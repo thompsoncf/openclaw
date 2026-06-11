@@ -1,0 +1,24 @@
+# Ambiente
+.env
+.env.local
+*.pyc
+__pycache__/
+*.egg-info/
+.vscode/
+.idea/
+
+# Virtualenv
+venv/
+env/
+
+# Dependencies
+node_modules/
+dist/
+build/
+
+# Logs
+*.log
+.logs/
+
+# Banco de testes
+test.db

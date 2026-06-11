@@ -45,7 +45,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Chama Anthropic com contexto
     try:
         response = client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model="claude-sonnet-4-6",
             max_tokens=500,
             system="""Você é um assistente financeiro chamado OpenClaw.
 Ajude o usuário a registrar gastos e entender suas finanças.

@@ -4,7 +4,7 @@ services:
     runtime: python
     plan: starter
     buildCommand: pip install -r requirements.txt
-    startCommand: python telegram_bot.py
+    startCommand: python -m bot.main
     envVars:
       - key: OPENCLAW_MODEL
         value: claude-sonnet-4-6

@@ -1,7 +1,8 @@
-python-dotenv==1.0.0
-psycopg2-binary==2.9.9
-anthropic==0.25.7
-python-telegram-bot==20.7
-flask==3.0.0
-flask-cors==4.0.0
-gunicorn==21.2.0
+anthropic>=0.40
+psycopg[binary]>=3.2
+psycopg_pool>=3.2
+python-telegram-bot>=21.0
+python-dotenv>=1.0
+pytest>=8.0
+fastapi>=0.110
+uvicorn[standard]>=0.29

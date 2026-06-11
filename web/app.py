@@ -1,54 +1,56 @@
-"""
-Web API Flask (Fase 2+)
-"""
-from flask import Flask, jsonify, request
-from flask_cors import CORS
-from financeiro.transacao import Livro
-import os
+"""Embriao da web (a interface "depois").
 
-app = Flask(__name__)
-CORS(app)
+Por enquanto serve uma pagina simples (status) e um /health que confere a
+conexao com o banco. Reaproveita o mesmo nucleo e o mesmo Postgres do bot,
+entao da' pra evoluir daqui pro painel financeiro de verdade sem recomecar.
 
-@app.route('/health', methods=['GET'])
+Sobe assim:
+    uvicorn web.app:app --host 0.0.0.0 --port $PORT
+"""
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse, JSONResponse
+
+from db.conexao import get_pool
+
+app = FastAPI(title="OpenClaw")
+
+_PAGINA = """<!doctype html>
+<html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenClaw</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center;
+    justify-content:center; font-family: system-ui, -apple-system, sans-serif;
+    background:#0e0e0f; color:#ececec; }
+  .card { max-width:440px; padding:2.5rem 2rem; text-align:center; }
+  h1 { font-size:1.6rem; font-weight:500; margin:0 0 .5rem; }
+  p { color:#a8a8a3; line-height:1.6; margin:.4rem 0; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%;
+    background:#1d9e75; margin-right:7px; vertical-align:middle; }
+  .status { font-size:.95rem; color:#5dcaa5; margin-top:1rem; }
+  .soon { margin-top:1.8rem; font-size:.85rem; color:#737370;
+    border-top:1px solid #2a2a2b; padding-top:1.2rem; }
+</style></head>
+<body><div class="card">
+  <h1>OpenClaw</h1>
+  <p>Seu assistente financeiro pessoal.</p>
+  <p class="status"><span class="dot"></span>no ar</p>
+  <p class="soon">Em breve, seu painel financeiro aqui.<br>
+  Por enquanto, fale com o assistente no Telegram.</p>
+</div></body></html>"""
+
+
+@app.get("/", response_class=HTMLResponse)
+def home():
+    return _PAGINA
+
+
+@app.get("/health")
 def health():
-    """Health check"""
-    return jsonify({'status': 'ok'}), 200
-
-@app.route('/saldo/<user_id>', methods=['GET'])
-def get_saldo(user_id):
-    """Retorna saldo do usuário"""
     try:
-        livro = Livro(user_id)
-        saldo = livro.saldo_total()
-        return jsonify({'usuario_id': user_id, 'saldo': saldo}), 200
-    except Exception as e:
-        return jsonify({'erro': str(e)}), 500
-
-@app.route('/gasto/<user_id>', methods=['POST'])
-def registrar_gasto(user_id):
-    """Registra um novo gasto"""
-    try:
-        dados = request.json
-        livro = Livro(user_id)
-        resultado = livro.registrar_gasto(
-            valor=float(dados['valor']),
-            categoria=dados['categoria'],
-            descricao=dados.get('descricao', '')
-        )
-        return jsonify(resultado), 201
-    except Exception as e:
-        return jsonify({'erro': str(e)}), 400
-
-@app.route('/transacoes/<user_id>', methods=['GET'])
-def listar_transacoes(user_id):
-    """Lista últimas transações"""
-    try:
-        livro = Livro(user_id)
-        transacoes = livro.ultimas_transacoes(limite=10)
-        return jsonify({'transacoes': transacoes}), 200
-    except Exception as e:
-        return jsonify({'erro': str(e)}), 500
-
-if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+        with get_pool().connection() as conn:
+            conn.execute("select 1")
+        return {"status": "ok", "db": "ok"}
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"status": "degraded", "db": str(e)}, status_code=503)

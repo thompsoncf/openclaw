@@ -1,32 +1,17 @@
 services:
-  - type: web
-    name: openclaw-web
-    env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn web.app:app
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11
-      - key: PORT
-        value: 5000
-      - key: DATABASE_URL
-        scope: service
-      - key: ANTHROPIC_API_KEY
-        scope: service
-      - key: TELEGRAM_TOKEN
-        scope: service
-
   - type: worker
     name: openclaw-bot
-    env: python
+    runtime: python
+    plan: starter
     buildCommand: pip install -r requirements.txt
-    startCommand: python bot/main.py
+    startCommand: python telegram_bot.py
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11
-      - key: DATABASE_URL
-        scope: service
-      - key: ANTHROPIC_API_KEY
-        scope: service
-      - key: TELEGRAM_TOKEN
-        scope: service
+      - key: OPENCLAW_MODEL
+        value: claude-sonnet-4-6
+
+  - type: web
+    name: openclaw-web
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn web.app:app --host 0.0.0.0 --port $PORT

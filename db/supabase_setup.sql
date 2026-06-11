@@ -1,5 +1,10 @@
--- OpenClaw Schema para Supabase
--- Cole tudo isso no SQL Editor do Supabase e clique em Run
+-- ============================================================
+-- OpenClaw — setup do banco para o Supabase
+-- Cole TODO este conteudo no SQL Editor do Supabase e clique em "Run".
+-- (Alternativa: rodar init_schema() pelo codigo — faz o mesmo.)
+-- ============================================================
+
+-- 1) TABELAS ---------------------------------------------------
 
 create table if not exists usuarios (
     id                   bigserial primary key,
@@ -34,12 +39,15 @@ create table if not exists uso_diario (
     primary key (usuario_id, dia)
 );
 
--- RLS: tranca tudo pro app (conexao direta via DB_URL tem acesso total)
-alter table usuarios enable row level security;
-alter table lancamentos enable row level security;
-alter table uso_diario enable row level security;
+-- 2) SEGURANCA (importante no Supabase) -----------------------
+-- O Supabase publica uma API REST publica em cima das tabelas. Ligar o RLS
+-- SEM criar politicas tranca essa API: ninguem acessa pela URL publica.
+-- O nosso app continua funcionando porque conecta direto no Postgres
+-- (string de conexao / pooler), que ignora o RLS. Ou seja: dado financeiro
+-- so' entra/sai pelo nosso codigo, nunca pela API publica do Supabase.
 
--- Politicas RLS vazias (nega tudo via API publica Supabase)
-create policy "usuarios_deny" on usuarios for all using (false);
-create policy "lancamentos_deny" on lancamentos for all using (false);
-create policy "uso_diario_deny" on uso_diario for all using (false);
+alter table usuarios    enable row level security;
+alter table lancamentos enable row level security;
+alter table uso_diario  enable row level security;
+
+-- Pronto. As tabelas estao criadas e protegidas.

@@ -26,6 +26,18 @@ from finance.agente_financeiro import criar_agente_financeiro
 app = FastAPI(title="OpenClaw")
 log = logging.getLogger("openclaw.web")
 
+# Portal (cadastro/login/painel) + sessao assinada por cookie
+from starlette.middleware.sessions import SessionMiddleware
+from web.portal import router as portal_router
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.environ.get("PORTAL_SECRET", "troque-isto-em-producao"),
+    same_site="lax",
+    https_only=os.environ.get("PORTAL_COOKIE_SECURE", "1") == "1",
+    max_age=60 * 60 * 24 * 7,
+)
+app.include_router(portal_router)
+
 _pool = None
 _brain = None
 _transcritor = None
@@ -184,5 +196,7 @@ _PAGINA = """<!doctype html>
   <h1>OpenClaw</h1>
   <p>Seu assistente financeiro pessoal.</p>
   <p class="status"><span class="dot"></span>no ar</p>
-  <p class="soon">Fale com o assistente no Telegram ou no WhatsApp.</p>
+  <p class="soon">Fale com o assistente no Telegram ou no WhatsApp.<br><br>
+  <a href="/cadastro" style="color:#5dcaa5">Criar conta</a> &nbsp;·&nbsp;
+  <a href="/login" style="color:#5dcaa5">Entrar</a></p>
 </div></body></html>"""

@@ -1,4 +1,4 @@
-"""Portal do OpenClaw: cadastro, login e painel (Bloco A).
+"""Portal do OpenClaw: cadastro, login e painel (Bloco A+B).
 
 Vive dentro do openclaw-web. Regra sagrada: toda pagina logada enxerga
 APENAS a conta da sessao (isolamento multi-tenant na camada web).
@@ -67,6 +67,25 @@ def _planos():
                       membros_inclusos, preco_assento_centavos
                from planos where ativo order by preco_base_centavos"""
         ).fetchall()
+
+
+def _limite_membros(conta_row) -> tuple[int, int, bool]:
+    """(ativos, inclusos_no_plano, pode_passar_do_limite).
+
+    PF: teto rigido = membros_inclusos. PJ: pode passar (assento extra cobrado).
+    """
+    pool = get_pool()
+    with pool.connection() as c:
+        ativos = c.execute(
+            "select count(*) from membros where conta_id=%s and ativo", (conta_row[0],)
+        ).fetchone()[0]
+        plano = c.execute(
+            "select membros_inclusos, tipo_conta from planos where codigo=%s",
+            (conta_row[4],),
+        ).fetchone()
+    inclusos = plano[0] if plano else 1
+    pode_extra = (conta_row[1] == "pj")
+    return ativos, inclusos, pode_extra
 
 
 def brl(centavos: int) -> str:
@@ -145,16 +164,46 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
 {% if conta[6] %} · válido até <b>{{ conta[6].strftime('%d/%m/%Y') }}</b>{% endif %}
  · tipo: <b>{{ conta[1]|upper }}</b></p>
 <h1 style="font-size:1.05rem;margin-top:1.4rem">Pessoas da conta</h1>
-<table><tr><th>Nome</th><th>Papel</th><th>WhatsApp</th><th>Status</th></tr>
+<table><tr><th>Nome</th><th>Papel</th><th>WhatsApp</th><th>Status</th><th></th></tr>
 {% for m in membros %}<tr><td>{{ m[0] or '-' }}</td><td>{{ m[1] }}</td>
-<td>{{ m[2] or '-' }}</td><td>{{ 'ativo' if m[3] else 'desativado' }}</td></tr>{% endfor %}
+<td>{{ m[2] or '-' }}</td><td>{{ 'ativo' if m[3] else 'desativado' }}</td>
+<td>{% if m[1] != 'dono' and m[3] %}<form method="post" action="/membros/desativar" style="margin:0">
+<input type="hidden" name="membro_id" value="{{ m[4] }}">
+<button style="margin:0;padding:.3rem .7rem;background:#6e2b2b;font-size:.8rem">desativar</button>
+</form>{% endif %}</td></tr>{% endfor %}
 </table>
 <p class="mut" style="margin-top:1.2rem">Seu assistente já responde no WhatsApp cadastrado.
-Mande "oi" pra ele! Gestão de pessoas e relatórios chegam nos próximos blocos.</p>
+Mande "oi" pra ele!</p>
+</div>
+<div class="card larga"><h1 style="font-size:1.05rem">Adicionar pessoa</h1>
+{% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+{% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
+{% if pode_adicionar %}
+<form method="post" action="/membros/adicionar">
+<label>Nome</label><input name="nome" required maxlength="80">
+<label>WhatsApp (com DDD)</label><input name="whatsapp" required maxlength="20" placeholder="86 98888-7777">
+<button>Adicionar à conta</button></form>
+{% if extra_pago %}<p class="mut">Seu plano inclui {{ inclusos }} pessoas; acima disso, cada assento extra é cobrado.</p>{% endif %}
+{% else %}
+<p class="mut">Seu plano ({{ conta[4] }}) permite {{ inclusos }} pessoa(s) e você já usa {{ ativos }}.
+Pra adicionar mais, faça upgrade pro plano Família ou PJ.</p>
+{% endif %}
+<p class="mut" style="margin-top:1rem"><a href="/senha" style="color:#5dcaa5">Alterar minha senha</a></p>
+</div>{% endblock %}"""
+
+_SENHA = """{% extends "base" %}{% block conteudo %}
+<div class="card"><h1>Alterar senha</h1>
+{% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+{% if ok %}<div class="ok">{{ ok }}</div>{% endif %}
+<form method="post" action="/senha">
+<label>Senha atual</label><input name="atual" type="password" required>
+<label>Nova senha</label><input name="nova" type="password" required minlength="8" maxlength="72">
+<button>Salvar nova senha</button></form>
+<p class="mut" style="margin-top:1rem"><a href="/painel" style="color:#5dcaa5">Voltar ao painel</a></p>
 </div>{% endblock %}"""
 
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "painel": _PAINEL,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "painel": _PAINEL, "senha": _SENHA,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 
@@ -233,9 +282,79 @@ def painel(request: Request):
     if conta is None:
         return RedirectResponse("/login", status_code=303)
     pool = get_pool()
-    with pool.connection() as c:   # ISOLAMENTO: so' membros DESTA conta
+    with pool.connection() as c:
         membros = c.execute(
-            "select nome, papel, whatsapp_id, ativo from membros where conta_id=%s order by id",
+            "select nome, papel, whatsapp_id, ativo, id from membros where conta_id=%s order by id",
             (conta[0],),
         ).fetchall()
-    return _render("painel", request, conta=conta, membros=membros, titulo="Painel")
+    ativos, inclusos, pode_extra = _limite_membros(conta)
+    pode_adicionar = pode_extra or ativos < inclusos
+    return _render("painel", request, conta=conta, membros=membros, titulo="Painel",
+                   ativos=ativos, inclusos=inclusos, extra_pago=pode_extra,
+                   pode_adicionar=pode_adicionar,
+                   erro=request.session.pop("erro", None),
+                   aviso=request.session.pop("aviso", None))
+
+
+@router.post("/membros/adicionar")
+def membros_adicionar(request: Request, nome: str = Form(...), whatsapp: str = Form(...)):
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    zap = _normalizar_zap(whatsapp)
+    ativos, inclusos, pode_extra = _limite_membros(conta)
+    if not pode_extra and ativos >= inclusos:
+        request.session["erro"] = "Limite de pessoas do plano atingido."
+        return RedirectResponse("/painel", status_code=303)
+    with pool.connection() as c:
+        ja = c.execute("select 1 from membros where whatsapp_id=%s", (zap,)).fetchone()
+    if ja:
+        request.session["erro"] = "Esse WhatsApp ja esta cadastrado."
+        return RedirectResponse("/painel", status_code=303)
+    ct.adicionar_membro(pool, conta[0], nome=nome.strip(), papel="membro", whatsapp_id=zap)
+    request.session["aviso"] = f"{nome.strip()} adicionado(a)! Ja pode falar com o assistente."
+    return RedirectResponse("/painel", status_code=303)
+
+
+@router.post("/membros/desativar")
+def membros_desativar(request: Request, membro_id: int = Form(...)):
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    with pool.connection() as c:
+        ok = c.execute(
+            "select 1 from membros where id=%s and conta_id=%s and papel <> 'dono'",
+            (membro_id, conta[0]),
+        ).fetchone()
+    if not ok:
+        request.session["erro"] = "Nao foi possivel desativar essa pessoa."
+        return RedirectResponse("/painel", status_code=303)
+    ct.desativar_membro(pool, membro_id)
+    request.session["aviso"] = "Pessoa desativada (o historico dela fica preservado)."
+    return RedirectResponse("/painel", status_code=303)
+
+
+@router.get("/senha", response_class=HTMLResponse)
+def senha_form(request: Request):
+    if not request.session.get("conta_id"):
+        return RedirectResponse("/login", status_code=303)
+    return _render("senha", request, erro=None, ok=None, titulo="Alterar senha")
+
+
+@router.post("/senha", response_class=HTMLResponse)
+def senha_envia(request: Request, atual: str = Form(...), nova: str = Form(...)):
+    cid = request.session.get("conta_id")
+    if not cid:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    with pool.connection() as c:
+        row = c.execute("select senha_hash from contas where id=%s", (cid,)).fetchone()
+    if not row or not verificar_senha(atual, row[0]):
+        return _render("senha", request, erro="Senha atual incorreta.", ok=None, titulo="Alterar senha")
+    with pool.connection() as c:
+        c.execute("update contas set senha_hash=%s where id=%s", (hash_senha(nova), cid))
+        c.commit()
+    ct.registrar_evento(pool, cid, "senha_alterada", "via portal")
+    return _render("senha", request, erro=None, ok="Senha alterada com sucesso!", titulo="Alterar senha")

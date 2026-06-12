@@ -92,6 +92,12 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
             elif (media_ctype or "").startswith("audio/") and _transcritor:
                 texto = _transcritor.transcrever(dados, "audio.ogg")
 
+        texto = (texto or "").strip()
+        if not texto and imagem_b64 is None:
+            _responder_whatsapp(to, "Nao consegui entender sua mensagem. "
+                                    "Pode mandar por texto, ou tente o audio de novo?")
+            return
+
         resposta = _agente_do(usuario).responder(texto, imagem_b64)
         _responder_whatsapp(to, resposta)
     except Exception as e:  # noqa: BLE001

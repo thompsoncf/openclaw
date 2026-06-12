@@ -86,6 +86,17 @@ class LivroCaixa:
 
     # ---------- Itens do cupom (raio-x do consumo) ----------
 
+    def buscar_duplicata(self, valor_centavos: int, data) -> list[dict]:
+        """Procura lancamentos iguais (mesmo valor e data) - sinal de cupom repetido."""
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                """select id, descricao, data, criado_em from lancamentos
+                   where usuario_id = %s and valor_centavos = %s and data = %s
+                   order by criado_em desc""",
+                (self.usuario_id, valor_centavos, data),
+            ).fetchall()
+        return [{"id": r[0], "descricao": r[1], "data": r[2], "criado_em": r[3]} for r in rows]
+
     def ultimo_lancamento_id(self) -> int | None:
         """Id do lancamento mais recente do usuario (pra anexar itens 'desse cupom')."""
         with self.pool.connection() as conn:
@@ -131,27 +142,27 @@ class LivroCaixa:
         corte = date.today() - timedelta(days=dias)
         with self.pool.connection() as conn:
             rows = conn.execute(
-                """select i.descricao, i.quantidade, i.valor_total_centavos, l.data
+                """select i.descricao, i.quantidade, i.valor_total_centavos, l.data, i.criado_em
                    from itens_lancamento i join lancamentos l on l.id = i.lancamento_id
                    where l.usuario_id = %s and i.descricao ilike %s and l.data >= %s
                    order by l.data desc, i.id desc""",
                 (self.usuario_id, f"%{termo}%", corte),
             ).fetchall()
         itens = [{"descricao": r[0], "quantidade": float(r[1]),
-                  "valor_total_centavos": int(r[2]), "data": r[3]} for r in rows]
+                  "valor_total_centavos": int(r[2]), "data": r[3], "criado_em": r[4]} for r in rows]
         total = sum(i["valor_total_centavos"] for i in itens)
         return itens, total
 
     def listar_itens(self, dias: int = 60, limite: int = 200) -> list[dict]:
         """Lista os itens dos ultimos N dias (pra perguntas por grupo, ex: 'frutas')."""
-        corte = date.today() - timedelta(dias=dias)
+        corte = date.today() - timedelta(days=dias)
         with self.pool.connection() as conn:
             rows = conn.execute(
-                """select i.descricao, i.quantidade, i.valor_total_centavos, l.data
+                """select i.descricao, i.quantidade, i.valor_total_centavos, l.data, i.criado_em
                    from itens_lancamento i join lancamentos l on l.id = i.lancamento_id
                    where l.usuario_id = %s and l.data >= %s
                    order by l.data desc, i.id desc limit %s""",
                 (self.usuario_id, corte, limite),
             ).fetchall()
         return [{"descricao": r[0], "quantidade": float(r[1]),
-                 "valor_total_centavos": int(r[2]), "data": r[3]} for r in rows]
+                 "valor_total_centavos": int(r[2]), "data": r[3], "criado_em": r[4]} for r in rows]

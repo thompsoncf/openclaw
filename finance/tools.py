@@ -61,6 +61,21 @@ def construir_ferramentas(livro: LivroCaixa) -> list[Ferramenta]:
         return (f"Despesas de {mes:02d}/{ano} (total {formatar_brl(total)}):\n"
                 + "\n".join(linhas))
 
+    def checar_duplicata(entrada: dict) -> str:
+        valor = entrada.get("valor")
+        if valor is None:
+            return "Informe o valor pra checar."
+        data = _parse_data(entrada.get("data"))
+        cents = reais_para_centavos(valor)
+        achados = livro.buscar_duplicata(cents, data)
+        if not achados:
+            return "Sem duplicata: pode registrar normalmente."
+        linhas = [f"- {a['descricao'] or 'sem descricao'} "
+                  f"(registrado em {a['criado_em'].strftime('%d/%m %H:%M')})" for a in achados]
+        return (f"ATENCAO: ja existe {len(achados)} lancamento(s) de {formatar_brl(cents)} "
+                f"na data {data.strftime('%d/%m/%Y')}:\n" + "\n".join(linhas)
+                + "\nProvavelmente e' o MESMO cupom. Avise o usuario e so' registre se ele confirmar.")
+
     def registrar_itens_cupom(entrada: dict) -> str:
         itens_in = entrada.get("itens") or []
         if not itens_in:
@@ -170,6 +185,21 @@ def construir_ferramentas(livro: LivroCaixa) -> list[Ferramenta]:
                 },
             },
             executar=relatorio_mes,
+        ),
+        Ferramenta(
+            nome="checar_duplicata",
+            descricao=("Verifica se ja' existe um lancamento igual (mesmo valor e data). "
+                       "Use SEMPRE antes de salvar um cupom por foto, pra evitar registrar "
+                       "o mesmo cupom duas vezes."),
+            parametros={
+                "type": "object",
+                "properties": {
+                    "valor": valor_schema,
+                    "data": {"type": "string", "description": "dd/mm/aaaa do cupom; vazio = hoje"},
+                },
+                "required": ["valor"],
+            },
+            executar=checar_duplicata,
         ),
         Ferramenta(
             nome="registrar_itens_cupom",

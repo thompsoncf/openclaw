@@ -2,16 +2,53 @@ services:
   - type: worker
     name: openclaw-bot
     runtime: python
-    plan: starter
+    plan: standard
+    numInstances: 1
     buildCommand: pip install -r requirements.txt
     startCommand: python telegram_bot.py
     envVars:
       - key: OPENCLAW_MODEL
         value: claude-sonnet-4-6
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: STT_API_KEY
+        sync: false
+      - key: STT_BASE_URL
+        sync: false
+      - key: STT_MODEL
+        sync: false
 
   - type: web
     name: openclaw-web
     runtime: python
-    plan: free
+    plan: standard
+    numInstances: 1
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn web.app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: OPENCLAW_MODEL
+        value: claude-sonnet-4-6
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: PORTAL_SECRET
+        sync: false
+      - key: PORTAL_COOKIE_SECURE
+        value: "1"
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_WHATSAPP_FROM
+        sync: false
+      - key: STT_API_KEY
+        sync: false
+      - key: STT_BASE_URL
+        sync: false
+      - key: STT_MODEL
+        sync: false

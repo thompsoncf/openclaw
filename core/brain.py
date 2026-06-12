@@ -8,7 +8,7 @@ import os
 
 class Brain:
     def __init__(self, model: str = "claude-sonnet-4-6", api_key: str | None = None,
-                 max_tokens: int = 1024):
+                 max_tokens: int = 4096):
         # Import tardio pra biblioteca nao ser obrigatoria so' pra rodar os testes do livro-caixa.
         from anthropic import Anthropic
         self.client = Anthropic(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"))

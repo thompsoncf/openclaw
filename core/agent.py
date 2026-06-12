@@ -106,6 +106,19 @@ class Agente:
 
         for _ in range(self.max_iteracoes):
             resp = self.brain.chamar(self.persona, self.memoria.mensagens(), schemas)
+
+            # Resposta CORTADA por limite de tokens (ex: cupom gigante): o tool_use
+            # veio incompleto. Nao salva (corromperia a memoria) e pede pra dividir.
+            if resp.stop_reason == "max_tokens":
+                tem_tool = any(getattr(b, "type", None) == "tool_use" for b in resp.content)
+                if tem_tool:
+                    return ("Esse cupom tem itens demais pra salvar de uma vez! "
+                            "Me manda de novo pedindo pra salvar METADE dos itens "
+                            "primeiro, depois a outra metade. Assim nao perco nenhum.")
+                # so' texto cortado: salva o que veio e devolve
+                self.memoria.adicionar("assistant", resp.content)
+                return self._texto(resp) or "Pode repetir, por favor?"
+
             self.memoria.adicionar("assistant", resp.content)
 
             if resp.stop_reason != "tool_use":

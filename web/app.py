@@ -29,6 +29,7 @@ log = logging.getLogger("openclaw.web")
 # Portal (cadastro/login/painel) + sessao assinada por cookie
 from starlette.middleware.sessions import SessionMiddleware
 from web.portal import router as portal_router
+from web.admin import router as admin_router
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.environ.get("PORTAL_SECRET", "troque-isto-em-producao"),
@@ -37,6 +38,7 @@ app.add_middleware(
     max_age=60 * 60 * 24 * 7,
 )
 app.include_router(portal_router)
+app.include_router(admin_router)
 
 _pool = None
 _brain = None

@@ -133,6 +133,16 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
 .barra{height:8px;background:#0e0e0f;border-radius:4px;overflow:hidden}
 .barra-fill{height:8px;background:#1d9e75;border-radius:4px}
 .chip{border:1px solid #2a2a2b;padding:.25rem .6rem;border-radius:999px;font-size:.8rem;color:#ccc}
+.abas{display:inline-flex;gap:4px;background:#0e0e0f;padding:3px;border-radius:8px;margin:.3rem 0 .6rem}
+.aba{width:auto;margin:0;padding:.4rem .9rem;border-radius:6px;background:transparent;color:#a8a8a3;font-size:.85rem}
+.aba:hover{background:#1a1a1b}
+.aba.ativa{background:#1d9e75;color:#fff}
+.dep{border:1px solid #2a2a2b;border-radius:8px;margin-bottom:8px;overflow:hidden}
+.dep-cab{display:flex;justify-content:space-between;align-items:center;padding:.7rem .9rem;background:#161617;cursor:pointer;font-size:.92rem}
+.dep-cab:hover{background:#1c1c1d}
+.seta{color:#5dcaa5;margin-right:.3rem}
+.dep-corpo{display:none;padding:.7rem .9rem;flex-wrap:wrap;gap:8px}
+.dep.aberto .dep-corpo{display:flex}
 </style></head><body>
 <div class="topo"><span class="logo">OpenClaw</span><span>
 {% if logado %}<a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/sair">Sair</a>
@@ -238,13 +248,13 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 {% endfor %}{% else %}<p class="mut">Sem despesas neste mês.</p>{% endif %}
 
 <h1 style="font-size:1.05rem; margin-top:1.6rem">Lançamentos</h1>
-<form method="get" action="/painel/financeiro" style="margin:.3rem 0">
-<input type="hidden" name="mes" value="{{ mes_sel }}"><input type="hidden" name="membro" value="{{ membro_sel or '' }}">
-<select name="tipo" onchange="this.form.submit()" style="width:auto">
-<option value="">Todos</option><option value="despesa" {% if tipo_sel=='despesa' %}selected{% endif %}>Despesas</option>
-<option value="receita" {% if tipo_sel=='receita' %}selected{% endif %}>Receitas</option></select></form>
-<table><tr><th>Data</th><th>Descrição</th><th>Categoria</th>{% if pessoas|length > 1 %}<th>Quem</th>{% endif %}<th style="text-align:right">Valor</th></tr>
-{% for l in lancamentos %}<tr>
+<div class="abas">
+<button type="button" class="aba ativa" data-f="todos" onclick="filtrarTipo(this)">Todos</button>
+<button type="button" class="aba" data-f="despesa" onclick="filtrarTipo(this)">Despesas</button>
+<button type="button" class="aba" data-f="receita" onclick="filtrarTipo(this)">Receitas</button>
+</div>
+<table id="tab-lanc"><tr><th>Data</th><th>Descrição</th><th>Categoria</th>{% if pessoas|length > 1 %}<th>Quem</th>{% endif %}<th style="text-align:right">Valor</th></tr>
+{% for l in lancamentos %}<tr data-tipo="{{ l.tipo }}">
 <td class="mut">{{ l.data.strftime('%d/%m') }}</td>
 <td>{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}</td>
 <td><span class="tag">{{ l.categoria }}</span></td>
@@ -253,15 +263,41 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 {{ '+' if l.tipo=='receita' else '−' }} {{ brl(l.valor).replace('R$ ','') }}</td></tr>
 {% else %}<tr><td colspan="5" class="mut">Nenhum lançamento neste período.</td></tr>{% endfor %}
 </table>
+<p id="lanc-vazio" class="mut" style="display:none">Nenhum lançamento desse tipo neste período.</p>
 
 <h1 style="font-size:1.05rem; margin-top:1.6rem">Raio-x do consumo por departamento</h1>
-{% if raiox %}{% for dep, itens in raiox.items() %}
-<p style="margin:.8rem 0 .3rem"><span class="tag">{{ dep }}</span></p>
-<div style="display:flex; gap:8px; flex-wrap:wrap">
-{% for it in itens %}<span class="chip">{{ it.descricao }} · {{ brl(it.valor) }}</span>{% endfor %}
+{% if raiox %}{% for dep, dados in raiox.items() %}
+<div class="dep">
+<div class="dep-cab" onclick="abrirDep(this)">
+<span><span class="seta">▸</span> {{ dep }} <span class="mut">· {{ dados.itens|length }} {{ 'item' if dados.itens|length == 1 else 'itens' }}</span></span>
+<b>{{ brl(dados.total) }}</b>
+</div>
+<div class="dep-corpo">
+{% for it in dados.itens %}<span class="chip">{{ it.descricao }} · {{ brl(it.valor) }}</span>{% endfor %}
+</div>
 </div>{% endfor %}
-{% else %}<p class="mut">Os itens aparecem aqui quando você pedir pro assistente "registrar os itens" de um cupom.</p>{% endif %}
-</div>{% endblock %}"""
+{% else %}<p class="mut">Os itens aparecem aqui quando você fotografa um cupom de mercado.</p>{% endif %}
+</div>
+
+<script>
+function filtrarTipo(btn){
+  document.querySelectorAll('.aba').forEach(function(a){a.classList.remove('ativa')});
+  btn.classList.add('ativa');
+  var f = btn.dataset.f, visiveis = 0;
+  document.querySelectorAll('#tab-lanc tr[data-tipo]').forEach(function(tr){
+    var ok = (f === 'todos' || tr.dataset.tipo === f);
+    tr.style.display = ok ? '' : 'none';
+    if (ok) visiveis++;
+  });
+  document.getElementById('lanc-vazio').style.display = visiveis ? 'none' : 'block';
+}
+function abrirDep(cab){
+  var dep = cab.parentElement;
+  dep.classList.toggle('aberto');
+  cab.querySelector('.seta').textContent = dep.classList.contains('aberto') ? '▾' : '▸';
+}
+</script>
+{% endblock %}"""
 
 _env = Environment(loader=DictLoader({
     "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH,
@@ -384,7 +420,10 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
     maior_cat = max((v for _, v in categorias), default=0)
     lancamentos = livro.lancamentos_recentes(ano_sel, mes_num, membro_sel,
                                              tipo if tipo in ("despesa", "receita") else None)
-    raiox = livro.raiox_por_departamento(membro_id=membro_sel)
+    raiox_bruto = livro.raiox_por_departamento(membro_id=membro_sel)
+    # monta {dep: {itens:[...], total:centavos}} pro accordion
+    raiox = {dep: {"itens": itens, "total": sum(i["valor"] for i in itens)}
+             for dep, itens in raiox_bruto.items()}
 
     meses = []
     y, m = hoje.year, hoje.month

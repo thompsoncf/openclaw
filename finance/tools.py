@@ -9,7 +9,7 @@ from core.agent import Ferramenta
 from .livro_caixa import LivroCaixa
 from .models import (
     Lancamento, Tipo, CATEGORIAS_DESPESA, CATEGORIAS_RECEITA,
-    formatar_brl,
+    formatar_brl, reais_para_centavos,
 )
 
 
@@ -61,7 +61,63 @@ def construir_ferramentas(livro: LivroCaixa) -> list[Ferramenta]:
         return (f"Despesas de {mes:02d}/{ano} (total {formatar_brl(total)}):\n"
                 + "\n".join(linhas))
 
+    def registrar_itens_cupom(entrada: dict) -> str:
+        itens_in = entrada.get("itens") or []
+        if not itens_in:
+            return "Nenhum item informado."
+        lanc_id = entrada.get("lancamento_id") or livro.ultimo_lancamento_id()
+        if not lanc_id:
+            return "Nao achei um lancamento pra anexar os itens. Registre o cupom primeiro."
+        itens = []
+        for it in itens_in:
+            vt = it.get("valor_total")
+            vu = it.get("valor_unitario")
+            itens.append({
+                "descricao": (it.get("descricao") or "").strip() or "Item",
+                "quantidade": it.get("quantidade") or 1,
+                "valor_unitario_centavos": reais_para_centavos(vu) if vu is not None else 0,
+                "valor_total_centavos": reais_para_centavos(vt) if vt is not None else 0,
+            })
+        n = livro.registrar_itens(int(lanc_id), itens)
+        if n == 0:
+            return "Nao consegui salvar os itens (lancamento nao encontrado)."
+        return f"Salvei {n} itens do cupom. Agora da' pra perguntar coisas tipo 'quanto gastei em X'."
+
+    def buscar_itens(entrada: dict) -> str:
+        termo = (entrada.get("termo") or "").strip()
+        if not termo:
+            return "Me diga o que procurar (ex: 'banana', 'flocao')."
+        dias = int(entrada.get("dias") or 60)
+        itens, total = livro.buscar_itens(termo, dias=dias)
+        if not itens:
+            return f"Nao achei itens com '{termo}' nos ultimos {dias} dias."
+        linhas = [f"- {i['descricao']}: {formatar_brl(i['valor_total_centavos'])} "
+                  f"({i['data'].strftime('%d/%m')})" for i in itens[:30]]
+        return (f"Itens com '{termo}' (ultimos {dias} dias) - total {formatar_brl(total)}:\n"
+                + "\n".join(linhas))
+
+    def listar_itens(entrada: dict) -> str:
+        dias = int(entrada.get("dias") or 60)
+        itens = livro.listar_itens(dias=dias)
+        if not itens:
+            return (f"Nenhum item detalhado nos ultimos {dias} dias. "
+                    "Os itens so' sao salvos quando voce pede pra registrar.")
+        linhas = [f"- {i['descricao']}: {formatar_brl(i['valor_total_centavos'])} "
+                  f"({i['data'].strftime('%d/%m')})" for i in itens]
+        return f"Itens detalhados (ultimos {dias} dias):\n" + "\n".join(linhas)
+
     valor_schema = {"type": "number", "description": "Valor em reais, ex: 87.40"}
+
+    item_schema = {
+        "type": "object",
+        "properties": {
+            "descricao": {"type": "string", "description": "nome do produto"},
+            "quantidade": {"type": "number", "description": "qtd (pode ser kg, ex: 1.99)"},
+            "valor_unitario": {"type": "number", "description": "preco unitario em reais"},
+            "valor_total": {"type": "number", "description": "preco total do item em reais"},
+        },
+        "required": ["descricao", "valor_total"],
+    }
 
     return [
         Ferramenta(
@@ -114,5 +170,47 @@ def construir_ferramentas(livro: LivroCaixa) -> list[Ferramenta]:
                 },
             },
             executar=relatorio_mes,
+        ),
+        Ferramenta(
+            nome="registrar_itens_cupom",
+            descricao=("Salva os itens individuais de um cupom (produto a produto). "
+                       "Use SO' quando o usuario pedir pra registrar/detalhar os itens. "
+                       "Por padrao, anexa ao ultimo lancamento registrado."),
+            parametros={
+                "type": "object",
+                "properties": {
+                    "itens": {"type": "array", "items": item_schema},
+                    "lancamento_id": {"type": "integer", "description": "opcional; vazio = ultimo cupom"},
+                },
+                "required": ["itens"],
+            },
+            executar=registrar_itens_cupom,
+        ),
+        Ferramenta(
+            nome="buscar_itens",
+            descricao=("Procura itens comprados pela descricao (ex: 'banana', 'flocao') "
+                       "e soma quanto foi gasto. Use pra 'quanto gastei em X'."),
+            parametros={
+                "type": "object",
+                "properties": {
+                    "termo": {"type": "string", "description": "texto a procurar na descricao"},
+                    "dias": {"type": "integer", "description": "janela em dias; vazio = 60"},
+                },
+                "required": ["termo"],
+            },
+            executar=buscar_itens,
+        ),
+        Ferramenta(
+            nome="listar_itens",
+            descricao=("Lista todos os itens detalhados de um periodo. Use pra perguntas "
+                       "por GRUPO (ex: 'quanto gastei em frutas') - voce le a lista e soma "
+                       "os que se encaixam."),
+            parametros={
+                "type": "object",
+                "properties": {
+                    "dias": {"type": "integer", "description": "janela em dias; vazio = 60"},
+                },
+            },
+            executar=listar_itens,
         ),
     ]

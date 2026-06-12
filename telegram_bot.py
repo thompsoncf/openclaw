@@ -57,9 +57,10 @@ async def start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(MSG_NAO_CADASTRADO)
         return
     membro, _conta = achado
+    _agentes.pop(membro.id, None)   # RESET: descarta a sessao/memoria anterior
     nome = membro.nome or update.effective_user.first_name or ""
     await update.message.reply_text(
-        f"Opa, {nome}! Sou seu assistente financeiro. Me diga seus gastos e "
+        f"Opa, {nome}! Conversa reiniciada. Me diga seus gastos e "
         "receitas (ex: \"gastei 50 no mercado\"), me mande a FOTO de um cupom, "
         "ou fale por AUDIO. Pode pedir \"qual meu saldo?\" tambem. Bora?"
     )

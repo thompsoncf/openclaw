@@ -42,7 +42,17 @@ class Agente:
         # a conversa (tool_use sem tool_result -> erro 400 pra sempre).
         with self._lock:
             self._sanear_memoria()
-            return self._responder(texto, imagem_b64, media_type)
+            try:
+                return self._responder(texto, imagem_b64, media_type)
+            except Exception as e:  # noqa: BLE001
+                # Rede-de-seguranca: se a memoria estiver irrecuperavel (ex: erro
+                # 400 de tool_use orfao que o saneamento nao pegou), ZERA tudo e
+                # tenta uma vez do zero. Melhor perder o historico que travar.
+                msg = str(e).lower()
+                if "tool_use" in msg or "tool_result" in msg or "400" in msg:
+                    self.memoria.limpar()
+                    return self._responder(texto, imagem_b64, media_type)
+                raise
 
     def _sanear_memoria(self, max_msgs: int = 40):
         """Conserta corrupcoes e poda o historico.

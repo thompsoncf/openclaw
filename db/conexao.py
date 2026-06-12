@@ -20,8 +20,15 @@ def get_pool() -> ConnectionPool:
         # prepare_threshold=None desliga prepared statements no servidor.
         # E' o que faz o pooler do Supabase (e qualquer pgbouncer) funcionar
         # sem erros misteriosos. Custo de performance e' desprezivel no piloto.
+        #
+        # check=check_connection: antes de entregar uma conexao, o pool testa
+        # se ela esta viva (o pooler do Supabase fecha conexoes ociosas). Se
+        # estiver morta, o pool descarta e abre outra - some o "connection is bad".
+        # max_idle: fecha conexoes paradas ha mais de 2 min, antes do Supabase.
         _pool = ConnectionPool(
             url, min_size=1, max_size=10, open=True,
+            max_idle=120,
+            check=ConnectionPool.check_connection,
             kwargs={"prepare_threshold": None},
         )
     return _pool

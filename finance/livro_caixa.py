@@ -208,18 +208,24 @@ class LivroCaixa:
             ).fetchone()
             if not dono:
                 return 0
+            # Grava em LOTES (executemany): robusto pra 10 ou 3000 itens.
+            params = [
+                (lancamento_id, it["descricao"], it.get("quantidade", 1),
+                 int(it.get("valor_unitario_centavos", 0)),
+                 int(it.get("valor_total_centavos", 0)))
+                for it in itens
+            ]
+            LOTE = 100
             n = 0
-            for it in itens:
-                conn.execute(
+            for i in range(0, len(params), LOTE):
+                conn.cursor().executemany(
                     """insert into itens_lancamento
                        (lancamento_id, descricao, quantidade,
                         valor_unitario_centavos, valor_total_centavos)
                        values (%s,%s,%s,%s,%s)""",
-                    (lancamento_id, it["descricao"], it.get("quantidade", 1),
-                     int(it.get("valor_unitario_centavos", 0)),
-                     int(it.get("valor_total_centavos", 0))),
+                    params[i:i + LOTE],
                 )
-                n += 1
+                n += len(params[i:i + LOTE])
             conn.commit()
             return n
 

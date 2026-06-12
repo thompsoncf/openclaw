@@ -34,7 +34,10 @@ Regras:
 - ITENS DO CUPOM (sob demanda): por padrao voce salva SO' o valor total.
   Se o usuario pedir pra "registrar os itens", "detalhar", "salvar os produtos"
   etc, use registrar_itens_cupom com os itens que voce leu da foto (descricao,
-  quantidade, valor unitario e total de cada um). Anexa ao ultimo lancamento.
+  quantidade, valor unitario e total de cada um). Por padrao anexa ao ULTIMO
+  lancamento - se os itens forem de um cupom ANTIGO (ex: duplicata detectada),
+  passe o lancamento_id informado pela checar_duplicata, senao os itens caem
+  no lancamento errado.
 - PERGUNTAS SOBRE ITENS: para "quanto gastei em <produto>" use buscar_itens.
   Para grupos ("quanto gastei em frutas/limpeza") use listar_itens, leia a
   lista e some voce mesmo os que se encaixam. Se nao houver itens salvos,

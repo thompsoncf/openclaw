@@ -108,10 +108,24 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
             pass
 
 
+def _normalizar_br(numero: str) -> str:
+    """Corrige o 'nono digito' do WhatsApp BR.
+
+    No Brasil, o numero pode chegar SEM o 9 (formato antigo, 12 digitos:
+    55 + DDD + 8 digitos). Pra ENVIAR de volta, o WhatsApp exige o 9.
+    Ex: +5586 81885930  ->  +5586 9 81885930
+    """
+    n = numero.replace("whatsapp:", "").strip()
+    digitos = n.lstrip("+")
+    if digitos.startswith("55") and len(digitos) == 12:
+        digitos = digitos[:4] + "9" + digitos[4:]
+    return "+" + digitos
+
+
 @app.post("/webhook/whatsapp")
 async def whatsapp(request: Request, background: BackgroundTasks):
     form = await request.form()
-    numero = (form.get("From", "") or "").replace("whatsapp:", "")
+    numero = _normalizar_br(form.get("From", "") or "")
     nome = form.get("ProfileName") or None
     body = form.get("Body", "") or ""
     media_url = None
@@ -119,7 +133,9 @@ async def whatsapp(request: Request, background: BackgroundTasks):
     if int(form.get("NumMedia", "0") or 0) > 0:
         media_url = form.get("MediaUrl0")
         media_ctype = form.get("MediaContentType0", "")
-    if numero:
+    # nunca responder pro proprio numero do bot (evita From==To)
+    bot = os.environ.get("TWILIO_WHATSAPP_FROM", "").replace("whatsapp:", "").lstrip("+")
+    if numero and numero.lstrip("+") != bot:
         background.add_task(processar_whatsapp, numero, nome, body, media_url, media_ctype)
     # responde rapido (200) pra nao estourar o timeout do Twilio
     return Response(content="<Response></Response>", media_type="application/xml")

@@ -253,16 +253,27 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <button type="button" class="aba" data-f="despesa" onclick="filtrarTipo(this)">Despesas</button>
 <button type="button" class="aba" data-f="receita" onclick="filtrarTipo(this)">Receitas</button>
 </div>
-<table id="tab-lanc"><tr><th>Data</th><th>Descrição</th><th>Categoria</th>{% if pessoas|length > 1 %}<th>Quem</th>{% endif %}<th style="text-align:right">Valor</th></tr>
-{% for l in lancamentos %}<tr data-tipo="{{ l.tipo }}">
-<td class="mut">{{ l.data.strftime('%d/%m') }}</td>
+<div id="lista-dias">
+{% for dia in dias %}
+<div class="dep" data-tipos="{% for it in dia.itens %}{{ it.tipo }} {% endfor %}">
+<div class="dep-cab" onclick="abrirDep(this)">
+<span><span class="seta">▸</span> {{ dia.data.strftime('%d/%m') }}
+<span class="mut">· {{ dia.itens|length }} {{ 'lançamento' if dia.itens|length == 1 else 'lançamentos' }}</span></span>
+<b style="color:{{ '#5dcaa5' if dia.saldo >= 0 else '#f0b8b8' }}">{{ '+' if dia.saldo >= 0 else '−' }} {{ brl(dia.saldo|abs).replace('R$ ','') }}</b>
+</div>
+<div class="dep-corpo" style="flex-direction:column; gap:0">
+<table style="margin:0">
+{% for l in dia.itens %}<tr data-tipo="{{ l.tipo }}">
 <td>{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}</td>
 <td><span class="tag">{{ l.categoria }}</span></td>
 {% if pessoas|length > 1 %}<td class="mut">{{ l.quem }}</td>{% endif %}
 <td style="text-align:right; font-weight:500; color:{{ '#5dcaa5' if l.tipo=='receita' else '#f0b8b8' }}">
-{{ '+' if l.tipo=='receita' else '−' }} {{ brl(l.valor).replace('R$ ','') }}</td></tr>
-{% else %}<tr><td colspan="5" class="mut">Nenhum lançamento neste período.</td></tr>{% endfor %}
+{{ '+' if l.tipo=='receita' else '−' }} {{ brl(l.valor).replace('R$ ','') }}</td></tr>{% endfor %}
 </table>
+</div>
+</div>
+{% else %}<p class="mut">Nenhum lançamento neste período.</p>{% endfor %}
+</div>
 <p id="lanc-vazio" class="mut" style="display:none">Nenhum lançamento desse tipo neste período.</p>
 
 <h1 style="font-size:1.05rem; margin-top:1.6rem">Raio-x do consumo por departamento</h1>
@@ -284,10 +295,15 @@ function filtrarTipo(btn){
   document.querySelectorAll('.aba').forEach(function(a){a.classList.remove('ativa')});
   btn.classList.add('ativa');
   var f = btn.dataset.f, visiveis = 0;
-  document.querySelectorAll('#tab-lanc tr[data-tipo]').forEach(function(tr){
-    var ok = (f === 'todos' || tr.dataset.tipo === f);
-    tr.style.display = ok ? '' : 'none';
-    if (ok) visiveis++;
+  document.querySelectorAll('#lista-dias .dep').forEach(function(dia){
+    var linhas = dia.querySelectorAll('tr[data-tipo]'), comTipo = 0;
+    linhas.forEach(function(tr){
+      var ok = (f === 'todos' || tr.dataset.tipo === f);
+      tr.style.display = ok ? '' : 'none';
+      if (ok) comTipo++;
+    });
+    dia.style.display = comTipo ? '' : 'none';
+    if (comTipo) visiveis++;
   });
   document.getElementById('lanc-vazio').style.display = visiveis ? 'none' : 'block';
 }
@@ -420,6 +436,16 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
     maior_cat = max((v for _, v in categorias), default=0)
     lancamentos = livro.lancamentos_recentes(ano_sel, mes_num, membro_sel,
                                              tipo if tipo in ("despesa", "receita") else None)
+    # agrupa por DIA (pro accordion): cada dia com seu saldo e seus lancamentos
+    from collections import OrderedDict
+    por_dia = OrderedDict()
+    for l in lancamentos:
+        d = l["data"]
+        if d not in por_dia:
+            por_dia[d] = {"itens": [], "saldo": 0}
+        por_dia[d]["itens"].append(l)
+        por_dia[d]["saldo"] += l["valor"] if l["tipo"] == "receita" else -l["valor"]
+    dias = [{"data": d, "itens": g["itens"], "saldo": g["saldo"]} for d, g in por_dia.items()]
     raiox_bruto = livro.raiox_por_departamento(membro_id=membro_sel)
     # monta {dep: {itens:[...], total:centavos}} pro accordion
     raiox = {dep: {"itens": itens, "total": sum(i["valor"] for i in itens)}
@@ -436,7 +462,7 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
 
     return _render("dash", request, titulo="Financeiro", conta=conta,
                    resumo=resumo, categorias=categorias, maior_cat=maior_cat,
-                   lancamentos=lancamentos, raiox=raiox, pessoas=pessoas,
+                   lancamentos=lancamentos, dias=dias, raiox=raiox, pessoas=pessoas,
                    meses=meses, mes_sel=mes_sel, membro_sel=membro_sel, tipo_sel=tipo)
 
 

@@ -55,6 +55,13 @@ async def start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
 async def _processar(update: Update, texto: str, imagem_b64: str | None = None):
     user = update.effective_user
     usuario = u.get_or_create(_pool, telegram_id=user.id, nome=user.first_name)
+    if not u.acesso_liberado(usuario):
+        await update.message.reply_text(
+            "Seu acesso esta suspenso (pagamento pendente ou plano vencido). "
+            "Assim que o pagamento for confirmado, voce volta a usar na hora. "
+            "Qualquer duvida, e' so' chamar!"
+        )
+        return
     ok, restante = u.checar_e_registrar_uso(_pool, usuario)
     if not ok:
         await update.message.reply_text(

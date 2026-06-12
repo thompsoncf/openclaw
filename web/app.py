@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from db.conexao import get_pool, init_schema
 from contas import contas as ct
 from core.brain import Brain
-from core.memory import MemoriaConversa
+from core.memory import MemoriaPersistente
 from core.transcribe import transcritor_se_configurado
 from finance.livro_caixa import LivroCaixa
 from finance.agente_financeiro import criar_agente_financeiro
@@ -41,7 +41,6 @@ app.include_router(portal_router)
 _pool = None
 _brain = None
 _transcritor = None
-_agentes: dict[int, object] = {}
 
 
 def _setup():
@@ -55,11 +54,9 @@ def _setup():
 
 
 def _agente_do(membro, conta):
-    ag = _agentes.get(membro.id)
-    if ag is None:
-        ag = criar_agente_financeiro(_brain, LivroCaixa(_pool, conta.id, membro.id), MemoriaConversa())
-        _agentes[membro.id] = ag
-    return ag
+    # Memoria persistente por membro (chave wa: pra nao colidir com o telegram).
+    memoria = MemoriaPersistente(_pool, f"wa:{membro.id}")
+    return criar_agente_financeiro(_brain, LivroCaixa(_pool, conta.id, membro.id), memoria)
 
 
 def _responder_whatsapp(to: str, texto: str):

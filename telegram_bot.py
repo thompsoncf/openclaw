@@ -18,7 +18,7 @@ from telegram.ext import (
 from db.conexao import get_pool, init_schema
 from contas import contas as ct
 from core.brain import Brain
-from core.memory import MemoriaConversa
+from core.memory import MemoriaPersistente
 from finance.livro_caixa import LivroCaixa
 from finance.agente_financeiro import criar_agente_financeiro
 from core.transcribe import transcritor_se_configurado
@@ -39,16 +39,13 @@ MSG_SEM_ACESSO = (
 _pool = None
 _brain: Brain | None = None
 _transcritor = None
-_agentes: dict[int, object] = {}   # membro_id -> Agente (memoria por sessao)
 
 
 def _agente_do(membro, conta):
-    ag = _agentes.get(membro.id)
-    if ag is None:
-        livro = LivroCaixa(_pool, conta.id, membro.id)
-        ag = criar_agente_financeiro(_brain, livro, MemoriaConversa())
-        _agentes[membro.id] = ag
-    return ag
+    # Memoria persistente por membro: sobrevive a deploy e e' unica entre instancias.
+    livro = LivroCaixa(_pool, conta.id, membro.id)
+    memoria = MemoriaPersistente(_pool, f"tg:{membro.id}")
+    return criar_agente_financeiro(_brain, livro, memoria)
 
 
 async def start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
@@ -57,7 +54,7 @@ async def start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(MSG_NAO_CADASTRADO)
         return
     membro, _conta = achado
-    _agentes.pop(membro.id, None)   # RESET: descarta a sessao/memoria anterior
+    MemoriaPersistente(_pool, f"tg:{membro.id}").limpar()   # RESET no banco
     nome = membro.nome or update.effective_user.first_name or ""
     await update.message.reply_text(
         f"Opa, {nome}! Conversa reiniciada. Me diga seus gastos e "

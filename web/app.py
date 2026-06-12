@@ -16,7 +16,7 @@ from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from db.conexao import get_pool, init_schema
-from usuarios import usuarios as u
+from contas import contas as ct
 from core.brain import Brain
 from core.memory import MemoriaConversa
 from core.transcribe import transcritor_se_configurado
@@ -42,11 +42,11 @@ def _setup():
     return _pool
 
 
-def _agente_do(usuario):
-    ag = _agentes.get(usuario.id)
+def _agente_do(membro, conta):
+    ag = _agentes.get(membro.id)
     if ag is None:
-        ag = criar_agente_financeiro(_brain, LivroCaixa(_pool, usuario.id), MemoriaConversa())
-        _agentes[usuario.id] = ag
+        ag = criar_agente_financeiro(_brain, LivroCaixa(_pool, conta.id, membro.id), MemoriaConversa())
+        _agentes[membro.id] = ag
     return ag
 
 
@@ -68,16 +68,22 @@ def _baixar_midia(url: str) -> bytes:
 
 def processar_whatsapp(numero: str, nome: str | None, body: str,
                        media_url: str | None, media_ctype: str):
-    """Roda em background: identifica, checa acesso, agente, responde via Twilio."""
+    """Roda em background: identifica o MEMBRO, checa a CONTA, agente, responde."""
     pool = _setup()
     to = f"whatsapp:{numero}"
     try:
-        usuario = u.get_or_create_whatsapp(pool, numero, nome)
-        if not u.acesso_liberado(usuario):
+        achado = ct.membro_por_whatsapp(pool, numero)
+        if achado is None:
+            _responder_whatsapp(to, "Ola! Ainda nao encontrei seu cadastro. O acesso e' "
+                                    "feito pelo portal: la voce escolhe seu plano e cadastra "
+                                    "seu numero. Depois e' so' voltar aqui!")
+            return
+        membro, conta = achado
+        if not ct.acesso_liberado(conta):
             _responder_whatsapp(to, "Seu acesso esta suspenso (pagamento pendente). "
                                     "Assim que o pagamento for confirmado, voce volta a usar.")
             return
-        ok, _restante = u.checar_e_registrar_uso(pool, usuario)
+        ok, _restante = ct.checar_e_registrar_uso(pool, conta)
         if not ok:
             _responder_whatsapp(to, "Voce atingiu o limite de mensagens de hoje. A gente se fala amanha!")
             return
@@ -98,7 +104,7 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
                                     "Pode mandar por texto, ou tente o audio de novo?")
             return
 
-        resposta = _agente_do(usuario).responder(texto, imagem_b64)
+        resposta = _agente_do(membro, conta).responder(texto, imagem_b64)
         _responder_whatsapp(to, resposta)
     except Exception as e:  # noqa: BLE001
         log.exception("erro no whatsapp")

@@ -25,7 +25,7 @@ class Ferramenta:
 class Agente:
     def __init__(self, nome: str, persona: str, ferramentas: list[Ferramenta],
                  brain: Brain, memoria: MemoriaConversa | None = None,
-                 max_iteracoes: int = 6):
+                 max_iteracoes: int = 10):
         self.nome = nome
         self.persona = persona
         self.ferramentas = {f.nome: f for f in ferramentas}
@@ -43,14 +43,21 @@ class Agente:
         self.memoria.adicionar("user", conteudo)
 
         schemas = [f.schema() for f in self.ferramentas.values()]
+        houve_ferramenta = False
 
         for _ in range(self.max_iteracoes):
             resp = self.brain.chamar(self.persona, self.memoria.mensagens(), schemas)
             self.memoria.adicionar("assistant", resp.content)
 
             if resp.stop_reason != "tool_use":
-                return self._texto(resp)
+                final = self._texto(resp)
+                if final:
+                    return final
+                # terminou sem texto: se fez alguma acao, confirma; senao, pede pra repetir
+                return ("Pronto, atualizei aqui! ✅" if houve_ferramenta
+                        else "Desculpa, nao entendi. Pode repetir?")
 
+            houve_ferramenta = True
             resultados = []
             for bloco in resp.content:
                 if getattr(bloco, "type", None) != "tool_use":
@@ -63,7 +70,10 @@ class Agente:
                 resultados.append({"type": "tool_result", "tool_use_id": bloco.id, "content": str(saida)})
             self.memoria.adicionar("user", resultados)
 
-        return "Desculpa, me embananei aqui e nao consegui finalizar. Pode repetir?"
+        # estourou o limite de iteracoes
+        return ("Registrei o que deu, mas me embananei no meio. Confere o saldo pra garantir?"
+                if houve_ferramenta
+                else "Desculpa, me embananei aqui e nao consegui finalizar. Pode repetir?")
 
     @staticmethod
     def _texto(resp) -> str:

@@ -7,3 +7,6 @@ pytest>=8.0
 fastapi>=0.110
 uvicorn[standard]>=0.29
 openai>=1.40
+twilio>=9.0
+httpx>=0.27
+python-multipart>=0.0.9

@@ -1,4 +1,4 @@
-"""Portal do OpenClaw: cadastro, login e painel (Bloco A+B).
+"""Portal do OpenClaw: cadastro, login e painel (Bloco A+B+C).
 
 Vive dentro do openclaw-web. Regra sagrada: toda pagina logada enxerga
 APENAS a conta da sessao (isolamento multi-tenant na camada web).
@@ -12,8 +12,11 @@ from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, DictLoader, select_autoescape
 
+from datetime import date
+
 from db.conexao import get_pool
 from contas import contas as ct
+from finance.livro_caixa import LivroCaixa
 
 router = APIRouter()
 
@@ -124,9 +127,15 @@ table{width:100%;border-collapse:collapse;margin-top:.8rem}
 td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-size:.92rem}
 .tag{display:inline-block;padding:.1rem .55rem;border-radius:999px;font-size:.78rem;
  border:1px solid #1d9e75;color:#5dcaa5}
+.metric{background:#0e0e0f;border:1px solid #2a2a2b;border-radius:8px;padding:1rem}
+.metric span{display:block;font-size:.8rem;color:#a8a8a3;margin-bottom:.3rem}
+.metric b{font-size:1.4rem;font-weight:500}
+.barra{height:8px;background:#0e0e0f;border-radius:4px;overflow:hidden}
+.barra-fill{height:8px;background:#1d9e75;border-radius:4px}
+.chip{border:1px solid #2a2a2b;padding:.25rem .6rem;border-radius:999px;font-size:.8rem;color:#ccc}
 </style></head><body>
 <div class="topo"><span class="logo">OpenClaw</span><span>
-{% if logado %}<a href="/painel">Painel</a><a href="/sair">Sair</a>
+{% if logado %}<a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/sair">Sair</a>
 {% else %}<a href="/login">Entrar</a><a href="/cadastro">Criar conta</a>{% endif %}
 </span></div>
 {% block conteudo %}{% endblock %}
@@ -202,8 +211,60 @@ _SENHA = """{% extends "base" %}{% block conteudo %}
 <p class="mut" style="margin-top:1rem"><a href="/painel" style="color:#5dcaa5">Voltar ao painel</a></p>
 </div>{% endblock %}"""
 
+_DASH = """{% extends "base" %}{% block conteudo %}
+<div class="card larga">
+<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.5rem">
+<h1 style="margin:0">Financeiro</h1>
+<form method="get" action="/painel/financeiro" style="margin:0; display:flex; gap:.5rem; align-items:center">
+<select name="mes" onchange="this.form.submit()">
+{% for v,rotulo in meses %}<option value="{{ v }}" {% if v==mes_sel %}selected{% endif %}>{{ rotulo }}</option>{% endfor %}
+</select>
+{% if pessoas|length > 1 %}<select name="membro" onchange="this.form.submit()">
+<option value="">Todos</option>
+{% for mid,nome in pessoas %}<option value="{{ mid }}" {% if mid==membro_sel %}selected{% endif %}>{{ nome }}</option>{% endfor %}
+</select>{% endif %}
+</form></div>
+
+<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:1.2rem 0">
+<div class="metric"><span>Saldo atual</span><b style="color:#5dcaa5">{{ brl(resumo.saldo) }}</b></div>
+<div class="metric"><span>Receitas do mês</span><b>{{ brl(resumo.receitas) }}</b></div>
+<div class="metric"><span>Despesas do mês</span><b>{{ brl(resumo.despesas) }}</b></div>
+</div>
+
+<h1 style="font-size:1.05rem">Despesas por categoria</h1>
+{% if categorias %}{% for cat,val in categorias %}
+<div style="display:flex; justify-content:space-between; font-size:.9rem; margin:.4rem 0 .2rem"><span>{{ cat }}</span><b>{{ brl(val) }}</b></div>
+<div class="barra"><div class="barra-fill" style="width:{{ (val*100//maior_cat) if maior_cat else 0 }}%"></div></div>
+{% endfor %}{% else %}<p class="mut">Sem despesas neste mês.</p>{% endif %}
+
+<h1 style="font-size:1.05rem; margin-top:1.6rem">Lançamentos</h1>
+<form method="get" action="/painel/financeiro" style="margin:.3rem 0">
+<input type="hidden" name="mes" value="{{ mes_sel }}"><input type="hidden" name="membro" value="{{ membro_sel or '' }}">
+<select name="tipo" onchange="this.form.submit()" style="width:auto">
+<option value="">Todos</option><option value="despesa" {% if tipo_sel=='despesa' %}selected{% endif %}>Despesas</option>
+<option value="receita" {% if tipo_sel=='receita' %}selected{% endif %}>Receitas</option></select></form>
+<table><tr><th>Data</th><th>Descrição</th><th>Categoria</th>{% if pessoas|length > 1 %}<th>Quem</th>{% endif %}<th style="text-align:right">Valor</th></tr>
+{% for l in lancamentos %}<tr>
+<td class="mut">{{ l.data.strftime('%d/%m') }}</td>
+<td>{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}</td>
+<td><span class="tag">{{ l.categoria }}</span></td>
+{% if pessoas|length > 1 %}<td class="mut">{{ l.quem }}</td>{% endif %}
+<td style="text-align:right; font-weight:500; color:{{ '#5dcaa5' if l.tipo=='receita' else '#f0b8b8' }}">
+{{ '+' if l.tipo=='receita' else '−' }} {{ brl(l.valor).replace('R$ ','') }}</td></tr>
+{% else %}<tr><td colspan="5" class="mut">Nenhum lançamento neste período.</td></tr>{% endfor %}
+</table>
+
+<h1 style="font-size:1.05rem; margin-top:1.6rem">Raio-x do consumo por departamento</h1>
+{% if raiox %}{% for dep, itens in raiox.items() %}
+<p style="margin:.8rem 0 .3rem"><span class="tag">{{ dep }}</span></p>
+<div style="display:flex; gap:8px; flex-wrap:wrap">
+{% for it in itens %}<span class="chip">{{ it.descricao }} · {{ brl(it.valor) }}</span>{% endfor %}
+</div>{% endfor %}
+{% else %}<p class="mut">Os itens aparecem aqui quando você pedir pro assistente "registrar os itens" de um cupom.</p>{% endif %}
+</div>{% endblock %}"""
+
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "painel": _PAINEL, "senha": _SENHA,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 
@@ -294,6 +355,50 @@ def painel(request: Request):
                    pode_adicionar=pode_adicionar,
                    erro=request.session.pop("erro", None),
                    aviso=request.session.pop("aviso", None))
+
+
+@router.get("/painel/financeiro", response_class=HTMLResponse)
+def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: str = ""):
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    hoje = date.today()
+    try:
+        ano_sel, mes_num = (int(x) for x in mes.split("-")) if mes else (hoje.year, hoje.month)
+    except ValueError:
+        ano_sel, mes_num = hoje.year, hoje.month
+    mes_sel = f"{ano_sel:04d}-{mes_num:02d}"
+    membro_sel = int(membro) if membro.isdigit() else None
+
+    with pool.connection() as c:
+        pessoas = c.execute(
+            "select id, coalesce(nome,'-') from membros where conta_id=%s and ativo order by id",
+            (conta[0],)).fetchall()
+    if membro_sel is not None and membro_sel not in {p[0] for p in pessoas}:
+        membro_sel = None
+
+    livro = LivroCaixa(pool, conta[0])
+    resumo = livro.resumo_mes(ano_sel, mes_num, membro_sel)
+    categorias = livro.despesas_por_categoria(ano_sel, mes_num, membro_sel)
+    maior_cat = max((v for _, v in categorias), default=0)
+    lancamentos = livro.lancamentos_recentes(ano_sel, mes_num, membro_sel,
+                                             tipo if tipo in ("despesa", "receita") else None)
+    raiox = livro.raiox_por_departamento(membro_id=membro_sel)
+
+    meses = []
+    y, m = hoje.year, hoje.month
+    nomes = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"]
+    for _ in range(6):
+        meses.append((f"{y:04d}-{m:02d}", f"{nomes[m-1]}/{y}"))
+        m -= 1
+        if m == 0:
+            m = 12; y -= 1
+
+    return _render("dash", request, titulo="Financeiro", conta=conta,
+                   resumo=resumo, categorias=categorias, maior_cat=maior_cat,
+                   lancamentos=lancamentos, raiox=raiox, pessoas=pessoas,
+                   meses=meses, mes_sel=mes_sel, membro_sel=membro_sel, tipo_sel=tipo)
 
 
 @router.post("/membros/adicionar")

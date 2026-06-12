@@ -1,8 +1,7 @@
-"""Livro-caixa de UM usuario dentro de UMA CONTA.
+"""Livro-caixa de UMA conta (tenant).
 
-Todo metodo e' escopado por conta_id: a pessoa so' enxerga e mexe no que e' dela.
-O membro_id (autor) e' registrado pra auditoria. Recebe o pool de conexoes e
-pega/devolve conexao a cada operacao.
+Todo metodo e' escopado por conta_id: a conta so' enxerga e mexe no que e' dela
+(isolamento sagrado do multi-tenant). membro_id marca QUEM lancou (auditoria).
 """
 from datetime import date, timedelta
 
@@ -86,6 +85,94 @@ class LivroCaixa:
             ).fetchone()
         return int(row[0])
 
+    # ---------- Dashboard do cliente (Bloco C) ----------
+
+    def resumo_mes(self, ano: int, mes: int, membro_id: int | None = None) -> dict:
+        """Saldo acumulado + receitas/despesas do mes (opcional: de UM membro)."""
+        cond = "conta_id = %s"
+        base: list = [self.conta_id]
+        if membro_id is not None:
+            cond += " and membro_id = %s"; base.append(membro_id)
+        with self.pool.connection() as conn:
+            saldo = conn.execute(
+                f"""select coalesce(sum(case when tipo='receita' then valor_centavos else -valor_centavos end),0)
+                    from lancamentos where {cond}""", base).fetchone()[0]
+            rec = conn.execute(
+                f"""select coalesce(sum(valor_centavos),0) from lancamentos
+                    where {cond} and tipo='receita'
+                    and extract(year from data)=%s and extract(month from data)=%s""",
+                base + [ano, mes]).fetchone()[0]
+            desp = conn.execute(
+                f"""select coalesce(sum(valor_centavos),0) from lancamentos
+                    where {cond} and tipo='despesa'
+                    and extract(year from data)=%s and extract(month from data)=%s""",
+                base + [ano, mes]).fetchone()[0]
+        return {"saldo": int(saldo), "receitas": int(rec), "despesas": int(desp)}
+
+    def despesas_por_categoria(self, ano: int, mes: int, membro_id: int | None = None) -> list[tuple[str, int]]:
+        cond = "conta_id = %s and tipo='despesa'"
+        params: list = [self.conta_id]
+        if membro_id is not None:
+            cond += " and membro_id = %s"; params.append(membro_id)
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                f"""select categoria, sum(valor_centavos) from lancamentos
+                    where {cond} and extract(year from data)=%s and extract(month from data)=%s
+                    group by categoria order by sum(valor_centavos) desc""",
+                params + [ano, mes]).fetchall()
+        return [(r[0], int(r[1])) for r in rows]
+
+    def evolucao_mensal(self, meses: int = 6, membro_id: int | None = None) -> list[dict]:
+        """Receitas e despesas dos ultimos N meses (pra grafico de tendencia)."""
+        cond = "conta_id = %s"
+        params: list = [self.conta_id]
+        if membro_id is not None:
+            cond += " and membro_id = %s"; params.append(membro_id)
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                f"""select to_char(date_trunc('month', data), 'YYYY-MM') as mes,
+                          coalesce(sum(case when tipo='receita' then valor_centavos else 0 end),0),
+                          coalesce(sum(case when tipo='despesa' then valor_centavos else 0 end),0)
+                    from lancamentos where {cond}
+                    group by 1 order by 1 desc limit %s""",
+                params + [meses]).fetchall()
+        return [{"mes": r[0], "receitas": int(r[1]), "despesas": int(r[2])} for r in reversed(rows)]
+
+    def lancamentos_recentes(self, ano: int, mes: int, membro_id: int | None = None,
+                             tipo: str | None = None, limite: int = 50) -> list[dict]:
+        cond = "l.conta_id = %s and extract(year from l.data)=%s and extract(month from l.data)=%s"
+        params: list = [self.conta_id, ano, mes]
+        if membro_id is not None:
+            cond += " and l.membro_id = %s"; params.append(membro_id)
+        if tipo in ("despesa", "receita"):
+            cond += " and l.tipo = %s"; params.append(tipo)
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                f"""select l.data, l.descricao, l.categoria, l.tipo, l.valor_centavos,
+                          l.origem, coalesce(m.nome, '-') as quem
+                    from lancamentos l left join membros m on m.id = l.membro_id
+                    where {cond} order by l.data desc, l.id desc limit %s""",
+                params + [limite]).fetchall()
+        return [{"data": r[0], "descricao": r[1], "categoria": r[2], "tipo": r[3],
+                 "valor": int(r[4]), "origem": r[5], "quem": r[6]} for r in rows]
+
+    def raiox_por_departamento(self, dias: int = 90, membro_id: int | None = None) -> dict[str, list[dict]]:
+        """Itens de cupom agrupados pelo DEPARTAMENTO (= categoria do lancamento)."""
+        cond = "l.conta_id = %s and i.criado_em >= now() - (%s || ' days')::interval"
+        params: list = [self.conta_id, dias]
+        if membro_id is not None:
+            cond += " and l.membro_id = %s"; params.append(membro_id)
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                f"""select l.categoria, i.descricao, i.valor_total_centavos
+                    from itens_lancamento i join lancamentos l on l.id = i.lancamento_id
+                    where {cond} order by l.categoria, i.valor_total_centavos desc""",
+                params).fetchall()
+        dep: dict[str, list[dict]] = {}
+        for cat, desc, val in rows:
+            dep.setdefault(cat, []).append({"descricao": desc, "valor": int(val)})
+        return dep
+
     # ---------- Itens do cupom (raio-x do consumo) ----------
 
     def buscar_duplicata(self, valor_centavos: int, data) -> list[dict]:
@@ -100,7 +187,7 @@ class LivroCaixa:
         return [{"id": r[0], "descricao": r[1], "data": r[2], "criado_em": r[3]} for r in rows]
 
     def ultimo_lancamento_id(self) -> int | None:
-        """Id do lancamento mais recente da conta (pra anexar itens 'desse cupom')."""
+        """Id do lancamento mais recente do usuario (pra anexar itens 'desse cupom')."""
         with self.pool.connection() as conn:
             row = conn.execute(
                 "select id from lancamentos where conta_id = %s order by id desc limit 1",
@@ -109,10 +196,10 @@ class LivroCaixa:
         return int(row[0]) if row else None
 
     def registrar_itens(self, lancamento_id: int, itens: list[dict]) -> int:
-        """Salva os itens de um cupom, ligados a um lancamento da PROPRIA CONTA.
+        """Salva os itens de um cupom, ligados a um lancamento do PROPRIO usuario.
 
         Cada item: {descricao, quantidade, valor_unitario_centavos, valor_total_centavos}.
-        Retorna quantos itens foram salvos (0 se o lancamento nao for da conta).
+        Retorna quantos itens foram salvos (0 se o lancamento nao for do usuario).
         """
         with self.pool.connection() as conn:
             dono = conn.execute(

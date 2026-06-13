@@ -157,20 +157,24 @@ class LivroCaixa:
                  "valor": int(r[4]), "origem": r[5], "quem": r[6]} for r in rows]
 
     def raiox_por_departamento(self, dias: int = 90, membro_id: int | None = None) -> dict[str, list[dict]]:
-        """Itens de cupom agrupados pelo DEPARTAMENTO (= categoria do lancamento)."""
+        """Itens de cupom agrupados pelo DEPARTAMENTO (= categoria do lancamento).
+
+        Cada item carrega a data do lancamento, pra UI dividir por dia dentro
+        do departamento.
+        """
         cond = "l.conta_id = %s and i.criado_em >= now() - (%s || ' days')::interval"
         params: list = [self.conta_id, dias]
         if membro_id is not None:
             cond += " and l.membro_id = %s"; params.append(membro_id)
         with self.pool.connection() as conn:
             rows = conn.execute(
-                f"""select l.categoria, i.descricao, i.valor_total_centavos
+                f"""select l.categoria, i.descricao, i.valor_total_centavos, l.data
                     from itens_lancamento i join lancamentos l on l.id = i.lancamento_id
-                    where {cond} order by l.categoria, i.valor_total_centavos desc""",
+                    where {cond} order by l.categoria, l.data desc, i.valor_total_centavos desc""",
                 params).fetchall()
         dep: dict[str, list[dict]] = {}
-        for cat, desc, val in rows:
-            dep.setdefault(cat, []).append({"descricao": desc, "valor": int(val)})
+        for cat, desc, val, data in rows:
+            dep.setdefault(cat, []).append({"descricao": desc, "valor": int(val), "data": data})
         return dep
 
     # ---------- Itens do cupom (raio-x do consumo) ----------

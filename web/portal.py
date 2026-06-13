@@ -143,6 +143,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
 .seta{color:#5dcaa5;margin-right:.3rem}
 .dep-corpo{display:none;padding:.7rem .9rem;flex-wrap:wrap;gap:8px}
 .dep.aberto .dep-corpo{display:flex}
+.dia-sub{font-size:.8rem;color:#5dcaa5;margin:.3rem 0 .4rem;border-bottom:1px solid #2a2a2b;padding-bottom:.2rem}
 </style></head><body>
 <div class="topo"><span class="logo">OpenClaw</span><span>
 {% if logado %}<a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/sair">Sair</a>
@@ -280,11 +281,16 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 {% if raiox %}{% for dep, dados in raiox.items() %}
 <div class="dep">
 <div class="dep-cab" onclick="abrirDep(this)">
-<span><span class="seta">▸</span> {{ dep }} <span class="mut">· {{ dados.itens|length }} {{ 'item' if dados.itens|length == 1 else 'itens' }}</span></span>
+<span><span class="seta">▸</span> {{ dep }}</span>
 <b>{{ brl(dados.total) }}</b>
 </div>
-<div class="dep-corpo">
-{% for it in dados.itens %}<span class="chip">{{ it.descricao }} · {{ brl(it.valor) }}</span>{% endfor %}
+<div class="dep-corpo" style="flex-direction:column; gap:0">
+{% for d in dados.dias %}
+<div class="dia-sub">{{ d.data.strftime('%d/%m/%Y') }} <span class="mut">· {{ brl(d.subtotal) }}</span></div>
+<div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:.7rem">
+{% for it in d.itens %}<span class="chip">{{ it.descricao }} · {{ brl(it.valor) }}</span>{% endfor %}
+</div>
+{% endfor %}
 </div>
 </div>{% endfor %}
 {% else %}<p class="mut">Os itens aparecem aqui quando você fotografa um cupom de mercado.</p>{% endif %}
@@ -447,9 +453,16 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
         por_dia[d]["saldo"] += l["valor"] if l["tipo"] == "receita" else -l["valor"]
     dias = [{"data": d, "itens": g["itens"], "saldo": g["saldo"]} for d, g in por_dia.items()]
     raiox_bruto = livro.raiox_por_departamento(membro_id=membro_sel)
-    # monta {dep: {itens:[...], total:centavos}} pro accordion
-    raiox = {dep: {"itens": itens, "total": sum(i["valor"] for i in itens)}
-             for dep, itens in raiox_bruto.items()}
+    # monta {dep: {total, dias:[{data, itens, subtotal}]}} - itens divididos por dia
+    from collections import OrderedDict
+    raiox = {}
+    for dep, itens in raiox_bruto.items():
+        por_dia = OrderedDict()
+        for it in itens:
+            por_dia.setdefault(it["data"], []).append(it)
+        dias_dep = [{"data": d, "itens": its, "subtotal": sum(i["valor"] for i in its)}
+                    for d, its in por_dia.items()]
+        raiox[dep] = {"total": sum(i["valor"] for i in itens), "dias": dias_dep}
 
     meses = []
     y, m = hoje.year, hoje.month

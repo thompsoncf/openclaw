@@ -24,7 +24,7 @@ def _parse_data(s: str | None) -> date:
     return date.today()
 
 
-def construir_ferramentas(livro: LivroCaixa) -> list[Ferramenta]:
+def construir_ferramentas(livro: LivroCaixa, lista=None) -> list[Ferramenta]:
     def lancar(tipo: Tipo, entrada: dict) -> str:
         lanc = Lancamento.criar(
             tipo=tipo,
@@ -135,6 +135,54 @@ def construir_ferramentas(livro: LivroCaixa) -> list[Ferramenta]:
         "required": ["descricao", "valor_total"],
     }
 
+    # ---------- lista de compras (opcional; so' se 'lista' foi passada) ----------
+    def add_lista(entrada: dict) -> str:
+        if lista is None:
+            return "Lista de compras nao disponivel."
+        itens = entrada.get("itens") or []
+        if isinstance(itens, str):
+            itens = [itens]
+        nomes = [str(i).strip() for i in itens if str(i).strip()]
+        if not nomes:
+            return "Nao entendi os itens. Quais produtos adicionar a' lista?"
+        n = lista.adicionar_varios(nomes)
+        if n == 1:
+            return f"Adicionei '{nomes[0]}' a' lista de compras. 🛒"
+        return f"Adicionei {n} itens a' lista de compras: {', '.join(nomes)}. 🛒"
+
+    def ver_lista(entrada: dict) -> str:
+        if lista is None:
+            return "Lista de compras nao disponivel."
+        itens = lista.listar(incluir_comprados=False)
+        if not itens:
+            return "A lista de compras esta vazia."
+        linhas = []
+        for i in itens:
+            q = ""
+            if i["quantidade"] and float(i["quantidade"]) != 1:
+                q = f" ({i['quantidade']:g}{i['unidade'] or ''})"
+            preco = ""
+            if i["preco_estimado_centavos"]:
+                preco = f" ~{formatar_brl(i['preco_estimado_centavos'])}"
+            linhas.append(f"• {i['descricao']}{q}{preco}")
+        r = lista.resumo()
+        rodape = f"\n\n{r['pendentes']} item(ns) pendente(s)"
+        if r["estimado_centavos"]:
+            rodape += f" · estimativa: {formatar_brl(r['estimado_centavos'])}"
+        return "🛒 Lista de compras:\n" + "\n".join(linhas) + rodape
+
+    def marcar_lista(entrada: dict) -> str:
+        if lista is None:
+            return "Lista de compras nao disponivel."
+        termo = (entrada.get("descricao") or "").strip().lower()
+        if not termo:
+            return "Qual item voce comprou?"
+        for i in lista.listar(incluir_comprados=False):
+            if termo in i["descricao"].lower():
+                lista.marcar_comprado(i["id"], True)
+                return f"Marquei '{i['descricao']}' como comprado. ✅"
+        return f"Nao achei '{termo}' entre os itens pendentes da lista."
+
     return [
         Ferramenta(
             nome="lancar_despesa",
@@ -244,4 +292,40 @@ def construir_ferramentas(livro: LivroCaixa) -> list[Ferramenta]:
             },
             executar=listar_itens,
         ),
-    ]
+    ] + ([
+        Ferramenta(
+            nome="adicionar_lista_compras",
+            descricao=("Adiciona um ou mais itens a' LISTA DE COMPRAS (o que ainda PRECISA "
+                       "comprar - diferente de registrar um gasto ja' feito). Use quando a "
+                       "pessoa disser que acabou algo, que precisa comprar, ou ditar uma lista "
+                       "(ex: 'preciso de arroz, cafe e detergente', 'acabou o sabao')."),
+            parametros={
+                "type": "object",
+                "properties": {
+                    "itens": {"type": "array", "items": {"type": "string"},
+                              "description": "nomes dos produtos a adicionar"},
+                },
+                "required": ["itens"],
+            },
+            executar=add_lista,
+        ),
+        Ferramenta(
+            nome="ver_lista_compras",
+            descricao="Mostra a lista de compras atual (itens que ainda faltam comprar).",
+            parametros={"type": "object", "properties": {}},
+            executar=ver_lista,
+        ),
+        Ferramenta(
+            nome="marcar_comprado_lista",
+            descricao=("Marca um item da lista de compras como JA' COMPRADO (sai da lista de "
+                       "pendentes). Use quando a pessoa disser que comprou/pegou um item."),
+            parametros={
+                "type": "object",
+                "properties": {
+                    "descricao": {"type": "string", "description": "nome do item comprado"},
+                },
+                "required": ["descricao"],
+            },
+            executar=marcar_lista,
+        ),
+    ] if lista is not None else [])

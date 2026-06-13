@@ -21,6 +21,7 @@ from core.brain import Brain
 from core.memory import MemoriaPersistente
 from core.transcribe import transcritor_se_configurado
 from finance.livro_caixa import LivroCaixa
+from finance.lista_compras import ListaCompras
 from finance.agente_financeiro import criar_agente_financeiro
 
 app = FastAPI(title="OpenClaw")
@@ -56,9 +57,9 @@ def _setup():
 
 
 def _agente_do(membro, conta):
-    # Memoria persistente por membro (chave wa: pra nao colidir com o telegram).
     memoria = MemoriaPersistente(_pool, f"wa:{membro.id}")
-    return criar_agente_financeiro(_brain, LivroCaixa(_pool, conta.id, membro.id), memoria)
+    lista = ListaCompras(_pool, conta.id, membro.id)
+    return criar_agente_financeiro(_brain, LivroCaixa(_pool, conta.id, membro.id), memoria, lista)
 
 
 def _responder_whatsapp(to: str, texto: str):

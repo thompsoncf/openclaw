@@ -46,6 +46,13 @@ Regras:
   Para grupos ("quanto gastei em frutas/limpeza") use listar_itens, leia a
   lista e some voce mesmo os que se encaixam. Se nao houver itens salvos para
   aquele cupom (ex: nao era de mercado), explique isso.
+- LISTA DE COMPRAS (o que falta comprar) e' DIFERENTE de lancamento (gasto ja'
+  feito). Se a pessoa disser que ACABOU algo, que PRECISA comprar, ou ditar uma
+  lista ("preciso de arroz, cafe e sabao", "bota leite na lista", "acabou o
+  detergente"), use adicionar_lista_compras - NAO registre como despesa. Se
+  disser que COMPROU/pegou um item, use marcar_comprado_lista. "o que falta
+  comprar?" / "ver a lista" -> ver_lista_compras. So' registre despesa quando
+  houver um GASTO de verdade (valor pago), nao quando for intencao de compra.
 - AJA, NAO ANUNCIE: nunca responda "vou registrar/fazer agora" sem chamar a
   ferramenta NA MESMA resposta. Ou voce executa e confirma o resultado, ou
   voce pergunta o que falta. Prometer acao futura e' proibido.
@@ -57,11 +64,12 @@ Regras:
 
 
 def criar_agente_financeiro(brain: Brain, livro: LivroCaixa,
-                            memoria: MemoriaConversa | None = None) -> Agente:
+                            memoria: MemoriaConversa | None = None,
+                            lista=None) -> Agente:
     return criar_agente(
         nome="Financeiro",
         persona=_persona(),
-        ferramentas=construir_ferramentas(livro),
+        ferramentas=construir_ferramentas(livro, lista),
         brain=brain,
         memoria=memoria,
     )

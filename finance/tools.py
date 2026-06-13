@@ -24,7 +24,8 @@ def _parse_data(s: str | None) -> date:
     return date.today()
 
 
-def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono") -> list[Ferramenta]:
+def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
+                          banco=None) -> list[Ferramenta]:
     from contas.permissoes import pode_financas, pode_lista
     def lancar(tipo: Tipo, entrada: dict) -> str:
         lanc = Lancamento.criar(
@@ -184,6 +185,28 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono") ->
                 return f"Marquei '{i['descricao']}' como comprado. ✅"
         return f"Nao achei '{termo}' entre os itens pendentes da lista."
 
+    def comparar_lista(entrada: dict) -> str:
+        if lista is None or banco is None:
+            return "Comparador de precos nao disponivel."
+        itens = [i["descricao"] for i in lista.listar(incluir_comprados=False)]
+        if not itens:
+            return "A lista de compras esta vazia. Adicione itens antes de comparar precos."
+        r = banco.comparar_cesta(itens)
+        if r["observacoes"] == 0:
+            return ("Ainda nao tenho precos suficientes pra comparar essa lista. "
+                    "Conforme voce e sua familia registram cupons de mercado, eu vou "
+                    "aprendendo os precos e em breve consigo dizer onde a cesta sai mais barata. 📈")
+        linhas = ["🛒 Onde sua cesta sai mais barata (pelos cupons registrados):\n"]
+        for i, m in enumerate(r["mercados"][:3], 1):
+            falta = f" · faltam {len(m['itens_faltando'])} itens" if m["itens_faltando"] else " · cesta completa"
+            linhas.append(f"{i}. {m['mercado']}: {formatar_brl(m['total_centavos'])}"
+                          f" ({m['itens_cobertos']} itens{falta})")
+        sem = [d["descricao"] for d in r["itens"] if not d["precos"]]
+        if sem:
+            linhas.append(f"\nAinda sem preco: {', '.join(sem)}")
+        linhas.append(f"\n(baseado em {r['observacoes']} precos dos seus cupons - melhora a cada compra)")
+        return "\n".join(linhas)
+
     return (([
         Ferramenta(
             nome="lancar_despesa",
@@ -328,5 +351,14 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono") ->
                 "required": ["descricao"],
             },
             executar=marcar_lista,
+        ),
+        Ferramenta(
+            nome="comparar_precos_lista",
+            descricao=("Compara onde a CESTA da lista de compras sai mais barata, usando os "
+                       "precos aprendidos dos cupons registrados. Use quando perguntarem "
+                       "'onde compro mais barato?', 'qual mercado e' melhor pra minha lista?', "
+                       "'onde a cesta sai em conta?'."),
+            parametros={"type": "object", "properties": {}},
+            executar=comparar_lista,
         ),
     ] if (lista is not None and pode_lista(papel)) else []))

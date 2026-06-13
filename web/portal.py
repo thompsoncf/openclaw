@@ -408,6 +408,22 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 <span style="font-size:.78rem">(baseada no histórico de preços)</span></p>
 {% endif %}
 
+{% if comparacao and comparacao.observacoes > 0 %}
+<div style="background:#0e0e0f; border:1px solid #2a2a2b; border-radius:10px; padding:1rem; margin:1rem 0">
+<div style="font-weight:600; margin-bottom:.6rem">🛒 Onde sua cesta sai mais barata</div>
+{% for m in comparacao.mercados[:3] %}
+<div style="display:flex; justify-content:space-between; padding:.4rem 0; {% if not loop.last %}border-bottom:1px solid #1d1d1f{% endif %}">
+<div>{{ loop.index }}. <b>{{ m.mercado }}</b>
+<span class="mut" style="font-size:.78rem">· {{ m.itens_cobertos }} itens{% if m.itens_faltando %} · faltam {{ m.itens_faltando|length }}{% else %} · completa{% endif %}</span></div>
+<b style="color:#5dcaa5">{{ brl(m.total_centavos) }}</b>
+</div>
+{% endfor %}
+<p class="mut" style="font-size:.74rem; margin:.6rem 0 0">Baseado em {{ comparacao.observacoes }} preços dos seus cupons — melhora a cada compra registrada.</p>
+</div>
+{% elif comparacao %}
+<p class="mut" style="font-size:.82rem; margin:1rem 0">📈 Ainda aprendendo os preços da sua região. Conforme você e sua família registram cupons de mercado, vou mostrar aqui onde a cesta sai mais barata.</p>
+{% endif %}
+
 {% if itens %}
 <table style="margin-top:.5rem">
 {% for i in itens %}
@@ -629,10 +645,20 @@ def compras(request: Request):
         return None, None
     try:
         lista.estimar_precos(_estimador)
+        itens = lista.listar(incluir_comprados=True)
     except Exception:  # noqa: BLE001
         pass
-    itens = lista.listar(incluir_comprados=True)
-    return _render("compras", request, titulo="Compras", itens=itens, resumo=lista.resumo())
+    # comparador de cesta (onde a lista inteira sai mais barata)
+    comparacao = None
+    try:
+        from finance.banco_precos import BancoPrecos
+        pendentes = [i["descricao"] for i in itens if not i["comprado"]]
+        if pendentes:
+            comparacao = BancoPrecos(get_pool()).comparar_cesta(pendentes)
+    except Exception:  # noqa: BLE001
+        comparacao = None
+    return _render("compras", request, titulo="Compras", itens=itens,
+                   resumo=lista.resumo(), comparacao=comparacao)
 
 
 @router.post("/painel/compras/add")

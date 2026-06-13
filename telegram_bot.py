@@ -21,6 +21,7 @@ from core.brain import Brain
 from core.memory import MemoriaPersistente
 from finance.livro_caixa import LivroCaixa
 from finance.lista_compras import ListaCompras
+from finance.banco_precos import BancoPrecos
 from finance.agente_financeiro import criar_agente_financeiro
 from core.transcribe import transcritor_se_configurado
 
@@ -51,8 +52,9 @@ _transcritor = None
 def _agente_do(membro, conta):
     livro = LivroCaixa(_pool, conta.id, membro.id)
     lista = ListaCompras(_pool, conta.id, membro.id)
+    banco = BancoPrecos(_pool)
     memoria = MemoriaPersistente(_pool, f"tg:{membro.id}")
-    return criar_agente_financeiro(_brain, livro, memoria, lista, membro.papel)
+    return criar_agente_financeiro(_brain, livro, memoria, lista, membro.papel, banco)
 
 
 async def start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):

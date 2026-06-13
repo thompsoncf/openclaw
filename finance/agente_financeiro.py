@@ -68,6 +68,9 @@ Regras:
   disser que COMPROU/pegou um item, use marcar_comprado_lista. "o que falta
   comprar?" / "ver a lista" -> ver_lista_compras. So' registre despesa quando
   houver um GASTO de verdade (valor pago), nao quando for intencao de compra.
+- ONDE COMPRAR MAIS BARATO: se perguntarem onde a lista/cesta sai mais em conta,
+  qual mercado e' melhor pra comprar, use comparar_precos_lista. Os precos vem
+  dos cupons que a familia registra - quanto mais cupons, melhor a comparacao.
 - AJA, NAO ANUNCIE: nunca responda "vou registrar/fazer agora" sem chamar a
   ferramenta NA MESMA resposta. Ou voce executa e confirma o resultado, ou
   voce pergunta o que falta. Prometer acao futura e' proibido.
@@ -80,11 +83,11 @@ Regras:
 
 def criar_agente_financeiro(brain: Brain, livro: LivroCaixa,
                             memoria: MemoriaConversa | None = None,
-                            lista=None, papel: str = "dono") -> Agente:
+                            lista=None, papel: str = "dono", banco=None) -> Agente:
     return criar_agente(
         nome="Financeiro",
         persona=_persona(papel),
-        ferramentas=construir_ferramentas(livro, lista, papel),
+        ferramentas=construir_ferramentas(livro, lista, papel, banco),
         brain=brain,
         memoria=memoria,
     )

@@ -87,6 +87,8 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
 </div>
 
 <div class="card"><h2>Contas</h2>
+<form method="post" action="/admin/precos/importar" style="margin-bottom:.8rem; display:inline">
+<button title="Lê os cupons de mercado e atualiza o banco de preços do comparador">↻ Atualizar banco de preços</button></form>
 <form method="get" action="/admin" style="margin-bottom:.8rem">
 <input name="busca" placeholder="buscar nome, e-mail ou documento" value="{{ busca or '' }}" style="width:60%">
 <button>Buscar</button></form>
@@ -174,6 +176,16 @@ def admin_ativar(request: Request, conta_id: int):
     request.session["admin_aviso"] = f"Conta {conta_id} ativada por mais 30 dias."
     return RedirectResponse("/admin", status_code=303)
 
+
+@router.post("/admin/precos/importar")
+def admin_importar_precos(request: Request):
+    adm = _admin(request)
+    if adm is None:
+        return _NEGADO
+    from finance.banco_precos import BancoPrecos
+    n = BancoPrecos(get_pool()).importar_historico()
+    request.session["admin_aviso"] = f"Banco de preços atualizado: {n} preços importados dos cupons."
+    return RedirectResponse("/admin", status_code=303)
 
 @router.post("/admin/conta/{conta_id}/suspender")
 def admin_suspender(request: Request, conta_id: int):

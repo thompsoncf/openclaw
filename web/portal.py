@@ -143,7 +143,12 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
 .seta{color:#5dcaa5;margin-right:.3rem}
 .dep-corpo{display:none;padding:.7rem .9rem;flex-wrap:wrap;gap:8px}
 .dep.aberto .dep-corpo{display:flex}
-.dia-sub{font-size:.8rem;color:#5dcaa5;margin:.3rem 0 .4rem;border-bottom:1px solid #2a2a2b;padding-bottom:.2rem}
+.subdia{border-top:1px solid #232324}
+.subdia-cab{display:flex;justify-content:space-between;align-items:center;padding:.55rem .2rem;cursor:pointer;font-size:.88rem}
+.subdia-cab:hover{color:#fff}
+.seta2{color:#5dcaa5;margin-right:.3rem;font-size:.8rem}
+.subdia-corpo{display:none;flex-wrap:wrap;gap:8px;padding:.2rem 0 .7rem}
+.subdia.aberto .subdia-corpo{display:flex}
 </style></head><body>
 <div class="topo"><span class="logo">OpenClaw</span><span>
 {% if logado %}<a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/sair">Sair</a>
@@ -284,11 +289,17 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <span><span class="seta">▸</span> {{ dep }}</span>
 <b>{{ brl(dados.total) }}</b>
 </div>
-<div class="dep-corpo" style="flex-direction:column; gap:0">
+<div class="dep-corpo" style="flex-direction:column; gap:0; padding-top:0">
 {% for d in dados.dias %}
-<div class="dia-sub">{{ d.data.strftime('%d/%m/%Y') }} <span class="mut">· {{ brl(d.subtotal) }}</span></div>
-<div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:.7rem">
+<div class="subdia">
+<div class="subdia-cab" onclick="abrirSub(event, this)">
+<span><span class="seta2">▸</span> {{ d.data.strftime('%d/%m/%Y') }}
+<span class="mut">· {{ d.itens|length }} {{ 'item' if d.itens|length == 1 else 'itens' }}</span></span>
+<span class="mut">{{ brl(d.subtotal) }}</span>
+</div>
+<div class="subdia-corpo">
 {% for it in d.itens %}<span class="chip">{{ it.descricao }} · {{ brl(it.valor) }}</span>{% endfor %}
+</div>
 </div>
 {% endfor %}
 </div>
@@ -312,6 +323,12 @@ function filtrarTipo(btn){
     if (comTipo) visiveis++;
   });
   document.getElementById('lanc-vazio').style.display = visiveis ? 'none' : 'block';
+}
+function abrirSub(ev, cab){
+  ev.stopPropagation();                 // nao fecha o departamento
+  var sub = cab.parentElement;
+  sub.classList.toggle('aberto');
+  cab.querySelector('.seta2').textContent = sub.classList.contains('aberto') ? '▾' : '▸';
 }
 function abrirDep(cab){
   var dep = cab.parentElement;

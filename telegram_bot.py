@@ -37,6 +37,12 @@ MSG_SEM_ACESSO = (
     "Assim que o pagamento for confirmado, voce volta a usar na hora."
 )
 
+import re as _re
+def _parece_convite(texto: str) -> bool:
+    """Formato do codigo: 2-4 letras/numeros + hifen + 4 hex (ex: LAR-7K2M)."""
+    return bool(_re.fullmatch(r"[A-Z0-9]{2,4}-[A-F0-9]{4}", (texto or "").strip().upper()))
+
+
 _pool = None
 _brain: Brain | None = None
 _transcritor = None
@@ -67,6 +73,14 @@ async def start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
 async def _processar(update: Update, texto: str, imagem_b64: str | None = None):
     achado = ct.membro_por_telegram(_pool, update.effective_user.id)
     if achado is None:
+        # talvez seja um CODIGO DE CONVITE (ex: "LAR-7K2M")
+        possivel = (texto or "").strip().upper()
+        if _parece_convite(possivel):
+            ok, msg = ct.resgatar_convite(_pool, possivel, update.effective_user.id)
+            await update.message.reply_text(
+                (msg + "Manda um 'oi' que eu te ajudo! 😊") if ok else
+                (msg + "\n\nSe voce recebeu um codigo de convite, confira e tente de novo."))
+            return
         await update.message.reply_text(MSG_NAO_CADASTRADO)
         return
     membro, conta = achado

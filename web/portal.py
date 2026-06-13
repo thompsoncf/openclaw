@@ -215,13 +215,15 @@ Mande "oi" pra ele!</p>
 {% if pode_adicionar %}
 <form method="post" action="/membros/adicionar">
 <label>Nome</label><input name="nome" required maxlength="80">
-<label>WhatsApp (com DDD)</label><input name="whatsapp" required maxlength="20" placeholder="86 98888-7777">
+<label>WhatsApp (com DDD) <span class="mut">— opcional</span></label><input name="whatsapp" maxlength="20" placeholder="86 98888-7777">
 <label>Tipo de acesso</label>
 <select name="papel">
 <option value="membro">Membro — vê finanças e usa a lista de compras</option>
 <option value="restrito">Restrito — só a lista de compras (ex: empregada)</option>
 </select>
 <button>Adicionar à conta</button></form>
+<p class="mut" style="margin-top:.6rem">Ao adicionar, você recebe um <b>código de convite</b>.
+Peça pra pessoa abrir o bot <b>ClawIAOpen</b> no Telegram e enviar o código — pronto, ela é vinculada.</p>
 {% if extra_pago %}<p class="mut">Seu plano inclui {{ inclusos }} pessoas; acima disso, cada assento extra é cobrado.</p>{% endif %}
 {% else %}
 <p class="mut">Seu plano ({{ conta[4] }}) permite {{ inclusos }} pessoa(s) e você já usa {{ ativos }}.
@@ -635,25 +637,33 @@ def compras_limpar(request: Request):
 
 
 @router.post("/membros/adicionar")
-def membros_adicionar(request: Request, nome: str = Form(...), whatsapp: str = Form(...),
+def membros_adicionar(request: Request, nome: str = Form(...), whatsapp: str = Form(""),
                       papel: str = Form("membro")):
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
     pool = get_pool()
-    zap = _normalizar_zap(whatsapp)
     ativos, inclusos, pode_extra = _limite_membros(conta)
     if not pode_extra and ativos >= inclusos:
         request.session["erro"] = "Limite de pessoas do plano atingido."
         return RedirectResponse("/painel", status_code=303)
-    with pool.connection() as c:
-        ja = c.execute("select 1 from membros where whatsapp_id=%s", (zap,)).fetchone()
-    if ja:
-        request.session["erro"] = "Esse WhatsApp ja esta cadastrado."
-        return RedirectResponse("/painel", status_code=303)
     papel = papel if papel in ("membro", "restrito") else "membro"
-    ct.adicionar_membro(pool, conta[0], nome=nome.strip(), papel=papel, whatsapp_id=zap)
-    request.session["aviso"] = f"{nome.strip()} adicionado(a)! Ja pode falar com o assistente."
+    nome = nome.strip()
+
+    zap = _normalizar_zap(whatsapp) if whatsapp.strip() else None
+    if zap:
+        with pool.connection() as c:
+            ja = c.execute("select 1 from membros where whatsapp_id=%s", (zap,)).fetchone()
+        if ja:
+            request.session["erro"] = "Esse WhatsApp ja esta cadastrado."
+            return RedirectResponse("/painel", status_code=303)
+
+    # cria UM membro com codigo de convite (e whatsapp, se informado)
+    codigo = ct.criar_convite(pool, conta[0], nome=nome, papel=papel, whatsapp_id=zap)
+    request.session["aviso"] = (
+        f"{nome} adicionado(a)! Código de convite do Telegram: {codigo} — "
+        f"peça pra essa pessoa abrir o bot ClawIAOpen e enviar esse código."
+        + (" (ou já pode usar pelo WhatsApp cadastrado)" if zap else ""))
     return RedirectResponse("/painel", status_code=303)
 
 

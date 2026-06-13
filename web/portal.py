@@ -142,6 +142,20 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
 .barra{height:8px;background:#0e0e0f;border-radius:4px;overflow:hidden}
 .barra-fill{height:8px;background:#1d9e75;border-radius:4px}
 .chip{border:1px solid #2a2a2b;padding:.25rem .6rem;border-radius:999px;font-size:.8rem;color:#ccc}
+.membros{display:flex;flex-direction:column;gap:6px;margin-top:.6rem}
+.membro-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:.7rem .8rem;background:#0e0e0f;border:1px solid #2a2a2b;border-radius:10px}
+.membro-id{display:flex;align-items:center;gap:10px;flex:1 1 180px;min-width:0}
+.avatar{width:34px;height:34px;border-radius:50%;background:#1d3a30;color:#5dcaa5;display:flex;align-items:center;justify-content:center;font-weight:600;flex-shrink:0}
+.membro-nome{font-size:.95rem}
+.membro-papel{font-size:.78rem;color:#a8a8a3}
+.membro-contato{flex:1 1 200px;font-size:.84rem;color:#c5c5c0;min-width:0}
+.membro-contato .conv code{background:#161617;border:1px solid #2a2a2b;border-radius:6px;padding:.1rem .4rem;font-size:.82rem;color:#5dcaa5}
+.membro-acoes{display:flex;gap:6px;flex:0 0 auto}
+.membro-acoes form{margin:0}
+.membro-acoes button{margin:0;padding:.35rem .7rem;font-size:.78rem;width:auto}
+.btn-conv{background:#1d6e9e}.btn-conv:hover{background:#2480b5}
+.btn-off{background:#6e2b2b}.btn-off:hover{background:#8a3636}
+.btn-on{background:#1d9e75}
 .abas{display:inline-flex;gap:4px;background:#0e0e0f;padding:3px;border-radius:8px;margin:.3rem 0 .6rem}
 .aba{width:auto;margin:0;padding:.4rem .9rem;border-radius:6px;background:transparent;color:#a8a8a3;font-size:.85rem}
 .aba:hover{background:#1a1a1b}
@@ -198,29 +212,37 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
 {% if conta[6] %} · válido até <b>{{ conta[6].strftime('%d/%m/%Y') }}</b>{% endif %}
  · tipo: <b>{{ conta[1]|upper }}</b></p>
 <h1 style="font-size:1.05rem;margin-top:1.4rem">Pessoas da conta</h1>
-<table><tr><th>Nome</th><th>Papel</th><th>Contato</th><th>Status</th><th></th></tr>
-{% for m in membros %}<tr><td>{{ m[0] or '-' }}</td><td>{{ m[1] }}</td>
-<td>{% if m[5] %}<span class="tag">convite: {{ m[5] }}</span>{% else %}{{ m[2] or '-' }}{% endif %}</td>
-<td>{{ 'ativo' if m[3] else 'desativado' }}</td>
-<td style="white-space:nowrap">
+<div class="membros">
+{% for m in membros %}
+<div class="membro-row">
+<div class="membro-id">
+<div class="avatar">{{ (m[0] or '?')[0]|upper }}</div>
+<div><div class="membro-nome">{{ m[0] or '-' }}</div>
+<div class="membro-papel"><span class="tag">{{ m[1] }}</span> {{ '' if m[3] else '· desativado' }}</div></div>
+</div>
+<div class="membro-contato">
+{% if m[2] %}<div class="zap">📱 {{ m[2] }}</div>{% endif %}
+{% if m[5] %}<div class="conv">🔑 <code>{{ m[5] }}</code> <span class="mut">(Telegram)</span></div>{% endif %}
+{% if not m[2] and not m[5] %}<span class="mut">sem contato vinculado</span>{% endif %}
+</div>
 {% if m[1] != 'dono' %}
-<form method="post" action="/membros/convite" style="display:inline;margin:0">
-<input type="hidden" name="membro_id" value="{{ m[4] }}">
-<button style="margin:0;padding:.3rem .6rem;background:#1d6e9e;font-size:.78rem">gerar convite</button></form>
+<div class="membro-acoes">
+<form method="post" action="/membros/convite"><input type="hidden" name="membro_id" value="{{ m[4] }}">
+<button class="btn-conv">↻ convite</button></form>
 {% if m[3] %}
-<form method="post" action="/membros/desativar" style="display:inline;margin:0">
-<input type="hidden" name="membro_id" value="{{ m[4] }}">
-<button style="margin:0;padding:.3rem .6rem;background:#6e2b2b;font-size:.78rem">desativar</button></form>
+<form method="post" action="/membros/desativar"><input type="hidden" name="membro_id" value="{{ m[4] }}">
+<button class="btn-off">desativar</button></form>
 {% else %}
-<form method="post" action="/membros/reativar" style="display:inline;margin:0">
-<input type="hidden" name="membro_id" value="{{ m[4] }}">
-<button style="margin:0;padding:.3rem .6rem;background:#1d9e75;font-size:.78rem">reativar</button></form>
+<form method="post" action="/membros/reativar"><input type="hidden" name="membro_id" value="{{ m[4] }}">
+<button class="btn-on">reativar</button></form>
 {% endif %}
-{% endif %}
-</td></tr>{% endfor %}
-</table>
-<p class="mut" style="margin-top:1.2rem">Seu assistente já responde no WhatsApp cadastrado.
-Mande "oi" pra ele!</p>
+</div>
+{% else %}<div class="membro-acoes mut" style="align-self:center">titular</div>{% endif %}
+</div>
+{% endfor %}
+</div>
+<p class="mut" style="margin-top:1rem">O código 🔑 serve pro Telegram (a pessoa envia no bot ClawIAOpen).
+Quem tem WhatsApp 📱 cadastrado também já usa por lá.</p>
 </div>
 <div class="card larga"><h1 style="font-size:1.05rem">Adicionar pessoa</h1>
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}

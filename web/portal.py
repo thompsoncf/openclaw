@@ -16,7 +16,7 @@ from datetime import date
 
 from db.conexao import get_pool
 from contas import contas as ct
-from contas.permissoes import pode_financas, pode_lista
+from contas.permissoes import pode_financas
 from finance.livro_caixa import LivroCaixa
 from finance.lista_compras import ListaCompras
 
@@ -49,6 +49,13 @@ def _normalizar_zap(numero: str) -> str:
     if len(d) == 12:                      # sem o nono digito -> insere
         d = d[:4] + "9" + d[4:]
     return "+" + d
+
+
+def _papel_logado(request: Request, conta_id: int) -> str:
+    """Papel do operador logado no portal. O login do portal e' por conta
+    (titular = dono), entao por padrao 'dono'. Centraliza o gate de permissoes
+    e ja' deixa pronto um futuro login por membro."""
+    return request.session.get("papel", "dono")
 
 
 def conta_logada(request: Request):
@@ -209,6 +216,11 @@ Mande "oi" pra ele!</p>
 <form method="post" action="/membros/adicionar">
 <label>Nome</label><input name="nome" required maxlength="80">
 <label>WhatsApp (com DDD)</label><input name="whatsapp" required maxlength="20" placeholder="86 98888-7777">
+<label>Tipo de acesso</label>
+<select name="papel">
+<option value="membro">Membro — vê finanças e usa a lista de compras</option>
+<option value="restrito">Restrito — só a lista de compras (ex: empregada)</option>
+</select>
 <button>Adicionar à conta</button></form>
 {% if extra_pago %}<p class="mut">Seu plano inclui {{ inclusos }} pessoas; acima disso, cada assento extra é cobrado.</p>{% endif %}
 {% else %}
@@ -487,8 +499,8 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
-    if not pode_financas(conta[1]):
-        return RedirectResponse("/painel", status_code=303)
+    if not pode_financas(_papel_logado(request, conta[0])):
+        return RedirectResponse("/painel/compras", status_code=303)
     pool = get_pool()
     hoje = date.today()
     try:
@@ -623,7 +635,8 @@ def compras_limpar(request: Request):
 
 
 @router.post("/membros/adicionar")
-def membros_adicionar(request: Request, nome: str = Form(...), whatsapp: str = Form(...)):
+def membros_adicionar(request: Request, nome: str = Form(...), whatsapp: str = Form(...),
+                      papel: str = Form("membro")):
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
@@ -638,7 +651,8 @@ def membros_adicionar(request: Request, nome: str = Form(...), whatsapp: str = F
     if ja:
         request.session["erro"] = "Esse WhatsApp ja esta cadastrado."
         return RedirectResponse("/painel", status_code=303)
-    ct.adicionar_membro(pool, conta[0], nome=nome.strip(), papel="membro", whatsapp_id=zap)
+    papel = papel if papel in ("membro", "restrito") else "membro"
+    ct.adicionar_membro(pool, conta[0], nome=nome.strip(), papel=papel, whatsapp_id=zap)
     request.session["aviso"] = f"{nome.strip()} adicionado(a)! Ja pode falar com o assistente."
     return RedirectResponse("/painel", status_code=303)
 

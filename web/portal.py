@@ -16,6 +16,7 @@ from datetime import date
 
 from db.conexao import get_pool
 from contas import contas as ct
+from contas.permissoes import pode_financas, pode_lista
 from finance.livro_caixa import LivroCaixa
 from finance.lista_compras import ListaCompras
 
@@ -486,6 +487,8 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
+    if not pode_financas(conta[1]):
+        return RedirectResponse("/painel", status_code=303)
     pool = get_pool()
     hoje = date.today()
     try:

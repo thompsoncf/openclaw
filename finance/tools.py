@@ -24,7 +24,8 @@ def _parse_data(s: str | None) -> date:
     return date.today()
 
 
-def construir_ferramentas(livro: LivroCaixa, lista=None) -> list[Ferramenta]:
+def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono") -> list[Ferramenta]:
+    from contas.permissoes import pode_financas, pode_lista
     def lancar(tipo: Tipo, entrada: dict) -> str:
         lanc = Lancamento.criar(
             tipo=tipo,
@@ -183,7 +184,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None) -> list[Ferramenta]:
                 return f"Marquei '{i['descricao']}' como comprado. ✅"
         return f"Nao achei '{termo}' entre os itens pendentes da lista."
 
-    return [
+    return (([
         Ferramenta(
             nome="lancar_despesa",
             descricao="Registra uma despesa (saida de dinheiro) no livro-caixa.",
@@ -292,7 +293,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None) -> list[Ferramenta]:
             },
             executar=listar_itens,
         ),
-    ] + ([
+    ] if pode_financas(papel) else []) + ([
         Ferramenta(
             nome="adicionar_lista_compras",
             descricao=("Adiciona um ou mais itens a' LISTA DE COMPRAS (o que ainda PRECISA "
@@ -328,4 +329,4 @@ def construir_ferramentas(livro: LivroCaixa, lista=None) -> list[Ferramenta]:
             },
             executar=marcar_lista,
         ),
-    ] if lista is not None else [])
+    ] if (lista is not None and pode_lista(papel)) else []))

@@ -59,7 +59,7 @@ def _setup():
 def _agente_do(membro, conta):
     memoria = MemoriaPersistente(_pool, f"wa:{membro.id}")
     lista = ListaCompras(_pool, conta.id, membro.id)
-    return criar_agente_financeiro(_brain, LivroCaixa(_pool, conta.id, membro.id), memoria, lista)
+    return criar_agente_financeiro(_brain, LivroCaixa(_pool, conta.id, membro.id), memoria, lista, membro.papel)
 
 
 def _responder_whatsapp(to: str, texto: str):

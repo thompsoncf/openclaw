@@ -177,6 +177,42 @@ def adicionar_membro(pool, conta_id: int, nome: str | None = None,
     return int(row[0])
 
 
+def gerar_convite_para(pool, membro_id: int, conta_id: int) -> str | None:
+    """(Re)gera um codigo de convite pra um membro EXISTENTE desta conta.
+    Zera o telegram_id (vai ser revinculado ao resgatar). Retorna o codigo,
+    ou None se o membro nao for desta conta ou for o dono.
+    """
+    import secrets
+    with pool.connection() as conn:
+        m = conn.execute(
+            "select papel, (select nome from contas where id=%s) from membros where id=%s and conta_id=%s",
+            (conta_id, membro_id, conta_id),
+        ).fetchone()
+        if not m or m[0] == "dono":
+            return None
+        pref = "".join(ch for ch in (m[1] or "OPEN") if ch.isalnum())[:3].upper() or "OPC"
+        codigo = f"{pref}-{secrets.token_hex(2).upper()}"
+        conn.execute(
+            "update membros set codigo_convite=%s, telegram_id=null, ativo=true where id=%s and conta_id=%s",
+            (codigo, membro_id, conta_id),
+        )
+        conn.commit()
+    registrar_evento(pool, conta_id, "convite_regerado", f"cod={codigo}", membro_id=membro_id)
+    return codigo
+
+
+def reativar_membro(pool, membro_id: int, conta_id: int) -> bool:
+    with pool.connection() as conn:
+        r = conn.execute(
+            "update membros set ativo=true where id=%s and conta_id=%s and papel <> 'dono'",
+            (membro_id, conta_id),
+        )
+        conn.commit()
+        if r.rowcount:
+            registrar_evento(pool, conta_id, "membro_reativado", "", membro_id=membro_id)
+        return r.rowcount > 0
+
+
 def desativar_membro(pool, membro_id: int):
     """Funcionario saiu? Desativa (NUNCA apaga: o historico dele fica integro)."""
     with pool.connection() as conn:

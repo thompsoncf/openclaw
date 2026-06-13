@@ -198,13 +198,26 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
 {% if conta[6] %} · válido até <b>{{ conta[6].strftime('%d/%m/%Y') }}</b>{% endif %}
  · tipo: <b>{{ conta[1]|upper }}</b></p>
 <h1 style="font-size:1.05rem;margin-top:1.4rem">Pessoas da conta</h1>
-<table><tr><th>Nome</th><th>Papel</th><th>WhatsApp</th><th>Status</th><th></th></tr>
+<table><tr><th>Nome</th><th>Papel</th><th>Contato</th><th>Status</th><th></th></tr>
 {% for m in membros %}<tr><td>{{ m[0] or '-' }}</td><td>{{ m[1] }}</td>
-<td>{{ m[2] or '-' }}</td><td>{{ 'ativo' if m[3] else 'desativado' }}</td>
-<td>{% if m[1] != 'dono' and m[3] %}<form method="post" action="/membros/desativar" style="margin:0">
+<td>{% if m[5] %}<span class="tag">convite: {{ m[5] }}</span>{% else %}{{ m[2] or '-' }}{% endif %}</td>
+<td>{{ 'ativo' if m[3] else 'desativado' }}</td>
+<td style="white-space:nowrap">
+{% if m[1] != 'dono' %}
+<form method="post" action="/membros/convite" style="display:inline;margin:0">
 <input type="hidden" name="membro_id" value="{{ m[4] }}">
-<button style="margin:0;padding:.3rem .7rem;background:#6e2b2b;font-size:.8rem">desativar</button>
-</form>{% endif %}</td></tr>{% endfor %}
+<button style="margin:0;padding:.3rem .6rem;background:#1d6e9e;font-size:.78rem">gerar convite</button></form>
+{% if m[3] %}
+<form method="post" action="/membros/desativar" style="display:inline;margin:0">
+<input type="hidden" name="membro_id" value="{{ m[4] }}">
+<button style="margin:0;padding:.3rem .6rem;background:#6e2b2b;font-size:.78rem">desativar</button></form>
+{% else %}
+<form method="post" action="/membros/reativar" style="display:inline;margin:0">
+<input type="hidden" name="membro_id" value="{{ m[4] }}">
+<button style="margin:0;padding:.3rem .6rem;background:#1d9e75;font-size:.78rem">reativar</button></form>
+{% endif %}
+{% endif %}
+</td></tr>{% endfor %}
 </table>
 <p class="mut" style="margin-top:1.2rem">Seu assistente já responde no WhatsApp cadastrado.
 Mande "oi" pra ele!</p>
@@ -484,7 +497,7 @@ def painel(request: Request):
     pool = get_pool()
     with pool.connection() as c:
         membros = c.execute(
-            "select nome, papel, whatsapp_id, ativo, id from membros where conta_id=%s order by id",
+            "select nome, papel, whatsapp_id, ativo, id, codigo_convite from membros where conta_id=%s order by id",
             (conta[0],),
         ).fetchall()
     ativos, inclusos, pode_extra = _limite_membros(conta)
@@ -664,6 +677,33 @@ def membros_adicionar(request: Request, nome: str = Form(...), whatsapp: str = F
         f"{nome} adicionado(a)! Código de convite do Telegram: {codigo} — "
         f"peça pra essa pessoa abrir o bot ClawIAOpen e enviar esse código."
         + (" (ou já pode usar pelo WhatsApp cadastrado)" if zap else ""))
+    return RedirectResponse("/painel", status_code=303)
+
+
+@router.post("/membros/convite")
+def membros_convite(request: Request, membro_id: int = Form(...)):
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    codigo = ct.gerar_convite_para(get_pool(), membro_id, conta[0])
+    if codigo:
+        request.session["aviso"] = (
+            f"Código de convite gerado: {codigo} — peça pra pessoa abrir o bot "
+            f"ClawIAOpen no Telegram e enviar esse código.")
+    else:
+        request.session["erro"] = "Não foi possível gerar o convite para essa pessoa."
+    return RedirectResponse("/painel", status_code=303)
+
+
+@router.post("/membros/reativar")
+def membros_reativar(request: Request, membro_id: int = Form(...)):
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    if ct.reativar_membro(get_pool(), membro_id, conta[0]):
+        request.session["aviso"] = "Pessoa reativada."
+    else:
+        request.session["erro"] = "Não foi possível reativar."
     return RedirectResponse("/painel", status_code=303)
 
 

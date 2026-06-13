@@ -17,6 +17,7 @@ from datetime import date
 from db.conexao import get_pool
 from contas import contas as ct
 from finance.livro_caixa import LivroCaixa
+from finance.lista_compras import ListaCompras
 
 router = APIRouter()
 
@@ -151,7 +152,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
 .subdia.aberto .subdia-corpo{display:flex}
 </style></head><body>
 <div class="topo"><span class="logo">OpenClaw</span><span>
-{% if logado %}<a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/sair">Sair</a>
+{% if logado %}<a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/painel/compras">Compras</a><a href="/sair">Sair</a>
 {% else %}<a href="/login">Entrar</a><a href="/cadastro">Criar conta</a>{% endif %}
 </span></div>
 {% block conteudo %}{% endblock %}
@@ -338,8 +339,56 @@ function abrirDep(cab){
 </script>
 {% endblock %}"""
 
+_COMPRAS = """{% extends "base" %}{% block conteudo %}
+<div class="card larga">
+<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.5rem">
+<h1 style="margin:0">Lista de compras</h1>
+{% if itens %}<form method="post" action="/painel/compras/limpar" style="margin:0"
+ onsubmit="return confirm('Remover os itens já comprados da lista?')">
+<button style="margin:0;padding:.4rem .8rem;background:#2a2a2b;font-size:.82rem">Limpar comprados</button></form>{% endif %}
+</div>
+
+<form method="post" action="/painel/compras/add" style="display:flex; gap:.5rem; margin:1rem 0">
+<input name="descricao" placeholder="Adicionar item (ex: arroz, café...)" required maxlength="80" style="flex:1">
+<button style="margin:0; width:auto; padding:.65rem 1.2rem">Adicionar</button>
+</form>
+
+{% if resumo.estimado_centavos %}
+<p class="mut">Estimativa dos pendentes: <b style="color:#5dcaa5">{{ brl(resumo.estimado_centavos) }}</b>
+<span style="font-size:.78rem">(baseada no histórico de preços)</span></p>
+{% endif %}
+
+{% if itens %}
+<table style="margin-top:.5rem">
+{% for i in itens %}
+<tr style="{{ 'opacity:.5' if i.comprado else '' }}">
+<td style="width:40px">
+<form method="post" action="/painel/compras/marcar" style="margin:0">
+<input type="hidden" name="item_id" value="{{ i.id }}">
+<input type="hidden" name="comprado" value="{{ 0 if i.comprado else 1 }}">
+<button title="marcar" style="margin:0;padding:.25rem .55rem;background:{{ '#1d9e75' if i.comprado else '#2a2a2b' }};font-size:.9rem">✓</button>
+</form></td>
+<td style="{{ 'text-decoration:line-through' if i.comprado else '' }}">{{ i.descricao }}
+{% if i.quantidade and i.quantidade != 1 %}<span class="mut">({{ '%g'|format(i.quantidade) }}{{ i.unidade or '' }})</span>{% endif %}
+{% if i.preco_estimado_centavos %}<span class="mut"> · ~{{ brl(i.preco_estimado_centavos) }}</span>{% endif %}</td>
+<td class="mut" style="font-size:.8rem">{{ i.quem }}</td>
+<td style="width:40px; text-align:right">
+<form method="post" action="/painel/compras/remover" style="margin:0">
+<input type="hidden" name="item_id" value="{{ i.id }}">
+<button title="remover" style="margin:0;padding:.25rem .5rem;background:transparent;color:#8a3636;font-size:.95rem">✕</button>
+</form></td></tr>
+{% endfor %}
+</table>
+<p class="mut" style="margin-top:1rem">{{ resumo.pendentes }} pendente(s)
+{% if resumo.comprados %}· {{ resumo.comprados }} comprado(s){% endif %}</p>
+{% else %}
+<p class="mut">A lista está vazia. Adicione itens acima — ou peça pelo WhatsApp/Telegram:
+<i>"acabou o arroz, bota na lista"</i>.</p>
+{% endif %}
+</div>{% endblock %}"""
+
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 
@@ -494,6 +543,80 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
                    resumo=resumo, categorias=categorias, maior_cat=maior_cat,
                    lancamentos=lancamentos, dias=dias, raiox=raiox, pessoas=pessoas,
                    meses=meses, mes_sel=mes_sel, membro_sel=membro_sel, tipo_sel=tipo)
+
+
+# ---------- lista de compras ----------
+
+def _lista_logada(request: Request):
+    conta = conta_logada(request)
+    if conta is None:
+        return None, None
+    pool = get_pool()
+    with pool.connection() as c:
+        m = c.execute("select id from membros where conta_id=%s order by id limit 1",
+                      (conta[0],)).fetchone()
+    membro_id = m[0] if m else None
+    return conta, ListaCompras(pool, conta[0], membro_id)
+
+
+@router.get("/painel/compras", response_class=HTMLResponse)
+def compras(request: Request):
+    conta, lista = _lista_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    livro = LivroCaixa(get_pool(), conta[0])
+    def _estimador(desc):
+        try:
+            itens_achados, _total = livro.buscar_itens(desc, dias=180)
+            precos = [it["valor_total_centavos"] for it in itens_achados
+                      if it.get("valor_total_centavos")]
+            if precos:
+                return int(sum(precos) / len(precos)), "historico"
+        except Exception:  # noqa: BLE001
+            pass
+        return None, None
+    try:
+        lista.estimar_precos(_estimador)
+    except Exception:  # noqa: BLE001
+        pass
+    itens = lista.listar(incluir_comprados=True)
+    return _render("compras", request, titulo="Compras", itens=itens, resumo=lista.resumo())
+
+
+@router.post("/painel/compras/add")
+def compras_add(request: Request, descricao: str = Form(...)):
+    conta, lista = _lista_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    lista.adicionar(descricao.strip())
+    return RedirectResponse("/painel/compras", status_code=303)
+
+
+@router.post("/painel/compras/marcar")
+def compras_marcar(request: Request, item_id: int = Form(...), comprado: int = Form(1)):
+    conta, lista = _lista_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    lista.marcar_comprado(item_id, bool(comprado))
+    return RedirectResponse("/painel/compras", status_code=303)
+
+
+@router.post("/painel/compras/remover")
+def compras_remover(request: Request, item_id: int = Form(...)):
+    conta, lista = _lista_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    lista.remover(item_id)
+    return RedirectResponse("/painel/compras", status_code=303)
+
+
+@router.post("/painel/compras/limpar")
+def compras_limpar(request: Request):
+    conta, lista = _lista_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    lista.limpar_comprados()
+    return RedirectResponse("/painel/compras", status_code=303)
 
 
 @router.post("/membros/adicionar")

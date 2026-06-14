@@ -214,6 +214,48 @@ class LivroCaixa:
             ).fetchone()
         return int(row[0]) if row else None
 
+    def buscar_preco_observado(self, descricao: str, cidade: str | None = None,
+                               dias: int = 90) -> tuple[int | None, str | None]:
+        """Busca o melhor preco de um produto no BANCO DE PRECOS (multiplas fontes:
+        cupom, api sefaz, etc). Prioriza: mesma cidade > mais recente. Retorna
+        (centavos, fonte_texto) ou (None, None). Funciona pra qualquer conta -
+        o banco de precos e' COLETIVO (o ouro), nao isolado por tenant."""
+        from .models import normalizar_descricao
+        from datetime import timedelta
+        norm = normalizar_descricao(descricao)
+        if not norm:
+            return (None, None)
+        corte = date.today() - timedelta(days=dias)
+        with self.pool.connection() as conn:
+            # 1) tenta na mesma cidade (regiao comeca com a cidade)
+            row = None
+            if cidade:
+                row = conn.execute(
+                    """select valor_unitario_centavos, mercado, fonte, data_compra
+                       from precos_observados
+                       where descricao_norm = %s and data_compra >= %s
+                         and regiao ilike %s
+                       order by data_compra desc limit 1""",
+                    (norm, corte, f"{cidade}%"),
+                ).fetchone()
+            # 2) fallback: qualquer lugar, mais recente
+            if not row:
+                row = conn.execute(
+                    """select valor_unitario_centavos, mercado, fonte, data_compra
+                       from precos_observados
+                       where descricao_norm = %s and data_compra >= %s
+                       order by data_compra desc limit 1""",
+                    (norm, corte),
+                ).fetchone()
+            if not row:
+                return (None, None)
+            centavos, mercado, fonte, data = row
+            # monta texto da fonte pro cliente: "Carvalho, 11/06" ou "SEFAZ-PI"
+            origem = "SEFAZ" if (fonte or "").startswith("api") else (mercado or "outro cliente")
+            quando = data.strftime("%d/%m") if data else ""
+            texto = f"{origem}, {quando}".strip(", ")
+            return (int(centavos), texto)
+
     def registrar_itens(self, lancamento_id: int, itens: list[dict]) -> int:
         """Salva os itens de um cupom, ligados a um lancamento do PROPRIO usuario.
 
@@ -236,8 +278,10 @@ class LivroCaixa:
             ]
             LOTE = 100
             n = 0
+            ids_itens = []
             for i in range(0, len(params), LOTE):
-                conn.cursor().executemany(
+                cur = conn.cursor()
+                cur.executemany(
                     """insert into itens_lancamento
                        (lancamento_id, descricao, quantidade,
                         valor_unitario_centavos, valor_total_centavos)
@@ -246,7 +290,57 @@ class LivroCaixa:
                 )
                 n += len(params[i:i + LOTE])
             conn.commit()
+            # alimenta o BANCO DE PRECOS (ouro): cada item com valor unitario
+            # vira um preco observado, agrupado por cidade+mercado.
+            try:
+                self._observar_precos(conn, lancamento_id)
+            except Exception:  # noqa: BLE001
+                pass            # coleta de preco nunca quebra o registro do cupom
             return n
+
+    def _observar_precos(self, conn, lancamento_id: int) -> int:
+        """Grava os itens do cupom no banco coletivo de precos (precos_observados),
+        pra alimentar comparacoes futuras. Agrupado por cidade (da conta) + mercado
+        (descricao do lancamento). Le os itens JA' salvos (com seus ids), entao o
+        indice unico idx_precos_item protege contra duplicacao. Tolerante."""
+        from .models import normalizar_descricao
+        info = conn.execute(
+            """select l.descricao, l.data, c.cidade
+               from lancamentos l join contas c on c.id = l.conta_id
+               where l.id = %s""",
+            (lancamento_id,),
+        ).fetchone()
+        if not info:
+            return 0
+        mercado, data_compra, cidade = info[0] or None, info[1], info[2] or None
+        regiao = " / ".join(p for p in (cidade, mercado) if p) or None
+        # le os itens recem-salvos desse lancamento (com id e valor unitario)
+        itens = conn.execute(
+            """select id, descricao, valor_unitario_centavos
+               from itens_lancamento where lancamento_id = %s""",
+            (lancamento_id,),
+        ).fetchall()
+        params = []
+        for item_id, desc, vu in itens:
+            vu = int(vu or 0)
+            desc = (desc or "").strip()
+            if vu <= 0 or not desc:
+                continue
+            params.append((normalizar_descricao(desc), desc, vu, mercado, regiao,
+                           data_compra, self.conta_id, item_id, "cupom"))
+        if not params:
+            return 0
+        cur = conn.cursor()
+        cur.executemany(
+            """insert into precos_observados
+               (descricao_norm, descricao_original, valor_unitario_centavos,
+                mercado, regiao, data_compra, conta_id, item_id, fonte)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               on conflict (item_id) do nothing""",
+            params,
+        )
+        conn.commit()
+        return len(params)
 
     def buscar_itens(self, termo: str, dias: int = 60) -> tuple[list[dict], int]:
         """Busca itens cuja descricao casa com 'termo' (nos ultimos N dias).

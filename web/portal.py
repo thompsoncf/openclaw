@@ -65,7 +65,7 @@ def conta_logada(request: Request):
     pool = get_pool()
     with pool.connection() as c:
         row = c.execute(
-            "select id, tipo, nome, email, plano, status, vencimento from contas where id = %s",
+            "select id, tipo, nome, email, plano, status, vencimento, cidade from contas where id = %s",
             (cid,),
         ).fetchone()
     return row
@@ -878,13 +878,20 @@ async def compras_api(request: Request):
         lista.limpar_comprados()
     elif acao == "apagar_tudo":
         lista.limpar_tudo()
+    # devolve a lista atualizada (com estimativa do BANCO DE PRECOS coletivo)
     livro = LivroCaixa(get_pool(), conta[0])
+    _cidade = conta[7] if len(conta) > 7 else None       # cidade do cadastro
     def _est(desc):
         try:
+            # 1) banco de precos coletivo (cupons de todos + API SEFAZ futura)
+            cent, fonte = livro.buscar_preco_observado(desc, cidade=_cidade)
+            if cent is not None:
+                return cent, fonte
+            # 2) fallback: historico do proprio usuario
             ach, _t = livro.buscar_itens(desc, dias=180)
             ps = [it["valor_total_centavos"] for it in ach if it.get("valor_total_centavos")]
             if ps:
-                return int(sum(ps) / len(ps)), "historico"
+                return int(sum(ps) / len(ps)), "seu histórico"
         except Exception:  # noqa: BLE001
             pass
         return None, None

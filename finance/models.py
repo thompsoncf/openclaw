@@ -8,6 +8,18 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from enum import Enum
+import unicodedata
+
+
+def normalizar_descricao(texto: str) -> str:
+    """Normaliza descricao de produto pra busca: minuscula, sem acento, sem
+    espacos extras. Ex: 'Coca-Cola 2L  ' -> 'coca-cola 2l'. Usada pra casar o
+    mesmo produto entre cupons diferentes no banco de precos."""
+    if not texto:
+        return ""
+    t = unicodedata.normalize("NFKD", texto)
+    t = "".join(c for c in t if not unicodedata.combining(c))
+    return " ".join(t.lower().split())
 
 
 class Tipo(str, Enum):

@@ -35,11 +35,13 @@ def _norm(t: str) -> str:
 #  1704 = balas, caramelos, doces sem cacau   (BALA CAFE, BALA LEITE)
 #  1806 = chocolates / bombons
 #  1702 = acucares especiais, xaropes, glucose (acucar comum e' 1701, fica)
-#  1901/1904/1905 = preparacoes de cereais, paes, biscoitos, bolos (ARROZ DOCE)
-#  1902 = massas alimenticias                  (MASSA PICANHA)
+#  1904 = preparacoes de cereais expandido (ARROZ DOCE, granola, sucrilhos)
+#  1905 = paes, biscoitos, bolos
 #  2106 = preparacoes alimenticias diversas; temperos/caldos
 #  2202 = refrigerantes e bebidas acucaradas
-_NCM_LIXO = {"1704", "1806", "1702", "1901", "1902", "1904", "1905", "2106", "2202"}
+# NAO inclui 1902 (massa) pq macarrao e' item valido - o casamento por 1a
+# palavra ja' barra 'MASSA PICANHA' (massa != picanha).
+_NCM_LIXO = {"1704", "1806", "1702", "1904", "1905", "2106", "2202"}
 
 
 class SefazMenorPreco:
@@ -105,13 +107,17 @@ class SefazMenorPreco:
             # termos nao mapeados como detergente/fralda) - e' blocklist generica.
             if ncm[:4] in _NCM_LIXO:
                 continue
-            # FILTRO 2 - CASAMENTO: a 1a palavra do termo precisa aparecer entre
-            # as palavras significativas do produto (com o NCM ja' limpando o
-            # lixo, isso pode ser generoso sem trazer bala/doce de volta).
+            # FILTRO 2 - CASAMENTO: a 1a palavra significativa do termo precisa
+            # ser a 1a palavra significativa do PRODUTO (o substantivo principal).
+            # 'cafe' casa 'CAFE PILAO' mas NAO 'ZIPER COR CAFE' nem 'BALA DE CAFE'
+            # (nesses, cafe nao e' a 1a palavra). Combinado com o NCM-lixo acima,
+            # mata o lixo de vez sem virar gato-e-rato de nomes.
             palavras_desc = [w for w in _norm(desc).split() if len(w) > 2]
-            if alvo and not any(
-                    pd == alvo[0] or pd.startswith(alvo[0][:4]) or alvo[0].startswith(pd[:4])
-                    for pd in palavras_desc):
+            if alvo and palavras_desc:
+                p1, t1 = palavras_desc[0], alvo[0]
+                if not (p1 == t1 or p1.startswith(t1[:4]) or t1.startswith(p1[:4])):
+                    continue
+            elif alvo and not palavras_desc:
                 continue
             est = p.get("estabelecimento") or {}
             nome_merc = (est.get("nm_fan") or est.get("nm_emp") or "").strip() or "(sem nome)"

@@ -430,6 +430,10 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
   function render(d){
     var itens = d.itens || [];
     pendentesAtuais = itens.filter(function(i){return !i.comprado;}).map(function(i){return i.descricao;});
+    // limpa ajustes orfaos (item removido/comprado nao deve manter ajuste)
+    Object.keys(ajustes).forEach(function(k){
+      if (pendentesAtuais.indexOf(k) === -1) delete ajustes[k];
+    });
     if (!itens.length){
       listaEl.innerHTML = '<p class="mut">A lista está vazia. Adicione itens acima — ou peça pelo WhatsApp/Telegram: <i>"acabou o arroz, bota na lista"</i>.</p>';
       resumoEl.textContent = '';
@@ -464,8 +468,9 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
     var inp = document.getElementById('inp-add');
     var v = inp.value.trim();
     if (!v) return;
-    inp.value = '';
-    ajustes = {};
+    inp.value = '';                 // limpa na hora, sutil
+    // NAO zera os ajustes ja' feitos - so' remove ajuste de item que nao existe
+    // mais (limpeza acontece no render, comparando com pendentesAtuais)
     acao({acao:'add', descricao:v}).then(carregarPrecos);
   };
   btnLimpar.onclick = function(){

@@ -477,9 +477,19 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
       linhas.forEach(function(m, i){
         var falta = m.faltando ? (' · faltam '+m.faltando) : ' · completa';
         var end = m.endereco ? ('<div class="mut" style="font-size:.72rem">'+m.endereco+'</div>') : '';
-        html += '<div style="display:flex;justify-content:space-between;padding:.45rem 0;'+(i<linhas.length-1?'border-bottom:1px solid #1d1d1f':'')+'">';
+        html += '<div style="padding:.45rem 0;'+(i<linhas.length-1?'border-bottom:1px solid #1d1d1f':'')+'">';
+        html += '<div style="display:flex;justify-content:space-between">';
         html += '<div>'+(i+1)+'. <b>'+m.mercado+'</b> <span class="mut" style="font-size:.76rem">· '+m.cobertos+' itens'+falta+'</span>'+end+'</div>';
         html += '<b style="color:#5dcaa5">'+m.total+'</b></div>';
+        if (m.produtos && m.produtos.length){
+          html += '<div style="margin:.3rem 0 0 1.1rem">';
+          m.produtos.forEach(function(pr){
+            html += '<div class="mut" style="font-size:.72rem;display:flex;justify-content:space-between">';
+            html += '<span>'+pr.descricao+'</span><span>'+pr.preco+'</span></div>';
+          });
+          html += '</div>';
+        }
+        html += '</div>';
       });
       html += '</div>';
     });
@@ -806,6 +816,8 @@ def _fmt_comparacao(r: dict) -> dict:
                 "mercado": m["mercado"], "total": brl(m["total_centavos"]),
                 "cobertos": m["itens_cobertos"], "faltando": len(m["itens_faltando"]),
                 "endereco": endereco,
+                "produtos": [{"descricao": pr["descricao"], "preco": brl(pr["valor_centavos"])}
+                             for pr in m.get("produtos", [])],
             })
         if linhas:
             grupos[rotulos.get(tipo, tipo)] = linhas

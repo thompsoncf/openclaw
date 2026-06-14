@@ -134,11 +134,13 @@ class SefazMenorPreco:
                 })
                 for p in precos:
                     m = mercados.setdefault(p["mercado"], {
-                        "soma": 0, "cobertos": 0, "faltando": [],
+                        "soma": 0, "cobertos": 0, "faltando": [], "produtos": [],
                         "tipo": p.get("tipo", "outro"), "bairro": p.get("bairro", ""),
                         "distancia_km": p.get("distancia_km")})
                     m["soma"] += p["valor_centavos"]
                     m["cobertos"] += 1
+                    m["produtos"].append({"descricao": p["descricao"],
+                                          "valor_centavos": p["valor_centavos"]})
             else:
                 detalhe_itens.append({"descricao": desc, "melhor_mercado": None,
                                       "melhor_centavos": None, "precos": []})
@@ -149,7 +151,8 @@ class SefazMenorPreco:
             m["faltando"] = [n for n in nomes if n not in tem]
         ranking = [{"mercado": k, "total_centavos": v["soma"],
                     "itens_cobertos": v["cobertos"], "itens_faltando": v["faltando"],
-                    "tipo": v["tipo"], "bairro": v["bairro"], "distancia_km": v["distancia_km"]}
+                    "tipo": v["tipo"], "bairro": v["bairro"], "distancia_km": v["distancia_km"],
+                    "produtos": v["produtos"]}
                    for k, v in mercados.items()]
         ranking.sort(key=lambda x: (-x["itens_cobertos"], x["total_centavos"]))
         return {"mercados": ranking, "itens": detalhe_itens, "observacoes": total_obs}

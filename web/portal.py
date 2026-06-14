@@ -395,7 +395,7 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.5rem">
 <h1 style="margin:0">Lista de compras</h1>
-<button id="btn-limpar" style="margin:0;padding:.4rem .8rem;background:#2a2a2b;font-size:.82rem;width:auto;display:none">Limpar comprados</button>
+<button id="btn-apagar" style="margin:0;padding:.4rem .8rem;background:#2a2a2b;font-size:.82rem;width:auto;display:none;color:#d98a8a">Apagar lista</button>
 </div>
 
 <form id="form-add" style="display:flex; gap:.5rem; margin:1rem 0">
@@ -414,7 +414,7 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
   var listaEl = document.getElementById('lista-itens');
   var resumoEl = document.getElementById('resumo-lista');
   var compEl = document.getElementById('comparador');
-  var btnLimpar = document.getElementById('btn-limpar');
+  var btnApagar = document.getElementById('btn-apagar');
   var ajustes = {};
   var pendentesAtuais = [];
 
@@ -437,7 +437,7 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
     if (!itens.length){
       listaEl.innerHTML = '<p class="mut">A lista está vazia. Adicione itens acima — ou peça pelo WhatsApp/Telegram: <i>"acabou o arroz, bota na lista"</i>.</p>';
       resumoEl.textContent = '';
-      btnLimpar.style.display = 'none';
+      btnApagar.style.display = 'none';
       compEl.innerHTML = '';
       return;
     }
@@ -453,8 +453,8 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
     });
     html += '</table>';
     listaEl.innerHTML = html;
-    resumoEl.textContent = d.pendentes + ' pendente(s)' + (d.comprados ? ' · '+d.comprados+' comprado(s)' : '');
-    btnLimpar.style.display = d.comprados ? '' : 'none';
+    resumoEl.textContent = d.pendentes + ' item(ns) na lista';
+    btnApagar.style.display = d.pendentes ? '' : 'none';
     Array.prototype.forEach.call(listaEl.querySelectorAll('.mk'), function(b){
       b.onclick = function(){ acao({acao:'marcar', item_id:+b.getAttribute('data-id'), comprado:+b.getAttribute('data-c')}).then(carregarPrecos); };
     });
@@ -473,8 +473,9 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
     // mais (limpeza acontece no render, comparando com pendentesAtuais)
     acao({acao:'add', descricao:v}).then(carregarPrecos);
   };
-  btnLimpar.onclick = function(){
-    acao({acao:'limpar'}).then(carregarPrecos);
+  btnApagar.onclick = function(){
+    if (!confirm('Apagar a lista inteira? Essa acao nao pode ser desfeita.')) return;
+    acao({acao:'apagar_tudo'}).then(carregarPrecos);
   };
 
   var prog = null;
@@ -871,6 +872,8 @@ async def compras_api(request: Request):
         lista.remover(int(dados["item_id"]))
     elif acao == "limpar":
         lista.limpar_comprados()
+    elif acao == "apagar_tudo":
+        lista.limpar_tudo()
     livro = LivroCaixa(get_pool(), conta[0])
     def _est(desc):
         try:
@@ -885,7 +888,7 @@ async def compras_api(request: Request):
         lista.estimar_precos(_est)
     except Exception:  # noqa: BLE001
         pass
-    itens = lista.listar(incluir_comprados=True)
+    itens = lista.listar(incluir_comprados=False)
     resumo = lista.resumo()
     return JSONResponse({
         "itens": [{"id": i["id"], "descricao": i["descricao"], "comprado": i["comprado"],

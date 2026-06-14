@@ -77,6 +77,16 @@ class ListaCompras:
             c.commit()
             return r.rowcount
 
+    def limpar_tudo(self) -> int:
+        """Apaga a lista INTEIRA (pendentes e comprados). Usar com confirmacao."""
+        with self.pool.connection() as c:
+            r = c.execute(
+                "delete from lista_compras where conta_id = %s",
+                (self.conta_id,),
+            )
+            c.commit()
+            return r.rowcount
+
     def listar(self, incluir_comprados: bool = True) -> list[dict]:
         sql = """select l.id, l.descricao, l.quantidade, l.unidade, l.comprado,
                         l.preco_estimado_centavos, l.fonte_preco,

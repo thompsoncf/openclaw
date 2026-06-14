@@ -18,13 +18,27 @@ def extrair_chave(texto: str) -> str | None:
     return None
 
 
+def _detectores():
+    """Monta os detectores de QR disponiveis. O WeChat detector e' muito
+    superior pra QR degradado (foto comprimida de WhatsApp/Telegram)."""
+    import cv2
+    dets = []
+    try:
+        dets.append(("wechat", cv2.wechat_qrcode.WeChatQRCode()))
+    except Exception:  # noqa: BLE001
+        pass
+    dets.append(("padrao", cv2.QRCodeDetector()))
+    return dets
+
+
 def ler_chave_da_imagem(imagem_bytes: bytes) -> str | None:
     """Le o QR code de uma imagem (bytes) e devolve a chave de 44 digitos.
     None se nao houver QR legivel ou nao for uma NFC-e. Tolerante a falha.
 
-    Foto de cupom costuma ter o QR pequeno numa imagem grande, o que engana o
-    detector. Por isso tentamos varias estrategias: imagem inteira, ampliada, e
-    recortes da regiao central ampliados (onde o QR costuma estar no DANFE)."""
+    Foto de cupom (WhatsApp/Telegram) chega COMPRIMIDA, com o QR pequeno e
+    degradado. Pra maximizar a leitura combinamos: detector WeChat (otimo pra
+    QR ruim) + detector padrao; na imagem inteira, ampliada, e em recortes da
+    regiao central ampliados em varias escalas."""
     try:
         import cv2
         import numpy as np
@@ -37,46 +51,53 @@ def ler_chave_da_imagem(imagem_bytes: bytes) -> str | None:
     except Exception:  # noqa: BLE001
         return None
 
-    det = cv2.QRCodeDetector()
+    dets = _detectores()
 
-    def _tenta(img) -> str | None:
-        try:
-            data, _pts, _ = det.detectAndDecode(img)
-            if data:
-                return extrair_chave(data)
-            ok, datas, _p, _s = det.detectAndDecodeMulti(img)
-            if ok and datas:
-                for d in datas:
-                    ch = extrair_chave(d)
-                    if ch:
-                        return ch
-        except Exception:  # noqa: BLE001
-            pass
+    def _le(img) -> str | None:
+        for nome, det in dets:
+            try:
+                if nome == "wechat":
+                    res, _pts = det.detectAndDecode(img)
+                    for d in (res or []):
+                        ch = extrair_chave(d)
+                        if ch:
+                            return ch
+                else:
+                    data, _pts, _ = det.detectAndDecode(img)
+                    if data:
+                        ch = extrair_chave(data)
+                        if ch:
+                            return ch
+                    ok, datas, _p, _s = det.detectAndDecodeMulti(img)
+                    if ok and datas:
+                        for d in datas:
+                            ch = extrair_chave(d)
+                            if ch:
+                                return ch
+            except Exception:  # noqa: BLE001
+                continue
         return None
 
-    ch = _tenta(arr)
-    if ch:
+    if (ch := _le(arr)):
         return ch
     try:
-        ch = _tenta(cv2.resize(arr, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC))
-        if ch:
+        if (ch := _le(cv2.resize(arr, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC))):
             return ch
     except Exception:  # noqa: BLE001
         pass
     try:
         h, w = arr.shape[:2]
         cortes = [
-            arr[int(h * 0.45):int(h * 0.78), int(w * 0.20):int(w * 0.80)],
+            arr[int(h * 0.45):int(h * 0.78), int(w * 0.18):int(w * 0.82)],
             arr[int(h * 0.35):int(h * 0.85), int(w * 0.10):int(w * 0.90)],
-            arr[int(h * 0.50):int(h * 1.00), int(w * 0.15):int(w * 0.85)],
+            arr[int(h * 0.50):, int(w * 0.15):int(w * 0.85)],
         ]
         for corte in cortes:
             if corte.size == 0:
                 continue
-            for fx in (3, 4):
+            for fx in (3, 4, 5):
                 grande = cv2.resize(corte, None, fx=fx, fy=fx, interpolation=cv2.INTER_CUBIC)
-                ch = _tenta(grande)
-                if ch:
+                if (ch := _le(grande)):
                     return ch
     except Exception:  # noqa: BLE001
         pass

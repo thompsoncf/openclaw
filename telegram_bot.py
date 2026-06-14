@@ -107,10 +107,10 @@ async def on_text(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
     await _processar(update, update.message.text or "")
 
 
-def _legenda_com_qr(update: Update, dados: bytes, media_type: str, legenda: str) -> str:
-    """Tenta ler o QR da NFC-e (foto ou PDF), REGISTRA a auditoria (toda foto,
-    leu ou nao) e anexa a chave na legenda como nota interna pro agente.
-    Puramente aditivo: nunca quebra o fluxo (qualquer erro -> legenda original)."""
+def _ler_qr_e_auditar(telegram_id: int, dados: bytes, media_type: str) -> None:
+    """Roda POR TRAS (thread separada): le o QR com calma (todas as tecnicas) e
+    registra a auditoria pra enriquecer nosso banco de dados. NUNCA bloqueia o
+    fluxo do cliente - o cupom ja' foi processado normalmente. Tolerante a tudo."""
     chave = None
     try:
         from finance.nfce_qr import ler_chave
@@ -120,31 +120,21 @@ def _legenda_com_qr(update: Update, dados: bytes, media_type: str, legenda: str)
     try:
         from finance.nfce_qr import registrar_leitura
         import contas.contas as ct
-        achado = ct.membro_por_telegram(get_pool(), update.effective_user.id)
+        achado = ct.membro_por_telegram(get_pool(), telegram_id)
         conta_id = achado[1].id if achado else None
         registrar_leitura(get_pool(), conta_id, chave, media_type)
     except Exception:  # noqa: BLE001
         pass
-    if chave:
-        try:
-            from finance.nfce_qr import metadados
-            m = metadados(chave)
-            return legenda + (
-                f"\n\n[NOTA FISCAL IDENTIFICADA pelo QR code: chave {chave}"
-                f"{', UF ' + m['uf'] if m.get('uf') else ''}"
-                f"{', emitida em ' + m['data_emissao'].strftime('%m/%Y') if m.get('data_emissao') else ''}"
-                f". Use essa chave como identificador unico da nota pra evitar duplicata.]")
-        except Exception:  # noqa: BLE001
-            pass
-    if not chave and media_type != "application/pdf":
-        return legenda + (
-            "\n\n[Obs interna: o QR code desta foto nao ficou legivel (provavelmente "
-            "pela compressao do Telegram). Registre normalmente pela leitura da foto. "
-            "Se for natural na conversa, voce PODE dar UMA dica leve e opcional: pra "
-            "identificar a nota com mais precisao, da' pra enviar o cupom 'como arquivo' "
-            "no Telegram (anexo > arquivo), que nao comprime. Nao insista nem repita "
-            "essa dica em toda foto - so' mencione de vez em quando, sem atrapalhar.]")
-    return legenda
+
+
+def _disparar_qr(update: Update, dados: bytes, media_type: str) -> None:
+    """Dispara a leitura do QR em background (nao espera o resultado)."""
+    try:
+        tid = update.effective_user.id
+        asyncio.get_event_loop().run_in_executor(
+            None, _ler_qr_e_auditar, tid, dados, media_type)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -153,7 +143,7 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     dados = await arq.download_as_bytearray()
     b64 = base64.b64encode(bytes(dados)).decode("ascii")
     legenda = update.message.caption or "Segue o cupom para registrar."
-    legenda = _legenda_com_qr(update, bytes(dados), "image/jpeg", legenda)
+    _disparar_qr(update, bytes(dados), "image/jpeg")
     await _processar(update, legenda, imagem_b64=b64)
 
 
@@ -170,11 +160,11 @@ async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     dados = await arq.download_as_bytearray()
     b64 = base64.b64encode(bytes(dados)).decode("ascii")
     if "pdf" in mime or nome.endswith(".pdf"):
-        legenda = _legenda_com_qr(update, bytes(dados), "application/pdf", legenda)
+        _disparar_qr(update, bytes(dados), "application/pdf")
         await _processar(update, legenda, imagem_b64=b64, media_type="application/pdf")
     elif mime.startswith("image/") or nome.endswith((".jpg", ".jpeg", ".png", ".webp")):
         mt = mime if mime.startswith("image/") else "image/jpeg"
-        legenda = _legenda_com_qr(update, bytes(dados), mt, legenda)
+        _disparar_qr(update, bytes(dados), mt)
         await _processar(update, legenda, imagem_b64=b64, media_type=mt)
     else:
         await update.message.reply_text(

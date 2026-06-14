@@ -10,6 +10,7 @@ Variaveis de ambiente do WhatsApp:
 import base64
 import logging
 import os
+import threading
 
 import httpx
 from fastapi import FastAPI, Request, BackgroundTasks
@@ -81,6 +82,26 @@ def _baixar_midia(url: str) -> bytes:
         return r.content
 
 
+def _ler_qr_e_auditar_whatsapp(numero: str, dados: bytes, media_type: str) -> None:
+    """Roda POR TRAS (thread separada): le o QR com calma (todas as tecnicas) e
+    registra a auditoria pra enriquecer nosso banco de dados. NUNCA bloqueia o
+    fluxo do cliente - a mensagem ja' foi processada normalmente. Tolerante a tudo."""
+    chave = None
+    try:
+        from finance.nfce_qr import ler_chave
+        chave = ler_chave(dados, media_type)
+    except Exception:  # noqa: BLE001
+        chave = None
+    try:
+        from finance.nfce_qr import registrar_leitura
+        pool = _setup()
+        achado = ct.membro_por_whatsapp(pool, numero)
+        conta_id = achado[1].id if achado else None
+        registrar_leitura(pool, conta_id, chave, media_type)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def processar_whatsapp(numero: str, nome: str | None, body: str,
                        media_url: str | None, media_ctype: str):
     """Roda em background: identifica o MEMBRO, checa a CONTA, agente, responde."""
@@ -110,8 +131,14 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
             if (media_ctype or "").startswith("image/"):
                 imagem_b64 = base64.b64encode(dados).decode("ascii")
                 texto = body or "Segue o cupom para registrar."
+                threading.Thread(target=_ler_qr_e_auditar_whatsapp,
+                                args=(numero, dados, media_ctype), daemon=True).start()
             elif (media_ctype or "").startswith("audio/") and _transcritor:
                 texto = _transcritor.transcrever(dados, "audio.ogg")
+            elif (media_ctype or "").startswith("application/pdf"):
+                texto = body or "Segue o comprovante para registrar."
+                threading.Thread(target=_ler_qr_e_auditar_whatsapp,
+                                args=(numero, dados, media_ctype), daemon=True).start()
 
         texto = (texto or "").strip()
         if not texto and imagem_b64 is None:

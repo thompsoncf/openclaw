@@ -203,32 +203,27 @@ def ler_chave(conteudo: bytes, media_type: str = "image/jpeg") -> str | None:
     return ler_chave_da_imagem(conteudo)
 
 
+_UF = {
+    "11": "RO", "12": "AC", "13": "AM", "14": "RR", "15": "PA", "16": "AP",
+    "17": "TO", "21": "MA", "22": "PI", "23": "CE", "24": "RN", "25": "PB",
+    "26": "PE", "27": "AL", "28": "SE", "29": "BA", "31": "MG", "32": "ES",
+    "33": "RJ", "35": "SP", "41": "PR", "42": "SC", "43": "RS", "50": "MS",
+    "51": "MT", "52": "GO", "53": "DF",
+}
+
+
 def metadados(chave: str) -> dict:
-    """Extrai metadados da chave fiscal (UF, data emissao, etc).
-    Formatos: chave é 44 digitos = AABBCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
-    Posicoes: 0-1 = ano, 2-3 = mes, 4-7 = CNPJ emitente (primeiros 4), ...
-    Simplificado: retorna UF a partir de lookup."""
-    if len(chave) != 44:
+    """Extrai UF, data aproximada (AAMM->1o dia do mes) e CNPJ do emitente."""
+    if not chave or len(chave) != 44:
         return {}
+    uf = _UF.get(chave[0:2])
+    aa, mm = chave[2:4], chave[4:6]
     try:
-        ano = int(chave[0:2])
-        mes = int(chave[2:4])
-        uf_codigo = int(chave[4:6])
-        ano_completo = 2000 + ano if ano < 100 else ano
-        dt = date(ano_completo, mes, 1) if 1 <= mes <= 12 else None
-        uf_map = {
-            11: "RO", 12: "AC", 13: "AM", 14: "RR", 15: "PA", 16: "AP", 17: "TO",
-            21: "MA", 22: "PI", 23: "CE", 24: "RN", 25: "PB", 26: "PE", 27: "AL",
-            28: "SE", 29: "BA", 31: "MG", 32: "ES", 33: "RJ", 35: "SP", 41: "PR",
-            42: "SC", 43: "RS", 50: "MS", 51: "MT", 52: "GO", 53: "DF"
-        }
-        return {
-            "uf": uf_map.get(uf_codigo),
-            "data_emissao": dt,
-            "chave": chave,
-        }
-    except (ValueError, IndexError):
-        return {}
+        data_emissao = date(2000 + int(aa), int(mm), 1)
+    except (ValueError, TypeError):
+        data_emissao = None
+    cnpj = chave[6:20]
+    return {"uf": uf, "data_emissao": data_emissao, "cnpj_emitente": cnpj}
 
 
 def registrar_leitura(pool, conta_id, chave, media_type, img_info=None):

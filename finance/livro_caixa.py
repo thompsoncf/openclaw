@@ -187,16 +187,23 @@ class LivroCaixa:
 
     # ---------- Itens do cupom (raio-x do consumo) ----------
 
-    def buscar_duplicata(self, valor_centavos: int, data) -> list[dict]:
-        """Procura lancamentos iguais (mesmo valor e data) - sinal de cupom repetido."""
+    def buscar_duplicata(self, valor_centavos: int, data, tolerancia_centavos: int = 0) -> list[dict]:
+        """Procura lancamentos duplicados: mesmo valor (com tolerancia) e data.
+        Tolerancia padrao: max(1% do valor, R$ 0.50)."""
+        if tolerancia_centavos == 0:
+            tolerancia_centavos = max(valor_centavos // 100, 50)
+        minimo = valor_centavos - tolerancia_centavos
+        maximo = valor_centavos + tolerancia_centavos
         with self.pool.connection() as conn:
             rows = conn.execute(
-                """select id, descricao, data, criado_em from lancamentos
-                   where conta_id = %s and valor_centavos = %s and data = %s
-                   order by criado_em desc""",
-                (self.conta_id, valor_centavos, data),
+                """select l.id, l.descricao, l.data, l.criado_em,
+                          (select count(*) from itens_lancamento where lancamento_id = l.id) as qtd_itens
+                   from lancamentos l
+                   where l.conta_id = %s and l.valor_centavos between %s and %s and l.data = %s
+                   order by l.criado_em desc""",
+                (self.conta_id, minimo, maximo, data),
             ).fetchall()
-        return [{"id": r[0], "descricao": r[1], "data": r[2], "criado_em": r[3]} for r in rows]
+        return [{"id": r[0], "descricao": r[1], "data": r[2], "criado_em": r[3], "qtd_itens": r[4]} for r in rows]
 
     def ultimo_lancamento_id(self) -> int | None:
         """Id do lancamento mais recente do usuario (pra anexar itens 'desse cupom')."""

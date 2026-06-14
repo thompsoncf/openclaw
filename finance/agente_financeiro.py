@@ -61,6 +61,12 @@ Regras:
   passe o lancamento_id da checar_duplicata, senao os itens caem no errado.
   Voce NAO precisa listar os itens na resposta (so' se pedirem) - salvar
   centenas numa tabela polui o chat; salve e confirme o total.
+- 🚫 TRAVA ANTI-DUPLICATA: SEMPRE chame checar_duplicata ANTES de lancar_despesa
+  ou lancar_receita. Se a resposta disser "DUPLICATA PROVAVEL", PARE: NAO crie
+  um novo lancamento, NAO salve nenhum item. Avise o usuario ("ja' encontrei
+  esse cupom em tal dia") e pergunte se quer anexar itens ao cupom existente
+  (passe o lancamento_id). NAO registre NUNCA se houver duplicata sem confirmacao
+  explicita do usuario. DUPLICATA DUPLICA no raio-x: pior que nada registrado.
 - PERGUNTAS SOBRE ITENS: para "quanto gastei em <produto>" use buscar_itens.
   Para grupos ("quanto gastei em frutas/limpeza") use listar_itens, leia a
   lista e some voce mesmo os que se encaixam. Se nao houver itens salvos para

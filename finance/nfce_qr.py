@@ -8,31 +8,79 @@ from __future__ import annotations
 from datetime import datetime, date
 
 
+def extrair_chave(texto: str) -> str | None:
+    """Valida e extrai a chave de 44 digitos de um string (pode vir com lixo)."""
+    if not texto:
+        return None
+    digitos = "".join(c for c in texto if c.isdigit())
+    if len(digitos) == 44:
+        return digitos
+    return None
+
+
 def ler_chave_da_imagem(imagem_bytes: bytes) -> str | None:
-    """Le o QR de uma imagem JPEG/PNG e retorna a chave da NFC-e (44 digitos).
-    Usa OpenCV + pyzbar. Retorna None se nao conseguir."""
+    """Le o QR code de uma imagem (bytes) e devolve a chave de 44 digitos.
+    None se nao houver QR legivel ou nao for uma NFC-e. Tolerante a falha.
+
+    Foto de cupom costuma ter o QR pequeno numa imagem grande, o que engana o
+    detector. Por isso tentamos varias estrategias: imagem inteira, ampliada, e
+    recortes da regiao central ampliados (onde o QR costuma estar no DANFE)."""
     try:
         import cv2
         import numpy as np
-    except ImportError:
-        return None
-    try:
-        nparr = np.frombuffer(imagem_bytes, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        if img is None:
-            return None
-        try:
-            from pyzbar.pyzbar import decode
-        except ImportError:
-            return None
-        barcodes = decode(img)
-        for barcode in barcodes:
-            texto = barcode.data.decode("utf-8", "ignore").strip()
-            if len(texto) == 44 and texto.isdigit():
-                return texto
-        return None
     except Exception:  # noqa: BLE001
         return None
+    try:
+        arr = cv2.imdecode(np.frombuffer(imagem_bytes, np.uint8), cv2.IMREAD_COLOR)
+        if arr is None:
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+
+    det = cv2.QRCodeDetector()
+
+    def _tenta(img) -> str | None:
+        try:
+            data, _pts, _ = det.detectAndDecode(img)
+            if data:
+                return extrair_chave(data)
+            ok, datas, _p, _s = det.detectAndDecodeMulti(img)
+            if ok and datas:
+                for d in datas:
+                    ch = extrair_chave(d)
+                    if ch:
+                        return ch
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
+    ch = _tenta(arr)
+    if ch:
+        return ch
+    try:
+        ch = _tenta(cv2.resize(arr, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC))
+        if ch:
+            return ch
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        h, w = arr.shape[:2]
+        cortes = [
+            arr[int(h * 0.45):int(h * 0.78), int(w * 0.20):int(w * 0.80)],
+            arr[int(h * 0.35):int(h * 0.85), int(w * 0.10):int(w * 0.90)],
+            arr[int(h * 0.50):int(h * 1.00), int(w * 0.15):int(w * 0.85)],
+        ]
+        for corte in cortes:
+            if corte.size == 0:
+                continue
+            for fx in (3, 4):
+                grande = cv2.resize(corte, None, fx=fx, fy=fx, interpolation=cv2.INTER_CUBIC)
+                ch = _tenta(grande)
+                if ch:
+                    return ch
+    except Exception:  # noqa: BLE001
+        pass
+    return None
 
 
 def ler_chave_de_pdf(pdf_bytes: bytes, max_paginas: int = 3) -> str | None:

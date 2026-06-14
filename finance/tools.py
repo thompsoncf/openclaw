@@ -73,11 +73,12 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
         if not achados:
             return "Sem duplicata: pode registrar normalmente."
         linhas = [f"- lancamento_id={a['id']}: {a['descricao'] or 'sem descricao'} "
-                  f"(registrado em {a['criado_em'].strftime('%d/%m %H:%M')})" for a in achados]
-        return (f"ATENCAO: ja existe {len(achados)} lancamento(s) de {formatar_brl(cents)} "
+                  f"({a['qtd_itens']} itens, registrado em {a['criado_em'].strftime('%d/%m %H:%M')})"
+                  for a in achados]
+        return (f"⚠️ DUPLICATA PROVAVEL: ja existe {len(achados)} lancamento(s) de {formatar_brl(cents)} "
                 f"na data {data.strftime('%d/%m/%Y')}:\n" + "\n".join(linhas)
-                + "\nProvavelmente e' o MESMO cupom. Avise o usuario e so' registre se ele confirmar. "
-                  "Se ele quiser anexar ITENS ao cupom existente, use o lancamento_id acima.")
+                + "\nSe for o MESMO cupom, pode anexar ITENS usando o lancamento_id acima. "
+                  "NAO crie um novo lancamento — isso duplica o lancamento no raio-x.")
 
     def registrar_itens_cupom(entrada: dict) -> str:
         itens_in = entrada.get("itens") or []

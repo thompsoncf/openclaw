@@ -120,10 +120,15 @@ def _ler_qr_e_auditar(telegram_id: int, dados: bytes, media_type: str) -> None:
     registra a auditoria pra enriquecer nosso banco de dados. NUNCA bloqueia o
     fluxo do cliente - o cupom ja' foi processado normalmente. Tolerante a tudo."""
     chave = None
+    import logging
+    _log = logging.getLogger("openclaw.qr")
     try:
         from finance.nfce_qr import ler_chave
         chave = ler_chave(dados, media_type)
-    except Exception:  # noqa: BLE001
+        _log.info("QR leitura: chave=%s media=%s bytes=%d",
+                  chave or "NAO_LEU", media_type, len(dados))
+    except Exception as e:  # noqa: BLE001
+        _log.exception("QR ERRO na leitura: %s", e)
         chave = None
     try:
         from finance.nfce_qr import registrar_leitura, medir_imagem
@@ -132,8 +137,8 @@ def _ler_qr_e_auditar(telegram_id: int, dados: bytes, media_type: str) -> None:
         conta_id = achado[1].id if achado else None
         info = medir_imagem(dados, media_type)
         registrar_leitura(get_pool(), conta_id, chave, media_type, info)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as e:  # noqa: BLE001
+        _log.exception("QR ERRO na auditoria: %s", e)
 
 
 def _disparar_qr(update: Update, dados: bytes, media_type: str) -> None:

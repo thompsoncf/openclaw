@@ -9,13 +9,23 @@ from datetime import datetime, date
 
 
 def extrair_chave(texto: str) -> str | None:
-    """Valida e extrai a chave de 44 digitos de um string (pode vir com lixo)."""
+    """Extrai a chave de 44 digitos de uma URL/texto de QR de NFC-e."""
     if not texto:
         return None
-    digitos = "".join(c for c in texto if c.isdigit())
-    if len(digitos) == 44:
-        return digitos
-    return None
+    # a chave aparece como p=<44digitos> ou chNFe=<44> ou solta no texto.
+    # IMPORTANTE: nao basta juntar todos os digitos do texto - a URL pode ter
+    # digitos extras (ex: o sufixo "|3|1" do PI), o que daria != 44 e quebraria.
+    import re
+    m = (re.search(r"[?&]p=(\d{44})", texto)
+         or re.search(r"chNFe=(\d{44})", texto)
+         or re.search(r"\b(\d{44})\b", texto))
+    if not m:
+        return None
+    chave = m.group(1)
+    # modelo 65 (NFC-e) ou 55 (NF-e) fica nas posicoes 20-21
+    if chave[20:22] not in ("65", "55"):
+        return None
+    return chave
 
 
 def _detectores():

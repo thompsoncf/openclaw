@@ -102,6 +102,34 @@ def _ler_qr_e_auditar_whatsapp(numero: str, dados: bytes, media_type: str) -> No
         pass
 
 
+def _ler_qr_whatsapp(numero: str, dados: bytes, media_type: str) -> None:
+    """Roda numa thread: le o QR da NFC-e (com calma, todas as tecnicas) e
+    registra a auditoria pra enriquecer nosso banco. NUNCA bloqueia a resposta
+    ao cliente. Tolerante a qualquer falha."""
+    chave = None
+    try:
+        from finance.nfce_qr import ler_chave
+        chave = ler_chave(dados, media_type)
+    except Exception:  # noqa: BLE001
+        chave = None
+    try:
+        from finance.nfce_qr import registrar_leitura
+        achado = ct.membro_por_whatsapp(_setup(), numero)
+        conta_id = achado[1].id if achado else None
+        registrar_leitura(_setup(), conta_id, chave, media_type)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _disparar_qr_whatsapp(numero: str, dados: bytes, media_type: str) -> None:
+    """Dispara a leitura do QR em thread separada (nao espera o resultado)."""
+    try:
+        threading.Thread(target=_ler_qr_whatsapp,
+                         args=(numero, bytes(dados), media_type), daemon=True).start()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def processar_whatsapp(numero: str, nome: str | None, body: str,
                        media_url: str | None, media_ctype: str):
     """Roda em background: identifica o MEMBRO, checa a CONTA, agente, responde."""
@@ -126,27 +154,24 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
 
         texto = body or ""
         imagem_b64 = None
+        media_type = "image/jpeg"
         if media_url:
             dados = _baixar_midia(media_url)
-            if (media_ctype or "").startswith("image/"):
+            ctype = (media_ctype or "")
+            if ctype.startswith("image/"):
                 imagem_b64 = base64.b64encode(dados).decode("ascii")
+                media_type = ctype
                 texto = body or "Segue o cupom para registrar."
-                threading.Thread(target=_ler_qr_e_auditar_whatsapp,
-                                args=(numero, dados, media_ctype), daemon=True).start()
-            elif (media_ctype or "").startswith("audio/") and _transcritor:
-                texto = _transcritor.transcrever(dados, "audio.ogg")
-            elif (media_ctype or "").startswith("application/pdf"):
+                _disparar_qr_whatsapp(numero, dados, ctype)
+            elif "pdf" in ctype:
+                imagem_b64 = base64.b64encode(dados).decode("ascii")
+                media_type = "application/pdf"
                 texto = body or "Segue o comprovante para registrar."
-                threading.Thread(target=_ler_qr_e_auditar_whatsapp,
-                                args=(numero, dados, media_ctype), daemon=True).start()
+                _disparar_qr_whatsapp(numero, dados, "application/pdf")
+            elif ctype.startswith("audio/") and _transcritor:
+                texto = _transcritor.transcrever(dados, "audio.ogg")
 
-        texto = (texto or "").strip()
-        if not texto and imagem_b64 is None:
-            _responder_whatsapp(to, "Nao consegui entender sua mensagem. "
-                                    "Pode mandar por texto, ou tente o audio de novo?")
-            return
-
-        resposta = _agente_do(membro, conta).responder(texto, imagem_b64)
+        resposta = _agente_do(membro, conta).responder(texto, imagem_b64, media_type)
         _responder_whatsapp(to, resposta)
     except Exception as e:  # noqa: BLE001
         log.exception("erro no whatsapp")

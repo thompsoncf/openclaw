@@ -71,7 +71,7 @@ button.danger{background:#6e2b2b}button.danger:hover{background:#8a3636}
 form.inline{display:inline;margin:0}
 </style></head><body>
 <div class="topo"><span class="logo">OpenClaw <span>· admin</span></span>
-<span><a href="/admin">Contas</a><a href="/painel">Meu painel</a><a href="/sair">Sair</a></span></div>
+<span><a href="/admin">Contas</a><a href="/admin/qr">QR notas</a><a href="/painel">Meu painel</a><a href="/sair">Sair</a></span></div>
 <div class="wrap">{% block conteudo %}{% endblock %}</div>
 </body></html>"""
 
@@ -113,7 +113,33 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
 </table></div>
 {% endblock %}"""
 
-_env = Environment(loader=DictLoader({"abase": _ADMIN_BASE, "ahome": _ADMIN_HOME}),
+_ADMIN_QR = """{% extends "abase" %}{% block conteudo %}
+<h1>Leitura de QR code das notas</h1>
+{% if aviso %}<div class="card" style="border-color:#1d9e75">{{ aviso }}</div>{% endif %}
+<div class="cards">
+<div class="metric"><span>Fotos/PDFs recebidos</span><b>{{ resumo.total }}</b></div>
+<div class="metric"><span>QR lido com sucesso</span><b style="color:#5dcaa5">{{ resumo.leu }}</b></div>
+<div class="metric"><span>Sem QR</span><b style="color:#e89a9a">{{ resumo.sem }}</b></div>
+<div class="metric"><span>Taxa de leitura</span><b>{{ resumo.taxa }}%</b></div>
+</div>
+
+<div class="card"><h2>Últimas notas recebidas</h2>
+<table><tr><th>Quando</th><th>Conta</th><th>Tipo</th><th>Leu?</th><th>UF</th><th>Emitida</th><th>Chave / CNPJ emitente</th></tr>
+{% for r in leituras %}<tr>
+<td class="mut">{{ r.criado_em.strftime('%d/%m %H:%M') }}</td>
+<td>{{ r.conta_id or '-' }}</td>
+<td class="mut">{{ 'PDF' if r.media_type == 'application/pdf' else 'foto' }}</td>
+<td>{% if r.leu %}<span class="tag ativa">sim</span>{% else %}<span class="tag suspensa">não</span>{% endif %}</td>
+<td>{{ r.uf or '-' }}</td>
+<td class="mut">{{ r.data_emissao.strftime('%m/%Y') if r.data_emissao else '-' }}</td>
+<td class="mut" style="font-size:.72rem">{% if r.chave %}{{ r.chave }}<br>CNPJ {{ r.cnpj_emitente }}{% else %}-{% endif %}</td>
+</tr>{% endfor %}
+</table>
+{% if not leituras %}<p class="mut">Nenhuma nota recebida ainda.</p>{% endif %}
+</div>
+{% endblock %}"""
+
+_env = Environment(loader=DictLoader({"abase": _ADMIN_BASE, "ahome": _ADMIN_HOME, "aqr": _ADMIN_QR}),
                    autoescape=select_autoescape())
 _env.globals["brl"] = brl
 
@@ -175,6 +201,30 @@ def admin_ativar(request: Request, conta_id: int):
     ct.registrar_evento(pool, conta_id, "admin_ativou", f"por admin {adm[0]}")
     request.session["admin_aviso"] = f"Conta {conta_id} ativada por mais 30 dias."
     return RedirectResponse("/admin", status_code=303)
+
+
+@router.get("/admin/qr", response_class=HTMLResponse)
+def admin_qr(request: Request):
+    if _admin(request) is None:
+        return _NEGADO
+    pool = get_pool()
+    with pool.connection() as c:
+        total = c.execute("select count(*) from qr_leituras").fetchone()[0]
+        leu = c.execute("select count(*) from qr_leituras where leu").fetchone()[0]
+        cols = ["conta_id", "chave", "uf", "cnpj_emitente", "data_emissao",
+                "media_type", "leu", "criado_em"]
+        leituras = [dict(zip(cols, r)) for r in c.execute(
+            """select conta_id, chave, uf, cnpj_emitente, data_emissao,
+                      media_type, leu, criado_em
+               from qr_leituras order by id desc limit 200""").fetchall()]
+    sem = total - leu
+    taxa = round(100 * leu / total) if total else 0
+    resumo = {"total": total, "leu": leu, "sem": sem, "taxa": taxa}
+    from types import SimpleNamespace
+    leituras = [SimpleNamespace(**x) for x in leituras]
+    return HTMLResponse(_env.get_template("aqr").render(
+        resumo=resumo, leituras=leituras,
+        aviso=request.session.pop("admin_aviso", None)))
 
 
 @router.post("/admin/precos/importar")

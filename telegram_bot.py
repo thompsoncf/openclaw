@@ -73,7 +73,8 @@ async def start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def _processar(update: Update, texto: str, imagem_b64: str | None = None):
+async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
+                     media_type: str = "image/jpeg"):
     achado = ct.membro_por_telegram(_pool, update.effective_user.id)
     if achado is None:
         # talvez seja um CODIGO DE CONVITE (ex: "LAR-7K2M")
@@ -98,7 +99,7 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None):
         return
     agente = _agente_do(membro, conta)
     # O agente e' sincrono (rede + LLM): roda fora do event loop pra nao travar o bot.
-    resposta = await asyncio.to_thread(agente.responder, texto, imagem_b64)
+    resposta = await asyncio.to_thread(agente.responder, texto, imagem_b64, media_type)
     await update.message.reply_text(resposta or "(sem resposta)")
 
 
@@ -113,6 +114,29 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     b64 = base64.b64encode(bytes(dados)).decode("ascii")
     legenda = update.message.caption or "Segue o cupom para registrar."
     await _processar(update, legenda, imagem_b64=b64)
+
+
+async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Recebe PDF (comprovante de banco) ou imagem enviada como arquivo."""
+    doc = update.message.document
+    nome = (doc.file_name or "").lower()
+    mime = (doc.mime_type or "").lower()
+    legenda = update.message.caption or "Segue o comprovante para registrar."
+    if doc.file_size and doc.file_size > 18 * 1024 * 1024:
+        await update.message.reply_text("Esse arquivo e' muito grande. Pode mandar uma foto do comprovante? 📸")
+        return
+    arq = await ctx.bot.get_file(doc.file_id)
+    dados = await arq.download_as_bytearray()
+    b64 = base64.b64encode(bytes(dados)).decode("ascii")
+    if "pdf" in mime or nome.endswith(".pdf"):
+        await _processar(update, legenda, imagem_b64=b64, media_type="application/pdf")
+    elif mime.startswith("image/") or nome.endswith((".jpg", ".jpeg", ".png", ".webp")):
+        mt = mime if mime.startswith("image/") else "image/jpeg"
+        await _processar(update, legenda, imagem_b64=b64, media_type=mt)
+    else:
+        await update.message.reply_text(
+            "Recebi o arquivo, mas só consigo ler PDF ou imagem. "
+            "Pode mandar o comprovante em PDF ou foto? 📄📸")
 
 
 async def on_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -149,6 +173,7 @@ def main():
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))
+    app.add_handler(MessageHandler(filters.Document.ALL, on_document))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, on_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     logging.info("OpenClaw no ar. Aguardando mensagens...")

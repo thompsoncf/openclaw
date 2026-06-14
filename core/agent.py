@@ -96,8 +96,13 @@ class Agente:
                    media_type: str = "image/jpeg") -> str:
         conteudo = []
         if imagem_b64:
-            conteudo.append({"type": "image", "source": {
-                "type": "base64", "media_type": media_type, "data": imagem_b64}})
+            if media_type == "application/pdf":
+                # PDF entra como documento (o modelo le' o conteudo do PDF)
+                conteudo.append({"type": "document", "source": {
+                    "type": "base64", "media_type": "application/pdf", "data": imagem_b64}})
+            else:
+                conteudo.append({"type": "image", "source": {
+                    "type": "base64", "media_type": media_type, "data": imagem_b64}})
         conteudo.append({"type": "text", "text": texto})
         self.memoria.adicionar("user", conteudo)
 

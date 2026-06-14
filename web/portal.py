@@ -582,7 +582,8 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
     categorias = livro.despesas_por_categoria(ano_sel, mes_num, membro_sel)
     maior_cat = max((v for _, v in categorias), default=0)
     lancamentos = livro.lancamentos_recentes(ano_sel, mes_num, membro_sel,
-                                             tipo if tipo in ("despesa", "receita") else None)
+                                             tipo if tipo in ("despesa", "receita") else None,
+                                             limite=1000)
     # agrupa por DIA (pro accordion): cada dia com seu saldo e seus lancamentos
     from collections import OrderedDict
     por_dia = OrderedDict()
@@ -593,7 +594,7 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
         por_dia[d]["itens"].append(l)
         por_dia[d]["saldo"] += l["valor"] if l["tipo"] == "receita" else -l["valor"]
     dias = [{"data": d, "itens": g["itens"], "saldo": g["saldo"]} for d, g in por_dia.items()]
-    raiox_bruto = livro.raiox_por_departamento(membro_id=membro_sel)
+    raiox_bruto = livro.raiox_por_departamento(ano=ano_sel, mes=mes_num, membro_id=membro_sel)
     # monta {dep: {total, dias:[{data, itens, subtotal}]}} - itens divididos por dia
     from collections import OrderedDict
     raiox = {}

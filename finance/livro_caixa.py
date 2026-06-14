@@ -156,14 +156,22 @@ class LivroCaixa:
         return [{"data": r[0], "descricao": r[1], "categoria": r[2], "tipo": r[3],
                  "valor": int(r[4]), "origem": r[5], "quem": r[6]} for r in rows]
 
-    def raiox_por_departamento(self, dias: int = 90, membro_id: int | None = None) -> dict[str, list[dict]]:
+    def raiox_por_departamento(self, ano: int | None = None, mes: int | None = None,
+                               membro_id: int | None = None,
+                               dias: int | None = None) -> dict[str, list[dict]]:
         """Itens de cupom agrupados pelo DEPARTAMENTO (= categoria do lancamento).
 
-        Cada item carrega a data do lancamento, pra UI dividir por dia dentro
-        do departamento.
+        Filtra pela DATA do lancamento. Se ano/mes informados, usa o mes (corrige
+        o bug de mostrar itens de outro mes). Senao, cai pra janela de `dias`.
         """
-        cond = "l.conta_id = %s and i.criado_em >= now() - (%s || ' days')::interval"
-        params: list = [self.conta_id, dias]
+        cond = "l.conta_id = %s"
+        params: list = [self.conta_id]
+        if ano is not None and mes is not None:
+            cond += " and extract(year from l.data) = %s and extract(month from l.data) = %s"
+            params += [ano, mes]
+        else:
+            cond += " and l.data >= (now() - (%s || ' days')::interval)::date"
+            params.append(dias or 90)
         if membro_id is not None:
             cond += " and l.membro_id = %s"; params.append(membro_id)
         with self.pool.connection() as conn:

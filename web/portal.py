@@ -487,15 +487,18 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
     }, 500);
   }
 
+  var reqToken = 0;
   function carregarPrecos(){
     if (!pendentesAtuais.length){ compEl.innerHTML=''; if(prog) clearInterval(prog); return; }
     barraProgresso();
+    var meuToken = ++reqToken;   // so' a chamada mais recente pode escrever
     var params = Object.keys(ajustes).map(function(it){
       return 'ajuste=' + encodeURIComponent(it + '||' + ajustes[it]);
     }).join('&');
     fetch('/painel/compras/precos' + (params ? ('?'+params) : ''))
       .then(function(r){ return r.json(); })
       .then(function(d){
+        if (meuToken !== reqToken) return;   // chegou atrasada: ignora
         if (prog) clearInterval(prog);
         var grupos = d.grupos || {}, nomes = Object.keys(grupos), html = '';
         if (!nomes.length){

@@ -86,6 +86,7 @@ def ler_chave_da_imagem(imagem_bytes: bytes) -> str | None:
     # --- DIAGNOSTICO TEMPORARIO: loga o que cada detector ve na imagem inteira
     try:
         import logging
+        import re as _re
         _dlog = logging.getLogger("openclaw.qr")
         for _nome, _det in dets:
             try:
@@ -93,8 +94,14 @@ def ler_chave_da_imagem(imagem_bytes: bytes) -> str | None:
                     _res, _ = _det.detectAndDecode(arr)
                     if _res:
                         _url = _res[0]
-                        _dlog.info("DIAG wechat URL COMPLETA=%r", _url)
-                        _dlog.info("DIAG wechat extrair_chave=%r", extrair_chave(_url))
+                        _dlog.info("DIAG url tipo=%s len=%d", type(_url).__name__, len(_url))
+                        _m = _re.search(r"[?&]p=(\d{44})", _url)
+                        _dlog.info("DIAG regex p= casou=%s", bool(_m))
+                        if _m:
+                            _ch = _m.group(1)
+                            _dlog.info("DIAG chave=%r len=%d pos20-22=%r",
+                                       _ch, len(_ch), _ch[20:22])
+                        _dlog.info("DIAG extrair_chave final=%r", extrair_chave(_url))
                     else:
                         _dlog.info("DIAG wechat: VAZIO")
             except Exception as _e:  # noqa: BLE001

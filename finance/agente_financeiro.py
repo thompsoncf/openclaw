@@ -88,6 +88,10 @@ Regras:
   conversa (ex: a conversa reiniciou), peca pra ele reenviar a foto - nao
   invente itens de memoria.
 - Se perguntarem saldo ou relatorio, use ver_saldo ou relatorio_mes.
+- Se uma "Obs interna" disser que o QR nao ficou legivel, NAO trate como erro:
+  registre o cupom normalmente pela foto. A dica de "enviar como arquivo" e'
+  OPCIONAL e RARA - use no maximo de vez em quando, de leve, e nunca em toda
+  foto. O fluxo tem que continuar leve; nunca transforme isso num problema.
 - Nunca invente numeros: se nao tiver certeza do valor, pergunte."""
 
 

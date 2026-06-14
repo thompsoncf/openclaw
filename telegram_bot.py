@@ -136,6 +136,14 @@ def _legenda_com_qr(update: Update, dados: bytes, media_type: str, legenda: str)
                 f". Use essa chave como identificador unico da nota pra evitar duplicata.]")
         except Exception:  # noqa: BLE001
             pass
+    if not chave and media_type != "application/pdf":
+        return legenda + (
+            "\n\n[Obs interna: o QR code desta foto nao ficou legivel (provavelmente "
+            "pela compressao do Telegram). Registre normalmente pela leitura da foto. "
+            "Se for natural na conversa, voce PODE dar UMA dica leve e opcional: pra "
+            "identificar a nota com mais precisao, da' pra enviar o cupom 'como arquivo' "
+            "no Telegram (anexo > arquivo), que nao comprime. Nao insista nem repita "
+            "essa dica em toda foto - so' mencione de vez em quando, sem atrapalhar.]")
     return legenda
 
 

@@ -516,7 +516,9 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
             html += '<div style="font-weight:600;margin-bottom:.6rem">'+grupo+' — onde sua cesta sai mais barata</div>';
             linhas.forEach(function(m, i){
               var falta = m.faltando ? (' · faltam '+m.faltando) : ' · completa';
-              var end = m.endereco ? ('<div class="mut" style="font-size:.72rem">'+esc(m.endereco)+'</div>') : '';
+              var endTxt = m.endereco || '';
+              if (m.data) endTxt += (endTxt ? ' · ' : '') + 'preço de ' + m.data;
+              var end = endTxt ? ('<div class="mut" style="font-size:.72rem">'+esc(endTxt)+'</div>') : '';
               html += '<div style="padding:.45rem 0;'+(i<linhas.length-1?'border-bottom:1px solid #1d1d1f':'')+'">';
               html += '<div style="display:flex;justify-content:space-between">';
               html += '<div>'+(i+1)+'. <b>'+esc(m.mercado)+'</b> <span class="mut" style="font-size:.76rem">· '+m.cobertos+' itens'+falta+'</span>'+end+'</div>';
@@ -810,10 +812,12 @@ def _fmt_comparacao(r: dict) -> dict:
             dist = m.get("distancia_km")
             if dist is not None:
                 endereco = (endereco + f" · {dist:g} km").strip(" ·")
+            dt = m.get("data_mais_recente")
+            data_txt = dt.strftime("%d/%m/%Y") if hasattr(dt, "strftime") else None
             linhas.append({
                 "mercado": m["mercado"], "total": brl(m["total_centavos"]),
                 "cobertos": m["itens_cobertos"], "faltando": len(m["itens_faltando"]),
-                "endereco": endereco,
+                "endereco": endereco, "data": data_txt,
                 "produtos": [{"descricao": pr["descricao"], "preco": brl(pr["valor_centavos"])}
                              for pr in m.get("produtos", [])],
             })

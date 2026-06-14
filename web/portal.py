@@ -448,8 +448,21 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 <script>
 (function(){
   var alvo = document.getElementById('comparador');
+  var ajustesAtivos = {};
   if (!alvo) return;
-  fetch('/painel/compras/precos').then(function(r){ return r.json(); }).then(function(d){
+  function recarregar() {
+    var params = new URLSearchParams();
+    Object.entries(ajustesAtivos).forEach(function(kv){
+      params.append('ajuste', kv[0]+'||'+kv[1]);
+    });
+    var url = '/painel/compras/precos'+(params.toString() ? '?'+params.toString() : '');
+    fetch(url).then(function(r){ return r.json(); }).then(function(d){
+      renderizar(d);
+    }).catch(function(){
+      alvo.innerHTML = '<p class="mut" style="font-size:.8rem">Não consegui buscar os preços agora. Tente recarregar.</p>';
+    });
+  }
+  function renderizar(d) {
     var grupos = d.grupos || {};
     var nomes = Object.keys(grupos);
     if (!nomes.length) {
@@ -470,14 +483,71 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
       });
       html += '</div>';
     });
+    if (d.itens && d.itens.length) {
+      html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #2a2a2b">';
+      html += '<p style="font-size:.85rem;font-weight:500;margin-bottom:.5rem">Não bateu? Ajuste cada produto:</p>';
+      d.itens.forEach(function(item){
+        var desc = item.descricao || '';
+        html += '<button type="button" onclick="event.preventDefault(); ajustar('+JSON.stringify(desc).replace(/"/g, '&quot;')+');" ';
+        html += 'style="background:none;border:none;color:#5dcaa5;cursor:pointer;font-size:.82rem;text-decoration:underline;padding:0.2rem 0;margin:0.3rem 0;text-align:left">';
+        html += '  → '+desc;
+        html += '</button><br/>';
+      });
+      html += '</div>';
+    }
     var fonte = d.fonte === 'sefaz'
       ? 'Preços oficiais de nota fiscal (SEFAZ), atualizados há pouco.'
       : 'Baseado em '+d.observacoes+' preços dos seus cupons — melhora a cada compra.';
     html += '<p class="mut" style="font-size:.72rem">'+fonte+'</p>';
     alvo.innerHTML = html;
-  }).catch(function(){
-    alvo.innerHTML = '<p class="mut" style="font-size:.8rem">Não consegui buscar os preços agora. Tente recarregar.</p>';
-  });
+  }
+  window.ajustar = function(item) {
+    var modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999';
+    var caixa = document.createElement('div');
+    caixa.style.cssText = 'background:#1d1d1f;border:1px solid #2a2a2b;border-radius:10px;padding:1.5rem;max-width:400px;max-height:70vh;overflow-y:auto;color:#fff';
+    caixa.innerHTML = '<p style="font-size:.75rem;color:#888;margin:0 0 1rem">Qual e o produto certo?</p>';
+    var loading = document.createElement('p');
+    loading.textContent = 'Carregando variantes...';
+    loading.style.cssText = 'color:#999;font-size:.82rem';
+    caixa.appendChild(loading);
+    modal.appendChild(caixa);
+    document.body.appendChild(modal);
+    fetch('/painel/compras/opcoes?item='+encodeURIComponent(item))
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var opcoes = d.opcoes || [];
+        if (!opcoes.length) {
+          loading.textContent = 'Nenhuma variante encontrada para esse produto.';
+          return;
+        }
+        caixa.innerHTML = '<p style="font-size:.75rem;color:#888;margin:0 0 1rem">Qual e o produto certo? (clique para escolher)</p>';
+        opcoes.forEach(function(op){
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.innerHTML = '<b>'+op.descricao+'</b><br/><span style="color:#999;font-size:.75rem">'+op.faixa+'</span>';
+          btn.style.cssText = 'display:block;width:100%;text-align:left;background:#0e0e0f;border:1px solid #2a2a2b;border-radius:6px;color:#fff;padding:0.7rem;margin:0.5rem 0;cursor:pointer;font-size:.82rem';
+          btn.onmouseover = function(){ this.style.borderColor = '#5dcaa5'; };
+          btn.onmouseout = function(){ this.style.borderColor = '#2a2a2b'; };
+          btn.onclick = function(){
+            ajustesAtivos[item] = op.descricao;
+            document.body.removeChild(modal);
+            recarregar();
+          };
+          caixa.appendChild(btn);
+        });
+        var fechar = document.createElement('button');
+        fechar.type = 'button';
+        fechar.textContent = 'Cancelar';
+        fechar.style.cssText = 'display:block;width:100%;background:none;border:1px solid #555;color:#888;padding:0.5rem;margin-top:1rem;cursor:pointer;border-radius:6px;font-size:.82rem';
+        fechar.onclick = function(){ document.body.removeChild(modal); };
+        caixa.appendChild(fechar);
+      })
+      .catch(function(){
+        loading.textContent = 'Erro ao carregar variantes. Tente novamente.';
+      });
+  };
+  recarregar();
 })();
 </script>
 {% endif %}
@@ -704,11 +774,18 @@ def compras_precos(request: Request):
     pendentes = [i["descricao"] for i in lista.listar(incluir_comprados=False)]
     if not pendentes:
         return JSONResponse({"grupos": {}, "observacoes": 0, "fonte": "vazio"})
+    # escolhas de ajuste: parametros ajuste=item||termo
+    escolhas: dict[str, str] = {}
+    for a in request.query_params.getlist("ajuste"):
+        if "||" in a:
+            item, termo = a.split("||", 1)
+            if item.strip() and termo.strip():
+                escolhas[item.strip()] = termo.strip()
     with get_pool().connection() as c:
         row = c.execute("select cidade from contas where id=%s", (conta[0],)).fetchone()
     cidade = row[0] if row else None
     try:
-        r = comparar_separado(get_pool(), pendentes, cidade)
+        r = comparar_separado(get_pool(), pendentes, cidade, escolhas)
     except Exception:  # noqa: BLE001
         return JSONResponse({"grupos": {}, "observacoes": 0, "fonte": "erro"})
     return JSONResponse(_fmt_comparacao(r))
@@ -733,6 +810,34 @@ def _fmt_comparacao(r: dict) -> dict:
         if linhas:
             grupos[rotulos.get(tipo, tipo)] = linhas
     return {"grupos": grupos, "observacoes": r.get("observacoes", 0), "fonte": r.get("fonte", "vazio")}
+
+
+@router.get("/painel/compras/opcoes")
+def compras_opcoes(request: Request, item: str = ""):
+    """Lista as variantes reais de produto pra um item (pro 'ajustar')."""
+    conta = conta_logada(request)
+    if conta is None:
+        return JSONResponse({"erro": "nao logado"}, status_code=401)
+    item = (item or "").strip()
+    if not item:
+        return JSONResponse({"opcoes": []})
+    with get_pool().connection() as c:
+        row = c.execute("select cidade from contas where id=%s", (conta[0],)).fetchone()
+    cidade = row[0] if row else None
+    from finance import cidades as cid
+    coord = cid.coordenada(cidade)
+    if not coord or cid.fonte(cidade) != "sefaz":
+        return JSONResponse({"opcoes": [], "motivo": "regiao sem catalogo SEFAZ"})
+    try:
+        from finance.sefaz_precos import SefazMenorPreco
+        lat, lon, raio = coord
+        ops = SefazMenorPreco().opcoes_produto(item, lat, lon, raio)
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"opcoes": []})
+    return JSONResponse({"opcoes": [
+        {"descricao": o["descricao"],
+         "faixa": (brl(o["min"]) if o["min"] == o["max"] else f"{brl(o['min'])}–{brl(o['max'])}")}
+        for o in ops]})
 
 
 @router.post("/painel/compras/add")

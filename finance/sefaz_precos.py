@@ -38,6 +38,24 @@ class SefazMenorPreco:
     def disponivel(self, lat: float, lon: float, raio_km: int = 15) -> bool:
         return len(self.buscar("arroz", lat, lon, raio_km)) > 0
 
+    def opcoes_produto(self, termo: str, lat: float, lon: float, raio_km: int = 15,
+                       limite: int = 8) -> list[dict]:
+        """Variantes DISTINTAS de produto que casam com o termo, pro cliente
+        escolher no 'ajustar'. Agrupa por descricao normalizada, mostra a faixa
+        de preco de cada variante. Ordenado por mais barato."""
+        precos = self.buscar(termo, lat, lon, raio_km, limite=40)
+        grupos: dict[str, dict] = {}
+        for p in precos:
+            chave = " ".join(_norm(p["descricao"]).split()[:3])
+            g = grupos.setdefault(chave, {"descricao": p["descricao"],
+                                          "min": p["valor_centavos"], "max": p["valor_centavos"],
+                                          "n": 0})
+            g["min"] = min(g["min"], p["valor_centavos"])
+            g["max"] = max(g["max"], p["valor_centavos"])
+            g["n"] += 1
+        opcoes = sorted(grupos.values(), key=lambda x: x["min"])
+        return opcoes[:limite]
+
     def buscar(self, termo: str, lat: float, lon: float, raio_km: int = 15,
                limite: int = 30) -> list[dict]:
         termo = (termo or "").strip()

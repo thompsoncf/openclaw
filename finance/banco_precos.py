@@ -198,19 +198,21 @@ def comparar_para_cidade(pool, itens: list[str], cidade: str | None) -> dict:
     return r
 
 
-def comparar_separado(pool, itens: list[str], cidade: str | None) -> dict:
+def comparar_separado(pool, itens: list[str], cidade: str | None,
+                      escolhas: dict[str, str] | None = None) -> dict:
     """Comparador separado por DEPARTAMENTO (mercado / farmacia / outro).
 
-    Retorna {'fonte', 'grupos': {'mercado': {...}, 'farmacia': {...}}, 'observacoes'}.
-    Cada grupo tem o ranking de estabelecimentos daquele tipo, ja' com bairro e
-    distancia. So' a SEFAZ classifica por tipo; o banco proprio cai em 'mercado'.
+    `escolhas` permite AJUSTAR um item: mapa {item: termo_especifico}. O termo
+    escolhido e' usado na busca no lugar do generico, dando precisao.
     """
-    base = comparar_para_cidade(pool, itens, cidade)
+    escolhas = escolhas or {}
+    termos = [escolhas.get(i, i) for i in itens]
+    base = comparar_para_cidade(pool, termos, cidade)
     grupos: dict[str, dict] = {}
     for m in base.get("mercados", []):
         tipo = m.get("tipo") or "mercado"
         if tipo == "outro":
-            tipo = "mercado"   # agrupa 'outro' com mercado (e' o caso comum)
+            tipo = "mercado"
         grupos.setdefault(tipo, {"mercados": []})["mercados"].append(m)
     for g in grupos.values():
         g["mercados"] = g["mercados"][:3]

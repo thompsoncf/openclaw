@@ -31,6 +31,23 @@ def _detectores():
     return dets
 
 
+def medir_imagem(dados: bytes, media_type: str = "image/jpeg") -> dict:
+    """Mede a imagem que chegou: largura, altura, tamanho em bytes. Pra auditar
+    a QUALIDADE real da foto que o app de mensagens entrega. Tolerante a falha."""
+    info = {"bytes": len(dados) if dados else 0, "largura": None, "altura": None}
+    if media_type == "application/pdf":
+        return info
+    try:
+        import cv2
+        import numpy as np
+        arr = cv2.imdecode(np.frombuffer(dados, np.uint8), cv2.IMREAD_COLOR)
+        if arr is not None:
+            info["altura"], info["largura"] = arr.shape[0], arr.shape[1]
+    except Exception:  # noqa: BLE001
+        pass
+    return info
+
+
 def ler_chave_da_imagem(imagem_bytes: bytes) -> str | None:
     """Le o QR code de uma imagem (bytes) e devolve a chave de 44 digitos.
     None se nao houver QR legivel ou nao for uma NFC-e. Tolerante a falha.
@@ -164,18 +181,21 @@ def metadados(chave: str) -> dict:
         return {}
 
 
-def registrar_leitura(pool, conta_id, chave, media_type):
-    """Grava a auditoria de uma foto/PDF recebido (leu QR ou nao). Tolerante a
-    falha: nunca quebra o fluxo do bot se o banco estiver indisponivel."""
+def registrar_leitura(pool, conta_id, chave, media_type, img_info=None):
+    """Grava a auditoria de uma foto/PDF recebido (leu QR ou nao), incluindo a
+    qualidade da imagem (dimensoes/bytes). Tolerante a falha."""
     try:
         m = metadados(chave) if chave else {}
+        info = img_info or {}
         with pool.connection() as c:
             c.execute(
                 """insert into qr_leituras
-                   (conta_id, chave, uf, cnpj_emitente, data_emissao, media_type, leu)
-                   values (%s, %s, %s, %s, %s, %s, %s)""",
+                   (conta_id, chave, uf, cnpj_emitente, data_emissao, media_type,
+                    leu, img_largura, img_altura, img_bytes)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (conta_id, chave, m.get("uf"), m.get("cnpj_emitente"),
-                 m.get("data_emissao"), media_type, bool(chave)),
+                 m.get("data_emissao"), media_type, bool(chave),
+                 info.get("largura"), info.get("altura"), info.get("bytes")),
             )
             c.commit()
     except Exception:  # noqa: BLE001

@@ -117,10 +117,11 @@ def _ler_qr_whatsapp(numero: str, dados: bytes, media_type: str) -> None:
     except Exception:  # noqa: BLE001
         chave = None
     try:
-        from finance.nfce_qr import registrar_leitura
+        from finance.nfce_qr import registrar_leitura, medir_imagem
         achado = ct.membro_por_whatsapp(_setup(), numero)
         conta_id = achado[1].id if achado else None
-        registrar_leitura(_setup(), conta_id, chave, media_type)
+        info = medir_imagem(dados, media_type)
+        registrar_leitura(_setup(), conta_id, chave, media_type, info)
     except Exception:  # noqa: BLE001
         pass
 

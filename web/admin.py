@@ -124,11 +124,12 @@ _ADMIN_QR = """{% extends "abase" %}{% block conteudo %}
 </div>
 
 <div class="card"><h2>Últimas notas recebidas</h2>
-<table><tr><th>Quando</th><th>Conta</th><th>Tipo</th><th>Leu?</th><th>UF</th><th>Emitida</th><th>Chave / CNPJ emitente</th></tr>
+<table><tr><th>Quando</th><th>Conta</th><th>Tipo</th><th>Foto (px / KB)</th><th>Leu?</th><th>UF</th><th>Emitida</th><th>Chave / CNPJ emitente</th></tr>
 {% for r in leituras %}<tr>
 <td class="mut">{{ r.criado_em.strftime('%d/%m %H:%M') }}</td>
 <td>{{ r.conta_id or '-' }}</td>
 <td class="mut">{{ 'PDF' if r.media_type == 'application/pdf' else 'foto' }}</td>
+<td class="mut" style="font-size:.78rem">{% if r.img_largura %}{{ r.img_largura }}×{{ r.img_altura }}{% if r.img_bytes %} · {{ (r.img_bytes/1024)|round|int }}KB{% endif %}{% else %}-{% endif %}</td>
 <td>{% if r.leu %}<span class="tag ativa">sim</span>{% else %}<span class="tag suspensa">não</span>{% endif %}</td>
 <td>{{ r.uf or '-' }}</td>
 <td class="mut">{{ r.data_emissao.strftime('%m/%Y') if r.data_emissao else '-' }}</td>
@@ -212,10 +213,10 @@ def admin_qr(request: Request):
         total = c.execute("select count(*) from qr_leituras").fetchone()[0]
         leu = c.execute("select count(*) from qr_leituras where leu").fetchone()[0]
         cols = ["conta_id", "chave", "uf", "cnpj_emitente", "data_emissao",
-                "media_type", "leu", "criado_em"]
+                "media_type", "leu", "criado_em", "img_largura", "img_altura", "img_bytes"]
         leituras = [dict(zip(cols, r)) for r in c.execute(
             """select conta_id, chave, uf, cnpj_emitente, data_emissao,
-                      media_type, leu, criado_em
+                      media_type, leu, criado_em, img_largura, img_altura, img_bytes
                from qr_leituras order by id desc limit 200""").fetchall()]
     sem = total - leu
     taxa = round(100 * leu / total) if total else 0

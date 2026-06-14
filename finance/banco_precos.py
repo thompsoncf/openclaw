@@ -196,3 +196,23 @@ def comparar_para_cidade(pool, itens: list[str], cidade: str | None) -> dict:
         r = BancoPrecos(pool).comparar_cesta(itens, regiao=None)
     r["fonte"] = "proprio" if r["observacoes"] > 0 else "vazio"
     return r
+
+
+def comparar_separado(pool, itens: list[str], cidade: str | None) -> dict:
+    """Comparador separado por DEPARTAMENTO (mercado / farmacia / outro).
+
+    Retorna {'fonte', 'grupos': {'mercado': {...}, 'farmacia': {...}}, 'observacoes'}.
+    Cada grupo tem o ranking de estabelecimentos daquele tipo, ja' com bairro e
+    distancia. So' a SEFAZ classifica por tipo; o banco proprio cai em 'mercado'.
+    """
+    base = comparar_para_cidade(pool, itens, cidade)
+    grupos: dict[str, dict] = {}
+    for m in base.get("mercados", []):
+        tipo = m.get("tipo") or "mercado"
+        if tipo == "outro":
+            tipo = "mercado"   # agrupa 'outro' com mercado (e' o caso comum)
+        grupos.setdefault(tipo, {"mercados": []})["mercados"].append(m)
+    for g in grupos.values():
+        g["mercados"] = g["mercados"][:3]
+    return {"fonte": base.get("fonte", "vazio"), "grupos": grupos,
+            "observacoes": base.get("observacoes", 0), "itens": base.get("itens", [])}

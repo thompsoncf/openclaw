@@ -1,16 +1,9 @@
 """Cliente da API SEFAZ Menor Preco (base aberta Nota Parana - cobre PR e PE).
 
-Consulta precos REAIS de nota fiscal, em tempo real, num raio geografico. E' a
-fonte oficial: cada preco vem da ultima NFC-e emitida pelo estabelecimento.
-
-Confirmado por sondagem que o endpoint responde de servidores (ex: Render):
-  GET /api/v1/produtos?local=LAT,LON&termo=PRODUTO&raio=KM&offset=0
-
-Cobertura: estados que usam a plataforma Celepar/Nota Parana (PR, PE...).
-Fora dela (ex: PI), retorna vazio - ai' o comparador usa o banco proprio.
-
-Esta camada e' TOLERANTE A FALHA: qualquer erro (timeout, bloqueio, formato)
-retorna lista vazia, nunca quebra o fluxo do usuario.
+Consulta precos REAIS de nota fiscal, em tempo real, num raio geografico.
+Casamento forte (palavra do termo na descricao) + descarte de outliers baratos.
+Classifica estabelecimento (mercado/farmacia) e traz endereco/distancia.
+Tolerante a falha: qualquer erro retorna vazio, nunca quebra o fluxo.
 """
 from __future__ import annotations
 
@@ -32,9 +25,8 @@ _HEADERS = {
 
 
 def _norm(t: str) -> str:
-    t = "".join(c for c in unicodedata.normalize("NFD", (t or "").lower())
-                if unicodedata.category(c) != "Mn")
-    return t
+    return "".join(c for c in unicodedata.normalize("NFD", (t or "").lower())
+                   if unicodedata.category(c) != "Mn")
 
 
 class SefazMenorPreco:
@@ -48,10 +40,6 @@ class SefazMenorPreco:
 
     def buscar(self, termo: str, lat: float, lon: float, raio_km: int = 15,
                limite: int = 30) -> list[dict]:
-        """Busca um produto. Retorna lista normalizada de precos por
-        estabelecimento (ordenada do mais barato). Vazia em qualquer erro.
-        Aplica casamento forte (palavra do termo na descricao) e descarte de
-        outliers baratos (item errado: sache, bala, unidade)."""
         termo = (termo or "").strip()
         if not termo:
             return []
@@ -77,15 +65,19 @@ class SefazMenorPreco:
             if valor <= 0:
                 continue
             desc = p.get("desc", "").strip()
-            # CASAMENTO FORTE: ao menos uma palavra significativa do termo
-            # precisa aparecer na descricao (evita 'acucar' casar com 'bala')
             if alvo and not any(w in _norm(desc) for w in alvo):
                 continue
             est = p.get("estabelecimento") or {}
+            nome_merc = (est.get("nm_fan") or est.get("nm_emp") or "").strip() or "(sem nome)"
+            logr = " ".join(x for x in [
+                (est.get("tp_logr") or "").strip(), (est.get("nm_logr") or "").strip(),
+                (est.get("nr_logr") or "").strip()] if x).strip()
             achados.append({
                 "descricao": desc,
                 "valor_centavos": int(round(valor * 100)),
-                "mercado": (est.get("nm_fan") or est.get("nm_emp") or "").strip() or "(sem nome)",
+                "mercado": nome_merc,
+                "tipo": _tipo_estabelecimento(nome_merc, p.get("ncm")),
+                "endereco": logr,
                 "bairro": (est.get("bairro") or "").strip(),
                 "cidade": (est.get("mun") or "").strip(),
                 "uf": (est.get("uf") or "").strip(),
@@ -99,7 +91,6 @@ class SefazMenorPreco:
 
     def comparar_cesta(self, itens: list[str], lat: float, lon: float,
                        raio_km: int = 15) -> dict:
-        """Mesma estrutura do BancoPrecos.comparar_cesta, mas com dados da API."""
         detalhe_itens = []
         mercados: dict[str, dict] = {}
         total_obs = 0
@@ -117,7 +108,10 @@ class SefazMenorPreco:
                     "melhor_centavos": melhor["valor_centavos"], "precos": precos,
                 })
                 for p in precos:
-                    m = mercados.setdefault(p["mercado"], {"soma": 0, "cobertos": 0, "faltando": []})
+                    m = mercados.setdefault(p["mercado"], {
+                        "soma": 0, "cobertos": 0, "faltando": [],
+                        "tipo": p.get("tipo", "outro"), "bairro": p.get("bairro", ""),
+                        "distancia_km": p.get("distancia_km")})
                     m["soma"] += p["valor_centavos"]
                     m["cobertos"] += 1
             else:
@@ -129,16 +123,33 @@ class SefazMenorPreco:
                    if any(p["mercado"] == nome_merc for p in d["precos"])}
             m["faltando"] = [n for n in nomes if n not in tem]
         ranking = [{"mercado": k, "total_centavos": v["soma"],
-                    "itens_cobertos": v["cobertos"], "itens_faltando": v["faltando"]}
+                    "itens_cobertos": v["cobertos"], "itens_faltando": v["faltando"],
+                    "tipo": v["tipo"], "bairro": v["bairro"], "distancia_km": v["distancia_km"]}
                    for k, v in mercados.items()]
         ranking.sort(key=lambda x: (-x["itens_cobertos"], x["total_centavos"]))
         return {"mercados": ranking, "itens": detalhe_itens, "observacoes": total_obs}
 
 
+def _tipo_estabelecimento(nome: str, ncm=None) -> str:
+    """Classifica em 'farmacia', 'mercado' ou 'outro' pelo nome (e NCM se util)."""
+    n = _norm(nome)
+    farmacia = ("farmacia", "drogaria", "drogasil", "pacheco", "raia", "panvel",
+                "pague menos", "nissei", "permanente", "ultrafarma",
+                "extrafarma", "venancio", "popular")
+    if any(t in n for t in farmacia):
+        return "farmacia"
+    if ncm and str(ncm).startswith("30"):
+        return "farmacia"
+    mercado = ("super", "mercado", "atacad", "atacarejo", "hiper", "armazem",
+               "mercearia", "comercial", "alimentos", "assai", "carrefour",
+               "big", "makro", "sams", "frangos", "hortifruti", "sacolao")
+    if any(t in n for t in mercado):
+        return "mercado"
+    return "outro"
+
+
 def _sem_outliers(achados: list[dict]) -> list[dict]:
-    """Descarta precos absurdamente baixos pro grupo (ex: 'acucar' de R$ 0,20
-    no meio de acucares de R$ 18 = item errado, sache, unidade). Usa a mediana:
-    remove o que estiver abaixo de 30% dela. So' age com >= 4 precos."""
+    """Descarta precos absurdamente baixos pro grupo (mediana * 0.3). >= 4 precos."""
     if len(achados) < 4:
         return achados
     vals = sorted(a["valor_centavos"] for a in achados)

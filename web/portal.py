@@ -9,7 +9,7 @@ import os
 import secrets
 
 from fastapi import APIRouter, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from jinja2 import Environment, DictLoader, select_autoescape
 
 from datetime import date
@@ -410,20 +410,10 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 <span style="font-size:.78rem">(baseada no histórico de preços)</span></p>
 {% endif %}
 
-{% if comparacao and comparacao.observacoes > 0 %}
-<div style="background:#0e0e0f; border:1px solid #2a2a2b; border-radius:10px; padding:1rem; margin:1rem 0">
-<div style="font-weight:600; margin-bottom:.6rem">🛒 Onde sua cesta sai mais barata</div>
-{% for m in comparacao.mercados[:3] %}
-<div style="display:flex; justify-content:space-between; padding:.4rem 0; {% if not loop.last %}border-bottom:1px solid #1d1d1f{% endif %}">
-<div>{{ loop.index }}. <b>{{ m.mercado }}</b>
-<span class="mut" style="font-size:.78rem">· {{ m.itens_cobertos }} itens{% if m.itens_faltando %} · faltam {{ m.itens_faltando|length }}{% else %} · completa{% endif %}</span></div>
-<b style="color:#5dcaa5">{{ brl(m.total_centavos) }}</b>
+{% if tem_pendentes %}
+<div id="comparador" style="margin:1rem 0">
+<div class="mut" style="font-size:.85rem">🔄 Buscando os melhores preços perto de você...</div>
 </div>
-{% endfor %}
-<p class="mut" style="font-size:.74rem; margin:.6rem 0 0">Baseado em {{ comparacao.observacoes }} preços dos seus cupons — melhora a cada compra registrada.</p>
-</div>
-{% elif comparacao %}
-<p class="mut" style="font-size:.82rem; margin:1rem 0">📈 Ainda aprendendo os preços da sua região. Conforme você e sua família registram cupons de mercado, vou mostrar aqui onde a cesta sai mais barata.</p>
 {% endif %}
 
 {% if itens %}
@@ -453,7 +443,45 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 <p class="mut">A lista está vazia. Adicione itens acima — ou peça pelo WhatsApp/Telegram:
 <i>"acabou o arroz, bota na lista"</i>.</p>
 {% endif %}
-</div>{% endblock %}"""
+</div>
+{% if tem_pendentes %}
+<script>
+(function(){
+  var alvo = document.getElementById('comparador');
+  if (!alvo) return;
+  fetch('/painel/compras/precos').then(function(r){ return r.json(); }).then(function(d){
+    var grupos = d.grupos || {};
+    var nomes = Object.keys(grupos);
+    if (!nomes.length) {
+      alvo.innerHTML = '<p class="mut" style="font-size:.82rem">📈 Ainda não tenho preços suficientes pra comparar essa lista aqui na sua região. Vou aprendendo conforme você e sua família registram cupons.</p>';
+      return;
+    }
+    var html = '';
+    nomes.forEach(function(grupo){
+      var linhas = grupos[grupo];
+      html += '<div style="background:#0e0e0f;border:1px solid #2a2a2b;border-radius:10px;padding:1rem;margin:1rem 0">';
+      html += '<div style="font-weight:600;margin-bottom:.6rem">'+grupo+' — onde sua cesta sai mais barata</div>';
+      linhas.forEach(function(m, i){
+        var falta = m.faltando ? (' · faltam '+m.faltando) : ' · completa';
+        var end = m.endereco ? ('<div class="mut" style="font-size:.72rem">'+m.endereco+'</div>') : '';
+        html += '<div style="display:flex;justify-content:space-between;padding:.45rem 0;'+(i<linhas.length-1?'border-bottom:1px solid #1d1d1f':'')+'">';
+        html += '<div>'+(i+1)+'. <b>'+m.mercado+'</b> <span class="mut" style="font-size:.76rem">· '+m.cobertos+' itens'+falta+'</span>'+end+'</div>';
+        html += '<b style="color:#5dcaa5">'+m.total+'</b></div>';
+      });
+      html += '</div>';
+    });
+    var fonte = d.fonte === 'sefaz'
+      ? 'Preços oficiais de nota fiscal (SEFAZ), atualizados há pouco.'
+      : 'Baseado em '+d.observacoes+' preços dos seus cupons — melhora a cada compra.';
+    html += '<p class="mut" style="font-size:.72rem">'+fonte+'</p>';
+    alvo.innerHTML = html;
+  }).catch(function(){
+    alvo.innerHTML = '<p class="mut" style="font-size:.8rem">Não consegui buscar os preços agora. Tente recarregar.</p>';
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}"""
 
 _env = Environment(loader=DictLoader({
     "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS,
@@ -656,20 +684,55 @@ def compras(request: Request):
         itens = lista.listar(incluir_comprados=True)
     except Exception:  # noqa: BLE001
         pass
-    # comparador de cesta (SEFAZ onde cobre, banco proprio no resto)
-    comparacao = None
-    try:
-        from finance.banco_precos import comparar_para_cidade
-        with get_pool().connection() as c:
-            row = c.execute("select cidade from contas where id=%s", (conta[0],)).fetchone()
-        cidade = row[0] if row else None
-        pendentes = [i["descricao"] for i in itens if not i["comprado"]]
-        if pendentes:
-            comparacao = comparar_para_cidade(get_pool(), pendentes, cidade)
-    except Exception:  # noqa: BLE001
-        comparacao = None
+    # o comparador NAO roda aqui (seria lento). A pagina carrega rapida e o
+    # JS busca os precos em segundo plano via /painel/compras/precos.
+    tem_pendentes = any(not i["comprado"] for i in itens)
     return _render("compras", request, titulo="Compras", itens=itens,
-                   resumo=lista.resumo(), comparacao=comparacao)
+                   resumo=lista.resumo(), tem_pendentes=tem_pendentes)
+
+
+@router.get("/painel/compras/precos")
+def compras_precos(request: Request):
+    """Endpoint chamado pelo JS em segundo plano: calcula o comparador separado
+    por departamento e devolve JSON. A pagina ja' carregou; isso preenche depois."""
+    conta = conta_logada(request)
+    if conta is None:
+        return JSONResponse({"erro": "nao logado"}, status_code=401)
+    from finance.banco_precos import comparar_separado
+    from finance.lista_compras import ListaCompras
+    lista = ListaCompras(get_pool(), conta[0])
+    pendentes = [i["descricao"] for i in lista.listar(incluir_comprados=False)]
+    if not pendentes:
+        return JSONResponse({"grupos": {}, "observacoes": 0, "fonte": "vazio"})
+    with get_pool().connection() as c:
+        row = c.execute("select cidade from contas where id=%s", (conta[0],)).fetchone()
+    cidade = row[0] if row else None
+    try:
+        r = comparar_separado(get_pool(), pendentes, cidade)
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"grupos": {}, "observacoes": 0, "fonte": "erro"})
+    return JSONResponse(_fmt_comparacao(r))
+
+
+def _fmt_comparacao(r: dict) -> dict:
+    """Formata o resultado do comparador pra JSON amigavel ao front (com BRL)."""
+    rotulos = {"mercado": "🏪 Mercado", "farmacia": "💊 Farmácia", "outro": "🏪 Mercado"}
+    grupos = {}
+    for tipo, g in r.get("grupos", {}).items():
+        linhas = []
+        for m in g["mercados"]:
+            endereco = m.get("bairro") or ""
+            dist = m.get("distancia_km")
+            if dist is not None:
+                endereco = (endereco + f" · {dist:g} km").strip(" ·")
+            linhas.append({
+                "mercado": m["mercado"], "total": brl(m["total_centavos"]),
+                "cobertos": m["itens_cobertos"], "faltando": len(m["itens_faltando"]),
+                "endereco": endereco,
+            })
+        if linhas:
+            grupos[rotulos.get(tipo, tipo)] = linhas
+    return {"grupos": grupos, "observacoes": r.get("observacoes", 0), "fonte": r.get("fonte", "vazio")}
 
 
 @router.post("/painel/compras/add")

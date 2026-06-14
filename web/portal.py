@@ -395,172 +395,179 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.5rem">
 <h1 style="margin:0">Lista de compras</h1>
-{% if itens %}<form method="post" action="/painel/compras/limpar" style="margin:0"
- onsubmit="return confirm('Remover os itens já comprados da lista?')">
-<button style="margin:0;padding:.4rem .8rem;background:#2a2a2b;font-size:.82rem">Limpar comprados</button></form>{% endif %}
+<button id="btn-limpar" style="margin:0;padding:.4rem .8rem;background:#2a2a2b;font-size:.82rem;width:auto;display:none">Limpar comprados</button>
 </div>
 
-<form method="post" action="/painel/compras/add" style="display:flex; gap:.5rem; margin:1rem 0">
-<input name="descricao" placeholder="Adicionar item (ex: arroz, café...)" required maxlength="80" style="flex:1">
+<form id="form-add" style="display:flex; gap:.5rem; margin:1rem 0">
+<input id="inp-add" placeholder="Adicionar item (ex: arroz, café...)" required maxlength="80" style="flex:1" autocomplete="off">
 <button style="margin:0; width:auto; padding:.65rem 1.2rem">Adicionar</button>
 </form>
 
-{% if resumo.estimado_centavos %}
-<p class="mut">Estimativa dos pendentes: <b style="color:#5dcaa5">{{ brl(resumo.estimado_centavos) }}</b>
-<span style="font-size:.78rem">(baseada no histórico de preços)</span></p>
-{% endif %}
+<div id="comparador" style="margin:1rem 0"></div>
 
-{% if tem_pendentes %}
-<div id="comparador" style="margin:1rem 0">
-<div class="mut" style="font-size:.85rem">🔄 Buscando os melhores preços perto de você...</div>
+<div id="lista-itens"></div>
+<p id="resumo-lista" class="mut" style="margin-top:1rem"></p>
 </div>
-{% endif %}
 
-{% if itens %}
-<table style="margin-top:.5rem">
-{% for i in itens %}
-<tr style="{{ 'opacity:.5' if i.comprado else '' }}">
-<td style="width:40px">
-<form method="post" action="/painel/compras/marcar" style="margin:0">
-<input type="hidden" name="item_id" value="{{ i.id }}">
-<input type="hidden" name="comprado" value="{{ 0 if i.comprado else 1 }}">
-<button title="marcar" style="margin:0;padding:.25rem .55rem;background:{{ '#1d9e75' if i.comprado else '#2a2a2b' }};font-size:.9rem">✓</button>
-</form></td>
-<td style="{{ 'text-decoration:line-through' if i.comprado else '' }}">{{ i.descricao }}
-{% if i.quantidade and i.quantidade != 1 %}<span class="mut">({{ '%g'|format(i.quantidade) }}{{ i.unidade or '' }})</span>{% endif %}
-{% if i.preco_estimado_centavos %}<span class="mut"> · ~{{ brl(i.preco_estimado_centavos) }}</span>{% endif %}</td>
-<td class="mut" style="font-size:.8rem">{{ i.quem }}</td>
-<td style="width:40px; text-align:right">
-<form method="post" action="/painel/compras/remover" style="margin:0">
-<input type="hidden" name="item_id" value="{{ i.id }}">
-<button title="remover" style="margin:0;padding:.25rem .5rem;background:transparent;color:#8a3636;font-size:.95rem">✕</button>
-</form></td></tr>
-{% endfor %}
-</table>
-<p class="mut" style="margin-top:1rem">{{ resumo.pendentes }} pendente(s)
-{% if resumo.comprados %}· {{ resumo.comprados }} comprado(s){% endif %}</p>
-{% else %}
-<p class="mut">A lista está vazia. Adicione itens acima — ou peça pelo WhatsApp/Telegram:
-<i>"acabou o arroz, bota na lista"</i>.</p>
-{% endif %}
-</div>
-{% if tem_pendentes %}
 <script>
 (function(){
-  var alvo = document.getElementById('comparador');
-  var ajustesAtivos = {};
-  if (!alvo) return;
-  function recarregar() {
-    var params = new URLSearchParams();
-    Object.entries(ajustesAtivos).forEach(function(kv){
-      params.append('ajuste', kv[0]+'||'+kv[1]);
-    });
-    var url = '/painel/compras/precos'+(params.toString() ? '?'+params.toString() : '');
-    fetch(url).then(function(r){ return r.json(); }).then(function(d){
-      renderizar(d);
-    }).catch(function(){
-      alvo.innerHTML = '<p class="mut" style="font-size:.8rem">Não consegui buscar os preços agora. Tente recarregar.</p>';
-    });
+  var listaEl = document.getElementById('lista-itens');
+  var resumoEl = document.getElementById('resumo-lista');
+  var compEl = document.getElementById('comparador');
+  var btnLimpar = document.getElementById('btn-limpar');
+  var ajustes = {};
+  var pendentesAtuais = [];
+
+  function esc(s){ var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+  function acao(payload){
+    return fetch('/painel/compras/api', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    }).then(function(r){ return r.json(); }).then(function(d){ render(d); return d; });
   }
-  function renderizar(d) {
-    var grupos = d.grupos || {};
-    var nomes = Object.keys(grupos);
-    if (!nomes.length) {
-      alvo.innerHTML = '<p class="mut" style="font-size:.82rem">📈 Ainda não tenho preços suficientes pra comparar essa lista aqui na sua região. Vou aprendendo conforme você e sua família registram cupons.</p>';
+
+  function render(d){
+    var itens = d.itens || [];
+    pendentesAtuais = itens.filter(function(i){return !i.comprado;}).map(function(i){return i.descricao;});
+    if (!itens.length){
+      listaEl.innerHTML = '<p class="mut">A lista está vazia. Adicione itens acima — ou peça pelo WhatsApp/Telegram: <i>"acabou o arroz, bota na lista"</i>.</p>';
+      resumoEl.textContent = '';
+      btnLimpar.style.display = 'none';
+      compEl.innerHTML = '';
       return;
     }
-    var html = '';
-    nomes.forEach(function(grupo){
-      var linhas = grupos[grupo];
-      html += '<div style="background:#0e0e0f;border:1px solid #2a2a2b;border-radius:10px;padding:1rem;margin:1rem 0">';
-      html += '<div style="font-weight:600;margin-bottom:.6rem">'+grupo+' — onde sua cesta sai mais barata</div>';
-      linhas.forEach(function(m, i){
-        var falta = m.faltando ? (' · faltam '+m.faltando) : ' · completa';
-        var end = m.endereco ? ('<div class="mut" style="font-size:.72rem">'+m.endereco+'</div>') : '';
-        html += '<div style="padding:.45rem 0;'+(i<linhas.length-1?'border-bottom:1px solid #1d1d1f':'')+'">';
-        html += '<div style="display:flex;justify-content:space-between">';
-        html += '<div>'+(i+1)+'. <b>'+m.mercado+'</b> <span class="mut" style="font-size:.76rem">· '+m.cobertos+' itens'+falta+'</span>'+end+'</div>';
-        html += '<b style="color:#5dcaa5">'+m.total+'</b></div>';
-        if (m.produtos && m.produtos.length){
-          html += '<div style="margin:.3rem 0 0 1.1rem">';
-          m.produtos.forEach(function(pr){
-            html += '<div class="mut" style="font-size:.72rem;display:flex;justify-content:space-between">';
-            html += '<span>'+pr.descricao+'</span><span>'+pr.preco+'</span></div>';
-          });
-          html += '</div>';
-        }
-        html += '</div>';
-      });
-      html += '</div>';
+    var html = '<table style="margin-top:.5rem">';
+    itens.forEach(function(i){
+      var preco = i.preco ? '<span class="mut"> · ~'+i.preco+'</span>' : '';
+      html += '<tr style="'+(i.comprado?'opacity:.5':'')+'">';
+      html += '<td style="width:40px"><button class="mk" data-id="'+i.id+'" data-c="'+(i.comprado?0:1)+'" title="marcar" style="margin:0;padding:.25rem .55rem;background:'+(i.comprado?'#1d9e75':'#2a2a2b')+';font-size:.9rem">✓</button></td>';
+      html += '<td style="'+(i.comprado?'text-decoration:line-through':'')+'">'+esc(i.descricao)+preco+'</td>';
+      html += '<td class="mut" style="font-size:.8rem">'+esc(i.quem||'')+'</td>';
+      html += '<td style="width:40px;text-align:right"><button class="rm" data-id="'+i.id+'" title="remover" style="margin:0;padding:.25rem .5rem;background:transparent;color:#8a3636;font-size:.95rem">✕</button></td>';
+      html += '</tr>';
     });
-    if (d.itens && d.itens.length) {
-      html += '<div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid #2a2a2b">';
-      html += '<p style="font-size:.85rem;font-weight:500;margin-bottom:.5rem">Não bateu? Ajuste cada produto:</p>';
-      d.itens.forEach(function(item){
-        var desc = item.descricao || '';
-        html += '<button type="button" onclick="event.preventDefault(); ajustar('+JSON.stringify(desc).replace(/"/g, '&quot;')+');" ';
-        html += 'style="background:none;border:none;color:#5dcaa5;cursor:pointer;font-size:.82rem;text-decoration:underline;padding:0.2rem 0;margin:0.3rem 0;text-align:left">';
-        html += '  → '+desc;
-        html += '</button><br/>';
-      });
-      html += '</div>';
-    }
-    var fonte = d.fonte === 'sefaz'
-      ? 'Preços oficiais de nota fiscal (SEFAZ), atualizados há pouco.'
-      : 'Baseado em '+d.observacoes+' preços dos seus cupons — melhora a cada compra.';
-    html += '<p class="mut" style="font-size:.72rem">'+fonte+'</p>';
-    alvo.innerHTML = html;
+    html += '</table>';
+    listaEl.innerHTML = html;
+    resumoEl.textContent = d.pendentes + ' pendente(s)' + (d.comprados ? ' · '+d.comprados+' comprado(s)' : '');
+    btnLimpar.style.display = d.comprados ? '' : 'none';
+    Array.prototype.forEach.call(listaEl.querySelectorAll('.mk'), function(b){
+      b.onclick = function(){ acao({acao:'marcar', item_id:+b.getAttribute('data-id'), comprado:+b.getAttribute('data-c')}).then(carregarPrecos); };
+    });
+    Array.prototype.forEach.call(listaEl.querySelectorAll('.rm'), function(b){
+      b.onclick = function(){ acao({acao:'remover', item_id:+b.getAttribute('data-id')}).then(carregarPrecos); };
+    });
   }
-  window.ajustar = function(item) {
-    var modal = document.createElement('div');
-    modal.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999';
-    var caixa = document.createElement('div');
-    caixa.style.cssText = 'background:#1d1d1f;border:1px solid #2a2a2b;border-radius:10px;padding:1.5rem;max-width:400px;max-height:70vh;overflow-y:auto;color:#fff';
-    caixa.innerHTML = '<p style="font-size:.75rem;color:#888;margin:0 0 1rem">Qual e o produto certo?</p>';
-    var loading = document.createElement('p');
-    loading.textContent = 'Carregando variantes...';
-    loading.style.cssText = 'color:#999;font-size:.82rem';
-    caixa.appendChild(loading);
-    modal.appendChild(caixa);
-    document.body.appendChild(modal);
+
+  document.getElementById('form-add').onsubmit = function(e){
+    e.preventDefault();
+    var inp = document.getElementById('inp-add');
+    var v = inp.value.trim();
+    if (!v) return;
+    inp.value = '';
+    ajustes = {};
+    acao({acao:'add', descricao:v}).then(carregarPrecos);
+  };
+  btnLimpar.onclick = function(){
+    acao({acao:'limpar'}).then(carregarPrecos);
+  };
+
+  var prog = null;
+  function barraProgresso(){
+    var n = pendentesAtuais.length || 1, i = 0;
+    compEl.innerHTML = '<div style="margin:.4rem 0"><div class="mut" style="font-size:.82rem" id="prog-txt">Buscando os melhores preços perto de você...</div>'
+      + '<div style="height:6px;background:#1d1d1f;border-radius:4px;margin-top:.4rem;overflow:hidden">'
+      + '<div id="prog-bar" style="height:100%;width:8%;background:#5dcaa5;transition:width .4s"></div></div></div>';
+    var bar = document.getElementById('prog-bar'), txt = document.getElementById('prog-txt');
+    if (prog) clearInterval(prog);
+    prog = setInterval(function(){
+      i = Math.min(i+1, n);
+      if (bar) bar.style.width = Math.min(8 + (i/n)*84, 92) + '%';
+      if (txt) txt.textContent = 'Buscando preços... ' + Math.min(i, n) + ' de ' + n + ' itens';
+    }, 500);
+  }
+
+  function carregarPrecos(){
+    if (!pendentesAtuais.length){ compEl.innerHTML=''; if(prog) clearInterval(prog); return; }
+    barraProgresso();
+    var params = Object.keys(ajustes).map(function(it){
+      return 'ajuste=' + encodeURIComponent(it + '||' + ajustes[it]);
+    }).join('&');
+    fetch('/painel/compras/precos' + (params ? ('?'+params) : ''))
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (prog) clearInterval(prog);
+        var grupos = d.grupos || {}, nomes = Object.keys(grupos), html = '';
+        if (!nomes.length){
+          html = '<p class="mut" style="font-size:.82rem">📈 Ainda não tenho preços suficientes pra comparar essa lista aqui na sua região.</p>';
+        } else {
+          nomes.forEach(function(grupo){
+            var linhas = grupos[grupo];
+            html += '<div style="background:#0e0e0f;border:1px solid #2a2a2b;border-radius:10px;padding:1rem;margin:1rem 0">';
+            html += '<div style="font-weight:600;margin-bottom:.6rem">'+grupo+' — onde sua cesta sai mais barata</div>';
+            linhas.forEach(function(m, i){
+              var falta = m.faltando ? (' · faltam '+m.faltando) : ' · completa';
+              var end = m.endereco ? ('<div class="mut" style="font-size:.72rem">'+esc(m.endereco)+'</div>') : '';
+              html += '<div style="padding:.45rem 0;'+(i<linhas.length-1?'border-bottom:1px solid #1d1d1f':'')+'">';
+              html += '<div style="display:flex;justify-content:space-between">';
+              html += '<div>'+(i+1)+'. <b>'+esc(m.mercado)+'</b> <span class="mut" style="font-size:.76rem">· '+m.cobertos+' itens'+falta+'</span>'+end+'</div>';
+              html += '<b style="color:#5dcaa5">'+m.total+'</b></div>';
+              if (m.produtos && m.produtos.length){
+                html += '<div style="margin:.3rem 0 0 1.1rem">';
+                m.produtos.forEach(function(pr){
+                  html += '<div class="mut" style="font-size:.72rem;display:flex;justify-content:space-between"><span>'+esc(pr.descricao)+'</span><span>'+pr.preco+'</span></div>';
+                });
+                html += '</div>';
+              }
+              html += '</div>';
+            });
+            html += '</div>';
+          });
+          var fonte = d.fonte === 'sefaz'
+            ? 'Preços oficiais de nota fiscal (SEFAZ), atualizados há pouco.'
+            : 'Baseado em '+d.observacoes+' preços dos seus cupons — melhora a cada compra.';
+          html += '<p class="mut" style="font-size:.72rem">'+fonte+'</p>';
+        }
+        html += '<div style="margin-top:.6rem"><div class="mut" style="font-size:.78rem;margin-bottom:.3rem">Não bateu? Ajuste o produto certo:</div><div style="display:flex;flex-wrap:wrap;gap:6px">';
+        pendentesAtuais.forEach(function(it){
+          var marca = ajustes[it] ? ' ✓' : '';
+          html += '<button type="button" class="aj" data-item="'+encodeURIComponent(it)+'" style="margin:0;padding:.25rem .6rem;background:#2a2a2b;font-size:.74rem;width:auto">'+esc(it)+marca+'</button>';
+        });
+        html += '</div><div id="aj-opcoes"></div></div>';
+        compEl.innerHTML = html;
+        Array.prototype.forEach.call(compEl.querySelectorAll('.aj'), function(b){
+          b.onclick = function(){ abrirOpcoes(decodeURIComponent(b.getAttribute('data-item'))); };
+        });
+      }).catch(function(){
+        if (prog) clearInterval(prog);
+        compEl.innerHTML = '<p class="mut" style="font-size:.8rem">Não consegui buscar os preços agora. Tente recarregar.</p>';
+      });
+  }
+
+  function abrirOpcoes(item){
+    var cx = document.getElementById('aj-opcoes');
+    cx.innerHTML = '<div class="mut" style="font-size:.78rem;margin-top:.5rem">🔄 Buscando opções de "'+esc(item)+'"...</div>';
     fetch('/painel/compras/opcoes?item='+encodeURIComponent(item))
       .then(function(r){ return r.json(); })
       .then(function(d){
-        var opcoes = d.opcoes || [];
-        if (!opcoes.length) {
-          loading.textContent = 'Nenhuma variante encontrada para esse produto.';
-          return;
-        }
-        caixa.innerHTML = '<p style="font-size:.75rem;color:#888;margin:0 0 1rem">Qual e o produto certo? (clique para escolher)</p>';
-        opcoes.forEach(function(op){
-          var btn = document.createElement('button');
-          btn.type = 'button';
-          btn.innerHTML = '<b>'+op.descricao+'</b><br/><span style="color:#999;font-size:.75rem">'+op.faixa+'</span>';
-          btn.style.cssText = 'display:block;width:100%;text-align:left;background:#0e0e0f;border:1px solid #2a2a2b;border-radius:6px;color:#fff;padding:0.7rem;margin:0.5rem 0;cursor:pointer;font-size:.82rem';
-          btn.onmouseover = function(){ this.style.borderColor = '#5dcaa5'; };
-          btn.onmouseout = function(){ this.style.borderColor = '#2a2a2b'; };
-          btn.onclick = function(){
-            ajustesAtivos[item] = op.descricao;
-            document.body.removeChild(modal);
-            recarregar();
-          };
-          caixa.appendChild(btn);
+        var ops = d.opcoes || [];
+        if (!ops.length){ cx.innerHTML = '<div class="mut" style="font-size:.76rem;margin-top:.5rem">Sem catálogo de produtos pra essa região (a comparação usa seus cupons).</div>'; return; }
+        var html = '<div style="background:#0e0e0f;border:1px solid #2a2a2b;border-radius:10px;padding:.8rem;margin-top:.5rem">';
+        html += '<div style="font-size:.8rem;margin-bottom:.4rem">Qual "'+esc(item)+'" você quer?</div>';
+        ops.forEach(function(o){
+          html += '<button type="button" class="op" data-termo="'+encodeURIComponent(o.descricao)+'" style="display:flex;justify-content:space-between;width:100%;margin:.15rem 0;padding:.4rem .6rem;background:#161617;font-size:.78rem;text-align:left"><span>'+esc(o.descricao)+'</span><span class="mut">'+o.faixa+'</span></button>';
         });
-        var fechar = document.createElement('button');
-        fechar.type = 'button';
-        fechar.textContent = 'Cancelar';
-        fechar.style.cssText = 'display:block;width:100%;background:none;border:1px solid #555;color:#888;padding:0.5rem;margin-top:1rem;cursor:pointer;border-radius:6px;font-size:.82rem';
-        fechar.onclick = function(){ document.body.removeChild(modal); };
-        caixa.appendChild(fechar);
-      })
-      .catch(function(){
-        loading.textContent = 'Erro ao carregar variantes. Tente novamente.';
-      });
-  };
-  recarregar();
+        html += '</div>';
+        cx.innerHTML = html;
+        Array.prototype.forEach.call(cx.querySelectorAll('.op'), function(b){
+          b.onclick = function(){ ajustes[item] = decodeURIComponent(b.getAttribute('data-termo')); carregarPrecos(); };
+        });
+      }).catch(function(){ cx.innerHTML=''; });
+  }
+
+  acao({acao:'noop'}).then(carregarPrecos);
 })();
 </script>
-{% endif %}
 {% endblock %}"""
 
 _env = Environment(loader=DictLoader({

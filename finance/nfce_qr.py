@@ -93,3 +93,21 @@ def metadados(chave: str) -> dict:
         }
     except (ValueError, IndexError):
         return {}
+
+
+def registrar_leitura(pool, conta_id, chave, media_type):
+    """Grava a auditoria de uma foto/PDF recebido (leu QR ou nao). Tolerante a
+    falha: nunca quebra o fluxo do bot se o banco estiver indisponivel."""
+    try:
+        m = metadados(chave) if chave else {}
+        with pool.connection() as c:
+            c.execute(
+                """insert into qr_leituras
+                   (conta_id, chave, uf, cnpj_emitente, data_emissao, media_type, leu)
+                   values (%s, %s, %s, %s, %s, %s, %s)""",
+                (conta_id, chave, m.get("uf"), m.get("cnpj_emitente"),
+                 m.get("data_emissao"), media_type, bool(chave)),
+            )
+            c.commit()
+    except Exception:  # noqa: BLE001
+        pass

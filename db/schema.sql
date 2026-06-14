@@ -115,3 +115,19 @@ insert into modulos (codigo, nome, preco_centavos) values
   ('financeiro', 'Modulo Financeiro', 0),
   ('contador',   'Modulo Contador',   1990)
 on conflict (codigo) do nothing;
+
+-- Auditoria de leitura de QR em fotos/PDFs de NFC-e
+create table if not exists qr_leituras (
+    id bigserial primary key,
+    conta_id bigint not null references contas(id) on delete cascade,
+    chave varchar(44),                    -- null se nao leu QR
+    uf varchar(2),                        -- extraido da chave se leu
+    cnpj_emitente varchar(14),            -- extraido da chave se leu
+    data_emissao date,                    -- extraido da chave se leu
+    media_type varchar(30),               -- image/jpeg, application/pdf, etc
+    leu boolean default false,            -- true se conseguiu ler (chave nao null)
+    criado_em timestamp default now()
+);
+
+create index if not exists ix_qr_leituras_conta_id on qr_leituras(conta_id);
+create index if not exists ix_qr_leituras_criado_em on qr_leituras(criado_em);

@@ -107,22 +107,35 @@ async def on_text(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
     await _processar(update, update.message.text or "")
 
 
-def _legenda_com_qr(dados: bytes, media_type: str, legenda: str) -> str:
-    """Tenta ler o QR da NFC-e (foto ou PDF) e anexa a chave na legenda como
-    nota interna pro agente. Se nao houver QR, devolve a legenda intacta.
+def _legenda_com_qr(update: Update, dados: bytes, media_type: str, legenda: str) -> str:
+    """Tenta ler o QR da NFC-e (foto ou PDF), REGISTRA a auditoria (toda foto,
+    leu ou nao) e anexa a chave na legenda como nota interna pro agente.
     Puramente aditivo: nunca quebra o fluxo (qualquer erro -> legenda original)."""
+    chave = None
     try:
-        from finance.nfce_qr import ler_chave, metadados
+        from finance.nfce_qr import ler_chave
         chave = ler_chave(dados, media_type)
-        if chave:
+    except Exception:  # noqa: BLE001
+        chave = None
+    try:
+        from finance.nfce_qr import registrar_leitura
+        import contas.contas as ct
+        achado = ct.membro_por_telegram(get_pool(), update.effective_user.id)
+        conta_id = achado[1].id if achado else None
+        registrar_leitura(get_pool(), conta_id, chave, media_type)
+    except Exception:  # noqa: BLE001
+        pass
+    if chave:
+        try:
+            from finance.nfce_qr import metadados
             m = metadados(chave)
             return legenda + (
                 f"\n\n[NOTA FISCAL IDENTIFICADA pelo QR code: chave {chave}"
                 f"{', UF ' + m['uf'] if m.get('uf') else ''}"
                 f"{', emitida em ' + m['data_emissao'].strftime('%m/%Y') if m.get('data_emissao') else ''}"
                 f". Use essa chave como identificador unico da nota pra evitar duplicata.]")
-    except Exception:  # noqa: BLE001
-        pass
+        except Exception:  # noqa: BLE001
+            pass
     return legenda
 
 
@@ -132,7 +145,7 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     dados = await arq.download_as_bytearray()
     b64 = base64.b64encode(bytes(dados)).decode("ascii")
     legenda = update.message.caption or "Segue o cupom para registrar."
-    legenda = _legenda_com_qr(bytes(dados), "image/jpeg", legenda)
+    legenda = _legenda_com_qr(update, bytes(dados), "image/jpeg", legenda)
     await _processar(update, legenda, imagem_b64=b64)
 
 
@@ -149,11 +162,11 @@ async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     dados = await arq.download_as_bytearray()
     b64 = base64.b64encode(bytes(dados)).decode("ascii")
     if "pdf" in mime or nome.endswith(".pdf"):
-        legenda = _legenda_com_qr(bytes(dados), "application/pdf", legenda)
+        legenda = _legenda_com_qr(update, bytes(dados), "application/pdf", legenda)
         await _processar(update, legenda, imagem_b64=b64, media_type="application/pdf")
     elif mime.startswith("image/") or nome.endswith((".jpg", ".jpeg", ".png", ".webp")):
         mt = mime if mime.startswith("image/") else "image/jpeg"
-        legenda = _legenda_com_qr(bytes(dados), mt, legenda)
+        legenda = _legenda_com_qr(update, bytes(dados), mt, legenda)
         await _processar(update, legenda, imagem_b64=b64, media_type=mt)
     else:
         await update.message.reply_text(

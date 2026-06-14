@@ -84,13 +84,20 @@ class SefazMenorPreco:
             if valor <= 0:
                 continue
             desc = p.get("desc", "").strip()
-            # CASAMENTO FORTE: a palavra do termo precisa aparecer como PALAVRA
-            # INTEIRA na descricao (nao substring), e idealmente entre as 2
-            # primeiras palavras (o nucleo do produto). Evita 'acucar' casar com
-            # 'bala acucar' / 'acucar de confeiteiro p/ bolo'.
-            palavras_desc = _norm(desc).split()
-            nucleo = set(palavras_desc[:2])           # 2 primeiras = o produto
-            if alvo and not any(w in nucleo for w in alvo):
+            # CASAMENTO FORTE: a 1a palavra significativa do termo precisa ser a
+            # 1a palavra significativa do produto (o substantivo principal).
+            # 'cafe' casa com 'CAFE PILAO' (cafe e' o produto), mas NAO com
+            # 'BALA CAFE' (o produto e' bala; cafe e' so' o sabor, vem depois).
+            palavras_desc = [w for w in _norm(desc).split() if len(w) > 2]
+            if alvo and palavras_desc:
+                # primeira palavra significativa do termo vs do produto
+                if alvo[0] != palavras_desc[0]:
+                    # tolera plural/variacao leve (cafe/cafes) e ordem so' se a
+                    # 1a do produto tambem estiver no termo (ex: 'arroz branco')
+                    if not (palavras_desc[0].startswith(alvo[0][:4]) or
+                            alvo[0].startswith(palavras_desc[0][:4])):
+                        continue
+            elif alvo and not palavras_desc:
                 continue
             est = p.get("estabelecimento") or {}
             nome_merc = (est.get("nm_fan") or est.get("nm_emp") or "").strip() or "(sem nome)"

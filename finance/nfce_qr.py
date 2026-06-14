@@ -83,6 +83,26 @@ def ler_chave_da_imagem(imagem_bytes: bytes) -> str | None:
 
     dets = _detectores()
 
+    # --- DIAGNOSTICO TEMPORARIO: loga o que cada detector ve na imagem inteira
+    try:
+        import logging
+        _dlog = logging.getLogger("openclaw.qr")
+        for _nome, _det in dets:
+            try:
+                if _nome == "wechat":
+                    _res, _ = _det.detectAndDecode(arr)
+                    _dlog.info("DIAG wechat inteira: %d resultados, amostra=%s",
+                               len(_res) if _res else 0,
+                               (_res[0][:40] if _res else "VAZIO"))
+                else:
+                    _d, _, _ = _det.detectAndDecode(arr)
+                    _dlog.info("DIAG padrao inteira: %s", _d[:40] if _d else "VAZIO")
+            except Exception as _e:  # noqa: BLE001
+                _dlog.info("DIAG %s erro: %s", _nome, _e)
+    except Exception:  # noqa: BLE001
+        pass
+    # --- fim diagnostico
+
     def _le(img) -> str | None:
         for nome, det in dets:
             try:

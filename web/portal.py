@@ -748,27 +748,9 @@ def compras(request: Request):
     conta, lista = _lista_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
-    livro = LivroCaixa(get_pool(), conta[0])
-    def _estimador(desc):
-        try:
-            itens_achados, _total = livro.buscar_itens(desc, dias=180)
-            precos = [it["valor_total_centavos"] for it in itens_achados
-                      if it.get("valor_total_centavos")]
-            if precos:
-                return int(sum(precos) / len(precos)), "historico"
-        except Exception:  # noqa: BLE001
-            pass
-        return None, None
-    try:
-        lista.estimar_precos(_estimador)
-        itens = lista.listar(incluir_comprados=True)
-    except Exception:  # noqa: BLE001
-        pass
-    # o comparador NAO roda aqui (seria lento). A pagina carrega rapida e o
-    # JS busca os precos em segundo plano via /painel/compras/precos.
-    tem_pendentes = any(not i["comprado"] for i in itens)
-    return _render("compras", request, titulo="Compras", itens=itens,
-                   resumo=lista.resumo(), tem_pendentes=tem_pendentes)
+    # a pagina carrega "vazia" e o JS busca a lista e os precos via AJAX
+    # (sem reload a cada acao). Ver endpoint /painel/compras/api.
+    return _render("compras", request, titulo="Compras")
 
 
 @router.get("/painel/compras/precos")
@@ -850,6 +832,54 @@ def compras_opcoes(request: Request, item: str = ""):
         {"descricao": o["descricao"],
          "faixa": (brl(o["min"]) if o["min"] == o["max"] else f"{brl(o['min'])}–{brl(o['max'])}")}
         for o in ops]})
+
+
+@router.post("/painel/compras/api")
+async def compras_api(request: Request):
+    """Acao na lista SEM reload: recebe {acao, ...} e devolve a lista atualizada
+    em JSON. O front redesenha so' a lista, sem recarregar a pagina."""
+    conta, lista = _lista_logada(request)
+    if conta is None:
+        return JSONResponse({"erro": "nao logado"}, status_code=401)
+    dados = await request.json()
+    acao = dados.get("acao")
+    if acao == "add":
+        import re as _re
+        partes = [p.strip() for p in _re.split(r"[,;\n]+", dados.get("descricao", "")) if p.strip()]
+        if len(partes) > 1:
+            lista.adicionar_varios(partes)
+        elif partes:
+            lista.adicionar(partes[0])
+    elif acao == "marcar":
+        lista.marcar_comprado(int(dados["item_id"]), bool(dados.get("comprado", 1)))
+    elif acao == "remover":
+        lista.remover(int(dados["item_id"]))
+    elif acao == "limpar":
+        lista.limpar_comprados()
+    livro = LivroCaixa(get_pool(), conta[0])
+    def _est(desc):
+        try:
+            ach, _t = livro.buscar_itens(desc, dias=180)
+            ps = [it["valor_total_centavos"] for it in ach if it.get("valor_total_centavos")]
+            if ps:
+                return int(sum(ps) / len(ps)), "historico"
+        except Exception:  # noqa: BLE001
+            pass
+        return None, None
+    try:
+        lista.estimar_precos(_est)
+    except Exception:  # noqa: BLE001
+        pass
+    itens = lista.listar(incluir_comprados=True)
+    resumo = lista.resumo()
+    return JSONResponse({
+        "itens": [{"id": i["id"], "descricao": i["descricao"], "comprado": i["comprado"],
+                   "quem": i["quem"],
+                   "preco": brl(i["preco_estimado_centavos"]) if i["preco_estimado_centavos"] else None}
+                  for i in itens],
+        "pendentes": resumo["pendentes"], "comprados": resumo["comprados"],
+        "tem_pendentes": resumo["pendentes"] > 0,
+    })
 
 
 @router.post("/painel/compras/add")

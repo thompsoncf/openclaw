@@ -17,12 +17,13 @@ class Tipo(str, Enum):
 
 CATEGORIAS_DESPESA = [
     "Mercado", "Restaurante", "Transporte", "Moradia", "Contas de casa",
-    "Saúde", "Educação", "Lazer", "Compras", "Assinaturas", "Impostos",
-    "Pet", "Outros",
+    "Saúde", "Educação", "Lazer", "Compras", "Vestuário", "Beleza",
+    "Presentes", "Serviços", "Assinaturas", "Impostos", "Pet", "Outros",
 ]
 
 CATEGORIAS_RECEITA = [
-    "Salário", "Freela", "Investimentos", "Vendas", "Reembolso", "Outros",
+    "Salário", "Freela", "Investimentos", "Vendas", "Aluguel",
+    "Benefício", "Presentes", "Reembolso", "Outros",
 ]
 
 

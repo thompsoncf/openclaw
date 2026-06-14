@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import ssl
+import unicodedata
 import urllib.parse
 import urllib.request
 from datetime import datetime
@@ -30,6 +31,12 @@ _HEADERS = {
 }
 
 
+def _norm(t: str) -> str:
+    t = "".join(c for c in unicodedata.normalize("NFD", (t or "").lower())
+                if unicodedata.category(c) != "Mn")
+    return t
+
+
 class SefazMenorPreco:
     """Consulta a API publica de preco. Stateless e tolerante a falha."""
 
@@ -37,13 +44,14 @@ class SefazMenorPreco:
         self.timeout = timeout
 
     def disponivel(self, lat: float, lon: float, raio_km: int = 15) -> bool:
-        """True se a API retorna dados pra esta regiao (ex: PR/PE)."""
         return len(self.buscar("arroz", lat, lon, raio_km)) > 0
 
     def buscar(self, termo: str, lat: float, lon: float, raio_km: int = 15,
                limite: int = 30) -> list[dict]:
         """Busca um produto. Retorna lista normalizada de precos por
-        estabelecimento (ja' ordenada do mais barato). Vazia em qualquer erro."""
+        estabelecimento (ordenada do mais barato). Vazia em qualquer erro.
+        Aplica casamento forte (palavra do termo na descricao) e descarte de
+        outliers baratos (item errado: sache, bala, unidade)."""
         termo = (termo or "").strip()
         if not termo:
             return []
@@ -59,6 +67,7 @@ class SefazMenorPreco:
         except Exception:  # noqa: BLE001
             return []
         produtos = dados.get("produtos") or []
+        alvo = [w for w in _norm(termo).split() if len(w) > 2]
         achados = []
         for p in produtos[:limite]:
             try:
@@ -67,9 +76,14 @@ class SefazMenorPreco:
                 continue
             if valor <= 0:
                 continue
+            desc = p.get("desc", "").strip()
+            # CASAMENTO FORTE: ao menos uma palavra significativa do termo
+            # precisa aparecer na descricao (evita 'acucar' casar com 'bala')
+            if alvo and not any(w in _norm(desc) for w in alvo):
+                continue
             est = p.get("estabelecimento") or {}
             achados.append({
-                "descricao": p.get("desc", "").strip(),
+                "descricao": desc,
                 "valor_centavos": int(round(valor * 100)),
                 "mercado": (est.get("nm_fan") or est.get("nm_emp") or "").strip() or "(sem nome)",
                 "bairro": (est.get("bairro") or "").strip(),
@@ -79,6 +93,7 @@ class SefazMenorPreco:
                 "data": _data(p.get("datahora")),
                 "gtin": (p.get("gtin") or "").strip() or None,
             })
+        achados = _sem_outliers(achados)
         achados.sort(key=lambda x: x["valor_centavos"])
         return achados
 
@@ -118,6 +133,20 @@ class SefazMenorPreco:
                    for k, v in mercados.items()]
         ranking.sort(key=lambda x: (-x["itens_cobertos"], x["total_centavos"]))
         return {"mercados": ranking, "itens": detalhe_itens, "observacoes": total_obs}
+
+
+def _sem_outliers(achados: list[dict]) -> list[dict]:
+    """Descarta precos absurdamente baixos pro grupo (ex: 'acucar' de R$ 0,20
+    no meio de acucares de R$ 18 = item errado, sache, unidade). Usa a mediana:
+    remove o que estiver abaixo de 30% dela. So' age com >= 4 precos."""
+    if len(achados) < 4:
+        return achados
+    vals = sorted(a["valor_centavos"] for a in achados)
+    meio = len(vals) // 2
+    mediana = vals[meio] if len(vals) % 2 else (vals[meio - 1] + vals[meio]) / 2
+    piso = mediana * 0.3
+    filtrados = [a for a in achados if a["valor_centavos"] >= piso]
+    return filtrados or achados
 
 
 def _f(v) -> float | None:

@@ -47,6 +47,10 @@ _pool = None
 _brain = None
 _transcritor = None
 
+# dica curta anexada quando o cliente manda FOTO de cupom no WhatsApp:
+DICA_QR_WPP = ("\n\n📸 Dica: deixe o QR code do cupom bem visível na foto — "
+               "assim eu identifico a nota certinho e melhoro os preços pra você.")
+
 
 def _setup():
     global _pool, _brain, _transcritor
@@ -155,6 +159,7 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
         texto = body or ""
         imagem_b64 = None
         media_type = "image/jpeg"
+        dica_qr = False
         if media_url:
             dados = _baixar_midia(media_url)
             ctype = (media_ctype or "")
@@ -163,6 +168,7 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
                 media_type = ctype
                 texto = body or "Segue o cupom para registrar."
                 _disparar_qr_whatsapp(numero, dados, ctype)
+                dica_qr = True
             elif "pdf" in ctype:
                 imagem_b64 = base64.b64encode(dados).decode("ascii")
                 media_type = "application/pdf"
@@ -172,6 +178,8 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
                 texto = _transcritor.transcrever(dados, "audio.ogg")
 
         resposta = _agente_do(membro, conta).responder(texto, imagem_b64, media_type)
+        if dica_qr:
+            resposta = (resposta or "") + DICA_QR_WPP
         _responder_whatsapp(to, resposta)
     except Exception as e:  # noqa: BLE001
         log.exception("erro no whatsapp")

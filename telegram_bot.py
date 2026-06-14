@@ -38,6 +38,11 @@ MSG_SEM_ACESSO = (
     "Assim que o pagamento for confirmado, voce volta a usar na hora."
 )
 
+# dica curta anexada quando o cliente manda FOTO de cupom (nao em PDF/arquivo):
+# ajuda o cliente a enquadrar o QR, melhorando nossa coleta de dados.
+DICA_QR = ("\n\n📸 _Dica: deixe o QR code do cupom bem visível na foto — "
+           "assim eu identifico a nota certinho e melhoro os preços pra você._")
+
 import re as _re
 def _parece_convite(texto: str) -> bool:
     """Formato do codigo: 2-4 letras/numeros + hifen + 4 hex (ex: LAR-7K2M)."""
@@ -74,7 +79,7 @@ async def start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
-                     media_type: str = "image/jpeg"):
+                     media_type: str = "image/jpeg", dica_qr: bool = False):
     achado = ct.membro_por_telegram(_pool, update.effective_user.id)
     if achado is None:
         # talvez seja um CODIGO DE CONVITE (ex: "LAR-7K2M")
@@ -100,7 +105,10 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
     agente = _agente_do(membro, conta)
     # O agente e' sincrono (rede + LLM): roda fora do event loop pra nao travar o bot.
     resposta = await asyncio.to_thread(agente.responder, texto, imagem_b64, media_type)
-    await update.message.reply_text(resposta or "(sem resposta)")
+    resposta = resposta or "(sem resposta)"
+    if dica_qr:
+        resposta += DICA_QR
+    await update.message.reply_text(resposta)
 
 
 async def on_text(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
@@ -144,7 +152,7 @@ async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     b64 = base64.b64encode(bytes(dados)).decode("ascii")
     legenda = update.message.caption or "Segue o cupom para registrar."
     _disparar_qr(update, bytes(dados), "image/jpeg")
-    await _processar(update, legenda, imagem_b64=b64)
+    await _processar(update, legenda, imagem_b64=b64, dica_qr=True)
 
 
 async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):

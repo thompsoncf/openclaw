@@ -19,12 +19,25 @@ def extrair_chave(texto: str) -> str | None:
 
 
 def _detectores():
-    """Monta os detectores de QR disponiveis. O WeChat detector e' muito
-    superior pra QR degradado (foto comprimida de WhatsApp/Telegram)."""
+    """Monta os detectores de QR disponiveis (cacheados). O WeChat detector e'
+    muito superior pra QR degradado (foto comprimida de WhatsApp/Telegram), mas
+    SO' funciona de verdade com os arquivos de modelo - por isso os embarcamos
+    em finance/wechat_models/ e passamos explicitamente (senao, dependendo do
+    build do opencv, ele instancia mas nao decodifica - foi o bug do Render)."""
     import cv2
+    import os
     dets = []
     try:
-        dets.append(("wechat", cv2.wechat_qrcode.WeChatQRCode()))
+        base = os.path.join(os.path.dirname(__file__), "wechat_models")
+        det_proto = os.path.join(base, "detect.prototxt")
+        det_model = os.path.join(base, "detect.caffemodel")
+        sr_proto = os.path.join(base, "sr.prototxt")
+        sr_model = os.path.join(base, "sr.caffemodel")
+        if all(os.path.exists(p) for p in (det_proto, det_model, sr_proto, sr_model)):
+            dets.append(("wechat", cv2.wechat_qrcode.WeChatQRCode(
+                det_proto, det_model, sr_proto, sr_model)))
+        else:
+            dets.append(("wechat", cv2.wechat_qrcode.WeChatQRCode()))
     except Exception:  # noqa: BLE001
         pass
     dets.append(("padrao", cv2.QRCodeDetector()))

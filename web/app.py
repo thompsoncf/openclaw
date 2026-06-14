@@ -61,7 +61,8 @@ def _agente_do(membro, conta):
     memoria = MemoriaPersistente(_pool, f"wa:{membro.id}")
     lista = ListaCompras(_pool, conta.id, membro.id)
     banco = BancoPrecos(_pool)
-    return criar_agente_financeiro(_brain, LivroCaixa(_pool, conta.id, membro.id), memoria, lista, membro.papel, banco)
+    cidade = getattr(conta, 'cidade', None)
+    return criar_agente_financeiro(_brain, LivroCaixa(_pool, conta.id, membro.id), memoria, lista, membro.papel, banco, cidade)
 
 
 def _responder_whatsapp(to: str, texto: str):

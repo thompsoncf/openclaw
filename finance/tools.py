@@ -25,7 +25,7 @@ def _parse_data(s: str | None) -> date:
 
 
 def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
-                          banco=None) -> list[Ferramenta]:
+                          banco=None, cidade: str | None = None) -> list[Ferramenta]:
     from contas.permissoes import pode_financas, pode_lista
     def lancar(tipo: Tipo, entrada: dict) -> str:
         lanc = Lancamento.criar(
@@ -191,7 +191,8 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
         itens = [i["descricao"] for i in lista.listar(incluir_comprados=False)]
         if not itens:
             return "A lista de compras esta vazia. Adicione itens antes de comparar precos."
-        r = banco.comparar_cesta(itens)
+        from finance.banco_precos import comparar_para_cidade
+        r = comparar_para_cidade(banco.pool, itens, cidade)
         if r["observacoes"] == 0:
             return ("Ainda nao tenho precos suficientes pra comparar essa lista. "
                     "Conforme voce e sua familia registram cupons de mercado, eu vou "

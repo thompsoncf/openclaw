@@ -54,7 +54,8 @@ def _agente_do(membro, conta):
     lista = ListaCompras(_pool, conta.id, membro.id)
     banco = BancoPrecos(_pool)
     memoria = MemoriaPersistente(_pool, f"tg:{membro.id}")
-    return criar_agente_financeiro(_brain, livro, memoria, lista, membro.papel, banco)
+    cidade = getattr(conta, 'cidade', None)
+    return criar_agente_financeiro(_brain, livro, memoria, lista, membro.papel, banco, cidade)
 
 
 async def start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):

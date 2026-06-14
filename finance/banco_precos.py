@@ -169,3 +169,30 @@ def _mercado_da_descricao(lanc_desc: str | None) -> str | None:
     for ruido in ("compra", "compras", "no ", "na ", "em "):
         s = re.sub(rf"\b{ruido}\b", "", s, flags=re.IGNORECASE).strip()
     return s.title()[:60] if s else None
+
+
+def comparar_para_cidade(pool, itens: list[str], cidade: str | None) -> dict:
+    """Comparador UNIFICADO: tenta a API SEFAZ (onde cobre, ex PR/PE) e cai no
+    banco proprio (ex Teresina). Devolve a estrutura padrao + a chave 'fonte'
+    ('sefaz' | 'proprio' | 'vazio') pra UI saber a origem.
+    """
+    from finance import cidades as cid
+
+    coord = cid.coordenada(cidade)
+    # 1) tenta SEFAZ se a cidade tem coordenada e fonte preferida sefaz
+    if coord and cid.fonte(cidade) == "sefaz":
+        try:
+            from finance.sefaz_precos import SefazMenorPreco
+            lat, lon, raio = coord
+            r = SefazMenorPreco().comparar_cesta(itens, lat, lon, raio)
+            if r["observacoes"] > 0:
+                r["fonte"] = "sefaz"
+                return r
+        except Exception:  # noqa: BLE001
+            pass
+    # 2) banco proprio (regiao = cidade)
+    r = BancoPrecos(pool).comparar_cesta(itens, regiao=(cidade or None))
+    if r["observacoes"] == 0:
+        r = BancoPrecos(pool).comparar_cesta(itens, regiao=None)
+    r["fonte"] = "proprio" if r["observacoes"] > 0 else "vazio"
+    return r

@@ -83,11 +83,12 @@ Regras:
 
 def criar_agente_financeiro(brain: Brain, livro: LivroCaixa,
                             memoria: MemoriaConversa | None = None,
-                            lista=None, papel: str = "dono", banco=None) -> Agente:
+                            lista=None, papel: str = "dono", banco=None,
+                            cidade: str | None = None) -> Agente:
     return criar_agente(
         nome="Financeiro",
         persona=_persona(papel),
-        ferramentas=construir_ferramentas(livro, lista, papel, banco),
+        ferramentas=construir_ferramentas(livro, lista, papel, banco, cidade),
         brain=brain,
         memoria=memoria,
     )

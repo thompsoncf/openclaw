@@ -193,6 +193,8 @@ _CADASTRO = """{% extends "base" %}{% block conteudo %}
 <label>Senha</label><input name="senha" type="password" required minlength="8" maxlength="72">
 <label>CPF ou CNPJ <span class="mut">(opcional agora)</span></label><input name="documento" maxlength="20">
 <label>Seu WhatsApp (com DDD)</label><input name="whatsapp" required placeholder="86 98888-7777" maxlength="20">
+<label>Sua cidade <span class="mut">(pra comparar preços perto de você)</span></label>
+<select name="cidade">{% for cod, nome in cidades %}<option value="{{ cod }}">{{ nome }}</option>{% endfor %}</select>
 <button>Começar meu teste grátis de 7 dias</button>
 <p class="mut">Sem cartão agora. Coletamos só o necessário (LGPD).</p>
 </form></div>{% endblock %}"""
@@ -457,6 +459,8 @@ _env = Environment(loader=DictLoader({
     "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
+from finance import cidades as _cidades_mod
+_env.globals["cidades"] = _cidades_mod.opcoes()
 
 
 def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
@@ -475,7 +479,8 @@ def cadastro_form(request: Request):
 @router.post("/cadastro", response_class=HTMLResponse)
 def cadastro_envia(request: Request, plano: str = Form(...), nome: str = Form(...),
                    email: str = Form(...), senha: str = Form(...),
-                   documento: str = Form(""), whatsapp: str = Form(...)):
+                   documento: str = Form(""), whatsapp: str = Form(...),
+                   cidade: str = Form("")):
     pool = get_pool()
     email = email.strip().lower()
     zap = _normalizar_zap(whatsapp)
@@ -494,7 +499,9 @@ def cadastro_envia(request: Request, plano: str = Form(...), nome: str = Form(..
 
     tipo = planos_ok[plano][2]
     doc = "".join(ch for ch in documento if ch.isdigit()) or None
-    conta_id = ct.criar_conta(pool, tipo, nome.strip(), plano=plano, documento=doc)
+    from finance import cidades as _cid
+    conta_id = ct.criar_conta(pool, tipo, nome.strip(), plano=plano, documento=doc,
+                              cidade=_cid.valida(cidade))  # trial 7d
     with pool.connection() as c:
         c.execute("update contas set email=%s, senha_hash=%s where id=%s",
                   (email, hash_senha(senha), conta_id))
@@ -648,13 +655,16 @@ def compras(request: Request):
         itens = lista.listar(incluir_comprados=True)
     except Exception:  # noqa: BLE001
         pass
-    # comparador de cesta (onde a lista inteira sai mais barata)
+    # comparador de cesta (SEFAZ onde cobre, banco proprio no resto)
     comparacao = None
     try:
-        from finance.banco_precos import BancoPrecos
+        from finance.banco_precos import comparar_para_cidade
+        with get_pool().connection() as c:
+            row = c.execute("select cidade from contas where id=%s", (conta[0],)).fetchone()
+        cidade = row[0] if row else None
         pendentes = [i["descricao"] for i in itens if not i["comprado"]]
         if pendentes:
-            comparacao = BancoPrecos(get_pool()).comparar_cesta(pendentes)
+            comparacao = comparar_para_cidade(get_pool(), pendentes, cidade)
     except Exception:  # noqa: BLE001
         comparacao = None
     return _render("compras", request, titulo="Compras", itens=itens,

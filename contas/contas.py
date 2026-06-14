@@ -23,6 +23,7 @@ class Conta:
     status: str                # trial | ativa | inadimplente | suspensa | cancelada
     vencimento: date | None
     limite_mensagens_dia: int
+    cidade: str | None = None
 
 
 @dataclass
@@ -36,7 +37,7 @@ class Membro:
     ativo: bool
 
 
-_C = "id, tipo, nome, documento, plano, status, vencimento, limite_mensagens_dia"
+_C = "id, tipo, nome, documento, plano, status, vencimento, limite_mensagens_dia, cidade"
 _M = "id, conta_id, nome, papel, telegram_id, whatsapp_id, ativo"
 
 
@@ -148,17 +149,17 @@ def registrar_evento(pool, conta_id: int, tipo: str, detalhe: str = "",
 
 def criar_conta(pool, tipo: str, nome: str, plano: str | None = None,
                 documento: str | None = None, status: str = "trial",
-                vencimento: date | None = None) -> int:
+                vencimento: date | None = None, cidade: str | None = None) -> int:
     if vencimento is None and status == "trial":
         vencimento = date.today() + timedelta(days=7)   # teste gratis padrao
     with pool.connection() as conn:
         row = conn.execute(
-            """insert into contas (tipo, nome, documento, plano, status, vencimento)
-               values (%s,%s,%s,%s,%s,%s) returning id""",
-            (tipo, nome, documento, plano, status, vencimento),
+            """insert into contas (tipo, nome, documento, plano, status, vencimento, cidade)
+               values (%s,%s,%s,%s,%s,%s,%s) returning id""",
+            (tipo, nome, documento, plano, status, vencimento, cidade),
         ).fetchone()
         conn.commit()
-    registrar_evento(pool, row[0], "conta_criada", f"tipo={tipo} plano={plano or '-'}")
+    registrar_evento(pool, row[0], "conta_criada", f"tipo={tipo} plano={plano or '-'} cidade={cidade or '-'}")
     return int(row[0])
 
 

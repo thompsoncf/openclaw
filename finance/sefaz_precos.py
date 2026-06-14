@@ -55,6 +55,7 @@ class SefazMenorPreco:
         except Exception:  # noqa: BLE001
             return []
         produtos = dados.get("produtos") or []
+        # palavras significativas do termo (pra casar so' o produto certo)
         alvo = [w for w in _norm(termo).split() if len(w) > 2]
         achados = []
         for p in produtos[:limite]:
@@ -65,7 +66,13 @@ class SefazMenorPreco:
             if valor <= 0:
                 continue
             desc = p.get("desc", "").strip()
-            if alvo and not any(w in _norm(desc) for w in alvo):
+            # CASAMENTO FORTE: a palavra do termo precisa aparecer como PALAVRA
+            # INTEIRA na descricao (nao substring), e idealmente entre as 2
+            # primeiras palavras (o nucleo do produto). Evita 'acucar' casar com
+            # 'bala acucar' / 'acucar de confeiteiro p/ bolo'.
+            palavras_desc = _norm(desc).split()
+            nucleo = set(palavras_desc[:2])           # 2 primeiras = o produto
+            if alvo and not any(w in nucleo for w in alvo):
                 continue
             est = p.get("estabelecimento") or {}
             nome_merc = (est.get("nm_fan") or est.get("nm_emp") or "").strip() or "(sem nome)"
@@ -149,15 +156,23 @@ def _tipo_estabelecimento(nome: str, ncm=None) -> str:
 
 
 def _sem_outliers(achados: list[dict]) -> list[dict]:
-    """Descarta precos absurdamente baixos pro grupo (mediana * 0.3). >= 4 precos."""
-    if len(achados) < 4:
+    """Descarta precos absurdamente baixos (item errado: sache, bala, unidade
+    avulsa). Duas defesas:
+    1. PISO ABSOLUTO: remove tudo abaixo de R$ 0,50 (50 centavos).
+    2. MEDIANA: com >= 3 precos, remove o que estiver abaixo de 35% da mediana.
+    Se as defesas zerarem tudo, devolve o original (nao esconde dado legitimo)."""
+    if not achados:
         return achados
-    vals = sorted(a["valor_centavos"] for a in achados)
-    meio = len(vals) // 2
-    mediana = vals[meio] if len(vals) % 2 else (vals[meio - 1] + vals[meio]) / 2
-    piso = mediana * 0.3
-    filtrados = [a for a in achados if a["valor_centavos"] >= piso]
-    return filtrados or achados
+    filtrados = [a for a in achados if a["valor_centavos"] >= 50]
+    base = filtrados or achados
+    if len(base) >= 3:
+        vals = sorted(a["valor_centavos"] for a in base)
+        meio = len(vals) // 2
+        mediana = vals[meio] if len(vals) % 2 else (vals[meio - 1] + vals[meio]) / 2
+        piso = mediana * 0.35
+        base2 = [a for a in base if a["valor_centavos"] >= piso]
+        base = base2 or base
+    return base
 
 
 def _f(v) -> float | None:

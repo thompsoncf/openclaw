@@ -740,7 +740,13 @@ def compras_add(request: Request, descricao: str = Form(...)):
     conta, lista = _lista_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
-    lista.adicionar(descricao.strip())
+    # permite adicionar varios de uma vez: "arroz, cafe, leite" -> 3 itens
+    import re as _re
+    partes = [p.strip() for p in _re.split(r"[,;\n]+", descricao) if p.strip()]
+    if len(partes) > 1:
+        lista.adicionar_varios(partes)
+    elif partes:
+        lista.adicionar(partes[0])
     return RedirectResponse("/painel/compras", status_code=303)
 
 

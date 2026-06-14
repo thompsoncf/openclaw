@@ -29,6 +29,19 @@ def _norm(t: str) -> str:
                    if unicodedata.category(c) != "Mn")
 
 
+# NCMs que vazam como "lixo barato" em buscas genericas, qualquer que seja o
+# termo. Blocklist (nao allowlist): so' remove categorias comprovadamente
+# erradas, sem quebrar termos nao mapeados (detergente, fralda, etc).
+#  1704 = balas, caramelos, doces sem cacau   (BALA CAFE, BALA LEITE)
+#  1806 = chocolates / bombons
+#  1702 = acucares especiais, xaropes, glucose (acucar comum e' 1701, fica)
+#  1901/1904/1905 = preparacoes de cereais, paes, biscoitos, bolos (ARROZ DOCE)
+#  1902 = massas alimenticias                  (MASSA PICANHA)
+#  2106 = preparacoes alimenticias diversas; temperos/caldos
+#  2202 = refrigerantes e bebidas acucaradas
+_NCM_LIXO = {"1704", "1806", "1702", "1901", "1902", "1904", "1905", "2106", "2202"}
+
+
 class SefazMenorPreco:
     """Consulta a API publica de preco. Stateless e tolerante a falha."""
 
@@ -84,20 +97,21 @@ class SefazMenorPreco:
             if valor <= 0:
                 continue
             desc = p.get("desc", "").strip()
-            # CASAMENTO FORTE: a 1a palavra significativa do termo precisa ser a
-            # 1a palavra significativa do produto (o substantivo principal).
-            # 'cafe' casa com 'CAFE PILAO' (cafe e' o produto), mas NAO com
-            # 'BALA CAFE' (o produto e' bala; cafe e' so' o sabor, vem depois).
+            ncm = str(p.get("ncm") or "")
+            # FILTRO 1 - NCM-LIXO (blocklist): remove categorias que vazam como
+            # 'lixo barato' qualquer que seja o termo - balas/doces, preparacoes
+            # de cereais (arroz doce, granola), paes/biscoitos/bolos, bebidas
+            # acucaradas, preparacoes diversas. NAO e' allowlist (que quebraria
+            # termos nao mapeados como detergente/fralda) - e' blocklist generica.
+            if ncm[:4] in _NCM_LIXO:
+                continue
+            # FILTRO 2 - CASAMENTO: a 1a palavra do termo precisa aparecer entre
+            # as palavras significativas do produto (com o NCM ja' limpando o
+            # lixo, isso pode ser generoso sem trazer bala/doce de volta).
             palavras_desc = [w for w in _norm(desc).split() if len(w) > 2]
-            if alvo and palavras_desc:
-                # primeira palavra significativa do termo vs do produto
-                if alvo[0] != palavras_desc[0]:
-                    # tolera plural/variacao leve (cafe/cafes) e ordem so' se a
-                    # 1a do produto tambem estiver no termo (ex: 'arroz branco')
-                    if not (palavras_desc[0].startswith(alvo[0][:4]) or
-                            alvo[0].startswith(palavras_desc[0][:4])):
-                        continue
-            elif alvo and not palavras_desc:
+            if alvo and not any(
+                    pd == alvo[0] or pd.startswith(alvo[0][:4]) or alvo[0].startswith(pd[:4])
+                    for pd in palavras_desc):
                 continue
             est = p.get("estabelecimento") or {}
             nome_merc = (est.get("nm_fan") or est.get("nm_emp") or "").strip() or "(sem nome)"

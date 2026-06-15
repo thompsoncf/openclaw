@@ -97,7 +97,12 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                 "valor_unitario_centavos": reais_para_centavos(vu) if vu is not None else 0,
                 "valor_total_centavos": reais_para_centavos(vt) if vt is not None else 0,
             })
-        n = livro.registrar_itens(int(lanc_id), itens)
+        loja_info = {
+            "cnpj": (entrada.get("cnpj_emitente") or "").strip() or None,
+            "endereco": (entrada.get("endereco") or "").strip() or None,
+            "nome": (entrada.get("estabelecimento") or "").strip() or None,
+        }
+        n = livro.registrar_itens(int(lanc_id), itens, loja_info=loja_info)
         if n == 0:
             return "Nao consegui salvar os itens (lancamento nao encontrado)."
         return f"Salvei {n} itens do cupom. Agora da' pra perguntar coisas tipo 'quanto gastei em X'."
@@ -286,6 +291,9 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                 "properties": {
                     "itens": {"type": "array", "items": item_schema},
                     "lancamento_id": {"type": "integer", "description": "opcional; vazio = ultimo cupom"},
+                    "cnpj_emitente": {"type": "string", "description": "CNPJ do estabelecimento (14 digitos), do cabecalho do cupom - identifica a loja exata"},
+                    "estabelecimento": {"type": "string", "description": "nome da loja (ex: 'Carvalho Supershop'), do cabecalho do cupom"},
+                    "endereco": {"type": "string", "description": "endereco da loja (rua, numero, bairro), do cabecalho do cupom"},
                 },
                 "required": ["itens"],
             },

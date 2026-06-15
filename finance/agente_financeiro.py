@@ -70,8 +70,10 @@ Regras:
 - ITENS DO CUPOM (AUTOMATICO em mercado): quando o cupom for de MERCADO ou
   SUPERMERCADO (categoria "Mercado"), depois de salvar o lancamento, salve
   TAMBEM os itens automaticamente com registrar_itens_cupom (sem o usuario
-  pedir) passando todos os produtos que leu (descricao, quantidade, valor
-  unitario e total). Pra OUTRAS categorias (conta de luz, agua, farmacia
+  pedir) passando: (1) todos os produtos que leu (descricao, quantidade, valor
+  unitario e total); (2) cnpj_emitente (CNPJ do estabelecimento, 14 digitos,
+  do cabecalho do cupom); (3) estabelecimento (nome da loja); (4) endereco
+  (endereco da loja). Pra OUTRAS categorias (conta de luz, agua, farmacia
   avulsa etc), salve SO' o valor total - nao detalhe itens a menos que peçam.
   Confirme com algo curto: "Salvei o cupom e os N itens do mercado ✅".
   Anexa ao ULTIMO lancamento; se for cupom ANTIGO (duplicata detectada),

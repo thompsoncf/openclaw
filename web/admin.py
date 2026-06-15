@@ -155,7 +155,7 @@ _ADMIN_PRECOS = """{% extends "abase" %}{% block conteudo %}
 {% for p in precos %}<tr>
 <td class="mut">{{ p.criado_em.strftime('%d/%m %H:%M') }}</td>
 <td>{{ p.descricao }}</td>
-<td><b>{{ brl(p.valor_centavos) }}</b></td>
+<td><b>{{ brl(p.valor_unitario_centavos) }}</b></td>
 <td>{% if p.loja_nome %}{{ p.loja_nome }}{% else %}<span class="mut">-</span>{% endif %}</td>
 <td class="mut">{{ p.uf or '-' }}</td>
 <td class="mut" style="font-size:.8rem">{{ p.cnpj or '-' }}</td>
@@ -281,9 +281,9 @@ def admin_precos(request: Request):
         de_cupom = c.execute("select count(*) from precos_observados where fonte = 'cupom'").fetchone()[0]
 
         # ultimos precos com detalhes de loja
-        cols_p = ["descricao", "valor_centavos", "loja_nome", "uf", "cnpj", "fonte", "criado_em"]
+        cols_p = ["descricao", "valor_unitario_centavos", "loja_nome", "uf", "cnpj", "fonte", "criado_em"]
         precos = [dict(zip(cols_p, r)) for r in c.execute(
-            """select po.descricao, po.valor_centavos, l.nome, l.uf, l.cnpj, po.fonte, po.criado_em
+            """select po.descricao, po.valor_unitario_centavos, l.nome, l.uf, l.cnpj, po.fonte, po.criado_em
                from precos_observados po
                left join lojas l on l.id = po.loja_id
                order by po.id desc limit 100""").fetchall()]

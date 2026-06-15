@@ -17,9 +17,9 @@ _TIMEOUT = 8
 
 
 def consultar_cnpj(cnpj: str) -> dict | None:
-    """Consulta o CNPJ na BrasilAPI e devolve {nome, endereco, cidade, uf, cnae, ramo}.
+    """Consulta o CNPJ na BrasilAPI e devolve {nome, endereco, cidade, uf}.
     None se nao achar ou falhar. nome usa fantasia (mais reconhecivel) com
-    fallback pra razao social. ramo e' derivado do CNAE."""
+    fallback pra razao social."""
     cnpj = "".join(c for c in (cnpj or "") if c.isdigit())
     if len(cnpj) != 14:
         return None
@@ -36,6 +36,7 @@ def consultar_cnpj(cnpj: str) -> dict | None:
         return None
     nome = (dados.get("nome_fantasia") or "").strip() or \
            (dados.get("razao_social") or "").strip() or None
+    # monta endereco: "Logradouro, Numero, Bairro"
     partes = [dados.get("logradouro"), dados.get("numero"), dados.get("bairro")]
     endereco = ", ".join(p.strip() for p in partes if p and str(p).strip()) or None
     cidade = (dados.get("municipio") or "").strip() or None
@@ -46,10 +47,17 @@ def consultar_cnpj(cnpj: str) -> dict | None:
             "cnae": cnae_desc, "ramo": ramo}
 
 
+# mapeia palavras-chave do CNAE -> ramo (departamento) da loja.
+# o CNAE da Receita descreve a atividade; classificamos em ramos uteis pra comparar.
 _RAMOS = [
     ("Farmacia",     ("farmac", "drogaria", "medicament")),
     ("Restaurante",  ("restaurante", "lanchonete", "refeicao", "bar ", "fast",
                       "pizzaria", "sorveteria", "casas de cha", "sucos")),
+    ("Padaria",      ("padaria", "panific", "confeitaria")),
+    ("Acougue",      ("acougue", "carnes", "frigorific", "casa de carne",
+                      "casa de carnes")),
+    ("Hortifruti",   ("hortifruti", "horti", "frutas", "verdura", "legume",
+                      "hortigranjeiro")),
     ("Supermercado", ("supermerc", "hipermerc", "minimerc", "mercearia",
                       "mercadorias em geral", "alimenticios", "varejista de merc",
                       "atacadista de alimentos", "alimentos")),
@@ -57,7 +65,9 @@ _RAMOS = [
 
 
 def classificar_ramo(cnae_desc: str | None) -> str | None:
-    """Classifica a loja num ramo (departamento) a partir da descricao do CNAE."""
+    """Classifica a loja num ramo (departamento) a partir da descricao do CNAE.
+    Ex: 'Comercio varejista de produtos farmaceuticos' -> 'Farmacia'. None se nao
+    casar (a loja fica sem ramo, ou usa a categoria do Claude como reserva)."""
     if not cnae_desc:
         return None
     import unicodedata
@@ -69,6 +79,8 @@ def classificar_ramo(cnae_desc: str | None) -> str | None:
     return None
 
 
+# mapeia a CATEGORIA do lancamento (que o Claude define) -> ramo, como RESERVA
+# quando nao ha' CNPJ pra consultar o CNAE.
 _CATEGORIA_RAMO = {
     "Mercado": "Supermercado",
     "Saude": "Farmacia",

@@ -22,6 +22,34 @@ def normalizar_descricao(texto: str) -> str:
     return " ".join(t.lower().split())
 
 
+def limpar_nome_produto(texto: str) -> str:
+    """Limpa o NOME DE EXIBICAO do produto (o que aparece pro usuario), tirando
+    lixo comum de cupom: desconto grudado, parenteses de promo, codigos soltos,
+    espacos duplos. NAO expande abreviacoes (isso e' outro problema). Preserva
+    acentos e caixa (e' pra mostrar bonito, nao pra casar).
+
+    Ex: 'Gefxfer 100mg 30ml (c/ desconto de R$ 13,85)' -> 'Gefxfer 100mg 30ml'
+        'Arroz Camil  5kg ' -> 'Arroz Camil 5kg'
+    """
+    import re
+    if not texto:
+        return ""
+    t = texto.strip()
+    # remove trechos de desconto/promo entre parenteses: (c/ desconto...), (promo...)
+    t = re.sub(r"\(\s*(c/|com)?\s*desconto[^)]*\)", "", t, flags=re.IGNORECASE)
+    t = re.sub(r"\(\s*promo[^)]*\)", "", t, flags=re.IGNORECASE)
+    # remove "desconto de R$ X,XX" solto (sem parenteses)
+    t = re.sub(r"\bc/?\s*desconto\s*(de)?\s*r\$?\s*[\d.,]+", "", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bdesconto\s*(de)?\s*r\$\s*[\d.,]+", "", t, flags=re.IGNORECASE)
+    # remove parenteses vazios que sobraram
+    t = re.sub(r"\(\s*\)", "", t)
+    # colapsa espacos
+    t = " ".join(t.split())
+    # tira pontuacao solta no fim
+    t = t.rstrip(" -,;.")
+    return t
+
+
 class Tipo(str, Enum):
     DESPESA = "despesa"
     RECEITA = "receita"
@@ -29,13 +57,13 @@ class Tipo(str, Enum):
 
 CATEGORIAS_DESPESA = [
     "Mercado", "Restaurante", "Transporte", "Moradia", "Contas de casa",
-    "Saúde", "Educação", "Lazer", "Compras", "Vestuário", "Beleza",
-    "Presentes", "Serviços", "Assinaturas", "Impostos", "Pet", "Outros",
+    "Saude", "Educacao", "Lazer", "Compras", "Vestuario", "Beleza",
+    "Presentes", "Servicos", "Assinaturas", "Impostos", "Pet", "Outros",
 ]
 
 CATEGORIAS_RECEITA = [
-    "Salário", "Freela", "Investimentos", "Vendas", "Aluguel",
-    "Benefício", "Presentes", "Reembolso", "Outros",
+    "Salario", "Freela", "Investimentos", "Vendas", "Aluguel",
+    "Beneficio", "Presentes", "Reembolso", "Outros",
 ]
 
 
@@ -44,7 +72,7 @@ def categorias_de(tipo: Tipo) -> list[str]:
 
 
 def normalizar_categoria(tipo: Tipo, categoria: str) -> str:
-    """Casa a categoria ignorando maiusculas/minusculas. Se nao bater, cai em 'Outros'."""
+    """Casa a categoria ignorando maiusculas/minusculas. Se nao batter, cai em 'Outros'."""
     validas = categorias_de(tipo)
     alvo = (categoria or "").strip().casefold()
     for c in validas:

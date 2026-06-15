@@ -166,6 +166,7 @@ class LivroCaixa:
 
         Filtra pela DATA do lancamento. Se ano/mes informados, usa o mes (corrige
         o bug de mostrar itens de outro mes). Senao, cai pra janela de `dias`.
+        Cada item carrega a data do lancamento, pra UI dividir por dia.
         """
         cond = "l.conta_id = %s"
         params: list = [self.conta_id]
@@ -190,23 +191,24 @@ class LivroCaixa:
 
     # ---------- Itens do cupom (raio-x do consumo) ----------
 
-    def buscar_duplicata(self, valor_centavos: int, data, tolerancia_centavos: int = 0) -> list[dict]:
-        """Procura lancamentos duplicados: mesmo valor (com tolerancia) e data.
-        Tolerancia padrao: max(1% do valor, R$ 0.50)."""
-        if tolerancia_centavos == 0:
-            tolerancia_centavos = max(valor_centavos // 100, 50)
-        minimo = valor_centavos - tolerancia_centavos
-        maximo = valor_centavos + tolerancia_centavos
+    def buscar_duplicata(self, valor_centavos: int, data) -> list[dict]:
+        """Procura lancamentos iguais (mesma data e valor igual OU bem proximo)
+        - sinal de cupom repetido. A tolerancia de centavos cobre pequenas
+        variacoes na leitura do mesmo cupom."""
+        tol = max(50, round(valor_centavos * 0.01))   # 1% ou R$0,50, o que for maior
         with self.pool.connection() as conn:
             rows = conn.execute(
-                """select l.id, l.descricao, l.data, l.criado_em,
-                          (select count(*) from itens_lancamento where lancamento_id = l.id) as qtd_itens
-                   from lancamentos l
-                   where l.conta_id = %s and l.valor_centavos between %s and %s and l.data = %s
-                   order by l.criado_em desc""",
-                (self.conta_id, minimo, maximo, data),
+                """select id, descricao, data, criado_em, valor_centavos,
+                          (select count(*) from itens_lancamento i
+                           where i.lancamento_id = lancamentos.id) as qtd_itens
+                   from lancamentos
+                   where conta_id = %s and data = %s
+                     and abs(valor_centavos - %s) <= %s
+                   order by criado_em desc""",
+                (self.conta_id, data, valor_centavos, tol),
             ).fetchall()
-        return [{"id": r[0], "descricao": r[1], "data": r[2], "criado_em": r[3], "qtd_itens": r[4]} for r in rows]
+        return [{"id": r[0], "descricao": r[1], "data": r[2], "criado_em": r[3],
+                 "valor_centavos": r[4], "qtd_itens": r[5]} for r in rows]
 
     def ultimo_lancamento_id(self) -> int | None:
         """Id do lancamento mais recente do usuario (pra anexar itens 'desse cupom')."""
@@ -230,6 +232,7 @@ class LivroCaixa:
                            (cnpj,)).fetchone()
         if row:
             loja_id, end_atual, nome_atual = row
+            # completa dados faltantes (ex: 1a vez veio sem endereco, agora veio)
             if (endereco and not end_atual) or (nome and not nome_atual):
                 conn.execute(
                     """update lojas set endereco = coalesce(nullif(%s,''), endereco),
@@ -237,7 +240,8 @@ class LivroCaixa:
                        where id = %s""",
                     (endereco or "", nome or "", loja_id))
             return loja_id
-        ramo = ramo_reserva
+        # loja NOVA: se faltar nome ou endereco, tenta completar na Receita (BrasilAPI)
+        ramo = ramo_reserva       # reserva: ramo derivado da categoria do Claude
         cnae = None
         if not nome or not endereco:
             try:
@@ -249,6 +253,7 @@ class LivroCaixa:
                     cidade = cidade or info.get("cidade")
                     uf = uf or info.get("uf")
                     cnae = info.get("cnae")
+                    # ramo do CNAE tem prioridade; senao mantem a reserva
                     ramo = info.get("ramo") or ramo
             except Exception:  # noqa: BLE001
                 _log.warning("consulta CNPJ falhou para %s (cria loja sem completar)", cnpj)
@@ -265,7 +270,7 @@ class LivroCaixa:
         (centavos, fonte_texto) ou (None, None). Funciona pra qualquer conta -
         o banco de precos e' COLETIVO (o ouro), nao isolado por tenant."""
         from .models import normalizar_descricao
-        from datetime import timedelta
+        from datetime import date, timedelta
         norm = normalizar_descricao(descricao)
         if not norm:
             return (None, None)
@@ -306,6 +311,10 @@ class LivroCaixa:
 
         Cada item: {descricao, quantidade, valor_unitario_centavos, valor_total_centavos}.
         Retorna quantos itens foram salvos (0 se o lancamento nao for do usuario).
+
+        Protecao contra DUPLICACAO: se o lancamento ja' tiver itens, por padrao
+        NAO empilha de novo (retorna -1). Com substituir=True, troca os antigos
+        pelos novos. Isso evita o "cupom com itens em dobro".
         """
         with self.pool.connection() as conn:
             dono = conn.execute(
@@ -314,6 +323,15 @@ class LivroCaixa:
             ).fetchone()
             if not dono:
                 return 0
+            ja = conn.execute(
+                "select count(*) from itens_lancamento where lancamento_id = %s",
+                (lancamento_id,),
+            ).fetchone()[0]
+            if ja and not substituir:
+                return -1                      # ja tem itens: nao duplica
+            if ja and substituir:
+                conn.execute("delete from itens_lancamento where lancamento_id = %s",
+                             (lancamento_id,))
             # Grava em LOTES (executemany): robusto pra 10 ou 3000 itens.
             params = [
                 (lancamento_id, it["descricao"], it.get("quantidade", 1),
@@ -349,7 +367,7 @@ class LivroCaixa:
         pra alimentar comparacoes futuras. Agrupado por cidade (da conta) + mercado
         (descricao do lancamento). Le os itens JA' salvos (com seus ids), entao o
         indice unico idx_precos_item protege contra duplicacao. Tolerante."""
-        from .models import normalizar_descricao
+        from .models import normalizar_descricao, limpar_nome_produto
         from .cnpj_info import ramo_por_categoria
         info = conn.execute(
             """select l.descricao, l.data, c.cidade, l.categoria
@@ -392,11 +410,13 @@ class LivroCaixa:
             if vu <= 0 or not desc:
                 continue
             norm = normalizar_descricao(desc)
+            # nome de exibicao limpo (tira desconto grudado, espacos, etc)
+            desc_limpo = limpar_nome_produto(desc) or desc
             chave = (norm, vu)
             if chave in vistos:
                 continue        # mesmo produto+preco no mesmo cupom: 1 preco basta
             vistos.add(chave)
-            params.append((norm, desc, vu, mercado, regiao,
+            params.append((norm, desc_limpo, vu, mercado, regiao,
                            data_compra, self.conta_id, item_id, "cupom", loja_id))
         if not params:
             return 0

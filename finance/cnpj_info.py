@@ -47,18 +47,12 @@ def consultar_cnpj(cnpj: str) -> dict | None:
 
 
 _RAMOS = [
-    ("Farmácia",            ("farmac", "drogaria", "medicament")),
-    ("Pet",                 ("animais", "veterinar", "pet shop", "estimacao", "animal")),
-    ("Material de construção", ("construc", "ferragem", "material de constr")),
-    ("Padaria",             ("padaria", "panific", "confeitaria")),
-    ("Açougue",             ("acougue", "carnes", "frigorific")),
-    ("Hortifruti",          ("hortifruti", "horti", "frutas", "verdura")),
-    ("Bebidas",             ("distribuidora de bebida", "bebida")),
-    ("Conveniência",        ("conveni", "tabacaria")),
-    ("Supermercado",        ("supermerc", "hipermerc", "minimerc", "mercearia")),
-    ("Restaurante",         ("restaurante", "lanchonete", "refeicao")),
-    ("Posto de combustível", ("combustivel", "posto")),
-    ("Mercado",             ("merc", "aliment", "generos")),
+    ("Farmacia",     ("farmac", "drogaria", "medicament")),
+    ("Restaurante",  ("restaurante", "lanchonete", "refeicao", "bar ", "fast",
+                      "pizzaria", "sorveteria", "casas de cha", "sucos")),
+    ("Supermercado", ("supermerc", "hipermerc", "minimerc", "mercearia",
+                      "mercadorias em geral", "alimenticios", "varejista de merc",
+                      "atacadista de alimentos", "alimentos")),
 ]
 
 
@@ -76,9 +70,8 @@ def classificar_ramo(cnae_desc: str | None) -> str | None:
 
 
 _CATEGORIA_RAMO = {
-    "Mercado": "Mercado",
-    "Saúde": "Farmácia",
-    "Pet": "Pet",
+    "Mercado": "Supermercado",
+    "Saude": "Farmacia",
     "Restaurante": "Restaurante",
 }
 

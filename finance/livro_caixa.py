@@ -3,11 +3,14 @@
 Todo metodo e' escopado por conta_id: a conta so' enxerga e mexe no que e' dela
 (isolamento sagrado do multi-tenant). membro_id marca QUEM lancou (auditoria).
 """
+import logging
 from datetime import date, timedelta
 
 from .models import (
     Lancamento, Tipo, centavos_para_reais, formatar_brl,
 )
+
+_log = logging.getLogger("openclaw.precos")
 
 
 class LivroCaixa:
@@ -248,7 +251,7 @@ class LivroCaixa:
                     cnae = info.get("cnae")
                     ramo = info.get("ramo") or ramo
             except Exception:  # noqa: BLE001
-                pass
+                _log.warning("consulta CNPJ falhou para %s (cria loja sem completar)", cnpj)
         novo = conn.execute(
             """insert into lojas (cnpj, nome, endereco, cidade, uf, ramo, cnae)
                values (%s,%s,%s,%s,%s,%s,%s) returning id""",
@@ -337,7 +340,8 @@ class LivroCaixa:
             try:
                 self._observar_precos(conn, lancamento_id, loja_info)
             except Exception:  # noqa: BLE001
-                pass            # coleta de preco nunca quebra o registro do cupom
+                # coleta de preco nunca quebra o registro do cupom, mas LOGA
+                _log.exception("falha ao observar precos do lancamento %s", lancamento_id)
             return n
 
     def _observar_precos(self, conn, lancamento_id: int, loja_info: dict | None = None) -> int:
@@ -372,6 +376,7 @@ class LivroCaixa:
                     loja_info.get("endereco"), cidade, uf,
                     ramo_reserva=ramo_por_categoria(categoria))
             except Exception:  # noqa: BLE001
+                _log.exception("falha ao achar/criar loja (cnpj=%s)", loja_info.get("cnpj"))
                 loja_id = None
         # le os itens recem-salvos desse lancamento (com id e valor unitario)
         itens = conn.execute(
@@ -380,12 +385,18 @@ class LivroCaixa:
             (lancamento_id,),
         ).fetchall()
         params = []
+        vistos = set()      # (descricao_norm, valor) ja' vistos NESTE lancamento
         for item_id, desc, vu in itens:
             vu = int(vu or 0)
             desc = (desc or "").strip()
             if vu <= 0 or not desc:
                 continue
-            params.append((normalizar_descricao(desc), desc, vu, mercado, regiao,
+            norm = normalizar_descricao(desc)
+            chave = (norm, vu)
+            if chave in vistos:
+                continue        # mesmo produto+preco no mesmo cupom: 1 preco basta
+            vistos.add(chave)
+            params.append((norm, desc, vu, mercado, regiao,
                            data_compra, self.conta_id, item_id, "cupom", loja_id))
         if not params:
             return 0

@@ -191,6 +191,18 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                 return f"Marquei '{i['descricao']}' como comprado. ✅"
         return f"Nao achei '{termo}' entre os itens pendentes da lista."
 
+    def remover_lista(entrada: dict) -> str:
+        if lista is None:
+            return "Lista de compras nao disponivel."
+        termo = (entrada.get("descricao") or "").strip().lower()
+        if not termo:
+            return "Qual item voce quer tirar da lista?"
+        for i in lista.listar(incluir_comprados=False):
+            if termo in i["descricao"].lower():
+                lista.remover(i["id"])
+                return f"Tirei '{i['descricao']}' da lista. 🗑️"
+        return f"Nao achei '{termo}' na lista pra remover."
+
     def comparar_lista(entrada: dict) -> str:
         if lista is None or banco is None:
             return "Comparador de precos nao disponivel."
@@ -361,6 +373,22 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                 "required": ["descricao"],
             },
             executar=marcar_lista,
+        ),
+        Ferramenta(
+            nome="remover_lista_compras",
+            descricao=("Remove/tira um item da LISTA DE COMPRAS (apaga de vez, diferente de "
+                       "marcar como comprado). Use quando a pessoa disser que adicionou errado, "
+                       "que nao precisa mais, que quer tirar/apagar/excluir um item da lista, "
+                       "ou pra corrigir um item que entrou por engano (ex: foto errada)."),
+            parametros={
+                "type": "object",
+                "properties": {
+                    "descricao": {"type": "string",
+                                  "description": "nome do item a remover da lista"},
+                },
+                "required": ["descricao"],
+            },
+            executar=remover_lista,
         ),
         Ferramenta(
             nome="comparar_precos_lista",

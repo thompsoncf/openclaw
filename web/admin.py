@@ -276,7 +276,7 @@ def admin_precos(request: Request):
     with pool.connection() as c:
         # resumo
         total = c.execute("select count(*) from precos_observados").fetchone()[0]
-        produtos = c.execute("select count(distinct descricao_normalizada) from precos_observados").fetchone()[0]
+        produtos = c.execute("select count(distinct descricao_norm) from precos_observados").fetchone()[0]
         lojas_count = c.execute("select count(*) from lojas").fetchone()[0]
         de_cupom = c.execute("select count(*) from precos_observados where fonte = 'cupom'").fetchone()[0]
 

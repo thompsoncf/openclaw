@@ -437,7 +437,13 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.5rem">
 <h1 style="margin:0">Lista de compras</h1>
+<div style="display:flex; gap:.5rem">
+{% if papel != 'dono' %}
+<button id="btn-avisar" onclick="avisarTerminei()" style="margin:0;padding:.4rem .8rem;background:#2AABEE;color:#fff;font-size:.82rem;width:auto;border-radius:8px;border:0;cursor:pointer">✅ Avisar que terminei</button>
+<span id="aviso-msg" class="mut" style="font-size:.85rem;margin-left:.5rem"></span>
+{% endif %}
 <button id="btn-apagar" style="margin:0;padding:.4rem .8rem;background:#2a2a2b;font-size:.82rem;width:auto;display:none;color:#d98a8a">Apagar lista</button>
+</div>
 </div>
 
 <form id="form-add" style="display:flex; gap:.5rem; margin:1rem 0">
@@ -620,6 +626,18 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 
   acao({acao:'noop'}).then(carregarPrecos);
 })();
+
+function avisarTerminei(){
+  var btn = document.getElementById('btn-avisar');
+  btn.disabled = true;
+  fetch('/painel/compras/avisar', {method:'POST'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      document.getElementById('aviso-msg').textContent = d.msg || 'Avisado!';
+      setTimeout(function(){ btn.disabled = false; }, 3000);
+    })
+    .catch(function(){ btn.disabled = false; });
+}
 </script>
 {% endblock %}"""
 
@@ -826,9 +844,16 @@ def compras(request: Request):
     conta, lista = _lista_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
+    # busca o papel do usuario logado (dono, membro, restrito)
+    pool = get_pool()
+    with pool.connection() as c:
+        m = c.execute(
+            "select papel from membros where conta_id=%s order by id limit 1",
+            (conta[0],)).fetchone()
+    papel = m[0] if m else "membro"
     # a pagina carrega "vazia" e o JS busca a lista e os precos via AJAX
     # (sem reload a cada acao). Ver endpoint /painel/compras/api.
-    return _render("compras", request, titulo="Compras")
+    return _render("compras", request, titulo="Compras", papel=papel)
 
 
 @router.get("/painel/compras/precos")
@@ -938,27 +963,8 @@ async def compras_api(request: Request):
         lista.limpar_comprados()
     elif acao == "apagar_tudo":
         lista.limpar_tudo()
-    # devolve a lista atualizada (com estimativa do BANCO DE PRECOS coletivo)
-    livro = LivroCaixa(get_pool(), conta[0])
-    _cidade = conta[7] if len(conta) > 7 else None       # cidade do cadastro
-    def _est(desc):
-        try:
-            # 1) banco de precos coletivo (cupons de todos + API SEFAZ futura)
-            cent, fonte = livro.buscar_preco_observado(desc, cidade=_cidade)
-            if cent is not None:
-                return cent, fonte
-            # 2) fallback: historico do proprio usuario
-            ach, _t = livro.buscar_itens(desc, dias=180)
-            ps = [it["valor_total_centavos"] for it in ach if it.get("valor_total_centavos")]
-            if ps:
-                return int(sum(ps) / len(ps)), "seu histórico"
-        except Exception:  # noqa: BLE001
-            pass
-        return None, None
-    try:
-        lista.estimar_precos(_est)
-    except Exception:  # noqa: BLE001
-        pass
+    # NAO estima preco aqui (sob demanda no botao "Comparar precos" ->
+    # /painel/compras/precos). Adicionar item fica leve, sem buscar preco.
     itens = lista.listar(incluir_comprados=False)
     resumo = lista.resumo()
     return JSONResponse({
@@ -1011,6 +1017,31 @@ def compras_limpar(request: Request):
         return RedirectResponse("/login", status_code=303)
     lista.limpar_comprados()
     return RedirectResponse("/painel/compras", status_code=303)
+
+
+@router.post("/painel/compras/avisar")
+def compras_avisar(request: Request):
+    """Pessoa (qualquer uma menos o dono) avisa que terminou a lista.
+    Manda Telegram pro dono. Nao trava a lista."""
+    conta, lista = _lista_logada(request)
+    if conta is None:
+        return JSONResponse({"erro": "nao logado"}, status_code=401)
+    pool = get_pool()
+    with pool.connection() as c:
+        m = c.execute(
+            "select nome, papel from membros where conta_id=%s and id = "
+            "(select id from membros where conta_id=%s order by id limit 1)",
+            (conta[0], conta[0])).fetchone()
+    quem_nome = (m[0] if m else None) or conta[2] or "Alguem"
+    papel = m[1] if m else "membro"
+    if papel == "dono":
+        return JSONResponse({"ok": False, "msg": "Voce e' o dono - o aviso e' pra voce mesmo."})
+    n = lista.resumo().get("pendentes", 0)
+    from finance.notificar import avisar_dono_lista_fechada
+    ok = avisar_dono_lista_fechada(pool, conta[0], quem_nome, n_itens=n)
+    if ok:
+        return JSONResponse({"ok": True, "msg": "Pronto! Avisei o responsavel. ✅"})
+    return JSONResponse({"ok": True, "msg": "Lista marcada como pronta! (o aviso por Telegram sai quando o responsavel conectar)"})
 
 
 @router.post("/membros/adicionar")

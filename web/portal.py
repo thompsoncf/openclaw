@@ -260,7 +260,8 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
 <span class="lk-wa" title="Disponível quando o WhatsApp oficial for aprovado">🟢 WhatsApp (em breve)</span>
 </div>
 </div>{% endif %}
-{% if not m[2] and not m[5] %}<span class="mut">sem contato vinculado</span>{% endif %}
+{% if m[6] and not m[5] %}<div class="conv mut">✅ Telegram conectado</div>{% endif %}
+{% if not m[2] and not m[5] and not m[6] %}<span class="mut">sem contato vinculado</span>{% endif %}
 </div>
 {% if m[1] != 'dono' %}
 <div class="membro-acoes">
@@ -797,7 +798,7 @@ def painel(request: Request):
     pool = get_pool()
     with pool.connection() as c:
         membros = c.execute(
-            "select nome, papel, whatsapp_id, ativo, id, codigo_convite from membros where conta_id=%s order by id",
+            "select nome, papel, whatsapp_id, ativo, id, codigo_convite, telegram_id from membros where conta_id=%s order by id",
             (conta[0],),
         ).fetchall()
     ativos, inclusos, pode_extra = _limite_membros(conta)

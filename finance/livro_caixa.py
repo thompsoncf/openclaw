@@ -235,6 +235,18 @@ class LivroCaixa:
                        where id = %s""",
                     (endereco or "", nome or "", loja_id))
             return loja_id
+        # loja NOVA: se faltar nome ou endereco, tenta completar na Receita (BrasilAPI)
+        if not nome or not endereco:
+            try:
+                from .cnpj_info import consultar_cnpj
+                info = consultar_cnpj(cnpj)
+                if info:
+                    nome = nome or info.get("nome")
+                    endereco = endereco or info.get("endereco")
+                    cidade = cidade or info.get("cidade")
+                    uf = uf or info.get("uf")
+            except Exception:  # noqa: BLE001
+                pass            # sem rede/erro: cria a loja com o que tiver
         novo = conn.execute(
             """insert into lojas (cnpj, nome, endereco, cidade, uf)
                values (%s,%s,%s,%s,%s) returning id""",

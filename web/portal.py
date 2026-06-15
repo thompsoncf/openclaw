@@ -520,10 +520,10 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 
   function ligarBotoesLinha(){
     Array.prototype.forEach.call(listaEl.querySelectorAll('.mk'), function(b){
-      b.onclick = function(){ acao({acao:'marcar', item_id:+b.getAttribute('data-id'), comprado:+b.getAttribute('data-c')}).then(carregarPrecos); };
+      b.onclick = function(){ acao({acao:'marcar', item_id:+b.getAttribute('data-id'), comprado:+b.getAttribute('data-c')}); };
     });
     Array.prototype.forEach.call(listaEl.querySelectorAll('.rm'), function(b){
-      b.onclick = function(){ acao({acao:'remover', item_id:+b.getAttribute('data-id')}).then(carregarPrecos); };
+      b.onclick = function(){ acao({acao:'remover', item_id:+b.getAttribute('data-id')}); };
     });
   }
 
@@ -562,11 +562,11 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
     inp.value = '';                 // limpa na hora, sutil
     // NAO zera os ajustes ja' feitos - so' remove ajuste de item que nao existe
     // mais (limpeza acontece no render, comparando com pendentesAtuais)
-    acao({acao:'add', descricao:v}).then(carregarPrecos);
+    acao({acao:'add', descricao:v});
   };
   btnApagar.onclick = function(){
     if (!confirm('Apagar a lista inteira? Essa acao nao pode ser desfeita.')) return;
-    acao({acao:'apagar_tudo'}).then(carregarPrecos);
+    acao({acao:'apagar_tudo'});
   };
 
   var prog = null;
@@ -667,7 +667,7 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
       }).catch(function(){ cx.innerHTML=''; });
   }
 
-  acao({acao:'noop'}).then(carregarPrecos);
+  acao({acao:'noop'});
 
   // Exportar funcoes pra escopo global (botoes do toggle precisam acessar)
   window.setVisao = setVisao;

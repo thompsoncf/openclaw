@@ -178,6 +178,35 @@ def adicionar_membro(pool, conta_id: int, nome: str | None = None,
     return int(row[0])
 
 
+def resgatar_convite(pool, codigo: str, telegram_id: int) -> tuple[bool, str]:
+    """A pessoa digitou o codigo no Telegram. Vincula o telegram_id dela ao
+    membro pendente. Retorna (ok, mensagem). Idempotente e seguro:
+    - codigo invalido -> (False, ...)
+    - codigo ja' usado -> (False, ...)
+    - telegram ja' vinculado a outra conta -> (False, ...)
+    """
+    codigo = (codigo or "").strip().upper()
+    if not codigo:
+        return False, "Codigo vazio."
+    with pool.connection() as conn:
+        ja = conn.execute("select 1 from membros where telegram_id=%s", (telegram_id,)).fetchone()
+        if ja:
+            return False, "Esse Telegram ja' esta vinculado a uma conta."
+        m = conn.execute(
+            "select id, conta_id, nome, papel from membros where codigo_convite=%s and telegram_id is null",
+            (codigo,),
+        ).fetchone()
+        if not m:
+            return False, "Codigo invalido ou ja' utilizado."
+        conn.execute(
+            "update membros set telegram_id=%s, codigo_convite=null, ativo=true where id=%s",
+            (telegram_id, m[0]),
+        )
+        conn.commit()
+    registrar_evento(pool, m[1], "convite_resgatado", f"{m[2]} vinculou Telegram", membro_id=m[0])
+    return True, f"Pronto, {m[2] or 'tudo certo'}! Voce foi vinculado a' conta."
+
+
 def gerar_convite_para(pool, membro_id: int, conta_id: int) -> str | None:
     """(Re)gera um codigo de convite pra um membro EXISTENTE desta conta.
     Zera o telegram_id (vai ser revinculado ao resgatar). Retorna o codigo,

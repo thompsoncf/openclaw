@@ -451,6 +451,8 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 <button style="margin:0; width:auto; padding:.65rem 1.2rem">Adicionar</button>
 </form>
 
+<button id="btn-comparar" onclick="carregarPrecos()" style="margin:.5rem 0;padding:.4rem 1rem;background:#6366f1;color:#fff;border:0;border-radius:8px;cursor:pointer;font-size:.9rem">📊 Comparar preços</button>
+
 <div id="comparador" style="margin:1rem 0"></div>
 
 <div id="toggle-visao" style="display:none; gap:.5rem; margin:.5rem 0">

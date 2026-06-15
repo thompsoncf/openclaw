@@ -675,6 +675,7 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
   window.setVisao = setVisao;
   window.renderItens = renderItens;
   window.ligarBotoesLinha = ligarBotoesLinha;
+  window.carregarPrecos = carregarPrecos;
 })();
 
 function avisarTerminei(){

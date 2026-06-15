@@ -140,47 +140,7 @@ _ADMIN_QR = """{% extends "abase" %}{% block conteudo %}
 </div>
 {% endblock %}"""
 
-_ADMIN_PRECOS = """{% extends "abase" %}{% block conteudo %}
-<h1>Auditoria de preços coletivos</h1>
-{% if aviso %}<div class="card" style="border-color:#1d9e75">{{ aviso }}</div>{% endif %}
-<div class="cards">
-<div class="metric"><span>Total de preços</span><b>{{ resumo.total }}</b></div>
-<div class="metric"><span>Produtos únicos</span><b>{{ resumo.produtos }}</b></div>
-<div class="metric"><span>Lojas</span><b>{{ resumo.lojas }}</b></div>
-<div class="metric"><span>De cupom (fonte)</span><b>{{ resumo.de_cupom }}</b></div>
-</div>
-
-<div class="card"><h2>Últimos preços registrados</h2>
-<table><tr><th>Quando</th><th>Produto</th><th>Preço</th><th>Lojas</th><th>UF</th><th>CNPJ</th><th>Fonte</th></tr>
-{% for p in precos %}<tr>
-<td class="mut">{{ p.criado_em.strftime('%d/%m %H:%M') }}</td>
-<td>{{ p.descricao }}</td>
-<td><b>{{ brl(p.valor_unitario_centavos) }}</b></td>
-<td>{% if p.loja_nome %}{{ p.loja_nome }}{% else %}<span class="mut">-</span>{% endif %}</td>
-<td class="mut">{{ p.uf or '-' }}</td>
-<td class="mut" style="font-size:.8rem">{{ p.cnpj or '-' }}</td>
-<td class="mut">{{ p.fonte }}</td>
-</tr>{% endfor %}
-</table>
-{% if not precos %}<p class="mut">Nenhum preço registrado ainda.</p>{% endif %}
-</div>
-
-<div class="card"><h2>Lojas</h2>
-<table><tr><th>CNPJ</th><th>Nome</th><th>UF</th><th>Endereço</th><th>Preços</th><th>Desde</th></tr>
-{% for l in lojas %}<tr>
-<td class="mut" style="font-size:.8rem">{{ l.cnpj }}</td>
-<td>{{ l.nome or '-' }}</td>
-<td class="mut">{{ l.uf or '-' }}</td>
-<td class="mut">{{ l.endereco or '-' }}</td>
-<td><b>{{ l.precos_count }}</b></td>
-<td class="mut">{{ l.criado_em.strftime('%d/%m/%y') }}</td>
-</tr>{% endfor %}
-</table>
-{% if not lojas %}<p class="mut">Nenhuma loja registrada ainda.</p>{% endif %}
-</div>
-{% endblock %}"""
-
-_env = Environment(loader=DictLoader({"abase": _ADMIN_BASE, "ahome": _ADMIN_HOME, "aqr": _ADMIN_QR, "aprecos": _ADMIN_PRECOS}),
+_env = Environment(loader=DictLoader({"abase": _ADMIN_BASE, "ahome": _ADMIN_HOME, "aqr": _ADMIN_QR}),
                    autoescape=select_autoescape())
 _env.globals["brl"] = brl
 
@@ -265,44 +225,6 @@ def admin_qr(request: Request):
     leituras = [SimpleNamespace(**x) for x in leituras]
     return HTMLResponse(_env.get_template("aqr").render(
         resumo=resumo, leituras=leituras,
-        aviso=request.session.pop("admin_aviso", None)))
-
-
-@router.get("/admin/precos", response_class=HTMLResponse)
-def admin_precos(request: Request):
-    if _admin(request) is None:
-        return _NEGADO
-    pool = get_pool()
-    with pool.connection() as c:
-        # resumo
-        total = c.execute("select count(*) from precos_observados").fetchone()[0]
-        produtos = c.execute("select count(distinct descricao_norm) from precos_observados").fetchone()[0]
-        lojas_count = c.execute("select count(*) from lojas").fetchone()[0]
-        de_cupom = c.execute("select count(*) from precos_observados where fonte = 'cupom'").fetchone()[0]
-
-        # ultimos precos com detalhes de loja
-        cols_p = ["descricao", "valor_unitario_centavos", "loja_nome", "uf", "cnpj", "fonte", "criado_em"]
-        precos = [dict(zip(cols_p, r)) for r in c.execute(
-            """select po.descricao, po.valor_unitario_centavos, l.nome, l.uf, l.cnpj, po.fonte, po.criado_em
-               from precos_observados po
-               left join lojas l on l.id = po.loja_id
-               order by po.id desc limit 100""").fetchall()]
-
-        # lojas com contagem de precos
-        cols_l = ["cnpj", "nome", "uf", "endereco", "criado_em", "precos_count"]
-        lojas = [dict(zip(cols_l, r)) for r in c.execute(
-            """select l.cnpj, l.nome, l.uf, l.endereco, l.criado_em, count(po.id)
-               from lojas l
-               left join precos_observados po on po.loja_id = l.id
-               group by l.id
-               order by count(po.id) desc""").fetchall()]
-
-    resumo = {"total": total, "produtos": produtos, "lojas": lojas_count, "de_cupom": de_cupom}
-    from types import SimpleNamespace
-    precos = [SimpleNamespace(**p) for p in precos]
-    lojas = [SimpleNamespace(**l) for l in lojas]
-    return HTMLResponse(_env.get_template("aprecos").render(
-        resumo=resumo, precos=precos, lojas=lojas,
         aviso=request.session.pop("admin_aviso", None)))
 
 

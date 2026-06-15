@@ -453,6 +453,13 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 
 <div id="comparador" style="margin:1rem 0"></div>
 
+<div id="toggle-visao" style="display:none; gap:.5rem; margin:.5rem 0">
+  <button id="bt-geral" onclick="setVisao('geral')"
+    style="margin:0;padding:.4rem .9rem;border-radius:8px;border:0;cursor:pointer;background:#1d9e75;color:#fff">Geral</button>
+  <button id="bt-pessoa" onclick="setVisao('pessoa')"
+    style="margin:0;padding:.4rem .9rem;border-radius:8px;border:1px solid #2a2a2b;cursor:pointer;background:#1a2233;color:#e7ecf3">Por pessoa</button>
+</div>
+
 <div id="lista-itens"></div>
 <p id="resumo-lista" class="mut" style="margin-top:1rem"></p>
 </div>
@@ -468,6 +475,58 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 
   function esc(s){ var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 
+  var _visao = 'geral';
+  var _itensCache = [];
+
+  function setVisao(v){
+    _visao = v;
+    document.getElementById('bt-geral').style.background = v==='geral' ? '#1d9e75' : '#1a2233';
+    document.getElementById('bt-geral').style.color = '#fff';
+    document.getElementById('bt-pessoa').style.background = v==='pessoa' ? '#1d9e75' : '#1a2233';
+    document.getElementById('bt-pessoa').style.color = '#fff';
+    renderItens(_itensCache);
+  }
+
+  function linhaItem(i){
+    var preco = i.preco ? '<span class="mut"> · ~'+i.preco+'</span>' : '';
+    var h = '<tr style="'+(i.comprado?'opacity:.5':'')+'">';
+    h += '<td style="width:40px"><button class="mk" data-id="'+i.id+'" data-c="'+(i.comprado?0:1)+'" title="marcar" style="margin:0;padding:.25rem .55rem;background:'+(i.comprado?'#1d9e75':'#2a2a2b')+';font-size:.9rem">✓</button></td>';
+    h += '<td style="'+(i.comprado?'text-decoration:line-through':'')+'">'+esc(i.descricao)+preco+'</td>';
+    if (_visao === 'geral') h += '<td class="mut" style="font-size:.8rem">'+esc(i.quem||'')+'</td>';
+    h += '<td style="width:40px;text-align:right"><button class="rm" data-id="'+i.id+'" title="remover" style="margin:0;padding:.25rem .5rem;background:transparent;color:#8a3636;font-size:.95rem">✕</button></td>';
+    h += '</tr>';
+    return h;
+  }
+
+  function renderItens(itens){
+    if (!itens.length){ listaEl.innerHTML = '<p class="mut">A lista está vazia. Adicione itens acima — ou peça pelo WhatsApp/Telegram: <i>"acabou o arroz, bota na lista"</i>.</p>'; return; }
+    var nomes = {}; itens.forEach(function(i){ nomes[i.quem||'-'] = 1; });
+    var temVarias = Object.keys(nomes).length > 1;
+    document.getElementById('toggle-visao').style.display = temVarias ? 'flex' : 'none';
+
+    var html = '';
+    if (_visao === 'pessoa' && temVarias){
+      Object.keys(nomes).sort().forEach(function(nome){
+        var doNome = itens.filter(function(i){ return (i.quem||'-') === nome; });
+        html += '<div style="margin:.6rem 0 .2rem;font-weight:600">'+esc(nome)+' <span class="mut" style="font-weight:400;font-size:.8rem">('+doNome.length+')</span></div>';
+        html += '<table style="margin:0">' + doNome.map(linhaItem).join('') + '</table>';
+      });
+    } else {
+      html = '<table style="margin-top:.5rem">' + itens.map(linhaItem).join('') + '</table>';
+    }
+    listaEl.innerHTML = html;
+    ligarBotoesLinha();
+  }
+
+  function ligarBotoesLinha(){
+    Array.prototype.forEach.call(listaEl.querySelectorAll('.mk'), function(b){
+      b.onclick = function(){ acao({acao:'marcar', item_id:+b.getAttribute('data-id'), comprado:+b.getAttribute('data-c')}).then(carregarPrecos); };
+    });
+    Array.prototype.forEach.call(listaEl.querySelectorAll('.rm'), function(b){
+      b.onclick = function(){ acao({acao:'remover', item_id:+b.getAttribute('data-id')}).then(carregarPrecos); };
+    });
+  }
+
   function acao(payload){
     return fetch('/painel/compras/api', {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -477,6 +536,7 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 
   function render(d){
     var itens = d.itens || [];
+    _itensCache = itens;
     pendentesAtuais = itens.filter(function(i){return !i.comprado;}).map(function(i){return i.descricao;});
     // limpa ajustes orfaos (item removido/comprado nao deve manter ajuste)
     Object.keys(ajustes).forEach(function(k){
@@ -489,26 +549,9 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
       compEl.innerHTML = '';
       return;
     }
-    var html = '<table style="margin-top:.5rem">';
-    itens.forEach(function(i){
-      var preco = i.preco ? '<span class="mut"> · ~'+i.preco+'</span>' : '';
-      html += '<tr style="'+(i.comprado?'opacity:.5':'')+'">';
-      html += '<td style="width:40px"><button class="mk" data-id="'+i.id+'" data-c="'+(i.comprado?0:1)+'" title="marcar" style="margin:0;padding:.25rem .55rem;background:'+(i.comprado?'#1d9e75':'#2a2a2b')+';font-size:.9rem">✓</button></td>';
-      html += '<td style="'+(i.comprado?'text-decoration:line-through':'')+'">'+esc(i.descricao)+preco+'</td>';
-      html += '<td class="mut" style="font-size:.8rem">'+esc(i.quem||'')+'</td>';
-      html += '<td style="width:40px;text-align:right"><button class="rm" data-id="'+i.id+'" title="remover" style="margin:0;padding:.25rem .5rem;background:transparent;color:#8a3636;font-size:.95rem">✕</button></td>';
-      html += '</tr>';
-    });
-    html += '</table>';
-    listaEl.innerHTML = html;
+    renderItens(itens);
     resumoEl.textContent = d.pendentes + ' item(ns) na lista';
     btnApagar.style.display = d.pendentes ? '' : 'none';
-    Array.prototype.forEach.call(listaEl.querySelectorAll('.mk'), function(b){
-      b.onclick = function(){ acao({acao:'marcar', item_id:+b.getAttribute('data-id'), comprado:+b.getAttribute('data-c')}).then(carregarPrecos); };
-    });
-    Array.prototype.forEach.call(listaEl.querySelectorAll('.rm'), function(b){
-      b.onclick = function(){ acao({acao:'remover', item_id:+b.getAttribute('data-id')}).then(carregarPrecos); };
-    });
   }
 
   document.getElementById('form-add').onsubmit = function(e){

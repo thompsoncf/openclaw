@@ -231,6 +231,26 @@ def gerar_convite_para(pool, membro_id: int, conta_id: int) -> str | None:
     return codigo
 
 
+def gerar_convite_dono(pool, conta_id: int) -> str | None:
+    """Gera um codigo de convite pro DONO da conta vincular o Telegram dele.
+    Diferente de gerar_convite_para (que bloqueia dono), esta e' especifica pro
+    onboarding do titular. Retorna None se o dono ja' vinculou o Telegram (tem
+    telegram_id) ou se nao existir dono."""
+    import secrets
+    with pool.connection() as conn:
+        m = conn.execute(
+            "select id, telegram_id, (select nome from contas where id=%s) "
+            "from membros where conta_id=%s and papel='dono'",
+            (conta_id, conta_id)).fetchone()
+        if not m or m[1] is not None:
+            return None
+        pref = "".join(ch for ch in (m[2] or "OPEN") if ch.isalnum())[:3].upper() or "OPC"
+        codigo = f"{pref}-{secrets.token_hex(2).upper()}"
+        conn.execute("update membros set codigo_convite=%s where id=%s", (codigo, m[0]))
+        conn.commit()
+    return codigo
+
+
 def reativar_membro(pool, membro_id: int, conta_id: int) -> bool:
     with pool.connection() as conn:
         r = conn.execute(

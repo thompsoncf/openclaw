@@ -213,6 +213,30 @@ _LOGIN = """{% extends "base" %}{% block conteudo %}
 <label>Senha</label><input name="senha" type="password" required>
 <button>Entrar</button></form></div>{% endblock %}"""
 
+_BEMVINDO = """{% extends "base" %}{% block conteudo %}
+<div style="max-width:420px;margin:2rem auto;text-align:center">
+  <div style="width:56px;height:56px;border-radius:50%;background:#11402e;display:flex;align-items:center;justify-content:center;margin:0 auto 1rem;font-size:28px">✅</div>
+  <h1 style="margin:0 0 .4rem">Bem-vindo, {{ nome }}!</h1>
+  <p class="mut" style="margin:0 0 1.5rem">Sua conta está pronta. Falta só conectar seu Telegram pra começar.</p>
+  {% if ja_conectado %}
+  <div class="card"><p>Seu Telegram já está conectado! 🎉</p>
+  <a class="btn" href="/painel">Ir pro painel →</a></div>
+  {% else %}
+  <div class="card" style="text-align:left">
+    <p class="mut" style="margin:0 0 .85rem">Conecte seu Telegram pra conversar com seu assistente — registrar gastos, ver saldo, montar a lista de compras.</p>
+    <a href="https://t.me/{{ bot }}?text={{ codigo|urlencode }}" target="_blank" rel="noopener"
+       style="display:flex;align-items:center;justify-content:center;gap:8px;padding:.8rem;border-radius:8px;text-decoration:none;background:#2AABEE;color:#fff;font-weight:600;margin-bottom:8px">
+       📨 Conectar meu Telegram</a>
+    <span title="Disponível em breve"
+       style="display:flex;align-items:center;justify-content:center;gap:8px;padding:.8rem;border-radius:8px;background:#11201a;color:#5a6b62;cursor:not-allowed">
+       🟢 WhatsApp (em breve)</span>
+    <p class="mut" style="font-size:.8rem;margin:.85rem 0 0">Vai abrir o Telegram com seu código <code>{{ codigo }}</code> — é só apertar enviar.</p>
+  </div>
+  <a href="/painel" class="mut" style="font-size:.85rem;display:inline-block;margin-top:1rem">Pular e ir pro painel →</a>
+  {% endif %}
+</div>
+{% endblock %}"""
+
 _PAINEL = """{% extends "base" %}{% block conteudo %}
 <div class="card larga"><h1>Olá, {{ conta[2] }}! <span class="tag">{{ conta[5] }}</span></h1>
 <p class="mut">Plano: <b>{{ conta[4] or '-' }}</b>
@@ -600,7 +624,7 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 {% endblock %}"""
 
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 from finance import cidades as _cidades_mod
@@ -651,8 +675,9 @@ def cadastro_envia(request: Request, plano: str = Form(...), nome: str = Form(..
                   (email, hash_senha(senha), conta_id))
         c.commit()
     ct.adicionar_membro(pool, conta_id, nome=nome.strip(), papel="dono", whatsapp_id=zap)
+    ct.gerar_convite_dono(pool, conta_id)  # codigo pro dono conectar o Telegram
     request.session["conta_id"] = conta_id
-    return RedirectResponse("/painel", status_code=303)
+    return RedirectResponse("/bem-vindo", status_code=303)
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -676,6 +701,23 @@ def login_envia(request: Request, email: str = Form(...), senha: str = Form(...)
 def sair(request: Request):
     request.session.clear()
     return RedirectResponse("/login", status_code=303)
+
+
+@router.get("/bem-vindo", response_class=HTMLResponse)
+def bem_vindo(request: Request):
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    with pool.connection() as c:
+        row = c.execute(
+            "select nome, codigo_convite, telegram_id from membros "
+            "where conta_id=%s and papel='dono'", (conta[0],)).fetchone()
+    nome = (row[0] if row else None) or "tudo certo"
+    codigo = row[1] if row else None
+    ja_conectado = bool(row and row[2])
+    return _render("bemvindo", request, nome=nome, codigo=codigo,
+                   ja_conectado=ja_conectado, bot="clawaladdin_bot")
 
 
 @router.get("/painel", response_class=HTMLResponse)

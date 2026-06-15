@@ -14,6 +14,8 @@ import unicodedata
 from datetime import date, timedelta
 
 
+# ---------- normalizacao de descricao (casar "ARROZ T1 5KG" com "arroz") ----------
+
 _STOP = {"tipo", "de", "do", "da", "com", "sem", "extra", "premium", "kg", "g",
          "un", "und", "ml", "l", "pct", "cx", "pc", "lt"}
 
@@ -24,11 +26,13 @@ def normalizar(desc: str) -> str:
     s = (desc or "").lower().strip()
     s = "".join(c for c in unicodedata.normalize("NFD", s)
                 if unicodedata.category(c) != "Mn")
+    # remove unidades coladas a numero: 5kg, 500g, 2l, 1.5l, 200ml
     s = re.sub(r"\b\d+[.,]?\d*\s*(kg|g|ml|l|un|und|pct|cx|lt|pc)\b", " ", s)
     s = re.sub(r"[^a-z0-9 ]", " ", s)
+    # remove numeros soltos e stopwords
     palavras = [p for p in s.split()
                 if p not in _STOP and not p.isdigit() and len(p) > 1]
-    return " ".join(palavras[:4])
+    return " ".join(palavras[:4])  # nucleo: ate' 4 palavras significativas
 
 
 def tokens(desc: str) -> set[str]:
@@ -38,6 +42,8 @@ def tokens(desc: str) -> set[str]:
 class BancoPrecos:
     def __init__(self, pool):
         self.pool = pool
+
+    # ---------- ingestao ----------
 
     def registrar_item(self, item_id: int, descricao: str, valor_unitario_centavos: int,
                        data_compra: date, mercado: str | None = None,
@@ -81,6 +87,8 @@ class BancoPrecos:
                 n += 1
         return n
 
+    # ---------- consulta de preco de UM item ----------
+
     def precos_de(self, descricao: str, regiao: str | None = None,
                   dias: int = 90) -> list[dict]:
         """Precos recentes que casam com a descricao (por nucleo normalizado),
@@ -88,36 +96,55 @@ class BancoPrecos:
         nucleo = normalizar(descricao)
         if not nucleo:
             return []
-        primeira = nucleo.split()[0]
+        primeira = nucleo.split()[0]  # ancora a busca na 1a palavra significativa
         corte = date.today() - timedelta(days=dias)
-        sql = """select mercado, valor_unitario_centavos, descricao_original, data_compra,
-                        descricao_norm
-                 from precos_observados
-                 where descricao_norm like %s and data_compra >= %s"""
+        sql = """select po.mercado, po.valor_unitario_centavos, po.descricao_original,
+                        po.data_compra, po.descricao_norm,
+                        l.endereco, l.cidade, l.uf
+                 from precos_observados po
+                 left join lojas l on l.id = po.loja_id
+                 where po.descricao_norm like %s and po.data_compra >= %s"""
         params: list = [f"%{primeira}%", corte]
         if regiao:
-            sql += " and (regiao = %s or regiao is null)"
+            sql += " and (po.regiao = %s or po.regiao is null)"
             params.append(regiao)
-        sql += " order by data_compra desc"
+        sql += " order by po.data_compra desc"
         with self.pool.connection() as c:
             rows = c.execute(sql, params).fetchall()
+        # filtra por similaridade de tokens (evita casar 'arroz' com 'arroz doce')
         alvo = tokens(descricao)
         achados = []
-        for merc, vu, orig, dt, norm in rows:
+        for merc, vu, orig, dt, norm, endereco, l_cidade, l_uf in rows:
             comuns = alvo & set(norm.split())
             if not alvo or len(comuns) >= max(1, len(alvo) // 2):
+                # monta endereco legivel (rua/bairro + cidade/uf), quando houver
+                partes_end = [p for p in [endereco,
+                              f"{l_cidade}/{l_uf}" if l_cidade and l_uf else None] if p]
                 achados.append({"mercado": merc or "(sem nome)", "valor_centavos": int(vu),
-                                "descricao": orig, "data": dt})
+                                "descricao": orig, "data": dt,
+                                "endereco": ", ".join(partes_end) or None})
+        # 1 preco por mercado (o mais recente, ja' que vem ordenado desc)
         por_mercado: dict[str, dict] = {}
         for a in achados:
             por_mercado.setdefault(a["mercado"], a)
         return sorted(por_mercado.values(), key=lambda x: x["valor_centavos"])
 
+    # ---------- comparador de CESTA ----------
+
     def comparar_cesta(self, itens: list[str], regiao: str | None = None,
                        dias: int = 90) -> dict:
         """Para uma lista de produtos, calcula quanto a CESTA sai em cada mercado.
-        Retorna o ranking de mercados + detalhe item a item."""
+        Retorna o ranking de mercados + detalhe item a item.
+
+        Estrutura:
+          {
+            "mercados": [{"mercado","total_centavos","itens_cobertos","itens_faltando"}],
+            "itens": [{"descricao","melhor_mercado","melhor_centavos","precos":[...]}],
+            "observacoes": int,   # quantos precos sustentam a comparacao
+          }
+        """
         detalhe_itens = []
+        # mercado -> {soma, cobertos, faltando[]}
         mercados: dict[str, dict] = {}
         total_obs = 0
 
@@ -142,6 +169,7 @@ class BancoPrecos:
                     "melhor_centavos": None, "precos": [],
                 })
 
+        # quais itens faltam em cada mercado (nao tinha preco la')
         nomes_itens = [d["descricao"] for d in detalhe_itens]
         for nome_merc, m in mercados.items():
             tem = set()
@@ -155,6 +183,7 @@ class BancoPrecos:
              "itens_cobertos": v["cobertos"], "itens_faltando": v["faltando"]}
             for k, v in mercados.items()
         ]
+        # ordena: mais itens cobertos primeiro, depois menor total
         ranking.sort(key=lambda x: (-x["itens_cobertos"], x["total_centavos"]))
 
         return {"mercados": ranking, "itens": detalhe_itens, "observacoes": total_obs}
@@ -166,7 +195,8 @@ def _mercado_da_descricao(lanc_desc: str | None) -> str | None:
     if not lanc_desc:
         return None
     s = lanc_desc.strip()
-    for ruido in ("compra", "compras", "no ", "na ", "em "):
+    # remove palavras genericas comuns
+    for ruido in ("compra", "compras", "mercado", "supermercado", "no ", "na ", "em "):
         s = re.sub(rf"\b{ruido}\b", "", s, flags=re.IGNORECASE).strip()
     return s.title()[:60] if s else None
 
@@ -192,6 +222,7 @@ def comparar_para_cidade(pool, itens: list[str], cidade: str | None) -> dict:
             pass
     # 2) banco proprio (regiao = cidade)
     r = BancoPrecos(pool).comparar_cesta(itens, regiao=(cidade or None))
+    # se o banco proprio com regiao especifica vier vazio, tenta sem filtro de regiao
     if r["observacoes"] == 0:
         r = BancoPrecos(pool).comparar_cesta(itens, regiao=None)
     r["fonte"] = "proprio" if r["observacoes"] > 0 else "vazio"
@@ -204,6 +235,8 @@ def comparar_separado(pool, itens: list[str], cidade: str | None,
 
     `escolhas` permite AJUSTAR um item: mapa {item: termo_especifico}. O termo
     escolhido e' usado na busca no lugar do generico, dando precisao.
+
+    Retorna {'fonte', 'grupos': {'mercado': {...}, 'farmacia': {...}}, 'observacoes'}.
     """
     escolhas = escolhas or {}
     termos = [escolhas.get(i, i) for i in itens]
@@ -212,8 +245,9 @@ def comparar_separado(pool, itens: list[str], cidade: str | None,
     for m in base.get("mercados", []):
         tipo = m.get("tipo") or "mercado"
         if tipo == "outro":
-            tipo = "mercado"
+            tipo = "mercado"   # agrupa 'outro' com mercado (e' o caso comum)
         grupos.setdefault(tipo, {"mercados": []})["mercados"].append(m)
+    # ja' vem ordenado; mantem top 3 por grupo
     for g in grupos.values():
         g["mercados"] = g["mercados"][:3]
     return {"fonte": base.get("fonte", "vazio"), "grupos": grupos,

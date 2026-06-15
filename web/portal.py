@@ -935,24 +935,38 @@ def compras_precos(request: Request):
 
 
 def _fmt_comparacao(r: dict) -> dict:
-    """Formata o resultado do comparador pra JSON amigavel ao front (com BRL)."""
+    """Formata o resultado do comparador pra JSON amigavel ao front (com BRL).
+    Popula endereco (da loja com melhor preco) e produtos (nomes completos de cada item)."""
     rotulos = {"mercado": "🏪 Mercado", "farmacia": "💊 Farmácia", "outro": "🏪 Mercado"}
     grupos = {}
+    itens_detalhe = {item["descricao"]: item for item in r.get("itens", [])}
+
     for tipo, g in r.get("grupos", {}).items():
         linhas = []
         for m in g["mercados"]:
-            endereco = m.get("bairro") or ""
-            dist = m.get("distancia_km")
-            if dist is not None:
-                endereco = (endereco + f" · {dist:g} km").strip(" ·")
-            dt = m.get("data_mais_recente")
-            data_txt = dt.strftime("%d/%m/%Y") if hasattr(dt, "strftime") else None
+            nome_merc = m["mercado"]
+            # monta lista de produtos com nome completo e preco pra este mercado
+            produtos = []
+            endereco_merc = None
+            for item_desc, item_info in itens_detalhe.items():
+                # procura se tem preco deste item neste mercado
+                for preco in item_info.get("precos", []):
+                    if preco["mercado"] == nome_merc:
+                        produtos.append({
+                            "descricao": preco["descricao"],  # nome completo (ex "Arroz Camil 5kg")
+                            "preco": brl(preco["valor_centavos"])
+                        })
+                        # pega endereco do 1o preco (mais barato deste mercado)
+                        if endereco_merc is None and preco.get("endereco"):
+                            endereco_merc = preco["endereco"]
+                        break
             linhas.append({
-                "mercado": m["mercado"], "total": brl(m["total_centavos"]),
-                "cobertos": m["itens_cobertos"], "faltando": len(m["itens_faltando"]),
-                "endereco": endereco, "data": data_txt,
-                "produtos": [{"descricao": pr["descricao"], "preco": brl(pr["valor_centavos"])}
-                             for pr in m.get("produtos", [])],
+                "mercado": nome_merc,
+                "total": brl(m["total_centavos"]),
+                "cobertos": m["itens_cobertos"],
+                "faltando": len(m["itens_faltando"]),
+                "endereco": endereco_merc or "",
+                "produtos": produtos,
             })
         if linhas:
             grupos[rotulos.get(tipo, tipo)] = linhas

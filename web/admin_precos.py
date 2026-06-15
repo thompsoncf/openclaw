@@ -44,9 +44,10 @@ _PRECOS_TPL = """{% extends "abase" %}{% block conteudo %}
 </div>
 
 {% if lojas %}<div class="card"><h2>Lojas cadastradas</h2>
-<table><tr><th>Loja</th><th>CNPJ</th><th>Endereço</th><th>Cidade/UF</th><th>Preços</th></tr>
+<table><tr><th>Loja</th><th>Ramo</th><th>CNPJ</th><th>Endereço</th><th>Cidade/UF</th><th>Preços</th></tr>
 {% for l in lojas %}<tr>
 <td>{{ l.nome or '-' }}</td>
+<td>{% if l.ramo %}<span class="tag ativa">{{ l.ramo }}</span>{% else %}<span class="mut">-</span>{% endif %}</td>
 <td class="mut" style="font-size:.78rem">{{ l.cnpj }}</td>
 <td class="mut" style="font-size:.78rem">{{ l.endereco or '-' }}</td>
 <td class="mut">{{ l.cidade or '-' }}{% if l.uf %}/{{ l.uf }}{% endif %}</td>
@@ -80,9 +81,9 @@ def admin_precos(request: Request):
                       po.mercado, po.fonte, l.nome, l.endereco, l.cidade, l.uf
                from precos_observados po left join lojas l on l.id = po.loja_id
                order by po.id desc limit 200""").fetchall()]
-        lcols = ["nome", "cnpj", "endereco", "cidade", "uf", "n_precos"]
+        lcols = ["nome", "cnpj", "endereco", "cidade", "uf", "ramo", "n_precos"]
         lojas = [dict(zip(lcols, r)) for r in c.execute(
-            """select l.nome, l.cnpj, l.endereco, l.cidade, l.uf, count(po.id)
+            """select l.nome, l.cnpj, l.endereco, l.cidade, l.uf, l.ramo, count(po.id)
                from lojas l left join precos_observados po on po.loja_id = l.id
                group by l.id order by count(po.id) desc limit 100""").fetchall()]
     resumo = {"total": total, "produtos": produtos, "lojas": n_lojas, "cupom": cupom}

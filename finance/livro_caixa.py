@@ -216,7 +216,7 @@ class LivroCaixa:
 
     def _achar_ou_criar_loja(self, conn, cnpj: str | None, nome: str | None,
                              endereco: str | None, cidade: str | None,
-                             uf: str | None) -> int | None:
+                             uf: str | None, ramo_reserva: str | None = None) -> int | None:
         """Acha a loja pelo CNPJ (identificador exato da filial) ou cria. Atualiza
         endereco/nome se vierem novos e os antigos estiverem vazios. Sem CNPJ,
         nao da' pra identificar a loja com seguranca -> retorna None."""
@@ -227,7 +227,6 @@ class LivroCaixa:
                            (cnpj,)).fetchone()
         if row:
             loja_id, end_atual, nome_atual = row
-            # completa dados faltantes (ex: 1a vez veio sem endereco, agora veio)
             if (endereco and not end_atual) or (nome and not nome_atual):
                 conn.execute(
                     """update lojas set endereco = coalesce(nullif(%s,''), endereco),
@@ -235,7 +234,8 @@ class LivroCaixa:
                        where id = %s""",
                     (endereco or "", nome or "", loja_id))
             return loja_id
-        # loja NOVA: se faltar nome ou endereco, tenta completar na Receita (BrasilAPI)
+        ramo = ramo_reserva
+        cnae = None
         if not nome or not endereco:
             try:
                 from .cnpj_info import consultar_cnpj
@@ -245,12 +245,14 @@ class LivroCaixa:
                     endereco = endereco or info.get("endereco")
                     cidade = cidade or info.get("cidade")
                     uf = uf or info.get("uf")
+                    cnae = info.get("cnae")
+                    ramo = info.get("ramo") or ramo
             except Exception:  # noqa: BLE001
-                pass            # sem rede/erro: cria a loja com o que tiver
+                pass
         novo = conn.execute(
-            """insert into lojas (cnpj, nome, endereco, cidade, uf)
-               values (%s,%s,%s,%s,%s) returning id""",
-            (cnpj, nome, endereco, cidade, uf)).fetchone()
+            """insert into lojas (cnpj, nome, endereco, cidade, uf, ramo, cnae)
+               values (%s,%s,%s,%s,%s,%s,%s) returning id""",
+            (cnpj, nome, endereco, cidade, uf, ramo, cnae)).fetchone()
         return novo[0] if novo else None
 
     def buscar_preco_observado(self, descricao: str, cidade: str | None = None,
@@ -344,8 +346,9 @@ class LivroCaixa:
         (descricao do lancamento). Le os itens JA' salvos (com seus ids), entao o
         indice unico idx_precos_item protege contra duplicacao. Tolerante."""
         from .models import normalizar_descricao
+        from .cnpj_info import ramo_por_categoria
         info = conn.execute(
-            """select l.descricao, l.data, c.cidade
+            """select l.descricao, l.data, c.cidade, l.categoria
                from lancamentos l join contas c on c.id = l.conta_id
                where l.id = %s""",
             (lancamento_id,),
@@ -353,6 +356,7 @@ class LivroCaixa:
         if not info:
             return 0
         mercado, data_compra, cidade = info[0] or None, info[1], info[2] or None
+        categoria = info[3] or None
         regiao = " / ".join(p for p in (cidade, mercado) if p) or None
         # identifica a LOJA pelo CNPJ (do QR/cupom) - diferencia filiais do grupo
         loja_id = None
@@ -365,7 +369,8 @@ class LivroCaixa:
                 loja_id = self._achar_ou_criar_loja(
                     conn, loja_info.get("cnpj"),
                     loja_info.get("nome") or mercado,
-                    loja_info.get("endereco"), cidade, uf)
+                    loja_info.get("endereco"), cidade, uf,
+                    ramo_reserva=ramo_por_categoria(categoria))
             except Exception:  # noqa: BLE001
                 loja_id = None
         # le os itens recem-salvos desse lancamento (com id e valor unitario)

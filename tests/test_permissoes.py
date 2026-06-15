@@ -56,7 +56,7 @@ def test_ferramentas_por_papel(pool):
     fr = {f.nome for f in construir_ferramentas(livro, lista, "restrito")}
     assert fr == {"adicionar_lista_compras", "ver_lista_compras",
                   "marcar_comprado_lista", "remover_lista_compras",
-                  "comparar_precos_lista"}
+                  "avisar_lista_pronta", "comparar_precos_lista"}
     assert "lancar_despesa" not in fr
     assert "lancar_receita" not in fr
     assert "ver_saldo" not in fr

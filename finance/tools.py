@@ -226,6 +226,35 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
         linhas.append(f"\n(baseado em {r['observacoes']} precos dos seus cupons - melhora a cada compra)")
         return "\n".join(linhas)
 
+    def avisar_pronta(_entrada: dict) -> str:
+        if lista is None:
+            return "Lista de compras nao disponivel."
+        quem = "Alguem"
+        try:
+            with livro.pool.connection() as c:
+                if livro.membro_id:
+                    r = c.execute("select nome from membros where id=%s",
+                                  (livro.membro_id,)).fetchone()
+                    if r and r[0]:
+                        quem = r[0]
+        except Exception:  # noqa: BLE001
+            pass
+        n = 0
+        try:
+            n = len(lista.listar(incluir_comprados=False))
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from finance.notificar import avisar_dono_lista_fechada
+            ok = avisar_dono_lista_fechada(livro.pool, livro.conta_id, quem, n_itens=n)
+        except Exception:  # noqa: BLE001
+            ok = False
+        if ok:
+            return ("Avisei o responsavel que voce terminou a lista! ✅ "
+                    "Pode continuar adicionando se lembrar de mais alguma coisa.")
+        return ("Anotei que voce terminou a lista! ✅ "
+                "(o aviso chega quando o responsavel conectar o Telegram)")
+
     return (([
         Ferramenta(
             nome="lancar_despesa",
@@ -398,5 +427,16 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                        "'onde a cesta sai em conta?'."),
             parametros={"type": "object", "properties": {}},
             executar=comparar_lista,
+        ),
+        Ferramenta(
+            nome="avisar_lista_pronta",
+            descricao=("Avisa o responsavel/dono da conta que a pessoa TERMINOU de montar "
+                       "a lista de compras (manda um aviso no Telegram do dono). Use quando "
+                       "a pessoa disser que terminou, que fechou a lista, que acabou de "
+                       "adicionar tudo, 'pronto, terminei', 'ja' coloquei tudo', 'pode comprar', "
+                       "ou algo que indique que ela finalizou os pedidos por agora. A lista NAO "
+                       "trava - ela ainda pode adicionar mais coisas depois."),
+            parametros={"type": "object", "properties": {}},
+            executar=avisar_pronta,
         ),
     ] if (lista is not None and pode_lista(papel)) else []))

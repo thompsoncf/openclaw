@@ -668,6 +668,11 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
   }
 
   acao({acao:'noop'}).then(carregarPrecos);
+
+  // Exportar funcoes pra escopo global (botoes do toggle precisam acessar)
+  window.setVisao = setVisao;
+  window.renderItens = renderItens;
+  window.ligarBotoesLinha = ligarBotoesLinha;
 })();
 
 function avisarTerminei(){

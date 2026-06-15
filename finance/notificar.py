@@ -1,60 +1,69 @@
-"""Notificacoes via Telegram para membros da conta (dono, etc).
+"""Notificacoes ativas pro dono da conta (ex: "fulano fechou a lista").
 
-Usa a Telegram Bot API direto: dispara mensagens sem ficar na fila de LivroCaixa.
-Tolerante a falha: se a rede cair ou o token nao existir, loga e continua.
+O portal (web) e o bot (worker) sao processos SEPARADOS no Render, entao o portal
+nao pode usar o objeto do bot pra mandar mensagem. Em vez disso, fala direto com a
+API HTTP do Telegram (api.telegram.org/bot<token>/sendMessage) usando o
+TELEGRAM_TOKEN. Funciona de qualquer processo.
+
+WhatsApp fica preparado (esqueleto) pra quando o numero oficial existir.
+
+Tolerante a falha: se nao houver token, dono sem telegram, ou a rede falhar, a
+funcao apenas registra no log e retorna False - nunca quebra o fluxo de quem
+clicou o botao.
 """
+import json
+import logging
 import os
 import urllib.request
-import urllib.error
+
+_log = logging.getLogger("openclaw.notificar")
+
+_TG_API = "https://api.telegram.org"
+_TIMEOUT = 8
 
 
-def avisar_dono_lista_fechada(pool, conta_id: int, quem_nome: str, n_itens: int) -> bool:
-    """Avisa o dono que alguem (quem_nome) fechou a lista de compras com N itens pendentes.
-
-    Busca o telegram_id do dono e manda uma mensagem no bot.
-    Retorna True se conseguiu mandar (ou faria mandar se tivesse token),
-    False só se erro CRITICO (dono nao tem telegram, etc).
-    """
+def _enviar_telegram(chat_id: int, texto: str) -> bool:
     token = os.environ.get("TELEGRAM_TOKEN")
-    if not token:
-        # Sem token, nao consegue mandar agora. Tolerante: log e segue.
+    if not token or not chat_id:
+        _log.info("notificar: sem token ou chat_id (token=%s, chat=%s)",
+                  bool(token), chat_id)
+        return False
+    url = f"{_TG_API}/bot{token}/sendMessage"
+    dados = json.dumps({
+        "chat_id": chat_id, "text": texto, "parse_mode": "Markdown",
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=dados, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+            return resp.status == 200
+    except Exception as e:  # noqa: BLE001
+        _log.warning("notificar: falha ao enviar telegram: %s", e)
         return False
 
-    # Busca o dono e seu telegram_id
+
+def _telegram_id_do_dono(pool, conta_id: int) -> int | None:
     with pool.connection() as c:
         row = c.execute(
-            "select telegram_id, nome from membros where conta_id=%s and papel='dono'",
-            (conta_id,),
-        ).fetchone()
+            "select telegram_id from membros "
+            "where conta_id=%s and papel='dono' and telegram_id is not null",
+            (conta_id,)).fetchone()
+    return row[0] if row else None
 
-    if not row or not row[0]:
-        # Dono nao tem telegram vinculado
+
+def avisar_dono_lista_fechada(pool, conta_id: int, quem_nome: str,
+                              n_itens: int = 0) -> bool:
+    """Avisa o dono (via Telegram) que alguem fechou/terminou a lista de compras.
+    A lista NAO trava - e' so' um aviso. Retorna True se conseguiu notificar.
+    """
+    chat = _telegram_id_do_dono(pool, conta_id)
+    if not chat:
+        _log.info("notificar: dono da conta %s sem telegram vinculado", conta_id)
         return False
-
-    telegram_id = row[0]
-    dono_nome = row[1] or "Responsável"
-
-    # Formata a mensagem
-    plural = "item" if n_itens == 1 else "itens"
-    msg = f"📋 {quem_nome} fechou a lista de compras ({n_itens} {plural} pendentes)."
-
-    # Manda via Telegram Bot API
-    try:
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-        dados = urllib.parse.urlencode({
-            "chat_id": telegram_id,
-            "text": msg,
-            "parse_mode": "HTML",
-        }).encode("utf-8")
-        req = urllib.request.Request(url, data=dados)
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            if resp.status == 200:
-                return True
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError):
-        # Falha na rede ou na API — tolerante
-        pass
-
-    return True  # Mesmo com falha, considera "ok" pra nao alarmar o usuario
-
-
-import urllib.parse
+    qtd = f" ({n_itens} {'item' if n_itens == 1 else 'itens'})" if n_itens else ""
+    texto = (f"📋 *{quem_nome}* fechou a lista de compras{qtd}.\n"
+             f"Dá uma olhada quando puder! Acesse o painel pra ver e comparar preços.")
+    ok = _enviar_telegram(chat, texto)
+    # WhatsApp: preparado pra quando o numero oficial existir.
+    # if not ok: _enviar_whatsapp(...)
+    return ok

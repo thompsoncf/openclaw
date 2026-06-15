@@ -15,14 +15,35 @@ class ListaCompras:
         self.conta_id = conta_id
         self.membro_id = membro_id
 
+    # ---------- escrita ----------
+
     def adicionar(self, descricao: str, quantidade: float = 1,
                   unidade: str | None = None,
                   preco_estimado_centavos: int | None = None,
                   fonte_preco: str | None = None) -> int:
+        """Adiciona um item a' lista da conta. Retorna o id do item.
+
+        Se um item com a mesma descricao (ignorando acento/caixa) ja' estiver na
+        lista e NAO comprado, nao duplica - retorna o id do existente. Isso evita
+        a lista encher de 'arroz, arroz, arroz' por duplo-clique ou reenvio.
+        """
         descricao = (descricao or "").strip()
         if not descricao:
             return 0
+        import unicodedata
+        norm = unicodedata.normalize("NFKD", descricao.lower())
+        norm = "".join(ch for ch in norm if not unicodedata.combining(ch)).strip()
         with self.pool.connection() as c:
+            existente = c.execute(
+                """select id from lista_compras
+                   where conta_id = %s and comprado = false
+                     and lower(translate(descricao,
+                         'Ã¡Ã Ã¢Ã£Ã¤Ã©Ã¨ÃªÃ«Ã­Ã¬Ã®Ã¯Ã³Ã²Ã´ÃµÃ¶ÃºÃ¹Ã»Ã¼Ã§ÃÃÃÃÃÃÃÃÃÃÃÃÃÃÃÃÃÃÃÃÃÃÃ',
+                         'aaaaaeeeeiiiiooooouuuucAAAAAEEEEIIIIOOOOOUUUUC')) = %s
+                   limit 1""",
+                (self.conta_id, norm)).fetchone()
+            if existente:
+                return existente[0]
             row = c.execute(
                 """insert into lista_compras
                    (conta_id, membro_id, descricao, quantidade, unidade,
@@ -35,19 +56,26 @@ class ListaCompras:
             return row[0]
 
     def adicionar_varios(self, descricoes: list[str]) -> int:
+        """Adiciona varios itens de uma vez (ex: lista ditada por voz). Retorna
+        quantos foram REALMENTE adicionados (novos).
+
+        Pula itens que ja' estao na lista (nao comprados) e duplicatas dentro da
+        propria chamada, pra nao encher de repetidos.
+        """
         itens = [(d or "").strip() for d in descricoes if (d or "").strip()]
         if not itens:
             return 0
-        with self.pool.connection() as c:
-            c.cursor().executemany(
-                """insert into lista_compras (conta_id, membro_id, descricao)
-                   values (%s,%s,%s)""",
-                [(self.conta_id, self.membro_id, d) for d in itens],
-            )
-            c.commit()
-        return len(itens)
+        antes = {i["id"] for i in self.listar(incluir_comprados=False)}
+        novos = 0
+        for d in itens:
+            novo_id = self.adicionar(d)
+            if novo_id and novo_id not in antes:
+                antes.add(novo_id)
+                novos += 1
+        return novos
 
     def marcar_comprado(self, item_id: int, comprado: bool = True) -> bool:
+        """Marca/desmarca um item como comprado. So' age em item DESTA conta."""
         with self.pool.connection() as c:
             r = c.execute(
                 """update lista_compras
@@ -69,6 +97,7 @@ class ListaCompras:
             return r.rowcount > 0
 
     def limpar_comprados(self) -> int:
+        """Tira da lista tudo que ja' foi comprado (faxina pos-compra)."""
         with self.pool.connection() as c:
             r = c.execute(
                 "delete from lista_compras where conta_id = %s and comprado",
@@ -87,7 +116,10 @@ class ListaCompras:
             c.commit()
             return r.rowcount
 
+    # ---------- leitura ----------
+
     def listar(self, incluir_comprados: bool = True) -> list[dict]:
+        """Itens da lista DESTA conta. Pendentes primeiro, mais novos no topo."""
         sql = """select l.id, l.descricao, l.quantidade, l.unidade, l.comprado,
                         l.preco_estimado_centavos, l.fonte_preco,
                         coalesce(m.nome, '-') as quem
@@ -104,6 +136,7 @@ class ListaCompras:
         return [dict(zip(cols, r)) for r in rows]
 
     def resumo(self) -> dict:
+        """Contagem e estimativa total dos itens PENDENTES."""
         with self.pool.connection() as c:
             row = c.execute(
                 """select count(*) filter (where not comprado) as pendentes,
@@ -114,7 +147,15 @@ class ListaCompras:
             ).fetchone()
         return {"pendentes": row[0], "comprados": row[1], "estimado_centavos": int(row[2])}
 
+    # ---------- gaveta de preco (plugavel) ----------
+
     def estimar_precos(self, estimador) -> int:
+        """Preenche preco_estimado dos itens pendentes SEM preco, usando o
+        `estimador(descricao) -> (centavos|None, fonte|None)`.
+
+        `estimador` e' injetado de fora (historico proprio agora, SEFAZ depois),
+        entao a lista nao se acopla a nenhuma fonte. Retorna quantos foram preenchidos.
+        """
         pendentes = [i for i in self.listar(incluir_comprados=False)
                      if i["preco_estimado_centavos"] is None]
         n = 0

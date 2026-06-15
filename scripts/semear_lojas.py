@@ -37,7 +37,7 @@ def completar_lojas_vazias() -> int:
     completadas = 0
     with pool.connection() as c:
         vazias = c.execute(
-            "select id, cnpj from lojas where nome is null or endereco is null"
+            "select id, cnpj from lojas where nome is null or endereco is null or ramo is null"
         ).fetchall()
     for loja_id, cnpj in vazias:
         info = consultar_cnpj(cnpj)
@@ -49,10 +49,13 @@ def completar_lojas_vazias() -> int:
                      nome = coalesce(nome, %s),
                      endereco = coalesce(endereco, %s),
                      cidade = coalesce(cidade, %s),
-                     uf = coalesce(uf, %s)
+                     uf = coalesce(uf, %s),
+                     ramo = coalesce(ramo, %s),
+                     cnae = coalesce(cnae, %s)
                    where id = %s""",
                 (info.get("nome"), info.get("endereco"),
-                 info.get("cidade"), info.get("uf"), loja_id))
+                 info.get("cidade"), info.get("uf"),
+                 info.get("ramo"), info.get("cnae"), loja_id))
             c.commit()
         completadas += 1
     return completadas

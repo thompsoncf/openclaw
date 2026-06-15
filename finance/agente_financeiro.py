@@ -86,6 +86,11 @@ Regras:
   (conta de luz, agua, restaurante, servicos), salve so' o valor total - nao
   detalhe itens a menos que peçam.
   Confirme com algo curto: "Salvei o cupom e os N itens ✅".
+- ITENS POR PESO (verdura, fruta, carne a granel): no cupom aparecem como
+  "PESO x PRECO_POR_KG = TOTAL" (ex: "0,654 x 8,25 = 5,40"). Pro valor_unitario
+  do item, use SEMPRE o PRECO POR KG (o 8,25), NUNCA o total pago (5,40) nem o
+  peso. O preco/kg e' o que permite comparar entre lojas. A quantidade pode ir
+  como o peso (0,654). Isso vale pra qualquer item vendido por kg/g.
   REGRA ANTI-DUPLICATA (OBRIGATORIA): SEMPRE chame checar_duplicata ANTES de
   criar o lancamento E antes de salvar itens. Se vier "DUPLICATA PROVAVEL",
   o cupom ja' foi registrado: NAO crie outro lancamento e NAO salve os itens

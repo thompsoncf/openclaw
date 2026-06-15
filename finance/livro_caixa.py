@@ -214,6 +214,33 @@ class LivroCaixa:
             ).fetchone()
         return int(row[0]) if row else None
 
+    def _achar_ou_criar_loja(self, conn, cnpj: str | None, nome: str | None,
+                             endereco: str | None, cidade: str | None,
+                             uf: str | None) -> int | None:
+        """Acha a loja pelo CNPJ (identificador exato da filial) ou cria. Atualiza
+        endereco/nome se vierem novos e os antigos estiverem vazios. Sem CNPJ,
+        nao da' pra identificar a loja com seguranca -> retorna None."""
+        cnpj = "".join(c for c in (cnpj or "") if c.isdigit())
+        if len(cnpj) != 14:
+            return None
+        row = conn.execute("select id, endereco, nome from lojas where cnpj = %s",
+                           (cnpj,)).fetchone()
+        if row:
+            loja_id, end_atual, nome_atual = row
+            # completa dados faltantes (ex: 1a vez veio sem endereco, agora veio)
+            if (endereco and not end_atual) or (nome and not nome_atual):
+                conn.execute(
+                    """update lojas set endereco = coalesce(nullif(%s,''), endereco),
+                                        nome = coalesce(nullif(%s,''), nome)
+                       where id = %s""",
+                    (endereco or "", nome or "", loja_id))
+            return loja_id
+        novo = conn.execute(
+            """insert into lojas (cnpj, nome, endereco, cidade, uf)
+               values (%s,%s,%s,%s,%s) returning id""",
+            (cnpj, nome, endereco, cidade, uf)).fetchone()
+        return novo[0] if novo else None
+
     def buscar_preco_observado(self, descricao: str, cidade: str | None = None,
                                dias: int = 90) -> tuple[int | None, str | None]:
         """Busca o melhor preco de um produto no BANCO DE PRECOS (multiplas fontes:
@@ -256,7 +283,8 @@ class LivroCaixa:
             texto = f"{origem}, {quando}".strip(", ")
             return (int(centavos), texto)
 
-    def registrar_itens(self, lancamento_id: int, itens: list[dict]) -> int:
+    def registrar_itens(self, lancamento_id: int, itens: list[dict],
+                        substituir: bool = False, loja_info: dict | None = None) -> int:
         """Salva os itens de um cupom, ligados a um lancamento do PROPRIO usuario.
 
         Cada item: {descricao, quantidade, valor_unitario_centavos, valor_total_centavos}.
@@ -293,12 +321,12 @@ class LivroCaixa:
             # alimenta o BANCO DE PRECOS (ouro): cada item com valor unitario
             # vira um preco observado, agrupado por cidade+mercado.
             try:
-                self._observar_precos(conn, lancamento_id)
+                self._observar_precos(conn, lancamento_id, loja_info)
             except Exception:  # noqa: BLE001
                 pass            # coleta de preco nunca quebra o registro do cupom
             return n
 
-    def _observar_precos(self, conn, lancamento_id: int) -> int:
+    def _observar_precos(self, conn, lancamento_id: int, loja_info: dict | None = None) -> int:
         """Grava os itens do cupom no banco coletivo de precos (precos_observados),
         pra alimentar comparacoes futuras. Agrupado por cidade (da conta) + mercado
         (descricao do lancamento). Le os itens JA' salvos (com seus ids), entao o
@@ -314,6 +342,20 @@ class LivroCaixa:
             return 0
         mercado, data_compra, cidade = info[0] or None, info[1], info[2] or None
         regiao = " / ".join(p for p in (cidade, mercado) if p) or None
+        # identifica a LOJA pelo CNPJ (do QR/cupom) - diferencia filiais do grupo
+        loja_id = None
+        if loja_info:
+            try:
+                # extrai UF da cidade se vier "Teresina-PI"
+                uf = None
+                if cidade and "-" in cidade:
+                    uf = cidade.rsplit("-", 1)[-1].strip().upper()[:2]
+                loja_id = self._achar_ou_criar_loja(
+                    conn, loja_info.get("cnpj"),
+                    loja_info.get("nome") or mercado,
+                    loja_info.get("endereco"), cidade, uf)
+            except Exception:  # noqa: BLE001
+                loja_id = None
         # le os itens recem-salvos desse lancamento (com id e valor unitario)
         itens = conn.execute(
             """select id, descricao, valor_unitario_centavos
@@ -327,15 +369,15 @@ class LivroCaixa:
             if vu <= 0 or not desc:
                 continue
             params.append((normalizar_descricao(desc), desc, vu, mercado, regiao,
-                           data_compra, self.conta_id, item_id, "cupom"))
+                           data_compra, self.conta_id, item_id, "cupom", loja_id))
         if not params:
             return 0
         cur = conn.cursor()
         cur.executemany(
             """insert into precos_observados
                (descricao_norm, descricao_original, valor_unitario_centavos,
-                mercado, regiao, data_compra, conta_id, item_id, fonte)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                mercado, regiao, data_compra, conta_id, item_id, fonte, loja_id)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                on conflict (item_id) do nothing""",
             params,
         )

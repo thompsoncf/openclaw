@@ -54,7 +54,7 @@ class Agente:
                     return self._responder(texto, imagem_b64, media_type)
                 raise
 
-    def _sanear_memoria(self, max_msgs: int = 40):
+    def _sanear_memoria(self, max_msgs: int = 16):
         """Conserta corrupcoes e poda o historico.
 
         Regras do Claude: todo assistant com tool_use precisa de um user com

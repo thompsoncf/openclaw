@@ -60,7 +60,7 @@ class MemoriaPersistente:
     a conversa sobrevive a deploys e e' a mesma vista por qualquer instancia.
     """
 
-    def __init__(self, pool, conversa_id: str, max_msgs: int = 40):
+    def __init__(self, pool, conversa_id: str, max_msgs: int = 16):
         self.pool = pool
         self.conversa_id = conversa_id
         self.max_msgs = max_msgs

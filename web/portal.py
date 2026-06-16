@@ -261,6 +261,13 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
 </div>
 </div>{% endif %}
 {% if m[6] and not m[5] %}<div class="conv mut">✅ Telegram conectado</div>{% endif %}
+{% if m[5] %}<div class="conv">🟢 <code>{{ m[5] }}</code> <span class="mut">(WhatsApp)</span>
+<div class="conv-links">
+<a class="lk-wpp" href="https://wa.me/{{ whatsapp_bot_num }}?text={{ m[5]|urlencode }}" target="_blank" rel="noopener">🟢 Convidar no WhatsApp</a>
+<button type="button" class="lk-copy" onclick="copiarConvite(this, 'https://wa.me/{{ whatsapp_bot_num }}?text={{ m[5]|urlencode }}')">🔗 Copiar link</button>
+</div>
+</div>{% endif %}
+{% if m[2] and not m[5] %}<div class="conv mut">✅ WhatsApp conectado</div>{% endif %}
 {% if not m[2] and not m[5] and not m[6] %}<span class="mut">sem contato vinculado</span>{% endif %}
 </div>
 {% if m[1] != 'dono' %}
@@ -803,9 +810,12 @@ def painel(request: Request):
         ).fetchall()
     ativos, inclusos, pode_extra = _limite_membros(conta)
     pode_adicionar = pode_extra or ativos < inclusos
+    # numero do WhatsApp bot (sem "whatsapp:+")
+    whatsapp_from = (os.environ.get("TWILIO_WHATSAPP_FROM") or "").replace("whatsapp:+", "")
     return _render("painel", request, conta=conta, membros=membros, titulo="Painel",
                    ativos=ativos, inclusos=inclusos, extra_pago=pode_extra,
                    pode_adicionar=pode_adicionar,
+                   whatsapp_bot_num=whatsapp_from,
                    erro=request.session.pop("erro", None),
                    aviso=request.session.pop("aviso", None))
 

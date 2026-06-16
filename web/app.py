@@ -10,6 +10,7 @@ Variaveis de ambiente do WhatsApp:
 import base64
 import logging
 import os
+import re as _re
 import threading
 
 import httpx
@@ -52,6 +53,14 @@ _transcritor = None
 # dica curta anexada quando o cliente manda FOTO de cupom no WhatsApp:
 DICA_QR_WPP = ("\n\n📸 Dica: deixe o QR code do cupom bem visível na foto — "
                "assim eu identifico a nota certinho e melhoro os preços pra você.")
+
+# reconhece codigo de convite (ex: THO-4632)
+_RE_CONVITE = _re.compile(r"\b([A-Z0-9]{2,4}-[A-F0-9]{4})\b")
+
+
+def _codigo_convite(texto: str) -> str | None:
+    m = _RE_CONVITE.search((texto or "").strip().upper())
+    return m.group(1) if m else None
 
 
 def _setup():
@@ -145,9 +154,15 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
     try:
         achado = ct.membro_por_whatsapp(pool, numero)
         if achado is None:
-            _responder_whatsapp(to, "Ola! Ainda nao encontrei seu cadastro. O acesso e' "
-                                    "feito pelo portal: la voce escolhe seu plano e cadastra "
-                                    "seu numero. Depois e' so' voltar aqui!")
+            # talvez a pessoa tenha mandado um CODIGO de convite
+            cod = _codigo_convite(body)
+            if cod:
+                ok, msg = ct.resgatar_convite_canal(pool, cod, "whatsapp", numero)
+                _responder_whatsapp(to, msg + ("Manda um 'oi' que eu te ajudo!" if ok else ""))
+                return
+            _responder_whatsapp(to, "Ola! Ainda nao encontrei seu cadastro. Se voce recebeu "
+                                    "um codigo de convite, e' so' me mandar aqui. Ou faca o "
+                                    "acesso pelo portal (escolhe o plano e cadastra seu numero).")
             return
         membro, conta = achado
         if not ct.acesso_liberado(conta):

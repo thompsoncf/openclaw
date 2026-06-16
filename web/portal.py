@@ -263,7 +263,11 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
 <div class="conv-links">
 <a class="lk-tg" href="https://t.me/clawaladdin_bot?text={{ m[5]|urlencode }}" target="_blank" rel="noopener">📨 Convidar no Telegram</a>
 <button type="button" class="lk-copy" onclick="copiarConvite(this, 'https://t.me/clawaladdin_bot?text={{ m[5]|urlencode }}')">🔗 Copiar link</button>
-<span class="lk-wa" title="Disponível quando o WhatsApp oficial for aprovado">🟢 WhatsApp (em breve)</span>
+{% if whatsapp_bot_num %}
+<a class="lk-wpp" href="https://wa.me/{{ whatsapp_bot_num }}?text={{ m[5]|urlencode }}" target="_blank" rel="noopener">🟢 Convidar no WhatsApp</a>
+{% else %}
+<span class="lk-wa" title="WhatsApp não configurado">🟢 WhatsApp (não disponível)</span>
+{% endif %}
 </div>
 </div>{% endif %}
 {% if m[6] and not m[5] %}<div class="conv mut">✅ Telegram conectado</div>{% endif %}

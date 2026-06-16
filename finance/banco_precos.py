@@ -6,6 +6,10 @@ dizemos onde a CESTA inteira sai mais barata (destaque) e, ao abrir, item a item
 
 A base e' compartilhada por REGIAO (preco de mercado e' dado publico), mas nunca
 expoe quem comprou - so' produto, preco, mercado, data.
+
+ESCALA: le' primeiro da tabela agregada precos_vigentes (mediana por
+produto+loja - rapido e robusto a outlier). Se vigentes estiver vazia
+(ex: manutencao ainda nao rodou), cai pro fallback nas observacoes brutas.
 """
 from __future__ import annotations
 
@@ -92,11 +96,60 @@ class BancoPrecos:
     def precos_de(self, descricao: str, regiao: str | None = None,
                   dias: int = 90) -> list[dict]:
         """Precos recentes que casam com a descricao (por nucleo normalizado),
-        agrupados por mercado (o mais recente de cada). Ordenado do mais barato."""
+        agrupados por mercado (o mais recente de cada). Ordenado do mais barato.
+
+        ESCALA: le' primeiro da tabela agregada precos_vigentes (mediana por
+        produto+loja - rapido e robusto a outlier). Se vigentes estiver vazia
+        (ex: manutencao ainda nao rodou), cai pro fallback nas observacoes brutas.
+        """
         nucleo = normalizar(descricao)
         if not nucleo:
             return []
         primeira = nucleo.split()[0]  # ancora a busca na 1a palavra significativa
+        # 1) tenta a tabela agregada (vigentes)
+        vig = self._precos_de_vigentes(descricao, primeira, regiao)
+        if vig:
+            return vig
+        # 2) fallback: observacoes brutas (comportamento antigo, sempre funciona)
+        return self._precos_de_brutos(descricao, primeira, regiao, dias)
+
+    def _precos_de_vigentes(self, descricao: str, primeira: str,
+                            regiao: str | None) -> list[dict]:
+        """Le da tabela agregada precos_vigentes (mediana por produto+loja)."""
+        sql = """select v.mercado, v.valor_mediana_centavos, v.descricao_exemplo,
+                        v.data_mais_recente, v.descricao_norm,
+                        l.endereco, l.cidade, l.uf, v.unidade, v.n_observacoes
+                 from precos_vigentes v
+                 left join lojas l on l.id = v.loja_id
+                 where v.descricao_norm like %s"""
+        params: list = [f"%{primeira}%"]
+        if regiao:
+            sql += " and (v.regiao = %s or v.regiao is null)"
+            params.append(regiao)
+        try:
+            with self.pool.connection() as c:
+                rows = c.execute(sql, params).fetchall()
+        except Exception:  # noqa: BLE001 - tabela pode nao existir ainda
+            return []
+        alvo = tokens(descricao)
+        achados = []
+        for merc, vu, orig, dt, norm, endereco, l_cidade, l_uf, unidade, nobs in rows:
+            comuns = alvo & set(norm.split())
+            if not alvo or len(comuns) >= max(1, len(alvo) // 2):
+                partes_end = [p for p in [endereco,
+                              f"{l_cidade}/{l_uf}" if l_cidade and l_uf else None] if p]
+                achados.append({"mercado": merc or "(sem nome)", "valor_centavos": int(vu),
+                                "descricao": orig, "data": dt,
+                                "unidade": unidade or "UN", "n_observacoes": int(nobs or 1),
+                                "endereco": ", ".join(partes_end) or None})
+        por_mercado: dict[str, dict] = {}
+        for a in achados:
+            por_mercado.setdefault(a["mercado"], a)
+        return sorted(por_mercado.values(), key=lambda x: x["valor_centavos"])
+
+    def _precos_de_brutos(self, descricao: str, primeira: str,
+                          regiao: str | None, dias: int) -> list[dict]:
+        """Fallback: le das observacoes brutas (comportamento original)."""
         corte = date.today() - timedelta(days=dias)
         sql = """select po.mercado, po.valor_unitario_centavos, po.descricao_original,
                         po.data_compra, po.descricao_norm,

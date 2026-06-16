@@ -27,6 +27,7 @@ from finance.lista_compras import ListaCompras
 from finance.banco_precos import BancoPrecos
 from finance.agente_financeiro import criar_agente_financeiro
 
+logging.basicConfig(level=logging.INFO)
 app = FastAPI(title="OpenClaw")
 log = logging.getLogger("openclaw.web")
 

@@ -216,7 +216,7 @@ _LOGIN = """{% extends "base" %}{% block conteudo %}
 _BEMVINDO = """{% extends "base" %}{% block conteudo %}
 <div style="max-width:420px;margin:2rem auto;text-align:center">
   <div style="width:56px;height:56px;border-radius:50%;background:#11402e;display:flex;align-items:center;justify-content:center;margin:0 auto 1rem;font-size:28px">✅</div>
-  <h1 style="margin:0 0 .4rem">Bem-vindo, {{ nome }}!</h1>
+  <h1 style="margin:0 0 .4rem">Bem-vindo, {{ nome_pessoa }}!</h1>
   <p class="mut" style="margin:0 0 1.5rem">Sua conta está pronta. Falta só conectar seu Telegram pra começar.</p>
   {% if ja_conectado %}
   <div class="card"><p>Seu Telegram já está conectado! 🎉</p>
@@ -793,7 +793,7 @@ def bem_vindo(request: Request):
     nome = (row[0] if row else None) or "tudo certo"
     codigo = row[1] if row else None
     ja_conectado = bool(row and row[2])
-    return _render("bemvindo", request, nome=nome, codigo=codigo,
+    return _render("bemvindo", request, nome_pessoa=nome, codigo=codigo,
                    ja_conectado=ja_conectado, bot="clawaladdin_bot")
 
 

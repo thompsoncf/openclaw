@@ -200,8 +200,8 @@ _CADASTRO = """{% extends "base" %}{% block conteudo %}
 <label>Senha</label><input name="senha" type="password" required minlength="8" maxlength="72">
 <label>CPF ou CNPJ <span class="mut">(opcional agora)</span></label><input name="documento" maxlength="20">
 <label>Seu WhatsApp (com DDD)</label><input name="whatsapp" required placeholder="86 98888-7777" maxlength="20">
-<label>Sua cidade <span class="mut">(pra comparar preços perto de você)</span></label>
-<select name="cidade">{% for cod, nome in cidades %}<option value="{{ cod }}">{{ nome }}</option>{% endfor %}</select>
+<label>Seu CEP <span class="mut">(pra comparar preços perto de você)</span></label>
+<input name="cep" required placeholder="64000-000" maxlength="9" inputmode="numeric">
 <button>Começar meu teste grátis de 7 dias</button>
 <p class="mut">Sem cartão agora. Coletamos só o necessário (LGPD).</p>
 </form></div>{% endblock %}"""
@@ -735,7 +735,7 @@ def cadastro_envia(request: Request, background: BackgroundTasks,
                    plano: str = Form(...), nome: str = Form(...),
                    email: str = Form(...), senha: str = Form(...),
                    documento: str = Form(""), whatsapp: str = Form(...),
-                   cidade: str = Form("")):
+                   cep: str = Form("")):
     pool = get_pool()
     email = email.strip().lower()
     zap = _normalizar_zap(whatsapp)
@@ -755,8 +755,11 @@ def cadastro_envia(request: Request, background: BackgroundTasks,
     tipo = planos_ok[plano][2]
     doc = "".join(ch for ch in documento if ch.isdigit()) or None
     from finance import cidades as _cid
+    from finance import cep as _cep
+    _info = _cep.consultar(cep)
+    regiao = _info["regiao"] if _info else None
     conta_id = ct.criar_conta(pool, tipo, nome.strip(), plano=plano, documento=doc,
-                              cidade=_cid.valida(cidade))  # trial 7d
+                              cidade=_cid.valida(regiao))  # trial 7d; CEP->regiao
     with pool.connection() as c:
         c.execute("update contas set email=%s, senha_hash=%s where id=%s",
                   (email, hash_senha(senha), conta_id))

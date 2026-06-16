@@ -41,4 +41,4 @@ def rotulo(cidade: str | None) -> str:
 
 def valida(cidade: str | None) -> str:
     c = (cidade or "").strip().lower()
-    return c if c in CIDADES else _PADRAO
+    return c or _PADRAO

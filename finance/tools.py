@@ -6,6 +6,7 @@ quando voce pede ("lanca 50 de mercado") ou quando le uma nota por foto.
 from datetime import date, datetime
 
 from core.agent import Ferramenta
+from contas.permissoes import pode_financas, pode_lista
 from .livro_caixa import LivroCaixa
 from .models import (
     Lancamento, Tipo, CATEGORIAS_DESPESA, CATEGORIAS_RECEITA,
@@ -26,7 +27,6 @@ def _parse_data(s: str | None) -> date:
 
 def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                           banco=None, cidade: str | None = None) -> list[Ferramenta]:
-    from contas.permissoes import pode_financas, pode_lista
     def lancar(tipo: Tipo, entrada: dict) -> str:
         lanc = Lancamento.criar(
             tipo=tipo,
@@ -72,13 +72,20 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
         achados = livro.buscar_duplicata(cents, data)
         if not achados:
             return "Sem duplicata: pode registrar normalmente."
-        linhas = [f"- lancamento_id={a['id']}: {a['descricao'] or 'sem descricao'} "
-                  f"({a['qtd_itens']} itens, registrado em {a['criado_em'].strftime('%d/%m %H:%M')})"
-                  for a in achados]
-        return (f"⚠️ DUPLICATA PROVAVEL: ja existe {len(achados)} lancamento(s) de {formatar_brl(cents)} "
-                f"na data {data.strftime('%d/%m/%Y')}:\n" + "\n".join(linhas)
-                + "\nSe for o MESMO cupom, pode anexar ITENS usando o lancamento_id acima. "
-                  "NAO crie um novo lancamento — isso duplica o lancamento no raio-x.")
+        linhas = []
+        for a in achados:
+            itens_txt = (f", JA TEM {a['qtd_itens']} itens salvos" if a.get("qtd_itens")
+                         else ", ainda sem itens")
+            linhas.append(f"- lancamento_id={a['id']}: {a['descricao'] or 'sem descricao'} "
+                          f"(registrado em {a['criado_em'].strftime('%d/%m %H:%M')}{itens_txt})")
+        return (f"ATENCAO - DUPLICATA PROVAVEL: ja existe {len(achados)} lancamento(s) "
+                f"de ~{formatar_brl(cents)} na data {data.strftime('%d/%m/%Y')}:\n"
+                + "\n".join(linhas)
+                + "\nE' quase CERTO que e' o MESMO cupom. NAO registre de novo nem salve "
+                  "itens de novo (isso duplica o raio-x). Avise o usuario que o cupom ja' "
+                  "esta' registrado e so' prossiga se ele confirmar EXPLICITAMENTE que e' "
+                  "uma compra diferente. Se um lancamento acima JA TEM itens, NUNCA salve "
+                  "os itens de novo.")
 
     def registrar_itens_cupom(entrada: dict) -> str:
         itens_in = entrada.get("itens") or []
@@ -96,6 +103,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                 "quantidade": it.get("quantidade") or 1,
                 "valor_unitario_centavos": reais_para_centavos(vu) if vu is not None else 0,
                 "valor_total_centavos": reais_para_centavos(vt) if vt is not None else 0,
+                "unidade": (it.get("unidade") or "").strip() or None,
             })
         loja_info = {
             "cnpj": (entrada.get("cnpj_emitente") or "").strip() or None,
@@ -105,6 +113,10 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
         n = livro.registrar_itens(int(lanc_id), itens, loja_info=loja_info)
         if n == 0:
             return "Nao consegui salvar os itens (lancamento nao encontrado)."
+        if n == -1:
+            return ("Esse cupom JA' tem itens salvos - nao registrei de novo pra nao duplicar. "
+                    "Se quiser substituir os itens antigos pelos novos, peca explicitamente "
+                    "'substituir os itens'.")
         return f"Salvei {n} itens do cupom. Agora da' pra perguntar coisas tipo 'quanto gastei em X'."
 
     def buscar_itens(entrada: dict) -> str:
@@ -136,9 +148,10 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
         "type": "object",
         "properties": {
             "descricao": {"type": "string", "description": "nome do produto"},
-            "quantidade": {"type": "number", "description": "qtd (pode ser kg, ex: 1.99)"},
-            "valor_unitario": {"type": "number", "description": "preco unitario em reais"},
-            "valor_total": {"type": "number", "description": "preco total do item em reais"},
+            "quantidade": {"type": "number", "description": "qtd comprada (pode ser kg, ex: 1.2)"},
+            "valor_unitario": {"type": "number", "description": "preco de 1 unidade ou de 1 kg/L (NUNCA o total). ex: 58.43"},
+            "valor_total": {"type": "number", "description": "valor total pago no item (qtd x unitario). ex: 70.12"},
+            "unidade": {"type": "string", "description": "base do preco: 'KG' (peso), 'L' (volume) ou 'UN' (unidade/pacote). default UN"},
         },
         "required": ["descricao", "valor_total"],
     }
@@ -177,7 +190,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
         rodape = f"\n\n{r['pendentes']} item(ns) pendente(s)"
         if r["estimado_centavos"]:
             rodape += f" · estimativa: {formatar_brl(r['estimado_centavos'])}"
-        return "🛒 Lista de compras:\n" + "\n".join(linhas) + rodape
+        return "📋 Lista de compras:\n" + "\n".join(linhas) + rodape
 
     def marcar_lista(entrada: dict) -> str:
         if lista is None:
@@ -185,10 +198,11 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
         termo = (entrada.get("descricao") or "").strip().lower()
         if not termo:
             return "Qual item voce comprou?"
+        # acha o item pendente cuja descricao casa com o termo
         for i in lista.listar(incluir_comprados=False):
             if termo in i["descricao"].lower():
                 lista.marcar_comprado(i["id"], True)
-                return f"Marquei '{i['descricao']}' como comprado. ✅"
+                return f"Marquei '{i['descricao']}' como comprado. ✓"
         return f"Nao achei '{termo}' entre os itens pendentes da lista."
 
     def remover_lista(entrada: dict) -> str:
@@ -214,12 +228,13 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
         if r["observacoes"] == 0:
             return ("Ainda nao tenho precos suficientes pra comparar essa lista. "
                     "Conforme voce e sua familia registram cupons de mercado, eu vou "
-                    "aprendendo os precos e em breve consigo dizer onde a cesta sai mais barata. 📈")
-        linhas = ["🛒 Onde sua cesta sai mais barata (pelos cupons registrados):\n"]
+                    "aprendendo os precos e em breve consigo dizer onde a cesta sai mais barata. 📊")
+        linhas = ["📊 Onde sua cesta sai mais barata (pelos cupons registrados):\n"]
         for i, m in enumerate(r["mercados"][:3], 1):
             falta = f" · faltam {len(m['itens_faltando'])} itens" if m["itens_faltando"] else " · cesta completa"
             linhas.append(f"{i}. {m['mercado']}: {formatar_brl(m['total_centavos'])}"
                           f" ({m['itens_cobertos']} itens{falta})")
+        # itens sem nenhum preco
         sem = [d["descricao"] for d in r["itens"] if not d["precos"]]
         if sem:
             linhas.append(f"\nAinda sem preco: {', '.join(sem)}")
@@ -229,6 +244,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
     def avisar_pronta(_entrada: dict) -> str:
         if lista is None:
             return "Lista de compras nao disponivel."
+        # descobre o nome de quem esta' avisando (pelo membro_id do livro)
         quem = "Alguem"
         try:
             with livro.pool.connection() as c:
@@ -250,12 +266,12 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
         except Exception:  # noqa: BLE001
             ok = False
         if ok:
-            return ("Avisei o responsavel que voce terminou a lista! ✅ "
+            return ("Avisei o responsavel que voce terminou a lista! ✓ "
                     "Pode continuar adicionando se lembrar de mais alguma coisa.")
-        return ("Anotei que voce terminou a lista! ✅ "
+        return ("Anotei que voce terminou a lista! ✓ "
                 "(o aviso chega quando o responsavel conectar o Telegram)")
 
-    return (([
+    financeiras = [
         Ferramenta(
             nome="lancar_despesa",
             descricao="Registra uma despesa (saida de dinheiro) no livro-caixa.",
@@ -367,7 +383,9 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
             },
             executar=listar_itens,
         ),
-    ] if pode_financas(papel) else []) + ([
+    ]
+
+    lista_ferr = ([
         Ferramenta(
             nome="adicionar_lista_compras",
             descricao=("Adiciona um ou mais itens a' LISTA DE COMPRAS (o que ainda PRECISA "
@@ -420,15 +438,6 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
             executar=remover_lista,
         ),
         Ferramenta(
-            nome="comparar_precos_lista",
-            descricao=("Compara onde a CESTA da lista de compras sai mais barata, usando os "
-                       "precos aprendidos dos cupons registrados. Use quando perguntarem "
-                       "'onde compro mais barato?', 'qual mercado e' melhor pra minha lista?', "
-                       "'onde a cesta sai em conta?'."),
-            parametros={"type": "object", "properties": {}},
-            executar=comparar_lista,
-        ),
-        Ferramenta(
             nome="avisar_lista_pronta",
             descricao=("Avisa o responsavel/dono da conta que a pessoa TERMINOU de montar "
                        "a lista de compras (manda um aviso no Telegram do dono). Use quando "
@@ -439,4 +448,21 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
             parametros={"type": "object", "properties": {}},
             executar=avisar_pronta,
         ),
-    ] if (lista is not None and pode_lista(papel)) else []))
+        Ferramenta(
+            nome="comparar_precos_lista",
+            descricao=("Compara onde a CESTA da lista de compras sai mais barata, usando os "
+                       "precos aprendidos dos cupons registrados. Use quando perguntarem "
+                       "'onde compro mais barato?', 'qual mercado e' melhor pra minha lista?', "
+                       "'onde a cesta sai em conta?'."),
+            parametros={"type": "object", "properties": {}},
+            executar=comparar_lista,
+        ),
+    ] if lista is not None else [])
+
+    # monta o conjunto conforme o PAPEL: restrito so' enxerga a lista.
+    ferramentas = []
+    if pode_financas(papel):
+        ferramentas += financeiras
+    if pode_lista(papel):
+        ferramentas += lista_ferr
+    return ferramentas

@@ -100,7 +100,7 @@ class BancoPrecos:
         corte = date.today() - timedelta(days=dias)
         sql = """select po.mercado, po.valor_unitario_centavos, po.descricao_original,
                         po.data_compra, po.descricao_norm,
-                        l.endereco, l.cidade, l.uf
+                        l.endereco, l.cidade, l.uf, po.unidade
                  from precos_observados po
                  left join lojas l on l.id = po.loja_id
                  where po.descricao_norm like %s and po.data_compra >= %s"""
@@ -114,7 +114,7 @@ class BancoPrecos:
         # filtra por similaridade de tokens (evita casar 'arroz' com 'arroz doce')
         alvo = tokens(descricao)
         achados = []
-        for merc, vu, orig, dt, norm, endereco, l_cidade, l_uf in rows:
+        for merc, vu, orig, dt, norm, endereco, l_cidade, l_uf, unidade in rows:
             comuns = alvo & set(norm.split())
             if not alvo or len(comuns) >= max(1, len(alvo) // 2):
                 # monta endereco legivel (rua/bairro + cidade/uf), quando houver
@@ -122,6 +122,7 @@ class BancoPrecos:
                               f"{l_cidade}/{l_uf}" if l_cidade and l_uf else None] if p]
                 achados.append({"mercado": merc or "(sem nome)", "valor_centavos": int(vu),
                                 "descricao": orig, "data": dt,
+                                "unidade": unidade or "UN",
                                 "endereco": ", ".join(partes_end) or None})
         # 1 preco por mercado (o mais recente, ja' que vem ordenado desc)
         por_mercado: dict[str, dict] = {}

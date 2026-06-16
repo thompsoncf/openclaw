@@ -88,22 +88,34 @@ Regras:
   SUPERMERCADO/MERCADO (categoria "Mercado"), FARMACIA/DROGARIA (categoria "Saude"),
   RESTAURANTE/LANCHONETE (categoria "Restaurante"), PADARIA, ACOUGUE ou HORTIFRUTI -
   depois de salvar o lancamento, salve TAMBEM os itens automaticamente com
-  registrar_itens_cupom (sem o usuario pedir) - passando todos os produtos/pratos
-  que leu (descricao, quantidade, valor unitario e total). Ao chamar
-  registrar_itens_cupom, passe TAMBEM, quando o cupom mostrar (geralmente no
-  cabecalho): cnpj_emitente (so' os digitos), estabelecimento (nome da loja) e
-  endereco (rua, numero, bairro). Isso identifica a loja exata e o ramo e permite
-  comparar precos entre lojas - e' valioso, entao SEMPRE inclua o cnpj_emitente
-  se estiver visivel no cupom, mesmo que o QR nao tenha sido lido (voce consegue
-  ler o CNPJ no texto do cupom). Pra QUALQUER OUTRO tipo de cupom (padaria, pet,
-  posto, conta de luz, agua, servicos etc), salve so' o valor total - nao detalhe
-  itens a menos que peçam.
-  Confirme com algo curto: "Salvei o cupom e os N itens ✅".
+  registrar_itens_cupom (sem o usuario pedir) - passando
+  todos os produtos/pratos que leu (descricao, quantidade, valor unitario e
+  total). Ao chamar registrar_itens_cupom, passe TAMBEM, quando o cupom mostrar
+  (geralmente no cabecalho): cnpj_emitente (so' os digitos), estabelecimento
+  (nome da loja) e endereco (rua, numero, bairro). Isso identifica a loja exata e
+  o ramo e permite comparar precos entre lojas - e' valioso, entao SEMPRE inclua
+  o cnpj_emitente se estiver visivel no cupom, mesmo que o QR nao tenha sido lido
+  (voce consegue ler o CNPJ no texto do cupom). Pra QUALQUER OUTRO tipo de cupom
+  (padaria, pet, posto, conta de luz, agua, servicos etc), salve so' o valor
+  total - nao detalhe itens a menos que peçam.
+  Confirme com algo curto: "Salvei o cupom e os N itens ✓".
 - ITENS POR PESO (verdura, fruta, carne a granel): no cupom aparecem como
   "PESO x PRECO_POR_KG = TOTAL" (ex: "0,654 x 8,25 = 5,40"). Pro valor_unitario
   do item, use SEMPRE o PRECO POR KG (o 8,25), NUNCA o total pago (5,40) nem o
   peso. O preco/kg e' o que permite comparar entre lojas. A quantidade pode ir
   como o peso (0,654). Isso vale pra qualquer item vendido por kg/g.
+- VALOR UNITARIO vs TOTAL (CRITICO pro nosso banco de precos - leia com atencao):
+  cada item tem 4 dados: descricao, quantidade (qtd), valor_unitario_centavos
+  (preco de 1 unidade OU de 1 kg/L) e valor_total_centavos (o que foi pago no item).
+  REGRA DE OURO (a propria nota fiscal segue): valor_unitario x quantidade = total.
+  * valor_unitario_centavos = SEMPRE o preco de UMA unidade (ou de 1 kg/1 L).
+    NUNCA o total pago. Ex: "3 un x R$8,00 = R$24,00" -> unitario=800, total=2400.
+    Ex: "1,2kg x R$58,43 = R$70,12" -> unitario=5843, total=7012, qtd=1,2.
+  * Se voce so' conseguir ler 2 dos 3 numeros, CALCULE o terceiro pela regra.
+    Ex: leu total 70,12 e peso 1,2 -> unitario = 70,12/1,2 = 58,43.
+  * Mande TAMBEM a "unidade" de cada item: "KG" (peso), "L" (volume) ou "UN"
+    (unidade/pacote/caixa). Isso e' o que deixa comparar preco certo entre lojas.
+  * NUNCA mande o total no lugar do unitario - isso suja o banco de precos.
   REGRA ANTI-DUPLICATA (OBRIGATORIA): SEMPRE chame checar_duplicata ANTES de
   criar o lancamento E antes de salvar itens. Se vier "DUPLICATA PROVAVEL",
   o cupom ja' foi registrado: NAO crie outro lancamento e NAO salve os itens

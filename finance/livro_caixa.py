@@ -22,6 +22,66 @@ def _intervalo_mes(ano: int, mes: int) -> tuple[date, date]:
     return inicio, proximo
 
 
+# unidades vendidas por PESO/VOLUME (preco e' por kg/L) vs por UNIDADE
+_UNID_PESO = {"KG", "KGS", "QUILO", "QUILOGRAMA", "G", "GR", "GRAMA", "GRAMAS"}
+_UNID_VOLUME = {"L", "LT", "LTS", "LITRO", "LITROS", "ML"}
+
+
+def _normalizar_unidade(u: str | None) -> str:
+    """Normaliza a unidade do cupom pra uma forma curta padrao (UN, KG, L).
+    Default 'UN' (a maioria dos itens e' por unidade)."""
+    if not u:
+        return "UN"
+    t = str(u).strip().upper().replace(".", "")
+    if t in _UNID_PESO:
+        # padroniza grama em KG (preco/kg e' a base de comparacao)
+        return "KG"
+    if t in _UNID_VOLUME:
+        return "L"
+    if t in {"UN", "UND", "UNID", "UNIDADE", "PC", "PCT", "PCTE", "CX", "CXA",
+             "DZ", "DUZIA", "FD", "FARDO", "PT", "PETE"}:
+        return "UN"
+    # desconhecido: mantem curto (3 chars) ou cai pra UN
+    return t[:3] if t else "UN"
+
+
+def _validar_item_preco(it: dict) -> tuple[int, float, int, str]:
+    """CAMADA 2 (rede de seguranca do banco de ouro): a partir do que a IA leu,
+    devolve (valor_unitario_centavos, quantidade, valor_total_centavos, unidade)
+    COERENTES, usando a regra de ferro da NFC-e: vUnCom * qCom = vProd.
+
+    Estrategia: a quantidade e o total sao geralmente os mais confiaveis. Se o
+    unitario nao bate com total/quantidade, RECALCULA o unitario. Assim, mesmo
+    se a IA confundir unitario com total (o bug da picanha), o banco grava certo.
+    """
+    qtd = it.get("quantidade", 1)
+    try:
+        qtd = float(qtd) if qtd is not None else 1.0
+    except (TypeError, ValueError):
+        qtd = 1.0
+    if qtd <= 0:
+        qtd = 1.0
+    vu = int(it.get("valor_unitario_centavos", 0) or 0)
+    vt = int(it.get("valor_total_centavos", 0) or 0)
+    unidade = _normalizar_unidade(it.get("unidade"))
+
+    # se nao temos total mas temos unitario+qtd, deriva total
+    if vt <= 0 and vu > 0:
+        vt = round(vu * qtd)
+    # se nao temos unitario mas temos total+qtd, deriva unitario
+    if vu <= 0 and vt > 0:
+        vu = round(vt / qtd)
+    # AMBOS presentes: checa coerencia (vu*qtd ~= vt). Tolerancia de 2% ou 2 cent.
+    if vu > 0 and vt > 0 and qtd > 0:
+        esperado = vu * qtd
+        tol = max(2, esperado * 0.02)
+        if abs(esperado - vt) > tol:
+            # nao bate: confia em total/qtd (recalcula o unitario)
+            # isso corrige o caso "IA pos o total no lugar do unitario"
+            vu = round(vt / qtd)
+    return int(vu), qtd, int(vt), unidade
+
+
 class LivroCaixa:
     def __init__(self, pool, conta_id: int, membro_id: int | None = None):
         self.pool = pool
@@ -346,12 +406,11 @@ class LivroCaixa:
                 conn.execute("delete from itens_lancamento where lancamento_id = %s",
                              (lancamento_id,))
             # Grava em LOTES (executemany): robusto pra 10 ou 3000 itens.
-            params = [
-                (lancamento_id, it["descricao"], it.get("quantidade", 1),
-                 int(it.get("valor_unitario_centavos", 0)),
-                 int(it.get("valor_total_centavos", 0)))
-                for it in itens
-            ]
+            # CAMADA 2: valida/corrige unitario, qtd, total e unidade de cada item.
+            params = []
+            for it in itens:
+                vu, qtd, vt, unidade = _validar_item_preco(it)
+                params.append((lancamento_id, it["descricao"], qtd, vu, vt, unidade))
             LOTE = 100
             n = 0
             ids_itens = []
@@ -360,8 +419,8 @@ class LivroCaixa:
                 cur.executemany(
                     """insert into itens_lancamento
                        (lancamento_id, descricao, quantidade,
-                        valor_unitario_centavos, valor_total_centavos)
-                       values (%s,%s,%s,%s,%s)""",
+                        valor_unitario_centavos, valor_total_centavos, unidade)
+                       values (%s,%s,%s,%s,%s,%s)""",
                     params[i:i + LOTE],
                 )
                 n += len(params[i:i + LOTE])
@@ -380,7 +439,7 @@ class LivroCaixa:
         pra alimentar comparacoes futuras. Agrupado por cidade (da conta) + mercado
         (descricao do lancamento). Le os itens JA' salvos (com seus ids), entao o
         indice unico idx_precos_item protege contra duplicacao. Tolerante."""
-        from .models import normalizar_descricao, limpar_nome_produto
+        from .models import normalizar_descricao
         from .cnpj_info import ramo_por_categoria
         info = conn.execute(
             """select l.descricao, l.data, c.cidade, l.categoria
@@ -409,36 +468,39 @@ class LivroCaixa:
             except Exception:  # noqa: BLE001
                 _log.exception("falha ao achar/criar loja (cnpj=%s)", loja_info.get("cnpj"))
                 loja_id = None
-        # le os itens recem-salvos desse lancamento (com id e valor unitario)
+        # le os itens recem-salvos desse lancamento (com id, valor unitario e unidade)
         itens = conn.execute(
-            """select id, descricao, valor_unitario_centavos
+            """select id, descricao, valor_unitario_centavos, unidade
                from itens_lancamento where lancamento_id = %s""",
             (lancamento_id,),
         ).fetchall()
         params = []
         vistos = set()      # (descricao_norm, valor) ja' vistos NESTE lancamento
-        for item_id, desc, vu in itens:
+        for item_id, desc, vu, unidade in itens:
             vu = int(vu or 0)
             desc = (desc or "").strip()
             if vu <= 0 or not desc:
                 continue
             norm = normalizar_descricao(desc)
             # nome de exibicao limpo (tira desconto grudado, espacos, etc)
+            from .models import limpar_nome_produto
             desc_limpo = limpar_nome_produto(desc) or desc
             chave = (norm, vu)
             if chave in vistos:
                 continue        # mesmo produto+preco no mesmo cupom: 1 preco basta
             vistos.add(chave)
             params.append((norm, desc_limpo, vu, mercado, regiao,
-                           data_compra, self.conta_id, item_id, "cupom", loja_id))
+                           data_compra, self.conta_id, item_id, "cupom", loja_id,
+                           unidade or "UN"))
         if not params:
             return 0
         cur = conn.cursor()
         cur.executemany(
             """insert into precos_observados
                (descricao_norm, descricao_original, valor_unitario_centavos,
-                mercado, regiao, data_compra, conta_id, item_id, fonte, loja_id)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                mercado, regiao, data_compra, conta_id, item_id, fonte, loja_id,
+                unidade)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                on conflict (item_id) do nothing""",
             params,
         )

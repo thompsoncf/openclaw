@@ -177,6 +177,9 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
 .lk-tg{background:#2AABEE;color:#fff;border-color:#2AABEE}
 .lk-copy{background:#1a2233;color:#e7ecf3;cursor:pointer}
 .lk-wa{background:#11201a;color:#5a6b62;border-color:#1e3a2e;cursor:not-allowed}
+.lk-wpp{background:#25D366;color:#fff;border-color:#25D366}
+.conv-canal{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+.conv-canal .conv-links{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 </style></head><body>
 <div class="topo"><span class="logo">OpenClaw</span><span>
 {% if logado %}<a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/painel/compras">Compras</a><a href="/sair">Sair</a>
@@ -259,26 +262,25 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
 </div>
 <div class="membro-contato">
 {% if m[2] %}<div class="zap">📱 {{ m[2] }}</div>{% endif %}
-{% if m[5] %}<div class="conv">🔑 <code>{{ m[5] }}</code> <span class="mut">(Telegram)</span>
-<div class="conv-links">
-<a class="lk-tg" href="https://t.me/clawaladdin_bot?text={{ m[5]|urlencode }}" target="_blank" rel="noopener">📨 Convidar no Telegram</a>
-<button type="button" class="lk-copy" onclick="copiarConvite(this, 'https://t.me/clawaladdin_bot?text={{ m[5]|urlencode }}')">🔗 Copiar link</button>
-{% if whatsapp_bot_num %}
-<a class="lk-wpp" href="https://wa.me/{{ whatsapp_bot_num }}?text={{ m[5]|urlencode }}" target="_blank" rel="noopener">🟢 Convidar no WhatsApp</a>
+{% if m[5] %}
+  <div class="conv">🔑 <code>{{ m[5] }}</code> <span class="mut">— convite pendente</span></div>
+  <div class="conv-canal">
+    <div class="conv-links">
+      <a class="lk-tg" href="https://t.me/clawaladdin_bot?text={{ m[5]|urlencode }}" target="_blank" rel="noopener">📨 Convidar no Telegram</a>
+      <button type="button" class="lk-copy" onclick="copiarConvite(this, 'https://t.me/clawaladdin_bot?text={{ m[5]|urlencode }}')">🔗 Copiar link</button>
+    </div>
+    {% if whatsapp_bot_num %}
+    <div class="conv-links">
+      <a class="lk-wpp" href="https://wa.me/{{ whatsapp_bot_num }}?text={{ m[5]|urlencode }}" target="_blank" rel="noopener">🟢 Convidar no WhatsApp</a>
+      <button type="button" class="lk-copy" onclick="copiarConvite(this, 'https://wa.me/{{ whatsapp_bot_num }}?text={{ m[5]|urlencode }}')">🔗 Copiar link</button>
+    </div>
+    {% endif %}
+  </div>
 {% else %}
-<span class="lk-wa" title="WhatsApp não configurado">🟢 WhatsApp (não disponível)</span>
+  {% if m[6] %}<div class="conv mut">✅ Telegram conectado</div>{% endif %}
+  {% if m[2] %}<div class="conv mut">✅ WhatsApp conectado</div>{% endif %}
+  {% if not m[2] and not m[6] %}<span class="mut">sem contato vinculado</span>{% endif %}
 {% endif %}
-</div>
-</div>{% endif %}
-{% if m[6] and not m[5] %}<div class="conv mut">✅ Telegram conectado</div>{% endif %}
-{% if m[5] %}<div class="conv">🟢 <code>{{ m[5] }}</code> <span class="mut">(WhatsApp)</span>
-<div class="conv-links">
-<a class="lk-wpp" href="https://wa.me/{{ whatsapp_bot_num }}?text={{ m[5]|urlencode }}" target="_blank" rel="noopener">🟢 Convidar no WhatsApp</a>
-<button type="button" class="lk-copy" onclick="copiarConvite(this, 'https://wa.me/{{ whatsapp_bot_num }}?text={{ m[5]|urlencode }}')">🔗 Copiar link</button>
-</div>
-</div>{% endif %}
-{% if m[2] and not m[5] %}<div class="conv mut">✅ WhatsApp conectado</div>{% endif %}
-{% if not m[2] and not m[5] and not m[6] %}<span class="mut">sem contato vinculado</span>{% endif %}
 </div>
 {% if m[1] != 'dono' %}
 <div class="membro-acoes">

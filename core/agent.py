@@ -111,6 +111,16 @@ class Agente:
 
         for _ in range(self.max_iteracoes):
             resp = self.brain.chamar(self.persona, self.memoria.mensagens(), schemas)
+            _u = getattr(resp, "usage", None)
+            if _u is not None:
+                import logging
+                logging.getLogger("openclaw.custo").info(
+                    "TOKENS in=%s cache_read=%s cache_write=%s out=%s",
+                    getattr(_u, "input_tokens", 0),
+                    getattr(_u, "cache_read_input_tokens", 0),
+                    getattr(_u, "cache_creation_input_tokens", 0),
+                    getattr(_u, "output_tokens", 0),
+                )
 
             # Resposta CORTADA por limite de tokens (ex: cupom gigante): o tool_use
             # veio incompleto. Nao salva (corromperia a memoria) e pede pra dividir.

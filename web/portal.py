@@ -236,7 +236,7 @@ _BEMVINDO = """{% extends "base" %}{% block conteudo %}
        style="display:flex;align-items:center;justify-content:center;gap:8px;padding:.8rem;border-radius:8px;background:#11201a;color:#5a6b62;cursor:not-allowed">
        🟢 WhatsApp (não disponível)</span>
     {% endif %}
-    <p class="mut" style="font-size:.8rem;margin:.85rem 0 0">Vai abrir o Telegram com seu código <code>{{ codigo }}</code> — é só apertar enviar.</p>
+    <p class="mut" style="font-size:.8rem;margin:.85rem 0 0">Use seu código <code>{{ codigo }}</code> em qualquer canal (Telegram ou WhatsApp) — é só enviar.</p>
   </div>
   <a href="/painel" class="mut" style="font-size:.85rem;display:inline-block;margin-top:1rem">Pular e ir pro painel →</a>
   {% endif %}

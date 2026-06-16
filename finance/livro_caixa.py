@@ -13,6 +13,15 @@ from .models import (
 _log = logging.getLogger("openclaw.precos")
 
 
+def _intervalo_mes(ano: int, mes: int) -> tuple[date, date]:
+    """Retorna (inicio, proximo_inicio) do mes. Usado pra filtrar por intervalo
+    de data (data >= inicio and data < proximo) em vez de extract(), que NAO usa
+    indice. Mesmo resultado, muito mais rapido com o indice (conta_id, data)."""
+    inicio = date(ano, mes, 1)
+    proximo = date(ano + 1, 1, 1) if mes == 12 else date(ano, mes + 1, 1)
+    return inicio, proximo
+
+
 class LivroCaixa:
     def __init__(self, pool, conta_id: int, membro_id: int | None = None):
         self.pool = pool
@@ -96,6 +105,7 @@ class LivroCaixa:
         base: list = [self.conta_id]
         if membro_id is not None:
             cond += " and membro_id = %s"; base.append(membro_id)
+        ini, prox = _intervalo_mes(ano, mes)
         with self.pool.connection() as conn:
             saldo = conn.execute(
                 f"""select coalesce(sum(case when tipo='receita' then valor_centavos else -valor_centavos end),0)
@@ -103,13 +113,13 @@ class LivroCaixa:
             rec = conn.execute(
                 f"""select coalesce(sum(valor_centavos),0) from lancamentos
                     where {cond} and tipo='receita'
-                    and extract(year from data)=%s and extract(month from data)=%s""",
-                base + [ano, mes]).fetchone()[0]
+                    and data >= %s and data < %s""",
+                base + [ini, prox]).fetchone()[0]
             desp = conn.execute(
                 f"""select coalesce(sum(valor_centavos),0) from lancamentos
                     where {cond} and tipo='despesa'
-                    and extract(year from data)=%s and extract(month from data)=%s""",
-                base + [ano, mes]).fetchone()[0]
+                    and data >= %s and data < %s""",
+                base + [ini, prox]).fetchone()[0]
         return {"saldo": int(saldo), "receitas": int(rec), "despesas": int(desp)}
 
     def despesas_por_categoria(self, ano: int, mes: int, membro_id: int | None = None) -> list[tuple[str, int]]:
@@ -117,12 +127,13 @@ class LivroCaixa:
         params: list = [self.conta_id]
         if membro_id is not None:
             cond += " and membro_id = %s"; params.append(membro_id)
+        ini, prox = _intervalo_mes(ano, mes)
         with self.pool.connection() as conn:
             rows = conn.execute(
                 f"""select categoria, sum(valor_centavos) from lancamentos
-                    where {cond} and extract(year from data)=%s and extract(month from data)=%s
+                    where {cond} and data >= %s and data < %s
                     group by categoria order by sum(valor_centavos) desc""",
-                params + [ano, mes]).fetchall()
+                params + [ini, prox]).fetchall()
         return [(r[0], int(r[1])) for r in rows]
 
     def evolucao_mensal(self, meses: int = 6, membro_id: int | None = None) -> list[dict]:
@@ -143,8 +154,9 @@ class LivroCaixa:
 
     def lancamentos_recentes(self, ano: int, mes: int, membro_id: int | None = None,
                              tipo: str | None = None, limite: int = 50) -> list[dict]:
-        cond = "l.conta_id = %s and extract(year from l.data)=%s and extract(month from l.data)=%s"
-        params: list = [self.conta_id, ano, mes]
+        ini, prox = _intervalo_mes(ano, mes)
+        cond = "l.conta_id = %s and l.data >= %s and l.data < %s"
+        params: list = [self.conta_id, ini, prox]
         if membro_id is not None:
             cond += " and l.membro_id = %s"; params.append(membro_id)
         if tipo in ("despesa", "receita"):
@@ -171,8 +183,9 @@ class LivroCaixa:
         cond = "l.conta_id = %s"
         params: list = [self.conta_id]
         if ano is not None and mes is not None:
-            cond += " and extract(year from l.data) = %s and extract(month from l.data) = %s"
-            params += [ano, mes]
+            ini, prox = _intervalo_mes(ano, mes)
+            cond += " and l.data >= %s and l.data < %s"
+            params += [ini, prox]
         else:
             cond += " and l.data >= (now() - (%s || ' days')::interval)::date"
             params.append(dias or 90)

@@ -8,7 +8,7 @@ import hashlib
 import os
 import secrets
 
-from fastapi import APIRouter, Request, Form
+from fastapi import APIRouter, Request, Form, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from jinja2 import Environment, DictLoader, select_autoescape
 
@@ -227,9 +227,15 @@ _BEMVINDO = """{% extends "base" %}{% block conteudo %}
     <a href="https://t.me/{{ bot }}?text={{ codigo|urlencode }}" target="_blank" rel="noopener"
        style="display:flex;align-items:center;justify-content:center;gap:8px;padding:.8rem;border-radius:8px;text-decoration:none;background:#2AABEE;color:#fff;font-weight:600;margin-bottom:8px">
        📨 Conectar meu Telegram</a>
-    <span title="Disponível em breve"
+    {% if whatsapp_bot_num %}
+    <a href="https://wa.me/{{ whatsapp_bot_num }}?text={{ codigo|urlencode }}" target="_blank" rel="noopener"
+       style="display:flex;align-items:center;justify-content:center;gap:8px;padding:.8rem;border-radius:8px;text-decoration:none;background:#25D366;color:#fff;font-weight:600">
+       🟢 Conectar meu WhatsApp</a>
+    {% else %}
+    <span title="WhatsApp não configurado"
        style="display:flex;align-items:center;justify-content:center;gap:8px;padding:.8rem;border-radius:8px;background:#11201a;color:#5a6b62;cursor:not-allowed">
-       🟢 WhatsApp (em breve)</span>
+       🟢 WhatsApp (não disponível)</span>
+    {% endif %}
     <p class="mut" style="font-size:.8rem;margin:.85rem 0 0">Vai abrir o Telegram com seu código <code>{{ codigo }}</code> — é só apertar enviar.</p>
   </div>
   <a href="/painel" class="mut" style="font-size:.85rem;display:inline-block;margin-top:1rem">Pular e ir pro painel →</a>
@@ -722,7 +728,8 @@ def cadastro_form(request: Request):
 
 
 @router.post("/cadastro", response_class=HTMLResponse)
-def cadastro_envia(request: Request, plano: str = Form(...), nome: str = Form(...),
+def cadastro_envia(request: Request, background: BackgroundTasks,
+                   plano: str = Form(...), nome: str = Form(...),
                    email: str = Form(...), senha: str = Form(...),
                    documento: str = Form(""), whatsapp: str = Form(...),
                    cidade: str = Form("")):
@@ -752,8 +759,14 @@ def cadastro_envia(request: Request, plano: str = Form(...), nome: str = Form(..
                   (email, hash_senha(senha), conta_id))
         c.commit()
     ct.adicionar_membro(pool, conta_id, nome=nome.strip(), papel="dono", whatsapp_id=zap)
-    ct.gerar_convite_dono(pool, conta_id)  # codigo pro dono conectar o Telegram
+    codigo_dono = ct.gerar_convite_dono(pool, conta_id)  # codigo pro dono conectar Telegram
     request.session["conta_id"] = conta_id
+    # email de boas-vindas (tolerante a falha - nunca quebra o cadastro)
+    try:
+        from finance.email_sender import enviar_boas_vindas
+        background.add_task(enviar_boas_vindas, email, nome.strip(), codigo_dono)
+    except Exception:  # noqa: BLE001
+        pass
     return RedirectResponse("/bem-vindo", status_code=303)
 
 
@@ -793,8 +806,10 @@ def bem_vindo(request: Request):
     nome = (row[0] if row else None) or "tudo certo"
     codigo = row[1] if row else None
     ja_conectado = bool(row and row[2])
+    whatsapp_bot_num = (os.environ.get("TWILIO_WHATSAPP_FROM") or "").replace("whatsapp:+", "")
     return _render("bemvindo", request, nome_pessoa=nome, codigo=codigo,
-                   ja_conectado=ja_conectado, bot="clawaladdin_bot")
+                   ja_conectado=ja_conectado, bot="clawaladdin_bot",
+                   whatsapp_bot_num=whatsapp_bot_num)
 
 
 @router.get("/painel", response_class=HTMLResponse)

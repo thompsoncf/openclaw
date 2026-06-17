@@ -88,16 +88,32 @@ class LivroCaixa:
         self.conta_id = conta_id
         self.membro_id = membro_id
 
-    def adicionar(self, lanc: Lancamento) -> Lancamento:
+    def lancamento_por_chave(self, chave: str | None) -> dict | None:
+        """Consulta se ja' existe lancamento nesta conta com essa chave (NFC-e).
+        Retorna {'id': int, 'data': date, 'valor': int, 'descricao': str} se encontrado.
+        Retorna None se nao existe ou se chave e' None/vazia."""
+        if not chave:
+            return None
+        with self.pool.connection() as conn:
+            row = conn.execute(
+                """select id, data, valor_centavos, descricao from lancamentos
+                   where conta_id = %s and chave = %s limit 1""",
+                (self.conta_id, chave),
+            ).fetchone()
+        if not row:
+            return None
+        return {"id": row[0], "data": row[1], "valor": int(row[2]), "descricao": row[3]}
+
+    def adicionar(self, lanc: Lancamento, chave: str | None = None) -> Lancamento:
         with self.pool.connection() as conn:
             row = conn.execute(
                 """insert into lancamentos
                    (conta_id, membro_id, tipo, valor_centavos, categoria, descricao,
-                    data, pagamento, origem, comprovante)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
+                    data, pagamento, origem, comprovante, chave)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
                 (self.conta_id, self.membro_id, lanc.tipo.value, lanc.valor_centavos,
                  lanc.categoria, lanc.descricao, lanc.data, lanc.pagamento,
-                 lanc.origem, lanc.comprovante),
+                 lanc.origem, lanc.comprovante, chave),
             ).fetchone()
             conn.commit()
             lanc.id = row[0]

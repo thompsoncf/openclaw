@@ -179,6 +179,7 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
         imagem_b64 = None
         media_type = "image/jpeg"
         dica_qr = False
+        chave_nfce = None
         if media_url:
             dados = _baixar_midia(media_url)
             ctype = (media_ctype or "")
@@ -188,11 +189,43 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
                 texto = body or "Segue o cupom para registrar."
                 _disparar_qr_whatsapp(numero, dados, ctype)
                 dica_qr = True
+                # TRAVA DUPLICIDADE: ler chave de forma síncrona ANTES do agente
+                try:
+                    from finance.nfce_qr import ler_chave_da_imagem
+                    chave_nfce = ler_chave_da_imagem(dados)
+                    if chave_nfce:
+                        from finance.livro_caixa import LivroCaixa
+                        liv = LivroCaixa(pool, conta["id"])
+                        duplicata = liv.lancamento_por_chave(chave_nfce)
+                        if duplicata:
+                            data_str = duplicata["data"].strftime("%d/%m/%Y")
+                            desc = duplicata["descricao"][:50]
+                            _responder_whatsapp(to,
+                                f"✓ Esse cupom ja foi registrado em {data_str} ({desc}...)")
+                            return
+                except Exception:  # noqa: BLE001
+                    pass  # trava falha gracefully, segue o fluxo normal
             elif "pdf" in ctype:
                 imagem_b64 = base64.b64encode(dados).decode("ascii")
                 media_type = "application/pdf"
                 texto = body or "Segue o comprovante para registrar."
                 _disparar_qr_whatsapp(numero, dados, "application/pdf")
+                # TRAVA DUPLICIDADE: mesmo pra PDF
+                try:
+                    from finance.nfce_qr import ler_chave_da_imagem
+                    chave_nfce = ler_chave_da_imagem(dados)
+                    if chave_nfce:
+                        from finance.livro_caixa import LivroCaixa
+                        liv = LivroCaixa(pool, conta["id"])
+                        duplicata = liv.lancamento_por_chave(chave_nfce)
+                        if duplicata:
+                            data_str = duplicata["data"].strftime("%d/%m/%Y")
+                            desc = duplicata["descricao"][:50]
+                            _responder_whatsapp(to,
+                                f"✓ Esse cupom ja foi registrado em {data_str} ({desc}...)")
+                            return
+                except Exception:  # noqa: BLE001
+                    pass
             elif ctype.startswith("audio/") and _transcritor:
                 texto = _transcritor.transcrever(dados, "audio.ogg")
 

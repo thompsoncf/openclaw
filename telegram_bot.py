@@ -102,6 +102,34 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
             "Voce atingiu o limite de mensagens de hoje. A gente se fala amanha!"
         )
         return
+
+    # TRAVA DUPLICIDADE: se temos imagem (cupom/PDF), verifica por chave NFC-e ANTES do agente
+    if imagem_b64:
+        try:
+            import base64
+            dados = base64.b64decode(imagem_b64)
+            from finance.nfce_qr import ler_chave_da_imagem
+            from finance.livro_caixa import LivroCaixa
+            chave_nfce = ler_chave_da_imagem(dados) if media_type.startswith("image/") else None
+            # PDF: tenta extrair chave via OCR/texto (nfce_qr.ler_chave tenta isso)
+            if media_type == "application/pdf":
+                try:
+                    from finance.nfce_qr import ler_chave
+                    chave_nfce = ler_chave(dados, media_type)
+                except Exception:  # noqa: BLE001
+                    chave_nfce = None
+            if chave_nfce:
+                liv = LivroCaixa(_pool, conta["id"])
+                duplicata = liv.lancamento_por_chave(chave_nfce)
+                if duplicata:
+                    data_str = duplicata["data"].strftime("%d/%m/%Y")
+                    desc = duplicata["descricao"][:50]
+                    await update.message.reply_text(
+                        f"✓ Esse cupom ja foi registrado em {data_str} ({desc}...)")
+                    return
+        except Exception:  # noqa: BLE001
+            pass  # trava falha gracefully, segue o fluxo normal
+
     agente = _agente_do(membro, conta)
     # O agente e' sincrono (rede + LLM): roda fora do event loop pra nao travar o bot.
     resposta = await asyncio.to_thread(agente.responder, texto, imagem_b64, media_type)

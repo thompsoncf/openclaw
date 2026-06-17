@@ -107,6 +107,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                 "valor_unitario_centavos": reais_para_centavos(vu) if vu is not None else 0,
                 "valor_total_centavos": reais_para_centavos(vt) if vt is not None else 0,
                 "unidade": (it.get("unidade") or "").strip() or None,
+                "codigo": (str(it.get("codigo") or "").strip() or None),
             })
         loja_info = {
             "cnpj": (entrada.get("cnpj_emitente") or "").strip() or None,
@@ -155,6 +156,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
             "valor_unitario": {"type": "number", "description": "preco de 1 unidade ou de 1 kg/L (NUNCA o total). ex: 58.43"},
             "valor_total": {"type": "number", "description": "valor total pago no item (qtd x unitario). ex: 70.12"},
             "unidade": {"type": "string", "description": "base do preco: 'KG' (peso), 'L' (volume) ou 'UN' (unidade/pacote). default UN"},
+            "codigo": {"type": "string", "description": "codigo de barras/EAN do produto (SO' digitos), da coluna COD do cupom, quando visivel. Casa o mesmo produto entre lojas."},
         },
         "required": ["descricao", "valor_total"],
     }

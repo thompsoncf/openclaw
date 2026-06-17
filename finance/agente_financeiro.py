@@ -94,6 +94,9 @@ Regras:
   obvias de cupom (ex: FD = Fralda, REFRI = Refrigerante, ACHOC = Achocolatado,
   DET = Detergente), mantenha a MARCA e o TAMANHO/peso e tire codigo/lixo solto.
   Ex: "FD PAMPERS PANTS AJUSTT MAX XXG/78" -> "Fralda Pampers Pants Ajuste Max XXG c/78".
+  Em CADA item, se o cupom mostrar o codigo de barras (coluna COD, 8 a 14 digitos),
+  inclua "codigo" com SO' os digitos - ele casa o mesmo produto entre lojas mesmo
+  que o nome saia escrito diferente.
   Ao chamar registrar_itens_cupom, passe TAMBEM, quando o cupom mostrar
   (geralmente no cabecalho): cnpj_emitente (so' os digitos), estabelecimento
   (nome da loja) e endereco (rua, numero, bairro). Isso identifica a loja exata e

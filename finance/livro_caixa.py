@@ -489,7 +489,8 @@ class LivroCaixa:
             params = []
             for it in itens:
                 vu, qtd, vt, unidade = _validar_item_preco(it)
-                params.append((lancamento_id, it["descricao"], qtd, vu, vt, unidade))
+                cod = str(it.get("codigo") or "").strip() or None
+                params.append((lancamento_id, it["descricao"], qtd, vu, vt, unidade, cod))
             LOTE = 100
             n = 0
             ids_itens = []
@@ -498,8 +499,8 @@ class LivroCaixa:
                 cur.executemany(
                     """insert into itens_lancamento
                        (lancamento_id, descricao, quantidade,
-                        valor_unitario_centavos, valor_total_centavos, unidade)
-                       values (%s,%s,%s,%s,%s,%s)""",
+                        valor_unitario_centavos, valor_total_centavos, unidade, codigo)
+                       values (%s,%s,%s,%s,%s,%s,%s)""",
                     params[i:i + LOTE],
                 )
                 n += len(params[i:i + LOTE])
@@ -549,13 +550,13 @@ class LivroCaixa:
                 loja_id = None
         # le os itens recem-salvos desse lancamento (com id, valor unitario e unidade)
         itens = conn.execute(
-            """select id, descricao, valor_unitario_centavos, unidade
+            """select id, descricao, valor_unitario_centavos, unidade, codigo
                from itens_lancamento where lancamento_id = %s""",
             (lancamento_id,),
         ).fetchall()
         params = []
         vistos = set()      # (descricao_norm, valor) ja' vistos NESTE lancamento
-        for item_id, desc, vu, unidade in itens:
+        for item_id, desc, vu, unidade, codigo in itens:
             vu = int(vu or 0)
             desc = (desc or "").strip()
             if vu <= 0 or not desc:
@@ -568,9 +569,11 @@ class LivroCaixa:
             if chave in vistos:
                 continue        # mesmo produto+preco no mesmo cupom: 1 preco basta
             vistos.add(chave)
+            cod = "".join(ch for ch in (codigo or "") if ch.isdigit())
+            gtin = cod if len(cod) in (8, 12, 13, 14) else None  # so' GTIN valido
             params.append((norm, desc_limpo, vu, mercado, regiao,
                            data_compra, self.conta_id, item_id, "cupom", loja_id,
-                           unidade or "UN"))
+                           unidade or "UN", gtin))
         if not params:
             return 0
         cur = conn.cursor()
@@ -578,8 +581,8 @@ class LivroCaixa:
             """insert into precos_observados
                (descricao_norm, descricao_original, valor_unitario_centavos,
                 mercado, regiao, data_compra, conta_id, item_id, fonte, loja_id,
-                unidade)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                unidade, gtin)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                on conflict (item_id) do nothing""",
             params,
         )

@@ -354,7 +354,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 
 <h1 style="font-size:1.05rem">Despesas por categoria</h1>
 {% if categorias %}{% for cat,val in categorias %}
-<div class="cat-linha" onclick="abrirCat(this)" data-cat="{{ cat }}" style="cursor:pointer">
+<div class="cat-linha" onclick="abrirCat(this)" data-cat="{{ cat }}" data-tipo="despesa" style="cursor:pointer">
   <div style="display:flex; justify-content:space-between; font-size:.9rem; margin:.4rem 0 .2rem">
     <span><span class="seta">▸</span> {{ cat }}</span><b>{{ brl(val) }}</b>
   </div>
@@ -362,6 +362,17 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 </div>
 <div class="cat-lancamentos" style="display:none; padding:.2rem 0 .6rem 1.2rem"></div>
 {% endfor %}{% else %}<p class="mut">Sem despesas neste mês.</p>{% endif %}
+
+<h1 style="font-size:1.05rem; margin-top:1.6rem">Receitas por categoria</h1>
+{% if receitas_cat %}{% for cat,val in receitas_cat %}
+<div class="cat-linha" onclick="abrirCat(this)" data-cat="{{ cat }}" data-tipo="receita" style="cursor:pointer">
+  <div style="display:flex; justify-content:space-between; font-size:.9rem; margin:.4rem 0 .2rem">
+    <span><span class="seta">▸</span> {{ cat }}</span><b>{{ brl(val) }}</b>
+  </div>
+  <div class="barra"><div class="barra-fill" style="width:{{ (val*100//maior_rec) if maior_rec else 0 }}%; background:#5dcaa5"></div></div>
+</div>
+<div class="cat-lancamentos" style="display:none; padding:.2rem 0 .6rem 1.2rem"></div>
+{% endfor %}{% else %}<p class="mut">Sem receitas neste mês.</p>{% endif %}
 
 <h1 style="font-size:1.05rem; margin-top:1.6rem">Lançamentos</h1>
 <div class="abas">
@@ -381,7 +392,10 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <table style="margin:0">
 {% for l in dia.itens %}<tr data-tipo="{{ l.tipo }}" data-cat="{{ canon(l.categoria) }}" data-desc="{{ l.descricao }}" data-valor="{{ brl(l.valor) }}">
 <td>{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}</td>
-<td><span class="tag">{{ l.categoria }}</span></td>
+<td><select class="cat-edit" data-id="{{ l.id }}" onchange="mudarCat(this)"
+     style="background:transparent;border:1px solid #2a3a33;border-radius:6px;color:inherit;font-size:.78rem;padding:.1rem .3rem;max-width:130px">
+  {% for c in categorias_lista %}<option value="{{ c }}" {% if canon(l.categoria)==c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+</select></td>
 {% if pessoas|length > 1 %}<td class="mut">{{ l.quem }}</td>{% endif %}
 <td style="text-align:right; font-weight:500; color:{{ '#5dcaa5' if l.tipo=='receita' else '#f0b8b8' }}">
 {{ '+' if l.tipo=='receita' else '−' }} {{ brl(l.valor).replace('R$ ','') }}</td></tr>{% endfor %}
@@ -453,12 +467,12 @@ function abrirCat(el){
   document.querySelectorAll('.cat-lancamentos').forEach(function(b){ b.style.display='none'; });
   document.querySelectorAll('.cat-linha .seta').forEach(function(s){ s.textContent='▸'; });
   if(jaAberto){ return; }
-  var cat = el.getAttribute('data-cat');       // categoria canônica de cima
-  // pega TODAS as linhas de lançamento da página com a mesma categoria canônica
-  var linhas = document.querySelectorAll('#lista-dias tr[data-cat="'+cat+'"]');
+  var cat = el.getAttribute('data-cat');       // categoria canônica
+  var tipo = el.getAttribute('data-tipo') || 'despesa';  // tipo: despesa ou receita
+  // pega TODAS as linhas de lançamento da página com a mesma categoria e tipo
+  var linhas = document.querySelectorAll('#lista-dias tr[data-cat="'+cat+'"][data-tipo="'+tipo+'"]');
   var html = '';
   linhas.forEach(function(tr){
-    if(tr.getAttribute('data-tipo') !== 'despesa') return;   // só despesas
     html += '<div style="display:flex;justify-content:space-between;font-size:.85rem;margin:.25rem 0">'
           + '<span>'+ tr.getAttribute('data-desc') +'</span>'
           + '<span class="mut">'+ tr.getAttribute('data-valor') +'</span></div>';
@@ -466,6 +480,18 @@ function abrirCat(el){
   box.innerHTML = html || '<span class="mut" style="font-size:.85rem">Sem lançamentos detalhados deste mês.</span>';
   box.style.display = 'block';
   seta.textContent = '▾';
+}
+function mudarCat(sel){
+  var fd = new FormData();
+  fd.append('lancamento_id', sel.getAttribute('data-id'));
+  fd.append('categoria', sel.value);
+  fetch('/painel/lancamento/categoria', {method:'POST', body: fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d.ok){ sel.style.borderColor='#5dcaa5'; setTimeout(function(){ location.reload(); }, 400); }
+      else { sel.style.borderColor='#f0b8b8'; }
+    })
+    .catch(function(){ sel.style.borderColor='#f0b8b8'; });
 }
 function copiarConvite(btn, url){
   navigator.clipboard.writeText(url).then(function(){
@@ -897,6 +923,10 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
     resumo = livro.resumo_mes(ano_sel, mes_num, membro_sel)
     categorias = livro.despesas_por_categoria(ano_sel, mes_num, membro_sel)
     maior_cat = max((v for _, v in categorias), default=0)
+    receitas_cat = livro.receitas_por_categoria(ano_sel, mes_num, membro_sel)
+    maior_rec = max((v for _, v in receitas_cat), default=0)
+    from finance.models import CATEGORIAS_DESPESA, CATEGORIAS_RECEITA
+    categorias_lista = CATEGORIAS_DESPESA + [c for c in CATEGORIAS_RECEITA if c not in CATEGORIAS_DESPESA]
     lancamentos = livro.lancamentos_recentes(ano_sel, mes_num, membro_sel,
                                              tipo if tipo in ("despesa", "receita") else None,
                                              limite=1000)
@@ -934,7 +964,8 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
     return _render("dash", request, titulo="Financeiro", conta=conta,
                    resumo=resumo, categorias=categorias, maior_cat=maior_cat,
                    lancamentos=lancamentos, dias=dias, raiox=raiox, pessoas=pessoas,
-                   meses=meses, mes_sel=mes_sel, membro_sel=membro_sel, tipo_sel=tipo)
+                   meses=meses, mes_sel=mes_sel, membro_sel=membro_sel, tipo_sel=tipo,
+                   receitas_cat=receitas_cat, maior_rec=maior_rec, categorias_lista=categorias_lista)
 
 
 # ---------- lista de compras ----------
@@ -1168,6 +1199,19 @@ def compras_avisar(request: Request):
     if ok:
         return JSONResponse({"ok": True, "msg": "Pronto! Avisei o responsavel. ✅"})
     return JSONResponse({"ok": True, "msg": "Lista marcada como pronta! (o aviso por Telegram sai quando o responsavel conectar)"})
+
+
+@router.post("/painel/lancamento/categoria")
+def mudar_categoria_lancamento(request: Request,
+                               lancamento_id: int = Form(...),
+                               categoria: str = Form(...)):
+    conta = conta_logada(request)
+    if not conta:
+        return JSONResponse({"ok": False}, status_code=401)
+    from finance.livro_caixa import LivroCaixa
+    livro = LivroCaixa(get_pool(), conta[0])
+    ok = livro.mudar_categoria(lancamento_id, categoria)
+    return JSONResponse({"ok": bool(ok)})
 
 
 @router.post("/membros/adicionar")

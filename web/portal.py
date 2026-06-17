@@ -393,11 +393,13 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 {% for l in dia.itens %}<tr data-tipo="{{ l.tipo }}" data-cat="{{ canon(l.categoria, l.tipo) }}" data-desc="{{ l.descricao }}" data-valor="{{ brl(l.valor) }}">
 <td>{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}</td>
 <td style="white-space:nowrap">
+<span style="display:inline-flex;align-items:center;gap:.4rem">
 <select class="cat-edit" data-id="{{ l.id }}" data-orig="{{ canon(l.categoria, l.tipo) }}" onchange="catMudou(this)"
-   style="background:transparent;border:1px solid #2a3a33;border-radius:6px;color:inherit;font-size:.78rem;padding:.1rem .3rem;max-width:120px">
-{% for c in categorias_de(l.tipo) %}<option value="{{ c }}" {% if canon(l.categoria, l.tipo)==c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+   style="background:#0e0e0f;border:1px solid #2a3a33;border-radius:6px;color:#ececec;font-size:.78rem;padding:.2rem .45rem;max-width:130px">
+{% for c in categorias_de(l.tipo) %}<option value="{{ c }}" style="background:#161617;color:#ececec" {% if canon(l.categoria, l.tipo)==c %}selected{% endif %}>{{ c }}</option>{% endfor %}
 </select>
-<button type="button" class="cat-ok" onclick="salvarCat(this)" style="display:none;margin-left:.35rem;padding:.15rem .55rem;width:auto;font-size:.72rem;font-weight:600;background:#2f7d5b;color:#fff;border:0;border-radius:6px;cursor:pointer;vertical-align:middle">OK</button>
+<button type="button" class="cat-ok" onclick="salvarCat(this)" style="display:none;padding:.24rem .65rem;width:auto;font-size:.72rem;font-weight:600;background:#1d9e75;color:#fff;border:0;border-radius:6px;cursor:pointer;line-height:1.1">OK</button>
+</span>
 </td>
 {% if pessoas|length > 1 %}<td class="mut">{{ l.quem }}</td>{% endif %}
 <td style="text-align:right; font-weight:500; color:{{ '#5dcaa5' if l.tipo=='receita' else '#f0b8b8' }}">

@@ -248,6 +248,29 @@ class LivroCaixa:
             conn.commit()
         return True
 
+    def apagar_lancamento(self, lancamento_id: int) -> bool:
+        """Apaga um lancamento DESTA conta. Seguranca multi-tenant: so' apaga se
+        for da propria conta. Limpa tambem os precos observados gerados por ele
+        (item_id NAO tem cascade); os itens_lancamento somem por ON DELETE CASCADE.
+        Retorna True se apagou, False se nao existe ou nao e' desta conta."""
+        with self.pool.connection() as conn:
+            dono = conn.execute(
+                "select 1 from lancamentos where id = %s and conta_id = %s",
+                (lancamento_id, self.conta_id)).fetchone()
+            if not dono:
+                return False
+            # tira do banco de precos o que veio deste lancamento (item_id sem cascade)
+            conn.execute(
+                """delete from precos_observados where item_id in
+                     (select id from itens_lancamento where lancamento_id = %s)""",
+                (lancamento_id,))
+            # apaga o lancamento; itens_lancamento somem por ON DELETE CASCADE
+            cur = conn.execute(
+                "delete from lancamentos where id = %s and conta_id = %s",
+                (lancamento_id, self.conta_id))
+            conn.commit()
+            return cur.rowcount > 0
+
     def evolucao_mensal(self, meses: int = 6, membro_id: int | None = None) -> list[dict]:
         """Receitas e despesas dos ultimos N meses (pra grafico de tendencia)."""
         cond = "conta_id = %s"

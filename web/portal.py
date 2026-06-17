@@ -403,7 +403,8 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 </td>
 {% if pessoas|length > 1 %}<td class="mut">{{ l.quem }}</td>{% endif %}
 <td style="text-align:right; font-weight:500; color:{{ '#5dcaa5' if l.tipo=='receita' else '#f0b8b8' }}">
-{{ '+' if l.tipo=='receita' else '−' }} {{ brl(l.valor).replace('R$ ','') }}</td></tr>{% endfor %}
+{{ '+' if l.tipo=='receita' else '−' }} {{ brl(l.valor).replace('R$ ','') }}</td>
+<td style="text-align:right"><button type="button" class="lanc-rm" data-id="{{ l.id }}" onclick="apagarLanc(this)" title="apagar lançamento" style="margin:0;padding:.15rem .45rem;width:auto;background:transparent;color:#8a3636;border:0;cursor:pointer;font-size:.95rem">✕</button></td></tr>{% endfor %}
 </table>
 </div>
 </div>
@@ -515,6 +516,19 @@ function salvarCat(btn){
       }
     })
     .catch(function(){ btn.disabled = false; btn.textContent = 'OK'; sel.style.borderColor = '#f0b8b8'; });
+}
+function apagarLanc(btn){
+  if(!confirm('Apagar este lançamento? Essa ação não pode ser desfeita.')) return;
+  var fd = new FormData();
+  fd.append('lancamento_id', btn.getAttribute('data-id'));
+  btn.disabled = true;
+  fetch('/painel/lancamento/apagar', {method:'POST', body: fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d.ok){ var tr = btn.closest('tr'); if(tr){ tr.remove(); } }
+      else { btn.disabled = false; alert('Não consegui apagar.'); }
+    })
+    .catch(function(){ btn.disabled = false; alert('Erro ao apagar.'); });
 }
 function copiarConvite(btn, url){
   navigator.clipboard.writeText(url).then(function(){
@@ -1235,6 +1249,17 @@ def mudar_categoria_lancamento(request: Request,
     from finance.livro_caixa import LivroCaixa
     livro = LivroCaixa(get_pool(), conta[0])
     ok = livro.mudar_categoria(lancamento_id, categoria)
+    return JSONResponse({"ok": bool(ok)})
+
+
+@router.post("/painel/lancamento/apagar")
+def apagar_lancamento_endpoint(request: Request, lancamento_id: int = Form(...)):
+    conta = conta_logada(request)
+    if not conta:
+        return JSONResponse({"ok": False}, status_code=401)
+    from finance.livro_caixa import LivroCaixa
+    livro = LivroCaixa(get_pool(), conta[0])
+    ok = livro.apagar_lancamento(lancamento_id)
     return JSONResponse({"ok": bool(ok)})
 
 

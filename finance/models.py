@@ -22,6 +22,38 @@ def normalizar_descricao(texto: str) -> str:
     return " ".join(t.lower().split())
 
 
+# Abreviacoes COMUNS e NAO-AMBIGUAS de cupom -> nome legivel. Conservador de
+# proposito: o Claude ja' expande na leitura; isto e' so' rede de seguranca pra
+# manter consistencia. NAO incluir ambiguas (cond=condicionador/condimento etc).
+_ABREVIACOES = {
+    "fd": "Fralda", "fds": "Fraldas",
+    "refri": "Refrigerante", "refrig": "Refrigerante",
+    "achoc": "Achocolatado",
+    "amac": "Amaciante",
+    "det": "Detergente",
+    "desod": "Desodorante",
+    "shamp": "Shampoo",
+    "marg": "Margarina",
+    "bisc": "Biscoito",
+    "iog": "Iogurte",
+    "req": "Requeijao",
+    "ajust": "Ajuste", "ajustt": "Ajuste",
+}
+
+
+def expandir_abreviacoes(texto: str) -> str:
+    """Expande abreviacoes comuns de cupom no NOME DE EXIBICAO, token a token e
+    sem distincao de caixa. Ex: 'FD Pampers Pants' -> 'Fralda Pampers Pants'.
+    So' mexe em tokens que estao no dicionario; o resto fica como veio."""
+    if not texto:
+        return texto
+    saida = []
+    for tok in texto.split():
+        chave = tok.lower().strip(".,;:/")
+        saida.append(_ABREVIACOES.get(chave, tok))
+    return " ".join(saida)
+
+
 def limpar_nome_produto(texto: str) -> str:
     """Limpa o NOME DE EXIBICAO do produto (o que aparece pro usuario), tirando
     lixo comum de cupom: desconto grudado, parenteses de promo, codigos soltos,
@@ -47,6 +79,8 @@ def limpar_nome_produto(texto: str) -> str:
     t = " ".join(t.split())
     # tira pontuacao solta no fim
     t = t.rstrip(" -,;.")
+    # expande abreviacoes comuns (FD->Fralda) - rede de seguranca de exibicao
+    t = expandir_abreviacoes(t)
     return t
 
 

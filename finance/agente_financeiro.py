@@ -90,7 +90,11 @@ Regras:
   depois de salvar o lancamento, salve TAMBEM os itens automaticamente com
   registrar_itens_cupom (sem o usuario pedir) - passando
   todos os produtos/pratos que leu (descricao, quantidade, valor unitario e
-  total). Ao chamar registrar_itens_cupom, passe TAMBEM, quando o cupom mostrar
+  total). Na DESCRICAO, escreva o nome LEGIVEL do produto: expanda abreviacoes
+  obvias de cupom (ex: FD = Fralda, REFRI = Refrigerante, ACHOC = Achocolatado,
+  DET = Detergente), mantenha a MARCA e o TAMANHO/peso e tire codigo/lixo solto.
+  Ex: "FD PAMPERS PANTS AJUSTT MAX XXG/78" -> "Fralda Pampers Pants Ajuste Max XXG c/78".
+  Ao chamar registrar_itens_cupom, passe TAMBEM, quando o cupom mostrar
   (geralmente no cabecalho): cnpj_emitente (so' os digitos), estabelecimento
   (nome da loja) e endereco (rua, numero, bairro). Isso identifica a loja exata e
   o ramo e permite comparar precos entre lojas - e' valioso, entao SEMPRE inclua

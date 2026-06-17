@@ -194,7 +194,12 @@ class LivroCaixa:
                     where {cond} and data >= %s and data < %s
                     group by categoria order by sum(valor_centavos) desc""",
                 params + [ini, prox]).fetchall()
-        return [(r[0], int(r[1])) for r in rows]
+        from .models import canonizar_categoria
+        agg: dict[str, int] = {}
+        for r in rows:
+            cat = canonizar_categoria(r[0], "despesa")
+            agg[cat] = agg.get(cat, 0) + int(r[1])
+        return sorted(agg.items(), key=lambda kv: kv[1], reverse=True)
 
     def evolucao_mensal(self, meses: int = 6, membro_id: int | None = None) -> list[dict]:
         """Receitas e despesas dos ultimos N meses (pra grafico de tendencia)."""
@@ -257,9 +262,11 @@ class LivroCaixa:
                     from itens_lancamento i join lancamentos l on l.id = i.lancamento_id
                     where {cond} order by l.categoria, l.data desc, i.valor_total_centavos desc""",
                 params).fetchall()
+        from .models import canonizar_categoria
         dep: dict[str, list[dict]] = {}
         for cat, desc, val, data in rows:
-            dep.setdefault(cat, []).append({"descricao": desc, "valor": int(val), "data": data})
+            cat_p = canonizar_categoria(cat, "despesa")
+            dep.setdefault(cat_p, []).append({"descricao": desc, "valor": int(val), "data": data})
         return dep
 
     # ---------- Itens do cupom (raio-x do consumo) ----------

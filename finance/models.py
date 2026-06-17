@@ -81,6 +81,29 @@ def normalizar_categoria(tipo: Tipo, categoria: str) -> str:
     return "Outros"
 
 
+def _sem_acento(s: str) -> str:
+    """Remove acentos de uma string."""
+    return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
+
+
+def canonizar_categoria(cat: str | None, tipo: str = "despesa") -> str:
+    """Mapeia uma categoria (possivelmente com acento/caixa diferente, ex 'Saúde'
+    vs 'Saude') para a categoria PADRAO da lista oficial. Se nao encontrar
+    correspondencia, devolve 'Outros' (nunca cria categoria nova).
+
+    Ex: 'Saude' -> 'Saude', 'saude' -> 'Saude', 'SAÚDE' -> 'Saude'.
+    Assim o agrupamento junta tudo na categoria oficial, sem depender de como
+    foi salvo. Nao altera os dados no banco - so' normaliza na leitura/exibicao.
+    """
+    if not cat:
+        return "Outros"
+    chave = _sem_acento(cat).strip().lower()
+    mapa_despesa = {_sem_acento(c).lower(): c for c in CATEGORIAS_DESPESA}
+    mapa_receita = {_sem_acento(c).lower(): c for c in CATEGORIAS_RECEITA}
+    mapa = mapa_receita if tipo == "receita" else mapa_despesa
+    return mapa.get(chave, "Outros")
+
+
 def reais_para_centavos(valor) -> int:
     d = Decimal(str(valor)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     if d < 0:

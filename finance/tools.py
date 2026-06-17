@@ -28,10 +28,13 @@ def _parse_data(s: str | None) -> date:
 def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                           banco=None, cidade: str | None = None) -> list[Ferramenta]:
     def lancar(tipo: Tipo, entrada: dict) -> str:
+        from .models import canonizar_categoria
+        cat_entrada = entrada.get("categoria", "Outros")
+        cat_canon = canonizar_categoria(cat_entrada, tipo.value if hasattr(tipo, "value") else str(tipo))
         lanc = Lancamento.criar(
             tipo=tipo,
             valor_reais=entrada["valor"],
-            categoria=entrada.get("categoria", "Outros"),
+            categoria=cat_canon,
             descricao=entrada.get("descricao", ""),
             data=_parse_data(entrada.get("data")),
             pagamento=entrada.get("pagamento", ""),

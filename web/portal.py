@@ -390,12 +390,15 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 </div>
 <div class="dep-corpo" style="flex-direction:column; gap:0">
 <table style="margin:0">
-{% for l in dia.itens %}<tr data-tipo="{{ l.tipo }}" data-cat="{{ canon(l.categoria) }}" data-desc="{{ l.descricao }}" data-valor="{{ brl(l.valor) }}">
+{% for l in dia.itens %}<tr data-tipo="{{ l.tipo }}" data-cat="{{ canon(l.categoria, l.tipo) }}" data-desc="{{ l.descricao }}" data-valor="{{ brl(l.valor) }}">
 <td>{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}</td>
-<td><select class="cat-edit" data-id="{{ l.id }}" onchange="mudarCat(this)"
-     style="background:transparent;border:1px solid #2a3a33;border-radius:6px;color:inherit;font-size:.78rem;padding:.1rem .3rem;max-width:130px">
-  {% for c in categorias_lista %}<option value="{{ c }}" {% if canon(l.categoria)==c %}selected{% endif %}>{{ c }}</option>{% endfor %}
-</select></td>
+<td style="white-space:nowrap">
+<select class="cat-edit" data-id="{{ l.id }}" data-orig="{{ canon(l.categoria, l.tipo) }}" onchange="catMudou(this)"
+   style="background:transparent;border:1px solid #2a3a33;border-radius:6px;color:inherit;font-size:.78rem;padding:.1rem .3rem;max-width:120px">
+{% for c in categorias_de(l.tipo) %}<option value="{{ c }}" {% if canon(l.categoria, l.tipo)==c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+</select>
+<button type="button" class="cat-ok" onclick="salvarCat(this)" style="display:none;margin-left:.35rem;padding:.15rem .55rem;width:auto;font-size:.72rem;font-weight:600;background:#2f7d5b;color:#fff;border:0;border-radius:6px;cursor:pointer;vertical-align:middle">OK</button>
+</td>
 {% if pessoas|length > 1 %}<td class="mut">{{ l.quem }}</td>{% endif %}
 <td style="text-align:right; font-weight:500; color:{{ '#5dcaa5' if l.tipo=='receita' else '#f0b8b8' }}">
 {{ '+' if l.tipo=='receita' else '−' }} {{ brl(l.valor).replace('R$ ','') }}</td></tr>{% endfor %}
@@ -481,17 +484,35 @@ function abrirCat(el){
   box.style.display = 'block';
   seta.textContent = '▾';
 }
-function mudarCat(sel){
+function catMudou(sel){
+  // mostra o botao OK so' quando o valor muda em relacao ao salvo
+  var btn = sel.parentElement.querySelector('.cat-ok');
+  btn.style.display = (sel.value !== sel.getAttribute('data-orig')) ? 'inline-block' : 'none';
+}
+function salvarCat(btn){
+  var sel = btn.parentElement.querySelector('.cat-edit');
   var fd = new FormData();
   fd.append('lancamento_id', sel.getAttribute('data-id'));
   fd.append('categoria', sel.value);
+  btn.disabled = true; btn.textContent = '...';
   fetch('/painel/lancamento/categoria', {method:'POST', body: fd})
     .then(function(r){ return r.json(); })
     .then(function(d){
-      if(d.ok){ sel.style.borderColor='#5dcaa5'; setTimeout(function(){ location.reload(); }, 400); }
-      else { sel.style.borderColor='#f0b8b8'; }
+      if(d.ok){
+        // atualiza no lugar, SEM recarregar a pagina
+        sel.setAttribute('data-orig', sel.value);
+        var tr = sel.closest('tr'); if(tr){ tr.setAttribute('data-cat', sel.value); }
+        sel.style.borderColor = '#5dcaa5';
+        btn.textContent = '✓';
+        setTimeout(function(){
+          btn.style.display = 'none'; btn.disabled = false;
+          btn.textContent = 'OK'; sel.style.borderColor = '#2a3a33';
+        }, 1100);
+      } else {
+        btn.disabled = false; btn.textContent = 'OK'; sel.style.borderColor = '#f0b8b8';
+      }
     })
-    .catch(function(){ sel.style.borderColor='#f0b8b8'; });
+    .catch(function(){ btn.disabled = false; btn.textContent = 'OK'; sel.style.borderColor = '#f0b8b8'; });
 }
 function copiarConvite(btn, url){
   navigator.clipboard.writeText(url).then(function(){
@@ -766,8 +787,9 @@ _env = Environment(loader=DictLoader({
     "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
-from finance.models import canonizar_categoria
-_env.globals["canon"] = lambda c: canonizar_categoria(c, "despesa")
+from finance.models import canonizar_categoria, categorias_de
+_env.globals["canon"] = lambda c, t="despesa": canonizar_categoria(c, t)
+_env.globals["categorias_de"] = categorias_de
 from finance import cidades as _cidades_mod
 _env.globals["cidades"] = _cidades_mod.opcoes()
 

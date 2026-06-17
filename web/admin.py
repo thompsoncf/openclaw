@@ -71,7 +71,7 @@ button.danger{background:#6e2b2b}button.danger:hover{background:#8a3636}
 form.inline{display:inline;margin:0}
 </style></head><body>
 <div class="topo"><span class="logo">OpenClaw <span>· admin</span></span>
-<span><a href="/admin">Contas</a><a href="/admin/qr">QR notas</a><a href="/admin/precos">Preços</a><a href="/admin/categorias">Categorias</a><a href="/painel">Meu painel</a><a href="/sair">Sair</a></span></div>
+<span><a href="/admin">Contas</a><a href="/admin/qr">QR notas</a><a href="/admin/precos">Preços</a><a href="/admin/categorias">Categorias</a><a href="/admin/banco">Banco</a><a href="/painel">Meu painel</a><a href="/sair">Sair</a></span></div>
 <div class="wrap">{% block conteudo %}{% endblock %}</div>
 </body></html>"""
 
@@ -181,7 +181,40 @@ Editar a lista em <b>finance/models.py: DEPARTAMENTOS_RAIOX</b>.</p>
 </table></div>
 {% endblock %}"""
 
-_env = Environment(loader=DictLoader({"abase": _ADMIN_BASE, "ahome": _ADMIN_HOME, "aqr": _ADMIN_QR, "acat": _ADMIN_CATEGORIAS}),
+_ADMIN_BANCO = """{% extends "abase" %}{% block conteudo %}
+<h1>Banco de preços</h1>
+<p class="mut">Coleta colaborativa dos cupons. O mesmo preço no mesmo dia/loja não
+vira várias linhas pro cliente — aqui aparece agregado, com <b>"visto N vezes"</b>
+(quanto mais vezes, mais confiável a mediana). Só leitura.</p>
+<div class="cards">
+<div class="metric"><span>Cupons com QR lido</span><b>{{ d.tot_cupons }}</b></div>
+<div class="metric"><span>Produtos distintos</span><b>{{ d.tot_produtos }}</b></div>
+<div class="metric"><span>Lojas</span><b>{{ d.tot_lojas }}</b></div>
+<div class="metric"><span>Observações de preço</span><b>{{ d.tot_observacoes }}</b></div>
+</div>
+
+<div class="card"><h2>Preços mais confirmados</h2>
+<table><tr><th>Loja</th><th>Produto</th><th>Preço</th><th>Dia</th><th>Visto</th></tr>
+{% for m in d.mais_confirmados %}<tr>
+<td>{{ m.loja }}</td><td>{{ m.produto }}</td><td>{{ brl(m.preco) }}</td>
+<td class="mut">{{ m.data.strftime('%d/%m/%y') if m.data else '-' }}</td>
+<td>{{ m.vezes }}×</td>
+</tr>{% endfor %}
+{% if not d.mais_confirmados %}<tr><td colspan="5" class="mut">Sem preços coletados ainda.</td></tr>{% endif %}
+</table></div>
+
+<div class="card"><h2>Top produtos (mais coletados)</h2>
+<table><tr><th>Produto</th><th>Observações</th></tr>
+{% for p in d.top_produtos %}<tr><td>{{ p.produto }}</td><td>{{ p.obs }}</td></tr>{% endfor %}
+</table></div>
+
+<div class="card"><h2>Top lojas</h2>
+<table><tr><th>Loja</th><th>Observações</th><th>Produtos</th></tr>
+{% for l in d.top_lojas %}<tr><td>{{ l.loja }}</td><td>{{ l.obs }}</td><td class="mut">{{ l.produtos }}</td></tr>{% endfor %}
+</table></div>
+{% endblock %}"""
+
+_env = Environment(loader=DictLoader({"abase": _ADMIN_BASE, "ahome": _ADMIN_HOME, "aqr": _ADMIN_QR, "acat": _ADMIN_CATEGORIAS, "abanco": _ADMIN_BANCO}),
                    autoescape=select_autoescape())
 _env.globals["brl"] = brl
 
@@ -243,6 +276,16 @@ def admin_ativar(request: Request, conta_id: int):
     ct.registrar_evento(pool, conta_id, "admin_ativou", f"por admin {adm[0]}")
     request.session["admin_aviso"] = f"Conta {conta_id} ativada por mais 30 dias."
     return RedirectResponse("/admin", status_code=303)
+
+
+@router.get("/admin/banco", response_class=HTMLResponse)
+def admin_banco(request: Request):
+    if not _admin(request):
+        return _NEGADO
+    from finance.estatisticas import estatisticas_precos
+    d = estatisticas_precos(get_pool())
+    return HTMLResponse(_env.get_template("abanco").render(
+        d=d, aviso=request.session.pop("admin_aviso", None)))
 
 
 @router.get("/admin/categorias", response_class=HTMLResponse)

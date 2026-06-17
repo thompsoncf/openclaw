@@ -107,3 +107,56 @@ def estatisticas_raiox(pool) -> list[dict]:
     linhas = [{"departamento": k, **v} for k, v in agg.items() if v["itens"] > 0]
     linhas.sort(key=lambda x: x["itens"], reverse=True)
     return linhas
+
+
+def estatisticas_precos(pool) -> dict:
+    """Painel do BANCO DE PRECOS (visao admin). So' leitura. Mostra:
+      - contadores: observacoes, produtos distintos, lojas, cupons com QR lido
+      - mais_confirmados: 1 linha por (loja, produto, preco, dia) com "visto N vezes"
+        (a ideia do contador: o mesmo preco no mesmo dia/loja nao polui, vira N)
+      - top_produtos / top_lojas: onde o banco e' mais forte
+    Mantem TODAS as observacoes cruas (sao a confianca da mediana); aqui so' agrega
+    pra exibir."""
+    with pool.connection() as conn:
+        tot_obs, tot_prod, tot_lojas = conn.execute(
+            """select count(*), count(distinct descricao_norm), count(distinct loja_id)
+               from precos_observados"""
+        ).fetchone()
+        try:
+            tot_cupons = conn.execute(
+                "select count(distinct chave) from qr_leituras where chave is not null"
+            ).fetchone()[0]
+        except Exception:  # noqa: BLE001
+            tot_cupons = 0
+        mais = conn.execute(
+            """select coalesce(nullif(mercado,''), regiao, '-') as loja,
+                      min(descricao_original) as produto,
+                      valor_unitario_centavos as preco, data_compra, count(*) as vezes
+               from precos_observados
+               group by coalesce(nullif(mercado,''), regiao, '-'),
+                        descricao_norm, valor_unitario_centavos, data_compra
+               order by vezes desc, data_compra desc
+               limit 60"""
+        ).fetchall()
+        top_prod = conn.execute(
+            """select min(descricao_original), count(*)
+               from precos_observados group by descricao_norm
+               order by count(*) desc limit 15"""
+        ).fetchall()
+        top_lojas = conn.execute(
+            """select coalesce(nullif(mercado,''), regiao, '-'), count(*),
+                      count(distinct descricao_norm)
+               from precos_observados
+               group by coalesce(nullif(mercado,''), regiao, '-')
+               order by count(*) desc limit 15"""
+        ).fetchall()
+    return {
+        "tot_observacoes": int(tot_obs or 0),
+        "tot_produtos": int(tot_prod or 0),
+        "tot_lojas": int(tot_lojas or 0),
+        "tot_cupons": int(tot_cupons or 0),
+        "mais_confirmados": [{"loja": r[0], "produto": r[1], "preco": int(r[2]),
+                              "data": r[3], "vezes": int(r[4])} for r in mais],
+        "top_produtos": [{"produto": r[0], "obs": int(r[1])} for r in top_prod],
+        "top_lojas": [{"loja": r[0], "obs": int(r[1]), "produtos": int(r[2])} for r in top_lojas],
+    }

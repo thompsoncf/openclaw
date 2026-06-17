@@ -392,10 +392,11 @@ class LivroCaixa:
                        where id = %s""",
                     (endereco or "", nome or "", loja_id))
             return loja_id
-        # loja NOVA: se faltar nome ou endereco, tenta completar na Receita (BrasilAPI)
+        # loja NOVA: completa na Receita (BrasilAPI) o que faltar - inclusive
+        # cidade/uf, que o agente costuma deixar embutidos no texto do endereco.
         ramo = ramo_reserva       # reserva: ramo derivado da categoria do Claude
         cnae = None
-        if not nome or not endereco:
+        if not nome or not endereco or not cidade or not uf:
             try:
                 from .cnpj_info import consultar_cnpj
                 info = consultar_cnpj(cnpj)

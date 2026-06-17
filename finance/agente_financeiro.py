@@ -172,4 +172,5 @@ def criar_agente_financeiro(brain: Brain, livro: LivroCaixa,
         ferramentas=construir_ferramentas(livro, lista, papel, banco, cidade),
         brain=brain,
         memoria=memoria,
+        livro=livro,
     )

@@ -26,13 +26,14 @@ class Ferramenta:
 class Agente:
     def __init__(self, nome: str, persona: str, ferramentas: list[Ferramenta],
                  brain: Brain, memoria: MemoriaConversa | None = None,
-                 max_iteracoes: int = 10):
+                 max_iteracoes: int = 10, livro=None):
         self.nome = nome
         self.persona = persona
         self.ferramentas = {f.nome: f for f in ferramentas}
         self.brain = brain
         self.memoria = memoria or MemoriaConversa()
         self.max_iteracoes = max_iteracoes
+        self.livro = livro  # webhook pode acessar pra setar chave_nfce_atual
         self._lock = threading.Lock()   # uma execucao por vez (memoria compartilhada)
 
     def responder(self, texto: str, imagem_b64: str | None = None,
@@ -169,6 +170,6 @@ class Agente:
 
 
 def criar_agente(nome: str, persona: str, ferramentas: list[Ferramenta],
-                 brain: Brain, memoria: MemoriaConversa | None = None) -> Agente:
+                 brain: Brain, memoria: MemoriaConversa | None = None, livro=None) -> Agente:
     """A porta da fabrica. Toda criacao de agente passa por aqui."""
-    return Agente(nome, persona, ferramentas, brain, memoria)
+    return Agente(nome, persona, ferramentas, brain, memoria, livro=livro)

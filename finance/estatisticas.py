@@ -75,16 +75,15 @@ def estatisticas_categorias(pool) -> dict:
 def estatisticas_raiox(pool) -> list[dict]:
     """Itens de cupom por DEPARTAMENTO, em TODAS as contas (visao admin do raio-x).
 
-    Diferente de estatisticas_categorias: aqui o nivel e' o ITEM de cupom
-    (itens_lancamento), nao o lancamento. Mostra onde ha' dado de cupom (alimenta
-    o banco de precos) e onde nao ha'. Marca os departamentos excluidos do raio-x
-    do cliente. Retorna lista ordenada por nÂº de itens (desc).
+    Mostra EXATAMENTE o que o cliente ve: so' os departamentos da lista branca
+    (finance/models.py: DEPARTAMENTOS_RAIOX) que tem item de cupom. Nivel de ITEM
+    (itens_lancamento), nao de lancamento. Ordenado por nÂº de itens (desc).
     """
-    from .models import CATEGORIAS_DESPESA
+    # fallback igual a' lista branca, caso models.py atrase no deploy
     try:
-        from .models import DEPARTAMENTOS_FORA_RAIOX
+        from .models import DEPARTAMENTOS_RAIOX
     except ImportError:
-        DEPARTAMENTOS_FORA_RAIOX = set()
+        DEPARTAMENTOS_RAIOX = {"Mercado", "Saude", "Restaurante", "Pet"}
 
     with pool.connection() as conn:
         rows = conn.execute(
@@ -98,18 +97,13 @@ def estatisticas_raiox(pool) -> list[dict]:
     agg: dict[str, dict] = {}
     for cat, itens, cupons, total in rows:
         cat_p = canonizar_categoria(cat, "despesa")
+        if cat_p not in DEPARTAMENTOS_RAIOX:
+            continue   # so' a lista branca
         a = agg.setdefault(cat_p, {"itens": 0, "cupons": 0, "total": 0})
         a["itens"] += int(itens)
         a["cupons"] += int(cupons)
         a["total"] += int(total)
 
-    linhas = [{"departamento": cat_p, "excluido": cat_p in DEPARTAMENTOS_FORA_RAIOX, **v}
-              for cat_p, v in agg.items()]
-    # departamentos de despesa que NUNCA receberam item (nao aparecem no raio-x)
-    vistas = set(agg.keys())
-    for c in CATEGORIAS_DESPESA:
-        if c not in vistas:
-            linhas.append({"departamento": c, "itens": 0, "cupons": 0, "total": 0,
-                           "excluido": c in DEPARTAMENTOS_FORA_RAIOX})
+    linhas = [{"departamento": k, **v} for k, v in agg.items() if v["itens"] > 0]
     linhas.sort(key=lambda x: x["itens"], reverse=True)
     return linhas

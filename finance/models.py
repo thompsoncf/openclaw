@@ -66,6 +66,11 @@ CATEGORIAS_RECEITA = [
     "Beneficio", "Presentes", "Reembolso", "Outros",
 ]
 
+# Departamentos que APARECEM no raio-x do consumo (LISTA BRANCA). So' faz sentido
+# detalhar item de cupom nesses. Tudo que nao estiver aqui fica fora do raio-x -
+# no cliente E no admin. Editar aqui pra incluir/tirar departamento.
+DEPARTAMENTOS_RAIOX = {"Mercado", "Saude", "Restaurante", "Pet"}
+
 
 def categorias_de(tipo: Tipo) -> list[str]:
     return CATEGORIAS_DESPESA if Tipo(tipo) == Tipo.DESPESA else CATEGORIAS_RECEITA

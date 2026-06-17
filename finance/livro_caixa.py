@@ -290,10 +290,12 @@ class LivroCaixa:
                     from itens_lancamento i join lancamentos l on l.id = i.lancamento_id
                     where {cond} order by l.categoria, l.data desc, i.valor_total_centavos desc""",
                 params).fetchall()
-        from .models import canonizar_categoria
+        from .models import canonizar_categoria, DEPARTAMENTOS_RAIOX
         dep: dict[str, list[dict]] = {}
         for cat, desc, val, data in rows:
             cat_p = canonizar_categoria(cat, "despesa")
+            if cat_p not in DEPARTAMENTOS_RAIOX:
+                continue   # raio-x so' mostra a lista branca (Mercado, Saude, ...)
             dep.setdefault(cat_p, []).append({"descricao": desc, "valor": int(val), "data": data})
         return dep
 

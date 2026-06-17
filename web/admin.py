@@ -171,13 +171,12 @@ _ADMIN_CATEGORIAS = """{% extends "abase" %}{% block conteudo %}
 
 <div class="card"><h2>Raio-x do consumo — itens de cupom (departamentos)</h2>
 <p class="mut">Nível de <b>item de cupom</b> (alimenta o banco de preços), não de lançamento.
-Quem tem itens aparece no raio-x do cliente; "sem itens" = não aparece. Os marcados
-<b>excluído</b> foram tirados de propósito (ex: Contas de casa).</p>
-<table><tr><th>Departamento</th><th>Itens</th><th>Cupons</th><th>Total</th><th>No raio-x?</th></tr>
+Mostra <b>apenas a lista branca</b> (Mercado, Saúde, Restaurante, Pet) que aparece no raio-x do cliente.
+Editar a lista em <b>finance/models.py: DEPARTAMENTOS_RAIOX</b>.</p>
+<table><tr><th>Departamento</th><th>Itens</th><th>Cupons</th><th>Total</th></tr>
 {% for l in raiox %}<tr>
 <td>{{ l.departamento }}</td>
 <td>{{ l.itens }}</td><td class="mut">{{ l.cupons }}</td><td>{{ brl(l.total) }}</td>
-<td>{% if l.excluido %}<span class="tag" style="border-color:#8a5a1c;color:#e0a83d">excluído</span>{% elif l.itens == 0 %}<span class="tag suspensa">sem itens</span>{% else %}<span class="tag ativa">aparece</span>{% endif %}</td>
 </tr>{% endfor %}
 </table></div>
 {% endblock %}"""

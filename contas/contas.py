@@ -249,6 +249,33 @@ def gerar_convite_para(pool, membro_id: int, conta_id: int) -> str | None:
     return codigo
 
 
+def regerar_acesso(pool, membro_id: int, conta_id: int) -> str | None:
+    """Recupera o acesso de QUALQUER membro (inclusive o dono): zera os dois
+    canais (telegram_id E whatsapp_id) e emite um codigo novo, pra reconectar de
+    outro aparelho/numero. Caso 'troquei de celular' / 'perdi o numero'.
+    Retorna o codigo, ou None se o membro nao for desta conta."""
+    import secrets
+    with pool.connection() as conn:
+        m = conn.execute(
+            "select (select nome from contas where id=%s) "
+            "from membros where id=%s and conta_id=%s",
+            (conta_id, membro_id, conta_id),
+        ).fetchone()
+        if not m:
+            return None
+        pref = "".join(ch for ch in (m[0] or "OPEN") if ch.isalnum())[:3].upper() or "OPC"
+        codigo = f"{pref}-{secrets.token_hex(2).upper()}"
+        conn.execute(
+            "update membros set codigo_convite=%s, telegram_id=null, "
+            "whatsapp_id=null, ativo=true where id=%s and conta_id=%s",
+            (codigo, membro_id, conta_id),
+        )
+        conn.commit()
+    registrar_evento(pool, conta_id, "acesso_regerado", f"cod={codigo}",
+                     membro_id=membro_id)
+    return codigo
+
+
 def gerar_convite_dono(pool, conta_id: int) -> str | None:
     """Gera um codigo de convite pro DONO da conta vincular o Telegram dele.
     Diferente de gerar_convite_para (que bloqueia dono), esta e' especifica pro

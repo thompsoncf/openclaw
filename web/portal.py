@@ -279,10 +279,10 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
 {% if not m[2] and not m[6] %}<span class="mut">sem contato</span>{% endif %}
 {% endif %}
 </div>
-{% if m[1] != 'dono' %}
 <div class="membro-acoes">
-<form method="post" action="/membros/convite"><input type="hidden" name="membro_id" value="{{ m[4] }}">
-<button class="btn-conv">↻ convite</button></form>
+<form method="post" action="/membros/reconectar"><input type="hidden" name="membro_id" value="{{ m[4] }}">
+<button class="btn-conv">↻ Reconectar</button></form>
+{% if m[1] != 'dono' %}
 {% if m[3] %}
 <form method="post" action="/membros/desativar"><input type="hidden" name="membro_id" value="{{ m[4] }}">
 <button class="btn-off">desativar</button></form>
@@ -290,8 +290,8 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
 <form method="post" action="/membros/reativar"><input type="hidden" name="membro_id" value="{{ m[4] }}">
 <button class="btn-on">reativar</button></form>
 {% endif %}
+{% else %}<span class="mut" style="font-size:.85rem">titular</span>{% endif %}
 </div>
-{% else %}<div class="membro-acoes mut" style="align-self:center">titular</div>{% endif %}
 </div>
 {% endfor %}
 </div>
@@ -1306,6 +1306,21 @@ def membros_convite(request: Request, membro_id: int = Form(...)):
             f"ClawIAOpen no Telegram e enviar esse código.")
     else:
         request.session["erro"] = "Não foi possível gerar o convite para essa pessoa."
+    return RedirectResponse("/painel", status_code=303)
+
+
+@router.post("/membros/reconectar")
+def membros_reconectar(request: Request, membro_id: int = Form(...)):
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    codigo = ct.regerar_acesso(get_pool(), membro_id, conta[0])
+    if codigo:
+        request.session["aviso"] = (
+            f"Código de reconexão gerado: {codigo} — mande este código pro bot "
+            f"no Telegram ou WhatsApp do número novo. Pronto, você conecta!")
+    else:
+        request.session["erro"] = "Não foi possível gerar o código de reconexão."
     return RedirectResponse("/painel", status_code=303)
 
 

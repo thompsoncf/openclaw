@@ -131,6 +131,24 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
             pass  # trava falha gracefully, segue o fluxo normal
 
     agente = _agente_do(membro, conta)
+    # Se lemos uma chave (na trava anterior), passa pro livro pra que tools a usem
+    chave_nfce = None
+    if imagem_b64:
+        try:
+            import base64
+            dados = base64.b64decode(imagem_b64)
+            from finance.nfce_qr import ler_chave_da_imagem
+            chave_nfce = ler_chave_da_imagem(dados) if media_type.startswith("image/") else None
+            if media_type == "application/pdf":
+                try:
+                    from finance.nfce_qr import ler_chave
+                    chave_nfce = ler_chave(dados, media_type)
+                except Exception:  # noqa: BLE001
+                    chave_nfce = None
+            if chave_nfce:
+                agente.livro.chave_nfce_atual = chave_nfce
+        except Exception:  # noqa: BLE001
+            pass
     # O agente e' sincrono (rede + LLM): roda fora do event loop pra nao travar o bot.
     resposta = await asyncio.to_thread(agente.responder, texto, imagem_b64, media_type)
     resposta = resposta or "(sem resposta)"

@@ -87,6 +87,7 @@ class LivroCaixa:
         self.pool = pool
         self.conta_id = conta_id
         self.membro_id = membro_id
+        self.chave_nfce_atual = None  # webhook pode setar isso pra que tools usem
 
     def lancamento_por_chave(self, chave: str | None) -> dict | None:
         """Consulta se ja' existe lancamento nesta conta com essa chave (NFC-e).
@@ -105,6 +106,8 @@ class LivroCaixa:
         return {"id": row[0], "data": row[1], "valor": int(row[2]), "descricao": row[3]}
 
     def adicionar(self, lanc: Lancamento, chave: str | None = None) -> Lancamento:
+        # usa chave explícita, ou chave_nfce_atual se tiver sido setada pelo webhook
+        chave_final = chave or self.chave_nfce_atual
         with self.pool.connection() as conn:
             row = conn.execute(
                 """insert into lancamentos
@@ -113,7 +116,7 @@ class LivroCaixa:
                    values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
                 (self.conta_id, self.membro_id, lanc.tipo.value, lanc.valor_centavos,
                  lanc.categoria, lanc.descricao, lanc.data, lanc.pagamento,
-                 lanc.origem, lanc.comprovante, chave),
+                 lanc.origem, lanc.comprovante, chave_final),
             ).fetchone()
             conn.commit()
             lanc.id = row[0]

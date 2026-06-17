@@ -229,7 +229,11 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
             elif ctype.startswith("audio/") and _transcritor:
                 texto = _transcritor.transcrever(dados, "audio.ogg")
 
-        resposta = _agente_do(membro, conta).responder(texto, imagem_b64, media_type)
+        agente = _agente_do(membro, conta)
+        # Se lemos uma chave, passa pro livro pra que tools a usem ao gravar lançamento
+        if chave_nfce:
+            agente.livro.chave_nfce_atual = chave_nfce
+        resposta = agente.responder(texto, imagem_b64, media_type)
         if dica_qr:
             resposta = (resposta or "") + DICA_QR_WPP
         _responder_whatsapp(to, resposta)

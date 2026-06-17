@@ -534,19 +534,28 @@ class LivroCaixa:
         regiao = " / ".join(p for p in (cidade, mercado) if p) or None
         # identifica a LOJA pelo CNPJ (do QR/cupom) - diferencia filiais do grupo
         loja_id = None
-        if loja_info:
+        li = loja_info or {}
+        cnpj = "".join(c for c in (li.get("cnpj") or "") if c.isdigit())
+        # fallback: CNPJ embutido na chave do QR (posicoes 7-20), ja' lida na trava
+        # de duplicidade. Garante a loja mesmo quando o agente nao leu o cabecalho.
+        if len(cnpj) != 14:
+            ch = "".join(c for c in str(getattr(self, "chave_nfce_atual", "") or "")
+                         if c.isdigit())
+            if len(ch) == 44:
+                cnpj = ch[6:20]
+        if len(cnpj) == 14:
             try:
                 # extrai UF da cidade se vier "Teresina-PI"
                 uf = None
                 if cidade and "-" in cidade:
                     uf = cidade.rsplit("-", 1)[-1].strip().upper()[:2]
                 loja_id = self._achar_ou_criar_loja(
-                    conn, loja_info.get("cnpj"),
-                    loja_info.get("nome") or mercado,
-                    loja_info.get("endereco"), cidade, uf,
+                    conn, cnpj,
+                    li.get("nome") or mercado,
+                    li.get("endereco"), cidade, uf,
                     ramo_reserva=ramo_por_categoria(categoria))
             except Exception:  # noqa: BLE001
-                _log.exception("falha ao achar/criar loja (cnpj=%s)", loja_info.get("cnpj"))
+                _log.exception("falha ao achar/criar loja (cnpj=%s)", cnpj)
                 loja_id = None
         # le os itens recem-salvos desse lancamento (com id, valor unitario e unidade)
         itens = conn.execute(

@@ -94,13 +94,16 @@ class BancoPrecos:
     # ---------- consulta de preco de UM item ----------
 
     def precos_de(self, descricao: str, regiao: str | None = None,
-                  dias: int = 90) -> list[dict]:
+                  dias: int = 90, so_com_endereco: bool = False) -> list[dict]:
         """Precos recentes que casam com a descricao (por nucleo normalizado),
         agrupados por mercado (o mais recente de cada). Ordenado do mais barato.
 
         ESCALA: le' primeiro da tabela agregada precos_vigentes (mediana por
         produto+loja - rapido e robusto a outlier). Se vigentes estiver vazia
         (ex: manutencao ainda nao rodou), cai pro fallback nas observacoes brutas.
+
+        so_com_endereco=True: descarta precos sem loja com endereco (texto livre
+        sem CNPJ) - usado pela lista de compras, onde so' vale loja que da' pra ir.
         """
         nucleo = normalizar(descricao)
         if not nucleo:
@@ -108,10 +111,11 @@ class BancoPrecos:
         primeira = nucleo.split()[0]  # ancora a busca na 1a palavra significativa
         # 1) tenta a tabela agregada (vigentes)
         vig = self._precos_de_vigentes(descricao, primeira, regiao)
-        if vig:
-            return vig
         # 2) fallback: observacoes brutas (comportamento antigo, sempre funciona)
-        return self._precos_de_brutos(descricao, primeira, regiao, dias)
+        res = vig if vig else self._precos_de_brutos(descricao, primeira, regiao, dias)
+        if so_com_endereco:
+            res = [p for p in res if p.get("endereco")]
+        return res
 
     def _precos_de_vigentes(self, descricao: str, primeira: str,
                             regiao: str | None) -> list[dict]:
@@ -216,7 +220,7 @@ class BancoPrecos:
         total_obs = 0
 
         for desc in itens:
-            precos = self.precos_de(desc, regiao=regiao, dias=dias)
+            precos = self.precos_de(desc, regiao=regiao, dias=dias, so_com_endereco=True)
             total_obs += len(precos)
             if precos:
                 melhor = precos[0]

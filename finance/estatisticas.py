@@ -129,13 +129,15 @@ def estatisticas_precos(pool) -> dict:
         except Exception:  # noqa: BLE001
             tot_cupons = 0
         mais = conn.execute(
-            """select coalesce(nullif(mercado,''), regiao, '-') as loja,
-                      min(descricao_original) as produto,
-                      valor_unitario_centavos as preco, data_compra, count(*) as vezes
-               from precos_observados
-               group by coalesce(nullif(mercado,''), regiao, '-'),
-                        descricao_norm, valor_unitario_centavos, data_compra
-               order by vezes desc, data_compra desc
+            """select coalesce(l.nome, nullif(po.mercado,''), po.regiao, '-') as loja,
+                      min(po.descricao_original) as produto,
+                      po.valor_unitario_centavos as preco, po.data_compra,
+                      count(*) as vezes
+               from precos_observados po
+               left join lojas l on l.id = po.loja_id
+               group by coalesce(l.nome, nullif(po.mercado,''), po.regiao, '-'),
+                        po.descricao_norm, po.valor_unitario_centavos, po.data_compra
+               order by vezes desc, po.data_compra desc
                limit 60"""
         ).fetchall()
         top_prod = conn.execute(
@@ -144,10 +146,11 @@ def estatisticas_precos(pool) -> dict:
                order by count(*) desc limit 15"""
         ).fetchall()
         top_lojas = conn.execute(
-            """select coalesce(nullif(mercado,''), regiao, '-'), count(*),
-                      count(distinct descricao_norm)
-               from precos_observados
-               group by coalesce(nullif(mercado,''), regiao, '-')
+            """select coalesce(l.nome, nullif(po.mercado,''), po.regiao, '-'),
+                      count(*), count(distinct po.descricao_norm)
+               from precos_observados po
+               left join lojas l on l.id = po.loja_id
+               group by coalesce(l.nome, nullif(po.mercado,''), po.regiao, '-')
                order by count(*) desc limit 15"""
         ).fetchall()
     return {

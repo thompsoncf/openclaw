@@ -118,7 +118,8 @@ class BancoPrecos:
         """Le da tabela agregada precos_vigentes (mediana por produto+loja)."""
         sql = """select v.mercado, v.valor_mediana_centavos, v.descricao_exemplo,
                         v.data_mais_recente, v.descricao_norm,
-                        l.endereco, l.cidade, l.uf, v.unidade, v.n_observacoes
+                        l.endereco, l.cidade, l.uf, v.unidade, v.n_observacoes,
+                        l.nome, v.loja_id
                  from precos_vigentes v
                  left join lojas l on l.id = v.loja_id
                  where v.descricao_norm like %s"""
@@ -133,18 +134,24 @@ class BancoPrecos:
             return []
         alvo = tokens(descricao)
         achados = []
-        for merc, vu, orig, dt, norm, endereco, l_cidade, l_uf, unidade, nobs in rows:
+        for (merc, vu, orig, dt, norm, endereco, l_cidade, l_uf, unidade, nobs,
+             l_nome, loja_id) in rows:
             comuns = alvo & set(norm.split())
             if not alvo or len(comuns) >= max(1, len(alvo) // 2):
                 partes_end = [p for p in [endereco,
                               f"{l_cidade}/{l_uf}" if l_cidade and l_uf else None] if p]
-                achados.append({"mercado": merc or "(sem nome)", "valor_centavos": int(vu),
+                # nome canonico da loja (por CNPJ) tem prioridade sobre o texto livre
+                nome_loja = l_nome or merc or "(sem nome)"
+                # dedup pela loja REAL (loja_id) quando existe; senao pelo texto
+                chave_loja = f"id:{loja_id}" if loja_id else f"txt:{nome_loja}"
+                achados.append({"mercado": nome_loja, "_chave": chave_loja,
+                                "valor_centavos": int(vu),
                                 "descricao": orig, "data": dt,
                                 "unidade": unidade or "UN", "n_observacoes": int(nobs or 1),
                                 "endereco": ", ".join(partes_end) or None})
         por_mercado: dict[str, dict] = {}
         for a in achados:
-            por_mercado.setdefault(a["mercado"], a)
+            por_mercado.setdefault(a.pop("_chave"), a)
         return sorted(por_mercado.values(), key=lambda x: x["valor_centavos"])
 
     def _precos_de_brutos(self, descricao: str, primeira: str,
@@ -153,7 +160,8 @@ class BancoPrecos:
         corte = date.today() - timedelta(days=dias)
         sql = """select po.mercado, po.valor_unitario_centavos, po.descricao_original,
                         po.data_compra, po.descricao_norm,
-                        l.endereco, l.cidade, l.uf, po.unidade
+                        l.endereco, l.cidade, l.uf, po.unidade,
+                        l.nome, po.loja_id
                  from precos_observados po
                  left join lojas l on l.id = po.loja_id
                  where po.descricao_norm like %s and po.data_compra >= %s"""
@@ -167,20 +175,25 @@ class BancoPrecos:
         # filtra por similaridade de tokens (evita casar 'arroz' com 'arroz doce')
         alvo = tokens(descricao)
         achados = []
-        for merc, vu, orig, dt, norm, endereco, l_cidade, l_uf, unidade in rows:
+        for (merc, vu, orig, dt, norm, endereco, l_cidade, l_uf, unidade,
+             l_nome, loja_id) in rows:
             comuns = alvo & set(norm.split())
             if not alvo or len(comuns) >= max(1, len(alvo) // 2):
                 # monta endereco legivel (rua/bairro + cidade/uf), quando houver
                 partes_end = [p for p in [endereco,
                               f"{l_cidade}/{l_uf}" if l_cidade and l_uf else None] if p]
-                achados.append({"mercado": merc or "(sem nome)", "valor_centavos": int(vu),
+                # nome canonico da loja (por CNPJ) tem prioridade sobre o texto livre
+                nome_loja = l_nome or merc or "(sem nome)"
+                chave_loja = f"id:{loja_id}" if loja_id else f"txt:{nome_loja}"
+                achados.append({"mercado": nome_loja, "_chave": chave_loja,
+                                "valor_centavos": int(vu),
                                 "descricao": orig, "data": dt,
                                 "unidade": unidade or "UN",
                                 "endereco": ", ".join(partes_end) or None})
-        # 1 preco por mercado (o mais recente, ja' que vem ordenado desc)
+        # 1 preco por loja (o mais recente, ja' que vem ordenado desc)
         por_mercado: dict[str, dict] = {}
         for a in achados:
-            por_mercado.setdefault(a["mercado"], a)
+            por_mercado.setdefault(a.pop("_chave"), a)
         return sorted(por_mercado.values(), key=lambda x: x["valor_centavos"])
 
     # ---------- comparador de CESTA ----------

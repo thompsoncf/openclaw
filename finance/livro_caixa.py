@@ -491,19 +491,28 @@ class LivroCaixa:
                 vu, qtd, vt, unidade = _validar_item_preco(it)
                 cod = str(it.get("codigo") or "").strip() or None
                 params.append((lancamento_id, it["descricao"], qtd, vu, vt, unidade, cod))
-            LOTE = 100
-            n = 0
-            ids_itens = []
-            for i in range(0, len(params), LOTE):
-                cur = conn.cursor()
-                cur.executemany(
-                    """insert into itens_lancamento
+            _INSERT_ITEM = """insert into itens_lancamento
                        (lancamento_id, descricao, quantidade,
                         valor_unitario_centavos, valor_total_centavos, unidade, codigo)
-                       values (%s,%s,%s,%s,%s,%s,%s)""",
-                    params[i:i + LOTE],
-                )
-                n += len(params[i:i + LOTE])
+                       values (%s,%s,%s,%s,%s,%s,%s)"""
+            n = 0
+            try:
+                # caminho rapido: tenta o lote inteiro de uma vez
+                conn.cursor().executemany(_INSERT_ITEM, params)
+                n = len(params)
+            except Exception:  # noqa: BLE001 - um item torto NAO pode derrubar o cupom
+                conn.rollback()
+                _log.warning("insert de itens em lote falhou (lanc %s); tentando item a item",
+                             lancamento_id)
+                # item a item: salva os bons, pula (e LOGA) o que falhar
+                for row in params:
+                    try:
+                        with conn.transaction():       # savepoint por item
+                            conn.cursor().execute(_INSERT_ITEM, row)
+                        n += 1
+                    except Exception:  # noqa: BLE001
+                        _log.exception("item ignorado (insert falhou) lanc %s: %r",
+                                       lancamento_id, row)
             conn.commit()
             # alimenta o BANCO DE PRECOS (ouro): cada item com valor unitario
             # vira um preco observado, agrupado por cidade+mercado.

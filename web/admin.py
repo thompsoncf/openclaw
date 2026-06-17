@@ -168,6 +168,18 @@ _ADMIN_CATEGORIAS = """{% extends "abase" %}{% block conteudo %}
 <td>{{ l.qtd }}</td><td class="mut">{{ l.pct }}%</td><td>{{ brl(l.total) }}</td>
 </tr>{% endfor %}
 </table></div>
+
+<div class="card"><h2>Raio-x do consumo — itens de cupom (departamentos)</h2>
+<p class="mut">Nível de <b>item de cupom</b> (alimenta o banco de preços), não de lançamento.
+Quem tem itens aparece no raio-x do cliente; "sem itens" = não aparece. Os marcados
+<b>excluído</b> foram tirados de propósito (ex: Contas de casa).</p>
+<table><tr><th>Departamento</th><th>Itens</th><th>Cupons</th><th>Total</th><th>No raio-x?</th></tr>
+{% for l in raiox %}<tr>
+<td>{{ l.departamento }}</td>
+<td>{{ l.itens }}</td><td class="mut">{{ l.cupons }}</td><td>{{ brl(l.total) }}</td>
+<td>{% if l.excluido %}<span class="tag" style="border-color:#8a5a1c;color:#e0a83d">excluído</span>{% elif l.itens == 0 %}<span class="tag suspensa">sem itens</span>{% else %}<span class="tag ativa">aparece</span>{% endif %}</td>
+</tr>{% endfor %}
+</table></div>
 {% endblock %}"""
 
 _env = Environment(loader=DictLoader({"abase": _ADMIN_BASE, "ahome": _ADMIN_HOME, "aqr": _ADMIN_QR, "acat": _ADMIN_CATEGORIAS}),
@@ -238,10 +250,12 @@ def admin_ativar(request: Request, conta_id: int):
 def admin_categorias(request: Request):
     if not _admin(request):
         return _NEGADO
-    from finance.estatisticas import estatisticas_categorias
-    dados = estatisticas_categorias(get_pool())
+    from finance.estatisticas import estatisticas_categorias, estatisticas_raiox
+    pool = get_pool()
+    dados = estatisticas_categorias(pool)
+    raiox = estatisticas_raiox(pool)
     return HTMLResponse(_env.get_template("acat").render(
-        d=dados, aviso=request.session.pop("admin_aviso", None)))
+        d=dados, raiox=raiox, aviso=request.session.pop("admin_aviso", None)))
 
 
 @router.get("/admin/qr", response_class=HTMLResponse)

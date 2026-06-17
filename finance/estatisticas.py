@@ -70,3 +70,46 @@ def estatisticas_categorias(pool) -> dict:
         "total_despesa": sum(l["qtd"] for l in desp),
         "total_receita": sum(l["qtd"] for l in rec),
     }
+
+
+def estatisticas_raiox(pool) -> list[dict]:
+    """Itens de cupom por DEPARTAMENTO, em TODAS as contas (visao admin do raio-x).
+
+    Diferente de estatisticas_categorias: aqui o nivel e' o ITEM de cupom
+    (itens_lancamento), nao o lancamento. Mostra onde ha' dado de cupom (alimenta
+    o banco de precos) e onde nao ha'. Marca os departamentos excluidos do raio-x
+    do cliente. Retorna lista ordenada por nÂº de itens (desc).
+    """
+    from .models import CATEGORIAS_DESPESA
+    try:
+        from .models import DEPARTAMENTOS_FORA_RAIOX
+    except ImportError:
+        DEPARTAMENTOS_FORA_RAIOX = set()
+
+    with pool.connection() as conn:
+        rows = conn.execute(
+            """select l.categoria, count(*) as itens,
+                      count(distinct l.id) as cupons,
+                      coalesce(sum(i.valor_total_centavos), 0) as total
+               from itens_lancamento i join lancamentos l on l.id = i.lancamento_id
+               group by l.categoria"""
+        ).fetchall()
+
+    agg: dict[str, dict] = {}
+    for cat, itens, cupons, total in rows:
+        cat_p = canonizar_categoria(cat, "despesa")
+        a = agg.setdefault(cat_p, {"itens": 0, "cupons": 0, "total": 0})
+        a["itens"] += int(itens)
+        a["cupons"] += int(cupons)
+        a["total"] += int(total)
+
+    linhas = [{"departamento": cat_p, "excluido": cat_p in DEPARTAMENTOS_FORA_RAIOX, **v}
+              for cat_p, v in agg.items()]
+    # departamentos de despesa que NUNCA receberam item (nao aparecem no raio-x)
+    vistas = set(agg.keys())
+    for c in CATEGORIAS_DESPESA:
+        if c not in vistas:
+            linhas.append({"departamento": c, "itens": 0, "cupons": 0, "total": 0,
+                           "excluido": c in DEPARTAMENTOS_FORA_RAIOX})
+    linhas.sort(key=lambda x: x["itens"], reverse=True)
+    return linhas

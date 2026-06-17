@@ -79,7 +79,7 @@ async def start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
 
 
 async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
-                     media_type: str = "image/jpeg", dica_qr: bool = False):
+                     media_type: str = "image/jpeg", dica_qr: bool = False, eh_cupom: bool | None = None):
     achado = ct.membro_por_telegram(_pool, update.effective_user.id)
     if achado is None:
         # talvez seja um CODIGO DE CONVITE (ex: "LAR-7K2M")
@@ -96,9 +96,13 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
     if not ct.acesso_liberado(conta):
         await update.message.reply_text(MSG_SEM_ACESSO)
         return
-    ok, _restante = ct.checar_e_registrar_uso(_pool, conta)
+    # Detecta automaticamente se é cupom (há imagem) se não foi especificado
+    eh_cupom = eh_cupom if eh_cupom is not None else bool(imagem_b64)
+    ok, _restante = ct.checar_e_registrar_uso(_pool, conta, eh_cupom=eh_cupom)
     if not ok:
         await update.message.reply_text(
+            "Voce atingiu o limite de CUPONS de hoje 📷. Pode continuar mandando texto normalmente!"
+            if eh_cupom else
             "Voce atingiu o limite de mensagens de hoje. A gente se fala amanha!"
         )
         return

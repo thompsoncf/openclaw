@@ -23,6 +23,7 @@ class Conta:
     status: str                # trial | ativa | inadimplente | suspensa | cancelada
     vencimento: date | None
     limite_mensagens_dia: int
+    limite_cupons_dia: int
     cidade: str | None = None
 
 
@@ -37,7 +38,7 @@ class Membro:
     ativo: bool
 
 
-_C = "id, tipo, nome, documento, plano, status, vencimento, limite_mensagens_dia, cidade"
+_C = "id, tipo, nome, documento, plano, status, vencimento, limite_mensagens_dia, limite_cupons_dia, cidade"
 _M = "id, conta_id, nome, papel, telegram_id, whatsapp_id, ativo"
 
 
@@ -113,24 +114,29 @@ def marcar_inadimplente(pool, conta_id: int):
 
 # ---------- Protecao de custo (POR CONTA) ----------
 
-def checar_e_registrar_uso(pool, conta: Conta) -> tuple[bool, int]:
-    """Incrementa o uso do dia da CONTA. Retorna (liberado, restante)."""
+def checar_e_registrar_uso(pool, conta: Conta, eh_cupom: bool = False) -> tuple[bool, int]:
+    """Incrementa o uso do dia da CONTA. eh_cupom=True conta no limite SEPARADO de
+    cupons (foto/PDF, ~5x mais caro); senao conta no limite de mensagens de texto.
+    Retorna (liberado, restante) do contador relevante."""
     hoje = date.today()
+    coluna = "cupons" if eh_cupom else "mensagens"
+    limite = conta.limite_cupons_dia if eh_cupom else conta.limite_mensagens_dia
     with pool.connection() as conn:
         row = conn.execute(
-            "select mensagens from uso_diario where conta_id = %s and dia = %s",
+            f"select {coluna} from uso_diario where conta_id = %s and dia = %s",
             (conta.id, hoje),
         ).fetchone()
         usado = row[0] if row else 0
-        if usado >= conta.limite_mensagens_dia:
+        if usado >= limite:
             return False, 0
         conn.execute(
-            """insert into uso_diario (conta_id, dia, mensagens) values (%s,%s,1)
-               on conflict (conta_id, dia) do update set mensagens = uso_diario.mensagens + 1""",
+            f"""insert into uso_diario (conta_id, dia, {coluna}) values (%s,%s,1)
+               on conflict (conta_id, dia) do update
+                 set {coluna} = uso_diario.{coluna} + 1""",
             (conta.id, hoje),
         )
         conn.commit()
-    return True, conta.limite_mensagens_dia - (usado + 1)
+    return True, limite - (usado + 1)
 
 
 # ---------- Auditoria ----------

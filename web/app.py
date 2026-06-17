@@ -170,9 +170,14 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
             _responder_whatsapp(to, "Seu acesso esta suspenso (pagamento pendente). "
                                     "Assim que o pagamento for confirmado, voce volta a usar.")
             return
-        ok, _restante = ct.checar_e_registrar_uso(pool, conta)
+        # Detecta se há mídia (cupom) vs apenas texto
+        eh_cupom = bool(int(form.get("NumMedia", "0") or 0) > 0)
+        ok, _restante = ct.checar_e_registrar_uso(pool, conta, eh_cupom=eh_cupom)
         if not ok:
-            _responder_whatsapp(to, "Voce atingiu o limite de mensagens de hoje. A gente se fala amanha!")
+            _responder_whatsapp(to,
+                "Voce atingiu o limite de CUPONS de hoje 📷. Pode seguir mandando texto!"
+                if eh_cupom else
+                "Voce atingiu o limite de mensagens de hoje. A gente se fala amanha!")
             return
 
         texto = body or ""

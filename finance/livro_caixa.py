@@ -183,8 +183,17 @@ class LivroCaixa:
         return {"saldo": int(saldo), "receitas": int(rec), "despesas": int(desp)}
 
     def despesas_por_categoria(self, ano: int, mes: int, membro_id: int | None = None) -> list[tuple[str, int]]:
-        cond = "conta_id = %s and tipo='despesa'"
-        params: list = [self.conta_id]
+        return self._por_categoria("despesa", ano, mes, membro_id)
+
+    def receitas_por_categoria(self, ano: int, mes: int, membro_id: int | None = None) -> list[tuple[str, int]]:
+        return self._por_categoria("receita", ano, mes, membro_id)
+
+    def _por_categoria(self, tipo: str, ano: int, mes: int,
+                       membro_id: int | None = None) -> list[tuple[str, int]]:
+        """Soma os lancamentos do tipo por categoria CANONICA (junta variacoes de
+        grafia, ex Saude/Saude). Serve pra despesa e receita."""
+        cond = "conta_id = %s and tipo=%s"
+        params: list = [self.conta_id, tipo]
         if membro_id is not None:
             cond += " and membro_id = %s"; params.append(membro_id)
         ini, prox = _intervalo_mes(ano, mes)
@@ -197,9 +206,28 @@ class LivroCaixa:
         from .models import canonizar_categoria
         agg: dict[str, int] = {}
         for r in rows:
-            cat = canonizar_categoria(r[0], "despesa")
+            cat = canonizar_categoria(r[0], tipo)
             agg[cat] = agg.get(cat, 0) + int(r[1])
         return sorted(agg.items(), key=lambda kv: kv[1], reverse=True)
+
+    def mudar_categoria(self, lancamento_id: int, nova_categoria: str) -> bool:
+        """Troca a categoria de UM lancamento (cliente corrigindo classificacao
+        errada). Canoniza a nova categoria (so' aceita as padrao). So' mexe em
+        lancamento DESTA conta (seguranca multi-tenant). Retorna True se mudou."""
+        from .models import canonizar_categoria
+        with self.pool.connection() as conn:
+            row = conn.execute(
+                "select tipo from lancamentos where id = %s and conta_id = %s",
+                (lancamento_id, self.conta_id)).fetchone()
+            if not row:
+                return False   # nao existe ou nao e' desta conta
+            tipo = row[0]
+            cat = canonizar_categoria(nova_categoria, tipo)
+            conn.execute(
+                "update lancamentos set categoria = %s where id = %s and conta_id = %s",
+                (cat, lancamento_id, self.conta_id))
+            conn.commit()
+        return True
 
     def evolucao_mensal(self, meses: int = 6, membro_id: int | None = None) -> list[dict]:
         """Receitas e despesas dos ultimos N meses (pra grafico de tendencia)."""
@@ -228,13 +256,13 @@ class LivroCaixa:
             cond += " and l.tipo = %s"; params.append(tipo)
         with self.pool.connection() as conn:
             rows = conn.execute(
-                f"""select l.data, l.descricao, l.categoria, l.tipo, l.valor_centavos,
+                f"""select l.id, l.data, l.descricao, l.categoria, l.tipo, l.valor_centavos,
                           l.origem, coalesce(m.nome, '-') as quem
                     from lancamentos l left join membros m on m.id = l.membro_id
                     where {cond} order by l.data desc, l.id desc limit %s""",
                 params + [limite]).fetchall()
-        return [{"data": r[0], "descricao": r[1], "categoria": r[2], "tipo": r[3],
-                 "valor": int(r[4]), "origem": r[5], "quem": r[6]} for r in rows]
+        return [{"id": r[0], "data": r[1], "descricao": r[2], "categoria": r[3], "tipo": r[4],
+                 "valor": int(r[5]), "origem": r[6], "quem": r[7]} for r in rows]
 
     def raiox_por_departamento(self, ano: int | None = None, mes: int | None = None,
                                membro_id: int | None = None,

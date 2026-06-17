@@ -71,7 +71,7 @@ button.danger{background:#6e2b2b}button.danger:hover{background:#8a3636}
 form.inline{display:inline;margin:0}
 </style></head><body>
 <div class="topo"><span class="logo">OpenClaw <span>· admin</span></span>
-<span><a href="/admin">Contas</a><a href="/admin/qr">QR notas</a><a href="/admin/precos">Preços</a><a href="/painel">Meu painel</a><a href="/sair">Sair</a></span></div>
+<span><a href="/admin">Contas</a><a href="/admin/qr">QR notas</a><a href="/admin/precos">Preços</a><a href="/admin/categorias">Categorias</a><a href="/painel">Meu painel</a><a href="/sair">Sair</a></span></div>
 <div class="wrap">{% block conteudo %}{% endblock %}</div>
 </body></html>"""
 
@@ -140,7 +140,37 @@ _ADMIN_QR = """{% extends "abase" %}{% block conteudo %}
 </div>
 {% endblock %}"""
 
-_env = Environment(loader=DictLoader({"abase": _ADMIN_BASE, "ahome": _ADMIN_HOME, "aqr": _ADMIN_QR}),
+_ADMIN_CATEGORIAS = """{% extends "abase" %}{% block conteudo %}
+<h1>Categorias — uso real</h1>
+<p class="mut">Visão de TODAS as contas. Use pra decidir o que criar ou remover na lista oficial
+(finance/models.py). Muita coisa em <b>"Outros"</b> = falta categoria. Categoria com <b>0 uso</b> = candidata a remover.</p>
+<div class="cards">
+<div class="metric"><span>Lançamentos de despesa</span><b>{{ d.total_despesa }}</b></div>
+<div class="metric" style="{% if d.pct_outros_despesa >= 15 %}border-color:#8a5a1c{% endif %}">
+  <span>% em "Outros" (despesa)</span><b style="{% if d.pct_outros_despesa >= 15 %}color:#e0a83d{% endif %}">{{ d.pct_outros_despesa }}%</b></div>
+<div class="metric"><span>Lançamentos de receita</span><b>{{ d.total_receita }}</b></div>
+<div class="metric" style="{% if d.pct_outros_receita >= 15 %}border-color:#8a5a1c{% endif %}">
+  <span>% em "Outros" (receita)</span><b style="{% if d.pct_outros_receita >= 15 %}color:#e0a83d{% endif %}">{{ d.pct_outros_receita }}%</b></div>
+</div>
+
+<div class="card"><h2>Despesa</h2>
+<table><tr><th>Categoria</th><th>Lançamentos</th><th>%</th><th>Total</th></tr>
+{% for l in d.despesa %}<tr>
+<td>{{ l.categoria }}{% if l.qtd == 0 %} <span class="tag suspensa">sem uso</span>{% elif l.categoria == 'Outros' and l.pct >= 15 %} <span class="tag" style="border-color:#8a5a1c;color:#e0a83d">revisar</span>{% endif %}</td>
+<td>{{ l.qtd }}</td><td class="mut">{{ l.pct }}%</td><td>{{ brl(l.total) }}</td>
+</tr>{% endfor %}
+</table></div>
+
+<div class="card"><h2>Receita</h2>
+<table><tr><th>Categoria</th><th>Lançamentos</th><th>%</th><th>Total</th></tr>
+{% for l in d.receita %}<tr>
+<td>{{ l.categoria }}{% if l.qtd == 0 %} <span class="tag suspensa">sem uso</span>{% elif l.categoria == 'Outros' and l.pct >= 15 %} <span class="tag" style="border-color:#8a5a1c;color:#e0a83d">revisar</span>{% endif %}</td>
+<td>{{ l.qtd }}</td><td class="mut">{{ l.pct }}%</td><td>{{ brl(l.total) }}</td>
+</tr>{% endfor %}
+</table></div>
+{% endblock %}"""
+
+_env = Environment(loader=DictLoader({"abase": _ADMIN_BASE, "ahome": _ADMIN_HOME, "aqr": _ADMIN_QR, "acat": _ADMIN_CATEGORIAS}),
                    autoescape=select_autoescape())
 _env.globals["brl"] = brl
 
@@ -202,6 +232,16 @@ def admin_ativar(request: Request, conta_id: int):
     ct.registrar_evento(pool, conta_id, "admin_ativou", f"por admin {adm[0]}")
     request.session["admin_aviso"] = f"Conta {conta_id} ativada por mais 30 dias."
     return RedirectResponse("/admin", status_code=303)
+
+
+@router.get("/admin/categorias", response_class=HTMLResponse)
+def admin_categorias(request: Request):
+    if not _admin(request):
+        return _NEGADO
+    from finance.estatisticas import estatisticas_categorias
+    dados = estatisticas_categorias(get_pool())
+    return HTMLResponse(_env.get_template("acat").render(
+        d=dados, aviso=request.session.pop("admin_aviso", None)))
 
 
 @router.get("/admin/qr", response_class=HTMLResponse)

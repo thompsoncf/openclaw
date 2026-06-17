@@ -354,8 +354,13 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 
 <h1 style="font-size:1.05rem">Despesas por categoria</h1>
 {% if categorias %}{% for cat,val in categorias %}
-<div style="display:flex; justify-content:space-between; font-size:.9rem; margin:.4rem 0 .2rem"><span>{{ cat }}</span><b>{{ brl(val) }}</b></div>
-<div class="barra"><div class="barra-fill" style="width:{{ (val*100//maior_cat) if maior_cat else 0 }}%"></div></div>
+<div class="cat-linha" onclick="abrirCat(this)" data-cat="{{ cat }}" style="cursor:pointer">
+  <div style="display:flex; justify-content:space-between; font-size:.9rem; margin:.4rem 0 .2rem">
+    <span><span class="seta">▸</span> {{ cat }}</span><b>{{ brl(val) }}</b>
+  </div>
+  <div class="barra"><div class="barra-fill" style="width:{{ (val*100//maior_cat) if maior_cat else 0 }}%"></div></div>
+</div>
+<div class="cat-lancamentos" style="display:none; padding:.2rem 0 .6rem 1.2rem"></div>
 {% endfor %}{% else %}<p class="mut">Sem despesas neste mês.</p>{% endif %}
 
 <h1 style="font-size:1.05rem; margin-top:1.6rem">Lançamentos</h1>
@@ -374,7 +379,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 </div>
 <div class="dep-corpo" style="flex-direction:column; gap:0">
 <table style="margin:0">
-{% for l in dia.itens %}<tr data-tipo="{{ l.tipo }}">
+{% for l in dia.itens %}<tr data-tipo="{{ l.tipo }}" data-cat="{{ canon(l.categoria) }}" data-desc="{{ l.descricao }}" data-valor="{{ brl(l.valor) }}">
 <td>{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}</td>
 <td><span class="tag">{{ l.categoria }}</span></td>
 {% if pessoas|length > 1 %}<td class="mut">{{ l.quem }}</td>{% endif %}
@@ -439,6 +444,28 @@ function abrirDep(cab){
   var dep = cab.parentElement;
   dep.classList.toggle('aberto');
   cab.querySelector('.seta').textContent = dep.classList.contains('aberto') ? '▾' : '▸';
+}
+function abrirCat(el){
+  var box = el.nextElementSibling;            // .cat-lancamentos
+  var seta = el.querySelector('.seta');
+  var jaAberto = box.style.display !== 'none';
+  // fecha todas
+  document.querySelectorAll('.cat-lancamentos').forEach(function(b){ b.style.display='none'; });
+  document.querySelectorAll('.cat-linha .seta').forEach(function(s){ s.textContent='▸'; });
+  if(jaAberto){ return; }
+  var cat = el.getAttribute('data-cat');       // categoria canônica de cima
+  // pega TODAS as linhas de lançamento da página com a mesma categoria canônica
+  var linhas = document.querySelectorAll('#lista-dias tr[data-cat="'+cat+'"]');
+  var html = '';
+  linhas.forEach(function(tr){
+    if(tr.getAttribute('data-tipo') !== 'despesa') return;   // só despesas
+    html += '<div style="display:flex;justify-content:space-between;font-size:.85rem;margin:.25rem 0">'
+          + '<span>'+ tr.getAttribute('data-desc') +'</span>'
+          + '<span class="mut">'+ tr.getAttribute('data-valor') +'</span></div>';
+  });
+  box.innerHTML = html || '<span class="mut" style="font-size:.85rem">Sem lançamentos detalhados deste mês.</span>';
+  box.style.display = 'block';
+  seta.textContent = '▾';
 }
 function copiarConvite(btn, url){
   navigator.clipboard.writeText(url).then(function(){
@@ -713,6 +740,8 @@ _env = Environment(loader=DictLoader({
     "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
+from finance.models import canonizar_categoria
+_env.globals["canon"] = lambda c: canonizar_categoria(c, "despesa")
 from finance import cidades as _cidades_mod
 _env.globals["cidades"] = _cidades_mod.opcoes()
 

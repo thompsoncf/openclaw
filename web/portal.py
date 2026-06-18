@@ -5,6 +5,7 @@ APENAS a conta da sessao (isolamento multi-tenant na camada web).
 Senhas: hash scrypt (stdlib) com sal aleatorio - nunca em texto puro.
 """
 import hashlib
+import logging
 import os
 import secrets
 
@@ -13,6 +14,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from jinja2 import Environment, DictLoader, select_autoescape
 
 from datetime import date
+
+log = logging.getLogger("zaq.portal")
 
 from db.conexao import get_pool
 from contas import contas as ct

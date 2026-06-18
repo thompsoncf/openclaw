@@ -110,8 +110,19 @@ class Agente:
         schemas = [f.schema() for f in self.ferramentas.values()]
         houve_ferramenta = False
 
+        # Escolha de modelo por economia: interacao COM imagem (cupom/PDF) usa o
+        # modelo forte (visao precisa de Sonnet); texto puro usa o modelo barato
+        # (Haiku da' conta de gasto digitado, saldo, conversa). Texto e' a maioria
+        # das mensagens, entao isso corta bastante o custo sem arriscar a leitura
+        # de cupom. Strings configuraveis por env (fallback nos padroes).
+        import os as _os
+        _modelo_forte = _os.environ.get("MODELO_FOTO", "claude-sonnet-4-6")
+        _modelo_barato = _os.environ.get("MODELO_TEXTO", "claude-haiku-4-5-20251001")
+        _modelo_turno = _modelo_forte if imagem_b64 else _modelo_barato
+
         for _ in range(self.max_iteracoes):
-            resp = self.brain.chamar(self.persona, self.memoria.mensagens(), schemas)
+            resp = self.brain.chamar(self.persona, self.memoria.mensagens(), schemas,
+                                     model=_modelo_turno)
             _u = getattr(resp, "usage", None)
             if _u is not None:
                 import logging
@@ -122,9 +133,15 @@ class Agente:
                 # origem: de qual conta veio esse gasto (pra rastrear o dreno).
                 # o livro carrega conta_id; degustacao = conta tecnica de visitante.
                 _conta = getattr(getattr(self, "livro", None), "conta_id", "?")
-                # custo estimado em R$ (Sonnet 4.6; cambio aproximado 5.40).
-                # in 3 / cache_write 3.75 / cache_read 0.30 / out 15 (US$/milhao)
-                _usd = (_in*3.0 + _cw*3.75 + _cr*0.30 + _out*15.0) / 1_000_000
+                # custo estimado em R$ pelo preco do MODELO usado neste turno
+                # (Sonnet na foto, Haiku no texto). US$/milhao de tokens:
+                #   Sonnet 4.6: in 3 / cache_write 3.75 / cache_read 0.30 / out 15
+                #   Haiku 4.5:  in 1 / cache_write 1.25 / cache_read 0.10 / out 5
+                if imagem_b64:
+                    _p_in, _p_cw, _p_cr, _p_out = 3.0, 3.75, 0.30, 15.0
+                else:
+                    _p_in, _p_cw, _p_cr, _p_out = 1.0, 1.25, 0.10, 5.0
+                _usd = (_in*_p_in + _cw*_p_cw + _cr*_p_cr + _out*_p_out) / 1_000_000
                 _brl = _usd * 5.40
                 logging.getLogger("openclaw.custo").info(
                     "TOKENS conta=%s in=%s cache_read=%s cache_write=%s out=%s ~R$%.4f",

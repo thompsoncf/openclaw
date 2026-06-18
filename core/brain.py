@@ -24,9 +24,15 @@ class Brain:
         self.usar_cache = usar_cache
         self.ultimo_uso = None   # guarda o usage da ultima chamada (pra medir economia)
 
-    def chamar(self, system: str, mensagens: list, ferramentas: list | None = None):
-        """Faz uma chamada ao modelo. Retorna o objeto de resposta da SDK."""
+    def chamar(self, system: str, mensagens: list, ferramentas: list | None = None,
+               model: str | None = None):
+        """Faz uma chamada ao modelo. Retorna o objeto de resposta da SDK.
+
+        model: se informado, sobrescreve self.model SO' nesta chamada (ex: usar
+        Haiku no texto e Sonnet na foto). Se None, usa self.model (padrao).
+        """
         ferramentas = ferramentas or []
+        _model = model or self.model
         if self.usar_cache:
             # system vira lista de bloco(s) com cache_control no ultimo (marca o
             # fim do prefixo estavel: persona). As ferramentas, sendo parte do
@@ -41,7 +47,7 @@ class Brain:
             tools_cache = self._tools_com_cache(ferramentas)
             mensagens = self._marcar_cache_imagem(mensagens)
             resp = self.client.messages.create(
-                model=self.model,
+                model=_model,
                 system=system_blocos,
                 messages=mensagens,
                 tools=tools_cache,
@@ -49,7 +55,7 @@ class Brain:
             )
         else:
             resp = self.client.messages.create(
-                model=self.model,
+                model=_model,
                 system=system,
                 messages=mensagens,
                 tools=ferramentas,

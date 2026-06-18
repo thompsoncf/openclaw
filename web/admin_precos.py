@@ -1,7 +1,7 @@
 """Tela ADM do banco de precos (o ouro), pensada pra ESCALA (10k-100k+ precos).
 
 - Tabela AGREGADA POR PRODUTO (1 linha/produto: menor preco, loja mais barata,
-  nº de lojas), nao lista crua - escala muito melhor.
+  nÂº de lojas), nao lista crua - escala muito melhor.
 - Filtros SEM REFRESH (AJAX): seletor de departamento (ramo) + busca por produto.
 - Paginacao no servidor (so' devolve a pagina pedida).
 
@@ -26,11 +26,25 @@ router = APIRouter()
 _POR_PAGINA = 50
 
 
+def _usar_vigentes(c) -> bool:
+    """True quando NAO ha observacoes cruas (ex: so' restaram os vigentes agregados).
+    Nesse caso, todas as leituras do painel passam a usar precos_vigentes."""
+    return c.execute("select count(*) from precos_observados").fetchone()[0] == 0
+
+
 def _resumo(c):
+    n_lojas = c.execute("select count(*) from lojas").fetchone()[0]
+    if _usar_vigentes(c):
+        total = c.execute("select count(*) from precos_vigentes").fetchone()[0]
+        produtos = c.execute(
+            "select count(distinct descricao_norm) from precos_vigentes").fetchone()[0]
+        # 'via cupom' nao existe em vigentes (agregado); usamos n_observacoes total
+        cupom = c.execute(
+            "select coalesce(sum(n_observacoes),0) from precos_vigentes").fetchone()[0]
+        return {"total": total, "produtos": produtos, "lojas": n_lojas, "cupom": cupom}
     total = c.execute("select count(*) from precos_observados").fetchone()[0]
     produtos = c.execute(
         "select count(distinct descricao_norm) from precos_observados").fetchone()[0]
-    n_lojas = c.execute("select count(*) from lojas").fetchone()[0]
     cupom = c.execute(
         "select count(*) from precos_observados where fonte='cupom'").fetchone()[0]
     return {"total": total, "produtos": produtos, "lojas": n_lojas, "cupom": cupom}
@@ -38,6 +52,13 @@ def _resumo(c):
 
 def _ramos(c):
     """Lista os ramos (departamentos) que existem, pra montar o seletor."""
+    if _usar_vigentes(c):
+        rows = c.execute(
+            """select l.ramo, count(distinct v.descricao_norm)
+               from precos_vigentes v join lojas l on l.id = v.loja_id
+               where l.ramo is not null
+               group by l.ramo order by l.ramo""").fetchall()
+        return [(r[0], r[1]) for r in rows]
     rows = c.execute(
         """select l.ramo, count(distinct po.descricao_norm)
            from precos_observados po join lojas l on l.id = po.loja_id
@@ -46,8 +67,68 @@ def _ramos(c):
     return [(r[0], r[1]) for r in rows]
 
 
+def _agregado_vigentes(c, ramo=None, busca=None, pagina=1):
+    """Versao que le' de precos_vigentes (quando observados esta vazia).
+    Cada linha de vigentes ja' e' 1 produto/loja/regiao com mediana e n_observacoes.
+    Agregamos por descricao_norm: menor mediana, nÂº de lojas, visto mais recente."""
+    where = ["v.valor_mediana_centavos > 0"]
+    args = []
+    if ramo:
+        where.append("l.ramo = %s")
+        args.append(ramo)
+    if busca:
+        where.append("v.descricao_norm like %s")
+        args.append(f"%{busca.lower().strip()}%")
+    w = " and ".join(where)
+    total = c.execute(
+        f"""select count(*) from (
+              select v.descricao_norm from precos_vigentes v
+              left join lojas l on l.id = v.loja_id
+              where {w} group by v.descricao_norm) t""", args).fetchone()[0]
+    offset = max(0, (pagina - 1) * _POR_PAGINA)
+    sql = f"""
+    with agg as (
+      select v.descricao_norm,
+             max(v.descricao_exemplo) as nome,
+             min(v.valor_mediana_centavos) as menor,
+             max(v.valor_mediana_centavos) as maior,
+             count(distinct v.loja_id) as n_lojas,
+             coalesce(sum(v.n_observacoes),0) as n_precos,
+             max(v.data_mais_recente) as visto
+      from precos_vigentes v
+      left join lojas l on l.id = v.loja_id
+      where {w}
+      group by v.descricao_norm
+    )
+    select a.descricao_norm, a.nome, a.menor, a.maior, a.n_lojas, a.n_precos, a.visto,
+      (select coalesce(l2.nome, v2.mercado) from precos_vigentes v2
+       left join lojas l2 on l2.id = v2.loja_id
+       where v2.descricao_norm = a.descricao_norm
+         and v2.valor_mediana_centavos = a.menor
+       order by v2.data_mais_recente desc limit 1) as loja_barata
+    from agg a
+    order by a.nome
+    limit {_POR_PAGINA} offset {offset}
+    """
+    rows = c.execute(sql, args).fetchall()
+    itens = [{
+        "nome": r[1], "menor": r[2], "maior": r[3], "n_lojas": r[4],
+        "n_precos": r[5], "visto": r[6].strftime("%d/%m") if r[6] else "",
+        "loja": r[7] or "-",
+        "menor_brl": brl(r[2]), "maior_brl": brl(r[3]),
+        "varia": r[2] != r[3],
+    } for r in rows]
+    paginas = max(1, (total + _POR_PAGINA - 1) // _POR_PAGINA)
+    return {"itens": itens, "total": total, "pagina": pagina, "paginas": paginas}
+
+
 def _agregado(c, ramo=None, busca=None, pagina=1):
-    """Agrega por produto: menor preco, loja mais barata, nº lojas. Paginado."""
+    """Agrega por produto: menor preco, loja mais barata, nÂº lojas. Paginado.
+
+    Se NAO ha observacoes cruas, le' de precos_vigentes (o agregado consolidado).
+    """
+    if _usar_vigentes(c):
+        return _agregado_vigentes(c, ramo, busca, pagina)
     where = ["po.valor_unitario_centavos > 0"]
     args = []
     if ramo:
@@ -126,10 +207,10 @@ def admin_precos_dados(request: Request, ramo: str = "", busca: str = "", pagina
 
 
 _PRECOS_TPL = """{% extends "abase" %}{% block conteudo %}
-<h1>Banco de preços (o ouro)</h1>
+<h1>Banco de preÃ§os (o ouro)</h1>
 <div class="cards">
-<div class="metric"><span>Preços coletados</span><b>{{ resumo.total }}</b></div>
-<div class="metric"><span>Produtos únicos</span><b style="color:#5dcaa5">{{ resumo.produtos }}</b></div>
+<div class="metric"><span>PreÃ§os coletados</span><b>{{ resumo.total }}</b></div>
+<div class="metric"><span>Produtos Ãºnicos</span><b style="color:#5dcaa5">{{ resumo.produtos }}</b></div>
 <div class="metric"><span>Lojas</span><b>{{ resumo.lojas }}</b></div>
 <div class="metric"><span>Via cupom</span><b>{{ resumo.cupom }}</b></div>
 </div>
@@ -145,14 +226,14 @@ _PRECOS_TPL = """{% extends "abase" %}{% block conteudo %}
   <span id="fcount" class="mut" style="font-size:.85rem"></span>
 </div>
 <table>
-<thead><tr><th>Produto</th><th>Menor preço</th><th>Onde</th><th>Faixa</th><th>Lojas</th><th>Visto</th></tr></thead>
+<thead><tr><th>Produto</th><th>Menor preÃ§o</th><th>Onde</th><th>Faixa</th><th>Lojas</th><th>Visto</th></tr></thead>
 <tbody id="tbody"><tr><td colspan="6" class="mut">Carregando...</td></tr></tbody>
 </table>
 <div id="paginacao" style="display:flex; gap:.5rem; align-items:center; margin-top:.8rem"></div>
 </div>
 
 {% if lojas %}<div class="card"><h2>Lojas cadastradas</h2>
-<table><tr><th>Loja</th><th>Ramo</th><th>CNPJ</th><th>Endereço</th><th>Cidade/UF</th><th>Preços</th></tr>
+<table><tr><th>Loja</th><th>Ramo</th><th>CNPJ</th><th>EndereÃ§o</th><th>Cidade/UF</th><th>PreÃ§os</th></tr>
 {% for l in lojas %}<tr>
 <td>{{ l.nome or '-' }}</td>
 <td>{% if l.ramo %}<span class="tag ativa">{{ l.ramo }}</span>{% else %}<span class="mut">-</span>{% endif %}</td>
@@ -200,8 +281,8 @@ _PRECOS_TPL = """{% extends "abase" %}{% block conteudo %}
       var p = '';
       if(d.paginas > 1){
         p += botao('&laquo; Anterior', pagina > 1, pagina - 1);
-        p += '<span class="mut" style="font-size:.85rem">Página ' + d.pagina + ' de ' + d.paginas + '</span>';
-        p += botao('Próxima &raquo;', pagina < d.paginas, pagina + 1);
+        p += '<span class="mut" style="font-size:.85rem">PÃ¡gina ' + d.pagina + ' de ' + d.paginas + '</span>';
+        p += botao('PrÃ³xima &raquo;', pagina < d.paginas, pagina + 1);
       }
       pag.innerHTML = p;
     }).catch(function(){

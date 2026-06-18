@@ -194,20 +194,31 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
                 texto = body or "Segue o cupom para registrar."
                 _disparar_qr_whatsapp(numero, dados, ctype)
                 dica_qr = True
-                # TRAVA DUPLICIDADE: ler chave de forma síncrona ANTES do agente
+                # TRAVA DUPLICIDADE + REPLICA: ler chave de forma síncrona ANTES do agente
                 try:
                     from finance.nfce_qr import ler_chave_da_imagem
                     chave_nfce = ler_chave_da_imagem(dados)
                     if chave_nfce:
                         from finance.livro_caixa import LivroCaixa
-                        liv = LivroCaixa(pool, conta["id"])
-                        duplicata = liv.lancamento_por_chave(chave_nfce)
-                        if duplicata:
-                            data_str = duplicata["data"].strftime("%d/%m/%Y")
-                            desc = duplicata["descricao"][:50]
-                            _responder_whatsapp(to,
-                                f"✓ Esse cupom ja foi registrado em {data_str} ({desc}...)")
-                            return
+                        liv = LivroCaixa(pool, conta["id"], membro.id)
+                        dup = liv.lancamento_por_chave(chave_nfce, global_=True)
+                        if dup:
+                            if dup["conta_id"] == conta["id"]:
+                                # mesma conta -> ja' registrado
+                                data_str = dup["data"].strftime("%d/%m/%Y")
+                                desc = dup["descricao"][:50]
+                                _responder_whatsapp(to,
+                                    f"✓ Esse cupom ja foi registrado em {data_str} ({desc}...)")
+                                return
+                            # outra conta -> tenta replicar (zero API)
+                            rep = liv.replicar_cupom(chave_nfce)
+                            if rep:
+                                _responder_whatsapp(to,
+                                    f"✓ Esse cupom ja foi lido no sistema. Salvei uma copia na sua "
+                                    f"conta: {rep['descricao']} - R$ {rep['valor']/100:.2f} "
+                                    f"({rep['n_itens']} itens). Nao precisei reler a foto.")
+                                return
+                            # dup existe mas SEM itens (parse falhou) -> cai pro fluxo normal
                 except Exception:  # noqa: BLE001
                     pass  # trava falha gracefully, segue o fluxo normal
             elif "pdf" in ctype:
@@ -215,20 +226,28 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
                 media_type = "application/pdf"
                 texto = body or "Segue o comprovante para registrar."
                 _disparar_qr_whatsapp(numero, dados, "application/pdf")
-                # TRAVA DUPLICIDADE: mesmo pra PDF
+                # TRAVA DUPLICIDADE + REPLICA: mesmo pra PDF
                 try:
                     from finance.nfce_qr import ler_chave_da_imagem
                     chave_nfce = ler_chave_da_imagem(dados)
                     if chave_nfce:
                         from finance.livro_caixa import LivroCaixa
-                        liv = LivroCaixa(pool, conta["id"])
-                        duplicata = liv.lancamento_por_chave(chave_nfce)
-                        if duplicata:
-                            data_str = duplicata["data"].strftime("%d/%m/%Y")
-                            desc = duplicata["descricao"][:50]
-                            _responder_whatsapp(to,
-                                f"✓ Esse cupom ja foi registrado em {data_str} ({desc}...)")
-                            return
+                        liv = LivroCaixa(pool, conta["id"], membro.id)
+                        dup = liv.lancamento_por_chave(chave_nfce, global_=True)
+                        if dup:
+                            if dup["conta_id"] == conta["id"]:
+                                data_str = dup["data"].strftime("%d/%m/%Y")
+                                desc = dup["descricao"][:50]
+                                _responder_whatsapp(to,
+                                    f"✓ Esse cupom ja foi registrado em {data_str} ({desc}...)")
+                                return
+                            rep = liv.replicar_cupom(chave_nfce)
+                            if rep:
+                                _responder_whatsapp(to,
+                                    f"✓ Esse cupom ja foi lido no sistema. Salvei uma copia na sua "
+                                    f"conta: {rep['descricao']} - R$ {rep['valor']/100:.2f} "
+                                    f"({rep['n_itens']} itens). Nao precisei reler a foto.")
+                                return
                 except Exception:  # noqa: BLE001
                     pass
             elif ctype.startswith("audio/") and _transcritor:

@@ -89,21 +89,82 @@ class LivroCaixa:
         self.membro_id = membro_id
         self.chave_nfce_atual = None  # webhook pode setar isso pra que tools usem
 
-    def lancamento_por_chave(self, chave: str | None) -> dict | None:
-        """Consulta se ja' existe lancamento nesta conta com essa chave (NFC-e).
-        Retorna {'id': int, 'data': date, 'valor': int, 'descricao': str} se encontrado.
-        Retorna None se nao existe ou se chave e' None/vazia."""
+    def lancamento_por_chave(self, chave: str | None, global_: bool = False) -> dict | None:
+        """Consulta se ja' existe lancamento com essa chave (NFC-e).
+
+        Se global_=False (default): busca SÓ nesta conta.
+        Se global_=True: busca em TODAS as contas (pra decidir se replica).
+
+        Retorna {'id': int, 'data': date, 'valor': int, 'descricao': str, 'conta_id': int}
+        se encontrado. Retorna None se nao existe ou se chave e' None/vazia."""
         if not chave:
             return None
         with self.pool.connection() as conn:
-            row = conn.execute(
-                """select id, data, valor_centavos, descricao from lancamentos
-                   where conta_id = %s and chave = %s limit 1""",
-                (self.conta_id, chave),
-            ).fetchone()
+            if global_:
+                row = conn.execute(
+                    """select id, data, valor_centavos, descricao, conta_id from lancamentos
+                       where chave = %s limit 1""",
+                    (chave,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """select id, data, valor_centavos, descricao, conta_id from lancamentos
+                       where conta_id = %s and chave = %s limit 1""",
+                    (self.conta_id, chave),
+                ).fetchone()
         if not row:
             return None
-        return {"id": row[0], "data": row[1], "valor": int(row[2]), "descricao": row[3]}
+        return {"id": row[0], "data": row[1], "valor": int(row[2]), "descricao": row[3], "conta_id": row[4]}
+
+    def replicar_cupom(self, chave: str | None) -> dict | None:
+        """Replica um cupom JA' PARSEADO (com itens) pra ESTA conta, SEM chamar a
+        API de visao. Copia o lancamento + os itens de qualquer conta que ja' tenha
+        esse cupom (mesma chave) COM itens. NAO re-observa precos (o parse original
+        ja' alimentou o banco; replicar nao pode inflar o 'visto N x'). Retorna
+        {'lancamento_id','n_itens','descricao','valor'} ou None se nao houver
+        cupom-fonte com itens - nesse caso o fluxo normal deve parsear."""
+        if not chave:
+            return None
+        with self.pool.connection() as conn:
+            fonte = conn.execute(
+                """select l.id, l.tipo, l.valor_centavos, l.categoria, l.descricao,
+                          l.data, l.pagamento
+                     from lancamentos l
+                    where l.chave = %s
+                      and exists (select 1 from itens_lancamento il
+                                  where il.lancamento_id = l.id)
+                    order by l.id limit 1""",
+                (chave,),
+            ).fetchone()
+            if not fonte:
+                return None     # nenhum cupom-fonte COM itens -> deixa parsear
+            src_id, tipo, valor, categoria, descricao, data, pagamento = fonte
+            novo = conn.execute(
+                """insert into lancamentos
+                     (conta_id, membro_id, tipo, valor_centavos, categoria, descricao,
+                      data, pagamento, origem, comprovante, chave)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,'replica','',%s) returning id""",
+                (self.conta_id, self.membro_id, tipo, valor, categoria, descricao,
+                 data, pagamento, chave),
+            ).fetchone()
+            novo_id = novo[0]
+            # copia os itens (1 INSERT ... SELECT). SEM _observar_precos de proposito.
+            conn.execute(
+                """insert into itens_lancamento
+                     (lancamento_id, descricao, quantidade, valor_unitario_centavos,
+                      valor_total_centavos, unidade, codigo)
+                   select %s, descricao, quantidade, valor_unitario_centavos,
+                          valor_total_centavos, unidade, codigo
+                     from itens_lancamento where lancamento_id = %s""",
+                (novo_id, src_id),
+            )
+            n = conn.execute(
+                "select count(*) from itens_lancamento where lancamento_id = %s",
+                (novo_id,),
+            ).fetchone()[0]
+            conn.commit()
+        return {"lancamento_id": novo_id, "n_itens": int(n),
+                "descricao": descricao, "valor": int(valor)}
 
     def adicionar(self, lanc: Lancamento, chave: str | None = None) -> Lancamento:
         # usa chave explícita, ou chave_nfce_atual se tiver sido setada pelo webhook

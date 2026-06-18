@@ -107,7 +107,7 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
         )
         return
 
-    # TRAVA DUPLICIDADE: se temos imagem (cupom/PDF), verifica por chave NFC-e ANTES do agente
+    # TRAVA DUPLICIDADE + REPLICA: se temos imagem (cupom/PDF), verifica por chave NFC-e ANTES do agente
     if imagem_b64:
         try:
             import base64
@@ -123,14 +123,25 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
                 except Exception:  # noqa: BLE001
                     chave_nfce = None
             if chave_nfce:
-                liv = LivroCaixa(_pool, conta["id"])
-                duplicata = liv.lancamento_por_chave(chave_nfce)
-                if duplicata:
-                    data_str = duplicata["data"].strftime("%d/%m/%Y")
-                    desc = duplicata["descricao"][:50]
-                    await update.message.reply_text(
-                        f"✓ Esse cupom ja foi registrado em {data_str} ({desc}...)")
-                    return
+                liv = LivroCaixa(_pool, conta["id"], membro.id)
+                dup = liv.lancamento_por_chave(chave_nfce, global_=True)
+                if dup:
+                    if dup["conta_id"] == conta["id"]:
+                        # mesma conta -> ja' registrado
+                        data_str = dup["data"].strftime("%d/%m/%Y")
+                        desc = dup["descricao"][:50]
+                        await update.message.reply_text(
+                            f"✓ Esse cupom ja foi registrado em {data_str} ({desc}...)")
+                        return
+                    # outra conta -> tenta replicar (zero API)
+                    rep = liv.replicar_cupom(chave_nfce)
+                    if rep:
+                        await update.message.reply_text(
+                            f"✓ Esse cupom ja foi lido no sistema. Salvei uma copia na sua "
+                            f"conta: {rep['descricao']} - R$ {rep['valor']/100:.2f} "
+                            f"({rep['n_itens']} itens). Nao precisei reler a foto.")
+                        return
+                    # dup existe mas SEM itens (parse falhou) -> cai pro fluxo normal (parseia)
         except Exception:  # noqa: BLE001
             pass  # trava falha gracefully, segue o fluxo normal
 

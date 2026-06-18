@@ -102,7 +102,13 @@ Regras:
   (nome da loja) e endereco (rua, numero, bairro). Isso identifica a loja exata e
   o ramo e permite comparar precos entre lojas - e' valioso, entao SEMPRE inclua
   o cnpj_emitente se estiver visivel no cupom, mesmo que o QR nao tenha sido lido
-  (voce consegue ler o CNPJ no texto do cupom). Pra QUALQUER OUTRO tipo de cupom
+  (voce consegue ler o CNPJ no texto do cupom).
+  NUNCA invente o nome da loja. Se o nome estiver ilegivel ou voce nao tiver
+  certeza, OMITA o campo estabelecimento e mande so' o cnpj_emitente (o sistema
+  resolve o nome pela Receita). Na descricao do lancamento, prefira algo NEUTRO
+  ("Compra no mercado") a chutar uma marca - um nome errado liga o gasto a' loja
+  errada e suja o banco de precos.
+  Pra QUALQUER OUTRO tipo de cupom
   (padaria, pet, posto, conta de luz, agua, servicos etc), salve so' o valor
   total - nao detalhe itens a menos que peçam.
   Confirme com algo curto: "Salvei o cupom e os N itens ✓".

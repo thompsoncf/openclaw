@@ -173,8 +173,8 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
             return "Nao entendi os itens. Quais produtos adicionar a' lista?"
         n = lista.adicionar_varios(nomes)
         if n == 1:
-            return f"Adicionei '{nomes[0]}' a' lista de compras. 🛒"
-        return f"Adicionei {n} itens a' lista de compras: {', '.join(nomes)}. 🛒"
+            return f"Adicionei '{nomes[0]}' a' lista de compras. ð"
+        return f"Adicionei {n} itens a' lista de compras: {', '.join(nomes)}. ð"
 
     def ver_lista(entrada: dict) -> str:
         if lista is None:
@@ -190,12 +190,12 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
             preco = ""
             if i["preco_estimado_centavos"]:
                 preco = f" ~{formatar_brl(i['preco_estimado_centavos'])}"
-            linhas.append(f"• {i['descricao']}{q}{preco}")
+            linhas.append(f"â¢ {i['descricao']}{q}{preco}")
         r = lista.resumo()
         rodape = f"\n\n{r['pendentes']} item(ns) pendente(s)"
         if r["estimado_centavos"]:
-            rodape += f" · estimativa: {formatar_brl(r['estimado_centavos'])}"
-        return "📋 Lista de compras:\n" + "\n".join(linhas) + rodape
+            rodape += f" Â· estimativa: {formatar_brl(r['estimado_centavos'])}"
+        return "ð Lista de compras:\n" + "\n".join(linhas) + rodape
 
     def marcar_lista(entrada: dict) -> str:
         if lista is None:
@@ -207,7 +207,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
         for i in lista.listar(incluir_comprados=False):
             if termo in i["descricao"].lower():
                 lista.marcar_comprado(i["id"], True)
-                return f"Marquei '{i['descricao']}' como comprado. ✓"
+                return f"Marquei '{i['descricao']}' como comprado. â"
         return f"Nao achei '{termo}' entre os itens pendentes da lista."
 
     def remover_lista(entrada: dict) -> str:
@@ -219,7 +219,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
         for i in lista.listar(incluir_comprados=False):
             if termo in i["descricao"].lower():
                 lista.remover(i["id"])
-                return f"Tirei '{i['descricao']}' da lista. 🗑️"
+                return f"Tirei '{i['descricao']}' da lista. ðï¸"
         return f"Nao achei '{termo}' na lista pra remover."
 
     def comparar_lista(entrada: dict) -> str:
@@ -233,10 +233,10 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
         if r["observacoes"] == 0:
             return ("Ainda nao tenho precos suficientes pra comparar essa lista. "
                     "Conforme voce e sua familia registram cupons de mercado, eu vou "
-                    "aprendendo os precos e em breve consigo dizer onde a cesta sai mais barata. 📊")
-        linhas = ["📊 Onde sua cesta sai mais barata (pelos cupons registrados):\n"]
+                    "aprendendo os precos e em breve consigo dizer onde a cesta sai mais barata. ð")
+        linhas = ["ð Onde sua cesta sai mais barata (pelos cupons registrados):\n"]
         for i, m in enumerate(r["mercados"][:3], 1):
-            falta = f" · faltam {len(m['itens_faltando'])} itens" if m["itens_faltando"] else " · cesta completa"
+            falta = f" Â· faltam {len(m['itens_faltando'])} itens" if m["itens_faltando"] else " Â· cesta completa"
             linhas.append(f"{i}. {m['mercado']}: {formatar_brl(m['total_centavos'])}"
                           f" ({m['itens_cobertos']} itens{falta})")
         # itens sem nenhum preco
@@ -271,10 +271,36 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
         except Exception:  # noqa: BLE001
             ok = False
         if ok:
-            return ("Avisei o responsavel que voce terminou a lista! ✓ "
+            return ("Avisei o responsavel que voce terminou a lista! â "
                     "Pode continuar adicionando se lembrar de mais alguma coisa.")
-        return ("Anotei que voce terminou a lista! ✓ "
+        return ("Anotei que voce terminou a lista! â "
                 "(o aviso chega quando o responsavel conectar o Telegram)")
+
+    def listar_recentes(entrada: dict) -> str:
+        """Lista os ultimos lancamentos com ID, pra corrigir/apagar o certo.
+        O agente DEVE usar isso pra achar o id real antes de apagar - nunca
+        chutar id de memoria."""
+        n = int(entrada.get("quantos") or 10)
+        lancs = livro.listar(limite=max(1, min(n, 30)))
+        if not lancs:
+            return "Nenhum lancamento encontrado."
+        linhas = []
+        for l in lancs:
+            tipo_txt = "despesa" if l.tipo == Tipo.DESPESA else "receita"
+            linhas.append(
+                f"id={l.id} | {tipo_txt} | {formatar_brl(l.valor_centavos)} | "
+                f"{l.categoria} | {l.descricao[:40]} | {l.data.strftime('%d/%m/%Y')}")
+        return "Lancamentos recentes:\n" + "\n".join(linhas)
+
+    def apagar_lancamento(entrada: dict) -> str:
+        """Apaga UM lancamento pelo id (correcao de erro). Use listar_recentes
+        antes pra ter o id certo. So' apaga da propria conta (multi-tenant)."""
+        lid = entrada.get("id")
+        if lid is None:
+            return "Preciso do id do lancamento pra apagar. Use listar_recentes primeiro."
+        ok = livro.apagar_lancamento(int(lid))
+        return (f"Lancamento id={lid} apagado. â" if ok
+                else f"Nao achei o lancamento id={lid} nesta conta (ja' apagado ou id errado).")
 
     financeiras = [
         Ferramenta(
@@ -315,6 +341,34 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
             descricao="Mostra o saldo atual (receitas menos despesas).",
             parametros={"type": "object", "properties": {}},
             executar=ver_saldo,
+        ),
+        Ferramenta(
+            nome="listar_recentes",
+            descricao=("Lista os ultimos lancamentos COM o id de cada um. Use SEMPRE "
+                       "antes de apagar ou corrigir um lancamento, pra pegar o id REAL "
+                       "(nunca chute id de memoria)."),
+            parametros={
+                "type": "object",
+                "properties": {
+                    "quantos": {"type": "integer", "description": "quantos mostrar (1-30; vazio=10)"},
+                },
+            },
+            executar=listar_recentes,
+        ),
+        Ferramenta(
+            nome="apagar_lancamento",
+            descricao=("Apaga UM lancamento pelo id. Use pra CORRIGIR um erro: quando o "
+                       "usuario disser que um lancamento esta' errado (tipo, valor, "
+                       "duplicado), apague o errado e crie o certo. Pegue o id com "
+                       "listar_recentes antes - nunca use id de memoria."),
+            parametros={
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer", "description": "id do lancamento a apagar"},
+                },
+                "required": ["id"],
+            },
+            executar=apagar_lancamento,
         ),
         Ferramenta(
             nome="relatorio_mes",

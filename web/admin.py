@@ -12,7 +12,7 @@ from jinja2 import Environment, DictLoader, select_autoescape
 
 from db.conexao import get_pool
 from contas import contas as ct
-from finance.estatisticas import estatisticas_funil
+from finance.estatisticas import estatisticas_funil, estatisticas_custo
 from web.portal import brl
 
 router = APIRouter()
@@ -72,7 +72,7 @@ button.danger{background:#6e2b2b}button.danger:hover{background:#8a3636}
 form.inline{display:inline;margin:0}
 </style></head><body>
 <div class="topo"><span class="logo">Zaq <span>· admin</span></span>
-<span><a href="/admin">Contas</a><a href="/admin/funil">Funil</a><a href="/admin/qr">QR notas</a><a href="/admin/precos">Preços</a><a href="/admin/categorias">Categorias</a><a href="/admin/banco">Banco</a><a href="/painel">Meu painel</a><a href="/sair">Sair</a></span></div>
+<span><a href="/admin">Contas</a><a href="/admin/funil">Funil</a><a href="/admin/custos">Custos</a><a href="/admin/qr">QR notas</a><a href="/admin/precos">Preços</a><a href="/admin/categorias">Categorias</a><a href="/admin/banco">Banco</a><a href="/painel">Meu painel</a><a href="/sair">Sair</a></span></div>
 <div class="wrap">{% block conteudo %}{% endblock %}</div>
 </body></html>"""
 
@@ -247,7 +247,41 @@ Os números do funil aparecem assim que o fluxo de cliente novo entrar no ar. Ab
 {% endfor %}</table></div>
 {% endblock %}"""
 
-_env = Environment(loader=DictLoader({"abase": _ADMIN_BASE, "ahome": _ADMIN_HOME, "aqr": _ADMIN_QR, "acat": _ADMIN_CATEGORIAS, "abanco": _ADMIN_BANCO, "afunil": _ADMIN_FUNIL}),
+_ADMIN_CUSTOS = """{% extends "abase" %}{% block conteudo %}
+<h2>Custos de API</h2>
+{% if not k.tem_tabela %}
+<div class="metric" style="border-color:#e0a83d">A tabela uso_api ainda não existe (migração 024 não aplicada).</div>
+{% endif %}
+
+<form method="get" action="/admin/custos" style="margin:1rem 0;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+<label>De <input type="date" name="desde" value="{{ desde or '' }}" style="padding:.4rem .5rem;border-radius:6px;border:1px solid #333;background:#0e0e0f;color:#ececec"></label>
+<label>Até <input type="date" name="ate" value="{{ ate or '' }}" style="padding:.4rem .5rem;border-radius:6px;border:1px solid #333;background:#0e0e0f;color:#ececec"></label>
+<button style="padding:.45rem .8rem;border:0;border-radius:7px;background:#1d9e75;color:#fff;cursor:pointer">Filtrar</button>
+<span class="mut">(vazio = mês corrente)</span>
+</form>
+
+<div class="cards">
+<div class="metric"><span>Custo total</span><b style="color:#e0a83d">R$ {{ k.geral.custo_total_reais }}</b></div>
+<div class="metric"><span>Contas ativas</span><b style="color:#7ab0e8">{{ k.geral.contas_ativas }}</b></div>
+<div class="metric"><span>Custo médio/cliente</span><b style="color:#a8d96f">R$ {{ k.geral.custo_medio_por_conta_reais }}</b></div>
+<div class="metric"><span>Chamadas</span><b style="color:#5dcaa5">{{ k.geral.chamadas }}</b></div>
+</div>
+
+<div class="card"><h3>Custos por tipo</h3>
+<table><tr><th>Tipo</th><th>Qtd</th><th>Custo R$</th><th>Médio R$</th></tr>
+<tr><td>📸 Fotos (cupom)</td><td>{{ k.geral.fotos }}</td><td>{{ k.geral.custo_fotos_reais }}</td><td>{{ k.geral.custo_medio_foto_reais }}</td></tr>
+<tr><td>💬 Textos</td><td>{{ k.geral.textos }}</td><td>{{ k.geral.custo_textos_reais }}</td><td>{{ k.geral.custo_medio_texto_reais }}</td></tr>
+</table></div>
+
+<div class="card"><h3>Por conta (top 30)</h3>
+<table><tr><th>#</th><th>Nome</th><th>Chamadas</th><th>Fotos</th><th>Custo R$</th></tr>
+{% for c in k.por_conta %}<tr><td>{{ c.conta_id }}</td><td>{{ c.nome }}</td><td>{{ c.chamadas }}</td><td>{{ c.fotos }}</td><td>{{ c.custo_reais }}</td></tr>
+{% else %}<tr><td colspan="5" class="mut">Sem uso no período.</td></tr>
+{% endfor %}</table></div>
+<p class="mut" style="margin-top:1rem">Custo estimado (Sonnet 4.6, câmbio ~5.40). A conta-degustação entra no total mas não conta como cliente na média.</p>
+{% endblock %}"""
+
+_env = Environment(loader=DictLoader({"abase": _ADMIN_BASE, "ahome": _ADMIN_HOME, "aqr": _ADMIN_QR, "acat": _ADMIN_CATEGORIAS, "abanco": _ADMIN_BANCO, "afunil": _ADMIN_FUNIL, "acustos": _ADMIN_CUSTOS}),
                    autoescape=select_autoescape())
 _env.globals["brl"] = brl
 
@@ -387,3 +421,13 @@ def admin_funil(request: Request):
     f = estatisticas_funil(pool)
     return HTMLResponse(_env.get_template("afunil").render(
         f=f, aviso=request.session.pop("admin_aviso", None)))
+
+
+@router.get("/admin/custos", response_class=HTMLResponse)
+def admin_custos(request: Request, desde: str = "", ate: str = ""):
+    if _admin(request) is None:
+        return _NEGADO
+    pool = get_pool()
+    k = estatisticas_custo(pool, desde or None, ate or None)
+    return HTMLResponse(_env.get_template("acustos").render(
+        k=k, desde=desde, ate=ate, aviso=request.session.pop("admin_aviso", None)))

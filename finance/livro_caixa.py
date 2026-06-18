@@ -606,14 +606,16 @@ class LivroCaixa:
         # identifica a LOJA pelo CNPJ (do QR/cupom) - diferencia filiais do grupo
         loja_id = None
         li = loja_info or {}
-        cnpj = "".join(c for c in (li.get("cnpj") or "") if c.isdigit())
-        # fallback: CNPJ embutido na chave do QR (posicoes 7-20), ja' lida na trava
-        # de duplicidade. Garante a loja mesmo quando o agente nao leu o cabecalho.
-        if len(cnpj) != 14:
-            ch = "".join(c for c in str(getattr(self, "chave_nfce_atual", "") or "")
-                         if c.isdigit())
-            if len(ch) == 44:
-                cnpj = ch[6:20]
+        # CNPJ da loja: PREFERE a chave do QR (lida por maquina, precisa) sobre o
+        # que o agente leu do cabecalho (visao pode trocar digito - ex: o Elizeu
+        # virou 0140 em vez de 0440). So' usa o cabecalho quando NAO ha chave.
+        cnpj = ""
+        ch = "".join(c for c in str(getattr(self, "chave_nfce_atual", "") or "")
+                     if c.isdigit())
+        if len(ch) == 44:
+            cnpj = ch[6:20]            # CNPJ emitente da chave (posicoes 7-20)
+        if len(cnpj) != 14:            # sem chave legivel -> usa o do cabecalho
+            cnpj = "".join(c for c in (li.get("cnpj") or "") if c.isdigit())
         if len(cnpj) == 14:
             try:
                 # extrai UF da cidade se vier "Teresina-PI"

@@ -97,7 +97,40 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
                 (msg + "Manda um 'oi' que eu te ajudo! 😊") if ok else
                 (msg + "\n\nSe voce recebeu um codigo de convite, confira e tente de novo."))
             return
-        await update.message.reply_text(MSG_NAO_CADASTRADO)
+        # --- LEAD (cliente novo em test-drive) ---
+        # cupom/foto é só pós-cadastro (protege custo ~5x)
+        if imagem_b64:
+            await update.message.reply_text(
+                "📸 O leitor de cupom é exclusivo pra quem tem conta! "
+                "Cria a sua grátis e ganha 7 dias pra testar tudo: zaq-ia.com")
+            return
+        est = ct.lead_estado(_pool, "telegram", str(update.effective_user.id))
+        if not est["pode_testar"]:
+            await update.message.reply_text(
+                "Você já testou seus gastos grátis 😊 Curtiu? "
+                "Cria sua conta e ganha 7 dias grátis pra usar tudo "
+                "(incluindo leitura de cupom): zaq-ia.com")
+            return
+        # sem texto = saudação inicial
+        if not texto:
+            await update.message.reply_text(
+                "Opa! 👋 Eu sou o Zaq, seu assistente financeiro no Telegram. "
+                "Quer ver como funciona? Me diz um gasto, tipo *almoço 35* "
+                "ou *uber 22*, que eu organizo pra você. "
+                f"(Você tem {est['restantes']} testes grátis.)")
+            return
+        # processa o gasto de teste DE VERDADE
+        from finance.degustacao import responder_degustacao
+        resp = responder_degustacao(_pool, _brain, texto)
+        novo = ct.lead_registrar_gasto(_pool, "telegram", str(update.effective_user.id))
+        extra = ""
+        if novo >= ct.LEAD_LIMITE_GASTOS:
+            extra = ("\n\n🎉 Curtiu? Esse foi seu último teste grátis. "
+                     "Cria sua conta e ganha 7 dias grátis pra usar tudo, "
+                     "incluindo a leitura automática de cupom: zaq-ia.com")
+        elif novo == ct.LEAD_LIMITE_GASTOS - 1:
+            extra = "\n\n_(resta 1 teste grátis — depois é só criar a conta em zaq-ia.com)_"
+        await update.message.reply_text(resp + extra)
         return
     membro, conta = achado
     if not ct.acesso_liberado(conta):

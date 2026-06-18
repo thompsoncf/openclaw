@@ -161,9 +161,40 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
                 ok, msg = ct.resgatar_convite_canal(pool, cod, "whatsapp", numero)
                 _responder_whatsapp(to, msg + ("Manda um 'oi' que eu te ajudo!" if ok else ""))
                 return
-            _responder_whatsapp(to, "Ola! Ainda nao encontrei seu cadastro. Se voce recebeu "
-                                    "um codigo de convite, e' so' me mandar aqui. Ou faca o "
-                                    "acesso pelo portal (escolhe o plano e cadastra seu numero).")
+            # --- LEAD (cliente novo em test-drive) ---
+            # cupom/foto é só pós-cadastro (protege custo ~5x)
+            if media_url:
+                _responder_whatsapp(to,
+                    "📸 O leitor de cupom é exclusivo pra quem tem conta! "
+                    "Cria a sua grátis e ganha 7 dias pra testar tudo: zaq-ia.com")
+                return
+            est = ct.lead_estado(pool, "whatsapp", numero)
+            if not est["pode_testar"]:
+                _responder_whatsapp(to,
+                    "Você já testou seus gastos grátis 😊 Curtiu? "
+                    "Cria sua conta e ganha 7 dias grátis pra usar tudo "
+                    "(incluindo leitura de cupom): zaq-ia.com")
+                return
+            # sem texto = saudação inicial
+            if not (body or "").strip():
+                _responder_whatsapp(to,
+                    "Opa! 👋 Eu sou o Zaq, seu assistente financeiro no WhatsApp. "
+                    "Quer ver como funciona? Me diz um gasto, tipo *almoço 35* "
+                    "ou *uber 22*, que eu organizo pra você. "
+                    f"(Você tem {est['restantes']} testes grátis.)")
+                return
+            # processa o gasto de teste DE VERDADE
+            from finance.degustacao import responder_degustacao
+            resp = responder_degustacao(pool, _brain, body)
+            novo = ct.lead_registrar_gasto(pool, "whatsapp", numero)
+            extra = ""
+            if novo >= ct.LEAD_LIMITE_GASTOS:
+                extra = ("\n\n🎉 Curtiu? Esse foi seu último teste grátis. "
+                         "Cria sua conta e ganha 7 dias grátis pra usar tudo, "
+                         "incluindo a leitura automática de cupom: zaq-ia.com")
+            elif novo == ct.LEAD_LIMITE_GASTOS - 1:
+                extra = "\n\n_(resta 1 teste grátis — depois é só criar a conta em zaq-ia.com)_"
+            _responder_whatsapp(to, resp + extra)
             return
         membro, conta = achado
         if not ct.acesso_liberado(conta):

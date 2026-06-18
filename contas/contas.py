@@ -340,3 +340,43 @@ def reivindicar_mensagem(pool, chave: str) -> bool:
         return row is not None   # inseriu = nosso; None = ja' existia
     except Exception:  # noqa: BLE001
         return True   # se a checagem falhar, melhor processar do que perder
+
+
+# ---------- Leads (test-drive / cliente novo) ----------
+
+LEAD_LIMITE_GASTOS = 5
+
+
+def lead_estado(pool, canal: str, identificador: str) -> dict:
+    """Retorna {gastos_usados, pode_testar, restantes} do lead. Cria se não existe."""
+    ident = str(identificador)
+    with pool.connection() as conn:
+        row = conn.execute(
+            "select gastos_usados from leads where canal=%s and identificador=%s",
+            (canal, ident),
+        ).fetchone()
+        if row is None:
+            conn.execute(
+                "insert into leads (canal, identificador) values (%s,%s) "
+                "on conflict (canal, identificador) do nothing",
+                (canal, ident),
+            )
+            conn.commit()
+            usados = 0
+        else:
+            usados = int(row[0])
+    return {"gastos_usados": usados, "pode_testar": usados < LEAD_LIMITE_GASTOS,
+            "restantes": max(0, LEAD_LIMITE_GASTOS - usados)}
+
+
+def lead_registrar_gasto(pool, canal: str, identificador: str) -> int:
+    """Incrementa o contador de gastos de teste. Retorna o novo total."""
+    ident = str(identificador)
+    with pool.connection() as conn:
+        row = conn.execute(
+            "update leads set gastos_usados = gastos_usados + 1, ultimo_em = now() "
+            "where canal=%s and identificador=%s returning gastos_usados",
+            (canal, ident),
+        ).fetchone()
+        conn.commit()
+    return int(row[0]) if row else 0

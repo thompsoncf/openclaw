@@ -115,13 +115,40 @@ class Agente:
             _u = getattr(resp, "usage", None)
             if _u is not None:
                 import logging
+                _in = getattr(_u, "input_tokens", 0)
+                _cr = getattr(_u, "cache_read_input_tokens", 0)
+                _cw = getattr(_u, "cache_creation_input_tokens", 0)
+                _out = getattr(_u, "output_tokens", 0)
+                # origem: de qual conta veio esse gasto (pra rastrear o dreno).
+                # o livro carrega conta_id; degustacao = conta tecnica de visitante.
+                _conta = getattr(getattr(self, "livro", None), "conta_id", "?")
+                # custo estimado em R$ (Sonnet 4.6; cambio aproximado 5.40).
+                # in 3 / cache_write 3.75 / cache_read 0.30 / out 15 (US$/milhao)
+                _usd = (_in*3.0 + _cw*3.75 + _cr*0.30 + _out*15.0) / 1_000_000
+                _brl = _usd * 5.40
                 logging.getLogger("openclaw.custo").info(
-                    "TOKENS in=%s cache_read=%s cache_write=%s out=%s",
-                    getattr(_u, "input_tokens", 0),
-                    getattr(_u, "cache_read_input_tokens", 0),
-                    getattr(_u, "cache_creation_input_tokens", 0),
-                    getattr(_u, "output_tokens", 0),
+                    "TOKENS conta=%s in=%s cache_read=%s cache_write=%s out=%s ~R$%.4f",
+                    _conta, _in, _cr, _cw, _out, _brl,
                 )
+                # grava o uso no banco (pro painel de custos do admin). Best-effort:
+                # nunca deixa um erro de gravacao quebrar a resposta ao usuario.
+                try:
+                    _pool = getattr(getattr(self, "livro", None), "pool", None)
+                    if _pool is not None and isinstance(_conta, int):
+                        _eh_foto = _cw > 4000   # cache_write alto = leu imagem (cupom)
+                        with _pool.connection() as _conn:
+                            _conn.execute(
+                                """insert into uso_api
+                                   (conta_id, input_tokens, cache_read_tokens,
+                                    cache_write_tokens, output_tokens, custo_centavos,
+                                    eh_foto)
+                                   values (%s,%s,%s,%s,%s,%s,%s)""",
+                                (_conta, _in, _cr, _cw, _out,
+                                 int(round(_brl * 100)), _eh_foto),
+                            )
+                            _conn.commit()
+                except Exception:
+                    pass   # gravacao de metrica nunca derruba a conversa
 
             # Resposta CORTADA por limite de tokens (ex: cupom gigante): o tool_use
             # veio incompleto. Nao salva (corromperia a memoria) e pede pra dividir.
@@ -142,7 +169,7 @@ class Agente:
                 if final:
                     return final
                 # terminou sem texto: se fez alguma acao, confirma; senao, pede pra repetir
-                return ("Pronto, atualizei aqui! ✅" if houve_ferramenta
+                return ("Pronto, atualizei aqui! 👍" if houve_ferramenta
                         else "Desculpa, nao entendi. Pode repetir?")
 
             houve_ferramenta = True

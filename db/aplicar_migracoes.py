@@ -100,6 +100,12 @@ def main():
     forcar = "--forcar" in sys.argv
     if forcar:
         print("⚠️  Modo --forcar: vai reexecutar TODAS as migrações (perigoso!)")
+        # Trava de segurança: --forcar exige confirmação explícita
+        if os.environ.get("PERMITIR_FORCAR") != "SIM":
+            print("BLOQUEADO: --forcar pode APAGAR dados (cascade/drop).")
+            print("Se tem certeza E é banco descartável, rode com:")
+            print("  PERMITIR_FORCAR=SIM python -m db.aplicar_migracoes --forcar")
+            sys.exit(1)
 
     url = os.environ.get("DATABASE_URL")
     if not url:

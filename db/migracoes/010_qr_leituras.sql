@@ -2,7 +2,7 @@
 -- Auditoria de leitura de QR em fotos/PDFs de NFC-e
 -- Rastreia: qual conta enviou, conseguiu ler ou nao, data/UF/CNPJ do emitente
 
-create table qr_leituras (
+create table if not exists qr_leituras (
     id bigserial primary key,
     conta_id bigint not null references contas(id) on delete cascade,
     chave varchar(44),                    -- null se nao leu QR
@@ -14,5 +14,5 @@ create table qr_leituras (
     criado_em timestamp default now()
 );
 
-create index ix_qr_leituras_conta_id on qr_leituras(conta_id);
-create index ix_qr_leituras_criado_em on qr_leituras(criado_em);
+create index if not exists ix_qr_leituras_conta_id on qr_leituras(conta_id);
+create index if not exists ix_qr_leituras_criado_em on qr_leituras(criado_em);

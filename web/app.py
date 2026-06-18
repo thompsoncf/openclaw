@@ -171,7 +171,7 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
                                     "Assim que o pagamento for confirmado, voce volta a usar.")
             return
         # Detecta se há mídia (cupom) vs apenas texto
-        eh_cupom = bool(int(form.get("NumMedia", "0") or 0) > 0)
+        eh_cupom = bool(media_url)
         ok, _restante = ct.checar_e_registrar_uso(pool, conta, eh_cupom=eh_cupom)
         if not ok:
             _responder_whatsapp(to,

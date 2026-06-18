@@ -628,6 +628,13 @@ class LivroCaixa:
             except Exception:  # noqa: BLE001
                 _log.exception("falha ao achar/criar loja (cnpj=%s)", cnpj)
                 loja_id = None
+        # SEM loja_id (CNPJ nao identificado) -> NAO contribui pro banco coletivo.
+        # Era a origem do "Carvalho" fantasma: observacao com loja_id=NULL gravava
+        # 'mercado' em texto livre, que o display mostrava pra sempre. O lancamento
+        # e os itens do usuario JA' foram salvos; aqui so' pulamos a contribuicao
+        # pro banco de precos, que exige loja identificada (CNPJ) pra ter valor.
+        if loja_id is None:
+            return 0
         # le os itens recem-salvos desse lancamento (com id, valor unitario e unidade)
         itens = conn.execute(
             """select id, descricao, valor_unitario_centavos, unidade, codigo

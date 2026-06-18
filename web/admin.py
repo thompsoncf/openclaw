@@ -12,6 +12,7 @@ from jinja2 import Environment, DictLoader, select_autoescape
 
 from db.conexao import get_pool
 from contas import contas as ct
+from finance.estatisticas import estatisticas_funil
 from web.portal import brl
 
 router = APIRouter()
@@ -71,7 +72,7 @@ button.danger{background:#6e2b2b}button.danger:hover{background:#8a3636}
 form.inline{display:inline;margin:0}
 </style></head><body>
 <div class="topo"><span class="logo">OpenClaw <span>· admin</span></span>
-<span><a href="/admin">Contas</a><a href="/admin/qr">QR notas</a><a href="/admin/precos">Preços</a><a href="/admin/categorias">Categorias</a><a href="/admin/banco">Banco</a><a href="/painel">Meu painel</a><a href="/sair">Sair</a></span></div>
+<span><a href="/admin">Contas</a><a href="/admin/funil">Funil</a><a href="/admin/qr">QR notas</a><a href="/admin/precos">Preços</a><a href="/admin/categorias">Categorias</a><a href="/admin/banco">Banco</a><a href="/painel">Meu painel</a><a href="/sair">Sair</a></span></div>
 <div class="wrap">{% block conteudo %}{% endblock %}</div>
 </body></html>"""
 
@@ -214,7 +215,39 @@ vira várias linhas pro cliente — aqui aparece agregado, com <b>"visto N vezes
 </table></div>
 {% endblock %}"""
 
-_env = Environment(loader=DictLoader({"abase": _ADMIN_BASE, "ahome": _ADMIN_HOME, "aqr": _ADMIN_QR, "acat": _ADMIN_CATEGORIAS, "abanco": _ADMIN_BANCO}),
+_ADMIN_FUNIL = """{% extends "abase" %}{% block conteudo %}
+<h2>Funil de aquisição</h2>
+{% if not f.tem_tabela_leads %}
+<div class="metric" style="border-color:#e0a83d">A tabela de leads ainda não existe (migração 023 não aplicada).
+Os números do funil aparecem assim que o fluxo de cliente novo entrar no ar. Abaixo, a saúde das contas já funciona.</div>
+{% else %}
+<div class="cards">
+  <div class="metric"><span>Visitantes</span><b style="color:#5dcaa5">{{ f.geral.visitantes }}</b></div>
+  <div class="metric"><span>Testaram</span><b style="color:#7ab0e8">{{ f.geral.testaram }} ({{ f.geral.pct_testou }}%)</b></div>
+  <div class="metric"><span>Cadastraram</span><b style="color:#a8d96f">{{ f.geral.cadastraram }} ({{ f.geral.pct_cadastrou }}%)</b></div>
+  <div class="metric"><span>Pagaram</span><b style="color:#e0a83d">{{ f.geral.pagaram }} ({{ f.geral.pct_pagou }}%)</b></div>
+</div>
+
+<div class="card"><h2>Por canal</h2>
+<table><tr><th>Canal</th><th>Visitantes</th><th>Testaram</th><th>Cadastraram</th><th>Pagaram</th></tr>
+{% for c in f.por_canal %}<tr><td>{{ c.canal }}</td><td>{{ c.visitantes }}</td><td>{{ c.testaram }}</td><td>{{ c.cadastraram }}</td><td>{{ c.pagaram }}</td></tr>
+{% else %}<tr><td colspan="5" class="mut">Sem leads ainda.</td></tr>
+{% endfor %}</table></div>
+{% endif %}
+
+<div class="card"><h2>Saúde das contas</h2>
+<table><tr><th>Status</th><th>Qtd</th></tr>
+{% for s in f.contas_status %}<tr><td>{{ s.status }}</td><td>{{ s.qtd }}</td></tr>
+{% endfor %}</table></div>
+
+<div class="card"><h2>Trials vencendo (próximos 3 dias)</h2>
+<table><tr><th>#</th><th>Nome</th><th>Plano</th><th>Vence</th></tr>
+{% for t in f.trials_vencendo %}<tr><td>{{ t.id }}</td><td>{{ t.nome }}</td><td>{{ t.plano or '-' }}</td><td>{{ t.vencimento }}</td></tr>
+{% else %}<tr><td colspan="4" class="mut">Nenhum trial vencendo nos próximos 3 dias.</td></tr>
+{% endfor %}</table></div>
+{% endblock %}"""
+
+_env = Environment(loader=DictLoader({"abase": _ADMIN_BASE, "ahome": _ADMIN_HOME, "aqr": _ADMIN_QR, "acat": _ADMIN_CATEGORIAS, "abanco": _ADMIN_BANCO, "afunil": _ADMIN_FUNIL}),
                    autoescape=select_autoescape())
 _env.globals["brl"] = brl
 
@@ -344,3 +377,13 @@ def admin_suspender(request: Request, conta_id: int):
     ct.registrar_evento(pool, conta_id, "admin_suspendeu", f"por admin {adm[0]}")
     request.session["admin_aviso"] = f"Conta {conta_id} suspensa."
     return RedirectResponse("/admin", status_code=303)
+
+
+@router.get("/admin/funil", response_class=HTMLResponse)
+def admin_funil(request: Request):
+    if not _admin(request):
+        return _NEGADO
+    pool = get_pool()
+    f = estatisticas_funil(pool)
+    return HTMLResponse(_env.get_template("afunil").render(
+        f=f, aviso=request.session.pop("admin_aviso", None)))

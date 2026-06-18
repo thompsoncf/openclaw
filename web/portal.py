@@ -250,6 +250,11 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
 <p class="mut">Plano: <b>{{ conta[4] or '-' }}</b>
 {% if conta[6] %} · válido até <b>{{ conta[6].strftime('%d/%m/%Y') }}</b>{% endif %}
  · tipo: <b>{{ conta[1]|upper }}</b></p>
+{% if conta[5] == 'trial' %}
+<form method="post" action="/assinar" style="display:inline">
+<button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;font-size:.95rem">💳 Assinar plano</button>
+</form>
+{% endif %}
 <h1 style="font-size:1.05rem;margin-top:1.4rem">Pessoas da conta</h1>
 <div class="membros">
 {% for m in membros %}
@@ -965,6 +970,32 @@ def painel(request: Request):
                    whatsapp_bot_num=whatsapp_from,
                    erro=request.session.pop("erro", None),
                    aviso=request.session.pop("aviso", None))
+
+
+@router.post("/assinar")
+def assinar(request: Request):
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    with pool.connection() as c:
+        plano_row = c.execute(
+            "select codigo, nome, preco_base_centavos from planos where codigo=%s",
+            (conta[4],),
+        ).fetchone()
+    if not plano_row:
+        request.session["erro"] = "Plano não encontrado"
+        return RedirectResponse("/painel", status_code=303)
+    try:
+        from finance.asaas import criar_link_pagamento
+        valor_reais = plano_row[2] / 100.0
+        link_data = criar_link_pagamento(conta_id=conta[0], nome_plano=plano_row[1],
+                                         valor_reais=valor_reais)
+        return RedirectResponse(link_data["url"], status_code=303)
+    except Exception as e:
+        log.error(f"Erro ao criar link Asaas: {e}")
+        request.session["erro"] = "Erro ao gerar link de pagamento. Tente novamente."
+        return RedirectResponse("/painel", status_code=303)
 
 
 @router.get("/painel/financeiro", response_class=HTMLResponse)

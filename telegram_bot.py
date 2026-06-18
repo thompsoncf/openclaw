@@ -149,6 +149,29 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
     if not ct.acesso_liberado(conta):
         await update.message.reply_text(MSG_SEM_ACESSO)
         return
+    # check para comandos de pagamento
+    cmd = (texto or "").strip().lower()
+    if cmd in ("assinar", "pagar", "upgrade", "plano", "assinar plano"):
+        try:
+            from finance.asaas import criar_link_pagamento
+            with _pool.connection() as c:
+                plano_row = c.execute(
+                    "select nome, preco_base_centavos from planos where codigo=%s",
+                    (conta.plano,),
+                ).fetchone()
+            if plano_row:
+                valor_reais = plano_row[1] / 100.0
+                link_data = criar_link_pagamento(conta_id=conta.id, nome_plano=plano_row[0],
+                                                 valor_reais=valor_reais)
+                await update.message.reply_text(f"Pra ativar seu plano {plano_row[0]}, é só pagar aqui 👇\n"
+                                               f"{link_data['url']}\n\n"
+                                               f"Aceita Pix, boleto ou cartão. Assim que cair, eu libero na hora! 🎉")
+            else:
+                await update.message.reply_text("Erro ao gerar link de pagamento. Tente novamente.")
+        except Exception as e:
+            logging.error(f"Erro Asaas Telegram: {e}")
+            await update.message.reply_text("Erro ao gerar link de pagamento. Tente novamente.")
+        return
     # Detecta automaticamente se é cupom (há imagem) se não foi especificado
     eh_cupom = eh_cupom if eh_cupom is not None else bool(imagem_b64)
     ok, _restante = ct.checar_e_registrar_uso(_pool, conta, eh_cupom=eh_cupom)

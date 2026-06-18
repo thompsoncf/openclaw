@@ -202,6 +202,29 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
             _responder_whatsapp(to, "Seu acesso esta suspenso (pagamento pendente). "
                                     "Assim que o pagamento for confirmado, voce volta a usar.")
             return
+        # check para comandos de pagamento
+        cmd = (body or "").strip().lower()
+        if cmd in ("assinar", "pagar", "upgrade", "plano", "assinar plano"):
+            try:
+                from finance.asaas import criar_link_pagamento
+                with pool.connection() as c:
+                    plano_row = c.execute(
+                        "select nome, preco_base_centavos from planos where codigo=%s",
+                        (conta.plano,),
+                    ).fetchone()
+                if plano_row:
+                    valor_reais = plano_row[1] / 100.0
+                    link_data = criar_link_pagamento(conta_id=conta.id, nome_plano=plano_row[0],
+                                                     valor_reais=valor_reais)
+                    _responder_whatsapp(to, f"Pra ativar seu plano {plano_row[0]}, é só pagar aqui 👇\n"
+                                           f"{link_data['url']}\n\n"
+                                           f"Aceita Pix, boleto ou cartão. Assim que cair, eu libero na hora! 🎉")
+                else:
+                    _responder_whatsapp(to, "Erro ao gerar link de pagamento. Tente novamente.")
+            except Exception as e:
+                log.error(f"Erro Asaas WhatsApp: {e}")
+                _responder_whatsapp(to, "Erro ao gerar link de pagamento. Tente novamente.")
+            return
         # Detecta se há mídia (cupom) vs apenas texto
         eh_cupom = bool(media_url)
         ok, _restante = ct.checar_e_registrar_uso(pool, conta, eh_cupom=eh_cupom)

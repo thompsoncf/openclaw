@@ -19,6 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from db.conexao import get_pool, init_schema
 from contas import contas as ct
+from contas.contas import URL_CADASTRO
 from core.brain import Brain
 from core.memory import MemoriaPersistente
 from core.transcribe import transcritor_se_configurado
@@ -166,14 +167,14 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
             if media_url:
                 _responder_whatsapp(to,
                     "📸 O leitor de cupom é exclusivo pra quem tem conta! "
-                    "Cria a sua grátis e ganha 7 dias pra testar tudo: https://zaq-ia.com/cadastro")
+                    "Cria a sua grátis e ganha 7 dias pra testar tudo: https://app.zaq-ia.com/cadastro")
                 return
             est = ct.lead_estado(pool, "whatsapp", numero)
             if not est["pode_testar"]:
                 _responder_whatsapp(to,
                     "Você já testou seus gastos grátis 😊 Curtiu? "
                     "Cria sua conta e ganha 7 dias grátis pra usar tudo "
-                    "(incluindo leitura de cupom): https://zaq-ia.com/cadastro")
+                    "(incluindo leitura de cupom): https://app.zaq-ia.com/cadastro")
                 return
             # sem texto = saudação inicial
             if not (body or "").strip():
@@ -191,9 +192,9 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
             if novo >= ct.LEAD_LIMITE_GASTOS:
                 extra = ("\n\n🎉 Curtiu? Esse foi seu último teste grátis. "
                          "Cria sua conta e ganha 7 dias grátis pra usar tudo, "
-                         "incluindo a leitura automática de cupom: https://zaq-ia.com/cadastro")
+                         "incluindo a leitura automática de cupom: https://app.zaq-ia.com/cadastro")
             elif novo == ct.LEAD_LIMITE_GASTOS - 1:
-                extra = "\n\n_(resta 1 teste grátis — depois é só criar a conta em https://zaq-ia.com/cadastro)_"
+                extra = "\n\n_(resta 1 teste grátis — depois é só criar a conta em https://app.zaq-ia.com/cadastro)_"
             _responder_whatsapp(to, resp + extra)
             return
         membro, conta = achado

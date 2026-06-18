@@ -12,6 +12,8 @@ custo (teto de mensagens/dia POR CONTA), auditoria e mascaramento LGPD.
 from dataclasses import dataclass
 from datetime import date, timedelta
 
+URL_CADASTRO = "https://app.zaq-ia.com/cadastro"
+
 
 @dataclass
 class Conta:

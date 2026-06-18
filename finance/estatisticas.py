@@ -256,3 +256,95 @@ def estatisticas_funil(pool) -> dict:
             })
 
     return out
+
+
+def estatisticas_custo(pool, desde_iso: str | None = None, ate_iso: str | None = None) -> dict:
+    """Resumo de custo de API pro painel admin, com período escolhível.
+
+    desde_iso/ate_iso no formato 'AAAA-MM-DD' (inclusive). Se ambos None, usa o mês corrente.
+
+    Estrutura:
+      {
+        "periodo": {"desde", "ate"},
+        "geral": {
+          "chamadas", "fotos", "textos",
+          "custo_total_reais",
+          "custo_fotos_reais", "custo_textos_reais",
+          "contas_ativas",
+          "custo_medio_por_conta_reais",
+          "custo_medio_foto_reais", "custo_medio_texto_reais",
+        },
+        "por_conta": [
+          {"conta_id", "nome", "chamadas", "fotos", "custo_reais"}, ...
+        ],
+        "tem_tabela": bool,
+      }
+    """
+    out = {"periodo": {"desde": desde_iso, "ate": ate_iso}, "tem_tabela": False,
+           "geral": {}, "por_conta": []}
+
+    with pool.connection() as conn:
+        existe = conn.execute("select to_regclass('public.uso_api') is not null").fetchone()[0]
+        out["tem_tabela"] = bool(existe)
+        if not existe:
+            return out
+
+        if desde_iso and ate_iso:
+            filtro = "u.criado_em::date between %s and %s"
+            args = (desde_iso, ate_iso)
+        else:
+            filtro = "date_trunc('month', u.criado_em) = date_trunc('month', current_date)"
+            args = ()
+        out["periodo"] = {"desde": desde_iso or "(início do mês)", "ate": ate_iso or "hoje"}
+
+        deg = conn.execute(
+            "select id from contas where nome='__degustacao_visitantes__' limit 1"
+        ).fetchone()
+        deg_id = int(deg[0]) if deg else -1
+
+        g = conn.execute(
+            f"""select
+                  count(*),
+                  count(*) filter (where u.eh_foto),
+                  count(*) filter (where not u.eh_foto),
+                  coalesce(sum(u.custo_centavos),0),
+                  coalesce(sum(u.custo_centavos) filter (where u.eh_foto),0),
+                  coalesce(sum(u.custo_centavos) filter (where not u.eh_foto),0),
+                  count(distinct u.conta_id) filter (where u.conta_id <> %s)
+                from uso_api u where {filtro}""",
+            (deg_id, *args),
+        ).fetchone()
+        chamadas, fotos, textos, ctot, cfoto, ctexto, contas_ativas = (
+            int(g[0]), int(g[1]), int(g[2]), int(g[3]), int(g[4]), int(g[5]), int(g[6]))
+
+        reais = lambda cent: round(cent / 100.0, 2)
+        out["geral"] = {
+            "chamadas": chamadas, "fotos": fotos, "textos": textos,
+            "custo_total_reais": reais(ctot),
+            "custo_fotos_reais": reais(cfoto),
+            "custo_textos_reais": reais(ctexto),
+            "contas_ativas": contas_ativas,
+            "custo_medio_por_conta_reais": reais(ctot / contas_ativas) if contas_ativas else 0.0,
+            "custo_medio_foto_reais": reais(cfoto / fotos) if fotos else 0.0,
+            "custo_medio_texto_reais": reais(ctexto / textos) if textos else 0.0,
+        }
+
+        for cid, nome, ch, ft, cc in conn.execute(
+            f"""select u.conta_id,
+                       coalesce(c.nome,'(conta '||u.conta_id||')'),
+                       count(*), count(*) filter (where u.eh_foto),
+                       coalesce(sum(u.custo_centavos),0)
+                from uso_api u
+                left join contas c on c.id = u.conta_id
+                where {filtro}
+                group by u.conta_id, c.nome
+                order by sum(u.custo_centavos) desc
+                limit 30""",
+            args,
+        ).fetchall():
+            out["por_conta"].append({
+                "conta_id": int(cid), "nome": nome, "chamadas": int(ch),
+                "fotos": int(ft), "custo_reais": reais(int(cc)),
+            })
+
+    return out

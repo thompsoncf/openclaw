@@ -315,6 +315,40 @@ def _normalizar_br(numero: str) -> str:
     return "+" + digitos
 
 
+@app.post("/webhook/asaas")
+async def webhook_asaas(request: Request):
+    token = request.headers.get("asaas-access-token", "")
+    if token != os.environ.get("ASAAS_WEBHOOK_TOKEN", ""):
+        return Response(status_code=401)
+
+    body = await request.json()
+    evento = body.get("event", "")
+    pay = body.get("payment", {}) or {}
+    ref = pay.get("externalReference")
+    if not ref:
+        return Response(status_code=200)
+    try:
+        conta_id = int(ref)
+    except (TypeError, ValueError):
+        return Response(status_code=200)
+
+    pool = _setup()
+    chave_idem = f"asaas:{pay.get('id','')}:{evento}"
+    if not ct.reivindicar_mensagem(pool, chave_idem):
+        return Response(status_code=200)
+
+    if evento in ("PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"):
+        ct.ativar(pool, conta_id, dias=30, plano=pay.get("description"))
+        ct.registrar_evento(pool, conta_id, "pagamento_confirmado",
+                            f"asaas {pay.get('id','')} valor {pay.get('value','')}")
+    elif evento == "PAYMENT_OVERDUE":
+        ct.marcar_inadimplente(pool, conta_id)
+    elif evento in ("PAYMENT_REFUNDED", "PAYMENT_DELETED", "PAYMENT_CHARGEBACK"):
+        ct.suspender(pool, conta_id, motivo=f"asaas {evento}")
+
+    return Response(status_code=200)
+
+
 @app.post("/webhook/whatsapp")
 async def whatsapp(request: Request, background: BackgroundTasks):
     form = await request.form()

@@ -61,7 +61,7 @@ def _saudacao_lead(restantes: int) -> str:
         "Quer ver como funciona? Me diz um gasto, tipo *almoço 35* ou *uber 22*, "
         "que eu organizo pra você na hora.\n\n"
         f"_(Você tem {restantes} testes grátis. Depois é só criar sua conta em "
-        "zaq-ia.com e ganhar 7 dias pra usar tudo, incluindo leitura de cupom.)_"
+        "https://zaq-ia.com/cadastro e ganhar 7 dias pra usar tudo, incluindo leitura de cupom.)_"
     )
 
 
@@ -85,7 +85,7 @@ async def start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
         est = ct.lead_estado(_pool, "telegram", str(update.effective_user.id))
         msg = (_saudacao_lead(est["restantes"]) if est["pode_testar"]
                else ("Você já usou seus testes grátis 😊 Curtiu? Cria sua conta e "
-                     "ganha 7 dias grátis pra usar tudo (incluindo cupom): zaq-ia.com"))
+                     "ganha 7 dias grátis pra usar tudo (incluindo cupom): https://zaq-ia.com/cadastro"))
         await update.message.reply_text(msg, parse_mode="Markdown")
         return
     membro, _conta = achado
@@ -120,14 +120,14 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
         if imagem_b64:
             await update.message.reply_text(
                 "📸 O leitor de cupom é exclusivo pra quem tem conta! "
-                "Cria a sua grátis e ganha 7 dias pra testar tudo: zaq-ia.com")
+                "Cria a sua grátis e ganha 7 dias pra testar tudo: https://zaq-ia.com/cadastro")
             return
         est = ct.lead_estado(_pool, "telegram", str(update.effective_user.id))
         if not est["pode_testar"]:
             await update.message.reply_text(
                 "Você já testou seus gastos grátis 😊 Curtiu? "
                 "Cria sua conta e ganha 7 dias grátis pra usar tudo "
-                "(incluindo leitura de cupom): zaq-ia.com")
+                "(incluindo leitura de cupom): https://zaq-ia.com/cadastro")
             return
         # sem texto = saudação inicial
         if not texto:
@@ -140,9 +140,9 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
         if novo >= ct.LEAD_LIMITE_GASTOS:
             extra = ("\n\n🎉 Curtiu? Esse foi seu último teste grátis. "
                      "Cria sua conta e ganha 7 dias grátis pra usar tudo, "
-                     "incluindo a leitura automática de cupom: zaq-ia.com")
+                     "incluindo a leitura automática de cupom: https://zaq-ia.com/cadastro")
         elif novo == ct.LEAD_LIMITE_GASTOS - 1:
-            extra = "\n\n_(resta 1 teste grátis — depois é só criar a conta em zaq-ia.com)_"
+            extra = "\n\n_(resta 1 teste grátis — depois é só criar a conta em https://zaq-ia.com/cadastro)_"
         await update.message.reply_text(resp + extra)
         return
     membro, conta = achado

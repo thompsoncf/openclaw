@@ -39,6 +39,7 @@ class Brain:
                 "cache_control": {"type": "ephemeral"},
             }]
             tools_cache = self._tools_com_cache(ferramentas)
+            mensagens = self._marcar_cache_imagem(mensagens)
             resp = self.client.messages.create(
                 model=self.model,
                 system=system_blocos,
@@ -57,6 +58,31 @@ class Brain:
         # guarda o usage pra quem quiser medir (input, cache_read, cache_creation, output)
         self.ultimo_uso = getattr(resp, "usage", None)
         return resp
+
+    @staticmethod
+    def _marcar_cache_imagem(mensagens: list) -> list:
+        """Poe cache_control no ULTIMO bloco da mensagem que tem imagem/PDF.
+        A foto do cupom (token MAIS caro) entra no cache, entao as rodadas
+        seguintes do loop de ferramentas leem ela a ~10% do preco em vez de
+        reprocessar 100% a cada chamada. Sem imagem, devolve intacto.
+        Nao muta a memoria original (trabalha em copias)."""
+        idx = None
+        for i, m in enumerate(mensagens):
+            c = m.get("content")
+            if isinstance(c, list) and any(
+                isinstance(b, dict) and b.get("type") in ("image", "document")
+                for b in c):
+                idx = i      # a ULTIMA mensagem com imagem (o cupom atual)
+        if idx is None:
+            return mensagens
+        msgs = list(mensagens)
+        m = dict(msgs[idx])
+        blocos = [dict(b) if isinstance(b, dict) else b for b in m["content"]]
+        if isinstance(blocos[-1], dict):
+            blocos[-1] = {**blocos[-1], "cache_control": {"type": "ephemeral"}}
+        m["content"] = blocos
+        msgs[idx] = m
+        return msgs
 
     @staticmethod
     def _tools_com_cache(ferramentas: list) -> list:

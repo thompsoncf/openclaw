@@ -1,4 +1,4 @@
-﻿"""Estatisticas de uso das categorias em TODAS as contas (visao do dono do SaaS).
+"""Estatisticas de uso das categorias em TODAS as contas (visao do dono do SaaS).
 
 Serve pra DECIDIR o que mexer na lista oficial (finance/models.py):
 - Categoria "Outros" com % alto  -> falta categoria; vale criar uma nova.
@@ -113,10 +113,10 @@ def estatisticas_precos(pool) -> dict:
     """Painel do BANCO DE PRECOS (visao admin). So' leitura. Mostra:
       - contadores: observacoes, produtos distintos, lojas, cupons com QR lido
       - mais_confirmados: 1 linha por (loja, produto, preco, dia) com "visto N vezes"
-        (a ideia do contador: o mesmo preco no mesmo dia/loja nao polui, vira N)
       - top_produtos / top_lojas: onde o banco e' mais forte
-    Mantem TODAS as observacoes cruas (sao a confianca da mediana); aqui so' agrega
-    pra exibir."""
+    Fallback: se precos_observados está vazio (incidente de perda), le de precos_vigentes
+    (os agregados consolidados de ~85 preços que sobreviveram).
+    """
     with pool.connection() as conn:
         tot_obs, tot_prod, tot_lojas = conn.execute(
             """select count(*), count(distinct descricao_norm), count(distinct loja_id)
@@ -128,36 +128,72 @@ def estatisticas_precos(pool) -> dict:
             ).fetchone()[0]
         except Exception:  # noqa: BLE001
             tot_cupons = 0
-        mais = conn.execute(
-            """select coalesce(l.nome, nullif(po.mercado,''), po.regiao, '-') as loja,
-                      min(po.descricao_original) as produto,
-                      po.valor_unitario_centavos as preco, po.data_compra,
-                      count(*) as vezes
-               from precos_observados po
-               left join lojas l on l.id = po.loja_id
-               group by coalesce(l.nome, nullif(po.mercado,''), po.regiao, '-'),
-                        po.descricao_norm, po.valor_unitario_centavos, po.data_compra
-               order by vezes desc, po.data_compra desc
-               limit 60"""
-        ).fetchall()
-        top_prod = conn.execute(
-            """select min(descricao_original), count(*)
-               from precos_observados group by descricao_norm
-               order by count(*) desc limit 15"""
-        ).fetchall()
-        top_lojas = conn.execute(
-            """select coalesce(l.nome, nullif(po.mercado,''), po.regiao, '-'),
-                      count(*), count(distinct po.descricao_norm)
-               from precos_observados po
-               left join lojas l on l.id = po.loja_id
-               group by coalesce(l.nome, nullif(po.mercado,''), po.regiao, '-')
-               order by count(*) desc limit 15"""
-        ).fetchall()
+
+        # Se NAO ha observacoes cruas (ex: so' restaram os vigentes agregados),
+        # o painel le' de precos_vigentes pra nao mostrar "0" com dados existindo.
+        usar_vigentes = (int(tot_obs or 0) == 0)
+
+        if usar_vigentes:
+            vg = conn.execute(
+                """select count(*), count(distinct descricao_norm), count(distinct loja_id)
+                   from precos_vigentes"""
+            ).fetchone()
+            tot_obs, tot_prod, tot_lojas = vg  # reusa os contadores com os vigentes
+            mais = conn.execute(
+                """select coalesce(l.nome, nullif(v.mercado,''), v.regiao, '-') as loja,
+                          v.descricao_exemplo as produto,
+                          v.valor_mediana_centavos as preco, v.data_mais_recente,
+                          v.n_observacoes as vezes
+                   from precos_vigentes v
+                   left join lojas l on l.id = v.loja_id
+                   order by v.n_observacoes desc, v.data_mais_recente desc
+                   limit 60"""
+            ).fetchall()
+            top_prod = conn.execute(
+                """select descricao_exemplo, sum(n_observacoes)
+                   from precos_vigentes group by descricao_exemplo, descricao_norm
+                   order by sum(n_observacoes) desc limit 15"""
+            ).fetchall()
+            top_lojas = conn.execute(
+                """select coalesce(l.nome, nullif(v.mercado,''), v.regiao, '-'),
+                          sum(v.n_observacoes), count(distinct v.descricao_norm)
+                   from precos_vigentes v
+                   left join lojas l on l.id = v.loja_id
+                   group by coalesce(l.nome, nullif(v.mercado,''), v.regiao, '-')
+                   order by sum(v.n_observacoes) desc limit 15"""
+            ).fetchall()
+        else:
+            mais = conn.execute(
+                """select coalesce(l.nome, nullif(po.mercado,''), po.regiao, '-') as loja,
+                          min(po.descricao_original) as produto,
+                          po.valor_unitario_centavos as preco, po.data_compra,
+                          count(*) as vezes
+                   from precos_observados po
+                   left join lojas l on l.id = po.loja_id
+                   group by coalesce(l.nome, nullif(po.mercado,''), po.regiao, '-'),
+                            po.descricao_norm, po.valor_unitario_centavos, po.data_compra
+                   order by vezes desc, po.data_compra desc
+                   limit 60"""
+            ).fetchall()
+            top_prod = conn.execute(
+                """select min(descricao_original), count(*)
+                   from precos_observados group by descricao_norm
+                   order by count(*) desc limit 15"""
+            ).fetchall()
+            top_lojas = conn.execute(
+                """select coalesce(l.nome, nullif(po.mercado,''), po.regiao, '-'),
+                          count(*), count(distinct po.descricao_norm)
+                   from precos_observados po
+                   left join lojas l on l.id = po.loja_id
+                   group by coalesce(l.nome, nullif(po.mercado,''), po.regiao, '-')
+                   order by count(*) desc limit 15"""
+            ).fetchall()
     return {
         "tot_observacoes": int(tot_obs or 0),
         "tot_produtos": int(tot_prod or 0),
         "tot_lojas": int(tot_lojas or 0),
         "tot_cupons": int(tot_cupons or 0),
+        "fonte": "vigentes" if usar_vigentes else "observados",
         "mais_confirmados": [{"loja": r[0], "produto": r[1], "preco": int(r[2]),
                               "data": r[3], "vezes": int(r[4])} for r in mais],
         "top_produtos": [{"produto": r[0], "obs": int(r[1])} for r in top_prod],

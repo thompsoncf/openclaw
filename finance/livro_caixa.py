@@ -678,6 +678,21 @@ class LivroCaixa:
         conn.commit()
         return len(params)
 
+    def buscar_lancamentos(self, termo: str, limite: int = 100) -> list[dict]:
+        """Busca lançamentos cuja descrição casa com 'termo'.
+        Retorna lista de lançamentos com os mesmos campos que lancamentos_recentes."""
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                """select l.id, l.data, l.descricao, l.categoria, l.tipo, l.valor_centavos,
+                          l.origem, coalesce(m.nome, '-') as quem
+                    from lancamentos l left join membros m on m.id = l.membro_id
+                    where l.conta_id = %s and l.descricao ilike %s
+                    order by l.data desc, l.id desc limit %s""",
+                (self.conta_id, f"%{termo}%", limite),
+            ).fetchall()
+        return [{"id": r[0], "data": r[1], "descricao": r[2], "categoria": r[3], "tipo": r[4],
+                 "valor": int(r[5]), "origem": r[6], "quem": r[7]} for r in rows]
+
     def buscar_itens(self, termo: str, dias: int = 60) -> tuple[list[dict], int]:
         """Busca itens cuja descricao casa com 'termo' (nos ultimos N dias).
 

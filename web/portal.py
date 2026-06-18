@@ -375,11 +375,43 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 {% endfor %}{% else %}<p class="mut">Sem receitas neste mês.</p>{% endif %}
 
 <h1 style="font-size:1.05rem; margin-top:1.6rem">Lançamentos</h1>
-<div class="abas">
+<form method="get" action="/painel/financeiro" style="margin:.5rem 0 1rem">
+<input type="search" name="q" value="{{ q_search or '' }}" placeholder="🔎 Buscar lançamento..."
+       style="width:100%;padding:.6rem .8rem;border:1px solid #2a3a33;border-radius:8px;background:#161617;color:#ececec;font-size:.95rem">
+{% if q_search %}<input type="hidden" name="mes" value="{{ mes_sel }}">{% endif %}
+</form>
+{% if q_search %}
+<p style="margin:.5rem 0; color:#8a8a85">{{ n_resultados }} {{ 'resultado' if n_resultados == 1 else 'resultados' }} para "{{ q_search }}"
+{% if n_resultados > 0 %}<a href="/painel/financeiro?mes={{ mes_sel }}" style="color:#5dcaa5;text-decoration:none"> — limpar busca</a>{% endif %}
+</p>
+{% endif %}
+<div class="abas" {% if q_search %}style="display:none"{% endif %}>
 <button type="button" class="aba ativa" data-f="todos" onclick="filtrarTipo(this)">Todos</button>
 <button type="button" class="aba" data-f="despesa" onclick="filtrarTipo(this)">Despesas</button>
 <button type="button" class="aba" data-f="receita" onclick="filtrarTipo(this)">Receitas</button>
 </div>
+{% if q_search %}
+<table style="width:100%;border-collapse:collapse;margin:1rem 0">
+<tbody>
+{% if n_resultados == 0 %}
+<tr><td colspan="5" style="padding:1.2rem;text-align:center;color:#8a8a85">Nenhum lançamento encontrado pra "{{ q_search }}"</td></tr>
+{% else %}
+{% for l in lancamentos %}
+<tr data-tipo="{{ l.tipo }}" style="border-bottom:1px solid #2a2a2b">
+<td style="padding:.7rem .8rem;font-size:.9rem;white-space:nowrap">{{ l.data.strftime('%d/%m/%Y') }}</td>
+<td style="padding:.7rem .8rem">{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}</td>
+<td style="padding:.7rem .8rem;font-size:.85rem;color:#a8a8a3">{{ l.categoria }}</td>
+<td style="padding:.7rem .8rem;text-align:right;font-weight:500;color:{{ '#5dcaa5' if l.tipo=='receita' else '#f0b8b8' }}">
+{{ '+' if l.tipo=='receita' else '−' }} {{ brl(l.valor).replace('R$ ','') }}</td>
+<td style="padding:.7rem .4rem;text-align:right">
+<button type="button" class="lanc-rm" data-id="{{ l.id }}" onclick="apagarLanc(this)" title="apagar lançamento" style="margin:0;padding:.15rem .45rem;width:auto;background:transparent;color:#8a3636;border:0;cursor:pointer;font-size:.95rem">✕</button>
+</td>
+</tr>
+{% endfor %}
+{% endif %}
+</tbody>
+</table>
+{% else %}
 <div id="lista-dias">
 {% for dia in dias %}
 <div class="dep" data-tipos="{% for it in dia.itens %}{{ it.tipo }} {% endfor %}">
@@ -410,6 +442,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 </div>
 {% else %}<p class="mut">Nenhum lançamento neste período.</p>{% endfor %}
 </div>
+{% endif %}
 <p id="lanc-vazio" class="mut" style="display:none">Nenhum lançamento desse tipo neste período.</p>
 
 <h1 style="font-size:1.05rem; margin-top:1.6rem">Raio-x do consumo por departamento</h1>
@@ -935,7 +968,7 @@ def painel(request: Request):
 
 
 @router.get("/painel/financeiro", response_class=HTMLResponse)
-def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: str = ""):
+def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: str = "", q: str = ""):
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
@@ -958,37 +991,50 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
         membro_sel = None
 
     livro = LivroCaixa(pool, conta[0])
-    resumo = livro.resumo_mes(ano_sel, mes_num, membro_sel)
-    categorias = livro.despesas_por_categoria(ano_sel, mes_num, membro_sel)
-    maior_cat = max((v for _, v in categorias), default=0)
-    receitas_cat = livro.receitas_por_categoria(ano_sel, mes_num, membro_sel)
-    maior_rec = max((v for _, v in receitas_cat), default=0)
+
+    # Se há busca, usa buscar_lancamentos; senão fluxo normal
+    if q:
+        lancamentos = livro.buscar_lancamentos(q, limite=100)
+        dias = []  # plano, não agrupado
+        raiox = {}
+        resumo = {"saldo": 0, "receitas": 0, "despesas": 0}
+        categorias = []
+        receitas_cat = []
+        maior_cat = 0
+        maior_rec = 0
+    else:
+        resumo = livro.resumo_mes(ano_sel, mes_num, membro_sel)
+        categorias = livro.despesas_por_categoria(ano_sel, mes_num, membro_sel)
+        maior_cat = max((v for _, v in categorias), default=0)
+        receitas_cat = livro.receitas_por_categoria(ano_sel, mes_num, membro_sel)
+        maior_rec = max((v for _, v in receitas_cat), default=0)
+        lancamentos = livro.lancamentos_recentes(ano_sel, mes_num, membro_sel,
+                                                 tipo if tipo in ("despesa", "receita") else None,
+                                                 limite=1000)
+        # agrupa por DIA (pro accordion): cada dia com seu saldo e seus lancamentos
+        from collections import OrderedDict
+        por_dia = OrderedDict()
+        for l in lancamentos:
+            d = l["data"]
+            if d not in por_dia:
+                por_dia[d] = {"itens": [], "saldo": 0}
+            por_dia[d]["itens"].append(l)
+            por_dia[d]["saldo"] += l["valor"] if l["tipo"] == "receita" else -l["valor"]
+        dias = [{"data": d, "itens": g["itens"], "saldo": g["saldo"]} for d, g in por_dia.items()]
+        raiox_bruto = livro.raiox_por_departamento(ano=ano_sel, mes=mes_num, membro_id=membro_sel)
+        # monta {dep: {total, dias:[{data, itens, subtotal}]}} - itens divididos por dia
+        from collections import OrderedDict
+        raiox = {}
+        for dep, itens in raiox_bruto.items():
+            por_dia = OrderedDict()
+            for it in itens:
+                por_dia.setdefault(it["data"], []).append(it)
+            dias_dep = [{"data": d, "itens": its, "subtotal": sum(i["valor"] for i in its)}
+                        for d, its in por_dia.items()]
+            raiox[dep] = {"total": sum(i["valor"] for i in itens), "dias": dias_dep}
+
     from finance.models import CATEGORIAS_DESPESA, CATEGORIAS_RECEITA
     categorias_lista = CATEGORIAS_DESPESA + [c for c in CATEGORIAS_RECEITA if c not in CATEGORIAS_DESPESA]
-    lancamentos = livro.lancamentos_recentes(ano_sel, mes_num, membro_sel,
-                                             tipo if tipo in ("despesa", "receita") else None,
-                                             limite=1000)
-    # agrupa por DIA (pro accordion): cada dia com seu saldo e seus lancamentos
-    from collections import OrderedDict
-    por_dia = OrderedDict()
-    for l in lancamentos:
-        d = l["data"]
-        if d not in por_dia:
-            por_dia[d] = {"itens": [], "saldo": 0}
-        por_dia[d]["itens"].append(l)
-        por_dia[d]["saldo"] += l["valor"] if l["tipo"] == "receita" else -l["valor"]
-    dias = [{"data": d, "itens": g["itens"], "saldo": g["saldo"]} for d, g in por_dia.items()]
-    raiox_bruto = livro.raiox_por_departamento(ano=ano_sel, mes=mes_num, membro_id=membro_sel)
-    # monta {dep: {total, dias:[{data, itens, subtotal}]}} - itens divididos por dia
-    from collections import OrderedDict
-    raiox = {}
-    for dep, itens in raiox_bruto.items():
-        por_dia = OrderedDict()
-        for it in itens:
-            por_dia.setdefault(it["data"], []).append(it)
-        dias_dep = [{"data": d, "itens": its, "subtotal": sum(i["valor"] for i in its)}
-                    for d, its in por_dia.items()]
-        raiox[dep] = {"total": sum(i["valor"] for i in itens), "dias": dias_dep}
 
     meses = []
     y, m = hoje.year, hoje.month
@@ -1003,7 +1049,8 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
                    resumo=resumo, categorias=categorias, maior_cat=maior_cat,
                    lancamentos=lancamentos, dias=dias, raiox=raiox, pessoas=pessoas,
                    meses=meses, mes_sel=mes_sel, membro_sel=membro_sel, tipo_sel=tipo,
-                   receitas_cat=receitas_cat, maior_rec=maior_rec, categorias_lista=categorias_lista)
+                   receitas_cat=receitas_cat, maior_rec=maior_rec, categorias_lista=categorias_lista,
+                   q_search=q, n_resultados=len(lancamentos) if q else 0)
 
 
 # ---------- lista de compras ----------

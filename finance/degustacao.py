@@ -43,7 +43,7 @@ def _id_conta_degustacao(pool) -> int:
             return int(row[0])
         row = conn.execute(
             """insert into contas (tipo, nome, plano, status)
-               values ('pf', %s, NULL, 'degustacao')
+               values ('pf', %s, NULL, 'suspensa')
                returning id""",
             (CONTA_DEGUSTACAO_NOME,),
         ).fetchone()

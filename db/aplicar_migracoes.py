@@ -70,11 +70,16 @@ def aplicar_migracoes(pool, forcar: bool = False):
             com_execucao.append(nome)
             print(f"✓ {nome}")
         except Exception as e:
-            print(f"✗ {nome}: {e}")
-            if forcar:
-                print("  (continuando porque --forcar foi usado)")
+            # Se a tabela/índice já existe (migração já rodou no passado, sem rastreamento),
+            # registra como concluída e continua (idempotência)
+            if "already exists" in str(e).lower() or "duplicate" in str(e).lower():
+                registrar_migracao(pool, nome)
+                print(f"⊘ {nome} (já existia, registrada como concluída)")
             else:
-                raise
+                print(f"✗ {nome}: {e}")
+                if not forcar:
+                    raise
+                print("  (continuando porque --forcar foi usado)")
 
     return len(com_execucao)
 

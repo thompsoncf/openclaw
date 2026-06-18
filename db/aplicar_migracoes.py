@@ -1,7 +1,10 @@
 """Aplica todas as migrações SQL da pasta db/migracoes/ em ordem.
 
+Usa uma tabela de rastreamento (schema_migrations) para saber quais já rodaram.
+Assim é seguro rodar N vezes — só executa as novas.
+
 Uso:
-    python -m db.aplicar_migracoes              # aplica todas as pendentes
+    python -m db.aplicar_migracoes              # aplica pendentes
     python -m db.aplicar_migracoes --forcar     # reaplica tudo (perigoso!)
 """
 import os
@@ -9,8 +12,38 @@ import sys
 from pathlib import Path
 from psycopg_pool import ConnectionPool
 
+def criar_tabela_rastreamento(pool):
+    """Cria a tabela schema_migrations se não existir."""
+    with pool.connection() as conn:
+        conn.execute(
+            """create table if not exists schema_migrations (
+                id serial primary key,
+                nome text unique not null,
+                executada_em timestamptz default now()
+            )"""
+        )
+        conn.commit()
+
+def migracao_ja_rodou(pool, nome: str) -> bool:
+    """Verifica se uma migração já foi executada."""
+    with pool.connection() as conn:
+        r = conn.execute(
+            "select 1 from schema_migrations where nome = %s", (nome,)
+        ).fetchone()
+    return r is not None
+
+def registrar_migracao(pool, nome: str):
+    """Registra que uma migração foi executada."""
+    with pool.connection() as conn:
+        conn.execute(
+            "insert into schema_migrations (nome) values (%s)", (nome,)
+        )
+        conn.commit()
+
 def aplicar_migracoes(pool, forcar: bool = False):
     """Lê e executa todos os .sql da pasta migracoes/ em ordem numérica."""
+    criar_tabela_rastreamento(pool)
+
     migracoes_dir = Path(__file__).parent / "migracoes"
     if not migracoes_dir.exists():
         print("Diretório de migrações não encontrado.")
@@ -23,15 +56,21 @@ def aplicar_migracoes(pool, forcar: bool = False):
 
     com_execucao = []
     for arquivo in arquivos:
+        nome = arquivo.name
+        if not forcar and migracao_ja_rodou(pool, nome):
+            print(f"⊘ {nome} (já rodou)")
+            continue
+
         sql = arquivo.read_text(encoding="utf-8")
         try:
             with pool.connection() as conn:
                 conn.execute(sql)
                 conn.commit()
-            com_execucao.append(arquivo.name)
-            print(f"✓ {arquivo.name}")
+            registrar_migracao(pool, nome)
+            com_execucao.append(nome)
+            print(f"✓ {nome}")
         except Exception as e:
-            print(f"✗ {arquivo.name}: {e}")
+            print(f"✗ {nome}: {e}")
             if forcar:
                 print("  (continuando porque --forcar foi usado)")
             else:

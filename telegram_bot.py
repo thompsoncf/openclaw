@@ -49,6 +49,26 @@ def _parece_convite(texto: str) -> bool:
     return bool(_re.fullmatch(r"[A-Z0-9]{2,4}-[A-F0-9]{4}", (texto or "").strip().upper()))
 
 
+def _reivindicar_update(update_id: int) -> bool:
+    """Retorna True se ESTE processo reivindicou o update (deve processar).
+    False se ja' foi reivindicado (outra instancia/reentrega) -> pular.
+
+    Protege contra: multiplas instancias vivas + reentrega do Telegram."""
+    if update_id is None:
+        return True   # sem id (raro) -> processa
+    try:
+        with _pool.connection() as conn:
+            row = conn.execute(
+                "insert into updates_processados (update_id) values (%s) "
+                "on conflict (update_id) do nothing returning update_id",
+                (update_id,),
+            ).fetchone()
+            conn.commit()
+        return row is not None   # inseriu = nosso; None = ja' existia
+    except Exception:  # noqa: BLE001
+        return True   # se a checagem falhar, melhor processar do que perder
+
+
 _pool = None
 _brain: Brain | None = None
 _transcritor = None
@@ -80,6 +100,11 @@ async def start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
 
 async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
                      media_type: str = "image/jpeg", dica_qr: bool = False, eh_cupom: bool | None = None):
+    # Idempotencia: se este update ja' foi processado (reentrega ou multiplas instancias),
+    # pula. Faz isso ANTES de qualquer trabalho caro (download, API).
+    if not _reivindicar_update(update.update_id):
+        return  # update repetido: ja' tratado
+
     achado = ct.membro_por_telegram(_pool, update.effective_user.id)
     if achado is None:
         # talvez seja um CODIGO DE CONVITE (ex: "LAR-7K2M")

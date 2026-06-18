@@ -1,10 +1,10 @@
-"""Estatisticas de uso das categorias em TODAS as contas (visao do dono do SaaS).
+﻿"""Estatisticas de uso das categorias em TODAS as contas (visao do dono do SaaS).
 
 Serve pra DECIDIR o que mexer na lista oficial (finance/models.py):
 - Categoria "Outros" com % alto  -> falta categoria; vale criar uma nova.
 - Categoria oficial com ZERO uso  -> candidata a remover.
 
-So' leitura: nenhum dado e' alterado. Junta grafias (ex 'Saude'/'SaÃºde') via
+So' leitura: nenhum dado e' alterado. Junta grafias (ex 'Saude'/'Saúde') via
 canonizar_categoria, igual a' exibicao do app. Como a canonizacao sempre cai
 numa categoria oficial (ou 'Outros'), qualquer categoria solta/antiga e'
 contabilizada dentro de 'Outros' automaticamente.
@@ -77,7 +77,7 @@ def estatisticas_raiox(pool) -> list[dict]:
 
     Mostra EXATAMENTE o que o cliente ve: so' os departamentos da lista branca
     (finance/models.py: DEPARTAMENTOS_RAIOX) que tem item de cupom. Nivel de ITEM
-    (itens_lancamento), nao de lancamento. Ordenado por nÂº de itens (desc).
+    (itens_lancamento), nao de lancamento. Ordenado por nº de itens (desc).
     """
     # fallback igual a' lista branca, caso models.py atrase no deploy
     try:
@@ -163,3 +163,96 @@ def estatisticas_precos(pool) -> dict:
         "top_produtos": [{"produto": r[0], "obs": int(r[1])} for r in top_prod],
         "top_lojas": [{"loja": r[0], "obs": int(r[1]), "produtos": int(r[2])} for r in top_lojas],
     }
+
+
+def estatisticas_funil(pool) -> dict:
+    """Funil de aquisição pro painel admin: visitante -> testou -> cadastrou -> pagou.
+
+    Cruza a tabela `leads` (test-drive da landing) com `contas` (status de pagamento).
+    "Pagou" = conta com status='ativa' (o ciclo trial->ativa ja' existe via ct.ativar).
+
+    Estrutura:
+      {
+        "geral": {
+          "visitantes", "testaram", "cadastraram", "pagaram",
+          "pct_testou", "pct_cadastrou", "pct_pagou"   # % sobre visitantes
+        },
+        "por_canal": [
+          {"canal", "visitantes", "testaram", "cadastraram", "pagaram"}, ...
+        ],
+        "contas_status": [{"status", "qtd"}, ...],       # saude das contas reais
+        "trials_vencendo": [{"id","nome","plano","vencimento"}, ...],  # <=3 dias
+        "tem_tabela_leads": bool,   # False se a migracao 023 ainda nao rodou
+      }
+    """
+    out: dict = {
+        "geral": {"visitantes": 0, "testaram": 0, "cadastraram": 0, "pagaram": 0,
+                  "pct_testou": 0.0, "pct_cadastrou": 0.0, "pct_pagou": 0.0},
+        "por_canal": [],
+        "contas_status": [],
+        "trials_vencendo": [],
+        "tem_tabela_leads": False,
+    }
+
+    with pool.connection() as conn:
+        # a tabela leads pode ainda nao existir (antes da migracao 023)
+        existe = conn.execute(
+            "select to_regclass('public.leads') is not null"
+        ).fetchone()[0]
+        out["tem_tabela_leads"] = bool(existe)
+
+        if existe:
+            g = conn.execute(
+                """select
+                     count(*),
+                     count(*) filter (where l.gastos_usados > 0),
+                     count(*) filter (where l.virou_conta),
+                     count(*) filter (where c.status = 'ativa')
+                   from leads l
+                   left join contas c on c.id = l.conta_id"""
+            ).fetchone()
+            vis, test, cad, pag = (int(g[0]), int(g[1]), int(g[2]), int(g[3]))
+            pct = lambda n: round(100.0 * n / vis, 1) if vis else 0.0
+            out["geral"] = {
+                "visitantes": vis, "testaram": test,
+                "cadastraram": cad, "pagaram": pag,
+                "pct_testou": pct(test), "pct_cadastrou": pct(cad), "pct_pagou": pct(pag),
+            }
+
+            for canal, v, t, ca, pa in conn.execute(
+                """select l.canal,
+                          count(*),
+                          count(*) filter (where l.gastos_usados > 0),
+                          count(*) filter (where l.virou_conta),
+                          count(*) filter (where c.status = 'ativa')
+                   from leads l
+                   left join contas c on c.id = l.conta_id
+                   group by l.canal order by count(*) desc"""
+            ).fetchall():
+                out["por_canal"].append({
+                    "canal": canal, "visitantes": int(v), "testaram": int(t),
+                    "cadastraram": int(ca), "pagaram": int(pa),
+                })
+
+        # saude das contas reais (ignora a conta-degustacao)
+        for status, qtd in conn.execute(
+            """select status, count(*) from contas
+               where nome <> '__degustacao_visitantes__'
+               group by status order by count(*) desc"""
+        ).fetchall():
+            out["contas_status"].append({"status": status, "qtd": int(qtd)})
+
+        # trials vencendo nos proximos 3 dias (agir antes de perder)
+        for cid, nome, plano, venc in conn.execute(
+            """select id, nome, plano, vencimento from contas
+               where status = 'trial'
+                 and vencimento between current_date and current_date + 3
+                 and nome <> '__degustacao_visitantes__'
+               order by vencimento"""
+        ).fetchall():
+            out["trials_vencendo"].append({
+                "id": int(cid), "nome": nome, "plano": plano,
+                "vencimento": venc.isoformat() if venc else None,
+            })
+
+    return out

@@ -297,7 +297,10 @@ async def whatsapp(request: Request, background: BackgroundTasks):
     # nunca responder pro proprio numero do bot (evita From==To)
     bot = os.environ.get("TWILIO_WHATSAPP_FROM", "").replace("whatsapp:", "").lstrip("+")
     if numero and numero.lstrip("+") != bot:
-        background.add_task(processar_whatsapp, numero, nome, body, media_url, media_ctype)
+        # Idempotencia: reivindicar a mensagem ANTES de processar (evita reentrega/duplicacao)
+        msg_sid = form.get("MessageSid") or ""
+        if ct.reivindicar_mensagem(_setup(), f"wa:{msg_sid}"):
+            background.add_task(processar_whatsapp, numero, nome, body, media_url, media_ctype)
     # responde rapido (200) pra nao estourar o timeout do Twilio
     return Response(content="<Response></Response>", media_type="application/xml")
 

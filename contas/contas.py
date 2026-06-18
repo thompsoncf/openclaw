@@ -317,3 +317,26 @@ def desativar_membro(pool, membro_id: int):
         conn.commit()
     if row:
         registrar_evento(pool, row[0], "membro_desativado", "", membro_id=membro_id)
+
+
+# ---------- Idempotencia (Telegram + WhatsApp) ----------
+
+def reivindicar_mensagem(pool, chave: str) -> bool:
+    """Retorna True se ESTE processo reivindicou a mensagem (deve processar).
+    False se ja' foi reivindicada (outra instancia/reentrega) -> pular.
+
+    Protege contra: multiplas instancias + reentrega do Telegram/Twilio.
+    Chave: 'tg:update_id' (Telegram) ou 'wa:MessageSid' (WhatsApp)."""
+    if not chave:
+        return True   # sem chave (raro) -> processa
+    try:
+        with pool.connection() as conn:
+            row = conn.execute(
+                "insert into mensagens_processadas (chave) values (%s) "
+                "on conflict (chave) do nothing returning chave",
+                (chave,),
+            ).fetchone()
+            conn.commit()
+        return row is not None   # inseriu = nosso; None = ja' existia
+    except Exception:  # noqa: BLE001
+        return True   # se a checagem falhar, melhor processar do que perder

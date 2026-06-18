@@ -108,7 +108,7 @@ def brl(centavos: int) -> str:
 
 _BASE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{ titulo }} - OpenClaw</title>
+<title>{{ titulo }} - Zaq</title>
 <style>
 :root { color-scheme: dark; }
 body{margin:0;min-height:100vh;font-family:system-ui,-apple-system,sans-serif;
@@ -180,7 +180,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
 .conv-invite{margin:.3rem 0;font-size:.82rem}
 .conv-links{display:flex;gap:4px;flex-wrap:wrap;margin-top:.3rem}
 </style></head><body>
-<div class="topo"><span class="logo">OpenClaw</span><span>
+<div class="topo"><span class="logo">Zaq</span><span>
 {% if logado %}<a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/painel/compras">Compras</a><a href="/sair">Sair</a>
 {% else %}<a href="/login">Entrar</a><a href="/cadastro">Criar conta</a>{% endif %}
 </span></div>

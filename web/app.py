@@ -355,7 +355,7 @@ def health():
 _PAGINA = """<!doctype html>
 <html lang="pt-br"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OpenClaw</title>
+<title>Zaq</title>
 <style>
   :root { color-scheme: light dark; }
   body { margin:0; min-height:100vh; display:flex; align-items:center;
@@ -371,7 +371,7 @@ _PAGINA = """<!doctype html>
     border-top:1px solid #2a2a2b; padding-top:1.2rem; }
 </style></head>
 <body><div class="card">
-  <h1>OpenClaw</h1>
+  <h1>Zaq</h1>
   <p>Seu assistente financeiro pessoal.</p>
   <p class="status"><span class="dot"></span>no ar</p>
   <p class="soon">Fale com o assistente no Telegram ou no WhatsApp.<br><br>

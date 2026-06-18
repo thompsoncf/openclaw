@@ -42,7 +42,7 @@ _NEGADO = HTMLResponse("<h1>404</h1>", status_code=404)
 
 _ADMIN_BASE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Admin - OpenClaw</title>
+<title>Admin - Zaq</title>
 <style>
 :root { color-scheme: dark; }
 body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#0e0e0f;
@@ -71,7 +71,7 @@ button.danger{background:#6e2b2b}button.danger:hover{background:#8a3636}
 .mut{color:#a8a8a3;font-size:.85rem}
 form.inline{display:inline;margin:0}
 </style></head><body>
-<div class="topo"><span class="logo">OpenClaw <span>· admin</span></span>
+<div class="topo"><span class="logo">Zaq <span>· admin</span></span>
 <span><a href="/admin">Contas</a><a href="/admin/funil">Funil</a><a href="/admin/qr">QR notas</a><a href="/admin/precos">Preços</a><a href="/admin/categorias">Categorias</a><a href="/admin/banco">Banco</a><a href="/painel">Meu painel</a><a href="/sair">Sair</a></span></div>
 <div class="wrap">{% block conteudo %}{% endblock %}</div>
 </body></html>"""

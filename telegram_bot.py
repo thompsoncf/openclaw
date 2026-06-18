@@ -49,6 +49,20 @@ def _parece_convite(texto: str) -> bool:
     return bool(_re.fullmatch(r"[A-Z0-9]{2,4}-[A-F0-9]{4}", (texto or "").strip().upper()))
 
 
+def _degustar_tg(texto: str) -> str:
+    from core.brain import Brain
+    from finance.degustacao import responder_degustacao
+    return responder_degustacao(_pool, _brain or Brain(), texto)
+
+
+def _saudacao_lead(restantes: int) -> str:
+    return (
+        "Opa! 👋 Eu sou o Zaq, seu assistente financeiro aqui no Telegram. "
+        "Quer ver como funciona? Me diz um gasto, tipo *almoço 35* ou *uber 22*, "
+        "que eu organizo pra você na hora.\n\n"
+        f"_(Você tem {restantes} testes grátis. Depois é só criar sua conta em "
+        "zaq-ia.com e ganhar 7 dias pra usar tudo, incluindo leitura de cupom.)_"
+    )
 
 
 _pool = None
@@ -68,7 +82,11 @@ def _agente_do(membro, conta):
 async def start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
     achado = ct.membro_por_telegram(_pool, update.effective_user.id)
     if achado is None:
-        await update.message.reply_text(MSG_NAO_CADASTRADO)
+        est = ct.lead_estado(_pool, "telegram", str(update.effective_user.id))
+        msg = (_saudacao_lead(est["restantes"]) if est["pode_testar"]
+               else ("Você já usou seus testes grátis 😊 Curtiu? Cria sua conta e "
+                     "ganha 7 dias grátis pra usar tudo (incluindo cupom): zaq-ia.com"))
+        await update.message.reply_text(msg, parse_mode="Markdown")
         return
     membro, _conta = achado
     MemoriaPersistente(_pool, f"tg:{membro.id}").limpar()   # RESET no banco
@@ -113,15 +131,10 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
             return
         # sem texto = saudação inicial
         if not texto:
-            await update.message.reply_text(
-                "Opa! 👋 Eu sou o Zaq, seu assistente financeiro no Telegram. "
-                "Quer ver como funciona? Me diz um gasto, tipo *almoço 35* "
-                "ou *uber 22*, que eu organizo pra você. "
-                f"(Você tem {est['restantes']} testes grátis.)")
+            await update.message.reply_text(_saudacao_lead(est["restantes"]), parse_mode="Markdown")
             return
         # processa o gasto de teste DE VERDADE
-        from finance.degustacao import responder_degustacao
-        resp = responder_degustacao(_pool, _brain, texto)
+        resp = _degustar_tg(texto)
         novo = ct.lead_registrar_gasto(_pool, "telegram", str(update.effective_user.id))
         extra = ""
         if novo >= ct.LEAD_LIMITE_GASTOS:

@@ -72,7 +72,7 @@ button.danger{background:#6e2b2b}button.danger:hover{background:#8a3636}
 form.inline{display:inline;margin:0}
 </style></head><body>
 <div class="topo"><span class="logo">Zaq <span>· admin</span></span>
-<span><a href="/admin">Contas</a><a href="/admin/funil">Funil</a><a href="/admin/custos">Custos</a><a href="/admin/qr">QR notas</a><a href="/admin/precos">Preços</a><a href="/admin/categorias">Categorias</a><a href="/admin/banco">Banco</a><a href="/painel">Meu painel</a><a href="/sair">Sair</a></span></div>
+<span><a href="/admin">Contas</a><a href="/admin/funil">Funil</a><a href="/admin/custos">Custos</a><a href="/admin/qr">QR notas</a><a href="/admin/precos">Preços</a><a href="/admin/categorias">Categorias</a><a href="/admin/banco">Banco</a><a href="/admin/pesquisas">Pesquisas</a><a href="/painel">Meu painel</a><a href="/sair">Sair</a></span></div>
 <div class="wrap">{% block conteudo %}{% endblock %}</div>
 </body></html>"""
 
@@ -290,7 +290,26 @@ _ADMIN_CUSTOS = """{% extends "abase" %}{% block conteudo %}
 <p class="mut" style="margin-top:1rem">Custo estimado (Sonnet 4.6, câmbio ~5.40). A conta-degustação entra no total mas não conta como cliente na média.</p>
 {% endblock %}"""
 
-_env = Environment(loader=DictLoader({"abase": _ADMIN_BASE, "ahome": _ADMIN_HOME, "aqr": _ADMIN_QR, "acat": _ADMIN_CATEGORIAS, "abanco": _ADMIN_BANCO, "afunil": _ADMIN_FUNIL, "acustos": _ADMIN_CUSTOS}),
+_ADMIN_PESQUISAS = """{% extends "abase" %}{% block conteudo %}
+<h1>Pesquisas de fornecedores</h1>
+{% if aviso %}<div class="metric" style="border-color:#1d9e75;color:#9fe8c9">{{ aviso }}</div>{% endif %}
+
+<div class="card"><h2>Respostas (últimas 200)</h2>
+<table><tr><th>ID</th><th>Segmento</th><th>Criado em</th><th>Respostas resumidas</th></tr>
+{% for p in pesquisas %}<tr>
+<td>{{ p.id }}</td>
+<td>{{ p.segmento }}</td>
+<td class="mut">{{ p.criado_em.strftime('%d/%m/%Y %H:%M') }}</td>
+<td class="mut" style="max-width:400px;word-break:break-word">
+  {% for k, v in p.respostas.items() %}
+  {{ k }}: {{ v if not v is string else v[:50] }}{% if not loop.last %}<br>{% endif %}
+  {% endfor %}
+</td></tr>
+{% else %}<tr><td colspan="4" class="mut">Sem pesquisas ainda.</td></tr>
+{% endfor %}</table></div>
+{% endblock %}"""
+
+_env = Environment(loader=DictLoader({"abase": _ADMIN_BASE, "ahome": _ADMIN_HOME, "aqr": _ADMIN_QR, "acat": _ADMIN_CATEGORIAS, "abanco": _ADMIN_BANCO, "afunil": _ADMIN_FUNIL, "acustos": _ADMIN_CUSTOS, "apesquisas": _ADMIN_PESQUISAS}),
                    autoescape=select_autoescape())
 _env.globals["brl"] = brl
 
@@ -403,6 +422,28 @@ def admin_categorias(request: Request):
     raiox = estatisticas_raiox(pool)
     return HTMLResponse(_env.get_template("acat").render(
         d=dados, raiox=raiox, aviso=request.session.pop("admin_aviso", None)))
+
+
+@router.get("/admin/pesquisas", response_class=HTMLResponse)
+def admin_pesquisas(request: Request):
+    """Lista respostas de pesquisas de fornecedores (Zaq Fornecedor fase 1)."""
+    if not _admin(request):
+        return _NEGADO
+    pool = get_pool()
+    with pool.connection() as c:
+        rows = c.execute("""select id, segmento, respostas, criado_em
+                            from pesquisa_fornecedor order by id desc limit 200""").fetchall()
+    import json
+    pesquisas = []
+    for r in rows:
+        pesquisas.append({
+            "id": r[0],
+            "segmento": r[1],
+            "respostas": r[2] if isinstance(r[2], dict) else (json.loads(r[2]) if r[2] else {}),
+            "criado_em": r[3]
+        })
+    return HTMLResponse(_env.get_template("apesquisas").render(
+        pesquisas=pesquisas, aviso=request.session.pop("admin_aviso", None)))
 
 
 @router.get("/admin/qr", response_class=HTMLResponse)

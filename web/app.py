@@ -440,6 +440,31 @@ def health():
         return JSONResponse({"status": "degraded", "db": str(e)}, status_code=503)
 
 
+@app.get("/pesquisa/{segmento}", response_class=HTMLResponse)
+def pesquisa_form(segmento: str):
+    """Formulário de pesquisa para fornecedores (Zaq Fornecedor fase 1)."""
+    return _HTML_PESQUISA
+
+
+@app.post("/api/pesquisa-fornecedor")
+async def pesquisa_salvar(request: Request):
+    """Salva respostas da pesquisa de fornecedor (anônima, jsonb)."""
+    try:
+        dados = await request.json()
+        seg = (dados.get("segmento") or "hortifruti")[:40]
+        resp = dados.get("respostas") or {}
+        import json as _json
+        pool = _setup()
+        with pool.connection() as c:
+            c.execute("insert into pesquisa_fornecedor (segmento, respostas) values (%s, %s)",
+                      (seg, _json.dumps(resp)))
+            c.commit()
+        return JSONResponse({"ok": True})
+    except Exception as e:  # noqa: BLE001
+        log.error("erro ao salvar pesquisa: %s", e)
+        return JSONResponse({"erro": str(e)}, status_code=400)
+
+
 _PAGINA = """<!doctype html>
 <html lang="pt-br"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -466,3 +491,168 @@ _PAGINA = """<!doctype html>
   <a href="/cadastro" style="color:#5dcaa5">Criar conta</a> &nbsp;·&nbsp;
   <a href="/login" style="color:#5dcaa5">Entrar</a></p>
 </div></body></html>"""
+
+
+_HTML_PESQUISA = """<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zaq — Como funciona sua distribuidora</title>
+<style>
+  :root{ --verde:#1d9e75; --verde2:#5dcaa5; --bg:#0f0f10; --card:#161617; --bord:#2a2a2b; --txt:#ececec; --mut:#a8a8a3; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--txt); font-family:-apple-system,Segoe UI,Roboto,sans-serif; line-height:1.5; }
+  .wrap{ max-width:640px; margin:0 auto; padding:1.5rem 1.1rem 4rem; }
+  .logo{ font-size:1.6rem; font-weight:700; color:var(--verde2); letter-spacing:-.5px; }
+  .sub{ color:var(--mut); font-size:.95rem; margin:.3rem 0 1.6rem; }
+  .q{ background:var(--card); border:1px solid var(--bord); border-radius:14px; padding:1.1rem 1.1rem .9rem; margin-bottom:1rem; }
+  .q h3{ font-size:1rem; font-weight:600; margin:0 0 .8rem; }
+  .q .hint{ font-size:.8rem; color:var(--mut); font-weight:400; }
+  .opt{ display:flex; align-items:center; gap:.7rem; padding:.6rem .7rem; border:1px solid var(--bord); border-radius:10px; margin-bottom:.45rem; cursor:pointer; transition:background .15s, border-color .15s; }
+  .opt:hover{ background:#1d1d1f; }
+  .opt input{ width:18px; height:18px; accent-color:var(--verde); flex-shrink:0; }
+  .opt.sel{ border-color:var(--verde); background:rgba(29,158,117,.08); }
+  .opt span{ font-size:.92rem; }
+  textarea{ width:100%; background:#0f0f10; border:1px solid var(--bord); border-radius:10px; color:var(--txt); padding:.7rem; font-size:.92rem; font-family:inherit; resize:vertical; min-height:70px; }
+  .btn{ width:100%; background:var(--verde); color:#fff; border:none; padding:.95rem; border-radius:12px; font-size:1.05rem; font-weight:600; cursor:pointer; margin-top:1rem; }
+  .btn:active{ transform:scale(.99); }
+  .btn:disabled{ opacity:.5; }
+  .ok{ text-align:center; padding:3rem 1rem; }
+  .ok .big{ font-size:3rem; }
+  .ok h2{ color:var(--verde2); }
+  .prog{ position:sticky; top:0; background:var(--bg); padding:.6rem 0; margin:-1.5rem 0 1rem; z-index:5; }
+  .prog .bar{ height:5px; background:var(--bord); border-radius:3px; overflow:hidden; }
+  .prog .fill{ height:100%; width:0; background:var(--verde); transition:width .3s; }
+  .prog .txt{ font-size:.78rem; color:var(--mut); margin-top:.35rem; }
+</style>
+</head>
+<body>
+<div class="wrap" id="wrap">
+
+  <div class="logo">Zaq</div>
+  <div class="sub">Poucas perguntas rápidas pra entender como sua distribuidora funciona. É só marcar — leva 3 minutos. 🚀</div>
+
+  <div class="prog"><div class="bar"><div class="fill" id="fill"></div></div><div class="txt" id="ptxt">0 de 11 respondidas</div></div>
+
+  <form id="form">
+    <!-- as perguntas são injetadas pelo JS -->
+  </form>
+
+  <button class="btn" id="enviar" disabled>Responder depois (preencha pra enviar)</button>
+</div>
+
+<div class="wrap ok" id="obrigado" style="display:none">
+  <div class="big">✓</div>
+  <h2>Recebido, valeu!</h2>
+  <p class="sub">Suas respostas chegaram. Em breve a gente conversa sobre como o Zaq pode ajudar sua distribuidora.</p>
+</div>
+
+<script>
+var SEGMENTO = "hortifruti";
+
+var PERGUNTAS = [
+  {id:"q1", tipo:"radio", t:"Quantos produtos diferentes você vende?",
+   opts:["Até 30","30 a 100","100 a 300","Mais de 300"]},
+  {id:"q2", tipo:"radio", t:"Como você controla seus produtos hoje?",
+   opts:["Na cabeça / de memória","Caderno ou papel","Planilha (Excel/Google)","Algum sistema/app","WhatsApp"]},
+  {id:"q3", tipo:"radio", t:"Com que frequência seus preços mudam?",
+   opts:["Todo dia","Toda semana","De vez em quando","Preço fixo, quase não muda"]},
+  {id:"q4", tipo:"check", t:"Você vende seus produtos por:", hint:"(pode marcar vários)",
+   opts:["Quilo (kg)","Caixa","Dúzia","Unidade","Sacola / saco"]},
+  {id:"q5", tipo:"check", t:"Como seus clientes fazem o pedido hoje?", hint:"(pode marcar vários)",
+   opts:["Ligação (telefone)","WhatsApp","Pessoalmente","Você que passa e oferece"]},
+  {id:"q6", tipo:"radio", t:"Quantos pedidos você recebe por dia?",
+   opts:["Até 10","10 a 30","30 a 50","Mais de 50"]},
+  {id:"q7", tipo:"check", t:"O que mais te dá trabalho nos pedidos hoje?", hint:"(pode marcar vários)",
+   opts:["Anotar tudo certo","Cliente esquece itens","Preço desatualizado","Organizar a rota de entrega","Confusão de quem pediu o quê"]},
+  {id:"q8", tipo:"radio", t:"Como funciona sua entrega?",
+   opts:["Dias fixos por bairro","Todo dia, conforme o pedido","Só quando junta bastante pedido","Outro"]},
+  {id:"q9", tipo:"radio", t:"Se seu cliente montasse o pedido sozinho, com seus preços, e caísse pronto e organizado no seu WhatsApp — quanto valeria por mês pra você?",
+   opts:["Não pagaria","Até R$ 50/mês","R$ 50 a R$ 150/mês","R$ 150 a R$ 300/mês","Mais de R$ 300/mês"]},
+  {id:"q10", tipo:"radio", t:"Na sua opinião, quem deveria pagar por esse sistema?",
+   opts:["Eu (o fornecedor)","O cliente que faz o pedido","Os dois dividem","Não sei"]},
+  {id:"q11", tipo:"texto", t:"Quer comentar mais alguma coisa?", hint:"(opcional)"},
+];
+
+var respostas = {};
+var formEl = document.getElementById('form');
+
+PERGUNTAS.forEach(function(p){
+  var div = document.createElement('div');
+  div.className = 'q';
+  var html = '<h3>'+p.t+(p.hint?' <span class="hint">'+p.hint+'</span>':'')+'</h3>';
+  if (p.tipo === 'texto'){
+    html += '<textarea data-q="'+p.id+'" placeholder="Escreva aqui (opcional)"></textarea>';
+  } else {
+    p.opts.forEach(function(o){
+      var inputType = p.tipo === 'check' ? 'checkbox' : 'radio';
+      html += '<label class="opt" data-q="'+p.id+'" data-o="'+o+'">'
+            + '<input type="'+inputType+'" name="'+p.id+'" value="'+o+'">'
+            + '<span>'+o+'</span></label>';
+    });
+  }
+  div.innerHTML = html;
+  formEl.appendChild(div);
+});
+
+formEl.addEventListener('change', function(e){
+  var lbl = e.target.closest('.opt');
+  if (lbl){
+    var q = lbl.getAttribute('data-q');
+    var p = PERGUNTAS.find(function(x){return x.id===q;});
+    if (p.tipo === 'radio'){
+      Array.prototype.forEach.call(formEl.querySelectorAll('.opt[data-q="'+q+'"]'), function(l){ l.classList.remove('sel'); });
+      lbl.classList.add('sel');
+      respostas[q] = lbl.getAttribute('data-o');
+    } else {
+      lbl.classList.toggle('sel', e.target.checked);
+      respostas[q] = respostas[q] || [];
+      var v = lbl.getAttribute('data-o');
+      if (e.target.checked){ if (respostas[q].indexOf(v)===-1) respostas[q].push(v); }
+      else { respostas[q] = respostas[q].filter(function(x){return x!==v;}); }
+    }
+    atualizar();
+  }
+});
+formEl.addEventListener('input', function(e){
+  if (e.target.tagName === 'TEXTAREA'){
+    respostas[e.target.getAttribute('data-q')] = e.target.value;
+  }
+});
+
+function atualizar(){
+  var obrig = PERGUNTAS.filter(function(p){return p.id!=='q11';});
+  var feitas = obrig.filter(function(p){
+    var r = respostas[p.id];
+    return r && (Array.isArray(r) ? r.length>0 : true);
+  }).length;
+  var pct = Math.round(feitas / obrig.length * 100);
+  document.getElementById('fill').style.width = pct + '%';
+  document.getElementById('ptxt').textContent = feitas + ' de ' + obrig.length + ' respondidas';
+  var btn = document.getElementById('enviar');
+  if (feitas === obrig.length){
+    btn.disabled = false; btn.textContent = 'Enviar respostas';
+  } else {
+    btn.disabled = true; btn.textContent = 'Preencha tudo pra enviar ('+(obrig.length-feitas)+' faltando)';
+  }
+}
+
+document.getElementById('enviar').onclick = function(){
+  this.disabled = true; this.textContent = 'Enviando...';
+  fetch('/api/pesquisa-fornecedor', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ segmento: SEGMENTO, respostas: respostas })
+  }).then(function(r){
+    if (!r.ok) throw new Error('falha');
+    document.getElementById('wrap').style.display = 'none';
+    document.getElementById('obrigado').style.display = 'block';
+    window.scrollTo(0,0);
+  }).catch(function(){
+    var b = document.getElementById('enviar');
+    b.disabled = false; b.textContent = 'Erro ao enviar — tente de novo';
+  });
+};
+</script>
+</body>
+</html>"""

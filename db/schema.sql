@@ -21,7 +21,7 @@ create table if not exists contas (
 
 create table if not exists membros (
     id          bigserial primary key,
-    conta_id    bigint not null references contas(id) on delete cascade,
+    conta_id    bigint not null references contas(id) on delete restrict,
     nome        text,
     papel       text not null default 'membro' check (papel in ('dono','membro')),
     telegram_id bigint unique,
@@ -51,7 +51,7 @@ create table if not exists modulos (
 );
 
 create table if not exists conta_modulos (
-    conta_id  bigint not null references contas(id) on delete cascade,
+    conta_id  bigint not null references contas(id) on delete restrict,
     modulo    text not null references modulos(codigo),
     ativo     boolean not null default true,
     criado_em timestamptz not null default now(),
@@ -60,7 +60,7 @@ create table if not exists conta_modulos (
 
 create table if not exists lancamentos (
     id             bigserial primary key,
-    conta_id       bigint not null references contas(id) on delete cascade,
+    conta_id       bigint not null references contas(id) on delete restrict,
     membro_id      bigint references membros(id) on delete set null,
     tipo           text not null check (tipo in ('despesa', 'receita')),
     valor_centavos bigint not null check (valor_centavos >= 0),
@@ -87,7 +87,7 @@ create table if not exists itens_lancamento (
 create index if not exists idx_itens_lancamento on itens_lancamento (lancamento_id);
 
 create table if not exists uso_diario (
-    conta_id  bigint not null references contas(id) on delete cascade,
+    conta_id  bigint not null references contas(id) on delete restrict,
     dia       date   not null,
     mensagens int    not null default 0,
     primary key (conta_id, dia)
@@ -95,7 +95,7 @@ create table if not exists uso_diario (
 
 create table if not exists eventos_conta (
     id        bigserial primary key,
-    conta_id  bigint not null references contas(id) on delete cascade,
+    conta_id  bigint not null references contas(id) on delete restrict,
     membro_id bigint references membros(id) on delete set null,
     tipo      text not null,
     detalhe   text not null default '',
@@ -119,7 +119,7 @@ on conflict (codigo) do nothing;
 -- Auditoria de leitura de QR em fotos/PDFs de NFC-e
 create table if not exists qr_leituras (
     id bigserial primary key,
-    conta_id bigint not null references contas(id) on delete cascade,
+    conta_id bigint not null references contas(id) on delete restrict,
     chave varchar(44),                    -- null se nao leu QR
     uf varchar(2),                        -- extraido da chave se leu
     cnpj_emitente varchar(14),            -- extraido da chave se leu

@@ -116,6 +116,52 @@ class ListaCompras:
             c.commit()
             return r.rowcount
 
+    def finalizar_compra(self) -> dict:
+        """Fecha a compra: arquiva os itens COMPRADOS no historico e os tira da lista.
+        Os PENDENTES continuam na lista pra proxima compra. Sem total (so' data e
+        quantidade de itens). Retorna {compra_id, itens} ou {compra_id: None, itens: 0}
+        se nao havia nada comprado.
+        """
+        with self.pool.connection() as c:
+            # conta quantos comprados ha' agora
+            row = c.execute(
+                "select count(*) from lista_compras where conta_id = %s and comprado",
+                (self.conta_id,),
+            ).fetchone()
+            n_itens = int(row[0]) if row else 0
+            if n_itens == 0:
+                return {"compra_id": None, "itens": 0}
+
+            # cria o registro da compra (so' data e n de itens)
+            compra = c.execute(
+                """insert into compras_historico (conta_id, membro_id, total_itens)
+                   values (%s, %s, %s) returning id""",
+                (self.conta_id, self.membro_id, n_itens),
+            ).fetchone()
+            compra_id = int(compra[0])
+
+            # tira os comprados da lista ativa (ja' estao arquivados no historico)
+            c.execute(
+                "delete from lista_compras where conta_id = %s and comprado",
+                (self.conta_id,),
+            )
+            c.commit()
+        return {"compra_id": compra_id, "itens": n_itens}
+
+    def listar_historico(self, limite: int = 50) -> list[dict]:
+        """Compras finalizadas DESTA conta, mais recentes primeiro."""
+        sql = """select h.id, h.total_itens, h.criado_em,
+                        coalesce(m.nome, '-') as quem
+                 from compras_historico h
+                 left join membros m on m.id = h.membro_id
+                 where h.conta_id = %s
+                 order by h.id desc
+                 limit %s"""
+        with self.pool.connection() as c:
+            rows = c.execute(sql, (self.conta_id, limite)).fetchall()
+        cols = ["id", "total_itens", "criado_em", "quem"]
+        return [dict(zip(cols, r)) for r in rows]
+
     # ---------- leitura ----------
 
     def listar(self, incluir_comprados: bool = True) -> list[dict]:

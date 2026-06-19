@@ -1239,6 +1239,8 @@ async def compras_api(request: Request):
         lista.limpar_comprados()
     elif acao == "apagar_tudo":
         lista.limpar_tudo()
+    elif acao == "finalizar":
+        resultado = lista.finalizar_compra()
     # NAO estima preco aqui (sob demanda no botao "Comparar precos" ->
     # /painel/compras/precos). Adicionar item fica leve, sem buscar preco.
     itens = lista.listar(incluir_comprados=False)
@@ -1251,6 +1253,20 @@ async def compras_api(request: Request):
         "pendentes": resumo["pendentes"], "comprados": resumo["comprados"],
         "tem_pendentes": resumo["pendentes"] > 0,
     })
+
+
+@router.get("/painel/compras/historico", response_class=JSONResponse)
+def compras_historico(request: Request):
+    """Lista compras finalizadas desta conta."""
+    conta, lista = _lista_logada(request)
+    if conta is None:
+        return JSONResponse({"erro": "nao logado"}, status_code=401)
+    hist = lista.listar_historico()
+    # formata data pra exibir
+    for h in hist:
+        h["data"] = h["criado_em"].strftime("%d/%m/%Y") if h.get("criado_em") else "-"
+        h.pop("criado_em", None)
+    return JSONResponse({"historico": hist})
 
 
 @router.post("/painel/compras/add")

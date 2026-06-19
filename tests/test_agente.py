@@ -20,11 +20,9 @@ from finance.tools import construir_ferramentas
 
 @pytest.fixture()
 def pool():
-    p = ConnectionPool(os.environ["DATABASE_URL"], min_size=1, max_size=4, open=True)
+    p = ConnectionPool(os.environ["TEST_DATABASE_URL"], min_size=1, max_size=4, open=True)
     init_schema(p)
     with p.connection() as c:
-        # selo da trava de protecao 026 (permite limpeza intencional no teste)
-        c.execute("set local app.permitir_limpeza = 'SIM'")
         c.execute("truncate contas, lancamentos, uso_diario restart identity cascade")
         c.commit()
     yield p

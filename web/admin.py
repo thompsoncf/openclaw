@@ -93,15 +93,24 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
 <form method="get" action="/admin" style="margin-bottom:.8rem">
 <input name="busca" placeholder="buscar nome, e-mail ou documento" value="{{ busca or '' }}" style="width:60%">
 <button>Buscar</button></form>
-<table><tr><th>ID</th><th>Nome</th><th>Tipo</th><th>Plano</th><th>Status</th><th>Vence</th><th>Membros</th><th>Ações</th></tr>
+<table><tr><th>ID</th><th>Nome</th><th>Plano</th><th>Status</th><th>Vence</th><th>Limites (msg/cup dia)</th><th>Uso hoje</th><th>Uso mês</th><th>Ações</th></tr>
 {% for c in contas %}<tr>
 <td>{{ c.id }}</td><td>{{ c.nome }}<br><span class="mut">{{ c.email or '-' }}</span></td>
-<td>{{ c.tipo|upper }}</td><td>{{ c.plano or '-' }}</td>
+<td>{{ c.plano or '-' }}</td>
 <td><span class="tag {{ c.status }}">{{ c.status }}</span></td>
 <td>{{ c.vencimento.strftime('%d/%m/%y') if c.vencimento else '-' }}</td>
-<td>{{ c.membros }}</td>
 <td>
-<form class="inline" method="post" action="/admin/conta/{{ c.id }}/ativar"><button>Ativar +30d</button></form>
+  <form class="inline" method="post" action="/admin/conta/{{ c.id }}/limites" style="display:flex; gap:4px; align-items:center">
+    <input type="number" name="msg" value="{{ c.limite_mensagens_dia }}" style="width:55px" title="mensagens/dia">
+    <span>/</span>
+    <input type="number" name="cup" value="{{ c.limite_cupons_dia }}" style="width:50px" title="cupons/dia">
+    <button style="padding:.35rem .5rem">✓</button>
+  </form>
+</td>
+<td class="mut">{{ c.msg_hoje }}/{{ c.limite_mensagens_dia }} msg<br>{{ c.cup_hoje }}/{{ c.limite_cupons_dia }} cup</td>
+<td class="mut">{{ c.msg_mes }} msg<br>{{ c.cup_mes }} cup</td>
+<td>
+<form class="inline" method="post" action="/admin/conta/{{ c.id }}/ativar"><button>+30d</button></form>
 <form class="inline" method="post" action="/admin/conta/{{ c.id }}/suspender"><button class="warn">Suspender</button></form>
 </td></tr>{% endfor %}
 </table></div>
@@ -308,14 +317,27 @@ def admin_home(request: Request, busca: str = ""):
                where ct.status in ('ativa','trial')""").fetchone()[0]
 
         sql = """select ct.id, ct.nome, ct.email, ct.tipo, ct.plano, ct.status, ct.vencimento,
-                        (select count(*) from membros m where m.conta_id = ct.id and m.ativo) as membros
+                        ct.limite_mensagens_dia, ct.limite_cupons_dia,
+                        (select count(*) from membros m where m.conta_id = ct.id and m.ativo) as membros,
+                        coalesce((select mensagens from uso_diario u
+                                  where u.conta_id = ct.id and u.dia = current_date),0) as msg_hoje,
+                        coalesce((select cupons from uso_diario u
+                                  where u.conta_id = ct.id and u.dia = current_date),0) as cup_hoje,
+                        coalesce((select sum(mensagens) from uso_diario u
+                                  where u.conta_id = ct.id
+                                    and u.dia >= date_trunc('month', current_date)),0) as msg_mes,
+                        coalesce((select sum(cupons) from uso_diario u
+                                  where u.conta_id = ct.id
+                                    and u.dia >= date_trunc('month', current_date)),0) as cup_mes
                  from contas ct"""
         params: list = []
         if busca.strip():
             sql += """ where ct.nome ilike %s or ct.email ilike %s or ct.documento ilike %s"""
             termo = f"%{busca.strip()}%"; params = [termo, termo, termo]
         sql += " order by ct.id desc limit 200"
-        cols = ["id", "nome", "email", "tipo", "plano", "status", "vencimento", "membros"]
+        cols = ["id", "nome", "email", "tipo", "plano", "status", "vencimento",
+                "limite_mensagens_dia", "limite_cupons_dia", "membros",
+                "msg_hoje", "cup_hoje", "msg_mes", "cup_mes"]
         contas = [dict(zip(cols, r)) for r in c.execute(sql, params).fetchall()]
 
         ecols = ["conta_id", "tipo", "detalhe", "criado_em"]
@@ -331,6 +353,22 @@ def admin_home(request: Request, busca: str = ""):
     return HTMLResponse(_env.get_template("ahome").render(
         resumo=resumo, contas=contas, eventos=eventos, busca=busca,
         aviso=request.session.pop("admin_aviso", None)))
+
+
+@router.post("/admin/conta/{conta_id}/limites")
+def admin_conta_limites(request: Request, conta_id: int,
+                        msg: int = Form(...), cup: int = Form(...)):
+    if _admin(request) is None:
+        return _NEGADO
+    msg = max(0, min(int(msg), 100000))
+    cup = max(0, min(int(cup), 100000))
+    pool = get_pool()
+    with pool.connection() as c:
+        c.execute("update contas set limite_mensagens_dia=%s, limite_cupons_dia=%s where id=%s",
+                  (msg, cup, conta_id))
+        c.commit()
+    request.session["admin_aviso"] = f"Limites da conta {conta_id} atualizados: {msg} msg/dia, {cup} cupons/dia."
+    return RedirectResponse("/admin", status_code=303)
 
 
 @router.post("/admin/conta/{conta_id}/ativar")

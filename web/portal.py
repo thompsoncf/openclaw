@@ -182,6 +182,15 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
 .lk-wpp{background:#25D366;color:#fff;border-color:#25D366}
 .conv-invite{margin:.3rem 0;font-size:.82rem}
 .conv-links{display:flex;gap:4px;flex-wrap:wrap;margin-top:.3rem}
+.item-row{transition:opacity .2s}
+.item-row.comprado{opacity:.5}
+.item-nome{word-break:break-word}
+.dep-head{margin:1rem 0 .3rem;font-size:.9rem;color:#5dcaa5;cursor:default;user-select:none}
+.carrinho-head{margin:1rem 0 .3rem;font-size:.9rem;color:#5dcaa5;cursor:pointer;user-select:none;font-weight:500}
+.carrinho-head:hover{color:#6dd9b8}
+.btn-finalizar{width:100%;margin-top:.8rem;padding:.7rem;background:#1d9e75;color:#fff;border:none;border-radius:8px;font-size:.95rem;font-weight:500;cursor:pointer}
+.btn-finalizar:hover{background:#22b485}
+.btn-finalizar:active{transform:scale(.99)}
 </style></head><body>
 <div class="topo"><span class="logo">Zaq</span><span>
 {% if logado %}<a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/painel/compras">Compras</a><a href="/sair">Sair</a>
@@ -584,7 +593,10 @@ function copiarConvite(btn, url){
 _COMPRAS = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.5rem">
-<h1 style="margin:0">Lista de compras</h1>
+<div style="display:flex; gap:.5rem; align-items:center">
+<h1 style="margin:0" id="titulo-abas">Lista de compras</h1>
+<button id="btn-historico" onclick="verHistorico()" style="margin:0;padding:.4rem .8rem;background:#2a2a2b;color:#5dcaa5;font-size:.82rem;width:auto;border-radius:8px;border:0;cursor:pointer">📋 Histórico</button>
+</div>
 <div style="display:flex; gap:.5rem">
 {% if papel != 'dono' %}
 <button id="btn-avisar" onclick="avisarTerminei()" style="margin:0;padding:.4rem .8rem;background:#2AABEE;color:#fff;font-size:.82rem;width:auto;border-radius:8px;border:0;cursor:pointer">✅ Avisar que terminei</button>
@@ -611,15 +623,53 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 </div>
 
 <div id="lista-itens"></div>
+<div id="btn-finalizar-box"></div>
 <p id="resumo-lista" class="mut" style="margin-top:1rem"></p>
 </div>
 
 <script>
+var DEPARTAMENTOS = [
+  ["Hortifruti", ["alface","tomate","cebola","batata","banana","maca","maçã","laranja","limao","limão",
+    "cenoura","alho","mamao","mamã","manga","uva","melancia","abacaxi","abacate","pera","morango",
+    "couve","brocolis","brócolis","pimentao","pimentã","pepino","abobora","abóbora","chuchu","mandioca",
+    "verdura","legume","fruta","salsa","cebolinha","coentro","rucula","rúcula","espinafre","beterraba",
+    "manjericao","manjericã","gengibre","milho","vagem","quiabo","berinjela"]],
+  ["Açougue", ["carne","frango","boi","porco","linguica","linguiça","bacon","bife","costela","file","filé",
+    "coxa","sobrecoxa","peito de frango","picanha","alcatra","patinho","moida","moída","peixe","tilapia",
+    "tilá","camarao","camarã","salsicha","peito","pernil","cupim","fraldinha","maminha","acem","acém"]],
+  ["Laticínios", ["leite","queijo","iogurte","manteiga","margarina","requeijao","requeijã","creme de leite",
+    "leite condensado","nata","mussarela","muçarela","mozzarela","prato","minas","coalho","ricota",
+    "cream cheese","danone","ovos","ovo","parmesao","parmesã"]],
+  ["Padaria", ["pao","pã","paes","pã","bolo","torrada","biscoito","bolacha","croissant","baguete",
+    "rosca","frances","francês","forma","bisnaga","panettone","pao de queijo","pã de queijo"]],
+  ["Bebidas", ["agua","água","refrigerante","suco","cerveja","vinho","cafe","café","cha","chá","achocolatado",
+    "energetico","energético","coca","guarana","guaraná","fanta","sprite","whisky","vodka","gin","leite de coco",
+    "isotonico","isotônico","gatorade","red bull","tonica","tônica","champagne","espumante"]],
+  ["Limpeza", ["detergente","sabao","sabã","amaciante","desinfetante","agua sanitaria","água sanitária","candida",
+    "câ","alvejante","limpa","multiuso","esponja","saco de lixo","vassoura","rodo","pano","cloro","veja",
+    "ype","ypê","omo","comfort","pinho","desengordurante","lustra","cera"]],
+  ["Higiene", ["sabonete","shampoo","xampu","condicionador","pasta de dente","creme dental","escova",
+    "papel higienico","papel higiênico","absorvente","fralda","desodorante","cotonete","algodao","algodã",
+    "lenço","lenco","aparelho de barbear","gilete","hidratante","fio dental","enxaguante","listerine"]],
+  ["Mercearia", ["arroz","feijao","feijã","macarrao","macarrã","oleo","óleo","azeite","sal","acucar","açúcar",
+    "farinha","molho","extrato","atum","sardinha","milho","ervilha","seleta","fermento","amido","tempero",
+    "vinagre","cafe","café","achocolatado","cereal","aveia","granola","mel","geleia","amendoim","castanha",
+    "lentilha","grao","grã","trigo","fuba","fubá","tapioca","leite em po","leite em pó","sopa","catchup",
+    "ketchup","mostarda","maionese","shoyu","caldo","macarrao instantaneo","miojo","nescau","leite ninho",
+    "biscoito","bolacha","chocolate","bala","doce","pipoca","salgadinho","chips","gelatina","pudim"]],
+  ["Congelados", ["congelado","sorvete","polpa","hamburguer","hambúrguer","nuggets","pizza","lasanha",
+    "pao de queijo congelado","empanado","petit pois","ervilha congelada"]],
+];
+var ORDEM_DEP = ["Hortifruti","Açougue","Laticínios","Padaria","Congelados","Mercearia","Bebidas","Limpeza","Higiene","Outros"];
+
+function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEPARTAMENTOS.length;d++){ var palavras=DEPARTAMENTOS[d][1]; for(var p=0;p<palavras.length;p++){ if(n.indexOf(palavras[p])!==-1) return DEPARTAMENTOS[d][0]; }} return "Outros"; }
+
 (function(){
   var listaEl = document.getElementById('lista-itens');
   var resumoEl = document.getElementById('resumo-lista');
   var compEl = document.getElementById('comparador');
   var btnApagar = document.getElementById('btn-apagar');
+  var btnFinalizarBox = document.getElementById('btn-finalizar-box');
   var ajustes = {};
   var pendentesAtuais = [];
 
@@ -639,33 +689,100 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 
   function linhaItem(i){
     var preco = i.preco ? '<span class="mut"> · ~'+i.preco+'</span>' : '';
-    var h = '<tr style="'+(i.comprado?'opacity:.5':'')+'">';
-    h += '<td style="width:40px"><button class="mk" data-id="'+i.id+'" data-c="'+(i.comprado?0:1)+'" title="marcar" style="margin:0;padding:.25rem .55rem;background:'+(i.comprado?'#1d9e75':'#2a2a2b')+';font-size:.9rem">✓</button></td>';
-    h += '<td style="'+(i.comprado?'text-decoration:line-through':'')+'">'+esc(i.descricao)+preco+'</td>';
+    var classe = i.comprado ? 'item-row comprado' : 'item-row';
+    var h = '<tr class="'+classe+'">';
+    h += '<td style="width:44px"><button class="mk" data-id="'+i.id+'" data-c="'+(i.comprado?0:1)+'" title="marcar comprado" style="margin:0;padding:.25rem .55rem;background:'+(i.comprado?'#1d9e75':'#2a2a2b')+';font-size:.9rem;border-radius:6px;border:0;cursor:pointer">'+(i.comprado?'✓':'○')+'</button></td>';
+    h += '<td class="item-nome" style="'+(i.comprado?'text-decoration:line-through':'')+'">'+esc(i.descricao)+preco+'</td>';
     if (_visao === 'geral') h += '<td class="mut" style="font-size:.8rem">'+esc(i.quem||'')+'</td>';
-    h += '<td style="width:40px;text-align:right"><button class="rm" data-id="'+i.id+'" title="remover" style="margin:0;padding:.25rem .5rem;background:transparent;color:#8a3636;font-size:.95rem">✕</button></td>';
+    h += '<td style="width:40px;text-align:right"><button class="rm" data-id="'+i.id+'" title="remover" style="margin:0;padding:.25rem .5rem;background:transparent;color:#8a3636;font-size:.95rem;border:0;cursor:pointer">✕</button></td>';
     h += '</tr>';
     return h;
   }
 
+  function ordenar(itens){
+    return itens.slice().sort(function(a,b){
+      if(!!a.comprado!==!!b.comprado) return a.comprado?1:-1;
+      return (a.descricao||'').localeCompare((b.descricao||''),'pt',{sensitivity:'base'});
+    });
+  }
+
   function renderItens(itens){
-    if (!itens.length){ listaEl.innerHTML = '<p class="mut">A lista está vazia. Adicione itens acima — ou peça pelo WhatsApp/Telegram: <i>"acabou o arroz, bota na lista"</i>.</p>'; return; }
-    var nomes = {}; itens.forEach(function(i){ nomes[i.quem||'-'] = 1; });
-    var temVarias = Object.keys(nomes).length > 1;
+    var pendentes = itens.filter(function(i){return !i.comprado;});
+    var comprados = itens.filter(function(i){return i.comprado;});
+
+    if(!pendentes.length && !comprados.length){ listaEl.innerHTML = '<p class="mut">A lista está vazia. Adicione itens acima — ou peça pelo WhatsApp/Telegram: <i>"acabou o arroz, bota na lista"</i>.</p>'; btnFinalizarBox.innerHTML=''; return; }
+
+    var nomes = {}; itens.forEach(function(i){ nomes[i.quem||'-']=1; });
+    var temVarias = Object.keys(nomes).length>1;
     document.getElementById('toggle-visao').style.display = temVarias ? 'flex' : 'none';
 
     var html = '';
-    if (_visao === 'pessoa' && temVarias){
+    if(_visao==='pessoa' && temVarias){
       Object.keys(nomes).sort().forEach(function(nome){
-        var doNome = itens.filter(function(i){ return (i.quem||'-') === nome; });
-        html += '<div style="margin:.6rem 0 .2rem;font-weight:600">'+esc(nome)+' <span class="mut" style="font-weight:400;font-size:.8rem">('+doNome.length+')</span></div>';
-        html += '<table style="margin:0">' + doNome.map(linhaItem).join('') + '</table>';
+        var doNome = ordenar(pendentes.filter(function(i){return(i.quem||'-')===nome;}));
+        if(!doNome.length) return;
+        html += '<div class="dep-head">'+esc(nome)+' <span class="mut" style="font-weight:400;font-size:.8rem">('+doNome.length+')</span></div>';
+        html += '<table style="margin:0">'+doNome.map(linhaItem).join('')+'</table>';
       });
     } else {
-      html = '<table style="margin-top:.5rem">' + itens.map(linhaItem).join('') + '</table>';
+      var grupos = {};
+      pendentes.forEach(function(i){ var dep=departamentoDe(i.descricao); (grupos[dep]=grupos[dep]||[]).push(i); });
+      ORDEM_DEP.forEach(function(dep){
+        if(!grupos[dep]) return;
+        var lista = ordenar(grupos[dep]);
+        html += '<div class="dep-head">'+dep+' <span class="mut" style="font-weight:400;font-size:.78rem">('+lista.length+' a comprar)</span></div>';
+        html += '<table style="margin:0 0 .4rem">'+lista.map(linhaItem).join('')+'</table>';
+      });
     }
+
+    if(comprados.length){
+      html += '<div class="carrinho-head" onclick="toggleCarrinho()"><span id="cart-arrow">▸</span> No carrinho ('+comprados.length+')</div>';
+      html += '<div id="carrinho-body" style="display:none"><table style="margin:0">'+ordenar(comprados).map(linhaItem).join('')+'</table></div>';
+    }
+
     listaEl.innerHTML = html;
     ligarBotoesLinha();
+
+    if(comprados.length){
+      btnFinalizarBox.innerHTML = '<button class="btn-finalizar" onclick="finalizarCompra()">✓ Finalizar compra ('+comprados.length+' itens)</button>';
+    } else {
+      btnFinalizarBox.innerHTML = '';
+    }
+  }
+
+  function toggleCarrinho(){
+    var b = document.getElementById('carrinho-body');
+    var a = document.getElementById('cart-arrow');
+    if(!b) return;
+    var aberto = b.style.display !== 'none';
+    b.style.display = aberto ? 'none' : 'block';
+    a.textContent = aberto ? '▸' : '▾';
+  }
+
+  function finalizarCompra(){
+    if(!confirm('Finalizar a compra? Os itens comprados vão pro histórico. Os que faltam continuam na lista.')) return;
+    acao({acao:'finalizar'});
+  }
+
+  function verHistorico(){
+    document.getElementById('titulo-abas').textContent = 'Histórico de compras';
+    fetch('/painel/compras/historico').then(function(r){return r.json();}).then(function(d){
+      var h = d.historico || [];
+      if(!h.length){ listaEl.innerHTML = '<p class="mut">Nenhuma compra finalizada ainda.</p>'; btnFinalizarBox.innerHTML=''; resumoEl.textContent=''; return; }
+      var html = '<table style="margin-top:.5rem"><tr><th>Data</th><th>Itens</th><th>Quem</th></tr>';
+      h.forEach(function(c){
+        html += '<tr><td>'+c.data+'</td><td>'+c.total_itens+' itens</td><td class="mut" style="font-size:.8rem">'+esc(c.quem||'-')+'</td></tr>';
+      });
+      html += '</table>';
+      listaEl.innerHTML = html;
+      btnFinalizarBox.innerHTML = '<button onclick="voltarLista()" style="margin-top:.8rem;width:100%;padding:.6rem;background:#1d9e75;color:#fff;border:0;border-radius:8px;cursor:pointer;font-weight:500">← Voltar à lista</button>';
+      resumoEl.textContent = h.length + ' compras finalizadas';
+    });
+  }
+
+  function voltarLista(){
+    document.getElementById('titulo-abas').textContent = 'Lista de compras';
+    acao({acao:'noop'});
   }
 
   function ligarBotoesLinha(){
@@ -697,6 +814,7 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
       resumoEl.textContent = '';
       btnApagar.style.display = 'none';
       compEl.innerHTML = '';
+      btnFinalizarBox.innerHTML = '';
       return;
     }
     renderItens(itens);
@@ -819,11 +937,15 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 
   acao({acao:'noop'});
 
-  // Exportar funcoes pra escopo global (botoes do toggle precisam acessar)
+  // Exportar funcoes pra escopo global
   window.setVisao = setVisao;
   window.renderItens = renderItens;
   window.ligarBotoesLinha = ligarBotoesLinha;
   window.carregarPrecos = carregarPrecos;
+  window.toggleCarrinho = toggleCarrinho;
+  window.finalizarCompra = finalizarCompra;
+  window.verHistorico = verHistorico;
+  window.voltarLista = voltarLista;
 })();
 
 function avisarTerminei(){

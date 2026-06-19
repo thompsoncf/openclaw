@@ -1415,7 +1415,7 @@ async def compras_api(request: Request):
         resultado = lista.finalizar_compra()
     # NAO estima preco aqui (sob demanda no botao "Comparar precos" ->
     # /painel/compras/precos). Adicionar item fica leve, sem buscar preco.
-    itens = lista.listar(incluir_comprados=False)
+    itens = lista.listar(incluir_comprados=True)  # frontend separa pendentes/comprados
     resumo = lista.resumo()
     return JSONResponse({
         "itens": [{"id": i["id"], "descricao": i["descricao"], "comprado": i["comprado"],

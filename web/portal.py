@@ -1367,7 +1367,9 @@ def membros_adicionar(request: Request, nome: str = Form(...), whatsapp: str = F
             return RedirectResponse("/painel", status_code=303)
 
     # cria UM membro com codigo de convite (e whatsapp, se informado)
-    codigo = ct.criar_convite(pool, conta[0], nome=nome, papel=papel, whatsapp_id=zap)
+    # criar_convite foi removido; agora é adicionar_membro + gerar_convite_para
+    membro_id = ct.adicionar_membro(pool, conta[0], nome=nome, papel=papel, whatsapp_id=zap)
+    codigo = ct.gerar_convite_para(pool, membro_id, conta[0])
     request.session["aviso"] = (
         f"{nome} adicionado(a)! Código de convite do Telegram: {codigo} — "
         f"peça pra essa pessoa abrir o bot ClawIAOpen e enviar esse código."

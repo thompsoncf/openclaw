@@ -354,7 +354,17 @@ async def webhook_asaas(request: Request):
         _logw.warning("ASAAS 401: token nao bate")
         return Response(status_code=401)
 
-    body = await request.json()
+    # corpo pode vir VAZIO (ping/teste do Asaas) -> nao quebra, responde 200
+    try:
+        _raw = await request.body()
+        if not _raw or not _raw.strip():
+            _logw.warning("ASAAS webhook com corpo vazio (ping/teste) - respondendo 200")
+            return Response(status_code=200)
+        import json as _json
+        body = _json.loads(_raw)
+    except Exception as _e:  # noqa: BLE001
+        _logw.warning("ASAAS webhook corpo invalido (%s) - respondendo 200", _e)
+        return Response(status_code=200)
     evento = body.get("event", "")
     pay = body.get("payment", {}) or {}
     ref = pay.get("externalReference")
@@ -365,19 +375,30 @@ async def webhook_asaas(request: Request):
     except (TypeError, ValueError):
         return Response(status_code=200)
 
-    pool = _setup()
-    chave_idem = f"asaas:{pay.get('id','')}:{evento}"
-    if not ct.reivindicar_mensagem(pool, chave_idem):
-        return Response(status_code=200)
+    # processamento BLINDADO: se algo falhar, loga o erro REAL e responde 200
+    # (assim o Asaas para de penalizar e a gente ve a causa no log do Render).
+    try:
+        pool = _setup()
+        chave_idem = f"asaas:{pay.get('id','')}:{evento}"
+        if not ct.reivindicar_mensagem(pool, chave_idem):
+            return Response(status_code=200)
 
-    if evento in ("PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"):
-        ct.ativar(pool, conta_id, dias=30, plano=pay.get("description"))
-        ct.registrar_evento(pool, conta_id, "pagamento_confirmado",
-                            f"asaas {pay.get('id','')} valor {pay.get('value','')}")
-    elif evento == "PAYMENT_OVERDUE":
-        ct.marcar_inadimplente(pool, conta_id)
-    elif evento in ("PAYMENT_REFUNDED", "PAYMENT_DELETED", "PAYMENT_CHARGEBACK"):
-        ct.suspender(pool, conta_id, motivo=f"asaas {evento}")
+        if evento in ("PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"):
+            ct.ativar(pool, conta_id, dias=30, plano=pay.get("description"))
+            ct.registrar_evento(pool, conta_id, "pagamento_confirmado",
+                                f"asaas {pay.get('id','')} valor {pay.get('value','')}")
+            _logw.warning("ASAAS conta %s ATIVADA (pagamento %s)", conta_id, pay.get('id',''))
+        elif evento == "PAYMENT_OVERDUE":
+            ct.marcar_inadimplente(pool, conta_id)
+        elif evento in ("PAYMENT_REFUNDED", "PAYMENT_DELETED", "PAYMENT_CHARGEBACK"):
+            ct.suspender(pool, conta_id, motivo=f"asaas {evento}")
+    except Exception as _e:  # noqa: BLE001
+        import traceback
+        _logw.error("ASAAS erro ao processar evento %s conta %s: %s\n%s",
+                    evento, conta_id, _e, traceback.format_exc())
+        # responde 200 mesmo assim: o pagamento foi recebido; nao adianta o Asaas
+        # reenviar (o erro e' nosso, no processamento). Vemos no log e corrigimos.
+        return Response(status_code=200)
 
     return Response(status_code=200)
 

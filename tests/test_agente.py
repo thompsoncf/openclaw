@@ -11,7 +11,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from db.conexao import init_schema
-from usuarios import usuarios as u
+import contas.contas as ct
 from core.agent import criar_agente
 from core.memory import MemoriaConversa
 from finance.livro_caixa import LivroCaixa
@@ -23,7 +23,9 @@ def pool():
     p = ConnectionPool(os.environ["DATABASE_URL"], min_size=1, max_size=4, open=True)
     init_schema(p)
     with p.connection() as c:
-        c.execute("truncate usuarios, lancamentos, uso_diario restart identity cascade")
+        # selo da trava de protecao 026 (permite limpeza intencional no teste)
+        c.execute("set local app.permitir_limpeza = 'SIM'")
+        c.execute("truncate contas, lancamentos, uso_diario restart identity cascade")
         c.commit()
     yield p
     p.close()
@@ -34,7 +36,7 @@ class CerebroFalso:
     def __init__(self):
         self.chamadas = 0
 
-    def chamar(self, system, mensagens, ferramentas=None):
+    def chamar(self, system, mensagens, ferramentas=None, model=None):
         self.chamadas += 1
         if self.chamadas == 1:
             bloco = SimpleNamespace(
@@ -47,8 +49,8 @@ class CerebroFalso:
 
 
 def test_loop_grava_no_livro(pool):
-    ana = u.get_or_create(pool, telegram_id=42, nome="Ana")
-    livro = LivroCaixa(pool, ana.id)
+    conta_id = ct.criar_conta(pool, tipo="pf", nome="Ana")
+    livro = LivroCaixa(pool, conta_id)
     agente = criar_agente(
         nome="Financeiro", persona="teste",
         ferramentas=construir_ferramentas(livro),

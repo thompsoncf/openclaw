@@ -15,6 +15,7 @@ def pool():
     p = ConnectionPool(os.environ["DATABASE_URL"], min_size=1, max_size=4, open=True)
     init_schema(p)
     with p.connection() as c:
+        c.execute("set local app.permitir_limpeza = 'SIM'")
         c.execute("truncate lancamentos, membros, contas restart identity cascade")
         c.commit()
     yield p

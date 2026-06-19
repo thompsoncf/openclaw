@@ -1,4 +1,4 @@
-"""Envio de emails do OpenClaw via SMTP (Google Workspace).
+"""Envio de emails do Zaq via SMTP (Google Workspace).
 
 Filosofia (igual notificar.py): le' tudo de variavel de ambiente, tolerante a
 falha (se faltar config ou a rede cair, loga e retorna False - NUNCA quebra o
@@ -9,7 +9,7 @@ Variaveis de ambiente (cadastrar no Render, NUNCA no codigo):
 - SMTP_PORT      (default 587)
 - SMTP_USER      (o email remetente, ex contato@seudominio.com.br)
 - SMTP_SENHA     (a SENHA DE APP do Google - 16 caracteres, sem espacos)
-- SMTP_FROM_NOME (nome de exibicao, ex "OpenClaw"; default "OpenClaw")
+- SMTP_FROM_NOME (nome de exibicao, ex "Zaq"; default "Zaq")
 - APP_URL        (url do portal, pra links nos emails; default a do Render)
 """
 from __future__ import annotations
@@ -38,7 +38,7 @@ def _config() -> dict | None:
         "port": int(os.environ.get("SMTP_PORT", "587")),
         "user": user,
         "senha": senha,
-        "from_nome": os.environ.get("SMTP_FROM_NOME", "OpenClaw"),
+        "from_nome": os.environ.get("SMTP_FROM_NOME", "Zaq"),
     }
 
 
@@ -91,7 +91,7 @@ def _layout(titulo: str, corpo_html: str) -> str:
       <table role="presentation" width="600" cellpadding="0" cellspacing="0"
              style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;">
         <tr><td style="background:#0f766e;padding:24px 32px;">
-          <span style="color:#fff;font-size:22px;font-weight:bold;">OpenClaw</span>
+          <span style="color:#fff;font-size:22px;font-weight:bold;">Zaq</span>
         </td></tr>
         <tr><td style="padding:32px;">
           <h1 style="margin:0 0 16px;font-size:20px;color:#111;">{titulo}</h1>
@@ -99,7 +99,7 @@ def _layout(titulo: str, corpo_html: str) -> str:
         </td></tr>
         <tr><td style="padding:20px 32px;background:#fafafa;border-top:1px solid #eee;">
           <p style="margin:0;font-size:12px;color:#999;">
-            Voce recebeu este email porque tem uma conta no OpenClaw.
+            Voce recebeu este email porque tem uma conta no Zaq.
           </p>
         </td></tr>
       </table>
@@ -136,16 +136,16 @@ def enviar_boas_vindas(destino: str, nome: str | None = None,
         </p>"""
     corpo = f"""
       <p>{saudacao}</p>
-      <p>Sua conta no OpenClaw foi criada com sucesso! 🎉</p>
-      <p>O OpenClaw e' seu assistente financeiro: registre gastos, leia cupons,
+      <p>Sua conta no Zaq foi criada com sucesso! ð</p>
+      <p>O Zaq e' seu assistente financeiro: registre gastos, leia cupons,
          monte sua lista de compras e compare precos.</p>
       {bloco_telegram}
       <p style="margin-top:24px;">Qualquer duvida, e' so' responder este email.</p>
     """
-    texto = (f"{saudacao}\n\nSua conta no OpenClaw foi criada com sucesso!\n"
+    texto = (f"{saudacao}\n\nSua conta no Zaq foi criada com sucesso!\n"
              f"Acesse: {url}/painel")
-    return enviar_email(destino, "Bem-vindo ao OpenClaw! 🎉",
-                        _layout("Bem-vindo ao OpenClaw!", corpo), texto)
+    return enviar_email(destino, "Bem-vindo ao Zaq! ð",
+                        _layout("Bem-vindo ao Zaq!", corpo), texto)
 
 
 def enviar_recuperacao_senha(destino: str, link_reset: str,
@@ -165,7 +165,7 @@ def enviar_recuperacao_senha(destino: str, link_reset: str,
          este email - sua senha continua a mesma.</p>
     """
     texto = f"{saudacao}\n\nRedefina sua senha: {link_reset}"
-    return enviar_email(destino, "Redefinir sua senha - OpenClaw",
+    return enviar_email(destino, "Redefinir sua senha - Zaq",
                         _layout("Redefinir sua senha", corpo), texto)
 
 
@@ -175,5 +175,5 @@ def enviar_aviso(destino: str, titulo: str, mensagem: str,
     saudacao = f"Ola, {nome}!" if nome else "Ola!"
     corpo = f"<p>{saudacao}</p><p>{mensagem}</p>"
     texto = f"{saudacao}\n\n{mensagem}"
-    return enviar_email(destino, f"{titulo} - OpenClaw",
+    return enviar_email(destino, f"{titulo} - Zaq",
                         _layout(titulo, corpo), texto)

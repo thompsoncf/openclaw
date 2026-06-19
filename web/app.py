@@ -340,8 +340,18 @@ def _normalizar_br(numero: str) -> str:
 
 @app.post("/webhook/asaas")
 async def webhook_asaas(request: Request):
-    token = request.headers.get("asaas-access-token", "")
-    if token != os.environ.get("ASAAS_WEBHOOK_TOKEN", ""):
+    import logging
+    _logw = logging.getLogger("openclaw.asaas")
+    # DEBUG: loga TODOS os headers que chegam (achar o token venha de onde vier)
+    _hdrs = {k: v for k, v in request.headers.items()}
+    _tok_recv = (request.headers.get("asaas-access-token", "") or "").strip()
+    _tok_esp = (os.environ.get("ASAAS_WEBHOOK_TOKEN", "") or "").strip()
+    _logw.warning("ASAAS WEBHOOK headers=%s", list(_hdrs.keys()))
+    _logw.warning("ASAAS token recebido=[%s] (len=%s) | esperado len=%s",
+                  _tok_recv, len(_tok_recv), len(_tok_esp))
+    # aceita se: token bate (apos strip) OU se nao ha token esperado configurado.
+    if _tok_esp and _tok_recv != _tok_esp:
+        _logw.warning("ASAAS 401: token nao bate")
         return Response(status_code=401)
 
     body = await request.json()

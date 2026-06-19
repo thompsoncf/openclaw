@@ -182,15 +182,33 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
 .lk-wpp{background:#25D366;color:#fff;border-color:#25D366}
 .conv-invite{margin:.3rem 0;font-size:.82rem}
 .conv-links{display:flex;gap:4px;flex-wrap:wrap;margin-top:.3rem}
-.item-row{transition:opacity .2s}
-.item-row.comprado{opacity:.5}
-.item-nome{word-break:break-word}
-.dep-head{margin:1rem 0 .3rem;font-size:.9rem;color:#5dcaa5;cursor:default;user-select:none}
-.carrinho-head{margin:1rem 0 .3rem;font-size:.9rem;color:#5dcaa5;cursor:pointer;user-select:none;font-weight:500}
-.carrinho-head:hover{color:#6dd9b8}
-.btn-finalizar{width:100%;margin-top:.8rem;padding:.7rem;background:#1d9e75;color:#fff;border:none;border-radius:8px;font-size:.95rem;font-weight:500;cursor:pointer}
+.abas{display:flex;gap:.4rem;margin:.6rem 0 .9rem}
+.aba{background:#2a2a2b;color:#a8a8a3;border:none;padding:.45rem 1rem;border-radius:8px;font-size:14px;cursor:pointer;transition:background .2s, color .2s}
+.aba.on{background:#1d9e75;color:#fff;font-weight:500}
+.dica-toque{font-size:.78rem;color:#7a7a78;margin:0 0 .6rem}
+.dephead{font-size:.72rem;font-weight:600;color:#cfcfca;margin:.6rem 0 .3rem .2rem}
+.litem{display:flex;align-items:center;gap:.6rem;padding:.7rem .5rem .7rem .6rem;margin-bottom:.4rem;background:#1a1a1c;border-radius:10px;transition:transform .15s,background .2s,opacity .35s,max-height .35s;position:relative;overflow:hidden}
+.litem .toque{display:flex;align-items:center;gap:.7rem;flex:1;cursor:pointer}
+.litem:active{transform:scale(.985)}
+.litem .bol{width:26px;height:26px;border:2px solid #5dcaa5;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px;transition:background .2s,border-color .2s}
+.litem .nome{flex:1;color:#ececec;font-size:15px;transition:color .2s;word-break:break-word}
+.litem .rem{width:34px;height:34px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#7a4a4a;font-size:1.1rem;border-radius:8px;cursor:pointer;border:0;background:transparent}
+.litem .rem:hover{background:rgba(180,60,60,.15);color:#c66}
+.litem.done{background:#15241d}
+.litem.done .bol{background:#1d9e75;border-color:#1d9e75}
+.litem.done .nome{color:#7a8a82;text-decoration:line-through}
+.litem.flash-v::after{content:'';position:absolute;inset:0;background:#1d9e75;opacity:.35;animation:cfade .5s ease-out forwards;pointer-events:none}
+.litem.flash-r::after{content:'';position:absolute;inset:0;background:#a33;opacity:.3;animation:cfade .4s ease-out forwards;pointer-events:none}
+@keyframes cfade{to{opacity:0}}
+.litem.saindo{opacity:0;transform:translateX(40px);max-height:0;padding-top:0;padding-bottom:0;margin-bottom:0}
+.cart-head{margin:1rem 0 .3rem;font-size:.88rem;color:#5dcaa5;cursor:pointer;user-select:none;font-weight:500}
+.btn-finalizar{width:100%;margin-top:.8rem;background:#1d9e75;color:#fff;border:none;padding:.7rem;border-radius:10px;font-size:15px;font-weight:500;cursor:pointer;transition:background .2s}
 .btn-finalizar:hover{background:#22b485}
 .btn-finalizar:active{transform:scale(.99)}
+.hist-dia{border-bottom:1px solid #2a2a2b}
+.hist-head{display:flex;align-items:center;justify-content:space-between;padding:.6rem .2rem;cursor:pointer;color:#ececec;font-size:14px;user-select:none}
+.hist-head:hover{background:#1a1a1c;border-radius:8px}
+.hist-itens{padding:.2rem .2rem .6rem 1rem;font-size:13px;color:#a8a8a3;line-height:1.7}
 </style></head><body>
 <div class="topo"><span class="logo">Zaq</span><span>
 {% if logado %}<a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/painel/compras">Compras</a><a href="/sair">Sair</a>
@@ -611,6 +629,11 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 <button style="margin:0; width:auto; padding:.65rem 1.2rem">Adicionar</button>
 </form>
 
+<div class="abas">
+  <button id="aba-lista" class="aba on" onclick="setAba('lista')" style="margin:0">Lista</button>
+  <button id="aba-hist" class="aba" onclick="setAba('historico')" style="margin:0">Histórico</button>
+</div>
+
 <button id="btn-comparar" onclick="carregarPrecos()" style="margin:.5rem 0;padding:.4rem 1rem;background:#6366f1;color:#fff;border:0;border-radius:8px;cursor:pointer;font-size:.9rem">📊 Comparar preços</button>
 
 <div id="comparador" style="margin:1rem 0"></div>
@@ -669,9 +692,10 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
   var resumoEl = document.getElementById('resumo-lista');
   var compEl = document.getElementById('comparador');
   var btnApagar = document.getElementById('btn-apagar');
-  var btnFinalizarBox = document.getElementById('btn-finalizar-box');
   var ajustes = {};
   var pendentesAtuais = [];
+  var _ultimoDados = null;
+  var _aba = 'lista';
 
   function esc(s){ var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 
@@ -801,7 +825,128 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
     }).then(function(r){ return r.json(); }).then(function(d){ render(d); return d; });
   }
 
+  function setAba(a){
+    _aba = a;
+    document.getElementById('aba-lista').className = 'aba' + (a==='lista'?' on':'');
+    document.getElementById('aba-hist').className = 'aba' + (a==='historico'?' on':'');
+    if(a==='lista'){ render(_ultimoDados || {itens:[]}); }
+    else { carregarHistorico(); }
+  }
+
+  function renderItens(itens){
+    var pendentes = itens.filter(function(i){return !i.comprado;});
+    var comprados = itens.filter(function(i){return i.comprado;});
+
+    if(!pendentes.length && !comprados.length){
+      listaEl.innerHTML = '<p class="mut">A lista está vazia. Adicione itens acima — ou peça pelo WhatsApp/Telegram: <i>"acabou o arroz, bota na lista"</i>.</p>';
+      return;
+    }
+
+    var dica = pendentes.length ? '<div class="dica-toque">👆 toque no item = comprei · toque no ✕ = tirar da lista</div>' : '';
+
+    var grupos={};
+    pendentes.forEach(function(i){ var d=departamentoDe(i.descricao); (grupos[d]=grupos[d]||[]).push(i); });
+    var html = dica;
+    ORDEM_DEP.forEach(function(dep){
+      if(!grupos[dep]) return;
+      html += '<div class="dephead">'+dep+'</div>';
+      ordenarAlf(grupos[dep]).forEach(function(i){ html += linhaItemAtivo(i); });
+    });
+    if(!pendentes.length) html += '<div class="mut" style="text-align:center;padding:1rem">Tudo no carrinho! 🛒</div>';
+
+    if(comprados.length){
+      html += '<div class="cart-head" onclick="toggleCarrinho()"><span id="cart-arrow">▸</span> No carrinho ('+comprados.length+')</div>';
+      html += '<div id="cart-body" style="display:none">';
+      ordenarAlf(comprados).forEach(function(i){ html += linhaItemComprado(i); });
+      html += '</div>';
+      html += '<button class="btn-finalizar" onclick="finalizarCompra('+comprados.length+')">✓ Finalizar compra ('+comprados.length+' itens)</button>';
+    }
+    listaEl.innerHTML = html;
+  }
+
+  function ordenarAlf(itens){
+    return itens.slice().sort(function(a,b){ return (a.descricao||'').localeCompare((b.descricao||''),'pt',{sensitivity:'base'}); });
+  }
+
+  function linhaItemAtivo(i){
+    var preco = i.preco ? '<span class="mut"> · ~'+i.preco+'</span>' : '';
+    var quem = (_visao==='geral' && i.quem) ? '<span class="mut" style="font-size:.78rem"> · '+esc(i.quem)+'</span>' : '';
+    return '<div class="litem" data-id="'+i.id+'">'
+         + '<div class="toque" onclick="marcarItem('+i.id+')">'
+         + '<span class="bol"></span>'
+         + '<span class="nome">'+esc(i.descricao)+preco+quem+'</span></div>'
+         + '<button class="rem" onclick="removerItem(event,'+i.id+')" title="tirar da lista">✕</button>'
+         + '</div>';
+  }
+
+  function linhaItemComprado(i){
+    return '<div style="display:flex;align-items:center;gap:.6rem;padding:.4rem .6rem;opacity:.6">'
+         + '<span style="color:#1d9e75">✓</span>'
+         + '<span style="color:#7a8a82;text-decoration:line-through;font-size:14px">'+esc(i.descricao)+'</span>'
+         + '<button class="rem" style="margin-left:auto" onclick="desmarcarItem('+i.id+')" title="voltar pra lista" style="background:transparent;border:0;color:#5dcaa5;cursor:pointer;font-size:.95rem">↩</button>'
+         + '</div>';
+  }
+
+  function marcarItem(id){
+    var el = listaEl.querySelector('.litem[data-id="'+id+'"]');
+    if(el){ el.classList.add('flash-v','done'); el.querySelector('.bol').textContent='✓';
+            setTimeout(function(){ el.classList.add('saindo'); },280); }
+    setTimeout(function(){ acao({acao:'marcar', item_id:id, comprado:1}); }, 600);
+  }
+
+  function removerItem(ev,id){
+    ev.stopPropagation();
+    var el = listaEl.querySelector('.litem[data-id="'+id+'"]');
+    if(el){ el.classList.add('flash-r');
+            setTimeout(function(){ el.classList.add('saindo'); },180); }
+    setTimeout(function(){ acao({acao:'remover', item_id:id}); }, 480);
+  }
+
+  function desmarcarItem(id){ acao({acao:'marcar', item_id:id, comprado:0}); }
+
+  function toggleCarrinho(){
+    var b=document.getElementById('cart-body'), a=document.getElementById('cart-arrow');
+    if(!b) return; var ab=b.style.display!=='none';
+    b.style.display=ab?'none':'block'; a.textContent=ab?'▸':'▾';
+  }
+
+  function finalizarCompra(n){
+    if(!confirm('Finalizar a compra? Os '+n+' itens comprados vão pro histórico. Os que faltam continuam na lista.')) return;
+    acao({acao:'finalizar'}).then(function(){
+      resumoEl.textContent = 'Compra finalizada! ✓';
+      setTimeout(function(){ resumoEl.textContent = ''; }, 3000);
+    });
+  }
+
+  function carregarHistorico(){
+    listaEl.innerHTML = '<p class="mut">Carregando histórico...</p>';
+    fetch('/painel/compras/historico').then(function(r){return r.json();}).then(function(d){
+      var h = d.historico || [];
+      if(!h.length){ listaEl.innerHTML = '<p class="mut">Nenhuma compra finalizada ainda. Quando você finalizar uma compra, ela aparece aqui.</p>'; return; }
+      var html = '';
+      h.forEach(function(c, idx){
+        var itensTxt = (c.itens||[]).join(' · ');
+        html += '<div class="hist-dia">'
+              + '<div class="hist-head" onclick="toggleDia('+idx+')">'
+              + '<span><span id="harr'+idx+'">▸</span> '+esc(c.data)+'</span>'
+              + '<span class="mut" style="font-size:.8rem">'+c.total_itens+' itens</span></div>'
+              + '<div id="hday'+idx+'" class="hist-itens" style="display:none">'+esc(itensTxt)+'</div>'
+              + '</div>';
+      });
+      listaEl.innerHTML = html;
+    });
+  }
+
+  function toggleDia(idx){
+    var b=document.getElementById('hday'+idx), a=document.getElementById('harr'+idx);
+    if(!b) return; var ab=b.style.display!=='none';
+    b.style.display=ab?'none':'block'; a.textContent=ab?'▸':'▾';
+  }
+
   function render(d){
+    _ultimoDados = d;
+    if(_aba !== 'lista') return;
+
     var itens = d.itens || [];
     _itensCache = itens;
     pendentesAtuais = itens.filter(function(i){return !i.comprado;}).map(function(i){return i.descricao;});
@@ -814,7 +959,6 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
       resumoEl.textContent = '';
       btnApagar.style.display = 'none';
       compEl.innerHTML = '';
-      btnFinalizarBox.innerHTML = '';
       return;
     }
     renderItens(itens);
@@ -942,10 +1086,14 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
   window.renderItens = renderItens;
   window.ligarBotoesLinha = ligarBotoesLinha;
   window.carregarPrecos = carregarPrecos;
+  window.setAba = setAba;
   window.toggleCarrinho = toggleCarrinho;
   window.finalizarCompra = finalizarCompra;
-  window.verHistorico = verHistorico;
-  window.voltarLista = voltarLista;
+  window.carregarHistorico = carregarHistorico;
+  window.toggleDia = toggleDia;
+  window.marcarItem = marcarItem;
+  window.removerItem = removerItem;
+  window.desmarcarItem = desmarcarItem;
 })();
 
 function avisarTerminei(){

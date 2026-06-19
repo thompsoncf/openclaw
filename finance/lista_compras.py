@@ -117,40 +117,46 @@ class ListaCompras:
             return r.rowcount
 
     def finalizar_compra(self) -> dict:
-        """Fecha a compra: arquiva os itens COMPRADOS no historico e os tira da lista.
-        Os PENDENTES continuam na lista pra proxima compra. Sem total (so' data e
-        quantidade de itens). Retorna {compra_id, itens} ou {compra_id: None, itens: 0}
-        se nao havia nada comprado.
+        """Fecha a compra: arquiva os itens COMPRADOS no historico (com os NOMES,
+        pra poder ver depois o que comprou em cada dia) e os tira da lista. Os
+        PENDENTES continuam na lista pra proxima compra. Retorna
+        {compra_id, itens, nomes} ou compra_id None se nao havia comprados.
         """
+        import json as _json
         with self.pool.connection() as c:
-            # conta quantos comprados ha' agora
-            row = c.execute(
-                "select count(*) from lista_compras where conta_id = %s and comprado",
+            # pega os comprados (id + descricao) pra arquivar
+            comprados = c.execute(
+                """select id, descricao from lista_compras
+                   where conta_id = %s and comprado
+                   order by descricao""",
                 (self.conta_id,),
-            ).fetchone()
-            n_itens = int(row[0]) if row else 0
+            ).fetchall()
+            n_itens = len(comprados)
             if n_itens == 0:
-                return {"compra_id": None, "itens": 0}
+                return {"compra_id": None, "itens": 0, "nomes": []}
 
-            # cria o registro da compra (so' data e n de itens)
+            nomes = [r[1] for r in comprados]
+
+            # cria o registro da compra: data, n de itens e os NOMES (json)
             compra = c.execute(
-                """insert into compras_historico (conta_id, membro_id, total_itens)
-                   values (%s, %s, %s) returning id""",
-                (self.conta_id, self.membro_id, n_itens),
+                """insert into compras_historico (conta_id, membro_id, total_itens, itens)
+                   values (%s, %s, %s, %s) returning id""",
+                (self.conta_id, self.membro_id, n_itens, _json.dumps(nomes)),
             ).fetchone()
             compra_id = int(compra[0])
 
-            # tira os comprados da lista ativa (ja' estao arquivados no historico)
+            # tira os comprados da lista ativa
             c.execute(
                 "delete from lista_compras where conta_id = %s and comprado",
                 (self.conta_id,),
             )
             c.commit()
-        return {"compra_id": compra_id, "itens": n_itens}
+        return {"compra_id": compra_id, "itens": n_itens, "nomes": nomes}
 
-    def listar_historico(self, limite: int = 50) -> list[dict]:
-        """Compras finalizadas DESTA conta, mais recentes primeiro."""
-        sql = """select h.id, h.total_itens, h.criado_em,
+    def listar_historico(self, limite: int = 60) -> list[dict]:
+        """Compras finalizadas DESTA conta, mais recentes primeiro, com os itens."""
+        import json as _json
+        sql = """select h.id, h.total_itens, h.itens, h.criado_em,
                         coalesce(m.nome, '-') as quem
                  from compras_historico h
                  left join membros m on m.id = h.membro_id
@@ -159,8 +165,19 @@ class ListaCompras:
                  limit %s"""
         with self.pool.connection() as c:
             rows = c.execute(sql, (self.conta_id, limite)).fetchall()
-        cols = ["id", "total_itens", "criado_em", "quem"]
-        return [dict(zip(cols, r)) for r in rows]
+        out = []
+        for r in rows:
+            itens = r[2]
+            if isinstance(itens, str):
+                try:
+                    itens = _json.loads(itens)
+                except Exception:
+                    itens = []
+            out.append({
+                "id": r[0], "total_itens": r[1], "itens": itens or [],
+                "criado_em": r[3], "quem": r[4],
+            })
+        return out
 
     # ---------- leitura ----------
 

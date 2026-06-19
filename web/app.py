@@ -255,10 +255,10 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
                     chave_nfce = ler_chave_da_imagem(dados)
                     if chave_nfce:
                         from finance.livro_caixa import LivroCaixa
-                        liv = LivroCaixa(pool, conta["id"], membro.id)
+                        liv = LivroCaixa(pool, conta.id, membro.id)
                         dup = liv.lancamento_por_chave(chave_nfce, global_=True)
                         if dup:
-                            if dup["conta_id"] == conta["id"]:
+                            if dup["conta_id"] == conta.id:
                                 # mesma conta -> ja' registrado
                                 data_str = dup["data"].strftime("%d/%m/%Y")
                                 desc = dup["descricao"][:50]
@@ -287,10 +287,10 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
                     chave_nfce = ler_chave_da_imagem(dados)
                     if chave_nfce:
                         from finance.livro_caixa import LivroCaixa
-                        liv = LivroCaixa(pool, conta["id"], membro.id)
+                        liv = LivroCaixa(pool, conta.id, membro.id)
                         dup = liv.lancamento_por_chave(chave_nfce, global_=True)
                         if dup:
-                            if dup["conta_id"] == conta["id"]:
+                            if dup["conta_id"] == conta.id:
                                 data_str = dup["data"].strftime("%d/%m/%Y")
                                 desc = dup["descricao"][:50]
                                 _responder_whatsapp(to,

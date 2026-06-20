@@ -513,6 +513,9 @@ def estatisticas_leituras_qr(pool) -> dict:
                group by 1
                order by total desc"""
         ).fetchall()
+        _classes = dict(conn.execute(
+            "select coalesce(classe,'?'), count(*) from qr_leituras group by 1"
+        ).fetchall())
 
     tipos = []
     tot = ok = 0
@@ -530,10 +533,27 @@ def estatisticas_leituras_qr(pool) -> dict:
             "kb_medio_acerto": int((bytes_ok or 0) / 1024),
             "kb_medio_falha": int((bytes_falha or 0) / 1024),
         })
+    def _cl(k):
+        return int(_classes.get(k, 0))
+    cupom_lido = _cl("cupom_lido")
+    cupom_sem_qr = _cl("cupom_sem_qr")
+    cupons_fiscais = cupom_lido + cupom_sem_qr
+    assert_cupom = int(round(100 * cupom_lido / cupons_fiscais)) if cupons_fiscais else 0
     return {
         "tipos": tipos,
         "total_leituras": tot,
-        "acertividade_geral_pct": int(round(100 * ok / tot)) if tot else 0,
+        # assertividade agora e' SO' sobre cupom fiscal (cupom_lido / cupons fiscais);
+        # comprovante/pdf_indefinido/outro NAO entram no denominador.
+        "acertividade_geral_pct": assert_cupom,
+        "assertividade_cupom_pct": assert_cupom,
+        "cupons_fiscais": cupons_fiscais,
+        "classes": {
+            "cupom_lido": cupom_lido,
+            "cupom_sem_qr": cupom_sem_qr,
+            "pdf_indefinido": _cl("pdf_indefinido"),
+            "outro": _cl("outro"),
+            "nao_classificado": _cl("?"),
+        },
     }
 
 

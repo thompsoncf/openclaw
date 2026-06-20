@@ -172,8 +172,10 @@ def ler_chave_da_imagem(imagem_bytes: bytes) -> str | None:
 
 
 def ler_chave_de_pdf(pdf_bytes: bytes, max_paginas: int = 3) -> str | None:
-    """Le o QR de um PDF de NFC-e: converte as primeiras paginas em imagem
-    (PyMuPDF, sem dependencia de poppler) e procura a chave. Tolerante a falha."""
+    """Le a chave de uma NFC-e/NF-e em PDF. Tenta primeiro o TEXTO do PDF (a
+    DANFE digital traz a chave de 44 digitos escrita, as vezes em grupos de 4) e,
+    so' se nao achar, renderiza a pagina e le o QR. extrair_chave valida o modelo
+    (65/55), entao numero solto nao vira falso positivo. Tolerante a falha."""
     try:
         import fitz  # PyMuPDF
     except Exception:  # noqa: BLE001
@@ -183,6 +185,21 @@ def ler_chave_de_pdf(pdf_bytes: bytes, max_paginas: int = 3) -> str | None:
     except Exception:  # noqa: BLE001
         return None
     try:
+        # 1) TEXTO (custo zero): a DANFE digital traz a chave de 44 digitos escrita
+        # (as vezes em grupos de 4). Procura runs de 44+ digitos (apos remover os
+        # espacos) e valida o modelo 65/55 nas posicoes 20-21, igual extrair_chave.
+        import re as _re
+        for i in range(min(max_paginas, doc.page_count)):
+            try:
+                txt = "".join((doc[i].get_text() or "").split())
+            except Exception:  # noqa: BLE001
+                txt = ""
+            for run in _re.findall(r"\d{44,}", txt):
+                for s in range(0, len(run) - 43):
+                    cand = run[s:s + 44]
+                    if cand[20:22] in ("65", "55"):
+                        return cand
+        # 2) QR renderizado (pega PDF escaneado/sem texto, como antes).
         for i in range(min(max_paginas, doc.page_count)):
             try:
                 png = doc[i].get_pixmap(dpi=200).tobytes("png")
@@ -232,15 +249,23 @@ def registrar_leitura(pool, conta_id, chave, media_type, img_info=None):
     try:
         m = metadados(chave) if chave else {}
         info = img_info or {}
+        if chave:
+            classe = "cupom_lido"
+        elif (media_type or "") == "application/pdf":
+            classe = "pdf_indefinido"
+        elif (media_type or "").startswith("image/"):
+            classe = "cupom_sem_qr"
+        else:
+            classe = "outro"
         with pool.connection() as c:
             c.execute(
                 """insert into qr_leituras
                    (conta_id, chave, uf, cnpj_emitente, data_emissao, media_type,
-                    leu, img_largura, img_altura, img_bytes)
-                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    leu, img_largura, img_altura, img_bytes, classe)
+                   values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (conta_id, chave, m.get("uf"), m.get("cnpj_emitente"),
                  m.get("data_emissao"), media_type, bool(chave),
-                 info.get("largura"), info.get("altura"), info.get("bytes")),
+                 info.get("largura"), info.get("altura"), info.get("bytes"), classe),
             )
             c.commit()
     except Exception:  # noqa: BLE001

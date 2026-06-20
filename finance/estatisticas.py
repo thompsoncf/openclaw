@@ -535,3 +535,35 @@ def estatisticas_leituras_qr(pool) -> dict:
         "total_leituras": tot,
         "acertividade_geral_pct": int(round(100 * ok / tot)) if tot else 0,
     }
+
+
+def resumo_fase_b_texto(pool, gatilhos: dict | None = None) -> str:
+    """Resumo legivel (Markdown do Telegram) do progresso da Fase B.
+    Bom pro alerta diario ao admin ou um comando '/banco' no painel."""
+    d = pronto_para_fase_b(pool, gatilhos)
+
+    def _barra(pct: int) -> str:
+        cheio = max(0, min(10, int(round((pct or 0) / 10))))
+        return "█" * cheio + "░" * (10 - cheio)
+
+    linhas = [f"*Banco de ouro – Fase B: {d['veredito']}*", ""]
+    for m in d["metricas"]:
+        marca = "✅" if m["ok"] else "⏳"
+        u = m["unidade"]
+        linhas.append(
+            f"{marca} {m['nome']}: {m['valor']}{u}/{m['gatilho']}{u} "
+            f"`{_barra(m['pct'])}` {m['pct']}%"
+        )
+    ctx = d["contexto"]
+    linhas += [
+        "",
+        f"🏆 Produtos multi-loja (ouro): *{ctx['produtos_multiloja']}*",
+        f"📊 Confirmados (≥2 leituras): *{ctx['produtos_confirmados']}*",
+        f"🧾 Cupons com QR: *{ctx['cupons_com_qr']}* (~{ctx['obs_por_cupom']} itens/cupom)",
+    ]
+    if ctx.get("cupons_faltando_estimado") is not None:
+        linhas.append(f"🎯 Faltam ~*{ctx['cupons_faltando_estimado']}* cupons pro volume")
+    if d["faltam"]:
+        linhas.append("")
+        linhas.append("Ainda falta: " + ", ".join(d["faltam"]))
+    return "\n".join(linhas)

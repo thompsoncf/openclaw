@@ -67,3 +67,31 @@ def avisar_dono_lista_fechada(pool, conta_id: int, quem_nome: str,
     # WhatsApp: preparado pra quando o numero oficial existir.
     # if not ok: _enviar_whatsapp(...)
     return ok
+
+
+def notificar_admin(texto: str) -> bool:
+    """Manda uma mensagem pro Telegram do ADMIN do SaaS (env ADMIN_TELEGRAM_ID).
+    Tolerante a falha: sem env ou sem rede, loga e devolve False."""
+    chat = os.environ.get("ADMIN_TELEGRAM_ID")
+    try:
+        chat = int(chat) if chat else None
+    except (TypeError, ValueError):
+        chat = None
+    if not chat:
+        _log.info("notificar_admin: ADMIN_TELEGRAM_ID nao configurado")
+        return False
+    return _enviar_telegram(chat, texto)
+
+
+def alerta_fase_b(pool, sempre: bool = False) -> bool:
+    """Checa o gatilho da Fase B e avisa o admin no Telegram.
+    Por padrao SO' avisa quando LIBERADA (nao enche o saco). Com sempre=True,
+    manda o progresso de qualquer jeito (ideal pra um cron diario).
+    Retorna True se mandou alguma mensagem."""
+    from finance.estatisticas import pronto_para_fase_b, resumo_fase_b_texto
+    d = pronto_para_fase_b(pool)
+    if not d["liberada"] and not sempre:
+        return False
+    cabecalho = ("🔓 *FASE B LIBERADA!* O banco encheu o suficiente.\n\n"
+                 if d["liberada"] else "")
+    return notificar_admin(cabecalho + resumo_fase_b_texto(pool))

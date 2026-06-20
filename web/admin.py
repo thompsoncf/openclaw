@@ -309,7 +309,67 @@ _ADMIN_PESQUISAS = """{% extends "abase" %}{% block conteudo %}
 {% endfor %}</table></div>
 {% endblock %}"""
 
-_env = Environment(loader=DictLoader({"abase": _ADMIN_BASE, "ahome": _ADMIN_HOME, "aqr": _ADMIN_QR, "acat": _ADMIN_CATEGORIAS, "abanco": _ADMIN_BANCO, "afunil": _ADMIN_FUNIL, "acustos": _ADMIN_CUSTOS, "apesquisas": _ADMIN_PESQUISAS}),
+_ADMIN_COMUNICACAO = """{% extends "abase" %}{% block conteudo %}
+<h1>Comunicacao</h1>
+{% if aviso %}<div class="card" style="border-color:#1d9e75">{{ aviso }}</div>{% endif %}
+
+<h2>O que chega: cupom x comprovante (ultimos {{ split.dias }} dias)</h2>
+<div class="cards">
+<div class="metric"><span>Imagens recebidas</span><b>{{ split.total_imagens }}</b></div>
+<div class="metric"><span>Cupom fiscal</span><b style="color:#5dcaa5">{{ split.cupom_fiscal }} ({{ split.pct_cupom }}%)</b></div>
+<div class="metric"><span>Comprovante/outro</span><b style="color:#7ab0e8">{{ split.comprovante_ou_outro }} ({{ split.pct_outro }}%)</b></div>
+</div>
+<p class="mut">Cupom = o agente usou tool de cupom (checar_duplicata / registrar_itens_cupom). O resto, tratou como comprovante. Sinal pela acao, nao por chute.</p>
+
+<div class="card"><h2>Banco de ouro - Fase B: {{ faseb.veredito }}</h2>
+<table>
+{% for m in faseb.metricas %}<tr>
+<td>{{ m.nome }}</td>
+<td class="mut">{{ m.valor }}{{ m.unidade }} / {{ m.gatilho }}{{ m.unidade }}</td>
+<td style="width:38%"><div style="background:#2a2a2b;border-radius:6px;height:8px">
+<div style="width:{{ m.pct }}%;height:8px;border-radius:6px;background:{% if m.ok %}#1d9e75{% else %}#8a5a1c{% endif %}"></div></div></td>
+<td style="white-space:nowrap">{% if m.ok %}<span class="tag ativa">ok</span>{% else %}<span class="mut">{{ m.pct }}%</span>{% endif %}</td>
+</tr>{% endfor %}
+</table>
+<p class="mut">Multi-loja (ouro): {{ faseb.contexto.produtos_multiloja }} &middot; Confirmados: {{ faseb.contexto.produtos_confirmados }} &middot; Cupons com QR: {{ faseb.contexto.cupons_com_qr }} &middot; Faltam (est.): {{ faseb.contexto.cupons_faltando_estimado }}</p>
+</div>
+
+<div class="card"><h2>Leitura de QR (auditoria por classe)</h2>
+<table>
+<tr><td>Cupom lido (QR ok)</td><td><b style="color:#5dcaa5">{{ qr.classes.cupom_lido }}</b></td></tr>
+<tr><td>Imagem sem QR</td><td>{{ qr.classes.cupom_sem_qr }}</td></tr>
+<tr><td>PDF indefinido</td><td>{{ qr.classes.pdf_indefinido }}</td></tr>
+<tr><td>Outro</td><td>{{ qr.classes.outro }}</td></tr>
+</table>
+<p class="mut">Assertividade de cupom: <b>{{ qr.assertividade_cupom_pct }}%</b> sobre {{ qr.cupons_fiscais }} cupons fiscais. Total auditado: {{ qr.total_leituras }}. (comprovante/outro fora da conta)</p>
+</div>
+
+<div class="card"><h2>Qualidade da foto (Foto x PDF)</h2>
+<table><tr><th>Tipo</th><th>Total</th><th>QR lido</th><th>Sem QR</th><th>KB lido</th><th>KB sem</th></tr>
+{% for t in qr.tipos %}<tr><td>{{ t.tipo }}</td><td>{{ t.total }}</td><td>{{ t.acertos }}</td><td>{{ t.falhas }}</td><td class="mut">{{ t.kb_medio_acerto }}</td><td class="mut">{{ t.kb_medio_falha }}</td></tr>{% endfor %}
+{% if not qr.tipos %}<tr><td colspan="6" class="mut">sem leituras</td></tr>{% endif %}
+</table>
+<p class="mut">KB do "lido" &gt; KB do "sem" = foto pequena/comprimida derrubando o QR.</p>
+</div>
+
+<div class="card"><h2>Uso (ultimos {{ uso.dias }} dias)</h2>
+<div class="cards">
+<div class="metric"><span>Interacoes</span><b>{{ uso.total }}</b></div>
+<div class="metric"><span>Sucesso</span><b>{{ uso.taxa_sucesso_pct }}%</b></div>
+<div class="metric"><span>Custo (R$)</span><b>{{ uso.custo_reais }}</b></div>
+</div>
+<p class="mut">Por canal: {% for x in uso.por_canal %}{{ x.canal|e }}: {{ x.qtd }}{% if not loop.last %}, {% endif %}{% endfor %} &middot; Por tipo: {% for x in uso.por_tipo %}{{ x.tipo|e }}: {{ x.qtd }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
+</div>
+
+<div class="card"><h2>Atrito (falhas e repeticoes)</h2>
+<table><tr><th>id</th><th>canal</th><th>tipo</th><th>texto</th><th>sucesso</th><th>repetiu</th></tr>
+{% for a in atrito %}<tr><td>{{ a.id }}</td><td class="mut">{{ a.canal|e or '-' }}</td><td class="mut">{{ a.tipo_midia|e or '-' }}</td><td class="mut">{{ (a.texto_usuario or '')[:50]|e }}</td><td>{% if a.sucesso %}sim{% else %}<span class="tag suspensa">nao</span>{% endif %}</td><td>{% if a.repetiu %}sim{% else %}-{% endif %}</td></tr>{% endfor %}
+{% if not atrito %}<tr><td colspan="6" class="mut">nenhum atrito recente</td></tr>{% endif %}
+</table></div>
+{% endblock %}"""
+
+
+_env = Environment(loader=DictLoader({"abase": _ADMIN_BASE, "ahome": _ADMIN_HOME, "aqr": _ADMIN_QR, "acat": _ADMIN_CATEGORIAS, "abanco": _ADMIN_BANCO, "afunil": _ADMIN_FUNIL, "acustos": _ADMIN_CUSTOS, "apesquisas": _ADMIN_PESQUISAS, "acomunic": _ADMIN_COMUNICACAO}),
                    autoescape=select_autoescape())
 _env.globals["brl"] = brl
 
@@ -514,121 +574,15 @@ def admin_custos(request: Request, desde: str = "", ate: str = ""):
 
 @router.get("/admin/comunicacao", response_class=HTMLResponse)
 def admin_comunicacao(request: Request):
-    # Painel do Modulo de Comunicacao: split cupom/comprovante + Fase B + QR + uso + atrito.
     if _admin(request) is None:
         return _NEGADO
     pool = get_pool()
     from finance.estatisticas import pronto_para_fase_b, estatisticas_leituras_qr
     from finance.observabilidade import resumo_uso, dificuldades, split_midia
-
-    faseb = pronto_para_fase_b(pool)
-    qr = estatisticas_leituras_qr(pool)
-    uso = resumo_uso(pool, 7)
-    atrito = dificuldades(pool, 30)
-    split = split_midia(pool, 30)
-
-    def _e(t):
-        return (str(t) if t is not None else "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-    def _barra(pct):
-        cheio = max(0, min(10, round((pct or 0) / 10)))
-        return "█" * cheio + "░" * (10 - cheio)
-
-    fb = "".join(
-        "<tr><td>%s</td><td>%s%s/%s%s</td><td><code>%s</code> %s%%</td><td>%s</td></tr>" % (
-            _e(m["nome"]), m["valor"], m["unidade"], m["gatilho"], m["unidade"],
-            _barra(m["pct"]), m["pct"], "OK" if m["ok"] else "...")
-        for m in faseb["metricas"])
-    ctx = faseb["contexto"]
-
-    split_tipo = "".join(
-        "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
-            _e(x["tipo"]), x["total"], x["cupom"], x["outro"])
-        for x in split["por_tipo"]) or "<tr><td colspan=4>sem imagens ainda</td></tr>"
-
-    cl = qr["classes"]
-    rotulos = {
-        "cupom_lido": "Cupom lido (QR ok)",
-        "cupom_sem_qr": "Imagem sem QR",
-        "pdf_indefinido": "PDF indefinido",
-        "outro": "Outro",
-        "nao_classificado": "Nao classificado (antigo)",
-    }
-    classe_rows = "".join(
-        "<tr><td>%s</td><td>%s</td></tr>" % (_e(rotulos.get(k, k)), cl.get(k, 0))
-        for k in ("cupom_lido", "cupom_sem_qr", "pdf_indefinido", "outro", "nao_classificado"))
-
-    tipo_rows = "".join(
-        "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
-            _e(t["tipo"]), t["total"], t["acertos"], t["falhas"],
-            t["kb_medio_acerto"], t["kb_medio_falha"])
-        for t in qr["tipos"]) or "<tr><td colspan=6>sem leituras</td></tr>"
-
-    canal = ", ".join("%s: %s" % (_e(x["canal"]), x["qtd"]) for x in uso["por_canal"]) or "-"
-    tmid = ", ".join("%s: %s" % (_e(x["tipo"]), x["qtd"]) for x in uso["por_tipo"]) or "-"
-
-    atrito_rows = "".join(
-        "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
-            a["id"], _e(a["canal"]), _e(a["tipo_midia"]), _e((a["texto_usuario"] or "")[:60]),
-            "nao" if a["sucesso"] is False else "sim", "sim" if a["repetiu"] else "-")
-        for a in atrito) or "<tr><td colspan=6>nenhum atrito recente</td></tr>"
-
-    d = {
-        "sdias": split["dias"], "simg": split["total_imagens"],
-        "scup": split["cupom_fiscal"], "spcup": split["pct_cupom"],
-        "soutro": split["comprovante_ou_outro"], "spoutro": split["pct_outro"],
-        "split_tipo": split_tipo,
-        "ver": faseb["veredito"], "fb": fb,
-        "multiloja": ctx["produtos_multiloja"], "confirm": ctx["produtos_confirmados"],
-        "comqr": ctx["cupons_com_qr"], "faltam": ctx.get("cupons_faltando_estimado"),
-        "classe_rows": classe_rows, "assert": qr["assertividade_cupom_pct"],
-        "fiscais": qr["cupons_fiscais"], "tipo_rows": tipo_rows, "total_qr": qr["total_leituras"],
-        "dias": uso["dias"], "inter": uso["total"], "suc": uso["taxa_sucesso_pct"],
-        "custo": uso["custo_reais"], "canal": canal, "tmid": tmid, "atrito_rows": atrito_rows,
-    }
-
-    html = """<!doctype html><html lang=pt-br><head><meta charset=utf-8>
-<meta name=viewport content="width=device-width,initial-scale=1">
-<title>Comunicacao - Zaq admin</title><style>
-body{font-family:system-ui,sans-serif;background:#0f1115;color:#e6e6e6;margin:0;padding:1rem}
-a{color:#6cf}h2{margin:1.4rem 0 .5rem}.nav{margin-bottom:1rem;font-size:.9rem}
-table{border-collapse:collapse;width:100%%;margin:.3rem 0 1rem;font-size:.9rem}
-th,td{border:1px solid #2a2f3a;padding:.35rem .5rem;text-align:left}
-th{background:#1a1f29}code{color:#7CFC9B}.v{font-weight:bold;color:#fff}
-.big{font-size:1.5rem}.card{background:#161a22;border:1px solid #2a2f3a;border-radius:8px;padding:.8rem 1rem;margin:.5rem 0}
-.hint{color:#9aa;font-size:.82rem}</style></head><body>
-<div class=nav><a href="/admin">&larr; admin</a> &nbsp;|&nbsp; <b>Comunicacao</b></div>
-<h1>Modulo de Comunicacao</h1>
-
-<h2>O que chega: CUPOM x COMPROVANTE (ultimos %(sdias)s dias)</h2>
-<div class=card>De <span class="v big">%(simg)s</span> imagens recebidas:<br><br>
-Cupom fiscal: <span class="v big">%(scup)s</span> (%(spcup)s%%) &nbsp;&nbsp;|&nbsp;&nbsp;
-Comprovante/outro: <span class="v big">%(soutro)s</span> (%(spoutro)s%%)<br>
-<span class=hint>Cupom = o agente usou tool de cupom (checar_duplicata / registrar_itens_cupom).
-O resto, o agente leu e tratou como comprovante. Sinal pela ACAO, nao por chute.</span></div>
-<table><tr><th>Tipo</th><th>Total</th><th>Cupom</th><th>Outro</th></tr>%(split_tipo)s</table>
-
-<h2>Fase B - %(ver)s</h2>
-<table><tr><th>Metrica</th><th>Atual/Meta</th><th>Progresso</th><th>OK</th></tr>%(fb)s</table>
-<div class=card>Multi-loja (ouro): <span class=v>%(multiloja)s</span> &nbsp;|&nbsp;
-Confirmados (>=2): <span class=v>%(confirm)s</span> &nbsp;|&nbsp;
-Cupons com QR: <span class=v>%(comqr)s</span> &nbsp;|&nbsp; Faltam (est.): <span class=v>%(faltam)s</span></div>
-
-<h2>Leitura de QR (auditoria por classe)</h2>
-<table><tr><th>Classe</th><th>Qtd</th></tr>%(classe_rows)s</table>
-<div class=card>Assertividade de cupom (auditoria): <span class=v>%(assert)s%%</span> sobre %(fiscais)s.
-Total de midias auditadas: %(total_qr)s.<br>
-<span class=hint>Esta classe vem da heuristica local (qr_leituras). O numero confiavel de cupom x comprovante e' o do topo (acao do agente).</span></div>
-
-<h2>Qualidade da foto (Foto x PDF)</h2>
-<table><tr><th>Tipo</th><th>Total</th><th>QR lido</th><th>Sem QR</th><th>KB lido</th><th>KB sem</th></tr>%(tipo_rows)s</table>
-<div class="card hint">KB do "lido" &gt; KB do "sem" = foto pequena/comprimida derrubando o QR.</div>
-
-<h2>Uso (ultimos %(dias)s dias)</h2>
-<div class=card>Interacoes: <span class=v>%(inter)s</span> &nbsp;|&nbsp; Sucesso: <span class=v>%(suc)s%%</span>
-&nbsp;|&nbsp; Custo: <span class=v>R$ %(custo)s</span><br>Por canal: %(canal)s<br>Por tipo: %(tmid)s</div>
-
-<h2>Atrito (falhas e repeticoes)</h2>
-<table><tr><th>id</th><th>canal</th><th>tipo</th><th>texto</th><th>sucesso</th><th>repetiu</th></tr>%(atrito_rows)s</table>
-</body></html>""" % d
-    return HTMLResponse(html)
+    return HTMLResponse(_env.get_template("acomunic").render(
+        faseb=pronto_para_fase_b(pool),
+        qr=estatisticas_leituras_qr(pool),
+        uso=resumo_uso(pool, 7),
+        atrito=dificuldades(pool, 30),
+        split=split_midia(pool, 30),
+        aviso=request.session.pop("admin_aviso", None)))

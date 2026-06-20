@@ -1065,13 +1065,32 @@ def cadastro_envia(request: Request, background: BackgroundTasks,
     from finance import cep as _cep
     _info = _cep.consultar(cep)
     regiao = _info["regiao"] if _info else None
-    conta_id = ct.criar_conta(pool, tipo, nome.strip(), plano=plano, documento=doc,
-                              cidade=_cid.valida(regiao))  # trial 7d; CEP->regiao
-    with pool.connection() as c:
-        c.execute("update contas set email=%s, senha_hash=%s where id=%s",
-                  (email, hash_senha(senha), conta_id))
-        c.commit()
+
+    # FIX 1: trava de email único (captura unique violation)
+    try:
+        conta_id = ct.criar_conta(pool, tipo, nome.strip(), plano=plano, documento=doc,
+                                  cidade=_cid.valida(regiao))  # trial 7d; CEP->regiao
+        with pool.connection() as c:
+            c.execute("update contas set email=%s, senha_hash=%s where id=%s",
+                      (email, hash_senha(senha), conta_id))
+            c.commit()
+    except Exception as e:  # captura violação de unique constraint
+        if "idx_contas_email_unico" in str(e) or "unique" in str(e).lower():
+            return _render("cadastro", request, planos=_planos(),
+                           erro="Ja existe uma conta com esse e-mail. Tente entrar.")
+        raise
+
     ct.adicionar_membro(pool, conta_id, nome=nome.strip(), papel="dono", whatsapp_id=zap)
+
+    # FIX 2: liga o lead (test-drive) à conta, pro funil contar "cadastrou"
+    try:
+        with pool.connection() as c:
+            c.execute("""update leads set virou_conta = true, conta_id = %s, ultimo_em = now()
+                         where canal = 'whatsapp' and identificador = %s""",
+                      (conta_id, zap))
+            c.commit()
+    except Exception:  # noqa: BLE001
+        pass  # nunca quebra o cadastro por causa do funil
     codigo_dono = ct.gerar_convite_dono(pool, conta_id)  # codigo pro dono conectar Telegram
     request.session["conta_id"] = conta_id
     # email de boas-vindas (tolerante a falha - nunca quebra o cadastro)

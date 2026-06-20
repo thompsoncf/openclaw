@@ -94,6 +94,17 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
         itens_in = entrada.get("itens") or []
         if not itens_in:
             return "Nenhum item informado."
+        # Plano B do QR: se o QR nao leu (chave_nfce_atual vazio) mas o agente leu
+        # a CHAVE DE ACESSO impressa no cupom, usa ela - validada por modelo E
+        # digito verificador (pega erro de leitura). Alimenta o banco de ouro.
+        if not getattr(livro, "chave_nfce_atual", None):
+            try:
+                from finance.nfce_qr import extrair_chave, chave_dv_valida
+                _ch = extrair_chave(str(entrada.get("chave") or ""))
+                if _ch and chave_dv_valida(_ch):
+                    livro.chave_nfce_atual = _ch
+            except Exception:  # noqa: BLE001
+                pass
         lanc_id = entrada.get("lancamento_id") or livro.ultimo_lancamento_id()
         if not lanc_id:
             return "Nao achei um lancamento pra anexar os itens. Registre o cupom primeiro."
@@ -408,6 +419,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                     "itens": {"type": "array", "items": item_schema},
                     "lancamento_id": {"type": "integer", "description": "opcional; vazio = ultimo cupom"},
                     "cnpj_emitente": {"type": "string", "description": "CNPJ do estabelecimento (14 digitos), do cabecalho do cupom - identifica a loja exata"},
+                    "chave": {"type": "string", "description": "CHAVE DE ACESSO do cupom (44 digitos), do rodape perto do QR. SEMPRE inclua se conseguir ler com certeza - alimenta o banco de precos quando o QR nao foi lido. So' digitos."},
                     "estabelecimento": {"type": "string", "description": "nome da loja (ex: 'Carvalho Supershop'), do cabecalho do cupom"},
                     "endereco": {"type": "string", "description": "endereco da loja (rua, numero, bairro), do cabecalho do cupom"},
                 },

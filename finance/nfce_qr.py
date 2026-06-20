@@ -9,23 +9,40 @@ from datetime import datetime, date
 
 
 def extrair_chave(texto: str) -> str | None:
-    """Extrai a chave de 44 digitos de uma URL/texto de QR de NFC-e."""
+    """Extrai a chave de 44 digitos de uma URL de QR OU do TEXTO de um cupom.
+    Aceita a chave colada a rotulo ('CHAVE DE ACESSO2226...') e em grupos de 4
+    com espacos. Valida o modelo 65 (NFC-e) / 55 (NF-e) nas posicoes 20-21."""
     if not texto:
         return None
-    # a chave aparece como p=<44digitos> ou chNFe=<44> ou solta no texto.
-    # IMPORTANTE: nao basta juntar todos os digitos do texto - a URL pode ter
-    # digitos extras (ex: o sufixo "|3|1" do PI), o que daria != 44 e quebraria.
     import re
-    m = (re.search(r"[?&]p=(\d{44})", texto)
-         or re.search(r"chNFe=(\d{44})", texto)
-         or re.search(r"\b(\d{44})\b", texto))
-    if not m:
-        return None
-    chave = m.group(1)
-    # modelo 65 (NFC-e) ou 55 (NF-e) fica nas posicoes 20-21
-    if chave[20:22] not in ("65", "55"):
-        return None
-    return chave
+    # 1) URL do QR: a chave vem como p=<44> ou chNFe=<44> (o mais confiavel).
+    m = re.search(r"[?&]p=(\d{44})", texto) or re.search(r"chNFe=(\d{44})", texto)
+    if m and m.group(1)[20:22] in ("65", "55"):
+        return m.group(1)
+    # 2) Texto solto (cupom/DANFE): procura runs de 44+ digitos apos remover os
+    # espacos e valida o modelo. NAO usa \b (rotulo grudado quebra o boundary).
+    for run in re.findall(r"\d{44,}", "".join(texto.split())):
+        for s in range(0, len(run) - 43):
+            cand = run[s:s + 44]
+            if cand[20:22] in ("65", "55"):
+                return cand
+    return None
+
+
+def chave_dv_valida(chave: str) -> bool:
+    """Valida o digito verificador (mod 11) de uma chave NFC-e/NF-e de 44 digitos.
+    Pega quase todo erro de 1 digito - essencial quando a chave vem da VISAO (o
+    agente leu do texto do cupom), nao do QR (que ja' e' confiavel)."""
+    if not chave or len(chave) != 44 or not chave.isdigit():
+        return False
+    corpo, dv = chave[:43], int(chave[43])
+    peso, soma = 2, 0
+    for d in reversed(corpo):
+        soma += int(d) * peso
+        peso = 2 if peso == 9 else peso + 1
+    resto = soma % 11
+    calc = 0 if resto in (0, 1) else 11 - resto
+    return calc == dv
 
 
 def _detectores():

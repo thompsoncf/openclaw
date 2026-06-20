@@ -115,6 +115,10 @@ Regras:
   o ramo e permite comparar precos entre lojas - e' valioso, entao SEMPRE inclua
   o cnpj_emitente se estiver visivel no cupom, mesmo que o QR nao tenha sido lido
   (voce consegue ler o CNPJ no texto do cupom).
+  CHAVE DE ACESSO: do mesmo jeito, se o cupom mostrar a CHAVE DE ACESSO (44
+  digitos, no rodape perto do QR), passe-a no campo "chave" - SO' os 44 digitos.
+  Isso alimenta o banco de precos quando o QR nao foi lido. Se NAO tiver certeza
+  de algum digito, OMITA a chave (melhor sem do que com digito errado).
   NUNCA invente o nome da loja. Se o nome estiver ilegivel ou voce nao tiver
   certeza, OMITA o campo estabelecimento e mande so' o cnpj_emitente (o sistema
   resolve o nome pela Receita). Na descricao do lancamento, prefira algo NEUTRO

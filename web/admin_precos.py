@@ -207,10 +207,10 @@ def admin_precos_dados(request: Request, ramo: str = "", busca: str = "", pagina
 
 
 _PRECOS_TPL = """{% extends "abase" %}{% block conteudo %}
-<h1>Banco de preÃ§os (o ouro)</h1>
+<h1>Banco de preços (o ouro)</h1>
 <div class="cards">
-<div class="metric"><span>PreÃ§os coletados</span><b>{{ resumo.total }}</b></div>
-<div class="metric"><span>Produtos Ãºnicos</span><b style="color:#5dcaa5">{{ resumo.produtos }}</b></div>
+<div class="metric"><span>Preços coletados</span><b>{{ resumo.total }}</b></div>
+<div class="metric"><span>Produtos únicos</span><b style="color:#5dcaa5">{{ resumo.produtos }}</b></div>
 <div class="metric"><span>Lojas</span><b>{{ resumo.lojas }}</b></div>
 <div class="metric"><span>Via cupom</span><b>{{ resumo.cupom }}</b></div>
 </div>
@@ -226,14 +226,14 @@ _PRECOS_TPL = """{% extends "abase" %}{% block conteudo %}
   <span id="fcount" class="mut" style="font-size:.85rem"></span>
 </div>
 <table>
-<thead><tr><th>Produto</th><th>Menor preÃ§o</th><th>Onde</th><th>Faixa</th><th>Lojas</th><th>Visto</th></tr></thead>
+<thead><tr><th>Produto</th><th>Menor preço</th><th>Onde</th><th>Faixa</th><th>Lojas</th><th>Visto</th></tr></thead>
 <tbody id="tbody"><tr><td colspan="6" class="mut">Carregando...</td></tr></tbody>
 </table>
 <div id="paginacao" style="display:flex; gap:.5rem; align-items:center; margin-top:.8rem"></div>
 </div>
 
 {% if lojas %}<div class="card"><h2>Lojas cadastradas</h2>
-<table><tr><th>Loja</th><th>Ramo</th><th>CNPJ</th><th>EndereÃ§o</th><th>Cidade/UF</th><th>PreÃ§os</th></tr>
+<table><tr><th>Loja</th><th>Ramo</th><th>CNPJ</th><th>Endereço</th><th>Cidade/UF</th><th>Preços</th></tr>
 {% for l in lojas %}<tr>
 <td>{{ l.nome or '-' }}</td>
 <td>{% if l.ramo %}<span class="tag ativa">{{ l.ramo }}</span>{% else %}<span class="mut">-</span>{% endif %}</td>
@@ -281,8 +281,8 @@ _PRECOS_TPL = """{% extends "abase" %}{% block conteudo %}
       var p = '';
       if(d.paginas > 1){
         p += botao('&laquo; Anterior', pagina > 1, pagina - 1);
-        p += '<span class="mut" style="font-size:.85rem">PÃ¡gina ' + d.pagina + ' de ' + d.paginas + '</span>';
-        p += botao('PrÃ³xima &raquo;', pagina < d.paginas, pagina + 1);
+        p += '<span class="mut" style="font-size:.85rem">Página ' + d.pagina + ' de ' + d.paginas + '</span>';
+        p += botao('Próxima &raquo;', pagina < d.paginas, pagina + 1);
       }
       pag.innerHTML = p;
     }).catch(function(){

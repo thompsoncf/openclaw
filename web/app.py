@@ -385,19 +385,21 @@ async def webhook_asaas(request: Request):
             _logw.warning("ASAAS webhook com corpo vazio (ping/teste) - respondendo 200")
             return Response(status_code=200)
 
-        # DIAGNOSTICO: ver o que realmente chega (primeiros bytes + encoding)
-        _ce = (request.headers.get("content-encoding", "") or "").lower()
-        _logw.warning("ASAAS raw[:80]=%r | content-encoding=%r | content-type=%r",
-                      _raw[:80], _ce, request.headers.get("content-type"))
-
-        # trata corpo comprimido (gzip), se for o caso
-        if "gzip" in _ce:
-            import gzip
-            _raw = gzip.decompress(_raw)
-
+        _ct = (request.headers.get("content-type", "") or "").lower()
         import json as _json
-        # utf-8-sig remove BOM se existir; decode antes do loads evita o char-0
-        body = _json.loads(_raw.decode("utf-8-sig"))
+
+        if "application/x-www-form-urlencoded" in _ct:
+            # Asaas manda o JSON embrulhado: body = "data=<json url-encoded>"
+            from urllib.parse import parse_qs
+            _campos = parse_qs(_raw.decode("utf-8", "replace"))
+            _payload = (_campos.get("data") or _campos.get("payload") or [""])[0]
+            if not _payload.strip():
+                _logw.warning("ASAAS form sem campo data - respondendo 200")
+                return Response(status_code=200)
+            body = _json.loads(_payload)
+        else:
+            # JSON puro (utf-8-sig remove BOM se houver)
+            body = _json.loads(_raw.decode("utf-8-sig"))
     except Exception as _e:  # noqa: BLE001
         _logw.warning("ASAAS webhook corpo invalido (%s) - respondendo 200", _e)
         return Response(status_code=200)

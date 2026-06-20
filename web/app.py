@@ -384,8 +384,20 @@ async def webhook_asaas(request: Request):
         if not _raw or not _raw.strip():
             _logw.warning("ASAAS webhook com corpo vazio (ping/teste) - respondendo 200")
             return Response(status_code=200)
+
+        # DIAGNOSTICO: ver o que realmente chega (primeiros bytes + encoding)
+        _ce = (request.headers.get("content-encoding", "") or "").lower()
+        _logw.warning("ASAAS raw[:80]=%r | content-encoding=%r | content-type=%r",
+                      _raw[:80], _ce, request.headers.get("content-type"))
+
+        # trata corpo comprimido (gzip), se for o caso
+        if "gzip" in _ce:
+            import gzip
+            _raw = gzip.decompress(_raw)
+
         import json as _json
-        body = _json.loads(_raw)
+        # utf-8-sig remove BOM se existir; decode antes do loads evita o char-0
+        body = _json.loads(_raw.decode("utf-8-sig"))
     except Exception as _e:  # noqa: BLE001
         _logw.warning("ASAAS webhook corpo invalido (%s) - respondendo 200", _e)
         return Response(status_code=200)

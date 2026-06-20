@@ -72,7 +72,7 @@ button.danger{background:#6e2b2b}button.danger:hover{background:#8a3636}
 form.inline{display:inline;margin:0}
 </style></head><body>
 <div class="topo"><span class="logo">Zaq <span>· admin</span></span>
-<span><a href="/admin">Contas</a><a href="/admin/funil">Funil</a><a href="/admin/custos">Custos</a><a href="/admin/qr">QR notas</a><a href="/admin/precos">Preços</a><a href="/admin/categorias">Categorias</a><a href="/admin/banco">Banco</a><a href="/admin/pesquisas">Pesquisas</a><a href="/painel">Meu painel</a><a href="/sair">Sair</a></span></div>
+<span><a href="/admin">Contas</a><a href="/admin/funil">Funil</a><a href="/admin/custos">Custos</a><a href="/admin/qr">QR notas</a><a href="/admin/precos">Preços</a><a href="/admin/categorias">Categorias</a><a href="/admin/banco">Banco</a><a href="/admin/comunicacao">Comunicacao</a><a href="/admin/pesquisas">Pesquisas</a><a href="/painel">Meu painel</a><a href="/sair">Sair</a></span></div>
 <div class="wrap">{% block conteudo %}{% endblock %}</div>
 </body></html>"""
 
@@ -510,3 +510,96 @@ def admin_custos(request: Request, desde: str = "", ate: str = ""):
     k = estatisticas_custo(pool, desde or None, ate or None)
     return HTMLResponse(_env.get_template("acustos").render(
         k=k, desde=desde, ate=ate, aviso=request.session.pop("admin_aviso", None)))
+
+
+@router.get("/admin/comunicacao", response_class=HTMLResponse)
+def admin_comunicacao(request: Request):
+    # Painel do Modulo de Comunicacao: Fase B + assertividade QR + uso + atrito.
+    if _admin(request) is None:
+        return _NEGADO
+    pool = get_pool()
+    from finance.estatisticas import pronto_para_fase_b, estatisticas_leituras_qr
+    from finance.observabilidade import resumo_uso, dificuldades
+
+    faseb = pronto_para_fase_b(pool)
+    qr = estatisticas_leituras_qr(pool)
+    uso = resumo_uso(pool, 7)
+    atrito = dificuldades(pool, 30)
+
+    def _esc(t):
+        return (str(t) if t is not None else "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def _barra(pct):
+        cheio = max(0, min(10, round((pct or 0) / 10)))
+        return "\u2588" * cheio + "\u2591" * (10 - cheio)
+
+    fb_rows = "".join(
+        "<tr><td>%s</td><td>%s%s/%s%s</td><td><code>%s</code> %s%%</td><td>%s</td></tr>" % (
+            _esc(m["nome"]), m["valor"], m["unidade"], m["gatilho"], m["unidade"],
+            _barra(m["pct"]), m["pct"], "OK" if m["ok"] else "...")
+        for m in faseb["metricas"])
+    ctx = faseb["contexto"]
+
+    qr_rows = "".join(
+        "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s%%</td><td>%s</td><td>%s</td></tr>" % (
+            _esc(t["tipo"]), t["total"], t["acertos"], t["falhas"],
+            t["acertividade_pct"], t["kb_medio_acerto"], t["kb_medio_falha"])
+        for t in qr["tipos"]) or "<tr><td colspan=7>sem leituras ainda</td></tr>"
+
+    canal_rows = ", ".join("%s: %s" % (_esc(x["canal"]), x["qtd"]) for x in uso["por_canal"]) or "-"
+    tipo_rows = ", ".join("%s: %s" % (_esc(x["tipo"]), x["qtd"]) for x in uso["por_tipo"]) or "-"
+
+    atrito_rows = "".join(
+        "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+            a["id"], _esc(a["canal"]), _esc(a["tipo_midia"]),
+            _esc((a["texto_usuario"] or "")[:60]),
+            "nao" if a["sucesso"] is False else "sim",
+            "sim" if a["repetiu"] else "-")
+        for a in atrito) or "<tr><td colspan=6>nenhum atrito recente \U0001f389</td></tr>"
+
+    html = """<!doctype html><html lang=pt-br><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>Comunicacao - Zaq admin</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#0f1115;color:#e6e6e6;margin:0;padding:1rem;}
+a{color:#6cf;} h2{margin:1.4rem 0 .5rem;} .nav{margin-bottom:1rem;font-size:.9rem;}
+table{border-collapse:collapse;width:100%%;margin:.3rem 0 1rem;font-size:.9rem;}
+th,td{border:1px solid #2a2f3a;padding:.35rem .5rem;text-align:left;}
+th{background:#1a1f29;} code{color:#7CFC9B;} .v{font-weight:bold;}
+.card{background:#161a22;border:1px solid #2a2f3a;border-radius:8px;padding:.8rem 1rem;margin:.5rem 0;}
+</style></head><body>
+<div class=nav><a href="/admin">&larr; admin</a> &nbsp;|&nbsp; <b>Comunicacao</b></div>
+<h1>Modulo de Comunicacao</h1>
+
+<h2>Fase B - %s</h2>
+<table><tr><th>Metrica</th><th>Atual/Meta</th><th>Progresso</th><th>OK</th></tr>%s</table>
+<div class=card>
+Produtos multi-loja (ouro): <span class=v>%s</span> &nbsp;|&nbsp;
+Confirmados (>=2): <span class=v>%s</span> &nbsp;|&nbsp;
+Cupons com QR: <span class=v>%s</span> &nbsp;|&nbsp;
+Cupons faltando (est.): <span class=v>%s</span>
+</div>
+
+<h2>Assertividade do QR (Foto x PDF)</h2>
+<table><tr><th>Tipo</th><th>Total</th><th>Acertos</th><th>Falhas</th><th>Acerto</th><th>KB ok</th><th>KB falha</th></tr>%s</table>
+<div class=card>Geral: <span class=v>%s%%</span> de acerto em %s leituras</div>
+
+<h2>Uso (ultimos %s dias)</h2>
+<div class=card>
+Interacoes: <span class=v>%s</span> &nbsp;|&nbsp;
+Sucesso: <span class=v>%s%%</span> &nbsp;|&nbsp;
+Custo: <span class=v>R$ %s</span><br>
+Por canal: %s<br>Por tipo: %s
+</div>
+
+<h2>Atrito (falhas e repeticoes)</h2>
+<table><tr><th>id</th><th>canal</th><th>tipo</th><th>texto</th><th>sucesso</th><th>repetiu</th></tr>%s</table>
+</body></html>""" % (
+        faseb["veredito"], fb_rows,
+        ctx["produtos_multiloja"], ctx["produtos_confirmados"],
+        ctx["cupons_com_qr"], ctx.get("cupons_faltando_estimado"),
+        qr_rows, qr["acertividade_geral_pct"], qr["total_leituras"],
+        uso["dias"], uso["total"], uso["taxa_sucesso_pct"], uso["custo_reais"],
+        canal_rows, tipo_rows, atrito_rows,
+    )
+    return HTMLResponse(html)

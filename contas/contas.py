@@ -116,13 +116,14 @@ def marcar_inadimplente(pool, conta_id: int):
 
 # ---------- Protecao de custo (POR CONTA) ----------
 
-def checar_e_registrar_uso(pool, conta: Conta, eh_cupom: bool = False) -> tuple[bool, int]:
-    """Incrementa o uso do dia da CONTA. eh_cupom=True conta no limite SEPARADO de
-    cupons (foto/PDF, ~5x mais caro); senao conta no limite de mensagens de texto.
-    Retorna (liberado, restante) do contador relevante."""
+def checar_e_registrar_uso(pool, conta: Conta, tem_midia: bool = False) -> tuple[bool, int]:
+    """Incrementa o uso do dia da CONTA. tem_midia=True (foto/PDF, ~5x custo)
+    conta no limite SEPARADO de mídia; senao conta no limite de mensagens de texto.
+    Tipo do documento (cupom vs comprovante) é decidido pelo agente — aqui só
+    importa se tem mídia (custo). Retorna (liberado, restante) do contador relevante."""
     hoje = date.today()
-    coluna = "cupons" if eh_cupom else "mensagens"
-    limite = conta.limite_cupons_dia if eh_cupom else conta.limite_mensagens_dia
+    coluna = "cupons" if tem_midia else "mensagens"
+    limite = conta.limite_cupons_dia if tem_midia else conta.limite_mensagens_dia
     with pool.connection() as conn:
         row = conn.execute(
             f"select {coluna} from uso_diario where conta_id = %s and dia = %s",

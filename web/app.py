@@ -59,6 +59,26 @@ DICA_QR_WPP = ("\n\n📸 Dica: deixe o QR code do cupom bem visível na foto —
 # reconhece codigo de convite (ex: THO-4632)
 _RE_CONVITE = _re.compile(r"\b([A-Z0-9]{2,4}-[A-F0-9]{4})\b")
 
+# Detector de rajada (Camada 0): contador de mídia por número WhatsApp em janela ~30s
+# Se mesmo cliente manda 2+ mídias rápido, avisa UMA VEZ na 2ª
+_rajada_midia_wpp: dict[str, list[float]] = {}  # numero -> lista de timestamps (segundos)
+_JANELA_RAJADA_SEG = 30
+
+
+def _processar_rajada_midia_wpp(numero: str) -> bool:
+    """Retorna True se é a 2ª+ mídia na janela (deve avisar 'Pode mandar todos')."""
+    import time
+    agora = time.time()
+    if numero not in _rajada_midia_wpp:
+        _rajada_midia_wpp[numero] = [agora]
+        return False
+    # limpa o histórico: mantem apenas eventos dentro da janela
+    _rajada_midia_wpp[numero] = [t for t in _rajada_midia_wpp[numero]
+                                 if agora - t < _JANELA_RAJADA_SEG]
+    eh_rajada = len(_rajada_midia_wpp[numero]) >= 1  # ja tem 1+ evento: isso é a 2ª
+    _rajada_midia_wpp[numero].append(agora)
+    return eh_rajada
+
 
 def _codigo_convite(texto: str) -> str | None:
     m = _RE_CONVITE.search((texto or "").strip().upper())
@@ -225,13 +245,18 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
                 log.error(f"Erro Asaas WhatsApp: {e}")
                 _responder_whatsapp(to, "Erro ao gerar link de pagamento. Tente novamente.")
             return
-        # Detecta se há mídia (cupom) vs apenas texto
-        eh_cupom = bool(media_url)
-        ok, _restante = ct.checar_e_registrar_uso(pool, conta, eh_cupom=eh_cupom)
+        # tem_midia=True (foto/PDF) custa 5x; tipo (cupom vs comprovante) é decidido pelo agente
+        tem_midia = bool(media_url)
+
+        # Detector de rajada (Camada 0): se 2ª+ mídia rápido, avisa (UMA VEZ)
+        if tem_midia and _processar_rajada_midia_wpp(numero):
+            _responder_whatsapp(to, "Pode mandar todos! 👍 Vou registrando um a um e te confirmo cada um.")
+
+        ok, _restante = ct.checar_e_registrar_uso(pool, conta, tem_midia=tem_midia)
         if not ok:
             _responder_whatsapp(to,
                 "Voce atingiu o limite de CUPONS de hoje 📷. Pode seguir mandando texto!"
-                if eh_cupom else
+                if tem_midia else
                 "Voce atingiu o limite de mensagens de hoje. A gente se fala amanha!")
             return
 

@@ -69,6 +69,26 @@ _pool = None
 _brain: Brain | None = None
 _transcritor = None
 
+# Detector de rajada (Camada 0): contador de mídia por usuário em janela ~30s
+# Se mesmo usuário manda 2+ mídias rápido, avisa UMA VEZ na 2ª
+_rajada_midia: dict[int, list[float]] = {}  # user_id -> lista de timestamps (segundos)
+_JANELA_RAJADA_SEG = 30
+
+
+def _processar_rajada_midia(user_id: int) -> bool:
+    """Retorna True se é a 2ª+ mídia na janela (deve avisar 'Pode mandar todos')."""
+    import time
+    agora = time.time()
+    if user_id not in _rajada_midia:
+        _rajada_midia[user_id] = [agora]
+        return False
+    # limpa o histórico: mantem apenas eventos dentro da janela
+    _rajada_midia[user_id] = [t for t in _rajada_midia[user_id]
+                              if agora - t < _JANELA_RAJADA_SEG]
+    eh_rajada = len(_rajada_midia[user_id]) >= 1  # ja tem 1+ evento: isso é a 2ª
+    _rajada_midia[user_id].append(agora)
+    return eh_rajada
+
 
 def _agente_do(membro, conta):
     livro = LivroCaixa(_pool, conta.id, membro.id)
@@ -172,13 +192,18 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
             logging.error(f"Erro Asaas Telegram: {e}")
             await update.message.reply_text("Erro ao gerar link de pagamento. Tente novamente.")
         return
-    # Detecta automaticamente se é cupom (há imagem) se não foi especificado
-    eh_cupom = eh_cupom if eh_cupom is not None else bool(imagem_b64)
-    ok, _restante = ct.checar_e_registrar_uso(_pool, conta, eh_cupom=eh_cupom)
+    # tem_midia=True (foto/PDF) custa 5x; tipo (cupom vs comprovante) é decidido pelo agente
+    tem_midia = bool(imagem_b64)
+
+    # Detector de rajada (Camada 0): se 2ª+ mídia rápido, avisa (UMA VEZ)
+    if tem_midia and _processar_rajada_midia(update.effective_user.id):
+        await update.message.reply_text("Pode mandar todos! 👍 Vou registrando um a um e te confirmo cada um.")
+
+    ok, _restante = ct.checar_e_registrar_uso(_pool, conta, tem_midia=tem_midia)
     if not ok:
         await update.message.reply_text(
             "Voce atingiu o limite de CUPONS de hoje 📷. Pode continuar mandando texto normalmente!"
-            if eh_cupom else
+            if tem_midia else
             "Voce atingiu o limite de mensagens de hoje. A gente se fala amanha!"
         )
         return

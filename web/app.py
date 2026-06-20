@@ -371,7 +371,7 @@ async def webhook_asaas(request: Request):
     # (Asaas sandbox não manda header; produção manda. Responde sempre 200 pra não penalizar.)
     _tok_recv = (request.headers.get("asaas-access-token", "") or "").strip()
     _tok_esp = (os.environ.get("ASAAS_WEBHOOK_TOKEN", "") or "").strip()
-    _logw.warning("ASAAS token recebido len=%s | esperado len=%s",
+    _logw.debug("ASAAS token recebido len=%s | esperado len=%s",
                   len(_tok_recv), len(_tok_esp))
     # só rejeita se EU configurei token (produção) E ele não bate
     if _tok_esp and _tok_recv != _tok_esp:
@@ -382,7 +382,7 @@ async def webhook_asaas(request: Request):
     try:
         _raw = await request.body()
         if not _raw or not _raw.strip():
-            _logw.warning("ASAAS webhook com corpo vazio (ping/teste) - respondendo 200")
+            _logw.debug("ASAAS webhook com corpo vazio (ping/teste) - respondendo 200")
             return Response(status_code=200)
 
         _ct = (request.headers.get("content-type", "") or "").lower()
@@ -412,6 +412,10 @@ async def webhook_asaas(request: Request):
         conta_id = int(ref)
     except (TypeError, ValueError):
         return Response(status_code=200)
+
+    # RASTRO (fase de testes): uma linha por evento real, pra acompanhar o fluxo
+    _logw.warning("ASAAS >> evento=%s pay=%s conta=%s valor=%s",
+                  evento, pay.get("id", ""), conta_id, pay.get("value", ""))
 
     # processamento BLINDADO: se algo falhar, loga o erro REAL e responde 200
     # (assim o Asaas para de penalizar e a gente ve a causa no log do Render).

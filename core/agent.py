@@ -152,7 +152,7 @@ class Agente:
                 try:
                     _pool = getattr(getattr(self, "livro", None), "pool", None)
                     if _pool is not None and isinstance(_conta, int):
-                        _eh_foto = _cw > 4000   # cache_write alto = leu imagem (cupom)
+                        _eh_foto = imagem_b64 is not None   # verdade direta: a interacao tem foto/PDF?
                         with _pool.connection() as _conn:
                             _conn.execute(
                                 """insert into uso_api

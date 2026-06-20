@@ -20,6 +20,7 @@ numeros absolutos sao maiores que em producao, mas a RAZAO Haiku vs Sonnet vale.
 import json
 import os
 import sys
+import unicodedata
 
 CAMBIO = 5.40   # US$ -> R$
 # (preco_entrada, preco_saida) em US$ por milhao de tokens
@@ -73,14 +74,20 @@ def decidir(client, modelo_id, persona, schemas, texto):
     return tools, " ".join(txt).strip(), resp.usage
 
 
+def _sem_acento(s):
+    """Remove acentos pra comparacao (cartao == cartão)."""
+    return "".join(c for c in unicodedata.normalize("NFD", s)
+                   if unicodedata.category(c) != "Mn")
+
+
 def _norm_input(d):
-    """Normaliza o input pra comparar: chaves ordenadas, strings em minuscula,
-    ignora 'data'/'origem' (defaults variam sem mudar a intencao)."""
+    """Normaliza o input pra comparar: chaves ordenadas, strings em minuscula e
+    sem acento, ignora 'data'/'origem' (defaults variam sem mudar a intencao)."""
     out = {}
     for k, v in (d or {}).items():
         if k in ("data", "origem"):
             continue
-        out[k] = v.lower().strip() if isinstance(v, str) else v
+        out[k] = _sem_acento(v.lower().strip()) if isinstance(v, str) else v
     return json.dumps(out, sort_keys=True, ensure_ascii=False)
 
 

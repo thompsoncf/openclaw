@@ -44,7 +44,7 @@ class Agente:
         with self._lock:
             self._sanear_memoria()
             try:
-                return self._responder(texto, imagem_b64, media_type)
+                resultado = self._responder(texto, imagem_b64, media_type)
             except Exception as e:  # noqa: BLE001
                 # Rede-de-seguranca: se a memoria estiver irrecuperavel (ex: erro
                 # 400 de tool_use orfao que o saneamento nao pegou), ZERA tudo e
@@ -52,8 +52,12 @@ class Agente:
                 msg = str(e).lower()
                 if "tool_use" in msg or "tool_result" in msg or "400" in msg:
                     self.memoria.limpar()
-                    return self._responder(texto, imagem_b64, media_type)
-                raise
+                    resultado = self._responder(texto, imagem_b64, media_type)
+                else:
+                    raise
+            # OBSERVABILIDADE (Modulo de Comunicacao): loga o turno (best-effort)
+            self._registrar_obs(texto, imagem_b64, media_type, resultado)
+            return resultado
 
     def _sanear_memoria(self, max_msgs: int = 16):
         """Conserta corrupcoes e poda o historico.
@@ -95,6 +99,7 @@ class Agente:
 
     def _responder(self, texto: str, imagem_b64: str | None = None,
                    media_type: str = "image/jpeg") -> str:
+        self._obs_tools = set(); self._obs_modelo = None; self._obs_custo = 0
         conteudo = []
         if imagem_b64:
             if media_type == "application/pdf":
@@ -143,6 +148,8 @@ class Agente:
                     _p_in, _p_cw, _p_cr, _p_out = 1.0, 1.25, 0.10, 5.0
                 _usd = (_in*_p_in + _cw*_p_cw + _cr*_p_cr + _out*_p_out) / 1_000_000
                 _brl = _usd * 5.40
+                self._obs_modelo = _modelo_turno
+                self._obs_custo += int(round(_brl * 100))
                 logging.getLogger("openclaw.custo").info(
                     "TOKENS conta=%s in=%s cache_read=%s cache_write=%s out=%s ~R$%.4f",
                     _conta, _in, _cr, _cw, _out, _brl,
@@ -195,6 +202,7 @@ class Agente:
                 if getattr(bloco, "type", None) != "tool_use":
                     continue
                 ferr = self.ferramentas.get(bloco.name)
+                self._obs_tools.add(bloco.name)
                 try:
                     saida = ferr.executar(bloco.input) if ferr else f"Ferramenta '{bloco.name}' nao existe."
                 except Exception as e:  # noqa: BLE001 - o agente recebe o erro e segue
@@ -211,6 +219,62 @@ class Agente:
     def _texto(resp) -> str:
         partes = [b.text for b in resp.content if getattr(b, "type", None) == "text"]
         return "\n".join(partes).strip()
+
+    def _registrar_obs(self, texto, imagem_b64, media_type, resultado):
+        # Grava o turno em conversas_log (best-effort; nunca quebra a resposta).
+        try:
+            livro = getattr(self, "livro", None)
+            pool = getattr(livro, "pool", None)
+            conta_id = getattr(livro, "conta_id", None)
+            if pool is None or not isinstance(conta_id, int):
+                return
+            if imagem_b64:
+                tipo = "pdf" if media_type == "application/pdf" else "foto"
+            else:
+                tipo = "texto"
+            falhas = ("me embananei", "nao entendi", "Pode repetir")
+            sucesso = not any(f in (resultado or "") for f in falhas)
+            from finance import observabilidade as _obs
+            _obs.registrar_interacao(
+                pool,
+                conta_id=conta_id,
+                membro_id=getattr(livro, "membro_id", None),
+                canal=getattr(self, "canal_atual", None),
+                tipo_midia=tipo,
+                texto_usuario=texto,
+                resposta=resultado,
+                tools_usadas=",".join(sorted(getattr(self, "_obs_tools", set()))) or None,
+                modelo=getattr(self, "_obs_modelo", None),
+                sucesso=sucesso,
+                repetiu=self._humano_repetiu(texto),
+                custo_centavos=getattr(self, "_obs_custo", 0),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _humano_repetiu(self, texto_atual) -> bool:
+        # True se a msg humana anterior na memoria for ~igual a atual (atrito).
+        try:
+            atual = " ".join((texto_atual or "").lower().split())
+            if not atual:
+                return False
+            humanos = []
+            for m in self.memoria.mensagens():
+                if m.get("role") != "user":
+                    continue
+                c = m.get("content")
+                if not isinstance(c, list):
+                    continue
+                if any(isinstance(b, dict) and b.get("type") == "tool_result" for b in c):
+                    continue
+                for b in c:
+                    if isinstance(b, dict) and b.get("type") == "text":
+                        t = " ".join((b.get("text") or "").lower().split())
+                        if t:
+                            humanos.append(t)
+            return len(humanos) >= 2 and humanos[-1] == atual and humanos[-2] == atual
+        except Exception:  # noqa: BLE001
+            return False
 
 
 def criar_agente(nome: str, persona: str, ferramentas: list[Ferramenta],

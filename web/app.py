@@ -371,8 +371,8 @@ async def webhook_asaas(request: Request):
     # (Asaas sandbox não manda header; produção manda. Responde sempre 200 pra não penalizar.)
     _tok_recv = (request.headers.get("asaas-access-token", "") or "").strip()
     _tok_esp = (os.environ.get("ASAAS_WEBHOOK_TOKEN", "") or "").strip()
-    _logw.warning("ASAAS token recebido=[%s] (len=%s) | esperado=[%s] (len=%s)",
-                  _tok_recv, len(_tok_recv), _tok_esp if not _tok_esp else f"{'*'*(_tok_esp[:10]+'...')}", len(_tok_esp))
+    _logw.warning("ASAAS token recebido len=%s | esperado len=%s",
+                  len(_tok_recv), len(_tok_esp))
     # só rejeita se EU configurei token (produção) E ele não bate
     if _tok_esp and _tok_recv != _tok_esp:
         _logw.warning("ASAAS token invalido (configurado mas nao bate) — ignorando webhook")
@@ -410,31 +410,25 @@ async def webhook_asaas(request: Request):
         if evento in ("PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"):
             # HARDENING: confirma o status do pagamento direto na API do Asaas
             # (protege contra webhook forjado mesmo se o token vaze)
+            from starlette.concurrency import run_in_threadpool
+            from finance import asaas
             try:
-                import httpx
-                asaas_key = os.environ.get("ASAAS_API_KEY", "").strip()
-                pay_id = pay.get("id", "")
-                if asaas_key and pay_id:
-                    async with httpx.AsyncClient(timeout=10) as c:
-                        r = await c.get(
-                            f"https://api.asaas.com/v3/payments/{pay_id}",
-                            headers={"access_token": asaas_key}
-                        )
-                    if r.status_code == 200:
-                        api_pay = r.json()
-                        status = api_pay.get("status", "")
-                        if status not in ("RECEIVED", "CONFIRMED"):
-                            _logw.warning("ASAAS pagamento %s status=%s (nao recebido/confirmado) — ignorando",
-                                         pay_id, status)
-                            return Response(status_code=200)
-                    else:
-                        _logw.warning("ASAAS API erro ao confirmar pagamento %s: %s", pay_id, r.status_code)
-                        return Response(status_code=200)
-            except Exception as _e:  # noqa: BLE001
-                _logw.warning("ASAAS confirmacao da API falhou (%s) — prosseguindo com cautela", _e)
+                api_pay = await run_in_threadpool(asaas.consultar_pagamento, pay.get("id", ""))
+                if api_pay.get("status") not in ("RECEIVED", "CONFIRMED"):
+                    _logw.warning("ASAAS pagamento %s status=%s — ignorando",
+                                 pay.get("id",""), api_pay.get("status"))
+                    return Response(status_code=200)
+            except asaas.AsaasErro as _e:
+                _logw.warning("ASAAS nao confirmou pagamento %s (%s) — nao ativando",
+                             pay.get("id",""), _e)
+                return Response(status_code=200)
 
-            # tudo certo: ativa a conta
-            ct.ativar(pool, conta_id, dias=30, plano=pay.get("description"))
+            # tudo certo: ativa a conta (lê o plano que já está gravado no banco, não o description do Asaas)
+            plano_atual = None
+            with pool.connection() as c:
+                row = c.execute("select plano from contas where id=%s", (conta_id,)).fetchone()
+                plano_atual = row[0] if row else None
+            ct.ativar(pool, conta_id, dias=30, plano=plano_atual)
             ct.registrar_evento(pool, conta_id, "pagamento_confirmado",
                                 f"asaas {pay.get('id','')} valor {pay.get('value','')}")
             _logw.warning("ASAAS conta %s ATIVADA (pagamento %s)", conta_id, pay.get('id',''))

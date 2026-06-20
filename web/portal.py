@@ -1082,12 +1082,19 @@ def cadastro_envia(request: Request, background: BackgroundTasks,
 
     ct.adicionar_membro(pool, conta_id, nome=nome.strip(), papel="dono", whatsapp_id=zap)
 
-    # FIX 2: liga o lead (test-drive) à conta, pro funil contar "cadastrou"
+    # FIX 2 (Opção B): registra/atualiza lead pra o funil contar TODOS os cadastros.
+    # Se a pessoa testou (lead existe), só marca virou_conta. Se cadastrou direto,
+    # cria lead já como cadastro com gastos_usados=0 (não infla "testaram").
     try:
         with pool.connection() as c:
-            c.execute("""update leads set virou_conta = true, conta_id = %s, ultimo_em = now()
-                         where canal = 'whatsapp' and identificador = %s""",
-                      (conta_id, zap))
+            c.execute(
+                """insert into leads (canal, identificador, virou_conta, conta_id, gastos_usados)
+                   values ('whatsapp', %s, true, %s, 0)
+                   on conflict (canal, identificador) do update
+                     set virou_conta = true, conta_id = excluded.conta_id,
+                         ultimo_em = now()""",
+                (zap, conta_id),
+            )
             c.commit()
     except Exception:  # noqa: BLE001
         pass  # nunca quebra o cadastro por causa do funil

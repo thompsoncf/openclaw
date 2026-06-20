@@ -613,7 +613,6 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.5rem">
 <div style="display:flex; gap:.5rem; align-items:center">
 <h1 style="margin:0" id="titulo-abas">Lista de compras</h1>
-<button id="btn-historico" onclick="verHistorico()" style="margin:0;padding:.4rem .8rem;background:#2a2a2b;color:#5dcaa5;font-size:.82rem;width:auto;border-radius:8px;border:0;cursor:pointer">📋 Histórico</button>
 </div>
 <div style="display:flex; gap:.5rem">
 {% if papel != 'dono' %}
@@ -782,10 +781,12 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
   }
 
   function linhaItemComprado(i){
-    return '<div style="display:flex;align-items:center;gap:.6rem;padding:.4rem .6rem;opacity:.6">'
-         + '<span style="color:#1d9e75">✓</span>'
-         + '<span style="color:#7a8a82;text-decoration:line-through;font-size:14px">'+esc(i.descricao)+'</span>'
-         + '<button class="rem" style="margin-left:auto" onclick="desmarcarItem('+i.id+')" title="voltar pra lista" style="background:transparent;border:0;color:#5dcaa5;cursor:pointer;font-size:.95rem">↩</button>'
+    return '<div style="display:flex;align-items:center;gap:.6rem;padding:.45rem .6rem;opacity:.7">'
+         + '<span style="color:#1d9e75;flex-shrink:0">✓</span>'
+         + '<span style="color:#7a8a82;text-decoration:line-through;font-size:14px;flex:1">'+esc(i.descricao)+'</span>'
+         + '<button onclick="desmarcarItem('+i.id+')" title="voltar pra lista" '
+         + 'style="flex-shrink:0;width:32px;height:32px;display:flex;align-items:center;justify-content:center;'
+         + 'background:transparent;border:0;color:#5dcaa5;cursor:pointer;font-size:1rem;border-radius:8px">↩</button>'
          + '</div>';
   }
 

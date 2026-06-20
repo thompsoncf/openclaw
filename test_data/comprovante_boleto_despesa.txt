@@ -1,0 +1,32 @@
+========================================
+      SANTANDER - BOLETO COMPENSADO
+========================================
+
+Data de Pagamento: 15/06/2026
+Horário: 16:20
+
+BOLETO PAGO
+
+Valor Pago: R$ 245,50
+Cedente: Distribuidora de Energia XYZ
+CNPJ: 98.765.432/0001-11
+
+Nosso Número: 0000123456
+Número do Banco: 033
+
+Vencimento Original: 15/06/2026
+Data da Compensação: 15/06/2026
+
+Referência: Fatura Junho 2026
+Descrição: Conta de luz
+
+Autenticação: BB123DEF456
+
+Status: COMPENSADO
+
+Juros e Multa: R$ 0,00
+Descontos: R$ 0,00
+
+========================================
+Pagamento realizado com sucesso
+========================================

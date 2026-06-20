@@ -1,0 +1,28 @@
+========================================
+        CAIXA ECONÔMICA - DOC RECEBIDO
+========================================
+
+Data: 16/06/2026
+Horário: 09:45
+
+TRANSFERÊNCIA - DOC
+
+Você recebeu uma DOC
+
+Valor: R$ 8.750,00
+Remetente: Empresa XYZ Ltda
+CNPJ: 12.345.678/0001-99
+
+Agência Remetente: 0001
+Conta Remetente: 123456-7
+
+Objetivo: Pagamento de serviços
+
+Data Processamento: 16/06/2026
+Autenticação: 2XY8Z9
+
+Status: CRÉDITO REALIZADO
+
+========================================
+Comprovante válido e autentico
+========================================

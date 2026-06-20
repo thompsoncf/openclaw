@@ -1,0 +1,28 @@
+========================================
+     BANCO DO BRASIL - TED ENVIADO
+========================================
+
+Data: 17/06/2026 às 10:15
+
+TRANSFERÊNCIA ELETRÔNICA - TED
+
+Tipo: DÉBITO (TRANSFERÊNCIA ENVIADA)
+Valor: R$ 1.250,90
+Beneficiário: Maria Santos
+CPF/CNPJ: 987.654.321-00
+
+Banco Destino: Bradesco
+Agência: 1234
+Conta: 5678901-2
+
+Descrição: Pagamento Fornecedor
+Ref: NF-2026-001
+
+Status: PROCESSADO
+Data de processamento: 17/06/2026
+
+Autenticação: 4A9B2C
+
+========================================
+Transação confirmada e irrevogável
+========================================

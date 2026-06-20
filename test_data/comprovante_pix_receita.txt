@@ -1,0 +1,23 @@
+========================================
+       ITAU BANCO - COMPROVANTE PIX
+========================================
+
+Data: 18/06/2026
+Horário: 14:32:15
+
+TRANSFERÊNCIA RECEBIDA (PIX Instantâneo)
+
+Valor: R$ 3.500,00
+Remetente: João Silva
+CPF: 123.456.789-00
+
+Referência: VENDA MOTO
+Banco: Itaú
+Data de crédito: 18/06/2026
+
+ID da transação: E1234567890123456789
+Status: Finalizado
+
+========================================
+Guarde este comprovante para sua segurança
+========================================

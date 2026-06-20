@@ -166,9 +166,49 @@ class LivroCaixa:
         return {"lancamento_id": novo_id, "n_itens": int(n),
                 "descricao": descricao, "valor": int(valor)}
 
-    def adicionar(self, lanc: Lancamento, chave: str | None = None) -> Lancamento:
+    def _lancamento_recente_igual(self, lanc: Lancamento, janela_min: int = 10) -> dict | None:
+        """Procura um lancamento IDENTICO criado ha' pouco NESTA conta: mesmo tipo,
+        valor EXATO e mesma data, dentro dos ultimos `janela_min` minutos. E' a
+        assinatura do re-registro acidental (varios comprovantes na mesma rajada;
+        o modelo, numa msg de resumo, chama lancar de novo pro mesmo valor). NAO
+        casa por descricao de proposito - o agente as vezes muda o sufixo (ex: com/
+        sem 'Banco do Brasil'), e o que importa pra dinheiro e' tipo+valor+data.
+        Retorna o dict do existente ou None."""
+        with self.pool.connection() as conn:
+            row = conn.execute(
+                """select id, descricao, valor_centavos, data, criado_em
+                   from lancamentos
+                   where conta_id = %s and tipo = %s and valor_centavos = %s
+                     and data = %s
+                     and criado_em >= now() - (%s || ' minutes')::interval
+                   order by criado_em desc limit 1""",
+                (self.conta_id, lanc.tipo.value, lanc.valor_centavos, lanc.data, janela_min),
+            ).fetchone()
+        if not row:
+            return None
+        return {"id": row[0], "descricao": row[1], "valor_centavos": int(row[2]),
+                "data": row[3], "criado_em": row[4]}
+
+    def adicionar(self, lanc: Lancamento, chave: str | None = None,
+                  forcar: bool = False, janela_dedup_min: int = 10) -> Lancamento:
         # usa chave explícita, ou chave_nfce_atual se tiver sido setada pelo webhook
         chave_final = chave or self.chave_nfce_atual
+        # TRAVA DE IDEMPOTENCIA (camada de dados, nao depende do modelo lembrar de
+        # checar). Comprovante de Pix/TED NAO tem chave NFC-e, entao a trava por
+        # chave nao o protege; aqui pegamos o re-registro acidental por tipo+valor+
+        # data dentro de uma janela curta. So' vale pra lancamento SEM chave (cupom
+        # tem chave e fluxo proprio de dedup). forcar=True pula a trava - pra quando
+        # o usuario confirma EXPLICITAMENTE que e' uma transacao diferente de mesmo
+        # valor no mesmo dia. Marca lanc.duplicado pro chamador avisar em vez de
+        # confirmar (e devolve o id do lancamento que JA' existia).
+        if not forcar and not chave_final:
+            existente = self._lancamento_recente_igual(lanc, janela_dedup_min)
+            if existente:
+                _log.info("dedup: %s ja' registrado ha' pouco (id=%s, %s) - nao dupliquei",
+                          formatar_brl(lanc.valor_centavos), existente["id"], lanc.data)
+                lanc.id = existente["id"]
+                lanc.duplicado = True
+                return lanc
         with self.pool.connection() as conn:
             row = conn.execute(
                 """insert into lancamentos
@@ -181,6 +221,7 @@ class LivroCaixa:
             ).fetchone()
             conn.commit()
             lanc.id = row[0]
+            lanc.duplicado = False
             return lanc
 
     def listar(self, mes: int | None = None, ano: int | None = None, limite: int = 50) -> list[Lancamento]:

@@ -123,3 +123,47 @@ def interacoes_recentes(pool, conta_id=None, limite: int = 50) -> list:
         else:
             rows = c.execute(base + "order by id desc limit %s", (int(limite),)).fetchall()
     return [dict(zip(cols, r)) for r in rows]
+
+
+# tools que SO' aparecem em cupom fiscal (o agente as chama ao processar cupom);
+# comprovante de PIX/banco vira so' um lancar_despesa simples, sem essas.
+_TOOLS_CUPOM = r"(checar_duplicata|registrar_itens_cupom)"
+
+
+def split_midia(pool, dias: int = 30) -> dict:
+    """Das interacoes com IMAGEM (foto/pdf) nos ultimos `dias`, quantas foram
+    CUPOM FISCAL (usaram tool de cupom) vs COMPROVANTE/outro. So' leitura.
+
+    Responde 'o que mais chega: cupom ou comprovante?' sem cruzar tabelas e sem
+    chute por tipo de arquivo — o sinal e' a ACAO do agente (ele agiu como cupom
+    => era cupom)."""
+    with pool.connection() as c:
+        total, cupom = c.execute(
+            "select count(*), count(*) filter (where tools_usadas ~ %s) "
+            "from conversas_log "
+            "where tipo_midia in ('foto','pdf') "
+            "and criado_em > now() - (%s || ' days')::interval",
+            (_TOOLS_CUPOM, str(int(dias)))).fetchone()
+        por_tipo = c.execute(
+            "select tipo_midia, count(*), count(*) filter (where tools_usadas ~ %s) "
+            "from conversas_log "
+            "where tipo_midia in ('foto','pdf') "
+            "and criado_em > now() - (%s || ' days')::interval "
+            "group by 1 order by 2 desc",
+            (_TOOLS_CUPOM, str(int(dias)))).fetchall()
+    total = total or 0
+    cupom = cupom or 0
+    outro = total - cupom
+    return {
+        "dias": dias,
+        "total_imagens": total,
+        "cupom_fiscal": cupom,
+        "comprovante_ou_outro": outro,
+        "pct_cupom": int(round(100 * cupom / total)) if total else 0,
+        "pct_outro": int(round(100 * outro / total)) if total else 0,
+        "por_tipo": [
+            {"tipo": t, "total": (tot or 0), "cupom": (cup or 0),
+             "outro": (tot or 0) - (cup or 0)}
+            for t, tot, cup in por_tipo
+        ],
+    }

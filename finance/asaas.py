@@ -6,7 +6,8 @@ a URL pra mandar no WhatsApp/portal.
 
 Quando o cliente paga, o Asaas chama o webhook /webhook/asaas (Claude Code) com o
 evento PAYMENT_RECEIVED/PAYMENT_CONFIRMED. O JSON traz externalReference = conta_id,
-que liga o pagamento à conta -> o webhook chama ct.ativar(conta_id, ...).
+que liga o pagamento à conta -> o webhook confirma o status via consultar_pagamento()
+e só então chama ct.ativar(conta_id, ...).
 
 Config por ambiente (env):
   ASAAS_API_KEY   -> a chave (sandbox ou producao)
@@ -45,6 +46,20 @@ def _post(caminho: str, payload: dict, timeout: float = 30.0) -> dict:
     url = _base_url() + caminho
     with httpx.Client(timeout=timeout) as c:
         r = c.post(url, json=payload, headers=_headers())
+    if r.status_code >= 300:
+        raise AsaasErro(f"Asaas {r.status_code} em {caminho}: {r.text[:300]}")
+    return r.json()
+
+
+def _get(caminho: str, timeout: float = 15.0) -> dict:
+    """GET na API do Asaas, usando a base correta (sandbox/producao via _base_url).
+
+    Levanta AsaasErro em status != 2xx (inclusive 404 = pagamento inexistente),
+    pra quem chama decidir o que fazer.
+    """
+    url = _base_url() + caminho
+    with httpx.Client(timeout=timeout) as c:
+        r = c.get(url, headers=_headers())
     if r.status_code >= 300:
         raise AsaasErro(f"Asaas {r.status_code} em {caminho}: {r.text[:300]}")
     return r.json()
@@ -121,6 +136,42 @@ def criar_cliente(nome: str, cpf_cnpj: str | None = None,
     if conta_id is not None:
         payload["externalReference"] = str(conta_id)
     return _post("/customers", payload)
+
+
+def consultar_pagamento(payment_id: str) -> dict:
+    """Busca um pagamento na API do Asaas pelo id (ex: 'pay_ze2kmvpz7kksbkwx').
+
+    Usa a base correta automaticamente (sandbox/producao via ASAAS_AMBIENTE), entao
+    funciona nos dois ambientes — diferente de chumbar a URL no webhook.
+
+    Retorna o JSON do pagamento. O campo que interessa pra ativar a conta e' 'status'
+    (RECEIVED / CONFIRMED = pago de verdade). Levanta AsaasErro em 404/erro.
+
+    Uso no webhook (Claude Code), dentro do handler async, sem bloquear o event loop:
+
+        from starlette.concurrency import run_in_threadpool
+        from finance import asaas
+        try:
+            api_pay = await run_in_threadpool(asaas.consultar_pagamento, pay_id)
+            if api_pay.get("status") not in ("RECEIVED", "CONFIRMED"):
+                return Response(status_code=200)   # nao pago -> ignora
+        except asaas.AsaasErro:
+            return Response(status_code=200)        # nao confirmou -> nao ativa
+    """
+    return _get(f"/payments/{payment_id}")
+
+
+def pagamento_confirmado(payment_id: str) -> bool:
+    """Conveniencia: True se o pagamento esta RECEIVED/CONFIRMED na API do Asaas.
+
+    Engole AsaasErro retornando False (na duvida, NAO ativa). Use consultar_pagamento
+    direto se voce quiser inspecionar value/description/etc.
+    """
+    try:
+        status = consultar_pagamento(payment_id).get("status", "")
+    except AsaasErro:
+        return False
+    return status in ("RECEIVED", "CONFIRMED")
 
 
 def sandbox_confirmar_pagamento(payment_id: str) -> dict:

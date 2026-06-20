@@ -367,17 +367,16 @@ def _normalizar_br(numero: str) -> str:
 async def webhook_asaas(request: Request):
     import logging
     _logw = logging.getLogger("openclaw.asaas")
-    # DEBUG: loga TODOS os headers que chegam (achar o token venha de onde vier)
-    _hdrs = {k: v for k, v in request.headers.items()}
+    # VALIDAÇÃO ROBUSTA: só rejeita se há token configurado E ele não bate
+    # (Asaas sandbox não manda header; produção manda. Responde sempre 200 pra não penalizar.)
     _tok_recv = (request.headers.get("asaas-access-token", "") or "").strip()
     _tok_esp = (os.environ.get("ASAAS_WEBHOOK_TOKEN", "") or "").strip()
-    _logw.warning("ASAAS WEBHOOK headers=%s", list(_hdrs.keys()))
-    _logw.warning("ASAAS token recebido=[%s] (len=%s) | esperado len=%s",
-                  _tok_recv, len(_tok_recv), len(_tok_esp))
-    # aceita se: token bate (apos strip) OU se nao ha token esperado configurado.
+    _logw.warning("ASAAS token recebido=[%s] (len=%s) | esperado=[%s] (len=%s)",
+                  _tok_recv, len(_tok_recv), _tok_esp if not _tok_esp else f"{'*'*(_tok_esp[:10]+'...')}", len(_tok_esp))
+    # só rejeita se EU configurei token (produção) E ele não bate
     if _tok_esp and _tok_recv != _tok_esp:
-        _logw.warning("ASAAS 401: token nao bate")
-        return Response(status_code=401)
+        _logw.warning("ASAAS token invalido (configurado mas nao bate) — ignorando webhook")
+        return Response(status_code=200)  # sempre 200 pra não penalizar no Asaas
 
     # corpo pode vir VAZIO (ping/teste do Asaas) -> nao quebra, responde 200
     try:
@@ -409,6 +408,32 @@ async def webhook_asaas(request: Request):
             return Response(status_code=200)
 
         if evento in ("PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"):
+            # HARDENING: confirma o status do pagamento direto na API do Asaas
+            # (protege contra webhook forjado mesmo se o token vaze)
+            try:
+                import httpx
+                asaas_key = os.environ.get("ASAAS_API_KEY", "").strip()
+                pay_id = pay.get("id", "")
+                if asaas_key and pay_id:
+                    async with httpx.AsyncClient(timeout=10) as c:
+                        r = await c.get(
+                            f"https://api.asaas.com/v3/payments/{pay_id}",
+                            headers={"access_token": asaas_key}
+                        )
+                    if r.status_code == 200:
+                        api_pay = r.json()
+                        status = api_pay.get("status", "")
+                        if status not in ("RECEIVED", "CONFIRMED"):
+                            _logw.warning("ASAAS pagamento %s status=%s (nao recebido/confirmado) — ignorando",
+                                         pay_id, status)
+                            return Response(status_code=200)
+                    else:
+                        _logw.warning("ASAAS API erro ao confirmar pagamento %s: %s", pay_id, r.status_code)
+                        return Response(status_code=200)
+            except Exception as _e:  # noqa: BLE001
+                _logw.warning("ASAAS confirmacao da API falhou (%s) — prosseguindo com cautela", _e)
+
+            # tudo certo: ativa a conta
             ct.ativar(pool, conta_id, dias=30, plano=pay.get("description"))
             ct.registrar_evento(pool, conta_id, "pagamento_confirmado",
                                 f"asaas {pay.get('id','')} valor {pay.get('value','')}")

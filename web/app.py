@@ -16,6 +16,7 @@ import threading
 import httpx
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.middleware.cors import CORSMiddleware
 
 from db.conexao import get_pool, init_schema
 from contas import contas as ct
@@ -43,6 +44,12 @@ app.add_middleware(
     same_site="lax",
     https_only=os.environ.get("PORTAL_COOKIE_SECURE", "1") == "1",
     max_age=60 * 60 * 24 * 7,
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://zaq-landing.onrender.com"],
+    allow_methods=["POST", "GET"],
+    allow_headers=["Content-Type"],
 )
 app.include_router(portal_router)
 app.include_router(admin_router)

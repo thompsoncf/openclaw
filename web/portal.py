@@ -68,7 +68,8 @@ def conta_logada(request: Request):
     pool = get_pool()
     with pool.connection() as c:
         row = c.execute(
-            "select id, tipo, nome, email, plano, status, vencimento, cidade, eh_fornecedor from contas where id = %s",
+            "select id, tipo, nome, email, plano, status, vencimento, cidade, "
+            "eh_fornecedor, fornecedor_slug from contas where id = %s",
             (cid,),
         ).fetchone()
     return row
@@ -361,7 +362,7 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
 <p class="mut">Informações mínimas da sua conta de fornecedor. Dados fiscais completos (certificado, regime tributário, etc.) serão pedidos quando ativarmos a emissão de nota fiscal.</p>
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
 {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
-<form method="post" action="/painel/fornecedor">
+<form method="post" action="/painel/fornecedor/dados">
 <label>Razão social</label><input name="razao_social" value="{{ fiscal.razao_social or '' }}" placeholder="ex: Hortifruti do Zé LTDA" maxlength="200">
 <label>CNPJ <span class="mut">(números apenas)</span></label><input name="cnpj" value="{{ fiscal.cnpj or '' }}" placeholder="14224053000103" maxlength="14">
 <label>Endereço completo</label><input name="endereco" value="{{ fiscal.endereco or '' }}" placeholder="ex: Rua A, 123, Teresina - PI, 64000-000" maxlength="200">
@@ -1196,8 +1197,10 @@ def painel(request: Request):
 @router.get("/painel/fornecedor", response_class=HTMLResponse)
 def painel_fornecedor(request: Request):
     conta = conta_logada(request)
-    if conta is None or not conta[8]:  # conta[8] = eh_fornecedor
+    if conta is None:
         return RedirectResponse("/login", status_code=303)
+    if not conta[8]:  # eh_fornecedor
+        return RedirectResponse("/painel", status_code=303)
     pool = get_pool()
     fiscal = None
     with pool.connection() as c:
@@ -1215,34 +1218,31 @@ def painel_fornecedor(request: Request):
                    aviso=request.session.pop("aviso", None))
 
 
-@router.post("/painel/fornecedor")
-def painel_fornecedor_salvar(request: Request,
-                            razao_social: str = Form(...),
-                            cnpj: str = Form(...),
-                            endereco: str = Form(...)):
+@router.post("/painel/fornecedor/dados")
+def painel_fornecedor_dados(request: Request,
+                           razao_social: str = Form(""),
+                           cnpj: str = Form(""),
+                           endereco: str = Form("")):
     conta = conta_logada(request)
-    if conta is None or not conta[8]:
+    if conta is None:
         return RedirectResponse("/login", status_code=303)
-
-    # Limpa CNPJ (tira caracteres não-numéricos)
-    cnpj = "".join(c for c in cnpj if c.isdigit())
-    if len(cnpj) != 14:
-        request.session["erro"] = "CNPJ deve ter 14 dígitos."
-        return RedirectResponse("/painel/fornecedor", status_code=303)
+    if not conta[8]:  # eh_fornecedor
+        return RedirectResponse("/painel", status_code=303)
 
     pool = get_pool()
     with pool.connection() as c:
-        # Tenta inserir; se já existe, atualiza
-        c.execute(
-            """insert into fornecedor_fiscal (conta_id, razao_social, cnpj, endereco)
-               values (%s, %s, %s, %s)
-               on conflict (conta_id) do update
-               set razao_social=%s, cnpj=%s, endereco=%s, atualizado_em=now()""",
-            (conta[0], razao_social, cnpj, endereco,
-             razao_social, cnpj, endereco)
-        )
+        # upsert: cria a linha fiscal se não existe, atualiza se existe
+        c.execute("""
+            insert into fornecedor_fiscal (conta_id, razao_social, cnpj, endereco)
+            values (%s, %s, %s, %s)
+            on conflict (conta_id) do update
+              set razao_social=excluded.razao_social,
+                  cnpj=excluded.cnpj,
+                  endereco=excluded.endereco,
+                  atualizado_em=now()
+        """, (conta[0], razao_social or None, cnpj or None, endereco or None))
         c.commit()
-    request.session["aviso"] = "✅ Dados do fornecedor salvos com sucesso!"
+    request.session["aviso"] = "Dados do fornecedor salvos."
     return RedirectResponse("/painel/fornecedor", status_code=303)
 
 

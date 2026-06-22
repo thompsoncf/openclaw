@@ -145,13 +145,21 @@ def checar_e_registrar_uso(pool, conta: Conta, tem_midia: bool = False) -> tuple
 # ---------- Auditoria ----------
 
 def registrar_evento(pool, conta_id: int, tipo: str, detalhe: str = "",
-                     membro_id: int | None = None):
-    with pool.connection() as conn:
-        conn.execute(
+                     membro_id: int | None = None, conn=None):
+    """Registra evento. Se conn passado, usa ela (mesmo transacao); senao abre propria."""
+    def _ins(c):
+        c.execute(
             "insert into eventos_conta (conta_id, membro_id, tipo, detalhe) values (%s,%s,%s,%s)",
             (conta_id, membro_id, tipo, detalhe),
         )
-        conn.commit()
+    if conn is not None:
+        # Dentro de transacao externa; nao commita aqui (quem commitou eh a transacao)
+        _ins(conn)
+    else:
+        # Abre transacao propria
+        with pool.connection() as c:
+            _ins(c)
+            c.commit()
 
 
 # ---------- Administracao (portal/admin; o chat NAO cria conta) ----------
@@ -182,13 +190,18 @@ def criar_conta(pool, tipo: str, nome: str, plano: str | None = None,
     if conn is not None:
         # Dentro de transação externa (da rota)
         conta_id = int(_ins(conn))
+        # Registra evento NA MESMA conexão (enxerga a conta recém-criada)
+        registrar_evento(pool, conta_id, "conta_criada",
+                         f"tipo={tipo} plano={plano or '-'} cidade={cidade or '-'}",
+                         conn=conn)
     else:
         # Abrir transação própria
         with pool.connection() as c:
             conta_id = int(_ins(c))
+            registrar_evento(pool, conta_id, "conta_criada",
+                             f"tipo={tipo} plano={plano or '-'} cidade={cidade or '-'}",
+                             conn=c)
             c.commit()
-
-    registrar_evento(pool, conta_id, "conta_criada", f"tipo={tipo} plano={plano or '-'} cidade={cidade or '-'}")
     return conta_id
 
 

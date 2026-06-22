@@ -1844,7 +1844,7 @@ def loja_fornecedor(request: Request, slug: str):
     with pool.connection() as c:
         forn = c.execute(
             """select id, nome, fornecedor_slug from contas
-               where fornecedor_slug = %s and eh_fornecedor and ativo""",
+               where fornecedor_slug = %s and eh_fornecedor""",
             (slug,),
         ).fetchone()
     if forn is None:

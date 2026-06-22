@@ -1860,10 +1860,11 @@ def cadastro_envia(request: Request, background: BackgroundTasks,
         conta_id = ct.criar_conta(pool, tipo, nome.strip(), plano=plano_gravar, documento=doc,
                                   cidade=_cid.valida(regiao))  # trial 7d; CEP->regiao
         with pool.connection() as c:
-            # Salvar email, senha, flag assinante_cesta, e endereço (se fornecido)
+            # Salvar email, senha, flag assinante_cesta, endereço e CEP (se fornecidos)
             endereco_val = (endereco or "").strip() or None
-            c.execute("update contas set email=%s, senha_hash=%s, eh_assinante_cesta=%s, endereco=%s where id=%s",
-                      (email, hash_senha(senha), eh_cesta, endereco_val, conta_id))
+            cep_val = (cep or "").strip() or None
+            c.execute("update contas set email=%s, senha_hash=%s, eh_assinante_cesta=%s, endereco=%s, cep=%s where id=%s",
+                      (email, hash_senha(senha), eh_cesta, endereco_val, cep_val, conta_id))
             c.commit()
     except Exception as e:  # captura violação de unique constraint
         if "idx_contas_email_unico" in str(e) or "unique" in str(e).lower():

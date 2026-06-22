@@ -405,54 +405,44 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
 <!-- SEÇÃO: Catálogo -->
 <div id="forn-catalogo" class="forn-secao" style="display:none">
   <button type="button" class="forn-voltar" onclick="fornVoltar()">← voltar</button>
-  <h3>Catálogo</h3>
-  <div style="margin-bottom:1rem">
-    <button type="button" onclick="fornShowNovoProduct()" style="padding:.5rem 1rem;background:#1d9e75;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:500">+ Novo produto</button>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+    <h3 style="margin:0">Catálogo</h3>
+    <button type="button" onclick="fornShowNovoProduct()" style="padding:.5rem 1rem;background:#1d9e75;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:500;font-size:.9rem">+ novo produto</button>
   </div>
 
-  <!-- LISTA DE PRODUTOS -->
-  <div id="forn-cat-lista">
+  <!-- LISTA DE PRODUTOS EM CARDS -->
+  <div id="forn-cat-lista" style="display:flex;flex-direction:column;gap:.8rem">
     {% if produtos %}
-    <table style="width:100%;border-collapse:collapse;font-size:.9rem">
-      <thead><tr style="border-bottom:1px solid #2a2a2b">
-        <th style="text-align:left;padding:.5rem">Produto</th>
-        <th style="text-align:center">Un.</th>
-        <th style="text-align:right">Saldo</th>
-        <th style="text-align:right">Custo €</th>
-        <th style="text-align:right">Preço €</th>
-        <th style="text-align:center">Margem</th>
-        <th style="text-align:center">Ações</th>
-      </tr></thead>
-      <tbody>
       {% for p in produtos %}
-      <tr style="border-bottom:1px solid #1c1c1f;{% if p.abaixo_minimo %}background:#2a1c1c{% endif %}">
-        <td style="padding:.5rem"><strong>{{ p.nome }}</strong>{% if p.abaixo_minimo %}<br><span class="mut" style="color:#ff6b6b;font-size:.8rem">⚠ abaixo do mínimo</span>{% endif %}</td>
-        <td style="text-align:center">{{ p.unidade }}</td>
-        <td style="text-align:right">{{ p.saldo }}</td>
-        <td style="text-align:right">{{ "%.2f" | format(p.custo_medio_centavos / 100) }}</td>
-        <td style="text-align:right">{{ "%.2f" | format(p.preco_venda_centavos / 100) }}</td>
-        <td style="text-align:center">{% if p.margem_pct %}{{ p.margem_pct }}%{% else %}-{% endif %}</td>
-        <td style="text-align:center;font-size:.8rem">
-          <button type="button" onclick="fornEditProduct({{ p.id }})" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer">✎</button>
-          <button type="button" onclick="fornShowEntrada({{ p.id }})" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer">↓</button>
-          <button type="button" onclick="fornShowPerda({{ p.id }})" style="background:transparent;border:none;color:#ff6b6b;cursor:pointer">✕</button>
-        </td>
-      </tr>
+      <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1rem">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.6rem">
+          <div>
+            <strong style="font-size:1rem">{{ p.nome }}</strong> · <span class="mut">{{ p.unidade }}</span>
+            <div class="mut" style="font-size:.85rem;margin-top:.3rem">
+              saldo: <strong>{{ p.saldo }} {{ p.unidade }}</strong> · custo médio <strong>R$ {{ "%.2f" | format(p.custo_medio_centavos / 100) }}</strong> · vende <strong>R$ {{ "%.2f" | format(p.preco_venda_centavos / 100) }}</strong> · margem {% if p.margem_pct %}<strong>{{ p.margem_pct }}%</strong>{% else %}-{% endif %}
+              {% if p.abaixo_minimo %}<br><span style="color:#ff6b6b">⚠ abaixo do mínimo</span>{% endif %}
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+          <button type="button" onclick="fornShowEntrada({{ p.id }})" style="background:#1d9e75;color:#fff;border:0;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem;font-weight:500">dar entrada</button>
+          <button type="button" onclick="fornShowPerda({{ p.id }})" style="background:#8a3636;color:#fff;border:0;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem;font-weight:500">registrar perda</button>
+          <button type="button" onclick="fornEditProduct({{ p.id }})" style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem">editar</button>
+        </div>
+      </div>
       {% endfor %}
-      </tbody>
-    </table>
     {% else %}
-    <p class="mut">Nenhum produto ainda. Clique em "+ Novo produto" pra começar.</p>
+    <p class="mut">Nenhum produto ainda. Clique em "+ novo produto" pra começar.</p>
     {% endif %}
   </div>
 
   <!-- MODAL: Novo/Editar Produto -->
-  <div id="forn-novo-prod" style="display:none;margin-top:2rem;padding:1rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px">
-    <h4>Novo produto</h4>
+  <div id="forn-novo-prod" style="display:none;margin-top:2rem;padding:1.2rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px">
+    <h4 style="margin-top:0">Novo produto</h4>
     <form method="post" action="/painel/fornecedor/catalogo/produto">
-      <label>Nome</label><input name="nome" required placeholder="ex: Tomate">
+      <label>Nome</label><input name="nome" required placeholder="ex: Tomate" style="width:100%">
       <label>Unidade</label>
-      <select name="unidade" required>
+      <select name="unidade" required style="width:100%">
         <option value="kg">kg</option>
         <option value="unidade">unidade</option>
         <option value="duzia">dúzia</option>
@@ -461,52 +451,60 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
         <option value="litro">litro</option>
         <option value="pacote">pacote</option>
       </select>
-      <label>Categoria (opcional)</label><input name="categoria" placeholder="ex: fruta">
-      <label>Preço de venda (€)</label><input name="preco_venda" type="number" step="0.01" placeholder="ex: 6.90">
-      <label>Estoque mínimo para alerta</label><input name="estoque_minimo" type="number" step="0.1" placeholder="ex: 5">
-      <button style="background:#1d9e75;color:#fff;padding:.4rem .8rem;border:0;border-radius:6px;cursor:pointer;margin-top:.5rem">Criar produto</button>
+      <label>Categoria (opcional)</label><input name="categoria" placeholder="ex: fruta" style="width:100%">
+      <label>Preço de venda (R$)</label><input name="preco_venda" type="number" step="0.01" placeholder="ex: 6.90" style="width:100%">
+      <label>Estoque mínimo para alerta</label><input name="estoque_minimo" type="number" step="0.1" placeholder="ex: 5" style="width:100%">
+      <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.8rem;width:100%;font-weight:500">Criar produto</button>
     </form>
-    <button type="button" onclick="fornHideNovoProduct()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.5rem">Cancelar</button>
+    <button type="button" onclick="fornHideNovoProduct()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.6rem;font-size:.9rem">Cancelar</button>
   </div>
 
   <!-- MODAL: Dar Entrada -->
-  <div id="forn-entrada" style="display:none;margin-top:2rem;padding:1rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px">
-    <h4>Dar entrada de estoque</h4>
+  <div id="forn-entrada" style="display:none;margin-top:2rem;padding:1.2rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px">
+    <h4 style="margin-top:0">ao clicar "dar entrada" abre isto:</h4>
     <form method="post" action="/painel/fornecedor/catalogo/entrada">
       <input type="hidden" id="forn-prod-id" name="produto_id">
-      <label>Quantidade</label><input name="quantidade" type="number" step="0.1" required placeholder="ex: 50">
-      <label>Custo unitário (€ — preço de compra)</label><input name="custo_unit" type="number" step="0.01" required placeholder="ex: 4.00">
-      <label>De onde comprou?</label>
-      <select name="origem_id" id="forn-origem-sel" required>
-        <option value="">Selecione uma origem</option>
-      </select>
-      <button type="button" onclick="fornShowNovaOrigem()" style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;padding:.3rem .6rem;cursor:pointer;font-size:.85rem;margin-top:.3rem">+ Nova origem</button>
-      <button style="background:#1d9e75;color:#fff;padding:.4rem .8rem;border:0;border-radius:6px;cursor:pointer;margin-top:.5rem;width:100%">Confirmar entrada</button>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem;margin-bottom:.8rem">
+        <div>
+          <label>Quantidade:</label><input name="quantidade" type="number" step="0.1" required placeholder="ex: 50 kg" style="width:100%">
+        </div>
+        <div>
+          <label>Custo: R$ <input name="custo_unit" type="number" step="0.01" required placeholder="4,00" style="width:100%;display:inline;width:auto">/kg</label>
+        </div>
+      </div>
+      <label>Origem (de quem comprou):</label>
+      <div style="display:flex;gap:.4rem">
+        <select name="origem_id" id="forn-origem-sel" required style="flex:1">
+          <option value="">CEASA</option>
+        </select>
+        <button type="button" onclick="fornShowNovaOrigem()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;font-size:.9rem;padding:0;text-decoration:underline">+ nova</button>
+      </div>
+      <button style="background:#1d9e75;color:#fff;padding:.6rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:1rem;width:100%;font-weight:500;font-size:.95rem">Confirmar entrada</button>
     </form>
-    <button type="button" onclick="fornHideEntrada()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.5rem">Cancelar</button>
+    <button type="button" onclick="fornHideEntrada()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.6rem;font-size:.9rem">Cancelar</button>
   </div>
 
   <!-- MODAL: Nova Origem -->
-  <div id="forn-nova-origem" style="display:none;margin-top:1rem;padding:.8rem;background:#2a2a2b;border-radius:6px">
-    <h4 style="margin-top:0">Nova origem de compra</h4>
+  <div id="forn-nova-origem" style="display:none;margin-top:1rem;padding:1rem;background:#2a2a2b;border-radius:6px">
+    <h4 style="margin-top:0;margin-bottom:.6rem">Nova origem</h4>
     <form method="post" action="/painel/fornecedor/catalogo/origem">
-      <label>Nome (ex: CEASA, Sítio do João)</label><input name="nome" required placeholder="">
-      <label>Contato (opcional)</label><input name="contato" placeholder="tel, email, whatsapp">
-      <button style="background:#1d9e75;color:#fff;padding:.3rem .6rem;border:0;border-radius:4px;cursor:pointer;font-size:.85rem">Criar origem</button>
+      <label>Nome</label><input name="nome" required placeholder="ex: CEASA, Sítio do João" style="width:100%">
+      <label>Contato (opcional)</label><input name="contato" placeholder="tel, email, whatsapp" style="width:100%">
+      <button style="background:#1d9e75;color:#fff;padding:.4rem .8rem;border:0;border-radius:4px;cursor:pointer;font-size:.85rem;margin-top:.5rem;font-weight:500">Criar origem</button>
     </form>
-    <button type="button" onclick="fornHideNovaOrigem()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;font-size:.85rem">Cancelar</button>
+    <button type="button" onclick="fornHideNovaOrigem()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;font-size:.85rem;margin-top:.5rem">Cancelar</button>
   </div>
 
   <!-- MODAL: Registrar Perda -->
-  <div id="forn-perda" style="display:none;margin-top:2rem;padding:1rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px">
-    <h4>Registrar perda</h4>
+  <div id="forn-perda" style="display:none;margin-top:2rem;padding:1.2rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px">
+    <h4 style="margin-top:0">Registrar perda</h4>
     <form method="post" action="/painel/fornecedor/catalogo/perda">
       <input type="hidden" id="forn-perda-prod-id" name="produto_id">
-      <label>Quantidade perdida</label><input name="quantidade" type="number" step="0.1" required placeholder="ex: 2">
-      <label>Motivo</label><input name="motivo" placeholder="ex: estragou, sobrou do dia">
-      <button style="background:#ff6b6b;color:#fff;padding:.4rem .8rem;border:0;border-radius:6px;cursor:pointer;margin-top:.5rem;width:100%">Registrar perda</button>
+      <label>Quantidade perdida</label><input name="quantidade" type="number" step="0.1" required placeholder="ex: 2" style="width:100%">
+      <label>Motivo</label><input name="motivo" placeholder="ex: estragou, sobrou do dia" style="width:100%">
+      <button style="background:#8a3636;color:#fff;padding:.6rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:1rem;width:100%;font-weight:500;font-size:.95rem">Registrar perda</button>
     </form>
-    <button type="button" onclick="fornHidePerda()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.5rem">Cancelar</button>
+    <button type="button" onclick="fornHidePerda()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.6rem;font-size:.9rem">Cancelar</button>
   </div>
 
 </div>

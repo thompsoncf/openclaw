@@ -483,7 +483,8 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
       <label>Origem (de quem comprou):</label>
       <div style="display:flex;gap:.4rem">
         <select name="origem_id" id="forn-origem-sel" required style="flex:1">
-          <option value="">CEASA</option>
+          <option value="">Selecione uma origem</option>
+          {% for o in origens %}<option value="{{ o.id }}">{{ o.nome }}</option>{% endfor %}
         </select>
         <button type="button" onclick="fornShowNovaOrigem()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;font-size:.9rem;padding:0;text-decoration:underline">+ nova</button>
       </div>
@@ -597,6 +598,7 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
       <label>De onde comprou?</label>
       <select name="origem_id" id="forn-compra-origem-sel" style="width:100%">
         <option value="">Selecione uma origem</option>
+        {% for o in origens %}<option value="{{ o.id }}">{{ o.nome }}</option>{% endfor %}
       </select>
       <button type="button" onclick="fornShowNovaOrigemCompra()" style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;padding:.3rem .6rem;cursor:pointer;font-size:.85rem;margin-top:.3rem">+ Nova origem</button>
       <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.8rem;width:100%;font-weight:500">Criar compra</button>
@@ -1625,6 +1627,8 @@ def painel_fornecedor(request: Request):
         } if row else {"razao_social": None, "cnpj": None, "endereco": None}
     # Carrega produtos do catálogo
     produtos = cat_mod.listar_produtos(pool, conta[0])
+    # Carrega origens de compra (de quem o fornecedor compra)
+    origens = cat_mod.listar_origens(pool, conta[0])
     # Carrega compras
     compras_raw = []
     with pool.connection() as c:
@@ -1635,7 +1639,7 @@ def painel_fornecedor(request: Request):
             (conta[0],),
         ).fetchall()
         compras_raw = [{"id": r[0], "data_compra": r[1], "total_centavos": r[2], "fonte": r[3], "status": r[4], "origem_nome": r[5]} for r in rows]
-    return _render("fornecedor", request, conta=conta, fiscal=fiscal, produtos=produtos, compras=compras_raw,
+    return _render("fornecedor", request, conta=conta, fiscal=fiscal, produtos=produtos, origens=origens, compras=compras_raw,
                    erro=request.session.pop("erro", None),
                    aviso=request.session.pop("aviso", None))
 

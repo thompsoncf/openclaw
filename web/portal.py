@@ -1818,7 +1818,8 @@ def cadastro_envia(request: Request, background: BackgroundTasks,
                    plano: str = Form("cesta"), nome: str = Form(""),
                    email: str = Form(...), senha: str = Form(...),
                    documento: str = Form(""), whatsapp: str = Form(...),
-                   cep: str = Form(""), endereco: str = Form("")):
+                   cep: str = Form(""), endereco: str = Form(""),
+                   next: str = Form("")):
     pool = get_pool()
     email = email.strip().lower()
     # Se nome vazio, usar parte do email como nome provisório
@@ -1898,6 +1899,10 @@ def cadastro_envia(request: Request, background: BackgroundTasks,
         background.add_task(enviar_boas_vindas, email, nome.strip(), codigo_dono)
     except Exception:  # noqa: BLE001
         pass
+    # Se veio da loja (/f/{slug}/confirmar), segue pra lá pra criar a assinatura
+    # Senão, vai pro /bem-vindo (fluxo normal do app)
+    if next and next.startswith("/f/"):
+        return RedirectResponse(next, status_code=303)
     return RedirectResponse("/bem-vindo", status_code=303)
 
 

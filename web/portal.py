@@ -1981,7 +1981,15 @@ def painel_fornecedor(request: Request):
     # Carrega tamanhos de cesta
     from finance import cestas as cestas_mod
     tamanhos = cestas_mod.listar_tamanhos(pool, conta[0], so_ativos=False)
-    return _render("fornecedor", request, conta=conta, fiscal=fiscal, produtos=produtos, origens=origens, compras=compras_raw, tamanhos=tamanhos,
+    # Carrega margem alvo do fornecedor
+    margem_alvo = None
+    with pool.connection() as c:
+        row = c.execute(
+            "select margem_alvo_pct from contas where id=%s",
+            (conta[0],),
+        ).fetchone()
+        margem_alvo = float(row[0]) if row and row[0] else 60.0
+    return _render("fornecedor", request, conta=conta, fiscal=fiscal, produtos=produtos, origens=origens, compras=compras_raw, tamanhos=tamanhos, margem_alvo=margem_alvo,
                    erro=request.session.pop("erro", None),
                    aviso=request.session.pop("aviso", None))
 
@@ -2011,6 +2019,45 @@ def painel_fornecedor_dados(request: Request,
         """, (conta[0], razao_social or None, cnpj or None, endereco or None))
         c.commit()
     request.session["aviso"] = "Dados do fornecedor salvos."
+    return RedirectResponse("/painel/fornecedor", status_code=303)
+
+
+@router.post("/painel/fornecedor/margem-alvo")
+def salvar_margem_alvo(request: Request, margem_alvo: str = Form("60")):
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return RedirectResponse("/painel/fornecedor", status_code=303)
+    try:
+        s = margem_alvo.replace("%", "").strip()
+        valor = float(s)
+        if valor < 0 or valor > 100:
+            valor = 60.0
+    except ValueError:
+        valor = 60.0
+    with get_pool().connection() as c:
+        c.execute(
+            "update contas set margem_alvo_pct = %s where id = %s",
+            (valor, conta[0]),
+        )
+        c.commit()
+    request.session["aviso"] = f"Margem alvo salva: {valor}%"
+    return RedirectResponse("/painel/fornecedor", status_code=303)
+
+
+@router.post("/painel/fornecedor/montar-cesta")
+def montar_cesta_teste(request: Request, assinatura_id: int = Form(...)):
+    from finance import montador
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return RedirectResponse("/painel/fornecedor", status_code=303)
+    try:
+        r = montador.montar_cesta(get_pool(), assinatura_id, persistir=True)
+        msg = f"✓ Cesta montada: {len(r['itens'])} itens, custo R$ {r['custo_total_centavos']/100:.2f}"
+        if r['avisos']:
+            msg += " | ⚠️ " + "; ".join(r['avisos'])
+        request.session["aviso"] = msg
+    except Exception as e:
+        request.session["erro"] = f"Erro ao montar cesta: {str(e)}"
     return RedirectResponse("/painel/fornecedor", status_code=303)
 
 

@@ -68,7 +68,7 @@ def conta_logada(request: Request):
     pool = get_pool()
     with pool.connection() as c:
         row = c.execute(
-            "select id, tipo, nome, email, plano, status, vencimento, cidade from contas where id = %s",
+            "select id, tipo, nome, email, plano, status, vencimento, cidade, eh_fornecedor from contas where id = %s",
             (cid,),
         ).fetchone()
     return row
@@ -211,7 +211,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
 .hist-itens{padding:.2rem .2rem .6rem 1rem;font-size:13px;color:#a8a8a3;line-height:1.7}
 </style></head><body>
 <div class="topo"><span class="logo">Zaq</span><span>
-{% if logado %}<a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/painel/compras">Compras</a><a href="/sair">Sair</a>
+{% if logado %}<a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/painel/compras">Compras</a>{% if conta and conta[8] %}<a href="/painel/fornecedor">👨‍🌾 Fornecedor</a>{% endif %}<a href="/sair">Sair</a>
 {% else %}<a href="/login">Entrar</a><a href="/cadastro">Criar conta</a>{% endif %}
 </span></div>
 {% block conteudo %}{% endblock %}
@@ -354,6 +354,25 @@ Peça pra pessoa abrir o bot <b>ClawIAOpen</b> no Telegram e enviar o código �
 Pra adicionar mais, faça upgrade pro plano Família ou PJ.</p>
 {% endif %}
 <p class="mut" style="margin-top:1rem"><a href="/senha" style="color:#5dcaa5">Alterar minha senha</a></p>
+</div>{% endblock %}"""
+
+_FORNECEDOR = """{% extends "base" %}{% block conteudo %}
+<div class="card larga"><h1>👨‍🌾 Dados do fornecedor</h1>
+<p class="mut">Informações mínimas da sua conta de fornecedor. Dados fiscais completos (certificado, regime tributário, etc.) serão pedidos quando ativarmos a emissão de nota fiscal.</p>
+{% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+{% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
+<form method="post" action="/painel/fornecedor">
+<label>Razão social</label><input name="razao_social" value="{{ fiscal.razao_social or '' }}" placeholder="ex: Hortifruti do Zé LTDA" maxlength="200">
+<label>CNPJ <span class="mut">(números apenas)</span></label><input name="cnpj" value="{{ fiscal.cnpj or '' }}" placeholder="14224053000103" maxlength="14">
+<label>Endereço completo</label><input name="endereco" value="{{ fiscal.endereco or '' }}" placeholder="ex: Rua A, 123, Teresina - PI, 64000-000" maxlength="200">
+<button>💾 Salvar dados</button>
+</form>
+<div class="card" style="margin-top:1.5rem;border-color:#1d9e75;background:#15241d">
+<h1 style="font-size:1rem;margin:0 0 .4rem">📋 Próximos passos</h1>
+<p style="font-size:.92rem;color:#c5d8ce;margin:0"><b>Catálogo</b> — Em breve, você vai poder adicionar seus produtos aqui.</p>
+<p style="font-size:.92rem;color:#c5d8ce;margin:.4rem 0 0"><b>Pedidos</b> — Acompanhe os pedidos dos seus clientes.</p>
+<p style="font-size:.92rem;color:#c5d8ce;margin:.4rem 0 0"><b>Financeiro</b> — Consulte seus ganhos e comissões.</p>
+</div>
 </div>{% endblock %}"""
 
 _SENHA = """{% extends "base" %}{% block conteudo %}
@@ -1014,7 +1033,7 @@ function avisarTerminei(){
 {% endblock %}"""
 
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 from finance.models import canonizar_categoria, categorias_de
@@ -1172,6 +1191,59 @@ def painel(request: Request):
                    whatsapp_bot_num=whatsapp_from,
                    erro=request.session.pop("erro", None),
                    aviso=request.session.pop("aviso", None))
+
+
+@router.get("/painel/fornecedor", response_class=HTMLResponse)
+def painel_fornecedor(request: Request):
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:  # conta[8] = eh_fornecedor
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    fiscal = None
+    with pool.connection() as c:
+        row = c.execute(
+            "select razao_social, cnpj, endereco from fornecedor_fiscal where conta_id=%s",
+            (conta[0],),
+        ).fetchone()
+        fiscal = {
+            "razao_social": row[0] if row else None,
+            "cnpj": row[1] if row else None,
+            "endereco": row[2] if row else None
+        } if row else {"razao_social": None, "cnpj": None, "endereco": None}
+    return _render("fornecedor", request, conta=conta, fiscal=fiscal,
+                   erro=request.session.pop("erro", None),
+                   aviso=request.session.pop("aviso", None))
+
+
+@router.post("/painel/fornecedor")
+def painel_fornecedor_salvar(request: Request,
+                            razao_social: str = Form(...),
+                            cnpj: str = Form(...),
+                            endereco: str = Form(...)):
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return RedirectResponse("/login", status_code=303)
+
+    # Limpa CNPJ (tira caracteres não-numéricos)
+    cnpj = "".join(c for c in cnpj if c.isdigit())
+    if len(cnpj) != 14:
+        request.session["erro"] = "CNPJ deve ter 14 dígitos."
+        return RedirectResponse("/painel/fornecedor", status_code=303)
+
+    pool = get_pool()
+    with pool.connection() as c:
+        # Tenta inserir; se já existe, atualiza
+        c.execute(
+            """insert into fornecedor_fiscal (conta_id, razao_social, cnpj, endereco)
+               values (%s, %s, %s, %s)
+               on conflict (conta_id) do update
+               set razao_social=%s, cnpj=%s, endereco=%s, atualizado_em=now()""",
+            (conta[0], razao_social, cnpj, endereco,
+             razao_social, cnpj, endereco)
+        )
+        c.commit()
+    request.session["aviso"] = "✅ Dados do fornecedor salvos com sucesso!"
+    return RedirectResponse("/painel/fornecedor", status_code=303)
 
 
 @router.post("/assinar")

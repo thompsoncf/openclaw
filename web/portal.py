@@ -359,53 +359,96 @@ Pra adicionar mais, faça upgrade pro plano Família ou PJ.</p>
 
 _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
 <div class="card larga"><h2>👨‍🌾 Fornecedor</h2>
-<div class="abas">
-  <button id="fab-dados" class="aba on" onclick="fornAba('dados')" style="margin:0">Meus dados</button>
-  <button id="fab-catalogo" class="aba" onclick="fornAba('catalogo')" style="margin:0">Catálogo</button>
-  <button id="fab-pedidos" class="aba" onclick="fornAba('pedidos')" style="margin:0">Pedidos</button>
-  <button id="fab-fin" class="aba" onclick="fornAba('financeiro')" style="margin:0">Financeiro</button>
-</div>
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
 {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
 
-<div id="forn-dados">
-  <h3>Seus dados</h3>
+<!-- MENU DE CARDS (visível ao entrar) -->
+<div id="forn-menu" class="forn-cards">
+  <button type="button" class="forn-card" onclick="fornAbrir('dados')">
+    <span class="fc-ic">🏢</span>
+    <span class="fc-tit">Meus dados</span>
+    <span class="fc-leg">Os dados da sua empresa: razão social, CNPJ e endereço.</span>
+  </button>
+  <button type="button" class="forn-card" onclick="fornAbrir('catalogo')">
+    <span class="fc-ic">📦</span>
+    <span class="fc-tit">Catálogo</span>
+    <span class="fc-leg">Seus produtos e preços — o que os clientes podem pedir de você.</span>
+  </button>
+  <button type="button" class="forn-card" onclick="fornAbrir('pedidos')">
+    <span class="fc-ic">📋</span>
+    <span class="fc-tit">Pedidos</span>
+    <span class="fc-leg">Os pedidos dos seus clientes, prontos pra separar e entregar.</span>
+  </button>
+  <button type="button" class="forn-card" onclick="fornAbrir('financeiro')">
+    <span class="fc-ic">💰</span>
+    <span class="fc-tit">Financeiro</span>
+    <span class="fc-leg">Quanto você ganhou, os repasses e as comissões.</span>
+  </button>
+</div>
+
+<!-- SEÇÃO: Meus dados -->
+<div id="forn-dados" class="forn-secao" style="display:none">
+  <button type="button" class="forn-voltar" onclick="fornVoltar()">← voltar</button>
+  <h3>Meus dados</h3>
   <form method="post" action="/painel/fornecedor/dados">
     <label>Razão social</label>
     <input name="razao_social" value="{{ fiscal.razao_social or '' }}" placeholder="ex: Hortifruti do Zé LTDA" maxlength="200">
-    <label>CNPJ <span class="mut">(números apenas)</span></label>
+    <label>CNPJ</label>
     <input name="cnpj" value="{{ fiscal.cnpj or '' }}" placeholder="14224053000103" maxlength="14">
-    <label>Endereço completo</label>
+    <label>Endereço</label>
     <input name="endereco" value="{{ fiscal.endereco or '' }}" placeholder="ex: Rua A, 123, Teresina - PI, 64000-000" maxlength="200">
-    <button>💾 Salvar dados</button>
+    <button>Salvar dados</button>
   </form>
-  <p class="mut">Dados fiscais completos (inscrição estadual, regime tributário, certificado) serão pedidos quando ativarmos a emissão de nota fiscal.</p>
+  <p class="mut">Dados fiscais completos (inscrição estadual, regime, certificado) serão pedidos quando ativarmos a emissão de nota.</p>
 </div>
 
-<div id="forn-catalogo" style="display:none">
+<!-- SEÇÃO: Catálogo -->
+<div id="forn-catalogo" class="forn-secao" style="display:none">
+  <button type="button" class="forn-voltar" onclick="fornVoltar()">← voltar</button>
   <h3>Catálogo</h3>
   <p class="mut">Em breve: importe sua planilha de produtos ou cadastre um a um, com preços.</p>
 </div>
 
-<div id="forn-pedidos" style="display:none">
+<!-- SEÇÃO: Pedidos -->
+<div id="forn-pedidos" class="forn-secao" style="display:none">
+  <button type="button" class="forn-voltar" onclick="fornVoltar()">← voltar</button>
   <h3>Pedidos</h3>
   <p class="mut">Em breve: os pedidos do dia, organizados por bairro, com a lista de separação.</p>
 </div>
 
-<div id="forn-financeiro" style="display:none">
+<!-- SEÇÃO: Financeiro -->
+<div id="forn-financeiro" class="forn-secao" style="display:none">
+  <button type="button" class="forn-voltar" onclick="fornVoltar()">← voltar</button>
   <h3>Financeiro</h3>
   <p class="mut">Em breve: seus ganhos, repasses e comissões.</p>
 </div>
 
 </div>
 
+<style>
+.forn-cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:.7rem; margin-top:1rem}
+.forn-card{display:flex; flex-direction:column; align-items:flex-start; text-align:left;
+  background:#1c1c1f; border:1px solid #2a2a2b; border-radius:12px; padding:1rem; cursor:pointer; transition:border-color .15s; color:inherit; font:inherit}
+.forn-card:hover{border-color:#1d9e75}
+.fc-ic{font-size:24px; margin-bottom:.4rem; line-height:1}
+.fc-tit{font-size:.95rem; font-weight:500; color:#f0f0ee; margin-bottom:.2rem}
+.fc-leg{font-size:.8rem; color:#a8a8a3; line-height:1.4}
+.forn-secao{margin-top:1rem}
+.forn-voltar{background:transparent; border:none; color:#5dcaa5; cursor:pointer; font-size:.9rem; padding:0 0 .8rem 0; text-decoration:none}
+.forn-voltar:hover{color:#7ad4b4}
+</style>
+
 <script>
-function fornAba(a){
-  var secoes = ['dados','catalogo','pedidos','financeiro'];
-  var btns = {dados:'fab-dados', catalogo:'fab-catalogo', pedidos:'fab-pedidos', financeiro:'fab-fin'};
-  secoes.forEach(function(s){
-    document.getElementById('forn-'+s).style.display = (s===a ? 'block' : 'none');
-    document.getElementById(btns[s]).className = 'aba' + (s===a ? ' on' : '');
+function fornAbrir(secao){
+  document.getElementById('forn-menu').style.display = 'none';
+  ['dados','catalogo','pedidos','financeiro'].forEach(function(s){
+    document.getElementById('forn-'+s).style.display = (s===secao ? 'block' : 'none');
+  });
+}
+function fornVoltar(){
+  document.getElementById('forn-menu').style.display = 'grid';
+  ['dados','catalogo','pedidos','financeiro'].forEach(function(s){
+    document.getElementById('forn-'+s).style.display = 'none';
   });
 }
 </script>

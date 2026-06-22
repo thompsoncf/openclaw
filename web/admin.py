@@ -130,11 +130,10 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
   {% else %}
     <form class="inline" method="post" action="/admin/conta/{{ c.id }}/fornecedor" style="display:flex; gap:3px; align-items:center; margin-top:3px">
       <select name="nicho_id" style="width:90px;font-size:.85rem" required title="nicho">
-        <option value="">Nicho</option>
         {% for n in nichos %}<option value="{{ n.id }}">{{ n.nome }}</option>{% endfor %}
       </select>
       <input type="number" name="comissao" step="0.01" placeholder="%" style="width:50px;font-size:.85rem" title="comissão %" required>
-      <input type="text" name="wallet" placeholder="wallet" style="width:100px;font-size:.85rem" title="Asaas wallet id">
+      <input name="wallet" placeholder="wallet Asaas" style="width:110px;font-size:.85rem" title="Asaas wallet id">
       <button style="padding:.3rem .5rem;font-size:.75rem">tornar forn.</button>
     </form>
   {% endif %}

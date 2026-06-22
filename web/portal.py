@@ -741,13 +741,13 @@ window.PRODUTOS = {
 <script>
 function fornAbrir(secao){
   document.getElementById('forn-menu').style.display = 'none';
-  ['dados','catalogo','compras','pedidos','financeiro'].forEach(function(s){
+  ['dados','catalogo','compras','cestas','pedidos','financeiro'].forEach(function(s){
     document.getElementById('forn-'+s).style.display = (s===secao ? 'block' : 'none');
   });
 }
 function fornVoltar(){
   document.getElementById('forn-menu').style.display = 'grid';
-  ['dados','catalogo','compras','pedidos','financeiro'].forEach(function(s){
+  ['dados','catalogo','compras','cestas','pedidos','financeiro'].forEach(function(s){
     document.getElementById('forn-'+s).style.display = 'none';
   });
 }

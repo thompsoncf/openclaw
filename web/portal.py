@@ -1711,6 +1711,7 @@ _ATIVAR_APP = """{% extends "base" %}{% block conteudo %}
 _PAINEL_ASSINATURAS = """{% extends "base" %}{% block conteudo %}
 <div class="card larga"><h2>Minhas assinaturas</h2>
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+{% if erro_asaas %}<div class="erro" style="margin-bottom:1rem;font-size:.85rem">⚠️ Asaas: {{ erro_asaas }}</div>{% endif %}
 {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
 {% if assinaturas %}
 {% for a in assinaturas %}
@@ -2173,11 +2174,25 @@ def _criar_assinatura_da_sessao(request, conta, slug):
         # Gera a subscription recorrente no Asaas (tenta; se falhar, assina mesmo assim)
         try:
             from finance import asaas
+            import os
+
+            # Pega documento da conta (CPF/CNPJ)
+            with pool.connection() as c:
+                doc_row = c.execute(
+                    "select documento from contas where id=%s", (conta[0],)
+                ).fetchone()
+            documento = doc_row[0] if doc_row and doc_row[0] else None
+
+            # Sandbox: usa CPF de teste se não tem documento
+            if not documento and (os.environ.get("ASAAS_AMBIENTE", "sandbox") or "sandbox").startswith("sand"):
+                documento = "24971563792"  # CPF de teste válido (sandbox only)
+
             # Cria ou recupera o customer no Asaas
             cust = asaas.criar_cliente(
                 nome=conta[1] or f"Cliente {conta[0]}",
                 email=conta[6] or None,  # conta[6] = email
-                telefone=None,  # whatsapp não é telefone formatado pro Asaas
+                cpf_cnpj=documento,  # Asaas exige CPF/CNPJ
+                telefone=None,
                 conta_id=conta[0],
             )
             # Cria a subscription recorrente (ciclo semanal/mensal/quinzenal)
@@ -2199,8 +2214,11 @@ def _criar_assinatura_da_sessao(request, conta, slug):
         except Exception as asaas_err:
             # Assina mesmo assim; o cliente paga depois (log do erro)
             import logging
+            err_msg = str(asaas_err)[:200]
             logging.getLogger(__name__).warning(
-                f"Asaas: erro ao criar subscription pra assinatura {assinatura_id}: {asaas_err}")
+                f"Asaas: erro ao criar subscription {assinatura_id}: {err_msg}")
+            # Durante testes: mostra erro na tela (tirar em produção se necessário)
+            request.session["erro_asaas"] = err_msg
 
         request.session.pop("loja_escolha", None)
         request.session["aviso"] = "✓ Assinatura criada! Em breve o pagamento."

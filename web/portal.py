@@ -218,7 +218,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
     <a href="/painel/assinaturas">🧺 Minhas cestas</a><a href="/sair">Sair</a>
   {% else %}
     <!-- Cliente do app / Fornecedor: menu completo -->
-    <a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/painel/compras">Compras</a>{% if conta and conta[8] %}<a href="/painel/fornecedor">👨‍🌾 Fornecedor</a>{% endif %}<a href="/sair">Sair</a>
+    <a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/painel/compras">Compras</a>{% if tem_cesta %}<a href="/painel/assinaturas">🧺 Minhas cestas</a>{% endif %}{% if conta and conta[8] %}<a href="/painel/fornecedor">👨‍🌾 Fornecedor</a>{% endif %}<a href="/sair">Sair</a>
   {% endif %}
 {% else %}<a href="/login">Entrar</a><a href="/cadastro">Criar conta</a>{% endif %}
 </span></div>
@@ -1783,9 +1783,26 @@ from finance import cidades as _cidades_mod
 _env.globals["cidades"] = _cidades_mod.opcoes()
 
 
+def _tem_assinatura_cesta(conta_id: int) -> bool:
+    """Verifica se a conta tem assinatura de cesta ativa (pra mostrar link no menu)."""
+    try:
+        with get_pool().connection() as c:
+            r = c.execute(
+                """select 1 from assinaturas
+                   where cliente_id = %s and status != 'cancelada' limit 1""",
+                (conta_id,),
+            ).fetchone()
+        return bool(r)
+    except Exception:
+        return False
+
+
 def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
     ctx.setdefault("logado", bool(request.session.get("conta_id")))
     ctx.setdefault("titulo", nome.capitalize())
+    # Injeta tem_cesta pro menu decidir mostrar "Minhas cestas"
+    if "tem_cesta" not in ctx and request.session.get("conta_id"):
+        ctx["tem_cesta"] = _tem_assinatura_cesta(request.session["conta_id"])
     return HTMLResponse(_env.get_template(nome).render(**ctx))
 
 

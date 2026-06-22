@@ -1601,7 +1601,7 @@ _LOJA = """{% extends "base" %}{% block conteudo %}
 {% for t in tamanhos %}
 <div style="background:#2a2a2b;padding:.8rem;margin-bottom:.6rem;border-radius:6px;cursor:pointer" onclick="document.getElementById('tam-{{ t.id }}').checked=true">
   <label style="cursor:pointer;display:flex;align-items:center;gap:.5rem">
-    <input type="radio" name="tamanho_id" id="tam-{{ t.id }}" value="{{ t.id }}" required {% if escolha.tamanho_id == t.id %}checked{% endif %}>
+    <input type="radio" name="tamanho_id" id="tam-{{ t.id }}" value="{{ t.id }}" required {% if escolha.tamanho_id and escolha.tamanho_id == t.id %}checked{% endif %}>
     <strong>{{ t.nome }}</strong> — R$ {{ "%.2f"|format(t.preco_centavos/100) }}
   </label>
   <div class="mut" style="font-size:.85rem;margin-top:.3rem">{{ t.qtd_frutas }}🍓 {{ t.qtd_legumes }}🥕 {{ t.qtd_verduras }}🥬 {{ t.qtd_temperos }}🌿 ({{ t.total_porcoes }} porções)</div>
@@ -1610,15 +1610,15 @@ _LOJA = """{% extends "base" %}{% block conteudo %}
 {% endfor %}
 <h4 style="margin-top:1.5rem">Frequência</h4>
 <select name="frequencia" style="width:100%">
-  <option value="semanal" {% if escolha.frequencia == 'semanal' %}selected{% endif %}>Semanal (a cada 7 dias)</option>
-  <option value="quinzenal" {% if escolha.frequencia == 'quinzenal' %}selected{% endif %}>Quinzenal (a cada 14 dias)</option>
-  <option value="mensal" {% if escolha.frequencia == 'mensal' %}selected{% endif %}>Mensal (a cada 30 dias)</option>
+  <option value="semanal" {% if (escolha.frequencia or 'semanal') == 'semanal' %}selected{% endif %}>Semanal (a cada 7 dias)</option>
+  <option value="quinzenal" {% if (escolha.frequencia or 'semanal') == 'quinzenal' %}selected{% endif %}>Quinzenal (a cada 14 dias)</option>
+  <option value="mensal" {% if (escolha.frequencia or 'semanal') == 'mensal' %}selected{% endif %}>Mensal (a cada 30 dias)</option>
 </select>
 <h4 style="margin-top:1.5rem">Produtos que você NÃO quer receber</h4>
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.5rem;max-height:200px;overflow-y:auto">
 {% for p in produtos %}
 <label style="display:flex;gap:.3rem;font-size:.9rem">
-  <input type="checkbox" name="restricoes" value="{{ p.id }}" {% if p.id in escolha.restricoes %}checked{% endif %}> {{ p.nome }}
+  <input type="checkbox" name="restricoes" value="{{ p.id }}" {% if p.id in (escolha.restricoes or []) %}checked{% endif %}> {{ p.nome }}
 </label>
 {% endfor %}
 </div>
@@ -1853,6 +1853,12 @@ def loja_fornecedor(request: Request, slug: str):
     tamanhos = cestas_mod.listar_tamanhos(pool, forn[0], so_ativos=True)
     produtos = cat_mod.listar_produtos(pool, forn[0], so_disponiveis=True)
     escolha = request.session.get("loja_escolha", {})
+    # garante chaves pra não quebrar o template na primeira visita
+    escolha = {
+        "tamanho_id": escolha.get("tamanho_id"),
+        "frequencia": escolha.get("frequencia", "semanal"),
+        "restricoes": escolha.get("restricoes", []) or [],
+    }
     return _render("loja", request, fornecedor=fornecedor, tamanhos=tamanhos,
                    produtos=produtos, escolha=escolha)
 

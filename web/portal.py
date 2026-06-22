@@ -412,7 +412,10 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
   <button type="button" class="forn-voltar" onclick="fornVoltar()">← voltar</button>
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
     <h3 style="margin:0">Catálogo</h3>
-    <button type="button" onclick="fornShowNovoProduct()" style="padding:.5rem 1rem;background:#1d9e75;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:500;font-size:.9rem">+ novo produto</button>
+    <div style="display:flex;gap:.5rem">
+      <button type="button" onclick="fornShowNovoProduct()" style="padding:.5rem 1rem;background:#1d9e75;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:500;font-size:.9rem">+ novo produto</button>
+      <button type="button" onclick="fornShowImportarPlanilha()" style="padding:.5rem 1rem;background:transparent;border:1px solid #1d9e75;color:#1d9e75;border-radius:6px;cursor:pointer;font-weight:500;font-size:.9rem">📊 importar planilha</button>
+    </div>
   </div>
 
   <!-- LISTA DE PRODUTOS EM CARDS -->
@@ -498,6 +501,39 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
       <button style="background:#1d9e75;color:#fff;padding:.4rem .8rem;border:0;border-radius:4px;cursor:pointer;font-size:.85rem;margin-top:.5rem;font-weight:500">Criar origem</button>
     </form>
     <button type="button" onclick="fornHideNovaOrigem()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;font-size:.85rem;margin-top:.5rem">Cancelar</button>
+  </div>
+
+  <!-- MODAL: Importar Planilha -->
+  <div id="forn-importar-planilha" style="display:none;margin-top:2rem;padding:1.2rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px">
+    <h4 style="margin-top:0">Importar planilha de produtos</h4>
+    <p class="mut" style="font-size:.9rem;margin-bottom:.8rem">Baixe o <a href="/static/modelo_planilha_produtos.csv" style="color:#5dcaa5">modelo de planilha</a>, preencha com seus produtos e suba o arquivo CSV.</p>
+    <form id="forn-form-import" style="display:flex;flex-direction:column;gap:.8rem">
+      <input type="file" id="forn-import-file" name="arquivo" accept=".csv" required style="padding:.5rem;border:1px solid #2a2a2b;border-radius:4px;background:#0a0a0a;color:#fff">
+      <button type="button" onclick="fornProcessarImportacao()" style="background:#1d9e75;color:#fff;padding:.6rem 1rem;border:0;border-radius:6px;cursor:pointer;font-weight:500;width:100%">Ler planilha</button>
+    </form>
+    <button type="button" onclick="fornHideImportarPlanilha()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.6rem;font-size:.9rem">Cancelar</button>
+  </div>
+
+  <!-- MODAL: Preview de Importação -->
+  <div id="forn-import-preview" style="display:none;margin-top:2rem;padding:1.2rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px">
+    <h4 style="margin-top:0">Preview dos produtos</h4>
+    <div id="forn-import-info" style="margin-bottom:1rem;padding:.8rem;background:#2a2a2b;border-radius:4px;font-size:.9rem">
+      <strong id="forn-import-total">0</strong> produtos encontrados ·
+      <span style="color:#1d9e75"><strong id="forn-import-validos">0</strong> OK</span> ·
+      <span style="color:#ff9800"><strong id="forn-import-problema">0</strong> com ⚠</span>
+    </div>
+    <table id="forn-import-tabela" style="width:100%;border-collapse:collapse;font-size:.85rem;margin-bottom:1rem">
+      <thead><tr style="border-bottom:1px solid #2a2a2b">
+        <th style="text-align:left;padding:.4rem">Produto</th>
+        <th style="text-align:center;padding:.4rem">Un</th>
+        <th style="text-align:right;padding:.4rem">Preço</th>
+        <th style="text-align:left;padding:.4rem">Categoria</th>
+        <th style="text-align:center;padding:.4rem">Status</th>
+      </tr></thead>
+      <tbody id="forn-import-tbody"></tbody>
+    </table>
+    <button type="button" onclick="fornConfirmarImportacao()" style="background:#1d9e75;color:#fff;padding:.6rem 1rem;border:0;border-radius:6px;cursor:pointer;font-weight:500;width:100%;margin-bottom:.5rem">Importar produtos</button>
+    <button type="button" onclick="fornHideImportarPlanilha()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;font-size:.9rem">Cancelar</button>
   </div>
 
   <!-- MODAL: Registrar Perda -->
@@ -679,6 +715,72 @@ function fornHideNovaOrigemCompra(){
 }
 function fornAbrirCompra(compra_id){
   alert('Revisar compra #' + compra_id + ' — em breve');
+}
+// IMPORTAÇÃO
+function fornShowImportarPlanilha(){
+  document.getElementById('forn-importar-planilha').style.display = 'block';
+  document.getElementById('forn-import-preview').style.display = 'none';
+}
+function fornHideImportarPlanilha(){
+  document.getElementById('forn-importar-planilha').style.display = 'none';
+  document.getElementById('forn-import-preview').style.display = 'none';
+  document.getElementById('forn-import-file').value = '';
+}
+function fornProcessarImportacao(){
+  var file = document.getElementById('forn-import-file').files[0];
+  if (!file) { alert('Selecione um arquivo'); return; }
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var formData = new FormData();
+    formData.append('arquivo', file);
+    fetch('/painel/fornecedor/catalogo/ler-planilha', {method: 'POST', body: formData})
+      .then(r => r.json())
+      .then(data => {
+        if (!data.ok) { alert('Erro: ' + data.erro); return; }
+        window.IMPORT_DATA = data;
+        document.getElementById('forn-importar-planilha').style.display = 'none';
+        document.getElementById('forn-import-preview').style.display = 'block';
+        document.getElementById('forn-import-total').textContent = data.total;
+        document.getElementById('forn-import-validos').textContent = data.validos;
+        document.getElementById('forn-import-problema').textContent = data.com_problema;
+        var tbody = document.getElementById('forn-import-tbody');
+        tbody.innerHTML = '';
+        data.itens.forEach(function(it) {
+          var tr = document.createElement('tr');
+          tr.style.borderBottom = '1px solid #2a2a2b';
+          if (it.problemas.length > 0) tr.style.backgroundColor = '#3a2a1a';
+          var tds = [
+            it.nome || '(sem nome)',
+            it.unidade,
+            (it.preco_venda_centavos / 100).toFixed(2),
+            it.categoria || '-',
+            it.problemas.length > 0 ? '⚠' : '✓'
+          ];
+          tds.forEach(function(txt) {
+            var td = document.createElement('td');
+            td.textContent = txt;
+            td.style.padding = '.4rem';
+            td.style.textAlign = txt === it.unidade ? 'center' : 'left';
+            tr.appendChild(td);
+          });
+          tbody.appendChild(tr);
+        });
+      }).catch(e => alert('Erro ao ler: ' + e.message));
+  };
+  reader.readAsArrayBuffer(file);
+}
+function fornConfirmarImportacao(){
+  if (!window.IMPORT_DATA) { alert('Nenhum preview'); return; }
+  fetch('/painel/fornecedor/catalogo/importar-planilha', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({itens: window.IMPORT_DATA.itens})
+  })
+  .then(r => r.json())
+  .then(data => {
+    alert('✓ Importados: ' + data.criados + ' | Pulados: ' + data.pulados);
+    location.reload();
+  }).catch(e => alert('Erro: ' + e.message));
 }
 </script>
 {% endblock %}"""
@@ -1684,6 +1786,50 @@ def painel_compras_origem(request: Request,
     except Exception as e:
         request.session["erro"] = f"Erro: {str(e)}"
     return RedirectResponse("/painel/fornecedor", status_code=303)
+
+
+@router.get("/static/modelo_planilha_produtos.csv")
+def modelo_planilha():
+    from fastapi.responses import FileResponse
+    import os
+    arquivo = os.path.join(os.path.dirname(__file__), "..", "db", "modelos", "modelo_planilha_produtos.csv")
+    return FileResponse(arquivo, media_type="text/csv", filename="modelo_planilha_produtos.csv")
+
+
+@router.post("/painel/fornecedor/catalogo/ler-planilha")
+async def ler_planilha(request: Request):
+    from finance.catalogo_import import ler_planilha_csv
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return {"ok": False, "erro": "não autorizado"}
+    try:
+        form = await request.form()
+        arquivo = form.get("arquivo")
+        if not arquivo:
+            return {"ok": False, "erro": "arquivo não enviado"}
+        conteudo = await arquivo.read()
+        resultado = ler_planilha_csv(conteudo)
+        return resultado
+    except Exception as e:
+        return {"ok": False, "erro": str(e)}
+
+
+@router.post("/painel/fornecedor/catalogo/importar-planilha")
+async def importar_planilha(request: Request):
+    from finance.catalogo_import import importar_itens
+    from finance import catalogo as cat_mod
+    import json
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return {"ok": False, "erro": "não autorizado"}
+    try:
+        body = await request.json()
+        itens = body.get("itens", [])
+        resultado = importar_itens(get_pool(), conta[0], itens)
+        request.session["aviso"] = f"✓ Importados: {resultado['criados']} produtos"
+        return resultado
+    except Exception as e:
+        return {"ok": False, "erro": str(e)}
 
 
 @router.post("/assinar")

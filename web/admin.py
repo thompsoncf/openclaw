@@ -5,6 +5,8 @@ SQL, nunca pela interface). Quem nao for admin recebe 404 - nem revela que a
 area existe. Toda acao administrativa e' registrada na auditoria (eventos_conta).
 """
 from datetime import date
+import re
+import unicodedata
 
 from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -16,6 +18,13 @@ from finance.estatisticas import estatisticas_funil, estatisticas_custo
 from web.portal import brl
 
 router = APIRouter()
+
+
+def _slug(texto: str) -> str:
+    """Gera slug a partir do nome: 'Hortifruti do Zé' -> 'hortifruti-do-ze'."""
+    t = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode()
+    t = re.sub(r"[^a-zA-Z0-9]+", "-", t).strip("-").lower()
+    return t or "fornecedor"
 
 
 # ---------- guarda de admin ----------
@@ -112,7 +121,24 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
 <td>
 <form class="inline" method="post" action="/admin/conta/{{ c.id }}/ativar"><button>+30d</button></form>
 <form class="inline" method="post" action="/admin/conta/{{ c.id }}/suspender"><button class="warn">Suspender</button></form>
-{% if c.tipo == 'pj' and not c.eh_fornecedor %}<details style="display:inline"><summary>👨‍🌾 Fornecedor</summary><form method="post" action="/admin/conta/{{ c.id }}/fornecedor" style="display:flex; gap:4px; align-items:center; margin-top:4px"><select name="nicho_id" required><option value="">Nicho</option><option value="1">Hortifruti</option></select><input type="number" name="comissao" step="0.01" placeholder="% comissao" style="width:80px" required><input type="text" name="wallet" placeholder="Wallet ID" required><button>Marcar fornecedor</button></form></details>{% elif c.eh_fornecedor %}<span class="tag ativa">👨‍🌾 Fornecedor</span>{% endif %}
+{% if c.tipo == 'pj' %}
+  {% if c.eh_fornecedor %}
+    <span class="tag ativa" title="slug: {{ c.fornecedor_slug }}">👨‍🌾 fornecedor ✓</span>
+    <form class="inline" method="post" action="/admin/conta/{{ c.id }}/remover-fornecedor">
+      <button class="warn" style="padding:.3rem .5rem;font-size:.75rem">remover</button>
+    </form>
+  {% else %}
+    <form class="inline" method="post" action="/admin/conta/{{ c.id }}/fornecedor" style="display:flex; gap:3px; align-items:center; margin-top:3px">
+      <select name="nicho_id" style="width:90px;font-size:.85rem" required title="nicho">
+        <option value="">Nicho</option>
+        {% for n in nichos %}<option value="{{ n.id }}">{{ n.nome }}</option>{% endfor %}
+      </select>
+      <input type="number" name="comissao" step="0.01" placeholder="%" style="width:50px;font-size:.85rem" title="comissão %" required>
+      <input type="text" name="wallet" placeholder="wallet" style="width:100px;font-size:.85rem" title="Asaas wallet id">
+      <button style="padding:.3rem .5rem;font-size:.75rem">tornar forn.</button>
+    </form>
+  {% endif %}
+{% endif %}
 </td></tr>{% endfor %}
 </table></div>
 
@@ -425,13 +451,19 @@ def admin_home(request: Request, busca: str = ""):
             """select conta_id, tipo, detalhe, criado_em from eventos_conta
                order by id desc limit 30""").fetchall()]
 
+        # Busca nichos pra select de fornecedor
+        ncols = ["id", "nome"]
+        nichos = [dict(zip(ncols, r)) for r in c.execute(
+            """select id, nome from nichos where ativo order by nome""").fetchall()]
+
     resumo = {"total": total, "trial": tot.get("trial", 0), "ativa": tot.get("ativa", 0),
               "vencendo": vencendo, "mrr": mrr}
     from types import SimpleNamespace
     contas = [SimpleNamespace(**c) for c in contas]
     eventos = [SimpleNamespace(**e) for e in eventos]
+    nichos = [SimpleNamespace(**n) for n in nichos]
     return HTMLResponse(_env.get_template("ahome").render(
-        resumo=resumo, contas=contas, eventos=eventos, busca=busca,
+        resumo=resumo, contas=contas, eventos=eventos, nichos=nichos, busca=busca,
         aviso=request.session.pop("admin_aviso", None)))
 
 
@@ -467,10 +499,11 @@ def admin_ativar(request: Request, conta_id: int):
 def admin_fornecedor(request: Request, conta_id: int,
                      nicho_id: int = Form(...),
                      comissao: float = Form(...),
-                     wallet: str = Form(...)):
+                     wallet: str = Form("")):
     adm = _admin(request)
     if adm is None:
         return _NEGADO
+    comissao = max(0.0, min(float(comissao), 100.0))
     pool = get_pool()
     with pool.connection() as c:
         # Pega o nome da conta pra gerar o slug
@@ -482,17 +515,34 @@ def admin_fornecedor(request: Request, conta_id: int,
         if conta[1] != 'pj':
             request.session["admin_aviso"] = f"Apenas contas PJ podem ser fornecedores."
             return RedirectResponse("/admin", status_code=303)
-        # Gera slug a partir do nome (substitui espaços por hífens, minúscula)
-        slug = conta[0].lower().replace(' ', '-').replace('_', '-')
-        slug = ''.join(c for c in slug if c.isalnum() or c == '-')
+        # Gera slug a partir do nome usando _slug()
+        base = _slug(conta[0])
+        # Garante slug único (se já existe, sufixa com id)
+        existe = c.execute("select 1 from contas where fornecedor_slug=%s and id<>%s",
+                          (base, conta_id)).fetchone()
+        slug = base if not existe else f"{base}-{conta_id}"
         # Atualiza a conta
         c.execute("""update contas set eh_fornecedor=true, nicho_id=%s, comissao_pct=%s,
                      asaas_wallet_id=%s, fornecedor_slug=%s where id=%s""",
-                  (nicho_id, comissao, wallet, slug, conta_id))
+                  (nicho_id, comissao, wallet or None, slug, conta_id))
         c.commit()
-    ct.registrar_evento(pool, conta_id, "tornou_fornecedor",
-                       f"nicho={nicho_id}, comissao={comissao}%, wallet={wallet}, slug={slug}")
-    request.session["admin_aviso"] = f"Conta {conta_id} marcada como fornecedor (slug: {slug})."
+    ct.registrar_evento(pool, conta_id, "admin_tornou_fornecedor",
+                       f"nicho={nicho_id}, comissao={comissao}%, wallet={wallet or 'vazio'}, slug={slug}")
+    request.session["admin_aviso"] = f"Conta {conta_id} agora é fornecedor (slug: {slug})."
+    return RedirectResponse("/admin", status_code=303)
+
+
+@router.post("/admin/conta/{conta_id}/remover-fornecedor")
+def admin_remover_fornecedor(request: Request, conta_id: int):
+    adm = _admin(request)
+    if adm is None:
+        return _NEGADO
+    pool = get_pool()
+    with pool.connection() as c:
+        c.execute("""update contas set eh_fornecedor=false where id=%s""", (conta_id,))
+        c.commit()
+    ct.registrar_evento(pool, conta_id, "admin_removeu_fornecedor", f"por admin {adm[0]}")
+    request.session["admin_aviso"] = f"Conta {conta_id} não é mais fornecedor."
     return RedirectResponse("/admin", status_code=303)
 
 

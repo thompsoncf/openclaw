@@ -549,7 +549,46 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
     <button type="button" onclick="fornHidePerda()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.6rem;font-size:.9rem">Cancelar</button>
   </div>
 
+  <!-- MODAL: Editar Produto -->
+  <div id="forn-editar-produto" style="display:none;margin-top:1rem;padding:1rem;background:#2a2a2b;border-radius:6px">
+    <h4 style="margin-top:0;margin-bottom:.8rem">Editar produto</h4>
+    <form method="post" action="/painel/fornecedor/catalogo/editar">
+      <input type="hidden" name="produto_id" id="forn-edit-id">
+      <label>Nome</label>
+      <input name="nome" id="forn-edit-nome" required style="width:100%">
+      <label>Unidade</label>
+      <select name="unidade" id="forn-edit-unidade" style="width:100%">
+        <option value="kg">kg</option><option value="duzia">dúzia</option>
+        <option value="unidade">unidade</option><option value="maco">maço</option>
+        <option value="bandeja">bandeja</option><option value="litro">litro</option>
+        <option value="pacote">pacote</option>
+      </select>
+      <label>Categoria</label>
+      <input name="categoria" id="forn-edit-categoria" placeholder="fruta, verdura..." style="width:100%">
+      <label>Preço de venda (R$)</label>
+      <input name="preco_venda" id="forn-edit-preco" placeholder="6,90" required style="width:100%">
+      <label>Estoque mínimo</label>
+      <input name="estoque_minimo" id="forn-edit-minimo" type="number" step="0.001" style="width:100%">
+      <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.8rem;width:100%;font-weight:500">Salvar alterações</button>
+    </form>
+    <button type="button" onclick="fornHideEditar()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.5rem;font-size:.85rem">Cancelar</button>
+  </div>
+
 </div>
+
+<script>
+window.PRODUTOS = {
+  {% for p in produtos %}
+  "{{ p.id }}": {
+    nome: {{ p.nome|tojson }},
+    unidade: {{ p.unidade|tojson }},
+    categoria: {{ (p.categoria or '')|tojson }},
+    preco: {{ "%.2f"|format(p.preco_venda_centavos/100) }},
+    minimo: {{ p.estoque_minimo }}
+  }{% if not loop.last %},{% endif %}
+  {% endfor %}
+};
+</script>
 
 <!-- SEÇÃO: Compras -->
 <div id="forn-compras" class="forn-secao" style="display:none">
@@ -669,7 +708,19 @@ function fornHideNovoProduct(){
   document.getElementById('forn-novo-prod').style.display = 'none';
 }
 function fornEditProduct(prod_id){
-  alert('Editar produto #' + prod_id + ' — em breve');
+  var p = window.PRODUTOS[prod_id];
+  if(!p){ return; }
+  document.getElementById('forn-edit-id').value = prod_id;
+  document.getElementById('forn-edit-nome').value = p.nome;
+  document.getElementById('forn-edit-unidade').value = p.unidade;
+  document.getElementById('forn-edit-categoria').value = p.categoria;
+  document.getElementById('forn-edit-preco').value = String(p.preco).replace('.', ',');
+  document.getElementById('forn-edit-minimo').value = p.minimo;
+  document.getElementById('forn-editar-produto').style.display = 'block';
+  document.getElementById('forn-editar-produto').scrollIntoView({behavior:'smooth'});
+}
+function fornHideEditar(){
+  document.getElementById('forn-editar-produto').style.display = 'none';
 }
 function fornShowEntrada(prod_id){
   document.getElementById('forn-prod-id').value = prod_id;
@@ -1735,6 +1786,38 @@ def painel_catalogo_produto(request: Request,
             preco_centavos, float(estoque_minimo or 0)
         )
         request.session["aviso"] = f"Produto '{nome}' criado com sucesso!"
+    except Exception as e:
+        request.session["erro"] = f"Erro: {str(e)}"
+    return RedirectResponse("/painel/fornecedor", status_code=303)
+
+
+@router.post("/painel/fornecedor/catalogo/editar")
+def painel_catalogo_editar(request: Request,
+                          produto_id: int = Form(...),
+                          nome: str = Form(""),
+                          unidade: str = Form("kg"),
+                          categoria: str = Form(""),
+                          preco_venda: str = Form("0"),
+                          estoque_minimo: str = Form("0")):
+    from finance import catalogo as cat_mod
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return RedirectResponse("/painel/fornecedor", status_code=303)
+    s = preco_venda.replace("R$", "").strip()
+    s = s.replace(".", "").replace(",", ".") if "," in s else s
+    try:
+        preco_centavos = int(round(float(s) * 100))
+    except ValueError:
+        preco_centavos = 0
+    try:
+        cat_mod.atualizar_produto(
+            get_pool(), conta[0], produto_id,
+            nome=nome, unidade=unidade,
+            categoria=(categoria.strip() or None),
+            preco_venda_centavos=preco_centavos,
+            estoque_minimo=float(estoque_minimo or 0),
+        )
+        request.session["aviso"] = "Produto atualizado."
     except Exception as e:
         request.session["erro"] = f"Erro: {str(e)}"
     return RedirectResponse("/painel/fornecedor", status_code=303)

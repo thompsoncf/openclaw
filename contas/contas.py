@@ -158,18 +158,38 @@ def registrar_evento(pool, conta_id: int, tipo: str, detalhe: str = "",
 
 def criar_conta(pool, tipo: str, nome: str, plano: str | None = None,
                 documento: str | None = None, status: str = "trial",
-                vencimento: date | None = None, cidade: str | None = None) -> int:
+                vencimento: date | None = None, cidade: str | None = None,
+                email: str | None = None, senha_hash: str | None = None,
+                eh_assinante_cesta: bool = False, endereco: str | None = None,
+                cep: str | None = None, limite_mensagens_dia: int = 50,
+                limite_cupons_dia: int = 5, conn=None) -> int:
+    """Cria conta (completa, numa transação). Se conn passado, usa ela; senão abre uma."""
     if vencimento is None and status == "trial":
-        vencimento = date.today() + timedelta(days=7)   # teste gratis padrao
-    with pool.connection() as conn:
-        row = conn.execute(
-            """insert into contas (tipo, nome, documento, plano, status, vencimento, cidade)
-               values (%s,%s,%s,%s,%s,%s,%s) returning id""",
-            (tipo, nome, documento, plano, status, vencimento, cidade),
-        ).fetchone()
-        conn.commit()
-    registrar_evento(pool, row[0], "conta_criada", f"tipo={tipo} plano={plano or '-'} cidade={cidade or '-'}")
-    return int(row[0])
+        vencimento = date.today() + timedelta(days=7)
+
+    def _ins(c):
+        return c.execute(
+            """insert into contas
+                 (tipo, nome, documento, plano, status, vencimento, cidade,
+                  email, senha_hash, eh_assinante_cesta, endereco, cep,
+                  limite_mensagens_dia, limite_cupons_dia)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
+            (tipo, nome, documento, plano, status, vencimento, cidade,
+             email, senha_hash, eh_assinante_cesta, endereco, cep,
+             limite_mensagens_dia, limite_cupons_dia),
+        ).fetchone()[0]
+
+    if conn is not None:
+        # Dentro de transação externa (da rota)
+        conta_id = int(_ins(conn))
+    else:
+        # Abrir transação própria
+        with pool.connection() as c:
+            conta_id = int(_ins(c))
+            c.commit()
+
+    registrar_evento(pool, conta_id, "conta_criada", f"tipo={tipo} plano={plano or '-'} cidade={cidade or '-'}")
+    return conta_id
 
 
 def adicionar_membro(pool, conta_id: int, nome: str | None = None,

@@ -1914,33 +1914,40 @@ def cadastro_envia(request: Request, background: BackgroundTasks,
     _info = _cep.consultar(cep)
     regiao = _info["regiao"] if _info else None
 
-    # FIX 1: trava de email único (captura unique violation)
+    # Preparar valores (antes da transação)
+    endereco_val = (endereco or "").strip() or None
+    cep_val = (cep or "").strip() or None
+    limite_msg = 20 if eh_cesta else 50
+    limite_cupom = 0 if eh_cesta else 5
+    senha_hash_val = hash_senha(senha)
+
+    # TUDO NUMA TRANSAÇÃO ATÔMICA: criar conta + membro de uma vez
     try:
-        conta_id = ct.criar_conta(pool, tipo, nome.strip(), plano=plano_gravar, documento=doc,
-                                  cidade=_cid.valida(regiao))  # trial 7d; CEP->regiao
         with pool.connection() as c:
-            # Salvar email, senha, flag assinante_cesta, endereço, CEP e limites
-            endereco_val = (endereco or "").strip() or None
-            cep_val = (cep or "").strip() or None
-            # Limites: assinante de cesta = 20 msg/dia, 0 cupom (não usa leitor fiscal)
-            #         cliente do app = 50 msg/dia, 5 cupom
-            limite_msg = 20 if eh_cesta else 50
-            limite_cupom = 0 if eh_cesta else 5
+            # 1. Criar conta (completa, com email/senha/limites)
+            conta_id = ct.criar_conta(
+                pool, tipo, nome.strip(), plano=plano_gravar, documento=doc,
+                cidade=_cid.valida(regiao), email=email, senha_hash=senha_hash_val,
+                eh_assinante_cesta=eh_cesta, endereco=endereco_val, cep=cep_val,
+                limite_mensagens_dia=limite_msg, limite_cupons_dia=limite_cupom,
+                conn=c  # <-- usa a transação da rota
+            )
+            # 2. Adicionar membro (dono) na mesma transação
             c.execute(
-                "update contas set email=%s, senha_hash=%s, eh_assinante_cesta=%s, "
-                "endereco=%s, cep=%s, limite_mensagens_dia=%s, limite_cupons_dia=%s "
-                "where id=%s",
-                (email, hash_senha(senha), eh_cesta, endereco_val, cep_val,
-                 limite_msg, limite_cupom, conta_id)
+                """insert into membros (conta_id, nome, papel, whatsapp_id)
+                   values (%s, %s, 'dono', %s)""",
+                (conta_id, nome.strip(), zap),
             )
             c.commit()
     except Exception as e:  # captura violação de unique constraint
-        if "idx_contas_email_unico" in str(e) or "unique" in str(e).lower():
+        msg_lower = str(e).lower()
+        if "email" in msg_lower or "idx_contas_email" in str(e):
             return _render("cadastro", request, planos=_planos(),
-                           erro="Ja existe uma conta com esse e-mail. Tente entrar.")
+                           erro="Já existe uma conta com esse e-mail. Tente entrar.")
+        if "whatsapp" in msg_lower or "membros" in msg_lower:
+            return _render("cadastro", request, planos=_planos(),
+                           erro="Esse WhatsApp já está cadastrado. Tente entrar.")
         raise
-
-    ct.adicionar_membro(pool, conta_id, nome=nome.strip(), papel="dono", whatsapp_id=zap)
 
     # FIX 2 (Opção B): registra/atualiza lead pra o funil contar TODOS os cadastros.
     # Se a pessoa testou (lead existe), só marca virou_conta. Se cadastrou direto,

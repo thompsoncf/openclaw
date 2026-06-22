@@ -102,6 +102,15 @@ def _setup():
     return _pool
 
 
+def _eh_assinante_cesta(pool, conta_id: int) -> bool:
+    """Verifica se a conta é um assinante de cesta (FASE 7)."""
+    with pool.connection() as c:
+        r = c.execute(
+            "select eh_assinante_cesta from contas where id=%s", (conta_id,)
+        ).fetchone()
+    return bool(r and r[0])
+
+
 def _agente_do(membro, conta):
     memoria = MemoriaPersistente(_pool, f"wa:{membro.id}")
     lista = ListaCompras(_pool, conta.id, membro.id)
@@ -231,6 +240,17 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
             _responder_whatsapp(to, "Seu acesso esta suspenso (pagamento pendente). "
                                     "Assim que o pagamento for confirmado, voce volta a usar.")
             return
+
+        # FASE 7: Assinante de cesta? Usar agente da cesta (Camada 1, read-only)
+        if _eh_assinante_cesta(pool, conta.id):
+            from finance.agente_cesta import criar_agente_cesta
+            from core.memoria import MemoriaPersistente
+            memoria = MemoriaPersistente(pool, f"cesta:{conta.id}")
+            ag = criar_agente_cesta(pool, conta.id, _brain, memoria)
+            resp = ag.responder(body)
+            _responder_whatsapp(to, resp)
+            return
+
         # check para comandos de pagamento
         cmd = (body or "").strip().lower()
         if cmd in ("assinar", "pagar", "upgrade", "plano", "assinar plano"):

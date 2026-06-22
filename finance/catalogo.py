@@ -355,3 +355,240 @@ def historico_produto(pool, fornecedor_id: int, produto_id: int, limite: int = 5
         }
         for r in rows
     ]
+
+
+# ============================================================================
+# ⚠️ REGRA DE PRIVACIDADE — gravar na pedra
+# ============================================================================
+# O CUSTO de compra do fornecedor (quanto ele pagou no CEASA) é DADO PRIVADO.
+# É segredo comercial DELE. Vive APENAS em estoque_mov / catalogo_produtos / compras_*.
+#
+# NUNCA, em hipótese alguma:
+#   - inserir custo de compra do fornecedor em precos_observados (banco de preços)
+#   - alimentar o banco de preços colaborativo com nota de COMPRA do fornecedor
+#   - expor custo_medio_centavos / custo_unit_centavos pro cliente ou outro fornecedor
+#
+# O banco de preços (precos_observados) É alimentado SÓ por cupons de CLIENTE
+# (via livro_caixa._observar_precos) – preço de VENDA no mercado, dado público.
+# Compra de fornecedor É outro mundo: estoque, privado, isolado. NÃO cruzar.
+# ============================================================================
+
+
+# ----------------------------------------------------------------------------
+# COMPRAS (módulo): agrupa vários itens de entrada numa "compra" (ida ao CEASA)
+# ----------------------------------------------------------------------------
+# Fluxo: cria a compra (rascunho) -> adiciona itens (manual OU lidos da nota) ->
+# fornecedor REVISA -> confirma_compra() gera as entradas de estoque de todos os
+# itens de uma vez. Enquanto rascunho, dá pra editar/remover itens.
+#
+# ⚠️ O custo daqui É PRIVADO do fornecedor. Nunca vai pro banco de preços.
+
+def criar_compra(
+    pool,
+    fornecedor_id: int,
+    origem_id: int | None = None,
+    data_compra=None,
+    fonte: str = "manual",
+    chave_nfe: str | None = None,
+) -> int:
+    """Cria uma compra em rascunho (cabeçalho). Retorna o id.
+
+    fonte: 'manual' | 'nota_pdf' | 'nota_foto' | 'nota_qr'.
+    chave_nfe: se veio de nota, a chave (idempotência – não importa 2x a mesma nota).
+    """
+    if fonte not in ("manual", "nota_pdf", "nota_foto", "nota_qr"):
+        fonte = "manual"
+    with pool.connection() as c:
+        # se veio nota com chave e já existe, retorna a compra existente (idempotência)
+        if chave_nfe:
+            ja = c.execute(
+                """select id from compras_fornecedor
+                   where fornecedor_id = %s and chave_nfe = %s""",
+                (fornecedor_id, chave_nfe),
+            ).fetchone()
+            if ja:
+                return int(ja[0])
+        row = c.execute(
+            """insert into compras_fornecedor
+                 (fornecedor_id, origem_id, data_compra, fonte, chave_nfe)
+               values (%s, %s, coalesce(%s, current_date), %s, %s)
+               returning id""",
+            (fornecedor_id, origem_id, data_compra, fonte, chave_nfe),
+        ).fetchone()
+        c.commit()
+    return int(row[0])
+
+
+def adicionar_item_compra(
+    pool,
+    fornecedor_id: int,
+    compra_id: int,
+    descricao: str,
+    quantidade: float,
+    custo_unit_centavos: int,
+    unidade: str = "kg",
+    produto_id: int | None = None,
+) -> int:
+    """Adiciona um item à compra (rascunho). Retorna o id do item.
+
+    produto_id: se já souber a qual produto do catálogo casa; senão fica null e o
+    fornecedor casa na revisão (ou cria o produto na hora).
+    """
+    with pool.connection() as c:
+        # confere que a compra é do fornecedor e está em rascunho
+        comp = c.execute(
+            """select status from compras_fornecedor
+               where id = %s and fornecedor_id = %s""",
+            (compra_id, fornecedor_id),
+        ).fetchone()
+        if comp is None:
+            raise ValueError("compra não encontrada para este fornecedor")
+        if comp[0] != "rascunho":
+            raise ValueError("só dá pra editar itens enquanto a compra é rascunho")
+        row = c.execute(
+            """insert into compras_itens
+                 (compra_id, produto_id, descricao, quantidade, unidade,
+                  custo_unit_centavos, casado)
+               values (%s, %s, %s, %s, %s, %s, %s) returning id""",
+            (compra_id, produto_id, (descricao or "").strip(),
+             Decimal(str(quantidade or 0)), (unidade or "kg").strip().lower(),
+             max(0, int(custo_unit_centavos)), produto_id is not None),
+        ).fetchone()
+        # atualiza o total do cabeçalho
+        c.execute(
+            """update compras_fornecedor set total_centavos = (
+                 select coalesce(sum(round(quantidade * custo_unit_centavos)), 0)
+                 from compras_itens where compra_id = %s)
+               where id = %s""",
+            (compra_id, compra_id),
+        )
+        c.commit()
+    return int(row[0])
+
+
+def listar_itens_compra(pool, fornecedor_id: int, compra_id: int) -> list[dict]:
+    """Lista os itens de uma compra (pra tela de revisão)."""
+    with pool.connection() as c:
+        # valida dono
+        if c.execute(
+            "select 1 from compras_fornecedor where id=%s and fornecedor_id=%s",
+            (compra_id, fornecedor_id),
+        ).fetchone() is None:
+            raise ValueError("compra não encontrada para este fornecedor")
+        rows = c.execute(
+            """select i.id, i.produto_id, i.descricao, i.quantidade, i.unidade,
+                      i.custo_unit_centavos, i.casado, p.nome
+               from compras_itens i
+               left join catalogo_produtos p on p.id = i.produto_id
+               where i.compra_id = %s order by i.id""",
+            (compra_id,),
+        ).fetchall()
+    return [
+        {
+            "id": r[0], "produto_id": r[1], "descricao": r[2],
+            "quantidade": float(r[3] or 0), "unidade": r[4],
+            "custo_unit_centavos": int(r[5] or 0), "casado": r[6],
+            "produto_nome": r[7],
+        }
+        for r in rows
+    ]
+
+
+def casar_item_produto(
+    pool, fornecedor_id: int, item_id: int, produto_id: int
+) -> bool:
+    """Vincula um item da compra a um produto do catálogo (na revisão).
+
+    Valida que o item e o produto pertencem ao fornecedor.
+    """
+    with pool.connection() as c:
+        ok = c.execute(
+            """select 1 from compras_itens i
+               join compras_fornecedor cf on cf.id = i.compra_id
+               where i.id = %s and cf.fornecedor_id = %s""",
+            (item_id, fornecedor_id),
+        ).fetchone()
+        prod = c.execute(
+            "select 1 from catalogo_produtos where id=%s and fornecedor_id=%s",
+            (produto_id, fornecedor_id),
+        ).fetchone()
+        if ok is None or prod is None:
+            return False
+        c.execute(
+            "update compras_itens set produto_id=%s, casado=true where id=%s",
+            (produto_id, item_id),
+        )
+        c.commit()
+        return True
+
+
+def confirmar_compra(pool, fornecedor_id: int, compra_id: int) -> dict:
+    """Confirma a compra: gera as ENTRADAS de estoque de todos os itens de uma vez.
+
+    Pré-requisito: todos os itens devem estar CASADOS a um produto (produto_id).
+    Cada item vira uma movimentação 'entrada' (saldo += qtd, custo médio recalculado),
+    com a origem da compra. Tudo numa transação. Retorna resumo.
+
+    ⚠️ NÃO toca em precos_observados. O custo É privado do fornecedor.
+    """
+    with pool.connection() as c:
+        comp = c.execute(
+            """select status, origem_id from compras_fornecedor
+               where id = %s and fornecedor_id = %s for update""",
+            (compra_id, fornecedor_id),
+        ).fetchone()
+        if comp is None:
+            raise ValueError("compra não encontrada para este fornecedor")
+        if comp[0] != "rascunho":
+            raise ValueError("compra já confirmada ou cancelada")
+        origem_id = comp[1]
+
+        itens = c.execute(
+            """select id, produto_id, quantidade, custo_unit_centavos, casado
+               from compras_itens where compra_id = %s""",
+            (compra_id,),
+        ).fetchall()
+        if not itens:
+            raise ValueError("compra sem itens")
+        nao_casados = [i for i in itens if not i[1]]
+        if nao_casados:
+            raise ValueError(
+                f"{len(nao_casados)} item(ns) sem produto casado – revise antes de confirmar"
+            )
+
+        # gera uma entrada por item (recalcula saldo + custo médio de cada produto)
+        for item_id, produto_id, qtd, custo_unit, _casado in itens:
+            prod = c.execute(
+                """select saldo, custo_medio_centavos from catalogo_produtos
+                   where id = %s and fornecedor_id = %s for update""",
+                (produto_id, fornecedor_id),
+            ).fetchone()
+            if prod is None:
+                raise ValueError(f"produto {produto_id} não é deste fornecedor")
+            saldo_atual = Decimal(str(prod[0] or 0))
+            custo_atual = int(prod[1] or 0)
+            q = Decimal(str(qtd))
+            novo_custo = _custo_medio_ponderado(saldo_atual, custo_atual, q, int(custo_unit))
+            novo_saldo = saldo_atual + q
+            c.execute(
+                """insert into estoque_mov
+                     (produto_id, fornecedor_id, tipo, quantidade,
+                      custo_unit_centavos, origem_id, motivo)
+                   values (%s, %s, 'entrada', %s, %s, %s, %s)""",
+                (produto_id, fornecedor_id, q, int(custo_unit), origem_id,
+                 f"compra #{compra_id}"),
+            )
+            c.execute(
+                """update catalogo_produtos
+                   set saldo = %s, custo_medio_centavos = %s, atualizado_em = now()
+                   where id = %s""",
+                (novo_saldo, novo_custo, produto_id),
+            )
+
+        c.execute(
+            """update compras_fornecedor
+               set status = 'confirmada', confirmada_em = now() where id = %s""",
+            (compra_id,),
+        )
+        c.commit()
+    return {"compra_id": compra_id, "itens": len(itens), "status": "confirmada"}

@@ -406,7 +406,109 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
 <div id="forn-catalogo" class="forn-secao" style="display:none">
   <button type="button" class="forn-voltar" onclick="fornVoltar()">← voltar</button>
   <h3>Catálogo</h3>
-  <p class="mut">Em breve: importe sua planilha de produtos ou cadastre um a um, com preços.</p>
+  <div style="margin-bottom:1rem">
+    <button type="button" onclick="fornShowNovoProduct()" style="padding:.5rem 1rem;background:#1d9e75;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:500">+ Novo produto</button>
+  </div>
+
+  <!-- LISTA DE PRODUTOS -->
+  <div id="forn-cat-lista">
+    {% if produtos %}
+    <table style="width:100%;border-collapse:collapse;font-size:.9rem">
+      <thead><tr style="border-bottom:1px solid #2a2a2b">
+        <th style="text-align:left;padding:.5rem">Produto</th>
+        <th style="text-align:center">Un.</th>
+        <th style="text-align:right">Saldo</th>
+        <th style="text-align:right">Custo €</th>
+        <th style="text-align:right">Preço €</th>
+        <th style="text-align:center">Margem</th>
+        <th style="text-align:center">Ações</th>
+      </tr></thead>
+      <tbody>
+      {% for p in produtos %}
+      <tr style="border-bottom:1px solid #1c1c1f;{% if p.abaixo_minimo %}background:#2a1c1c{% endif %}">
+        <td style="padding:.5rem"><strong>{{ p.nome }}</strong>{% if p.abaixo_minimo %}<br><span class="mut" style="color:#ff6b6b;font-size:.8rem">⚠ abaixo do mínimo</span>{% endif %}</td>
+        <td style="text-align:center">{{ p.unidade }}</td>
+        <td style="text-align:right">{{ p.saldo }}</td>
+        <td style="text-align:right">{{ "%.2f" | format(p.custo_medio_centavos / 100) }}</td>
+        <td style="text-align:right">{{ "%.2f" | format(p.preco_venda_centavos / 100) }}</td>
+        <td style="text-align:center">{% if p.margem_pct %}{{ p.margem_pct }}%{% else %}-{% endif %}</td>
+        <td style="text-align:center;font-size:.8rem">
+          <button type="button" onclick="fornEditProduct({{ p.id }})" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer">✎</button>
+          <button type="button" onclick="fornShowEntrada({{ p.id }})" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer">↓</button>
+          <button type="button" onclick="fornShowPerda({{ p.id }})" style="background:transparent;border:none;color:#ff6b6b;cursor:pointer">✕</button>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="mut">Nenhum produto ainda. Clique em "+ Novo produto" pra começar.</p>
+    {% endif %}
+  </div>
+
+  <!-- MODAL: Novo/Editar Produto -->
+  <div id="forn-novo-prod" style="display:none;margin-top:2rem;padding:1rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px">
+    <h4>Novo produto</h4>
+    <form method="post" action="/painel/fornecedor/catalogo/produto">
+      <label>Nome</label><input name="nome" required placeholder="ex: Tomate">
+      <label>Unidade</label>
+      <select name="unidade" required>
+        <option value="kg">kg</option>
+        <option value="unidade">unidade</option>
+        <option value="duzia">dúzia</option>
+        <option value="maco">maço</option>
+        <option value="bandeja">bandeja</option>
+        <option value="litro">litro</option>
+        <option value="pacote">pacote</option>
+      </select>
+      <label>Categoria (opcional)</label><input name="categoria" placeholder="ex: fruta">
+      <label>Preço de venda (€)</label><input name="preco_venda" type="number" step="0.01" placeholder="ex: 6.90">
+      <label>Estoque mínimo para alerta</label><input name="estoque_minimo" type="number" step="0.1" placeholder="ex: 5">
+      <button style="background:#1d9e75;color:#fff;padding:.4rem .8rem;border:0;border-radius:6px;cursor:pointer;margin-top:.5rem">Criar produto</button>
+    </form>
+    <button type="button" onclick="fornHideNovoProduct()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.5rem">Cancelar</button>
+  </div>
+
+  <!-- MODAL: Dar Entrada -->
+  <div id="forn-entrada" style="display:none;margin-top:2rem;padding:1rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px">
+    <h4>Dar entrada de estoque</h4>
+    <form method="post" action="/painel/fornecedor/catalogo/entrada">
+      <input type="hidden" id="forn-prod-id" name="produto_id">
+      <label>Quantidade</label><input name="quantidade" type="number" step="0.1" required placeholder="ex: 50">
+      <label>Custo unitário (€ — preço de compra)</label><input name="custo_unit" type="number" step="0.01" required placeholder="ex: 4.00">
+      <label>De onde comprou?</label>
+      <select name="origem_id" id="forn-origem-sel" required>
+        <option value="">Selecione uma origem</option>
+      </select>
+      <button type="button" onclick="fornShowNovaOrigem()" style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;padding:.3rem .6rem;cursor:pointer;font-size:.85rem;margin-top:.3rem">+ Nova origem</button>
+      <button style="background:#1d9e75;color:#fff;padding:.4rem .8rem;border:0;border-radius:6px;cursor:pointer;margin-top:.5rem;width:100%">Confirmar entrada</button>
+    </form>
+    <button type="button" onclick="fornHideEntrada()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.5rem">Cancelar</button>
+  </div>
+
+  <!-- MODAL: Nova Origem -->
+  <div id="forn-nova-origem" style="display:none;margin-top:1rem;padding:.8rem;background:#2a2a2b;border-radius:6px">
+    <h4 style="margin-top:0">Nova origem de compra</h4>
+    <form method="post" action="/painel/fornecedor/catalogo/origem">
+      <label>Nome (ex: CEASA, Sítio do João)</label><input name="nome" required placeholder="">
+      <label>Contato (opcional)</label><input name="contato" placeholder="tel, email, whatsapp">
+      <button style="background:#1d9e75;color:#fff;padding:.3rem .6rem;border:0;border-radius:4px;cursor:pointer;font-size:.85rem">Criar origem</button>
+    </form>
+    <button type="button" onclick="fornHideNovaOrigem()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;font-size:.85rem">Cancelar</button>
+  </div>
+
+  <!-- MODAL: Registrar Perda -->
+  <div id="forn-perda" style="display:none;margin-top:2rem;padding:1rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px">
+    <h4>Registrar perda</h4>
+    <form method="post" action="/painel/fornecedor/catalogo/perda">
+      <input type="hidden" id="forn-perda-prod-id" name="produto_id">
+      <label>Quantidade perdida</label><input name="quantidade" type="number" step="0.1" required placeholder="ex: 2">
+      <label>Motivo</label><input name="motivo" placeholder="ex: estragou, sobrou do dia">
+      <button style="background:#ff6b6b;color:#fff;padding:.4rem .8rem;border:0;border-radius:6px;cursor:pointer;margin-top:.5rem;width:100%">Registrar perda</button>
+    </form>
+    <button type="button" onclick="fornHidePerda()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.5rem">Cancelar</button>
+  </div>
+
 </div>
 
 <!-- SEÇÃO: Pedidos -->
@@ -450,6 +552,36 @@ function fornVoltar(){
   ['dados','catalogo','pedidos','financeiro'].forEach(function(s){
     document.getElementById('forn-'+s).style.display = 'none';
   });
+}
+function fornShowNovoProduct(){
+  document.getElementById('forn-novo-prod').style.display = 'block';
+}
+function fornHideNovoProduct(){
+  document.getElementById('forn-novo-prod').style.display = 'none';
+}
+function fornEditProduct(prod_id){
+  alert('Editar produto #' + prod_id + ' — em breve');
+}
+function fornShowEntrada(prod_id){
+  document.getElementById('forn-prod-id').value = prod_id;
+  document.getElementById('forn-entrada').style.display = 'block';
+  // TODO: carregar origem_sel com origens via AJAX
+}
+function fornHideEntrada(){
+  document.getElementById('forn-entrada').style.display = 'none';
+}
+function fornShowPerda(prod_id){
+  document.getElementById('forn-perda-prod-id').value = prod_id;
+  document.getElementById('forn-perda').style.display = 'block';
+}
+function fornHidePerda(){
+  document.getElementById('forn-perda').style.display = 'none';
+}
+function fornShowNovaOrigem(){
+  document.getElementById('forn-nova-origem').style.display = 'block';
+}
+function fornHideNovaOrigem(){
+  document.getElementById('forn-nova-origem').style.display = 'none';
 }
 </script>
 {% endblock %}"""
@@ -1274,6 +1406,7 @@ def painel(request: Request):
 
 @router.get("/painel/fornecedor", response_class=HTMLResponse)
 def painel_fornecedor(request: Request):
+    from finance import catalogo as cat_mod
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
@@ -1291,7 +1424,9 @@ def painel_fornecedor(request: Request):
             "cnpj": row[1] if row else None,
             "endereco": row[2] if row else None
         } if row else {"razao_social": None, "cnpj": None, "endereco": None}
-    return _render("fornecedor", request, conta=conta, fiscal=fiscal,
+    # Carrega produtos do catálogo
+    produtos = cat_mod.listar_produtos(pool, conta[0])
+    return _render("fornecedor", request, conta=conta, fiscal=fiscal, produtos=produtos,
                    erro=request.session.pop("erro", None),
                    aviso=request.session.pop("aviso", None))
 
@@ -1321,6 +1456,91 @@ def painel_fornecedor_dados(request: Request,
         """, (conta[0], razao_social or None, cnpj or None, endereco or None))
         c.commit()
     request.session["aviso"] = "Dados do fornecedor salvos."
+    return RedirectResponse("/painel/fornecedor", status_code=303)
+
+
+@router.post("/painel/fornecedor/catalogo/produto")
+def painel_catalogo_produto(request: Request,
+                           nome: str = Form(""),
+                           unidade: str = Form("kg"),
+                           categoria: str = Form(""),
+                           preco_venda: str = Form("0"),
+                           estoque_minimo: str = Form("0")):
+    from finance import catalogo as cat_mod
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return RedirectResponse("/painel/fornecedor", status_code=303)
+    try:
+        preco_centavos = int(float(preco_venda or 0) * 100)
+        produto_id = cat_mod.criar_produto(
+            get_pool(), conta[0], nome, unidade, categoria,
+            preco_centavos, float(estoque_minimo or 0)
+        )
+        request.session["aviso"] = f"Produto '{nome}' criado com sucesso!"
+    except Exception as e:
+        request.session["erro"] = f"Erro: {str(e)}"
+    return RedirectResponse("/painel/fornecedor", status_code=303)
+
+
+@router.post("/painel/fornecedor/catalogo/entrada")
+def painel_catalogo_entrada(request: Request,
+                           produto_id: int = Form(...),
+                           quantidade: str = Form(""),
+                           custo_unit: str = Form(""),
+                           origem_id: int = Form(...)):
+    from finance import catalogo as cat_mod
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return RedirectResponse("/painel/fornecedor", status_code=303)
+    try:
+        custo_centavos = int(float(custo_unit or 0) * 100)
+        result = cat_mod.registrar_movimentacao(
+            get_pool(), conta[0], produto_id, "entrada",
+            float(quantidade or 0), custo_centavos, origem_id
+        )
+        aviso = f"✓ Entrada registrada! Novo saldo: {result['saldo_novo']} " \
+                f"| Custo médio: €{result['custo_medio_centavos']/100:.2f}"
+        if result["abaixo_minimo"]:
+            aviso += " ⚠ Abaixo do mínimo!"
+        request.session["aviso"] = aviso
+    except Exception as e:
+        request.session["erro"] = f"Erro: {str(e)}"
+    return RedirectResponse("/painel/fornecedor", status_code=303)
+
+
+@router.post("/painel/fornecedor/catalogo/perda")
+def painel_catalogo_perda(request: Request,
+                         produto_id: int = Form(...),
+                         quantidade: str = Form(""),
+                         motivo: str = Form("")):
+    from finance import catalogo as cat_mod
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return RedirectResponse("/painel/fornecedor", status_code=303)
+    try:
+        result = cat_mod.registrar_movimentacao(
+            get_pool(), conta[0], produto_id, "perda",
+            float(quantidade or 0), motivo=motivo
+        )
+        request.session["aviso"] = f"✓ Perda registrada. Novo saldo: {result['saldo_novo']}"
+    except Exception as e:
+        request.session["erro"] = f"Erro: {str(e)}"
+    return RedirectResponse("/painel/fornecedor", status_code=303)
+
+
+@router.post("/painel/fornecedor/catalogo/origem")
+def painel_catalogo_origem(request: Request,
+                          nome: str = Form(""),
+                          contato: str = Form("")):
+    from finance import catalogo as cat_mod
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return RedirectResponse("/painel/fornecedor", status_code=303)
+    try:
+        cat_mod.criar_origem(get_pool(), conta[0], nome, contato)
+        request.session["aviso"] = f"Origem '{nome}' criada!"
+    except Exception as e:
+        request.session["erro"] = f"Erro: {str(e)}"
     return RedirectResponse("/painel/fornecedor", status_code=303)
 
 

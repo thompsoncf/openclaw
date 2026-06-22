@@ -1896,7 +1896,7 @@ def cadastro_envia(request: Request, background: BackgroundTasks,
         plano_gravar = plano
     else:
         tipo = "pf"  # assinante de cesta é pessoa física; a flag eh_assinante_cesta marca o papel
-        plano_gravar = None
+        plano_gravar = "zaq_cesta"  # plano grátis, escondido do cadastro do app
 
     with pool.connection() as c:
         ja = c.execute("select 1 from contas where lower(email)=%s", (email,)).fetchone()
@@ -1919,11 +1919,20 @@ def cadastro_envia(request: Request, background: BackgroundTasks,
         conta_id = ct.criar_conta(pool, tipo, nome.strip(), plano=plano_gravar, documento=doc,
                                   cidade=_cid.valida(regiao))  # trial 7d; CEP->regiao
         with pool.connection() as c:
-            # Salvar email, senha, flag assinante_cesta, endereço e CEP (se fornecidos)
+            # Salvar email, senha, flag assinante_cesta, endereço, CEP e limites
             endereco_val = (endereco or "").strip() or None
             cep_val = (cep or "").strip() or None
-            c.execute("update contas set email=%s, senha_hash=%s, eh_assinante_cesta=%s, endereco=%s, cep=%s where id=%s",
-                      (email, hash_senha(senha), eh_cesta, endereco_val, cep_val, conta_id))
+            # Limites: assinante de cesta = 20 msg/dia, 0 cupom (não usa leitor fiscal)
+            #         cliente do app = 50 msg/dia, 5 cupom
+            limite_msg = 20 if eh_cesta else 50
+            limite_cupom = 0 if eh_cesta else 5
+            c.execute(
+                "update contas set email=%s, senha_hash=%s, eh_assinante_cesta=%s, "
+                "endereco=%s, cep=%s, limite_mensagens_dia=%s, limite_cupons_dia=%s "
+                "where id=%s",
+                (email, hash_senha(senha), eh_cesta, endereco_val, cep_val,
+                 limite_msg, limite_cupom, conta_id)
+            )
             c.commit()
     except Exception as e:  # captura violação de unique constraint
         if "idx_contas_email_unico" in str(e) or "unique" in str(e).lower():

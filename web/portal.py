@@ -1648,46 +1648,33 @@ _LOJA = """{% extends "base" %}{% block conteudo %}
 {% endblock %}"""
 
 _LOJA_CONFIRMAR_NOVO = """{% extends "base" %}{% block conteudo %}
-<div class="card larga"><h2>Confirme sua assinatura</h2>
-<p class="mut">Já tem conta? <a href="/login" style="color:#5dcaa5">Faça login aqui</a></p>
-
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-top:1.5rem">
-<!-- OPÇÃO 1: Só a cesta (grátis) — em destaque -->
-<div style="background:linear-gradient(135deg,#1d4620 0%,#0a2e15 100%);border:2px solid #5dcaa5;border-radius:8px;padding:1.5rem;position:relative">
-<div style="position:absolute;top:.6rem;right:.8rem;background:#1d9e75;color:#fff;padding:.2rem .6rem;border-radius:4px;font-size:.75rem;font-weight:600">RECOMENDADO</div>
-<h4 style="margin:0 0 .5rem 0;color:#5dcaa5">🧺 Só quero a cesta</h4>
-<p class="mut" style="margin:0 0 1rem 0;font-size:.85rem">Crie uma conta grátis e comece a assinar sua cesta esta semana. Sem cobranças.</p>
-<form method="post" action="/cadastro">
-  <input type="hidden" name="next" value="/f/{{ slug }}/confirmar">
-  <input type="hidden" name="plano" value="cesta">
-  <label style="color:#fff">Email</label><input name="email" type="email" required placeholder="seu@email.com" style="width:100%;margin-bottom:.6rem;background:#0a0a0a;border:1px solid #2a2a2b;color:#fff;padding:.4rem;border-radius:4px">
-  <label style="color:#fff">Senha</label><input name="senha" type="password" required placeholder="mínimo 8 caracteres" style="width:100%;margin-bottom:.6rem;background:#0a0a0a;border:1px solid #2a2a2b;color:#fff;padding:.4rem;border-radius:4px">
-  <label style="color:#fff">CEP</label><input name="cep" required placeholder="12345-678" style="width:100%;margin-bottom:.6rem;background:#0a0a0a;border:1px solid #2a2a2b;color:#fff;padding:.4rem;border-radius:4px">
-  <label style="color:#fff">Endereço</label><input name="endereco" required placeholder="Rua X, nº 123" style="width:100%;margin-bottom:1rem;background:#0a0a0a;border:1px solid #2a2a2b;color:#fff;padding:.4rem;border-radius:4px">
-  <button style="background:#1d9e75;color:#fff;padding:.6rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:600;font-size:.95rem">✓ Criar conta grátis</button>
-</form>
-</div>
-
-<!-- OPÇÃO 2: Quero o app também (com plano) -->
-<div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1.5rem">
-<h4 style="margin-top:0">💰 Quero usar o app também</h4>
-<p class="mut" style="font-size:.85rem">Cesta + controle financeiro. Escolha um plano pago do app (opcional depois).</p>
-<form method="post" action="/cadastro">
-  <input type="hidden" name="next" value="/f/{{ slug }}/confirmar">
-  <label>Email</label><input name="email" type="email" required placeholder="seu@email.com" style="width:100%;margin-bottom:.6rem">
-  <label>Senha</label><input name="senha" type="password" required placeholder="mínimo 8 caracteres" style="width:100%;margin-bottom:.6rem">
-  <label>CEP</label><input name="cep" required placeholder="12345-678" style="width:100%;margin-bottom:.6rem">
-  <label>Endereço</label><input name="endereco" required placeholder="Rua X, nº 123" style="width:100%;margin-bottom:.8rem">
-  <label>Plano do app (opcional)</label>
-  <select name="plano" style="width:100%;margin-bottom:1rem">
-    <option value="cesta">Grátis (só cesta)</option>
-    <option value="pro">Pro — R$ 29/mês</option>
-    <option value="premium">Premium — R$ 79/mês</option>
-  </select>
-  <button style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;padding:.6rem 1rem;border-radius:6px;cursor:pointer;width:100%;font-weight:500">Criar conta</button>
-</form>
-</div>
-</div>
+<div class="card" style="max-width:420px;margin:0 auto">
+  <h2 style="margin-bottom:.3rem">Confirme sua assinatura 🧺</h2>
+  <p class="mut" style="margin-bottom:1.2rem;font-size:.9rem">
+    Crie sua conta grátis pra receber sua cesta.
+    Já tem conta? <a href="/login" style="color:#5dcaa5">Entrar</a>
+  </p>
+  {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+  <form method="post" action="/cadastro">
+    <input type="hidden" name="next" value="/f/{{ slug }}/confirmar">
+    <input type="hidden" name="plano" value="cesta">
+    <label>Email</label>
+    <input name="email" type="email" required placeholder="seu@email.com" style="width:100%;margin-bottom:.6rem">
+    <label>Senha</label>
+    <input name="senha" type="password" required placeholder="mínimo 8 caracteres" style="width:100%;margin-bottom:.6rem">
+    <label>📱 WhatsApp (com DDD) <span class="mut" style="font-size:.8rem">— pra avisar da sua cesta</span></label>
+    <input name="whatsapp" required placeholder="86 98888-7777" maxlength="20" style="width:100%;margin-bottom:.6rem">
+    <label>CEP</label>
+    <input name="cep" required placeholder="64000-000" style="width:100%;margin-bottom:.6rem">
+    <label>Endereço</label>
+    <input name="endereco" required placeholder="Rua X, nº 123, bairro" style="width:100%;margin-bottom:1rem">
+    <button style="background:#1d9e75;color:#fff;padding:.7rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:600;font-size:.95rem">
+      Criar conta e assinar 🧺
+    </button>
+  </form>
+  <p class="mut" style="font-size:.8rem;text-align:center;margin-top:.8rem">
+    Conta grátis. Você só paga a cesta, 4 dias antes de cada entrega. Sem fidelidade.
+  </p>
 </div>
 {% endblock %}"""
 
@@ -1811,12 +1798,15 @@ def cadastro_form(request: Request):
 
 @router.post("/cadastro", response_class=HTMLResponse)
 def cadastro_envia(request: Request, background: BackgroundTasks,
-                   plano: str = Form("cesta"), nome: str = Form(...),
+                   plano: str = Form("cesta"), nome: str = Form(""),
                    email: str = Form(...), senha: str = Form(...),
                    documento: str = Form(""), whatsapp: str = Form(...),
-                   cep: str = Form("")):
+                   cep: str = Form(""), endereco: str = Form("")):
     pool = get_pool()
     email = email.strip().lower()
+    # Se nome vazio, usar parte do email como nome provisório
+    if not nome or not nome.strip():
+        nome = email.split("@")[0].capitalize()
     zap = _normalizar_zap(whatsapp)
 
     # Validar plano: "cesta" é a opção grátis (assinante de cesta),
@@ -1853,8 +1843,10 @@ def cadastro_envia(request: Request, background: BackgroundTasks,
         conta_id = ct.criar_conta(pool, tipo, nome.strip(), plano=plano_gravar, documento=doc,
                                   cidade=_cid.valida(regiao))  # trial 7d; CEP->regiao
         with pool.connection() as c:
-            c.execute("update contas set email=%s, senha_hash=%s, eh_assinante_cesta=%s where id=%s",
-                      (email, hash_senha(senha), eh_cesta, conta_id))
+            # Salvar email, senha, flag assinante_cesta, e endereço (se fornecido)
+            endereco_val = (endereco or "").strip() or None
+            c.execute("update contas set email=%s, senha_hash=%s, eh_assinante_cesta=%s, endereco=%s where id=%s",
+                      (email, hash_senha(senha), eh_cesta, endereco_val, conta_id))
             c.commit()
     except Exception as e:  # captura violação de unique constraint
         if "idx_contas_email_unico" in str(e) or "unique" in str(e).lower():

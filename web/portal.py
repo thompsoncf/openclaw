@@ -624,6 +624,45 @@ window.PRODUTOS = {
     {% endif %}
   </div>
 
+  <!-- MODAL: Nova Compra -->
+  <div id="forn-nova-compra" style="display:none;margin-top:2rem;padding:1.2rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px">
+    <h4 style="margin-top:0">Nova compra</h4>
+    <div style="display:flex;gap:.6rem;margin-bottom:1rem">
+      <button type="button" onclick="fornShowCompraManual()" style="flex:1;background:#1d9e75;color:#fff;padding:.5rem;border:0;border-radius:6px;cursor:pointer;font-weight:500">Manual (digitar itens)</button>
+      <button type="button" onclick="fornShowCompraNota()" style="flex:1;background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;padding:.5rem;border-radius:6px;cursor:pointer;font-weight:500">Com nota (em breve)</button>
+    </div>
+    <button type="button" onclick="fornHideNovaCompra()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;font-size:.85rem">Cancelar</button>
+  </div>
+
+  <!-- MODAL: Compra Manual -->
+  <div id="forn-compra-manual" style="display:none;margin-top:1rem;padding:1rem;background:#2a2a2b;border-radius:6px">
+    <h4 style="margin-top:0;margin-bottom:.8rem">Nova compra manual</h4>
+    <form method="post" action="/painel/fornecedor/compras/criar">
+      <label>Data da compra</label><input type="date" name="data_compra" style="width:100%">
+      <label>De onde comprou?</label>
+      <select name="origem_id" id="forn-compra-origem-sel" style="width:100%">
+        <option value="">Selecione uma origem</option>
+        {% for o in origens %}<option value="{{ o.id }}">{{ o.nome }}</option>{% endfor %}
+      </select>
+      <button type="button" onclick="fornShowNovaOrigemCompra()" style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;padding:.3rem .6rem;cursor:pointer;font-size:.85rem;margin-top:.3rem">+ Nova origem</button>
+      <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.8rem;width:100%;font-weight:500">Criar compra</button>
+    </form>
+    <button type="button" onclick="fornHideCompraManual()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.5rem;font-size:.85rem">Cancelar</button>
+  </div>
+
+  <!-- MODAL: Nova Origem (Compras) -->
+  <div id="forn-nova-origem-compra" style="display:none;margin-top:1rem;padding:1rem;background:#1c1c1f;border-radius:6px">
+    <h4 style="margin-top:0;margin-bottom:.6rem">Nova origem</h4>
+    <form method="post" action="/painel/fornecedor/compras/origem">
+      <label>Nome</label><input name="nome" required placeholder="ex: CEASA, Sítio do João" style="width:100%">
+      <label>Contato (opcional)</label><input name="contato" placeholder="tel, email, whatsapp" style="width:100%">
+      <button style="background:#1d9e75;color:#fff;padding:.4rem .8rem;border:0;border-radius:4px;cursor:pointer;margin-top:.5rem;font-weight:500">Criar origem</button>
+    </form>
+    <button type="button" onclick="fornHideNovaOrigemCompra()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;font-size:.85rem;margin-top:.5rem">Cancelar</button>
+  </div>
+
+</div>
+
 <!-- SEÇÃO: Cestas -->
 <div id="forn-cestas" class="forn-secao" style="display:none">
   <button type="button" class="forn-voltar" onclick="fornVoltar()">← voltar</button>
@@ -669,43 +708,6 @@ window.PRODUTOS = {
     </form>
   </div>
 </div>
-
-  <!-- MODAL: Nova Compra -->
-  <div id="forn-nova-compra" style="display:none;margin-top:2rem;padding:1.2rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px">
-    <h4 style="margin-top:0">Nova compra</h4>
-    <div style="display:flex;gap:.6rem;margin-bottom:1rem">
-      <button type="button" onclick="fornShowCompraManual()" style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;flex:1;font-weight:500">Manual (digitar itens)</button>
-      <button type="button" onclick="fornShowCompraNota()" style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;padding:.5rem 1rem;border-radius:6px;cursor:pointer;flex:1;font-weight:500">Com nota (em breve)</button>
-    </div>
-    <button type="button" onclick="fornHideNovaCompra()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.6rem;font-size:.9rem">Cancelar</button>
-  </div>
-
-  <!-- MODAL: Compra Manual (form de criação) -->
-  <div id="forn-compra-manual" style="display:none;margin-top:1rem;padding:1rem;background:#2a2a2b;border-radius:6px">
-    <h4 style="margin-top:0;margin-bottom:.8rem">Nova compra manual</h4>
-    <form method="post" action="/painel/fornecedor/compras/criar">
-      <label>Data da compra</label><input type="date" name="data_compra" style="width:100%">
-      <label>De onde comprou?</label>
-      <select name="origem_id" id="forn-compra-origem-sel" style="width:100%">
-        <option value="">Selecione uma origem</option>
-        {% for o in origens %}<option value="{{ o.id }}">{{ o.nome }}</option>{% endfor %}
-      </select>
-      <button type="button" onclick="fornShowNovaOrigemCompra()" style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;padding:.3rem .6rem;cursor:pointer;font-size:.85rem;margin-top:.3rem">+ Nova origem</button>
-      <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.8rem;width:100%;font-weight:500">Criar compra</button>
-    </form>
-    <button type="button" onclick="fornHideCompraManual()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.5rem;font-size:.85rem">Cancelar</button>
-  </div>
-
-  <!-- MODAL: Nova Origem (pra compra) -->
-  <div id="forn-nova-origem-compra" style="display:none;margin-top:1rem;padding:1rem;background:#1c1c1f;border-radius:6px">
-    <h4 style="margin-top:0;margin-bottom:.6rem">Nova origem</h4>
-    <form method="post" action="/painel/fornecedor/compras/origem">
-      <label>Nome</label><input name="nome" required placeholder="ex: CEASA, Sítio do João" style="width:100%">
-      <label>Contato (opcional)</label><input name="contato" placeholder="tel, email, whatsapp" style="width:100%">
-      <button style="background:#1d9e75;color:#fff;padding:.4rem .8rem;border:0;border-radius:4px;cursor:pointer;font-size:.85rem;margin-top:.5rem;font-weight:500">Criar origem</button>
-    </form>
-    <button type="button" onclick="fornHideNovaOrigemCompra()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;font-size:.85rem;margin-top:.5rem">Cancelar</button>
-  </div>
 
 </div>
 

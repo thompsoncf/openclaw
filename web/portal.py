@@ -1686,8 +1686,75 @@ _PAINEL_ASSINATURAS = """{% extends "base" %}{% block conteudo %}
 </div>
 {% endblock %}"""
 
+_CESTA_AJUSTE = """{% extends "base" %}{% block conteudo %}
+<div class="card larga"><h2>🧺 Sua cesta da semana</h2>
+{% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+{% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
+
+<div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1.2rem;margin-bottom:1.5rem">
+  <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:1rem">
+    <div>
+      <h3 style="margin:0;margin-bottom:.5rem">{{ cesta.fornecedor_nome }}</h3>
+      <strong>R$ {{ "%.2f"|format(cesta.preco_centavos/100) }}</strong> · Entrega: <strong>{{ cesta.data_entrega }}</strong>
+    </div>
+    <div style="text-align:right;font-size:.9rem;color:#5dcaa5">
+      {% if cesta.status == 'confirmada' %}✓ Confirmada{% elif cesta.status == 'em_ajuste' %}Ajustando...{% else %}Sugerida{% endif %}
+    </div>
+  </div>
+  <p class="mut" style="margin:0;font-size:.85rem">Está tudo certo? Não precisa fazer nada — sua cesta vai automático.<br>Quer tirar algo? É só remover abaixo.</p>
+</div>
+
+{% if cesta.itens %}
+{% set grupos = {} %}
+{% for item in cesta.itens %}
+  {% if item.grupo not in grupos %}{% set _ = grupos.update({item.grupo: []}) %}{% endif %}
+  {% set _ = grupos[item.grupo].append(item) %}
+{% endfor %}
+
+{% for grupo in ['fruta', 'legume', 'verdura', 'tempero'] %}
+{% if grupo in grupos %}
+<div style="margin-bottom:1.5rem">
+  <h4 style="margin:0 0 .8rem 0;color:#5dcaa5;text-transform:capitalize">🥗 {{ grupo }}s</h4>
+  <div style="display:grid;gap:.6rem">
+  {% for item in grupos[grupo] %}
+    <div style="background:#0a0a0a;border:1px solid #2a2a2b;border-radius:6px;padding:.8rem;display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <strong>{{ item.nome }}</strong><br>
+        <span class="mut" style="font-size:.85rem">{{ item.quantidade }} {{ item.unidade }}</span>
+      </div>
+      {% if cesta.status != 'confirmada' %}
+      <form method="post" action="/cesta/{{ cesta.id }}/remover" style="display:inline">
+        <input type="hidden" name="item_id" value="{{ item.item_id }}">
+        <button style="background:#8a3636;color:#fff;border:0;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem">tirar</button>
+      </form>
+      {% endif %}
+    </div>
+  {% endfor %}
+  </div>
+</div>
+{% endif %}
+{% endfor %}
+
+{% if cesta.status != 'confirmada' %}
+<form method="post" action="/cesta/{{ cesta.id }}/confirmar" style="margin-top:1.5rem">
+  <button style="background:#1d9e75;color:#fff;padding:.7rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:600;font-size:1rem">✓ Confirmar cesta</button>
+  <p class="mut" style="font-size:.85rem;text-align:center;margin-top:.5rem">Ou deixe como está — vai automático. 👍</p>
+</form>
+{% else %}
+<div style="background:#1d4620;border:1px solid #2d8659;border-radius:6px;padding:1rem;text-align:center;margin-top:1.5rem">
+  <p style="margin:0;color:#5dcaa5;font-weight:500">✓ Cesta confirmada</p>
+  <small class="mut">Ela será entregue em {{ cesta.data_entrega }}</small>
+</div>
+{% endif %}
+
+{% else %}
+<p class="mut">Nenhum item na sua cesta. Algo deu errado — avisa pra gente!</p>
+{% endif %}
+</div>
+{% endblock %}"""
+
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "cesta_ajuste": _CESTA_AJUSTE,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 from finance.models import canonizar_categoria, categorias_de
@@ -1954,6 +2021,79 @@ def painel_assinatura_status(request: Request, assinatura_id: int,
     except Exception as e:
         request.session["erro"] = f"Erro: {str(e)}"
     return RedirectResponse("/painel/assinaturas", status_code=303)
+
+
+# ===== FASE 6: Janela semanal (ajuste da cesta) =====
+@router.get("/cesta/{cesta_id}", response_class=HTMLResponse)
+def ver_cesta(request: Request, cesta_id: int):
+    from finance import janela
+    conta = conta_logada(request)
+    if conta is None:
+        request.session["next"] = f"/cesta/{cesta_id}"
+        return RedirectResponse("/login", status_code=303)
+    cesta = janela.obter_cesta(get_pool(), cesta_id, cliente_id=conta[0])
+    if cesta is None:
+        return HTMLResponse("<h1>Cesta não encontrada</h1>", status_code=404)
+    return _render("cesta_ajuste", request, cesta=cesta,
+                   aviso=request.session.pop("aviso", None),
+                   erro=request.session.pop("erro", None))
+
+
+@router.post("/cesta/{cesta_id}/remover")
+def cesta_remover_item(request: Request, cesta_id: int, item_id: int = Form(...)):
+    from finance import janela
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    janela.remover_item(get_pool(), cesta_id, item_id, conta[0])
+    request.session["aviso"] = "Item removido da sua cesta."
+    return RedirectResponse(f"/cesta/{cesta_id}", status_code=303)
+
+
+@router.post("/cesta/{cesta_id}/confirmar")
+def cesta_confirmar(request: Request, cesta_id: int):
+    from finance import janela
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    janela.confirmar_cesta(get_pool(), cesta_id, conta[0])
+    request.session["aviso"] = "Cesta confirmada! 🧺"
+    return RedirectResponse(f"/cesta/{cesta_id}", status_code=303)
+
+
+# ===== Botões de teste (manual) — abrir/fechar janela =====
+@router.post("/painel/teste/abrir-janela")
+def teste_abrir_janela(request: Request, assinatura_id: int = Form(...)):
+    from finance import janela
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:  # eh_fornecedor
+        return RedirectResponse("/painel/fornecedor", status_code=303)
+    try:
+        r = janela.abrir_janela_semana(get_pool(), apenas_assinatura_id=assinatura_id)
+        msg = f"✓ Montadas {r['montadas']} cestas"
+        if r['erros']:
+            msg += f" | ⚠️ {len(r['erros'])} erros"
+        request.session["aviso"] = msg
+    except Exception as e:
+        request.session["erro"] = f"Erro: {str(e)}"
+    return RedirectResponse("/painel/fornecedor", status_code=303)
+
+
+@router.post("/painel/teste/fechar-janela")
+def teste_fechar_janela(request: Request, data_entrega: str = Form(...)):
+    from finance import janela
+    from datetime import datetime
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return RedirectResponse("/painel/fornecedor", status_code=303)
+    try:
+        data = datetime.strptime(data_entrega, "%Y-%m-%d").date()
+        r = janela.fechar_janela(get_pool(), data)
+        msg = f"✓ Confirmadas {r['confirmadas']} cestas (modo confiança)"
+        request.session["aviso"] = msg
+    except Exception as e:
+        request.session["erro"] = f"Erro: {str(e)}"
+    return RedirectResponse("/painel/fornecedor", status_code=303)
 
 
 @router.get("/painel/fornecedor", response_class=HTMLResponse)

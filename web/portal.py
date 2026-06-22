@@ -1591,8 +1591,89 @@ _COMPRA_REVISAR = """{% extends "base" %}{% block conteudo %}
 </div>
 {% endblock %}"""
 
+_LOJA = """{% extends "base" %}{% block conteudo %}
+<div class="card larga"><h2>{{ fornecedor.nome }}</h2>
+<p class="mut">Escolha o tamanho e a frequência de sua cesta. Sem fidelidade — cancele quando quiser.</p>
+<form method="post" action="/f/{{ fornecedor.slug }}/assinar" style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1.5rem">
+<h4>Tamanhos disponíveis</h4>
+{% for t in tamanhos %}
+<div style="background:#2a2a2b;padding:.8rem;margin-bottom:.6rem;border-radius:6px;cursor:pointer" onclick="document.getElementById('tam-{{ t.id }}').checked=true">
+  <label style="cursor:pointer;display:flex;align-items:center;gap:.5rem">
+    <input type="radio" name="tamanho_id" id="tam-{{ t.id }}" value="{{ t.id }}" required {% if escolha.tamanho_id == t.id %}checked{% endif %}>
+    <strong>{{ t.nome }}</strong> — R$ {{ "%.2f"|format(t.preco_centavos/100) }}
+  </label>
+  <div class="mut" style="font-size:.85rem;margin-top:.3rem">{{ t.qtd_frutas }}🍓 {{ t.qtd_legumes }}🥕 {{ t.qtd_verduras }}🥬 {{ t.qtd_temperos }}🌿 ({{ t.total_porcoes }} porções)</div>
+  {% if t.descricao %}<div class="mut" style="font-size:.85rem">{{ t.descricao }}</div>{% endif %}
+</div>
+{% endfor %}
+<h4 style="margin-top:1.5rem">Frequência</h4>
+<select name="frequencia" style="width:100%">
+  <option value="semanal" {% if escolha.frequencia == 'semanal' %}selected{% endif %}>Semanal (a cada 7 dias)</option>
+  <option value="quinzenal" {% if escolha.frequencia == 'quinzenal' %}selected{% endif %}>Quinzenal (a cada 14 dias)</option>
+  <option value="mensal" {% if escolha.frequencia == 'mensal' %}selected{% endif %}>Mensal (a cada 30 dias)</option>
+</select>
+<h4 style="margin-top:1.5rem">Produtos que você NÃO quer receber</h4>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.5rem;max-height:200px;overflow-y:auto">
+{% for p in produtos %}
+<label style="display:flex;gap:.3rem;font-size:.9rem">
+  <input type="checkbox" name="restricoes" value="{{ p.id }}" {% if p.id in escolha.restricoes %}checked{% endif %}> {{ p.nome }}
+</label>
+{% endfor %}
+</div>
+<button style="background:#1d9e75;color:#fff;padding:.7rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:600;font-size:1rem;margin-top:1.5rem">✓ Assinar</button>
+<p class="mut" style="font-size:.85rem;margin-top:.5rem;text-align:center">Você só paga 4 dias antes de cada entrega.</p>
+</form>
+</div>
+{% endblock %}"""
+
+_LOJA_CONFIRMAR_NOVO = """{% extends "base" %}{% block conteudo %}
+<div class="card larga"><h2>Confirme sua assinatura</h2>
+<p class="mut">Você já tem conta? <a href="/login" style="color:#5dcaa5">Faça login</a></p>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-top:1.5rem">
+<div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1.5rem">
+<h4 style="margin-top:0">Criar conta nova</h4>
+<form method="post" action="/cadastro">
+  <input type="hidden" name="next" value="/f/{{ slug }}/confirmar">
+  <label>Email</label><input name="email" type="email" required placeholder="seu@email.com" style="width:100%;margin-bottom:.8rem">
+  <label>Senha</label><input name="senha" type="password" required placeholder="mínimo 8 caracteres" style="width:100%;margin-bottom:.8rem">
+  <label>CEP</label><input name="cep" required placeholder="12345-678" style="width:100%;margin-bottom:.8rem">
+  <label>Endereço</label><input name="endereco" required placeholder="Rua X, nº 123" style="width:100%;margin-bottom:.8rem">
+  <button style="background:#1d9e75;color:#fff;padding:.6rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:500">Criar e assinar</button>
+</form>
+</div>
+</div>
+</div>
+{% endblock %}"""
+
+_PAINEL_ASSINATURAS = """{% extends "base" %}{% block conteudo %}
+<div class="card larga"><h2>Minhas assinaturas</h2>
+{% if assinaturas %}
+{% for a in assinaturas %}
+<div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1rem;margin-bottom:.6rem">
+  <div style="display:flex;justify-content:space-between;align-items:start">
+    <div>
+      <strong>{{ a.tamanho_nome }}</strong> — <strong>R$ {{ "%.2f"|format(a.preco_centavos/100) }}</strong>
+      <div class="mut" style="font-size:.85rem;margin-top:.3rem">De: {{ a.fornecedor_nome }} | Frequência: {{ a.frequencia }} | Status: <strong>{{ a.status }}</strong></div>
+    </div>
+    <form method="post" action="/painel/assinaturas/{{ a.id }}/status" style="display:inline">
+      <select name="novo_status" onchange="this.form.submit()" style="padding:.3rem;border:1px solid #2a2a2b;border-radius:4px;background:#0a0a0a;color:#fff;font-size:.85rem">
+        <option value="">Ações</option>
+        {% if a.status != 'ativa' %}<option value="ativa">Reativar</option>{% endif %}
+        {% if a.status == 'ativa' %}<option value="pausada">Pausar</option>{% endif %}
+        {% if a.status != 'cancelada' %}<option value="cancelada">Cancelar</option>{% endif %}
+      </select>
+    </form>
+  </div>
+</div>
+{% endfor %}
+{% else %}
+<p class="mut">Você ainda não tem assinaturas. <a href="/" style="color:#5dcaa5">Explore os fornecedores</a></p>
+{% endif %}
+</div>
+{% endblock %}"""
+
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 from finance.models import canonizar_categoria, categorias_de
@@ -1750,6 +1831,109 @@ def painel(request: Request):
                    whatsapp_bot_num=whatsapp_from,
                    erro=request.session.pop("erro", None),
                    aviso=request.session.pop("aviso", None))
+
+
+# ========== LOJA PÚBLICA (FASE 3) ==========
+
+@router.get("/f/{slug}", response_class=HTMLResponse)
+def loja_fornecedor(request: Request, slug: str):
+    from finance import cestas as cestas_mod, catalogo as cat_mod
+    pool = get_pool()
+    with pool.connection() as c:
+        forn = c.execute(
+            """select id, nome, fornecedor_slug from contas
+               where fornecedor_slug = %s and eh_fornecedor and ativo""",
+            (slug,),
+        ).fetchone()
+    if forn is None:
+        return HTMLResponse("<h1>Loja não encontrada</h1>", status_code=404)
+    fornecedor = {"id": forn[0], "nome": forn[1], "slug": forn[2]}
+    tamanhos = cestas_mod.listar_tamanhos(pool, forn[0], so_ativos=True)
+    produtos = cat_mod.listar_produtos(pool, forn[0], so_disponiveis=True)
+    escolha = request.session.get("loja_escolha", {})
+    return _render("loja", request, fornecedor=fornecedor, tamanhos=tamanhos,
+                   produtos=produtos, escolha=escolha)
+
+
+@router.post("/f/{slug}/assinar")
+def loja_assinar(request: Request, slug: str,
+                tamanho_id: int = Form(...),
+                frequencia: str = Form("semanal"),
+                restricoes: list[int] = Form(default=[])):
+    request.session["loja_escolha"] = {
+        "slug": slug, "tamanho_id": tamanho_id,
+        "frequencia": frequencia, "restricoes": restricoes or [],
+    }
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse(f"/f/{slug}/confirmar", status_code=303)
+    # já logado: cria direto
+    return _criar_assinatura_da_sessao(request, conta, slug)
+
+
+@router.get("/f/{slug}/confirmar", response_class=HTMLResponse)
+def loja_confirmar(request: Request, slug: str):
+    conta = conta_logada(request)
+    esc = request.session.get("loja_escolha", {})
+    if esc.get("slug") != slug:
+        return RedirectResponse(f"/f/{slug}", status_code=303)
+    if conta is None:
+        # sem conta: mostra cadastro/login
+        return _render("loja_confirmar_novo", request, slug=slug, erro=None)
+    # logado: cria a assinatura
+    return _criar_assinatura_da_sessao(request, conta, slug)
+
+
+def _criar_assinatura_da_sessao(request, conta, slug):
+    from finance import assinaturas as assin_mod
+    esc = request.session.get("loja_escolha")
+    if not esc or esc.get("slug") != slug:
+        return RedirectResponse("/painel", status_code=303)
+    pool = get_pool()
+    with pool.connection() as c:
+        forn = c.execute(
+            "select id from contas where fornecedor_slug=%s and eh_fornecedor",
+            (slug,)).fetchone()
+    if forn is None:
+        return RedirectResponse("/painel", status_code=303)
+    try:
+        r = assin_mod.criar_assinatura(
+            pool, cliente_id=conta[0], fornecedor_id=forn[0],
+            tamanho_id=esc["tamanho_id"], frequencia=esc["frequencia"],
+            restricoes_produto_ids=esc.get("restricoes", []),
+        )
+        request.session.pop("loja_escolha", None)
+        request.session["aviso"] = "✓ Assinatura criada! Em breve o pagamento."
+    except Exception as e:
+        request.session["erro"] = f"Erro: {str(e)}"
+    return RedirectResponse("/painel/assinaturas", status_code=303)
+
+
+@router.get("/painel/assinaturas", response_class=HTMLResponse)
+def painel_assinaturas(request: Request):
+    from finance import assinaturas as assin_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    assinaturas = assin_mod.listar_assinaturas_cliente(get_pool(), conta[0])
+    return _render("painel_assinaturas", request, conta=conta, assinaturas=assinaturas,
+                   erro=request.session.pop("erro", None),
+                   aviso=request.session.pop("aviso", None))
+
+
+@router.post("/painel/assinaturas/{assinatura_id}/status")
+def painel_assinatura_status(request: Request, assinatura_id: int,
+                            novo_status: str = Form(...)):
+    from finance import assinaturas as assin_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    try:
+        assin_mod.alterar_status(get_pool(), conta[0], assinatura_id, novo_status)
+        request.session["aviso"] = f"Assinatura {novo_status}."
+    except Exception as e:
+        request.session["erro"] = f"Erro: {str(e)}"
+    return RedirectResponse("/painel/assinaturas", status_code=303)
 
 
 @router.get("/painel/fornecedor", response_class=HTMLResponse)

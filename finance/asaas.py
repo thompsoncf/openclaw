@@ -180,3 +180,63 @@ def sandbox_confirmar_pagamento(payment_id: str) -> dict:
     So' use em sandbox. Em producao isso nao existe — o pagamento e' real.
     """
     return _post(f"/payments/{payment_id}/confirmRealReceiveSandbox", {})
+
+
+# ============================================================
+# ASSINATURA RECORRENTE (Pix Automático / cobrança automática)
+# ============================================================
+
+def criar_assinatura_recorrente(
+    asaas_customer_id: str,
+    valor_reais: float,
+    ciclo: str,
+    assinatura_id: int,
+    descricao: str | None = None,
+    primeira_cobranca=None,
+) -> dict:
+    """Cria uma ASSINATURA recorrente no Asaas (cobra sozinho todo ciclo).
+
+    - asaas_customer_id: id do customer no Asaas (de criar_cliente).
+    - valor_reais: valor por cobrança, em REAIS (ex: 90.00).
+    - ciclo: 'semanal'|'quinzenal'|'mensal' -> mapeado pro cycle do Asaas.
+    - assinatura_id: a assinatura da cesta (vira externalReference 'cesta:<id>').
+    - billingType UNDEFINED: cliente escolhe Pix/boleto/cartão.
+
+    Retorna o JSON do Asaas (campo 'id' = subscription id).
+    O webhook recebe os PAYMENT_RECEIVED de cada cobrança, com o externalReference.
+    """
+    from datetime import date as _date, timedelta as _td
+
+    # mapeia o ciclo pro formato do Asaas
+    cycle_map = {
+        "semanal": "WEEKLY",
+        "quinzenal": "BIWEEKLY",
+        "mensal": "MONTHLY",
+    }
+    cycle = cycle_map.get((ciclo or "mensal").lower(), "MONTHLY")
+
+    if primeira_cobranca is None:
+        primeira_cobranca = _date.today() + _td(days=3)  # prazo pro 1º pagamento
+    next_due = (primeira_cobranca.isoformat()
+                if hasattr(primeira_cobranca, "isoformat") else str(primeira_cobranca))
+
+    payload = {
+        "customer": asaas_customer_id,
+        "billingType": "UNDEFINED",
+        "value": round(float(valor_reais), 2),
+        "nextDueDate": next_due,
+        "cycle": cycle,
+        "description": descricao or "Assinatura de cesta Zaq",
+        "externalReference": f"cesta:{assinatura_id}",
+    }
+    return _post("/subscriptions", payload)
+
+
+def cancelar_assinatura_recorrente(subscription_id: str) -> dict:
+    """Cancela uma assinatura recorrente no Asaas (deixa de cobrar)."""
+    url = _base_url() + f"/subscriptions/{subscription_id}"
+    with httpx.Client(timeout=30.0) as c:
+        r = c.delete(url, headers=_headers())
+    if r.status_code >= 300:
+        raise AsaasErro(f"Asaas {r.status_code} ao cancelar subscription: {r.text[:200]}")
+    return r.json()

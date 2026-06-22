@@ -518,7 +518,7 @@ async def whatsapp(request: Request, background: BackgroundTasks):
 
 @app.post("/webhook/asaas")
 async def webhook_asaas(request: Request):
-    """Webhook do Asaas: quando pagamento é confirmado, ativa a conta."""
+    """Webhook do Asaas: ativa cesta (externalReference 'cesta:id') ou conta do app."""
     try:
         payload = await request.json()
     except Exception:
@@ -526,9 +526,8 @@ async def webhook_asaas(request: Request):
 
     event = payload.get("event", "")
     if event not in ("PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"):
-        return JSONResponse({"ok": True}, status_code=200)  # ignora outros eventos
+        return JSONResponse({"ok": True}, status_code=200)
 
-    # Extrai o payment_id e external_reference (conta_id)
     payment = payload.get("payment", {})
     payment_id = payment.get("id", "")
     external_ref = payment.get("externalReference", "")
@@ -537,36 +536,58 @@ async def webhook_asaas(request: Request):
         log.warning(f"Asaas webhook: payment_id ou external_ref vazio")
         return JSONResponse({"ok": True}, status_code=200)
 
-    try:
-        conta_id = int(external_ref)
-    except (ValueError, TypeError):
-        log.warning(f"Asaas webhook: external_ref inválido: {external_ref}")
-        return JSONResponse({"ok": True}, status_code=200)
-
-    # Consulta o pagamento na API do Asaas pra confirmar (segurança)
+    # Consulta o pagamento na API pra confirmar
     from starlette.concurrency import run_in_threadpool
-    from finance import asaas
+    from finance import asaas, assinaturas as assin_mod
     try:
         api_payment = await run_in_threadpool(asaas.consultar_pagamento, payment_id)
         status = api_payment.get("status", "")
         if status not in ("RECEIVED", "CONFIRMED"):
-            log.info(f"Asaas webhook: pagamento {payment_id} status={status} (não confirmado ainda)")
+            log.info(f"Asaas webhook: pagamento {payment_id} status={status}")
             return JSONResponse({"ok": True}, status_code=200)
     except asaas.AsaasErro as e:
         log.warning(f"Asaas webhook: erro ao consultar {payment_id}: {e}")
         return JSONResponse({"ok": True}, status_code=200)
 
-    # Pagamento confirmado! Ativa a conta
     pool = _setup()
+    ref = str(external_ref)
+
+    # CESTA: externalReference "cesta:<assinatura_id>"
+    if ref.startswith("cesta:"):
+        try:
+            assinatura_id = int(ref.split(":", 1)[1])
+        except (ValueError, IndexError):
+            log.warning(f"Asaas webhook: cesta ref inválido: {ref}")
+            return JSONResponse({"ok": True}, status_code=200)
+
+        # Idempotência: reivindicar a chave
+        chave = f"asaas:cesta:{assinatura_id}:{payment_id}"
+        if ct.reivindicar_mensagem(pool, chave):
+            try:
+                assin_mod.ativar_pos_pagamento(pool, assinatura_id)
+                log.warning(f"ASAAS cesta assinatura {assinatura_id} ATIVADA (pay {payment_id})")
+                ct.registrar_evento(pool, None, "assinatura_ativada_asaas",
+                                   f"assinatura_id={assinatura_id}, valor={api_payment.get('value')} BRL")
+            except Exception as e:
+                log.error(f"Asaas webhook: erro ao ativar cesta {assinatura_id}: {e}")
+        return JSONResponse({"ok": True}, status_code=200)
+
+    # APP: externalReference "<conta_id>"
     try:
-        # Ativa a conta (30 dias; plano já foi salvo no upgrade)
-        ct.ativar(pool, conta_id, dias=30)
-        log.info(f"Asaas webhook: conta {conta_id} ativada (pagamento {payment_id})")
-        ct.registrar_evento(pool, conta_id, "pagamento_confirmado",
-                           f"payment_id={payment_id} ({api_payment.get('value')} BRL)")
-    except Exception as e:
-        log.error(f"Asaas webhook: erro ao ativar conta {conta_id}: {e}")
-        # Ainda retorna 200 (pro Asaas não reenviar) mas registra o erro
+        conta_id = int(ref)
+    except (ValueError, TypeError):
+        log.warning(f"Asaas webhook: conta_id inválido: {ref}")
+        return JSONResponse({"ok": True}, status_code=200)
+
+    chave = f"asaas:app:{conta_id}:{payment_id}"
+    if ct.reivindicar_mensagem(pool, chave):
+        try:
+            ct.ativar(pool, conta_id, dias=30)
+            log.info(f"Asaas webhook: conta {conta_id} ativada (pagamento {payment_id})")
+            ct.registrar_evento(pool, conta_id, "pagamento_confirmado",
+                               f"payment_id={payment_id} ({api_payment.get('value')} BRL)")
+        except Exception as e:
+            log.error(f"Asaas webhook: erro ao ativar conta {conta_id}: {e}")
 
     return JSONResponse({"ok": True}, status_code=200)
 

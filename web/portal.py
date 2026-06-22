@@ -2146,7 +2146,7 @@ def _criar_assinatura_da_sessao(request, conta, slug):
     pool = get_pool()
     with pool.connection() as c:
         forn = c.execute(
-            "select id from contas where fornecedor_slug=%s and eh_fornecedor",
+            "select id, nome from contas where fornecedor_slug=%s and eh_fornecedor",
             (slug,)).fetchone()
     if forn is None:
         return RedirectResponse("/painel", status_code=303)
@@ -2156,6 +2156,42 @@ def _criar_assinatura_da_sessao(request, conta, slug):
             tamanho_id=esc["tamanho_id"], frequencia=esc["frequencia"],
             restricoes_produto_ids=esc.get("restricoes", []),
         )
+        assinatura_id = r["assinatura_id"]
+        preco_reais = r["preco_centavos"] / 100
+        frequencia = esc["frequencia"]
+
+        # Gera a subscription recorrente no Asaas (tenta; se falhar, assina mesmo assim)
+        try:
+            from finance import asaas
+            # Cria ou recupera o customer no Asaas
+            cust = asaas.criar_cliente(
+                nome=conta[1] or f"Cliente {conta[0]}",
+                email=conta[6] or None,  # conta[6] = email
+                telefone=None,  # whatsapp não é telefone formatado pro Asaas
+                conta_id=conta[0],
+            )
+            # Cria a subscription recorrente (ciclo semanal/mensal/quinzenal)
+            tamanho_nome = esc.get("tamanho_nome", "")
+            sub = asaas.criar_assinatura_recorrente(
+                asaas_customer_id=cust["id"],
+                valor_reais=preco_reais,
+                ciclo=frequencia,
+                assinatura_id=assinatura_id,
+                descricao=f"Cesta {tamanho_nome} - {forn[1]}",
+            )
+            # Guarda o subscription_id na assinatura
+            with pool.connection() as c:
+                c.execute(
+                    "update assinaturas set asaas_subscription_id=%s where id=%s",
+                    (sub["id"], assinatura_id),
+                )
+                c.commit()
+        except Exception as asaas_err:
+            # Assina mesmo assim; o cliente paga depois (log do erro)
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Asaas: erro ao criar subscription pra assinatura {assinatura_id}: {asaas_err}")
+
         request.session.pop("loja_escolha", None)
         request.session["aviso"] = "✓ Assinatura criada! Em breve o pagamento."
     except Exception as e:

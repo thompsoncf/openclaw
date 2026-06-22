@@ -102,12 +102,19 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
 <form method="get" action="/admin" style="margin-bottom:.8rem">
 <input name="busca" placeholder="buscar nome, e-mail ou documento" value="{{ busca or '' }}" style="width:60%">
 <button>Buscar</button></form>
-<table><tr><th>ID</th><th>Nome</th><th>Plano</th><th>Status</th><th>Vence</th><th>Limites (msg/cup dia)</th><th>Uso hoje</th><th>Uso mês</th><th>Ações</th></tr>
+<table><tr><th>ID</th><th>Nome</th><th>Plano</th><th>Status</th><th>Vence</th><th>Cesta</th><th>Limites (msg/cup dia)</th><th>Uso hoje</th><th>Uso mês</th><th>Ações</th></tr>
 {% for c in contas %}<tr>
 <td>{{ c.id }}</td><td>{{ c.nome }}<br><span class="mut">{{ c.email or '-' }}</span></td>
 <td>{{ c.plano or '-' }}</td>
 <td><span class="tag {{ c.status }}">{{ c.status }}</span></td>
 <td>{{ c.vencimento.strftime('%d/%m/%y') if c.vencimento else '-' }}</td>
+<td>
+  {% if c.qtd_cestas and c.qtd_cestas > 0 %}
+    <span class="tag ativa" title="tem assinatura de cesta">🧺 {{ c.qtd_cestas }}</span>
+  {% else %}
+    <span class="mut">-</span>
+  {% endif %}
+</td>
 <td>
   <form class="inline" method="post" action="/admin/conta/{{ c.id }}/limites" style="display:flex; gap:4px; align-items:center">
     <input type="number" name="msg" value="{{ c.limite_mensagens_dia }}" style="width:55px" title="mensagens/dia">
@@ -138,6 +145,13 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
     </form>
   {% endif %}
 {% endif %}
+<!-- Editar endereço/CEP (pra entrega da cesta) -->
+<form class="inline" method="post" action="/admin/conta/{{ c.id }}/endereco"
+      style="display:flex; gap:3px; align-items:center; margin-top:3px; flex-wrap:wrap">
+  <input name="cep" value="{{ c.cep or '' }}" placeholder="CEP" style="width:80px;font-size:.8rem" title="CEP">
+  <input name="endereco" value="{{ c.endereco or '' }}" placeholder="endereço" style="width:160px;font-size:.8rem" title="endereço de entrega">
+  <button style="padding:.3rem .5rem;font-size:.75rem">salvar end.</button>
+</form>
 </td></tr>{% endfor %}
 </table></div>
 
@@ -433,7 +447,11 @@ def admin_home(request: Request, busca: str = ""):
                                     and u.dia >= date_trunc('month', current_date)),0) as msg_mes,
                         coalesce((select sum(cupons) from uso_diario u
                                   where u.conta_id = ct.id
-                                    and u.dia >= date_trunc('month', current_date)),0) as cup_mes
+                                    and u.dia >= date_trunc('month', current_date)),0) as cup_mes,
+                        coalesce((select count(*) from assinaturas a
+                                  where a.cliente_id = ct.id
+                                    and a.status != 'cancelada'),0) as qtd_cestas,
+                        ct.endereco, ct.cep
                  from contas ct"""
         params: list = []
         if busca.strip():
@@ -442,7 +460,7 @@ def admin_home(request: Request, busca: str = ""):
         sql += " order by ct.id desc limit 200"
         cols = ["id", "nome", "email", "tipo", "plano", "status", "vencimento",
                 "limite_mensagens_dia", "limite_cupons_dia", "eh_fornecedor", "membros",
-                "msg_hoje", "cup_hoje", "msg_mes", "cup_mes"]
+                "msg_hoje", "cup_hoje", "msg_mes", "cup_mes", "qtd_cestas", "endereco", "cep"]
         contas = [dict(zip(cols, r)) for r in c.execute(sql, params).fetchall()]
 
         ecols = ["conta_id", "tipo", "detalhe", "criado_em"]
@@ -632,6 +650,28 @@ def admin_suspender(request: Request, conta_id: int):
     ct.suspender(pool, conta_id, f"por admin {adm[0]}")
     ct.registrar_evento(pool, conta_id, "admin_suspendeu", f"por admin {adm[0]}")
     request.session["admin_aviso"] = f"Conta {conta_id} suspensa."
+    return RedirectResponse("/admin", status_code=303)
+
+
+@router.post("/admin/conta/{conta_id}/endereco")
+def admin_conta_endereco(request: Request, conta_id: int,
+                         cep: str = Form(""), endereco: str = Form("")):
+    """Edita endereço/CEP da conta (pra entrega da cesta)."""
+    adm = _admin(request)
+    if adm is None:
+        return _NEGADO
+    pool = get_pool()
+    cep_val = (cep or "").strip() or None
+    endereco_val = (endereco or "").strip() or None
+    with pool.connection() as c:
+        c.execute(
+            "update contas set cep=%s, endereco=%s where id=%s",
+            (cep_val, endereco_val, conta_id),
+        )
+        c.commit()
+    ct.registrar_evento(pool, conta_id, "admin_atualizou_endereco",
+                       f"CEP={cep_val}, endereço={endereco_val}")
+    request.session["admin_aviso"] = f"Endereço da conta {conta_id} atualizado."
     return RedirectResponse("/admin", status_code=303)
 
 

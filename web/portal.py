@@ -358,23 +358,58 @@ Pra adicionar mais, faça upgrade pro plano Família ou PJ.</p>
 </div>{% endblock %}"""
 
 _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
-<div class="card larga"><h1>👨‍🌾 Dados do fornecedor</h1>
-<p class="mut">Informações mínimas da sua conta de fornecedor. Dados fiscais completos (certificado, regime tributário, etc.) serão pedidos quando ativarmos a emissão de nota fiscal.</p>
+<div class="card larga"><h2>👨‍🌾 Fornecedor</h2>
+<div class="abas">
+  <button id="fab-dados" class="aba on" onclick="fornAba('dados')" style="margin:0">Meus dados</button>
+  <button id="fab-catalogo" class="aba" onclick="fornAba('catalogo')" style="margin:0">Catálogo</button>
+  <button id="fab-pedidos" class="aba" onclick="fornAba('pedidos')" style="margin:0">Pedidos</button>
+  <button id="fab-fin" class="aba" onclick="fornAba('financeiro')" style="margin:0">Financeiro</button>
+</div>
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
 {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
-<form method="post" action="/painel/fornecedor/dados">
-<label>Razão social</label><input name="razao_social" value="{{ fiscal.razao_social or '' }}" placeholder="ex: Hortifruti do Zé LTDA" maxlength="200">
-<label>CNPJ <span class="mut">(números apenas)</span></label><input name="cnpj" value="{{ fiscal.cnpj or '' }}" placeholder="14224053000103" maxlength="14">
-<label>Endereço completo</label><input name="endereco" value="{{ fiscal.endereco or '' }}" placeholder="ex: Rua A, 123, Teresina - PI, 64000-000" maxlength="200">
-<button>💾 Salvar dados</button>
-</form>
-<div class="card" style="margin-top:1.5rem;border-color:#1d9e75;background:#15241d">
-<h1 style="font-size:1rem;margin:0 0 .4rem">📋 Próximos passos</h1>
-<p style="font-size:.92rem;color:#c5d8ce;margin:0"><b>Catálogo</b> — Em breve, você vai poder adicionar seus produtos aqui.</p>
-<p style="font-size:.92rem;color:#c5d8ce;margin:.4rem 0 0"><b>Pedidos</b> — Acompanhe os pedidos dos seus clientes.</p>
-<p style="font-size:.92rem;color:#c5d8ce;margin:.4rem 0 0"><b>Financeiro</b> — Consulte seus ganhos e comissões.</p>
+
+<div id="forn-dados">
+  <h3>Seus dados</h3>
+  <form method="post" action="/painel/fornecedor/dados">
+    <label>Razão social</label>
+    <input name="razao_social" value="{{ fiscal.razao_social or '' }}" placeholder="ex: Hortifruti do Zé LTDA" maxlength="200">
+    <label>CNPJ <span class="mut">(números apenas)</span></label>
+    <input name="cnpj" value="{{ fiscal.cnpj or '' }}" placeholder="14224053000103" maxlength="14">
+    <label>Endereço completo</label>
+    <input name="endereco" value="{{ fiscal.endereco or '' }}" placeholder="ex: Rua A, 123, Teresina - PI, 64000-000" maxlength="200">
+    <button>💾 Salvar dados</button>
+  </form>
+  <p class="mut">Dados fiscais completos (inscrição estadual, regime tributário, certificado) serão pedidos quando ativarmos a emissão de nota fiscal.</p>
 </div>
-</div>{% endblock %}"""
+
+<div id="forn-catalogo" style="display:none">
+  <h3>Catálogo</h3>
+  <p class="mut">Em breve: importe sua planilha de produtos ou cadastre um a um, com preços.</p>
+</div>
+
+<div id="forn-pedidos" style="display:none">
+  <h3>Pedidos</h3>
+  <p class="mut">Em breve: os pedidos do dia, organizados por bairro, com a lista de separação.</p>
+</div>
+
+<div id="forn-financeiro" style="display:none">
+  <h3>Financeiro</h3>
+  <p class="mut">Em breve: seus ganhos, repasses e comissões.</p>
+</div>
+
+</div>
+
+<script>
+function fornAba(a){
+  var secoes = ['dados','catalogo','pedidos','financeiro'];
+  var btns = {dados:'fab-dados', catalogo:'fab-catalogo', pedidos:'fab-pedidos', financeiro:'fab-fin'};
+  secoes.forEach(function(s){
+    document.getElementById('forn-'+s).style.display = (s===a ? 'block' : 'none');
+    document.getElementById(btns[s]).className = 'aba' + (s===a ? ' on' : '');
+  });
+}
+</script>
+{% endblock %}"""
 
 _SENHA = """{% extends "base" %}{% block conteudo %}
 <div class="card"><h1>Alterar senha</h1>

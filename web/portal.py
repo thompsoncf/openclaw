@@ -69,7 +69,7 @@ def conta_logada(request: Request):
     with pool.connection() as c:
         row = c.execute(
             "select id, tipo, nome, email, plano, status, vencimento, cidade, "
-            "eh_fornecedor, fornecedor_slug from contas where id = %s",
+            "eh_fornecedor, fornecedor_slug, eh_assinante_cesta from contas where id = %s",
             (cid,),
         ).fetchone()
     return row
@@ -212,7 +212,14 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
 .hist-itens{padding:.2rem .2rem .6rem 1rem;font-size:13px;color:#a8a8a3;line-height:1.7}
 </style></head><body>
 <div class="topo"><span class="logo">Zaq</span><span>
-{% if logado %}<a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/painel/compras">Compras</a>{% if conta and conta[8] %}<a href="/painel/fornecedor">👨‍🌾 Fornecedor</a>{% endif %}<a href="/sair">Sair</a>
+{% if logado %}
+  {% if conta and conta[10] %}
+    <!-- Assinante de cesta: menu simples (só cestas) -->
+    <a href="/painel/assinaturas">🧺 Minhas cestas</a><a href="/sair">Sair</a>
+  {% else %}
+    <!-- Cliente do app / Fornecedor: menu completo -->
+    <a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/painel/compras">Compras</a>{% if conta and conta[8] %}<a href="/painel/fornecedor">👨‍🌾 Fornecedor</a>{% endif %}<a href="/sair">Sair</a>
+  {% endif %}
 {% else %}<a href="/login">Entrar</a><a href="/cadastro">Criar conta</a>{% endif %}
 </span></div>
 {% block conteudo %}{% endblock %}
@@ -1642,17 +1649,42 @@ _LOJA = """{% extends "base" %}{% block conteudo %}
 
 _LOJA_CONFIRMAR_NOVO = """{% extends "base" %}{% block conteudo %}
 <div class="card larga"><h2>Confirme sua assinatura</h2>
-<p class="mut">Você já tem conta? <a href="/login" style="color:#5dcaa5">Faça login</a></p>
+<p class="mut">Já tem conta? <a href="/login" style="color:#5dcaa5">Faça login aqui</a></p>
+
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-top:1.5rem">
-<div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1.5rem">
-<h4 style="margin-top:0">Criar conta nova</h4>
+<!-- OPÇÃO 1: Só a cesta (grátis) — em destaque -->
+<div style="background:linear-gradient(135deg,#1d4620 0%,#0a2e15 100%);border:2px solid #5dcaa5;border-radius:8px;padding:1.5rem;position:relative">
+<div style="position:absolute;top:.6rem;right:.8rem;background:#1d9e75;color:#fff;padding:.2rem .6rem;border-radius:4px;font-size:.75rem;font-weight:600">RECOMENDADO</div>
+<h4 style="margin:0 0 .5rem 0;color:#5dcaa5">🧺 Só quero a cesta</h4>
+<p class="mut" style="margin:0 0 1rem 0;font-size:.85rem">Crie uma conta grátis e comece a assinar sua cesta esta semana. Sem cobranças.</p>
 <form method="post" action="/cadastro">
   <input type="hidden" name="next" value="/f/{{ slug }}/confirmar">
-  <label>Email</label><input name="email" type="email" required placeholder="seu@email.com" style="width:100%;margin-bottom:.8rem">
-  <label>Senha</label><input name="senha" type="password" required placeholder="mínimo 8 caracteres" style="width:100%;margin-bottom:.8rem">
-  <label>CEP</label><input name="cep" required placeholder="12345-678" style="width:100%;margin-bottom:.8rem">
+  <input type="hidden" name="plano" value="cesta">
+  <label style="color:#fff">Email</label><input name="email" type="email" required placeholder="seu@email.com" style="width:100%;margin-bottom:.6rem;background:#0a0a0a;border:1px solid #2a2a2b;color:#fff;padding:.4rem;border-radius:4px">
+  <label style="color:#fff">Senha</label><input name="senha" type="password" required placeholder="mínimo 8 caracteres" style="width:100%;margin-bottom:.6rem;background:#0a0a0a;border:1px solid #2a2a2b;color:#fff;padding:.4rem;border-radius:4px">
+  <label style="color:#fff">CEP</label><input name="cep" required placeholder="12345-678" style="width:100%;margin-bottom:.6rem;background:#0a0a0a;border:1px solid #2a2a2b;color:#fff;padding:.4rem;border-radius:4px">
+  <label style="color:#fff">Endereço</label><input name="endereco" required placeholder="Rua X, nº 123" style="width:100%;margin-bottom:1rem;background:#0a0a0a;border:1px solid #2a2a2b;color:#fff;padding:.4rem;border-radius:4px">
+  <button style="background:#1d9e75;color:#fff;padding:.6rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:600;font-size:.95rem">✓ Criar conta grátis</button>
+</form>
+</div>
+
+<!-- OPÇÃO 2: Quero o app também (com plano) -->
+<div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1.5rem">
+<h4 style="margin-top:0">💰 Quero usar o app também</h4>
+<p class="mut" style="font-size:.85rem">Cesta + controle financeiro. Escolha um plano pago do app (opcional depois).</p>
+<form method="post" action="/cadastro">
+  <input type="hidden" name="next" value="/f/{{ slug }}/confirmar">
+  <label>Email</label><input name="email" type="email" required placeholder="seu@email.com" style="width:100%;margin-bottom:.6rem">
+  <label>Senha</label><input name="senha" type="password" required placeholder="mínimo 8 caracteres" style="width:100%;margin-bottom:.6rem">
+  <label>CEP</label><input name="cep" required placeholder="12345-678" style="width:100%;margin-bottom:.6rem">
   <label>Endereço</label><input name="endereco" required placeholder="Rua X, nº 123" style="width:100%;margin-bottom:.8rem">
-  <button style="background:#1d9e75;color:#fff;padding:.6rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:500">Criar e assinar</button>
+  <label>Plano do app (opcional)</label>
+  <select name="plano" style="width:100%;margin-bottom:1rem">
+    <option value="cesta">Grátis (só cesta)</option>
+    <option value="pro">Pro — R$ 29/mês</option>
+    <option value="premium">Premium — R$ 79/mês</option>
+  </select>
+  <button style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;padding:.6rem 1rem;border-radius:6px;cursor:pointer;width:100%;font-weight:500">Criar conta</button>
 </form>
 </div>
 </div>
@@ -1779,16 +1811,27 @@ def cadastro_form(request: Request):
 
 @router.post("/cadastro", response_class=HTMLResponse)
 def cadastro_envia(request: Request, background: BackgroundTasks,
-                   plano: str = Form(...), nome: str = Form(...),
+                   plano: str = Form("cesta"), nome: str = Form(...),
                    email: str = Form(...), senha: str = Form(...),
                    documento: str = Form(""), whatsapp: str = Form(...),
                    cep: str = Form("")):
     pool = get_pool()
     email = email.strip().lower()
     zap = _normalizar_zap(whatsapp)
-    planos_ok = {p[0]: p for p in _planos()}
-    if plano not in planos_ok:
-        return _render("cadastro", request, planos=_planos(), erro="Plano invalido.")
+
+    # Validar plano: "cesta" é a opção grátis (assinante de cesta),
+    # outros planos vêm de _planos()
+    eh_cesta = (plano == "cesta")
+    if not eh_cesta:
+        planos_ok = {p[0]: p for p in _planos()}
+        if plano not in planos_ok:
+            return _render("cadastro", request, planos=_planos(), erro="Plano inválido.")
+        tipo = planos_ok[plano][2]
+        plano_gravar = plano
+    else:
+        tipo = "cliente"
+        plano_gravar = None
+
     with pool.connection() as c:
         ja = c.execute("select 1 from contas where lower(email)=%s", (email,)).fetchone()
         zap_ja = c.execute("select 1 from membros where whatsapp_id=%s", (zap,)).fetchone()
@@ -1799,7 +1842,6 @@ def cadastro_envia(request: Request, background: BackgroundTasks,
         return _render("cadastro", request, planos=_planos(),
                        erro="Esse WhatsApp ja esta cadastrado em outra conta.")
 
-    tipo = planos_ok[plano][2]
     doc = "".join(ch for ch in documento if ch.isdigit()) or None
     from finance import cidades as _cid
     from finance import cep as _cep
@@ -1808,11 +1850,11 @@ def cadastro_envia(request: Request, background: BackgroundTasks,
 
     # FIX 1: trava de email único (captura unique violation)
     try:
-        conta_id = ct.criar_conta(pool, tipo, nome.strip(), plano=plano, documento=doc,
+        conta_id = ct.criar_conta(pool, tipo, nome.strip(), plano=plano_gravar, documento=doc,
                                   cidade=_cid.valida(regiao))  # trial 7d; CEP->regiao
         with pool.connection() as c:
-            c.execute("update contas set email=%s, senha_hash=%s where id=%s",
-                      (email, hash_senha(senha), conta_id))
+            c.execute("update contas set email=%s, senha_hash=%s, eh_assinante_cesta=%s where id=%s",
+                      (email, hash_senha(senha), eh_cesta, conta_id))
             c.commit()
     except Exception as e:  # captura violação de unique constraint
         if "idx_contas_email_unico" in str(e) or "unique" in str(e).lower():
@@ -1896,6 +1938,9 @@ def painel(request: Request):
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
+    # Assinante de cesta: home dele é a cesta, não o painel financeiro
+    if conta[10]:  # eh_assinante_cesta
+        return RedirectResponse("/painel/assinaturas", status_code=303)
     pool = get_pool()
     with pool.connection() as c:
         membros = c.execute(

@@ -1836,7 +1836,7 @@ def cadastro_envia(request: Request, background: BackgroundTasks,
         tipo = planos_ok[plano][2]
         plano_gravar = plano
     else:
-        tipo = "cliente"
+        tipo = "pf"  # assinante de cesta é pessoa física; a flag eh_assinante_cesta marca o papel
         plano_gravar = None
 
     with pool.connection() as c:

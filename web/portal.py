@@ -410,6 +410,18 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
     <button>Salvar dados</button>
   </form>
   <p class="mut">Dados fiscais completos (inscrição estadual, regime, certificado) serão pedidos quando ativarmos a emissão de nota.</p>
+
+  <hr style="margin:1.5rem 0;border:none;border-top:1px solid #2a2a2b">
+  <h4 style="margin-top:0">⚙️ Configuração de margem</h4>
+  <p class="mut">Define a folga de custo para que você tenha margem pra perda, comissão e lucro. A cesta sempre respeita esse limite.</p>
+  <form method="post" action="/painel/fornecedor/margem-alvo" style="display:flex;gap:.5rem;align-items:flex-end">
+    <div style="flex:1">
+      <label>Margem alvo (%)</label>
+      <input name="margem_alvo" type="number" min="0" max="100" value="{{ margem_alvo }}" placeholder="60" style="width:100%">
+      <small class="mut" style="display:block;margin-top:.3rem">Até {{ margem_alvo }}% do preço da cesta pode ser custo. Ex: 60% = você garante 40% de folga.</small>
+    </div>
+    <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;font-weight:500">Salvar</button>
+  </form>
 </div>
 
 <!-- SEÇÃO: Catálogo -->

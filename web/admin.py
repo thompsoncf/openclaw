@@ -112,6 +112,7 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
 <td>
 <form class="inline" method="post" action="/admin/conta/{{ c.id }}/ativar"><button>+30d</button></form>
 <form class="inline" method="post" action="/admin/conta/{{ c.id }}/suspender"><button class="warn">Suspender</button></form>
+{% if c.tipo == 'pj' and not c.eh_fornecedor %}<details style="display:inline"><summary>👨‍🌾 Fornecedor</summary><form method="post" action="/admin/conta/{{ c.id }}/fornecedor" style="display:flex; gap:4px; align-items:center; margin-top:4px"><select name="nicho_id" required><option value="">Nicho</option><option value="1">Hortifruti</option></select><input type="number" name="comissao" step="0.01" placeholder="% comissao" style="width:80px" required><input type="text" name="wallet" placeholder="Wallet ID" required><button>Marcar fornecedor</button></form></details>{% elif c.eh_fornecedor %}<span class="tag ativa">👨‍🌾 Fornecedor</span>{% endif %}
 </td></tr>{% endfor %}
 </table></div>
 
@@ -396,7 +397,7 @@ def admin_home(request: Request, busca: str = ""):
                where ct.status in ('ativa','trial')""").fetchone()[0]
 
         sql = """select ct.id, ct.nome, ct.email, ct.tipo, ct.plano, ct.status, ct.vencimento,
-                        ct.limite_mensagens_dia, ct.limite_cupons_dia,
+                        ct.limite_mensagens_dia, ct.limite_cupons_dia, ct.eh_fornecedor,
                         (select count(*) from membros m where m.conta_id = ct.id and m.ativo) as membros,
                         coalesce((select mensagens from uso_diario u
                                   where u.conta_id = ct.id and u.dia = current_date),0) as msg_hoje,
@@ -415,7 +416,7 @@ def admin_home(request: Request, busca: str = ""):
             termo = f"%{busca.strip()}%"; params = [termo, termo, termo]
         sql += " order by ct.id desc limit 200"
         cols = ["id", "nome", "email", "tipo", "plano", "status", "vencimento",
-                "limite_mensagens_dia", "limite_cupons_dia", "membros",
+                "limite_mensagens_dia", "limite_cupons_dia", "eh_fornecedor", "membros",
                 "msg_hoje", "cup_hoje", "msg_mes", "cup_mes"]
         contas = [dict(zip(cols, r)) for r in c.execute(sql, params).fetchall()]
 
@@ -459,6 +460,39 @@ def admin_ativar(request: Request, conta_id: int):
     ct.ativar(pool, conta_id, dias=30)
     ct.registrar_evento(pool, conta_id, "admin_ativou", f"por admin {adm[0]}")
     request.session["admin_aviso"] = f"Conta {conta_id} ativada por mais 30 dias."
+    return RedirectResponse("/admin", status_code=303)
+
+
+@router.post("/admin/conta/{conta_id}/fornecedor")
+def admin_fornecedor(request: Request, conta_id: int,
+                     nicho_id: int = Form(...),
+                     comissao: float = Form(...),
+                     wallet: str = Form(...)):
+    adm = _admin(request)
+    if adm is None:
+        return _NEGADO
+    pool = get_pool()
+    with pool.connection() as c:
+        # Pega o nome da conta pra gerar o slug
+        conta = c.execute("select nome, tipo from contas where id=%s", (conta_id,)).fetchone()
+        if not conta:
+            request.session["admin_aviso"] = f"Conta {conta_id} não encontrada."
+            return RedirectResponse("/admin", status_code=303)
+        # Verifica se é PJ
+        if conta[1] != 'pj':
+            request.session["admin_aviso"] = f"Apenas contas PJ podem ser fornecedores."
+            return RedirectResponse("/admin", status_code=303)
+        # Gera slug a partir do nome (substitui espaços por hífens, minúscula)
+        slug = conta[0].lower().replace(' ', '-').replace('_', '-')
+        slug = ''.join(c for c in slug if c.isalnum() or c == '-')
+        # Atualiza a conta
+        c.execute("""update contas set eh_fornecedor=true, nicho_id=%s, comissao_pct=%s,
+                     asaas_wallet_id=%s, fornecedor_slug=%s where id=%s""",
+                  (nicho_id, comissao, wallet, slug, conta_id))
+        c.commit()
+    ct.registrar_evento(pool, conta_id, "tornou_fornecedor",
+                       f"nicho={nicho_id}, comissao={comissao}%, wallet={wallet}, slug={slug}")
+    request.session["admin_aviso"] = f"Conta {conta_id} marcada como fornecedor (slug: {slug})."
     return RedirectResponse("/admin", status_code=303)
 
 

@@ -1441,8 +1441,56 @@ function avisarTerminei(){
 </script>
 {% endblock %}"""
 
+_COMPRA_REVISAR = """{% extends "base" %}{% block conteudo %}
+<div class="card larga"><a href="/painel/fornecedor" style="color:#5dcaa5;display:inline-block;margin-bottom:1rem">← voltar</a>
+<h2 style="margin-top:0">🛒 Compra #{{ compra.id }}</h2>
+<p class="mut">Origem: <strong>{{ compra.origem_nome or '-' }}</strong> · {{ compra.data }} · status: <strong>{{ compra.status }}</strong></p>
+{% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
+{% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+{% if compra.status == 'rascunho' %}
+<div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1.2rem;margin:1.5rem 0">
+<h4 style="margin-top:0">Adicionar item</h4>
+{% if produtos %}
+<form method="post" action="/painel/fornecedor/compras/{{ compra.id }}/item" style="display:grid;gap:1rem">
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+<div><label>Produto</label><select name="produto_id" required style="width:100%"><option value="">Selecione um produto</option>
+{% for p in produtos %}<option value="{{ p.id }}">{{ p.nome }} ({{ p.unidade }})</option>{% endfor %}
+</select></div>
+<div><label>Quantidade</label><input name="quantidade" type="number" step="0.001" required placeholder="50"></div>
+</div>
+<div><label>Custo unitário (R$)</label><input name="custo_unit" placeholder="4,00" required></div>
+<button style="background:#1d9e75;color:#fff;padding:.6rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:500">Adicionar item</button>
+</form>
+{% else %}
+<p class="mut">Você ainda não tem produtos no catálogo. <a href="/painel/fornecedor" style="color:#5dcaa5">Crie um produto</a> primeiro.</p>
+{% endif %}
+</div>
+{% endif %}
+<h4>Itens da compra</h4>
+{% if itens %}
+<table style="width:100%;border-collapse:collapse;font-size:.9rem;margin-bottom:1.5rem">
+<tr style="border-bottom:2px solid #2a2a2b;color:#888"><th style="text-align:left;padding:.6rem;font-weight:500">Produto</th><th style="text-align:center;padding:.6rem;font-weight:500">Qtd</th><th style="text-align:right;padding:.6rem;font-weight:500">Custo un.</th><th style="text-align:right;padding:.6rem;font-weight:500">Subtotal</th></tr>
+{% for i in itens %}
+<tr style="border-top:1px solid #2a2a2b"><td style="padding:.6rem">{{ i.produto_nome or i.descricao }}</td><td style="text-align:center;padding:.6rem">{{ i.quantidade }} {{ i.unidade }}</td><td style="text-align:right;padding:.6rem">R$ {{ "%.2f"|format(i.custo_unit_centavos/100) }}</td><td style="text-align:right;padding:.6rem;font-weight:500">R$ {{ "%.2f"|format(i.quantidade * i.custo_unit_centavos/100) }}</td></tr>
+{% endfor %}
+<tr style="border-top:2px solid #2a2a2b;background:#2a2a2b"><td colspan="3" style="text-align:right;padding:.6rem;font-weight:600">Total:</td><td style="text-align:right;padding:.6rem;font-weight:600">R$ {{ "%.2f"|format(compra.total_centavos/100) }}</td></tr>
+</table>
+{% if compra.status == 'rascunho' %}
+<form method="post" action="/painel/fornecedor/compras/{{ compra.id }}/confirmar">
+<button style="background:#1d9e75;color:#fff;padding:.7rem 1rem;border:0;border-radius:8px;cursor:pointer;width:100%;font-weight:600;font-size:1rem;margin-bottom:1rem">✓ Confirmar compra (dar entrada no estoque)</button>
+</form>
+<p class="mut" style="font-size:.85rem;margin:0">Ao confirmar, os itens dão entrada no estoque e o custo médio é recalculado. Não dá pra editar depois.</p>
+{% else %}
+<div style="background:#2a3a2a;border:1px solid #1d9e75;color:#5dcaa5;padding:.8rem;border-radius:6px;text-align:center">✓ Compra confirmada em {{ compra.data }}</div>
+{% endif %}
+{% else %}
+<p class="mut" style="background:#2a2a2b;padding:1rem;border-radius:6px">Nenhum item ainda. Adicione acima.</p>
+{% endif %}
+</div>
+{% endblock %}"""
+
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 from finance.models import canonizar_categoria, categorias_de

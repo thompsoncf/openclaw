@@ -2267,16 +2267,18 @@ def painel_ativar_app_envia(request: Request, plano: str = Form(...)):
         return RedirectResponse("/painel/ativar-app", status_code=303)
     pool = get_pool()
     with pool.connection() as c:
-        # Muda plano + status aguardando_pagamento (Asaas ativa de fato na Fase 5)
+        # Muda plano + limites (status fica trial até Asaas confirmar na Fase 5)
         c.execute(
-            """update contas set plano=%s, status='aguardando_pagamento',
+            """update contas set plano=%s,
                    limite_mensagens_dia=50, limite_cupons_dia=5 where id=%s""",
             (plano, conta[0]),
         )
         c.commit()
-    ct.registrar_evento(pool, conta[0], "app_ativado", f"plano={plano}")
-    request.session["aviso"] = ("App financeiro ativado! Assim que o pagamento "
-                                "confirmar, você terá acesso completo.")
+    # Registra o upgrade (pra auditoria e funil)
+    ct.registrar_evento(pool, conta[0], "upgrade_app",
+                       f"plano={plano} (aguardando pagamento Asaas)")
+    request.session["aviso"] = ("Plano escolhido! Assim que o pagamento for ativado, "
+                                "você terá acesso completo ao app financeiro.")
     return RedirectResponse("/painel/meu-plano", status_code=303)
 
 

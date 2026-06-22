@@ -570,7 +570,7 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
             <div class="mut" style="font-size:.85rem;margin-top:.3rem">Total: <strong>R$ {{ "%.2f" | format(c.total_centavos / 100) }}</strong> | Origem: {{ c.origem_nome or '-' }} | Fonte: {{ c.fonte }}</div>
           </div>
           <div style="display:flex;gap:.4rem">
-            <button type="button" onclick="fornAbrirCompra({{ c.id }})" style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;border-radius:4px;padding:.3rem .6rem;cursor:pointer;font-size:.85rem">revisar</button>
+            <a href="/painel/fornecedor/compras/{{ c.id }}" style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;border-radius:4px;padding:.3rem .6rem;cursor:pointer;font-size:.85rem;text-decoration:none;display:inline-block">revisar</a>
           </div>
         </div>
       </div>
@@ -714,9 +714,6 @@ function fornShowNovaOrigemCompra(){
 }
 function fornHideNovaOrigemCompra(){
   document.getElementById('forn-nova-origem-compra').style.display = 'none';
-}
-function fornAbrirCompra(compra_id){
-  alert('Revisar compra #' + compra_id + ' — em breve');
 }
 // IMPORTAÇÃO
 function fornShowImportarPlanilha(){
@@ -1787,6 +1784,82 @@ def painel_compras_origem(request: Request,
     try:
         cat_mod.criar_origem(get_pool(), conta[0], nome, contato)
         request.session["aviso"] = f"Origem '{nome}' criada!"
+    except Exception as e:
+        request.session["erro"] = f"Erro: {str(e)}"
+    return RedirectResponse("/painel/fornecedor", status_code=303)
+
+
+@router.get("/painel/fornecedor/compras/{compra_id}", response_class=HTMLResponse)
+def painel_compra_revisar(request: Request, compra_id: int):
+    from finance import catalogo as cat_mod
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return RedirectResponse("/painel/fornecedor", status_code=303)
+    pool = get_pool()
+    try:
+        itens = cat_mod.listar_itens_compra(pool, conta[0], compra_id)
+    except Exception:
+        request.session["erro"] = "Compra não encontrada."
+        return RedirectResponse("/painel/fornecedor", status_code=303)
+    produtos = cat_mod.listar_produtos(pool, conta[0])
+    with pool.connection() as c:
+        cab = c.execute(
+            """select id, data_compra, total_centavos, status,
+                      (select nome from origem_compra where id = origem_id)
+               from compras_fornecedor where id=%s and fornecedor_id=%s""",
+            (compra_id, conta[0]),
+        ).fetchone()
+    if cab is None:
+        request.session["erro"] = "Compra não encontrada."
+        return RedirectResponse("/painel/fornecedor", status_code=303)
+    compra = {"id": cab[0], "data": cab[1], "total_centavos": cab[2],
+              "status": cab[3], "origem_nome": cab[4]}
+    return _render("compra_revisar", request, conta=conta, compra=compra,
+                   itens=itens, produtos=produtos,
+                   erro=request.session.pop("erro", None),
+                   aviso=request.session.pop("aviso", None))
+
+
+@router.post("/painel/fornecedor/compras/{compra_id}/item")
+def painel_compra_add_item(request: Request, compra_id: int,
+                          produto_id: int = Form(...),
+                          quantidade: float = Form(...),
+                          custo_unit: str = Form(...)):
+    from finance import catalogo as cat_mod
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return RedirectResponse("/painel/fornecedor", status_code=303)
+    s = custo_unit.replace("R$", "").strip().replace(".", "").replace(",", ".") \
+        if "," in custo_unit else custo_unit.replace("R$", "").strip()
+    try:
+        custo_centavos = int(round(float(s) * 100))
+    except ValueError:
+        custo_centavos = 0
+    try:
+        prods = {p["id"]: p["nome"] for p in cat_mod.listar_produtos(get_pool(), conta[0])}
+        desc = prods.get(produto_id, "produto")
+        with get_pool().connection() as c:
+            urow = c.execute("select unidade from catalogo_produtos where id=%s", (produto_id,)).fetchone()
+        unidade = urow[0] if urow else "kg"
+        cat_mod.adicionar_item_compra(
+            get_pool(), conta[0], compra_id, desc, quantidade,
+            custo_centavos, unidade=unidade, produto_id=produto_id,
+        )
+        request.session["aviso"] = "Item adicionado."
+    except Exception as e:
+        request.session["erro"] = f"Erro: {str(e)}"
+    return RedirectResponse(f"/painel/fornecedor/compras/{compra_id}", status_code=303)
+
+
+@router.post("/painel/fornecedor/compras/{compra_id}/confirmar")
+def painel_compra_confirmar(request: Request, compra_id: int):
+    from finance import catalogo as cat_mod
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return RedirectResponse("/painel/fornecedor", status_code=303)
+    try:
+        r = cat_mod.confirmar_compra(get_pool(), conta[0], compra_id)
+        request.session["aviso"] = f"✓ Compra confirmada! {r['itens']} item(ns) deram entrada no estoque."
     except Exception as e:
         request.session["erro"] = f"Erro: {str(e)}"
     return RedirectResponse("/painel/fornecedor", status_code=303)

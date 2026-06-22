@@ -1719,6 +1719,16 @@ _PAINEL_ASSINATURAS = """{% extends "base" %}{% block conteudo %}
     <div style="flex:1">
       <strong>{{ a.tamanho_nome }}</strong> — <strong>R$ {{ "%.2f"|format(a.preco_centavos/100) }}</strong>
       <div class="mut" style="font-size:.85rem;margin-top:.3rem">De: {{ a.fornecedor_nome }} | Frequência: {{ a.frequencia }} | Status: <strong>{{ a.status }}</strong></div>
+      <!-- Status: aguardando pagamento -->
+      {% if a.status == 'aguardando_pagamento' %}
+      <div style="margin-top:.6rem;padding:.6rem;background:#2a2a2b;border-radius:4px;border-left:3px solid #ffa500">
+        <p class="mut" style="font-size:.85rem;margin:0 0 .4rem">⏳ Aguardando pagamento</p>
+        <a href="/painel/assinaturas/{{ a.id }}/pagar" style="display:inline-block;background:#5dcaa5;color:#0a0a0a;padding:.4rem .8rem;border-radius:4px;text-decoration:none;font-weight:600;font-size:.85rem;cursor:pointer">
+          Pagar agora →
+        </a>
+      </div>
+      {% endif %}
+
       <!-- Trocar tamanho (apenas se tem tamanhos disponíveis) -->
       {% if tamanhos_por_fornecedor.get(a.fornecedor_id) %}
       <form method="post" action="/painel/assinaturas/{{ a.id }}/trocar-tamanho" style="display:flex;gap:.5rem;margin-top:.6rem;align-items:end">
@@ -2316,6 +2326,51 @@ def painel_ativar_app_envia(request: Request, plano: str = Form(...)):
     request.session["aviso"] = ("Plano escolhido! Assim que o pagamento for ativado, "
                                 "você terá acesso completo ao app financeiro.")
     return RedirectResponse("/painel/meu-plano", status_code=303)
+
+
+@router.get("/painel/assinaturas/{assinatura_id}/pagar")
+def painel_assinatura_pagar(request: Request, assinatura_id: int):
+    """Redireciona pro link de pagamento da subscription do Asaas."""
+    from finance import asaas
+    pool = get_pool()
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+
+    # Confere que a assinatura é do cliente e pega o subscription_id
+    with pool.connection() as c:
+        a = c.execute(
+            """select asaas_subscription_id, preco_centavos from assinaturas
+               where id=%s and cliente_id=%s""",
+            (assinatura_id, conta[0]),
+        ).fetchone()
+    if a is None:
+        request.session["erro"] = "Assinatura não encontrada."
+        return RedirectResponse("/painel/assinaturas", status_code=303)
+
+    asaas_sub_id = a[0]
+    if not asaas_sub_id:
+        request.session["erro"] = "Pagamento ainda não foi gerado. Tente novamente em breve."
+        return RedirectResponse("/painel/assinaturas", status_code=303)
+
+    # Busca os dados da subscription no Asaas pra pegar o link de pagamento
+    try:
+        sub_data = asaas.obter_subscription(asaas_sub_id)
+        # Tenta pegar o link direto ou a 1ª cobrança pendente
+        url_pagamento = sub_data.get("url") or sub_data.get("link")
+        if not url_pagamento:
+            # Fallback: busca o 1º pagamento pendente da subscription
+            payments = asaas.listar_pagamentos_subscription(asaas_sub_id)
+            if payments:
+                url_pagamento = payments[0].get("url")
+        if url_pagamento:
+            return RedirectResponse(url_pagamento, status_code=303)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Asaas: erro ao pegar subscription {asaas_sub_id}: {e}")
+
+    request.session["erro"] = "Não foi possível gerar o link de pagamento."
+    return RedirectResponse("/painel/assinaturas", status_code=303)
 
 
 @router.post("/painel/assinaturas/{assinatura_id}/status")

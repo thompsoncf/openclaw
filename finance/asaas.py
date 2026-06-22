@@ -240,3 +240,17 @@ def cancelar_assinatura_recorrente(subscription_id: str) -> dict:
     if r.status_code >= 300:
         raise AsaasErro(f"Asaas {r.status_code} ao cancelar subscription: {r.text[:200]}")
     return r.json()
+
+
+def obter_subscription(subscription_id: str) -> dict:
+    """Busca os dados de uma subscription pelo id."""
+    return _get(f"/subscriptions/{subscription_id}")
+
+
+def listar_pagamentos_subscription(subscription_id: str) -> list[dict]:
+    """Lista os pagamentos de uma subscription (mostra as cobranças)."""
+    try:
+        data = _get(f"/subscriptions/{subscription_id}/payments")
+        return data.get("data", []) if isinstance(data, dict) else data
+    except AsaasErro:
+        return []

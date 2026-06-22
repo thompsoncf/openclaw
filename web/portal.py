@@ -379,6 +379,11 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
     <span class="fc-tit">Compras</span>
     <span class="fc-leg">O que você compra no CEASA — notas e entradas de estoque.</span>
   </button>
+  <button type="button" class="forn-card" onclick="fornAbrir('cestas')">
+    <span class="fc-ic">🧺</span>
+    <span class="fc-tit">Cestas</span>
+    <span class="fc-leg">Os tamanhos de cesta que seus clientes podem assinar.</span>
+  </button>
   <button type="button" class="forn-card" onclick="fornAbrir('pedidos')">
     <span class="fc-ic">📋</span>
     <span class="fc-tit">Pedidos</span>
@@ -618,6 +623,52 @@ window.PRODUTOS = {
     <p class="mut">Nenhuma compra ainda. Clique em "+ nova compra" pra começar.</p>
     {% endif %}
   </div>
+
+<!-- SEÇÃO: Cestas -->
+<div id="forn-cestas" class="forn-secao" style="display:none">
+  <button type="button" class="forn-voltar" onclick="fornVoltar()">← voltar</button>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+    <h3 style="margin:0">🧺 Tamanhos de cesta</h3>
+  </div>
+  <p class="mut">Defina os tamanhos que seus clientes podem assinar. O preço é FIXO — o que vai dentro varia conforme a estação e o estoque.</p>
+
+  <!-- lista dos tamanhos -->
+  {% if tamanhos %}
+  {% for t in tamanhos %}
+  <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1rem;margin-bottom:.6rem">
+    <strong>{{ t.nome }}</strong> · <strong>R$ {{ "%.2f"|format(t.preco_centavos/100) }}</strong>
+    <div class="mut" style="font-size:.85rem;margin-top:.3rem">
+      {{ t.qtd_frutas }} frutas · {{ t.qtd_legumes }} legumes · {{ t.qtd_verduras }} verduras · {{ t.qtd_temperos }} temperos ({{ t.total_porcoes }} porções)
+      {% if t.descricao %}<br>{{ t.descricao }}{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="mut">Nenhum tamanho ainda. Crie o primeiro (ex: Pequena, Média, Grande).</p>
+  {% endif %}
+
+  <!-- form criar tamanho -->
+  <div style="background:#2a2a2b;border-radius:6px;padding:1rem;margin-top:1rem">
+    <h4 style="margin-top:0">Novo tamanho</h4>
+    <form method="post" action="/painel/fornecedor/cestas/criar">
+      <label>Nome</label>
+      <input name="nome" placeholder="Pequena / Média / Grande" required style="width:100%">
+      <label>Preço fixo (R$)</label>
+      <input name="preco" placeholder="90,00" required style="width:100%">
+      <label>Porções de frutas</label>
+      <input name="qtd_frutas" type="number" value="0" style="width:100%">
+      <label>Porções de legumes</label>
+      <input name="qtd_legumes" type="number" value="0" style="width:100%">
+      <label>Porções de verduras</label>
+      <input name="qtd_verduras" type="number" value="0" style="width:100%">
+      <label>Porções de temperos</label>
+      <input name="qtd_temperos" type="number" value="0" style="width:100%">
+      <label>Descrição (opcional)</label>
+      <input name="descricao" placeholder="ideal pra 2 pessoas por semana" style="width:100%">
+      <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.8rem;width:100%;font-weight:500">Criar tamanho</button>
+    </form>
+  </div>
+</div>
 
   <!-- MODAL: Nova Compra -->
   <div id="forn-nova-compra" style="display:none;margin-top:2rem;padding:1.2rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px">
@@ -1735,7 +1786,10 @@ def painel_fornecedor(request: Request):
             (conta[0],),
         ).fetchall()
         compras_raw = [{"id": r[0], "data_compra": r[1], "total_centavos": r[2], "fonte": r[3], "status": r[4], "origem_nome": r[5]} for r in rows]
-    return _render("fornecedor", request, conta=conta, fiscal=fiscal, produtos=produtos, origens=origens, compras=compras_raw,
+    # Carrega tamanhos de cesta
+    from finance import cestas as cestas_mod
+    tamanhos = cestas_mod.listar_tamanhos(pool, conta[0], so_ativos=False)
+    return _render("fornecedor", request, conta=conta, fiscal=fiscal, produtos=produtos, origens=origens, compras=compras_raw, tamanhos=tamanhos,
                    erro=request.session.pop("erro", None),
                    aviso=request.session.pop("aviso", None))
 
@@ -1915,6 +1969,35 @@ def painel_compras_origem(request: Request,
     try:
         cat_mod.criar_origem(get_pool(), conta[0], nome, contato)
         request.session["aviso"] = f"Origem '{nome}' criada!"
+    except Exception as e:
+        request.session["erro"] = f"Erro: {str(e)}"
+    return RedirectResponse("/painel/fornecedor", status_code=303)
+
+
+@router.post("/painel/fornecedor/cestas/criar")
+def painel_cestas_criar(request: Request,
+                       nome: str = Form(...),
+                       preco: str = Form("0"),
+                       qtd_frutas: int = Form(0),
+                       qtd_legumes: int = Form(0),
+                       qtd_verduras: int = Form(0),
+                       qtd_temperos: int = Form(0),
+                       descricao: str = Form("")):
+    from finance import cestas as cestas_mod
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return RedirectResponse("/painel/fornecedor", status_code=303)
+    s = preco.replace("R$", "").strip()
+    s = s.replace(".", "").replace(",", ".") if "," in s else s
+    try:
+        preco_cent = int(round(float(s) * 100))
+    except ValueError:
+        preco_cent = 0
+    try:
+        cestas_mod.criar_tamanho(get_pool(), conta[0], nome, preco_cent,
+                                 qtd_frutas, qtd_legumes, qtd_verduras, qtd_temperos,
+                                 descricao or None)
+        request.session["aviso"] = "Tamanho de cesta criado."
     except Exception as e:
         request.session["erro"] = f"Erro: {str(e)}"
     return RedirectResponse("/painel/fornecedor", status_code=303)

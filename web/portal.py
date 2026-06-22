@@ -1680,13 +1680,33 @@ _LOJA_CONFIRMAR_NOVO = """{% extends "base" %}{% block conteudo %}
 
 _PAINEL_ASSINATURAS = """{% extends "base" %}{% block conteudo %}
 <div class="card larga"><h2>Minhas assinaturas</h2>
+{% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+{% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
 {% if assinaturas %}
 {% for a in assinaturas %}
 <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1rem;margin-bottom:.6rem">
   <div style="display:flex;justify-content:space-between;align-items:start">
-    <div>
+    <div style="flex:1">
       <strong>{{ a.tamanho_nome }}</strong> — <strong>R$ {{ "%.2f"|format(a.preco_centavos/100) }}</strong>
       <div class="mut" style="font-size:.85rem;margin-top:.3rem">De: {{ a.fornecedor_nome }} | Frequência: {{ a.frequencia }} | Status: <strong>{{ a.status }}</strong></div>
+      <!-- Trocar tamanho (apenas se tem tamanhos disponíveis) -->
+      {% if tamanhos_por_fornecedor.get(a.fornecedor_id) %}
+      <form method="post" action="/painel/assinaturas/{{ a.id }}/trocar-tamanho" style="display:flex;gap:.5rem;margin-top:.6rem;align-items:end">
+        <div style="flex:1">
+          <label style="font-size:.8rem;color:#888">Mudar tamanho:</label>
+          <select name="novo_tamanho_id" style="width:100%;padding:.4rem;border:1px solid #2a2a2b;border-radius:4px;background:#0a0a0a;color:#fff;font-size:.85rem">
+            <option value="">Escolher novo tamanho...</option>
+            {% for t in tamanhos_por_fornecedor[a.fornecedor_id] %}
+              {% if t.id != a.tamanho_id_atual %}
+              <option value="{{ t.id }}">{{ t.nome }} — R$ {{ "%.2f"|format(t.preco_centavos/100) }}</option>
+              {% endif %}
+            {% endfor %}
+          </select>
+        </div>
+        <button type="submit" style="background:#5dcaa5;color:#0a0a0a;border:0;padding:.4rem .8rem;border-radius:4px;cursor:pointer;font-weight:600;font-size:.85rem;white-space:nowrap">Trocar</button>
+      </form>
+      <p class="mut" style="font-size:.75rem;margin-top:.3rem">Muda a partir da próxima entrega.</p>
+      {% endif %}
     </div>
     <form method="post" action="/painel/assinaturas/{{ a.id }}/status" style="display:inline">
       <select name="novo_status" onchange="this.form.submit()" style="padding:.3rem;border:1px solid #2a2a2b;border-radius:4px;background:#0a0a0a;color:#fff;font-size:.85rem">
@@ -2059,13 +2079,42 @@ def _criar_assinatura_da_sessao(request, conta, slug):
 @router.get("/painel/assinaturas", response_class=HTMLResponse)
 def painel_assinaturas(request: Request):
     from finance import assinaturas as assin_mod
+    from finance import cestas as cestas_mod
+    pool = get_pool()
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
-    assinaturas = assin_mod.listar_assinaturas_cliente(get_pool(), conta[0])
+    assinaturas = assin_mod.listar_assinaturas_cliente(pool, conta[0])
+    # Monta dict de tamanhos disponíveis por fornecedor
+    tamanhos_por_fornecedor = {}
+    for a in assinaturas:
+        forn_id = a["fornecedor_id"]
+        if forn_id not in tamanhos_por_fornecedor:
+            tamanhos_por_fornecedor[forn_id] = cestas_mod.listar_tamanhos(pool, forn_id)
     return _render("painel_assinaturas", request, conta=conta, assinaturas=assinaturas,
+                   tamanhos_por_fornecedor=tamanhos_por_fornecedor,
                    erro=request.session.pop("erro", None),
                    aviso=request.session.pop("aviso", None))
+
+
+@router.post("/painel/assinaturas/{assinatura_id}/trocar-tamanho", response_class=HTMLResponse)
+def trocar_tamanho_assinatura(request: Request, assinatura_id: int,
+                              novo_tamanho_id: int = Form(...)):
+    from finance import assinaturas as assin_mod
+    pool = get_pool()
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    try:
+        resultado = assin_mod.trocar_tamanho(pool, conta[0], assinatura_id, novo_tamanho_id)
+        if resultado["ok"]:
+            preco = resultado["preco_centavos"] / 100
+            request.session["aviso"] = f"✓ Tamanho alterado! Nova cesta será R$ {preco:.2f} (a partir da próxima entrega)."
+        else:
+            request.session["erro"] = f"Erro: {resultado.get('erro', 'tamanho inválido')}"
+    except Exception as e:
+        request.session["erro"] = f"Erro: {str(e)}"
+    return RedirectResponse("/painel/assinaturas", status_code=303)
 
 
 @router.post("/painel/assinaturas/{assinatura_id}/status")

@@ -105,7 +105,7 @@ def listar_assinaturas_cliente(pool, cliente_id: int) -> list[dict]:
     with pool.connection() as c:
         rows = c.execute(
             """select a.id, a.fornecedor_id, ct.nome, a.frequencia, a.status,
-                      a.preco_centavos, co.nome
+                      a.preco_centavos, co.nome, a.tamanho_id
                from assinaturas a
                join cesta_tamanhos ct on ct.id = a.tamanho_id
                join contas co on co.id = a.fornecedor_id
@@ -117,7 +117,7 @@ def listar_assinaturas_cliente(pool, cliente_id: int) -> list[dict]:
         {
             "id": r[0], "fornecedor_id": r[1], "tamanho_nome": r[2],
             "frequencia": r[3], "status": r[4], "preco_centavos": int(r[5] or 0),
-            "fornecedor_nome": r[6],
+            "fornecedor_nome": r[6], "tamanho_id_atual": r[7],
         }
         for r in rows
     ]
@@ -191,3 +191,39 @@ def ativar_pos_pagamento(pool, assinatura_id: int) -> bool:
         )
         c.commit()
         return cur.rowcount > 0
+
+
+def trocar_tamanho(pool, cliente_id: int, assinatura_id: int, novo_tamanho_id: int) -> dict:
+    """Troca o tamanho da assinatura (ex: Pequena -> Grande).
+
+    Vale a partir da PRÓXIMA entrega — não mexe em cesta já montada desta semana.
+    Valida que a assinatura é do cliente e que o tamanho é do mesmo fornecedor.
+    Atualiza o preço (snapshot) pro novo tamanho. Retorna {ok, preco_centavos} ou {ok: False, erro}.
+    """
+    with pool.connection() as c:
+        # confere que a assinatura é do cliente e pega o fornecedor
+        a = c.execute(
+            """select fornecedor_id from assinaturas
+               where id = %s and cliente_id = %s""",
+            (assinatura_id, cliente_id),
+        ).fetchone()
+        if a is None:
+            return {"ok": False, "erro": "assinatura não encontrada"}
+        fornecedor_id = a[0]
+        # confere que o novo tamanho é do mesmo fornecedor e pega o preço
+        t = c.execute(
+            """select preco_centavos from cesta_tamanhos
+               where id = %s and fornecedor_id = %s and ativo""",
+            (novo_tamanho_id, fornecedor_id),
+        ).fetchone()
+        if t is None:
+            return {"ok": False, "erro": "tamanho inválido para este fornecedor"}
+        novo_preco = int(t[0] or 0)
+        # atualiza o tamanho e o preço (vale na próxima; cesta_semana já montada não muda)
+        c.execute(
+            """update assinaturas set tamanho_id = %s, preco_centavos = %s
+               where id = %s and cliente_id = %s""",
+            (novo_tamanho_id, novo_preco, assinatura_id, cliente_id),
+        )
+        c.commit()
+    return {"ok": True, "preco_centavos": novo_preco}

@@ -214,8 +214,8 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
 <div class="topo"><span class="logo">Zaq</span><span>
 {% if logado %}
   {% if conta and conta[10] %}
-    <!-- Assinante de cesta: menu simples (só cestas) -->
-    <a href="/painel/assinaturas">🧺 Minhas cestas</a><a href="/sair">Sair</a>
+    <!-- Assinante de cesta: menu com cestas + plano -->
+    <a href="/painel/assinaturas">🧺 Minhas cestas</a><a href="/painel/meu-plano">Meu plano</a><a href="/sair">Sair</a>
   {% else %}
     <!-- Cliente do app / Fornecedor: menu completo -->
     <a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/painel/compras">Compras</a>{% if tem_cesta %}<a href="/painel/assinaturas">🧺 Minhas cestas</a>{% endif %}{% if conta and conta[8] %}<a href="/painel/fornecedor">👨‍🌾 Fornecedor</a>{% endif %}<a href="/sair">Sair</a>
@@ -1725,6 +1725,44 @@ _PAINEL_ASSINATURAS = """{% extends "base" %}{% block conteudo %}
 </div>
 {% endblock %}"""
 
+_MEU_PLANO = """{% extends "base" %}{% block conteudo %}
+<div class="card larga"><h2>Meu plano</h2>
+{% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
+{% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+{% if assinaturas %}
+{% for a in assinaturas %}
+<div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1rem;margin-bottom:.8rem">
+  <strong>{{ a.tamanho_nome }}</strong> — R$ {{ "%.2f"|format(a.preco_centavos/100) }}
+  <div class="mut" style="font-size:.85rem">De: {{ a.fornecedor_nome }} · {{ a.frequencia }} · {{ a.status }}</div>
+  <!-- Trocar de tamanho -->
+  <form method="post" action="/painel/meu-plano/trocar" style="margin-top:.6rem">
+    <input type="hidden" name="assinatura_id" value="{{ a.id }}">
+    <label style="font-size:.85rem">Trocar tamanho (vale na próxima entrega):</label>
+    <select name="novo_tamanho_id" style="width:100%;margin:.3rem 0;padding:.4rem;border:1px solid #2a2a2b;border-radius:4px;background:#0a0a0a;color:#fff">
+      <option value="">Escolher novo tamanho...</option>
+      {% for t in tamanhos_por_forn[a.fornecedor_id] %}
+        {% if t.id != a.tamanho_id_atual %}
+        <option value="{{ t.id }}">{{ t.nome }} — R$ {{ "%.2f"|format(t.preco_centavos/100) }}</option>
+        {% endif %}
+      {% endfor %}
+    </select>
+    <button type="submit" style="background:#1d9e75;color:#fff;padding:.4rem .8rem;border:0;border-radius:6px;cursor:pointer;font-size:.85rem;margin-top:.3rem">Trocar tamanho</button>
+  </form>
+</div>
+{% endfor %}
+{% else %}
+<p class="mut">Você ainda não tem uma assinatura. <a href="/painel/assinaturas" style="color:#5dcaa5">Ver fornecedores</a></p>
+{% endif %}
+<!-- UPSELL discreto do app financeiro -->
+<div style="background:#161617;border:1px solid #2a2a2b;border-radius:8px;padding:1rem;margin-top:1.5rem">
+  <p style="margin:0;font-size:.88rem;color:#a8a8a3">
+    💡 Sabia que o Zaq também controla seus gastos, lê cupom fiscal e organiza sua lista
+    de compras? <a href="/cadastro" style="color:#5dcaa5">Conheça o app financeiro →</a>
+  </p>
+</div>
+</div>
+{% endblock %}"""
+
 _CESTA_AJUSTE = """{% extends "base" %}{% block conteudo %}
 <div class="card larga"><h2>🧺 Sua cesta da semana</h2>
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
@@ -1793,7 +1831,7 @@ _CESTA_AJUSTE = """{% extends "base" %}{% block conteudo %}
 {% endblock %}"""
 
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "cesta_ajuste": _CESTA_AJUSTE,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "cesta_ajuste": _CESTA_AJUSTE,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 from finance.models import canonizar_categoria, categorias_de
@@ -2115,6 +2153,47 @@ def trocar_tamanho_assinatura(request: Request, assinatura_id: int,
     except Exception as e:
         request.session["erro"] = f"Erro: {str(e)}"
     return RedirectResponse("/painel/assinaturas", status_code=303)
+
+
+@router.get("/painel/meu-plano", response_class=HTMLResponse)
+def painel_meu_plano(request: Request):
+    from finance import assinaturas as assin_mod
+    from finance import cestas as cestas_mod
+    pool = get_pool()
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    assinaturas = assin_mod.listar_assinaturas_cliente(pool, conta[0])
+    # Monta dict de tamanhos disponíveis por fornecedor
+    tamanhos_por_forn = {}
+    for a in assinaturas:
+        fid = a["fornecedor_id"]
+        if fid not in tamanhos_por_forn:
+            tamanhos_por_forn[fid] = cestas_mod.listar_tamanhos(pool, fid, so_ativos=True)
+    return _render("meu_plano", request, conta=conta, assinaturas=assinaturas,
+                   tamanhos_por_forn=tamanhos_por_forn,
+                   aviso=request.session.pop("aviso", None),
+                   erro=request.session.pop("erro", None))
+
+
+@router.post("/painel/meu-plano/trocar", response_class=HTMLResponse)
+def painel_meu_plano_trocar(request: Request,
+                            assinatura_id: int = Form(...),
+                            novo_tamanho_id: int = Form(...)):
+    from finance import assinaturas as assin_mod
+    pool = get_pool()
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    try:
+        r = assin_mod.trocar_tamanho(pool, conta[0], assinatura_id, novo_tamanho_id)
+        if r["ok"]:
+            request.session["aviso"] = "Plano alterado! Vale a partir da próxima entrega."
+        else:
+            request.session["erro"] = r.get("erro", "Não foi possível trocar.")
+    except Exception as e:
+        request.session["erro"] = f"Erro: {str(e)}"
+    return RedirectResponse("/painel/meu-plano", status_code=303)
 
 
 @router.post("/painel/assinaturas/{assinatura_id}/status")

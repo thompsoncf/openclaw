@@ -1678,6 +1678,36 @@ _LOJA_CONFIRMAR_NOVO = """{% extends "base" %}{% block conteudo %}
 </div>
 {% endblock %}"""
 
+_ATIVAR_APP = """{% extends "base" %}{% block conteudo %}
+<div class="card" style="max-width:480px;margin:0 auto">
+  <h2>Ative o app financeiro 💰</h2>
+  {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
+  <p class="mut" style="font-size:.9rem;line-height:1.6">
+    Além da sua cesta, o Zaq controla seus gastos, lê cupom fiscal pela foto e
+    organiza sua lista de compras — tudo pelo WhatsApp ou Telegram.
+  </p>
+  <ul style="font-size:.88rem;color:#c5d8ce;line-height:1.8;margin:.5rem 0 1rem">
+    <li>📊 Controle de gastos automático</li>
+    <li>🧾 Leitura de cupom fiscal por foto</li>
+    <li>🛒 Lista de compras inteligente</li>
+  </ul>
+  <form method="post" action="/painel/ativar-app">
+    <label>Escolha seu plano:</label>
+    <select name="plano" style="width:100%;margin:.4rem 0 1rem;padding:.4rem;border:1px solid #2a2a2b;border-radius:4px;background:#0a0a0a;color:#fff">
+      {% for p in planos %}
+      <option value="{{ p[0] }}">{{ p[1] }} — R$ {{ "%.2f"|format(p[3]/100) }}/mês</option>
+      {% endfor %}
+    </select>
+    <button type="submit" style="background:#534AB7;color:#fff;padding:.7rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:600;font-size:.95rem">
+      Ativar app financeiro
+    </button>
+  </form>
+  <p class="mut" style="font-size:.8rem;text-align:center;margin-top:.8rem">
+    Você continua com sua cesta normalmente. O app é um extra.
+  </p>
+</div>
+{% endblock %}"""
+
 _PAINEL_ASSINATURAS = """{% extends "base" %}{% block conteudo %}
 <div class="card larga"><h2>Minhas assinaturas</h2>
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
@@ -1757,7 +1787,7 @@ _MEU_PLANO = """{% extends "base" %}{% block conteudo %}
 <div style="background:#161617;border:1px solid #2a2a2b;border-radius:8px;padding:1rem;margin-top:1.5rem">
   <p style="margin:0;font-size:.88rem;color:#a8a8a3">
     💡 Sabia que o Zaq também controla seus gastos, lê cupom fiscal e organiza sua lista
-    de compras? <a href="/cadastro" style="color:#5dcaa5">Conheça o app financeiro →</a>
+    de compras? <a href="/painel/ativar-app" style="color:#5dcaa5">Conheça o app financeiro →</a>
   </p>
 </div>
 </div>
@@ -1831,7 +1861,7 @@ _CESTA_AJUSTE = """{% extends "base" %}{% block conteudo %}
 {% endblock %}"""
 
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "cesta_ajuste": _CESTA_AJUSTE,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 from finance.models import canonizar_categoria, categorias_de
@@ -1858,9 +1888,12 @@ def _tem_assinatura_cesta(conta_id: int) -> bool:
 def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
     ctx.setdefault("logado", bool(request.session.get("conta_id")))
     ctx.setdefault("titulo", nome.capitalize())
-    # Injeta tem_cesta pro menu decidir mostrar "Minhas cestas"
-    if "tem_cesta" not in ctx and request.session.get("conta_id"):
-        ctx["tem_cesta"] = _tem_assinatura_cesta(request.session["conta_id"])
+    # Injeta conta + tem_cesta pro menu decidir certo (em qualquer tela)
+    if request.session.get("conta_id"):
+        if "conta" not in ctx:
+            ctx["conta"] = conta_logada(request)
+        if "tem_cesta" not in ctx:
+            ctx["tem_cesta"] = _tem_assinatura_cesta(request.session["conta_id"])
     return HTMLResponse(_env.get_template(nome).render(**ctx))
 
 
@@ -2209,6 +2242,41 @@ def painel_meu_plano_trocar(request: Request,
             request.session["erro"] = r.get("erro", "Não foi possível trocar.")
     except Exception as e:
         request.session["erro"] = f"Erro: {str(e)}"
+    return RedirectResponse("/painel/meu-plano", status_code=303)
+
+
+@router.get("/painel/ativar-app", response_class=HTMLResponse)
+def painel_ativar_app(request: Request):
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    # Planos pagos do app (não o zaq_cesta)
+    planos = [p for p in _planos() if p[0] != "zaq_cesta"]
+    return _render("ativar_app", request, conta=conta, planos=planos,
+                   aviso=request.session.pop("aviso", None))
+
+
+@router.post("/painel/ativar-app", response_class=HTMLResponse)
+def painel_ativar_app_envia(request: Request, plano: str = Form(...)):
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    planos_ok = {p[0]: p for p in _planos() if p[0] != "zaq_cesta"}
+    if plano not in planos_ok:
+        request.session["aviso"] = "Plano inválido."
+        return RedirectResponse("/painel/ativar-app", status_code=303)
+    pool = get_pool()
+    with pool.connection() as c:
+        # Muda plano + status aguardando_pagamento (Asaas ativa de fato na Fase 5)
+        c.execute(
+            """update contas set plano=%s, status='aguardando_pagamento',
+                   limite_mensagens_dia=50, limite_cupons_dia=5 where id=%s""",
+            (plano, conta[0]),
+        )
+        c.commit()
+    ct.registrar_evento(pool, conta[0], "app_ativado", f"plano={plano}")
+    request.session["aviso"] = ("App financeiro ativado! Assim que o pagamento "
+                                "confirmar, você terá acesso completo.")
     return RedirectResponse("/painel/meu-plano", status_code=303)
 
 

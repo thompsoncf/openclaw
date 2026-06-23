@@ -1892,7 +1892,7 @@ _PEDIDOS_FORN = """{% extends "base" %}{% block conteudo %}
   <div class="ped-abas">
     <a href="/painel/fornecedor/pedidos" class="ped-aba ativa">Lista</a>
     <a href="/painel/fornecedor/separacao" class="ped-aba">Separação</a>
-    <span class="ped-aba off" title="em breve">Embalagem</span>
+    <a href="/painel/fornecedor/embalagem" class="ped-aba">Embalagem</a>
     <span class="ped-aba off" title="em breve">Rotas</span>
   </div>
 
@@ -2095,7 +2095,7 @@ _SEPARACAO_FORN = """{% extends "base" %}{% block conteudo %}
   <div class="ped-abas">
     <a href="/painel/fornecedor/pedidos" class="ped-aba">Lista</a>
     <a href="/painel/fornecedor/separacao" class="ped-aba ativa">Separação</a>
-    <span class="ped-aba off" title="em breve">Embalagem</span>
+    <a href="/painel/fornecedor/embalagem" class="ped-aba">Embalagem</a>
     <span class="ped-aba off" title="em breve">Rotas</span>
   </div>
 
@@ -2250,8 +2250,180 @@ _SEPARACAO_FORN = """{% extends "base" %}{% block conteudo %}
 </style>
 {% endblock %}"""
 
+_EMBALAGEM_FORN = """{% extends "base" %}{% block conteudo %}
+<div class="card larga">
+  <a href="/painel/fornecedor" class="ped-back">← voltar</a>
+  <h2 style="margin:.2rem 0 1.2rem">📋 Pedidos</h2>
+
+  <!-- SUB-ABAS -->
+  <div class="ped-abas">
+    <a href="/painel/fornecedor/pedidos" class="ped-aba">Lista</a>
+    <a href="/painel/fornecedor/separacao" class="ped-aba">Separação</a>
+    <a href="/painel/fornecedor/embalagem" class="ped-aba ativa">Embalagem</a>
+    <span class="ped-aba off" title="em breve">Rotas</span>
+  </div>
+
+  <!-- FILTRO -->
+  <form method="get" action="/painel/fornecedor/embalagem" class="sep-filtro">
+    <select name="periodo" onchange="this.form.submit()">
+      <option value="esta_semana"    {% if periodo=='esta_semana' %}selected{% endif %}>Esta semana</option>
+      <option value="proxima_semana" {% if periodo=='proxima_semana' %}selected{% endif %}>Próxima semana</option>
+      <option value="proxima"        {% if periodo=='proxima' %}selected{% endif %}>Próximas entregas</option>
+      <option value="mes"            {% if periodo=='mes' %}selected{% endif %}>Próximos 30 dias</option>
+    </select>
+    {% if dados.data_de and dados.data_ate %}
+    <span class="sep-range">{{ dados.data_de }} → {{ dados.data_ate }}</span>
+    {% endif %}
+  </form>
+
+  <!-- RESUMO -->
+  <div class="sep-resumo">
+    <div class="sep-card">
+      <div class="sep-card-num">{{ dados.qtd_total }}</div>
+      <div class="sep-card-rot">cesta{% if dados.qtd_total != 1 %}s{% endif %} pra embalar</div>
+    </div>
+    <div class="sep-card">
+      <div class="sep-card-num" style="color:#1d9e75">{{ dados.qtd_embaladas }}</div>
+      <div class="sep-card-rot">já embaladas</div>
+    </div>
+    <div class="sep-card">
+      <div class="sep-card-num" style="color:#e0a83d">{{ dados.qtd_falta_embalar }}</div>
+      <div class="sep-card-rot">faltam</div>
+    </div>
+  </div>
+
+  {% if dados.cestas %}
+  <div class="emb-cards">
+    {% for c in dados.cestas %}
+    <div class="emb-card {% if c.esta_embalada %}emb-card-pronta{% endif %}">
+      <div class="emb-card-head">
+        <div class="emb-card-cli">
+          <div class="emb-card-nome">🧺 {{ c.tamanho_nome }} — {{ c.cliente_nome }}</div>
+          {% if c.endereco %}<div class="emb-card-end">{{ c.endereco }}</div>{% endif %}
+          {% if c.cep %}<div class="emb-card-cep">CEP {{ c.cep }} {% if c.data_entrega %}· 📅 {{ c.data_entrega }}{% endif %}</div>
+          {% elif c.data_entrega %}<div class="emb-card-cep">📅 {{ c.data_entrega }}</div>{% endif %}
+        </div>
+        <div class="emb-card-acoes">
+          {% if c.esta_embalada %}
+            <div class="emb-pronto">✓ embalada<br><small>{{ c.embalada_em }}</small></div>
+            <form method="post" action="/painel/fornecedor/embalagem/{{ c.id }}/desmarcar" style="display:inline">
+              <button class="emb-btn-desfazer" title="desfazer">↶ desmarcar</button>
+            </form>
+          {% else %}
+            <form method="post" action="/painel/fornecedor/embalagem/{{ c.id }}/marcar" style="display:inline">
+              <button class="emb-btn-marcar">✓ Embalada</button>
+            </form>
+          {% endif %}
+          <a href="/painel/fornecedor/embalagem/{{ c.id }}/etiqueta" target="_blank" rel="noopener" class="emb-btn-etiqueta">🏷️ Etiqueta</a>
+        </div>
+      </div>
+      <div class="emb-itens">
+        {% for it in c.itens %}
+        <span class="emb-item">{{ it.quantidade }} {{ it.unidade }} · <strong>{{ it.produto_nome }}</strong></span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="ped-vazio">
+    <div style="font-size:2.5rem;opacity:.4;margin-bottom:.5rem">📦</div>
+    <p>Sem cestas confirmadas pra embalar neste período.</p>
+    <p class="mut" style="margin-top:.5rem;font-size:.9rem">Cestas em sugerida/em_ajuste não aparecem aqui (cliente ainda pode mexer).</p>
+  </div>
+  {% endif %}
+</div>
+
+<style>
+.ped-back{color:#5dcaa5;display:inline-block;margin-bottom:.8rem;font-size:.9rem;text-decoration:none}
+.ped-back:hover{text-decoration:underline}
+.ped-abas{display:flex;gap:0;border-bottom:1px solid #2a2a2b;margin-bottom:1rem;overflow-x:auto}
+.ped-aba{padding:.55rem 1rem;color:#a8a8a3;border-bottom:2px solid transparent;text-decoration:none;font-size:.92rem;white-space:nowrap}
+.ped-aba:hover{color:#ececec}
+.ped-aba.ativa{color:#5dcaa5;border-color:#5dcaa5;font-weight:600}
+.ped-aba.off{color:#5a5a5a;font-size:.88rem;cursor:default}
+.sep-filtro{display:flex;align-items:center;gap:.8rem;margin-bottom:1rem;padding:.7rem .9rem;background:#1a1a1c;border:1px solid #2a2a2b;border-radius:8px;flex-wrap:wrap}
+.sep-filtro select{background:#0a0a0a;color:#ececec;border:1px solid #2a2a2b;border-radius:6px;padding:.5rem .7rem;font-size:.9rem;cursor:pointer}
+.sep-range{color:#a8a8a3;font-size:.85rem}
+.sep-resumo{display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem;margin-bottom:1rem}
+.sep-card{background:#1a1a1c;border:1px solid #2a2a2b;border-radius:8px;padding:1rem;text-align:center}
+.sep-card-num{color:#5dcaa5;font-size:1.6rem;font-weight:700;line-height:1.1}
+.sep-card-rot{color:#a8a8a3;font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin-top:.3rem}
+.emb-cards{display:flex;flex-direction:column;gap:.7rem}
+.emb-card{background:#1a1a1c;border:1px solid #2a2a2b;border-radius:8px;padding:1rem}
+.emb-card-pronta{border-left:3px solid #1d9e75;opacity:.7}
+.emb-card-head{display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:.7rem}
+.emb-card-cli{flex:1;min-width:200px}
+.emb-card-nome{font-weight:600;color:#ececec;font-size:1rem}
+.emb-card-end{color:#a8a8a3;font-size:.85rem;margin-top:.25rem}
+.emb-card-cep{color:#7a7a7a;font-size:.78rem;margin-top:.15rem}
+.emb-card-acoes{display:flex;gap:.4rem;align-items:flex-start;flex-wrap:wrap}
+.emb-btn-marcar{background:#15241d;color:#5dcaa5;border:1px solid #5dcaa5;border-radius:6px;padding:.5rem .85rem;cursor:pointer;font-size:.88rem;font-weight:500;white-space:nowrap}
+.emb-btn-marcar:hover{background:#1d2e25}
+.emb-btn-etiqueta{background:#1a1a1c;color:#a8a8a3;border:1px solid #2a2a2b;border-radius:6px;padding:.5rem .85rem;text-decoration:none;font-size:.88rem;white-space:nowrap}
+.emb-btn-etiqueta:hover{border-color:#5dcaa5;color:#5dcaa5}
+.emb-pronto{color:#1d9e75;font-weight:600;font-size:.88rem;text-align:center;line-height:1.3}
+.emb-pronto small{color:#7a7a7a;font-size:.72rem;font-weight:400}
+.emb-btn-desfazer{background:transparent;color:#7a7a7a;border:1px solid #2a2a2b;border-radius:6px;padding:.35rem .6rem;cursor:pointer;font-size:.78rem}
+.emb-btn-desfazer:hover{color:#c66;border-color:#3a2020}
+.emb-itens{display:flex;flex-wrap:wrap;gap:.4rem;padding-top:.6rem;border-top:1px dashed #2a2a2b}
+.emb-item{color:#a8a8a3;font-size:.82rem;background:#0a0a0a;padding:.25rem .55rem;border-radius:4px}
+.emb-item strong{color:#ececec}
+.ped-vazio{text-align:center;padding:3rem 1rem;color:#a8a8a3}
+@media (max-width:520px){
+  .sep-resumo{grid-template-columns:1fr;gap:.4rem}
+  .emb-card-head{flex-direction:column}
+  .emb-card-acoes{width:100%}
+  .emb-btn-marcar,.emb-btn-etiqueta{flex:1;text-align:center}
+}
+</style>
+{% endblock %}"""
+
+_ETIQUETA_FORN = """<!doctype html>
+<html lang="pt-br"><head>
+<meta charset="utf-8">
+<title>Etiqueta — Cesta #{{ e.id }}</title>
+<style>
+body{font-family:system-ui,-apple-system,sans-serif;background:#fff;color:#000;margin:0;padding:1rem}
+.etiqueta{width:100mm;max-width:100%;border:2px solid #000;border-radius:6px;padding:1rem 1.2rem;page-break-after:always}
+.etq-topo{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid #000;padding-bottom:.4rem;margin-bottom:.6rem}
+.etq-marca{font-size:1.1rem;font-weight:700;letter-spacing:-.02em}
+.etq-data{font-size:.85rem;color:#444}
+.etq-cli{font-size:1.4rem;font-weight:700;margin-bottom:.3rem;line-height:1.15}
+.etq-end{font-size:.95rem;color:#222;line-height:1.4}
+.etq-cep{font-size:.8rem;color:#444;margin-top:.2rem}
+.etq-cesta{margin-top:.8rem;padding-top:.5rem;border-top:1px dashed #888;font-size:1.05rem}
+.etq-cesta b{font-size:1.2rem}
+.etq-rodape{margin-top:.6rem;font-size:.75rem;color:#666;text-align:right}
+.etq-acoes{margin-top:1rem;padding-top:1rem;border-top:1px solid #ddd;display:flex;gap:.5rem}
+.etq-acoes button{padding:.6rem 1rem;border-radius:6px;border:1px solid #000;cursor:pointer;background:#000;color:#fff;font-size:.9rem}
+.etq-acoes .sec{background:#fff;color:#000}
+@media print{
+  .etq-acoes{display:none}
+  body{padding:0}
+  .etiqueta{border:1px solid #000;page-break-after:always}
+}
+</style></head>
+<body>
+<div class="etiqueta">
+  <div class="etq-topo">
+    <div class="etq-marca">🧺 {{ e.fornecedor_nome or 'Zaq Fornecedor' }}</div>
+    {% if e.data_entrega %}<div class="etq-data">Entrega: {{ e.data_entrega }}</div>{% endif %}
+  </div>
+  <div class="etq-cli">{{ e.cliente_nome }}</div>
+  {% if e.endereco %}<div class="etq-end">{{ e.endereco }}</div>{% endif %}
+  {% if e.cep %}<div class="etq-cep">CEP {{ e.cep }}</div>{% endif %}
+  <div class="etq-cesta">Cesta <b>{{ e.tamanho_nome }}</b></div>
+  <div class="etq-rodape">Pedido #{{ e.id }}</div>
+</div>
+<div class="etq-acoes">
+  <button onclick="window.print()">🖨️ Imprimir</button>
+  <button class="sec" onclick="window.close()">Fechar</button>
+</div>
+</body></html>"""
+
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 from finance.models import canonizar_categoria, categorias_de
@@ -2986,6 +3158,66 @@ def painel_fornecedor_separacao(request: Request, periodo: str = "proxima_semana
     dados = pedidos_mod.consolidar_separacao(get_pool(), conta[0], periodo=periodo_f)
     return _render("separacao_forn", request, conta=conta,
                    dados=dados, periodo=periodo_f)
+
+
+@router.get("/painel/fornecedor/embalagem", response_class=HTMLResponse)
+def painel_fornecedor_embalagem(request: Request, periodo: str = "proxima_semana"):
+    from finance import pedidos as pedidos_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    if not conta[8]:  # eh_fornecedor
+        return RedirectResponse("/painel", status_code=303)
+    periodo_f = (periodo or "proxima_semana").strip() or "proxima_semana"
+    dados = pedidos_mod.listar_para_embalagem(get_pool(), conta[0], periodo=periodo_f)
+    return _render("embalagem_forn", request, conta=conta, dados=dados, periodo=periodo_f)
+
+
+@router.post("/painel/fornecedor/embalagem/{cesta_id}/marcar")
+def painel_fornecedor_marcar_embalada(request: Request, cesta_id: int,
+                                       periodo: str = Form("proxima_semana")):
+    from finance import pedidos as pedidos_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    if not conta[8]:
+        return RedirectResponse("/painel", status_code=303)
+    ok = pedidos_mod.marcar_embalada(get_pool(), conta[0], cesta_id)
+    if not ok:
+        request.session["erro"] = "Cesta não encontrada ou não está confirmada."
+    return RedirectResponse(
+        f"/painel/fornecedor/embalagem?periodo={periodo}", status_code=303,
+    )
+
+
+@router.post("/painel/fornecedor/embalagem/{cesta_id}/desmarcar")
+def painel_fornecedor_desmarcar_embalada(request: Request, cesta_id: int,
+                                          periodo: str = Form("proxima_semana")):
+    from finance import pedidos as pedidos_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    if not conta[8]:
+        return RedirectResponse("/painel", status_code=303)
+    pedidos_mod.desmarcar_embalada(get_pool(), conta[0], cesta_id)
+    return RedirectResponse(
+        f"/painel/fornecedor/embalagem?periodo={periodo}", status_code=303,
+    )
+
+
+@router.get("/painel/fornecedor/embalagem/{cesta_id}/etiqueta", response_class=HTMLResponse)
+def painel_fornecedor_etiqueta(request: Request, cesta_id: int):
+    from finance import pedidos as pedidos_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    if not conta[8]:
+        return RedirectResponse("/painel", status_code=303)
+    e = pedidos_mod.dados_etiqueta(get_pool(), conta[0], cesta_id)
+    if e is None:
+        request.session["erro"] = "Cesta não encontrada."
+        return RedirectResponse("/painel/fornecedor/embalagem", status_code=303)
+    return HTMLResponse(_env.get_template("etiqueta_forn").render(e=e))
 
 
 @router.post("/painel/fornecedor/margem-alvo")

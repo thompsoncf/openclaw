@@ -387,6 +387,196 @@ def consolidar_separacao(
     }
 
 
+def listar_para_embalagem(
+    pool,
+    fornecedor_id: int,
+    *,
+    periodo: str = "proxima_semana",
+    incluir_embaladas: bool = True,
+) -> dict[str, Any]:
+    """Pack list — cestas individuais pro fornecedor montar uma por uma.
+
+    Diferente da Separação (que CONSOLIDA itens), aqui é por CESTA. Cada cesta
+    vira um cartão com cliente, endereço, lista de itens, e botão "embalada".
+
+    Só inclui cestas em status 'confirmada' (em sugerida/ajuste o cliente
+    ainda pode mexer — não vale embalar).
+
+    Retorna {
+      periodo, data_de, data_ate,
+      qtd_total, qtd_embaladas, qtd_falta_embalar,
+      cestas: [
+        {id, cliente_nome, endereco, bairro, cep, tamanho_nome, data_entrega,
+         embalada_em (None ou ISO), itens:[{produto_nome, grupo, quantidade, unidade}]}
+      ]
+    }
+    """
+    data_de, data_ate = _intervalo_do_periodo(periodo)
+
+    where_data = ""
+    params_data: list[Any] = []
+    if data_de is not None:
+        where_data += " and cs.data_entrega >= %s"
+        params_data.append(data_de)
+    if data_ate is not None:
+        where_data += " and cs.data_entrega <= %s"
+        params_data.append(data_ate)
+
+    where_emb = "" if incluir_embaladas else " and cs.embalada_em is null"
+
+    with pool.connection() as c:
+        # 1) busca as cestas confirmadas do período
+        cestas_raw = c.execute(
+            f"""select cs.id, cs.cliente_id,
+                       coalesce(cli.nome, '(cliente '||cs.cliente_id||')'),
+                       cli.endereco, cli.cep,
+                       coalesce(ct.nome, '?'),
+                       cs.data_entrega, cs.embalada_em
+                 from cesta_semana cs
+                 left join contas cli on cli.id = cs.cliente_id
+                 left join assinaturas a on a.id = cs.assinatura_id
+                 left join cesta_tamanhos ct on ct.id = a.tamanho_id
+                where cs.fornecedor_id = %s
+                  and cs.status = 'confirmada'
+                  {where_data}{where_emb}
+                order by cs.embalada_em nulls first, cs.data_entrega, cli.nome""",
+            (fornecedor_id, *params_data),
+        ).fetchall()
+
+        # 2) busca itens de todas de uma vez (evita N+1)
+        ids = [int(r[0]) for r in cestas_raw]
+        itens_por_cesta: dict[int, list[dict[str, Any]]] = {i: [] for i in ids}
+        if ids:
+            rows = c.execute(
+                """select ci.cesta_id,
+                          coalesce(p.nome, '(produto '||ci.produto_id||')'),
+                          coalesce(ci.grupo, p.categoria, 'outros'),
+                          ci.quantidade,
+                          coalesce(p.unidade, 'und')
+                     from cesta_itens ci
+                     left join catalogo_produtos p on p.id = ci.produto_id
+                    where ci.cesta_id = any(%s)
+                    order by ci.grupo nulls last, p.nome""",
+                (ids,),
+            ).fetchall()
+            for cid, nome, grupo, qtd, un in rows:
+                itens_por_cesta[int(cid)].append({
+                    "produto_nome": nome,
+                    "grupo": grupo,
+                    "quantidade": float(qtd or 0),
+                    "unidade": un,
+                })
+
+    cestas = []
+    qtd_embaladas = 0
+    for (cid, cli_id, cli_nome, end, cep, tam, data_ent, embalada) in cestas_raw:
+        if embalada is not None:
+            qtd_embaladas += 1
+        cestas.append({
+            "id": int(cid),
+            "cliente_id": int(cli_id),
+            "cliente_nome": cli_nome,
+            "endereco": end,
+            "bairro": _extrair_bairro(end),
+            "cep": cep,
+            "tamanho_nome": tam,
+            "data_entrega": data_ent.isoformat() if data_ent else None,
+            "embalada_em": (
+                embalada.strftime("%d/%m %H:%M")
+                if isinstance(embalada, datetime) else None
+            ),
+            "esta_embalada": embalada is not None,
+            "itens": itens_por_cesta.get(int(cid), []),
+        })
+
+    return {
+        "periodo": periodo,
+        "data_de": data_de.isoformat() if data_de else None,
+        "data_ate": data_ate.isoformat() if data_ate else None,
+        "qtd_total": len(cestas),
+        "qtd_embaladas": qtd_embaladas,
+        "qtd_falta_embalar": len(cestas) - qtd_embaladas,
+        "cestas": cestas,
+    }
+
+
+def marcar_embalada(pool, fornecedor_id: int, cesta_id: int) -> bool:
+    """Marca uma cesta como embalada (gravando `embalada_em = now()`).
+
+    Idempotente: re-marcar não atualiza o timestamp (preserva o original).
+    Valida que a cesta é do fornecedor (segurança multi-tenant).
+    Retorna True se atualizou, False se a cesta não existe ou não é dele.
+    """
+    with pool.connection() as c:
+        r = c.execute(
+            """update cesta_semana
+                  set embalada_em = coalesce(embalada_em, now())
+                where id = %s and fornecedor_id = %s
+                  and status = 'confirmada'
+                returning id""",
+            (cesta_id, fornecedor_id),
+        ).fetchone()
+        c.commit()
+    return r is not None
+
+
+def desmarcar_embalada(pool, fornecedor_id: int, cesta_id: int) -> bool:
+    """Desfaz a marcação de embalada (volta `embalada_em` pra NULL).
+
+    Útil se o fornecedor marcou por engano. Valida fornecedor.
+    """
+    with pool.connection() as c:
+        r = c.execute(
+            """update cesta_semana
+                  set embalada_em = null
+                where id = %s and fornecedor_id = %s
+                returning id""",
+            (cesta_id, fornecedor_id),
+        ).fetchone()
+        c.commit()
+    return r is not None
+
+
+def dados_etiqueta(pool, fornecedor_id: int, cesta_id: int) -> dict[str, Any] | None:
+    """Dados pra renderizar a etiqueta imprimível de UMA cesta.
+
+    Mesma estrutura básica que `detalhe_pedido`, mas otimizada pra impressão
+    (sem itens detalhados — etiqueta é cliente + endereço + tamanho + data).
+    Valida fornecedor.
+    """
+    with pool.connection() as c:
+        row = c.execute(
+            """select cs.id,
+                      coalesce(cli.nome, '(cliente '||cs.cliente_id||')'),
+                      cli.endereco, cli.cep,
+                      coalesce(ct.nome, '?'),
+                      cs.data_entrega,
+                      coalesce(f.nome, '') as fornecedor_nome,
+                      f.fornecedor_slug
+                 from cesta_semana cs
+                 left join contas cli on cli.id = cs.cliente_id
+                 left join contas f on f.id = cs.fornecedor_id
+                 left join assinaturas a on a.id = cs.assinatura_id
+                 left join cesta_tamanhos ct on ct.id = a.tamanho_id
+                where cs.id = %s and cs.fornecedor_id = %s""",
+            (cesta_id, fornecedor_id),
+        ).fetchone()
+    if row is None:
+        return None
+    (cid, cli_nome, end, cep, tam, data_ent, forn_nome, forn_slug) = row
+    return {
+        "id": int(cid),
+        "cliente_nome": cli_nome,
+        "endereco": end or "",
+        "cep": cep or "",
+        "bairro": _extrair_bairro(end),
+        "tamanho_nome": tam,
+        "data_entrega": data_ent.isoformat() if data_ent else None,
+        "fornecedor_nome": forn_nome,
+        "fornecedor_slug": forn_slug,
+    }
+
+
 # ---------- helpers privados ----------
 
 def _status_pagamento(status_cesta: str, status_assinatura: str | None) -> str:

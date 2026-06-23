@@ -259,6 +259,133 @@ def detalhe_pedido(pool, fornecedor_id: int, cesta_id: int) -> dict[str, Any] | 
     }
 
 
+def consolidar_separacao(
+    pool,
+    fornecedor_id: int,
+    *,
+    periodo: str = "proxima_semana",
+    data_de: date | None = None,
+    data_ate: date | None = None,
+) -> dict[str, Any]:
+    """Pick list — o que o fornecedor precisa SEPARAR/COMPRAR pra entregar.
+
+    Soma quantidades de cada produto nas cestas CONFIRMADAS do período, agrupadas
+    por grupo (fruta/legume/verdura/tempero). Cestas em 'sugerida'/'em_ajuste'
+    NÃO entram na soma (cliente ainda pode mexer); são contadas separadamente
+    pra UI alertar "X cestas ainda em ajuste — pode mudar".
+
+    Cancelada/entregue/cobrada não interessam aqui (já saíram do "vou entregar").
+
+    periodo: atalho — default 'proxima_semana' (seg a dom da próxima semana).
+             pode ser 'esta_semana'/'proxima'/'mes'. Se data_de/data_ate forem
+             passados, sobrescrevem o periodo.
+
+    Retorna:
+      {
+        "periodo": "proxima_semana",
+        "data_de": "2026-06-29", "data_ate": "2026-07-05",
+        "qtd_cestas_confirmadas": 5,
+        "qtd_cestas_em_ajuste": 2,        # alerta — podem virar confirmadas
+        "qtd_cestas_total": 7,
+        "valor_total_reais": 600.0,        # soma do preço das confirmadas
+        "grupos": [
+          {"grupo": "fruta", "itens": [
+              {"produto_nome": "Banana prata", "unidade": "kg", "quantidade": 4.5,
+               "categoria": "fruta", "saldo_atual": 30.0, "suficiente": True}, ...]},
+          ...
+        ],
+        "total_itens_distintos": 8,
+      }
+    """
+    if periodo and (data_de is None and data_ate is None):
+        data_de, data_ate = _intervalo_do_periodo(periodo)
+
+    where_data = ""
+    params_data: list[Any] = []
+    if data_de is not None:
+        where_data += " and cs.data_entrega >= %s"
+        params_data.append(data_de)
+    if data_ate is not None:
+        where_data += " and cs.data_entrega <= %s"
+        params_data.append(data_ate)
+
+    with pool.connection() as c:
+        # 1) cabeçalho — quantas cestas confirmadas vs em ajuste; valor total
+        cab = c.execute(
+            f"""select
+                  count(*) filter (where cs.status = 'confirmada')                 as conf,
+                  count(*) filter (where cs.status in ('sugerida','em_ajuste'))    as ajuste,
+                  count(*) filter (where cs.status in ('confirmada','sugerida','em_ajuste')) as total,
+                  coalesce(sum(cs.preco_centavos) filter (where cs.status='confirmada'), 0) as valor_c
+                from cesta_semana cs
+                where cs.fornecedor_id = %s{where_data}""",
+            (fornecedor_id, *params_data),
+        ).fetchone()
+        qtd_conf, qtd_ajuste, qtd_total, valor_c = cab
+
+        # 2) consolidado — só status='confirmada' (rigoroso)
+        sql_itens = f"""
+            select
+              ci.produto_id,
+              coalesce(p.nome, '(produto ' || ci.produto_id || ')')  as produto_nome,
+              coalesce(ci.grupo, p.categoria, 'outros')               as grupo,
+              coalesce(p.unidade, 'und')                              as unidade,
+              p.categoria,
+              coalesce(p.saldo, 0)                                    as saldo_atual,
+              sum(ci.quantidade)                                      as qtd_total
+            from cesta_itens ci
+            join cesta_semana cs on cs.id = ci.cesta_id
+            left join catalogo_produtos p on p.id = ci.produto_id
+            where cs.fornecedor_id = %s
+              and cs.status = 'confirmada'
+              {where_data}
+            group by ci.produto_id, p.nome, ci.grupo, p.categoria, p.unidade, p.saldo
+            order by grupo, produto_nome
+        """
+        rows = c.execute(sql_itens, (fornecedor_id, *params_data)).fetchall()
+
+    # agrupa por grupo pro template
+    grupos_dict: dict[str, list[dict[str, Any]]] = {}
+    total_itens = 0
+    for prod_id, prod_nome, grupo, unidade, categoria, saldo, qtd in rows:
+        qtd_f = float(qtd or 0)
+        saldo_f = float(saldo or 0)
+        grupos_dict.setdefault(grupo, []).append({
+            "produto_id": int(prod_id),
+            "produto_nome": prod_nome,
+            "grupo": grupo,
+            "unidade": unidade,
+            "categoria": categoria or grupo,
+            "quantidade": round(qtd_f, 3),
+            "saldo_atual": round(saldo_f, 3),
+            "suficiente": saldo_f >= qtd_f,
+            "falta": round(max(0.0, qtd_f - saldo_f), 3),
+        })
+        total_itens += 1
+
+    # ordem natural dos grupos (fruta/legume/verdura/tempero/outros)
+    ordem = ["fruta", "legume", "verdura", "tempero", "outros"]
+    grupos_lista = []
+    for nome in ordem:
+        if nome in grupos_dict:
+            grupos_lista.append({"grupo": nome, "itens": grupos_dict.pop(nome)})
+    # grupos não previstos vão no fim
+    for nome, itens in grupos_dict.items():
+        grupos_lista.append({"grupo": nome, "itens": itens})
+
+    return {
+        "periodo": periodo,
+        "data_de": data_de.isoformat() if data_de else None,
+        "data_ate": data_ate.isoformat() if data_ate else None,
+        "qtd_cestas_confirmadas": int(qtd_conf or 0),
+        "qtd_cestas_em_ajuste": int(qtd_ajuste or 0),
+        "qtd_cestas_total": int(qtd_total or 0),
+        "valor_total_reais": round(int(valor_c or 0) / 100, 2),
+        "grupos": grupos_lista,
+        "total_itens_distintos": total_itens,
+    }
+
+
 # ---------- helpers privados ----------
 
 def _status_pagamento(status_cesta: str, status_assinatura: str | None) -> str:

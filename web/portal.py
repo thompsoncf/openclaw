@@ -403,11 +403,11 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
     <span class="fc-tit">Cestas</span>
     <span class="fc-leg">Os tamanhos de cesta que seus clientes podem assinar.</span>
   </button>
-  <button type="button" class="forn-card" onclick="fornAbrir('pedidos')">
+  <a href="/painel/fornecedor/pedidos" class="forn-card" style="text-decoration:none;color:inherit;display:flex;flex-direction:column">
     <span class="fc-ic">📋</span>
     <span class="fc-tit">Pedidos</span>
     <span class="fc-leg">Os pedidos dos seus clientes, prontos pra separar e entregar.</span>
-  </button>
+  </a>
   <button type="button" class="forn-card" onclick="fornAbrir('financeiro')">
     <span class="fc-ic">💰</span>
     <span class="fc-tit">Financeiro</span>
@@ -743,12 +743,6 @@ window.PRODUTOS = {
 </div>
 
 <!-- SEÇÃO: Pedidos -->
-<div id="forn-pedidos" class="forn-secao" style="display:none">
-  <button type="button" class="forn-voltar" onclick="fornVoltar()">← voltar</button>
-  <h3>Pedidos</h3>
-  <p class="mut">Em breve: os pedidos do dia, organizados por bairro, com a lista de separação.</p>
-</div>
-
 <!-- SEÇÃO: Financeiro -->
 <div id="forn-financeiro" class="forn-secao" style="display:none">
   <button type="button" class="forn-voltar" onclick="fornVoltar()">← voltar</button>
@@ -1889,8 +1883,59 @@ _CESTA_AJUSTE = """{% extends "base" %}{% block conteudo %}
 </div>
 {% endblock %}"""
 
+_FORNECEDOR_PEDIDOS = """{% extends "base" %}{% block conteudo %}
+<div class="card"><h1>📋 Pedidos da semana</h1>
+<p class="mut">Cestas em aberto, agendadas e entregues</p>
+<form method="get" style="margin:1rem 0;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+  <label style="display:flex;gap:.3rem;align-items:center">
+    <span class="mut">Status:</span>
+    <select name="status" style="padding:.4rem .5rem;border-radius:6px;border:1px solid #333;background:#0e0e0f;color:#ececec">
+      <option value="">Todos</option>
+      <option value="em_aberto" {% if status_filtro == 'em_aberto' %}selected{% endif %}>Em aberto</option>
+      <option value="sugerida" {% if status_filtro == 'sugerida' %}selected{% endif %}>Sugerida</option>
+      <option value="em_ajuste" {% if status_filtro == 'em_ajuste' %}selected{% endif %}>Em ajuste</option>
+      <option value="confirmada" {% if status_filtro == 'confirmada' %}selected{% endif %}>Confirmada</option>
+      <option value="cobrada" {% if status_filtro == 'cobrada' %}selected{% endif %}>Cobrada</option>
+      <option value="entregue" {% if status_filtro == 'entregue' %}selected{% endif %}>Entregue</option>
+      <option value="cancelada" {% if status_filtro == 'cancelada' %}selected{% endif %}>Cancelada</option>
+    </select>
+  </label>
+  <label style="display:flex;gap:.3rem;align-items:center">
+    <span class="mut">De:</span>
+    <input type="date" name="desde" value="{{ desde }}" style="padding:.4rem .5rem;border-radius:6px;border:1px solid #333;background:#0e0e0f;color:#ececec">
+  </label>
+  <label style="display:flex;gap:.3rem;align-items:center">
+    <span class="mut">Até:</span>
+    <input type="date" name="ate" value="{{ ate }}" style="padding:.4rem .5rem;border-radius:6px;border:1px solid #333;background:#0e0e0f;color:#ececec">
+  </label>
+  <button style="padding:.45rem .8rem;border:0;border-radius:7px;background:#1d9e75;color:#fff;cursor:pointer">Filtrar</button>
+</form>
+<div style="display:flex;gap:.5rem;margin:1rem 0;flex-wrap:wrap">
+  <span style="padding:.4rem .8rem;border-radius:20px;background:#2a2a2b;color:#ececec;font-size:.85rem">📋 Total: <b>{{ contagem.total }}</b></span>
+  <span style="padding:.4rem .8rem;border-radius:20px;background:#ff6b6b;color:#fff;font-size:.85rem">🟠 Em aberto: <b>{{ contagem.em_aberto }}</b></span>
+  <span style="padding:.4rem .8rem;border-radius:20px;background:#4dabf7;color:#fff;font-size:.85rem">✅ Entregue: <b>{{ contagem.entregue }}</b></span>
+  <span style="padding:.4rem .8rem;border-radius:20px;background:#a0aec0;color:#1a1a1c;font-size:.85rem">❌ Cancelada: <b>{{ contagem.cancelada }}</b></span>
+</div>
+<table style="width:100%;margin-top:1rem;border-collapse:collapse">
+  <tr style="border-bottom:1px solid #333">
+    <th style="text-align:left;padding:.6rem;color:#5dcaa5">ID</th><th style="text-align:left;padding:.6rem;color:#5dcaa5">Cliente</th><th style="text-align:left;padding:.6rem;color:#5dcaa5">Tamanho</th><th style="text-align:left;padding:.6rem;color:#5dcaa5">Entrega</th><th style="text-align:left;padding:.6rem;color:#5dcaa5">Preço</th><th style="text-align:left;padding:.6rem;color:#5dcaa5">Status</th><th style="text-align:left;padding:.6rem;color:#5dcaa5">Pagto</th><th style="text-align:left;padding:.6rem;color:#5dcaa5">Itens</th>
+  </tr>
+{% if pedidos %}{% for p in pedidos %}
+  <tr style="border-bottom:1px solid #2a2a2b;{% if p.status == 'cancelada' %}opacity:.5{% endif %}">
+    <td style="padding:.6rem"><b>{{ p.id }}</b></td><td style="padding:.6rem">{{ p.cliente_nome }}</td><td style="padding:.6rem"><span class="mut">{{ p.tamanho_nome }}</span></td><td style="padding:.6rem"><span class="mut">{{ p.data_entrega or '—' }}</span></td><td style="padding:.6rem"><b>R$ {{ p.preco_reais }}</b></td>
+    <td style="padding:.6rem">{% if p.status == 'sugerida' %}<span style="color:#ffa94d">🟡 Sugerida</span>{% elif p.status == 'em_ajuste' %}<span style="color:#ff922b">🟠 Em ajuste</span>{% elif p.status == 'confirmada' %}<span style="color:#4dabf7">🔵 Confirmada</span>{% elif p.status == 'cobrada' %}<span style="color:#69db7c">💰 Cobrada</span>{% elif p.status == 'entregue' %}<span style="color:#51cf66">✅ Entregue</span>{% elif p.status == 'cancelada' %}<span style="color:#a8a8a3">❌ Cancelada</span>{% else %}{{ p.status }}{% endif %}</td>
+    <td style="padding:.6rem">{% if p.status_pagamento == 'pago' %}<span style="color:#51cf66">✓ Pago</span>{% elif p.status_pagamento == 'atrasado' %}<span style="color:#ff6b6b">⚠ Atrasado</span>{% elif p.status_pagamento == 'cancelado' %}<span style="color:#a8a8a3">—</span>{% else %}<span style="color:#ffa94d">🕐 Aguardando</span>{% endif %}</td>
+    <td style="padding:.6rem"><span class="mut">{{ p.qtd_itens }} item{{ 's' if p.qtd_itens != 1 else '' }}</span></td>
+  </tr>
+{% endfor %}{% else %}
+  <tr><td colspan="8" class="mut" style="padding:1rem;text-align:center">Sem pedidos neste período</td></tr>
+{% endif %}
+</table>
+</div>
+{% endblock %}"""
+
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "fornecedor_pedidos": _FORNECEDOR_PEDIDOS,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 from finance.models import canonizar_categoria, categorias_de
@@ -2572,6 +2617,28 @@ def painel_fornecedor_dados(request: Request,
         c.commit()
     request.session["aviso"] = "Dados do fornecedor salvos."
     return RedirectResponse("/painel/fornecedor", status_code=303)
+
+
+@router.get("/painel/fornecedor/pedidos", response_class=HTMLResponse)
+def painel_fornecedor_pedidos(request: Request, status: str = "", desde: str = "", ate: str = ""):
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    if not conta[8]:
+        return _NEGADO
+    fornecedor_id = conta[0]
+    pool = get_pool()
+    from finance.pedidos import listar_pedidos, contar_por_status
+    from datetime import datetime as dt
+    filt_status = status if status and status != "todos" else None
+    filt_desde = dt.fromisoformat(desde).date() if desde else None
+    filt_ate = dt.fromisoformat(ate).date() if ate else None
+    pedidos = listar_pedidos(pool, fornecedor_id, status=filt_status, data_de=filt_desde, data_ate=filt_ate, limit=200)
+    contagem = contar_por_status(pool, fornecedor_id)
+    return HTMLResponse(_env.get_template("fornecedor_pedidos").render(
+        conta=conta, logado=True, pedidos=pedidos, contagem=contagem,
+        status_filtro=status, desde=desde, ate=ate,
+    ))
 
 
 @router.post("/painel/fornecedor/margem-alvo")

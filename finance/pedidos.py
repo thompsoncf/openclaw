@@ -1,0 +1,263 @@
+"""finance/pedidos.py — visão de PEDIDOS do fornecedor.
+
+Um "pedido" aqui é uma `cesta_semana` (uma assinatura × uma semana). Esta camada
+NÃO cria pedidos — eles nascem do montador (Fase 4) através da janela semanal
+(Fase 6). Aqui só CONSULTAMOS o que já existe, pro fornecedor enxergar e operar.
+
+Quatro sub-abas estão planejadas no painel do fornecedor:
+  1. Lista       — gestão (este arquivo, agora)
+  2. Separação   — consolidado de itens da semana (futuro)
+  3. Embalagem   — pack-list por cliente + etiqueta (futuro)
+  4. Rotas       — agrupamento por bairro/CEP (futuro)
+
+Fronteira (decisão do dono):
+  - Este arquivo (assistente): consulta read-only de `cesta_semana`/`cesta_itens`.
+  - Web (Claude Code): rota /painel/fornecedor/pedidos e template.
+
+⚠️ PRIVACIDADE: nunca devolver `custo_unit_centavos`/`custo_total_centavos` em
+respostas que vão pro cliente. O fornecedor PODE ver o próprio custo
+(é dele); mas a aba Lista do PEDIDO não precisa dele — mostra só preço e
+status. Esta função respeita isso (não retorna custo).
+"""
+from __future__ import annotations
+
+from datetime import date, datetime
+from typing import Any
+
+
+# status que o template renderiza com cor/ícone próprio
+_STATUS_VALIDOS = {
+    "sugerida", "em_ajuste", "confirmada",
+    "cobrada", "entregue", "cancelada",
+}
+
+
+def listar_pedidos(
+    pool,
+    fornecedor_id: int,
+    *,
+    status: str | None = None,
+    data_de: date | None = None,
+    data_ate: date | None = None,
+    busca_cliente: str | None = None,
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    """Lista pedidos (cestas da semana) deste fornecedor, do mais recente.
+
+    Filtros (todos opcionais):
+      - status: 'sugerida'/'em_ajuste'/'confirmada'/'cobrada'/'entregue'/'cancelada'.
+        Aceita também 'em_aberto' (= sugerida OU em_ajuste OU confirmada) como
+        atalho pra "ainda não entregou".
+      - data_de / data_ate: filtra por `data_entrega` (inclusive).
+      - busca_cliente: substring case-insensitive no nome do cliente.
+      - limit: teto pra não estourar tela; default 200 cobre semanas grandes.
+
+    Retorna lista de dicts já formatados pro template (sem custo do fornecedor).
+    Campos: id, cliente_id, cliente_nome, bairro, endereco, cep, fornecedor_nome,
+            tamanho_nome, data_entrega, status, qtd_itens, preco_reais,
+            status_pagamento, assinatura_id, criada_em.
+    """
+    where = ["cs.fornecedor_id = %s"]
+    params: list[Any] = [fornecedor_id]
+
+    if status:
+        if status == "em_aberto":
+            where.append("cs.status in ('sugerida','em_ajuste','confirmada')")
+        elif status in _STATUS_VALIDOS:
+            where.append("cs.status = %s")
+            params.append(status)
+        # se vier status inválido, simplesmente ignora (não trava o painel)
+
+    if data_de is not None:
+        where.append("cs.data_entrega >= %s")
+        params.append(data_de)
+    if data_ate is not None:
+        where.append("cs.data_entrega <= %s")
+        params.append(data_ate)
+    if busca_cliente:
+        where.append("c.nome ilike %s")
+        params.append(f"%{busca_cliente}%")
+
+    sql = f"""
+        select
+            cs.id,
+            cs.cliente_id,
+            coalesce(c.nome, '(cliente '||cs.cliente_id||')')          as cliente_nome,
+            c.endereco                                                  as endereco,
+            c.cep                                                       as cep,
+            coalesce(f.nome, '')                                        as fornecedor_nome,
+            coalesce(ct.nome, '?')                                      as tamanho_nome,
+            cs.data_entrega,
+            cs.status,
+            (select count(*) from cesta_itens ci where ci.cesta_id = cs.id) as qtd_itens,
+            cs.preco_centavos,
+            cs.assinatura_id,
+            a.status                                                    as status_assinatura,
+            cs.criada_em
+        from cesta_semana cs
+        left join contas c            on c.id = cs.cliente_id
+        left join contas f            on f.id = cs.fornecedor_id
+        left join assinaturas a       on a.id = cs.assinatura_id
+        left join cesta_tamanhos ct   on ct.id = a.tamanho_id
+        where {' and '.join(where)}
+        order by cs.data_entrega desc nulls last, cs.id desc
+        limit %s
+    """
+    params.append(int(limit))
+
+    out: list[dict[str, Any]] = []
+    with pool.connection() as c:
+        for row in c.execute(sql, params).fetchall():
+            (cesta_id, cli_id, cli_nome, endereco, cep, forn_nome, tam_nome,
+             data_ent, st, qtd, preco_c, assin_id, st_assin, criada) = row
+            out.append({
+                "id": int(cesta_id),
+                "cliente_id": int(cli_id),
+                "cliente_nome": cli_nome,
+                "bairro": _extrair_bairro(endereco),
+                "endereco": endereco,
+                "cep": cep,
+                "fornecedor_nome": forn_nome,
+                "tamanho_nome": tam_nome,
+                "data_entrega": data_ent.isoformat() if data_ent else None,
+                "status": st,
+                "qtd_itens": int(qtd or 0),
+                "preco_reais": round(int(preco_c or 0) / 100, 2),
+                "status_pagamento": _status_pagamento(st, st_assin),
+                "assinatura_id": int(assin_id),
+                "criada_em": criada.isoformat() if isinstance(criada, datetime) else str(criada),
+            })
+    return out
+
+
+def contar_por_status(pool, fornecedor_id: int) -> dict[str, int]:
+    """Conta pedidos por status (pros 'chips' resumo no topo da aba Lista).
+
+    Considera só pedidos com data_entrega >= hoje OU sem data (em rascunho).
+    Pedidos antigos entregues/cancelados não inflam a contagem.
+    """
+    sql = """
+        select status, count(*)
+          from cesta_semana
+         where fornecedor_id = %s
+           and (data_entrega is null or data_entrega >= current_date - interval '60 days')
+         group by status
+    """
+    out: dict[str, int] = {s: 0 for s in _STATUS_VALIDOS}
+    with pool.connection() as c:
+        for st, n in c.execute(sql, (fornecedor_id,)).fetchall():
+            if st in out:
+                out[st] = int(n)
+    # totais úteis pra UI
+    out["em_aberto"] = out["sugerida"] + out["em_ajuste"] + out["confirmada"]
+    out["total"] = sum(out[s] for s in _STATUS_VALIDOS)
+    return out
+
+
+def detalhe_pedido(pool, fornecedor_id: int, cesta_id: int) -> dict[str, Any] | None:
+    """Carrega um pedido inteiro pra tela de detalhe (cabeçalho + itens).
+
+    Valida que a cesta é deste fornecedor (segurança multi-tenant).
+    Retorna None se não existir ou não for dele.
+    """
+    with pool.connection() as c:
+        cab = c.execute(
+            """select cs.id, cs.cliente_id,
+                      coalesce(cli.nome, '(cliente '||cs.cliente_id||')'),
+                      cli.endereco, cli.cep,
+                      coalesce(ct.nome, '?'), cs.data_entrega, cs.status,
+                      cs.preco_centavos, a.status, cs.assinatura_id, cs.criada_em
+                 from cesta_semana cs
+                 left join contas cli on cli.id = cs.cliente_id
+                 left join assinaturas a on a.id = cs.assinatura_id
+                 left join cesta_tamanhos ct on ct.id = a.tamanho_id
+                where cs.id = %s and cs.fornecedor_id = %s""",
+            (cesta_id, fornecedor_id),
+        ).fetchone()
+        if cab is None:
+            return None
+        (cid, cli_id, cli_nome, endereco, cep, tam_nome, data_ent, st,
+         preco_c, st_assin, assin_id, criada) = cab
+
+        itens_raw = c.execute(
+            """select ci.id, ci.produto_id,
+                      coalesce(p.nome, '(produto '||ci.produto_id||')'),
+                      ci.grupo, ci.quantidade, p.unidade,
+                      ci.preco_unit_centavos
+                 from cesta_itens ci
+                 left join catalogo_produtos p on p.id = ci.produto_id
+                where ci.cesta_id = %s
+                order by ci.grupo nulls last, p.nome""",
+            (cesta_id,),
+        ).fetchall()
+
+    itens: list[dict[str, Any]] = []
+    for iid, prod_id, prod_nome, grupo, qtd, unidade, preco_unit_c in itens_raw:
+        itens.append({
+            "id": int(iid),
+            "produto_id": int(prod_id),
+            "produto_nome": prod_nome,
+            "grupo": grupo or "outros",
+            "quantidade": float(qtd or 0),
+            "unidade": unidade or "und",
+            "preco_unit_reais": round(int(preco_unit_c or 0) / 100, 2),
+        })
+
+    return {
+        "id": int(cid),
+        "cliente_id": int(cli_id),
+        "cliente_nome": cli_nome,
+        "endereco": endereco,
+        "cep": cep,
+        "bairro": _extrair_bairro(endereco),
+        "tamanho_nome": tam_nome,
+        "data_entrega": data_ent.isoformat() if data_ent else None,
+        "status": st,
+        "preco_reais": round(int(preco_c or 0) / 100, 2),
+        "status_pagamento": _status_pagamento(st, st_assin),
+        "assinatura_id": int(assin_id),
+        "criada_em": criada.isoformat() if isinstance(criada, datetime) else str(criada),
+        "itens": itens,
+        "qtd_itens": len(itens),
+    }
+
+
+# ---------- helpers privados ----------
+
+def _status_pagamento(status_cesta: str, status_assinatura: str | None) -> str:
+    """Resume o "estado do dinheiro" do pedido pro fornecedor.
+
+    Regra prática (não enche de status — só 4 buckets úteis pra UI):
+      - cobrada/entregue          -> 'pago'         (já tem dinheiro do Asaas)
+      - cancelada                  -> 'cancelado'    (não vai mais)
+      - assinatura inadimplente    -> 'atrasado'
+      - resto (sugerida/em_ajuste/confirmada com assinatura ok) -> 'aguardando'
+    """
+    if status_cesta == "cancelada":
+        return "cancelado"
+    if status_cesta in ("cobrada", "entregue"):
+        return "pago"
+    if status_assinatura == "inadimplente":
+        return "atrasado"
+    return "aguardando"
+
+
+def _extrair_bairro(endereco: str | None) -> str:
+    """Heurística leve: tenta achar 'bairro' num endereço livre.
+
+    Endereços vêm como texto livre ('Rua X, 123, Bairro Y, Cidade - UF, CEP').
+    Pra aba Lista isso basta — a aba Rotas (futura) vai usar CEP de verdade.
+    Sem bairro reconhecível, retorna ''.
+    """
+    if not endereco:
+        return ""
+    partes = [p.strip() for p in endereco.split(",") if p.strip()]
+    # tenta encontrar a parte que mais parece um bairro (não é número, não é UF)
+    for parte in partes:
+        baixa = parte.lower()
+        if any(t in baixa for t in ("bairro", "centro", "zona")):
+            return parte
+    # fallback: 3ª parte costuma ser o bairro em endereços brasileiros padrão
+    if len(partes) >= 3:
+        return partes[2]
+    return ""

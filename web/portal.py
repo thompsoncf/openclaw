@@ -2335,20 +2335,43 @@ def painel_ativar_app_envia(request: Request, plano: str = Form(...)):
     if plano not in planos_ok:
         request.session["aviso"] = "Plano inválido."
         return RedirectResponse("/painel/ativar-app", status_code=303)
+
+    p = planos_ok[plano]
+    nome_plano = p[1]
+    preco_cent = int(p[3] or 0)
+
     pool = get_pool()
     with pool.connection() as c:
-        # Muda plano + limites (status fica trial até Asaas confirmar na Fase 5)
+        # Muda plano + limites (status fica trial até o Asaas confirmar o pagamento)
         c.execute(
             """update contas set plano=%s,
                    limite_mensagens_dia=50, limite_cupons_dia=5 where id=%s""",
             (plano, conta[0]),
         )
         c.commit()
-    # Registra o upgrade (pra auditoria e funil)
     ct.registrar_evento(pool, conta[0], "upgrade_app",
                        f"plano={plano} (aguardando pagamento Asaas)")
-    request.session["aviso"] = ("Plano escolhido! Assim que o pagamento for ativado, "
-                                "você terá acesso completo ao app financeiro.")
+
+    # Gera o link de pagamento do app (externalReference = conta_id -> webhook ativa)
+    from finance import asaas
+    try:
+        link = asaas.criar_link_pagamento(
+            conta_id=conta[0],
+            nome_plano=nome_plano,
+            valor_reais=preco_cent / 100,
+            descricao=f"App financeiro Zaq — {nome_plano}",
+        )
+        url = link.get("url")
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(
+            f"Asaas: erro ao criar link app conta {conta[0]}: {e}")
+        request.session["erro"] = f"Plano escolhido, mas não consegui gerar o pagamento: {e}"
+        return RedirectResponse("/painel/meu-plano", status_code=303)
+
+    if url:
+        return RedirectResponse(url, status_code=303)
+    request.session["erro"] = "Plano escolhido, mas o link de pagamento não foi gerado. Tente de novo."
     return RedirectResponse("/painel/meu-plano", status_code=303)
 
 

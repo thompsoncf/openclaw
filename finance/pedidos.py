@@ -360,6 +360,7 @@ def consolidar_separacao(
             "saldo_atual": round(saldo_f, 3),
             "suficiente": saldo_f >= qtd_f,
             "falta": round(max(0.0, qtd_f - saldo_f), 3),
+            "sobra_apos": round(saldo_f - qtd_f, 3),
         })
         total_itens += 1
 

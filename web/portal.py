@@ -2151,17 +2151,28 @@ _SEPARACAO_FORN = """{% extends "base" %}{% block conteudo %}
       <div class="sep-item {% if not it.suficiente %}sep-item-falta{% endif %}">
         <div class="sep-item-info">
           <div class="sep-item-nome">{{ it.produto_nome }}</div>
-          <div class="sep-item-saldo">
-            {% if it.suficiente %}
-              <span style="color:#1d9e75">✓ tem em estoque</span>
-              <span class="mut">({{ it.saldo_atual }} {{ it.unidade }})</span>
+          <div class="sep-item-meta">
+            <span class="sep-meta-rot">precisa:</span>
+            <strong>{{ it.quantidade }} {{ it.unidade }}</strong>
+            <span class="sep-meta-sep">·</span>
+            <span class="sep-meta-rot">estoque:</span>
+            <strong>{{ it.saldo_atual }} {{ it.unidade }}</strong>
+            <span class="sep-meta-sep">·</span>
+            <span class="sep-meta-rot">sobra:</span>
+            {% if it.sobra_apos >= 0 %}
+              <strong style="color:#5dcaa5">{{ it.sobra_apos }} {{ it.unidade }}</strong>
             {% else %}
-              <span style="color:#c66">⚠ faltam {{ it.falta }} {{ it.unidade }}</span>
-              <span class="mut">(estoque: {{ it.saldo_atual }})</span>
+              <strong style="color:#c66">faltam {{ it.falta }} {{ it.unidade }}</strong>
             {% endif %}
           </div>
         </div>
-        <div class="sep-item-qtd">{{ it.quantidade }} {{ it.unidade }}</div>
+        <div class="sep-item-status">
+          {% if it.suficiente %}
+            <span class="sep-ok">✓</span>
+          {% else %}
+            <span class="sep-fail">⚠ repor</span>
+          {% endif %}
+        </div>
       </div>
       {% endfor %}
     </div>
@@ -2213,10 +2224,17 @@ _SEPARACAO_FORN = """{% extends "base" %}{% block conteudo %}
 .sep-item-falta{border-left:3px solid #c66}
 .sep-item-info{flex:1;min-width:0}
 .sep-item-nome{color:#ececec;font-weight:500}
-.sep-item-saldo{color:#a8a8a3;font-size:.8rem;margin-top:.2rem}
-.sep-item-qtd{color:#5dcaa5;font-weight:700;font-size:1.1rem;white-space:nowrap}
+.sep-item-meta{color:#a8a8a3;font-size:.85rem;margin-top:.3rem;display:flex;flex-wrap:wrap;gap:.3rem;align-items:center}
+.sep-item-meta strong{color:#ececec;font-weight:600}
+.sep-meta-rot{color:#7a7a7a;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em}
+.sep-meta-sep{color:#3a3a3b;margin:0 .15rem}
+.sep-item-status{font-size:1.5rem;white-space:nowrap}
+.sep-ok{color:#1d9e75}
+.sep-fail{color:#c66;font-size:.9rem;font-weight:600;background:#2a1414;padding:.3rem .6rem;border-radius:6px}
 .ped-vazio{text-align:center;padding:3rem 1rem;color:#a8a8a3}
 @media (max-width:520px){
+  .sep-item-meta{font-size:.78rem;gap:.2rem;flex-direction:column;align-items:flex-start;gap:.1rem}
+  .sep-meta-sep{display:none}
   .sep-resumo{grid-template-columns:1fr;gap:.4rem}
   .sep-card{padding:.8rem}
   .sep-card-num{font-size:1.3rem}

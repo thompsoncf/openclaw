@@ -213,13 +213,12 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
 </style></head><body>
 <div class="topo"><span class="logo">Zaq</span><span>
 {% if logado %}
-  {% if conta and conta[10] %}
-    <!-- Assinante de cesta: menu com cestas + plano -->
-    <a href="/painel/assinaturas">🧺 Minhas cestas</a><a href="/painel/meu-plano">Meu plano</a><a href="/sair">Sair</a>
-  {% else %}
-    <!-- Cliente do app / Fornecedor: menu completo -->
-    <a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/painel/compras">Compras</a>{% if tem_cesta %}<a href="/painel/assinaturas">🧺 Minhas cestas</a>{% endif %}{% if conta and conta[8] %}<a href="/painel/fornecedor">👨‍🌾 Fornecedor</a>{% endif %}<a href="/sair">Sair</a>
-  {% endif %}
+  {% set _tem_app = conta and conta[4] and conta[4] != 'zaq_cesta' %}
+  {% set _tem_cesta = (conta and conta[10]) or tem_cesta %}
+  {% if _tem_app %}<a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/painel/compras">Compras</a>{% endif %}
+  {% if _tem_cesta %}<a href="/painel/assinaturas">🧺 Minhas cestas</a><a href="/painel/meu-plano">Meu plano</a>{% endif %}
+  {% if conta and conta[8] %}<a href="/painel/fornecedor">👨‍🌾 Fornecedor</a>{% endif %}
+  <a href="/sair">Sair</a>
 {% else %}<a href="/login">Entrar</a><a href="/cadastro">Criar conta</a>{% endif %}
 </span></div>
 {% block conteudo %}{% endblock %}
@@ -2077,8 +2076,10 @@ def painel(request: Request):
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
-    # Assinante de cesta: home dele é a cesta, não o painel financeiro
-    if conta[10]:  # eh_assinante_cesta
+    # Assinante PURO de cesta (sem plano de app): home é a cesta.
+    # Misto (cesta + app) NÃO é redirecionado — vê o painel financeiro.
+    eh_cesta_puro = conta[10] and (not conta[4] or conta[4] == 'zaq_cesta')
+    if eh_cesta_puro:
         return RedirectResponse("/painel/assinaturas", status_code=303)
     pool = get_pool()
     with pool.connection() as c:

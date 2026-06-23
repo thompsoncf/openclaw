@@ -1883,196 +1883,175 @@ _CESTA_AJUSTE = """{% extends "base" %}{% block conteudo %}
 </div>
 {% endblock %}"""
 
-_FORNECEDOR_PEDIDOS = """{% extends "base" %}{% block conteudo %}
-<div class="card"><h1>📋 Pedidos da semana</h1>
-<p class="mut">Cestas em aberto, agendadas e entregues</p>
-<form method="get" style="margin:1rem 0;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-  <label style="display:flex;gap:.3rem;align-items:center">
-    <span class="mut">Status:</span>
-    <select name="status" style="padding:.4rem .5rem;border-radius:6px;border:1px solid #333;background:#0e0e0f;color:#ececec">
-      <option value="">Todos</option>
-      <option value="em_aberto" {% if status_filtro == 'em_aberto' %}selected{% endif %}>Em aberto</option>
-      <option value="sugerida" {% if status_filtro == 'sugerida' %}selected{% endif %}>Sugerida</option>
-      <option value="em_ajuste" {% if status_filtro == 'em_ajuste' %}selected{% endif %}>Em ajuste</option>
-      <option value="confirmada" {% if status_filtro == 'confirmada' %}selected{% endif %}>Confirmada</option>
-      <option value="cobrada" {% if status_filtro == 'cobrada' %}selected{% endif %}>Cobrada</option>
-      <option value="entregue" {% if status_filtro == 'entregue' %}selected{% endif %}>Entregue</option>
-      <option value="cancelada" {% if status_filtro == 'cancelada' %}selected{% endif %}>Cancelada</option>
-    </select>
-  </label>
-  <label style="display:flex;gap:.3rem;align-items:center">
-    <span class="mut">De:</span>
-    <input type="date" name="desde" value="{{ desde }}" style="padding:.4rem .5rem;border-radius:6px;border:1px solid #333;background:#0e0e0f;color:#ececec">
-  </label>
-  <label style="display:flex;gap:.3rem;align-items:center">
-    <span class="mut">Até:</span>
-    <input type="date" name="ate" value="{{ ate }}" style="padding:.4rem .5rem;border-radius:6px;border:1px solid #333;background:#0e0e0f;color:#ececec">
-  </label>
-  <button style="padding:.45rem .8rem;border:0;border-radius:7px;background:#1d9e75;color:#fff;cursor:pointer">Filtrar</button>
-</form>
-<div style="display:flex;gap:.5rem;margin:1rem 0;flex-wrap:wrap">
-  <span style="padding:.4rem .8rem;border-radius:20px;background:#2a2a2b;color:#ececec;font-size:.85rem">📋 Total: <b>{{ contagem.total }}</b></span>
-  <span style="padding:.4rem .8rem;border-radius:20px;background:#ff6b6b;color:#fff;font-size:.85rem">🟠 Em aberto: <b>{{ contagem.em_aberto }}</b></span>
-  <span style="padding:.4rem .8rem;border-radius:20px;background:#4dabf7;color:#fff;font-size:.85rem">✅ Entregue: <b>{{ contagem.entregue }}</b></span>
-  <span style="padding:.4rem .8rem;border-radius:20px;background:#a0aec0;color:#1a1a1c;font-size:.85rem">❌ Cancelada: <b>{{ contagem.cancelada }}</b></span>
-</div>
-<table style="width:100%;margin-top:1rem;border-collapse:collapse">
-  <tr style="border-bottom:1px solid #333">
-    <th style="text-align:left;padding:.6rem;color:#5dcaa5">ID</th><th style="text-align:left;padding:.6rem;color:#5dcaa5">Cliente</th><th style="text-align:left;padding:.6rem;color:#5dcaa5">Tamanho</th><th style="text-align:left;padding:.6rem;color:#5dcaa5">Entrega</th><th style="text-align:left;padding:.6rem;color:#5dcaa5">Preço</th><th style="text-align:left;padding:.6rem;color:#5dcaa5">Status</th><th style="text-align:left;padding:.6rem;color:#5dcaa5">Pagto</th><th style="text-align:left;padding:.6rem;color:#5dcaa5">Itens</th>
-  </tr>
-{% if pedidos %}{% for p in pedidos %}
-  <tr style="border-bottom:1px solid #2a2a2b;{% if p.status == 'cancelada' %}opacity:.5{% endif %}">
-    <td style="padding:.6rem"><b>{{ p.id }}</b></td><td style="padding:.6rem">{{ p.cliente_nome }}</td><td style="padding:.6rem"><span class="mut">{{ p.tamanho_nome }}</span></td><td style="padding:.6rem"><span class="mut">{{ p.data_entrega or '—' }}</span></td><td style="padding:.6rem"><b>R$ {{ p.preco_reais }}</b></td>
-    <td style="padding:.6rem">{% if p.status == 'sugerida' %}<span style="color:#ffa94d">🟡 Sugerida</span>{% elif p.status == 'em_ajuste' %}<span style="color:#ff922b">🟠 Em ajuste</span>{% elif p.status == 'confirmada' %}<span style="color:#4dabf7">🔵 Confirmada</span>{% elif p.status == 'cobrada' %}<span style="color:#69db7c">💰 Cobrada</span>{% elif p.status == 'entregue' %}<span style="color:#51cf66">✅ Entregue</span>{% elif p.status == 'cancelada' %}<span style="color:#a8a8a3">❌ Cancelada</span>{% else %}{{ p.status }}{% endif %}</td>
-    <td style="padding:.6rem">{% if p.status_pagamento == 'pago' %}<span style="color:#51cf66">✓ Pago</span>{% elif p.status_pagamento == 'atrasado' %}<span style="color:#ff6b6b">⚠ Atrasado</span>{% elif p.status_pagamento == 'cancelado' %}<span style="color:#a8a8a3">—</span>{% else %}<span style="color:#ffa94d">🕐 Aguardando</span>{% endif %}</td>
-    <td style="padding:.6rem"><span class="mut">{{ p.qtd_itens }} item{{ 's' if p.qtd_itens != 1 else '' }}</span></td>
-  </tr>
-{% endfor %}{% else %}
-  <tr><td colspan="8" class="mut" style="padding:1rem;text-align:center">Sem pedidos neste período</td></tr>
-{% endif %}
-</table>
-</div>
-{% endblock %}"""
-
 _PEDIDOS_FORN = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
-  <a href="/painel/fornecedor" style="color:#5dcaa5;display:inline-block;margin-bottom:1rem">← voltar pro painel</a>
-  <h2>📋 Pedidos</h2>
+  <a href="/painel/fornecedor" class="ped-back">← voltar</a>
+  <h2 style="margin:.2rem 0 1.2rem">📋 Pedidos</h2>
 
-  <div class="ped-abas">
-    <a class="ped-aba ativa">Lista</a>
-    <span class="ped-aba off" title="em breve">Separação</span>
-    <span class="ped-aba off" title="em breve">Embalagem</span>
-    <span class="ped-aba off" title="em breve">Rotas</span>
-  </div>
-
-  <div class="ped-chips">
-    <a class="ped-chip {% if not filtro_status %}on{% endif %}" href="/painel/fornecedor/pedidos">Todos <b>{{ contagens.total }}</b></a>
-    <a class="ped-chip {% if filtro_status=='em_aberto' %}on{% endif %}" href="/painel/fornecedor/pedidos?status=em_aberto">Em aberto <b>{{ contagens.em_aberto }}</b></a>
-    <a class="ped-chip {% if filtro_status=='confirmada' %}on{% endif %}" href="/painel/fornecedor/pedidos?status=confirmada">Confirmadas <b>{{ contagens.confirmada }}</b></a>
-    <a class="ped-chip {% if filtro_status=='cobrada' %}on{% endif %}" href="/painel/fornecedor/pedidos?status=cobrada">Cobradas <b>{{ contagens.cobrada }}</b></a>
-    <a class="ped-chip {% if filtro_status=='entregue' %}on{% endif %}" href="/painel/fornecedor/pedidos?status=entregue">Entregues <b>{{ contagens.entregue }}</b></a>
-    <a class="ped-chip {% if filtro_status=='cancelada' %}on{% endif %}" href="/painel/fornecedor/pedidos?status=cancelada">Canceladas <b>{{ contagens.cancelada }}</b></a>
-  </div>
-
-  <form method="get" action="/painel/fornecedor/pedidos" style="margin:1rem 0;display:flex;gap:.5rem">
-    {% if filtro_status %}<input type="hidden" name="status" value="{{ filtro_status }}">{% endif %}
-    <input name="busca" value="{{ filtro_busca or '' }}" placeholder="Buscar cliente..." style="flex:1">
-    <button>Buscar</button>
+  <form method="get" action="/painel/fornecedor/pedidos" class="ped-filtros">
+    <select name="status" onchange="this.form.submit()">
+      <option value="">Todos os status</option>
+      <option value="em_aberto"  {% if filtro_status=='em_aberto' %}selected{% endif %}>Em aberto</option>
+      <option value="sugerida"   {% if filtro_status=='sugerida' %}selected{% endif %}>Sugerida</option>
+      <option value="em_ajuste"  {% if filtro_status=='em_ajuste' %}selected{% endif %}>Em ajuste</option>
+      <option value="confirmada" {% if filtro_status=='confirmada' %}selected{% endif %}>Confirmada</option>
+      <option value="cobrada"    {% if filtro_status=='cobrada' %}selected{% endif %}>Cobrada</option>
+      <option value="entregue"   {% if filtro_status=='entregue' %}selected{% endif %}>Entregue</option>
+      <option value="cancelada"  {% if filtro_status=='cancelada' %}selected{% endif %}>Cancelada</option>
+    </select>
+    <select name="periodo" onchange="this.form.submit()">
+      <option value="">Qualquer data</option>
+      <option value="proxima"        {% if filtro_periodo=='proxima' %}selected{% endif %}>Próximas entregas</option>
+      <option value="esta_semana"    {% if filtro_periodo=='esta_semana' %}selected{% endif %}>Esta semana</option>
+      <option value="proxima_semana" {% if filtro_periodo=='proxima_semana' %}selected{% endif %}>Próxima semana</option>
+      <option value="mes"            {% if filtro_periodo=='mes' %}selected{% endif %}>Próximos 30 dias</option>
+      <option value="passadas"       {% if filtro_periodo=='passadas' %}selected{% endif %}>Já entregues</option>
+    </select>
+    <input name="busca" value="{{ filtro_busca or '' }}" placeholder="Buscar cliente..." class="ped-busca">
+    {% if filtro_status or filtro_periodo or filtro_busca %}
+    <a href="/painel/fornecedor/pedidos" class="ped-limpa" title="Limpar filtros">×</a>
+    {% endif %}
   </form>
 
+  <div class="ped-resumo">
+    {{ pedidos|length }} pedido{% if pedidos|length != 1 %}s{% endif %}
+    {% if contagens.em_aberto %} · <strong style="color:#e0a83d">{{ contagens.em_aberto }}</strong> em aberto{% endif %}
+    {% if contagens.entregue %} · <strong style="color:#1d9e75">{{ contagens.entregue }}</strong> já entregue{% if contagens.entregue != 1 %}s{% endif %}{% endif %}
+  </div>
+
   {% if pedidos %}
-  <div style="overflow-x:auto">
-    <table class="ped-tab">
-      <thead><tr>
-        <th>#</th><th>Cliente</th><th>Bairro</th><th>Tamanho</th>
-        <th>Entrega</th><th>Status</th><th>Pagamento</th><th>Itens</th><th>Valor</th><th></th>
-      </tr></thead>
-      <tbody>
-      {% for p in pedidos %}
-        <tr>
-          <td class="mut">{{ p.id }}</td>
-          <td><strong>{{ p.cliente_nome }}</strong></td>
-          <td class="mut">{{ p.bairro or '—' }}</td>
-          <td>{{ p.tamanho_nome }}</td>
-          <td>{{ p.data_entrega or '—' }}</td>
-          <td><span class="ped-st ped-st-{{ p.status }}">{{ p.status }}</span></td>
-          <td><span class="ped-pg ped-pg-{{ p.status_pagamento }}">{{ p.status_pagamento }}</span></td>
-          <td class="mut">{{ p.qtd_itens }}</td>
-          <td><strong>R$ {{ "%.2f"|format(p.preco_reais) }}</strong></td>
-          <td><a href="/painel/fornecedor/pedidos/{{ p.id }}" style="color:#5dcaa5">ver →</a></td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
+  <div class="ped-lista">
+    {% for p in pedidos %}
+    <a href="/painel/fornecedor/pedidos/{{ p.id }}" class="ped-card">
+      <div class="ped-card-topo">
+        <div class="ped-card-cli">
+          <div class="ped-cli-nome">{{ p.cliente_nome }}</div>
+          <div class="ped-cli-bairro">{{ p.bairro or 'sem bairro' }}</div>
+        </div>
+        <div class="ped-card-val">
+          R$ {{ "%.2f"|format(p.preco_reais) }}
+          <div class="ped-card-tam">{{ p.tamanho_nome }}</div>
+        </div>
+      </div>
+      <div class="ped-card-meta">
+        <span class="ped-st ped-st-{{ p.status }}">{{ p.status|replace('_',' ') }}</span>
+        <span class="ped-pg ped-pg-{{ p.status_pagamento }}">{{ p.status_pagamento }}</span>
+        <span class="ped-meta-sep">{{ p.qtd_itens }} {% if p.qtd_itens == 1 %}item{% else %}itens{% endif %}</span>
+        {% if p.data_entrega %}<span class="ped-meta-data">📅 {{ p.data_entrega }}</span>{% endif %}
+      </div>
+    </a>
+    {% endfor %}
   </div>
   {% else %}
-  <p class="mut" style="text-align:center;padding:2rem 1rem">
-    Nenhum pedido {% if filtro_status %}neste filtro{% else %}ainda{% endif %}.
-    {% if not filtro_status %}<br>Os pedidos aparecem aqui quando a janela semanal monta as cestas dos seus clientes.{% endif %}
-  </p>
+  <div class="ped-vazio">
+    <div style="font-size:2.5rem;opacity:.4;margin-bottom:.5rem">📭</div>
+    {% if filtro_status or filtro_periodo or filtro_busca %}
+      <p>Nenhum pedido com esses filtros.</p>
+      <a href="/painel/fornecedor/pedidos" style="color:#5dcaa5">Limpar filtros</a>
+    {% else %}
+      <p>Ainda não há pedidos.</p>
+      <p class="mut" style="margin-top:.5rem;font-size:.9rem">
+        Os pedidos aparecem aqui quando a janela semanal monta as cestas dos seus clientes.
+      </p>
+    {% endif %}
+  </div>
   {% endif %}
 </div>
 
 <style>
-.ped-abas{display:flex;gap:.4rem;border-bottom:1px solid #2a2a2b;margin:1rem 0}
-.ped-aba{padding:.5rem 1rem;color:#a8a8a3;border-bottom:2px solid transparent;cursor:default}
-.ped-aba.ativa{color:#5dcaa5;border-color:#5dcaa5;font-weight:600}
-.ped-aba.off{color:#5a5a5a;font-size:.9rem}
-.ped-chips{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:1rem}
-.ped-chip{padding:.35rem .7rem;border:1px solid #2a2a2b;border-radius:14px;font-size:.85rem;color:#a8a8a3;text-decoration:none;background:#1a1a1c}
-.ped-chip:hover{border-color:#5dcaa5;color:#ececec}
-.ped-chip.on{background:#15241d;border-color:#5dcaa5;color:#5dcaa5}
-.ped-chip b{margin-left:.3rem;color:#ececec}
-.ped-chip.on b{color:#5dcaa5}
-.ped-tab{width:100%;border-collapse:collapse;font-size:.92rem}
-.ped-tab th{text-align:left;padding:.6rem .5rem;border-bottom:1px solid #2a2a2b;color:#a8a8a3;font-weight:500;font-size:.82rem;text-transform:uppercase;letter-spacing:.04em}
-.ped-tab td{padding:.7rem .5rem;border-bottom:1px solid #1c1c1f}
-.ped-tab tr:hover td{background:#15241d}
-.ped-st{display:inline-block;padding:.2rem .55rem;border-radius:10px;font-size:.78rem;background:#1c1c1f;color:#a8a8a3}
+.ped-back{color:#5dcaa5;display:inline-block;margin-bottom:.8rem;font-size:.9rem;text-decoration:none}
+.ped-back:hover{text-decoration:underline}
+.ped-filtros{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin-bottom:.8rem;padding:.8rem;background:#1a1a1c;border:1px solid #2a2a2b;border-radius:8px}
+.ped-filtros select,.ped-filtros input{background:#0a0a0a;color:#ececec;border:1px solid #2a2a2b;border-radius:6px;padding:.5rem .7rem;font-size:.9rem}
+.ped-filtros select{cursor:pointer;min-width:140px}
+.ped-busca{flex:1;min-width:160px}
+.ped-limpa{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:#2a1414;color:#c66;border-radius:6px;text-decoration:none;font-size:1.2rem;line-height:1}
+.ped-limpa:hover{background:#3a1818}
+.ped-resumo{color:#a8a8a3;font-size:.88rem;margin-bottom:1rem;padding:0 .2rem}
+.ped-lista{display:flex;flex-direction:column;gap:.6rem}
+.ped-card{display:block;background:#1a1a1c;border:1px solid #2a2a2b;border-radius:8px;padding:1rem;text-decoration:none;color:inherit;transition:border-color .15s,transform .1s}
+.ped-card:hover{border-color:#5dcaa5;transform:translateX(2px)}
+.ped-card:active{transform:translateX(2px) scale(.998)}
+.ped-card-topo{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;margin-bottom:.7rem}
+.ped-card-cli{flex:1;min-width:0}
+.ped-cli-nome{font-weight:600;color:#ececec;font-size:1rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ped-cli-bairro{color:#a8a8a3;font-size:.82rem;margin-top:.15rem}
+.ped-card-val{text-align:right;font-weight:600;color:#5dcaa5;font-size:1.05rem;white-space:nowrap}
+.ped-card-tam{color:#a8a8a3;font-size:.78rem;font-weight:400;margin-top:.15rem}
+.ped-card-meta{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;font-size:.78rem}
+.ped-st,.ped-pg{display:inline-block;padding:.2rem .55rem;border-radius:10px}
 .ped-st-sugerida{background:#2a2a2b;color:#c9c9c9}
 .ped-st-em_ajuste{background:#3a2d12;color:#e0a83d}
 .ped-st-confirmada{background:#15241d;color:#5dcaa5}
 .ped-st-cobrada{background:#15241d;color:#5dcaa5}
 .ped-st-entregue{background:#0e2a1e;color:#1d9e75}
 .ped-st-cancelada{background:#2a1414;color:#c66}
-.ped-pg{display:inline-block;padding:.2rem .55rem;border-radius:10px;font-size:.78rem}
 .ped-pg-pago{background:#0e2a1e;color:#1d9e75}
 .ped-pg-aguardando{background:#3a2d12;color:#e0a83d}
 .ped-pg-atrasado{background:#2a1414;color:#c66}
 .ped-pg-cancelado{background:#1c1c1f;color:#7a7a7a}
+.ped-meta-sep{color:#7a7a7a;margin-left:auto}
+.ped-meta-data{color:#a8a8a3}
+.ped-vazio{text-align:center;padding:3rem 1rem;color:#a8a8a3}
+@media (max-width:520px){
+  .ped-filtros{padding:.6rem;gap:.4rem}
+  .ped-filtros select{min-width:0;flex:1}
+  .ped-busca{flex-basis:100%}
+  .ped-card{padding:.85rem}
+  .ped-cli-nome{font-size:.95rem}
+  .ped-card-val{font-size:1rem}
+  .ped-meta-sep{margin-left:0}
+}
 </style>
 {% endblock %}"""
 
 _PEDIDO_DETALHE_FORN = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
-  <a href="/painel/fornecedor/pedidos" style="color:#5dcaa5;display:inline-block;margin-bottom:1rem">← voltar pra lista</a>
-  <h2>📋 Pedido #{{ p.id }}</h2>
+  <a href="/painel/fornecedor/pedidos" class="ped-back">← voltar pra lista</a>
+  <h2 style="margin:.2rem 0 1.2rem">Pedido #{{ p.id }}</h2>
 
-  <div class="ped-det-grid">
-    <div>
-      <div class="mut" style="font-size:.82rem;text-transform:uppercase;letter-spacing:.04em;margin-bottom:.3rem">Cliente</div>
-      <div><strong>{{ p.cliente_nome }}</strong></div>
-      {% if p.endereco %}<div class="mut" style="margin-top:.3rem">{{ p.endereco }}</div>{% endif %}
+  <div class="ped-det">
+    <div class="ped-det-bloco">
+      <div class="ped-det-rot">Cliente</div>
+      <div class="ped-det-val">{{ p.cliente_nome }}</div>
+      {% if p.endereco %}<div class="mut" style="margin-top:.3rem;font-size:.9rem">{{ p.endereco }}</div>{% endif %}
       {% if p.cep %}<div class="mut" style="font-size:.85rem">CEP {{ p.cep }}</div>{% endif %}
     </div>
-    <div>
-      <div class="mut" style="font-size:.82rem;text-transform:uppercase;letter-spacing:.04em;margin-bottom:.3rem">Pedido</div>
-      <div>Cesta <strong>{{ p.tamanho_nome }}</strong> — R$ {{ "%.2f"|format(p.preco_reais) }}</div>
-      <div class="mut" style="margin-top:.3rem">Entrega: {{ p.data_entrega or '—' }}</div>
-      <div style="margin-top:.5rem">
-        <span class="ped-st ped-st-{{ p.status }}">{{ p.status }}</span>
+    <div class="ped-det-bloco">
+      <div class="ped-det-rot">Cesta</div>
+      <div class="ped-det-val">{{ p.tamanho_nome }} — R$ {{ "%.2f"|format(p.preco_reais) }}</div>
+      <div class="mut" style="margin-top:.3rem;font-size:.9rem">Entrega: {{ p.data_entrega or 'a definir' }}</div>
+      <div style="margin-top:.6rem">
+        <span class="ped-st ped-st-{{ p.status }}">{{ p.status|replace('_',' ') }}</span>
         <span class="ped-pg ped-pg-{{ p.status_pagamento }}">{{ p.status_pagamento }}</span>
       </div>
     </div>
   </div>
 
-  <h3 style="margin-top:2rem">Itens ({{ p.qtd_itens }})</h3>
+  <h3 style="margin:2rem 0 .8rem;font-size:1.05rem">Itens ({{ p.qtd_itens }})</h3>
   {% if p.itens %}
-  <table class="ped-tab" style="margin-top:.5rem">
-    <thead><tr><th>Grupo</th><th>Produto</th><th>Quantidade</th><th>Preço unit.</th></tr></thead>
-    <tbody>
+  <div class="ped-itens">
     {% for it in p.itens %}
-      <tr>
-        <td class="mut">{{ it.grupo }}</td>
-        <td>{{ it.produto_nome }}</td>
-        <td>{{ it.quantidade }} {{ it.unidade }}</td>
-        <td>R$ {{ "%.2f"|format(it.preco_unit_reais) }}</td>
-      </tr>
+    <div class="ped-item">
+      <div class="ped-item-info">
+        <div class="ped-item-nome">{{ it.produto_nome }}</div>
+        <div class="ped-item-grupo">{{ it.grupo }}</div>
+      </div>
+      <div class="ped-item-qtd">{{ it.quantidade }} {{ it.unidade }}</div>
+    </div>
     {% endfor %}
-    </tbody>
-  </table>
+  </div>
   {% else %}
-  <p class="mut">Cesta ainda sem itens montados.</p>
+  <p class="mut" style="padding:1rem 0">Cesta ainda sem itens montados.</p>
   {% endif %}
 </div>
 
 <style>
-.ped-det-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-top:1rem;padding:1rem;background:#1a1a1c;border:1px solid #2a2a2b;border-radius:8px}
-@media (max-width:600px){.ped-det-grid{grid-template-columns:1fr}}
-.ped-tab{width:100%;border-collapse:collapse;font-size:.92rem}
-.ped-tab th{text-align:left;padding:.6rem .5rem;border-bottom:1px solid #2a2a2b;color:#a8a8a3;font-weight:500;font-size:.82rem;text-transform:uppercase;letter-spacing:.04em}
-.ped-tab td{padding:.7rem .5rem;border-bottom:1px solid #1c1c1f}
+.ped-back{color:#5dcaa5;display:inline-block;margin-bottom:.8rem;font-size:.9rem;text-decoration:none}
+.ped-back:hover{text-decoration:underline}
+.ped-det{display:grid;grid-template-columns:1fr 1fr;gap:1rem;background:#1a1a1c;border:1px solid #2a2a2b;border-radius:8px;padding:1.2rem}
+.ped-det-rot{color:#a8a8a3;font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.4rem}
+.ped-det-val{color:#ececec;font-size:1.05rem;font-weight:600}
 .ped-st,.ped-pg{display:inline-block;padding:.2rem .55rem;border-radius:10px;font-size:.78rem;margin-right:.3rem}
 .ped-st-sugerida{background:#2a2a2b;color:#c9c9c9}
 .ped-st-em_ajuste{background:#3a2d12;color:#e0a83d}
@@ -2084,11 +2063,18 @@ _PEDIDO_DETALHE_FORN = """{% extends "base" %}{% block conteudo %}
 .ped-pg-aguardando{background:#3a2d12;color:#e0a83d}
 .ped-pg-atrasado{background:#2a1414;color:#c66}
 .ped-pg-cancelado{background:#1c1c1f;color:#7a7a7a}
+.ped-itens{display:flex;flex-direction:column;gap:.4rem}
+.ped-item{display:flex;justify-content:space-between;align-items:center;padding:.7rem 1rem;background:#1a1a1c;border:1px solid #2a2a2b;border-radius:6px;gap:1rem}
+.ped-item-info{flex:1;min-width:0}
+.ped-item-nome{color:#ececec;font-weight:500}
+.ped-item-grupo{color:#7a7a7a;font-size:.78rem;text-transform:capitalize;margin-top:.1rem}
+.ped-item-qtd{color:#5dcaa5;font-weight:600;white-space:nowrap}
+@media (max-width:520px){.ped-det{grid-template-columns:1fr}}
 </style>
 {% endblock %}"""
 
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "fornecedor_pedidos": _FORNECEDOR_PEDIDOS, "pedidos_forn": _PEDIDOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 from finance.models import canonizar_categoria, categorias_de
@@ -2773,7 +2759,8 @@ def painel_fornecedor_dados(request: Request,
 
 
 @router.get("/painel/fornecedor/pedidos", response_class=HTMLResponse)
-def painel_fornecedor_pedidos(request: Request, status: str = "", busca: str = ""):
+def painel_fornecedor_pedidos(request: Request, status: str = "",
+                              periodo: str = "", busca: str = ""):
     from finance import pedidos as pedidos_mod
     conta = conta_logada(request)
     if conta is None:
@@ -2782,15 +2769,17 @@ def painel_fornecedor_pedidos(request: Request, status: str = "", busca: str = "
         return RedirectResponse("/painel", status_code=303)
     pool = get_pool()
     status_f = status.strip() or None
+    periodo_f = periodo.strip() or None
     busca_f = busca.strip() or None
     pedidos_lista = pedidos_mod.listar_pedidos(
-        pool, conta[0], status=status_f, busca_cliente=busca_f, limit=200,
+        pool, conta[0], status=status_f, periodo=periodo_f,
+        busca_cliente=busca_f, limit=200,
     )
     contagens = pedidos_mod.contar_por_status(pool, conta[0])
-    return HTMLResponse(_env.get_template("pedidos_forn").render(
-        conta=conta, logado=True, pedidos=pedidos_lista, contagens=contagens,
-        filtro_status=status_f, filtro_busca=busca_f,
-    ))
+    return _render("pedidos_forn", request, conta=conta,
+                   pedidos=pedidos_lista, contagens=contagens,
+                   filtro_status=status_f, filtro_periodo=periodo_f,
+                   filtro_busca=busca_f)
 
 
 @router.get("/painel/fornecedor/pedidos/{pedido_id}", response_class=HTMLResponse)
@@ -2805,9 +2794,7 @@ def painel_fornecedor_pedido_detalhe(request: Request, pedido_id: int):
     if p is None:
         request.session["erro"] = "Pedido não encontrado."
         return RedirectResponse("/painel/fornecedor/pedidos", status_code=303)
-    return HTMLResponse(_env.get_template("pedido_detalhe_forn").render(
-        conta=conta, logado=True, p=p,
-    ))
+    return _render("pedido_detalhe_forn", request, conta=conta, p=p)
 
 
 @router.post("/painel/fornecedor/margem-alvo")

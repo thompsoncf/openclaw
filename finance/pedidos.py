@@ -21,7 +21,7 @@ status. Esta função respeita isso (não retorna custo).
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 
@@ -32,11 +32,42 @@ _STATUS_VALIDOS = {
 }
 
 
+def _intervalo_do_periodo(periodo: str | None) -> tuple[date | None, date | None]:
+    """Traduz atalhos de período em (data_de, data_ate). Devolve (None, None) se
+    o atalho for desconhecido ou ausente — o template não trava por isso.
+
+    Atalhos suportados:
+      - 'proxima'      : próxima entrega (hoje em diante)
+      - 'esta_semana'  : entrega entre hoje e domingo desta semana
+      - 'proxima_semana': segunda a domingo da semana que vem
+      - 'mes'          : hoje + 30 dias
+      - 'passadas'     : últimos 30 dias (entregas já realizadas)
+    """
+    if not periodo:
+        return None, None
+    hoje = date.today()
+    # weekday: segunda=0 ... domingo=6
+    dias_ate_domingo = 6 - hoje.weekday()
+    if periodo == "proxima":
+        return hoje, None
+    if periodo == "esta_semana":
+        return hoje, hoje + timedelta(days=dias_ate_domingo)
+    if periodo == "proxima_semana":
+        prox_seg = hoje + timedelta(days=dias_ate_domingo + 1)
+        return prox_seg, prox_seg + timedelta(days=6)
+    if periodo == "mes":
+        return hoje, hoje + timedelta(days=30)
+    if periodo == "passadas":
+        return hoje - timedelta(days=30), hoje - timedelta(days=1)
+    return None, None
+
+
 def listar_pedidos(
     pool,
     fornecedor_id: int,
     *,
     status: str | None = None,
+    periodo: str | None = None,
     data_de: date | None = None,
     data_ate: date | None = None,
     busca_cliente: str | None = None,
@@ -48,7 +79,10 @@ def listar_pedidos(
       - status: 'sugerida'/'em_ajuste'/'confirmada'/'cobrada'/'entregue'/'cancelada'.
         Aceita também 'em_aberto' (= sugerida OU em_ajuste OU confirmada) como
         atalho pra "ainda não entregou".
-      - data_de / data_ate: filtra por `data_entrega` (inclusive).
+      - periodo: atalho — 'proxima'/'esta_semana'/'proxima_semana'/'mes'/'passadas'.
+        Se passado, sobrescreve data_de/data_ate.
+      - data_de / data_ate: filtra por `data_entrega` (inclusive). Use pra range
+        personalizado quando 'periodo' não cobrir.
       - busca_cliente: substring case-insensitive no nome do cliente.
       - limit: teto pra não estourar tela; default 200 cobre semanas grandes.
 
@@ -57,6 +91,9 @@ def listar_pedidos(
             tamanho_nome, data_entrega, status, qtd_itens, preco_reais,
             status_pagamento, assinatura_id, criada_em.
     """
+    # atalho de período traduz pra data_de/data_ate (sem mexer no SQL)
+    if periodo:
+        data_de, data_ate = _intervalo_do_periodo(periodo)
     where = ["cs.fornecedor_id = %s"]
     params: list[Any] = [fornecedor_id]
 

@@ -193,25 +193,36 @@ def ativar_pos_pagamento(pool, assinatura_id: int) -> bool:
         return cur.rowcount > 0
 
 
-def _link_da_subscription(asaas, sub_id: str):
-    """Pega o link de pagamento da 1ª cobrança de uma subscription do Asaas.
+_PAGO = ("RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH")
 
-    A subscription em si NÃO carrega URL de pagamento — quem tem é a cobrança
-    (payment), no campo 'invoiceUrl' (a página hospedada onde o cliente paga
-    Pix/boleto/cartão). Por isso buscamos os pagamentos da subscription.
 
-    Retorna a URL (str) ou None se a cobrança ainda não foi gerada.
+def _cobranca_da_subscription(asaas, sub_id: str):
+    """Inspeciona a 1ª cobrança de uma subscription do Asaas.
+
+    A subscription em si NÃO carrega status nem URL de pagamento — quem carrega é a
+    cobrança (payment): 'status' diz se já pagou; 'invoiceUrl' é a página hospedada
+    onde o cliente paga Pix/boleto/cartão.
+
+    Retorna a tupla (ja_pago, url):
+      - ja_pago=True  se ALGUMA cobrança está RECEIVED/CONFIRMED (pago de verdade).
+      - url           = link de pagamento da 1ª cobrança pagável, ou None se ainda
+                        não foi gerada.
     """
     try:
         pagamentos = asaas.listar_pagamentos_subscription(sub_id)
     except Exception:
         pagamentos = []
+    # 1) alguma já paga? (reconciliação — não depende de webhook)
+    for p in pagamentos:
+        if p.get("status") in _PAGO:
+            return True, None
+    # 2) senão, pega o link da 1ª cobrança pra pagar
     for p in pagamentos:
         url = (p.get("invoiceUrl") or p.get("bankSlipUrl")
                or p.get("transactionReceiptUrl"))
         if url:
-            return url
-    return None
+            return False, url
+    return False, None
 
 
 def garantir_link_pagamento(pool, cliente_id: int, assinatura_id: int) -> dict:
@@ -228,6 +239,7 @@ def garantir_link_pagamento(pool, cliente_id: int, assinatura_id: int) -> dict:
 
     Retorna:
       {"ok": True,  "url": "<link>"}                 -> redireciona o cliente pro Asaas
+      {"ok": True,  "ja_pago": True}                 -> já estava pago; assinatura ATIVADA
       {"ok": True,  "url": None, "pendente": True}   -> subscription ok, cobrança gerando
       {"ok": False, "erro": "<motivo>"}              -> mostrar na tela
     """
@@ -251,9 +263,12 @@ def garantir_link_pagamento(pool, cliente_id: int, assinatura_id: int) -> dict:
     sub_id, preco_cent, frequencia, tam_nome, forn_nome = a
     preco_reais = int(preco_cent or 0) / 100
 
-    # 2) já existe subscription -> só pega o link da cobrança
+    # 2) já existe subscription -> reconcilia: se já pagou, ativa; senão devolve o link
     if sub_id:
-        url = _link_da_subscription(asaas, sub_id)
+        ja_pago, url = _cobranca_da_subscription(asaas, sub_id)
+        if ja_pago:
+            ativar_pos_pagamento(pool, assinatura_id)
+            return {"ok": True, "ja_pago": True}
         if url:
             return {"ok": True, "url": url}
         return {"ok": True, "url": None, "pendente": True}
@@ -302,7 +317,7 @@ def garantir_link_pagamento(pool, cliente_id: int, assinatura_id: int) -> dict:
         )
         c.commit()
 
-    url = _link_da_subscription(asaas, novo_sub_id)
+    _ja_pago, url = _cobranca_da_subscription(asaas, novo_sub_id)
     if url:
         return {"ok": True, "url": url}
     return {"ok": True, "url": None, "pendente": True}

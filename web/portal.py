@@ -2385,7 +2385,9 @@ def painel_assinatura_pagar(request: Request, assinatura_id: int):
     r = assin_mod.garantir_link_pagamento(get_pool(), conta[0], assinatura_id)
     if r.get("ok") and r.get("url"):
         return RedirectResponse(r["url"], status_code=303)
-    if r.get("ok") and r.get("pendente"):
+    if r.get("ok") and r.get("ja_pago"):
+        request.session["aviso"] = "Pagamento confirmado! Sua assinatura está ativa. 🧺"
+    elif r.get("ok") and r.get("pendente"):
         request.session["erro"] = "Cobrança sendo gerada no Asaas. Tente de novo em alguns segundos."
     else:
         request.session["erro"] = r.get("erro", "Não foi possível gerar o link de pagamento.")

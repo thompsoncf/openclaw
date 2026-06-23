@@ -403,7 +403,7 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
     <span class="fc-tit">Cestas</span>
     <span class="fc-leg">Os tamanhos de cesta que seus clientes podem assinar.</span>
   </button>
-  <a href="/painel/fornecedor/pedidos" class="forn-card" style="text-decoration:none;color:inherit;display:flex;flex-direction:column">
+  <a href="/painel/fornecedor/pedidos" class="forn-card" style="text-decoration:none">
     <span class="fc-ic">📋</span>
     <span class="fc-tit">Pedidos</span>
     <span class="fc-leg">Os pedidos dos seus clientes, prontos pra separar e entregar.</span>
@@ -1934,8 +1934,161 @@ _FORNECEDOR_PEDIDOS = """{% extends "base" %}{% block conteudo %}
 </div>
 {% endblock %}"""
 
+_PEDIDOS_FORN = """{% extends "base" %}{% block conteudo %}
+<div class="card larga">
+  <a href="/painel/fornecedor" style="color:#5dcaa5;display:inline-block;margin-bottom:1rem">← voltar pro painel</a>
+  <h2>📋 Pedidos</h2>
+
+  <div class="ped-abas">
+    <a class="ped-aba ativa">Lista</a>
+    <span class="ped-aba off" title="em breve">Separação</span>
+    <span class="ped-aba off" title="em breve">Embalagem</span>
+    <span class="ped-aba off" title="em breve">Rotas</span>
+  </div>
+
+  <div class="ped-chips">
+    <a class="ped-chip {% if not filtro_status %}on{% endif %}" href="/painel/fornecedor/pedidos">Todos <b>{{ contagens.total }}</b></a>
+    <a class="ped-chip {% if filtro_status=='em_aberto' %}on{% endif %}" href="/painel/fornecedor/pedidos?status=em_aberto">Em aberto <b>{{ contagens.em_aberto }}</b></a>
+    <a class="ped-chip {% if filtro_status=='confirmada' %}on{% endif %}" href="/painel/fornecedor/pedidos?status=confirmada">Confirmadas <b>{{ contagens.confirmada }}</b></a>
+    <a class="ped-chip {% if filtro_status=='cobrada' %}on{% endif %}" href="/painel/fornecedor/pedidos?status=cobrada">Cobradas <b>{{ contagens.cobrada }}</b></a>
+    <a class="ped-chip {% if filtro_status=='entregue' %}on{% endif %}" href="/painel/fornecedor/pedidos?status=entregue">Entregues <b>{{ contagens.entregue }}</b></a>
+    <a class="ped-chip {% if filtro_status=='cancelada' %}on{% endif %}" href="/painel/fornecedor/pedidos?status=cancelada">Canceladas <b>{{ contagens.cancelada }}</b></a>
+  </div>
+
+  <form method="get" action="/painel/fornecedor/pedidos" style="margin:1rem 0;display:flex;gap:.5rem">
+    {% if filtro_status %}<input type="hidden" name="status" value="{{ filtro_status }}">{% endif %}
+    <input name="busca" value="{{ filtro_busca or '' }}" placeholder="Buscar cliente..." style="flex:1">
+    <button>Buscar</button>
+  </form>
+
+  {% if pedidos %}
+  <div style="overflow-x:auto">
+    <table class="ped-tab">
+      <thead><tr>
+        <th>#</th><th>Cliente</th><th>Bairro</th><th>Tamanho</th>
+        <th>Entrega</th><th>Status</th><th>Pagamento</th><th>Itens</th><th>Valor</th><th></th>
+      </tr></thead>
+      <tbody>
+      {% for p in pedidos %}
+        <tr>
+          <td class="mut">{{ p.id }}</td>
+          <td><strong>{{ p.cliente_nome }}</strong></td>
+          <td class="mut">{{ p.bairro or '—' }}</td>
+          <td>{{ p.tamanho_nome }}</td>
+          <td>{{ p.data_entrega or '—' }}</td>
+          <td><span class="ped-st ped-st-{{ p.status }}">{{ p.status }}</span></td>
+          <td><span class="ped-pg ped-pg-{{ p.status_pagamento }}">{{ p.status_pagamento }}</span></td>
+          <td class="mut">{{ p.qtd_itens }}</td>
+          <td><strong>R$ {{ "%.2f"|format(p.preco_reais) }}</strong></td>
+          <td><a href="/painel/fornecedor/pedidos/{{ p.id }}" style="color:#5dcaa5">ver →</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="mut" style="text-align:center;padding:2rem 1rem">
+    Nenhum pedido {% if filtro_status %}neste filtro{% else %}ainda{% endif %}.
+    {% if not filtro_status %}<br>Os pedidos aparecem aqui quando a janela semanal monta as cestas dos seus clientes.{% endif %}
+  </p>
+  {% endif %}
+</div>
+
+<style>
+.ped-abas{display:flex;gap:.4rem;border-bottom:1px solid #2a2a2b;margin:1rem 0}
+.ped-aba{padding:.5rem 1rem;color:#a8a8a3;border-bottom:2px solid transparent;cursor:default}
+.ped-aba.ativa{color:#5dcaa5;border-color:#5dcaa5;font-weight:600}
+.ped-aba.off{color:#5a5a5a;font-size:.9rem}
+.ped-chips{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:1rem}
+.ped-chip{padding:.35rem .7rem;border:1px solid #2a2a2b;border-radius:14px;font-size:.85rem;color:#a8a8a3;text-decoration:none;background:#1a1a1c}
+.ped-chip:hover{border-color:#5dcaa5;color:#ececec}
+.ped-chip.on{background:#15241d;border-color:#5dcaa5;color:#5dcaa5}
+.ped-chip b{margin-left:.3rem;color:#ececec}
+.ped-chip.on b{color:#5dcaa5}
+.ped-tab{width:100%;border-collapse:collapse;font-size:.92rem}
+.ped-tab th{text-align:left;padding:.6rem .5rem;border-bottom:1px solid #2a2a2b;color:#a8a8a3;font-weight:500;font-size:.82rem;text-transform:uppercase;letter-spacing:.04em}
+.ped-tab td{padding:.7rem .5rem;border-bottom:1px solid #1c1c1f}
+.ped-tab tr:hover td{background:#15241d}
+.ped-st{display:inline-block;padding:.2rem .55rem;border-radius:10px;font-size:.78rem;background:#1c1c1f;color:#a8a8a3}
+.ped-st-sugerida{background:#2a2a2b;color:#c9c9c9}
+.ped-st-em_ajuste{background:#3a2d12;color:#e0a83d}
+.ped-st-confirmada{background:#15241d;color:#5dcaa5}
+.ped-st-cobrada{background:#15241d;color:#5dcaa5}
+.ped-st-entregue{background:#0e2a1e;color:#1d9e75}
+.ped-st-cancelada{background:#2a1414;color:#c66}
+.ped-pg{display:inline-block;padding:.2rem .55rem;border-radius:10px;font-size:.78rem}
+.ped-pg-pago{background:#0e2a1e;color:#1d9e75}
+.ped-pg-aguardando{background:#3a2d12;color:#e0a83d}
+.ped-pg-atrasado{background:#2a1414;color:#c66}
+.ped-pg-cancelado{background:#1c1c1f;color:#7a7a7a}
+</style>
+{% endblock %}"""
+
+_PEDIDO_DETALHE_FORN = """{% extends "base" %}{% block conteudo %}
+<div class="card larga">
+  <a href="/painel/fornecedor/pedidos" style="color:#5dcaa5;display:inline-block;margin-bottom:1rem">← voltar pra lista</a>
+  <h2>📋 Pedido #{{ p.id }}</h2>
+
+  <div class="ped-det-grid">
+    <div>
+      <div class="mut" style="font-size:.82rem;text-transform:uppercase;letter-spacing:.04em;margin-bottom:.3rem">Cliente</div>
+      <div><strong>{{ p.cliente_nome }}</strong></div>
+      {% if p.endereco %}<div class="mut" style="margin-top:.3rem">{{ p.endereco }}</div>{% endif %}
+      {% if p.cep %}<div class="mut" style="font-size:.85rem">CEP {{ p.cep }}</div>{% endif %}
+    </div>
+    <div>
+      <div class="mut" style="font-size:.82rem;text-transform:uppercase;letter-spacing:.04em;margin-bottom:.3rem">Pedido</div>
+      <div>Cesta <strong>{{ p.tamanho_nome }}</strong> — R$ {{ "%.2f"|format(p.preco_reais) }}</div>
+      <div class="mut" style="margin-top:.3rem">Entrega: {{ p.data_entrega or '—' }}</div>
+      <div style="margin-top:.5rem">
+        <span class="ped-st ped-st-{{ p.status }}">{{ p.status }}</span>
+        <span class="ped-pg ped-pg-{{ p.status_pagamento }}">{{ p.status_pagamento }}</span>
+      </div>
+    </div>
+  </div>
+
+  <h3 style="margin-top:2rem">Itens ({{ p.qtd_itens }})</h3>
+  {% if p.itens %}
+  <table class="ped-tab" style="margin-top:.5rem">
+    <thead><tr><th>Grupo</th><th>Produto</th><th>Quantidade</th><th>Preço unit.</th></tr></thead>
+    <tbody>
+    {% for it in p.itens %}
+      <tr>
+        <td class="mut">{{ it.grupo }}</td>
+        <td>{{ it.produto_nome }}</td>
+        <td>{{ it.quantidade }} {{ it.unidade }}</td>
+        <td>R$ {{ "%.2f"|format(it.preco_unit_reais) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="mut">Cesta ainda sem itens montados.</p>
+  {% endif %}
+</div>
+
+<style>
+.ped-det-grid{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-top:1rem;padding:1rem;background:#1a1a1c;border:1px solid #2a2a2b;border-radius:8px}
+@media (max-width:600px){.ped-det-grid{grid-template-columns:1fr}}
+.ped-tab{width:100%;border-collapse:collapse;font-size:.92rem}
+.ped-tab th{text-align:left;padding:.6rem .5rem;border-bottom:1px solid #2a2a2b;color:#a8a8a3;font-weight:500;font-size:.82rem;text-transform:uppercase;letter-spacing:.04em}
+.ped-tab td{padding:.7rem .5rem;border-bottom:1px solid #1c1c1f}
+.ped-st,.ped-pg{display:inline-block;padding:.2rem .55rem;border-radius:10px;font-size:.78rem;margin-right:.3rem}
+.ped-st-sugerida{background:#2a2a2b;color:#c9c9c9}
+.ped-st-em_ajuste{background:#3a2d12;color:#e0a83d}
+.ped-st-confirmada{background:#15241d;color:#5dcaa5}
+.ped-st-cobrada{background:#15241d;color:#5dcaa5}
+.ped-st-entregue{background:#0e2a1e;color:#1d9e75}
+.ped-st-cancelada{background:#2a1414;color:#c66}
+.ped-pg-pago{background:#0e2a1e;color:#1d9e75}
+.ped-pg-aguardando{background:#3a2d12;color:#e0a83d}
+.ped-pg-atrasado{background:#2a1414;color:#c66}
+.ped-pg-cancelado{background:#1c1c1f;color:#7a7a7a}
+</style>
+{% endblock %}"""
+
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "fornecedor_pedidos": _FORNECEDOR_PEDIDOS,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "fornecedor_pedidos": _FORNECEDOR_PEDIDOS, "pedidos_forn": _PEDIDOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 from finance.models import canonizar_categoria, categorias_de
@@ -2620,24 +2773,40 @@ def painel_fornecedor_dados(request: Request,
 
 
 @router.get("/painel/fornecedor/pedidos", response_class=HTMLResponse)
-def painel_fornecedor_pedidos(request: Request, status: str = "", desde: str = "", ate: str = ""):
+def painel_fornecedor_pedidos(request: Request, status: str = "", busca: str = ""):
+    from finance import pedidos as pedidos_mod
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
     if not conta[8]:
-        return _NEGADO
-    fornecedor_id = conta[0]
+        return RedirectResponse("/painel", status_code=303)
     pool = get_pool()
-    from finance.pedidos import listar_pedidos, contar_por_status
-    from datetime import datetime as dt
-    filt_status = status if status and status != "todos" else None
-    filt_desde = dt.fromisoformat(desde).date() if desde else None
-    filt_ate = dt.fromisoformat(ate).date() if ate else None
-    pedidos = listar_pedidos(pool, fornecedor_id, status=filt_status, data_de=filt_desde, data_ate=filt_ate, limit=200)
-    contagem = contar_por_status(pool, fornecedor_id)
-    return HTMLResponse(_env.get_template("fornecedor_pedidos").render(
-        conta=conta, logado=True, pedidos=pedidos, contagem=contagem,
-        status_filtro=status, desde=desde, ate=ate,
+    status_f = status.strip() or None
+    busca_f = busca.strip() or None
+    pedidos_lista = pedidos_mod.listar_pedidos(
+        pool, conta[0], status=status_f, busca_cliente=busca_f, limit=200,
+    )
+    contagens = pedidos_mod.contar_por_status(pool, conta[0])
+    return HTMLResponse(_env.get_template("pedidos_forn").render(
+        conta=conta, logado=True, pedidos=pedidos_lista, contagens=contagens,
+        filtro_status=status_f, filtro_busca=busca_f,
+    ))
+
+
+@router.get("/painel/fornecedor/pedidos/{pedido_id}", response_class=HTMLResponse)
+def painel_fornecedor_pedido_detalhe(request: Request, pedido_id: int):
+    from finance import pedidos as pedidos_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    if not conta[8]:
+        return RedirectResponse("/painel", status_code=303)
+    p = pedidos_mod.detalhe_pedido(get_pool(), conta[0], pedido_id)
+    if p is None:
+        request.session["erro"] = "Pedido não encontrado."
+        return RedirectResponse("/painel/fornecedor/pedidos", status_code=303)
+    return HTMLResponse(_env.get_template("pedido_detalhe_forn").render(
+        conta=conta, logado=True, p=p,
     ))
 
 

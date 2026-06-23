@@ -1893,7 +1893,7 @@ _PEDIDOS_FORN = """{% extends "base" %}{% block conteudo %}
     <a href="/painel/fornecedor/pedidos" class="ped-aba ativa">Lista</a>
     <a href="/painel/fornecedor/separacao" class="ped-aba">Separação</a>
     <a href="/painel/fornecedor/embalagem" class="ped-aba">Embalagem</a>
-    <span class="ped-aba off" title="em breve">Rotas</span>
+    <a href="/painel/fornecedor/rotas" class="ped-aba">Rotas</a>
   </div>
 
   <form method="get" action="/painel/fornecedor/pedidos" class="ped-filtros">
@@ -2096,7 +2096,7 @@ _SEPARACAO_FORN = """{% extends "base" %}{% block conteudo %}
     <a href="/painel/fornecedor/pedidos" class="ped-aba">Lista</a>
     <a href="/painel/fornecedor/separacao" class="ped-aba ativa">Separação</a>
     <a href="/painel/fornecedor/embalagem" class="ped-aba">Embalagem</a>
-    <span class="ped-aba off" title="em breve">Rotas</span>
+    <a href="/painel/fornecedor/rotas" class="ped-aba">Rotas</a>
   </div>
 
   <!-- FILTRO DE PERÍODO -->
@@ -2260,7 +2260,7 @@ _EMBALAGEM_FORN = """{% extends "base" %}{% block conteudo %}
     <a href="/painel/fornecedor/pedidos" class="ped-aba">Lista</a>
     <a href="/painel/fornecedor/separacao" class="ped-aba">Separação</a>
     <a href="/painel/fornecedor/embalagem" class="ped-aba ativa">Embalagem</a>
-    <span class="ped-aba off" title="em breve">Rotas</span>
+    <a href="/painel/fornecedor/rotas" class="ped-aba">Rotas</a>
   </div>
 
   <!-- FILTRO -->
@@ -2422,8 +2422,158 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#fff;color:#000;m
 </div>
 </body></html>"""
 
+_ROTAS_FORN = """{% extends "base" %}{% block conteudo %}
+<div class="card larga">
+  <a href="/painel/fornecedor" class="ped-back">← voltar</a>
+  <h2 style="margin:.2rem 0 1.2rem">📋 Pedidos</h2>
+
+  <!-- SUB-ABAS -->
+  <div class="ped-abas">
+    <a href="/painel/fornecedor/pedidos" class="ped-aba">Lista</a>
+    <a href="/painel/fornecedor/separacao" class="ped-aba">Separação</a>
+    <a href="/painel/fornecedor/embalagem" class="ped-aba">Embalagem</a>
+    <a href="/painel/fornecedor/rotas" class="ped-aba ativa">Rotas</a>
+  </div>
+
+  <!-- FILTRO -->
+  <form method="get" action="/painel/fornecedor/rotas" class="sep-filtro">
+    <select name="periodo" onchange="this.form.submit()">
+      <option value="esta_semana"    {% if periodo=='esta_semana' %}selected{% endif %}>Esta semana</option>
+      <option value="proxima_semana" {% if periodo=='proxima_semana' %}selected{% endif %}>Próxima semana</option>
+      <option value="proxima"        {% if periodo=='proxima' %}selected{% endif %}>Próximas entregas</option>
+      <option value="mes"            {% if periodo=='mes' %}selected{% endif %}>Próximos 30 dias</option>
+    </select>
+    {% if dados.data_de and dados.data_ate %}
+    <span class="sep-range">{{ dados.data_de }} → {{ dados.data_ate }}</span>
+    {% endif %}
+  </form>
+
+  <!-- RESUMO -->
+  <div class="sep-resumo" style="grid-template-columns:repeat(4,1fr)">
+    <div class="sep-card">
+      <div class="sep-card-num">{{ dados.qtd_grupos }}</div>
+      <div class="sep-card-rot">bairro{% if dados.qtd_grupos != 1 %}s{% endif %}</div>
+    </div>
+    <div class="sep-card">
+      <div class="sep-card-num">{{ dados.qtd_total }}</div>
+      <div class="sep-card-rot">cesta{% if dados.qtd_total != 1 %}s{% endif %}</div>
+    </div>
+    <div class="sep-card">
+      <div class="sep-card-num" style="color:#e0a83d">{{ dados.qtd_pendentes }}</div>
+      <div class="sep-card-rot">pendentes</div>
+    </div>
+    <div class="sep-card">
+      <div class="sep-card-num" style="color:#1d9e75">{{ dados.qtd_entregues }}</div>
+      <div class="sep-card-rot">entregues</div>
+    </div>
+  </div>
+
+  {% if dados.qtd_nao_embaladas %}
+  <div class="sep-alerta">
+    ⚠️ <strong>{{ dados.qtd_nao_embaladas }}</strong> cesta{% if dados.qtd_nao_embaladas != 1 %}s ainda não foram{% else %} ainda não foi{% endif %} embalada{% if dados.qtd_nao_embaladas != 1 %}s{% endif %}.
+    <a href="/painel/fornecedor/embalagem" class="sep-alerta-link">embalar →</a>
+  </div>
+  {% endif %}
+
+  {% if dados.grupos %}
+  {% for g in dados.grupos %}
+  <div class="rot-grupo">
+    <h3 class="rot-grupo-tit">
+      📍 {{ g.bairro }}
+      <span class="rot-grupo-meta">{{ g.qtd }} cesta{% if g.qtd != 1 %}s{% endif %}{% if g.qtd_pendentes %} · <span style="color:#e0a83d">{{ g.qtd_pendentes }} pendente{% if g.qtd_pendentes != 1 %}s{% endif %}</span>{% endif %}</span>
+    </h3>
+    <div class="rot-cestas">
+      {% for c in g.cestas %}
+      <div class="rot-cesta {% if c.esta_entregue %}rot-c-entregue{% elif not c.esta_embalada %}rot-c-nemb{% endif %}">
+        <div class="rot-c-info">
+          <div class="rot-c-nome">
+            🧺 {{ c.tamanho_nome }} — {{ c.cliente_nome }}
+            {% if not c.esta_embalada and not c.esta_entregue %}<span class="rot-tag-nemb">⚠ não embalada</span>{% endif %}
+          </div>
+          {% if c.endereco %}<div class="rot-c-end">{{ c.endereco }}</div>{% endif %}
+          <div class="rot-c-meta">
+            {% if c.cep %}📮 {{ c.cep }}{% endif %}
+            {% if c.qtd_itens %} · {{ c.qtd_itens }} item{% if c.qtd_itens != 1 %}s{% endif %}{% endif %}
+            {% if c.whatsapp %} · 📱 {{ c.whatsapp }}{% endif %}
+          </div>
+        </div>
+        <div class="rot-c-acoes">
+          {% if c.esta_entregue %}
+            <div class="rot-pronto">✓ entregue<br><small>{{ c.entregue_em }}</small></div>
+            <form method="post" action="/painel/fornecedor/rotas/{{ c.id }}/desmarcar" style="display:inline">
+              <input type="hidden" name="periodo" value="{{ periodo }}">
+              <button class="emb-btn-desfazer" title="desfazer">↶</button>
+            </form>
+          {% else %}
+            <form method="post" action="/painel/fornecedor/rotas/{{ c.id }}/entregar" style="display:inline">
+              <input type="hidden" name="periodo" value="{{ periodo }}">
+              <button class="rot-btn-entregar">✓ Entregue</button>
+            </form>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+
+  {% else %}
+  <div class="ped-vazio">
+    <div style="font-size:2.5rem;opacity:.4;margin-bottom:.5rem">🚚</div>
+    <p>Sem entregas pra esse período.</p>
+    <p class="mut" style="margin-top:.5rem;font-size:.9rem">Cestas confirmadas viram a rota de entrega.</p>
+  </div>
+  {% endif %}
+</div>
+
+<style>
+.ped-back{color:#5dcaa5;display:inline-block;margin-bottom:.8rem;font-size:.9rem;text-decoration:none}
+.ped-back:hover{text-decoration:underline}
+.ped-abas{display:flex;gap:0;border-bottom:1px solid #2a2a2b;margin-bottom:1rem;overflow-x:auto}
+.ped-aba{padding:.55rem 1rem;color:#a8a8a3;border-bottom:2px solid transparent;text-decoration:none;font-size:.92rem;white-space:nowrap}
+.ped-aba:hover{color:#ececec}
+.ped-aba.ativa{color:#5dcaa5;border-color:#5dcaa5;font-weight:600}
+.ped-aba.off{color:#5a5a5a;font-size:.88rem;cursor:default}
+.sep-filtro{display:flex;align-items:center;gap:.8rem;margin-bottom:1rem;padding:.7rem .9rem;background:#1a1a1c;border:1px solid #2a2a2b;border-radius:8px;flex-wrap:wrap}
+.sep-filtro select{background:#0a0a0a;color:#ececec;border:1px solid #2a2a2b;border-radius:6px;padding:.5rem .7rem;font-size:.9rem;cursor:pointer}
+.sep-range{color:#a8a8a3;font-size:.85rem}
+.sep-resumo{display:grid;gap:.6rem;margin-bottom:1rem}
+.sep-card{background:#1a1a1c;border:1px solid #2a2a2b;border-radius:8px;padding:.9rem;text-align:center}
+.sep-card-num{color:#5dcaa5;font-size:1.5rem;font-weight:700;line-height:1.1}
+.sep-card-rot{color:#a8a8a3;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;margin-top:.3rem}
+.sep-alerta{background:#3a2d12;border:1px solid #6b5320;border-radius:8px;padding:.8rem 1rem;margin-bottom:1rem;color:#e0a83d;font-size:.9rem}
+.sep-alerta-link{color:#e0a83d;text-decoration:underline;margin-left:.4rem;white-space:nowrap}
+.rot-grupo{margin-bottom:1.5rem}
+.rot-grupo-tit{color:#5dcaa5;font-size:1rem;margin:0 0 .6rem;padding-bottom:.4rem;border-bottom:1px solid #2a2a2b;display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.5rem}
+.rot-grupo-meta{color:#a8a8a3;font-size:.82rem;font-weight:400}
+.rot-cestas{display:flex;flex-direction:column;gap:.5rem}
+.rot-cesta{display:flex;justify-content:space-between;gap:1rem;background:#1a1a1c;border:1px solid #2a2a2b;border-radius:6px;padding:.9rem 1rem;align-items:flex-start;flex-wrap:wrap}
+.rot-c-entregue{border-left:3px solid #1d9e75;opacity:.65}
+.rot-c-nemb{border-left:3px solid #e0a83d}
+.rot-c-info{flex:1;min-width:200px}
+.rot-c-nome{color:#ececec;font-weight:600;font-size:.95rem}
+.rot-tag-nemb{display:inline-block;color:#e0a83d;background:#3a2d12;font-size:.7rem;font-weight:500;padding:.15rem .4rem;border-radius:4px;margin-left:.4rem;vertical-align:middle}
+.rot-c-end{color:#a8a8a3;font-size:.85rem;margin-top:.25rem}
+.rot-c-meta{color:#7a7a7a;font-size:.78rem;margin-top:.2rem}
+.rot-c-acoes{display:flex;gap:.4rem;align-items:flex-start}
+.rot-btn-entregar{background:#15241d;color:#5dcaa5;border:1px solid #5dcaa5;border-radius:6px;padding:.5rem .9rem;cursor:pointer;font-size:.88rem;font-weight:500;white-space:nowrap}
+.rot-btn-entregar:hover{background:#1d2e25}
+.rot-pronto{color:#1d9e75;font-weight:600;font-size:.85rem;text-align:center;line-height:1.3}
+.rot-pronto small{color:#7a7a7a;font-size:.7rem;font-weight:400}
+.emb-btn-desfazer{background:transparent;color:#7a7a7a;border:1px solid #2a2a2b;border-radius:6px;padding:.4rem .55rem;cursor:pointer;font-size:.9rem}
+.emb-btn-desfazer:hover{color:#c66;border-color:#3a2020}
+.ped-vazio{text-align:center;padding:3rem 1rem;color:#a8a8a3}
+@media (max-width:520px){
+  .sep-resumo{grid-template-columns:repeat(2,1fr) !important;gap:.4rem}
+  .rot-cesta{flex-direction:column}
+  .rot-c-acoes{width:100%}
+  .rot-btn-entregar{flex:1}
+}
+</style>
+{% endblock %}"""
+
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 from finance.models import canonizar_categoria, categorias_de
@@ -3218,6 +3368,51 @@ def painel_fornecedor_etiqueta(request: Request, cesta_id: int):
         request.session["erro"] = "Cesta não encontrada."
         return RedirectResponse("/painel/fornecedor/embalagem", status_code=303)
     return HTMLResponse(_env.get_template("etiqueta_forn").render(e=e))
+
+
+@router.get("/painel/fornecedor/rotas", response_class=HTMLResponse)
+def painel_fornecedor_rotas(request: Request, periodo: str = "proxima_semana"):
+    from finance import pedidos as pedidos_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    if not conta[8]:  # eh_fornecedor
+        return RedirectResponse("/painel", status_code=303)
+    periodo_f = (periodo or "proxima_semana").strip() or "proxima_semana"
+    dados = pedidos_mod.listar_para_rotas(get_pool(), conta[0], periodo=periodo_f)
+    return _render("rotas_forn", request, conta=conta, dados=dados, periodo=periodo_f)
+
+
+@router.post("/painel/fornecedor/rotas/{cesta_id}/entregar")
+def painel_fornecedor_marcar_entregue(request: Request, cesta_id: int,
+                                       periodo: str = Form("proxima_semana")):
+    from finance import pedidos as pedidos_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    if not conta[8]:
+        return RedirectResponse("/painel", status_code=303)
+    ok = pedidos_mod.marcar_entregue(get_pool(), conta[0], cesta_id)
+    if not ok:
+        request.session["erro"] = "Cesta não encontrada ou status inválido."
+    return RedirectResponse(
+        f"/painel/fornecedor/rotas?periodo={periodo}", status_code=303,
+    )
+
+
+@router.post("/painel/fornecedor/rotas/{cesta_id}/desmarcar")
+def painel_fornecedor_desmarcar_entregue(request: Request, cesta_id: int,
+                                          periodo: str = Form("proxima_semana")):
+    from finance import pedidos as pedidos_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    if not conta[8]:
+        return RedirectResponse("/painel", status_code=303)
+    pedidos_mod.desmarcar_entregue(get_pool(), conta[0], cesta_id)
+    return RedirectResponse(
+        f"/painel/fornecedor/rotas?periodo={periodo}", status_code=303,
+    )
 
 
 @router.post("/painel/fornecedor/margem-alvo")

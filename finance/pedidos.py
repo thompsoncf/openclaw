@@ -579,6 +579,185 @@ def dados_etiqueta(pool, fornecedor_id: int, cesta_id: int) -> dict[str, Any] | 
 
 # ---------- helpers privados ----------
 
+def listar_para_rotas(
+    pool,
+    fornecedor_id: int,
+    *,
+    periodo: str = "proxima_semana",
+    incluir_entregues: bool = True,
+) -> dict[str, Any]:
+    """Rotas — cestas agrupadas por bairro pra entregar.
+
+    TODAS as confirmadas entram (embalada ou não). As que ainda não estão
+    embaladas vêm marcadas pra alertar o fornecedor ("⚠ não embalada").
+
+    Grupos formados pelo bairro extraído do endereço; clientes sem bairro
+    reconhecível vão num grupo "(sem bairro)" no fim.
+
+    Dentro de cada grupo, ordem por embalada (não-embaladas primeiro — alerta)
+    e depois por nome do cliente.
+
+    Retorna {
+      periodo, data_de, data_ate,
+      qtd_total, qtd_entregues, qtd_pendentes, qtd_nao_embaladas,
+      grupos: [
+        {bairro, qtd, cestas:[{id, cliente_nome, endereco, bairro, cep,
+                                tamanho_nome, data_entrega,
+                                esta_embalada, esta_entregue,
+                                embalada_em, entregue_em,
+                                qtd_itens, whatsapp}]}
+      ]
+    }
+    """
+    data_de, data_ate = _intervalo_do_periodo(periodo)
+
+    where_data = ""
+    params_data: list[Any] = []
+    if data_de is not None:
+        where_data += " and cs.data_entrega >= %s"
+        params_data.append(data_de)
+    if data_ate is not None:
+        where_data += " and cs.data_entrega <= %s"
+        params_data.append(data_ate)
+
+    where_entr = "" if incluir_entregues else " and cs.entregue_em is null"
+
+    with pool.connection() as c:
+        rows = c.execute(
+            f"""select cs.id, cs.cliente_id,
+                       coalesce(cli.nome, '(cliente '||cs.cliente_id||')'),
+                       cli.endereco, cli.cep,
+                       coalesce(ct.nome, '?'),
+                       cs.data_entrega, cs.embalada_em, cs.entregue_em,
+                       (select count(*) from cesta_itens ci where ci.cesta_id = cs.id),
+                       (select whatsapp_id from membros m
+                          where m.conta_id = cs.cliente_id and m.papel = 'dono'
+                          limit 1)
+                 from cesta_semana cs
+                 left join contas cli on cli.id = cs.cliente_id
+                 left join assinaturas a on a.id = cs.assinatura_id
+                 left join cesta_tamanhos ct on ct.id = a.tamanho_id
+                where cs.fornecedor_id = %s
+                  and cs.status in ('confirmada','cobrada','entregue')
+                  {where_data}{where_entr}
+                order by cs.data_entrega, cli.nome""",
+            (fornecedor_id, *params_data),
+        ).fetchall()
+
+    grupos_dict: dict[str, list[dict[str, Any]]] = {}
+    qtd_total = 0
+    qtd_entregues = 0
+    qtd_nao_embaladas = 0
+    for (cid, cli_id, cli_nome, end, cep, tam, data_ent,
+         embalada, entregue, qtd_itens, wpp) in rows:
+        bairro = _extrair_bairro(end) or "(sem bairro)"
+        esta_embalada = embalada is not None
+        esta_entregue = entregue is not None
+        qtd_total += 1
+        if esta_entregue:
+            qtd_entregues += 1
+        if not esta_embalada and not esta_entregue:
+            qtd_nao_embaladas += 1
+
+        grupos_dict.setdefault(bairro, []).append({
+            "id": int(cid),
+            "cliente_id": int(cli_id),
+            "cliente_nome": cli_nome,
+            "endereco": end or "",
+            "bairro": bairro,
+            "cep": cep or "",
+            "tamanho_nome": tam,
+            "data_entrega": data_ent.isoformat() if data_ent else None,
+            "esta_embalada": esta_embalada,
+            "esta_entregue": esta_entregue,
+            "embalada_em": (
+                embalada.strftime("%d/%m %H:%M")
+                if isinstance(embalada, datetime) else None
+            ),
+            "entregue_em": (
+                entregue.strftime("%d/%m %H:%M")
+                if isinstance(entregue, datetime) else None
+            ),
+            "qtd_itens": int(qtd_itens or 0),
+            "whatsapp": wpp,
+        })
+
+    # ordena dentro de cada grupo: pendentes primeiro, embaladas depois, entregues no fim
+    def _ordem(c: dict[str, Any]) -> tuple[int, str]:
+        if c["esta_entregue"]:
+            return (2, c["cliente_nome"])
+        if c["esta_embalada"]:
+            return (1, c["cliente_nome"])
+        return (0, c["cliente_nome"])
+
+    grupos_lista = []
+    # bairros conhecidos primeiro (alfabético), "(sem bairro)" no fim
+    bairros = sorted(k for k in grupos_dict.keys() if k != "(sem bairro)")
+    if "(sem bairro)" in grupos_dict:
+        bairros.append("(sem bairro)")
+    for b in bairros:
+        cestas_b = sorted(grupos_dict[b], key=_ordem)
+        grupos_lista.append({
+            "bairro": b,
+            "qtd": len(cestas_b),
+            "qtd_pendentes": sum(1 for x in cestas_b if not x["esta_entregue"]),
+            "cestas": cestas_b,
+        })
+
+    return {
+        "periodo": periodo,
+        "data_de": data_de.isoformat() if data_de else None,
+        "data_ate": data_ate.isoformat() if data_ate else None,
+        "qtd_total": qtd_total,
+        "qtd_entregues": qtd_entregues,
+        "qtd_pendentes": qtd_total - qtd_entregues,
+        "qtd_nao_embaladas": qtd_nao_embaladas,
+        "qtd_grupos": len(grupos_lista),
+        "grupos": grupos_lista,
+    }
+
+
+def marcar_entregue(pool, fornecedor_id: int, cesta_id: int) -> bool:
+    """Marca uma cesta como entregue: status='entregue' + entregue_em=now().
+
+    Idempotente. Só atualiza se a cesta é do fornecedor E está em
+    confirmada/cobrada/entregue (não permite entregar uma cancelada).
+    """
+    with pool.connection() as c:
+        r = c.execute(
+            """update cesta_semana
+                  set status = 'entregue',
+                      entregue_em = coalesce(entregue_em, now())
+                where id = %s and fornecedor_id = %s
+                  and status in ('confirmada','cobrada','entregue')
+                returning id""",
+            (cesta_id, fornecedor_id),
+        ).fetchone()
+        c.commit()
+    return r is not None
+
+
+def desmarcar_entregue(pool, fornecedor_id: int, cesta_id: int) -> bool:
+    """Desfaz a entrega: volta status pra 'confirmada' e entregue_em=NULL.
+
+    Útil pra correção de erro humano (marcou cliente errado, etc).
+    """
+    with pool.connection() as c:
+        r = c.execute(
+            """update cesta_semana
+                  set status = 'confirmada',
+                      entregue_em = null
+                where id = %s and fornecedor_id = %s
+                  and status = 'entregue'
+                returning id""",
+            (cesta_id, fornecedor_id),
+        ).fetchone()
+        c.commit()
+    return r is not None
+
+
+# ---------- helpers privados ----------
+
 def _status_pagamento(status_cesta: str, status_assinatura: str | None) -> str:
     """Resume o "estado do dinheiro" do pedido pro fornecedor.
 

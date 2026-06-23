@@ -1775,6 +1775,12 @@ _MEU_PLANO = """{% extends "base" %}{% block conteudo %}
 <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1rem;margin-bottom:.8rem">
   <strong>{{ a.tamanho_nome }}</strong> — R$ {{ "%.2f"|format(a.preco_centavos/100) }}
   <div class="mut" style="font-size:.85rem">De: {{ a.fornecedor_nome }} · {{ a.frequencia }} · {{ a.status }}</div>
+  {% if a.status == 'aguardando_pagamento' %}
+  <div style="border-left:3px solid #e0a83d;background:#1a1712;border-radius:6px;padding:.7rem .9rem;margin-top:.7rem">
+    <div style="font-size:.9rem;color:#e0a83d;margin-bottom:.45rem">⏳ Aguardando pagamento</div>
+    <a href="/painel/assinaturas/{{ a.id }}/pagar" style="display:inline-block;background:#5dcaa5;color:#0a0a0a;padding:.45rem .9rem;border-radius:6px;text-decoration:none;font-weight:600;font-size:.85rem">Pagar agora →</a>
+  </div>
+  {% endif %}
   <!-- Trocar de tamanho -->
   <form method="post" action="/painel/meu-plano/trocar" style="margin-top:.6rem">
     <input type="hidden" name="assinatura_id" value="{{ a.id }}">

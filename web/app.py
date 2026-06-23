@@ -394,60 +394,61 @@ def _normalizar_br(numero: str) -> str:
 
 @app.post("/webhook/asaas")
 async def webhook_asaas(request: Request):
+    """Webhook do Asaas: ativa CESTA (externalReference 'cesta:<id>') ou CONTA do app
+    (externalReference '<conta_id>'). Parsing robusto (form-urlencoded OU json),
+    confirmação na API e idempotência. Sempre responde 200 pra não penalizar no Asaas.
+    """
     import logging
     _logw = logging.getLogger("openclaw.asaas")
-    # VALIDAÇÃO ROBUSTA: só rejeita se há token configurado E ele não bate
-    # (Asaas sandbox não manda header; produção manda. Responde sempre 200 pra não penalizar.)
+    # VALIDAÇÃO: só rejeita se há token configurado E ele não bate
     _tok_recv = (request.headers.get("asaas-access-token", "") or "").strip()
     _tok_esp = (os.environ.get("ASAAS_WEBHOOK_TOKEN", "") or "").strip()
-    _logw.debug("ASAAS token recebido len=%s | esperado len=%s",
-                  len(_tok_recv), len(_tok_esp))
-    # só rejeita se EU configurei token (produção) E ele não bate
     if _tok_esp and _tok_recv != _tok_esp:
         _logw.warning("ASAAS token invalido (configurado mas nao bate) — ignorando webhook")
-        return Response(status_code=200)  # sempre 200 pra não penalizar no Asaas
+        return Response(status_code=200)
 
-    # corpo pode vir VAZIO (ping/teste do Asaas) -> nao quebra, responde 200
+    # corpo pode vir VAZIO (ping/teste) -> responde 200
     try:
         _raw = await request.body()
         if not _raw or not _raw.strip():
-            _logw.debug("ASAAS webhook com corpo vazio (ping/teste) - respondendo 200")
             return Response(status_code=200)
-
         _ct = (request.headers.get("content-type", "") or "").lower()
         import json as _json
-
         if "application/x-www-form-urlencoded" in _ct:
-            # Asaas manda o JSON embrulhado: body = "data=<json url-encoded>"
             from urllib.parse import parse_qs
             _campos = parse_qs(_raw.decode("utf-8", "replace"))
             _payload = (_campos.get("data") or _campos.get("payload") or [""])[0]
             if not _payload.strip():
-                _logw.warning("ASAAS form sem campo data - respondendo 200")
                 return Response(status_code=200)
             body = _json.loads(_payload)
         else:
-            # JSON puro (utf-8-sig remove BOM se houver)
             body = _json.loads(_raw.decode("utf-8-sig"))
     except Exception as _e:  # noqa: BLE001
         _logw.warning("ASAAS webhook corpo invalido (%s) - respondendo 200", _e)
         return Response(status_code=200)
+
     evento = body.get("event", "")
     pay = body.get("payment", {}) or {}
     ref = pay.get("externalReference")
     if not ref:
         return Response(status_code=200)
+    ref = str(ref)
+
+    # descobre o tipo pelo prefixo: "cesta:<id>" = assinatura de cesta; senão = conta do app
+    is_cesta = ref.startswith("cesta:")
+    assinatura_id = conta_id = None
     try:
-        conta_id = int(ref)
-    except (TypeError, ValueError):
+        if is_cesta:
+            assinatura_id = int(ref.split(":", 1)[1])
+        else:
+            conta_id = int(ref)
+    except (TypeError, ValueError, IndexError):
+        _logw.warning("ASAAS externalReference invalido: %r", ref)
         return Response(status_code=200)
 
-    # RASTRO (fase de testes): uma linha por evento real, pra acompanhar o fluxo
-    _logw.warning("ASAAS >> evento=%s pay=%s conta=%s valor=%s",
-                  evento, pay.get("id", ""), conta_id, pay.get("value", ""))
+    _logw.warning("ASAAS >> evento=%s pay=%s ref=%s valor=%s",
+                  evento, pay.get("id", ""), ref, pay.get("value", ""))
 
-    # processamento BLINDADO: se algo falhar, loga o erro REAL e responde 200
-    # (assim o Asaas para de penalizar e a gente ve a causa no log do Render).
     try:
         pool = _setup()
         chave_idem = f"asaas:{pay.get('id','')}:{evento}"
@@ -455,40 +456,53 @@ async def webhook_asaas(request: Request):
             return Response(status_code=200)
 
         if evento in ("PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"):
-            # HARDENING: confirma o status do pagamento direto na API do Asaas
-            # (protege contra webhook forjado mesmo se o token vaze)
+            # HARDENING: confirma o status direto na API (protege contra webhook forjado)
             from starlette.concurrency import run_in_threadpool
             from finance import asaas
             try:
                 api_pay = await run_in_threadpool(asaas.consultar_pagamento, pay.get("id", ""))
                 if api_pay.get("status") not in ("RECEIVED", "CONFIRMED"):
                     _logw.warning("ASAAS pagamento %s status=%s — ignorando",
-                                 pay.get("id",""), api_pay.get("status"))
+                                  pay.get("id", ""), api_pay.get("status"))
                     return Response(status_code=200)
             except asaas.AsaasErro as _e:
                 _logw.warning("ASAAS nao confirmou pagamento %s (%s) — nao ativando",
-                             pay.get("id",""), _e)
+                              pay.get("id", ""), _e)
                 return Response(status_code=200)
 
-            # tudo certo: ativa a conta (lê o plano que já está gravado no banco, não o description do Asaas)
-            plano_atual = None
-            with pool.connection() as c:
-                row = c.execute("select plano from contas where id=%s", (conta_id,)).fetchone()
-                plano_atual = row[0] if row else None
-            ct.ativar(pool, conta_id, dias=30, plano=plano_atual)
-            ct.registrar_evento(pool, conta_id, "pagamento_confirmado",
-                                f"asaas {pay.get('id','')} valor {pay.get('value','')}")
-            _logw.warning("ASAAS conta %s ATIVADA (pagamento %s)", conta_id, pay.get('id',''))
+            if is_cesta:
+                from finance import assinaturas as assin_mod
+                assin_mod.ativar_pos_pagamento(pool, assinatura_id)
+                # cliente_id da assinatura, pra registrar o evento sem FK nula
+                cli_id = None
+                with pool.connection() as c:
+                    row = c.execute("select cliente_id from assinaturas where id=%s",
+                                    (assinatura_id,)).fetchone()
+                    cli_id = row[0] if row else None
+                ct.registrar_evento(pool, cli_id, "assinatura_ativada_asaas",
+                                    f"assinatura_id={assinatura_id} valor {pay.get('value','')}")
+                _logw.warning("ASAAS cesta assinatura %s ATIVADA (pay %s)",
+                              assinatura_id, pay.get("id", ""))
+            else:
+                # ativa a conta do app (lê o plano gravado no banco, não o description do Asaas)
+                with pool.connection() as c:
+                    row = c.execute("select plano from contas where id=%s", (conta_id,)).fetchone()
+                    plano_atual = row[0] if row else None
+                ct.ativar(pool, conta_id, dias=30, plano=plano_atual)
+                ct.registrar_evento(pool, conta_id, "pagamento_confirmado",
+                                    f"asaas {pay.get('id','')} valor {pay.get('value','')}")
+                _logw.warning("ASAAS conta %s ATIVADA (pagamento %s)", conta_id, pay.get("id", ""))
+
         elif evento == "PAYMENT_OVERDUE":
-            ct.marcar_inadimplente(pool, conta_id)
+            if not is_cesta:
+                ct.marcar_inadimplente(pool, conta_id)
         elif evento in ("PAYMENT_REFUNDED", "PAYMENT_DELETED", "PAYMENT_CHARGEBACK"):
-            ct.suspender(pool, conta_id, motivo=f"asaas {evento}")
+            if not is_cesta:
+                ct.suspender(pool, conta_id, motivo=f"asaas {evento}")
     except Exception as _e:  # noqa: BLE001
         import traceback
-        _logw.error("ASAAS erro ao processar evento %s conta %s: %s\n%s",
-                    evento, conta_id, _e, traceback.format_exc())
-        # responde 200 mesmo assim: o pagamento foi recebido; nao adianta o Asaas
-        # reenviar (o erro e' nosso, no processamento). Vemos no log e corrigimos.
+        _logw.error("ASAAS erro ao processar evento %s ref %s: %s\n%s",
+                    evento, ref, _e, traceback.format_exc())
         return Response(status_code=200)
 
     return Response(status_code=200)
@@ -514,82 +528,6 @@ async def whatsapp(request: Request, background: BackgroundTasks):
             background.add_task(processar_whatsapp, numero, nome, body, media_url, media_ctype)
     # responde rapido (200) pra nao estourar o timeout do Twilio
     return Response(content="<Response></Response>", media_type="application/xml")
-
-
-@app.post("/webhook/asaas")
-async def webhook_asaas(request: Request):
-    """Webhook do Asaas: ativa cesta (externalReference 'cesta:id') ou conta do app."""
-    try:
-        payload = await request.json()
-    except Exception:
-        return JSONResponse({"ok": False}, status_code=400)
-
-    event = payload.get("event", "")
-    if event not in ("PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"):
-        return JSONResponse({"ok": True}, status_code=200)
-
-    payment = payload.get("payment", {})
-    payment_id = payment.get("id", "")
-    external_ref = payment.get("externalReference", "")
-
-    if not payment_id or not external_ref:
-        log.warning(f"Asaas webhook: payment_id ou external_ref vazio")
-        return JSONResponse({"ok": True}, status_code=200)
-
-    # Consulta o pagamento na API pra confirmar
-    from starlette.concurrency import run_in_threadpool
-    from finance import asaas, assinaturas as assin_mod
-    try:
-        api_payment = await run_in_threadpool(asaas.consultar_pagamento, payment_id)
-        status = api_payment.get("status", "")
-        if status not in ("RECEIVED", "CONFIRMED"):
-            log.info(f"Asaas webhook: pagamento {payment_id} status={status}")
-            return JSONResponse({"ok": True}, status_code=200)
-    except asaas.AsaasErro as e:
-        log.warning(f"Asaas webhook: erro ao consultar {payment_id}: {e}")
-        return JSONResponse({"ok": True}, status_code=200)
-
-    pool = _setup()
-    ref = str(external_ref)
-
-    # CESTA: externalReference "cesta:<assinatura_id>"
-    if ref.startswith("cesta:"):
-        try:
-            assinatura_id = int(ref.split(":", 1)[1])
-        except (ValueError, IndexError):
-            log.warning(f"Asaas webhook: cesta ref inválido: {ref}")
-            return JSONResponse({"ok": True}, status_code=200)
-
-        # Idempotência: reivindicar a chave
-        chave = f"asaas:cesta:{assinatura_id}:{payment_id}"
-        if ct.reivindicar_mensagem(pool, chave):
-            try:
-                assin_mod.ativar_pos_pagamento(pool, assinatura_id)
-                log.warning(f"ASAAS cesta assinatura {assinatura_id} ATIVADA (pay {payment_id})")
-                ct.registrar_evento(pool, None, "assinatura_ativada_asaas",
-                                   f"assinatura_id={assinatura_id}, valor={api_payment.get('value')} BRL")
-            except Exception as e:
-                log.error(f"Asaas webhook: erro ao ativar cesta {assinatura_id}: {e}")
-        return JSONResponse({"ok": True}, status_code=200)
-
-    # APP: externalReference "<conta_id>"
-    try:
-        conta_id = int(ref)
-    except (ValueError, TypeError):
-        log.warning(f"Asaas webhook: conta_id inválido: {ref}")
-        return JSONResponse({"ok": True}, status_code=200)
-
-    chave = f"asaas:app:{conta_id}:{payment_id}"
-    if ct.reivindicar_mensagem(pool, chave):
-        try:
-            ct.ativar(pool, conta_id, dias=30)
-            log.info(f"Asaas webhook: conta {conta_id} ativada (pagamento {payment_id})")
-            ct.registrar_evento(pool, conta_id, "pagamento_confirmado",
-                               f"payment_id={payment_id} ({api_payment.get('value')} BRL)")
-        except Exception as e:
-            log.error(f"Asaas webhook: erro ao ativar conta {conta_id}: {e}")
-
-    return JSONResponse({"ok": True}, status_code=200)
 
 
 @app.get("/", response_class=HTMLResponse)

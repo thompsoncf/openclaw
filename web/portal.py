@@ -2348,46 +2348,18 @@ def painel_ativar_app_envia(request: Request, plano: str = Form(...)):
 
 @router.get("/painel/assinaturas/{assinatura_id}/pagar")
 def painel_assinatura_pagar(request: Request, assinatura_id: int):
-    """Redireciona pro link de pagamento da subscription do Asaas."""
-    from finance import asaas
-    pool = get_pool()
+    """Garante a cobrança no Asaas (cria se faltar) e leva o cliente pro link."""
+    from finance import assinaturas as assin_mod
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
-
-    # Confere que a assinatura é do cliente e pega o subscription_id
-    with pool.connection() as c:
-        a = c.execute(
-            """select asaas_subscription_id, preco_centavos from assinaturas
-               where id=%s and cliente_id=%s""",
-            (assinatura_id, conta[0]),
-        ).fetchone()
-    if a is None:
-        request.session["erro"] = "Assinatura não encontrada."
-        return RedirectResponse("/painel/assinaturas", status_code=303)
-
-    asaas_sub_id = a[0]
-    if not asaas_sub_id:
-        request.session["erro"] = "Pagamento ainda não foi gerado. Tente novamente em breve."
-        return RedirectResponse("/painel/assinaturas", status_code=303)
-
-    # Busca os dados da subscription no Asaas pra pegar o link de pagamento
-    try:
-        sub_data = asaas.obter_subscription(asaas_sub_id)
-        # Tenta pegar o link direto ou a 1ª cobrança pendente
-        url_pagamento = sub_data.get("url") or sub_data.get("link")
-        if not url_pagamento:
-            # Fallback: busca o 1º pagamento pendente da subscription
-            payments = asaas.listar_pagamentos_subscription(asaas_sub_id)
-            if payments:
-                url_pagamento = payments[0].get("url")
-        if url_pagamento:
-            return RedirectResponse(url_pagamento, status_code=303)
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"Asaas: erro ao pegar subscription {asaas_sub_id}: {e}")
-
-    request.session["erro"] = "Não foi possível gerar o link de pagamento."
+    r = assin_mod.garantir_link_pagamento(get_pool(), conta[0], assinatura_id)
+    if r.get("ok") and r.get("url"):
+        return RedirectResponse(r["url"], status_code=303)
+    if r.get("ok") and r.get("pendente"):
+        request.session["erro"] = "Cobrança sendo gerada no Asaas. Tente de novo em alguns segundos."
+    else:
+        request.session["erro"] = r.get("erro", "Não foi possível gerar o link de pagamento.")
     return RedirectResponse("/painel/assinaturas", status_code=303)
 
 

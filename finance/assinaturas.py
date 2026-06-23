@@ -193,6 +193,121 @@ def ativar_pos_pagamento(pool, assinatura_id: int) -> bool:
         return cur.rowcount > 0
 
 
+def _link_da_subscription(asaas, sub_id: str):
+    """Pega o link de pagamento da 1ª cobrança de uma subscription do Asaas.
+
+    A subscription em si NÃO carrega URL de pagamento — quem tem é a cobrança
+    (payment), no campo 'invoiceUrl' (a página hospedada onde o cliente paga
+    Pix/boleto/cartão). Por isso buscamos os pagamentos da subscription.
+
+    Retorna a URL (str) ou None se a cobrança ainda não foi gerada.
+    """
+    try:
+        pagamentos = asaas.listar_pagamentos_subscription(sub_id)
+    except Exception:
+        pagamentos = []
+    for p in pagamentos:
+        url = (p.get("invoiceUrl") or p.get("bankSlipUrl")
+               or p.get("transactionReceiptUrl"))
+        if url:
+            return url
+    return None
+
+
+def garantir_link_pagamento(pool, cliente_id: int, assinatura_id: int) -> dict:
+    """Garante que a assinatura tem cobrança no Asaas e devolve o link de pagamento.
+
+    Idempotente e AUTO-RECUPERÁVEL — resolve o caso "Pagamento ainda não foi gerado":
+    - Se a assinatura JÁ tem asaas_subscription_id: busca o link da 1ª cobrança.
+    - Se NÃO tem (falhou no checkout, ou nasceu antes da fix do CPF): cria o customer
+      + a subscription recorrente AGORA, salva o id e devolve o link.
+
+    Diferente do checkout antigo, NÃO engole o erro do Asaas: em falha devolve
+    {"ok": False, "erro": "<mensagem real do Asaas>"} pra UI/log mostrarem a verdade
+    (era esse erro silenciado que escondia a causa).
+
+    Retorna:
+      {"ok": True,  "url": "<link>"}                 -> redireciona o cliente pro Asaas
+      {"ok": True,  "url": None, "pendente": True}   -> subscription ok, cobrança gerando
+      {"ok": False, "erro": "<motivo>"}              -> mostrar na tela
+    """
+    import os
+    from finance import asaas
+
+    # 1) carrega a assinatura (valida dono) + dados pra cobrança
+    with pool.connection() as c:
+        a = c.execute(
+            """select a.asaas_subscription_id, a.preco_centavos, a.frequencia,
+                      ct.nome, fo.nome
+               from assinaturas a
+               join cesta_tamanhos ct on ct.id = a.tamanho_id
+               join contas fo on fo.id = a.fornecedor_id
+               where a.id = %s and a.cliente_id = %s""",
+            (assinatura_id, cliente_id),
+        ).fetchone()
+    if a is None:
+        return {"ok": False, "erro": "Assinatura não encontrada."}
+
+    sub_id, preco_cent, frequencia, tam_nome, forn_nome = a
+    preco_reais = int(preco_cent or 0) / 100
+
+    # 2) já existe subscription -> só pega o link da cobrança
+    if sub_id:
+        url = _link_da_subscription(asaas, sub_id)
+        if url:
+            return {"ok": True, "url": url}
+        return {"ok": True, "url": None, "pendente": True}
+
+    # 3) não existe -> cria customer + subscription AGORA (recuperação)
+    with pool.connection() as c:
+        cli = c.execute(
+            "select nome, email, documento from contas where id = %s",
+            (cliente_id,),
+        ).fetchone()
+    nome = (cli[0] if cli else None) or f"Cliente {cliente_id}"
+    email = cli[1] if cli else None
+    documento = cli[2] if cli and cli[2] else None
+
+    # sandbox: usa CPF de teste válido se a conta não tem documento
+    sandbox = (os.environ.get("ASAAS_AMBIENTE", "sandbox")
+               or "sandbox").lower().startswith("sand")
+    if not documento and sandbox:
+        documento = "24971563792"  # CPF de teste válido — só sandbox
+    if not documento:
+        return {"ok": False,
+                "erro": "Falta CPF/CNPJ na conta para gerar a cobrança no Asaas."}
+
+    try:
+        cust = asaas.criar_cliente(
+            nome=nome, email=email, cpf_cnpj=documento, conta_id=cliente_id,
+        )
+        sub = asaas.criar_assinatura_recorrente(
+            asaas_customer_id=cust["id"],
+            valor_reais=preco_reais,
+            ciclo=frequencia,
+            assinatura_id=assinatura_id,
+            descricao=f"Cesta {tam_nome} - {forn_nome}",
+        )
+        novo_sub_id = sub["id"]
+    except asaas.AsaasErro as e:
+        return {"ok": False, "erro": f"Asaas: {e}"}
+    except Exception as e:  # rede/timeout/chave faltando — mostra a verdade
+        return {"ok": False, "erro": f"Erro ao falar com o Asaas: {e}"}
+
+    # salva o subscription_id (idempotência: próxima vez cai no ramo 2)
+    with pool.connection() as c:
+        c.execute(
+            "update assinaturas set asaas_subscription_id = %s where id = %s",
+            (novo_sub_id, assinatura_id),
+        )
+        c.commit()
+
+    url = _link_da_subscription(asaas, novo_sub_id)
+    if url:
+        return {"ok": True, "url": url}
+    return {"ok": True, "url": None, "pendente": True}
+
+
 def trocar_tamanho(pool, cliente_id: int, assinatura_id: int, novo_tamanho_id: int) -> dict:
     """Troca o tamanho da assinatura (ex: Pequena -> Grande).
 

@@ -2884,7 +2884,26 @@ def cadastro_envia(request: Request, background: BackgroundTasks,
         background.add_task(enviar_boas_vindas, email, nome.strip(), codigo_dono)
     except Exception:  # noqa: BLE001
         pass
-    # Se veio da loja (/f/{slug}/confirmar), segue pra lá pra criar a assinatura
+    # Aplicar carrinho_intencao se houver (cliente tentou adicionar item deslogado)
+    intencao = request.session.pop("carrinho_intencao", None)
+    if intencao:
+        try:
+            from finance import carrinho as car_mod
+            forn_id = None
+            with pool.connection() as c:
+                r = c.execute(
+                    "select id from contas where fornecedor_slug=%s and eh_fornecedor",
+                    (intencao.get("slug"),),
+                ).fetchone()
+                forn_id = r[0] if r else None
+            if forn_id:
+                cid = car_mod.obter_ou_criar(pool, conta_id, forn_id)
+                car_mod.adicionar_item(pool, cid, intencao["produto_id"],
+                                      intencao.get("quantidade", 1))
+                request.session["carrinho_id"] = cid
+        except Exception:
+            pass  # ignora erros, segue o fluxo mesmo sem carrinho
+    # Se veio da loja (/f/{slug}/carrinho ou /f/{slug}), segue pra lá
     # Senão, vai pro /bem-vindo (fluxo normal do app)
     if next and next.startswith("/f/"):
         return RedirectResponse(next, status_code=303)
@@ -2905,6 +2924,30 @@ def login_envia(request: Request, email: str = Form(...), senha: str = Form(...)
     if not row or not verificar_senha(senha, row[1]):
         return _render("login", request, erro="E-mail ou senha incorretos.", aviso=None)
     request.session["conta_id"] = row[0]
+    # Aplicar carrinho_intencao se houver (cliente tentou adicionar item deslogado)
+    intencao = request.session.pop("carrinho_intencao", None)
+    if intencao:
+        try:
+            from finance import carrinho as car_mod
+            forn_id = None
+            with pool.connection() as c:
+                r = c.execute(
+                    "select id from contas where fornecedor_slug=%s and eh_fornecedor",
+                    (intencao.get("slug"),),
+                ).fetchone()
+                forn_id = r[0] if r else None
+            if forn_id:
+                cid = car_mod.obter_ou_criar(pool, row[0], forn_id)
+                car_mod.adicionar_item(pool, cid, intencao["produto_id"],
+                                      intencao.get("quantidade", 1))
+                request.session["carrinho_id"] = cid
+                # Redireciona pra loja com carrinho, não pro painel
+                return RedirectResponse(f"/f/{intencao.get('slug')}", status_code=303)
+        except Exception:
+            pass  # ignora erros, segue pra loja/painel mesmo sem carrinho
+    next_url = request.session.pop("next", None)
+    if next_url and next_url.startswith("/f/"):
+        return RedirectResponse(next_url, status_code=303)
     return RedirectResponse("/painel", status_code=303)
 
 

@@ -43,6 +43,15 @@ MSG_SEM_ACESSO = (
 DICA_QR = ("\n\n📸 _Dica: deixe o QR code do cupom bem visível na foto — "
            "assim eu identifico a nota certinho e melhoro os preços pra você._")
 
+# dica quando o QR nao foi lido, mas a visao conseguiu ler os itens (cupom foi salvo)
+DICA_QR_FALHOU = ("\n\n📸 Consegui registrar os itens do cupom, mas não consegui ler o QR code "
+                  "(a foto ficou um pouco escura/dobrada). Pra eu ler o QR direitinho e evitar "
+                  "duplicar, da próxima vez tenta:\n"
+                  "• Boa luz, sem sombra no cupom\n"
+                  "• O cupom esticado (sem dobras), de frente\n"
+                  "• O QR code inteiro e bem focado\n\n"
+                  "_Mas relaxa — os itens dessa compra já foram salvos! 👍_")
+
 import re as _re
 def _parece_convite(texto: str) -> bool:
     """Formato do codigo: 2-4 letras/numeros + hifen + 4 hex (ex: LAR-7K2M)."""
@@ -271,7 +280,12 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
     resposta = await asyncio.to_thread(agente.responder, texto, imagem_b64, media_type)
     resposta = resposta or "(sem resposta)"
     if dica_qr:
-        resposta += DICA_QR
+        # se a chave foi lida: dica genérica (sempre melhorar a foto do QR)
+        # se NÃO foi lida mas a imagem foi processada: dica específica (orientar sobre qualidade)
+        if chave_nfce is None:
+            resposta += DICA_QR_FALHOU
+        else:
+            resposta += DICA_QR
     await update.message.reply_text(resposta)
 
 

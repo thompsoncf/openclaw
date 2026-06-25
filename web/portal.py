@@ -1652,9 +1652,15 @@ _LOJA = """{% extends "base" %}{% block conteudo %}
         {% if no_cart %}
           {% set item = no_cart[0] %}
           <div style="display:flex;align-items:center;gap:8px;background:#0e0e0f;border-radius:8px;padding:3px">
-            <form method="post" action="/f/{{ fornecedor.slug }}/carrinho/item/{{ item.id }}" style="display:inline"><input type="hidden" name="quantidade" value="{{ item.quantidade - (1 if item.unidade in ['unidade','duzia','maco'] else 0.5) }}"><button style="width:28px;height:28px;border-radius:7px;background:#1d9e75;color:#fff;border:0;cursor:pointer">−</button></form>
-            <span style="font-size:.8rem;color:#ececec;min-width:42px;text-align:center">{{ item.quantidade }} {{ item.unidade }}</span>
-            <form method="post" action="/f/{{ fornecedor.slug }}/carrinho/item/{{ item.id }}" style="display:inline"><input type="hidden" name="quantidade" value="{{ item.quantidade + (1 if item.unidade in ['unidade','duzia','maco'] else 0.5) }}"><button style="width:28px;height:28px;border-radius:7px;background:#1d9e75;color:#fff;border:0;cursor:pointer">+</button></form>
+            {% if carrinho.virtual %}
+              <form method="post" action="/f/{{ fornecedor.slug }}/carrinho-sessao/item" style="display:inline"><input type="hidden" name="produto_id" value="{{ p.id }}"><input type="hidden" name="quantidade" value="{{ item.quantidade - (1 if item.unidade in ['unidade','duzia','maco'] else 0.5) }}"><button style="width:28px;height:28px;border-radius:7px;background:#1d9e75;color:#fff;border:0;cursor:pointer">−</button></form>
+              <span style="font-size:.8rem;color:#ececec;min-width:42px;text-align:center">{{ item.quantidade }} {{ item.unidade }}</span>
+              <form method="post" action="/f/{{ fornecedor.slug }}/carrinho-sessao/item" style="display:inline"><input type="hidden" name="produto_id" value="{{ p.id }}"><input type="hidden" name="quantidade" value="{{ item.quantidade + (1 if item.unidade in ['unidade','duzia','maco'] else 0.5) }}"><button style="width:28px;height:28px;border-radius:7px;background:#1d9e75;color:#fff;border:0;cursor:pointer">+</button></form>
+            {% else %}
+              <form method="post" action="/f/{{ fornecedor.slug }}/carrinho/item/{{ item.id }}" style="display:inline"><input type="hidden" name="quantidade" value="{{ item.quantidade - (1 if item.unidade in ['unidade','duzia','maco'] else 0.5) }}"><button style="width:28px;height:28px;border-radius:7px;background:#1d9e75;color:#fff;border:0;cursor:pointer">−</button></form>
+              <span style="font-size:.8rem;color:#ececec;min-width:42px;text-align:center">{{ item.quantidade }} {{ item.unidade }}</span>
+              <form method="post" action="/f/{{ fornecedor.slug }}/carrinho/item/{{ item.id }}" style="display:inline"><input type="hidden" name="quantidade" value="{{ item.quantidade + (1 if item.unidade in ['unidade','duzia','maco'] else 0.5) }}"><button style="width:28px;height:28px;border-radius:7px;background:#1d9e75;color:#fff;border:0;cursor:pointer">+</button></form>
+            {% endif %}
           </div>
         {% else %}
           <form method="post" action="/f/{{ fornecedor.slug }}/carrinho/add" style="display:inline">
@@ -1688,7 +1694,7 @@ _LOJA = """{% extends "base" %}{% block conteudo %}
           <button disabled style="width:100%;opacity:.5;background:#888780;color:#0e0e0f;border:0;border-radius:9px;padding:.6rem;cursor:not-allowed;font-weight:600">Enviar pedido</button>
         {% else %}
           <div style="background:#15301f;border:1px solid #1d9e75;border-radius:8px;padding:.5rem .6rem;margin:.7rem 0;font-size:.72rem;color:#9fe8c9">ℹ️ Confirma e paga depois.</div>
-          <form method="post" action="/f/{{ fornecedor.slug }}/carrinho/fechar">
+          <form method="post" action="/f/{{ fornecedor.slug }}/carrinho/checkout">
             <input name="endereco" placeholder="Endereço de entrega" required style="width:100%;margin-bottom:.4rem;font-size:.8rem;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#ececec;border-radius:6px">
             <input name="obs" placeholder="Observação (opcional)" style="width:100%;margin-bottom:.5rem;font-size:.8rem;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#ececec;border-radius:6px">
             <button style="width:100%;background:#1d9e75;color:#fff;border:0;border-radius:9px;padding:.7rem;font-weight:600;cursor:pointer">✓ Enviar pedido</button>
@@ -1741,31 +1747,45 @@ _LOJA = """{% extends "base" %}{% block conteudo %}
 
 _LOJA_CONFIRMAR_NOVO = """{% extends "base" %}{% block conteudo %}
 <div class="card" style="max-width:420px;margin:0 auto">
-  <h2 style="margin-bottom:.3rem">Confirme sua assinatura 🧺</h2>
-  <p class="mut" style="margin-bottom:1.2rem;font-size:.9rem">
-    Crie sua conta grátis pra receber sua cesta.
-    Já tem conta? <a href="/login" style="color:#5dcaa5">Entrar</a>
-  </p>
+  {% if contexto == "carrinho" %}
+    <h2 style="margin-bottom:.3rem">Quase lá! 🛒</h2>
+    <p class="mut" style="margin-bottom:1.2rem;font-size:.9rem">
+      Pra enviar seu pedido, entre ou crie sua conta rápida.
+      Já tem conta? <a href="/login?next=/f/{{ slug }}/carrinho/materializar" style="color:#5dcaa5">Entrar</a>
+    </p>
+    {% set next_url = "/f/" + slug + "/carrinho/materializar" %}
+    {% set btn_text = "Criar conta e enviar pedido" %}
+    {% set help_text = "Conta grátis. Seu pedido será enviado após confirmar." %}
+  {% else %}
+    <h2 style="margin-bottom:.3rem">Confirme sua assinatura 🧺</h2>
+    <p class="mut" style="margin-bottom:1.2rem;font-size:.9rem">
+      Crie sua conta grátis pra receber sua cesta.
+      Já tem conta? <a href="/login" style="color:#5dcaa5">Entrar</a>
+    </p>
+    {% set next_url = "/f/" + slug + "/confirmar" %}
+    {% set btn_text = "Criar conta e assinar 🧺" %}
+    {% set help_text = "Conta grátis. Você só paga a cesta, 4 dias antes de cada entrega. Sem fidelidade." %}
+  {% endif %}
   {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
   <form method="post" action="/cadastro">
-    <input type="hidden" name="next" value="/f/{{ slug }}/confirmar">
+    <input type="hidden" name="next" value="{{ next_url }}">
     <input type="hidden" name="plano" value="cesta">
     <label>Email</label>
     <input name="email" type="email" required placeholder="seu@email.com" style="width:100%;margin-bottom:.6rem">
     <label>Senha</label>
     <input name="senha" type="password" required placeholder="mínimo 8 caracteres" style="width:100%;margin-bottom:.6rem">
-    <label>📱 WhatsApp (com DDD) <span class="mut" style="font-size:.8rem">— pra avisar da sua cesta</span></label>
+    <label>📱 WhatsApp (com DDD) <span class="mut" style="font-size:.8rem">— pra avisar do seu pedido</span></label>
     <input name="whatsapp" required placeholder="86 98888-7777" maxlength="20" style="width:100%;margin-bottom:.6rem">
     <label>CEP</label>
     <input name="cep" required placeholder="64000-000" style="width:100%;margin-bottom:.6rem">
     <label>Endereço</label>
     <input name="endereco" required placeholder="Rua X, nº 123, bairro" style="width:100%;margin-bottom:1rem">
     <button style="background:#1d9e75;color:#fff;padding:.7rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:600;font-size:.95rem">
-      Criar conta e assinar 🧺
+      {{ btn_text }}
     </button>
   </form>
   <p class="mut" style="font-size:.8rem;text-align:center;margin-top:.8rem">
-    Conta grátis. Você só paga a cesta, 4 dias antes de cada entrega. Sem fidelidade.
+    {{ help_text }}
   </p>
 </div>
 {% endblock %}"""
@@ -2749,6 +2769,40 @@ from finance import cidades as _cidades_mod
 _env.globals["cidades"] = _cidades_mod.opcoes()
 
 
+def _carrinho_virtual_da_sessao(pool, fornecedor_id: int, cs: dict):
+    """Monta carrinho virtual (deslogado) com preços do catálogo."""
+    itens, subtotal = [], 0
+    with pool.connection() as c:
+        for it in cs.get("itens", []):
+            p = c.execute(
+                """select nome, unidade, preco_venda_centavos from catalogo_produtos
+                   where id=%s and fornecedor_id=%s and ativo and disponivel""",
+                (it["produto_id"], fornecedor_id),
+            ).fetchone()
+            if not p:
+                continue
+            tot = int(round(float(it.get("quantidade", 1)) * int(p[2] or 0)))
+            subtotal += tot
+            itens.append({
+                "id": None, "produto_id": it["produto_id"], "nome": p[0],
+                "unidade": p[1], "quantidade": float(it.get("quantidade", 1)),
+                "preco_unit_centavos": int(p[2] or 0), "total_centavos": tot,
+            })
+        rf = c.execute(
+            """select coalesce(taxa_entrega_centavos,0),
+                      coalesce(pedido_minimo_centavos,0)
+               from contas where id=%s""",
+            (fornecedor_id,),
+        ).fetchone()
+    taxa = int(rf[0] or 0) if rf else 0
+    minimo = int(rf[1] or 0) if rf else 0
+    return {
+        "id": None, "itens": itens, "subtotal_centavos": subtotal,
+        "taxa_centavos": taxa, "total_centavos": subtotal + taxa,
+        "pedido_minimo_centavos": minimo, "virtual": True,
+    }
+
+
 def _tem_assinatura_cesta(conta_id: int) -> bool:
     """Verifica se a conta tem assinatura de cesta ativa (pra mostrar link no menu)."""
     try:
@@ -2946,8 +3000,12 @@ def login_envia(request: Request, email: str = Form(...), senha: str = Form(...)
         except Exception:
             pass  # ignora erros, segue pra loja/painel mesmo sem carrinho
     next_url = request.session.pop("next", None)
-    if next_url and next_url.startswith("/f/"):
-        return RedirectResponse(next_url, status_code=303)
+    if next_url:
+        if next_url.startswith("/f/") and "/carrinho/materializar" in next_url:
+            # materialização do carrinho da sessão — continua
+            return RedirectResponse(next_url, status_code=303)
+        elif next_url.startswith("/f/"):
+            return RedirectResponse(next_url, status_code=303)
     return RedirectResponse("/painel", status_code=303)
 
 
@@ -3095,9 +3153,14 @@ def loja_fornecedor(request: Request, slug: str):
     secoes = [(c, grupos[c]) for c in ordem if c in grupos]
 
     carrinho = None
-    cid = request.session.get("carrinho_id")
-    if cid:
-        carrinho = car_mod.ver(pool, cid)
+    if conta is not None:
+        cid = request.session.get("carrinho_id")
+        if cid:
+            carrinho = car_mod.ver(pool, cid)
+    else:
+        cs = request.session.get("carrinho_sessao")
+        if cs and cs.get("slug") == fornecedor["slug"] and cs.get("itens"):
+            carrinho = _carrinho_virtual_da_sessao(pool, fornecedor["id"], cs)
 
     return _render("loja", request, fornecedor=fornecedor, tamanhos=tamanhos,
                    produtos=produtos, escolha=escolha, secoes=secoes, carrinho=carrinho,
@@ -3227,14 +3290,40 @@ def carrinho_add(request: Request, slug: str,
         return RedirectResponse(f"/f/{slug}", status_code=303)
     conta = conta_logada(request)
     if conta is None:
-        request.session["carrinho_intencao"] = {
-            "slug": slug, "produto_id": produto_id, "quantidade": float(quantidade)
-        }
-        request.session["next"] = f"/f/{slug}"
-        return RedirectResponse("/cadastro", status_code=303)
+        cs = request.session.get("carrinho_sessao") or {"slug": slug, "itens": []}
+        if cs.get("slug") != slug:
+            cs = {"slug": slug, "itens": []}
+        achou = False
+        for it in cs["itens"]:
+            if it["produto_id"] == produto_id:
+                it["quantidade"] = float(it["quantidade"]) + float(quantidade)
+                achou = True
+                break
+        if not achou:
+            cs["itens"].append({"produto_id": produto_id, "quantidade": float(quantidade)})
+        request.session["carrinho_sessao"] = cs
+        return RedirectResponse(f"/f/{slug}#carrinho", status_code=303)
     cid = car_mod.obter_ou_criar(pool, conta[0], forn[0])
     car_mod.adicionar_item(pool, cid, produto_id, quantidade)
     request.session["carrinho_id"] = cid
+    return RedirectResponse(f"/f/{slug}#carrinho", status_code=303)
+
+
+@router.post("/f/{slug}/carrinho-sessao/item")
+def carrinho_sessao_item(request: Request, slug: str,
+                         produto_id: int = Form(...), quantidade: float = Form(...)):
+    cs = request.session.get("carrinho_sessao")
+    if cs and cs.get("slug") == slug:
+        novos = []
+        for it in cs["itens"]:
+            if it["produto_id"] == produto_id:
+                if float(quantidade) > 0:
+                    it["quantidade"] = float(quantidade)
+                    novos.append(it)
+            else:
+                novos.append(it)
+        cs["itens"] = novos
+        request.session["carrinho_sessao"] = cs
     return RedirectResponse(f"/f/{slug}#carrinho", status_code=303)
 
 
@@ -3249,13 +3338,20 @@ def carrinho_item(request: Request, slug: str, item_id: int,
     return RedirectResponse(f"/f/{slug}#carrinho", status_code=303)
 
 
-@router.post("/f/{slug}/carrinho/fechar")
-def carrinho_fechar(request: Request, slug: str,
-                    endereco: str = Form(""), obs: str = Form("")):
+@router.post("/f/{slug}/carrinho/checkout")
+def carrinho_checkout(request: Request, slug: str,
+                      endereco: str = Form(""), obs: str = Form("")):
     from finance import carrinho as car_mod
     conta = conta_logada(request)
+    if conta is None:
+        cs = request.session.get("carrinho_sessao") or {}
+        cs["endereco"] = endereco
+        cs["obs"] = obs
+        request.session["carrinho_sessao"] = cs
+        return _render("loja_confirmar_novo", request, slug=slug, erro=None,
+                       contexto="carrinho")
     cid = request.session.get("carrinho_id")
-    if not conta or not cid:
+    if not cid:
         return RedirectResponse(f"/f/{slug}", status_code=303)
     pool = get_pool()
     r = car_mod.fechar(pool, cid, endereco_entrega=endereco or None, obs=obs or None)
@@ -3269,6 +3365,43 @@ def carrinho_fechar(request: Request, slug: str,
     cid_feito = cid
     request.session.pop("carrinho_id", None)
     return RedirectResponse(f"/pedido-enviado/{cid_feito}", status_code=303)
+
+
+@router.post("/f/{slug}/carrinho/fechar")
+def carrinho_fechar(request: Request, slug: str,
+                    endereco: str = Form(""), obs: str = Form("")):
+    return carrinho_checkout(request, slug, endereco, obs)
+
+
+@router.get("/f/{slug}/carrinho/materializar")
+def carrinho_materializar(request: Request, slug: str):
+    from finance import carrinho as car_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse(f"/f/{slug}", status_code=303)
+    pool = get_pool()
+    cs = request.session.get("carrinho_sessao")
+    if not cs or cs.get("slug") != slug or not cs.get("itens"):
+        return RedirectResponse(f"/f/{slug}", status_code=303)
+    with pool.connection() as c:
+        forn = c.execute(
+            "select id from contas where fornecedor_slug=%s and eh_fornecedor",
+            (slug,),
+        ).fetchone()
+    if not forn:
+        return RedirectResponse(f"/f/{slug}", status_code=303)
+    cid = car_mod.obter_ou_criar(pool, conta[0], forn[0])
+    for it in cs["itens"]:
+        car_mod.adicionar_item(pool, cid, it["produto_id"], it.get("quantidade", 1))
+    r = car_mod.fechar(pool, cid, endereco_entrega=cs.get("endereco"),
+                       obs=cs.get("obs"))
+    request.session.pop("carrinho_sessao", None)
+    if not r["ok"]:
+        request.session["carrinho_id"] = cid
+        if r.get("faltam_centavos"):
+            request.session["erro_carrinho"] = f"Faltam R$ {r['faltam_centavos']/100:.2f} pro mínimo."
+        return RedirectResponse(f"/f/{slug}#carrinho", status_code=303)
+    return RedirectResponse(f"/pedido-enviado/{cid}", status_code=303)
 
 
 @router.get("/pedido-enviado/{carrinho_id}", response_class=HTMLResponse)

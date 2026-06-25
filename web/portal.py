@@ -263,7 +263,11 @@ _LOGIN = """{% extends "base" %}{% block conteudo %}
 <form method="post" action="/login">
 <label>E-mail</label><input name="email" type="email" required>
 <label>Senha</label><input name="senha" type="password" required>
-<button>Entrar</button></form></div>{% endblock %}"""
+<button>Entrar</button></form>
+<p style="text-align:center;margin-top:.8rem">
+  <a href="/esqueci-senha" style="color:#5dcaa5;font-size:.88rem;text-decoration:none">Esqueci minha senha</a>
+</p>
+</div>{% endblock %}"""
 
 _BEMVINDO = """{% extends "base" %}{% block conteudo %}
 <div style="max-width:420px;margin:2rem auto;text-align:center">
@@ -2572,8 +2576,61 @@ _ROTAS_FORN = """{% extends "base" %}{% block conteudo %}
 </style>
 {% endblock %}"""
 
+_ESQUECI_SENHA = """{% extends "base" %}{% block conteudo %}
+<div class="card">
+  <h1>Recuperar Senha</h1>
+  {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+  {% if enviado %}
+  <div class="ok">
+    <p>✅ Se esse e-mail tem uma conta no Zaq, enviamos um link de recuperação.</p>
+    <p style="font-size:.9rem;color:#a8a8a3;margin-top:.8rem">
+      Confira sua caixa de entrada (e a pasta de spam). O link é válido por 1 hora.
+    </p>
+  </div>
+  <p style="text-align:center;margin-top:1.5rem">
+    <a href="/login" style="color:#5dcaa5;font-size:.88rem;text-decoration:none">Voltar ao login</a>
+  </p>
+  {% else %}
+  <p style="color:#a8a8a3;margin-bottom:1.2rem">
+    Digite o e-mail da sua conta e enviaremos um link pra redefinir sua senha.
+  </p>
+  <form method="post" action="/esqueci-senha">
+    <label>E-mail</label>
+    <input name="email" type="email" required>
+    <button>Enviar link</button>
+  </form>
+  <p style="text-align:center;margin-top:.8rem">
+    <a href="/login" style="color:#5dcaa5;font-size:.88rem;text-decoration:none">Voltar ao login</a>
+  </p>
+  {% endif %}
+</div>
+{% endblock %}"""
+
+_REDEFINIR_SENHA = """{% extends "base" %}{% block conteudo %}
+<div class="card">
+  <h1>Redefinir Senha</h1>
+  {% if not valido %}
+  <div class="erro">
+    <p>❌ Link inválido ou expirado.</p>
+    <p style="font-size:.9rem;margin-top:.5rem">
+      Os links de recuperação são válidos por 1 hora. Peça um novo em <a href="/esqueci-senha" style="color:#5dcaa5">esqueci minha senha</a>.
+    </p>
+  </div>
+  {% else %}
+  {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+  <form method="post" action="/redefinir-senha">
+    <input type="hidden" name="token" value="{{ token }}">
+    <label>Nova Senha</label>
+    <input name="senha" type="password" required minlength="8"
+           placeholder="Mínimo 8 caracteres">
+    <button>Redefinir Senha</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}"""
+
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 from finance.models import canonizar_categoria, categorias_de
@@ -2745,6 +2802,66 @@ def login_envia(request: Request, email: str = Form(...), senha: str = Form(...)
 @router.get("/sair")
 def sair(request: Request):
     request.session.clear()
+    return RedirectResponse("/login", status_code=303)
+
+
+@router.get("/esqueci-senha", response_class=HTMLResponse)
+def esqueci_senha_form(request: Request):
+    return _render("esqueci_senha", request, enviado=False, erro=None)
+
+
+@router.post("/esqueci-senha", response_class=HTMLResponse)
+def esqueci_senha_envia(request: Request, background: BackgroundTasks,
+                        email: str = Form(...)):
+    import secrets
+    from datetime import datetime, timedelta, timezone
+    from finance.email_sender import enviar_recuperacao_senha
+    pool = get_pool()
+    email = email.strip().lower()
+    with pool.connection() as c:
+        row = c.execute("select id from contas where lower(email)=%s", (email,)).fetchone()
+        if row:
+            token = secrets.token_urlsafe(32)
+            expira = datetime.now(timezone.utc) + timedelta(hours=1)
+            c.execute("""insert into tokens_reset_senha (token, conta_id, expira_em)
+                         values (%s, %s, %s)""", (token, row[0], expira))
+            c.commit()
+            link = f"{os.environ.get('APP_URL', 'https://app.zaq-ia.com')}/redefinir-senha?token={token}"
+            background.add_task(enviar_recuperacao_senha, email, link)
+    return _render("esqueci_senha", request, enviado=True, erro=None)
+
+
+@router.get("/redefinir-senha", response_class=HTMLResponse)
+def redefinir_senha_form(request: Request, token: str = ""):
+    pool = get_pool()
+    from datetime import datetime, timezone
+    with pool.connection() as c:
+        row = c.execute("""select conta_id from tokens_reset_senha
+                           where token=%s and not usado and expira_em > now()""",
+                        (token,)).fetchone()
+    if not row:
+        return _render("redefinir_senha", request, token=token, valido=False, erro=None)
+    return _render("redefinir_senha", request, token=token, valido=True, erro=None)
+
+
+@router.post("/redefinir-senha", response_class=HTMLResponse)
+def redefinir_senha_envia(request: Request, token: str = Form(...),
+                          senha: str = Form(...)):
+    pool = get_pool()
+    with pool.connection() as c:
+        row = c.execute("""select conta_id from tokens_reset_senha
+                           where token=%s and not usado and expira_em > now()""",
+                        (token,)).fetchone()
+        if not row:
+            return _render("redefinir_senha", request, token=token, valido=False, erro="Link inválido ou expirado.")
+        if len(senha) < 8:
+            return _render("redefinir_senha", request, token=token, valido=True,
+                           erro="A senha precisa de ao menos 8 caracteres.")
+        c.execute("update contas set senha_hash=%s where id=%s",
+                  (hash_senha(senha), row[0]))
+        c.execute("update tokens_reset_senha set usado=true where token=%s", (token,))
+        c.commit()
+    request.session["aviso"] = "Senha redefinida! Faça login."
     return RedirectResponse("/login", status_code=303)
 
 

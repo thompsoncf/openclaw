@@ -88,6 +88,57 @@ def medir_imagem(dados: bytes, media_type: str = "image/jpeg") -> dict:
     return info
 
 
+def _variantes_preproc(arr):
+    """Gera versoes pre-processadas da imagem pra ajudar a leitura de QR em fotos
+    DIFICEIS (escuras, baixo contraste, amassadas). Cada tecnica realca o QR de um
+    jeito; tentamos varias porque cada foto ruim falha de um jeito diferente.
+    Retorna lista de imagens (numpy arrays) pra tentar ler, alem da original.
+    Tolerante a falha: se cv2 nao tiver algo, pula aquela variante."""
+    out = []
+    try:
+        import cv2
+        import numpy as np
+    except Exception:  # noqa: BLE001
+        return out
+    try:
+        gray = cv2.cvtColor(arr, cv2.COLOR_BGR2GRAY)
+    except Exception:  # noqa: BLE001
+        return out
+
+    # 1. CLAHE: equalizacao de contraste adaptativa (resolve foto ESCURA/desigual)
+    try:
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+        eq = clahe.apply(gray)
+        out.append(cv2.cvtColor(eq, cv2.COLOR_GRAY2BGR))
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 2. Threshold adaptativo: vira preto-e-branco puro (o QR e' P&B por natureza)
+    try:
+        th = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                   cv2.THRESH_BINARY, 31, 5)
+        out.append(cv2.cvtColor(th, cv2.COLOR_GRAY2BGR))
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 3. Otsu: outro threshold (bom quando a iluminacao e' mais uniforme)
+    try:
+        _t, oth = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        out.append(cv2.cvtColor(oth, cv2.COLOR_GRAY2BGR))
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 4. Sharpen: realca bordas (recupera QR levemente borrado)
+    try:
+        blur = cv2.GaussianBlur(gray, (0, 0), 3)
+        sharp = cv2.addWeighted(gray, 1.5, blur, -0.5, 0)
+        out.append(cv2.cvtColor(sharp, cv2.COLOR_GRAY2BGR))
+    except Exception:  # noqa: BLE001
+        pass
+
+    return out
+
+
 def ler_chave_da_imagem(imagem_bytes: bytes) -> str | None:
     """Le o QR code de uma imagem (bytes) e devolve a chave de 44 digitos.
     None se nao houver QR legivel ou nao for uma NFC-e. Tolerante a falha.
@@ -183,6 +234,33 @@ def ler_chave_da_imagem(imagem_bytes: bytes) -> str | None:
                 grande = cv2.resize(corte, None, fx=fx, fy=fx, interpolation=cv2.INTER_CUBIC)
                 if (ch := _le(grande)):
                     return ch
+    except Exception:  # noqa: BLE001
+        pass
+
+    # ULTIMA cartada: variantes pre-processadas (contraste/threshold/sharpen),
+    # pra fotos ESCURAS, de baixo contraste ou amassadas. Tenta cada variante na
+    # imagem inteira, ampliada 2x, e nos recortes centrais ampliados.
+    try:
+        for var in _variantes_preproc(arr):
+            if (ch := _le(var)):
+                return ch
+            try:
+                if (ch := _le(cv2.resize(var, None, fx=2, fy=2,
+                                         interpolation=cv2.INTER_CUBIC))):
+                    return ch
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                hv, wv = var.shape[:2]
+                corte_v = var[int(hv * 0.40):, int(wv * 0.10):int(wv * 0.90)]
+                if corte_v.size:
+                    for fx in (3, 4):
+                        gv = cv2.resize(corte_v, None, fx=fx, fy=fx,
+                                        interpolation=cv2.INTER_CUBIC)
+                        if (ch := _le(gv)):
+                            return ch
+            except Exception:  # noqa: BLE001
+                pass
     except Exception:  # noqa: BLE001
         pass
     return None

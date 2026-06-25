@@ -1623,38 +1623,120 @@ _COMPRA_REVISAR = """{% extends "base" %}{% block conteudo %}
 {% endblock %}"""
 
 _LOJA = """{% extends "base" %}{% block conteudo %}
-<div class="card larga"><h2>{{ fornecedor.nome }}</h2>
-<p class="mut">Escolha o tamanho e a frequência de sua cesta. Sem fidelidade — cancele quando quiser.</p>
-<form method="post" action="/f/{{ fornecedor.slug }}/assinar" style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1.5rem">
-<h4>Tamanhos disponíveis</h4>
-{% for t in tamanhos %}
-<div style="background:#2a2a2b;padding:.8rem;margin-bottom:.6rem;border-radius:6px;cursor:pointer" onclick="document.getElementById('tam-{{ t.id }}').checked=true">
-  <label style="cursor:pointer;display:flex;align-items:center;gap:.5rem">
-    <input type="radio" name="tamanho_id" id="tam-{{ t.id }}" value="{{ t.id }}" required {% if escolha.tamanho_id and escolha.tamanho_id == t.id %}checked{% endif %}>
-    <strong>{{ t.nome }}</strong> — R$ {{ "%.2f"|format(t.preco_centavos/100) }}
-  </label>
-  <div class="mut" style="font-size:.85rem;margin-top:.3rem">{{ t.qtd_frutas }}🍓 {{ t.qtd_legumes }}🥕 {{ t.qtd_verduras }}🥬 {{ t.qtd_temperos }}🌿 ({{ t.total_porcoes }} porções)</div>
-  {% if t.descricao %}<div class="mut" style="font-size:.85rem">{{ t.descricao }}</div>{% endif %}
+<div style="max-width:900px;margin:0 auto">
+  <div style="background:#161617;border:1px solid #2a2a2b;border-radius:12px;padding:1rem 1.1rem;margin-bottom:1rem;display:flex;justify-content:space-between;align-items:center">
+    <div>
+      <div style="font-size:1.1rem;color:#ececec;font-weight:600">{{ fornecedor.nome }}</div>
+      <div style="font-size:.8rem;color:#1d9e75">📍 Entrega · mínimo R$ {{ "%.0f"|format((carrinho.pedido_minimo_centavos or 5000)/100) if carrinho else "50" }}</div>
+    </div>
+    <div style="width:38px;height:38px;border-radius:9px;background:#1d9e75;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600">Z</div>
+  </div>
+
+  <div style="display:flex;gap:8px;margin-bottom:1rem">
+    <a href="#avulso" style="font-size:.85rem;padding:6px 14px;border-radius:8px;background:#1d9e75;color:#fff;text-decoration:none;cursor:pointer" onclick="document.getElementById('avulso').style.display='grid'; document.getElementById('assinar').style.display='none'">Comprar avulso</a>
+    <a href="#assinar" style="font-size:.85rem;padding:6px 14px;border-radius:8px;background:#1c1c1f;color:#b4b2a9;text-decoration:none;cursor:pointer" onclick="document.getElementById('assinar').style.display='block'; document.getElementById('avulso').style.display='none'">Assinar cesta</a>
+  </div>
+
+  <div id="avulso" style="display:grid;grid-template-columns:1fr 280px;gap:0">
+    <div style="padding-right:1rem">
+      {% set icones = {'fruta':'🍎','legume':'🥕','verdura':'🥬','tempero':'🌿','outros':'🛒'} %}
+      {% for cat, itens in secoes %}
+      <div style="font-size:.8rem;color:#5dcaa5;font-weight:600;margin:.8rem 0 .5rem">{{ icones.get(cat,'🛒') }} {{ cat|capitalize }}s</div>
+      {% for p in itens %}
+      <div style="background:#161617;border:1px solid #2a2a2b;border-radius:11px;padding:.7rem .8rem;margin-bottom:.5rem;display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:.85rem;color:#ececec">{{ p.nome }}</div>
+          <div style="font-size:.8rem;color:#1d9e75;font-weight:500">R$ {{ "%.2f"|format(p.preco_venda_centavos/100) }}<span style="color:#888780">/{{ p.unidade }}</span></div>
+        </div>
+        {% set no_cart = carrinho and carrinho.itens|selectattr('produto_id','equalto',p.id)|list %}
+        {% if no_cart %}
+          {% set item = no_cart[0] %}
+          <div style="display:flex;align-items:center;gap:8px;background:#0e0e0f;border-radius:8px;padding:3px">
+            <form method="post" action="/f/{{ fornecedor.slug }}/carrinho/item/{{ item.id }}" style="display:inline"><input type="hidden" name="quantidade" value="{{ item.quantidade - (1 if item.unidade in ['unidade','duzia','maco'] else 0.5) }}"><button style="width:28px;height:28px;border-radius:7px;background:#1d9e75;color:#fff;border:0;cursor:pointer">−</button></form>
+            <span style="font-size:.8rem;color:#ececec;min-width:42px;text-align:center">{{ item.quantidade }} {{ item.unidade }}</span>
+            <form method="post" action="/f/{{ fornecedor.slug }}/carrinho/item/{{ item.id }}" style="display:inline"><input type="hidden" name="quantidade" value="{{ item.quantidade + (1 if item.unidade in ['unidade','duzia','maco'] else 0.5) }}"><button style="width:28px;height:28px;border-radius:7px;background:#1d9e75;color:#fff;border:0;cursor:pointer">+</button></form>
+          </div>
+        {% else %}
+          <form method="post" action="/f/{{ fornecedor.slug }}/carrinho/add" style="display:inline">
+            <input type="hidden" name="produto_id" value="{{ p.id }}">
+            <input type="hidden" name="quantidade" value="{{ 1 if p.unidade in ['unidade','duzia','maco'] else 1 }}">
+            <button style="background:#1c2a1f;color:#5dcaa5;border:1px solid #1d9e75;border-radius:8px;padding:6px 12px;font-size:.8rem;cursor:pointer">+ Adicionar</button>
+          </form>
+        {% endif %}
+      </div>
+      {% endfor %}
+      {% endfor %}
+    </div>
+
+    <div id="carrinho" style="background:#131314;border:1px solid #2a2a2b;border-radius:12px;padding:1rem;height:fit-content;position:sticky;top:1rem">
+      <div style="font-size:.85rem;color:#ececec;font-weight:600;margin-bottom:.7rem">🛒 Seu carrinho</div>
+      {% if erro_carrinho %}<div class="erro" style="font-size:.78rem;margin-bottom:.5rem">{{ erro_carrinho }}</div>{% endif %}
+      {% if carrinho and carrinho.itens %}
+        {% for it in carrinho.itens %}
+        <div style="display:flex;justify-content:space-between;font-size:.78rem;padding:4px 0;border-bottom:1px solid #2a2a2b">
+          <span style="color:#b4b2a9">{{ it.quantidade }}{{ it.unidade }} {{ it.nome }}</span>
+          <span style="color:#ececec">R$ {{ "%.2f"|format(it.total_centavos/100) }}</span>
+        </div>
+        {% endfor %}
+        <div style="font-size:.78rem;color:#888780;line-height:1.8;margin-top:.6rem">
+          <div style="display:flex;justify-content:space-between"><span>Subtotal</span><span style="color:#ececec">R$ {{ "%.2f"|format(carrinho.subtotal_centavos/100) }}</span></div>
+          <div style="display:flex;justify-content:space-between"><span>Entrega</span><span style="color:#ececec">R$ {{ "%.2f"|format(carrinho.taxa_centavos/100) }}</span></div>
+          <div style="display:flex;justify-content:space-between;border-top:1px solid #2a2a2b;margin-top:5px;padding-top:6px;font-size:.9rem"><span style="color:#ececec;font-weight:600">Total</span><span style="color:#5dcaa5;font-weight:600">R$ {{ "%.2f"|format(carrinho.total_centavos/100) }}</span></div>
+        </div>
+        {% if carrinho.pedido_minimo_centavos and carrinho.subtotal_centavos < carrinho.pedido_minimo_centavos %}
+          <div style="font-size:.75rem;color:#e0a23c;margin:.6rem 0">Faltam R$ {{ "%.2f"|format((carrinho.pedido_minimo_centavos - carrinho.subtotal_centavos)/100) }} pro mínimo</div>
+          <button disabled style="width:100%;opacity:.5;background:#888780;color:#0e0e0f;border:0;border-radius:9px;padding:.6rem;cursor:not-allowed;font-weight:600">Enviar pedido</button>
+        {% else %}
+          <div style="background:#15301f;border:1px solid #1d9e75;border-radius:8px;padding:.5rem .6rem;margin:.7rem 0;font-size:.72rem;color:#9fe8c9">ℹ️ Confirma e paga depois.</div>
+          <form method="post" action="/f/{{ fornecedor.slug }}/carrinho/fechar">
+            <input name="endereco" placeholder="Endereço de entrega" required style="width:100%;margin-bottom:.4rem;font-size:.8rem;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#ececec;border-radius:6px">
+            <input name="obs" placeholder="Observação (opcional)" style="width:100%;margin-bottom:.5rem;font-size:.8rem;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#ececec;border-radius:6px">
+            <button style="width:100%;background:#1d9e75;color:#fff;border:0;border-radius:9px;padding:.7rem;font-weight:600;cursor:pointer">✓ Enviar pedido</button>
+          </form>
+        {% endif %}
+      {% else %}
+        <p style="font-size:.8rem;color:#888780">Carrinho vazio. Adicione produtos!</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div id="assinar" style="display:none">
+    <form method="post" action="/f/{{ fornecedor.slug }}/assinar" style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1.5rem">
+    <h4>Tamanhos disponíveis</h4>
+    {% for t in tamanhos %}
+    <div style="background:#2a2a2b;padding:.8rem;margin-bottom:.6rem;border-radius:6px;cursor:pointer" onclick="document.getElementById('tam-{{ t.id }}').checked=true">
+      <label style="cursor:pointer;display:flex;align-items:center;gap:.5rem">
+        <input type="radio" name="tamanho_id" id="tam-{{ t.id }}" value="{{ t.id }}" required {% if escolha.tamanho_id and escolha.tamanho_id == t.id %}checked{% endif %}>
+        <strong>{{ t.nome }}</strong> — R$ {{ "%.2f"|format(t.preco_centavos/100) }}
+      </label>
+      <div class="mut" style="font-size:.85rem;margin-top:.3rem">{{ t.qtd_frutas }}🍓 {{ t.qtd_legumes }}🥕 {{ t.qtd_verduras }}🥬 {{ t.qtd_temperos }}🌿 ({{ t.total_porcoes }} porções)</div>
+      {% if t.descricao %}<div class="mut" style="font-size:.85rem">{{ t.descricao }}</div>{% endif %}
+    </div>
+    {% endfor %}
+    <h4 style="margin-top:1.5rem">Frequência</h4>
+    <select name="frequencia" style="width:100%">
+      <option value="semanal" {% if (escolha.frequencia or 'semanal') == 'semanal' %}selected{% endif %}>Semanal (a cada 7 dias)</option>
+      <option value="quinzenal" {% if (escolha.frequencia or 'semanal') == 'quinzenal' %}selected{% endif %}>Quinzenal (a cada 14 dias)</option>
+      <option value="mensal" {% if (escolha.frequencia or 'semanal') == 'mensal' %}selected{% endif %}>Mensal (a cada 30 dias)</option>
+    </select>
+    <h4 style="margin-top:1.5rem">Produtos que você NÃO quer receber</h4>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.5rem;max-height:200px;overflow-y:auto">
+    {% for p in produtos %}
+    <label style="display:flex;gap:.3rem;font-size:.9rem">
+      <input type="checkbox" name="restricoes" value="{{ p.id }}" {% if p.id in (escolha.restricoes or []) %}checked{% endif %}> {{ p.nome }}
+    </label>
+    {% endfor %}
+    </div>
+    <button style="background:#1d9e75;color:#fff;padding:.7rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:600;font-size:1rem;margin-top:1.5rem">✓ Assinar</button>
+    <p class="mut" style="font-size:.85rem;margin-top:.5rem;text-align:center">Você só paga 4 dias antes de cada entrega.</p>
+    </form>
+  </div>
 </div>
-{% endfor %}
-<h4 style="margin-top:1.5rem">Frequência</h4>
-<select name="frequencia" style="width:100%">
-  <option value="semanal" {% if (escolha.frequencia or 'semanal') == 'semanal' %}selected{% endif %}>Semanal (a cada 7 dias)</option>
-  <option value="quinzenal" {% if (escolha.frequencia or 'semanal') == 'quinzenal' %}selected{% endif %}>Quinzenal (a cada 14 dias)</option>
-  <option value="mensal" {% if (escolha.frequencia or 'semanal') == 'mensal' %}selected{% endif %}>Mensal (a cada 30 dias)</option>
-</select>
-<h4 style="margin-top:1.5rem">Produtos que você NÃO quer receber</h4>
-<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.5rem;max-height:200px;overflow-y:auto">
-{% for p in produtos %}
-<label style="display:flex;gap:.3rem;font-size:.9rem">
-  <input type="checkbox" name="restricoes" value="{{ p.id }}" {% if p.id in (escolha.restricoes or []) %}checked{% endif %}> {{ p.nome }}
-</label>
-{% endfor %}
-</div>
-<button style="background:#1d9e75;color:#fff;padding:.7rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:600;font-size:1rem;margin-top:1.5rem">✓ Assinar</button>
-<p class="mut" style="font-size:.85rem;margin-top:.5rem;text-align:center">Você só paga 4 dias antes de cada entrega.</p>
-</form>
-</div>
+
+@media (max-width:680px){
+  .loja-grid { grid-template-columns:1fr !important; }
+  #carrinho { position:static; margin-top:1rem; }
+}
 {% endblock %}"""
 
 _LOJA_CONFIRMAR_NOVO = """{% extends "base" %}{% block conteudo %}
@@ -2629,8 +2711,35 @@ _REDEFINIR_SENHA = """{% extends "base" %}{% block conteudo %}
 </div>
 {% endblock %}"""
 
+_PEDIDO_ENVIADO = """{% extends "base" %}{% block conteudo %}
+<div class="card" style="max-width:420px;margin:0 auto;text-align:center">
+  <div style="width:58px;height:58px;border-radius:50%;background:#15301f;border:1px solid #1d9e75;display:flex;align-items:center;justify-content:center;margin:0 auto 1rem">
+    <span style="font-size:28px;color:#1d9e75">✓</span>
+  </div>
+  <h2>Pedido enviado!</h2>
+  <p class="mut" style="font-size:.85rem">O fornecedor vai confirmar seu pedido e avisar você pelo WhatsApp.</p>
+
+  <div style="text-align:left;margin:1.2rem 0">
+    <div style="display:flex;align-items:center;gap:11px;margin:.4rem 0"><div style="width:28px;height:28px;border-radius:50%;background:#1d9e75;display:flex;align-items:center;justify-content:center;color:#fff">✓</div><span style="font-size:.82rem;color:#ececec">Pedido recebido</span></div>
+    <div style="display:flex;align-items:center;gap:11px;margin:.4rem 0"><div style="width:28px;height:28px;border-radius:50%;background:#1c1c1f;border:1px solid #888780;display:flex;align-items:center;justify-content:center;color:#888780">⏳</div><span style="font-size:.82rem;color:#888780">Aguardando confirmação</span></div>
+    <div style="display:flex;align-items:center;gap:11px;margin:.4rem 0"><div style="width:28px;height:28px;border-radius:50%;background:#1c1c1f;border:1px solid #2a2a2b;display:flex;align-items:center;justify-content:center;color:#5f5e5a">💳</div><span style="font-size:.82rem;color:#5f5e5a">Pagamento (após confirmar)</span></div>
+    <div style="display:flex;align-items:center;gap:11px;margin:.4rem 0"><div style="width:28px;height:28px;border-radius:50%;background:#1c1c1f;border:1px solid #2a2a2b;display:flex;align-items:center;justify-content:center;color:#5f5e5a">🚚</div><span style="font-size:.82rem;color:#5f5e5a">A caminho</span></div>
+  </div>
+
+  {% if carrinho %}
+  <div style="background:#161617;border:1px solid #2a2a2b;border-radius:11px;padding:.8rem;text-align:left;margin-bottom:1rem">
+    <div style="display:flex;justify-content:space-between;font-size:.8rem"><span class="mut">Pedido #{{ carrinho.id }}</span><span style="color:#5dcaa5;background:#15301f;padding:2px 9px;border-radius:20px;font-size:.72rem">aguardando</span></div>
+    <div style="display:flex;justify-content:space-between;border-top:1px solid #2a2a2b;margin-top:6px;padding-top:6px;font-size:.85rem"><span style="color:#ececec">Total</span><span style="color:#5dcaa5;font-weight:600">R$ {{ "%.2f"|format(carrinho.total_centavos/100) }}</span></div>
+  </div>
+  {% endif %}
+
+  <a href="/painel" style="display:block;background:#1c1c1f;color:#ececec;border:1px solid #2a2a2b;border-radius:10px;padding:.7rem;text-decoration:none;font-size:.85rem;margin-bottom:.5rem">Ver meus pedidos</a>
+  <a href="/f/{{ fornecedor_slug or '' }}" style="color:#5dcaa5;font-size:.8rem;text-decoration:none">Voltar à loja</a>
+</div>
+{% endblock %}"""
+
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 from finance.models import canonizar_categoria, categorias_de
@@ -2916,7 +3025,7 @@ def painel(request: Request):
 
 @router.get("/f/{slug}", response_class=HTMLResponse)
 def loja_fornecedor(request: Request, slug: str):
-    from finance import cestas as cestas_mod, catalogo as cat_mod
+    from finance import cestas as cestas_mod, catalogo as cat_mod, carrinho as car_mod
     pool = get_pool()
     with pool.connection() as c:
         forn = c.execute(
@@ -2930,14 +3039,26 @@ def loja_fornecedor(request: Request, slug: str):
     tamanhos = cestas_mod.listar_tamanhos(pool, forn[0], so_ativos=True)
     produtos = cat_mod.listar_produtos(pool, forn[0], so_disponiveis=True)
     escolha = request.session.get("loja_escolha", {})
-    # garante chaves pra não quebrar o template na primeira visita
     escolha = {
         "tamanho_id": escolha.get("tamanho_id"),
         "frequencia": escolha.get("frequencia", "semanal"),
         "restricoes": escolha.get("restricoes", []) or [],
     }
+    grupos = {}
+    for p in produtos:
+        cat = (p.get("categoria") or "outros").lower()
+        grupos.setdefault(cat, []).append(p)
+    ordem = ["fruta", "legume", "verdura", "tempero", "outros"]
+    secoes = [(c, grupos[c]) for c in ordem if c in grupos]
+
+    carrinho = None
+    cid = request.session.get("carrinho_id")
+    if cid:
+        carrinho = car_mod.ver(pool, cid)
+
     return _render("loja", request, fornecedor=fornecedor, tamanhos=tamanhos,
-                   produtos=produtos, escolha=escolha)
+                   produtos=produtos, escolha=escolha, secoes=secoes, carrinho=carrinho,
+                   erro_carrinho=request.session.pop("erro_carrinho", None))
 
 
 @router.post("/f/{slug}/assinar")
@@ -3045,6 +3166,85 @@ def _criar_assinatura_da_sessao(request, conta, slug):
     except Exception as e:
         request.session["erro"] = f"Erro: {str(e)}"
     return RedirectResponse("/painel/assinaturas", status_code=303)
+
+
+# ========== CARRINHO AVULSO (PEÇA 3) ==========
+
+@router.post("/f/{slug}/carrinho/add")
+def carrinho_add(request: Request, slug: str,
+                 produto_id: int = Form(...), quantidade: float = Form(1)):
+    from finance import carrinho as car_mod
+    pool = get_pool()
+    with pool.connection() as c:
+        forn = c.execute(
+            "select id from contas where fornecedor_slug=%s and eh_fornecedor",
+            (slug,),
+        ).fetchone()
+    if forn is None:
+        return RedirectResponse(f"/f/{slug}", status_code=303)
+    conta = conta_logada(request)
+    if conta is None:
+        request.session["carrinho_intencao"] = {
+            "slug": slug, "produto_id": produto_id, "quantidade": float(quantidade)
+        }
+        request.session["next"] = f"/f/{slug}"
+        return RedirectResponse(f"/f/{slug}/entrar-ou-cadastrar", status_code=303)
+    cid = car_mod.obter_ou_criar(pool, conta[0], forn[0])
+    car_mod.adicionar_item(pool, cid, produto_id, quantidade)
+    request.session["carrinho_id"] = cid
+    return RedirectResponse(f"/f/{slug}#carrinho", status_code=303)
+
+
+@router.post("/f/{slug}/carrinho/item/{item_id}")
+def carrinho_item(request: Request, slug: str, item_id: int,
+                  quantidade: float = Form(...)):
+    from finance import carrinho as car_mod
+    conta = conta_logada(request)
+    cid = request.session.get("carrinho_id")
+    if conta and cid:
+        car_mod.atualizar_quantidade(pool := get_pool(), cid, item_id, quantidade)
+    return RedirectResponse(f"/f/{slug}#carrinho", status_code=303)
+
+
+@router.post("/f/{slug}/carrinho/fechar")
+def carrinho_fechar(request: Request, slug: str,
+                    endereco: str = Form(""), obs: str = Form("")):
+    from finance import carrinho as car_mod
+    conta = conta_logada(request)
+    cid = request.session.get("carrinho_id")
+    if not conta or not cid:
+        return RedirectResponse(f"/f/{slug}", status_code=303)
+    pool = get_pool()
+    r = car_mod.fechar(pool, cid, endereco_entrega=endereco or None, obs=obs or None)
+    if not r["ok"]:
+        if r.get("faltam_centavos"):
+            request.session["erro_carrinho"] = (
+                f"Faltam R$ {r['faltam_centavos']/100:.2f} pro pedido mínimo.")
+        else:
+            request.session["erro_carrinho"] = r.get("erro", "Não foi possível enviar.")
+        return RedirectResponse(f"/f/{slug}#carrinho", status_code=303)
+    cid_feito = cid
+    request.session.pop("carrinho_id", None)
+    return RedirectResponse(f"/pedido-enviado/{cid_feito}", status_code=303)
+
+
+@router.get("/pedido-enviado/{carrinho_id}", response_class=HTMLResponse)
+def pedido_enviado(request: Request, carrinho_id: int):
+    from finance import carrinho as car_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    car = car_mod.ver(pool, carrinho_id)
+    if car is None:
+        return RedirectResponse("/painel", status_code=303)
+    with pool.connection() as c:
+        forn_slug = c.execute(
+            "select fornecedor_slug from contas where id=%s",
+            (car["fornecedor_id"],),
+        ).fetchone()
+    forn_slug = forn_slug[0] if forn_slug else ""
+    return _render("pedido_enviado", request, carrinho=car, fornecedor_slug=forn_slug)
 
 
 @router.get("/painel/assinaturas", response_class=HTMLResponse)

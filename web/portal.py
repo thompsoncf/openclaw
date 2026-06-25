@@ -3231,7 +3231,7 @@ def carrinho_add(request: Request, slug: str,
             "slug": slug, "produto_id": produto_id, "quantidade": float(quantidade)
         }
         request.session["next"] = f"/f/{slug}"
-        return RedirectResponse(f"/f/{slug}/entrar-ou-cadastrar", status_code=303)
+        return RedirectResponse("/cadastro", status_code=303)
     cid = car_mod.obter_ou_criar(pool, conta[0], forn[0])
     car_mod.adicionar_item(pool, cid, produto_id, quantidade)
     request.session["carrinho_id"] = cid

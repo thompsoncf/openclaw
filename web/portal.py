@@ -4310,6 +4310,28 @@ def sugerir_foto_endpoint(request: Request, nome: str = ""):
     return JSONResponse({"foto_url": foto})
 
 
+@router.get("/painel/fornecedor/opcoes-foto")
+def opcoes_foto_endpoint(request: Request, nome: str = ""):
+    from finance import galeria_fotos
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return JSONResponse({"opcoes": []})
+    return JSONResponse({"opcoes": galeria_fotos.opcoes_de_foto(nome)})
+
+
+@router.post("/painel/fornecedor/produto/foto")
+def salvar_foto_produto(request: Request, dados: dict = Body(...)):
+    from finance import catalogo as cat_mod
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    produto_id = int(dados.get("produto_id", 0))
+    foto_url = (dados.get("foto_url") or "").strip()
+    cat_mod.atualizar_produto(get_pool(), conta[0], produto_id,
+                              foto_url=foto_url or None)
+    return JSONResponse({"ok": True})
+
+
 @router.post("/painel/fornecedor/catalogo/editar")
 def painel_catalogo_editar(request: Request,
                           produto_id: int = Form(...),

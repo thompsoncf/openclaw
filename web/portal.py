@@ -459,34 +459,54 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
     </div>
   </div>
 
-  <!-- LISTA DE PRODUTOS EM CARDS -->
-  <div id="forn-cat-lista" style="display:flex;flex-direction:column;gap:.8rem">
+  <!-- BUSCA -->
+  {% if produtos %}
+  <div style="margin-bottom:.7rem">
+    <input type="text" id="forn-cat-busca" placeholder="🔎 buscar produto..." autocomplete="off"
+           oninput="fornFiltrarCatalogo(this.value)"
+           style="width:100%;padding:.5rem .7rem;background:#161617;border:1px solid #2a2a2b;border-radius:8px;color:#e8e8e8;font-size:.9rem;box-sizing:border-box">
+  </div>
+  {% endif %}
+
+  <!-- LISTA DE PRODUTOS (compacta) -->
+  <div id="forn-cat-lista" style="display:flex;flex-direction:column;gap:.4rem">
     {% if produtos %}
       {% for p in produtos %}
-      <div class="forn-prod-card" data-pid="{{ p.id }}" style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1rem">
-        <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:.6rem">
-          <div class="forn-prod-foto" style="width:54px;height:54px;border-radius:9px;flex-shrink:0;overflow:hidden;background-size:cover;background-position:center{% if p.foto_url %};background-image:url('{{ p.foto_url }}'){% else %};background:#1a2a1f;display:flex;align-items:center;justify-content:center{% endif %}">
-            {% if not p.foto_url %}<span style="font-size:22px;color:#3a5a48">🥬</span>{% endif %}
-          </div>
+      <div class="forn-prod-card forn-row" data-pid="{{ p.id }}" data-nome="{{ p.nome|lower }}" style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;overflow:hidden">
+        <div class="forn-row-head" onclick="fornToggleRow(this)" style="display:flex;align-items:center;gap:10px;padding:.6rem .75rem;cursor:pointer">
+          <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:{% if p.abaixo_minimo %}#ff6b6b{% else %}#1d9e75{% endif %}"></span>
           <div style="flex:1;min-width:0">
-            <strong style="font-size:1rem">{{ p.nome }}</strong> · <span class="mut">{{ p.unidade }}</span>
-            <div class="mut" style="font-size:.85rem;margin-top:.3rem">
-              saldo: <strong>{{ p.saldo }} {{ p.unidade }}</strong> · custo médio <strong>R$ {{ "%.2f" | format(p.custo_medio_centavos / 100) }}</strong> · vende <strong>R$ {{ "%.2f" | format(p.preco_venda_centavos / 100) }}</strong> · margem {% if p.margem_pct %}<strong>{{ p.margem_pct }}%</strong>{% else %}-{% endif %}
-              {% if p.abaixo_minimo %}<br><span style="color:#ff6b6b">⚠ abaixo do mínimo</span>{% endif %}
+            <div style="font-size:.92rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ p.nome }} <span class="mut" style="font-weight:400;font-size:.8rem">· {{ p.unidade }}</span></div>
+            <div class="mut" style="font-size:.75rem;margin-top:1px">saldo {{ p.saldo }} {{ p.unidade }}{% if p.abaixo_minimo %} · <span style="color:#ff6b6b">abaixo do mínimo</span>{% endif %}</div>
+          </div>
+          <span style="font-size:.92rem;font-weight:500;color:#cfcfcf;white-space:nowrap">R$ {{ "%.2f" | format(p.preco_venda_centavos / 100) }}</span>
+          <span class="forn-row-chev" style="color:#6a6a6a;font-size:1rem;transition:transform .15s">▾</span>
+        </div>
+        <div class="forn-row-body" style="display:none;padding:0 .75rem .7rem;border-top:1px solid #242426">
+          <div class="mut" style="font-size:.75rem;padding:.5rem 0 .6rem">
+            custo médio R$ {{ "%.2f" | format(p.custo_medio_centavos / 100) }} · margem {% if p.margem_pct %}{{ p.margem_pct }}%{% else %}-{% endif %}
+          </div>
+          <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+            <button type="button" onclick="fornShowEntrada({{ p.id }})" style="background:#1d9e75;color:#fff;border:0;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem;font-weight:500">dar entrada</button>
+            <button type="button" onclick="fornShowPerda({{ p.id }})" style="background:#8a3636;color:#fff;border:0;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem;font-weight:500">perda</button>
+            <button type="button" onclick="fornEditProduct({{ p.id }})" style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem">editar</button>
+            <button type="button" onclick="fornFoto({{ p.id }})" style="background:transparent;border:1px solid #534AB7;color:#a89ce8;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem">📷 foto</button>
+            <button type="button" onclick="fornConfirmApagar({{ p.id }})" style="background:transparent;border:1px solid #6b3030;color:#d98a8a;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem">🗑 apagar</button>
+          </div>
+          <div class="forn-row-confirm" id="forn-confirm-{{ p.id }}" style="display:none;margin-top:.6rem;background:#241a1a;border:1px solid #5a2b2b;border-radius:6px;padding:.6rem">
+            <div style="font-size:.8rem;color:#e3b9b9;margin-bottom:.5rem">Apagar <strong>{{ p.nome }}</strong>? Ele some da loja e do catálogo. O histórico de movimentações fica guardado.</div>
+            <div style="display:flex;gap:.4rem;justify-content:flex-end">
+              <button type="button" onclick="fornCancelApagar({{ p.id }})" style="background:transparent;color:#9a9a9a;border:1px solid #3a3a3a;border-radius:5px;padding:.35rem .9rem;cursor:pointer;font-size:.82rem">Cancelar</button>
+              <button type="button" onclick="fornApagarProduto({{ p.id }})" style="background:#a32d2d;color:#fff;border:0;border-radius:5px;padding:.35rem .9rem;cursor:pointer;font-size:.82rem;font-weight:500">Apagar</button>
             </div>
           </div>
-        </div>
-        <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-          <button type="button" onclick="fornShowEntrada({{ p.id }})" style="background:#1d9e75;color:#fff;border:0;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem;font-weight:500">dar entrada</button>
-          <button type="button" onclick="fornShowPerda({{ p.id }})" style="background:#8a3636;color:#fff;border:0;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem;font-weight:500">registrar perda</button>
-          <button type="button" onclick="fornEditProduct({{ p.id }})" style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem">editar</button>
-          <button type="button" onclick="fornFoto({{ p.id }})" style="background:transparent;border:1px solid #534AB7;color:#a89ce8;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem">📷 foto</button>
         </div>
       </div>
       {% endfor %}
     {% else %}
     <p class="mut">Nenhum produto ainda. Clique em "+ novo produto" pra começar.</p>
     {% endif %}
+    <p class="mut" id="forn-cat-sem-resultado" style="display:none">Nenhum produto encontrado.</p>
   </div>
 
   <!-- MODAL: Novo/Editar Produto -->
@@ -971,6 +991,54 @@ function fornShowPerda(prod_id){
 }
 function fornHidePerda(){
   document.getElementById('forn-perda').style.display = 'none';
+}
+function fornToggleRow(head){
+  var body = head.parentElement.querySelector('.forn-row-body');
+  var chev = head.querySelector('.forn-row-chev');
+  if(!body) return;
+  var aberto = body.style.display === 'block';
+  body.style.display = aberto ? 'none' : 'block';
+  if(chev) chev.style.transform = aberto ? 'rotate(0deg)' : 'rotate(180deg)';
+}
+function fornFiltrarCatalogo(q){
+  q = (q || '').trim().toLowerCase();
+  var rows = document.querySelectorAll('#forn-cat-lista .forn-row');
+  var visiveis = 0;
+  rows.forEach(function(r){
+    var nome = r.getAttribute('data-nome') || '';
+    var ok = !q || nome.indexOf(q) !== -1;
+    r.style.display = ok ? '' : 'none';
+    if(ok) visiveis++;
+  });
+  var sem = document.getElementById('forn-cat-sem-resultado');
+  if(sem) sem.style.display = (visiveis === 0 && rows.length > 0) ? 'block' : 'none';
+}
+function fornConfirmApagar(pid){
+  var c = document.getElementById('forn-confirm-' + pid);
+  if(c) c.style.display = 'block';
+}
+function fornCancelApagar(pid){
+  var c = document.getElementById('forn-confirm-' + pid);
+  if(c) c.style.display = 'none';
+}
+function fornApagarProduto(pid){
+  var fd = new FormData();
+  fd.append('produto_id', pid);
+  var btnRow = document.querySelector('#forn-cat-lista .forn-row[data-pid="' + pid + '"]');
+  fetch('/painel/fornecedor/catalogo/apagar', { method: 'POST', body: fd })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d && d.ok){
+        if(btnRow){
+          btnRow.style.transition = 'opacity .25s';
+          btnRow.style.opacity = '0';
+          setTimeout(function(){ btnRow.remove(); }, 260);
+        }
+      } else {
+        alert('Não consegui apagar o produto.');
+      }
+    })
+    .catch(function(){ alert('Erro ao apagar o produto.'); });
 }
 function fornShowNovaOrigem(){
   document.getElementById('forn-nova-origem').style.display = 'block';
@@ -4543,6 +4611,19 @@ def painel_catalogo_editar(request: Request,
     except Exception as e:
         request.session["erro"] = f"Erro: {str(e)}"
     return RedirectResponse("/painel/fornecedor", status_code=303)
+
+
+@router.post("/painel/fornecedor/catalogo/apagar")
+def painel_catalogo_apagar(request: Request, produto_id: int = Form(...)):
+    from finance import catalogo as cat_mod
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return JSONResponse({"ok": False}, status_code=401)
+    try:
+        ok = cat_mod.arquivar_produto(get_pool(), conta[0], produto_id)
+    except Exception:
+        return JSONResponse({"ok": False}, status_code=500)
+    return JSONResponse({"ok": bool(ok)})
 
 
 @router.post("/painel/fornecedor/catalogo/entrada")

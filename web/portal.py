@@ -4278,21 +4278,36 @@ def painel_catalogo_produto(request: Request,
                            unidade: str = Form("kg"),
                            categoria: str = Form(""),
                            preco_venda: str = Form("0"),
-                           estoque_minimo: str = Form("0")):
-    from finance import catalogo as cat_mod
+                           estoque_minimo: str = Form("0"),
+                           foto_url: str = Form(""),
+                           descricao_curta: str = Form("")):
+    from finance import catalogo as cat_mod, galeria_fotos
     conta = conta_logada(request)
     if conta is None or not conta[8]:
         return RedirectResponse("/painel/fornecedor", status_code=303)
     try:
         preco_centavos = int(float(preco_venda or 0) * 100)
+        if not foto_url:
+            foto_url = galeria_fotos.sugerir_foto(nome) or None
         produto_id = cat_mod.criar_produto(
             get_pool(), conta[0], nome, unidade, categoria,
-            preco_centavos, float(estoque_minimo or 0)
+            preco_centavos, float(estoque_minimo or 0),
+            foto_url=foto_url, descricao_curta=descricao_curta or None
         )
         request.session["aviso"] = f"Produto '{nome}' criado com sucesso!"
     except Exception as e:
         request.session["erro"] = f"Erro: {str(e)}"
     return RedirectResponse("/painel/fornecedor", status_code=303)
+
+
+@router.get("/painel/fornecedor/sugerir-foto")
+def sugerir_foto_endpoint(request: Request, nome: str = ""):
+    from finance import galeria_fotos
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return JSONResponse({"foto_url": ""}, status_code=403)
+    foto = galeria_fotos.sugerir_foto(nome) or ""
+    return JSONResponse({"foto_url": foto})
 
 
 @router.post("/painel/fornecedor/catalogo/editar")

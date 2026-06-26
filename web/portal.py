@@ -515,7 +515,7 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
       <h4 style="margin-top:0">Novo produto</h4>
       <form method="post" action="/painel/fornecedor/catalogo/produto">
         <label style="font-size:.85rem">Nome</label>
-        <input name="nome" id="forn-novo-nome" required placeholder="ex: Tomate" oninput="fornNovoBuscarSugestoes()" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.7rem">
+        <input name="nome" id="forn-novo-nome" required placeholder="ex: Tomate" oninput="fornNovoBuscarSugestoes();fornNovoChutarCategoria()" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.7rem">
 
         <!-- FOTO (opcional) -->
         <div style="background:#161617;border:1px solid #242426;border-radius:9px;padding:.7rem;margin-bottom:.7rem">
@@ -546,8 +546,12 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
           <option value="pacote">pacote</option>
         </select>
 
-        <label style="font-size:.85rem">Categoria (opcional)</label>
-        <input name="categoria" placeholder="ex: fruta" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.7rem">
+        <label style="font-size:.85rem">Categoria</label>
+        <div id="forn-novo-cat-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin:.35rem 0 .5rem">
+          {% for c in categorias_padrao %}<span class="forn-catchip" onclick="fornSetCat('forn-novo-categoria', this, '{{ c }}')" style="font-size:.76rem;color:#b4b2a9;background:#161617;border:1.5px solid #2a2a2b;border-radius:16px;padding:4px 12px;cursor:pointer">{{ c }}</span>{% endfor %}
+          {% for c in categorias_usadas %}<span class="forn-catchip" onclick="fornSetCat('forn-novo-categoria', this, '{{ c }}')" style="font-size:.76rem;color:#b4b2a9;background:#161617;border:1.5px solid #2a2a2b;border-radius:16px;padding:4px 12px;cursor:pointer">{{ c }}</span>{% endfor %}
+        </div>
+        <input name="categoria" id="forn-novo-categoria" placeholder="toque numa sugestão ou digite" oninput="fornCatLimpaSel('forn-novo-cat-chips')" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.7rem">
 
         <div style="display:flex;gap:.6rem;margin-bottom:.9rem">
           <div style="flex:1">
@@ -665,7 +669,11 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
           <option value="pacote">pacote</option>
         </select>
         <label style="font-size:.85rem">Categoria</label>
-        <input name="categoria" id="forn-edit-categoria" placeholder="fruta, verdura..." style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.7rem">
+        <div id="forn-edit-cat-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin:.35rem 0 .5rem">
+          {% for c in categorias_padrao %}<span class="forn-catchip" onclick="fornSetCat('forn-edit-categoria', this, '{{ c }}')" style="font-size:.76rem;color:#b4b2a9;background:#161617;border:1.5px solid #2a2a2b;border-radius:16px;padding:4px 12px;cursor:pointer">{{ c }}</span>{% endfor %}
+          {% for c in categorias_usadas %}<span class="forn-catchip" onclick="fornSetCat('forn-edit-categoria', this, '{{ c }}')" style="font-size:.76rem;color:#b4b2a9;background:#161617;border:1.5px solid #2a2a2b;border-radius:16px;padding:4px 12px;cursor:pointer">{{ c }}</span>{% endfor %}
+        </div>
+        <input name="categoria" id="forn-edit-categoria" placeholder="toque numa sugestão ou digite" oninput="fornCatLimpaSel('forn-edit-cat-chips')" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.7rem">
         <label style="font-size:.85rem">Preço de venda (R$)</label>
         <input name="preco_venda" id="forn-edit-preco" placeholder="6,90" required style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.7rem">
         <label style="font-size:.85rem">Estoque mínimo</label>
@@ -1009,6 +1017,45 @@ function fornNovoFotoPreview(url){
   img.onload = function(){ prev.style.backgroundImage="url('"+url+"')"; if(vazia) vazia.style.display='none'; };
   img.onerror = function(){ prev.style.backgroundImage='none'; if(vazia){ vazia.style.display='block'; vazia.textContent='✗'; } };
   img.src = url;
+}
+function fornSetCat(inputId, chip, valor){
+  var inp = document.getElementById(inputId);
+  if(inp) inp.value = valor;
+  var box = chip.parentElement;
+  if(box) box.querySelectorAll('.forn-catchip').forEach(function(x){ x.style.border='1.5px solid #2a2a2b'; x.style.color='#b4b2a9'; });
+  chip.style.border = '1.5px solid #1d9e75';
+  chip.style.color = '#5dcaa5';
+}
+function fornCatLimpaSel(boxId){
+  var box = document.getElementById(boxId);
+  if(box) box.querySelectorAll('.forn-catchip').forEach(function(x){ x.style.border='1.5px solid #2a2a2b'; x.style.color='#b4b2a9'; });
+}
+var _fornCatTimer = null;
+function fornNovoChutarCategoria(){
+  var nomeEl = document.getElementById('forn-novo-nome');
+  var catEl = document.getElementById('forn-novo-categoria');
+  if(!nomeEl || !catEl) return;
+  if((catEl.value || '').trim()) return;
+  var nome = (nomeEl.value || '').trim();
+  if(nome.length < 2) return;
+  clearTimeout(_fornCatTimer);
+  _fornCatTimer = setTimeout(function(){
+    if((catEl.value || '').trim()) return;
+    fetch('/painel/fornecedor/sugerir-categoria?nome=' + encodeURIComponent(nome))
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(d && d.categoria && !(catEl.value || '').trim()){
+          catEl.value = d.categoria;
+          var box = document.getElementById('forn-novo-cat-chips');
+          if(box) box.querySelectorAll('.forn-catchip').forEach(function(x){
+            var hit = x.textContent.trim() === d.categoria;
+            x.style.border = hit ? '1.5px solid #1d9e75' : '1.5px solid #2a2a2b';
+            x.style.color  = hit ? '#5dcaa5' : '#b4b2a9';
+          });
+        }
+      })
+      .catch(function(){});
+  }, 500);
 }
 var _fornNovoSugTimer = null;
 function fornNovoBuscarSugestoes(){
@@ -2005,11 +2052,11 @@ _LOJA = """{% extends "base" %}{% block conteudo %}
     <div class="lj-vitrine">
       <div class="lj-chips">
         <span class="lj-chip on" onclick="ljCat('tudo',this)">Tudo</span>
-        {% for cat, itens in secoes %}<span class="lj-chip" onclick="ljCat('{{ cat }}',this)">{{ cat|capitalize }}s</span>{% endfor %}
+        {% for cat, itens in secoes %}<span class="lj-chip" onclick="ljCat('{{ cat }}',this)">{{ cat|capitalize }}{% if not cat.endswith('s') %}s{% endif %}</span>{% endfor %}
       </div>
       {% for cat, itens in secoes %}
       <div class="lj-sec" data-cat="{{ cat }}">
-        <div class="lj-sec-tit">{{ cat|capitalize }}s</div>
+        <div class="lj-sec-tit">{{ cat|capitalize }}{% if not cat.endswith('s') %}s{% endif %}</div>
         <div class="lj-grade">
           {% for p in itens %}
           <div class="lj-card" data-pid="{{ p.id }}" data-unidade="{{ p.unidade }}">
@@ -3582,10 +3629,12 @@ def loja_fornecedor(request: Request, slug: str):
     }
     grupos = {}
     for p in produtos:
-        cat = (p.get("categoria") or "outros").lower()
+        cat = ((p.get("categoria") or "").strip() or "outros").lower()
         grupos.setdefault(cat, []).append(p)
-    ordem = ["fruta", "legume", "verdura", "tempero", "outros"]
+    ordem = ["fruta", "legume", "verdura", "tempero", "ovos", "outros"]
+    extras = [c for c in sorted(grupos) if c not in ordem]
     secoes = [(c, grupos[c]) for c in ordem if c in grupos]
+    secoes += [(c, grupos[c]) for c in extras]
 
     carrinho = None
     carrinho_json = None
@@ -4316,6 +4365,12 @@ def painel_fornecedor(request: Request):
         } if row else {"razao_social": None, "cnpj": None, "endereco": None}
     # Carrega produtos do catálogo
     produtos = cat_mod.listar_produtos(pool, conta[0])
+    # Carrega categorias (padrão + as que o fornecedor já usa)
+    from finance import categorias as cat_sug
+    categorias_padrao = cat_sug.CATEGORIAS_PADRAO
+    _usadas = { (p.get("categoria") or "").strip().lower()
+                for p in produtos if (p.get("categoria") or "").strip() }
+    categorias_usadas = sorted(_usadas - set(categorias_padrao))
     # Carrega origens de compra (de quem o fornecedor compra)
     origens = cat_mod.listar_origens(pool, conta[0])
     # Carrega compras
@@ -4340,6 +4395,7 @@ def painel_fornecedor(request: Request):
         ).fetchone()
         margem_alvo = float(row[0]) if row and row[0] else 60.0
     return _render("fornecedor", request, conta=conta, fiscal=fiscal, produtos=produtos, origens=origens, compras=compras_raw, tamanhos=tamanhos, margem_alvo=margem_alvo,
+                   categorias_padrao=categorias_padrao, categorias_usadas=categorias_usadas,
                    erro=request.session.pop("erro", None),
                    aviso=request.session.pop("aviso", None))
 
@@ -4586,6 +4642,9 @@ def painel_catalogo_produto(request: Request,
         preco_centavos = int(float(preco_venda or 0) * 100)
         if not foto_url:
             foto_url = galeria_fotos.sugerir_foto(nome) or None
+        from finance import categorias as cat_sug
+        if not (categoria or "").strip():
+            categoria = cat_sug.sugerir_categoria(nome) or ""
         produto_id = cat_mod.criar_produto(
             get_pool(), conta[0], nome, unidade, categoria,
             preco_centavos, float(estoque_minimo or 0),
@@ -4623,6 +4682,15 @@ def sugerir_fotos_endpoint(request: Request, nome: str = ""):
     if conta is None or not conta[8]:
         return JSONResponse({"opcoes": []})
     return JSONResponse({"opcoes": galeria_fotos.opcoes_de_foto(nome, n=4)})
+
+
+@router.get("/painel/fornecedor/sugerir-categoria")
+def sugerir_categoria_endpoint(request: Request, nome: str = ""):
+    from finance import categorias as cat_sug
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return JSONResponse({"categoria": None})
+    return JSONResponse({"categoria": cat_sug.sugerir_categoria(nome)})
 
 
 @router.post("/painel/fornecedor/produto/upload-foto")

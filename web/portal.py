@@ -463,10 +463,9 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
   <div id="forn-cat-lista" style="display:flex;flex-direction:column;gap:.8rem">
     {% if produtos %}
       {% for p in produtos %}
-      <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1rem">
+      <div class="forn-prod-card" data-pid="{{ p.id }}" style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1rem">
         <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:.6rem">
-          <div style="width:54px;height:54px;border-radius:9px;background:#1a2a1f;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden;background-size:cover;background-position:center"
-               {% if p.foto_url %}style="width:54px;height:54px;border-radius:9px;background-image:url('{{ p.foto_url }}');background-size:cover;background-position:center;flex-shrink:0"{% endif %}>
+          <div class="forn-prod-foto" style="width:54px;height:54px;border-radius:9px;flex-shrink:0;overflow:hidden;background-size:cover;background-position:center{% if p.foto_url %};background-image:url('{{ p.foto_url }}'){% else %};background:#1a2a1f;display:flex;align-items:center;justify-content:center{% endif %}">
             {% if not p.foto_url %}<span style="font-size:22px;color:#3a5a48">🥬</span>{% endif %}
           </div>
           <div style="flex:1;min-width:0">
@@ -705,13 +704,46 @@ function fornFotoSalvar(){
   const pid = document.getElementById('forn-foto-pid').value;
   const url = (fotoEscolhida || document.getElementById('forn-foto-link').value.trim() || '');
   fetch('/painel/fornecedor/produto/foto',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({produto_id:parseInt(pid),foto_url:url})}).then(()=>location.reload());
+    body:JSON.stringify({produto_id:parseInt(pid),foto_url:url})})
+    .then(r=>r.json()).then(()=>{
+      aplicarFotoNoCard(parseInt(pid), url);
+      document.getElementById('forn-foto-modal').style.display='none';
+    })
+    .catch(()=>{ alert('Não foi possível salvar a foto. Tente de novo.'); });
 }
 
 function fornFotoRemover(){
   const pid = document.getElementById('forn-foto-pid').value;
   fetch('/painel/fornecedor/produto/foto',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({produto_id:parseInt(pid),foto_url:''})}).then(()=>location.reload());
+    body:JSON.stringify({produto_id:parseInt(pid),foto_url:''})})
+    .then(r=>r.json()).then(()=>{
+      aplicarFotoNoCard(parseInt(pid), '');
+      document.getElementById('forn-foto-modal').style.display='none';
+    })
+    .catch(()=>{ alert('Não foi possível remover a foto.'); });
+}
+
+function aplicarFotoNoCard(pid, url){
+  if(window.PRODUTOS[pid]) window.PRODUTOS[pid].foto_url = url || '';
+  const card = document.querySelector('.forn-prod-card[data-pid="'+pid+'"]');
+  if(card){
+    const mini = card.querySelector('.forn-prod-foto');
+    if(mini){
+      if(url){
+        mini.style.backgroundImage = "url('"+url+"')";
+        mini.style.backgroundSize = "cover";
+        mini.style.backgroundPosition = "center";
+        mini.innerHTML = '';
+      } else {
+        mini.style.backgroundImage = 'none';
+        mini.style.background = '#1a2a1f';
+        mini.style.display = 'flex';
+        mini.style.alignItems = 'center';
+        mini.style.justifyContent = 'center';
+        mini.innerHTML = '<span style="font-size:22px;color:#3a5a48">🥬</span>';
+      }
+    }
+  }
 }
 
 // Fechar modal ao clicar fora

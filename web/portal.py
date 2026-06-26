@@ -3679,6 +3679,56 @@ def carrinho_materializar(request: Request, slug: str):
     return RedirectResponse(f"/pedido-enviado/{cid}", status_code=303)
 
 
+@router.get("/f/{slug}/carrinho/revisar", response_class=HTMLResponse)
+def carrinho_revisar(request: Request, slug: str):
+    from finance import carrinho as car_mod
+    pool = get_pool()
+    with pool.connection() as c:
+        forn = c.execute(
+            "select id, nome from contas where fornecedor_slug=%s and eh_fornecedor",
+            (slug,),
+        ).fetchone()
+    if not forn:
+        return HTMLResponse("<h1>Loja não encontrada</h1>", status_code=404)
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    cid = request.session.get("carrinho_id")
+    if not cid:
+        return RedirectResponse(f"/f/{slug}", status_code=303)
+    car = car_mod.ver(pool, cid)
+    if not car:
+        return RedirectResponse(f"/f/{slug}", status_code=303)
+    html = f"""<div style="max-width:620px;margin:0 auto;padding:1.5rem">
+<h2>Revise seu pedido 🛒</h2>
+<div style="background:#161617;border:1px solid #232325;border-radius:12px;padding:1.3rem;margin-bottom:1.5rem">
+  <div style="font-size:13px;color:#5dcaa5;font-weight:600;margin-bottom:.8rem">Itens</div>
+  {''.join(f'<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #232325;font-size:12px"><span>{i["quantidade"]}{i["unidade"]} {i["nome"]}</span><span style="color:#f4f4f4">R$ {i["total_centavos"]/100:.2f}</span></div>' for i in car["itens"])}
+  <div style="display:flex;justify-content:space-between;padding:8px 0;margin-top:.5rem;font-size:12px;color:#888780">
+    <span>Subtotal</span><span style="color:#f4f4f4">R$ {car["subtotal_centavos"]/100:.2f}</span>
+  </div>
+  <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12px;color:#888780">
+    <span>Entrega</span><span style="color:#f4f4f4">R$ {car["taxa_centavos"]/100:.2f}</span>
+  </div>
+  <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid #232325;margin-top:5px;font-size:13px;font-weight:600">
+    <span>Total</span><span style="color:#5dcaa5">R$ {car["total_centavos"]/100:.2f}</span>
+  </div>
+</div>
+
+<form method="post" action="/f/{slug}/carrinho/checkout" style="background:#1c1c1f;border:1px solid #232325;border-radius:12px;padding:1.3rem">
+  <div style="font-size:13px;color:#5dcaa5;font-weight:600;margin-bottom:.8rem">Endereço de entrega</div>
+  <input name="endereco" placeholder="Rua, número, complemento" required style="width:100%;padding:.7rem;margin-bottom:.8rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:8px;font-size:13px" value="{car.get('endereco_entrega','') or ''}">
+
+  <div style="font-size:13px;color:#5dcaa5;font-weight:600;margin-bottom:.8rem;margin-top:1rem">Observação (opcional)</div>
+  <textarea name="obs" placeholder="Ex: sem cebola, deixar na porta" style="width:100%;padding:.7rem;margin-bottom:1rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:8px;font-size:13px;min-height:80px;resize:none" rows="4">{car.get('obs','') or ''}</textarea>
+
+  <button type="submit" style="width:100%;background:#1d9e75;color:#fff;border:0;border-radius:10px;padding:.8rem;font-weight:600;cursor:pointer;font-size:13px">Confirmar pedido</button>
+  <a href="/f/{slug}" style="display:block;text-align:center;margin-top:.8rem;color:#888780;text-decoration:none;font-size:12px">← Voltar à loja</a>
+</form>
+</div>"""
+    return HTMLResponse(html)
+
+
 @router.get("/pedido-enviado/{carrinho_id}", response_class=HTMLResponse)
 def pedido_enviado(request: Request, carrinho_id: int):
     from finance import carrinho as car_mod

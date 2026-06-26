@@ -1623,90 +1623,87 @@ _COMPRA_REVISAR = """{% extends "base" %}{% block conteudo %}
 {% endblock %}"""
 
 _LOJA = """{% extends "base" %}{% block conteudo %}
-<div style="max-width:900px;margin:0 auto">
-  <div style="background:#161617;border:1px solid #2a2a2b;border-radius:12px;padding:1rem 1.1rem;margin-bottom:1rem;display:flex;justify-content:space-between;align-items:center">
-    <div>
-      <div style="font-size:1.1rem;color:#ececec;font-weight:600">{{ fornecedor.nome }}</div>
-      <div style="font-size:.8rem;color:#1d9e75">📍 Entrega · mínimo R$ {{ "%.0f"|format((carrinho.pedido_minimo_centavos or 5000)/100) if carrinho else "50" }}</div>
+<style>
+  .loja-wrap { max-width:920px; margin:0 auto; }
+  .loja-header { height:90px; background:linear-gradient(120deg,#14342a,#0f2a20); position:relative; display:flex; align-items:flex-end; padding:0 1.2rem; border-radius:14px 14px 0 0; }
+  .loja-abas { display:flex; gap:4px; padding:1.4rem 1.2rem 0; border-bottom:1px solid #1c1c1f; overflow-x:auto; }
+  .loja-aba { font-size:12.5px; padding:9px 16px; color:#888780; border-bottom:2px solid transparent; cursor:pointer; white-space:nowrap; text-decoration:none; }
+  .loja-aba.ativa { color:#f4f4f4; font-weight:500; border-bottom-color:#1d9e75; }
+  .loja-grid { display:grid; grid-template-columns:1fr 300px; }
+  .vitrine { padding:1.1rem 1.2rem; border-right:1px solid #1c1c1f; }
+  .prod-grade { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .prod-card { background:#161617; border:1px solid #232325; border-radius:13px; overflow:hidden; }
+  .prod-foto { height:84px; background:#1a2a1f; display:flex; align-items:center; justify-content:center; background-size:cover; background-position:center; }
+  .qtd-ctrl { display:flex; align-items:center; gap:6px; background:#0e0e0f; border-radius:8px; padding:3px; }
+  .qtd-btn { width:27px; height:27px; padding:0; border-radius:6px; background:#1d9e75; color:#fff; border:0; font-size:16px; cursor:pointer; }
+  .btn-add { display:flex; align-items:center; gap:4px; background:#1d9e75; color:#fff; border:0; border-radius:8px; padding:7px 13px; font-size:12px; font-weight:600; cursor:pointer; }
+  .carrinho-lateral { padding:1.1rem 1.2rem; background:#131314; }
+  .cat-chips { display:flex; gap:7px; margin-bottom:1.1rem; overflow-x:auto; }
+  .cat-chip { font-size:12px; padding:6px 15px; border-radius:20px; background:#161617; color:#b4b2a9; border:1px solid #2a2a2b; white-space:nowrap; cursor:pointer; }
+  .cat-chip.ativa { background:#1d9e75; color:#fff; border-color:#1d9e75; }
+  @media (max-width:680px){
+    .loja-grid { grid-template-columns:1fr; }
+    .prod-grade { grid-template-columns:1fr; }
+    .vitrine { border-right:0; }
+    .carrinho-lateral { position:sticky; bottom:0; border-top:1px solid #1d9e75; }
+  }
+</style>
+<div class="loja-wrap">
+  <div class="loja-header" {% if fornecedor.banner_url %}style="background-image:url('{{ fornecedor.banner_url }}')"{% elif fornecedor.banner_cor %}style="background:{{ fornecedor.banner_cor }}"{% endif %}>
+    <div style="position:absolute;top:12px;right:16px;background:#15301f;color:#5dcaa5;font-size:10.5px;padding:4px 11px;border-radius:20px;border:1px solid #1d9e7544">● Aberto</div>
+    <div style="display:flex;align-items:center;gap:13px;transform:translateY(20px)">
+      <div style="width:58px;height:58px;border-radius:14px;background:#1d9e75;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:24px;border:3px solid #0e0e0f">{{ fornecedor.nome[0]|upper }}</div>
+      <div style="padding-bottom:22px">
+        <div style="font-size:17px;color:#f4f4f4;font-weight:600">{{ fornecedor.nome }}</div>
+        <div style="font-size:11.5px;color:#9fbfb0">🛵 40-60 min · Entrega R$ {{ "%.0f"|format((fornecedor.taxa_entrega_centavos or 500)/100) }} · Mín. R$ {{ "%.0f"|format((fornecedor.pedido_minimo_centavos or 5000)/100) }}</div>
+      </div>
     </div>
-    <div style="width:38px;height:38px;border-radius:9px;background:#1d9e75;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600">Z</div>
   </div>
 
-  <div style="display:flex;gap:8px;margin-bottom:1rem">
-    <a href="#avulso" style="font-size:.85rem;padding:6px 14px;border-radius:8px;background:#1d9e75;color:#fff;text-decoration:none;cursor:pointer" onclick="document.getElementById('avulso').style.display='grid'; document.getElementById('assinar').style.display='none'">Comprar avulso</a>
-    <a href="#assinar" style="font-size:.85rem;padding:6px 14px;border-radius:8px;background:#1c1c1f;color:#b4b2a9;text-decoration:none;cursor:pointer" onclick="document.getElementById('assinar').style.display='block'; document.getElementById('avulso').style.display='none'">Assinar cesta</a>
+  <div class="loja-abas">
+    <a class="loja-aba ativa" onclick="mostrarAba('comprar',this)">Comprar</a>
+    <a class="loja-aba" onclick="mostrarAba('assinar',this)">Assinar cesta</a>
+    <a class="loja-aba" href="/f/{{ fornecedor.slug }}/promocoes">🏷️ Promoções</a>
+    <a class="loja-aba" href="/painel/meus-pedidos">🧾 Meus pedidos</a>
   </div>
 
-  <div id="avulso" style="display:grid;grid-template-columns:1fr 280px;gap:0">
-    <div style="padding-right:1rem">
+  <div id="aba-comprar" class="loja-grid">
+    <div class="vitrine">
+      <div class="cat-chips">
+        <span class="cat-chip ativa" onclick="filtrarCat('tudo',this)">Tudo</span>
+        {% for cat,_ in secoes %}<span class="cat-chip" onclick="filtrarCat('{{cat}}',this)">{{ cat|capitalize }}s</span>{% endfor %}
+      </div>
       {% set icones = {'fruta':'🍎','legume':'🥕','verdura':'🥬','tempero':'🌿','outros':'🛒'} %}
       {% for cat, itens in secoes %}
-      <div style="font-size:.8rem;color:#5dcaa5;font-weight:600;margin:.8rem 0 .5rem">{{ icones.get(cat,'🛒') }} {{ cat|capitalize }}s</div>
-      {% for p in itens %}
-      <div style="background:#161617;border:1px solid #2a2a2b;border-radius:11px;padding:.7rem .8rem;margin-bottom:.5rem;display:flex;justify-content:space-between;align-items:center">
-        <div>
-          <div style="font-size:.85rem;color:#ececec">{{ p.nome }}</div>
-          <div style="font-size:.8rem;color:#1d9e75;font-weight:500">R$ {{ "%.2f"|format(p.preco_venda_centavos/100) }}<span style="color:#888780">/{{ p.unidade }}</span></div>
-        </div>
-        {% set no_cart = carrinho and carrinho.itens|selectattr('produto_id','equalto',p.id)|list %}
-        {% if no_cart %}
-          {% set item = no_cart[0] %}
-          <div style="display:flex;align-items:center;gap:8px;background:#0e0e0f;border-radius:8px;padding:3px">
-            {% if carrinho.virtual %}
-              <form method="post" action="/f/{{ fornecedor.slug }}/carrinho-sessao/item" style="display:inline"><input type="hidden" name="produto_id" value="{{ p.id }}"><input type="hidden" name="quantidade" value="{{ item.quantidade - (1 if item.unidade in ['unidade','duzia','maco'] else 0.5) }}"><button style="width:28px;height:28px;border-radius:7px;background:#1d9e75;color:#fff;border:0;cursor:pointer">−</button></form>
-              <span style="font-size:.8rem;color:#ececec;min-width:42px;text-align:center">{{ item.quantidade }} {{ item.unidade }}</span>
-              <form method="post" action="/f/{{ fornecedor.slug }}/carrinho-sessao/item" style="display:inline"><input type="hidden" name="produto_id" value="{{ p.id }}"><input type="hidden" name="quantidade" value="{{ item.quantidade + (1 if item.unidade in ['unidade','duzia','maco'] else 0.5) }}"><button style="width:28px;height:28px;border-radius:7px;background:#1d9e75;color:#fff;border:0;cursor:pointer">+</button></form>
-            {% else %}
-              <form method="post" action="/f/{{ fornecedor.slug }}/carrinho/item/{{ item.id }}" style="display:inline"><input type="hidden" name="quantidade" value="{{ item.quantidade - (1 if item.unidade in ['unidade','duzia','maco'] else 0.5) }}"><button style="width:28px;height:28px;border-radius:7px;background:#1d9e75;color:#fff;border:0;cursor:pointer">−</button></form>
-              <span style="font-size:.8rem;color:#ececec;min-width:42px;text-align:center">{{ item.quantidade }} {{ item.unidade }}</span>
-              <form method="post" action="/f/{{ fornecedor.slug }}/carrinho/item/{{ item.id }}" style="display:inline"><input type="hidden" name="quantidade" value="{{ item.quantidade + (1 if item.unidade in ['unidade','duzia','maco'] else 0.5) }}"><button style="width:28px;height:28px;border-radius:7px;background:#1d9e75;color:#fff;border:0;cursor:pointer">+</button></form>
-            {% endif %}
+      <div class="cat-secao" data-cat="{{cat}}">
+        <div style="font-size:12.5px;color:#5dcaa5;font-weight:600;margin:.5rem 0 .7rem">{{ cat|capitalize }}s</div>
+        <div class="prod-grade">
+        {% for p in itens %}
+          <div class="prod-card" data-pid="{{ p.id }}">
+            <div class="prod-foto" {% if p.foto_url %}style="background-image:url('{{ p.foto_url }}')"{% endif %}>
+              {% if not p.foto_url %}<span style="font-size:26px">{{ icones.get(cat,'🛒') }}</span>{% endif %}
+            </div>
+            <div style="padding:.7rem">
+              <div style="font-size:13px;color:#f4f4f4;font-weight:500">{{ p.nome }}</div>
+              {% if p.descricao_curta %}<div style="font-size:10.5px;color:#888780;margin:1px 0 5px">{{ p.descricao_curta }}</div>{% endif %}
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-top:5px">
+                <div style="font-size:13.5px;color:#5dcaa5;font-weight:600">R$ {{ "%.2f"|format(p.preco_venda_centavos/100) }}<span style="color:#888780;font-weight:400;font-size:10px">/{{ p.unidade }}</span></div>
+                <div class="prod-acao" id="acao-{{ p.id }}" data-unidade="{{ p.unidade }}">
+                  <button class="btn-add" onclick="addItem({{ p.id }},'{{ p.unidade }}')">+Add</button>
+                </div>
+              </div>
+            </div>
           </div>
-        {% else %}
-          <form method="post" action="/f/{{ fornecedor.slug }}/carrinho/add" style="display:inline">
-            <input type="hidden" name="produto_id" value="{{ p.id }}">
-            <input type="hidden" name="quantidade" value="{{ 1 if p.unidade in ['unidade','duzia','maco'] else 1 }}">
-            <button style="background:#1c2a1f;color:#5dcaa5;border:1px solid #1d9e75;border-radius:8px;padding:6px 12px;font-size:.8rem;cursor:pointer">+ Adicionar</button>
-          </form>
-        {% endif %}
+        {% endfor %}
+        </div>
       </div>
       {% endfor %}
-      {% endfor %}
     </div>
 
-    <div id="carrinho" style="background:#131314;border:1px solid #2a2a2b;border-radius:12px;padding:1rem;height:fit-content;position:sticky;top:1rem">
-      <div style="font-size:.85rem;color:#ececec;font-weight:600;margin-bottom:.7rem">🛒 Seu carrinho</div>
-      {% if erro_carrinho %}<div class="erro" style="font-size:.78rem;margin-bottom:.5rem">{{ erro_carrinho }}</div>{% endif %}
-      {% if carrinho and carrinho.itens %}
-        {% for it in carrinho.itens %}
-        <div style="display:flex;justify-content:space-between;font-size:.78rem;padding:4px 0;border-bottom:1px solid #2a2a2b">
-          <span style="color:#b4b2a9">{{ it.quantidade }}{{ it.unidade }} {{ it.nome }}</span>
-          <span style="color:#ececec">R$ {{ "%.2f"|format(it.total_centavos/100) }}</span>
-        </div>
-        {% endfor %}
-        <div style="font-size:.78rem;color:#888780;line-height:1.8;margin-top:.6rem">
-          <div style="display:flex;justify-content:space-between"><span>Subtotal</span><span style="color:#ececec">R$ {{ "%.2f"|format(carrinho.subtotal_centavos/100) }}</span></div>
-          <div style="display:flex;justify-content:space-between"><span>Entrega</span><span style="color:#ececec">R$ {{ "%.2f"|format(carrinho.taxa_centavos/100) }}</span></div>
-          <div style="display:flex;justify-content:space-between;border-top:1px solid #2a2a2b;margin-top:5px;padding-top:6px;font-size:.9rem"><span style="color:#ececec;font-weight:600">Total</span><span style="color:#5dcaa5;font-weight:600">R$ {{ "%.2f"|format(carrinho.total_centavos/100) }}</span></div>
-        </div>
-        {% if carrinho.pedido_minimo_centavos and carrinho.subtotal_centavos < carrinho.pedido_minimo_centavos %}
-          <div style="font-size:.75rem;color:#e0a23c;margin:.6rem 0">Faltam R$ {{ "%.2f"|format((carrinho.pedido_minimo_centavos - carrinho.subtotal_centavos)/100) }} pro mínimo</div>
-          <button disabled style="width:100%;opacity:.5;background:#888780;color:#0e0e0f;border:0;border-radius:9px;padding:.6rem;cursor:not-allowed;font-weight:600">Enviar pedido</button>
-        {% else %}
-          <div style="background:#15301f;border:1px solid #1d9e75;border-radius:8px;padding:.5rem .6rem;margin:.7rem 0;font-size:.72rem;color:#9fe8c9">ℹ️ Confirma e paga depois.</div>
-          <form method="post" action="/f/{{ fornecedor.slug }}/carrinho/checkout">
-            <input name="endereco" placeholder="Endereço de entrega" required style="width:100%;margin-bottom:.4rem;font-size:.8rem;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#ececec;border-radius:6px">
-            <input name="obs" placeholder="Observação (opcional)" style="width:100%;margin-bottom:.5rem;font-size:.8rem;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#ececec;border-radius:6px">
-            <button style="width:100%;background:#1d9e75;color:#fff;border:0;border-radius:9px;padding:.7rem;font-weight:600;cursor:pointer">✓ Enviar pedido</button>
-          </form>
-        {% endif %}
-      {% else %}
-        <p style="font-size:.8rem;color:#888780">Carrinho vazio. Adicione produtos!</p>
-      {% endif %}
-    </div>
+    <div class="carrinho-lateral" id="carrinho-box"></div>
   </div>
 
-  <div id="assinar" style="display:none">
+  <div id="aba-assinar" style="display:none;padding:1.1rem 1.2rem">
     <form method="post" action="/f/{{ fornecedor.slug }}/assinar" style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1.5rem">
     <h4>Tamanhos disponíveis</h4>
     {% for t in tamanhos %}
@@ -1739,10 +1736,83 @@ _LOJA = """{% extends "base" %}{% block conteudo %}
   </div>
 </div>
 
-@media (max-width:680px){
-  .loja-grid { grid-template-columns:1fr !important; }
-  #carrinho { position:static; margin-top:1rem; }
+<script>
+let CART = {{ carrinho_json|safe }};
+const SLUG = "{{ fornecedor.slug }}";
+function brl(c){ return 'R$ ' + (c/100).toFixed(2); }
+
+function renderCarrinho(){
+  const box = document.getElementById('carrinho-box');
+  if(!CART.itens.length){
+    box.innerHTML = '<div style="font-size:.85rem;color:#888780">🛒 Carrinho vazio. Adicione produtos!</div>';
+    atualizarBotoes();
+    return;
+  }
+  let h = '<div style="font-size:14px;color:#f4f4f4;font-weight:600;margin-bottom:.8rem">🛒 Carrinho <span style="background:#1d9e75;color:#fff;font-size:10px;padding:1px 7px;border-radius:10px;float:right">'+CART.itens.length+'</span></div>';
+  CART.itens.forEach(it=>{
+    h += '<div style="display:flex;justify-content:space-between;font-size:11.5px;padding:5px 0;border-bottom:1px solid #1c1c1f"><span style="color:#b4b2a9">'+it.qtd+it.unidade+' '+it.nome+'</span><span style="color:#f4f4f4">'+brl(it.total)+'</span></div>';
+  });
+  h += '<div style="font-size:11.5px;color:#888780;line-height:1.9;margin-top:.6rem">';
+  h += '<div style="display:flex;justify-content:space-between"><span>Subtotal</span><span style="color:#f4f4f4">'+brl(CART.subtotal)+'</span></div>';
+  h += '<div style="display:flex;justify-content:space-between"><span>Entrega</span><span style="color:#f4f4f4">'+brl(CART.taxa)+'</span></div>';
+  h += '<div style="display:flex;justify-content:space-between;border-top:1px solid #2a2a2b;margin-top:5px;padding-top:6px"><span style="color:#f4f4f4;font-weight:600">Total</span><span style="color:#5dcaa5;font-weight:600">'+brl(CART.total)+'</span></div></div>';
+  if(CART.minimo && CART.subtotal < CART.minimo){
+    h += '<div style="background:#2a1f10;border:1px solid #BA751744;border-radius:8px;padding:7px 9px;margin:.7rem 0;font-size:10.5px;color:#e0a23c">Faltam '+brl(CART.minimo-CART.subtotal)+' pro mínimo</div>';
+    h += '<button disabled style="width:100%;background:#2a2a2b;color:#888780;border:0;border-radius:9px;padding:.7rem;font-weight:600">Enviar pedido</button>';
+  } else {
+    h += '<div style="background:#15301f;border:1px solid #1d9e75;border-radius:8px;padding:.5rem;margin:.7rem 0;font-size:.72rem;color:#9fe8c9">ℹ️ Confirma e paga depois.</div>';
+    h += '<a href="/f/'+SLUG+'/carrinho/revisar" style="display:block;text-align:center;background:#1d9e75;color:#fff;border-radius:9px;padding:.7rem;font-weight:600;text-decoration:none">Ver carrinho</a>';
+  }
+  box.innerHTML = h;
+  atualizarBotoes();
 }
+
+function atualizarBotoes(){
+  document.querySelectorAll('.prod-card').forEach(card=>{
+    const pid = parseInt(card.dataset.pid);
+    const it = CART.itens.find(i=>i.produto_id===pid);
+    const acao = card.querySelector('.prod-acao');
+    if(it){
+      acao.innerHTML = '<div class="qtd-ctrl"><button class="qtd-btn" onclick="mudarQtd('+pid+',-1)">−</button><span style="font-size:12px;color:#f4f4f4;font-weight:600;min-width:34px;text-align:center">'+it.qtd+it.unidade+'</span><button class="qtd-btn" onclick="mudarQtd('+pid+',1)">+</button></div>';
+    } else {
+      const u = acao.dataset.unidade || 'kg';
+      acao.innerHTML = '<button class="btn-add" onclick="addItem('+pid+",'"+u+"'"+')">+Add</button>';
+    }
+  });
+}
+
+async function addItem(pid, unidade){
+  const inc = unidade in ['unidade','duzia','maco'] ? 1 : 0.5;
+  const r = await fetch('/f/'+SLUG+'/carrinho/add',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'produto_id='+pid+'&quantidade='+inc});
+  CART = await r.json();
+  renderCarrinho();
+}
+
+async function mudarQtd(pid, dir){
+  const it = CART.itens.find(i=>i.produto_id===pid);
+  if(!it) return;
+  const inc = it.unidade in ['unidade','duzia','maco'] ? 1 : 0.5;
+  const nova = it.qtd + dir*inc;
+  const r = await fetch('/f/'+SLUG+'/carrinho-sessao/item',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'produto_id='+pid+'&quantidade='+(nova<=0?0:nova)});
+  CART = await r.json();
+  renderCarrinho();
+}
+
+function mostrarAba(qual, el){
+  document.getElementById('aba-comprar').style.display = qual==='comprar'?'grid':'none';
+  document.getElementById('aba-assinar').style.display = qual==='assinar'?'block':'none';
+  document.querySelectorAll('.loja-aba').forEach(a=>a.classList.remove('ativa'));
+  el.classList.add('ativa');
+}
+
+function filtrarCat(cat, el){
+  document.querySelectorAll('.cat-secao').forEach(s=>{ s.style.display = (cat==='tudo'||s.dataset.cat===cat)?'block':'none'; });
+  document.querySelectorAll('.cat-chip').forEach(c=>c.classList.remove('ativa'));
+  el.classList.add('ativa');
+}
+
+renderCarrinho();
+</script>
 {% endblock %}"""
 
 _LOJA_CONFIRMAR_NOVO = """{% extends "base" %}{% block conteudo %}
@@ -3195,17 +3265,46 @@ def loja_fornecedor(request: Request, slug: str):
     secoes = [(c, grupos[c]) for c in ordem if c in grupos]
 
     carrinho = None
+    carrinho_json = None
     if conta is not None:
         cid = request.session.get("carrinho_id")
         if cid:
             carrinho = car_mod.ver(pool, cid)
+            if carrinho:
+                carrinho_json = json.dumps({
+                    "itens": [{"produto_id": i["produto_id"], "nome": i["nome"],
+                               "unidade": i["unidade"], "qtd": i["quantidade"],
+                               "preco_unit": i["preco_unit_centavos"],
+                               "total": i["total_centavos"]} for i in carrinho["itens"]],
+                    "subtotal": carrinho["subtotal_centavos"],
+                    "taxa": carrinho["taxa_centavos"],
+                    "total": carrinho["total_centavos"],
+                    "minimo": carrinho["pedido_minimo_centavos"],
+                    "virtual": False
+                })
     else:
         cs = request.session.get("carrinho_sessao")
         if cs and cs.get("slug") == fornecedor["slug"] and cs.get("itens"):
             carrinho = _carrinho_virtual_da_sessao(pool, fornecedor["id"], cs)
+            if carrinho:
+                carrinho_json = json.dumps({
+                    "itens": [{"produto_id": i["produto_id"], "nome": i["nome"],
+                               "unidade": i["unidade"], "qtd": i["quantidade"],
+                               "preco_unit": i["preco_unit_centavos"],
+                               "total": i["total_centavos"]} for i in carrinho["itens"]],
+                    "subtotal": carrinho["subtotal_centavos"],
+                    "taxa": carrinho["taxa_centavos"],
+                    "total": carrinho["total_centavos"],
+                    "minimo": carrinho["pedido_minimo_centavos"],
+                    "virtual": True
+                })
+
+    if not carrinho_json:
+        carrinho_json = json.dumps({"itens": [], "subtotal": 0, "taxa": 0, "total": 0, "minimo": fornecedor.get("pedido_minimo_centavos", 0), "virtual": conta is None})
 
     return _render("loja", request, fornecedor=fornecedor, tamanhos=tamanhos,
                    produtos=produtos, escolha=escolha, secoes=secoes, carrinho=carrinho,
+                   carrinho_json=carrinho_json,
                    erro_carrinho=request.session.pop("erro_carrinho", None))
 
 
@@ -3322,6 +3421,7 @@ def _criar_assinatura_da_sessao(request, conta, slug):
 def carrinho_add(request: Request, slug: str,
                  produto_id: int = Form(...), quantidade: float = Form(1)):
     from finance import carrinho as car_mod
+    import json
     pool = get_pool()
     with pool.connection() as c:
         forn = c.execute(
@@ -3329,7 +3429,7 @@ def carrinho_add(request: Request, slug: str,
             (slug,),
         ).fetchone()
     if forn is None:
-        return RedirectResponse(f"/f/{slug}", status_code=303)
+        return JSONResponse({"ok": False, "erro": "fornecedor não encontrado"}, status_code=404)
     conta = conta_logada(request)
     if conta is None:
         cs = request.session.get("carrinho_sessao") or {"slug": slug, "itens": []}
@@ -3344,16 +3444,37 @@ def carrinho_add(request: Request, slug: str,
         if not achou:
             cs["itens"].append({"produto_id": produto_id, "quantidade": float(quantidade)})
         request.session["carrinho_sessao"] = cs
-        return RedirectResponse(f"/f/{slug}#carrinho", status_code=303)
+        car = _carrinho_virtual_da_sessao(pool, forn[0], cs)
+        return JSONResponse({
+            "itens": car["itens"], "subtotal": car["subtotal_centavos"],
+            "taxa": car["taxa_centavos"], "total": car["total_centavos"],
+            "minimo": car["pedido_minimo_centavos"], "virtual": True
+        })
     cid = car_mod.obter_ou_criar(pool, conta[0], forn[0])
     car_mod.adicionar_item(pool, cid, produto_id, quantidade)
     request.session["carrinho_id"] = cid
-    return RedirectResponse(f"/f/{slug}#carrinho", status_code=303)
+    car = car_mod.ver(pool, cid)
+    return JSONResponse({
+        "itens": [{"produto_id": i["produto_id"], "nome": i["nome"], "unidade": i["unidade"],
+                   "qtd": i["quantidade"], "preco_unit": i["preco_unit_centavos"],
+                   "total": i["total_centavos"]} for i in car["itens"]],
+        "subtotal": car["subtotal_centavos"], "taxa": car["taxa_centavos"],
+        "total": car["total_centavos"], "minimo": car["pedido_minimo_centavos"], "virtual": False
+    })
 
 
 @router.post("/f/{slug}/carrinho-sessao/item")
 def carrinho_sessao_item(request: Request, slug: str,
                          produto_id: int = Form(...), quantidade: float = Form(...)):
+    from finance import carrinho as car_mod
+    pool = get_pool()
+    with pool.connection() as c:
+        forn = c.execute(
+            "select id from contas where fornecedor_slug=%s and eh_fornecedor",
+            (slug,),
+        ).fetchone()
+    if forn is None:
+        return JSONResponse({"ok": False}, status_code=404)
     cs = request.session.get("carrinho_sessao")
     if cs and cs.get("slug") == slug:
         novos = []
@@ -3366,7 +3487,12 @@ def carrinho_sessao_item(request: Request, slug: str,
                 novos.append(it)
         cs["itens"] = novos
         request.session["carrinho_sessao"] = cs
-    return RedirectResponse(f"/f/{slug}#carrinho", status_code=303)
+    car = _carrinho_virtual_da_sessao(pool, forn[0], cs or {"itens": []})
+    return JSONResponse({
+        "itens": car["itens"], "subtotal": car["subtotal_centavos"],
+        "taxa": car["taxa_centavos"], "total": car["total_centavos"],
+        "minimo": car["pedido_minimo_centavos"], "virtual": True
+    })
 
 
 @router.post("/f/{slug}/carrinho/item/{item_id}")

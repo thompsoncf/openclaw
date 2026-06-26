@@ -10,7 +10,7 @@ import logging
 import os
 import secrets
 
-from fastapi import APIRouter, Request, Form, BackgroundTasks
+from fastapi import APIRouter, Request, Form, Body, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from jinja2 import Environment, DictLoader, select_autoescape
 
@@ -3458,10 +3458,10 @@ def loja_promocoes(request: Request, slug: str):
 # ========== CARRINHO AVULSO (PEÇA 3) ==========
 
 @router.post("/f/{slug}/carrinho/add")
-def carrinho_add(request: Request, slug: str,
-                 produto_id: int = Form(...), quantidade: float = Form(1)):
+def carrinho_add(request: Request, slug: str, dados: dict = Body(...)):
     from finance import carrinho as car_mod
-    import json
+    produto_id = int(dados.get("produto_id"))
+    quantidade = float(dados.get("quantidade", 1))
     pool = get_pool()
     with pool.connection() as c:
         forn = c.execute(
@@ -3486,9 +3486,11 @@ def carrinho_add(request: Request, slug: str,
         request.session["carrinho_sessao"] = cs
         car = _carrinho_virtual_da_sessao(pool, forn[0], cs)
         return JSONResponse({
-            "itens": car["itens"], "subtotal": car["subtotal_centavos"],
-            "taxa": car["taxa_centavos"], "total": car["total_centavos"],
-            "minimo": car["pedido_minimo_centavos"], "virtual": True
+            "itens": [{"produto_id": i["produto_id"], "nome": i["nome"],
+                       "unidade": i["unidade"], "qtd": i["quantidade"],
+                       "total": i["total_centavos"]} for i in car["itens"]],
+            "subtotal": car["subtotal_centavos"], "taxa": car["taxa_centavos"],
+            "total": car["total_centavos"], "minimo": car["pedido_minimo_centavos"]
         })
     cid = car_mod.obter_ou_criar(pool, conta[0], forn[0])
     car_mod.adicionar_item(pool, cid, produto_id, quantidade)
@@ -3500,6 +3502,71 @@ def carrinho_add(request: Request, slug: str,
                    "total": i["total_centavos"]} for i in car["itens"]],
         "subtotal": car["subtotal_centavos"], "taxa": car["taxa_centavos"],
         "total": car["total_centavos"], "minimo": car["pedido_minimo_centavos"], "virtual": False
+    })
+
+
+@router.post("/f/{slug}/carrinho/qtd")
+def carrinho_qtd(request: Request, slug: str, dados: dict = Body(...)):
+    from finance import carrinho as car_mod
+    produto_id = int(dados.get("produto_id"))
+    quantidade = float(dados.get("quantidade", 0))
+    pool = get_pool()
+    with pool.connection() as c:
+        forn = c.execute(
+            "select id from contas where fornecedor_slug=%s and eh_fornecedor",
+            (slug,),
+        ).fetchone()
+    if forn is None:
+        return JSONResponse({"erro": "fornecedor"}, status_code=404)
+    conta = conta_logada(request)
+    if conta is None:
+        cs = request.session.get("carrinho_sessao")
+        if cs and cs.get("slug") == slug:
+            novos = []
+            for it in cs["itens"]:
+                if it["produto_id"] == produto_id:
+                    if quantidade > 0:
+                        it["quantidade"] = quantidade
+                        novos.append(it)
+                else:
+                    novos.append(it)
+            cs["itens"] = novos
+            request.session["carrinho_sessao"] = cs
+        car = _carrinho_virtual_da_sessao(pool, forn[0], cs) if cs and cs.get("itens") else None
+        if car:
+            return JSONResponse({
+                "itens": [{"produto_id": i["produto_id"], "nome": i["nome"],
+                           "unidade": i["unidade"], "qtd": i["quantidade"],
+                           "total": i["total_centavos"]} for i in car["itens"]],
+                "subtotal": car["subtotal_centavos"], "taxa": car["taxa_centavos"],
+                "total": car["total_centavos"], "minimo": car["pedido_minimo_centavos"]
+            })
+        rf = None
+        with pool.connection() as c:
+            rf = c.execute(
+                "select coalesce(taxa_entrega_centavos,0), coalesce(pedido_minimo_centavos,0) from contas where id=%s",
+                (forn[0],)
+            ).fetchone()
+        return JSONResponse({
+            "itens": [], "subtotal": 0, "taxa": int(rf[0] or 0),
+            "total": 0, "minimo": int(rf[1] or 0)
+        })
+    cid = request.session.get("carrinho_id")
+    if cid:
+        car = car_mod.ver(pool, cid)
+        item = next((i for i in car["itens"] if i["produto_id"] == produto_id), None) if car else None
+        if item:
+            car_mod.atualizar_quantidade(pool, cid, item["id"], quantidade)
+        car = car_mod.ver(pool, cid)
+        return JSONResponse({
+            "itens": [{"produto_id": i["produto_id"], "nome": i["nome"],
+                       "unidade": i["unidade"], "qtd": i["quantidade"],
+                       "total": i["total_centavos"]} for i in car["itens"]],
+            "subtotal": car["subtotal_centavos"], "taxa": car["taxa_centavos"],
+            "total": car["total_centavos"], "minimo": car["pedido_minimo_centavos"]
+        })
+    return JSONResponse({
+        "itens": [], "subtotal": 0, "taxa": 0, "total": 0, "minimo": 0
     })
 
 

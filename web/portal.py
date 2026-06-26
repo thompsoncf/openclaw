@@ -620,22 +620,23 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
     <button type="button" onclick="fornHideEditar()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.5rem;font-size:.85rem">Cancelar</button>
   </div>
 
-  <!-- MODAL: Foto -->
-  <div id="forn-foto-modal" style="display:none;margin-top:2rem;padding:1.2rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px">
-    <h4 style="margin-top:0">Foto de <span id="forn-foto-nome"></span></h4>
-    <input type="hidden" id="forn-foto-pid">
-    <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:1rem">
-      <div id="forn-foto-atual" style="width:80px;height:80px;border-radius:10px;background:#1a2a1f;border:2px solid #1d9e75;flex-shrink:0;background-size:cover;background-position:center"></div>
-      <div style="flex:1;font-size:.8rem;color:#888780">Foto atual. Não combina? Escolha outra abaixo, cole um link, ou remova.</div>
-    </div>
-    <div style="font-size:.8rem;color:#5dcaa5;font-weight:600;margin-bottom:.5rem">Opções pra esse item:</div>
-    <div id="forn-foto-opcoes" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:1rem"></div>
-    <label style="font-size:.8rem">ou cole o link de uma foto sua:</label>
-    <input id="forn-foto-link" placeholder="https://..." style="width:100%;margin-bottom:.9rem;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
-    <div style="display:flex;gap:8px">
-      <button type="button" onclick="fornFotoSalvar()" style="flex:1;background:#1d9e75;color:#fff;border:0;border-radius:8px;padding:.6rem;font-weight:600;cursor:pointer">Salvar foto</button>
-      <button type="button" onclick="fornFotoRemover()" style="background:transparent;border:1px solid #8a3636;color:#c97;border-radius:8px;padding:.6rem .9rem;cursor:pointer">Remover</button>
-      <button type="button" onclick="document.getElementById('forn-foto-modal').style.display='none'" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.6rem .9rem;cursor:pointer">Cancelar</button>
+  <!-- MODAL: Foto (flutuante) -->
+  <div id="forn-foto-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:#000000aa;align-items:center;justify-content:center;padding:1rem">
+    <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:12px;padding:1.3rem;max-width:420px;width:100%;max-height:85vh;overflow-y:auto">
+      <h4 style="margin-top:0">Foto de <span id="forn-foto-nome"></span></h4>
+      <input type="hidden" id="forn-foto-pid">
+      <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:1rem">
+        <div id="forn-foto-atual" style="width:80px;height:80px;border-radius:10px;background:#1a2a1f;border:2px solid #1d9e75;flex-shrink:0;background-size:cover;background-position:center"></div>
+        <div style="flex:1;font-size:.8rem;color:#888780">Foto atual. Cole o link de uma foto pra trocar, ou remova.</div>
+      </div>
+      <label style="font-size:.8rem;color:#5dcaa5;font-weight:600">Link da foto:</label>
+      <input id="forn-foto-link" placeholder="https://... (link de uma imagem)" style="width:100%;margin:.4rem 0 .9rem;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;box-sizing:border-box">
+      <div style="font-size:.72rem;color:#888780;margin-bottom:.9rem">Dica: use o link de uma foto que permita ser exibida em outros sites. Foto própria hospedada funciona melhor.</div>
+      <div style="display:flex;gap:8px">
+        <button type="button" onclick="fornFotoSalvar()" style="flex:1;background:#1d9e75;color:#fff;border:0;border-radius:8px;padding:.6rem;font-weight:600;cursor:pointer">Salvar</button>
+        <button type="button" onclick="fornFotoRemover()" style="background:transparent;border:1px solid #8a3636;color:#c97;border-radius:8px;padding:.6rem .9rem;cursor:pointer">Remover</button>
+        <button type="button" onclick="document.getElementById('forn-foto-modal').style.display='none'" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.6rem .9rem;cursor:pointer">Cancelar</button>
+      </div>
     </div>
   </div>
 
@@ -654,54 +655,30 @@ window.PRODUTOS = {
   }{% if not loop.last %},{% endif %}
   {% endfor %}
 };
-let fotoSelecionada = null;
-async function fornFoto(pid){
+function fornFoto(pid){
   const p = window.PRODUTOS[pid];
   document.getElementById('forn-foto-pid').value = pid;
   document.getElementById('forn-foto-nome').textContent = p.nome;
   document.getElementById('forn-foto-atual').style.backgroundImage = p.foto_url ? "url('"+p.foto_url+"')" : "none";
-  fotoSelecionada = p.foto_url || null;
-  document.getElementById('forn-foto-link').value = '';
-  const r = await fetch('/painel/fornecedor/opcoes-foto?nome='+encodeURIComponent(p.nome));
-  const dados = await r.json();
-  const box = document.getElementById('forn-foto-opcoes');
-  box.innerHTML = '';
-  if(!dados.opcoes.length){
-    box.innerHTML = '<span style="font-size:.78rem;color:#888780">Sem opções na galeria pra esse nome. Cole um link abaixo.</span>';
-  }
-  dados.opcoes.forEach(url=>{
-    const d = document.createElement('div');
-    d.style.cssText = "width:56px;height:56px;border-radius:8px;background:url('"+url+"') center/cover;cursor:pointer;border:2px solid "+(url===fotoSelecionada?'#1d9e75':'#2a2a2b');
-    d.onclick = ()=>{
-      fotoSelecionada = url;
-      document.getElementById('forn-foto-atual').style.backgroundImage="url('"+url+"')";
-      document.getElementById('forn-foto-link').value='';
-      box.querySelectorAll('div').forEach(x=>x.style.border='2px solid #2a2a2b');
-      d.style.border='2px solid #1d9e75';
-    };
-    box.appendChild(d);
-  });
-  document.getElementById('forn-foto-modal').style.display='block';
+  document.getElementById('forn-foto-link').value = p.foto_url || '';
+  document.getElementById('forn-foto-modal').style.display = 'flex';
 }
-async function fornFotoSalvar(){
+function fornFotoSalvar(){
   const pid = document.getElementById('forn-foto-pid').value;
-  const link = document.getElementById('forn-foto-link').value.trim();
-  const url = link || fotoSelecionada || '';
-  await fetch('/painel/fornecedor/produto/foto', {
+  const url = document.getElementById('forn-foto-link').value.trim();
+  fetch('/painel/fornecedor/produto/foto', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({produto_id:parseInt(pid),foto_url:url})
-  });
-  location.reload();
+  }).then(()=>location.reload());
 }
-async function fornFotoRemover(){
+function fornFotoRemover(){
   const pid = document.getElementById('forn-foto-pid').value;
-  await fetch('/painel/fornecedor/produto/foto', {
+  fetch('/painel/fornecedor/produto/foto', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({produto_id:parseInt(pid),foto_url:''})
-  });
-  location.reload();
+  }).then(()=>location.reload());
 }
 </script>
 

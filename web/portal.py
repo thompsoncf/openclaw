@@ -3137,6 +3137,7 @@ def loja_fornecedor(request: Request, slug: str):
     if forn is None:
         return HTMLResponse("<h1>Loja não encontrada</h1>", status_code=404)
     fornecedor = {"id": forn[0], "nome": forn[1], "slug": forn[2]}
+    conta = conta_logada(request)
     tamanhos = cestas_mod.listar_tamanhos(pool, forn[0], so_ativos=True)
     produtos = cat_mod.listar_produtos(pool, forn[0], so_disponiveis=True)
     escolha = request.session.get("loja_escolha", {})

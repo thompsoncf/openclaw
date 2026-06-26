@@ -5,6 +5,7 @@ APENAS a conta da sessao (isolamento multi-tenant na camada web).
 Senhas: hash scrypt (stdlib) com sal aleatorio - nunca em texto puro.
 """
 import hashlib
+import json
 import logging
 import os
 import secrets

@@ -509,27 +509,61 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
     <p class="mut" id="forn-cat-sem-resultado" style="display:none">Nenhum produto encontrado.</p>
   </div>
 
-  <!-- MODAL: Novo/Editar Produto -->
-  <div id="forn-novo-prod" style="display:none;margin-top:2rem;padding:1.2rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px">
-    <h4 style="margin-top:0">Novo produto</h4>
-    <form method="post" action="/painel/fornecedor/catalogo/produto">
-      <label>Nome</label><input name="nome" required placeholder="ex: Tomate" style="width:100%">
-      <label>Unidade</label>
-      <select name="unidade" required style="width:100%">
-        <option value="kg">kg</option>
-        <option value="unidade">unidade</option>
-        <option value="duzia">dúzia</option>
-        <option value="maco">maço</option>
-        <option value="bandeja">bandeja</option>
-        <option value="litro">litro</option>
-        <option value="pacote">pacote</option>
-      </select>
-      <label>Categoria (opcional)</label><input name="categoria" placeholder="ex: fruta" style="width:100%">
-      <label>Preço de venda (R$)</label><input name="preco_venda" type="number" step="0.01" placeholder="ex: 6.90" style="width:100%">
-      <label>Estoque mínimo para alerta</label><input name="estoque_minimo" type="number" step="0.1" placeholder="ex: 5" style="width:100%">
-      <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.8rem;width:100%;font-weight:500">Criar produto</button>
-    </form>
-    <button type="button" onclick="fornHideNovoProduct()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.6rem;font-size:.9rem">Cancelar</button>
+  <!-- MODAL: Novo Produto (flutuante, com foto) -->
+  <div id="forn-novo-prod" style="display:none;position:fixed;inset:0;z-index:1000;background:#000000aa;align-items:center;justify-content:center;padding:1rem">
+    <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:12px;padding:1.3rem;max-width:420px;width:100%;max-height:88vh;overflow-y:auto">
+      <h4 style="margin-top:0">Novo produto</h4>
+      <form method="post" action="/painel/fornecedor/catalogo/produto">
+        <label style="font-size:.85rem">Nome</label>
+        <input name="nome" id="forn-novo-nome" required placeholder="ex: Tomate" oninput="fornNovoBuscarSugestoes()" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.7rem">
+
+        <!-- FOTO (opcional) -->
+        <div style="background:#161617;border:1px solid #242426;border-radius:9px;padding:.7rem;margin-bottom:.7rem">
+          <div style="font-size:.78rem;color:#5dcaa5;font-weight:600;margin-bottom:.5rem">📷 Foto do produto <span style="color:#6a6a6a;font-weight:400">(opcional)</span></div>
+          <div style="display:flex;gap:11px;align-items:flex-start;margin-bottom:.6rem">
+            <div id="forn-novo-previa" style="width:64px;height:64px;border-radius:9px;background:#1a2a1f;border:2px solid #1d9e75;flex-shrink:0;display:flex;align-items:center;justify-content:center;background-size:cover;background-position:center">
+              <span id="forn-novo-previa-vazia" style="font-size:24px;color:#3a5a48">🥬</span>
+            </div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:.72rem;color:#888780;margin-bottom:.4rem">Sugestões pelo nome:</div>
+              <div id="forn-novo-sugestoes" style="display:flex;gap:6px;flex-wrap:wrap">
+                <span style="font-size:.72rem;color:#6a6a6a">digite o nome acima</span>
+              </div>
+            </div>
+          </div>
+          <input id="forn-novo-foto-link" name="foto_url" placeholder="ou cole o link: https://..." oninput="fornNovoFotoPreview(this.value)" style="width:100%;box-sizing:border-box;padding:.45rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;font-size:.8rem">
+          <div style="font-size:.68rem;color:#6a6a6a;margin-top:.45rem;line-height:1.5">ℹ Quer a foto real do aparelho? Crie o produto e toque em <span style="color:#a89ce8">📷 foto</span>.</div>
+        </div>
+
+        <label style="font-size:.85rem">Unidade</label>
+        <select name="unidade" required style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.7rem">
+          <option value="kg">kg</option>
+          <option value="unidade">unidade</option>
+          <option value="duzia">dúzia</option>
+          <option value="maco">maço</option>
+          <option value="bandeja">bandeja</option>
+          <option value="litro">litro</option>
+          <option value="pacote">pacote</option>
+        </select>
+
+        <label style="font-size:.85rem">Categoria (opcional)</label>
+        <input name="categoria" placeholder="ex: fruta" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.7rem">
+
+        <div style="display:flex;gap:.6rem;margin-bottom:.9rem">
+          <div style="flex:1">
+            <label style="font-size:.85rem">Preço de venda (R$)</label>
+            <input name="preco_venda" type="number" step="0.01" placeholder="6.90" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
+          </div>
+          <div style="flex:1">
+            <label style="font-size:.85rem">Estoque mínimo</label>
+            <input name="estoque_minimo" type="number" step="0.1" placeholder="5" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
+          </div>
+        </div>
+
+        <button style="width:100%;background:#1d9e75;color:#fff;padding:.65rem;border:0;border-radius:8px;cursor:pointer;font-weight:600">Criar produto</button>
+      </form>
+      <button type="button" onclick="fornHideNovoProduct()" style="width:100%;background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.5rem;margin-top:.5rem;cursor:pointer">Cancelar</button>
+    </div>
   </div>
 
   <!-- MODAL: Dar Entrada -->
@@ -959,10 +993,52 @@ function fornVoltar(){
 }
 // CATÁLOGO
 function fornShowNovoProduct(){
-  document.getElementById('forn-novo-prod').style.display = 'block';
+  var m = document.getElementById('forn-novo-prod');
+  m.style.display = 'flex';
+  fornNovoBuscarSugestoes();
 }
 function fornHideNovoProduct(){
   document.getElementById('forn-novo-prod').style.display = 'none';
+}
+function fornNovoFotoPreview(url){
+  var prev = document.getElementById('forn-novo-previa');
+  var vazia = document.getElementById('forn-novo-previa-vazia');
+  url = (url || '').trim();
+  if(!url){ prev.style.backgroundImage='none'; if(vazia){ vazia.style.display='block'; vazia.textContent='🥬'; } return; }
+  var img = new Image();
+  img.onload = function(){ prev.style.backgroundImage="url('"+url+"')"; if(vazia) vazia.style.display='none'; };
+  img.onerror = function(){ prev.style.backgroundImage='none'; if(vazia){ vazia.style.display='block'; vazia.textContent='✗'; } };
+  img.src = url;
+}
+var _fornNovoSugTimer = null;
+function fornNovoBuscarSugestoes(){
+  var campoNome = document.getElementById('forn-novo-nome');
+  var box = document.getElementById('forn-novo-sugestoes');
+  if(!campoNome || !box) return;
+  var nome = (campoNome.value || '').trim();
+  if(nome.length < 2){ box.innerHTML = '<span style="font-size:.72rem;color:#6a6a6a">digite o nome acima</span>'; return; }
+  clearTimeout(_fornNovoSugTimer);
+  _fornNovoSugTimer = setTimeout(function(){
+    box.innerHTML = '<span style="font-size:.72rem;color:#888780">buscando...</span>';
+    fetch('/painel/fornecedor/sugerir-fotos?nome=' + encodeURIComponent(nome))
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        box.innerHTML = '';
+        if(!d.opcoes || !d.opcoes.length){ box.innerHTML = '<span style="font-size:.72rem;color:#888780">sem sugestões; cole um link</span>'; return; }
+        d.opcoes.forEach(function(url){
+          var t = document.createElement('div');
+          t.style.cssText = "width:40px;height:40px;border-radius:7px;background:url('" + url + "') center/cover;cursor:pointer;border:2px solid #2a2a2b;flex-shrink:0";
+          t.onclick = function(){
+            document.getElementById('forn-novo-foto-link').value = url;
+            fornNovoFotoPreview(url);
+            box.querySelectorAll('div').forEach(function(x){ x.style.border = '2px solid #2a2a2b'; });
+            t.style.border = '2px solid #1d9e75';
+          };
+          box.appendChild(t);
+        });
+      })
+      .catch(function(){ box.innerHTML = '<span style="font-size:.72rem;color:#888780">erro ao buscar; cole um link</span>'; });
+  }, 450);
 }
 function fornEditProduct(prod_id){
   var p = window.PRODUTOS[prod_id];

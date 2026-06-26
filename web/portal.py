@@ -620,22 +620,29 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
     <button type="button" onclick="fornHideEditar()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.5rem;font-size:.85rem">Cancelar</button>
   </div>
 
-  <!-- MODAL: Foto (flutuante) -->
+  <!-- MODAL: Foto (flutuante, com sugestões Unsplash + prévia) -->
   <div id="forn-foto-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:#000000aa;align-items:center;justify-content:center;padding:1rem">
-    <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:12px;padding:1.3rem;max-width:420px;width:100%;max-height:85vh;overflow-y:auto">
-      <h4 style="margin-top:0">Foto de <span id="forn-foto-nome"></span></h4>
+    <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:12px;padding:1.3rem;max-width:400px;width:100%;max-height:88vh;overflow-y:auto">
+      <h4 style="margin-top:0">Foto de <span id="forn-foto-nome" style="color:#5dcaa5"></span></h4>
       <input type="hidden" id="forn-foto-pid">
       <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:1rem">
-        <div id="forn-foto-atual" style="width:80px;height:80px;border-radius:10px;background:#1a2a1f;border:2px solid #1d9e75;flex-shrink:0;background-size:cover;background-position:center"></div>
-        <div style="flex:1;font-size:.8rem;color:#888780">Foto atual. Cole o link de uma foto pra trocar, ou remova.</div>
+        <div id="forn-foto-previa" style="width:88px;height:88px;border-radius:10px;background:#1a2a1f;border:2px solid #1d9e75;flex-shrink:0;background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center">
+          <span id="forn-foto-previa-vazia" style="font-size:28px;color:#3a5a48">🥬</span>
+        </div>
+        <div style="flex:1;font-size:.78rem;color:#888780">A prévia aparece quando você cola o link ou escolhe uma sugestão. Se não carregar, o link não serve.</div>
       </div>
-      <label style="font-size:.8rem;color:#5dcaa5;font-weight:600">Link da foto:</label>
-      <input id="forn-foto-link" placeholder="https://... (link de uma imagem)" style="width:100%;margin:.4rem 0 .9rem;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;box-sizing:border-box">
-      <div style="font-size:.72rem;color:#888780;margin-bottom:.9rem">Dica: use o link de uma foto que permita ser exibida em outros sites. Foto própria hospedada funciona melhor.</div>
+      <div id="forn-foto-sugbox" style="margin-bottom:.9rem">
+        <div style="font-size:.78rem;color:#5dcaa5;font-weight:600;margin-bottom:.4rem">✨ Sugestões</div>
+        <div id="forn-foto-sugestoes" style="display:flex;gap:7px;flex-wrap:wrap">
+          <span style="font-size:.74rem;color:#888780">buscando...</span>
+        </div>
+      </div>
+      <label style="font-size:.8rem;color:#b4b2a9">Ou cole o link da sua foto:</label>
+      <input id="forn-foto-link" placeholder="https://..." oninput="fornFotoPreview(this.value)" style="width:100%;box-sizing:border-box;margin:.4rem 0 .9rem;padding:.55rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:7px">
       <div style="display:flex;gap:8px">
-        <button type="button" onclick="fornFotoSalvar()" style="flex:1;background:#1d9e75;color:#fff;border:0;border-radius:8px;padding:.6rem;font-weight:600;cursor:pointer">Salvar</button>
-        <button type="button" onclick="fornFotoRemover()" style="background:transparent;border:1px solid #8a3636;color:#c97;border-radius:8px;padding:.6rem .9rem;cursor:pointer">Remover</button>
-        <button type="button" onclick="document.getElementById('forn-foto-modal').style.display='none'" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.6rem .9rem;cursor:pointer">Cancelar</button>
+        <button type="button" onclick="fornFotoSalvar()" style="flex:1;background:#1d9e75;color:#fff;border:0;border-radius:8px;padding:.65rem;font-weight:600;cursor:pointer">Salvar</button>
+        <button type="button" onclick="fornFotoRemover()" style="background:transparent;border:1px solid #8a3636;color:#c97;border-radius:8px;padding:.65rem .9rem;cursor:pointer">Remover</button>
+        <button type="button" onclick="document.getElementById('forn-foto-modal').style.display='none'" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.65rem .9rem;cursor:pointer">Cancelar</button>
       </div>
     </div>
   </div>
@@ -655,31 +662,60 @@ window.PRODUTOS = {
   }{% if not loop.last %},{% endif %}
   {% endfor %}
 };
+
+let fotoEscolhida = null;
+
+function fornFotoPreview(url){
+  const prev = document.getElementById('forn-foto-previa');
+  const vazia = document.getElementById('forn-foto-previa-vazia');
+  if(!url){ prev.style.backgroundImage='none'; vazia.style.display='block'; fotoEscolhida=null; return; }
+  const img = new Image();
+  img.onload = ()=>{ prev.style.backgroundImage="url('"+url+"')"; vazia.style.display='none'; fotoEscolhida=url; };
+  img.onerror = ()=>{ prev.style.backgroundImage='none'; vazia.style.display='block'; vazia.textContent='✗'; fotoEscolhida=null; };
+  img.src = url;
+}
+
 function fornFoto(pid){
   const p = window.PRODUTOS[pid];
   document.getElementById('forn-foto-pid').value = pid;
   document.getElementById('forn-foto-nome').textContent = p.nome;
-  document.getElementById('forn-foto-atual').style.backgroundImage = p.foto_url ? "url('"+p.foto_url+"')" : "none";
   document.getElementById('forn-foto-link').value = p.foto_url || '';
+  fornFotoPreview(p.foto_url || '');
   document.getElementById('forn-foto-modal').style.display = 'flex';
+  const box = document.getElementById('forn-foto-sugestoes');
+  box.innerHTML = '<span style="font-size:.74rem;color:#888780">buscando...</span>';
+  fetch('/painel/fornecedor/sugerir-fotos?nome='+encodeURIComponent(p.nome))
+    .then(r=>r.json()).then(d=>{
+      box.innerHTML = '';
+      if(!d.opcoes.length){ box.innerHTML = '<span style="font-size:.74rem;color:#888780">Sem sugestões. Cole um link abaixo.</span>'; return; }
+      d.opcoes.forEach(url=>{
+        const t = document.createElement('div');
+        t.style.cssText = "width:56px;height:56px;border-radius:8px;background:url('"+url+"') center/cover;cursor:pointer;border:2px solid #2a2a2b";
+        t.onclick = ()=>{ document.getElementById('forn-foto-link').value=url; fornFotoPreview(url);
+          box.querySelectorAll('div').forEach(x=>x.style.border='2px solid #2a2a2b'); t.style.border='2px solid #1d9e75'; };
+        box.appendChild(t);
+      });
+    }).catch(()=>{ box.innerHTML='<span style="font-size:.74rem;color:#888780">Erro ao buscar. Cole um link.</span>'; });
 }
+
 function fornFotoSalvar(){
   const pid = document.getElementById('forn-foto-pid').value;
-  const url = document.getElementById('forn-foto-link').value.trim();
-  fetch('/painel/fornecedor/produto/foto', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({produto_id:parseInt(pid),foto_url:url})
-  }).then(()=>location.reload());
+  const url = (fotoEscolhida || document.getElementById('forn-foto-link').value.trim() || '');
+  fetch('/painel/fornecedor/produto/foto',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({produto_id:parseInt(pid),foto_url:url})}).then(()=>location.reload());
 }
+
 function fornFotoRemover(){
   const pid = document.getElementById('forn-foto-pid').value;
-  fetch('/painel/fornecedor/produto/foto', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({produto_id:parseInt(pid),foto_url:''})
-  }).then(()=>location.reload());
+  fetch('/painel/fornecedor/produto/foto',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({produto_id:parseInt(pid),foto_url:''})}).then(()=>location.reload());
 }
+
+// Fechar modal ao clicar fora
+['forn-foto-modal'].forEach(id=>{
+  const m = document.getElementById(id);
+  if(m) m.addEventListener('click', e=>{ if(e.target===m) m.style.display='none'; });
+});
 </script>
 
 <!-- SEÇÃO: Compras -->
@@ -4368,6 +4404,15 @@ def opcoes_foto_endpoint(request: Request, nome: str = ""):
     if conta is None or not conta[8]:
         return JSONResponse({"opcoes": []})
     return JSONResponse({"opcoes": galeria_fotos.opcoes_de_foto(nome)})
+
+
+@router.get("/painel/fornecedor/sugerir-fotos")
+def sugerir_fotos_endpoint(request: Request, nome: str = ""):
+    from finance import galeria_fotos
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return JSONResponse({"opcoes": []})
+    return JSONResponse({"opcoes": galeria_fotos.opcoes_de_foto(nome, n=4)})
 
 
 @router.post("/painel/fornecedor/produto/foto")

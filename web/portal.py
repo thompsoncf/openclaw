@@ -596,28 +596,31 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
   </div>
 
   <!-- MODAL: Editar Produto -->
-  <div id="forn-editar-produto" style="display:none;margin-top:1rem;padding:1rem;background:#2a2a2b;border-radius:6px">
-    <h4 style="margin-top:0;margin-bottom:.8rem">Editar produto</h4>
-    <form method="post" action="/painel/fornecedor/catalogo/editar">
-      <input type="hidden" name="produto_id" id="forn-edit-id">
-      <label>Nome</label>
-      <input name="nome" id="forn-edit-nome" required style="width:100%">
-      <label>Unidade</label>
-      <select name="unidade" id="forn-edit-unidade" style="width:100%">
-        <option value="kg">kg</option><option value="duzia">dúzia</option>
-        <option value="unidade">unidade</option><option value="maco">maço</option>
-        <option value="bandeja">bandeja</option><option value="litro">litro</option>
-        <option value="pacote">pacote</option>
-      </select>
-      <label>Categoria</label>
-      <input name="categoria" id="forn-edit-categoria" placeholder="fruta, verdura..." style="width:100%">
-      <label>Preço de venda (R$)</label>
-      <input name="preco_venda" id="forn-edit-preco" placeholder="6,90" required style="width:100%">
-      <label>Estoque mínimo</label>
-      <input name="estoque_minimo" id="forn-edit-minimo" type="number" step="0.001" style="width:100%">
-      <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.8rem;width:100%;font-weight:500">Salvar alterações</button>
-    </form>
-    <button type="button" onclick="fornHideEditar()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.5rem;font-size:.85rem">Cancelar</button>
+  <!-- MODAL: Editar Produto (flutuante) -->
+  <div id="forn-editar-produto" style="display:none;position:fixed;inset:0;z-index:1000;background:#000000aa;align-items:center;justify-content:center;padding:1rem">
+    <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:12px;padding:1.3rem;max-width:420px;width:100%;max-height:88vh;overflow-y:auto">
+      <h4 style="margin-top:0">Editar produto</h4>
+      <form method="post" action="/painel/fornecedor/catalogo/editar">
+        <input type="hidden" name="produto_id" id="forn-edit-id">
+        <label style="font-size:.85rem">Nome</label>
+        <input name="nome" id="forn-edit-nome" required style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.7rem">
+        <label style="font-size:.85rem">Unidade</label>
+        <select name="unidade" id="forn-edit-unidade" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.7rem">
+          <option value="kg">kg</option><option value="duzia">dúzia</option>
+          <option value="unidade">unidade</option><option value="maco">maço</option>
+          <option value="bandeja">bandeja</option><option value="litro">litro</option>
+          <option value="pacote">pacote</option>
+        </select>
+        <label style="font-size:.85rem">Categoria</label>
+        <input name="categoria" id="forn-edit-categoria" placeholder="fruta, verdura..." style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.7rem">
+        <label style="font-size:.85rem">Preço de venda (R$)</label>
+        <input name="preco_venda" id="forn-edit-preco" placeholder="6,90" required style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.7rem">
+        <label style="font-size:.85rem">Estoque mínimo</label>
+        <input name="estoque_minimo" id="forn-edit-minimo" type="number" step="0.001" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.9rem">
+        <button style="width:100%;background:#1d9e75;color:#fff;padding:.65rem;border:0;border-radius:8px;cursor:pointer;font-weight:600">Salvar alterações</button>
+      </form>
+      <button type="button" onclick="fornHideEditar()" style="width:100%;background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.5rem;margin-top:.5rem;cursor:pointer">Cancelar</button>
+    </div>
   </div>
 
   <!-- MODAL: Foto (flutuante, com sugestões Unsplash + prévia) -->
@@ -712,7 +715,7 @@ function fornFotoRemover(){
 }
 
 // Fechar modal ao clicar fora
-['forn-foto-modal'].forEach(id=>{
+['forn-foto-modal','forn-editar-produto'].forEach(id=>{
   const m = document.getElementById(id);
   if(m) m.addEventListener('click', e=>{ if(e.target===m) m.style.display='none'; });
 });
@@ -886,8 +889,7 @@ function fornEditProduct(prod_id){
   document.getElementById('forn-edit-categoria').value = p.categoria;
   document.getElementById('forn-edit-preco').value = String(p.preco).replace('.', ',');
   document.getElementById('forn-edit-minimo').value = p.minimo;
-  document.getElementById('forn-editar-produto').style.display = 'block';
-  document.getElementById('forn-editar-produto').scrollIntoView({behavior:'smooth'});
+  document.getElementById('forn-editar-produto').style.display = 'flex';
 }
 function fornHideEditar(){
   document.getElementById('forn-editar-produto').style.display = 'none';

@@ -16,3 +16,4 @@ opencv-contrib-python-headless>=4.9
 numpy>=1.26
 pymupdf>=1.24
 pyzbar>=0.1.9
+Pillow>=10.0

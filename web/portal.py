@@ -10,7 +10,7 @@ import logging
 import os
 import secrets
 
-from fastapi import APIRouter, Request, Form, Body, BackgroundTasks
+from fastapi import APIRouter, Request, Form, Body, BackgroundTasks, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from jinja2 import Environment, DictLoader, select_autoescape
 
@@ -627,6 +627,13 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
     <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:12px;padding:1.3rem;max-width:400px;width:100%;max-height:88vh;overflow-y:auto">
       <h4 style="margin-top:0">Foto de <span id="forn-foto-nome" style="color:#5dcaa5"></span></h4>
       <input type="hidden" id="forn-foto-pid">
+      <label style="display:flex;align-items:center;gap:10px;background:#1d9e75;color:#fff;border-radius:9px;padding:.7rem .9rem;font-size:12.5px;font-weight:600;cursor:pointer;margin-bottom:.8rem">
+        <span style="font-size:20px">📷</span>
+        <div>Tirar foto / enviar do aparelho
+          <div style="font-size:10px;font-weight:400;opacity:.85">a foto real do seu produto</div></div>
+        <input type="file" accept="image/*" capture="environment" onchange="fornFotoUpload(this)" style="display:none">
+      </label>
+      <div id="forn-foto-upload-status" style="font-size:.74rem;color:#888780;margin-bottom:.8rem"></div>
       <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:1rem">
         <div id="forn-foto-previa" style="width:88px;height:88px;border-radius:10px;background:#1a2a1f;border:2px solid #1d9e75;flex-shrink:0;background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center">
           <span id="forn-foto-previa-vazia" style="font-size:28px;color:#3a5a48">🥬</span>
@@ -744,6 +751,31 @@ function aplicarFotoNoCard(pid, url){
       }
     }
   }
+}
+
+function fornFotoUpload(input){
+  const file = input.files[0];
+  if(!file) return;
+  const pid = document.getElementById('forn-foto-pid').value;
+  const status = document.getElementById('forn-foto-upload-status');
+  status.textContent = 'Enviando foto...';
+  // Preview local imediato (antes do upload terminar)
+  const reader = new FileReader();
+  reader.onload = e => fornFotoPreview(e.target.result);
+  reader.readAsDataURL(file);
+  // Sobe pro servidor
+  const fd = new FormData();
+  fd.append('produto_id', pid);
+  fd.append('arquivo', file);
+  fetch('/painel/fornecedor/produto/upload-foto', {method:'POST', body:fd})
+    .then(r=>r.json()).then(d=>{
+      if(d.erro){ status.textContent = '✗ '+d.erro; return; }
+      status.textContent = '✓ Foto enviada!';
+      aplicarFotoNoCard(parseInt(pid), d.foto_url);
+      if(window.PRODUTOS[pid]) window.PRODUTOS[pid].foto_url = d.foto_url;
+      setTimeout(()=>{ document.getElementById('forn-foto-modal').style.display='none'; }, 600);
+    })
+    .catch(e=>{ status.textContent = '✗ Falhou. Tente de novo.'; });
 }
 
 // Fechar modal ao clicar fora
@@ -4447,6 +4479,25 @@ def sugerir_fotos_endpoint(request: Request, nome: str = ""):
     if conta is None or not conta[8]:
         return JSONResponse({"opcoes": []})
     return JSONResponse({"opcoes": galeria_fotos.opcoes_de_foto(nome, n=4)})
+
+
+@router.post("/painel/fornecedor/produto/upload-foto")
+async def upload_foto_produto(request: Request, produto_id: int = Form(...),
+                              arquivo: UploadFile = File(...)):
+    from finance import upload_foto, catalogo as cat_mod
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    try:
+        conteudo = await arquivo.read()
+        url = upload_foto.subir_foto(conteudo, arquivo.filename or "",
+                                     arquivo.content_type or "image/jpeg")
+    except ValueError as e:
+        return JSONResponse({"erro": str(e)}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"erro": f"Erro ao processar: {str(e)}"}, status_code=500)
+    cat_mod.atualizar_produto(get_pool(), conta[0], produto_id, foto_url=url)
+    return JSONResponse({"ok": True, "foto_url": url})
 
 
 @router.post("/painel/fornecedor/produto/foto")

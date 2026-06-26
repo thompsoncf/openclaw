@@ -70,6 +70,8 @@ def criar_produto(
     categoria: str | None = None,
     preco_venda_centavos: int = 0,
     estoque_minimo: float = 0,
+    foto_url: str | None = None,
+    descricao_curta: str | None = None,
 ) -> int:
     """Cria um produto no catálogo do fornecedor. Retorna o id.
 
@@ -85,10 +87,11 @@ def criar_produto(
         row = c.execute(
             """insert into catalogo_produtos
                  (fornecedor_id, nome, unidade, categoria,
-                  preco_venda_centavos, estoque_minimo)
-               values (%s, %s, %s, %s, %s, %s) returning id""",
+                  preco_venda_centavos, estoque_minimo, foto_url, descricao_curta)
+               values (%s, %s, %s, %s, %s, %s, %s, %s) returning id""",
             (fornecedor_id, nome, unidade, (categoria or "").strip() or None,
-             max(0, int(preco_venda_centavos)), Decimal(str(estoque_minimo or 0))),
+             max(0, int(preco_venda_centavos)), Decimal(str(estoque_minimo or 0)),
+             (foto_url or "").strip() or None, (descricao_curta or "").strip() or None),
         ).fetchone()
         c.commit()
     return int(row[0])
@@ -96,14 +99,14 @@ def criar_produto(
 
 def atualizar_produto(pool, fornecedor_id: int, produto_id: int, **campos) -> bool:
     """Atualiza campos do produto (nome, unidade, categoria, preco_venda_centavos,
-    estoque_minimo, disponivel). Só altera se o produto for do fornecedor.
+    estoque_minimo, disponivel, foto_url, descricao_curta). Só altera se o produto for do fornecedor.
 
     Retorna True se atualizou. NÃO mexe em saldo nem custo_medio (esses vêm das
     movimentações, não de edição manual – use registrar_movimentacao).
     """
     permitidos = {
         "nome", "unidade", "categoria", "preco_venda_centavos",
-        "estoque_minimo", "disponivel",
+        "estoque_minimo", "disponivel", "foto_url", "descricao_curta",
     }
     sets, vals = [], []
     for k, v in campos.items():
@@ -153,7 +156,8 @@ def listar_produtos(
     margem_pct é calculada na hora (venda vs custo médio). Não é guardada.
     """
     sql = """select id, nome, unidade, categoria, preco_venda_centavos,
-                    custo_medio_centavos, saldo, estoque_minimo, disponivel
+                    custo_medio_centavos, saldo, estoque_minimo, disponivel,
+                    foto_url, descricao_curta
              from catalogo_produtos
              where fornecedor_id = %s and ativo"""
     if so_disponiveis:
@@ -177,6 +181,8 @@ def listar_produtos(
             "saldo": saldo,
             "estoque_minimo": minimo,
             "disponivel": r[8],
+            "foto_url": r[9],
+            "descricao_curta": r[10],
             "margem_pct": _margem_pct(venda, custo),
             "abaixo_minimo": minimo > 0 and saldo <= minimo,
         })

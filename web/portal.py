@@ -1790,6 +1790,47 @@ _LOJA_CONFIRMAR_NOVO = """{% extends "base" %}{% block conteudo %}
 </div>
 {% endblock %}"""
 
+_MEUS_PEDIDOS = """{% extends "base" %}{% block conteudo %}
+<div style="max-width:920px;margin:0 auto">
+  <h2 style="margin-bottom:1.5rem">🧾 Meus pedidos</h2>
+  {% if not pedidos %}
+  <div class="card" style="text-align:center">
+    <p class="mut">Você ainda não tem pedidos. <a href="/" style="color:#5dcaa5">Explorar fornecedores</a></p>
+  </div>
+  {% else %}
+    {% set grupos_reais = {} %}
+    {% for p in pedidos %}
+      {% set g = p.grupo %}
+      {% if g not in grupos_reais %}{% set _ = grupos_reais.update({g: []}) %}{% endif %}
+      {% set _ = grupos_reais[g].append(p) %}
+    {% endfor %}
+
+    {% for grupo_nome,rótulos in [('em_aberto','Em aberto'),('concluido','Concluído'),('cancelado','Cancelado')] %}
+      {% if grupo_nome in grupos_reais %}
+      <div style="margin-bottom:2rem">
+        <h3 style="font-size:14px;color:#5dcaa5;font-weight:600;margin-bottom:.8rem">{{ rótulos }}</h3>
+        {% for p in grupos_reais[grupo_nome] %}
+        <div style="background:#161617;border:1px solid #232325;border-radius:12px;padding:1.1rem;margin-bottom:.7rem">
+          <div style="display:flex;justify-content:space-between;align-items:start">
+            <div style="flex:1">
+              <div style="font-size:15px;color:#f4f4f4;font-weight:600">{{ p.fornecedor_nome }}</div>
+              <div style="font-size:12px;color:#888780;margin:5px 0">Pedido #{{ p.id }} · {{ p.qtd_itens }} itens · {{ p.criado_em.strftime('%d/%m/%Y') if p.criado_em else 'Data' }}</div>
+              <div style="font-size:13px;color:#5dcaa5;font-weight:600;margin-top:.5rem">{{ p.total_centavos|brl }}</div>
+            </div>
+            <div style="text-align:right">
+              <span style="display:inline-block;background:#15301f;color:#5dcaa5;padding:4px 10px;border-radius:16px;font-size:11px;border:1px solid #1d9e7544">{{ p.status_rotulo }}</span>
+              <a href="/painel/meu-pedido/{{ p.id }}" style="display:block;margin-top:8px;font-size:12px;color:#5dcaa5;text-decoration:none">Detalhar →</a>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    {% endfor %}
+  {% endif %}
+</div>
+{% endblock %}"""
+
 _ATIVAR_APP = """{% extends "base" %}{% block conteudo %}
 <div class="card" style="max-width:480px;margin:0 auto">
   <h2>Ative o app financeiro 💰</h2>
@@ -2759,7 +2800,7 @@ _PEDIDO_ENVIADO = """{% extends "base" %}{% block conteudo %}
 {% endblock %}"""
 
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 from finance.models import canonizar_categoria, categorias_de
@@ -4273,6 +4314,16 @@ def assinar(request: Request):
         log.error(f"Erro ao criar link Asaas: {e}")
         request.session["erro"] = "Erro ao gerar link de pagamento. Tente novamente."
         return RedirectResponse("/painel", status_code=303)
+
+
+@router.get("/painel/meus-pedidos", response_class=HTMLResponse)
+def meus_pedidos(request: Request):
+    from finance import carrinho as car_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pedidos = car_mod.listar_do_cliente(get_pool(), conta[0])
+    return _render("meus_pedidos", request, pedidos=pedidos)
 
 
 @router.get("/painel/financeiro", response_class=HTMLResponse)

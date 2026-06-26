@@ -464,8 +464,12 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
     {% if produtos %}
       {% for p in produtos %}
       <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1rem">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.6rem">
-          <div>
+        <div style="display:flex;gap:12px;align-items:flex-start;margin-bottom:.6rem">
+          <div style="width:54px;height:54px;border-radius:9px;background:#1a2a1f;display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden;background-size:cover;background-position:center"
+               {% if p.foto_url %}style="width:54px;height:54px;border-radius:9px;background-image:url('{{ p.foto_url }}');background-size:cover;background-position:center;flex-shrink:0"{% endif %}>
+            {% if not p.foto_url %}<span style="font-size:22px;color:#3a5a48">🥬</span>{% endif %}
+          </div>
+          <div style="flex:1;min-width:0">
             <strong style="font-size:1rem">{{ p.nome }}</strong> · <span class="mut">{{ p.unidade }}</span>
             <div class="mut" style="font-size:.85rem;margin-top:.3rem">
               saldo: <strong>{{ p.saldo }} {{ p.unidade }}</strong> · custo médio <strong>R$ {{ "%.2f" | format(p.custo_medio_centavos / 100) }}</strong> · vende <strong>R$ {{ "%.2f" | format(p.preco_venda_centavos / 100) }}</strong> · margem {% if p.margem_pct %}<strong>{{ p.margem_pct }}%</strong>{% else %}-{% endif %}
@@ -477,6 +481,7 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
           <button type="button" onclick="fornShowEntrada({{ p.id }})" style="background:#1d9e75;color:#fff;border:0;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem;font-weight:500">dar entrada</button>
           <button type="button" onclick="fornShowPerda({{ p.id }})" style="background:#8a3636;color:#fff;border:0;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem;font-weight:500">registrar perda</button>
           <button type="button" onclick="fornEditProduct({{ p.id }})" style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem">editar</button>
+          <button type="button" onclick="fornFoto({{ p.id }})" style="background:transparent;border:1px solid #534AB7;color:#a89ce8;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem">📷 foto</button>
         </div>
       </div>
       {% endfor %}
@@ -615,6 +620,25 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
     <button type="button" onclick="fornHideEditar()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.5rem;font-size:.85rem">Cancelar</button>
   </div>
 
+  <!-- MODAL: Foto -->
+  <div id="forn-foto-modal" style="display:none;margin-top:2rem;padding:1.2rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px">
+    <h4 style="margin-top:0">Foto de <span id="forn-foto-nome"></span></h4>
+    <input type="hidden" id="forn-foto-pid">
+    <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:1rem">
+      <div id="forn-foto-atual" style="width:80px;height:80px;border-radius:10px;background:#1a2a1f;border:2px solid #1d9e75;flex-shrink:0;background-size:cover;background-position:center"></div>
+      <div style="flex:1;font-size:.8rem;color:#888780">Foto atual. Não combina? Escolha outra abaixo, cole um link, ou remova.</div>
+    </div>
+    <div style="font-size:.8rem;color:#5dcaa5;font-weight:600;margin-bottom:.5rem">Opções pra esse item:</div>
+    <div id="forn-foto-opcoes" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:1rem"></div>
+    <label style="font-size:.8rem">ou cole o link de uma foto sua:</label>
+    <input id="forn-foto-link" placeholder="https://..." style="width:100%;margin-bottom:.9rem;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
+    <div style="display:flex;gap:8px">
+      <button type="button" onclick="fornFotoSalvar()" style="flex:1;background:#1d9e75;color:#fff;border:0;border-radius:8px;padding:.6rem;font-weight:600;cursor:pointer">Salvar foto</button>
+      <button type="button" onclick="fornFotoRemover()" style="background:transparent;border:1px solid #8a3636;color:#c97;border-radius:8px;padding:.6rem .9rem;cursor:pointer">Remover</button>
+      <button type="button" onclick="document.getElementById('forn-foto-modal').style.display='none'" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.6rem .9rem;cursor:pointer">Cancelar</button>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -625,10 +649,60 @@ window.PRODUTOS = {
     unidade: {{ p.unidade|tojson }},
     categoria: {{ (p.categoria or '')|tojson }},
     preco: {{ "%.2f"|format(p.preco_venda_centavos/100) }},
-    minimo: {{ p.estoque_minimo }}
+    minimo: {{ p.estoque_minimo }},
+    foto_url: {{ (p.foto_url or '')|tojson }}
   }{% if not loop.last %},{% endif %}
   {% endfor %}
 };
+let fotoSelecionada = null;
+async function fornFoto(pid){
+  const p = window.PRODUTOS[pid];
+  document.getElementById('forn-foto-pid').value = pid;
+  document.getElementById('forn-foto-nome').textContent = p.nome;
+  document.getElementById('forn-foto-atual').style.backgroundImage = p.foto_url ? "url('"+p.foto_url+"')" : "none";
+  fotoSelecionada = p.foto_url || null;
+  document.getElementById('forn-foto-link').value = '';
+  const r = await fetch('/painel/fornecedor/opcoes-foto?nome='+encodeURIComponent(p.nome));
+  const dados = await r.json();
+  const box = document.getElementById('forn-foto-opcoes');
+  box.innerHTML = '';
+  if(!dados.opcoes.length){
+    box.innerHTML = '<span style="font-size:.78rem;color:#888780">Sem opções na galeria pra esse nome. Cole um link abaixo.</span>';
+  }
+  dados.opcoes.forEach(url=>{
+    const d = document.createElement('div');
+    d.style.cssText = "width:56px;height:56px;border-radius:8px;background:url('"+url+"') center/cover;cursor:pointer;border:2px solid "+(url===fotoSelecionada?'#1d9e75':'#2a2a2b');
+    d.onclick = ()=>{
+      fotoSelecionada = url;
+      document.getElementById('forn-foto-atual').style.backgroundImage="url('"+url+"')";
+      document.getElementById('forn-foto-link').value='';
+      box.querySelectorAll('div').forEach(x=>x.style.border='2px solid #2a2a2b');
+      d.style.border='2px solid #1d9e75';
+    };
+    box.appendChild(d);
+  });
+  document.getElementById('forn-foto-modal').style.display='block';
+}
+async function fornFotoSalvar(){
+  const pid = document.getElementById('forn-foto-pid').value;
+  const link = document.getElementById('forn-foto-link').value.trim();
+  const url = link || fotoSelecionada || '';
+  await fetch('/painel/fornecedor/produto/foto', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({produto_id:parseInt(pid),foto_url:url})
+  });
+  location.reload();
+}
+async function fornFotoRemover(){
+  const pid = document.getElementById('forn-foto-pid').value;
+  await fetch('/painel/fornecedor/produto/foto', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({produto_id:parseInt(pid),foto_url:''})
+  });
+  location.reload();
+}
 </script>
 
 <!-- SEÇÃO: Compras -->

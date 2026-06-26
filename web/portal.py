@@ -1969,7 +1969,7 @@ _COMPRA_REVISAR = """{% extends "base" %}{% block conteudo %}
 
 _LOJA = """{% extends "base" %}{% block conteudo %}
 <style>
-  .lj-wrap{max-width:940px;margin:0 auto}
+  .lj-wrap{max-width:1180px;margin:0 auto}
   .lj-header{height:96px;background:linear-gradient(125deg,#14342a,#0f2820);position:relative;display:flex;align-items:flex-end;padding:0 1.3rem;border-radius:14px 14px 0 0;background-size:cover;background-position:center}
   .lj-aberto{position:absolute;top:13px;right:16px;background:#15301f;color:#5dcaa5;font-size:10.5px;padding:4px 11px;border-radius:20px;border:1px solid #1d9e7544}
   .lj-id{display:flex;align-items:center;gap:13px;transform:translateY(20px)}
@@ -1979,15 +1979,20 @@ _LOJA = """{% extends "base" %}{% block conteudo %}
   .lj-abas{display:flex;gap:2px;padding:1.5rem 1.3rem 0;border-bottom:1px solid #1c1c1f;overflow-x:auto}
   .lj-aba{font-size:12.5px;padding:10px 16px;color:#888780;border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap;text-decoration:none;background:none;border-top:0;border-left:0;border-right:0;font-family:inherit}
   .lj-aba.on{color:#f4f4f4;font-weight:500;border-bottom-color:#1d9e75}
-  .lj-body{display:grid;grid-template-columns:1fr 310px}
+  .lj-body{display:grid;grid-template-columns:172px 1fr 300px}
   .lj-vitrine{padding:1.1rem 1.3rem;border-right:1px solid #1c1c1f;min-width:0}
-  .lj-chips{display:flex;gap:7px;margin-bottom:1.1rem;overflow-x:auto;padding-bottom:2px}
+  .lj-chips{display:none;gap:7px;margin-bottom:1.1rem;overflow-x:auto;padding-bottom:2px}
   .lj-chip{font-size:12px;padding:6px 15px;border-radius:20px;background:#161617;color:#b4b2a9;border:1px solid #2a2a2b;white-space:nowrap;cursor:pointer;flex-shrink:0}
   .lj-chip.on{background:#1d9e75;color:#fff;border-color:#1d9e75}
+  .lj-nav{position:sticky;top:12px;align-self:start;border-right:1px solid #1c1c1f;padding:1.1rem .8rem 1.1rem 0}
+  .lj-nav-tit{font-size:11px;color:#5dcaa5;font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:9px}
+  .lj-navcat{display:block;width:100%;text-align:left;font-size:12.5px;color:#b4b2a9;background:none;border:0;border-radius:7px;padding:7px 9px;cursor:pointer;font-family:inherit;margin-bottom:2px}
+  .lj-navcat.on{background:#15301f;color:#5dcaa5;font-weight:500}
+  .lj-busca{width:100%;box-sizing:border-box;margin-bottom:1rem;padding:.55rem .75rem;background:#161617;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:9px;font-size:12.5px}
   .lj-sec-tit{font-size:12.5px;color:#5dcaa5;font-weight:600;margin:.6rem 0 .7rem}
-  .lj-grade{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:1.3rem}
+  .lj-grade{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:11px;margin-bottom:1.4rem}
   .lj-card{background:#161617;border:1px solid #232325;border-radius:13px;overflow:hidden;display:flex;flex-direction:column}
-  .lj-foto{height:88px;background:#1a2a1f;display:flex;align-items:center;justify-content:center;background-size:cover;background-position:center}
+  .lj-foto{height:118px;background:#1a2a1f;display:flex;align-items:center;justify-content:center;background-size:cover;background-position:center}
   .lj-card-body{padding:.7rem;display:flex;flex-direction:column;flex:1}
   .lj-pnome{font-size:13px;color:#f4f4f4;font-weight:500}
   .lj-pdesc{font-size:10.5px;color:#888780;margin:1px 0 0}
@@ -2025,6 +2030,8 @@ _LOJA = """{% extends "base" %}{% block conteudo %}
     .lj-grade{grid-template-columns:1fr 1fr}
     .lj-vitrine{border-right:0;padding-bottom:.5rem}
     .lj-cart{position:sticky;bottom:0;border-top:1px solid #1d9e75;box-shadow:0 -8px 20px #0e0e0fcc}
+    .lj-nav{display:none}
+    .lj-chips{display:flex}
   }
   @media (max-width:420px){ .lj-grade{grid-template-columns:1fr} }
 </style>
@@ -2049,7 +2056,13 @@ _LOJA = """{% extends "base" %}{% block conteudo %}
   </div>
 
   <div id="ab-comprar" class="lj-body">
+    <nav class="lj-nav">
+      <div class="lj-nav-tit">Categorias</div>
+      <button class="lj-navcat on" onclick="ljCat('tudo',this)">Tudo</button>
+      {% for cat, itens in secoes %}<button class="lj-navcat" onclick="ljCat('{{ cat }}',this)">{{ cat|capitalize }}{% if not cat.endswith('s') %}s{% endif %}</button>{% endfor %}
+    </nav>
     <div class="lj-vitrine">
+      <input class="lj-busca" type="text" placeholder="🔎 buscar produto" oninput="ljBusca(this.value)">
       <div class="lj-chips">
         <span class="lj-chip on" onclick="ljCat('tudo',this)">Tudo</span>
         {% for cat, itens in secoes %}<span class="lj-chip" onclick="ljCat('{{ cat }}',this)">{{ cat|capitalize }}{% if not cat.endswith('s') %}s{% endif %}</span>{% endfor %}
@@ -2059,7 +2072,7 @@ _LOJA = """{% extends "base" %}{% block conteudo %}
         <div class="lj-sec-tit">{{ cat|capitalize }}{% if not cat.endswith('s') %}s{% endif %}</div>
         <div class="lj-grade">
           {% for p in itens %}
-          <div class="lj-card" data-pid="{{ p.id }}" data-unidade="{{ p.unidade }}">
+          <div class="lj-card" data-pid="{{ p.id }}" data-unidade="{{ p.unidade }}" data-nome="{{ p.nome|lower }}">
             <div class="lj-foto"{% if p.foto_url %} style="background-image:url('{{ p.foto_url }}')"{% endif %}></div>
             <div class="lj-card-body">
               <div class="lj-pnome">{{ p.nome }}</div>
@@ -2128,9 +2141,27 @@ function ljAba(q){
   document.getElementById('t-assinar').classList.toggle('on', q==='assinar');
 }
 function ljCat(cat, el){
+  var b = document.querySelector('.lj-busca'); if(b) b.value='';
   document.querySelectorAll('.lj-sec').forEach(s=>{ s.style.display=(cat==='tudo'||s.dataset.cat===cat)?'block':'none'; });
-  document.querySelectorAll('.lj-chip').forEach(c=>c.classList.remove('on'));
+  document.querySelectorAll('.lj-card').forEach(c=>{ c.style.display=''; });
+  document.querySelectorAll('.lj-chip,.lj-navcat').forEach(c=>c.classList.remove('on'));
   el.classList.add('on');
+}
+function ljBusca(q){
+  q=(q||'').trim().toLowerCase();
+  document.querySelectorAll('.lj-navcat,.lj-chip').forEach(c=>c.classList.remove('on'));
+  document.querySelectorAll('.lj-sec').forEach(function(sec){
+    var vis=0;
+    sec.querySelectorAll('.lj-card').forEach(function(c){
+      var ok=!q||((c.dataset.nome||'').indexOf(q)!==-1);
+      c.style.display=ok?'':'none'; if(ok)vis++;
+    });
+    sec.style.display=vis?'':'none';
+  });
+  if(!q){
+    var t=document.querySelector('.lj-navcat'); if(t) t.classList.add('on');
+    var t2=document.querySelector('.lj-chip'); if(t2) t2.classList.add('on');
+  }
 }
 function ljTam(el){
   document.querySelectorAll('.lj-tam').forEach(t=>t.classList.remove('sel'));

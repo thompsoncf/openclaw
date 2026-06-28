@@ -40,9 +40,25 @@ FILIAL = os.environ.get("CARVALHO_FILIAL", "1")
 DOMAINKEY = os.environ.get("CARVALHO_DOMAINKEY", "carvalhosupershop.com.br")
 CDS = {"1": "Carvalho Supershop (atacarejo)", "2": "Carvalho Supershop (varejo)"}
 
-_TOKEN = os.environ.get("CARVALHO_TOKEN", "").strip()
-_SESSION = os.environ.get("CARVALHO_SESSION", "").strip()
+# Token de convidado CAPTURADO que já funcionou (deu 200 na sonda 4). Temporário:
+# some quando expirar. Se isso acontecer, recapture um cURL e exporte CARVALHO_TOKEN.
+_TOKEN_EMBUTIDO = ("Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9."
+    "eyJpc3MiOiJ2aXBjb21tZXJjZSIsImF1ZCI6ImFwaS1hZG1pbiIsInN1YiI6IjZiYzQ4NjdlLWRjYTkt"
+    "MTFlOS04NzQyLTAyMGQ3OTM1OWNhMCIsInZpcGNvbW1lcmNlQ2xpZW50ZUlkIjpudWxsLCJpYXQiOjE3"
+    "ODI2MTM2NDMsInZlciI6MSwiY2xpZW50IjpudWxsLCJvcGVyYXRvciI6bnVsbCwib3JnIjoiMjMifQ."
+    "Z9g-iSiCX20vKyBITiDUEhhjDWxiQTkJE8zopvhVc3zC2pUwaMZ9tACLD4tI3s_ow1LXtp467HUxi002_qGzog")
+_SESSION_EMBUTIDO = "a2f4128f-1700-4b42-8916-86620e24773d"
 _CTX = ssl.create_default_context()
+
+
+def _placeholder(tok: str) -> bool:
+    return (not tok) or ("..." in tok) or (len(tok) < 80) or ("eyJ" not in tok)
+
+
+# usa o env SÓ se for um token de verdade; senão cai no embutido que funciona
+_env_tok = os.environ.get("CARVALHO_TOKEN", "").strip()
+_TOKEN = _env_tok if (_env_tok and not _placeholder(_env_tok)) else _TOKEN_EMBUTIDO
+_SESSION = os.environ.get("CARVALHO_SESSION", "").strip() or _SESSION_EMBUTIDO
 
 # itens de mercado pra varrer o catálogo pela BUSCA (endpoint confirmado).
 # não precisa ser exaustivo: cobre o que importa pro banco de preços (cesta).
@@ -57,10 +73,6 @@ TERMOS = [
     "mortadela", "tempero", "vinagre", "maionese", "ketchup", "creme de leite",
     "leite condensado", "farofa", "tapioca", "cuscuz",
 ]
-
-
-def _placeholder(tok: str) -> bool:
-    return (not tok) or ("..." in tok) or (len(tok) < 80) or ("eyJ" not in tok)
 
 
 def _headers() -> dict:
@@ -182,14 +194,16 @@ def normalizar(p: dict, cd: str) -> dict:
     }
 
 
-def coletar(cds=None, termos=None, max_paginas=12) -> list[dict]:
+def coletar(cds=None, termos=None, max_paginas=6) -> list[dict]:
+    """Varre os CDs pela busca, com PROGRESSO ao vivo (um print por termo) pra
+    você ver que não travou. max_paginas baixo = termina rápido (a cesta cabe)."""
     cds = cds or list(CDS)
     termos = termos or TERMOS
     out: dict[tuple, dict] = {}
     for cd in cds:
-        achados = 0
+        print(f"\n  --- CD {cd} ({CDS.get(cd, '')}) ---", flush=True)
         for termo in termos:
-            page, total = 1, 1
+            page, total, n = 1, 1, 0
             while page <= min(total, max_paginas):
                 prods, total = _buscar(cd, termo, page)
                 if not prods:
@@ -197,10 +211,10 @@ def coletar(cds=None, termos=None, max_paginas=12) -> list[dict]:
                 for p in prods:
                     reg = normalizar(p, cd)
                     out[(cd, reg["produto_id"])] = reg
-                    achados += 1
+                    n += 1
                 page += 1
-                time.sleep(0.15)  # gentil com o servidor
-        print(f"  cd={cd}: {achados} linhas coletadas (dedup depois)")
+                time.sleep(0.1)  # gentil com o servidor
+            print(f"    {termo:18} +{n}", flush=True)
     return list(out.values())
 
 

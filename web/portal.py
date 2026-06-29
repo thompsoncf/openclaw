@@ -1838,7 +1838,11 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
               if (m.produtos && m.produtos.length){
                 html += '<div style="margin:.3rem 0 0 1.1rem">';
                 m.produtos.forEach(function(pr){
-                  html += '<div class="mut" style="font-size:.72rem;display:flex;justify-content:space-between"><span>'+esc(pr.descricao)+'</span><span>'+pr.preco+'</span></div>';
+                  var quando = (pr.dias === 0 ? 'hoje' : (pr.dias === 1 ? 'ontem' : (pr.dias != null ? 'há '+pr.dias+'d' : '')));
+                  var selo = '🧾 cupom' + (quando ? ' · '+quando : '');
+                  html += '<div style="font-size:.72rem;display:flex;justify-content:space-between;gap:.5rem">'
+                        + '<span>'+esc(pr.descricao)+' <span style="color:#1d9e75;font-size:.64rem">'+selo+'</span></span>'
+                        + '<span class="mut">'+pr.preco+'</span></div>';
                 });
                 html += '</div>';
               }
@@ -1848,8 +1852,20 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
           });
           var fonte = d.fonte === 'sefaz'
             ? 'Preços oficiais de nota fiscal (SEFAZ), atualizados há pouco.'
-            : 'Baseado em '+d.observacoes+' preços dos seus cupons — melhora a cada compra.';
+            : 'Total e ranking contam só os seus cupons (preço real) — melhora a cada compra.';
           html += '<p class="mut" style="font-size:.72rem">'+fonte+'</p>';
+        }
+        var sc = d.sem_cupom || [];
+        if (sc.length){
+          html += '<div style="margin-top:.8rem;border:1px solid #2c4459;border-radius:10px;padding:.8rem;background:rgba(111,168,220,.05)">';
+          html += '<div style="font-size:.74rem;color:#6fa8dc;margin-bottom:.5rem">📦 Ainda sem cupom · referência do catálogo</div>';
+          sc.forEach(function(s){
+            html += '<div style="font-size:.72rem;display:flex;justify-content:space-between;gap:.5rem;padding:.2rem 0">'
+                  + '<span>'+esc(s.descricao)+' <span style="color:#6fa8dc;font-size:.64rem">📦 '+esc(s.mercado)+'</span></span>'
+                  + '<span style="color:#6fa8dc">~ '+s.preco+'</span></div>';
+          });
+          html += '<div class="mut" style="font-size:.66rem;margin-top:.4rem">Ninguém escaneou cupom desses ainda. Preço online de referência – <b>não entra no total</b>. Quando chegar um cupom, ele assume.</div>';
+          html += '</div>';
         }
         html += '<div style="margin-top:.6rem"><div class="mut" style="font-size:.78rem;margin-bottom:.3rem">Não bateu? Ajuste o produto certo:</div><div style="display:flex;flex-wrap:wrap;gap:6px">';
         pendentesAtuais.forEach(function(it){
@@ -1892,10 +1908,19 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
                 + '<div style="font-size:.66rem;margin-top:.12rem;color:'+cor+'">'+selo+'</div></div>'
                 + '<div style="font-weight:600;font-size:.86rem;color:'+cor+'">'+preco+'</div></div>';
         });
-        html += '<button type="button" class="voltar-prod" style="margin-top:.5rem;font-size:.72rem;background:transparent;color:#8b97a6;border:0;cursor:pointer;padding:.2rem 0">← outros produtos</button>';
+        html += '<div style="display:flex;gap:.5rem;align-items:center;margin-top:.6rem">'
+              + '<button type="button" class="usar-cesta" style="flex:1;background:#1d9e75;color:#06281e;border:0;border-radius:8px;padding:.5rem;font-size:.74rem;font-weight:600;cursor:pointer">✓ usar este na cesta</button>'
+              + '<button type="button" class="voltar-prod" style="font-size:.72rem;background:transparent;color:#8b97a6;border:0;cursor:pointer;padding:.2rem .4rem">← outros</button>'
+              + '</div>';
         html += '</div>';
         cx.innerHTML = html;
         var vb = cx.querySelector('.voltar-prod'); if (vb) vb.onclick = function(){ abrirOpcoes(item); };
+        var ub = cx.querySelector('.usar-cesta');
+        if (ub) ub.onclick = function(){
+          ajustes[item] = d.produto;
+          if (typeof carregarPrecos === 'function') carregarPrecos();
+          cx.innerHTML = '<div class="mut" style="font-size:.74rem;margin-top:.5rem">✓ Cesta ajustada pra <b>'+esc(d.produto)+'</b>. Recalculando…</div>';
+        };
         return;
       }
 
@@ -5271,32 +5296,39 @@ def compras_precos(request: Request):
         r = comparar_separado(get_pool(), pendentes, cidade, escolhas)
     except Exception:  # noqa: BLE001
         return JSONResponse({"grupos": {}, "observacoes": 0, "fonte": "erro"})
-    return JSONResponse(_fmt_comparacao(r))
+    return JSONResponse(_fmt_comparacao(r, cidade))
 
 
-def _fmt_comparacao(r: dict) -> dict:
-    """Formata o resultado do comparador pra JSON amigavel ao front (com BRL).
-    Popula endereco (da loja com melhor preco) e produtos (nomes completos de cada item)."""
+def _fmt_comparacao(r: dict, cidade: str | None = None) -> dict:
+    """Formata o resultado do comparador pra JSON amigavel ao front (com BRL). Cada
+    produto leva dias (recencia) e fonte='cupom'. Itens SEM cupom ganham referencia de
+    catalogo (fora do total)."""
+    from datetime import date
     rotulos = {"mercado": "🏪 Mercado", "farmacia": "💊 Farmácia", "outro": "🏪 Mercado"}
     grupos = {}
     itens_detalhe = {item["descricao"]: item for item in r.get("itens", [])}
+
+    def _dias(dt):
+        try:
+            return (date.today() - dt).days
+        except Exception:  # noqa: BLE001
+            return None
 
     for tipo, g in r.get("grupos", {}).items():
         linhas = []
         for m in g["mercados"]:
             nome_merc = m["mercado"]
-            # monta lista de produtos com nome completo e preco pra este mercado
             produtos = []
             endereco_merc = None
             for item_desc, item_info in itens_detalhe.items():
-                # procura se tem preco deste item neste mercado
                 for preco in item_info.get("precos", []):
                     if preco["mercado"] == nome_merc:
                         produtos.append({
-                            "descricao": preco["descricao"],  # nome completo (ex "Arroz Camil 5kg")
-                            "preco": brl(preco["valor_centavos"])
+                            "descricao": preco["descricao"],
+                            "preco": brl(preco["valor_centavos"]),
+                            "fonte": "cupom",
+                            "dias": _dias(preco.get("data")),
                         })
-                        # pega endereco do 1o preco (mais barato deste mercado)
                         if endereco_merc is None and preco.get("endereco"):
                             endereco_merc = preco["endereco"]
                         break
@@ -5310,7 +5342,27 @@ def _fmt_comparacao(r: dict) -> dict:
             })
         if linhas:
             grupos[rotulos.get(tipo, tipo)] = linhas
-    return {"grupos": grupos, "observacoes": r.get("observacoes", 0), "fonte": r.get("fonte", "vazio")}
+
+    # itens da lista que NINGUÉM tem em cupom -> referência de catálogo (fora do total)
+    sem_cupom = []
+    try:
+        from finance.banco_precos import BancoPrecos
+        banco = BancoPrecos(get_pool())
+        for desc, info in itens_detalhe.items():
+            if not info.get("precos"):
+                ref = banco.referencia_catalogo(desc, regiao=cidade)
+                if ref:
+                    sem_cupom.append({
+                        "item": desc,
+                        "descricao": ref["descricao"],
+                        "mercado": ref["mercado"],
+                        "preco": brl(ref["valor_centavos"]),
+                    })
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {"grupos": grupos, "observacoes": r.get("observacoes", 0),
+            "fonte": r.get("fonte", "vazio"), "sem_cupom": sem_cupom}
 
 
 @router.get("/painel/compras/opcoes")

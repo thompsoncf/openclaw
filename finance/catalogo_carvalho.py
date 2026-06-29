@@ -55,6 +55,21 @@ REDES: dict[str, dict] = {
         "token_fallback": _CARVALHO_TOKEN_FALLBACK,
         "session_fallback": "a2f4128f-1700-4b42-8916-86620e24773d",
     },
+    "ferreira": {
+        "rede": "ferreira_em_casa",
+        "nome": "Ferreira em Casa",
+        "org": "123",
+        "domainkey": "ferreiraemcasa.com.br",
+        "filial": "1",
+        "cds": {"1": "Ferreira em Casa"},
+        "regiao": "Teresina",
+        "env": "FERREIRA",
+        "token_fallback": ("Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9."
+            "eyJpc3MiOiJ2aXBjb21tZXJjZSIsImF1ZCI6ImFwaS1hZG1pbiIsInN1YiI6IjZiYzQ4NjdlLWRjYTkt"
+            "MTFlOS04NzQyLTAyMGQ3OTM1OWNhMCIsInZpcGNvbW1lcmNlQ2xpZW50ZUlkIjpudWxsLCJpYXQiOjE3ODI3NDM3OTksInZlciI6MSwiY2xpZW50IjpudWxsLCJvcGVyYXRvciI6bnVsbCwib3JnIjoiMTIzIn0."
+            "FY7QDSO3boNUdIXBJVHW4_7GRS4HWa-UeCQm7v5i37WkPKQFP75l8do6MzazBL7dqk5aPu9ymR83aopjHPFTrA"),
+        "session_fallback": "20dd9781-25a4-43e4-b991-bda1fb2978cf",
+    },
     # Esqueleto: preencher 'org' e 'cds' quando capturar o cURL do gruporcarvalho.com.br
     # (F12 > Network > busca 'arroz' > Copy as cURL) e exportar RCARVALHO_TOKEN/SESSION.
     "r_carvalho": {

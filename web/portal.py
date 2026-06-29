@@ -1867,16 +1867,19 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
       });
   }
 
-  function abrirOpcoes(item){
+  function abrirOpcoes(item, gtin, produto){
     var cx = document.getElementById('aj-opcoes');
     cx.innerHTML = '<div class="mut" style="font-size:.78rem;margin-top:.5rem">🔄 Buscando menor preço de "'+esc(item)+'"...</div>';
-    fetch('/painel/compras/opcoes?item='+encodeURIComponent(item))
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        var ops = d.opcoes || [];
-        if (!ops.length){ cx.innerHTML = '<div class="mut" style="font-size:.76rem;margin-top:.5rem">Ainda não tenho preço desse item aqui na sua região.</div>'; return; }
-        var html = '<div style="background:#0e0e0f;border:1px solid #2a2a2b;border-radius:10px;padding:.8rem;margin-top:.5rem">';
-        html += '<div style="font-size:.8rem;margin-bottom:.5rem">📍 Onde "'+esc(item)+'" tá mais barato perto de você</div>';
+    var url = '/painel/compras/opcoes?item='+encodeURIComponent(item)
+            + (gtin ? ('&gtin='+encodeURIComponent(gtin)) : '')
+            + (produto ? ('&produto='+encodeURIComponent(produto)) : '');
+    fetch(url).then(function(r){ return r.json(); }).then(function(d){
+      var ops = d.opcoes || [];
+      if (!ops.length){ cx.innerHTML = '<div class="mut" style="font-size:.76rem;margin-top:.5rem">Ainda não tenho preço desse item aqui na sua região.</div>'; return; }
+      var html = '<div style="background:#0e0e0f;border:1px solid #2a2a2b;border-radius:10px;padding:.8rem;margin-top:.5rem">';
+
+      if (d.nivel === 'lojas'){
+        html += '<div style="font-size:.8rem;margin-bottom:.5rem">📍 <b>'+esc(d.produto||item)+'</b> — onde tá mais barato</div>';
         ops.forEach(function(o){
           var preco = 'R$ ' + (o.preco_centavos/100).toFixed(2).replace('.', ',');
           var cupom = (o.fonte === 'cupom');
@@ -1884,13 +1887,39 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
           var quando = (o.dias === 0 ? 'hoje' : (o.dias === 1 ? 'ontem' : 'há ' + o.dias + 'd'));
           var selo = cupom ? ('🧾 cupom · ' + quando) : '📦 catálogo';
           html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:.4rem 0;border-top:1px solid #1f1f20">'
-                + '<div style="font-size:.78rem"><div>' + esc(o.mercado) + '</div>'
-                + '<div style="font-size:.66rem;margin-top:.12rem;color:' + cor + '">' + selo + '</div></div>'
-                + '<div style="font-weight:600;font-size:.86rem;color:' + cor + '">' + preco + '</div></div>';
+                + '<div style="font-size:.78rem"><div>'+esc(o.mercado)+'</div>'
+                + '<div style="font-size:.66rem;margin-top:.12rem;color:'+cor+'">'+selo+'</div></div>'
+                + '<div style="font-weight:600;font-size:.86rem;color:'+cor+'">'+preco+'</div></div>';
         });
+        html += '<button type="button" class="voltar-prod" style="margin-top:.5rem;font-size:.72rem;background:transparent;color:#8b97a6;border:0;cursor:pointer;padding:.2rem 0">← outros produtos</button>';
         html += '</div>';
         cx.innerHTML = html;
-      }).catch(function(){ cx.innerHTML=''; });
+        var vb = cx.querySelector('.voltar-prod'); if (vb) vb.onclick = function(){ abrirOpcoes(item); };
+        return;
+      }
+
+      html += '<div style="font-size:.8rem;margin-bottom:.5rem">Qual "'+esc(item)+'"? Toque pra ver as lojas</div>';
+      ops.forEach(function(o){
+        var mn = (o.preco_min_centavos/100).toFixed(2).replace('.', ',');
+        var mx = (o.preco_max_centavos/100).toFixed(2).replace('.', ',');
+        var faixa = (o.preco_min_centavos === o.preco_max_centavos) ? ('R$ '+mn) : ('R$ '+mn+'–'+mx);
+        var nl = o.n_lojas + (o.n_lojas === 1 ? ' loja' : ' lojas');
+        html += '<button type="button" class="prod" data-gtin="'+(o.gtin||'')+'" data-desc="'+encodeURIComponent(o.descricao)+'" '
+              + 'style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;width:100%;text-align:left;margin:.15rem 0;padding:.45rem .6rem;background:#161617;border:0;border-radius:8px;cursor:pointer;color:#e8edf2">'
+              + '<span style="font-size:.76rem">'+esc(o.descricao)+'<br><span class="mut" style="font-size:.66rem">'+nl+'</span></span>'
+              + '<span style="font-weight:600;font-size:.78rem;color:#5dcaa5;white-space:nowrap">'+faixa+'</span></button>';
+      });
+      html += '</div>';
+      cx.innerHTML = html;
+      Array.prototype.forEach.call(cx.querySelectorAll('.prod'), function(b){
+        b.onclick = function(){
+          var g = b.getAttribute('data-gtin');
+          var dsc = decodeURIComponent(b.getAttribute('data-desc'));
+          if (g) abrirOpcoes(item, g, null);
+          else   abrirOpcoes(item, null, dsc);
+        };
+      });
+    }).catch(function(){ cx.innerHTML=''; });
   }
 
   acao({acao:'noop'});
@@ -5275,22 +5304,23 @@ def _fmt_comparacao(r: dict) -> dict:
 
 
 @router.get("/painel/compras/opcoes")
-def compras_opcoes(request: Request, item: str = "", gtin: str = ""):
-    """Menor preço por item: lojas ranqueadas por preço, cada uma com a FONTE
-    (cupom = preço real por loja / catálogo = referência online) pro selo na tela.
-    Lê do banco próprio (cupom + catálogo) via BancoPrecos.opcoes_item."""
+def compras_opcoes(request: Request, item: str = "", gtin: str = "", produto: str = ""):
+    """Menor preço em 2 níveis: sem gtin -> produtos distintos (nome + faixa);
+    com gtin/produto -> lojas daquele produto exato, com fonte (cupom/catálogo).
+    opcoes_item já devolve o dict pronto {"nivel","opcoes",...} - NÃO embrulhar."""
     conta = conta_logada(request)
     if conta is None:
         return JSONResponse({"erro": "nao logado"}, status_code=401)
     item = (item or "").strip()
-    if not item and not gtin:
-        return JSONResponse({"opcoes": []})
+    if not item and not gtin and not produto:
+        return JSONResponse({"nivel": "produtos", "termo": "", "opcoes": []})
     with get_pool().connection() as c:
         row = c.execute("select cidade from contas where id=%s", (conta[0],)).fetchone()
     cidade = row[0] if row else None
     from finance.banco_precos import BancoPrecos
-    ops = BancoPrecos(get_pool()).opcoes_item(item, regiao=cidade, gtin=(gtin or None))
-    return JSONResponse({"opcoes": ops})
+    resp = BancoPrecos(get_pool()).opcoes_item(
+        item, regiao=cidade, gtin=(gtin or None), produto=(produto or None))
+    return JSONResponse(resp)
 
 
 @router.post("/painel/compras/api")

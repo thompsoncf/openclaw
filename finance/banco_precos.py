@@ -218,27 +218,24 @@ class BancoPrecos:
         return self._tem_fonte
 
     def opcoes_item(self, descricao: str, regiao: str | None = None,
-                    dias: int = 90, limite: int = 10, gtin: str | None = None) -> list[dict]:
-        """Para UM produto, devolve as lojas ranqueadas do mais barato ao mais caro,
-        cada uma com a FONTE:
-          'cupom'    -> preço real pago, por loja física (a verdade; tem endereço/data)
-          'catalogo' -> referência online (entrega), nunca se passa por preço de loja
+                    dias: int = 90, limite: int = 12,
+                    gtin: str | None = None, produto: str | None = None) -> dict:
+        """Menor preço em DOIS NÍVEIS, pra comparar PRODUTO IGUAL (nunca 1kg x 5kg):
 
-        Precisão do match (pra não misturar 1kg com 5kg / comum com integral):
-          - gtin informado -> match EXATO por código de barras (mesmo produto em
-            cada loja). É o caminho preciso quando a tela já sabe a variação.
-          - só texto -> exige que o TAMANHO bata (5kg só casa com 5kg) e aperta a
-            sobreposição de palavras (~2/3), em vez do 1/2 antigo.
+          - SEM gtin  -> nível 'produtos': lista os produtos distintos que casam
+            com o termo, cada um com NOME + faixa de preço + em quantas lojas.
+          - COM gtin  -> nível 'lojas': ranqueia as lojas DAQUELE produto exato,
+            do mais barato ao mais caro, com a FONTE (cupom/catálogo) pro selo.
 
-        Alimenta /painel/compras/opcoes: o front só pinta o selo a partir de
-        'fonte'. Não toca em precos_de() nem na cesta (que continua só cupom).
+        Retorna sempre um dict:
+          {"nivel": "produtos", "termo": <str>, "opcoes": [...]}
+          {"nivel": "lojas", "produto": <str>, "gtin": <str>, "opcoes": [...]}
+        Não toca em precos_de() nem na cesta (que continua só cupom).
         """
         import re
         import unicodedata
 
         def _cidade_core(s: str) -> str:
-            """núcleo da cidade: minúscula, sem acento, sem sufixo de UF.
-            'teresina-pi' / 'Teresina' / 'Teresina/PI' -> 'teresina'."""
             s = (s or "").strip().lower()
             s = "".join(ch for ch in unicodedata.normalize("NFD", s)
                         if unicodedata.category(ch) != "Mn")
@@ -246,7 +243,6 @@ class BancoPrecos:
             return s.strip()
 
         def tam(txt: str) -> set:
-            """tokens de TAMANHO normalizados (5kg, 1kg, 500g, 2l...) de um nome."""
             t = (txt or "").lower().replace(",", ".")
             out = set()
             for val, un in re.findall(
@@ -261,19 +257,25 @@ class BancoPrecos:
         col_fonte = "po.fonte" if self._coluna_fonte_existe() else "'cupom' as fonte"
         sel = f"""select po.mercado, po.valor_unitario_centavos, po.descricao_original,
                          po.data_compra, po.descricao_norm, po.unidade,
-                         {col_fonte}, po.loja_id, l.nome, l.endereco, l.cidade, l.uf
+                         {col_fonte}, po.loja_id, l.nome, l.endereco, l.cidade, l.uf,
+                         po.gtin
                   from precos_observados po
                   left join lojas l on l.id = po.loja_id"""
 
         gtin_limpo = re.sub(r"\D", "", gtin or "")
+        prod_exato = (produto or "").strip()
+        modo_lojas = bool(gtin_limpo or prod_exato)
         if gtin_limpo:
             sql = sel + " where po.gtin = %s and po.data_compra >= %s"
             params: list = [gtin_limpo, corte]
+        elif prod_exato:
+            sql = sel + " where po.descricao_norm = %s and po.data_compra >= %s"
+            params = [normalizar(prod_exato), corte]
         else:
             nucleo = normalizar(descricao)
             primeira = nucleo.split()[0] if nucleo else ""
             if not primeira:
-                return []
+                return {"nivel": "produtos", "termo": descricao, "opcoes": []}
             sql = sel + " where po.descricao_norm like %s and po.data_compra >= %s"
             params = [f"%{primeira}%", corte]
         if regiao:
@@ -283,15 +285,15 @@ class BancoPrecos:
         with self.pool.connection() as c:
             rows = c.execute(sql, params).fetchall()
 
-        alvo = tokens(descricao) if not gtin_limpo else set()
-        alvo_tam = tam(descricao) if not gtin_limpo else set()
+        alvo = tokens(descricao) if not modo_lojas else set()
+        alvo_tam = tam(descricao) if not modo_lojas else set()
         need = max(2, (2 * len(alvo) + 2) // 3) if alvo else 0
         hoje = date.today()
-        achados: list[dict] = []
+
+        regs: list[dict] = []
         for (merc, vu, orig, dt, norm, unidade, fonte, loja_id,
-             l_nome, endereco, l_cidade, l_uf) in rows:
-            if not gtin_limpo:
-                # tamanho: se a busca pede um tamanho, o candidato tem que ter o mesmo
+             l_nome, endereco, l_cidade, l_uf, g) in rows:
+            if not modo_lojas:
                 if alvo_tam and not (alvo_tam & (tam(orig) | tam(norm))):
                     continue
                 comuns = alvo & set((norm or "").split())
@@ -299,24 +301,57 @@ class BancoPrecos:
                     continue
             fonte = fonte or "cupom"
             nome_loja = l_nome or merc or "(sem nome)"
-            chave = f"{fonte}:" + (f"id:{loja_id}" if loja_id else f"txt:{nome_loja}")
             partes_end = [p for p in [endereco,
                           f"{l_cidade}/{l_uf}" if l_cidade and l_uf else None] if p]
-            achados.append({
-                "_chave": chave,
-                "mercado": nome_loja,
-                "fonte": fonte,
-                "preco_centavos": int(vu),
-                "descricao": orig,
-                "unidade": unidade or "UN",
+            regs.append({
+                "gtin": g, "descricao": orig, "norm": norm or "",
+                "mercado": nome_loja, "fonte": fonte, "preco_centavos": int(vu),
+                "loja_key": (f"id:{loja_id}" if loja_id else f"txt:{nome_loja}"),
                 "data": dt.isoformat() if dt else None,
                 "dias": (hoje - dt).days if dt else None,
+                "unidade": unidade or "UN",
                 "endereco": ", ".join(partes_end) or None,
             })
-        por_chave: dict[str, dict] = {}
-        for a in achados:
-            por_chave.setdefault(a.pop("_chave"), a)
-        return sorted(por_chave.values(), key=lambda x: x["preco_centavos"])[:limite]
+
+        # nível LOJAS (produto exato por gtin ou nome)
+        if modo_lojas:
+            por: dict[str, dict] = {}
+            for r in regs:
+                por.setdefault(f"{r['fonte']}:{r['loja_key']}", r)
+            lojas = sorted(por.values(), key=lambda x: x["preco_centavos"])[:limite]
+            nome_prod = lojas[0]["descricao"] if lojas else (produto or descricao)
+            g_ret = gtin_limpo or (lojas[0]["gtin"] if lojas else None)
+            for r in lojas:
+                r.pop("norm", None); r.pop("loja_key", None); r.pop("gtin", None)
+            return {"nivel": "lojas", "produto": nome_prod,
+                    "gtin": g_ret, "opcoes": lojas}
+
+        # nível PRODUTOS (agrupa por gtin OU nome normalizado)
+        prod: dict[str, dict] = {}
+        for r in regs:
+            k = r["gtin"] or r["norm"]
+            p = prod.get(k)
+            if not p:
+                prod[k] = {"gtin": r["gtin"], "descricao": r["descricao"],
+                           "preco_min_centavos": r["preco_centavos"],
+                           "preco_max_centavos": r["preco_centavos"],
+                           "lojas": {r["loja_key"]}, "fonte_min": r["fonte"]}
+            else:
+                if r["preco_centavos"] < p["preco_min_centavos"]:
+                    p["preco_min_centavos"] = r["preco_centavos"]
+                    p["fonte_min"] = r["fonte"]
+                p["preco_max_centavos"] = max(p["preco_max_centavos"], r["preco_centavos"])
+                p["lojas"].add(r["loja_key"])
+                if len(r["descricao"]) < len(p["descricao"]):
+                    p["descricao"] = r["descricao"]
+        produtos = [{
+            "gtin": p["gtin"], "descricao": p["descricao"],
+            "preco_min_centavos": p["preco_min_centavos"],
+            "preco_max_centavos": p["preco_max_centavos"],
+            "n_lojas": len(p["lojas"]), "fonte": p["fonte_min"],
+        } for p in prod.values()]
+        produtos.sort(key=lambda x: x["preco_min_centavos"])
+        return {"nivel": "produtos", "termo": descricao, "opcoes": produtos[:limite]}
 
     def registrar_catalogo(self, registros: list[dict], regiao: str = "Teresina",
                            data_compra: date | None = None) -> int:

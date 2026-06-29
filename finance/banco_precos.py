@@ -281,49 +281,49 @@ class BancoPrecos:
     def registrar_catalogo(self, registros: list[dict], regiao: str = "Teresina",
                            data_compra: date | None = None) -> int:
         """Grava preço de CATÁLOGO (referência online), fonte='catalogo'. Recebe os
-        registros do ingestor (catalogo_carvalho.coletar(): campos descricao,
-        preco_centavos, loja_nome, produto_id, gtin).
+        registros do ingestor (catalogo_carvalho.coletar(): descricao,
+        preco_centavos, loja_nome, gtin, unidade).
 
-        Idempotente: usa o produto_id do VipCommerce como chave estável (id imutável
-        da loja) — assim, mesmo que nome/GTIN mudem entre coletas, é sempre a mesma
-        linha = UPDATE em vez de duplicar. item_id sintético NEGATIVO por (mercado|produto_id)
-        nunca colide com cupom (sempre positivo). Não toca em nenhum preço de cupom.
-        Devolve quantos gravou."""
-        import hashlib
+        item_id tem FK pra itens_lancamento (só cupom tem item de lançamento),
+        então catálogo grava com item_id NULL. Idempotência por REFRESH: apaga as
+        linhas de catálogo DAQUELAS MESMAS lojas e reinsere as novas. Resultado:
+          - NUNCA duplica produto (apaga antes de inserir);
+          - SEMPRE atualiza o preço (reinsere o atual);
+          - data_compra = hoje => sempre a ÚLTIMA data de atualização.
+        Nunca toca em preço de cupom (filtra fonte='catalogo'). Sem migração.
+        Devolve quantas linhas inseriu."""
         data_compra = data_compra or date.today()
-        n = 0
+        linhas = []
+        mercados: set[str] = set()
+        for r in registros:
+            preco = r.get("preco_centavos")
+            desc = (r.get("descricao") or "").strip()
+            mercado = r.get("loja_nome") or r.get("mercado")
+            if not desc or not preco or preco <= 0 or not mercado:
+                continue
+            mercados.add(mercado)
+            linhas.append((normalizar(desc), desc[:200], int(preco), mercado,
+                           regiao, r.get("gtin"), data_compra, r.get("unidade") or "UN"))
+        if not linhas:
+            return 0
         with self.pool.connection() as c:
-            for r in registros:
-                preco = r.get("preco_centavos")
-                desc = (r.get("descricao") or "").strip()
-                mercado = r.get("loja_nome") or r.get("mercado")
-                gtin = r.get("gtin")
-                produto_id = r.get("produto_id")
-                if not desc or not preco or preco <= 0 or not mercado:
-                    continue
-                # chave de idempotência estável: produto_id (id da loja, nunca muda)
-                # fallback: gtin ou descricao normalizada
-                ident = produto_id or gtin or normalizar(desc)
-                chave = f"{mercado}|{ident}"
-                sint = -(int.from_bytes(
-                    hashlib.blake2b(chave.encode("utf-8"), digest_size=7).digest(), "big"))
-                c.execute(
+            with c.cursor() as cur:
+                # apaga SÓ o catálogo dessas lojas (cupom fica intacto)
+                cur.execute(
+                    "delete from precos_observados "
+                    "where fonte = 'catalogo' and regiao = %s and mercado = any(%s)",
+                    (regiao, list(mercados)),
+                )
+                cur.executemany(
                     """insert into precos_observados
                        (descricao_norm, descricao_original, valor_unitario_centavos,
-                        mercado, regiao, gtin, data_compra, conta_id, item_id, fonte)
-                       values (%s,%s,%s,%s,%s,%s,%s,null,%s,'catalogo')
-                       on conflict (item_id) do update set
-                         valor_unitario_centavos = excluded.valor_unitario_centavos,
-                         descricao_original = excluded.descricao_original,
-                         mercado = excluded.mercado, regiao = excluded.regiao,
-                         gtin = excluded.gtin, data_compra = excluded.data_compra,
-                         fonte = 'catalogo'""",
-                    (normalizar(desc), desc[:200], int(preco),
-                     mercado, regiao, gtin, data_compra, sint),
+                        mercado, regiao, gtin, data_compra, unidade,
+                        conta_id, item_id, fonte)
+                       values (%s,%s,%s,%s,%s,%s,%s,%s, null, null, 'catalogo')""",
+                    linhas,
                 )
-                n += 1
             c.commit()
-        return n
+        return len(linhas)
 
     # ---------- comparador de CESTA ----------
 

@@ -1,33 +1,30 @@
 """finance/catalogo_carvalho.py
 
-Ingestor do catálogo ONLINE do Carvalho Supershop (Grupo Vanguarda) via API
-pública da VipCommerce. Lê PREÇO DE REFERÊNCIA (catálogo online) - NÃO substitui
-o cupom NFC-e (preço real pago na loja física). Tudo entra rotulado fonte=catalogo.
+Ingestor GENÉRICO de catálogo VipCommerce (multi-rede). Lê PREÇO DE REFERÊNCIA
+(catálogo online) - NÃO substitui o cupom NFC-e (preço real por loja). Tudo entra
+rotulado fonte='catalogo' via BancoPrecos.registrar_catalogo.
 
-Estrutura confirmada por reconhecimento:
-  base    : https://services.vipcommerce.com.br/api-admin/v1
-  org=23  domainkey=carvalhosupershop.com.br  filial=1
-  CDs     : 1 (atacarejo, ~229 itens em 'arroz') e 2 (varejo, ~144) -> preço difere por CD
-  busca   : .../filial/1/centro_distribuicao/{cd}/loja/buscas/produtos/termo/{termo}?page=N
-            ^ ESTE é o endpoint confirmado. A coleta usa ele varrendo itens de mercado.
+Cada rede VipCommerce é só CONFIG (org, domainkey, filial, CDs, prefixo de env).
+A lógica (token, busca, normalização, GTIN) é a mesma pra todas.
 
-Token de convidado (Bearer) obrigatório. Configure por env COM O TOKEN REAL:
-  export CARVALHO_TOKEN='Bearer eyJ0eXAiOiJKV1Qi...'   (o Bearer INTEIRO do cURL)
-  export CARVALHO_SESSION='a2f4128f-...'               (o ?session= da URL; opcional)
+  ATENÇÃO: isto vale pra VipCommerce. Ferreira (ferreiraemcasa) e Mateus (mateusmais)
+  rodam plataforma PRÓPRIA (custom) -> precisam de adaptador separado, não entram aqui.
 
-Uso (verificar no Render):
-  python -m finance.catalogo_carvalho
-  -> testa o token, coleta, grava /tmp/catalogo_carvalho.json e imprime resumo +
-     comparação de preço por CD pro mesmo GTIN.
+Token/sessão por rede via env <PREFIXO>_TOKEN / <PREFIXO>_SESSION:
+  carvalho    -> CARVALHO_TOKEN  / CARVALHO_SESSION
+  r_carvalho  -> RCARVALHO_TOKEN / RCARVALHO_SESSION
 
-NÃO escreve no banco. coletar() devolve registros limpos; a gravação em
-precos_observados/banco_preços é o passo seguinte (com Claude Code, após schema).
+Uso (Render):
+  python -m finance.catalogo_carvalho                    # rede padrão (carvalho), só JSON
+  python -m finance.catalogo_carvalho carvalho --gravar  # coleta e grava no banco
+  python -m finance.catalogo_carvalho r_carvalho         # depois de preencher org/CDs
 """
 from __future__ import annotations
 
 import json
 import os
 import ssl
+import sys
 import time
 import unicodedata
 import urllib.error
@@ -35,33 +32,46 @@ import urllib.parse
 import urllib.request
 
 BASE = "https://services.vipcommerce.com.br/api-admin/v1"
-ORG = os.environ.get("CARVALHO_ORG", "23")
-FILIAL = os.environ.get("CARVALHO_FILIAL", "1")
-DOMAINKEY = os.environ.get("CARVALHO_DOMAINKEY", "carvalhosupershop.com.br")
-CDS = {"1": "Carvalho Supershop (atacarejo)", "2": "Carvalho Supershop (varejo)"}
 
-# Token de convidado CAPTURADO que já funcionou (deu 200 na sonda 4). Temporário:
-# some quando expirar. Se isso acontecer, recapture um cURL e exporte CARVALHO_TOKEN.
-_TOKEN_EMBUTIDO = ("Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9."
+# token de convidado do Carvalho que JÁ funcionou (temporário; some quando expirar)
+_CARVALHO_TOKEN_FALLBACK = ("Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiJ9."
     "eyJpc3MiOiJ2aXBjb21tZXJjZSIsImF1ZCI6ImFwaS1hZG1pbiIsInN1YiI6IjZiYzQ4NjdlLWRjYTkt"
     "MTFlOS04NzQyLTAyMGQ3OTM1OWNhMCIsInZpcGNvbW1lcmNlQ2xpZW50ZUlkIjpudWxsLCJpYXQiOjE3"
     "ODI2MTM2NDMsInZlciI6MSwiY2xpZW50IjpudWxsLCJvcGVyYXRvciI6bnVsbCwib3JnIjoiMjMifQ."
     "Z9g-iSiCX20vKyBITiDUEhhjDWxiQTkJE8zopvhVc3zC2pUwaMZ9tACLD4tI3s_ow1LXtp467HUxi002_qGzog")
-_SESSION_EMBUTIDO = "a2f4128f-1700-4b42-8916-86620e24773d"
-_CTX = ssl.create_default_context()
 
-
-def _placeholder(tok: str) -> bool:
-    return (not tok) or ("..." in tok) or (len(tok) < 80) or ("eyJ" not in tok)
-
-
-# usa o env SÓ se for um token de verdade; senão cai no embutido que funciona
-_env_tok = os.environ.get("CARVALHO_TOKEN", "").strip()
-_TOKEN = _env_tok if (_env_tok and not _placeholder(_env_tok)) else _TOKEN_EMBUTIDO
-_SESSION = os.environ.get("CARVALHO_SESSION", "").strip() or _SESSION_EMBUTIDO
+# ----------------------------------------------------------------- REDES (config)
+REDES: dict[str, dict] = {
+    "carvalho": {
+        "rede": "carvalho_vanguarda",
+        "nome": "Carvalho Supershop (Grupo Vanguarda)",
+        "org": "23",
+        "domainkey": "carvalhosupershop.com.br",
+        "filial": "1",
+        "cds": {"1": "Carvalho Supershop (atacarejo)",
+                "2": "Carvalho Supershop (varejo)"},
+        "regiao": "Teresina",
+        "env": "CARVALHO",
+        "token_fallback": _CARVALHO_TOKEN_FALLBACK,
+        "session_fallback": "a2f4128f-1700-4b42-8916-86620e24773d",
+    },
+    # Esqueleto: preencher 'org' e 'cds' quando capturar o cURL do gruporcarvalho.com.br
+    # (F12 > Network > busca 'arroz' > Copy as cURL) e exportar RCARVALHO_TOKEN/SESSION.
+    "r_carvalho": {
+        "rede": "r_carvalho",
+        "nome": "R Carvalho (Grupo R Carvalho / Reginaldo)",
+        "org": None,
+        "domainkey": "gruporcarvalho.com.br",
+        "filial": "1",
+        "cds": {},                 # ex.: {"1": "R Carvalho (atacarejo)", "2": "R Carvalho (varejo)"}
+        "regiao": "Teresina",
+        "env": "RCARVALHO",
+        "token_fallback": "",
+        "session_fallback": "",
+    },
+}
 
 # itens de mercado pra varrer o catálogo pela BUSCA (endpoint confirmado).
-# não precisa ser exaustivo: cobre o que importa pro banco de preços (cesta).
 TERMOS = [
     "arroz", "feijao", "leite", "acucar", "cafe", "oleo", "macarrao", "farinha",
     "sal", "ovo", "frango", "carne", "linguica", "salsicha", "presunto", "queijo",
@@ -74,29 +84,50 @@ TERMOS = [
     "leite condensado", "farofa", "tapioca", "cuscuz",
 ]
 
+_CTX = ssl.create_default_context()
 
-def _headers() -> dict:
+
+# ----------------------------------------------------------------- credenciais
+def _placeholder(tok: str) -> bool:
+    return (not tok) or ("..." in tok) or (len(tok) < 80) or ("eyJ" not in tok)
+
+
+def _token(rede: dict) -> str:
+    env = rede.get("env", "")
+    tok = os.environ.get(f"{env}_TOKEN", "").strip()
+    if tok and not _placeholder(tok):
+        return tok
+    return rede.get("token_fallback", "")
+
+
+def _session(rede: dict) -> str:
+    env = rede.get("env", "")
+    return os.environ.get(f"{env}_SESSION", "").strip() or rede.get("session_fallback", "")
+
+
+def _headers(rede: dict) -> dict:
     return {
         "accept": "application/json",
         "accept-language": "pt-BR,pt;q=0.9",
-        "authorization": _TOKEN,
+        "authorization": _token(rede),
         "content-type": "application/json",
-        "domainkey": DOMAINKEY,
-        "organizationid": ORG,
-        "origin": f"https://www.{DOMAINKEY}",
-        "referer": f"https://www.{DOMAINKEY}/",
+        "domainkey": rede["domainkey"],
+        "organizationid": str(rede["org"]),
+        "origin": f"https://www.{rede['domainkey']}",
+        "referer": f"https://www.{rede['domainkey']}/",
         "user-agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                        "(KHTML, like Gecko) Chrome/149.0 Safari/537.36"),
     }
 
 
-def _get(path: str, tentativas: int = 3):
+def _get(rede: dict, path: str, tentativas: int = 3):
     url = BASE + path
-    if _SESSION:
-        url += ("&" if "?" in url else "?") + f"session={_SESSION}"
+    sess = _session(rede)
+    if sess:
+        url += ("&" if "?" in url else "?") + f"session={sess}"
     for i in range(tentativas):
         try:
-            req = urllib.request.Request(url, headers=_headers())
+            req = urllib.request.Request(url, headers=_headers(rede))
             with urllib.request.urlopen(req, timeout=25, context=_CTX) as r:
                 return r.status, json.loads(r.read().decode("utf-8", "replace"))
         except urllib.error.HTTPError as e:
@@ -142,28 +173,32 @@ except Exception:  # noqa: BLE001
 
 
 # ------------------------------------------------------------- token check
-def verificar_token() -> bool:
-    if _placeholder(_TOKEN):
-        print("ERRO: CARVALHO_TOKEN não parece o token real.")
-        print("  Você provavelmente colou o exemplo 'Bearer eyJ...'.")
-        print("  Cole o Bearer INTEIRO do cURL do navegador:")
-        print("    export CARVALHO_TOKEN='Bearer eyJ0eXAiOiJKV1Qi................'")
+def verificar_token(rede: dict) -> bool:
+    if rede.get("org") in (None, "", 0) or not rede.get("cds"):
+        print(f"CONFIG INCOMPLETA pra '{rede['rede']}': falta 'org' e/ou 'cds'.")
+        print("  Capture o cURL da busca no site da rede, descubra org + CDs e preencha em REDES.")
         return False
-    pre = f"/org/{ORG}/filial/{FILIAL}/centro_distribuicao/1/loja/buscas/produtos/termo/arroz?page=1"
-    st, body = _get(pre)
+    if _placeholder(_token(rede)):
+        print(f"ERRO: token de '{rede['rede']}' ausente/placeholder.")
+        print(f"  export {rede['env']}_TOKEN='Bearer eyJ...'  (o Bearer inteiro do cURL)")
+        return False
+    cd0 = next(iter(rede["cds"]))
+    pre = (f"/org/{rede['org']}/filial/{rede['filial']}/centro_distribuicao/{cd0}"
+           f"/loja/buscas/produtos/termo/arroz?page=1")
+    st, body = _get(rede, pre)
     if st == 200 and isinstance(body, dict) and body.get("success"):
         n = (body.get("paginator") or {}).get("total_items", "?")
-        print(f"  token OK (busca 'arroz' devolveu {n} itens).")
+        print(f"  token OK ({rede['rede']}: busca 'arroz' devolveu {n} itens).")
         return True
-    print(f"  token NÃO validou: status={st} resp={str(body)[:120]}")
-    print("  -> recapture um cURL fresco e refaça o export CARVALHO_TOKEN.")
+    print(f"  token NÃO validou ({rede['rede']}): status={st} resp={str(body)[:120]}")
     return False
 
 
 # ------------------------------------------------------------- coleta
-def _buscar(cd: str, termo: str, page: int):
-    pre = f"/org/{ORG}/filial/{FILIAL}/centro_distribuicao/{cd}/loja/buscas/produtos/termo/{_slug(termo)}?page={page}"
-    st, body = _get(pre)
+def _buscar(rede: dict, cd: str, termo: str, page: int):
+    pre = (f"/org/{rede['org']}/filial/{rede['filial']}/centro_distribuicao/{cd}"
+           f"/loja/buscas/produtos/termo/{_slug(termo)}?page={page}")
+    st, body = _get(rede, pre)
     if st == 200 and isinstance(body, dict):
         data = body.get("data") or {}
         prods = data.get("produtos") or []
@@ -172,13 +207,13 @@ def _buscar(cd: str, termo: str, page: int):
     return [], 1
 
 
-def normalizar(p: dict, cd: str) -> dict:
+def normalizar(p: dict, cd: str, rede: dict) -> dict:
     gtin = str(p.get("codigo_barras") or "").strip()
     oferta = p.get("oferta") or {}
     nome = (p.get("descricao") or "").strip()
     return {
-        "fonte": "catalogo", "rede": "carvalho_vanguarda",
-        "loja_cd": cd, "loja_nome": CDS.get(cd, f"CD {cd}"),
+        "fonte": "catalogo", "rede": rede["rede"],
+        "loja_cd": cd, "loja_nome": rede["cds"].get(cd, f"{rede['rede']} CD{cd}"),
         "produto_id": p.get("produto_id"), "descricao": nome,
         "categoria": sugerir_categoria(nome), "secao_id": p.get("secao_id"),
         "gtin": gtin if _ean_valido(gtin) else None, "gtin_bruto": gtin or None,
@@ -190,32 +225,42 @@ def normalizar(p: dict, cd: str) -> dict:
         "preco_antigo_centavos": _centavos(oferta.get("preco_antigo")) if oferta else None,
         "atacado_menor_centavos": _centavos(oferta.get("menor_preco")) if oferta else None,
         "disponivel": bool(p.get("disponivel")), "vendidos": p.get("quantidade_vendida"),
-        "imagem": p.get("imagem"),  # só o nome do arquivo; URL do CDN: TODO confirmar prefixo
+        "imagem": p.get("imagem"),
     }
 
 
-def coletar(cds=None, termos=None, max_paginas=6) -> list[dict]:
-    """Varre os CDs pela busca, com PROGRESSO ao vivo (um print por termo) pra
-    você ver que não travou. max_paginas baixo = termina rápido (a cesta cabe)."""
-    cds = cds or list(CDS)
+def coletar(rede: dict, termos=None, max_paginas=6) -> list[dict]:
     termos = termos or TERMOS
     out: dict[tuple, dict] = {}
-    for cd in cds:
-        print(f"\n  --- CD {cd} ({CDS.get(cd, '')}) ---", flush=True)
+    for cd in rede["cds"]:
+        print(f"\n  --- {rede['rede']} CD {cd} ({rede['cds'][cd]}) ---", flush=True)
         for termo in termos:
             page, total, n = 1, 1, 0
             while page <= min(total, max_paginas):
-                prods, total = _buscar(cd, termo, page)
+                prods, total = _buscar(rede, cd, termo, page)
                 if not prods:
                     break
                 for p in prods:
-                    reg = normalizar(p, cd)
+                    reg = normalizar(p, cd, rede)
                     out[(cd, reg["produto_id"])] = reg
                     n += 1
                 page += 1
-                time.sleep(0.1)  # gentil com o servidor
+                time.sleep(0.1)
             print(f"    {termo:18} +{n}", flush=True)
     return list(out.values())
+
+
+# ------------------------------------------------------------- gravação
+def gravar_no_banco(regs: list[dict], regiao: str = "Teresina") -> int:
+    """Grava em precos_observados com fonte='catalogo', via pool oficial do
+    projeto (db.conexao.get_pool, psycopg3) e BancoPrecos.registrar_catalogo
+    (idempotente, sem migração). Precisa de DATABASE_URL e do método
+    registrar_catalogo já inserido no finance/banco_precos.py."""
+    from db.conexao import get_pool
+    from finance.banco_precos import BancoPrecos
+    n = BancoPrecos(get_pool()).registrar_catalogo(regs, regiao=regiao)
+    print(f"  gravados/atualizados: {n} (fonte='catalogo', regiao={regiao})")
+    return n
 
 
 # ------------------------------------------------------------- standalone
@@ -228,46 +273,35 @@ def _resumo(regs: list[dict]) -> None:
         if r["gtin"] and r["preco_centavos"]:
             porg.setdefault(r["gtin"], {})[r["loja_cd"]] = r["preco_centavos"]
     multi = {g: v for g, v in porg.items() if len(v) > 1}
-    print(f"  GTINs em mais de 1 CD (dá pra comparar preço): {len(multi)}")
-    for g, v in list(multi.items())[:10]:
+    print(f"  GTINs em mais de 1 CD (compara preço): {len(multi)}")
+    for g, v in list(multi.items())[:8]:
         nome = next((r["descricao"] for r in regs if r["gtin"] == g), "")
         precos = "  ".join(f"cd{cd}=R${c/100:.2f}" for cd, c in sorted(v.items()))
-        print(f"    {g}  {nome[:32]:32} {precos}")
-
-
-def gravar_no_banco(regs: list[dict] | None = None, regiao: str = "Teresina") -> int:
-    """Grava os registros coletados em precos_observados com fonte='catalogo',
-    usando o pool oficial do projeto (db.conexao.get_pool, psycopg3) e o metodo
-    BancoPrecos.registrar_catalogo (idempotente, sem migracao).
-
-    Se regs for None, le de /tmp/catalogo_carvalho.json. Precisa de DATABASE_URL.
-    OBS: depende de registrar_catalogo ja' inserido no finance/banco_precos.py.
-    """
-    if regs is None:
-        with open("/tmp/catalogo_carvalho.json", encoding="utf-8") as f:
-            regs = json.load(f)
-    from db.conexao import get_pool
-    from finance.banco_precos import BancoPrecos
-    n = BancoPrecos(get_pool()).registrar_catalogo(regs, regiao=regiao)
-    print(f"  gravados/atualizados no banco: {n} (fonte='catalogo', regiao={regiao})")
-    return n
+        print(f"    {g}  {nome[:30]:30} {precos}")
 
 
 def main() -> None:
-    import sys
-    print("Verificando token...")
-    if not verificar_token():
+    args = [a for a in sys.argv[1:]]
+    slug = next((a for a in args if not a.startswith("-")), "carvalho")
+    gravar = "--gravar" in args
+    rede = REDES.get(slug)
+    if not rede:
+        print(f"Rede '{slug}' não existe. Disponíveis: {', '.join(REDES)}")
         return
-    print("Coletando catálogo Carvalho (cd1 + cd2) pela busca...")
-    regs = coletar()
-    destino = "/tmp/catalogo_carvalho.json"
+    print(f"Rede: {rede['nome']}  (slug={slug})")
+    print("Verificando token...")
+    if not verificar_token(rede):
+        return
+    print(f"Coletando catálogo de {rede['rede']} pela busca...")
+    regs = coletar(rede)
+    destino = f"/tmp/catalogo_{slug}.json"
     with open(destino, "w", encoding="utf-8") as f:
         json.dump(regs, f, ensure_ascii=False, indent=2)
     _resumo(regs)
     print(f"\n  JSON salvo em {destino}")
-    if "--gravar" in sys.argv:
+    if gravar:
         print("\nGravando no banco de preços...")
-        gravar_no_banco(regs)
+        gravar_no_banco(regs, regiao=rede["regiao"])
     else:
         print("  (rode com --gravar pra escrever no banco; sem isso, só gera o JSON.)")
 

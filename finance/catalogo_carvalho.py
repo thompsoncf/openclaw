@@ -235,6 +235,22 @@ def _resumo(regs: list[dict]) -> None:
         print(f"    {g}  {nome[:32]:32} {precos}")
 
 
+def gravar_no_banco(regs: list[dict], regiao: str = "Teresina") -> int:
+    """Grava os registros coletados no banco com fonte='catalogo'."""
+    from finance.banco_precos import BancoPrecos
+    import psycopg2.pool
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        print("ERRO: DATABASE_URL não configurada")
+        return 0
+    pool = psycopg2.pool.SimpleConnectionPool(1, 5, db_url)
+    try:
+        gravados = BancoPrecos(pool).registrar_catalogo(regs, regiao=regiao)
+        return gravados
+    finally:
+        pool.closeall()
+
+
 def main() -> None:
     print("Verificando token...")
     if not verificar_token():
@@ -246,7 +262,11 @@ def main() -> None:
         json.dump(regs, f, ensure_ascii=False, indent=2)
     _resumo(regs)
     print(f"\n  JSON salvo em {destino}")
-    print("  (confira e me diga; depois ligamos no banco com o Claude Code.)")
+
+    # Grava no banco
+    print("\n  Gravando no banco com fonte='catalogo'...")
+    gravados = gravar_no_banco(regs, regiao="Teresina")
+    print(f"  ✓ {gravados} registros gravados")
 
 
 if __name__ == "__main__":

@@ -200,6 +200,126 @@ class BancoPrecos:
             por_mercado.setdefault(a.pop("_chave"), a)
         return sorted(por_mercado.values(), key=lambda x: x["valor_centavos"])
 
+    # ---------- opcoes por item (visao "menor preco" com selo de fonte) ----------
+    def _coluna_fonte_existe(self) -> bool:
+        """True se precos_observados tem a coluna 'fonte' (migração 012 aplicada).
+        Cacheia no objeto. Antes, tudo é 'cupom'."""
+        if getattr(self, "_tem_fonte", None) is not None:
+            return self._tem_fonte
+        try:
+            with self.pool.connection() as c:
+                r = c.execute(
+                    "select 1 from information_schema.columns "
+                    "where table_name = 'precos_observados' and column_name = 'fonte'"
+                ).fetchone()
+            self._tem_fonte = bool(r)
+        except Exception:  # noqa: BLE001
+            self._tem_fonte = False
+        return self._tem_fonte
+
+    def opcoes_item(self, descricao: str, regiao: str | None = None,
+                    dias: int = 90, limite: int = 10) -> list[dict]:
+        """Para UM produto, devolve as lojas ranqueadas do mais barato ao mais caro,
+        cada uma com a FONTE:
+          'cupom'    -> preço real pago, por loja física (a verdade; tem endereço/data)
+          'catalogo' -> referência online (entrega), nunca se passa por preço de loja
+
+        Alimenta a visão por item da tela de compras (/painel/compras/opcoes): o
+        front só precisa pintar o selo a partir de 'fonte'. Cupom e catálogo
+        aparecem juntos, ordenados por preço; o selo deixa claro o que é o quê.
+        Não toca em precos_de() nem na comparação de cesta (que continua só cupom).
+        """
+        nucleo = normalizar(descricao)
+        primeira = nucleo.split()[0] if nucleo else ""
+        if not primeira:
+            return []
+        corte = date.today() - timedelta(days=dias)
+        col_fonte = "po.fonte" if self._coluna_fonte_existe() else "'cupom' as fonte"
+        sql = f"""select po.mercado, po.valor_unitario_centavos, po.descricao_original,
+                         po.data_compra, po.descricao_norm, po.unidade,
+                         {col_fonte}, po.loja_id, l.nome, l.endereco, l.cidade, l.uf
+                  from precos_observados po
+                  left join lojas l on l.id = po.loja_id
+                  where po.descricao_norm like %s and po.data_compra >= %s"""
+        params: list = [f"%{primeira}%", corte]
+        if regiao:
+            sql += " and (po.regiao = %s or po.regiao is null)"
+            params.append(regiao)
+        sql += " order by po.data_compra desc"
+        with self.pool.connection() as c:
+            rows = c.execute(sql, params).fetchall()
+
+        alvo = tokens(descricao)
+        hoje = date.today()
+        achados: list[dict] = []
+        for (merc, vu, orig, dt, norm, unidade, fonte, loja_id,
+             l_nome, endereco, l_cidade, l_uf) in rows:
+            comuns = alvo & set((norm or "").split())
+            if alvo and len(comuns) < max(1, len(alvo) // 2):
+                continue
+            fonte = fonte or "cupom"
+            nome_loja = l_nome or merc or "(sem nome)"
+            chave = f"{fonte}:" + (f"id:{loja_id}" if loja_id else f"txt:{nome_loja}")
+            partes_end = [p for p in [endereco,
+                          f"{l_cidade}/{l_uf}" if l_cidade and l_uf else None] if p]
+            achados.append({
+                "_chave": chave,
+                "mercado": nome_loja,
+                "fonte": fonte,
+                "preco_centavos": int(vu),
+                "descricao": orig,
+                "unidade": unidade or "UN",
+                "data": dt.isoformat() if dt else None,
+                "dias": (hoje - dt).days if dt else None,
+                "endereco": ", ".join(partes_end) or None,
+            })
+        por_chave: dict[str, dict] = {}
+        for a in achados:
+            por_chave.setdefault(a.pop("_chave"), a)
+        return sorted(por_chave.values(), key=lambda x: x["preco_centavos"])[:limite]
+
+    def registrar_catalogo(self, registros: list[dict], regiao: str = "Teresina",
+                           data_compra: date | None = None) -> int:
+        """Grava preço de CATÁLOGO (referência online), fonte='catalogo'. Recebe os
+        registros do ingestor (catalogo_carvalho.coletar(): campos descricao,
+        preco_centavos, loja_nome, gtin).
+
+        Idempotente: usa um item_id sintético NEGATIVO por (loja+gtin), que (a) nunca
+        colide com item_id de cupom (sempre positivo) e (b) faz a re-coleta ATUALIZAR
+        a mesma linha (on conflict) em vez de duplicar. Não toca em nenhum preço de
+        cupom. Devolve quantos gravou."""
+        import hashlib
+        data_compra = data_compra or date.today()
+        n = 0
+        with self.pool.connection() as c:
+            for r in registros:
+                preco = r.get("preco_centavos")
+                desc = (r.get("descricao") or "").strip()
+                mercado = r.get("loja_nome") or r.get("mercado")
+                gtin = r.get("gtin")
+                if not desc or not preco or preco <= 0 or not mercado:
+                    continue
+                chave = f"{mercado}|{gtin or normalizar(desc)}"
+                sint = -(int.from_bytes(
+                    hashlib.blake2b(chave.encode("utf-8"), digest_size=7).digest(), "big"))
+                c.execute(
+                    """insert into precos_observados
+                       (descricao_norm, descricao_original, valor_unitario_centavos,
+                        mercado, regiao, gtin, data_compra, conta_id, item_id, fonte)
+                       values (%s,%s,%s,%s,%s,%s,%s,null,%s,'catalogo')
+                       on conflict (item_id) do update set
+                         valor_unitario_centavos = excluded.valor_unitario_centavos,
+                         descricao_original = excluded.descricao_original,
+                         mercado = excluded.mercado, regiao = excluded.regiao,
+                         gtin = excluded.gtin, data_compra = excluded.data_compra,
+                         fonte = 'catalogo'""",
+                    (normalizar(desc), desc[:200], int(preco),
+                     mercado, regiao, gtin, data_compra, sint),
+                )
+                n += 1
+            c.commit()
+        return n
+
     # ---------- comparador de CESTA ----------
 
     def comparar_cesta(self, itens: list[str], regiao: str | None = None,

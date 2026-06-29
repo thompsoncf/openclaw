@@ -1867,12 +1867,13 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
       });
   }
 
-  function abrirOpcoes(item, gtin, produto){
+  function abrirOpcoes(item, gtin, produto, tudo){
     var cx = document.getElementById('aj-opcoes');
     cx.innerHTML = '<div class="mut" style="font-size:.78rem;margin-top:.5rem">🔄 Buscando menor preço de "'+esc(item)+'"...</div>';
     var url = '/painel/compras/opcoes?item='+encodeURIComponent(item)
             + (gtin ? ('&gtin='+encodeURIComponent(gtin)) : '')
-            + (produto ? ('&produto='+encodeURIComponent(produto)) : '');
+            + (produto ? ('&produto='+encodeURIComponent(produto)) : '')
+            + (tudo ? '&tudo=1' : '');
     fetch(url).then(function(r){ return r.json(); }).then(function(d){
       var ops = d.opcoes || [];
       if (!ops.length){ cx.innerHTML = '<div class="mut" style="font-size:.76rem;margin-top:.5rem">Ainda não tenho preço desse item aqui na sua região.</div>'; return; }
@@ -1898,17 +1899,24 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
         return;
       }
 
-      html += '<div style="font-size:.8rem;margin-bottom:.5rem">Qual "'+esc(item)+'"? Toque pra ver as lojas</div>';
+      var ocultos = d.ocultos || 0;
+      html += '<div style="font-size:.8rem;margin-bottom:.4rem">Qual "'+esc(item)+'"? Toque pra ver as lojas</div>';
+      if (ocultos > 0)
+        html += '<div class="mut" style="font-size:.66rem;margin-bottom:.5rem">Mostrando só produtos de "'+esc(item)+'".</div>';
       ops.forEach(function(o){
         var mn = (o.preco_min_centavos/100).toFixed(2).replace('.', ',');
         var mx = (o.preco_max_centavos/100).toFixed(2).replace('.', ',');
         var faixa = (o.preco_min_centavos === o.preco_max_centavos) ? ('R$ '+mn) : ('R$ '+mn+'–'+mx);
         var nl = o.n_lojas + (o.n_lojas === 1 ? ' loja' : ' lojas');
+        var ingr = (o.nucleo === false);
+        var badge = ingr ? ' <span style="font-size:.58rem;font-family:monospace;text-transform:uppercase;letter-spacing:.04em;color:#5B6675;border:1px solid #262D38;border-radius:4px;padding:0 4px">ingrediente</span>' : '';
         html += '<button type="button" class="prod" data-gtin="'+(o.gtin||'')+'" data-desc="'+encodeURIComponent(o.descricao)+'" '
-              + 'style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;width:100%;text-align:left;margin:.15rem 0;padding:.45rem .6rem;background:#161617;border:0;border-radius:8px;cursor:pointer;color:#e8edf2">'
-              + '<span style="font-size:.76rem">'+esc(o.descricao)+'<br><span class="mut" style="font-size:.66rem">'+nl+'</span></span>'
-              + '<span style="font-weight:600;font-size:.78rem;color:#5dcaa5;white-space:nowrap">'+faixa+'</span></button>';
+              + 'style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;width:100%;text-align:left;margin:.15rem 0;padding:.45rem .6rem;background:#161617;border:0;border-radius:8px;cursor:pointer;color:#e8edf2'+(ingr?';opacity:.62':'')+'">'
+              + '<span style="font-size:.76rem">'+esc(o.descricao)+badge+'<br><span class="mut" style="font-size:.66rem">'+nl+'</span></span>'
+              + '<span style="font-weight:600;font-size:.78rem;color:'+(ingr?'#8b97a6':'#5dcaa5')+';white-space:nowrap">'+faixa+'</span></button>';
       });
+      if (ocultos > 0)
+        html += '<button type="button" class="ver-tudo" style="width:100%;background:transparent;border:1px dashed #262D38;color:#8b97a6;border-radius:8px;padding:.5rem;font-size:.72rem;cursor:pointer;margin-top:.3rem">+ ver tudo que tem "'+esc(item)+'" ('+ocultos+')</button>';
       html += '</div>';
       cx.innerHTML = html;
       Array.prototype.forEach.call(cx.querySelectorAll('.prod'), function(b){
@@ -1919,6 +1927,8 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
           else   abrirOpcoes(item, null, dsc);
         };
       });
+      var vt = cx.querySelector('.ver-tudo');
+      if (vt) vt.onclick = function(){ abrirOpcoes(item, null, null, true); };
     }).catch(function(){ cx.innerHTML=''; });
   }
 
@@ -5304,7 +5314,7 @@ def _fmt_comparacao(r: dict) -> dict:
 
 
 @router.get("/painel/compras/opcoes")
-def compras_opcoes(request: Request, item: str = "", gtin: str = "", produto: str = ""):
+def compras_opcoes(request: Request, item: str = "", gtin: str = "", produto: str = "", tudo: str = ""):
     """Menor preço em 2 níveis: sem gtin -> produtos distintos (nome + faixa);
     com gtin/produto -> lojas daquele produto exato, com fonte (cupom/catálogo).
     opcoes_item já devolve o dict pronto {"nivel","opcoes",...} - NÃO embrulhar."""
@@ -5319,7 +5329,7 @@ def compras_opcoes(request: Request, item: str = "", gtin: str = "", produto: st
     cidade = row[0] if row else None
     from finance.banco_precos import BancoPrecos
     resp = BancoPrecos(get_pool()).opcoes_item(
-        item, regiao=cidade, gtin=(gtin or None), produto=(produto or None))
+        item, regiao=cidade, gtin=(gtin or None), produto=(produto or None), tudo=bool(tudo))
     return JSONResponse(resp)
 
 

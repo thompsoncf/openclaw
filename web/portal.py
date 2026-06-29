@@ -1897,17 +1897,23 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
 
       if (d.nivel === 'lojas'){
         html += '<div style="font-size:.8rem;margin-bottom:.5rem">📍 <b>'+esc(d.produto||item)+'</b> — onde tá mais barato</div>';
+        var temCatalogo = false;
         ops.forEach(function(o){
           var preco = 'R$ ' + (o.preco_centavos/100).toFixed(2).replace('.', ',');
           var cupom = (o.fonte === 'cupom');
           var cor = cupom ? '#1d9e75' : '#6fa8dc';
           var quando = (o.dias === 0 ? 'hoje' : (o.dias === 1 ? 'ontem' : 'há ' + o.dias + 'd'));
-          var selo = cupom ? ('🧾 cupom · ' + quando) : '📦 catálogo';
+          var selo = cupom ? ('🧾 cupom · ' + quando) : '📦 catálogo · preço do site';
+          if (!cupom) temCatalogo = true;
           html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:.4rem 0;border-top:1px solid #1f1f20">'
                 + '<div style="font-size:.78rem"><div>'+esc(o.mercado)+'</div>'
                 + '<div style="font-size:.66rem;margin-top:.12rem;color:'+cor+'">'+selo+'</div></div>'
                 + '<div style="font-weight:600;font-size:.86rem;color:'+cor+'">'+preco+'</div></div>';
         });
+        if (temCatalogo)
+          html += '<div class="mut" style="font-size:.64rem;margin-top:.5rem;line-height:1.5;border-top:1px solid #1f1f20;padding-top:.4rem">'
+                + '📦 <b>preço do site</b> (online), não de loja física. '
+                + '<b>atacarejo</b> = preço de quantidade · <b>varejo</b> = unidade.</div>';
         html += '<div style="display:flex;gap:.5rem;align-items:center;margin-top:.6rem">'
               + '<button type="button" class="usar-cesta" style="flex:1;background:#1d9e75;color:#06281e;border:0;border-radius:8px;padding:.5rem;font-size:.74rem;font-weight:600;cursor:pointer">✓ usar este na cesta</button>'
               + '<button type="button" class="voltar-prod" style="font-size:.72rem;background:transparent;color:#8b97a6;border:0;cursor:pointer;padding:.2rem .4rem">← outros</button>'

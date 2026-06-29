@@ -219,7 +219,8 @@ class BancoPrecos:
 
     def opcoes_item(self, descricao: str, regiao: str | None = None,
                     dias: int = 90, limite: int = 12,
-                    gtin: str | None = None, produto: str | None = None) -> dict:
+                    gtin: str | None = None, produto: str | None = None,
+                    tudo: bool = False) -> dict:
         """Menor preço em DOIS NÍVEIS, pra comparar PRODUTO IGUAL (nunca 1kg x 5kg):
 
           - SEM gtin  -> nível 'produtos': lista os produtos distintos que casam
@@ -228,8 +229,10 @@ class BancoPrecos:
             do mais barato ao mais caro, com a FONTE (cupom/catálogo) pro selo.
 
         Retorna sempre um dict:
-          {"nivel": "produtos", "termo": <str>, "opcoes": [...]}
-          {"nivel": "lojas", "produto": <str>, "gtin": <str>, "opcoes": [...]}
+          {"nivel": "produtos", "termo": <str>, "ocultos": N, "opcoes": [
+              {"gtin","descricao","preco_min_centavos","preco_max_centavos","n_lojas","fonte","nucleo"} ]}
+          {"nivel": "lojas", "produto": <str>, "gtin": <str>, "opcoes": [
+              {"mercado","fonte","preco_centavos","descricao","unidade","data","dias","endereco"} ]}
         Não toca em precos_de() nem na cesta (que continua só cupom).
         """
         import re
@@ -275,7 +278,7 @@ class BancoPrecos:
             nucleo = normalizar(descricao)
             primeira = nucleo.split()[0] if nucleo else ""
             if not primeira:
-                return {"nivel": "produtos", "termo": descricao, "opcoes": []}
+                return {"nivel": "produtos", "termo": descricao, "ocultos": 0, "opcoes": []}
             sql = sel + " where po.descricao_norm like %s and po.data_compra >= %s"
             params = [f"%{primeira}%", corte]
         if regiao:
@@ -333,6 +336,7 @@ class BancoPrecos:
             p = prod.get(k)
             if not p:
                 prod[k] = {"gtin": r["gtin"], "descricao": r["descricao"],
+                           "norm": r["norm"],
                            "preco_min_centavos": r["preco_centavos"],
                            "preco_max_centavos": r["preco_centavos"],
                            "lojas": {r["loja_key"]}, "fonte_min": r["fonte"]}
@@ -344,14 +348,35 @@ class BancoPrecos:
                 p["lojas"].add(r["loja_key"])
                 if len(r["descricao"]) < len(p["descricao"]):
                     p["descricao"] = r["descricao"]
-        produtos = [{
+        q0 = (normalizar(descricao).split() or [""])[0]
+
+        def _e_nucleo(pnorm: str) -> bool:
+            ws = (pnorm or "").split()
+            return bool(ws) and ws[0] == q0
+
+        def _relev(pnorm: str) -> int:
+            ws = (pnorm or "").split()
+            return ws.index(q0) if q0 in ws else 99
+
+        todos = [{
             "gtin": p["gtin"], "descricao": p["descricao"],
             "preco_min_centavos": p["preco_min_centavos"],
             "preco_max_centavos": p["preco_max_centavos"],
             "n_lojas": len(p["lojas"]), "fonte": p["fonte_min"],
+            "nucleo": _e_nucleo(p["norm"]), "_relev": _relev(p["norm"]),
         } for p in prod.values()]
-        produtos.sort(key=lambda x: x["preco_min_centavos"])
-        return {"nivel": "produtos", "termo": descricao, "opcoes": produtos[:limite]}
+        nucleo = sorted([x for x in todos if x["nucleo"]],
+                        key=lambda x: (x["_relev"], x["preco_min_centavos"]))
+        resto = sorted([x for x in todos if not x["nucleo"]],
+                       key=lambda x: (x["_relev"], x["preco_min_centavos"]))
+        if tudo or len(nucleo) < 3:
+            visiveis, ocultos = nucleo + resto, 0
+        else:
+            visiveis, ocultos = nucleo, len(resto)
+        for x in visiveis:
+            x.pop("_relev", None)
+        return {"nivel": "produtos", "termo": descricao,
+                "ocultos": ocultos, "opcoes": visiveis[:limite]}
 
     def registrar_catalogo(self, registros: list[dict], regiao: str = "Teresina",
                            data_compra: date | None = None) -> int:

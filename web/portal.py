@@ -1869,22 +1869,27 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
 
   function abrirOpcoes(item){
     var cx = document.getElementById('aj-opcoes');
-    cx.innerHTML = '<div class="mut" style="font-size:.78rem;margin-top:.5rem">🔄 Buscando opções de "'+esc(item)+'"...</div>';
+    cx.innerHTML = '<div class="mut" style="font-size:.78rem;margin-top:.5rem">🔄 Buscando menor preço de "'+esc(item)+'"...</div>';
     fetch('/painel/compras/opcoes?item='+encodeURIComponent(item))
       .then(function(r){ return r.json(); })
       .then(function(d){
         var ops = d.opcoes || [];
-        if (!ops.length){ cx.innerHTML = '<div class="mut" style="font-size:.76rem;margin-top:.5rem">Sem catálogo de produtos pra essa região (a comparação usa seus cupons).</div>'; return; }
+        if (!ops.length){ cx.innerHTML = '<div class="mut" style="font-size:.76rem;margin-top:.5rem">Ainda não tenho preço desse item aqui na sua região.</div>'; return; }
         var html = '<div style="background:#0e0e0f;border:1px solid #2a2a2b;border-radius:10px;padding:.8rem;margin-top:.5rem">';
-        html += '<div style="font-size:.8rem;margin-bottom:.4rem">Qual "'+esc(item)+'" você quer?</div>';
+        html += '<div style="font-size:.8rem;margin-bottom:.5rem">📍 Onde "'+esc(item)+'" tá mais barato perto de você</div>';
         ops.forEach(function(o){
-          html += '<button type="button" class="op" data-termo="'+encodeURIComponent(o.descricao)+'" style="display:flex;justify-content:space-between;width:100%;margin:.15rem 0;padding:.4rem .6rem;background:#161617;font-size:.78rem;text-align:left"><span>'+esc(o.descricao)+'</span><span class="mut">'+o.faixa+'</span></button>';
+          var preco = 'R$ ' + (o.preco_centavos/100).toFixed(2).replace('.', ',');
+          var cupom = (o.fonte === 'cupom');
+          var cor = cupom ? '#1d9e75' : '#6fa8dc';
+          var quando = (o.dias === 0 ? 'hoje' : (o.dias === 1 ? 'ontem' : 'há ' + o.dias + 'd'));
+          var selo = cupom ? ('🧾 cupom · ' + quando) : '📦 catálogo';
+          html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:.4rem 0;border-top:1px solid #1f1f20">'
+                + '<div style="font-size:.78rem"><div>' + esc(o.mercado) + '</div>'
+                + '<div style="font-size:.66rem;margin-top:.12rem;color:' + cor + '">' + selo + '</div></div>'
+                + '<div style="font-weight:600;font-size:.86rem;color:' + cor + '">' + preco + '</div></div>';
         });
         html += '</div>';
         cx.innerHTML = html;
-        Array.prototype.forEach.call(cx.querySelectorAll('.op'), function(b){
-          b.onclick = function(){ ajustes[item] = decodeURIComponent(b.getAttribute('data-termo')); carregarPrecos(); };
-        });
       }).catch(function(){ cx.innerHTML=''; });
   }
 
@@ -5270,31 +5275,22 @@ def _fmt_comparacao(r: dict) -> dict:
 
 
 @router.get("/painel/compras/opcoes")
-def compras_opcoes(request: Request, item: str = ""):
-    """Lista as variantes reais de produto pra um item (pro 'ajustar')."""
+def compras_opcoes(request: Request, item: str = "", gtin: str = ""):
+    """Menor preço por item: lojas ranqueadas por preço, cada uma com a FONTE
+    (cupom = preço real por loja / catálogo = referência online) pro selo na tela.
+    Lê do banco próprio (cupom + catálogo) via BancoPrecos.opcoes_item."""
     conta = conta_logada(request)
     if conta is None:
         return JSONResponse({"erro": "nao logado"}, status_code=401)
     item = (item or "").strip()
-    if not item:
+    if not item and not gtin:
         return JSONResponse({"opcoes": []})
     with get_pool().connection() as c:
         row = c.execute("select cidade from contas where id=%s", (conta[0],)).fetchone()
     cidade = row[0] if row else None
-    from finance import cidades as cid
-    coord = cid.coordenada(cidade)
-    if not coord or cid.fonte(cidade) != "sefaz":
-        return JSONResponse({"opcoes": [], "motivo": "regiao sem catalogo SEFAZ"})
-    try:
-        from finance.sefaz_precos import SefazMenorPreco
-        lat, lon, raio = coord
-        ops = SefazMenorPreco().opcoes_produto(item, lat, lon, raio)
-    except Exception:  # noqa: BLE001
-        return JSONResponse({"opcoes": []})
-    return JSONResponse({"opcoes": [
-        {"descricao": o["descricao"],
-         "faixa": (brl(o["min"]) if o["min"] == o["max"] else f"{brl(o['min'])}–{brl(o['max'])}")}
-        for o in ops]})
+    from finance.banco_precos import BancoPrecos
+    ops = BancoPrecos(get_pool()).opcoes_item(item, regiao=cidade, gtin=(gtin or None))
+    return JSONResponse({"opcoes": ops})
 
 
 @router.post("/painel/compras/api")

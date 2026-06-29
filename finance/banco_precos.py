@@ -282,12 +282,13 @@ class BancoPrecos:
                            data_compra: date | None = None) -> int:
         """Grava preço de CATÁLOGO (referência online), fonte='catalogo'. Recebe os
         registros do ingestor (catalogo_carvalho.coletar(): campos descricao,
-        preco_centavos, loja_nome, gtin).
+        preco_centavos, loja_nome, produto_id, gtin).
 
-        Idempotente: usa um item_id sintético NEGATIVO por (loja+gtin), que (a) nunca
-        colide com item_id de cupom (sempre positivo) e (b) faz a re-coleta ATUALIZAR
-        a mesma linha (on conflict) em vez de duplicar. Não toca em nenhum preço de
-        cupom. Devolve quantos gravou."""
+        Idempotente: usa o produto_id do VipCommerce como chave estável (id imutável
+        da loja) — assim, mesmo que nome/GTIN mudem entre coletas, é sempre a mesma
+        linha = UPDATE em vez de duplicar. item_id sintético NEGATIVO por (mercado|produto_id)
+        nunca colide com cupom (sempre positivo). Não toca em nenhum preço de cupom.
+        Devolve quantos gravou."""
         import hashlib
         data_compra = data_compra or date.today()
         n = 0
@@ -297,9 +298,13 @@ class BancoPrecos:
                 desc = (r.get("descricao") or "").strip()
                 mercado = r.get("loja_nome") or r.get("mercado")
                 gtin = r.get("gtin")
+                produto_id = r.get("produto_id")
                 if not desc or not preco or preco <= 0 or not mercado:
                     continue
-                chave = f"{mercado}|{gtin or normalizar(desc)}"
+                # chave de idempotência estável: produto_id (id da loja, nunca muda)
+                # fallback: gtin ou descricao normalizada
+                ident = produto_id or gtin or normalizar(desc)
+                chave = f"{mercado}|{ident}"
                 sint = -(int.from_bytes(
                     hashlib.blake2b(chave.encode("utf-8"), digest_size=7).digest(), "big"))
                 c.execute(

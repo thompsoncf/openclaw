@@ -235,23 +235,26 @@ def _resumo(regs: list[dict]) -> None:
         print(f"    {g}  {nome[:32]:32} {precos}")
 
 
-def gravar_no_banco(regs: list[dict], regiao: str = "Teresina") -> int:
-    """Grava os registros coletados no banco com fonte='catalogo'."""
+def gravar_no_banco(regs: list[dict] | None = None, regiao: str = "Teresina") -> int:
+    """Grava os registros coletados em precos_observados com fonte='catalogo',
+    usando o pool oficial do projeto (db.conexao.get_pool, psycopg3) e o metodo
+    BancoPrecos.registrar_catalogo (idempotente, sem migracao).
+
+    Se regs for None, le de /tmp/catalogo_carvalho.json. Precisa de DATABASE_URL.
+    OBS: depende de registrar_catalogo ja' inserido no finance/banco_precos.py.
+    """
+    if regs is None:
+        with open("/tmp/catalogo_carvalho.json", encoding="utf-8") as f:
+            regs = json.load(f)
+    from db.conexao import get_pool
     from finance.banco_precos import BancoPrecos
-    import psycopg2.pool
-    db_url = os.environ.get("DATABASE_URL")
-    if not db_url:
-        print("ERRO: DATABASE_URL não configurada")
-        return 0
-    pool = psycopg2.pool.SimpleConnectionPool(1, 5, db_url)
-    try:
-        gravados = BancoPrecos(pool).registrar_catalogo(regs, regiao=regiao)
-        return gravados
-    finally:
-        pool.closeall()
+    n = BancoPrecos(get_pool()).registrar_catalogo(regs, regiao=regiao)
+    print(f"  gravados/atualizados no banco: {n} (fonte='catalogo', regiao={regiao})")
+    return n
 
 
 def main() -> None:
+    import sys
     print("Verificando token...")
     if not verificar_token():
         return
@@ -262,11 +265,11 @@ def main() -> None:
         json.dump(regs, f, ensure_ascii=False, indent=2)
     _resumo(regs)
     print(f"\n  JSON salvo em {destino}")
-
-    # Grava no banco
-    print("\n  Gravando no banco com fonte='catalogo'...")
-    gravados = gravar_no_banco(regs, regiao="Teresina")
-    print(f"  ✓ {gravados} registros gravados")
+    if "--gravar" in sys.argv:
+        print("\nGravando no banco de preços...")
+        gravar_no_banco(regs)
+    else:
+        print("  (rode com --gravar pra escrever no banco; sem isso, só gera o JSON.)")
 
 
 if __name__ == "__main__":

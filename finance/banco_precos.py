@@ -369,14 +369,16 @@ class BancoPrecos:
                         key=lambda x: (x["_relev"], x["preco_min_centavos"]))
         resto = sorted([x for x in todos if not x["nucleo"]],
                        key=lambda x: (x["_relev"], x["preco_min_centavos"]))
+        # limita CADA grupo separado: o "resto" (ingrediente) sempre aparece no "ver tudo",
+        # mesmo havendo muitos produtos de núcleo
         if tudo or len(nucleo) < 3:
-            visiveis, ocultos = nucleo + resto, 0
+            visiveis, ocultos = nucleo[:limite] + resto[:limite], 0
         else:
-            visiveis, ocultos = nucleo, len(resto)
+            visiveis, ocultos = nucleo[:limite], len(resto)
         for x in visiveis:
             x.pop("_relev", None)
         return {"nivel": "produtos", "termo": descricao,
-                "ocultos": ocultos, "opcoes": visiveis[:limite]}
+                "ocultos": ocultos, "opcoes": visiveis}
 
     def registrar_catalogo(self, registros: list[dict], regiao: str = "Teresina",
                            data_compra: date | None = None) -> int:
@@ -424,6 +426,51 @@ class BancoPrecos:
                 )
             c.commit()
         return len(linhas)
+
+    def referencia_catalogo(self, descricao: str, regiao: str | None = None,
+                            dias: int = 120) -> dict | None:
+        """Referência de CATÁLOGO (mais barata) de UM item, pra seção "ainda sem
+        cupom" da cesta. Só fonte='catalogo', com filtro de NÚCLEO (o termo é o
+        que o produto É). Devolve {descricao,mercado,valor_centavos,data,dias} ou
+        None. NUNCA entra no total da cesta - é só referência online."""
+        import re
+        import unicodedata
+
+        def _core(s: str) -> str:
+            s = (s or "").strip().lower()
+            s = "".join(c for c in unicodedata.normalize("NFD", s)
+                        if unicodedata.category(c) != "Mn")
+            return re.sub(r"[\-/ ]+[a-z]{2}$", "", s).strip()
+
+        nuc = normalizar(descricao)
+        q0 = nuc.split()[0] if nuc else ""
+        if not q0:
+            return None
+        corte = date.today() - timedelta(days=dias)
+        sql = ("select valor_unitario_centavos, descricao_original, descricao_norm, "
+               "mercado, data_compra from precos_observados "
+               "where fonte = 'catalogo' and descricao_norm like %s and data_compra >= %s")
+        params: list = [f"%{q0}%", corte]
+        if regiao:
+            sql += " and (regiao ilike %s or regiao is null)"
+            params.append(f"%{_core(regiao)}%")
+        with self.pool.connection() as c:
+            rows = c.execute(sql, params).fetchall()
+        alvo = tokens(descricao)
+        hoje = date.today()
+        melhor = None
+        for vu, orig, norm, merc, dt in rows:
+            ws = (norm or "").split()
+            if not ws or ws[0] != q0:
+                continue
+            comuns = alvo & set(ws)
+            if alvo and len(comuns) < max(1, len(alvo) // 2):
+                continue
+            if melhor is None or int(vu) < melhor["valor_centavos"]:
+                melhor = {"descricao": orig, "mercado": merc, "valor_centavos": int(vu),
+                          "data": dt.isoformat() if dt else None,
+                          "dias": (hoje - dt).days if dt else None}
+        return melhor
 
     # ---------- comparador de CESTA ----------
 

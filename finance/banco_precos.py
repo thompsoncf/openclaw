@@ -218,45 +218,85 @@ class BancoPrecos:
         return self._tem_fonte
 
     def opcoes_item(self, descricao: str, regiao: str | None = None,
-                    dias: int = 90, limite: int = 10) -> list[dict]:
+                    dias: int = 90, limite: int = 10, gtin: str | None = None) -> list[dict]:
         """Para UM produto, devolve as lojas ranqueadas do mais barato ao mais caro,
         cada uma com a FONTE:
           'cupom'    -> preço real pago, por loja física (a verdade; tem endereço/data)
           'catalogo' -> referência online (entrega), nunca se passa por preço de loja
 
-        Alimenta a visão por item da tela de compras (/painel/compras/opcoes): o
-        front só precisa pintar o selo a partir de 'fonte'. Cupom e catálogo
-        aparecem juntos, ordenados por preço; o selo deixa claro o que é o quê.
-        Não toca em precos_de() nem na comparação de cesta (que continua só cupom).
+        Precisão do match (pra não misturar 1kg com 5kg / comum com integral):
+          - gtin informado -> match EXATO por código de barras (mesmo produto em
+            cada loja). É o caminho preciso quando a tela já sabe a variação.
+          - só texto -> exige que o TAMANHO bata (5kg só casa com 5kg) e aperta a
+            sobreposição de palavras (~2/3), em vez do 1/2 antigo.
+
+        Alimenta /painel/compras/opcoes: o front só pinta o selo a partir de
+        'fonte'. Não toca em precos_de() nem na cesta (que continua só cupom).
         """
-        nucleo = normalizar(descricao)
-        primeira = nucleo.split()[0] if nucleo else ""
-        if not primeira:
-            return []
+        import re
+        import unicodedata
+
+        def _cidade_core(s: str) -> str:
+            """núcleo da cidade: minúscula, sem acento, sem sufixo de UF.
+            'teresina-pi' / 'Teresina' / 'Teresina/PI' -> 'teresina'."""
+            s = (s or "").strip().lower()
+            s = "".join(ch for ch in unicodedata.normalize("NFD", s)
+                        if unicodedata.category(ch) != "Mn")
+            s = re.sub(r"[\-/ ]+[a-z]{2}$", "", s)
+            return s.strip()
+
+        def tam(txt: str) -> set:
+            """tokens de TAMANHO normalizados (5kg, 1kg, 500g, 2l...) de um nome."""
+            t = (txt or "").lower().replace(",", ".")
+            out = set()
+            for val, un in re.findall(
+                    r"(\d+(?:\.\d+)?)\s*(kgs?|gramas?|grs?|gr|g|ml|lts?|litros?|l)\b", t):
+                v = val.rstrip("0").rstrip(".") if "." in val else val
+                un = {"kgs": "kg", "gr": "g", "grs": "g", "grama": "g", "gramas": "g",
+                      "lt": "l", "lts": "l", "litro": "l", "litros": "l"}.get(un, un)
+                out.add(f"{v}{un}")
+            return out
+
         corte = date.today() - timedelta(days=dias)
         col_fonte = "po.fonte" if self._coluna_fonte_existe() else "'cupom' as fonte"
-        sql = f"""select po.mercado, po.valor_unitario_centavos, po.descricao_original,
+        sel = f"""select po.mercado, po.valor_unitario_centavos, po.descricao_original,
                          po.data_compra, po.descricao_norm, po.unidade,
                          {col_fonte}, po.loja_id, l.nome, l.endereco, l.cidade, l.uf
                   from precos_observados po
-                  left join lojas l on l.id = po.loja_id
-                  where po.descricao_norm like %s and po.data_compra >= %s"""
-        params: list = [f"%{primeira}%", corte]
+                  left join lojas l on l.id = po.loja_id"""
+
+        gtin_limpo = re.sub(r"\D", "", gtin or "")
+        if gtin_limpo:
+            sql = sel + " where po.gtin = %s and po.data_compra >= %s"
+            params: list = [gtin_limpo, corte]
+        else:
+            nucleo = normalizar(descricao)
+            primeira = nucleo.split()[0] if nucleo else ""
+            if not primeira:
+                return []
+            sql = sel + " where po.descricao_norm like %s and po.data_compra >= %s"
+            params = [f"%{primeira}%", corte]
         if regiao:
-            sql += " and (po.regiao = %s or po.regiao is null)"
-            params.append(regiao)
+            sql += " and (po.regiao ilike %s or po.regiao is null)"
+            params.append(f"%{_cidade_core(regiao)}%")
         sql += " order by po.data_compra desc"
         with self.pool.connection() as c:
             rows = c.execute(sql, params).fetchall()
 
-        alvo = tokens(descricao)
+        alvo = tokens(descricao) if not gtin_limpo else set()
+        alvo_tam = tam(descricao) if not gtin_limpo else set()
+        need = max(2, (2 * len(alvo) + 2) // 3) if alvo else 0
         hoje = date.today()
         achados: list[dict] = []
         for (merc, vu, orig, dt, norm, unidade, fonte, loja_id,
              l_nome, endereco, l_cidade, l_uf) in rows:
-            comuns = alvo & set((norm or "").split())
-            if alvo and len(comuns) < max(1, len(alvo) // 2):
-                continue
+            if not gtin_limpo:
+                # tamanho: se a busca pede um tamanho, o candidato tem que ter o mesmo
+                if alvo_tam and not (alvo_tam & (tam(orig) | tam(norm))):
+                    continue
+                comuns = alvo & set((norm or "").split())
+                if alvo and len(comuns) < min(need, len(alvo)):
+                    continue
             fonte = fonte or "cupom"
             nome_loja = l_nome or merc or "(sem nome)"
             chave = f"{fonte}:" + (f"id:{loja_id}" if loja_id else f"txt:{nome_loja}")

@@ -81,7 +81,7 @@ button.danger{background:#6e2b2b}button.danger:hover{background:#8a3636}
 form.inline{display:inline;margin:0}
 </style></head><body>
 <div class="topo"><span class="logo">Zaq <span>· admin</span></span>
-<span><a href="/admin">Contas</a><a href="/admin/funil">Funil</a><a href="/admin/custos">Custos</a><a href="/admin/qr">QR notas</a><a href="/admin/precos">Preços</a><a href="/admin/categorias">Categorias</a><a href="/admin/banco">Banco</a><a href="/admin/comunicacao">Comunicacao</a><a href="/admin/pesquisas">Pesquisas</a><a href="/painel">Meu painel</a><a href="/sair">Sair</a></span></div>
+<span><a href="/admin">Contas</a><a href="/admin/funil">Funil</a><a href="/admin/custos">Custos</a><a href="/admin/qr">QR notas</a><a href="/admin/precos">Preços</a><a href="/admin/categorias">Categorias</a><a href="/admin/banco">Banco</a><a href="/admin/comunicacao">Comunicacao</a><a href="/admin/pesquisas">Pesquisas</a><a href="/admin/orcamento">Orçamento</a><a href="/painel">Meu painel</a><a href="/sair">Sair</a></span></div>
 <div class="wrap">{% block conteudo %}{% endblock %}</div>
 </body></html>"""
 

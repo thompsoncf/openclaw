@@ -1,7 +1,4 @@
 import re, sys
-
-# Loja v3 (design claro do Claude Design). Pagina standalone (nao estende _BASE).
-# Gerado – subir verbatim. Roda: python replace_loja.py
 novo_loja = """<!doctype html>
 <html lang="pt-br"><head>
 <meta charset="utf-8">
@@ -25,10 +22,11 @@ novo_loja = """<!doctype html>
   .sz-tab{display:none}
   .sz-tab.on{display:block}
   .qadd{position:absolute;bottom:6px;right:6px;width:32px;height:32px;border-radius:50%;background:#2f7d32;color:#fff;border:0;cursor:pointer;font-size:19px;line-height:1;box-shadow:0 2px 6px rgba(0,0,0,.22)}
+  .sz-cart{position:sticky;top:12px}
   @media (max-width:900px){
     .sz-body{grid-template-columns:1fr}
     .sz-nav{display:none !important}
-    .sz-cart{position:sticky;bottom:0;border-top:2px solid #31772f !important;border-radius:14px 14px 0 0 !important;box-shadow:0 -10px 26px rgba(0,0,0,.10)}
+    .sz-cart{position:sticky;top:auto;bottom:0;background:#fff;border:0;border-top:2px solid #31772f !important;border-radius:14px 14px 0 0 !important;box-shadow:0 -10px 26px rgba(0,0,0,.12);max-height:56vh;overflow-y:auto;z-index:30}
     .sz-chips{display:flex !important}
     .sz-vitrine{border-right:0 !important;padding:16px 6px !important}
   }
@@ -194,7 +192,7 @@ novo_loja = """<!doctype html>
         {% endif %}
       </div>
 
-      <div class="sz-cart" id="sz-cart" style="padding:22px 20px;background:#f7f9f5;align-self:start;position:sticky;top:12px"></div>
+      <div class="sz-cart" id="sz-cart" style="padding:20px;background:#fff;border:1px solid #e8ece5;border-radius:14px;align-self:start"></div>
     </div>
   </div>
 
@@ -331,12 +329,23 @@ function syncCards(){
   });
 }
 
+function szRemove(pid){
+  fetch('/f/'+SLUG+'/carrinho/qtd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:pid,quantidade:0})}).then(function(r){return r.json();}).then(function(d){CART=d;renderCart();syncCards();}).catch(function(e){console.error(e);});
+}
+async function szLimpar(){
+  var itens=(CART.itens||[]).slice();
+  for(var i=0;i<itens.length;i++){
+    try{var r=await fetch('/f/'+SLUG+'/carrinho/qtd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:itens[i].produto_id,quantidade:0})});CART=await r.json();}catch(e){}
+  }
+  renderCart();syncCards();
+}
 function renderCart(){
   var box=document.getElementById('sz-cart');
   var n=(CART.itens||[]).length;
   var h='<div style="font-size:15px;color:#1a2417;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px">🛒 Carrinho';
   if(n)h+='<span style="background:#31772f;color:#fff;font-size:11px;font-weight:700;padding:1px 8px;border-radius:12px;margin-left:auto">'+n+'</span>';
   h+='</div>';
+  if(n)h+='<div style="text-align:right;margin:-10px 0 10px"><button onclick="szLimpar()" style="border:0;background:none;color:#a3aca0;font-size:11px;cursor:pointer;text-decoration:underline;font-family:inherit">limpar carrinho</button></div>';
   if(!n){h+='<div style="font-size:13px;color:#8a938a;line-height:1.5">Carrinho vazio. Adicione produtos!</div>';box.innerHTML=h;return;}
   var sub=CART.subtotal||0;
   if(FRETEG>0){
@@ -346,7 +355,7 @@ function renderCart(){
     h+='<div style="height:7px;background:#e6ebe2;border-radius:5px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+(gratis?'#2f7d32':'#7bbf5a')+'"></div></div></div>';
   }
   (CART.itens||[]).forEach(function(it){
-    h+='<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:8px 0;border-bottom:1px solid #e7eae5"><span style="color:#5b6659">'+fmtQ(it.qtd)+it.unidade+' '+it.nome+'</span><span style="color:#1a2417;white-space:nowrap;font-weight:500">'+brl(it.total)+'</span></div>';
+    h+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;padding:8px 0;border-bottom:1px solid #e7eae5"><span style="color:#5b6659;flex:1;min-width:0">'+fmtQ(it.qtd)+it.unidade+' '+it.nome+'</span><span style="color:#1a2417;white-space:nowrap;font-weight:500">'+brl(it.total)+'</span><button onclick="szRemove('+it.produto_id+')" title="Remover" style="border:0;background:none;color:#c0603f;cursor:pointer;font-size:14px;line-height:1;padding:0 2px;font-family:inherit">✕</button></div>';
   });
   h+='<div style="font-size:12.5px;color:#8a938a;line-height:2.1;margin-top:10px">';
   h+='<div style="display:flex;justify-content:space-between"><span>Subtotal</span><span style="color:#1a2417">'+brl(sub)+'</span></div>';
@@ -368,15 +377,13 @@ renderCart();syncCards();szInitAssinar();
 </script>
 </body></html>
 """
-
-ALVO = "web/portal.py"
-src = open(ALVO, encoding="utf-8").read()
-assert '"""' not in novo_loja, "template tem triplo-aspas"
-achados = re.findall(r'_LOJA = """.*?(?:{% endblock %}|</html>)\s*"""', src, flags=re.DOTALL)
-if len(achados) != 1:
-    print(f"ABORTADO: encontrei {len(achados)} blocos _LOJA (esperado 1). Nada alterado."); sys.exit(1)
-novo = re.sub(r'_LOJA = """.*?(?:{% endblock %}|</html>)\s*"""',
-              lambda m: '_LOJA = """' + novo_loja + '"""', src, count=1, flags=re.DOTALL)
-open(ALVO, "w", encoding="utf-8").write(novo)
-print("OK: _LOJA v3 (header responsivo) aplicado")
+ALVO="web/portal.py"
+src=open(ALVO,encoding="utf-8").read()
+assert '"""' not in novo_loja
+achados=re.findall(r'_LOJA = """.*?(?:{% endblock %}|</html>)\s*"""', src, flags=re.DOTALL)
+if len(achados)!=1:
+    print(f"ABORTADO: {len(achados)} blocos _LOJA (esperado 1)."); sys.exit(1)
+novo=re.sub(r'_LOJA = """.*?(?:{% endblock %}|</html>)\s*"""', lambda m:'_LOJA = """'+novo_loja+'"""', src, count=1, flags=re.DOTALL)
+open(ALVO,"w",encoding="utf-8").write(novo)
+print("OK: _LOJA v3 (carrinho corrigido) aplicado")
 print('Pre-deploy: python -c "from web import portal"')

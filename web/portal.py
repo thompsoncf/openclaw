@@ -3715,19 +3715,44 @@ def loja_fornecedor(request: Request, slug: str):
     with pool.connection() as c:
         forn = c.execute(
             """select id, nome, fornecedor_slug, taxa_entrega_centavos,
-                      pedido_minimo_centavos, banner_url, banner_cor
+                      pedido_minimo_centavos, banner_url, banner_cor,
+                      logo_url, bio, sobre, whatsapp_loja, verificado,
+                      desconto_pix_pct, frete_gratis_acima_centavos
                from contas where fornecedor_slug = %s and eh_fornecedor""",
             (slug,),
         ).fetchone()
     if forn is None:
         return HTMLResponse("<h1>Loja não encontrada</h1>", status_code=404)
+    end = c.execute(
+        "select endereco from fornecedor_fiscal where conta_id = %s", (forn[0],)
+    ).fetchone()
     fornecedor = {"id": forn[0], "nome": forn[1], "slug": forn[2],
                   "taxa_entrega_centavos": int(forn[3] or 0),
                   "pedido_minimo_centavos": int(forn[4] or 0),
-                  "banner_url": forn[5], "banner_cor": forn[6]}
+                  "banner_url": forn[5], "banner_cor": forn[6],
+                  "logo_url": forn[7], "bio": forn[8], "sobre": forn[9],
+                  "whatsapp_loja": forn[10], "verificado": forn[11],
+                  "desconto_pix_pct": float(forn[12]) if forn[12] is not None else 0,
+                  "frete_gratis_acima_centavos": int(forn[13] or 0),
+                  "endereco": end[0] if end else None}
     conta = conta_logada(request)
     tamanhos = cestas_mod.listar_tamanhos(pool, forn[0], so_ativos=True)
     produtos = cat_mod.listar_produtos(pool, forn[0], so_disponiveis=True)
+    sazonais = cat_mod.listar_produtos(pool, forn[0], so_disponiveis=True, sazonal=True)
+    mais_vendidos = []
+    pedidos = []
+    if conta is not None:
+        with pool.connection() as c:
+            pedidos_rows = c.execute(
+                """select id, codigo, status, data, total_centavos from carrinhos
+                   where cliente_id = %s and fornecedor_id = %s and status in ('fechado', 'entregue')
+                   order by data desc limit 10""",
+                (conta[0], forn[0]),
+            ).fetchall()
+            pedidos = [{
+                "code": r[1], "status": r[2], "data": r[3].strftime("%d/%m") if r[3] else "",
+                "total_centavos": int(r[4] or 0)
+            } for r in pedidos_rows]
     escolha = request.session.get("loja_escolha", {})
     escolha = {
         "tamanho_id": escolha.get("tamanho_id"),
@@ -3783,7 +3808,8 @@ def loja_fornecedor(request: Request, slug: str):
 
     return _render("loja", request, fornecedor=fornecedor, tamanhos=tamanhos,
                    produtos=produtos, escolha=escolha, secoes=secoes, carrinho=carrinho,
-                   carrinho_json=carrinho_json,
+                   carrinho_json=carrinho_json, sazonais=sazonais,
+                   mais_vendidos=mais_vendidos, pedidos=pedidos,
                    erro_carrinho=request.session.pop("erro_carrinho", None))
 
 

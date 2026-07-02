@@ -40,8 +40,29 @@ def _config() -> tuple[str, str, str]:
     return url, key, bucket
 
 
-def _redimensionar(conteudo: bytes, content_type: str) -> tuple[bytes, str]:
+def _cortar_aspecto(img, aspecto: float):
+    """Corta no CENTRO pra deixar a imagem na proporção 'aspecto' (largura/altura).
+    Ex: 1.0 = quadrado (logo), 3.0 = bem largo (capa). Sem distorcer, só corta."""
+    w, h = img.size
+    if not h:
+        return img
+    atual = w / h
+    if atual > aspecto:            # larga demais -> corta as laterais
+        nova = int(round(h * aspecto))
+        x = max(0, (w - nova) // 2)
+        return img.crop((x, 0, x + nova, h))
+    if atual < aspecto:            # alta demais -> corta topo e base
+        nova = int(round(w / aspecto))
+        y = max(0, (h - nova) // 2)
+        return img.crop((0, y, w, y + nova))
+    return img
+
+
+def _redimensionar(conteudo: bytes, content_type: str,
+                   aspecto: float | None = None) -> tuple[bytes, str]:
     """Reduz a imagem pra no máximo _LADO_MAX no maior lado, mantendo proporção.
+    Se 'aspecto' for dado (ex: 1.0 logo, 3.0 capa), corta no centro pra essa proporção
+    ANTES de reduzir (fica sempre alinhada, sem distorcer).
     Converte pra JPEG (mais leve). Retorna (bytes, content_type)."""
     try:
         from PIL import Image, ImageOps
@@ -54,6 +75,8 @@ def _redimensionar(conteudo: bytes, content_type: str) -> tuple[bytes, str]:
         pass
     if img.mode != "RGB":
         img = img.convert("RGB")
+    if aspecto:
+        img = _cortar_aspecto(img, aspecto)
     img.thumbnail((_LADO_MAX, _LADO_MAX), Image.LANCZOS)
     out = io.BytesIO()
     img.save(out, format="JPEG", quality=82, optimize=True)
@@ -61,8 +84,10 @@ def _redimensionar(conteudo: bytes, content_type: str) -> tuple[bytes, str]:
 
 
 def subir_foto(conteudo: bytes, nome_arquivo: str = "",
-               content_type: str = "image/jpeg") -> str:
+               content_type: str = "image/jpeg",
+               aspecto: float | None = None) -> str:
     """Valida, redimensiona e sobe a foto pro Supabase Storage. Retorna a URL pública.
+    'aspecto' opcional corta no centro pra alinhar (1.0 = logo quadrada, 3.0 = capa larga).
     Levanta ValueError se a foto for inválida ou o upload falhar."""
     if not conteudo:
         raise ValueError("Arquivo vazio.")
@@ -72,7 +97,7 @@ def subir_foto(conteudo: bytes, nome_arquivo: str = "",
     if ct not in _TIPOS_OK:
         raise ValueError("Só aceitamos imagem (JPEG, PNG ou WEBP).")
 
-    conteudo, ct = _redimensionar(conteudo, ct)
+    conteudo, ct = _redimensionar(conteudo, ct, aspecto)
 
     url, key, bucket = _config()
     nome = f"{int(time.time())}_{uuid.uuid4().hex[:8]}.jpg"

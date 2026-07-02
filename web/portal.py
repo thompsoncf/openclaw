@@ -2110,6 +2110,15 @@ _LOJA = """<!doctype html>
     .sz-vitrine{border-right:0 !important;padding:16px 6px !important}
   }
   @media (max-width:520px){ .sz-grid{grid-template-columns:1fr 1fr} }
+  .sz-cover{height:170px;background-position:center;background-size:cover}
+  .sz-logo{width:92px;height:92px;border-radius:22px;font-size:34px}
+  .sz-idrow{margin-top:-40px}
+  @media (max-width:640px){
+    .sz-cover{height:118px}
+    .sz-logo{width:70px;height:70px;border-radius:16px;font-size:24px}
+    .sz-idrow{margin-top:-28px;gap:12px}
+    .sz-idrow .sz-nome{font-size:19px !important}
+  }
 </style>
 </head><body>
 
@@ -2172,18 +2181,18 @@ _LOJA = """<!doctype html>
   </div>
 
   <div style="position:relative">
-    <div style="height:170px;background:{% if fornecedor.banner_url %}url('{{ fornecedor.banner_url }}') center/cover{% elif fornecedor.banner_cor %}{{ fornecedor.banner_cor }}{% else %}linear-gradient(120deg,#3a7d3a,#245c24){% endif %}"></div>
+    <div class="sz-cover" style="background:{% if fornecedor.banner_url %}url('{{ fornecedor.banner_url }}') center/cover{% elif fornecedor.banner_cor %}{{ fornecedor.banner_cor }}{% else %}linear-gradient(120deg,#3a7d3a,#245c24){% endif %}"></div>
     <span style="position:absolute;top:14px;right:16px;background:rgba(0,0,0,.45);color:#eafae6;font-size:12px;font-weight:600;padding:6px 13px;border-radius:20px;display:flex;align-items:center;gap:7px;backdrop-filter:blur(4px)">
       <span style="width:8px;height:8px;border-radius:50%;background:#8ff0a0"></span>Aberto agora
     </span>
   </div>
 
   <div style="padding:0 22px">
-    <div style="display:flex;align-items:flex-end;gap:16px;margin-top:-40px;position:relative">
-      <div style="width:92px;height:92px;border-radius:22px;box-shadow:0 6px 18px rgba(0,0,0,.18);border:4px solid #fff;flex-shrink:0;background:{% if fornecedor.logo_url %}url('{{ fornecedor.logo_url }}') center/cover{% else %}#eef6ea{% endif %};display:flex;align-items:center;justify-content:center;font-size:34px;font-weight:700;color:#31772f">{% if not fornecedor.logo_url %}{{ fornecedor.nome[0]|upper }}{% endif %}</div>
+    <div class="sz-idrow" style="display:flex;align-items:flex-end;gap:16px;position:relative">
+      <div class="sz-logo" style="box-shadow:0 6px 18px rgba(0,0,0,.18);border:4px solid #fff;flex-shrink:0;background:{% if fornecedor.logo_url %}url('{{ fornecedor.logo_url }}') center/cover{% else %}#eef6ea{% endif %};display:flex;align-items:center;justify-content:center;font-weight:700;color:#31772f">{% if not fornecedor.logo_url %}{{ fornecedor.nome[0]|upper }}{% endif %}</div>
       <div style="padding-bottom:6px">
         <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
-          <span style="font-size:24px;font-weight:700;color:#1a2417;letter-spacing:-.3px">{{ fornecedor.nome }}</span>
+          <span class="sz-nome" style="font-size:24px;font-weight:700;color:#1a2417;letter-spacing:-.3px">{{ fornecedor.nome }}</span>
           {% if fornecedor.verificado %}<span style="display:inline-flex;align-items:center;gap:4px;background:#eef6ea;color:#31772f;font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px">✓ Produtor verificado</span>{% endif %}
         </div>
         {% if fornecedor.bio %}<div style="font-size:13px;color:#6b7669;margin-top:5px">{{ fornecedor.bio }}</div>{% endif %}
@@ -2326,9 +2335,9 @@ _LOJA = """<!doctype html>
         {% endfor %}
         <div style="font-size:13px;color:#31772f;font-weight:600;margin:20px 0 12px">2. Com que frequência?</div>
         <div style="display:flex;gap:8px;margin-bottom:20px">
-          <label class="freqopt" style="flex:1;text-align:center;background:#fff;color:#3a463a;border:1px solid #e7eae5;border-radius:11px;padding:11px;font-size:12.5px;cursor:pointer"><input type="radio" name="frequencia" value="semanal" style="display:none" {% if (escolha.frequencia or 'semanal')=='semanal' %}checked{% endif %}>Semanal</label>
-          <label class="freqopt" style="flex:1;text-align:center;background:#fff;color:#3a463a;border:1px solid #e7eae5;border-radius:11px;padding:11px;font-size:12.5px;cursor:pointer"><input type="radio" name="frequencia" value="quinzenal" style="display:none" {% if escolha.frequencia=='quinzenal' %}checked{% endif %}>Quinzenal</label>
-          <label class="freqopt" style="flex:1;text-align:center;background:#fff;color:#3a463a;border:1px solid #e7eae5;border-radius:11px;padding:11px;font-size:12.5px;cursor:pointer"><input type="radio" name="frequencia" value="mensal" style="display:none" {% if escolha.frequencia=='mensal' %}checked{% endif %}>Mensal</label>
+          <label class="freqopt" onclick="szFreq(this)" style="flex:1;text-align:center;background:#fff;color:#3a463a;border:1px solid #e7eae5;border-radius:11px;padding:11px;font-size:12.5px;cursor:pointer"><input type="radio" name="frequencia" value="semanal" style="display:none" {% if (escolha.frequencia or 'semanal')=='semanal' %}checked{% endif %}>Semanal</label>
+          <label class="freqopt" onclick="szFreq(this)" style="flex:1;text-align:center;background:#fff;color:#3a463a;border:1px solid #e7eae5;border-radius:11px;padding:11px;font-size:12.5px;cursor:pointer"><input type="radio" name="frequencia" value="quinzenal" style="display:none" {% if escolha.frequencia=='quinzenal' %}checked{% endif %}>Quinzenal</label>
+          <label class="freqopt" onclick="szFreq(this)" style="flex:1;text-align:center;background:#fff;color:#3a463a;border:1px solid #e7eae5;border-radius:11px;padding:11px;font-size:12.5px;cursor:pointer"><input type="radio" name="frequencia" value="mensal" style="display:none" {% if escolha.frequencia=='mensal' %}checked{% endif %}>Mensal</label>
         </div>
         <details style="margin-bottom:20px">
           <summary style="font-size:12px;color:#8a938a;cursor:pointer">Algum item que você não quer receber? (opcional)</summary>
@@ -2370,7 +2379,12 @@ function szBusca(q){
     c.style.display=(!q||m)?'':'none';
   });
 }
-function szTam(el){document.querySelectorAll('.tamopt').forEach(function(t){t.style.border='1px solid #e7eae5';});el.style.border='2px solid #2f7d32';}
+function szTam(el){document.querySelectorAll('.tamopt').forEach(function(t){t.style.border='1px solid #e7eae5';t.style.background='#fff';});el.style.border='2px solid #2f7d32';el.style.background='#eef6ea';var r=el.querySelector('input');if(r)r.checked=true;}
+function szFreq(el){document.querySelectorAll('.freqopt').forEach(function(f){f.style.border='1px solid #e7eae5';f.style.background='#fff';f.style.color='#3a463a';});el.style.border='2px solid #2f7d32';el.style.background='#eef6ea';el.style.color='#2f7d32';var r=el.querySelector('input');if(r)r.checked=true;}
+function szInitAssinar(){
+  var t=document.querySelector('.tamopt input:checked');if(t)szTam(t.parentNode);
+  var f=document.querySelector('.freqopt input:checked');if(f)szFreq(f.parentNode);
+}
 
 function selQ(pid,u){if(SEL[pid]==null)SEL[pid]=inc(u);return SEL[pid];}
 function szInc(pid,u){SEL[pid]=selQ(pid,u)+inc(u);document.getElementById('sel-'+pid).textContent=fmtQ(SEL[pid]);}
@@ -2427,7 +2441,7 @@ function renderCart(){
   }
   box.innerHTML=h;
 }
-renderCart();syncCards();
+renderCart();syncCards();szInitAssinar();
 </script>
 </body></html>
 """

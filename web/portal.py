@@ -437,6 +437,27 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
   <p class="mut">Dados fiscais completos (inscrição estadual, regime, certificado) serão pedidos quando ativarmos a emissão de nota.</p>
 
   <hr style="margin:1.5rem 0;border:none;border-top:1px solid #2a2a2b">
+  <h4 style="margin-top:0">🖼️ Identidade da loja</h4>
+  <p class="mut">A logo e a capa aparecem no topo da sua loja pública.</p>
+  <div style="display:flex;gap:1.2rem;flex-wrap:wrap;align-items:flex-end">
+    <div>
+      <div class="mut" style="font-size:.8rem;margin-bottom:.4rem">Logomarca</div>
+      <div id="forn-logo-prev" style="width:78px;height:78px;border-radius:16px;background:#161617{% if logo_url %} url('{{ logo_url }}') center/cover{% endif %};border:1px solid #2a2a2b"></div>
+      <label style="display:inline-block;margin-top:.5rem;font-size:.82rem;color:#1d9e75;cursor:pointer">enviar logo
+        <input type="file" accept="image/*" onchange="fornLogoUpload(this)" style="display:none">
+      </label>
+    </div>
+    <div style="flex:1;min-width:200px">
+      <div class="mut" style="font-size:.8rem;margin-bottom:.4rem">Capa (banner)</div>
+      <div id="forn-banner-prev" style="height:78px;border-radius:12px;background:#161617{% if banner_url %} url('{{ banner_url }}') center/cover{% endif %};border:1px solid #2a2a2b"></div>
+      <label style="display:inline-block;margin-top:.5rem;font-size:.82rem;color:#1d9e75;cursor:pointer">enviar capa
+        <input type="file" accept="image/*" onchange="fornBannerUpload(this)" style="display:none">
+      </label>
+    </div>
+  </div>
+  <div id="forn-id-status" style="font-size:.78rem;color:#888780;margin-top:.5rem"></div>
+
+  <hr style="margin:1.5rem 0;border:none;border-top:1px solid #2a2a2b">
   <h4 style="margin-top:0">⚙️ Configuração de margem</h4>
   <p class="mut">Define a folga de custo para que você tenha margem pra perda, comissão e lucro. A cesta sempre respeita esse limite.</p>
   <form method="post" action="/painel/fornecedor/margem-alvo" style="display:flex;gap:.5rem;align-items:flex-end">
@@ -840,6 +861,20 @@ function fornFotoUpload(input){
     })
     .catch(e=>{ status.textContent = '✗ Falhou. Tente de novo.'; });
 }
+
+function _fornImgUpload(inp, url, prevId){
+  var f=inp.files&&inp.files[0]; if(!f) return;
+  var st=document.getElementById('forn-id-status'); st.textContent='enviando...';
+  var fd=new FormData(); fd.append('arquivo', f);
+  fetch(url,{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){
+    if(d.logo_url||d.banner_url){
+      document.getElementById(prevId).style.background="#161617 url('"+(d.logo_url||d.banner_url)+"') center/cover";
+      st.textContent='✓ salvo';
+    } else { st.textContent=d.erro||'falhou'; }
+  }).catch(function(){st.textContent='erro de conexão';});
+}
+function fornLogoUpload(i){_fornImgUpload(i,'/painel/fornecedor/logo','forn-logo-prev');}
+function fornBannerUpload(i){_fornImgUpload(i,'/painel/fornecedor/banner','forn-banner-prev');}
 
 // Fechar modal ao clicar fora
 ['forn-foto-modal','forn-editar-produto'].forEach(id=>{
@@ -3842,9 +3877,9 @@ def loja_fornecedor(request: Request, slug: str):
     if forn is None:
         return HTMLResponse("<h1>Loja não encontrada</h1>", status_code=404)
     end = c.execute(
-        "select endereco from fornecedor_fiscal where conta_id = %s", (forn[0],)
+        "select endereco, razao_social from fornecedor_fiscal where conta_id = %s", (forn[0],)
     ).fetchone()
-    fornecedor = {"id": forn[0], "nome": forn[1], "slug": forn[2],
+    fornecedor = {"id": forn[0], "nome": (end[1] if end and end[1] else forn[1]), "slug": forn[2],
                   "taxa_entrega_centavos": int(forn[3] or 0),
                   "pedido_minimo_centavos": int(forn[4] or 0),
                   "banner_url": forn[5], "banner_cor": forn[6],
@@ -5025,30 +5060,43 @@ def salvar_promo_produto(request: Request, dados: dict = Body(...)):
 
 
 @router.post("/painel/fornecedor/logo")
-def salvar_logo_fornecedor(request: Request, dados: dict = Body(...)):
+async def salvar_logo_fornecedor(request: Request, arquivo: UploadFile = File(...)):
+    from finance import upload_foto
     conta = conta_logada(request)
     if conta is None or not conta[8]:
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
-    logo_url = (dados.get("logo_url") or "").strip()
+    try:
+        conteudo = await arquivo.read()
+        url = upload_foto.subir_foto(conteudo, arquivo.filename or "",
+                                     arquivo.content_type or "image/jpeg")
+    except ValueError as e:
+        return JSONResponse({"erro": str(e)}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"erro": f"Erro: {str(e)}"}, status_code=500)
     with get_pool().connection() as c:
-        c.execute("update contas set logo_url=%s where id=%s",
-                  (logo_url or None, conta[0]))
+        c.execute("update contas set logo_url=%s where id=%s", (url, conta[0]))
         c.commit()
-    return JSONResponse({"ok": True, "logo_url": logo_url or None})
+    return JSONResponse({"ok": True, "logo_url": url})
 
 
 @router.post("/painel/fornecedor/banner")
-def salvar_banner_fornecedor(request: Request, dados: dict = Body(...)):
+async def salvar_banner_fornecedor(request: Request, arquivo: UploadFile = File(...)):
+    from finance import upload_foto
     conta = conta_logada(request)
     if conta is None or not conta[8]:
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
-    banner_url = (dados.get("banner_url") or "").strip()
-    banner_cor = (dados.get("banner_cor") or "").strip()
+    try:
+        conteudo = await arquivo.read()
+        url = upload_foto.subir_foto(conteudo, arquivo.filename or "",
+                                     arquivo.content_type or "image/jpeg")
+    except ValueError as e:
+        return JSONResponse({"erro": str(e)}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"erro": f"Erro: {str(e)}"}, status_code=500)
     with get_pool().connection() as c:
-        c.execute("update contas set banner_url=%s, banner_cor=%s where id=%s",
-                  (banner_url or None, banner_cor or None, conta[0]))
+        c.execute("update contas set banner_url=%s where id=%s", (url, conta[0]))
         c.commit()
-    return JSONResponse({"ok": True, "banner_url": banner_url or None, "banner_cor": banner_cor or None})
+    return JSONResponse({"ok": True, "banner_url": url})
 
 
 @router.post("/painel/fornecedor/catalogo/editar")

@@ -114,6 +114,7 @@ def brl(centavos: int) -> str:
 _BASE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ titulo }} - Zaq</title>
+<link rel="icon" href="/static/zaq-icon.svg" type="image/svg+xml">
 <style>
 :root { color-scheme: dark; }
 body{margin:0;min-height:100vh;font-family:system-ui,-apple-system,sans-serif;
@@ -218,7 +219,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
 .wa-suporte:hover .wa-tooltip{opacity:1}
 @media (max-width:600px){.wa-suporte{bottom:16px;right:16px;width:52px;height:52px}.wa-tooltip{display:none}}
 </style></head><body>
-<div class="topo"><span class="logo">Zaq</span><span>
+<div class="topo"><span class="logo" style="display:inline-flex;align-items:center;gap:7px"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M16 18 H44 L18 46 H46" stroke="#3ee0a6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z" fill="#3ee0a6"/></svg>zaq</span><span>
 {% if logado %}
   {% set _tem_app = conta and conta[4] and conta[4] != 'zaq_cesta' %}
   {% set _tem_cesta = (conta and conta[10]) or tem_cesta %}

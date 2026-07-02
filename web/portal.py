@@ -5090,7 +5090,7 @@ async def salvar_banner_fornecedor(request: Request, arquivo: UploadFile = File(
         conteudo = await arquivo.read()
         url = upload_foto.subir_foto(conteudo, arquivo.filename or "",
                                      arquivo.content_type or "image/jpeg",
-                                     aspecto=2.5)
+                                     aspecto=4.0)
     except ValueError as e:
         return JSONResponse({"erro": str(e)}, status_code=400)
     except Exception as e:

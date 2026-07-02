@@ -4519,15 +4519,31 @@ def painel_fornecedor(request: Request):
     # Carrega tamanhos de cesta
     from finance import cestas as cestas_mod
     tamanhos = cestas_mod.listar_tamanhos(pool, conta[0], so_ativos=False)
-    # Carrega margem alvo do fornecedor
+    # Carrega identidade + iFrutus + margem alvo do fornecedor
     margem_alvo = None
+    identidade = {}
     with pool.connection() as c:
         row = c.execute(
-            "select margem_alvo_pct from contas where id=%s",
+            """select margem_alvo_pct, logo_url, banner_url, banner_cor,
+                      bio, sobre, whatsapp_loja, desconto_pix_pct, frete_gratis_acima_centavos
+               from contas where id=%s""",
             (conta[0],),
         ).fetchone()
-        margem_alvo = float(row[0]) if row and row[0] else 60.0
-    return _render("fornecedor", request, conta=conta, fiscal=fiscal, produtos=produtos, origens=origens, compras=compras_raw, tamanhos=tamanhos, margem_alvo=margem_alvo,
+        if row:
+            margem_alvo = float(row[0]) if row[0] else 60.0
+            identidade = {
+                "logo_url": row[1],
+                "banner_url": row[2],
+                "banner_cor": row[3],
+                "bio": row[4],
+                "sobre": row[5],
+                "whatsapp_loja": row[6],
+                "desconto_pix_pct": float(row[7]) if row[7] is not None else 0,
+                "frete_gratis_acima_centavos": int(row[8] or 0),
+            }
+        else:
+            margem_alvo = 60.0
+    return _render("fornecedor", request, conta=conta, fiscal=fiscal, identidade=identidade, produtos=produtos, origens=origens, compras=compras_raw, tamanhos=tamanhos, margem_alvo=margem_alvo,
                    categorias_padrao=categorias_padrao, categorias_usadas=categorias_usadas,
                    erro=request.session.pop("erro", None),
                    aviso=request.session.pop("aviso", None))
@@ -4537,7 +4553,12 @@ def painel_fornecedor(request: Request):
 def painel_fornecedor_dados(request: Request,
                            razao_social: str = Form(""),
                            cnpj: str = Form(""),
-                           endereco: str = Form("")):
+                           endereco: str = Form(""),
+                           bio: str = Form(""),
+                           sobre: str = Form(""),
+                           whatsapp_loja: str = Form(""),
+                           desconto_pix_pct: str = Form(""),
+                           frete_gratis_acima: str = Form("")):
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
@@ -4545,8 +4566,15 @@ def painel_fornecedor_dados(request: Request,
         return RedirectResponse("/painel", status_code=303)
 
     pool = get_pool()
+    try:
+        desconto_pix = float(desconto_pix_pct or 0) if desconto_pix_pct else None
+        frete_gratis_c = int(round(float(frete_gratis_acima or 0) * 100)) if frete_gratis_acima else None
+    except (ValueError, TypeError):
+        desconto_pix = None
+        frete_gratis_c = None
+
     with pool.connection() as c:
-        # upsert: cria a linha fiscal se não existe, atualiza se existe
+        # upsert fornecedor_fiscal (dados fiscais)
         c.execute("""
             insert into fornecedor_fiscal (conta_id, razao_social, cnpj, endereco)
             values (%s, %s, %s, %s)
@@ -4556,6 +4584,14 @@ def painel_fornecedor_dados(request: Request,
                   endereco=excluded.endereco,
                   atualizado_em=now()
         """, (conta[0], razao_social or None, cnpj or None, endereco or None))
+        # update contas (identidade + iFrutus campos)
+        c.execute("""
+            update contas
+            set bio=%s, sobre=%s, whatsapp_loja=%s,
+                desconto_pix_pct=%s, frete_gratis_acima_centavos=%s
+            where id=%s
+        """, (bio or None, sobre or None, whatsapp_loja or None,
+              desconto_pix, frete_gratis_c, conta[0]))
         c.commit()
     request.session["aviso"] = "Dados do fornecedor salvos."
     return RedirectResponse("/painel/fornecedor", status_code=303)
@@ -4871,6 +4907,33 @@ def salvar_promo_produto(request: Request, dados: dict = Body(...)):
     cat_mod.atualizar_produto(get_pool(), conta[0], produto_id,
                               em_promo=em_promo, preco_promo_centavos=promo_c)
     return JSONResponse({"ok": True, "em_promo": em_promo, "preco_promo_centavos": promo_c})
+
+
+@router.post("/painel/fornecedor/logo")
+def salvar_logo_fornecedor(request: Request, dados: dict = Body(...)):
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    logo_url = (dados.get("logo_url") or "").strip()
+    with get_pool().connection() as c:
+        c.execute("update contas set logo_url=%s where id=%s",
+                  (logo_url or None, conta[0]))
+        c.commit()
+    return JSONResponse({"ok": True, "logo_url": logo_url or None})
+
+
+@router.post("/painel/fornecedor/banner")
+def salvar_banner_fornecedor(request: Request, dados: dict = Body(...)):
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    banner_url = (dados.get("banner_url") or "").strip()
+    banner_cor = (dados.get("banner_cor") or "").strip()
+    with get_pool().connection() as c:
+        c.execute("update contas set banner_url=%s, banner_cor=%s where id=%s",
+                  (banner_url or None, banner_cor or None, conta[0]))
+        c.commit()
+    return JSONResponse({"ok": True, "banner_url": banner_url or None, "banner_cor": banner_cor or None})
 
 
 @router.post("/painel/fornecedor/catalogo/editar")

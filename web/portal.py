@@ -4858,6 +4858,21 @@ def salvar_foto_produto(request: Request, dados: dict = Body(...)):
     return JSONResponse({"ok": True})
 
 
+@router.post("/painel/fornecedor/produto/promo")
+def salvar_promo_produto(request: Request, dados: dict = Body(...)):
+    from finance import catalogo as cat_mod
+    conta = conta_logada(request)
+    if conta is None or not conta[8]:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    produto_id = int(dados.get("produto_id", 0))
+    em_promo = bool(dados.get("em_promo"))
+    preco_promo = float(dados.get("preco_promo", 0)) if em_promo else 0
+    promo_c = int(round(preco_promo * 100)) if em_promo else None
+    cat_mod.atualizar_produto(get_pool(), conta[0], produto_id,
+                              em_promo=em_promo, preco_promo_centavos=promo_c)
+    return JSONResponse({"ok": True, "em_promo": em_promo, "preco_promo_centavos": promo_c})
+
+
 @router.post("/painel/fornecedor/catalogo/editar")
 def painel_catalogo_editar(request: Request,
                           produto_id: int = Form(...),

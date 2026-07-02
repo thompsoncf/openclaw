@@ -442,14 +442,14 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
   <div style="display:flex;gap:1.2rem;flex-wrap:wrap;align-items:flex-end">
     <div>
       <div class="mut" style="font-size:.8rem;margin-bottom:.4rem">Logomarca</div>
-      <div id="forn-logo-prev" style="width:78px;height:78px;border-radius:16px;background:#161617{% if logo_url %} url('{{ logo_url }}') center/cover{% endif %};border:1px solid #2a2a2b"></div>
+      <div id="forn-logo-prev" style="width:78px;height:78px;border-radius:16px;background:#161617{% if identidade.logo_url %} url('{{ identidade.logo_url }}') center/cover{% endif %};border:1px solid #2a2a2b"></div>
       <label style="display:inline-block;margin-top:.5rem;font-size:.82rem;color:#1d9e75;cursor:pointer">enviar logo
         <input type="file" accept="image/*" onchange="fornLogoUpload(this)" style="display:none">
       </label>
     </div>
     <div style="flex:1;min-width:200px">
       <div class="mut" style="font-size:.8rem;margin-bottom:.4rem">Capa (banner)</div>
-      <div id="forn-banner-prev" style="height:78px;border-radius:12px;background:#161617{% if banner_url %} url('{{ banner_url }}') center/cover{% endif %};border:1px solid #2a2a2b"></div>
+      <div id="forn-banner-prev" style="height:78px;border-radius:12px;background:#161617{% if identidade.banner_url %} url('{{ identidade.banner_url }}') center/cover{% endif %};border:1px solid #2a2a2b"></div>
       <label style="display:inline-block;margin-top:.5rem;font-size:.82rem;color:#1d9e75;cursor:pointer">enviar capa
         <input type="file" accept="image/*" onchange="fornBannerUpload(this)" style="display:none">
       </label>

@@ -1287,10 +1287,11 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 </select>{% endif %}
 </form></div>
 
-<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:1.2rem 0">
-<div class="metric"><span>Saldo atual</span><b style="color:#5dcaa5">{{ brl(resumo.saldo) }}</b></div>
-<div class="metric"><span>Receitas do mês</span><b>{{ brl(resumo.receitas) }}</b></div>
-<div class="metric"><span>Despesas do mês</span><b>{{ brl(resumo.despesas) }}</b></div>
+<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin:1.2rem 0">
+<div class="metric"><span>Saldo anterior</span><b style="color:{% if resumo.anterior < 0 %}#e07a5f{% else %}#5dcaa5{% endif %}">{{ brl(resumo.anterior) }}</b></div>
+<div class="metric"><span>+ Receitas do mês</span><b>{{ brl(resumo.receitas) }}</b></div>
+<div class="metric"><span>− Despesas do mês</span><b>{{ brl(resumo.despesas) }}</b></div>
+<div class="metric"><span>= Saldo do mês</span><b style="color:#5dcaa5">{{ brl(resumo.saldo) }}</b></div>
 </div>
 
 <h1 style="font-size:1.05rem">Despesas por categoria</h1>
@@ -5188,7 +5189,7 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
         lancamentos = livro.buscar_lancamentos(q, limite=100)
         dias = []  # plano, não agrupado
         raiox = {}
-        resumo = {"saldo": 0, "receitas": 0, "despesas": 0}
+        resumo = {"saldo": 0, "receitas": 0, "despesas": 0, "anterior": 0}
         categorias = []
         receitas_cat = []
         maior_cat = 0

@@ -281,16 +281,20 @@ class LivroCaixa:
     # ---------- Dashboard do cliente (Bloco C) ----------
 
     def resumo_mes(self, ano: int, mes: int, membro_id: int | None = None) -> dict:
-        """Saldo acumulado + receitas/despesas do mes (opcional: de UM membro)."""
+        """Extrato do mes: saldo anterior (acumulado ate' o fim do mes passado)
+        + receitas/despesas do mes = saldo ao FIM do mes selecionado.
+        A conta sempre fecha: anterior + receitas - despesas = saldo.
+        (opcional: de UM membro)."""
         cond = "conta_id = %s"
         base: list = [self.conta_id]
         if membro_id is not None:
             cond += " and membro_id = %s"; base.append(membro_id)
         ini, prox = _intervalo_mes(ano, mes)
         with self.pool.connection() as conn:
-            saldo = conn.execute(
+            anterior = conn.execute(
                 f"""select coalesce(sum(case when tipo='receita' then valor_centavos else -valor_centavos end),0)
-                    from lancamentos where {cond}""", base).fetchone()[0]
+                    from lancamentos where {cond} and data < %s""",
+                base + [ini]).fetchone()[0]
             rec = conn.execute(
                 f"""select coalesce(sum(valor_centavos),0) from lancamentos
                     where {cond} and tipo='receita'
@@ -301,7 +305,9 @@ class LivroCaixa:
                     where {cond} and tipo='despesa'
                     and data >= %s and data < %s""",
                 base + [ini, prox]).fetchone()[0]
-        return {"saldo": int(saldo), "receitas": int(rec), "despesas": int(desp)}
+        anterior = int(anterior); rec = int(rec); desp = int(desp)
+        return {"anterior": anterior, "receitas": rec, "despesas": desp,
+                "saldo": anterior + rec - desp}
 
     def despesas_por_categoria(self, ano: int, mes: int, membro_id: int | None = None) -> list[tuple[str, int]]:
         return self._por_categoria("despesa", ano, mes, membro_id)

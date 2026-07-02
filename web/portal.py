@@ -3708,21 +3708,18 @@ def loja_fornecedor(request: Request, slug: str):
     conta = conta_logada(request)
     tamanhos = cestas_mod.listar_tamanhos(pool, forn[0], so_ativos=True)
     produtos = cat_mod.listar_produtos(pool, forn[0], so_disponiveis=True)
-    sazonais = cat_mod.listar_produtos(pool, forn[0], so_disponiveis=True, sazonal=True)
+    try:
+        _todos = cat_mod.listar_produtos(pool, forn[0], so_disponiveis=True)
+        sazonais = [p for p in _todos if p.get("sazonal")]
+    except Exception:
+        sazonais = []
     mais_vendidos = []
     pedidos = []
     if conta is not None:
-        with pool.connection() as c:
-            pedidos_rows = c.execute(
-                """select id, codigo, status, data, total_centavos from carrinhos
-                   where cliente_id = %s and fornecedor_id = %s and status in ('fechado', 'entregue')
-                   order by data desc limit 10""",
-                (conta[0], forn[0]),
-            ).fetchall()
-            pedidos = [{
-                "code": r[1], "status": r[2], "data": r[3].strftime("%d/%m") if r[3] else "",
-                "total_centavos": int(r[4] or 0)
-            } for r in pedidos_rows]
+        try:
+            pedidos = car_mod.pedidos_do_cliente(pool, conta[0], forn[0])
+        except Exception:
+            pedidos = []
     escolha = request.session.get("loja_escolha", {})
     escolha = {
         "tamanho_id": escolha.get("tamanho_id"),

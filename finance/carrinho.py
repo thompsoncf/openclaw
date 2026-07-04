@@ -163,6 +163,47 @@ def remover_item(pool, carrinho_id: int, item_id: int) -> dict:
     return atualizar_quantidade(pool, carrinho_id, item_id, 0)
 
 
+def migrar_sessao(pool, cliente_id: int, fornecedor_id: int, itens) -> int:
+    """Migra o carrinho de SESSAO (deslogado) pro carrinho do banco.
+    Usado quando a pessoa enche o carrinho sem conta e depois entra/cadastra:
+    nada se perde. Soma quantidades se o item ja existir. Retorna o carrinho_id."""
+    cid = obter_ou_criar(pool, cliente_id, fornecedor_id)
+    for it in (itens or []):
+        try:
+            adicionar_item(pool, cid, int(it["produto_id"]),
+                           float(it.get("quantidade", 1)))
+        except Exception:
+            continue  # item indisponivel/removido: segue com o resto
+    return cid
+
+
+def registrar_pagamento(pool, carrinho_id: int, forma: str,
+                        link_url: str | None = None) -> None:
+    """Grava a forma de pagamento escolhida (entrega_pix / entrega_cartao /
+    entrega_dinheiro / pagar_agora) e, se houver, o link de pagamento."""
+    with pool.connection() as c:
+        c.execute(
+            """update carrinhos
+               set forma_pagamento=%s,
+                   pagamento_link_url=coalesce(%s, pagamento_link_url)
+               where id=%s""",
+            (forma, link_url, carrinho_id),
+        )
+        c.commit()
+
+
+def marcar_pago(pool, carrinho_id: int) -> bool:
+    """Marca o pedido como pago (webhook Asaas). Idempotente."""
+    with pool.connection() as c:
+        r = c.execute(
+            "update carrinhos set pago=true, pago_em=now() "
+            "where id=%s and not pago returning id",
+            (carrinho_id,),
+        ).fetchone()
+        c.commit()
+    return r is not None
+
+
 def esvaziar(pool, carrinho_id: int) -> dict:
     """Remove TODOS os itens de uma vez (1 transacao, 1 roundtrip).
     Muito mais rapido que remover item a item."""
@@ -239,6 +280,85 @@ def fechar(pool, carrinho_id: int, endereco_entrega: str | None = None,
         )
         c.commit()
     return {"ok": True, "totais": totais}
+
+
+_ROTULO_STATUS = {
+    "aguardando": "Aguardando confirmação",
+    "confirmado": "Confirmado",
+    "em_entrega": "Em entrega",
+    "entregue": "Entregue",
+    "cancelado": "Cancelado",
+}
+
+
+def listar_do_cliente(pool, cliente_id: int,
+                      fornecedor_id: int | None = None) -> list[dict]:
+    """Pedidos do CLIENTE (exclui o carrinho aberto/rascunho), mais novos primeiro.
+    Traz fornecedor (nome/slug), contagem de itens e situacao de pagamento.
+    Tolerante: se as colunas de pagamento (migracao 047) ainda nao existirem,
+    cai pra consulta sem elas em vez de quebrar."""
+    cond = "ca.cliente_id = %s and ca.status <> 'rascunho'"
+    args: list = [cliente_id]
+    if fornecedor_id is not None:
+        cond += " and ca.fornecedor_id = %s"
+        args.append(fornecedor_id)
+    base = (
+        "select ca.id, ca.status, ca.criado_em, ca.total_centavos, "
+        "co.nome, co.fornecedor_slug, "
+        "(select count(*) from carrinho_itens ci where ci.carrinho_id = ca.id){extra} "
+        "from carrinhos ca join contas co on co.id = ca.fornecedor_id "
+        f"where {cond} order by ca.criado_em desc limit 60"
+    )
+    pag = ", coalesce(ca.pago,false), ca.forma_pagamento, ca.pagamento_link_url"
+    with pool.connection() as c:
+        try:
+            rows = c.execute(base.format(extra=pag), args).fetchall()
+            tem_pag = True
+        except Exception:
+            try:
+                c.rollback()
+            except Exception:
+                pass
+            rows = c.execute(base.format(extra=""), args).fetchall()
+            tem_pag = False
+    out = []
+    for r in rows:
+        status = r[1]
+        grupo = ("concluido" if status == "entregue"
+                 else "cancelado" if status == "cancelado" else "em_aberto")
+        rotulo = _ROTULO_STATUS.get(status, status or "")
+        pago = bool(r[7]) if tem_pag else False
+        forma = r[8] if tem_pag else None
+        link = r[9] if tem_pag else None
+        if pago:
+            rotulo += " · Pago ✓"
+        elif forma == "pagar_agora":
+            rotulo += " · Aguardando pagamento"
+        out.append({
+            "id": r[0], "status": status, "grupo": grupo,
+            "status_rotulo": rotulo, "criado_em": r[2],
+            "total_centavos": int(r[3] or 0),
+            "fornecedor_nome": r[4], "fornecedor_slug": r[5],
+            "qtd_itens": int(r[6] or 0),
+            "pago": pago, "forma_pagamento": forma,
+            "pagamento_link_url": link,
+        })
+    return out
+
+
+def pedidos_do_cliente(pool, cliente_id: int, fornecedor_id: int) -> list[dict]:
+    """Formato compacto pra aba 'Meus pedidos' DENTRO da loja do fornecedor."""
+    ped = listar_do_cliente(pool, cliente_id, fornecedor_id)[:5]
+    out = []
+    for p in ped:
+        data = ""
+        try:
+            data = p["criado_em"].strftime("%d/%m") if p["criado_em"] else ""
+        except Exception:
+            data = str(p["criado_em"] or "")[:10]
+        out.append({"code": str(p["id"]), "status": p["status_rotulo"],
+                    "data": data, "total_centavos": p["total_centavos"]})
+    return out
 
 
 def listar_para_fornecedor(pool, fornecedor_id: int,

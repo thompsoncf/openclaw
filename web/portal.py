@@ -224,7 +224,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
   {% set _tem_app = conta and conta[4] and conta[4] != 'zaq_cesta' %}
   {% set _tem_cesta = (conta and conta[10]) or tem_cesta %}
   {% if _tem_app %}<a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/painel/compras">Compras</a>{% endif %}
-  {% if _tem_cesta %}<a href="/painel/assinaturas">🧺 Minhas cestas</a><a href="/painel/meu-plano">Meu plano</a>{% endif %}
+  {% if _tem_cesta %}<a href="/painel/assinaturas">🧺 Minhas cestas</a><a href="/painel/meus-pedidos">🛍️ Meus pedidos</a><a href="/painel/meu-plano">Meu plano</a>{% endif %}
   {% if conta and conta[8] %}<a href="/painel/fornecedor">👨‍🌾 Fornecedor</a>{% endif %}
   <a href="/sair">Sair</a>
 {% else %}<a href="/login">Entrar</a><a href="/cadastro">Criar conta</a>{% endif %}
@@ -2530,7 +2530,9 @@ _LOJA_CONFIRMAR_NOVO = """{% extends "base" %}{% block conteudo %}
 
 _MEUS_PEDIDOS = """{% extends "base" %}{% block conteudo %}
 <div style="max-width:920px;margin:0 auto">
-  <h2 style="margin-bottom:1.5rem">🧾 Meus pedidos</h2>
+  <h2 style="margin-bottom:.4rem">🛍️ Meus pedidos</h2>
+  <p class="mut" style="margin-bottom:1.5rem;font-size:.86rem">Compras avulsas feitas nas lojas — cada pedido é único, sem recorrência.
+  Suas cestas por assinatura (entrega recorrente) ficam em <a href="/painel/assinaturas" style="color:#5dcaa5">🧺 Minhas cestas</a>.</p>
   {% if not pedidos %}
   <div class="card" style="text-align:center">
     <p class="mut">Você ainda não tem pedidos. <a href="/" style="color:#5dcaa5">Explorar fornecedores</a></p>
@@ -2557,7 +2559,10 @@ _MEUS_PEDIDOS = """{% extends "base" %}{% block conteudo %}
             </div>
             <div style="text-align:right">
               <span style="display:inline-block;background:#15301f;color:#5dcaa5;padding:4px 10px;border-radius:16px;font-size:11px;border:1px solid #1d9e7544">{{ p.status_rotulo }}</span>
-              <a href="/painel/meu-pedido/{{ p.id }}" style="display:block;margin-top:8px;font-size:12px;color:#5dcaa5;text-decoration:none">Detalhar →</a>
+              <a href="/pedido-enviado/{{ p.id }}" style="display:block;margin-top:8px;font-size:12px;color:#5dcaa5;text-decoration:none">Detalhar →</a>
+              {% if p.forma_pagamento == 'pagar_agora' and not p.pago and p.grupo == 'em_aberto' %}
+              <a href="/pedido/{{ p.id }}/pagar" style="display:inline-block;margin-top:8px;background:#c99536;color:#1a1206;padding:6px 12px;border-radius:8px;font-size:11.5px;font-weight:700;text-decoration:none">⚡ Pagar agora</a>
+              {% endif %}
             </div>
           </div>
         </div>
@@ -2609,7 +2614,9 @@ _ATIVAR_APP = """{% extends "base" %}{% block conteudo %}
 {% endblock %}"""
 
 _PAINEL_ASSINATURAS = """{% extends "base" %}{% block conteudo %}
-<div class="card larga"><h2>Minhas assinaturas</h2>
+<div class="card larga"><h2>🧺 Minhas cestas (assinaturas)</h2>
+<p class="mut" style="margin-top:-.3rem;margin-bottom:1rem;font-size:.86rem">Entrega recorrente: você recebe e paga por período, sem refazer o pedido.
+Suas compras avulsas nas lojas ficam em <a href="/painel/meus-pedidos" style="color:#5dcaa5">🛍️ Meus pedidos</a>.</p>
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
 {% if erro_asaas %}<div class="erro" style="margin-bottom:1rem;font-size:.85rem">⚠️ Asaas: {{ erro_asaas }}</div>{% endif %}
 {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
@@ -3612,6 +3619,7 @@ _env = Environment(loader=DictLoader({
     "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
+_env.filters["brl"] = brl
 from finance.models import canonizar_categoria, categorias_de
 _env.globals["canon"] = lambda c, t="despesa": canonizar_categoria(c, t)
 _env.globals["categorias_de"] = categorias_de

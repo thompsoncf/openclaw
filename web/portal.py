@@ -2139,14 +2139,12 @@ _LOJA = """<!doctype html>
         <span style="font-size:15px;color:#2f7d32;font-weight:700">R$ {{ "%.2f"|format(eff/100) }}</span><span style="font-size:11px;color:#8a938a;font-weight:400">/{{ p.unidade }}</span>
       </div>
       {% if fornecedor.desconto_pix_pct %}<div style="font-size:11px;color:#31772f;margin-top:2px">no Pix <strong>R$ {{ "%.2f"|format(eff*(1-(fornecedor.desconto_pix_pct or 0)/100)/100) }}</strong></div>{% endif %}
-      <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:4px;background:#f4f6f2;border:1px solid #e2e7dd;border-radius:9px;padding:3px;flex:1;min-width:0">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:4px;background:#f4f6f2;border:1px solid #e2e7dd;border-radius:9px;padding:3px;margin-top:10px">
           <button onclick="szDec({{ p.id }},'{{ p.unidade }}')" style="width:28px;height:28px;border-radius:7px;background:#e6e9e2;color:#3a463a;border:0;font-size:17px;cursor:pointer;line-height:1;flex-shrink:0">−</button>
           <span id="sel-{{ p.id }}" style="font-size:13px;color:#23301f;font-weight:600;text-align:center">{% if p.unidade in ['unidade','duzia','maco','bandeja','pacote'] %}1{% else %}0,5{% endif %}</span>
           <button onclick="szInc({{ p.id }},'{{ p.unidade }}')" style="width:28px;height:28px;border-radius:7px;background:#e6e9e2;color:#3a463a;border:0;font-size:17px;cursor:pointer;line-height:1;flex-shrink:0">+</button>
-        </div>
-        <button onclick="szAdd({{ p.id }},'{{ p.unidade }}')" title="Adicionar" style="width:40px;height:36px;border-radius:9px;background:#2f7d32;color:#fff;border:0;cursor:pointer;flex-shrink:0;font-size:18px">🛒</button>
       </div>
+      <button onclick="szAdd({{ p.id }},'{{ p.unidade }}')" style="display:flex;align-items:center;justify-content:center;gap:7px;width:100%;margin-top:7px;height:36px;border-radius:9px;background:#2f7d32;color:#fff;border:0;cursor:pointer;font-size:12.5px;font-weight:700;font-family:inherit"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg>Adicionar</button>
       <div data-incart="{{ p.id }}" style="display:none;font-size:10.5px;color:#31772f;font-weight:600;margin-top:6px">✓ <span></span> no carrinho</div>
     </div>
   </div>
@@ -2409,20 +2407,34 @@ function syncCards(){
   });
 }
 
+function recalcLocal(){
+  var sub=0;(CART.itens||[]).forEach(function(i){sub+=i.total||0;});
+  CART.subtotal=sub; CART.total=sub+(CART.itens&&CART.itens.length?(CART.taxa||0):0);
+}
 function szRemove(pid){
-  fetch('/f/'+SLUG+'/carrinho/qtd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:pid,quantidade:0})}).then(function(r){return r.json();}).then(function(d){CART=d;renderCart();syncCards();}).catch(function(e){console.error(e);});
+  CART.itens=(CART.itens||[]).filter(function(i){return i.produto_id!==pid;});
+  recalcLocal(); renderCart(); syncCards();
+  fetch('/f/'+SLUG+'/carrinho/qtd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:pid,quantidade:0})})
+    .then(function(r){return r.json();}).then(function(d){CART=d;renderCart();syncCards();}).catch(function(e){console.error(e);});
 }
 async function szLimpar(){
   var itens=(CART.itens||[]).slice();
-  for(var i=0;i<itens.length;i++){
-    try{var r=await fetch('/f/'+SLUG+'/carrinho/qtd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:itens[i].produto_id,quantidade:0})});CART=await r.json();}catch(e){}
-  }
-  renderCart();syncCards();
+  CART.itens=[]; recalcLocal(); renderCart(); syncCards();
+  try{
+    var r=await fetch('/f/'+SLUG+'/carrinho/limpar',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+    if(r.ok){CART=await r.json();}
+    else{
+      await Promise.all(itens.map(function(it){
+        return fetch('/f/'+SLUG+'/carrinho/qtd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:it.produto_id,quantidade:0})});
+      }));
+    }
+  }catch(e){console.error(e);}
+  renderCart(); syncCards();
 }
 function renderCart(){
   var box=document.getElementById('sz-cart');
   var n=(CART.itens||[]).length;
-  var h='<div style="font-size:15px;color:#1a2417;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px">🛒 Carrinho';
+  var h='<div style="font-size:15px;color:#1a2417;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:9px"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#2f7d32" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg>Seu pedido';
   if(n)h+='<span style="background:#31772f;color:#fff;font-size:11px;font-weight:700;padding:1px 8px;border-radius:12px;margin-left:auto">'+n+'</span>';
   h+='</div>';
   if(n)h+='<div style="text-align:right;margin:-10px 0 10px"><button onclick="szLimpar()" style="border:0;background:none;color:#a3aca0;font-size:11px;cursor:pointer;text-decoration:underline;font-family:inherit">limpar carrinho</button></div>';
@@ -2431,11 +2443,11 @@ function renderCart(){
   if(FRETEG>0){
     var falta=FRETEG-sub, gratis=falta<=0, pct=Math.min(100,Math.round(sub/FRETEG*100));
     h+='<div style="margin-bottom:14px">';
-    h+=gratis?'<div style="font-size:12px;color:#31772f;font-weight:600;margin-bottom:6px">✓ Você ganhou frete grátis!</div>':'<div style="font-size:11.5px;color:#6b7669;margin-bottom:6px">Faltam <strong style="color:#31772f">'+brl(falta)+'</strong> pro frete grátis</div>';
+    h+=gratis?'<div style="font-size:12px;color:#31772f;font-weight:600;margin-bottom:6px">🚚 Você ganhou frete grátis!</div>':'<div style="font-size:11.5px;color:#6b7669;margin-bottom:6px">Faltam <strong style="color:#31772f">'+brl(falta)+'</strong> pro frete grátis</div>';
     h+='<div style="height:7px;background:#e6ebe2;border-radius:5px;overflow:hidden"><div style="height:100%;width:'+pct+'%;background:'+(gratis?'#2f7d32':'#7bbf5a')+'"></div></div></div>';
   }
   (CART.itens||[]).forEach(function(it){
-    h+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;padding:8px 0;border-bottom:1px solid #e7eae5"><span style="color:#5b6659;flex:1;min-width:0">'+fmtQ(it.qtd)+it.unidade+' '+it.nome+'</span><span style="color:#1a2417;white-space:nowrap;font-weight:500">'+brl(it.total)+'</span><button onclick="szRemove('+it.produto_id+')" title="Remover" style="border:0;background:none;color:#c0603f;cursor:pointer;font-size:14px;line-height:1;padding:0 2px;font-family:inherit">✕</button></div>';
+    h+='<div style="display:flex;align-items:center;gap:9px;font-size:12px;padding:9px 0;border-bottom:1px solid #e7eae5"><span style="flex-shrink:0;min-width:44px;text-align:center;background:#eef6ea;color:#31772f;font-weight:700;font-size:11px;border-radius:7px;padding:3px 6px">'+fmtQ(it.qtd)+it.unidade+'</span><span style="color:#3a463a;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+it.nome+'</span><span style="color:#1a2417;white-space:nowrap;font-weight:600">'+brl(it.total)+'</span><button onclick="szRemove('+it.produto_id+')" title="Remover item" style="flex-shrink:0;width:24px;height:24px;border-radius:50%;border:1px solid #ecd9d0;background:#fdf6f3;color:#c0603f;cursor:pointer;font-size:12px;line-height:1;font-family:inherit">✕</button></div>';
   });
   h+='<div style="font-size:12.5px;color:#8a938a;line-height:2.1;margin-top:10px">';
   h+='<div style="display:flex;justify-content:space-between"><span>Subtotal</span><span style="color:#1a2417">'+brl(sub)+'</span></div>';

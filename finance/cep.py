@@ -1,14 +1,23 @@
-"""Descobre cidade/UF a partir do CEP, via BrasilAPI.
+"""Descobre cidade/UF/rua/bairro a partir do CEP, via BrasilAPI.
 
-Usado no cadastro pra NAO obrigar a pessoa a escolher cidade numa lista.
-Ela digita o CEP; aqui a gente descobre cidade e estado e monta a chave de
-regiao que o banco de precos usa (ex: "teresina-pi").
+Usado no cadastro pra NAO obrigar a pessoa a escolher cidade numa lista
+(ela digita o CEP; aqui a gente descobre cidade/estado e monta a chave de
+regiao que o banco de precos usa, ex: "teresina-pi") e tambem no checkout
+da loja pra AUTOPREENCHER rua e bairro (a pessoa so completa numero e
+complemento).
+
+BrasilAPI v2 ja' devolve street/neighborhood (rua/bairro) alem de city/state;
+antes a gente so aproveitava city/state. Agora expomos rua/bairro tambem.
+Campos rua/bairro podem vir VAZIOS (CEP de cidade pequena ou CEP unico de
+bairro grande cobre area ampla) - nesse caso o formulario deixa a pessoa
+preencher a mao. Por isso rua/bairro sao sempre string (nunca None).
 
 Tolerante a falha: se o CEP for invalido, a API cair, ou a rede falhar, retorna
-None - o cadastro segue sem travar (cidade fica vazia e pode ser ajustada depois).
+None - o cadastro/checkout segue sem travar (cidade fica vazia e pode ser
+ajustada depois).
 
 BrasilAPI ja' esta' liberada no Render. (No sandbox de teste local ela e'
-bloqueada, entao a logica e' testada com mock.)
+bloqueada, entao a logica de parse e' testada com mock via _montar().)
 """
 from __future__ import annotations
 
@@ -36,11 +45,37 @@ def _slug(cidade: str, uf: str) -> str:
     return base
 
 
-def consultar(cep: str | None) -> dict | None:
-    """Consulta o CEP e devolve {'cidade','uf','regiao','rotulo'} ou None.
+def _montar(dados: dict) -> dict | None:
+    """Normaliza a resposta crua da BrasilAPI num dict estavel (ou None).
 
-    - regiao: chave normalizada pro banco de precos (ex: 'teresina-pi')
-    - rotulo: nome amigavel (ex: 'Teresina - PI')
+    Separado de consultar() so pra ser testavel sem rede.
+    """
+    cidade = (dados.get("city") or "").strip()
+    uf = (dados.get("state") or "").strip().upper()
+    if not cidade or not uf:
+        return None
+    return {
+        "cidade": cidade,
+        "uf": uf,
+        "rua": (dados.get("street") or "").strip(),
+        "bairro": (dados.get("neighborhood") or "").strip(),
+        "regiao": _slug(cidade, uf),
+        "rotulo": f"{cidade} - {uf}",
+    }
+
+
+def consultar(cep: str | None) -> dict | None:
+    """Consulta o CEP e devolve dict normalizado ou None.
+
+    Retorno:
+      {
+        'cidade': 'Teresina',
+        'uf': 'PI',
+        'rua': 'Rua Sao Pedro',   # pode ser '' (CEP amplo)
+        'bairro': 'Centro',        # pode ser '' (CEP amplo)
+        'regiao': 'teresina-pi',   # chave normalizada pro banco de precos
+        'rotulo': 'Teresina - PI', # nome amigavel
+      }
     """
     digs = _so_digitos(cep)
     if len(digs) != 8:
@@ -52,17 +87,8 @@ def consultar(cep: str | None) -> dict | None:
         )
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as r:
             dados = json.loads(r.read().decode("utf-8"))
-    except Exception as e:  # noqa: BLE001 - nunca trava o cadastro
+    except Exception as e:  # noqa: BLE001 - nunca trava o cadastro/checkout
         _log.info("cep %s falhou: %s: %s", digs, type(e).__name__, e)
         return None
 
-    cidade = (dados.get("city") or "").strip()
-    uf = (dados.get("state") or "").strip().upper()
-    if not cidade or not uf:
-        return None
-    return {
-        "cidade": cidade,
-        "uf": uf,
-        "regiao": _slug(cidade, uf),
-        "rotulo": f"{cidade} - {uf}",
-    }
+    return _montar(dados)

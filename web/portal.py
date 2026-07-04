@@ -2514,10 +2514,19 @@ _LOJA_CONFIRMAR_NOVO = """{% extends "base" %}{% block conteudo %}
     <input name="senha" type="password" required placeholder="mínimo 8 caracteres" style="width:100%;margin-bottom:.6rem">
     <label>📱 WhatsApp (com DDD) <span class="mut" style="font-size:.8rem">— pra avisar do seu pedido</span></label>
     <input name="whatsapp" required placeholder="86 98888-7777" maxlength="20" style="width:100%;margin-bottom:.6rem">
+    {% if contexto == "carrinho" %}
+    <input type="hidden" name="cep" value="{{ cep_pre|default('') }}">
+    <input type="hidden" name="endereco" value="{{ endereco_pre|default('') }}">
+    <div class="mut" style="font-size:.82rem;margin-bottom:1rem;padding:.55rem .7rem;background:#f2f5f0;border-radius:8px;line-height:1.4">
+      📍 Entrega em: {{ endereco_pre|default('') or "endereço do passo anterior" }}
+      <a href="/f/{{ slug }}/carrinho/revisar" style="color:#1d9e75;margin-left:6px;white-space:nowrap">editar</a>
+    </div>
+    {% else %}
     <label>CEP</label>
     <input name="cep" required placeholder="64000-000" style="width:100%;margin-bottom:.6rem">
     <label>Endereço</label>
     <input name="endereco" required placeholder="Rua X, nº 123, bairro" style="width:100%;margin-bottom:1rem">
+    {% endif %}
     <button style="background:#1d9e75;color:#fff;padding:.7rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:600;font-size:.95rem">
       {{ btn_text }}
     </button>
@@ -3590,13 +3599,30 @@ _REVISAR = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
     <span>no Pix na entrega (−{{ "%.0f"|format(pix_pct) }}%)</span><span style="font-weight:700">R$ {{ "%.2f"|format(car["total_centavos"]*(1-pix_pct/100)/100) }}</span></div>{% endif %}
 </div>
 
-<form method="post" action="/f/{{ slug }}/carrinho/checkout">
+<form method="post" action="/f/{{ slug }}/carrinho/checkout" id="rzform" onsubmit="return rzCompose()">
   <div class="rz-card">
     <div class="rz-tit">Entrega</div>
-    <label style="font-size:12.5px;color:#3a463a;font-weight:500">Endereço</label>
-    <input name="endereco" required placeholder="Rua, número, bairro" value="{{ endereco_pre }}" style="margin:5px 0 12px">
+    <button type="button" id="rzgps" style="width:100%;background:#0f7d5c;color:#fff;border:0;border-radius:10px;padding:12px;font-size:13.5px;font-weight:600;cursor:pointer;margin-bottom:12px">📍 <span id="rzgpstxt">Usar minha localização</span></button>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;color:#8a938a;font-size:12px"><div style="flex:1;height:1px;background:#e7eae5"></div>ou digite o CEP<div style="flex:1;height:1px;background:#e7eae5"></div></div>
+    <label style="font-size:12.5px;color:#3a463a;font-weight:500">CEP</label>
+    <input id="rzcep" inputmode="numeric" maxlength="9" placeholder="64000-000" autocomplete="off" value="{{ cep_pre|default('') }}" style="margin:5px 0 12px">
+    <div style="display:flex;gap:8px">
+      <div style="flex:1"><label style="font-size:12.5px;color:#3a463a;font-weight:500">Rua</label>
+        <input id="rzrua" placeholder="Rua" value="{{ endereco_pre }}" style="margin:5px 0 12px"></div>
+      <div style="width:96px"><label style="font-size:12.5px;color:#3a463a;font-weight:500">Número</label>
+        <input id="rznum" inputmode="numeric" placeholder="123" style="margin:5px 0 12px"></div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <div style="flex:1"><label style="font-size:12.5px;color:#3a463a;font-weight:500">Bairro</label>
+        <input id="rzbairro" placeholder="Bairro" style="margin:5px 0 12px"></div>
+      <div style="flex:1"><label style="font-size:12.5px;color:#3a463a;font-weight:500">Complemento</label>
+        <input id="rzcompl" placeholder="apto, bloco…" style="margin:5px 0 12px"></div>
+    </div>
+    <div id="rzcidade" style="font-size:12px;color:#31772f;margin-bottom:8px"></div>
     <label style="font-size:12.5px;color:#3a463a;font-weight:500">Observação (opcional)</label>
     <textarea name="obs" rows="2" placeholder="Ex: deixar na portaria" style="margin-top:5px;resize:none">{{ obs_pre }}</textarea>
+    <input type="hidden" name="endereco" id="rzendereco">
+    <input type="hidden" name="cep" id="rzcephidden" value="{{ cep_pre|default('') }}">
   </div>
   <div class="rz-card">
     <div class="rz-tit">Pagamento</div>
@@ -3612,7 +3638,57 @@ _REVISAR = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
     <a href="/login?next=/f/{{ slug }}/carrinho/materializar" style="color:#2f7d32;font-weight:600">Entrar</a></div>
   {% else %}<div style="text-align:center;font-size:12px;color:#8a938a;margin-top:10px">Você recebe a confirmação do fornecedor em seguida.</div>{% endif %}
 </form>
-<script>function fp(r){document.querySelectorAll('.rz-fp').forEach(function(l){l.classList.toggle('on', l.contains(r) && r.checked);});}</script>
+<script>
+function fp(r){document.querySelectorAll('.rz-fp').forEach(function(l){l.classList.toggle('on', l.contains(r) && r.checked);});}
+(function(){
+  var $=function(id){return document.getElementById(id);};
+  function maskCep(v){v=(v||'').replace(/[^0-9]/g,'').slice(0,8);return v.length>5?v.slice(0,5)+'-'+v.slice(5):v;}
+  function setCidade(c,uf,cep){var t=c?(c+(uf?' - '+uf:'')):'';if(cep){t+=(t?'  ·  ':'')+cep;}$('rzcidade').textContent=t;}
+  function fill(d){
+    if(d.rua){$('rzrua').value=d.rua;}
+    if(d.bairro){$('rzbairro').value=d.bairro;}
+    var cepfmt=d.cep?maskCep(d.cep):'';
+    setCidade(d.cidade,d.uf,cepfmt);
+    if(d.cep){$('rzcephidden').value=(''+d.cep).replace(/[^0-9]/g,'');$('rzcep').value=cepfmt;}
+    if(d.rua){$('rznum').focus();}else{$('rzrua').focus();}
+  }
+  var cep=$('rzcep');
+  if(cep){cep.addEventListener('input',function(){
+    cep.value=maskCep(cep.value);var digs=cep.value.replace(/[^0-9]/g,'');
+    $('rzcephidden').value=digs;
+    if(digs.length<8){return;}
+    fetch('/api/cep/'+digs).then(function(r){return r.json();}).then(function(d){
+      if(d&&d.ok){fill(d);}
+    }).catch(function(){});
+  });}
+  var gps=$('rzgps');
+  if(gps){gps.addEventListener('click',function(){
+    var txt=$('rzgpstxt');
+    if(!navigator.geolocation){txt.textContent='GPS indisponível — digite o CEP';return;}
+    txt.textContent='Obtendo localização…';gps.disabled=true;
+    navigator.geolocation.getCurrentPosition(function(pos){
+      fetch('/api/geo?lat='+pos.coords.latitude+'&lng='+pos.coords.longitude)
+        .then(function(r){return r.json();}).then(function(d){
+          gps.disabled=false;
+          if(d&&d.ok){txt.textContent='Localização encontrada ✓';fill(d);}
+          else{txt.textContent='Não achei — digite o CEP';}
+        }).catch(function(){gps.disabled=false;txt.textContent='Erro — digite o CEP';});
+    },function(err){
+      gps.disabled=false;
+      txt.textContent=(err&&err.code===1)?'Permissão negada — digite o CEP':'Não consegui — digite o CEP';
+    },{enableHighAccuracy:true,timeout:8000,maximumAge:0});
+  });}
+  window.rzCompose=function(){
+    var rua=($('rzrua').value||'').trim(),num=($('rznum').value||'').trim(),
+        bairro=($('rzbairro').value||'').trim(),compl=($('rzcompl').value||'').trim();
+    if(!rua){alert('Preencha a rua da entrega.');$('rzrua').focus();return false;}
+    var e=rua;if(num){e+=', '+num;}if(bairro){e+=', '+bairro;}if(compl){e+=' — '+compl;}
+    $('rzendereco').value=e;
+    if(!$('rzcephidden').value){$('rzcephidden').value=($('rzcep').value||'').replace(/[^0-9]/g,'');}
+    return true;
+  };
+})();
+</script>
 </div></body></html>"""
 
 _env = Environment(loader=DictLoader({
@@ -4399,7 +4475,7 @@ def carrinho_item(request: Request, slug: str, item_id: int,
 @router.post("/f/{slug}/carrinho/checkout")
 def carrinho_checkout(request: Request, slug: str,
                       endereco: str = Form(""), obs: str = Form(""),
-                      forma: str = Form("")):
+                      forma: str = Form(""), cep: str = Form("")):
     from finance import carrinho as car_mod
     formas_ok = {"entrega_pix", "entrega_cartao", "entrega_dinheiro", "pagar_agora"}
     if forma not in formas_ok:
@@ -4410,9 +4486,10 @@ def carrinho_checkout(request: Request, slug: str,
         cs["endereco"] = endereco
         cs["obs"] = obs
         cs["forma"] = forma
+        cs["cep"] = cep
         request.session["carrinho_sessao"] = cs
         return _render("loja_confirmar_novo", request, slug=slug, erro=None,
-                       contexto="carrinho")
+                       contexto="carrinho", endereco_pre=endereco, cep_pre=cep)
     cid = request.session.get("carrinho_id")
     if not cid:
         return RedirectResponse(f"/f/{slug}", status_code=303)
@@ -4565,6 +4642,32 @@ def carrinho_revisar(request: Request, slug: str):
     return _render("revisar", request, slug=slug, loja=forn[1],
                    pix_pct=float(forn[2] or 0), car=car, anon=False,
                    endereco_pre=end_pre, obs_pre=car.get("obs") or "")
+
+
+@router.get("/api/cep/{cep}")
+def api_cep(cep: str):
+    """CEP -> endereco (autopreenchimento do checkout). JSON tolerante a falha."""
+    from finance import cep as _cep
+    info = _cep.consultar(cep)
+    if not info:
+        return JSONResponse({"ok": False})
+    return JSONResponse({
+        "ok": True, "rua": info.get("rua", ""), "bairro": info.get("bairro", ""),
+        "cidade": info["cidade"], "uf": info["uf"],
+    })
+
+
+@router.get("/api/geo")
+def api_geo(lat: float = 0.0, lng: float = 0.0):
+    """lat/lng -> endereco ("usar minha localizacao"). JSON tolerante a falha."""
+    from finance import geo as _geo
+    info = _geo.reverse(lat, lng)
+    if not info:
+        return JSONResponse({"ok": False})
+    return JSONResponse({
+        "ok": True, "rua": info.get("rua", ""), "bairro": info.get("bairro", ""),
+        "cidade": info["cidade"], "uf": info["uf"], "cep": info.get("cep", ""),
+    })
 
 
 @router.get("/pedido-enviado/{carrinho_id}", response_class=HTMLResponse)

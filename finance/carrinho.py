@@ -163,6 +163,17 @@ def remover_item(pool, carrinho_id: int, item_id: int) -> dict:
     return atualizar_quantidade(pool, carrinho_id, item_id, 0)
 
 
+def esvaziar(pool, carrinho_id: int) -> dict:
+    """Remove TODOS os itens de uma vez (1 transacao, 1 roundtrip).
+    Muito mais rapido que remover item a item."""
+    with pool.connection() as c:
+        c.execute("delete from carrinho_itens where carrinho_id = %s",
+                  (carrinho_id,))
+        tot = _recalcular(c, carrinho_id)
+        c.commit()
+    return tot
+
+
 def ver(pool, carrinho_id: int) -> dict | None:
     """Retorna o carrinho com itens e totais. None se não existe."""
     with pool.connection() as c:

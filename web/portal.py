@@ -4224,6 +4224,37 @@ def carrinho_qtd(request: Request, slug: str, dados: dict = Body(...)):
     })
 
 
+@router.post("/f/{slug}/carrinho/limpar")
+def carrinho_limpar(request: Request, slug: str):
+    """Esvazia o carrinho INTEIRO em 1 chamada (sessao ou logado)."""
+    from finance import carrinho as car_mod
+    pool = get_pool()
+    with pool.connection() as c:
+        forn = c.execute(
+            "select id, coalesce(taxa_entrega_centavos,0), coalesce(pedido_minimo_centavos,0) "
+            "from contas where fornecedor_slug=%s and eh_fornecedor",
+            (slug,),
+        ).fetchone()
+    if forn is None:
+        return JSONResponse({"erro": "fornecedor"}, status_code=404)
+    vazio = {"itens": [], "subtotal": 0, "taxa": int(forn[1] or 0),
+             "total": 0, "minimo": int(forn[2] or 0)}
+    conta = conta_logada(request)
+    if conta is None:
+        cs = request.session.get("carrinho_sessao")
+        if cs and cs.get("slug") == slug:
+            cs["itens"] = []
+            request.session["carrinho_sessao"] = cs
+        return JSONResponse(vazio)
+    cid = request.session.get("carrinho_id")
+    if cid:
+        try:
+            car_mod.esvaziar(pool, cid)
+        except Exception:
+            pass
+    return JSONResponse(vazio)
+
+
 @router.post("/f/{slug}/carrinho-sessao/item")
 def carrinho_sessao_item(request: Request, slug: str,
                          produto_id: int = Form(...), quantidade: float = Form(...)):

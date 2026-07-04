@@ -45,7 +45,7 @@ novo_loja = """<!doctype html>
 
 {% macro card_full(p) %}
 {% set eff = p.preco_promo_centavos if (p.em_promo and p.preco_promo_centavos) else p.preco_venda_centavos %}
-<div class="prodcard" data-nome="{{ p.nome }}" style="background:#fff;border:1px solid #e8ece5;border-radius:15px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 1px 3px rgba(20,40,15,.05)">
+<div class="prodcard" data-pid="{{ p.id }}" data-nome="{{ p.nome }}" data-preco="{{ eff }}" data-unidade="{{ p.unidade }}" style="background:#fff;border:1px solid #e8ece5;border-radius:15px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 1px 3px rgba(20,40,15,.05)">
   <div style="position:relative">
     <div class="sz-foto" style="height:118px;{% if p.foto_url %}background-image:url('{{ p.foto_url }}'){% endif %}">{% if not p.foto_url %}<span style="font-size:34px;opacity:.5">🥬</span>{% endif %}</div>
     {% if p.em_promo and p.preco_promo_centavos %}<span style="position:absolute;top:8px;left:8px;background:#f48b22;color:#fff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px">OFERTA</span>{% endif %}
@@ -73,7 +73,7 @@ novo_loja = """<!doctype html>
 
 {% macro card_shelf(p) %}
 {% set eff = p.preco_promo_centavos if (p.em_promo and p.preco_promo_centavos) else p.preco_venda_centavos %}
-<div class="prodcard sz-shelfcard" data-nome="{{ p.nome }}">
+<div class="prodcard sz-shelfcard" data-pid="{{ p.id }}" data-nome="{{ p.nome }}" data-preco="{{ eff }}" data-unidade="{{ p.unidade }}">
   <div style="position:relative">
     <div class="sz-foto" style="height:96px;{% if p.foto_url %}background-image:url('{{ p.foto_url }}'){% endif %}">{% if not p.foto_url %}<span style="font-size:28px;opacity:.5">🥬</span>{% endif %}</div>
     {% if p.em_promo and p.preco_promo_centavos %}<span style="position:absolute;top:6px;left:6px;background:#f48b22;color:#fff;font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px">OFERTA</span>{% endif %}
@@ -310,12 +310,36 @@ function szInc(pid,u){SEL[pid]=selQ(pid,u)+inc(u);document.getElementById('sel-'
 function szDec(pid,u){var v=selQ(pid,u)-inc(u);SEL[pid]=v<inc(u)?inc(u):v;document.getElementById('sel-'+pid).textContent=fmtQ(SEL[pid]);}
 function fmtQ(v){return (v%1===0)?v:v.toFixed(1).replace('.',',');}
 
-async function szAdd(pid,u){
-  var q=selQ(pid,u);
-  try{var r=await fetch('/f/'+SLUG+'/carrinho/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:pid,quantidade:q})});CART=await r.json();renderCart();syncCards();}catch(e){console.error(e);}
+var REQSEQ=0;
+function syncSrv(p){
+  var my=++REQSEQ;
+  p.then(function(r){return r.json();}).then(function(d){
+    if(my===REQSEQ && d && d.itens!==undefined){CART=d;renderCart();syncCards();}
+  }).catch(function(e){console.error(e);});
 }
-async function szQuick(pid,u){
-  try{var r=await fetch('/f/'+SLUG+'/carrinho/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:pid,quantidade:inc(u)})});CART=await r.json();renderCart();syncCards();}catch(e){console.error(e);}
+function prodInfo(pid){
+  var el=document.querySelector('[data-pid="'+pid+'"]');
+  if(!el)return null;
+  return {nome:el.getAttribute('data-nome')||'Produto',
+          preco:parseInt(el.getAttribute('data-preco'),10)||0,
+          unidade:el.getAttribute('data-unidade')||''};
+}
+function addLocal(pid,q){
+  var inf=prodInfo(pid); if(!inf)return;
+  CART.itens=CART.itens||[];
+  var it=null;for(var i=0;i<CART.itens.length;i++){if(CART.itens[i].produto_id===pid){it=CART.itens[i];break;}}
+  if(it){it.qtd=(it.qtd||0)+q;it.total=Math.round(inf.preco*it.qtd);}
+  else{CART.itens.push({produto_id:pid,nome:inf.nome,unidade:inf.unidade,qtd:q,total:Math.round(inf.preco*q)});}
+  recalcLocal();renderCart();syncCards();
+}
+function szAdd(pid,u){
+  var q=selQ(pid,u);
+  addLocal(pid,q);
+  syncSrv(fetch('/f/'+SLUG+'/carrinho/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:pid,quantidade:q})}));
+}
+function szQuick(pid,u){
+  addLocal(pid,inc(u));
+  syncSrv(fetch('/f/'+SLUG+'/carrinho/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:pid,quantidade:inc(u)})}));
 }
 
 function syncCards(){
@@ -334,22 +358,11 @@ function recalcLocal(){
 function szRemove(pid){
   CART.itens=(CART.itens||[]).filter(function(i){return i.produto_id!==pid;});
   recalcLocal(); renderCart(); syncCards();
-  fetch('/f/'+SLUG+'/carrinho/qtd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:pid,quantidade:0})})
-    .then(function(r){return r.json();}).then(function(d){CART=d;renderCart();syncCards();}).catch(function(e){console.error(e);});
+  syncSrv(fetch('/f/'+SLUG+'/carrinho/qtd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:pid,quantidade:0})}));
 }
-async function szLimpar(){
-  var itens=(CART.itens||[]).slice();
+function szLimpar(){
   CART.itens=[]; recalcLocal(); renderCart(); syncCards();
-  try{
-    var r=await fetch('/f/'+SLUG+'/carrinho/limpar',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
-    if(r.ok){CART=await r.json();}
-    else{
-      await Promise.all(itens.map(function(it){
-        return fetch('/f/'+SLUG+'/carrinho/qtd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:it.produto_id,quantidade:0})});
-      }));
-    }
-  }catch(e){console.error(e);}
-  renderCart(); syncCards();
+  syncSrv(fetch('/f/'+SLUG+'/carrinho/limpar',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}));
 }
 function renderCart(){
   var box=document.getElementById('sz-cart');
@@ -397,5 +410,5 @@ if len(achados)!=1:
     print(f"ABORTADO: {len(achados)} blocos _LOJA (esperado 1)."); sys.exit(1)
 novo=re.sub(r'_LOJA = """.*?(?:{% endblock %}|</html>)\s*"""', lambda m:'_LOJA = """'+novo_loja+'"""', src, count=1, flags=re.DOTALL)
 open(ALVO,"w",encoding="utf-8").write(novo)
-print("OK: _LOJA v3 (carrinho claro + resposta instantanea) aplicado")
-print('Pre-deploy: python -c "from web import portal; from finance import carrinho"')
+print("OK: _LOJA v3 (add instantaneo + guarda de sequencia) aplicado")
+print('Pre-deploy: python -c "from web import portal"')

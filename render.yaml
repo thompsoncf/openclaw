@@ -28,7 +28,7 @@ services:
     plan: standard
     numInstances: 1
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn web.app:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn web.app:app --host 0.0.0.0 --port $PORT --workers 2
     envVars:
       - key: OPENCLAW_MODEL
         value: claude-sonnet-4-6

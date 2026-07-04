@@ -3918,8 +3918,7 @@ def loja_fornecedor(request: Request, slug: str):
     tamanhos = cestas_mod.listar_tamanhos(pool, forn[0], so_ativos=True)
     produtos = cat_mod.listar_produtos(pool, forn[0], so_disponiveis=True)
     try:
-        _todos = cat_mod.listar_produtos(pool, forn[0], so_disponiveis=True)
-        sazonais = [p for p in _todos if p.get("sazonal")]
+        sazonais = [p for p in produtos if p.get("sazonal")]
     except Exception:
         sazonais = []
     mais_vendidos = []

@@ -33,6 +33,10 @@ logging.basicConfig(level=logging.INFO)
 app = FastAPI(title="OpenClaw")
 log = logging.getLogger("openclaw.web")
 
+# Compressao gzip: HTML/JSON acima de 1KB saem comprimidos (~75% menor no 4G)
+from starlette.middleware.gzip import GZipMiddleware
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
 # Portal (cadastro/login/painel) + sessao assinada por cookie
 from starlette.middleware.sessions import SessionMiddleware
 from web.portal import router as portal_router
@@ -56,6 +60,24 @@ app.include_router(portal_router)
 app.include_router(admin_router)
 app.include_router(precos_router)
 app.include_router(orcamento_router)
+
+_FAVICON_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">'
+    '<rect width="64" height="64" rx="14" fill="#0f7d5c"/>'
+    '<path d="M18 20 H42 L20 44 H44" stroke="#ffffff" stroke-width="6" '
+    'stroke-linecap="round" stroke-linejoin="round" fill="none"/>'
+    '<path d="M47 12 L49 17 L54 19 L49 21 L47 26 L45 21 L40 19 L45 17 Z" fill="#f48b22"/>'
+    "</svg>"
+)
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+@app.get("/favicon.svg", include_in_schema=False)
+def favicon():
+    from fastapi.responses import Response
+    return Response(content=_FAVICON_SVG, media_type="image/svg+xml",
+                    headers={"Cache-Control": "public, max-age=604800"})
+
 
 _pool = None
 _brain = None

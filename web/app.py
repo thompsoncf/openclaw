@@ -195,6 +195,11 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
     to = f"whatsapp:{numero}"
     try:
         achado = ct.membro_por_whatsapp(pool, numero)
+        if achado is not None and _codigo_convite((body or "").strip()) == (body or "").strip().upper():
+            # membro JA conectado mandou so' o codigo (1o acesso com o numero
+            # certo): confirma em vez de mandar pra IA interpretar.
+            _responder_whatsapp(to, "Voce ja esta conectado! – Manda um 'oi' que eu te ajudo 👋")
+            return
         if achado is None:
             # talvez a pessoa tenha mandado um CODIGO de convite
             cod = _codigo_convite(body)

@@ -282,7 +282,7 @@ _BEMVINDO = """{% extends "base" %}{% block conteudo %}
   {% else %}
   <div class="card" style="text-align:left">
     <p class="mut" style="margin:0 0 .85rem">Conecte seu Telegram pra conversar com seu assistente — registrar gastos, ver saldo, montar a lista de compras.</p>
-    <a href="https://t.me/{{ bot }}?text={{ codigo|urlencode }}" target="_blank" rel="noopener"
+    <a href="https://t.me/{{ bot }}?start={{ codigo|urlencode }}" target="_blank" rel="noopener"
        style="display:flex;align-items:center;justify-content:center;gap:8px;padding:.8rem;border-radius:8px;text-decoration:none;background:#2AABEE;color:#fff;font-weight:600;margin-bottom:8px">
        📨 Conectar meu Telegram</a>
     {% if whatsapp_bot_num %}
@@ -326,8 +326,8 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
 <div class="conv-invite">
   <div>🔑 <code>{{ m[5] }}</code></div>
   <div class="conv-links">
-    <a class="lk-tg" href="https://t.me/clawaladdin_bot?text={{ m[5]|urlencode }}" target="_blank" rel="noopener">📨 Telegram</a>
-    <button type="button" class="lk-copy" onclick="copiarConvite(this, 'https://t.me/clawaladdin_bot?text={{ m[5]|urlencode }}')">🔗 Copiar</button>
+    <a class="lk-tg" href="https://t.me/clawaladdin_bot?start={{ m[5]|urlencode }}" target="_blank" rel="noopener">📨 Telegram</a>
+    <button type="button" class="lk-copy" onclick="copiarConvite(this, 'https://t.me/clawaladdin_bot?start={{ m[5]|urlencode }}')">🔗 Copiar</button>
     {% if whatsapp_bot_num %}
     <a class="lk-wpp" href="https://wa.me/{{ whatsapp_bot_num }}?text={{ m[5]|urlencode }}" target="_blank" rel="noopener">🟢 WhatsApp</a>
     <button type="button" class="lk-copy" onclick="copiarConvite(this, 'https://wa.me/{{ whatsapp_bot_num }}?text={{ m[5]|urlencode }}')">🔗 Copiar</button>

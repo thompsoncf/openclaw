@@ -234,18 +234,27 @@ def resgatar_convite_canal(pool, codigo: str, canal: str, valor) -> tuple[bool, 
     else:
         return False, "Canal invalido."
     with pool.connection() as conn:
-        ja = conn.execute(
-            f"select 1 from membros where {coluna}=%s", (valor,)
-        ).fetchone()
-        if ja:
-            return False, f"Esse {rotulo} ja' esta vinculado a uma conta."
+        # O codigo identifica o membro; o canal e' SOBRESCRITO (o codigo existe
+        # justamente pra vincular o aparelho REAL – o numero digitado no
+        # cadastro pode estar errado e nao pode travar o vinculo).
         m = conn.execute(
-            f"select id, conta_id, nome, papel from membros "
-            f"where codigo_convite=%s and {coluna} is null",
+            "select id, conta_id, nome, papel from membros where codigo_convite=%s",
             (codigo,),
         ).fetchone()
         if not m:
+            # codigo inexistente/ja consumido. Se ESTE aparelho ja esta
+            # vinculado (ex: mandou o codigo duas vezes), confirma em vez de erro.
+            ja = conn.execute(
+                f"select 1 from membros where {coluna}=%s", (valor,)
+            ).fetchone()
+            if ja:
+                return True, "Voce ja esta conectado! – "
             return False, "Codigo invalido ou ja' utilizado."
+        outro = conn.execute(
+            f"select 1 from membros where {coluna}=%s and id<>%s", (valor, m[0])
+        ).fetchone()
+        if outro:
+            return False, f"Esse {rotulo} ja' esta vinculado a outra conta."
         conn.execute(
             f"update membros set {coluna}=%s, codigo_convite=null, ativo=true where id=%s",
             (valor, m[0]),
@@ -274,7 +283,7 @@ def gerar_convite_para(pool, membro_id: int, conta_id: int) -> str | None:
         ).fetchone()
         if not m or m[0] == "dono":
             return None
-        pref = "".join(ch for ch in (m[1] or "OPEN") if ch.isalnum())[:3].upper() or "OPC"
+        pref = "".join(ch for ch in (m[1] or "OPEN") if ch.isascii() and ch.isalnum())[:3].upper() or "OPC"
         codigo = f"{pref}-{secrets.token_hex(2).upper()}"
         conn.execute(
             "update membros set codigo_convite=%s, telegram_id=null, ativo=true where id=%s and conta_id=%s",
@@ -299,7 +308,7 @@ def regerar_acesso(pool, membro_id: int, conta_id: int) -> str | None:
         ).fetchone()
         if not m:
             return None
-        pref = "".join(ch for ch in (m[0] or "OPEN") if ch.isalnum())[:3].upper() or "OPC"
+        pref = "".join(ch for ch in (m[0] or "OPEN") if ch.isascii() and ch.isalnum())[:3].upper() or "OPC"
         codigo = f"{pref}-{secrets.token_hex(2).upper()}"
         conn.execute(
             "update membros set codigo_convite=%s, telegram_id=null, "
@@ -325,7 +334,7 @@ def gerar_convite_dono(pool, conta_id: int) -> str | None:
             (conta_id, conta_id)).fetchone()
         if not m or m[1] is not None:
             return None
-        pref = "".join(ch for ch in (m[2] or "OPEN") if ch.isalnum())[:3].upper() or "OPC"
+        pref = "".join(ch for ch in (m[2] or "OPEN") if ch.isascii() and ch.isalnum())[:3].upper() or "OPC"
         codigo = f"{pref}-{secrets.token_hex(2).upper()}"
         conn.execute("update membros set codigo_convite=%s where id=%s", (codigo, m[0]))
         conn.commit()

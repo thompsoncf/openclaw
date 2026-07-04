@@ -58,6 +58,12 @@ def _parece_convite(texto: str) -> bool:
     return bool(_re.fullmatch(r"[A-Z0-9]{2,4}-[A-F0-9]{4}", (texto or "").strip().upper()))
 
 
+def _extrair_convite(texto: str) -> str | None:
+    """Acha o codigo mesmo dentro de uma frase (ex: 'meu codigo e LAR-7K2M')."""
+    m = _re.search(r"\b([A-Z0-9]{2,4}-[A-F0-9]{4})\b", (texto or "").upper())
+    return m.group(1) if m else None
+
+
 def _degustar_tg(texto: str) -> str:
     from core.brain import Brain
     from finance.degustacao import responder_degustacao
@@ -112,6 +118,14 @@ def _agente_do(membro, conta):
 
 async def start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE):
     achado = ct.membro_por_telegram(_pool, update.effective_user.id)
+    # deep-link t.me/bot?start=CODIGO -> vincula sem digitar nada
+    payload = (_ctx.args[0].strip().upper() if getattr(_ctx, "args", None) else "")
+    if achado is None and _parece_convite(payload):
+        ok, msg = ct.resgatar_convite(_pool, payload, update.effective_user.id)
+        await update.message.reply_text(
+            (msg + "Manda um 'oi' que eu te ajudo! 👋") if ok else
+            (msg + "\n\nSe voce recebeu um codigo de convite, confira e tente de novo."))
+        return
     if achado is None:
         est = ct.lead_estado(_pool, "telegram", str(update.effective_user.id))
         msg = (_saudacao_lead(est["restantes"]) if est["pode_testar"]
@@ -137,13 +151,17 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
         return  # mensagem repetida: ja' tratada
 
     achado = ct.membro_por_telegram(_pool, update.effective_user.id)
+    if achado is not None and _parece_convite(texto or ""):
+        # membro JA conectado mandou so' o codigo: confirma em vez de ir pra IA
+        await update.message.reply_text("Voce ja esta conectado! 👋 Manda um 'oi' que eu te ajudo 😊")
+        return
     if achado is None:
-        # talvez seja um CODIGO DE CONVITE (ex: "LAR-7K2M")
-        possivel = (texto or "").strip().upper()
-        if _parece_convite(possivel):
+        # talvez seja um CODIGO DE CONVITE (ex: "LAR-7K2M"), mesmo dentro de frase
+        possivel = _extrair_convite(texto)
+        if possivel:
             ok, msg = ct.resgatar_convite(_pool, possivel, update.effective_user.id)
             await update.message.reply_text(
-                (msg + "Manda um 'oi' que eu te ajudo! 😊") if ok else
+                (msg + "Manda um 'oi' que eu te ajudo! 👋") if ok else
                 (msg + "\n\nSe voce recebeu um codigo de convite, confira e tente de novo."))
             return
         # --- LEAD (cliente novo em test-drive) ---

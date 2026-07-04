@@ -224,7 +224,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
   {% set _tem_app = conta and conta[4] and conta[4] != 'zaq_cesta' %}
   {% set _tem_cesta = (conta and conta[10]) or tem_cesta %}
   {% if _tem_app %}<a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/painel/compras">Compras</a>{% endif %}
-  {% if _tem_cesta %}<a href="/painel/assinaturas">🧺 Minhas cestas</a><a href="/painel/meus-pedidos">🛍️ Meus pedidos</a>{% endif %}
+  {% if _tem_cesta %}<a href="/painel/assinaturas">🧺 Minhas assinaturas</a><a href="/painel/meus-pedidos">🛍️ Meus pedidos</a>{% endif %}
   {% if conta and conta[8] %}<a href="/painel/fornecedor">👨‍🌾 Fornecedor</a>{% endif %}
   <a href="/sair">Sair</a>
 {% else %}<a href="/login">Entrar</a><a href="/cadastro">Criar conta</a>{% endif %}
@@ -2543,7 +2543,7 @@ _MEUS_PEDIDOS = """{% extends "base" %}{% block conteudo %}
 <div style="max-width:920px;margin:0 auto">
   <h2 style="margin-bottom:.4rem">🛍️ Meus pedidos</h2>
   <p class="mut" style="margin-bottom:1.5rem;font-size:.86rem">Compras avulsas feitas nas lojas — cada pedido é único, sem recorrência.
-  Suas cestas por assinatura (entrega recorrente) ficam em <a href="/painel/assinaturas" style="color:#5dcaa5">🧺 Minhas cestas</a>.</p>
+  Suas cestas por assinatura (entrega recorrente) ficam em <a href="/painel/assinaturas" style="color:#5dcaa5">🧺 Minhas assinaturas</a>.</p>
   {% if not pedidos %}
   <div class="card" style="text-align:center">
     <p class="mut">Você ainda não tem pedidos. <a href="/" style="color:#5dcaa5">Explorar fornecedores</a></p>
@@ -2625,8 +2625,8 @@ _ATIVAR_APP = """{% extends "base" %}{% block conteudo %}
 {% endblock %}"""
 
 _PAINEL_ASSINATURAS = """{% extends "base" %}{% block conteudo %}
-{% include "bloco_conta" %}
-<div class="card larga"><h2>🧺 Minhas cestas (assinaturas)</h2>
+{% if not (conta and conta[4] and conta[4] != 'zaq_cesta') %}{% include "bloco_conta" %}{% endif %}
+<div class="card larga"><h2>🧺 Minhas assinaturas</h2>
 <p class="mut" style="margin-top:-.3rem;margin-bottom:1rem;font-size:.86rem">Entrega recorrente: você recebe e paga por período, sem refazer o pedido.
 Suas compras avulsas nas lojas ficam em <a href="/painel/meus-pedidos" style="color:#5dcaa5">🛍️ Meus pedidos</a>.</p>
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
@@ -3725,7 +3725,7 @@ _BLOCO_CONTA = """
     <label>CEP</label>
     <input id="mdcep" inputmode="numeric" maxlength="9" placeholder="64000-000" autocomplete="off" value="{{ md_cep or '' }}" style="width:100%;margin-bottom:.6rem">
     <div style="display:flex;gap:.5rem">
-      <div style="flex:1"><label>Rua</label><input id="mdrua" placeholder="Rua" value="{{ md_endereco or '' }}" style="width:100%;margin-bottom:.6rem"></div>
+      <div style="flex:1"><label>Rua</label><input id="mdrua" placeholder="Rua" style="width:100%;margin-bottom:.6rem"></div>
       <div style="width:90px"><label>Número</label><input id="mdnum" inputmode="numeric" placeholder="123" style="width:100%;margin-bottom:.6rem"></div>
     </div>
     <div style="display:flex;gap:.5rem">

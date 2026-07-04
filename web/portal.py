@@ -224,7 +224,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
   {% set _tem_app = conta and conta[4] and conta[4] != 'zaq_cesta' %}
   {% set _tem_cesta = (conta and conta[10]) or tem_cesta %}
   {% if _tem_app %}<a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/painel/compras">Compras</a>{% endif %}
-  {% if _tem_cesta %}<a href="/painel/assinaturas">🧺 Minhas cestas</a><a href="/painel/meus-pedidos">🛍️ Meus pedidos</a><a href="/painel/meu-plano">Meu plano</a>{% endif %}
+  {% if _tem_cesta %}<a href="/painel/assinaturas">🧺 Minhas cestas</a><a href="/painel/meus-pedidos">🛍️ Meus pedidos</a>{% endif %}
   {% if conta and conta[8] %}<a href="/painel/fornecedor">👨‍🌾 Fornecedor</a>{% endif %}
   <a href="/sair">Sair</a>
 {% else %}<a href="/login">Entrar</a><a href="/cadastro">Criar conta</a>{% endif %}
@@ -311,7 +311,9 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
 <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;font-size:.95rem">💳 Assinar plano</button>
 </form>
 {% endif %}
-<h1 style="font-size:1.05rem;margin-top:1.4rem">Pessoas da conta</h1>
+</div>
+{% include "bloco_conta" %}
+<div class="card larga"><h1 style="font-size:1.05rem;margin-top:0">Pessoas da conta</h1>
 <div class="membros">
 {% for m in membros %}
 <div class="membro-row">
@@ -2623,6 +2625,7 @@ _ATIVAR_APP = """{% extends "base" %}{% block conteudo %}
 {% endblock %}"""
 
 _PAINEL_ASSINATURAS = """{% extends "base" %}{% block conteudo %}
+{% include "bloco_conta" %}
 <div class="card larga"><h2>🧺 Minhas cestas (assinaturas)</h2>
 <p class="mut" style="margin-top:-.3rem;margin-bottom:1rem;font-size:.86rem">Entrega recorrente: você recebe e paga por período, sem refazer o pedido.
 Suas compras avulsas nas lojas ficam em <a href="/painel/meus-pedidos" style="color:#5dcaa5">🛍️ Meus pedidos</a>.</p>
@@ -3691,8 +3694,96 @@ function fp(r){document.querySelectorAll('.rz-fp').forEach(function(l){l.classLi
 </script>
 </div></body></html>"""
 
+_BLOCO_CONTA = """
+<div class="card larga">
+  <h1 style="font-size:1.05rem;margin-top:0">Meus dados</h1>
+  {% if md_aviso %}<div class="ok">{{ md_aviso }}</div>{% endif %}
+  {% if md_erro %}<div class="erro">{{ md_erro }}</div>{% endif %}
+  <form method="post" action="/painel/dados">
+    <label>Nome</label>
+    <input name="nome" value="{{ md_nome or '' }}" required maxlength="80" style="width:100%;margin-bottom:.6rem">
+    <label>WhatsApp (com DDD)</label>
+    <input name="whatsapp" value="{{ md_whatsapp or '' }}" required maxlength="20" placeholder="86 98888-7777" style="width:100%;margin-bottom:.25rem">
+    <p class="mut" style="font-size:.76rem;margin:.1rem 0 .7rem">Trocar o número reenvia o código pra reconectar no bot.</p>
+    <button>Salvar dados</button>
+  </form>
+  <table style="width:100%;font-size:.85rem;margin-top:.7rem">
+    <tr><td class="mut" style="padding:.3rem 0">E-mail</td><td style="text-align:right">{{ md_email or '-' }}</td></tr>
+    <tr><td class="mut" style="padding:.3rem 0">Senha</td><td style="text-align:right"><a href="/senha" style="color:#5dcaa5">alterar senha</a></td></tr>
+  </table>
+  <p class="mut" style="font-size:.76rem;margin-top:.3rem">Alterar e-mail (com confirmação): em breve.</p>
+</div>
+
+<div class="card larga">
+  <h1 style="font-size:1.05rem;margin-top:0">📍 Meu endereço</h1>
+  <p class="mut" style="margin-bottom:.8rem">Mudou de casa? Atualize aqui — vira o padrão nos próximos pedidos.</p>
+  {% if md_endereco %}
+  <div style="background:#161617;border:1px solid #2a2a2b;border-radius:10px;padding:.7rem .9rem;margin-bottom:.9rem;font-size:.9rem">🏠 {{ md_endereco }}{% if md_cep %}<div class="mut" style="font-size:.8rem;margin-top:.2rem">CEP {{ md_cep }}</div>{% endif %}</div>
+  {% endif %}
+  <form method="post" action="/painel/endereco" id="mdform" onsubmit="return mdCompose()">
+    <button type="button" id="mdgps" style="width:100%;background:#0f7d5c;color:#fff;border:0;border-radius:9px;padding:.7rem;font-weight:600;cursor:pointer;margin-bottom:.7rem">📍 <span id="mdgpstxt">Usar minha localização</span></button>
+    <label>CEP</label>
+    <input id="mdcep" inputmode="numeric" maxlength="9" placeholder="64000-000" autocomplete="off" value="{{ md_cep or '' }}" style="width:100%;margin-bottom:.6rem">
+    <div style="display:flex;gap:.5rem">
+      <div style="flex:1"><label>Rua</label><input id="mdrua" placeholder="Rua" value="{{ md_endereco or '' }}" style="width:100%;margin-bottom:.6rem"></div>
+      <div style="width:90px"><label>Número</label><input id="mdnum" inputmode="numeric" placeholder="123" style="width:100%;margin-bottom:.6rem"></div>
+    </div>
+    <div style="display:flex;gap:.5rem">
+      <div style="flex:1"><label>Bairro</label><input id="mdbairro" placeholder="Bairro" style="width:100%;margin-bottom:.6rem"></div>
+      <div style="flex:1"><label>Complemento</label><input id="mdcompl" placeholder="apto, bloco…" style="width:100%;margin-bottom:.6rem"></div>
+    </div>
+    <div id="mdcidade" class="mut" style="font-size:.82rem;margin-bottom:.6rem"></div>
+    <input type="hidden" name="endereco" id="mdendereco">
+    <input type="hidden" name="cep" id="mdcephidden" value="{{ md_cep or '' }}">
+    <button>Salvar endereço</button>
+  </form>
+  <script>
+  (function(){
+    var $=function(id){return document.getElementById(id);};
+    function maskCep(v){v=(v||'').replace(/[^0-9]/g,'').slice(0,8);return v.length>5?v.slice(0,5)+'-'+v.slice(5):v;}
+    function setCidade(c,uf,cep){var t=c?(c+(uf?' - '+uf:'')):'';if(cep){t+=(t?'  ·  ':'')+cep;}$('mdcidade').textContent=t;}
+    function fill(d){
+      if(d.rua){$('mdrua').value=d.rua;}
+      if(d.bairro){$('mdbairro').value=d.bairro;}
+      var cf=d.cep?maskCep(d.cep):'';setCidade(d.cidade,d.uf,cf);
+      if(d.cep){$('mdcephidden').value=(''+d.cep).replace(/[^0-9]/g,'');$('mdcep').value=cf;}
+      if(d.rua){$('mdnum').focus();}else{$('mdrua').focus();}
+    }
+    var cep=$('mdcep');
+    if(cep){cep.addEventListener('input',function(){
+      cep.value=maskCep(cep.value);var digs=cep.value.replace(/[^0-9]/g,'');
+      $('mdcephidden').value=digs;if(digs.length<8){return;}
+      fetch('/api/cep/'+digs).then(function(r){return r.json();}).then(function(d){if(d&&d.ok){fill(d);}}).catch(function(){});
+    });}
+    var gps=$('mdgps');
+    if(gps){gps.addEventListener('click',function(){
+      var t=$('mdgpstxt');
+      if(!navigator.geolocation){t.textContent='GPS indisponível — digite o CEP';return;}
+      t.textContent='Obtendo localização…';gps.disabled=true;
+      navigator.geolocation.getCurrentPosition(function(pos){
+        fetch('/api/geo?lat='+pos.coords.latitude+'&lng='+pos.coords.longitude)
+          .then(function(r){return r.json();}).then(function(d){gps.disabled=false;
+            if(d&&d.ok){t.textContent='Localização encontrada ✓';fill(d);}else{t.textContent='Não achei — digite o CEP';}
+          }).catch(function(){gps.disabled=false;t.textContent='Erro — digite o CEP';});
+      },function(err){gps.disabled=false;t.textContent=(err&&err.code===1)?'Permissão negada — digite o CEP':'Não consegui — digite o CEP';},
+      {enableHighAccuracy:true,timeout:8000,maximumAge:0});
+    });}
+    window.mdCompose=function(){
+      var rua=($('mdrua').value||'').trim(),num=($('mdnum').value||'').trim(),bairro=($('mdbairro').value||'').trim(),compl=($('mdcompl').value||'').trim();
+      if(!rua){alert('Preencha a rua.');$('mdrua').focus();return false;}
+      var e=rua;if(num){e+=', '+num;}if(bairro){e+=', '+bairro;}if(compl){e+=' — '+compl;}
+      $('mdendereco').value=e;
+      if(!$('mdcephidden').value){$('mdcephidden').value=($('mdcep').value||'').replace(/[^0-9]/g,'');}
+      return true;
+    };
+  })();
+  </script>
+</div>
+"""
+
+
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 _env.filters["brl"] = brl
@@ -4052,6 +4143,7 @@ def painel(request: Request):
     # numero do WhatsApp bot (sem "whatsapp:+")
     whatsapp_from = (os.environ.get("TWILIO_WHATSAPP_FROM") or "").replace("whatsapp:+", "")
     return _render("painel", request, conta=conta, membros=membros, titulo="Painel",
+                   **_dados_bloco(pool, conta, request),
                    ativos=ativos, inclusos=inclusos, extra_pago=pode_extra,
                    pode_adicionar=pode_adicionar,
                    whatsapp_bot_num=whatsapp_from,
@@ -4689,6 +4781,79 @@ def pedido_enviado(request: Request, carrinho_id: int):
     return _render("pedido_enviado", request, carrinho=car, fornecedor_slug=forn_slug)
 
 
+def _dados_bloco(pool, conta, request):
+    """Contexto do bloco 'Meus dados + Meu endereco' (Painel e Minhas cestas)."""
+    with pool.connection() as c:
+        row = c.execute("select endereco, cep from contas where id=%s", (conta[0],)).fetchone()
+        zap = c.execute(
+            "select whatsapp_id from membros where conta_id=%s and papel=%s order by id limit 1",
+            (conta[0], "dono")).fetchone()
+    return {
+        "md_nome": conta[2], "md_email": conta[3],
+        "md_whatsapp": (zap[0] if zap else "") or "",
+        "md_endereco": (row[0] if row else "") or "",
+        "md_cep": (row[1] if row else "") or "",
+        "md_aviso": request.session.pop("md_aviso", None),
+        "md_erro": request.session.pop("md_erro", None),
+    }
+
+
+@router.post("/painel/dados")
+def painel_dados(request: Request, nome: str = Form(""), whatsapp: str = Form("")):
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    nome_val = (nome or "").strip()
+    if not nome_val:
+        request.session["md_erro"] = "O nome nao pode ficar vazio."
+        return RedirectResponse(request.headers.get("referer") or "/painel", status_code=303)
+    zap_novo = _normalizar_zap(whatsapp) if whatsapp else None
+    with pool.connection() as c:
+        dono = c.execute(
+            "select id, whatsapp_id from membros where conta_id=%s and papel=%s order by id limit 1",
+            (conta[0], "dono")).fetchone()
+        if zap_novo and dono and zap_novo != (dono[1] or ""):
+            ja = c.execute("select 1 from membros where whatsapp_id=%s and conta_id<>%s",
+                           (zap_novo, conta[0])).fetchone()
+            if ja:
+                request.session["md_erro"] = "Esse WhatsApp ja esta em outra conta."
+                return RedirectResponse(request.headers.get("referer") or "/painel", status_code=303)
+        c.execute("update contas set nome=%s where id=%s", (nome_val, conta[0]))
+        if dono:
+            if zap_novo and zap_novo != (dono[1] or ""):
+                c.execute("update membros set nome=%s, whatsapp_id=%s where id=%s",
+                          (nome_val, zap_novo, dono[0]))
+            else:
+                c.execute("update membros set nome=%s where id=%s", (nome_val, dono[0]))
+        c.commit()
+    if zap_novo and dono and zap_novo != (dono[1] or ""):
+        try:
+            ct.gerar_convite_dono(pool, conta[0])
+        except Exception:  # noqa: BLE001
+            pass
+        request.session["md_aviso"] = "Dados salvos. WhatsApp trocado — reconecte pelo bot com o codigo."
+    else:
+        request.session["md_aviso"] = "Dados salvos."
+    return RedirectResponse(request.headers.get("referer") or "/painel", status_code=303)
+
+
+@router.post("/painel/endereco")
+def painel_endereco(request: Request, endereco: str = Form(""), cep: str = Form("")):
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    endereco_val = (endereco or "").strip() or None
+    cep_val = "".join(ch for ch in (cep or "") if ch.isdigit()) or None
+    with pool.connection() as c:
+        c.execute("update contas set endereco=%s, cep=%s where id=%s",
+                  (endereco_val, cep_val, conta[0]))
+        c.commit()
+    request.session["md_aviso"] = "Endereco atualizado."
+    return RedirectResponse(request.headers.get("referer") or "/painel", status_code=303)
+
+
 @router.get("/painel/assinaturas", response_class=HTMLResponse)
 def painel_assinaturas(request: Request):
     from finance import assinaturas as assin_mod
@@ -4705,6 +4870,7 @@ def painel_assinaturas(request: Request):
         if forn_id not in tamanhos_por_fornecedor:
             tamanhos_por_fornecedor[forn_id] = cestas_mod.listar_tamanhos(pool, forn_id)
     return _render("painel_assinaturas", request, conta=conta, assinaturas=assinaturas,
+                   **_dados_bloco(pool, conta, request),
                    tamanhos_por_fornecedor=tamanhos_por_fornecedor,
                    erro=request.session.pop("erro", None),
                    aviso=request.session.pop("aviso", None))
@@ -4732,6 +4898,11 @@ def trocar_tamanho_assinatura(request: Request, assinatura_id: int,
 
 @router.get("/painel/meu-plano", response_class=HTMLResponse)
 def painel_meu_plano(request: Request):
+    # "Meu plano" foi absorvido por "Minhas cestas" (trocar/pagar/pausar ja estao la).
+    return RedirectResponse("/painel/assinaturas", status_code=303)
+
+
+def _painel_meu_plano_legado(request: Request):
     from finance import assinaturas as assin_mod
     from finance import cestas as cestas_mod
     pool = get_pool()

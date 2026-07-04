@@ -3546,8 +3546,70 @@ _PEDIDO_ENVIADO = """{% extends "base" %}{% block conteudo %}
 </div>
 {% endblock %}"""
 
+_REVISAR = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seu pedido · {{ loja }}</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>body{margin:0;background:#eef0ec;font-family:'Poppins',system-ui,sans-serif;color:#23301f}*{box-sizing:border-box}
+.rz{max-width:640px;margin:0 auto;padding:18px 14px 50px}
+.rz-card{background:#fff;border:1px solid #e8ece5;border-radius:16px;padding:20px;margin-bottom:14px;box-shadow:0 1px 3px rgba(20,40,15,.05)}
+.rz-tit{font-size:12px;font-weight:700;color:#31772f;text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px}
+.rz input,.rz textarea{width:100%;padding:11px 13px;background:#f8faf6;border:1px solid #e2e7dd;color:#23301f;border-radius:10px;font-size:13.5px;font-family:inherit;outline:none}
+.rz input:focus,.rz textarea:focus{border-color:#2f7d32}
+.rz-fp{display:flex;align-items:center;gap:11px;border:1.5px solid #e7eae5;border-radius:12px;padding:12px 14px;margin-bottom:8px;cursor:pointer;font-size:13.5px}
+.rz-fp input{width:auto}
+.rz-fp.on{border-color:#2f7d32;background:#eef6ea}
+</style></head><body><div class="rz">
+<a href="/f/{{ slug }}" style="display:inline-block;color:#31772f;text-decoration:none;font-size:13px;font-weight:500;margin-bottom:12px">← Voltar à loja</a>
+<h2 style="margin:0 0 4px;font-size:21px">Seu pedido</h2>
+<div style="font-size:13px;color:#6b7669;margin-bottom:16px">{{ loja }}</div>
+
+<div class="rz-card">
+  <div class="rz-tit">Itens</div>
+  {% for i in car["itens"] %}
+  <div style="display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:1px solid #f0f2ee;font-size:13px">
+    <span style="min-width:46px;text-align:center;background:#eef6ea;color:#31772f;font-weight:700;font-size:11px;border-radius:7px;padding:3px 6px">{{ i["quantidade"] }}{{ i["unidade"] }}</span>
+    <span style="flex:1">{{ i["nome"] }}</span>
+    <span style="font-weight:600">R$ {{ "%.2f"|format(i["total_centavos"]/100) }}</span>
+  </div>
+  {% endfor %}
+  <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7669;padding:9px 0 0">
+    <span>Subtotal</span><span>R$ {{ "%.2f"|format(car["subtotal_centavos"]/100) }}</span></div>
+  <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7669;padding:4px 0">
+    <span>Entrega</span><span>R$ {{ "%.2f"|format(car["taxa_centavos"]/100) }}</span></div>
+  <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:700;border-top:1px solid #e7eae5;margin-top:6px;padding-top:10px">
+    <span>Total</span><span style="color:#2f7d32">R$ {{ "%.2f"|format(car["total_centavos"]/100) }}</span></div>
+  {% if pix_pct %}<div style="display:flex;justify-content:space-between;font-size:12.5px;color:#31772f;padding-top:2px">
+    <span>no Pix na entrega (−{{ "%.0f"|format(pix_pct) }}%)</span><span style="font-weight:700">R$ {{ "%.2f"|format(car["total_centavos"]*(1-pix_pct/100)/100) }}</span></div>{% endif %}
+</div>
+
+<form method="post" action="/f/{{ slug }}/carrinho/checkout">
+  <div class="rz-card">
+    <div class="rz-tit">Entrega</div>
+    <label style="font-size:12.5px;color:#3a463a;font-weight:500">Endereço</label>
+    <input name="endereco" required placeholder="Rua, número, bairro" value="{{ endereco_pre }}" style="margin:5px 0 12px">
+    <label style="font-size:12.5px;color:#3a463a;font-weight:500">Observação (opcional)</label>
+    <textarea name="obs" rows="2" placeholder="Ex: deixar na portaria" style="margin-top:5px;resize:none">{{ obs_pre }}</textarea>
+  </div>
+  <div class="rz-card">
+    <div class="rz-tit">Pagamento</div>
+    <label class="rz-fp on"><input type="radio" name="forma" value="entrega_pix" checked onchange="fp(this)"> 💠 Pix na entrega{% if pix_pct %} <span style="color:#31772f;font-weight:700;margin-left:auto">R$ {{ "%.2f"|format(car["total_centavos"]*(1-pix_pct/100)/100) }}</span>{% endif %}</label>
+    <label class="rz-fp"><input type="radio" name="forma" value="entrega_cartao" onchange="fp(this)"> 💳 Cartão na entrega</label>
+    <label class="rz-fp"><input type="radio" name="forma" value="entrega_dinheiro" onchange="fp(this)"> 💵 Dinheiro na entrega</label>
+    <label class="rz-fp"><input type="radio" name="forma" value="pagar_agora" onchange="fp(this)"> ⚡ Pagar agora <span style="color:#8a938a;font-size:12px;margin-left:6px">Pix ou cartão online</span></label>
+  </div>
+  <button type="submit" style="width:100%;background:#f48b22;color:#fff;border:0;border-radius:12px;padding:15px;font-size:14.5px;font-weight:700;cursor:pointer;font-family:inherit">
+    {% if anon %}Continuar{% else %}Confirmar pedido{% endif %}</button>
+  {% if anon %}<div style="text-align:center;font-size:12.5px;color:#6b7669;margin-top:10px">
+    No próximo passo você entra ou cria sua conta rapidinho — o carrinho vai junto. Já tem conta?
+    <a href="/login?next=/f/{{ slug }}/carrinho/materializar" style="color:#2f7d32;font-weight:600">Entrar</a></div>
+  {% else %}<div style="text-align:center;font-size:12px;color:#8a938a;margin-top:10px">Você recebe a confirmação do fornecedor em seguida.</div>{% endif %}
+</form>
+<script>function fp(r){document.querySelectorAll('.rz-fp').forEach(function(l){l.classList.toggle('on', l.contains(r) && r.checked);});}</script>
+</div></body></html>"""
+
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 from finance.models import canonizar_categoria, categorias_de
@@ -3754,6 +3816,9 @@ def cadastro_envia(request: Request, background: BackgroundTasks,
 
 @router.get("/login", response_class=HTMLResponse)
 def login_form(request: Request):
+    nxt = request.query_params.get("next")
+    if nxt and nxt.startswith("/"):
+        request.session["next"] = nxt
     return _render("login", request, erro=None, aviso=None)
 
 
@@ -4325,13 +4390,18 @@ def carrinho_item(request: Request, slug: str, item_id: int,
 
 @router.post("/f/{slug}/carrinho/checkout")
 def carrinho_checkout(request: Request, slug: str,
-                      endereco: str = Form(""), obs: str = Form("")):
+                      endereco: str = Form(""), obs: str = Form(""),
+                      forma: str = Form("")):
     from finance import carrinho as car_mod
+    formas_ok = {"entrega_pix", "entrega_cartao", "entrega_dinheiro", "pagar_agora"}
+    if forma not in formas_ok:
+        forma = "entrega_pix"
     conta = conta_logada(request)
     if conta is None:
         cs = request.session.get("carrinho_sessao") or {}
         cs["endereco"] = endereco
         cs["obs"] = obs
+        cs["forma"] = forma
         request.session["carrinho_sessao"] = cs
         return _render("loja_confirmar_novo", request, slug=slug, erro=None,
                        contexto="carrinho")
@@ -4347,9 +4417,53 @@ def carrinho_checkout(request: Request, slug: str,
         else:
             request.session["erro_carrinho"] = r.get("erro", "Não foi possível enviar.")
         return RedirectResponse(f"/f/{slug}#carrinho", status_code=303)
+    try:
+        car_mod.registrar_pagamento(pool, cid, forma)
+    except Exception:
+        pass
     cid_feito = cid
     request.session.pop("carrinho_id", None)
+    if forma == "pagar_agora":
+        return RedirectResponse(f"/pedido/{cid_feito}/pagar", status_code=303)
     return RedirectResponse(f"/pedido-enviado/{cid_feito}", status_code=303)
+
+
+@router.get("/pedido/{carrinho_id}/pagar")
+def pedido_pagar(request: Request, carrinho_id: int):
+    """Gera (ou reaproveita) o link de pagamento Asaas do pedido e redireciona."""
+    from finance import carrinho as car_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    car = car_mod.ver(pool, carrinho_id)
+    if not car or car.get("cliente_id") != conta[0]:
+        return RedirectResponse("/painel", status_code=303)
+    try:
+        with pool.connection() as c:
+            r0 = c.execute("select pagamento_link_url from carrinhos where id=%s",
+                           (carrinho_id,)).fetchone()
+        if r0 and r0[0]:
+            return RedirectResponse(r0[0], status_code=303)
+    except Exception:
+        pass  # coluna ainda sem migracao: gera link novo (degrada sem quebrar)
+    try:
+        from finance import asaas
+        link = asaas.criar_link_pagamento(
+            conta_id=f"pedido:{carrinho_id}",
+            nome_plano=f"Pedido #{carrinho_id}",
+            valor_reais=car["total_centavos"] / 100,
+            descricao=f"Pedido #{carrinho_id} — pagamento online",
+        )
+        url = link.get("url")
+        if url:
+            car_mod.registrar_pagamento(pool, carrinho_id, "pagar_agora", url)
+            return RedirectResponse(url, status_code=303)
+    except Exception:
+        pass
+    request.session["erro_carrinho"] = (
+        "Não consegui gerar o pagamento online agora — combine o pagamento na entrega.")
+    return RedirectResponse(f"/pedido-enviado/{carrinho_id}", status_code=303)
 
 
 @router.post("/f/{slug}/carrinho/fechar")
@@ -4386,6 +4500,14 @@ def carrinho_materializar(request: Request, slug: str):
         if r.get("faltam_centavos"):
             request.session["erro_carrinho"] = f"Faltam R$ {r['faltam_centavos']/100:.2f} pro mínimo."
         return RedirectResponse(f"/f/{slug}#carrinho", status_code=303)
+    forma = (cs.get("forma") or "").strip()
+    if forma:
+        try:
+            car_mod.registrar_pagamento(pool, cid, forma)
+        except Exception:
+            pass
+    if forma == "pagar_agora":
+        return RedirectResponse(f"/pedido/{cid}/pagar", status_code=303)
     return RedirectResponse(f"/pedido-enviado/{cid}", status_code=303)
 
 
@@ -4395,48 +4517,46 @@ def carrinho_revisar(request: Request, slug: str):
     pool = get_pool()
     with pool.connection() as c:
         forn = c.execute(
-            "select id, nome from contas where fornecedor_slug=%s and eh_fornecedor",
+            "select id, nome, coalesce(desconto_pix_pct,0) from contas "
+            "where fornecedor_slug=%s and eh_fornecedor",
             (slug,),
         ).fetchone()
     if not forn:
         return HTMLResponse("<h1>Loja não encontrada</h1>", status_code=404)
     conta = conta_logada(request)
     if conta is None:
-        return RedirectResponse("/login", status_code=303)
+        # ANONIMO: mostra a revisao do carrinho de SESSAO (nao expulsa mais)
+        cs = request.session.get("carrinho_sessao")
+        if not cs or cs.get("slug") != slug or not cs.get("itens"):
+            return RedirectResponse(f"/f/{slug}", status_code=303)
+        car = _carrinho_virtual_da_sessao(pool, forn[0], cs)
+        if not car or not car["itens"]:
+            return RedirectResponse(f"/f/{slug}", status_code=303)
+        return _render("revisar", request, slug=slug, loja=forn[1],
+                       pix_pct=float(forn[2] or 0), car=car, anon=True,
+                       endereco_pre=cs.get("endereco") or "",
+                       obs_pre=cs.get("obs") or "")
+    # LOGADO: se sobrou carrinho de sessao (encheu deslogado e entrou), migra pro banco
+    cs = request.session.get("carrinho_sessao")
+    if cs and cs.get("slug") == slug and cs.get("itens"):
+        cid_m = car_mod.migrar_sessao(pool, conta[0], forn[0], cs["itens"])
+        request.session["carrinho_id"] = cid_m
+        request.session.pop("carrinho_sessao", None)
     cid = request.session.get("carrinho_id")
     if not cid:
         return RedirectResponse(f"/f/{slug}", status_code=303)
     car = car_mod.ver(pool, cid)
-    if not car:
+    if not car or not car["itens"]:
         return RedirectResponse(f"/f/{slug}", status_code=303)
-    html = f"""<div style="max-width:620px;margin:0 auto;padding:1.5rem">
-<h2>Revise seu pedido 🛒</h2>
-<div style="background:#161617;border:1px solid #232325;border-radius:12px;padding:1.3rem;margin-bottom:1.5rem">
-  <div style="font-size:13px;color:#5dcaa5;font-weight:600;margin-bottom:.8rem">Itens</div>
-  {''.join(f'<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #232325;font-size:12px"><span>{i["quantidade"]}{i["unidade"]} {i["nome"]}</span><span style="color:#f4f4f4">R$ {i["total_centavos"]/100:.2f}</span></div>' for i in car["itens"])}
-  <div style="display:flex;justify-content:space-between;padding:8px 0;margin-top:.5rem;font-size:12px;color:#888780">
-    <span>Subtotal</span><span style="color:#f4f4f4">R$ {car["subtotal_centavos"]/100:.2f}</span>
-  </div>
-  <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:12px;color:#888780">
-    <span>Entrega</span><span style="color:#f4f4f4">R$ {car["taxa_centavos"]/100:.2f}</span>
-  </div>
-  <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid #232325;margin-top:5px;font-size:13px;font-weight:600">
-    <span>Total</span><span style="color:#5dcaa5">R$ {car["total_centavos"]/100:.2f}</span>
-  </div>
-</div>
-
-<form method="post" action="/f/{slug}/carrinho/checkout" style="background:#1c1c1f;border:1px solid #232325;border-radius:12px;padding:1.3rem">
-  <div style="font-size:13px;color:#5dcaa5;font-weight:600;margin-bottom:.8rem">Endereço de entrega</div>
-  <input name="endereco" placeholder="Rua, número, complemento" required style="width:100%;padding:.7rem;margin-bottom:.8rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:8px;font-size:13px" value="{car.get('endereco_entrega','') or ''}">
-
-  <div style="font-size:13px;color:#5dcaa5;font-weight:600;margin-bottom:.8rem;margin-top:1rem">Observação (opcional)</div>
-  <textarea name="obs" placeholder="Ex: sem cebola, deixar na porta" style="width:100%;padding:.7rem;margin-bottom:1rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:8px;font-size:13px;min-height:80px;resize:none" rows="4">{car.get('obs','') or ''}</textarea>
-
-  <button type="submit" style="width:100%;background:#1d9e75;color:#fff;border:0;border-radius:10px;padding:.8rem;font-weight:600;cursor:pointer;font-size:13px">Confirmar pedido</button>
-  <a href="/f/{slug}" style="display:block;text-align:center;margin-top:.8rem;color:#888780;text-decoration:none;font-size:12px">← Voltar à loja</a>
-</form>
-</div>"""
-    return HTMLResponse(html)
+    end_pre = car.get("endereco_entrega") or ""
+    if not end_pre:
+        with pool.connection() as c:
+            r = c.execute("select coalesce(endereco,'') from contas where id=%s",
+                          (conta[0],)).fetchone()
+            end_pre = (r[0] or "") if r else ""
+    return _render("revisar", request, slug=slug, loja=forn[1],
+                   pix_pct=float(forn[2] or 0), car=car, anon=False,
+                   endereco_pre=end_pre, obs_pre=car.get("obs") or "")
 
 
 @router.get("/pedido-enviado/{carrinho_id}", response_class=HTMLResponse)

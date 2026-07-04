@@ -463,7 +463,17 @@ async def webhook_asaas(request: Request):
         return Response(status_code=200)
     ref = str(ref)
 
-    # descobre o tipo pelo prefixo: "cesta:<id>" = assinatura de cesta; senão = conta do app
+    # prefixos: "cesta:<id>" = assinatura de cesta; "pedido:<id>" = pedido da loja;
+    # senão = conta do app
+    if ref.startswith("pedido:"):
+        if evento in ("PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"):
+            try:
+                from finance import carrinho as _car
+                _car.marcar_pago(_setup(), int(ref.split(":", 1)[1]))
+                _logw.warning("ASAAS pedido pago: %s", ref)
+            except Exception as _e:  # noqa: BLE001
+                _logw.warning("ASAAS pedido %s erro: %s", ref, _e)
+        return Response(status_code=200)
     is_cesta = ref.startswith("cesta:")
     assinatura_id = conta_id = None
     try:

@@ -503,3 +503,177 @@ def atualizar_endereco_entrega(pool, carrinho_id: int, cliente_id: int,
         c.execute("update carrinhos set endereco_entrega=%s where id=%s", (end, carrinho_id))
         c.commit()
     return {"ok": True}
+
+
+# ==========================================================
+# FASES DO AVULSO (pipeline unificado) -- formato compativel
+# com as funcoes de cesta em pedidos.py, pra a pagina mesclar.
+# 'embalada_em' vem da migracao 050 (defensivo se ainda nao rodou).
+# ==========================================================
+
+def _tem_embalada_em(c) -> bool:
+    try:
+        c.execute("select embalada_em from carrinhos limit 0")
+        return True
+    except Exception:
+        c.rollback()
+        return False
+
+
+def _itens_avulso(c, carrinho_ids: list[int]) -> dict:
+    """{carrinho_id: [{produto_nome, grupo, quantidade, unidade}]}"""
+    por = {i: [] for i in carrinho_ids}
+    if not carrinho_ids:
+        return por
+    rows = c.execute(
+        """select i.carrinho_id, i.nome,
+                  coalesce(p.categoria, 'outros'),
+                  i.quantidade, coalesce(i.unidade, 'und')
+             from carrinho_itens i
+             left join catalogo_produtos p on p.id = i.produto_id
+            where i.carrinho_id = any(%s)
+            order by p.categoria nulls last, i.nome""",
+        (carrinho_ids,),
+    ).fetchall()
+    for cid, nome, grupo, qtd, un in rows:
+        por[int(cid)].append({
+            "produto_nome": nome, "grupo": grupo,
+            "quantidade": float(qtd or 0), "unidade": un,
+        })
+    return por
+
+
+def avulsos_novos(pool, fornecedor_id: int) -> list[dict]:
+    """Avulsos aguardando aceite do fornecedor (fase Novos)."""
+    with pool.connection() as c:
+        rows = c.execute(
+            """select ca.id, ca.cliente_id, ct.nome, ca.endereco_entrega,
+                      ca.bairro, ca.total_centavos, ca.forma_pagamento, ca.criado_em,
+                      (select count(*) from carrinho_itens i where i.carrinho_id = ca.id)
+                 from carrinhos ca join contas ct on ct.id = ca.cliente_id
+                where ca.fornecedor_id = %s and ca.status = 'aguardando'
+                order by ca.criado_em""",
+            (fornecedor_id,),
+        ).fetchall()
+    return [{
+        "tipo": "avulso", "id": int(r[0]), "cliente_id": int(r[1]),
+        "cliente_nome": r[2], "endereco": r[3] or "", "bairro": r[4] or "",
+        "total_centavos": int(r[5] or 0),
+        "forma_label": _FORMA_LABEL.get(r[6], r[6] or ""),
+        "criado_em": r[7], "qtd_itens": int(r[8] or 0),
+    } for r in rows]
+
+
+def avulsos_para_embalagem(pool, fornecedor_id: int) -> list[dict]:
+    """Avulsos confirmados (fase Embalagem), formato compativel com cesta."""
+    with pool.connection() as c:
+        tem = _tem_embalada_em(c)
+        emb = "ca.embalada_em" if tem else "null::timestamptz as embalada_em"
+        rows = c.execute(
+            f"""select ca.id, ca.cliente_id, ct.nome, ca.endereco_entrega,
+                       ca.bairro, ca.cep, ca.total_centavos, {emb}
+                  from carrinhos ca join contas ct on ct.id = ca.cliente_id
+                 where ca.fornecedor_id = %s and ca.status = 'confirmado'
+                 order by {'ca.embalada_em nulls first, ' if tem else ''}ca.criado_em""",
+            (fornecedor_id,),
+        ).fetchall()
+        itens = _itens_avulso(c, [int(r[0]) for r in rows])
+    out = []
+    for r in rows:
+        embalada = r[7]
+        out.append({
+            "tipo": "avulso", "id": int(r[0]), "cliente_id": int(r[1]),
+            "cliente_nome": r[2], "endereco": r[3] or "", "bairro": r[4] or "",
+            "cep": r[5] or "", "tamanho_nome": None, "total_centavos": int(r[6] or 0),
+            "data_entrega": None,
+            "embalada_em": embalada.strftime("%d/%m %H:%M") if hasattr(embalada, "strftime") else None,
+            "esta_embalada": embalada is not None,
+            "itens": itens.get(int(r[0]), []),
+        })
+    return out
+
+
+def avulsos_para_rotas(pool, fornecedor_id: int) -> list[dict]:
+    """Avulsos a caminho/entregues (fase Rotas), formato compativel com cesta."""
+    with pool.connection() as c:
+        tem = _tem_embalada_em(c)
+        emb = "ca.embalada_em" if tem else "null::timestamptz as embalada_em"
+        rows = c.execute(
+            f"""select ca.id, ca.cliente_id, ct.nome, ca.endereco_entrega,
+                       ca.bairro, ca.cep, ca.total_centavos, {emb},
+                       ca.entregue_em, ca.status,
+                       (select count(*) from carrinho_itens i where i.carrinho_id = ca.id),
+                       (select whatsapp_id from membros m
+                          where m.conta_id = ca.cliente_id and m.papel = 'dono' limit 1)
+                  from carrinhos ca join contas ct on ct.id = ca.cliente_id
+                 where ca.fornecedor_id = %s
+                   and ca.status in ('confirmado','em_entrega','entregue')
+                 order by ct.nome""",
+            (fornecedor_id,),
+        ).fetchall()
+    out = []
+    for r in rows:
+        embalada, entregue, status = r[7], r[8], r[9]
+        esta_entregue = (status == "entregue") or (entregue is not None)
+        out.append({
+            "tipo": "avulso", "id": int(r[0]), "cliente_id": int(r[1]),
+            "cliente_nome": r[2], "endereco": r[3] or "", "bairro": r[4] or "",
+            "cep": r[5] or "", "tamanho_nome": None, "total_centavos": int(r[6] or 0),
+            "data_entrega": None,
+            "esta_embalada": embalada is not None,
+            "esta_entregue": esta_entregue,
+            "embalada_em": embalada.strftime("%d/%m %H:%M") if hasattr(embalada, "strftime") else None,
+            "entregue_em": entregue.strftime("%d/%m %H:%M") if hasattr(entregue, "strftime") else None,
+            "qtd_itens": int(r[10] or 0), "whatsapp": r[11],
+        })
+    return out
+
+
+def avulsos_itens_separacao(pool, fornecedor_id: int) -> list[dict]:
+    """Soma itens dos avulsos confirmados (entra na pick list agregada)."""
+    with pool.connection() as c:
+        rows = c.execute(
+            """select i.nome, coalesce(p.categoria, 'outros') as grupo,
+                      coalesce(p.unidade, i.unidade, 'und') as un,
+                      sum(i.quantidade)
+                 from carrinho_itens i
+                 join carrinhos ca on ca.id = i.carrinho_id
+                 left join catalogo_produtos p on p.id = i.produto_id
+                where ca.fornecedor_id = %s and ca.status = 'confirmado'
+                group by i.nome, grupo, un
+                order by grupo, i.nome""",
+            (fornecedor_id,),
+        ).fetchall()
+    return [{"produto_nome": r[0], "grupo": r[1], "unidade": r[2],
+             "quantidade": float(r[3] or 0)} for r in rows]
+
+
+def marcar_embalada(pool, fornecedor_id: int, carrinho_id: int) -> bool:
+    """Marca um avulso como embalado (embalada_em=now()). Idempotente."""
+    with pool.connection() as c:
+        try:
+            r = c.execute(
+                """update carrinhos set embalada_em = coalesce(embalada_em, now())
+                    where id=%s and fornecedor_id=%s and status='confirmado'
+                    returning id""",
+                (carrinho_id, fornecedor_id),
+            ).fetchone()
+            c.commit()
+            return r is not None
+        except Exception:
+            c.rollback()
+            return False
+
+
+def desmarcar_embalada(pool, fornecedor_id: int, carrinho_id: int) -> bool:
+    with pool.connection() as c:
+        try:
+            r = c.execute(
+                "update carrinhos set embalada_em=null where id=%s and fornecedor_id=%s returning id",
+                (carrinho_id, fornecedor_id),
+            ).fetchone()
+            c.commit()
+            return r is not None
+        except Exception:
+            c.rollback()
+            return False

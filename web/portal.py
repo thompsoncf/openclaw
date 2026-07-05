@@ -389,10 +389,6 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
     <span class="fc-tile">📋</span>
     <span class="fc-txt"><span class="fc-tit">Pedidos</span><span class="fc-leg">As cestas das assinaturas — separar, embalar e entregar.</span></span>
   </a>
-  <a href="/painel/fornecedor/avulsos" class="forn-card" style="text-decoration:none">
-    <span class="fc-tile">📦</span>
-    <span class="fc-txt"><span class="fc-tit">Pedidos avulsos</span><span class="fc-leg">Pedidos feitos direto na loja, fora das assinaturas de cesta.</span></span>
-  </a>
   <button type="button" class="forn-card" onclick="fornAbrir('cestas')">
     <span class="fc-tile">🧺</span>
     <span class="fc-txt"><span class="fc-tit">Cestas</span><span class="fc-leg">Os tamanhos de cesta que seus clientes podem assinar.</span></span>
@@ -3854,8 +3850,132 @@ _AVULSOS_FORN = """{% extends "base" %}{% block conteudo %}
 {% endblock %}"""
 
 
+_PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
+{% macro card(p) %}
+<div class="uni-card" data-tipo="{{ p.tipo }}" style="background:#161617;border:1px solid #2a2a2b;border-left:3px solid {{ '#7fd4a8' if p.tipo=='cesta' else '#e0b877' }};border-radius:12px;padding:.8rem 1rem;margin-bottom:.7rem{% if p.esta_entregue %};opacity:.7{% endif %}">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem">
+    <div>
+      <span style="font-size:.72rem;padding:1px 8px;border-radius:999px;font-weight:600;{{ 'background:#1e2b23;color:#7fd4a8' if p.tipo=='cesta' else 'background:#2b2620;color:#e0b877' }}">{{ '🧺 cesta' if p.tipo=='cesta' else '📦 avulso' }}</span>
+      <b style="margin-left:.4rem">{{ p.cliente_nome }}</b>
+      <div class="mut" style="font-size:.78rem;margin-top:.2rem">{{ p.bairro or 'sem bairro' }}{% if p.qtd_itens %} · {{ p.qtd_itens }} itens{% endif %}</div>
+    </div>
+    <div style="text-align:right;white-space:nowrap">
+      {% if p.tipo=='cesta' and p.tamanho_nome %}<span class="mut" style="font-size:.8rem">{{ p.tamanho_nome }}</span>{% endif %}
+      {% if p.tipo=='avulso' %}<span style="color:#5dcaa5;font-weight:600">R$ {{ "%.2f"|format(p.total_centavos/100) }}</span>{% endif %}
+    </div>
+  </div>
+  {% if p.endereco %}<div class="mut" style="font-size:.78rem;margin:.4rem 0 0">📍 {{ p.endereco }}</div>{% endif %}
+  {{ caller() }}
+</div>
+{% endmacro %}
+
+<div class="card larga">
+  <a href="/painel/fornecedor" class="ped-back">← voltar</a>
+  <h2 style="margin:.2rem 0 1rem">📋 Pedidos</h2>
+  <div class="ped-abas" style="overflow-x:auto">
+    {% for f, lab in [('novos','Novos'),('separacao','Separação'),('embalagem','Embalagem'),('rotas','Rotas'),('entregues','Entregues')] %}
+    <a href="/painel/fornecedor/pedidos?fase={{ f }}" class="ped-aba{% if fase==f %} ativa{% endif %}">{{ lab }}{% if f=='novos' and n_novos %} <span style="background:#e0a83d;color:#111;border-radius:999px;padding:0 6px;font-size:.7rem">{{ n_novos }}</span>{% endif %}</a>
+    {% endfor %}
+  </div>
+  {% if erro %}<div class="erro" style="margin-top:1rem">{{ erro }}</div>{% endif %}
+  {% if aviso %}<div class="ok" style="margin-top:1rem">{{ aviso }}</div>{% endif %}
+
+  {% if fase in ['embalagem','rotas','entregues'] %}
+  <div style="display:flex;gap:.4rem;margin:1rem 0 .4rem">
+    <button type="button" class="tp-btn" data-tp="todos" onclick="filtTipo(this)" style="font-size:12px;padding:5px 13px;border-radius:999px;cursor:pointer;border:1px solid #1d9e75;background:#1d9e75;color:#fff">Todos</button>
+    <button type="button" class="tp-btn" data-tp="cesta" onclick="filtTipo(this)" style="font-size:12px;padding:5px 13px;border-radius:999px;cursor:pointer;border:1px solid #2a2a2b;background:transparent;color:#a8a8a3">🧺 Cestas</button>
+    <button type="button" class="tp-btn" data-tp="avulso" onclick="filtTipo(this)" style="font-size:12px;padding:5px 13px;border-radius:999px;cursor:pointer;border:1px solid #2a2a2b;background:transparent;color:#a8a8a3">📦 Avulsos</button>
+  </div>
+  {% endif %}
+
+  {% if fase == 'novos' %}
+    {% if not novos %}<p class="mut" style="text-align:center;padding:2rem 0">Nenhum pedido avulso aguardando aceite.</p>{% endif %}
+    {% for p in novos %}
+    {% call card(p) %}
+    <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #212122;margin-top:.6rem;padding-top:.6rem">
+      <span class="mut" style="font-size:.78rem">{{ p.forma_label }}{% if p.criado_em %} · {{ p.criado_em.strftime('%d/%m %H:%M') }}{% endif %}</span>
+      <div style="display:flex;gap:.4rem">
+        <form method="post" action="/painel/fornecedor/pedidos/avulso/{{ p.id }}/recusar" style="margin:0"><input type="hidden" name="fase" value="novos"><button style="width:auto;margin:0;padding:.4rem .8rem;font-size:.8rem;background:transparent;border:1px solid #6e2b2b;color:#e89a9a">Recusar</button></form>
+        <form method="post" action="/painel/fornecedor/pedidos/avulso/{{ p.id }}/aceitar" style="margin:0"><input type="hidden" name="fase" value="novos"><button style="width:auto;margin:0;padding:.4rem .9rem;font-size:.8rem">Aceitar</button></form>
+      </div>
+    </div>
+    {% endcall %}
+    {% endfor %}
+
+  {% elif fase == 'separacao' %}
+    <p class="mut" style="margin:1rem 0 .3rem">Pick list — tudo o que separar (cestas + avulsos confirmados somados).</p>
+    {% if not sep.grupos %}<p class="mut" style="text-align:center;padding:2rem 0">Nada confirmado pra separar ainda.</p>{% endif %}
+    {% for g in sep.grupos %}
+    <div style="margin-top:1rem"><div class="mut" style="text-transform:uppercase;font-size:.72rem;letter-spacing:.04em;margin-bottom:.4rem">{{ g.grupo }}</div>
+      {% for it in g.itens %}
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:.5rem .2rem;border-bottom:1px solid #1c1c1d">
+        <span>{{ it.produto_nome }}</span>
+        <span style="white-space:nowrap"><b>{{ "%g"|format(it.quantidade) }}</b> <span class="mut">{{ it.unidade }}</span>{% if it.get('suficiente') is not none %} <span style="font-size:.7rem;color:{{ '#5dcaa5' if it.suficiente else '#e0a83d' }}">{{ '✓' if it.suficiente else 'falta ' ~ ("%g"|format(it.falta)) }}</span>{% endif %}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+
+  {% elif fase == 'embalagem' %}
+    <p class="mut" style="margin:.4rem 0">{{ n_falta }} a embalar de {{ itens|length }}.</p>
+    {% if not itens %}<p class="mut" style="text-align:center;padding:2rem 0">Nada pra embalar.</p>{% endif %}
+    {% for p in itens %}
+    {% call card(p) %}
+    <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #212122;margin-top:.6rem;padding-top:.6rem">
+      <span class="mut" style="font-size:.78rem">{% if p.esta_embalada %}✅ embalado {{ p.embalada_em }}{% else %}a embalar{% endif %}</span>
+      <div style="display:flex;gap:.4rem">
+        {% if p.tipo=='cesta' %}<a href="/painel/fornecedor/embalagem/{{ p.id }}/etiqueta" target="_blank" style="color:#5dcaa5;font-size:.8rem;align-self:center;text-decoration:none">etiqueta</a>{% endif %}
+        {% if p.esta_embalada %}
+        <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/desembalar" style="margin:0"><input type="hidden" name="fase" value="embalagem"><button style="width:auto;margin:0;padding:.4rem .8rem;font-size:.8rem;background:transparent;border:1px solid #333;color:#a8a8a3">desfazer</button></form>
+        {% else %}
+        <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/embalar" style="margin:0"><input type="hidden" name="fase" value="embalagem"><button style="width:auto;margin:0;padding:.4rem .9rem;font-size:.8rem">Embalado</button></form>
+        {% endif %}
+      </div>
+    </div>
+    {% endcall %}
+    {% endfor %}
+
+  {% elif fase == 'rotas' %}
+    {% if not grupos %}<p class="mut" style="text-align:center;padding:2rem 0">Nada pra rotear.</p>{% endif %}
+    {% for g in grupos %}
+    <div style="font-size:.85rem;color:#5dcaa5;font-weight:600;margin:1.2rem 0 .5rem">📍 {{ g.bairro }} · {{ g.qtd }} pedido(s)</div>
+    {% for p in g.pedidos %}
+    {% call card(p) %}
+    <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #212122;margin-top:.6rem;padding-top:.6rem">
+      <span class="mut" style="font-size:.78rem">{% if not p.esta_embalada %}⚠ não embalado{% else %}pronto{% endif %}</span>
+      <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/entregar" style="margin:0"><input type="hidden" name="fase" value="rotas"><button style="width:auto;margin:0;padding:.4rem .9rem;font-size:.8rem">Entregue</button></form>
+    </div>
+    {% endcall %}
+    {% endfor %}
+    {% endfor %}
+
+  {% elif fase == 'entregues' %}
+    {% if not entregues %}<p class="mut" style="text-align:center;padding:2rem 0">Nenhum pedido entregue ainda.</p>{% endif %}
+    {% for p in entregues %}
+    {% call card(p) %}
+    <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #212122;margin-top:.6rem;padding-top:.6rem">
+      <span class="mut" style="font-size:.78rem">✅ entregue{% if p.entregue_em %} {{ p.entregue_em }}{% endif %}</span>
+      <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/desentregar" style="margin:0"><input type="hidden" name="fase" value="entregues"><button style="width:auto;margin:0;padding:.35rem .7rem;font-size:.78rem;background:transparent;border:1px solid #333;color:#a8a8a3">desfazer</button></form>
+    </div>
+    {% endcall %}
+    {% endfor %}
+  {% endif %}
+</div>
+<script>
+function filtTipo(b){
+  var t=b.getAttribute('data-tp');
+  document.querySelectorAll('.tp-btn').forEach(function(x){x.style.background='transparent';x.style.color='#a8a8a3';x.style.borderColor='#2a2a2b';});
+  b.style.background='#1d9e75';b.style.color='#fff';b.style.borderColor='#1d9e75';
+  document.querySelectorAll('.uni-card').forEach(function(c){
+    c.style.display=(t==='todos'||c.getAttribute('data-tipo')===t)?'':'none';
+  });
+}
+</script>
+{% endblock %}"""
+
+
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 _env.filters["brl"] = brl
@@ -5383,6 +5503,7 @@ def painel_fornecedor_dados(request: Request,
 
 @router.get("/painel/fornecedor/avulsos", response_class=HTMLResponse)
 def painel_fornecedor_avulsos(request: Request, status: str = ""):
+    return RedirectResponse("/painel/fornecedor/pedidos?fase=novos", status_code=303)  # unificado
     from finance import carrinho as car_mod
     conta = conta_logada(request)
     if conta is None:
@@ -5413,28 +5534,152 @@ def painel_fornecedor_avulso_status(request: Request, carrinho_id: int,
         request.headers.get("referer") or "/painel/fornecedor/avulsos", status_code=303)
 
 
+_FASES_PED = ("novos", "separacao", "embalagem", "rotas", "entregues")
+
+
 @router.get("/painel/fornecedor/pedidos", response_class=HTMLResponse)
-def painel_fornecedor_pedidos(request: Request, status: str = "",
-                              periodo: str = "", busca: str = ""):
+def painel_fornecedor_pedidos(request: Request, fase: str = "",
+                              periodo: str = "proxima_semana"):
     from finance import pedidos as pedidos_mod
+    from finance import carrinho as car_mod
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
     if not conta[8]:
         return RedirectResponse("/painel", status_code=303)
     pool = get_pool()
-    status_f = status.strip() or None
-    periodo_f = periodo.strip() or None
-    busca_f = busca.strip() or None
-    pedidos_lista = pedidos_mod.listar_pedidos(
-        pool, conta[0], status=status_f, periodo=periodo_f,
-        busca_cliente=busca_f, limit=200,
-    )
-    contagens = pedidos_mod.contar_por_status(pool, conta[0])
-    return _render("pedidos_forn", request, conta=conta,
-                   pedidos=pedidos_lista, contagens=contagens,
-                   filtro_status=status_f, filtro_periodo=periodo_f,
-                   filtro_busca=busca_f)
+    fid = conta[0]
+    fase = (fase or "novos").strip()
+    if fase not in _FASES_PED:
+        fase = "novos"
+    per = (periodo or "proxima_semana").strip() or "proxima_semana"
+
+    novos_lst = car_mod.avulsos_novos(pool, fid)
+    ctx = {
+        "fase": fase, "periodo": per, "n_novos": len(novos_lst),
+        "erro": request.session.pop("erro_ped", None),
+        "aviso": request.session.pop("aviso_ped", None),
+    }
+
+    if fase == "novos":
+        ctx["novos"] = novos_lst
+
+    elif fase == "separacao":
+        sep = pedidos_mod.consolidar_separacao(pool, fid, periodo=per)
+        idx = {}
+        for g in sep["grupos"]:
+            for it in g["itens"]:
+                idx[(g["grupo"], it["produto_nome"], it["unidade"])] = it
+        for a in car_mod.avulsos_itens_separacao(pool, fid):
+            key = (a["grupo"], a["produto_nome"], a["unidade"])
+            if key in idx:
+                idx[key]["quantidade"] = round(
+                    float(idx[key]["quantidade"]) + a["quantidade"], 3)
+            else:
+                grp = next((g for g in sep["grupos"] if g["grupo"] == a["grupo"]), None)
+                if grp is None:
+                    grp = {"grupo": a["grupo"], "itens": []}
+                    sep["grupos"].append(grp)
+                novo = {"produto_nome": a["produto_nome"], "unidade": a["unidade"],
+                        "quantidade": a["quantidade"], "grupo": a["grupo"]}
+                grp["itens"].append(novo)
+                idx[key] = novo
+        _ord = {"fruta": 0, "legume": 1, "verdura": 2, "tempero": 3, "outros": 4}
+        sep["grupos"].sort(key=lambda g: _ord.get(g["grupo"], 9))
+        for g in sep["grupos"]:
+            g["itens"].sort(key=lambda x: x["produto_nome"])
+        ctx["sep"] = sep
+
+    elif fase == "embalagem":
+        cestas = pedidos_mod.listar_para_embalagem(pool, fid, periodo=per)["cestas"]
+        for x in cestas:
+            x["tipo"] = "cesta"
+            x["qtd_itens"] = len(x.get("itens") or [])
+            x["esta_entregue"] = False
+        av = car_mod.avulsos_para_embalagem(pool, fid)
+        itens = cestas + av
+        itens.sort(key=lambda x: (x["esta_embalada"], (x["cliente_nome"] or "")))
+        ctx["itens"] = itens
+        ctx["n_falta"] = sum(1 for x in itens if not x["esta_embalada"])
+
+    elif fase == "rotas":
+        dados = pedidos_mod.listar_para_rotas(pool, fid, periodo=per)
+        buckets = {}
+        for g in dados["grupos"]:
+            for cst in g["cestas"]:
+                if cst.get("esta_entregue"):
+                    continue
+                cst["tipo"] = "cesta"
+                buckets.setdefault(g["bairro"], []).append(cst)
+        for a in car_mod.avulsos_para_rotas(pool, fid):
+            if a.get("esta_entregue"):
+                continue
+            buckets.setdefault(a["bairro"] or "(sem bairro)", []).append(a)
+        bairros = sorted(k for k in buckets if k != "(sem bairro)")
+        if "(sem bairro)" in buckets:
+            bairros.append("(sem bairro)")
+        ctx["grupos"] = [{"bairro": b, "qtd": len(buckets[b]), "pedidos": buckets[b]}
+                         for b in bairros]
+
+    elif fase == "entregues":
+        ent = []
+        dados = pedidos_mod.listar_para_rotas(pool, fid, periodo=per)
+        for g in dados["grupos"]:
+            for cst in g["cestas"]:
+                if cst.get("esta_entregue"):
+                    cst["tipo"] = "cesta"
+                    ent.append(cst)
+        for a in car_mod.avulsos_para_rotas(pool, fid):
+            if a.get("esta_entregue"):
+                ent.append(a)
+        ent.sort(key=lambda x: (x.get("entregue_em") or ""), reverse=True)
+        ctx["entregues"] = ent
+
+    return _render("pedidos_uni", request, conta=conta, **ctx)
+
+
+@router.post("/painel/fornecedor/pedidos/{tipo}/{item_id}/{acao}")
+def painel_fornecedor_pedido_acao(request: Request, tipo: str, item_id: int,
+                                  acao: str, fase: str = Form("novos")):
+    from finance import pedidos as pedidos_mod
+    from finance import carrinho as car_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    if not conta[8]:
+        return RedirectResponse("/painel", status_code=303)
+    pool = get_pool()
+    fid = conta[0]
+    ok = True
+    if tipo == "cesta":
+        if acao == "embalar":
+            ok = pedidos_mod.marcar_embalada(pool, fid, item_id)
+        elif acao == "desembalar":
+            pedidos_mod.desmarcar_embalada(pool, fid, item_id)
+        elif acao == "entregar":
+            ok = pedidos_mod.marcar_entregue(pool, fid, item_id)
+        elif acao == "desentregar":
+            pedidos_mod.desmarcar_entregue(pool, fid, item_id)
+    elif tipo == "avulso":
+        if acao == "aceitar":
+            ok = car_mod.mudar_status(pool, fid, item_id, "confirmado").get("ok", False)
+        elif acao == "recusar":
+            ok = car_mod.mudar_status(pool, fid, item_id, "cancelado").get("ok", False)
+        elif acao == "embalar":
+            ok = car_mod.marcar_embalada(pool, fid, item_id)
+        elif acao == "desembalar":
+            car_mod.desmarcar_embalada(pool, fid, item_id)
+        elif acao == "entregar":
+            ok = car_mod.mudar_status(pool, fid, item_id, "entregue").get("ok", False)
+        elif acao == "desentregar":
+            car_mod.mudar_status(pool, fid, item_id, "confirmado").get("ok", False)
+    if not ok:
+        request.session["erro_ped"] = "Nao foi possivel atualizar o pedido."
+    else:
+        request.session["aviso_ped"] = "Pedido atualizado."
+    if fase not in _FASES_PED:
+        fase = "novos"
+    return RedirectResponse(f"/painel/fornecedor/pedidos?fase={fase}", status_code=303)
 
 
 @router.get("/painel/fornecedor/pedidos/{pedido_id}", response_class=HTMLResponse)
@@ -5460,10 +5705,7 @@ def painel_fornecedor_separacao(request: Request, periodo: str = "proxima_semana
         return RedirectResponse("/login", status_code=303)
     if not conta[8]:  # eh_fornecedor
         return RedirectResponse("/painel", status_code=303)
-    periodo_f = (periodo or "proxima_semana").strip() or "proxima_semana"
-    dados = pedidos_mod.consolidar_separacao(get_pool(), conta[0], periodo=periodo_f)
-    return _render("separacao_forn", request, conta=conta,
-                   dados=dados, periodo=periodo_f)
+    return RedirectResponse("/painel/fornecedor/pedidos?fase=separacao", status_code=303)
 
 
 @router.get("/painel/fornecedor/embalagem", response_class=HTMLResponse)
@@ -5474,9 +5716,7 @@ def painel_fornecedor_embalagem(request: Request, periodo: str = "proxima_semana
         return RedirectResponse("/login", status_code=303)
     if not conta[8]:  # eh_fornecedor
         return RedirectResponse("/painel", status_code=303)
-    periodo_f = (periodo or "proxima_semana").strip() or "proxima_semana"
-    dados = pedidos_mod.listar_para_embalagem(get_pool(), conta[0], periodo=periodo_f)
-    return _render("embalagem_forn", request, conta=conta, dados=dados, periodo=periodo_f)
+    return RedirectResponse("/painel/fornecedor/pedidos?fase=embalagem", status_code=303)
 
 
 @router.post("/painel/fornecedor/embalagem/{cesta_id}/marcar")
@@ -5534,9 +5774,7 @@ def painel_fornecedor_rotas(request: Request, periodo: str = "proxima_semana"):
         return RedirectResponse("/login", status_code=303)
     if not conta[8]:  # eh_fornecedor
         return RedirectResponse("/painel", status_code=303)
-    periodo_f = (periodo or "proxima_semana").strip() or "proxima_semana"
-    dados = pedidos_mod.listar_para_rotas(get_pool(), conta[0], periodo=periodo_f)
-    return _render("rotas_forn", request, conta=conta, dados=dados, periodo=periodo_f)
+    return RedirectResponse("/painel/fornecedor/pedidos?fase=rotas", status_code=303)
 
 
 @router.post("/painel/fornecedor/rotas/{cesta_id}/entregar")

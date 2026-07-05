@@ -244,7 +244,8 @@ def ver(pool, carrinho_id: int) -> dict | None:
 
 
 def fechar(pool, carrinho_id: int, endereco_entrega: str | None = None,
-           obs: str | None = None) -> dict:
+           obs: str | None = None, cep: str | None = None,
+           bairro: str | None = None) -> dict:
     """Cliente fecha o carrinho (rascunho -> aguardando). Valida: tem itens E
     atinge o mínimo do fornecedor (mínimo vale sobre o SUBTOTAL, sem taxa).
     Retorna {ok, totais} ou {ok:false, erro, faltam_centavos}."""
@@ -271,13 +272,26 @@ def fechar(pool, carrinho_id: int, endereco_entrega: str | None = None,
             faltam = minimo - totais["subtotal_centavos"]
             return {"ok": False, "erro": "pedido abaixo do minimo",
                     "minimo_centavos": minimo, "faltam_centavos": faltam}
-        c.execute(
-            """update carrinhos set status='aguardando',
-                   endereco_entrega=coalesce(%s, endereco_entrega),
-                   obs=coalesce(%s, obs)
-               where id=%s""",
-            (endereco_entrega, obs, carrinho_id),
-        )
+        try:
+            c.execute(
+                """update carrinhos set status='aguardando',
+                       endereco_entrega=coalesce(%s, endereco_entrega),
+                       obs=coalesce(%s, obs),
+                       cep=coalesce(%s, cep),
+                       bairro=coalesce(%s, bairro)
+                   where id=%s""",
+                (endereco_entrega, obs, cep, bairro, carrinho_id),
+            )
+        except Exception:
+            # colunas cep/bairro ainda sem migracao: salva sem elas (degrada sem quebrar)
+            c.rollback()
+            c.execute(
+                """update carrinhos set status='aguardando',
+                       endereco_entrega=coalesce(%s, endereco_entrega),
+                       obs=coalesce(%s, obs)
+                   where id=%s""",
+                (endereco_entrega, obs, carrinho_id),
+            )
         c.commit()
     return {"ok": True, "totais": totais}
 

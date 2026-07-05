@@ -3637,6 +3637,7 @@ _REVISAR = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
     <textarea name="obs" rows="2" placeholder="Ex: deixar na portaria" style="margin-top:5px;resize:none">{{ obs_pre }}</textarea>
     <input type="hidden" name="endereco" id="rzendereco">
     <input type="hidden" name="cep" id="rzcephidden" value="{{ cep_pre|default('') }}">
+    <input type="hidden" name="bairro" id="rzbairro_h">
   </div>
   <div class="rz-card">
     <div class="rz-tit">Pagamento</div>
@@ -3699,6 +3700,7 @@ function fp(r){document.querySelectorAll('.rz-fp').forEach(function(l){l.classLi
     if(!rua){alert('Preencha a rua da entrega.');$('rzrua').focus();return false;}
     var e=rua;if(num){e+=', '+num;}if(bairro){e+=', '+bairro;}if(compl){e+=' — '+compl;}
     $('rzendereco').value=e;
+    var _bh=$('rzbairro_h');if(_bh){_bh.value=bairro;}
     if(!$('rzcephidden').value){$('rzcephidden').value=($('rzcep').value||'').replace(/[^0-9]/g,'');}
     return true;
   };
@@ -3770,6 +3772,7 @@ _BLOCO_CONTA = """
       <div id="mdcidade" style="font-size:.82rem;color:#5dcaa5;margin-top:.5rem"></div>
       <input type="hidden" name="endereco" id="mdendereco">
       <input type="hidden" name="cep" id="mdcephidden" value="{{ md_cep or '' }}">
+      <input type="hidden" name="bairro" id="mdbairro_h">
       <div style="display:flex;gap:.6rem;margin-top:1rem">
         <button style="width:auto;margin:0;padding:.6rem 1.4rem">Salvar endereço</button>
         {% if md_endereco %}<button type="button" onclick="mdCancelar()" style="width:auto;margin:0;padding:.6rem 1.4rem;background:transparent;border:1px solid #333;color:#a8a8a3">Cancelar</button>{% endif %}
@@ -3790,7 +3793,7 @@ _BLOCO_CONTA = """
     if(cep)cep.addEventListener('input',function(){cep.value=maskCep(cep.value);var digs=cep.value.replace(/[^0-9]/g,'');$('mdcephidden').value=digs;if(digs.length<8)return;fetch('/api/cep/'+digs).then(function(r){return r.json();}).then(function(d){if(d&&d.ok)fill(d);}).catch(function(){});});
     var gps=$('mdgps');
     if(gps)gps.addEventListener('click',function(){var t=$('mdgpstxt');if(!navigator.geolocation){t.textContent='GPS indisponível — digite o CEP';return;}t.textContent='Obtendo localização…';gps.disabled=true;navigator.geolocation.getCurrentPosition(function(pos){fetch('/api/geo?lat='+pos.coords.latitude+'&lng='+pos.coords.longitude).then(function(r){return r.json();}).then(function(d){gps.disabled=false;if(d&&d.ok){t.textContent='Localização encontrada ✓';fill(d);}else{t.textContent='Não achei — digite o CEP';}}).catch(function(){gps.disabled=false;t.textContent='Erro — digite o CEP';});},function(err){gps.disabled=false;t.textContent=(err&&err.code===1)?'Permissão negada — digite o CEP':'Não consegui — digite o CEP';},{enableHighAccuracy:true,timeout:8000,maximumAge:0});});
-    window.mdCompose=function(){var rua=($('mdrua').value||'').trim(),num=($('mdnum').value||'').trim(),bairro=($('mdbairro').value||'').trim(),compl=($('mdcompl').value||'').trim();if(!rua){alert('Preencha a rua.');$('mdrua').focus();return false;}var e=rua;if(num)e+=', '+num;if(bairro)e+=', '+bairro;if(compl)e+=' — '+compl;$('mdendereco').value=e;if(!$('mdcephidden').value)$('mdcephidden').value=($('mdcep').value||'').replace(/[^0-9]/g,'');return true;};
+    window.mdCompose=function(){var rua=($('mdrua').value||'').trim(),num=($('mdnum').value||'').trim(),bairro=($('mdbairro').value||'').trim(),compl=($('mdcompl').value||'').trim();if(!rua){alert('Preencha a rua.');$('mdrua').focus();return false;}var e=rua;if(num)e+=', '+num;if(bairro)e+=', '+bairro;if(compl)e+=' — '+compl;$('mdendereco').value=e;var _mbh=document.getElementById('mdbairro_h');if(_mbh)_mbh.value=bairro;if(!$('mdcephidden').value)$('mdcephidden').value=($('mdcep').value||'').replace(/[^0-9]/g,'');return true;};
   })();
   </script>
 </div>
@@ -4582,7 +4585,8 @@ def carrinho_item(request: Request, slug: str, item_id: int,
 @router.post("/f/{slug}/carrinho/checkout")
 def carrinho_checkout(request: Request, slug: str,
                       endereco: str = Form(""), obs: str = Form(""),
-                      forma: str = Form(""), cep: str = Form("")):
+                      forma: str = Form(""), cep: str = Form(""),
+                      bairro: str = Form("")):
     from finance import carrinho as car_mod
     formas_ok = {"entrega_pix", "entrega_cartao", "entrega_dinheiro", "pagar_agora"}
     if forma not in formas_ok:
@@ -4594,6 +4598,7 @@ def carrinho_checkout(request: Request, slug: str,
         cs["obs"] = obs
         cs["forma"] = forma
         cs["cep"] = cep
+        cs["bairro"] = bairro
         request.session["carrinho_sessao"] = cs
         return _render("loja_confirmar_novo", request, slug=slug, erro=None,
                        contexto="carrinho", endereco_pre=endereco, cep_pre=cep)
@@ -4601,7 +4606,8 @@ def carrinho_checkout(request: Request, slug: str,
     if not cid:
         return RedirectResponse(f"/f/{slug}", status_code=303)
     pool = get_pool()
-    r = car_mod.fechar(pool, cid, endereco_entrega=endereco or None, obs=obs or None)
+    r = car_mod.fechar(pool, cid, endereco_entrega=endereco or None, obs=obs or None,
+                       cep=cep or None, bairro=bairro or None)
     if not r["ok"]:
         if r.get("faltam_centavos"):
             request.session["erro_carrinho"] = (
@@ -4685,7 +4691,7 @@ def carrinho_materializar(request: Request, slug: str):
     for it in cs["itens"]:
         car_mod.adicionar_item(pool, cid, it["produto_id"], it.get("quantidade", 1))
     r = car_mod.fechar(pool, cid, endereco_entrega=cs.get("endereco"),
-                       obs=cs.get("obs"))
+                       obs=cs.get("obs"), cep=cs.get("cep"), bairro=cs.get("bairro"))
     request.session.pop("carrinho_sessao", None)
     if not r["ok"]:
         request.session["carrinho_id"] = cid
@@ -4924,16 +4930,22 @@ def pedido_editar_endereco(request: Request, carrinho_id: int, endereco: str = F
 
 
 @router.post("/painel/endereco")
-def painel_endereco(request: Request, endereco: str = Form(""), cep: str = Form("")):
+def painel_endereco(request: Request, endereco: str = Form(""), cep: str = Form(""), bairro: str = Form("")):
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
     pool = get_pool()
     endereco_val = (endereco or "").strip() or None
     cep_val = "".join(ch for ch in (cep or "") if ch.isdigit()) or None
+    bairro_val = (bairro or "").strip() or None
     with pool.connection() as c:
-        c.execute("update contas set endereco=%s, cep=%s where id=%s",
-                  (endereco_val, cep_val, conta[0]))
+        try:
+            c.execute("update contas set endereco=%s, cep=%s, bairro=%s where id=%s",
+                      (endereco_val, cep_val, bairro_val, conta[0]))
+        except Exception:
+            c.rollback()
+            c.execute("update contas set endereco=%s, cep=%s where id=%s",
+                      (endereco_val, cep_val, conta[0]))
         c.commit()
     request.session["md_aviso"] = "Endereco atualizado."
     return RedirectResponse(request.headers.get("referer") or "/painel", status_code=303)

@@ -164,6 +164,7 @@ def listar_pedidos(
                 "assinatura_id": int(assin_id),
                 "criada_em": criada.isoformat() if isinstance(criada, datetime) else str(criada),
             })
+    _override_bairros(pool, out)
     return out
 
 
@@ -246,7 +247,7 @@ def detalhe_pedido(pool, fornecedor_id: int, cesta_id: int) -> dict[str, Any] | 
         "cliente_nome": cli_nome,
         "endereco": endereco,
         "cep": cep,
-        "bairro": _extrair_bairro(endereco),
+        "bairro": (_mapa_bairros(pool, [cli_id]).get(cli_id) or _extrair_bairro(endereco)),
         "tamanho_nome": tam_nome,
         "data_entrega": data_ent.isoformat() if data_ent else None,
         "status": st,
@@ -489,6 +490,7 @@ def listar_para_embalagem(
             "itens": itens_por_cesta.get(int(cid), []),
         })
 
+    _override_bairros(pool, cestas)
     return {
         "periodo": periodo,
         "data_de": data_de.isoformat() if data_de else None,
@@ -552,7 +554,8 @@ def dados_etiqueta(pool, fornecedor_id: int, cesta_id: int) -> dict[str, Any] | 
                       coalesce(ct.nome, '?'),
                       cs.data_entrega,
                       coalesce(f.nome, '') as fornecedor_nome,
-                      f.fornecedor_slug
+                      f.fornecedor_slug,
+                      cli.bairro
                  from cesta_semana cs
                  left join contas cli on cli.id = cs.cliente_id
                  left join contas f on f.id = cs.fornecedor_id
@@ -563,13 +566,13 @@ def dados_etiqueta(pool, fornecedor_id: int, cesta_id: int) -> dict[str, Any] | 
         ).fetchone()
     if row is None:
         return None
-    (cid, cli_nome, end, cep, tam, data_ent, forn_nome, forn_slug) = row
+    (cid, cli_nome, end, cep, tam, data_ent, forn_nome, forn_slug, cli_bairro) = row
     return {
         "id": int(cid),
         "cliente_nome": cli_nome,
         "endereco": end or "",
         "cep": cep or "",
-        "bairro": _extrair_bairro(end),
+        "bairro": (cli_bairro or "").strip() or _extrair_bairro(end),
         "tamanho_nome": tam,
         "data_entrega": data_ent.isoformat() if data_ent else None,
         "fornecedor_nome": forn_nome,
@@ -644,13 +647,14 @@ def listar_para_rotas(
             (fornecedor_id, *params_data),
         ).fetchall()
 
+    _bmap = _mapa_bairros(pool, [r[1] for r in rows])
     grupos_dict: dict[str, list[dict[str, Any]]] = {}
     qtd_total = 0
     qtd_entregues = 0
     qtd_nao_embaladas = 0
     for (cid, cli_id, cli_nome, end, cep, tam, data_ent,
          embalada, entregue, qtd_itens, wpp) in rows:
-        bairro = _extrair_bairro(end) or "(sem bairro)"
+        bairro = (_bmap.get(cli_id) or _extrair_bairro(end)) or "(sem bairro)"
         esta_embalada = embalada is not None
         esta_entregue = entregue is not None
         qtd_total += 1
@@ -795,3 +799,31 @@ def _extrair_bairro(endereco: str | None) -> str:
     if len(partes) >= 3:
         return partes[2]
     return ""
+
+
+def _mapa_bairros(pool, cliente_ids) -> dict:
+    """{cliente_id: bairro} a partir de contas.bairro (so os nao-vazios).
+    Defensivo: se a coluna ainda nao existe, retorna {} (cai no fallback)."""
+    ids = sorted({int(i) for i in cliente_ids if i})
+    if not ids:
+        return {}
+    try:
+        with pool.connection() as c:
+            rows = c.execute(
+                "select id, bairro from contas where id = any(%s)", (ids,)
+            ).fetchall()
+        return {r[0]: (r[1] or "").strip() for r in rows if (r[1] or "").strip()}
+    except Exception:
+        return {}
+
+
+def _override_bairros(pool, dicts) -> None:
+    """Sobrepoe o campo bairro (dos dicts que tem cliente_id) pelo bairro
+    salvo em contas, quando existir. Mantem o chute como fallback."""
+    bm = _mapa_bairros(pool, [d.get("cliente_id") for d in dicts])
+    if not bm:
+        return
+    for d in dicts:
+        b = bm.get(d.get("cliente_id"))
+        if b:
+            d["bairro"] = b

@@ -3851,6 +3851,13 @@ _AVULSOS_FORN = """{% extends "base" %}{% block conteudo %}
 
 
 _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
+<style>
+.ped-back{color:#5dcaa5;display:inline-block;margin-bottom:.6rem;font-size:.9rem;text-decoration:none}
+.ped-abas{display:flex;gap:.4rem;overflow-x:auto;padding-bottom:4px;margin:.2rem 0 1.1rem}
+.ped-aba{flex:0 0 auto;padding:.5rem .95rem;border-radius:9px;border:1px solid #2a2a2b;color:#a8a8a3;text-decoration:none;font-size:.88rem;white-space:nowrap}
+.ped-aba.ativa{background:#161617;color:#5dcaa5;border-color:#2f5d4e;font-weight:500}
+.uni-card{transition:border-color .15s}
+</style>
 {% macro card(p) %}
 <div class="uni-card" data-tipo="{{ p.tipo }}" style="background:#161617;border:1px solid #2a2a2b;border-left:3px solid {{ '#7fd4a8' if p.tipo=='cesta' else '#e0b877' }};border-radius:12px;padding:.8rem 1rem;margin-bottom:.7rem{% if p.esta_entregue %};opacity:.7{% endif %}">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem">

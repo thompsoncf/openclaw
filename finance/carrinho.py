@@ -434,3 +434,27 @@ def definir_config_delivery(pool, fornecedor_id: int,
         c.execute(f"update contas set {', '.join(sets)} where id=%s", tuple(args))
         c.commit()
     return {"ok": True}
+
+
+def atualizar_endereco_entrega(pool, carrinho_id: int, cliente_id: int,
+                               endereco: str, cep: str | None = None) -> dict:
+    """Atualiza o endereco de entrega de um pedido, SO enquanto nao saiu pra
+    entrega (status em rascunho/aguardando/confirmado). Valida que o pedido e'
+    do proprio cliente. Retorna {"ok": bool, "erro"?: str}."""
+    editavel = {"rascunho", "aguardando", "confirmado"}
+    end = (endereco or "").strip()
+    if not end:
+        return {"ok": False, "erro": "endereco vazio"}
+    with pool.connection() as c:
+        r = c.execute(
+            "select cliente_id, status from carrinhos where id=%s", (carrinho_id,)
+        ).fetchone()
+        if not r:
+            return {"ok": False, "erro": "pedido nao encontrado"}
+        if r[0] != cliente_id:
+            return {"ok": False, "erro": "pedido de outro cliente"}
+        if (r[1] or "") not in editavel:
+            return {"ok": False, "erro": "pedido ja saiu pra entrega"}
+        c.execute("update carrinhos set endereco_entrega=%s where id=%s", (end, carrinho_id))
+        c.commit()
+    return {"ok": True}

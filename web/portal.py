@@ -3553,6 +3553,23 @@ _PEDIDO_ENVIADO = """{% extends "base" %}{% block conteudo %}
   </div>
   {% endif %}
 
+  {% if carrinho and carrinho.endereco_entrega %}
+  <div style="background:#161617;border:1px solid #2a2a2b;border-radius:11px;padding:.8rem;text-align:left;margin-bottom:1rem">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem">
+      <div style="font-size:.82rem"><span class="mut">Entregar em</span><br><span style="color:#ececec">{{ carrinho.endereco_entrega }}</span></div>
+      {% if carrinho.status in ['rascunho','aguardando','confirmado'] %}<button type="button" onclick="var f=document.getElementById('ped-end-form');f.style.display=(f.style.display==='none'?'block':'none');" style="width:auto;margin:0;padding:.35rem .8rem;font-size:.78rem;background:transparent;border:1px solid #333;color:#5dcaa5">editar</button>{% endif %}
+    </div>
+    {% if carrinho.status in ['rascunho','aguardando','confirmado'] %}
+    <form id="ped-end-form" method="post" action="/pedido/{{ carrinho.id }}/endereco" style="display:none;margin-top:.6rem">
+      <input name="endereco" value="{{ carrinho.endereco_entrega }}" required style="width:100%;margin-bottom:.5rem">
+      <button style="width:auto;margin:0;padding:.45rem 1rem;font-size:.85rem">Salvar endereco</button>
+    </form>
+    {% else %}
+    <div class="mut" style="font-size:.72rem;margin-top:.4rem">Ja saiu pra entrega — fale com o fornecedor pra mudar.</div>
+    {% endif %}
+  </div>
+  {% endif %}
+
   <a href="/painel" style="display:block;background:#1c1c1f;color:#ececec;border:1px solid #2a2a2b;border-radius:10px;padding:.7rem;text-decoration:none;font-size:.85rem;margin-bottom:.5rem">Ver meus pedidos</a>
   <a href="/f/{{ fornecedor_slug or '' }}" style="color:#5dcaa5;font-size:.8rem;text-decoration:none">Voltar à loja</a>
 </div>
@@ -3598,13 +3615,14 @@ _REVISAR = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 <form method="post" action="/f/{{ slug }}/carrinho/checkout" id="rzform" onsubmit="return rzCompose()">
   <div class="rz-card">
     <div class="rz-tit">Entrega</div>
+    {% if endereco_pre %}<div style="background:#eef6ea;border:1px solid #cfe6d4;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:12.5px;color:#23301f">📍 Entregar no meu endereço salvo:<div style="color:#31772f;margin:3px 0 8px">{{ endereco_pre }}</div><button type="button" onclick="usarSalvo()" style="background:#0f7d5c;color:#fff;border:0;border-radius:8px;padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer">Usar este endereço</button><input type="hidden" id="rzsalvo" value="{{ endereco_pre }}"></div><div style="text-align:center;font-size:12px;color:#8a938a;margin-bottom:12px">ou informe outro endereço:</div>{% endif %}
     <button type="button" id="rzgps" style="width:100%;background:#0f7d5c;color:#fff;border:0;border-radius:10px;padding:12px;font-size:13.5px;font-weight:600;cursor:pointer;margin-bottom:12px">📍 <span id="rzgpstxt">Usar minha localização</span></button>
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;color:#8a938a;font-size:12px"><div style="flex:1;height:1px;background:#e7eae5"></div>ou digite o CEP<div style="flex:1;height:1px;background:#e7eae5"></div></div>
     <label style="font-size:12.5px;color:#3a463a;font-weight:500">CEP</label>
     <input id="rzcep" inputmode="numeric" maxlength="9" placeholder="64000-000" autocomplete="off" value="{{ cep_pre|default('') }}" style="margin:5px 0 12px">
     <div style="display:flex;gap:8px">
       <div style="flex:1"><label style="font-size:12.5px;color:#3a463a;font-weight:500">Rua</label>
-        <input id="rzrua" placeholder="Rua" value="{{ endereco_pre }}" style="margin:5px 0 12px"></div>
+        <input id="rzrua" placeholder="Rua" style="margin:5px 0 12px"></div>
       <div style="width:96px"><label style="font-size:12.5px;color:#3a463a;font-weight:500">Número</label>
         <input id="rznum" inputmode="numeric" placeholder="123" style="margin:5px 0 12px"></div>
     </div>
@@ -3674,7 +3692,8 @@ function fp(r){document.querySelectorAll('.rz-fp').forEach(function(l){l.classLi
       txt.textContent=(err&&err.code===1)?'Permissão negada — digite o CEP':'Não consegui — digite o CEP';
     },{enableHighAccuracy:true,timeout:8000,maximumAge:0});
   });}
-  window.rzCompose=function(){
+  window.usarSalvo=function(){var s=document.getElementById('rzsalvo'),e=document.getElementById('rzendereco');if(s&&e){e.value=s.value;}document.getElementById('rzform').submit();};
+    window.rzCompose=function(){
     var rua=($('rzrua').value||'').trim(),num=($('rznum').value||'').trim(),
         bairro=($('rzbairro').value||'').trim(),compl=($('rzcompl').value||'').trim();
     if(!rua){alert('Preencha a rua da entrega.');$('rzrua').focus();return false;}
@@ -3701,7 +3720,7 @@ _BLOCO_CONTA = """
       <div><div style="font-size:.98rem;color:#ececec">{{ md_nome or '-' }}</div><div class="mut" style="font-size:.78rem;margin-top:2px">titular{% if conta and conta[4] %} · {{ conta[4] }}{% endif %}</div></div>
     </div>
     <div style="margin-top:.7rem;border-top:1px solid #2a2a2b">
-      <div style="display:flex;align-items:center;gap:11px;padding:.6rem 0;border-bottom:1px solid #212122"><span style="color:#5dcaa5">✉️</span><span class="mut" style="flex:1;font-size:.82rem">E-mail</span><span style="font-size:.86rem;color:#ececec">{{ md_email or '-' }}</span></div>
+      <div style="display:flex;align-items:center;gap:11px;padding:.6rem 0;border-bottom:1px solid #212122"><span style="color:#5dcaa5">✉️</span><span class="mut" style="flex:1;font-size:.82rem">E-mail</span><span style="font-size:.86rem;color:#ececec">{{ md_email or '-' }}{% if md_email_pendente %}<div style="font-size:.72rem;color:#e0a83d">a confirmar: {{ md_email_pendente }}</div>{% endif %}</span></div>
       <div style="display:flex;align-items:center;gap:11px;padding:.6rem 0;border-bottom:1px solid #212122"><span style="color:#5dcaa5">📱</span><span class="mut" style="flex:1;font-size:.82rem">WhatsApp</span><span style="font-size:.86rem;color:#ececec">{{ md_whatsapp or '-' }}</span></div>
       <div style="display:flex;align-items:center;gap:11px;padding:.6rem 0"><span style="color:#5dcaa5">🔒</span><span class="mut" style="flex:1;font-size:.82rem">Senha</span><a href="/senha" style="font-size:.86rem;color:#5dcaa5;text-decoration:none">alterar</a></div>
     </div>
@@ -3712,7 +3731,9 @@ _BLOCO_CONTA = """
       <input name="nome" value="{{ md_nome or '' }}" required maxlength="80">
       <label>WhatsApp (com DDD)</label>
       <input name="whatsapp" value="{{ md_whatsapp or '' }}" required maxlength="20" placeholder="86 98888-7777">
-      <p class="mut" style="font-size:.76rem;margin:.6rem 0 0">Trocar o número reenvia o código pra reconectar no bot. E-mail (alterar com confirmação): em breve.</p>
+      <label>E-mail</label>
+      <input name="email" type="email" value="{{ md_email or '' }}" maxlength="120" placeholder="seu@email.com">
+      <p class="mut" style="font-size:.76rem;margin:.6rem 0 0">Trocar o número reenvia o código pra reconectar no bot. Trocar o e-mail envia um link de confirmação — o novo só vale depois de confirmar.</p>
       <div style="display:flex;gap:.6rem;margin-top:1rem">
         <button style="width:auto;margin:0;padding:.6rem 1.4rem">Salvar</button>
         <button type="button" onclick="dadosCancelar()" style="width:auto;margin:0;padding:.6rem 1.4rem;background:transparent;border:1px solid #333;color:#a8a8a3">Cancelar</button>
@@ -4778,7 +4799,7 @@ def pedido_enviado(request: Request, carrinho_id: int):
 def _dados_bloco(pool, conta, request):
     """Contexto do bloco 'Meus dados + Meu endereco' (Painel e Minhas cestas)."""
     with pool.connection() as c:
-        row = c.execute("select endereco, cep from contas where id=%s", (conta[0],)).fetchone()
+        row = c.execute("select endereco, cep, email_pendente from contas where id=%s", (conta[0],)).fetchone()
         zap = c.execute(
             "select whatsapp_id from membros where conta_id=%s and papel=%s order by id limit 1",
             (conta[0], "dono")).fetchone()
@@ -4787,13 +4808,14 @@ def _dados_bloco(pool, conta, request):
         "md_whatsapp": (zap[0] if zap else "") or "",
         "md_endereco": (row[0] if row else "") or "",
         "md_cep": (row[1] if row else "") or "",
+        "md_email_pendente": (row[2] if row and len(row) > 2 else "") or "",
         "md_aviso": request.session.pop("md_aviso", None),
         "md_erro": request.session.pop("md_erro", None),
     }
 
 
 @router.post("/painel/dados")
-def painel_dados(request: Request, nome: str = Form(""), whatsapp: str = Form("")):
+def painel_dados(request: Request, background: BackgroundTasks, nome: str = Form(""), whatsapp: str = Form(""), email: str = Form("")):
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
@@ -4821,15 +4843,84 @@ def painel_dados(request: Request, nome: str = Form(""), whatsapp: str = Form(""
             else:
                 c.execute("update membros set nome=%s where id=%s", (nome_val, dono[0]))
         c.commit()
+    email_val = (email or "").strip().lower()
+    email_msg = ""
+    if email_val and email_val != (conta[3] or "").strip().lower():
+        import secrets
+        from datetime import datetime, timedelta, timezone
+        with pool.connection() as c:
+            ja_email = c.execute("select 1 from contas where lower(email)=%s and id<>%s",
+                                 (email_val, conta[0])).fetchone()
+        if ja_email:
+            request.session["md_erro"] = "Esse e-mail ja esta em outra conta."
+            return RedirectResponse(request.headers.get("referer") or "/painel", status_code=303)
+        tok = secrets.token_urlsafe(32)
+        expira = datetime.now(timezone.utc) + timedelta(hours=24)
+        with pool.connection() as c:
+            c.execute("insert into tokens_email (token, conta_id, email_novo, expira_em) values (%s,%s,%s,%s)",
+                      (tok, conta[0], email_val, expira))
+            c.execute("update contas set email_pendente=%s where id=%s", (email_val, conta[0]))
+            c.commit()
+        link = f"{os.environ.get('APP_URL', 'https://app.zaq-ia.com')}/confirmar-email?token={tok}"
+        try:
+            from finance.email_sender import enviar_confirmacao_email
+            background.add_task(enviar_confirmacao_email, email_val, link, nome_val)
+        except Exception:  # noqa: BLE001
+            pass
+        email_msg = " Enviei um link pro novo e-mail; ele so vale depois de confirmar."
     if zap_novo and dono and zap_novo != (dono[1] or ""):
         try:
             ct.gerar_convite_dono(pool, conta[0])
         except Exception:  # noqa: BLE001
             pass
-        request.session["md_aviso"] = "Dados salvos. WhatsApp trocado — reconecte pelo bot com o codigo."
+        request.session["md_aviso"] = "Dados salvos. WhatsApp trocado — reconecte pelo bot com o codigo." + email_msg
     else:
-        request.session["md_aviso"] = "Dados salvos."
+        request.session["md_aviso"] = "Dados salvos." + email_msg
     return RedirectResponse(request.headers.get("referer") or "/painel", status_code=303)
+
+
+@router.get("/confirmar-email", response_class=HTMLResponse)
+def confirmar_email(request: Request):
+    from datetime import datetime, timezone
+    token = (request.query_params.get("token") or "").strip()
+    if not token:
+        return HTMLResponse("<h1>Link invalido</h1>", status_code=400)
+    pool = get_pool()
+    with pool.connection() as c:
+        row = c.execute(
+            "select conta_id, email_novo, expira_em, usado from tokens_email where token=%s",
+            (token,),
+        ).fetchone()
+        if not row or row[3] or row[2] < datetime.now(timezone.utc):
+            return HTMLResponse("<h1>Link invalido ou expirado</h1>", status_code=400)
+        conta_id, email_novo = row[0], row[1]
+        ja = c.execute("select 1 from contas where lower(email)=%s and id<>%s",
+                       (email_novo.lower(), conta_id)).fetchone()
+        if ja:
+            return HTMLResponse("<h1>Esse e-mail ja esta em uso por outra conta</h1>", status_code=400)
+        c.execute(
+            "update contas set email=%s, email_pendente=null, email_confirmado_em=now() where id=%s",
+            (email_novo, conta_id),
+        )
+        c.execute("update tokens_email set usado=true where token=%s", (token,))
+        c.commit()
+    request.session["md_aviso"] = "E-mail confirmado!"
+    if request.session.get("conta_id") == conta_id:
+        return RedirectResponse("/painel", status_code=303)
+    return HTMLResponse(
+        "<h1 style='font-family:sans-serif'>E-mail confirmado! Ja pode entrar com o novo e-mail.</h1>")
+
+
+@router.post("/pedido/{carrinho_id}/endereco")
+def pedido_editar_endereco(request: Request, carrinho_id: int, endereco: str = Form("")):
+    from finance import carrinho as car_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    r = car_mod.atualizar_endereco_entrega(get_pool(), carrinho_id, conta[0], endereco)
+    if not r["ok"]:
+        request.session["erro_pedido"] = r.get("erro", "Nao foi possivel alterar o endereco.")
+    return RedirectResponse(f"/pedido-enviado/{carrinho_id}", status_code=303)
 
 
 @router.post("/painel/endereco")

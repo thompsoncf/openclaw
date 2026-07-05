@@ -169,6 +169,26 @@ def enviar_recuperacao_senha(destino: str, link_reset: str,
                         _layout("Redefinir sua senha", corpo), texto)
 
 
+def enviar_confirmacao_email(destino: str, link_confirma: str,
+                             nome: str | None = None) -> bool:
+    """Email de confirmacao de um NOVO e-mail (link com token, vale 24h)."""
+    saudacao = f"Ola, {nome}!" if nome else "Ola!"
+    corpo = f"""
+      <p>{saudacao}</p>
+      <p>Voce pediu pra usar este e-mail na sua conta Zaq. Confirme clicando abaixo
+         (o link vale 24 horas):</p>
+      <p style="text-align:center;margin:24px 0;">
+        <a href="{link_confirma}" style="background:#0f766e;color:#fff;text-decoration:none;
+           padding:12px 28px;border-radius:8px;font-weight:bold;display:inline-block;">
+           Confirmar meu e-mail</a>
+      </p>
+      <p style="font-size:13px;color:#666;">Se voce nao pediu isso, pode ignorar
+         este email.</p>
+    """
+    texto = f"{saudacao}\n\nConfirme seu e-mail: {link_confirma}"
+    return enviar_email(destino, "Confirme seu e-mail - Zaq", corpo, texto)
+
+
 def enviar_aviso(destino: str, titulo: str, mensagem: str,
                  nome: str | None = None) -> bool:
     """Email de aviso generico (cobranca, lista pronta, etc)."""

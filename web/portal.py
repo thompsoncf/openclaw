@@ -302,91 +302,80 @@ _BEMVINDO = """{% extends "base" %}{% block conteudo %}
 {% endblock %}"""
 
 _PAINEL = """{% extends "base" %}{% block conteudo %}
-<div class="card larga"><h1>Olá, {{ conta[2] }}! <span class="tag">{{ conta[5] }}</span></h1>
-<p class="mut">Plano: <b>{{ conta[4] or '-' }}</b>
-{% if conta[6] %} · válido até <b>{{ conta[6].strftime('%d/%m/%Y') }}</b>{% endif %}
- · tipo: <b>{{ conta[1]|upper }}</b></p>
-{% if conta[5] == 'trial' %}
-<form method="post" action="/assinar" style="display:inline">
-<button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;font-size:.95rem">💳 Assinar plano</button>
-</form>
-{% endif %}
+<div class="card larga">
+  <h1 style="margin:0">Olá, {{ conta[2] }}! <span class="tag">{{ conta[5] }}</span></h1>
+  <p class="mut" style="margin-top:.6rem">Plano: <b>{{ conta[4] or '-' }}</b>{% if conta[6] %} · válido até <b>{{ conta[6].strftime('%d/%m/%Y') }}</b>{% endif %} · tipo: <b>{{ conta[1]|upper }}</b></p>
+  {% if conta[5] == 'trial' %}<form method="post" action="/assinar" style="margin:0"><button style="width:auto;margin:.6rem 0 0;padding:.55rem 1.1rem">💳 Assinar plano</button></form>{% endif %}
 </div>
+
 {% include "bloco_conta" %}
-<div class="card larga"><h1 style="font-size:1.05rem;margin-top:0">Pessoas da conta</h1>
-<div class="membros">
-{% for m in membros %}
-<div class="membro-row">
-<div class="membro-id">
-<div class="avatar">{{ (m[0] or '?')[0]|upper }}</div>
-<div><div class="membro-nome">{{ m[0] or '-' }}</div>
-<div class="membro-papel"><span class="tag">{{ m[1] }}</span> {{ '' if m[3] else '· desativado' }}</div></div>
-</div>
-<div class="membro-contato">
-{% if m[2] %}<div class="zap">📱 {{ m[2] }}</div>{% endif %}
-{% if m[2] or m[6] %}
-{% if m[6] %}<div class="conv mut">✅ Telegram conectado</div>{% endif %}
-{% if m[2] %}<div class="conv mut">✅ WhatsApp conectado</div>{% endif %}
-{% if m[5] and not m[6] %}<div class="mut" style="font-size:.78rem;margin-top:.2rem">🔑 Conectar Telegram também: <code>{{ m[5] }}</code></div>{% endif %}
-{% elif m[5] %}
-<div class="conv-invite">
-  <div>🔑 <code>{{ m[5] }}</code></div>
-  <div class="conv-links">
-    <a class="lk-tg" href="https://t.me/clawaladdin_bot?start={{ m[5]|urlencode }}" target="_blank" rel="noopener">📨 Telegram</a>
-    <button type="button" class="lk-copy" onclick="copiarConvite(this, 'https://t.me/clawaladdin_bot?start={{ m[5]|urlencode }}')">🔗 Copiar</button>
-    {% if whatsapp_bot_num %}
-    <a class="lk-wpp" href="https://wa.me/{{ whatsapp_bot_num }}?text={{ m[5]|urlencode }}" target="_blank" rel="noopener">🟢 WhatsApp</a>
-    <button type="button" class="lk-copy" onclick="copiarConvite(this, 'https://wa.me/{{ whatsapp_bot_num }}?text={{ m[5]|urlencode }}')">🔗 Copiar</button>
+
+<div class="card larga">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <h1 style="font-size:1.05rem;margin:0">Pessoas da conta</h1>
+    <button type="button" onclick="addPessoaToggle()" id="add-btn" style="width:auto;margin:0;background:#1d9e75;color:#fff;border:0;border-radius:999px;padding:.4rem 1rem;font-size:.82rem;cursor:pointer">＋ Adicionar</button>
+  </div>
+  {% if erro %}<div class="erro" style="margin-top:.8rem">{{ erro }}</div>{% endif %}
+  {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
+  <div class="membros">
+  {% for m in membros %}
+  <div class="membro-row">
+    <div class="membro-id">
+      <div class="avatar">{{ (m[0] or '?')[0]|upper }}</div>
+      <div><div class="membro-nome">{{ m[0] or '-' }}</div>
+      <div class="membro-papel"><span class="tag">{{ m[1] }}</span> {{ '' if m[3] else '· desativado' }}</div></div>
+    </div>
+    <div class="membro-contato">
+      {% if m[2] or m[6] %}
+        {% if m[6] %}<div class="conv mut">✅ Telegram conectado</div>{% endif %}
+        {% if m[2] %}<div class="conv mut">✅ WhatsApp conectado</div>{% endif %}
+        {% if m[5] and not m[6] %}<div class="mut" style="font-size:.78rem;margin-top:.2rem">🔑 Conectar Telegram também: <code>{{ m[5] }}</code></div>{% endif %}
+      {% elif m[5] %}
+        <div class="conv-invite">
+          <div>🔑 <code>{{ m[5] }}</code></div>
+          <div class="conv-links">
+            <a class="lk-tg" href="https://t.me/clawaladdin_bot?start={{ m[5]|urlencode }}" target="_blank" rel="noopener">📨 Telegram</a>
+            <button type="button" class="lk-copy" onclick="copiarConvite(this, 'https://t.me/clawaladdin_bot?start={{ m[5]|urlencode }}')">🔗 Copiar</button>
+            {% if whatsapp_bot_num %}
+            <a class="lk-wpp" href="https://wa.me/{{ whatsapp_bot_num }}?text={{ m[5]|urlencode }}" target="_blank" rel="noopener">🟢 WhatsApp</a>
+            <button type="button" class="lk-copy" onclick="copiarConvite(this, 'https://wa.me/{{ whatsapp_bot_num }}?text={{ m[5]|urlencode }}')">🔗 Copiar</button>
+            {% endif %}
+          </div>
+        </div>
+      {% else %}<span class="mut">sem contato</span>{% endif %}
+    </div>
+    <div class="membro-acoes">
+      <form method="post" action="/membros/reconectar"><input type="hidden" name="membro_id" value="{{ m[4] }}"><button class="btn-conv">↻ Reconectar</button></form>
+      {% if m[1] != 'dono' %}
+        {% if m[3] %}<form method="post" action="/membros/desativar"><input type="hidden" name="membro_id" value="{{ m[4] }}"><button class="btn-off">desativar</button></form>
+        {% else %}<form method="post" action="/membros/reativar"><input type="hidden" name="membro_id" value="{{ m[4] }}"><button class="btn-on">reativar</button></form>{% endif %}
+      {% else %}<span class="mut" style="font-size:.85rem;align-self:center">titular</span>{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+  </div>
+  <div id="add-pessoa-body"{% if not aviso %} style="display:none"{% endif %}>
+    <div style="border-top:1px solid #212122;margin-top:1rem;padding-top:1rem">
+    {% if pode_adicionar %}
+      <div class="mut" style="font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;margin-bottom:.6rem">Nova pessoa</div>
+      <form method="post" action="/membros/adicionar">
+        <label>Nome</label><input name="nome" required maxlength="80">
+        <div style="display:flex;gap:.6rem">
+          <div style="flex:1"><label>WhatsApp <span class="mut">— opcional</span></label><input name="whatsapp" maxlength="20" placeholder="86 98888-7777"></div>
+          <div style="flex:1"><label>Acesso</label><select name="papel"><option value="membro">Membro</option><option value="restrito">Restrito (só lista)</option></select></div>
+        </div>
+        <button style="margin-top:1rem">Adicionar à conta</button>
+      </form>
+      <p class="mut" style="margin-top:.7rem;font-size:.8rem">Ao adicionar, você recebe um código de convite pro Telegram (ou a pessoa já usa pelo WhatsApp cadastrado).</p>
+      {% if extra_pago %}<p class="mut" style="font-size:.8rem">Seu plano inclui {{ inclusos }} pessoas; assento extra é cobrado.</p>{% endif %}
+    {% else %}
+      <p class="mut" style="font-size:.85rem">Seu plano ({{ conta[4] }}) permite {{ inclusos }} pessoa(s) e você já usa {{ ativos }}. Faça upgrade pra adicionar mais.</p>
     {% endif %}
+    </div>
   </div>
 </div>
-{% else %}
-<span class="mut">sem contato</span>
-{% endif %}
-</div>
-<div class="membro-acoes">
-<form method="post" action="/membros/reconectar"><input type="hidden" name="membro_id" value="{{ m[4] }}">
-<button class="btn-conv">↻ Reconectar</button></form>
-{% if m[1] != 'dono' %}
-{% if m[3] %}
-<form method="post" action="/membros/desativar"><input type="hidden" name="membro_id" value="{{ m[4] }}">
-<button class="btn-off">desativar</button></form>
-{% else %}
-<form method="post" action="/membros/reativar"><input type="hidden" name="membro_id" value="{{ m[4] }}">
-<button class="btn-on">reativar</button></form>
-{% endif %}
-{% else %}<span class="mut" style="font-size:.85rem">titular</span>{% endif %}
-</div>
-</div>
-{% endfor %}
-</div>
-<p class="mut" style="margin-top:1rem">O código 🔑 serve pro Telegram (a pessoa envia no bot ClawIAOpen).
-Quem tem WhatsApp 📱 cadastrado também já usa por lá.</p>
-</div>
-<div class="card larga"><div style="display:flex;justify-content:space-between;align-items:center"><h1 style="font-size:1.05rem;margin:0">Adicionar pessoa</h1><button type="button" onclick="addPessoaToggle()" style="background:transparent;border:1px solid #2a2a2b;color:#5dcaa5;border-radius:8px;padding:.35rem .7rem;font-size:.8rem;cursor:pointer">＋ Nova pessoa</button></div>
-{% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
-{% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
-<div id="add-pessoa-body"{% if not aviso %} style="display:none;margin-top:.6rem"{% else %} style="margin-top:.6rem"{% endif %}>
-{% if pode_adicionar %}
-<form method="post" action="/membros/adicionar">
-<label>Nome</label><input name="nome" required maxlength="80">
-<label>WhatsApp (com DDD) <span class="mut">— opcional</span></label><input name="whatsapp" maxlength="20" placeholder="86 98888-7777">
-<label>Tipo de acesso</label>
-<select name="papel">
-<option value="membro">Membro — vê finanças e usa a lista de compras</option>
-<option value="restrito">Restrito — só a lista de compras (ex: empregada)</option>
-</select>
-<button>Adicionar à conta</button></form>
-<p class="mut" style="margin-top:.6rem">Ao adicionar, você recebe um <b>código de convite</b>.
-Peça pra pessoa abrir o bot <b>ClawIAOpen</b> no Telegram e enviar o código — pronto, ela é vinculada.</p>
-{% if extra_pago %}<p class="mut">Seu plano inclui {{ inclusos }} pessoas; acima disso, cada assento extra é cobrado.</p>{% endif %}
-{% else %}
-<p class="mut">Seu plano ({{ conta[4] }}) permite {{ inclusos }} pessoa(s) e você já usa {{ ativos }}.
-Pra adicionar mais, faça upgrade pro plano Família ou PJ.</p>
-{% endif %}
-</div>
-<script>window.addPessoaToggle=function(){var b=document.getElementById('add-pessoa-body');if(b){b.style.display=(b.style.display==='none'?'block':'none');}};</script>
-</div>{% endblock %}"""
+<script>window.addPessoaToggle=function(){var b=document.getElementById('add-pessoa-body');if(b)b.style.display=(b.style.display==='none'?'block':'none');};</script>
+{% endblock %}"""
 
 _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
 <div class="card larga"><h2>👨‍🌾 Fornecedor</h2>
@@ -3700,105 +3689,87 @@ function fp(r){document.querySelectorAll('.rz-fp').forEach(function(l){l.classLi
 
 _BLOCO_CONTA = """
 <div class="card larga">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem"><h1 style="font-size:1.05rem;margin:0">Meus dados</h1><button type="button" onclick="dadosEditar()" style="background:transparent;border:1px solid #2a2a2b;color:#5dcaa5;border-radius:8px;padding:.35rem .7rem;font-size:.8rem;cursor:pointer">Editar</button></div>
-  {% if md_aviso %}<div class="ok">{{ md_aviso }}</div>{% endif %}
-  {% if md_erro %}<div class="erro">{{ md_erro }}</div>{% endif %}
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <h1 style="font-size:1.05rem;margin:0">Meus dados</h1>
+    <button type="button" onclick="dadosEditar()" id="dados-btn" style="width:auto;margin:0;background:transparent;border:1px solid #2f5d4e;color:#5dcaa5;border-radius:999px;padding:.35rem .9rem;font-size:.8rem;cursor:pointer">✏️ Editar</button>
+  </div>
+  {% if md_aviso %}<div class="ok" style="margin-top:.8rem">{{ md_aviso }}</div>{% endif %}
+  {% if md_erro %}<div class="erro" style="margin-top:.8rem">{{ md_erro }}</div>{% endif %}
   <div id="dados-resumo">
-    <table style="width:100%;font-size:.88rem">
-      <tr><td class="mut" style="padding:.3rem 0">Nome</td><td style="text-align:right">{{ md_nome or '-' }}</td></tr>
-      <tr><td class="mut" style="padding:.3rem 0">E-mail</td><td style="text-align:right">{{ md_email or '-' }}</td></tr>
-      <tr><td class="mut" style="padding:.3rem 0">WhatsApp</td><td style="text-align:right">{{ md_whatsapp or '-' }}</td></tr>
-      <tr><td class="mut" style="padding:.3rem 0">Senha</td><td style="text-align:right"><a href="/senha" style="color:#5dcaa5">alterar</a></td></tr>
-    </table>
+    <div style="display:flex;align-items:center;gap:13px;margin:1rem 0 .3rem">
+      <div class="avatar" style="width:46px;height:46px;font-size:1.1rem">{{ (md_nome or '?')[0]|upper }}</div>
+      <div><div style="font-size:.98rem;color:#ececec">{{ md_nome or '-' }}</div><div class="mut" style="font-size:.78rem;margin-top:2px">titular{% if conta and conta[4] %} · {{ conta[4] }}{% endif %}</div></div>
+    </div>
+    <div style="margin-top:.7rem;border-top:1px solid #2a2a2b">
+      <div style="display:flex;align-items:center;gap:11px;padding:.6rem 0;border-bottom:1px solid #212122"><span style="color:#5dcaa5">✉️</span><span class="mut" style="flex:1;font-size:.82rem">E-mail</span><span style="font-size:.86rem;color:#ececec">{{ md_email or '-' }}</span></div>
+      <div style="display:flex;align-items:center;gap:11px;padding:.6rem 0;border-bottom:1px solid #212122"><span style="color:#5dcaa5">📱</span><span class="mut" style="flex:1;font-size:.82rem">WhatsApp</span><span style="font-size:.86rem;color:#ececec">{{ md_whatsapp or '-' }}</span></div>
+      <div style="display:flex;align-items:center;gap:11px;padding:.6rem 0"><span style="color:#5dcaa5">🔒</span><span class="mut" style="flex:1;font-size:.82rem">Senha</span><a href="/senha" style="font-size:.86rem;color:#5dcaa5;text-decoration:none">alterar</a></div>
+    </div>
   </div>
-  <div id="dados-form" style="display:none;margin-top:.6rem">
-  <form method="post" action="/painel/dados">
-    <label>Nome</label>
-    <input name="nome" value="{{ md_nome or '' }}" required maxlength="80" style="width:100%;margin-bottom:.6rem">
-    <label>WhatsApp (com DDD)</label>
-    <input name="whatsapp" value="{{ md_whatsapp or '' }}" required maxlength="20" placeholder="86 98888-7777" style="width:100%;margin-bottom:.25rem">
-    <p class="mut" style="font-size:.76rem;margin:.1rem 0 .7rem">Trocar o número reenvia o código pra reconectar no bot. E-mail (alterar com confirmação): em breve.</p>
-    <button>Salvar dados</button>
-    <button type="button" onclick="dadosCancelar()" style="background:transparent;border:1px solid #2a2a2b;color:#888780;border-radius:6px;padding:.5rem .9rem;margin-left:.4rem;cursor:pointer">Cancelar</button>
-  </form>
+  <div id="dados-form" style="display:none">
+    <form method="post" action="/painel/dados">
+      <label>Nome</label>
+      <input name="nome" value="{{ md_nome or '' }}" required maxlength="80">
+      <label>WhatsApp (com DDD)</label>
+      <input name="whatsapp" value="{{ md_whatsapp or '' }}" required maxlength="20" placeholder="86 98888-7777">
+      <p class="mut" style="font-size:.76rem;margin:.6rem 0 0">Trocar o número reenvia o código pra reconectar no bot. E-mail (alterar com confirmação): em breve.</p>
+      <div style="display:flex;gap:.6rem;margin-top:1rem">
+        <button style="width:auto;margin:0;padding:.6rem 1.4rem">Salvar</button>
+        <button type="button" onclick="dadosCancelar()" style="width:auto;margin:0;padding:.6rem 1.4rem;background:transparent;border:1px solid #333;color:#a8a8a3">Cancelar</button>
+      </div>
+    </form>
   </div>
-  <script>
-  window.dadosEditar=function(){var f=document.getElementById('dados-form'),r=document.getElementById('dados-resumo');if(f){f.style.display='block';}if(r){r.style.display='none';}};
-  window.dadosCancelar=function(){var f=document.getElementById('dados-form'),r=document.getElementById('dados-resumo');if(f){f.style.display='none';}if(r){r.style.display='block';}};
-  </script>
 </div>
 
 <div class="card larga">
-  <h1 style="font-size:1.05rem;margin-top:0">📍 Meu endereço</h1>
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <h1 style="font-size:1.05rem;margin:0">Meu endereço</h1>
+    {% if md_endereco %}<button type="button" onclick="mdEditar()" id="md-btn" style="width:auto;margin:0;background:transparent;border:1px solid #2f5d4e;color:#5dcaa5;border-radius:999px;padding:.35rem .9rem;font-size:.8rem;cursor:pointer">✏️ Editar</button>{% endif %}
+  </div>
   {% if md_endereco %}
-  <div id="md-atual" style="display:flex;justify-content:space-between;align-items:flex-start;gap:.6rem;background:#161617;border:1px solid #2a2a2b;border-radius:10px;padding:.7rem .9rem;font-size:.9rem">
-    <div>🏠 {{ md_endereco }}{% if md_cep %}<div class="mut" style="font-size:.8rem;margin-top:.2rem">CEP {{ md_cep }}</div>{% endif %}</div>
-    <button type="button" onclick="mdEditar()" style="flex:none;background:transparent;border:1px solid #2a2a2b;color:#5dcaa5;border-radius:8px;padding:.35rem .7rem;font-size:.8rem;cursor:pointer">Editar</button>
+  <div id="md-atual" style="display:flex;align-items:flex-start;gap:13px;margin-top:1rem">
+    <div style="width:42px;height:42px;border-radius:12px;background:#13251d;color:#5dcaa5;display:flex;align-items:center;justify-content:center;flex:none;font-size:1.2rem">🏠</div>
+    <div><div style="font-size:.9rem;color:#ececec;line-height:1.45">{{ md_endereco }}</div>{% if md_cep %}<div class="mut" style="font-size:.8rem;margin-top:3px">CEP {{ md_cep }}</div>{% endif %}</div>
   </div>
   {% endif %}
-  <div id="md-form-wrap"{% if md_endereco %} style="display:none;margin-top:.9rem"{% endif %}>
-  <p class="mut" style="margin:.2rem 0 .8rem">Mudou de casa? Atualize aqui — vira o padrão nos próximos pedidos.</p>
-  <form method="post" action="/painel/endereco" id="mdform" onsubmit="return mdCompose()">
-    <button type="button" id="mdgps" style="width:100%;background:#0f7d5c;color:#fff;border:0;border-radius:9px;padding:.7rem;font-weight:600;cursor:pointer;margin-bottom:.7rem">📍 <span id="mdgpstxt">Usar minha localização</span></button>
-    <label>CEP</label>
-    <input id="mdcep" inputmode="numeric" maxlength="9" placeholder="64000-000" autocomplete="off" value="{{ md_cep or '' }}" style="width:100%;margin-bottom:.6rem">
-    <div style="display:flex;gap:.5rem">
-      <div style="flex:1"><label>Rua</label><input id="mdrua" placeholder="Rua" style="width:100%;margin-bottom:.6rem"></div>
-      <div style="width:90px"><label>Número</label><input id="mdnum" inputmode="numeric" placeholder="123" style="width:100%;margin-bottom:.6rem"></div>
-    </div>
-    <div style="display:flex;gap:.5rem">
-      <div style="flex:1"><label>Bairro</label><input id="mdbairro" placeholder="Bairro" style="width:100%;margin-bottom:.6rem"></div>
-      <div style="flex:1"><label>Complemento</label><input id="mdcompl" placeholder="apto, bloco…" style="width:100%;margin-bottom:.6rem"></div>
-    </div>
-    <div id="mdcidade" class="mut" style="font-size:.82rem;margin-bottom:.6rem"></div>
-    <input type="hidden" name="endereco" id="mdendereco">
-    <input type="hidden" name="cep" id="mdcephidden" value="{{ md_cep or '' }}">
-    <button>Salvar endereço</button>
-  </form>
+  <div id="md-form-wrap"{% if md_endereco %} style="display:none;margin-top:1rem"{% endif %}>
+    <p class="mut" style="margin:.2rem 0 .8rem;font-size:.83rem">Mudou de casa? Atualize aqui — vira o padrão nos próximos pedidos.</p>
+    <form method="post" action="/painel/endereco" id="mdform" onsubmit="return mdCompose()">
+      <button type="button" id="mdgps" style="margin:0;background:#0f7d5c">📍 <span id="mdgpstxt">Usar minha localização</span></button>
+      <label>CEP</label>
+      <input id="mdcep" inputmode="numeric" maxlength="9" placeholder="64000-000" autocomplete="off" value="{{ md_cep or '' }}">
+      <div style="display:flex;gap:.6rem">
+        <div style="flex:1"><label>Rua</label><input id="mdrua" placeholder="Rua"></div>
+        <div style="width:92px"><label>Número</label><input id="mdnum" inputmode="numeric" placeholder="123"></div>
+      </div>
+      <div style="display:flex;gap:.6rem">
+        <div style="flex:1"><label>Bairro</label><input id="mdbairro" placeholder="Bairro"></div>
+        <div style="flex:1"><label>Complemento</label><input id="mdcompl" placeholder="apto, bloco…"></div>
+      </div>
+      <div id="mdcidade" style="font-size:.82rem;color:#5dcaa5;margin-top:.5rem"></div>
+      <input type="hidden" name="endereco" id="mdendereco">
+      <input type="hidden" name="cep" id="mdcephidden" value="{{ md_cep or '' }}">
+      <div style="display:flex;gap:.6rem;margin-top:1rem">
+        <button style="width:auto;margin:0;padding:.6rem 1.4rem">Salvar endereço</button>
+        {% if md_endereco %}<button type="button" onclick="mdCancelar()" style="width:auto;margin:0;padding:.6rem 1.4rem;background:transparent;border:1px solid #333;color:#a8a8a3">Cancelar</button>{% endif %}
+      </div>
+    </form>
   </div>
   <script>
+  window.dadosEditar=function(){var f=document.getElementById('dados-form'),r=document.getElementById('dados-resumo'),b=document.getElementById('dados-btn');if(f)f.style.display='block';if(r)r.style.display='none';if(b)b.style.display='none';};
+  window.dadosCancelar=function(){var f=document.getElementById('dados-form'),r=document.getElementById('dados-resumo'),b=document.getElementById('dados-btn');if(f)f.style.display='none';if(r)r.style.display='block';if(b)b.style.display='inline-block';};
+  window.mdEditar=function(){var w=document.getElementById('md-form-wrap'),a=document.getElementById('md-atual'),b=document.getElementById('md-btn');if(w)w.style.display='block';if(a)a.style.display='none';if(b)b.style.display='none';};
+  window.mdCancelar=function(){var w=document.getElementById('md-form-wrap'),a=document.getElementById('md-atual'),b=document.getElementById('md-btn');if(w)w.style.display='none';if(a)a.style.display='flex';if(b)b.style.display='inline-block';};
   (function(){
     var $=function(id){return document.getElementById(id);};
     function maskCep(v){v=(v||'').replace(/[^0-9]/g,'').slice(0,8);return v.length>5?v.slice(0,5)+'-'+v.slice(5):v;}
-    function setCidade(c,uf,cep){var t=c?(c+(uf?' - '+uf:'')):'';if(cep){t+=(t?'  ·  ':'')+cep;}$('mdcidade').textContent=t;}
-    function fill(d){
-      if(d.rua){$('mdrua').value=d.rua;}
-      if(d.bairro){$('mdbairro').value=d.bairro;}
-      var cf=d.cep?maskCep(d.cep):'';setCidade(d.cidade,d.uf,cf);
-      if(d.cep){$('mdcephidden').value=(''+d.cep).replace(/[^0-9]/g,'');$('mdcep').value=cf;}
-      if(d.rua){$('mdnum').focus();}else{$('mdrua').focus();}
-    }
+    function setCidade(c,uf,cep){var t=c?(c+(uf?' - '+uf:'')):'';if(cep){t+=(t?'  ·  ':'')+cep;}var e=$('mdcidade');if(e)e.textContent=t;}
+    function fill(d){if(d.rua)$('mdrua').value=d.rua;if(d.bairro)$('mdbairro').value=d.bairro;var cf=d.cep?maskCep(d.cep):'';setCidade(d.cidade,d.uf,cf);if(d.cep){$('mdcephidden').value=(''+d.cep).replace(/[^0-9]/g,'');$('mdcep').value=cf;}if(d.rua){$('mdnum').focus();}else{$('mdrua').focus();}}
     var cep=$('mdcep');
-    if(cep){cep.addEventListener('input',function(){
-      cep.value=maskCep(cep.value);var digs=cep.value.replace(/[^0-9]/g,'');
-      $('mdcephidden').value=digs;if(digs.length<8){return;}
-      fetch('/api/cep/'+digs).then(function(r){return r.json();}).then(function(d){if(d&&d.ok){fill(d);}}).catch(function(){});
-    });}
+    if(cep)cep.addEventListener('input',function(){cep.value=maskCep(cep.value);var digs=cep.value.replace(/[^0-9]/g,'');$('mdcephidden').value=digs;if(digs.length<8)return;fetch('/api/cep/'+digs).then(function(r){return r.json();}).then(function(d){if(d&&d.ok)fill(d);}).catch(function(){});});
     var gps=$('mdgps');
-    if(gps){gps.addEventListener('click',function(){
-      var t=$('mdgpstxt');
-      if(!navigator.geolocation){t.textContent='GPS indisponível — digite o CEP';return;}
-      t.textContent='Obtendo localização…';gps.disabled=true;
-      navigator.geolocation.getCurrentPosition(function(pos){
-        fetch('/api/geo?lat='+pos.coords.latitude+'&lng='+pos.coords.longitude)
-          .then(function(r){return r.json();}).then(function(d){gps.disabled=false;
-            if(d&&d.ok){t.textContent='Localização encontrada ✓';fill(d);}else{t.textContent='Não achei — digite o CEP';}
-          }).catch(function(){gps.disabled=false;t.textContent='Erro — digite o CEP';});
-      },function(err){gps.disabled=false;t.textContent=(err&&err.code===1)?'Permissão negada — digite o CEP':'Não consegui — digite o CEP';},
-      {enableHighAccuracy:true,timeout:8000,maximumAge:0});
-    });}
-    window.mdEditar=function(){
-      var w=document.getElementById('md-form-wrap');if(w){w.style.display='block';}
-      var a=document.getElementById('md-atual');if(a){a.style.display='none';}
-    };
-    window.mdCompose=function(){
-      var rua=($('mdrua').value||'').trim(),num=($('mdnum').value||'').trim(),bairro=($('mdbairro').value||'').trim(),compl=($('mdcompl').value||'').trim();
-      if(!rua){alert('Preencha a rua.');$('mdrua').focus();return false;}
-      var e=rua;if(num){e+=', '+num;}if(bairro){e+=', '+bairro;}if(compl){e+=' — '+compl;}
-      $('mdendereco').value=e;
-      if(!$('mdcephidden').value){$('mdcephidden').value=($('mdcep').value||'').replace(/[^0-9]/g,'');}
-      return true;
-    };
+    if(gps)gps.addEventListener('click',function(){var t=$('mdgpstxt');if(!navigator.geolocation){t.textContent='GPS indisponível — digite o CEP';return;}t.textContent='Obtendo localização…';gps.disabled=true;navigator.geolocation.getCurrentPosition(function(pos){fetch('/api/geo?lat='+pos.coords.latitude+'&lng='+pos.coords.longitude).then(function(r){return r.json();}).then(function(d){gps.disabled=false;if(d&&d.ok){t.textContent='Localização encontrada ✓';fill(d);}else{t.textContent='Não achei — digite o CEP';}}).catch(function(){gps.disabled=false;t.textContent='Erro — digite o CEP';});},function(err){gps.disabled=false;t.textContent=(err&&err.code===1)?'Permissão negada — digite o CEP':'Não consegui — digite o CEP';},{enableHighAccuracy:true,timeout:8000,maximumAge:0});});
+    window.mdCompose=function(){var rua=($('mdrua').value||'').trim(),num=($('mdnum').value||'').trim(),bairro=($('mdbairro').value||'').trim(),compl=($('mdcompl').value||'').trim();if(!rua){alert('Preencha a rua.');$('mdrua').focus();return false;}var e=rua;if(num)e+=', '+num;if(bairro)e+=', '+bairro;if(compl)e+=' — '+compl;$('mdendereco').value=e;if(!$('mdcephidden').value)$('mdcephidden').value=($('mdcep').value||'').replace(/[^0-9]/g,'');return true;};
   })();
   </script>
 </div>

@@ -114,7 +114,7 @@ def brl(centavos: int) -> str:
 _BASE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ titulo }} - Zaq</title>
-<link rel="icon" href="/static/zaq-icon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>
 :root { color-scheme: dark; }
 body{margin:0;min-height:100vh;font-family:system-ui,-apple-system,sans-serif;

@@ -324,7 +324,11 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
 </div>
 <div class="membro-contato">
 {% if m[2] %}<div class="zap">📱 {{ m[2] }}</div>{% endif %}
-{% if m[5] %}
+{% if m[2] or m[6] %}
+{% if m[6] %}<div class="conv mut">✅ Telegram conectado</div>{% endif %}
+{% if m[2] %}<div class="conv mut">✅ WhatsApp conectado</div>{% endif %}
+{% if m[5] and not m[6] %}<div class="mut" style="font-size:.78rem;margin-top:.2rem">🔑 Conectar Telegram também: <code>{{ m[5] }}</code></div>{% endif %}
+{% elif m[5] %}
 <div class="conv-invite">
   <div>🔑 <code>{{ m[5] }}</code></div>
   <div class="conv-links">
@@ -337,9 +341,7 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
   </div>
 </div>
 {% else %}
-{% if m[6] %}<div class="conv mut">✅ Telegram conectado</div>{% endif %}
-{% if m[2] %}<div class="conv mut">✅ WhatsApp conectado</div>{% endif %}
-{% if not m[2] and not m[6] %}<span class="mut">sem contato</span>{% endif %}
+<span class="mut">sem contato</span>
 {% endif %}
 </div>
 <div class="membro-acoes">
@@ -361,9 +363,10 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
 <p class="mut" style="margin-top:1rem">O código 🔑 serve pro Telegram (a pessoa envia no bot ClawIAOpen).
 Quem tem WhatsApp 📱 cadastrado também já usa por lá.</p>
 </div>
-<div class="card larga"><h1 style="font-size:1.05rem">Adicionar pessoa</h1>
+<div class="card larga"><div style="display:flex;justify-content:space-between;align-items:center"><h1 style="font-size:1.05rem;margin:0">Adicionar pessoa</h1><button type="button" onclick="addPessoaToggle()" style="background:transparent;border:1px solid #2a2a2b;color:#5dcaa5;border-radius:8px;padding:.35rem .7rem;font-size:.8rem;cursor:pointer">＋ Nova pessoa</button></div>
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
 {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
+<div id="add-pessoa-body"{% if not aviso %} style="display:none;margin-top:.6rem"{% else %} style="margin-top:.6rem"{% endif %}>
 {% if pode_adicionar %}
 <form method="post" action="/membros/adicionar">
 <label>Nome</label><input name="nome" required maxlength="80">
@@ -381,7 +384,8 @@ Peça pra pessoa abrir o bot <b>ClawIAOpen</b> no Telegram e enviar o código �
 <p class="mut">Seu plano ({{ conta[4] }}) permite {{ inclusos }} pessoa(s) e você já usa {{ ativos }}.
 Pra adicionar mais, faça upgrade pro plano Família ou PJ.</p>
 {% endif %}
-<p class="mut" style="margin-top:1rem"><a href="/senha" style="color:#5dcaa5">Alterar minha senha</a></p>
+</div>
+<script>window.addPessoaToggle=function(){var b=document.getElementById('add-pessoa-body');if(b){b.style.display=(b.style.display==='none'?'block':'none');}};</script>
 </div>{% endblock %}"""
 
 _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
@@ -3696,30 +3700,44 @@ function fp(r){document.querySelectorAll('.rz-fp').forEach(function(l){l.classLi
 
 _BLOCO_CONTA = """
 <div class="card larga">
-  <h1 style="font-size:1.05rem;margin-top:0">Meus dados</h1>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem"><h1 style="font-size:1.05rem;margin:0">Meus dados</h1><button type="button" onclick="dadosEditar()" style="background:transparent;border:1px solid #2a2a2b;color:#5dcaa5;border-radius:8px;padding:.35rem .7rem;font-size:.8rem;cursor:pointer">Editar</button></div>
   {% if md_aviso %}<div class="ok">{{ md_aviso }}</div>{% endif %}
   {% if md_erro %}<div class="erro">{{ md_erro }}</div>{% endif %}
+  <div id="dados-resumo">
+    <table style="width:100%;font-size:.88rem">
+      <tr><td class="mut" style="padding:.3rem 0">Nome</td><td style="text-align:right">{{ md_nome or '-' }}</td></tr>
+      <tr><td class="mut" style="padding:.3rem 0">E-mail</td><td style="text-align:right">{{ md_email or '-' }}</td></tr>
+      <tr><td class="mut" style="padding:.3rem 0">WhatsApp</td><td style="text-align:right">{{ md_whatsapp or '-' }}</td></tr>
+      <tr><td class="mut" style="padding:.3rem 0">Senha</td><td style="text-align:right"><a href="/senha" style="color:#5dcaa5">alterar</a></td></tr>
+    </table>
+  </div>
+  <div id="dados-form" style="display:none;margin-top:.6rem">
   <form method="post" action="/painel/dados">
     <label>Nome</label>
     <input name="nome" value="{{ md_nome or '' }}" required maxlength="80" style="width:100%;margin-bottom:.6rem">
     <label>WhatsApp (com DDD)</label>
     <input name="whatsapp" value="{{ md_whatsapp or '' }}" required maxlength="20" placeholder="86 98888-7777" style="width:100%;margin-bottom:.25rem">
-    <p class="mut" style="font-size:.76rem;margin:.1rem 0 .7rem">Trocar o número reenvia o código pra reconectar no bot.</p>
+    <p class="mut" style="font-size:.76rem;margin:.1rem 0 .7rem">Trocar o número reenvia o código pra reconectar no bot. E-mail (alterar com confirmação): em breve.</p>
     <button>Salvar dados</button>
+    <button type="button" onclick="dadosCancelar()" style="background:transparent;border:1px solid #2a2a2b;color:#888780;border-radius:6px;padding:.5rem .9rem;margin-left:.4rem;cursor:pointer">Cancelar</button>
   </form>
-  <table style="width:100%;font-size:.85rem;margin-top:.7rem">
-    <tr><td class="mut" style="padding:.3rem 0">E-mail</td><td style="text-align:right">{{ md_email or '-' }}</td></tr>
-    <tr><td class="mut" style="padding:.3rem 0">Senha</td><td style="text-align:right"><a href="/senha" style="color:#5dcaa5">alterar senha</a></td></tr>
-  </table>
-  <p class="mut" style="font-size:.76rem;margin-top:.3rem">Alterar e-mail (com confirmação): em breve.</p>
+  </div>
+  <script>
+  window.dadosEditar=function(){var f=document.getElementById('dados-form'),r=document.getElementById('dados-resumo');if(f){f.style.display='block';}if(r){r.style.display='none';}};
+  window.dadosCancelar=function(){var f=document.getElementById('dados-form'),r=document.getElementById('dados-resumo');if(f){f.style.display='none';}if(r){r.style.display='block';}};
+  </script>
 </div>
 
 <div class="card larga">
   <h1 style="font-size:1.05rem;margin-top:0">📍 Meu endereço</h1>
-  <p class="mut" style="margin-bottom:.8rem">Mudou de casa? Atualize aqui — vira o padrão nos próximos pedidos.</p>
   {% if md_endereco %}
-  <div style="background:#161617;border:1px solid #2a2a2b;border-radius:10px;padding:.7rem .9rem;margin-bottom:.9rem;font-size:.9rem">🏠 {{ md_endereco }}{% if md_cep %}<div class="mut" style="font-size:.8rem;margin-top:.2rem">CEP {{ md_cep }}</div>{% endif %}</div>
+  <div id="md-atual" style="display:flex;justify-content:space-between;align-items:flex-start;gap:.6rem;background:#161617;border:1px solid #2a2a2b;border-radius:10px;padding:.7rem .9rem;font-size:.9rem">
+    <div>🏠 {{ md_endereco }}{% if md_cep %}<div class="mut" style="font-size:.8rem;margin-top:.2rem">CEP {{ md_cep }}</div>{% endif %}</div>
+    <button type="button" onclick="mdEditar()" style="flex:none;background:transparent;border:1px solid #2a2a2b;color:#5dcaa5;border-radius:8px;padding:.35rem .7rem;font-size:.8rem;cursor:pointer">Editar</button>
+  </div>
   {% endif %}
+  <div id="md-form-wrap"{% if md_endereco %} style="display:none;margin-top:.9rem"{% endif %}>
+  <p class="mut" style="margin:.2rem 0 .8rem">Mudou de casa? Atualize aqui — vira o padrão nos próximos pedidos.</p>
   <form method="post" action="/painel/endereco" id="mdform" onsubmit="return mdCompose()">
     <button type="button" id="mdgps" style="width:100%;background:#0f7d5c;color:#fff;border:0;border-radius:9px;padding:.7rem;font-weight:600;cursor:pointer;margin-bottom:.7rem">📍 <span id="mdgpstxt">Usar minha localização</span></button>
     <label>CEP</label>
@@ -3737,6 +3755,7 @@ _BLOCO_CONTA = """
     <input type="hidden" name="cep" id="mdcephidden" value="{{ md_cep or '' }}">
     <button>Salvar endereço</button>
   </form>
+  </div>
   <script>
   (function(){
     var $=function(id){return document.getElementById(id);};
@@ -3768,6 +3787,10 @@ _BLOCO_CONTA = """
       },function(err){gps.disabled=false;t.textContent=(err&&err.code===1)?'Permissão negada — digite o CEP':'Não consegui — digite o CEP';},
       {enableHighAccuracy:true,timeout:8000,maximumAge:0});
     });}
+    window.mdEditar=function(){
+      var w=document.getElementById('md-form-wrap');if(w){w.style.display='block';}
+      var a=document.getElementById('md-atual');if(a){a.style.display='none';}
+    };
     window.mdCompose=function(){
       var rua=($('mdrua').value||'').trim(),num=($('mdnum').value||'').trim(),bairro=($('mdbairro').value||'').trim(),compl=($('mdcompl').value||'').trim();
       if(!rua){alert('Preencha a rua.');$('mdrua').focus();return false;}

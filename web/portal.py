@@ -384,47 +384,43 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
 
 <!-- MENU DE CARDS (visível ao entrar) -->
 <div id="forn-menu" class="forn-cards">
-  <button type="button" class="forn-card" onclick="fornAbrir('dados')">
-    <span class="fc-ic">🏢</span>
-    <span class="fc-tit">Meus dados</span>
-    <span class="fc-leg">Os dados da sua empresa: razão social, CNPJ e endereço.</span>
-  </button>
-  <button type="button" class="forn-card" onclick="fornAbrir('catalogo')">
-    <span class="fc-ic">📦</span>
-    <span class="fc-tit">Catálogo</span>
-    <span class="fc-leg">Seus produtos e preços — o que os clientes podem pedir de você.</span>
-  </button>
-  <button type="button" class="forn-card" onclick="fornAbrir('compras')">
-    <span class="fc-ic">🛒</span>
-    <span class="fc-tit">Compras</span>
-    <span class="fc-leg">O que você compra no CEASA — notas e entradas de estoque.</span>
-  </button>
-  <button type="button" class="forn-card" onclick="fornAbrir('cestas')">
-    <span class="fc-ic">🧺</span>
-    <span class="fc-tit">Cestas</span>
-    <span class="fc-leg">Os tamanhos de cesta que seus clientes podem assinar.</span>
-  </button>
+  <div class="forn-grupo">Operação do dia</div>
   <a href="/painel/fornecedor/pedidos" class="forn-card" style="text-decoration:none">
-    <span class="fc-ic">📋</span>
-    <span class="fc-tit">Pedidos</span>
-    <span class="fc-leg">Os pedidos dos seus clientes, prontos pra separar e entregar.</span>
+    <span class="fc-tile">📋</span>
+    <span class="fc-txt"><span class="fc-tit">Pedidos</span><span class="fc-leg">As cestas das assinaturas — separar, embalar e entregar.</span></span>
   </a>
   <a href="/painel/fornecedor/avulsos" class="forn-card" style="text-decoration:none">
-    <span class="fc-ic">📦</span>
-    <span class="fc-tit">Pedidos avulsos</span>
-    <span class="fc-leg">Pedidos feitos direto na loja, fora das assinaturas de cesta.</span>
+    <span class="fc-tile">📦</span>
+    <span class="fc-txt"><span class="fc-tit">Pedidos avulsos</span><span class="fc-leg">Pedidos feitos direto na loja, fora das assinaturas de cesta.</span></span>
   </a>
+  <button type="button" class="forn-card" onclick="fornAbrir('cestas')">
+    <span class="fc-tile">🧺</span>
+    <span class="fc-txt"><span class="fc-tit">Cestas</span><span class="fc-leg">Os tamanhos de cesta que seus clientes podem assinar.</span></span>
+  </button>
+  <button type="button" class="forn-card" onclick="fornAbrir('catalogo')">
+    <span class="fc-tile">🏷️</span>
+    <span class="fc-txt"><span class="fc-tit">Catálogo</span><span class="fc-leg">Seus produtos e preços — o que aparece na sua loja.</span></span>
+  </button>
+  <div class="forn-grupo">Gestão</div>
+  <button type="button" class="forn-card" onclick="fornAbrir('compras')">
+    <span class="fc-tile amber">🛒</span>
+    <span class="fc-txt"><span class="fc-tit">Compras</span><span class="fc-leg">Entradas do CEASA e o estoque que abastece a loja.</span></span>
+  </button>
   <button type="button" class="forn-card" onclick="fornAbrir('financeiro')">
-    <span class="fc-ic">💰</span>
-    <span class="fc-tit">Financeiro</span>
-    <span class="fc-leg">Quanto você ganhou, os repasses e as comissões.</span>
+    <span class="fc-tile amber">💰</span>
+    <span class="fc-txt"><span class="fc-tit">Financeiro</span><span class="fc-leg">Quanto você ganhou, os repasses e as comissões.</span></span>
+  </button>
+  <div class="forn-grupo">Configuração</div>
+  <button type="button" class="forn-card" onclick="fornAbrir('dados')">
+    <span class="fc-tile blue">🏢</span>
+    <span class="fc-txt"><span class="fc-tit">Dados da empresa</span><span class="fc-leg">Razão social, CNPJ, endereço e a sua loja.</span></span>
   </button>
 </div>
 
 <!-- SEÇÃO: Meus dados -->
 <div id="forn-dados" class="forn-secao" style="display:none">
   <button type="button" class="forn-voltar" onclick="fornVoltar()">← voltar</button>
-  <h3>Meus dados</h3>
+  <h3>Dados da empresa</h3>
   <form method="post" action="/painel/fornecedor/dados">
     <label>Razão social</label>
     <input name="razao_social" value="{{ fiscal.razao_social or '' }}" placeholder="ex: Hortifruti do Zé LTDA" maxlength="200">
@@ -1011,12 +1007,18 @@ function fornBannerUpload(i){_fornImgUpload(i,'/painel/fornecedor/banner','forn-
 
 <style>
 .forn-cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:.7rem; margin-top:1rem}
-.forn-card{display:flex; flex-direction:column; align-items:flex-start; text-align:left;
+.forn-card{display:flex; flex-direction:row; align-items:flex-start; gap:.75rem; text-align:left;
   background:#1c1c1f; border:1px solid #2a2a2b; border-radius:12px; padding:1rem; cursor:pointer; transition:border-color .15s; color:inherit; font:inherit}
 .forn-card:hover{border-color:#1d9e75}
 .fc-ic{font-size:24px; margin-bottom:.4rem; line-height:1}
 .fc-tit{font-size:.95rem; font-weight:500; color:#f0f0ee; margin-bottom:.2rem}
 .fc-leg{font-size:.8rem; color:#a8a8a3; line-height:1.4}
+.fc-txt{display:flex; flex-direction:column}
+.fc-tile{width:42px; height:42px; border-radius:11px; background:#13251d; color:#5dcaa5; display:flex; align-items:center; justify-content:center; font-size:20px; flex:none}
+.fc-tile.amber{background:#2a2417; color:#e0b877}
+.fc-tile.blue{background:#16202e; color:#7ab0e8}
+.forn-grupo{grid-column:1/-1; font-size:11px; color:#6f6f6a; text-transform:uppercase; letter-spacing:.05em; margin:.7rem 0 -.05rem}
+.forn-grupo:first-child{margin-top:.2rem}
 .forn-secao{margin-top:1rem}
 .forn-voltar{background:transparent; border:none; color:#5dcaa5; cursor:pointer; font-size:.9rem; padding:0 0 .8rem 0; text-decoration:none}
 .forn-voltar:hover{color:#7ad4b4}

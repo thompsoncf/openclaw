@@ -102,73 +102,79 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
 <form method="get" action="/admin" style="margin-bottom:.8rem">
 <input name="busca" placeholder="buscar nome, e-mail ou documento" value="{{ busca or '' }}" style="width:60%">
 <button>Buscar</button></form>
+<div style="max-height:65vh;overflow-y:auto;padding-right:.3rem;margin-top:.4rem">
 {% for c in contas %}
-<div style="background:#0e0e0f;border:1px solid #2a2a2b;border-radius:12px;padding:1rem 1.1rem;margin-bottom:.9rem">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.6rem;flex-wrap:wrap">
-    <div><span class="mut">#{{ c.id }}</span> <b>{{ c.nome }}</b> <span class="mut">{{ c.email or '-' }}</span></div>
-    <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
-      <span class="tag">{{ c.plano or '-' }}</span>
+<div style="background:#0e0e0f;border:1px solid #2a2a2b;border-radius:10px;padding:.7rem .9rem;margin-bottom:.6rem">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:.6rem;flex-wrap:wrap">
+    <div style="min-width:0"><span class="mut">#{{ c.id }}</span> <b>{{ c.nome }}</b> <span class="mut" style="font-size:.8rem">{{ c.email or '-' }}</span></div>
+    <div style="display:flex;gap:.35rem;align-items:center;flex-wrap:wrap">
       <span class="tag {{ c.status }}">{{ c.status }}</span>
+      <span class="tag">{{ c.plano or '-' }}</span>
       {% if c.qtd_cestas and c.qtd_cestas > 0 %}<span class="tag ativa" title="assinatura de cesta">cesta {{ c.qtd_cestas }}</span>{% endif %}
-      <span class="mut">vence {{ c.vencimento.strftime('%d/%m/%y') if c.vencimento else '-' }}</span>
+      <span class="mut" style="font-size:.78rem">vence {{ c.vencimento.strftime('%d/%m/%y') if c.vencimento else '-' }}</span>
+      <button type="button" onclick="admToggle({{ c.id }})" id="tgl-{{ c.id }}" style="padding:.3rem .7rem;font-size:.78rem;background:transparent;border:1px solid #333;color:#5dcaa5">detalhes</button>
     </div>
   </div>
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.6rem;margin-top:.8rem">
-    <div style="background:#161617;border-radius:8px;padding:.6rem .7rem">
-      <div class="mut" style="font-size:.72rem;text-transform:uppercase;margin-bottom:.4rem">Limites / dia</div>
-      <form class="inline" method="post" action="/admin/conta/{{ c.id }}/limites" style="display:flex;gap:4px;align-items:center">
-        <input type="number" name="msg" value="{{ c.limite_mensagens_dia }}" style="width:52px" title="mensagens/dia"><span>/</span>
-        <input type="number" name="cup" value="{{ c.limite_cupons_dia }}" style="width:48px" title="cupons/dia">
-        <button style="padding:.35rem .55rem">ok</button>
-      </form>
-    </div>
-    <div style="background:#161617;border-radius:8px;padding:.6rem .7rem">
-      <div class="mut" style="font-size:.72rem;text-transform:uppercase;margin-bottom:.4rem">Uso hoje</div>
-      <div style="font-size:.88rem">{{ c.msg_hoje }}/{{ c.limite_mensagens_dia }} msg<br>{{ c.cup_hoje }}/{{ c.limite_cupons_dia }} cup</div>
-    </div>
-    <div style="background:#161617;border-radius:8px;padding:.6rem .7rem">
-      <div class="mut" style="font-size:.72rem;text-transform:uppercase;margin-bottom:.4rem">Uso mes</div>
-      <div style="font-size:.88rem">{{ c.msg_mes }} msg<br>{{ c.cup_mes }} cup</div>
-    </div>
-  </div>
-  <div style="background:#161617;border-radius:8px;padding:.7rem .8rem;margin-top:.6rem">
-    <div class="mut" style="font-size:.72rem;text-transform:uppercase;margin-bottom:.5rem">Endereco de entrega</div>
-    <form method="post" action="/admin/conta/{{ c.id }}/endereco" style="display:flex;gap:.5rem;align-items:flex-end;flex-wrap:wrap">
-      <div><div class="mut" style="font-size:.78rem;margin-bottom:.2rem">CEP</div><input name="cep" id="cep-{{ c.id }}" value="{{ c.cep or '' }}" placeholder="CEP" style="width:104px" oninput="admCep({{ c.id }})"></div>
-      <div style="flex:1;min-width:200px"><div class="mut" style="font-size:.78rem;margin-bottom:.2rem">Endereco</div><input name="endereco" id="end-{{ c.id }}" value="{{ c.endereco or '' }}" placeholder="rua, numero, bairro" style="width:100%"></div>
-      <button style="padding:.5rem .9rem">Salvar</button>
-    </form>
-    <div class="mut" style="font-size:.72rem;margin-top:.4rem">Digite o CEP para preencher rua/bairro (so preenche se estiver vazio).</div>
-  </div>
-  <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin-top:.7rem">
-    <form class="inline" method="post" action="/admin/conta/{{ c.id }}/ativar"><button>+30 dias</button></form>
-    <form class="inline" method="post" action="/admin/conta/{{ c.id }}/suspender"><button class="warn">Suspender</button></form>
-    {% if c.tipo == 'pj' %}
-      {% if c.eh_fornecedor %}
-        <span class="tag ativa" title="slug: {{ c.fornecedor_slug }}">fornecedor ok</span>
-        <form class="inline" method="post" action="/admin/conta/{{ c.id }}/remover-fornecedor"><button class="warn" style="padding:.35rem .6rem;font-size:.78rem">remover forn.</button></form>
-      {% else %}
-        <form class="inline" method="post" action="/admin/conta/{{ c.id }}/fornecedor" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
-          <select name="nicho_id" style="width:100px" required title="nicho">{% for n in nichos %}<option value="{{ n.id }}">{{ n.nome }}</option>{% endfor %}</select>
-          <input type="number" name="comissao" step="0.01" placeholder="%" style="width:52px" title="comissao %" required>
-          <input name="wallet" placeholder="wallet Asaas" style="width:120px" title="Asaas wallet id">
-          <button style="padding:.4rem .7rem;font-size:.8rem">tornar fornecedor</button>
+  <div id="det-{{ c.id }}" style="display:none;margin-top:.8rem">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.6rem">
+      <div style="background:#161617;border-radius:8px;padding:.6rem .7rem">
+        <div class="mut" style="font-size:.72rem;text-transform:uppercase;margin-bottom:.4rem">Limites / dia</div>
+        <form class="inline" method="post" action="/admin/conta/{{ c.id }}/limites" style="display:flex;gap:4px;align-items:center">
+          <input type="number" name="msg" value="{{ c.limite_mensagens_dia }}" style="width:52px" title="mensagens/dia"><span>/</span>
+          <input type="number" name="cup" value="{{ c.limite_cupons_dia }}" style="width:48px" title="cupons/dia">
+          <button style="padding:.35rem .55rem">ok</button>
         </form>
+      </div>
+      <div style="background:#161617;border-radius:8px;padding:.6rem .7rem">
+        <div class="mut" style="font-size:.72rem;text-transform:uppercase;margin-bottom:.4rem">Uso hoje</div>
+        <div style="font-size:.88rem">{{ c.msg_hoje }}/{{ c.limite_mensagens_dia }} msg<br>{{ c.cup_hoje }}/{{ c.limite_cupons_dia }} cup</div>
+      </div>
+      <div style="background:#161617;border-radius:8px;padding:.6rem .7rem">
+        <div class="mut" style="font-size:.72rem;text-transform:uppercase;margin-bottom:.4rem">Uso mes</div>
+        <div style="font-size:.88rem">{{ c.msg_mes }} msg<br>{{ c.cup_mes }} cup</div>
+      </div>
+    </div>
+    <div style="background:#161617;border-radius:8px;padding:.7rem .8rem;margin-top:.6rem">
+      <div class="mut" style="font-size:.72rem;text-transform:uppercase;margin-bottom:.5rem">Endereco de entrega</div>
+      <form method="post" action="/admin/conta/{{ c.id }}/endereco" style="display:flex;gap:.5rem;align-items:flex-end;flex-wrap:wrap">
+        <div><div class="mut" style="font-size:.78rem;margin-bottom:.2rem">CEP</div><input name="cep" id="cep-{{ c.id }}" value="{{ c.cep or '' }}" placeholder="CEP" style="width:104px" oninput="admCep({{ c.id }})"></div>
+        <div style="flex:1;min-width:200px"><div class="mut" style="font-size:.78rem;margin-bottom:.2rem">Endereco</div><input name="endereco" id="end-{{ c.id }}" value="{{ c.endereco or '' }}" placeholder="rua, numero, bairro" style="width:100%"></div>
+        <button style="padding:.5rem .9rem">Salvar</button>
+      </form>
+      <div class="mut" style="font-size:.72rem;margin-top:.4rem">CEP preenche rua/bairro automatico (so se estiver vazio).</div>
+    </div>
+    <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin-top:.7rem">
+      <form class="inline" method="post" action="/admin/conta/{{ c.id }}/ativar"><button>+30 dias</button></form>
+      <form class="inline" method="post" action="/admin/conta/{{ c.id }}/suspender"><button class="warn">Suspender</button></form>
+      {% if c.tipo == 'pj' %}
+        {% if c.eh_fornecedor %}
+          <span class="tag ativa" title="slug: {{ c.fornecedor_slug }}">fornecedor ok</span>
+          <form class="inline" method="post" action="/admin/conta/{{ c.id }}/remover-fornecedor"><button class="warn" style="padding:.35rem .6rem;font-size:.78rem">remover forn.</button></form>
+        {% else %}
+          <form class="inline" method="post" action="/admin/conta/{{ c.id }}/fornecedor" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
+            <select name="nicho_id" style="width:100px" required title="nicho">{% for n in nichos %}<option value="{{ n.id }}">{{ n.nome }}</option>{% endfor %}</select>
+            <input type="number" name="comissao" step="0.01" placeholder="%" style="width:52px" title="comissao %" required>
+            <input name="wallet" placeholder="wallet Asaas" style="width:120px" title="Asaas wallet id">
+            <button style="padding:.4rem .7rem;font-size:.8rem">tornar fornecedor</button>
+          </form>
+        {% endif %}
       {% endif %}
-    {% endif %}
+    </div>
   </div>
 </div>
 {% endfor %}
+</div>
 <script>
+function admToggle(id){var d=document.getElementById('det-'+id),b=document.getElementById('tgl-'+id);if(!d)return;var open=(d.style.display!=='none');d.style.display=open?'none':'block';if(b)b.textContent=open?'detalhes':'fechar';}
 function admCep(id){var c=document.getElementById('cep-'+id);var d=(c.value||'').replace(/[^0-9]/g,'');if(d.length!==8)return;fetch('/api/cep/'+d).then(function(r){return r.json();}).then(function(j){if(!j||!j.ok)return;var e=document.getElementById('end-'+id);if(e&&!e.value.trim()){var s=j.rua||'';if(j.bairro)s+=(s?', ':'')+j.bairro;if(j.cidade)s+=(s?' - ':'')+j.cidade+(j.uf?'/'+j.uf:'');e.value=s;}}).catch(function(){});}
 </script></div>
 
 <div class="card"><h2>Auditoria recente</h2>
-<table><tr><th>Quando</th><th>Conta</th><th>Evento</th><th>Detalhe</th></tr>
+<div style="max-height:320px;overflow:auto"><table><tr><th>Quando</th><th>Conta</th><th>Evento</th><th>Detalhe</th></tr>
 {% for e in eventos %}<tr>
 <td class="mut">{{ e.criado_em.strftime('%d/%m %H:%M') }}</td>
 <td>{{ e.conta_id }}</td><td>{{ e.tipo }}</td><td class="mut">{{ e.detalhe }}</td></tr>{% endfor %}
-</table></div>
+</table></div></div>
 {% endblock %}"""
 
 _ADMIN_QR = """{% extends "abase" %}{% block conteudo %}

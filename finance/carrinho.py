@@ -375,31 +375,62 @@ def pedidos_do_cliente(pool, cliente_id: int, fornecedor_id: int) -> list[dict]:
     return out
 
 
+_FORMA_LABEL = {
+    "entrega_pix": "Pix na entrega", "entrega_cartao": "Cartao na entrega",
+    "entrega_dinheiro": "Dinheiro na entrega", "pagar_agora": "Pago online",
+}
+
+
 def listar_para_fornecedor(pool, fornecedor_id: int,
                            status: str | None = None) -> list[dict]:
-    """Lista os carrinhos enviados ao fornecedor. Aguardando primeiro."""
-    with pool.connection() as c:
-        q = """select ca.id, ca.cliente_id, ct.nome, ca.status, ca.canal,
-                      ca.subtotal_centavos, ca.taxa_centavos, ca.total_centavos,
-                      ca.endereco_entrega, ca.obs, ca.criado_em
-               from carrinhos ca join contas ct on ct.id = ca.cliente_id
-               where ca.fornecedor_id=%s and ca.status != 'rascunho'"""
-        args = [fornecedor_id]
+    """Lista os carrinhos avulsos enviados ao fornecedor. Aguardando primeiro.
+    Inclui bairro/forma de pagamento/pago quando as colunas existem (defensivo)."""
+    def _monta(cols: str):
+        q = (f"select {cols} from carrinhos ca "
+             "join contas ct on ct.id = ca.cliente_id "
+             "where ca.fornecedor_id=%s and ca.status != 'rascunho'")
+        a = [fornecedor_id]
         if status:
             q += " and ca.status=%s"
-            args.append(status)
-        q += """ order by case ca.status when 'aguardando' then 0
-                                         when 'confirmado' then 1
-                                         when 'em_entrega' then 2 else 3 end,
-                          ca.criado_em desc"""
-        rows = c.execute(q, tuple(args)).fetchall()
-    return [
-        {"id": r[0], "cliente_id": r[1], "cliente_nome": r[2], "status": r[3],
-         "canal": r[4], "subtotal_centavos": int(r[5] or 0),
-         "taxa_centavos": int(r[6] or 0), "total_centavos": int(r[7] or 0),
-         "endereco_entrega": r[8], "obs": r[9], "criado_em": r[10]}
-        for r in rows
-    ]
+            a.append(status)
+        q += (" order by case ca.status when 'aguardando' then 0 "
+              "when 'confirmado' then 1 when 'em_entrega' then 2 else 3 end, "
+              "ca.criado_em desc")
+        return q, tuple(a)
+
+    base = ("ca.id, ca.cliente_id, ct.nome, ca.status, ca.canal, "
+            "ca.subtotal_centavos, ca.taxa_centavos, ca.total_centavos, "
+            "ca.endereco_entrega, ca.obs, ca.criado_em")
+    extra = base + ", ca.bairro, ca.forma_pagamento, ca.pago"
+    tem_extra = True
+    with pool.connection() as c:
+        try:
+            q, a = _monta(extra)
+            rows = c.execute(q, a).fetchall()
+        except Exception:
+            c.rollback()
+            tem_extra = False
+            q, a = _monta(base)
+            rows = c.execute(q, a).fetchall()
+
+    out = []
+    for r in rows:
+        d = {"id": r[0], "cliente_id": r[1], "cliente_nome": r[2], "status": r[3],
+             "canal": r[4], "subtotal_centavos": int(r[5] or 0),
+             "taxa_centavos": int(r[6] or 0), "total_centavos": int(r[7] or 0),
+             "endereco_entrega": r[8], "obs": r[9], "criado_em": r[10]}
+        if tem_extra:
+            d["bairro"] = r[11]
+            d["forma_pagamento"] = r[12]
+            d["forma_label"] = _FORMA_LABEL.get(r[12], r[12] or "")
+            d["pago"] = bool(r[13])
+        else:
+            d["bairro"] = None
+            d["forma_pagamento"] = None
+            d["forma_label"] = ""
+            d["pago"] = False
+        out.append(d)
+    return out
 
 
 def mudar_status(pool, fornecedor_id: int, carrinho_id: int,

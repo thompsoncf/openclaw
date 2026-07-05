@@ -409,6 +409,11 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
     <span class="fc-tit">Pedidos</span>
     <span class="fc-leg">Os pedidos dos seus clientes, prontos pra separar e entregar.</span>
   </a>
+  <a href="/painel/fornecedor/avulsos" class="forn-card" style="text-decoration:none">
+    <span class="fc-ic">📦</span>
+    <span class="fc-tit">Pedidos avulsos</span>
+    <span class="fc-leg">Pedidos feitos direto na loja, fora das assinaturas de cesta.</span>
+  </a>
   <button type="button" class="forn-card" onclick="fornAbrir('financeiro')">
     <span class="fc-ic">💰</span>
     <span class="fc-tit">Financeiro</span>
@@ -3800,8 +3805,55 @@ _BLOCO_CONTA = """
 """
 
 
+_AVULSOS_FORN = """{% extends "base" %}{% block conteudo %}
+<div class="card larga">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.2rem">
+    <h1 style="font-size:1.2rem;margin:0">Pedidos avulsos</h1>
+    <a href="/painel/fornecedor/pedidos" style="color:#5dcaa5;font-size:.85rem;text-decoration:none">Cestas &rsaquo;</a>
+  </div>
+  <p class="mut" style="margin:.3rem 0 1rem">Pedidos feitos direto na sua loja (fora das assinaturas de cesta).</p>
+  {% set fstatus = status or '' %}
+  <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1rem">
+    <a href="/painel/fornecedor/avulsos" class="tag" style="text-decoration:none{% if not fstatus %};background:#1d9e75;color:#fff;border-color:#1d9e75{% endif %}">Todos</a>
+    <a href="/painel/fornecedor/avulsos?status=aguardando" class="tag" style="text-decoration:none{% if fstatus=='aguardando' %};background:#1d9e75;color:#fff;border-color:#1d9e75{% endif %}">Aguardando</a>
+    <a href="/painel/fornecedor/avulsos?status=confirmado" class="tag" style="text-decoration:none{% if fstatus=='confirmado' %};background:#1d9e75;color:#fff;border-color:#1d9e75{% endif %}">Confirmado</a>
+    <a href="/painel/fornecedor/avulsos?status=em_entrega" class="tag" style="text-decoration:none{% if fstatus=='em_entrega' %};background:#1d9e75;color:#fff;border-color:#1d9e75{% endif %}">Em entrega</a>
+    <a href="/painel/fornecedor/avulsos?status=entregue" class="tag" style="text-decoration:none{% if fstatus=='entregue' %};background:#1d9e75;color:#fff;border-color:#1d9e75{% endif %}">Entregues</a>
+  </div>
+  {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
+  {% if not pedidos %}<p class="mut" style="text-align:center;padding:2rem 0">Nenhum pedido avulso{% if fstatus %} nesse status{% endif %} por aqui ainda.</p>{% endif %}
+  {% set cor = {'aguardando':'#e0a83d','confirmado':'#3a78c2','em_entrega':'#5b8def','entregue':'#1d9e75','cancelado':'#8a3636'} %}
+  {% for p in pedidos %}
+  <div style="background:#0e0e0f;border:1px solid #2a2a2b;border-left:3px solid {{ cor.get(p.status,'#2a2a2b') }};border-radius:12px;padding:.9rem 1rem;margin-bottom:.8rem{% if p.status in ['entregue','cancelado'] %};opacity:.7{% endif %}">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem">
+      <div><b>{{ p.cliente_nome }}</b> <span class="mut" style="font-size:.78rem">#{{ p.id }}{% if p.criado_em %} &middot; {{ p.criado_em.strftime('%d/%m %H:%M') }}{% endif %}</span></div>
+      <span class="tag" style="border-color:{{ cor.get(p.status,'#444') }};color:{{ cor.get(p.status,'#bbb') }}">{{ p.status }}{% if p.pago %} &middot; pago{% endif %}</span>
+    </div>
+    {% if p.endereco_entrega %}<div class="mut" style="font-size:.83rem;margin:.5rem 0">📍 {{ p.endereco_entrega }}{% if p.forma_label %} &middot; <span style="color:#c5c5c0">{{ p.forma_label }}</span>{% endif %}</div>{% endif %}
+    {% if p.obs %}<div class="mut" style="font-size:.8rem;margin:.2rem 0 .3rem">Obs: {{ p.obs }}</div>{% endif %}
+    <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #212122;padding-top:.6rem;margin-top:.5rem">
+      <span style="color:#5dcaa5;font-weight:600">R$ {{ "%.2f"|format(p.total_centavos/100) }}</span>
+      <div style="display:flex;gap:.4rem">
+        {% if p.status == 'aguardando' %}
+          <form method="post" action="/painel/fornecedor/avulsos/{{ p.id }}/status" style="margin:0"><input type="hidden" name="novo" value="cancelado"><button style="width:auto;margin:0;padding:.4rem .8rem;font-size:.8rem;background:transparent;border:1px solid #6e2b2b;color:#e89a9a">Recusar</button></form>
+          <form method="post" action="/painel/fornecedor/avulsos/{{ p.id }}/status" style="margin:0"><input type="hidden" name="novo" value="confirmado"><button style="width:auto;margin:0;padding:.4rem .9rem;font-size:.8rem">Confirmar</button></form>
+        {% elif p.status == 'confirmado' %}
+          <form method="post" action="/painel/fornecedor/avulsos/{{ p.id }}/status" style="margin:0"><input type="hidden" name="novo" value="cancelado"><button style="width:auto;margin:0;padding:.4rem .8rem;font-size:.8rem;background:transparent;border:1px solid #333;color:#a8a8a3">Cancelar</button></form>
+          <form method="post" action="/painel/fornecedor/avulsos/{{ p.id }}/status" style="margin:0"><input type="hidden" name="novo" value="em_entrega"><button style="width:auto;margin:0;padding:.4rem .9rem;font-size:.8rem">Saiu pra entrega</button></form>
+        {% elif p.status == 'em_entrega' %}
+          <form method="post" action="/painel/fornecedor/avulsos/{{ p.id }}/status" style="margin:0"><input type="hidden" name="novo" value="entregue"><button style="width:auto;margin:0;padding:.4rem .9rem;font-size:.8rem">Marcar entregue</button></form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+  <a href="/painel/fornecedor" style="color:#5dcaa5;text-decoration:none;font-size:.85rem">&larr; voltar</a>
+</div>
+{% endblock %}"""
+
+
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 _env.filters["brl"] = brl
@@ -5325,6 +5377,38 @@ def painel_fornecedor_dados(request: Request,
         c.commit()
     request.session["aviso"] = "Dados do fornecedor salvos."
     return RedirectResponse("/painel/fornecedor", status_code=303)
+
+
+@router.get("/painel/fornecedor/avulsos", response_class=HTMLResponse)
+def painel_fornecedor_avulsos(request: Request, status: str = ""):
+    from finance import carrinho as car_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    if not conta[8]:
+        return RedirectResponse("/painel", status_code=303)
+    st = status if status in ("aguardando", "confirmado", "em_entrega",
+                              "entregue", "cancelado") else None
+    pedidos = car_mod.listar_para_fornecedor(get_pool(), conta[0], st)
+    return _render("avulsos_forn", request, titulo="Pedidos avulsos", conta=conta,
+                   pedidos=pedidos, status=status,
+                   aviso=request.session.pop("aviso_avulso", None))
+
+
+@router.post("/painel/fornecedor/avulsos/{carrinho_id}/status")
+def painel_fornecedor_avulso_status(request: Request, carrinho_id: int,
+                                    novo: str = Form("")):
+    from finance import carrinho as car_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    if not conta[8]:
+        return RedirectResponse("/painel", status_code=303)
+    r = car_mod.mudar_status(get_pool(), conta[0], carrinho_id, novo)
+    request.session["aviso_avulso"] = (
+        "Pedido atualizado." if r.get("ok") else r.get("erro", "Nao foi possivel atualizar."))
+    return RedirectResponse(
+        request.headers.get("referer") or "/painel/fornecedor/avulsos", status_code=303)
 
 
 @router.get("/painel/fornecedor/pedidos", response_class=HTMLResponse)

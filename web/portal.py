@@ -304,7 +304,7 @@ _BEMVINDO = """{% extends "base" %}{% block conteudo %}
 _PAINEL = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
   <h1 style="margin:0">Olá, {{ conta[2] }}! <span class="tag">{{ conta[5] }}</span></h1>
-  <p class="mut" style="margin-top:.6rem">Plano: <b>{{ conta[4] or '-' }}</b>{% if conta[6] %} · válido até <b>{{ conta[6].strftime('%d/%m/%Y') }}</b>{% endif %} · tipo: <b>{{ conta[1]|upper }}</b></p>
+  <p class="mut" style="margin-top:.6rem">Plano: <b>{{ conta[4] or '-' }}</b>{% if conta[6] %} · válido até <b>{{ conta[6].strftime('%d/%m/%Y') }}</b>{% endif %} · tipo: <b>{{ conta[1]|upper }}</b> <a href="/painel/ativar-app" id="trocar-plano" style="color:#5dcaa5;text-decoration:none;margin-left:.3rem">trocar plano &gt;</a></p>
   {% if conta[5] == 'trial' %}<form method="post" action="/assinar" style="margin:0"><button style="width:auto;margin:.6rem 0 0;padding:.55rem 1.1rem">💳 Assinar plano</button></form>{% endif %}
 </div>
 

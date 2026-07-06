@@ -3304,6 +3304,10 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#fff;color:#000;m
 .etq-cesta{margin-top:.8rem;padding-top:.5rem;border-top:1px dashed #888;font-size:1.05rem}
 .etq-cesta b{font-size:1.2rem}
 .etq-rodape{margin-top:.6rem;font-size:.75rem;color:#666;text-align:right}
+.etq-itens{margin-top:.7rem;padding-top:.5rem;border-top:1px dashed #888}
+.etq-itens-t{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:#555;margin-bottom:.35rem}
+.etq-item{font-size:.95rem;padding:.18rem 0;line-height:1.3}
+.etq-check{font-size:1.1rem;color:#000;margin-right:.3rem}
 .etq-acoes{margin-top:1rem;padding-top:1rem;border-top:1px solid #ddd;display:flex;gap:.5rem}
 .etq-acoes button{padding:.6rem 1rem;border-radius:6px;border:1px solid #000;cursor:pointer;background:#000;color:#fff;font-size:.9rem}
 .etq-acoes .sec{background:#fff;color:#000}
@@ -3323,6 +3327,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#fff;color:#000;m
   {% if e.endereco %}<div class="etq-end">{{ e.endereco }}</div>{% endif %}
   {% if e.cep %}<div class="etq-cep">CEP {{ e.cep }}</div>{% endif %}
   <div class="etq-cesta">{% if e.tipo == 'avulso' %}Avulso · <b>{{ e.qtd_itens }} ite{{ 'm' if e.qtd_itens == 1 else 'ns' }}</b>{% if e.forma_label %} · {{ e.forma_label }}{% endif %}{% else %}Cesta <b>{{ e.tamanho_nome }}</b>{% endif %}</div>
+  {% if e.itens %}<div class="etq-itens"><div class="etq-itens-t">Separar</div>{% for it in e.itens %}<div class="etq-item"><span class="etq-check">&#9744;</span> <b>{{ "%g"|format(it.quantidade) }} {{ it.unidade }}</b> {{ it.produto_nome }}</div>{% endfor %}</div>{% endif %}
   <div class="etq-rodape">Pedido #{{ e.id }}</div>
 </div>
 <div class="etq-acoes">
@@ -3900,7 +3905,7 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
     {% for p in novos %}
     {% call card(p) %}
     <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #212122;margin-top:.6rem;padding-top:.6rem">
-      <span class="mut" style="font-size:.78rem">{{ p.forma_label }}{% if p.criado_em %} · {{ p.criado_em.strftime('%d/%m %H:%M') }}{% endif %}</span>
+      <span class="mut" style="font-size:.78rem">{{ p.forma_label }}{% if p.criado_em %} · {{ p.criado_em.strftime('%d/%m %H:%M') }}{% endif %} · <a href="/painel/fornecedor/embalagem/avulso/{{ p.id }}/etiqueta" target="_blank" style="color:#5dcaa5;text-decoration:none">🏷️ etiqueta</a></span>
       <div style="display:flex;gap:.4rem">
         <form method="post" action="/painel/fornecedor/pedidos/avulso/{{ p.id }}/recusar" style="margin:0"><input type="hidden" name="fase" value="novos"><button style="width:auto;margin:0;padding:.4rem .8rem;font-size:.8rem;background:transparent;border:1px solid #6e2b2b;color:#e89a9a">Recusar</button></form>
         <form method="post" action="/painel/fornecedor/pedidos/avulso/{{ p.id }}/aceitar" style="margin:0"><input type="hidden" name="fase" value="novos"><button style="width:auto;margin:0;padding:.4rem .9rem;font-size:.8rem">Aceitar</button></form>
@@ -5979,6 +5984,7 @@ def painel_fornecedor_etiqueta(request: Request, cesta_id: int):
     if e is None:
         request.session["erro"] = "Cesta não encontrada."
         return RedirectResponse("/painel/fornecedor/embalagem", status_code=303)
+    e["itens"] = pedidos_mod.itens_da_cesta(get_pool(), conta[0], cesta_id)
     return HTMLResponse(_env.get_template("etiqueta_forn").render(e=e))
 
 
@@ -5994,6 +6000,7 @@ def painel_fornecedor_etiqueta_avulso(request: Request, carrinho_id: int):
     if e is None:
         request.session["erro"] = "Pedido nao encontrado."
         return RedirectResponse("/painel/fornecedor/pedidos?fase=embalagem", status_code=303)
+    e["itens"] = car_mod.itens_do_avulso(get_pool(), conta[0], carrinho_id)
     return HTMLResponse(_env.get_template("etiqueta_forn").render(e=e))
 
 

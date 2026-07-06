@@ -750,3 +750,20 @@ def dados_etiqueta_avulso(pool, fornecedor_id: int, carrinho_id: int) -> dict | 
         "forma_label": _FORMA_LABEL.get(forma, forma or ""),
         "qtd_itens": int(qtd or 0),
     }
+
+
+def itens_do_avulso(pool, fornecedor_id: int, carrinho_id: int) -> list:
+    """Itens de UM avulso (pick ticket na etiqueta). Valida fornecedor."""
+    with pool.connection() as c:
+        rows = c.execute(
+            """select i.nome, coalesce(p.categoria, 'outros'),
+                      i.quantidade, coalesce(i.unidade, 'und')
+                 from carrinho_itens i
+                 join carrinhos ca on ca.id = i.carrinho_id
+                 left join catalogo_produtos p on p.id = i.produto_id
+                where i.carrinho_id = %s and ca.fornecedor_id = %s
+                order by p.categoria nulls last, i.nome""",
+            (carrinho_id, fornecedor_id),
+        ).fetchall()
+    return [{"produto_nome": r[0], "grupo": r[1],
+             "quantidade": float(r[2] or 0), "unidade": r[3]} for r in rows]

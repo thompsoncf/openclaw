@@ -827,3 +827,21 @@ def _override_bairros(pool, dicts) -> None:
         b = bm.get(d.get("cliente_id"))
         if b:
             d["bairro"] = b
+
+
+def itens_da_cesta(pool, fornecedor_id: int, cesta_id: int) -> list:
+    """Itens de UMA cesta (pick ticket na etiqueta). Valida fornecedor."""
+    with pool.connection() as c:
+        rows = c.execute(
+            """select coalesce(p.nome, '(produto '||ci.produto_id||')'),
+                      coalesce(ci.grupo, p.categoria, 'outros'),
+                      ci.quantidade, coalesce(p.unidade, 'und')
+                 from cesta_itens ci
+                 join cesta_semana cs on cs.id = ci.cesta_id
+                 left join catalogo_produtos p on p.id = ci.produto_id
+                where ci.cesta_id = %s and cs.fornecedor_id = %s
+                order by ci.grupo nulls last, p.nome""",
+            (cesta_id, fornecedor_id),
+        ).fetchall()
+    return [{"produto_nome": r[0], "grupo": r[1],
+             "quantidade": float(r[2] or 0), "unidade": r[3]} for r in rows]

@@ -3910,18 +3910,56 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
     {% endfor %}
 
   {% elif fase == 'separacao' %}
-    <p class="mut" style="margin:1rem 0 .3rem">Pick list — tudo o que separar (cestas + avulsos confirmados somados).</p>
-    {% if not sep.grupos %}<p class="mut" style="text-align:center;padding:2rem 0">Nada confirmado pra separar ainda.</p>{% endif %}
-    {% for g in sep.grupos %}
-    <div style="margin-top:1rem"><div class="mut" style="text-transform:uppercase;font-size:.72rem;letter-spacing:.04em;margin-bottom:.4rem">{{ g.grupo }}</div>
-      {% for it in g.itens %}
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:.5rem .2rem;border-bottom:1px solid #1c1c1d">
-        <span>{{ it.produto_nome }}</span>
-        <span style="white-space:nowrap"><b>{{ "%g"|format(it.quantidade) }}</b> <span class="mut">{{ it.unidade }}</span>{% if it.get('suficiente') is not none %} <span style="font-size:.7rem;color:{{ '#5dcaa5' if it.suficiente else '#e0a83d' }}">{{ '✓' if it.suficiente else 'falta ' ~ ("%g"|format(it.falta)) }}</span>{% endif %}</span>
+    <form method="get" action="/painel/fornecedor/pedidos" style="margin:.4rem 0 .2rem">
+      <input type="hidden" name="fase" value="separacao">
+      <select name="periodo" onchange="this.form.submit()" style="background:#0e0e0f;border:1px solid #333;color:#ececec;border-radius:8px;padding:.4rem .6rem;font-size:.85rem">
+        <option value="esta_semana"{% if periodo=='esta_semana' %} selected{% endif %}>Esta semana</option>
+        <option value="proxima_semana"{% if periodo=='proxima_semana' %} selected{% endif %}>Próxima semana</option>
+        <option value="proxima"{% if periodo=='proxima' %} selected{% endif %}>Próximas entregas</option>
+        <option value="mes"{% if periodo=='mes' %} selected{% endif %}>Próximos 30 dias</option>
+      </select>
+      {% if sep.data_de and sep.data_ate %}<span class="mut" style="margin-left:.5rem;font-size:.8rem">{{ sep.data_de }} — {{ sep.data_ate }}</span>{% endif %}
+    </form>
+    <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin:.8rem 0">
+      <div style="flex:1;min-width:96px;background:#161617;border:1px solid #2a2a2b;border-radius:10px;padding:.7rem;text-align:center"><div style="font-size:1.25rem;font-weight:600;color:#5dcaa5">{{ sep.qtd_cestas_confirmadas }}{% if sep.qtd_avulsos %}+{{ sep.qtd_avulsos }}{% endif %}</div><div class="mut" style="font-size:.7rem">cestas{% if sep.qtd_avulsos %}+avulsos{% endif %}</div></div>
+      <div style="flex:1;min-width:96px;background:#161617;border:1px solid #2a2a2b;border-radius:10px;padding:.7rem;text-align:center"><div style="font-size:1.25rem;font-weight:600;color:#ececec">{{ sep.total_itens_distintos }}</div><div class="mut" style="font-size:.7rem">produtos</div></div>
+      <div style="flex:1;min-width:96px;background:#161617;border:1px solid #2a2a2b;border-radius:10px;padding:.7rem;text-align:center"><div style="font-size:1.25rem;font-weight:600;color:#ececec">R$ {{ "%.0f"|format(sep.valor_total_reais) }}</div><div class="mut" style="font-size:.7rem">em cestas</div></div>
+    </div>
+    {% if sep.qtd_cestas_em_ajuste %}<div style="background:#2a2417;border:1px solid #6b5a2a;border-radius:10px;padding:.6rem .9rem;font-size:.82rem;color:#e0c07a;margin-bottom:.6rem">⚠️ {{ sep.qtd_cestas_em_ajuste }} cesta(s) ainda em ajuste pelos clientes — a lista pode mudar.</div>{% endif %}
+    <div style="display:flex;gap:.5rem;margin:.2rem 0 .8rem">
+      <button type="button" class="sep-tg" data-v="cliente" onclick="sepView(this)" style="font-size:12px;padding:6px 14px;border-radius:999px;cursor:pointer;border:1px solid #1d9e75;background:#1d9e75;color:#fff">Por cliente (separar)</button>
+      <button type="button" class="sep-tg" data-v="total" onclick="sepView(this)" style="font-size:12px;padding:6px 14px;border-radius:999px;cursor:pointer;border:1px solid #2a2a2b;background:transparent;color:#a8a8a3">Total a comprar</button>
+    </div>
+    <div id="sep-cliente">
+      {% if not ped_sep %}<p class="mut" style="text-align:center;padding:2rem 0">Nenhum pedido confirmado pra separar.</p>{% endif %}
+      {% for p in ped_sep %}
+      {% call card(p) %}
+        {% if p.itens %}<div style="margin-top:.5rem;border-top:1px solid #212122;padding-top:.4rem">{% for it in p.itens %}<div style="display:flex;justify-content:space-between;font-size:.83rem;padding:.24rem 0"><span>{{ it.produto_nome }}</span><span class="mut" style="white-space:nowrap">{{ "%g"|format(it.quantidade) }} {{ it.unidade }}</span></div>{% endfor %}</div>{% else %}<div class="mut" style="font-size:.78rem;margin-top:.4rem">sem itens</div>{% endif %}
+      {% endcall %}
+      {% endfor %}
+    </div>
+    <div id="sep-total" style="display:none">
+      <p class="mut" style="margin:.2rem 0 .3rem;font-size:.82rem">Total a comprar — cestas + avulsos somados.</p>
+      {% if not sep.grupos %}<p class="mut" style="text-align:center;padding:2rem 0">Nada confirmado.</p>{% endif %}
+      {% for g in sep.grupos %}
+      <div style="margin-top:1rem"><div class="mut" style="text-transform:uppercase;font-size:.72rem;letter-spacing:.04em;margin-bottom:.4rem">{{ g.grupo }}</div>
+        {% for it in g.itens %}
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:.5rem .2rem;border-bottom:1px solid #1c1c1d">
+          <span>{{ it.produto_nome }}</span>
+          <span style="white-space:nowrap"><b>{{ "%g"|format(it.quantidade) }}</b> <span class="mut">{{ it.unidade }}</span>{% if it.get('suficiente') is not none %} <span style="font-size:.7rem;color:{{ '#5dcaa5' if it.suficiente else '#e0a83d' }}">{{ '✓' if it.suficiente else 'falta ' ~ ("%g"|format(it.falta)) }}</span>{% endif %}</span>
+        </div>
+        {% endfor %}
       </div>
       {% endfor %}
     </div>
-    {% endfor %}
+    <script>
+    function sepView(b){var v=b.getAttribute('data-v');
+      document.querySelectorAll('.sep-tg').forEach(function(x){x.style.background='transparent';x.style.color='#a8a8a3';x.style.borderColor='#2a2a2b';});
+      b.style.background='#1d9e75';b.style.color='#fff';b.style.borderColor='#1d9e75';
+      document.getElementById('sep-cliente').style.display=(v==='cliente'?'':'none');
+      document.getElementById('sep-total').style.display=(v==='total'?'':'none');
+    }
+    </script>
 
   {% elif fase == 'embalagem' %}
     <p class="mut" style="margin:.4rem 0">{{ n_falta }} a embalar de {{ itens|length }}.</p>
@@ -5596,7 +5634,17 @@ def painel_fornecedor_pedidos(request: Request, fase: str = "",
         sep["grupos"].sort(key=lambda g: _ord.get(g["grupo"], 9))
         for g in sep["grupos"]:
             g["itens"].sort(key=lambda x: x["produto_nome"])
+        sep["total_itens_distintos"] = sum(len(g["itens"]) for g in sep["grupos"])
+        _ped = pedidos_mod.listar_para_embalagem(pool, fid, periodo=per)["cestas"]
+        for _x in _ped:
+            _x["tipo"] = "cesta"
+            _x["qtd_itens"] = len(_x.get("itens") or [])
+        _av = car_mod.avulsos_para_embalagem(pool, fid)
+        _ped_sep = _ped + _av
+        _ped_sep.sort(key=lambda x: (x.get("cliente_nome") or ""))
+        sep["qtd_avulsos"] = len(_av)
         ctx["sep"] = sep
+        ctx["ped_sep"] = _ped_sep
 
     elif fase == "embalagem":
         cestas = pedidos_mod.listar_para_embalagem(pool, fid, periodo=per)["cestas"]

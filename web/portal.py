@@ -3928,6 +3928,7 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
     {% if not itens %}<p class="mut" style="text-align:center;padding:2rem 0">Nada pra embalar.</p>{% endif %}
     {% for p in itens %}
     {% call card(p) %}
+    {% if p.itens %}<details style="margin-top:.5rem"><summary style="cursor:pointer;color:#5dcaa5;font-size:.8rem;list-style:none">ver {{ p.itens|length }} itens</summary><div style="margin-top:.4rem;padding-left:.2rem">{% for it in p.itens %}<div style="display:flex;justify-content:space-between;font-size:.82rem;padding:.28rem 0;border-bottom:1px solid #1c1c1d"><span>{{ it.produto_nome }}</span><span class="mut" style="white-space:nowrap">{{ "%g"|format(it.quantidade) }} {{ it.unidade }}</span></div>{% endfor %}</div></details>{% endif %}
     <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #212122;margin-top:.6rem;padding-top:.6rem">
       <span class="mut" style="font-size:.78rem">{% if p.esta_embalada %}✅ embalado {{ p.embalada_em }}{% else %}a embalar{% endif %}</span>
       <div style="display:flex;gap:.4rem">

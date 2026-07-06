@@ -17,6 +17,23 @@ _OFFLINE = ("entrega_dinheiro", "entrega_cartao", "entrega_pix")
 
 _PERIODOS = ("mes", "mes_passado", "30dias", "tudo")
 
+# Ciclo de repasse: dia da semana em que a plataforma repassa (0=seg ... 6=dom).
+# Repasse semanal -- casa com a cesta semanal. Ajuste aqui se mudar o ciclo.
+DIA_REPASSE = 4  # sexta-feira
+
+_DIAS_PT = ("segunda", "terca", "quarta", "quinta", "sexta", "sabado", "domingo")
+
+
+def _proximo_repasse(hoje: date | None = None) -> date:
+    """Proxima data de repasse (proxima ocorrencia de DIA_REPASSE, hoje inclusive)."""
+    hoje = hoje or date.today()
+    dias = (DIA_REPASSE - hoje.weekday()) % 7
+    return hoje + timedelta(days=dias)
+
+
+def _label_repasse(d: date) -> str:
+    return "%s, %02d/%02d" % (_DIAS_PT[d.weekday()], d.day, d.month)
+
 
 def _range(periodo: str):
     hoje = date.today()
@@ -100,6 +117,7 @@ def resumo_financeiro(pool, fornecedor_id: int, periodo: str = "mes") -> dict:
     return {
         "periodo": periodo, "comissao_pct": pct,
         "comissao_configurada": comissao_configurada,
+        "proximo_repasse_label": _label_repasse(_proximo_repasse()),
         "faturamento_cent": faturamento,
         "comissao_cent": comissao,
         "liquido_cent": liquido,

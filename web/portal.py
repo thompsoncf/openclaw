@@ -4069,6 +4069,7 @@ _FINANCEIRO_FORN = """{% extends "base" %}{% block conteudo %}
 .fin-hero-num{font-size:2rem;font-weight:700;margin:.2rem 0}
 .fin-hero-sub{font-size:.8rem;color:#a8a8a3;margin-top:.3rem}
 .fin-direto{display:flex;justify-content:space-between;align-items:center;background:#161617;border:1px solid #2a2a2b;border-radius:11px;padding:.8rem 1rem;margin-bottom:1.1rem}
+.fin-prox{background:#12202a;border:1px solid #274a5e;border-radius:11px;padding:.65rem 1rem;margin-bottom:1.1rem;font-size:.9rem;color:#cfe3f0}
 .fin-box{background:#161617;border:1px solid #2a2a2b;border-radius:12px;padding:1rem 1.1rem;margin-bottom:1.1rem}
 .fin-box-tit{font-size:.78rem;color:#6f6f6a;text-transform:uppercase;letter-spacing:.04em;margin-bottom:.6rem}
 .fin-lin{display:flex;justify-content:space-between;padding:.3rem 0;font-size:.92rem}
@@ -4115,6 +4116,8 @@ _FINANCEIRO_FORN = """{% extends "base" %}{% block conteudo %}
     <div class="fin-hero-sub">líquido do online — cai na sua wallet Asaas</div>
   </div>
   {% endif %}
+
+  {% if not resumo.repasse_negativo %}<div class="fin-prox">🗓️ Próximo repasse: <b>{{ resumo.proximo_repasse_label }}</b> <span class="mut">· repasses semanais</span></div>{% endif %}
 
   <div class="fin-direto">
     <div><b>Recebido direto</b> <span class="fin-tag">na entrega</span><div class="mut" style="font-size:.76rem;margin-top:.2rem">dinheiro/cartão/Pix na entrega — já no seu caixa</div></div>

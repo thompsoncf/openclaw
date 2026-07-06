@@ -199,3 +199,66 @@ def extrato_financeiro(pool, fornecedor_id: int, periodo: str = "mes",
 
     itens.sort(key=lambda x: x.get("data") or "", reverse=True)
     return itens[:limit]
+
+
+# ---------- Livro de repasses (a plataforma repassa; o fornecedor ve) ----------
+
+def total_repassado(pool, fornecedor_id: int) -> int:
+    """Soma de tudo que ja foi repassado ao fornecedor. Defensivo (tabela pode
+    nao existir ate a migracao 052 rodar)."""
+    with pool.connection() as c:
+        try:
+            r = c.execute(
+                "select coalesce(sum(valor_centavos), 0) from repasses "
+                "where fornecedor_id = %s", (fornecedor_id,)).fetchone()
+            return int(r[0] or 0)
+        except Exception:
+            c.rollback()
+            return 0
+
+
+def saldo_a_repassar(pool, fornecedor_id: int) -> int:
+    """Saldo REAL a repassar agora = (online - comissao, TODO o periodo)
+    menos o que ja foi repassado. Pode ser negativo."""
+    r = resumo_financeiro(pool, fornecedor_id, "tudo")
+    return int(r["repasse_cent"]) - total_repassado(pool, fornecedor_id)
+
+
+def registrar_repasse(pool, fornecedor_id: int, valor_centavos: int,
+                      observacao: str = "", criado_por: int | None = None) -> bool:
+    """Registra um repasse feito pela plataforma. Defensivo."""
+    try:
+        valor_centavos = int(valor_centavos)
+    except Exception:
+        return False
+    if valor_centavos <= 0:
+        return False
+    with pool.connection() as c:
+        try:
+            c.execute(
+                "insert into repasses (fornecedor_id, valor_centavos, observacao, criado_por) "
+                "values (%s, %s, %s, %s)",
+                (fornecedor_id, valor_centavos,
+                 (observacao or "").strip() or None, criado_por))
+            c.commit()
+            return True
+        except Exception:
+            c.rollback()
+            return False
+
+
+def listar_repasses(pool, fornecedor_id: int, limit: int = 50) -> list:
+    """Historico de repasses do fornecedor (mais recente primeiro). Defensivo."""
+    with pool.connection() as c:
+        try:
+            rows = c.execute(
+                "select id, valor_centavos, data_repasse, coalesce(observacao, '') "
+                "from repasses where fornecedor_id = %s "
+                "order by data_repasse desc, id desc limit %s",
+                (fornecedor_id, limit)).fetchall()
+            return [{"id": int(r[0]), "valor_cent": int(r[1]),
+                     "data": r[2].strftime("%d/%m/%Y") if hasattr(r[2], "strftime") else str(r[2]),
+                     "obs": r[3]} for r in rows]
+        except Exception:
+            c.rollback()
+            return []

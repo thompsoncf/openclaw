@@ -4159,6 +4159,19 @@ _FINANCEIRO_FORN = """{% extends "base" %}{% block conteudo %}
     </div>
   </div>
   {% endfor %}
+
+  <div class="fin-sec" style="margin-top:1.4rem">Livro de repasses</div>
+  <div class="fin-box">
+    <div class="fin-lin"><span>Saldo a repassar (total)</span><span class="{{ 'green' if saldo_cent > 0 else 'mut' }}">R$ {{ (saldo_cent/100)|n2 }}</span></div>
+    <div class="fin-lin sub"><span>total ja repassado</span><span>R$ {{ (repassado_cent/100)|n2 }}</span></div>
+  </div>
+  {% if not repasses %}<p class="mut" style="text-align:center;padding:1rem 0">Nenhum repasse registrado ainda. O admin registra quando paga.</p>{% endif %}
+  {% for rp in repasses %}
+  <div class="fin-row">
+    <div><b>R$ {{ (rp.valor_cent/100)|n2 }}</b><div class="mut" style="font-size:.76rem;margin-top:.2rem">{{ rp.data }}{% if rp.obs %} · {{ rp.obs }}{% endif %}</div></div>
+    <span class="fin-pill p-dir">repassado</span>
+  </div>
+  {% endfor %}
 </div>
 {% endblock %}"""
 
@@ -5703,8 +5716,13 @@ def painel_fornecedor_financeiro(request: Request, periodo: str = "mes"):
     fid = conta[0]
     resumo = fin.resumo_financeiro(pool, fid, periodo)
     extrato = fin.extrato_financeiro(pool, fid, periodo)
+    saldo_cent = fin.saldo_a_repassar(pool, fid)
+    repassado_cent = fin.total_repassado(pool, fid)
+    repasses = fin.listar_repasses(pool, fid)
     return _render("financeiro_forn", request, conta=conta,
                    resumo=resumo, extrato=extrato,
+                   saldo_cent=saldo_cent, repassado_cent=repassado_cent,
+                   repasses=repasses,
                    aviso=request.session.pop("aviso_fin", None))
 
 

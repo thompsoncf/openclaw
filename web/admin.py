@@ -150,6 +150,7 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
         {% if c.eh_fornecedor %}
           <span class="tag ativa" title="slug: {{ c.fornecedor_slug }}">fornecedor ok</span>
           <form class="inline" method="post" action="/admin/conta/{{ c.id }}/remover-fornecedor"><button class="warn" style="padding:.35rem .6rem;font-size:.78rem">remover forn.</button></form>
+          <form class="inline" method="post" action="/admin/conta/{{ c.id }}/repasse" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"><input type="number" name="valor" step="0.01" placeholder="R$ repasse" style="width:92px" required><input name="obs" placeholder="obs (ex: sem 01-07)" style="width:126px"><button style="padding:.35rem .6rem;font-size:.78rem">registrar repasse</button></form>
         {% else %}
           <form class="inline" method="post" action="/admin/conta/{{ c.id }}/fornecedor" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">
             <select name="nicho_id" style="width:100px" required title="nicho">{% for n in nichos %}<option value="{{ n.id }}">{{ n.nome }}</option>{% endfor %}</select>
@@ -574,6 +575,27 @@ def admin_remover_fornecedor(request: Request, conta_id: int):
         c.commit()
     ct.registrar_evento(pool, conta_id, "admin_removeu_fornecedor", f"por admin {adm[0]}")
     request.session["admin_aviso"] = f"Conta {conta_id} não é mais fornecedor."
+    return RedirectResponse("/admin", status_code=303)
+
+
+@router.post("/admin/conta/{conta_id}/repasse")
+def admin_registrar_repasse(request: Request, conta_id: int,
+                            valor: float = Form(...), obs: str = Form("")):
+    adm = _admin(request)
+    if adm is None:
+        return _NEGADO
+    from finance import financeiro_forn as fin
+    try:
+        cent = int(round(float(valor) * 100))
+    except Exception:
+        cent = 0
+    ok = fin.registrar_repasse(get_pool(), conta_id, cent, obs, adm[0])
+    if ok:
+        ct.registrar_evento(get_pool(), conta_id, "admin_repasse",
+                            f"valor={valor}, obs={obs}, por admin {adm[0]}")
+        request.session["admin_aviso"] = f"Repasse de R$ {valor} registrado (conta {conta_id})."
+    else:
+        request.session["admin_aviso"] = "Valor de repasse invalido."
     return RedirectResponse("/admin", status_code=303)
 
 

@@ -109,6 +109,15 @@ def brl(centavos: int) -> str:
     return f"R$ {centavos/100:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _n2(v) -> str:
+    """Numero em formato BR com 2 casas, SEM 'R$' (o template ja poe o R$).
+    Ex.: 2020.5 -> '2.020,50'. Tolerante a None/erro."""
+    try:
+        return f"{float(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except Exception:
+        return "0,00"
+
+
 # ---------- paginas (templates embutidos: 1 arquivo so') ----------
 
 _BASE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
@@ -741,7 +750,7 @@ window.PRODUTOS = {
     nome: {{ p.nome|tojson }},
     unidade: {{ p.unidade|tojson }},
     categoria: {{ (p.categoria or '')|tojson }},
-    preco: {{ "%.2f"|format(p.preco_venda_centavos/100) }},
+    preco: {{ (p.preco_venda_centavos/100)|n2 }},
     minimo: {{ p.estoque_minimo }},
     foto_url: {{ (p.foto_url or '')|tojson }}
   }{% if not loop.last %},{% endif %}
@@ -955,7 +964,7 @@ function fornBannerUpload(i){_fornImgUpload(i,'/painel/fornecedor/banner','forn-
   {% if tamanhos %}
   {% for t in tamanhos %}
   <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1rem;margin-bottom:.6rem">
-    <strong>{{ t.nome }}</strong> · <strong>R$ {{ "%.2f"|format(t.preco_centavos/100) }}</strong>
+    <strong>{{ t.nome }}</strong> · <strong>R$ {{ (t.preco_centavos/100)|n2 }}</strong>
     <div class="mut" style="font-size:.85rem;margin-top:.3rem">
       {{ t.qtd_frutas }} frutas · {{ t.qtd_legumes }} legumes · {{ t.qtd_verduras }} verduras · {{ t.qtd_temperos }} temperos ({{ t.total_porcoes }} porções)
       {% if t.descricao %}<br>{{ t.descricao }}{% endif %}
@@ -2059,9 +2068,9 @@ _COMPRA_REVISAR = """{% extends "base" %}{% block conteudo %}
 <table style="width:100%;border-collapse:collapse;font-size:.9rem;margin-bottom:1.5rem">
 <tr style="border-bottom:2px solid #2a2a2b;color:#888"><th style="text-align:left;padding:.6rem;font-weight:500">Produto</th><th style="text-align:center;padding:.6rem;font-weight:500">Qtd</th><th style="text-align:right;padding:.6rem;font-weight:500">Custo un.</th><th style="text-align:right;padding:.6rem;font-weight:500">Subtotal</th></tr>
 {% for i in itens %}
-<tr style="border-top:1px solid #2a2a2b"><td style="padding:.6rem">{{ i.produto_nome or i.descricao }}</td><td style="text-align:center;padding:.6rem">{{ i.quantidade }} {{ i.unidade }}</td><td style="text-align:right;padding:.6rem">R$ {{ "%.2f"|format(i.custo_unit_centavos/100) }}</td><td style="text-align:right;padding:.6rem;font-weight:500">R$ {{ "%.2f"|format(i.quantidade * i.custo_unit_centavos/100) }}</td></tr>
+<tr style="border-top:1px solid #2a2a2b"><td style="padding:.6rem">{{ i.produto_nome or i.descricao }}</td><td style="text-align:center;padding:.6rem">{{ i.quantidade }} {{ i.unidade }}</td><td style="text-align:right;padding:.6rem">R$ {{ (i.custo_unit_centavos/100)|n2 }}</td><td style="text-align:right;padding:.6rem;font-weight:500">R$ {{ (i.quantidade * i.custo_unit_centavos/100)|n2 }}</td></tr>
 {% endfor %}
-<tr style="border-top:2px solid #2a2a2b;background:#2a2a2b"><td colspan="3" style="text-align:right;padding:.6rem;font-weight:600">Total:</td><td style="text-align:right;padding:.6rem;font-weight:600">R$ {{ "%.2f"|format(compra.total_centavos/100) }}</td></tr>
+<tr style="border-top:2px solid #2a2a2b;background:#2a2a2b"><td colspan="3" style="text-align:right;padding:.6rem;font-weight:600">Total:</td><td style="text-align:right;padding:.6rem;font-weight:600">R$ {{ (compra.total_centavos/100)|n2 }}</td></tr>
 </table>
 {% if compra.status == 'rascunho' %}
 <form method="post" action="/painel/fornecedor/compras/{{ compra.id }}/confirmar">
@@ -2133,10 +2142,10 @@ _LOJA = """<!doctype html>
     {% if p.descricao_curta %}<div style="font-size:11px;color:#8a938a;margin:2px 0 0">{{ p.descricao_curta }}</div>{% endif %}
     <div style="margin-top:auto;padding-top:12px">
       <div style="white-space:nowrap">
-        {% if p.em_promo and p.preco_promo_centavos %}<span style="font-size:11px;color:#a3aca0;text-decoration:line-through;margin-right:4px">R$ {{ "%.2f"|format(p.preco_venda_centavos/100) }}</span>{% endif %}
-        <span style="font-size:15px;color:#2f7d32;font-weight:700">R$ {{ "%.2f"|format(eff/100) }}</span><span style="font-size:11px;color:#8a938a;font-weight:400">/{{ p.unidade }}</span>
+        {% if p.em_promo and p.preco_promo_centavos %}<span style="font-size:11px;color:#a3aca0;text-decoration:line-through;margin-right:4px">R$ {{ (p.preco_venda_centavos/100)|n2 }}</span>{% endif %}
+        <span style="font-size:15px;color:#2f7d32;font-weight:700">R$ {{ (eff/100)|n2 }}</span><span style="font-size:11px;color:#8a938a;font-weight:400">/{{ p.unidade }}</span>
       </div>
-      {% if fornecedor.desconto_pix_pct %}<div style="font-size:11px;color:#31772f;margin-top:2px">no Pix <strong>R$ {{ "%.2f"|format(eff*(1-(fornecedor.desconto_pix_pct or 0)/100)/100) }}</strong></div>{% endif %}
+      {% if fornecedor.desconto_pix_pct %}<div style="font-size:11px;color:#31772f;margin-top:2px">no Pix <strong>R$ {{ (eff*(1-(fornecedor.desconto_pix_pct or 0)/100)/100)|n2 }}</strong></div>{% endif %}
       <div style="display:flex;align-items:center;justify-content:space-between;gap:4px;background:#f4f6f2;border:1px solid #e2e7dd;border-radius:9px;padding:3px;margin-top:10px">
           <button onclick="szDec({{ p.id }},'{{ p.unidade }}')" style="width:28px;height:28px;border-radius:7px;background:#e6e9e2;color:#3a463a;border:0;font-size:17px;cursor:pointer;line-height:1;flex-shrink:0">−</button>
           <span id="sel-{{ p.id }}" style="font-size:13px;color:#23301f;font-weight:600;text-align:center">{% if p.unidade in ['unidade','duzia','maco','bandeja','pacote'] %}1{% else %}0,5{% endif %}</span>
@@ -2159,8 +2168,8 @@ _LOJA = """<!doctype html>
   </div>
   <div style="padding:9px 10px">
     <div style="font-size:12.5px;color:#2f7d32;font-weight:600;line-height:1.2">{{ p.nome }}</div>
-    <div style="font-size:13px;color:#2f7d32;font-weight:700;margin-top:4px">R$ {{ "%.2f"|format(eff/100) }}<span style="font-size:10px;color:#8a938a;font-weight:400">/{{ p.unidade }}</span></div>
-    {% if fornecedor.desconto_pix_pct %}<div style="font-size:10px;color:#31772f">no Pix R$ {{ "%.2f"|format(eff*(1-(fornecedor.desconto_pix_pct or 0)/100)/100) }}</div>{% endif %}
+    <div style="font-size:13px;color:#2f7d32;font-weight:700;margin-top:4px">R$ {{ (eff/100)|n2 }}<span style="font-size:10px;color:#8a938a;font-weight:400">/{{ p.unidade }}</span></div>
+    {% if fornecedor.desconto_pix_pct %}<div style="font-size:10px;color:#31772f">no Pix R$ {{ (eff*(1-(fornecedor.desconto_pix_pct or 0)/100)/100)|n2 }}</div>{% endif %}
     <div data-incart="{{ p.id }}" style="display:none;font-size:9.5px;color:#31772f;font-weight:600;margin-top:2px">✓ <span></span></div>
   </div>
 </div>
@@ -2299,7 +2308,7 @@ _LOJA = """<!doctype html>
             <span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:#eef6ea;color:#31772f;margin-left:8px">{{ o.status }}</span>
             <div style="font-size:12.5px;color:#8a938a;margin-top:3px">{{ o.data }}</div>
           </div>
-          <div style="text-align:right"><div style="font-size:12px;color:#8a938a">Total</div><div style="font-size:18px;font-weight:700;color:#2f7d32">R$ {{ "%.2f"|format((o.total_centavos or 0)/100) }}</div></div>
+          <div style="text-align:right"><div style="font-size:12px;color:#8a938a">Total</div><div style="font-size:18px;font-weight:700;color:#2f7d32">R$ {{ ((o.total_centavos or 0)/100)|n2 }}</div></div>
         </div>
       </div>
       {% endfor %}
@@ -2607,7 +2616,7 @@ _ATIVAR_APP = """{% extends "base" %}{% block conteudo %}
     <label>Escolha seu plano:</label>
     <select name="plano" style="width:100%;margin:.4rem 0 1rem;padding:.4rem;border:1px solid #2a2a2b;border-radius:4px;background:#0a0a0a;color:#fff">
       {% for p in planos %}
-      <option value="{{ p[0] }}">{{ p[1] }} — R$ {{ "%.2f"|format(p[3]/100) }}/mês</option>
+      <option value="{{ p[0] }}">{{ p[1] }} — R$ {{ (p[3]/100)|n2 }}/mês</option>
       {% endfor %}
     </select>
     <button type="submit" style="background:#534AB7;color:#fff;padding:.7rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:600;font-size:.95rem">
@@ -2633,7 +2642,7 @@ Suas compras avulsas nas lojas ficam em <a href="/painel/meus-pedidos" style="co
 <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1rem;margin-bottom:.6rem">
   <div style="display:flex;justify-content:space-between;align-items:start">
     <div style="flex:1">
-      <strong>{{ a.tamanho_nome }}</strong> — <strong>R$ {{ "%.2f"|format(a.preco_centavos/100) }}</strong>
+      <strong>{{ a.tamanho_nome }}</strong> — <strong>R$ {{ (a.preco_centavos/100)|n2 }}</strong>
       <div class="mut" style="font-size:.85rem;margin-top:.3rem">De: {{ a.fornecedor_nome }} | Frequência: {{ a.frequencia }} | Status: <strong>{{ a.status }}</strong></div>
       <!-- Status: aguardando pagamento -->
       {% if a.status == 'aguardando_pagamento' %}
@@ -2654,7 +2663,7 @@ Suas compras avulsas nas lojas ficam em <a href="/painel/meus-pedidos" style="co
             <option value="">Escolher novo tamanho...</option>
             {% for t in tamanhos_por_fornecedor[a.fornecedor_id] %}
               {% if t.id != a.tamanho_id_atual %}
-              <option value="{{ t.id }}">{{ t.nome }} — R$ {{ "%.2f"|format(t.preco_centavos/100) }}</option>
+              <option value="{{ t.id }}">{{ t.nome }} — R$ {{ (t.preco_centavos/100)|n2 }}</option>
               {% endif %}
             {% endfor %}
           </select>
@@ -2688,7 +2697,7 @@ _MEU_PLANO = """{% extends "base" %}{% block conteudo %}
 {% if assinaturas %}
 {% for a in assinaturas %}
 <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1rem;margin-bottom:.8rem">
-  <strong>{{ a.tamanho_nome }}</strong> — R$ {{ "%.2f"|format(a.preco_centavos/100) }}
+  <strong>{{ a.tamanho_nome }}</strong> — R$ {{ (a.preco_centavos/100)|n2 }}
   <div class="mut" style="font-size:.85rem">De: {{ a.fornecedor_nome }} · {{ a.frequencia }} · {{ a.status }}</div>
   {% if a.status == 'aguardando_pagamento' %}
   <div style="border-left:3px solid #e0a83d;background:#1a1712;border-radius:6px;padding:.7rem .9rem;margin-top:.7rem">
@@ -2704,7 +2713,7 @@ _MEU_PLANO = """{% extends "base" %}{% block conteudo %}
       <option value="">Escolher novo tamanho...</option>
       {% for t in tamanhos_por_forn[a.fornecedor_id] %}
         {% if t.id != a.tamanho_id_atual %}
-        <option value="{{ t.id }}">{{ t.nome }} — R$ {{ "%.2f"|format(t.preco_centavos/100) }}</option>
+        <option value="{{ t.id }}">{{ t.nome }} — R$ {{ (t.preco_centavos/100)|n2 }}</option>
         {% endif %}
       {% endfor %}
     </select>
@@ -2734,7 +2743,7 @@ _CESTA_AJUSTE = """{% extends "base" %}{% block conteudo %}
   <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:1rem">
     <div>
       <h3 style="margin:0;margin-bottom:.5rem">{{ cesta.fornecedor_nome }}</h3>
-      <strong>R$ {{ "%.2f"|format(cesta.preco_centavos/100) }}</strong> · Entrega: <strong>{{ cesta.data_entrega }}</strong>
+      <strong>R$ {{ (cesta.preco_centavos/100)|n2 }}</strong> · Entrega: <strong>{{ cesta.data_entrega }}</strong>
     </div>
     <div style="text-align:right;font-size:.9rem;color:#5dcaa5">
       {% if cesta.status == 'confirmada' %}✓ Confirmada{% elif cesta.status == 'em_ajuste' %}Ajustando...{% else %}Sugerida{% endif %}
@@ -2846,7 +2855,7 @@ _PEDIDOS_FORN = """{% extends "base" %}{% block conteudo %}
           <div class="ped-cli-bairro">{{ p.bairro or 'sem bairro' }}</div>
         </div>
         <div class="ped-card-val">
-          R$ {{ "%.2f"|format(p.preco_reais) }}
+          R$ {{ (p.preco_reais)|n2 }}
           <div class="ped-card-tam">{{ p.tamanho_nome }}</div>
         </div>
       </div>
@@ -2941,7 +2950,7 @@ _PEDIDO_DETALHE_FORN = """{% extends "base" %}{% block conteudo %}
     </div>
     <div class="ped-det-bloco">
       <div class="ped-det-rot">Cesta</div>
-      <div class="ped-det-val">{{ p.tamanho_nome }} — R$ {{ "%.2f"|format(p.preco_reais) }}</div>
+      <div class="ped-det-val">{{ p.tamanho_nome }} — R$ {{ (p.preco_reais)|n2 }}</div>
       <div class="mut" style="margin-top:.3rem;font-size:.9rem">Entrega: {{ p.data_entrega or 'a definir' }}</div>
       <div style="margin-top:.6rem">
         <span class="ped-st ped-st-{{ p.status }}">{{ p.status|replace('_',' ') }}</span>
@@ -3034,7 +3043,7 @@ _SEPARACAO_FORN = """{% extends "base" %}{% block conteudo %}
       <div class="sep-card-rot">produto{% if dados.total_itens_distintos != 1 %}s{% endif %} distinto{% if dados.total_itens_distintos != 1 %}s{% endif %}</div>
     </div>
     <div class="sep-card">
-      <div class="sep-card-num">R$ {{ "%.2f"|format(dados.valor_total_reais) }}</div>
+      <div class="sep-card-num">R$ {{ (dados.valor_total_reais)|n2 }}</div>
       <div class="sep-card-rot">valor total</div>
     </div>
   </div>
@@ -3557,7 +3566,7 @@ _PEDIDO_ENVIADO = """{% extends "base" %}{% block conteudo %}
   {% if carrinho %}
   <div style="background:#161617;border:1px solid #2a2a2b;border-radius:11px;padding:.8rem;text-align:left;margin-bottom:1rem">
     <div style="display:flex;justify-content:space-between;font-size:.8rem"><span class="mut">Pedido #{{ carrinho.id }}</span><span style="color:#5dcaa5;background:#15301f;padding:2px 9px;border-radius:20px;font-size:.72rem">aguardando</span></div>
-    <div style="display:flex;justify-content:space-between;border-top:1px solid #2a2a2b;margin-top:6px;padding-top:6px;font-size:.85rem"><span style="color:#ececec">Total</span><span style="color:#5dcaa5;font-weight:600">R$ {{ "%.2f"|format(carrinho.total_centavos/100) }}</span></div>
+    <div style="display:flex;justify-content:space-between;border-top:1px solid #2a2a2b;margin-top:6px;padding-top:6px;font-size:.85rem"><span style="color:#ececec">Total</span><span style="color:#5dcaa5;font-weight:600">R$ {{ (carrinho.total_centavos/100)|n2 }}</span></div>
   </div>
   {% endif %}
 
@@ -3607,17 +3616,17 @@ _REVISAR = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
   <div style="display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:1px solid #f0f2ee;font-size:13px">
     <span style="min-width:46px;text-align:center;background:#eef6ea;color:#31772f;font-weight:700;font-size:11px;border-radius:7px;padding:3px 6px">{{ i["quantidade"] }}{{ i["unidade"] }}</span>
     <span style="flex:1">{{ i["nome"] }}</span>
-    <span style="font-weight:600">R$ {{ "%.2f"|format(i["total_centavos"]/100) }}</span>
+    <span style="font-weight:600">R$ {{ (i["total_centavos"]/100)|n2 }}</span>
   </div>
   {% endfor %}
   <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7669;padding:9px 0 0">
-    <span>Subtotal</span><span>R$ {{ "%.2f"|format(car["subtotal_centavos"]/100) }}</span></div>
+    <span>Subtotal</span><span>R$ {{ (car["subtotal_centavos"]/100)|n2 }}</span></div>
   <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7669;padding:4px 0">
-    <span>Entrega</span><span>R$ {{ "%.2f"|format(car["taxa_centavos"]/100) }}</span></div>
+    <span>Entrega</span><span>R$ {{ (car["taxa_centavos"]/100)|n2 }}</span></div>
   <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:700;border-top:1px solid #e7eae5;margin-top:6px;padding-top:10px">
-    <span>Total</span><span style="color:#2f7d32">R$ {{ "%.2f"|format(car["total_centavos"]/100) }}</span></div>
+    <span>Total</span><span style="color:#2f7d32">R$ {{ (car["total_centavos"]/100)|n2 }}</span></div>
   {% if pix_pct %}<div style="display:flex;justify-content:space-between;font-size:12.5px;color:#31772f;padding-top:2px">
-    <span>no Pix na entrega (−{{ "%.0f"|format(pix_pct) }}%)</span><span style="font-weight:700">R$ {{ "%.2f"|format(car["total_centavos"]*(1-pix_pct/100)/100) }}</span></div>{% endif %}
+    <span>no Pix na entrega (−{{ "%.0f"|format(pix_pct) }}%)</span><span style="font-weight:700">R$ {{ (car["total_centavos"]*(1-pix_pct/100)/100)|n2 }}</span></div>{% endif %}
 </div>
 
 <form method="post" action="/f/{{ slug }}/carrinho/checkout" id="rzform" onsubmit="return rzCompose()">
@@ -3649,7 +3658,7 @@ _REVISAR = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
   </div>
   <div class="rz-card">
     <div class="rz-tit">Pagamento</div>
-    <label class="rz-fp on"><input type="radio" name="forma" value="entrega_pix" checked onchange="fp(this)"> 💠 Pix na entrega{% if pix_pct %} <span style="color:#31772f;font-weight:700;margin-left:auto">R$ {{ "%.2f"|format(car["total_centavos"]*(1-pix_pct/100)/100) }}</span>{% endif %}</label>
+    <label class="rz-fp on"><input type="radio" name="forma" value="entrega_pix" checked onchange="fp(this)"> 💠 Pix na entrega{% if pix_pct %} <span style="color:#31772f;font-weight:700;margin-left:auto">R$ {{ (car["total_centavos"]*(1-pix_pct/100)/100)|n2 }}</span>{% endif %}</label>
     <label class="rz-fp"><input type="radio" name="forma" value="entrega_cartao" onchange="fp(this)"> 💳 Cartão na entrega</label>
     <label class="rz-fp"><input type="radio" name="forma" value="entrega_dinheiro" onchange="fp(this)"> 💵 Dinheiro na entrega</label>
     <label class="rz-fp"><input type="radio" name="forma" value="pagar_agora" onchange="fp(this)"> ⚡ Pagar agora <span style="color:#8a938a;font-size:12px;margin-left:6px">Pix ou cartão online</span></label>
@@ -3835,7 +3844,7 @@ _AVULSOS_FORN = """{% extends "base" %}{% block conteudo %}
     {% if p.endereco_entrega %}<div class="mut" style="font-size:.83rem;margin:.5rem 0">📍 {{ p.endereco_entrega }}{% if p.forma_label %} &middot; <span style="color:#c5c5c0">{{ p.forma_label }}</span>{% endif %}</div>{% endif %}
     {% if p.obs %}<div class="mut" style="font-size:.8rem;margin:.2rem 0 .3rem">Obs: {{ p.obs }}</div>{% endif %}
     <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #212122;padding-top:.6rem;margin-top:.5rem">
-      <span style="color:#5dcaa5;font-weight:600">R$ {{ "%.2f"|format(p.total_centavos/100) }}</span>
+      <span style="color:#5dcaa5;font-weight:600">R$ {{ (p.total_centavos/100)|n2 }}</span>
       <div style="display:flex;gap:.4rem">
         {% if p.status == 'aguardando' %}
           <form method="post" action="/painel/fornecedor/avulsos/{{ p.id }}/status" style="margin:0"><input type="hidden" name="novo" value="cancelado"><button style="width:auto;margin:0;padding:.4rem .8rem;font-size:.8rem;background:transparent;border:1px solid #6e2b2b;color:#e89a9a">Recusar</button></form>
@@ -3873,7 +3882,7 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
     </div>
     <div style="text-align:right;white-space:nowrap">
       {% if p.tipo=='cesta' and p.tamanho_nome %}<span class="mut" style="font-size:.8rem">{{ p.tamanho_nome }}</span>{% endif %}
-      {% if p.tipo=='avulso' %}<span style="color:#5dcaa5;font-weight:600">R$ {{ "%.2f"|format(p.total_centavos/100) }}</span>{% endif %}
+      {% if p.tipo=='avulso' %}<span style="color:#5dcaa5;font-weight:600">R$ {{ (p.total_centavos/100)|n2 }}</span>{% endif %}
     </div>
   </div>
   {% if p.endereco %}<div class="mut" style="font-size:.78rem;margin:.4rem 0 0">📍 {{ p.endereco }}</div>{% endif %}
@@ -4010,7 +4019,7 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
       <details style="margin-top:.5rem">
         <summary style="list-style:none;cursor:pointer;background:#1d9e75;color:#fff;border-radius:8px;padding:.42rem .9rem;font-size:.8rem;font-weight:500;display:inline-block">Entregue — como recebeu?</summary>
         <div style="margin-top:.5rem;background:#101011;border:1px dashed #3a5c4e;border-radius:9px;padding:.7rem">
-          <div class="mut" style="font-size:.8rem;margin-bottom:.5rem">Como o cliente pagou{% if p.tipo=='avulso' %} R$ {{ "%.2f"|format(p.total_centavos/100) }}{% endif %}?</div>
+          <div class="mut" style="font-size:.8rem;margin-bottom:.5rem">Como o cliente pagou{% if p.tipo=='avulso' %} R$ {{ (p.total_centavos/100)|n2 }}{% endif %}?</div>
           <div style="display:flex;gap:.4rem;flex-wrap:wrap">
             {% for fv, fl in [('entrega_dinheiro','💵 Dinheiro'),('entrega_cartao','💳 Cartão'),('entrega_pix','📱 Pix'),('pagar_agora','🔗 Pagou pelo link')] %}
             <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/receber" style="margin:0"><input type="hidden" name="fase" value="rotas"><input type="hidden" name="forma" value="{{ fv }}"><button style="width:auto;margin:0;padding:.35rem .7rem;font-size:.78rem;background:#161617;border:1px solid #2a2a2b;color:#ececec">{{ fl }}</button></form>
@@ -4096,35 +4105,35 @@ _FINANCEIRO_FORN = """{% extends "base" %}{% block conteudo %}
   {% if resumo.repasse_negativo %}
   <div class="fin-hero neg">
     <div class="fin-hero-rot" style="color:#e5a3a3">A pagar à plataforma</div>
-    <div class="fin-hero-num red">R$ {{ "%.2f"|format((0 - resumo.repasse_cent)/100) }}</div>
+    <div class="fin-hero-num red">R$ {{ ((0 - resumo.repasse_cent)/100)|n2 }}</div>
     <div class="fin-hero-sub">a comissão das vendas offline passou do repasse online do período</div>
   </div>
   {% else %}
   <div class="fin-hero pos">
     <div class="fin-hero-rot" style="color:#8fd3b3">A repassar (online)</div>
-    <div class="fin-hero-num green">R$ {{ "%.2f"|format(resumo.repasse_cent/100) }}</div>
+    <div class="fin-hero-num green">R$ {{ (resumo.repasse_cent/100)|n2 }}</div>
     <div class="fin-hero-sub">líquido do online — cai na sua wallet Asaas</div>
   </div>
   {% endif %}
 
   <div class="fin-direto">
     <div><b>Recebido direto</b> <span class="fin-tag">na entrega</span><div class="mut" style="font-size:.76rem;margin-top:.2rem">dinheiro/cartão/Pix na entrega — já no seu caixa</div></div>
-    <div class="green" style="font-weight:600;font-size:1.1rem">R$ {{ "%.2f"|format(resumo.recebido_direto_cent/100) }}</div>
+    <div class="green" style="font-weight:600;font-size:1.1rem">R$ {{ (resumo.recebido_direto_cent/100)|n2 }}</div>
   </div>
 
   <div class="fin-box">
     <div class="fin-box-tit">Faturamento do período</div>
-    <div class="fin-lin"><span>Bruto ({{ resumo.qtd_pedidos }} pedido{% if resumo.qtd_pedidos != 1 %}s{% endif %})</span><span>R$ {{ "%.2f"|format(resumo.faturamento_cent/100) }}</span></div>
-    <div class="fin-lin"><span>− Comissão da plataforma ({{ "%g"|format(resumo.comissao_pct) }}%)</span><span class="amber">− R$ {{ "%.2f"|format(resumo.comissao_cent/100) }}</span></div>
-    <div class="fin-lin tot"><span>Líquido pra você</span><span class="green">R$ {{ "%.2f"|format(resumo.liquido_cent/100) }}</span></div>
-    <div class="fin-lin sub"><span>├ recebido direto (na entrega)</span><span>R$ {{ "%.2f"|format(resumo.recebido_direto_cent/100) }}</span></div>
-    <div class="fin-lin sub"><span>├ a repassar (online){% if resumo.repasse_negativo %} — negativo{% endif %}</span><span>R$ {{ "%.2f"|format(resumo.repasse_cent/100) }}</span></div>
-    {% if resumo.pendente_cent %}<div class="fin-lin sub"><span>└ pendente (entregue, a receber)</span><span>R$ {{ "%.2f"|format(resumo.pendente_cent/100) }}</span></div>{% endif %}
+    <div class="fin-lin"><span>Bruto ({{ resumo.qtd_pedidos }} pedido{% if resumo.qtd_pedidos != 1 %}s{% endif %})</span><span>R$ {{ (resumo.faturamento_cent/100)|n2 }}</span></div>
+    <div class="fin-lin"><span>− Comissão da plataforma ({{ "%g"|format(resumo.comissao_pct) }}%)</span><span class="amber">− R$ {{ (resumo.comissao_cent/100)|n2 }}</span></div>
+    <div class="fin-lin tot"><span>Líquido pra você</span><span class="green">R$ {{ (resumo.liquido_cent/100)|n2 }}</span></div>
+    <div class="fin-lin sub"><span>├ recebido direto (na entrega)</span><span>R$ {{ (resumo.recebido_direto_cent/100)|n2 }}</span></div>
+    <div class="fin-lin sub"><span>├ a repassar (online){% if resumo.repasse_negativo %} — negativo{% endif %}</span><span>R$ {{ (resumo.repasse_cent/100)|n2 }}</span></div>
+    {% if resumo.pendente_cent %}<div class="fin-lin sub"><span>└ pendente (entregue, a receber)</span><span>R$ {{ (resumo.pendente_cent/100)|n2 }}</span></div>{% endif %}
   </div>
 
   <div class="fin-origem">
-    <div class="fin-oc"><div style="font-weight:600">🧺 R$ {{ "%.2f"|format(resumo.cestas_cent/100) }}</div><div class="mut" style="font-size:.72rem">cestas · {{ resumo.cestas_qtd }} pedido{% if resumo.cestas_qtd != 1 %}s{% endif %}</div></div>
-    <div class="fin-oc"><div style="font-weight:600">📦 R$ {{ "%.2f"|format(resumo.avulsos_cent/100) }}</div><div class="mut" style="font-size:.72rem">avulsos · {{ resumo.avulsos_qtd }} pedido{% if resumo.avulsos_qtd != 1 %}s{% endif %}</div></div>
+    <div class="fin-oc"><div style="font-weight:600">🧺 R$ {{ (resumo.cestas_cent/100)|n2 }}</div><div class="mut" style="font-size:.72rem">cestas · {{ resumo.cestas_qtd }} pedido{% if resumo.cestas_qtd != 1 %}s{% endif %}</div></div>
+    <div class="fin-oc"><div style="font-weight:600">📦 R$ {{ (resumo.avulsos_cent/100)|n2 }}</div><div class="mut" style="font-size:.72rem">avulsos · {{ resumo.avulsos_qtd }} pedido{% if resumo.avulsos_qtd != 1 %}s{% endif %}</div></div>
   </div>
 
   <div class="fin-sec">Extrato de pedidos</div>
@@ -4135,10 +4144,10 @@ _FINANCEIRO_FORN = """{% extends "base" %}{% block conteudo %}
       <b>{{ e.cliente_nome }}</b>
       <span class="fin-badge {{ 'b-cesta' if e.tipo=='cesta' else 'b-avulso' }}">{{ e.tipo }}</span>
       <span class="fin-tag{% if e.canal=='online' %} on{% endif %}">{{ 'online' if e.canal=='online' else 'na entrega' }}</span>
-      <div class="mut" style="font-size:.76rem;margin-top:.2rem">{{ e.data }} · R$ {{ "%.2f"|format(e.valor_cent/100) }} − R$ {{ "%.2f"|format(e.comissao_cent/100) }} comissão</div>
+      <div class="mut" style="font-size:.76rem;margin-top:.2rem">{{ e.data }} · R$ {{ (e.valor_cent/100)|n2 }} − R$ {{ (e.comissao_cent/100)|n2 }} comissão</div>
     </div>
     <div style="text-align:right">
-      <div class="{{ 'green' if e.pago else '' }}" style="font-weight:600">R$ {{ "%.2f"|format(e.liquido_cent/100) }}</div>
+      <div class="{{ 'green' if e.pago else '' }}" style="font-weight:600">R$ {{ (e.liquido_cent/100)|n2 }}</div>
       {% if e.pendente and e.markable %}
       <form method="post" action="/painel/fornecedor/financeiro/{{ e.id }}/recebido" style="margin:.2rem 0 0"><input type="hidden" name="periodo" value="{{ resumo.periodo }}"><button style="width:auto;margin:0;padding:.25rem .6rem;font-size:.72rem">marcar recebido</button></form>
       {% elif e.pendente %}<span class="fin-pill p-pend">a cobrar</span>
@@ -4156,6 +4165,7 @@ _env = Environment(loader=DictLoader({
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 _env.filters["brl"] = brl
+_env.filters["n2"] = _n2
 from finance.models import canonizar_categoria, categorias_de
 _env.globals["canon"] = lambda c, t="despesa": canonizar_categoria(c, t)
 _env.globals["categorias_de"] = categorias_de

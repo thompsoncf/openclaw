@@ -3939,7 +3939,14 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
       {% if not ped_sep %}<p class="mut" style="text-align:center;padding:2rem 0">Nenhum pedido confirmado pra separar.</p>{% endif %}
       {% for p in ped_sep %}
       {% call card(p) %}
-        {% if p.itens %}<div style="margin-top:.5rem;border-top:1px solid #212122;padding-top:.4rem">{% for it in p.itens %}<div style="display:flex;justify-content:space-between;font-size:.83rem;padding:.24rem 0"><span>{{ it.produto_nome }}</span><span class="mut" style="white-space:nowrap">{{ "%g"|format(it.quantidade) }} {{ it.unidade }}</span></div>{% endfor %}</div>{% else %}<div class="mut" style="font-size:.78rem;margin-top:.4rem">sem itens</div>{% endif %}
+        {% if p.itens %}<div style="margin-top:.5rem;border-top:1px solid #212122;padding-top:.4rem{% if p.separada %};opacity:.55{% endif %}">{% for it in p.itens %}<div style="display:flex;justify-content:space-between;font-size:.83rem;padding:.24rem 0"><span>{{ it.produto_nome }}</span><span class="mut" style="white-space:nowrap">{{ "%g"|format(it.quantidade) }} {{ it.unidade }}</span></div>{% endfor %}</div>{% else %}<div class="mut" style="font-size:.78rem;margin-top:.4rem">sem itens</div>{% endif %}
+        <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #212122;margin-top:.5rem;padding-top:.5rem">
+          <span style="font-size:.8rem;color:{{ '#5dcaa5' if p.separada else '#a8a8a3' }}">{% if p.separada %}☑ separado{% else %}☐ a separar{% endif %}</span>
+          <div style="display:flex;gap:.7rem;align-items:center">
+            <a href="/painel/fornecedor/embalagem/{% if p.tipo=='avulso' %}avulso/{% endif %}{{ p.id }}/etiqueta" target="_blank" style="color:#5dcaa5;font-size:.78rem;text-decoration:none">🏷️ etiqueta</a>
+            <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/{{ 'desseparar' if p.separada else 'separar' }}" style="margin:0"><input type="hidden" name="fase" value="separacao"><button style="width:auto;margin:0;padding:.35rem .8rem;font-size:.78rem;{% if p.separada %}background:transparent;border:1px solid #333;color:#a8a8a3{% else %}background:#1d9e75;border:0;color:#fff{% endif %}">{% if p.separada %}desfazer{% else %}marcar separado{% endif %}</button></form>
+          </div>
+        </div>
       {% endcall %}
       {% endfor %}
     </div>
@@ -5800,6 +5807,11 @@ def painel_fornecedor_pedidos(request: Request, fase: str = "",
         _ped_sep = _ped + _av
         _ped_sep.sort(key=lambda x: (x.get("cliente_nome") or ""))
         sep["qtd_avulsos"] = len(_av)
+        _sc = pedidos_mod.separadas_cesta(pool, fid, [x["id"] for x in _ped])
+        _sa = car_mod.separadas_avulso(pool, fid, [x["id"] for x in _av])
+        for _x in _ped_sep:
+            _x["separada"] = (_x["id"] in _sc) if _x["tipo"] == "cesta" else (_x["id"] in _sa)
+        sep["qtd_separadas"] = sum(1 for _x in _ped_sep if _x.get("separada"))
         ctx["sep"] = sep
         ctx["ped_sep"] = _ped_sep
 
@@ -5873,6 +5885,10 @@ def painel_fornecedor_pedido_acao(request: Request, tipo: str, item_id: int,
             ok = pedidos_mod.marcar_embalada(pool, fid, item_id)
         elif acao == "desembalar":
             pedidos_mod.desmarcar_embalada(pool, fid, item_id)
+        elif acao == "separar":
+            ok = pedidos_mod.marcar_separada(pool, fid, item_id)
+        elif acao == "desseparar":
+            pedidos_mod.desmarcar_separada(pool, fid, item_id)
         elif acao == "entregar":
             ok = pedidos_mod.marcar_entregue(pool, fid, item_id)
         elif acao == "desentregar":
@@ -5886,6 +5902,10 @@ def painel_fornecedor_pedido_acao(request: Request, tipo: str, item_id: int,
             ok = car_mod.marcar_embalada(pool, fid, item_id)
         elif acao == "desembalar":
             car_mod.desmarcar_embalada(pool, fid, item_id)
+        elif acao == "separar":
+            ok = car_mod.marcar_separada(pool, fid, item_id)
+        elif acao == "desseparar":
+            ok = car_mod.desmarcar_separada(pool, fid, item_id)
         elif acao == "entregar":
             ok = car_mod.mudar_status(pool, fid, item_id, "entregue").get("ok", False)
         elif acao == "receber":

@@ -767,3 +767,51 @@ def itens_do_avulso(pool, fornecedor_id: int, carrinho_id: int) -> list:
         ).fetchall()
     return [{"produto_nome": r[0], "grupo": r[1],
              "quantidade": float(r[2] or 0), "unidade": r[3]} for r in rows]
+
+
+def marcar_separada(pool, fornecedor_id: int, carrinho_id: int) -> bool:
+    """Marca um avulso como separado (separada_em = now()). Defensivo."""
+    with pool.connection() as c:
+        try:
+            r = c.execute(
+                """update carrinhos set separada_em = coalesce(separada_em, now())
+                    where id = %s and fornecedor_id = %s and status = 'confirmado'
+                    returning id""",
+                (carrinho_id, fornecedor_id),
+            ).fetchone()
+            c.commit()
+            return r is not None
+        except Exception:
+            c.rollback()
+            return False
+
+
+def desmarcar_separada(pool, fornecedor_id: int, carrinho_id: int) -> bool:
+    with pool.connection() as c:
+        try:
+            r = c.execute(
+                "update carrinhos set separada_em = null "
+                "where id = %s and fornecedor_id = %s returning id",
+                (carrinho_id, fornecedor_id),
+            ).fetchone()
+            c.commit()
+            return r is not None
+        except Exception:
+            c.rollback()
+            return False
+
+
+def separadas_avulso(pool, fornecedor_id: int, ids: list) -> set:
+    if not ids:
+        return set()
+    with pool.connection() as c:
+        try:
+            rows = c.execute(
+                "select id from carrinhos where fornecedor_id = %s "
+                "and id = any(%s) and separada_em is not null",
+                (fornecedor_id, list(ids)),
+            ).fetchall()
+            return {int(r[0]) for r in rows}
+        except Exception:
+            c.rollback()
+            return set()

@@ -845,3 +845,53 @@ def itens_da_cesta(pool, fornecedor_id: int, cesta_id: int) -> list:
         ).fetchall()
     return [{"produto_nome": r[0], "grupo": r[1],
              "quantidade": float(r[2] or 0), "unidade": r[3]} for r in rows]
+
+
+def marcar_separada(pool, fornecedor_id: int, cesta_id: int) -> bool:
+    """Marca uma cesta como separada (separada_em = now()). Espelha embalada.
+    Defensivo: se a coluna nao existir (migracao 051 nao rodou), retorna False."""
+    with pool.connection() as c:
+        try:
+            r = c.execute(
+                """update cesta_semana set separada_em = coalesce(separada_em, now())
+                    where id = %s and fornecedor_id = %s and status = 'confirmada'
+                    returning id""",
+                (cesta_id, fornecedor_id),
+            ).fetchone()
+            c.commit()
+            return r is not None
+        except Exception:
+            c.rollback()
+            return False
+
+
+def desmarcar_separada(pool, fornecedor_id: int, cesta_id: int) -> bool:
+    with pool.connection() as c:
+        try:
+            r = c.execute(
+                "update cesta_semana set separada_em = null "
+                "where id = %s and fornecedor_id = %s returning id",
+                (cesta_id, fornecedor_id),
+            ).fetchone()
+            c.commit()
+            return r is not None
+        except Exception:
+            c.rollback()
+            return False
+
+
+def separadas_cesta(pool, fornecedor_id: int, ids: list) -> set:
+    """Ids de cestas ja separadas (dentre `ids`). Defensivo."""
+    if not ids:
+        return set()
+    with pool.connection() as c:
+        try:
+            rows = c.execute(
+                "select id from cesta_semana where fornecedor_id = %s "
+                "and id = any(%s) and separada_em is not null",
+                (fornecedor_id, list(ids)),
+            ).fetchall()
+            return {int(r[0]) for r in rows}
+        except Exception:
+            c.rollback()
+            return set()

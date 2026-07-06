@@ -3291,7 +3291,7 @@ _EMBALAGEM_FORN = """{% extends "base" %}{% block conteudo %}
 _ETIQUETA_FORN = """<!doctype html>
 <html lang="pt-br"><head>
 <meta charset="utf-8">
-<title>Etiqueta — Cesta #{{ e.id }}</title>
+<title>Etiqueta — {{ 'Avulso' if e.tipo == 'avulso' else 'Cesta' }} #{{ e.id }}</title>
 <style>
 body{font-family:system-ui,-apple-system,sans-serif;background:#fff;color:#000;margin:0;padding:1rem}
 .etiqueta{width:100mm;max-width:100%;border:2px solid #000;border-radius:6px;padding:1rem 1.2rem;page-break-after:always}
@@ -3316,13 +3316,13 @@ body{font-family:system-ui,-apple-system,sans-serif;background:#fff;color:#000;m
 <body>
 <div class="etiqueta">
   <div class="etq-topo">
-    <div class="etq-marca">🧺 {{ e.fornecedor_nome or 'Zaq Fornecedor' }}</div>
+    <div class="etq-marca">{% if e.tipo == 'avulso' %}📦{% else %}🧺{% endif %} {{ e.fornecedor_nome or 'Zaq Fornecedor' }}</div>
     {% if e.data_entrega %}<div class="etq-data">Entrega: {{ e.data_entrega }}</div>{% endif %}
   </div>
   <div class="etq-cli">{{ e.cliente_nome }}</div>
   {% if e.endereco %}<div class="etq-end">{{ e.endereco }}</div>{% endif %}
   {% if e.cep %}<div class="etq-cep">CEP {{ e.cep }}</div>{% endif %}
-  <div class="etq-cesta">Cesta <b>{{ e.tamanho_nome }}</b></div>
+  <div class="etq-cesta">{% if e.tipo == 'avulso' %}Avulso · <b>{{ e.qtd_itens }} ite{{ 'm' if e.qtd_itens == 1 else 'ns' }}</b>{% if e.forma_label %} · {{ e.forma_label }}{% endif %}{% else %}Cesta <b>{{ e.tamanho_nome }}</b>{% endif %}</div>
   <div class="etq-rodape">Pedido #{{ e.id }}</div>
 </div>
 <div class="etq-acoes">
@@ -3970,7 +3970,7 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
     <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #212122;margin-top:.6rem;padding-top:.6rem">
       <span class="mut" style="font-size:.78rem">{% if p.esta_embalada %}✅ embalado {{ p.embalada_em }}{% else %}a embalar{% endif %}</span>
       <div style="display:flex;gap:.4rem">
-        {% if p.tipo=='cesta' %}<a href="/painel/fornecedor/embalagem/{{ p.id }}/etiqueta" target="_blank" style="color:#5dcaa5;font-size:.8rem;align-self:center;text-decoration:none">etiqueta</a>{% endif %}
+        <a href="/painel/fornecedor/embalagem/{% if p.tipo=='avulso' %}avulso/{% endif %}{{ p.id }}/etiqueta" target="_blank" style="color:#5dcaa5;font-size:.8rem;align-self:center;text-decoration:none">etiqueta</a>
         {% if p.esta_embalada %}
         <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/desembalar" style="margin:0"><input type="hidden" name="fase" value="embalagem"><button style="width:auto;margin:0;padding:.4rem .8rem;font-size:.8rem;background:transparent;border:1px solid #333;color:#a8a8a3">desfazer</button></form>
         {% else %}
@@ -4127,8 +4127,9 @@ _FINANCEIRO_FORN = """{% extends "base" %}{% block conteudo %}
     </div>
     <div style="text-align:right">
       <div class="{{ 'green' if e.pago else '' }}" style="font-weight:600">R$ {{ "%.2f"|format(e.liquido_cent/100) }}</div>
-      {% if e.pendente %}
+      {% if e.pendente and e.markable %}
       <form method="post" action="/painel/fornecedor/financeiro/{{ e.id }}/recebido" style="margin:.2rem 0 0"><input type="hidden" name="periodo" value="{{ resumo.periodo }}"><button style="width:auto;margin:0;padding:.25rem .6rem;font-size:.72rem">marcar recebido</button></form>
+      {% elif e.pendente %}<span class="fin-pill p-pend">a cobrar</span>
       {% elif e.canal=='direto' %}<span class="fin-pill p-dir">recebido</span>
       {% else %}<span class="fin-pill p-on">online</span>{% endif %}
     </div>
@@ -5978,6 +5979,21 @@ def painel_fornecedor_etiqueta(request: Request, cesta_id: int):
     if e is None:
         request.session["erro"] = "Cesta não encontrada."
         return RedirectResponse("/painel/fornecedor/embalagem", status_code=303)
+    return HTMLResponse(_env.get_template("etiqueta_forn").render(e=e))
+
+
+@router.get("/painel/fornecedor/embalagem/avulso/{carrinho_id}/etiqueta", response_class=HTMLResponse)
+def painel_fornecedor_etiqueta_avulso(request: Request, carrinho_id: int):
+    from finance import carrinho as car_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    if not conta[8]:
+        return RedirectResponse("/painel", status_code=303)
+    e = car_mod.dados_etiqueta_avulso(get_pool(), conta[0], carrinho_id)
+    if e is None:
+        request.session["erro"] = "Pedido nao encontrado."
+        return RedirectResponse("/painel/fornecedor/pedidos?fase=embalagem", status_code=303)
     return HTMLResponse(_env.get_template("etiqueta_forn").render(e=e))
 
 

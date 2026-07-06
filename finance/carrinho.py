@@ -720,3 +720,33 @@ def registrar_recebimento(pool, fornecedor_id: int, carrinho_id: int,
         except Exception:
             c.rollback()
             return False
+
+
+def dados_etiqueta_avulso(pool, fornecedor_id: int, carrinho_id: int) -> dict | None:
+    """Dados da etiqueta imprimivel de UM pedido avulso (mesma estrutura da cesta,
+    com tipo='avulso'). Valida fornecedor."""
+    with pool.connection() as c:
+        row = c.execute(
+            """select ca.id,
+                      coalesce(cli.nome, '(cliente '||ca.cliente_id||')'),
+                      ca.endereco_entrega, ca.cep, ca.bairro,
+                      coalesce(f.nome, ''), f.fornecedor_slug,
+                      coalesce(ca.forma_pagamento, ''),
+                      (select count(*) from carrinho_itens i where i.carrinho_id = ca.id)
+                 from carrinhos ca
+                 left join contas cli on cli.id = ca.cliente_id
+                 left join contas f on f.id = ca.fornecedor_id
+                where ca.id = %s and ca.fornecedor_id = %s""",
+            (carrinho_id, fornecedor_id),
+        ).fetchone()
+    if row is None:
+        return None
+    (cid, nome, end, cep, bairro, forn_nome, forn_slug, forma, qtd) = row
+    return {
+        "id": int(cid), "tipo": "avulso", "cliente_nome": nome,
+        "endereco": end or "", "cep": cep or "", "bairro": bairro or "",
+        "tamanho_nome": None, "data_entrega": None,
+        "fornecedor_nome": forn_nome, "fornecedor_slug": forn_slug,
+        "forma_label": _FORMA_LABEL.get(forma, forma or ""),
+        "qtd_itens": int(qtd or 0),
+    }

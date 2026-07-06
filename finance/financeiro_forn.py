@@ -76,12 +76,19 @@ def resumo_financeiro(pool, fornecedor_id: int, periodo: str = "mes") -> dict:
             else:
                 av_on += cent
 
-        # --- pendente: avulso entregue e nao pago (a receber na mao) ---
+        # --- pendente: avulso entregue-nao-pago + cestas confirmadas (a cobrar) ---
         rp = c.execute(
             "select coalesce(sum(total_centavos),0), count(*) from carrinhos ca "
             "where ca.fornecedor_id = %s and ca.status = 'entregue' and ca.pago = false",
             (fornecedor_id,)).fetchone()
-        pendente_cent, pendente_qtd = int(rp[0] or 0), int(rp[1] or 0)
+        pend_av_cent, pend_av_qtd = int(rp[0] or 0), int(rp[1] or 0)
+        rc = c.execute(
+            "select coalesce(sum(preco_centavos),0), count(*) from cesta_semana cs "
+            "where cs.fornecedor_id = %s and cs.status = 'confirmada'",
+            (fornecedor_id,)).fetchone()
+        pend_ce_cent, pend_ce_qtd = int(rc[0] or 0), int(rc[1] or 0)
+        pendente_cent = pend_av_cent + pend_ce_cent
+        pendente_qtd = pend_av_qtd + pend_ce_qtd
 
     online = cestas_cent + av_on
     offline = av_off
@@ -101,6 +108,7 @@ def resumo_financeiro(pool, fornecedor_id: int, periodo: str = "mes") -> dict:
         "repasse_cent": repasse,
         "repasse_negativo": repasse < 0,
         "pendente_cent": pendente_cent, "pendente_qtd": pendente_qtd,
+        "pendente_avulso_cent": pend_av_cent, "pendente_cesta_cent": pend_ce_cent,
         "cestas_cent": cestas_cent, "cestas_qtd": cestas_qtd,
         "avulsos_cent": av_off + av_on, "avulsos_qtd": av_qtd,
         "qtd_pedidos": cestas_qtd + av_qtd,
@@ -122,24 +130,26 @@ def extrato_financeiro(pool, fornecedor_id: int, periodo: str = "mes",
 
         itens: list[dict] = []
 
-        cc = ["cs.fornecedor_id = %s", "cs.status in ('cobrada','entregue')"]
+        cc = ["cs.fornecedor_id = %s", "cs.status in ('cobrada','entregue','confirmada')"]
         pc: list = [fornecedor_id]
         if de:
             cc.append("coalesce(cs.entregue_em::date, cs.data_entrega, cs.criada_em::date) >= %s")
             cc.append("coalesce(cs.entregue_em::date, cs.data_entrega, cs.criada_em::date) <= %s")
             pc += [de, ate]
-        for cid, nome, cent, quando in c.execute(
-            "select cs.id, coalesce(cli.nome,'cliente'), cs.preco_centavos, "
+        for cid, nome, cent, status, quando in c.execute(
+            "select cs.id, coalesce(cli.nome,'cliente'), cs.preco_centavos, cs.status, "
             "coalesce(cs.entregue_em::date, cs.data_entrega, cs.criada_em::date) "
             "from cesta_semana cs left join contas cli on cli.id = cs.cliente_id "
-            "where " + " and ".join(cc) + " order by 4 desc limit %s",
+            "where " + " and ".join(cc) + " order by 5 desc limit %s",
             tuple(pc) + (limit,)).fetchall():
             cent = int(cent or 0)
+            _pago = status in ("cobrada", "entregue")
             itens.append({
                 "tipo": "cesta", "id": int(cid), "cliente_nome": nome,
                 "valor_cent": cent, "comissao_cent": round(cent * pct / 100),
                 "liquido_cent": cent - round(cent * pct / 100),
-                "canal": "online", "pago": True, "pendente": False,
+                "canal": "online", "pago": _pago, "pendente": not _pago,
+                "markable": False,
                 "data": quando.strftime("%d/%m") if hasattr(quando, "strftime") else "",
             })
 
@@ -165,6 +175,7 @@ def extrato_financeiro(pool, fornecedor_id: int, periodo: str = "mes",
                 "valor_cent": cent, "comissao_cent": round(cent * pct / 100),
                 "liquido_cent": cent - round(cent * pct / 100),
                 "canal": canal, "pago": pago, "pendente": not pago,
+                "markable": not pago,
                 "data": quando.strftime("%d/%m") if hasattr(quando, "strftime") else "",
             })
 

@@ -402,10 +402,10 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
     <span class="fc-tile amber">🛒</span>
     <span class="fc-txt"><span class="fc-tit">Compras</span><span class="fc-leg">Entradas do CEASA e o estoque que abastece a loja.</span></span>
   </button>
-  <button type="button" class="forn-card" onclick="fornAbrir('financeiro')">
+  <a href="/painel/fornecedor/financeiro" class="forn-card" style="text-decoration:none">
     <span class="fc-tile amber">💰</span>
     <span class="fc-txt"><span class="fc-tit">Financeiro</span><span class="fc-leg">Quanto você ganhou, os repasses e as comissões.</span></span>
-  </button>
+  </a>
   <div class="forn-grupo">Configuração</div>
   <button type="button" class="forn-card" onclick="fornAbrir('dados')">
     <span class="fc-tile blue">🏢</span>
@@ -4038,8 +4038,108 @@ function filtTipo(b){
 {% endblock %}"""
 
 
+_FINANCEIRO_FORN = """{% extends "base" %}{% block conteudo %}
+<style>
+.fin-back{color:#5dcaa5;font-size:.9rem;text-decoration:none;display:inline-block;margin-bottom:.4rem}
+.fin-hero{border-radius:14px;padding:1.1rem 1.2rem;margin:.8rem 0 .7rem}
+.fin-hero.pos{background:#13251d;border:1px solid #2f5d4e}
+.fin-hero.neg{background:#2a1717;border:1px solid #6e2b2b}
+.fin-hero-rot{font-size:.75rem;text-transform:uppercase;letter-spacing:.04em}
+.fin-hero-num{font-size:2rem;font-weight:700;margin:.2rem 0}
+.fin-hero-sub{font-size:.8rem;color:#a8a8a3;margin-top:.3rem}
+.fin-direto{display:flex;justify-content:space-between;align-items:center;background:#161617;border:1px solid #2a2a2b;border-radius:11px;padding:.8rem 1rem;margin-bottom:1.1rem}
+.fin-box{background:#161617;border:1px solid #2a2a2b;border-radius:12px;padding:1rem 1.1rem;margin-bottom:1.1rem}
+.fin-box-tit{font-size:.78rem;color:#6f6f6a;text-transform:uppercase;letter-spacing:.04em;margin-bottom:.6rem}
+.fin-lin{display:flex;justify-content:space-between;padding:.3rem 0;font-size:.92rem}
+.fin-lin.sub{font-size:.82rem;color:#a8a8a3;padding-left:1rem}
+.fin-lin.tot{border-top:1px solid #2a2a2b;margin-top:.3rem;padding-top:.5rem;font-weight:600}
+.fin-origem{display:flex;gap:.6rem;margin-bottom:1.1rem;flex-wrap:wrap}
+.fin-oc{flex:1;min-width:140px;background:#161617;border:1px solid #2a2a2b;border-radius:10px;padding:.7rem .9rem}
+.fin-sec{font-size:.78rem;color:#6f6f6a;text-transform:uppercase;letter-spacing:.04em;margin:.4rem 0 .6rem}
+.fin-row{display:flex;justify-content:space-between;align-items:center;background:#161617;border:1px solid #2a2a2b;border-radius:11px;padding:.7rem .9rem;margin-bottom:.55rem}
+.fin-badge{font-size:10px;padding:1px 7px;border-radius:999px;font-weight:600}
+.b-cesta{background:#1e2b23;color:#7fd4a8}.b-avulso{background:#2b2620;color:#e0b877}
+.fin-tag{font-size:10px;padding:1px 7px;border-radius:999px;border:1px solid #333;color:#a8a8a3}
+.fin-tag.on{border-color:#3a78c2;color:#7ab0e8}
+.fin-pill{font-size:10px;padding:2px 8px;border-radius:999px}
+.p-on{background:#16202e;color:#7ab0e8;border:1px solid #3a78c2}
+.p-dir{background:#15301f;color:#5dcaa5;border:1px solid #1d9e75}
+.p-pend{background:#2a2417;color:#e0c07a;border:1px solid #6b5a2a}
+.green{color:#5dcaa5}.amber{color:#e0b877}.red{color:#e0857a}.mut{color:#a8a8a3}
+</style>
+<div class="card larga">
+  <a href="/painel/fornecedor" class="fin-back">← voltar</a>
+  <h2 style="margin:.2rem 0 .8rem">💰 Financeiro</h2>
+  {% if aviso %}<div class="ok" style="margin-bottom:1rem">{{ aviso }}</div>{% endif %}
+  {% if not resumo.comissao_configurada %}<div style="background:#2a2417;border:1px solid #6b5a2a;border-radius:10px;padding:.7rem .9rem;font-size:.83rem;color:#e0c07a;margin-bottom:1rem">⚠️ Comissão não configurada no cadastro deste fornecedor — o cálculo está usando 0%. Peça pro admin definir a comissão.</div>{% endif %}
+  <form method="get" action="/painel/fornecedor/financeiro" style="margin-bottom:.6rem">
+    <select name="periodo" onchange="this.form.submit()" style="background:#0e0e0f;border:1px solid #333;color:#ececec;border-radius:8px;padding:.45rem .7rem;font-size:.9rem">
+      <option value="mes"{% if resumo.periodo=='mes' %} selected{% endif %}>Este mês</option>
+      <option value="mes_passado"{% if resumo.periodo=='mes_passado' %} selected{% endif %}>Mês passado</option>
+      <option value="30dias"{% if resumo.periodo=='30dias' %} selected{% endif %}>Últimos 30 dias</option>
+      <option value="tudo"{% if resumo.periodo=='tudo' %} selected{% endif %}>Tudo</option>
+    </select>
+  </form>
+
+  {% if resumo.repasse_negativo %}
+  <div class="fin-hero neg">
+    <div class="fin-hero-rot" style="color:#e5a3a3">A pagar à plataforma</div>
+    <div class="fin-hero-num red">R$ {{ "%.2f"|format((0 - resumo.repasse_cent)/100) }}</div>
+    <div class="fin-hero-sub">a comissão das vendas offline passou do repasse online do período</div>
+  </div>
+  {% else %}
+  <div class="fin-hero pos">
+    <div class="fin-hero-rot" style="color:#8fd3b3">A repassar (online)</div>
+    <div class="fin-hero-num green">R$ {{ "%.2f"|format(resumo.repasse_cent/100) }}</div>
+    <div class="fin-hero-sub">líquido do online — cai na sua wallet Asaas</div>
+  </div>
+  {% endif %}
+
+  <div class="fin-direto">
+    <div><b>Recebido direto</b> <span class="fin-tag">na entrega</span><div class="mut" style="font-size:.76rem;margin-top:.2rem">dinheiro/cartão/Pix na entrega — já no seu caixa</div></div>
+    <div class="green" style="font-weight:600;font-size:1.1rem">R$ {{ "%.2f"|format(resumo.recebido_direto_cent/100) }}</div>
+  </div>
+
+  <div class="fin-box">
+    <div class="fin-box-tit">Faturamento do período</div>
+    <div class="fin-lin"><span>Bruto ({{ resumo.qtd_pedidos }} pedido{% if resumo.qtd_pedidos != 1 %}s{% endif %})</span><span>R$ {{ "%.2f"|format(resumo.faturamento_cent/100) }}</span></div>
+    <div class="fin-lin"><span>− Comissão da plataforma ({{ "%g"|format(resumo.comissao_pct) }}%)</span><span class="amber">− R$ {{ "%.2f"|format(resumo.comissao_cent/100) }}</span></div>
+    <div class="fin-lin tot"><span>Líquido pra você</span><span class="green">R$ {{ "%.2f"|format(resumo.liquido_cent/100) }}</span></div>
+    <div class="fin-lin sub"><span>├ recebido direto (na entrega)</span><span>R$ {{ "%.2f"|format(resumo.recebido_direto_cent/100) }}</span></div>
+    <div class="fin-lin sub"><span>├ a repassar (online){% if resumo.repasse_negativo %} — negativo{% endif %}</span><span>R$ {{ "%.2f"|format(resumo.repasse_cent/100) }}</span></div>
+    {% if resumo.pendente_cent %}<div class="fin-lin sub"><span>└ pendente (entregue, a receber)</span><span>R$ {{ "%.2f"|format(resumo.pendente_cent/100) }}</span></div>{% endif %}
+  </div>
+
+  <div class="fin-origem">
+    <div class="fin-oc"><div style="font-weight:600">🧺 R$ {{ "%.2f"|format(resumo.cestas_cent/100) }}</div><div class="mut" style="font-size:.72rem">cestas · {{ resumo.cestas_qtd }} pedido{% if resumo.cestas_qtd != 1 %}s{% endif %}</div></div>
+    <div class="fin-oc"><div style="font-weight:600">📦 R$ {{ "%.2f"|format(resumo.avulsos_cent/100) }}</div><div class="mut" style="font-size:.72rem">avulsos · {{ resumo.avulsos_qtd }} pedido{% if resumo.avulsos_qtd != 1 %}s{% endif %}</div></div>
+  </div>
+
+  <div class="fin-sec">Extrato de pedidos</div>
+  {% if not extrato %}<p class="mut" style="text-align:center;padding:2rem 0">Nenhum pedido no período.</p>{% endif %}
+  {% for e in extrato %}
+  <div class="fin-row">
+    <div>
+      <b>{{ e.cliente_nome }}</b>
+      <span class="fin-badge {{ 'b-cesta' if e.tipo=='cesta' else 'b-avulso' }}">{{ e.tipo }}</span>
+      <span class="fin-tag{% if e.canal=='online' %} on{% endif %}">{{ 'online' if e.canal=='online' else 'na entrega' }}</span>
+      <div class="mut" style="font-size:.76rem;margin-top:.2rem">{{ e.data }} · R$ {{ "%.2f"|format(e.valor_cent/100) }} − R$ {{ "%.2f"|format(e.comissao_cent/100) }} comissão</div>
+    </div>
+    <div style="text-align:right">
+      <div class="{{ 'green' if e.pago else '' }}" style="font-weight:600">R$ {{ "%.2f"|format(e.liquido_cent/100) }}</div>
+      {% if e.pendente %}
+      <form method="post" action="/painel/fornecedor/financeiro/{{ e.id }}/recebido" style="margin:.2rem 0 0"><input type="hidden" name="periodo" value="{{ resumo.periodo }}"><button style="width:auto;margin:0;padding:.25rem .6rem;font-size:.72rem">marcar recebido</button></form>
+      {% elif e.canal=='direto' %}<span class="fin-pill p-dir">recebido</span>
+      {% else %}<span class="fin-pill p-on">online</span>{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}"""
+
+
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 _env.filters["brl"] = brl
@@ -5563,6 +5663,39 @@ def painel_fornecedor_dados(request: Request,
         c.commit()
     request.session["aviso"] = "Dados do fornecedor salvos."
     return RedirectResponse("/painel/fornecedor", status_code=303)
+
+
+@router.get("/painel/fornecedor/financeiro", response_class=HTMLResponse)
+def painel_fornecedor_financeiro(request: Request, periodo: str = "mes"):
+    from finance import financeiro_forn as fin
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    if not conta[8]:
+        return RedirectResponse("/painel", status_code=303)
+    pool = get_pool()
+    fid = conta[0]
+    resumo = fin.resumo_financeiro(pool, fid, periodo)
+    extrato = fin.extrato_financeiro(pool, fid, periodo)
+    return _render("financeiro_forn", request, conta=conta,
+                   resumo=resumo, extrato=extrato,
+                   aviso=request.session.pop("aviso_fin", None))
+
+
+@router.post("/painel/fornecedor/financeiro/{carrinho_id}/recebido")
+def painel_fornecedor_marcar_recebido(request: Request, carrinho_id: int,
+                                      periodo: str = Form("mes")):
+    from finance import carrinho as car_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    if not conta[8]:
+        return RedirectResponse("/painel", status_code=303)
+    ok = car_mod.registrar_recebimento(get_pool(), conta[0], carrinho_id, "", True)
+    request.session["aviso_fin"] = ("Recebimento confirmado."
+                                    if ok else "Nao foi possivel confirmar.")
+    return RedirectResponse(f"/painel/fornecedor/financeiro?periodo={periodo}",
+                            status_code=303)
 
 
 @router.get("/painel/fornecedor/avulsos", response_class=HTMLResponse)

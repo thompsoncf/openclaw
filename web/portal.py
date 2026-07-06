@@ -3987,9 +3987,27 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
     <div style="font-size:.85rem;color:#5dcaa5;font-weight:600;margin:1.2rem 0 .5rem">📍 {{ g.bairro }} · {{ g.qtd }} pedido(s)</div>
     {% for p in g.pedidos %}
     {% call card(p) %}
-    <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #212122;margin-top:.6rem;padding-top:.6rem">
-      <span class="mut" style="font-size:.78rem">{% if not p.esta_embalada %}⚠ não embalado{% else %}pronto{% endif %}</span>
-      <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/entregar" style="margin:0"><input type="hidden" name="fase" value="rotas"><button style="width:auto;margin:0;padding:.4rem .9rem;font-size:.8rem">Entregue</button></form>
+    <div style="border-top:1px solid #212122;margin-top:.6rem;padding-top:.6rem">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span class="mut" style="font-size:.78rem">{% if not p.esta_embalada %}⚠ não embalado{% else %}pronto{% endif %}</span>
+        {% if p.pago %}
+        <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/entregar" style="margin:0"><input type="hidden" name="fase" value="rotas"><button style="width:auto;margin:0;padding:.4rem .9rem;font-size:.8rem">Entregue</button></form>
+        {% endif %}
+      </div>
+      {% if not p.pago %}
+      <details style="margin-top:.5rem">
+        <summary style="list-style:none;cursor:pointer;background:#1d9e75;color:#fff;border-radius:8px;padding:.42rem .9rem;font-size:.8rem;font-weight:500;display:inline-block">Entregue — como recebeu?</summary>
+        <div style="margin-top:.5rem;background:#101011;border:1px dashed #3a5c4e;border-radius:9px;padding:.7rem">
+          <div class="mut" style="font-size:.8rem;margin-bottom:.5rem">Como o cliente pagou{% if p.tipo=='avulso' %} R$ {{ "%.2f"|format(p.total_centavos/100) }}{% endif %}?</div>
+          <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+            {% for fv, fl in [('entrega_dinheiro','💵 Dinheiro'),('entrega_cartao','💳 Cartão'),('entrega_pix','📱 Pix'),('pagar_agora','🔗 Pagou pelo link')] %}
+            <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/receber" style="margin:0"><input type="hidden" name="fase" value="rotas"><input type="hidden" name="forma" value="{{ fv }}"><button style="width:auto;margin:0;padding:.35rem .7rem;font-size:.78rem;background:#161617;border:1px solid #2a2a2b;color:#ececec">{{ fl }}</button></form>
+            {% endfor %}
+            <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/receber" style="margin:0"><input type="hidden" name="fase" value="rotas"><input type="hidden" name="forma" value="nao"><button style="width:auto;margin:0;padding:.35rem .7rem;font-size:.78rem;background:transparent;border:1px solid #444;color:#a8a8a3">Entregue, não recebi</button></form>
+          </div>
+        </div>
+      </details>
+      {% endif %}
     </div>
     {% endcall %}
     {% endfor %}
@@ -5666,10 +5684,13 @@ def painel_fornecedor_pedidos(request: Request, fase: str = "",
                 if cst.get("esta_entregue"):
                     continue
                 cst["tipo"] = "cesta"
+                cst["pago"] = True
                 buckets.setdefault(g["bairro"], []).append(cst)
-        for a in car_mod.avulsos_para_rotas(pool, fid):
-            if a.get("esta_entregue"):
-                continue
+        _avs = [a for a in car_mod.avulsos_para_rotas(pool, fid)
+                if not a.get("esta_entregue")]
+        _info = car_mod.avulsos_pago_info(pool, fid, [a["id"] for a in _avs])
+        for a in _avs:
+            a["pago"] = _info.get(a["id"], {}).get("pago", False)
             buckets.setdefault(a["bairro"] or "(sem bairro)", []).append(a)
         bairros = sorted(k for k in buckets if k != "(sem bairro)")
         if "(sem bairro)" in buckets:
@@ -5696,7 +5717,8 @@ def painel_fornecedor_pedidos(request: Request, fase: str = "",
 
 @router.post("/painel/fornecedor/pedidos/{tipo}/{item_id}/{acao}")
 def painel_fornecedor_pedido_acao(request: Request, tipo: str, item_id: int,
-                                  acao: str, fase: str = Form("novos")):
+                                  acao: str, fase: str = Form("novos"),
+                                  forma: str = Form("")):
     from finance import pedidos as pedidos_mod
     from finance import carrinho as car_mod
     conta = conta_logada(request)
@@ -5727,6 +5749,10 @@ def painel_fornecedor_pedido_acao(request: Request, tipo: str, item_id: int,
             car_mod.desmarcar_embalada(pool, fid, item_id)
         elif acao == "entregar":
             ok = car_mod.mudar_status(pool, fid, item_id, "entregue").get("ok", False)
+        elif acao == "receber":
+            _recebido = forma != "nao"
+            ok = car_mod.registrar_recebimento(
+                pool, fid, item_id, forma if _recebido else "", _recebido)
         elif acao == "desentregar":
             car_mod.mudar_status(pool, fid, item_id, "confirmado").get("ok", False)
     if not ok:

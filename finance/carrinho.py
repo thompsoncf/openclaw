@@ -677,3 +677,46 @@ def desmarcar_embalada(pool, fornecedor_id: int, carrinho_id: int) -> bool:
         except Exception:
             c.rollback()
             return False
+
+
+def avulsos_pago_info(pool, fornecedor_id: int, ids: list[int]) -> dict:
+    """{id: {"pago": bool, "forma": str}} -- enriquece a fase Rotas."""
+    if not ids:
+        return {}
+    with pool.connection() as c:
+        rows = c.execute(
+            """select id, coalesce(pago, false), coalesce(forma_pagamento, '')
+                 from carrinhos where fornecedor_id = %s and id = any(%s)""",
+            (fornecedor_id, list(ids)),
+        ).fetchall()
+    return {int(r[0]): {"pago": bool(r[1]), "forma": r[2]} for r in rows}
+
+
+def registrar_recebimento(pool, fornecedor_id: int, carrinho_id: int,
+                          forma: str, recebido: bool) -> bool:
+    """Na entrega: marca entregue, grava a forma REAL do pagamento e o pago.
+    forma vazia mantem a forma atual (caso "entregue mas nao recebi")."""
+    with pool.connection() as c:
+        try:
+            sets = ["status = 'entregue'",
+                    "entregue_em = coalesce(entregue_em, now())"]
+            params: list = []
+            if forma:
+                sets.append("forma_pagamento = %s")
+                params.append(forma)
+            if recebido:
+                sets.append("pago = true")
+                sets.append("pago_em = coalesce(pago_em, now())")
+            else:
+                sets.append("pago = false")
+            params += [carrinho_id, fornecedor_id]
+            r = c.execute(
+                "update carrinhos set " + ", ".join(sets) +
+                " where id = %s and fornecedor_id = %s returning id",
+                tuple(params),
+            ).fetchone()
+            c.commit()
+            return r is not None
+        except Exception:
+            c.rollback()
+            return False

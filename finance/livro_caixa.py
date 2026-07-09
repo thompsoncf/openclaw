@@ -383,6 +383,57 @@ class LivroCaixa:
             conn.commit()
             return cur.rowcount > 0
 
+    def ids_por_natureza(self, ano: int, mes: int, membro_id: int | None = None,
+                         natureza: str | None = None) -> list[int]:
+        """Ids dos lançamentos do mês que batem com o filtro de natureza.
+        Usado pra saber 'os visíveis' (ex: os a definir) antes de classificar."""
+        ini, prox = _intervalo_mes(ano, mes)
+        cond = "conta_id = %s and data >= %s and data < %s"
+        params: list = [self.conta_id, ini, prox]
+        if membro_id is not None:
+            cond += " and membro_id = %s"; params.append(membro_id)
+        cond, params = _cond_natureza(cond, params, natureza)
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                f"select id from lancamentos where {cond} order by data, id", params).fetchall()
+        return [int(r[0]) for r in rows]
+
+    def lancamentos_a_definir(self, ano: int, mes: int,
+                              membro_id: int | None = None) -> list[dict]:
+        """Lista dos lançamentos 'a definir' do mês (id, data, categoria, valor,
+        tipo) — pro modal de classificação. Multi-tenant."""
+        ini, prox = _intervalo_mes(ano, mes)
+        cond = "conta_id = %s and data >= %s and data < %s and natureza is null"
+        params: list = [self.conta_id, ini, prox]
+        if membro_id is not None:
+            cond += " and membro_id = %s"; params.append(membro_id)
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                f"""select id, data, categoria, valor_centavos, tipo, descricao
+                     from lancamentos where {cond} order by data, id""", params).fetchall()
+        return [{"id": r[0], "data": r[1], "categoria": r[2], "valor": int(r[3]),
+                 "tipo": r[4], "descricao": r[5]} for r in rows]
+
+    def marcar_natureza_mapa(self, mapa: dict) -> int:
+        """Marca vários lançamentos, cada um com sua natureza. `mapa` é
+        {id: 'pessoal'|'empresa'}. Ignora valores inválidos. Multi-tenant.
+        Retorna quantos foram marcados."""
+        marc = 0
+        with self.pool.connection() as conn:
+            for lid, nat in (mapa or {}).items():
+                if nat not in ("pessoal", "empresa"):
+                    continue
+                try:
+                    lid_i = int(lid)
+                except (TypeError, ValueError):
+                    continue
+                cur = conn.execute(
+                    "update lancamentos set natureza = %s where id = %s and conta_id = %s",
+                    (nat, lid_i, self.conta_id))
+                marc += cur.rowcount
+            conn.commit()
+        return marc
+
     def contar_a_definir(self, ano: int | None = None, mes: int | None = None) -> int:
         """Quantos lancamentos DESTA conta estao sem natureza (a definir).
         Se ano/mes vier, conta so' o mes; senao, tudo."""

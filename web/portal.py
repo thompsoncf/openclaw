@@ -1362,7 +1362,27 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 </div>
 </div>
 {% endif %}
-{% if eh_pj and n_a_definir and not natureza_sel %}<div style="background:#2b2416;border:1px solid #f0c05a44;border-radius:8px;padding:.55rem .9rem;margin:.4rem 0 0;color:#f0c05a;font-size:.83rem">🏢 <b>{{ n_a_definir }}</b> lançamento(s) sem classificar (pessoal ou empresa). <a href="/painel/financeiro?natureza=a_definir" style="color:#f0c05a;text-decoration:underline">classificar agora</a></div>{% endif %}
+{% if eh_pj and n_a_definir %}<div style="background:#2b2416;border:1px solid #f0c05a44;border-radius:8px;padding:.55rem .9rem;margin:.4rem 0 0;color:#f0c05a;font-size:.83rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem"><span>🏢 <b>{{ n_a_definir }}</b> lançamento(s) sem classificar (pessoal ou empresa).</span> <button type="button" onclick="abrirClassificador()" style="background:#f0c05a;color:#1a1409;border:0;border-radius:6px;padding:.35rem .9rem;font-size:.8rem;font-weight:600;cursor:pointer">classificar em lote</button></div>{% endif %}
+
+{% if eh_pj %}<div id="modal-classif" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;align-items:center;justify-content:center;padding:1rem">
+<div style="background:#0e0e0f;border:1px solid #2a2a2b;border-radius:12px;max-width:560px;width:100%;max-height:85vh;display:flex;flex-direction:column;padding:1.1rem 1.2rem">
+<div style="font-size:1rem;font-weight:600;color:#f4f4f4">Classificar lançamentos a definir</div>
+<div style="font-size:.75rem;color:#888780;margin:.2rem 0 .7rem">Escolha pessoal ou empresa em cada um. Os que deixar em branco continuam "a definir".</div>
+<div style="display:flex;gap:.4rem;align-items:center;margin-bottom:.7rem;flex-wrap:wrap">
+<span style="color:#888780;font-size:.7rem">atalhos:</span>
+<button type="button" onclick="classifTodos('pessoal')" style="font-size:.7rem;color:#f0c05a;background:#3a2c1d;border:0;padding:.25rem .7rem;border-radius:6px;cursor:pointer">todos pessoal</button>
+<button type="button" onclick="classifTodos('empresa')" style="font-size:.7rem;color:#5dcaa5;background:#1d3a2e;border:0;padding:.25rem .7rem;border-radius:6px;cursor:pointer">todos 🏢 empresa</button>
+<button type="button" onclick="classifTodos('')" style="font-size:.7rem;color:#b4b2a9;background:#1c1c1e;border:0;padding:.25rem .7rem;border-radius:6px;cursor:pointer">limpar</button>
+</div>
+<div id="classif-lista" style="background:#131316;border-radius:9px;overflow-y:auto;flex:1;margin-bottom:.8rem"></div>
+<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
+<span id="classif-contador" style="color:#888780;font-size:.75rem"></span>
+<span style="display:flex;gap:.5rem">
+<button type="button" onclick="fecharClassificador()" style="border:1px solid #444;background:transparent;color:#b4b2a9;font-size:.8rem;padding:.4rem .9rem;border-radius:6px;cursor:pointer">Cancelar</button>
+<button type="button" id="classif-salvar" onclick="salvarClassificacao()" style="background:#1d9e75;color:#fff;font-size:.8rem;font-weight:600;padding:.4rem 1rem;border:0;border-radius:6px;cursor:pointer">Salvar</button>
+</span>
+</div>
+</div></div>{% endif %}
 
 <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin:1.2rem 0">
 <div class="metric"><span>Saldo anterior</span><b style="color:{% if resumo.anterior < 0 %}#e07a5f{% else %}#5dcaa5{% endif %}">{{ brl(resumo.anterior) }}</b></div>
@@ -1544,6 +1564,64 @@ function catMudou(sel){
   // mostra o botao OK so' quando o valor muda em relacao ao salvo
   var btn = sel.parentElement.querySelector('.cat-ok');
   btn.style.display = (sel.value !== sel.getAttribute('data-orig')) ? 'inline-block' : 'none';
+}
+var _classif = {};  // id -> 'pessoal'|'empresa'|''
+function abrirClassificador(){
+  var mes = new URLSearchParams(location.search).get('mes') || '';
+  var membro = new URLSearchParams(location.search).get('membro') || '';
+  fetch('/painel/lancamentos-a-definir?mes='+encodeURIComponent(mes)+'&membro='+encodeURIComponent(membro))
+   .then(r=>r.json()).then(d=>{
+     if(!d.ok) return;
+     _classif = {};
+     var lista = document.getElementById('classif-lista');
+     lista.innerHTML = d.itens.map(function(it){
+       _classif[it.id]='';
+       var val = (it.valor/100).toLocaleString('pt-BR',{minimumFractionDigits:2});
+       var sinal = it.tipo==='receita' ? '+' : '−';
+       var desc = it.descricao ? (' · '+it.descricao) : '';
+       return '<div style="display:flex;align-items:center;gap:.5rem;padding:.5rem .7rem;border-bottom:1px solid #1e1e20">'+
+         '<span style="flex:1;color:#ececec;font-size:.78rem">'+it.data+' · '+it.categoria+desc+' <span style="color:#888780">'+sinal+' R$ '+val+'</span></span>'+
+         '<span style="display:inline-flex;background:#0e0e0f;border:1px solid #2a2a2b;border-radius:7px;padding:2px">'+
+         '<button type="button" data-id="'+it.id+'" data-nat="pessoal" onclick="classifUm(this)" style="font-size:.68rem;padding:.25rem .7rem;border:0;border-radius:5px;background:transparent;color:#888780;cursor:pointer">pessoal</button>'+
+         '<button type="button" data-id="'+it.id+'" data-nat="empresa" onclick="classifUm(this)" style="font-size:.68rem;padding:.25rem .7rem;border:0;border-radius:5px;background:transparent;color:#888780;cursor:pointer">empresa</button>'+
+         '</span></div>';
+     }).join('');
+     _classifRefresh();
+     document.getElementById('modal-classif').style.display='flex';
+   });
+}
+function classifUm(btn){
+  var id=btn.getAttribute('data-id'), nat=btn.getAttribute('data-nat');
+  _classif[id] = (_classif[id]===nat) ? '' : nat;  // clicar de novo desmarca
+  _classifPinta();
+}
+function classifTodos(nat){
+  Object.keys(_classif).forEach(function(id){ _classif[id]=nat; });
+  _classifPinta();
+}
+function _classifPinta(){
+  document.querySelectorAll('#classif-lista button[data-id]').forEach(function(b){
+    var id=b.getAttribute('data-id'), nat=b.getAttribute('data-nat');
+    var on = _classif[id]===nat;
+    if(on && nat==='pessoal'){ b.style.background='#f0c05a'; b.style.color='#1a1409'; b.style.fontWeight='600'; }
+    else if(on && nat==='empresa'){ b.style.background='#1d9e75'; b.style.color='#fff'; b.style.fontWeight='600'; }
+    else { b.style.background='transparent'; b.style.color='#888780'; b.style.fontWeight='400'; }
+  });
+  _classifRefresh();
+}
+function _classifRefresh(){
+  var tot=Object.keys(_classif).length;
+  var feitos=Object.keys(_classif).filter(function(k){return _classif[k];}).length;
+  document.getElementById('classif-contador').textContent = feitos+' classificado(s) · '+(tot-feitos)+' em branco (fica a definir)';
+  document.getElementById('classif-salvar').textContent = feitos>0 ? ('Salvar '+feitos+' classificação(ões)') : 'Salvar';
+}
+function fecharClassificador(){ document.getElementById('modal-classif').style.display='none'; }
+function salvarClassificacao(){
+  var mapa={};
+  Object.keys(_classif).forEach(function(id){ if(_classif[id]) mapa[id]=_classif[id]; });
+  if(!Object.keys(mapa).length){ fecharClassificador(); return; }
+  fetch('/painel/lancamentos-classificar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mapa:mapa})})
+   .then(r=>r.json()).then(d=>{ if(d.ok){ location.reload(); } });
 }
 function marcarNat(id, nat, btn){
   fetch('/painel/lancamento/natureza', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&natureza='+nat})
@@ -7345,6 +7423,40 @@ def marcar_natureza_lancamento(request: Request,
     nat = natureza if natureza in ("pessoal", "empresa") else None
     ok = livro.marcar_natureza(lancamento_id, nat)
     return JSONResponse({"ok": bool(ok)})
+
+
+@router.get("/painel/lancamentos-a-definir")
+def listar_a_definir(request: Request, mes: str = "", membro: str = ""):
+    conta = conta_logada(request)
+    if not conta:
+        return JSONResponse({"ok": False}, status_code=401)
+    from finance.livro_caixa import LivroCaixa
+    from datetime import date as _date
+    hoje = _date.today()
+    try:
+        ano_sel, mes_num = (int(x) for x in mes.split("-")) if mes else (hoje.year, hoje.month)
+    except ValueError:
+        ano_sel, mes_num = hoje.year, hoje.month
+    membro_sel = int(membro) if membro.isdigit() else None
+    livro = LivroCaixa(get_pool(), conta[0])
+    itens = livro.lancamentos_a_definir(ano_sel, mes_num, membro_sel)
+    out = [{"id": i["id"], "data": i["data"].strftime("%d/%m") if hasattr(i["data"], "strftime") else str(i["data"]),
+            "categoria": i["categoria"], "valor": i["valor"], "tipo": i["tipo"],
+            "descricao": i["descricao"] or ""} for i in itens]
+    return JSONResponse({"ok": True, "itens": out})
+
+
+@router.post("/painel/lancamentos-classificar")
+async def classificar_a_definir(request: Request):
+    conta = conta_logada(request)
+    if not conta:
+        return JSONResponse({"ok": False}, status_code=401)
+    from finance.livro_caixa import LivroCaixa
+    dados = await request.json()
+    mapa = dados.get("mapa") or {}
+    livro = LivroCaixa(get_pool(), conta[0])
+    n = livro.marcar_natureza_mapa(mapa)
+    return JSONResponse({"ok": True, "n": n})
 
 
 @router.post("/painel/lancamento/apagar")

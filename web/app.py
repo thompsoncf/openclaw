@@ -474,6 +474,21 @@ async def webhook_asaas(request: Request):
             except Exception as _e:  # noqa: BLE001
                 _logw.warning("ASAAS pedido %s erro: %s", ref, _e)
         return Response(status_code=200)
+    if ref.startswith("titulo:"):
+        if evento in ("PAYMENT_RECEIVED", "PAYMENT_CONFIRMED"):
+            try:
+                from finance import empresa as _emp
+                _pool = _setup()
+                _tid = int(ref.split(":", 1)[1])
+                with _pool.connection() as _c:
+                    _r = _c.execute(
+                        "select conta_id from titulos where id=%s", (_tid,)).fetchone()
+                if _r:
+                    _emp.marcar_titulo_recebido(_pool, _r[0], _tid)
+                _logw.warning("ASAAS titulo pago: %s", ref)
+            except Exception as _e:  # noqa: BLE001
+                _logw.warning("ASAAS titulo %s erro: %s", ref, _e)
+        return Response(status_code=200)
     is_cesta = ref.startswith("cesta:")
     assinatura_id = conta_id = None
     try:

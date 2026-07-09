@@ -2637,7 +2637,61 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     <tr style="border-top:1px solid #2a2a2b"><td style="font-weight:600">Resultado</td>
       <td style="text-align:right;font-weight:600;color:{{ '#5dcaa5' if dre.resultado_centavos>=0 else '#e07a5f' }}">{{ dre.resultado_centavos|brl }} · {{ dre.margem_pct }}%</td></tr>
   </table>
-  <div class="mut" style="font-size:.75rem;margin-top:.8rem">📊 Títulos, equipe e relatório do contador chegam na próxima etapa.</div>
+
+  <div class="mut" style="font-size:.75rem;margin-top:.8rem">Relatório do contador: <a href="/painel/empresa/contador.csv?ano={{ dre.ano }}&mes={{ dre.mes }}" style="color:#5dcaa5">baixar planilha ({{ '%02d'|format(dre.mes) }}/{{ dre.ano }}) ↓</a></div>
+</div>
+
+<div class="card larga">
+  <div style="display:flex;justify-content:space-between;align-items:center"><strong>Títulos a pagar e receber</strong></div>
+  <form method="post" action="/painel/empresa/titulo" style="display:grid;grid-template-columns:1fr 2fr 1fr 1fr auto;gap:.5rem;margin:.7rem 0;align-items:end">
+    <label style="font-size:.72rem;color:#8a938a">Tipo<select name="tipo" style="width:100%">
+      <option value="pagar">A pagar</option><option value="receber">A receber</option></select></label>
+    <label style="font-size:.72rem;color:#8a938a">Descrição<input name="descricao" required placeholder="Ex: Aluguel do ponto" style="width:100%"></label>
+    <label style="font-size:.72rem;color:#8a938a">Valor R$<input name="valor" required inputmode="decimal" placeholder="0,00" style="width:100%"></label>
+    <label style="font-size:.72rem;color:#8a938a">Vencimento<input name="vencimento" type="date" required style="width:100%"></label>
+    <button type="submit" style="background:#1d9e75;color:#fff;border:0;border-radius:6px;padding:.55rem .8rem;font-weight:600;cursor:pointer">+ Add</button>
+  </form>
+  <label style="font-size:.72rem;color:#8a938a;display:flex;gap:.4rem;align-items:center;margin-bottom:.6rem"><input type="checkbox" form="_nada" disabled style="width:auto"> <span class="mut">Contraparte e recorrência aparecem ao detalhar o título.</span></label>
+  {% if titulos %}<table style="width:100%;font-size:.85rem">
+    <tr class="mut" style="font-size:.72rem"><td>Venc.</td><td>Descrição</td><td>Tipo</td><td style="text-align:right">Valor</td><td></td></tr>
+    {% for t in titulos %}<tr style="border-top:1px solid #232325">
+      <td style="{% if t.atrasado %}color:#f0c05a{% endif %}">{{ t.vencimento.strftime('%d/%m') }}{% if t.atrasado %} ⚠{% endif %}</td>
+      <td>{{ t.descricao }}{% if t.contraparte %} <span class="mut">· {{ t.contraparte }}</span>{% endif %}</td>
+      <td>{% if t.tipo=='pagar' %}<span style="color:#e07a5f">pagar</span>{% else %}<span style="color:#5dcaa5">receber</span>{% endif %}</td>
+      <td style="text-align:right;font-weight:600">{{ t.valor_centavos|brl }}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <form method="post" action="/painel/empresa/titulo/{{ t.id }}/baixa" style="display:inline"><button style="background:none;border:0;color:#5dcaa5;cursor:pointer;font-size:.78rem">dar baixa ✓</button></form>
+        {% if t.tipo=='receber' %}{% if t.cobranca_link_url %}<a href="{{ t.cobranca_link_url }}" target="_blank" style="color:#c99536;font-size:.78rem;margin-left:.5rem">link Pix ↗</a>{% else %}<form method="post" action="/painel/empresa/titulo/{{ t.id }}/cobrar" style="display:inline"><button style="background:none;border:0;color:#c99536;cursor:pointer;font-size:.78rem;margin-left:.5rem">cobrar via Pix →</button></form>{% endif %}{% endif %}
+      </td></tr>{% endfor %}
+  </table>{% else %}<div class="mut" style="font-size:.85rem">Nenhum título em aberto. Adicione acima — ou peça pro Zaq no WhatsApp.</div>{% endif %}
+</div>
+
+<div class="card larga">
+  <div style="display:flex;justify-content:space-between;align-items:center"><strong>Equipe e folha</strong>
+    <span class="mut" style="font-size:.72rem">folha de {{ '%02d'|format(dre.mes) }}/{{ dre.ano }}: <b style="color:#e07a5f">{{ folha.total_a_pagar_centavos|brl }}</b> · custo real ≈ {{ folha.custo_real_total_centavos|brl }}</span></div>
+  <form method="post" action="/painel/empresa/funcionario" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:.5rem;margin:.7rem 0;align-items:end">
+    <label style="font-size:.72rem;color:#8a938a">Nome<input name="nome" required placeholder="Nome do funcionário" style="width:100%"></label>
+    <label style="font-size:.72rem;color:#8a938a">Cargo<input name="cargo" placeholder="Ex: Vendedor" style="width:100%"></label>
+    <label style="font-size:.72rem;color:#8a938a">Salário R$<input name="salario" required inputmode="decimal" placeholder="0,00" style="width:100%"></label>
+    <label style="font-size:.72rem;color:#8a938a">Dia pgto<input name="dia" type="number" min="1" max="28" value="5" style="width:100%"></label>
+    <button type="submit" style="background:#1d9e75;color:#fff;border:0;border-radius:6px;padding:.55rem .8rem;font-weight:600;cursor:pointer">+ Add</button>
+  </form>
+  {% if folha.itens %}<table style="width:100%;font-size:.85rem">
+    <tr class="mut" style="font-size:.72rem"><td>Funcionário</td><td style="text-align:right">Salário</td><td style="text-align:right">Vale</td><td style="text-align:right">A pagar</td><td style="text-align:right">Custo real</td><td></td></tr>
+    {% for f in folha.itens %}<tr style="border-top:1px solid #232325">
+      <td>{{ f.nome }}{% if f.pro_labore %} <span class="mut">· pró-labore</span>{% elif f.cargo %} <span class="mut">· {{ f.cargo }}</span>{% endif %}</td>
+      <td style="text-align:right">{{ f.salario_centavos|brl }}</td>
+      <td style="text-align:right;color:#f0c05a">{% if f.vales_centavos %}-{{ f.vales_centavos|brl }}{% else %}—{% endif %}</td>
+      <td style="text-align:right;font-weight:600">{% if f.quitado %}<span style="color:#5dcaa5">pago ✓</span>{% else %}{{ f.a_pagar_centavos|brl }}{% endif %}</td>
+      <td style="text-align:right" class="mut">{{ f.custo_real_centavos|brl }}</td>
+      <td style="text-align:right;white-space:nowrap">
+        {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vale" style="display:inline"><input name="valor" inputmode="decimal" placeholder="vale R$" style="width:70px;font-size:.75rem"><button style="background:none;border:0;color:#f0c05a;cursor:pointer;font-size:.78rem">dar vale</button></form>{% endif %}
+        {% if not f.quitado %}<form method="post" action="/painel/empresa/folha/pagar" style="display:inline"><input type="hidden" name="funcionario_id" value="{{ f.id }}"><button style="background:none;border:0;color:#5dcaa5;cursor:pointer;font-size:.78rem;margin-left:.4rem">pagar ✓</button></form>{% endif %}
+      </td></tr>{% endfor %}
+  </table>
+  <form method="post" action="/painel/empresa/folha/pagar" style="margin-top:.7rem"><button style="background:#1d9e75;color:#fff;border:0;border-radius:6px;padding:.5rem 1rem;font-weight:600;cursor:pointer">Pagar folha inteira ✓</button></form>
+  {% else %}<div class="mut" style="font-size:.85rem">Nenhum funcionário cadastrado. Adicione acima.</div>{% endif %}
+  <div class="mut" style="font-size:.72rem;margin-top:.7rem">ℹ️ Controle gerencial de pessoal — a folha oficial (eSocial, guias, holerite) segue com seu contador, que recebe tudo no relatório mensal.</div>
 </div>
 {% endblock %}"""
 
@@ -6696,9 +6750,162 @@ def painel_empresa(request: Request):
     with pool.connection() as c:
         r = c.execute("select coalesce(documento,'') from contas where id=%s",
                       (conta[0],)).fetchone()
-        doc = r[0] if r else ""
+        doc = _mascara_cnpj(r[0]) if r else ""
+    titulos = emp.listar_titulos(pool, conta[0], status="aberto")
+    folha = emp.folha_do_mes(pool, conta[0], hoje.year, hoje.month)
     return _render("empresa", request, empresa_nome=conta[2], empresa_doc=doc,
-                   res=res, fluxo=fluxo, dre=dre, tem_pj=True)
+                   res=res, fluxo=fluxo, dre=dre, titulos=titulos, folha=folha,
+                   tem_pj=True)
+
+
+def _mascara_cnpj(doc: str) -> str:
+    d = "".join(ch for ch in (doc or "") if ch.isdigit())
+    if len(d) == 14:
+        return f"{d[:2]}.{d[2:5]}.{d[5:8]}/{d[8:12]}-{d[12:]}"
+    if len(d) == 11:
+        return f"{d[:3]}.{d[3:6]}.{d[6:9]}-{d[9:]}"
+    return doc or ""
+
+
+def _reais_para_centavos(txt: str) -> int:
+    t = (txt or "").strip().replace("R$", "").replace(" ", "").replace(".", "").replace(",", ".")
+    try:
+        return int(round(float(t) * 100))
+    except (ValueError, TypeError):
+        return 0
+
+
+def _guard_pj(request: Request):
+    """Retorna (conta, pool) se a conta tem o módulo PJ ativo; senão None."""
+    from finance import empresa as emp
+    conta = conta_logada(request)
+    if conta is None:
+        return None
+    pool = get_pool()
+    if not emp.modulo_pj_ativo(pool, conta[0]):
+        return None
+    return conta, pool
+
+
+@router.post("/painel/empresa/titulo")
+def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
+                         descricao: str = Form(""), valor: str = Form(""),
+                         vencimento: str = Form(""), contraparte: str = Form(""),
+                         recorrente: str = Form("")):
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    cent = _reais_para_centavos(valor)
+    if cent > 0 and descricao.strip() and vencimento:
+        try:
+            emp.criar_titulo(pool, conta[0], tipo if tipo in ("pagar", "receber") else "pagar",
+                             descricao, cent, _date.fromisoformat(vencimento),
+                             contraparte=contraparte,
+                             recorrente=bool(recorrente), criado_por=None)
+        except Exception:
+            pass
+    return RedirectResponse("/painel/empresa", status_code=303)
+
+
+@router.post("/painel/empresa/titulo/{titulo_id}/baixa")
+def empresa_titulo_baixa(request: Request, titulo_id: int):
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    emp.dar_baixa_titulo(pool, conta[0], titulo_id)
+    return RedirectResponse("/painel/empresa", status_code=303)
+
+
+@router.post("/painel/empresa/titulo/{titulo_id}/cobrar")
+def empresa_titulo_cobrar(request: Request, titulo_id: int):
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    tits = {t["id"]: t for t in emp.listar_titulos(pool, conta[0], status="aberto")}
+    t = tits.get(titulo_id)
+    if t and t["tipo"] == "receber":
+        try:
+            from finance import asaas
+            link = asaas.criar_link_pagamento(
+                conta_id=f"titulo:{titulo_id}", nome_plano=f"Cobrança — {t['descricao']}"[:60],
+                valor_reais=t["valor_centavos"] / 100,
+                descricao=(t["descricao"] or "")[:100])
+            url = link.get("url")
+            if url:
+                emp.registrar_link_cobranca(pool, conta[0], titulo_id, url)
+        except Exception:
+            pass
+    return RedirectResponse("/painel/empresa", status_code=303)
+
+
+@router.post("/painel/empresa/funcionario")
+def empresa_funcionario_criar(request: Request, nome: str = Form(""),
+                              cargo: str = Form(""), salario: str = Form(""),
+                              dia: str = Form("5"), pro_labore: str = Form("")):
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    if nome.strip():
+        try:
+            dia_i = max(1, min(28, int(dia or "5")))
+        except ValueError:
+            dia_i = 5
+        try:
+            emp.criar_funcionario(pool, conta[0], nome, cargo=cargo,
+                                  salario_centavos=_reais_para_centavos(salario),
+                                  dia_pagamento=dia_i, pro_labore=bool(pro_labore))
+        except Exception:
+            pass
+    return RedirectResponse("/painel/empresa", status_code=303)
+
+
+@router.post("/painel/empresa/funcionario/{funcionario_id}/vale")
+def empresa_vale(request: Request, funcionario_id: int, valor: str = Form("")):
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    cent = _reais_para_centavos(valor)
+    if cent > 0:
+        emp.registrar_evento_folha(pool, conta[0], funcionario_id, "vale", cent)
+    return RedirectResponse("/painel/empresa", status_code=303)
+
+
+@router.post("/painel/empresa/folha/pagar")
+def empresa_folha_pagar(request: Request, funcionario_id: str = Form("")):
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    hoje = _date.today()
+    fid = int(funcionario_id) if funcionario_id.strip().isdigit() else None
+    emp.pagar_folha(pool, conta[0], hoje.year, hoje.month, funcionario_id=fid)
+    return RedirectResponse("/painel/empresa", status_code=303)
+
+
+@router.get("/painel/empresa/contador.csv")
+def empresa_contador_csv(request: Request, ano: int = 0, mes: int = 0):
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    hoje = _date.today()
+    ano = ano or hoje.year
+    mes = mes or hoje.month
+    csv = emp.csv_contador(pool, conta[0], ano, mes)
+    return HTMLResponse(csv, media_type="text/csv; charset=utf-8", headers={
+        "Content-Disposition": f'attachment; filename="empresa_{ano}_{mes:02d}.csv"'})
 
 
 

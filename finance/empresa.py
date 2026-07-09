@@ -575,20 +575,23 @@ def obter_dados_empresa(pool, conta_id: int) -> dict:
     with pool.connection() as c:
         r = c.execute(
             """select coalesce(documento,''), coalesce(razao_social,''),
-                      coalesce(nome_fantasia,''), coalesce(cidade,''),
-                      coalesce(uf,'')
+                      coalesce(nome_fantasia,''), coalesce(endereco,''),
+                      coalesce(bairro,''), coalesce(cep,''),
+                      coalesce(cidade,''), coalesce(uf,'')
                  from contas where id=%s""",
             (conta_id,),
         ).fetchone()
     if not r:
         return {"documento": "", "razao_social": "", "nome_fantasia": "",
-                "cidade": "", "uf": ""}
+                "endereco": "", "bairro": "", "cep": "", "cidade": "", "uf": ""}
     return {"documento": r[0], "razao_social": r[1], "nome_fantasia": r[2],
-            "cidade": r[3], "uf": r[4]}
+            "endereco": r[3], "bairro": r[4], "cep": r[5],
+            "cidade": r[6], "uf": r[7]}
 
 
 def salvar_dados_empresa(pool, conta_id: int, *, documento: str = "",
                          razao_social: str = "", nome_fantasia: str = "",
+                         endereco: str = "", bairro: str = "", cep: str = "",
                          cidade: str = "", uf: str = "") -> tuple[bool, str]:
     """Grava os dados da empresa na conta. Valida CNPJ (14 dígitos) e razão.
 
@@ -601,15 +604,18 @@ def salvar_dados_empresa(pool, conta_id: int, *, documento: str = "",
     if not razao:
         return False, "Informe a razão social."
     fantasia = (nome_fantasia or "").strip() or None
+    end = (endereco or "").strip() or None
+    bai = (bairro or "").strip() or None
+    _cep = "".join(ch for ch in (cep or "") if ch.isdigit()) or None
     cid = (cidade or "").strip() or None
     est = (uf or "").strip().upper()[:2] or None
     with pool.connection() as c:
         c.execute(
             """update contas
                   set documento=%s, razao_social=%s, nome_fantasia=%s,
-                      cidade=%s, uf=%s
+                      endereco=%s, bairro=%s, cep=%s, cidade=%s, uf=%s
                 where id=%s""",
-            (doc, razao, fantasia, cid, est, conta_id),
+            (doc, razao, fantasia, end, bai, _cep, cid, est, conta_id),
         )
         c.commit()
     return True, "Dados da empresa salvos."

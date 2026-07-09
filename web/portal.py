@@ -2744,14 +2744,21 @@ _EMPRESA_DADOS = """{% extends "base" %}{% block conteudo %}
     <div id="cnpj-msg" class="mut" style="font-size:.72rem;margin-top:.25rem"></div>
     <label>Razão social</label>
     <input id="razao" name="razao_social" value="{{ dados.razao_social }}" required>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.7rem">
-      <div><label>Nome fantasia</label>
-        <input id="fantasia" name="nome_fantasia" value="{{ dados.nome_fantasia }}"></div>
-      <div><label>Cidade / UF</label>
-        <div style="display:flex;gap:.4rem">
-          <input id="cidade" name="cidade" value="{{ dados.cidade }}" style="flex:1">
-          <input id="uf" name="uf" value="{{ dados.uf }}" maxlength="2" placeholder="UF" style="width:56px;text-transform:uppercase">
-        </div></div>
+    <label>Nome fantasia</label>
+    <input id="fantasia" name="nome_fantasia" value="{{ dados.nome_fantasia }}">
+    <div style="display:grid;grid-template-columns:1fr 2fr;gap:.7rem">
+      <div><label>CEP</label>
+        <input id="cep" name="cep" value="{{ dados.cep }}" inputmode="numeric" placeholder="00000-000"></div>
+      <div><label>Endereço (rua, número)</label>
+        <input id="endereco" name="endereco" value="{{ dados.endereco }}"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1.4fr 1.4fr .6fr;gap:.7rem">
+      <div><label>Bairro</label>
+        <input id="bairro" name="bairro" value="{{ dados.bairro }}"></div>
+      <div><label>Cidade</label>
+        <input id="cidade" name="cidade" value="{{ dados.cidade }}"></div>
+      <div><label>UF</label>
+        <input id="uf" name="uf" value="{{ dados.uf }}" maxlength="2" placeholder="UF" style="text-transform:uppercase"></div>
     </div>
     <button type="submit" style="background:#1d9e75;color:#fff;border:0;border-radius:8px;padding:.7rem 1.4rem;font-weight:600;cursor:pointer;margin-top:1rem">Salvar e continuar →</button>
   </form>
@@ -2768,6 +2775,9 @@ async function buscarCnpj(){
     var d=await r.json();
     if(d.ok){
       if(d.nome){ document.getElementById('razao').value=d.nome; document.getElementById('fantasia').value=d.nome; }
+      if(d.endereco) document.getElementById('endereco').value=d.endereco;
+      if(d.bairro) document.getElementById('bairro').value=d.bairro;
+      if(d.cep) document.getElementById('cep').value=d.cep;
       if(d.cidade) document.getElementById('cidade').value=d.cidade;
       if(d.uf) document.getElementById('uf').value=d.uf;
       msg.textContent='✓ Dados encontrados — confira e ajuste se precisar.';
@@ -6978,7 +6988,9 @@ def painel_empresa_dados_form(request: Request):
 def painel_empresa_dados_salvar(
     request: Request,
     documento: str = Form(""), razao_social: str = Form(""),
-    nome_fantasia: str = Form(""), cidade: str = Form(""), uf: str = Form(""),
+    nome_fantasia: str = Form(""), endereco: str = Form(""),
+    bairro: str = Form(""), cep: str = Form(""),
+    cidade: str = Form(""), uf: str = Form(""),
 ):
     from finance import empresa as emp
     conta = conta_logada(request)
@@ -6989,12 +7001,14 @@ def painel_empresa_dados_salvar(
         return RedirectResponse("/painel", status_code=303)
     ok, msg = emp.salvar_dados_empresa(
         pool, conta[0], documento=documento, razao_social=razao_social,
-        nome_fantasia=nome_fantasia, cidade=cidade, uf=uf)
+        nome_fantasia=nome_fantasia, endereco=endereco, bairro=bairro,
+        cep=cep, cidade=cidade, uf=uf)
     if not ok:
         d = emp.obter_dados_empresa(pool, conta[0])
         # devolve o que o usuário digitou + erro
         d.update({"documento": documento, "razao_social": razao_social,
-                  "nome_fantasia": nome_fantasia, "cidade": cidade, "uf": uf})
+                  "nome_fantasia": nome_fantasia, "endereco": endereco,
+                  "bairro": bairro, "cep": cep, "cidade": cidade, "uf": uf})
         return _render("empresa_dados", request, dados=d, tem_pj=True, erro=msg)
     return RedirectResponse("/painel/empresa", status_code=303)
 
@@ -7009,6 +7023,9 @@ def painel_empresa_buscar_cnpj(request: Request, cnpj: str = ""):
     if not dados:
         return JSONResponse({"ok": False})
     return JSONResponse({"ok": True, "nome": dados.get("nome") or "",
+                         "endereco": dados.get("endereco") or "",
+                         "bairro": dados.get("bairro") or "",
+                         "cep": dados.get("cep") or "",
                          "cidade": dados.get("cidade") or "",
                          "uf": dados.get("uf") or ""})
 

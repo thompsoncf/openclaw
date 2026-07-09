@@ -36,15 +36,18 @@ def consultar_cnpj(cnpj: str) -> dict | None:
         return None
     nome = (dados.get("nome_fantasia") or "").strip() or \
            (dados.get("razao_social") or "").strip() or None
-    # monta endereco: "Logradouro, Numero, Bairro"
-    partes = [dados.get("logradouro"), dados.get("numero"), dados.get("bairro")]
-    endereco = ", ".join(p.strip() for p in partes if p and str(p).strip()) or None
+    # endereco = logradouro + numero (o bairro vira campo proprio)
+    _log = (dados.get("logradouro") or "").strip()
+    _num = (dados.get("numero") or "").strip()
+    endereco = (f"{_log}, {_num}" if _log and _num else _log or _num) or None
+    bairro = (dados.get("bairro") or "").strip() or None
+    cep = "".join(c for c in str(dados.get("cep") or "") if c.isdigit()) or None
     cidade = (dados.get("municipio") or "").strip() or None
     uf = (dados.get("uf") or "").strip() or None
     cnae_desc = (dados.get("cnae_fiscal_descricao") or "").strip() or None
     ramo = classificar_ramo(cnae_desc)
-    return {"nome": nome, "endereco": endereco, "cidade": cidade, "uf": uf,
-            "cnae": cnae_desc, "ramo": ramo}
+    return {"nome": nome, "endereco": endereco, "bairro": bairro, "cep": cep,
+            "cidade": cidade, "uf": uf, "cnae": cnae_desc, "ramo": ramo}
 
 
 # mapeia palavras-chave do CNAE -> ramo (departamento) da loja.

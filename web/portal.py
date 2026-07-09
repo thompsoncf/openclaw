@@ -131,7 +131,18 @@ body{margin:0;min-height:100vh;font-family:system-ui,-apple-system,sans-serif;
  background:#0e0e0f;color:#ececec;display:flex;flex-direction:column;align-items:center}
 .topo{width:100%;max-width:960px;display:flex;justify-content:space-between;
  align-items:center;padding:1.2rem 1rem;box-sizing:border-box}
-.topo a{color:#5dcaa5;text-decoration:none;margin-left:1rem}
+.topo a{color:#5dcaa5;text-decoration:none;margin-left:1rem;white-space:nowrap}
+#menu-links{display:flex;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+@media (max-width:600px){
+  #menu-btn{display:inline-flex !important}
+  #menu-links{display:none;position:absolute;top:64px;right:12px;left:12px;z-index:50;
+    flex-direction:column;align-items:stretch;background:#141416;border:1px solid #2a2a2b;
+    border-radius:12px;padding:6px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+  #menu-links.aberto{display:flex}
+  #menu-links a{margin-left:0;padding:.7rem .9rem;border-radius:8px;border-bottom:1px solid #1e1e20}
+  #menu-links a:last-child{border-bottom:0}
+  .topo{position:relative;padding:1rem}
+}
 .logo{font-weight:600;color:#ececec;font-size:1.1rem}
 .card{width:100%;max-width:430px;background:#161617;border:1px solid #2a2a2b;
  border-radius:14px;padding:2rem;margin:1.5rem 1rem;box-sizing:border-box}
@@ -229,7 +240,9 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
 .wa-suporte:hover .wa-tooltip{opacity:1}
 @media (max-width:600px){.wa-suporte{bottom:16px;right:16px;width:52px;height:52px}.wa-tooltip{display:none}}
 </style></head><body>
-<div class="topo"><span class="logo" style="display:inline-flex;align-items:center;gap:7px"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M16 18 H44 L18 46 H46" stroke="#3ee0a6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z" fill="#3ee0a6"/></svg>zaq</span><span>
+<div class="topo"><span class="logo" style="display:inline-flex;align-items:center;gap:7px"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M16 18 H44 L18 46 H46" stroke="#3ee0a6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z" fill="#3ee0a6"/></svg>zaq</span>
+<button type="button" id="menu-btn" onclick="document.getElementById('menu-links').classList.toggle('aberto')" aria-label="menu" style="display:none;background:none;border:0;cursor:pointer;flex-direction:column;gap:4px;padding:6px"><span style="width:22px;height:2px;background:#b4b2a9;border-radius:2px;display:block"></span><span style="width:22px;height:2px;background:#b4b2a9;border-radius:2px;display:block"></span><span style="width:22px;height:2px;background:#b4b2a9;border-radius:2px;display:block"></span></button>
+<span id="menu-links" onclick="if(event.target.tagName==='A'){this.classList.remove('aberto')}">
 {% if logado %}
   {% set _tem_app = conta and conta[4] and conta[4] != 'zaq_cesta' %}
   {% set _tem_cesta = (conta and conta[10]) or tem_cesta %}
@@ -1386,8 +1399,16 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 
 <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin:1.2rem 0; align-items:stretch">
 <div class="metric"><span>Saldo anterior</span><b style="white-space:nowrap;color:{% if resumo.anterior < 0 %}#e07a5f{% else %}#5dcaa5{% endif %}">{{ brl(resumo.anterior) }}</b>{% if eh_pj and natureza_sel in ['empresa','pessoal','a_definir'] and resumo.anterior == 0 %}<small style="display:block;color:#6a7178;font-size:.62rem;margin-top:.3rem;line-height:1.3">sem histórico de {{ {'empresa':'empresa','pessoal':'pessoal','a_definir':'lançamentos a definir'}[natureza_sel] }} antes deste mês</small>{% endif %}</div>
-<div class="metric"><span>+ Receitas do mês{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b style="white-space:nowrap">{{ brl(resumo.receitas) }}</b>{% if eh_pj and not natureza_sel and quebra %}<div style="margin-top:.5rem;padding-top:.45rem;border-top:1px solid #1e1e20;font-size:.64rem;color:#7a7a75;line-height:1.5">🏢 {{ brl(quebra.receitas.empresa) }} · 👤 {{ brl(quebra.receitas.pessoal) }} · ⏳ {{ brl(quebra.receitas.a_definir) }}</div>{% endif %}</div>
-<div class="metric"><span>− Despesas do mês{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b style="white-space:nowrap">{{ brl(resumo.despesas) }}</b>{% if eh_pj and not natureza_sel and quebra %}<div style="margin-top:.5rem;padding-top:.45rem;border-top:1px solid #1e1e20;font-size:.64rem;color:#7a7a75;line-height:1.5">🏢 {{ brl(quebra.despesas.empresa) }} · 👤 {{ brl(quebra.despesas.pessoal) }} · ⏳ {{ brl(quebra.despesas.a_definir) }}{% if quebra.despesas.a_definir %} <span style="color:#f0c05a">⚠</span>{% endif %}</div>{% endif %}</div>
+<div class="metric"><span>+ Receitas do mês{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b style="white-space:nowrap">{{ brl(resumo.receitas) }}</b>{% if eh_pj and not natureza_sel and quebra %}<div style="margin-top:.5rem;padding-top:.45rem;border-top:1px solid #1e1e20;font-size:.66rem;line-height:1.9">
+<div style="display:flex;justify-content:space-between;color:#7a9a8a"><span>🏢 Empresa</span><span>{{ brl(quebra.receitas.empresa) }}</span></div>
+<div style="display:flex;justify-content:space-between;color:#7a7a75"><span>👤 Pessoal</span><span>{{ brl(quebra.receitas.pessoal) }}</span></div>
+<div style="display:flex;justify-content:space-between;color:#7a7a75"><span>⏳ A definir</span><span>{{ brl(quebra.receitas.a_definir) }}</span></div>
+</div>{% endif %}</div>
+<div class="metric"><span>− Despesas do mês{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b style="white-space:nowrap">{{ brl(resumo.despesas) }}</b>{% if eh_pj and not natureza_sel and quebra %}<div style="margin-top:.5rem;padding-top:.45rem;border-top:1px solid #1e1e20;font-size:.66rem;line-height:1.9">
+<div style="display:flex;justify-content:space-between;color:#9a8a7a"><span>🏢 Empresa</span><span>{{ brl(quebra.despesas.empresa) }}</span></div>
+<div style="display:flex;justify-content:space-between;color:#7a7a75"><span>👤 Pessoal</span><span>{{ brl(quebra.despesas.pessoal) }}</span></div>
+<div style="display:flex;justify-content:space-between;{% if quebra.despesas.a_definir %}color:#f0c05a{% else %}color:#7a7a75{% endif %}"><span>⏳ A definir{% if quebra.despesas.a_definir %} ⚠{% endif %}</span><span>{{ brl(quebra.despesas.a_definir) }}</span></div>
+</div>{% endif %}</div>
 <div class="metric"><span>= {% if eh_pj and natureza_sel %}Resultado{% else %}Saldo{% endif %} do mês</span><b style="white-space:nowrap;color:#5dcaa5">{{ brl(resumo.saldo) }}</b></div>
 </div>
 

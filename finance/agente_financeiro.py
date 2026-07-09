@@ -221,11 +221,26 @@ Regras:
 def criar_agente_financeiro(brain: Brain, livro: LivroCaixa,
                             memoria: MemoriaConversa | None = None,
                             lista=None, papel: str = "dono", banco=None,
-                            cidade: str | None = None) -> Agente:
+                            cidade: str | None = None, pool=None,
+                            conta_id: int | None = None,
+                            empresa_nome: str = "") -> Agente:
+    persona = _persona(papel)
+    ferramentas = construir_ferramentas(livro, lista, papel, banco, cidade)
+    # MODO EMPRESA: só pra dono de conta PJ com o módulo ativo (não mexe no PF).
+    if pool is not None and conta_id is not None and papel == "dono":
+        try:
+            from . import empresa as _emp
+            if _emp.modulo_pj_ativo(pool, conta_id):
+                from .tools_pj import bloco_persona_pj, construir_ferramentas_pj
+                persona = persona + bloco_persona_pj(pool, conta_id, empresa_nome)
+                ferramentas = ferramentas + construir_ferramentas_pj(
+                    pool, conta_id, getattr(livro, "membro_id", None))
+        except Exception:
+            pass  # qualquer erro no módulo PJ NÃO pode derrubar o agente PF
     return criar_agente(
         nome="Financeiro",
-        persona=_persona(papel),
-        ferramentas=construir_ferramentas(livro, lista, papel, banco, cidade),
+        persona=persona,
+        ferramentas=ferramentas,
         brain=brain,
         memoria=memoria,
         livro=livro,

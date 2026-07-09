@@ -111,7 +111,7 @@ def _agente_do(membro, conta):
     banco = BancoPrecos(_pool)
     memoria = MemoriaPersistente(_pool, f"tg:{membro.id}")
     cidade = getattr(conta, 'cidade', None)
-    ag = criar_agente_financeiro(_brain, livro, memoria, lista, membro.papel, banco, cidade)
+    ag = criar_agente_financeiro(_brain, livro, memoria, lista, membro.papel, banco, cidade, pool=_pool, conta_id=conta.id, empresa_nome=getattr(conta, "nome", ""))
     ag.canal_atual = "telegram"
     return ag
 

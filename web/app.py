@@ -140,7 +140,7 @@ def _agente_do(membro, conta):
     lista = ListaCompras(_pool, conta.id, membro.id)
     banco = BancoPrecos(_pool)
     cidade = getattr(conta, 'cidade', None)
-    ag = criar_agente_financeiro(_brain, LivroCaixa(_pool, conta.id, membro.id), memoria, lista, membro.papel, banco, cidade)
+    ag = criar_agente_financeiro(_brain, LivroCaixa(_pool, conta.id, membro.id), memoria, lista, membro.papel, banco, cidade, pool=_pool, conta_id=conta.id, empresa_nome=getattr(conta, "nome", ""))
     ag.canal_atual = "whatsapp"
     return ag
 

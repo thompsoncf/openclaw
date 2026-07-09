@@ -2738,8 +2738,8 @@ _EMPRESA_DADOS = """{% extends "base" %}{% block conteudo %}
   <form method="post" action="/painel/empresa/dados">
     <label>CNPJ</label>
     <div style="display:flex;gap:.5rem">
-      <input id="cnpj" name="documento" value="{{ dados.documento }}" inputmode="numeric" placeholder="00.000.000/0001-00" required style="flex:1">
-      <button type="button" onclick="buscarCnpj()" style="background:#1d3a2e;color:#5dcaa5;border:1px solid #1d9e7544;border-radius:7px;padding:0 1rem;cursor:pointer;white-space:nowrap">🔍 Buscar</button>
+      <input id="cnpj" name="documento" value="{{ dados.documento }}" inputmode="numeric" placeholder="00.000.000/0001-00" required style="flex:1 1 auto;width:auto;min-width:0">
+      <button type="button" onclick="buscarCnpj()" style="flex:0 0 auto;width:auto;margin-top:0;background:#1d3a2e;color:#5dcaa5;border:1px solid #1d9e7544;border-radius:7px;padding:0 1.1rem;cursor:pointer;white-space:nowrap">🔍 Buscar</button>
     </div>
     <div id="cnpj-msg" class="mut" style="font-size:.72rem;margin-top:.25rem"></div>
     <label>Razão social</label>

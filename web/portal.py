@@ -13,6 +13,7 @@ import secrets
 from fastapi import APIRouter, Request, Form, Body, BackgroundTasks, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from jinja2 import Environment, DictLoader, select_autoescape
+from datetime import date as _date
 
 from datetime import date
 
@@ -235,6 +236,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
   {% if _tem_app %}<a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/painel/compras">Compras</a>{% endif %}
   {% if _tem_cesta %}<a href="/painel/assinaturas">🧺 Minhas assinaturas</a><a href="/painel/meus-pedidos">🛍️ Meus pedidos</a>{% endif %}
   {% if conta and conta[8] %}<a href="/painel/fornecedor">👨‍🌾 Fornecedor</a>{% endif %}
+  {% if tem_pj %}<a href="/painel/empresa">🏢 Empresa</a>{% endif %}
   <a href="/sair">Sair</a>
 {% else %}<a href="/login">Entrar</a><a href="/cadastro">Criar conta</a>{% endif %}
 </span></div>
@@ -2590,6 +2592,55 @@ _MEUS_PEDIDOS = """{% extends "base" %}{% block conteudo %}
 </div>
 {% endblock %}"""
 
+_EMPRESA = """{% extends "base" %}{% block conteudo %}
+<div class="card larga">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
+    <div><h2 style="margin:0">🏢 Empresa</h2>
+      <div class="mut" style="font-size:.82rem">{{ empresa_nome }}{% if empresa_doc %} · CNPJ {{ empresa_doc }}{% endif %}</div></div>
+    <span style="background:#15301f;color:#5dcaa5;font-size:.72rem;font-weight:600;padding:.25rem .7rem;border-radius:14px;border:1px solid #1d9e7544">Módulo PJ ativo</span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.6rem;margin-top:1rem">
+    <div class="card" style="margin:0"><div class="mut" style="font-size:.72rem">A pagar ({{ res.dias }} dias)</div>
+      <div style="font-size:1.3rem;color:#e07a5f;font-weight:600">{{ res.a_pagar_centavos|brl }}</div>
+      <div class="mut" style="font-size:.68rem">{{ res.n_pagar }} título(s)</div></div>
+    <div class="card" style="margin:0"><div class="mut" style="font-size:.72rem">A receber ({{ res.dias }} dias)</div>
+      <div style="font-size:1.3rem;color:#5dcaa5;font-weight:600">{{ res.a_receber_centavos|brl }}</div>
+      <div class="mut" style="font-size:.68rem">{{ res.n_receber }} título(s)</div></div>
+    <div class="card" style="margin:0"><div class="mut" style="font-size:.72rem">Atrasados</div>
+      <div style="font-size:1.3rem;color:#f0c05a;font-weight:600">{{ res.n_atrasados }}</div>
+      <div class="mut" style="font-size:.68rem">{{ res.atrasados_centavos|brl }}</div></div>
+    <div class="card" style="margin:0;border-color:#1d9e7533"><div class="mut" style="font-size:.72rem">Saldo projetado (30d)</div>
+      <div style="font-size:1.3rem;color:#5dcaa5;font-weight:600">{{ fluxo.saldo_projetado_centavos|brl }}</div>
+      <div class="mut" style="font-size:.68rem">caixa + previsto</div></div>
+  </div>
+</div>
+
+<div class="card larga">
+  <div style="display:flex;justify-content:space-between"><strong>Fluxo de caixa projetado</strong>
+    <span class="mut" style="font-size:.72rem">saldo hoje {{ fluxo.saldo_atual_centavos|brl }}</span></div>
+  <table style="width:100%;margin-top:.6rem;font-size:.85rem">
+    <tr class="mut" style="font-size:.72rem"><td>Semana</td><td style="text-align:right">Entra</td><td style="text-align:right">Sai</td><td style="text-align:right">Saldo previsto</td></tr>
+    {% for p in fluxo.pontos %}<tr><td>até {{ p.ate.strftime('%d/%m') }}</td>
+      <td style="text-align:right;color:#5dcaa5">{{ p.receber_centavos|brl }}</td>
+      <td style="text-align:right;color:#e07a5f">{{ p.pagar_centavos|brl }}</td>
+      <td style="text-align:right;font-weight:600">{{ p.saldo_centavos|brl }}</td></tr>{% endfor %}
+  </table>
+</div>
+
+<div class="card larga">
+  <div style="display:flex;justify-content:space-between"><strong>DRE do mês (simplificado)</strong>
+    <span class="mut" style="font-size:.72rem">{{ '%02d'|format(dre.mes) }}/{{ dre.ano }}</span></div>
+  <table style="width:100%;margin-top:.6rem;font-size:.9rem">
+    <tr><td class="mut">Receitas</td><td style="text-align:right;color:#5dcaa5">{{ dre.receitas_centavos|brl }}</td></tr>
+    <tr><td class="mut">(−) Despesas</td><td style="text-align:right">{{ dre.despesas_centavos|brl }}</td></tr>
+    <tr style="border-top:1px solid #2a2a2b"><td style="font-weight:600">Resultado</td>
+      <td style="text-align:right;font-weight:600;color:{{ '#5dcaa5' if dre.resultado_centavos>=0 else '#e07a5f' }}">{{ dre.resultado_centavos|brl }} · {{ dre.margem_pct }}%</td></tr>
+  </table>
+  <div class="mut" style="font-size:.75rem;margin-top:.8rem">📊 Títulos, equipe e relatório do contador chegam na próxima etapa.</div>
+</div>
+{% endblock %}"""
+
 _PROMOCOES_EM_BREVE = """{% extends "base" %}{% block conteudo %}
 <div class="card" style="max-width:440px;margin:2rem auto;text-align:center">
   <div style="font-size:42px;margin-bottom:.5rem">🏷️</div>
@@ -4177,7 +4228,7 @@ _FINANCEIRO_FORN = """{% extends "base" %}{% block conteudo %}
 
 
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 _env.filters["brl"] = brl
@@ -4246,6 +4297,12 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
             ctx["conta"] = conta_logada(request)
         if "tem_cesta" not in ctx:
             ctx["tem_cesta"] = _tem_assinatura_cesta(request.session["conta_id"])
+        if "tem_pj" not in ctx:
+            try:
+                from finance import empresa as _emp
+                ctx["tem_pj"] = _emp.modulo_pj_ativo(get_pool(), request.session["conta_id"])
+            except Exception:
+                ctx["tem_pj"] = False
     return HTMLResponse(_env.get_template(nome).render(**ctx))
 
 
@@ -6619,6 +6676,30 @@ def meus_pedidos(request: Request):
         return RedirectResponse("/login", status_code=303)
     pedidos = car_mod.listar_do_cliente(get_pool(), conta[0])
     return _render("meus_pedidos", request, pedidos=pedidos)
+
+
+@router.get("/painel/empresa", response_class=HTMLResponse)
+def painel_empresa(request: Request):
+    """Visão geral do módulo Empresa (PJ). Só pra conta com o módulo ativo."""
+    from finance import empresa as emp
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.modulo_pj_ativo(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    hoje = _date.today()
+    res = emp.resumo_titulos(pool, conta[0])
+    fluxo = emp.fluxo_projetado(pool, conta[0])
+    dre = emp.dre_mes(pool, conta[0], hoje.year, hoje.month)
+    doc = ""
+    with pool.connection() as c:
+        r = c.execute("select coalesce(documento,'') from contas where id=%s",
+                      (conta[0],)).fetchone()
+        doc = r[0] if r else ""
+    return _render("empresa", request, empresa_nome=conta[2], empresa_doc=doc,
+                   res=res, fluxo=fluxo, dre=dre, tem_pj=True)
+
 
 
 @router.get("/painel/financeiro", response_class=HTMLResponse)

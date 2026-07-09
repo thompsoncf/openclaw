@@ -213,11 +213,11 @@ class LivroCaixa:
             row = conn.execute(
                 """insert into lancamentos
                    (conta_id, membro_id, tipo, valor_centavos, categoria, descricao,
-                    data, pagamento, origem, comprovante, chave)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
+                    data, pagamento, origem, comprovante, chave, natureza)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
                 (self.conta_id, self.membro_id, lanc.tipo.value, lanc.valor_centavos,
                  lanc.categoria, lanc.descricao, lanc.data, lanc.pagamento,
-                 lanc.origem, lanc.comprovante, chave_final),
+                 lanc.origem, lanc.comprovante, chave_final, lanc.natureza),
             ).fetchone()
             conn.commit()
             lanc.id = row[0]

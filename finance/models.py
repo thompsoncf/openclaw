@@ -170,11 +170,12 @@ class Lancamento:
     pagamento: str = ""
     origem: str = "manual"
     comprovante: str = ""
+    natureza: str | None = None  # 'pessoal' | 'empresa' | None (a definir)
     id: int | None = None
 
     @classmethod
     def criar(cls, tipo, valor_reais, categoria, descricao="", data=None,
-              pagamento="", origem="manual", comprovante=""):
+              pagamento="", origem="manual", comprovante="", natureza=None):
         tipo = Tipo(tipo)
         return cls(
             tipo=tipo,
@@ -185,4 +186,5 @@ class Lancamento:
             pagamento=pagamento,
             origem=origem,
             comprovante=comprovante,
+            natureza=natureza,
         )

@@ -178,7 +178,7 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                       categoria=t[4] or (CAT_FORNECEDORES if t[0] == "pagar"
                                          else CAT_VENDAS),
                       descricao=f"{t[1]}{quem}", data=data_pagto,
-                      origem="titulo")
+                      origem="titulo", natureza="empresa")
     livro = LivroCaixa(pool, conta_id, membro_id)
     salvo = livro.adicionar(lanc, forcar=True)
 
@@ -347,7 +347,7 @@ def registrar_evento_folha(pool, conta_id: int, funcionario_id: int, tipo: str,
                           categoria=CAT_PESSOAL,
                           descricao=f"Vale/adiantamento — {f[0]}"
                                     + (f" ({descricao})" if descricao else ""),
-                          origem="folha")
+                          origem="folha", natureza="empresa")
         salvo = LivroCaixa(pool, conta_id, membro_id).adicionar(lanc, forcar=True)
         lanc_id = salvo.id
 
@@ -423,7 +423,7 @@ def pagar_folha(pool, conta_id: int, ano: int, mes: int,
         lanc = Lancamento(tipo=Tipo.DESPESA, valor_centavos=valor,
                           categoria=CAT_PESSOAL,
                           descricao=f"{rotulo} {mes:02d}/{ano} — {item['nome']}",
-                          origem="folha")
+                          origem="folha", natureza="empresa")
         salvo = livro.adicionar(lanc, forcar=True)
         with pool.connection() as c:
             c.execute(

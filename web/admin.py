@@ -124,6 +124,24 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
   </form>
   {% endfor %}
 </table>
+
+<div style="font-weight:600;color:#b4b2a9;font-size:.82rem;margin:1rem 0 .4rem">Módulos (add-ons do plano PJ)</div>
+<table style="width:100%;font-size:.86rem">
+  <tr class="mut" style="font-size:.74rem;text-align:left"><td style="padding:.3rem 0">Módulo</td><td style="text-align:right">Mensalidade</td><td style="text-align:center">Ativo</td><td></td></tr>
+  {% for m in modulos_admin %}
+  <form method="post" action="/admin/modulo/{{ m.codigo }}">
+  <tr style="border-top:1px solid #232325">
+    <td style="padding:.5rem 0;color:#ececec">{{ m.nome }}{% if m.codigo == 'fornecedor' %} <span class="mut" style="font-size:.72rem">+ comissão % das vendas</span>{% endif %}</td>
+    <td style="text-align:right"><span style="display:inline-flex;align-items:center;gap:3px;justify-content:flex-end">
+      <span class="mut" style="font-size:.75rem">R$</span>
+      <input name="preco" value="{{ (m.preco_centavos/100)|n2 }}" style="width:64px;text-align:right;padding:.25rem .4rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:5px"></span></td>
+    <td style="text-align:center"><input type="checkbox" name="ativo" value="1" {% if m.ativo %}checked{% endif %}></td>
+    <td style="text-align:right"><button style="padding:.25rem .7rem;background:#1d9e75;border:0;color:#fff;border-radius:5px;font-size:.76rem;cursor:pointer">salvar</button></td>
+  </tr>
+  </form>
+  {% endfor %}
+</table>
+<div class="mut" style="font-size:.72rem;margin-top:.5rem">Os módulos são ligados por conta no detalhe de cada conta (Empresa = plano PJ; Fornecedor = ativar fornecedor). Aqui você só define o preço.</div>
 <div class="mut" style="font-size:.76rem;margin-top:.7rem">{% if beta_gratis %}Com o beta ligado, o preço nunca aparece pro cliente no cadastro. Ao desligar, estes preços valem na hora — sem mexer em código.{% else %}⚠️ Beta desligado: estes preços estão ativos no cadastro.{% endif %}</div>
 </div>
 
@@ -542,12 +560,19 @@ def admin_home(request: Request, busca: str = ""):
         _pl = _c.execute(
             """select codigo, nome, tipo_conta, preco_base_centavos, ativo
                  from planos order by tipo_conta, preco_base_centavos""").fetchall()
+        _md = _c.execute(
+            """select codigo, nome, preco_centavos, ativo
+                 from modulos where codigo in ('pj','fornecedor')
+                 order by codigo""").fetchall()
     planos_admin = [_SN(codigo=r[0], nome=r[1], tipo_conta=r[2],
                         preco_base_centavos=r[3], ativo=r[4]) for r in _pl]
+    modulos_admin = [_SN(codigo=r[0], nome=r[1], preco_centavos=r[2], ativo=r[3])
+                     for r in _md]
     beta_gratis = _cfg.beta_gratis_ativo(get_pool())
     return HTMLResponse(_env.get_template("ahome").render(
         resumo=resumo, contas=contas, eventos=eventos, nichos=nichos, busca=busca,
-        planos_admin=planos_admin, beta_gratis=beta_gratis,
+        planos_admin=planos_admin, modulos_admin=modulos_admin,
+        beta_gratis=beta_gratis,
         aviso=request.session.pop("admin_aviso", None)))
 
 
@@ -578,6 +603,24 @@ def admin_plano_salvar(request: Request, codigo: str,
                   (cent, bool(ativo), codigo))
         c.commit()
     request.session["admin_aviso"] = f"Plano {codigo} atualizado."
+    return RedirectResponse("/admin", status_code=303)
+
+
+@router.post("/admin/modulo/{codigo}")
+def admin_modulo_salvar(request: Request, codigo: str,
+                        preco: str = Form(""), ativo: str = Form("")):
+    if _admin(request) is None:
+        return _NEGADO
+    t = (preco or "").strip().replace("R$", "").replace(" ", "").replace(".", "").replace(",", ".")
+    try:
+        cent = int(round(float(t) * 100))
+    except (ValueError, TypeError):
+        cent = 0
+    with get_pool().connection() as c:
+        c.execute("update modulos set preco_centavos=%s, ativo=%s where codigo=%s",
+                  (cent, bool(ativo), codigo))
+        c.commit()
+    request.session["admin_aviso"] = f"Modulo {codigo} atualizado."
     return RedirectResponse("/admin", status_code=303)
 
 

@@ -1356,9 +1356,9 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <div style="color:#888780;font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.35rem">Ver lançamentos de</div>
 <div style="display:inline-flex;background:#161617;border:1px solid #2a2a2b;border-radius:9px;padding:3px;gap:2px;flex-wrap:wrap">
 <a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if not natureza_sel %}background:#1d9e75;color:#fff;font-weight:600{% else %}color:#b4b2a9{% endif %}">Todos</a>
-<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=pessoal" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if natureza_sel=='pessoal' %}background:#f0c05a;color:#1a1409;font-weight:600{% else %}color:#b4b2a9{% endif %}">Pessoal</a>
+<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=pessoal" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if natureza_sel=='pessoal' %}background:#f0c05a;color:#1a1409;font-weight:600{% else %}color:#b4b2a9{% endif %}">👤 Pessoal</a>
 <a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=empresa" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if natureza_sel=='empresa' %}background:#1d9e75;color:#fff;font-weight:600{% else %}color:#b4b2a9{% endif %}">🏢 Empresa</a>
-<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=a_definir" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;display:inline-flex;align-items:center;gap:.35rem;{% if natureza_sel=='a_definir' %}background:#3a2c1d;color:#f0c05a;font-weight:600{% else %}color:#f0c05a{% endif %}">A definir{% if n_a_definir %} <span style="background:#3a2c1d;color:#f0c05a;font-size:.62rem;padding:1px 6px;border-radius:8px">{{ n_a_definir }}</span>{% endif %}</a>
+<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=a_definir" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;display:inline-flex;align-items:center;gap:.35rem;{% if natureza_sel=='a_definir' %}background:#3a2c1d;color:#f0c05a;font-weight:600{% else %}color:#f0c05a{% endif %}">⏳ A definir{% if n_a_definir %} <span style="background:#3a2c1d;color:#f0c05a;font-size:.62rem;padding:1px 6px;border-radius:8px">{{ n_a_definir }}</span>{% endif %}</a>
 </div>
 </div>
 {% endif %}
@@ -1384,28 +1384,11 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 </div>
 </div></div>{% endif %}
 
-<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin:1.2rem 0">
-<div class="metric"><span>Saldo anterior</span><b style="color:{% if resumo.anterior < 0 %}#e07a5f{% else %}#5dcaa5{% endif %}">{{ brl(resumo.anterior) }}</b>{% if eh_pj and natureza_sel in ['empresa','pessoal','a_definir'] and resumo.anterior == 0 %}<small style="display:block;color:#6a7178;font-size:.62rem;margin-top:.25rem;line-height:1.3">sem histórico de {{ {'empresa':'empresa','pessoal':'pessoal','a_definir':'lançamentos a definir'}[natureza_sel] }} antes deste mês</small>{% endif %}</div>
-{% if eh_pj and not natureza_sel and quebra %}
-<div class="metric"><span>+ Receitas do mês</span>
-<div style="font-size:.72rem;color:#a8a8a3;line-height:1.7;margin:.15rem 0 .35rem">
-<div style="display:flex;justify-content:space-between"><span>🏢 Empresa</span><span style="color:#cfe8dd">{{ brl(quebra.receitas.empresa) }}</span></div>
-<div style="display:flex;justify-content:space-between"><span>Pessoal</span><span style="color:#cfe8dd">{{ brl(quebra.receitas.pessoal) }}</span></div>
-<div style="display:flex;justify-content:space-between;color:#9a8f6a"><span>A definir</span><span>{{ brl(quebra.receitas.a_definir) }}</span></div>
-</div>
-<b style="border-top:1px solid #2a2a2b;padding-top:.3rem;display:block">{{ brl(resumo.receitas) }}</b></div>
-<div class="metric"><span>− Despesas do mês</span>
-<div style="font-size:.72rem;color:#a8a8a3;line-height:1.7;margin:.15rem 0 .35rem">
-<div style="display:flex;justify-content:space-between"><span>🏢 Empresa</span><span style="color:#e8c5bb">{{ brl(quebra.despesas.empresa) }}</span></div>
-<div style="display:flex;justify-content:space-between"><span>Pessoal</span><span style="color:#e8c5bb">{{ brl(quebra.despesas.pessoal) }}</span></div>
-<div style="display:flex;justify-content:space-between;color:#c9a56a"><span>A definir{% if quebra.despesas.a_definir %} ⚠{% endif %}</span><span style="color:#f0c05a">{{ brl(quebra.despesas.a_definir) }}</span></div>
-</div>
-<b style="border-top:1px solid #2a2a2b;padding-top:.3rem;display:block">{{ brl(resumo.despesas) }}</b></div>
-{% else %}
-<div class="metric"><span>+ Receitas do mês{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b>{{ brl(resumo.receitas) }}</b></div>
-<div class="metric"><span>− Despesas do mês{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b>{{ brl(resumo.despesas) }}</b></div>
-{% endif %}
-<div class="metric"><span>= {% if eh_pj and natureza_sel %}Resultado{% else %}Saldo{% endif %} do mês</span><b style="color:#5dcaa5">{{ brl(resumo.saldo) }}</b></div>
+<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin:1.2rem 0; align-items:stretch">
+<div class="metric"><span>Saldo anterior</span><b style="white-space:nowrap;color:{% if resumo.anterior < 0 %}#e07a5f{% else %}#5dcaa5{% endif %}">{{ brl(resumo.anterior) }}</b>{% if eh_pj and natureza_sel in ['empresa','pessoal','a_definir'] and resumo.anterior == 0 %}<small style="display:block;color:#6a7178;font-size:.62rem;margin-top:.3rem;line-height:1.3">sem histórico de {{ {'empresa':'empresa','pessoal':'pessoal','a_definir':'lançamentos a definir'}[natureza_sel] }} antes deste mês</small>{% endif %}</div>
+<div class="metric"><span>+ Receitas do mês{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b style="white-space:nowrap">{{ brl(resumo.receitas) }}</b>{% if eh_pj and not natureza_sel and quebra %}<div style="margin-top:.5rem;padding-top:.45rem;border-top:1px solid #1e1e20;font-size:.64rem;color:#7a7a75;line-height:1.5">🏢 {{ brl(quebra.receitas.empresa) }} · 👤 {{ brl(quebra.receitas.pessoal) }} · ⏳ {{ brl(quebra.receitas.a_definir) }}</div>{% endif %}</div>
+<div class="metric"><span>− Despesas do mês{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b style="white-space:nowrap">{{ brl(resumo.despesas) }}</b>{% if eh_pj and not natureza_sel and quebra %}<div style="margin-top:.5rem;padding-top:.45rem;border-top:1px solid #1e1e20;font-size:.64rem;color:#7a7a75;line-height:1.5">🏢 {{ brl(quebra.despesas.empresa) }} · 👤 {{ brl(quebra.despesas.pessoal) }} · ⏳ {{ brl(quebra.despesas.a_definir) }}{% if quebra.despesas.a_definir %} <span style="color:#f0c05a">⚠</span>{% endif %}</div>{% endif %}</div>
+<div class="metric"><span>= {% if eh_pj and natureza_sel %}Resultado{% else %}Saldo{% endif %} do mês</span><b style="white-space:nowrap;color:#5dcaa5">{{ brl(resumo.saldo) }}</b></div>
 </div>
 
 <h1 style="font-size:1.05rem">Despesas por categoria</h1>
@@ -1480,7 +1463,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <table style="margin:0">
 {% for l in dia.itens %}<tr data-tipo="{{ l.tipo }}" data-cat="{{ canon(l.categoria, l.tipo) }}" data-desc="{{ l.descricao }}" data-valor="{{ brl(l.valor) }}">
 <td>{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}
-{% if eh_pj %}{% if l.natureza=='empresa' %}<span class="nat-tag" style="font-size:.62rem;background:#1d3a2e;color:#5dcaa5;padding:1px 7px;border-radius:8px;margin-left:.3rem">🏢 empresa</span>{% elif l.natureza=='pessoal' %}<span class="nat-tag" style="font-size:.62rem;background:#3a2c1d;color:#f0c05a;padding:1px 7px;border-radius:8px;margin-left:.3rem">pessoal</span>{% else %}<span style="display:inline-flex;gap:.25rem;margin-left:.3rem"><button type="button" onclick="marcarNat({{ l.id }},'pessoal',this)" style="font-size:.6rem;padding:1px 6px;background:#3a2c1d;color:#f0c05a;border:0;border-radius:7px;cursor:pointer">pessoal?</button><button type="button" onclick="marcarNat({{ l.id }},'empresa',this)" style="font-size:.6rem;padding:1px 6px;background:#1d3a2e;color:#5dcaa5;border:0;border-radius:7px;cursor:pointer">empresa?</button></span>{% endif %}{% endif %}</td>
+{% if eh_pj %}{% if l.natureza=='empresa' %}<span class="nat-tag" style="font-size:.62rem;background:#1d3a2e;color:#5dcaa5;padding:1px 7px;border-radius:8px;margin-left:.3rem">🏢 empresa</span>{% elif l.natureza=='pessoal' %}<span class="nat-tag" style="font-size:.62rem;background:#3a2c1d;color:#f0c05a;padding:1px 7px;border-radius:8px;margin-left:.3rem">👤 pessoal</span>{% else %}<span style="display:inline-flex;gap:.25rem;margin-left:.3rem"><button type="button" onclick="marcarNat({{ l.id }},'pessoal',this)" style="font-size:.6rem;padding:1px 6px;background:#3a2c1d;color:#f0c05a;border:0;border-radius:7px;cursor:pointer">pessoal?</button><button type="button" onclick="marcarNat({{ l.id }},'empresa',this)" style="font-size:.6rem;padding:1px 6px;background:#1d3a2e;color:#5dcaa5;border:0;border-radius:7px;cursor:pointer">empresa?</button></span>{% endif %}{% endif %}</td>
 <td style="white-space:nowrap">
 <span style="display:inline-flex;align-items:center;gap:.4rem">
 <select class="cat-edit" data-id="{{ l.id }}" data-orig="{{ canon(l.categoria, l.tipo) }}" onchange="catMudou(this)"

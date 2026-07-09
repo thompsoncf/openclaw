@@ -7067,6 +7067,11 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
         return RedirectResponse("/painel/compras", status_code=303)
     pool = get_pool()
     hoje = date.today()
+    # Gate PJ ÚNICO: usa modulo_pj_ativo (mesma verdade da aba Empresa e do bot).
+    # Cobre plano PJ + status válido E o override por cortesia (conta_modulos).
+    # Chamado uma vez só por request — não pesa pra conta PF (retorna False).
+    from finance import empresa as _emp
+    eh_pj = _emp.modulo_pj_ativo(pool, conta[0])
     try:
         ano_sel, mes_num = (int(x) for x in mes.split("-")) if mes else (hoje.year, hoje.month)
     except ValueError:
@@ -7097,11 +7102,11 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
         quebra = None
     else:
         # natureza (pessoal/empresa/a_definir) só filtra em conta PJ; PF ignora
-        nat = natureza if (conta[1] == "pj" and natureza in ("pessoal", "empresa", "a_definir")) else None
+        nat = natureza if (eh_pj and natureza in ("pessoal", "empresa", "a_definir")) else None
         resumo = livro.resumo_mes(ano_sel, mes_num, membro_sel, natureza=nat)
         # quebra por natureza (só PJ): pro card mostrar empresa/pessoal/a definir
         quebra = None
-        if conta[1] == "pj":
+        if eh_pj:
             r_emp = livro.resumo_mes(ano_sel, mes_num, membro_sel, natureza="empresa")
             r_pes = livro.resumo_mes(ano_sel, mes_num, membro_sel, natureza="pessoal")
             r_def = livro.resumo_mes(ano_sel, mes_num, membro_sel, natureza="a_definir")
@@ -7126,7 +7131,7 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
             por_dia[d]["itens"].append(l)
             por_dia[d]["saldo"] += l["valor"] if l["tipo"] == "receita" else -l["valor"]
         dias = [{"data": d, "itens": g["itens"], "saldo": g["saldo"]} for d, g in por_dia.items()]
-        n_a_definir = livro.contar_a_definir(ano_sel, mes_num) if conta[1] == "pj" else 0
+        n_a_definir = livro.contar_a_definir(ano_sel, mes_num) if eh_pj else 0
         raiox_bruto = livro.raiox_por_departamento(ano=ano_sel, mes=mes_num, membro_id=membro_sel)
         # monta {dep: {total, dias:[{data, itens, subtotal}]}} - itens divididos por dia
         from collections import OrderedDict
@@ -7157,10 +7162,10 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
                    meses=meses, mes_sel=mes_sel, membro_sel=membro_sel, tipo_sel=tipo,
                    receitas_cat=receitas_cat, maior_rec=maior_rec, categorias_lista=categorias_lista,
                    q_search=q, n_resultados=len(lancamentos) if q else 0,
-                   natureza_sel=(natureza if conta[1] == "pj" else ""),
+                   natureza_sel=(natureza if eh_pj else ""),
                    n_a_definir=n_a_definir,
                    quebra=quebra,
-                   eh_pj=(conta[1] == "pj"))
+                   eh_pj=eh_pj)
 
 
 # ---------- lista de compras ----------

@@ -255,8 +255,8 @@ _CADASTRO = """{% extends "base" %}{% block conteudo %}
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
 <form method="post" action="/cadastro">
 <label>Plano</label><select name="plano">
-{% for p in planos %}<option value="{{ p[0] }}">{{ p[1] }} — {{ brl(p[3]) }}/mês
-{% if p[2]=='pj' %}(inclui {{ p[4] }} usuários; extra {{ brl(p[5]) }}){% elif p[4]>1 %}(até {{ p[4] }} pessoas){% endif %}</option>{% endfor %}
+{% for p in planos %}<option value="{{ p[0] }}">{{ p[1] }} — {% if beta_gratis %}Grátis (beta){% else %}{{ brl(p[3]) }}/mês{% endif %}
+{% if p[2]=='pj' %}(inclui {{ p[4] }} usuários{% if not beta_gratis %}; extra {{ brl(p[5]) }}{% endif %}){% elif p[4]>1 %}(até {{ p[4] }} pessoas){% endif %}</option>{% endfor %}
 </select>
 <label>Seu nome</label><input name="nome" required maxlength="80">
 <label>E-mail</label><input name="email" type="email" required maxlength="120">
@@ -2721,7 +2721,7 @@ _ATIVAR_APP = """{% extends "base" %}{% block conteudo %}
     <label>Escolha seu plano:</label>
     <select name="plano" style="width:100%;margin:.4rem 0 1rem;padding:.4rem;border:1px solid #2a2a2b;border-radius:4px;background:#0a0a0a;color:#fff">
       {% for p in planos %}
-      <option value="{{ p[0] }}">{{ p[1] }} — R$ {{ (p[3]/100)|n2 }}/mês</option>
+      <option value="{{ p[0] }}">{{ p[1] }} — {% if beta_gratis %}Grátis (beta){% else %}R$ {{ (p[3]/100)|n2 }}/mês{% endif %}</option>
       {% endfor %}
     </select>
     <button type="submit" style="background:#534AB7;color:#fff;padding:.7rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:600;font-size:.95rem">
@@ -4351,6 +4351,12 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
             ctx["conta"] = conta_logada(request)
         if "tem_cesta" not in ctx:
             ctx["tem_cesta"] = _tem_assinatura_cesta(request.session["conta_id"])
+    if "beta_gratis" not in ctx:
+        try:
+            from finance import config_app as _cfg
+            ctx["beta_gratis"] = _cfg.beta_gratis_ativo(get_pool())
+        except Exception:
+            ctx["beta_gratis"] = True
         if "tem_pj" not in ctx:
             try:
                 from finance import empresa as _emp

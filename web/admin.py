@@ -96,6 +96,37 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
 <div class="metric"><span>Receita mensal estimada</span><b>{{ brl(resumo.mrr) }}</b></div>
 </div>
 
+<div class="card"><h2>Planos e preços</h2>
+<form method="post" action="/admin/beta" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;background:{% if beta_gratis %}#14251c{% else %}#161617{% endif %};border:1px solid {% if beta_gratis %}#1d9e7533{% else %}#2a2a2b{% endif %};border-radius:10px;padding:.8rem 1rem;margin-bottom:1rem">
+  <div><div style="font-weight:600;color:{% if beta_gratis %}#5dcaa5{% else %}#b4b2a9{% endif %}">Modo beta — tudo grátis {% if beta_gratis %}(LIGADO){% else %}(desligado){% endif %}</div>
+  <div class="mut" style="font-size:.78rem;margin-top:.2rem">{% if beta_gratis %}Quem se cadastra vê "Grátis (beta)" e não é cobrado. Os preços abaixo ficam guardados.{% else %}Os preços abaixo estão VALENDO — clientes veem o valor no cadastro.{% endif %}</div></div>
+  <button name="acao" value="{% if beta_gratis %}off{% else %}on{% endif %}" style="padding:.5rem 1rem;background:{% if beta_gratis %}#333{% else %}#1d9e75{% endif %};border:0;color:#fff;border-radius:6px;font-weight:600;cursor:pointer">{% if beta_gratis %}Desligar beta{% else %}Ligar beta{% endif %}</button>
+</form>
+<table style="width:100%;font-size:.86rem">
+  <tr class="mut" style="font-size:.74rem;text-align:left"><td style="padding:.3rem 0">Plano</td><td>Tipo</td><td style="text-align:right">Preço/mês</td><td style="text-align:center">Ativo</td><td></td></tr>
+  {% for p in planos_admin %}
+  <form method="post" action="/admin/plano/{{ p.codigo }}">
+  <tr style="border-top:1px solid #232325">
+    <td style="padding:.5rem 0;color:#ececec">{{ p.nome }}</td>
+    <td class="mut">{{ p.tipo_conta }}</td>
+    <td style="text-align:right">
+      {% if p.codigo == 'zaq_cesta' %}<span style="color:#5dcaa5;font-size:.8rem">sempre grátis</span>
+      {% else %}<span style="display:inline-flex;align-items:center;gap:3px;justify-content:flex-end">
+        <span class="mut" style="font-size:.75rem">R$</span>
+        <input name="preco" value="{{ (p.preco_base_centavos/100)|n2 }}" style="width:64px;text-align:right;padding:.25rem .4rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:5px">
+      </span>{% endif %}
+    </td>
+    <td style="text-align:center">
+      {% if p.codigo != 'zaq_cesta' %}<input type="checkbox" name="ativo" value="1" {% if p.ativo %}checked{% endif %}>{% else %}<span style="color:#5dcaa5">●</span>{% endif %}
+    </td>
+    <td style="text-align:right">{% if p.codigo != 'zaq_cesta' %}<button style="padding:.25rem .7rem;background:#1d9e75;border:0;color:#fff;border-radius:5px;font-size:.76rem;cursor:pointer">salvar</button>{% else %}<span class="mut">—</span>{% endif %}</td>
+  </tr>
+  </form>
+  {% endfor %}
+</table>
+<div class="mut" style="font-size:.76rem;margin-top:.7rem">{% if beta_gratis %}Com o beta ligado, o preço nunca aparece pro cliente no cadastro. Ao desligar, estes preços valem na hora — sem mexer em código.{% else %}⚠️ Beta desligado: estes preços estão ativos no cadastro.{% endif %}</div>
+</div>
+
 <div class="card"><h2>Contas</h2>
 <form method="post" action="/admin/precos/importar" style="margin-bottom:.8rem; display:inline">
 <button title="Lê os cupons de mercado e atualiza o banco de preços do comparador">↻ Atualizar banco de preços</button></form>
@@ -494,9 +525,49 @@ def admin_home(request: Request, busca: str = ""):
     contas = [SimpleNamespace(**c) for c in contas]
     eventos = [SimpleNamespace(**e) for e in eventos]
     nichos = [SimpleNamespace(**n) for n in nichos]
+    from finance import config_app as _cfg
+    from types import SimpleNamespace as _SN
+    with get_pool().connection() as _c:
+        _pl = _c.execute(
+            """select codigo, nome, tipo_conta, preco_base_centavos, ativo
+                 from planos order by tipo_conta, preco_base_centavos""").fetchall()
+    planos_admin = [_SN(codigo=r[0], nome=r[1], tipo_conta=r[2],
+                        preco_base_centavos=r[3], ativo=r[4]) for r in _pl]
+    beta_gratis = _cfg.beta_gratis_ativo(get_pool())
     return HTMLResponse(_env.get_template("ahome").render(
         resumo=resumo, contas=contas, eventos=eventos, nichos=nichos, busca=busca,
+        planos_admin=planos_admin, beta_gratis=beta_gratis,
         aviso=request.session.pop("admin_aviso", None)))
+
+
+@router.post("/admin/beta")
+def admin_beta(request: Request, acao: str = Form("")):
+    if _admin(request) is None:
+        return _NEGADO
+    from finance import config_app as _cfg
+    _cfg.set_beta_gratis(get_pool(), acao == "on")
+    request.session["admin_aviso"] = (
+        "Modo beta LIGADO — clientes veem gratis." if acao == "on"
+        else "Modo beta DESLIGADO — precos valendo no cadastro.")
+    return RedirectResponse("/admin", status_code=303)
+
+
+@router.post("/admin/plano/{codigo}")
+def admin_plano_salvar(request: Request, codigo: str,
+                       preco: str = Form(""), ativo: str = Form("")):
+    if _admin(request) is None:
+        return _NEGADO
+    t = (preco or "").strip().replace("R$", "").replace(" ", "").replace(".", "").replace(",", ".")
+    try:
+        cent = int(round(float(t) * 100))
+    except (ValueError, TypeError):
+        cent = 0
+    with get_pool().connection() as c:
+        c.execute("update planos set preco_base_centavos=%s, ativo=%s where codigo=%s",
+                  (cent, bool(ativo), codigo))
+        c.commit()
+    request.session["admin_aviso"] = f"Plano {codigo} atualizado."
+    return RedirectResponse("/admin", status_code=303)
 
 
 @router.post("/admin/conta/{conta_id}/limites")

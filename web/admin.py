@@ -460,6 +460,17 @@ _env = Environment(loader=DictLoader({"abase": _ADMIN_BASE, "ahome": _ADMIN_HOME
 _env.globals["brl"] = brl
 
 
+def _n2(v) -> str:
+    """Numero em formato BR com 2 casas, SEM 'R$'. Ex.: 2020.5 -> '2.020,50'."""
+    try:
+        return f"{float(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except (ValueError, TypeError):
+        return "0,00"
+
+
+_env.filters["n2"] = _n2
+
+
 # ---------- rotas ----------
 
 @router.get("/admin", response_class=HTMLResponse)

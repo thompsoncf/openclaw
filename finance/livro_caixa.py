@@ -82,6 +82,16 @@ def _validar_item_preco(it: dict) -> tuple[int, float, int, str]:
     return int(vu), qtd, int(vt), unidade
 
 
+def _cond_natureza(cond: str, params: list, natureza: str | None, col: str = "natureza"):
+    """Acrescenta filtro de natureza a uma query. 'a_definir' => null;
+    'pessoal'/'empresa' => igual; None/'todos' => sem filtro."""
+    if natureza == "a_definir":
+        cond += f" and {col} is null"
+    elif natureza in ("pessoal", "empresa"):
+        cond += f" and {col} = %s"; params.append(natureza)
+    return cond, params
+
+
 class LivroCaixa:
     def __init__(self, pool, conta_id: int, membro_id: int | None = None):
         self.pool = pool
@@ -280,7 +290,8 @@ class LivroCaixa:
 
     # ---------- Dashboard do cliente (Bloco C) ----------
 
-    def resumo_mes(self, ano: int, mes: int, membro_id: int | None = None) -> dict:
+    def resumo_mes(self, ano: int, mes: int, membro_id: int | None = None,
+                   natureza: str | None = None) -> dict:
         """Extrato do mes: saldo anterior (acumulado ate' o fim do mes passado)
         + receitas/despesas do mes = saldo ao FIM do mes selecionado.
         A conta sempre fecha: anterior + receitas - despesas = saldo.
@@ -289,6 +300,7 @@ class LivroCaixa:
         base: list = [self.conta_id]
         if membro_id is not None:
             cond += " and membro_id = %s"; base.append(membro_id)
+        cond, base = _cond_natureza(cond, base, natureza)
         ini, prox = _intervalo_mes(ano, mes)
         with self.pool.connection() as conn:
             anterior = conn.execute(
@@ -309,20 +321,24 @@ class LivroCaixa:
         return {"anterior": anterior, "receitas": rec, "despesas": desp,
                 "saldo": anterior + rec - desp}
 
-    def despesas_por_categoria(self, ano: int, mes: int, membro_id: int | None = None) -> list[tuple[str, int]]:
-        return self._por_categoria("despesa", ano, mes, membro_id)
+    def despesas_por_categoria(self, ano: int, mes: int, membro_id: int | None = None,
+                               natureza: str | None = None) -> list[tuple[str, int]]:
+        return self._por_categoria("despesa", ano, mes, membro_id, natureza)
 
-    def receitas_por_categoria(self, ano: int, mes: int, membro_id: int | None = None) -> list[tuple[str, int]]:
-        return self._por_categoria("receita", ano, mes, membro_id)
+    def receitas_por_categoria(self, ano: int, mes: int, membro_id: int | None = None,
+                               natureza: str | None = None) -> list[tuple[str, int]]:
+        return self._por_categoria("receita", ano, mes, membro_id, natureza)
 
     def _por_categoria(self, tipo: str, ano: int, mes: int,
-                       membro_id: int | None = None) -> list[tuple[str, int]]:
+                       membro_id: int | None = None,
+                       natureza: str | None = None) -> list[tuple[str, int]]:
         """Soma os lancamentos do tipo por categoria CANONICA (junta variacoes de
         grafia, ex Saude/Saude). Serve pra despesa e receita."""
         cond = "conta_id = %s and tipo=%s"
         params: list = [self.conta_id, tipo]
         if membro_id is not None:
             cond += " and membro_id = %s"; params.append(membro_id)
+        cond, params = _cond_natureza(cond, params, natureza)
         ini, prox = _intervalo_mes(ano, mes)
         with self.pool.connection() as conn:
             rows = conn.execute(
@@ -355,6 +371,29 @@ class LivroCaixa:
                 (cat, lancamento_id, self.conta_id))
             conn.commit()
         return True
+
+    def marcar_natureza(self, lancamento_id: int, natureza: str | None) -> bool:
+        """Marca um lancamento como 'pessoal', 'empresa' ou None (a definir).
+        Multi-tenant: so' mexe em lancamento DESTA conta."""
+        nat = natureza if natureza in ("pessoal", "empresa") else None
+        with self.pool.connection() as conn:
+            cur = conn.execute(
+                "update lancamentos set natureza = %s where id = %s and conta_id = %s",
+                (nat, lancamento_id, self.conta_id))
+            conn.commit()
+            return cur.rowcount > 0
+
+    def contar_a_definir(self, ano: int | None = None, mes: int | None = None) -> int:
+        """Quantos lancamentos DESTA conta estao sem natureza (a definir).
+        Se ano/mes vier, conta so' o mes; senao, tudo."""
+        cond = "conta_id = %s and natureza is null"
+        params: list = [self.conta_id]
+        if ano and mes:
+            ini, prox = _intervalo_mes(ano, mes)
+            cond += " and data >= %s and data < %s"; params += [ini, prox]
+        with self.pool.connection() as conn:
+            return int(conn.execute(
+                f"select count(*) from lancamentos where {cond}", params).fetchone()[0])
 
     def apagar_lancamento(self, lancamento_id: int) -> bool:
         """Apaga um lancamento DESTA conta. Seguranca multi-tenant: so' apaga se
@@ -396,7 +435,8 @@ class LivroCaixa:
         return [{"mes": r[0], "receitas": int(r[1]), "despesas": int(r[2])} for r in reversed(rows)]
 
     def lancamentos_recentes(self, ano: int, mes: int, membro_id: int | None = None,
-                             tipo: str | None = None, limite: int = 50) -> list[dict]:
+                             tipo: str | None = None, limite: int = 50,
+                             natureza: str | None = None) -> list[dict]:
         ini, prox = _intervalo_mes(ano, mes)
         cond = "l.conta_id = %s and l.data >= %s and l.data < %s"
         params: list = [self.conta_id, ini, prox]
@@ -404,15 +444,16 @@ class LivroCaixa:
             cond += " and l.membro_id = %s"; params.append(membro_id)
         if tipo in ("despesa", "receita"):
             cond += " and l.tipo = %s"; params.append(tipo)
+        cond, params = _cond_natureza(cond, params, natureza, col="l.natureza")
         with self.pool.connection() as conn:
             rows = conn.execute(
                 f"""select l.id, l.data, l.descricao, l.categoria, l.tipo, l.valor_centavos,
-                          l.origem, coalesce(m.nome, '-') as quem
+                          l.origem, coalesce(m.nome, '-') as quem, l.natureza
                     from lancamentos l left join membros m on m.id = l.membro_id
                     where {cond} order by l.data desc, l.id desc limit %s""",
                 params + [limite]).fetchall()
         return [{"id": r[0], "data": r[1], "descricao": r[2], "categoria": r[3], "tipo": r[4],
-                 "valor": int(r[5]), "origem": r[6], "quem": r[7]} for r in rows]
+                 "valor": int(r[5]), "origem": r[6], "quem": r[7], "natureza": r[8]} for r in rows]
 
     def raiox_por_departamento(self, ano: int | None = None, mes: int | None = None,
                                membro_id: int | None = None,

@@ -49,6 +49,16 @@ O QUE FAZER (use as ferramentas de empresa):
 - "como está a folha?", "quanto devo de salário?", "qual meu saldo/fluxo?",
   "o que tenho a pagar?" -> consultar_empresa.
 
+PESSOAL x EMPRESA (esta conta mistura os dois — ajude a separar):
+- Ao registrar um GASTO ou RECEITA do dia-a-dia (não título/folha), SEMPRE
+  pergunte de forma leve: "esse foi pessoal ou da empresa?". Se a pessoa disser,
+  chame marcar_natureza com o id do lançamento. Se ela não responder ou mudar de
+  assunto, tudo bem — fica "a definir" e ela resolve depois (NÃO insista).
+- "marca aquele gasto como empresa", "o do posto foi pessoal" -> marcar_natureza.
+- "como foi o mês da empresa?", "relatório da empresa", "quanto gastei de
+  pessoal?", "me separa pessoal e empresa" -> relatorio_separado.
+- Título e folha JÁ entram como empresa sozinhos — não pergunte a natureza deles.
+
 REGRAS:
 - Valores em reais (ex: 1500 = R$ 1.500,00). Datas em dd/mm/aaaa; se a pessoa
   disser "dia 15", assuma o dia 15 do mês atual (ou do próximo se já passou).
@@ -178,6 +188,44 @@ def construir_ferramentas_pj(pool, conta_id: int,
                       f"projetado {formatar_brl(fluxo['saldo_projetado_centavos'])}.")
         return " ".join(partes)
 
+    def marcar_natureza_tool(e: dict) -> str:
+        from .livro_caixa import LivroCaixa
+        lid = e.get("lancamento_id")
+        nat = e.get("natureza")
+        if not lid or nat not in ("pessoal", "empresa"):
+            return "Preciso do id do lançamento e se é pessoal ou empresa."
+        liv = LivroCaixa(pool, conta_id)
+        ok = liv.marcar_natureza(int(lid), nat)
+        if not ok:
+            return "Não achei esse lançamento pra marcar."
+        rot = "🏢 empresa" if nat == "empresa" else "pessoal"
+        return f"Marquei como {rot}. ✅"
+
+    def relatorio_separado(e: dict) -> str:
+        from datetime import date as _date
+        from .livro_caixa import LivroCaixa
+        hoje = _date.today()
+        mes = int(e.get("mes") or hoje.month)
+        ano = int(e.get("ano") or hoje.year)
+        liv = LivroCaixa(pool, conta_id)
+        emp = liv.resumo_mes(ano, mes, natureza="empresa")
+        pes = liv.resumo_mes(ano, mes, natureza="pessoal")
+        ndef = liv.contar_a_definir(ano, mes)
+        def _res(r):
+            saldo = r["receitas"] - r["despesas"]
+            return (f"receitas {formatar_brl(r['receitas'])}, "
+                    f"despesas {formatar_brl(r['despesas'])}, "
+                    f"resultado {formatar_brl(saldo)}")
+        partes = [
+            f"📅 {mes:02d}/{ano}",
+            f"🏢 Empresa: {_res(emp)}.",
+            f"Pessoal: {_res(pes)}.",
+        ]
+        if ndef:
+            partes.append(f"💡 {ndef} lançamento(s) ainda a definir "
+                          "(me diz quais são pessoal ou empresa pra eu incluir).")
+        return " ".join(partes)
+
     valor_s = {"type": "number", "description": "valor em reais, ex 1500.50"}
     return [
         Ferramenta(
@@ -227,5 +275,30 @@ def construir_ferramentas_pj(pool, conta_id: int,
             descricao="Resumo da empresa: títulos a pagar/receber, atrasados, folha do mês e saldo/fluxo.",
             parametros={"type": "object", "properties": {}},
             executar=consultar_empresa,
+        ),
+        Ferramenta(
+            nome="marcar_natureza",
+            descricao="Marca um lançamento como pessoal ou empresa. Use o id do lançamento (o registro devolve id=N).",
+            parametros={
+                "type": "object",
+                "properties": {
+                    "lancamento_id": {"type": "integer"},
+                    "natureza": {"type": "string", "enum": ["pessoal", "empresa"]},
+                },
+                "required": ["lancamento_id", "natureza"],
+            },
+            executar=marcar_natureza_tool,
+        ),
+        Ferramenta(
+            nome="relatorio_separado",
+            descricao="Relatório do mês separando pessoal e empresa (receitas, despesas, resultado). Mostra também quantos estão a definir.",
+            parametros={
+                "type": "object",
+                "properties": {
+                    "mes": {"type": "integer", "description": "1-12; vazio = mês atual"},
+                    "ano": {"type": "integer", "description": "vazio = ano atual"},
+                },
+            },
+            executar=relatorio_separado,
         ),
     ]

@@ -1350,7 +1350,14 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <option value="">Todos</option>
 {% for mid,nome in pessoas %}<option value="{{ mid }}" {% if mid==membro_sel %}selected{% endif %}>{{ nome }}</option>{% endfor %}
 </select>{% endif %}
+{% if eh_pj %}<select name="natureza" onchange="this.form.submit()" title="filtrar por natureza">
+<option value="" {% if not natureza_sel %}selected{% endif %}>Todos</option>
+<option value="pessoal" {% if natureza_sel=='pessoal' %}selected{% endif %}>Pessoal</option>
+<option value="empresa" {% if natureza_sel=='empresa' %}selected{% endif %}>🏢 Empresa</option>
+<option value="a_definir" {% if natureza_sel=='a_definir' %}selected{% endif %}>A definir{% if n_a_definir %} ({{ n_a_definir }}){% endif %}</option>
+</select>{% endif %}
 </form></div>
+{% if eh_pj and n_a_definir and not natureza_sel %}<div style="background:#2b2416;border:1px solid #f0c05a44;border-radius:8px;padding:.55rem .9rem;margin:.4rem 0 0;color:#f0c05a;font-size:.83rem">🏢 <b>{{ n_a_definir }}</b> lançamento(s) sem classificar (pessoal ou empresa). <a href="/painel/financeiro?natureza=a_definir" style="color:#f0c05a;text-decoration:underline">classificar agora</a></div>{% endif %}
 
 <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin:1.2rem 0">
 <div class="metric"><span>Saldo anterior</span><b style="color:{% if resumo.anterior < 0 %}#e07a5f{% else %}#5dcaa5{% endif %}">{{ brl(resumo.anterior) }}</b></div>
@@ -1430,7 +1437,8 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <div class="dep-corpo" style="flex-direction:column; gap:0">
 <table style="margin:0">
 {% for l in dia.itens %}<tr data-tipo="{{ l.tipo }}" data-cat="{{ canon(l.categoria, l.tipo) }}" data-desc="{{ l.descricao }}" data-valor="{{ brl(l.valor) }}">
-<td>{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}</td>
+<td>{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}
+{% if eh_pj %}{% if l.natureza=='empresa' %}<span class="nat-tag" style="font-size:.62rem;background:#1d3a2e;color:#5dcaa5;padding:1px 7px;border-radius:8px;margin-left:.3rem">🏢 empresa</span>{% elif l.natureza=='pessoal' %}<span class="nat-tag" style="font-size:.62rem;background:#3a2c1d;color:#f0c05a;padding:1px 7px;border-radius:8px;margin-left:.3rem">pessoal</span>{% else %}<span style="display:inline-flex;gap:.25rem;margin-left:.3rem"><button type="button" onclick="marcarNat({{ l.id }},'pessoal',this)" style="font-size:.6rem;padding:1px 6px;background:#3a2c1d;color:#f0c05a;border:0;border-radius:7px;cursor:pointer">pessoal?</button><button type="button" onclick="marcarNat({{ l.id }},'empresa',this)" style="font-size:.6rem;padding:1px 6px;background:#1d3a2e;color:#5dcaa5;border:0;border-radius:7px;cursor:pointer">empresa?</button></span>{% endif %}{% endif %}</td>
 <td style="white-space:nowrap">
 <span style="display:inline-flex;align-items:center;gap:.4rem">
 <select class="cat-edit" data-id="{{ l.id }}" data-orig="{{ canon(l.categoria, l.tipo) }}" onchange="catMudou(this)"
@@ -1531,6 +1539,10 @@ function catMudou(sel){
   // mostra o botao OK so' quando o valor muda em relacao ao salvo
   var btn = sel.parentElement.querySelector('.cat-ok');
   btn.style.display = (sel.value !== sel.getAttribute('data-orig')) ? 'inline-block' : 'none';
+}
+function marcarNat(id, nat, btn){
+  fetch('/painel/lancamento/natureza', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&natureza='+nat})
+    .then(r=>r.json()).then(d=>{ if(d.ok){ location.reload(); } });
 }
 function salvarCat(btn){
   var sel = btn.parentElement.querySelector('.cat-edit');
@@ -6940,7 +6952,7 @@ def empresa_contador_csv(request: Request, ano: int = 0, mes: int = 0):
 
 
 @router.get("/painel/financeiro", response_class=HTMLResponse)
-def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: str = "", q: str = ""):
+def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: str = "", q: str = "", natureza: str = ""):
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
@@ -6974,15 +6986,18 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
         receitas_cat = []
         maior_cat = 0
         maior_rec = 0
+        n_a_definir = 0
     else:
-        resumo = livro.resumo_mes(ano_sel, mes_num, membro_sel)
-        categorias = livro.despesas_por_categoria(ano_sel, mes_num, membro_sel)
+        # natureza (pessoal/empresa/a_definir) só filtra em conta PJ; PF ignora
+        nat = natureza if (conta[1] == "pj" and natureza in ("pessoal", "empresa", "a_definir")) else None
+        resumo = livro.resumo_mes(ano_sel, mes_num, membro_sel, natureza=nat)
+        categorias = livro.despesas_por_categoria(ano_sel, mes_num, membro_sel, natureza=nat)
         maior_cat = max((v for _, v in categorias), default=0)
-        receitas_cat = livro.receitas_por_categoria(ano_sel, mes_num, membro_sel)
+        receitas_cat = livro.receitas_por_categoria(ano_sel, mes_num, membro_sel, natureza=nat)
         maior_rec = max((v for _, v in receitas_cat), default=0)
         lancamentos = livro.lancamentos_recentes(ano_sel, mes_num, membro_sel,
                                                  tipo if tipo in ("despesa", "receita") else None,
-                                                 limite=1000)
+                                                 limite=1000, natureza=nat)
         # agrupa por DIA (pro accordion): cada dia com seu saldo e seus lancamentos
         from collections import OrderedDict
         por_dia = OrderedDict()
@@ -6993,6 +7008,7 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
             por_dia[d]["itens"].append(l)
             por_dia[d]["saldo"] += l["valor"] if l["tipo"] == "receita" else -l["valor"]
         dias = [{"data": d, "itens": g["itens"], "saldo": g["saldo"]} for d, g in por_dia.items()]
+        n_a_definir = livro.contar_a_definir(ano_sel, mes_num) if conta[1] == "pj" else 0
         raiox_bruto = livro.raiox_por_departamento(ano=ano_sel, mes=mes_num, membro_id=membro_sel)
         # monta {dep: {total, dias:[{data, itens, subtotal}]}} - itens divididos por dia
         from collections import OrderedDict
@@ -7022,7 +7038,10 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
                    lancamentos=lancamentos, dias=dias, raiox=raiox, pessoas=pessoas,
                    meses=meses, mes_sel=mes_sel, membro_sel=membro_sel, tipo_sel=tipo,
                    receitas_cat=receitas_cat, maior_rec=maior_rec, categorias_lista=categorias_lista,
-                   q_search=q, n_resultados=len(lancamentos) if q else 0)
+                   q_search=q, n_resultados=len(lancamentos) if q else 0,
+                   natureza_sel=(natureza if conta[1] == "pj" else ""),
+                   n_a_definir=n_a_definir,
+                   eh_pj=(conta[1] == "pj"))
 
 
 # ---------- lista de compras ----------
@@ -7303,6 +7322,20 @@ def mudar_categoria_lancamento(request: Request,
     from finance.livro_caixa import LivroCaixa
     livro = LivroCaixa(get_pool(), conta[0])
     ok = livro.mudar_categoria(lancamento_id, categoria)
+    return JSONResponse({"ok": bool(ok)})
+
+
+@router.post("/painel/lancamento/natureza")
+def marcar_natureza_lancamento(request: Request,
+                               lancamento_id: int = Form(...),
+                               natureza: str = Form(...)):
+    conta = conta_logada(request)
+    if not conta:
+        return JSONResponse({"ok": False}, status_code=401)
+    from finance.livro_caixa import LivroCaixa
+    livro = LivroCaixa(get_pool(), conta[0])
+    nat = natureza if natureza in ("pessoal", "empresa") else None
+    ok = livro.marcar_natureza(lancamento_id, nat)
     return JSONResponse({"ok": bool(ok)})
 
 

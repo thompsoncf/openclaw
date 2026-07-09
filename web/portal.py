@@ -1385,10 +1385,27 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 </div></div>{% endif %}
 
 <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin:1.2rem 0">
-<div class="metric"><span>Saldo anterior</span><b style="color:{% if resumo.anterior < 0 %}#e07a5f{% else %}#5dcaa5{% endif %}">{{ brl(resumo.anterior) }}</b></div>
-<div class="metric"><span>+ Receitas do mês</span><b>{{ brl(resumo.receitas) }}</b></div>
-<div class="metric"><span>− Despesas do mês</span><b>{{ brl(resumo.despesas) }}</b></div>
-<div class="metric"><span>= Saldo do mês</span><b style="color:#5dcaa5">{{ brl(resumo.saldo) }}</b></div>
+<div class="metric"><span>Saldo anterior</span><b style="color:{% if resumo.anterior < 0 %}#e07a5f{% else %}#5dcaa5{% endif %}">{{ brl(resumo.anterior) }}</b>{% if eh_pj and natureza_sel in ['empresa','pessoal','a_definir'] and resumo.anterior == 0 %}<small style="display:block;color:#6a7178;font-size:.62rem;margin-top:.25rem;line-height:1.3">sem histórico de {{ {'empresa':'empresa','pessoal':'pessoal','a_definir':'lançamentos a definir'}[natureza_sel] }} antes deste mês</small>{% endif %}</div>
+{% if eh_pj and not natureza_sel and quebra %}
+<div class="metric"><span>+ Receitas do mês</span>
+<div style="font-size:.72rem;color:#a8a8a3;line-height:1.7;margin:.15rem 0 .35rem">
+<div style="display:flex;justify-content:space-between"><span>🏢 Empresa</span><span style="color:#cfe8dd">{{ brl(quebra.receitas.empresa) }}</span></div>
+<div style="display:flex;justify-content:space-between"><span>Pessoal</span><span style="color:#cfe8dd">{{ brl(quebra.receitas.pessoal) }}</span></div>
+<div style="display:flex;justify-content:space-between;color:#9a8f6a"><span>A definir</span><span>{{ brl(quebra.receitas.a_definir) }}</span></div>
+</div>
+<b style="border-top:1px solid #2a2a2b;padding-top:.3rem;display:block">{{ brl(resumo.receitas) }}</b></div>
+<div class="metric"><span>− Despesas do mês</span>
+<div style="font-size:.72rem;color:#a8a8a3;line-height:1.7;margin:.15rem 0 .35rem">
+<div style="display:flex;justify-content:space-between"><span>🏢 Empresa</span><span style="color:#e8c5bb">{{ brl(quebra.despesas.empresa) }}</span></div>
+<div style="display:flex;justify-content:space-between"><span>Pessoal</span><span style="color:#e8c5bb">{{ brl(quebra.despesas.pessoal) }}</span></div>
+<div style="display:flex;justify-content:space-between;color:#c9a56a"><span>A definir{% if quebra.despesas.a_definir %} ⚠{% endif %}</span><span style="color:#f0c05a">{{ brl(quebra.despesas.a_definir) }}</span></div>
+</div>
+<b style="border-top:1px solid #2a2a2b;padding-top:.3rem;display:block">{{ brl(resumo.despesas) }}</b></div>
+{% else %}
+<div class="metric"><span>+ Receitas do mês{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b>{{ brl(resumo.receitas) }}</b></div>
+<div class="metric"><span>− Despesas do mês{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b>{{ brl(resumo.despesas) }}</b></div>
+{% endif %}
+<div class="metric"><span>= {% if eh_pj and natureza_sel %}Resultado{% else %}Saldo{% endif %} do mês</span><b style="color:#5dcaa5">{{ brl(resumo.saldo) }}</b></div>
 </div>
 
 <h1 style="font-size:1.05rem">Despesas por categoria</h1>
@@ -7073,10 +7090,21 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
         maior_cat = 0
         maior_rec = 0
         n_a_definir = 0
+        quebra = None
     else:
         # natureza (pessoal/empresa/a_definir) só filtra em conta PJ; PF ignora
         nat = natureza if (conta[1] == "pj" and natureza in ("pessoal", "empresa", "a_definir")) else None
         resumo = livro.resumo_mes(ano_sel, mes_num, membro_sel, natureza=nat)
+        # quebra por natureza (só PJ): pro card mostrar empresa/pessoal/a definir
+        quebra = None
+        if conta[1] == "pj":
+            r_emp = livro.resumo_mes(ano_sel, mes_num, membro_sel, natureza="empresa")
+            r_pes = livro.resumo_mes(ano_sel, mes_num, membro_sel, natureza="pessoal")
+            r_def = livro.resumo_mes(ano_sel, mes_num, membro_sel, natureza="a_definir")
+            quebra = {
+                "receitas": {"empresa": r_emp["receitas"], "pessoal": r_pes["receitas"], "a_definir": r_def["receitas"]},
+                "despesas": {"empresa": r_emp["despesas"], "pessoal": r_pes["despesas"], "a_definir": r_def["despesas"]},
+            }
         categorias = livro.despesas_por_categoria(ano_sel, mes_num, membro_sel, natureza=nat)
         maior_cat = max((v for _, v in categorias), default=0)
         receitas_cat = livro.receitas_por_categoria(ano_sel, mes_num, membro_sel, natureza=nat)
@@ -7127,6 +7155,7 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
                    q_search=q, n_resultados=len(lancamentos) if q else 0,
                    natureza_sel=(natureza if conta[1] == "pj" else ""),
                    n_a_definir=n_a_definir,
+                   quebra=quebra,
                    eh_pj=(conta[1] == "pj"))
 
 

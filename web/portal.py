@@ -1350,13 +1350,18 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <option value="">Todos</option>
 {% for mid,nome in pessoas %}<option value="{{ mid }}" {% if mid==membro_sel %}selected{% endif %}>{{ nome }}</option>{% endfor %}
 </select>{% endif %}
-{% if eh_pj %}<select name="natureza" onchange="this.form.submit()" title="filtrar por natureza">
-<option value="" {% if not natureza_sel %}selected{% endif %}>Todos</option>
-<option value="pessoal" {% if natureza_sel=='pessoal' %}selected{% endif %}>Pessoal</option>
-<option value="empresa" {% if natureza_sel=='empresa' %}selected{% endif %}>🏢 Empresa</option>
-<option value="a_definir" {% if natureza_sel=='a_definir' %}selected{% endif %}>A definir{% if n_a_definir %} ({{ n_a_definir }}){% endif %}</option>
-</select>{% endif %}
 </form></div>
+{% if eh_pj %}
+<div style="margin:.8rem 0 .2rem">
+<div style="color:#888780;font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.35rem">Ver lançamentos de</div>
+<div style="display:inline-flex;background:#161617;border:1px solid #2a2a2b;border-radius:9px;padding:3px;gap:2px;flex-wrap:wrap">
+<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if not natureza_sel %}background:#1d9e75;color:#fff;font-weight:600{% else %}color:#b4b2a9{% endif %}">Todos</a>
+<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=pessoal" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if natureza_sel=='pessoal' %}background:#f0c05a;color:#1a1409;font-weight:600{% else %}color:#b4b2a9{% endif %}">Pessoal</a>
+<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=empresa" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if natureza_sel=='empresa' %}background:#1d9e75;color:#fff;font-weight:600{% else %}color:#b4b2a9{% endif %}">🏢 Empresa</a>
+<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=a_definir" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;display:inline-flex;align-items:center;gap:.35rem;{% if natureza_sel=='a_definir' %}background:#3a2c1d;color:#f0c05a;font-weight:600{% else %}color:#f0c05a{% endif %}">A definir{% if n_a_definir %} <span style="background:#3a2c1d;color:#f0c05a;font-size:.62rem;padding:1px 6px;border-radius:8px">{{ n_a_definir }}</span>{% endif %}</a>
+</div>
+</div>
+{% endif %}
 {% if eh_pj and n_a_definir and not natureza_sel %}<div style="background:#2b2416;border:1px solid #f0c05a44;border-radius:8px;padding:.55rem .9rem;margin:.4rem 0 0;color:#f0c05a;font-size:.83rem">🏢 <b>{{ n_a_definir }}</b> lançamento(s) sem classificar (pessoal ou empresa). <a href="/painel/financeiro?natureza=a_definir" style="color:#f0c05a;text-decoration:underline">classificar agora</a></div>{% endif %}
 
 <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin:1.2rem 0">

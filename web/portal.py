@@ -135,7 +135,7 @@ body{margin:0;min-height:100vh;font-family:system-ui,-apple-system,sans-serif;
 #menu-links{display:flex;align-items:center;flex-wrap:wrap;justify-content:flex-end}
 @media (max-width:600px){
   #menu-btn{display:inline-flex !important}
-  #menu-links{display:none;position:absolute;top:64px;right:12px;left:12px;z-index:50;
+  #menu-links{display:none;position:absolute;top:100%;right:12px;left:12px;z-index:50;margin-top:4px;
     flex-direction:column;align-items:stretch;background:#141416;border:1px solid #2a2a2b;
     border-radius:12px;padding:6px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
   #menu-links.aberto{display:flex}

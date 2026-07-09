@@ -388,8 +388,25 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
                                 return
                 except Exception:  # noqa: BLE001
                     pass
-            elif ctype.startswith("audio/") and _transcritor:
-                texto = _transcritor.transcrever(dados, "audio.ogg")
+            elif ctype.startswith("audio/"):
+                # AUDIO/VOZ: transcreve. NUNCA deixa o cliente no vacuo — se nao
+                # der pra transcrever (sem STT configurado, sem credito, erro ou
+                # audio vazio), responde pedindo texto em vez de engolir.
+                if not _transcritor:
+                    _responder_whatsapp(to, "Recebi seu audio! 🎤 Por enquanto eu "
+                        "ainda nao consigo ouvir aqui — me manda por texto que eu "
+                        "resolvo rapidinho. 😊")
+                    return
+                try:
+                    texto = (_transcritor.transcrever(dados, "audio.ogg") or "").strip()
+                except Exception:  # noqa: BLE001
+                    log.exception("falha ao transcrever audio")
+                    texto = ""
+                if not texto:
+                    _responder_whatsapp(to, "Recebi seu audio, mas nao consegui "
+                        "entender dessa vez. 🎧 Pode repetir com mais calma ou me "
+                        "mandar por texto?")
+                    return
 
         agente = _agente_do(membro, conta)
         # Se lemos uma chave, passa pro livro pra que tools a usem ao gravar lançamento

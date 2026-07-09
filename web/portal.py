@@ -5593,14 +5593,17 @@ def painel_ativar_app_envia(request: Request, plano: str = Form(...)):
     p = planos_ok[plano]
     nome_plano = p[1]
     preco_cent = int(p[3] or 0)
+    tipo_novo = p[2]  # 'pf' ou 'pj' — sincroniza o tipo da conta com o plano
 
     pool = get_pool()
     with pool.connection() as c:
-        # Muda plano + limites (status fica trial até o Asaas confirmar o pagamento)
+        # Muda plano + TIPO + limites (status fica trial até o Asaas confirmar).
+        # Sincronizar o tipo é essencial: sem isso, quem troca pra pj_base fica
+        # com tipo='pf' e não vê as features PJ (ex: separação no Financeiro).
         c.execute(
-            """update contas set plano=%s,
+            """update contas set plano=%s, tipo=%s,
                    limite_mensagens_dia=50, limite_cupons_dia=5 where id=%s""",
-            (plano, conta[0]),
+            (plano, tipo_novo, conta[0]),
         )
         c.commit()
     ct.registrar_evento(pool, conta[0], "upgrade_app",

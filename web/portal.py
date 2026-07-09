@@ -2730,11 +2730,58 @@ _MEUS_PEDIDOS = """{% extends "base" %}{% block conteudo %}
 </div>
 {% endblock %}"""
 
+_EMPRESA_DADOS = """{% extends "base" %}{% block conteudo %}
+<div class="card larga">
+  <h2 style="margin:0 0 .3rem">🏢 Complete os dados da sua empresa</h2>
+  <div class="mut" style="font-size:.82rem;margin-bottom:1rem">Precisamos disso pra organizar seu financeiro PJ direito. É rápido — digite o CNPJ e busque.</div>
+  {% if erro %}<div style="background:#3a2020;border:1px solid #e07a5f55;color:#f0b0a0;padding:.6rem .9rem;border-radius:8px;font-size:.82rem;margin-bottom:1rem">{{ erro }}</div>{% endif %}
+  <form method="post" action="/painel/empresa/dados">
+    <label>CNPJ</label>
+    <div style="display:flex;gap:.5rem">
+      <input id="cnpj" name="documento" value="{{ dados.documento }}" inputmode="numeric" placeholder="00.000.000/0001-00" required style="flex:1">
+      <button type="button" onclick="buscarCnpj()" style="background:#1d3a2e;color:#5dcaa5;border:1px solid #1d9e7544;border-radius:7px;padding:0 1rem;cursor:pointer;white-space:nowrap">🔍 Buscar</button>
+    </div>
+    <div id="cnpj-msg" class="mut" style="font-size:.72rem;margin-top:.25rem"></div>
+    <label>Razão social</label>
+    <input id="razao" name="razao_social" value="{{ dados.razao_social }}" required>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.7rem">
+      <div><label>Nome fantasia</label>
+        <input id="fantasia" name="nome_fantasia" value="{{ dados.nome_fantasia }}"></div>
+      <div><label>Cidade / UF</label>
+        <div style="display:flex;gap:.4rem">
+          <input id="cidade" name="cidade" value="{{ dados.cidade }}" style="flex:1">
+          <input id="uf" name="uf" value="{{ dados.uf }}" maxlength="2" placeholder="UF" style="width:56px;text-transform:uppercase">
+        </div></div>
+    </div>
+    <button type="submit" style="background:#1d9e75;color:#fff;border:0;border-radius:8px;padding:.7rem 1.4rem;font-weight:600;cursor:pointer;margin-top:1rem">Salvar e continuar →</button>
+  </form>
+</div>
+<script>
+async function buscarCnpj(){
+  var el=document.getElementById('cnpj');
+  var msg=document.getElementById('cnpj-msg');
+  var cnpj=(el.value||'').replace(/[^0-9]/g,'');
+  if(cnpj.length!==14){ msg.textContent='Digite os 14 dígitos do CNPJ.'; return; }
+  msg.textContent='Buscando...';
+  try{
+    var r=await fetch('/painel/empresa/buscar-cnpj?cnpj='+cnpj);
+    var d=await r.json();
+    if(d.ok){
+      if(d.nome){ document.getElementById('razao').value=d.nome; document.getElementById('fantasia').value=d.nome; }
+      if(d.cidade) document.getElementById('cidade').value=d.cidade;
+      if(d.uf) document.getElementById('uf').value=d.uf;
+      msg.textContent='✓ Dados encontrados — confira e ajuste se precisar.';
+    } else { msg.textContent='Não achei esse CNPJ. Preencha manualmente.'; }
+  }catch(e){ msg.textContent='Erro na busca. Preencha manualmente.'; }
+}
+</script>
+{% endblock %}"""
+
 _EMPRESA = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
     <div><h2 style="margin:0">🏢 Empresa</h2>
-      <div class="mut" style="font-size:.82rem">{{ empresa_nome }}{% if empresa_doc %} · CNPJ {{ empresa_doc }}{% endif %}</div></div>
+      <div class="mut" style="font-size:.82rem">{{ empresa_nome }}{% if empresa_doc %} · CNPJ {{ empresa_doc }}{% endif %}<a href="/painel/empresa/dados" style="color:#5dcaa5;font-size:.72rem;margin-left:.4rem;text-decoration:none">editar dados ›</a></div></div>
     <span style="background:#15301f;color:#5dcaa5;font-size:.72rem;font-weight:600;padding:.25rem .7rem;border-radius:14px;border:1px solid #1d9e7544">Módulo PJ ativo</span>
   </div>
 
@@ -4420,7 +4467,7 @@ _FINANCEIRO_FORN = """{% extends "base" %}{% block conteudo %}
 
 
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 _env.filters["brl"] = brl
@@ -6893,6 +6940,11 @@ def painel_empresa(request: Request):
     pool = get_pool()
     if not emp.modulo_pj_ativo(pool, conta[0]):
         return RedirectResponse("/painel", status_code=303)
+    # Gate: enquanto a empresa não tiver dados (CNPJ+razão), mostra só a tela
+    # de cadastro. Resto do app (Financeiro/Compras) segue livre.
+    if not emp.dados_empresa_completos(pool, conta[0]):
+        d = emp.obter_dados_empresa(pool, conta[0])
+        return _render("empresa_dados", request, dados=d, tem_pj=True, erro="")
     hoje = _date.today()
     res = emp.resumo_titulos(pool, conta[0])
     fluxo = emp.fluxo_projetado(pool, conta[0])
@@ -6907,6 +6959,58 @@ def painel_empresa(request: Request):
     return _render("empresa", request, empresa_nome=conta[2], empresa_doc=doc,
                    res=res, fluxo=fluxo, dre=dre, titulos=titulos, folha=folha,
                    tem_pj=True)
+
+
+@router.get("/painel/empresa/dados", response_class=HTMLResponse)
+def painel_empresa_dados_form(request: Request):
+    from finance import empresa as emp
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.modulo_pj_ativo(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    d = emp.obter_dados_empresa(pool, conta[0])
+    return _render("empresa_dados", request, dados=d, tem_pj=True, erro="")
+
+
+@router.post("/painel/empresa/dados", response_class=HTMLResponse)
+def painel_empresa_dados_salvar(
+    request: Request,
+    documento: str = Form(""), razao_social: str = Form(""),
+    nome_fantasia: str = Form(""), cidade: str = Form(""), uf: str = Form(""),
+):
+    from finance import empresa as emp
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.modulo_pj_ativo(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    ok, msg = emp.salvar_dados_empresa(
+        pool, conta[0], documento=documento, razao_social=razao_social,
+        nome_fantasia=nome_fantasia, cidade=cidade, uf=uf)
+    if not ok:
+        d = emp.obter_dados_empresa(pool, conta[0])
+        # devolve o que o usuário digitou + erro
+        d.update({"documento": documento, "razao_social": razao_social,
+                  "nome_fantasia": nome_fantasia, "cidade": cidade, "uf": uf})
+        return _render("empresa_dados", request, dados=d, tem_pj=True, erro=msg)
+    return RedirectResponse("/painel/empresa", status_code=303)
+
+
+@router.get("/painel/empresa/buscar-cnpj")
+def painel_empresa_buscar_cnpj(request: Request, cnpj: str = ""):
+    conta = conta_logada(request)
+    if conta is None:
+        return JSONResponse({"ok": False}, status_code=401)
+    from finance import cnpj_info
+    dados = cnpj_info.consultar_cnpj(cnpj)
+    if not dados:
+        return JSONResponse({"ok": False})
+    return JSONResponse({"ok": True, "nome": dados.get("nome") or "",
+                         "cidade": dados.get("cidade") or "",
+                         "uf": dados.get("uf") or ""})
 
 
 def _mascara_cnpj(doc: str) -> str:

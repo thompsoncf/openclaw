@@ -87,6 +87,7 @@ form.inline{display:inline;margin:0}
 
 _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
 <h1>Torre de controle</h1>
+{% if leads_forn and leads_forn > 0 %}<div class="metric" style="border-color:#b8860b;color:#e8cf9f">👨‍🌾 {{ leads_forn }} conta(s) marcaram interesse no <b>módulo Fornecedor</b> no cadastro — veja a tag "quer Fornecedor" na lista.</div>{% endif %}
 {% if aviso %}<div class="metric" style="border-color:#1d9e75;color:#9fe8c9">{{ aviso }}</div>{% endif %}
 <div class="cards">
 <div class="metric"><span>Contas</span><b>{{ resumo.total }}</b></div>
@@ -159,6 +160,7 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
     <div style="display:flex;gap:.35rem;align-items:center;flex-wrap:wrap">
       <span class="tag {{ c.status }}">{{ c.status }}</span>
       <span class="tag">{{ c.plano or '-' }}</span>
+      {% if c.interesse_modulos and 'fornecedor' in c.interesse_modulos %}<span class="tag" style="background:#3a2c08;color:#e8cf9f" title="marcou interesse no cadastro">quer Fornecedor</span>{% endif %}
       {% if c.qtd_cestas and c.qtd_cestas > 0 %}<span class="tag ativa" title="assinatura de cesta">cesta {{ c.qtd_cestas }}</span>{% endif %}
       <span class="mut" style="font-size:.78rem">vence {{ c.vencimento.strftime('%d/%m/%y') if c.vencimento else '-' }}</span>
       <button type="button" onclick="admToggle({{ c.id }})" id="tgl-{{ c.id }}" style="padding:.3rem .7rem;font-size:.78rem;background:transparent;border:1px solid #333;color:#5dcaa5">detalhes</button>
@@ -512,6 +514,7 @@ def admin_home(request: Request, busca: str = ""):
 
         sql = """select ct.id, ct.nome, ct.email, ct.tipo, ct.plano, ct.status, ct.vencimento,
                         ct.limite_mensagens_dia, ct.limite_cupons_dia, ct.eh_fornecedor,
+                        coalesce(ct.interesse_modulos,'') as interesse_modulos,
                         (select count(*) from membros m where m.conta_id = ct.id and m.ativo) as membros,
                         coalesce((select mensagens from uso_diario u
                                   where u.conta_id = ct.id and u.dia = current_date),0) as msg_hoje,
@@ -534,7 +537,8 @@ def admin_home(request: Request, busca: str = ""):
             termo = f"%{busca.strip()}%"; params = [termo, termo, termo]
         sql += " order by ct.id desc limit 200"
         cols = ["id", "nome", "email", "tipo", "plano", "status", "vencimento",
-                "limite_mensagens_dia", "limite_cupons_dia", "eh_fornecedor", "membros",
+                "limite_mensagens_dia", "limite_cupons_dia", "eh_fornecedor",
+                "interesse_modulos", "membros",
                 "msg_hoje", "cup_hoje", "msg_mes", "cup_mes", "qtd_cestas", "endereco", "cep"]
         contas = [dict(zip(cols, r)) for r in c.execute(sql, params).fetchall()]
 
@@ -569,10 +573,17 @@ def admin_home(request: Request, busca: str = ""):
     modulos_admin = [_SN(codigo=r[0], nome=r[1], preco_centavos=r[2], ativo=r[3])
                      for r in _md]
     beta_gratis = _cfg.beta_gratis_ativo(get_pool())
+    try:
+        with get_pool().connection() as _cx:
+            leads_forn = _cx.execute(
+                "select count(*) from contas where interesse_modulos ilike %s",
+                ("%fornecedor%",)).fetchone()[0]
+    except Exception:
+        leads_forn = 0
     return HTMLResponse(_env.get_template("ahome").render(
         resumo=resumo, contas=contas, eventos=eventos, nichos=nichos, busca=busca,
         planos_admin=planos_admin, modulos_admin=modulos_admin,
-        beta_gratis=beta_gratis,
+        beta_gratis=beta_gratis, leads_forn=leads_forn,
         aviso=request.session.pop("admin_aviso", None)))
 
 

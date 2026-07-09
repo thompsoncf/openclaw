@@ -254,10 +254,30 @@ _CADASTRO = """{% extends "base" %}{% block conteudo %}
 <div class="card"><h1>Criar sua conta</h1>
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
 <form method="post" action="/cadastro">
-<label>Plano</label><select name="plano">
-{% for p in planos %}<option value="{{ p[0] }}">{{ p[1] }} — {% if beta_gratis %}Grátis (beta){% else %}{{ brl(p[3]) }}/mês{% endif %}
-{% if p[2]=='pj' %}(inclui {{ p[4] }} usuários{% if not beta_gratis %}; extra {{ brl(p[5]) }}{% endif %}){% elif p[4]>1 %}(até {{ p[4] }} pessoas){% endif %}</option>{% endfor %}
-</select>
+<label style="margin-bottom:.3rem;display:block">Escolha seu plano</label>
+<div class="mut" style="font-size:.8rem;margin-bottom:.6rem">Tudo grátis durante o beta — experimente sem compromisso.</div>
+<div style="display:grid;gap:.5rem;margin-bottom:1rem">
+{% for p in planos %}{% if p[0] != 'zaq_cesta' %}
+<label style="display:block;background:{% if p[2]=='pj' %}#14251c{% else %}#161617{% endif %};border:{% if p[2]=='pj' %}2px solid #1d9e75{% else %}1px solid #232325{% endif %};border-radius:10px;padding:.7rem .9rem;cursor:pointer">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <span style="color:#f4f4f4;font-weight:600;font-size:.95rem"><input type="radio" name="plano" value="{{ p[0] }}" {% if p[2]=='pj' %}checked{% endif %} style="width:auto;margin-right:.5rem">{% if p[2]=='pj' %}🏢 {% endif %}{{ p[1] }}</span>
+    <span style="background:#15301f;color:#5dcaa5;font-size:.62rem;padding:.1rem .5rem;border-radius:9px">{% if beta_gratis %}Grátis (beta){% else %}{{ brl(p[3]) }}/mês{% endif %}</span>
+  </div>
+  <div class="mut" style="font-size:.74rem;margin-top:.35rem;margin-left:1.4rem">
+    {% if p[2]=='pj' %}Contas a pagar/receber, funcionários e folha, DRE e relatório pro contador. Inclui {{ p[4] }} membros.{% elif p[4]>1 %}As contas da casa, até {{ p[4] }} pessoas no mesmo caixa.{% else %}Suas contas pessoais — cupom por foto, gastos no WhatsApp.{% endif %}
+  </div>
+</label>
+{% endif %}{% endfor %}
+</div>
+
+<div style="background:#161617;border:1px dashed #3a3a3d;border-radius:10px;padding:.7rem .9rem;margin-bottom:1rem">
+  <div style="color:#b4b2a9;font-size:.82rem;font-weight:600;margin-bottom:.4rem">Quer vender também? (nossa equipe ativa e te ajuda)</div>
+  <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
+    <input type="checkbox" name="interesse" value="fornecedor" style="width:auto">
+    <span style="color:#ececec;font-size:.82rem">👨‍🌾 Tenho interesse no <b>módulo Fornecedor</b> (loja / marketplace)</span>
+  </label>
+  <div class="mut" style="font-size:.7rem;margin-top:.2rem;margin-left:1.6rem">Ao marcar, avisamos seu interesse pra equipe. Você não é cobrado por isso.</div>
+</div>
 <label>Seu nome</label><input name="nome" required maxlength="80">
 <label>E-mail</label><input name="email" type="email" required maxlength="120">
 <label>Senha</label><input name="senha" type="password" required minlength="8" maxlength="72">
@@ -4379,6 +4399,7 @@ def cadastro_envia(request: Request, background: BackgroundTasks,
                    email: str = Form(...), senha: str = Form(...),
                    documento: str = Form(""), whatsapp: str = Form(...),
                    cep: str = Form(""), endereco: str = Form(""),
+                   interesse: str = Form(""),
                    next: str = Form("")):
     pool = get_pool()
     email = email.strip().lower()
@@ -4440,6 +4461,9 @@ def cadastro_envia(request: Request, background: BackgroundTasks,
                    values (%s, %s, 'dono', %s)""",
                 (conta_id, nome.strip(), zap),
             )
+            if interesse.strip():
+                c.execute("update contas set interesse_modulos=%s where id=%s",
+                          (interesse.strip()[:200], conta_id))
             c.commit()
     except Exception as e:  # captura violação de unique constraint
         msg_lower = str(e).lower()

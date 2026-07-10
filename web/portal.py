@@ -441,10 +441,6 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
     <span class="fc-txt"><span class="fc-tit">Cestas</span><span class="fc-leg">Os tamanhos de cesta que seus clientes podem assinar.</span></span>
   </button>
   <div class="forn-grupo">Gestão</div>
-  <button type="button" class="forn-card" onclick="fornAbrir('compras')">
-    <span class="fc-tile amber">🛒</span>
-    <span class="fc-txt"><span class="fc-tit">Compras</span><span class="fc-leg">Entradas do CEASA e o estoque que abastece a loja.</span></span>
-  </button>
   <a href="/painel/fornecedor/financeiro" class="forn-card" style="text-decoration:none">
     <span class="fc-tile amber">💰</span>
     <span class="fc-txt"><span class="fc-tit">Financeiro</span><span class="fc-leg">Quanto você ganhou, os repasses e as comissões.</span></span>
@@ -453,74 +449,6 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
 
 <!-- SEÇÃO: Meus dados -->
 
-
-<!-- SEÇÃO: Compras -->
-<div id="forn-compras" class="forn-secao" style="display:none">
-  <button type="button" class="forn-voltar" onclick="fornVoltar()">← voltar</button>
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
-    <h3 style="margin:0">Compras</h3>
-    <button type="button" onclick="fornShowNovaCompra()" style="padding:.5rem 1rem;background:#1d9e75;color:#fff;border:0;border-radius:6px;cursor:pointer;font-weight:500;font-size:.9rem">+ nova compra</button>
-  </div>
-
-  <!-- LISTA DE COMPRAS -->
-  <div id="forn-compras-lista" style="display:flex;flex-direction:column;gap:.8rem">
-    {% if compras %}
-      {% for c in compras %}
-      <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1rem">
-        <div style="display:flex;justify-content:space-between;align-items:start">
-          <div>
-            <strong>#{{ c.id }}</strong> · <span class="mut">{{ c.data_compra }}</span> · <span style="{% if c.status == 'confirmada' %}color:#1d9e75{% else %}color:#ffa500{% endif %}">{{ c.status }}</span>
-            <div class="mut" style="font-size:.85rem;margin-top:.3rem">Total: <strong>R$ {{ "%.2f" | format(c.total_centavos / 100) }}</strong> | Origem: {{ c.origem_nome or '-' }} | Fonte: {{ c.fonte }}</div>
-          </div>
-          <div style="display:flex;gap:.4rem">
-            <a href="/painel/fornecedor/compras/{{ c.id }}" style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;border-radius:4px;padding:.3rem .6rem;cursor:pointer;font-size:.85rem;text-decoration:none;display:inline-block">revisar</a>
-          </div>
-        </div>
-      </div>
-      {% endfor %}
-    {% else %}
-    <p class="mut">Nenhuma compra ainda. Clique em "+ nova compra" pra começar.</p>
-    {% endif %}
-  </div>
-
-  <!-- MODAL: Nova Compra -->
-  <div id="forn-nova-compra" style="display:none;margin-top:2rem;padding:1.2rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px">
-    <h4 style="margin-top:0">Nova compra</h4>
-    <div style="display:flex;gap:.6rem;margin-bottom:1rem">
-      <button type="button" onclick="fornShowCompraManual()" style="flex:1;background:#1d9e75;color:#fff;padding:.5rem;border:0;border-radius:6px;cursor:pointer;font-weight:500">Manual (digitar itens)</button>
-      <button type="button" onclick="fornShowCompraNota()" style="flex:1;background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;padding:.5rem;border-radius:6px;cursor:pointer;font-weight:500">Com nota (em breve)</button>
-    </div>
-    <button type="button" onclick="fornHideNovaCompra()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;font-size:.85rem">Cancelar</button>
-  </div>
-
-  <!-- MODAL: Compra Manual -->
-  <div id="forn-compra-manual" style="display:none;margin-top:1rem;padding:1rem;background:#2a2a2b;border-radius:6px">
-    <h4 style="margin-top:0;margin-bottom:.8rem">Nova compra manual</h4>
-    <form method="post" action="/painel/fornecedor/compras/criar">
-      <label>Data da compra</label><input type="date" name="data_compra" style="width:100%">
-      <label>De onde comprou?</label>
-      <select name="origem_id" id="forn-compra-origem-sel" style="width:100%">
-        <option value="">Selecione uma origem</option>
-        {% for o in origens %}<option value="{{ o.id }}">{{ o.nome }}</option>{% endfor %}
-      </select>
-      <button type="button" onclick="fornShowNovaOrigemCompra()" style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;padding:.3rem .6rem;cursor:pointer;font-size:.85rem;margin-top:.3rem">+ Nova origem</button>
-      <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.8rem;width:100%;font-weight:500">Criar compra</button>
-    </form>
-    <button type="button" onclick="fornHideCompraManual()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.5rem;font-size:.85rem">Cancelar</button>
-  </div>
-
-  <!-- MODAL: Nova Origem (Compras) -->
-  <div id="forn-nova-origem-compra" style="display:none;margin-top:1rem;padding:1rem;background:#1c1c1f;border-radius:6px">
-    <h4 style="margin-top:0;margin-bottom:.6rem">Nova origem</h4>
-    <form method="post" action="/painel/fornecedor/compras/origem">
-      <label>Nome</label><input name="nome" required placeholder="ex: CEASA, Sítio do João" style="width:100%">
-      <label>Contato (opcional)</label><input name="contato" placeholder="tel, email, whatsapp" style="width:100%">
-      <button style="background:#1d9e75;color:#fff;padding:.4rem .8rem;border:0;border-radius:4px;cursor:pointer;margin-top:.5rem;font-weight:500">Criar origem</button>
-    </form>
-    <button type="button" onclick="fornHideNovaOrigemCompra()" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;font-size:.85rem;margin-top:.5rem">Cancelar</button>
-  </div>
-
-</div>
 
 <!-- SEÇÃO: Cestas -->
 <div id="forn-cestas" class="forn-secao" style="display:none">
@@ -602,40 +530,17 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
 <script>
 function fornAbrir(secao){
   document.getElementById('forn-menu').style.display = 'none';
-  ['compras','cestas','pedidos','financeiro'].forEach(function(s){
+  ['cestas','pedidos','financeiro'].forEach(function(s){
     document.getElementById('forn-'+s).style.display = (s===secao ? 'block' : 'none');
   });
 }
 function fornVoltar(){
   document.getElementById('forn-menu').style.display = 'grid';
-  ['compras','cestas','pedidos','financeiro'].forEach(function(s){
+  ['cestas','pedidos','financeiro'].forEach(function(s){
     document.getElementById('forn-'+s).style.display = 'none';
   });
 }
 // COMPRAS
-function fornShowNovaCompra(){
-  document.getElementById('forn-nova-compra').style.display = 'block';
-}
-function fornHideNovaCompra(){
-  document.getElementById('forn-nova-compra').style.display = 'none';
-}
-function fornShowCompraManual(){
-  document.getElementById('forn-compra-manual').style.display = 'block';
-  document.getElementById('forn-nova-compra').style.display = 'none';
-}
-function fornHideCompraManual(){
-  document.getElementById('forn-compra-manual').style.display = 'none';
-  document.getElementById('forn-nova-compra').style.display = 'block';
-}
-function fornShowCompraNota(){
-  alert('Leitura de nota — em breve. Por enquanto use compra manual.');
-}
-function fornShowNovaOrigemCompra(){
-  document.getElementById('forn-nova-origem-compra').style.display = 'block';
-}
-function fornHideNovaOrigemCompra(){
-  document.getElementById('forn-nova-origem-compra').style.display = 'none';
-}
 </script>
 {% endblock %}"""
 
@@ -6137,41 +6042,6 @@ async def salvar_banner_fornecedor(request: Request, arquivo: UploadFile = File(
     return JSONResponse({"ok": True, "banner_url": url})
 
 
-@router.post("/painel/fornecedor/compras/criar")
-def painel_compras_criar(request: Request,
-                        data_compra: str = Form(""),
-                        origem_id: int = Form(None)):
-    from finance import catalogo as cat_mod
-    conta = conta_logada(request)
-    if conta is None or not conta[8]:
-        return RedirectResponse("/painel/fornecedor", status_code=303)
-    try:
-        compra_id = cat_mod.criar_compra(
-            get_pool(), conta[0], origem_id, data_compra, fonte="manual"
-        )
-        request.session["compra_id_atual"] = compra_id
-        request.session["aviso"] = f"Compra #{compra_id} criada em rascunho. Adicione itens."
-    except Exception as e:
-        request.session["erro"] = f"Erro: {str(e)}"
-    return RedirectResponse("/painel/fornecedor", status_code=303)
-
-
-@router.post("/painel/fornecedor/compras/origem")
-def painel_compras_origem(request: Request,
-                         nome: str = Form(""),
-                         contato: str = Form("")):
-    from finance import catalogo as cat_mod
-    conta = conta_logada(request)
-    if conta is None or not conta[8]:
-        return RedirectResponse("/painel/fornecedor", status_code=303)
-    try:
-        cat_mod.criar_origem(get_pool(), conta[0], nome, contato)
-        request.session["aviso"] = f"Origem '{nome}' criada!"
-    except Exception as e:
-        request.session["erro"] = f"Erro: {str(e)}"
-    return RedirectResponse("/painel/fornecedor", status_code=303)
-
-
 @router.post("/painel/fornecedor/cestas/criar")
 def painel_cestas_criar(request: Request,
                        nome: str = Form(...),
@@ -6196,82 +6066,6 @@ def painel_cestas_criar(request: Request,
                                  qtd_frutas, qtd_legumes, qtd_verduras, qtd_temperos,
                                  descricao or None)
         request.session["aviso"] = "Tamanho de cesta criado."
-    except Exception as e:
-        request.session["erro"] = f"Erro: {str(e)}"
-    return RedirectResponse("/painel/fornecedor", status_code=303)
-
-
-@router.get("/painel/fornecedor/compras/{compra_id}", response_class=HTMLResponse)
-def painel_compra_revisar(request: Request, compra_id: int):
-    from finance import catalogo as cat_mod
-    conta = conta_logada(request)
-    if conta is None or not conta[8]:
-        return RedirectResponse("/painel/fornecedor", status_code=303)
-    pool = get_pool()
-    try:
-        itens = cat_mod.listar_itens_compra(pool, conta[0], compra_id)
-    except Exception:
-        request.session["erro"] = "Compra não encontrada."
-        return RedirectResponse("/painel/fornecedor", status_code=303)
-    produtos = cat_mod.listar_produtos(pool, conta[0])
-    with pool.connection() as c:
-        cab = c.execute(
-            """select id, data_compra, total_centavos, status,
-                      (select nome from origem_compra where id = origem_id)
-               from compras_fornecedor where id=%s and fornecedor_id=%s""",
-            (compra_id, conta[0]),
-        ).fetchone()
-    if cab is None:
-        request.session["erro"] = "Compra não encontrada."
-        return RedirectResponse("/painel/fornecedor", status_code=303)
-    compra = {"id": cab[0], "data": cab[1], "total_centavos": cab[2],
-              "status": cab[3], "origem_nome": cab[4]}
-    return _render("compra_revisar", request, conta=conta, compra=compra,
-                   itens=itens, produtos=produtos,
-                   erro=request.session.pop("erro", None),
-                   aviso=request.session.pop("aviso", None))
-
-
-@router.post("/painel/fornecedor/compras/{compra_id}/item")
-def painel_compra_add_item(request: Request, compra_id: int,
-                          produto_id: int = Form(...),
-                          quantidade: float = Form(...),
-                          custo_unit: str = Form(...)):
-    from finance import catalogo as cat_mod
-    conta = conta_logada(request)
-    if conta is None or not conta[8]:
-        return RedirectResponse("/painel/fornecedor", status_code=303)
-    s = custo_unit.replace("R$", "").strip().replace(".", "").replace(",", ".") \
-        if "," in custo_unit else custo_unit.replace("R$", "").strip()
-    try:
-        custo_centavos = int(round(float(s) * 100))
-    except ValueError:
-        custo_centavos = 0
-    try:
-        prods = {p["id"]: p["nome"] for p in cat_mod.listar_produtos(get_pool(), conta[0])}
-        desc = prods.get(produto_id, "produto")
-        with get_pool().connection() as c:
-            urow = c.execute("select unidade from catalogo_produtos where id=%s", (produto_id,)).fetchone()
-        unidade = urow[0] if urow else "kg"
-        cat_mod.adicionar_item_compra(
-            get_pool(), conta[0], compra_id, desc, quantidade,
-            custo_centavos, unidade=unidade, produto_id=produto_id,
-        )
-        request.session["aviso"] = "Item adicionado."
-    except Exception as e:
-        request.session["erro"] = f"Erro: {str(e)}"
-    return RedirectResponse(f"/painel/fornecedor/compras/{compra_id}", status_code=303)
-
-
-@router.post("/painel/fornecedor/compras/{compra_id}/confirmar")
-def painel_compra_confirmar(request: Request, compra_id: int):
-    from finance import catalogo as cat_mod
-    conta = conta_logada(request)
-    if conta is None or not conta[8]:
-        return RedirectResponse("/painel/fornecedor", status_code=303)
-    try:
-        r = cat_mod.confirmar_compra(get_pool(), conta[0], compra_id)
-        request.session["aviso"] = f"✓ Compra confirmada! {r['itens']} item(ns) deram entrada no estoque."
     except Exception as e:
         request.session["erro"] = f"Erro: {str(e)}"
     return RedirectResponse("/painel/fornecedor", status_code=303)

@@ -59,30 +59,44 @@ def listar_origens(pool, fornecedor_id: int, incluir_inativas: bool = False) -> 
 # ----------------------------------------------------------------------------
 # PRODUTOS do catálogo
 # ----------------------------------------------------------------------------
-UNIDADES_VALIDAS = {"kg", "duzia", "unidade", "maco", "bandeja", "litro", "pacote"}
+# Unidades válidas = união de todas as unidades de todos os nichos (finance/nichos.py).
+# Antes era uma lista fixa de hortifrúti; agora o vocabulário é por nicho. Mantido
+# como conjunto pra retrocompatibilidade de quem já importava UNIDADES_VALIDAS.
+from .nichos import (
+    TODAS_UNIDADES as UNIDADES_VALIDAS,
+    unidade_valida_para as _unidade_valida_para,
+    unidade_padrao as _unidade_padrao,
+)
 
 
 def criar_produto(
     pool,
     fornecedor_id: int,
     nome: str,
-    unidade: str = "kg",
+    unidade: str = "unidade",
     categoria: str | None = None,
     preco_venda_centavos: int = 0,
     estoque_minimo: float = 0,
     foto_url: str | None = None,
     descricao_curta: str | None = None,
+    nicho: str | None = None,
 ) -> int:
-    """Cria um produto no catálogo do fornecedor. Retorna o id.
+    """Cria um produto no catálogo da conta. Retorna o id.
 
     Saldo e custo médio começam em 0 – sobem quando houver ENTRADA de estoque.
+    `nicho` (slug) define o vocabulário de unidades; se dado e a unidade não
+    pertencer ao nicho, cai no padrão do nicho. Se omitido, valida contra a
+    união de todas as unidades conhecidas.
     """
     nome = (nome or "").strip()
     if not nome:
         raise ValueError("nome do produto é obrigatório")
-    unidade = (unidade or "kg").strip().lower()
-    if unidade not in UNIDADES_VALIDAS:
-        unidade = "kg"
+    unidade = (unidade or "").strip().lower()
+    if nicho:
+        if not _unidade_valida_para(nicho, unidade):
+            unidade = _unidade_padrao(nicho)
+    elif unidade not in UNIDADES_VALIDAS:
+        unidade = "unidade"
     with pool.connection() as c:
         row = c.execute(
             """insert into catalogo_produtos

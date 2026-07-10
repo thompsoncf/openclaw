@@ -577,22 +577,25 @@ def obter_dados_empresa(pool, conta_id: int) -> dict:
             """select coalesce(documento,''), coalesce(razao_social,''),
                       coalesce(nome_fantasia,''), coalesce(endereco,''),
                       coalesce(bairro,''), coalesce(cep,''),
-                      coalesce(cidade,''), coalesce(uf,'')
+                      coalesce(cidade,''), coalesce(uf,''),
+                      coalesce(email_empresa,''), coalesce(telefone,'')
                  from contas where id=%s""",
             (conta_id,),
         ).fetchone()
     if not r:
         return {"documento": "", "razao_social": "", "nome_fantasia": "",
-                "endereco": "", "bairro": "", "cep": "", "cidade": "", "uf": ""}
+                "endereco": "", "bairro": "", "cep": "", "cidade": "", "uf": "",
+                "email_empresa": "", "telefone": ""}
     return {"documento": r[0], "razao_social": r[1], "nome_fantasia": r[2],
             "endereco": r[3], "bairro": r[4], "cep": r[5],
-            "cidade": r[6], "uf": r[7]}
+            "cidade": r[6], "uf": r[7], "email_empresa": r[8], "telefone": r[9]}
 
 
 def salvar_dados_empresa(pool, conta_id: int, *, documento: str = "",
                          razao_social: str = "", nome_fantasia: str = "",
                          endereco: str = "", bairro: str = "", cep: str = "",
-                         cidade: str = "", uf: str = "") -> tuple[bool, str]:
+                         cidade: str = "", uf: str = "", email_empresa: str = "",
+                         telefone: str = "") -> tuple[bool, str]:
     """Grava os dados da empresa na conta. Valida CNPJ (14 dígitos) e razão.
 
     Retorna (ok, mensagem). Multi-tenant: grava só na própria conta.
@@ -609,13 +612,16 @@ def salvar_dados_empresa(pool, conta_id: int, *, documento: str = "",
     _cep = "".join(ch for ch in (cep or "") if ch.isdigit()) or None
     cid = (cidade or "").strip() or None
     est = (uf or "").strip().upper()[:2] or None
+    mail = (email_empresa or "").strip().lower() or None
+    tel = (telefone or "").strip() or None
     with pool.connection() as c:
         c.execute(
             """update contas
                   set documento=%s, razao_social=%s, nome_fantasia=%s,
-                      endereco=%s, bairro=%s, cep=%s, cidade=%s, uf=%s
+                      endereco=%s, bairro=%s, cep=%s, cidade=%s, uf=%s,
+                      email_empresa=%s, telefone=%s
                 where id=%s""",
-            (doc, razao, fantasia, end, bai, _cep, cid, est, conta_id),
+            (doc, razao, fantasia, end, bai, _cep, cid, est, mail, tel, conta_id),
         )
         c.commit()
     return True, "Dados da empresa salvos."

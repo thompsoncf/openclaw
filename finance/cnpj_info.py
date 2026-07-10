@@ -17,7 +17,7 @@ _TIMEOUT = 8
 
 
 def consultar_cnpj(cnpj: str) -> dict | None:
-    """Consulta o CNPJ na BrasilAPI e devolve {nome, endereco, cidade, uf}.
+    """Consulta o CNPJ na BrasilAPI e devolve {nome, endereco, bairro, cep, cidade, uf, email, telefone, ...}.
     None se nao achar ou falhar. nome usa fantasia (mais reconhecivel) com
     fallback pra razao social."""
     cnpj = "".join(c for c in (cnpj or "") if c.isdigit())
@@ -46,8 +46,25 @@ def consultar_cnpj(cnpj: str) -> dict | None:
     uf = (dados.get("uf") or "").strip() or None
     cnae_desc = (dados.get("cnae_fiscal_descricao") or "").strip() or None
     ramo = classificar_ramo(cnae_desc)
+    # contato: email e telefone vem do cadastro da Receita (pode estar
+    # desatualizado) — usado so como SUGESTAO, o cliente confirma na tela.
+    email = (dados.get("email") or "").strip().lower() or None
+    ddd = (dados.get("ddd_telefone_1") or "").strip()
+    telefone = _formata_telefone(ddd)
     return {"nome": nome, "endereco": endereco, "bairro": bairro, "cep": cep,
-            "cidade": cidade, "uf": uf, "cnae": cnae_desc, "ramo": ramo}
+            "cidade": cidade, "uf": uf, "cnae": cnae_desc, "ramo": ramo,
+            "email": email, "telefone": telefone}
+
+
+def _formata_telefone(bruto: str) -> str | None:
+    """Formata o telefone da Receita. Ex.: '8632220000' -> '(86) 3222-0000'.
+    O campo ddd_telefone_1 da BrasilAPI ja vem com DDD+numero juntos."""
+    d = "".join(c for c in (bruto or "") if c.isdigit())
+    if len(d) == 10:
+        return f"({d[:2]}) {d[2:6]}-{d[6:]}"
+    if len(d) == 11:
+        return f"({d[:2]}) {d[2:7]}-{d[7:]}"
+    return d or None
 
 
 # mapeia palavras-chave do CNAE -> ramo (departamento) da loja.

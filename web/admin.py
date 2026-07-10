@@ -185,7 +185,7 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
         <div style="font-size:.88rem">{{ c.msg_mes }} msg<br>{{ c.cup_mes }} cup</div>
       </div>
     </div>
-    {% if c.documento or c.razao_social or c.nome_fantasia %}
+    {% if c.documento or c.razao_social or c.nome_fantasia or c.email_empresa or c.telefone %}
     <div style="background:#161617;border-radius:8px;padding:.7rem .8rem;margin-top:.6rem">
       <div class="mut" style="font-size:.72rem;text-transform:uppercase;margin-bottom:.5rem">{% if c.tipo == 'pj' %}🏢 Dados da empresa{% else %}Dados cadastrais{% endif %}</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.5rem .9rem;font-size:.82rem">
@@ -194,6 +194,8 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
         {% if c.nome_fantasia %}<div><div class="mut" style="font-size:.68rem">Nome fantasia</div>{{ c.nome_fantasia }}</div>{% endif %}
         {% if c.cidade or c.uf %}<div><div class="mut" style="font-size:.68rem">Cidade / UF</div>{{ c.cidade }}{% if c.uf %} / {{ c.uf }}{% endif %}</div>{% endif %}
         {% if c.bairro %}<div><div class="mut" style="font-size:.68rem">Bairro</div>{{ c.bairro }}</div>{% endif %}
+        {% if c.email_empresa %}<div><div class="mut" style="font-size:.68rem">E-mail</div>{{ c.email_empresa }}</div>{% endif %}
+        {% if c.telefone %}<div><div class="mut" style="font-size:.68rem">Telefone</div>{{ c.telefone }}</div>{% endif %}
       </div>
     </div>
     {% endif %}
@@ -547,7 +549,9 @@ def admin_home(request: Request, busca: str = ""):
                         coalesce(ct.nome_fantasia,'') as nome_fantasia,
                         coalesce(ct.bairro,'') as bairro,
                         coalesce(ct.cidade,'') as cidade,
-                        coalesce(ct.uf,'') as uf
+                        coalesce(ct.uf,'') as uf,
+                        coalesce(ct.email_empresa,'') as email_empresa,
+                        coalesce(ct.telefone,'') as telefone
                  from contas ct"""
         params: list = []
         if busca.strip():
@@ -558,7 +562,8 @@ def admin_home(request: Request, busca: str = ""):
                 "limite_mensagens_dia", "limite_cupons_dia", "eh_fornecedor",
                 "interesse_modulos", "membros",
                 "msg_hoje", "cup_hoje", "msg_mes", "cup_mes", "qtd_cestas", "endereco", "cep",
-                "documento", "razao_social", "nome_fantasia", "bairro", "cidade", "uf"]
+                "documento", "razao_social", "nome_fantasia", "bairro", "cidade", "uf",
+                "email_empresa", "telefone"]
         contas = [dict(zip(cols, r)) for r in c.execute(sql, params).fetchall()]
 
         ecols = ["conta_id", "tipo", "detalhe", "criado_em"]

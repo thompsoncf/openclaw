@@ -2760,6 +2760,13 @@ _EMPRESA_DADOS = """{% extends "base" %}{% block conteudo %}
       <div><label>UF</label>
         <input id="uf" name="uf" value="{{ dados.uf }}" maxlength="2" placeholder="UF" style="text-transform:uppercase"></div>
     </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.7rem">
+      <div><label>E-mail da empresa</label>
+        <input id="email_empresa" name="email_empresa" type="email" value="{{ dados.email_empresa }}" placeholder="contato@empresa.com"></div>
+      <div><label>Telefone</label>
+        <input id="telefone" name="telefone" value="{{ dados.telefone }}" placeholder="(00) 0000-0000"></div>
+    </div>
+    <div class="mut" style="font-size:.72rem;margin-top:.2rem">O e-mail/telefone vêm do cadastro da Receita e podem estar desatualizados — confira antes de salvar.</div>
     <button type="submit" style="background:#1d9e75;color:#fff;border:0;border-radius:8px;padding:.7rem 1.4rem;font-weight:600;cursor:pointer;margin-top:1rem">Salvar e continuar →</button>
   </form>
 </div>
@@ -2780,6 +2787,8 @@ async function buscarCnpj(){
       if(d.cep) document.getElementById('cep').value=d.cep;
       if(d.cidade) document.getElementById('cidade').value=d.cidade;
       if(d.uf) document.getElementById('uf').value=d.uf;
+      if(d.email) document.getElementById('email_empresa').value=d.email;
+      if(d.telefone) document.getElementById('telefone').value=d.telefone;
       msg.textContent='✓ Dados encontrados — confira e ajuste se precisar.';
     } else { msg.textContent='Não achei esse CNPJ. Preencha manualmente.'; }
   }catch(e){ msg.textContent='Erro na busca. Preencha manualmente.'; }
@@ -6991,6 +7000,7 @@ def painel_empresa_dados_salvar(
     nome_fantasia: str = Form(""), endereco: str = Form(""),
     bairro: str = Form(""), cep: str = Form(""),
     cidade: str = Form(""), uf: str = Form(""),
+    email_empresa: str = Form(""), telefone: str = Form(""),
 ):
     from finance import empresa as emp
     conta = conta_logada(request)
@@ -7002,13 +7012,15 @@ def painel_empresa_dados_salvar(
     ok, msg = emp.salvar_dados_empresa(
         pool, conta[0], documento=documento, razao_social=razao_social,
         nome_fantasia=nome_fantasia, endereco=endereco, bairro=bairro,
-        cep=cep, cidade=cidade, uf=uf)
+        cep=cep, cidade=cidade, uf=uf, email_empresa=email_empresa,
+        telefone=telefone)
     if not ok:
         d = emp.obter_dados_empresa(pool, conta[0])
         # devolve o que o usuário digitou + erro
         d.update({"documento": documento, "razao_social": razao_social,
                   "nome_fantasia": nome_fantasia, "endereco": endereco,
-                  "bairro": bairro, "cep": cep, "cidade": cidade, "uf": uf})
+                  "bairro": bairro, "cep": cep, "cidade": cidade, "uf": uf,
+                  "email_empresa": email_empresa, "telefone": telefone})
         return _render("empresa_dados", request, dados=d, tem_pj=True, erro=msg)
     return RedirectResponse("/painel/empresa", status_code=303)
 
@@ -7027,7 +7039,9 @@ def painel_empresa_buscar_cnpj(request: Request, cnpj: str = ""):
                          "bairro": dados.get("bairro") or "",
                          "cep": dados.get("cep") or "",
                          "cidade": dados.get("cidade") or "",
-                         "uf": dados.get("uf") or ""})
+                         "uf": dados.get("uf") or "",
+                         "email": dados.get("email") or "",
+                         "telefone": dados.get("telefone") or ""})
 
 
 def _mascara_cnpj(doc: str) -> str:

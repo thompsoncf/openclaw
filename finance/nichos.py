@@ -26,40 +26,73 @@ from __future__ import annotations
 # 'label' é só um nome amigável pra UI. 'unidades' e 'categorias' são as listas
 # que aparecem nos selects do cadastro de produto. A ordem importa: [0] é o padrão.
 NICHOS: dict[str, dict] = {
+    # ---- NICHOS DE PRODUTO (tem estoque: saldo sobe/desce) ----
     "hortifruti": {
         "label": "Hortifrúti",
+        "tipo": "produto",
         "unidades": ["kg", "duzia", "maco", "unidade", "bandeja", "litro", "pacote"],
         "categorias": ["fruta", "verdura", "legume", "tempero", "outro"],
     },
     "vestuario": {
         "label": "Vestuário / Acessórios",
+        "tipo": "produto",
         "unidades": ["peca", "par", "unidade"],
         "categorias": ["masculino", "feminino", "infantil", "calcado", "acessorio", "outro"],
     },
     "minimercado": {
         "label": "Minimercado / Mercearia",
+        "tipo": "produto",
         "unidades": ["unidade", "kg", "pacote", "litro", "caixa", "fardo"],
         "categorias": ["alimento", "bebida", "limpeza", "higiene", "outro"],
     },
     "alimentacao": {
         "label": "Alimentação / Lanche",
+        "tipo": "produto",
         "unidades": ["unidade", "porcao", "prato", "litro"],
         "categorias": ["salgado", "doce", "bebida", "prato", "combo", "outro"],
     },
     "farmacia": {
         "label": "Farmácia / Saúde",
+        "tipo": "produto",
         "unidades": ["caixa", "unidade", "frasco", "ml", "comprimido"],
         "categorias": ["medicamento", "higiene", "infantil", "beleza", "outro"],
     },
     "beleza": {
         "label": "Beleza / Cosméticos",
+        "tipo": "produto",
         "unidades": ["unidade", "frasco", "kit"],
         "categorias": ["cabelo", "pele", "maquiagem", "perfume", "unha", "outro"],
     },
     "generico": {
         "label": "Outro / Genérico",
+        "tipo": "produto",
         "unidades": ["unidade", "kg", "caixa", "pacote", "litro"],
         "categorias": [],  # livre: o lojista digita a categoria que quiser
+    },
+    # ---- NICHOS DE SERVIÇO (nao tem estoque: presta e registra) ----
+    "consultoria": {
+        "label": "Consultoria / Tecnologia",
+        "tipo": "servico",
+        "unidades": ["hora", "modulo", "projeto", "pacote", "mensal"],
+        "categorias": ["consultoria", "desenvolvimento", "suporte", "treinamento", "outro"],
+    },
+    "salao": {
+        "label": "Beleza / Salão (serviço)",
+        "tipo": "servico",
+        "unidades": ["sessao", "hora", "pacote"],
+        "categorias": ["cabelo", "unha", "estetica", "barba", "outro"],
+    },
+    "educacao": {
+        "label": "Educação / Aulas",
+        "tipo": "servico",
+        "unidades": ["aula", "hora", "modulo", "pacote", "mensal"],
+        "categorias": ["reforco", "idioma", "musica", "curso", "outro"],
+    },
+    "servicos_gerais": {
+        "label": "Serviços gerais",
+        "tipo": "servico",
+        "unidades": ["servico", "hora", "diaria", "visita", "orcamento"],
+        "categorias": ["manutencao", "reparo", "instalacao", "limpeza", "outro"],
     },
 }
 
@@ -113,8 +146,27 @@ def label_do_nicho(slug: str | None) -> str:
 
 
 def lista_nichos() -> list[dict]:
-    """Todos os nichos pra montar um select: [{slug, label}, ...]."""
-    return [{"slug": s, "label": cfg["label"]} for s, cfg in NICHOS.items()]
+    """Todos os nichos pra montar um select: [{slug, label, tipo}, ...]."""
+    return [{"slug": s, "label": cfg["label"], "tipo": cfg.get("tipo", "produto")}
+            for s, cfg in NICHOS.items()]
+
+
+# ---------------------------------------------------------------------------
+# TIPO do nicho: 'produto' (tem estoque) ou 'servico' (nao tem estoque)
+# ---------------------------------------------------------------------------
+def tipo_do_nicho(slug: str | None) -> str:
+    """'produto' ou 'servico'. Default 'produto' (o generico e' produto)."""
+    return config_do_nicho(slug).get("tipo", "produto")
+
+
+def eh_servico(slug: str | None) -> bool:
+    return tipo_do_nicho(slug) == "servico"
+
+
+def lista_nichos_por_tipo(tipo: str) -> list[dict]:
+    """Nichos de um tipo ('produto'|'servico'): [{slug, label}, ...]."""
+    return [{"slug": s, "label": cfg["label"]}
+            for s, cfg in NICHOS.items() if cfg.get("tipo", "produto") == tipo]
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +179,9 @@ _UNIDADE_LABEL = {
     "peca": "peça", "par": "par", "caixa": "caixa", "fardo": "fardo",
     "porcao": "porção", "prato": "prato", "frasco": "frasco", "ml": "ml",
     "comprimido": "comprimido", "kit": "kit",
+    "hora": "hora", "modulo": "módulo", "projeto": "projeto", "mensal": "mensal",
+    "sessao": "sessão", "aula": "aula", "servico": "serviço", "diaria": "diária",
+    "visita": "visita", "orcamento": "orçamento",
 }
 
 

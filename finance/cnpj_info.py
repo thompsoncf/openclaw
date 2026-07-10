@@ -84,8 +84,18 @@ _RAMOS = [
                       "atacadista de alimentos", "alimentos")),
     ("Vestuario",    ("vestuario", "roupas", "confeccao", "artigos do vestuario",
                       "calcados", "moda", "boutique", "acessorios do vestuario")),
-    ("Beleza",       ("cosmetic", "perfumaria", "beleza", "salao", "cabelei",
-                      "estetica", "higiene pessoal", "manicure")),
+    # SERVICO de beleza (atende a pessoa) — vem ANTES de Beleza(produto) porque
+    # "salao/cabeleireiro/manicure" é serviço, nao venda de cosmético.
+    ("Salao",        ("salao", "cabelei", "manicure", "pedicure", "estetica",
+                      "barbearia", "spa")),
+    ("Beleza",       ("cosmetic", "perfumaria", "artigos de perfumaria")),
+    ("Consultoria",  ("consultoria", "tecnologia", "software", "sistemas",
+                      "desenvolvimento de programas", "desenvolvimento de sistemas",
+                      "informatica", "programacao", "assessoria")),
+    ("Educacao",     ("educac", "ensino", "escola", "curso", "treinamento",
+                      "aulas", "idiomas")),
+    ("ServicosGerais",("manutencao", "reparacao", "instalacao", "reparo",
+                       "servicos combinados", "limpeza predial")),
 ]
 
 
@@ -99,7 +109,11 @@ _RAMO_NICHO = {
     "Hortifruti":   "hortifruti",
     "Supermercado": "minimercado",
     "Vestuario":    "vestuario",
+    "Salao":        "salao",
     "Beleza":       "beleza",
+    "Consultoria":  "consultoria",
+    "Educacao":     "educacao",
+    "ServicosGerais": "servicos_gerais",
 }
 
 

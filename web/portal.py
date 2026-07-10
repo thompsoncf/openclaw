@@ -2843,7 +2843,8 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
             <div style="color:#6a8a7a;font-size:.66rem">{% if p.margem_pct is not none %}margem {{ p.margem_pct|round|int }}%{% endif %}</div>
           </div>
         </div>
-        <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.7rem;padding-top:.65rem;border-top:1px solid #242426">
+        <div class="prod-acoes" style="display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.7rem;padding-top:.65rem;border-top:1px solid #242426">
+          <button type="button" onclick="prodVender({{ p.id }})" style="background:#1d9e75;color:#fff;border:0;border-radius:6px;padding:.32rem .8rem;cursor:pointer;font-size:.76rem;font-weight:600">vender</button>
           <button type="button" onclick="prodEntrada({{ p.id }})" style="background:#173d2e;color:#5dcaa5;border:0;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem;font-weight:500">+ entrada</button>
           <button type="button" onclick="prodPerda({{ p.id }})" style="background:transparent;border:1px solid #3a3a3d;color:#b4b2a9;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem">perda</button>
           <button type="button" onclick="prodEditar({{ p.id }})" style="background:transparent;border:1px solid #3a3a3d;color:#b4b2a9;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem">editar</button>
@@ -2993,6 +2994,7 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
 <form method="post" id="prod-apagar-form" action="/painel/produtos/apagar" style="display:none"><input type="hidden" name="produto_id" id="prod-apagar-id"></form>
 
 <style>
+.prod-acoes button{width:auto;margin-top:0}
 .prod-modal{position:fixed;inset:0;z-index:1000;background:#000000aa;display:flex;align-items:center;justify-content:center;padding:1rem}
 .prod-modal-box{background:#1c1c1f;border:1px solid #2a2a2b;border-radius:12px;padding:1.3rem;max-width:440px;width:100%;max-height:88vh;overflow-y:auto}
 .prod-inp{width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin:.25rem 0 .6rem}
@@ -3001,12 +3003,13 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
 <script>
 window.PRODUTOS = {
   {% for p in produtos %}
-  "{{ p.id }}": { nome: {{ p.nome|tojson }}, unidade: {{ p.unidade|tojson }}, categoria: {{ (p.categoria or '')|tojson }}, preco: {{ (p.preco_venda_centavos/100)|n2 }}, minimo: {{ p.estoque_minimo }}, foto_url: {{ (p.foto_url or '')|tojson }}, em_promo: {{ 'true' if p.em_promo else 'false' }}, preco_promo: {{ ((p.preco_promo_centavos or 0)/100)|n2 }} }{% if not loop.last %},{% endif %}
+  "{{ p.id }}": { nome: {{ p.nome|tojson }}, unidade: {{ p.unidade|tojson }}, categoria: {{ (p.categoria or '')|tojson }}, preco: {{ (p.preco_venda_centavos/100)|tojson }}, minimo: {{ (p.estoque_minimo if p.estoque_minimo is not none else '')|tojson }}, foto_url: {{ (p.foto_url or '')|tojson }}, em_promo: {{ 'true' if p.em_promo else 'false' }}, preco_promo: {{ ((p.preco_promo_centavos or 0)/100)|tojson }} }{% if not loop.last %},{% endif %}
   {% endfor %}
 };
 var prodFotoEscolhida = null;
 var prodItensPlanilha = [];
 function prodFecha(id){ document.getElementById(id).style.display='none'; }
+function prodVender(id){ alert('Venda de balcão (PDV) chega na próxima leva. Este botão já fica no lugar.'); }
 function prodNovo(){ document.getElementById('prod-form-titulo').textContent='Novo produto'; document.getElementById('prod-edit-id').value=''; document.getElementById('prod-f-nome').value=''; document.getElementById('prod-f-preco').value=''; document.getElementById('prod-f-min').value=''; document.getElementById('prod-modal-form').style.display='flex'; }
 function prodImportar(){ document.getElementById('prod-modal-importar').style.display='flex'; }
 function prodFiltrar(q){ q=q.toLowerCase(); var cards=document.querySelectorAll('.prod-card'); for(var i=0;i<cards.length;i++){ cards[i].style.display=cards[i].getAttribute('data-nome').indexOf(q)>-1?'':'none'; } }

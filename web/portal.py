@@ -4804,9 +4804,10 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
         if "vende_produto" not in ctx:
             try:
                 from finance import empresa as _emp
+                _acesso = _emp.acesso_pj(get_pool(), request.session["conta_id"])
                 _ov = _emp.o_que_vende(get_pool(), request.session["conta_id"])
-                ctx["vende_produto"] = _ov["produto"]
-                ctx["vende_servico"] = _ov["servico"]
+                ctx["vende_produto"] = _ov["produto"] and _acesso
+                ctx["vende_servico"] = _ov["servico"] and _acesso
             except Exception:
                 ctx["vende_produto"] = False
                 ctx["vende_servico"] = False
@@ -7225,7 +7226,7 @@ def painel_produtos(request: Request):
     if conta is None:
         return RedirectResponse("/login", status_code=303)
     pool = get_pool()
-    if not emp.modulo_pj_ativo(pool, conta[0]):
+    if not emp.acesso_pj(pool, conta[0]):
         return RedirectResponse("/painel", status_code=303)
     ov = emp.o_que_vende(pool, conta[0])
     if not ov["produto"]:
@@ -7266,7 +7267,7 @@ def painel_produtos_salvar(request: Request,
     if conta is None:
         return RedirectResponse("/login", status_code=303)
     pool = get_pool()
-    if not emp.modulo_pj_ativo(pool, conta[0]):
+    if not emp.acesso_pj(pool, conta[0]):
         return RedirectResponse("/painel", status_code=303)
     try:
         s = preco_venda.replace("R$", "").strip()
@@ -7301,7 +7302,7 @@ def painel_produtos_entrada(request: Request,
     if conta is None:
         return RedirectResponse("/login", status_code=303)
     pool = get_pool()
-    if not emp.modulo_pj_ativo(pool, conta[0]):
+    if not emp.acesso_pj(pool, conta[0]):
         return RedirectResponse("/painel", status_code=303)
     try:
         custo_centavos = int(float(custo_unit or 0) * 100)
@@ -7327,7 +7328,7 @@ def painel_produtos_perda(request: Request,
     if conta is None:
         return RedirectResponse("/login", status_code=303)
     pool = get_pool()
-    if not emp.modulo_pj_ativo(pool, conta[0]):
+    if not emp.acesso_pj(pool, conta[0]):
         return RedirectResponse("/painel", status_code=303)
     try:
         r = cat.registrar_movimentacao(pool, conta[0], produto_id, "perda",
@@ -7345,7 +7346,7 @@ def painel_produtos_apagar(request: Request, produto_id: int = Form(...)):
     if conta is None:
         return RedirectResponse("/login", status_code=303)
     pool = get_pool()
-    if not emp.modulo_pj_ativo(pool, conta[0]):
+    if not emp.acesso_pj(pool, conta[0]):
         return RedirectResponse("/painel", status_code=303)
     try:
         cat.arquivar_produto(pool, conta[0], produto_id)
@@ -7365,7 +7366,7 @@ def painel_produtos_origem(request: Request,
     if conta is None:
         return RedirectResponse("/login", status_code=303)
     pool = get_pool()
-    if not emp.modulo_pj_ativo(pool, conta[0]):
+    if not emp.acesso_pj(pool, conta[0]):
         return RedirectResponse("/painel", status_code=303)
     try:
         cat.criar_origem(pool, conta[0], nome, contato)
@@ -7382,7 +7383,7 @@ def painel_produtos_foto(request: Request, dados: dict = Body(...)):
     if conta is None:
         return JSONResponse({"erro": "nao autenticado"}, status_code=401)
     pool = get_pool()
-    if not emp.modulo_pj_ativo(pool, conta[0]):
+    if not emp.acesso_pj(pool, conta[0]):
         return JSONResponse({"erro": "sem modulo pj"}, status_code=403)
     produto_id = int(dados.get("produto_id", 0))
     foto_url = (dados.get("foto_url") or "").strip()
@@ -7397,7 +7398,7 @@ def painel_produtos_promo(request: Request, dados: dict = Body(...)):
     if conta is None:
         return JSONResponse({"erro": "nao autenticado"}, status_code=401)
     pool = get_pool()
-    if not emp.modulo_pj_ativo(pool, conta[0]):
+    if not emp.acesso_pj(pool, conta[0]):
         return JSONResponse({"erro": "sem modulo pj"}, status_code=403)
     produto_id = int(dados.get("produto_id", 0))
     em_promo = bool(dados.get("em_promo"))
@@ -7416,7 +7417,7 @@ async def painel_produtos_upload_foto(request: Request, produto_id: int = Form(.
     if conta is None:
         return JSONResponse({"erro": "nao autenticado"}, status_code=401)
     pool = get_pool()
-    if not emp.modulo_pj_ativo(pool, conta[0]):
+    if not emp.acesso_pj(pool, conta[0]):
         return JSONResponse({"erro": "sem modulo pj"}, status_code=403)
     try:
         conteudo = await arquivo.read()
@@ -7436,7 +7437,7 @@ def painel_produtos_sugerir_fotos(request: Request, nome: str = ""):
     conta = conta_logada(request)
     if conta is None:
         return JSONResponse({"opcoes": []}, status_code=401)
-    if not emp.modulo_pj_ativo(get_pool(), conta[0]):
+    if not emp.acesso_pj(get_pool(), conta[0]):
         return JSONResponse({"opcoes": []})
     return JSONResponse({"opcoes": galeria_fotos.opcoes_de_foto(nome, n=4)})
 
@@ -7447,7 +7448,7 @@ def painel_produtos_sugerir_categoria(request: Request, nome: str = ""):
     conta = conta_logada(request)
     if conta is None:
         return JSONResponse({"categoria": None}, status_code=401)
-    if not emp.modulo_pj_ativo(get_pool(), conta[0]):
+    if not emp.acesso_pj(get_pool(), conta[0]):
         return JSONResponse({"categoria": None})
     return JSONResponse({"categoria": cat_sug.sugerir_categoria(nome)})
 
@@ -7459,7 +7460,7 @@ async def painel_produtos_ler_planilha(request: Request):
     conta = conta_logada(request)
     if conta is None:
         return {"ok": False, "erro": "nao autenticado"}
-    if not emp.modulo_pj_ativo(get_pool(), conta[0]):
+    if not emp.acesso_pj(get_pool(), conta[0]):
         return {"ok": False, "erro": "sem modulo pj"}
     try:
         form = await request.form()
@@ -7480,7 +7481,7 @@ async def painel_produtos_importar_planilha(request: Request):
     if conta is None:
         return {"ok": False, "erro": "nao autenticado"}
     pool = get_pool()
-    if not emp.modulo_pj_ativo(pool, conta[0]):
+    if not emp.acesso_pj(pool, conta[0]):
         return {"ok": False, "erro": "sem modulo pj"}
     try:
         body = await request.json()

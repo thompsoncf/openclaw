@@ -58,6 +58,21 @@ def modulo_pj_ativo(pool, conta_id: int) -> bool:
     return r is not None
 
 
+def acesso_pj(pool, conta_id: int) -> bool:
+    """Gate das abas do PJ base (Produtos/Servicos/Vendas). Uma conta acessa o PJ
+    base se tem o modulo PJ OU se e' fornecedor. Motivo: os produtos vivem no PJ
+    base e o marketplace le' de la' — entao ser fornecedor IMPLICA usar o PJ base.
+    Ponto unico de decisao: menu e rotas usam esta funcao pra nunca discordarem."""
+    if modulo_pj_ativo(pool, conta_id):
+        return True
+    with pool.connection() as c:
+        r = c.execute(
+            "select 1 from contas where id=%s and eh_fornecedor",
+            (conta_id,),
+        ).fetchone()
+    return r is not None
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Títulos (contas a pagar e a receber)
 # ─────────────────────────────────────────────────────────────────────────

@@ -2767,6 +2767,13 @@ _EMPRESA_DADOS = """{% extends "base" %}{% block conteudo %}
         <input id="telefone" name="telefone" value="{{ dados.telefone }}" placeholder="(00) 0000-0000"></div>
     </div>
     <div class="mut" style="font-size:.72rem;margin-top:.2rem">O e-mail/telefone vêm do cadastro da Receita e podem estar desatualizados — confira antes de salvar.</div>
+    <label>Ramo do negócio</label>
+    <select id="nicho" name="nicho">
+      {% for n in nichos_lista %}
+      <option value="{{ n.slug }}" {% if dados.nicho == n.slug %}selected{% endif %}>{{ n.label }}</option>
+      {% endfor %}
+    </select>
+    <div class="mut" style="font-size:.72rem;margin-top:.2rem">Detectamos pelo CNPJ — confira e ajuste se preciso. Define as unidades/categorias dos seus produtos.</div>
     <button type="submit" style="background:#1d9e75;color:#fff;border:0;border-radius:8px;padding:.7rem 1.4rem;font-weight:600;cursor:pointer;margin-top:1rem">Salvar e continuar →</button>
   </form>
 </div>
@@ -2789,6 +2796,7 @@ async function buscarCnpj(){
       if(d.uf) document.getElementById('uf').value=d.uf;
       if(d.email) document.getElementById('email_empresa').value=d.email;
       if(d.telefone) document.getElementById('telefone').value=d.telefone;
+      if(d.nicho){ var ns=document.getElementById('nicho'); if(ns) ns.value=d.nicho; }
       msg.textContent='✓ Dados encontrados — confira e ajuste se precisar.';
     } else { msg.textContent='Não achei esse CNPJ. Preencha manualmente.'; }
   }catch(e){ msg.textContent='Erro na busca. Preencha manualmente.'; }
@@ -4496,6 +4504,7 @@ _env.globals["canon"] = lambda c, t="despesa": canonizar_categoria(c, t)
 _env.globals["categorias_de"] = categorias_de
 from finance import cidades as _cidades_mod
 _env.globals["cidades"] = _cidades_mod.opcoes()
+from finance import nichos as _nichos
 
 
 def _carrinho_virtual_da_sessao(pool, fornecedor_id: int, cs: dict):
@@ -6963,7 +6972,8 @@ def painel_empresa(request: Request):
     # de cadastro. Resto do app (Financeiro/Compras) segue livre.
     if not emp.dados_empresa_completos(pool, conta[0]):
         d = emp.obter_dados_empresa(pool, conta[0])
-        return _render("empresa_dados", request, dados=d, tem_pj=True, erro="")
+        return _render("empresa_dados", request, dados=d, tem_pj=True, erro="",
+                       nichos_lista=_nichos.lista_nichos())
     hoje = _date.today()
     res = emp.resumo_titulos(pool, conta[0])
     fluxo = emp.fluxo_projetado(pool, conta[0])
@@ -6990,7 +7000,8 @@ def painel_empresa_dados_form(request: Request):
     if not emp.modulo_pj_ativo(pool, conta[0]):
         return RedirectResponse("/painel", status_code=303)
     d = emp.obter_dados_empresa(pool, conta[0])
-    return _render("empresa_dados", request, dados=d, tem_pj=True, erro="")
+    return _render("empresa_dados", request, dados=d, tem_pj=True, erro="",
+                   nichos_lista=_nichos.lista_nichos())
 
 
 @router.post("/painel/empresa/dados", response_class=HTMLResponse)
@@ -7001,6 +7012,7 @@ def painel_empresa_dados_salvar(
     bairro: str = Form(""), cep: str = Form(""),
     cidade: str = Form(""), uf: str = Form(""),
     email_empresa: str = Form(""), telefone: str = Form(""),
+    nicho: str = Form(""),
 ):
     from finance import empresa as emp
     conta = conta_logada(request)
@@ -7013,7 +7025,7 @@ def painel_empresa_dados_salvar(
         pool, conta[0], documento=documento, razao_social=razao_social,
         nome_fantasia=nome_fantasia, endereco=endereco, bairro=bairro,
         cep=cep, cidade=cidade, uf=uf, email_empresa=email_empresa,
-        telefone=telefone)
+        telefone=telefone, nicho=nicho)
     if not ok:
         d = emp.obter_dados_empresa(pool, conta[0])
         # devolve o que o usuário digitou + erro
@@ -7021,7 +7033,8 @@ def painel_empresa_dados_salvar(
                   "nome_fantasia": nome_fantasia, "endereco": endereco,
                   "bairro": bairro, "cep": cep, "cidade": cidade, "uf": uf,
                   "email_empresa": email_empresa, "telefone": telefone})
-        return _render("empresa_dados", request, dados=d, tem_pj=True, erro=msg)
+        return _render("empresa_dados", request, dados=d, tem_pj=True, erro=msg,
+                       nichos_lista=_nichos.lista_nichos())
     return RedirectResponse("/painel/empresa", status_code=303)
 
 
@@ -7041,7 +7054,8 @@ def painel_empresa_buscar_cnpj(request: Request, cnpj: str = ""):
                          "cidade": dados.get("cidade") or "",
                          "uf": dados.get("uf") or "",
                          "email": dados.get("email") or "",
-                         "telefone": dados.get("telefone") or ""})
+                         "telefone": dados.get("telefone") or "",
+                         "nicho": dados.get("nicho") or ""})
 
 
 def _mascara_cnpj(doc: str) -> str:

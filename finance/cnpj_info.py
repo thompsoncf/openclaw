@@ -46,6 +46,7 @@ def consultar_cnpj(cnpj: str) -> dict | None:
     uf = (dados.get("uf") or "").strip() or None
     cnae_desc = (dados.get("cnae_fiscal_descricao") or "").strip() or None
     ramo = classificar_ramo(cnae_desc)
+    nicho = nicho_do_cnae(cnae_desc)
     # contato: email e telefone vem do cadastro da Receita (pode estar
     # desatualizado) — usado so como SUGESTAO, o cliente confirma na tela.
     email = (dados.get("email") or "").strip().lower() or None
@@ -53,7 +54,7 @@ def consultar_cnpj(cnpj: str) -> dict | None:
     telefone = _formata_telefone(ddd)
     return {"nome": nome, "endereco": endereco, "bairro": bairro, "cep": cep,
             "cidade": cidade, "uf": uf, "cnae": cnae_desc, "ramo": ramo,
-            "email": email, "telefone": telefone}
+            "nicho": nicho, "email": email, "telefone": telefone}
 
 
 def _formata_telefone(bruto: str) -> str | None:
@@ -81,7 +82,33 @@ _RAMOS = [
     ("Supermercado", ("supermerc", "hipermerc", "minimerc", "mercearia",
                       "mercadorias em geral", "alimenticios", "varejista de merc",
                       "atacadista de alimentos", "alimentos")),
+    ("Vestuario",    ("vestuario", "roupas", "confeccao", "artigos do vestuario",
+                      "calcados", "moda", "boutique", "acessorios do vestuario")),
+    ("Beleza",       ("cosmetic", "perfumaria", "beleza", "salao", "cabelei",
+                      "estetica", "higiene pessoal", "manicure")),
 ]
+
+
+# ponte: ramo (de classificar_ramo) -> slug do nicho do modulo Vendas (nichos.py).
+# varios ramos caem no mesmo nicho (ex: Padaria e Restaurante -> alimentacao).
+_RAMO_NICHO = {
+    "Farmacia":     "farmacia",
+    "Restaurante":  "alimentacao",
+    "Padaria":      "alimentacao",
+    "Acougue":      "minimercado",
+    "Hortifruti":   "hortifruti",
+    "Supermercado": "minimercado",
+    "Vestuario":    "vestuario",
+    "Beleza":       "beleza",
+}
+
+
+def nicho_do_cnae(cnae_desc: str | None) -> str | None:
+    """Deriva o SLUG do nicho (Vendas) a partir da descricao do CNAE.
+    Reusa classificar_ramo e mapeia pro nosso nicho. None se nao classificar
+    (a tela cai no 'generico' ou o cliente escolhe)."""
+    ramo = classificar_ramo(cnae_desc)
+    return _RAMO_NICHO.get(ramo) if ramo else None
 
 
 def classificar_ramo(cnae_desc: str | None) -> str | None:

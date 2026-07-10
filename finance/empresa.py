@@ -574,28 +574,32 @@ def obter_dados_empresa(pool, conta_id: int) -> dict:
     """Devolve os dados cadastrais atuais da empresa (pra pré-preencher a tela)."""
     with pool.connection() as c:
         r = c.execute(
-            """select coalesce(documento,''), coalesce(razao_social,''),
-                      coalesce(nome_fantasia,''), coalesce(endereco,''),
-                      coalesce(bairro,''), coalesce(cep,''),
-                      coalesce(cidade,''), coalesce(uf,''),
-                      coalesce(email_empresa,''), coalesce(telefone,'')
-                 from contas where id=%s""",
+            """select coalesce(ct.documento,''), coalesce(ct.razao_social,''),
+                      coalesce(ct.nome_fantasia,''), coalesce(ct.endereco,''),
+                      coalesce(ct.bairro,''), coalesce(ct.cep,''),
+                      coalesce(ct.cidade,''), coalesce(ct.uf,''),
+                      coalesce(ct.email_empresa,''), coalesce(ct.telefone,''),
+                      coalesce(n.slug,'')
+                 from contas ct
+                 left join nichos n on n.id = ct.nicho_id
+                where ct.id=%s""",
             (conta_id,),
         ).fetchone()
     if not r:
         return {"documento": "", "razao_social": "", "nome_fantasia": "",
                 "endereco": "", "bairro": "", "cep": "", "cidade": "", "uf": "",
-                "email_empresa": "", "telefone": ""}
+                "email_empresa": "", "telefone": "", "nicho": ""}
     return {"documento": r[0], "razao_social": r[1], "nome_fantasia": r[2],
             "endereco": r[3], "bairro": r[4], "cep": r[5],
-            "cidade": r[6], "uf": r[7], "email_empresa": r[8], "telefone": r[9]}
+            "cidade": r[6], "uf": r[7], "email_empresa": r[8], "telefone": r[9],
+            "nicho": r[10]}
 
 
 def salvar_dados_empresa(pool, conta_id: int, *, documento: str = "",
                          razao_social: str = "", nome_fantasia: str = "",
                          endereco: str = "", bairro: str = "", cep: str = "",
                          cidade: str = "", uf: str = "", email_empresa: str = "",
-                         telefone: str = "") -> tuple[bool, str]:
+                         telefone: str = "", nicho: str = "") -> tuple[bool, str]:
     """Grava os dados da empresa na conta. Valida CNPJ (14 dígitos) e razão.
 
     Retorna (ok, mensagem). Multi-tenant: grava só na própria conta.
@@ -614,14 +618,32 @@ def salvar_dados_empresa(pool, conta_id: int, *, documento: str = "",
     est = (uf or "").strip().upper()[:2] or None
     mail = (email_empresa or "").strip().lower() or None
     tel = (telefone or "").strip() or None
+    nicho_slug = (nicho or "").strip().lower() or None
     with pool.connection() as c:
-        c.execute(
-            """update contas
-                  set documento=%s, razao_social=%s, nome_fantasia=%s,
-                      endereco=%s, bairro=%s, cep=%s, cidade=%s, uf=%s,
-                      email_empresa=%s, telefone=%s
-                where id=%s""",
-            (doc, razao, fantasia, end, bai, _cep, cid, est, mail, tel, conta_id),
-        )
+        # resolve o slug do nicho -> nicho_id (FK). Se nao achar, deixa como esta'.
+        nicho_id = None
+        if nicho_slug:
+            nr = c.execute("select id from nichos where slug=%s and ativo",
+                           (nicho_slug,)).fetchone()
+            nicho_id = nr[0] if nr else None
+        if nicho_id is not None:
+            c.execute(
+                """update contas
+                      set documento=%s, razao_social=%s, nome_fantasia=%s,
+                          endereco=%s, bairro=%s, cep=%s, cidade=%s, uf=%s,
+                          email_empresa=%s, telefone=%s, nicho_id=%s
+                    where id=%s""",
+                (doc, razao, fantasia, end, bai, _cep, cid, est, mail, tel,
+                 nicho_id, conta_id),
+            )
+        else:
+            c.execute(
+                """update contas
+                      set documento=%s, razao_social=%s, nome_fantasia=%s,
+                          endereco=%s, bairro=%s, cep=%s, cidade=%s, uf=%s,
+                          email_empresa=%s, telefone=%s
+                    where id=%s""",
+                (doc, razao, fantasia, end, bai, _cep, cid, est, mail, tel, conta_id),
+            )
         c.commit()
     return True, "Dados da empresa salvos."

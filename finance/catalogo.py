@@ -127,9 +127,9 @@ def atualizar_produto(pool, fornecedor_id: int, produto_id: int, **campos) -> bo
         if k not in permitidos:
             continue
         if k == "unidade":
-            v = (v or "kg").strip().lower()
+            v = (v or "").strip().lower()
             if v not in UNIDADES_VALIDAS:
-                v = "kg"
+                v = "unidade"
         if k == "preco_venda_centavos":
             v = max(0, int(v))
         if k == "estoque_minimo":

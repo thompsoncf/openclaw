@@ -197,17 +197,14 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
         {% if c.email_empresa %}<div><div class="mut" style="font-size:.68rem">E-mail</div>{{ c.email_empresa }}</div>{% endif %}
         {% if c.telefone %}<div><div class="mut" style="font-size:.68rem">Telefone</div>{{ c.telefone }}</div>{% endif %}
       </div>
+      {% if c.cep or c.endereco %}
+      <div style="border-top:1px solid #262628;margin-top:.6rem;padding-top:.6rem;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.5rem .9rem;font-size:.82rem">
+        {% if c.cep %}<div><div class="mut" style="font-size:.68rem">CEP</div>{{ c.cep }}</div>{% endif %}
+        {% if c.endereco %}<div style="grid-column:span 2"><div class="mut" style="font-size:.68rem">Endereco</div>{{ c.endereco }}</div>{% endif %}
+      </div>
+      {% endif %}
     </div>
     {% endif %}
-    <div style="background:#161617;border-radius:8px;padding:.7rem .8rem;margin-top:.6rem">
-      <div class="mut" style="font-size:.72rem;text-transform:uppercase;margin-bottom:.5rem">Endereco de entrega</div>
-      <form method="post" action="/admin/conta/{{ c.id }}/endereco" style="display:flex;gap:.5rem;align-items:flex-end;flex-wrap:wrap">
-        <div><div class="mut" style="font-size:.78rem;margin-bottom:.2rem">CEP</div><input name="cep" id="cep-{{ c.id }}" value="{{ c.cep or '' }}" placeholder="CEP" style="width:104px" oninput="admCep({{ c.id }})"></div>
-        <div style="flex:1;min-width:200px"><div class="mut" style="font-size:.78rem;margin-bottom:.2rem">Endereco</div><input name="endereco" id="end-{{ c.id }}" value="{{ c.endereco or '' }}" placeholder="rua, numero, bairro" style="width:100%"></div>
-        <button style="padding:.5rem .9rem">Salvar</button>
-      </form>
-      <div class="mut" style="font-size:.72rem;margin-top:.4rem">CEP preenche rua/bairro automatico (so se estiver vazio).</div>
-    </div>
     <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;margin-top:.7rem">
       <form class="inline" method="post" action="/admin/conta/{{ c.id }}/ativar"><button>+30 dias</button></form>
       <form class="inline" method="post" action="/admin/conta/{{ c.id }}/suspender"><button class="warn">Suspender</button></form>

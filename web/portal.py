@@ -252,6 +252,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
   {% if _tem_cesta %}<a href="/painel/assinaturas">🧺 Minhas assinaturas</a><a href="/painel/meus-pedidos">🛍️ Meus pedidos</a>{% endif %}
   {% if conta and conta[8] %}<a href="/painel/fornecedor">👨‍🌾 Fornecedor</a>{% endif %}
   {% if tem_pj %}<a href="/painel/empresa">🏢 Empresa</a>{% endif %}
+  {% if vende_produto %}<a href="/painel/produtos">📦 Produtos</a>{% endif %}
   <a href="/sair">Sair</a>
 {% else %}<a href="/login">Entrar</a><a href="/cadastro">Criar conta</a>{% endif %}
 </span></div>
@@ -2804,6 +2805,98 @@ async function buscarCnpj(){
 </script>
 {% endblock %}"""
 
+_PRODUTOS = """{% extends "base" %}{% block conteudo %}
+<div class="card larga">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
+    <h2 style="margin:0">📦 Produtos{% if nicho_label %} <span style="color:#6a6a66;font-size:.7rem;font-weight:400">· {{ nicho_label }}</span>{% endif %}</h2>
+    <button type="button" onclick="prodNovo()" style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:8px;cursor:pointer;font-weight:600;font-size:.9rem">+ Novo produto</button>
+  </div>
+  {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+  {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
+
+  <!-- cards de resumo -->
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;margin:1rem 0">
+    <div class="metric" style="padding:.7rem .8rem"><span style="font-size:.62rem;color:#6a8a7a">PRODUTOS</span><b style="color:#5dcaa5;display:block;font-size:1.1rem">{{ resumo.total }}</b></div>
+    <div class="metric" style="padding:.7rem .8rem"><span style="font-size:.62rem">EM ESTOQUE</span><b style="display:block;font-size:1.1rem">{{ brl(resumo.valor_estoque) }}</b></div>
+    <div class="metric" style="padding:.7rem .8rem"><span style="font-size:.62rem;color:#c9a56a">ESTOQUE BAIXO</span><b style="color:#f0c05a;display:block;font-size:1.1rem">{{ resumo.baixo }}{% if resumo.baixo %} ⚠{% endif %}</b></div>
+  </div>
+
+  <!-- form de cadastro (escondido) -->
+  <div id="prod-novo" style="display:none;margin-bottom:1.2rem;padding:1.1rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:10px">
+    <h3 style="margin-top:0;font-size:1rem">Novo produto</h3>
+    <form method="post" action="/painel/produtos/novo">
+      <label style="font-size:.85rem">Nome</label>
+      <input name="nome" required placeholder="ex: Dipirona 500mg" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.6rem">
+      <div style="display:flex;gap:.6rem;flex-wrap:wrap">
+        <div style="flex:1;min-width:120px">
+          <label style="font-size:.85rem">Unidade</label>
+          <select name="unidade" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
+            {% for u in unidades %}<option value="{{ u }}">{{ label_unidade(u) }}</option>{% endfor %}
+          </select>
+        </div>
+        <div style="flex:1;min-width:120px">
+          <label style="font-size:.85rem">Categoria</label>
+          {% if categorias %}
+          <select name="categoria" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
+            <option value="">—</option>
+            {% for c in categorias %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+          </select>
+          {% else %}
+          <input name="categoria" placeholder="livre" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
+          {% endif %}
+        </div>
+      </div>
+      <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.6rem">
+        <div style="flex:1;min-width:120px">
+          <label style="font-size:.85rem">Preço de venda (R$)</label>
+          <input name="preco_venda" type="number" step="0.01" required placeholder="12,00" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
+        </div>
+        <div style="flex:1;min-width:120px">
+          <label style="font-size:.85rem">Estoque mínimo</label>
+          <input name="estoque_minimo" type="number" step="0.1" placeholder="5" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
+        </div>
+      </div>
+      <button style="width:100%;background:#1d9e75;color:#fff;padding:.6rem;border:0;border-radius:8px;cursor:pointer;font-weight:600;margin-top:.9rem">Criar produto</button>
+    </form>
+    <button type="button" onclick="prodCancelar()" style="width:100%;background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.5rem;margin-top:.5rem;cursor:pointer">Cancelar</button>
+  </div>
+
+  <!-- lista de produtos -->
+  {% if produtos %}
+  <div style="display:grid;grid-template-columns:2.4fr 1fr .9fr;gap:.4rem;font-size:.6rem;color:#6a6a66;padding:0 .3rem .4rem;border-bottom:1px solid #1e1e20;text-transform:uppercase">
+    <span>Produto</span><span>Preço</span><span>Estoque</span>
+  </div>
+  {% for p in produtos %}
+  <div style="display:grid;grid-template-columns:2.4fr 1fr .9fr;gap:.4rem;padding:.55rem .3rem;align-items:center;border-bottom:1px solid #161618;font-size:.9rem">
+    <div>
+      <div style="color:#ececec">{{ p.nome }}</div>
+      <div style="color:#6a6a66;font-size:.65rem">{% if p.categoria %}{{ p.categoria }}{% endif %}{% if p.margem_pct is not none %} · {{ p.margem_pct|round|int }}%{% endif %}</div>
+    </div>
+    <span style="color:#cfe8dd">{{ brl(p.preco_venda_centavos) }}</span>
+    <span style="color:{% if p.abaixo_minimo %}#e07a5f{% else %}#5dcaa5{% endif %}">{{ p.saldo|round(1) }}{% if p.abaixo_minimo %} ⚠{% endif %}</span>
+  </div>
+  {% endfor %}
+  {% else %}
+  <div style="text-align:center;padding:2rem 1rem;color:#6a6a66">
+    <div style="font-size:1.6rem;margin-bottom:.4rem">📦</div>
+    <div style="font-size:.9rem">Nenhum produto ainda. Clique em <b style="color:#5dcaa5">+ Novo produto</b> pra começar.</div>
+  </div>
+  {% endif %}
+
+  {% if pode_servico %}
+  <div style="margin-top:1.4rem;padding-top:1rem;border-top:1px solid #1e1e20;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
+    <span style="color:#6a6a66;font-size:.78rem">Você também presta serviços?</span>
+    <a href="/painel/servicos" style="color:#a99aef;font-size:.78rem;text-decoration:none">Ativar aba Serviços →</a>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+function prodNovo(){document.getElementById('prod-novo').style.display='block';}
+function prodCancelar(){document.getElementById('prod-novo').style.display='none';}
+</script>
+{% endblock %}"""
+
 _EMPRESA = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
@@ -4494,7 +4587,7 @@ _FINANCEIRO_FORN = """{% extends "base" %}{% block conteudo %}
 
 
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS, "produtos": _PRODUTOS,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 _env.filters["brl"] = brl
@@ -4576,6 +4669,15 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
                 ctx["tem_pj"] = _emp.modulo_pj_ativo(get_pool(), request.session["conta_id"])
             except Exception:
                 ctx["tem_pj"] = False
+        if "vende_produto" not in ctx:
+            try:
+                from finance import empresa as _emp
+                _ov = _emp.o_que_vende(get_pool(), request.session["conta_id"])
+                ctx["vende_produto"] = _ov["produto"]
+                ctx["vende_servico"] = _ov["servico"]
+            except Exception:
+                ctx["vende_produto"] = False
+                ctx["vende_servico"] = False
     return HTMLResponse(_env.get_template(nome).render(**ctx))
 
 
@@ -6988,6 +7090,68 @@ def painel_empresa(request: Request):
     return _render("empresa", request, empresa_nome=conta[2], empresa_doc=doc,
                    res=res, fluxo=fluxo, dre=dre, titulos=titulos, folha=folha,
                    tem_pj=True)
+
+
+@router.get("/painel/produtos")
+def painel_produtos(request: Request):
+    """Aba Produtos: lista + cadastro. Gate do cadastro completo da empresa."""
+    from finance import empresa as emp, catalogo as cat, nichos as nic
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.modulo_pj_ativo(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    ov = emp.o_que_vende(pool, conta[0])
+    if not ov["produto"]:
+        # conta não vende produto — manda pra serviços se vender, senão painel
+        return RedirectResponse("/painel/servicos" if ov["servico"] else "/painel",
+                                status_code=303)
+    # Gate: sem cadastro completo, manda completar a empresa primeiro
+    if not emp.dados_empresa_completos(pool, conta[0]):
+        return RedirectResponse("/painel/empresa", status_code=303)
+    dados = emp.obter_dados_empresa(pool, conta[0])
+    nicho = dados.get("nicho") or ""
+    produtos = cat.listar_produtos(pool, conta[0])
+    valor = sum(int(p.get("preco_venda_centavos") or 0) * (p.get("saldo") or 0)
+                for p in produtos)
+    resumo = {"total": len(produtos), "valor_estoque": int(valor),
+              "baixo": sum(1 for p in produtos if p.get("abaixo_minimo"))}
+    aviso = request.session.pop("aviso", "")
+    erro = request.session.pop("erro", "")
+    return _render("produtos", request, produtos=produtos, resumo=resumo,
+                   nicho_label=nic.label_do_nicho(nicho),
+                   unidades=nic.unidades_do_nicho(nicho),
+                   categorias=nic.categorias_do_nicho(nicho),
+                   label_unidade=nic.label_unidade,
+                   pode_servico=ov["servico"], aviso=aviso, erro=erro,
+                   tem_pj=True, vende_produto=True, vende_servico=ov["servico"])
+
+
+@router.post("/painel/produtos/novo")
+def painel_produtos_novo(request: Request,
+                         nome: str = Form(...),
+                         unidade: str = Form("unidade"),
+                         categoria: str = Form(""),
+                         preco_venda: str = Form("0"),
+                         estoque_minimo: str = Form("0")):
+    from finance import empresa as emp, catalogo as cat
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.modulo_pj_ativo(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    try:
+        dados = emp.obter_dados_empresa(pool, conta[0])
+        preco_centavos = int(float((preco_venda or "0").replace(",", ".")) * 100)
+        cat.criar_produto(pool, conta[0], nome, unidade, categoria or "",
+                          preco_centavos, float((estoque_minimo or "0").replace(",", ".")),
+                          nicho=dados.get("nicho") or None)
+        request.session["aviso"] = f"Produto '{nome}' criado!"
+    except Exception as e:
+        request.session["erro"] = f"Erro ao criar produto: {e}"
+    return RedirectResponse("/painel/produtos", status_code=303)
 
 
 @router.get("/painel/empresa/dados", response_class=HTMLResponse)

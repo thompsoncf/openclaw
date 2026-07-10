@@ -185,6 +185,18 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
         <div style="font-size:.88rem">{{ c.msg_mes }} msg<br>{{ c.cup_mes }} cup</div>
       </div>
     </div>
+    {% if c.documento or c.razao_social or c.nome_fantasia %}
+    <div style="background:#161617;border-radius:8px;padding:.7rem .8rem;margin-top:.6rem">
+      <div class="mut" style="font-size:.72rem;text-transform:uppercase;margin-bottom:.5rem">{% if c.tipo == 'pj' %}🏢 Dados da empresa{% else %}Dados cadastrais{% endif %}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.5rem .9rem;font-size:.82rem">
+        {% if c.documento %}<div><div class="mut" style="font-size:.68rem">{% if c.tipo == 'pj' %}CNPJ{% else %}CPF/CNPJ{% endif %}</div>{{ c.documento }}</div>{% endif %}
+        {% if c.razao_social %}<div><div class="mut" style="font-size:.68rem">Razao social</div>{{ c.razao_social }}</div>{% endif %}
+        {% if c.nome_fantasia %}<div><div class="mut" style="font-size:.68rem">Nome fantasia</div>{{ c.nome_fantasia }}</div>{% endif %}
+        {% if c.cidade or c.uf %}<div><div class="mut" style="font-size:.68rem">Cidade / UF</div>{{ c.cidade }}{% if c.uf %} / {{ c.uf }}{% endif %}</div>{% endif %}
+        {% if c.bairro %}<div><div class="mut" style="font-size:.68rem">Bairro</div>{{ c.bairro }}</div>{% endif %}
+      </div>
+    </div>
+    {% endif %}
     <div style="background:#161617;border-radius:8px;padding:.7rem .8rem;margin-top:.6rem">
       <div class="mut" style="font-size:.72rem;text-transform:uppercase;margin-bottom:.5rem">Endereco de entrega</div>
       <form method="post" action="/admin/conta/{{ c.id }}/endereco" style="display:flex;gap:.5rem;align-items:flex-end;flex-wrap:wrap">
@@ -529,7 +541,13 @@ def admin_home(request: Request, busca: str = ""):
                         coalesce((select count(*) from assinaturas a
                                   where a.cliente_id = ct.id
                                     and a.status != 'cancelada'),0) as qtd_cestas,
-                        ct.endereco, ct.cep
+                        ct.endereco, ct.cep,
+                        coalesce(ct.documento,'') as documento,
+                        coalesce(ct.razao_social,'') as razao_social,
+                        coalesce(ct.nome_fantasia,'') as nome_fantasia,
+                        coalesce(ct.bairro,'') as bairro,
+                        coalesce(ct.cidade,'') as cidade,
+                        coalesce(ct.uf,'') as uf
                  from contas ct"""
         params: list = []
         if busca.strip():
@@ -539,7 +557,8 @@ def admin_home(request: Request, busca: str = ""):
         cols = ["id", "nome", "email", "tipo", "plano", "status", "vencimento",
                 "limite_mensagens_dia", "limite_cupons_dia", "eh_fornecedor",
                 "interesse_modulos", "membros",
-                "msg_hoje", "cup_hoje", "msg_mes", "cup_mes", "qtd_cestas", "endereco", "cep"]
+                "msg_hoje", "cup_hoje", "msg_mes", "cup_mes", "qtd_cestas", "endereco", "cep",
+                "documento", "razao_social", "nome_fantasia", "bairro", "cidade", "uf"]
         contas = [dict(zip(cols, r)) for r in c.execute(sql, params).fetchall()]
 
         ecols = ["conta_id", "tipo", "detalhe", "criado_em"]

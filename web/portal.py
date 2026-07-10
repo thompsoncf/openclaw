@@ -2877,23 +2877,37 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
     <form method="post" action="/painel/produtos/salvar">
       <input type="hidden" name="produto_id" id="prod-edit-id" value="">
       <label style="font-size:.85rem">Nome</label>
-      <input name="nome" id="prod-f-nome" required placeholder="ex: Alface crespa" oninput="prodSugereCategoria(this.value)" class="prod-inp">
-      <div style="display:flex;gap:.6rem;flex-wrap:wrap">
-        <div style="flex:1;min-width:120px">
-          <label style="font-size:.85rem">Unidade</label>
-          <select name="unidade" id="prod-f-unidade" class="prod-inp">
-            {% for u in unidades %}<option value="{{ u }}">{{ label_unidade(u) }}</option>{% endfor %}
-          </select>
+      <input name="nome" id="prod-f-nome" required placeholder="ex: Alface crespa" oninput="prodSugereCategoria(this.value);prodNovoBuscarSugestoes()" class="prod-inp">
+
+      <div style="background:#161617;border:1px solid #242426;border-radius:9px;padding:.7rem;margin:.2rem 0 .7rem">
+        <div style="font-size:.78rem;color:#5dcaa5;font-weight:600;margin-bottom:.5rem">📷 Foto do produto <span style="color:#6a6a6a;font-weight:400">(opcional)</span></div>
+        <div style="display:flex;gap:11px;align-items:flex-start;margin-bottom:.6rem">
+          <div id="prod-novo-previa" style="width:64px;height:64px;border-radius:9px;background:#1a2a1f;border:2px solid #1d9e75;flex-shrink:0;display:flex;align-items:center;justify-content:center;background-size:cover;background-position:center">
+            <span id="prod-novo-previa-vazia" style="font-size:24px;color:#3a5a48">📦</span>
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:.72rem;color:#888780;margin-bottom:.4rem">Sugestões pelo nome:</div>
+            <div id="prod-novo-sugestoes" style="display:flex;gap:6px;flex-wrap:wrap">
+              <span style="font-size:.72rem;color:#6a6a6a">digite o nome acima</span>
+            </div>
+          </div>
         </div>
-        <div style="flex:1;min-width:120px">
-          <label style="font-size:.85rem">Categoria</label>
-          {% if categorias %}
-          <select name="categoria" id="prod-f-categoria" class="prod-inp"><option value="">—</option>{% for c in categorias %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select>
-          {% else %}
-          <input name="categoria" id="prod-f-categoria" placeholder="livre" class="prod-inp">
-          {% endif %}
-        </div>
+        <input id="prod-novo-foto-link" name="foto_url" placeholder="ou cole o link: https://..." oninput="prodNovoFotoPreview(this.value)" class="prod-inp" style="margin:.1rem 0 0;font-size:.8rem">
+        <div style="font-size:.68rem;color:#6a6a6a;margin-top:.45rem;line-height:1.5">ℹ Quer a foto real do aparelho? Crie o produto e toque em <span style="color:#a89ce8">📷 foto</span>.</div>
       </div>
+
+      <label style="font-size:.85rem">Unidade</label>
+      <select name="unidade" id="prod-f-unidade" class="prod-inp">
+        {% for u in unidades %}<option value="{{ u }}">{{ label_unidade(u) }}</option>{% endfor %}
+      </select>
+
+      <label style="font-size:.85rem">Categoria</label>
+      {% if categorias %}
+      <div id="prod-cat-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin:.35rem 0 .5rem">
+        {% for c in categorias %}<span class="prod-catchip" onclick="prodSetCat(this, {{ c|tojson }})" style="font-size:.76rem;color:#b4b2a9;background:#161617;border:1.5px solid #2a2a2b;border-radius:16px;padding:4px 12px;cursor:pointer">{{ c }}</span>{% endfor %}
+      </div>
+      {% endif %}
+      <input name="categoria" id="prod-f-categoria" placeholder="toque numa sugestão ou digite" oninput="prodCatLimpaSel()" class="prod-inp">
       <div style="display:flex;gap:.6rem;flex-wrap:wrap">
         <div style="flex:1;min-width:120px">
           <label style="font-size:.85rem">Preço de venda (R$)</label>
@@ -3010,10 +3024,16 @@ var prodFotoEscolhida = null;
 var prodItensPlanilha = [];
 function prodFecha(id){ document.getElementById(id).style.display='none'; }
 function prodVender(id){ alert('Venda de balcão (PDV) chega na próxima leva. Este botão já fica no lugar.'); }
-function prodNovo(){ document.getElementById('prod-form-titulo').textContent='Novo produto'; document.getElementById('prod-edit-id').value=''; document.getElementById('prod-f-nome').value=''; document.getElementById('prod-f-preco').value=''; document.getElementById('prod-f-min').value=''; document.getElementById('prod-modal-form').style.display='flex'; }
+function prodNovoFotoPreview(url){ var prev=document.getElementById('prod-novo-previa'); var vazia=document.getElementById('prod-novo-previa-vazia'); url=(url||'').trim(); if(!url){ prev.style.backgroundImage='none'; if(vazia){ vazia.style.display='block'; vazia.textContent='📦'; } return; } var img=new Image(); img.onload=function(){ prev.style.backgroundImage="url('"+url+"')"; if(vazia) vazia.style.display='none'; }; img.onerror=function(){ prev.style.backgroundImage='none'; if(vazia){ vazia.style.display='block'; vazia.textContent='✗'; } }; img.src=url; }
+function prodSetCat(chip, valor){ var inp=document.getElementById('prod-f-categoria'); if(inp) inp.value=valor; var box=chip.parentElement; if(box) box.querySelectorAll('.prod-catchip').forEach(function(x){ x.style.border='1.5px solid #2a2a2b'; x.style.color='#b4b2a9'; }); chip.style.border='1.5px solid #1d9e75'; chip.style.color='#5dcaa5'; }
+function prodCatLimpaSel(){ var box=document.getElementById('prod-cat-chips'); if(box) box.querySelectorAll('.prod-catchip').forEach(function(x){ x.style.border='1.5px solid #2a2a2b'; x.style.color='#b4b2a9'; }); }
+function prodCatDestaca(valor){ var box=document.getElementById('prod-cat-chips'); if(!box) return; box.querySelectorAll('.prod-catchip').forEach(function(x){ var hit=x.textContent.trim()===valor; x.style.border=hit?'1.5px solid #1d9e75':'1.5px solid #2a2a2b'; x.style.color=hit?'#5dcaa5':'#b4b2a9'; }); }
+var _prodSugTimer=null;
+function prodNovoBuscarSugestoes(){ var campo=document.getElementById('prod-f-nome'); var box=document.getElementById('prod-novo-sugestoes'); if(!campo||!box) return; var nome=(campo.value||'').trim(); if(nome.length<2){ box.innerHTML='<span style="font-size:.72rem;color:#6a6a6a">digite o nome acima</span>'; return; } clearTimeout(_prodSugTimer); _prodSugTimer=setTimeout(function(){ box.innerHTML='<span style="font-size:.72rem;color:#888780">buscando...</span>'; fetch('/painel/produtos/sugerir-fotos?nome='+encodeURIComponent(nome)).then(function(r){ return r.json(); }).then(function(d){ box.innerHTML=''; if(!d.opcoes||!d.opcoes.length){ box.innerHTML='<span style="font-size:.72rem;color:#888780">sem sugestões; cole um link</span>'; return; } d.opcoes.forEach(function(url){ var t=document.createElement('div'); t.style.cssText="width:40px;height:40px;border-radius:7px;background:url('"+url+"') center/cover;cursor:pointer;border:2px solid #2a2a2b;flex-shrink:0"; t.onclick=function(){ document.getElementById('prod-novo-foto-link').value=url; prodNovoFotoPreview(url); box.querySelectorAll('div').forEach(function(x){ x.style.border='2px solid #2a2a2b'; }); t.style.border='2px solid #1d9e75'; }; box.appendChild(t); }); }).catch(function(){ box.innerHTML='<span style="font-size:.72rem;color:#888780">erro ao buscar; cole um link</span>'; }); }, 450); }
+function prodNovo(){ document.getElementById('prod-form-titulo').textContent='Novo produto'; document.getElementById('prod-edit-id').value=''; document.getElementById('prod-f-nome').value=''; document.getElementById('prod-f-categoria').value=''; document.getElementById('prod-f-preco').value=''; document.getElementById('prod-f-min').value=''; document.getElementById('prod-novo-foto-link').value=''; prodNovoFotoPreview(''); prodCatLimpaSel(); document.getElementById('prod-novo-sugestoes').innerHTML='<span style="font-size:.72rem;color:#6a6a6a">digite o nome acima</span>'; document.getElementById('prod-modal-form').style.display='flex'; }
 function prodImportar(){ document.getElementById('prod-modal-importar').style.display='flex'; }
 function prodFiltrar(q){ q=q.toLowerCase(); var cards=document.querySelectorAll('.prod-card'); for(var i=0;i<cards.length;i++){ cards[i].style.display=cards[i].getAttribute('data-nome').indexOf(q)>-1?'':'none'; } }
-function prodEditar(id){ var p=window.PRODUTOS[id]; document.getElementById('prod-form-titulo').textContent='Editar produto'; document.getElementById('prod-edit-id').value=id; document.getElementById('prod-f-nome').value=p.nome; document.getElementById('prod-f-unidade').value=p.unidade; var c=document.getElementById('prod-f-categoria'); if(c){ c.value=p.categoria; } document.getElementById('prod-f-preco').value=p.preco; document.getElementById('prod-f-min').value=p.minimo; document.getElementById('prod-modal-form').style.display='flex'; }
+function prodEditar(id){ var p=window.PRODUTOS[id]; document.getElementById('prod-form-titulo').textContent='Editar produto'; document.getElementById('prod-edit-id').value=id; document.getElementById('prod-f-nome').value=p.nome; document.getElementById('prod-f-unidade').value=p.unidade; document.getElementById('prod-f-categoria').value=p.categoria||''; document.getElementById('prod-f-preco').value=p.preco; document.getElementById('prod-f-min').value=p.minimo; document.getElementById('prod-novo-foto-link').value=p.foto_url||''; prodNovoFotoPreview(p.foto_url||''); prodCatDestaca(p.categoria||''); document.getElementById('prod-novo-sugestoes').innerHTML='<span style="font-size:.72rem;color:#6a6a6a">digite o nome pra ver sugestões</span>'; document.getElementById('prod-modal-form').style.display='flex'; }
 function prodEntrada(id){ document.getElementById('prod-mov-titulo').textContent='Dar entrada · '+window.PRODUTOS[id].nome; document.getElementById('prod-mov-id').value=id; document.getElementById('prod-mov-form').action='/painel/produtos/entrada'; document.getElementById('prod-mov-custo-wrap').style.display='block'; document.getElementById('prod-mov-motivo-wrap').style.display='none'; document.getElementById('prod-modal-mov').style.display='flex'; }
 function prodPerda(id){ document.getElementById('prod-mov-titulo').textContent='Registrar perda · '+window.PRODUTOS[id].nome; document.getElementById('prod-mov-id').value=id; document.getElementById('prod-mov-form').action='/painel/produtos/perda'; document.getElementById('prod-mov-custo-wrap').style.display='none'; document.getElementById('prod-mov-motivo-wrap').style.display='block'; document.getElementById('prod-modal-mov').style.display='flex'; }
 function prodApagar(id){ if(confirm('Apagar '+window.PRODUTOS[id].nome+'? Ele some do catálogo. O histórico fica guardado.')){ document.getElementById('prod-apagar-id').value=id; document.getElementById('prod-apagar-form').submit(); } }
@@ -7262,7 +7282,8 @@ def painel_produtos_salvar(request: Request,
                            unidade: str = Form("unidade"),
                            categoria: str = Form(""),
                            preco_venda: str = Form("0"),
-                           estoque_minimo: str = Form("0")):
+                           estoque_minimo: str = Form("0"),
+                           foto_url: str = Form("")):
     """Cria (produto_id vazio) ou edita (produto_id preenchido). Reusa catalogo.py."""
     from finance import empresa as emp, catalogo as cat
     conta = conta_logada(request)
@@ -7278,15 +7299,19 @@ def painel_produtos_salvar(request: Request,
         emin = float((estoque_minimo or "0").replace(",", "."))
         dados = emp.obter_dados_empresa(pool, conta[0])
         if (produto_id or "").strip():
-            cat.atualizar_produto(pool, conta[0], int(produto_id),
-                                  nome=nome, unidade=unidade,
-                                  categoria=(categoria.strip() or None),
-                                  preco_venda_centavos=preco_centavos,
-                                  estoque_minimo=emin)
+            campos = dict(nome=nome, unidade=unidade,
+                          categoria=(categoria.strip() or None),
+                          preco_venda_centavos=preco_centavos,
+                          estoque_minimo=emin)
+            if foto_url.strip():
+                campos["foto_url"] = foto_url.strip()
+            cat.atualizar_produto(pool, conta[0], int(produto_id), **campos)
             request.session["aviso"] = "Produto atualizado."
         else:
             cat.criar_produto(pool, conta[0], nome, unidade, categoria or "",
-                              preco_centavos, emin, nicho=dados.get("nicho") or None)
+                              preco_centavos, emin,
+                              foto_url=(foto_url.strip() or None),
+                              nicho=dados.get("nicho") or None)
             request.session["aviso"] = f"Produto '{nome}' criado!"
     except Exception as e:
         request.session["erro"] = f"Erro: {e}"

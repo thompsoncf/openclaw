@@ -252,7 +252,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
   {% if _tem_cesta %}<a href="/painel/assinaturas">🧺 Minhas assinaturas</a><a href="/painel/meus-pedidos">🛍️ Meus pedidos</a>{% endif %}
   {% if conta and conta[8] %}<a href="/painel/fornecedor">👨‍🌾 Fornecedor</a>{% endif %}
   {% if tem_pj %}<a href="/painel/empresa">🏢 Empresa</a>{% endif %}
-  {% if vende_produto %}<a href="/painel/produtos">📦 Produtos</a>{% endif %}
+  {% if vende_produto %}<a href="/painel/produtos">📦 Produtos</a><a href="/painel/produtos/abastecimento">🛒 Abastecimento</a>{% endif %}
   <a href="/sair">Sair</a>
 {% else %}<a href="/login">Entrar</a><a href="/cadastro">Criar conta</a>{% endif %}
 </span></div>
@@ -1476,7 +1476,7 @@ function avisarTerminei(){
 {% endblock %}"""
 
 _COMPRA_REVISAR = """{% extends "base" %}{% block conteudo %}
-<div class="card larga"><a href="/painel/fornecedor" style="color:#5dcaa5;display:inline-block;margin-bottom:1rem">← voltar</a>
+<div class="card larga"><a href="/painel/produtos/abastecimento" style="color:#5dcaa5;display:inline-block;margin-bottom:1rem">← voltar</a>
 <h2 style="margin-top:0">🛒 Compra #{{ compra.id }}</h2>
 <p class="mut">Origem: <strong>{{ compra.origem_nome or '-' }}</strong> · {{ compra.data }} · status: <strong>{{ compra.status }}</strong></p>
 {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
@@ -1485,7 +1485,7 @@ _COMPRA_REVISAR = """{% extends "base" %}{% block conteudo %}
 <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1.2rem;margin:1.5rem 0">
 <h4 style="margin-top:0">Adicionar item</h4>
 {% if produtos %}
-<form method="post" action="/painel/fornecedor/compras/{{ compra.id }}/item" style="display:grid;gap:1rem">
+<form method="post" action="/painel/produtos/abastecimento/{{ compra.id }}/item" style="display:grid;gap:1rem">
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
 <div><label>Produto</label><select name="produto_id" required style="width:100%"><option value="">Selecione um produto</option>
 {% for p in produtos %}<option value="{{ p.id }}">{{ p.nome }} ({{ p.unidade }})</option>{% endfor %}
@@ -1496,7 +1496,7 @@ _COMPRA_REVISAR = """{% extends "base" %}{% block conteudo %}
 <button style="background:#1d9e75;color:#fff;padding:.6rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:500">Adicionar item</button>
 </form>
 {% else %}
-<p class="mut">Você ainda não tem produtos no catálogo. <a href="/painel/fornecedor" style="color:#5dcaa5">Crie um produto</a> primeiro.</p>
+<p class="mut">Você ainda não tem produtos no catálogo. <a href="/painel/produtos/abastecimento" style="color:#5dcaa5">Crie um produto</a> primeiro.</p>
 {% endif %}
 </div>
 {% endif %}
@@ -1510,7 +1510,7 @@ _COMPRA_REVISAR = """{% extends "base" %}{% block conteudo %}
 <tr style="border-top:2px solid #2a2a2b;background:#2a2a2b"><td colspan="3" style="text-align:right;padding:.6rem;font-weight:600">Total:</td><td style="text-align:right;padding:.6rem;font-weight:600">R$ {{ (compra.total_centavos/100)|n2 }}</td></tr>
 </table>
 {% if compra.status == 'rascunho' %}
-<form method="post" action="/painel/fornecedor/compras/{{ compra.id }}/confirmar">
+<form method="post" action="/painel/produtos/abastecimento/{{ compra.id }}/confirmar">
 <button style="background:#1d9e75;color:#fff;padding:.7rem 1rem;border:0;border-radius:8px;cursor:pointer;width:100%;font-weight:600;font-size:1rem;margin-bottom:1rem">✓ Confirmar compra (dar entrada no estoque)</button>
 </form>
 <p class="mut" style="font-size:.85rem;margin:0">Ao confirmar, os itens dão entrada no estoque e o custo médio é recalculado. Não dá pra editar depois.</p>
@@ -2392,6 +2392,74 @@ function prodPromoToggle(){ document.getElementById('prod-promo-preco-wrap').sty
 function prodPromoSalvar(){ var pid=document.getElementById('prod-promo-pid').value; var ativo=document.getElementById('prod-promo-ativo').checked; var preco=parseFloat(document.getElementById('prod-promo-preco').value||0); fetch('/painel/produtos/promo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:parseInt(pid),em_promo:ativo,preco_promo:preco})}).then(function(r){ return r.json(); }).then(function(){ location.reload(); }).catch(function(){ alert('Não foi possível salvar a promoção.'); }); }
 function prodLerPlanilha(input){ var file=input.files[0]; if(!file){ return; } var fd=new FormData(); fd.append('arquivo',file); var prev=document.getElementById('prod-planilha-previa'); prev.innerHTML='<span class="mut">lendo...</span>'; fetch('/painel/produtos/ler-planilha',{method:'POST',body:fd}).then(function(r){ return r.json(); }).then(function(d){ if(!d.ok){ prev.innerHTML='<span style="color:#ff6b6b">'+(d.erro||'erro')+'</span>'; return; } prodItensPlanilha=d.itens||[]; if(!prodItensPlanilha.length){ prev.innerHTML='<span class="mut">Nenhum item válido.</span>'; return; } prev.innerHTML='<div style="font-size:.85rem;margin-bottom:.5rem">'+prodItensPlanilha.length+' itens lidos.</div><button type="button" id="prod-planilha-btn" style="width:100%;background:#1d9e75;color:#fff;border:0;border-radius:8px;padding:.6rem;font-weight:600;cursor:pointer">Importar '+prodItensPlanilha.length+' produtos</button>'; document.getElementById('prod-planilha-btn').onclick=prodImportarConfirma; }).catch(function(){ prev.innerHTML='<span style="color:#ff6b6b">Erro ao ler.</span>'; }); }
 function prodImportarConfirma(){ fetch('/painel/produtos/importar-planilha',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({itens:prodItensPlanilha})}).then(function(r){ return r.json(); }).then(function(d){ if(d.ok){ location.reload(); } else { alert(d.erro||'Erro ao importar'); } }).catch(function(){ alert('Erro ao importar'); }); }
+</script>
+{% endblock %}"""
+
+_ABASTECIMENTO = """{% extends "base" %}{% block conteudo %}
+<div class="card larga">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
+    <h2 style="margin:0">🛒 Abastecimento <span style="color:#6a6a66;font-size:.7rem;font-weight:400">· entradas que repõem o estoque</span></h2>
+    <div style="display:flex;gap:.5rem">
+      <a href="/painel/produtos" style="padding:.5rem 1rem;background:transparent;border:1px solid #3a3a3d;color:#b4b2a9;border-radius:8px;text-decoration:none;font-size:.9rem">← Produtos</a>
+      <button type="button" onclick="abastShowNova()" style="padding:.5rem 1rem;background:#1d9e75;color:#fff;border:0;border-radius:8px;cursor:pointer;font-weight:600;font-size:.9rem">+ nova compra</button>
+    </div>
+  </div>
+  {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+  {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
+  <div style="display:flex;flex-direction:column;gap:.8rem;margin-top:1rem">
+    {% if compras %}
+      {% for c in compras %}
+      <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1rem">
+        <div style="display:flex;justify-content:space-between;align-items:start">
+          <div>
+            <strong>#{{ c.id }}</strong> · <span class="mut">{{ c.data_compra }}</span> · <span style="{% if c.status == 'confirmada' %}color:#1d9e75{% else %}color:#ffa500{% endif %}">{{ c.status }}</span>
+            <div class="mut" style="font-size:.85rem;margin-top:.3rem">Total: <strong>R$ {{ "%.2f" | format(c.total_centavos / 100) }}</strong> | Origem: {{ c.origem_nome or '-' }} | Fonte: {{ c.fonte }}</div>
+          </div>
+          <a href="/painel/produtos/abastecimento/{{ c.id }}" style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;border-radius:4px;padding:.3rem .6rem;font-size:.85rem;text-decoration:none">revisar</a>
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+    <p class="mut">Nenhuma compra ainda. Clique em "+ nova compra" pra começar.</p>
+    {% endif %}
+  </div>
+  <div id="abast-nova" style="display:none;margin-top:1.5rem;padding:1.2rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px">
+    <h4 style="margin-top:0">Nova compra</h4>
+    <div style="display:flex;gap:.6rem;margin-bottom:1rem">
+      <button type="button" onclick="abastShowManual()" style="flex:1;background:#1d9e75;color:#fff;padding:.5rem;border:0;border-radius:6px;cursor:pointer;font-weight:500">Manual (digitar itens)</button>
+      <button type="button" onclick="alert('Leitura de nota chega em breve.')" style="flex:1;background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;padding:.5rem;border-radius:6px;cursor:pointer;font-weight:500">Com nota (em breve)</button>
+    </div>
+    <button type="button" onclick="abastHide('abast-nova')" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;font-size:.85rem">Cancelar</button>
+  </div>
+  <div id="abast-manual" style="display:none;margin-top:1rem;padding:1rem;background:#161617;border:1px solid #2a2a2b;border-radius:6px">
+    <h4 style="margin-top:0;margin-bottom:.8rem">Nova compra manual</h4>
+    <form method="post" action="/painel/produtos/abastecimento/criar">
+      <label>Data da compra</label><input type="date" name="data_compra" style="width:100%">
+      <label>De onde comprou?</label>
+      <select name="origem_id" style="width:100%">
+        <option value="">Selecione uma origem</option>
+        {% for o in origens %}<option value="{{ o.id }}">{{ o.nome }}</option>{% endfor %}
+      </select>
+      <button type="button" onclick="abastShowOrigem()" style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;padding:.3rem .6rem;cursor:pointer;font-size:.85rem;margin-top:.3rem">+ Nova origem</button>
+      <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.8rem;width:100%;font-weight:500">Criar compra</button>
+    </form>
+    <button type="button" onclick="abastHide('abast-manual')" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.5rem;font-size:.85rem">Cancelar</button>
+  </div>
+  <div id="abast-origem" style="display:none;margin-top:1rem;padding:1rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:6px">
+    <h4 style="margin-top:0;margin-bottom:.6rem">Nova origem</h4>
+    <form method="post" action="/painel/produtos/abastecimento/origem">
+      <label>Nome</label><input name="nome" required placeholder="ex: CEASA, Sítio do João" style="width:100%">
+      <label>Contato (opcional)</label><input name="contato" placeholder="tel, email, whatsapp" style="width:100%">
+      <button style="background:#1d9e75;color:#fff;padding:.4rem .8rem;border:0;border-radius:4px;cursor:pointer;margin-top:.5rem;font-weight:500">Criar origem</button>
+    </form>
+    <button type="button" onclick="abastHide('abast-origem')" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;font-size:.85rem;margin-top:.5rem">Cancelar</button>
+  </div>
+</div>
+<script>
+function abastShowNova(){ document.getElementById('abast-nova').style.display='block'; }
+function abastShowManual(){ document.getElementById('abast-manual').style.display='block'; }
+function abastShowOrigem(){ document.getElementById('abast-origem').style.display='block'; }
+function abastHide(id){ document.getElementById(id).style.display='none'; }
 </script>
 {% endblock %}"""
 
@@ -4085,7 +4153,7 @@ _FINANCEIRO_FORN = """{% extends "base" %}{% block conteudo %}
 
 
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS, "produtos": _PRODUTOS,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS, "produtos": _PRODUTOS, "abastecimento": _ABASTECIMENTO,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 _env.filters["brl"] = brl
@@ -6251,6 +6319,139 @@ def meus_pedidos(request: Request):
         return RedirectResponse("/login", status_code=303)
     pedidos = car_mod.listar_do_cliente(get_pool(), conta[0])
     return _render("meus_pedidos", request, pedidos=pedidos)
+
+
+@router.get("/painel/produtos/abastecimento", response_class=HTMLResponse)
+def painel_abastecimento(request: Request):
+    from finance import empresa as emp, catalogo as cat_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.acesso_pj(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    with pool.connection() as c:
+        rows = c.execute(
+            """select id, data_compra, total_centavos, fonte, status,
+                      (select nome from origem_compra where id = compras_fornecedor.origem_id) as origem_nome
+               from compras_fornecedor where fornecedor_id=%s order by criado_em desc limit 20""",
+            (conta[0],),
+        ).fetchall()
+    compras = [{"id": r[0], "data_compra": r[1], "total_centavos": r[2], "fonte": r[3], "status": r[4], "origem_nome": r[5]} for r in rows]
+    origens = cat_mod.listar_origens(pool, conta[0])
+    return _render("abastecimento", request, conta=conta, compras=compras, origens=origens,
+                   erro=request.session.pop("erro", None), aviso=request.session.pop("aviso", None))
+
+
+@router.post("/painel/produtos/abastecimento/criar")
+def painel_abastecimento_criar(request: Request, data_compra: str = Form(""), origem_id: int = Form(None)):
+    from finance import empresa as emp, catalogo as cat_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.acesso_pj(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    try:
+        compra_id = cat_mod.criar_compra(pool, conta[0], origem_id, data_compra, fonte="manual")
+        request.session["aviso"] = f"Compra #{compra_id} criada em rascunho. Adicione itens."
+        return RedirectResponse(f"/painel/produtos/abastecimento/{compra_id}", status_code=303)
+    except Exception as e:
+        request.session["erro"] = f"Erro: {str(e)}"
+    return RedirectResponse("/painel/produtos/abastecimento", status_code=303)
+
+
+@router.post("/painel/produtos/abastecimento/origem")
+def painel_abastecimento_origem(request: Request, nome: str = Form(""), contato: str = Form("")):
+    from finance import empresa as emp, catalogo as cat_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.acesso_pj(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    try:
+        cat_mod.criar_origem(pool, conta[0], nome, contato)
+        request.session["aviso"] = f"Origem '{nome}' criada!"
+    except Exception as e:
+        request.session["erro"] = f"Erro: {str(e)}"
+    return RedirectResponse("/painel/produtos/abastecimento", status_code=303)
+
+
+@router.get("/painel/produtos/abastecimento/{compra_id}", response_class=HTMLResponse)
+def painel_abastecimento_revisar(request: Request, compra_id: int):
+    from finance import empresa as emp, catalogo as cat_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.acesso_pj(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    try:
+        itens = cat_mod.listar_itens_compra(pool, conta[0], compra_id)
+    except Exception:
+        request.session["erro"] = "Compra não encontrada."
+        return RedirectResponse("/painel/produtos/abastecimento", status_code=303)
+    produtos = cat_mod.listar_produtos(pool, conta[0])
+    with pool.connection() as c:
+        cab = c.execute(
+            """select id, data_compra, total_centavos, status,
+                      (select nome from origem_compra where id = origem_id)
+               from compras_fornecedor where id=%s and fornecedor_id=%s""",
+            (compra_id, conta[0]),
+        ).fetchone()
+    if cab is None:
+        request.session["erro"] = "Compra não encontrada."
+        return RedirectResponse("/painel/produtos/abastecimento", status_code=303)
+    compra = {"id": cab[0], "data": cab[1], "total_centavos": cab[2], "status": cab[3], "origem_nome": cab[4]}
+    return _render("compra_revisar", request, conta=conta, compra=compra, itens=itens, produtos=produtos,
+                   erro=request.session.pop("erro", None), aviso=request.session.pop("aviso", None))
+
+
+@router.post("/painel/produtos/abastecimento/{compra_id}/item")
+def painel_abastecimento_add_item(request: Request, compra_id: int,
+                                  produto_id: int = Form(...), quantidade: float = Form(...),
+                                  custo_unit: str = Form(...)):
+    from finance import empresa as emp, catalogo as cat_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.acesso_pj(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    s2 = custo_unit.replace("R$", "").strip().replace(".", "").replace(",", ".") if "," in custo_unit else custo_unit.replace("R$", "").strip()
+    try:
+        custo_centavos = int(round(float(s2) * 100))
+    except ValueError:
+        custo_centavos = 0
+    try:
+        prods = {p["id"]: p["nome"] for p in cat_mod.listar_produtos(pool, conta[0])}
+        desc = prods.get(produto_id, "produto")
+        with pool.connection() as c:
+            urow = c.execute("select unidade from catalogo_produtos where id=%s", (produto_id,)).fetchone()
+        unidade = urow[0] if urow else "kg"
+        cat_mod.adicionar_item_compra(pool, conta[0], compra_id, desc, quantidade, custo_centavos, unidade=unidade, produto_id=produto_id)
+        request.session["aviso"] = "Item adicionado."
+    except Exception as e:
+        request.session["erro"] = f"Erro: {str(e)}"
+    return RedirectResponse(f"/painel/produtos/abastecimento/{compra_id}", status_code=303)
+
+
+@router.post("/painel/produtos/abastecimento/{compra_id}/confirmar")
+def painel_abastecimento_confirmar(request: Request, compra_id: int):
+    from finance import empresa as emp, catalogo as cat_mod
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.acesso_pj(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    try:
+        r = cat_mod.confirmar_compra(pool, conta[0], compra_id)
+        request.session["aviso"] = f"✓ Compra confirmada! {r['itens']} item(ns) deram entrada no estoque."
+    except Exception as e:
+        request.session["erro"] = f"Erro: {str(e)}"
+    return RedirectResponse("/painel/produtos/abastecimento", status_code=303)
 
 
 @router.get("/painel/empresa", response_class=HTMLResponse)

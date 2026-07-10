@@ -29,70 +29,95 @@ NICHOS: dict[str, dict] = {
     # ---- NICHOS DE PRODUTO (tem estoque: saldo sobe/desce) ----
     "hortifruti": {
         "label": "Hortifrúti",
-        "tipo": "produto",
+        "vende_produto": True, "vende_servico": False,
         "unidades": ["kg", "duzia", "maco", "unidade", "bandeja", "litro", "pacote"],
         "categorias": ["fruta", "verdura", "legume", "tempero", "outro"],
     },
     "vestuario": {
         "label": "Vestuário / Acessórios",
-        "tipo": "produto",
+        "vende_produto": True, "vende_servico": False,
         "unidades": ["peca", "par", "unidade"],
         "categorias": ["masculino", "feminino", "infantil", "calcado", "acessorio", "outro"],
     },
     "minimercado": {
         "label": "Minimercado / Mercearia",
-        "tipo": "produto",
+        "vende_produto": True, "vende_servico": False,
         "unidades": ["unidade", "kg", "pacote", "litro", "caixa", "fardo"],
         "categorias": ["alimento", "bebida", "limpeza", "higiene", "outro"],
     },
     "alimentacao": {
         "label": "Alimentação / Lanche",
-        "tipo": "produto",
+        "vende_produto": True, "vende_servico": False,
         "unidades": ["unidade", "porcao", "prato", "litro"],
         "categorias": ["salgado", "doce", "bebida", "prato", "combo", "outro"],
     },
     "farmacia": {
         "label": "Farmácia / Saúde",
-        "tipo": "produto",
+        "vende_produto": True, "vende_servico": False,
         "unidades": ["caixa", "unidade", "frasco", "ml", "comprimido"],
         "categorias": ["medicamento", "higiene", "infantil", "beleza", "outro"],
     },
     "beleza": {
         "label": "Beleza / Cosméticos",
-        "tipo": "produto",
+        "vende_produto": True, "vende_servico": False,
         "unidades": ["unidade", "frasco", "kit"],
         "categorias": ["cabelo", "pele", "maquiagem", "perfume", "unha", "outro"],
     },
     "generico": {
         "label": "Outro / Genérico",
-        "tipo": "produto",
+        "vende_produto": True, "vende_servico": False,
         "unidades": ["unidade", "kg", "caixa", "pacote", "litro"],
         "categorias": [],  # livre: o lojista digita a categoria que quiser
     },
     # ---- NICHOS DE SERVIÇO (nao tem estoque: presta e registra) ----
     "consultoria": {
         "label": "Consultoria / Tecnologia",
-        "tipo": "servico",
+        "vende_produto": False, "vende_servico": True,
         "unidades": ["hora", "modulo", "projeto", "pacote", "mensal"],
         "categorias": ["consultoria", "desenvolvimento", "suporte", "treinamento", "outro"],
     },
     "salao": {
         "label": "Beleza / Salão (serviço)",
-        "tipo": "servico",
+        "vende_produto": False, "vende_servico": True,
         "unidades": ["sessao", "hora", "pacote"],
         "categorias": ["cabelo", "unha", "estetica", "barba", "outro"],
     },
     "educacao": {
         "label": "Educação / Aulas",
-        "tipo": "servico",
+        "vende_produto": False, "vende_servico": True,
         "unidades": ["aula", "hora", "modulo", "pacote", "mensal"],
         "categorias": ["reforco", "idioma", "musica", "curso", "outro"],
     },
     "servicos_gerais": {
         "label": "Serviços gerais",
-        "tipo": "servico",
+        "vende_produto": False, "vende_servico": True,
         "unidades": ["servico", "hora", "diaria", "visita", "orcamento"],
         "categorias": ["manutencao", "reparo", "instalacao", "limpeza", "outro"],
+    },
+    # ---- NICHOS MISTOS (vendem PRODUTO e SERVICO) ----
+    "oficina": {
+        "label": "Oficina / Auto",
+        "vende_produto": True, "vende_servico": True,
+        "unidades": ["peca", "unidade", "litro", "hora", "servico", "orcamento"],
+        "categorias": ["peca", "acessorio", "oleo_fluido", "mao_de_obra", "revisao", "outro"],
+    },
+    "petshop": {
+        "label": "Petshop",
+        "vende_produto": True, "vende_servico": True,
+        "unidades": ["unidade", "kg", "pacote", "sessao", "hora", "banho"],
+        "categorias": ["racao", "acessorio", "medicamento", "banho_tosa", "veterinario", "outro"],
+    },
+    "salao_completo": {
+        "label": "Salão completo (produto + serviço)",
+        "vende_produto": True, "vende_servico": True,
+        "unidades": ["unidade", "frasco", "sessao", "hora", "pacote"],
+        "categorias": ["cosmetico", "cabelo", "unha", "estetica", "barba", "outro"],
+    },
+    "assistencia": {
+        "label": "Assistência técnica",
+        "vende_produto": True, "vende_servico": True,
+        "unidades": ["peca", "unidade", "servico", "hora", "orcamento"],
+        "categorias": ["peca", "acessorio", "conserto", "diagnostico", "outro"],
     },
 }
 
@@ -146,27 +171,56 @@ def label_do_nicho(slug: str | None) -> str:
 
 
 def lista_nichos() -> list[dict]:
-    """Todos os nichos pra montar um select: [{slug, label, tipo}, ...]."""
-    return [{"slug": s, "label": cfg["label"], "tipo": cfg.get("tipo", "produto")}
+    """Todos os nichos pra montar um select: [{slug, label, ...}, ...]."""
+    return [{"slug": s, "label": cfg["label"],
+             "vende_produto": bool(cfg.get("vende_produto", True)),
+             "vende_servico": bool(cfg.get("vende_servico", False))}
             for s, cfg in NICHOS.items()]
 
 
 # ---------------------------------------------------------------------------
-# TIPO do nicho: 'produto' (tem estoque) ou 'servico' (nao tem estoque)
+# O QUE O NICHO VENDE: produto (tem estoque), servico (sem estoque), ou ambos
 # ---------------------------------------------------------------------------
+def vende_produto(slug: str | None) -> bool:
+    """O nicho vende PRODUTO (tem estoque)? Default True."""
+    return bool(config_do_nicho(slug).get("vende_produto", True))
+
+
+def vende_servico(slug: str | None) -> bool:
+    """O nicho vende SERVICO (sem estoque)? Default False."""
+    return bool(config_do_nicho(slug).get("vende_servico", False))
+
+
+def eh_misto(slug: str | None) -> bool:
+    """Vende os DOIS (produto e servico)?"""
+    return vende_produto(slug) and vende_servico(slug)
+
+
+# --- compat: alguns lugares ainda pensam em 'tipo' unico. Derivamos do par. ---
 def tipo_do_nicho(slug: str | None) -> str:
-    """'produto' ou 'servico'. Default 'produto' (o generico e' produto)."""
-    return config_do_nicho(slug).get("tipo", "produto")
+    """Compat: 'servico' se vende servico e NAO produto; senao 'produto'.
+    Prefira vende_produto()/vende_servico() pra nichos mistos."""
+    if vende_servico(slug) and not vende_produto(slug):
+        return "servico"
+    return "produto"
 
 
 def eh_servico(slug: str | None) -> bool:
-    return tipo_do_nicho(slug) == "servico"
+    """Compat: True so pra servico PURO. Nichos mistos retornam False aqui —
+    use vende_servico() se quiser saber se oferece servico."""
+    return vende_servico(slug) and not vende_produto(slug)
 
 
 def lista_nichos_por_tipo(tipo: str) -> list[dict]:
-    """Nichos de um tipo ('produto'|'servico'): [{slug, label}, ...]."""
+    """Nichos que oferecem determinado tipo. 'produto' -> todos que vendem
+    produto (inclui mistos); 'servico' -> todos que vendem servico (inclui
+    mistos). [{slug, label}, ...]."""
+    if tipo == "servico":
+        pred = vende_servico
+    else:
+        pred = vende_produto
     return [{"slug": s, "label": cfg["label"]}
-            for s, cfg in NICHOS.items() if cfg.get("tipo", "produto") == tipo]
+            for s, cfg in NICHOS.items() if pred(s)]
 
 
 # ---------------------------------------------------------------------------

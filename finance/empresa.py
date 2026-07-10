@@ -552,6 +552,51 @@ def csv_contador(pool, conta_id: int, ano: int, mes: int) -> str:
 # ---------------------------------------------------------------------------
 # Dados cadastrais da empresa (cadastro pós-upgrade PF->PJ)
 # ---------------------------------------------------------------------------
+def o_que_vende(pool, conta_id: int) -> dict:
+    """O que a conta vende: {produto: bool, servico: bool}.
+
+    A verdade é o par de colunas contas.vende_produto/vende_servico (decisão do
+    cliente, parte A+). Enquanto NULL (não definido ainda), cai no padrão do
+    nicho da conta. Nunca devolve os dois False.
+    """
+    from . import nichos as _n
+    with pool.connection() as c:
+        r = c.execute(
+            """select ct.vende_produto, ct.vende_servico, n.slug
+                 from contas ct
+                 left join nichos n on n.id = ct.nicho_id
+                where ct.id=%s""",
+            (conta_id,),
+        ).fetchone()
+    slug = r[2] if r else None
+    prod = r[0] if r and r[0] is not None else _n.vende_produto(slug)
+    serv = r[1] if r and r[1] is not None else _n.vende_servico(slug)
+    if not prod and not serv:  # segurança: nunca deixa os dois desligados
+        prod = True
+    return {"produto": bool(prod), "servico": bool(serv)}
+
+
+def definir_o_que_vende(pool, conta_id: int, *, produto=None, servico=None) -> dict:
+    """Liga/desliga produto e/ou servico pra conta (parte A+: destravar a aba).
+
+    Passe só o que quer mudar (produto=True liga a aba Produtos, etc.). O que vier
+    None mantém o valor atual. NUNCA deixa os dois desligados (ignora um desligar
+    que zeraria tudo). Devolve o estado final {produto, servico}.
+    """
+    atual = o_que_vende(pool, conta_id)
+    novo_prod = atual["produto"] if produto is None else bool(produto)
+    novo_serv = atual["servico"] if servico is None else bool(servico)
+    if not novo_prod and not novo_serv:  # não deixa a conta sem nada pra vender
+        return atual
+    with pool.connection() as c:
+        c.execute(
+            "update contas set vende_produto=%s, vende_servico=%s where id=%s",
+            (novo_prod, novo_serv, conta_id),
+        )
+        c.commit()
+    return {"produto": novo_prod, "servico": novo_serv}
+
+
 def dados_empresa_completos(pool, conta_id: int) -> bool:
     """True se a empresa já tem os dados mínimos preenchidos (CNPJ + razão).
 
@@ -635,6 +680,16 @@ def salvar_dados_empresa(pool, conta_id: int, *, documento: str = "",
                     where id=%s""",
                 (doc, razao, fantasia, end, bai, _cep, cid, est, mail, tel,
                  nicho_id, conta_id),
+            )
+            # inicializa o que a conta vende pelo padrão do nicho, SEM sobrescrever
+            # uma escolha já feita pelo cliente (coalesce mantém o valor atual).
+            from .nichos import vende_produto as _vp, vende_servico as _vs
+            c.execute(
+                """update contas
+                      set vende_produto = coalesce(vende_produto, %s),
+                          vende_servico = coalesce(vende_servico, %s)
+                    where id=%s""",
+                (_vp(nicho_slug), _vs(nicho_slug), conta_id),
             )
         else:
             c.execute(

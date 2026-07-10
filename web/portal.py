@@ -2814,74 +2814,91 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
   {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
   {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
 
-  <!-- cards de resumo -->
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;margin:1rem 0">
     <div class="metric" style="padding:.7rem .8rem"><span style="font-size:.62rem;color:#6a8a7a">PRODUTOS</span><b style="color:#5dcaa5;display:block;font-size:1.1rem">{{ resumo.total }}</b></div>
     <div class="metric" style="padding:.7rem .8rem"><span style="font-size:.62rem">EM ESTOQUE</span><b style="display:block;font-size:1.1rem">{{ brl(resumo.valor_estoque) }}</b></div>
     <div class="metric" style="padding:.7rem .8rem"><span style="font-size:.62rem;color:#c9a56a">ESTOQUE BAIXO</span><b style="color:#f0c05a;display:block;font-size:1.1rem">{{ resumo.baixo }}{% if resumo.baixo %} ⚠{% endif %}</b></div>
   </div>
 
-  <!-- form de cadastro (escondido) -->
+  <!-- form cadastro (escondido) -->
   <div id="prod-novo" style="display:none;margin-bottom:1.2rem;padding:1.1rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:10px">
-    <h3 style="margin-top:0;font-size:1rem">Novo produto</h3>
-    <form method="post" action="/painel/produtos/novo">
+    <h3 id="prod-form-titulo" style="margin-top:0;font-size:1rem">Novo produto</h3>
+    <form method="post" action="/painel/produtos/salvar">
+      <input type="hidden" name="produto_id" id="prod-edit-id" value="">
       <label style="font-size:.85rem">Nome</label>
-      <input name="nome" required placeholder="ex: Dipirona 500mg" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.6rem">
+      <input name="nome" id="prod-f-nome" required placeholder="ex: Dipirona 500mg" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.6rem">
       <div style="display:flex;gap:.6rem;flex-wrap:wrap">
         <div style="flex:1;min-width:120px">
           <label style="font-size:.85rem">Unidade</label>
-          <select name="unidade" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
+          <select name="unidade" id="prod-f-unidade" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
             {% for u in unidades %}<option value="{{ u }}">{{ label_unidade(u) }}</option>{% endfor %}
           </select>
         </div>
         <div style="flex:1;min-width:120px">
           <label style="font-size:.85rem">Categoria</label>
           {% if categorias %}
-          <select name="categoria" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
+          <select name="categoria" id="prod-f-categoria" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
             <option value="">—</option>
             {% for c in categorias %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
           </select>
           {% else %}
-          <input name="categoria" placeholder="livre" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
+          <input name="categoria" id="prod-f-categoria" placeholder="livre" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
           {% endif %}
         </div>
       </div>
       <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.6rem">
         <div style="flex:1;min-width:120px">
           <label style="font-size:.85rem">Preço de venda (R$)</label>
-          <input name="preco_venda" type="number" step="0.01" required placeholder="12,00" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
+          <input name="preco_venda" id="prod-f-preco" type="number" step="0.01" required placeholder="12,00" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
         </div>
         <div style="flex:1;min-width:120px">
           <label style="font-size:.85rem">Estoque mínimo</label>
-          <input name="estoque_minimo" type="number" step="0.1" placeholder="5" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
+          <input name="estoque_minimo" id="prod-f-min" type="number" step="0.1" placeholder="5" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
         </div>
       </div>
-      <button style="width:100%;background:#1d9e75;color:#fff;padding:.6rem;border:0;border-radius:8px;cursor:pointer;font-weight:600;margin-top:.9rem">Criar produto</button>
+      <button style="width:100%;background:#1d9e75;color:#fff;padding:.6rem;border:0;border-radius:8px;cursor:pointer;font-weight:600;margin-top:.9rem">Salvar</button>
     </form>
     <button type="button" onclick="prodCancelar()" style="width:100%;background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.5rem;margin-top:.5rem;cursor:pointer">Cancelar</button>
   </div>
 
-  <!-- lista de produtos -->
+  <!-- busca -->
   {% if produtos %}
-  <div style="display:grid;grid-template-columns:2.4fr 1fr .9fr;gap:.4rem;font-size:.6rem;color:#6a6a66;padding:0 .3rem .4rem;border-bottom:1px solid #1e1e20;text-transform:uppercase">
-    <span>Produto</span><span>Preço</span><span>Estoque</span>
-  </div>
-  {% for p in produtos %}
-  <div style="display:grid;grid-template-columns:2.4fr 1fr .9fr;gap:.4rem;padding:.55rem .3rem;align-items:center;border-bottom:1px solid #161618;font-size:.9rem">
-    <div>
-      <div style="color:#ececec">{{ p.nome }}</div>
-      <div style="color:#6a6a66;font-size:.65rem">{% if p.categoria %}{{ p.categoria }}{% endif %}{% if p.margem_pct is not none %} · {{ p.margem_pct|round|int }}%{% endif %}</div>
-    </div>
-    <span style="color:#cfe8dd">{{ brl(p.preco_venda_centavos) }}</span>
-    <span style="color:{% if p.abaixo_minimo %}#e07a5f{% else %}#5dcaa5{% endif %}">{{ p.saldo|round(1) }}{% if p.abaixo_minimo %} ⚠{% endif %}</span>
-  </div>
-  {% endfor %}
-  {% else %}
-  <div style="text-align:center;padding:2rem 1rem;color:#6a6a66">
-    <div style="font-size:1.6rem;margin-bottom:.4rem">📦</div>
-    <div style="font-size:.9rem">Nenhum produto ainda. Clique em <b style="color:#5dcaa5">+ Novo produto</b> pra começar.</div>
-  </div>
+  <input type="text" id="prod-busca" placeholder="🔍 buscar produto..." autocomplete="off" oninput="prodFiltrar(this.value)"
+         style="width:100%;padding:.5rem .7rem;background:#161617;border:1px solid #2a2a2b;border-radius:8px;color:#e8e8e8;font-size:.9rem;box-sizing:border-box;margin-bottom:.7rem">
   {% endif %}
+
+  <!-- lista -->
+  <div style="display:flex;flex-direction:column;gap:.4rem">
+    {% if produtos %}
+      {% for p in produtos %}
+      <div class="prod-row" data-nome="{{ p.nome|lower }}" style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;overflow:hidden">
+        <div onclick="prodToggle(this)" style="display:flex;align-items:center;gap:10px;padding:.6rem .75rem;cursor:pointer">
+          <span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:{% if p.abaixo_minimo %}#ff6b6b{% else %}#1d9e75{% endif %}"></span>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:.92rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ p.nome }} <span class="mut" style="font-weight:400;font-size:.8rem">· {{ label_unidade(p.unidade) }}</span></div>
+            <div class="mut" style="font-size:.75rem;margin-top:1px">saldo {{ p.saldo|round(1) }} {{ label_unidade(p.unidade) }}{% if p.categoria %} · {{ p.categoria }}{% endif %}{% if p.abaixo_minimo %} · <span style="color:#ff6b6b">abaixo do mínimo</span>{% endif %}</div>
+          </div>
+          <span style="font-size:.92rem;font-weight:500;color:#cfcfcf;white-space:nowrap">{{ brl(p.preco_venda_centavos) }}</span>
+          <span style="color:#6a6a6a;font-size:1rem">▾</span>
+        </div>
+        <div class="prod-body" style="display:none;padding:0 .75rem .7rem;border-top:1px solid #242426">
+          <div class="mut" style="font-size:.75rem;padding:.5rem 0 .6rem">custo médio {{ brl(p.custo_medio_centavos) }} · margem {% if p.margem_pct is not none %}{{ p.margem_pct|round|int }}%{% else %}-{% endif %}</div>
+          <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+            <button type="button" onclick="prodEntrada({{ p.id }},'{{ p.nome }}')" style="background:#1d9e75;color:#fff;border:0;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem;font-weight:500">dar entrada</button>
+            <button type="button" onclick="prodPerda({{ p.id }},'{{ p.nome }}')" style="background:#8a3636;color:#fff;border:0;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem;font-weight:500">perda</button>
+            <button type="button" onclick='prodEditar({{ p.id }},{{ p.nome|tojson }},{{ p.unidade|tojson }},{{ (p.categoria or "")|tojson }},{{ p.preco_venda_centavos }},{{ p.estoque_minimo or 0 }})' style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem">editar</button>
+            <button type="button" onclick="prodApagar({{ p.id }},'{{ p.nome }}')" style="background:transparent;border:1px solid #6b3030;color:#d98a8a;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem">🗑 apagar</button>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+    <div style="text-align:center;padding:2rem 1rem;color:#6a6a66">
+      <div style="font-size:1.6rem;margin-bottom:.4rem">📦</div>
+      <div style="font-size:.9rem">Nenhum produto ainda. Clique em <b style="color:#5dcaa5">+ Novo produto</b> pra começar.</div>
+    </div>
+    {% endif %}
+  </div>
 
   {% if pode_servico %}
   <div style="margin-top:1.4rem;padding-top:1rem;border-top:1px solid #1e1e20;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
@@ -2891,9 +2908,44 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
   {% endif %}
 </div>
 
+<!-- modal entrada/perda -->
+<div id="prod-mov" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50;align-items:center;justify-content:center" onclick="if(event.target===this)prodMovFecha()">
+  <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:12px;padding:1.2rem;max-width:340px;width:90%">
+    <h3 id="prod-mov-titulo" style="margin-top:0;font-size:1rem">Dar entrada</h3>
+    <form method="post" id="prod-mov-form">
+      <input type="hidden" name="produto_id" id="prod-mov-id">
+      <label style="font-size:.85rem">Quantidade</label>
+      <input name="quantidade" type="number" step="0.1" required style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.6rem">
+      <div id="prod-mov-custo-wrap">
+        <label style="font-size:.85rem">Custo unitário (R$)</label>
+        <input name="custo_unit" type="number" step="0.01" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.6rem">
+        <label style="font-size:.85rem">Origem</label>
+        <select name="origem_id" id="prod-mov-origem" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.6rem">
+          {% for o in origens %}<option value="{{ o.id }}">{{ o.nome }}</option>{% endfor %}
+        </select>
+      </div>
+      <div id="prod-mov-motivo-wrap" style="display:none">
+        <label style="font-size:.85rem">Motivo (opcional)</label>
+        <input name="motivo" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.6rem">
+      </div>
+      <button style="width:100%;background:#1d9e75;color:#fff;padding:.6rem;border:0;border-radius:8px;cursor:pointer;font-weight:600">Confirmar</button>
+    </form>
+    <button type="button" onclick="prodMovFecha()" style="width:100%;background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.5rem;margin-top:.5rem;cursor:pointer">Cancelar</button>
+  </div>
+</div>
+
+<form method="post" id="prod-apagar-form" action="/painel/produtos/apagar" style="display:none"><input type="hidden" name="produto_id" id="prod-apagar-id"></form>
+
 <script>
-function prodNovo(){document.getElementById('prod-novo').style.display='block';}
+function prodNovo(){var f=document.getElementById('prod-novo');f.style.display='block';document.getElementById('prod-form-titulo').textContent='Novo produto';document.getElementById('prod-edit-id').value='';document.getElementById('prod-f-nome').value='';document.getElementById('prod-f-preco').value='';document.getElementById('prod-f-min').value='';}
 function prodCancelar(){document.getElementById('prod-novo').style.display='none';}
+function prodToggle(el){var b=el.parentElement.querySelector('.prod-body');b.style.display=b.style.display==='none'?'block':'none';}
+function prodFiltrar(q){q=q.toLowerCase();document.querySelectorAll('.prod-row').forEach(function(r){r.style.display=r.dataset.nome.indexOf(q)>-1?'':'none';});}
+function prodEditar(id,nome,unidade,cat,preco,emin){var f=document.getElementById('prod-novo');f.style.display='block';document.getElementById('prod-form-titulo').textContent='Editar produto';document.getElementById('prod-edit-id').value=id;document.getElementById('prod-f-nome').value=nome;document.getElementById('prod-f-unidade').value=unidade;var c=document.getElementById('prod-f-categoria');if(c)c.value=cat;document.getElementById('prod-f-preco').value=(preco/100).toFixed(2);document.getElementById('prod-f-min').value=emin;window.scrollTo(0,0);}
+function prodEntrada(id,nome){document.getElementById('prod-mov').style.display='flex';document.getElementById('prod-mov-titulo').textContent='Dar entrada · '+nome;document.getElementById('prod-mov-id').value=id;document.getElementById('prod-mov-form').action='/painel/produtos/entrada';document.getElementById('prod-mov-custo-wrap').style.display='block';document.getElementById('prod-mov-motivo-wrap').style.display='none';}
+function prodPerda(id,nome){document.getElementById('prod-mov').style.display='flex';document.getElementById('prod-mov-titulo').textContent='Registrar perda · '+nome;document.getElementById('prod-mov-id').value=id;document.getElementById('prod-mov-form').action='/painel/produtos/perda';document.getElementById('prod-mov-custo-wrap').style.display='none';document.getElementById('prod-mov-motivo-wrap').style.display='block';}
+function prodMovFecha(){document.getElementById('prod-mov').style.display='none';}
+function prodApagar(id,nome){if(confirm('Apagar '+nome+'? Ele some do catálogo. O histórico fica guardado.')){document.getElementById('prod-apagar-id').value=id;document.getElementById('prod-apagar-form').submit();}}
 </script>
 {% endblock %}"""
 
@@ -7094,7 +7146,7 @@ def painel_empresa(request: Request):
 
 @router.get("/painel/produtos")
 def painel_produtos(request: Request):
-    """Aba Produtos: lista + cadastro. Gate do cadastro completo da empresa."""
+    """Aba Produtos do PJ base. Reusa catalogo.py (genérico)."""
     from finance import empresa as emp, catalogo as cat, nichos as nic
     conta = conta_logada(request)
     if conta is None:
@@ -7104,10 +7156,8 @@ def painel_produtos(request: Request):
         return RedirectResponse("/painel", status_code=303)
     ov = emp.o_que_vende(pool, conta[0])
     if not ov["produto"]:
-        # conta não vende produto — manda pra serviços se vender, senão painel
         return RedirectResponse("/painel/servicos" if ov["servico"] else "/painel",
                                 status_code=303)
-    # Gate: sem cadastro completo, manda completar a empresa primeiro
     if not emp.dados_empresa_completos(pool, conta[0]):
         return RedirectResponse("/painel/empresa", status_code=303)
     dados = emp.obter_dados_empresa(pool, conta[0])
@@ -7117,24 +7167,27 @@ def painel_produtos(request: Request):
                 for p in produtos)
     resumo = {"total": len(produtos), "valor_estoque": int(valor),
               "baixo": sum(1 for p in produtos if p.get("abaixo_minimo"))}
-    aviso = request.session.pop("aviso", "")
-    erro = request.session.pop("erro", "")
     return _render("produtos", request, produtos=produtos, resumo=resumo,
                    nicho_label=nic.label_do_nicho(nicho),
                    unidades=nic.unidades_do_nicho(nicho),
                    categorias=nic.categorias_do_nicho(nicho),
                    label_unidade=nic.label_unidade,
-                   pode_servico=ov["servico"], aviso=aviso, erro=erro,
+                   origens=cat.listar_origens(pool, conta[0]),
+                   pode_servico=ov["servico"],
+                   aviso=request.session.pop("aviso", ""),
+                   erro=request.session.pop("erro", ""),
                    tem_pj=True, vende_produto=True, vende_servico=ov["servico"])
 
 
-@router.post("/painel/produtos/novo")
-def painel_produtos_novo(request: Request,
-                         nome: str = Form(...),
-                         unidade: str = Form("unidade"),
-                         categoria: str = Form(""),
-                         preco_venda: str = Form("0"),
-                         estoque_minimo: str = Form("0")):
+@router.post("/painel/produtos/salvar")
+def painel_produtos_salvar(request: Request,
+                           produto_id: str = Form(""),
+                           nome: str = Form(...),
+                           unidade: str = Form("unidade"),
+                           categoria: str = Form(""),
+                           preco_venda: str = Form("0"),
+                           estoque_minimo: str = Form("0")):
+    """Cria (produto_id vazio) ou edita (produto_id preenchido). Reusa catalogo.py."""
     from finance import empresa as emp, catalogo as cat
     conta = conta_logada(request)
     if conta is None:
@@ -7143,14 +7196,109 @@ def painel_produtos_novo(request: Request,
     if not emp.modulo_pj_ativo(pool, conta[0]):
         return RedirectResponse("/painel", status_code=303)
     try:
+        s = preco_venda.replace("R$", "").strip()
+        s = s.replace(".", "").replace(",", ".") if "," in s else s
+        preco_centavos = int(round(float(s or 0) * 100))
+        emin = float((estoque_minimo or "0").replace(",", "."))
         dados = emp.obter_dados_empresa(pool, conta[0])
-        preco_centavos = int(float((preco_venda or "0").replace(",", ".")) * 100)
-        cat.criar_produto(pool, conta[0], nome, unidade, categoria or "",
-                          preco_centavos, float((estoque_minimo or "0").replace(",", ".")),
-                          nicho=dados.get("nicho") or None)
-        request.session["aviso"] = f"Produto '{nome}' criado!"
+        if (produto_id or "").strip():
+            cat.atualizar_produto(pool, conta[0], int(produto_id),
+                                  nome=nome, unidade=unidade,
+                                  categoria=(categoria.strip() or None),
+                                  preco_venda_centavos=preco_centavos,
+                                  estoque_minimo=emin)
+            request.session["aviso"] = "Produto atualizado."
+        else:
+            cat.criar_produto(pool, conta[0], nome, unidade, categoria or "",
+                              preco_centavos, emin, nicho=dados.get("nicho") or None)
+            request.session["aviso"] = f"Produto '{nome}' criado!"
     except Exception as e:
-        request.session["erro"] = f"Erro ao criar produto: {e}"
+        request.session["erro"] = f"Erro: {e}"
+    return RedirectResponse("/painel/produtos", status_code=303)
+
+
+@router.post("/painel/produtos/entrada")
+def painel_produtos_entrada(request: Request,
+                            produto_id: int = Form(...),
+                            quantidade: str = Form(""),
+                            custo_unit: str = Form(""),
+                            origem_id: int = Form(...)):
+    from finance import empresa as emp, catalogo as cat
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.modulo_pj_ativo(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    try:
+        custo_centavos = int(float(custo_unit or 0) * 100)
+        r = cat.registrar_movimentacao(pool, conta[0], produto_id, "entrada",
+                                       float(quantidade or 0), custo_centavos, origem_id)
+        aviso = f"✓ Entrada registrada! Novo saldo: {r['saldo_novo']} " \
+                f"| Custo médio: R$ {r['custo_medio_centavos']/100:.2f}"
+        if r.get("abaixo_minimo"):
+            aviso += " ⚠ Abaixo do mínimo!"
+        request.session["aviso"] = aviso
+    except Exception as e:
+        request.session["erro"] = f"Erro: {e}"
+    return RedirectResponse("/painel/produtos", status_code=303)
+
+
+@router.post("/painel/produtos/perda")
+def painel_produtos_perda(request: Request,
+                          produto_id: int = Form(...),
+                          quantidade: str = Form(""),
+                          motivo: str = Form("")):
+    from finance import empresa as emp, catalogo as cat
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.modulo_pj_ativo(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    try:
+        r = cat.registrar_movimentacao(pool, conta[0], produto_id, "perda",
+                                       float(quantidade or 0), motivo=motivo)
+        request.session["aviso"] = f"✓ Perda registrada. Novo saldo: {r['saldo_novo']}"
+    except Exception as e:
+        request.session["erro"] = f"Erro: {e}"
+    return RedirectResponse("/painel/produtos", status_code=303)
+
+
+@router.post("/painel/produtos/apagar")
+def painel_produtos_apagar(request: Request, produto_id: int = Form(...)):
+    from finance import empresa as emp, catalogo as cat
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.modulo_pj_ativo(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    try:
+        cat.arquivar_produto(pool, conta[0], produto_id)
+        request.session["aviso"] = "Produto apagado."
+    except Exception as e:
+        request.session["erro"] = f"Erro: {e}"
+    return RedirectResponse("/painel/produtos", status_code=303)
+
+
+@router.post("/painel/produtos/origem")
+def painel_produtos_origem(request: Request,
+                           nome: str = Form(""),
+                           contato: str = Form("")):
+    """Cria uma origem de compra (pro modal de entrada)."""
+    from finance import empresa as emp, catalogo as cat
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.modulo_pj_ativo(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    try:
+        cat.criar_origem(pool, conta[0], nome, contato)
+        request.session["aviso"] = f"Origem '{nome}' criada!"
+    except Exception as e:
+        request.session["erro"] = f"Erro: {e}"
     return RedirectResponse("/painel/produtos", status_code=303)
 
 

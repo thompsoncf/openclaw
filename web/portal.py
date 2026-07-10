@@ -2823,84 +2823,33 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
     <div class="metric" style="padding:.7rem .8rem"><span style="font-size:.62rem;color:#c9a56a">ESTOQUE BAIXO</span><b style="color:#f0c05a;display:block;font-size:1.1rem">{{ resumo.baixo }}{% if resumo.baixo %} ⚠{% endif %}</b></div>
   </div>
 
-  <!-- form cadastro/editar -->
-  <div id="prod-novo" style="display:none;margin-bottom:1.2rem;padding:1.1rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:10px">
-    <h3 id="prod-form-titulo" style="margin-top:0;font-size:1rem">Novo produto</h3>
-    <form method="post" action="/painel/produtos/salvar">
-      <input type="hidden" name="produto_id" id="prod-edit-id" value="">
-      <label style="font-size:.85rem">Nome</label>
-      <input name="nome" id="prod-f-nome" required placeholder="ex: Dipirona 500mg" oninput="prodSugereCategoria(this.value)" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.6rem">
-      <div style="display:flex;gap:.6rem;flex-wrap:wrap">
-        <div style="flex:1;min-width:120px">
-          <label style="font-size:.85rem">Unidade</label>
-          <select name="unidade" id="prod-f-unidade" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
-            {% for u in unidades %}<option value="{{ u }}">{{ label_unidade(u) }}</option>{% endfor %}
-          </select>
-        </div>
-        <div style="flex:1;min-width:120px">
-          <label style="font-size:.85rem">Categoria</label>
-          {% if categorias %}
-          <select name="categoria" id="prod-f-categoria" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
-            <option value="">—</option>
-            {% for c in categorias %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
-          </select>
-          {% else %}
-          <input name="categoria" id="prod-f-categoria" placeholder="livre" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
-          {% endif %}
-        </div>
-      </div>
-      <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.6rem">
-        <div style="flex:1;min-width:120px">
-          <label style="font-size:.85rem">Preço de venda (R$)</label>
-          <input name="preco_venda" id="prod-f-preco" type="number" step="0.01" required placeholder="12,00" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
-        </div>
-        <div style="flex:1;min-width:120px">
-          <label style="font-size:.85rem">Estoque mínimo</label>
-          <input name="estoque_minimo" id="prod-f-min" type="number" step="0.1" placeholder="5" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
-        </div>
-      </div>
-      <button style="width:100%;background:#1d9e75;color:#fff;padding:.6rem;border:0;border-radius:8px;cursor:pointer;font-weight:600;margin-top:.9rem">Salvar</button>
-    </form>
-    <button type="button" onclick="prodCancelar()" style="width:100%;background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.5rem;margin-top:.5rem;cursor:pointer">Cancelar</button>
-  </div>
-
-  <!-- importar planilha -->
-  <div id="prod-importar" style="display:none;margin-bottom:1.2rem;padding:1.1rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:10px">
-    <h3 style="margin-top:0;font-size:1rem">Importar planilha (CSV)</h3>
-    <p class="mut" style="font-size:.8rem">Colunas: nome, unidade, categoria, preço, estoque mínimo. A primeira linha é o cabeçalho.</p>
-    <input type="file" id="prod-planilha-file" accept=".csv" onchange="prodLerPlanilha(this)" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px">
-    <div id="prod-planilha-previa" style="margin-top:.8rem"></div>
-    <button type="button" onclick="prodCancelarImportar()" style="width:100%;background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.5rem;margin-top:.5rem;cursor:pointer">Cancelar</button>
-  </div>
-
   {% if produtos %}
   <input type="text" id="prod-busca" placeholder="🔍 buscar produto..." autocomplete="off" oninput="prodFiltrar(this.value)"
          style="width:100%;padding:.5rem .7rem;background:#161617;border:1px solid #2a2a2b;border-radius:8px;color:#e8e8e8;font-size:.9rem;box-sizing:border-box;margin-bottom:.7rem">
   {% endif %}
 
-  <div style="display:flex;flex-direction:column;gap:.4rem">
+  <div style="display:flex;flex-direction:column;gap:.5rem">
     {% if produtos %}
       {% for p in produtos %}
-      <div class="prod-card" data-pid="{{ p.id }}" data-nome="{{ p.nome|lower }}" style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;overflow:hidden">
-        <div onclick="prodToggle(this)" style="display:flex;align-items:center;gap:10px;padding:.6rem .75rem;cursor:pointer">
-          <div class="prod-foto" style="width:38px;height:38px;border-radius:7px;flex-shrink:0;{% if p.foto_url %}background:url('{{ p.foto_url }}') center/cover{% else %}background:#1a2a1f;display:flex;align-items:center;justify-content:center{% endif %}">{% if not p.foto_url %}<span style="font-size:18px;color:#3a5a48">📦</span>{% endif %}</div>
+      <div class="prod-card" data-nome="{{ p.nome|lower }}" style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:10px;padding:.7rem .85rem">
+        <div style="display:flex;align-items:center;gap:11px">
+          <div class="prod-foto" style="width:44px;height:44px;border-radius:8px;flex-shrink:0;{% if p.foto_url %}background:url('{{ p.foto_url }}') center/cover{% else %}background:#1a2a1f;display:flex;align-items:center;justify-content:center{% endif %}">{% if not p.foto_url %}<span style="font-size:20px;color:#3a5a48">📦</span>{% endif %}</div>
           <div style="flex:1;min-width:0">
             <div style="font-size:.92rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ p.nome }} <span class="mut" style="font-weight:400;font-size:.8rem">· {{ label_unidade(p.unidade) }}</span>{% if p.em_promo %} <span style="background:#8a3680;color:#fff;font-size:.62rem;padding:1px 6px;border-radius:4px">promo</span>{% endif %}</div>
             <div class="mut" style="font-size:.75rem;margin-top:1px">saldo {{ p.saldo|round(1) }} {{ label_unidade(p.unidade) }}{% if p.categoria %} · {{ p.categoria }}{% endif %}{% if p.abaixo_minimo %} · <span style="color:#ff6b6b">abaixo do mínimo</span>{% endif %}</div>
           </div>
-          <span style="font-size:.92rem;font-weight:500;color:#cfcfcf;white-space:nowrap">{{ brl(p.preco_venda_centavos) }}</span>
-          <span style="color:#6a6a6a;font-size:1rem">▾</span>
-        </div>
-        <div class="prod-body" style="display:none;padding:0 .75rem .7rem;border-top:1px solid #242426">
-          <div class="mut" style="font-size:.75rem;padding:.5rem 0 .6rem">custo médio {{ brl(p.custo_medio_centavos) }} · margem {% if p.margem_pct is not none %}{{ p.margem_pct|round|int }}%{% else %}-{% endif %}</div>
-          <div style="display:flex;gap:.4rem;flex-wrap:wrap">
-            <button type="button" onclick="prodEntrada({{ p.id }})" style="background:#1d9e75;color:#fff;border:0;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem;font-weight:500">dar entrada</button>
-            <button type="button" onclick="prodPerda({{ p.id }})" style="background:#8a3636;color:#fff;border:0;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem;font-weight:500">perda</button>
-            <button type="button" onclick="prodEditar({{ p.id }})" style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem">editar</button>
-            <button type="button" onclick="prodFoto({{ p.id }})" style="background:transparent;border:1px solid #534AB7;color:#a89ce8;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem">📷 foto</button>
-            <button type="button" onclick="prodPromo({{ p.id }})" style="background:transparent;border:1px solid #8a3680;color:#d89ad0;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem">🔖 promo</button>
-            <button type="button" onclick="prodApagar({{ p.id }})" style="background:transparent;border:1px solid #6b3030;color:#d98a8a;border-radius:4px;padding:.4rem .8rem;cursor:pointer;font-size:.85rem">🗑 apagar</button>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="color:#cfcfcf;font-size:.95rem;font-weight:600">{{ brl(p.preco_venda_centavos) }}</div>
+            <div style="color:#6a8a7a;font-size:.66rem">{% if p.margem_pct is not none %}margem {{ p.margem_pct|round|int }}%{% endif %}</div>
           </div>
+        </div>
+        <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.7rem;padding-top:.65rem;border-top:1px solid #242426">
+          <button type="button" onclick="prodEntrada({{ p.id }})" style="background:#173d2e;color:#5dcaa5;border:0;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem;font-weight:500">+ entrada</button>
+          <button type="button" onclick="prodPerda({{ p.id }})" style="background:transparent;border:1px solid #3a3a3d;color:#b4b2a9;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem">perda</button>
+          <button type="button" onclick="prodEditar({{ p.id }})" style="background:transparent;border:1px solid #3a3a3d;color:#b4b2a9;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem">editar</button>
+          <button type="button" onclick="prodFoto({{ p.id }})" style="background:transparent;border:1px solid #3a3a3d;color:#a89ce8;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem">📷</button>
+          <button type="button" onclick="prodPromo({{ p.id }})" style="background:transparent;border:1px solid #3a3a3d;color:#d89ad0;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem">🔖</button>
+          <button type="button" onclick="prodApagar({{ p.id }})" style="background:transparent;border:1px solid #3a2a2a;color:#d98a8a;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem">🗑</button>
         </div>
       </div>
       {% endfor %}
@@ -2920,81 +2869,134 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
   {% endif %}
 </div>
 
-<!-- MODAL FOTO -->
-<div id="prod-foto-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:#000000aa;align-items:center;justify-content:center;padding:1rem">
-  <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:12px;padding:1.3rem;max-width:400px;width:100%;max-height:88vh;overflow-y:auto">
+<!-- MODAL cadastro/editar -->
+<div id="prod-modal-form" class="prod-modal" style="display:none">
+  <div class="prod-modal-box">
+    <h3 id="prod-form-titulo" style="margin-top:0;font-size:1.05rem">Novo produto</h3>
+    <form method="post" action="/painel/produtos/salvar">
+      <input type="hidden" name="produto_id" id="prod-edit-id" value="">
+      <label style="font-size:.85rem">Nome</label>
+      <input name="nome" id="prod-f-nome" required placeholder="ex: Alface crespa" oninput="prodSugereCategoria(this.value)" class="prod-inp">
+      <div style="display:flex;gap:.6rem;flex-wrap:wrap">
+        <div style="flex:1;min-width:120px">
+          <label style="font-size:.85rem">Unidade</label>
+          <select name="unidade" id="prod-f-unidade" class="prod-inp">
+            {% for u in unidades %}<option value="{{ u }}">{{ label_unidade(u) }}</option>{% endfor %}
+          </select>
+        </div>
+        <div style="flex:1;min-width:120px">
+          <label style="font-size:.85rem">Categoria</label>
+          {% if categorias %}
+          <select name="categoria" id="prod-f-categoria" class="prod-inp"><option value="">—</option>{% for c in categorias %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select>
+          {% else %}
+          <input name="categoria" id="prod-f-categoria" placeholder="livre" class="prod-inp">
+          {% endif %}
+        </div>
+      </div>
+      <div style="display:flex;gap:.6rem;flex-wrap:wrap">
+        <div style="flex:1;min-width:120px">
+          <label style="font-size:.85rem">Preço de venda (R$)</label>
+          <input name="preco_venda" id="prod-f-preco" type="number" step="0.01" required placeholder="3,50" class="prod-inp">
+        </div>
+        <div style="flex:1;min-width:120px">
+          <label style="font-size:.85rem">Estoque mínimo</label>
+          <input name="estoque_minimo" id="prod-f-min" type="number" step="0.1" placeholder="5" class="prod-inp">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:.9rem">
+        <button style="flex:1;background:#1d9e75;color:#fff;padding:.6rem;border:0;border-radius:8px;cursor:pointer;font-weight:600">Salvar</button>
+        <button type="button" onclick="prodFecha('prod-modal-form')" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.6rem 1rem;cursor:pointer">Cancelar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- MODAL entrada/perda -->
+<div id="prod-modal-mov" class="prod-modal" style="display:none">
+  <div class="prod-modal-box" style="max-width:340px">
+    <h3 id="prod-mov-titulo" style="margin-top:0;font-size:1.05rem">Dar entrada</h3>
+    <form method="post" id="prod-mov-form">
+      <input type="hidden" name="produto_id" id="prod-mov-id">
+      <label style="font-size:.85rem">Quantidade</label>
+      <input name="quantidade" type="number" step="0.1" required class="prod-inp">
+      <div id="prod-mov-custo-wrap">
+        <label style="font-size:.85rem">Custo unitário (R$)</label>
+        <input name="custo_unit" type="number" step="0.01" class="prod-inp">
+        <label style="font-size:.85rem">Origem</label>
+        <select name="origem_id" id="prod-mov-origem" class="prod-inp">{% for o in origens %}<option value="{{ o.id }}">{{ o.nome }}</option>{% endfor %}</select>
+      </div>
+      <div id="prod-mov-motivo-wrap" style="display:none">
+        <label style="font-size:.85rem">Motivo (opcional)</label>
+        <input name="motivo" class="prod-inp">
+      </div>
+      <div style="display:flex;gap:8px;margin-top:.6rem">
+        <button style="flex:1;background:#1d9e75;color:#fff;padding:.6rem;border:0;border-radius:8px;cursor:pointer;font-weight:600">Confirmar</button>
+        <button type="button" onclick="prodFecha('prod-modal-mov')" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.6rem 1rem;cursor:pointer">Cancelar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- MODAL foto -->
+<div id="prod-modal-foto" class="prod-modal" style="display:none">
+  <div class="prod-modal-box">
     <h4 style="margin-top:0">Foto de <span id="prod-foto-nome" style="color:#5dcaa5"></span></h4>
     <input type="hidden" id="prod-foto-pid">
     <label style="display:flex;align-items:center;gap:10px;background:#1d9e75;color:#fff;border-radius:9px;padding:.7rem .9rem;font-size:12.5px;font-weight:600;cursor:pointer;margin-bottom:.8rem">
-      <span style="font-size:20px">📷</span>
-      <div>Tirar foto / enviar do aparelho<div style="font-size:10px;font-weight:400;opacity:.85">a foto real do seu produto</div></div>
+      <span style="font-size:20px">📷</span><div>Tirar foto / enviar do aparelho<div style="font-size:10px;font-weight:400;opacity:.85">a foto real do seu produto</div></div>
       <input type="file" accept="image/*" capture="environment" onchange="prodFotoUpload(this)" style="display:none">
     </label>
     <div id="prod-foto-upload-status" style="font-size:.74rem;color:#888780;margin-bottom:.8rem"></div>
     <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:1rem">
-      <div id="prod-foto-previa" style="width:88px;height:88px;border-radius:10px;background:#1a2a1f;border:2px solid #1d9e75;flex-shrink:0;background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center">
-        <span id="prod-foto-previa-vazia" style="font-size:28px;color:#3a5a48">📦</span>
-      </div>
+      <div id="prod-foto-previa" style="width:88px;height:88px;border-radius:10px;background:#1a2a1f;border:2px solid #1d9e75;flex-shrink:0;background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center"><span id="prod-foto-previa-vazia" style="font-size:28px;color:#3a5a48">📦</span></div>
       <div style="flex:1;font-size:.78rem;color:#888780">A prévia aparece quando você cola o link ou escolhe uma sugestão.</div>
     </div>
-    <div id="prod-foto-sugbox" style="margin-bottom:.9rem">
-      <div style="font-size:.78rem;color:#5dcaa5;font-weight:600;margin-bottom:.4rem">✨ Sugestões</div>
-      <div id="prod-foto-sugestoes" style="display:flex;gap:7px;flex-wrap:wrap"><span style="font-size:.74rem;color:#888780">buscando...</span></div>
-    </div>
+    <div id="prod-foto-sugbox" style="margin-bottom:.9rem"><div style="font-size:.78rem;color:#5dcaa5;font-weight:600;margin-bottom:.4rem">✨ Sugestões</div><div id="prod-foto-sugestoes" style="display:flex;gap:7px;flex-wrap:wrap"><span style="font-size:.74rem;color:#888780">buscando...</span></div></div>
     <label style="font-size:.8rem;color:#b4b2a9">Ou cole o link da sua foto:</label>
-    <input id="prod-foto-link" placeholder="https://..." oninput="prodFotoPreview(this.value)" style="width:100%;box-sizing:border-box;margin:.4rem 0 .9rem;padding:.55rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:7px">
+    <input id="prod-foto-link" placeholder="https://..." oninput="prodFotoPreview(this.value)" class="prod-inp">
     <div style="display:flex;gap:8px">
       <button type="button" onclick="prodFotoSalvar()" style="flex:1;background:#1d9e75;color:#fff;border:0;border-radius:8px;padding:.65rem;font-weight:600;cursor:pointer">Salvar</button>
       <button type="button" onclick="prodFotoRemover()" style="background:transparent;border:1px solid #8a3636;color:#c97;border-radius:8px;padding:.65rem .9rem;cursor:pointer">Remover</button>
-      <button type="button" onclick="document.getElementById('prod-foto-modal').style.display='none'" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.65rem .9rem;cursor:pointer">Cancelar</button>
+      <button type="button" onclick="prodFecha('prod-modal-foto')" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.65rem .9rem;cursor:pointer">Cancelar</button>
     </div>
   </div>
 </div>
 
-<!-- MODAL PROMO -->
-<div id="prod-promo-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:#000000aa;align-items:center;justify-content:center;padding:1rem">
-  <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:12px;padding:1.3rem;max-width:340px;width:100%">
+<!-- MODAL promo -->
+<div id="prod-modal-promo" class="prod-modal" style="display:none">
+  <div class="prod-modal-box" style="max-width:340px">
     <h4 style="margin-top:0">Promoção · <span id="prod-promo-nome" style="color:#d89ad0"></span></h4>
     <input type="hidden" id="prod-promo-pid">
     <label style="display:flex;align-items:center;gap:8px;margin-bottom:.8rem;font-size:.9rem"><input type="checkbox" id="prod-promo-ativo" onchange="prodPromoToggle()"> Produto em promoção</label>
     <div id="prod-promo-preco-wrap" style="display:none">
       <label style="font-size:.85rem">Preço promocional (R$)</label>
-      <input id="prod-promo-preco" type="number" step="0.01" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.6rem">
+      <input id="prod-promo-preco" type="number" step="0.01" class="prod-inp">
     </div>
     <div style="display:flex;gap:8px">
       <button type="button" onclick="prodPromoSalvar()" style="flex:1;background:#8a3680;color:#fff;border:0;border-radius:8px;padding:.6rem;font-weight:600;cursor:pointer">Salvar</button>
-      <button type="button" onclick="document.getElementById('prod-promo-modal').style.display='none'" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.6rem .9rem;cursor:pointer">Cancelar</button>
+      <button type="button" onclick="prodFecha('prod-modal-promo')" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.6rem .9rem;cursor:pointer">Cancelar</button>
     </div>
   </div>
 </div>
 
-<!-- MODAL entrada/perda -->
-<div id="prod-mov" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50;align-items:center;justify-content:center" onclick="if(event.target===this)prodMovFecha()">
-  <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:12px;padding:1.2rem;max-width:340px;width:90%">
-    <h3 id="prod-mov-titulo" style="margin-top:0;font-size:1rem">Dar entrada</h3>
-    <form method="post" id="prod-mov-form">
-      <input type="hidden" name="produto_id" id="prod-mov-id">
-      <label style="font-size:.85rem">Quantidade</label>
-      <input name="quantidade" type="number" step="0.1" required style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.6rem">
-      <div id="prod-mov-custo-wrap">
-        <label style="font-size:.85rem">Custo unitário (R$)</label>
-        <input name="custo_unit" type="number" step="0.01" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.6rem">
-        <label style="font-size:.85rem">Origem</label>
-        <select name="origem_id" id="prod-mov-origem" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.6rem">
-          {% for o in origens %}<option value="{{ o.id }}">{{ o.nome }}</option>{% endfor %}
-        </select>
-      </div>
-      <div id="prod-mov-motivo-wrap" style="display:none">
-        <label style="font-size:.85rem">Motivo (opcional)</label>
-        <input name="motivo" style="width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin-bottom:.6rem">
-      </div>
-      <button style="width:100%;background:#1d9e75;color:#fff;padding:.6rem;border:0;border-radius:8px;cursor:pointer;font-weight:600">Confirmar</button>
-    </form>
-    <button type="button" onclick="prodMovFecha()" style="width:100%;background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.5rem;margin-top:.5rem;cursor:pointer">Cancelar</button>
+<!-- MODAL importar -->
+<div id="prod-modal-importar" class="prod-modal" style="display:none">
+  <div class="prod-modal-box">
+    <h3 style="margin-top:0;font-size:1.05rem">Importar planilha (CSV)</h3>
+    <p class="mut" style="font-size:.8rem">Colunas: nome, unidade, categoria, preço, estoque mínimo. Primeira linha é o cabeçalho.</p>
+    <input type="file" id="prod-planilha-file" accept=".csv" onchange="prodLerPlanilha(this)" class="prod-inp">
+    <div id="prod-planilha-previa" style="margin-top:.8rem"></div>
+    <button type="button" onclick="prodFecha('prod-modal-importar')" style="width:100%;background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.5rem;margin-top:.5rem;cursor:pointer">Cancelar</button>
   </div>
 </div>
 
 <form method="post" id="prod-apagar-form" action="/painel/produtos/apagar" style="display:none"><input type="hidden" name="produto_id" id="prod-apagar-id"></form>
+
+<style>
+.prod-modal{position:fixed;inset:0;z-index:1000;background:#000000aa;display:flex;align-items:center;justify-content:center;padding:1rem}
+.prod-modal-box{background:#1c1c1f;border:1px solid #2a2a2b;border-radius:12px;padding:1.3rem;max-width:440px;width:100%;max-height:88vh;overflow-y:auto}
+.prod-inp{width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin:.25rem 0 .6rem}
+</style>
 
 <script>
 window.PRODUTOS = {
@@ -3002,30 +3004,27 @@ window.PRODUTOS = {
   "{{ p.id }}": { nome: {{ p.nome|tojson }}, unidade: {{ p.unidade|tojson }}, categoria: {{ (p.categoria or '')|tojson }}, preco: {{ (p.preco_venda_centavos/100)|n2 }}, minimo: {{ p.estoque_minimo }}, foto_url: {{ (p.foto_url or '')|tojson }}, em_promo: {{ 'true' if p.em_promo else 'false' }}, preco_promo: {{ ((p.preco_promo_centavos or 0)/100)|n2 }} }{% if not loop.last %},{% endif %}
   {% endfor %}
 };
-let prodFotoEscolhida = null;
-function prodNovo(){var f=document.getElementById('prod-novo');f.style.display='block';document.getElementById('prod-importar').style.display='none';document.getElementById('prod-form-titulo').textContent='Novo produto';document.getElementById('prod-edit-id').value='';document.getElementById('prod-f-nome').value='';document.getElementById('prod-f-preco').value='';document.getElementById('prod-f-min').value='';}
-function prodCancelar(){document.getElementById('prod-novo').style.display='none';}
-function prodImportar(){document.getElementById('prod-importar').style.display='block';document.getElementById('prod-novo').style.display='none';}
-function prodCancelarImportar(){document.getElementById('prod-importar').style.display='none';}
-function prodToggle(el){var b=el.parentElement.querySelector('.prod-body');b.style.display=b.style.display==='none'?'block':'none';}
-function prodFiltrar(q){q=q.toLowerCase();document.querySelectorAll('.prod-card').forEach(function(r){r.style.display=r.dataset.nome.indexOf(q)>-1?'':'none';});}
-function prodEditar(id){var p=window.PRODUTOS[id];var f=document.getElementById('prod-novo');f.style.display='block';document.getElementById('prod-form-titulo').textContent='Editar produto';document.getElementById('prod-edit-id').value=id;document.getElementById('prod-f-nome').value=p.nome;document.getElementById('prod-f-unidade').value=p.unidade;var c=document.getElementById('prod-f-categoria');if(c)c.value=p.categoria;document.getElementById('prod-f-preco').value=p.preco;document.getElementById('prod-f-min').value=p.minimo;window.scrollTo(0,0);}
-function prodEntrada(id){document.getElementById('prod-mov').style.display='flex';document.getElementById('prod-mov-titulo').textContent='Dar entrada · '+window.PRODUTOS[id].nome;document.getElementById('prod-mov-id').value=id;document.getElementById('prod-mov-form').action='/painel/produtos/entrada';document.getElementById('prod-mov-custo-wrap').style.display='block';document.getElementById('prod-mov-motivo-wrap').style.display='none';}
-function prodPerda(id){document.getElementById('prod-mov').style.display='flex';document.getElementById('prod-mov-titulo').textContent='Registrar perda · '+window.PRODUTOS[id].nome;document.getElementById('prod-mov-id').value=id;document.getElementById('prod-mov-form').action='/painel/produtos/perda';document.getElementById('prod-mov-custo-wrap').style.display='none';document.getElementById('prod-mov-motivo-wrap').style.display='block';}
-function prodMovFecha(){document.getElementById('prod-mov').style.display='none';}
-function prodApagar(id){if(confirm('Apagar '+window.PRODUTOS[id].nome+'? Ele some do catálogo. O histórico fica guardado.')){document.getElementById('prod-apagar-id').value=id;document.getElementById('prod-apagar-form').submit();}}
-function prodSugereCategoria(nome){if(!nome||nome.length<3)return;var c=document.getElementById('prod-f-categoria');if(!c||c.value)return;fetch('/painel/produtos/sugerir-categoria?nome='+encodeURIComponent(nome)).then(function(r){return r.json();}).then(function(d){if(d.categoria&&!c.value){if(c.tagName==='SELECT'){for(var i=0;i<c.options.length;i++){if(c.options[i].value===d.categoria){c.value=d.categoria;break;}}}else{c.value=d.categoria;}}}).catch(function(){});}
-function prodFotoPreview(url){var prev=document.getElementById('prod-foto-previa');var vazia=document.getElementById('prod-foto-previa-vazia');if(!url){prev.style.backgroundImage='none';vazia.style.display='block';prodFotoEscolhida=null;return;}var img=new Image();img.onload=function(){prev.style.backgroundImage="url('"+url+"')";vazia.style.display='none';prodFotoEscolhida=url;};img.onerror=function(){prev.style.backgroundImage='none';vazia.style.display='block';vazia.textContent='⚠';prodFotoEscolhida=null;};img.src=url;}
-function prodFoto(pid){var p=window.PRODUTOS[pid];document.getElementById('prod-foto-pid').value=pid;document.getElementById('prod-foto-nome').textContent=p.nome;document.getElementById('prod-foto-link').value=p.foto_url||'';prodFotoPreview(p.foto_url||'');document.getElementById('prod-foto-modal').style.display='flex';var box=document.getElementById('prod-foto-sugestoes');box.innerHTML='<span style="font-size:.74rem;color:#888780">buscando...</span>';fetch('/painel/produtos/sugerir-fotos?nome='+encodeURIComponent(p.nome)).then(function(r){return r.json();}).then(function(d){box.innerHTML='';if(!d.opcoes.length){box.innerHTML='<span style="font-size:.74rem;color:#888780">Sem sugestões. Cole um link.</span>';return;}d.opcoes.forEach(function(url){var t=document.createElement('div');t.style.cssText="width:56px;height:56px;border-radius:8px;background:url('"+url+"') center/cover;cursor:pointer;border:2px solid #2a2a2b";t.onclick=function(){document.getElementById('prod-foto-link').value=url;prodFotoPreview(url);box.querySelectorAll('div').forEach(function(x){x.style.border='2px solid #2a2a2b';});t.style.border='2px solid #1d9e75';};box.appendChild(t);});}).catch(function(){box.innerHTML='<span style="font-size:.74rem;color:#888780">Erro ao buscar. Cole um link.</span>';});}
-function prodFotoSalvar(){var pid=document.getElementById('prod-foto-pid').value;var url=(prodFotoEscolhida||document.getElementById('prod-foto-link').value.trim()||'');fetch('/painel/produtos/foto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:parseInt(pid),foto_url:url})}).then(function(r){return r.json();}).then(function(){prodAplicaFoto(parseInt(pid),url);document.getElementById('prod-foto-modal').style.display='none';}).catch(function(){alert('Não foi possível salvar a foto.');});}
-function prodFotoRemover(){var pid=document.getElementById('prod-foto-pid').value;fetch('/painel/produtos/foto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:parseInt(pid),foto_url:''})}).then(function(r){return r.json();}).then(function(){prodAplicaFoto(parseInt(pid),'');document.getElementById('prod-foto-modal').style.display='none';}).catch(function(){alert('Não foi possível remover.');});}
-function prodAplicaFoto(pid,url){if(window.PRODUTOS[pid])window.PRODUTOS[pid].foto_url=url||'';var card=document.querySelector('.prod-card[data-pid="'+pid+'"]');if(card){var mini=card.querySelector('.prod-foto');if(mini){if(url){mini.style.background="url('"+url+"') center/cover";mini.innerHTML='';}else{mini.style.background='#1a2a1f';mini.style.display='flex';mini.style.alignItems='center';mini.style.justifyContent='center';mini.innerHTML='<span style="font-size:18px;color:#3a5a48">📦</span>';}}}}
-function prodFotoUpload(input){var file=input.files[0];if(!file)return;var pid=document.getElementById('prod-foto-pid').value;var status=document.getElementById('prod-foto-upload-status');status.textContent='Enviando foto...';var reader=new FileReader();reader.onload=function(e){prodFotoPreview(e.target.result);};reader.readAsDataURL(file);var fd=new FormData();fd.append('produto_id',pid);fd.append('arquivo',file);fetch('/painel/produtos/upload-foto',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){if(d.erro){status.textContent='⚠ '+d.erro;return;}status.textContent='✓ Foto enviada!';prodAplicaFoto(parseInt(pid),d.foto_url);setTimeout(function(){document.getElementById('prod-foto-modal').style.display='none';},600);}).catch(function(){status.textContent='⚠ Falhou. Tente de novo.';});}
-function prodPromo(id){var p=window.PRODUTOS[id];document.getElementById('prod-promo-pid').value=id;document.getElementById('prod-promo-nome').textContent=p.nome;document.getElementById('prod-promo-ativo').checked=p.em_promo;document.getElementById('prod-promo-preco').value=p.em_promo?p.preco_promo:'';document.getElementById('prod-promo-preco-wrap').style.display=p.em_promo?'block':'none';document.getElementById('prod-promo-modal').style.display='flex';}
-function prodPromoToggle(){document.getElementById('prod-promo-preco-wrap').style.display=document.getElementById('prod-promo-ativo').checked?'block':'none';}
-function prodPromoSalvar(){var pid=document.getElementById('prod-promo-pid').value;var ativo=document.getElementById('prod-promo-ativo').checked;var preco=parseFloat(document.getElementById('prod-promo-preco').value||0);fetch('/painel/produtos/promo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:parseInt(pid),em_promo:ativo,preco_promo:preco})}).then(function(r){return r.json();}).then(function(){location.reload();}).catch(function(){alert('Não foi possível salvar a promoção.');});}
-function prodLerPlanilha(input){var file=input.files[0];if(!file)return;var fd=new FormData();fd.append('arquivo',file);var prev=document.getElementById('prod-planilha-previa');prev.innerHTML='<span class="mut">lendo...</span>';fetch('/painel/produtos/ler-planilha',{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){if(!d.ok){prev.innerHTML='<span style="color:#ff6b6b">'+(d.erro||'erro')+'</span>';return;}var itens=d.itens||[];if(!itens.length){prev.innerHTML='<span class="mut">Nenhum item válido.</span>';return;}prev.innerHTML='<div style="font-size:.85rem;margin-bottom:.5rem">'+itens.length+' itens lidos. Confirmar importação?</div><button type="button" onclick=\\'prodImportarConfirma('+JSON.stringify(itens).replace(/'/g,"&#39;")+')\\' style="width:100%;background:#1d9e75;color:#fff;border:0;border-radius:8px;padding:.6rem;font-weight:600;cursor:pointer">Importar '+itens.length+' produtos</button>';}).catch(function(){prev.innerHTML='<span style="color:#ff6b6b">Erro ao ler.</span>';});}
-function prodImportarConfirma(itens){fetch('/painel/produtos/importar-planilha',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({itens:itens})}).then(function(r){return r.json();}).then(function(d){if(d.ok){location.reload();}else{alert(d.erro||'Erro ao importar');}}).catch(function(){alert('Erro ao importar');});}
+var prodFotoEscolhida = null;
+var prodItensPlanilha = [];
+function prodFecha(id){ document.getElementById(id).style.display='none'; }
+function prodNovo(){ document.getElementById('prod-form-titulo').textContent='Novo produto'; document.getElementById('prod-edit-id').value=''; document.getElementById('prod-f-nome').value=''; document.getElementById('prod-f-preco').value=''; document.getElementById('prod-f-min').value=''; document.getElementById('prod-modal-form').style.display='flex'; }
+function prodImportar(){ document.getElementById('prod-modal-importar').style.display='flex'; }
+function prodFiltrar(q){ q=q.toLowerCase(); var cards=document.querySelectorAll('.prod-card'); for(var i=0;i<cards.length;i++){ cards[i].style.display=cards[i].getAttribute('data-nome').indexOf(q)>-1?'':'none'; } }
+function prodEditar(id){ var p=window.PRODUTOS[id]; document.getElementById('prod-form-titulo').textContent='Editar produto'; document.getElementById('prod-edit-id').value=id; document.getElementById('prod-f-nome').value=p.nome; document.getElementById('prod-f-unidade').value=p.unidade; var c=document.getElementById('prod-f-categoria'); if(c){ c.value=p.categoria; } document.getElementById('prod-f-preco').value=p.preco; document.getElementById('prod-f-min').value=p.minimo; document.getElementById('prod-modal-form').style.display='flex'; }
+function prodEntrada(id){ document.getElementById('prod-mov-titulo').textContent='Dar entrada · '+window.PRODUTOS[id].nome; document.getElementById('prod-mov-id').value=id; document.getElementById('prod-mov-form').action='/painel/produtos/entrada'; document.getElementById('prod-mov-custo-wrap').style.display='block'; document.getElementById('prod-mov-motivo-wrap').style.display='none'; document.getElementById('prod-modal-mov').style.display='flex'; }
+function prodPerda(id){ document.getElementById('prod-mov-titulo').textContent='Registrar perda · '+window.PRODUTOS[id].nome; document.getElementById('prod-mov-id').value=id; document.getElementById('prod-mov-form').action='/painel/produtos/perda'; document.getElementById('prod-mov-custo-wrap').style.display='none'; document.getElementById('prod-mov-motivo-wrap').style.display='block'; document.getElementById('prod-modal-mov').style.display='flex'; }
+function prodApagar(id){ if(confirm('Apagar '+window.PRODUTOS[id].nome+'? Ele some do catálogo. O histórico fica guardado.')){ document.getElementById('prod-apagar-id').value=id; document.getElementById('prod-apagar-form').submit(); } }
+function prodSugereCategoria(nome){ if(!nome||nome.length<3){ return; } var c=document.getElementById('prod-f-categoria'); if(!c||c.value){ return; } fetch('/painel/produtos/sugerir-categoria?nome='+encodeURIComponent(nome)).then(function(r){ return r.json(); }).then(function(d){ if(d.categoria&&!c.value){ if(c.tagName==='SELECT'){ for(var i=0;i<c.options.length;i++){ if(c.options[i].value===d.categoria){ c.value=d.categoria; break; } } } else { c.value=d.categoria; } } }).catch(function(){}); }
+function prodFotoPreview(url){ var prev=document.getElementById('prod-foto-previa'); var vazia=document.getElementById('prod-foto-previa-vazia'); if(!url){ prev.style.backgroundImage='none'; vazia.style.display='block'; prodFotoEscolhida=null; return; } var img=new Image(); img.onload=function(){ prev.style.backgroundImage="url('"+url+"')"; vazia.style.display='none'; prodFotoEscolhida=url; }; img.onerror=function(){ prev.style.backgroundImage='none'; vazia.style.display='block'; vazia.textContent='⚠'; prodFotoEscolhida=null; }; img.src=url; }
+function prodFoto(pid){ var p=window.PRODUTOS[pid]; document.getElementById('prod-foto-pid').value=pid; document.getElementById('prod-foto-nome').textContent=p.nome; document.getElementById('prod-foto-link').value=p.foto_url||''; prodFotoPreview(p.foto_url||''); document.getElementById('prod-modal-foto').style.display='flex'; var box=document.getElementById('prod-foto-sugestoes'); box.innerHTML='<span style="font-size:.74rem;color:#888780">buscando...</span>'; fetch('/painel/produtos/sugerir-fotos?nome='+encodeURIComponent(p.nome)).then(function(r){ return r.json(); }).then(function(d){ box.innerHTML=''; if(!d.opcoes.length){ box.innerHTML='<span style="font-size:.74rem;color:#888780">Sem sugestões. Cole um link.</span>'; return; } d.opcoes.forEach(function(url){ var t=document.createElement('div'); t.style.cssText="width:56px;height:56px;border-radius:8px;background:url('"+url+"') center/cover;cursor:pointer;border:2px solid #2a2a2b"; t.onclick=function(){ document.getElementById('prod-foto-link').value=url; prodFotoPreview(url); }; box.appendChild(t); }); }).catch(function(){ box.innerHTML='<span style="font-size:.74rem;color:#888780">Erro ao buscar. Cole um link.</span>'; }); }
+function prodFotoSalvar(){ var pid=document.getElementById('prod-foto-pid').value; var url=(prodFotoEscolhida||document.getElementById('prod-foto-link').value.trim()||''); fetch('/painel/produtos/foto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:parseInt(pid),foto_url:url})}).then(function(r){ return r.json(); }).then(function(){ location.reload(); }).catch(function(){ alert('Não foi possível salvar a foto.'); }); }
+function prodFotoRemover(){ var pid=document.getElementById('prod-foto-pid').value; fetch('/painel/produtos/foto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:parseInt(pid),foto_url:''})}).then(function(r){ return r.json(); }).then(function(){ location.reload(); }).catch(function(){ alert('Não foi possível remover.'); }); }
+function prodFotoUpload(input){ var file=input.files[0]; if(!file){ return; } var pid=document.getElementById('prod-foto-pid').value; var status=document.getElementById('prod-foto-upload-status'); status.textContent='Enviando foto...'; var reader=new FileReader(); reader.onload=function(e){ prodFotoPreview(e.target.result); }; reader.readAsDataURL(file); var fd=new FormData(); fd.append('produto_id',pid); fd.append('arquivo',file); fetch('/painel/produtos/upload-foto',{method:'POST',body:fd}).then(function(r){ return r.json(); }).then(function(d){ if(d.erro){ status.textContent='⚠ '+d.erro; return; } status.textContent='✓ Foto enviada!'; setTimeout(function(){ location.reload(); },600); }).catch(function(){ status.textContent='⚠ Falhou. Tente de novo.'; }); }
+function prodPromo(id){ var p=window.PRODUTOS[id]; document.getElementById('prod-promo-pid').value=id; document.getElementById('prod-promo-nome').textContent=p.nome; document.getElementById('prod-promo-ativo').checked=p.em_promo; document.getElementById('prod-promo-preco').value=p.em_promo?p.preco_promo:''; document.getElementById('prod-promo-preco-wrap').style.display=p.em_promo?'block':'none'; document.getElementById('prod-modal-promo').style.display='flex'; }
+function prodPromoToggle(){ document.getElementById('prod-promo-preco-wrap').style.display=document.getElementById('prod-promo-ativo').checked?'block':'none'; }
+function prodPromoSalvar(){ var pid=document.getElementById('prod-promo-pid').value; var ativo=document.getElementById('prod-promo-ativo').checked; var preco=parseFloat(document.getElementById('prod-promo-preco').value||0); fetch('/painel/produtos/promo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:parseInt(pid),em_promo:ativo,preco_promo:preco})}).then(function(r){ return r.json(); }).then(function(){ location.reload(); }).catch(function(){ alert('Não foi possível salvar a promoção.'); }); }
+function prodLerPlanilha(input){ var file=input.files[0]; if(!file){ return; } var fd=new FormData(); fd.append('arquivo',file); var prev=document.getElementById('prod-planilha-previa'); prev.innerHTML='<span class="mut">lendo...</span>'; fetch('/painel/produtos/ler-planilha',{method:'POST',body:fd}).then(function(r){ return r.json(); }).then(function(d){ if(!d.ok){ prev.innerHTML='<span style="color:#ff6b6b">'+(d.erro||'erro')+'</span>'; return; } prodItensPlanilha=d.itens||[]; if(!prodItensPlanilha.length){ prev.innerHTML='<span class="mut">Nenhum item válido.</span>'; return; } prev.innerHTML='<div style="font-size:.85rem;margin-bottom:.5rem">'+prodItensPlanilha.length+' itens lidos.</div><button type="button" id="prod-planilha-btn" style="width:100%;background:#1d9e75;color:#fff;border:0;border-radius:8px;padding:.6rem;font-weight:600;cursor:pointer">Importar '+prodItensPlanilha.length+' produtos</button>'; document.getElementById('prod-planilha-btn').onclick=prodImportarConfirma; }).catch(function(){ prev.innerHTML='<span style="color:#ff6b6b">Erro ao ler.</span>'; }); }
+function prodImportarConfirma(){ fetch('/painel/produtos/importar-planilha',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({itens:prodItensPlanilha})}).then(function(r){ return r.json(); }).then(function(d){ if(d.ok){ location.reload(); } else { alert(d.erro||'Erro ao importar'); } }).catch(function(){ alert('Erro ao importar'); }); }
 </script>
 {% endblock %}"""
 

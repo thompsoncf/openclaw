@@ -440,10 +440,10 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
     <span class="fc-tile">🧺</span>
     <span class="fc-txt"><span class="fc-tit">Cestas</span><span class="fc-leg">Os tamanhos de cesta que seus clientes podem assinar.</span></span>
   </button>
-  <button type="button" class="forn-card" onclick="fornAbrir('catalogo')">
+  <a href="/painel/produtos" class="forn-card" style="text-decoration:none">
     <span class="fc-tile">🏷️</span>
-    <span class="fc-txt"><span class="fc-tit">Catálogo</span><span class="fc-leg">Seus produtos e preços — o que aparece na sua loja.</span></span>
-  </button>
+    <span class="fc-txt"><span class="fc-tit">Gerenciar produtos</span><span class="fc-leg">Seus produtos e preços — o que aparece na sua loja.</span></span>
+  </a>
   <div class="forn-grupo">Gestão</div>
   <button type="button" class="forn-card" onclick="fornAbrir('compras')">
     <span class="fc-tile amber">🛒</span>

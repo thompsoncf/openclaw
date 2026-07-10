@@ -449,78 +449,10 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
     <span class="fc-tile amber">💰</span>
     <span class="fc-txt"><span class="fc-tit">Financeiro</span><span class="fc-leg">Quanto você ganhou, os repasses e as comissões.</span></span>
   </a>
-  <div class="forn-grupo">Configuração</div>
-  <button type="button" class="forn-card" onclick="fornAbrir('dados')">
-    <span class="fc-tile blue">🏢</span>
-    <span class="fc-txt"><span class="fc-tit">Dados da empresa</span><span class="fc-leg">Razão social, CNPJ, endereço e a sua loja.</span></span>
-  </button>
 </div>
 
 <!-- SEÇÃO: Meus dados -->
-<div id="forn-dados" class="forn-secao" style="display:none">
-  <button type="button" class="forn-voltar" onclick="fornVoltar()">← voltar</button>
-  <h3>Dados da empresa</h3>
-  <form method="post" action="/painel/fornecedor/dados">
-    <label>Razão social</label>
-    <input name="razao_social" value="{{ fiscal.razao_social or '' }}" placeholder="ex: Hortifruti do Zé LTDA" maxlength="200">
-    <label>CNPJ</label>
-    <input name="cnpj" value="{{ fiscal.cnpj or '' }}" placeholder="14224053000103" maxlength="14">
-    <label>Endereço</label>
-    <input name="endereco" value="{{ fiscal.endereco or '' }}" placeholder="ex: Rua A, 123, Teresina - PI, 64000-000" maxlength="200">
-    <button>Salvar dados</button>
-  </form>
-  <p class="mut">Dados fiscais completos (inscrição estadual, regime, certificado) serão pedidos quando ativarmos a emissão de nota.</p>
 
-  <hr style="margin:1.5rem 0;border:none;border-top:1px solid #2a2a2b">
-  <h4 style="margin-top:0">🖼️ Identidade da loja</h4>
-  <p class="mut">A logo e a capa aparecem no topo da sua loja pública.</p>
-  <div style="display:flex;gap:1.2rem;flex-wrap:wrap;align-items:flex-end">
-    <div>
-      <div class="mut" style="font-size:.8rem;margin-bottom:.4rem">Logomarca</div>
-      <div id="forn-logo-prev" style="width:78px;height:78px;border-radius:16px;background:#161617{% if identidade.logo_url %} url('{{ identidade.logo_url }}') center/cover{% endif %};border:1px solid #2a2a2b"></div>
-      <label style="display:inline-block;margin-top:.5rem;font-size:.82rem;color:#1d9e75;cursor:pointer">enviar logo
-        <input type="file" accept="image/*" onchange="fornLogoUpload(this)" style="display:none">
-      </label>
-    </div>
-    <div style="flex:1;min-width:200px">
-      <div class="mut" style="font-size:.8rem;margin-bottom:.4rem">Capa (banner)</div>
-      <div id="forn-banner-prev" style="height:78px;border-radius:12px;background:#161617{% if identidade.banner_url %} url('{{ identidade.banner_url }}') center/cover{% endif %};border:1px solid #2a2a2b"></div>
-      <label style="display:inline-block;margin-top:.5rem;font-size:.82rem;color:#1d9e75;cursor:pointer">enviar capa
-        <input type="file" accept="image/*" onchange="fornBannerUpload(this)" style="display:none">
-      </label>
-    </div>
-  </div>
-  <div id="forn-id-status" style="font-size:.78rem;color:#888780;margin-top:.5rem"></div>
-
-  <hr style="margin:1.5rem 0;border:none;border-top:1px solid #2a2a2b">
-  <h4 style="margin-top:0">⚙️ Configuração de margem</h4>
-  <p class="mut">Define a folga de custo para que você tenha margem pra perda, comissão e lucro. A cesta sempre respeita esse limite.</p>
-  <form method="post" action="/painel/fornecedor/margem-alvo" style="display:flex;gap:.5rem;align-items:flex-end">
-    <div style="flex:1">
-      <label>Margem alvo (%)</label>
-      <input name="margem_alvo" type="number" min="0" max="100" value="{{ margem_alvo }}" placeholder="60" style="width:100%">
-      <small class="mut" style="display:block;margin-top:.3rem">Até {{ margem_alvo }}% do preço da cesta pode ser custo. Ex: 60% = você garante 40% de folga.</small>
-    </div>
-    <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;font-weight:500">Salvar</button>
-  </form>
-</div>
-
-<!-- SEÇÃO: Catálogo -->
-<script>
-function _fornImgUpload(inp, url, prevId){
-  var f=inp.files&&inp.files[0]; if(!f) return;
-  var st=document.getElementById('forn-id-status'); st.textContent='enviando...';
-  var fd=new FormData(); fd.append('arquivo', f);
-  fetch(url,{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){
-    if(d.logo_url||d.banner_url){
-      document.getElementById(prevId).style.background="#161617 url('"+(d.logo_url||d.banner_url)+"') center/cover";
-      st.textContent='✓ salvo';
-    } else { st.textContent=d.erro||'falhou'; }
-  }).catch(function(){st.textContent='erro de conexão';});
-}
-function fornLogoUpload(i){_fornImgUpload(i,'/painel/fornecedor/logo','forn-logo-prev');}
-function fornBannerUpload(i){_fornImgUpload(i,'/painel/fornecedor/banner','forn-banner-prev');}
-</script>
 
 <!-- SEÇÃO: Compras -->
 <div id="forn-compras" class="forn-secao" style="display:none">
@@ -670,13 +602,13 @@ function fornBannerUpload(i){_fornImgUpload(i,'/painel/fornecedor/banner','forn-
 <script>
 function fornAbrir(secao){
   document.getElementById('forn-menu').style.display = 'none';
-  ['dados','compras','cestas','pedidos','financeiro'].forEach(function(s){
+  ['compras','cestas','pedidos','financeiro'].forEach(function(s){
     document.getElementById('forn-'+s).style.display = (s===secao ? 'block' : 'none');
   });
 }
 function fornVoltar(){
   document.getElementById('forn-menu').style.display = 'grid';
-  ['dados','compras','cestas','pedidos','financeiro'].forEach(function(s){
+  ['compras','cestas','pedidos','financeiro'].forEach(function(s){
     document.getElementById('forn-'+s).style.display = 'none';
   });
 }
@@ -2142,7 +2074,55 @@ _EMPRESA_DADOS = """{% extends "base" %}{% block conteudo %}
     <button type="submit" style="background:#1d9e75;color:#fff;border:0;border-radius:8px;padding:.7rem 1.4rem;font-weight:600;cursor:pointer;margin-top:1rem">Salvar e continuar →</button>
   </form>
 </div>
+{% if eh_fornecedor %}
+<div class="card larga">
+  <h3 style="margin-top:0">🖼️ Identidade da loja</h3>
+  <div class="mut" style="font-size:.82rem;margin-bottom:.8rem">A logo e a capa aparecem no topo da sua loja pública.</div>
+  <div style="display:flex;gap:1.2rem;flex-wrap:wrap;align-items:flex-end">
+    <div>
+      <div class="mut" style="font-size:.8rem;margin-bottom:.4rem">Logomarca</div>
+      <div id="forn-logo-prev" style="width:78px;height:78px;border-radius:16px;background:#161617{% if identidade.logo_url %} url('{{ identidade.logo_url }}') center/cover{% endif %};border:1px solid #2a2a2b"></div>
+      <label style="display:inline-block;margin-top:.5rem;font-size:.82rem;color:#1d9e75;cursor:pointer">enviar logo
+        <input type="file" accept="image/*" onchange="fornLogoUpload(this)" style="display:none">
+      </label>
+    </div>
+    <div style="flex:1;min-width:200px">
+      <div class="mut" style="font-size:.8rem;margin-bottom:.4rem">Capa (banner)</div>
+      <div id="forn-banner-prev" style="height:78px;border-radius:12px;background:#161617{% if identidade.banner_url %} url('{{ identidade.banner_url }}') center/cover{% endif %};border:1px solid #2a2a2b"></div>
+      <label style="display:inline-block;margin-top:.5rem;font-size:.82rem;color:#1d9e75;cursor:pointer">enviar capa
+        <input type="file" accept="image/*" onchange="fornBannerUpload(this)" style="display:none">
+      </label>
+    </div>
+  </div>
+  <div id="forn-id-status" style="font-size:.78rem;color:#888780;margin-top:.5rem"></div>
+</div>
+<div class="card larga">
+  <h3 style="margin-top:0">⚙️ Margem alvo</h3>
+  <div class="mut" style="font-size:.82rem;margin-bottom:.8rem">Folga de custo pra cobrir perda, comissão e lucro. A cesta sempre respeita esse limite.</div>
+  <form method="post" action="/painel/fornecedor/margem-alvo" style="display:flex;gap:.5rem;align-items:flex-end">
+    <div style="flex:1">
+      <label>Margem alvo (%)</label>
+      <input name="margem_alvo" type="number" min="0" max="100" value="{{ margem_alvo }}" placeholder="60" style="width:100%">
+      <small class="mut" style="display:block;margin-top:.3rem">Até {{ margem_alvo }}% do preço da cesta pode ser custo. Ex: 60% = você garante 40% de folga.</small>
+    </div>
+    <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;font-weight:500">Salvar</button>
+  </form>
+</div>
+{% endif %}
 <script>
+function _fornImgUpload(inp, url, prevId){
+  var f=inp.files&&inp.files[0]; if(!f) return;
+  var st=document.getElementById('forn-id-status'); st.textContent='enviando...';
+  var fd=new FormData(); fd.append('arquivo', f);
+  fetch(url,{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){
+    if(d.logo_url||d.banner_url){
+      document.getElementById(prevId).style.background="#161617 url('"+(d.logo_url||d.banner_url)+"') center/cover";
+      st.textContent='✓ salvo';
+    } else { st.textContent=d.erro||'falhou'; }
+  }).catch(function(){st.textContent='erro de conexão';});
+}
+function fornLogoUpload(i){_fornImgUpload(i,'/painel/fornecedor/logo','forn-logo-prev');}
+function fornBannerUpload(i){_fornImgUpload(i,'/painel/fornecedor/banner','forn-banner-prev');}
 async function buscarCnpj(){
   var el=document.getElementById('cnpj');
   var msg=document.getElementById('cnpj-msg');
@@ -5614,47 +5594,6 @@ def painel_fornecedor(request: Request):
                    aviso=request.session.pop("aviso", None))
 
 
-@router.post("/painel/fornecedor/dados")
-def painel_fornecedor_dados(request: Request,
-                           razao_social: str = Form(""),
-                           cnpj: str = Form(""),
-                           endereco: str = Form(""),
-                           bio: str = Form(""),
-                           sobre: str = Form(""),
-                           whatsapp_loja: str = Form(""),
-                           desconto_pix_pct: str = Form(""),
-                           frete_gratis_acima: str = Form("")):
-    conta = conta_logada(request)
-    if conta is None:
-        return RedirectResponse("/login", status_code=303)
-    if not conta[8]:  # eh_fornecedor
-        return RedirectResponse("/painel", status_code=303)
-
-    pool = get_pool()
-    try:
-        desconto_pix = float(desconto_pix_pct or 0) if desconto_pix_pct else None
-        frete_gratis_c = int(round(float(frete_gratis_acima or 0) * 100)) if frete_gratis_acima else None
-    except (ValueError, TypeError):
-        desconto_pix = None
-        frete_gratis_c = None
-
-    _doc = "".join(ch for ch in (cnpj or "") if ch.isdigit()) or None
-    with pool.connection() as c:
-        # dados cadastrais + identidade da loja, tudo em contas (fonte unica)
-        c.execute("""
-            update contas
-            set razao_social=%s, documento=coalesce(%s, documento), endereco=%s,
-                bio=%s, sobre=%s, whatsapp_loja=%s,
-                desconto_pix_pct=%s, frete_gratis_acima_centavos=%s
-            where id=%s
-        """, (razao_social or None, _doc, endereco or None,
-              bio or None, sobre or None, whatsapp_loja or None,
-              desconto_pix, frete_gratis_c, conta[0]))
-        c.commit()
-    request.session["aviso"] = "Dados do fornecedor salvos."
-    return RedirectResponse("/painel/fornecedor", status_code=303)
-
-
 @router.get("/painel/fornecedor/financeiro", response_class=HTMLResponse)
 def painel_fornecedor_financeiro(request: Request, periodo: str = "mes"):
     from finance import financeiro_forn as fin
@@ -6068,7 +6007,7 @@ def salvar_margem_alvo(request: Request, margem_alvo: str = Form("60")):
         )
         c.commit()
     request.session["aviso"] = f"Margem alvo salva: {valor}%"
-    return RedirectResponse("/painel/fornecedor", status_code=303)
+    return RedirectResponse("/painel/empresa/dados", status_code=303)
 
 
 @router.post("/painel/fornecedor/montar-cesta")
@@ -6634,8 +6573,17 @@ def painel_empresa_dados_form(request: Request):
     if not emp.modulo_pj_ativo(pool, conta[0]):
         return RedirectResponse("/painel", status_code=303)
     d = emp.obter_dados_empresa(pool, conta[0])
+    eh_forn = bool(conta[8])
+    identidade, margem_alvo = {}, 60.0
+    if eh_forn:
+        with pool.connection() as c:
+            row = c.execute("select margem_alvo_pct, logo_url, banner_url from contas where id=%s", (conta[0],)).fetchone()
+        if row:
+            margem_alvo = float(row[0]) if row[0] else 60.0
+            identidade = {"logo_url": row[1], "banner_url": row[2]}
     return _render("empresa_dados", request, dados=d, tem_pj=True, erro="",
-                   nichos_lista=_nichos.lista_nichos())
+                   nichos_lista=_nichos.lista_nichos(),
+                   eh_fornecedor=eh_forn, identidade=identidade, margem_alvo=margem_alvo)
 
 
 @router.post("/painel/empresa/dados", response_class=HTMLResponse)

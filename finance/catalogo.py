@@ -121,6 +121,7 @@ def atualizar_produto(pool, fornecedor_id: int, produto_id: int, **campos) -> bo
     permitidos = {
         "nome", "unidade", "categoria", "preco_venda_centavos",
         "estoque_minimo", "disponivel", "foto_url", "descricao_curta",
+        "em_promo", "preco_promo_centavos",
     }
     sets, vals = [], []
     for k, v in campos.items():
@@ -132,6 +133,10 @@ def atualizar_produto(pool, fornecedor_id: int, produto_id: int, **campos) -> bo
                 v = "unidade"
         if k == "preco_venda_centavos":
             v = max(0, int(v))
+        if k == "preco_promo_centavos":
+            v = max(0, int(v)) if v is not None else None
+        if k == "em_promo":
+            v = bool(v)
         if k == "estoque_minimo":
             v = Decimal(str(v or 0))
         sets.append(f"{k} = %s")

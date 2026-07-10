@@ -615,6 +615,12 @@ def dados_empresa_completos(pool, conta_id: int) -> bool:
     return len(doc) == 14 and bool(razao)
 
 
+def cadastro_pj_ok(pool, conta_id: int) -> bool:
+    """Gate das abas PJ (Produtos/Servicos): dados da empresa completos OU ja e'
+    fornecedor com razao/cnpj preenchidos (que agora vivem em contas)."""
+    return dados_empresa_completos(pool, conta_id)
+
+
 def obter_dados_empresa(pool, conta_id: int) -> dict:
     """Devolve os dados cadastrais atuais da empresa (pra pré-preencher a tela)."""
     with pool.connection() as c:

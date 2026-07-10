@@ -5052,7 +5052,7 @@ def loja_fornecedor(request: Request, slug: str):
     if forn is None:
         return HTMLResponse("<h1>Loja não encontrada</h1>", status_code=404)
     end = c.execute(
-        "select endereco, razao_social from fornecedor_fiscal where conta_id = %s", (forn[0],)
+        "select endereco, razao_social from contas where id = %s", (forn[0],)
     ).fetchone()
     fornecedor = {"id": forn[0], "nome": (end[1] if end and end[1] else forn[1]), "slug": forn[2],
                   "taxa_entrega_centavos": int(forn[3] or 0),
@@ -6086,7 +6086,7 @@ def painel_fornecedor(request: Request):
     fiscal = None
     with pool.connection() as c:
         row = c.execute(
-            "select razao_social, cnpj, endereco from fornecedor_fiscal where conta_id=%s",
+            "select razao_social, documento, endereco from contas where id=%s",
             (conta[0],),
         ).fetchone()
         fiscal = {
@@ -6171,24 +6171,17 @@ def painel_fornecedor_dados(request: Request,
         desconto_pix = None
         frete_gratis_c = None
 
+    _doc = "".join(ch for ch in (cnpj or "") if ch.isdigit()) or None
     with pool.connection() as c:
-        # upsert fornecedor_fiscal (dados fiscais)
-        c.execute("""
-            insert into fornecedor_fiscal (conta_id, razao_social, cnpj, endereco)
-            values (%s, %s, %s, %s)
-            on conflict (conta_id) do update
-              set razao_social=excluded.razao_social,
-                  cnpj=excluded.cnpj,
-                  endereco=excluded.endereco,
-                  atualizado_em=now()
-        """, (conta[0], razao_social or None, cnpj or None, endereco or None))
-        # update contas (identidade + iFrutus campos)
+        # dados cadastrais + identidade da loja, tudo em contas (fonte unica)
         c.execute("""
             update contas
-            set bio=%s, sobre=%s, whatsapp_loja=%s,
+            set razao_social=%s, documento=coalesce(%s, documento), endereco=%s,
+                bio=%s, sobre=%s, whatsapp_loja=%s,
                 desconto_pix_pct=%s, frete_gratis_acima_centavos=%s
             where id=%s
-        """, (bio or None, sobre or None, whatsapp_loja or None,
+        """, (razao_social or None, _doc, endereco or None,
+              bio or None, sobre or None, whatsapp_loja or None,
               desconto_pix, frete_gratis_c, conta[0]))
         c.commit()
     request.session["aviso"] = "Dados do fornecedor salvos."
@@ -7158,7 +7151,7 @@ def painel_produtos(request: Request):
     if not ov["produto"]:
         return RedirectResponse("/painel/servicos" if ov["servico"] else "/painel",
                                 status_code=303)
-    if not emp.dados_empresa_completos(pool, conta[0]):
+    if not emp.cadastro_pj_ok(pool, conta[0]):
         return RedirectResponse("/painel/empresa", status_code=303)
     dados = emp.obter_dados_empresa(pool, conta[0])
     nicho = dados.get("nicho") or ""

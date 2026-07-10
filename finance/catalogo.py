@@ -176,7 +176,7 @@ def listar_produtos(
     """
     sql = """select id, nome, unidade, categoria, preco_venda_centavos,
                     custo_medio_centavos, saldo, estoque_minimo, disponivel,
-                    foto_url, descricao_curta
+                    foto_url, descricao_curta, em_promo, preco_promo_centavos
              from catalogo_produtos
              where fornecedor_id = %s and ativo"""
     if so_disponiveis:
@@ -202,6 +202,8 @@ def listar_produtos(
             "disponivel": r[8],
             "foto_url": r[9],
             "descricao_curta": r[10],
+            "em_promo": bool(r[11]),
+            "preco_promo_centavos": int(r[12] or 0),
             "margem_pct": _margem_pct(venda, custo),
             "abaixo_minimo": minimo > 0 and saldo <= minimo,
         })

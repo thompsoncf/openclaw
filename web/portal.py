@@ -252,7 +252,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left;font-s
   {% if _tem_cesta %}<a href="/painel/assinaturas">🧺 Minhas assinaturas</a><a href="/painel/meus-pedidos">🛍️ Meus pedidos</a>{% endif %}
   {% if conta and conta[8] %}<a href="/painel/fornecedor">👨‍🌾 Fornecedor</a>{% endif %}
   {% if tem_pj %}<a href="/painel/empresa">🏢 Empresa</a>{% endif %}
-  {% if vende_produto %}<a href="/painel/produtos">📦 Produtos</a><a href="/painel/produtos/abastecimento">🛒 Abastecimento</a>{% endif %}
+  {% if vende_produto %}<a href="/painel/produtos">📦 Produtos</a><a href="/painel/produtos/abastecimento">🛒 Abastecimento</a><a href="/painel/clientes">👥 Clientes</a>{% endif %}
   <a href="/sair">Sair</a>
 {% else %}<a href="/login">Entrar</a><a href="/cadastro">Criar conta</a>{% endif %}
 </span></div>
@@ -2407,6 +2407,95 @@ function abastHide(id){ document.getElementById(id).style.display='none'; }
 </script>
 {% endblock %}"""
 
+_CLIENTES = """{% extends "base" %}{% block conteudo %}
+<div class="card larga">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
+    <h2 style="margin:0">👥 Clientes <span style="color:#6a6a66;font-size:.7rem;font-weight:400">· {{ total }} na base</span></h2>
+    <button type="button" onclick="document.getElementById('cli-novo').style.display='block'" style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:8px;cursor:pointer;font-weight:600;width:auto">+ novo cliente</button>
+  </div>
+  {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+  {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
+  <form method="get" action="/painel/clientes" style="margin:1rem 0">
+    <input name="busca" value="{{ busca }}" placeholder="🔍 buscar por nome, telefone ou CPF..." style="width:100%">
+  </form>
+  <div id="cli-novo" style="display:none;background:#161617;border:1px solid #2a2a2b;border-radius:8px;padding:1rem;margin-bottom:1rem">
+    <h4 style="margin-top:0">Novo cliente</h4>
+    <form method="post" action="/painel/clientes/novo">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
+        <div><label>Nome *</label><input name="nome" required style="width:100%"></div>
+        <div><label>Telefone / celular</label><input name="telefone" style="width:100%"></div>
+        <div><label>CPF</label><input name="cpf" style="width:100%"></div>
+        <div><label>E-mail</label><input name="email" style="width:100%"></div>
+        <div><label>Aniversário</label><input type="date" name="aniversario" style="width:100%"></div>
+        <div><label>Obs</label><input name="obs" style="width:100%"></div>
+      </div>
+      <div style="display:flex;gap:.5rem;margin-top:.7rem">
+        <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;font-weight:500;width:auto">Salvar</button>
+        <button type="button" onclick="document.getElementById('cli-novo').style.display='none'" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:6px;padding:.5rem 1rem;cursor:pointer;width:auto">Cancelar</button>
+      </div>
+    </form>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:.5rem">
+    {% if clientes %}
+      {% for c in clientes %}
+      <a href="/painel/clientes/{{ c.id }}" style="display:flex;justify-content:space-between;align-items:center;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:.7rem .9rem;text-decoration:none">
+        <div><div style="color:#ececec">{{ c.nome }}</div><div class="mut" style="font-size:.8rem">{% if c.telefone %}📱 {{ c.telefone }}{% endif %}{% if c.cpf %} · CPF {{ c.cpf }}{% endif %}{% if c.obs %} · {{ c.obs }}{% endif %}</div></div>
+        <span style="color:#5dcaa5;font-size:.85rem">ver →</span>
+      </a>
+      {% endfor %}
+    {% else %}
+    <p class="mut">{% if busca %}Nenhum cliente pra "{{ busca }}".{% else %}Nenhum cliente ainda. As vendas de balcão vão populando aqui, ou cadastre no botão acima.{% endif %}</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}"""
+
+
+_CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
+<div class="card larga">
+  <a href="/painel/clientes" style="color:#5dcaa5;text-decoration:none;font-size:.85rem">← Clientes</a>
+  {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+  {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
+  <h2 style="margin:.4rem 0">{{ cliente.nome }}</h2>
+  <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:1rem">
+    <div><div class="mut" style="font-size:.75rem">Compras</div><div style="font-size:1.1rem">{{ resumo.n }}</div></div>
+    <div><div class="mut" style="font-size:.75rem">Total</div><div style="font-size:1.1rem;color:#5dcaa5">R$ {{ "%.2f"|format(resumo.total_centavos/100) }}</div></div>
+    <div><div class="mut" style="font-size:.75rem">Ticket médio</div><div style="font-size:1.1rem">R$ {{ "%.2f"|format(resumo.ticket_centavos/100) }}</div></div>
+    <div><div class="mut" style="font-size:.75rem">Última</div><div style="font-size:1.1rem">{{ resumo.ultima or '—' }}</div></div>
+  </div>
+  <details style="margin-bottom:1rem"><summary style="cursor:pointer;color:#b4b2a9">✏️ Editar cadastro</summary>
+    <form method="post" action="/painel/clientes/{{ cliente.id }}/editar" style="margin-top:.7rem">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
+        <div><label>Nome</label><input name="nome" value="{{ cliente.nome or '' }}" style="width:100%"></div>
+        <div><label>Telefone</label><input name="telefone" value="{{ cliente.telefone or '' }}" style="width:100%"></div>
+        <div><label>CPF</label><input name="cpf" value="{{ cliente.cpf or '' }}" style="width:100%"></div>
+        <div><label>E-mail</label><input name="email" value="{{ cliente.email or '' }}" style="width:100%"></div>
+        <div><label>Aniversário</label><input type="date" name="aniversario" value="{{ cliente.aniversario or '' }}" style="width:100%"></div>
+        <div><label>Obs</label><input name="obs" value="{{ cliente.obs or '' }}" style="width:100%"></div>
+      </div>
+      <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.7rem;width:auto">Salvar</button>
+    </form>
+  </details>
+  <h3 style="margin:0 0 .5rem">Histórico de compras</h3>
+  {% if compras %}
+  <div style="display:flex;flex-direction:column;gap:.4rem">
+    {% for v in compras %}
+    <div style="display:flex;justify-content:space-between;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:6px;padding:.5rem .8rem">
+      <div><span class="mut" style="font-size:.8rem">{{ v.data }}</span>{% if v.pagamento %}<span class="mut" style="font-size:.72rem"> · {{ v.pagamento }}</span>{% endif %}</div>
+      <div style="color:#cfcfcf">R$ {{ "%.2f"|format(v.valor_centavos/100) }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="mut">Sem compras registradas ainda.</p>
+  {% endif %}
+  <form method="post" action="/painel/clientes/{{ cliente.id }}/arquivar" style="margin-top:1.2rem" onsubmit="return confirm('Arquivar este cliente?')">
+    <button style="background:transparent;border:1px solid #3a2a2a;color:#d98a8a;padding:.4rem .8rem;border-radius:6px;cursor:pointer;font-size:.85rem;width:auto">Arquivar cliente</button>
+  </form>
+</div>
+{% endblock %}"""
+
+
 _EMPRESA = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
@@ -4097,7 +4186,7 @@ _FINANCEIRO_FORN = """{% extends "base" %}{% block conteudo %}
 
 
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS, "produtos": _PRODUTOS, "abastecimento": _ABASTECIMENTO,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS, "produtos": _PRODUTOS, "abastecimento": _ABASTECIMENTO, "clientes": _CLIENTES, "cliente_detalhe": _CLIENTE_DETALHE,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 _env.filters["brl"] = brl
@@ -6314,6 +6403,115 @@ async def painel_produtos_vender(request: Request):
         return JSONResponse({"ok": False, "erro": str(e)}, status_code=400)
     except Exception:
         return JSONResponse({"ok": False, "erro": "erro ao registrar venda"}, status_code=500)
+
+
+@router.get("/painel/clientes", response_class=HTMLResponse)
+def painel_clientes(request: Request, busca: str = ""):
+    from finance import empresa as emp, clientes as cli
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.acesso_pj(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    lista = cli.listar_clientes(pool, conta[0], busca=busca or None)
+    total = cli.contar_clientes(pool, conta[0])
+    return _render("clientes", request, conta=conta, clientes=lista, total=total,
+                   busca=busca or "",
+                   erro=request.session.pop("erro", None),
+                   aviso=request.session.pop("aviso", None))
+
+
+@router.post("/painel/clientes/novo")
+def painel_clientes_novo(request: Request, nome: str = Form(...),
+                         telefone: str = Form(""), cpf: str = Form(""),
+                         email: str = Form(""), aniversario: str = Form(""),
+                         obs: str = Form("")):
+    from finance import empresa as emp, clientes as cli
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.acesso_pj(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    try:
+        cli.criar_cliente(pool, conta[0], nome, telefone=(telefone or None),
+                          cpf=(cpf or None), email=(email or None),
+                          aniversario=(aniversario or None), obs=(obs or None))
+        request.session["aviso"] = "Cliente cadastrado."
+    except ValueError as e:
+        request.session["erro"] = str(e)
+    return RedirectResponse("/painel/clientes", status_code=303)
+
+
+@router.get("/painel/clientes/{cliente_id}", response_class=HTMLResponse)
+def painel_cliente_detalhe(request: Request, cliente_id: int):
+    from finance import empresa as emp, clientes as cli
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.acesso_pj(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    cl = cli.obter_cliente(pool, conta[0], cliente_id)
+    if cl is None:
+        request.session["erro"] = "Cliente nao encontrado."
+        return RedirectResponse("/painel/clientes", status_code=303)
+    with pool.connection() as conn:
+        rows = conn.execute(
+            """select id, data, valor_centavos, coalesce(pagamento,''), coalesce(descricao,'')
+                 from lancamentos
+                where cliente_id=%s and conta_id=%s and tipo='receita'
+                order by data desc, id desc limit 50""",
+            (cliente_id, conta[0]),
+        ).fetchall()
+        agg = conn.execute(
+            """select count(*), coalesce(sum(valor_centavos),0), max(data)
+                 from lancamentos where cliente_id=%s and conta_id=%s and tipo='receita'""",
+            (cliente_id, conta[0]),
+        ).fetchone()
+    compras = [{"id": r[0], "data": r[1], "valor_centavos": r[2],
+                "pagamento": r[3], "descricao": r[4]} for r in rows]
+    n = agg[0] or 0
+    total = agg[1] or 0
+    resumo = {"n": n, "total_centavos": total, "ultima": agg[2],
+              "ticket_centavos": (total // n) if n else 0}
+    return _render("cliente_detalhe", request, conta=conta, cliente=cl,
+                   compras=compras, resumo=resumo,
+                   erro=request.session.pop("erro", None),
+                   aviso=request.session.pop("aviso", None))
+
+
+@router.post("/painel/clientes/{cliente_id}/editar")
+def painel_cliente_editar(request: Request, cliente_id: int, nome: str = Form(""),
+                          telefone: str = Form(""), cpf: str = Form(""),
+                          email: str = Form(""), aniversario: str = Form(""),
+                          obs: str = Form("")):
+    from finance import empresa as emp, clientes as cli
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.acesso_pj(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    cli.atualizar_cliente(pool, conta[0], cliente_id, nome=nome, telefone=telefone,
+                          cpf=cpf, email=email, aniversario=aniversario, obs=obs)
+    request.session["aviso"] = "Cliente atualizado."
+    return RedirectResponse(f"/painel/clientes/{cliente_id}", status_code=303)
+
+
+@router.post("/painel/clientes/{cliente_id}/arquivar")
+def painel_cliente_arquivar(request: Request, cliente_id: int):
+    from finance import empresa as emp, clientes as cli
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.acesso_pj(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    cli.arquivar_cliente(pool, conta[0], cliente_id)
+    request.session["aviso"] = "Cliente arquivado."
+    return RedirectResponse("/painel/clientes", status_code=303)
 
 
 @router.get("/painel/empresa", response_class=HTMLResponse)

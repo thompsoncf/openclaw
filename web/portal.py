@@ -2256,11 +2256,42 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
 
 <form method="post" id="prod-apagar-form" action="/painel/produtos/apagar" style="display:none"><input type="hidden" name="produto_id" id="prod-apagar-id"></form>
 
+<div id="prod-modal-pdv" class="prod-modal" style="display:none">
+  <div class="prod-modal-box" style="max-width:440px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.6rem">
+      <h3 style="margin:0">🛒 Venda de balcão</h3>
+      <button type="button" onclick="pdvFecha()" style="background:transparent;border:none;color:#888;font-size:1.2rem;cursor:pointer;width:auto;margin:0;padding:0">✕</button>
+    </div>
+    <div id="pdv-itens" style="margin-bottom:.6rem"></div>
+    <div style="display:flex;gap:.5rem;margin-bottom:.5rem">
+      <input id="pdv-cliente" placeholder="Cliente (opcional)" class="prod-inp" style="margin:0">
+      <input id="pdv-tel" placeholder="Telefone" class="prod-inp" style="margin:0;max-width:120px">
+    </div>
+    <div style="display:flex;gap:.5rem;margin-bottom:.6rem;align-items:center">
+      <span style="font-size:.8rem;color:#888">Desconto R$</span>
+      <input id="pdv-desc" type="number" step="0.01" min="0" value="0" class="prod-inp" style="margin:0;max-width:110px" oninput="pdvRender()">
+    </div>
+    <div style="font-size:.75rem;color:#888;margin-bottom:.3rem">Pagamento</div>
+    <div id="pdv-pag" style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.8rem">
+      <span class="pdv-pag-chip pdv-pag-sel" data-pag="dinheiro" onclick="pdvPag(this)">Dinheiro</span>
+      <span class="pdv-pag-chip" data-pag="pix" onclick="pdvPag(this)">Pix</span>
+      <span class="pdv-pag-chip" data-pag="cartao" onclick="pdvPag(this)">Cartão</span>
+    </div>
+    <div id="pdv-erro" style="color:#d98a8a;font-size:.8rem;margin-bottom:.5rem;display:none"></div>
+    <div style="display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid #2a2a2b;padding-top:.6rem">
+      <span style="color:#888">Total</span><span id="pdv-total" style="color:#5dcaa5;font-size:1.3rem;font-weight:700">R$ 0,00</span>
+    </div>
+    <button type="button" onclick="pdvFinalizar()" id="pdv-finalizar" style="width:100%;background:#1d9e75;color:#fff;padding:.65rem;border:0;border-radius:8px;cursor:pointer;font-weight:700;margin-top:.7rem">Finalizar venda</button>
+  </div>
+</div>
+
 <style>
 .prod-acoes button{width:auto;margin-top:0}
 .prod-modal{position:fixed;inset:0;z-index:1000;background:#000000aa;display:flex;align-items:center;justify-content:center;padding:1rem}
 .prod-modal-box{background:#1c1c1f;border:1px solid #2a2a2b;border-radius:12px;padding:1.3rem;max-width:440px;width:100%;max-height:88vh;overflow-y:auto}
 .prod-inp{width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin:.25rem 0 .6rem}
+.pdv-pag-chip{font-size:.78rem;color:#b4b2a9;background:#161617;border:1.5px solid #2a2a2b;border-radius:16px;padding:.3rem .8rem;cursor:pointer}
+.pdv-pag-chip.pdv-pag-sel{border-color:#1d9e75;color:#5dcaa5}
 </style>
 
 <script>
@@ -2272,7 +2303,15 @@ window.PRODUTOS = {
 var prodFotoEscolhida = null;
 var prodItensPlanilha = [];
 function prodFecha(id){ document.getElementById(id).style.display='none'; }
-function prodVender(id){ alert('Venda de balcão (PDV) chega na próxima leva. Este botão já fica no lugar.'); }
+var PDV_CART=[];
+function prodVender(id){ var p=window.PRODUTOS[id]; if(!p) return; var e=PDV_CART.find(function(x){return x.id==id;}); if(e){ e.qtd++; } else { PDV_CART.push({id:id,nome:p.nome,unidade:p.unidade,preco:(typeof p.preco==='number'?p.preco:0),qtd:1}); } document.getElementById('prod-modal-pdv').style.display='flex'; document.getElementById('pdv-erro').style.display='none'; pdvRender(); }
+function pdvFecha(){ document.getElementById('prod-modal-pdv').style.display='none'; }
+function pdvQtd(id,d){ var e=PDV_CART.find(function(x){return x.id==id;}); if(!e) return; e.qtd=Math.round((e.qtd+d)*1000)/1000; if(e.qtd<=0){ PDV_CART=PDV_CART.filter(function(x){return x.id!=id;}); } pdvRender(); }
+function pdvPreco(id,v){ var e=PDV_CART.find(function(x){return x.id==id;}); if(e){ e.preco=parseFloat(String(v).replace(',','.'))||0; } pdvRender(); }
+function pdvPag(el){ document.querySelectorAll('#pdv-pag .pdv-pag-chip').forEach(function(x){x.classList.remove('pdv-pag-sel');}); el.classList.add('pdv-pag-sel'); }
+function pdvFmt(n){ return 'R$ '+n.toFixed(2).replace('.',','); }
+function pdvRender(){ var box=document.getElementById('pdv-itens'); if(!PDV_CART.length){ box.innerHTML='<div style="color:#888;text-align:center;padding:1rem;font-size:.85rem">Carrinho vazio.</div>'; document.getElementById('pdv-total').textContent='R$ 0,00'; return; } var sub=0,h=''; PDV_CART.forEach(function(it){ var lt=it.preco*it.qtd; sub+=lt; h+='<div style="display:flex;align-items:center;gap:.5rem;padding:.4rem 0;border-bottom:1px solid #242426">'+'<div style="flex:1;min-width:0"><div style="color:#ececec;font-size:.85rem">'+it.nome+'</div><input type="number" step="0.01" value="'+it.preco.toFixed(2)+'" onchange="pdvPreco('+it.id+',this.value)" style="width:80px;background:#0e0e0f;border:1px solid #2a2a2b;color:#cfcfcf;border-radius:5px;padding:.2rem .3rem;font-size:.72rem;margin-top:.2rem"> <span style="color:#6a8a7a;font-size:.68rem">/'+it.unidade+'</span></div>'+'<div style="display:flex;align-items:center;gap:.3rem"><span onclick="pdvQtd('+it.id+',-1)" style="width:22px;height:22px;border-radius:5px;background:#1c1c1f;border:1px solid #3a3a3d;color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">-</span><span style="color:#ececec;font-size:.8rem;min-width:44px;text-align:center">'+it.qtd+' '+it.unidade+'</span><span onclick="pdvQtd('+it.id+',1)" style="width:22px;height:22px;border-radius:5px;background:#1c1c1f;border:1px solid #3a3a3d;color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">+</span></div>'+'<div style="color:#cfcfcf;font-size:.8rem;min-width:64px;text-align:right">'+pdvFmt(lt)+'</div>'+'</div>'; }); box.innerHTML=h; var desc=parseFloat(String(document.getElementById('pdv-desc').value).replace(',','.'))||0; var tot=sub-desc; if(tot<0)tot=0; document.getElementById('pdv-total').textContent=pdvFmt(tot); }
+function pdvFinalizar(){ if(!PDV_CART.length){ return; } var btn=document.getElementById('pdv-finalizar'); btn.disabled=true; btn.textContent='Registrando...'; var desc=parseFloat(String(document.getElementById('pdv-desc').value).replace(',','.'))||0; var pagEl=document.querySelector('#pdv-pag .pdv-pag-sel'); var payload={ itens:PDV_CART.map(function(it){ return {produto_id:it.id, quantidade:it.qtd, preco_unit_centavos:Math.round(it.preco*100)}; }), cliente_nome:document.getElementById('pdv-cliente').value||null, cliente_telefone:document.getElementById('pdv-tel').value||null, pagamento:pagEl?pagEl.getAttribute('data-pag'):'dinheiro', desconto_centavos:Math.round(desc*100) }; fetch('/painel/produtos/vender',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(d){ if(d.ok){ PDV_CART=[]; location.reload(); } else { var e=document.getElementById('pdv-erro'); e.textContent=d.erro||'erro'; e.style.display='block'; btn.disabled=false; btn.textContent='Finalizar venda'; } }).catch(function(){ var e=document.getElementById('pdv-erro'); e.textContent='erro de conexão'; e.style.display='block'; btn.disabled=false; btn.textContent='Finalizar venda'; }); }
 function prodNovoFotoPreview(url){ var prev=document.getElementById('prod-novo-previa'); var vazia=document.getElementById('prod-novo-previa-vazia'); url=(url||'').trim(); if(!url){ prev.style.backgroundImage='none'; if(vazia){ vazia.style.display='block'; vazia.textContent='📦'; } return; } var img=new Image(); img.onload=function(){ prev.style.backgroundImage="url('"+url+"')"; if(vazia) vazia.style.display='none'; }; img.onerror=function(){ prev.style.backgroundImage='none'; if(vazia){ vazia.style.display='block'; vazia.textContent='✗'; } }; img.src=url; }
 function prodSetCat(chip, valor){ var inp=document.getElementById('prod-f-categoria'); if(inp) inp.value=valor; var box=chip.parentElement; if(box) box.querySelectorAll('.prod-catchip').forEach(function(x){ x.style.border='1.5px solid #2a2a2b'; x.style.color='#b4b2a9'; }); chip.style.border='1.5px solid #1d9e75'; chip.style.color='#5dcaa5'; }
 function prodCatLimpaSel(){ var box=document.getElementById('prod-cat-chips'); if(box) box.querySelectorAll('.prod-catchip').forEach(function(x){ x.style.border='1.5px solid #2a2a2b'; x.style.color='#b4b2a9'; }); }
@@ -6246,6 +6285,35 @@ def painel_abastecimento_confirmar(request: Request, compra_id: int):
     except Exception as e:
         request.session["erro"] = f"Erro: {str(e)}"
     return RedirectResponse("/painel/produtos/abastecimento", status_code=303)
+
+
+@router.post("/painel/produtos/vender")
+async def painel_produtos_vender(request: Request):
+    from finance import empresa as emp, pdv
+    conta = conta_logada(request)
+    if conta is None:
+        return JSONResponse({"ok": False, "erro": "nao autenticado"}, status_code=401)
+    pool = get_pool()
+    if not emp.acesso_pj(pool, conta[0]):
+        return JSONResponse({"ok": False, "erro": "sem acesso"}, status_code=403)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "erro": "payload invalido"}, status_code=400)
+    itens = body.get("itens") or []
+    try:
+        r = pdv.registrar_venda_balcao(
+            pool, conta[0], itens,
+            cliente_nome=body.get("cliente_nome"),
+            cliente_telefone=body.get("cliente_telefone"),
+            pagamento=body.get("pagamento") or "dinheiro",
+            desconto_centavos=int(body.get("desconto_centavos") or 0),
+        )
+        return JSONResponse({"ok": True, **r})
+    except ValueError as e:
+        return JSONResponse({"ok": False, "erro": str(e)}, status_code=400)
+    except Exception:
+        return JSONResponse({"ok": False, "erro": "erro ao registrar venda"}, status_code=500)
 
 
 @router.get("/painel/empresa", response_class=HTMLResponse)

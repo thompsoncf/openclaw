@@ -49,8 +49,10 @@ def registrar_venda_balcao(
     dono_id: int,
     itens: list[dict],
     *,
+    cliente_id: int | None = None,
     cliente_nome: str | None = None,
     cliente_telefone: str | None = None,
+    cliente_cpf: str | None = None,
     pagamento: str = "dinheiro",
     desconto_centavos: int = 0,
     permitir_estoque_negativo: bool = False,
@@ -117,13 +119,17 @@ def registrar_venda_balcao(
     total = subtotal - desconto
 
     # ---- 2) cliente (agenda) opcional ----
-    cliente_id = None
+    # Um cliente_id ja escolhido (puxado da base pelo lojista) tem prioridade;
+    # senao acha/cria por cpf (forte), telefone ou nome.
     nome_lbl = (cliente_nome or "").strip()
-    if nome_lbl:
-        cliente_id = _cli.achar_ou_criar(
-            pool, dono_id, nome_lbl,
-            telefone=(cliente_telefone or "").strip() or None,
-        )
+    if cliente_id is None:
+        cpf_lbl = (cliente_cpf or "").strip() or None
+        if nome_lbl or cpf_lbl:
+            cliente_id = _cli.achar_ou_criar(
+                pool, dono_id, nome_lbl or "cliente",
+                telefone=(cliente_telefone or "").strip() or None,
+                cpf=cpf_lbl,
+            )
 
     # ---- 3) baixa de estoque por item (saida) ----
     for ln in linhas:

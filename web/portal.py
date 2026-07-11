@@ -2263,9 +2263,14 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
       <button type="button" onclick="pdvFecha()" style="background:transparent;border:none;color:#888;font-size:1.2rem;cursor:pointer;width:auto;margin:0;padding:0">✕</button>
     </div>
     <div id="pdv-itens" style="margin-bottom:.6rem"></div>
-    <div style="display:flex;gap:.5rem;margin-bottom:.5rem">
-      <input id="pdv-cliente" placeholder="Cliente (opcional)" class="prod-inp" style="margin:0">
-      <input id="pdv-tel" placeholder="Telefone" class="prod-inp" style="margin:0;max-width:120px">
+    <div style="position:relative;margin-bottom:.5rem">
+      <input id="pdv-cli-busca" placeholder="Cliente — CPF, telefone ou nome" autocomplete="off" oninput="pdvCliBusca(this.value)" class="prod-inp" style="margin:0">
+      <div id="pdv-cli-sug" style="display:none;position:absolute;left:0;right:0;top:100%;background:#1c1c1f;border:1px solid #2a2a2b;border-top:0;border-radius:0 0 7px 7px;z-index:20;max-height:170px;overflow:auto"></div>
+      <div id="pdv-cli-sel" style="display:none;margin-top:.4rem;font-size:.82rem;color:#5dcaa5"></div>
+      <div id="pdv-cli-novo" style="display:none;margin-top:.4rem;gap:.4rem;grid-template-columns:1fr 1fr">
+        <input id="pdv-novo-nome" placeholder="Nome do novo cliente" class="prod-inp" style="margin:0">
+        <input id="pdv-novo-cpf" placeholder="CPF (opcional)" class="prod-inp" style="margin:0">
+      </div>
     </div>
     <div style="display:flex;gap:.5rem;margin-bottom:.6rem;align-items:center">
       <span style="font-size:.8rem;color:#888">Desconto R$</span>
@@ -2311,7 +2316,12 @@ function pdvPreco(id,v){ var e=PDV_CART.find(function(x){return x.id==id;}); if(
 function pdvPag(el){ document.querySelectorAll('#pdv-pag .pdv-pag-chip').forEach(function(x){x.classList.remove('pdv-pag-sel');}); el.classList.add('pdv-pag-sel'); }
 function pdvFmt(n){ return 'R$ '+n.toFixed(2).replace('.',','); }
 function pdvRender(){ var box=document.getElementById('pdv-itens'); if(!PDV_CART.length){ box.innerHTML='<div style="color:#888;text-align:center;padding:1rem;font-size:.85rem">Carrinho vazio.</div>'; document.getElementById('pdv-total').textContent='R$ 0,00'; return; } var sub=0,h=''; PDV_CART.forEach(function(it){ var lt=it.preco*it.qtd; sub+=lt; h+='<div style="display:flex;align-items:center;gap:.5rem;padding:.4rem 0;border-bottom:1px solid #242426">'+'<div style="flex:1;min-width:0"><div style="color:#ececec;font-size:.85rem">'+it.nome+'</div><input type="number" step="0.01" value="'+it.preco.toFixed(2)+'" onchange="pdvPreco('+it.id+',this.value)" style="width:80px;background:#0e0e0f;border:1px solid #2a2a2b;color:#cfcfcf;border-radius:5px;padding:.2rem .3rem;font-size:.72rem;margin-top:.2rem"> <span style="color:#6a8a7a;font-size:.68rem">/'+it.unidade+'</span></div>'+'<div style="display:flex;align-items:center;gap:.3rem"><span onclick="pdvQtd('+it.id+',-1)" style="width:22px;height:22px;border-radius:5px;background:#1c1c1f;border:1px solid #3a3a3d;color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">-</span><span style="color:#ececec;font-size:.8rem;min-width:44px;text-align:center">'+it.qtd+' '+it.unidade+'</span><span onclick="pdvQtd('+it.id+',1)" style="width:22px;height:22px;border-radius:5px;background:#1c1c1f;border:1px solid #3a3a3d;color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">+</span></div>'+'<div style="color:#cfcfcf;font-size:.8rem;min-width:64px;text-align:right">'+pdvFmt(lt)+'</div>'+'</div>'; }); box.innerHTML=h; var desc=parseFloat(String(document.getElementById('pdv-desc').value).replace(',','.'))||0; var tot=sub-desc; if(tot<0)tot=0; document.getElementById('pdv-total').textContent=pdvFmt(tot); }
-function pdvFinalizar(){ if(!PDV_CART.length){ return; } var btn=document.getElementById('pdv-finalizar'); btn.disabled=true; btn.textContent='Registrando...'; var desc=parseFloat(String(document.getElementById('pdv-desc').value).replace(',','.'))||0; var pagEl=document.querySelector('#pdv-pag .pdv-pag-sel'); var payload={ itens:PDV_CART.map(function(it){ return {produto_id:it.id, quantidade:it.qtd, preco_unit_centavos:Math.round(it.preco*100)}; }), cliente_nome:document.getElementById('pdv-cliente').value||null, cliente_telefone:document.getElementById('pdv-tel').value||null, pagamento:pagEl?pagEl.getAttribute('data-pag'):'dinheiro', desconto_centavos:Math.round(desc*100) }; fetch('/painel/produtos/vender',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(d){ if(d.ok){ PDV_CART=[]; location.reload(); } else { var e=document.getElementById('pdv-erro'); e.textContent=d.erro||'erro'; e.style.display='block'; btn.disabled=false; btn.textContent='Finalizar venda'; } }).catch(function(){ var e=document.getElementById('pdv-erro'); e.textContent='erro de conexão'; e.style.display='block'; btn.disabled=false; btn.textContent='Finalizar venda'; }); }
+var PDV_CLI=null, PDV_CLI_RES=[], PDV_CLI_T=null;
+function pdvCliBusca(q){ q=(q||'').trim(); PDV_CLI=null; document.getElementById('pdv-cli-sel').style.display='none'; if(PDV_CLI_T) clearTimeout(PDV_CLI_T); var sug=document.getElementById('pdv-cli-sug'); if(q.length<2){ sug.style.display='none'; return; } PDV_CLI_T=setTimeout(function(){ fetch('/painel/clientes/buscar?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(d){ PDV_CLI_RES=d.clientes||[]; var h=''; PDV_CLI_RES.forEach(function(c,i){ h+='<div onclick="pdvCliPick('+i+')" style="padding:.45rem .6rem;border-bottom:1px solid #242426;cursor:pointer;font-size:.82rem;color:#ececec">'+c.nome+'<span style="color:#6a8a7a;font-size:.72rem">'+(c.telefone?(' · '+c.telefone):'')+(c.cpf?(' · CPF '+c.cpf):'')+'</span></div>'; }); h+='<div onclick="pdvCliNovo()" style="padding:.45rem .6rem;cursor:pointer;font-size:.82rem;color:#5dcaa5">+ cadastrar novo cliente</div>'; sug.innerHTML=h; sug.style.display='block'; }).catch(function(){}); }, 250); }
+function pdvCliPick(i){ var c=PDV_CLI_RES[i]; if(!c) return; PDV_CLI={id:c.id,nome:c.nome,telefone:c.telefone,cpf:c.cpf}; document.getElementById('pdv-cli-busca').value=c.nome; document.getElementById('pdv-cli-sug').style.display='none'; document.getElementById('pdv-cli-novo').style.display='none'; var sel=document.getElementById('pdv-cli-sel'); sel.innerHTML='✓ '+c.nome+' <a onclick="pdvCliLimpar()" style="color:#d98a8a;cursor:pointer;margin-left:.4rem">(trocar)</a>'; sel.style.display='block'; }
+function pdvCliNovo(){ document.getElementById('pdv-cli-sug').style.display='none'; var q=document.getElementById('pdv-cli-busca').value||''; var novo=document.getElementById('pdv-cli-novo'); novo.style.display='grid'; var digs=q.replace(/[^0-9]/g,""); if(digs.length>=11){ document.getElementById('pdv-novo-cpf').value=q; document.getElementById('pdv-novo-nome').value=''; } else { document.getElementById('pdv-novo-nome').value=q; } PDV_CLI=null; }
+function pdvCliLimpar(){ PDV_CLI=null; document.getElementById('pdv-cli-sel').style.display='none'; document.getElementById('pdv-cli-busca').value=''; document.getElementById('pdv-cli-novo').style.display='none'; document.getElementById('pdv-novo-nome').value=''; document.getElementById('pdv-novo-cpf').value=''; }
+function pdvFinalizar(){ if(!PDV_CART.length){ return; } var btn=document.getElementById('pdv-finalizar'); btn.disabled=true; btn.textContent='Registrando...'; var desc=parseFloat(String(document.getElementById('pdv-desc').value).replace(',','.'))||0; var pagEl=document.querySelector('#pdv-pag .pdv-pag-sel'); var payload={ itens:PDV_CART.map(function(it){ return {produto_id:it.id, quantidade:it.qtd, preco_unit_centavos:Math.round(it.preco*100)}; }), pagamento:pagEl?pagEl.getAttribute('data-pag'):'dinheiro', desconto_centavos:Math.round(desc*100) }; if(PDV_CLI&&PDV_CLI.id){ payload.cliente_id=PDV_CLI.id; payload.cliente_nome=PDV_CLI.nome; } else { var nn=(document.getElementById('pdv-novo-nome').value||'').trim(); var nc=(document.getElementById('pdv-novo-cpf').value||'').trim(); if(nn) payload.cliente_nome=nn; if(nc) payload.cliente_cpf=nc; } fetch('/painel/produtos/vender',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(d){ if(d.ok){ PDV_CART=[]; location.reload(); } else { var e=document.getElementById('pdv-erro'); e.textContent=d.erro||'erro'; e.style.display='block'; btn.disabled=false; btn.textContent='Finalizar venda'; } }).catch(function(){ var e=document.getElementById('pdv-erro'); e.textContent='erro de conexão'; e.style.display='block'; btn.disabled=false; btn.textContent='Finalizar venda'; }); }
 function prodNovoFotoPreview(url){ var prev=document.getElementById('prod-novo-previa'); var vazia=document.getElementById('prod-novo-previa-vazia'); url=(url||'').trim(); if(!url){ prev.style.backgroundImage='none'; if(vazia){ vazia.style.display='block'; vazia.textContent='📦'; } return; } var img=new Image(); img.onload=function(){ prev.style.backgroundImage="url('"+url+"')"; if(vazia) vazia.style.display='none'; }; img.onerror=function(){ prev.style.backgroundImage='none'; if(vazia){ vazia.style.display='block'; vazia.textContent='✗'; } }; img.src=url; }
 function prodSetCat(chip, valor){ var inp=document.getElementById('prod-f-categoria'); if(inp) inp.value=valor; var box=chip.parentElement; if(box) box.querySelectorAll('.prod-catchip').forEach(function(x){ x.style.border='1.5px solid #2a2a2b'; x.style.color='#b4b2a9'; }); chip.style.border='1.5px solid #1d9e75'; chip.style.color='#5dcaa5'; }
 function prodCatLimpaSel(){ var box=document.getElementById('prod-cat-chips'); if(box) box.querySelectorAll('.prod-catchip').forEach(function(x){ x.style.border='1.5px solid #2a2a2b'; x.style.color='#b4b2a9'; }); }
@@ -6393,8 +6403,10 @@ async def painel_produtos_vender(request: Request):
     try:
         r = pdv.registrar_venda_balcao(
             pool, conta[0], itens,
+            cliente_id=body.get("cliente_id"),
             cliente_nome=body.get("cliente_nome"),
             cliente_telefone=body.get("cliente_telefone"),
+            cliente_cpf=body.get("cliente_cpf"),
             pagamento=body.get("pagamento") or "dinheiro",
             desconto_centavos=int(body.get("desconto_centavos") or 0),
         )
@@ -6442,6 +6454,24 @@ def painel_clientes_novo(request: Request, nome: str = Form(...),
     except ValueError as e:
         request.session["erro"] = str(e)
     return RedirectResponse("/painel/clientes", status_code=303)
+
+
+@router.get("/painel/clientes/buscar")
+def painel_clientes_buscar(request: Request, q: str = ""):
+    from finance import empresa as emp, clientes as cli
+    conta = conta_logada(request)
+    if conta is None:
+        return JSONResponse({"clientes": []}, status_code=401)
+    pool = get_pool()
+    if not emp.acesso_pj(pool, conta[0]):
+        return JSONResponse({"clientes": []}, status_code=403)
+    q = (q or "").strip()
+    if len(q) < 2:
+        return JSONResponse({"clientes": []})
+    lista = cli.listar_clientes(pool, conta[0], busca=q, limite=8)
+    out = [{"id": c["id"], "nome": c["nome"], "telefone": c["telefone"], "cpf": c["cpf"]}
+           for c in lista]
+    return JSONResponse({"clientes": out})
 
 
 @router.get("/painel/clientes/{cliente_id}", response_class=HTMLResponse)

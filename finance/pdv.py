@@ -153,6 +153,15 @@ def registrar_venda_balcao(
     # a trava anti-duplicidade por tipo+valor+data nao deve barrar.
     lanc = lc.adicionar(lanc, forcar=True)
 
+    # liga a venda ao cliente (migracao 066: lancamentos.cliente_id)
+    if cliente_id:
+        with pool.connection() as _c:
+            _c.execute(
+                "update lancamentos set cliente_id=%s where id=%s and conta_id=%s",
+                (cliente_id, lanc.id, dono_id),
+            )
+            _c.commit()
+
     # ---- 5) itens da venda ligados ao lancamento ----
     lc.registrar_itens(
         lanc.id,

@@ -64,8 +64,10 @@ def _papel_logado(request: Request, conta_id: int) -> str:
 
 
 def conta_logada(request: Request):
-    # Memoizacao por requisicao: conta_logada e' chamado varias vezes por pagina
-    # (rota + _render). Guarda o resultado em request.state pra rodar a query 1x so.
+    # Memoizacao por requisicao + gating numa query so: alem dos campos da conta,
+    # ja traz o acesso computado em conta[11..15]:
+    #   [11]=tem_pj(modulo_pj)  [12]=acesso_pj  [13]=vende_produto  [14]=vende_servico
+    #   [15]=tem_cesta   (indices 0..10 = os campos originais, inalterados)
     if hasattr(request.state, "_conta_cache"):
         return request.state._conta_cache
     cid = request.session.get("conta_id")
@@ -74,11 +76,36 @@ def conta_logada(request: Request):
         return None
     pool = get_pool()
     with pool.connection() as c:
-        row = c.execute(
-            "select id, tipo, nome, email, plano, status, vencimento, cidade, "
-            "eh_fornecedor, fornecedor_slug, eh_assinante_cesta from contas where id = %s",
+        r = c.execute(
+            """select co.id, co.tipo, co.nome, co.email, co.plano, co.status,
+                      co.vencimento, co.cidade, co.eh_fornecedor, co.fornecedor_slug,
+                      co.eh_assinante_cesta,
+                      p.tipo_conta, n.slug, co.vende_produto, co.vende_servico,
+                      exists(select 1 from conta_modulos cm
+                              where cm.conta_id = co.id and cm.modulo = 'pj' and cm.ativo),
+                      exists(select 1 from assinaturas a
+                              where a.cliente_id = co.id and a.status <> 'cancelada')
+                 from contas co
+                 left join planos p on p.codigo = co.plano
+                 left join nichos n on n.id = co.nicho_id
+                where co.id = %s""",
             (cid,),
         ).fetchone()
+    if r is None:
+        request.state._conta_cache = None
+        return None
+    _plano_tipo, _nslug = r[11], r[12]
+    _vp_ovr, _vs_ovr, _mod_pj_ovr, _cesta_db = r[13], r[14], r[15], r[16]
+    _modulo_pj = (_plano_tipo == "pj" and r[5] in ("trial", "ativa")) or bool(_mod_pj_ovr)
+    _acesso = _modulo_pj or bool(r[8])
+    from finance import nichos as _n
+    _prod = _vp_ovr if _vp_ovr is not None else _n.vende_produto(_nslug)
+    _serv = _vs_ovr if _vs_ovr is not None else _n.vende_servico(_nslug)
+    if not _prod and not _serv:
+        _prod = True
+    _tem_cesta = bool(r[10]) or bool(_cesta_db)
+    row = tuple(r[0:11]) + (_modulo_pj, _acesso,
+                            bool(_prod) and _acesso, bool(_serv) and _acesso, _tem_cesta)
     request.state._conta_cache = row
     return row
 
@@ -4500,34 +4527,24 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
                  ("pedidos", "/painel/meus-pedidos"), ("compras", "/painel/compras"),
                  ("painel", "/painel")]
         ctx["secao_ativa"] = next((k for k, pre in _secs if _p == pre or _p.startswith(pre + "/")), "")
-    # Injeta conta + tem_cesta pro menu decidir certo (em qualquer tela)
+    # Injeta conta + gating (o conta_logada ja traz tudo numa query so: conta[11..15])
     if request.session.get("conta_id"):
         if "conta" not in ctx:
             ctx["conta"] = conta_logada(request)
+        _c = ctx.get("conta")
         if "tem_cesta" not in ctx:
-            ctx["tem_cesta"] = _tem_assinatura_cesta(request.session["conta_id"])
+            ctx["tem_cesta"] = bool(_c and _c[15])
+        if "tem_pj" not in ctx:
+            ctx["tem_pj"] = bool(_c and _c[11])
+        if "vende_produto" not in ctx:
+            ctx["vende_produto"] = bool(_c and _c[13])
+            ctx["vende_servico"] = bool(_c and _c[14])
     if "beta_gratis" not in ctx:
         try:
             from finance import config_app as _cfg
             ctx["beta_gratis"] = _cfg.beta_gratis_ativo(get_pool())
         except Exception:
             ctx["beta_gratis"] = True
-        if "tem_pj" not in ctx:
-            try:
-                from finance import empresa as _emp
-                ctx["tem_pj"] = _emp.modulo_pj_ativo(get_pool(), request.session["conta_id"])
-            except Exception:
-                ctx["tem_pj"] = False
-        if "vende_produto" not in ctx:
-            try:
-                from finance import empresa as _emp
-                _acesso = _emp.acesso_pj(get_pool(), request.session["conta_id"])
-                _ov = _emp.o_que_vende(get_pool(), request.session["conta_id"])
-                ctx["vende_produto"] = _ov["produto"] and _acesso
-                ctx["vende_servico"] = _ov["servico"] and _acesso
-            except Exception:
-                ctx["vende_produto"] = False
-                ctx["vende_servico"] = False
     return HTMLResponse(_env.get_template(nome).render(**ctx))
 
 

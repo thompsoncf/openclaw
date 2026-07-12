@@ -67,9 +67,12 @@ _ADMIN_BASE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 }
 body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:var(--bg);
  color:var(--txt);display:flex;flex-direction:column;align-items:center}
-.topo{width:100%;max-width:1000px;display:flex;justify-content:space-between;
+.topo{width:100%;max-width:1000px;display:flex;flex-wrap:wrap;gap:.6rem;justify-content:space-between;
  align-items:center;padding:1.2rem 1rem;box-sizing:border-box}
-.topo a{color:var(--verde-claro);text-decoration:none;margin-left:1rem}
+.adm-nav{display:inline-flex;flex-wrap:wrap;gap:.25rem;background:var(--card-2);padding:.25rem;border-radius:14px;border:1px solid var(--borda)}
+.adm-nav a{color:var(--txt-mut);text-decoration:none;margin:0;padding:.35rem .7rem;border-radius:10px;font-size:.85rem;transition:background .18s,color .18s}
+.adm-nav a:hover{color:var(--txt)}
+.adm-nav a.on{background:var(--verde);color:#fff;font-weight:500}
 .logo{font-weight:600}.logo span{color:#e0a83d}
 .wrap{width:100%;max-width:1000px;padding:0 1rem 3rem;box-sizing:border-box}
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:1rem 0}
@@ -92,8 +95,9 @@ button.danger{background:#6e2b2b}button.danger:hover{background:#8a3636}
 form.inline{display:inline;margin:0}
 </style></head><body>
 <div class="topo"><span class="logo">Zaq <span>· admin</span></span>
-<span><a href="/admin">Contas</a><a href="/admin/funil">Funil</a><a href="/admin/custos">Custos</a><a href="/admin/qr">QR notas</a><a href="/admin/precos">Preços</a><a href="/admin/categorias">Categorias</a><a href="/admin/banco">Banco</a><a href="/admin/comunicacao">Comunicacao</a><a href="/admin/pesquisas">Pesquisas</a><a href="/admin/orcamento">Orçamento</a><a href="/painel">Meu painel</a><a href="/sair">Sair</a></span></div>
+<nav class="adm-nav"><a href="/admin">Contas</a><a href="/admin/funil">Funil</a><a href="/admin/custos">Custos</a><a href="/admin/qr">QR notas</a><a href="/admin/precos">Preços</a><a href="/admin/categorias">Categorias</a><a href="/admin/banco">Banco</a><a href="/admin/comunicacao">Comunicacao</a><a href="/admin/pesquisas">Pesquisas</a><a href="/admin/orcamento">Orçamento</a><a href="/painel">Meu painel</a><a href="/sair">Sair</a></nav></div>
 <div class="wrap">{% block conteudo %}{% endblock %}</div>
+<script>(function(){var p=location.pathname;document.querySelectorAll(".adm-nav a").forEach(function(a){var h=a.getAttribute("href");if(h===p||(h!=="/admin"&&h!=="/painel"&&h!=="/sair"&&p.indexOf(h)===0))a.classList.add("on");});})();</script>
 </body></html>"""
 
 _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
@@ -584,6 +588,14 @@ def admin_home(request: Request, busca: str = ""):
         nichos = [dict(zip(ncols, r)) for r in c.execute(
             """select id, nome from nichos where ativo order by nome""").fetchall()]
 
+        _pl = c.execute(
+            """select codigo, nome, tipo_conta, preco_base_centavos, ativo
+                 from planos order by tipo_conta, preco_base_centavos""").fetchall()
+        _md = c.execute(
+            """select codigo, nome, preco_centavos, ativo
+                 from modulos where codigo in ('pj','fornecedor')
+                 order by codigo""").fetchall()
+
     resumo = {"total": total, "trial": tot.get("trial", 0), "ativa": tot.get("ativa", 0),
               "vencendo": vencendo, "mrr": mrr}
     from types import SimpleNamespace
@@ -592,14 +604,6 @@ def admin_home(request: Request, busca: str = ""):
     nichos = [SimpleNamespace(**n) for n in nichos]
     from finance import config_app as _cfg
     from types import SimpleNamespace as _SN
-    with get_pool().connection() as _c:
-        _pl = _c.execute(
-            """select codigo, nome, tipo_conta, preco_base_centavos, ativo
-                 from planos order by tipo_conta, preco_base_centavos""").fetchall()
-        _md = _c.execute(
-            """select codigo, nome, preco_centavos, ativo
-                 from modulos where codigo in ('pj','fornecedor')
-                 order by codigo""").fetchall()
     planos_admin = [_SN(codigo=r[0], nome=r[1], tipo_conta=r[2],
                         preco_base_centavos=r[3], ativo=r[4]) for r in _pl]
     modulos_admin = [_SN(codigo=r[0], nome=r[1], preco_centavos=r[2], ativo=r[3])

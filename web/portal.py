@@ -198,6 +198,7 @@ button:hover{background:var(--verde-hover)}
  padding:.6rem .8rem;font-size:.88rem;margin-bottom:.6rem}
 .ok{background:#15301f;border:1px solid var(--verde);color:#9fe8c9;border-radius:8px;
  padding:.6rem .8rem;font-size:.88rem;margin-bottom:.6rem}
+.nowrap{white-space:nowrap}
 .mut{color:var(--txt-mut);font-size:.85rem}
 table{width:100%;border-collapse:collapse;margin-top:.8rem}
 td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;font-size:.92rem}
@@ -676,10 +677,10 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 {% if eh_pj %}
 <div style="margin:.8rem 0 .2rem">
 <div style="color:#888780;font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.35rem">Ver lançamentos de</div>
-<div style="display:inline-flex;background:#161617;border:1px solid #2a2a2b;border-radius:9px;padding:3px;gap:2px;flex-wrap:wrap">
-<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if not natureza_sel %}background:#1d9e75;color:#fff;font-weight:600{% else %}color:#b4b2a9{% endif %}">Todos</a>
+<div style="display:inline-flex;background:var(--card);border:1px solid var(--borda);border-radius:9px;padding:3px;gap:2px;flex-wrap:wrap">
+<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if not natureza_sel %}background:var(--verde);color:#fff;font-weight:600{% else %}color:#b4b2a9{% endif %}">Todos</a>
 <a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=pessoal" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if natureza_sel=='pessoal' %}background:#f0c05a;color:#1a1409;font-weight:600{% else %}color:#b4b2a9{% endif %}">👤 Pessoal</a>
-<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=empresa" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if natureza_sel=='empresa' %}background:#1d9e75;color:#fff;font-weight:600{% else %}color:#b4b2a9{% endif %}">🏢 Empresa</a>
+<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=empresa" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if natureza_sel=='empresa' %}background:var(--verde);color:#fff;font-weight:600{% else %}color:#b4b2a9{% endif %}">🏢 Empresa</a>
 <a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=a_definir" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;display:inline-flex;align-items:center;gap:.35rem;{% if natureza_sel=='a_definir' %}background:#3a2c1d;color:#f0c05a;font-weight:600{% else %}color:#f0c05a{% endif %}">⏳ A definir{% if n_a_definir %} <span style="background:#3a2c1d;color:#f0c05a;font-size:.62rem;padding:1px 6px;border-radius:8px">{{ n_a_definir }}</span>{% endif %}</a>
 </div>
 </div>
@@ -687,13 +688,13 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 {% if eh_pj and n_a_definir %}<div style="background:#2b2416;border:1px solid #f0c05a44;border-radius:8px;padding:.55rem .9rem;margin:.4rem 0 0;color:#f0c05a;font-size:.83rem;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem"><span>🏢 <b>{{ n_a_definir }}</b> lançamento(s) sem classificar (pessoal ou empresa).</span> <button type="button" onclick="abrirClassificador()" style="background:#f0c05a;color:#1a1409;border:0;border-radius:6px;padding:.35rem .9rem;font-size:.8rem;font-weight:600;cursor:pointer">classificar em lote</button></div>{% endif %}
 
 {% if eh_pj %}<div id="modal-classif" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;align-items:center;justify-content:center;padding:1rem">
-<div style="background:#0e0e0f;border:1px solid #2a2a2b;border-radius:12px;max-width:560px;width:100%;max-height:85vh;display:flex;flex-direction:column;padding:1.1rem 1.2rem">
+<div style="background:var(--bg);border:1px solid var(--borda);border-radius:12px;max-width:560px;width:100%;max-height:85vh;display:flex;flex-direction:column;padding:1.1rem 1.2rem">
 <div style="font-size:1rem;font-weight:600;color:#f4f4f4">Classificar lançamentos a definir</div>
 <div style="font-size:.75rem;color:#888780;margin:.2rem 0 .7rem">Escolha pessoal ou empresa em cada um. Os que deixar em branco continuam "a definir".</div>
 <div style="display:flex;gap:.4rem;align-items:center;margin-bottom:.7rem;flex-wrap:wrap">
 <span style="color:#888780;font-size:.7rem">atalhos:</span>
 <button type="button" onclick="classifTodos('pessoal')" style="font-size:.7rem;color:#f0c05a;background:#3a2c1d;border:0;padding:.25rem .7rem;border-radius:6px;cursor:pointer">todos pessoal</button>
-<button type="button" onclick="classifTodos('empresa')" style="font-size:.7rem;color:#5dcaa5;background:#1d3a2e;border:0;padding:.25rem .7rem;border-radius:6px;cursor:pointer">todos 🏢 empresa</button>
+<button type="button" onclick="classifTodos('empresa')" style="font-size:.7rem;color:var(--verde-claro);background:#1d3a2e;border:0;padding:.25rem .7rem;border-radius:6px;cursor:pointer">todos 🏢 empresa</button>
 <button type="button" onclick="classifTodos('')" style="font-size:.7rem;color:#b4b2a9;background:#1c1c1e;border:0;padding:.25rem .7rem;border-radius:6px;cursor:pointer">limpar</button>
 </div>
 <div id="classif-lista" style="background:#131316;border-radius:9px;overflow-y:auto;flex:1;margin-bottom:.8rem"></div>
@@ -701,23 +702,23 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <span id="classif-contador" style="color:#888780;font-size:.75rem"></span>
 <span style="display:flex;gap:.5rem">
 <button type="button" onclick="fecharClassificador()" style="border:1px solid #444;background:transparent;color:#b4b2a9;font-size:.8rem;padding:.4rem .9rem;border-radius:6px;cursor:pointer">Cancelar</button>
-<button type="button" id="classif-salvar" onclick="salvarClassificacao()" style="background:#1d9e75;color:#fff;font-size:.8rem;font-weight:600;padding:.4rem 1rem;border:0;border-radius:6px;cursor:pointer">Salvar</button>
+<button type="button" id="classif-salvar" onclick="salvarClassificacao()" style="background:var(--verde);color:#fff;font-size:.8rem;font-weight:600;padding:.4rem 1rem;border:0;border-radius:6px;cursor:pointer">Salvar</button>
 </span>
 </div>
 </div></div>{% endif %}
 
 <div class="fin-cards">
-<div class="metric" style="display:flex;flex-direction:column;justify-content:space-between"><div><span>Saldo anterior</span><b style="white-space:nowrap;color:{% if resumo.anterior < 0 %}#e07a5f{% else %}#5dcaa5{% endif %}">{{ brl(resumo.anterior) }}</b>{% if eh_pj and natureza_sel in ['empresa','pessoal','a_definir'] and resumo.anterior == 0 %}<small style="display:block;color:#6a7178;font-size:.62rem;margin-top:.3rem;line-height:1.3">sem histórico de {{ {'empresa':'empresa','pessoal':'pessoal','a_definir':'lançamentos a definir'}[natureza_sel] }} antes deste mês</small>{% endif %}</div>
-<div style="margin-top:1rem;padding-top:.9rem;border-top:1px solid #1e1e20"><span>= {% if eh_pj and natureza_sel %}Resultado{% else %}Saldo{% endif %} do mês</span><b style="white-space:nowrap;color:#5dcaa5">{{ brl(resumo.saldo) }}</b></div></div>
-<div class="metric"><span>+ Receitas do mês{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b style="white-space:nowrap">{{ brl(resumo.receitas) }}</b>{% if eh_pj and not natureza_sel and quebra %}<div style="margin-top:.5rem;padding-top:.45rem;border-top:1px solid #1e1e20;font-size:.68rem;line-height:1.85">
-<div style="display:flex;justify-content:space-between;gap:.4rem;color:#7a9a8a"><span style="white-space:nowrap">🏢 Empresa</span><span style="white-space:nowrap">{{ (quebra.receitas.empresa/100)|n2 }}</span></div>
-<div style="display:flex;justify-content:space-between;gap:.4rem;color:#7a7a75"><span style="white-space:nowrap">👤 Pessoal</span><span style="white-space:nowrap">{{ (quebra.receitas.pessoal/100)|n2 }}</span></div>
-<div style="display:flex;justify-content:space-between;gap:.4rem;color:#7a7a75"><span style="white-space:nowrap">⏳ A definir</span><span style="white-space:nowrap">{{ (quebra.receitas.a_definir/100)|n2 }}</span></div>
+<div class="metric" style="display:flex;flex-direction:column;justify-content:space-between"><div><span>Saldo anterior</span><b style="white-space:nowrap;color:{% if resumo.anterior < 0 %}#e07a5f{% else %}var(--verde-claro){% endif %}">{{ brl(resumo.anterior) }}</b>{% if eh_pj and natureza_sel in ['empresa','pessoal','a_definir'] and resumo.anterior == 0 %}<small style="display:block;color:#6a7178;font-size:.62rem;margin-top:.3rem;line-height:1.3">sem histórico de {{ {'empresa':'empresa','pessoal':'pessoal','a_definir':'lançamentos a definir'}[natureza_sel] }} antes deste mês</small>{% endif %}</div>
+<div style="margin-top:1rem;padding-top:.9rem;border-top:1px solid #1e1e20"><span>= {% if eh_pj and natureza_sel %}Resultado{% else %}Saldo{% endif %} do mês</span><b style="white-space:nowrap;color:var(--verde-claro)">{{ brl(resumo.saldo) }}</b></div></div>
+<div class="metric"><span>+ Receitas do mês{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b class="nowrap">{{ brl(resumo.receitas) }}</b>{% if eh_pj and not natureza_sel and quebra %}<div style="margin-top:.5rem;padding-top:.45rem;border-top:1px solid #1e1e20;font-size:.68rem;line-height:1.85">
+<div style="display:flex;justify-content:space-between;gap:.4rem;color:#7a9a8a"><span class="nowrap">🏢 Empresa</span><span class="nowrap">{{ (quebra.receitas.empresa/100)|n2 }}</span></div>
+<div style="display:flex;justify-content:space-between;gap:.4rem;color:#7a7a75"><span class="nowrap">👤 Pessoal</span><span class="nowrap">{{ (quebra.receitas.pessoal/100)|n2 }}</span></div>
+<div style="display:flex;justify-content:space-between;gap:.4rem;color:#7a7a75"><span class="nowrap">⏳ A definir</span><span class="nowrap">{{ (quebra.receitas.a_definir/100)|n2 }}</span></div>
 </div>{% endif %}</div>
-<div class="metric"><span>− Despesas do mês{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b style="white-space:nowrap">{{ brl(resumo.despesas) }}</b>{% if eh_pj and not natureza_sel and quebra %}<div style="margin-top:.5rem;padding-top:.45rem;border-top:1px solid #1e1e20;font-size:.68rem;line-height:1.85">
-<div style="display:flex;justify-content:space-between;gap:.4rem;color:#9a8a7a"><span style="white-space:nowrap">🏢 Empresa</span><span style="white-space:nowrap">{{ (quebra.despesas.empresa/100)|n2 }}</span></div>
-<div style="display:flex;justify-content:space-between;gap:.4rem;color:#7a7a75"><span style="white-space:nowrap">👤 Pessoal</span><span style="white-space:nowrap">{{ (quebra.despesas.pessoal/100)|n2 }}</span></div>
-<div style="display:flex;justify-content:space-between;gap:.4rem;{% if quebra.despesas.a_definir %}color:#f0c05a{% else %}color:#7a7a75{% endif %}"><span style="white-space:nowrap">⏳ A definir{% if quebra.despesas.a_definir %} ⚠{% endif %}</span><span style="white-space:nowrap">{{ (quebra.despesas.a_definir/100)|n2 }}</span></div>
+<div class="metric"><span>− Despesas do mês{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b class="nowrap">{{ brl(resumo.despesas) }}</b>{% if eh_pj and not natureza_sel and quebra %}<div style="margin-top:.5rem;padding-top:.45rem;border-top:1px solid #1e1e20;font-size:.68rem;line-height:1.85">
+<div style="display:flex;justify-content:space-between;gap:.4rem;color:#9a8a7a"><span class="nowrap">🏢 Empresa</span><span class="nowrap">{{ (quebra.despesas.empresa/100)|n2 }}</span></div>
+<div style="display:flex;justify-content:space-between;gap:.4rem;color:#7a7a75"><span class="nowrap">👤 Pessoal</span><span class="nowrap">{{ (quebra.despesas.pessoal/100)|n2 }}</span></div>
+<div style="display:flex;justify-content:space-between;gap:.4rem;{% if quebra.despesas.a_definir %}color:#f0c05a{% else %}color:#7a7a75{% endif %}"><span class="nowrap">⏳ A definir{% if quebra.despesas.a_definir %} ⚠{% endif %}</span><span class="nowrap">{{ (quebra.despesas.a_definir/100)|n2 }}</span></div>
 </div>{% endif %}</div>
 </div>
 
@@ -738,7 +739,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
   <div style="display:flex; justify-content:space-between; font-size:.9rem; margin:.4rem 0 .2rem">
     <span><span class="seta">▸</span> {{ cat }}</span><b>{{ brl(val) }}</b>
   </div>
-  <div class="barra"><div class="barra-fill" style="width:{{ (val*100//maior_rec) if maior_rec else 0 }}%; background:#5dcaa5"></div></div>
+  <div class="barra"><div class="barra-fill" style="width:{{ (val*100//maior_rec) if maior_rec else 0 }}%; background:var(--verde-claro)"></div></div>
 </div>
 <div class="cat-lancamentos" style="display:none; padding:.2rem 0 .6rem 1.2rem"></div>
 {% endfor %}{% else %}<p class="mut">Sem receitas neste mês.</p>{% endif %}
@@ -746,12 +747,12 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <h1 style="font-size:1.05rem; margin-top:1.6rem">Lançamentos</h1>
 <form method="get" action="/painel/financeiro" style="margin:.5rem 0 1rem">
 <input type="search" name="q" value="{{ q_search or '' }}" placeholder="🔎 Buscar lançamento..."
-       style="width:100%;padding:.6rem .8rem;border:1px solid #2a3a33;border-radius:8px;background:#161617;color:#ececec;font-size:.95rem">
+       style="width:100%;padding:.6rem .8rem;border:1px solid #2a3a33;border-radius:8px;background:var(--card);color:var(--txt);font-size:.95rem">
 {% if q_search %}<input type="hidden" name="mes" value="{{ mes_sel }}">{% endif %}
 </form>
 {% if q_search %}
 <p style="margin:.5rem 0; color:#8a8a85">{{ n_resultados }} {{ 'resultado' if n_resultados == 1 else 'resultados' }} para "{{ q_search }}"
-{% if n_resultados > 0 %}<a href="/painel/financeiro?mes={{ mes_sel }}" style="color:#5dcaa5;text-decoration:none"> — limpar busca</a>{% endif %}
+{% if n_resultados > 0 %}<a href="/painel/financeiro?mes={{ mes_sel }}" style="color:var(--verde-claro);text-decoration:none"> — limpar busca</a>{% endif %}
 </p>
 {% endif %}
 <div class="abas" {% if q_search %}style="display:none"{% endif %}>
@@ -766,11 +767,11 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <tr><td colspan="5" style="padding:1.2rem;text-align:center;color:#8a8a85">Nenhum lançamento encontrado pra "{{ q_search }}"</td></tr>
 {% else %}
 {% for l in lancamentos %}
-<tr data-tipo="{{ l.tipo }}" style="border-bottom:1px solid #2a2a2b">
+<tr data-tipo="{{ l.tipo }}" style="border-bottom:1px solid var(--borda)">
 <td style="padding:.7rem .8rem;font-size:.9rem;white-space:nowrap">{{ l.data.strftime('%d/%m/%Y') }}</td>
 <td style="padding:.7rem .8rem">{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}</td>
-<td style="padding:.7rem .8rem;font-size:.85rem;color:#a8a8a3">{{ l.categoria }}</td>
-<td style="padding:.7rem .8rem;text-align:right;font-weight:500;color:{{ '#5dcaa5' if l.tipo=='receita' else '#f0b8b8' }}">
+<td style="padding:.7rem .8rem;font-size:.85rem;color:var(--txt-mut)">{{ l.categoria }}</td>
+<td style="padding:.7rem .8rem;text-align:right;font-weight:500;color:{{ 'var(--verde-claro)' if l.tipo=='receita' else '#f0b8b8' }}">
 {{ '+' if l.tipo=='receita' else '−' }} {{ brl(l.valor).replace('R$ ','') }}</td>
 <td style="padding:.7rem .4rem;text-align:right">
 <button type="button" class="lanc-rm" data-id="{{ l.id }}" onclick="apagarLanc(this)" title="apagar lançamento" style="margin:0;padding:.15rem .45rem;width:auto;background:transparent;color:#8a3636;border:0;cursor:pointer;font-size:.95rem">✕</button>
@@ -787,24 +788,24 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <div class="dep-cab" onclick="abrirDep(this)">
 <span><span class="seta">▸</span> {{ dia.data.strftime('%d/%m') }}
 <span class="mut">· {{ dia.itens|length }} {{ 'lançamento' if dia.itens|length == 1 else 'lançamentos' }}</span></span>
-<b style="color:{{ '#5dcaa5' if dia.saldo >= 0 else '#f0b8b8' }}">{{ '+' if dia.saldo >= 0 else '−' }} {{ brl(dia.saldo|abs).replace('R$ ','') }}</b>
+<b style="color:{{ 'var(--verde-claro)' if dia.saldo >= 0 else '#f0b8b8' }}">{{ '+' if dia.saldo >= 0 else '−' }} {{ brl(dia.saldo|abs).replace('R$ ','') }}</b>
 </div>
 <div class="dep-corpo" style="flex-direction:column; gap:0">
 <table style="margin:0">
 {% for l in dia.itens %}<tr data-tipo="{{ l.tipo }}" data-cat="{{ canon(l.categoria, l.tipo) }}" data-desc="{{ l.descricao }}" data-valor="{{ brl(l.valor) }}">
 <td>{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}
-{% if eh_pj %}{% if l.natureza=='empresa' %}<span class="nat-tag" style="font-size:.62rem;background:#1d3a2e;color:#5dcaa5;padding:1px 7px;border-radius:8px;margin-left:.3rem">🏢 empresa</span>{% elif l.natureza=='pessoal' %}<span class="nat-tag" style="font-size:.62rem;background:#3a2c1d;color:#f0c05a;padding:1px 7px;border-radius:8px;margin-left:.3rem">👤 pessoal</span>{% else %}<span style="display:inline-flex;gap:.25rem;margin-left:.3rem"><button type="button" onclick="marcarNat({{ l.id }},'pessoal',this)" style="font-size:.6rem;padding:1px 6px;background:#3a2c1d;color:#f0c05a;border:0;border-radius:7px;cursor:pointer">pessoal?</button><button type="button" onclick="marcarNat({{ l.id }},'empresa',this)" style="font-size:.6rem;padding:1px 6px;background:#1d3a2e;color:#5dcaa5;border:0;border-radius:7px;cursor:pointer">empresa?</button></span>{% endif %}{% endif %}</td>
-<td style="white-space:nowrap">
+{% if eh_pj %}{% if l.natureza=='empresa' %}<span class="nat-tag" style="font-size:.62rem;background:#1d3a2e;color:var(--verde-claro);padding:1px 7px;border-radius:8px;margin-left:.3rem">🏢 empresa</span>{% elif l.natureza=='pessoal' %}<span class="nat-tag" style="font-size:.62rem;background:#3a2c1d;color:#f0c05a;padding:1px 7px;border-radius:8px;margin-left:.3rem">👤 pessoal</span>{% else %}<span style="display:inline-flex;gap:.25rem;margin-left:.3rem"><button type="button" onclick="marcarNat({{ l.id }},'pessoal',this)" style="font-size:.6rem;padding:1px 6px;background:#3a2c1d;color:#f0c05a;border:0;border-radius:7px;cursor:pointer">pessoal?</button><button type="button" onclick="marcarNat({{ l.id }},'empresa',this)" style="font-size:.6rem;padding:1px 6px;background:#1d3a2e;color:var(--verde-claro);border:0;border-radius:7px;cursor:pointer">empresa?</button></span>{% endif %}{% endif %}</td>
+<td class="nowrap">
 <span style="display:inline-flex;align-items:center;gap:.4rem">
 <select class="cat-edit" data-id="{{ l.id }}" data-orig="{{ canon(l.categoria, l.tipo) }}" onchange="catMudou(this)"
-   style="background:#0e0e0f;border:1px solid #2a3a33;border-radius:6px;color:#ececec;font-size:.78rem;padding:.2rem .45rem;max-width:130px">
-{% for c in categorias_de(l.tipo) %}<option value="{{ c }}" style="background:#161617;color:#ececec" {% if canon(l.categoria, l.tipo)==c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+   style="background:var(--bg);border:1px solid #2a3a33;border-radius:6px;color:var(--txt);font-size:.78rem;padding:.2rem .45rem;max-width:130px">
+{% for c in categorias_de(l.tipo) %}<option value="{{ c }}" style="background:var(--card);color:var(--txt)" {% if canon(l.categoria, l.tipo)==c %}selected{% endif %}>{{ c }}</option>{% endfor %}
 </select>
-<button type="button" class="cat-ok" onclick="salvarCat(this)" style="display:none;padding:.24rem .65rem;width:auto;font-size:.72rem;font-weight:600;background:#1d9e75;color:#fff;border:0;border-radius:6px;cursor:pointer;line-height:1.1">OK</button>
+<button type="button" class="cat-ok" onclick="salvarCat(this)" style="display:none;padding:.24rem .65rem;width:auto;font-size:.72rem;font-weight:600;background:var(--verde);color:#fff;border:0;border-radius:6px;cursor:pointer;line-height:1.1">OK</button>
 </span>
 </td>
 {% if pessoas|length > 1 %}<td class="mut">{{ l.quem }}</td>{% endif %}
-<td style="text-align:right; font-weight:500; color:{{ '#5dcaa5' if l.tipo=='receita' else '#f0b8b8' }}">
+<td style="text-align:right; font-weight:500; color:{{ 'var(--verde-claro)' if l.tipo=='receita' else '#f0b8b8' }}">
 {{ '+' if l.tipo=='receita' else '−' }} {{ brl(l.valor).replace('R$ ','') }}</td>
 <td style="text-align:right"><button type="button" class="lanc-rm" data-id="{{ l.id }}" onclick="apagarLanc(this)" title="apagar lançamento" style="margin:0;padding:.15rem .45rem;width:auto;background:transparent;color:#8a3636;border:0;cursor:pointer;font-size:.95rem">✕</button></td></tr>{% endfor %}
 </table>
@@ -910,8 +911,8 @@ function abrirClassificador(){
        var sinal = it.tipo==='receita' ? '+' : '−';
        var desc = it.descricao ? (' · '+it.descricao) : '';
        return '<div style="display:flex;align-items:center;gap:.5rem;padding:.5rem .7rem;border-bottom:1px solid #1e1e20">'+
-         '<span style="flex:1;color:#ececec;font-size:.78rem">'+it.data+' · '+it.categoria+desc+' <span style="color:#888780">'+sinal+' R$ '+val+'</span></span>'+
-         '<span style="display:inline-flex;background:#0e0e0f;border:1px solid #2a2a2b;border-radius:7px;padding:2px">'+
+         '<span style="flex:1;color:var(--txt);font-size:.78rem">'+it.data+' · '+it.categoria+desc+' <span style="color:#888780">'+sinal+' R$ '+val+'</span></span>'+
+         '<span style="display:inline-flex;background:var(--bg);border:1px solid var(--borda);border-radius:7px;padding:2px">'+
          '<button type="button" data-id="'+it.id+'" data-nat="pessoal" onclick="classifUm(this)" style="font-size:.68rem;padding:.25rem .7rem;border:0;border-radius:5px;background:transparent;color:#888780;cursor:pointer">pessoal</button>'+
          '<button type="button" data-id="'+it.id+'" data-nat="empresa" onclick="classifUm(this)" style="font-size:.68rem;padding:.25rem .7rem;border:0;border-radius:5px;background:transparent;color:#888780;cursor:pointer">empresa</button>'+
          '</span></div>';
@@ -934,7 +935,7 @@ function _classifPinta(){
     var id=b.getAttribute('data-id'), nat=b.getAttribute('data-nat');
     var on = _classif[id]===nat;
     if(on && nat==='pessoal'){ b.style.background='#f0c05a'; b.style.color='#1a1409'; b.style.fontWeight='600'; }
-    else if(on && nat==='empresa'){ b.style.background='#1d9e75'; b.style.color='#fff'; b.style.fontWeight='600'; }
+    else if(on && nat==='empresa'){ b.style.background='var(--verde)'; b.style.color='#fff'; b.style.fontWeight='600'; }
     else { b.style.background='transparent'; b.style.color='#888780'; b.style.fontWeight='400'; }
   });
   _classifRefresh();
@@ -970,7 +971,7 @@ function salvarCat(btn){
         // atualiza no lugar, SEM recarregar a pagina
         sel.setAttribute('data-orig', sel.value);
         var tr = sel.closest('tr'); if(tr){ tr.setAttribute('data-cat', sel.value); }
-        sel.style.borderColor = '#5dcaa5';
+        sel.style.borderColor = 'var(--verde-claro)';
         btn.textContent = '✓';
         setTimeout(function(){
           btn.style.display = 'none'; btn.disabled = false;
@@ -2630,9 +2631,9 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
 
 _PDV = """{% extends "base" %}{% block conteudo %}
 <style>
-.prod-inp{width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin:.25rem 0 .6rem}
-.pdv-pag-chip{font-size:.82rem;color:#b4b2a9;background:#161617;border:1.5px solid #2a2a2b;border-radius:16px;padding:.35rem .9rem;cursor:pointer}
-.pdv-pag-chip.pdv-pag-sel{border-color:#1d9e75;color:#5dcaa5}
+.prod-inp{width:100%;box-sizing:border-box;padding:.5rem;background:var(--bg);border:1px solid var(--borda);color:#f4f4f4;border-radius:6px;margin:.25rem 0 .6rem}
+.pdv-pag-chip{font-size:.82rem;color:#b4b2a9;background:var(--card);border:1.5px solid var(--borda);border-radius:16px;padding:.35rem .9rem;cursor:pointer}
+.pdv-pag-chip.pdv-pag-sel{border-color:var(--verde);color:var(--verde-claro)}
 </style>
 <div class="card larga" style="max-width:560px;margin:0 auto">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
@@ -2643,7 +2644,7 @@ _PDV = """{% extends "base" %}{% block conteudo %}
 
   <div style="position:relative;margin-bottom:.6rem">
     <input id="pdv-prod-busca" placeholder="\U0001F50D buscar produto pra adicionar" autocomplete="off" oninput="pdvProdBusca(this.value)" class="prod-inp" style="margin:0">
-    <div id="pdv-prod-sug" style="display:none;position:absolute;left:0;right:0;top:100%;background:#1c1c1f;border:1px solid #2a2a2b;border-top:0;border-radius:0 0 7px 7px;z-index:20;max-height:190px;overflow:auto"></div>
+    <div id="pdv-prod-sug" style="display:none;position:absolute;left:0;right:0;top:100%;background:#1c1c1f;border:1px solid var(--borda);border-top:0;border-radius:0 0 7px 7px;z-index:20;max-height:190px;overflow:auto"></div>
   </div>
 
   <div style="color:#888;font-size:.72rem;margin:.6rem 0 .3rem">Venda</div>
@@ -2651,8 +2652,8 @@ _PDV = """{% extends "base" %}{% block conteudo %}
 
   <div style="position:relative;margin-bottom:.5rem">
     <input id="pdv-cli-busca" placeholder="Cliente — CPF, telefone ou nome" autocomplete="off" oninput="pdvCliBusca(this.value)" class="prod-inp" style="margin:0">
-    <div id="pdv-cli-sug" style="display:none;position:absolute;left:0;right:0;top:100%;background:#1c1c1f;border:1px solid #2a2a2b;border-top:0;border-radius:0 0 7px 7px;z-index:20;max-height:170px;overflow:auto"></div>
-    <div id="pdv-cli-sel" style="display:none;margin-top:.4rem;font-size:.82rem;color:#5dcaa5"></div>
+    <div id="pdv-cli-sug" style="display:none;position:absolute;left:0;right:0;top:100%;background:#1c1c1f;border:1px solid var(--borda);border-top:0;border-radius:0 0 7px 7px;z-index:20;max-height:170px;overflow:auto"></div>
+    <div id="pdv-cli-sel" style="display:none;margin-top:.4rem;font-size:.82rem;color:var(--verde-claro)"></div>
     <div id="pdv-cli-novo" style="display:none;margin-top:.4rem;gap:.4rem;grid-template-columns:1fr 1fr">
       <input id="pdv-novo-nome" placeholder="Nome do novo cliente" class="prod-inp" style="margin:0">
       <input id="pdv-novo-cpf" placeholder="CPF (opcional)" class="prod-inp" style="margin:0">
@@ -2676,15 +2677,15 @@ _PDV = """{% extends "base" %}{% block conteudo %}
     <input id="pdv-venc" type="date" class="prod-inp" style="margin:.15rem 0 0;max-width:180px">
     <div style="font-size:.7rem;color:#888;margin-top:.2rem">Fiado exige cliente identificado.</div>
   </div>
-  <div id="pdv-troco" style="display:flex;justify-content:space-between;font-size:.82rem;color:#888;margin-bottom:.6rem"><span>Troco</span><span id="pdv-troco-v" style="color:#ececec">R$ 0,00</span></div>
+  <div id="pdv-troco" style="display:flex;justify-content:space-between;font-size:.82rem;color:#888;margin-bottom:.6rem"><span>Troco</span><span id="pdv-troco-v" style="color:var(--txt)">R$ 0,00</span></div>
 
   <div id="pdv-erro" style="color:#d98a8a;font-size:.82rem;margin-bottom:.5rem;display:none"></div>
-  <div style="display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid #2a2a2b;padding-top:.7rem">
-    <span style="color:#888">Total</span><span id="pdv-total" style="color:#5dcaa5;font-size:1.5rem;font-weight:700">R$ 0,00</span>
+  <div style="display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid var(--borda);padding-top:.7rem">
+    <span style="color:#888">Total</span><span id="pdv-total" style="color:var(--verde-claro);font-size:1.5rem;font-weight:700">R$ 0,00</span>
   </div>
-  <button type="button" onclick="pdvFinalizar()" id="pdv-finalizar" style="width:100%;background:#1d9e75;color:#fff;padding:.75rem;border:0;border-radius:9px;cursor:pointer;font-weight:700;margin-top:.8rem;font-size:1rem">Finalizar venda</button>
+  <button type="button" onclick="pdvFinalizar()" id="pdv-finalizar" style="width:100%;background:var(--verde);color:#fff;padding:.75rem;border:0;border-radius:9px;cursor:pointer;font-weight:700;margin-top:.8rem;font-size:1rem">Finalizar venda</button>
 
-  <div id="pdv-recibo" style="display:none;margin-top:1rem;background:#161617;border:1px solid #2a2a2b;border-radius:10px;padding:1rem"></div>
+  <div id="pdv-recibo" style="display:none;margin-top:1rem;background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:1rem"></div>
 </div>
 
 <div class="card larga" style="max-width:560px;margin:1rem auto 0">
@@ -2695,7 +2696,7 @@ _PDV = """{% extends "base" %}{% block conteudo %}
   {% if vendas %}
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.6rem">
     {% for t in totais %}
-    <div style="background:#161617;border:1px solid #2a2a2b;border-radius:8px;padding:.5rem .7rem">
+    <div style="background:var(--card);border:1px solid var(--borda);border-radius:8px;padding:.5rem .7rem">
       <div class="mut" style="font-size:.72rem;text-transform:capitalize">{{ t.metodo }} · {{ t.n }}</div>
       <div style="font-size:1rem">R$ {{ "%.2f"|format(t.total_centavos/100) }}</div>
     </div>
@@ -2707,13 +2708,13 @@ _PDV = """{% extends "base" %}{% block conteudo %}
     </div>
     {% endif %}
   </div>
-  <div style="display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid #2a2a2b;padding-top:.5rem;margin-bottom:.7rem">
-    <span class="mut">Recebido hoje</span><span style="color:#5dcaa5;font-size:1.2rem;font-weight:700">R$ {{ "%.2f"|format(recebido_centavos/100) }}</span>
+  <div style="display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid var(--borda);padding-top:.5rem;margin-bottom:.7rem">
+    <span class="mut">Recebido hoje</span><span style="color:var(--verde-claro);font-size:1.2rem;font-weight:700">R$ {{ "%.2f"|format(recebido_centavos/100) }}</span>
   </div>
   <div class="mut" style="font-size:.72rem;margin-bottom:.3rem">Últimas vendas</div>
   {% for v in vendas %}
   <a href="{% if v.tipo=='paga' %}/painel/pdv/venda/{{ v.id }}{% else %}/painel/clientes/{{ v.cliente_id }}{% endif %}" style="display:flex;justify-content:space-between;align-items:center;padding:.5rem 0;border-bottom:1px solid #242426;text-decoration:none">
-    <div><div style="color:#ececec;font-size:.85rem">{{ v.cliente or 'sem cliente' }}</div><div class="mut" style="font-size:.72rem">{{ v.hora.strftime('%H:%M') if v.hora else '' }} · {{ v.pagamento }}{% if v.tipo=='fiado' %} · ver ficha{% endif %}</div></div>
+    <div><div style="color:var(--txt);font-size:.85rem">{{ v.cliente or 'sem cliente' }}</div><div class="mut" style="font-size:.72rem">{{ v.hora.strftime('%H:%M') if v.hora else '' }} · {{ v.pagamento }}{% if v.tipo=='fiado' %} · ver ficha{% endif %}</div></div>
     <div style="{% if v.tipo=='fiado' %}color:#e0b878{% else %}color:#cfcfcf{% endif %};font-size:.9rem">R$ {{ "%.2f"|format(v.valor_centavos/100) }}</div>
   </a>
   {% endfor %}
@@ -2726,19 +2727,19 @@ window.PDV_PROD = {{ produtos_json|tojson }};
 window.PDV_ADD = {{ add }};
 var PDV_CART=[], PDV_CLI=null, PDV_CLI_RES=[], PDV_CLI_T=null, PDV_PAG='dinheiro';
 function pdvFmt(n){ return 'R$ '+(Math.round(n*100)/100).toFixed(2).replace('.',','); }
-function pdvProdBusca(q){ q=(q||'').trim().toLowerCase(); var sug=document.getElementById('pdv-prod-sug'); if(q.length<1){ sug.style.display='none'; return; } var res=window.PDV_PROD.filter(function(p){return (p.nome||'').toLowerCase().indexOf(q)>=0;}).slice(0,12); var h=''; res.forEach(function(p){ h+='<div onclick="pdvAdd('+p.id+')" style="padding:.45rem .6rem;border-bottom:1px solid #242426;cursor:pointer;font-size:.82rem;color:#ececec;display:flex;justify-content:space-between"><span>'+p.nome+'</span><span style="color:#6a8a7a;font-size:.72rem">'+pdvFmt(p.preco)+'/'+p.unidade+' · '+p.saldo+'</span></div>'; }); if(!res.length) h='<div style="padding:.5rem .6rem;color:#888;font-size:.8rem">nada encontrado</div>'; sug.innerHTML=h; sug.style.display='block'; }
+function pdvProdBusca(q){ q=(q||'').trim().toLowerCase(); var sug=document.getElementById('pdv-prod-sug'); if(q.length<1){ sug.style.display='none'; return; } var res=window.PDV_PROD.filter(function(p){return (p.nome||'').toLowerCase().indexOf(q)>=0;}).slice(0,12); var h=''; res.forEach(function(p){ h+='<div onclick="pdvAdd('+p.id+')" style="padding:.45rem .6rem;border-bottom:1px solid #242426;cursor:pointer;font-size:.82rem;color:var(--txt);display:flex;justify-content:space-between"><span>'+p.nome+'</span><span style="color:#6a8a7a;font-size:.72rem">'+pdvFmt(p.preco)+'/'+p.unidade+' · '+p.saldo+'</span></div>'; }); if(!res.length) h='<div style="padding:.5rem .6rem;color:#888;font-size:.8rem">nada encontrado</div>'; sug.innerHTML=h; sug.style.display='block'; }
 function pdvAdd(id){ var p=window.PDV_PROD.find(function(x){return x.id==id;}); if(!p) return; var e=PDV_CART.find(function(x){return x.id==id;}); if(e){ e.qtd++; } else { PDV_CART.push({id:p.id,nome:p.nome,unidade:p.unidade,preco:(typeof p.preco==='number'?p.preco:0),qtd:1}); } document.getElementById('pdv-prod-sug').style.display='none'; document.getElementById('pdv-prod-busca').value=''; document.getElementById('pdv-erro').style.display='none'; pdvRender(); }
 function pdvQtd(id,d){ var e=PDV_CART.find(function(x){return x.id==id;}); if(!e) return; e.qtd=Math.round((e.qtd+d)*1000)/1000; if(e.qtd<=0){ PDV_CART=PDV_CART.filter(function(x){return x.id!=id;}); } pdvRender(); }
 function pdvPreco(id,v){ var e=PDV_CART.find(function(x){return x.id==id;}); if(e){ e.preco=parseFloat(String(v).replace(',','.'))||0; } pdvRender(); }
-function pdvRender(){ var box=document.getElementById('pdv-itens'); var sub=0,h=''; if(!PDV_CART.length){ box.innerHTML='<div style="color:#888;text-align:center;padding:.8rem;font-size:.85rem">Carrinho vazio — busque um produto acima.</div>'; } else { PDV_CART.forEach(function(it){ var lt=it.preco*it.qtd; sub+=lt; h+='<div style="display:flex;align-items:center;gap:.5rem;padding:.4rem 0;border-bottom:1px solid #242426">'+'<div style="flex:1;min-width:0"><div style="color:#ececec;font-size:.85rem">'+it.nome+'</div><input type="number" step="0.01" value="'+it.preco.toFixed(2)+'" onchange="pdvPreco('+it.id+',this.value)" style="width:78px;background:#0e0e0f;border:1px solid #2a2a2b;color:#cfcfcf;border-radius:5px;padding:.2rem .3rem;font-size:.72rem;margin-top:.2rem"> <span style="color:#6a8a7a;font-size:.68rem">/'+it.unidade+'</span></div>'+'<div style="display:flex;align-items:center;gap:.3rem"><span onclick="pdvQtd('+it.id+',-1)" style="width:22px;height:22px;border-radius:5px;background:#1c1c1f;border:1px solid #3a3a3d;color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">-</span><span style="color:#ececec;font-size:.8rem;min-width:44px;text-align:center">'+it.qtd+' '+it.unidade+'</span><span onclick="pdvQtd('+it.id+',1)" style="width:22px;height:22px;border-radius:5px;background:#1c1c1f;border:1px solid #3a3a3d;color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">+</span></div>'+'<div style="color:#cfcfcf;font-size:.8rem;min-width:64px;text-align:right">'+pdvFmt(lt)+'</div>'+'</div>'; }); box.innerHTML=h; } var desc=parseFloat(String(document.getElementById('pdv-desc').value).replace(',','.'))||0; var tot=sub-desc; if(tot<0)tot=0; document.getElementById('pdv-total').textContent=pdvFmt(tot); var rec=parseFloat(String(document.getElementById('pdv-recebido').value).replace(',','.'))||0; var troco=rec-tot; document.getElementById('pdv-troco-v').textContent=pdvFmt(troco>0?troco:0); }
+function pdvRender(){ var box=document.getElementById('pdv-itens'); var sub=0,h=''; if(!PDV_CART.length){ box.innerHTML='<div style="color:#888;text-align:center;padding:.8rem;font-size:.85rem">Carrinho vazio — busque um produto acima.</div>'; } else { PDV_CART.forEach(function(it){ var lt=it.preco*it.qtd; sub+=lt; h+='<div style="display:flex;align-items:center;gap:.5rem;padding:.4rem 0;border-bottom:1px solid #242426">'+'<div style="flex:1;min-width:0"><div style="color:var(--txt);font-size:.85rem">'+it.nome+'</div><input type="number" step="0.01" value="'+it.preco.toFixed(2)+'" onchange="pdvPreco('+it.id+',this.value)" style="width:78px;background:var(--bg);border:1px solid var(--borda);color:#cfcfcf;border-radius:5px;padding:.2rem .3rem;font-size:.72rem;margin-top:.2rem"> <span style="color:#6a8a7a;font-size:.68rem">/'+it.unidade+'</span></div>'+'<div style="display:flex;align-items:center;gap:.3rem"><span onclick="pdvQtd('+it.id+',-1)" style="width:22px;height:22px;border-radius:5px;background:#1c1c1f;border:1px solid #3a3a3d;color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">-</span><span style="color:var(--txt);font-size:.8rem;min-width:44px;text-align:center">'+it.qtd+' '+it.unidade+'</span><span onclick="pdvQtd('+it.id+',1)" style="width:22px;height:22px;border-radius:5px;background:#1c1c1f;border:1px solid #3a3a3d;color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">+</span></div>'+'<div style="color:#cfcfcf;font-size:.8rem;min-width:64px;text-align:right">'+pdvFmt(lt)+'</div>'+'</div>'; }); box.innerHTML=h; } var desc=parseFloat(String(document.getElementById('pdv-desc').value).replace(',','.'))||0; var tot=sub-desc; if(tot<0)tot=0; document.getElementById('pdv-total').textContent=pdvFmt(tot); var rec=parseFloat(String(document.getElementById('pdv-recebido').value).replace(',','.'))||0; var troco=rec-tot; document.getElementById('pdv-troco-v').textContent=pdvFmt(troco>0?troco:0); }
 function pdvPag(el){ document.querySelectorAll('#pdv-pag .pdv-pag-chip').forEach(function(x){x.classList.remove('pdv-pag-sel');}); el.classList.add('pdv-pag-sel'); PDV_PAG=el.getAttribute('data-pag'); var fiado=PDV_PAG==='fiado'; var din=PDV_PAG==='dinheiro'; document.getElementById('pdv-fiado-box').style.display=fiado?'block':'none'; document.getElementById('pdv-din').style.display=fiado?'none':'flex'; document.getElementById('pdv-troco').style.display=din?'flex':'none'; }
-function pdvCliBusca(q){ q=(q||'').trim(); PDV_CLI=null; document.getElementById('pdv-cli-sel').style.display='none'; if(PDV_CLI_T) clearTimeout(PDV_CLI_T); var sug=document.getElementById('pdv-cli-sug'); if(q.length<2){ sug.style.display='none'; return; } PDV_CLI_T=setTimeout(function(){ fetch('/painel/clientes/buscar?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(d){ PDV_CLI_RES=d.clientes||[]; var h=''; PDV_CLI_RES.forEach(function(c,i){ h+='<div onclick="pdvCliPick('+i+')" style="padding:.45rem .6rem;border-bottom:1px solid #242426;cursor:pointer;font-size:.82rem;color:#ececec">'+c.nome+'<span style="color:#6a8a7a;font-size:.72rem">'+(c.telefone?(' · '+c.telefone):'')+(c.cpf?(' · CPF '+c.cpf):'')+'</span></div>'; }); h+='<div onclick="pdvCliNovo()" style="padding:.45rem .6rem;cursor:pointer;font-size:.82rem;color:#5dcaa5">+ cadastrar novo cliente</div>'; sug.innerHTML=h; sug.style.display='block'; }).catch(function(){}); }, 250); }
+function pdvCliBusca(q){ q=(q||'').trim(); PDV_CLI=null; document.getElementById('pdv-cli-sel').style.display='none'; if(PDV_CLI_T) clearTimeout(PDV_CLI_T); var sug=document.getElementById('pdv-cli-sug'); if(q.length<2){ sug.style.display='none'; return; } PDV_CLI_T=setTimeout(function(){ fetch('/painel/clientes/buscar?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(d){ PDV_CLI_RES=d.clientes||[]; var h=''; PDV_CLI_RES.forEach(function(c,i){ h+='<div onclick="pdvCliPick('+i+')" style="padding:.45rem .6rem;border-bottom:1px solid #242426;cursor:pointer;font-size:.82rem;color:var(--txt)">'+c.nome+'<span style="color:#6a8a7a;font-size:.72rem">'+(c.telefone?(' · '+c.telefone):'')+(c.cpf?(' · CPF '+c.cpf):'')+'</span></div>'; }); h+='<div onclick="pdvCliNovo()" style="padding:.45rem .6rem;cursor:pointer;font-size:.82rem;color:var(--verde-claro)">+ cadastrar novo cliente</div>'; sug.innerHTML=h; sug.style.display='block'; }).catch(function(){}); }, 250); }
 function pdvCliPick(i){ var c=PDV_CLI_RES[i]; if(!c) return; PDV_CLI={id:c.id,nome:c.nome,telefone:c.telefone,cpf:c.cpf}; document.getElementById('pdv-cli-busca').value=c.nome; document.getElementById('pdv-cli-sug').style.display='none'; document.getElementById('pdv-cli-novo').style.display='none'; var sel=document.getElementById('pdv-cli-sel'); sel.innerHTML='✓ '+c.nome+' <a onclick="pdvCliLimpar()" style="color:#d98a8a;cursor:pointer;margin-left:.4rem">(trocar)</a>'; sel.style.display='block'; }
 function pdvCliNovo(){ document.getElementById('pdv-cli-sug').style.display='none'; var q=document.getElementById('pdv-cli-busca').value||''; document.getElementById('pdv-cli-novo').style.display='grid'; var digs=q.replace(/[^0-9]/g,''); if(digs.length>=11){ document.getElementById('pdv-novo-cpf').value=q; document.getElementById('pdv-novo-nome').value=''; } else { document.getElementById('pdv-novo-nome').value=q; } PDV_CLI=null; }
 function pdvCliLimpar(){ PDV_CLI=null; document.getElementById('pdv-cli-sel').style.display='none'; document.getElementById('pdv-cli-busca').value=''; document.getElementById('pdv-cli-novo').style.display='none'; document.getElementById('pdv-novo-nome').value=''; document.getElementById('pdv-novo-cpf').value=''; }
 function pdvClienteInfo(){ if(PDV_CLI&&PDV_CLI.id) return {cliente_id:PDV_CLI.id, cliente_nome:PDV_CLI.nome}; var nn=(document.getElementById('pdv-novo-nome').value||'').trim(); var nc=(document.getElementById('pdv-novo-cpf').value||'').trim(); var o={}; if(nn) o.cliente_nome=nn; if(nc) o.cliente_cpf=nc; return o; }
 function pdvFinalizar(){ if(!PDV_CART.length){ return; } var e=document.getElementById('pdv-erro'); var ci=pdvClienteInfo(); if(PDV_PAG==='fiado' && !ci.cliente_id && !ci.cliente_nome){ e.textContent='Fiado exige um cliente identificado.'; e.style.display='block'; return; } var btn=document.getElementById('pdv-finalizar'); btn.disabled=true; btn.textContent='Registrando...'; var desc=parseFloat(String(document.getElementById('pdv-desc').value).replace(',','.'))||0; var payload={ itens:PDV_CART.map(function(it){ return {produto_id:it.id, quantidade:it.qtd, preco_unit_centavos:Math.round(it.preco*100)}; }), pagamento:PDV_PAG, desconto_centavos:Math.round(desc*100) }; for(var k in ci){ payload[k]=ci[k]; } if(PDV_PAG==='fiado'){ payload.vencimento=document.getElementById('pdv-venc').value||''; } fetch('/painel/produtos/vender',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(d){ if(d.ok){ pdvRecibo(d,ci); } else { e.textContent=d.erro||'erro'; e.style.display='block'; btn.disabled=false; btn.textContent='Finalizar venda'; } }).catch(function(){ e.textContent='erro de conexão'; e.style.display='block'; btn.disabled=false; btn.textContent='Finalizar venda'; }); }
-function pdvRecibo(d,ci){ var linhas=PDV_CART.map(function(it){ return '<div style="display:flex;justify-content:space-between;font-size:.8rem;color:#cfcfcf"><span>'+it.qtd+' '+it.unidade+' '+it.nome+'</span><span>'+pdvFmt(it.preco*it.qtd)+'</span></div>'; }).join(''); var extra=''; if(d.fiado){ extra='<div style="color:#e0b878;font-size:.82rem;margin-top:.3rem">Fiado · vence '+(d.vencimento||'')+'</div>'; } var box=document.getElementById('pdv-recibo'); box.innerHTML='<div style="text-align:center;color:#5dcaa5;font-weight:700;margin-bottom:.5rem">✓ Venda registrada</div>'+linhas+'<div style="display:flex;justify-content:space-between;border-top:1px solid #2a2a2b;margin-top:.5rem;padding-top:.5rem;color:#ececec;font-weight:600"><span>Total</span><span>'+pdvFmt((d.total_centavos||0)/100)+'</span></div>'+(ci.cliente_nome?('<div style="color:#888;font-size:.78rem;margin-top:.3rem">Cliente: '+ci.cliente_nome+'</div>'):'')+extra+'<div style="display:flex;gap:.5rem;margin-top:.8rem"><button type="button" onclick="window.print()" style="flex:1;background:transparent;border:1px solid #3a3a3d;color:#b4b2a9;border-radius:7px;padding:.5rem;cursor:pointer">Imprimir</button><button type="button" onclick="location.href=\\'/painel/pdv\\'" style="flex:1;background:#1d9e75;color:#fff;border:0;border-radius:7px;padding:.5rem;cursor:pointer;font-weight:600">Nova venda</button></div>'; box.style.display='block'; box.scrollIntoView({behavior:'smooth'}); }
+function pdvRecibo(d,ci){ var linhas=PDV_CART.map(function(it){ return '<div style="display:flex;justify-content:space-between;font-size:.8rem;color:#cfcfcf"><span>'+it.qtd+' '+it.unidade+' '+it.nome+'</span><span>'+pdvFmt(it.preco*it.qtd)+'</span></div>'; }).join(''); var extra=''; if(d.fiado){ extra='<div style="color:#e0b878;font-size:.82rem;margin-top:.3rem">Fiado · vence '+(d.vencimento||'')+'</div>'; } var box=document.getElementById('pdv-recibo'); box.innerHTML='<div style="text-align:center;color:var(--verde-claro);font-weight:700;margin-bottom:.5rem">✓ Venda registrada</div>'+linhas+'<div style="display:flex;justify-content:space-between;border-top:1px solid var(--borda);margin-top:.5rem;padding-top:.5rem;color:var(--txt);font-weight:600"><span>Total</span><span>'+pdvFmt((d.total_centavos||0)/100)+'</span></div>'+(ci.cliente_nome?('<div style="color:#888;font-size:.78rem;margin-top:.3rem">Cliente: '+ci.cliente_nome+'</div>'):'')+extra+'<div style="display:flex;gap:.5rem;margin-top:.8rem"><button type="button" onclick="window.print()" style="flex:1;background:transparent;border:1px solid #3a3a3d;color:#b4b2a9;border-radius:7px;padding:.5rem;cursor:pointer">Imprimir</button><button type="button" onclick="location.href=\\'/painel/pdv\\'" style="flex:1;background:var(--verde);color:#fff;border:0;border-radius:7px;padding:.5rem;cursor:pointer;font-weight:600">Nova venda</button></div>'; box.style.display='block'; box.scrollIntoView({behavior:'smooth'}); }
 document.addEventListener('DOMContentLoaded', function(){ pdvRender(); if(window.PDV_ADD){ pdvAdd(window.PDV_ADD); } });
 </script>
 {% endblock %}"""

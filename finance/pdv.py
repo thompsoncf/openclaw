@@ -22,12 +22,26 @@ correcao manual. Para o balcao (poucos itens por venda) isso e' aceitavel no v1.
 
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from .livro_caixa import LivroCaixa
 from .models import Lancamento, Tipo
 from . import catalogo as _cat
 from . import clientes as _cli
+from . import empresa as _emp
+
+
+def _parse_venc(s):
+    """Aceita 'AAAA-MM-DD' ou date; devolve date ou None."""
+    if not s:
+        return None
+    if isinstance(s, date):
+        return s
+    try:
+        return datetime.strptime(str(s).strip(), "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
 
 
 def _saldo_produto(pool, dono_id: int, produto_id: int):
@@ -54,6 +68,7 @@ def registrar_venda_balcao(
     cliente_telefone: str | None = None,
     cliente_cpf: str | None = None,
     pagamento: str = "dinheiro",
+    vencimento: str | None = None,
     desconto_centavos: int = 0,
     permitir_estoque_negativo: bool = False,
     membro_id: int | None = None,
@@ -137,6 +152,35 @@ def registrar_venda_balcao(
             pool, dono_id, ln["produto_id"], "saida", ln["quantidade"],
             motivo="venda balcao",
         )
+
+    # ---- 3.5) FIADO: nao gera receita agora; cria um titulo A RECEBER do cliente ----
+    if (pagamento or "").strip().lower() == "fiado":
+        if not cliente_id:
+            raise ValueError("fiado exige um cliente identificado")
+        venc = _parse_venc(vencimento) or (date.today() + timedelta(days=30))
+        desc_f = "Venda de balcao (fiado)"
+        if nome_lbl:
+            desc_f += f" - {nome_lbl}"
+        t = _emp.criar_titulo(
+            pool, dono_id, "receber", desc_f, total, venc,
+            contraparte=nome_lbl, criado_por=membro_id,
+        )
+        with pool.connection() as _c:
+            _c.execute(
+                "update titulos set cliente_id=%s where id=%s and conta_id=%s",
+                (cliente_id, t["id"], dono_id),
+            )
+            _c.commit()
+        return {
+            "fiado": True,
+            "titulo_id": t["id"],
+            "subtotal_centavos": subtotal,
+            "desconto_centavos": desconto,
+            "total_centavos": total,
+            "vencimento": str(venc),
+            "cliente_id": cliente_id,
+            "itens": len(linhas),
+        }
 
     # ---- 4) receita no livro-caixa (canal 'balcao') ----
     desc = "Venda de balcao"

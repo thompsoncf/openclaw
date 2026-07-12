@@ -380,10 +380,10 @@ _CADASTRO = """{% extends "base" %}{% block conteudo %}
 <div class="mut" style="font-size:.8rem;margin-bottom:.6rem">Tudo grátis durante o beta — experimente sem compromisso.</div>
 <div style="display:grid;gap:.5rem;margin-bottom:1rem">
 {% for p in planos %}{% if p[0] != 'zaq_cesta' %}
-<label style="display:block;background:{% if p[2]=='pj' %}#14251c{% else %}#161617{% endif %};border:{% if p[2]=='pj' %}2px solid #1d9e75{% else %}1px solid #232325{% endif %};border-radius:10px;padding:.7rem .9rem;cursor:pointer">
+<label style="display:block;background:{% if p[2]=='pj' %}#14251c{% else %}var(--card){% endif %};border:{% if p[2]=='pj' %}2px solid var(--verde){% else %}1px solid #232325{% endif %};border-radius:10px;padding:.7rem .9rem;cursor:pointer">
   <div style="display:flex;justify-content:space-between;align-items:center">
     <span style="color:#f4f4f4;font-weight:600;font-size:.95rem"><input type="radio" name="plano" value="{{ p[0] }}" {% if p[2]=='pj' %}checked{% endif %} style="width:auto;margin-right:.5rem">{% if p[2]=='pj' %}🏢 {% endif %}{{ p[1] }}</span>
-    <span style="background:#15301f;color:#5dcaa5;font-size:.62rem;padding:.1rem .5rem;border-radius:9px">{% if beta_gratis %}Grátis (beta){% else %}{{ brl(p[3]) }}/mês{% endif %}</span>
+    <span style="background:#15301f;color:var(--verde-claro);font-size:.62rem;padding:.1rem .5rem;border-radius:9px">{% if beta_gratis %}Grátis (beta){% else %}{{ brl(p[3]) }}/mês{% endif %}</span>
   </div>
   <div class="mut" style="font-size:.74rem;margin-top:.35rem;margin-left:1.4rem">
     {% if p[2]=='pj' %}Contas a pagar/receber, funcionários e folha, DRE e relatório pro contador. Inclui {{ p[4] }} membros.{% elif p[4]>1 %}As contas da casa, até {{ p[4] }} pessoas no mesmo caixa.{% else %}Suas contas pessoais — cupom por foto, gastos no WhatsApp.{% endif %}
@@ -392,11 +392,11 @@ _CADASTRO = """{% extends "base" %}{% block conteudo %}
 {% endif %}{% endfor %}
 </div>
 
-<div style="background:#161617;border:1px dashed #3a3a3d;border-radius:10px;padding:.7rem .9rem;margin-bottom:1rem">
+<div style="background:var(--card);border:1px dashed #3a3a3d;border-radius:10px;padding:.7rem .9rem;margin-bottom:1rem">
   <div style="color:#b4b2a9;font-size:.82rem;font-weight:600;margin-bottom:.4rem">Quer vender também? (nossa equipe ativa e te ajuda)</div>
   <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
     <input type="checkbox" name="interesse" value="fornecedor" style="width:auto">
-    <span style="color:#ececec;font-size:.82rem">👨‍🌾 Tenho interesse no <b>módulo Fornecedor</b> (loja / marketplace)</span>
+    <span style="color:var(--txt);font-size:.82rem">👨‍🌾 Tenho interesse no <b>módulo Fornecedor</b> (loja / marketplace)</span>
   </label>
   <div class="mut" style="font-size:.7rem;margin-top:.2rem;margin-left:1.6rem">Ao marcar, avisamos seu interesse pra equipe. Você não é cobrado por isso.</div>
 </div>
@@ -420,7 +420,7 @@ _LOGIN = """{% extends "base" %}{% block conteudo %}
 <label>Senha</label><input name="senha" type="password" required>
 <button>Entrar</button></form>
 <p style="text-align:center;margin-top:.8rem">
-  <a href="/esqueci-senha" style="color:#5dcaa5;font-size:.88rem;text-decoration:none">Esqueci minha senha</a>
+  <a href="/esqueci-senha" style="color:var(--verde-claro);font-size:.88rem;text-decoration:none">Esqueci minha senha</a>
 </p>
 </div>{% endblock %}"""
 
@@ -457,7 +457,7 @@ _BEMVINDO = """{% extends "base" %}{% block conteudo %}
 _PAINEL = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
   <h1 style="margin:0">Olá, {{ conta[2] }}! <span class="tag">{{ conta[5] }}</span></h1>
-  <p class="mut" style="margin-top:.6rem">Plano: <b>{{ conta[4] or '-' }}</b>{% if conta[6] %} · válido até <b>{{ conta[6].strftime('%d/%m/%Y') }}</b>{% endif %} · tipo: <b>{{ conta[1]|upper }}</b> <a href="/painel/ativar-app" id="trocar-plano" style="color:#5dcaa5;text-decoration:none;margin-left:.3rem">trocar plano &gt;</a></p>
+  <p class="mut" style="margin-top:.6rem">Plano: <b>{{ conta[4] or '-' }}</b>{% if conta[6] %} · válido até <b>{{ conta[6].strftime('%d/%m/%Y') }}</b>{% endif %} · tipo: <b>{{ conta[1]|upper }}</b> <a href="/painel/ativar-app" id="trocar-plano" style="color:var(--verde-claro);text-decoration:none;margin-left:.3rem">trocar plano &gt;</a></p>
   {% if conta[5] == 'trial' %}<form method="post" action="/assinar" style="margin:0"><button style="width:auto;margin:.6rem 0 0;padding:.55rem 1.1rem">💳 Assinar plano</button></form>{% endif %}
 </div>
 
@@ -466,7 +466,7 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center">
     <h1 style="font-size:1.05rem;margin:0">Pessoas da conta</h1>
-    <button type="button" onclick="addPessoaToggle()" id="add-btn" style="width:auto;margin:0;background:#1d9e75;color:#fff;border:0;border-radius:999px;padding:.4rem 1rem;font-size:.82rem;cursor:pointer">＋ Adicionar</button>
+    <button type="button" onclick="addPessoaToggle()" id="add-btn" style="width:auto;margin:0;background:var(--verde);color:#fff;border:0;border-radius:999px;padding:.4rem 1rem;font-size:.82rem;cursor:pointer">＋ Adicionar</button>
   </div>
   {% if erro %}<div class="erro" style="margin-top:.8rem">{{ erro }}</div>{% endif %}
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
@@ -567,7 +567,7 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
   <!-- lista dos tamanhos -->
   {% if tamanhos %}
   {% for t in tamanhos %}
-  <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1rem;margin-bottom:.6rem">
+  <div style="background:#1c1c1f;border:1px solid var(--borda);border-radius:8px;padding:1rem;margin-bottom:.6rem">
     <strong>{{ t.nome }}</strong> · <strong>R$ {{ (t.preco_centavos/100)|n2 }}</strong>
     <div class="mut" style="font-size:.85rem;margin-top:.3rem">
       {{ t.qtd_frutas }} frutas · {{ t.qtd_legumes }} legumes · {{ t.qtd_verduras }} verduras · {{ t.qtd_temperos }} temperos ({{ t.total_porcoes }} porções)
@@ -580,7 +580,7 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
   {% endif %}
 
   <!-- form criar tamanho -->
-  <div style="background:#2a2a2b;border-radius:6px;padding:1rem;margin-top:1rem">
+  <div style="background:var(--borda);border-radius:6px;padding:1rem;margin-top:1rem">
     <h4 style="margin-top:0">Novo tamanho</h4>
     <form method="post" action="/painel/fornecedor/cestas/criar">
       <label>Nome</label>
@@ -597,7 +597,7 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
       <input name="qtd_temperos" type="number" value="0" style="width:100%">
       <label>Descrição (opcional)</label>
       <input name="descricao" placeholder="ideal pra 2 pessoas por semana" style="width:100%">
-      <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.8rem;width:100%;font-weight:500">Criar tamanho</button>
+      <button style="background:var(--verde);color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.8rem;width:100%;font-weight:500">Criar tamanho</button>
     </form>
   </div>
 </div>
@@ -617,19 +617,19 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
 <style>
 .forn-cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:.7rem; margin-top:1rem}
 .forn-card{display:flex; flex-direction:row; align-items:flex-start; gap:.75rem; text-align:left;
-  background:#1c1c1f; border:1px solid #2a2a2b; border-radius:12px; padding:1rem; cursor:pointer; transition:border-color .15s; color:inherit; font:inherit}
-.forn-card:hover{border-color:#1d9e75}
+  background:#1c1c1f; border:1px solid var(--borda); border-radius:12px; padding:1rem; cursor:pointer; transition:border-color .15s; color:inherit; font:inherit}
+.forn-card:hover{border-color:var(--verde)}
 .fc-ic{font-size:24px; margin-bottom:.4rem; line-height:1}
 .fc-tit{font-size:.95rem; font-weight:500; color:#f0f0ee; margin-bottom:.2rem}
-.fc-leg{font-size:.8rem; color:#a8a8a3; line-height:1.4}
+.fc-leg{font-size:.8rem; color:var(--txt-mut); line-height:1.4}
 .fc-txt{display:flex; flex-direction:column}
-.fc-tile{width:42px; height:42px; border-radius:11px; background:#13251d; color:#5dcaa5; display:flex; align-items:center; justify-content:center; font-size:20px; flex:none}
+.fc-tile{width:42px; height:42px; border-radius:11px; background:#13251d; color:var(--verde-claro); display:flex; align-items:center; justify-content:center; font-size:20px; flex:none}
 .fc-tile.amber{background:#2a2417; color:#e0b877}
 .fc-tile.blue{background:#16202e; color:#7ab0e8}
 .forn-grupo{grid-column:1/-1; font-size:11px; color:#6f6f6a; text-transform:uppercase; letter-spacing:.05em; margin:.7rem 0 -.05rem}
 .forn-grupo:first-child{margin-top:.2rem}
 .forn-secao{margin-top:1rem}
-.forn-voltar{background:transparent; border:none; color:#5dcaa5; cursor:pointer; font-size:.9rem; padding:0 0 .8rem 0; text-decoration:none}
+.forn-voltar{background:transparent; border:none; color:var(--verde-claro); cursor:pointer; font-size:.9rem; padding:0 0 .8rem 0; text-decoration:none}
 .forn-voltar:hover{color:#7ad4b4}
 </style>
 
@@ -658,7 +658,7 @@ _SENHA = """{% extends "base" %}{% block conteudo %}
 <label>Senha atual</label><input name="atual" type="password" required>
 <label>Nova senha</label><input name="nova" type="password" required minlength="8" maxlength="72">
 <button>Salvar nova senha</button></form>
-<p class="mut" style="margin-top:1rem"><a href="/painel" style="color:#5dcaa5">Voltar ao painel</a></p>
+<p class="mut" style="margin-top:1rem"><a href="/painel" style="color:var(--verde-claro)">Voltar ao painel</a></p>
 </div>{% endblock %}"""
 
 _DASH = """{% extends "base" %}{% block conteudo %}
@@ -1017,7 +1017,7 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 <button id="btn-avisar" onclick="avisarTerminei()" style="margin:0;padding:.4rem .8rem;background:#2AABEE;color:#fff;font-size:.82rem;width:auto;border-radius:8px;border:0;cursor:pointer">✅ Avisar que terminei</button>
 <span id="aviso-msg" class="mut" style="font-size:.85rem;margin-left:.5rem"></span>
 {% endif %}
-<button id="btn-apagar" style="margin:0;padding:.4rem .8rem;background:#2a2a2b;font-size:.82rem;width:auto;display:none;color:#d98a8a">Apagar lista</button>
+<button id="btn-apagar" style="margin:0;padding:.4rem .8rem;background:var(--borda);font-size:.82rem;width:auto;display:none;color:#d98a8a">Apagar lista</button>
 </div>
 </div>
 
@@ -1037,9 +1037,9 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 
 <div id="toggle-visao" style="display:none; gap:.5rem; margin:.5rem 0">
   <button id="bt-geral" onclick="setVisao('geral')"
-    style="margin:0;padding:.4rem .9rem;border-radius:8px;border:0;cursor:pointer;background:#1d9e75;color:#fff">Geral</button>
+    style="margin:0;padding:.4rem .9rem;border-radius:8px;border:0;cursor:pointer;background:var(--verde);color:#fff">Geral</button>
   <button id="bt-pessoa" onclick="setVisao('pessoa')"
-    style="margin:0;padding:.4rem .9rem;border-radius:8px;border:1px solid #2a2a2b;cursor:pointer;background:#1a2233;color:#e7ecf3">Por pessoa</button>
+    style="margin:0;padding:.4rem .9rem;border-radius:8px;border:1px solid var(--borda);cursor:pointer;background:#1a2233;color:#e7ecf3">Por pessoa</button>
 </div>
 
 <div id="lista-itens"></div>
@@ -1101,9 +1101,9 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
 
   function setVisao(v){
     _visao = v;
-    document.getElementById('bt-geral').style.background = v==='geral' ? '#1d9e75' : '#1a2233';
+    document.getElementById('bt-geral').style.background = v==='geral' ? 'var(--verde)' : '#1a2233';
     document.getElementById('bt-geral').style.color = '#fff';
-    document.getElementById('bt-pessoa').style.background = v==='pessoa' ? '#1d9e75' : '#1a2233';
+    document.getElementById('bt-pessoa').style.background = v==='pessoa' ? 'var(--verde)' : '#1a2233';
     document.getElementById('bt-pessoa').style.color = '#fff';
     renderItens(_itensCache);
   }
@@ -1180,11 +1180,11 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
 
   function linhaItemComprado(i){
     return '<div style="display:flex;align-items:center;gap:.6rem;padding:.45rem .6rem;opacity:.7">'
-         + '<span style="color:#1d9e75;flex-shrink:0">✓</span>'
+         + '<span style="color:var(--verde);flex-shrink:0">✓</span>'
          + '<span style="color:#7a8a82;text-decoration:line-through;font-size:14px;flex:1">'+esc(i.descricao)+'</span>'
          + '<button onclick="desmarcarItem('+i.id+')" title="voltar pra lista" '
          + 'style="flex-shrink:0;width:32px;height:32px;display:flex;align-items:center;justify-content:center;'
-         + 'background:transparent;border:0;color:#5dcaa5;cursor:pointer;font-size:1rem;border-radius:8px">↩</button>'
+         + 'background:transparent;border:0;color:var(--verde-claro);cursor:pointer;font-size:1rem;border-radius:8px">↩</button>'
          + '</div>';
   }
 
@@ -1287,7 +1287,7 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
     var n = pendentesAtuais.length || 1, i = 0;
     compEl.innerHTML = '<div style="margin:.4rem 0"><div class="mut" style="font-size:.82rem" id="prog-txt">Buscando os melhores preços perto de você...</div>'
       + '<div style="height:6px;background:#1d1d1f;border-radius:4px;margin-top:.4rem;overflow:hidden">'
-      + '<div id="prog-bar" style="height:100%;width:8%;background:#5dcaa5;transition:width .4s"></div></div></div>';
+      + '<div id="prog-bar" style="height:100%;width:8%;background:var(--verde-claro);transition:width .4s"></div></div></div>';
     var bar = document.getElementById('prog-bar'), txt = document.getElementById('prog-txt');
     if (prog) clearInterval(prog);
     prog = setInterval(function(){
@@ -1316,7 +1316,7 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
         } else {
           nomes.forEach(function(grupo){
             var linhas = grupos[grupo];
-            html += '<div style="background:#0e0e0f;border:1px solid #2a2a2b;border-radius:10px;padding:1rem;margin:1rem 0">';
+            html += '<div style="background:var(--bg);border:1px solid var(--borda);border-radius:10px;padding:1rem;margin:1rem 0">';
             html += '<div style="font-weight:600;margin-bottom:.6rem">'+grupo+' — onde sua cesta sai mais barata</div>';
             linhas.forEach(function(m, i){
               var falta = m.faltando ? (' · faltam '+m.faltando) : ' · completa';
@@ -1326,14 +1326,14 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
               html += '<div style="padding:.45rem 0;'+(i<linhas.length-1?'border-bottom:1px solid #1d1d1f':'')+'">';
               html += '<div style="display:flex;justify-content:space-between">';
               html += '<div>'+(i+1)+'. <b>'+esc(m.mercado)+'</b> <span class="mut" style="font-size:.76rem">· '+m.cobertos+' itens'+falta+'</span>'+end+'</div>';
-              html += '<b style="color:#5dcaa5">'+m.total+'</b></div>';
+              html += '<b style="color:var(--verde-claro)">'+m.total+'</b></div>';
               if (m.produtos && m.produtos.length){
                 html += '<div style="margin:.3rem 0 0 1.1rem">';
                 m.produtos.forEach(function(pr){
                   var quando = (pr.dias === 0 ? 'hoje' : (pr.dias === 1 ? 'ontem' : (pr.dias != null ? 'há '+pr.dias+'d' : '')));
                   var selo = '🧾 cupom' + (quando ? ' · '+quando : '');
                   html += '<div style="font-size:.72rem;display:flex;justify-content:space-between;gap:.5rem">'
-                        + '<span>'+esc(pr.descricao)+' <span style="color:#1d9e75;font-size:.64rem">'+selo+'</span></span>'
+                        + '<span>'+esc(pr.descricao)+' <span style="color:var(--verde);font-size:.64rem">'+selo+'</span></span>'
                         + '<span class="mut">'+pr.preco+'</span></div>';
                 });
                 html += '</div>';
@@ -1362,7 +1362,7 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
         html += '<div style="margin-top:.6rem"><div class="mut" style="font-size:.78rem;margin-bottom:.3rem">Não bateu? Ajuste o produto certo:</div><div style="display:flex;flex-wrap:wrap;gap:6px">';
         pendentesAtuais.forEach(function(it){
           var marca = ajustes[it] ? ' ✓' : '';
-          html += '<button type="button" class="aj" data-item="'+encodeURIComponent(it)+'" style="margin:0;padding:.25rem .6rem;background:#2a2a2b;font-size:.74rem;width:auto">'+esc(it)+marca+'</button>';
+          html += '<button type="button" class="aj" data-item="'+encodeURIComponent(it)+'" style="margin:0;padding:.25rem .6rem;background:var(--borda);font-size:.74rem;width:auto">'+esc(it)+marca+'</button>';
         });
         html += '</div><div id="aj-opcoes"></div></div>';
         compEl.innerHTML = html;
@@ -1385,7 +1385,7 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
     fetch(url).then(function(r){ return r.json(); }).then(function(d){
       var ops = d.opcoes || [];
       if (!ops.length){ cx.innerHTML = '<div class="mut" style="font-size:.76rem;margin-top:.5rem">Ainda não tenho preço desse item aqui na sua região.</div>'; return; }
-      var html = '<div style="background:#0e0e0f;border:1px solid #2a2a2b;border-radius:10px;padding:.8rem;margin-top:.5rem">';
+      var html = '<div style="background:var(--bg);border:1px solid var(--borda);border-radius:10px;padding:.8rem;margin-top:.5rem">';
 
       if (d.nivel === 'lojas'){
         html += '<div style="font-size:.8rem;margin-bottom:.5rem">📍 <b>'+esc(d.produto||item)+'</b> — onde tá mais barato</div>';
@@ -1393,7 +1393,7 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
         ops.forEach(function(o){
           var preco = 'R$ ' + (o.preco_centavos/100).toFixed(2).replace('.', ',');
           var cupom = (o.fonte === 'cupom');
-          var cor = cupom ? '#1d9e75' : '#6fa8dc';
+          var cor = cupom ? 'var(--verde)' : '#6fa8dc';
           var quando = (o.dias === 0 ? 'hoje' : (o.dias === 1 ? 'ontem' : 'há ' + o.dias + 'd'));
           var selo = cupom ? ('🧾 cupom · ' + quando) : '📦 catálogo · preço do site';
           if (!cupom) temCatalogo = true;
@@ -1407,7 +1407,7 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
                 + '📦 <b>preço do site</b> (online), não de loja física. '
                 + '<b>atacarejo</b> = preço de quantidade · <b>varejo</b> = unidade.</div>';
         html += '<div style="display:flex;gap:.5rem;align-items:center;margin-top:.6rem">'
-              + '<button type="button" class="usar-cesta" style="flex:1;background:#1d9e75;color:#06281e;border:0;border-radius:8px;padding:.5rem;font-size:.74rem;font-weight:600;cursor:pointer">✓ usar este na cesta</button>'
+              + '<button type="button" class="usar-cesta" style="flex:1;background:var(--verde);color:#06281e;border:0;border-radius:8px;padding:.5rem;font-size:.74rem;font-weight:600;cursor:pointer">✓ usar este na cesta</button>'
               + '<button type="button" class="voltar-prod" style="font-size:.72rem;background:transparent;color:#8b97a6;border:0;cursor:pointer;padding:.2rem .4rem">← outros</button>'
               + '</div>';
         html += '</div>';
@@ -1434,9 +1434,9 @@ function departamentoDe(nome){ var n=(nome||"").toLowerCase(); for(var d=0;d<DEP
         var ingr = (o.nucleo === false);
         var badge = ingr ? ' <span style="font-size:.58rem;font-family:monospace;text-transform:uppercase;letter-spacing:.04em;color:#5B6675;border:1px solid #262D38;border-radius:4px;padding:0 4px">ingrediente</span>' : '';
         html += '<button type="button" class="prod" data-gtin="'+(o.gtin||'')+'" data-desc="'+encodeURIComponent(o.descricao)+'" '
-              + 'style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;width:100%;text-align:left;margin:.15rem 0;padding:.45rem .6rem;background:#161617;border:0;border-radius:8px;cursor:pointer;color:#e8edf2'+(ingr?';opacity:.62':'')+'">'
+              + 'style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;width:100%;text-align:left;margin:.15rem 0;padding:.45rem .6rem;background:var(--card);border:0;border-radius:8px;cursor:pointer;color:#e8edf2'+(ingr?';opacity:.62':'')+'">'
               + '<span style="font-size:.76rem">'+esc(o.descricao)+badge+'<br><span class="mut" style="font-size:.66rem">'+nl+'</span></span>'
-              + '<span style="font-weight:600;font-size:.78rem;color:'+(ingr?'#8b97a6':'#5dcaa5')+';white-space:nowrap">'+faixa+'</span></button>';
+              + '<span style="font-weight:600;font-size:.78rem;color:'+(ingr?'#8b97a6':'var(--verde-claro)')+';white-space:nowrap">'+faixa+'</span></button>';
       });
       if (ocultos > 0)
         html += '<button type="button" class="ver-tudo" style="width:100%;background:transparent;border:1px dashed #262D38;color:#8b97a6;border-radius:8px;padding:.5rem;font-size:.72rem;cursor:pointer;margin-top:.3rem">+ ver tudo que tem "'+esc(item)+'" ('+ocultos+')</button>';
@@ -1487,13 +1487,13 @@ function avisarTerminei(){
 {% endblock %}"""
 
 _COMPRA_REVISAR = """{% extends "base" %}{% block conteudo %}
-<div class="card larga"><a href="/painel/produtos/abastecimento" style="color:#5dcaa5;display:inline-block;margin-bottom:1rem">← voltar</a>
+<div class="card larga"><a href="/painel/produtos/abastecimento" style="color:var(--verde-claro);display:inline-block;margin-bottom:1rem">← voltar</a>
 <h2 style="margin-top:0">🛒 Compra #{{ compra.id }}</h2>
 <p class="mut">Origem: <strong>{{ compra.origem_nome or '-' }}</strong> · {{ compra.data }} · status: <strong>{{ compra.status }}</strong></p>
 {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
 {% if compra.status == 'rascunho' %}
-<div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1.2rem;margin:1.5rem 0">
+<div style="background:#1c1c1f;border:1px solid var(--borda);border-radius:8px;padding:1.2rem;margin:1.5rem 0">
 <h4 style="margin-top:0">Adicionar item</h4>
 {% if produtos %}
 <form method="post" action="/painel/produtos/abastecimento/{{ compra.id }}/item" style="display:grid;gap:1rem">
@@ -1504,32 +1504,32 @@ _COMPRA_REVISAR = """{% extends "base" %}{% block conteudo %}
 <div><label>Quantidade</label><input name="quantidade" type="number" step="0.001" required placeholder="50"></div>
 </div>
 <div><label>Custo unitário (R$)</label><input name="custo_unit" placeholder="4,00" required></div>
-<button style="background:#1d9e75;color:#fff;padding:.6rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:500">Adicionar item</button>
+<button style="background:var(--verde);color:#fff;padding:.6rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:500">Adicionar item</button>
 </form>
 {% else %}
-<p class="mut">Você ainda não tem produtos no catálogo. <a href="/painel/produtos/abastecimento" style="color:#5dcaa5">Crie um produto</a> primeiro.</p>
+<p class="mut">Você ainda não tem produtos no catálogo. <a href="/painel/produtos/abastecimento" style="color:var(--verde-claro)">Crie um produto</a> primeiro.</p>
 {% endif %}
 </div>
 {% endif %}
 <h4>Itens da compra</h4>
 {% if itens %}
 <table style="width:100%;border-collapse:collapse;font-size:.9rem;margin-bottom:1.5rem">
-<tr style="border-bottom:2px solid #2a2a2b;color:#888"><th style="text-align:left;padding:.6rem;font-weight:500">Produto</th><th style="text-align:center;padding:.6rem;font-weight:500">Qtd</th><th style="text-align:right;padding:.6rem;font-weight:500">Custo un.</th><th style="text-align:right;padding:.6rem;font-weight:500">Subtotal</th></tr>
+<tr style="border-bottom:2px solid var(--borda);color:#888"><th style="text-align:left;padding:.6rem;font-weight:500">Produto</th><th style="text-align:center;padding:.6rem;font-weight:500">Qtd</th><th style="text-align:right;padding:.6rem;font-weight:500">Custo un.</th><th style="text-align:right;padding:.6rem;font-weight:500">Subtotal</th></tr>
 {% for i in itens %}
-<tr style="border-top:1px solid #2a2a2b"><td style="padding:.6rem">{{ i.produto_nome or i.descricao }}</td><td style="text-align:center;padding:.6rem">{{ i.quantidade }} {{ i.unidade }}</td><td style="text-align:right;padding:.6rem">R$ {{ (i.custo_unit_centavos/100)|n2 }}</td><td style="text-align:right;padding:.6rem;font-weight:500">R$ {{ (i.quantidade * i.custo_unit_centavos/100)|n2 }}</td></tr>
+<tr style="border-top:1px solid var(--borda)"><td style="padding:.6rem">{{ i.produto_nome or i.descricao }}</td><td style="text-align:center;padding:.6rem">{{ i.quantidade }} {{ i.unidade }}</td><td style="text-align:right;padding:.6rem">R$ {{ (i.custo_unit_centavos/100)|n2 }}</td><td style="text-align:right;padding:.6rem;font-weight:500">R$ {{ (i.quantidade * i.custo_unit_centavos/100)|n2 }}</td></tr>
 {% endfor %}
-<tr style="border-top:2px solid #2a2a2b;background:#2a2a2b"><td colspan="3" style="text-align:right;padding:.6rem;font-weight:600">Total:</td><td style="text-align:right;padding:.6rem;font-weight:600">R$ {{ (compra.total_centavos/100)|n2 }}</td></tr>
+<tr style="border-top:2px solid var(--borda);background:var(--borda)"><td colspan="3" style="text-align:right;padding:.6rem;font-weight:600">Total:</td><td style="text-align:right;padding:.6rem;font-weight:600">R$ {{ (compra.total_centavos/100)|n2 }}</td></tr>
 </table>
 {% if compra.status == 'rascunho' %}
 <form method="post" action="/painel/produtos/abastecimento/{{ compra.id }}/confirmar">
-<button style="background:#1d9e75;color:#fff;padding:.7rem 1rem;border:0;border-radius:8px;cursor:pointer;width:100%;font-weight:600;font-size:1rem;margin-bottom:1rem">✓ Confirmar compra (dar entrada no estoque)</button>
+<button style="background:var(--verde);color:#fff;padding:.7rem 1rem;border:0;border-radius:8px;cursor:pointer;width:100%;font-weight:600;font-size:1rem;margin-bottom:1rem">✓ Confirmar compra (dar entrada no estoque)</button>
 </form>
 <p class="mut" style="font-size:.85rem;margin:0">Ao confirmar, os itens dão entrada no estoque e o custo médio é recalculado. Não dá pra editar depois.</p>
 {% else %}
-<div style="background:#2a3a2a;border:1px solid #1d9e75;color:#5dcaa5;padding:.8rem;border-radius:6px;text-align:center">✓ Compra confirmada em {{ compra.data }}</div>
+<div style="background:#2a3a2a;border:1px solid var(--verde);color:var(--verde-claro);padding:.8rem;border-radius:6px;text-align:center">✓ Compra confirmada em {{ compra.data }}</div>
 {% endif %}
 {% else %}
-<p class="mut" style="background:#2a2a2b;padding:1rem;border-radius:6px">Nenhum item ainda. Adicione acima.</p>
+<p class="mut" style="background:var(--borda);padding:1rem;border-radius:6px">Nenhum item ainda. Adicione acima.</p>
 {% endif %}
 </div>
 {% endblock %}"""
@@ -1944,7 +1944,7 @@ _LOJA_CONFIRMAR_NOVO = """{% extends "base" %}{% block conteudo %}
     <h2 style="margin-bottom:.3rem">Quase lá! 🛒</h2>
     <p class="mut" style="margin-bottom:1.2rem;font-size:.9rem">
       Pra enviar seu pedido, entre ou crie sua conta rápida.
-      Já tem conta? <a href="/login?next=/f/{{ slug }}/carrinho/materializar" style="color:#5dcaa5">Entrar</a>
+      Já tem conta? <a href="/login?next=/f/{{ slug }}/carrinho/materializar" style="color:var(--verde-claro)">Entrar</a>
     </p>
     {% set next_url = "/f/" + slug + "/carrinho/materializar" %}
     {% set btn_text = "Criar conta e enviar pedido" %}
@@ -1953,7 +1953,7 @@ _LOJA_CONFIRMAR_NOVO = """{% extends "base" %}{% block conteudo %}
     <h2 style="margin-bottom:.3rem">Confirme sua assinatura 🧺</h2>
     <p class="mut" style="margin-bottom:1.2rem;font-size:.9rem">
       Crie sua conta grátis pra receber sua cesta.
-      Já tem conta? <a href="/login" style="color:#5dcaa5">Entrar</a>
+      Já tem conta? <a href="/login" style="color:var(--verde-claro)">Entrar</a>
     </p>
     {% set next_url = "/f/" + slug + "/confirmar" %}
     {% set btn_text = "Criar conta e assinar 🧺" %}
@@ -1974,7 +1974,7 @@ _LOJA_CONFIRMAR_NOVO = """{% extends "base" %}{% block conteudo %}
     <input type="hidden" name="endereco" value="{{ endereco_pre|default('') }}">
     <div class="mut" style="font-size:.82rem;margin-bottom:1rem;padding:.55rem .7rem;background:#f2f5f0;border-radius:8px;line-height:1.4">
       📍 Entrega em: {{ endereco_pre|default('') or "endereço do passo anterior" }}
-      <a href="/f/{{ slug }}/carrinho/revisar" style="color:#1d9e75;margin-left:6px;white-space:nowrap">editar</a>
+      <a href="/f/{{ slug }}/carrinho/revisar" style="color:var(--verde);margin-left:6px;white-space:nowrap">editar</a>
     </div>
     {% else %}
     <label>CEP</label>
@@ -1982,7 +1982,7 @@ _LOJA_CONFIRMAR_NOVO = """{% extends "base" %}{% block conteudo %}
     <label>Endereço</label>
     <input name="endereco" required placeholder="Rua X, nº 123, bairro" style="width:100%;margin-bottom:1rem">
     {% endif %}
-    <button style="background:#1d9e75;color:#fff;padding:.7rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:600;font-size:.95rem">
+    <button style="background:var(--verde);color:#fff;padding:.7rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:600;font-size:.95rem">
       {{ btn_text }}
     </button>
   </form>
@@ -1996,10 +1996,10 @@ _MEUS_PEDIDOS = """{% extends "base" %}{% block conteudo %}
 <div style="max-width:920px;margin:0 auto">
   <h2 style="margin-bottom:.4rem">🛍️ Meus pedidos</h2>
   <p class="mut" style="margin-bottom:1.5rem;font-size:.86rem">Compras avulsas feitas nas lojas — cada pedido é único, sem recorrência.
-  Suas cestas por assinatura (entrega recorrente) ficam em <a href="/painel/assinaturas" style="color:#5dcaa5">🧺 Minhas assinaturas</a>.</p>
+  Suas cestas por assinatura (entrega recorrente) ficam em <a href="/painel/assinaturas" style="color:var(--verde-claro)">🧺 Minhas assinaturas</a>.</p>
   {% if not pedidos %}
   <div class="card" style="text-align:center">
-    <p class="mut">Você ainda não tem pedidos. <a href="/" style="color:#5dcaa5">Explorar fornecedores</a></p>
+    <p class="mut">Você ainda não tem pedidos. <a href="/" style="color:var(--verde-claro)">Explorar fornecedores</a></p>
   </div>
   {% else %}
     {% set grupos_reais = {} %}
@@ -2012,18 +2012,18 @@ _MEUS_PEDIDOS = """{% extends "base" %}{% block conteudo %}
     {% for grupo_nome,rótulos in [('em_aberto','Em aberto'),('concluido','Concluído'),('cancelado','Cancelado')] %}
       {% if grupo_nome in grupos_reais %}
       <div style="margin-bottom:2rem">
-        <h3 style="font-size:14px;color:#5dcaa5;font-weight:600;margin-bottom:.8rem">{{ rótulos }}</h3>
+        <h3 style="font-size:14px;color:var(--verde-claro);font-weight:600;margin-bottom:.8rem">{{ rótulos }}</h3>
         {% for p in grupos_reais[grupo_nome] %}
-        <div style="background:#161617;border:1px solid #232325;border-radius:12px;padding:1.1rem;margin-bottom:.7rem">
+        <div style="background:var(--card);border:1px solid #232325;border-radius:12px;padding:1.1rem;margin-bottom:.7rem">
           <div style="display:flex;justify-content:space-between;align-items:start">
             <div style="flex:1">
               <div style="font-size:15px;color:#f4f4f4;font-weight:600">{{ p.fornecedor_nome }}</div>
               <div style="font-size:12px;color:#888780;margin:5px 0">Pedido #{{ p.id }} · {{ p.qtd_itens }} itens · {{ p.criado_em.strftime('%d/%m/%Y') if p.criado_em else 'Data' }}</div>
-              <div style="font-size:13px;color:#5dcaa5;font-weight:600;margin-top:.5rem">{{ p.total_centavos|brl }}</div>
+              <div style="font-size:13px;color:var(--verde-claro);font-weight:600;margin-top:.5rem">{{ p.total_centavos|brl }}</div>
             </div>
             <div style="text-align:right">
-              <span style="display:inline-block;background:#15301f;color:#5dcaa5;padding:4px 10px;border-radius:16px;font-size:11px;border:1px solid #1d9e7544">{{ p.status_rotulo }}</span>
-              <a href="/pedido-enviado/{{ p.id }}" style="display:block;margin-top:8px;font-size:12px;color:#5dcaa5;text-decoration:none">Detalhar →</a>
+              <span style="display:inline-block;background:#15301f;color:var(--verde-claro);padding:4px 10px;border-radius:16px;font-size:11px;border:1px solid var(--verde)44">{{ p.status_rotulo }}</span>
+              <a href="/pedido-enviado/{{ p.id }}" style="display:block;margin-top:8px;font-size:12px;color:var(--verde-claro);text-decoration:none">Detalhar →</a>
               {% if p.forma_pagamento == 'pagar_agora' and not p.pago and p.grupo == 'em_aberto' %}
               <a href="/pedido/{{ p.id }}/pagar" style="display:inline-block;margin-top:8px;background:#c99536;color:#1a1206;padding:6px 12px;border-radius:8px;font-size:11.5px;font-weight:700;text-decoration:none">⚡ Pagar agora</a>
               {% endif %}
@@ -2047,7 +2047,7 @@ _EMPRESA_DADOS = """{% extends "base" %}{% block conteudo %}
     <label>CNPJ</label>
     <div style="display:flex;gap:.5rem">
       <input id="cnpj" name="documento" value="{{ dados.documento }}" inputmode="numeric" placeholder="00.000.000/0001-00" required style="flex:1 1 auto;width:auto;min-width:0">
-      <button type="button" onclick="buscarCnpj()" style="flex:0 0 auto;width:auto;margin-top:0;background:#1d3a2e;color:#5dcaa5;border:1px solid #1d9e7544;border-radius:7px;padding:0 1.1rem;cursor:pointer;white-space:nowrap">🔍 Buscar</button>
+      <button type="button" onclick="buscarCnpj()" style="flex:0 0 auto;width:auto;margin-top:0;background:#1d3a2e;color:var(--verde-claro);border:1px solid var(--verde)44;border-radius:7px;padding:0 1.1rem;cursor:pointer;white-space:nowrap">🔍 Buscar</button>
     </div>
     <div id="cnpj-msg" class="mut" style="font-size:.72rem;margin-top:.25rem"></div>
     <label>Razão social</label>
@@ -2082,7 +2082,7 @@ _EMPRESA_DADOS = """{% extends "base" %}{% block conteudo %}
       {% endfor %}
     </select>
     <div class="mut" style="font-size:.72rem;margin-top:.2rem">Detectamos pelo CNPJ — confira e ajuste se preciso. Define as unidades/categorias dos seus produtos.</div>
-    <button type="submit" style="background:#1d9e75;color:#fff;border:0;border-radius:8px;padding:.7rem 1.4rem;font-weight:600;cursor:pointer;margin-top:1rem">Salvar e continuar →</button>
+    <button type="submit" style="background:var(--verde);color:#fff;border:0;border-radius:8px;padding:.7rem 1.4rem;font-weight:600;cursor:pointer;margin-top:1rem">Salvar e continuar →</button>
   </form>
 </div>
 {% if eh_fornecedor %}
@@ -2092,15 +2092,15 @@ _EMPRESA_DADOS = """{% extends "base" %}{% block conteudo %}
   <div style="display:flex;gap:1.2rem;flex-wrap:wrap;align-items:flex-end">
     <div>
       <div class="mut" style="font-size:.8rem;margin-bottom:.4rem">Logomarca</div>
-      <div id="forn-logo-prev" style="width:78px;height:78px;border-radius:16px;background:#161617{% if identidade.logo_url %} url('{{ identidade.logo_url }}') center/cover{% endif %};border:1px solid #2a2a2b"></div>
-      <label style="display:inline-block;margin-top:.5rem;font-size:.82rem;color:#1d9e75;cursor:pointer">enviar logo
+      <div id="forn-logo-prev" style="width:78px;height:78px;border-radius:16px;background:var(--card){% if identidade.logo_url %} url('{{ identidade.logo_url }}') center/cover{% endif %};border:1px solid var(--borda)"></div>
+      <label style="display:inline-block;margin-top:.5rem;font-size:.82rem;color:var(--verde);cursor:pointer">enviar logo
         <input type="file" accept="image/*" onchange="fornLogoUpload(this)" style="display:none">
       </label>
     </div>
     <div style="flex:1;min-width:200px">
       <div class="mut" style="font-size:.8rem;margin-bottom:.4rem">Capa (banner)</div>
-      <div id="forn-banner-prev" style="height:78px;border-radius:12px;background:#161617{% if identidade.banner_url %} url('{{ identidade.banner_url }}') center/cover{% endif %};border:1px solid #2a2a2b"></div>
-      <label style="display:inline-block;margin-top:.5rem;font-size:.82rem;color:#1d9e75;cursor:pointer">enviar capa
+      <div id="forn-banner-prev" style="height:78px;border-radius:12px;background:var(--card){% if identidade.banner_url %} url('{{ identidade.banner_url }}') center/cover{% endif %};border:1px solid var(--borda)"></div>
+      <label style="display:inline-block;margin-top:.5rem;font-size:.82rem;color:var(--verde);cursor:pointer">enviar capa
         <input type="file" accept="image/*" onchange="fornBannerUpload(this)" style="display:none">
       </label>
     </div>
@@ -2116,7 +2116,7 @@ _EMPRESA_DADOS = """{% extends "base" %}{% block conteudo %}
       <input name="margem_alvo" type="number" min="0" max="100" value="{{ margem_alvo }}" placeholder="60" style="width:100%">
       <small class="mut" style="display:block;margin-top:.3rem">Até {{ margem_alvo }}% do preço da cesta pode ser custo. Ex: 60% = você garante 40% de folga.</small>
     </div>
-    <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;font-weight:500">Salvar</button>
+    <button style="background:var(--verde);color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;font-weight:500">Salvar</button>
   </form>
 </div>
 {% endif %}
@@ -2127,7 +2127,7 @@ function _fornImgUpload(inp, url, prevId){
   var fd=new FormData(); fd.append('arquivo', f);
   fetch(url,{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){
     if(d.logo_url||d.banner_url){
-      document.getElementById(prevId).style.background="#161617 url('"+(d.logo_url||d.banner_url)+"') center/cover";
+      document.getElementById(prevId).style.background="var(--card) url('"+(d.logo_url||d.banner_url)+"') center/cover";
       st.textContent='✓ salvo';
     } else { st.textContent=d.erro||'falhou'; }
   }).catch(function(){st.textContent='erro de conexão';});
@@ -2165,28 +2165,28 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
     <h2 style="margin:0">📦 Produtos{% if nicho_label %} <span style="color:#6a6a66;font-size:.7rem;font-weight:400">· {{ nicho_label }}</span>{% endif %}</h2>
     <div style="display:flex;gap:.5rem">
-      <button type="button" onclick="prodNovo()" style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:8px;cursor:pointer;font-weight:600;font-size:.9rem">+ Novo produto</button>
-      <button type="button" onclick="prodImportar()" style="padding:.5rem 1rem;background:transparent;border:1px solid #1d9e75;color:#1d9e75;border-radius:8px;cursor:pointer;font-weight:500;font-size:.9rem">📊 planilha</button>
+      <button type="button" onclick="prodNovo()" style="background:var(--verde);color:#fff;padding:.5rem 1rem;border:0;border-radius:8px;cursor:pointer;font-weight:600;font-size:.9rem">+ Novo produto</button>
+      <button type="button" onclick="prodImportar()" style="padding:.5rem 1rem;background:transparent;border:1px solid var(--verde);color:var(--verde);border-radius:8px;cursor:pointer;font-weight:500;font-size:.9rem">📊 planilha</button>
     </div>
   </div>
   {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
   {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
 
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;margin:1rem 0">
-    <div class="metric" style="padding:.7rem .8rem"><span style="font-size:.62rem;color:#6a8a7a">PRODUTOS</span><b style="color:#5dcaa5;display:block;font-size:1.1rem">{{ resumo.total }}</b></div>
+    <div class="metric" style="padding:.7rem .8rem"><span style="font-size:.62rem;color:#6a8a7a">PRODUTOS</span><b style="color:var(--verde-claro);display:block;font-size:1.1rem">{{ resumo.total }}</b></div>
     <div class="metric" style="padding:.7rem .8rem"><span style="font-size:.62rem">EM ESTOQUE</span><b style="display:block;font-size:1.1rem">{{ brl(resumo.valor_estoque) }}</b></div>
     <div class="metric" style="padding:.7rem .8rem"><span style="font-size:.62rem;color:#c9a56a">ESTOQUE BAIXO</span><b style="color:#f0c05a;display:block;font-size:1.1rem">{{ resumo.baixo }}{% if resumo.baixo %} ⚠{% endif %}</b></div>
   </div>
 
   {% if produtos %}
   <input type="text" id="prod-busca" placeholder="🔍 buscar produto..." autocomplete="off" oninput="prodFiltrar(this.value)"
-         style="width:100%;padding:.5rem .7rem;background:#161617;border:1px solid #2a2a2b;border-radius:8px;color:#e8e8e8;font-size:.9rem;box-sizing:border-box;margin-bottom:.7rem">
+         style="width:100%;padding:.5rem .7rem;background:var(--card);border:1px solid var(--borda);border-radius:8px;color:#e8e8e8;font-size:.9rem;box-sizing:border-box;margin-bottom:.7rem">
   {% endif %}
 
   <div style="display:flex;flex-direction:column;gap:.5rem">
     {% if produtos %}
       {% for p in produtos %}
-      <div class="prod-card" data-nome="{{ p.nome|lower }}" style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:10px;padding:.7rem .85rem">
+      <div class="prod-card" data-nome="{{ p.nome|lower }}" style="background:#1c1c1f;border:1px solid var(--borda);border-radius:10px;padding:.7rem .85rem">
         <div style="display:flex;align-items:center;gap:11px">
           <div class="prod-foto" style="width:44px;height:44px;border-radius:8px;flex-shrink:0;{% if p.foto_url %}background:url('{{ p.foto_url }}') center/cover{% else %}background:#1a2a1f;display:flex;align-items:center;justify-content:center{% endif %}">{% if not p.foto_url %}<span style="font-size:20px;color:#3a5a48">📦</span>{% endif %}</div>
           <div style="flex:1;min-width:0">
@@ -2199,8 +2199,8 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
           </div>
         </div>
         <div class="prod-acoes" style="display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.7rem;padding-top:.65rem;border-top:1px solid #242426">
-          <button type="button" onclick="prodVender({{ p.id }})" style="background:#1d9e75;color:#fff;border:0;border-radius:6px;padding:.32rem .8rem;cursor:pointer;font-size:.76rem;font-weight:600">vender</button>
-          <button type="button" onclick="prodEntrada({{ p.id }})" style="background:#173d2e;color:#5dcaa5;border:0;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem;font-weight:500">+ entrada</button>
+          <button type="button" onclick="prodVender({{ p.id }})" style="background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.32rem .8rem;cursor:pointer;font-size:.76rem;font-weight:600">vender</button>
+          <button type="button" onclick="prodEntrada({{ p.id }})" style="background:#173d2e;color:var(--verde-claro);border:0;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem;font-weight:500">+ entrada</button>
           <button type="button" onclick="prodPerda({{ p.id }})" style="background:transparent;border:1px solid #3a3a3d;color:#b4b2a9;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem">perda</button>
           <button type="button" onclick="prodEditar({{ p.id }})" style="background:transparent;border:1px solid #3a3a3d;color:#b4b2a9;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem">editar</button>
           <button type="button" onclick="prodFoto({{ p.id }})" style="background:transparent;border:1px solid #3a3a3d;color:#a89ce8;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem">📷</button>
@@ -2212,7 +2212,7 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
     {% else %}
     <div style="text-align:center;padding:2rem 1rem;color:#6a6a66">
       <div style="font-size:1.6rem;margin-bottom:.4rem">📦</div>
-      <div style="font-size:.9rem">Nenhum produto ainda. Clique em <b style="color:#5dcaa5">+ Novo produto</b> pra começar.</div>
+      <div style="font-size:.9rem">Nenhum produto ainda. Clique em <b style="color:var(--verde-claro)">+ Novo produto</b> pra começar.</div>
     </div>
     {% endif %}
   </div>
@@ -2234,10 +2234,10 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
       <label style="font-size:.85rem">Nome</label>
       <input name="nome" id="prod-f-nome" required placeholder="ex: Alface crespa" oninput="prodSugereCategoria(this.value);prodNovoBuscarSugestoes()" class="prod-inp">
 
-      <div style="background:#161617;border:1px solid #242426;border-radius:9px;padding:.7rem;margin:.2rem 0 .7rem">
-        <div style="font-size:.78rem;color:#5dcaa5;font-weight:600;margin-bottom:.5rem">📷 Foto do produto <span style="color:#6a6a6a;font-weight:400">(opcional)</span></div>
+      <div style="background:var(--card);border:1px solid #242426;border-radius:9px;padding:.7rem;margin:.2rem 0 .7rem">
+        <div style="font-size:.78rem;color:var(--verde-claro);font-weight:600;margin-bottom:.5rem">📷 Foto do produto <span style="color:#6a6a6a;font-weight:400">(opcional)</span></div>
         <div style="display:flex;gap:11px;align-items:flex-start;margin-bottom:.6rem">
-          <div id="prod-novo-previa" style="width:64px;height:64px;border-radius:9px;background:#1a2a1f;border:2px solid #1d9e75;flex-shrink:0;display:flex;align-items:center;justify-content:center;background-size:cover;background-position:center">
+          <div id="prod-novo-previa" style="width:64px;height:64px;border-radius:9px;background:#1a2a1f;border:2px solid var(--verde);flex-shrink:0;display:flex;align-items:center;justify-content:center;background-size:cover;background-position:center">
             <span id="prod-novo-previa-vazia" style="font-size:24px;color:#3a5a48">📦</span>
           </div>
           <div style="flex:1;min-width:0">
@@ -2259,7 +2259,7 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
       <label style="font-size:.85rem">Categoria</label>
       {% if categorias %}
       <div id="prod-cat-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin:.35rem 0 .5rem">
-        {% for c in categorias %}<span class="prod-catchip" onclick="prodSetCat(this, {{ c|tojson }})" style="font-size:.76rem;color:#b4b2a9;background:#161617;border:1.5px solid #2a2a2b;border-radius:16px;padding:4px 12px;cursor:pointer">{{ c }}</span>{% endfor %}
+        {% for c in categorias %}<span class="prod-catchip" onclick="prodSetCat(this, {{ c|tojson }})" style="font-size:.76rem;color:#b4b2a9;background:var(--card);border:1.5px solid var(--borda);border-radius:16px;padding:4px 12px;cursor:pointer">{{ c }}</span>{% endfor %}
       </div>
       {% endif %}
       <input name="categoria" id="prod-f-categoria" placeholder="toque numa sugestão ou digite" oninput="prodCatLimpaSel()" class="prod-inp">
@@ -2274,7 +2274,7 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
         </div>
       </div>
       <div style="display:flex;gap:8px;margin-top:.9rem">
-        <button style="flex:1;background:#1d9e75;color:#fff;padding:.6rem;border:0;border-radius:8px;cursor:pointer;font-weight:600">Salvar</button>
+        <button style="flex:1;background:var(--verde);color:#fff;padding:.6rem;border:0;border-radius:8px;cursor:pointer;font-weight:600">Salvar</button>
         <button type="button" onclick="prodFecha('prod-modal-form')" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.6rem 1rem;cursor:pointer">Cancelar</button>
       </div>
     </form>
@@ -2300,7 +2300,7 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
         <input name="motivo" class="prod-inp">
       </div>
       <div style="display:flex;gap:8px;margin-top:.6rem">
-        <button style="flex:1;background:#1d9e75;color:#fff;padding:.6rem;border:0;border-radius:8px;cursor:pointer;font-weight:600">Confirmar</button>
+        <button style="flex:1;background:var(--verde);color:#fff;padding:.6rem;border:0;border-radius:8px;cursor:pointer;font-weight:600">Confirmar</button>
         <button type="button" onclick="prodFecha('prod-modal-mov')" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.6rem 1rem;cursor:pointer">Cancelar</button>
       </div>
     </form>
@@ -2310,22 +2310,22 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
 <!-- MODAL foto -->
 <div id="prod-modal-foto" class="prod-modal" style="display:none">
   <div class="prod-modal-box">
-    <h4 style="margin-top:0">Foto de <span id="prod-foto-nome" style="color:#5dcaa5"></span></h4>
+    <h4 style="margin-top:0">Foto de <span id="prod-foto-nome" style="color:var(--verde-claro)"></span></h4>
     <input type="hidden" id="prod-foto-pid">
-    <label style="display:flex;align-items:center;gap:10px;background:#1d9e75;color:#fff;border-radius:9px;padding:.7rem .9rem;font-size:12.5px;font-weight:600;cursor:pointer;margin-bottom:.8rem">
+    <label style="display:flex;align-items:center;gap:10px;background:var(--verde);color:#fff;border-radius:9px;padding:.7rem .9rem;font-size:12.5px;font-weight:600;cursor:pointer;margin-bottom:.8rem">
       <span style="font-size:20px">📷</span><div>Tirar foto / enviar do aparelho<div style="font-size:10px;font-weight:400;opacity:.85">a foto real do seu produto</div></div>
       <input type="file" accept="image/*" capture="environment" onchange="prodFotoUpload(this)" style="display:none">
     </label>
     <div id="prod-foto-upload-status" style="font-size:.74rem;color:#888780;margin-bottom:.8rem"></div>
     <div style="display:flex;gap:14px;align-items:flex-start;margin-bottom:1rem">
-      <div id="prod-foto-previa" style="width:88px;height:88px;border-radius:10px;background:#1a2a1f;border:2px solid #1d9e75;flex-shrink:0;background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center"><span id="prod-foto-previa-vazia" style="font-size:28px;color:#3a5a48">📦</span></div>
+      <div id="prod-foto-previa" style="width:88px;height:88px;border-radius:10px;background:#1a2a1f;border:2px solid var(--verde);flex-shrink:0;background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center"><span id="prod-foto-previa-vazia" style="font-size:28px;color:#3a5a48">📦</span></div>
       <div style="flex:1;font-size:.78rem;color:#888780">A prévia aparece quando você cola o link ou escolhe uma sugestão.</div>
     </div>
-    <div id="prod-foto-sugbox" style="margin-bottom:.9rem"><div style="font-size:.78rem;color:#5dcaa5;font-weight:600;margin-bottom:.4rem">✨ Sugestões</div><div id="prod-foto-sugestoes" style="display:flex;gap:7px;flex-wrap:wrap"><span style="font-size:.74rem;color:#888780">buscando...</span></div></div>
+    <div id="prod-foto-sugbox" style="margin-bottom:.9rem"><div style="font-size:.78rem;color:var(--verde-claro);font-weight:600;margin-bottom:.4rem">✨ Sugestões</div><div id="prod-foto-sugestoes" style="display:flex;gap:7px;flex-wrap:wrap"><span style="font-size:.74rem;color:#888780">buscando...</span></div></div>
     <label style="font-size:.8rem;color:#b4b2a9">Ou cole o link da sua foto:</label>
     <input id="prod-foto-link" placeholder="https://..." oninput="prodFotoPreview(this.value)" class="prod-inp">
     <div style="display:flex;gap:8px">
-      <button type="button" onclick="prodFotoSalvar()" style="flex:1;background:#1d9e75;color:#fff;border:0;border-radius:8px;padding:.65rem;font-weight:600;cursor:pointer">Salvar</button>
+      <button type="button" onclick="prodFotoSalvar()" style="flex:1;background:var(--verde);color:#fff;border:0;border-radius:8px;padding:.65rem;font-weight:600;cursor:pointer">Salvar</button>
       <button type="button" onclick="prodFotoRemover()" style="background:transparent;border:1px solid #8a3636;color:#c97;border-radius:8px;padding:.65rem .9rem;cursor:pointer">Remover</button>
       <button type="button" onclick="prodFecha('prod-modal-foto')" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.65rem .9rem;cursor:pointer">Cancelar</button>
     </div>
@@ -2371,8 +2371,8 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
     <div id="pdv-itens" style="margin-bottom:.6rem"></div>
     <div style="position:relative;margin-bottom:.5rem">
       <input id="pdv-cli-busca" placeholder="Cliente — CPF, telefone ou nome" autocomplete="off" oninput="pdvCliBusca(this.value)" class="prod-inp" style="margin:0">
-      <div id="pdv-cli-sug" style="display:none;position:absolute;left:0;right:0;top:100%;background:#1c1c1f;border:1px solid #2a2a2b;border-top:0;border-radius:0 0 7px 7px;z-index:20;max-height:170px;overflow:auto"></div>
-      <div id="pdv-cli-sel" style="display:none;margin-top:.4rem;font-size:.82rem;color:#5dcaa5"></div>
+      <div id="pdv-cli-sug" style="display:none;position:absolute;left:0;right:0;top:100%;background:#1c1c1f;border:1px solid var(--borda);border-top:0;border-radius:0 0 7px 7px;z-index:20;max-height:170px;overflow:auto"></div>
+      <div id="pdv-cli-sel" style="display:none;margin-top:.4rem;font-size:.82rem;color:var(--verde-claro)"></div>
       <div id="pdv-cli-novo" style="display:none;margin-top:.4rem;gap:.4rem;grid-template-columns:1fr 1fr">
         <input id="pdv-novo-nome" placeholder="Nome do novo cliente" class="prod-inp" style="margin:0">
         <input id="pdv-novo-cpf" placeholder="CPF (opcional)" class="prod-inp" style="margin:0">
@@ -2389,20 +2389,20 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
       <span class="pdv-pag-chip" data-pag="cartao" onclick="pdvPag(this)">Cartão</span>
     </div>
     <div id="pdv-erro" style="color:#d98a8a;font-size:.8rem;margin-bottom:.5rem;display:none"></div>
-    <div style="display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid #2a2a2b;padding-top:.6rem">
-      <span style="color:#888">Total</span><span id="pdv-total" style="color:#5dcaa5;font-size:1.3rem;font-weight:700">R$ 0,00</span>
+    <div style="display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid var(--borda);padding-top:.6rem">
+      <span style="color:#888">Total</span><span id="pdv-total" style="color:var(--verde-claro);font-size:1.3rem;font-weight:700">R$ 0,00</span>
     </div>
-    <button type="button" onclick="pdvFinalizar()" id="pdv-finalizar" style="width:100%;background:#1d9e75;color:#fff;padding:.65rem;border:0;border-radius:8px;cursor:pointer;font-weight:700;margin-top:.7rem">Finalizar venda</button>
+    <button type="button" onclick="pdvFinalizar()" id="pdv-finalizar" style="width:100%;background:var(--verde);color:#fff;padding:.65rem;border:0;border-radius:8px;cursor:pointer;font-weight:700;margin-top:.7rem">Finalizar venda</button>
   </div>
 </div>
 
 <style>
 .prod-acoes button{width:auto;margin-top:0}
 .prod-modal{position:fixed;inset:0;z-index:1000;background:#000000aa;display:flex;align-items:center;justify-content:center;padding:1rem}
-.prod-modal-box{background:#1c1c1f;border:1px solid #2a2a2b;border-radius:12px;padding:1.3rem;max-width:440px;width:100%;max-height:88vh;overflow-y:auto}
-.prod-inp{width:100%;box-sizing:border-box;padding:.5rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:6px;margin:.25rem 0 .6rem}
-.pdv-pag-chip{font-size:.78rem;color:#b4b2a9;background:#161617;border:1.5px solid #2a2a2b;border-radius:16px;padding:.3rem .8rem;cursor:pointer}
-.pdv-pag-chip.pdv-pag-sel{border-color:#1d9e75;color:#5dcaa5}
+.prod-modal-box{background:#1c1c1f;border:1px solid var(--borda);border-radius:12px;padding:1.3rem;max-width:440px;width:100%;max-height:88vh;overflow-y:auto}
+.prod-inp{width:100%;box-sizing:border-box;padding:.5rem;background:var(--bg);border:1px solid var(--borda);color:#f4f4f4;border-radius:6px;margin:.25rem 0 .6rem}
+.pdv-pag-chip{font-size:.78rem;color:#b4b2a9;background:var(--card);border:1.5px solid var(--borda);border-radius:16px;padding:.3rem .8rem;cursor:pointer}
+.pdv-pag-chip.pdv-pag-sel{border-color:var(--verde);color:var(--verde-claro)}
 </style>
 
 <script>
@@ -2421,19 +2421,19 @@ function pdvQtd(id,d){ var e=PDV_CART.find(function(x){return x.id==id;}); if(!e
 function pdvPreco(id,v){ var e=PDV_CART.find(function(x){return x.id==id;}); if(e){ e.preco=parseFloat(String(v).replace(',','.'))||0; } pdvRender(); }
 function pdvPag(el){ document.querySelectorAll('#pdv-pag .pdv-pag-chip').forEach(function(x){x.classList.remove('pdv-pag-sel');}); el.classList.add('pdv-pag-sel'); }
 function pdvFmt(n){ return 'R$ '+n.toFixed(2).replace('.',','); }
-function pdvRender(){ var box=document.getElementById('pdv-itens'); if(!PDV_CART.length){ box.innerHTML='<div style="color:#888;text-align:center;padding:1rem;font-size:.85rem">Carrinho vazio.</div>'; document.getElementById('pdv-total').textContent='R$ 0,00'; return; } var sub=0,h=''; PDV_CART.forEach(function(it){ var lt=it.preco*it.qtd; sub+=lt; h+='<div style="display:flex;align-items:center;gap:.5rem;padding:.4rem 0;border-bottom:1px solid #242426">'+'<div style="flex:1;min-width:0"><div style="color:#ececec;font-size:.85rem">'+it.nome+'</div><input type="number" step="0.01" value="'+it.preco.toFixed(2)+'" onchange="pdvPreco('+it.id+',this.value)" style="width:80px;background:#0e0e0f;border:1px solid #2a2a2b;color:#cfcfcf;border-radius:5px;padding:.2rem .3rem;font-size:.72rem;margin-top:.2rem"> <span style="color:#6a8a7a;font-size:.68rem">/'+it.unidade+'</span></div>'+'<div style="display:flex;align-items:center;gap:.3rem"><span onclick="pdvQtd('+it.id+',-1)" style="width:22px;height:22px;border-radius:5px;background:#1c1c1f;border:1px solid #3a3a3d;color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">-</span><span style="color:#ececec;font-size:.8rem;min-width:44px;text-align:center">'+it.qtd+' '+it.unidade+'</span><span onclick="pdvQtd('+it.id+',1)" style="width:22px;height:22px;border-radius:5px;background:#1c1c1f;border:1px solid #3a3a3d;color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">+</span></div>'+'<div style="color:#cfcfcf;font-size:.8rem;min-width:64px;text-align:right">'+pdvFmt(lt)+'</div>'+'</div>'; }); box.innerHTML=h; var desc=parseFloat(String(document.getElementById('pdv-desc').value).replace(',','.'))||0; var tot=sub-desc; if(tot<0)tot=0; document.getElementById('pdv-total').textContent=pdvFmt(tot); }
+function pdvRender(){ var box=document.getElementById('pdv-itens'); if(!PDV_CART.length){ box.innerHTML='<div style="color:#888;text-align:center;padding:1rem;font-size:.85rem">Carrinho vazio.</div>'; document.getElementById('pdv-total').textContent='R$ 0,00'; return; } var sub=0,h=''; PDV_CART.forEach(function(it){ var lt=it.preco*it.qtd; sub+=lt; h+='<div style="display:flex;align-items:center;gap:.5rem;padding:.4rem 0;border-bottom:1px solid #242426">'+'<div style="flex:1;min-width:0"><div style="color:var(--txt);font-size:.85rem">'+it.nome+'</div><input type="number" step="0.01" value="'+it.preco.toFixed(2)+'" onchange="pdvPreco('+it.id+',this.value)" style="width:80px;background:var(--bg);border:1px solid var(--borda);color:#cfcfcf;border-radius:5px;padding:.2rem .3rem;font-size:.72rem;margin-top:.2rem"> <span style="color:#6a8a7a;font-size:.68rem">/'+it.unidade+'</span></div>'+'<div style="display:flex;align-items:center;gap:.3rem"><span onclick="pdvQtd('+it.id+',-1)" style="width:22px;height:22px;border-radius:5px;background:#1c1c1f;border:1px solid #3a3a3d;color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">-</span><span style="color:var(--txt);font-size:.8rem;min-width:44px;text-align:center">'+it.qtd+' '+it.unidade+'</span><span onclick="pdvQtd('+it.id+',1)" style="width:22px;height:22px;border-radius:5px;background:#1c1c1f;border:1px solid #3a3a3d;color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">+</span></div>'+'<div style="color:#cfcfcf;font-size:.8rem;min-width:64px;text-align:right">'+pdvFmt(lt)+'</div>'+'</div>'; }); box.innerHTML=h; var desc=parseFloat(String(document.getElementById('pdv-desc').value).replace(',','.'))||0; var tot=sub-desc; if(tot<0)tot=0; document.getElementById('pdv-total').textContent=pdvFmt(tot); }
 var PDV_CLI=null, PDV_CLI_RES=[], PDV_CLI_T=null;
-function pdvCliBusca(q){ q=(q||'').trim(); PDV_CLI=null; document.getElementById('pdv-cli-sel').style.display='none'; if(PDV_CLI_T) clearTimeout(PDV_CLI_T); var sug=document.getElementById('pdv-cli-sug'); if(q.length<2){ sug.style.display='none'; return; } PDV_CLI_T=setTimeout(function(){ fetch('/painel/clientes/buscar?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(d){ PDV_CLI_RES=d.clientes||[]; var h=''; PDV_CLI_RES.forEach(function(c,i){ h+='<div onclick="pdvCliPick('+i+')" style="padding:.45rem .6rem;border-bottom:1px solid #242426;cursor:pointer;font-size:.82rem;color:#ececec">'+c.nome+'<span style="color:#6a8a7a;font-size:.72rem">'+(c.telefone?(' · '+c.telefone):'')+(c.cpf?(' · CPF '+c.cpf):'')+'</span></div>'; }); h+='<div onclick="pdvCliNovo()" style="padding:.45rem .6rem;cursor:pointer;font-size:.82rem;color:#5dcaa5">+ cadastrar novo cliente</div>'; sug.innerHTML=h; sug.style.display='block'; }).catch(function(){}); }, 250); }
+function pdvCliBusca(q){ q=(q||'').trim(); PDV_CLI=null; document.getElementById('pdv-cli-sel').style.display='none'; if(PDV_CLI_T) clearTimeout(PDV_CLI_T); var sug=document.getElementById('pdv-cli-sug'); if(q.length<2){ sug.style.display='none'; return; } PDV_CLI_T=setTimeout(function(){ fetch('/painel/clientes/buscar?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(d){ PDV_CLI_RES=d.clientes||[]; var h=''; PDV_CLI_RES.forEach(function(c,i){ h+='<div onclick="pdvCliPick('+i+')" style="padding:.45rem .6rem;border-bottom:1px solid #242426;cursor:pointer;font-size:.82rem;color:var(--txt)">'+c.nome+'<span style="color:#6a8a7a;font-size:.72rem">'+(c.telefone?(' · '+c.telefone):'')+(c.cpf?(' · CPF '+c.cpf):'')+'</span></div>'; }); h+='<div onclick="pdvCliNovo()" style="padding:.45rem .6rem;cursor:pointer;font-size:.82rem;color:var(--verde-claro)">+ cadastrar novo cliente</div>'; sug.innerHTML=h; sug.style.display='block'; }).catch(function(){}); }, 250); }
 function pdvCliPick(i){ var c=PDV_CLI_RES[i]; if(!c) return; PDV_CLI={id:c.id,nome:c.nome,telefone:c.telefone,cpf:c.cpf}; document.getElementById('pdv-cli-busca').value=c.nome; document.getElementById('pdv-cli-sug').style.display='none'; document.getElementById('pdv-cli-novo').style.display='none'; var sel=document.getElementById('pdv-cli-sel'); sel.innerHTML='✓ '+c.nome+' <a onclick="pdvCliLimpar()" style="color:#d98a8a;cursor:pointer;margin-left:.4rem">(trocar)</a>'; sel.style.display='block'; }
 function pdvCliNovo(){ document.getElementById('pdv-cli-sug').style.display='none'; var q=document.getElementById('pdv-cli-busca').value||''; var novo=document.getElementById('pdv-cli-novo'); novo.style.display='grid'; var digs=q.replace(/[^0-9]/g,""); if(digs.length>=11){ document.getElementById('pdv-novo-cpf').value=q; document.getElementById('pdv-novo-nome').value=''; } else { document.getElementById('pdv-novo-nome').value=q; } PDV_CLI=null; }
 function pdvCliLimpar(){ PDV_CLI=null; document.getElementById('pdv-cli-sel').style.display='none'; document.getElementById('pdv-cli-busca').value=''; document.getElementById('pdv-cli-novo').style.display='none'; document.getElementById('pdv-novo-nome').value=''; document.getElementById('pdv-novo-cpf').value=''; }
 function pdvFinalizar(){ if(!PDV_CART.length){ return; } var btn=document.getElementById('pdv-finalizar'); btn.disabled=true; btn.textContent='Registrando...'; var desc=parseFloat(String(document.getElementById('pdv-desc').value).replace(',','.'))||0; var pagEl=document.querySelector('#pdv-pag .pdv-pag-sel'); var payload={ itens:PDV_CART.map(function(it){ return {produto_id:it.id, quantidade:it.qtd, preco_unit_centavos:Math.round(it.preco*100)}; }), pagamento:pagEl?pagEl.getAttribute('data-pag'):'dinheiro', desconto_centavos:Math.round(desc*100) }; if(PDV_CLI&&PDV_CLI.id){ payload.cliente_id=PDV_CLI.id; payload.cliente_nome=PDV_CLI.nome; } else { var nn=(document.getElementById('pdv-novo-nome').value||'').trim(); var nc=(document.getElementById('pdv-novo-cpf').value||'').trim(); if(nn) payload.cliente_nome=nn; if(nc) payload.cliente_cpf=nc; } fetch('/painel/produtos/vender',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(d){ if(d.ok){ PDV_CART=[]; location.reload(); } else { var e=document.getElementById('pdv-erro'); e.textContent=d.erro||'erro'; e.style.display='block'; btn.disabled=false; btn.textContent='Finalizar venda'; } }).catch(function(){ var e=document.getElementById('pdv-erro'); e.textContent='erro de conexão'; e.style.display='block'; btn.disabled=false; btn.textContent='Finalizar venda'; }); }
 function prodNovoFotoPreview(url){ var prev=document.getElementById('prod-novo-previa'); var vazia=document.getElementById('prod-novo-previa-vazia'); url=(url||'').trim(); if(!url){ prev.style.backgroundImage='none'; if(vazia){ vazia.style.display='block'; vazia.textContent='📦'; } return; } var img=new Image(); img.onload=function(){ prev.style.backgroundImage="url('"+url+"')"; if(vazia) vazia.style.display='none'; }; img.onerror=function(){ prev.style.backgroundImage='none'; if(vazia){ vazia.style.display='block'; vazia.textContent='✗'; } }; img.src=url; }
-function prodSetCat(chip, valor){ var inp=document.getElementById('prod-f-categoria'); if(inp) inp.value=valor; var box=chip.parentElement; if(box) box.querySelectorAll('.prod-catchip').forEach(function(x){ x.style.border='1.5px solid #2a2a2b'; x.style.color='#b4b2a9'; }); chip.style.border='1.5px solid #1d9e75'; chip.style.color='#5dcaa5'; }
-function prodCatLimpaSel(){ var box=document.getElementById('prod-cat-chips'); if(box) box.querySelectorAll('.prod-catchip').forEach(function(x){ x.style.border='1.5px solid #2a2a2b'; x.style.color='#b4b2a9'; }); }
-function prodCatDestaca(valor){ var box=document.getElementById('prod-cat-chips'); if(!box) return; box.querySelectorAll('.prod-catchip').forEach(function(x){ var hit=x.textContent.trim()===valor; x.style.border=hit?'1.5px solid #1d9e75':'1.5px solid #2a2a2b'; x.style.color=hit?'#5dcaa5':'#b4b2a9'; }); }
+function prodSetCat(chip, valor){ var inp=document.getElementById('prod-f-categoria'); if(inp) inp.value=valor; var box=chip.parentElement; if(box) box.querySelectorAll('.prod-catchip').forEach(function(x){ x.style.border='1.5px solid var(--borda)'; x.style.color='#b4b2a9'; }); chip.style.border='1.5px solid var(--verde)'; chip.style.color='var(--verde-claro)'; }
+function prodCatLimpaSel(){ var box=document.getElementById('prod-cat-chips'); if(box) box.querySelectorAll('.prod-catchip').forEach(function(x){ x.style.border='1.5px solid var(--borda)'; x.style.color='#b4b2a9'; }); }
+function prodCatDestaca(valor){ var box=document.getElementById('prod-cat-chips'); if(!box) return; box.querySelectorAll('.prod-catchip').forEach(function(x){ var hit=x.textContent.trim()===valor; x.style.border=hit?'1.5px solid var(--verde)':'1.5px solid var(--borda)'; x.style.color=hit?'var(--verde-claro)':'#b4b2a9'; }); }
 var _prodSugTimer=null;
-function prodNovoBuscarSugestoes(){ var campo=document.getElementById('prod-f-nome'); var box=document.getElementById('prod-novo-sugestoes'); if(!campo||!box) return; var nome=(campo.value||'').trim(); if(nome.length<2){ box.innerHTML='<span style="font-size:.72rem;color:#6a6a6a">digite o nome acima</span>'; return; } clearTimeout(_prodSugTimer); _prodSugTimer=setTimeout(function(){ box.innerHTML='<span style="font-size:.72rem;color:#888780">buscando...</span>'; fetch('/painel/produtos/sugerir-fotos?nome='+encodeURIComponent(nome)).then(function(r){ return r.json(); }).then(function(d){ box.innerHTML=''; if(!d.opcoes||!d.opcoes.length){ box.innerHTML='<span style="font-size:.72rem;color:#888780">sem sugestões; cole um link</span>'; return; } d.opcoes.forEach(function(url){ var t=document.createElement('div'); t.style.cssText="width:40px;height:40px;border-radius:7px;background:url('"+url+"') center/cover;cursor:pointer;border:2px solid #2a2a2b;flex-shrink:0"; t.onclick=function(){ document.getElementById('prod-novo-foto-link').value=url; prodNovoFotoPreview(url); box.querySelectorAll('div').forEach(function(x){ x.style.border='2px solid #2a2a2b'; }); t.style.border='2px solid #1d9e75'; }; box.appendChild(t); }); }).catch(function(){ box.innerHTML='<span style="font-size:.72rem;color:#888780">erro ao buscar; cole um link</span>'; }); }, 450); }
+function prodNovoBuscarSugestoes(){ var campo=document.getElementById('prod-f-nome'); var box=document.getElementById('prod-novo-sugestoes'); if(!campo||!box) return; var nome=(campo.value||'').trim(); if(nome.length<2){ box.innerHTML='<span style="font-size:.72rem;color:#6a6a6a">digite o nome acima</span>'; return; } clearTimeout(_prodSugTimer); _prodSugTimer=setTimeout(function(){ box.innerHTML='<span style="font-size:.72rem;color:#888780">buscando...</span>'; fetch('/painel/produtos/sugerir-fotos?nome='+encodeURIComponent(nome)).then(function(r){ return r.json(); }).then(function(d){ box.innerHTML=''; if(!d.opcoes||!d.opcoes.length){ box.innerHTML='<span style="font-size:.72rem;color:#888780">sem sugestões; cole um link</span>'; return; } d.opcoes.forEach(function(url){ var t=document.createElement('div'); t.style.cssText="width:40px;height:40px;border-radius:7px;background:url('"+url+"') center/cover;cursor:pointer;border:2px solid var(--borda);flex-shrink:0"; t.onclick=function(){ document.getElementById('prod-novo-foto-link').value=url; prodNovoFotoPreview(url); box.querySelectorAll('div').forEach(function(x){ x.style.border='2px solid var(--borda)'; }); t.style.border='2px solid var(--verde)'; }; box.appendChild(t); }); }).catch(function(){ box.innerHTML='<span style="font-size:.72rem;color:#888780">erro ao buscar; cole um link</span>'; }); }, 450); }
 function prodNovo(){ document.getElementById('prod-form-titulo').textContent='Novo produto'; document.getElementById('prod-edit-id').value=''; document.getElementById('prod-f-nome').value=''; document.getElementById('prod-f-categoria').value=''; document.getElementById('prod-f-preco').value=''; document.getElementById('prod-f-min').value=''; document.getElementById('prod-novo-foto-link').value=''; prodNovoFotoPreview(''); prodCatLimpaSel(); document.getElementById('prod-novo-sugestoes').innerHTML='<span style="font-size:.72rem;color:#6a6a6a">digite o nome acima</span>'; document.getElementById('prod-modal-form').style.display='flex'; }
 function prodImportar(){ document.getElementById('prod-modal-importar').style.display='flex'; }
 function prodFiltrar(q){ q=q.toLowerCase(); var cards=document.querySelectorAll('.prod-card'); for(var i=0;i<cards.length;i++){ cards[i].style.display=cards[i].getAttribute('data-nome').indexOf(q)>-1?'':'none'; } }
@@ -2443,14 +2443,14 @@ function prodPerda(id){ document.getElementById('prod-mov-titulo').textContent='
 function prodApagar(id){ if(confirm('Apagar '+window.PRODUTOS[id].nome+'? Ele some do catálogo. O histórico fica guardado.')){ document.getElementById('prod-apagar-id').value=id; document.getElementById('prod-apagar-form').submit(); } }
 function prodSugereCategoria(nome){ if(!nome||nome.length<3){ return; } var c=document.getElementById('prod-f-categoria'); if(!c||c.value){ return; } fetch('/painel/produtos/sugerir-categoria?nome='+encodeURIComponent(nome)).then(function(r){ return r.json(); }).then(function(d){ if(d.categoria&&!c.value){ if(c.tagName==='SELECT'){ for(var i=0;i<c.options.length;i++){ if(c.options[i].value===d.categoria){ c.value=d.categoria; break; } } } else { c.value=d.categoria; } } }).catch(function(){}); }
 function prodFotoPreview(url){ var prev=document.getElementById('prod-foto-previa'); var vazia=document.getElementById('prod-foto-previa-vazia'); if(!url){ prev.style.backgroundImage='none'; vazia.style.display='block'; prodFotoEscolhida=null; return; } var img=new Image(); img.onload=function(){ prev.style.backgroundImage="url('"+url+"')"; vazia.style.display='none'; prodFotoEscolhida=url; }; img.onerror=function(){ prev.style.backgroundImage='none'; vazia.style.display='block'; vazia.textContent='⚠'; prodFotoEscolhida=null; }; img.src=url; }
-function prodFoto(pid){ var p=window.PRODUTOS[pid]; document.getElementById('prod-foto-pid').value=pid; document.getElementById('prod-foto-nome').textContent=p.nome; document.getElementById('prod-foto-link').value=p.foto_url||''; prodFotoPreview(p.foto_url||''); document.getElementById('prod-modal-foto').style.display='flex'; var box=document.getElementById('prod-foto-sugestoes'); box.innerHTML='<span style="font-size:.74rem;color:#888780">buscando...</span>'; fetch('/painel/produtos/sugerir-fotos?nome='+encodeURIComponent(p.nome)).then(function(r){ return r.json(); }).then(function(d){ box.innerHTML=''; if(!d.opcoes.length){ box.innerHTML='<span style="font-size:.74rem;color:#888780">Sem sugestões. Cole um link.</span>'; return; } d.opcoes.forEach(function(url){ var t=document.createElement('div'); t.style.cssText="width:56px;height:56px;border-radius:8px;background:url('"+url+"') center/cover;cursor:pointer;border:2px solid #2a2a2b"; t.onclick=function(){ document.getElementById('prod-foto-link').value=url; prodFotoPreview(url); }; box.appendChild(t); }); }).catch(function(){ box.innerHTML='<span style="font-size:.74rem;color:#888780">Erro ao buscar. Cole um link.</span>'; }); }
+function prodFoto(pid){ var p=window.PRODUTOS[pid]; document.getElementById('prod-foto-pid').value=pid; document.getElementById('prod-foto-nome').textContent=p.nome; document.getElementById('prod-foto-link').value=p.foto_url||''; prodFotoPreview(p.foto_url||''); document.getElementById('prod-modal-foto').style.display='flex'; var box=document.getElementById('prod-foto-sugestoes'); box.innerHTML='<span style="font-size:.74rem;color:#888780">buscando...</span>'; fetch('/painel/produtos/sugerir-fotos?nome='+encodeURIComponent(p.nome)).then(function(r){ return r.json(); }).then(function(d){ box.innerHTML=''; if(!d.opcoes.length){ box.innerHTML='<span style="font-size:.74rem;color:#888780">Sem sugestões. Cole um link.</span>'; return; } d.opcoes.forEach(function(url){ var t=document.createElement('div'); t.style.cssText="width:56px;height:56px;border-radius:8px;background:url('"+url+"') center/cover;cursor:pointer;border:2px solid var(--borda)"; t.onclick=function(){ document.getElementById('prod-foto-link').value=url; prodFotoPreview(url); }; box.appendChild(t); }); }).catch(function(){ box.innerHTML='<span style="font-size:.74rem;color:#888780">Erro ao buscar. Cole um link.</span>'; }); }
 function prodFotoSalvar(){ var pid=document.getElementById('prod-foto-pid').value; var url=(prodFotoEscolhida||document.getElementById('prod-foto-link').value.trim()||''); fetch('/painel/produtos/foto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:parseInt(pid),foto_url:url})}).then(function(r){ return r.json(); }).then(function(){ location.reload(); }).catch(function(){ alert('Não foi possível salvar a foto.'); }); }
 function prodFotoRemover(){ var pid=document.getElementById('prod-foto-pid').value; fetch('/painel/produtos/foto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:parseInt(pid),foto_url:''})}).then(function(r){ return r.json(); }).then(function(){ location.reload(); }).catch(function(){ alert('Não foi possível remover.'); }); }
 function prodFotoUpload(input){ var file=input.files[0]; if(!file){ return; } var pid=document.getElementById('prod-foto-pid').value; var status=document.getElementById('prod-foto-upload-status'); status.textContent='Enviando foto...'; var reader=new FileReader(); reader.onload=function(e){ prodFotoPreview(e.target.result); }; reader.readAsDataURL(file); var fd=new FormData(); fd.append('produto_id',pid); fd.append('arquivo',file); fetch('/painel/produtos/upload-foto',{method:'POST',body:fd}).then(function(r){ return r.json(); }).then(function(d){ if(d.erro){ status.textContent='⚠ '+d.erro; return; } status.textContent='✓ Foto enviada!'; setTimeout(function(){ location.reload(); },600); }).catch(function(){ status.textContent='⚠ Falhou. Tente de novo.'; }); }
 function prodPromo(id){ var p=window.PRODUTOS[id]; document.getElementById('prod-promo-pid').value=id; document.getElementById('prod-promo-nome').textContent=p.nome; document.getElementById('prod-promo-ativo').checked=p.em_promo; document.getElementById('prod-promo-preco').value=p.em_promo?p.preco_promo:''; document.getElementById('prod-promo-preco-wrap').style.display=p.em_promo?'block':'none'; document.getElementById('prod-modal-promo').style.display='flex'; }
 function prodPromoToggle(){ document.getElementById('prod-promo-preco-wrap').style.display=document.getElementById('prod-promo-ativo').checked?'block':'none'; }
 function prodPromoSalvar(){ var pid=document.getElementById('prod-promo-pid').value; var ativo=document.getElementById('prod-promo-ativo').checked; var preco=parseFloat(document.getElementById('prod-promo-preco').value||0); fetch('/painel/produtos/promo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:parseInt(pid),em_promo:ativo,preco_promo:preco})}).then(function(r){ return r.json(); }).then(function(){ location.reload(); }).catch(function(){ alert('Não foi possível salvar a promoção.'); }); }
-function prodLerPlanilha(input){ var file=input.files[0]; if(!file){ return; } var fd=new FormData(); fd.append('arquivo',file); var prev=document.getElementById('prod-planilha-previa'); prev.innerHTML='<span class="mut">lendo...</span>'; fetch('/painel/produtos/ler-planilha',{method:'POST',body:fd}).then(function(r){ return r.json(); }).then(function(d){ if(!d.ok){ prev.innerHTML='<span style="color:#ff6b6b">'+(d.erro||'erro')+'</span>'; return; } prodItensPlanilha=d.itens||[]; if(!prodItensPlanilha.length){ prev.innerHTML='<span class="mut">Nenhum item válido.</span>'; return; } prev.innerHTML='<div style="font-size:.85rem;margin-bottom:.5rem">'+prodItensPlanilha.length+' itens lidos.</div><button type="button" id="prod-planilha-btn" style="width:100%;background:#1d9e75;color:#fff;border:0;border-radius:8px;padding:.6rem;font-weight:600;cursor:pointer">Importar '+prodItensPlanilha.length+' produtos</button>'; document.getElementById('prod-planilha-btn').onclick=prodImportarConfirma; }).catch(function(){ prev.innerHTML='<span style="color:#ff6b6b">Erro ao ler.</span>'; }); }
+function prodLerPlanilha(input){ var file=input.files[0]; if(!file){ return; } var fd=new FormData(); fd.append('arquivo',file); var prev=document.getElementById('prod-planilha-previa'); prev.innerHTML='<span class="mut">lendo...</span>'; fetch('/painel/produtos/ler-planilha',{method:'POST',body:fd}).then(function(r){ return r.json(); }).then(function(d){ if(!d.ok){ prev.innerHTML='<span style="color:#ff6b6b">'+(d.erro||'erro')+'</span>'; return; } prodItensPlanilha=d.itens||[]; if(!prodItensPlanilha.length){ prev.innerHTML='<span class="mut">Nenhum item válido.</span>'; return; } prev.innerHTML='<div style="font-size:.85rem;margin-bottom:.5rem">'+prodItensPlanilha.length+' itens lidos.</div><button type="button" id="prod-planilha-btn" style="width:100%;background:var(--verde);color:#fff;border:0;border-radius:8px;padding:.6rem;font-weight:600;cursor:pointer">Importar '+prodItensPlanilha.length+' produtos</button>'; document.getElementById('prod-planilha-btn').onclick=prodImportarConfirma; }).catch(function(){ prev.innerHTML='<span style="color:#ff6b6b">Erro ao ler.</span>'; }); }
 function prodImportarConfirma(){ fetch('/painel/produtos/importar-planilha',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({itens:prodItensPlanilha})}).then(function(r){ return r.json(); }).then(function(d){ if(d.ok){ location.reload(); } else { alert(d.erro||'Erro ao importar'); } }).catch(function(){ alert('Erro ao importar'); }); }
 </script>
 {% endblock %}"""
@@ -2461,7 +2461,7 @@ _ABASTECIMENTO = """{% extends "base" %}{% block conteudo %}
     <h2 style="margin:0">🛒 Abastecimento <span style="color:#6a6a66;font-size:.7rem;font-weight:400">· entradas que repõem o estoque</span></h2>
     <div style="display:flex;gap:.5rem">
       <a href="/painel/produtos" style="padding:.5rem 1rem;background:transparent;border:1px solid #3a3a3d;color:#b4b2a9;border-radius:8px;text-decoration:none;font-size:.9rem">← Produtos</a>
-      <button type="button" onclick="abastShowNova()" style="padding:.5rem 1rem;background:#1d9e75;color:#fff;border:0;border-radius:8px;cursor:pointer;font-weight:600;font-size:.9rem">+ nova compra</button>
+      <button type="button" onclick="abastShowNova()" style="padding:.5rem 1rem;background:var(--verde);color:#fff;border:0;border-radius:8px;cursor:pointer;font-weight:600;font-size:.9rem">+ nova compra</button>
     </div>
   </div>
   {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
@@ -2469,13 +2469,13 @@ _ABASTECIMENTO = """{% extends "base" %}{% block conteudo %}
   <div style="display:flex;flex-direction:column;gap:.8rem;margin-top:1rem">
     {% if compras %}
       {% for c in compras %}
-      <div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1rem">
+      <div style="background:#1c1c1f;border:1px solid var(--borda);border-radius:8px;padding:1rem">
         <div style="display:flex;justify-content:space-between;align-items:start">
           <div>
-            <strong>#{{ c.id }}</strong> · <span class="mut">{{ c.data_compra }}</span> · <span style="{% if c.status == 'confirmada' %}color:#1d9e75{% else %}color:#ffa500{% endif %}">{{ c.status }}</span>
+            <strong>#{{ c.id }}</strong> · <span class="mut">{{ c.data_compra }}</span> · <span style="{% if c.status == 'confirmada' %}color:var(--verde){% else %}color:#ffa500{% endif %}">{{ c.status }}</span>
             <div class="mut" style="font-size:.85rem;margin-top:.3rem">Total: <strong>R$ {{ "%.2f" | format(c.total_centavos / 100) }}</strong> | Origem: {{ c.origem_nome or '-' }} | Fonte: {{ c.fonte }}</div>
           </div>
-          <a href="/painel/produtos/abastecimento/{{ c.id }}" style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;border-radius:4px;padding:.3rem .6rem;font-size:.85rem;text-decoration:none">revisar</a>
+          <a href="/painel/produtos/abastecimento/{{ c.id }}" style="background:transparent;border:1px solid var(--verde-claro);color:var(--verde-claro);border-radius:4px;padding:.3rem .6rem;font-size:.85rem;text-decoration:none">revisar</a>
         </div>
       </div>
       {% endfor %}
@@ -2483,15 +2483,15 @@ _ABASTECIMENTO = """{% extends "base" %}{% block conteudo %}
     <p class="mut">Nenhuma compra ainda. Clique em "+ nova compra" pra começar.</p>
     {% endif %}
   </div>
-  <div id="abast-nova" style="display:none;margin-top:1.5rem;padding:1.2rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px">
+  <div id="abast-nova" style="display:none;margin-top:1.5rem;padding:1.2rem;background:#1c1c1f;border:1px solid var(--borda);border-radius:8px">
     <h4 style="margin-top:0">Nova compra</h4>
     <div style="display:flex;gap:.6rem;margin-bottom:1rem">
-      <button type="button" onclick="abastShowManual()" style="flex:1;background:#1d9e75;color:#fff;padding:.5rem;border:0;border-radius:6px;cursor:pointer;font-weight:500">Manual (digitar itens)</button>
-      <button type="button" onclick="alert('Leitura de nota chega em breve.')" style="flex:1;background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;padding:.5rem;border-radius:6px;cursor:pointer;font-weight:500">Com nota (em breve)</button>
+      <button type="button" onclick="abastShowManual()" style="flex:1;background:var(--verde);color:#fff;padding:.5rem;border:0;border-radius:6px;cursor:pointer;font-weight:500">Manual (digitar itens)</button>
+      <button type="button" onclick="alert('Leitura de nota chega em breve.')" style="flex:1;background:transparent;border:1px solid var(--verde-claro);color:var(--verde-claro);padding:.5rem;border-radius:6px;cursor:pointer;font-weight:500">Com nota (em breve)</button>
     </div>
-    <button type="button" onclick="abastHide('abast-nova')" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;font-size:.85rem">Cancelar</button>
+    <button type="button" onclick="abastHide('abast-nova')" style="background:transparent;border:none;color:var(--verde-claro);cursor:pointer;font-size:.85rem">Cancelar</button>
   </div>
-  <div id="abast-manual" style="display:none;margin-top:1rem;padding:1rem;background:#161617;border:1px solid #2a2a2b;border-radius:6px">
+  <div id="abast-manual" style="display:none;margin-top:1rem;padding:1rem;background:var(--card);border:1px solid var(--borda);border-radius:6px">
     <h4 style="margin-top:0;margin-bottom:.8rem">Nova compra manual</h4>
     <form method="post" action="/painel/produtos/abastecimento/criar">
       <label>Data da compra</label><input type="date" name="data_compra" style="width:100%">
@@ -2500,19 +2500,19 @@ _ABASTECIMENTO = """{% extends "base" %}{% block conteudo %}
         <option value="">Selecione uma origem</option>
         {% for o in origens %}<option value="{{ o.id }}">{{ o.nome }}</option>{% endfor %}
       </select>
-      <button type="button" onclick="abastShowOrigem()" style="background:transparent;border:1px solid #5dcaa5;color:#5dcaa5;padding:.3rem .6rem;cursor:pointer;font-size:.85rem;margin-top:.3rem">+ Nova origem</button>
-      <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.8rem;width:100%;font-weight:500">Criar compra</button>
+      <button type="button" onclick="abastShowOrigem()" style="background:transparent;border:1px solid var(--verde-claro);color:var(--verde-claro);padding:.3rem .6rem;cursor:pointer;font-size:.85rem;margin-top:.3rem">+ Nova origem</button>
+      <button style="background:var(--verde);color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.8rem;width:100%;font-weight:500">Criar compra</button>
     </form>
-    <button type="button" onclick="abastHide('abast-manual')" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;margin-top:.5rem;font-size:.85rem">Cancelar</button>
+    <button type="button" onclick="abastHide('abast-manual')" style="background:transparent;border:none;color:var(--verde-claro);cursor:pointer;margin-top:.5rem;font-size:.85rem">Cancelar</button>
   </div>
-  <div id="abast-origem" style="display:none;margin-top:1rem;padding:1rem;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:6px">
+  <div id="abast-origem" style="display:none;margin-top:1rem;padding:1rem;background:#1c1c1f;border:1px solid var(--borda);border-radius:6px">
     <h4 style="margin-top:0;margin-bottom:.6rem">Nova origem</h4>
     <form method="post" action="/painel/produtos/abastecimento/origem">
       <label>Nome</label><input name="nome" required placeholder="ex: CEASA, Sítio do João" style="width:100%">
       <label>Contato (opcional)</label><input name="contato" placeholder="tel, email, whatsapp" style="width:100%">
-      <button style="background:#1d9e75;color:#fff;padding:.4rem .8rem;border:0;border-radius:4px;cursor:pointer;margin-top:.5rem;font-weight:500">Criar origem</button>
+      <button style="background:var(--verde);color:#fff;padding:.4rem .8rem;border:0;border-radius:4px;cursor:pointer;margin-top:.5rem;font-weight:500">Criar origem</button>
     </form>
-    <button type="button" onclick="abastHide('abast-origem')" style="background:transparent;border:none;color:#5dcaa5;cursor:pointer;font-size:.85rem;margin-top:.5rem">Cancelar</button>
+    <button type="button" onclick="abastHide('abast-origem')" style="background:transparent;border:none;color:var(--verde-claro);cursor:pointer;font-size:.85rem;margin-top:.5rem">Cancelar</button>
   </div>
 </div>
 <script>
@@ -2527,14 +2527,14 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
     <h2 style="margin:0">👥 Clientes <span style="color:#6a6a66;font-size:.7rem;font-weight:400">· {{ total }} na base</span></h2>
-    <button type="button" onclick="document.getElementById('cli-novo').style.display='block'" style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:8px;cursor:pointer;font-weight:600;width:auto">+ novo cliente</button>
+    <button type="button" onclick="document.getElementById('cli-novo').style.display='block'" style="background:var(--verde);color:#fff;padding:.5rem 1rem;border:0;border-radius:8px;cursor:pointer;font-weight:600;width:auto">+ novo cliente</button>
   </div>
   {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
   {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
   <form method="get" action="/painel/clientes" style="margin:1rem 0">
     <input name="busca" value="{{ busca }}" placeholder="🔍 buscar por nome, telefone ou CPF..." style="width:100%">
   </form>
-  <div id="cli-novo" style="display:none;background:#161617;border:1px solid #2a2a2b;border-radius:8px;padding:1rem;margin-bottom:1rem">
+  <div id="cli-novo" style="display:none;background:var(--card);border:1px solid var(--borda);border-radius:8px;padding:1rem;margin-bottom:1rem">
     <h4 style="margin-top:0">Novo cliente</h4>
     <form method="post" action="/painel/clientes/novo">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
@@ -2546,7 +2546,7 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
         <div><label>Obs</label><input name="obs" style="width:100%"></div>
       </div>
       <div style="display:flex;gap:.5rem;margin-top:.7rem">
-        <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;font-weight:500;width:auto">Salvar</button>
+        <button style="background:var(--verde);color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;font-weight:500;width:auto">Salvar</button>
         <button type="button" onclick="document.getElementById('cli-novo').style.display='none'" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:6px;padding:.5rem 1rem;cursor:pointer;width:auto">Cancelar</button>
       </div>
     </form>
@@ -2554,9 +2554,9 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
   <div style="display:flex;flex-direction:column;gap:.5rem">
     {% if clientes %}
       {% for c in clientes %}
-      <a href="/painel/clientes/{{ c.id }}" style="display:flex;justify-content:space-between;align-items:center;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:.7rem .9rem;text-decoration:none">
-        <div><div style="color:#ececec">{{ c.nome }}</div><div class="mut" style="font-size:.8rem">{% if c.telefone %}📱 {{ c.telefone }}{% endif %}{% if c.cpf %} · CPF {{ c.cpf }}{% endif %}{% if c.obs %} · {{ c.obs }}{% endif %}</div></div>
-        <span style="color:#5dcaa5;font-size:.85rem">ver →</span>
+      <a href="/painel/clientes/{{ c.id }}" style="display:flex;justify-content:space-between;align-items:center;background:#1c1c1f;border:1px solid var(--borda);border-radius:8px;padding:.7rem .9rem;text-decoration:none">
+        <div><div style="color:var(--txt)">{{ c.nome }}</div><div class="mut" style="font-size:.8rem">{% if c.telefone %}📱 {{ c.telefone }}{% endif %}{% if c.cpf %} · CPF {{ c.cpf }}{% endif %}{% if c.obs %} · {{ c.obs }}{% endif %}</div></div>
+        <span style="color:var(--verde-claro);font-size:.85rem">ver →</span>
       </a>
       {% endfor %}
     {% else %}
@@ -2569,13 +2569,13 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
 
 _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
-  <a href="/painel/clientes" style="color:#5dcaa5;text-decoration:none;font-size:.85rem">← Clientes</a>
+  <a href="/painel/clientes" style="color:var(--verde-claro);text-decoration:none;font-size:.85rem">← Clientes</a>
   {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
   {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
   <h2 style="margin:.4rem 0">{{ cliente.nome }}</h2>
   <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-bottom:1rem">
     <div><div class="mut" style="font-size:.75rem">Compras</div><div style="font-size:1.1rem">{{ resumo.n }}</div></div>
-    <div><div class="mut" style="font-size:.75rem">Total</div><div style="font-size:1.1rem;color:#5dcaa5">R$ {{ "%.2f"|format(resumo.total_centavos/100) }}</div></div>
+    <div><div class="mut" style="font-size:.75rem">Total</div><div style="font-size:1.1rem;color:var(--verde-claro)">R$ {{ "%.2f"|format(resumo.total_centavos/100) }}</div></div>
     <div><div class="mut" style="font-size:.75rem">Ticket médio</div><div style="font-size:1.1rem">R$ {{ "%.2f"|format(resumo.ticket_centavos/100) }}</div></div>
     <div><div class="mut" style="font-size:.75rem">Última</div><div style="font-size:1.1rem">{{ resumo.ultima or '—' }}</div></div>
   </div>
@@ -2589,21 +2589,21 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
         <div><label>Aniversário</label><input type="date" name="aniversario" value="{{ cliente.aniversario or '' }}" style="width:100%"></div>
         <div><label>Obs</label><input name="obs" value="{{ cliente.obs or '' }}" style="width:100%"></div>
       </div>
-      <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.7rem;width:auto">Salvar</button>
+      <button style="background:var(--verde);color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.7rem;width:auto">Salvar</button>
     </form>
   </details>
   {% if fiados %}
-  <div style="background:#161617;border:1px solid #3a2f17;border-radius:10px;padding:.8rem 1rem;margin-bottom:1rem">
+  <div style="background:var(--card);border:1px solid #3a2f17;border-radius:10px;padding:.8rem 1rem;margin-bottom:1rem">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">
       <span style="color:#e0b878;font-weight:600">Em aberto (fiado)</span>
       <span style="color:#e0b878;font-weight:700">R$ {{ "%.2f"|format(fiado_total/100) }}</span>
     </div>
     {% for f in fiados %}
     <div style="display:flex;justify-content:space-between;align-items:center;padding:.45rem 0;border-top:1px solid #242426">
-      <div style="font-size:.82rem;color:#cfcfcf">Fiado #{{ f.id }} <span style="color:#888;font-size:.74rem">· vence {{ f.vencimento }}</span><br><span style="color:#ececec">R$ {{ "%.2f"|format(f.valor_centavos/100) }}</span></div>
+      <div style="font-size:.82rem;color:#cfcfcf">Fiado #{{ f.id }} <span style="color:#888;font-size:.74rem">· vence {{ f.vencimento }}</span><br><span style="color:var(--txt)">R$ {{ "%.2f"|format(f.valor_centavos/100) }}</span></div>
       <div style="display:flex;gap:.4rem;align-items:center">
         {% if f.link %}<a href="{{ f.link }}" target="_blank" style="color:#c99536;font-size:.76rem">link Pix ↗</a>{% else %}<form method="post" action="/painel/clientes/{{ cliente.id }}/fiado/{{ f.id }}/cobrar" style="display:inline"><button style="background:none;border:1px solid #c99536;color:#c99536;border-radius:5px;padding:.25rem .55rem;cursor:pointer;font-size:.74rem;width:auto">cobrar Pix</button></form>{% endif %}
-        <form method="post" action="/painel/clientes/{{ cliente.id }}/fiado/{{ f.id }}/baixar" style="display:inline" onsubmit="return confirm('Confirmar recebimento deste fiado?')"><button style="background:none;border:1px solid #1d9e75;color:#5dcaa5;border-radius:5px;padding:.25rem .55rem;cursor:pointer;font-size:.74rem;width:auto">dar baixa</button></form>
+        <form method="post" action="/painel/clientes/{{ cliente.id }}/fiado/{{ f.id }}/baixar" style="display:inline" onsubmit="return confirm('Confirmar recebimento deste fiado?')"><button style="background:none;border:1px solid var(--verde);color:var(--verde-claro);border-radius:5px;padding:.25rem .55rem;cursor:pointer;font-size:.74rem;width:auto">dar baixa</button></form>
       </div>
     </div>
     {% endfor %}
@@ -2613,7 +2613,7 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
   {% if compras %}
   <div style="display:flex;flex-direction:column;gap:.4rem">
     {% for v in compras %}
-    <div style="display:flex;justify-content:space-between;background:#1c1c1f;border:1px solid #2a2a2b;border-radius:6px;padding:.5rem .8rem">
+    <div style="display:flex;justify-content:space-between;background:#1c1c1f;border:1px solid var(--borda);border-radius:6px;padding:.5rem .8rem">
       <div><span class="mut" style="font-size:.8rem">{{ v.data }}</span>{% if v.pagamento %}<span class="mut" style="font-size:.72rem"> · {{ v.pagamento }}</span>{% endif %}</div>
       <div style="color:#cfcfcf">R$ {{ "%.2f"|format(v.valor_centavos/100) }}</div>
     </div>
@@ -2753,13 +2753,13 @@ _VENDA_DETALHE = """{% extends "base" %}{% block conteudo %}
   <div class="mut" style="font-size:.72rem;margin-bottom:.3rem">{{ itens|length }} item(ns)</div>
   {% for it in itens %}
   <div style="display:flex;justify-content:space-between;padding:.45rem 0;border-bottom:1px solid #242426">
-    <div style="font-size:.88rem;color:#ececec">{{ it.descricao }} <span class="mut" style="font-size:.72rem">· {{ it.quantidade }} {{ it.unidade }} × R$ {{ "%.2f"|format(it.vu/100) }}</span></div>
+    <div style="font-size:.88rem;color:var(--txt)">{{ it.descricao }} <span class="mut" style="font-size:.72rem">· {{ it.quantidade }} {{ it.unidade }} × R$ {{ "%.2f"|format(it.vu/100) }}</span></div>
     <div style="font-size:.88rem">R$ {{ "%.2f"|format(it.vt/100) }}</div>
   </div>
   {% endfor %}
   <div style="display:flex;justify-content:space-between;color:#888;font-size:.82rem;padding-top:.5rem"><span>Subtotal</span><span>R$ {{ "%.2f"|format(venda.subtotal_centavos/100) }}</span></div>
   {% if venda.desconto_centavos %}<div style="display:flex;justify-content:space-between;color:#888;font-size:.82rem"><span>Desconto</span><span>− R$ {{ "%.2f"|format(venda.desconto_centavos/100) }}</span></div>{% endif %}
-  <div style="display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid #2a2a2b;padding-top:.5rem;margin-top:.3rem"><span class="mut">Total</span><span style="color:#5dcaa5;font-size:1.3rem;font-weight:700">R$ {{ "%.2f"|format(venda.valor_centavos/100) }}</span></div>
+  <div style="display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid var(--borda);padding-top:.5rem;margin-top:.3rem"><span class="mut">Total</span><span style="color:var(--verde-claro);font-size:1.3rem;font-weight:700">R$ {{ "%.2f"|format(venda.valor_centavos/100) }}</span></div>
 </div>
 {% endblock %}"""
 
@@ -2767,8 +2767,8 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
     <div><h2 style="margin:0">🏢 Empresa</h2>
-      <div class="mut" style="font-size:.82rem">{{ empresa_nome }}{% if empresa_doc %} · CNPJ {{ empresa_doc }}{% endif %}<a href="/painel/empresa/dados" style="color:#5dcaa5;font-size:.72rem;margin-left:.4rem;text-decoration:none">editar dados ›</a></div></div>
-    <span style="background:#15301f;color:#5dcaa5;font-size:.72rem;font-weight:600;padding:.25rem .7rem;border-radius:14px;border:1px solid #1d9e7544">Módulo PJ ativo</span>
+      <div class="mut" style="font-size:.82rem">{{ empresa_nome }}{% if empresa_doc %} · CNPJ {{ empresa_doc }}{% endif %}<a href="/painel/empresa/dados" style="color:var(--verde-claro);font-size:.72rem;margin-left:.4rem;text-decoration:none">editar dados ›</a></div></div>
+    <span style="background:#15301f;color:var(--verde-claro);font-size:.72rem;font-weight:600;padding:.25rem .7rem;border-radius:14px;border:1px solid var(--verde)44">Módulo PJ ativo</span>
   </div>
 
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.6rem;margin-top:1rem">
@@ -2776,13 +2776,13 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
       <div style="font-size:1.3rem;color:#e07a5f;font-weight:600">{{ res.a_pagar_centavos|brl }}</div>
       <div class="mut" style="font-size:.68rem">{{ res.n_pagar }} título(s)</div></div>
     <div class="card" style="margin:0"><div class="mut" style="font-size:.72rem">A receber ({{ res.dias }} dias)</div>
-      <div style="font-size:1.3rem;color:#5dcaa5;font-weight:600">{{ res.a_receber_centavos|brl }}</div>
+      <div style="font-size:1.3rem;color:var(--verde-claro);font-weight:600">{{ res.a_receber_centavos|brl }}</div>
       <div class="mut" style="font-size:.68rem">{{ res.n_receber }} título(s)</div></div>
     <div class="card" style="margin:0"><div class="mut" style="font-size:.72rem">Atrasados</div>
       <div style="font-size:1.3rem;color:#f0c05a;font-weight:600">{{ res.n_atrasados }}</div>
       <div class="mut" style="font-size:.68rem">{{ res.atrasados_centavos|brl }}</div></div>
-    <div class="card" style="margin:0;border-color:#1d9e7533"><div class="mut" style="font-size:.72rem">Saldo projetado (30d)</div>
-      <div style="font-size:1.3rem;color:#5dcaa5;font-weight:600">{{ fluxo.saldo_projetado_centavos|brl }}</div>
+    <div class="card" style="margin:0;border-color:var(--verde)33"><div class="mut" style="font-size:.72rem">Saldo projetado (30d)</div>
+      <div style="font-size:1.3rem;color:var(--verde-claro);font-weight:600">{{ fluxo.saldo_projetado_centavos|brl }}</div>
       <div class="mut" style="font-size:.68rem">caixa + previsto</div></div>
   </div>
 </div>
@@ -2793,7 +2793,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   <table style="width:100%;margin-top:.6rem;font-size:.85rem">
     <tr class="mut" style="font-size:.72rem"><td>Semana</td><td style="text-align:right">Entra</td><td style="text-align:right">Sai</td><td style="text-align:right">Saldo previsto</td></tr>
     {% for p in fluxo.pontos %}<tr><td>até {{ p.ate.strftime('%d/%m') }}</td>
-      <td style="text-align:right;color:#5dcaa5">{{ p.receber_centavos|brl }}</td>
+      <td style="text-align:right;color:var(--verde-claro)">{{ p.receber_centavos|brl }}</td>
       <td style="text-align:right;color:#e07a5f">{{ p.pagar_centavos|brl }}</td>
       <td style="text-align:right;font-weight:600">{{ p.saldo_centavos|brl }}</td></tr>{% endfor %}
   </table>
@@ -2803,13 +2803,13 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   <div style="display:flex;justify-content:space-between"><strong>DRE do mês (simplificado)</strong>
     <span class="mut" style="font-size:.72rem">{{ '%02d'|format(dre.mes) }}/{{ dre.ano }}</span></div>
   <table style="width:100%;margin-top:.6rem;font-size:.9rem">
-    <tr><td class="mut">Receitas</td><td style="text-align:right;color:#5dcaa5">{{ dre.receitas_centavos|brl }}</td></tr>
+    <tr><td class="mut">Receitas</td><td style="text-align:right;color:var(--verde-claro)">{{ dre.receitas_centavos|brl }}</td></tr>
     <tr><td class="mut">(−) Despesas</td><td style="text-align:right">{{ dre.despesas_centavos|brl }}</td></tr>
-    <tr style="border-top:1px solid #2a2a2b"><td style="font-weight:600">Resultado</td>
-      <td style="text-align:right;font-weight:600;color:{{ '#5dcaa5' if dre.resultado_centavos>=0 else '#e07a5f' }}">{{ dre.resultado_centavos|brl }} · {{ dre.margem_pct }}%</td></tr>
+    <tr style="border-top:1px solid var(--borda)"><td style="font-weight:600">Resultado</td>
+      <td style="text-align:right;font-weight:600;color:{{ 'var(--verde-claro)' if dre.resultado_centavos>=0 else '#e07a5f' }}">{{ dre.resultado_centavos|brl }} · {{ dre.margem_pct }}%</td></tr>
   </table>
 
-  <div class="mut" style="font-size:.75rem;margin-top:.8rem">Relatório do contador: <a href="/painel/empresa/contador.csv?ano={{ dre.ano }}&mes={{ dre.mes }}" style="color:#5dcaa5">baixar planilha ({{ '%02d'|format(dre.mes) }}/{{ dre.ano }}) ↓</a></div>
+  <div class="mut" style="font-size:.75rem;margin-top:.8rem">Relatório do contador: <a href="/painel/empresa/contador.csv?ano={{ dre.ano }}&mes={{ dre.mes }}" style="color:var(--verde-claro)">baixar planilha ({{ '%02d'|format(dre.mes) }}/{{ dre.ano }}) ↓</a></div>
 </div>
 
 <div class="card larga">
@@ -2820,7 +2820,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     <label style="font-size:.72rem;color:#8a938a">Descrição<input name="descricao" required placeholder="Ex: Aluguel do ponto" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Valor R$<input name="valor" required inputmode="decimal" placeholder="0,00" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Vencimento<input name="vencimento" type="date" required style="width:100%"></label>
-    <button type="submit" style="background:#1d9e75;color:#fff;border:0;border-radius:6px;padding:.55rem .8rem;font-weight:600;cursor:pointer">+ Add</button>
+    <button type="submit" style="background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.55rem .8rem;font-weight:600;cursor:pointer">+ Add</button>
   </form>
   <label style="font-size:.72rem;color:#8a938a;display:flex;gap:.4rem;align-items:center;margin-bottom:.6rem"><input type="checkbox" form="_nada" disabled style="width:auto"> <span class="mut">Contraparte e recorrência aparecem ao detalhar o título.</span></label>
   {% if titulos %}<table style="width:100%;font-size:.85rem">
@@ -2828,10 +2828,10 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     {% for t in titulos %}<tr style="border-top:1px solid #232325">
       <td style="{% if t.atrasado %}color:#f0c05a{% endif %}">{{ t.vencimento.strftime('%d/%m') }}{% if t.atrasado %} ⚠{% endif %}</td>
       <td>{{ t.descricao }}{% if t.contraparte %} <span class="mut">· {{ t.contraparte }}</span>{% endif %}</td>
-      <td>{% if t.tipo=='pagar' %}<span style="color:#e07a5f">pagar</span>{% else %}<span style="color:#5dcaa5">receber</span>{% endif %}</td>
+      <td>{% if t.tipo=='pagar' %}<span style="color:#e07a5f">pagar</span>{% else %}<span style="color:var(--verde-claro)">receber</span>{% endif %}</td>
       <td style="text-align:right;font-weight:600">{{ t.valor_centavos|brl }}</td>
       <td style="text-align:right;white-space:nowrap">
-        <form method="post" action="/painel/empresa/titulo/{{ t.id }}/baixa" style="display:inline"><button style="background:none;border:0;color:#5dcaa5;cursor:pointer;font-size:.78rem">dar baixa ✓</button></form>
+        <form method="post" action="/painel/empresa/titulo/{{ t.id }}/baixa" style="display:inline"><button style="background:none;border:0;color:var(--verde-claro);cursor:pointer;font-size:.78rem">dar baixa ✓</button></form>
         {% if t.tipo=='receber' %}{% if t.cobranca_link_url %}<a href="{{ t.cobranca_link_url }}" target="_blank" style="color:#c99536;font-size:.78rem;margin-left:.5rem">link Pix ↗</a>{% else %}<form method="post" action="/painel/empresa/titulo/{{ t.id }}/cobrar" style="display:inline"><button style="background:none;border:0;color:#c99536;cursor:pointer;font-size:.78rem;margin-left:.5rem">cobrar via Pix →</button></form>{% endif %}{% endif %}
       </td></tr>{% endfor %}
   </table>{% else %}<div class="mut" style="font-size:.85rem">Nenhum título em aberto. Adicione acima — ou peça pro Zaq no WhatsApp.</div>{% endif %}
@@ -2845,7 +2845,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     <label style="font-size:.72rem;color:#8a938a">Cargo<input name="cargo" placeholder="Ex: Vendedor" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Salário R$<input name="salario" required inputmode="decimal" placeholder="0,00" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Dia pgto<input name="dia" type="number" min="1" max="28" value="5" style="width:100%"></label>
-    <button type="submit" style="background:#1d9e75;color:#fff;border:0;border-radius:6px;padding:.55rem .8rem;font-weight:600;cursor:pointer">+ Add</button>
+    <button type="submit" style="background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.55rem .8rem;font-weight:600;cursor:pointer">+ Add</button>
   </form>
   {% if folha.itens %}<table style="width:100%;font-size:.85rem">
     <tr class="mut" style="font-size:.72rem"><td>Funcionário</td><td style="text-align:right">Salário</td><td style="text-align:right">Vale</td><td style="text-align:right">A pagar</td><td style="text-align:right">Custo real</td><td></td></tr>
@@ -2853,14 +2853,14 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
       <td>{{ f.nome }}{% if f.pro_labore %} <span class="mut">· pró-labore</span>{% elif f.cargo %} <span class="mut">· {{ f.cargo }}</span>{% endif %}</td>
       <td style="text-align:right">{{ f.salario_centavos|brl }}</td>
       <td style="text-align:right;color:#f0c05a">{% if f.vales_centavos %}-{{ f.vales_centavos|brl }}{% else %}—{% endif %}</td>
-      <td style="text-align:right;font-weight:600">{% if f.quitado %}<span style="color:#5dcaa5">pago ✓</span>{% else %}{{ f.a_pagar_centavos|brl }}{% endif %}</td>
+      <td style="text-align:right;font-weight:600">{% if f.quitado %}<span style="color:var(--verde-claro)">pago ✓</span>{% else %}{{ f.a_pagar_centavos|brl }}{% endif %}</td>
       <td style="text-align:right" class="mut">{{ f.custo_real_centavos|brl }}</td>
       <td style="text-align:right;white-space:nowrap">
         {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vale" style="display:inline"><input name="valor" inputmode="decimal" placeholder="vale R$" style="width:70px;font-size:.75rem"><button style="background:none;border:0;color:#f0c05a;cursor:pointer;font-size:.78rem">dar vale</button></form>{% endif %}
-        {% if not f.quitado %}<form method="post" action="/painel/empresa/folha/pagar" style="display:inline"><input type="hidden" name="funcionario_id" value="{{ f.id }}"><button style="background:none;border:0;color:#5dcaa5;cursor:pointer;font-size:.78rem;margin-left:.4rem">pagar ✓</button></form>{% endif %}
+        {% if not f.quitado %}<form method="post" action="/painel/empresa/folha/pagar" style="display:inline"><input type="hidden" name="funcionario_id" value="{{ f.id }}"><button style="background:none;border:0;color:var(--verde-claro);cursor:pointer;font-size:.78rem;margin-left:.4rem">pagar ✓</button></form>{% endif %}
       </td></tr>{% endfor %}
   </table>
-  <form method="post" action="/painel/empresa/folha/pagar" style="margin-top:.7rem"><button style="background:#1d9e75;color:#fff;border:0;border-radius:6px;padding:.5rem 1rem;font-weight:600;cursor:pointer">Pagar folha inteira ✓</button></form>
+  <form method="post" action="/painel/empresa/folha/pagar" style="margin-top:.7rem"><button style="background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.5rem 1rem;font-weight:600;cursor:pointer">Pagar folha inteira ✓</button></form>
   {% else %}<div class="mut" style="font-size:.85rem">Nenhum funcionário cadastrado. Adicione acima.</div>{% endif %}
   <div class="mut" style="font-size:.72rem;margin-top:.7rem">ℹ️ Controle gerencial de pessoal — a folha oficial (eSocial, guias, holerite) segue com seu contador, que recebe tudo no relatório mensal.</div>
 </div>
@@ -2871,7 +2871,7 @@ _PROMOCOES_EM_BREVE = """{% extends "base" %}{% block conteudo %}
   <div style="font-size:42px;margin-bottom:.5rem">🏷️</div>
   <h2>Promoções em breve!</h2>
   <p class="mut">O {{ fornecedor.nome }} ainda não tem ofertas ativas. Volte logo — ou aproveite a loja!</p>
-  <a href="/f/{{ fornecedor.slug }}" style="display:inline-block;margin-top:1rem;background:#1d9e75;color:#fff;padding:.7rem 1.4rem;border-radius:9px;text-decoration:none;font-weight:600">Ver produtos</a>
+  <a href="/f/{{ fornecedor.slug }}" style="display:inline-block;margin-top:1rem;background:var(--verde);color:#fff;padding:.7rem 1.4rem;border-radius:9px;text-decoration:none;font-weight:600">Ver produtos</a>
 </div>
 {% endblock %}"""
 
@@ -2890,7 +2890,7 @@ _ATIVAR_APP = """{% extends "base" %}{% block conteudo %}
   </ul>
   <form method="post" action="/painel/ativar-app">
     <label>Escolha seu plano:</label>
-    <select name="plano" style="width:100%;margin:.4rem 0 1rem;padding:.4rem;border:1px solid #2a2a2b;border-radius:4px;background:#0a0a0a;color:#fff">
+    <select name="plano" style="width:100%;margin:.4rem 0 1rem;padding:.4rem;border:1px solid var(--borda);border-radius:4px;background:#0a0a0a;color:#fff">
       {% for p in planos %}
       <option value="{{ p[0] }}">{{ p[1] }} — {% if beta_gratis %}Grátis (beta){% else %}R$ {{ (p[3]/100)|n2 }}/mês{% endif %}</option>
       {% endfor %}
@@ -2909,22 +2909,22 @@ _PAINEL_ASSINATURAS = """{% extends "base" %}{% block conteudo %}
 {% if not (conta and conta[4] and conta[4] != 'zaq_cesta') %}{% include "bloco_conta" %}{% endif %}
 <div class="card larga"><h2>🧺 Minhas assinaturas</h2>
 <p class="mut" style="margin-top:-.3rem;margin-bottom:1rem;font-size:.86rem">Entrega recorrente: você recebe e paga por período, sem refazer o pedido.
-Suas compras avulsas nas lojas ficam em <a href="/painel/meus-pedidos" style="color:#5dcaa5">🛍️ Meus pedidos</a>.</p>
+Suas compras avulsas nas lojas ficam em <a href="/painel/meus-pedidos" style="color:var(--verde-claro)">🛍️ Meus pedidos</a>.</p>
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
 {% if erro_asaas %}<div class="erro" style="margin-bottom:1rem;font-size:.85rem">⚠️ Asaas: {{ erro_asaas }}</div>{% endif %}
 {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
 {% if assinaturas %}
 {% for a in assinaturas %}
-<div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1rem;margin-bottom:.6rem">
+<div style="background:#1c1c1f;border:1px solid var(--borda);border-radius:8px;padding:1rem;margin-bottom:.6rem">
   <div style="display:flex;justify-content:space-between;align-items:start">
     <div style="flex:1">
       <strong>{{ a.tamanho_nome }}</strong> — <strong>R$ {{ (a.preco_centavos/100)|n2 }}</strong>
       <div class="mut" style="font-size:.85rem;margin-top:.3rem">De: {{ a.fornecedor_nome }} | Frequência: {{ a.frequencia }} | Status: <strong>{{ a.status }}</strong></div>
       <!-- Status: aguardando pagamento -->
       {% if a.status == 'aguardando_pagamento' %}
-      <div style="margin-top:.6rem;padding:.6rem;background:#2a2a2b;border-radius:4px;border-left:3px solid #ffa500">
+      <div style="margin-top:.6rem;padding:.6rem;background:var(--borda);border-radius:4px;border-left:3px solid #ffa500">
         <p class="mut" style="font-size:.85rem;margin:0 0 .4rem">⏳ Aguardando pagamento</p>
-        <a href="/painel/assinaturas/{{ a.id }}/pagar" style="display:inline-block;background:#5dcaa5;color:#0a0a0a;padding:.4rem .8rem;border-radius:4px;text-decoration:none;font-weight:600;font-size:.85rem;cursor:pointer">
+        <a href="/painel/assinaturas/{{ a.id }}/pagar" style="display:inline-block;background:var(--verde-claro);color:#0a0a0a;padding:.4rem .8rem;border-radius:4px;text-decoration:none;font-weight:600;font-size:.85rem;cursor:pointer">
           Pagar agora →
         </a>
       </div>
@@ -2935,7 +2935,7 @@ Suas compras avulsas nas lojas ficam em <a href="/painel/meus-pedidos" style="co
       <form method="post" action="/painel/assinaturas/{{ a.id }}/trocar-tamanho" style="display:flex;gap:.5rem;margin-top:.6rem;align-items:end">
         <div style="flex:1">
           <label style="font-size:.8rem;color:#888">Mudar tamanho:</label>
-          <select name="novo_tamanho_id" style="width:100%;padding:.4rem;border:1px solid #2a2a2b;border-radius:4px;background:#0a0a0a;color:#fff;font-size:.85rem">
+          <select name="novo_tamanho_id" style="width:100%;padding:.4rem;border:1px solid var(--borda);border-radius:4px;background:#0a0a0a;color:#fff;font-size:.85rem">
             <option value="">Escolher novo tamanho...</option>
             {% for t in tamanhos_por_fornecedor[a.fornecedor_id] %}
               {% if t.id != a.tamanho_id_atual %}
@@ -2944,13 +2944,13 @@ Suas compras avulsas nas lojas ficam em <a href="/painel/meus-pedidos" style="co
             {% endfor %}
           </select>
         </div>
-        <button type="submit" style="background:#5dcaa5;color:#0a0a0a;border:0;padding:.4rem .8rem;border-radius:4px;cursor:pointer;font-weight:600;font-size:.85rem;white-space:nowrap">Trocar</button>
+        <button type="submit" style="background:var(--verde-claro);color:#0a0a0a;border:0;padding:.4rem .8rem;border-radius:4px;cursor:pointer;font-weight:600;font-size:.85rem;white-space:nowrap">Trocar</button>
       </form>
       <p class="mut" style="font-size:.75rem;margin-top:.3rem">Muda a partir da próxima entrega.</p>
       {% endif %}
     </div>
     <form method="post" action="/painel/assinaturas/{{ a.id }}/status" style="display:inline">
-      <select name="novo_status" onchange="this.form.submit()" style="padding:.3rem;border:1px solid #2a2a2b;border-radius:4px;background:#0a0a0a;color:#fff;font-size:.85rem">
+      <select name="novo_status" onchange="this.form.submit()" style="padding:.3rem;border:1px solid var(--borda);border-radius:4px;background:#0a0a0a;color:#fff;font-size:.85rem">
         <option value="">Ações</option>
         {% if a.status != 'ativa' %}<option value="ativa">Reativar</option>{% endif %}
         {% if a.status == 'ativa' %}<option value="pausada">Pausar</option>{% endif %}
@@ -2961,7 +2961,7 @@ Suas compras avulsas nas lojas ficam em <a href="/painel/meus-pedidos" style="co
 </div>
 {% endfor %}
 {% else %}
-<p class="mut">Você ainda não tem assinaturas. <a href="/" style="color:#5dcaa5">Explore os fornecedores</a></p>
+<p class="mut">Você ainda não tem assinaturas. <a href="/" style="color:var(--verde-claro)">Explore os fornecedores</a></p>
 {% endif %}
 </div>
 {% endblock %}"""
@@ -2972,20 +2972,20 @@ _MEU_PLANO = """{% extends "base" %}{% block conteudo %}
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
 {% if assinaturas %}
 {% for a in assinaturas %}
-<div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1rem;margin-bottom:.8rem">
+<div style="background:#1c1c1f;border:1px solid var(--borda);border-radius:8px;padding:1rem;margin-bottom:.8rem">
   <strong>{{ a.tamanho_nome }}</strong> — R$ {{ (a.preco_centavos/100)|n2 }}
   <div class="mut" style="font-size:.85rem">De: {{ a.fornecedor_nome }} · {{ a.frequencia }} · {{ a.status }}</div>
   {% if a.status == 'aguardando_pagamento' %}
   <div style="border-left:3px solid #e0a83d;background:#1a1712;border-radius:6px;padding:.7rem .9rem;margin-top:.7rem">
     <div style="font-size:.9rem;color:#e0a83d;margin-bottom:.45rem">⏳ Aguardando pagamento</div>
-    <a href="/painel/assinaturas/{{ a.id }}/pagar" style="display:inline-block;background:#5dcaa5;color:#0a0a0a;padding:.45rem .9rem;border-radius:6px;text-decoration:none;font-weight:600;font-size:.85rem">Pagar agora →</a>
+    <a href="/painel/assinaturas/{{ a.id }}/pagar" style="display:inline-block;background:var(--verde-claro);color:#0a0a0a;padding:.45rem .9rem;border-radius:6px;text-decoration:none;font-weight:600;font-size:.85rem">Pagar agora →</a>
   </div>
   {% endif %}
   <!-- Trocar de tamanho -->
   <form method="post" action="/painel/meu-plano/trocar" style="margin-top:.6rem">
     <input type="hidden" name="assinatura_id" value="{{ a.id }}">
     <label style="font-size:.85rem">Trocar tamanho (vale na próxima entrega):</label>
-    <select name="novo_tamanho_id" style="width:100%;margin:.3rem 0;padding:.4rem;border:1px solid #2a2a2b;border-radius:4px;background:#0a0a0a;color:#fff">
+    <select name="novo_tamanho_id" style="width:100%;margin:.3rem 0;padding:.4rem;border:1px solid var(--borda);border-radius:4px;background:#0a0a0a;color:#fff">
       <option value="">Escolher novo tamanho...</option>
       {% for t in tamanhos_por_forn[a.fornecedor_id] %}
         {% if t.id != a.tamanho_id_atual %}
@@ -2993,18 +2993,18 @@ _MEU_PLANO = """{% extends "base" %}{% block conteudo %}
         {% endif %}
       {% endfor %}
     </select>
-    <button type="submit" style="background:#1d9e75;color:#fff;padding:.4rem .8rem;border:0;border-radius:6px;cursor:pointer;font-size:.85rem;margin-top:.3rem">Trocar tamanho</button>
+    <button type="submit" style="background:var(--verde);color:#fff;padding:.4rem .8rem;border:0;border-radius:6px;cursor:pointer;font-size:.85rem;margin-top:.3rem">Trocar tamanho</button>
   </form>
 </div>
 {% endfor %}
 {% else %}
-<p class="mut">Você ainda não tem uma assinatura. <a href="/painel/assinaturas" style="color:#5dcaa5">Ver fornecedores</a></p>
+<p class="mut">Você ainda não tem uma assinatura. <a href="/painel/assinaturas" style="color:var(--verde-claro)">Ver fornecedores</a></p>
 {% endif %}
 <!-- UPSELL discreto do app financeiro -->
-<div style="background:#161617;border:1px solid #2a2a2b;border-radius:8px;padding:1rem;margin-top:1.5rem">
-  <p style="margin:0;font-size:.88rem;color:#a8a8a3">
+<div style="background:var(--card);border:1px solid var(--borda);border-radius:8px;padding:1rem;margin-top:1.5rem">
+  <p style="margin:0;font-size:.88rem;color:var(--txt-mut)">
     💡 Sabia que o Zaq também controla seus gastos, lê cupom fiscal e organiza sua lista
-    de compras? <a href="/painel/ativar-app" style="color:#5dcaa5">Conheça o app financeiro →</a>
+    de compras? <a href="/painel/ativar-app" style="color:var(--verde-claro)">Conheça o app financeiro →</a>
   </p>
 </div>
 </div>
@@ -3015,13 +3015,13 @@ _CESTA_AJUSTE = """{% extends "base" %}{% block conteudo %}
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
 {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
 
-<div style="background:#1c1c1f;border:1px solid #2a2a2b;border-radius:8px;padding:1.2rem;margin-bottom:1.5rem">
+<div style="background:#1c1c1f;border:1px solid var(--borda);border-radius:8px;padding:1.2rem;margin-bottom:1.5rem">
   <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:1rem">
     <div>
       <h3 style="margin:0;margin-bottom:.5rem">{{ cesta.fornecedor_nome }}</h3>
       <strong>R$ {{ (cesta.preco_centavos/100)|n2 }}</strong> · Entrega: <strong>{{ cesta.data_entrega }}</strong>
     </div>
-    <div style="text-align:right;font-size:.9rem;color:#5dcaa5">
+    <div style="text-align:right;font-size:.9rem;color:var(--verde-claro)">
       {% if cesta.status == 'confirmada' %}✓ Confirmada{% elif cesta.status == 'em_ajuste' %}Ajustando...{% else %}Sugerida{% endif %}
     </div>
   </div>
@@ -3038,10 +3038,10 @@ _CESTA_AJUSTE = """{% extends "base" %}{% block conteudo %}
 {% for grupo in ['fruta', 'legume', 'verdura', 'tempero'] %}
 {% if grupo in grupos %}
 <div style="margin-bottom:1.5rem">
-  <h4 style="margin:0 0 .8rem 0;color:#5dcaa5;text-transform:capitalize">🥗 {{ grupo }}s</h4>
+  <h4 style="margin:0 0 .8rem 0;color:var(--verde-claro);text-transform:capitalize">🥗 {{ grupo }}s</h4>
   <div style="display:grid;gap:.6rem">
   {% for item in grupos[grupo] %}
-    <div style="background:#0a0a0a;border:1px solid #2a2a2b;border-radius:6px;padding:.8rem;display:flex;justify-content:space-between;align-items:center">
+    <div style="background:#0a0a0a;border:1px solid var(--borda);border-radius:6px;padding:.8rem;display:flex;justify-content:space-between;align-items:center">
       <div>
         <strong>{{ item.nome }}</strong><br>
         <span class="mut" style="font-size:.85rem">{{ item.quantidade }} {{ item.unidade }}</span>
@@ -3061,12 +3061,12 @@ _CESTA_AJUSTE = """{% extends "base" %}{% block conteudo %}
 
 {% if cesta.status != 'confirmada' %}
 <form method="post" action="/cesta/{{ cesta.id }}/confirmar" style="margin-top:1.5rem">
-  <button style="background:#1d9e75;color:#fff;padding:.7rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:600;font-size:1rem">✓ Confirmar cesta</button>
+  <button style="background:var(--verde);color:#fff;padding:.7rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:600;font-size:1rem">✓ Confirmar cesta</button>
   <p class="mut" style="font-size:.85rem;text-align:center;margin-top:.5rem">Ou deixe como está — vai automático. 👍</p>
 </form>
 {% else %}
 <div style="background:#1d4620;border:1px solid #2d8659;border-radius:6px;padding:1rem;text-align:center;margin-top:1.5rem">
-  <p style="margin:0;color:#5dcaa5;font-weight:500">✓ Cesta confirmada</p>
+  <p style="margin:0;color:var(--verde-claro);font-weight:500">✓ Cesta confirmada</p>
   <small class="mut">Ela será entregue em {{ cesta.data_entrega }}</small>
 </div>
 {% endif %}
@@ -3118,7 +3118,7 @@ _PEDIDOS_FORN = """{% extends "base" %}{% block conteudo %}
   <div class="ped-resumo">
     {{ pedidos|length }} pedido{% if pedidos|length != 1 %}s{% endif %}
     {% if contagens.em_aberto %} · <strong style="color:#e0a83d">{{ contagens.em_aberto }}</strong> em aberto{% endif %}
-    {% if contagens.entregue %} · <strong style="color:#1d9e75">{{ contagens.entregue }}</strong> já entregue{% if contagens.entregue != 1 %}s{% endif %}{% endif %}
+    {% if contagens.entregue %} · <strong style="color:var(--verde)">{{ contagens.entregue }}</strong> já entregue{% if contagens.entregue != 1 %}s{% endif %}{% endif %}
   </div>
 
   {% if pedidos %}
@@ -3149,7 +3149,7 @@ _PEDIDOS_FORN = """{% extends "base" %}{% block conteudo %}
     <div style="font-size:2.5rem;opacity:.4;margin-bottom:.5rem">📭</div>
     {% if filtro_status or filtro_periodo or filtro_busca %}
       <p>Nenhum pedido com esses filtros.</p>
-      <a href="/painel/fornecedor/pedidos" style="color:#5dcaa5">Limpar filtros</a>
+      <a href="/painel/fornecedor/pedidos" style="color:var(--verde-claro)">Limpar filtros</a>
     {% else %}
       <p>Ainda não há pedidos.</p>
       <p class="mut" style="margin-top:.5rem;font-size:.9rem">
@@ -3161,44 +3161,44 @@ _PEDIDOS_FORN = """{% extends "base" %}{% block conteudo %}
 </div>
 
 <style>
-.ped-back{color:#5dcaa5;display:inline-block;margin-bottom:.8rem;font-size:.9rem;text-decoration:none}
+.ped-back{color:var(--verde-claro);display:inline-block;margin-bottom:.8rem;font-size:.9rem;text-decoration:none}
 .ped-back:hover{text-decoration:underline}
-.ped-filtros{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin-bottom:.8rem;padding:.8rem;background:#1a1a1c;border:1px solid #2a2a2b;border-radius:8px}
-.ped-filtros select,.ped-filtros input{background:#0a0a0a;color:#ececec;border:1px solid #2a2a2b;border-radius:6px;padding:.5rem .7rem;font-size:.9rem}
+.ped-filtros{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin-bottom:.8rem;padding:.8rem;background:var(--card-2);border:1px solid var(--borda);border-radius:8px}
+.ped-filtros select,.ped-filtros input{background:#0a0a0a;color:var(--txt);border:1px solid var(--borda);border-radius:6px;padding:.5rem .7rem;font-size:.9rem}
 .ped-filtros select{cursor:pointer;min-width:140px}
 .ped-busca{flex:1;min-width:160px}
 .ped-limpa{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;background:#2a1414;color:#c66;border-radius:6px;text-decoration:none;font-size:1.2rem;line-height:1}
 .ped-limpa:hover{background:#3a1818}
-.ped-resumo{color:#a8a8a3;font-size:.88rem;margin-bottom:1rem;padding:0 .2rem}
+.ped-resumo{color:var(--txt-mut);font-size:.88rem;margin-bottom:1rem;padding:0 .2rem}
 .ped-lista{display:flex;flex-direction:column;gap:.6rem}
-.ped-card{display:block;background:#1a1a1c;border:1px solid #2a2a2b;border-radius:8px;padding:1rem;text-decoration:none;color:inherit;transition:border-color .15s,transform .1s}
-.ped-card:hover{border-color:#5dcaa5;transform:translateX(2px)}
+.ped-card{display:block;background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:1rem;text-decoration:none;color:inherit;transition:border-color .15s,transform .1s}
+.ped-card:hover{border-color:var(--verde-claro);transform:translateX(2px)}
 .ped-card:active{transform:translateX(2px) scale(.998)}
 .ped-card-topo{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;margin-bottom:.7rem}
 .ped-card-cli{flex:1;min-width:0}
-.ped-cli-nome{font-weight:600;color:#ececec;font-size:1rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ped-cli-bairro{color:#a8a8a3;font-size:.82rem;margin-top:.15rem}
-.ped-card-val{text-align:right;font-weight:600;color:#5dcaa5;font-size:1.05rem;white-space:nowrap}
-.ped-card-tam{color:#a8a8a3;font-size:.78rem;font-weight:400;margin-top:.15rem}
+.ped-cli-nome{font-weight:600;color:var(--txt);font-size:1rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ped-cli-bairro{color:var(--txt-mut);font-size:.82rem;margin-top:.15rem}
+.ped-card-val{text-align:right;font-weight:600;color:var(--verde-claro);font-size:1.05rem;white-space:nowrap}
+.ped-card-tam{color:var(--txt-mut);font-size:.78rem;font-weight:400;margin-top:.15rem}
 .ped-card-meta{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;font-size:.78rem}
 .ped-st,.ped-pg{display:inline-block;padding:.2rem .55rem;border-radius:10px}
-.ped-st-sugerida{background:#2a2a2b;color:#c9c9c9}
+.ped-st-sugerida{background:var(--borda);color:#c9c9c9}
 .ped-st-em_ajuste{background:#3a2d12;color:#e0a83d}
-.ped-st-confirmada{background:#15241d;color:#5dcaa5}
-.ped-st-cobrada{background:#15241d;color:#5dcaa5}
-.ped-st-entregue{background:#0e2a1e;color:#1d9e75}
+.ped-st-confirmada{background:#15241d;color:var(--verde-claro)}
+.ped-st-cobrada{background:#15241d;color:var(--verde-claro)}
+.ped-st-entregue{background:#0e2a1e;color:var(--verde)}
 .ped-st-cancelada{background:#2a1414;color:#c66}
-.ped-pg-pago{background:#0e2a1e;color:#1d9e75}
+.ped-pg-pago{background:#0e2a1e;color:var(--verde)}
 .ped-pg-aguardando{background:#3a2d12;color:#e0a83d}
 .ped-pg-atrasado{background:#2a1414;color:#c66}
 .ped-pg-cancelado{background:#1c1c1f;color:#7a7a7a}
 .ped-meta-sep{color:#7a7a7a;margin-left:auto}
-.ped-meta-data{color:#a8a8a3}
-.ped-vazio{text-align:center;padding:3rem 1rem;color:#a8a8a3}
-.ped-abas{display:flex;gap:0;border-bottom:1px solid #2a2a2b;margin-bottom:1rem;overflow-x:auto}
-.ped-aba{padding:.55rem 1rem;color:#a8a8a3;border-bottom:2px solid transparent;text-decoration:none;font-size:.92rem;white-space:nowrap}
-.ped-aba:hover{color:#ececec}
-.ped-aba.ativa{color:#5dcaa5;border-color:#5dcaa5;font-weight:600}
+.ped-meta-data{color:var(--txt-mut)}
+.ped-vazio{text-align:center;padding:3rem 1rem;color:var(--txt-mut)}
+.ped-abas{display:flex;gap:0;border-bottom:1px solid var(--borda);margin-bottom:1rem;overflow-x:auto}
+.ped-aba{padding:.55rem 1rem;color:var(--txt-mut);border-bottom:2px solid transparent;text-decoration:none;font-size:.92rem;white-space:nowrap}
+.ped-aba:hover{color:var(--txt)}
+.ped-aba.ativa{color:var(--verde-claro);border-color:var(--verde-claro);font-weight:600}
 .ped-aba.off{color:#5a5a5a;font-size:.88rem;cursor:default}
 @media (max-width:520px){
   .ped-filtros{padding:.6rem;gap:.4rem}
@@ -3254,28 +3254,28 @@ _PEDIDO_DETALHE_FORN = """{% extends "base" %}{% block conteudo %}
 </div>
 
 <style>
-.ped-back{color:#5dcaa5;display:inline-block;margin-bottom:.8rem;font-size:.9rem;text-decoration:none}
+.ped-back{color:var(--verde-claro);display:inline-block;margin-bottom:.8rem;font-size:.9rem;text-decoration:none}
 .ped-back:hover{text-decoration:underline}
-.ped-det{display:grid;grid-template-columns:1fr 1fr;gap:1rem;background:#1a1a1c;border:1px solid #2a2a2b;border-radius:8px;padding:1.2rem}
-.ped-det-rot{color:#a8a8a3;font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.4rem}
-.ped-det-val{color:#ececec;font-size:1.05rem;font-weight:600}
+.ped-det{display:grid;grid-template-columns:1fr 1fr;gap:1rem;background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:1.2rem}
+.ped-det-rot{color:var(--txt-mut);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.4rem}
+.ped-det-val{color:var(--txt);font-size:1.05rem;font-weight:600}
 .ped-st,.ped-pg{display:inline-block;padding:.2rem .55rem;border-radius:10px;font-size:.78rem;margin-right:.3rem}
-.ped-st-sugerida{background:#2a2a2b;color:#c9c9c9}
+.ped-st-sugerida{background:var(--borda);color:#c9c9c9}
 .ped-st-em_ajuste{background:#3a2d12;color:#e0a83d}
-.ped-st-confirmada{background:#15241d;color:#5dcaa5}
-.ped-st-cobrada{background:#15241d;color:#5dcaa5}
-.ped-st-entregue{background:#0e2a1e;color:#1d9e75}
+.ped-st-confirmada{background:#15241d;color:var(--verde-claro)}
+.ped-st-cobrada{background:#15241d;color:var(--verde-claro)}
+.ped-st-entregue{background:#0e2a1e;color:var(--verde)}
 .ped-st-cancelada{background:#2a1414;color:#c66}
-.ped-pg-pago{background:#0e2a1e;color:#1d9e75}
+.ped-pg-pago{background:#0e2a1e;color:var(--verde)}
 .ped-pg-aguardando{background:#3a2d12;color:#e0a83d}
 .ped-pg-atrasado{background:#2a1414;color:#c66}
 .ped-pg-cancelado{background:#1c1c1f;color:#7a7a7a}
 .ped-itens{display:flex;flex-direction:column;gap:.4rem}
-.ped-item{display:flex;justify-content:space-between;align-items:center;padding:.7rem 1rem;background:#1a1a1c;border:1px solid #2a2a2b;border-radius:6px;gap:1rem}
+.ped-item{display:flex;justify-content:space-between;align-items:center;padding:.7rem 1rem;background:var(--card-2);border:1px solid var(--borda);border-radius:6px;gap:1rem}
 .ped-item-info{flex:1;min-width:0}
-.ped-item-nome{color:#ececec;font-weight:500}
+.ped-item-nome{color:var(--txt);font-weight:500}
 .ped-item-grupo{color:#7a7a7a;font-size:.78rem;text-transform:capitalize;margin-top:.1rem}
-.ped-item-qtd{color:#5dcaa5;font-weight:600;white-space:nowrap}
+.ped-item-qtd{color:var(--verde-claro);font-weight:600;white-space:nowrap}
 @media (max-width:520px){.ped-det{grid-template-columns:1fr}}
 </style>
 {% endblock %}"""
@@ -3354,7 +3354,7 @@ _SEPARACAO_FORN = """{% extends "base" %}{% block conteudo %}
             <span class="sep-meta-sep">·</span>
             <span class="sep-meta-rot">sobra:</span>
             {% if it.sobra_apos >= 0 %}
-              <strong style="color:#5dcaa5">{{ it.sobra_apos }} {{ it.unidade }}</strong>
+              <strong style="color:var(--verde-claro)">{{ it.sobra_apos }} {{ it.unidade }}</strong>
             {% else %}
               <strong style="color:#c66">faltam {{ it.falta }} {{ it.unidade }}</strong>
             {% endif %}
@@ -3392,40 +3392,40 @@ _SEPARACAO_FORN = """{% extends "base" %}{% block conteudo %}
 </div>
 
 <style>
-.ped-back{color:#5dcaa5;display:inline-block;margin-bottom:.8rem;font-size:.9rem;text-decoration:none}
+.ped-back{color:var(--verde-claro);display:inline-block;margin-bottom:.8rem;font-size:.9rem;text-decoration:none}
 .ped-back:hover{text-decoration:underline}
-.ped-abas{display:flex;gap:0;border-bottom:1px solid #2a2a2b;margin-bottom:1rem;overflow-x:auto}
-.ped-aba{padding:.55rem 1rem;color:#a8a8a3;border-bottom:2px solid transparent;text-decoration:none;font-size:.92rem;white-space:nowrap}
-.ped-aba:hover{color:#ececec}
-.ped-aba.ativa{color:#5dcaa5;border-color:#5dcaa5;font-weight:600}
+.ped-abas{display:flex;gap:0;border-bottom:1px solid var(--borda);margin-bottom:1rem;overflow-x:auto}
+.ped-aba{padding:.55rem 1rem;color:var(--txt-mut);border-bottom:2px solid transparent;text-decoration:none;font-size:.92rem;white-space:nowrap}
+.ped-aba:hover{color:var(--txt)}
+.ped-aba.ativa{color:var(--verde-claro);border-color:var(--verde-claro);font-weight:600}
 .ped-aba.off{color:#5a5a5a;font-size:.88rem;cursor:default}
-.sep-filtro{display:flex;align-items:center;gap:.8rem;margin-bottom:1rem;padding:.7rem .9rem;background:#1a1a1c;border:1px solid #2a2a2b;border-radius:8px;flex-wrap:wrap}
-.sep-filtro select{background:#0a0a0a;color:#ececec;border:1px solid #2a2a2b;border-radius:6px;padding:.5rem .7rem;font-size:.9rem;cursor:pointer}
-.sep-range{color:#a8a8a3;font-size:.85rem}
+.sep-filtro{display:flex;align-items:center;gap:.8rem;margin-bottom:1rem;padding:.7rem .9rem;background:var(--card-2);border:1px solid var(--borda);border-radius:8px;flex-wrap:wrap}
+.sep-filtro select{background:#0a0a0a;color:var(--txt);border:1px solid var(--borda);border-radius:6px;padding:.5rem .7rem;font-size:.9rem;cursor:pointer}
+.sep-range{color:var(--txt-mut);font-size:.85rem}
 .sep-resumo{display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem;margin-bottom:1rem}
-.sep-card{background:#1a1a1c;border:1px solid #2a2a2b;border-radius:8px;padding:1rem;text-align:center}
-.sep-card-num{color:#5dcaa5;font-size:1.6rem;font-weight:700;line-height:1.1}
-.sep-card-rot{color:#a8a8a3;font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin-top:.3rem}
+.sep-card{background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:1rem;text-align:center}
+.sep-card-num{color:var(--verde-claro);font-size:1.6rem;font-weight:700;line-height:1.1}
+.sep-card-rot{color:var(--txt-mut);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin-top:.3rem}
 .sep-alerta{background:#3a2d12;border:1px solid #6b5320;border-radius:8px;padding:.8rem 1rem;margin-bottom:1rem;color:#e0a83d;font-size:.9rem}
 .sep-alerta-link{color:#e0a83d;text-decoration:underline;margin-left:.4rem;white-space:nowrap}
 .sep-acoes{margin-bottom:1rem}
-.sep-btn{background:#15241d;color:#5dcaa5;border:1px solid #5dcaa5;border-radius:6px;padding:.5rem .9rem;cursor:pointer;font-size:.9rem}
+.sep-btn{background:#15241d;color:var(--verde-claro);border:1px solid var(--verde-claro);border-radius:6px;padding:.5rem .9rem;cursor:pointer;font-size:.9rem}
 .sep-btn:hover{background:#1d2e25}
 .sep-grupo{margin-bottom:1.2rem}
-.sep-grupo-tit{color:#5dcaa5;font-size:.92rem;text-transform:uppercase;letter-spacing:.06em;margin:0 0 .5rem;padding-bottom:.3rem;border-bottom:1px solid #2a2a2b}
+.sep-grupo-tit{color:var(--verde-claro);font-size:.92rem;text-transform:uppercase;letter-spacing:.06em;margin:0 0 .5rem;padding-bottom:.3rem;border-bottom:1px solid var(--borda)}
 .sep-itens{display:flex;flex-direction:column;gap:.4rem}
-.sep-item{display:flex;justify-content:space-between;align-items:center;padding:.8rem 1rem;background:#1a1a1c;border:1px solid #2a2a2b;border-radius:6px;gap:1rem}
+.sep-item{display:flex;justify-content:space-between;align-items:center;padding:.8rem 1rem;background:var(--card-2);border:1px solid var(--borda);border-radius:6px;gap:1rem}
 .sep-item-falta{border-left:3px solid #c66}
 .sep-item-info{flex:1;min-width:0}
-.sep-item-nome{color:#ececec;font-weight:500}
-.sep-item-meta{color:#a8a8a3;font-size:.85rem;margin-top:.3rem;display:flex;flex-wrap:wrap;gap:.3rem;align-items:center}
-.sep-item-meta strong{color:#ececec;font-weight:600}
+.sep-item-nome{color:var(--txt);font-weight:500}
+.sep-item-meta{color:var(--txt-mut);font-size:.85rem;margin-top:.3rem;display:flex;flex-wrap:wrap;gap:.3rem;align-items:center}
+.sep-item-meta strong{color:var(--txt);font-weight:600}
 .sep-meta-rot{color:#7a7a7a;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em}
 .sep-meta-sep{color:#3a3a3b;margin:0 .15rem}
 .sep-item-status{font-size:1.5rem;white-space:nowrap}
-.sep-ok{color:#1d9e75}
+.sep-ok{color:var(--verde)}
 .sep-fail{color:#c66;font-size:.9rem;font-weight:600;background:#2a1414;padding:.3rem .6rem;border-radius:6px}
-.ped-vazio{text-align:center;padding:3rem 1rem;color:#a8a8a3}
+.ped-vazio{text-align:center;padding:3rem 1rem;color:var(--txt-mut)}
 @media (max-width:520px){
   .sep-item-meta{font-size:.78rem;gap:.2rem;flex-direction:column;align-items:flex-start;gap:.1rem}
   .sep-meta-sep{display:none}
@@ -3477,7 +3477,7 @@ _EMBALAGEM_FORN = """{% extends "base" %}{% block conteudo %}
       <div class="sep-card-rot">cesta{% if dados.qtd_total != 1 %}s{% endif %} pra embalar</div>
     </div>
     <div class="sep-card">
-      <div class="sep-card-num" style="color:#1d9e75">{{ dados.qtd_embaladas }}</div>
+      <div class="sep-card-num" style="color:var(--verde)">{{ dados.qtd_embaladas }}</div>
       <div class="sep-card-rot">já embaladas</div>
     </div>
     <div class="sep-card">
@@ -3529,41 +3529,41 @@ _EMBALAGEM_FORN = """{% extends "base" %}{% block conteudo %}
 </div>
 
 <style>
-.ped-back{color:#5dcaa5;display:inline-block;margin-bottom:.8rem;font-size:.9rem;text-decoration:none}
+.ped-back{color:var(--verde-claro);display:inline-block;margin-bottom:.8rem;font-size:.9rem;text-decoration:none}
 .ped-back:hover{text-decoration:underline}
-.ped-abas{display:flex;gap:0;border-bottom:1px solid #2a2a2b;margin-bottom:1rem;overflow-x:auto}
-.ped-aba{padding:.55rem 1rem;color:#a8a8a3;border-bottom:2px solid transparent;text-decoration:none;font-size:.92rem;white-space:nowrap}
-.ped-aba:hover{color:#ececec}
-.ped-aba.ativa{color:#5dcaa5;border-color:#5dcaa5;font-weight:600}
+.ped-abas{display:flex;gap:0;border-bottom:1px solid var(--borda);margin-bottom:1rem;overflow-x:auto}
+.ped-aba{padding:.55rem 1rem;color:var(--txt-mut);border-bottom:2px solid transparent;text-decoration:none;font-size:.92rem;white-space:nowrap}
+.ped-aba:hover{color:var(--txt)}
+.ped-aba.ativa{color:var(--verde-claro);border-color:var(--verde-claro);font-weight:600}
 .ped-aba.off{color:#5a5a5a;font-size:.88rem;cursor:default}
-.sep-filtro{display:flex;align-items:center;gap:.8rem;margin-bottom:1rem;padding:.7rem .9rem;background:#1a1a1c;border:1px solid #2a2a2b;border-radius:8px;flex-wrap:wrap}
-.sep-filtro select{background:#0a0a0a;color:#ececec;border:1px solid #2a2a2b;border-radius:6px;padding:.5rem .7rem;font-size:.9rem;cursor:pointer}
-.sep-range{color:#a8a8a3;font-size:.85rem}
+.sep-filtro{display:flex;align-items:center;gap:.8rem;margin-bottom:1rem;padding:.7rem .9rem;background:var(--card-2);border:1px solid var(--borda);border-radius:8px;flex-wrap:wrap}
+.sep-filtro select{background:#0a0a0a;color:var(--txt);border:1px solid var(--borda);border-radius:6px;padding:.5rem .7rem;font-size:.9rem;cursor:pointer}
+.sep-range{color:var(--txt-mut);font-size:.85rem}
 .sep-resumo{display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem;margin-bottom:1rem}
-.sep-card{background:#1a1a1c;border:1px solid #2a2a2b;border-radius:8px;padding:1rem;text-align:center}
-.sep-card-num{color:#5dcaa5;font-size:1.6rem;font-weight:700;line-height:1.1}
-.sep-card-rot{color:#a8a8a3;font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin-top:.3rem}
+.sep-card{background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:1rem;text-align:center}
+.sep-card-num{color:var(--verde-claro);font-size:1.6rem;font-weight:700;line-height:1.1}
+.sep-card-rot{color:var(--txt-mut);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin-top:.3rem}
 .emb-cards{display:flex;flex-direction:column;gap:.7rem}
-.emb-card{background:#1a1a1c;border:1px solid #2a2a2b;border-radius:8px;padding:1rem}
-.emb-card-pronta{border-left:3px solid #1d9e75;opacity:.7}
+.emb-card{background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:1rem}
+.emb-card-pronta{border-left:3px solid var(--verde);opacity:.7}
 .emb-card-head{display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:.7rem}
 .emb-card-cli{flex:1;min-width:200px}
-.emb-card-nome{font-weight:600;color:#ececec;font-size:1rem}
-.emb-card-end{color:#a8a8a3;font-size:.85rem;margin-top:.25rem}
+.emb-card-nome{font-weight:600;color:var(--txt);font-size:1rem}
+.emb-card-end{color:var(--txt-mut);font-size:.85rem;margin-top:.25rem}
 .emb-card-cep{color:#7a7a7a;font-size:.78rem;margin-top:.15rem}
 .emb-card-acoes{display:flex;gap:.4rem;align-items:flex-start;flex-wrap:wrap}
-.emb-btn-marcar{background:#15241d;color:#5dcaa5;border:1px solid #5dcaa5;border-radius:6px;padding:.5rem .85rem;cursor:pointer;font-size:.88rem;font-weight:500;white-space:nowrap}
+.emb-btn-marcar{background:#15241d;color:var(--verde-claro);border:1px solid var(--verde-claro);border-radius:6px;padding:.5rem .85rem;cursor:pointer;font-size:.88rem;font-weight:500;white-space:nowrap}
 .emb-btn-marcar:hover{background:#1d2e25}
-.emb-btn-etiqueta{background:#1a1a1c;color:#a8a8a3;border:1px solid #2a2a2b;border-radius:6px;padding:.5rem .85rem;text-decoration:none;font-size:.88rem;white-space:nowrap}
-.emb-btn-etiqueta:hover{border-color:#5dcaa5;color:#5dcaa5}
-.emb-pronto{color:#1d9e75;font-weight:600;font-size:.88rem;text-align:center;line-height:1.3}
+.emb-btn-etiqueta{background:var(--card-2);color:var(--txt-mut);border:1px solid var(--borda);border-radius:6px;padding:.5rem .85rem;text-decoration:none;font-size:.88rem;white-space:nowrap}
+.emb-btn-etiqueta:hover{border-color:var(--verde-claro);color:var(--verde-claro)}
+.emb-pronto{color:var(--verde);font-weight:600;font-size:.88rem;text-align:center;line-height:1.3}
 .emb-pronto small{color:#7a7a7a;font-size:.72rem;font-weight:400}
-.emb-btn-desfazer{background:transparent;color:#7a7a7a;border:1px solid #2a2a2b;border-radius:6px;padding:.35rem .6rem;cursor:pointer;font-size:.78rem}
+.emb-btn-desfazer{background:transparent;color:#7a7a7a;border:1px solid var(--borda);border-radius:6px;padding:.35rem .6rem;cursor:pointer;font-size:.78rem}
 .emb-btn-desfazer:hover{color:#c66;border-color:#3a2020}
-.emb-itens{display:flex;flex-wrap:wrap;gap:.4rem;padding-top:.6rem;border-top:1px dashed #2a2a2b}
-.emb-item{color:#a8a8a3;font-size:.82rem;background:#0a0a0a;padding:.25rem .55rem;border-radius:4px}
-.emb-item strong{color:#ececec}
-.ped-vazio{text-align:center;padding:3rem 1rem;color:#a8a8a3}
+.emb-itens{display:flex;flex-wrap:wrap;gap:.4rem;padding-top:.6rem;border-top:1px dashed var(--borda)}
+.emb-item{color:var(--txt-mut);font-size:.82rem;background:#0a0a0a;padding:.25rem .55rem;border-radius:4px}
+.emb-item strong{color:var(--txt)}
+.ped-vazio{text-align:center;padding:3rem 1rem;color:var(--txt-mut)}
 @media (max-width:520px){
   .sep-resumo{grid-template-columns:1fr;gap:.4rem}
   .emb-card-head{flex-direction:column}
@@ -3662,7 +3662,7 @@ _ROTAS_FORN = """{% extends "base" %}{% block conteudo %}
       <div class="sep-card-rot">pendentes</div>
     </div>
     <div class="sep-card">
-      <div class="sep-card-num" style="color:#1d9e75">{{ dados.qtd_entregues }}</div>
+      <div class="sep-card-num" style="color:var(--verde)">{{ dados.qtd_entregues }}</div>
       <div class="sep-card-rot">entregues</div>
     </div>
   </div>
@@ -3726,42 +3726,42 @@ _ROTAS_FORN = """{% extends "base" %}{% block conteudo %}
 </div>
 
 <style>
-.ped-back{color:#5dcaa5;display:inline-block;margin-bottom:.8rem;font-size:.9rem;text-decoration:none}
+.ped-back{color:var(--verde-claro);display:inline-block;margin-bottom:.8rem;font-size:.9rem;text-decoration:none}
 .ped-back:hover{text-decoration:underline}
-.ped-abas{display:flex;gap:0;border-bottom:1px solid #2a2a2b;margin-bottom:1rem;overflow-x:auto}
-.ped-aba{padding:.55rem 1rem;color:#a8a8a3;border-bottom:2px solid transparent;text-decoration:none;font-size:.92rem;white-space:nowrap}
-.ped-aba:hover{color:#ececec}
-.ped-aba.ativa{color:#5dcaa5;border-color:#5dcaa5;font-weight:600}
+.ped-abas{display:flex;gap:0;border-bottom:1px solid var(--borda);margin-bottom:1rem;overflow-x:auto}
+.ped-aba{padding:.55rem 1rem;color:var(--txt-mut);border-bottom:2px solid transparent;text-decoration:none;font-size:.92rem;white-space:nowrap}
+.ped-aba:hover{color:var(--txt)}
+.ped-aba.ativa{color:var(--verde-claro);border-color:var(--verde-claro);font-weight:600}
 .ped-aba.off{color:#5a5a5a;font-size:.88rem;cursor:default}
-.sep-filtro{display:flex;align-items:center;gap:.8rem;margin-bottom:1rem;padding:.7rem .9rem;background:#1a1a1c;border:1px solid #2a2a2b;border-radius:8px;flex-wrap:wrap}
-.sep-filtro select{background:#0a0a0a;color:#ececec;border:1px solid #2a2a2b;border-radius:6px;padding:.5rem .7rem;font-size:.9rem;cursor:pointer}
-.sep-range{color:#a8a8a3;font-size:.85rem}
+.sep-filtro{display:flex;align-items:center;gap:.8rem;margin-bottom:1rem;padding:.7rem .9rem;background:var(--card-2);border:1px solid var(--borda);border-radius:8px;flex-wrap:wrap}
+.sep-filtro select{background:#0a0a0a;color:var(--txt);border:1px solid var(--borda);border-radius:6px;padding:.5rem .7rem;font-size:.9rem;cursor:pointer}
+.sep-range{color:var(--txt-mut);font-size:.85rem}
 .sep-resumo{display:grid;gap:.6rem;margin-bottom:1rem}
-.sep-card{background:#1a1a1c;border:1px solid #2a2a2b;border-radius:8px;padding:.9rem;text-align:center}
-.sep-card-num{color:#5dcaa5;font-size:1.5rem;font-weight:700;line-height:1.1}
-.sep-card-rot{color:#a8a8a3;font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;margin-top:.3rem}
+.sep-card{background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:.9rem;text-align:center}
+.sep-card-num{color:var(--verde-claro);font-size:1.5rem;font-weight:700;line-height:1.1}
+.sep-card-rot{color:var(--txt-mut);font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;margin-top:.3rem}
 .sep-alerta{background:#3a2d12;border:1px solid #6b5320;border-radius:8px;padding:.8rem 1rem;margin-bottom:1rem;color:#e0a83d;font-size:.9rem}
 .sep-alerta-link{color:#e0a83d;text-decoration:underline;margin-left:.4rem;white-space:nowrap}
 .rot-grupo{margin-bottom:1.5rem}
-.rot-grupo-tit{color:#5dcaa5;font-size:1rem;margin:0 0 .6rem;padding-bottom:.4rem;border-bottom:1px solid #2a2a2b;display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.5rem}
-.rot-grupo-meta{color:#a8a8a3;font-size:.82rem;font-weight:400}
+.rot-grupo-tit{color:var(--verde-claro);font-size:1rem;margin:0 0 .6rem;padding-bottom:.4rem;border-bottom:1px solid var(--borda);display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.5rem}
+.rot-grupo-meta{color:var(--txt-mut);font-size:.82rem;font-weight:400}
 .rot-cestas{display:flex;flex-direction:column;gap:.5rem}
-.rot-cesta{display:flex;justify-content:space-between;gap:1rem;background:#1a1a1c;border:1px solid #2a2a2b;border-radius:6px;padding:.9rem 1rem;align-items:flex-start;flex-wrap:wrap}
-.rot-c-entregue{border-left:3px solid #1d9e75;opacity:.65}
+.rot-cesta{display:flex;justify-content:space-between;gap:1rem;background:var(--card-2);border:1px solid var(--borda);border-radius:6px;padding:.9rem 1rem;align-items:flex-start;flex-wrap:wrap}
+.rot-c-entregue{border-left:3px solid var(--verde);opacity:.65}
 .rot-c-nemb{border-left:3px solid #e0a83d}
 .rot-c-info{flex:1;min-width:200px}
-.rot-c-nome{color:#ececec;font-weight:600;font-size:.95rem}
+.rot-c-nome{color:var(--txt);font-weight:600;font-size:.95rem}
 .rot-tag-nemb{display:inline-block;color:#e0a83d;background:#3a2d12;font-size:.7rem;font-weight:500;padding:.15rem .4rem;border-radius:4px;margin-left:.4rem;vertical-align:middle}
-.rot-c-end{color:#a8a8a3;font-size:.85rem;margin-top:.25rem}
+.rot-c-end{color:var(--txt-mut);font-size:.85rem;margin-top:.25rem}
 .rot-c-meta{color:#7a7a7a;font-size:.78rem;margin-top:.2rem}
 .rot-c-acoes{display:flex;gap:.4rem;align-items:flex-start}
-.rot-btn-entregar{background:#15241d;color:#5dcaa5;border:1px solid #5dcaa5;border-radius:6px;padding:.5rem .9rem;cursor:pointer;font-size:.88rem;font-weight:500;white-space:nowrap}
+.rot-btn-entregar{background:#15241d;color:var(--verde-claro);border:1px solid var(--verde-claro);border-radius:6px;padding:.5rem .9rem;cursor:pointer;font-size:.88rem;font-weight:500;white-space:nowrap}
 .rot-btn-entregar:hover{background:#1d2e25}
-.rot-pronto{color:#1d9e75;font-weight:600;font-size:.85rem;text-align:center;line-height:1.3}
+.rot-pronto{color:var(--verde);font-weight:600;font-size:.85rem;text-align:center;line-height:1.3}
 .rot-pronto small{color:#7a7a7a;font-size:.7rem;font-weight:400}
-.emb-btn-desfazer{background:transparent;color:#7a7a7a;border:1px solid #2a2a2b;border-radius:6px;padding:.4rem .55rem;cursor:pointer;font-size:.9rem}
+.emb-btn-desfazer{background:transparent;color:#7a7a7a;border:1px solid var(--borda);border-radius:6px;padding:.4rem .55rem;cursor:pointer;font-size:.9rem}
 .emb-btn-desfazer:hover{color:#c66;border-color:#3a2020}
-.ped-vazio{text-align:center;padding:3rem 1rem;color:#a8a8a3}
+.ped-vazio{text-align:center;padding:3rem 1rem;color:var(--txt-mut)}
 @media (max-width:520px){
   .sep-resumo{grid-template-columns:repeat(2,1fr) !important;gap:.4rem}
   .rot-cesta{flex-direction:column}
@@ -3778,15 +3778,15 @@ _ESQUECI_SENHA = """{% extends "base" %}{% block conteudo %}
   {% if enviado %}
   <div class="ok">
     <p>✅ Se esse e-mail tem uma conta no Zaq, enviamos um link de recuperação.</p>
-    <p style="font-size:.9rem;color:#a8a8a3;margin-top:.8rem">
+    <p style="font-size:.9rem;color:var(--txt-mut);margin-top:.8rem">
       Confira sua caixa de entrada (e a pasta de spam). O link é válido por 1 hora.
     </p>
   </div>
   <p style="text-align:center;margin-top:1.5rem">
-    <a href="/login" style="color:#5dcaa5;font-size:.88rem;text-decoration:none">Voltar ao login</a>
+    <a href="/login" style="color:var(--verde-claro);font-size:.88rem;text-decoration:none">Voltar ao login</a>
   </p>
   {% else %}
-  <p style="color:#a8a8a3;margin-bottom:1.2rem">
+  <p style="color:var(--txt-mut);margin-bottom:1.2rem">
     Digite o e-mail da sua conta e enviaremos um link pra redefinir sua senha.
   </p>
   <form method="post" action="/esqueci-senha">
@@ -3795,7 +3795,7 @@ _ESQUECI_SENHA = """{% extends "base" %}{% block conteudo %}
     <button>Enviar link</button>
   </form>
   <p style="text-align:center;margin-top:.8rem">
-    <a href="/login" style="color:#5dcaa5;font-size:.88rem;text-decoration:none">Voltar ao login</a>
+    <a href="/login" style="color:var(--verde-claro);font-size:.88rem;text-decoration:none">Voltar ao login</a>
   </p>
   {% endif %}
 </div>
@@ -3808,7 +3808,7 @@ _REDEFINIR_SENHA = """{% extends "base" %}{% block conteudo %}
   <div class="erro">
     <p>❌ Link inválido ou expirado.</p>
     <p style="font-size:.9rem;margin-top:.5rem">
-      Os links de recuperação são válidos por 1 hora. Peça um novo em <a href="/esqueci-senha" style="color:#5dcaa5">esqueci minha senha</a>.
+      Os links de recuperação são válidos por 1 hora. Peça um novo em <a href="/esqueci-senha" style="color:var(--verde-claro)">esqueci minha senha</a>.
     </p>
   </div>
   {% else %}
@@ -3826,31 +3826,31 @@ _REDEFINIR_SENHA = """{% extends "base" %}{% block conteudo %}
 
 _PEDIDO_ENVIADO = """{% extends "base" %}{% block conteudo %}
 <div class="card" style="max-width:420px;margin:0 auto;text-align:center">
-  <div style="width:58px;height:58px;border-radius:50%;background:#15301f;border:1px solid #1d9e75;display:flex;align-items:center;justify-content:center;margin:0 auto 1rem">
-    <span style="font-size:28px;color:#1d9e75">✓</span>
+  <div style="width:58px;height:58px;border-radius:50%;background:#15301f;border:1px solid var(--verde);display:flex;align-items:center;justify-content:center;margin:0 auto 1rem">
+    <span style="font-size:28px;color:var(--verde)">✓</span>
   </div>
   <h2>Pedido enviado!</h2>
   <p class="mut" style="font-size:.85rem">O fornecedor vai confirmar seu pedido e avisar você pelo WhatsApp.</p>
 
   <div style="text-align:left;margin:1.2rem 0">
-    <div style="display:flex;align-items:center;gap:11px;margin:.4rem 0"><div style="width:28px;height:28px;border-radius:50%;background:#1d9e75;display:flex;align-items:center;justify-content:center;color:#fff">✓</div><span style="font-size:.82rem;color:#ececec">Pedido recebido</span></div>
+    <div style="display:flex;align-items:center;gap:11px;margin:.4rem 0"><div style="width:28px;height:28px;border-radius:50%;background:var(--verde);display:flex;align-items:center;justify-content:center;color:#fff">✓</div><span style="font-size:.82rem;color:var(--txt)">Pedido recebido</span></div>
     <div style="display:flex;align-items:center;gap:11px;margin:.4rem 0"><div style="width:28px;height:28px;border-radius:50%;background:#1c1c1f;border:1px solid #888780;display:flex;align-items:center;justify-content:center;color:#888780">⏳</div><span style="font-size:.82rem;color:#888780">Aguardando confirmação</span></div>
-    <div style="display:flex;align-items:center;gap:11px;margin:.4rem 0"><div style="width:28px;height:28px;border-radius:50%;background:#1c1c1f;border:1px solid #2a2a2b;display:flex;align-items:center;justify-content:center;color:#5f5e5a">💳</div><span style="font-size:.82rem;color:#5f5e5a">Pagamento (após confirmar)</span></div>
-    <div style="display:flex;align-items:center;gap:11px;margin:.4rem 0"><div style="width:28px;height:28px;border-radius:50%;background:#1c1c1f;border:1px solid #2a2a2b;display:flex;align-items:center;justify-content:center;color:#5f5e5a">🚚</div><span style="font-size:.82rem;color:#5f5e5a">A caminho</span></div>
+    <div style="display:flex;align-items:center;gap:11px;margin:.4rem 0"><div style="width:28px;height:28px;border-radius:50%;background:#1c1c1f;border:1px solid var(--borda);display:flex;align-items:center;justify-content:center;color:#5f5e5a">💳</div><span style="font-size:.82rem;color:#5f5e5a">Pagamento (após confirmar)</span></div>
+    <div style="display:flex;align-items:center;gap:11px;margin:.4rem 0"><div style="width:28px;height:28px;border-radius:50%;background:#1c1c1f;border:1px solid var(--borda);display:flex;align-items:center;justify-content:center;color:#5f5e5a">🚚</div><span style="font-size:.82rem;color:#5f5e5a">A caminho</span></div>
   </div>
 
   {% if carrinho %}
-  <div style="background:#161617;border:1px solid #2a2a2b;border-radius:11px;padding:.8rem;text-align:left;margin-bottom:1rem">
-    <div style="display:flex;justify-content:space-between;font-size:.8rem"><span class="mut">Pedido #{{ carrinho.id }}</span><span style="color:#5dcaa5;background:#15301f;padding:2px 9px;border-radius:20px;font-size:.72rem">aguardando</span></div>
-    <div style="display:flex;justify-content:space-between;border-top:1px solid #2a2a2b;margin-top:6px;padding-top:6px;font-size:.85rem"><span style="color:#ececec">Total</span><span style="color:#5dcaa5;font-weight:600">R$ {{ (carrinho.total_centavos/100)|n2 }}</span></div>
+  <div style="background:var(--card);border:1px solid var(--borda);border-radius:11px;padding:.8rem;text-align:left;margin-bottom:1rem">
+    <div style="display:flex;justify-content:space-between;font-size:.8rem"><span class="mut">Pedido #{{ carrinho.id }}</span><span style="color:var(--verde-claro);background:#15301f;padding:2px 9px;border-radius:20px;font-size:.72rem">aguardando</span></div>
+    <div style="display:flex;justify-content:space-between;border-top:1px solid var(--borda);margin-top:6px;padding-top:6px;font-size:.85rem"><span style="color:var(--txt)">Total</span><span style="color:var(--verde-claro);font-weight:600">R$ {{ (carrinho.total_centavos/100)|n2 }}</span></div>
   </div>
   {% endif %}
 
   {% if carrinho and carrinho.endereco_entrega %}
-  <div style="background:#161617;border:1px solid #2a2a2b;border-radius:11px;padding:.8rem;text-align:left;margin-bottom:1rem">
+  <div style="background:var(--card);border:1px solid var(--borda);border-radius:11px;padding:.8rem;text-align:left;margin-bottom:1rem">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem">
-      <div style="font-size:.82rem"><span class="mut">Entregar em</span><br><span style="color:#ececec">{{ carrinho.endereco_entrega }}</span></div>
-      {% if carrinho.status in ['rascunho','aguardando','confirmado'] %}<button type="button" onclick="var f=document.getElementById('ped-end-form');f.style.display=(f.style.display==='none'?'block':'none');" style="width:auto;margin:0;padding:.35rem .8rem;font-size:.78rem;background:transparent;border:1px solid #333;color:#5dcaa5">editar</button>{% endif %}
+      <div style="font-size:.82rem"><span class="mut">Entregar em</span><br><span style="color:var(--txt)">{{ carrinho.endereco_entrega }}</span></div>
+      {% if carrinho.status in ['rascunho','aguardando','confirmado'] %}<button type="button" onclick="var f=document.getElementById('ped-end-form');f.style.display=(f.style.display==='none'?'block':'none');" style="width:auto;margin:0;padding:.35rem .8rem;font-size:.78rem;background:transparent;border:1px solid #333;color:var(--verde-claro)">editar</button>{% endif %}
     </div>
     {% if carrinho.status in ['rascunho','aguardando','confirmado'] %}
     <form id="ped-end-form" method="post" action="/pedido/{{ carrinho.id }}/endereco" style="display:none;margin-top:.6rem">
@@ -3863,8 +3863,8 @@ _PEDIDO_ENVIADO = """{% extends "base" %}{% block conteudo %}
   </div>
   {% endif %}
 
-  <a href="/painel" style="display:block;background:#1c1c1f;color:#ececec;border:1px solid #2a2a2b;border-radius:10px;padding:.7rem;text-decoration:none;font-size:.85rem;margin-bottom:.5rem">Ver meus pedidos</a>
-  <a href="/f/{{ fornecedor_slug or '' }}" style="color:#5dcaa5;font-size:.8rem;text-decoration:none">Voltar à loja</a>
+  <a href="/painel" style="display:block;background:#1c1c1f;color:var(--txt);border:1px solid var(--borda);border-radius:10px;padding:.7rem;text-decoration:none;font-size:.85rem;margin-bottom:.5rem">Ver meus pedidos</a>
+  <a href="/f/{{ fornecedor_slug or '' }}" style="color:var(--verde-claro);font-size:.8rem;text-decoration:none">Voltar à loja</a>
 </div>
 {% endblock %}"""
 
@@ -4005,19 +4005,19 @@ _BLOCO_CONTA = """
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center">
     <h1 style="font-size:1.05rem;margin:0">Meus dados</h1>
-    <button type="button" onclick="dadosEditar()" id="dados-btn" style="width:auto;margin:0;background:transparent;border:1px solid #2f5d4e;color:#5dcaa5;border-radius:999px;padding:.35rem .9rem;font-size:.8rem;cursor:pointer">✏️ Editar</button>
+    <button type="button" onclick="dadosEditar()" id="dados-btn" style="width:auto;margin:0;background:transparent;border:1px solid #2f5d4e;color:var(--verde-claro);border-radius:999px;padding:.35rem .9rem;font-size:.8rem;cursor:pointer">✏️ Editar</button>
   </div>
   {% if md_aviso %}<div class="ok" style="margin-top:.8rem">{{ md_aviso }}</div>{% endif %}
   {% if md_erro %}<div class="erro" style="margin-top:.8rem">{{ md_erro }}</div>{% endif %}
   <div id="dados-resumo">
     <div style="display:flex;align-items:center;gap:13px;margin:1rem 0 .3rem">
       <div class="avatar" style="width:46px;height:46px;font-size:1.1rem">{{ (md_nome or '?')[0]|upper }}</div>
-      <div><div style="font-size:.98rem;color:#ececec">{{ md_nome or '-' }}</div><div class="mut" style="font-size:.78rem;margin-top:2px">titular{% if conta and conta[4] %} · {{ conta[4] }}{% endif %}</div></div>
+      <div><div style="font-size:.98rem;color:var(--txt)">{{ md_nome or '-' }}</div><div class="mut" style="font-size:.78rem;margin-top:2px">titular{% if conta and conta[4] %} · {{ conta[4] }}{% endif %}</div></div>
     </div>
-    <div style="margin-top:.7rem;border-top:1px solid #2a2a2b">
-      <div style="display:flex;align-items:center;gap:11px;padding:.6rem 0;border-bottom:1px solid #212122"><span style="color:#5dcaa5">✉️</span><span class="mut" style="flex:1;font-size:.82rem">E-mail</span><span style="font-size:.86rem;color:#ececec">{{ md_email or '-' }}{% if md_email_pendente %}<div style="font-size:.72rem;color:#e0a83d">a confirmar: {{ md_email_pendente }}</div>{% endif %}</span></div>
-      <div style="display:flex;align-items:center;gap:11px;padding:.6rem 0;border-bottom:1px solid #212122"><span style="color:#5dcaa5">📱</span><span class="mut" style="flex:1;font-size:.82rem">WhatsApp</span><span style="font-size:.86rem;color:#ececec">{{ md_whatsapp or '-' }}</span></div>
-      <div style="display:flex;align-items:center;gap:11px;padding:.6rem 0"><span style="color:#5dcaa5">🔒</span><span class="mut" style="flex:1;font-size:.82rem">Senha</span><a href="/senha" style="font-size:.86rem;color:#5dcaa5;text-decoration:none">alterar</a></div>
+    <div style="margin-top:.7rem;border-top:1px solid var(--borda)">
+      <div style="display:flex;align-items:center;gap:11px;padding:.6rem 0;border-bottom:1px solid #212122"><span style="color:var(--verde-claro)">✉️</span><span class="mut" style="flex:1;font-size:.82rem">E-mail</span><span style="font-size:.86rem;color:var(--txt)">{{ md_email or '-' }}{% if md_email_pendente %}<div style="font-size:.72rem;color:#e0a83d">a confirmar: {{ md_email_pendente }}</div>{% endif %}</span></div>
+      <div style="display:flex;align-items:center;gap:11px;padding:.6rem 0;border-bottom:1px solid #212122"><span style="color:var(--verde-claro)">📱</span><span class="mut" style="flex:1;font-size:.82rem">WhatsApp</span><span style="font-size:.86rem;color:var(--txt)">{{ md_whatsapp or '-' }}</span></div>
+      <div style="display:flex;align-items:center;gap:11px;padding:.6rem 0"><span style="color:var(--verde-claro)">🔒</span><span class="mut" style="flex:1;font-size:.82rem">Senha</span><a href="/senha" style="font-size:.86rem;color:var(--verde-claro);text-decoration:none">alterar</a></div>
     </div>
   </div>
   <div id="dados-form" style="display:none">
@@ -4031,7 +4031,7 @@ _BLOCO_CONTA = """
       <p class="mut" style="font-size:.76rem;margin:.6rem 0 0">Trocar o número reenvia o código pra reconectar no bot. Trocar o e-mail envia um link de confirmação — o novo só vale depois de confirmar.</p>
       <div style="display:flex;gap:.6rem;margin-top:1rem">
         <button style="width:auto;margin:0;padding:.6rem 1.4rem">Salvar</button>
-        <button type="button" onclick="dadosCancelar()" style="width:auto;margin:0;padding:.6rem 1.4rem;background:transparent;border:1px solid #333;color:#a8a8a3">Cancelar</button>
+        <button type="button" onclick="dadosCancelar()" style="width:auto;margin:0;padding:.6rem 1.4rem;background:transparent;border:1px solid #333;color:var(--txt-mut)">Cancelar</button>
       </div>
     </form>
   </div>
@@ -4040,12 +4040,12 @@ _BLOCO_CONTA = """
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center">
     <h1 style="font-size:1.05rem;margin:0">Meu endereço</h1>
-    {% if md_endereco %}<button type="button" onclick="mdEditar()" id="md-btn" style="width:auto;margin:0;background:transparent;border:1px solid #2f5d4e;color:#5dcaa5;border-radius:999px;padding:.35rem .9rem;font-size:.8rem;cursor:pointer">✏️ Editar</button>{% endif %}
+    {% if md_endereco %}<button type="button" onclick="mdEditar()" id="md-btn" style="width:auto;margin:0;background:transparent;border:1px solid #2f5d4e;color:var(--verde-claro);border-radius:999px;padding:.35rem .9rem;font-size:.8rem;cursor:pointer">✏️ Editar</button>{% endif %}
   </div>
   {% if md_endereco %}
   <div id="md-atual" style="display:flex;align-items:flex-start;gap:13px;margin-top:1rem">
-    <div style="width:42px;height:42px;border-radius:12px;background:#13251d;color:#5dcaa5;display:flex;align-items:center;justify-content:center;flex:none;font-size:1.2rem">🏠</div>
-    <div><div style="font-size:.9rem;color:#ececec;line-height:1.45">{{ md_endereco }}</div>{% if md_cep %}<div class="mut" style="font-size:.8rem;margin-top:3px">CEP {{ md_cep }}</div>{% endif %}</div>
+    <div style="width:42px;height:42px;border-radius:12px;background:#13251d;color:var(--verde-claro);display:flex;align-items:center;justify-content:center;flex:none;font-size:1.2rem">🏠</div>
+    <div><div style="font-size:.9rem;color:var(--txt);line-height:1.45">{{ md_endereco }}</div>{% if md_cep %}<div class="mut" style="font-size:.8rem;margin-top:3px">CEP {{ md_cep }}</div>{% endif %}</div>
   </div>
   {% endif %}
   <div id="md-form-wrap"{% if md_endereco %} style="display:none;margin-top:1rem"{% endif %}>
@@ -4062,13 +4062,13 @@ _BLOCO_CONTA = """
         <div style="flex:1"><label>Bairro</label><input id="mdbairro" placeholder="Bairro"></div>
         <div style="flex:1"><label>Complemento</label><input id="mdcompl" placeholder="apto, bloco…"></div>
       </div>
-      <div id="mdcidade" style="font-size:.82rem;color:#5dcaa5;margin-top:.5rem"></div>
+      <div id="mdcidade" style="font-size:.82rem;color:var(--verde-claro);margin-top:.5rem"></div>
       <input type="hidden" name="endereco" id="mdendereco">
       <input type="hidden" name="cep" id="mdcephidden" value="{{ md_cep or '' }}">
       <input type="hidden" name="bairro" id="mdbairro_h">
       <div style="display:flex;gap:.6rem;margin-top:1rem">
         <button style="width:auto;margin:0;padding:.6rem 1.4rem">Salvar endereço</button>
-        {% if md_endereco %}<button type="button" onclick="mdCancelar()" style="width:auto;margin:0;padding:.6rem 1.4rem;background:transparent;border:1px solid #333;color:#a8a8a3">Cancelar</button>{% endif %}
+        {% if md_endereco %}<button type="button" onclick="mdCancelar()" style="width:auto;margin:0;padding:.6rem 1.4rem;background:transparent;border:1px solid #333;color:var(--txt-mut)">Cancelar</button>{% endif %}
       </div>
     </form>
   </div>
@@ -4097,22 +4097,22 @@ _AVULSOS_FORN = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.2rem">
     <h1 style="font-size:1.2rem;margin:0">Pedidos avulsos</h1>
-    <a href="/painel/fornecedor/pedidos" style="color:#5dcaa5;font-size:.85rem;text-decoration:none">Cestas &rsaquo;</a>
+    <a href="/painel/fornecedor/pedidos" style="color:var(--verde-claro);font-size:.85rem;text-decoration:none">Cestas &rsaquo;</a>
   </div>
   <p class="mut" style="margin:.3rem 0 1rem">Pedidos feitos direto na sua loja (fora das assinaturas de cesta).</p>
   {% set fstatus = status or '' %}
   <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1rem">
-    <a href="/painel/fornecedor/avulsos" class="tag" style="text-decoration:none{% if not fstatus %};background:#1d9e75;color:#fff;border-color:#1d9e75{% endif %}">Todos</a>
-    <a href="/painel/fornecedor/avulsos?status=aguardando" class="tag" style="text-decoration:none{% if fstatus=='aguardando' %};background:#1d9e75;color:#fff;border-color:#1d9e75{% endif %}">Aguardando</a>
-    <a href="/painel/fornecedor/avulsos?status=confirmado" class="tag" style="text-decoration:none{% if fstatus=='confirmado' %};background:#1d9e75;color:#fff;border-color:#1d9e75{% endif %}">Confirmado</a>
-    <a href="/painel/fornecedor/avulsos?status=em_entrega" class="tag" style="text-decoration:none{% if fstatus=='em_entrega' %};background:#1d9e75;color:#fff;border-color:#1d9e75{% endif %}">Em entrega</a>
-    <a href="/painel/fornecedor/avulsos?status=entregue" class="tag" style="text-decoration:none{% if fstatus=='entregue' %};background:#1d9e75;color:#fff;border-color:#1d9e75{% endif %}">Entregues</a>
+    <a href="/painel/fornecedor/avulsos" class="tag" style="text-decoration:none{% if not fstatus %};background:var(--verde);color:#fff;border-color:var(--verde){% endif %}">Todos</a>
+    <a href="/painel/fornecedor/avulsos?status=aguardando" class="tag" style="text-decoration:none{% if fstatus=='aguardando' %};background:var(--verde);color:#fff;border-color:var(--verde){% endif %}">Aguardando</a>
+    <a href="/painel/fornecedor/avulsos?status=confirmado" class="tag" style="text-decoration:none{% if fstatus=='confirmado' %};background:var(--verde);color:#fff;border-color:var(--verde){% endif %}">Confirmado</a>
+    <a href="/painel/fornecedor/avulsos?status=em_entrega" class="tag" style="text-decoration:none{% if fstatus=='em_entrega' %};background:var(--verde);color:#fff;border-color:var(--verde){% endif %}">Em entrega</a>
+    <a href="/painel/fornecedor/avulsos?status=entregue" class="tag" style="text-decoration:none{% if fstatus=='entregue' %};background:var(--verde);color:#fff;border-color:var(--verde){% endif %}">Entregues</a>
   </div>
   {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
   {% if not pedidos %}<p class="mut" style="text-align:center;padding:2rem 0">Nenhum pedido avulso{% if fstatus %} nesse status{% endif %} por aqui ainda.</p>{% endif %}
-  {% set cor = {'aguardando':'#e0a83d','confirmado':'#3a78c2','em_entrega':'#5b8def','entregue':'#1d9e75','cancelado':'#8a3636'} %}
+  {% set cor = {'aguardando':'#e0a83d','confirmado':'#3a78c2','em_entrega':'#5b8def','entregue':'var(--verde)','cancelado':'#8a3636'} %}
   {% for p in pedidos %}
-  <div style="background:#0e0e0f;border:1px solid #2a2a2b;border-left:3px solid {{ cor.get(p.status,'#2a2a2b') }};border-radius:12px;padding:.9rem 1rem;margin-bottom:.8rem{% if p.status in ['entregue','cancelado'] %};opacity:.7{% endif %}">
+  <div style="background:var(--bg);border:1px solid var(--borda);border-left:3px solid {{ cor.get(p.status,'var(--borda)') }};border-radius:12px;padding:.9rem 1rem;margin-bottom:.8rem{% if p.status in ['entregue','cancelado'] %};opacity:.7{% endif %}">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem">
       <div><b>{{ p.cliente_nome }}</b> <span class="mut" style="font-size:.78rem">#{{ p.id }}{% if p.criado_em %} &middot; {{ p.criado_em.strftime('%d/%m %H:%M') }}{% endif %}</span></div>
       <span class="tag" style="border-color:{{ cor.get(p.status,'#444') }};color:{{ cor.get(p.status,'#bbb') }}">{{ p.status }}{% if p.pago %} &middot; pago{% endif %}</span>
@@ -4120,13 +4120,13 @@ _AVULSOS_FORN = """{% extends "base" %}{% block conteudo %}
     {% if p.endereco_entrega %}<div class="mut" style="font-size:.83rem;margin:.5rem 0">📍 {{ p.endereco_entrega }}{% if p.forma_label %} &middot; <span style="color:#c5c5c0">{{ p.forma_label }}</span>{% endif %}</div>{% endif %}
     {% if p.obs %}<div class="mut" style="font-size:.8rem;margin:.2rem 0 .3rem">Obs: {{ p.obs }}</div>{% endif %}
     <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #212122;padding-top:.6rem;margin-top:.5rem">
-      <span style="color:#5dcaa5;font-weight:600">R$ {{ (p.total_centavos/100)|n2 }}</span>
+      <span style="color:var(--verde-claro);font-weight:600">R$ {{ (p.total_centavos/100)|n2 }}</span>
       <div style="display:flex;gap:.4rem">
         {% if p.status == 'aguardando' %}
           <form method="post" action="/painel/fornecedor/avulsos/{{ p.id }}/status" style="margin:0"><input type="hidden" name="novo" value="cancelado"><button style="width:auto;margin:0;padding:.4rem .8rem;font-size:.8rem;background:transparent;border:1px solid #6e2b2b;color:#e89a9a">Recusar</button></form>
           <form method="post" action="/painel/fornecedor/avulsos/{{ p.id }}/status" style="margin:0"><input type="hidden" name="novo" value="confirmado"><button style="width:auto;margin:0;padding:.4rem .9rem;font-size:.8rem">Confirmar</button></form>
         {% elif p.status == 'confirmado' %}
-          <form method="post" action="/painel/fornecedor/avulsos/{{ p.id }}/status" style="margin:0"><input type="hidden" name="novo" value="cancelado"><button style="width:auto;margin:0;padding:.4rem .8rem;font-size:.8rem;background:transparent;border:1px solid #333;color:#a8a8a3">Cancelar</button></form>
+          <form method="post" action="/painel/fornecedor/avulsos/{{ p.id }}/status" style="margin:0"><input type="hidden" name="novo" value="cancelado"><button style="width:auto;margin:0;padding:.4rem .8rem;font-size:.8rem;background:transparent;border:1px solid #333;color:var(--txt-mut)">Cancelar</button></form>
           <form method="post" action="/painel/fornecedor/avulsos/{{ p.id }}/status" style="margin:0"><input type="hidden" name="novo" value="em_entrega"><button style="width:auto;margin:0;padding:.4rem .9rem;font-size:.8rem">Saiu pra entrega</button></form>
         {% elif p.status == 'em_entrega' %}
           <form method="post" action="/painel/fornecedor/avulsos/{{ p.id }}/status" style="margin:0"><input type="hidden" name="novo" value="entregue"><button style="width:auto;margin:0;padding:.4rem .9rem;font-size:.8rem">Marcar entregue</button></form>
@@ -4135,21 +4135,21 @@ _AVULSOS_FORN = """{% extends "base" %}{% block conteudo %}
     </div>
   </div>
   {% endfor %}
-  <a href="/painel/fornecedor" style="color:#5dcaa5;text-decoration:none;font-size:.85rem">&larr; voltar</a>
+  <a href="/painel/fornecedor" style="color:var(--verde-claro);text-decoration:none;font-size:.85rem">&larr; voltar</a>
 </div>
 {% endblock %}"""
 
 
 _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
 <style>
-.ped-back{color:#5dcaa5;display:inline-block;margin-bottom:.6rem;font-size:.9rem;text-decoration:none}
+.ped-back{color:var(--verde-claro);display:inline-block;margin-bottom:.6rem;font-size:.9rem;text-decoration:none}
 .ped-abas{display:flex;gap:.4rem;overflow-x:auto;padding-bottom:4px;margin:.2rem 0 1.1rem}
-.ped-aba{flex:0 0 auto;padding:.5rem .95rem;border-radius:9px;border:1px solid #2a2a2b;color:#a8a8a3;text-decoration:none;font-size:.88rem;white-space:nowrap}
-.ped-aba.ativa{background:#161617;color:#5dcaa5;border-color:#2f5d4e;font-weight:500}
+.ped-aba{flex:0 0 auto;padding:.5rem .95rem;border-radius:9px;border:1px solid var(--borda);color:var(--txt-mut);text-decoration:none;font-size:.88rem;white-space:nowrap}
+.ped-aba.ativa{background:var(--card);color:var(--verde-claro);border-color:#2f5d4e;font-weight:500}
 .uni-card{transition:border-color .15s}
 </style>
 {% macro card(p) %}
-<div class="uni-card" data-tipo="{{ p.tipo }}" style="background:#161617;border:1px solid #2a2a2b;border-left:3px solid {{ '#7fd4a8' if p.tipo=='cesta' else '#e0b877' }};border-radius:12px;padding:.8rem 1rem;margin-bottom:.7rem{% if p.esta_entregue %};opacity:.7{% endif %}">
+<div class="uni-card" data-tipo="{{ p.tipo }}" style="background:var(--card);border:1px solid var(--borda);border-left:3px solid {{ '#7fd4a8' if p.tipo=='cesta' else '#e0b877' }};border-radius:12px;padding:.8rem 1rem;margin-bottom:.7rem{% if p.esta_entregue %};opacity:.7{% endif %}">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem">
     <div>
       <span style="font-size:.72rem;padding:1px 8px;border-radius:999px;font-weight:600;{{ 'background:#1e2b23;color:#7fd4a8' if p.tipo=='cesta' else 'background:#2b2620;color:#e0b877' }}">{{ '🧺 cesta' if p.tipo=='cesta' else '📦 avulso' }}</span>
@@ -4158,7 +4158,7 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
     </div>
     <div style="text-align:right;white-space:nowrap">
       {% if p.tipo=='cesta' and p.tamanho_nome %}<span class="mut" style="font-size:.8rem">{{ p.tamanho_nome }}</span>{% endif %}
-      {% if p.tipo=='avulso' %}<span style="color:#5dcaa5;font-weight:600">R$ {{ (p.total_centavos/100)|n2 }}</span>{% endif %}
+      {% if p.tipo=='avulso' %}<span style="color:var(--verde-claro);font-weight:600">R$ {{ (p.total_centavos/100)|n2 }}</span>{% endif %}
     </div>
   </div>
   {% if p.endereco %}<div class="mut" style="font-size:.78rem;margin:.4rem 0 0">📍 {{ p.endereco }}</div>{% endif %}
@@ -4179,9 +4179,9 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
 
   {% if fase in ['embalagem','rotas','entregues'] %}
   <div style="display:flex;gap:.4rem;margin:1rem 0 .4rem">
-    <button type="button" class="tp-btn" data-tp="todos" onclick="filtTipo(this)" style="font-size:12px;padding:5px 13px;border-radius:999px;cursor:pointer;border:1px solid #1d9e75;background:#1d9e75;color:#fff">Todos</button>
-    <button type="button" class="tp-btn" data-tp="cesta" onclick="filtTipo(this)" style="font-size:12px;padding:5px 13px;border-radius:999px;cursor:pointer;border:1px solid #2a2a2b;background:transparent;color:#a8a8a3">🧺 Cestas</button>
-    <button type="button" class="tp-btn" data-tp="avulso" onclick="filtTipo(this)" style="font-size:12px;padding:5px 13px;border-radius:999px;cursor:pointer;border:1px solid #2a2a2b;background:transparent;color:#a8a8a3">📦 Avulsos</button>
+    <button type="button" class="tp-btn" data-tp="todos" onclick="filtTipo(this)" style="font-size:12px;padding:5px 13px;border-radius:999px;cursor:pointer;border:1px solid var(--verde);background:var(--verde);color:#fff">Todos</button>
+    <button type="button" class="tp-btn" data-tp="cesta" onclick="filtTipo(this)" style="font-size:12px;padding:5px 13px;border-radius:999px;cursor:pointer;border:1px solid var(--borda);background:transparent;color:var(--txt-mut)">🧺 Cestas</button>
+    <button type="button" class="tp-btn" data-tp="avulso" onclick="filtTipo(this)" style="font-size:12px;padding:5px 13px;border-radius:999px;cursor:pointer;border:1px solid var(--borda);background:transparent;color:var(--txt-mut)">📦 Avulsos</button>
   </div>
   {% endif %}
 
@@ -4190,7 +4190,7 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
     {% for p in novos %}
     {% call card(p) %}
     <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #212122;margin-top:.6rem;padding-top:.6rem">
-      <span class="mut" style="font-size:.78rem">{{ p.forma_label }}{% if p.criado_em %} · {{ p.criado_em.strftime('%d/%m %H:%M') }}{% endif %} · <a href="/painel/fornecedor/embalagem/avulso/{{ p.id }}/etiqueta" target="_blank" style="color:#5dcaa5;text-decoration:none">🏷️ etiqueta</a></span>
+      <span class="mut" style="font-size:.78rem">{{ p.forma_label }}{% if p.criado_em %} · {{ p.criado_em.strftime('%d/%m %H:%M') }}{% endif %} · <a href="/painel/fornecedor/embalagem/avulso/{{ p.id }}/etiqueta" target="_blank" style="color:var(--verde-claro);text-decoration:none">🏷️ etiqueta</a></span>
       <div style="display:flex;gap:.4rem">
         <form method="post" action="/painel/fornecedor/pedidos/avulso/{{ p.id }}/recusar" style="margin:0"><input type="hidden" name="fase" value="novos"><button style="width:auto;margin:0;padding:.4rem .8rem;font-size:.8rem;background:transparent;border:1px solid #6e2b2b;color:#e89a9a">Recusar</button></form>
         <form method="post" action="/painel/fornecedor/pedidos/avulso/{{ p.id }}/aceitar" style="margin:0"><input type="hidden" name="fase" value="novos"><button style="width:auto;margin:0;padding:.4rem .9rem;font-size:.8rem">Aceitar</button></form>
@@ -4202,7 +4202,7 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
   {% elif fase == 'separacao' %}
     <form method="get" action="/painel/fornecedor/pedidos" style="margin:.4rem 0 .2rem">
       <input type="hidden" name="fase" value="separacao">
-      <select name="periodo" onchange="this.form.submit()" style="background:#0e0e0f;border:1px solid #333;color:#ececec;border-radius:8px;padding:.4rem .6rem;font-size:.85rem">
+      <select name="periodo" onchange="this.form.submit()" style="background:var(--bg);border:1px solid #333;color:var(--txt);border-radius:8px;padding:.4rem .6rem;font-size:.85rem">
         <option value="esta_semana"{% if periodo=='esta_semana' %} selected{% endif %}>Esta semana</option>
         <option value="proxima_semana"{% if periodo=='proxima_semana' %} selected{% endif %}>Próxima semana</option>
         <option value="proxima"{% if periodo=='proxima' %} selected{% endif %}>Próximas entregas</option>
@@ -4211,14 +4211,14 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
       {% if sep.data_de and sep.data_ate %}<span class="mut" style="margin-left:.5rem;font-size:.8rem">{{ sep.data_de }} — {{ sep.data_ate }}</span>{% endif %}
     </form>
     <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin:.8rem 0">
-      <div style="flex:1;min-width:96px;background:#161617;border:1px solid #2a2a2b;border-radius:10px;padding:.7rem;text-align:center"><div style="font-size:1.25rem;font-weight:600;color:#5dcaa5">{{ sep.qtd_cestas_confirmadas }}{% if sep.qtd_avulsos %}+{{ sep.qtd_avulsos }}{% endif %}</div><div class="mut" style="font-size:.7rem">cestas{% if sep.qtd_avulsos %}+avulsos{% endif %}</div></div>
-      <div style="flex:1;min-width:96px;background:#161617;border:1px solid #2a2a2b;border-radius:10px;padding:.7rem;text-align:center"><div style="font-size:1.25rem;font-weight:600;color:#ececec">{{ sep.total_itens_distintos }}</div><div class="mut" style="font-size:.7rem">produtos</div></div>
-      <div style="flex:1;min-width:96px;background:#161617;border:1px solid #2a2a2b;border-radius:10px;padding:.7rem;text-align:center"><div style="font-size:1.25rem;font-weight:600;color:#ececec">R$ {{ "%.0f"|format(sep.valor_total_reais) }}</div><div class="mut" style="font-size:.7rem">em cestas</div></div>
+      <div style="flex:1;min-width:96px;background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.7rem;text-align:center"><div style="font-size:1.25rem;font-weight:600;color:var(--verde-claro)">{{ sep.qtd_cestas_confirmadas }}{% if sep.qtd_avulsos %}+{{ sep.qtd_avulsos }}{% endif %}</div><div class="mut" style="font-size:.7rem">cestas{% if sep.qtd_avulsos %}+avulsos{% endif %}</div></div>
+      <div style="flex:1;min-width:96px;background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.7rem;text-align:center"><div style="font-size:1.25rem;font-weight:600;color:var(--txt)">{{ sep.total_itens_distintos }}</div><div class="mut" style="font-size:.7rem">produtos</div></div>
+      <div style="flex:1;min-width:96px;background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.7rem;text-align:center"><div style="font-size:1.25rem;font-weight:600;color:var(--txt)">R$ {{ "%.0f"|format(sep.valor_total_reais) }}</div><div class="mut" style="font-size:.7rem">em cestas</div></div>
     </div>
     {% if sep.qtd_cestas_em_ajuste %}<div style="background:#2a2417;border:1px solid #6b5a2a;border-radius:10px;padding:.6rem .9rem;font-size:.82rem;color:#e0c07a;margin-bottom:.6rem">⚠️ {{ sep.qtd_cestas_em_ajuste }} cesta(s) ainda em ajuste pelos clientes — a lista pode mudar.</div>{% endif %}
     <div style="display:flex;gap:.5rem;margin:.2rem 0 .8rem">
-      <button type="button" class="sep-tg" data-v="cliente" onclick="sepView(this)" style="font-size:12px;padding:6px 14px;border-radius:999px;cursor:pointer;border:1px solid #1d9e75;background:#1d9e75;color:#fff">Por cliente (separar)</button>
-      <button type="button" class="sep-tg" data-v="total" onclick="sepView(this)" style="font-size:12px;padding:6px 14px;border-radius:999px;cursor:pointer;border:1px solid #2a2a2b;background:transparent;color:#a8a8a3">Total a comprar</button>
+      <button type="button" class="sep-tg" data-v="cliente" onclick="sepView(this)" style="font-size:12px;padding:6px 14px;border-radius:999px;cursor:pointer;border:1px solid var(--verde);background:var(--verde);color:#fff">Por cliente (separar)</button>
+      <button type="button" class="sep-tg" data-v="total" onclick="sepView(this)" style="font-size:12px;padding:6px 14px;border-radius:999px;cursor:pointer;border:1px solid var(--borda);background:transparent;color:var(--txt-mut)">Total a comprar</button>
     </div>
     <div id="sep-cliente">
       {% if not ped_sep %}<p class="mut" style="text-align:center;padding:2rem 0">Nenhum pedido confirmado pra separar.</p>{% endif %}
@@ -4226,10 +4226,10 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
       {% call card(p) %}
         {% if p.itens %}<div style="margin-top:.5rem;border-top:1px solid #212122;padding-top:.4rem{% if p.separada %};opacity:.55{% endif %}">{% for it in p.itens %}<div style="display:flex;justify-content:space-between;font-size:.83rem;padding:.24rem 0"><span>{{ it.produto_nome }}</span><span class="mut" style="white-space:nowrap">{{ "%g"|format(it.quantidade) }} {{ it.unidade }}</span></div>{% endfor %}</div>{% else %}<div class="mut" style="font-size:.78rem;margin-top:.4rem">sem itens</div>{% endif %}
         <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #212122;margin-top:.5rem;padding-top:.5rem">
-          <span style="font-size:.8rem;color:{{ '#5dcaa5' if p.separada else '#a8a8a3' }}">{% if p.separada %}☑ separado{% else %}☐ a separar{% endif %}</span>
+          <span style="font-size:.8rem;color:{{ 'var(--verde-claro)' if p.separada else 'var(--txt-mut)' }}">{% if p.separada %}☑ separado{% else %}☐ a separar{% endif %}</span>
           <div style="display:flex;gap:.7rem;align-items:center">
-            <a href="/painel/fornecedor/embalagem/{% if p.tipo=='avulso' %}avulso/{% endif %}{{ p.id }}/etiqueta" target="_blank" style="color:#5dcaa5;font-size:.78rem;text-decoration:none">🏷️ etiqueta</a>
-            <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/{{ 'desseparar' if p.separada else 'separar' }}" style="margin:0"><input type="hidden" name="fase" value="separacao"><button style="width:auto;margin:0;padding:.35rem .8rem;font-size:.78rem;{% if p.separada %}background:transparent;border:1px solid #333;color:#a8a8a3{% else %}background:#1d9e75;border:0;color:#fff{% endif %}">{% if p.separada %}desfazer{% else %}marcar separado{% endif %}</button></form>
+            <a href="/painel/fornecedor/embalagem/{% if p.tipo=='avulso' %}avulso/{% endif %}{{ p.id }}/etiqueta" target="_blank" style="color:var(--verde-claro);font-size:.78rem;text-decoration:none">🏷️ etiqueta</a>
+            <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/{{ 'desseparar' if p.separada else 'separar' }}" style="margin:0"><input type="hidden" name="fase" value="separacao"><button style="width:auto;margin:0;padding:.35rem .8rem;font-size:.78rem;{% if p.separada %}background:transparent;border:1px solid #333;color:var(--txt-mut){% else %}background:var(--verde);border:0;color:#fff{% endif %}">{% if p.separada %}desfazer{% else %}marcar separado{% endif %}</button></form>
           </div>
         </div>
       {% endcall %}
@@ -4243,7 +4243,7 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
         {% for it in g.itens %}
         <div style="display:flex;justify-content:space-between;align-items:center;padding:.5rem .2rem;border-bottom:1px solid #1c1c1d">
           <span>{{ it.produto_nome }}</span>
-          <span style="white-space:nowrap"><b>{{ "%g"|format(it.quantidade) }}</b> <span class="mut">{{ it.unidade }}</span>{% if it.get('suficiente') is not none %} <span style="font-size:.7rem;color:{{ '#5dcaa5' if it.suficiente else '#e0a83d' }}">{{ '✓' if it.suficiente else 'falta ' ~ ("%g"|format(it.falta)) }}</span>{% endif %}</span>
+          <span style="white-space:nowrap"><b>{{ "%g"|format(it.quantidade) }}</b> <span class="mut">{{ it.unidade }}</span>{% if it.get('suficiente') is not none %} <span style="font-size:.7rem;color:{{ 'var(--verde-claro)' if it.suficiente else '#e0a83d' }}">{{ '✓' if it.suficiente else 'falta ' ~ ("%g"|format(it.falta)) }}</span>{% endif %}</span>
         </div>
         {% endfor %}
       </div>
@@ -4251,8 +4251,8 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
     </div>
     <script>
     function sepView(b){var v=b.getAttribute('data-v');
-      document.querySelectorAll('.sep-tg').forEach(function(x){x.style.background='transparent';x.style.color='#a8a8a3';x.style.borderColor='#2a2a2b';});
-      b.style.background='#1d9e75';b.style.color='#fff';b.style.borderColor='#1d9e75';
+      document.querySelectorAll('.sep-tg').forEach(function(x){x.style.background='transparent';x.style.color='var(--txt-mut)';x.style.borderColor='var(--borda)';});
+      b.style.background='var(--verde)';b.style.color='#fff';b.style.borderColor='var(--verde)';
       document.getElementById('sep-cliente').style.display=(v==='cliente'?'':'none');
       document.getElementById('sep-total').style.display=(v==='total'?'':'none');
     }
@@ -4263,13 +4263,13 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
     {% if not itens %}<p class="mut" style="text-align:center;padding:2rem 0">Nada pra embalar.</p>{% endif %}
     {% for p in itens %}
     {% call card(p) %}
-    {% if p.itens %}<details style="margin-top:.5rem"><summary style="cursor:pointer;color:#5dcaa5;font-size:.8rem;list-style:none">ver {{ p.itens|length }} itens</summary><div style="margin-top:.4rem;padding-left:.2rem">{% for it in p.itens %}<div style="display:flex;justify-content:space-between;font-size:.82rem;padding:.28rem 0;border-bottom:1px solid #1c1c1d"><span>{{ it.produto_nome }}</span><span class="mut" style="white-space:nowrap">{{ "%g"|format(it.quantidade) }} {{ it.unidade }}</span></div>{% endfor %}</div></details>{% endif %}
+    {% if p.itens %}<details style="margin-top:.5rem"><summary style="cursor:pointer;color:var(--verde-claro);font-size:.8rem;list-style:none">ver {{ p.itens|length }} itens</summary><div style="margin-top:.4rem;padding-left:.2rem">{% for it in p.itens %}<div style="display:flex;justify-content:space-between;font-size:.82rem;padding:.28rem 0;border-bottom:1px solid #1c1c1d"><span>{{ it.produto_nome }}</span><span class="mut" style="white-space:nowrap">{{ "%g"|format(it.quantidade) }} {{ it.unidade }}</span></div>{% endfor %}</div></details>{% endif %}
     <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #212122;margin-top:.6rem;padding-top:.6rem">
       <span class="mut" style="font-size:.78rem">{% if p.esta_embalada %}✅ embalado {{ p.embalada_em }}{% else %}a embalar{% endif %}</span>
       <div style="display:flex;gap:.4rem">
-        <a href="/painel/fornecedor/embalagem/{% if p.tipo=='avulso' %}avulso/{% endif %}{{ p.id }}/etiqueta" target="_blank" style="color:#5dcaa5;font-size:.8rem;align-self:center;text-decoration:none">etiqueta</a>
+        <a href="/painel/fornecedor/embalagem/{% if p.tipo=='avulso' %}avulso/{% endif %}{{ p.id }}/etiqueta" target="_blank" style="color:var(--verde-claro);font-size:.8rem;align-self:center;text-decoration:none">etiqueta</a>
         {% if p.esta_embalada %}
-        <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/desembalar" style="margin:0"><input type="hidden" name="fase" value="embalagem"><button style="width:auto;margin:0;padding:.4rem .8rem;font-size:.8rem;background:transparent;border:1px solid #333;color:#a8a8a3">desfazer</button></form>
+        <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/desembalar" style="margin:0"><input type="hidden" name="fase" value="embalagem"><button style="width:auto;margin:0;padding:.4rem .8rem;font-size:.8rem;background:transparent;border:1px solid #333;color:var(--txt-mut)">desfazer</button></form>
         {% else %}
         <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/embalar" style="margin:0"><input type="hidden" name="fase" value="embalagem"><button style="width:auto;margin:0;padding:.4rem .9rem;font-size:.8rem">Embalado</button></form>
         {% endif %}
@@ -4281,7 +4281,7 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
   {% elif fase == 'rotas' %}
     {% if not grupos %}<p class="mut" style="text-align:center;padding:2rem 0">Nada pra rotear.</p>{% endif %}
     {% for g in grupos %}
-    <div style="font-size:.85rem;color:#5dcaa5;font-weight:600;margin:1.2rem 0 .5rem">📍 {{ g.bairro }} · {{ g.qtd }} pedido(s)</div>
+    <div style="font-size:.85rem;color:var(--verde-claro);font-weight:600;margin:1.2rem 0 .5rem">📍 {{ g.bairro }} · {{ g.qtd }} pedido(s)</div>
     {% for p in g.pedidos %}
     {% call card(p) %}
     <div style="border-top:1px solid #212122;margin-top:.6rem;padding-top:.6rem">
@@ -4293,14 +4293,14 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
       </div>
       {% if not p.pago %}
       <details style="margin-top:.5rem">
-        <summary style="list-style:none;cursor:pointer;background:#1d9e75;color:#fff;border-radius:8px;padding:.42rem .9rem;font-size:.8rem;font-weight:500;display:inline-block">Entregue — como recebeu?</summary>
+        <summary style="list-style:none;cursor:pointer;background:var(--verde);color:#fff;border-radius:8px;padding:.42rem .9rem;font-size:.8rem;font-weight:500;display:inline-block">Entregue — como recebeu?</summary>
         <div style="margin-top:.5rem;background:#101011;border:1px dashed #3a5c4e;border-radius:9px;padding:.7rem">
           <div class="mut" style="font-size:.8rem;margin-bottom:.5rem">Como o cliente pagou{% if p.tipo=='avulso' %} R$ {{ (p.total_centavos/100)|n2 }}{% endif %}?</div>
           <div style="display:flex;gap:.4rem;flex-wrap:wrap">
             {% for fv, fl in [('entrega_dinheiro','💵 Dinheiro'),('entrega_cartao','💳 Cartão'),('entrega_pix','📱 Pix'),('pagar_agora','🔗 Pagou pelo link')] %}
-            <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/receber" style="margin:0"><input type="hidden" name="fase" value="rotas"><input type="hidden" name="forma" value="{{ fv }}"><button style="width:auto;margin:0;padding:.35rem .7rem;font-size:.78rem;background:#161617;border:1px solid #2a2a2b;color:#ececec">{{ fl }}</button></form>
+            <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/receber" style="margin:0"><input type="hidden" name="fase" value="rotas"><input type="hidden" name="forma" value="{{ fv }}"><button style="width:auto;margin:0;padding:.35rem .7rem;font-size:.78rem;background:var(--card);border:1px solid var(--borda);color:var(--txt)">{{ fl }}</button></form>
             {% endfor %}
-            <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/receber" style="margin:0"><input type="hidden" name="fase" value="rotas"><input type="hidden" name="forma" value="nao"><button style="width:auto;margin:0;padding:.35rem .7rem;font-size:.78rem;background:transparent;border:1px solid #444;color:#a8a8a3">Entregue, não recebi</button></form>
+            <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/receber" style="margin:0"><input type="hidden" name="fase" value="rotas"><input type="hidden" name="forma" value="nao"><button style="width:auto;margin:0;padding:.35rem .7rem;font-size:.78rem;background:transparent;border:1px solid #444;color:var(--txt-mut)">Entregue, não recebi</button></form>
           </div>
         </div>
       </details>
@@ -4316,7 +4316,7 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
     {% call card(p) %}
     <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid #212122;margin-top:.6rem;padding-top:.6rem">
       <span class="mut" style="font-size:.78rem">✅ entregue{% if p.entregue_em %} {{ p.entregue_em }}{% endif %}</span>
-      <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/desentregar" style="margin:0"><input type="hidden" name="fase" value="entregues"><button style="width:auto;margin:0;padding:.35rem .7rem;font-size:.78rem;background:transparent;border:1px solid #333;color:#a8a8a3">desfazer</button></form>
+      <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/desentregar" style="margin:0"><input type="hidden" name="fase" value="entregues"><button style="width:auto;margin:0;padding:.35rem .7rem;font-size:.78rem;background:transparent;border:1px solid #333;color:var(--txt-mut)">desfazer</button></form>
     </div>
     {% endcall %}
     {% endfor %}
@@ -4325,8 +4325,8 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
 <script>
 function filtTipo(b){
   var t=b.getAttribute('data-tp');
-  document.querySelectorAll('.tp-btn').forEach(function(x){x.style.background='transparent';x.style.color='#a8a8a3';x.style.borderColor='#2a2a2b';});
-  b.style.background='#1d9e75';b.style.color='#fff';b.style.borderColor='#1d9e75';
+  document.querySelectorAll('.tp-btn').forEach(function(x){x.style.background='transparent';x.style.color='var(--txt-mut)';x.style.borderColor='var(--borda)';});
+  b.style.background='var(--verde)';b.style.color='#fff';b.style.borderColor='var(--verde)';
   document.querySelectorAll('.uni-card').forEach(function(c){
     c.style.display=(t==='todos'||c.getAttribute('data-tipo')===t)?'':'none';
   });
@@ -4337,33 +4337,33 @@ function filtTipo(b){
 
 _FINANCEIRO_FORN = """{% extends "base" %}{% block conteudo %}
 <style>
-.fin-back{color:#5dcaa5;font-size:.9rem;text-decoration:none;display:inline-block;margin-bottom:.4rem}
+.fin-back{color:var(--verde-claro);font-size:.9rem;text-decoration:none;display:inline-block;margin-bottom:.4rem}
 .fin-hero{border-radius:14px;padding:1.1rem 1.2rem;margin:.8rem 0 .7rem}
 .fin-hero.pos{background:#13251d;border:1px solid #2f5d4e}
 .fin-hero.neg{background:#2a1717;border:1px solid #6e2b2b}
 .fin-hero-rot{font-size:.75rem;text-transform:uppercase;letter-spacing:.04em}
 .fin-hero-num{font-size:2rem;font-weight:700;margin:.2rem 0}
-.fin-hero-sub{font-size:.8rem;color:#a8a8a3;margin-top:.3rem}
-.fin-direto{display:flex;justify-content:space-between;align-items:center;background:#161617;border:1px solid #2a2a2b;border-radius:11px;padding:.8rem 1rem;margin-bottom:1.1rem}
+.fin-hero-sub{font-size:.8rem;color:var(--txt-mut);margin-top:.3rem}
+.fin-direto{display:flex;justify-content:space-between;align-items:center;background:var(--card);border:1px solid var(--borda);border-radius:11px;padding:.8rem 1rem;margin-bottom:1.1rem}
 .fin-prox{background:#12202a;border:1px solid #274a5e;border-radius:11px;padding:.65rem 1rem;margin-bottom:1.1rem;font-size:.9rem;color:#cfe3f0}
-.fin-box{background:#161617;border:1px solid #2a2a2b;border-radius:12px;padding:1rem 1.1rem;margin-bottom:1.1rem}
+.fin-box{background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:1rem 1.1rem;margin-bottom:1.1rem}
 .fin-box-tit{font-size:.78rem;color:#6f6f6a;text-transform:uppercase;letter-spacing:.04em;margin-bottom:.6rem}
 .fin-lin{display:flex;justify-content:space-between;padding:.3rem 0;font-size:.92rem}
-.fin-lin.sub{font-size:.82rem;color:#a8a8a3;padding-left:1rem}
-.fin-lin.tot{border-top:1px solid #2a2a2b;margin-top:.3rem;padding-top:.5rem;font-weight:600}
+.fin-lin.sub{font-size:.82rem;color:var(--txt-mut);padding-left:1rem}
+.fin-lin.tot{border-top:1px solid var(--borda);margin-top:.3rem;padding-top:.5rem;font-weight:600}
 .fin-origem{display:flex;gap:.6rem;margin-bottom:1.1rem;flex-wrap:wrap}
-.fin-oc{flex:1;min-width:140px;background:#161617;border:1px solid #2a2a2b;border-radius:10px;padding:.7rem .9rem}
+.fin-oc{flex:1;min-width:140px;background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.7rem .9rem}
 .fin-sec{font-size:.78rem;color:#6f6f6a;text-transform:uppercase;letter-spacing:.04em;margin:.4rem 0 .6rem}
-.fin-row{display:flex;justify-content:space-between;align-items:center;background:#161617;border:1px solid #2a2a2b;border-radius:11px;padding:.7rem .9rem;margin-bottom:.55rem}
+.fin-row{display:flex;justify-content:space-between;align-items:center;background:var(--card);border:1px solid var(--borda);border-radius:11px;padding:.7rem .9rem;margin-bottom:.55rem}
 .fin-badge{font-size:10px;padding:1px 7px;border-radius:999px;font-weight:600}
 .b-cesta{background:#1e2b23;color:#7fd4a8}.b-avulso{background:#2b2620;color:#e0b877}
-.fin-tag{font-size:10px;padding:1px 7px;border-radius:999px;border:1px solid #333;color:#a8a8a3}
+.fin-tag{font-size:10px;padding:1px 7px;border-radius:999px;border:1px solid #333;color:var(--txt-mut)}
 .fin-tag.on{border-color:#3a78c2;color:#7ab0e8}
 .fin-pill{font-size:10px;padding:2px 8px;border-radius:999px}
 .p-on{background:#16202e;color:#7ab0e8;border:1px solid #3a78c2}
-.p-dir{background:#15301f;color:#5dcaa5;border:1px solid #1d9e75}
+.p-dir{background:#15301f;color:var(--verde-claro);border:1px solid var(--verde)}
 .p-pend{background:#2a2417;color:#e0c07a;border:1px solid #6b5a2a}
-.green{color:#5dcaa5}.amber{color:#e0b877}.red{color:#e0857a}.mut{color:#a8a8a3}
+.green{color:var(--verde-claro)}.amber{color:#e0b877}.red{color:#e0857a}.mut{color:var(--txt-mut)}
 </style>
 <div class="card larga">
   <a href="/painel/fornecedor" class="fin-back">← voltar</a>
@@ -4371,7 +4371,7 @@ _FINANCEIRO_FORN = """{% extends "base" %}{% block conteudo %}
   {% if aviso %}<div class="ok" style="margin-bottom:1rem">{{ aviso }}</div>{% endif %}
   {% if not resumo.comissao_configurada %}<div style="background:#2a2417;border:1px solid #6b5a2a;border-radius:10px;padding:.7rem .9rem;font-size:.83rem;color:#e0c07a;margin-bottom:1rem">⚠️ Comissão não configurada no cadastro deste fornecedor — o cálculo está usando 0%. Peça pro admin definir a comissão.</div>{% endif %}
   <form method="get" action="/painel/fornecedor/financeiro" style="margin-bottom:.6rem">
-    <select name="periodo" onchange="this.form.submit()" style="background:#0e0e0f;border:1px solid #333;color:#ececec;border-radius:8px;padding:.45rem .7rem;font-size:.9rem">
+    <select name="periodo" onchange="this.form.submit()" style="background:var(--bg);border:1px solid #333;color:var(--txt);border-radius:8px;padding:.45rem .7rem;font-size:.9rem">
       <option value="mes"{% if resumo.periodo=='mes' %} selected{% endif %}>Este mês</option>
       <option value="mes_passado"{% if resumo.periodo=='mes_passado' %} selected{% endif %}>Mês passado</option>
       <option value="30dias"{% if resumo.periodo=='30dias' %} selected{% endif %}>Últimos 30 dias</option>

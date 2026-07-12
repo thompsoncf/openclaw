@@ -59,31 +59,36 @@ _ADMIN_BASE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Admin - Zaq</title>
 <style>
-:root { color-scheme: dark; }
-body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#0e0e0f;
- color:#ececec;display:flex;flex-direction:column;align-items:center}
+:root {
+  color-scheme: dark;
+  --bg:#0e0e0f; --card:#161617; --card-2:#1a1a1c; --borda:#2a2a2b;
+  --txt:#ececec; --txt-mut:#a8a8a3;
+  --verde:#1d9e75; --verde-hover:#22b485; --verde-claro:#5dcaa5;
+}
+body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:var(--bg);
+ color:var(--txt);display:flex;flex-direction:column;align-items:center}
 .topo{width:100%;max-width:1000px;display:flex;justify-content:space-between;
  align-items:center;padding:1.2rem 1rem;box-sizing:border-box}
-.topo a{color:#5dcaa5;text-decoration:none;margin-left:1rem}
+.topo a{color:var(--verde-claro);text-decoration:none;margin-left:1rem}
 .logo{font-weight:600}.logo span{color:#e0a83d}
 .wrap{width:100%;max-width:1000px;padding:0 1rem 3rem;box-sizing:border-box}
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:1rem 0}
-.metric{background:#161617;border:1px solid #2a2a2b;border-radius:10px;padding:1rem}
-.metric span{display:block;font-size:.8rem;color:#a8a8a3;margin-bottom:.3rem}
+.metric{background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:1rem}
+.metric span{display:block;font-size:.8rem;color:var(--txt-mut);margin-bottom:.3rem}
 .metric b{font-size:1.5rem;font-weight:500}
-.card{background:#161617;border:1px solid #2a2a2b;border-radius:12px;padding:1.3rem;margin:1rem 0}
+.card{background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:1.3rem;margin:1rem 0}
 h1{font-size:1.3rem;font-weight:500}h2{font-size:1.05rem;font-weight:500;margin:0 0 .6rem}
 table{width:100%;border-collapse:collapse;font-size:.9rem}
-td,th{padding:.5rem .4rem;border-bottom:1px solid #2a2a2b;text-align:left}
-input,select{padding:.5rem .6rem;border-radius:7px;border:1px solid #333;background:#0e0e0f;color:#ececec;font-size:.9rem}
-button{padding:.45rem .8rem;border:0;border-radius:7px;background:#1d9e75;color:#fff;cursor:pointer;font-size:.85rem}
-button:hover{background:#22b485}
+td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left}
+input,select{padding:.5rem .6rem;border-radius:7px;border:1px solid #333;background:var(--bg);color:var(--txt);font-size:.9rem}
+button{padding:.45rem .8rem;border:0;border-radius:7px;background:var(--verde);color:#fff;cursor:pointer;font-size:.85rem}
+button:hover{background:var(--verde-hover)}
 button.warn{background:#8a5a1c}button.warn:hover{background:#a86c22}
 button.danger{background:#6e2b2b}button.danger:hover{background:#8a3636}
 .tag{display:inline-block;padding:.1rem .5rem;border-radius:999px;font-size:.75rem;border:1px solid #444;color:#bbb}
-.tag.ativa{border-color:#1d9e75;color:#5dcaa5}.tag.trial{border-color:#3a78c2;color:#7ab0e8}
+.tag.ativa{border-color:var(--verde);color:var(--verde-claro)}.tag.trial{border-color:#3a78c2;color:#7ab0e8}
 .tag.suspensa,.tag.inadimplente{border-color:#8a3636;color:#e89a9a}
-.mut{color:#a8a8a3;font-size:.85rem}
+.mut{color:var(--txt-mut);font-size:.85rem}
 form.inline{display:inline;margin:0}
 </style></head><body>
 <div class="topo"><span class="logo">Zaq <span>· admin</span></span>
@@ -94,7 +99,7 @@ form.inline{display:inline;margin:0}
 _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
 <h1>Torre de controle</h1>
 {% if leads_forn and leads_forn > 0 %}<div class="metric" style="border-color:#b8860b;color:#e8cf9f">👨‍🌾 {{ leads_forn }} conta(s) marcaram interesse no <b>módulo Fornecedor</b> no cadastro — veja a tag "quer Fornecedor" na lista.</div>{% endif %}
-{% if aviso %}<div class="metric" style="border-color:#1d9e75;color:#9fe8c9">{{ aviso }}</div>{% endif %}
+{% if aviso %}<div class="metric" style="border-color:var(--verde);color:#9fe8c9">{{ aviso }}</div>{% endif %}
 <div class="cards">
 <div class="metric"><span>Contas</span><b>{{ resumo.total }}</b></div>
 <div class="metric"><span>Em trial</span><b>{{ resumo.trial }}</b></div>
@@ -104,29 +109,29 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
 </div>
 
 <div class="card"><h2>Planos e preços</h2>
-<form method="post" action="/admin/beta" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;background:{% if beta_gratis %}#14251c{% else %}#161617{% endif %};border:1px solid {% if beta_gratis %}#1d9e7533{% else %}#2a2a2b{% endif %};border-radius:10px;padding:.8rem 1rem;margin-bottom:1rem">
-  <div><div style="font-weight:600;color:{% if beta_gratis %}#5dcaa5{% else %}#b4b2a9{% endif %}">Modo beta — tudo grátis {% if beta_gratis %}(LIGADO){% else %}(desligado){% endif %}</div>
+<form method="post" action="/admin/beta" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;background:{% if beta_gratis %}#14251c{% else %}var(--card){% endif %};border:1px solid {% if beta_gratis %}var(--verde)33{% else %}var(--borda){% endif %};border-radius:10px;padding:.8rem 1rem;margin-bottom:1rem">
+  <div><div style="font-weight:600;color:{% if beta_gratis %}var(--verde-claro){% else %}#b4b2a9{% endif %}">Modo beta — tudo grátis {% if beta_gratis %}(LIGADO){% else %}(desligado){% endif %}</div>
   <div class="mut" style="font-size:.78rem;margin-top:.2rem">{% if beta_gratis %}Quem se cadastra vê "Grátis (beta)" e não é cobrado. Os preços abaixo ficam guardados.{% else %}Os preços abaixo estão VALENDO — clientes veem o valor no cadastro.{% endif %}</div></div>
-  <button name="acao" value="{% if beta_gratis %}off{% else %}on{% endif %}" style="padding:.5rem 1rem;background:{% if beta_gratis %}#333{% else %}#1d9e75{% endif %};border:0;color:#fff;border-radius:6px;font-weight:600;cursor:pointer">{% if beta_gratis %}Desligar beta{% else %}Ligar beta{% endif %}</button>
+  <button name="acao" value="{% if beta_gratis %}off{% else %}on{% endif %}" style="padding:.5rem 1rem;background:{% if beta_gratis %}#333{% else %}var(--verde){% endif %};border:0;color:#fff;border-radius:6px;font-weight:600;cursor:pointer">{% if beta_gratis %}Desligar beta{% else %}Ligar beta{% endif %}</button>
 </form>
 <table style="width:100%;font-size:.86rem">
   <tr class="mut" style="font-size:.74rem;text-align:left"><td style="padding:.3rem 0">Plano</td><td>Tipo</td><td style="text-align:right">Preço/mês</td><td style="text-align:center">Ativo</td><td></td></tr>
   {% for p in planos_admin %}
   <form method="post" action="/admin/plano/{{ p.codigo }}">
   <tr style="border-top:1px solid #232325">
-    <td style="padding:.5rem 0;color:#ececec">{{ p.nome }}</td>
+    <td style="padding:.5rem 0;color:var(--txt)">{{ p.nome }}</td>
     <td class="mut">{{ p.tipo_conta }}</td>
     <td style="text-align:right">
-      {% if p.codigo == 'zaq_cesta' %}<span style="color:#5dcaa5;font-size:.8rem">sempre grátis</span>
+      {% if p.codigo == 'zaq_cesta' %}<span style="color:var(--verde-claro);font-size:.8rem">sempre grátis</span>
       {% else %}<span style="display:inline-flex;align-items:center;gap:3px;justify-content:flex-end">
         <span class="mut" style="font-size:.75rem">R$</span>
-        <input name="preco" value="{{ (p.preco_base_centavos/100)|n2 }}" style="width:64px;text-align:right;padding:.25rem .4rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:5px">
+        <input name="preco" value="{{ (p.preco_base_centavos/100)|n2 }}" style="width:64px;text-align:right;padding:.25rem .4rem;background:var(--bg);border:1px solid var(--borda);color:#f4f4f4;border-radius:5px">
       </span>{% endif %}
     </td>
     <td style="text-align:center">
-      {% if p.codigo != 'zaq_cesta' %}<input type="checkbox" name="ativo" value="1" {% if p.ativo %}checked{% endif %}>{% else %}<span style="color:#5dcaa5">●</span>{% endif %}
+      {% if p.codigo != 'zaq_cesta' %}<input type="checkbox" name="ativo" value="1" {% if p.ativo %}checked{% endif %}>{% else %}<span style="color:var(--verde-claro)">●</span>{% endif %}
     </td>
-    <td style="text-align:right">{% if p.codigo != 'zaq_cesta' %}<button style="padding:.25rem .7rem;background:#1d9e75;border:0;color:#fff;border-radius:5px;font-size:.76rem;cursor:pointer">salvar</button>{% else %}<span class="mut">—</span>{% endif %}</td>
+    <td style="text-align:right">{% if p.codigo != 'zaq_cesta' %}<button style="padding:.25rem .7rem;background:var(--verde);border:0;color:#fff;border-radius:5px;font-size:.76rem;cursor:pointer">salvar</button>{% else %}<span class="mut">—</span>{% endif %}</td>
   </tr>
   </form>
   {% endfor %}
@@ -138,12 +143,12 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
   {% for m in modulos_admin %}
   <form method="post" action="/admin/modulo/{{ m.codigo }}">
   <tr style="border-top:1px solid #232325">
-    <td style="padding:.5rem 0;color:#ececec">{{ m.nome }}{% if m.codigo == 'fornecedor' %} <span class="mut" style="font-size:.72rem">+ comissão % das vendas</span>{% endif %}</td>
+    <td style="padding:.5rem 0;color:var(--txt)">{{ m.nome }}{% if m.codigo == 'fornecedor' %} <span class="mut" style="font-size:.72rem">+ comissão % das vendas</span>{% endif %}</td>
     <td style="text-align:right"><span style="display:inline-flex;align-items:center;gap:3px;justify-content:flex-end">
       <span class="mut" style="font-size:.75rem">R$</span>
-      <input name="preco" value="{{ (m.preco_centavos/100)|n2 }}" style="width:64px;text-align:right;padding:.25rem .4rem;background:#0e0e0f;border:1px solid #2a2a2b;color:#f4f4f4;border-radius:5px"></span></td>
+      <input name="preco" value="{{ (m.preco_centavos/100)|n2 }}" style="width:64px;text-align:right;padding:.25rem .4rem;background:var(--bg);border:1px solid var(--borda);color:#f4f4f4;border-radius:5px"></span></td>
     <td style="text-align:center"><input type="checkbox" name="ativo" value="1" {% if m.ativo %}checked{% endif %}></td>
-    <td style="text-align:right"><button style="padding:.25rem .7rem;background:#1d9e75;border:0;color:#fff;border-radius:5px;font-size:.76rem;cursor:pointer">salvar</button></td>
+    <td style="text-align:right"><button style="padding:.25rem .7rem;background:var(--verde);border:0;color:#fff;border-radius:5px;font-size:.76rem;cursor:pointer">salvar</button></td>
   </tr>
   </form>
   {% endfor %}
@@ -160,7 +165,7 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
 <button>Buscar</button></form>
 <div style="max-height:65vh;overflow-y:auto;padding-right:.3rem;margin-top:.4rem">
 {% for c in contas %}
-<div style="background:#0e0e0f;border:1px solid #2a2a2b;border-radius:10px;padding:.7rem .9rem;margin-bottom:.6rem">
+<div style="background:var(--bg);border:1px solid var(--borda);border-radius:10px;padding:.7rem .9rem;margin-bottom:.6rem">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:.6rem;flex-wrap:wrap">
     <div style="min-width:0"><span class="mut">#{{ c.id }}</span> <b>{{ c.nome }}</b> <span class="mut" style="font-size:.8rem">{{ c.email or '-' }}</span></div>
     <div style="display:flex;gap:.35rem;align-items:center;flex-wrap:wrap">
@@ -169,12 +174,12 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
       {% if c.interesse_modulos and 'fornecedor' in c.interesse_modulos %}<span class="tag" style="background:#3a2c08;color:#e8cf9f" title="marcou interesse no cadastro">quer Fornecedor</span>{% endif %}
       {% if c.qtd_cestas and c.qtd_cestas > 0 %}<span class="tag ativa" title="assinatura de cesta">cesta {{ c.qtd_cestas }}</span>{% endif %}
       <span class="mut" style="font-size:.78rem">vence {{ c.vencimento.strftime('%d/%m/%y') if c.vencimento else '-' }}</span>
-      <button type="button" onclick="admToggle({{ c.id }})" id="tgl-{{ c.id }}" style="padding:.3rem .7rem;font-size:.78rem;background:transparent;border:1px solid #333;color:#5dcaa5">detalhes</button>
+      <button type="button" onclick="admToggle({{ c.id }})" id="tgl-{{ c.id }}" style="padding:.3rem .7rem;font-size:.78rem;background:transparent;border:1px solid #333;color:var(--verde-claro)">detalhes</button>
     </div>
   </div>
   <div id="det-{{ c.id }}" style="display:none;margin-top:.8rem">
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.6rem">
-      <div style="background:#161617;border-radius:8px;padding:.6rem .7rem">
+      <div style="background:var(--card);border-radius:8px;padding:.6rem .7rem">
         <div class="mut" style="font-size:.72rem;text-transform:uppercase;margin-bottom:.4rem">Limites / dia</div>
         <form class="inline" method="post" action="/admin/conta/{{ c.id }}/limites" style="display:flex;gap:4px;align-items:center">
           <input type="number" name="msg" value="{{ c.limite_mensagens_dia }}" style="width:52px" title="mensagens/dia"><span>/</span>
@@ -182,17 +187,17 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
           <button style="padding:.35rem .55rem">ok</button>
         </form>
       </div>
-      <div style="background:#161617;border-radius:8px;padding:.6rem .7rem">
+      <div style="background:var(--card);border-radius:8px;padding:.6rem .7rem">
         <div class="mut" style="font-size:.72rem;text-transform:uppercase;margin-bottom:.4rem">Uso hoje</div>
         <div style="font-size:.88rem">{{ c.msg_hoje }}/{{ c.limite_mensagens_dia }} msg<br>{{ c.cup_hoje }}/{{ c.limite_cupons_dia }} cup</div>
       </div>
-      <div style="background:#161617;border-radius:8px;padding:.6rem .7rem">
+      <div style="background:var(--card);border-radius:8px;padding:.6rem .7rem">
         <div class="mut" style="font-size:.72rem;text-transform:uppercase;margin-bottom:.4rem">Uso mes</div>
         <div style="font-size:.88rem">{{ c.msg_mes }} msg<br>{{ c.cup_mes }} cup</div>
       </div>
     </div>
     {% if c.documento or c.razao_social or c.nome_fantasia or c.email_empresa or c.telefone %}
-    <div style="background:#161617;border-radius:8px;padding:.7rem .8rem;margin-top:.6rem">
+    <div style="background:var(--card);border-radius:8px;padding:.7rem .8rem;margin-top:.6rem">
       <div class="mut" style="font-size:.72rem;text-transform:uppercase;margin-bottom:.5rem">{% if c.tipo == 'pj' %}🏢 Dados da empresa{% else %}Dados cadastrais{% endif %}</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.5rem .9rem;font-size:.82rem">
         {% if c.documento %}<div><div class="mut" style="font-size:.68rem">{% if c.tipo == 'pj' %}CNPJ{% else %}CPF/CNPJ{% endif %}</div>{{ c.documento }}</div>{% endif %}
@@ -248,10 +253,10 @@ function admCep(id){var c=document.getElementById('cep-'+id);var d=(c.value||'')
 
 _ADMIN_QR = """{% extends "abase" %}{% block conteudo %}
 <h1>Leitura de QR code das notas</h1>
-{% if aviso %}<div class="card" style="border-color:#1d9e75">{{ aviso }}</div>{% endif %}
+{% if aviso %}<div class="card" style="border-color:var(--verde)">{{ aviso }}</div>{% endif %}
 <div class="cards">
 <div class="metric"><span>Fotos/PDFs recebidos</span><b>{{ resumo.total }}</b></div>
-<div class="metric"><span>QR lido com sucesso</span><b style="color:#5dcaa5">{{ resumo.leu }}</b></div>
+<div class="metric"><span>QR lido com sucesso</span><b style="color:var(--verde-claro)">{{ resumo.leu }}</b></div>
 <div class="metric"><span>Sem QR</span><b style="color:#e89a9a">{{ resumo.sem }}</b></div>
 <div class="metric"><span>Taxa de leitura</span><b>{{ resumo.taxa }}%</b></div>
 </div>
@@ -354,7 +359,7 @@ _ADMIN_FUNIL = """{% extends "abase" %}{% block conteudo %}
 Os números do funil aparecem assim que o fluxo de cliente novo entrar no ar. Abaixo, a saúde das contas já funciona.</div>
 {% else %}
 <div class="cards">
-  <div class="metric"><span>Visitantes</span><b style="color:#5dcaa5">{{ f.geral.visitantes }}</b></div>
+  <div class="metric"><span>Visitantes</span><b style="color:var(--verde-claro)">{{ f.geral.visitantes }}</b></div>
   <div class="metric"><span>Testaram</span><b style="color:#7ab0e8">{{ f.geral.testaram }} ({{ f.geral.pct_testou }}%)</b></div>
   <div class="metric"><span>Cadastraram</span><b style="color:#a8d96f">{{ f.geral.cadastraram }} ({{ f.geral.pct_cadastrou }}%)</b></div>
   <div class="metric"><span>Pagaram</span><b style="color:#e0a83d">{{ f.geral.pagaram }} ({{ f.geral.pct_pagou }}%)</b></div>
@@ -386,9 +391,9 @@ _ADMIN_CUSTOS = """{% extends "abase" %}{% block conteudo %}
 {% endif %}
 
 <form method="get" action="/admin/custos" style="margin:1rem 0;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-<label>De <input type="date" name="desde" value="{{ desde or '' }}" style="padding:.4rem .5rem;border-radius:6px;border:1px solid #333;background:#0e0e0f;color:#ececec"></label>
-<label>Até <input type="date" name="ate" value="{{ ate or '' }}" style="padding:.4rem .5rem;border-radius:6px;border:1px solid #333;background:#0e0e0f;color:#ececec"></label>
-<button style="padding:.45rem .8rem;border:0;border-radius:7px;background:#1d9e75;color:#fff;cursor:pointer">Filtrar</button>
+<label>De <input type="date" name="desde" value="{{ desde or '' }}" style="padding:.4rem .5rem;border-radius:6px;border:1px solid #333;background:var(--bg);color:var(--txt)"></label>
+<label>Até <input type="date" name="ate" value="{{ ate or '' }}" style="padding:.4rem .5rem;border-radius:6px;border:1px solid #333;background:var(--bg);color:var(--txt)"></label>
+<button style="padding:.45rem .8rem;border:0;border-radius:7px;background:var(--verde);color:#fff;cursor:pointer">Filtrar</button>
 <span class="mut">(vazio = mês corrente)</span>
 </form>
 
@@ -396,7 +401,7 @@ _ADMIN_CUSTOS = """{% extends "abase" %}{% block conteudo %}
 <div class="metric"><span>Custo total</span><b style="color:#e0a83d">R$ {{ k.geral.custo_total_reais }}</b></div>
 <div class="metric"><span>Contas ativas</span><b style="color:#7ab0e8">{{ k.geral.contas_ativas }}</b></div>
 <div class="metric"><span>Custo médio/cliente</span><b style="color:#a8d96f">R$ {{ k.geral.custo_medio_por_conta_reais }}</b></div>
-<div class="metric"><span>Chamadas</span><b style="color:#5dcaa5">{{ k.geral.chamadas }}</b></div>
+<div class="metric"><span>Chamadas</span><b style="color:var(--verde-claro)">{{ k.geral.chamadas }}</b></div>
 </div>
 
 <div class="card"><h3>Custos por tipo</h3>
@@ -415,7 +420,7 @@ _ADMIN_CUSTOS = """{% extends "abase" %}{% block conteudo %}
 
 _ADMIN_PESQUISAS = """{% extends "abase" %}{% block conteudo %}
 <h1>Pesquisas de fornecedores</h1>
-{% if aviso %}<div class="metric" style="border-color:#1d9e75;color:#9fe8c9">{{ aviso }}</div>{% endif %}
+{% if aviso %}<div class="metric" style="border-color:var(--verde);color:#9fe8c9">{{ aviso }}</div>{% endif %}
 
 <div class="card"><h2>Respostas (últimas 200)</h2>
 <table><tr><th>ID</th><th>Segmento</th><th>Criado em</th><th>Respostas resumidas</th></tr>
@@ -434,12 +439,12 @@ _ADMIN_PESQUISAS = """{% extends "abase" %}{% block conteudo %}
 
 _ADMIN_COMUNICACAO = """{% extends "abase" %}{% block conteudo %}
 <h1>Comunicacao</h1>
-{% if aviso %}<div class="card" style="border-color:#1d9e75">{{ aviso }}</div>{% endif %}
+{% if aviso %}<div class="card" style="border-color:var(--verde)">{{ aviso }}</div>{% endif %}
 
 <h2>O que chega: cupom x comprovante (ultimos {{ split.dias }} dias)</h2>
 <div class="cards">
 <div class="metric"><span>Imagens recebidas</span><b>{{ split.total_imagens }}</b></div>
-<div class="metric"><span>Cupom fiscal</span><b style="color:#5dcaa5">{{ split.cupom_fiscal }} ({{ split.pct_cupom }}%)</b></div>
+<div class="metric"><span>Cupom fiscal</span><b style="color:var(--verde-claro)">{{ split.cupom_fiscal }} ({{ split.pct_cupom }}%)</b></div>
 <div class="metric"><span>Comprovante/outro</span><b style="color:#7ab0e8">{{ split.comprovante_ou_outro }} ({{ split.pct_outro }}%)</b></div>
 </div>
 <p class="mut">Cupom = o agente usou tool de cupom (checar_duplicata / registrar_itens_cupom). O resto, tratou como comprovante. Sinal pela acao, nao por chute.</p>
@@ -449,8 +454,8 @@ _ADMIN_COMUNICACAO = """{% extends "abase" %}{% block conteudo %}
 {% for m in faseb.metricas %}<tr>
 <td>{{ m.nome }}</td>
 <td class="mut">{{ m.valor }}{{ m.unidade }} / {{ m.gatilho }}{{ m.unidade }}</td>
-<td style="width:38%"><div style="background:#2a2a2b;border-radius:6px;height:8px">
-<div style="width:{{ m.pct }}%;height:8px;border-radius:6px;background:{% if m.ok %}#1d9e75{% else %}#8a5a1c{% endif %}"></div></div></td>
+<td style="width:38%"><div style="background:var(--borda);border-radius:6px;height:8px">
+<div style="width:{{ m.pct }}%;height:8px;border-radius:6px;background:{% if m.ok %}var(--verde){% else %}#8a5a1c{% endif %}"></div></div></td>
 <td style="white-space:nowrap">{% if m.ok %}<span class="tag ativa">ok</span>{% else %}<span class="mut">{{ m.pct }}%</span>{% endif %}</td>
 </tr>{% endfor %}
 </table>
@@ -459,7 +464,7 @@ _ADMIN_COMUNICACAO = """{% extends "abase" %}{% block conteudo %}
 
 <div class="card"><h2>Leitura de QR (auditoria por classe)</h2>
 <table>
-<tr><td>Cupom lido (QR ok)</td><td><b style="color:#5dcaa5">{{ qr.classes.cupom_lido }}</b></td></tr>
+<tr><td>Cupom lido (QR ok)</td><td><b style="color:var(--verde-claro)">{{ qr.classes.cupom_lido }}</b></td></tr>
 <tr><td>Imagem sem QR</td><td>{{ qr.classes.cupom_sem_qr }}</td></tr>
 <tr><td>PDF indefinido</td><td>{{ qr.classes.pdf_indefinido }}</td></tr>
 <tr><td>Outro</td><td>{{ qr.classes.outro }}</td></tr>

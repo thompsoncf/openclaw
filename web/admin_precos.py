@@ -210,7 +210,7 @@ _PRECOS_TPL = """{% extends "abase" %}{% block conteudo %}
 <h1>Banco de preços (o ouro)</h1>
 <div class="cards">
 <div class="metric"><span>Preços coletados</span><b>{{ resumo.total }}</b></div>
-<div class="metric"><span>Produtos únicos</span><b style="color:#5dcaa5">{{ resumo.produtos }}</b></div>
+<div class="metric"><span>Produtos únicos</span><b style="color:var(--verde-claro)">{{ resumo.produtos }}</b></div>
 <div class="metric"><span>Lojas</span><b>{{ resumo.lojas }}</b></div>
 <div class="metric"><span>Via cupom</span><b>{{ resumo.cupom }}</b></div>
 </div>

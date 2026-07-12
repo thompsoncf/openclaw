@@ -184,7 +184,7 @@ _ORCAMENTO_TPL = """{% extends "abase" %}{% block conteudo %}
 .oc-mod{display:grid; grid-template-columns:auto 1fr 96px 96px 110px; gap:.7rem; align-items:center; padding:.6rem 0; border-bottom:1px solid #1a2233}
 .oc-mod.off{opacity:.45}
 .oc-tog{width:42px; height:24px; border-radius:99px; border:none; cursor:pointer; position:relative; background:#2a3550; flex:none}
-.oc-tog.on{background:#5dcaa5}
+.oc-tog.on{background:var(--verde-claro)}
 .oc-tog::after{content:""; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:#fff; transition:left .15s}
 .oc-tog.on::after{left:21px}
 .oc-num{display:flex; align-items:center; gap:3px; border:1px solid #243049; border-radius:7px; padding:.35rem .5rem; background:#0e1525}
@@ -195,9 +195,9 @@ _ORCAMENTO_TPL = """{% extends "abase" %}{% block conteudo %}
 body.oc-margin .oc-custo-col{display:flex}
 .oc-head{display:grid; grid-template-columns:auto 1fr 96px 96px 110px; gap:.7rem; font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; color:#5a6678; padding-bottom:.4rem; border-bottom:1px solid #243049}
 .oc-pill{padding:.4rem .8rem; border-radius:99px; border:1px solid #243049; background:#0e1525; color:#cdd6e4; cursor:pointer; font-size:.85rem}
-.oc-pill.on{border-color:#5dcaa5; background:#10241d; color:#9fe7cc}
+.oc-pill.on{border-color:var(--verde-claro); background:#10241d; color:#9fe7cc}
 .oc-seg button{padding:.45rem .7rem; border:1px solid #243049; background:#0e1525; color:#cdd6e4; cursor:pointer; font-size:.85rem; border-radius:7px}
-.oc-seg button.on{border-color:#5dcaa5; background:#10241d; color:#9fe7cc}
+.oc-seg button.on{border-color:var(--verde-claro); background:#10241d; color:#9fe7cc}
 .oc-step{display:inline-flex; align-items:center; gap:0}
 .oc-step button{width:34px; height:34px; border:1px solid #243049; background:#0e1525; color:#e7ecf3; cursor:pointer; font-size:1.1rem}
 .oc-step .v{min-width:38px; text-align:center; font-variant-numeric:tabular-nums}
@@ -307,8 +307,8 @@ body.oc-margin .oc-custo-col{display:flex}
       <div class="mut" style="font-size:.78rem; letter-spacing:.1em; text-transform:uppercase; color:#c99536">Resumo · ao vivo</div>
       <div class="oc-ll"><span class="mut">Investimento inicial</span><b id="oc-r-setup">R$ 0</b></div>
       <div class="oc-ll"><span class="mut">Mensalidade</span><b id="oc-r-mensal" style="color:#c99536">R$ 0</b></div>
-      <div class="oc-ll" id="oc-r-margem-l" style="display:none"><span class="mut">Margem/mes</span><b id="oc-r-margem" style="color:#5dcaa5; font-size:.95rem">-</b></div>
-      <div class="oc-total"><div class="mut" style="font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; color:#c99536">Total 1o ano</div><div class="v" id="oc-r-ano">R$ 0</div><div class="mut" id="oc-r-eco" style="display:none; font-size:.8rem; color:#5dcaa5; margin-top:.3rem"></div></div>
+      <div class="oc-ll" id="oc-r-margem-l" style="display:none"><span class="mut">Margem/mes</span><b id="oc-r-margem" style="color:var(--verde-claro); font-size:.95rem">-</b></div>
+      <div class="oc-total"><div class="mut" style="font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; color:#c99536">Total 1o ano</div><div class="v" id="oc-r-ano">R$ 0</div><div class="mut" id="oc-r-eco" style="display:none; font-size:.8rem; color:var(--verde-claro); margin-top:.3rem"></div></div>
       <button id="oc-anual" class="oc-pill" data-on="0" type="button" style="width:100%; margin-top:.7rem; text-align:left; display:flex; justify-content:space-between; align-items:center">Pagamento anual (-15%) <span id="oc-anual-mk">↻</span></button>
       <button id="oc-gerar" class="oc-btn oc-btn-g">Gerar proposta</button>
       <button id="oc-salvar" class="oc-btn oc-btn-o">Salvar no historico</button>

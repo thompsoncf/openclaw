@@ -64,8 +64,13 @@ def _papel_logado(request: Request, conta_id: int) -> str:
 
 
 def conta_logada(request: Request):
+    # Memoizacao por requisicao: conta_logada e' chamado varias vezes por pagina
+    # (rota + _render). Guarda o resultado em request.state pra rodar a query 1x so.
+    if hasattr(request.state, "_conta_cache"):
+        return request.state._conta_cache
     cid = request.session.get("conta_id")
     if not cid:
+        request.state._conta_cache = None
         return None
     pool = get_pool()
     with pool.connection() as c:
@@ -74,6 +79,7 @@ def conta_logada(request: Request):
             "eh_fornecedor, fornecedor_slug, eh_assinante_cesta from contas where id = %s",
             (cid,),
         ).fetchone()
+    request.state._conta_cache = row
     return row
 
 

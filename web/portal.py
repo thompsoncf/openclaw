@@ -2581,6 +2581,41 @@ _PDV = """{% extends "base" %}{% block conteudo %}
 
   <div id="pdv-recibo" style="display:none;margin-top:1rem;background:#161617;border:1px solid #2a2a2b;border-radius:10px;padding:1rem"></div>
 </div>
+
+<div class="card larga" style="max-width:560px;margin:1rem auto 0">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.7rem">
+    <h3 style="margin:0">Vendas de hoje</h3>
+    <span class="mut" style="font-size:.8rem">{{ vendas|length }} venda(s)</span>
+  </div>
+  {% if vendas %}
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-bottom:.6rem">
+    {% for t in totais %}
+    <div style="background:#161617;border:1px solid #2a2a2b;border-radius:8px;padding:.5rem .7rem">
+      <div class="mut" style="font-size:.72rem;text-transform:capitalize">{{ t.metodo }} · {{ t.n }}</div>
+      <div style="font-size:1rem">R$ {{ "%.2f"|format(t.total_centavos/100) }}</div>
+    </div>
+    {% endfor %}
+    {% if fiado_n %}
+    <div style="background:#1c1710;border:1px solid #3a2f17;border-radius:8px;padding:.5rem .7rem">
+      <div style="font-size:.72rem;color:#e0b878">Fiado · {{ fiado_n }} (a receber)</div>
+      <div style="font-size:1rem;color:#e0b878">R$ {{ "%.2f"|format(fiado_total/100) }}</div>
+    </div>
+    {% endif %}
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid #2a2a2b;padding-top:.5rem;margin-bottom:.7rem">
+    <span class="mut">Recebido hoje</span><span style="color:#5dcaa5;font-size:1.2rem;font-weight:700">R$ {{ "%.2f"|format(recebido_centavos/100) }}</span>
+  </div>
+  <div class="mut" style="font-size:.72rem;margin-bottom:.3rem">Últimas vendas</div>
+  {% for v in vendas %}
+  <a href="{% if v.tipo=='paga' %}/painel/pdv/venda/{{ v.id }}{% else %}/painel/clientes/{{ v.cliente_id }}{% endif %}" style="display:flex;justify-content:space-between;align-items:center;padding:.5rem 0;border-bottom:1px solid #242426;text-decoration:none">
+    <div><div style="color:#ececec;font-size:.85rem">{{ v.cliente or 'sem cliente' }}</div><div class="mut" style="font-size:.72rem">{{ v.hora.strftime('%H:%M') if v.hora else '' }} · {{ v.pagamento }}{% if v.tipo=='fiado' %} · ver ficha{% endif %}</div></div>
+    <div style="{% if v.tipo=='fiado' %}color:#e0b878{% else %}color:#cfcfcf{% endif %};font-size:.9rem">R$ {{ "%.2f"|format(v.valor_centavos/100) }}</div>
+  </a>
+  {% endfor %}
+  {% else %}
+  <p class="mut">Nenhuma venda hoje ainda.</p>
+  {% endif %}
+</div>
 <script>
 window.PDV_PROD = {{ produtos_json|tojson }};
 window.PDV_ADD = {{ add }};
@@ -2601,6 +2636,27 @@ function pdvFinalizar(){ if(!PDV_CART.length){ return; } var e=document.getEleme
 function pdvRecibo(d,ci){ var linhas=PDV_CART.map(function(it){ return '<div style="display:flex;justify-content:space-between;font-size:.8rem;color:#cfcfcf"><span>'+it.qtd+' '+it.unidade+' '+it.nome+'</span><span>'+pdvFmt(it.preco*it.qtd)+'</span></div>'; }).join(''); var extra=''; if(d.fiado){ extra='<div style="color:#e0b878;font-size:.82rem;margin-top:.3rem">Fiado · vence '+(d.vencimento||'')+'</div>'; } var box=document.getElementById('pdv-recibo'); box.innerHTML='<div style="text-align:center;color:#5dcaa5;font-weight:700;margin-bottom:.5rem">✓ Venda registrada</div>'+linhas+'<div style="display:flex;justify-content:space-between;border-top:1px solid #2a2a2b;margin-top:.5rem;padding-top:.5rem;color:#ececec;font-weight:600"><span>Total</span><span>'+pdvFmt((d.total_centavos||0)/100)+'</span></div>'+(ci.cliente_nome?('<div style="color:#888;font-size:.78rem;margin-top:.3rem">Cliente: '+ci.cliente_nome+'</div>'):'')+extra+'<div style="display:flex;gap:.5rem;margin-top:.8rem"><button type="button" onclick="window.print()" style="flex:1;background:transparent;border:1px solid #3a3a3d;color:#b4b2a9;border-radius:7px;padding:.5rem;cursor:pointer">Imprimir</button><button type="button" onclick="location.href=\\'/painel/pdv\\'" style="flex:1;background:#1d9e75;color:#fff;border:0;border-radius:7px;padding:.5rem;cursor:pointer;font-weight:600">Nova venda</button></div>'; box.style.display='block'; box.scrollIntoView({behavior:'smooth'}); }
 document.addEventListener('DOMContentLoaded', function(){ pdvRender(); if(window.PDV_ADD){ pdvAdd(window.PDV_ADD); } });
 </script>
+{% endblock %}"""
+
+_VENDA_DETALHE = """{% extends "base" %}{% block conteudo %}
+<div class="card larga" style="max-width:480px;margin:0 auto">
+  <a href="/painel/pdv" style="color:#8a8a85;text-decoration:none;font-size:.85rem">← voltar ao caixa</a>
+  {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin:.5rem 0 1rem">
+    <div><div style="font-size:1.2rem;font-weight:600">Venda #{{ venda.id }}</div><div class="mut" style="font-size:.8rem">{{ venda.hora.strftime('%d/%m %H:%M') if venda.hora else '' }} · {{ venda.pagamento }}</div></div>
+    {% if venda.cliente %}<div style="text-align:right"><div class="mut" style="font-size:.72rem">Cliente</div><div>{{ venda.cliente }}</div></div>{% endif %}
+  </div>
+  <div class="mut" style="font-size:.72rem;margin-bottom:.3rem">{{ itens|length }} item(ns)</div>
+  {% for it in itens %}
+  <div style="display:flex;justify-content:space-between;padding:.45rem 0;border-bottom:1px solid #242426">
+    <div style="font-size:.88rem;color:#ececec">{{ it.descricao }} <span class="mut" style="font-size:.72rem">· {{ it.quantidade }} {{ it.unidade }} × R$ {{ "%.2f"|format(it.vu/100) }}</span></div>
+    <div style="font-size:.88rem">R$ {{ "%.2f"|format(it.vt/100) }}</div>
+  </div>
+  {% endfor %}
+  <div style="display:flex;justify-content:space-between;color:#888;font-size:.82rem;padding-top:.5rem"><span>Subtotal</span><span>R$ {{ "%.2f"|format(venda.subtotal_centavos/100) }}</span></div>
+  {% if venda.desconto_centavos %}<div style="display:flex;justify-content:space-between;color:#888;font-size:.82rem"><span>Desconto</span><span>− R$ {{ "%.2f"|format(venda.desconto_centavos/100) }}</span></div>{% endif %}
+  <div style="display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid #2a2a2b;padding-top:.5rem;margin-top:.3rem"><span class="mut">Total</span><span style="color:#5dcaa5;font-size:1.3rem;font-weight:700">R$ {{ "%.2f"|format(venda.valor_centavos/100) }}</span></div>
+</div>
 {% endblock %}"""
 
 _EMPRESA = """{% extends "base" %}{% block conteudo %}
@@ -4293,7 +4349,7 @@ _FINANCEIRO_FORN = """{% extends "base" %}{% block conteudo %}
 
 
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS, "produtos": _PRODUTOS, "abastecimento": _ABASTECIMENTO, "clientes": _CLIENTES, "cliente_detalhe": _CLIENTE_DETALHE, "pdv": _PDV,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS, "produtos": _PRODUTOS, "abastecimento": _ABASTECIMENTO, "clientes": _CLIENTES, "cliente_detalhe": _CLIENTE_DETALHE, "pdv": _PDV, "venda_detalhe": _VENDA_DETALHE,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 _env.filters["brl"] = brl
@@ -6665,7 +6721,52 @@ def painel_pdv(request: Request, add: int = 0):
     prod_js = [{"id": pr["id"], "nome": pr["nome"], "unidade": pr["unidade"],
                 "preco": (pr["preco_venda_centavos"] or 0) / 100.0,
                 "saldo": float(pr["saldo"] or 0)} for pr in produtos]
+    vendas = []
+    totais = {}
+    recebido = 0
+    fiado_total = 0
+    fiado_n = 0
+    with pool.connection() as conn:
+        pagas = conn.execute(
+            """select l.id, (l.criado_em at time zone 'America/Sao_Paulo'),
+                      l.valor_centavos, coalesce(l.pagamento,'dinheiro'), coalesce(cc.nome,'')
+                 from lancamentos l
+                 left join (select c.id cid, coalesce(p.nome, c.nome) nome
+                              from clientes c left join pessoas p on p.id = c.pessoa_id) cc
+                        on cc.cid = l.cliente_id
+                where l.conta_id=%s and l.origem='balcao' and l.tipo='receita'
+                      and l.data = current_date
+                order by l.criado_em desc""",
+            (conta[0],),
+        ).fetchall()
+        for r in pagas:
+            vendas.append({"tipo": "paga", "id": r[0], "hora": r[1],
+                           "valor_centavos": r[2], "pagamento": r[3], "cliente": r[4]})
+            recebido += r[2]
+            t = totais.get(r[3], [0, 0]); t[0] += 1; t[1] += r[2]; totais[r[3]] = t
+        fiados = conn.execute(
+            """select t.id, (t.criado_em at time zone 'America/Sao_Paulo'),
+                      t.valor_centavos, coalesce(cc.nome,''), t.cliente_id
+                 from titulos t
+                 left join (select c.id cid, coalesce(p.nome, c.nome) nome
+                              from clientes c left join pessoas p on p.id = c.pessoa_id) cc
+                        on cc.cid = t.cliente_id
+                where t.conta_id=%s and t.tipo='receber' and t.status='aberto'
+                      and t.criado_em::date = current_date
+                      and t.descricao like 'Venda de balcao%%'
+                order by t.criado_em desc""",
+            (conta[0],),
+        ).fetchall()
+        for r in fiados:
+            vendas.append({"tipo": "fiado", "id": r[0], "hora": r[1],
+                           "valor_centavos": r[2], "pagamento": "fiado",
+                           "cliente": r[3], "cliente_id": r[4]})
+            fiado_total += r[2]; fiado_n += 1
+    vendas.sort(key=lambda x: x["hora"], reverse=True)
+    totais_lst = [{"metodo": k, "n": v[0], "total_centavos": v[1]} for k, v in totais.items()]
     return _render("pdv", request, conta=conta, produtos_json=prod_js, add=add or 0,
+                   vendas=vendas, totais=totais_lst, recebido_centavos=recebido,
+                   fiado_total=fiado_total, fiado_n=fiado_n,
                    erro=request.session.pop("erro", None))
 
 
@@ -6714,6 +6815,46 @@ def painel_cliente_fiado_cobrar(request: Request, cliente_id: int, titulo_id: in
         except Exception:
             request.session["erro"] = "Nao foi possivel gerar o link agora."
     return RedirectResponse(f"/painel/clientes/{cliente_id}", status_code=303)
+
+
+@router.get("/painel/pdv/venda/{lancamento_id}", response_class=HTMLResponse)
+def painel_pdv_venda(request: Request, lancamento_id: int):
+    from finance import empresa as emp
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.acesso_pj(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    with pool.connection() as conn:
+        cab = conn.execute(
+            """select l.id, (l.criado_em at time zone 'America/Sao_Paulo'),
+                      l.valor_centavos, coalesce(l.pagamento,''), coalesce(cc.nome,'')
+                 from lancamentos l
+                 left join (select c.id cid, coalesce(p.nome, c.nome) nome
+                              from clientes c left join pessoas p on p.id = c.pessoa_id) cc
+                        on cc.cid = l.cliente_id
+                where l.id=%s and l.conta_id=%s and l.origem='balcao' and l.tipo='receita'""",
+            (lancamento_id, conta[0]),
+        ).fetchone()
+        if cab is None:
+            request.session["erro"] = "Venda nao encontrada."
+            return RedirectResponse("/painel/pdv", status_code=303)
+        its = conn.execute(
+            """select descricao, quantidade, valor_unitario_centavos,
+                      valor_total_centavos, coalesce(unidade,'un')
+                 from itens_lancamento where lancamento_id=%s order by id""",
+            (lancamento_id,),
+        ).fetchall()
+    itens = [{"descricao": r[0], "quantidade": float(r[1]), "vu": r[2],
+              "vt": r[3], "unidade": r[4]} for r in its]
+    subtotal = sum(i["vt"] for i in itens)
+    venda = {"id": cab[0], "hora": cab[1], "valor_centavos": cab[2],
+             "pagamento": cab[3], "cliente": cab[4],
+             "subtotal_centavos": subtotal,
+             "desconto_centavos": max(0, subtotal - cab[2])}
+    return _render("venda_detalhe", request, conta=conta, venda=venda, itens=itens,
+                   erro=request.session.pop("erro", None))
 
 
 @router.get("/painel/empresa", response_class=HTMLResponse)

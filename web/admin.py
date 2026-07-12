@@ -31,8 +31,12 @@ def _slug(texto: str) -> str:
 
 def _admin(request: Request):
     """Retorna a conta logada SE for admin; senao None."""
+    # Memoizacao por requisicao: _admin e' chamado varias vezes por pagina do admin.
+    if hasattr(request.state, "_admin_cache"):
+        return request.state._admin_cache
     cid = request.session.get("conta_id")
     if not cid:
+        request.state._admin_cache = None
         return None
     pool = get_pool()
     with pool.connection() as c:
@@ -40,7 +44,9 @@ def _admin(request: Request):
             "select id, nome, is_admin from contas where id = %s", (cid,)
         ).fetchone()
     if not row or not row[2]:
+        request.state._admin_cache = None
         return None
+    request.state._admin_cache = row
     return row
 
 

@@ -5898,64 +5898,51 @@ def painel_fornecedor(request: Request):
     if not conta[8]:  # eh_fornecedor
         return RedirectResponse("/painel", status_code=303)
     pool = get_pool()
-    fiscal = None
+    # Uma conexao so: dados da conta (fiscal + identidade, mesma tabela) + compras.
     with pool.connection() as c:
-        row = c.execute(
-            "select razao_social, documento, endereco from contas where id=%s",
+        crow = c.execute(
+            """select razao_social, documento, endereco,
+                      margem_alvo_pct, logo_url, banner_url, banner_cor, bio, sobre,
+                      whatsapp_loja, desconto_pix_pct, frete_gratis_acima_centavos
+                 from contas where id=%s""",
             (conta[0],),
         ).fetchone()
-        fiscal = {
-            "razao_social": row[0] if row else None,
-            "cnpj": row[1] if row else None,
-            "endereco": row[2] if row else None
-        } if row else {"razao_social": None, "cnpj": None, "endereco": None}
-    # Carrega produtos do catálogo
-    produtos = cat_mod.listar_produtos(pool, conta[0])
-    # Carrega categorias (padrão + as que o fornecedor já usa)
-    from finance import categorias as cat_sug
-    categorias_padrao = cat_sug.CATEGORIAS_PADRAO
-    _usadas = { (p.get("categoria") or "").strip().lower()
-                for p in produtos if (p.get("categoria") or "").strip() }
-    categorias_usadas = sorted(_usadas - set(categorias_padrao))
-    # Carrega origens de compra (de quem o fornecedor compra)
-    origens = cat_mod.listar_origens(pool, conta[0])
-    # Carrega compras
-    compras_raw = []
-    with pool.connection() as c:
-        rows = c.execute(
+        compras_rows = c.execute(
             """select id, data_compra, total_centavos, fonte, status,
                       (select nome from origem_compra where id = compras_fornecedor.origem_id) as origem_nome
                from compras_fornecedor where fornecedor_id=%s order by criado_em desc limit 20""",
             (conta[0],),
         ).fetchall()
-        compras_raw = [{"id": r[0], "data_compra": r[1], "total_centavos": r[2], "fonte": r[3], "status": r[4], "origem_nome": r[5]} for r in rows]
-    # Carrega tamanhos de cesta
+    fiscal = {
+        "razao_social": crow[0] if crow else None,
+        "cnpj": crow[1] if crow else None,
+        "endereco": crow[2] if crow else None,
+    } if crow else {"razao_social": None, "cnpj": None, "endereco": None}
+    if crow:
+        margem_alvo = float(crow[3]) if crow[3] else 60.0
+        identidade = {
+            "logo_url": crow[4],
+            "banner_url": crow[5],
+            "banner_cor": crow[6],
+            "bio": crow[7],
+            "sobre": crow[8],
+            "whatsapp_loja": crow[9],
+            "desconto_pix_pct": float(crow[10]) if crow[10] is not None else 0,
+            "frete_gratis_acima_centavos": int(crow[11] or 0),
+        }
+    else:
+        margem_alvo = 60.0
+        identidade = {}
+    compras_raw = [{"id": r[0], "data_compra": r[1], "total_centavos": r[2], "fonte": r[3], "status": r[4], "origem_nome": r[5]} for r in compras_rows]
+    produtos = cat_mod.listar_produtos(pool, conta[0])
+    from finance import categorias as cat_sug
+    categorias_padrao = cat_sug.CATEGORIAS_PADRAO
+    _usadas = { (p.get("categoria") or "").strip().lower()
+                for p in produtos if (p.get("categoria") or "").strip() }
+    categorias_usadas = sorted(_usadas - set(categorias_padrao))
+    origens = cat_mod.listar_origens(pool, conta[0])
     from finance import cestas as cestas_mod
     tamanhos = cestas_mod.listar_tamanhos(pool, conta[0], so_ativos=False)
-    # Carrega identidade + iFrutus + margem alvo do fornecedor
-    margem_alvo = None
-    identidade = {}
-    with pool.connection() as c:
-        row = c.execute(
-            """select margem_alvo_pct, logo_url, banner_url, banner_cor,
-                      bio, sobre, whatsapp_loja, desconto_pix_pct, frete_gratis_acima_centavos
-               from contas where id=%s""",
-            (conta[0],),
-        ).fetchone()
-        if row:
-            margem_alvo = float(row[0]) if row[0] else 60.0
-            identidade = {
-                "logo_url": row[1],
-                "banner_url": row[2],
-                "banner_cor": row[3],
-                "bio": row[4],
-                "sobre": row[5],
-                "whatsapp_loja": row[6],
-                "desconto_pix_pct": float(row[7]) if row[7] is not None else 0,
-                "frete_gratis_acima_centavos": int(row[8] or 0),
-            }
-        else:
-            margem_alvo = 60.0
     return _render("fornecedor", request, conta=conta, fiscal=fiscal, identidade=identidade, produtos=produtos, origens=origens, compras=compras_raw, tamanhos=tamanhos, margem_alvo=margem_alvo,
                    categorias_padrao=categorias_padrao, categorias_usadas=categorias_usadas,
                    erro=request.session.pop("erro", None),

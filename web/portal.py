@@ -244,9 +244,9 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
 .lk-wpp{background:#25D366;color:#fff;border-color:#25D366}
 .conv-invite{margin:.3rem 0;font-size:.82rem}
 .conv-links{display:flex;gap:4px;flex-wrap:wrap;margin-top:.3rem}
-.abas{display:flex;flex-wrap:wrap;gap:.4rem;margin:.6rem 0 .9rem}
-.aba{width:auto;background:var(--borda);color:var(--txt-mut);border:none;padding:.45rem 1rem;border-radius:8px;font-size:14px;cursor:pointer;transition:background .2s,color .2s}
-.aba:hover{background:var(--card-2);color:var(--txt)}
+.abas{display:inline-flex;flex-wrap:wrap;gap:.25rem;background:var(--card-2);padding:.25rem;border-radius:999px;border:1px solid var(--borda);margin:.6rem 0 .9rem}
+.aba{width:auto;background:transparent;color:var(--txt-mut);border:none;padding:.4rem 1rem;border-radius:999px;font-size:14px;cursor:pointer;transition:background .18s,color .18s}
+.aba:hover{color:var(--txt)}
 .aba.on,.aba.ativa{background:var(--verde);color:#fff;font-weight:500}
 .dica-toque{font-size:.78rem;color:#7a7a78;margin:0 0 .6rem}
 .dephead{font-size:.72rem;font-weight:600;color:#cfcfca;margin:.6rem 0 .3rem .2rem}
@@ -2632,8 +2632,6 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
 _PDV = """{% extends "base" %}{% block conteudo %}
 <style>
 .prod-inp{width:100%;box-sizing:border-box;padding:.5rem;background:var(--bg);border:1px solid var(--borda);color:#f4f4f4;border-radius:6px;margin:.25rem 0 .6rem}
-.pdv-pag-chip{font-size:.82rem;color:#b4b2a9;background:var(--card);border:1.5px solid var(--borda);border-radius:16px;padding:.35rem .9rem;cursor:pointer}
-.pdv-pag-chip.pdv-pag-sel{border-color:var(--verde);color:var(--verde-claro)}
 </style>
 <div class="card larga" style="max-width:560px;margin:0 auto">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
@@ -2661,11 +2659,11 @@ _PDV = """{% extends "base" %}{% block conteudo %}
   </div>
 
   <div style="color:#888;font-size:.72rem;margin-bottom:.3rem">Pagamento</div>
-  <div id="pdv-pag" style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.7rem">
-    <span class="pdv-pag-chip pdv-pag-sel" data-pag="dinheiro" onclick="pdvPag(this)">Dinheiro</span>
-    <span class="pdv-pag-chip" data-pag="pix" onclick="pdvPag(this)">Pix</span>
-    <span class="pdv-pag-chip" data-pag="cartao" onclick="pdvPag(this)">Cartão</span>
-    <span class="pdv-pag-chip" data-pag="fiado" onclick="pdvPag(this)">Fiado</span>
+  <div id="pdv-pag" class="abas" style="margin-bottom:.7rem">
+    <span class="aba on" data-pag="dinheiro" onclick="pdvPag(this)">Dinheiro</span>
+    <span class="aba" data-pag="pix" onclick="pdvPag(this)">Pix</span>
+    <span class="aba" data-pag="cartao" onclick="pdvPag(this)">Cartão</span>
+    <span class="aba" data-pag="fiado" onclick="pdvPag(this)">Fiado</span>
   </div>
 
   <div id="pdv-din" style="display:flex;gap:.5rem;margin-bottom:.5rem">
@@ -2732,7 +2730,7 @@ function pdvAdd(id){ var p=window.PDV_PROD.find(function(x){return x.id==id;}); 
 function pdvQtd(id,d){ var e=PDV_CART.find(function(x){return x.id==id;}); if(!e) return; e.qtd=Math.round((e.qtd+d)*1000)/1000; if(e.qtd<=0){ PDV_CART=PDV_CART.filter(function(x){return x.id!=id;}); } pdvRender(); }
 function pdvPreco(id,v){ var e=PDV_CART.find(function(x){return x.id==id;}); if(e){ e.preco=parseFloat(String(v).replace(',','.'))||0; } pdvRender(); }
 function pdvRender(){ var box=document.getElementById('pdv-itens'); var sub=0,h=''; if(!PDV_CART.length){ box.innerHTML='<div style="color:#888;text-align:center;padding:.8rem;font-size:.85rem">Carrinho vazio — busque um produto acima.</div>'; } else { PDV_CART.forEach(function(it){ var lt=it.preco*it.qtd; sub+=lt; h+='<div style="display:flex;align-items:center;gap:.5rem;padding:.4rem 0;border-bottom:1px solid #242426">'+'<div style="flex:1;min-width:0"><div style="color:var(--txt);font-size:.85rem">'+it.nome+'</div><input type="number" step="0.01" value="'+it.preco.toFixed(2)+'" onchange="pdvPreco('+it.id+',this.value)" style="width:78px;background:var(--bg);border:1px solid var(--borda);color:#cfcfcf;border-radius:5px;padding:.2rem .3rem;font-size:.72rem;margin-top:.2rem"> <span style="color:#6a8a7a;font-size:.68rem">/'+it.unidade+'</span></div>'+'<div style="display:flex;align-items:center;gap:.3rem"><span onclick="pdvQtd('+it.id+',-1)" style="width:22px;height:22px;border-radius:5px;background:#1c1c1f;border:1px solid #3a3a3d;color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">-</span><span style="color:var(--txt);font-size:.8rem;min-width:44px;text-align:center">'+it.qtd+' '+it.unidade+'</span><span onclick="pdvQtd('+it.id+',1)" style="width:22px;height:22px;border-radius:5px;background:#1c1c1f;border:1px solid #3a3a3d;color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">+</span></div>'+'<div style="color:#cfcfcf;font-size:.8rem;min-width:64px;text-align:right">'+pdvFmt(lt)+'</div>'+'</div>'; }); box.innerHTML=h; } var desc=parseFloat(String(document.getElementById('pdv-desc').value).replace(',','.'))||0; var tot=sub-desc; if(tot<0)tot=0; document.getElementById('pdv-total').textContent=pdvFmt(tot); var rec=parseFloat(String(document.getElementById('pdv-recebido').value).replace(',','.'))||0; var troco=rec-tot; document.getElementById('pdv-troco-v').textContent=pdvFmt(troco>0?troco:0); }
-function pdvPag(el){ document.querySelectorAll('#pdv-pag .pdv-pag-chip').forEach(function(x){x.classList.remove('pdv-pag-sel');}); el.classList.add('pdv-pag-sel'); PDV_PAG=el.getAttribute('data-pag'); var fiado=PDV_PAG==='fiado'; var din=PDV_PAG==='dinheiro'; document.getElementById('pdv-fiado-box').style.display=fiado?'block':'none'; document.getElementById('pdv-din').style.display=fiado?'none':'flex'; document.getElementById('pdv-troco').style.display=din?'flex':'none'; }
+function pdvPag(el){ document.querySelectorAll('#pdv-pag .aba').forEach(function(x){x.classList.remove('on');}); el.classList.add('on'); PDV_PAG=el.getAttribute('data-pag'); var fiado=PDV_PAG==='fiado'; var din=PDV_PAG==='dinheiro'; document.getElementById('pdv-fiado-box').style.display=fiado?'block':'none'; document.getElementById('pdv-din').style.display=fiado?'none':'flex'; document.getElementById('pdv-troco').style.display=din?'flex':'none'; }
 function pdvCliBusca(q){ q=(q||'').trim(); PDV_CLI=null; document.getElementById('pdv-cli-sel').style.display='none'; if(PDV_CLI_T) clearTimeout(PDV_CLI_T); var sug=document.getElementById('pdv-cli-sug'); if(q.length<2){ sug.style.display='none'; return; } PDV_CLI_T=setTimeout(function(){ fetch('/painel/clientes/buscar?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(d){ PDV_CLI_RES=d.clientes||[]; var h=''; PDV_CLI_RES.forEach(function(c,i){ h+='<div onclick="pdvCliPick('+i+')" style="padding:.45rem .6rem;border-bottom:1px solid #242426;cursor:pointer;font-size:.82rem;color:var(--txt)">'+c.nome+'<span style="color:#6a8a7a;font-size:.72rem">'+(c.telefone?(' · '+c.telefone):'')+(c.cpf?(' · CPF '+c.cpf):'')+'</span></div>'; }); h+='<div onclick="pdvCliNovo()" style="padding:.45rem .6rem;cursor:pointer;font-size:.82rem;color:var(--verde-claro)">+ cadastrar novo cliente</div>'; sug.innerHTML=h; sug.style.display='block'; }).catch(function(){}); }, 250); }
 function pdvCliPick(i){ var c=PDV_CLI_RES[i]; if(!c) return; PDV_CLI={id:c.id,nome:c.nome,telefone:c.telefone,cpf:c.cpf}; document.getElementById('pdv-cli-busca').value=c.nome; document.getElementById('pdv-cli-sug').style.display='none'; document.getElementById('pdv-cli-novo').style.display='none'; var sel=document.getElementById('pdv-cli-sel'); sel.innerHTML='✓ '+c.nome+' <a onclick="pdvCliLimpar()" style="color:#d98a8a;cursor:pointer;margin-left:.4rem">(trocar)</a>'; sel.style.display='block'; }
 function pdvCliNovo(){ document.getElementById('pdv-cli-sug').style.display='none'; var q=document.getElementById('pdv-cli-busca').value||''; document.getElementById('pdv-cli-novo').style.display='grid'; var digs=q.replace(/[^0-9]/g,''); if(digs.length>=11){ document.getElementById('pdv-novo-cpf').value=q; document.getElementById('pdv-novo-nome').value=''; } else { document.getElementById('pdv-novo-nome').value=q; } PDV_CLI=null; }

@@ -2486,6 +2486,23 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
       <button style="background:#1d9e75;color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.7rem;width:auto">Salvar</button>
     </form>
   </details>
+  {% if fiados %}
+  <div style="background:#161617;border:1px solid #3a2f17;border-radius:10px;padding:.8rem 1rem;margin-bottom:1rem">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">
+      <span style="color:#e0b878;font-weight:600">Em aberto (fiado)</span>
+      <span style="color:#e0b878;font-weight:700">R$ {{ "%.2f"|format(fiado_total/100) }}</span>
+    </div>
+    {% for f in fiados %}
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:.45rem 0;border-top:1px solid #242426">
+      <div style="font-size:.82rem;color:#cfcfcf">Fiado #{{ f.id }} <span style="color:#888;font-size:.74rem">· vence {{ f.vencimento }}</span><br><span style="color:#ececec">R$ {{ "%.2f"|format(f.valor_centavos/100) }}</span></div>
+      <div style="display:flex;gap:.4rem;align-items:center">
+        {% if f.link %}<a href="{{ f.link }}" target="_blank" style="color:#c99536;font-size:.76rem">link Pix ↗</a>{% else %}<form method="post" action="/painel/clientes/{{ cliente.id }}/fiado/{{ f.id }}/cobrar" style="display:inline"><button style="background:none;border:1px solid #c99536;color:#c99536;border-radius:5px;padding:.25rem .55rem;cursor:pointer;font-size:.74rem;width:auto">cobrar Pix</button></form>{% endif %}
+        <form method="post" action="/painel/clientes/{{ cliente.id }}/fiado/{{ f.id }}/baixar" style="display:inline" onsubmit="return confirm('Confirmar recebimento deste fiado?')"><button style="background:none;border:1px solid #1d9e75;color:#5dcaa5;border-radius:5px;padding:.25rem .55rem;cursor:pointer;font-size:.74rem;width:auto">dar baixa</button></form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
   <h3 style="margin:0 0 .5rem">Histórico de compras</h3>
   {% if compras %}
   <div style="display:flex;flex-direction:column;gap:.4rem">
@@ -6581,6 +6598,16 @@ def painel_cliente_detalhe(request: Request, cliente_id: int):
                  from lancamentos where cliente_id=%s and conta_id=%s and tipo='receita'""",
             (cliente_id, conta[0]),
         ).fetchone()
+        fiados_rows = conn.execute(
+            """select id, valor_centavos, vencimento, coalesce(cobranca_link_url,'')
+                 from titulos
+                where cliente_id=%s and conta_id=%s and status='aberto' and tipo='receber'
+                order by vencimento asc, id asc""",
+            (cliente_id, conta[0]),
+        ).fetchall()
+    fiados = [{"id": r[0], "valor_centavos": r[1], "vencimento": r[2], "link": r[3]}
+              for r in fiados_rows]
+    fiado_total = sum(f["valor_centavos"] for f in fiados)
     compras = [{"id": r[0], "data": r[1], "valor_centavos": r[2],
                 "pagamento": r[3], "descricao": r[4]} for r in rows]
     n = agg[0] or 0
@@ -6588,7 +6615,7 @@ def painel_cliente_detalhe(request: Request, cliente_id: int):
     resumo = {"n": n, "total_centavos": total, "ultima": agg[2],
               "ticket_centavos": (total // n) if n else 0}
     return _render("cliente_detalhe", request, conta=conta, cliente=cl,
-                   compras=compras, resumo=resumo,
+                   compras=compras, resumo=resumo, fiados=fiados, fiado_total=fiado_total,
                    erro=request.session.pop("erro", None),
                    aviso=request.session.pop("aviso", None))
 
@@ -6640,6 +6667,53 @@ def painel_pdv(request: Request, add: int = 0):
                 "saldo": float(pr["saldo"] or 0)} for pr in produtos]
     return _render("pdv", request, conta=conta, produtos_json=prod_js, add=add or 0,
                    erro=request.session.pop("erro", None))
+
+
+@router.post("/painel/clientes/{cliente_id}/fiado/{titulo_id}/baixar")
+def painel_cliente_fiado_baixar(request: Request, cliente_id: int, titulo_id: int):
+    from finance import empresa as emp
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.acesso_pj(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    try:
+        emp.dar_baixa_titulo(pool, conta[0], titulo_id)
+        request.session["aviso"] = "Fiado recebido — lancado no caixa."
+    except Exception as e:
+        request.session["erro"] = f"Erro: {str(e)}"
+    return RedirectResponse(f"/painel/clientes/{cliente_id}", status_code=303)
+
+
+@router.post("/painel/clientes/{cliente_id}/fiado/{titulo_id}/cobrar")
+def painel_cliente_fiado_cobrar(request: Request, cliente_id: int, titulo_id: int):
+    from finance import empresa as emp
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.acesso_pj(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    tits = {t["id"]: t for t in emp.listar_titulos(pool, conta[0], status="aberto")}
+    t = tits.get(titulo_id)
+    if t and t["tipo"] == "receber":
+        try:
+            from finance import asaas
+            link = asaas.criar_link_pagamento(
+                conta_id=f"titulo:{titulo_id}",
+                nome_plano=f"Cobranca — {t['descricao']}"[:60],
+                valor_reais=t["valor_centavos"] / 100,
+                descricao=(t["descricao"] or "")[:100])
+            url = link.get("url")
+            if url:
+                emp.registrar_link_cobranca(pool, conta[0], titulo_id, url)
+                request.session["aviso"] = "Link de cobranca Pix gerado."
+            else:
+                request.session["erro"] = "Nao foi possivel gerar o link agora."
+        except Exception:
+            request.session["erro"] = "Nao foi possivel gerar o link agora."
+    return RedirectResponse(f"/painel/clientes/{cliente_id}", status_code=303)
 
 
 @router.get("/painel/empresa", response_class=HTMLResponse)

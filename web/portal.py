@@ -190,10 +190,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
 .btn-conv{background:#1d6e9e}.btn-conv:hover{background:#2480b5}
 .btn-off{background:#6e2b2b}.btn-off:hover{background:#8a3636}
 .btn-on{background:var(--verde)}
-.abas{display:inline-flex;gap:4px;background:var(--bg);padding:3px;border-radius:8px;margin:.3rem 0 .6rem}
-.aba{width:auto;margin:0;padding:.4rem .9rem;border-radius:6px;background:transparent;color:var(--txt-mut);font-size:.85rem}
-.aba:hover{background:#1a1a1b}
-.aba.ativa{background:var(--verde);color:#fff}
+
 .dep{border:1px solid var(--borda);border-radius:8px;margin-bottom:8px;overflow:hidden}
 .dep-cab{display:flex;justify-content:space-between;align-items:center;padding:.7rem .9rem;background:var(--card);cursor:pointer;font-size:.92rem}
 .dep-cab:hover{background:#1c1c1d}
@@ -213,9 +210,10 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
 .lk-wpp{background:#25D366;color:#fff;border-color:#25D366}
 .conv-invite{margin:.3rem 0;font-size:.82rem}
 .conv-links{display:flex;gap:4px;flex-wrap:wrap;margin-top:.3rem}
-.abas{display:flex;gap:.4rem;margin:.6rem 0 .9rem}
-.aba{background:var(--borda);color:var(--txt-mut);border:none;padding:.45rem 1rem;border-radius:8px;font-size:14px;cursor:pointer;transition:background .2s, color .2s}
-.aba.on{background:var(--verde);color:#fff;font-weight:500}
+.abas{display:flex;flex-wrap:wrap;gap:.4rem;margin:.6rem 0 .9rem}
+.aba{width:auto;background:var(--borda);color:var(--txt-mut);border:none;padding:.45rem 1rem;border-radius:8px;font-size:14px;cursor:pointer;transition:background .2s,color .2s}
+.aba:hover{background:var(--card-2);color:var(--txt)}
+.aba.on,.aba.ativa{background:var(--verde);color:#fff;font-weight:500}
 .dica-toque{font-size:.78rem;color:#7a7a78;margin:0 0 .6rem}
 .dephead{font-size:.72rem;font-weight:600;color:#cfcfca;margin:.6rem 0 .3rem .2rem}
 .litem{display:flex;align-items:center;gap:.6rem;padding:.7rem .5rem .7rem .6rem;margin-bottom:.4rem;background:var(--card-2);border-radius:10px;transition:transform .15s,background .2s,opacity .35s,max-height .35s;position:relative;overflow:hidden}
@@ -246,21 +244,90 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
 .wa-tooltip{position:absolute;right:68px;background:var(--card-2);color:var(--txt);padding:.45rem .8rem;border-radius:6px;font-size:.85rem;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .2s;border:1px solid var(--borda)}
 .wa-suporte:hover .wa-tooltip{opacity:1}
 @media (max-width:600px){.wa-suporte{bottom:16px;right:16px;width:52px;height:52px}.wa-tooltip{display:none}.fin-cards{grid-template-columns:1fr}.fin-cards>div:first-child{display:grid !important;grid-template-columns:1fr 1fr;gap:.6rem}.fin-cards>div:first-child>div:last-child{margin-top:0 !important;padding-top:0 !important;border-top:0 !important;border-left:1px solid #1e1e20;padding-left:.6rem !important}}
+
+#navprog{position:fixed;top:0;left:0;height:3px;width:0;background:var(--verde-claro);z-index:100;transition:width .35s ease;opacity:0}
+#navprog.run{width:92%;opacity:1;transition:width 9s cubic-bezier(.1,.7,.2,1)}
+.nav-ic{width:20px;height:20px;flex-shrink:0;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.side,.btmnav,.mais-sheet,.mais-bg{display:none}
+.side-grp{font-size:.66rem;text-transform:uppercase;letter-spacing:.5px;color:#6a6a66;padding:.7rem .6rem .25rem}
+.nav-i{display:flex;align-items:center;gap:.65rem;padding:.55rem .6rem;border-radius:8px;color:var(--txt-mut);text-decoration:none;font-size:.9rem;margin:0}
+.nav-i:hover{background:var(--card-2);color:var(--txt)}
+.nav-i.on{background:rgba(29,158,117,.16);color:var(--verde-claro)}
+.topo-mob{display:none}
+@media(min-width:768px){
+  body{padding-left:216px}
+  .topo-mob{display:none !important}
+  .side{display:flex;flex-direction:column;position:fixed;left:0;top:0;bottom:0;width:216px;background:var(--card);border-right:1px solid var(--borda);padding:1rem .7rem;box-sizing:border-box;overflow-y:auto;z-index:40}
+  .side-logo{font-weight:600;color:var(--txt);font-size:1.1rem;padding:.2rem .6rem 1rem;display:flex;align-items:center;gap:.5rem}
+}
+@media(max-width:767px){
+  body{padding-bottom:66px}
+  .topo-mob{display:flex}
+  .wa-suporte{bottom:80px !important}
+  .btmnav{display:flex;position:fixed;left:0;right:0;bottom:0;height:60px;background:var(--card);border-top:1px solid var(--borda);z-index:60}
+  .btmnav a,.btmnav button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--txt-mut);text-decoration:none;background:none;border:0;font-size:.6rem;cursor:pointer;margin:0;padding:0;width:auto}
+  .btmnav .on{color:var(--verde-claro)}
+  .btmnav .nav-ic{width:22px;height:22px}
+  .mais-bg{display:block;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:70;opacity:0;pointer-events:none;transition:opacity .25s}
+  .mais-bg.open{opacity:1;pointer-events:auto}
+  .mais-sheet{display:block;position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--borda);border-radius:16px 16px 0 0;padding:.4rem 1rem 1.4rem;z-index:71;transform:translateY(100%);transition:transform .25s;max-height:80vh;overflow-y:auto}
+  .mais-sheet.open{transform:translateY(0)}
+  .mais-grab{width:34px;height:4px;background:var(--borda);border-radius:2px;margin:.4rem auto .5rem}
+}
 </style></head><body>
-<div class="topo"><span class="logo" style="display:inline-flex;align-items:center;gap:7px"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M16 18 H44 L18 46 H46" stroke="#3ee0a6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z" fill="#3ee0a6"/></svg>zaq</span>
-<button type="button" id="menu-btn" onclick="document.getElementById('menu-links').classList.toggle('aberto')" aria-label="menu" style="display:none;background:none;border:0;cursor:pointer;flex-direction:column;gap:4px;padding:6px"><span style="width:22px;height:2px;background:#b4b2a9;border-radius:2px;display:block"></span><span style="width:22px;height:2px;background:#b4b2a9;border-radius:2px;display:block"></span><span style="width:22px;height:2px;background:#b4b2a9;border-radius:2px;display:block"></span></button>
-<span id="menu-links" onclick="if(event.target.tagName==='A'){this.classList.remove('aberto')}">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="ic-caixa" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></symbol><symbol id="ic-produtos" viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></symbol><symbol id="ic-clientes" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><path d="M16 6a3 3 0 010 6"/></symbol><symbol id="ic-financeiro" viewBox="0 0 24 24"><path d="M4 4v16h16"/><path d="M8 15l3-4 3 2 4-6"/></symbol><symbol id="ic-mais" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol><symbol id="ic-abastecimento" viewBox="0 0 24 24"><path d="M3 6h11v9H3zM14 9h4l3 3v3h-7z"/><circle cx="7" cy="18" r="1.6"/><circle cx="17" cy="18" r="1.6"/></symbol><symbol id="ic-empresa" viewBox="0 0 24 24"><path d="M4 9l1.2-4h13.6L20 9M5 9v10h14V9M4 9h16M10 19v-5h4v5"/></symbol><symbol id="ic-fornecedor" viewBox="0 0 24 24"><path d="M12 21v-8M12 13c0-3 2-5.5 5.5-5.5C17.5 11 15.5 13 12 13zM12 15c0-2.5-1.6-4.5-4.5-4.5C7.5 13 9 15 12 15z"/></symbol><symbol id="ic-compras" viewBox="0 0 24 24"><circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/><path d="M2 4h2.2l2.3 11h11l1.8-8H6"/></symbol><symbol id="ic-cesta" viewBox="0 0 24 24"><path d="M5 9h14l-1.4 10H6.4zM9 9l1.2-5M15 9l-1.2-5"/></symbol><symbol id="ic-painel" viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v4h-7zM13 11h7v9h-7zM4 14h7v6H4z"/></symbol><symbol id="ic-sair" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></symbol></defs></svg>
+<div id="navprog"></div>
+{% macro navi(sec, href, ic, label) -%}
+<a href="{{ href }}" class="nav-i{% if secao_ativa==sec and sec %} on{% endif %}" onclick="navTap(this)"><svg class="nav-ic"><use href="#ic-{{ ic }}"/></svg><span>{{ label }}</span></a>
+{%- endmacro %}
+{% macro tabi(sec, href, ic, label) -%}
+<a href="{{ href }}" class="{% if secao_ativa==sec and sec %}on{% endif %}" onclick="navTap(this)"><svg class="nav-ic"><use href="#ic-{{ ic }}"/></svg><span>{{ label }}</span></a>
+{%- endmacro %}
 {% if logado %}
-  {% set _tem_app = conta and conta[4] and conta[4] != 'zaq_cesta' %}
-  {% set _tem_cesta = (conta and conta[10]) or tem_cesta %}
-  {% if _tem_app %}<a href="/painel">Painel</a><a href="/painel/financeiro">Financeiro</a><a href="/painel/compras">Compras</a>{% endif %}
-  {% if _tem_cesta %}<a href="/painel/assinaturas">🧺 Minhas assinaturas</a><a href="/painel/meus-pedidos">🛍️ Meus pedidos</a>{% endif %}
-  {% if conta and conta[8] %}<a href="/painel/fornecedor">👨‍🌾 Fornecedor</a>{% endif %}
-  {% if tem_pj %}<a href="/painel/empresa">🏢 Empresa</a>{% endif %}
-  {% if vende_produto %}<a href="/painel/produtos">📦 Produtos</a><a href="/painel/produtos/abastecimento">🛒 Abastecimento</a><a href="/painel/clientes">👥 Clientes</a><a href="/painel/pdv">🧾 Caixa</a>{% endif %}
-  <a href="/sair">Sair</a>
-{% else %}<a href="/login">Entrar</a><a href="/cadastro">Criar conta</a>{% endif %}
-</span></div>
+{% set _tem_app = conta and conta[4] and conta[4] != 'zaq_cesta' %}
+{% set _tem_cesta = (conta and conta[10]) or tem_cesta %}
+{% set _forn = conta and conta[8] %}
+<div class="topo topo-mob"><span class="logo" style="display:inline-flex;align-items:center;gap:7px"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M16 18 H44 L18 46 H46" stroke="#3ee0a6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z" fill="#3ee0a6"/></svg>zaq</span></div>
+<nav class="side">
+  <div class="side-logo"><span class="logo" style="display:inline-flex;align-items:center;gap:7px"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M16 18 H44 L18 46 H46" stroke="#3ee0a6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z" fill="#3ee0a6"/></svg>zaq</span></div>
+  {% if vende_produto or _tem_app %}<div class="side-grp">Principal</div>{% endif %}
+  {% if vende_produto %}{{ navi('caixa','/painel/pdv','caixa','Caixa') }}{{ navi('produtos','/painel/produtos','produtos','Produtos') }}{{ navi('clientes','/painel/clientes','clientes','Clientes') }}{% endif %}
+  {% if _tem_app %}{{ navi('financeiro','/painel/financeiro','financeiro','Financeiro') }}{% endif %}
+  {% if vende_produto or tem_pj or _forn %}<div class="side-grp">Loja</div>{% endif %}
+  {% if vende_produto %}{{ navi('abastecimento','/painel/produtos/abastecimento','abastecimento','Abastecimento') }}{% endif %}
+  {% if tem_pj %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{% endif %}
+  {% if _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
+  {% if _tem_app or _tem_cesta %}<div class="side-grp">Pessoal</div>{% endif %}
+  {% if _tem_app %}{{ navi('painel','/painel','painel','Painel') }}{{ navi('compras','/painel/compras','compras','Lista de compras') }}{% endif %}
+  {% if _tem_cesta %}{{ navi('assinaturas','/painel/assinaturas','cesta','Assinaturas') }}{{ navi('pedidos','/painel/meus-pedidos','compras','Meus pedidos') }}{% endif %}
+  <div style="flex:1"></div>
+  {{ navi('','/sair','sair','Sair') }}
+</nav>
+<nav class="btmnav">
+  {% if vende_produto %}{{ tabi('caixa','/painel/pdv','caixa','Caixa') }}{{ tabi('produtos','/painel/produtos','produtos','Produtos') }}{{ tabi('clientes','/painel/clientes','clientes','Clientes') }}{% endif %}
+  {% if _tem_app %}{{ tabi('financeiro','/painel/financeiro','financeiro','Financeiro') }}{% endif %}
+  {% if not vende_produto and _tem_app %}{{ tabi('painel','/painel','painel','Painel') }}{% endif %}
+  <button type="button" onclick="maisToggle(true)"><svg class="nav-ic"><use href="#ic-mais"/></svg><span>Mais</span></button>
+</nav>
+<div class="mais-bg" onclick="maisToggle(false)"></div>
+<div class="mais-sheet" id="mais-sheet">
+  <div class="mais-grab"></div>
+  {% if vende_produto or tem_pj or _forn %}<div class="side-grp">Loja</div>{% endif %}
+  {% if vende_produto %}{{ navi('abastecimento','/painel/produtos/abastecimento','abastecimento','Abastecimento') }}{% endif %}
+  {% if tem_pj %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{% endif %}
+  {% if _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
+  {% if _tem_app or _tem_cesta %}<div class="side-grp">Pessoal</div>{% endif %}
+  {% if _tem_app %}{{ navi('painel','/painel','painel','Painel') }}{{ navi('compras','/painel/compras','compras','Lista de compras') }}{% endif %}
+  {% if _tem_cesta %}{{ navi('assinaturas','/painel/assinaturas','cesta','Assinaturas') }}{{ navi('pedidos','/painel/meus-pedidos','compras','Meus pedidos') }}{% endif %}
+  {{ navi('','/sair','sair','Sair') }}
+</div>
+<script>
+function navTap(el){var p=el.closest('nav');if(p){var A=p.querySelectorAll('a');for(var i=0;i<A.length;i++)A[i].classList.remove('on');}el.classList.add('on');var b=document.getElementById('navprog');if(b)b.classList.add('run');}
+function maisToggle(v){var sh=document.getElementById('mais-sheet'),bg=document.querySelector('.mais-bg');if(sh)sh.classList.toggle('open',v);if(bg)bg.classList.toggle('open',v);}
+</script>
+{% else %}
+<div class="topo"><span class="logo" style="display:inline-flex;align-items:center;gap:7px"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M16 18 H44 L18 46 H46" stroke="#3ee0a6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z" fill="#3ee0a6"/></svg>zaq</span><span id="menu-links"><a href="/login">Entrar</a><a href="/cadastro">Criar conta</a></span></div>
+{% endif %}
 {% block conteudo %}{% endblock %}
 <a href="https://wa.me/5586981885930?text={% if conta %}Oi%20Thompson%21%20Estou%20no%20Zaq%20%28conta%20%23{{ conta[0] }}%29%20e%20preciso%20de%20ajuda%20com%3A%20{% else %}Oi%20Thompson%21%20Estou%20no%20Zaq%20e%20preciso%20de%20ajuda%20com%3A%20{% endif %}"
    target="_blank" rel="noopener" class="wa-suporte" aria-label="Falar com Thompson no WhatsApp">
@@ -4418,6 +4485,15 @@ def _tem_assinatura_cesta(conta_id: int) -> bool:
 def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
     ctx.setdefault("logado", bool(request.session.get("conta_id")))
     ctx.setdefault("titulo", nome.capitalize())
+    if "secao_ativa" not in ctx:
+        _p = request.url.path
+        _secs = [("caixa", "/painel/pdv"), ("abastecimento", "/painel/produtos/abastecimento"),
+                 ("produtos", "/painel/produtos"), ("clientes", "/painel/clientes"),
+                 ("financeiro", "/painel/financeiro"), ("empresa", "/painel/empresa"),
+                 ("fornecedor", "/painel/fornecedor"), ("assinaturas", "/painel/assinaturas"),
+                 ("pedidos", "/painel/meus-pedidos"), ("compras", "/painel/compras"),
+                 ("painel", "/painel")]
+        ctx["secao_ativa"] = next((k for k, pre in _secs if _p == pre or _p.startswith(pre + "/")), "")
     # Injeta conta + tem_cesta pro menu decidir certo (em qualquer tela)
     if request.session.get("conta_id"):
         if "conta" not in ctx:

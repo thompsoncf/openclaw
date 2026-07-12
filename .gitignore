@@ -4,3 +4,9 @@ __pycache__/
 .env
 .pytest_cache/
 pgdata/
+
+# scripts de aplicação one-shot (find→replace de levas) — não versionar
+/aplica_*.py
+/aplicar_*.py
+/apply_*.py
+/ajustes_*.py

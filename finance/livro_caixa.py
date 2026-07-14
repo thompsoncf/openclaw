@@ -321,6 +321,44 @@ class LivroCaixa:
         return {"anterior": anterior, "receitas": rec, "despesas": desp,
                 "saldo": anterior + rec - desp}
 
+    def resumo_mes_quebra(self, ano: int, mes: int, membro_id: int | None = None) -> dict:
+        """resumo_mes + quebra por natureza numa conexao so (2 queries com group by, no
+        lugar de 4x resumo_mes). Retorna {'total':..., 'empresa':..., 'pessoal':...,
+        'a_definir':...}, cada bloco = {anterior, receitas, despesas, saldo}. Equivale a
+        resumo_mes() (total) e resumo_mes(natureza=X) para cada natureza."""
+        cond = "conta_id = %s"
+        base: list = [self.conta_id]
+        if membro_id is not None:
+            cond += " and membro_id = %s"; base.append(membro_id)
+        ini, prox = _intervalo_mes(ano, mes)
+        blocos = {n: {"anterior": 0, "receitas": 0, "despesas": 0}
+                  for n in ("empresa", "pessoal", "a_definir")}
+        with self.pool.connection() as conn:
+            for nat, val in conn.execute(
+                f"""select coalesce(natureza,'a_definir'),
+                           coalesce(sum(case when tipo='receita' then valor_centavos
+                                             else -valor_centavos end),0)
+                    from lancamentos where {cond} and data < %s
+                    group by coalesce(natureza,'a_definir')""",
+                base + [ini]).fetchall():
+                if nat in blocos:
+                    blocos[nat]["anterior"] = int(val)
+            for nat, tipo, val in conn.execute(
+                f"""select coalesce(natureza,'a_definir'), tipo, coalesce(sum(valor_centavos),0)
+                    from lancamentos where {cond} and data >= %s and data < %s
+                    group by coalesce(natureza,'a_definir'), tipo""",
+                base + [ini, prox]).fetchall():
+                if nat in blocos:
+                    blocos[nat]["receitas" if tipo == "receita" else "despesas"] = int(val)
+        total = {"anterior": 0, "receitas": 0, "despesas": 0}
+        for b in blocos.values():
+            b["saldo"] = b["anterior"] + b["receitas"] - b["despesas"]
+            total["anterior"] += b["anterior"]
+            total["receitas"] += b["receitas"]
+            total["despesas"] += b["despesas"]
+        total["saldo"] = total["anterior"] + total["receitas"] - total["despesas"]
+        return {"total": total, **blocos}
+
     def despesas_por_categoria(self, ano: int, mes: int, membro_id: int | None = None,
                                natureza: str | None = None) -> list[tuple[str, int]]:
         return self._por_categoria("despesa", ano, mes, membro_id, natureza)

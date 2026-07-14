@@ -7533,17 +7533,17 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
     else:
         # natureza (pessoal/empresa/a_definir) só filtra em conta PJ; PF ignora
         nat = natureza if (eh_pj and natureza in ("pessoal", "empresa", "a_definir")) else None
-        resumo = livro.resumo_mes(ano_sel, mes_num, membro_sel, natureza=nat)
-        # quebra por natureza (só PJ): pro card mostrar empresa/pessoal/a definir
+        # quebra por natureza (só PJ): 1 query com group by no lugar de 4x resumo_mes (perf)
         quebra = None
         if eh_pj:
-            r_emp = livro.resumo_mes(ano_sel, mes_num, membro_sel, natureza="empresa")
-            r_pes = livro.resumo_mes(ano_sel, mes_num, membro_sel, natureza="pessoal")
-            r_def = livro.resumo_mes(ano_sel, mes_num, membro_sel, natureza="a_definir")
+            _q = livro.resumo_mes_quebra(ano_sel, mes_num, membro_sel)
+            resumo = _q[nat] if nat else _q["total"]
             quebra = {
-                "receitas": {"empresa": r_emp["receitas"], "pessoal": r_pes["receitas"], "a_definir": r_def["receitas"]},
-                "despesas": {"empresa": r_emp["despesas"], "pessoal": r_pes["despesas"], "a_definir": r_def["despesas"]},
+                "receitas": {"empresa": _q["empresa"]["receitas"], "pessoal": _q["pessoal"]["receitas"], "a_definir": _q["a_definir"]["receitas"]},
+                "despesas": {"empresa": _q["empresa"]["despesas"], "pessoal": _q["pessoal"]["despesas"], "a_definir": _q["a_definir"]["despesas"]},
             }
+        else:
+            resumo = livro.resumo_mes(ano_sel, mes_num, membro_sel, natureza=nat)
         categorias = livro.despesas_por_categoria(ano_sel, mes_num, membro_sel, natureza=nat)
         maior_cat = max((v for _, v in categorias), default=0)
         receitas_cat = livro.receitas_por_categoria(ano_sel, mes_num, membro_sel, natureza=nat)

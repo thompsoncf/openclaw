@@ -709,13 +709,13 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 
 <div class="fin-cards">
 <div class="metric" style="display:flex;flex-direction:column;justify-content:space-between"><div><span>Saldo anterior</span><b style="white-space:nowrap;color:{% if resumo.anterior < 0 %}#e07a5f{% else %}var(--verde-claro){% endif %}">{{ brl(resumo.anterior) }}</b>{% if eh_pj and natureza_sel in ['empresa','pessoal','a_definir'] and resumo.anterior == 0 %}<small style="display:block;color:#6a7178;font-size:.62rem;margin-top:.3rem;line-height:1.3">sem histórico de {{ {'empresa':'empresa','pessoal':'pessoal','a_definir':'lançamentos a definir'}[natureza_sel] }} antes deste mês</small>{% endif %}</div>
-<div style="margin-top:1rem;padding-top:.9rem;border-top:1px solid #1e1e20"><span>= {% if eh_pj and natureza_sel %}Resultado{% else %}Saldo{% endif %} do mês</span><b style="white-space:nowrap;color:var(--verde-claro)">{{ brl(resumo.saldo) }}</b></div></div>
-<div class="metric"><span>+ Receitas do mês{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b class="nowrap">{{ brl(resumo.receitas) }}</b>{% if eh_pj and not natureza_sel and quebra %}<div style="margin-top:.5rem;padding-top:.45rem;border-top:1px solid #1e1e20;font-size:.68rem;line-height:1.85">
+<div style="margin-top:1rem;padding-top:.9rem;border-top:1px solid #1e1e20"><span>= {% if eh_pj and natureza_sel %}Resultado{% else %}Saldo{% endif %} {% if q_search %}da busca{% else %}do mês{% endif %}</span><b style="white-space:nowrap;color:var(--verde-claro)">{{ brl(resumo.saldo) }}</b></div></div>
+<div class="metric"><span>+ Receitas {% if q_search %}da busca{% else %}do mês{% endif %}{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b class="nowrap">{{ brl(resumo.receitas) }}</b>{% if eh_pj and not natureza_sel and quebra %}<div style="margin-top:.5rem;padding-top:.45rem;border-top:1px solid #1e1e20;font-size:.68rem;line-height:1.85">
 <div style="display:flex;justify-content:space-between;gap:.4rem;color:#7a9a8a"><span class="nowrap">🏢 Empresa</span><span class="nowrap">{{ (quebra.receitas.empresa/100)|n2 }}</span></div>
 <div style="display:flex;justify-content:space-between;gap:.4rem;color:#7a7a75"><span class="nowrap">👤 Pessoal</span><span class="nowrap">{{ (quebra.receitas.pessoal/100)|n2 }}</span></div>
 <div style="display:flex;justify-content:space-between;gap:.4rem;color:#7a7a75"><span class="nowrap">⏳ A definir</span><span class="nowrap">{{ (quebra.receitas.a_definir/100)|n2 }}</span></div>
 </div>{% endif %}</div>
-<div class="metric"><span>− Despesas do mês{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b class="nowrap">{{ brl(resumo.despesas) }}</b>{% if eh_pj and not natureza_sel and quebra %}<div style="margin-top:.5rem;padding-top:.45rem;border-top:1px solid #1e1e20;font-size:.68rem;line-height:1.85">
+<div class="metric"><span>− Despesas {% if q_search %}da busca{% else %}do mês{% endif %}{% if eh_pj and natureza_sel %} · {{ natureza_sel|replace('a_definir','a definir') }}{% endif %}</span><b class="nowrap">{{ brl(resumo.despesas) }}</b>{% if eh_pj and not natureza_sel and quebra %}<div style="margin-top:.5rem;padding-top:.45rem;border-top:1px solid #1e1e20;font-size:.68rem;line-height:1.85">
 <div style="display:flex;justify-content:space-between;gap:.4rem;color:#9a8a7a"><span class="nowrap">🏢 Empresa</span><span class="nowrap">{{ (quebra.despesas.empresa/100)|n2 }}</span></div>
 <div style="display:flex;justify-content:space-between;gap:.4rem;color:#7a7a75"><span class="nowrap">👤 Pessoal</span><span class="nowrap">{{ (quebra.despesas.pessoal/100)|n2 }}</span></div>
 <div style="display:flex;justify-content:space-between;gap:.4rem;{% if quebra.despesas.a_definir %}color:#f0c05a{% else %}color:#7a7a75{% endif %}"><span class="nowrap">⏳ A definir{% if quebra.despesas.a_definir %} ⚠{% endif %}</span><span class="nowrap">{{ (quebra.despesas.a_definir/100)|n2 }}</span></div>
@@ -7520,7 +7520,10 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
         lancamentos = livro.buscar_lancamentos(q, limite=100)
         dias = []  # plano, não agrupado
         raiox = {}
-        resumo = {"saldo": 0, "receitas": 0, "despesas": 0, "anterior": 0}
+        # soma os resultados da busca (valor em centavos, como resumo_mes/brl)
+        _rec = sum(l["valor"] for l in lancamentos if l["tipo"] == "receita")
+        _desp = sum(l["valor"] for l in lancamentos if l["tipo"] == "despesa")
+        resumo = {"saldo": _rec - _desp, "receitas": _rec, "despesas": _desp, "anterior": 0}
         categorias = []
         receitas_cat = []
         maior_cat = 0

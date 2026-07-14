@@ -31,6 +31,9 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
         from .models import canonizar_categoria
         cat_entrada = entrada.get("categoria", "Outros")
         cat_canon = canonizar_categoria(cat_entrada, tipo.value if hasattr(tipo, "value") else str(tipo))
+        _nat = entrada.get("natureza")
+        if _nat not in ("pessoal", "empresa"):
+            _nat = None
         lanc = Lancamento.criar(
             tipo=tipo,
             valor_reais=entrada["valor"],
@@ -39,6 +42,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
             data=_parse_data(entrada.get("data")),
             pagamento=entrada.get("pagamento", ""),
             origem=entrada.get("origem", "manual"),
+            natureza=_nat,
         )
         salvo = livro.adicionar(lanc)
         rotulo = "Despesa" if tipo == Tipo.DESPESA else "Receita"
@@ -326,6 +330,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                     "data": {"type": "string", "description": "dd/mm/aaaa; vazio = hoje"},
                     "pagamento": {"type": "string", "description": "ex: Pix, cartao, dinheiro"},
                     "origem": {"type": "string", "enum": ["manual", "foto"]},
+                    "natureza": {"type": "string", "enum": ["pessoal", "empresa"], "description": "só para conta PJ que mistura pessoal e empresa: se a pessoa já disse que foi pessoal ou da empresa, passe aqui na hora do registro (evita 2º passo)"},
                 },
                 "required": ["valor", "categoria"],
             },
@@ -342,6 +347,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                     "descricao": {"type": "string"},
                     "data": {"type": "string", "description": "dd/mm/aaaa; vazio = hoje"},
                     "origem": {"type": "string", "enum": ["manual", "foto"]},
+                    "natureza": {"type": "string", "enum": ["pessoal", "empresa"], "description": "só para conta PJ que mistura pessoal e empresa: se a pessoa já disse que foi pessoal ou da empresa, passe aqui na hora do registro (evita 2º passo)"},
                 },
                 "required": ["valor", "categoria"],
             },

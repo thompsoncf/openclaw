@@ -524,7 +524,12 @@ def dre_mes(pool, conta_id: int, ano: int, mes: int, top: int = 5) -> dict:
     """DRE simplificado do mês a partir do livro-caixa (fonte única).
 
     Agrega por categoria DIRETO (sem a canonização de categorias PF do
-    livro-caixa, que jogaria 'Pessoal'/'Fornecedores' em 'Outros')."""
+    livro-caixa, que jogaria 'Pessoal'/'Fornecedores' em 'Outros').
+
+    Só entra o que está classificado como empresa (natureza='empresa'); os
+    lançamentos "a definir" (natureza null) ficam FORA do resultado — podem ser
+    gasto pessoal. Pra o número nunca sair silenciosamente magro, devolvemos
+    a_definir_n/a_definir_centavos: quanto ficou de fora, pra tela avisar."""
     ini = date(ano, mes, 1)
     fim = _mes_seguinte(ini)
     with pool.connection() as c:
@@ -536,6 +541,14 @@ def dre_mes(pool, conta_id: int, ano: int, mes: int, top: int = 5) -> dict:
                 group by tipo, categoria""",
             (conta_id, ini, fim),
         ).fetchall()
+        # o que ficou de fora do DRE por ainda não estar classificado
+        adef = c.execute(
+            """select count(*), coalesce(sum(valor_centavos),0)
+                 from lancamentos
+                where conta_id=%s and data >= %s and data < %s
+                  and natureza is null""",
+            (conta_id, ini, fim),
+        ).fetchone()
     receitas = sorted(((cat, int(v or 0)) for t, cat, v in rows
                        if t == "receita"), key=lambda kv: kv[1], reverse=True)
     despesas = sorted(((cat, int(v or 0)) for t, cat, v in rows
@@ -547,7 +560,9 @@ def dre_mes(pool, conta_id: int, ano: int, mes: int, top: int = 5) -> dict:
     return {"ano": ano, "mes": mes,
             "receitas_centavos": tot_r, "despesas_centavos": tot_d,
             "resultado_centavos": resultado, "margem_pct": margem,
-            "top_receitas": receitas[:top], "top_despesas": despesas[:top]}
+            "top_receitas": receitas[:top], "top_despesas": despesas[:top],
+            "a_definir_n": int(adef[0] or 0),
+            "a_definir_centavos": int(adef[1] or 0)}
 
 
 def csv_contador(pool, conta_id: int, ano: int, mes: int) -> str:

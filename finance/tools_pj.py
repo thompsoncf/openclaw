@@ -90,6 +90,9 @@ def _parse_data_pj(s: str | None) -> date:
         hoje = date.today()
         dia = min(int(dig[:2]), 28)
         venc = date(hoje.year, hoje.month, dia)
+        if venc < hoje:  # "dia 15" que já passou → rola pro mês seguinte
+            ano, mes = (hoje.year + 1, 1) if hoje.month == 12 else (hoje.year, hoje.month + 1)
+            venc = date(ano, mes, dia)
         return venc
     return date.today()
 
@@ -209,7 +212,9 @@ def construir_ferramentas_pj(pool, conta_id: int,
         mes = int(e.get("mes") or hoje.month)
         ano = int(e.get("ano") or hoje.year)
         liv = LivroCaixa(pool, conta_id)
-        emp = liv.resumo_mes(ano, mes, natureza="empresa")
+        # res_emp (não `emp`): `emp` é o módulo importado no topo (from . import
+        # empresa as emp); reaproveitar o nome aqui sombreava o módulo.
+        res_emp = liv.resumo_mes(ano, mes, natureza="empresa")
         pes = liv.resumo_mes(ano, mes, natureza="pessoal")
         ndef = liv.contar_a_definir(ano, mes)
         def _res(r):
@@ -219,7 +224,7 @@ def construir_ferramentas_pj(pool, conta_id: int,
                     f"resultado {formatar_brl(saldo)}")
         partes = [
             f"📅 {mes:02d}/{ano}",
-            f"🏢 Empresa: {_res(emp)}.",
+            f"🏢 Empresa: {_res(res_emp)}.",
             f"Pessoal: {_res(pes)}.",
         ]
         if ndef:

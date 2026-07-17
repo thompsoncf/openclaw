@@ -153,14 +153,21 @@ def resumo_titulos(pool, conta_id: int, dias: int = 7) -> dict:
         ).fetchall()
     res = {"a_pagar_centavos": 0, "n_pagar": 0,
            "a_receber_centavos": 0, "n_receber": 0,
+           "atrasados_pagar_centavos": 0, "n_atrasados_pagar": 0,
+           "atrasados_receber_centavos": 0, "n_atrasados_receber": 0,
            "atrasados_centavos": 0, "n_atrasados": 0, "dias": dias}
     for tipo, soma, n, atras_v, atras_n in rows:
         if tipo == "pagar":
             res["a_pagar_centavos"] = int(soma or 0)
             res["n_pagar"] = int(n or 0)
+            res["atrasados_pagar_centavos"] = int(atras_v or 0)
+            res["n_atrasados_pagar"] = int(atras_n or 0)
         else:
             res["a_receber_centavos"] = int(soma or 0)
             res["n_receber"] = int(n or 0)
+            res["atrasados_receber_centavos"] = int(atras_v or 0)
+            res["n_atrasados_receber"] = int(atras_n or 0)
+        # combinado mantido p/ compat com quem já lê atrasados_centavos/n_atrasados
         res["atrasados_centavos"] += int(atras_v or 0)
         res["n_atrasados"] += int(atras_n or 0)
     return res
@@ -175,17 +182,30 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
     seguinte. Idempotente: título já pago/cancelado não lança de novo.
     """
     data_pagto = data_pagto or date.today()
+    # Baixa ATÔMICA: o status vira num único UPDATE ... WHERE status='aberto'
+    # RETURNING, ANTES de lançar no livro-caixa. Só quem ganha a corrida (a linha
+    # volta no RETURNING) lança. Sem isso, duas chamadas concorrentes — webhook
+    # Asaas duplicado ou duplo-toque — liam status='aberto' e AMBAS lançavam,
+    # dobrando o valor no caixa. O UPDATE toma o lock da linha; a segunda chamada
+    # reavalia o WHERE já com status='pago' e volta vazia.
     with pool.connection() as c:
         t = c.execute(
-            """select tipo, descricao, contraparte, valor_centavos, categoria,
-                      recorrente, vencimento, status
-                 from titulos where id=%s and conta_id=%s""",
-            (titulo_id, conta_id),
+            """update titulos set status='pago', pago_em=%s
+                where id=%s and conta_id=%s and status='aberto'
+             returning tipo, descricao, contraparte, valor_centavos, categoria,
+                       recorrente, vencimento""",
+            (data_pagto, titulo_id, conta_id),
         ).fetchone()
-    if not t:
-        return {"ok": False, "erro": "Título não encontrado."}
-    if t[7] != "aberto":
-        return {"ok": False, "erro": f"Título já está '{t[7]}'."}
+        if not t:
+            # não ganhou a corrida: ou o título não existe, ou já não está aberto
+            estado = c.execute(
+                "select status from titulos where id=%s and conta_id=%s",
+                (titulo_id, conta_id),
+            ).fetchone()
+            if not estado:
+                return {"ok": False, "erro": "Título não encontrado."}
+            return {"ok": False, "erro": f"Título já está '{estado[0]}'."}
+        c.commit()
 
     tipo_lanc = Tipo.DESPESA if t[0] == "pagar" else Tipo.RECEITA
     quem = f" — {t[2]}" if t[2] else ""
@@ -200,9 +220,9 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
     proximo_id = None
     with pool.connection() as c:
         c.execute(
-            """update titulos set status='pago', pago_em=%s, lancamento_id=%s
-                where id=%s and conta_id=%s and status='aberto'""",
-            (data_pagto, salvo.id, titulo_id, conta_id),
+            """update titulos set lancamento_id=%s
+                where id=%s and conta_id=%s""",
+            (salvo.id, titulo_id, conta_id),
         )
         if t[5]:  # recorrente mensal: cria o próximo
             prox = _mes_seguinte(t[6])
@@ -512,6 +532,7 @@ def dre_mes(pool, conta_id: int, ano: int, mes: int, top: int = 5) -> dict:
             """select tipo, categoria, sum(valor_centavos)
                  from lancamentos
                 where conta_id=%s and data >= %s and data < %s
+                  and natureza='empresa'
                 group by tipo, categoria""",
             (conta_id, ini, fim),
         ).fetchall()
@@ -541,16 +562,18 @@ def csv_contador(pool, conta_id: int, ano: int, mes: int) -> str:
     fim = _mes_seguinte(ini)
     with pool.connection() as c:
         lanc = c.execute(
-            """select data, tipo, categoria, descricao, valor_centavos, origem
+            """select data, tipo, categoria, descricao, valor_centavos, origem,
+                      natureza
                  from lancamentos
                 where conta_id=%s and data >= %s and data < %s
                 order by data, id""",
             (conta_id, ini, fim),
         ).fetchall()
-    linhas = ["data;tipo;categoria;descricao;valor;origem"]
-    for d, t, cat, desc, v, orig in lanc:
+    linhas = ["data;tipo;categoria;descricao;valor;origem;natureza"]
+    for d, t, cat, desc, v, orig, nat in lanc:
         desc = (desc or "").replace(";", ",").replace("\n", " ")
-        linhas.append(f"{d};{t};{cat};{desc};{brl(int(v or 0))};{orig}")
+        linhas.append(
+            f"{d};{t};{cat};{desc};{brl(int(v or 0))};{orig};{nat or 'a definir'}")
 
     abertos = listar_titulos(pool, conta_id, status="aberto")
     linhas.append("")

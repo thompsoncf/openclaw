@@ -2809,6 +2809,13 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
       <td style="text-align:right;font-weight:600;color:{{ 'var(--verde-claro)' if dre.resultado_centavos>=0 else '#e07a5f' }}">{{ dre.resultado_centavos|brl }} · {{ dre.margem_pct }}%</td></tr>
   </table>
 
+  {% if dre.a_definir_n %}
+  <div style="background:#2b2416;border:1px solid #f0c05a44;border-radius:8px;padding:.55rem .9rem;margin-top:.7rem;color:#f0c05a;font-size:.78rem;line-height:1.35">
+    ⚠️ <b>{{ dre.a_definir_centavos|brl }}</b> em <b>{{ dre.a_definir_n }}</b> lançamento(s) ainda a classificar <b>não entraram</b> neste DRE.
+    <a href="/painel/financeiro?mes={{ dre.mes }}&natureza=a_definir" style="color:#f0c05a;text-decoration:underline">classificar agora →</a>
+  </div>
+  {% endif %}
+
   <div class="mut" style="font-size:.75rem;margin-top:.8rem">Relatório do contador: <a href="/painel/empresa/contador.csv?ano={{ dre.ano }}&mes={{ dre.mes }}" style="color:var(--verde-claro)">baixar planilha ({{ '%02d'|format(dre.mes) }}/{{ dre.ano }}) ↓</a></div>
 </div>
 

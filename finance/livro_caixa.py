@@ -200,7 +200,8 @@ class LivroCaixa:
                 "data": row[3], "criado_em": row[4]}
 
     def adicionar(self, lanc: Lancamento, chave: str | None = None,
-                  forcar: bool = False, janela_dedup_min: int = 10) -> Lancamento:
+                  forcar: bool = False, janela_dedup_min: int = 10,
+                  conn=None) -> Lancamento:
         # usa chave explícita, ou chave_nfce_atual se tiver sido setada pelo webhook
         chave_final = chave or self.chave_nfce_atual
         # TRAVA DE IDEMPOTENCIA (camada de dados, nao depende do modelo lembrar de
@@ -219,18 +220,27 @@ class LivroCaixa:
                 lanc.id = existente["id"]
                 lanc.duplicado = True
                 return lanc
-        with self.pool.connection() as conn:
-            row = conn.execute(
-                """insert into lancamentos
+        # SQL do insert (reutilizado com conexão própria OU externa)
+        _sql = """insert into lancamentos
                    (conta_id, membro_id, tipo, valor_centavos, categoria, descricao,
                     data, pagamento, origem, comprovante, chave, natureza)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
-                (self.conta_id, self.membro_id, lanc.tipo.value, lanc.valor_centavos,
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id"""
+        _args = (self.conta_id, self.membro_id, lanc.tipo.value, lanc.valor_centavos,
                  lanc.categoria, lanc.descricao, lanc.data, lanc.pagamento,
-                 lanc.origem, lanc.comprovante, chave_final, lanc.natureza),
-            ).fetchone()
-            conn.commit()
-            lanc.id = row[0]
+                 lanc.origem, lanc.comprovante, chave_final, lanc.natureza)
+
+        # conn EXTERNO: o chamador controla a transação (NÃO commita aqui). Serve pra
+        # operações que precisam ser atômicas com outros inserts (ex.: pagar_folha,
+        # onde ledger + folha_eventos têm que entrar juntos ou não entrar).
+        if conn is not None:
+            lanc.id = conn.execute(_sql, _args).fetchone()[0]
+            lanc.duplicado = False
+            return lanc
+
+        # conn PRÓPRIO: comportamento de sempre (abre, insere, commita).
+        with self.pool.connection() as own:
+            lanc.id = own.execute(_sql, _args).fetchone()[0]
+            own.commit()
             lanc.duplicado = False
             return lanc
 

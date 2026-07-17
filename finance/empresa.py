@@ -443,24 +443,28 @@ def pagar_folha(pool, conta_id: int, ano: int, mes: int,
                 funcionario_id: int | None = None,
                 membro_id: int | None = None) -> dict:
     """Paga o restante da folha (de um funcionário, ou de todos) em 1 clique:
-    registra o evento 'pagamento' e lança a despesa 'Pessoal' no caixa."""
+    registra o evento 'pagamento' e lança a despesa 'Pessoal' no caixa.
+
+    ATÔMICO: ledger (lançamentos) + folha_eventos de todos os itens entram numa
+    ÚNICA transação — ou paga a folha inteira, ou nada (nunca fica meio paga)."""
     folha = folha_do_mes(pool, conta_id, ano, mes)
     comp = folha["competencia"]
-    pagos, total = [], 0
     livro = LivroCaixa(pool, conta_id, membro_id)
-    for item in folha["itens"]:
-        if funcionario_id is not None and item["id"] != funcionario_id:
-            continue
-        valor = item["a_pagar_centavos"]
-        if valor <= 0:
-            continue
-        rotulo = "Pró-labore" if item["pro_labore"] else "Folha"
-        lanc = Lancamento(tipo=Tipo.DESPESA, valor_centavos=valor,
-                          categoria=CAT_PESSOAL,
-                          descricao=f"{rotulo} {mes:02d}/{ano} — {item['nome']}",
-                          origem="folha", natureza="empresa")
-        salvo = livro.adicionar(lanc, forcar=True)
-        with pool.connection() as c:
+    pagos, total = [], 0
+    with pool.connection() as c:
+        for item in folha["itens"]:
+            if funcionario_id is not None and item["id"] != funcionario_id:
+                continue
+            valor = item["a_pagar_centavos"]
+            if valor <= 0:
+                continue
+            rotulo = "Pró-labore" if item["pro_labore"] else "Folha"
+            lanc = Lancamento(tipo=Tipo.DESPESA, valor_centavos=valor,
+                              categoria=CAT_PESSOAL,
+                              descricao=f"{rotulo} {mes:02d}/{ano} — {item['nome']}",
+                              origem="folha", natureza="empresa")
+            # mesma conexão/transação do loop: ledger + folha_eventos juntos
+            salvo = livro.adicionar(lanc, forcar=True, conn=c)
             c.execute(
                 """insert into folha_eventos
                      (conta_id, funcionario_id, tipo, valor_centavos,
@@ -469,10 +473,10 @@ def pagar_folha(pool, conta_id: int, ano: int, mes: int,
                 (conta_id, item["id"], valor, comp,
                  f"{rotulo} {mes:02d}/{ano}", salvo.id),
             )
-            c.commit()
-        pagos.append({"funcionario_id": item["id"], "nome": item["nome"],
-                      "valor_centavos": valor, "lancamento_id": salvo.id})
-        total += valor
+            pagos.append({"funcionario_id": item["id"], "nome": item["nome"],
+                          "valor_centavos": valor, "lancamento_id": salvo.id})
+            total += valor
+        c.commit()   # um único commit: ou paga a folha toda, ou nada
     return {"ok": True, "pagos": pagos, "total_centavos": total}
 
 

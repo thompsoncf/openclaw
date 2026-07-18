@@ -182,12 +182,17 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
     seguinte. Idempotente: título já pago/cancelado não lança de novo.
     """
     data_pagto = data_pagto or date.today()
-    # Baixa ATÔMICA: o status vira num único UPDATE ... WHERE status='aberto'
-    # RETURNING, ANTES de lançar no livro-caixa. Só quem ganha a corrida (a linha
-    # volta no RETURNING) lança. Sem isso, duas chamadas concorrentes — webhook
-    # Asaas duplicado ou duplo-toque — liam status='aberto' e AMBAS lançavam,
-    # dobrando o valor no caixa. O UPDATE toma o lock da linha; a segunda chamada
-    # reavalia o WHERE já com status='pago' e volta vazia.
+    # Baixa ATÔMICA numa ÚNICA transação/conexão: o status vira num UPDATE ...
+    # WHERE status='aberto' RETURNING e, na MESMA conexão, o lançamento entra
+    # (adicionar(conn=c)) e o lancamento_id/recorrente são gravados — tudo commita
+    # junto. Benefícios sobre a versão de 3 conexões:
+    #   • título e lançamento entram juntos ou não entram (se o insert do caixa
+    #     falhar, o UPDATE do status faz rollback e o título volta a 'aberto');
+    #   • uma conexão por chamada — dispensa pool com max_size ≥ 2.
+    # A corrida (webhook duplicado / duplo-toque) segue fechada: o UPDATE toma o
+    # lock da linha até o commit; a 2ª chamada reavalia o WHERE já com 'pago' e
+    # volta vazia, sem lançar.
+    proximo_id = None
     with pool.connection() as c:
         t = c.execute(
             """update titulos set status='pago', pago_em=%s
@@ -205,20 +210,18 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
             if not estado:
                 return {"ok": False, "erro": "Título não encontrado."}
             return {"ok": False, "erro": f"Título já está '{estado[0]}'."}
-        c.commit()
 
-    tipo_lanc = Tipo.DESPESA if t[0] == "pagar" else Tipo.RECEITA
-    quem = f" — {t[2]}" if t[2] else ""
-    lanc = Lancamento(tipo=tipo_lanc, valor_centavos=int(t[3]),
-                      categoria=t[4] or (CAT_FORNECEDORES if t[0] == "pagar"
-                                         else CAT_VENDAS),
-                      descricao=f"{t[1]}{quem}", data=data_pagto,
-                      origem="titulo", natureza="empresa")
-    livro = LivroCaixa(pool, conta_id, membro_id)
-    salvo = livro.adicionar(lanc, forcar=True)
+        tipo_lanc = Tipo.DESPESA if t[0] == "pagar" else Tipo.RECEITA
+        quem = f" — {t[2]}" if t[2] else ""
+        lanc = Lancamento(tipo=tipo_lanc, valor_centavos=int(t[3]),
+                          categoria=t[4] or (CAT_FORNECEDORES if t[0] == "pagar"
+                                             else CAT_VENDAS),
+                          descricao=f"{t[1]}{quem}", data=data_pagto,
+                          origem="titulo", natureza="empresa")
+        # mesma conexão c: o lançamento é atômico com a baixa do título
+        salvo = LivroCaixa(pool, conta_id, membro_id).adicionar(
+            lanc, forcar=True, conn=c)
 
-    proximo_id = None
-    with pool.connection() as c:
         c.execute(
             """update titulos set lancamento_id=%s
                 where id=%s and conta_id=%s""",

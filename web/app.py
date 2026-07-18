@@ -37,6 +37,37 @@ log = logging.getLogger("openclaw.web")
 from starlette.middleware.gzip import GZipMiddleware
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 
+
+# Gate de permissão por papel do membro logado. IMPORTANTE: registrado ANTES do
+# SessionMiddleware pra ficar INTERNO a ele — assim request.session já está
+# carregada quando o gate roda. O titular (dono) e visitantes passam direto;
+# só barra membro de equipe fora do que o papel dele acessa (defesa central,
+# além de esconder do menu).
+from contas.equipe import caps_do_papel as _caps_do_papel
+
+
+@app.middleware("http")
+async def _gate_permissoes(request: Request, call_next):
+    try:
+        papel = request.session.get("papel")
+    except Exception:  # rota sem sessão
+        papel = None
+    if papel and papel != "dono":
+        caps = _caps_do_papel(papel)
+        p = request.url.path
+        nega = (
+            (p.startswith("/painel/servicos") and not caps["vendas"])
+            or ((p.startswith("/painel/empresa") or p.startswith("/painel/financeiro")
+                 or p.startswith("/painel/folha")) and not caps["financeiro"])
+            or (p.startswith("/painel/equipe") and not caps["gerir"])
+            or (p.startswith("/membros") and not caps["gerir"])
+        )
+        if nega:
+            from fastapi.responses import RedirectResponse as _RR
+            return _RR("/painel", status_code=303)
+    return await call_next(request)
+
+
 # Portal (cadastro/login/painel) + sessao assinada por cookie
 from starlette.middleware.sessions import SessionMiddleware
 from web.portal import router as portal_router
@@ -57,37 +88,6 @@ app.add_middleware(
     allow_methods=["POST", "GET"],
     allow_headers=["Content-Type"],
 )
-
-
-# Gate de permissão por papel do membro logado. O titular (dono) e visitantes
-# passam direto — cada rota já exige login onde precisa. Só barra membro de
-# equipe fora do que o papel dele acessa (defesa central, além de esconder do
-# menu). Adicionado depois do SessionMiddleware => request.session disponível.
-from contas.equipe import caps_do_papel as _caps_do_papel
-
-
-@app.middleware("http")
-async def _gate_permissoes(request: Request, call_next):
-    try:
-        papel = request.session.get("papel")
-    except Exception:  # sem sessão nessa rota
-        papel = None
-    if papel and papel != "dono":
-        caps = _caps_do_papel(papel)
-        p = request.url.path
-        nega = (
-            (p.startswith("/painel/servicos") and not caps["vendas"])
-            or ((p.startswith("/painel/empresa") or p.startswith("/painel/financeiro")
-                 or p.startswith("/painel/folha")) and not caps["financeiro"])
-            or (p.startswith("/painel/equipe") and not caps["gerir"])
-            or (p.startswith("/membros") and not caps["gerir"])
-        )
-        if nega:
-            from fastapi.responses import RedirectResponse as _RR
-            return _RR("/painel", status_code=303)
-    return await call_next(request)
-
-
 app.include_router(portal_router)
 app.include_router(admin_router)
 app.include_router(precos_router)

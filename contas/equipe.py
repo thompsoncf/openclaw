@@ -54,32 +54,40 @@ def garantir_tabela(pool):
     """Colunas de login web em membros (idempotente). Relaxa o check de papel pra
     aceitar os papéis de equipe."""
     with pool.connection() as c:
+        c.execute("alter table contas  add column if not exists senha_hash     text")
         c.execute("alter table membros add column if not exists email          text")
         c.execute("alter table membros add column if not exists senha_hash     text")
         c.execute("alter table membros add column if not exists convite_token  text")
         c.execute("alter table membros add column if not exists convite_expira timestamptz")
         c.execute("alter table membros drop constraint if exists membros_papel_check")
-        c.execute("create unique index if not exists idx_membros_email "
-                  "on membros (lower(email)) where email is not null")
+        # e-mail é único POR CONTA (não global): a mesma pessoa pode ser membro de
+        # várias empresas com o mesmo e-mail. Troca o índice global antigo, se houver.
+        c.execute("drop index if exists idx_membros_email")
+        c.execute("create unique index if not exists idx_membros_email_conta "
+                  "on membros (conta_id, lower(email)) where email is not null")
         c.execute("create unique index if not exists idx_membros_convite "
                   "on membros (convite_token) where convite_token is not null")
         c.commit()
 
 
-def _email_livre(c, email: str, ignorar_membro: int | None = None) -> bool:
-    """E-mail não pode colidir com nenhuma conta (login do dono) nem outro membro."""
-    if c.execute("select 1 from contas where lower(email)=%s", (email,)).fetchone():
-        return False
-    q = "select 1 from membros where lower(email)=%s"
-    args: list = [email]
-    if ignorar_membro:
-        q += " and id<>%s"
-        args.append(ignorar_membro)
-    return c.execute(q, tuple(args)).fetchone() is None
+def _tem_login(c, email: str) -> bool:
+    """A pessoa já tem uma senha no Zaq? (conta própria OU membro que já aceitou).
+    Se sim, o convite só a VINCULA — ela entra com a senha que já tem."""
+    if c.execute("select 1 from contas where lower(email)=%s and senha_hash is not null",
+                 (email,)).fetchone():
+        return True
+    return c.execute("select 1 from membros where lower(email)=%s and senha_hash is not null",
+                     (email,)).fetchone() is not None
 
 
 def convidar(pool, conta_id: int, nome: str, email: str, papel: str) -> dict:
-    """Cria o membro (inativo até aceitar) e devolve o token do link de convite."""
+    """Convida um membro pra ESTA conta.
+
+    - E-mail é único POR conta (a pessoa pode ser membro de várias empresas).
+    - Se a pessoa já tem login Zaq (conta própria ou membro de outra empresa),
+      já entra ativa e usa a senha que tem — devolve {ja_tem_login: True}, sem link.
+    - Senão, cria inativa com token e devolve o link pra ela criar a senha.
+    """
     papel = (papel or "vendedor").strip()
     if papel not in PAPEIS_PJ:
         return {"ok": False, "erro": "Papel inválido."}
@@ -87,10 +95,18 @@ def convidar(pool, conta_id: int, nome: str, email: str, papel: str) -> dict:
     if "@" not in email or "." not in email:
         return {"ok": False, "erro": "E-mail inválido."}
     nome = (nome or "").strip() or email.split("@")[0]
-    token = secrets.token_urlsafe(24)
     with pool.connection() as c:
-        if not _email_livre(c, email):
-            return {"ok": False, "erro": "Esse e-mail já está em uso."}
+        if c.execute("select 1 from membros where conta_id=%s and lower(email)=%s",
+                     (conta_id, email)).fetchone():
+            return {"ok": False, "erro": "Essa pessoa já está na equipe."}
+        if _tem_login(c, email):
+            row = c.execute(
+                """insert into membros (conta_id, nome, papel, email, ativo)
+                   values (%s,%s,%s,%s,true) returning id""",
+                (conta_id, nome, papel, email)).fetchone()
+            c.commit()
+            return {"ok": True, "membro_id": row[0], "ja_tem_login": True}
+        token = secrets.token_urlsafe(24)
         row = c.execute(
             """insert into membros (conta_id, nome, papel, email, ativo,
                                     convite_token, convite_expira)
@@ -98,7 +114,54 @@ def convidar(pool, conta_id: int, nome: str, email: str, papel: str) -> dict:
             (conta_id, nome, papel, email, token, _agora() + timedelta(days=7)),
         ).fetchone()
         c.commit()
-    return {"ok": True, "membro_id": row[0], "token": token}
+    return {"ok": True, "membro_id": row[0], "token": token, "ja_tem_login": False}
+
+
+def contextos_de_login(pool, email: str, senha_txt: str) -> list[dict]:
+    """Todos os contextos que essa pessoa (e-mail+senha) pode acessar:
+    a própria conta (se tiver) + cada empresa onde é membro ativo.
+
+    A senha é validada UMA vez, contra a autoridade da identidade: a conta
+    própria manda; se não tiver conta, a senha do membro que ela definiu.
+    Devolve [] se a senha não confere. Cada contexto:
+        {tipo, conta_id, membro_id, papel, nome}
+    """
+    email = (email or "").strip().lower()
+    with pool.connection() as c:
+        conta = c.execute(
+            "select id, nome, senha_hash from contas where lower(email)=%s", (email,)).fetchone()
+        own_ok = bool(conta and _senha.verificar_senha(senha_txt, conta[2]))
+        autoridade = own_ok
+        if not autoridade:
+            m = c.execute(
+                "select senha_hash from membros where lower(email)=%s and senha_hash is not null limit 1",
+                (email,)).fetchone()
+            autoridade = bool(m and _senha.verificar_senha(senha_txt, m[0]))
+        if not autoridade:
+            return []
+        ctxs: list[dict] = []
+        if own_ok:
+            ctxs.append({"tipo": "conta", "conta_id": conta[0], "membro_id": None,
+                         "papel": "dono", "nome": conta[1]})
+        membs = c.execute(
+            """select m.id, m.conta_id, m.papel, co.nome
+                 from membros m join contas co on co.id = m.conta_id
+                where lower(m.email)=%s and m.ativo
+                order by co.nome""", (email,)).fetchall()
+    for mm in membs:
+        ctxs.append({"tipo": "membro", "conta_id": mm[1], "membro_id": mm[0],
+                     "papel": mm[2], "nome": mm[3]})
+    return ctxs
+
+
+def aplicar_contexto(session, ctx: dict) -> None:
+    """Grava na sessão o contexto ativo escolhido (conta própria ou empresa)."""
+    session["conta_id"] = ctx["conta_id"]
+    session["papel"] = ctx["papel"]
+    if ctx.get("membro_id"):
+        session["membro_id"] = ctx["membro_id"]
+    else:
+        session.pop("membro_id", None)
 
 
 def info_convite(pool, token: str) -> dict | None:

@@ -339,6 +339,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if _tem_app or _tem_cesta %}<div class="side-grp">Pessoal</div>{% endif %}
   {% if _tem_app %}{{ navi('painel','/painel','painel','Painel') }}{{ navi('compras','/painel/compras','compras','Lista de compras') }}{% endif %}
   {% if _tem_cesta %}{{ navi('assinaturas','/painel/assinaturas','cesta','Assinaturas') }}{{ navi('pedidos','/painel/meus-pedidos','compras','Meus pedidos') }}{% endif %}
+  {% if n_contextos > 1 %}{{ navi('trocar','/trocar','fornecedor','Trocar empresa') }}{% endif %}
   <div style="flex:1"></div>
   {{ navi('','/sair','sair','Sair') }}
 </nav>
@@ -4548,6 +4549,7 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
         _papel = request.session.get("papel", "dono")
         ctx.setdefault("papel", _papel)
         ctx["caps"] = _equipe.caps_do_papel(_papel)
+    ctx.setdefault("n_contextos", len(request.session.get("contextos") or []))
     # Injeta conta + gating (o conta_logada ja traz tudo numa query so: conta[11..15])
     if request.session.get("conta_id"):
         if "conta" not in ctx:
@@ -4719,24 +4721,24 @@ def login_form(request: Request):
 @router.post("/login", response_class=HTMLResponse)
 def login_envia(request: Request, email: str = Form(...), senha: str = Form(...)):
     pool = get_pool()
-    with pool.connection() as c:
-        row = c.execute("select id, senha_hash from contas where lower(email)=%s",
-                        (email.strip().lower(),)).fetchone()
-    if row and verificar_senha(senha, row[1]):
-        # login do TITULAR (dono) — acesso total à conta.
-        request.session["conta_id"] = row[0]
-        request.session["papel"] = "dono"
-        request.session.pop("membro_id", None)
-    else:
-        # senão, tenta login de MEMBRO da equipe (papel define o que acessa).
-        from contas import equipe as _equipe
-        ctx = _equipe.autenticar(pool, email, senha)
-        if not ctx:
-            return _render("login", request, erro="E-mail ou senha incorretos.", aviso=None)
-        request.session["conta_id"] = ctx["conta_id"]
-        request.session["membro_id"] = ctx["membro_id"]
-        request.session["papel"] = ctx["papel"]
+    # Identidade unificada por e-mail: a pessoa pode ter a conta dela + ser membro
+    # de várias empresas. Uma senha, vários contextos.
+    from contas import equipe as _equipe
+    ctxs = _equipe.contextos_de_login(pool, email, senha)
+    if not ctxs:
+        return _render("login", request, erro="E-mail ou senha incorretos.", aviso=None)
+    request.session["contextos"] = ctxs
+    if len(ctxs) > 1:
+        # mais de um lugar pra trabalhar — deixa escolher.
+        request.session.pop("papel", None)
+        request.session.pop("conta_id", None)
+        return RedirectResponse("/trocar", status_code=303)
+    _equipe.aplicar_contexto(request.session, ctxs[0])
+    # daqui pra baixo: contexto único aplicado. Fluxo de carrinho/next só faz
+    # sentido pra quem entrou na PRÓPRIA conta (cliente/dono).
+    if not (ctxs[0]["papel"] == "dono" and ctxs[0]["membro_id"] is None):
         return RedirectResponse("/painel", status_code=303)
+    row = (request.session["conta_id"],)   # compat com o bloco de carrinho abaixo
     # Aplicar carrinho_intencao se houver (cliente tentou adicionar item deslogado)
     intencao = request.session.pop("carrinho_intencao", None)
     if intencao:

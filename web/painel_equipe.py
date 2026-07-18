@@ -40,6 +40,7 @@ def painel_equipe(request: Request):
                    membros=eq.listar_equipe(pool, conta[0]),
                    papeis=[(p, eq.rotulo(p)) for p in eq.PAPEIS_PJ],
                    novo_link=request.session.pop("equipe_link", None),
+                   aviso=request.session.pop("equipe_aviso", None),
                    erro=request.session.pop("equipe_erro", None))
 
 
@@ -50,7 +51,11 @@ def painel_equipe_convidar(request: Request, nome: str = Form(""),
     if redir is not None:
         return redir
     r = eq.convidar(get_pool(), conta[0], nome, email, papel)
-    if r.get("ok"):
+    if r.get("ok") and r.get("ja_tem_login"):
+        request.session["equipe_aviso"] = ("Essa pessoa já tem login no Zaq — foi adicionada "
+                                            "à equipe. Ela acessa esta empresa com a senha que "
+                                            "já usa, pelo menu “Trocar empresa”.")
+    elif r.get("ok"):
         request.session["equipe_link"] = _link(request, r["token"])
     else:
         request.session["equipe_erro"] = r.get("erro", "Não consegui convidar.")
@@ -84,6 +89,25 @@ def painel_equipe_reconvite(request: Request, membro_id: int = Form(...)):
     if r.get("ok"):
         request.session["equipe_link"] = _link(request, r["token"])
     return RedirectResponse("/painel/equipe", status_code=303)
+
+
+# ---------------------------------------------------------------- troca de contexto
+@router.get("/trocar", response_class=HTMLResponse)
+def trocar_form(request: Request):
+    ctxs = request.session.get("contextos") or []
+    if not ctxs:
+        return RedirectResponse("/login", status_code=303)
+    return _render("trocar", request, contextos=ctxs, ativa=request.session.get("conta_id"),
+                   rotulo=eq.rotulo)
+
+
+@router.post("/trocar")
+def trocar_aplica(request: Request, i: int = Form(...)):
+    ctxs = request.session.get("contextos") or []
+    if 0 <= i < len(ctxs):
+        eq.aplicar_contexto(request.session, ctxs[i])
+        return RedirectResponse("/painel", status_code=303)
+    return RedirectResponse("/trocar", status_code=303)
 
 
 # ---------------------------------------------------------------- convite (público)
@@ -132,6 +156,7 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
     </div>
   </div>
   {% endif %}
+  {% if aviso %}<div style="margin-top:.8rem;padding:.7rem .8rem;border:1px solid var(--verde);border-radius:10px;background:#10241d;font-size:.85rem;color:var(--verde-claro)">{{ aviso }}</div>{% endif %}
   {% if erro %}<div class="mut" style="margin-top:.8rem;color:#e07a5f">{{ erro }}</div>{% endif %}
 
   <form method="post" action="/painel/equipe/convidar" style="margin-top:1rem;display:grid;grid-template-columns:1.4fr 1.6fr 1fr auto;gap:.5rem;align-items:end">
@@ -194,5 +219,22 @@ _CONVITE_TPL = """{% extends "base" %}{% block conteudo %}
 </div>
 {% endblock %}"""
 
+_TROCAR_TPL = """{% extends "base" %}{% block conteudo %}
+<div class="card larga">
+  <h1 style="margin-top:0">Onde você quer trabalhar?</h1>
+  <p class="mut">Você tem acesso a mais de um espaço. Escolha por qual entrar — dá pra trocar depois pelo menu.</p>
+  {% for c in contextos %}
+  <form method="post" action="/trocar" style="margin:.5rem 0">
+    <input type="hidden" name="i" value="{{ loop.index0 }}">
+    <button style="width:100%;text-align:left;display:flex;justify-content:space-between;align-items:center;margin-top:0;{% if c.conta_id==ativa %}border:1px solid var(--verde){% endif %}">
+      <span><b>{{ c.nome }}</b><br><span style="font-size:.8rem;opacity:.85">{{ rotulo(c.papel) }}{% if c.tipo=='conta' %} · sua conta{% endif %}</span></span>
+      <span>{% if c.conta_id==ativa %}atual{% else %}entrar ›{% endif %}</span>
+    </button>
+  </form>
+  {% endfor %}
+</div>
+{% endblock %}"""
+
 _env.loader.mapping["equipe"] = _EQUIPE_TPL
 _env.loader.mapping["convite"] = _CONVITE_TPL
+_env.loader.mapping["trocar"] = _TROCAR_TPL

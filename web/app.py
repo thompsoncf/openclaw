@@ -43,6 +43,7 @@ from web.portal import router as portal_router
 from web.admin import router as admin_router
 from web.admin_precos import router as precos_router
 from web.painel_servicos import router as servicos_router
+from web.painel_equipe import router as equipe_router
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.environ.get("PORTAL_SECRET", "troque-isto-em-producao"),
@@ -56,10 +57,42 @@ app.add_middleware(
     allow_methods=["POST", "GET"],
     allow_headers=["Content-Type"],
 )
+
+
+# Gate de permissão por papel do membro logado. O titular (dono) e visitantes
+# passam direto — cada rota já exige login onde precisa. Só barra membro de
+# equipe fora do que o papel dele acessa (defesa central, além de esconder do
+# menu). Adicionado depois do SessionMiddleware => request.session disponível.
+from contas.equipe import caps_do_papel as _caps_do_papel
+
+
+@app.middleware("http")
+async def _gate_permissoes(request: Request, call_next):
+    try:
+        papel = request.session.get("papel")
+    except Exception:  # sem sessão nessa rota
+        papel = None
+    if papel and papel != "dono":
+        caps = _caps_do_papel(papel)
+        p = request.url.path
+        nega = (
+            (p.startswith("/painel/servicos") and not caps["vendas"])
+            or ((p.startswith("/painel/empresa") or p.startswith("/painel/financeiro")
+                 or p.startswith("/painel/folha")) and not caps["financeiro"])
+            or (p.startswith("/painel/equipe") and not caps["gerir"])
+            or (p.startswith("/membros") and not caps["gerir"])
+        )
+        if nega:
+            from fastapi.responses import RedirectResponse as _RR
+            return _RR("/painel", status_code=303)
+    return await call_next(request)
+
+
 app.include_router(portal_router)
 app.include_router(admin_router)
 app.include_router(precos_router)
 app.include_router(servicos_router)
+app.include_router(equipe_router)
 
 _FAVICON_SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">'

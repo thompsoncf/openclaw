@@ -75,7 +75,15 @@ def _conta_servico(request: Request):
         return None, RedirectResponse("/painel", status_code=303)
     if not conta[14]:                       # [14] = vende_servico
         return None, RedirectResponse("/painel/empresa", status_code=303)
+    from contas import equipe as _equipe
+    if not _equipe.caps_do_papel(request.session.get("papel", "dono"))["vendas"]:
+        return None, RedirectResponse("/painel", status_code=303)
     return conta, None
+
+
+def _ator(request: Request):
+    """(membro_id, papel) do operador logado — pra carimbar/filtrar o funil."""
+    return request.session.get("membro_id"), request.session.get("papel", "dono")
 
 
 # ---------------------------------------------------------------- rotas
@@ -277,13 +285,15 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
                 vals + (dados.id, conta[0])).fetchone()
             oid = r[0] if r else None
         if oid is None and not dados.id:
+            membro_id, _papel = _ator(request)
+            criador = str(membro_id) if membro_id else "dono"
             oid = c.execute(
                 """insert into orcamentos
                    (conta_id, cliente, empresa, cnpj, segmento, whatsapp, email,
                     modulos, escopo, canal, setup_centavos, mensal_centavos,
-                    primeiro_ano_centavos, n_modulos)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s,%s,%s) returning id""",
-                (conta[0],) + vals).fetchone()[0]
+                    primeiro_ano_centavos, n_modulos, criado_por)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s,%s,%s,%s) returning id""",
+                (conta[0],) + vals + (criador,)).fetchone()[0]
         c.commit()
     if oid is None:
         return JSONResponse({"erro": "proposta não encontrada ou já fechada"}, status_code=400)
@@ -295,13 +305,23 @@ def painel_servicos_lista(request: Request):
     conta, redir = _conta_servico(request)
     if redir is not None:
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    membro_id, papel = _ator(request)
     with get_pool().connection() as c:
         _garantir_tabela(c)
-        rows = c.execute(
-            """select id, cliente, empresa, setup_centavos, mensal_centavos,
-                      primeiro_ano_centavos, n_modulos, criado_em, status
-               from orcamentos where conta_id=%s
-               order by criado_em desc limit 50""", (conta[0],)).fetchall()
+        # vendedor vê só as propostas dele; dono/gestor veem o funil inteiro.
+        if papel == "vendedor" and membro_id:
+            rows = c.execute(
+                """select id, cliente, empresa, setup_centavos, mensal_centavos,
+                          primeiro_ano_centavos, n_modulos, criado_em, status
+                   from orcamentos where conta_id=%s and criado_por=%s
+                   order by criado_em desc limit 50""",
+                (conta[0], str(membro_id))).fetchall()
+        else:
+            rows = c.execute(
+                """select id, cliente, empresa, setup_centavos, mensal_centavos,
+                          primeiro_ano_centavos, n_modulos, criado_em, status
+                   from orcamentos where conta_id=%s
+                   order by criado_em desc limit 50""", (conta[0],)).fetchall()
     itens = [{
         "id": r[0],
         "cliente": r[1] or "-",
@@ -323,14 +343,17 @@ def painel_servicos_item(request: Request, orc_id: int):
     conta, redir = _conta_servico(request)
     if redir is not None:
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    membro_id, papel = _ator(request)
+    dono_filtro = " and criado_por=%s" if (papel == "vendedor" and membro_id) else ""
+    args = (orc_id, conta[0]) + ((str(membro_id),) if dono_filtro else ())
     with get_pool().connection() as c:
         _garantir_tabela(c)
         r = c.execute(
             """select id, cliente, empresa, cnpj, segmento, whatsapp, email,
                       modulos, escopo, status, setup_centavos, mensal_centavos,
                       primeiro_ano_centavos, n_modulos
-                 from orcamentos where id=%s and conta_id=%s""",
-            (orc_id, conta[0])).fetchone()
+                 from orcamentos where id=%s and conta_id=%s""" + dono_filtro,
+            args).fetchone()
     if not r:
         return JSONResponse({"erro": "não encontrado"}, status_code=404)
     mods = r[7]

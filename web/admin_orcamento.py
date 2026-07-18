@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from core.brain import Brain
 from db.conexao import get_pool
+from finance.cnpj_info import consultar_cnpj
 from web.portal import brl
 from web.admin import _admin, _NEGADO, _ADMIN_BASE
 
@@ -62,6 +63,7 @@ def _garantir_tabela(c):
     # garantimos aqui em runtime (add-if-not-exists e' idempotente e barato). A
     # migracao 068 faz o mesmo para bases geridas por db/aplicar_migracoes.
     c.execute("""
+        alter table orcamentos add column if not exists cnpj          text;
         alter table orcamentos add column if not exists whatsapp      text;
         alter table orcamentos add column if not exists email         text;
         alter table orcamentos add column if not exists modulos       jsonb;
@@ -85,6 +87,27 @@ def admin_orcamento(request: Request):
         _garantir_tabela(c)
     modulos = [{**m, "on": m["id"] in _DEFAULT_ON} for m in _MODULOS]
     return HTMLResponse(_env.get_template("aorcamento").render(modulos=modulos))
+
+
+@router.get("/admin/orcamento/cnpj")
+def admin_orcamento_cnpj(request: Request, cnpj: str = ""):
+    """Consulta o CNPJ na BrasilAPI/Receita e devolve os campos pra preencher a
+    ficha. Tolerante a falha (consultar_cnpj retorna None em qualquer erro)."""
+    if _admin(request) is None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    dados = consultar_cnpj(cnpj)
+    if not dados:
+        return JSONResponse(
+            {"erro": "CNPJ nao encontrado (confira os digitos) ou consulta indisponivel"},
+            status_code=404)
+    return JSONResponse({
+        "empresa": dados.get("nome"),
+        "segmento": dados.get("ramo") or dados.get("cnae"),
+        "whatsapp": dados.get("telefone"),
+        "email": dados.get("email"),
+        "cidade": dados.get("cidade"),
+        "uf": dados.get("uf"),
+    })
 
 
 class SugerirIn(BaseModel):
@@ -136,6 +159,7 @@ def admin_orcamento_sugerir(request: Request, dados: SugerirIn):
 class SalvarIn(BaseModel):
     cliente: str = ""
     empresa: str = ""
+    cnpj: str = ""
     segmento: str = ""
     whatsapp: str = ""
     email: str = ""
@@ -158,11 +182,12 @@ def admin_orcamento_salvar(request: Request, dados: SalvarIn):
         _garantir_tabela(c)
         c.execute(
             """insert into orcamentos
-               (cliente, empresa, segmento, whatsapp, email, modulos, escopo,
+               (cliente, empresa, cnpj, segmento, whatsapp, email, modulos, escopo,
                 canal, setup_centavos, mensal_centavos, primeiro_ano_centavos,
                 n_modulos)
-               values (%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s,%s,%s)""",
-            (dados.cliente or None, dados.empresa or None, dados.segmento or None,
+               values (%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s,%s,%s)""",
+            (dados.cliente or None, dados.empresa or None,
+             (dados.cnpj or "").strip() or None, dados.segmento or None,
              (dados.whatsapp or "").strip() or None, (dados.email or "").strip() or None,
              json.dumps(modulos), (dados.escopo or "").strip() or None,
              (dados.canal or "").strip() or None,
@@ -252,10 +277,19 @@ body.oc-margin .oc-custo-col{display:flex}
 
 <div class="card">
   <h2 style="margin-top:0">Cliente</h2>
+  <div class="oc-field" style="margin-bottom:.7rem">
+    <label>CNPJ <span style="color:#5a6678;font-size:.78rem">— preenche empresa, segmento e contato automaticamente</span></label>
+    <div style="display:flex; gap:.5rem; align-items:center">
+      <input id="oc-cnpj" class="oc-inp" placeholder="00.000.000/0000-00" inputmode="numeric" style="flex:1">
+      <button id="oc-cnpj-btn" type="button" style="background:#c99536;color:#1a1206;border:0;border-radius:8px;padding:.55rem 1.1rem;font-weight:600;cursor:pointer;white-space:nowrap">Buscar</button>
+    </div>
+    <span id="oc-cnpj-msg" style="font-size:.8rem;color:#5a6678;display:block;margin-top:.25rem"></span>
+  </div>
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:.8rem">
     <div class="oc-field"><label>Empresa</label><input id="oc-empresa" class="oc-inp" placeholder="Nome da empresa"></div>
     <div class="oc-field"><label>Contato</label><input id="oc-contato" class="oc-inp" placeholder="Responsavel"></div>
     <div class="oc-field"><label>WhatsApp</label><input id="oc-whats" class="oc-inp" placeholder="(86) 9 9999-9999"></div>
+    <div class="oc-field"><label>E-mail</label><input id="oc-email" class="oc-inp" placeholder="contato@empresa.com.br"></div>
     <div class="oc-field"><label>Segmento</label><input id="oc-segmento" class="oc-inp" placeholder="Saude, Varejo, Logistica..."></div>
   </div>
 </div>
@@ -474,12 +508,33 @@ body.oc-margin .oc-custo-col{display:flex}
       .finally(function(){btn.disabled=false; btn.textContent=t0;});
   });
 
+  // buscar CNPJ -> autofill (Receita/BrasilAPI)
+  document.getElementById('oc-cnpj-btn').addEventListener('click',function(){
+    var dig=(document.getElementById('oc-cnpj').value||'').replace(/\\D/g,'');
+    var msg=document.getElementById('oc-cnpj-msg');
+    if(dig.length!==14){msg.textContent='Digite os 14 digitos do CNPJ.'; return;}
+    var btn=this, t0=btn.textContent; btn.disabled=true; btn.textContent='Buscando...'; msg.textContent='';
+    fetch('/admin/orcamento/cnpj?cnpj='+encodeURIComponent(dig))
+      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+      .then(function(res){
+        if(!res.ok){msg.textContent=(res.d&&res.d.erro)||'Nao encontrei esse CNPJ.'; return;}
+        var d=res.d;
+        function set(id,v){if(v){document.getElementById(id).value=v;}}
+        set('oc-empresa',d.empresa); set('oc-segmento',d.segmento);
+        set('oc-whats',d.whatsapp); set('oc-email',d.email);
+        var loc=[d.cidade,d.uf].filter(Boolean).join('/');
+        msg.textContent='Preenchido pela Receita'+(loc?' — '+loc:'')+'. Confira e ajuste se precisar.';
+      })
+      .catch(function(){msg.textContent='Erro de conexao ao consultar.';})
+      .finally(function(){btn.disabled=false; btn.textContent=t0;});
+  });
+
   // salvar
   document.getElementById('oc-salvar').addEventListener('click',function(){
     var c=calc();
     var modIds=rows().filter(function(r){return r.getAttribute('data-on')==='1';}).map(function(r){return r.getAttribute('data-id');});
     var escEl=document.getElementById('oc-escopo-out');
-    var body={cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',modulos:modIds,escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setup),mensal:Math.round(c.mensal),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods};
+    var body={cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',modulos:modIds,escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setup),mensal:Math.round(c.mensal),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods};
     var btn=this; btn.textContent='Salvando...';
     fetch('/admin/orcamento/salvar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
       .then(function(r){return r.json();}).then(function(){btn.textContent='Salvo!'; carregarHist(); setTimeout(function(){btn.textContent='Salvar no historico';},1500);})

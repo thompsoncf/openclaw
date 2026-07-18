@@ -560,8 +560,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       </div>
       <div style="display:flex; gap:1.5rem; flex-wrap:wrap; align-items:flex-end">
         <div class="oc-field" style="margin-bottom:0"><label>Integrações externas</label>
-          <div class="oc-step"><button type="button" data-step="-1">-</button><span class="v" id="oc-integ-v">3</span><button type="button" data-step="1">+</button></div>
-          <input type="hidden" id="oc-integ" value="3">
+          <div class="oc-step"><button type="button" data-step="-1">-</button><span class="v" id="oc-integ-v">0</span><button type="button" data-step="1">+</button></div>
+          <input type="hidden" id="oc-integ" value="0">
         </div>
         <div class="oc-field" style="margin-bottom:0"><label>Suporte 24h</label>
           <button id="oc-sup" class="oc-pill" data-on="0" type="button">Atendimento dedicado</button>
@@ -569,9 +569,9 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       </div>
       <div class="oc-field" style="margin-top:.8rem"><label>Canais</label>
         <div style="display:flex; gap:.4rem; flex-wrap:wrap">
-          <button class="oc-canal oc-pill on" data-on="1">WhatsApp</button>
-          <button class="oc-canal oc-pill on" data-on="1">Site</button>
-          <button class="oc-canal oc-pill on" data-on="1">Instagram</button>
+          <button class="oc-canal oc-pill" data-on="0">WhatsApp</button>
+          <button class="oc-canal oc-pill" data-on="0">Site</button>
+          <button class="oc-canal oc-pill" data-on="0">Instagram</button>
           <button class="oc-canal oc-pill" data-on="0">Telegram</button>
           <button class="oc-canal oc-pill" data-on="0">E-mail</button>
           <button class="oc-canal oc-pill" data-on="0">Voz</button>
@@ -695,7 +695,9 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     if(preserva){rows().forEach(function(r){onset[r.getAttribute('data-id')]=r.getAttribute('data-on');});}
     box.innerHTML='';
     CATALOGO.forEach(function(s){
-      var on = preserva ? (onset[s.slug]!==undefined?onset[s.slug]:'1') : '1';
+      // orçamento começa LIMPO: nenhum serviço marcado. O vendedor marca (ou a IA
+      // sugere). Ao re-renderizar (add/editar), preserva o que já estava marcado.
+      var on = preserva ? (onset[s.slug]!==undefined?onset[s.slug]:'0') : '0';
       var r=document.createElement('div'); r.className='oc-mod'+(on==='1'?'':' off');
       r.setAttribute('data-id',s.slug); r.setAttribute('data-on',on);
       r.setAttribute('data-nome',s.nome); r.setAttribute('data-desc',s.descricao||''); r.setAttribute('data-cid',s.id);
@@ -826,6 +828,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     ['oc-empresa','oc-contato','oc-cnpj','oc-segmento','oc-whats','oc-email','oc-desc'].forEach(function(id){setv(id,'');});
     var out=document.getElementById('oc-escopo-out'); out.style.display='none'; out.removeAttribute('data-escopo'); out.textContent='';
     document.getElementById('oc-editando').style.display='none';
+    marcaMods([]);   // proposta nova começa sem nenhum serviço marcado
     pinta();
   }
   function abrir(id){

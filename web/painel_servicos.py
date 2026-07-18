@@ -560,8 +560,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       </div>
       <div style="display:flex; gap:1.5rem; flex-wrap:wrap; align-items:flex-end">
         <div class="oc-field" style="margin-bottom:0"><label>Integrações externas</label>
-          <div class="oc-step"><button type="button" data-step="-1">-</button><span class="v" id="oc-integ-v">3</span><button type="button" data-step="1">+</button></div>
-          <input type="hidden" id="oc-integ" value="3">
+          <div class="oc-step"><button type="button" data-step="-1">-</button><span class="v" id="oc-integ-v">0</span><button type="button" data-step="1">+</button></div>
+          <input type="hidden" id="oc-integ" value="0">
         </div>
         <div class="oc-field" style="margin-bottom:0"><label>Suporte 24h</label>
           <button id="oc-sup" class="oc-pill" data-on="0" type="button">Atendimento dedicado</button>
@@ -569,9 +569,9 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       </div>
       <div class="oc-field" style="margin-top:.8rem"><label>Canais</label>
         <div style="display:flex; gap:.4rem; flex-wrap:wrap">
-          <button class="oc-canal oc-pill on" data-on="1">WhatsApp</button>
-          <button class="oc-canal oc-pill on" data-on="1">Site</button>
-          <button class="oc-canal oc-pill on" data-on="1">Instagram</button>
+          <button class="oc-canal oc-pill" data-on="0">WhatsApp</button>
+          <button class="oc-canal oc-pill" data-on="0">Site</button>
+          <button class="oc-canal oc-pill" data-on="0">Instagram</button>
           <button class="oc-canal oc-pill" data-on="0">Telegram</button>
           <button class="oc-canal oc-pill" data-on="0">E-mail</button>
           <button class="oc-canal oc-pill" data-on="0">Voz</button>

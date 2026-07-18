@@ -695,7 +695,9 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     if(preserva){rows().forEach(function(r){onset[r.getAttribute('data-id')]=r.getAttribute('data-on');});}
     box.innerHTML='';
     CATALOGO.forEach(function(s){
-      var on = preserva ? (onset[s.slug]!==undefined?onset[s.slug]:'1') : '1';
+      // orçamento começa LIMPO: nenhum serviço marcado. O vendedor marca (ou a IA
+      // sugere). Ao re-renderizar (add/editar), preserva o que já estava marcado.
+      var on = preserva ? (onset[s.slug]!==undefined?onset[s.slug]:'0') : '0';
       var r=document.createElement('div'); r.className='oc-mod'+(on==='1'?'':' off');
       r.setAttribute('data-id',s.slug); r.setAttribute('data-on',on);
       r.setAttribute('data-nome',s.nome); r.setAttribute('data-desc',s.descricao||''); r.setAttribute('data-cid',s.id);
@@ -826,6 +828,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     ['oc-empresa','oc-contato','oc-cnpj','oc-segmento','oc-whats','oc-email','oc-desc'].forEach(function(id){setv(id,'');});
     var out=document.getElementById('oc-escopo-out'); out.style.display='none'; out.removeAttribute('data-escopo'); out.textContent='';
     document.getElementById('oc-editando').style.display='none';
+    marcaMods([]);   // proposta nova começa sem nenhum serviço marcado
     pinta();
   }
   function abrir(id){

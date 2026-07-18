@@ -11,8 +11,9 @@ finance.vendas.fechar_orcamento, que vira TÍTULOS A RECEBER no módulo Empresa
 (setup único + mensalidade recorrente). Sem PDV novo pra serviço: a receita entra
 pelo livro-caixa de sempre.
 
-O catálogo (_MODULOS) é o da Aladdin (nicho tecnologia, 1º caso). O motor é
-genérico — trocar o catálogo por conta é o passo do multi-tenant de catálogo.
+O catálogo de serviços é POR CONTA (finance.servicos_catalogo) — cada empresa
+monta o que vende. Empresa nova começa vazia; a Aladdin usa o modelo de
+tecnologia. A IA de escopo e a validação de módulos usam o catálogo da conta.
 """
 import json
 import re
@@ -24,26 +25,10 @@ from pydantic import BaseModel
 from core.brain import Brain
 from db.conexao import get_pool
 from finance.cnpj_info import consultar_cnpj
-from finance import empresa as emp, vendas
+from finance import empresa as emp, vendas, servicos_catalogo as scat
 from web.portal import _render, _env, conta_logada, brl
 
 router = APIRouter()
-
-# ---------------------------------------------------------------- catalogo
-# Valores em REAIS (referencia de mercado). Tudo editavel na tela.
-_MODULOS = [
-    {"id": "atendimento", "nome": "Agente de Atendimento", "desc": "Atendimento 24/7 multicanal",      "setup": 4500,  "mensal": 1200, "custo": 430},
-    {"id": "automacao",   "nome": "Automacao de Processos", "desc": "Workflows e RPA",                  "setup": 6000,  "mensal": 1500, "custo": 520},
-    {"id": "crm",         "nome": "CRM / Leads",            "desc": "Pipeline e gestao de leads",       "setup": 3500,  "mensal": 900,  "custo": 300},
-    {"id": "sdr",         "nome": "SDR Digital",            "desc": "Prospeccao e qualificacao",        "setup": 5000,  "mensal": 1400, "custo": 480},
-    {"id": "docs",        "nome": "Analise de Documentos",  "desc": "Extracao e leitura com IA",        "setup": 4000,  "mensal": 1100, "custo": 360},
-    {"id": "bi",          "nome": "BI / Dashboard",         "desc": "Indicadores em tempo real",        "setup": 5500,  "mensal": 1300, "custo": 410},
-    {"id": "voz",         "nome": "Agente de Voz",          "desc": "Ligacoes com IA",                  "setup": 7000,  "mensal": 1800, "custo": 640},
-    {"id": "financeiro",  "nome": "Automacao Financeira",   "desc": "Conciliacao e cobranca",           "setup": 6500,  "mensal": 1600, "custo": 560},
-    {"id": "custom",      "nome": "Sistema Sob Medida",     "desc": "Desenvolvimento dedicado",         "setup": 12000, "mensal": 2500, "custo": 1100},
-]
-_DEFAULT_ON = {"atendimento", "automacao", "crm", "sdr", "bi"}  # plano "pro"
-_IDS_VALIDOS = {m["id"] for m in _MODULOS}
 
 
 def _garantir_tabela(c):
@@ -99,11 +84,77 @@ def painel_servicos(request: Request):
     conta, redir = _conta_servico(request)
     if redir is not None:
         return redir
-    with get_pool().connection() as c:
+    pool = get_pool()
+    with pool.connection() as c:
         _garantir_tabela(c)
-    modulos = [{**m, "on": m["id"] in _DEFAULT_ON} for m in _MODULOS]
-    return _render("servicos", request, modulos=modulos, empresa_nome=conta[2],
+    scat.garantir_tabela(pool)
+    return _render("servicos", request, empresa_nome=conta[2],
                    tem_pj=True, vende_servico=True)
+
+
+# ---------------------------------------------------------------- catálogo (por conta)
+@router.get("/painel/servicos/catalogo")
+def painel_servicos_catalogo(request: Request):
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    pool = get_pool()
+    scat.garantir_tabela(pool)
+    itens = [{
+        "id": s["id"], "slug": s["slug"], "nome": s["nome"],
+        "descricao": s["descricao"],
+        "setup": round(s["setup_centavos"] / 100),
+        "mensal": round(s["mensal_centavos"] / 100),
+        "custo": round(s["custo_centavos"] / 100),
+    } for s in scat.listar(pool, conta[0])]
+    return JSONResponse({"itens": itens})
+
+
+class ServicoIn(BaseModel):
+    id: int | None = None
+    nome: str = ""
+    descricao: str = ""
+    setup: int = 0     # REAIS
+    mensal: int = 0    # REAIS
+    custo: int = 0     # REAIS
+
+
+@router.post("/painel/servicos/catalogo/salvar")
+def painel_servicos_catalogo_salvar(request: Request, dados: ServicoIn):
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    r = scat.salvar(get_pool(), conta[0], id=dados.id, nome=dados.nome,
+                    descricao=dados.descricao,
+                    setup_centavos=int(dados.setup or 0) * 100,
+                    mensal_centavos=int(dados.mensal or 0) * 100,
+                    custo_centavos=int(dados.custo or 0) * 100)
+    if not r.get("ok"):
+        return JSONResponse({"erro": r.get("erro", "falha ao salvar")}, status_code=400)
+    return JSONResponse(r)
+
+
+class ServicoDelIn(BaseModel):
+    id: int
+
+
+@router.post("/painel/servicos/catalogo/excluir")
+def painel_servicos_catalogo_excluir(request: Request, dados: ServicoDelIn):
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    r = scat.excluir(get_pool(), conta[0], int(dados.id))
+    if not r.get("ok"):
+        return JSONResponse({"erro": "serviço não encontrado"}, status_code=404)
+    return JSONResponse(r)
+
+
+@router.post("/painel/servicos/catalogo/importar-modelo")
+def painel_servicos_catalogo_importar(request: Request):
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    return JSONResponse(scat.importar_modelo(get_pool(), conta[0]))
 
 
 @router.get("/painel/servicos/cnpj")
@@ -142,19 +193,25 @@ def painel_servicos_sugerir(request: Request, dados: SugerirIn):
     if not desc:
         return JSONResponse({"erro": "descricao vazia"}, status_code=400)
 
-    catalogo = "\n".join(f"{m['id']}: {m['nome']} - {m['desc']}" for m in _MODULOS)
+    itens = scat.listar(get_pool(), conta[0])
+    if not itens:
+        return JSONResponse(
+            {"erro": "cadastre seus serviços primeiro pra a IA poder escolher"},
+            status_code=400)
+    slugs_validos = {s["slug"] for s in itens}
+    catalogo = "\n".join(f"{s['slug']}: {s['nome']} - {s['descricao']}" for s in itens)
     system = (
-        "Voce e' consultor de pre-vendas de uma empresa de tecnologia que implanta "
-        "sistemas de IA sob medida para empresas brasileiras. "
-        "Responde SEMPRE em portugues do Brasil e SO' com JSON valido."
+        "Voce e' consultor de pre-vendas. A empresa vende os servicos listados "
+        "abaixo (catalogo dela). Responde SEMPRE em portugues do Brasil e SO' com "
+        "JSON valido."
     )
     prompt = (
-        f"MODULOS DISPONIVEIS (use os ids exatos):\n{catalogo}\n\n"
+        f"SERVICOS DISPONIVEIS (use os slugs exatos):\n{catalogo}\n\n"
         f"DESCRICAO DO CLIENTE:\n\"\"\"{desc}\"\"\"\n\n"
-        "Tarefa: escolha os modulos mais adequados, identifique o segmento e "
+        "Tarefa: escolha os servicos mais adequados, identifique o segmento e "
         "escreva um escopo (2 a 4 frases, tom comercial, focado em resultado).\n"
         "Responda APENAS com JSON, sem markdown:\n"
-        '{"modules":["id","id"],"segmento":"...","escopo":"..."}'
+        '{"modules":["slug","slug"],"segmento":"...","escopo":"..."}'
     )
     try:
         resp = Brain().chamar(system=system, mensagens=[{"role": "user", "content": prompt}])
@@ -164,7 +221,7 @@ def painel_servicos_sugerir(request: Request, dados: SugerirIn):
         ).strip()
         txt = re.sub(r"^```json|^```|```$", "", txt).strip()
         data = json.loads(txt)
-        mods = [i for i in data.get("modules", []) if i in _IDS_VALIDOS]
+        mods = [i for i in data.get("modules", []) if i in slugs_validos]
         return JSONResponse({
             "modules": mods,
             "segmento": (data.get("segmento") or "").strip(),
@@ -196,7 +253,8 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
     conta, redir = _conta_servico(request)
     if redir is not None:
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
-    modulos = [i for i in (dados.modulos or []) if i in _IDS_VALIDOS]
+    validos = scat.slugs_validos(get_pool(), conta[0])
+    modulos = [i for i in (dados.modulos or []) if i in validos]
     vals = (dados.cliente or None, dados.empresa or None,
             (dados.cnpj or "").strip() or None, dados.segmento or None,
             (dados.whatsapp or "").strip() or None, (dados.email or "").strip() or None,
@@ -284,7 +342,7 @@ def painel_servicos_item(request: Request, orc_id: int):
     return JSONResponse({
         "id": r[0], "cliente": r[1] or "", "empresa": r[2] or "",
         "cnpj": r[3] or "", "segmento": r[4] or "", "whatsapp": r[5] or "",
-        "email": r[6] or "", "modulos": [m for m in (mods or []) if m in _IDS_VALIDOS],
+        "email": r[6] or "", "modulos": [str(m) for m in (mods or [])],
         "escopo": r[8] or "", "status": r[9] or "rascunho",
         "setup": brl(r[10]), "mensal": brl(r[11]), "total": brl(r[12]),
         "n_modulos": r[13] or 0,
@@ -341,8 +399,14 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-field label{font-size:.82rem; color:var(--txt-mut)}
 .oc-inp{padding:.55rem .7rem; border-radius:8px; background:var(--bg); color:var(--txt); border:1px solid var(--borda); font-size:.95rem; width:100%; box-sizing:border-box}
 .oc-inp:focus{border-color:var(--verde); outline:none}
-.oc-mod{display:grid; grid-template-columns:auto 1fr 92px 92px 104px; gap:.6rem; align-items:center; padding:.6rem 0; border-bottom:1px solid var(--borda)}
-.oc-mod.off{opacity:.45}
+.oc-mod{display:grid; grid-template-columns:auto 1fr 84px 84px 84px auto; gap:.55rem; align-items:center; padding:.6rem 0; border-bottom:1px solid var(--borda)}
+.oc-mod.off{opacity:.5}
+.oc-mod .oc-nome{cursor:default}
+.oc-rowacts{display:flex; gap:.1rem; white-space:nowrap}
+.oc-ic{background:none; border:0; color:var(--txt-mut); cursor:pointer; font-size:.95rem; padding:.1rem .25rem; border-radius:6px}
+.oc-ic:hover{color:var(--txt); background:var(--bg)}
+.oc-svcform{background:var(--bg); border:1px solid var(--borda); border-radius:10px; padding:.8rem; margin-top:.7rem}
+.oc-empty{border:1px dashed var(--borda); border-radius:12px; padding:1.4rem; text-align:center; margin-top:.6rem}
 .oc-tog{width:42px; height:24px; border-radius:99px; border:none; cursor:pointer; position:relative; background:#2a3550; flex:none}
 .oc-tog.on{background:var(--verde-claro)}
 .oc-tog::after{content:""; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:#fff; transition:left .15s}
@@ -353,7 +417,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-num input:focus{outline:none}
 .oc-custo-col{display:none}
 .sv-wrap.oc-margin .oc-custo-col{display:flex}
-.oc-head{display:grid; grid-template-columns:auto 1fr 92px 92px 104px; gap:.6rem; font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:var(--txt-mut); padding-bottom:.4rem; border-bottom:1px solid var(--borda)}
+.oc-head{display:grid; grid-template-columns:auto 1fr 84px 84px 84px auto; gap:.55rem; font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:var(--txt-mut); padding-bottom:.4rem; border-bottom:1px solid var(--borda)}
 .oc-pill{padding:.4rem .8rem; border-radius:99px; border:1px solid var(--borda); background:var(--bg); color:var(--txt); cursor:pointer; font-size:.85rem}
 .oc-pill.on{border-color:var(--verde-claro); background:#10241d; color:var(--verde-claro)}
 .oc-seg button{padding:.45rem .7rem; border:1px solid var(--borda); background:var(--bg); color:var(--txt); cursor:pointer; font-size:.85rem; border-radius:7px}
@@ -407,34 +471,52 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   </div>
 </div>
 
-<div class="card">
-  <h2 style="margin-top:0">Planos rápidos</h2>
-  <div style="display:flex; gap:.6rem; flex-wrap:wrap">
-    <button class="oc-pill" data-plano="basico">Básico</button>
-    <button class="oc-pill" data-plano="pro">Pro</button>
-    <button class="oc-pill" data-plano="enterprise">Enterprise</button>
-  </div>
-</div>
-
 <div class="oc-grid">
   <div>
     <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center">
-        <h2 style="margin:0">Módulos</h2>
-        <button id="oc-margin" class="oc-pill">Modo margem</button>
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.4rem">
+        <h2 style="margin:0">Meus serviços</h2>
+        <div style="display:flex; gap:.4rem; flex-wrap:wrap">
+          <button id="oc-add" class="oc-pill" type="button">+ Adicionar serviço</button>
+          <button id="oc-margin" class="oc-pill" type="button">Modo margem</button>
+        </div>
       </div>
-      <div class="oc-head" style="margin-top:.8rem">
-        <span></span><span>Módulo</span><span style="text-align:right">Setup</span><span style="text-align:right">Mensal</span><span style="text-align:right">Custo/Margem</span>
+
+      <!-- formulário de add/editar serviço do catálogo -->
+      <div id="oc-svc-form" class="oc-svcform" style="display:none">
+        <input type="hidden" id="svc-id">
+        <div style="display:grid; grid-template-columns:2fr 3fr; gap:.6rem">
+          <div class="oc-field" style="margin-bottom:.4rem"><label>Nome do serviço</label><input id="svc-nome" class="oc-inp" placeholder="Ex.: Consultoria de SEO"></div>
+          <div class="oc-field" style="margin-bottom:.4rem"><label>Descrição</label><input id="svc-desc" class="oc-inp" placeholder="O que está incluso"></div>
+        </div>
+        <div style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end">
+          <div class="oc-field" style="margin-bottom:0"><label>Setup (R$)</label><input id="svc-setup" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
+          <div class="oc-field" style="margin-bottom:0"><label>Mensal (R$)</label><input id="svc-mensal" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
+          <div class="oc-field" style="margin-bottom:0"><label>Custo (R$)</label><input id="svc-custo" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
+          <div style="flex:1; display:flex; gap:.4rem; justify-content:flex-end">
+            <button id="svc-salvar" class="oc-btn-g" type="button" style="border:0; border-radius:8px; padding:.5rem 1rem; font-weight:600; cursor:pointer">Salvar</button>
+            <button id="svc-cancelar" class="oc-pill" type="button">Cancelar</button>
+          </div>
+        </div>
+        <div id="svc-msg" class="mut" style="font-size:.8rem; margin-top:.4rem"></div>
       </div>
-      {% for m in modulos %}
-      <div class="oc-mod{% if not m.on %} off{% endif %}" data-id="{{ m.id }}" data-on="{{ '1' if m.on else '0' }}" data-nome="{{ m.nome }}" data-desc="{{ m.desc }}">
-        <button class="oc-tog{% if m.on %} on{% endif %}" type="button" title="Ativar/desativar"></button>
-        <div><b>{{ m.nome }}</b><div class="mut" style="font-size:.78rem">{{ m.desc }}</div></div>
-        <div class="oc-num"><span>R$</span><input class="oc-setup" inputmode="numeric" value="{{ m.setup }}"></div>
-        <div class="oc-num"><span>R$</span><input class="oc-mensal" inputmode="numeric" value="{{ m.mensal }}"></div>
-        <div class="oc-num oc-custo-col"><span>R$</span><input class="oc-custo" inputmode="numeric" value="{{ m.custo }}"></div>
+
+      <div class="oc-head" id="oc-head" style="margin-top:.8rem; display:none">
+        <span></span><span>Serviço</span><span style="text-align:right">Setup</span><span style="text-align:right">Mensal</span><span style="text-align:right">Custo/Margem</span><span></span>
       </div>
-      {% endfor %}
+      <div id="oc-mods"></div>
+      <div id="oc-mods-empty" class="oc-empty" style="display:none">
+        <b>Você ainda não cadastrou seus serviços</b>
+        <p class="mut" style="margin:.3rem 0 0">Adicione o que a sua empresa vende — nome, setup e mensalidade. Isso vira o seu catálogo pra montar orçamentos.</p>
+        <div style="display:flex; gap:.5rem; justify-content:center; margin-top:.8rem; flex-wrap:wrap">
+          <button id="oc-add2" class="oc-btn-g" type="button" style="border:0; border-radius:8px; padding:.5rem 1rem; font-weight:600; cursor:pointer">+ Adicionar serviço</button>
+          <button id="oc-import" class="oc-pill" type="button">Usar modelo de tecnologia</button>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:space-between; margin-top:.6rem">
+        <button id="oc-todos" class="oc-pill" type="button" style="display:none">Marcar todos</button>
+        <button id="oc-limpar" class="oc-pill" type="button" style="display:none">Limpar seleção</button>
+      </div>
     </div>
 
     <div class="card">
@@ -541,16 +623,16 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     else eco.style.display='none';
   }
 
-  rows().forEach(function(r){
-    r.querySelector('.oc-tog').addEventListener('click',function(){
-      var on=r.getAttribute('data-on')==='1';
-      r.setAttribute('data-on',on?'0':'1');
-      r.classList.toggle('off',on);
-      this.classList.toggle('on',!on);
-      pinta();
-    });
+  // linhas de serviço são dinâmicas (catálogo por conta) — delegação:
+  var MODS=document.getElementById('oc-mods');
+  MODS.addEventListener('click',function(e){
+    var tog=e.target.closest('.oc-tog'); if(!tog) return;
+    var r=tog.closest('.oc-mod'); var on=r.getAttribute('data-on')==='1';
+    r.setAttribute('data-on',on?'0':'1'); r.classList.toggle('off',on); tog.classList.toggle('on',!on); pinta();
   });
-  document.querySelectorAll('.oc-setup,.oc-mensal,.oc-custo').forEach(function(i){i.addEventListener('input',pinta);});
+  MODS.addEventListener('input',function(e){
+    if(e.target.classList.contains('oc-setup')||e.target.classList.contains('oc-mensal')||e.target.classList.contains('oc-custo')) pinta();
+  });
 
   document.getElementById('oc-margin').addEventListener('click',function(){
     WRAP.classList.toggle('oc-margin');
@@ -582,19 +664,78 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     });
   });
 
-  var PLANOS={basico:['atendimento','crm'],pro:['atendimento','automacao','crm','sdr','bi'],enterprise:['atendimento','automacao','crm','sdr','docs','bi','voz','financeiro','custom']};
-  document.querySelectorAll('[data-plano]').forEach(function(b){
-    b.addEventListener('click',function(){
-      var set=PLANOS[b.getAttribute('data-plano')]||[];
-      rows().forEach(function(r){
-        var on=set.indexOf(r.getAttribute('data-id'))>=0;
-        r.setAttribute('data-on',on?'1':'0'); r.classList.toggle('off',!on);
-        r.querySelector('.oc-tog').classList.toggle('on',on);
-      });
-      document.querySelectorAll('[data-plano]').forEach(function(x){x.classList.remove('on');});
-      b.classList.add('on'); pinta();
+  // ---- catálogo de serviços por conta (Meus serviços) ----
+  var CATALOGO=[];
+  function ec(s){var d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
+  function renderCatalogo(preserva){
+    var box=document.getElementById('oc-mods'), onset={};
+    if(preserva){rows().forEach(function(r){onset[r.getAttribute('data-id')]=r.getAttribute('data-on');});}
+    box.innerHTML='';
+    CATALOGO.forEach(function(s){
+      var on = preserva ? (onset[s.slug]!==undefined?onset[s.slug]:'1') : '1';
+      var r=document.createElement('div'); r.className='oc-mod'+(on==='1'?'':' off');
+      r.setAttribute('data-id',s.slug); r.setAttribute('data-on',on);
+      r.setAttribute('data-nome',s.nome); r.setAttribute('data-desc',s.descricao||''); r.setAttribute('data-cid',s.id);
+      r.innerHTML='<button class="oc-tog'+(on==='1'?' on':'')+'" type="button" title="Entra nesta proposta"></button>'
+        +'<div class="oc-nome"><b>'+ec(s.nome)+'</b><div class="mut" style="font-size:.78rem">'+ec(s.descricao||'')+'</div></div>'
+        +'<div class="oc-num"><span>R$</span><input class="oc-setup" inputmode="numeric" value="'+s.setup+'"></div>'
+        +'<div class="oc-num"><span>R$</span><input class="oc-mensal" inputmode="numeric" value="'+s.mensal+'"></div>'
+        +'<div class="oc-num oc-custo-col"><span>R$</span><input class="oc-custo" inputmode="numeric" value="'+s.custo+'"></div>'
+        +'<div class="oc-rowacts"><button class="oc-ic oc-edit" type="button" title="Editar serviço">✎</button><button class="oc-ic oc-del" type="button" title="Excluir serviço">🗑</button></div>';
+      box.appendChild(r);
     });
+    var vazio=CATALOGO.length===0;
+    document.getElementById('oc-mods-empty').style.display=vazio?'block':'none';
+    document.getElementById('oc-head').style.display=vazio?'none':'grid';
+    document.getElementById('oc-todos').style.display=vazio?'none':'inline-block';
+    document.getElementById('oc-limpar').style.display=vazio?'none':'inline-block';
+    pinta();
+  }
+  function carregarCatalogo(preserva){
+    return fetch('/painel/servicos/catalogo').then(function(r){return r.json();}).then(function(d){
+      CATALOGO=d.itens||[]; renderCatalogo(preserva);
+    }).catch(function(){});
+  }
+  // editar / excluir (delegação)
+  document.getElementById('oc-mods').addEventListener('click',function(e){
+    var ed=e.target.closest('.oc-edit'), dl=e.target.closest('.oc-del');
+    if(ed){var r=ed.closest('.oc-mod'); abrirForm({id:r.getAttribute('data-cid'),nome:r.getAttribute('data-nome'),descricao:r.getAttribute('data-desc'),setup:num(r.querySelector('.oc-setup')),mensal:num(r.querySelector('.oc-mensal')),custo:num(r.querySelector('.oc-custo'))});}
+    else if(dl){var r2=dl.closest('.oc-mod'); if(confirm('Excluir "'+r2.getAttribute('data-nome')+'" do seu catálogo?')){fetch('/painel/servicos/catalogo/excluir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:parseInt(r2.getAttribute('data-cid'),10)})}).then(function(){carregarCatalogo(true);});}}
   });
+  // form de add/editar serviço do catálogo
+  function abrirForm(s){
+    s=s||{};
+    document.getElementById('svc-id').value=s.id||'';
+    document.getElementById('svc-nome').value=s.nome||'';
+    document.getElementById('svc-desc').value=s.descricao||'';
+    document.getElementById('svc-setup').value=s.setup||0;
+    document.getElementById('svc-mensal').value=s.mensal||0;
+    document.getElementById('svc-custo').value=s.custo||0;
+    document.getElementById('svc-msg').textContent='';
+    document.getElementById('oc-svc-form').style.display='block';
+    document.getElementById('svc-nome').focus();
+  }
+  function fecharForm(){document.getElementById('oc-svc-form').style.display='none';}
+  document.getElementById('oc-add').addEventListener('click',function(){abrirForm();});
+  document.getElementById('oc-add2').addEventListener('click',function(){abrirForm();});
+  document.getElementById('svc-cancelar').addEventListener('click',fecharForm);
+  document.getElementById('svc-salvar').addEventListener('click',function(){
+    var nome=document.getElementById('svc-nome').value.trim();
+    if(!nome){document.getElementById('svc-msg').textContent='Informe o nome do serviço.';return;}
+    var idv=document.getElementById('svc-id').value;
+    var body={id:idv?parseInt(idv,10):null,nome:nome,descricao:document.getElementById('svc-desc').value||'',setup:num(document.getElementById('svc-setup')),mensal:num(document.getElementById('svc-mensal')),custo:num(document.getElementById('svc-custo'))};
+    var b=this; b.disabled=true;
+    fetch('/painel/servicos/catalogo/salvar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+      .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
+      .then(function(res){b.disabled=false; if(!res.ok){document.getElementById('svc-msg').textContent=(res.d&&res.d.erro)||'Não consegui salvar.';return;} fecharForm(); carregarCatalogo(true);})
+      .catch(function(){b.disabled=false; document.getElementById('svc-msg').textContent='Erro de conexão.';});
+  });
+  document.getElementById('oc-import').addEventListener('click',function(){
+    var b=this; b.disabled=true; b.textContent='Importando...';
+    fetch('/painel/servicos/catalogo/importar-modelo',{method:'POST'}).then(function(){return carregarCatalogo(false);}).finally(function(){b.disabled=false; b.textContent='Usar modelo de tecnologia';});
+  });
+  document.getElementById('oc-todos').addEventListener('click',function(){rows().forEach(function(r){r.setAttribute('data-on','1');r.classList.remove('off');r.querySelector('.oc-tog').classList.add('on');});pinta();});
+  document.getElementById('oc-limpar').addEventListener('click',function(){rows().forEach(function(r){r.setAttribute('data-on','0');r.classList.add('off');r.querySelector('.oc-tog').classList.remove('on');});pinta();});
 
   document.getElementById('oc-sugerir').addEventListener('click',function(){
     var desc=document.getElementById('oc-desc').value.trim();
@@ -767,7 +908,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     if(w){w.document.write(html); w.document.close();}
   });
 
-  pinta(); carregarHist();
+  carregarCatalogo(false); carregarHist();
 })();
 </script>{% endraw %}
 {% endblock %}"""

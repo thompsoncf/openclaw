@@ -21,6 +21,7 @@ from psycopg_pool import ConnectionPool
 
 from db.conexao import init_schema
 from finance import empresa
+from finance.livro_caixa import LivroCaixa
 
 # Migrações que criam o que a baixa toca: chave (018), titulos (053),
 # natureza em lancamentos (057). schema.sql cria contas/membros/lancamentos.
@@ -136,3 +137,57 @@ def test_baixa_recorrente_cria_proximo_uma_vez(pool, conta_id):
 
     # baixa gerou exatamente 1 lançamento (o do título atual)
     assert _conta_lancamentos(pool, conta_id) == 1
+
+
+def test_baixa_rollback_total_se_caixa_falha(pool, conta_id, monkeypatch):
+    """Baixa numa transação só: se o lançamento no caixa falhar, o UPDATE do
+    status faz rollback — o título NÃO pode ficar 'pago' sem lançamento."""
+    tid = _cria_titulo(pool, conta_id, tipo="pagar", valor=10000)
+
+    def explode(self, lanc, **kw):
+        raise RuntimeError("falha simulada no caixa")
+    monkeypatch.setattr(LivroCaixa, "adicionar", explode)
+
+    with pytest.raises(RuntimeError):
+        empresa.dar_baixa_titulo(pool, conta_id, tid)
+
+    with pool.connection() as c:
+        st = c.execute(
+            "select status, lancamento_id from titulos where id=%s", (tid,)
+        ).fetchone()
+    assert st[0] == "aberto", "título ficou inconsistente (pago sem lançamento)"
+    assert st[1] is None
+    assert _conta_lancamentos(pool, conta_id) == 0
+
+
+def test_baixa_concorrente_pool_de_uma_conexao(pool, conta_id):
+    """A baixa usa UMA conexão por chamada — funciona com pool max_size=1.
+
+    Duas baixas simultâneas num pool de 1 conexão: a 2ª espera no pool, e o
+    resultado é 1 lançamento / 1 sucesso, sem deadlock. (fixture pool garante o
+    schema; aqui abrimos um pool próprio de 1 conexão pro mesmo banco.)"""
+    tid = _cria_titulo(pool, conta_id, valor=5000)
+
+    pool1 = ConnectionPool(os.environ["TEST_DATABASE_URL"], min_size=1,
+                           max_size=1, open=True,
+                           kwargs={"prepare_threshold": None})
+    try:
+        barreira = threading.Barrier(2)
+        resultados = []
+
+        def worker():
+            barreira.wait()
+            resultados.append(empresa.dar_baixa_titulo(pool1, conta_id, tid))
+
+        threads = [threading.Thread(target=worker) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=20)
+        assert not any(t.is_alive() for t in threads), "deadlock com max_size=1"
+
+        sucessos = [r for r in resultados if r.get("ok")]
+        assert len(sucessos) == 1, f"esperava 1 vencedora, veio {resultados}"
+        assert _conta_lancamentos(pool, conta_id) == 1
+    finally:
+        pool1.close()

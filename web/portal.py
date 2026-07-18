@@ -329,11 +329,12 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   <div class="side-logo"><span class="logo" style="display:inline-flex;align-items:center;gap:7px"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M16 18 H44 L18 46 H46" stroke="#3ee0a6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z" fill="#3ee0a6"/></svg>zaq</span></div>
   {% if vende_produto or _tem_app %}<div class="side-grp">Principal</div>{% endif %}
   {% if vende_produto %}{{ navi('caixa','/painel/pdv','caixa','Caixa') }}{{ navi('produtos','/painel/produtos','produtos','Produtos') }}{{ navi('clientes','/painel/clientes','clientes','Clientes') }}{% endif %}
-  {% if _tem_app %}{{ navi('financeiro','/painel/financeiro','financeiro','Financeiro') }}{% endif %}
-  {% if vende_produto or tem_pj or _forn %}<div class="side-grp">Loja</div>{% endif %}
+  {% if _tem_app and caps.financeiro %}{{ navi('financeiro','/painel/financeiro','financeiro','Financeiro') }}{% endif %}
+  {% if vende_produto or (tem_pj and caps.financeiro) or (vende_servico and caps.vendas) or _forn or caps.gerir %}<div class="side-grp">Loja</div>{% endif %}
   {% if vende_produto %}{{ navi('abastecimento','/painel/produtos/abastecimento','abastecimento','Abastecimento') }}{% endif %}
-  {% if vende_servico %}{{ navi('servicos','/painel/servicos','financeiro','Serviços') }}{% endif %}
-  {% if tem_pj %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{% endif %}
+  {% if vende_servico and caps.vendas %}{{ navi('servicos','/painel/servicos','financeiro','Serviços') }}{% endif %}
+  {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{% endif %}
+  {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
   {% if _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
   {% if _tem_app or _tem_cesta %}<div class="side-grp">Pessoal</div>{% endif %}
   {% if _tem_app %}{{ navi('painel','/painel','painel','Painel') }}{{ navi('compras','/painel/compras','compras','Lista de compras') }}{% endif %}
@@ -352,8 +353,9 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   <div class="mais-grab"></div>
   {% if vende_produto or tem_pj or _forn %}<div class="side-grp">Loja</div>{% endif %}
   {% if vende_produto %}{{ navi('abastecimento','/painel/produtos/abastecimento','abastecimento','Abastecimento') }}{% endif %}
-  {% if vende_servico %}{{ navi('servicos','/painel/servicos','financeiro','Serviços') }}{% endif %}
-  {% if tem_pj %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{% endif %}
+  {% if vende_servico and caps.vendas %}{{ navi('servicos','/painel/servicos','financeiro','Serviços') }}{% endif %}
+  {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{% endif %}
+  {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
   {% if _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
   {% if _tem_app or _tem_cesta %}<div class="side-grp">Pessoal</div>{% endif %}
   {% if _tem_app %}{{ navi('painel','/painel','painel','Painel') }}{{ navi('compras','/painel/compras','compras','Lista de compras') }}{% endif %}
@@ -4533,12 +4535,19 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
         _p = request.url.path
         _secs = [("caixa", "/painel/pdv"), ("abastecimento", "/painel/produtos/abastecimento"),
                  ("produtos", "/painel/produtos"), ("clientes", "/painel/clientes"),
-                 ("servicos", "/painel/servicos"),
+                 ("servicos", "/painel/servicos"), ("equipe", "/painel/equipe"),
                  ("financeiro", "/painel/financeiro"), ("empresa", "/painel/empresa"),
                  ("fornecedor", "/painel/fornecedor"), ("assinaturas", "/painel/assinaturas"),
                  ("pedidos", "/painel/meus-pedidos"), ("compras", "/painel/compras"),
                  ("painel", "/painel")]
         ctx["secao_ativa"] = next((k for k, pre in _secs if _p == pre or _p.startswith(pre + "/")), "")
+    # Papel + capacidades do operador logado (dono/gestor/vendedor/financeiro).
+    # Esconde do menu o que o papel não acessa (o gate no app.py é a trava dura).
+    if "caps" not in ctx:
+        from contas import equipe as _equipe
+        _papel = request.session.get("papel", "dono")
+        ctx.setdefault("papel", _papel)
+        ctx["caps"] = _equipe.caps_do_papel(_papel)
     # Injeta conta + gating (o conta_logada ja traz tudo numa query so: conta[11..15])
     if request.session.get("conta_id"):
         if "conta" not in ctx:
@@ -4713,9 +4722,21 @@ def login_envia(request: Request, email: str = Form(...), senha: str = Form(...)
     with pool.connection() as c:
         row = c.execute("select id, senha_hash from contas where lower(email)=%s",
                         (email.strip().lower(),)).fetchone()
-    if not row or not verificar_senha(senha, row[1]):
-        return _render("login", request, erro="E-mail ou senha incorretos.", aviso=None)
-    request.session["conta_id"] = row[0]
+    if row and verificar_senha(senha, row[1]):
+        # login do TITULAR (dono) — acesso total à conta.
+        request.session["conta_id"] = row[0]
+        request.session["papel"] = "dono"
+        request.session.pop("membro_id", None)
+    else:
+        # senão, tenta login de MEMBRO da equipe (papel define o que acessa).
+        from contas import equipe as _equipe
+        ctx = _equipe.autenticar(pool, email, senha)
+        if not ctx:
+            return _render("login", request, erro="E-mail ou senha incorretos.", aviso=None)
+        request.session["conta_id"] = ctx["conta_id"]
+        request.session["membro_id"] = ctx["membro_id"]
+        request.session["papel"] = ctx["papel"]
+        return RedirectResponse("/painel", status_code=303)
     # Aplicar carrinho_intencao se houver (cliente tentou adicionar item deslogado)
     intencao = request.session.pop("carrinho_intencao", None)
     if intencao:

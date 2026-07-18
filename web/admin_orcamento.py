@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from core.brain import Brain
 from db.conexao import get_pool
 from finance.cnpj_info import consultar_cnpj
+from finance.vendas import fechar_orcamento
 from web.portal import brl
 from web.admin import _admin, _NEGADO, _ADMIN_BASE
 
@@ -205,20 +206,38 @@ def admin_orcamento_lista(request: Request):
     with get_pool().connection() as c:
         _garantir_tabela(c)
         rows = c.execute(
-            """select cliente, empresa, setup_centavos, mensal_centavos,
-                      primeiro_ano_centavos, n_modulos, criado_em
+            """select id, cliente, empresa, setup_centavos, mensal_centavos,
+                      primeiro_ano_centavos, n_modulos, criado_em, status
                from orcamentos order by criado_em desc limit 50""").fetchall()
     itens = [{
-        "cliente": r[0] or "-",
-        "empresa": r[1] or "",
-        "setup": brl(r[2]),
-        "mensal": brl(r[3]),
-        "total": brl(r[4]),
-        "mods": r[5],
-        "data": r[6].strftime("%d/%m") if r[6] else "",
-        "inicial": (r[0] or r[1] or "?").strip()[:1].upper(),
+        "id": r[0],
+        "cliente": r[1] or "-",
+        "empresa": r[2] or "",
+        "setup": brl(r[3]),
+        "mensal": brl(r[4]),
+        "total": brl(r[5]),
+        "mods": r[6],
+        "data": r[7].strftime("%d/%m") if r[7] else "",
+        "status": r[8] or "rascunho",
+        "inicial": (r[1] or r[2] or "?").strip()[:1].upper(),
     } for r in rows]
     return JSONResponse({"itens": itens})
+
+
+class FecharIn(BaseModel):
+    orcamento_id: int
+
+
+@router.post("/admin/orcamento/fechar")
+def admin_orcamento_fechar(request: Request, dados: FecharIn):
+    """Fecha o orçamento -> gera os títulos a receber (setup + mensal recorrente)
+    na conta logada (a empresa de serviço). Chama o motor finance.vendas."""
+    adm = _admin(request)
+    if adm is None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    r = fechar_orcamento(get_pool(), conta_id=adm[0],
+                         orcamento_id=int(dados.orcamento_id))
+    return JSONResponse(r, status_code=200 if r.get("ok") else 409)
 
 
 # ---------------------------------------------------------------- template
@@ -543,18 +562,37 @@ body.oc-margin .oc-custo-col{display:flex}
 
   // historico
   function esc(s){var d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML;}
+  function statusBadge(s){
+    var cor={rascunho:'#8b97a8',enviado:'#5aa9e6',negociando:'#c99536',fechado:'#3bb487',perdido:'#a05a5a'}[s]||'#8b97a8';
+    return '<span style="font-size:.62rem;text-transform:uppercase;letter-spacing:.03em;color:'+cor+';border:1px solid '+cor+'55;border-radius:6px;padding:.05rem .4rem">'+esc(s)+'</span>';
+  }
   function carregarHist(){
     fetch('/admin/orcamento/lista').then(function(r){return r.json();}).then(function(d){
       var box=document.getElementById('oc-hist-box');
       if(!d.itens||!d.itens.length){box.innerHTML='<p class="mut">Nenhum orcamento salvo ainda.</p>'; return;}
       box.innerHTML=d.itens.map(function(it){
+        var acao = it.status==='fechado'
+          ? '<span class="mut" style="font-size:.72rem">✓ contrato</span>'
+          : '<button type="button" onclick="fecharOrc('+it.id+',this)" style="font-size:.72rem;padding:.25rem .6rem;border-radius:6px;border:1px solid #c99536;background:transparent;color:#c99536;cursor:pointer">Fechar contrato</button>';
         return '<div class="oc-hist"><div style="display:flex;align-items:center;min-width:0">'
           +'<div class="oc-av">'+esc(it.inicial)+'</div>'
           +'<div><b>'+esc(it.cliente)+(it.empresa?' <span class="mut">· '+esc(it.empresa)+'</span>':'')+'</b>'
-          +'<div class="mut" style="font-size:.78rem">'+esc(it.data)+' · '+it.mods+' modulos</div></div></div>'
-          +'<b style="font-variant-numeric:tabular-nums">'+esc(it.total)+'</b></div>';
+          +'<div class="mut" style="font-size:.78rem">'+esc(it.data)+' · '+it.mods+' modulos · '+statusBadge(it.status)+'</div></div></div>'
+          +'<div style="display:flex;flex-direction:column;align-items:flex-end;gap:.3rem">'
+          +'<b style="font-variant-numeric:tabular-nums">'+esc(it.total)+'</b>'+acao+'</div></div>';
       }).join('');
     }).catch(function(){document.getElementById('oc-hist-box').innerHTML='<p class="mut">Erro ao carregar.</p>';});
+  }
+  function fecharOrc(id, btn){
+    if(!confirm('Fechar o contrato? Isso gera os títulos a receber (setup + mensalidade recorrente) no financeiro.')) return;
+    btn.disabled=true; btn.textContent='Fechando...';
+    fetch('/admin/orcamento/fechar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({orcamento_id:id})})
+      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+      .then(function(res){
+        if(!res.ok){btn.disabled=false; btn.textContent='Fechar contrato'; alert((res.d&&res.d.erro)||'Nao foi possivel fechar.'); return;}
+        carregarHist();
+      })
+      .catch(function(){btn.disabled=false; btn.textContent='Fechar contrato'; alert('Erro de conexao.');});
   }
 
   // gerar proposta (documento premium em nova aba)

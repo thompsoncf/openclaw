@@ -175,6 +175,7 @@ def painel_servicos_sugerir(request: Request, dados: SugerirIn):
 
 
 class SalvarIn(BaseModel):
+    id: int | None = None   # se vier, ATUALIZA a proposta (reaberta do funil)
     cliente: str = ""
     empresa: str = ""
     cnpj: str = ""
@@ -196,24 +197,39 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
     if redir is not None:
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
     modulos = [i for i in (dados.modulos or []) if i in _IDS_VALIDOS]
+    vals = (dados.cliente or None, dados.empresa or None,
+            (dados.cnpj or "").strip() or None, dados.segmento or None,
+            (dados.whatsapp or "").strip() or None, (dados.email or "").strip() or None,
+            json.dumps(modulos), (dados.escopo or "").strip() or None,
+            (dados.canal or "").strip() or None,
+            int(dados.setup) * 100, int(dados.mensal) * 100,
+            int(dados.primeiro_ano) * 100, int(dados.n_modulos))
     with get_pool().connection() as c:
         _garantir_tabela(c)
-        c.execute(
-            """insert into orcamentos
-               (conta_id, cliente, empresa, cnpj, segmento, whatsapp, email,
-                modulos, escopo, canal, setup_centavos, mensal_centavos,
-                primeiro_ano_centavos, n_modulos)
-               values (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s,%s,%s)""",
-            (conta[0], dados.cliente or None, dados.empresa or None,
-             (dados.cnpj or "").strip() or None, dados.segmento or None,
-             (dados.whatsapp or "").strip() or None, (dados.email or "").strip() or None,
-             json.dumps(modulos), (dados.escopo or "").strip() or None,
-             (dados.canal or "").strip() or None,
-             int(dados.setup) * 100, int(dados.mensal) * 100,
-             int(dados.primeiro_ano) * 100, int(dados.n_modulos)),
-        )
+        oid = None
+        if dados.id:
+            # atualiza a proposta reaberta (nunca mexe em uma já 'fechado')
+            r = c.execute(
+                """update orcamentos set cliente=%s, empresa=%s, cnpj=%s, segmento=%s,
+                       whatsapp=%s, email=%s, modulos=%s::jsonb, escopo=%s, canal=%s,
+                       setup_centavos=%s, mensal_centavos=%s, primeiro_ano_centavos=%s,
+                       n_modulos=%s, atualizado_em=now()
+                     where id=%s and conta_id=%s and status <> 'fechado'
+                   returning id""",
+                vals + (dados.id, conta[0])).fetchone()
+            oid = r[0] if r else None
+        if oid is None and not dados.id:
+            oid = c.execute(
+                """insert into orcamentos
+                   (conta_id, cliente, empresa, cnpj, segmento, whatsapp, email,
+                    modulos, escopo, canal, setup_centavos, mensal_centavos,
+                    primeiro_ano_centavos, n_modulos)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s,%s,%s) returning id""",
+                (conta[0],) + vals).fetchone()[0]
         c.commit()
-    return JSONResponse({"ok": True})
+    if oid is None:
+        return JSONResponse({"erro": "proposta não encontrada ou já fechada"}, status_code=400)
+    return JSONResponse({"ok": True, "id": oid})
 
 
 @router.get("/painel/servicos/lista")
@@ -243,6 +259,38 @@ def painel_servicos_lista(request: Request):
     return JSONResponse({"itens": itens})
 
 
+@router.get("/painel/servicos/item/{orc_id}")
+def painel_servicos_item(request: Request, orc_id: int):
+    """Devolve um orçamento salvo (escopado por conta) pra reabrir no formulário."""
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    with get_pool().connection() as c:
+        _garantir_tabela(c)
+        r = c.execute(
+            """select id, cliente, empresa, cnpj, segmento, whatsapp, email,
+                      modulos, escopo, status, setup_centavos, mensal_centavos,
+                      primeiro_ano_centavos, n_modulos
+                 from orcamentos where id=%s and conta_id=%s""",
+            (orc_id, conta[0])).fetchone()
+    if not r:
+        return JSONResponse({"erro": "não encontrado"}, status_code=404)
+    mods = r[7]
+    if isinstance(mods, str):
+        try:
+            mods = json.loads(mods)
+        except Exception:
+            mods = []
+    return JSONResponse({
+        "id": r[0], "cliente": r[1] or "", "empresa": r[2] or "",
+        "cnpj": r[3] or "", "segmento": r[4] or "", "whatsapp": r[5] or "",
+        "email": r[6] or "", "modulos": [m for m in (mods or []) if m in _IDS_VALIDOS],
+        "escopo": r[8] or "", "status": r[9] or "rascunho",
+        "setup": brl(r[10]), "mensal": brl(r[11]), "total": brl(r[12]),
+        "n_modulos": r[13] or 0,
+    })
+
+
 class FecharIn(BaseModel):
     id: int
 
@@ -268,10 +316,25 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   <span class="mut" style="font-size:.85rem">{{ empresa_nome }}</span>
 </div>
 <p class="mut" style="margin-top:0">Monte a proposta, salve no funil e feche o contrato — ao fechar, vira título a receber (setup + mensalidade) no módulo Empresa.</p>
+<div id="oc-editando" style="display:none;align-items:center;justify-content:space-between;gap:.6rem;background:#10241d;border:1px solid #1c3a30;border-radius:10px;padding:.5rem .8rem;margin-bottom:.8rem">
+  <span class="t" style="font-size:.85rem;color:var(--verde-claro)"></span>
+  <button id="oc-novo" type="button" class="oc-pill">Nova proposta</button>
+</div>
 
 {% raw %}<style>
 .sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizing:border-box}
 .sv-wrap .card{max-width:none;margin:0 0 1rem}
+/* o base do painel força button{width:100%;margin-top:1.4rem} — reseta aqui e
+   reaplica largura cheia só onde faz sentido (os CTAs do resumo). */
+.sv-wrap button{width:auto;margin-top:0}
+.sv-wrap .oc-tog{width:42px;padding:0}
+.sv-wrap .oc-step button{width:34px;padding:0}
+.sv-wrap .oc-num input{padding:.35rem 0}
+.sv-wrap .oc-btn{width:100%;margin-top:.6rem}
+.sv-wrap #oc-anual{width:100%;margin-top:.7rem}
+.sv-wrap #oc-cnpj-btn,.sv-wrap #oc-sugerir{margin-top:0}
+.sv-wrap h1{font-size:1.5rem}
+.sv-wrap .card h2{font-size:1.05rem}
 .oc-grid{display:grid; grid-template-columns:1fr 320px; gap:1rem; align-items:start}
 @media(max-width:820px){.oc-grid{grid-template-columns:1fr}}
 .oc-field{display:flex; flex-direction:column; gap:.35rem; margin-bottom:.6rem}
@@ -577,14 +640,48 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     var c=calc();
     var modIds=rows().filter(function(r){return r.getAttribute('data-on')==='1';}).map(function(r){return r.getAttribute('data-id');});
     var escEl=document.getElementById('oc-escopo-out');
-    var body={cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',modulos:modIds,escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setup),mensal:Math.round(c.mensal),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods};
+    var body={id:EDIT_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',modulos:modIds,escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setup),mensal:Math.round(c.mensal),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods};
     var btn=this; btn.textContent='Salvando...';
     fetch('/painel/servicos/salvar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-      .then(function(r){return r.json();}).then(function(){btn.textContent='Salvo!'; carregarHist(); setTimeout(function(){btn.textContent='Salvar no funil';},1500);})
+      .then(function(r){return r.json();}).then(function(d){if(d&&d.id){EDIT_ID=d.id;} btn.textContent='Salvo!'; carregarHist(); setTimeout(function(){btn.textContent='Salvar no funil';},1500);})
       .catch(function(){btn.textContent='Erro ao salvar';});
   });
 
   function esc(s){var d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML;}
+  function setv(id,v){var e=document.getElementById(id); if(e){e.value=v||'';}}
+  function marcaMods(ids){
+    rows().forEach(function(r){
+      var on=(ids||[]).indexOf(r.getAttribute('data-id'))>=0;
+      r.setAttribute('data-on',on?'1':'0'); r.classList.toggle('off',!on);
+      r.querySelector('.oc-tog').classList.toggle('on',on);
+    });
+  }
+  var EDIT_ID=null;
+  function novo(){
+    EDIT_ID=null;
+    ['oc-empresa','oc-contato','oc-cnpj','oc-segmento','oc-whats','oc-email','oc-desc'].forEach(function(id){setv(id,'');});
+    var out=document.getElementById('oc-escopo-out'); out.style.display='none'; out.removeAttribute('data-escopo'); out.textContent='';
+    document.getElementById('oc-editando').style.display='none';
+    pinta();
+  }
+  function abrir(id){
+    fetch('/painel/servicos/item/'+id).then(function(r){return r.json();}).then(function(d){
+      if(d.erro){alert('Não consegui abrir essa proposta.'); return;}
+      EDIT_ID=d.id;
+      setv('oc-empresa',d.empresa); setv('oc-contato',d.cliente); setv('oc-cnpj',d.cnpj);
+      setv('oc-segmento',d.segmento); setv('oc-whats',d.whatsapp); setv('oc-email',d.email);
+      marcaMods(d.modulos);
+      var out=document.getElementById('oc-escopo-out');
+      if(d.escopo){out.style.display='block'; out.textContent=d.escopo; out.setAttribute('data-escopo',d.escopo);}
+      else{out.style.display='none'; out.removeAttribute('data-escopo');}
+      var bn=document.getElementById('oc-editando');
+      bn.style.display='flex';
+      bn.querySelector('.t').textContent='Proposta #'+d.id+' · '+d.status+' · '+d.total+' (valores por módulo recalculados pelo catálogo)';
+      pinta();
+      window.scrollTo({top:0,behavior:'smooth'});
+    }).catch(function(){alert('Erro de conexão.');});
+  }
+  document.getElementById('oc-novo').addEventListener('click',novo);
   function fechar(id,btn){
     if(!confirm('Fechar este contrato? Vai gerar título a receber (setup + mensalidade) no módulo Empresa.')){return;}
     btn.disabled=true; btn.textContent='Fechando...';
@@ -604,10 +701,14 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       d.itens.forEach(function(it){
         var el=document.createElement('div'); el.className='oc-hist';
         var fechado=it.status==='fechado';
-        el.innerHTML='<div style="display:flex;align-items:center;min-width:0">'
-          +'<div class="oc-av">'+esc(it.inicial)+'</div>'
+        var left=document.createElement('div'); left.className='oc-hist-open';
+        left.style.cssText='display:flex;align-items:center;min-width:0;flex:1;cursor:pointer';
+        left.title='Abrir proposta';
+        left.innerHTML='<div class="oc-av">'+esc(it.inicial)+'</div>'
           +'<div><b>'+esc(it.cliente)+(it.empresa?' <span class="mut">· '+esc(it.empresa)+'</span>':'')+'</b>'
-          +'<div class="mut" style="font-size:.78rem">'+esc(it.data)+' · '+it.mods+' módulos · '+esc(it.total)+'</div></div></div>';
+          +'<div class="mut" style="font-size:.78rem">'+esc(it.data)+' · '+it.mods+' módulos · '+esc(it.total)+'</div></div>';
+        left.addEventListener('click',function(){abrir(it.id);});
+        el.appendChild(left);
         var right=document.createElement('div'); right.style.display='flex'; right.style.alignItems='center'; right.style.gap='.6rem';
         var badge=document.createElement('span'); badge.className='oc-badge '+(fechado?'fechado':'aberto'); badge.textContent=fechado?'Fechado':esc(it.status);
         right.appendChild(badge);

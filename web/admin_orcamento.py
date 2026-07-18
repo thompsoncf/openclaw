@@ -73,7 +73,9 @@ def _garantir_tabela(c):
         alter table orcamentos add column if not exists canal         text;
         alter table orcamentos add column if not exists follow_up_em  date;
         alter table orcamentos add column if not exists atualizado_em timestamptz not null default now();
+        alter table orcamentos add column if not exists conta_id      bigint references contas(id) on delete restrict;
         create index if not exists idx_orcamentos_status on orcamentos (status, criado_em desc);
+        create index if not exists idx_orcamentos_conta on orcamentos (conta_id, status, criado_em desc);
     """)
     c.commit()
 
@@ -174,7 +176,8 @@ class SalvarIn(BaseModel):
 
 @router.post("/admin/orcamento/salvar")
 def admin_orcamento_salvar(request: Request, dados: SalvarIn):
-    if _admin(request) is None:
+    adm = _admin(request)
+    if adm is None:
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
     ids_validos = {m["id"] for m in _MODULOS}
     modulos = [i for i in (dados.modulos or []) if i in ids_validos]
@@ -182,11 +185,11 @@ def admin_orcamento_salvar(request: Request, dados: SalvarIn):
         _garantir_tabela(c)
         c.execute(
             """insert into orcamentos
-               (cliente, empresa, cnpj, segmento, whatsapp, email, modulos, escopo,
-                canal, setup_centavos, mensal_centavos, primeiro_ano_centavos,
-                n_modulos)
-               values (%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s,%s,%s)""",
-            (dados.cliente or None, dados.empresa or None,
+               (conta_id, cliente, empresa, cnpj, segmento, whatsapp, email,
+                modulos, escopo, canal, setup_centavos, mensal_centavos,
+                primeiro_ano_centavos, n_modulos)
+               values (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s,%s,%s)""",
+            (adm[0], dados.cliente or None, dados.empresa or None,
              (dados.cnpj or "").strip() or None, dados.segmento or None,
              (dados.whatsapp or "").strip() or None, (dados.email or "").strip() or None,
              json.dumps(modulos), (dados.escopo or "").strip() or None,
@@ -200,23 +203,27 @@ def admin_orcamento_salvar(request: Request, dados: SalvarIn):
 
 @router.get("/admin/orcamento/lista")
 def admin_orcamento_lista(request: Request):
-    if _admin(request) is None:
+    adm = _admin(request)
+    if adm is None:
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
     with get_pool().connection() as c:
         _garantir_tabela(c)
         rows = c.execute(
-            """select cliente, empresa, setup_centavos, mensal_centavos,
-                      primeiro_ano_centavos, n_modulos, criado_em
-               from orcamentos order by criado_em desc limit 50""").fetchall()
+            """select id, cliente, empresa, setup_centavos, mensal_centavos,
+                      primeiro_ano_centavos, n_modulos, criado_em, status
+               from orcamentos where conta_id=%s
+               order by criado_em desc limit 50""", (adm[0],)).fetchall()
     itens = [{
-        "cliente": r[0] or "-",
-        "empresa": r[1] or "",
-        "setup": brl(r[2]),
-        "mensal": brl(r[3]),
-        "total": brl(r[4]),
-        "mods": r[5],
-        "data": r[6].strftime("%d/%m") if r[6] else "",
-        "inicial": (r[0] or r[1] or "?").strip()[:1].upper(),
+        "id": r[0],
+        "cliente": r[1] or "-",
+        "empresa": r[2] or "",
+        "setup": brl(r[3]),
+        "mensal": brl(r[4]),
+        "total": brl(r[5]),
+        "mods": r[6],
+        "data": r[7].strftime("%d/%m") if r[7] else "",
+        "status": r[8] or "rascunho",
+        "inicial": (r[1] or r[2] or "?").strip()[:1].upper(),
     } for r in rows]
     return JSONResponse({"itens": itens})
 

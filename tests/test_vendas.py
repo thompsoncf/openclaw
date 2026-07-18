@@ -32,6 +32,7 @@ def pool():
             criado_em timestamptz default now())""")
         c.execute((base / "068_orcamento_pipeline.sql").read_text(encoding="utf-8"))
         c.execute((base / "069_orcamento_cnpj.sql").read_text(encoding="utf-8"))
+        c.execute((base / "070_orcamento_conta.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()
@@ -47,12 +48,13 @@ def conta_id(pool):
     return cid
 
 
-def _orc(pool, *, empresa="Clínica X", setup=450000, mensal=210000, status="enviado"):
+def _orc(pool, conta_id, *, empresa="Clínica X", setup=450000, mensal=210000,
+         status="enviado"):
     with pool.connection() as c:
         oid = c.execute(
-            """insert into orcamentos (empresa, cliente, setup_centavos,
-                   mensal_centavos, status) values (%s,%s,%s,%s,%s) returning id""",
-            (empresa, "Dra. Ana", setup, mensal, status),
+            """insert into orcamentos (conta_id, empresa, cliente, setup_centavos,
+                   mensal_centavos, status) values (%s,%s,%s,%s,%s,%s) returning id""",
+            (conta_id, empresa, "Dra. Ana", setup, mensal, status),
         ).fetchone()[0]
         c.commit()
     return oid
@@ -67,7 +69,7 @@ def _titulos(pool, conta_id):
 
 
 def test_fechar_gera_setup_e_mensal_recorrente(pool, conta_id):
-    oid = _orc(pool, empresa="Clínica Sorriso", setup=450000, mensal=210000)
+    oid = _orc(pool, conta_id, empresa="Clínica Sorriso", setup=450000, mensal=210000)
     r = vendas.fechar_orcamento(pool, conta_id, oid)
     assert r["ok"] and r["setup_titulo_id"] and r["mensal_titulo_id"]
 
@@ -85,7 +87,7 @@ def test_fechar_gera_setup_e_mensal_recorrente(pool, conta_id):
 
 
 def test_fechar_e_idempotente(pool, conta_id):
-    oid = _orc(pool, setup=100000, mensal=50000)
+    oid = _orc(pool, conta_id, setup=100000, mensal=50000)
     assert vendas.fechar_orcamento(pool, conta_id, oid)["ok"] is True
 
     r2 = vendas.fechar_orcamento(pool, conta_id, oid)
@@ -94,7 +96,7 @@ def test_fechar_e_idempotente(pool, conta_id):
 
 
 def test_fechar_sem_setup_so_mensal(pool, conta_id):
-    oid = _orc(pool, setup=0, mensal=90000)
+    oid = _orc(pool, conta_id, setup=0, mensal=90000)
     r = vendas.fechar_orcamento(pool, conta_id, oid)
     assert r["ok"] and r["setup_titulo_id"] is None and r["mensal_titulo_id"]
     ts = _titulos(pool, conta_id)
@@ -103,4 +105,16 @@ def test_fechar_sem_setup_so_mensal(pool, conta_id):
 
 def test_fechar_orcamento_inexistente(pool, conta_id):
     r = vendas.fechar_orcamento(pool, conta_id, 999999)
+    assert r["ok"] is False and "não encontrado" in r["erro"].lower()
+
+
+def test_fechar_escopo_por_conta(pool, conta_id):
+    """Uma empresa não pode fechar o orçamento de outra (multi-tenant)."""
+    with pool.connection() as c:
+        outra = c.execute(
+            "insert into contas (tipo, nome) values ('pj', 'Outra') returning id"
+        ).fetchone()[0]
+        c.commit()
+    oid = _orc(pool, outra, setup=100000, mensal=50000)      # orçamento é de OUTRA conta
+    r = vendas.fechar_orcamento(pool, conta_id, oid)          # tenta com a conta errada
     assert r["ok"] is False and "não encontrado" in r["erro"].lower()

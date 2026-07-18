@@ -58,6 +58,21 @@ def _garantir_tabela(c):
             n_modulos              int default 0,
             criado_em              timestamptz default now()
         )""")
+    # Colunas do pipeline de propostas. O deploy nao roda migracao sozinho, entao
+    # garantimos aqui em runtime (add-if-not-exists e' idempotente e barato). A
+    # migracao 068 faz o mesmo para bases geridas por db/aplicar_migracoes.
+    c.execute("""
+        alter table orcamentos add column if not exists whatsapp      text;
+        alter table orcamentos add column if not exists email         text;
+        alter table orcamentos add column if not exists modulos       jsonb;
+        alter table orcamentos add column if not exists escopo        text;
+        alter table orcamentos add column if not exists status        text not null default 'rascunho';
+        alter table orcamentos add column if not exists criado_por    text;
+        alter table orcamentos add column if not exists canal         text;
+        alter table orcamentos add column if not exists follow_up_em  date;
+        alter table orcamentos add column if not exists atualizado_em timestamptz not null default now();
+        create index if not exists idx_orcamentos_status on orcamentos (status, criado_em desc);
+    """)
     c.commit()
 
 
@@ -122,9 +137,14 @@ class SalvarIn(BaseModel):
     cliente: str = ""
     empresa: str = ""
     segmento: str = ""
-    setup: int = 0          # em REAIS
-    mensal: int = 0         # em REAIS
-    primeiro_ano: int = 0   # em REAIS
+    whatsapp: str = ""
+    email: str = ""
+    modulos: list[str] = []   # ids dos modulos escolhidos
+    escopo: str = ""
+    canal: str = ""
+    setup: int = 0            # em REAIS
+    mensal: int = 0           # em REAIS
+    primeiro_ano: int = 0     # em REAIS
     n_modulos: int = 0
 
 
@@ -132,14 +152,20 @@ class SalvarIn(BaseModel):
 def admin_orcamento_salvar(request: Request, dados: SalvarIn):
     if _admin(request) is None:
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    ids_validos = {m["id"] for m in _MODULOS}
+    modulos = [i for i in (dados.modulos or []) if i in ids_validos]
     with get_pool().connection() as c:
         _garantir_tabela(c)
         c.execute(
             """insert into orcamentos
-               (cliente, empresa, segmento, setup_centavos, mensal_centavos,
-                primeiro_ano_centavos, n_modulos)
-               values (%s,%s,%s,%s,%s,%s,%s)""",
+               (cliente, empresa, segmento, whatsapp, email, modulos, escopo,
+                canal, setup_centavos, mensal_centavos, primeiro_ano_centavos,
+                n_modulos)
+               values (%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s,%s,%s)""",
             (dados.cliente or None, dados.empresa or None, dados.segmento or None,
+             (dados.whatsapp or "").strip() or None, (dados.email or "").strip() or None,
+             json.dumps(modulos), (dados.escopo or "").strip() or None,
+             (dados.canal or "").strip() or None,
              int(dados.setup) * 100, int(dados.mensal) * 100,
              int(dados.primeiro_ano) * 100, int(dados.n_modulos)),
         )
@@ -451,7 +477,9 @@ body.oc-margin .oc-custo-col{display:flex}
   // salvar
   document.getElementById('oc-salvar').addEventListener('click',function(){
     var c=calc();
-    var body={cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',segmento:document.getElementById('oc-segmento').value||'',setup:Math.round(c.setup),mensal:Math.round(c.mensal),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods};
+    var modIds=rows().filter(function(r){return r.getAttribute('data-on')==='1';}).map(function(r){return r.getAttribute('data-id');});
+    var escEl=document.getElementById('oc-escopo-out');
+    var body={cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',modulos:modIds,escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setup),mensal:Math.round(c.mensal),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods};
     var btn=this; btn.textContent='Salvando...';
     fetch('/admin/orcamento/salvar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
       .then(function(r){return r.json();}).then(function(){btn.textContent='Salvo!'; carregarHist(); setTimeout(function(){btn.textContent='Salvar no historico';},1500);})

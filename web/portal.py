@@ -332,6 +332,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if _tem_app %}{{ navi('financeiro','/painel/financeiro','financeiro','Financeiro') }}{% endif %}
   {% if vende_produto or tem_pj or _forn %}<div class="side-grp">Loja</div>{% endif %}
   {% if vende_produto %}{{ navi('abastecimento','/painel/produtos/abastecimento','abastecimento','Abastecimento') }}{% endif %}
+  {% if vende_servico %}{{ navi('servicos','/painel/servicos','financeiro','Serviços') }}{% endif %}
   {% if tem_pj %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{% endif %}
   {% if _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
   {% if _tem_app or _tem_cesta %}<div class="side-grp">Pessoal</div>{% endif %}
@@ -351,6 +352,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   <div class="mais-grab"></div>
   {% if vende_produto or tem_pj or _forn %}<div class="side-grp">Loja</div>{% endif %}
   {% if vende_produto %}{{ navi('abastecimento','/painel/produtos/abastecimento','abastecimento','Abastecimento') }}{% endif %}
+  {% if vende_servico %}{{ navi('servicos','/painel/servicos','financeiro','Serviços') }}{% endif %}
   {% if tem_pj %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{% endif %}
   {% if _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
   {% if _tem_app or _tem_cesta %}<div class="side-grp">Pessoal</div>{% endif %}
@@ -4531,6 +4533,7 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
         _p = request.url.path
         _secs = [("caixa", "/painel/pdv"), ("abastecimento", "/painel/produtos/abastecimento"),
                  ("produtos", "/painel/produtos"), ("clientes", "/painel/clientes"),
+                 ("servicos", "/painel/servicos"),
                  ("financeiro", "/painel/financeiro"), ("empresa", "/painel/empresa"),
                  ("fornecedor", "/painel/fornecedor"), ("assinaturas", "/painel/assinaturas"),
                  ("pedidos", "/painel/meus-pedidos"), ("compras", "/painel/compras"),

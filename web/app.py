@@ -42,7 +42,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from web.portal import router as portal_router
 from web.admin import router as admin_router
 from web.admin_precos import router as precos_router
-from web.admin_orcamento import router as orcamento_router
+from web.painel_servicos import router as servicos_router
 app.add_middleware(
     SessionMiddleware,
     secret_key=os.environ.get("PORTAL_SECRET", "troque-isto-em-producao"),
@@ -59,7 +59,7 @@ app.add_middleware(
 app.include_router(portal_router)
 app.include_router(admin_router)
 app.include_router(precos_router)
-app.include_router(orcamento_router)
+app.include_router(servicos_router)
 
 _FAVICON_SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">'

@@ -53,18 +53,24 @@ async def _gate_permissoes(request: Request, call_next):
     except Exception:  # rota sem sessão
         papel = None
     if papel and papel != "dono":
+        # MEMBRO de equipe: whitelist. Só acessa a(s) área(s) do papel dele — nunca
+        # o /painel do dono (Pessoas da conta, plano) nem áreas de outro papel.
         caps = _caps_do_papel(papel)
         p = request.url.path
-        nega = (
-            (p.startswith("/painel/servicos") and not caps["vendas"])
-            or ((p.startswith("/painel/empresa") or p.startswith("/painel/financeiro")
-                 or p.startswith("/painel/folha")) and not caps["financeiro"])
-            or (p.startswith("/painel/equipe") and not caps["gerir"])
-            or (p.startswith("/membros") and not caps["gerir"])
-        )
-        if nega:
+        home = ("/painel/servicos" if caps["vendas"]
+                else "/painel/empresa" if caps["financeiro"] else "/trocar")
+        permitido = ["/trocar", "/sair"]
+        if caps["vendas"]:
+            permitido.append("/painel/servicos")
+        if caps["financeiro"]:
+            permitido.append("/painel/empresa")   # financeiro da EMPRESA (não o pessoal do dono)
+        if caps["gerir"]:
+            permitido += ["/painel/equipe", "/membros"]
+        # só barra rotas do painel/membros; público, loja e webhooks passam livres.
+        guardado = p == "/painel" or p.startswith("/painel/") or p.startswith("/membros")
+        if guardado and not any(p == a or p.startswith(a + "/") for a in permitido):
             from fastapi.responses import RedirectResponse as _RR
-            return _RR("/painel", status_code=303)
+            return _RR(home if p != home else "/trocar", status_code=303)
     return await call_next(request)
 
 

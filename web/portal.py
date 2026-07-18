@@ -244,10 +244,13 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
 .lk-wpp{background:#25D366;color:#fff;border-color:#25D366}
 .conv-invite{margin:.3rem 0;font-size:.82rem}
 .conv-links{display:flex;gap:4px;flex-wrap:wrap;margin-top:.3rem}
-.abas{display:inline-flex;flex-wrap:wrap;gap:.25rem;background:var(--card-2);padding:.25rem;border-radius:999px;border:1px solid var(--borda);margin:.6rem 0 .9rem}
-.aba{width:auto;background:transparent;color:var(--txt-mut);border:none;padding:.4rem 1rem;border-radius:999px;font-size:14px;cursor:pointer;transition:background .18s,color .18s}
+/* Trilho de abas/chips — mesmo padrão do grupo "Ver lançamentos de" (pessoal/
+   empresa): fundo --card, cantos 9px, itens 6px. align-items:center e o margin:0
+   do .aba evitam a "barriga" que o margin-top do button base causava. */
+.abas{display:inline-flex;align-items:center;flex-wrap:wrap;gap:2px;background:var(--card);padding:3px;border-radius:9px;border:1px solid var(--borda);margin:.6rem 0 .9rem}
+.aba{width:auto;margin:0;display:inline-flex;align-items:center;line-height:1;background:transparent;color:#b4b2a9;border:none;padding:.35rem .8rem;border-radius:6px;font-size:.8rem;cursor:pointer;transition:background .18s,color .18s}
 .aba:hover{color:var(--txt)}
-.aba.on,.aba.ativa{background:var(--verde);color:#fff;font-weight:500}
+.aba.on,.aba.ativa{background:var(--verde);color:#fff;font-weight:600}
 .dica-toque{font-size:.78rem;color:#7a7a78;margin:0 0 .6rem}
 .dephead{font-size:.72rem;font-weight:600;color:#cfcfca;margin:.6rem 0 .3rem .2rem}
 .litem{display:flex;align-items:center;gap:.6rem;padding:.7rem .5rem .7rem .6rem;margin-bottom:.4rem;background:var(--card-2);border-radius:10px;transition:transform .15s,background .2s,opacity .35s,max-height .35s;position:relative;overflow:hidden}

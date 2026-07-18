@@ -1,0 +1,51 @@
+name: CI
+
+# Roda a suíte a cada push na main e em todo pull request.
+# Sobe um Postgres 16 DESCARTÁVEL como service e aponta TEST_DATABASE_URL pra ele.
+# Nunca toca produção: DATABASE_URL não é definida aqui, e a trava em
+# tests/conftest.py já exige um banco de teste separado.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: pytest (Postgres 16)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: openclaw_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Instala dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Roda a suíte
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/openclaw_test
+        run: pytest -q

@@ -42,16 +42,18 @@ def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
     """
     hoje = date.today()
     with pool.connection() as c:
-        # trava atômica: só o primeiro a fechar segue; os demais voltam vazios
+        # trava atômica + escopo por conta: só o dono fecha, e só o primeiro a
+        # fechar segue; os demais (duplo-clique) voltam vazios.
         orc = c.execute(
             """update orcamentos set status='fechado', atualizado_em=now()
-                where id=%s and status <> 'fechado'
+                where id=%s and conta_id=%s and status <> 'fechado'
              returning empresa, cliente, setup_centavos, mensal_centavos""",
-            (orcamento_id,),
+            (orcamento_id, conta_id),
         ).fetchone()
         if not orc:
             estado = c.execute(
-                "select status from orcamentos where id=%s", (orcamento_id,)
+                "select status from orcamentos where id=%s and conta_id=%s",
+                (orcamento_id, conta_id),
             ).fetchone()
             if not estado:
                 return {"ok": False, "erro": "Orçamento não encontrado."}

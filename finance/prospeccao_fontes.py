@@ -129,12 +129,84 @@ def _endereco_partes(componentes) -> tuple[str, str]:
     return cidade, uf
 
 
-def enriquecer_cnpj(cnpj: str) -> dict:
-    """Puxa dados públicos do CNPJ na BrasilAPI (grátis, sem chave).
+def tem_chave_cnpja() -> bool:
+    return bool(os.environ.get("CNPJA_TOKEN"))
 
-    Devolve {"ok", "dados": {...}} ou {"ok": False, "erro"}. Campos: socio,
-    regime_tributario, porte, telefone, email, segmento, cidade, uf, razao_social.
+
+def enriquecer_cnpj(cnpj: str) -> dict:
+    """Enriquece por CNPJ. Se houver CNPJA_TOKEN, usa o CNPJá (mais rico:
+    Simples, sócio, porte, inscrição estadual…); senão, ou se falhar, cai na
+    BrasilAPI (grátis). Devolve {"ok", "dados": {...}} ou {"ok": False, "erro"}.
     """
+    if tem_chave_cnpja():
+        r = enriquecer_cnpj_cnpja(cnpj)
+        if r.get("ok"):
+            return r
+    return _enriquecer_cnpj_brasilapi(cnpj)
+
+
+def enriquecer_cnpj_cnpja(cnpj: str, token: str | None = None) -> dict:
+    """CNPJá comercial: GET /office/{cnpj}. Precisa de CNPJA_TOKEN (header
+    Authorization). Parsing tolerante ao schema Office do CNPJá."""
+    key = token or os.environ.get("CNPJA_TOKEN")
+    if not key:
+        return {"ok": False, "erro": "sem_chave"}
+    d = "".join(c for c in (cnpj or "") if c.isdigit())
+    if len(d) != 14:
+        return {"ok": False, "erro": "cnpj_invalido"}
+    try:
+        r = httpx.get(f"https://api.cnpja.com/office/{d}",
+                      params={"simples": "true", "registrations": "BR"},
+                      headers={"Authorization": key}, timeout=20)
+        if r.status_code != 200:
+            return {"ok": False, "erro": f"http_{r.status_code}", "detalhe": r.text[:200]}
+        j = r.json()
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "erro": "rede", "detalhe": str(e)[:200]}
+
+    comp = j.get("company") or {}
+    membros = comp.get("members") or []
+    socio = None
+    if membros:
+        socio = ((membros[0].get("person") or {}).get("name")) or membros[0].get("name")
+    if (comp.get("simei") or {}).get("optant"):
+        regime = "MEI"
+    elif (comp.get("simples") or {}).get("optant"):
+        regime = "Simples Nacional"
+    else:
+        regime = None
+    size = comp.get("size") or {}
+    addr = j.get("address") or {}
+    phones = j.get("phones") or []
+    tel = None
+    if phones:
+        ph = phones[0]
+        tel = ((ph.get("area") or "") + (ph.get("number") or "")) or None
+    emails = j.get("emails") or []
+    email = (emails[0].get("address") if emails else None)
+    reg = j.get("registrations") or []
+    ie = None
+    for x in reg:
+        if x.get("enabled") and x.get("number"):
+            ie = f"{x.get('number')} ({x.get('state', '')})".strip()
+            break
+    dados = {
+        "razao_social": comp.get("name") or j.get("alias"),
+        "socio": socio,
+        "regime_tributario": regime,
+        "porte": (size.get("text") or size.get("acronym") or "").strip() or None,
+        "telefone": tel,
+        "email": (email or "").strip().lower() or None,
+        "segmento": (j.get("mainActivity") or {}).get("text"),
+        "cidade": (addr.get("city") or "").title().strip() or None,
+        "uf": (addr.get("state") or "").strip().upper() or None,
+        "inscricao_estadual": ie,
+    }
+    return {"ok": True, "dados": dados}
+
+
+def _enriquecer_cnpj_brasilapi(cnpj: str) -> dict:
+    """BrasilAPI (grátis, sem chave)."""
     d = "".join(c for c in (cnpj or "") if c.isdigit())
     if len(d) != 14:
         return {"ok": False, "erro": "cnpj_invalido"}

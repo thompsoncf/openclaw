@@ -1249,12 +1249,12 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 
         <form id="edit-dados" method="post" action="/painel/prospeccao/{{ a.id }}/editar" style="display:none;margin-top:.8rem;border-top:1px solid var(--borda);padding-top:.8rem">
           <div class="egrid">
+            <div class="full"><label class="lbl">CNPJ <span class="mut" style="font-weight:400">— cole aqui e puxe tudo da Receita</span></label><div style="display:flex;gap:.3rem"><input class="fld" name="cnpj" inputmode="numeric" placeholder="00.000.000/0000-00" value="{{ a.cnpj or '' }}"><button type="button" class="pbtn ghost" style="padding:.5rem .6rem;white-space:nowrap" onclick="fichaCnpj()" title="Preencher tudo pela Receita">↓ Receita</button></div></div>
             <div><label class="lbl">Contato</label><input class="fld" name="contato" value="{{ a.contato or '' }}"></div>
             <div><label class="lbl">Cargo</label><input class="fld" name="cargo" value="{{ a.cargo or '' }}"></div>
             <div><label class="lbl">Telefone</label><input class="fld" name="telefone" value="{{ a.telefone or '' }}"></div>
             <div><label class="lbl">WhatsApp</label><input class="fld" name="whatsapp" value="{{ a.whatsapp or '' }}"></div>
             <div><label class="lbl">E-mail</label><input class="fld" name="email" value="{{ a.email or '' }}"></div>
-            <div><label class="lbl">CNPJ</label><div style="display:flex;gap:.3rem"><input class="fld" name="cnpj" value="{{ a.cnpj or '' }}"><button type="button" class="pbtn ghost" style="padding:.5rem .6rem;white-space:nowrap" onclick="fichaCnpj()" title="Preencher tudo pela Receita">↓ Receita</button></div></div>
             <div><label class="lbl">Segmento</label><input class="fld" name="segmento" value="{{ a.segmento or '' }}"></div>
             <div><label class="lbl">Cidade</label><input class="fld" name="cidade" value="{{ a.cidade or '' }}"></div>
             <div><label class="lbl">UF</label><input class="fld" name="uf" maxlength="2" value="{{ a.uf or '' }}"></div>
@@ -1320,11 +1320,22 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 function prospToggle(id){var e=document.getElementById(id);e.style.display=(e.style.display==='none')?'block':'none';}
 function rcPick(el){var box=document.getElementById('rc-pills');box.querySelectorAll('.rcpill').forEach(function(b){b.classList.remove('on');});el.classList.add('on');document.getElementById('rc-tipo').value=el.getAttribute('data-tipo');}
 function fToast(msg){var t=document.getElementById('f-toast');if(!t){t=document.createElement('div');t.id='f-toast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--card);border:1px solid var(--verde);color:var(--verde-claro);padding:.6rem 1rem;border-radius:10px;z-index:200;font-size:.85rem;box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .4s';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';clearTimeout(window._ft);window._ft=setTimeout(function(){t.style.opacity='0';},2600);}
+function cnpjManualBox(id){
+  // caixa pra colar o CNPJ achado por fora (Google) e aplicar direto — mesma
+  // rota do "usar" (grava + puxa a Receita; o backend valida os 14 dígitos).
+  // Sem precisar abrir "editar".
+  return '<form method="post" action="/painel/prospeccao/'+id+'/aplicar-cnpj" '
+    +'style="display:flex;gap:.3rem;align-items:center;margin-top:.5rem;border-top:1px dashed var(--borda);padding-top:.5rem">'
+    +'<span class="mut" style="font-size:.76rem;white-space:nowrap">Já tem o CNPJ?</span>'
+    +'<input class="fld" name="cnpj" inputmode="numeric" placeholder="cole aqui" style="flex:1;padding:.4rem .55rem">'
+    +'<button class="pbtn" style="padding:.35rem .8rem;font-size:.78rem;margin:0">usar</button></form>';
+}
 function acharCnpj(id,btn){var box=document.getElementById('cnpj-cands');var endLead=(btn&&btn.getAttribute('data-endereco'))||'';box.innerHTML='<div class="mut" style="font-size:.8rem">Procurando CNPJ…</div>';
   fetch('/painel/prospeccao/'+id+'/buscar-cnpj',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
     var webBtn=d.web?('<a class="pbtn" style="padding:.35rem .8rem;font-size:.8rem;margin-top:.4rem;display:inline-flex" target="_blank" rel="noopener" href="'+d.web+'">🔎 buscar na web</a>'):'';
-    if(!d.ok){box.innerHTML='<div class="mut" style="font-size:.8rem;color:#e0a33e">Não achei ('+(d.erro||'?')+').</div>'+webBtn+'<div class="mut" style="font-size:.76rem;margin-top:.3rem">ou preencha o CNPJ em <b>editar</b>.</div>';return;}
-    if(!d.itens||!d.itens.length){box.innerHTML='<div class="mut" style="font-size:.8rem">Nenhum CNPJ nessa cidade pra esse nome.</div>'+webBtn+'<div class="mut" style="font-size:.76rem;margin-top:.3rem">ou preencha o CNPJ em <b>editar</b>.</div>';return;}
+    var manual=cnpjManualBox(id);
+    if(!d.ok){box.innerHTML='<div class="mut" style="font-size:.8rem;color:#e0a33e">Não achei ('+(d.erro||'?')+').</div>'+webBtn+manual;return;}
+    if(!d.itens||!d.itens.length){box.innerHTML='<div class="mut" style="font-size:.8rem">Nenhum CNPJ nessa cidade pra esse nome.</div>'+webBtn+manual;return;}
     var h='';
     if(endLead){h+='<div class="mut" style="font-size:.76rem;margin:.1rem 0 .3rem">📍 Endereço do lead: <b>'+jsEsc(endLead)+'</b> — escolha o que bate:</div>';}
     else{h+='<div class="lb" style="margin:.2rem 0">Escolha a empresa certa (confira o endereço):</div>';}
@@ -1339,8 +1350,9 @@ function acharCnpj(id,btn){var box=document.getElementById('cnpj-cands');var end
     });
     h+='</div>';
     if(d.web){h+='<div style="margin-top:.4rem"><a class="mut" style="font-size:.76rem" target="_blank" rel="noopener" href="'+d.web+'">nenhuma bate? buscar na web →</a></div>';}
+    h+=manual;
     box.innerHTML=h;
-  }).catch(function(){box.innerHTML='<div class="mut" style="font-size:.8rem;color:#e0a33e">Falha de rede.</div>';});}
+  }).catch(function(){box.innerHTML='<div class="mut" style="font-size:.8rem;color:#e0a33e">Falha de rede.</div>'+cnpjManualBox(id);});}
 function jsEsc(s){return (s||'').replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];});}
 function fichaCnpj(){var f=document.getElementById('edit-dados');var cnpj=f.querySelector('[name=cnpj]').value.replace(/\\D/g,'');if(cnpj.length!==14){fToast('CNPJ precisa ter 14 dígitos');return;}
   fToast('Consultando Receita…');

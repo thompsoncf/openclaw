@@ -753,8 +753,20 @@ async def webhook_twilio(request: Request):
     form = await request.form()
     params = {k: str(v) for k, v in form.items()}
     assinatura = request.headers.get("X-Twilio-Signature", "")
-    url = wa.url_webhook() or str(request.url)
+    # a Twilio assina com a URL PÚBLICA exata que ela chamou. Atrás do proxy do
+    # Render, request.url vem com host/esquema internos — então reconstruímos a
+    # partir dos cabeçalhos encaminhados (Host público + https).
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+    if host:
+        proto = request.headers.get("x-forwarded-proto", "https")
+        url = f"{proto}://{host}{request.url.path}"
+    else:
+        url = wa.url_webhook() or str(request.url)
     if not wa.validar_assinatura(url, params, assinatura):
+        import logging
+        logging.getLogger("prospeccao").info(
+            "webhook_twilio: assinatura inválida · url=%s · From=%s · To=%s",
+            url, params.get("From", ""), params.get("To", ""))
         return Response(status_code=403)
     corpo = params.get("Body", "")
     remetente = _so_digitos(params.get("From", ""))

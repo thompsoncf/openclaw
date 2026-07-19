@@ -304,7 +304,14 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
                        whatsapp=%s, email=%s, modulos=%s::jsonb, itens=%s::jsonb, escopo=%s, canal=%s,
                        setup_centavos=%s, mensal_centavos=%s, primeiro_ano_centavos=%s,
                        n_modulos=%s, atualizado_em=now(),
-                       token=coalesce(token, %s)
+                       token=coalesce(token, %s),
+                       -- editar uma proposta JÁ assinada a reabre: volta pra 'enviado'
+                       -- e limpa a assinatura (os termos mudaram → precisa re-aprovar).
+                       status=case when status='aprovada' then 'enviado' else status end,
+                       aprovada_por=case when status='aprovada' then null else aprovada_por end,
+                       aprovada_em=case when status='aprovada' then null else aprovada_em end,
+                       aprovada_doc=case when status='aprovada' then null else aprovada_doc end,
+                       aprovada_ip=case when status='aprovada' then null else aprovada_ip end
                      where id=%s and conta_id=%s and status <> 'fechado'
                    returning id, token""",
                 vals + (secrets.token_urlsafe(16), dados.id, conta[0])).fetchone()
@@ -388,24 +395,25 @@ def painel_servicos_item(request: Request, orc_id: int):
         r = c.execute(
             """select id, cliente, empresa, cnpj, segmento, whatsapp, email,
                       modulos, escopo, status, setup_centavos, mensal_centavos,
-                      primeiro_ano_centavos, n_modulos
+                      primeiro_ano_centavos, n_modulos, itens
                  from orcamentos where id=%s and conta_id=%s""" + dono_filtro,
             args).fetchone()
     if not r:
         return JSONResponse({"erro": "não encontrado"}, status_code=404)
-    mods = r[7]
-    if isinstance(mods, str):
-        try:
-            mods = json.loads(mods)
-        except Exception:
-            mods = []
+    def _jsonb(v):
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except Exception:
+                return []
+        return v or []
     return JSONResponse({
         "id": r[0], "cliente": r[1] or "", "empresa": r[2] or "",
         "cnpj": r[3] or "", "segmento": r[4] or "", "whatsapp": r[5] or "",
-        "email": r[6] or "", "modulos": [str(m) for m in (mods or [])],
+        "email": r[6] or "", "modulos": [str(m) for m in (_jsonb(r[7]))],
         "escopo": r[8] or "", "status": r[9] or "rascunho",
         "setup": brl(r[10]), "mensal": brl(r[11]), "total": brl(r[12]),
-        "n_modulos": r[13] or 0,
+        "n_modulos": r[13] or 0, "itens": _jsonb(r[14]),
     })
 
 
@@ -894,12 +902,20 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       setv('oc-empresa',d.empresa); setv('oc-contato',d.cliente); setv('oc-cnpj',d.cnpj);
       setv('oc-segmento',d.segmento); setv('oc-whats',d.whatsapp); setv('oc-email',d.email);
       marcaMods(d.modulos);
+      // restaura os valores EXATOS que estavam salvos (não recalcula pelo catálogo)
+      (d.itens||[]).forEach(function(it){
+        var r=rows().filter(function(x){return x.getAttribute('data-nome')===it.nome;})[0];
+        if(r){ var s=r.querySelector('.oc-setup'), m=r.querySelector('.oc-mensal');
+          if(s&&it.setup!=null) s.value=it.setup;
+          if(m&&it.mensal!=null) m.value=it.mensal; }
+      });
       var out=document.getElementById('oc-escopo-out');
       if(d.escopo){out.style.display='block'; out.textContent=d.escopo; out.setAttribute('data-escopo',d.escopo);}
       else{out.style.display='none'; out.removeAttribute('data-escopo');}
       var bn=document.getElementById('oc-editando');
       bn.style.display='flex';
-      bn.querySelector('.t').textContent='Proposta #'+d.id+' · '+d.status+' · '+d.total+' (valores por módulo recalculados pelo catálogo)';
+      var aviso=(d.status==='aprovada')?' · ⚠ editar vai pedir nova aprovação do cliente':'';
+      bn.querySelector('.t').textContent='Editando proposta #'+d.id+' · '+d.status+aviso+' — salve pra atualizar o link do cliente.';
       pinta();
       window.scrollTo({top:0,behavior:'smooth'});
     }).catch(function(){alert('Erro de conexão.');});
@@ -938,6 +954,11 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         badge.className='oc-badge '+(fechado?'fechado':(aprovada?'fechado':'aberto'));
         badge.textContent=fechado?'Fechado':(aprovada?('Aprovada'+(it.aprovada_por?' · '+esc(it.aprovada_por):'')):esc(it.status));
         right.appendChild(badge);
+        if(!fechado){
+          var be=document.createElement('button'); be.className='oc-ic'; be.title='Editar proposta'; be.textContent='✏️';
+          be.addEventListener('click',function(){abrir(it.id);});
+          right.appendChild(be);
+        }
         if(it.token){
           var lk=window.location.origin+'/proposta/'+it.token;
           var bl=document.createElement('button'); bl.className='oc-ic'; bl.title='Copiar link do cliente'; bl.textContent='🔗';

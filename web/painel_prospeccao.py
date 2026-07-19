@@ -577,7 +577,7 @@ def _data_para_ts(v: str):
 
 # ================================================================ CSS + TEMPLATES
 _CSS = """<style>
-.pw{max-width:1240px;margin:0 auto}
+.pw{max-width:1240px;margin:0 auto;padding:1.2rem 1rem 2.5rem}
 .pw h2.tt{margin:0;font-size:1.35rem}
 .pbtn{width:auto;margin:0;padding:.5rem .9rem;border-radius:9px;font-size:.86rem;font-weight:600;
   background:var(--verde);color:#fff;border:0;cursor:pointer;display:inline-flex;align-items:center;gap:.4rem;text-decoration:none}
@@ -616,7 +616,7 @@ _CSS = """<style>
 @media(min-width:900px){
   .kbtabs{display:none}
   .kbrow{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.55rem}
-  .kbcol{display:flex !important;min-height:56vh}
+  .kbcol{display:flex !important;min-height:180px}
 }
 /* ---- ficha ---- */
 .fgrid{display:grid;grid-template-columns:1.05fr 1fr;gap:1rem;margin-top:1rem;align-items:start}
@@ -661,8 +661,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <h2 class="tt">Prospecção</h2>
       <div class="mut" style="font-size:.82rem;margin-top:.15rem">{{ total_alvos }} alvo(s){% if total_valor %} · pipeline {{ brl(total_valor) }}{% endif %}</div>
     </div>
-    <a class="pbtn ghost" href="/painel/prospeccao/captar">🎯 Captar leads</a>
-    <button type="button" class="pbtn" onclick="prospToggle('novo-alvo')">+ Novo alvo</button>
+    <a class="pbtn" href="/painel/prospeccao/captar">🎯 Captar leads</a>
   </div>
 
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
@@ -677,25 +676,6 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </select>
   </form>
   {% endif %}
-
-  <div id="novo-alvo" class="fsec" style="display:none;margin-top:1rem;max-width:760px">
-    <div class="sh"><b>Novo alvo</b><button type="button" class="pbtn ghost" onclick="prospToggle('novo-alvo')">Fechar</button></div>
-    <form method="post" action="/painel/prospeccao/novo" class="egrid">
-      <input type="hidden" name="voltar" value="/painel/prospeccao">
-      <div class="full"><label class="lbl">Empresa *</label><input class="fld" name="empresa" required placeholder="Nome da empresa"></div>
-      <div><label class="lbl">Segmento</label><input class="fld" name="segmento" placeholder="Ex: pet shop"></div>
-      <div><label class="lbl">Cidade</label><input class="fld" name="cidade"></div>
-      <div><label class="lbl">UF</label><input class="fld" name="uf" maxlength="2" style="text-transform:uppercase"></div>
-      <div><label class="lbl">Contato</label><input class="fld" name="contato" placeholder="Pessoa"></div>
-      <div><label class="lbl">Telefone</label><input class="fld" name="telefone"></div>
-      <div><label class="lbl">WhatsApp</label><input class="fld" name="whatsapp"></div>
-      <div><label class="lbl">CNPJ</label><input class="fld" name="cnpj"></div>
-      <div><label class="lbl">Valor estimado (R$)</label><input class="fld" name="valor" inputmode="decimal" placeholder="0,00"></div>
-      <div><label class="lbl">Temperatura</label><select class="fld" name="temperatura">{% for v,l in temperaturas_all %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
-      {% if gerencia %}<div><label class="lbl">Vendedor</label><select class="fld" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
-      <div class="full"><button class="pbtn" style="margin:.3rem 0 0">Adicionar</button></div>
-    </form>
-  </div>
 
   <!-- abas de status (só mobile) -->
   <div class="kbtabs" id="kbtabs">
@@ -723,7 +703,6 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 </div>
 
 <script>
-function prospToggle(id){var e=document.getElementById(id);e.style.display=(e.style.display==='none')?'block':'none';}
 function kbTab(s){document.querySelectorAll('.kbcol').forEach(function(c){c.classList.toggle('show',c.getAttribute('data-status')===s);});
   document.querySelectorAll('.kbtab').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===s);});}
 (function(){var cols=document.querySelectorAll('#kbrow .kbcol');var alvo='novo';

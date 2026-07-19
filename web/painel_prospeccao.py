@@ -789,14 +789,26 @@ async def webhook_twilio(request: Request):
                  where conta_id=%s and right(regexp_replace(coalesce(whatsapp, telefone, ''), '\D', '', 'g'), 8) = %s
                  order by atualizado_em desc limit 1""", (conta_id, alvo8)).fetchone()
         lead_id = lead[0] if lead else None
-        if lead_id:
-            conv = c.execute("select id from conversas where conta_id=%s and prospeccao_id=%s and canal='whatsapp'",
-                             (conta_id, lead_id)).fetchone()
-        else:
-            conv = c.execute("select id from conversas where conta_id=%s and contato_ref=%s and canal='whatsapp'",
-                             (conta_id, remetente)).fetchone()
+        if not lead_id:
+            # contato NOVO (landing/WhatsApp) → vira lead QUENTE, não atribuído (o
+            # dono distribui). Usa o nome do perfil do WhatsApp quando a Twilio manda.
+            nome = (params.get("ProfileName") or "").strip() or "Contato WhatsApp"
+            lead_id = c.execute(
+                """insert into prospeccao (conta_id, vendedor_id, empresa, whatsapp,
+                     origem, temperatura, status)
+                   values (%s, null, %s, %s, 'whatsapp_inbound', 'quente', 'novo') returning id""",
+                (conta_id, nome[:250], "+" + remetente)).fetchone()[0]
+        # acha a conversa do lead OU uma órfã por contato_ref (e vincula ela ao lead)
+        conv = c.execute(
+            """select id, prospeccao_id from conversas
+                where conta_id=%s and canal='whatsapp'
+                  and (prospeccao_id=%s or (prospeccao_id is null and contato_ref=%s))
+                order by ultima_msg_em desc limit 1""",
+            (conta_id, lead_id, remetente)).fetchone()
         if conv:
             conv_id = conv[0]
+            if conv[1] is None:
+                c.execute("update conversas set prospeccao_id=%s where id=%s", (lead_id, conv_id))
         else:
             conv_id = c.execute(
                 """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status)

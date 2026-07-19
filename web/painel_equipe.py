@@ -174,7 +174,7 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
       <div class="avatar">{{ (m.nome or m.email or '?')[:1]|upper }}</div>
       <div style="flex:1;min-width:160px">
         <b>{{ m.nome }}</b>
-        {% if not m.aceitou %}<span class="tag" style="background:#2a2212;color:#e0b25a">convite pendente</span>
+        {% if m.pendente %}<span class="tag" style="background:#2a2212;color:#e0b25a">convite pendente</span>
         {% elif not m.ativo %}<span class="tag" style="background:#3a1a1a;color:#e07a5f">desativado</span>
         {% else %}<span class="tag">ativo</span>{% endif %}
         <div class="mut" style="font-size:.78rem">{{ m.email }} · {{ m.rotulo }}</div>

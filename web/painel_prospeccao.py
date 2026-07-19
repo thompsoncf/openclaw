@@ -549,6 +549,39 @@ def _canais_status(pool, conta_id: int) -> dict:
     }
 
 
+_AGENTE_PADRAO = {"ativo": False, "limiar_confianca": 80, "horario": "comercial",
+                  "tom": "informal", "max_trocas": 4, "escalar_para": "dono_lead",
+                  "pode_responder": True, "pode_qualificar": True, "pode_agendar": True,
+                  "pode_orcamento": True, "orcamento_proativo": False}
+
+
+def _agente_config(c, conta_id: int) -> dict:
+    """Config do agente da empresa (defaults se ainda não salvou)."""
+    r = c.execute(
+        """select ativo, limiar_confianca, horario, tom, max_trocas, escalar_para,
+                  pode_responder, pode_qualificar, pode_agendar, pode_orcamento, orcamento_proativo
+             from agente_config where conta_id=%s""", (conta_id,)).fetchone()
+    if not r:
+        return dict(_AGENTE_PADRAO)
+    ks = ["ativo", "limiar_confianca", "horario", "tom", "max_trocas", "escalar_para",
+          "pode_responder", "pode_qualificar", "pode_agendar", "pode_orcamento", "orcamento_proativo"]
+    return dict(zip(ks, r))
+
+
+def _agente_conhecimento(c, conta_id: int) -> dict:
+    """Base de conhecimento: {instrucoes: texto, faqs: [{id, pergunta, resposta}]}."""
+    rows = c.execute(
+        "select id, tipo, pergunta, resposta from agente_conhecimento where conta_id=%s order by ordem, id",
+        (conta_id,)).fetchall()
+    instr, faqs = "", []
+    for (id_, tipo, perg, resp) in rows:
+        if tipo == "instrucoes":
+            instr = resp or ""
+        else:
+            faqs.append({"id": id_, "pergunta": perg or "", "resposta": resp or ""})
+    return {"instrucoes": instr, "faqs": faqs}
+
+
 @router.get("/painel/prospeccao/comunicacao", response_class=HTMLResponse)
 def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str = "", vendedor: str = ""):
     """Hub omnichannel: Conversas · E-mails · Agente · Canais (lê de conversas/mensagens)."""
@@ -616,12 +649,17 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
                 emails.append({"quando": e[0], "empresa": e[1],
                                "quem": "Você" if e[2] and e[2] == ctx["membro_id"] else (e[3] or "—"),
                                "cabecalho": cab.strip(), "preview": " ".join(corpo.split())[:80]})
+        ag_cfg, ag_conhec = None, None
+        if aba == "agente":
+            ag_cfg = _agente_config(c, ctx["conta_id"])
+            ag_conhec = _agente_conhecimento(c, ctx["conta_id"])
     vends = _vendedores(pool, ctx["conta_id"]) if ctx["gerencia"] else []
     return _render("prospeccao_comunicacao", request, titulo="Comunicação",
                    secao_ativa="prospeccao", aba=aba, convs=convs, emails=emails, canal=canal,
                    canais=_canais_status(pool, ctx["conta_id"]), canal_rot=CANAL_ROT,
                    gerencia=ctx["gerencia"], vendedores=vends, filtro_vend=filtro_vend,
                    remetente=remetente_configurado(), tem_ia=_tem_ia(),
+                   ag_cfg=ag_cfg, ag_conhec=ag_conhec,
                    aviso=request.session.pop("prosp_aviso", None))
 
 
@@ -749,6 +787,96 @@ def comunicacao_canal_numero(request: Request, canal: str = Form(...), numero: s
         msg = "Esse número já está vinculado a outra empresa."
     request.session["prosp_aviso"] = msg
     return RedirectResponse(destino, status_code=303)
+
+
+_AG_DESTINO = "/painel/prospeccao/comunicacao?aba=agente"
+
+
+@router.post("/painel/prospeccao/comunicacao/agente-config")
+async def comunicacao_agente_config(request: Request):
+    """Salva a config do Agente (por empresa). Só dono/gestor."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "Só o dono/gestor configura o agente."
+        return RedirectResponse(_AG_DESTINO, status_code=303)
+    f = await request.form()
+    def _b(k):
+        return bool(f.get(k))
+    def _i(k, pad, lo, hi):
+        try:
+            return max(lo, min(hi, int(f.get(k) or pad)))
+        except (ValueError, TypeError):
+            return pad
+    horario = f.get("horario") if f.get("horario") in ("comercial", "24h") else "comercial"
+    tom = f.get("tom") if f.get("tom") in ("informal", "formal") else "informal"
+    escalar = f.get("escalar_para") if f.get("escalar_para") in ("dono_lead", "plantao") else "dono_lead"
+    vals = (_b("ativo"), _i("limiar_confianca", 80, 50, 95), horario, tom,
+            _i("max_trocas", 4, 1, 20), escalar, _b("pode_responder"), _b("pode_qualificar"),
+            _b("pode_agendar"), _b("pode_orcamento"), _b("orcamento_proativo"))
+    with get_pool().connection() as c:
+        c.execute(
+            """insert into agente_config (conta_id, ativo, limiar_confianca, horario, tom,
+                 max_trocas, escalar_para, pode_responder, pode_qualificar, pode_agendar,
+                 pode_orcamento, orcamento_proativo)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               on conflict (conta_id) do update set
+                 ativo=excluded.ativo, limiar_confianca=excluded.limiar_confianca,
+                 horario=excluded.horario, tom=excluded.tom, max_trocas=excluded.max_trocas,
+                 escalar_para=excluded.escalar_para, pode_responder=excluded.pode_responder,
+                 pode_qualificar=excluded.pode_qualificar, pode_agendar=excluded.pode_agendar,
+                 pode_orcamento=excluded.pode_orcamento, orcamento_proativo=excluded.orcamento_proativo,
+                 atualizado_em=now()""",
+            (ctx["conta_id"], *vals))
+        c.commit()
+    request.session["prosp_aviso"] = "Agente atualizado ✓"
+    return RedirectResponse(_AG_DESTINO, status_code=303)
+
+
+@router.post("/painel/prospeccao/comunicacao/agente-instrucoes")
+def comunicacao_agente_instrucoes(request: Request, texto: str = Form("")):
+    """Salva as instruções gerais do agente (uma linha tipo='instrucoes' por conta)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        return RedirectResponse(_AG_DESTINO, status_code=303)
+    with get_pool().connection() as c:
+        c.execute("delete from agente_conhecimento where conta_id=%s and tipo='instrucoes'", (ctx["conta_id"],))
+        if (texto or "").strip():
+            c.execute("""insert into agente_conhecimento (conta_id, tipo, resposta, ordem)
+                         values (%s,'instrucoes',%s,0)""", (ctx["conta_id"], texto.strip()[:4000]))
+        c.commit()
+    request.session["prosp_aviso"] = "Instruções salvas ✓"
+    return RedirectResponse(_AG_DESTINO, status_code=303)
+
+
+@router.post("/painel/prospeccao/comunicacao/agente-faq")
+def comunicacao_agente_faq(request: Request, pergunta: str = Form(""), resposta: str = Form(""),
+                           excluir: str = Form("")):
+    """Adiciona ou exclui uma pergunta/resposta da base do agente."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        return RedirectResponse(_AG_DESTINO, status_code=303)
+    with get_pool().connection() as c:
+        if excluir.isdigit():
+            c.execute("delete from agente_conhecimento where id=%s and conta_id=%s and tipo='faq'",
+                      (int(excluir), ctx["conta_id"]))
+            msg = "Pergunta removida."
+        elif (pergunta or "").strip() and (resposta or "").strip():
+            c.execute("""insert into agente_conhecimento (conta_id, tipo, pergunta, resposta, ordem)
+                         values (%s,'faq',%s,%s,
+                           coalesce((select max(ordem)+1 from agente_conhecimento where conta_id=%s and tipo='faq'),1))""",
+                      (ctx["conta_id"], pergunta.strip()[:300], resposta.strip()[:2000], ctx["conta_id"]))
+            msg = "Pergunta adicionada ✓"
+        else:
+            msg = "Preencha pergunta e resposta."
+        c.commit()
+    request.session["prosp_aviso"] = msg
+    return RedirectResponse(_AG_DESTINO, status_code=303)
 
 
 @router.post("/webhooks/twilio")
@@ -2027,7 +2155,21 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .st-off{color:#e0a33e;border-color:#5a4520;background:#241d10}
 .cx-env{font-family:ui-monospace,Menlo,monospace;font-size:.76rem;background:var(--bg);border:1px solid var(--borda);border-radius:8px;padding:.5rem .6rem;color:var(--txt-mut);margin-top:.5rem}
 .cx-env b{color:var(--verde-claro)}
-@media(max-width:900px){.cx-grid{grid-template-columns:1fr}.cx-ctx{order:3}.cx-cc{grid-template-columns:1fr}}
+.sw{position:relative;display:inline-block;width:42px;height:24px;flex-shrink:0}
+.sw input{opacity:0;width:0;height:0}
+.sw span{position:absolute;inset:0;background:#333;border-radius:999px;cursor:pointer;transition:.15s}
+.sw span::before{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;background:#eee;border-radius:50%;transition:.15s}
+.sw input:checked+span{background:var(--verde)}
+.sw input:checked+span::before{transform:translateX(18px);background:#04140d}
+.agrow{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.55rem 0;border-top:1px solid var(--borda)}
+.agrow:first-of-type{border-top:0}
+.agrow .lab b{font-size:.88rem}.agrow .lab div{color:var(--txt-mut);font-size:.76rem;margin-top:.1rem}
+.aggrid{display:grid;grid-template-columns:1fr 1fr;gap:.7rem;margin-top:.3rem}
+.agfield label{display:block;font-size:.74rem;text-transform:uppercase;letter-spacing:.04em;color:var(--txt-mut);margin-bottom:.25rem}
+.agfaq{border:1px solid var(--borda);border-radius:10px;padding:.55rem .65rem;margin-bottom:.45rem;background:var(--bg);display:flex;gap:.6rem;align-items:flex-start}
+.agfaq .q b{font-size:.85rem}.agfaq .q p{margin:.15rem 0 0;color:var(--txt-mut);font-size:.8rem}
+.tag-new{font-size:.6rem;padding:.05rem .4rem;border-radius:999px;background:#241634;color:#c9a3e0;border:1px solid #4a3163;margin-left:.35rem}
+@media(max-width:900px){.cx-grid{grid-template-columns:1fr}.cx-ctx{order:3}.cx-cc{grid-template-columns:1fr}.aggrid{grid-template-columns:1fr}}
 </style>
 <div class="cx-wrap">
   <div class="cx-head">
@@ -2103,11 +2245,72 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   </div>
 
   {% elif aba=='agente' %}
-  <div class="cx-card" style="margin-top:.8rem;text-align:center;padding:2rem">
-    <div style="font-size:2rem">🤖</div>
-    <h3 style="margin:.4rem 0">Agente IA</h3>
-    <p class="mut" style="max-width:440px;margin:.2rem auto">Config (liga/desliga, confiança, autonomia, handoff) e treino (base de conhecimento) chegam na próxima entrega. A estrutura já está pronta aqui embaixo.</p>
+  {% if not gerencia %}
+  <div class="cx-card" style="margin-top:.8rem"><p class="mut" style="margin:0">Só o dono/gestor configura o Agente.</p></div>
+  {% else %}
+  {% if not tem_ia %}<div class="cx-card" style="margin-top:.8rem;border-color:#5a4520"><p class="mut" style="margin:0;color:#e0a33e">⚠️ A IA ainda não está configurada no ambiente (falta a chave). O agente só responde depois disso — mas você já pode deixar tudo configurado aqui.</p></div>{% endif %}
+  <form method="post" action="/painel/prospeccao/comunicacao/agente-config" class="cx-cc" style="align-items:start">
+    <div>
+      <div class="cx-card">
+        <div style="display:flex;align-items:center;gap:.7rem">
+          <div style="font-size:1.6rem">🤖</div>
+          <div style="flex:1"><b style="font-size:1rem">Agente de Atendimento</b><div class="mut" style="font-size:.8rem">Responde os leads, qualifica e te passa quando precisa.</div></div>
+          <label class="sw"><input type="checkbox" name="ativo" {% if ag_cfg.ativo %}checked{% endif %}><span></span></label>
+        </div>
+      </div>
+      <div class="cx-card">
+        <h3>⚙️ Comportamento</h3>
+        <div class="agfield" style="margin:.5rem 0"><label>Confiança mínima pra responder sozinho: <b style="color:#c9a3e0" id="lim-v">{{ ag_cfg.limiar_confianca }}%</b></label>
+          <input type="range" name="limiar_confianca" min="50" max="95" value="{{ ag_cfg.limiar_confianca }}" style="width:100%;accent-color:#7b4fb0" oninput="document.getElementById('lim-v').textContent=this.value+'%'"></div>
+        <div class="aggrid">
+          <div class="agfield"><label>Responder em</label><select class="fld" name="horario"><option value="comercial" {% if ag_cfg.horario=='comercial' %}selected{% endif %}>Horário comercial</option><option value="24h" {% if ag_cfg.horario=='24h' %}selected{% endif %}>24 horas</option></select></div>
+          <div class="agfield"><label>Tom</label><select class="fld" name="tom"><option value="informal" {% if ag_cfg.tom=='informal' %}selected{% endif %}>Informal</option><option value="formal" {% if ag_cfg.tom=='formal' %}selected{% endif %}>Formal</option></select></div>
+          <div class="agfield"><label>Máx. trocas antes de te chamar</label><input class="fld" name="max_trocas" inputmode="numeric" value="{{ ag_cfg.max_trocas }}"></div>
+          <div class="agfield"><label>Escalar para</label><select class="fld" name="escalar_para"><option value="dono_lead" {% if ag_cfg.escalar_para=='dono_lead' %}selected{% endif %}>Dono do lead</option><option value="plantao" {% if ag_cfg.escalar_para=='plantao' %}selected{% endif %}>Vendedor de plantão</option></select></div>
+        </div>
+      </div>
+      <div class="cx-card">
+        <h3>✅ O que ele faz sozinho</h3>
+        <div class="agrow"><div class="lab"><b>Responder dúvidas frequentes</b><div>Usa a base de conhecimento ao lado</div></div><label class="sw"><input type="checkbox" name="pode_responder" {% if ag_cfg.pode_responder %}checked{% endif %}><span></span></label></div>
+        <div class="agrow"><div class="lab"><b>Qualificar o lead</b><div>Mede interesse e ajusta a temperatura</div></div><label class="sw"><input type="checkbox" name="pode_qualificar" {% if ag_cfg.pode_qualificar %}checked{% endif %}><span></span></label></div>
+        <div class="agrow"><div class="lab"><b>Agendar follow-up</b></div><label class="sw"><input type="checkbox" name="pode_agendar" {% if ag_cfg.pode_agendar %}checked{% endif %}><span></span></label></div>
+        <div class="agrow"><div class="lab"><b>Gerar orçamento prévio quando o cliente pedir<span class="tag-new">novo</span></b><div>Monta rascunho com serviços + preço e manda o link</div></div><label class="sw"><input type="checkbox" name="pode_orcamento" {% if ag_cfg.pode_orcamento %}checked{% endif %}><span></span></label></div>
+        <div class="agrow"><div class="lab"><b>Oferecer orçamento proativamente</b><div>Sem o cliente pedir</div></div><label class="sw"><input type="checkbox" name="orcamento_proativo" {% if ag_cfg.orcamento_proativo %}checked{% endif %}><span></span></label></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end"><button class="pbtn">Salvar configuração</button></div>
+    </div>
+    <div>
+      <div class="cx-card">
+        <h3>🙋 Quando ele te passa (handoff)</h3>
+        <div class="mut" style="font-size:.84rem;line-height:1.9">✓ O cliente pede pra falar com uma pessoa<br>✓ Sentimento negativo / reclamação<br>✓ Confiança abaixo do limiar<br>✓ Negociação de preço / fechamento<br>✓ Assunto fora do escopo dos serviços</div>
+      </div>
+    </div>
+  </form>
+
+  <div class="cx-card">
+    <h3>🧠 Treinar o agente</h3>
+    <p class="mut" style="font-size:.82rem;margin:.1rem 0 .6rem">Quanto melhor a base, melhor ele responde. Já funciona antes mesmo do WhatsApp.</p>
+    <form method="post" action="/painel/prospeccao/comunicacao/agente-instrucoes">
+      <div class="agfield"><label>Sobre a empresa / instruções gerais</label>
+        <textarea class="fld" name="texto" rows="3" placeholder="Ex: Somos a X, ajudamos comércios de Teresina a... Nunca prometa prazo/desconto sem confirmar com o vendedor.">{{ ag_conhec.instrucoes }}</textarea></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:.4rem"><button class="pbtn ghost">Salvar instruções</button></div>
+    </form>
+    <div style="border-top:1px solid var(--borda);margin:.8rem 0;padding-top:.7rem">
+      <label class="agfield" style="display:block;margin-bottom:.4rem"><span style="font-size:.74rem;text-transform:uppercase;letter-spacing:.04em;color:var(--txt-mut)">Perguntas & respostas</span></label>
+      {% for q in ag_conhec.faqs %}
+      <div class="agfaq"><div class="q" style="flex:1"><b>{{ q.pergunta }}</b><p>{{ q.resposta }}</p></div>
+        <form method="post" action="/painel/prospeccao/comunicacao/agente-faq" style="margin:0"><input type="hidden" name="excluir" value="{{ q.id }}"><button class="pbtn ghost" style="padding:.3rem .55rem;font-size:.76rem" title="Remover">🗑</button></form></div>
+      {% else %}<p class="mut" style="font-size:.82rem">Nenhuma pergunta cadastrada ainda.</p>{% endfor %}
+      <form method="post" action="/painel/prospeccao/comunicacao/agente-faq" style="margin-top:.5rem">
+        <div class="aggrid">
+          <div class="agfield"><label>Pergunta</label><input class="fld" name="pergunta" placeholder="Quanto custa?"></div>
+          <div class="agfield"><label>Resposta</label><input class="fld" name="resposta" placeholder="A partir de R$149/mês. Posso montar um orçamento?"></div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:.4rem"><button class="pbtn">+ Adicionar pergunta</button></div>
+      </form>
+    </div>
   </div>
+  {% endif %}
 
   {% else %}
   <p class="mut" style="margin:.8rem 0 0">Todos os canais num lugar só. As credenciais ficam no ambiente (Render); aqui você vê o status e conecta cada um quando o acesso libera.</p>

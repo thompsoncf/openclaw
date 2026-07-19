@@ -136,6 +136,25 @@ def _vendedor_destino(ctx: dict, vendedor_id: str, pool, conta_id: int):
     return vid if ok else None
 
 
+def _eh_ajax(request: Request) -> bool:
+    return request.headers.get("x-requested-with") == "fetch"
+
+
+def _nome_vendedor(pool, conta_id: int, vid):
+    if not vid:
+        return None
+    with pool.connection() as c:
+        r = c.execute("select coalesce(nullif(nome,''), email) from membros where id=%s and conta_id=%s",
+                      (vid, conta_id)).fetchone()
+    return r[0] if r else None
+
+
+def _lead_card(id_, empresa, segmento, cidade, uf, temperatura, valor, vendedor):
+    """Payload mínimo pra o JS montar um card no kanban (sem recarregar)."""
+    return {"id": id_, "empresa": empresa, "segmento": segmento or "", "cidade": cidade or "",
+            "uf": uf or "", "temperatura": temperatura, "valor": int(valor or 0), "vendedor": vendedor}
+
+
 # ================================================================ KANBAN
 @router.get("/painel/prospeccao", response_class=HTMLResponse)
 def prospeccao_kanban(request: Request, vendedor: str = ""):
@@ -182,7 +201,8 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
                    status=STATUS, colunas=colunas, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
                    temperaturas_all=TEMPERATURAS, gerencia=ctx["gerencia"],
                    vendedores=vends, filtro_vend=filtro_vend, total_valor=total_valor,
-                   total_alvos=len(rows), aviso=request.session.pop("prosp_aviso", None))
+                   total_alvos=len(rows), tem_places=fontes.tem_chave_places(),
+                   aviso=request.session.pop("prosp_aviso", None))
 
 
 # ================================================================ ADD MANUAL
@@ -197,25 +217,34 @@ def prospeccao_novo(request: Request, empresa: str = Form(...), segmento: str = 
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
+    ajax = _eh_ajax(request)
     empresa = (empresa or "").strip()
     destino = voltar if voltar in ("/painel/prospeccao", "/painel/prospeccao/captar") else "/painel/prospeccao"
     if not empresa:
+        if ajax:
+            return JSONResponse({"ok": False, "erro": "Informe ao menos o nome da empresa."}, status_code=400)
         request.session["prosp_aviso"] = "Informe ao menos o nome da empresa."
         return RedirectResponse(destino, status_code=303)
     temperatura = temperatura if temperatura in TEMP_OK else "frio"
-    vend = _vendedor_destino(ctx, vendedor_id, get_pool(), ctx["conta_id"])
-    with get_pool().connection() as c:
-        c.execute(
+    pool = get_pool()
+    vend = _vendedor_destino(ctx, vendedor_id, pool, ctx["conta_id"])
+    with pool.connection() as c:
+        row = c.execute(
             """insert into prospeccao (conta_id, vendedor_id, empresa, segmento, cidade,
                  uf, contato, telefone, whatsapp, email, cnpj, temperatura,
                  valor_estimado_centavos, origem, obs, criado_por)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
             (ctx["conta_id"], vend, empresa, segmento.strip() or None, cidade.strip() or None,
              (uf or "").strip()[:2].upper() or None, contato.strip() or None,
              telefone.strip() or None, whatsapp.strip() or None, email.strip().lower() or None,
              cnpj.strip() or None, temperatura, _reais_para_centavos(valor),
-             (origem or "manual").strip() or None, obs.strip() or None, ctx["membro_id"]))
+             (origem or "manual").strip() or None, obs.strip() or None, ctx["membro_id"])).fetchone()
         c.commit()
+    if ajax:
+        lead = _lead_card(row[0], empresa, segmento.strip(), cidade.strip(),
+                          (uf or "").strip()[:2].upper(), temperatura, _reais_para_centavos(valor),
+                          _nome_vendedor(pool, ctx["conta_id"], vend) if ctx["gerencia"] else None)
+        return JSONResponse({"ok": True, "lead": lead})
     request.session["prosp_aviso"] = f"“{empresa}” entrou na prospecção."
     return RedirectResponse(destino, status_code=303)
 
@@ -290,8 +319,10 @@ async def captar_csv(request: Request, arquivo: UploadFile = File(...),
                  (pega("email").lower() or None), pega("cnpj") or None, ctx["membro_id"]))
             inseridos += 1
         c.commit()
-    request.session["prosp_aviso"] = (
-        f"{inseridos} lead(s) importado(s) do CSV." + (f" {pulados} linha(s) sem nome ignorada(s)." if pulados else ""))
+    msg = f"{inseridos} lead(s) importado(s) do CSV." + (f" {pulados} linha(s) sem nome ignorada(s)." if pulados else "")
+    if _eh_ajax(request):
+        return JSONResponse({"ok": True, "inseridos": inseridos, "pulados": pulados, "msg": msg})
+    request.session["prosp_aviso"] = msg
     return RedirectResponse("/painel/prospeccao", status_code=303)
 
 
@@ -311,9 +342,15 @@ def captar_buscar(request: Request, segmento: str = Form(...), cidade: str = For
                            "p": i["place_id"], "s": 1 if i["tem_site"] else 0,
                            "tp": i["temperatura"], "en": i["endereco"],
                            "r": i.get("rating"), "n": i.get("avaliacoes")})
+    n_redes = sum(1 for x in res.get("itens", []) if x["rede"]) if esconder else 0
     busca = {"segmento": segmento, "cidade": cidade, "esconder": esconder,
-             "ok": res.get("ok"), "erro": res.get("erro"),
-             "n_redes": sum(1 for x in res.get("itens", []) if x["rede"]) if esconder else 0}
+             "ok": res.get("ok"), "erro": res.get("erro"), "n_redes": n_redes}
+    if _eh_ajax(request):
+        enxuto = [{"empresa": i["empresa"], "telefone": i["telefone"], "rating": i.get("rating"),
+                   "tem_site": i["tem_site"], "endereco": i["endereco"],
+                   "temperatura": i["temperatura"], "pack": i["pack"]} for i in itens]
+        return JSONResponse({"ok": res.get("ok"), "erro": res.get("erro"),
+                             "itens": enxuto, "n_redes": n_redes})
     return _render_captar(request, ctx, aba="google", resultados=itens, busca=busca)
 
 
@@ -322,11 +359,13 @@ async def captar_importar(request: Request):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
+    pool = get_pool()
     form = await request.form()
     escolhidos = form.getlist("itens")
-    vend = _vendedor_destino(ctx, form.get("vendedor_id", ""), get_pool(), ctx["conta_id"])
-    inseridos, dup = 0, 0
-    with get_pool().connection() as c:
+    vend = _vendedor_destino(ctx, form.get("vendedor_id", ""), pool, ctx["conta_id"])
+    nome_vend = _nome_vendedor(pool, ctx["conta_id"], vend) if ctx["gerencia"] else None
+    inseridos, dup, leads = 0, 0, []
+    with pool.connection() as c:
         for token in escolhidos:
             d = _unpack(token)
             if not d or not d.get("e"):
@@ -339,17 +378,20 @@ async def captar_importar(request: Request):
             obs = d.get("en") or ""
             if d.get("r"):
                 obs = (obs + f" · nota {d['r']} ({d.get('n', 0)} aval.)").strip(" ·")
-            c.execute(
+            temp = d.get("tp") if d.get("tp") in TEMP_OK else "frio"
+            row = c.execute(
                 """insert into prospeccao (conta_id, vendedor_id, empresa, cidade,
                      telefone, temperatura, tem_site, place_id, origem, obs, criado_por)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,'google_places',%s,%s)""",
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,'google_places',%s,%s) returning id""",
                 (ctx["conta_id"], vend, d["e"][:250], d.get("c") or None,
-                 d.get("t") or None, d.get("tp") if d.get("tp") in TEMP_OK else "frio",
-                 bool(d.get("s")), pid, obs or None, ctx["membro_id"]))
+                 d.get("t") or None, temp, bool(d.get("s")), pid, obs or None, ctx["membro_id"])).fetchone()
+            leads.append(_lead_card(row[0], d["e"][:250], "", d.get("c") or "", "", temp, 0, nome_vend))
             inseridos += 1
         c.commit()
-    request.session["prosp_aviso"] = (
-        f"{inseridos} lead(s) adicionado(s) do Google." + (f" {dup} já existia(m)." if dup else ""))
+    msg = f"{inseridos} lead(s) adicionado(s) do Google." + (f" {dup} já existia(m)." if dup else "")
+    if _eh_ajax(request):
+        return JSONResponse({"ok": True, "inseridos": inseridos, "dup": dup, "leads": leads, "msg": msg})
+    request.session["prosp_aviso"] = msg
     return RedirectResponse("/painel/prospeccao", status_code=303)
 
 
@@ -659,12 +701,69 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   <div style="display:flex;align-items:flex-start;gap:.6rem;flex-wrap:wrap">
     <div style="flex:1;min-width:170px">
       <h2 class="tt">Prospecção</h2>
-      <div class="mut" style="font-size:.82rem;margin-top:.15rem">{{ total_alvos }} alvo(s){% if total_valor %} · pipeline {{ brl(total_valor) }}{% endif %}</div>
+      <div class="mut" style="font-size:.82rem;margin-top:.15rem"><span id="kb-total-n">{{ total_alvos }}</span> alvo(s){% if total_valor %} · pipeline {{ brl(total_valor) }}{% endif %}</div>
     </div>
-    <a class="pbtn" href="/painel/prospeccao/captar">🎯 Captar leads</a>
+    <button type="button" class="pbtn" onclick="capToggle()">🎯 Captar leads</button>
   </div>
 
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
+
+  <!-- painel de captação inline (abre pra baixo, sem sair da página) -->
+  <div id="captar" class="fsec" style="display:none;margin-top:1rem">
+    <div class="cabas">
+      <button type="button" class="caba on" data-tab="manual" onclick="capTab('manual')">✏️ Manual</button>
+      <button type="button" class="caba" data-tab="csv" onclick="capTab('csv')">📄 CSV</button>
+      <button type="button" class="caba" data-tab="google" onclick="capTab('google')">📍 Google Maps</button>
+    </div>
+
+    <div class="captab" data-tab="manual">
+      <form id="cap-manual" action="/painel/prospeccao/novo" method="post" onsubmit="return capManual(event)" class="egrid">
+        <input type="hidden" name="voltar" value="/painel/prospeccao">
+        <div class="full"><label class="lbl">Empresa *</label><input class="fld" name="empresa" required placeholder="Nome da empresa"></div>
+        <div><label class="lbl">Segmento</label><input class="fld" name="segmento" placeholder="Ex: pet shop"></div>
+        <div><label class="lbl">Cidade</label><input class="fld" name="cidade"></div>
+        <div><label class="lbl">UF</label><input class="fld" name="uf" maxlength="2" style="text-transform:uppercase"></div>
+        <div><label class="lbl">Contato</label><input class="fld" name="contato"></div>
+        <div><label class="lbl">Telefone</label><input class="fld" name="telefone"></div>
+        <div><label class="lbl">WhatsApp</label><input class="fld" name="whatsapp"></div>
+        <div><label class="lbl">CNPJ</label><input class="fld" name="cnpj"></div>
+        <div><label class="lbl">Valor (R$)</label><input class="fld" name="valor" inputmode="decimal" placeholder="0,00"></div>
+        <div><label class="lbl">Temperatura</label><select class="fld" name="temperatura">{% for v,l in temperaturas_all %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
+        {% if gerencia %}<div><label class="lbl">Vendedor</label><select class="fld" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
+        <div class="full"><button class="pbtn" style="margin:.3rem 0 0">Adicionar</button></div>
+      </form>
+    </div>
+
+    <div class="captab" data-tab="csv" style="display:none">
+      <form id="cap-csv" action="/painel/prospeccao/captar/csv" method="post" enctype="multipart/form-data" onsubmit="return capCsv(event)">
+        <label class="lbl">Arquivo CSV</label>
+        <input class="fld" type="file" name="arquivo" accept=".csv,text/csv" required>
+        <div class="mut" style="font-size:.8rem;margin-top:.5rem">1ª linha = cabeçalho. Colunas: <b>empresa</b>, telefone, whatsapp, cidade, uf, segmento, contato, email, cnpj. Separador , ou ;.</div>
+        {% if gerencia %}<div style="max-width:280px;margin-top:.6rem"><label class="lbl">Atribuir a</label><select class="fld" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
+        <button class="pbtn" style="margin-top:.8rem">Importar CSV</button>
+      </form>
+    </div>
+
+    <div class="captab" data-tab="google" style="display:none">
+      {% if not tem_places %}
+      <div class="mut" style="font-size:.84rem;line-height:1.6">📍 Pra buscar no Google Maps falta a chave. No Render (openclaw-web → Environment) adicione <code style="background:var(--bg);padding:.1rem .35rem;border-radius:5px;border:1px solid var(--borda)">GOOGLE_PLACES_API_KEY</code> (Places API New, billing ativo).</div>
+      {% else %}
+      <form id="cap-google" action="/painel/prospeccao/captar/buscar" method="post" onsubmit="return capBuscar(event)">
+        <div class="egrid">
+          <div><label class="lbl">Segmento</label><input class="fld" name="segmento" required placeholder="Ex: pet shop"></div>
+          <div><label class="lbl">Cidade</label><input class="fld" name="cidade" placeholder="Ex: Teresina - PI"></div>
+        </div>
+        <label class="rrow" style="border:1px solid var(--borda);border-radius:10px;margin-top:.6rem;cursor:pointer">
+          <span class="toggle"><input type="checkbox" name="esconder_redes" value="1" checked><span class="tgl"></span></span>
+          <span style="font-size:.88rem">Esconder redes grandes (Petz, Drogasil…)</span>
+        </label>
+        {% if gerencia %}<div style="max-width:280px;margin-top:.6rem"><label class="lbl">Atribuir a</label><select class="fld" id="cap-g-vend" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
+        <button class="pbtn" style="margin-top:.8rem" id="cap-g-btn">Buscar</button>
+      </form>
+      <div id="cap-res" style="margin-top:.9rem"></div>
+      {% endif %}
+    </div>
+  </div>
 
   {% if gerencia %}
   <form method="get" action="/painel/prospeccao" style="margin-top:.8rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
@@ -724,6 +823,39 @@ function kbDrop(ev,status){ev.preventDefault();ev.currentTarget.classList.remove
         var tabc=document.querySelector('.kbtab[data-tab="'+col.getAttribute('data-status')+'"] .c');if(tabc)tabc.textContent=n;
         var dp=col.querySelector('.kbdrop');if(n===0&&!dp.querySelector('.kbempty')){var e=document.createElement('div');e.className='kbempty';e.textContent='vazio';dp.appendChild(e);}});
     }).catch(function(){location.reload();});}
+
+// ---- captação inline (sem reload) ----
+var TEMPCOR={frio:'#5b9bd5',morno:'#e0a33e',quente:'#e0574f'};
+function jsEsc(s){return (s||'').replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];});}
+function jsBrl(c){c=c||0;var s=(c/100).toFixed(2).split('.');var i=s[0].replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.');return 'R$ '+i+','+s[1];}
+function cardGo(id){if(!window._kbMoved)location.href='/painel/prospeccao/'+id;}
+function updCounts(){var tot=0;document.querySelectorAll('.kbcol').forEach(function(col){var n=col.querySelectorAll('.kbcard').length;tot+=n;var chip=col.querySelector('.kbcnt');if(chip)chip.textContent=n;var tc=document.querySelector('.kbtab[data-tab="'+col.getAttribute('data-status')+'"] .c');if(tc)tc.textContent=n;});var tn=document.getElementById('kb-total-n');if(tn)tn.textContent=tot;}
+function addCard(l){var col=document.querySelector('.kbcol[data-status="novo"]');if(!col)return;var drop=col.querySelector('.kbdrop');var e=drop.querySelector('.kbempty');if(e)e.remove();
+  var cor=TEMPCOR[l.temperatura]||'#5b9bd5';
+  var sub=(l.segmento||l.cidade)?('<div class="sub">'+(l.segmento?jsEsc(l.segmento):'')+(l.cidade?(' · '+jsEsc(l.cidade)+(l.uf?('/'+jsEsc(l.uf)):'')):'')+'</div>'):'';
+  var ft='<div class="ft">'+(l.valor?('<span style="font-size:.76rem;color:var(--verde-claro)">'+jsBrl(l.valor)+'</span>'):'<span></span>')+'<span></span></div>';
+  var vd=l.vendedor?('<div class="mut" style="font-size:.72rem;margin-top:.28rem">👤 '+jsEsc(l.vendedor)+'</div>'):'';
+  var html='<div class="kbcard" draggable="true" data-id="'+l.id+'" ondragstart="kbDrag(event,'+l.id+')" ondragend="kbEnd(event)" onclick="cardGo('+l.id+')"><div style="display:flex;align-items:center;gap:.4rem"><span class="tdot" style="background:'+cor+'"></span><span class="emp">'+jsEsc(l.empresa)+'</span></div>'+sub+ft+vd+'</div>';
+  drop.insertAdjacentHTML('afterbegin',html);updCounts();}
+function capToggle(){var e=document.getElementById('captar');var vis=e.style.display!=='none';e.style.display=vis?'none':'block';if(!vis){var i=e.querySelector('.captab[data-tab=manual] input[name=empresa]');if(i)i.focus();e.scrollIntoView({behavior:'smooth',block:'nearest'});}}
+function capTab(t){document.querySelectorAll('#captar .caba').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===t);});document.querySelectorAll('#captar .captab').forEach(function(d){d.style.display=(d.getAttribute('data-tab')===t)?'block':'none';});}
+function capFetch(url,fd){return fetch(url,{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();});}
+function capManual(ev){ev.preventDefault();var f=ev.target;capFetch('/painel/prospeccao/novo',new FormData(f)).then(function(d){if(!d.ok){capToast(d.erro||'Erro');return;}addCard(d.lead);f.reset();capToast('Lead adicionado');}).catch(function(){capToast('Falha de rede');});return false;}
+function capCsv(ev){ev.preventDefault();capFetch('/painel/prospeccao/captar/csv',new FormData(ev.target)).then(function(d){if(!d.ok){capToast('Erro no CSV');return;}capToast(d.msg||'Importado');setTimeout(function(){location.reload();},800);}).catch(function(){capToast('Falha de rede');});return false;}
+function capBuscar(ev){ev.preventDefault();var f=ev.target;var btn=document.getElementById('cap-g-btn');if(btn){btn.disabled=true;btn.textContent='Buscando…';}
+  capFetch('/painel/prospeccao/captar/buscar',new FormData(f)).then(function(d){if(btn){btn.disabled=false;btn.textContent='Buscar';}var box=document.getElementById('cap-res');
+    if(!d.ok){box.innerHTML='<div class="mut" style="color:#e0a33e">Não consegui buscar ('+(d.erro||'?')+'). Confira a chave/billing e tente de novo.</div>';return;}
+    if(!d.itens.length){box.innerHTML='<div class="mut">Nada encontrado'+(d.n_redes?(' ('+d.n_redes+' rede(s) oculta(s))'):'')+'. Tente outro termo/cidade.</div>';return;}
+    var TP={quente:'#f0917f',morno:'#e0b25a',frio:'#7bb8e6'};
+    var h='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem"><div class="mut" style="font-size:.82rem">'+d.itens.length+' encontrado(s)'+(d.n_redes?(' · '+d.n_redes+' oculta(s)'):'')+'</div><label class="mut" style="font-size:.8rem;cursor:pointer"><input type="checkbox" onclick="capAll(this)" style="width:auto;vertical-align:middle;accent-color:var(--verde)"> marcar todos</label></div><div class="rlist" id="cap-list">';
+    d.itens.forEach(function(it){h+='<label class="rrow" style="cursor:pointer"><input type="checkbox" name="itens" value="'+it.pack+'"><span style="flex:1"><span style="display:flex;align-items:center;gap:.4rem"><span class="tdot" style="background:'+(TEMPCOR[it.temperatura]||'#5b9bd5')+'"></span><b style="font-size:.88rem">'+jsEsc(it.empresa)+'</b></span><span class="mut" style="font-size:.76rem">'+(it.telefone?jsEsc(it.telefone):'')+(it.rating?(' · nota '+it.rating):'')+(it.tem_site?'':' · <span style=\\'color:#e0574f\\'>sem site</span>')+(it.endereco?(' · '+jsEsc(it.endereco)):'')+'</span></span><span class="tpill" style="background:transparent;border:1px solid '+(TP[it.temperatura]||'#7bb8e6')+';color:'+(TP[it.temperatura]||'#7bb8e6')+'">'+it.temperatura+'</span></label>';});
+    h+='</div><div style="margin-top:.8rem"><button type="button" class="pbtn" onclick="capImport()">Adicionar selecionados</button></div>';box.innerHTML=h;
+  }).catch(function(){if(btn){btn.disabled=false;btn.textContent='Buscar';}capToast('Falha de rede');});return false;}
+function capAll(el){document.querySelectorAll('#cap-list input[name=itens]').forEach(function(c){c.checked=el.checked;});}
+function capImport(){var packs=[];document.querySelectorAll('#cap-list input[name=itens]:checked').forEach(function(c){packs.push(c.value);});if(!packs.length){capToast('Marque ao menos um');return;}
+  var fd=new FormData();packs.forEach(function(p){fd.append('itens',p);});var vs=document.getElementById('cap-g-vend');if(vs)fd.append('vendedor_id',vs.value);
+  capFetch('/painel/prospeccao/captar/importar',fd).then(function(d){if(!d.ok){capToast('Erro ao importar');return;}(d.leads||[]).forEach(addCard);capToast(d.msg||'Adicionados');document.getElementById('cap-res').innerHTML='';var gf=document.getElementById('cap-google');if(gf)gf.reset();}).catch(function(){capToast('Falha de rede');});}
+function capToast(msg){var t=document.getElementById('cap-toast');if(!t){t=document.createElement('div');t.id='cap-toast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--card);border:1px solid var(--verde);color:var(--verde-claro);padding:.6rem 1rem;border-radius:10px;z-index:200;font-size:.85rem;box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .4s';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';clearTimeout(window._captoastT);window._captoastT=setTimeout(function(){t.style.opacity='0';},2600);}
 </script>
 {% endblock %}"""
 

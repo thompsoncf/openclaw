@@ -12,6 +12,17 @@ rede devolve {"ok": False, "erro": ...} em vez de estourar exceção.
 from __future__ import annotations
 
 import os
+import unicodedata
+
+
+def _norm(s: str) -> str:
+    """minúsculo, sem acento, sem sufixo ' - UF' / '/UF' — pra comparar cidade."""
+    s = (s or "").strip()
+    for sep in (" - ", " – ", "/"):
+        if sep in s:
+            s = s.split(sep)[0]
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
+    return s.strip().lower()
 
 import httpx
 
@@ -277,6 +288,7 @@ def buscar_cnpj_por_nome(nome: str, cidade: str = "", uf: str = "",
             break
     if lst is None:
         lst = j if isinstance(j, list) else []
+    cid_lead = _norm(cidade)
     itens = []
     for o in lst:
         if not isinstance(o, dict):
@@ -289,6 +301,9 @@ def buscar_cnpj_por_nome(nome: str, cidade: str = "", uf: str = "",
         it_uf = (addr.get("state") or "").upper()
         # filtro por UF no cliente (garante, mesmo se a API ignorou o param)
         if uf and it_uf and it_uf != uf:
+            continue
+        # filtro por CIDADE: só candidatos da mesma cidade do lead (bate o endereço).
+        if cid_lead and _norm(addr.get("city") or "") != cid_lead:
             continue
         pe = []
         if addr.get("street"):
@@ -304,9 +319,6 @@ def buscar_cnpj_por_nome(nome: str, cidade: str = "", uf: str = "",
             "endereco": " · ".join(pe),
             "situacao": (o.get("status") or {}).get("text") or "",
         })
-    cid = (cidade or "").strip().lower()
-    if cid:
-        itens.sort(key=lambda x: 0 if cid in (x["cidade"] or "").lower() else 1)
     return {"ok": True, "itens": itens, "erro": None}
 
 

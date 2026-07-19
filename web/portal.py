@@ -482,6 +482,7 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
 .kpi .peq{font-size:.72rem;color:var(--txt-mut)}
 .kpi .chip{display:inline-flex;align-items:center;gap:4px;font-size:.7rem;font-weight:650;background:#3a2a12;color:#fab219;border-radius:999px;padding:.12rem .5rem;width:fit-content}
 .dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:26px}
+.dash-grid.solo{grid-template-columns:1fr}
 .dash-grid>div{min-width:0}
 .sub-h{font-size:.82rem;font-weight:650;margin:0 0 14px;color:var(--txt)}
 .sub-h span{color:var(--txt-mut);font-weight:500}
@@ -557,7 +558,7 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
 
   <div class="dash-div"></div>
 
-  <div class="dash-grid">
+  <div class="dash-grid{% if not dash.tem_funil %} solo{% endif %}">
     <div>
       <h3 class="sub-h">Entradas × saídas <span>· mês atual</span></h3>
       {% set maxrd = [dash.dre.receitas_centavos, dash.dre.despesas_centavos, 1]|max %}
@@ -583,6 +584,7 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
       {% if dash.dre.a_definir_n %}<p class="mut" style="font-size:.76rem;margin:.7rem 0 0">{{ dash.dre.a_definir_n }} lançamento(s) a classificar ({{ dash.dre.a_definir_centavos|brl }}) fora do resultado.</p>{% endif %}
     </div>
 
+    {% if dash.tem_funil %}
     <div>
       <h3 class="sub-h">Funil de vendas <span>· propostas por status</span></h3>
       {% if dash.funil_total %}
@@ -606,6 +608,7 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
       </div>
       {% endif %}
     </div>
+    {% endif %}
   </div>
 
   <div class="dash-div"></div>
@@ -5030,11 +5033,15 @@ _FUNIL_COR = {"rascunho": "#9ec5f4", "enviado": "#6da7ec", "negociando": "#3987e
               "aprovada": "#256abf", "fechado": "#184f95", "perdido": "#5f5f5a"}
 
 
-def _painel_dashboard(pool, conta):
+def _painel_dashboard(pool, conta, vende_servico=False):
     """Monta os dados do dashboard do /painel (KPIs financeiros + funil de vendas).
 
     Reusa os helpers do módulo Empresa (mesmos de /painel/empresa). Tolerante:
     conta sem títulos/orçamentos vira dashboard zerado, sem quebrar.
+
+    Segmentação por nicho: o financeiro é universal p/ todo PJ, mas o funil de
+    propostas só faz sentido pra quem VENDE SERVIÇO (conta[14]). Conta de produto
+    puro não roda a query nem vê a pizza — `tem_funil` fica False.
     """
     from finance import empresa as emp
     hoje = _date.today()
@@ -5050,22 +5057,23 @@ def _painel_dashboard(pool, conta):
             (conta[0],)).fetchone()
     mrr_centavos = int(mrr_row[0] or 0) if mrr_row else 0
 
-    # Funil de propostas por status (tabela pode não existir p/ quem nunca vendeu).
+    # Funil de propostas por status — SÓ pra quem vende serviço (segmento).
     contagem = {s: 0 for s in _FUNIL_ORDEM}
     setup = {s: 0 for s in _FUNIL_ORDEM}
     mensal = {s: 0 for s in _FUNIL_ORDEM}
-    try:
-        with pool.connection() as c:
-            for st, n, s, m in c.execute(
-                "select status, count(*), coalesce(sum(setup_centavos),0), "
-                "coalesce(sum(mensal_centavos),0) from orcamentos "
-                "where conta_id=%s group by status", (conta[0],)).fetchall():
-                if st in contagem:
-                    contagem[st] = int(n or 0)
-                    setup[st] = int(s or 0)
-                    mensal[st] = int(m or 0)
-    except Exception:
-        pass  # sem tabela orcamentos → funil vazio
+    if vende_servico:
+        try:
+            with pool.connection() as c:
+                for st, n, s, m in c.execute(
+                    "select status, count(*), coalesce(sum(setup_centavos),0), "
+                    "coalesce(sum(mensal_centavos),0) from orcamentos "
+                    "where conta_id=%s group by status", (conta[0],)).fetchall():
+                    if st in contagem:
+                        contagem[st] = int(n or 0)
+                        setup[st] = int(s or 0)
+                        mensal[st] = int(m or 0)
+        except Exception:
+            pass  # sem tabela orcamentos → funil vazio
 
     total = sum(contagem.values())
     fechadas = contagem["fechado"]
@@ -5104,6 +5112,7 @@ def _painel_dashboard(pool, conta):
     return {
         "res": res, "dre": dre, "fluxo": fluxo,
         "mrr_centavos": mrr_centavos,
+        "tem_funil": bool(vende_servico),
         "funil_total": total, "funil_conversao": conversao,
         "funil_previsto": valor_previsto, "funil_recorrente": novo_recorrente,
         "funil_legenda": legenda, "funil_gradiente": gradiente,
@@ -5138,7 +5147,7 @@ def painel(request: Request):
     dash = None
     if conta[11] and _caps.get("financeiro"):
         try:
-            dash = _painel_dashboard(pool, conta)
+            dash = _painel_dashboard(pool, conta, vende_servico=bool(conta[14]))
         except Exception:
             dash = None  # nunca deixa o dashboard derrubar o painel
     return _render("painel", request, conta=conta, membros=membros, titulo="Painel",

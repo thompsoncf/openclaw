@@ -101,7 +101,9 @@ def _seed(pool, cid):
 
 def test_dashboard_numeros(pool, conta_id):
     _seed(pool, conta_id)
-    d = portal._painel_dashboard(pool, _conta16(conta_id))
+    d = portal._painel_dashboard(pool, _conta16(conta_id), vende_servico=True)
+
+    assert d["tem_funil"] is True
 
     # resumo de títulos (janela 30d)
     assert d["res"]["a_receber_centavos"] == 1_360_000
@@ -135,12 +137,31 @@ def test_dashboard_numeros(pool, conta_id):
 
 
 def test_dashboard_conta_vazia(pool, conta_id):
-    """Conta sem nada: dashboard zerado, sem funil, sem quebrar."""
-    d = portal._painel_dashboard(pool, _conta16(conta_id))
+    """Conta de serviço sem nada: dashboard zerado, funil vazio, sem quebrar."""
+    d = portal._painel_dashboard(pool, _conta16(conta_id), vende_servico=True)
     assert d["res"]["a_receber_centavos"] == 0
     assert d["mrr_centavos"] == 0
+    assert d["tem_funil"] is True
     assert d["funil_total"] == 0
     assert d["funil_legenda"] == []
     assert d["funil_gradiente"] == ""
     # fluxo ainda produz série (saldo 0 constante)
     assert d["fluxo_poly"].count(",") == 5
+
+
+def test_dashboard_produto_only(pool, conta_id):
+    """Conta que vende PRODUTO mas não serviço: financeiro preenchido, SEM funil.
+
+    Segmentação por nicho: mesmo com propostas na tabela, produto puro não vê o
+    funil (tem_funil False) e a query nem roda."""
+    _seed(pool, conta_id)  # tem orcamentos, mas a conta não vende serviço
+    d = portal._painel_dashboard(pool, _conta16(conta_id), vende_servico=False)
+    # financeiro segue universal
+    assert d["res"]["a_receber_centavos"] == 1_360_000
+    assert d["mrr_centavos"] == 360_000
+    assert d["dre"]["resultado_centavos"] == 600_000
+    # funil desligado pelo segmento
+    assert d["tem_funil"] is False
+    assert d["funil_total"] == 0
+    assert d["funil_legenda"] == []
+    assert d["funil_gradiente"] == ""

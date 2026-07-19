@@ -10,13 +10,25 @@ conta — quem tem o link vê aquela proposta e só ela.
 """
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Request, Form
+from fastapi import APIRouter, BackgroundTasks, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from db.conexao import get_pool
 from web.portal import _env
 
 router = APIRouter()
+
+
+def _notificar_assinatura(d: dict, assinante: str) -> None:
+    """Avisa a empresa (Telegram + e-mail) que o cliente assinou. Roda em
+    background e é tolerante a falha — nunca afeta a resposta pro cliente."""
+    try:
+        from finance import notificar
+        notificar.avisar_proposta_assinada(
+            get_pool(), d["conta_id"], d.get("empresa") or d.get("contato") or "cliente",
+            assinante, d.get("ano1", ""), d.get("criado_por"))
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _reais(v) -> str:
@@ -53,7 +65,8 @@ def _carregar(token: str, pool=None):
         r = c.execute(
             """select o.id, o.empresa, o.cliente, o.whatsapp, o.segmento, o.escopo,
                       o.itens, o.setup_centavos, o.mensal_centavos, o.primeiro_ano_centavos,
-                      o.status, o.criado_em, o.aprovada_por, o.aprovada_em, c.nome
+                      o.status, o.criado_em, o.aprovada_por, o.aprovada_em, c.nome,
+                      o.conta_id, o.criado_por
                  from orcamentos o join contas c on c.id = o.conta_id
                 where o.token=%s""", (token,)).fetchone()
     if not r:
@@ -76,6 +89,7 @@ def _carregar(token: str, pool=None):
         "criado": criado, "validade": criado + timedelta(days=15),
         "aprovada_por": r[12] or "", "aprovada_em": r[13],
         "vendedor": r[14] or "Proposta",
+        "conta_id": r[15], "criado_por": r[16],
         "doc_num": "PR-%s-%03d" % (criado.strftime("%Y%m"), (r[0] or 0) % 1000),
     }
 
@@ -99,12 +113,15 @@ def proposta_publica(request: Request, token: str, erro: str = ""):
 
 
 @router.post("/proposta/{token}/assinar")
-def proposta_assinar(request: Request, token: str, nome: str = Form(""),
-                     doc: str = Form(""), aceite: str = Form("")):
+def proposta_assinar(request: Request, background: BackgroundTasks, token: str,
+                     nome: str = Form(""), doc: str = Form(""), aceite: str = Form("")):
     if not (nome or "").strip() or aceite != "on":
         return RedirectResponse(
             f"/proposta/{token}?erro=Preencha+seu+nome+e+marque+o+aceite.", status_code=303)
-    registrar_assinatura(get_pool(), token, nome, doc, _ip(request))
+    if registrar_assinatura(get_pool(), token, nome, doc, _ip(request)):
+        d = _carregar(token)
+        if d:
+            background.add_task(_notificar_assinatura, d, nome.strip())
     return RedirectResponse(f"/proposta/{token}", status_code=303)
 
 

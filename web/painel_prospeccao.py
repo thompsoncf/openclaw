@@ -635,14 +635,19 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
     with pool.connection() as c:
         cv = c.execute(
             """select cv.canal, cv.status, cv.prospeccao_id, p.empresa, p.segmento,
-                      p.cidade, p.uf, p.whatsapp, p.telefone, p.email, p.status, m.nome, p.vendedor_id
+                      p.cidade, p.uf, p.whatsapp, p.telefone, p.email, p.status, m.nome,
+                      p.vendedor_id, cv.contato_ref
                  from conversas cv
                  left join prospeccao p on p.id = cv.prospeccao_id
                  left join membros m on m.id = p.vendedor_id
                 where cv.id=%s and cv.conta_id=%s""", (conversa_id, ctx["conta_id"])).fetchone()
         if not cv:
             return JSONResponse({"ok": False, "erro": "escopo"}, status_code=404)
-        if not ctx["gerencia"] and cv[12] != ctx["membro_id"]:
+        # conversa sem lead (prospeccao_id null) não tem vendedor — só gerência ou
+        # quem já é responsável vê; vendedor comum não acessa conversa órfã.
+        if not ctx["gerencia"] and cv[2] is not None and cv[12] != ctx["membro_id"]:
+            return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+        if not ctx["gerencia"] and cv[2] is None:
             return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
         rows = c.execute(
             """select msg.canal, msg.direcao, msg.autor, msg.criado_em, msg.texto, msg.membro_id, mm.nome
@@ -661,13 +666,14 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
                      "quando": quando.strftime("%d/%m %H:%M") if quando else "",
                      "quem": quem, "cabecalho": cab.strip(), "corpo": (corpo or cab).strip()})
     from finance import whatsapp_twilio as _wa
+    destino = cv[7] or cv[8] or cv[13]     # telefone do lead OU contato_ref (conversa sem lead)
     pode_wa = False
-    if cv[0] == "whatsapp" and _wa.configurado() and bool(cv[7] or cv[8]):
+    if cv[0] == "whatsapp" and _wa.configurado() and bool(destino):
         with pool.connection() as _c:
             pode_wa = bool(_canal_ident(_c, ctx["conta_id"], "whatsapp"))
-    lead = {"id": cv[2], "empresa": cv[3], "canal": cv[0], "canal_rot": CANAL_ROT.get(cv[0], cv[0]),
+    lead = {"id": cv[2], "empresa": cv[3] or cv[13] or "—", "canal": cv[0], "canal_rot": CANAL_ROT.get(cv[0], cv[0]),
             "segmento": cv[4], "cidade": cv[5], "uf": cv[6],
-            "whatsapp": cv[7] or cv[8], "email": cv[9], "vendedor": cv[11],
+            "whatsapp": destino, "email": cv[9], "vendedor": cv[11],
             "status_rot": STATUS_ROT.get(cv[10], cv[10] or "")}
     return JSONResponse({"ok": True, "lead": lead, "msgs": msgs,
                          "conversa_id": conversa_id, "pode_responder": pode_wa})
@@ -704,8 +710,8 @@ def comunicacao_responder(request: Request, conversa_id: int = Form(...), texto:
                      "sem_numero_empresa": "Cadastre o número da empresa na aba Canais.",
                      "numero_invalido": "Número do lead inválido."}
             return JSONResponse({"ok": False, "erro": erros.get(res.get("erro"), "Não consegui enviar (janela de 24h fechada? use template).")})
-        _registrar_msg(c, ctx["conta_id"], cv[1], "whatsapp", "out", "humano",
-                       texto, ctx["membro_id"], res.get("sid"))
+        _add_msg(c, conversa_id, "whatsapp", "out", "humano",
+                 texto, ctx["membro_id"], res.get("sid"))
         c.commit()
     return JSONResponse({"ok": True})
 
@@ -1180,15 +1186,22 @@ def _conversa_id(c, conta_id, alvo_id, canal):
     return r[0]
 
 
-def _registrar_msg(c, conta_id, alvo_id, canal, direcao, autor, texto, membro_id=None, provider_sid=None):
-    """Grava uma mensagem na conversa (cria a conversa se preciso) e atualiza o topo."""
-    conv = _conversa_id(c, conta_id, alvo_id, canal)
+def _add_msg(c, conversa_id, canal, direcao, autor, texto, membro_id=None, provider_sid=None):
+    """Grava uma mensagem numa conversa JÁ conhecida (não re-deriva por lead) e
+    atualiza o topo. Use quando já se tem o conversa_id (ex: responder no inbox)."""
     c.execute(
         """insert into mensagens (conversa_id, canal, direcao, autor, membro_id, texto, provider_sid)
            values (%s,%s,%s,%s,%s,%s,%s)""",
-        (conv, canal, direcao, autor, membro_id, (texto or "")[:8000], provider_sid))
-    c.execute("update conversas set ultima_msg_em=now() where id=%s", (conv,))
-    return conv
+        (conversa_id, canal, direcao, autor, membro_id, (texto or "")[:8000], provider_sid))
+    c.execute("update conversas set ultima_msg_em=now() where id=%s", (conversa_id,))
+    return conversa_id
+
+
+def _registrar_msg(c, conta_id, alvo_id, canal, direcao, autor, texto, membro_id=None, provider_sid=None):
+    """Grava uma mensagem na conversa DO LEAD (cria a conversa se preciso). Pra
+    conversa sem lead, use _add_msg com o conversa_id."""
+    conv = _conversa_id(c, conta_id, alvo_id, canal)
+    return _add_msg(c, conv, canal, direcao, autor, texto, membro_id, provider_sid)
 
 
 def _reg_atividade(c, alvo_id, conta_id, membro_id, tipo, descricao, status_atual):

@@ -19,7 +19,7 @@ import secrets
 from datetime import datetime, timezone
 from urllib.parse import quote
 
-from fastapi import APIRouter, Request, Form, UploadFile, File
+from fastapi import APIRouter, Request, Form, UploadFile, File, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 
 from db.conexao import get_pool
@@ -674,7 +674,7 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
         cv = c.execute(
             """select cv.canal, cv.status, cv.prospeccao_id, p.empresa, p.segmento,
                       p.cidade, p.uf, p.whatsapp, p.telefone, p.email, p.status, m.nome,
-                      p.vendedor_id, cv.contato_ref
+                      p.vendedor_id, cv.contato_ref, cv.agente_ativo
                  from conversas cv
                  left join prospeccao p on p.id = cv.prospeccao_id
                  left join membros m on m.id = p.vendedor_id
@@ -714,7 +714,8 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
             "whatsapp": destino, "email": cv[9], "vendedor": cv[11],
             "status_rot": STATUS_ROT.get(cv[10], cv[10] or "")}
     return JSONResponse({"ok": True, "lead": lead, "msgs": msgs,
-                         "conversa_id": conversa_id, "pode_responder": pode_wa})
+                         "conversa_id": conversa_id, "pode_responder": pode_wa,
+                         "agente_ativo": bool(cv[14])})
 
 
 @router.post("/painel/prospeccao/comunicacao/responder")
@@ -752,6 +753,22 @@ def comunicacao_responder(request: Request, conversa_id: int = Form(...), texto:
                  texto, ctx["membro_id"], res.get("sid"))
         c.commit()
     return JSONResponse({"ok": True})
+
+
+@router.post("/painel/prospeccao/comunicacao/agente-conversa")
+def comunicacao_agente_conversa(request: Request, conversa_id: int = Form(...), ativar: str = Form("")):
+    """Assumir (desliga o bot nessa conversa) ou devolver ao agente (liga)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    on = ativar == "1"
+    with get_pool().connection() as c:
+        r = c.execute("update conversas set agente_ativo=%s where id=%s and conta_id=%s returning id",
+                      (on, conversa_id, ctx["conta_id"])).fetchone()
+        c.commit()
+    if not r:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=404)
+    return JSONResponse({"ok": True, "agente_ativo": on})
 
 
 @router.post("/painel/prospeccao/comunicacao/canal-numero")
@@ -880,7 +897,7 @@ def comunicacao_agente_faq(request: Request, pergunta: str = Form(""), resposta:
 
 
 @router.post("/webhooks/twilio")
-async def webhook_twilio(request: Request):
+async def webhook_twilio(request: Request, background_tasks: BackgroundTasks):
     """Recebe mensagens do WhatsApp (Twilio). Valida a assinatura, acha/cria a
     conversa pelo telefone→lead e grava a mensagem (entrada). Abre a janela de 24h."""
     from finance import whatsapp_twilio as wa
@@ -933,20 +950,28 @@ async def webhook_twilio(request: Request):
                   and (prospeccao_id=%s or (prospeccao_id is null and contato_ref=%s))
                 order by ultima_msg_em desc limit 1""",
             (conta_id, lead_id, remetente)).fetchone()
+        # o agente assume conversa nova quando o master está ligado (o vendedor pode
+        # "assumir" depois, o que desliga o bot só naquela conversa).
+        master = c.execute("select coalesce(ativo,false) from agente_config where conta_id=%s",
+                           (conta_id,)).fetchone()
+        agente_on = bool(master and master[0])
         if conv:
             conv_id = conv[0]
             if conv[1] is None:
                 c.execute("update conversas set prospeccao_id=%s where id=%s", (lead_id, conv_id))
         else:
             conv_id = c.execute(
-                """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status)
-                   values (%s,%s,'whatsapp',%s,'aberta') returning id""",
-                (conta_id, lead_id, remetente)).fetchone()[0]
+                """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status, agente_ativo)
+                   values (%s,%s,'whatsapp',%s,'aberta',%s) returning id""",
+                (conta_id, lead_id, remetente, agente_on)).fetchone()[0]
         c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
                      values (%s,'whatsapp','in','lead',%s,%s)""", (conv_id, corpo[:8000], sid))
         c.execute("""update conversas set ultima_msg_em=now(), status='aberta',
                        janela_expira_em=now()+interval '24 hours' where id=%s""", (conv_id,))
         c.commit()
+    # deixa o agente atender em background (não segura a resposta pro Twilio)
+    from finance import agente as _ag
+    background_tasks.add_task(_ag.atender, get_pool(), conta_id, conv_id)
     return Response("<Response></Response>", media_type="application/xml")
 
 
@@ -2375,9 +2400,12 @@ function cxOpen(el,id){
     }else{
       rodape='<div class="cx-stub">Responder por aqui<span class="lbl2">em breve</span> — disponível quando o canal estiver conectado (aba <b>Canais</b>). O <b>1º contato</b> sai pela ficha.</div>';
     }
+    var agBtn=(d.agente_ativo
+      ?'<button class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem;border-color:#4a3163;color:#c9a3e0" onclick="cxAgente('+d.conversa_id+',0)" title="Assumir você (desliga o agente nesta conversa)">🙋 Assumir</button>'
+      :'<button class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem" onclick="cxAgente('+d.conversa_id+',1)" title="Devolver ao agente">🤖 Ativar agente</button>');
     th.innerHTML=''
-      +'<div class="cx-th"><div><b>'+cxEsc(L.empresa)+'</b><small>'+cxEsc(L.canal_rot||'')+(L.cidade?(' · '+cxEsc(L.cidade)+(L.uf?'/'+cxEsc(L.uf):'')):'')+(L.status_rot?(' · '+cxEsc(L.status_rot)):'')+'</small></div>'
-      +'<span style="flex:1"></span>'+(L.id?('<a class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem" href="/painel/prospeccao/'+L.id+'">Abrir ficha</a>'):'')+'</div>'
+      +'<div class="cx-th"><div><b>'+cxEsc(L.empresa)+'</b><small>'+cxEsc(L.canal_rot||'')+(L.cidade?(' · '+cxEsc(L.cidade)+(L.uf?'/'+cxEsc(L.uf):'')):'')+(L.status_rot?(' · '+cxEsc(L.status_rot)):'')+(d.agente_ativo?' · <span style=\\'color:#c9a3e0\\'>🤖 no automático</span>':'')+'</small></div>'
+      +'<span style="flex:1"></span>'+agBtn+(L.id?(' <a class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem" href="/painel/prospeccao/'+L.id+'">Abrir ficha</a>'):'')+'</div>'
       +'<div class="cx-msgs">'+msgs+'</div>'+rodape;
     var kv=function(k,v){return v?('<div class="cx-kv"><span>'+k+'</span><b>'+cxEsc(v)+'</b></div>'):'';};
     cx.innerHTML=''
@@ -2385,6 +2413,14 @@ function cxOpen(el,id){
       +'<div class="cx-sec"><h4>🤖 Agente IA <span class="cx-stub" style="border:0;background:none;padding:0"><span class="lbl2">Fase 4</span></span></h4><div class="mut" style="font-size:.8rem;line-height:1.5">Atendimento automático com handoff pro vendedor chega numa próxima fase.</div></div>'
       +'<div class="cx-sec"><a class="pbtn" style="width:100%;text-align:center" href="/painel/prospeccao/'+L.id+'">Abrir ficha do lead</a></div>';
   }).catch(function(){th.innerHTML='<div class="cx-empty">Falha de rede.</div>';});
+}
+function cxAgente(convId,on){
+  var fd=new FormData();fd.append('conversa_id',convId);fd.append('ativar',on?'1':'0');
+  fetch('/painel/prospeccao/comunicacao/agente-conversa',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){alert(d.erro||'Não consegui.');return;}
+      cxOpen(document.getElementById('cxc-'+convId),convId);
+    }).catch(function(){alert('Falha de rede.');});
 }
 function cxResponder(convId){
   var ta=document.getElementById('cx-reply');if(!ta)return;var t=ta.value.trim();if(!t){return;}

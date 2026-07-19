@@ -46,6 +46,12 @@ def _app_url() -> str:
     return os.environ.get("APP_URL", "https://openclaw-web-bcu3.onrender.com").rstrip("/")
 
 
+def remetente_configurado() -> str | None:
+    """O endereço remetente configurado (SMTP_USER) — aparece em todo e-mail, não
+    é segredo. Retorna None se o envio de e-mail não está configurado."""
+    return os.environ.get("SMTP_USER") or None
+
+
 def enviar_email(destino: str, assunto: str, html: str,
                  texto_alt: str | None = None, reply_to: str | None = None,
                  from_nome: str | None = None) -> bool:

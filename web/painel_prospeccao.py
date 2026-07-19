@@ -26,7 +26,7 @@ from db.conexao import get_pool
 from contas import equipe as eq
 from finance import prospeccao_fontes as fontes
 from finance import servicos_catalogo as scat
-from finance.email_sender import enviar_email
+from finance.email_sender import enviar_email, remetente_configurado
 from web.portal import _render, _env, conta_logada
 
 router = APIRouter()
@@ -497,6 +497,94 @@ async def captar_importar(request: Request):
     return RedirectResponse("/painel/prospeccao", status_code=303)
 
 
+# ================================================================ COMUNICAÇÃO (inbox)
+_CANAIS_COMM = ("email", "whatsapp")
+
+
+def _preview(descricao: str) -> str:
+    """Prévia curta da mensagem: pega o corpo (depois do cabeçalho) e a 1ª linha."""
+    corpo = (descricao or "").split("\n\n", 1)
+    txt = corpo[1] if len(corpo) > 1 else corpo[0]
+    return " ".join(txt.split())[:90]
+
+
+@router.get("/painel/prospeccao/comunicacao", response_class=HTMLResponse)
+def prospeccao_comunicacao(request: Request, canal: str = "", vendedor: str = ""):
+    """Inbox: conversas (leads) com e-mail/WhatsApp registrados. Read-only (Fase A)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    pool = get_pool()
+    tipos = [canal] if canal in _CANAIS_COMM else list(_CANAIS_COMM)
+    where = ["p.conta_id=%s"]
+    params_tail: list = [ctx["conta_id"]]
+    filtro_vend = ""
+    if not ctx["gerencia"]:
+        where.append("p.vendedor_id=%s")
+        params_tail.append(ctx["membro_id"])
+    else:
+        filtro_vend = (vendedor or "").strip()
+        if filtro_vend.isdigit():
+            where.append("p.vendedor_id=%s")
+            params_tail.append(int(filtro_vend))
+    sql = f"""
+        select p.id, p.empresa, p.cidade, p.uf, a.tipo, a.criado_em, a.descricao,
+               a.membro_id, m.nome, cnt.n
+          from prospeccao p
+          join lateral (select tipo, criado_em, descricao, membro_id
+                          from prospeccao_atividades
+                         where prospeccao_id=p.id and tipo = any(%s)
+                         order by criado_em desc limit 1) a on true
+          left join membros m on m.id = a.membro_id
+          join lateral (select count(*) n from prospeccao_atividades
+                         where prospeccao_id=p.id and tipo = any(%s)) cnt on true
+         where {' and '.join(where)}
+         order by a.criado_em desc limit 100"""
+    with pool.connection() as c:
+        rows = c.execute(sql, (tipos, tipos, *params_tail)).fetchall()
+    convs = []
+    for r in rows:
+        quem = "Você" if r[7] and r[7] == ctx["membro_id"] else (r[8] or "—")
+        convs.append({"id": r[0], "empresa": r[1], "cidade": r[2], "uf": r[3],
+                      "canal": r[4], "quando": r[5], "preview": _preview(r[6]),
+                      "quem": quem, "n": r[9]})
+    vends = _vendedores(pool, ctx["conta_id"]) if ctx["gerencia"] else []
+    return _render("prospeccao_comunicacao", request, titulo="Comunicação",
+                   secao_ativa="prospeccao", convs=convs, canal=canal,
+                   gerencia=ctx["gerencia"], vendedores=vends, filtro_vend=filtro_vend,
+                   remetente=remetente_configurado(), tem_ia=_tem_ia())
+
+
+@router.get("/painel/prospeccao/comunicacao/{lead_id}")
+def prospeccao_comunicacao_thread(request: Request, lead_id: int):
+    """Thread (read-only) de um lead: as mensagens de e-mail/WhatsApp registradas."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    pool = get_pool()
+    alvo = _carrega_alvo(pool, ctx["conta_id"], lead_id)
+    if not alvo or not _pode_ver(alvo, ctx):
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    with pool.connection() as c:
+        rows = c.execute(
+            """select a.tipo, a.criado_em, a.descricao, a.membro_id, m.nome
+                 from prospeccao_atividades a
+                 left join membros m on m.id = a.membro_id
+                where a.prospeccao_id=%s and a.tipo = any(%s)
+                order by a.criado_em asc""", (lead_id, list(_CANAIS_COMM))).fetchall()
+    msgs = []
+    for (tipo, quando, desc, mid, nome) in rows:
+        cab, _, corpo = (desc or "").partition("\n\n")
+        msgs.append({"tipo": tipo, "quando": quando.strftime("%d/%m %H:%M") if quando else "",
+                     "quem": ("Você" if mid and mid == ctx["membro_id"] else (nome or "—")),
+                     "cabecalho": cab.strip(), "corpo": corpo.strip()})
+    lead = {"id": alvo["id"], "empresa": alvo["empresa"], "segmento": alvo["segmento"],
+            "cidade": alvo["cidade"], "uf": alvo["uf"], "whatsapp": alvo["whatsapp"] or alvo["telefone"],
+            "email": alvo["email"], "vendedor": alvo["vendedor_nome"],
+            "status_rot": STATUS_ROT.get(alvo["status"], alvo["status"])}
+    return JSONResponse({"ok": True, "lead": lead, "msgs": msgs})
+
+
 # ================================================================ FICHA DO ALVO
 @router.get("/painel/prospeccao/{alvo_id}", response_class=HTMLResponse)
 def prospeccao_ficha(request: Request, alvo_id: int):
@@ -923,9 +1011,10 @@ def prospeccao_enviar_email(request: Request, alvo_id: int, assunto: str = Form(
                       reply_to=email_rem or None, from_nome=(ctx["conta"][2] or None))
     if not ok:
         return JSONResponse({"ok": False, "erro": "envio_falhou"})
+    remetente = remetente_configurado() or ""
     with pool.connection() as c:
         _reg_atividade(c, alvo_id, ctx["conta_id"], ctx["membro_id"], "email",
-                       f"E-mail enviado p/ {destino} · {assunto}\n\n{corpo}", alvo["status"])
+                       f"De {remetente} · Para {destino} · {assunto}\n\n{corpo}", alvo["status"])
         c.commit()
     return JSONResponse({"ok": True})
 
@@ -1077,7 +1166,10 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <h2 class="tt">Prospecção</h2>
       <div class="mut" style="font-size:.82rem;margin-top:.15rem">{% if conta %}<b style="color:var(--verde-claro)">🏢 {{ conta[2] }}</b> · {% endif %}<span id="kb-total-n">{{ total_alvos }}</span> alvo(s){% if total_valor %} · pipeline {{ brl(total_valor) }}{% endif %}{% if n_contextos and n_contextos > 1 %} · <a href="/trocar" style="color:var(--verde-claro)">trocar empresa ⇄</a>{% endif %}</div>
     </div>
-    <button type="button" class="pbtn" onclick="capToggle()">🎯 Captar leads</button>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+      <a class="pbtn ghost" href="/painel/prospeccao/comunicacao" style="display:inline-flex;align-items:center">📨 Comunicação</a>
+      <button type="button" class="pbtn" onclick="capToggle()">🎯 Captar leads</button>
+    </div>
   </div>
 
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
@@ -1605,6 +1697,126 @@ function iaWhats(){var box=document.getElementById('ia-box');var base=(box.getAt
 </script>
 {% endblock %}"""
 
+_COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
+<style>
+.cx-wrap{max-width:1180px;margin:0 auto;padding:0 .3rem}
+.cx-head{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+.cx-head code{background:var(--card);border:1px solid var(--borda);border-radius:6px;padding:.12rem .45rem;color:var(--verde-claro);font-size:.82rem}
+.cx-filtros{display:flex;gap:.5rem;flex-wrap:wrap;margin:.8rem 0}
+.cx-grid{display:grid;grid-template-columns:300px 1fr 280px;gap:.7rem;align-items:start}
+.cx-list{border:1px solid var(--borda);border-radius:12px;background:var(--card);overflow:hidden;max-height:72vh;overflow-y:auto}
+.cx-conv{display:flex;gap:.6rem;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--borda);padding:.7rem .75rem;cursor:pointer;color:var(--txt)}
+.cx-conv:hover{background:#141416}
+.cx-conv.on{background:#12271f}
+.cx-conv .av{width:36px;height:36px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.78rem;background:#1d3a30;color:var(--verde-claro)}
+.cx-conv .mid{flex:1;min-width:0}
+.cx-conv .nm{display:flex;justify-content:space-between;gap:.4rem;align-items:baseline}
+.cx-conv .nm b{font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cx-conv .nm .t{color:var(--txt-mut);font-size:.7rem;white-space:nowrap}
+.cx-conv .pre{color:var(--txt-mut);font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:.15rem}
+.cx-cn{font-size:.66rem;padding:.05rem .4rem;border-radius:999px;border:1px solid;margin-top:.25rem;display:inline-block}
+.cn-mail{color:var(--azul,#5b9bd5);border-color:#2f4a63;background:#14212e}
+.cn-wpp{color:#3ddc84;border-color:#1e4a34;background:#10241a}
+.cx-thread,.cx-ctx{border:1px solid var(--borda);border-radius:12px;background:var(--card);min-height:40vh}
+.cx-thread{display:flex;flex-direction:column;max-height:72vh}
+.cx-empty{padding:2.4rem 1rem;text-align:center;color:var(--txt-mut);font-size:.9rem}
+.cx-th{display:flex;align-items:center;gap:.6rem;padding:.7rem .85rem;border-bottom:1px solid var(--borda)}
+.cx-th b{font-size:.92rem}
+.cx-th small{display:block;color:var(--txt-mut);font-size:.75rem}
+.cx-msgs{flex:1;overflow-y:auto;padding:.9rem;display:flex;flex-direction:column;gap:.6rem}
+.cx-day{align-self:center;color:#6c6c68;font-size:.72rem}
+.cx-m{max-width:82%;align-self:flex-end;background:#123028;border:1px solid #1d5741;border-radius:12px;border-bottom-right-radius:4px;padding:.5rem .7rem;font-size:.86rem;line-height:1.45}
+.cx-m .cab{color:var(--txt-mut);font-size:.72rem;margin-bottom:.25rem}
+.cx-m .meta{display:block;color:var(--txt-mut);font-size:.68rem;margin-top:.3rem;text-align:right}
+.cx-stub{border-top:1px solid var(--borda);padding:.7rem .85rem;background:#101011;color:var(--txt-mut);font-size:.8rem}
+.cx-stub .lbl2{display:inline-block;font-size:.62rem;padding:.05rem .4rem;border-radius:999px;background:#241634;color:#c9a3e0;border:1px solid #4a3163;margin-left:.3rem}
+.cx-ctx{padding:.85rem}
+.cx-sec{margin-bottom:.9rem}
+.cx-sec h4{margin:0 0 .4rem;font-size:.74rem;text-transform:uppercase;letter-spacing:.04em;color:var(--txt-mut)}
+.cx-kv{display:flex;justify-content:space-between;gap:.5rem;font-size:.82rem;padding:.18rem 0}
+.cx-kv span{color:var(--txt-mut)}
+@media(max-width:900px){.cx-grid{grid-template-columns:1fr}.cx-ctx{order:3}}
+</style>
+<div class="cx-wrap">
+  <div class="cx-head">
+    <div>
+      <h2 class="tt">📨 Comunicação</h2>
+      <div class="mut" style="font-size:.82rem;margin-top:.15rem">Enviando e-mails como {% if remetente %}<code>{{ remetente }}</code> · respostas voltam pro e-mail de quem enviou{% else %}<span style="color:#e0574f">(e-mail ainda não configurado)</span>{% endif %}</div>
+    </div>
+    <a class="pbtn ghost" href="/painel/prospeccao" style="display:inline-flex;align-items:center">‹ Prospecção</a>
+  </div>
+
+  <form class="cx-filtros" method="get" action="/painel/prospeccao/comunicacao">
+    <select class="fld" name="canal" style="width:auto" onchange="this.form.submit()">
+      <option value="" {% if not canal %}selected{% endif %}>Todos os canais</option>
+      <option value="email" {% if canal=='email' %}selected{% endif %}>✉️ E-mail</option>
+      <option value="whatsapp" {% if canal=='whatsapp' %}selected{% endif %}>💬 WhatsApp</option>
+    </select>
+    {% if gerencia %}<select class="fld" name="vendedor" style="width:auto" onchange="this.form.submit()">
+      <option value="">Todos os vendedores</option>
+      {% for v in vendedores %}<option value="{{ v.id }}" {% if filtro_vend==(v.id|string) %}selected{% endif %}>{{ v.nome }}</option>{% endfor %}
+    </select>{% endif %}
+    <span class="mut" style="align-self:center;font-size:.8rem">{{ convs|length }} conversa(s)</span>
+  </form>
+
+  <div class="cx-grid">
+    <div class="cx-list">
+      {% for c in convs %}
+      <button type="button" class="cx-conv" id="cxc-{{ c.id }}" onclick="cxOpen(this,{{ c.id }})">
+        <span class="av">{{ (c.empresa[:2]|upper) if c.empresa else '?' }}</span>
+        <span class="mid">
+          <span class="nm"><b>{{ c.empresa }}</b><span class="t">{{ c.quando.strftime('%d/%m') if c.quando else '' }}</span></span>
+          <span class="pre">{{ c.quem }}: {{ c.preview }}</span>
+          <span class="cx-cn {{ 'cn-wpp' if c.canal=='whatsapp' else 'cn-mail' }}">{{ '💬 WhatsApp' if c.canal=='whatsapp' else '✉️ E-mail' }}{% if c.n > 1 %} · {{ c.n }}{% endif %}</span>
+        </span>
+      </button>
+      {% else %}
+      <div class="cx-empty">Nenhuma comunicação ainda.<br><span style="font-size:.82rem">Envie um e-mail ou WhatsApp de 1º contato pela ficha de um lead — aparece aqui.</span></div>
+      {% endfor %}
+    </div>
+
+    <div class="cx-thread" id="cx-thread">
+      <div class="cx-empty">← Escolha uma conversa pra ver as mensagens.</div>
+    </div>
+
+    <div class="cx-ctx" id="cx-ctx">
+      <div class="cx-empty" style="padding:1.4rem 1rem">Selecione uma conversa.</div>
+    </div>
+  </div>
+</div>
+<script>
+function cxEsc(s){var d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
+function cxOpen(el,id){
+  document.querySelectorAll('.cx-conv').forEach(function(x){x.classList.remove('on');});
+  if(el)el.classList.add('on');
+  var th=document.getElementById('cx-thread'),cx=document.getElementById('cx-ctx');
+  th.innerHTML='<div class="cx-empty">Carregando…</div>';
+  fetch('/painel/prospeccao/comunicacao/'+id).then(function(r){return r.json();}).then(function(d){
+    if(!d.ok){th.innerHTML='<div class="cx-empty">Não consegui abrir.</div>';return;}
+    var L=d.lead;
+    var msgs='';
+    d.msgs.forEach(function(m){
+      var cab=m.cabecalho?('<div class="cab">'+(m.tipo==='whatsapp'?'💬 ':'✉️ ')+cxEsc(m.cabecalho)+'</div>'):'';
+      var corpo=cxEsc(m.corpo||m.cabecalho).replace(/\\n/g,'<br>');
+      msgs+='<div class="cx-m">'+cab+corpo+'<span class="meta">'+cxEsc(m.quem)+' · '+cxEsc(m.quando)+'</span></div>';
+    });
+    if(!d.msgs.length)msgs='<div class="cx-empty">Sem mensagens.</div>';
+    th.innerHTML=''
+      +'<div class="cx-th"><div><b>'+cxEsc(L.empresa)+'</b><small>'+(L.cidade?cxEsc(L.cidade)+(L.uf?'/'+cxEsc(L.uf):''):'')+(L.status_rot?(' · '+cxEsc(L.status_rot)):'')+'</small></div>'
+      +'<span style="flex:1"></span><a class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem" href="/painel/prospeccao/'+L.id+'">Abrir ficha</a></div>'
+      +'<div class="cx-msgs">'+msgs+'</div>'
+      +'<div class="cx-stub">Responder por aqui<span class="lbl2">Fase 2</span> — WhatsApp/e-mail bidirecional. Por enquanto, use o <b>1º contato</b> na ficha.</div>';
+    var kv=function(k,v){return v?('<div class="cx-kv"><span>'+k+'</span><b>'+cxEsc(v)+'</b></div>'):'';};
+    cx.innerHTML=''
+      +'<div class="cx-sec"><h4>Lead</h4>'+kv('Empresa',L.empresa)+kv('Segmento',L.segmento)+kv('Cidade',(L.cidade||'')+(L.uf?'/'+L.uf:''))+kv('WhatsApp',L.whatsapp)+kv('E-mail',L.email)+kv('Responsável',L.vendedor)+kv('Status',L.status_rot)+'</div>'
+      +'<div class="cx-sec"><h4>🤖 Agente IA <span class="cx-stub" style="border:0;background:none;padding:0"><span class="lbl2">Fase 4</span></span></h4><div class="mut" style="font-size:.8rem;line-height:1.5">Atendimento automático com handoff pro vendedor chega numa próxima fase.</div></div>'
+      +'<div class="cx-sec"><a class="pbtn" style="width:100%;text-align:center" href="/painel/prospeccao/'+L.id+'">Abrir ficha do lead</a></div>';
+  }).catch(function(){th.innerHTML='<div class="cx-empty">Falha de rede.</div>';});
+}
+</script>
+{% endblock %}"""
+
 _env.loader.mapping["prospeccao"] = _KANBAN_TPL
 _env.loader.mapping["prospeccao_captar"] = _CAPTAR_TPL
 _env.loader.mapping["prospeccao_ficha"] = _FICHA_TPL
+_env.loader.mapping["prospeccao_comunicacao"] = _COMUNICACAO_TPL

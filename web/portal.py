@@ -470,22 +470,181 @@ _BEMVINDO = """{% extends "base" %}{% block conteudo %}
 {% endblock %}"""
 
 _PAINEL = """{% extends "base" %}{% block conteudo %}
+<style>
+.dash-eyebrow{font-size:.72rem;text-transform:uppercase;letter-spacing:.09em;color:var(--txt-mut);font-weight:650;margin:0 0 12px}
+.dash-div{height:1px;background:var(--borda);margin:18px 0}
+.dash-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.kpi{background:var(--bg);border:1px solid var(--borda);border-radius:12px;padding:13px 14px;display:flex;flex-direction:column;gap:5px;min-width:0}
+.kpi .rot{font-size:.73rem;color:var(--txt-mut);font-weight:600}
+.kpi .val{font-size:1.22rem;font-weight:680;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.kpi .val.pos{color:var(--verde-claro)}
+.kpi .val.neg{color:#e07a6b}
+.kpi .peq{font-size:.72rem;color:var(--txt-mut)}
+.kpi .chip{display:inline-flex;align-items:center;gap:4px;font-size:.7rem;font-weight:650;background:#3a2a12;color:#fab219;border-radius:999px;padding:.12rem .5rem;width:fit-content}
+.dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:26px}
+.dash-grid.solo{grid-template-columns:1fr}
+.dash-grid>div{min-width:0}
+.sub-h{font-size:.82rem;font-weight:650;margin:0 0 14px;color:var(--txt)}
+.sub-h span{color:var(--txt-mut);font-weight:500}
+.rd-row{display:flex;flex-direction:column;gap:5px;margin-bottom:13px}
+.rd-top{display:flex;justify-content:space-between;align-items:baseline;font-size:.85rem}
+.rd-top .rd-nome{color:var(--txt-mut)}
+.rd-top .rd-val{font-weight:680;font-variant-numeric:tabular-nums}
+.rd-bar{height:9px;border-radius:5px;background:var(--bg);overflow:hidden}
+.rd-bar>span{display:block;height:100%;border-radius:5px}
+.rd-res{display:flex;justify-content:space-between;align-items:baseline;padding-top:11px;border-top:1px solid var(--borda);margin-top:2px}
+.rd-res .rl{font-size:.78rem;color:var(--txt-mut)}
+.rd-res .rv{font-size:1.1rem;font-weight:700;font-variant-numeric:tabular-nums}
+.rd-res .rv.pos{color:var(--verde-claro)}
+.rd-res .rv.neg{color:#e07a6b}
+.cats{margin-top:15px;display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.cats h4{margin:0 0 7px;font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:var(--txt-mut)}
+.cats .ci{display:flex;justify-content:space-between;gap:8px;font-size:.81rem;padding:3px 0}
+.cats .ci .cn{color:var(--txt);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cats .ci .cv{color:var(--txt-mut);font-variant-numeric:tabular-nums;flex:none}
+.swatch{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;vertical-align:middle}
+.funil{display:flex;gap:20px;align-items:center}
+.donut{width:150px;height:150px;flex:none;border-radius:50%;position:relative}
+.donut::after{content:"";position:absolute;inset:26px;border-radius:50%;background:var(--card);display:block}
+.donut .mid{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.donut .mid .n{font-size:1.45rem;font-weight:720;line-height:1}
+.donut .mid .l{font-size:.62rem;color:var(--txt-mut);text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
+.legenda{display:flex;flex-direction:column;gap:7px;flex:1;min-width:0}
+.leg-row{display:flex;align-items:center;gap:9px;font-size:.83rem}
+.leg-row .dot{width:10px;height:10px;border-radius:3px;flex:none}
+.leg-row .leg-nome{flex:1;min-width:0;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.leg-row .leg-n{font-variant-numeric:tabular-nums;color:var(--txt-mut);font-weight:600}
+.resumo{display:flex;gap:20px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid var(--borda)}
+.resumo .r{display:flex;flex-direction:column;gap:2px}
+.resumo .r .rv{font-size:1.02rem;font-weight:680;font-variant-numeric:tabular-nums}
+.resumo .r .rv.win{color:var(--verde-claro)}
+.resumo .r .rl{font-size:.72rem;color:var(--txt-mut)}
+.funil-vazio{display:flex;flex-direction:column;gap:8px;align-items:flex-start;color:var(--txt-mut);font-size:.88rem}
+.fluxo-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.fluxo-head .fv{font-size:.8rem;color:var(--txt-mut)}
+.fluxo-head .fv b{color:var(--verde-claro);font-variant-numeric:tabular-nums}
+.fluxo-svg{width:100%;height:118px;display:block}
+.xlabels{display:flex;justify-content:space-between;font-size:.7rem;color:var(--txt-mut);margin-top:4px}
+.acc{padding:0;overflow:hidden}
+.acc>summary{padding:16px 20px;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;font-size:1.02rem;font-weight:620;color:var(--txt)}
+.acc>summary::-webkit-details-marker{display:none}
+.acc>summary .sum-meta{font-size:.8rem;color:var(--txt-mut);font-weight:500;margin-left:.4rem}
+.acc>summary .chev{color:var(--txt-mut);transition:transform .2s;font-size:.85rem}
+.acc[open]>summary .chev{transform:rotate(180deg)}
+.acc-body{padding:0 20px 18px}
+.acc-body .card{border:0;background:transparent;padding:0;margin:0 0 1.2rem;max-width:none}
+@media(max-width:700px){
+.dash-kpis{grid-template-columns:repeat(2,1fr)}
+.dash-grid{grid-template-columns:1fr;gap:22px}
+.cats{grid-template-columns:1fr}
+}
+</style>
 <div class="card larga">
   <h1 style="margin:0">Olá, {{ conta[2] }}! <span class="tag">{{ conta[5] }}</span></h1>
   <p class="mut" style="margin-top:.6rem">Plano: <b>{{ conta[4] or '-' }}</b>{% if conta[6] %} · válido até <b>{{ conta[6].strftime('%d/%m/%Y') }}</b>{% endif %} · tipo: <b>{{ conta[1]|upper }}</b> <a href="/painel/ativar-app" id="trocar-plano" style="color:var(--verde-claro);text-decoration:none;margin-left:.3rem">trocar plano &gt;</a></p>
   {% if conta[5] == 'trial' %}<form method="post" action="/assinar" style="margin:0"><button style="width:auto;margin:.6rem 0 0;padding:.55rem 1.1rem">💳 Assinar plano</button></form>{% endif %}
 </div>
 
-{% include "bloco_conta" %}
-
+{% if dash %}
 <div class="card larga">
-  <div style="display:flex;justify-content:space-between;align-items:center">
-    <h1 style="font-size:1.05rem;margin:0">Pessoas da conta</h1>
-    <button type="button" onclick="addPessoaToggle()" id="add-btn" style="width:auto;margin:0;background:var(--verde);color:#fff;border:0;border-radius:999px;padding:.4rem 1rem;font-size:.82rem;cursor:pointer">＋ Adicionar</button>
+  <p class="dash-eyebrow">Visão do negócio · {{ dash.dre.mes }}/{{ dash.dre.ano }}</p>
+  <div class="dash-kpis">
+    <div class="kpi"><span class="rot">A receber · 30d</span><span class="val pos">{{ dash.res.a_receber_centavos|brl }}</span><span class="peq">{{ dash.res.n_receber }} título(s) aberto(s)</span></div>
+    <div class="kpi"><span class="rot">A pagar · 30d</span><span class="val">{{ dash.res.a_pagar_centavos|brl }}</span>{% if dash.res.atrasados_pagar_centavos %}<span class="chip">⚠ {{ dash.res.atrasados_pagar_centavos|brl }} atrasado</span>{% else %}<span class="peq">{{ dash.res.n_pagar }} título(s)</span>{% endif %}</div>
+    <div class="kpi"><span class="rot">Saldo projetado</span><span class="val">{{ dash.fluxo.saldo_projetado_centavos|brl }}</span><span class="peq">em 4 semanas</span></div>
+    <div class="kpi"><span class="rot">MRR</span><span class="val pos">{{ dash.mrr_centavos|brl }}</span><span class="peq">recorrente / mês</span></div>
+    <div class="kpi"><span class="rot">Resultado do mês</span><span class="val {{ 'pos' if dash.dre.resultado_centavos >= 0 else 'neg' }}">{{ dash.dre.resultado_centavos|brl }}</span><span class="peq">margem {{ dash.dre.margem_pct }}%</span></div>
   </div>
-  {% if erro %}<div class="erro" style="margin-top:.8rem">{{ erro }}</div>{% endif %}
-  {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
-  <div class="membros">
+
+  <div class="dash-div"></div>
+
+  <div class="dash-grid{% if not dash.tem_funil %} solo{% endif %}">
+    <div>
+      <h3 class="sub-h">Entradas × saídas <span>· mês atual</span></h3>
+      {% set maxrd = [dash.dre.receitas_centavos, dash.dre.despesas_centavos, 1]|max %}
+      <div class="rd-row">
+        <div class="rd-top"><span class="rd-nome"><span class="swatch" style="background:var(--verde-claro)"></span>Receitas</span><span class="rd-val" style="color:var(--verde-claro)">{{ dash.dre.receitas_centavos|brl }}</span></div>
+        <div class="rd-bar"><span style="width:{{ (100*dash.dre.receitas_centavos/maxrd)|round(1) }}%;background:var(--verde-claro)"></span></div>
+      </div>
+      <div class="rd-row">
+        <div class="rd-top"><span class="rd-nome"><span class="swatch" style="background:#e07a6b"></span>Despesas</span><span class="rd-val" style="color:#e07a6b">{{ dash.dre.despesas_centavos|brl }}</span></div>
+        <div class="rd-bar"><span style="width:{{ (100*dash.dre.despesas_centavos/maxrd)|round(1) }}%;background:#e07a6b"></span></div>
+      </div>
+      <div class="rd-res"><span class="rl">Resultado do mês</span><span class="rv {{ 'pos' if dash.dre.resultado_centavos >= 0 else 'neg' }}">{{ dash.dre.resultado_centavos|brl }}</span></div>
+      {% if dash.dre.top_receitas or dash.dre.top_despesas %}
+      <div class="cats">
+        <div><h4>Top receitas</h4>
+          {% for cat, v in dash.dre.top_receitas[:3] %}<div class="ci"><span class="cn">{{ cat or 'Outros' }}</span><span class="cv">{{ v|brl }}</span></div>{% else %}<div class="ci mut">—</div>{% endfor %}
+        </div>
+        <div><h4>Top despesas</h4>
+          {% for cat, v in dash.dre.top_despesas[:3] %}<div class="ci"><span class="cn">{{ cat or 'Outros' }}</span><span class="cv">{{ v|brl }}</span></div>{% else %}<div class="ci mut">—</div>{% endfor %}
+        </div>
+      </div>
+      {% endif %}
+      {% if dash.dre.a_definir_n %}<p class="mut" style="font-size:.76rem;margin:.7rem 0 0">{{ dash.dre.a_definir_n }} lançamento(s) a classificar ({{ dash.dre.a_definir_centavos|brl }}) fora do resultado.</p>{% endif %}
+    </div>
+
+    {% if dash.tem_funil %}
+    <div>
+      <h3 class="sub-h">Funil de vendas <span>· propostas por status</span></h3>
+      {% if dash.funil_total %}
+      <div class="funil">
+        <div class="donut" role="img" aria-label="{{ dash.funil_total }} propostas por status" style="background:{{ dash.funil_gradiente }}">
+          <div class="mid"><span class="n">{{ dash.funil_total }}</span><span class="l">propostas</span></div>
+        </div>
+        <div class="legenda">
+          {% for f in dash.funil_legenda %}<div class="leg-row"><span class="dot" style="background:{{ f.cor }}"></span><span class="leg-nome{% if f.mut %} mut{% endif %}">{{ f.rotulo }}</span><span class="leg-n">{{ f.n }}</span></div>{% endfor %}
+        </div>
+      </div>
+      <div class="resumo">
+        <div class="r"><span class="rv win">{{ dash.funil_conversao }}%</span><span class="rl">conversão</span></div>
+        <div class="r"><span class="rv">{{ dash.funil_previsto|brl }}</span><span class="rl">valor previsto</span></div>
+        <div class="r"><span class="rv">{{ dash.funil_recorrente|brl }}</span><span class="rl">novo recorrente/mês</span></div>
+      </div>
+      {% else %}
+      <div class="funil-vazio">
+        <div>Nenhuma proposta ainda.</div>
+        <a href="/painel/servicos" style="color:var(--verde-claro);text-decoration:none;font-weight:600">Criar minha primeira proposta →</a>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="dash-div"></div>
+
+  <div>
+    <div class="fluxo-head">
+      <h3 class="sub-h" style="margin:0">Fluxo projetado <span>· próximas 4 semanas</span></h3>
+      <span class="fv">saldo hoje {{ dash.fluxo.saldo_atual_centavos|brl }} → <b>{{ dash.fluxo.saldo_projetado_centavos|brl }}</b></span>
+    </div>
+    <svg class="fluxo-svg" viewBox="0 0 600 120" preserveAspectRatio="none" role="img" aria-label="Saldo projetado nas próximas 4 semanas">
+      <defs><linearGradient id="fluxoGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3987e5" stop-opacity="0.28"/><stop offset="1" stop-color="#3987e5" stop-opacity="0"/></linearGradient></defs>
+      <line x1="0" y1="30" x2="600" y2="30" stroke="var(--borda)" stroke-width="1"/>
+      <line x1="0" y1="65" x2="600" y2="65" stroke="var(--borda)" stroke-width="1"/>
+      <line x1="0" y1="100" x2="600" y2="100" stroke="var(--borda)" stroke-width="1"/>
+      <path d="{{ dash.fluxo_area }}" fill="url(#fluxoGrad)"/>
+      <polyline points="{{ dash.fluxo_poly }}" fill="none" stroke="#3987e5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="{{ dash.fluxo_end_x|round(1) }}" cy="{{ dash.fluxo_end_y|round(1) }}" r="4.5" fill="#3987e5" stroke="var(--card)" stroke-width="2"/>
+    </svg>
+    <div class="xlabels"><span>hoje</span><span>sem 1</span><span>sem 2</span><span>sem 3</span><span>sem 4</span></div>
+  </div>
+</div>
+{% endif %}
+
+<details class="card larga acc">
+  <summary>Meus dados e endereço <span class="chev">▾</span></summary>
+  <div class="acc-body">
+    {% include "bloco_conta" %}
+  </div>
+</details>
+
+<details class="card larga acc"{% if aviso or erro %} open{% endif %}>
+  <summary><span>Pessoas da conta<span class="sum-meta">· {{ membros|length }} pessoa(s)</span></span> <span class="chev">▾</span></summary>
+  <div class="acc-body">
+  {% if erro %}<div class="erro" style="margin-top:.4rem">{{ erro }}</div>{% endif %}
+  {% if aviso %}<div class="ok" style="margin-top:.4rem">{{ aviso }}</div>{% endif %}
+  <div class="membros" style="margin-top:.6rem">
   {% for m in membros %}
   <div class="membro-row">
     <div class="membro-id">
@@ -522,6 +681,7 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
   </div>
   {% endfor %}
   </div>
+  <div style="margin-top:1rem"><button type="button" onclick="addPessoaToggle()" id="add-btn" style="width:auto;margin:0;background:var(--verde);color:#fff;border:0;border-radius:999px;padding:.42rem 1rem;font-size:.82rem;cursor:pointer">＋ Adicionar pessoa</button></div>
   <div id="add-pessoa-body"{% if not aviso %} style="display:none"{% endif %}>
     <div style="border-top:1px solid #212122;margin-top:1rem;padding-top:1rem">
     {% if pode_adicionar %}
@@ -541,7 +701,8 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
     {% endif %}
     </div>
   </div>
-</div>
+  </div>
+</details>
 <script>window.addPessoaToggle=function(){var b=document.getElementById('add-pessoa-body');if(b)b.style.display=(b.style.display==='none'?'block':'none');};</script>
 {% endblock %}"""
 
@@ -4863,6 +5024,103 @@ def bem_vindo(request: Request):
                    whatsapp_bot_num=whatsapp_bot_num)
 
 
+# Rampa ordinal azul (validada p/ superfície escura #161617) + cinza p/ "perdido".
+_FUNIL_ORDEM = ["rascunho", "enviado", "negociando", "aprovada", "fechado", "perdido"]
+_FUNIL_ROTULO = {"rascunho": "Rascunho", "enviado": "Enviado",
+                 "negociando": "Negociando", "aprovada": "Aprovada",
+                 "fechado": "Fechada", "perdido": "Perdida"}
+_FUNIL_COR = {"rascunho": "#9ec5f4", "enviado": "#6da7ec", "negociando": "#3987e5",
+              "aprovada": "#256abf", "fechado": "#184f95", "perdido": "#5f5f5a"}
+
+
+def _painel_dashboard(pool, conta, vende_servico=False):
+    """Monta os dados do dashboard do /painel (KPIs financeiros + funil de vendas).
+
+    Reusa os helpers do módulo Empresa (mesmos de /painel/empresa). Tolerante:
+    conta sem títulos/orçamentos vira dashboard zerado, sem quebrar.
+
+    Segmentação por nicho: o financeiro é universal p/ todo PJ, mas o funil de
+    propostas só faz sentido pra quem VENDE SERVIÇO (conta[14]). Conta de produto
+    puro não roda a query nem vê a pizza — `tem_funil` fica False.
+    """
+    from finance import empresa as emp
+    hoje = _date.today()
+    res = emp.resumo_titulos(pool, conta[0], dias=30)
+    fluxo = emp.fluxo_projetado(pool, conta[0], semanas=4)
+    dre = emp.dre_mes(pool, conta[0], hoje.year, hoje.month)
+
+    # MRR: receita recorrente ainda em aberto.
+    with pool.connection() as c:
+        mrr_row = c.execute(
+            "select coalesce(sum(valor_centavos),0), count(*) from titulos "
+            "where conta_id=%s and tipo='receber' and recorrente and status='aberto'",
+            (conta[0],)).fetchone()
+    mrr_centavos = int(mrr_row[0] or 0) if mrr_row else 0
+
+    # Funil de propostas por status — SÓ pra quem vende serviço (segmento).
+    contagem = {s: 0 for s in _FUNIL_ORDEM}
+    setup = {s: 0 for s in _FUNIL_ORDEM}
+    mensal = {s: 0 for s in _FUNIL_ORDEM}
+    if vende_servico:
+        try:
+            with pool.connection() as c:
+                for st, n, s, m in c.execute(
+                    "select status, count(*), coalesce(sum(setup_centavos),0), "
+                    "coalesce(sum(mensal_centavos),0) from orcamentos "
+                    "where conta_id=%s group by status", (conta[0],)).fetchall():
+                    if st in contagem:
+                        contagem[st] = int(n or 0)
+                        setup[st] = int(s or 0)
+                        mensal[st] = int(m or 0)
+        except Exception:
+            pass  # sem tabela orcamentos → funil vazio
+
+    total = sum(contagem.values())
+    fechadas = contagem["fechado"]
+    conversao = round(100.0 * fechadas / total) if total else 0
+    valor_previsto = sum(setup[s] + 12 * mensal[s]
+                         for s in _FUNIL_ORDEM if s != "perdido")
+    novo_recorrente = mensal["fechado"]
+
+    # Legenda (só status presentes) + conic-gradient com fresta de 1.2° na superfície.
+    ativos = [s for s in _FUNIL_ORDEM if contagem[s] > 0]
+    legenda = [{"rotulo": _FUNIL_ROTULO[s], "n": contagem[s], "cor": _FUNIL_COR[s],
+                "mut": s == "perdido"} for s in ativos]
+    partes, acc, gap, k = [], 0.0, 1.2, len(ativos)
+    for i, s in enumerate(ativos):
+        span = 360.0 * contagem[s] / total
+        a, b = acc, acc + span
+        corte = max(a, b - gap) if k > 1 else b
+        partes.append(f"{_FUNIL_COR[s]} {a:.2f}deg {corte:.2f}deg")
+        if k > 1:
+            partes.append(f"#161617 {corte:.2f}deg {b:.2f}deg")
+        acc = b
+    gradiente = "conic-gradient(" + ", ".join(partes) + ")" if partes else ""
+
+    # Fluxo projetado → série p/ SVG (saldo hoje + 4 semanas).
+    serie = [fluxo["saldo_atual_centavos"]] + [p["saldo_centavos"] for p in fluxo["pontos"]]
+    lo, hi = min(serie), max(serie)
+    rng = (hi - lo) or 1
+    n = len(serie)
+    xs = [20 + (560 * i / (n - 1)) for i in range(n)] if n > 1 else [300]
+    ys = [100 - ((v - lo) / rng) * 78 for v in serie]
+    poly = " ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys))
+    area = ("M" + f"{xs[0]:.1f},{ys[0]:.1f}"
+            + "".join(f" L{x:.1f},{y:.1f}" for x, y in zip(xs[1:], ys[1:]))
+            + f" L{xs[-1]:.1f},112 L{xs[0]:.1f},112 Z")
+
+    return {
+        "res": res, "dre": dre, "fluxo": fluxo,
+        "mrr_centavos": mrr_centavos,
+        "tem_funil": bool(vende_servico),
+        "funil_total": total, "funil_conversao": conversao,
+        "funil_previsto": valor_previsto, "funil_recorrente": novo_recorrente,
+        "funil_legenda": legenda, "funil_gradiente": gradiente,
+        "fluxo_poly": poly, "fluxo_area": area,
+        "fluxo_end_x": xs[-1], "fluxo_end_y": ys[-1],
+    }
+
+
 @router.get("/painel", response_class=HTMLResponse)
 def painel(request: Request):
     conta = conta_logada(request)
@@ -4883,8 +5141,18 @@ def painel(request: Request):
     pode_adicionar = pode_extra or ativos < inclusos
     # numero do WhatsApp bot (sem "whatsapp:+")
     whatsapp_from = (os.environ.get("TWILIO_WHATSAPP_FROM") or "").replace("whatsapp:+", "")
+    # Dashboard de negócio: só p/ conta PJ e operador com acesso financeiro.
+    from contas import equipe as _equipe
+    _caps = _equipe.caps_do_papel(request.session.get("papel", "dono"))
+    dash = None
+    if conta[11] and _caps.get("financeiro"):
+        try:
+            dash = _painel_dashboard(pool, conta, vende_servico=bool(conta[14]))
+        except Exception:
+            dash = None  # nunca deixa o dashboard derrubar o painel
     return _render("painel", request, conta=conta, membros=membros, titulo="Painel",
                    **_dados_bloco(pool, conta, request),
+                   dash=dash,
                    ativos=ativos, inclusos=inclusos, extra_pago=pode_extra,
                    pode_adicionar=pode_adicionar,
                    whatsapp_bot_num=whatsapp_from,

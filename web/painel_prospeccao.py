@@ -731,11 +731,13 @@ def prospeccao_orcamento(request: Request, alvo_id: int):
             _garantir_tabela(c)
             row = c.execute(
                 """insert into orcamentos (conta_id, cliente, empresa, cnpj, segmento,
-                     whatsapp, email, criado_por, token, status)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,'rascunho') returning id""",
+                     whatsapp, email, telefone, cidade, uf, site, cargo, socio,
+                     criado_por, token, status)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'rascunho') returning id""",
                 (ctx["conta_id"], alvo["contato"], alvo["empresa"], alvo["cnpj"], alvo["segmento"],
-                 alvo["whatsapp"] or alvo["telefone"], alvo["email"], criador,
-                 secrets.token_urlsafe(16))).fetchone()
+                 alvo["whatsapp"] or alvo["telefone"], alvo["email"], alvo["telefone"],
+                 alvo["cidade"], alvo["uf"], alvo["site_url"], alvo["cargo"], alvo["socio"],
+                 criador, secrets.token_urlsafe(16))).fetchone()
             oid = row[0]
             novo_status = alvo["status"] if alvo["status"] in ("ganho", "perdido") else "proposta"
             c.execute("update prospeccao set orcamento_id=%s, status=%s, atualizado_em=now() "

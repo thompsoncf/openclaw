@@ -995,7 +995,11 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     });
   });
 
-  carregarCatalogo(false); carregarHist();
+  carregarCatalogo(false).then(function(){
+    var ab=new URLSearchParams(location.search).get('abrir');
+    if(ab && /^[0-9]+$/.test(ab)){ abrir(ab); history.replaceState({},'','/painel/servicos'); }
+  });
+  carregarHist();
 })();
 </script>{% endraw %}
 {% endblock %}"""

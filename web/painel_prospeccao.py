@@ -75,6 +75,8 @@ def _acesso(request: Request):
     papel = request.session.get("papel", "dono")
     if not eq.caps_do_papel(papel).get("vendas"):
         return None, RedirectResponse("/painel", status_code=303)
+    if not conta[11]:  # prospecção é ferramenta de EMPRESA (módulo PJ) — não de conta PF
+        return None, RedirectResponse("/painel", status_code=303)
     ctx = {"conta": conta, "conta_id": conta[0], "papel": papel,
            "membro_id": request.session.get("membro_id"),
            "gerencia": papel in ("dono", "gestor")}

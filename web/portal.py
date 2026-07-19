@@ -334,7 +334,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if caps.vendas or (tem_pj and caps.financeiro) or caps.gerir or (_dono and (vende_produto or _forn)) %}<div class="side-grp">{{ 'Loja' if _dono else 'Minha área' }}</div>{% endif %}
   {% if _dono and vende_produto %}{{ navi('abastecimento','/painel/produtos/abastecimento','abastecimento','Abastecimento') }}{% endif %}
   {% if vende_servico and caps.vendas %}{{ navi('servicos','/painel/servicos','financeiro','Serviços') }}{% endif %}
-  {% if caps.vendas %}{{ navi('prospeccao','/painel/prospeccao','prospeccao','Prospecção') }}{% endif %}
+  {% if tem_pj and caps.vendas %}{{ navi('prospeccao','/painel/prospeccao','prospeccao','Prospecção') }}{% endif %}
   {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
   {% if _dono and _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
@@ -350,7 +350,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if _dono and _tem_app %}{{ tabi('financeiro','/painel/financeiro','financeiro','Financeiro') }}{% endif %}
   {% if _dono and not vende_produto and _tem_app %}{{ tabi('painel','/painel','painel','Painel') }}{% endif %}
   {% if not _dono and vende_servico and caps.vendas %}{{ tabi('servicos','/painel/servicos','financeiro','Serviços') }}{% endif %}
-  {% if not _dono and caps.vendas %}{{ tabi('prospeccao','/painel/prospeccao','prospeccao','Prospecção') }}{% endif %}
+  {% if not _dono and tem_pj and caps.vendas %}{{ tabi('prospeccao','/painel/prospeccao','prospeccao','Prospecção') }}{% endif %}
   {% if not _dono and tem_pj and caps.financeiro %}{{ tabi('empresa','/painel/empresa','empresa','Empresa') }}{% endif %}
   <button type="button" onclick="maisToggle(true)"><svg class="nav-ic"><use href="#ic-mais"/></svg><span>Mais</span></button>
 </nav>
@@ -360,7 +360,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if caps.vendas or (tem_pj and caps.financeiro) or caps.gerir or (_dono and (vende_produto or _forn)) %}<div class="side-grp">{{ 'Loja' if _dono else 'Minha área' }}</div>{% endif %}
   {% if _dono and vende_produto %}{{ navi('abastecimento','/painel/produtos/abastecimento','abastecimento','Abastecimento') }}{% endif %}
   {% if vende_servico and caps.vendas %}{{ navi('servicos','/painel/servicos','financeiro','Serviços') }}{% endif %}
-  {% if caps.vendas %}{{ navi('prospeccao','/painel/prospeccao','prospeccao','Prospecção') }}{% endif %}
+  {% if tem_pj and caps.vendas %}{{ navi('prospeccao','/painel/prospeccao','prospeccao','Prospecção') }}{% endif %}
   {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
   {% if _dono and _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}

@@ -582,6 +582,62 @@ def _agente_conhecimento(c, conta_id: int) -> dict:
     return {"instrucoes": instr, "faqs": faqs}
 
 
+def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend=""):
+    """Lista de conversas (topo por última msg) — usada na página e no polling."""
+    where = ["cv.conta_id=%s"]
+    params = [conta_id]
+    if not gerencia:
+        where.append("p.vendedor_id=%s")
+        params.append(membro_id)
+    elif (vend or "").isdigit():   # filtro por vendedor (só dono/gestor)
+        where.append("p.vendedor_id=%s")
+        params.append(int(vend))
+    if canal in CANAIS_TODOS:
+        where.append("cv.canal=%s")
+        params.append(canal)
+    rows = c.execute(f"""
+        select cv.id, cv.canal, cv.status, cv.ultima_msg_em, cv.prospeccao_id,
+               coalesce(p.empresa, cv.contato_ref, '—'), p.cidade, p.uf,
+               lm.texto, lm.autor, lm.membro_id, mm.nome, cnt.n, lm.id
+          from conversas cv
+          left join prospeccao p on p.id = cv.prospeccao_id
+          left join lateral (select id, texto, autor, membro_id from mensagens
+                              where conversa_id=cv.id order by criado_em desc limit 1) lm on true
+          left join membros mm on mm.id = lm.membro_id
+          join lateral (select count(*) n from mensagens where conversa_id=cv.id) cnt on true
+         where {' and '.join(where)}
+         order by cv.ultima_msg_em desc limit 100""", tuple(params)).fetchall()
+    out = []
+    for r in rows:
+        if r[9] == "bot":
+            quem = "🤖 Agente"
+        elif r[9] == "lead":
+            quem = r[5]
+        elif r[10] and r[10] == membro_id:
+            quem = "Você"
+        else:
+            quem = r[11] or "—"
+        out.append({"id": r[0], "canal": r[1], "canal_rot": CANAL_ROT.get(r[1], r[1]),
+                    "status": r[2], "quando": r[3], "empresa": r[5], "cidade": r[6],
+                    "uf": r[7], "preview": _preview(r[8]), "quem": quem, "n": r[12],
+                    "ult_autor": r[9], "ult_msg_id": r[13] or 0})
+    return out
+
+
+@router.get("/painel/prospeccao/comunicacao/lista")
+def prospeccao_comunicacao_lista(request: Request, canal: str = "", vendedor: str = ""):
+    """Lista de conversas em JSON (pro polling em tempo real)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False}, status_code=401)
+    with get_pool().connection() as c:
+        convs = _conversas_list(c, ctx["conta_id"], ctx["gerencia"], ctx["membro_id"],
+                                canal=canal, vend=vendedor)
+    for cv in convs:
+        cv["quando"] = cv["quando"].strftime("%d/%m %H:%M") if cv["quando"] else ""
+    return JSONResponse({"ok": True, "convs": convs})
+
+
 @router.get("/painel/prospeccao/comunicacao", response_class=HTMLResponse)
 def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str = "", vendedor: str = ""):
     """Hub omnichannel: Conversas · E-mails · Agente · Canais (lê de conversas/mensagens)."""
@@ -590,49 +646,13 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
         return redir
     aba = aba if aba in ("conversas", "emails", "agente", "canais") else "conversas"
     pool = get_pool()
-    where = ["cv.conta_id=%s"]
-    params: list = [ctx["conta_id"]]
-    filtro_vend = ""
-    if not ctx["gerencia"]:
-        where.append("p.vendedor_id=%s")
-        params.append(ctx["membro_id"])
-    else:
-        filtro_vend = (vendedor or "").strip()
-        if filtro_vend.isdigit():
-            where.append("p.vendedor_id=%s")
-            params.append(int(filtro_vend))
-    if canal in CANAIS_TODOS:
-        where.append("cv.canal=%s")
-        params.append(canal)
-    wsql = " and ".join(where)
+    filtro_vend = (vendedor or "").strip() if ctx["gerencia"] else ""
     convs, emails = [], []
     with pool.connection() as c:
-        rows = c.execute(f"""
-            select cv.id, cv.canal, cv.status, cv.ultima_msg_em, cv.prospeccao_id,
-                   coalesce(p.empresa, cv.contato_ref, '—'), p.cidade, p.uf,
-                   lm.texto, lm.autor, lm.membro_id, mm.nome, cnt.n
-              from conversas cv
-              left join prospeccao p on p.id = cv.prospeccao_id
-              left join lateral (select texto, autor, membro_id from mensagens
-                                  where conversa_id=cv.id order by criado_em desc limit 1) lm on true
-              left join membros mm on mm.id = lm.membro_id
-              join lateral (select count(*) n from mensagens where conversa_id=cv.id) cnt on true
-             where {wsql}
-             order by cv.ultima_msg_em desc limit 100""", tuple(params)).fetchall()
-        for r in rows:
-            if r[9] == "bot":
-                quem = "🤖 Agente"
-            elif r[9] == "lead":
-                quem = r[5]
-            elif r[10] and r[10] == ctx["membro_id"]:
-                quem = "Você"
-            else:
-                quem = r[11] or "—"
-            convs.append({"id": r[0], "canal": r[1], "canal_rot": CANAL_ROT.get(r[1], r[1]),
-                          "status": r[2], "quando": r[3], "empresa": r[5],
-                          "cidade": r[6], "uf": r[7], "preview": _preview(r[8]),
-                          "quem": quem, "n": r[12]})
+        convs = _conversas_list(c, ctx["conta_id"], ctx["gerencia"], ctx["membro_id"],
+                                canal=canal, vend=filtro_vend)
         if aba == "emails":
+            wsql = "cv.conta_id=%s" + ("" if ctx["gerencia"] else " and p.vendedor_id=%s")
             erows = c.execute(f"""
                 select msg.criado_em, coalesce(p.empresa, cv.contato_ref, '—'),
                        msg.membro_id, mm.nome, msg.texto
@@ -2167,6 +2187,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .cx-tab:hover{color:var(--txt)}
 .cx-tab.on{color:var(--verde-claro);border-bottom-color:var(--verde)}
 .cx-m.cin{align-self:flex-start;background:var(--card-2);border-color:var(--borda)}
+.cx-m.cbot{background:#1c1428;border-color:#4a3163}
+.cx-m .who{display:block;font-size:.64rem;color:#c9a3e0;margin-bottom:.15rem}
+.cx-msgs{scroll-behavior:smooth}
+.cx-undot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--verde);margin-left:.3rem;vertical-align:middle}
+.cx-conv .av{transition:none}
 .cx-tbl{margin-top:.8rem;border:1px solid var(--borda);border-radius:12px;overflow:hidden;background:var(--card)}
 .cx-tbl table{width:100%;border-collapse:collapse;font-size:.86rem}
 .cx-tbl th{text-align:left;font-weight:600;color:var(--txt-mut);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;padding:.6rem .8rem;background:var(--card-2);border-bottom:1px solid var(--borda)}
@@ -2230,7 +2255,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   </form>
 
   <div class="cx-grid">
-    <div class="cx-list">
+    <div class="cx-list" id="cx-list">
       {% for c in convs %}
       <button type="button" class="cx-conv" id="cxc-{{ c.id }}" onclick="cxOpen(this,{{ c.id }})">
         <span class="av">{{ (c.empresa[:2]|upper) if c.empresa else '?' }}</span>
@@ -2376,64 +2401,97 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   {% endif %}
 </div>
 <script>
+var _cxConv=null,_cxSig='',_cxAg=null,_cxTimer=null,_cxSeen={},_cxList={};
 function cxEsc(s){var d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
+function cxMsgsHtml(d){
+  if(!d.msgs.length)return '<div class="cx-empty">Sem mensagens.</div>';
+  var h='';
+  d.msgs.forEach(function(m){
+    var cls=(m.direcao==='in')?'cx-m cin':((m.autor==='bot')?'cx-m cbot':'cx-m');
+    var cab=m.cabecalho?('<div class="cab">'+cxEsc(m.cabecalho)+'</div>'):'';
+    var corpo=cxEsc(m.corpo||m.cabecalho).replace(/\\n/g,'<br>');
+    h+='<div class="'+cls+'">'+cab+corpo+'<span class="meta">'+cxEsc(m.quem)+' · '+cxEsc(m.quando)+'</span></div>';
+  });
+  return h;
+}
+function cxSig(d){return d.msgs.length+'|'+(d.msgs.length?(d.msgs[d.msgs.length-1].corpo||''):'')+'|'+(d.agente_ativo?1:0)+'|'+(d.pode_responder?1:0);}
+function cxScroll(force){var b=document.getElementById('cx-msgs');if(!b)return;
+  if(force||b.scrollHeight-b.scrollTop-b.clientHeight<80)b.scrollTop=b.scrollHeight;}
 function cxOpen(el,id){
-  document.querySelectorAll('.cx-conv').forEach(function(x){x.classList.remove('on');});
-  if(el)el.classList.add('on');
+  _cxConv=id;if(el&&_cxList[id])_cxSeen[id]=_cxList[id].ult_msg_id||0;
   var th=document.getElementById('cx-thread'),cx=document.getElementById('cx-ctx');
+  document.querySelectorAll('.cx-conv').forEach(function(x){x.classList.remove('on');});
+  var lb=document.getElementById('cxc-'+id);if(lb){lb.classList.add('on');var dt=lb.querySelector('.cx-undot');if(dt)dt.remove();}
   th.innerHTML='<div class="cx-empty">Carregando…</div>';
   fetch('/painel/prospeccao/comunicacao/thread/'+id).then(function(r){return r.json();}).then(function(d){
+    if(_cxConv!==id)return;
     if(!d.ok){th.innerHTML='<div class="cx-empty">Não consegui abrir.</div>';return;}
-    var L=d.lead;
-    var msgs='';
-    d.msgs.forEach(function(m){
-      var cls=(m.direcao==='in')?'cx-m cin':'cx-m';
-      var cab=m.cabecalho?('<div class="cab">'+cxEsc(m.cabecalho)+'</div>'):'';
-      var corpo=cxEsc(m.corpo||m.cabecalho).replace(/\\n/g,'<br>');
-      msgs+='<div class="'+cls+'">'+cab+corpo+'<span class="meta">'+cxEsc(m.quem)+' · '+cxEsc(m.quando)+'</span></div>';
-    });
-    if(!d.msgs.length)msgs='<div class="cx-empty">Sem mensagens.</div>';
-    var rodape;
-    if(d.pode_responder){
-      rodape='<div class="cx-comp"><textarea id="cx-reply" rows="2" placeholder="Escreva uma resposta…"></textarea>'
-        +'<button class="pbtn" onclick="cxResponder('+d.conversa_id+')">Enviar</button></div>';
-    }else{
-      rodape='<div class="cx-stub">Responder por aqui<span class="lbl2">em breve</span> — disponível quando o canal estiver conectado (aba <b>Canais</b>). O <b>1º contato</b> sai pela ficha.</div>';
-    }
+    var L=d.lead;_cxSig=cxSig(d);_cxAg=d.agente_ativo?1:0;
+    var rodape=d.pode_responder
+      ?'<div class="cx-comp"><textarea id="cx-reply" rows="2" placeholder="Escreva uma resposta…" onkeydown="if(event.key===\\'Enter\\'&&!event.shiftKey){event.preventDefault();cxResponder('+d.conversa_id+');}"></textarea><button class="pbtn" id="cx-send" onclick="cxResponder('+d.conversa_id+')">Enviar</button></div>'
+      :'<div class="cx-stub">Responder por aqui<span class="lbl2">em breve</span> — disponível quando o canal estiver conectado (aba <b>Canais</b>).</div>';
     var agBtn=(d.agente_ativo
-      ?'<button class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem;border-color:#4a3163;color:#c9a3e0" onclick="cxAgente('+d.conversa_id+',0)" title="Assumir você (desliga o agente nesta conversa)">🙋 Assumir</button>'
+      ?'<button class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem;border-color:#4a3163;color:#c9a3e0" onclick="cxAgente('+d.conversa_id+',0)" title="Assumir você (desliga o agente)">🙋 Assumir</button>'
       :'<button class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem" onclick="cxAgente('+d.conversa_id+',1)" title="Devolver ao agente">🤖 Ativar agente</button>');
     th.innerHTML=''
       +'<div class="cx-th"><div><b>'+cxEsc(L.empresa)+'</b><small>'+cxEsc(L.canal_rot||'')+(L.cidade?(' · '+cxEsc(L.cidade)+(L.uf?'/'+cxEsc(L.uf):'')):'')+(L.status_rot?(' · '+cxEsc(L.status_rot)):'')+(d.agente_ativo?' · <span style=\\'color:#c9a3e0\\'>🤖 no automático</span>':'')+'</small></div>'
       +'<span style="flex:1"></span>'+agBtn+(L.id?(' <a class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem" href="/painel/prospeccao/'+L.id+'">Abrir ficha</a>'):'')+'</div>'
-      +'<div class="cx-msgs">'+msgs+'</div>'+rodape;
+      +'<div class="cx-msgs" id="cx-msgs">'+cxMsgsHtml(d)+'</div>'+rodape;
+    cxScroll(true);
     var kv=function(k,v){return v?('<div class="cx-kv"><span>'+k+'</span><b>'+cxEsc(v)+'</b></div>'):'';};
     cx.innerHTML=''
       +'<div class="cx-sec"><h4>Lead</h4>'+kv('Empresa',L.empresa)+kv('Segmento',L.segmento)+kv('Cidade',(L.cidade||'')+(L.uf?'/'+L.uf:''))+kv('WhatsApp',L.whatsapp)+kv('E-mail',L.email)+kv('Responsável',L.vendedor)+kv('Status',L.status_rot)+'</div>'
-      +'<div class="cx-sec"><h4>🤖 Agente IA <span class="cx-stub" style="border:0;background:none;padding:0"><span class="lbl2">Fase 4</span></span></h4><div class="mut" style="font-size:.8rem;line-height:1.5">Atendimento automático com handoff pro vendedor chega numa próxima fase.</div></div>'
-      +'<div class="cx-sec"><a class="pbtn" style="width:100%;text-align:center" href="/painel/prospeccao/'+L.id+'">Abrir ficha do lead</a></div>';
+      +(L.id?('<div class="cx-sec"><a class="pbtn" style="width:100%;text-align:center" href="/painel/prospeccao/'+L.id+'">Abrir ficha do lead</a></div>'):'');
   }).catch(function(){th.innerHTML='<div class="cx-empty">Falha de rede.</div>';});
+}
+function cxPollThread(){
+  if(!_cxConv)return;var id=_cxConv;
+  fetch('/painel/prospeccao/comunicacao/thread/'+id).then(function(r){return r.json();}).then(function(d){
+    if(!d.ok||_cxConv!==id)return;
+    if((d.agente_ativo?1:0)!==_cxAg||cxSig(d).split('|')[3]!==_cxSig.split('|')[3]){cxOpen(document.getElementById('cxc-'+id),id);return;}
+    var sig=cxSig(d);if(sig===_cxSig)return;_cxSig=sig;
+    var b=document.getElementById('cx-msgs');if(b){b.innerHTML=cxMsgsHtml(d);cxScroll(false);}
+  }).catch(function(){});
+}
+function cxParams(){var q=new URLSearchParams(location.search);return 'canal='+(q.get('canal')||'')+'&vendedor='+(q.get('vendedor')||'');}
+function cxListItem(c){
+  var cnc={whatsapp:'cn-wpp',email:'cn-mail',messenger:'cn-msg',instagram:'cn-ig'}[c.canal]||'cn-mail';
+  var unread=(c.id!==_cxConv)&&(c.ult_autor==='lead'||c.ult_autor==='bot')&&((c.ult_msg_id||0)>(_cxSeen[c.id]||0));
+  var av=(c.empresa||'?').substring(0,2).toUpperCase();
+  return '<button type="button" class="cx-conv'+(c.id===_cxConv?' on':'')+'" id="cxc-'+c.id+'" onclick="cxOpen(this,'+c.id+')">'
+    +'<span class="av">'+cxEsc(av)+'</span><span class="mid">'
+    +'<span class="nm"><b>'+cxEsc(c.empresa)+'</b><span class="t">'+cxEsc(c.quando||'')+(unread?' <span class="cx-undot"></span>':'')+'</span></span>'
+    +'<span class="pre">'+cxEsc(c.quem)+': '+cxEsc(c.preview)+'</span>'
+    +'<span class="cx-cn '+cnc+'">'+cxEsc(c.canal_rot)+(c.n>1?(' · '+c.n):'')+'</span></span></button>';
+}
+function cxPollList(){
+  var box=document.getElementById('cx-list');if(!box)return;
+  fetch('/painel/prospeccao/comunicacao/lista?'+cxParams()).then(function(r){return r.json();}).then(function(d){
+    if(!d.ok)return;var h='';_cxList={};
+    d.convs.forEach(function(c){_cxList[c.id]=c;h+=cxListItem(c);});
+    box.innerHTML=h||'<div class="cx-empty">Nenhuma conversa ainda.</div>';
+  }).catch(function(){});
 }
 function cxAgente(convId,on){
   var fd=new FormData();fd.append('conversa_id',convId);fd.append('ativar',on?'1':'0');
   fetch('/painel/prospeccao/comunicacao/agente-conversa',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
-    .then(function(r){return r.json();}).then(function(d){
-      if(!d.ok){alert(d.erro||'Não consegui.');return;}
-      cxOpen(document.getElementById('cxc-'+convId),convId);
-    }).catch(function(){alert('Falha de rede.');});
+    .then(function(r){return r.json();}).then(function(d){if(!d.ok){alert(d.erro||'Não consegui.');return;}cxOpen(document.getElementById('cxc-'+convId),convId);}).catch(function(){alert('Falha de rede.');});
 }
 function cxResponder(convId){
-  var ta=document.getElementById('cx-reply');if(!ta)return;var t=ta.value.trim();if(!t){return;}
-  var btn=event&&event.target;if(btn){btn.disabled=true;btn.textContent='Enviando…';}
+  var ta=document.getElementById('cx-reply');if(!ta)return;var t=ta.value.trim();if(!t)return;
+  var b=document.getElementById('cx-msgs');
+  if(b){if(b.querySelector('.cx-empty'))b.innerHTML='';b.insertAdjacentHTML('beforeend','<div class="cx-m" style="opacity:.6"><span class="who">Você</span>'+cxEsc(t).replace(/\\n/g,'<br>')+'<span class="meta">enviando…</span></div>');cxScroll(true);}
+  ta.value='';var sd=document.getElementById('cx-send');if(sd){sd.disabled=true;sd.textContent='…';}
   var fd=new FormData();fd.append('conversa_id',convId);fd.append('texto',t);
   fetch('/painel/prospeccao/comunicacao/responder',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
     .then(function(r){return r.json();}).then(function(d){
-      if(btn){btn.disabled=false;btn.textContent='Enviar';}
-      if(!d.ok){alert(d.erro||'Não consegui enviar.');return;}
-      var el=document.getElementById('cxc-'+convId);
-      cxOpen(el,convId);
-    }).catch(function(){if(btn){btn.disabled=false;btn.textContent='Enviar';}alert('Falha de rede.');});
+      if(sd){sd.disabled=false;sd.textContent='Enviar';}
+      if(!d.ok){alert(d.erro||'Não consegui enviar.');ta.value=t;}
+      _cxSig='';cxPollThread();cxPollList();
+    }).catch(function(){if(sd){sd.disabled=false;sd.textContent='Enviar';}alert('Falha de rede.');ta.value=t;});
 }
+(function(){var box=document.getElementById('cx-list');if(box){document.querySelectorAll('#cx-list .cx-conv').forEach(function(b){var id=parseInt(b.id.replace('cxc-',''));_cxList[id]={id:id,ult_msg_id:0};});
+  _cxTimer=setInterval(function(){cxPollList();cxPollThread();},4000);}})();
 </script>
 {% endblock %}"""
 

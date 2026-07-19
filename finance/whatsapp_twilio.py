@@ -4,10 +4,12 @@ Tudo tolerante a falta de config: sem as env (TWILIO_ACCOUNT_SID/AUTH_TOKEN/
 WHATSAPP_FROM) o adaptador fica inerte (no-op) e nada quebra. O SDK `twilio` é
 importado tarde (lazy) — o módulo carrega mesmo sem ele instalado.
 
+Credenciais da conta Twilio são GLOBAIS (env); o NÚMERO de cada empresa é por
+conta (banco: canais_config), porque o env TWILIO_WHATSAPP_FROM é único e já é do
+Zaq. O inbound roteia pelo número que recebeu (To → conta).
+
 Env:
 - TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN  — credenciais (no Render, nunca no código)
-- TWILIO_WHATSAPP_FROM                    — ex: 'whatsapp:+17602847678'
-- WHATSAPP_CONTA_ID                       — conta dona do número (roteia o inbound)
 - APP_URL                                 — URL pública (valida a assinatura do webhook)
 """
 from __future__ import annotations
@@ -18,20 +20,14 @@ import os
 def _cfg() -> dict | None:
     sid = os.environ.get("TWILIO_ACCOUNT_SID")
     tok = os.environ.get("TWILIO_AUTH_TOKEN")
-    frm = os.environ.get("TWILIO_WHATSAPP_FROM")
-    if not (sid and tok and frm):
+    if not (sid and tok):
         return None
-    return {"sid": sid, "token": tok, "from": frm.strip()}
+    return {"sid": sid, "token": tok}
 
 
 def configurado() -> bool:
+    """Credenciais globais presentes (o número em si é por empresa, no banco)."""
     return _cfg() is not None
-
-
-def conta_dona() -> int | None:
-    """Conta (tenant) dona do número — pra rotear as mensagens que chegam."""
-    v = os.environ.get("WHATSAPP_CONTA_ID")
-    return int(v) if v and v.isdigit() else None
 
 
 def _so_digitos(s: str) -> str:
@@ -48,19 +44,28 @@ def _wa_addr(numero: str) -> str:
     return "whatsapp:+" + d
 
 
-def enviar_texto(numero: str, corpo: str) -> dict:
-    """Envia texto livre (dentro da janela de 24h). Fora da janela o Twilio recusa —
-    aí é preciso template (fica pra próxima etapa)."""
+def normalizar_from(numero: str) -> str:
+    """Formato canônico do número da empresa pra guardar/usar como 'from' (whatsapp:+DDI...)."""
+    d = _so_digitos(numero)
+    return ("whatsapp:+" + d) if d else ""
+
+
+def enviar_texto(remetente: str, numero: str, corpo: str) -> dict:
+    """Envia texto livre (dentro da janela de 24h) a partir do NÚMERO da empresa
+    (`remetente`, ex 'whatsapp:+17602847678'). Fora da janela o Twilio recusa — aí
+    é preciso template (próxima etapa)."""
     cfg = _cfg()
     if not cfg:
         return {"ok": False, "erro": "nao_configurado"}
+    if not remetente:
+        return {"ok": False, "erro": "sem_numero_empresa"}
     to = _wa_addr(numero)
     if not to:
         return {"ok": False, "erro": "numero_invalido"}
     try:
         from twilio.rest import Client
         msg = Client(cfg["sid"], cfg["token"]).messages.create(
-            from_=cfg["from"], to=to, body=(corpo or "")[:1500])
+            from_=remetente, to=to, body=(corpo or "")[:1500])
         return {"ok": True, "sid": msg.sid}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "erro": str(e)[:200]}

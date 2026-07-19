@@ -555,7 +555,8 @@ def prospeccao_buscar_cnpj(request: Request, alvo_id: int):
     alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
     if not alvo or not _pode_ver(alvo, ctx):
         return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
-    return JSONResponse(fontes.buscar_cnpj_por_nome(alvo["empresa"], alvo["cidade"] or ""))
+    return JSONResponse(fontes.buscar_cnpj_por_nome(
+        alvo["empresa"], alvo["cidade"] or "", alvo["uf"] or ""))
 
 
 @router.post("/painel/prospeccao/{alvo_id}/aplicar-cnpj")

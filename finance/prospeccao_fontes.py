@@ -62,13 +62,18 @@ def buscar_places(termo: str, cidade: str, api_key: str | None = None,
     if not termo:
         return {"ok": False, "erro": "sem_termo", "itens": []}
     url = "https://places.googleapis.com/v1/places:searchText"
+    # Campos na MESMA faixa de cobrança que já usamos (telefone + nota): dá pra
+    # incluir cidade/UF exatas, segmento, status e link do mapa sem subir o preço.
+    # (horários/reviews subiriam pra faixa "Atmosphere", mais cara — ficam de fora.)
     headers = {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": key,
         "X-Goog-FieldMask": (
             "places.id,places.displayName,places.formattedAddress,"
-            "places.nationalPhoneNumber,places.websiteUri,places.rating,"
-            "places.userRatingCount"
+            "places.addressComponents,places.nationalPhoneNumber,"
+            "places.internationalPhoneNumber,places.websiteUri,places.rating,"
+            "places.userRatingCount,places.primaryTypeDisplayName,"
+            "places.businessStatus,places.googleMapsUri"
         ),
     }
     consulta = f"{termo} em {cidade}" if cidade else termo
@@ -89,18 +94,39 @@ def buscar_places(termo: str, cidade: str, api_key: str | None = None,
         if not nome:
             continue
         tem_site = "websiteUri" in p
+        cid, uf = _endereco_partes(p.get("addressComponents"))
+        seg = (p.get("primaryTypeDisplayName") or {}).get("text") or ""
+        status = p.get("businessStatus") or ""
         itens.append({
             "empresa": nome,
             "endereco": p.get("formattedAddress") or "",
-            "telefone": p.get("nationalPhoneNumber") or "",
+            "telefone": p.get("nationalPhoneNumber") or p.get("internationalPhoneNumber") or "",
             "place_id": p.get("id") or "",
             "tem_site": tem_site,
             "rating": p.get("rating"),
             "avaliacoes": p.get("userRatingCount") or 0,
+            "segmento": seg,
+            "cidade": cid or cidade,
+            "uf": uf,
+            "maps_uri": p.get("googleMapsUri") or "",
+            "status": status,
+            "aberto": status != "CLOSED_PERMANENTLY",
             "rede": eh_rede_grande(nome),
             "temperatura": temperatura_auto(tem_site),
         })
     return {"ok": True, "itens": itens, "erro": None}
+
+
+def _endereco_partes(componentes) -> tuple[str, str]:
+    """Extrai (cidade, UF) dos addressComponents do Places (New)."""
+    cidade, uf = "", ""
+    for c in componentes or []:
+        tipos = c.get("types") or []
+        if not cidade and ("administrative_area_level_2" in tipos or "locality" in tipos):
+            cidade = c.get("longText") or c.get("shortText") or ""
+        if not uf and "administrative_area_level_1" in tipos:
+            uf = (c.get("shortText") or "")[:2].upper()
+    return cidade, uf
 
 
 def enriquecer_cnpj(cnpj: str) -> dict:

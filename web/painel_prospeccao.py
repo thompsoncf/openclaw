@@ -577,16 +577,18 @@ def prospeccao_aplicar_cnpj(request: Request, alvo_id: int, cnpj: str = Form(...
     with pool.connection() as c:
         if res.get("ok"):
             d = res["dados"]
+            # identidade (sócio/regime/porte/segmento) + receita: SOBRESCREVE — assim
+            # "trocar CNPJ" corrige de fato. Contato/local: coalesce (Google costuma
+            # ser o certo do lead).
             c.execute(
                 """update prospeccao set cnpj=%s,
-                       socio=coalesce(socio,%s), regime_tributario=coalesce(regime_tributario,%s),
-                       porte=coalesce(porte,%s), telefone=coalesce(telefone,%s),
-                       email=coalesce(email,%s), segmento=coalesce(segmento,%s),
+                       socio=%s, regime_tributario=%s, porte=%s, segmento=%s,
+                       telefone=coalesce(telefone,%s), email=coalesce(email,%s),
                        cidade=coalesce(cidade,%s), uf=coalesce(uf,%s),
                        receita=%s::jsonb, atualizado_em=now()
                      where id=%s and conta_id=%s""",
                 (cnpj.strip(), d.get("socio"), d.get("regime_tributario"), d.get("porte"),
-                 d.get("telefone"), d.get("email"), d.get("segmento"), d.get("cidade"),
+                 d.get("segmento"), d.get("telefone"), d.get("email"), d.get("cidade"),
                  d.get("uf"), json.dumps(_receita_extras(d)), alvo_id, ctx["conta_id"]))
             request.session["prosp_aviso"] = "CNPJ vinculado e dados da Receita preenchidos ✓"
         else:
@@ -594,6 +596,27 @@ def prospeccao_aplicar_cnpj(request: Request, alvo_id: int, cnpj: str = Form(...
                       (cnpj.strip(), alvo_id, ctx["conta_id"]))
             request.session["prosp_aviso"] = "CNPJ salvo (não consegui enriquecer agora — use ↻)."
         c.commit()
+    return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
+
+
+@router.post("/painel/prospeccao/{alvo_id}/limpar-cnpj")
+def prospeccao_limpar_cnpj(request: Request, alvo_id: int):
+    """Desfaz um CNPJ escolhido errado: zera cnpj + receita + identidade (sócio/
+    regime/porte). Contato/telefone/cidade/uf ficam (dados do lead)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    pool = get_pool()
+    alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
+    if not alvo or not _pode_ver(alvo, ctx):
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    with pool.connection() as c:
+        c.execute(
+            """update prospeccao set cnpj=null, receita=null, socio=null,
+                   regime_tributario=null, porte=null, atualizado_em=now()
+                 where id=%s and conta_id=%s""", (alvo_id, ctx["conta_id"]))
+        c.commit()
+    request.session["prosp_aviso"] = "CNPJ removido. Busque de novo se quiser."
     return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
 
 
@@ -1163,8 +1186,11 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="fsec">
         <div class="sh"><b>Dados</b>
           <div style="display:flex;gap:.4rem">
+            {% set _end_lead = (a.receita.endereco if a.receita else None) or a.obs or ((a.cidade or '') ~ ('/' ~ a.uf if a.uf else '')) %}
             {% if a.cnpj %}<form method="post" action="/painel/prospeccao/{{ a.id }}/enriquecer" style="margin:0"><button class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" title="Puxar dados da Receita (CNPJá/BrasilAPI)">↻ atualizar</button></form>
-            {% elif tem_cnpja %}<button type="button" class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" onclick="acharCnpj({{ a.id }})" title="Achar o CNPJ por nome+cidade (CNPJá)">🔎 achar CNPJ</button>
+              {% if tem_cnpja %}<button type="button" class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" data-endereco="{{ _end_lead }}" onclick="acharCnpj({{ a.id }},this)" title="Buscar outro CNPJ (trocar)">🔎 trocar</button>{% endif %}
+              <form method="post" action="/painel/prospeccao/{{ a.id }}/limpar-cnpj" style="margin:0" onsubmit="return confirm('Remover o CNPJ e os dados da Receita deste lead?')"><button class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" title="Remover o CNPJ (escolhido errado)">🗑 limpar</button></form>
+            {% elif tem_cnpja %}<button type="button" class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" data-endereco="{{ _end_lead }}" onclick="acharCnpj({{ a.id }},this)" title="Achar o CNPJ por nome+cidade (CNPJá)">🔎 achar CNPJ</button>
             {% else %}<a class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" target="_blank" rel="noopener" title="Achar o CNPJ na web (nome + cidade)" href="https://www.google.com/search?q={{ (a.empresa ~ ' ' ~ (a.cidade or '') ~ ' cnpj')|urlencode }}">🔎 achar CNPJ</a>{% endif %}
             <button type="button" class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" onclick="prospToggle('edit-dados')">editar</button>
           </div>
@@ -1270,16 +1296,21 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 function prospToggle(id){var e=document.getElementById(id);e.style.display=(e.style.display==='none')?'block':'none';}
 function rcPick(el){var box=document.getElementById('rc-pills');box.querySelectorAll('.rcpill').forEach(function(b){b.classList.remove('on');});el.classList.add('on');document.getElementById('rc-tipo').value=el.getAttribute('data-tipo');}
 function fToast(msg){var t=document.getElementById('f-toast');if(!t){t=document.createElement('div');t.id='f-toast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--card);border:1px solid var(--verde);color:var(--verde-claro);padding:.6rem 1rem;border-radius:10px;z-index:200;font-size:.85rem;box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .4s';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';clearTimeout(window._ft);window._ft=setTimeout(function(){t.style.opacity='0';},2600);}
-function acharCnpj(id){var box=document.getElementById('cnpj-cands');box.innerHTML='<div class="mut" style="font-size:.8rem">Procurando CNPJ…</div>';
+function acharCnpj(id,btn){var box=document.getElementById('cnpj-cands');var endLead=(btn&&btn.getAttribute('data-endereco'))||'';box.innerHTML='<div class="mut" style="font-size:.8rem">Procurando CNPJ…</div>';
   fetch('/painel/prospeccao/'+id+'/buscar-cnpj',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
     if(!d.ok){box.innerHTML='<div class="mut" style="font-size:.8rem;color:#e0a33e">Não achei ('+(d.erro||'?')+'). Preencha o CNPJ na mão em <b>editar</b>.</div>';return;}
-    if(!d.itens||!d.itens.length){box.innerHTML='<div class="mut" style="font-size:.8rem">Nenhum CNPJ encontrado pra esse nome. Tente pelo <b>editar</b>.</div>';return;}
-    var h='<div class="lb" style="margin:.2rem 0">Escolha a empresa certa:</div><div class="rlist">';
+    if(!d.itens||!d.itens.length){box.innerHTML='<div class="mut" style="font-size:.8rem">Nenhum CNPJ encontrado pra esse nome/UF. Tente pelo <b>editar</b>.</div>';return;}
+    var h='';
+    if(endLead){h+='<div class="mut" style="font-size:.76rem;margin:.1rem 0 .3rem">📍 Endereço do lead: <b>'+jsEsc(endLead)+'</b> — escolha o que bate:</div>';}
+    else{h+='<div class="lb" style="margin:.2rem 0">Escolha a empresa certa (confira o endereço):</div>';}
+    h+='<div class="rlist">';
     d.itens.forEach(function(it){
+      var loc=(it.cidade?(jsEsc(it.cidade)+(it.uf?('/'+it.uf):'')):'');
       h+='<form method="post" action="/painel/prospeccao/'+id+'/aplicar-cnpj" class="rrow" style="cursor:pointer;gap:.5rem"><input type="hidden" name="cnpj" value="'+it.cnpj+'">'
         +'<span style="flex:1"><b style="font-size:.85rem">'+jsEsc(it.razao_social||it.nome_fantasia||it.cnpj)+'</b>'
-        +'<span class="mut" style="font-size:.74rem"> · '+it.cnpj+(it.cidade?(' · '+jsEsc(it.cidade)+(it.uf?('/'+it.uf):'')):'')+(it.situacao?(' · '+jsEsc(it.situacao)):'')+'</span></span>'
-        +'<button class="pbtn" style="padding:.3rem .7rem;font-size:.78rem;margin:0">usar</button></form>';
+        +'<span class="mut" style="font-size:.74rem"> · '+it.cnpj+(it.situacao?(' · '+jsEsc(it.situacao)):'')+'</span>'
+        +(it.endereco?('<span class="mut" style="display:block;font-size:.74rem">📍 '+jsEsc(it.endereco)+(loc?(' · '+loc):'')+'</span>'):(loc?('<span class="mut" style="display:block;font-size:.74rem">📍 '+loc+'</span>'):''))
+        +'</span><button class="pbtn" style="padding:.3rem .7rem;font-size:.78rem;margin:0">usar</button></form>';
     });
     h+='</div>';box.innerHTML=h;
   }).catch(function(){box.innerHTML='<div class="mut" style="font-size:.8rem;color:#e0a33e">Falha de rede.</div>';});}

@@ -290,12 +290,18 @@ def buscar_cnpj_por_nome(nome: str, cidade: str = "", uf: str = "",
         # filtro por UF no cliente (garante, mesmo se a API ignorou o param)
         if uf and it_uf and it_uf != uf:
             continue
+        pe = []
+        if addr.get("street"):
+            pe.append(str(addr["street"]) + (", " + str(addr["number"]) if addr.get("number") else ""))
+        if addr.get("district"):
+            pe.append(str(addr["district"]))
         itens.append({
             "cnpj": cnpj,
             "razao_social": comp.get("name") or o.get("name") or "",
             "nome_fantasia": o.get("alias") or "",
             "cidade": (addr.get("city") or "").title(),
             "uf": it_uf,
+            "endereco": " · ".join(pe),
             "situacao": (o.get("status") or {}).get("text") or "",
         })
     cid = (cidade or "").strip().lower()

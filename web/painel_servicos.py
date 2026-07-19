@@ -17,6 +17,7 @@ tecnologia. A IA de escopo e a validação de módulos usam o catálogo da conta
 """
 import json
 import re
+import secrets
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -59,9 +60,20 @@ def _garantir_tabela(c):
         alter table orcamentos add column if not exists follow_up_em  date;
         alter table orcamentos add column if not exists atualizado_em timestamptz not null default now();
         alter table orcamentos add column if not exists conta_id      bigint references contas(id) on delete restrict;
+        alter table orcamentos add column if not exists token         text;
+        alter table orcamentos add column if not exists itens         jsonb;
+        alter table orcamentos add column if not exists aprovada_em   timestamptz;
+        alter table orcamentos add column if not exists aprovada_por  text;
+        alter table orcamentos add column if not exists aprovada_doc  text;
+        alter table orcamentos add column if not exists aprovada_ip   text;
         create index if not exists idx_orcamentos_status on orcamentos (status, criado_em desc);
         create index if not exists idx_orcamentos_conta on orcamentos (conta_id, status, criado_em desc);
+        create unique index if not exists idx_orcamentos_token on orcamentos (token) where token is not null;
     """)
+    # novo estado 'aprovada' — relaxa o check de status (068 só tinha 5 estados).
+    c.execute("alter table orcamentos drop constraint if exists orcamentos_status_check")
+    c.execute("""alter table orcamentos add constraint orcamentos_status_check
+        check (status in ('rascunho','enviado','negociando','aprovada','fechado','perdido'))""")
     c.commit()
 
 
@@ -239,6 +251,13 @@ def painel_servicos_sugerir(request: Request, dados: SugerirIn):
         return JSONResponse({"erro": "falha ao gerar"}, status_code=500)
 
 
+class ItemIn(BaseModel):
+    nome: str = ""
+    desc: str = ""
+    setup: int = 0
+    mensal: int = 0
+
+
 class SalvarIn(BaseModel):
     id: int | None = None   # se vier, ATUALIZA a proposta (reaberta do funil)
     cliente: str = ""
@@ -248,6 +267,7 @@ class SalvarIn(BaseModel):
     whatsapp: str = ""
     email: str = ""
     modulos: list[str] = []   # ids dos modulos escolhidos
+    itens: list[ItemIn] = []  # snapshot das linhas (nome/setup/mensal) pra a proposta
     escopo: str = ""
     canal: str = ""
     setup: int = 0            # em REAIS
@@ -263,41 +283,49 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
     validos = scat.slugs_validos(get_pool(), conta[0])
     modulos = [i for i in (dados.modulos or []) if i in validos]
+    itens = [{"nome": (it.nome or "")[:120], "desc": (it.desc or "")[:200],
+              "setup": int(it.setup or 0), "mensal": int(it.mensal or 0)}
+             for it in (dados.itens or [])[:50]]
+    itens_json = json.dumps(itens)
     vals = (dados.cliente or None, dados.empresa or None,
             (dados.cnpj or "").strip() or None, dados.segmento or None,
             (dados.whatsapp or "").strip() or None, (dados.email or "").strip() or None,
-            json.dumps(modulos), (dados.escopo or "").strip() or None,
+            json.dumps(modulos), itens_json, (dados.escopo or "").strip() or None,
             (dados.canal or "").strip() or None,
             int(dados.setup) * 100, int(dados.mensal) * 100,
             int(dados.primeiro_ano) * 100, int(dados.n_modulos))
     with get_pool().connection() as c:
         _garantir_tabela(c)
-        oid = None
+        oid = tok = None
         if dados.id:
             # atualiza a proposta reaberta (nunca mexe em uma já 'fechado')
             r = c.execute(
                 """update orcamentos set cliente=%s, empresa=%s, cnpj=%s, segmento=%s,
-                       whatsapp=%s, email=%s, modulos=%s::jsonb, escopo=%s, canal=%s,
+                       whatsapp=%s, email=%s, modulos=%s::jsonb, itens=%s::jsonb, escopo=%s, canal=%s,
                        setup_centavos=%s, mensal_centavos=%s, primeiro_ano_centavos=%s,
-                       n_modulos=%s, atualizado_em=now()
+                       n_modulos=%s, atualizado_em=now(),
+                       token=coalesce(token, %s)
                      where id=%s and conta_id=%s and status <> 'fechado'
-                   returning id""",
-                vals + (dados.id, conta[0])).fetchone()
-            oid = r[0] if r else None
+                   returning id, token""",
+                vals + (secrets.token_urlsafe(16), dados.id, conta[0])).fetchone()
+            if r:
+                oid, tok = r
         if oid is None and not dados.id:
             membro_id, _papel = _ator(request)
             criador = str(membro_id) if membro_id else "dono"
-            oid = c.execute(
+            r = c.execute(
                 """insert into orcamentos
                    (conta_id, cliente, empresa, cnpj, segmento, whatsapp, email,
-                    modulos, escopo, canal, setup_centavos, mensal_centavos,
-                    primeiro_ano_centavos, n_modulos, criado_por)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s,%s,%s,%s) returning id""",
-                (conta[0],) + vals + (criador,)).fetchone()[0]
+                    modulos, itens, escopo, canal, setup_centavos, mensal_centavos,
+                    primeiro_ano_centavos, n_modulos, criado_por, token)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,%s,%s,%s,%s)
+                   returning id, token""",
+                (conta[0],) + vals + (criador, secrets.token_urlsafe(16))).fetchone()
+            oid, tok = r
         c.commit()
     if oid is None:
         return JSONResponse({"erro": "proposta não encontrada ou já fechada"}, status_code=400)
-    return JSONResponse({"ok": True, "id": oid})
+    return JSONResponse({"ok": True, "id": oid, "token": tok})
 
 
 @router.get("/painel/servicos/lista")
@@ -309,18 +337,17 @@ def painel_servicos_lista(request: Request):
     with get_pool().connection() as c:
         _garantir_tabela(c)
         # vendedor vê só as propostas dele; dono/gestor veem o funil inteiro.
+        _cols = """select id, cliente, empresa, setup_centavos, mensal_centavos,
+                          primeiro_ano_centavos, n_modulos, criado_em, status,
+                          token, aprovada_por, aprovada_em"""
         if papel == "vendedor" and membro_id:
             rows = c.execute(
-                """select id, cliente, empresa, setup_centavos, mensal_centavos,
-                          primeiro_ano_centavos, n_modulos, criado_em, status
-                   from orcamentos where conta_id=%s and criado_por=%s
+                _cols + """ from orcamentos where conta_id=%s and criado_por=%s
                    order by criado_em desc limit 50""",
                 (conta[0], str(membro_id))).fetchall()
         else:
             rows = c.execute(
-                """select id, cliente, empresa, setup_centavos, mensal_centavos,
-                          primeiro_ano_centavos, n_modulos, criado_em, status
-                   from orcamentos where conta_id=%s
+                _cols + """ from orcamentos where conta_id=%s
                    order by criado_em desc limit 50""", (conta[0],)).fetchall()
     itens = [{
         "id": r[0],
@@ -332,6 +359,9 @@ def painel_servicos_lista(request: Request):
         "mods": r[6],
         "data": r[7].strftime("%d/%m") if r[7] else "",
         "status": r[8] or "rascunho",
+        "token": r[9] or "",
+        "aprovada_por": r[10] or "",
+        "aprovada_em": r[11].strftime("%d/%m/%Y") if r[11] else "",
         "inicial": (r[1] or r[2] or "?").strip()[:1].upper(),
     } for r in rows]
     return JSONResponse({"itens": itens})
@@ -815,15 +845,21 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       .finally(function(){btn.disabled=false; btn.textContent=t0;});
   });
 
-  document.getElementById('oc-salvar').addEventListener('click',function(){
+  function coletarBody(){
     var c=calc();
-    var modIds=rows().filter(function(r){return r.getAttribute('data-on')==='1';}).map(function(r){return r.getAttribute('data-id');});
+    var sel=rows().filter(function(r){return r.getAttribute('data-on')==='1';});
+    var itens=sel.map(function(r){return {nome:r.getAttribute('data-nome'),desc:r.getAttribute('data-desc')||'',setup:num(r.querySelector('.oc-setup')),mensal:num(r.querySelector('.oc-mensal'))};});
     var escEl=document.getElementById('oc-escopo-out');
-    var body={id:EDIT_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',modulos:modIds,escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setup),mensal:Math.round(c.mensal),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods};
+    return {id:EDIT_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',modulos:sel.map(function(r){return r.getAttribute('data-id');}),itens:itens,escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setup),mensal:Math.round(c.mensal),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods};
+  }
+  function salvarProposta(cb){
+    fetch('/painel/servicos/salvar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(coletarBody())})
+      .then(function(r){return r.json();}).then(function(d){if(d&&d.id){EDIT_ID=d.id;} if(cb)cb(d);})
+      .catch(function(){if(cb)cb(null);});
+  }
+  document.getElementById('oc-salvar').addEventListener('click',function(){
     var btn=this; btn.textContent='Salvando...';
-    fetch('/painel/servicos/salvar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-      .then(function(r){return r.json();}).then(function(d){if(d&&d.id){EDIT_ID=d.id;} btn.textContent='Salvo!'; carregarHist(); setTimeout(function(){btn.textContent='Salvar no funil';},1500);})
-      .catch(function(){btn.textContent='Erro ao salvar';});
+    salvarProposta(function(d){ btn.textContent=(d&&d.id)?'Salvo!':'Erro ao salvar'; carregarHist(); setTimeout(function(){btn.textContent='Salvar no funil';},1500); });
   });
 
   function esc(s){var d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML;}
@@ -889,9 +925,20 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
           +'<div class="mut" style="font-size:.78rem">'+esc(it.data)+' · '+it.mods+' módulos · '+esc(it.total)+'</div></div>';
         left.addEventListener('click',function(){abrir(it.id);});
         el.appendChild(left);
-        var right=document.createElement('div'); right.style.display='flex'; right.style.alignItems='center'; right.style.gap='.6rem';
-        var badge=document.createElement('span'); badge.className='oc-badge '+(fechado?'fechado':'aberto'); badge.textContent=fechado?'Fechado':esc(it.status);
+        var right=document.createElement('div'); right.style.display='flex'; right.style.alignItems='center'; right.style.gap='.5rem'; right.style.flexWrap='wrap';
+        var aprovada=it.status==='aprovada';
+        var badge=document.createElement('span');
+        badge.className='oc-badge '+(fechado?'fechado':(aprovada?'fechado':'aberto'));
+        badge.textContent=fechado?'Fechado':(aprovada?('Aprovada'+(it.aprovada_por?' · '+esc(it.aprovada_por):'')):esc(it.status));
         right.appendChild(badge);
+        if(it.token){
+          var lk=window.location.origin+'/proposta/'+it.token;
+          var bl=document.createElement('button'); bl.className='oc-ic'; bl.title='Copiar link do cliente'; bl.textContent='🔗';
+          bl.addEventListener('click',function(){navigator.clipboard.writeText(lk); bl.textContent='✓'; setTimeout(function(){bl.textContent='🔗';},1200);});
+          var bp=document.createElement('button'); bp.className='oc-ic'; bp.title='Abrir / baixar PDF'; bp.textContent='📄';
+          bp.addEventListener('click',function(){window.open('/proposta/'+it.token,'_blank');});
+          right.appendChild(bl); right.appendChild(bp);
+        }
         if(!fechado){
           var b=document.createElement('button'); b.className='oc-fechar'; b.textContent='Fechar contrato';
           b.addEventListener('click',function(){fechar(it.id,b);});
@@ -903,48 +950,21 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     }).catch(function(){document.getElementById('oc-hist-box').innerHTML='<p class="mut">Erro ao carregar.</p>';});
   }
 
+  // Gerar proposta = salva no funil e abre o LINK PÚBLICO (o mesmo que o cliente
+  // recebe: vê, baixa PDF e aprova/assina). Abre a aba já, pra o popup não ser
+  // bloqueado, e navega quando o token volta.
   document.getElementById('oc-gerar').addEventListener('click',function(){
-    var c=calc();
-    var empresa=document.getElementById('oc-empresa').value||'Cliente';
-    var contato=document.getElementById('oc-contato').value||'';
-    var whats=document.getElementById('oc-whats').value||'';
-    var segmento=document.getElementById('oc-segmento').value||'';
-    var escopo=(document.getElementById('oc-escopo-out').getAttribute('data-escopo'))||('Propomos à '+empresa+' a implantação de uma operação de IA sob medida, integrando os módulos abaixo, com foco em automatizar o atendimento, qualificar oportunidades e dar visibilidade dos resultados.');
-    var linhas=rows().filter(function(r){return r.getAttribute('data-on')==='1';}).map(function(r){
-      return {nome:r.getAttribute('data-nome'),desc:r.getAttribute('data-desc'),setup:num(r.querySelector('.oc-setup')),mensal:num(r.querySelector('.oc-mensal'))};
+    var emp=(document.getElementById('oc-empresa').value||'').trim();
+    var sel=rows().filter(function(r){return r.getAttribute('data-on')==='1';});
+    if(!emp && !sel.length){alert('Preencha a empresa ou marque ao menos um serviço.');return;}
+    var w=window.open('about:blank','_blank');
+    if(w){try{w.document.write('<p style="font-family:system-ui;color:#8A8475;padding:24px">Gerando proposta…</p>');}catch(e){}}
+    var btn=this, t0=btn.textContent; btn.textContent='Gerando...';
+    salvarProposta(function(d){
+      btn.textContent=t0; carregarHist();
+      if(!d||!d.token){ if(w)w.close(); alert('Não consegui gerar a proposta.'); return; }
+      if(w){ w.location='/proposta/'+d.token; } else { window.location='/proposta/'+d.token; }
     });
-    var hoje=new Date();
-    var meses=['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
-    var dataStr=hoje.getDate()+' de '+meses[hoje.getMonth()]+' de '+hoje.getFullYear();
-    var docNum='PR-'+hoje.getFullYear()+(''+(hoje.getMonth()+1)).padStart(2,'0')+'-'+(''+(Math.floor(hoje.getTime()/1000)%1000)).padStart(3,'0');
-    var trs=linhas.map(function(l){return '<tr><td><b>'+l.nome+'</b><small>'+l.desc+'</small></td><td class=r>'+fmt(l.setup)+'</td><td class=r>'+fmt(l.mensal)+'</td></tr>';}).join('');
-    var html='<!doctype html><html lang=pt-br><head><meta charset=utf-8><title>Proposta '+empresa+'</title>'
-      +'<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,-apple-system,sans-serif;color:#14213D;background:#EEE9DD;padding:30px}'
-      +'.pg{max-width:794px;margin:0 auto;background:#fff;border-radius:4px;overflow:hidden;box-shadow:0 20px 50px -25px rgba(20,33,61,.4)}'
-      +'.hd{background:#14213D;color:#F4F1EA;padding:36px 48px;display:flex;justify-content:space-between;align-items:flex-start}'
-      +'.hd .lg{font-size:26px;font-weight:600}.hd .lg span{color:#E0B458}'
-      +'.hd .sub{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:#9FA8BC;margin-top:5px}'
-      +'.hd .mt{text-align:right;font-size:11px;color:#9FA8BC}.hd .mt b{display:block;color:#E0B458;font-size:10px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:4px}'
-      +'.bd{padding:34px 48px 44px}.eb{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#B8862E;font-weight:600;margin:24px 0 10px}'
-      +'.cli{background:#FBFAF7;border:1px solid #ECE7DC;border-radius:9px;padding:14px 16px;font-size:14px}'
-      +'p.es{font-size:13.5px;line-height:1.7;color:#3A4254}'
-      +'table{width:100%;border-collapse:collapse;margin-top:4px}th{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#9FA8BC;background:#14213D;padding:10px 14px;text-align:left}th.r,td.r{text-align:right;font-family:monospace}'
-      +'td{padding:12px 14px;border-bottom:1px solid #F0EBE0;font-size:13.5px}td small{display:block;color:#A8A192;font-size:11.5px;margin-top:2px}'
-      +'.tot{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:24px}.bx{border:1px solid #ECE7DC;border-radius:12px;padding:18px}.bx .l{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:600}.bx .v{font-family:monospace;font-size:23px;font-weight:600;margin-top:6px}'
-      +'.fin{margin-top:12px;background:#14213D;border-radius:12px;padding:20px 22px;display:flex;justify-content:space-between;align-items:center}.fin .l{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#E0B458;font-weight:600}.fin .v{font-family:monospace;font-size:30px;font-weight:600;color:#FBFAF7}'
-      +'.ft{margin-top:28px;font-size:11.5px;color:#8A8475;line-height:1.6}@media print{body{background:#fff;padding:0}.pg{box-shadow:none;border-radius:0}@page{size:A4;margin:0}}'
-      +'</style></head><body><div class=pg>'
-      +'<div class=hd><div><div class=lg>'+esc(empresa)+' <span>·</span></div><div class=sub>Proposta comercial</div></div>'
-      +'<div class=mt><b>Proposta comercial</b>'+docNum+'<br>'+dataStr+'</div></div>'
-      +'<div class=bd><div class=eb>Preparada para</div><div class=cli><b>'+esc(empresa)+'</b>'+(contato?' · '+esc(contato):'')+(whats?' · '+esc(whats):'')+(segmento?'<br><span style="color:#A8A192">Segmento: '+esc(segmento)+'</span>':'')+'</div>'
-      +'<div class=eb>Escopo da solução</div><p class=es>'+esc(escopo)+'</p>'
-      +'<div class=eb>Módulos contratados</div><table><tr><th>Módulo</th><th class=r>Setup</th><th class=r>Mensal</th></tr>'+trs+'</table>'
-      +'<div class=tot><div class=bx><div class=l>Investimento inicial</div><div class=v>'+fmt(c.setup)+'</div></div><div class=bx><div class=l>Mensalidade</div><div class=v>'+fmt(c.mensal)+'</div></div></div>'
-      +'<div class=fin><div><div class=l>Total estimado · 1º ano</div></div><div class=v>'+fmt(c.ano1)+'</div></div>'
-      +'<div class=ft>Proposta válida por 15 dias. Valores em reais (BRL). Implantação média de 2 a 6 semanas conforme escopo.</div>'
-      +'</div></div><script>window.onload=function(){setTimeout(function(){window.print();},400);}<\/script></body></html>';
-    var w=window.open('','_blank');
-    if(w){w.document.write(html); w.document.close();}
   });
 
   carregarCatalogo(false); carregarHist();

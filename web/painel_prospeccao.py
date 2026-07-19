@@ -13,6 +13,7 @@ import base64
 import csv as _csv
 import io
 import json
+import secrets
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request, Form, UploadFile, File
@@ -79,18 +80,25 @@ def _acesso(request: Request):
         return None, RedirectResponse("/painel", status_code=303)
     ctx = {"conta": conta, "conta_id": conta[0], "papel": papel,
            "membro_id": request.session.get("membro_id"),
-           "gerencia": papel in ("dono", "gestor")}
+           "gerencia": papel in ("dono", "gestor"),  # vê a carteira toda + filtra
+           "pode_atribuir": papel == "dono"}          # só o dono atribui/reatribui
     return ctx, None
 
 
 def _vendedores(pool, conta_id: int) -> list[dict]:
+    """Quem pode receber alvos: o dono (aparece pelo nome) + vendedores/gestores.
+    O dono vem primeiro e rotulado, pra ele poder ficar com leads no próprio nome."""
     with pool.connection() as c:
         rows = c.execute(
             """select id, coalesce(nullif(nome,''), email), papel
                  from membros
-                where conta_id=%s and ativo and papel in ('vendedor','gestor')
-                order by nome""", (conta_id,)).fetchall()
-    return [{"id": r[0], "nome": r[1], "papel": r[2]} for r in rows]
+                where conta_id=%s and ativo and papel in ('dono','vendedor','gestor')
+                order by (papel<>'dono'), nome""", (conta_id,)).fetchall()
+    out = []
+    for r in rows:
+        nome = r[1] + " (você)" if r[2] == "dono" else r[1]
+        out.append({"id": r[0], "nome": nome, "papel": r[2]})
+    return out
 
 
 def _carrega_alvo(pool, conta_id: int, alvo_id: int):
@@ -125,9 +133,9 @@ def _pode_ver(alvo: dict, ctx: dict) -> bool:
 
 
 def _vendedor_destino(ctx: dict, vendedor_id: str, pool, conta_id: int):
-    """Pra quem vai o alvo captado: gerência escolhe (validando a conta);
-    vendedor sempre pra si mesmo."""
-    if not ctx["gerencia"]:
+    """Pra quem vai o alvo captado: só o dono escolhe (validando a conta);
+    vendedor/gestor sempre pra si mesmo."""
+    if not ctx["pode_atribuir"]:
         return ctx["membro_id"]
     if not (vendedor_id or "").isdigit():
         return None
@@ -201,7 +209,7 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
     vends = _vendedores(pool, conta_id) if ctx["gerencia"] else []
     return _render("prospeccao", request, titulo="Prospecção", secao_ativa="prospeccao",
                    status=STATUS, colunas=colunas, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
-                   temperaturas_all=TEMPERATURAS, gerencia=ctx["gerencia"],
+                   temperaturas_all=TEMPERATURAS, gerencia=ctx["gerencia"], pode_atribuir=ctx["pode_atribuir"],
                    vendedores=vends, filtro_vend=filtro_vend, total_valor=total_valor,
                    total_alvos=len(rows), tem_places=fontes.tem_chave_places(),
                    aviso=request.session.pop("prosp_aviso", None))
@@ -259,7 +267,7 @@ def _render_captar(request, ctx, aba="manual", resultados=None, busca=None):
     pool = get_pool()
     vends = _vendedores(pool, ctx["conta_id"]) if ctx["gerencia"] else []
     return _render("prospeccao_captar", request, titulo="Captar leads",
-                   secao_ativa="prospeccao", aba=aba, gerencia=ctx["gerencia"],
+                   secao_ativa="prospeccao", aba=aba, gerencia=ctx["gerencia"], pode_atribuir=ctx["pode_atribuir"],
                    vendedores=vends, temperaturas_all=TEMPERATURAS,
                    tem_places=fontes.tem_chave_places(), resultados=resultados,
                    busca=busca or {}, temp_cor=TEMP_COR,
@@ -448,7 +456,7 @@ def prospeccao_ficha(request: Request, alvo_id: int):
     return _render("prospeccao_ficha", request, titulo=alvo["empresa"], secao_ativa="prospeccao",
                    a=alvo, timeline=timeline, status=STATUS, temperaturas=TEMPERATURAS,
                    tipos=TIPOS, resultados=RESULTADOS, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
-                   gerencia=ctx["gerencia"], vendedores=vends,
+                   gerencia=ctx["gerencia"], pode_atribuir=ctx["pode_atribuir"], vendedores=vends,
                    aviso=request.session.pop("prosp_aviso", None))
 
 
@@ -577,7 +585,7 @@ def prospeccao_atribuir(request: Request, alvo_id: int, vendedor_id: str = Form(
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
-    if not ctx["gerencia"]:
+    if not ctx["pode_atribuir"]:
         return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
     vend = _vendedor_destino(ctx, vendedor_id, get_pool(), ctx["conta_id"])
     with get_pool().connection() as c:
@@ -586,6 +594,43 @@ def prospeccao_atribuir(request: Request, alvo_id: int, vendedor_id: str = Form(
         c.commit()
     request.session["prosp_aviso"] = "Alvo atribuído." if vend else "Alvo sem responsável."
     return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
+
+
+# ---------------------------------------------------------------- gerar orçamento (Etapa 4)
+@router.post("/painel/prospeccao/{alvo_id}/orcamento")
+def prospeccao_orcamento(request: Request, alvo_id: int):
+    """Converte o lead num orçamento (módulo Serviços) e leva o vendedor pra editar.
+    Reaproveita a tabela orcamentos: cliente/empresa são texto, não precisa cadastrar
+    cliente antes. Grava o vínculo em prospeccao.orcamento_id e avança pra 'proposta'."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    pool = get_pool()
+    alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
+    if not alvo or not _pode_ver(alvo, ctx):
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    if not ctx["conta"][14]:  # vende_servico — orçamento é do módulo Serviços
+        request.session["prosp_aviso"] = "Orçamento é do módulo Serviços — ative Serviços na empresa pra usar."
+        return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
+    oid = alvo.get("orcamento_id")
+    if not oid:
+        from web.painel_servicos import _garantir_tabela
+        criador = str(ctx["membro_id"]) if ctx["membro_id"] else "dono"
+        with pool.connection() as c:
+            _garantir_tabela(c)
+            row = c.execute(
+                """insert into orcamentos (conta_id, cliente, empresa, cnpj, segmento,
+                     whatsapp, email, criado_por, token, status)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,'rascunho') returning id""",
+                (ctx["conta_id"], alvo["contato"], alvo["empresa"], alvo["cnpj"], alvo["segmento"],
+                 alvo["whatsapp"] or alvo["telefone"], alvo["email"], criador,
+                 secrets.token_urlsafe(16))).fetchone()
+            oid = row[0]
+            novo_status = alvo["status"] if alvo["status"] in ("ganho", "perdido") else "proposta"
+            c.execute("update prospeccao set orcamento_id=%s, status=%s, atualizado_em=now() "
+                      "where id=%s and conta_id=%s", (oid, novo_status, alvo_id, ctx["conta_id"]))
+            c.commit()
+    return RedirectResponse(f"/painel/servicos?abrir={oid}", status_code=303)
 
 
 @router.post("/painel/prospeccao/{alvo_id}/status")
@@ -763,7 +808,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <div><label class="lbl">WhatsApp</label><input class="fld" name="whatsapp"></div>
           <div><label class="lbl">Valor (R$)</label><input class="fld" name="valor" inputmode="decimal" placeholder="0,00"></div>
           <div><label class="lbl">Temperatura</label><select class="fld" name="temperatura">{% for v,l in temperaturas_all %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
-          {% if gerencia %}<div><label class="lbl">Vendedor</label><select class="fld" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
+          {% if pode_atribuir %}<div><label class="lbl">Vendedor</label><select class="fld" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
           <div class="full"><button class="pbtn" style="margin:.3rem 0 0">Adicionar</button></div>
         </div>
       </form>
@@ -774,7 +819,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <label class="lbl">Arquivo CSV</label>
         <input class="fld" type="file" name="arquivo" accept=".csv,text/csv" required>
         <div class="mut" style="font-size:.8rem;margin-top:.5rem">1ª linha = cabeçalho. Colunas: <b>empresa</b>, telefone, whatsapp, cidade, uf, segmento, contato, email, cnpj. Separador , ou ;.</div>
-        {% if gerencia %}<div style="max-width:280px;margin-top:.6rem"><label class="lbl">Atribuir a</label><select class="fld" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
+        {% if pode_atribuir %}<div style="max-width:280px;margin-top:.6rem"><label class="lbl">Atribuir a</label><select class="fld" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
         <button class="pbtn" style="margin-top:.8rem">Importar CSV</button>
       </form>
     </div>
@@ -792,7 +837,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <span class="toggle"><input type="checkbox" name="esconder_redes" value="1" checked><span class="tgl"></span></span>
           <span style="font-size:.88rem">Esconder redes grandes (Petz, Drogasil…)</span>
         </label>
-        {% if gerencia %}<div style="max-width:280px;margin-top:.6rem"><label class="lbl">Atribuir a</label><select class="fld" id="cap-g-vend" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
+        {% if pode_atribuir %}<div style="max-width:280px;margin-top:.6rem"><label class="lbl">Atribuir a</label><select class="fld" id="cap-g-vend" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
         <button class="pbtn" style="margin-top:.8rem" id="cap-g-btn">Buscar</button>
       </form>
       <div id="cap-res" style="margin-top:.9rem"></div>
@@ -918,7 +963,7 @@ _CAPTAR_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <a class="caba {% if aba=='google' %}on{% endif %}" href="/painel/prospeccao/captar?aba=google">📍 Google Maps</a>
   </div>
 
-  {% macro vendsel() %}{% if gerencia %}<div><label class="lbl">Atribuir a</label>
+  {% macro vendsel() %}{% if pode_atribuir %}<div><label class="lbl">Atribuir a</label>
     <select class="fld" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}{% endmacro %}
 
   {% if aba=='manual' %}
@@ -946,7 +991,7 @@ _CAPTAR_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <input class="fld" type="file" name="arquivo" accept=".csv,text/csv" required>
       <div class="mut" style="font-size:.8rem;margin-top:.5rem">Use a 1ª linha como cabeçalho. Colunas reconhecidas:
         <b>empresa</b> (ou nome), telefone, whatsapp, cidade, uf, segmento, contato, email, cnpj. Separador vírgula ou ponto-e-vírgula.</div>
-      {% if gerencia %}<div style="margin-top:.6rem;max-width:280px">{{ vendsel() }}</div>{% endif %}
+      {% if pode_atribuir %}<div style="margin-top:.6rem;max-width:280px">{{ vendsel() }}</div>{% endif %}
       <button class="pbtn" style="margin-top:.8rem">Importar CSV</button>
     </form>
   </div>
@@ -1000,7 +1045,7 @@ _CAPTAR_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           {% endfor %}
         </div>
         <div style="display:flex;align-items:end;gap:.6rem;flex-wrap:wrap;margin-top:.8rem">
-          {% if gerencia %}<div style="min-width:200px">{{ vendsel() }}</div>{% endif %}
+          {% if pode_atribuir %}<div style="min-width:200px">{{ vendsel() }}</div>{% endif %}
           <button class="pbtn">Adicionar selecionados</button>
         </div>
       </form>
@@ -1040,7 +1085,9 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% if a.zap_link %}<a class="pbtn ghost" href="{{ a.zap_link }}" target="_blank" rel="noopener">💬 WhatsApp</a>{% endif %}
       {% if a.maps_url %}<a class="pbtn ghost" href="{{ a.maps_url }}" target="_blank" rel="noopener">🗺️ Mapa</a>{% endif %}
       <span style="flex:1"></span>
-      <button type="button" class="pbtn" disabled title="Chega na Etapa 4 (conversão)">📄 Gerar orçamento</button>
+      {% if not vende_servico %}<button type="button" class="pbtn" disabled title="Disponível pra empresas que vendem serviço">📄 Gerar orçamento</button>
+      {% elif a.orcamento_id %}<a class="pbtn" href="/painel/servicos?abrir={{ a.orcamento_id }}">📄 Ver orçamento</a>
+      {% else %}<form method="post" action="/painel/prospeccao/{{ a.id }}/orcamento" style="margin:0"><button class="pbtn">📄 Gerar orçamento</button></form>{% endif %}
     </div>
     {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
   </div>
@@ -1101,7 +1148,7 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <form method="post" action="/painel/prospeccao/{{ a.id }}/temperatura" style="margin:0">
           <div class="rcpills">{% for t,rot in temperaturas %}<button type="submit" name="temperatura" value="{{ t }}" class="rcpill {% if t==a.temperatura %}on{% endif %}" style="{% if t==a.temperatura %}background:{{ temp_cor[t] }};border-color:{{ temp_cor[t] }}{% endif %}">{{ rot }}</button>{% endfor %}</div>
         </form>
-        {% if gerencia %}
+        {% if pode_atribuir %}
         <form method="post" action="/painel/prospeccao/{{ a.id }}/atribuir" style="margin-top:.6rem">
           <label class="lbl">Vendedor responsável</label>
           <select class="fld" name="vendedor_id" onchange="this.form.submit()"><option value="">— sem responsável —</option>{% for v in vendedores %}<option value="{{ v.id }}" {% if v.id==a.vendedor_id %}selected{% endif %}>{{ v.nome }}</option>{% endfor %}</select>

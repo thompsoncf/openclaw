@@ -215,11 +215,13 @@ def listar_equipe(pool, conta_id: int) -> list[dict]:
     """Membros com login web (os que têm e-mail). Não inclui o dono (login por conta)."""
     with pool.connection() as c:
         rows = c.execute(
-            """select id, nome, email, papel, ativo, (senha_hash is not null)
+            """select id, nome, email, papel, ativo, (convite_token is not null)
                  from membros where conta_id=%s and email is not null
                 order by id""", (conta_id,)).fetchall()
+    # 'pendente' = convite por LINK ainda não aceito (inativo + com token). Quem já
+    # tinha login Zaq entra ativo sem senha/token — NÃO é pendente.
     return [{"id": r[0], "nome": r[1], "email": r[2], "papel": r[3], "ativo": r[4],
-             "aceitou": r[5], "rotulo": rotulo(r[3])} for r in rows]
+             "pendente": (not r[4]) and r[5], "rotulo": rotulo(r[3])} for r in rows]
 
 
 def atualizar_papel(pool, conta_id: int, membro_id: int, papel: str) -> dict:

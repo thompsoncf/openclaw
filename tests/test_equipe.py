@@ -136,10 +136,21 @@ def test_escopo_por_conta(pool, conta_id):
 
 
 def test_listar_equipe(pool, conta_id):
+    # convite por LINK (e-mail novo, sem login) fica 'pendente' até aceitar
     equipe.convidar(pool, conta_id, "M1", "m1@x.com", "vendedor")
     eq = equipe.listar_equipe(pool, conta_id)
-    assert any(m["email"] == "m1@x.com" and m["rotulo"] == "Vendedor" and m["aceitou"] is False
+    assert any(m["email"] == "m1@x.com" and m["rotulo"] == "Vendedor" and m["pendente"] is True
                for m in eq)
+
+
+def test_quem_ja_tem_login_nao_fica_pendente(pool, conta_id):
+    """O caso do Rawilson: já tinha conta Zaq, foi convidado, entra ativo sem
+    senha/token — NÃO pode aparecer como 'convite pendente'."""
+    _conta(pool, "Conta do Rex", "rex2@x.com", "rexpass12")   # ele já tem login
+    r = equipe.convidar(pool, conta_id, "Rex", "rex2@x.com", "vendedor")
+    assert r["ok"] and r.get("ja_tem_login") is True
+    m = next(x for x in equipe.listar_equipe(pool, conta_id) if x["email"] == "rex2@x.com")
+    assert m["ativo"] is True and m["pendente"] is False
 
 
 def test_regerar_convite(pool, conta_id):

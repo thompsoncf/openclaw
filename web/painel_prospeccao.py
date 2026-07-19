@@ -13,8 +13,11 @@ import base64
 import csv as _csv
 import io
 import json
+import os
+import re
 import secrets
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 from fastapi import APIRouter, Request, Form, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
@@ -22,6 +25,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from db.conexao import get_pool
 from contas import equipe as eq
 from finance import prospeccao_fontes as fontes
+from finance import servicos_catalogo as scat
+from finance.email_sender import enviar_email
 from web.portal import _render, _env, conta_logada
 
 router = APIRouter()
@@ -66,6 +71,28 @@ def _zap_link(numero: str) -> str:
     if not d.startswith("55"):
         d = "55" + d
     return "https://wa.me/" + d
+
+
+def _zap_link_texto(numero: str, texto: str) -> str:
+    """wa.me com a mensagem já preenchida (o vendedor confere e envia em 1 clique)."""
+    base = _zap_link(numero)
+    if not base:
+        return ""
+    return base + "?text=" + quote(texto or "")
+
+
+def _tem_ia() -> bool:
+    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+
+def _membro_contato(pool, conta_id: int, vid):
+    """nome + e-mail do responsável (pra assinar a mensagem e virar Reply-To)."""
+    if not vid:
+        return None, None
+    with pool.connection() as c:
+        r = c.execute("select coalesce(nullif(nome,''), email), email from membros "
+                      "where id=%s and conta_id=%s", (vid, conta_id)).fetchone()
+    return (r[0], r[1]) if r else (None, None)
 
 
 # ---------------------------------------------------------------- acesso / escopo
@@ -496,7 +523,7 @@ def prospeccao_ficha(request: Request, alvo_id: int):
                    a=alvo, timeline=timeline, status=STATUS, temperaturas=TEMPERATURAS,
                    tipos=TIPOS, resultados=RESULTADOS, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
                    gerencia=ctx["gerencia"], pode_atribuir=ctx["pode_atribuir"], vendedores=vends,
-                   tem_cnpja=fontes.tem_chave_cnpja(),
+                   tem_cnpja=fontes.tem_chave_cnpja(), tem_ia=_tem_ia(),
                    aviso=request.session.pop("prosp_aviso", None))
 
 
@@ -778,6 +805,152 @@ async def prospeccao_status(request: Request, alvo_id: int):
                   (status, alvo_id, ctx["conta_id"]))
         c.commit()
     return JSONResponse({"ok": True, "status": status})
+
+
+# ================================================================ 1º CONTATO (IA)
+def _ctx_servicos(pool, conta_id: int) -> str:
+    """Catálogo de serviços da empresa, pra a IA saber o que oferecer."""
+    try:
+        itens = scat.listar(pool, conta_id)
+    except Exception:  # noqa: BLE001
+        itens = []
+    return "\n".join(f"- {s.get('nome','')}: {s.get('descricao','') or ''}".strip()
+                     for s in (itens or [])[:20])
+
+
+def _draft_ia(pool, conta, alvo: dict, canal: str, remetente: str) -> dict:
+    """Gera o rascunho da 1ª abordagem via Claude. canal: 'email' | 'whatsapp'.
+    Retorna {'assunto','corpo'} (email) ou {'texto'} (whatsapp), ou {'erro'}."""
+    from core.brain import Brain
+    empresa_nome = (conta[2] or "nossa empresa").strip()
+    catalogo = _ctx_servicos(pool, conta[0])
+    site = alvo.get("site_url") or ""
+    lead = "\n".join(x for x in [
+        f"Empresa: {alvo.get('empresa') or ''}",
+        f"Contato: {alvo.get('contato') or ''}" if alvo.get("contato") else "",
+        f"Segmento: {alvo.get('segmento') or ''}" if alvo.get("segmento") else "",
+        f"Cidade: {alvo.get('cidade') or ''}{('/' + alvo['uf']) if alvo.get('uf') else ''}" if alvo.get("cidade") else "",
+        f"Site: {site}" if site else "",
+    ] if x)
+    if canal == "whatsapp":
+        formato = '{"texto":"..."}'
+        instr = ("uma mensagem de WhatsApp de PRIMEIRO contato: bem curta (3 a 5 linhas), "
+                 "informal e humana, 1 pergunta/CTA leve pra puxar conversa, sem links longos, "
+                 "pode usar no máximo 1 emoji.")
+    else:
+        formato = '{"assunto":"...","corpo":"..."}'
+        instr = ("um e-mail de PRIMEIRO contato: assunto curto e o corpo com 5 a 8 linhas, "
+                 "tom consultivo (não spam), conecte com o segmento/realidade do lead, 1 CTA "
+                 "(sugerir uma conversa rápida). Assine como " + remetente + " (" + empresa_nome + ").")
+    system = ("Você é um SDR de pré-vendas experiente. Escreve abordagens de prospecção "
+              "que soam humanas e relevantes, em português do Brasil. NUNCA invente dados "
+              "(preço, números, promessas). Responda SEMPRE só com JSON válido, sem markdown.")
+    prompt = (f"MINHA EMPRESA: {empresa_nome}\n"
+              f"SERVIÇOS QUE OFEREÇO:\n{catalogo or '(catálogo não informado)'}\n\n"
+              f"LEAD QUE VOU ABORDAR:\n{lead}\n\n"
+              f"Tarefa: escreva {instr}\n"
+              f"Responda APENAS com JSON: {formato}")
+    try:
+        resp = Brain().chamar(system=system, mensagens=[{"role": "user", "content": prompt}])
+        txt = "".join(getattr(b, "text", "") for b in resp.content
+                      if getattr(b, "type", None) == "text").strip()
+        txt = re.sub(r"^```json|^```|```$", "", txt).strip()
+        return json.loads(txt)
+    except Exception as e:  # noqa: BLE001
+        return {"erro": str(e)[:120]}
+
+
+def _reg_atividade(c, alvo_id, conta_id, membro_id, tipo, descricao, status_atual):
+    """Registra a abordagem na timeline e avança 'novo'→'contatado' (igual o contato manual)."""
+    c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id, tipo,
+                   resultado, descricao) values (%s,%s,%s,%s,%s)""",
+              (alvo_id, membro_id, tipo, None, (descricao or "")[:4000]))
+    novo = "contatado" if status_atual == "novo" else status_atual
+    c.execute("""update prospeccao set ultimo_contato_em=now(), status=%s,
+                   atualizado_em=now() where id=%s and conta_id=%s""",
+              (novo, alvo_id, conta_id))
+
+
+@router.post("/painel/prospeccao/{alvo_id}/mensagem-ia")
+def prospeccao_mensagem_ia(request: Request, alvo_id: int, canal: str = Form("email")):
+    """Gera o rascunho da 1ª abordagem (e-mail ou WhatsApp) via IA — não envia."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not _tem_ia():
+        return JSONResponse({"ok": False, "erro": "sem_ia"})
+    pool = get_pool()
+    alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
+    if not alvo or not _pode_ver(alvo, ctx):
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    canal = "whatsapp" if canal == "whatsapp" else "email"
+    nome_rem, _email_rem = _membro_contato(pool, ctx["conta_id"], ctx["membro_id"])
+    d = _draft_ia(pool, ctx["conta"], alvo, canal, nome_rem or "Equipe")
+    if d.get("erro"):
+        return JSONResponse({"ok": False, "erro": d["erro"]})
+    if canal == "whatsapp":
+        texto = (d.get("texto") or "").strip()
+        return JSONResponse({"ok": True, "canal": "whatsapp", "texto": texto,
+                             "link": _zap_link_texto(alvo["whatsapp"] or alvo["telefone"], texto)})
+    return JSONResponse({"ok": True, "canal": "email",
+                         "assunto": (d.get("assunto") or "").strip(),
+                         "corpo": (d.get("corpo") or "").strip()})
+
+
+@router.post("/painel/prospeccao/{alvo_id}/enviar-email")
+def prospeccao_enviar_email(request: Request, alvo_id: int, assunto: str = Form(...),
+                            corpo: str = Form(...)):
+    """Envia o e-mail (revisado pelo vendedor) pro lead e registra na timeline."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    pool = get_pool()
+    alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
+    if not alvo or not _pode_ver(alvo, ctx):
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    destino = (alvo.get("email") or "").strip()
+    if not destino:
+        return JSONResponse({"ok": False, "erro": "sem_email"})
+    assunto = (assunto or "").strip() or f"Contato · {ctx['conta'][2] or ''}".strip()
+    corpo = (corpo or "").strip()
+    if not corpo:
+        return JSONResponse({"ok": False, "erro": "sem_corpo"})
+    nome_rem, email_rem = _membro_contato(pool, ctx["conta_id"], ctx["membro_id"])
+    html = "<div style=\"font-family:system-ui,Arial,sans-serif;font-size:15px;line-height:1.6;color:#222\">" \
+           + "".join(f"<p style=\"margin:0 0 12px\">{_html_escape(par)}</p>"
+                     for par in corpo.split("\n\n")) + "</div>"
+    ok = enviar_email(destino, assunto, html, texto_alt=corpo,
+                      reply_to=email_rem or None, from_nome=(ctx["conta"][2] or None))
+    if not ok:
+        return JSONResponse({"ok": False, "erro": "envio_falhou"})
+    with pool.connection() as c:
+        _reg_atividade(c, alvo_id, ctx["conta_id"], ctx["membro_id"], "email",
+                       f"E-mail enviado p/ {destino} · {assunto}\n\n{corpo}", alvo["status"])
+        c.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/painel/prospeccao/{alvo_id}/registrar-whatsapp")
+def prospeccao_registrar_whatsapp(request: Request, alvo_id: int, texto: str = Form("")):
+    """Registra na timeline que o WhatsApp de 1º contato foi disparado (o envio é
+    no app do vendedor via wa.me — aqui só marcamos o histórico)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    pool = get_pool()
+    alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
+    if not alvo or not _pode_ver(alvo, ctx):
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    with pool.connection() as c:
+        _reg_atividade(c, alvo_id, ctx["conta_id"], ctx["membro_id"], "whatsapp",
+                       "WhatsApp de 1º contato" + (f"\n\n{texto.strip()}" if texto.strip() else ""),
+                       alvo["status"])
+        c.commit()
+    return JSONResponse({"ok": True})
+
+
+def _html_escape(s: str) -> str:
+    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
 
 
 # ---------------------------------------------------------------- helpers locais
@@ -1231,6 +1404,16 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 
   <div class="fgrid">
     <div>
+      {% if tem_ia and (a.email or a.whatsapp or a.telefone) %}
+      <div class="fsec">
+        <div class="sh"><b>✨ Primeiro contato</b><span class="mut" style="font-size:.74rem;font-weight:400">IA escreve · você revisa e envia</span></div>
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+          {% if a.email %}<button type="button" class="pbtn ghost" id="ia-btn-email" onclick="iaMsg('email')">✉️ E-mail com IA</button>{% endif %}
+          {% if a.whatsapp or a.telefone %}<button type="button" class="pbtn ghost" id="ia-btn-wpp" onclick="iaMsg('whatsapp')">💬 WhatsApp com IA</button>{% endif %}
+        </div>
+        <div id="ia-box" style="display:none;margin-top:.7rem"></div>
+      </div>
+      {% endif %}
       <div class="fsec">
         <div class="sh"><b>Dados</b>
           <div style="display:flex;gap:.4rem">
@@ -1389,6 +1572,36 @@ function fichaCnpj(){var f=document.getElementById('edit-dados');var cnpj=f.quer
     put('email',x.email);put('socio',x.socio);put('regime_tributario',x.regime_tributario);put('porte',x.porte);
     fToast('Preenchido pela Receita ✓ confira e salve');
   }).catch(function(){fToast('Falha de rede');});}
+function iaMsg(canal){var box=document.getElementById('ia-box');var eb=document.getElementById('ia-btn-email'),wb=document.getElementById('ia-btn-wpp');
+  if(eb)eb.disabled=true;if(wb)wb.disabled=true;box.style.display='block';box.innerHTML='<div class="mut" style="font-size:.82rem">✨ Gerando com IA…</div>';
+  var fd=new FormData();fd.append('canal',canal);
+  fetch('/painel/prospeccao/{{ a.id }}/mensagem-ia',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();}).then(function(d){
+    if(eb)eb.disabled=false;if(wb)wb.disabled=false;
+    if(!d.ok){box.innerHTML='<div class="mut" style="color:#e0a33e;font-size:.82rem">'+(d.erro==='sem_ia'?'IA não configurada (falta a chave da IA).':'Não consegui gerar ('+(d.erro||'?')+').')+'</div>';return;}
+    if(d.canal==='whatsapp'){
+      box.innerHTML='<label class="lbl">Mensagem de WhatsApp</label><textarea class="fld" id="ia-texto" rows="5"></textarea>'
+        +'<div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap"><button type="button" class="pbtn" onclick="iaWhats()">💬 Abrir no WhatsApp</button>'
+        +'<button type="button" class="pbtn ghost" onclick="iaMsg(&quot;whatsapp&quot;)">↻ gerar outra</button></div>'
+        +'<div class="mut" style="font-size:.74rem;margin-top:.35rem">Abre seu WhatsApp com o texto pronto e registra no histórico.</div>';
+      document.getElementById('ia-texto').value=d.texto||'';box.setAttribute('data-link',d.link||'');
+    }else{
+      box.innerHTML='<label class="lbl">Assunto</label><input class="fld" id="ia-assunto">'
+        +'<label class="lbl" style="margin-top:.5rem">Mensagem</label><textarea class="fld" id="ia-corpo" rows="8"></textarea>'
+        +'<div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap"><button type="button" class="pbtn" onclick="iaSendEmail()">✉️ Enviar e-mail</button>'
+        +'<button type="button" class="pbtn ghost" onclick="iaMsg(&quot;email&quot;)">↻ gerar outro</button></div>'
+        +'<div class="mut" style="font-size:.74rem;margin-top:.35rem">Envia pra {{ a.email }} · resposta volta pro seu e-mail · registra no histórico.</div>';
+      document.getElementById('ia-assunto').value=d.assunto||'';document.getElementById('ia-corpo').value=d.corpo||'';
+    }
+  }).catch(function(){if(eb)eb.disabled=false;if(wb)wb.disabled=false;box.innerHTML='<div class="mut" style="color:#e0a33e">Falha de rede.</div>';});}
+function iaSendEmail(){var a=document.getElementById('ia-assunto').value,c=document.getElementById('ia-corpo').value;if(!c.trim()){fToast('Escreva a mensagem');return;}
+  fToast('Enviando…');var fd=new FormData();fd.append('assunto',a);fd.append('corpo',c);
+  fetch('/painel/prospeccao/{{ a.id }}/enviar-email',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();}).then(function(d){
+    if(!d.ok){fToast(d.erro==='envio_falhou'?'Não consegui enviar (confira a config de e-mail).':d.erro==='sem_email'?'Lead sem e-mail.':'Erro ao enviar');return;}
+    fToast('E-mail enviado ✓');setTimeout(function(){location.reload();},900);}).catch(function(){fToast('Falha de rede');});}
+function iaWhats(){var box=document.getElementById('ia-box');var base=(box.getAttribute('data-link')||'').split('?text=')[0];var t=document.getElementById('ia-texto').value;
+  if(base)window.open(base+'?text='+encodeURIComponent(t),'_blank');
+  var fd=new FormData();fd.append('texto',t);
+  fetch('/painel/prospeccao/{{ a.id }}/registrar-whatsapp',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();}).then(function(){fToast('Registrado no histórico ✓');setTimeout(function(){location.reload();},900);}).catch(function(){});}
 </script>
 {% endblock %}"""
 

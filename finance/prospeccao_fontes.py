@@ -225,28 +225,50 @@ def enriquecer_cnpj_cnpja(cnpj: str, token: str | None = None) -> dict:
     return {"ok": True, "dados": dados}
 
 
-def buscar_cnpj_por_nome(nome: str, cidade: str = "", token: str | None = None,
-                         limite: int = 6) -> dict:
-    """Acha CNPJs por NOME (CNPJá comercial: GET /office?names.in=...). Devolve
-    {"ok", "itens": [{cnpj, razao_social, nome_fantasia, cidade, uf, situacao}]}.
-    Filtra por cidade no cliente (quando informada) pra ranquear melhor."""
+def _limpa_termo_busca(nome: str) -> str:
+    """Tira o sufixo de bairro/filial ('... - Cristo Rei') e ruído, pra o
+    names.in casar o NOME da empresa, não só a 1ª palavra."""
+    n = (nome or "").strip()
+    for sep in (" - ", " – ", " — ", " | "):
+        if sep in n:
+            n = n.split(sep)[0].strip()
+    return n
+
+
+def buscar_cnpj_por_nome(nome: str, cidade: str = "", uf: str = "",
+                         token: str | None = None, limite: int = 10) -> dict:
+    """Acha CNPJs por NOME (CNPJá comercial: GET /office?names.in=...), FILTRADO
+    pela UF do lead (address.state.in) e ranqueado pela cidade captada — pra os
+    candidatos baterem o endereço, não trazer empresa de outro estado.
+    Devolve {"ok", "itens": [{cnpj, razao_social, nome_fantasia, cidade, uf, situacao}]}."""
     key = token or os.environ.get("CNPJA_TOKEN")
     if not key:
         return {"ok": False, "erro": "sem_chave", "itens": []}
-    nome = (nome or "").strip()
-    if len(nome) < 3:
+    termo = _limpa_termo_busca(nome)
+    if len(termo) < 3:
         return {"ok": False, "erro": "nome_curto", "itens": []}
-    try:
-        r = httpx.get("https://api.cnpja.com/office",
-                      params={"names.in": nome, "limit": str(min(max(limite, 1), 20))},
-                      headers={"Authorization": key}, timeout=25)
-        if r.status_code != 200:
-            return {"ok": False, "erro": f"http_{r.status_code}", "detalhe": r.text[:200], "itens": []}
-        j = r.json()
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "erro": "rede", "detalhe": str(e)[:200], "itens": []}
+    uf = (uf or "").strip().upper()[:2]
+    base = {"names.in": termo, "limit": str(min(max(limite, 1), 20))}
+    hdr = {"Authorization": key}
 
-    # a resposta pode vir como {records: N, ...} + lista em 'records'/'data'/'items'
+    def _chama(params):
+        try:
+            r = httpx.get("https://api.cnpja.com/office", params=params, headers=hdr, timeout=25)
+            return r.status_code, (r.json() if r.status_code == 200 else None), r.text[:200]
+        except Exception as e:  # noqa: BLE001
+            return None, None, str(e)[:200]
+
+    # 1ª tentativa: com filtro de UF na API. Se o param for recusado, refaz sem ele.
+    if uf:
+        st, j, det = _chama(dict(base, **{"address.state.in": uf}))
+        if st != 200:
+            st, j, det = _chama(base)
+    else:
+        st, j, det = _chama(base)
+    if st != 200:
+        erro = "rede" if st is None else f"http_{st}"
+        return {"ok": False, "erro": erro, "detalhe": det, "itens": []}
+
     lst = None
     for k in ("records", "data", "items", "results"):
         v = j.get(k) if isinstance(j, dict) else None
@@ -264,17 +286,21 @@ def buscar_cnpj_por_nome(nome: str, cidade: str = "", token: str | None = None,
         cnpj = o.get("taxId") or o.get("cnpj") or ""
         if not cnpj:
             continue
+        it_uf = (addr.get("state") or "").upper()
+        # filtro por UF no cliente (garante, mesmo se a API ignorou o param)
+        if uf and it_uf and it_uf != uf:
+            continue
         itens.append({
             "cnpj": cnpj,
             "razao_social": comp.get("name") or o.get("name") or "",
             "nome_fantasia": o.get("alias") or "",
             "cidade": (addr.get("city") or "").title(),
-            "uf": (addr.get("state") or "").upper(),
+            "uf": it_uf,
             "situacao": (o.get("status") or {}).get("text") or "",
         })
-    cidade = (cidade or "").strip().lower()
-    if cidade:
-        itens.sort(key=lambda x: 0 if cidade in (x["cidade"] or "").lower() else 1)
+    cid = (cidade or "").strip().lower()
+    if cid:
+        itens.sort(key=lambda x: 0 if cid in (x["cidade"] or "").lower() else 1)
     return {"ok": True, "itens": itens, "erro": None}
 
 

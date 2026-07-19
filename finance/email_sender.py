@@ -47,17 +47,25 @@ def _app_url() -> str:
 
 
 def enviar_email(destino: str, assunto: str, html: str,
-                 texto_alt: str | None = None) -> bool:
+                 texto_alt: str | None = None, reply_to: str | None = None,
+                 from_nome: str | None = None) -> bool:
     """Envia um email (HTML + alternativa texto). Tolerante a falha: retorna
-    True se enviou, False se faltou config / deu erro (sem levantar excecao)."""
+    True se enviou, False se faltou config / deu erro (sem levantar excecao).
+
+    reply_to: se informado, as respostas voltam pra esse endereco (ex: o vendedor
+      da empresa, no envio de prospeccao — o From continua sendo o SMTP do Zaq).
+    from_nome: sobrescreve o nome de exibicao do remetente so' neste envio (ex: o
+      nome da empresa que esta' prospectando)."""
     cfg = _config()
     if not cfg or not destino:
         return False
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = assunto
-        msg["From"] = f"{cfg['from_nome']} <{cfg['user']}>"
+        msg["From"] = f"{(from_nome or cfg['from_nome'])} <{cfg['user']}>"
         msg["To"] = destino
+        if reply_to:
+            msg["Reply-To"] = reply_to
         # parte texto (fallback) + parte html
         if texto_alt:
             msg.attach(MIMEText(texto_alt, "plain", "utf-8"))

@@ -213,7 +213,8 @@ def prospeccao_novo(request: Request, empresa: str = Form(...), segmento: str = 
                     cnpj: str = Form(""), temperatura: str = Form("frio"),
                     valor: str = Form(""), origem: str = Form("manual"),
                     vendedor_id: str = Form(""), obs: str = Form(""),
-                    voltar: str = Form("")):
+                    socio: str = Form(""), regime_tributario: str = Form(""),
+                    porte: str = Form(""), voltar: str = Form("")):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -232,13 +233,15 @@ def prospeccao_novo(request: Request, empresa: str = Form(...), segmento: str = 
         row = c.execute(
             """insert into prospeccao (conta_id, vendedor_id, empresa, segmento, cidade,
                  uf, contato, telefone, whatsapp, email, cnpj, temperatura,
-                 valor_estimado_centavos, origem, obs, criado_por)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
+                 valor_estimado_centavos, origem, obs, socio, regime_tributario, porte, criado_por)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
             (ctx["conta_id"], vend, empresa, segmento.strip() or None, cidade.strip() or None,
              (uf or "").strip()[:2].upper() or None, contato.strip() or None,
              telefone.strip() or None, whatsapp.strip() or None, email.strip().lower() or None,
              cnpj.strip() or None, temperatura, _reais_para_centavos(valor),
-             (origem or "manual").strip() or None, obs.strip() or None, ctx["membro_id"])).fetchone()
+             (origem or "manual").strip() or None, obs.strip() or None,
+             socio.strip() or None, regime_tributario.strip() or None, porte.strip() or None,
+             ctx["membro_id"])).fetchone()
         c.commit()
     if ajax:
         lead = _lead_card(row[0], empresa, segmento.strip(), cidade.strip(),
@@ -259,6 +262,18 @@ def _render_captar(request, ctx, aba="manual", resultados=None, busca=None):
                    tem_places=fontes.tem_chave_places(), resultados=resultados,
                    busca=busca or {}, temp_cor=TEMP_COR,
                    aviso=request.session.pop("prosp_aviso", None))
+
+
+@router.get("/painel/prospeccao/cnpj")
+def cnpj_lookup(request: Request, cnpj: str = ""):
+    """Consulta 1 CNPJ na Receita (BrasilAPI) e devolve os dados pro autofill."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    res = fontes.enriquecer_cnpj(cnpj)
+    if not res.get("ok"):
+        return JSONResponse({"ok": False, "erro": res.get("erro")})
+    return JSONResponse({"ok": True, "dados": res["dados"]})
 
 
 @router.get("/painel/prospeccao/captar", response_class=HTMLResponse)
@@ -726,7 +741,13 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <div><label class="lbl">Contato</label><input class="fld" name="contato"></div>
         <div><label class="lbl">Telefone</label><input class="fld" name="telefone"></div>
         <div><label class="lbl">WhatsApp</label><input class="fld" name="whatsapp"></div>
-        <div><label class="lbl">CNPJ</label><input class="fld" name="cnpj"></div>
+        <div><label class="lbl">CNPJ</label>
+          <div style="display:flex;gap:.3rem">
+            <input class="fld" name="cnpj" placeholder="só números">
+            <button type="button" class="pbtn ghost" style="padding:.5rem .7rem;white-space:nowrap" onclick="capCnpj()">↓ Receita</button>
+          </div>
+        </div>
+        <input type="hidden" name="socio"><input type="hidden" name="regime_tributario"><input type="hidden" name="porte">
         <div><label class="lbl">Valor (R$)</label><input class="fld" name="valor" inputmode="decimal" placeholder="0,00"></div>
         <div><label class="lbl">Temperatura</label><select class="fld" name="temperatura">{% for v,l in temperaturas_all %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
         {% if gerencia %}<div><label class="lbl">Vendedor</label><select class="fld" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
@@ -841,6 +862,15 @@ function capToggle(){var e=document.getElementById('captar');var vis=e.style.dis
 function capTab(t){document.querySelectorAll('#captar .caba').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===t);});document.querySelectorAll('#captar .captab').forEach(function(d){d.style.display=(d.getAttribute('data-tab')===t)?'block':'none';});}
 function capFetch(url,fd){return fetch(url,{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();});}
 function capManual(ev){ev.preventDefault();var f=ev.target;capFetch('/painel/prospeccao/novo',new FormData(f)).then(function(d){if(!d.ok){capToast(d.erro||'Erro');return;}addCard(d.lead);f.reset();capToast('Lead adicionado');}).catch(function(){capToast('Falha de rede');});return false;}
+function capCnpj(){var f=document.getElementById('cap-manual');var cnpj=f.querySelector('[name=cnpj]').value.replace(/\\D/g,'');if(cnpj.length!==14){capToast('CNPJ precisa ter 14 dígitos');return;}
+  capToast('Consultando Receita…');
+  fetch('/painel/prospeccao/cnpj?cnpj='+cnpj,{headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
+    if(!d.ok){capToast('CNPJ não encontrado ('+(d.erro||'')+')');return;}var x=d.dados;
+    function put(n,v,forca){var el=f.querySelector('[name='+n+']');if(el&&v&&(forca||!el.value))el.value=v;}
+    put('empresa',x.razao_social,false);put('segmento',x.segmento,true);put('cidade',x.cidade,true);put('uf',x.uf,true);
+    put('telefone',x.telefone,true);put('socio',x.socio,true);put('regime_tributario',x.regime_tributario,true);put('porte',x.porte,true);
+    capToast('Dados da Receita preenchidos ✓');
+  }).catch(function(){capToast('Falha de rede');});}
 function capCsv(ev){ev.preventDefault();capFetch('/painel/prospeccao/captar/csv',new FormData(ev.target)).then(function(d){if(!d.ok){capToast('Erro no CSV');return;}capToast(d.msg||'Importado');setTimeout(function(){location.reload();},800);}).catch(function(){capToast('Falha de rede');});return false;}
 function capBuscar(ev){ev.preventDefault();var f=ev.target;var btn=document.getElementById('cap-g-btn');if(btn){btn.disabled=true;btn.textContent='Buscando…';}
   capFetch('/painel/prospeccao/captar/buscar',new FormData(f)).then(function(d){if(btn){btn.disabled=false;btn.textContent='Buscar';}var box=document.getElementById('cap-res');
@@ -1005,7 +1035,8 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="fsec">
         <div class="sh"><b>Dados</b>
           <div style="display:flex;gap:.4rem">
-            {% if a.cnpj %}<form method="post" action="/painel/prospeccao/{{ a.id }}/enriquecer" style="margin:0"><button class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" title="Puxar sócio/regime/porte da Receita (BrasilAPI)">↻ atualizar</button></form>{% endif %}
+            {% if a.cnpj %}<form method="post" action="/painel/prospeccao/{{ a.id }}/enriquecer" style="margin:0"><button class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" title="Puxar sócio/regime/porte da Receita (BrasilAPI)">↻ atualizar</button></form>
+            {% else %}<a class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" target="_blank" rel="noopener" title="Achar o CNPJ na web (nome + cidade)" href="https://www.google.com/search?q={{ (a.empresa ~ ' ' ~ (a.cidade or '') ~ ' cnpj')|urlencode }}">🔎 achar CNPJ</a>{% endif %}
             <button type="button" class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" onclick="prospToggle('edit-dados')">editar</button>
           </div>
         </div>

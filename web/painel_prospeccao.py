@@ -109,7 +109,7 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
                       p.status, p.temperatura, p.valor_estimado_centavos, p.origem,
                       p.obs, p.instagram, p.socio, p.regime_tributario, p.porte,
                       p.ultimo_contato_em, p.proximo_contato_em, p.vendedor_id,
-                      m.nome, p.orcamento_id, p.tem_site, p.maps_url
+                      m.nome, p.orcamento_id, p.tem_site, p.maps_url, p.receita
                  from prospeccao p
                  left join membros m on m.id = p.vendedor_id
                 where p.id=%s and p.conta_id=%s""", (alvo_id, conta_id)).fetchone()
@@ -119,7 +119,7 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
             "telefone", "whatsapp", "email", "status", "temperatura", "valor",
             "origem", "obs", "instagram", "socio", "regime_tributario", "porte",
             "ultimo_contato_em", "proximo_contato_em", "vendedor_id", "vendedor_nome",
-            "orcamento_id", "tem_site", "maps_url"]
+            "orcamento_id", "tem_site", "maps_url", "receita"]
     d = dict(zip(cols, r))
     d["zap_link"] = _zap_link(d["whatsapp"] or d["telefone"])
     d["tel_link"] = "tel:" + _so_digitos(d["telefone"]) if d["telefone"] else ""
@@ -163,6 +163,17 @@ def _lead_card(id_, empresa, segmento, cidade, uf, temperatura, valor, vendedor)
     """Payload mínimo pra o JS montar um card no kanban (sem recarregar)."""
     return {"id": id_, "empresa": empresa, "segmento": segmento or "", "cidade": cidade or "",
             "uf": uf or "", "temperatura": temperatura, "valor": int(valor or 0), "vendedor": vendedor}
+
+
+_RECEITA_KEYS = ["fonte", "razao_social", "nome_fantasia", "situacao", "abertura",
+                 "capital_social", "natureza", "endereco", "inscricao_estadual",
+                 "atividade_principal", "atividades_secundarias"]
+
+
+def _receita_extras(d: dict) -> dict:
+    """Só os campos ricos da Receita que valem guardar/mostrar (o resto já vai
+    pras colunas)."""
+    return {k: d.get(k) for k in _RECEITA_KEYS if d.get(k)}
 
 
 # ================================================================ KANBAN
@@ -457,6 +468,7 @@ def prospeccao_ficha(request: Request, alvo_id: int):
                    a=alvo, timeline=timeline, status=STATUS, temperaturas=TEMPERATURAS,
                    tipos=TIPOS, resultados=RESULTADOS, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
                    gerencia=ctx["gerencia"], pode_atribuir=ctx["pode_atribuir"], vendedores=vends,
+                   tem_cnpja=fontes.tem_chave_cnpja(),
                    aviso=request.session.pop("prosp_aviso", None))
 
 
@@ -514,20 +526,73 @@ def prospeccao_enriquecer(request: Request, alvo_id: int):
         request.session["prosp_aviso"] = erros.get(res.get("erro"), "Não consegui enriquecer agora.")
         return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
     d = res["dados"]
-    # só preenche o que estiver vazio (não sobrescreve o que o vendedor já pôs)
+    # só preenche o que estiver vazio (não sobrescreve o que o vendedor já pôs);
+    # o pacote rico (situação, abertura, capital, endereço, IE…) vai no jsonb receita.
     with pool.connection() as c:
         c.execute(
             """update prospeccao set
                    socio=coalesce(socio,%s), regime_tributario=coalesce(regime_tributario,%s),
                    porte=coalesce(porte,%s), telefone=coalesce(telefone,%s),
                    email=coalesce(email,%s), segmento=coalesce(segmento,%s),
-                   cidade=coalesce(cidade,%s), uf=coalesce(uf,%s), atualizado_em=now()
+                   cidade=coalesce(cidade,%s), uf=coalesce(uf,%s),
+                   receita=%s::jsonb, atualizado_em=now()
                  where id=%s and conta_id=%s""",
             (d.get("socio"), d.get("regime_tributario"), d.get("porte"), d.get("telefone"),
              d.get("email"), d.get("segmento"), d.get("cidade"), d.get("uf"),
-             alvo_id, ctx["conta_id"]))
+             json.dumps(_receita_extras(d)), alvo_id, ctx["conta_id"]))
         c.commit()
     request.session["prosp_aviso"] = "Dados da Receita preenchidos ✓"
+    return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
+
+
+@router.post("/painel/prospeccao/{alvo_id}/buscar-cnpj")
+def prospeccao_buscar_cnpj(request: Request, alvo_id: int):
+    """Acha CNPJs pelo nome+cidade do lead (CNPJá). Devolve candidatos pra escolher."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    pool = get_pool()
+    alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
+    if not alvo or not _pode_ver(alvo, ctx):
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    return JSONResponse(fontes.buscar_cnpj_por_nome(alvo["empresa"], alvo["cidade"] or ""))
+
+
+@router.post("/painel/prospeccao/{alvo_id}/aplicar-cnpj")
+def prospeccao_aplicar_cnpj(request: Request, alvo_id: int, cnpj: str = Form(...)):
+    """Grava o CNPJ escolhido e já enriquece (colunas + jsonb receita)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    pool = get_pool()
+    alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
+    if not alvo or not _pode_ver(alvo, ctx):
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    limpo = "".join(ch for ch in (cnpj or "") if ch.isdigit())
+    if len(limpo) != 14:
+        request.session["prosp_aviso"] = "CNPJ inválido."
+        return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
+    res = fontes.enriquecer_cnpj(limpo)
+    with pool.connection() as c:
+        if res.get("ok"):
+            d = res["dados"]
+            c.execute(
+                """update prospeccao set cnpj=%s,
+                       socio=coalesce(socio,%s), regime_tributario=coalesce(regime_tributario,%s),
+                       porte=coalesce(porte,%s), telefone=coalesce(telefone,%s),
+                       email=coalesce(email,%s), segmento=coalesce(segmento,%s),
+                       cidade=coalesce(cidade,%s), uf=coalesce(uf,%s),
+                       receita=%s::jsonb, atualizado_em=now()
+                     where id=%s and conta_id=%s""",
+                (cnpj.strip(), d.get("socio"), d.get("regime_tributario"), d.get("porte"),
+                 d.get("telefone"), d.get("email"), d.get("segmento"), d.get("cidade"),
+                 d.get("uf"), json.dumps(_receita_extras(d)), alvo_id, ctx["conta_id"]))
+            request.session["prosp_aviso"] = "CNPJ vinculado e dados da Receita preenchidos ✓"
+        else:
+            c.execute("update prospeccao set cnpj=%s, atualizado_em=now() where id=%s and conta_id=%s",
+                      (cnpj.strip(), alvo_id, ctx["conta_id"]))
+            request.session["prosp_aviso"] = "CNPJ salvo (não consegui enriquecer agora — use ↻)."
+        c.commit()
     return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
 
 
@@ -1097,11 +1162,13 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="fsec">
         <div class="sh"><b>Dados</b>
           <div style="display:flex;gap:.4rem">
-            {% if a.cnpj %}<form method="post" action="/painel/prospeccao/{{ a.id }}/enriquecer" style="margin:0"><button class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" title="Puxar sócio/regime/porte da Receita (BrasilAPI)">↻ atualizar</button></form>
+            {% if a.cnpj %}<form method="post" action="/painel/prospeccao/{{ a.id }}/enriquecer" style="margin:0"><button class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" title="Puxar dados da Receita (CNPJá/BrasilAPI)">↻ atualizar</button></form>
+            {% elif tem_cnpja %}<button type="button" class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" onclick="acharCnpj({{ a.id }})" title="Achar o CNPJ por nome+cidade (CNPJá)">🔎 achar CNPJ</button>
             {% else %}<a class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" target="_blank" rel="noopener" title="Achar o CNPJ na web (nome + cidade)" href="https://www.google.com/search?q={{ (a.empresa ~ ' ' ~ (a.cidade or '') ~ ' cnpj')|urlencode }}">🔎 achar CNPJ</a>{% endif %}
             <button type="button" class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" onclick="prospToggle('edit-dados')">editar</button>
           </div>
         </div>
+        <div id="cnpj-cands" style="margin:.2rem 0"></div>
         {% if a.contato %}<div class="drow"><span class="ic">👤</span><span class="lb">Contato</span><span>{{ a.contato }}{% if a.cargo %} · {{ a.cargo }}{% endif %}</span></div>{% endif %}
         {% if a.cnpj %}<div class="drow"><span class="ic">🏢</span><span class="lb">CNPJ</span><span>{{ a.cnpj }}</span></div>{% endif %}
         {% if a.socio %}<div class="drow"><span class="ic">🧑‍💼</span><span class="lb">Sócio</span><span>{{ a.socio }}</span></div>{% endif %}
@@ -1114,6 +1181,19 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         {% if a.valor %}<div class="drow"><span class="ic">💰</span><span class="lb">Valor est.</span><span style="color:var(--verde-claro)">{{ brl(a.valor) }}</span></div>{% endif %}
         {% if a.proximo_contato_em %}<div class="drow"><span class="ic">📅</span><span class="lb">Próximo</span><span style="color:var(--verde-claro)">{{ a.proximo_contato_em.strftime('%d/%m/%Y') }}</span></div>{% endif %}
         {% if a.obs %}<div class="drow"><span class="ic">📝</span><span class="lb">Obs</span><span>{{ a.obs }}</span></div>{% endif %}
+        {% if a.receita %}
+        <div style="margin-top:.6rem;border-top:1px solid var(--borda);padding-top:.5rem">
+          <div class="lb" style="text-transform:uppercase;letter-spacing:.03em;margin-bottom:.2rem">🧾 Receita Federal{% if a.receita.fonte %} · <span style="opacity:.7">{{ a.receita.fonte }}</span>{% endif %}</div>
+          {% if a.receita.nome_fantasia %}<div class="drow"><span class="ic">🏷️</span><span class="lb">Fantasia</span><span>{{ a.receita.nome_fantasia }}</span></div>{% endif %}
+          {% if a.receita.situacao %}<div class="drow"><span class="ic">📌</span><span class="lb">Situação</span><span>{{ a.receita.situacao }}</span></div>{% endif %}
+          {% if a.receita.abertura %}<div class="drow"><span class="ic">📆</span><span class="lb">Abertura</span><span>{{ a.receita.abertura }}</span></div>{% endif %}
+          {% if a.receita.capital_social %}<div class="drow"><span class="ic">🏦</span><span class="lb">Capital</span><span>{{ a.receita.capital_social }}</span></div>{% endif %}
+          {% if a.receita.natureza %}<div class="drow"><span class="ic">⚖️</span><span class="lb">Natureza</span><span>{{ a.receita.natureza }}</span></div>{% endif %}
+          {% if a.receita.inscricao_estadual %}<div class="drow"><span class="ic">🧾</span><span class="lb">Insc. Est.</span><span>{{ a.receita.inscricao_estadual }}</span></div>{% endif %}
+          {% if a.receita.endereco %}<div class="drow"><span class="ic">📍</span><span class="lb">Endereço</span><span>{{ a.receita.endereco }}</span></div>{% endif %}
+          {% if a.receita.atividades_secundarias %}<div class="drow"><span class="ic">🔧</span><span class="lb">Outras ativ.</span><span>{{ a.receita.atividades_secundarias|join(' · ') }}</span></div>{% endif %}
+        </div>
+        {% endif %}
         {% if not (a.contato or a.cnpj or a.socio or a.telefone or a.whatsapp or a.email or a.instagram or a.valor) %}
           <div class="mut" style="font-size:.82rem">Sem dados ainda. Clique em <b>editar</b> pra preencher — ou preencha o CNPJ e use <b>↻ atualizar</b> pra puxar da Receita.</div>{% endif %}
 
@@ -1189,6 +1269,20 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 function prospToggle(id){var e=document.getElementById(id);e.style.display=(e.style.display==='none')?'block':'none';}
 function rcPick(el){var box=document.getElementById('rc-pills');box.querySelectorAll('.rcpill').forEach(function(b){b.classList.remove('on');});el.classList.add('on');document.getElementById('rc-tipo').value=el.getAttribute('data-tipo');}
 function fToast(msg){var t=document.getElementById('f-toast');if(!t){t=document.createElement('div');t.id='f-toast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--card);border:1px solid var(--verde);color:var(--verde-claro);padding:.6rem 1rem;border-radius:10px;z-index:200;font-size:.85rem;box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .4s';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';clearTimeout(window._ft);window._ft=setTimeout(function(){t.style.opacity='0';},2600);}
+function acharCnpj(id){var box=document.getElementById('cnpj-cands');box.innerHTML='<div class="mut" style="font-size:.8rem">Procurando CNPJ…</div>';
+  fetch('/painel/prospeccao/'+id+'/buscar-cnpj',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
+    if(!d.ok){box.innerHTML='<div class="mut" style="font-size:.8rem;color:#e0a33e">Não achei ('+(d.erro||'?')+'). Preencha o CNPJ na mão em <b>editar</b>.</div>';return;}
+    if(!d.itens||!d.itens.length){box.innerHTML='<div class="mut" style="font-size:.8rem">Nenhum CNPJ encontrado pra esse nome. Tente pelo <b>editar</b>.</div>';return;}
+    var h='<div class="lb" style="margin:.2rem 0">Escolha a empresa certa:</div><div class="rlist">';
+    d.itens.forEach(function(it){
+      h+='<form method="post" action="/painel/prospeccao/'+id+'/aplicar-cnpj" class="rrow" style="cursor:pointer;gap:.5rem"><input type="hidden" name="cnpj" value="'+it.cnpj+'">'
+        +'<span style="flex:1"><b style="font-size:.85rem">'+jsEsc(it.razao_social||it.nome_fantasia||it.cnpj)+'</b>'
+        +'<span class="mut" style="font-size:.74rem"> · '+it.cnpj+(it.cidade?(' · '+jsEsc(it.cidade)+(it.uf?('/'+it.uf):'')):'')+(it.situacao?(' · '+jsEsc(it.situacao)):'')+'</span></span>'
+        +'<button class="pbtn" style="padding:.3rem .7rem;font-size:.78rem;margin:0">usar</button></form>';
+    });
+    h+='</div>';box.innerHTML=h;
+  }).catch(function(){box.innerHTML='<div class="mut" style="font-size:.8rem;color:#e0a33e">Falha de rede.</div>';});}
+function jsEsc(s){return (s||'').replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];});}
 function fichaCnpj(){var f=document.getElementById('edit-dados');var cnpj=f.querySelector('[name=cnpj]').value.replace(/\\D/g,'');if(cnpj.length!==14){fToast('CNPJ precisa ter 14 dígitos');return;}
   fToast('Consultando Receita…');
   fetch('/painel/prospeccao/cnpj?cnpj='+cnpj,{headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){

@@ -190,8 +190,19 @@ def enriquecer_cnpj_cnpja(cnpj: str, token: str | None = None) -> dict:
         if x.get("enabled") and x.get("number"):
             ie = f"{x.get('number')} ({x.get('state', '')})".strip()
             break
+    # endereço completo montado a partir dos pedaços
+    partes_end = []
+    if addr.get("street"):
+        partes_end.append(str(addr["street"]) + (", " + str(addr["number"]) if addr.get("number") else ""))
+    if addr.get("district"):
+        partes_end.append(str(addr["district"]))
+    if addr.get("zip"):
+        partes_end.append("CEP " + str(addr["zip"]))
+    endereco = " · ".join(partes_end) or None
+    secundarias = [a.get("text") for a in (j.get("sideActivities") or []) if a.get("text")][:6]
     dados = {
         "razao_social": comp.get("name") or j.get("alias"),
+        "nome_fantasia": (j.get("alias") or "").strip() or None,
         "socio": socio,
         "regime_tributario": regime,
         "porte": (size.get("text") or size.get("acronym") or "").strip() or None,
@@ -200,9 +211,71 @@ def enriquecer_cnpj_cnpja(cnpj: str, token: str | None = None) -> dict:
         "segmento": (j.get("mainActivity") or {}).get("text"),
         "cidade": (addr.get("city") or "").title().strip() or None,
         "uf": (addr.get("state") or "").strip().upper() or None,
+        # extras ricos (vão pro jsonb `receita`, exibidos na ficha):
         "inscricao_estadual": ie,
+        "situacao": (j.get("status") or {}).get("text"),
+        "abertura": j.get("founded"),
+        "capital_social": comp.get("equity"),
+        "natureza": (comp.get("nature") or {}).get("text"),
+        "endereco": endereco,
+        "atividade_principal": (j.get("mainActivity") or {}).get("text"),
+        "atividades_secundarias": secundarias,
+        "fonte": "CNPJá",
     }
     return {"ok": True, "dados": dados}
+
+
+def buscar_cnpj_por_nome(nome: str, cidade: str = "", token: str | None = None,
+                         limite: int = 6) -> dict:
+    """Acha CNPJs por NOME (CNPJá comercial: GET /office?names.in=...). Devolve
+    {"ok", "itens": [{cnpj, razao_social, nome_fantasia, cidade, uf, situacao}]}.
+    Filtra por cidade no cliente (quando informada) pra ranquear melhor."""
+    key = token or os.environ.get("CNPJA_TOKEN")
+    if not key:
+        return {"ok": False, "erro": "sem_chave", "itens": []}
+    nome = (nome or "").strip()
+    if len(nome) < 3:
+        return {"ok": False, "erro": "nome_curto", "itens": []}
+    try:
+        r = httpx.get("https://api.cnpja.com/office",
+                      params={"names.in": nome, "limit": str(min(max(limite, 1), 20))},
+                      headers={"Authorization": key}, timeout=25)
+        if r.status_code != 200:
+            return {"ok": False, "erro": f"http_{r.status_code}", "detalhe": r.text[:200], "itens": []}
+        j = r.json()
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "erro": "rede", "detalhe": str(e)[:200], "itens": []}
+
+    # a resposta pode vir como {records: N, ...} + lista em 'records'/'data'/'items'
+    lst = None
+    for k in ("records", "data", "items", "results"):
+        v = j.get(k) if isinstance(j, dict) else None
+        if isinstance(v, list):
+            lst = v
+            break
+    if lst is None:
+        lst = j if isinstance(j, list) else []
+    itens = []
+    for o in lst:
+        if not isinstance(o, dict):
+            continue
+        comp = o.get("company") or {}
+        addr = o.get("address") or {}
+        cnpj = o.get("taxId") or o.get("cnpj") or ""
+        if not cnpj:
+            continue
+        itens.append({
+            "cnpj": cnpj,
+            "razao_social": comp.get("name") or o.get("name") or "",
+            "nome_fantasia": o.get("alias") or "",
+            "cidade": (addr.get("city") or "").title(),
+            "uf": (addr.get("state") or "").upper(),
+            "situacao": (o.get("status") or {}).get("text") or "",
+        })
+    cidade = (cidade or "").strip().lower()
+    if cidade:
+        itens.sort(key=lambda x: 0 if cidade in (x["cidade"] or "").lower() else 1)
+    return {"ok": True, "itens": itens, "erro": None}
 
 
 def _enriquecer_cnpj_brasilapi(cnpj: str) -> dict:
@@ -229,8 +302,17 @@ def _enriquecer_cnpj_brasilapi(cnpj: str) -> dict:
     else:
         regime = None
     tel = (j.get("ddd_telefone_1") or "").strip() or None
+    pe = []
+    if j.get("logradouro"):
+        pe.append(str(j["logradouro"]) + (", " + str(j["numero"]) if j.get("numero") else ""))
+    if j.get("bairro"):
+        pe.append(str(j["bairro"]))
+    if j.get("cep"):
+        pe.append("CEP " + str(j["cep"]))
+    sec = [a.get("descricao") for a in (j.get("cnaes_secundarios") or []) if a.get("descricao")][:6]
     dados = {
         "razao_social": j.get("razao_social") or j.get("nome_fantasia"),
+        "nome_fantasia": (j.get("nome_fantasia") or "").strip() or None,
         "socio": socio,
         "regime_tributario": regime,
         "porte": (j.get("porte") or "").title().strip() or None,
@@ -239,5 +321,14 @@ def _enriquecer_cnpj_brasilapi(cnpj: str) -> dict:
         "segmento": j.get("cnae_fiscal_descricao") or None,
         "cidade": (j.get("municipio") or "").title().strip() or None,
         "uf": (j.get("uf") or "").strip().upper() or None,
+        "inscricao_estadual": None,
+        "situacao": j.get("descricao_situacao_cadastral"),
+        "abertura": j.get("data_inicio_atividade"),
+        "capital_social": j.get("capital_social"),
+        "natureza": j.get("natureza_juridica"),
+        "endereco": " · ".join(pe) or None,
+        "atividade_principal": j.get("cnae_fiscal_descricao"),
+        "atividades_secundarias": sec,
+        "fonte": "BrasilAPI",
     }
     return {"ok": True, "dados": dados}

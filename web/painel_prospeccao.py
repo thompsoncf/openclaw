@@ -109,7 +109,8 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
                       p.status, p.temperatura, p.valor_estimado_centavos, p.origem,
                       p.obs, p.instagram, p.socio, p.regime_tributario, p.porte,
                       p.ultimo_contato_em, p.proximo_contato_em, p.vendedor_id,
-                      m.nome, p.orcamento_id, p.tem_site, p.maps_url, p.receita
+                      m.nome, p.orcamento_id, p.tem_site, p.maps_url, p.receita,
+                      p.site_url
                  from prospeccao p
                  left join membros m on m.id = p.vendedor_id
                 where p.id=%s and p.conta_id=%s""", (alvo_id, conta_id)).fetchone()
@@ -119,11 +120,22 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
             "telefone", "whatsapp", "email", "status", "temperatura", "valor",
             "origem", "obs", "instagram", "socio", "regime_tributario", "porte",
             "ultimo_contato_em", "proximo_contato_em", "vendedor_id", "vendedor_nome",
-            "orcamento_id", "tem_site", "maps_url", "receita"]
+            "orcamento_id", "tem_site", "maps_url", "receita", "site_url"]
     d = dict(zip(cols, r))
     d["zap_link"] = _zap_link(d["whatsapp"] or d["telefone"])
     d["tel_link"] = "tel:" + _so_digitos(d["telefone"]) if d["telefone"] else ""
+    d["site_dominio"] = _dominio(d.get("site_url"))
     return d
+
+
+def _dominio(url: str | None) -> str:
+    """Só o domínio, pra mostrar o link curto na ficha (sem http:// nem /caminho)."""
+    u = (url or "").strip()
+    if not u:
+        return ""
+    u = u.split("://", 1)[-1]
+    u = u.split("/", 1)[0]
+    return u[4:] if u.startswith("www.") else u
 
 
 def _pode_ver(alvo: dict, ctx: dict) -> bool:
@@ -379,7 +391,8 @@ def captar_buscar(request: Request, segmento: str = Form(...), cidade: str = For
                            "p": i["place_id"], "s": 1 if i["tem_site"] else 0,
                            "tp": i["temperatura"], "en": i["endereco"],
                            "r": i.get("rating"), "n": i.get("avaliacoes"),
-                           "m": i.get("maps_uri") or "", "st": i.get("status") or ""})
+                           "m": i.get("maps_uri") or "", "st": i.get("status") or "",
+                           "w": i.get("site") or ""})
     n_redes = sum(1 for x in res.get("itens", []) if x["rede"]) if esconder else 0
     busca = {"segmento": segmento, "cidade": cidade, "esconder": esconder,
              "ok": res.get("ok"), "erro": res.get("erro"), "n_redes": n_redes}
@@ -426,11 +439,12 @@ async def captar_importar(request: Request):
             temp = d.get("tp") if d.get("tp") in TEMP_OK else "frio"
             row = c.execute(
                 """insert into prospeccao (conta_id, vendedor_id, empresa, segmento, cidade,
-                     uf, telefone, temperatura, tem_site, place_id, origem, obs, maps_url, criado_por)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'google_places',%s,%s,%s) returning id""",
+                     uf, telefone, temperatura, tem_site, place_id, origem, obs, maps_url, site_url, criado_por)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'google_places',%s,%s,%s,%s) returning id""",
                 (ctx["conta_id"], vend, d["e"][:250], d.get("sg") or None, d.get("c") or None,
                  (d.get("u") or "")[:2].upper() or None, d.get("t") or None, temp,
-                 bool(d.get("s")), pid, obs or None, d.get("m") or None, ctx["membro_id"])).fetchone()
+                 bool(d.get("s")), pid, obs or None, d.get("m") or None, d.get("w") or None,
+                 ctx["membro_id"])).fetchone()
             leads.append(_lead_card(row[0], d["e"][:250], d.get("sg") or "", d.get("c") or "",
                                     (d.get("u") or "")[:2].upper(), temp, 0, nome_vend))
             inseridos += 1
@@ -479,7 +493,7 @@ def prospeccao_editar(request: Request, alvo_id: int, contato: str = Form(""),
                       cidade: str = Form(""), uf: str = Form(""), valor: str = Form(""),
                       socio: str = Form(""), regime_tributario: str = Form(""),
                       porte: str = Form(""), instagram: str = Form(""),
-                      tem_site: str = Form(""), obs: str = Form("")):
+                      tem_site: str = Form(""), site_url: str = Form(""), obs: str = Form("")):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -487,19 +501,24 @@ def prospeccao_editar(request: Request, alvo_id: int, contato: str = Form(""),
     alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
     if not alvo or not _pode_ver(alvo, ctx):
         return RedirectResponse("/painel/prospeccao", status_code=303)
-    site = True if tem_site == "1" else False if tem_site == "0" else None
+    site_link = (site_url or "").strip()
+    if site_link and "://" not in site_link:
+        site_link = "https://" + site_link
+    site_link = site_link or None
+    # se preencheu o link, o lead tem site (mesmo que não tenha marcado o rádio)
+    site = True if (tem_site == "1" or site_link) else False if tem_site == "0" else None
     with pool.connection() as c:
         c.execute(
             """update prospeccao set contato=%s, cargo=%s, telefone=%s, whatsapp=%s,
                    email=%s, cnpj=%s, segmento=%s, cidade=%s, uf=%s,
                    valor_estimado_centavos=%s, socio=%s, regime_tributario=%s, porte=%s,
-                   instagram=%s, tem_site=%s, obs=%s, atualizado_em=now()
+                   instagram=%s, tem_site=%s, site_url=%s, obs=%s, atualizado_em=now()
                  where id=%s and conta_id=%s""",
             (contato.strip() or None, cargo.strip() or None, telefone.strip() or None,
              whatsapp.strip() or None, email.strip().lower() or None, cnpj.strip() or None,
              segmento.strip() or None, cidade.strip() or None, (uf or "").strip()[:2].upper() or None,
              _reais_para_centavos(valor), socio.strip() or None, regime_tributario.strip() or None,
-             porte.strip() or None, instagram.strip() or None, site, obs.strip() or None,
+             porte.strip() or None, instagram.strip() or None, site, site_link, obs.strip() or None,
              alvo_id, ctx["conta_id"]))
         c.commit()
     request.session["prosp_aviso"] = "Dados atualizados."
@@ -1176,6 +1195,7 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% if a.tel_link %}<a class="pbtn ghost" href="{{ a.tel_link }}">📞 Ligar</a>{% endif %}
       {% if a.zap_link %}<a class="pbtn ghost" href="{{ a.zap_link }}" target="_blank" rel="noopener">💬 WhatsApp</a>{% endif %}
       {% if a.maps_url %}<a class="pbtn ghost" href="{{ a.maps_url }}" target="_blank" rel="noopener">🗺️ Mapa</a>{% endif %}
+      {% if a.site_url %}<a class="pbtn ghost" href="{{ a.site_url }}" target="_blank" rel="noopener">🌐 Site</a>{% endif %}
       <span style="flex:1"></span>
       {% if not vende_servico %}<button type="button" class="pbtn" disabled title="Disponível pra empresas que vendem serviço">📄 Gerar orçamento</button>
       {% elif a.orcamento_id %}<a class="pbtn" href="/painel/servicos?abrir={{ a.orcamento_id }}">📄 Ver orçamento</a>
@@ -1207,7 +1227,7 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         {% if a.whatsapp %}<div class="drow"><span class="ic">💬</span><span class="lb">WhatsApp</span><span>{{ a.whatsapp }}<span class="badge">Business?</span></span></div>{% endif %}
         {% if a.email %}<div class="drow"><span class="ic">✉️</span><span class="lb">E-mail</span><span>{{ a.email }}</span></div>{% endif %}
         {% if a.instagram %}<div class="drow"><span class="ic">📷</span><span class="lb">Instagram</span><span>{{ a.instagram }}</span></div>{% endif %}
-        {% if a.tem_site is not none %}<div class="drow"><span class="ic">🌐</span><span class="lb">Site</span><span>{% if a.tem_site %}tem site{% else %}<span style="color:#e0574f">não tem</span>{% endif %}</span></div>{% endif %}
+        {% if a.site_url %}<div class="drow"><span class="ic">🌐</span><span class="lb">Site</span><span><a href="{{ a.site_url }}" target="_blank" rel="noopener" style="color:var(--verde-claro)">{{ a.site_dominio or a.site_url }}</a> · <span class="mut" style="font-size:.78rem">ver página</span></span></div>{% elif a.tem_site is not none %}<div class="drow"><span class="ic">🌐</span><span class="lb">Site</span><span>{% if a.tem_site %}tem site{% else %}<span style="color:#e0574f">não tem</span>{% endif %}</span></div>{% endif %}
         {% if a.valor %}<div class="drow"><span class="ic">💰</span><span class="lb">Valor est.</span><span style="color:var(--verde-claro)">{{ brl(a.valor) }}</span></div>{% endif %}
         {% if a.proximo_contato_em %}<div class="drow"><span class="ic">📅</span><span class="lb">Próximo</span><span style="color:var(--verde-claro)">{{ a.proximo_contato_em.strftime('%d/%m/%Y') }}</span></div>{% endif %}
         {% if a.obs %}<div class="drow"><span class="ic">📝</span><span class="lb">Obs</span><span>{{ a.obs }}</span></div>{% endif %}
@@ -1247,6 +1267,7 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
               <option value="" {% if a.tem_site is none %}selected{% endif %}>—</option>
               <option value="1" {% if a.tem_site is true %}selected{% endif %}>Tem</option>
               <option value="0" {% if a.tem_site is false %}selected{% endif %}>Não tem</option></select></div>
+            <div class="full"><label class="lbl">Site (link)</label><input class="fld" name="site_url" inputmode="url" placeholder="https://…" value="{{ a.site_url or '' }}"></div>
             <div class="full"><label class="lbl">Observações</label><input class="fld" name="obs" value="{{ a.obs or '' }}"></div>
           </div>
           <div style="display:flex;gap:.5rem;margin-top:.7rem"><button class="pbtn" style="margin:0">Salvar dados</button><button type="button" class="pbtn ghost" onclick="prospToggle('edit-dados')">Cancelar</button></div>

@@ -508,80 +508,136 @@ def _preview(descricao: str) -> str:
     return " ".join(txt.split())[:90]
 
 
+CANAL_ROT = {"email": "✉️ E-mail", "whatsapp": "💬 WhatsApp",
+             "messenger": "🔵 Messenger", "instagram": "📸 Instagram"}
+CANAIS_TODOS = ("email", "whatsapp", "messenger", "instagram")
+
+
+def _canais_status() -> dict:
+    """Quais canais estão conectados (por presença de credencial no ambiente)."""
+    twilio = bool(os.environ.get("TWILIO_ACCOUNT_SID") and os.environ.get("TWILIO_AUTH_TOKEN"))
+    return {
+        "email": bool(remetente_configurado()),
+        "whatsapp": twilio and bool(os.environ.get("TWILIO_WHATSAPP_FROM")),
+        "messenger": twilio and bool(os.environ.get("TWILIO_MESSENGER_FROM")),
+        "instagram": bool(os.environ.get("META_PAGE_TOKEN") and os.environ.get("IG_ACCOUNT_ID")),
+    }
+
+
 @router.get("/painel/prospeccao/comunicacao", response_class=HTMLResponse)
-def prospeccao_comunicacao(request: Request, canal: str = "", vendedor: str = ""):
-    """Inbox: conversas (leads) com e-mail/WhatsApp registrados. Read-only (Fase A)."""
+def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str = "", vendedor: str = ""):
+    """Hub omnichannel: Conversas · E-mails · Agente · Canais (lê de conversas/mensagens)."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
+    aba = aba if aba in ("conversas", "emails", "agente", "canais") else "conversas"
     pool = get_pool()
-    tipos = [canal] if canal in _CANAIS_COMM else list(_CANAIS_COMM)
-    where = ["p.conta_id=%s"]
-    params_tail: list = [ctx["conta_id"]]
+    where = ["cv.conta_id=%s"]
+    params: list = [ctx["conta_id"]]
     filtro_vend = ""
     if not ctx["gerencia"]:
         where.append("p.vendedor_id=%s")
-        params_tail.append(ctx["membro_id"])
+        params.append(ctx["membro_id"])
     else:
         filtro_vend = (vendedor or "").strip()
         if filtro_vend.isdigit():
             where.append("p.vendedor_id=%s")
-            params_tail.append(int(filtro_vend))
-    sql = f"""
-        select p.id, p.empresa, p.cidade, p.uf, a.tipo, a.criado_em, a.descricao,
-               a.membro_id, m.nome, cnt.n
-          from prospeccao p
-          join lateral (select tipo, criado_em, descricao, membro_id
-                          from prospeccao_atividades
-                         where prospeccao_id=p.id and tipo = any(%s)
-                         order by criado_em desc limit 1) a on true
-          left join membros m on m.id = a.membro_id
-          join lateral (select count(*) n from prospeccao_atividades
-                         where prospeccao_id=p.id and tipo = any(%s)) cnt on true
-         where {' and '.join(where)}
-         order by a.criado_em desc limit 100"""
+            params.append(int(filtro_vend))
+    if canal in CANAIS_TODOS:
+        where.append("cv.canal=%s")
+        params.append(canal)
+    wsql = " and ".join(where)
+    convs, emails = [], []
     with pool.connection() as c:
-        rows = c.execute(sql, (tipos, tipos, *params_tail)).fetchall()
-    convs = []
-    for r in rows:
-        quem = "Você" if r[7] and r[7] == ctx["membro_id"] else (r[8] or "—")
-        convs.append({"id": r[0], "empresa": r[1], "cidade": r[2], "uf": r[3],
-                      "canal": r[4], "quando": r[5], "preview": _preview(r[6]),
-                      "quem": quem, "n": r[9]})
+        rows = c.execute(f"""
+            select cv.id, cv.canal, cv.status, cv.ultima_msg_em, cv.prospeccao_id,
+                   coalesce(p.empresa, cv.contato_ref, '—'), p.cidade, p.uf,
+                   lm.texto, lm.autor, lm.membro_id, mm.nome, cnt.n
+              from conversas cv
+              left join prospeccao p on p.id = cv.prospeccao_id
+              left join lateral (select texto, autor, membro_id from mensagens
+                                  where conversa_id=cv.id order by criado_em desc limit 1) lm on true
+              left join membros mm on mm.id = lm.membro_id
+              join lateral (select count(*) n from mensagens where conversa_id=cv.id) cnt on true
+             where {wsql}
+             order by cv.ultima_msg_em desc limit 100""", tuple(params)).fetchall()
+        for r in rows:
+            if r[9] == "bot":
+                quem = "🤖 Agente"
+            elif r[9] == "lead":
+                quem = r[5]
+            elif r[10] and r[10] == ctx["membro_id"]:
+                quem = "Você"
+            else:
+                quem = r[11] or "—"
+            convs.append({"id": r[0], "canal": r[1], "canal_rot": CANAL_ROT.get(r[1], r[1]),
+                          "status": r[2], "quando": r[3], "empresa": r[5],
+                          "cidade": r[6], "uf": r[7], "preview": _preview(r[8]),
+                          "quem": quem, "n": r[12]})
+        if aba == "emails":
+            erows = c.execute(f"""
+                select msg.criado_em, coalesce(p.empresa, cv.contato_ref, '—'),
+                       msg.membro_id, mm.nome, msg.texto
+                  from mensagens msg
+                  join conversas cv on cv.id = msg.conversa_id
+                  left join prospeccao p on p.id = cv.prospeccao_id
+                  left join membros mm on mm.id = msg.membro_id
+                 where cv.conta_id=%s and msg.canal='email' and msg.direcao='out'
+                   {'and p.vendedor_id=%s' if not ctx['gerencia'] else ''}
+                 order by msg.criado_em desc limit 100""",
+                (ctx["conta_id"], ctx["membro_id"]) if not ctx["gerencia"] else (ctx["conta_id"],)).fetchall()
+            for e in erows:
+                cab, _, corpo = (e[4] or "").partition("\n\n")
+                emails.append({"quando": e[0], "empresa": e[1],
+                               "quem": "Você" if e[2] and e[2] == ctx["membro_id"] else (e[3] or "—"),
+                               "cabecalho": cab.strip(), "preview": " ".join(corpo.split())[:80]})
     vends = _vendedores(pool, ctx["conta_id"]) if ctx["gerencia"] else []
     return _render("prospeccao_comunicacao", request, titulo="Comunicação",
-                   secao_ativa="prospeccao", convs=convs, canal=canal,
+                   secao_ativa="prospeccao", aba=aba, convs=convs, emails=emails, canal=canal,
+                   canais=_canais_status(), canal_rot=CANAL_ROT,
                    gerencia=ctx["gerencia"], vendedores=vends, filtro_vend=filtro_vend,
                    remetente=remetente_configurado(), tem_ia=_tem_ia())
 
 
-@router.get("/painel/prospeccao/comunicacao/{lead_id}")
-def prospeccao_comunicacao_thread(request: Request, lead_id: int):
-    """Thread (read-only) de um lead: as mensagens de e-mail/WhatsApp registradas."""
+@router.get("/painel/prospeccao/comunicacao/thread/{conversa_id}")
+def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
+    """Thread de uma conversa: mensagens in/out (read-only nesta fase)."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
     pool = get_pool()
-    alvo = _carrega_alvo(pool, ctx["conta_id"], lead_id)
-    if not alvo or not _pode_ver(alvo, ctx):
-        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
     with pool.connection() as c:
+        cv = c.execute(
+            """select cv.canal, cv.status, cv.prospeccao_id, p.empresa, p.segmento,
+                      p.cidade, p.uf, p.whatsapp, p.telefone, p.email, p.status, m.nome, p.vendedor_id
+                 from conversas cv
+                 left join prospeccao p on p.id = cv.prospeccao_id
+                 left join membros m on m.id = p.vendedor_id
+                where cv.id=%s and cv.conta_id=%s""", (conversa_id, ctx["conta_id"])).fetchone()
+        if not cv:
+            return JSONResponse({"ok": False, "erro": "escopo"}, status_code=404)
+        if not ctx["gerencia"] and cv[12] != ctx["membro_id"]:
+            return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
         rows = c.execute(
-            """select a.tipo, a.criado_em, a.descricao, a.membro_id, m.nome
-                 from prospeccao_atividades a
-                 left join membros m on m.id = a.membro_id
-                where a.prospeccao_id=%s and a.tipo = any(%s)
-                order by a.criado_em asc""", (lead_id, list(_CANAIS_COMM))).fetchall()
+            """select msg.canal, msg.direcao, msg.autor, msg.criado_em, msg.texto, msg.membro_id, mm.nome
+                 from mensagens msg left join membros mm on mm.id = msg.membro_id
+                where msg.conversa_id=%s order by msg.criado_em asc""", (conversa_id,)).fetchall()
     msgs = []
-    for (tipo, quando, desc, mid, nome) in rows:
-        cab, _, corpo = (desc or "").partition("\n\n")
-        msgs.append({"tipo": tipo, "quando": quando.strftime("%d/%m %H:%M") if quando else "",
-                     "quem": ("Você" if mid and mid == ctx["membro_id"] else (nome or "—")),
-                     "cabecalho": cab.strip(), "corpo": corpo.strip()})
-    lead = {"id": alvo["id"], "empresa": alvo["empresa"], "segmento": alvo["segmento"],
-            "cidade": alvo["cidade"], "uf": alvo["uf"], "whatsapp": alvo["whatsapp"] or alvo["telefone"],
-            "email": alvo["email"], "vendedor": alvo["vendedor_nome"],
-            "status_rot": STATUS_ROT.get(alvo["status"], alvo["status"])}
+    for (cn, direcao, autor, quando, texto, mid, nome) in rows:
+        cab, _, corpo = (texto or "").partition("\n\n")
+        if autor == "bot":
+            quem = "🤖 Agente"
+        elif autor == "lead":
+            quem = cv[3] or "Lead"
+        else:
+            quem = "Você" if mid and mid == ctx["membro_id"] else (nome or "—")
+        msgs.append({"canal": cn, "direcao": direcao, "autor": autor,
+                     "quando": quando.strftime("%d/%m %H:%M") if quando else "",
+                     "quem": quem, "cabecalho": cab.strip(), "corpo": (corpo or cab).strip()})
+    lead = {"id": cv[2], "empresa": cv[3], "canal_rot": CANAL_ROT.get(cv[0], cv[0]),
+            "segmento": cv[4], "cidade": cv[5], "uf": cv[6],
+            "whatsapp": cv[7] or cv[8], "email": cv[9], "vendedor": cv[11],
+            "status_rot": STATUS_ROT.get(cv[10], cv[10] or "")}
     return JSONResponse({"ok": True, "lead": lead, "msgs": msgs})
 
 
@@ -948,11 +1004,37 @@ def _draft_ia(pool, conta, alvo: dict, canal: str, remetente: str) -> dict:
         return {"erro": str(e)[:120]}
 
 
+def _conversa_id(c, conta_id, alvo_id, canal):
+    """Acha (ou cria) a conversa daquele lead+canal e devolve o id — base do inbox omnichannel."""
+    r = c.execute("select id from conversas where conta_id=%s and prospeccao_id=%s and canal=%s",
+                  (conta_id, alvo_id, canal)).fetchone()
+    if r:
+        return r[0]
+    r = c.execute(
+        """insert into conversas (conta_id, prospeccao_id, canal, status, ultima_msg_em)
+           values (%s,%s,%s,'aberta',now()) returning id""",
+        (conta_id, alvo_id, canal)).fetchone()
+    return r[0]
+
+
+def _registrar_msg(c, conta_id, alvo_id, canal, direcao, autor, texto, membro_id=None, provider_sid=None):
+    """Grava uma mensagem na conversa (cria a conversa se preciso) e atualiza o topo."""
+    conv = _conversa_id(c, conta_id, alvo_id, canal)
+    c.execute(
+        """insert into mensagens (conversa_id, canal, direcao, autor, membro_id, texto, provider_sid)
+           values (%s,%s,%s,%s,%s,%s,%s)""",
+        (conv, canal, direcao, autor, membro_id, (texto or "")[:8000], provider_sid))
+    c.execute("update conversas set ultima_msg_em=now() where id=%s", (conv,))
+    return conv
+
+
 def _reg_atividade(c, alvo_id, conta_id, membro_id, tipo, descricao, status_atual):
-    """Registra a abordagem na timeline e avança 'novo'→'contatado' (igual o contato manual)."""
+    """Registra a abordagem na timeline, no inbox (conversas/mensagens) e avança 'novo'→'contatado'."""
     c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id, tipo,
                    resultado, descricao) values (%s,%s,%s,%s,%s)""",
               (alvo_id, membro_id, tipo, None, (descricao or "")[:4000]))
+    if tipo in ("email", "whatsapp"):
+        _registrar_msg(c, conta_id, alvo_id, tipo, "out", "humano", descricao, membro_id)
     novo = "contatado" if status_atual == "novo" else status_atual
     c.execute("""update prospeccao set ultimo_contato_em=now(), status=%s,
                    atualizado_em=now() where id=%s and conta_id=%s""",
@@ -1735,7 +1817,27 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .cx-sec h4{margin:0 0 .4rem;font-size:.74rem;text-transform:uppercase;letter-spacing:.04em;color:var(--txt-mut)}
 .cx-kv{display:flex;justify-content:space-between;gap:.5rem;font-size:.82rem;padding:.18rem 0}
 .cx-kv span{color:var(--txt-mut)}
-@media(max-width:900px){.cx-grid{grid-template-columns:1fr}.cx-ctx{order:3}}
+.cn-msg{color:#4a9cff;border-color:#274a73;background:#0f1e30}
+.cn-ig{color:#f083b0;border-color:#5c2946;background:#2a1420}
+.cx-tabs{display:flex;gap:.2rem;border-bottom:1px solid var(--borda);margin:.7rem 0 0;overflow-x:auto}
+.cx-tab{padding:.6rem .85rem;font-size:.88rem;color:var(--txt-mut);border-bottom:2px solid transparent;white-space:nowrap;text-decoration:none}
+.cx-tab:hover{color:var(--txt)}
+.cx-tab.on{color:var(--verde-claro);border-bottom-color:var(--verde)}
+.cx-m.cin{align-self:flex-start;background:var(--card-2);border-color:var(--borda)}
+.cx-tbl{margin-top:.8rem;border:1px solid var(--borda);border-radius:12px;overflow:hidden;background:var(--card)}
+.cx-tbl table{width:100%;border-collapse:collapse;font-size:.86rem}
+.cx-tbl th{text-align:left;font-weight:600;color:var(--txt-mut);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;padding:.6rem .8rem;background:var(--card-2);border-bottom:1px solid var(--borda)}
+.cx-tbl td{padding:.6rem .8rem;border-top:1px solid var(--borda);vertical-align:top}
+.cx-tbl tr:hover td{background:#191b1a}
+.cx-cc{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:.8rem}
+.cx-card{border:1px solid var(--borda);border-radius:14px;background:var(--card);padding:1rem}
+.cx-card h3{margin:0 0 .4rem;font-size:.95rem}
+.cx-stat{display:inline-flex;align-items:center;gap:.35rem;font-size:.76rem;padding:.15rem .5rem;border-radius:999px;border:1px solid;margin-left:.4rem}
+.st-on{color:var(--verde-claro);border-color:#1d5741;background:#0f231b}
+.st-off{color:#e0a33e;border-color:#5a4520;background:#241d10}
+.cx-env{font-family:ui-monospace,Menlo,monospace;font-size:.76rem;background:var(--bg);border:1px solid var(--borda);border-radius:8px;padding:.5rem .6rem;color:var(--txt-mut);margin-top:.5rem}
+.cx-env b{color:var(--verde-claro)}
+@media(max-width:900px){.cx-grid{grid-template-columns:1fr}.cx-ctx{order:3}.cx-cc{grid-template-columns:1fr}}
 </style>
 <div class="cx-wrap">
   <div class="cx-head">
@@ -1746,11 +1848,20 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <a class="pbtn ghost" href="/painel/prospeccao" style="display:inline-flex;align-items:center">‹ Prospecção</a>
   </div>
 
+  <div class="cx-tabs">
+    {% for k,rot in [('conversas','💬 Conversas'),('emails','✉️ E-mails'),('agente','🤖 Agente IA'),('canais','⚙️ Canais')] %}
+    <a class="cx-tab {% if aba==k %}on{% endif %}" href="/painel/prospeccao/comunicacao?aba={{ k }}">{{ rot }}</a>{% endfor %}
+  </div>
+
+  {% if aba=='conversas' %}
   <form class="cx-filtros" method="get" action="/painel/prospeccao/comunicacao">
+    <input type="hidden" name="aba" value="conversas">
     <select class="fld" name="canal" style="width:auto" onchange="this.form.submit()">
       <option value="" {% if not canal %}selected{% endif %}>Todos os canais</option>
       <option value="email" {% if canal=='email' %}selected{% endif %}>✉️ E-mail</option>
       <option value="whatsapp" {% if canal=='whatsapp' %}selected{% endif %}>💬 WhatsApp</option>
+      <option value="messenger" {% if canal=='messenger' %}selected{% endif %}>🔵 Messenger</option>
+      <option value="instagram" {% if canal=='instagram' %}selected{% endif %}>📸 Instagram</option>
     </select>
     {% if gerencia %}<select class="fld" name="vendedor" style="width:auto" onchange="this.form.submit()">
       <option value="">Todos os vendedores</option>
@@ -1767,7 +1878,8 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <span class="mid">
           <span class="nm"><b>{{ c.empresa }}</b><span class="t">{{ c.quando.strftime('%d/%m') if c.quando else '' }}</span></span>
           <span class="pre">{{ c.quem }}: {{ c.preview }}</span>
-          <span class="cx-cn {{ 'cn-wpp' if c.canal=='whatsapp' else 'cn-mail' }}">{{ '💬 WhatsApp' if c.canal=='whatsapp' else '✉️ E-mail' }}{% if c.n > 1 %} · {{ c.n }}{% endif %}</span>
+          {% set cnc = {'whatsapp':'cn-wpp','email':'cn-mail','messenger':'cn-msg','instagram':'cn-ig'} %}
+          <span class="cx-cn {{ cnc.get(c.canal,'cn-mail') }}">{{ c.canal_rot }}{% if c.n > 1 %} · {{ c.n }}{% endif %}</span>
         </span>
       </button>
       {% else %}
@@ -1783,6 +1895,55 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="cx-empty" style="padding:1.4rem 1rem">Selecione uma conversa.</div>
     </div>
   </div>
+
+  {% elif aba=='emails' %}
+  <div class="cx-tbl">
+    <table>
+      <thead><tr><th style="width:88px">Data</th><th>Lead</th><th style="width:140px">Quem</th><th>Assunto / prévia</th></tr></thead>
+      <tbody>
+        {% for e in emails %}
+        <tr><td class="mut" style="white-space:nowrap"><b style="color:var(--txt);display:block">{{ e.quando.strftime('%d/%m') if e.quando else '' }}</b>{{ e.quando.strftime('%H:%M') if e.quando else '' }}</td>
+          <td><b>{{ e.empresa }}</b></td><td>{{ e.quem }}</td>
+          <td><b style="font-size:.85rem">{{ e.cabecalho }}</b><div class="mut" style="font-size:.8rem">{{ e.preview }}</div></td></tr>
+        {% else %}<tr><td colspan="4" class="mut" style="text-align:center;padding:2rem">Nenhum e-mail enviado ainda.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% elif aba=='agente' %}
+  <div class="cx-card" style="margin-top:.8rem;text-align:center;padding:2rem">
+    <div style="font-size:2rem">🤖</div>
+    <h3 style="margin:.4rem 0">Agente IA</h3>
+    <p class="mut" style="max-width:440px;margin:.2rem auto">Config (liga/desliga, confiança, autonomia, handoff) e treino (base de conhecimento) chegam na próxima entrega. A estrutura já está pronta aqui embaixo.</p>
+  </div>
+
+  {% else %}
+  <p class="mut" style="margin:.8rem 0 0">Todos os canais num lugar só. As credenciais ficam no ambiente (Render); aqui você vê o status e conecta cada um quando o acesso libera.</p>
+  <div class="cx-cc">
+    <div class="cx-card">
+      <h3>✉️ E-mail <span class="cx-stat {{ 'st-on' if canais.email else 'st-off' }}">● {{ 'Conectado' if canais.email else 'A configurar' }}</span></h3>
+      <div class="cx-kv"><span>Remetente</span><b>{{ remetente or '—' }}</b></div>
+      <div class="mut" style="margin-top:.4rem;font-size:.8rem">SMTP (Google Workspace). Prospecção fria ✓</div>
+    </div>
+    <div class="cx-card">
+      <h3>💬 WhatsApp <span class="cx-stat {{ 'st-on' if canais.whatsapp else 'st-off' }}">● {{ 'Conectado' if canais.whatsapp else 'Aguardando número' }}</span></h3>
+      <div class="mut" style="font-size:.8rem">Via Twilio. Adquira o número, ponha no Render e conecta:</div>
+      <div class="cx-env"><b>TWILIO_ACCOUNT_SID</b>=•••••<br><b>TWILIO_AUTH_TOKEN</b>=•••••<br><b>TWILIO_WHATSAPP_FROM</b>=whatsapp:+55••••</div>
+      <div class="mut" style="margin-top:.4rem;font-size:.8rem">Webhook: <code>/webhooks/twilio</code> · fria ✓ (com template)</div>
+    </div>
+    <div class="cx-card">
+      <h3>🔵 Messenger <span class="cx-stat {{ 'st-on' if canais.messenger else 'st-off' }}">● {{ 'Conectado' if canais.messenger else 'A conectar' }}</span></h3>
+      <div class="mut" style="font-size:.8rem">Via Twilio (mesmo webhook). Precisa da Página do Facebook + revisão do app na Meta.</div>
+      <div class="mut" style="margin-top:.4rem;font-size:.8rem">📥 Canal de <b>resposta</b> (janela 24h) — não é abordagem fria.</div>
+    </div>
+    <div class="cx-card">
+      <h3>📸 Instagram <span class="cx-stat {{ 'st-on' if canais.instagram else 'st-off' }}">● {{ 'Conectado' if canais.instagram else 'A conectar' }}</span></h3>
+      <div class="mut" style="font-size:.8rem">Via Meta direto (a Twilio não cobre IG). Conta IG Profissional ligada à Página + App Review.</div>
+      <div class="cx-env"><b>META_APP_ID</b>=•••••<br><b>META_PAGE_TOKEN</b>=•••••<br><b>IG_ACCOUNT_ID</b>=•••••</div>
+      <div class="mut" style="margin-top:.4rem;font-size:.8rem">Webhook: <code>/webhooks/meta</code> · 📥 <b>resposta</b>.</div>
+    </div>
+  </div>
+  {% endif %}
 </div>
 <script>
 function cxEsc(s){var d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
@@ -1791,21 +1952,22 @@ function cxOpen(el,id){
   if(el)el.classList.add('on');
   var th=document.getElementById('cx-thread'),cx=document.getElementById('cx-ctx');
   th.innerHTML='<div class="cx-empty">Carregando…</div>';
-  fetch('/painel/prospeccao/comunicacao/'+id).then(function(r){return r.json();}).then(function(d){
+  fetch('/painel/prospeccao/comunicacao/thread/'+id).then(function(r){return r.json();}).then(function(d){
     if(!d.ok){th.innerHTML='<div class="cx-empty">Não consegui abrir.</div>';return;}
     var L=d.lead;
     var msgs='';
     d.msgs.forEach(function(m){
-      var cab=m.cabecalho?('<div class="cab">'+(m.tipo==='whatsapp'?'💬 ':'✉️ ')+cxEsc(m.cabecalho)+'</div>'):'';
+      var cls=(m.direcao==='in')?'cx-m cin':'cx-m';
+      var cab=m.cabecalho?('<div class="cab">'+cxEsc(m.cabecalho)+'</div>'):'';
       var corpo=cxEsc(m.corpo||m.cabecalho).replace(/\\n/g,'<br>');
-      msgs+='<div class="cx-m">'+cab+corpo+'<span class="meta">'+cxEsc(m.quem)+' · '+cxEsc(m.quando)+'</span></div>';
+      msgs+='<div class="'+cls+'">'+cab+corpo+'<span class="meta">'+cxEsc(m.quem)+' · '+cxEsc(m.quando)+'</span></div>';
     });
     if(!d.msgs.length)msgs='<div class="cx-empty">Sem mensagens.</div>';
     th.innerHTML=''
-      +'<div class="cx-th"><div><b>'+cxEsc(L.empresa)+'</b><small>'+(L.cidade?cxEsc(L.cidade)+(L.uf?'/'+cxEsc(L.uf):''):'')+(L.status_rot?(' · '+cxEsc(L.status_rot)):'')+'</small></div>'
-      +'<span style="flex:1"></span><a class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem" href="/painel/prospeccao/'+L.id+'">Abrir ficha</a></div>'
+      +'<div class="cx-th"><div><b>'+cxEsc(L.empresa)+'</b><small>'+cxEsc(L.canal_rot||'')+(L.cidade?(' · '+cxEsc(L.cidade)+(L.uf?'/'+cxEsc(L.uf):'')):'')+(L.status_rot?(' · '+cxEsc(L.status_rot)):'')+'</small></div>'
+      +'<span style="flex:1"></span>'+(L.id?('<a class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem" href="/painel/prospeccao/'+L.id+'">Abrir ficha</a>'):'')+'</div>'
       +'<div class="cx-msgs">'+msgs+'</div>'
-      +'<div class="cx-stub">Responder por aqui<span class="lbl2">Fase 2</span> — WhatsApp/e-mail bidirecional. Por enquanto, use o <b>1º contato</b> na ficha.</div>';
+      +'<div class="cx-stub">Responder por aqui<span class="lbl2">em breve</span> — quando o canal estiver conectado (Twilio/Meta). Por enquanto, o <b>1º contato</b> sai pela ficha.</div>';
     var kv=function(k,v){return v?('<div class="cx-kv"><span>'+k+'</span><b>'+cxEsc(v)+'</b></div>'):'';};
     cx.innerHTML=''
       +'<div class="cx-sec"><h4>Lead</h4>'+kv('Empresa',L.empresa)+kv('Segmento',L.segmento)+kv('Cidade',(L.cidade||'')+(L.uf?'/'+L.uf:''))+kv('WhatsApp',L.whatsapp)+kv('E-mail',L.email)+kv('Responsável',L.vendedor)+kv('Status',L.status_rot)+'</div>'

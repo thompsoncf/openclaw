@@ -353,16 +353,20 @@ def captar_buscar(request: Request, segmento: str = Form(...), cidade: str = For
     if esconder:
         itens = [i for i in itens if not i["rede"]]
     for i in itens:
-        i["pack"] = _pack({"e": i["empresa"], "t": i["telefone"], "c": cidade.strip(),
+        i["pack"] = _pack({"e": i["empresa"], "t": i["telefone"], "c": i.get("cidade") or cidade.strip(),
+                           "u": i.get("uf") or "", "sg": i.get("segmento") or "",
                            "p": i["place_id"], "s": 1 if i["tem_site"] else 0,
                            "tp": i["temperatura"], "en": i["endereco"],
-                           "r": i.get("rating"), "n": i.get("avaliacoes")})
+                           "r": i.get("rating"), "n": i.get("avaliacoes"),
+                           "m": i.get("maps_uri") or "", "st": i.get("status") or ""})
     n_redes = sum(1 for x in res.get("itens", []) if x["rede"]) if esconder else 0
     busca = {"segmento": segmento, "cidade": cidade, "esconder": esconder,
              "ok": res.get("ok"), "erro": res.get("erro"), "n_redes": n_redes}
     if _eh_ajax(request):
         enxuto = [{"empresa": i["empresa"], "telefone": i["telefone"], "rating": i.get("rating"),
                    "tem_site": i["tem_site"], "endereco": i["endereco"],
+                   "segmento": i.get("segmento") or "", "cidade": i.get("cidade") or "",
+                   "uf": i.get("uf") or "", "aberto": i.get("aberto", True),
                    "temperatura": i["temperatura"], "pack": i["pack"]} for i in itens]
         return JSONResponse({"ok": res.get("ok"), "erro": res.get("erro"),
                              "itens": enxuto, "n_redes": n_redes})
@@ -390,17 +394,26 @@ async def captar_importar(request: Request):
                                  (ctx["conta_id"], pid)).fetchone():
                 dup += 1
                 continue
-            obs = d.get("en") or ""
+            partes = []
+            if d.get("en"):
+                partes.append(d["en"])
             if d.get("r"):
-                obs = (obs + f" · nota {d['r']} ({d.get('n', 0)} aval.)").strip(" ·")
+                partes.append(f"nota {d['r']} ({d.get('n', 0)} aval.)")
+            if d.get("st") and d["st"] != "OPERATIONAL":
+                partes.append("status: " + d["st"])
+            if d.get("m"):
+                partes.append(d["m"])
+            obs = " · ".join(partes)
             temp = d.get("tp") if d.get("tp") in TEMP_OK else "frio"
             row = c.execute(
-                """insert into prospeccao (conta_id, vendedor_id, empresa, cidade,
-                     telefone, temperatura, tem_site, place_id, origem, obs, criado_por)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,'google_places',%s,%s) returning id""",
-                (ctx["conta_id"], vend, d["e"][:250], d.get("c") or None,
-                 d.get("t") or None, temp, bool(d.get("s")), pid, obs or None, ctx["membro_id"])).fetchone()
-            leads.append(_lead_card(row[0], d["e"][:250], "", d.get("c") or "", "", temp, 0, nome_vend))
+                """insert into prospeccao (conta_id, vendedor_id, empresa, segmento, cidade,
+                     uf, telefone, temperatura, tem_site, place_id, origem, obs, criado_por)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'google_places',%s,%s) returning id""",
+                (ctx["conta_id"], vend, d["e"][:250], d.get("sg") or None, d.get("c") or None,
+                 (d.get("u") or "")[:2].upper() or None, d.get("t") or None, temp,
+                 bool(d.get("s")), pid, obs or None, ctx["membro_id"])).fetchone()
+            leads.append(_lead_card(row[0], d["e"][:250], d.get("sg") or "", d.get("c") or "",
+                                    (d.get("u") or "")[:2].upper(), temp, 0, nome_vend))
             inseridos += 1
         c.commit()
     msg = f"{inseridos} lead(s) adicionado(s) do Google." + (f" {dup} já existia(m)." if dup else "")
@@ -732,26 +745,26 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </div>
 
     <div class="captab" data-tab="manual">
-      <form id="cap-manual" action="/painel/prospeccao/novo" method="post" onsubmit="return capManual(event)" class="egrid">
+      <form id="cap-manual" action="/painel/prospeccao/novo" method="post" onsubmit="return capManual(event)">
         <input type="hidden" name="voltar" value="/painel/prospeccao">
-        <div class="full"><label class="lbl">Empresa *</label><input class="fld" name="empresa" required placeholder="Nome da empresa"></div>
-        <div><label class="lbl">Segmento</label><input class="fld" name="segmento" placeholder="Ex: pet shop"></div>
-        <div><label class="lbl">Cidade</label><input class="fld" name="cidade"></div>
-        <div><label class="lbl">UF</label><input class="fld" name="uf" maxlength="2" style="text-transform:uppercase"></div>
-        <div><label class="lbl">Contato</label><input class="fld" name="contato"></div>
-        <div><label class="lbl">Telefone</label><input class="fld" name="telefone"></div>
-        <div><label class="lbl">WhatsApp</label><input class="fld" name="whatsapp"></div>
-        <div><label class="lbl">CNPJ</label>
-          <div style="display:flex;gap:.3rem">
-            <input class="fld" name="cnpj" placeholder="só números">
-            <button type="button" class="pbtn ghost" style="padding:.5rem .7rem;white-space:nowrap" onclick="capCnpj()">↓ Receita</button>
-          </div>
-        </div>
         <input type="hidden" name="socio"><input type="hidden" name="regime_tributario"><input type="hidden" name="porte">
-        <div><label class="lbl">Valor (R$)</label><input class="fld" name="valor" inputmode="decimal" placeholder="0,00"></div>
-        <div><label class="lbl">Temperatura</label><select class="fld" name="temperatura">{% for v,l in temperaturas_all %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
-        {% if gerencia %}<div><label class="lbl">Vendedor</label><select class="fld" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
-        <div class="full"><button class="pbtn" style="margin:.3rem 0 0">Adicionar</button></div>
+        <div style="display:flex;gap:.5rem;align-items:end;background:var(--bg);border:1px solid var(--borda);border-radius:10px;padding:.7rem;margin-bottom:.8rem;flex-wrap:wrap">
+          <div style="flex:1;min-width:200px"><label class="lbl">🔎 CNPJ — puxa tudo da Receita</label><input class="fld" name="cnpj" inputmode="numeric" placeholder="digite o CNPJ (só números) e clique buscar"></div>
+          <button type="button" class="pbtn" onclick="capCnpj()" style="white-space:nowrap">↓ Buscar Receita</button>
+        </div>
+        <div class="egrid">
+          <div class="full"><label class="lbl">Empresa *</label><input class="fld" name="empresa" required placeholder="Nome da empresa"></div>
+          <div><label class="lbl">Segmento</label><input class="fld" name="segmento" placeholder="Ex: pet shop"></div>
+          <div><label class="lbl">Cidade</label><input class="fld" name="cidade"></div>
+          <div><label class="lbl">UF</label><input class="fld" name="uf" maxlength="2" style="text-transform:uppercase"></div>
+          <div><label class="lbl">Contato</label><input class="fld" name="contato"></div>
+          <div><label class="lbl">Telefone</label><input class="fld" name="telefone"></div>
+          <div><label class="lbl">WhatsApp</label><input class="fld" name="whatsapp"></div>
+          <div><label class="lbl">Valor (R$)</label><input class="fld" name="valor" inputmode="decimal" placeholder="0,00"></div>
+          <div><label class="lbl">Temperatura</label><select class="fld" name="temperatura">{% for v,l in temperaturas_all %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
+          {% if gerencia %}<div><label class="lbl">Vendedor</label><select class="fld" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
+          <div class="full"><button class="pbtn" style="margin:.3rem 0 0">Adicionar</button></div>
+        </div>
       </form>
     </div>
 
@@ -878,7 +891,7 @@ function capBuscar(ev){ev.preventDefault();var f=ev.target;var btn=document.getE
     if(!d.itens.length){box.innerHTML='<div class="mut">Nada encontrado'+(d.n_redes?(' ('+d.n_redes+' rede(s) oculta(s))'):'')+'. Tente outro termo/cidade.</div>';return;}
     var TP={quente:'#f0917f',morno:'#e0b25a',frio:'#7bb8e6'};
     var h='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem"><div class="mut" style="font-size:.82rem">'+d.itens.length+' encontrado(s)'+(d.n_redes?(' · '+d.n_redes+' oculta(s)'):'')+'</div><label class="mut" style="font-size:.8rem;cursor:pointer"><input type="checkbox" onclick="capAll(this)" style="width:auto;vertical-align:middle;accent-color:var(--verde)"> marcar todos</label></div><div class="rlist" id="cap-list">';
-    d.itens.forEach(function(it){h+='<label class="rrow" style="cursor:pointer"><input type="checkbox" name="itens" value="'+it.pack+'"><span style="flex:1"><span style="display:flex;align-items:center;gap:.4rem"><span class="tdot" style="background:'+(TEMPCOR[it.temperatura]||'#5b9bd5')+'"></span><b style="font-size:.88rem">'+jsEsc(it.empresa)+'</b></span><span class="mut" style="font-size:.76rem">'+(it.telefone?jsEsc(it.telefone):'')+(it.rating?(' · nota '+it.rating):'')+(it.tem_site?'':' · <span style=\\'color:#e0574f\\'>sem site</span>')+(it.endereco?(' · '+jsEsc(it.endereco)):'')+'</span></span><span class="tpill" style="background:transparent;border:1px solid '+(TP[it.temperatura]||'#7bb8e6')+';color:'+(TP[it.temperatura]||'#7bb8e6')+'">'+it.temperatura+'</span></label>';});
+    d.itens.forEach(function(it){var loc=(it.cidade?(' · '+jsEsc(it.cidade)+(it.uf?('/'+jsEsc(it.uf)):'')):'');h+='<label class="rrow" style="cursor:pointer"><input type="checkbox" name="itens" value="'+it.pack+'"><span style="flex:1"><span style="display:flex;align-items:center;gap:.4rem"><span class="tdot" style="background:'+(TEMPCOR[it.temperatura]||'#5b9bd5')+'"></span><b style="font-size:.88rem">'+jsEsc(it.empresa)+'</b>'+(it.aberto===false?' <span style=\\'color:#e0574f;font-size:.7rem\\'>(fechado)</span>':'')+'</span><span class="mut" style="font-size:.76rem">'+(it.segmento?(jsEsc(it.segmento)+' · '):'')+(it.telefone?jsEsc(it.telefone):'')+(it.rating?(' · nota '+it.rating):'')+(it.tem_site?'':' · <span style=\\'color:#e0574f\\'>sem site</span>')+loc+'</span></span><span class="tpill" style="background:transparent;border:1px solid '+(TP[it.temperatura]||'#7bb8e6')+';color:'+(TP[it.temperatura]||'#7bb8e6')+'">'+it.temperatura+'</span></label>';});
     h+='</div><div style="margin-top:.8rem"><button type="button" class="pbtn" onclick="capImport()">Adicionar selecionados</button></div>';box.innerHTML=h;
   }).catch(function(){if(btn){btn.disabled=false;btn.textContent='Buscar';}capToast('Falha de rede');});return false;}
 function capAll(el){document.querySelectorAll('#cap-list input[name=itens]').forEach(function(c){c.checked=el.checked;});}
@@ -978,7 +991,7 @@ _CAPTAR_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <input type="checkbox" name="itens" value="{{ it.pack }}">
             <span style="flex:1">
               <span style="display:flex;align-items:center;gap:.4rem"><span class="tdot" style="background:{{ temp_cor[it.temperatura] }}"></span><b style="font-size:.88rem">{{ it.empresa }}</b></span>
-              <span class="mut" style="font-size:.76rem">{% if it.telefone %}{{ it.telefone }}{% endif %}{% if it.rating %} · nota {{ it.rating }}{% endif %}{% if not it.tem_site %} · <span style="color:#e0574f">sem site</span>{% endif %}{% if it.endereco %} · {{ it.endereco }}{% endif %}</span>
+              <span class="mut" style="font-size:.76rem">{% if it.segmento %}{{ it.segmento }} · {% endif %}{% if it.telefone %}{{ it.telefone }}{% endif %}{% if it.rating %} · nota {{ it.rating }}{% endif %}{% if not it.tem_site %} · <span style="color:#e0574f">sem site</span>{% endif %}{% if it.cidade %} · {{ it.cidade }}{% if it.uf %}/{{ it.uf }}{% endif %}{% endif %}</span>
             </span>
             {% set tp = {'quente':'#f0917f','morno':'#e0b25a','frio':'#7bb8e6'} %}
             <span class="tpill" style="background:transparent;border:1px solid {{ tp[it.temperatura] }};color:{{ tp[it.temperatura] }}">{{ it.temperatura }}</span>

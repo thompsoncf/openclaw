@@ -416,8 +416,9 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .sv-wrap #oc-cnpj-btn,.sv-wrap #oc-sugerir{margin-top:0}
 .sv-wrap h1{font-size:1.5rem}
 .sv-wrap .card h2{font-size:1.05rem}
-.oc-grid{display:grid; grid-template-columns:1fr 320px; gap:1rem; align-items:start}
-@media(max-width:820px){.oc-grid{grid-template-columns:1fr}}
+.oc-grid{display:grid; grid-template-columns:minmax(0,1fr) 320px; gap:1rem; align-items:start}
+.oc-grid > *{min-width:0}
+@media(max-width:820px){.oc-grid{grid-template-columns:minmax(0,1fr)}}
 .oc-field{display:flex; flex-direction:column; gap:.35rem; margin-bottom:.6rem}
 .oc-field label{font-size:.82rem; color:var(--txt-mut)}
 .oc-inp{padding:.55rem .7rem; border-radius:8px; background:var(--bg); color:var(--txt); border:1px solid var(--borda); font-size:.95rem; width:100%; box-sizing:border-box}
@@ -462,6 +463,18 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-badge.fechado{background:#10241d; color:var(--verde-claro)}
 .oc-badge.aberto{background:#2a2212; color:#e0b25a}
 .oc-fechar{background:var(--verde); color:#04140d; border:0; border-radius:8px; padding:.4rem .8rem; font-weight:600; cursor:pointer; font-size:.8rem}
+/* mobile: cada serviço vira 2 linhas (toggle+nome+ações em cima, valores embaixo).
+   Fica no FIM do bloco pra vencer a cascata das regras base acima. */
+@media(max-width:600px){
+  .sv-wrap{padding-left:.6rem; padding-right:.6rem}
+  .sv-wrap .oc-head{display:none!important}   /* o JS seta display:grid inline; !important vence no mobile */
+  .sv-wrap .oc-mod{display:flex; flex-wrap:wrap; align-items:center; gap:.4rem .5rem; padding:.7rem 0}
+  .sv-wrap .oc-mod .oc-tog{order:1}
+  .sv-wrap .oc-mod .oc-nome{order:2; flex:1 1 60%; min-width:0}
+  .sv-wrap .oc-mod .oc-rowacts{order:3; margin-left:auto}
+  .sv-wrap .oc-mod .oc-num{order:4; flex:1 1 40%}
+  .sv-wrap .oc-mod .oc-num input{text-align:left}
+}
 </style>{% endraw %}
 
 <div class="card">

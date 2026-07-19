@@ -336,6 +336,13 @@ def painel_servicos_lista(request: Request):
     membro_id, papel = _ator(request)
     with get_pool().connection() as c:
         _garantir_tabela(c)
+        # auto-cura: toda proposta precisa de um token pro link/PDF (as antigas
+        # foram salvas antes do token existir). Gera pra quem está sem, uma vez.
+        c.execute(
+            """update orcamentos set token = substr(md5(random()::text || id::text
+                 || clock_timestamp()::text), 1, 22)
+               where conta_id=%s and token is null""", (conta[0],))
+        c.commit()
         # vendedor vê só as propostas dele; dono/gestor veem o funil inteiro.
         _cols = """select id, cliente, empresa, setup_centavos, mensal_centavos,
                           primeiro_ano_centavos, n_modulos, criado_em, status,

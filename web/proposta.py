@@ -208,8 +208,13 @@ td{padding:11px 13px;border-bottom:1px solid #F0EBE0;font-size:13.5px}td small{d
 
   {% if prop.assinada %}
   <div class="ok">
+    {% if prop.aprovada_por %}
     <h3>✓ Proposta aprovada</h3>
     <p>Aprovada por <b>{{ prop.aprovada_por }}</b>{% if prop.aprovada_str %} em {{ prop.aprovada_str }}{% endif %}. A empresa foi notificada e dará os próximos passos.</p>
+    {% else %}
+    <h3>✓ Proposta fechada</h3>
+    <p>Esta proposta já foi contratada. Fale com a empresa para os próximos passos.</p>
+    {% endif %}
   </div>
   {% else %}
   <form class="sign" method="post" action="/proposta/{{ token }}/assinar">

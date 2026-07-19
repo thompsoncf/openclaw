@@ -99,7 +99,7 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
                       p.status, p.temperatura, p.valor_estimado_centavos, p.origem,
                       p.obs, p.instagram, p.socio, p.regime_tributario, p.porte,
                       p.ultimo_contato_em, p.proximo_contato_em, p.vendedor_id,
-                      m.nome, p.orcamento_id, p.tem_site
+                      m.nome, p.orcamento_id, p.tem_site, p.maps_url
                  from prospeccao p
                  left join membros m on m.id = p.vendedor_id
                 where p.id=%s and p.conta_id=%s""", (alvo_id, conta_id)).fetchone()
@@ -109,7 +109,7 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
             "telefone", "whatsapp", "email", "status", "temperatura", "valor",
             "origem", "obs", "instagram", "socio", "regime_tributario", "porte",
             "ultimo_contato_em", "proximo_contato_em", "vendedor_id", "vendedor_nome",
-            "orcamento_id", "tem_site"]
+            "orcamento_id", "tem_site", "maps_url"]
     d = dict(zip(cols, r))
     d["zap_link"] = _zap_link(d["whatsapp"] or d["telefone"])
     d["tel_link"] = "tel:" + _so_digitos(d["telefone"]) if d["telefone"] else ""
@@ -401,17 +401,15 @@ async def captar_importar(request: Request):
                 partes.append(f"nota {d['r']} ({d.get('n', 0)} aval.)")
             if d.get("st") and d["st"] != "OPERATIONAL":
                 partes.append("status: " + d["st"])
-            if d.get("m"):
-                partes.append(d["m"])
-            obs = " · ".join(partes)
+            obs = " · ".join(partes)   # link do mapa vai na coluna própria, não na obs
             temp = d.get("tp") if d.get("tp") in TEMP_OK else "frio"
             row = c.execute(
                 """insert into prospeccao (conta_id, vendedor_id, empresa, segmento, cidade,
-                     uf, telefone, temperatura, tem_site, place_id, origem, obs, criado_por)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'google_places',%s,%s) returning id""",
+                     uf, telefone, temperatura, tem_site, place_id, origem, obs, maps_url, criado_por)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'google_places',%s,%s,%s) returning id""",
                 (ctx["conta_id"], vend, d["e"][:250], d.get("sg") or None, d.get("c") or None,
                  (d.get("u") or "")[:2].upper() or None, d.get("t") or None, temp,
-                 bool(d.get("s")), pid, obs or None, ctx["membro_id"])).fetchone()
+                 bool(d.get("s")), pid, obs or None, d.get("m") or None, ctx["membro_id"])).fetchone()
             leads.append(_lead_card(row[0], d["e"][:250], d.get("sg") or "", d.get("c") or "",
                                     (d.get("u") or "")[:2].upper(), temp, 0, nome_vend))
             inseridos += 1
@@ -699,6 +697,7 @@ _CSS = """<style>
 .drow:first-of-type{border-top:0}
 .drow .ic{color:var(--txt-mut);text-align:center}
 .drow .lb{color:var(--txt-mut);font-size:.78rem}
+.drow>span:last-child{min-width:0;overflow-wrap:anywhere}
 .badge{display:inline-block;padding:.02rem .4rem;border-radius:6px;font-size:.68rem;font-weight:600;background:#123a26;color:#5fe0a5;border:1px solid #1d5c3c;margin-left:.35rem}
 .tl{position:relative;padding:.15rem 0 .8rem 1rem;border-left:2px solid var(--borda);margin-left:.25rem}
 .tl:last-child{padding-bottom:.1rem}
@@ -1037,6 +1036,7 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-top:.8rem">
       {% if a.tel_link %}<a class="pbtn ghost" href="{{ a.tel_link }}">📞 Ligar</a>{% endif %}
       {% if a.zap_link %}<a class="pbtn ghost" href="{{ a.zap_link }}" target="_blank" rel="noopener">💬 WhatsApp</a>{% endif %}
+      {% if a.maps_url %}<a class="pbtn ghost" href="{{ a.maps_url }}" target="_blank" rel="noopener">🗺️ Mapa</a>{% endif %}
       <span style="flex:1"></span>
       <button type="button" class="pbtn" disabled title="Chega na Etapa 4 (conversão)">📄 Gerar orçamento</button>
     </div>
@@ -1075,7 +1075,7 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <div><label class="lbl">Telefone</label><input class="fld" name="telefone" value="{{ a.telefone or '' }}"></div>
             <div><label class="lbl">WhatsApp</label><input class="fld" name="whatsapp" value="{{ a.whatsapp or '' }}"></div>
             <div><label class="lbl">E-mail</label><input class="fld" name="email" value="{{ a.email or '' }}"></div>
-            <div><label class="lbl">CNPJ</label><input class="fld" name="cnpj" value="{{ a.cnpj or '' }}"></div>
+            <div><label class="lbl">CNPJ</label><div style="display:flex;gap:.3rem"><input class="fld" name="cnpj" value="{{ a.cnpj or '' }}"><button type="button" class="pbtn ghost" style="padding:.5rem .6rem;white-space:nowrap" onclick="fichaCnpj()" title="Preencher tudo pela Receita">↓ Receita</button></div></div>
             <div><label class="lbl">Segmento</label><input class="fld" name="segmento" value="{{ a.segmento or '' }}"></div>
             <div><label class="lbl">Cidade</label><input class="fld" name="cidade" value="{{ a.cidade or '' }}"></div>
             <div><label class="lbl">UF</label><input class="fld" name="uf" maxlength="2" value="{{ a.uf or '' }}"></div>
@@ -1139,6 +1139,17 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 <script>
 function prospToggle(id){var e=document.getElementById(id);e.style.display=(e.style.display==='none')?'block':'none';}
 function rcPick(el){var box=document.getElementById('rc-pills');box.querySelectorAll('.rcpill').forEach(function(b){b.classList.remove('on');});el.classList.add('on');document.getElementById('rc-tipo').value=el.getAttribute('data-tipo');}
+function fToast(msg){var t=document.getElementById('f-toast');if(!t){t=document.createElement('div');t.id='f-toast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--card);border:1px solid var(--verde);color:var(--verde-claro);padding:.6rem 1rem;border-radius:10px;z-index:200;font-size:.85rem;box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .4s';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';clearTimeout(window._ft);window._ft=setTimeout(function(){t.style.opacity='0';},2600);}
+function fichaCnpj(){var f=document.getElementById('edit-dados');var cnpj=f.querySelector('[name=cnpj]').value.replace(/\\D/g,'');if(cnpj.length!==14){fToast('CNPJ precisa ter 14 dígitos');return;}
+  fToast('Consultando Receita…');
+  fetch('/painel/prospeccao/cnpj?cnpj='+cnpj,{headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
+    if(!d.ok){fToast('CNPJ não encontrado ('+(d.erro||'')+')');return;}var x=d.dados;
+    function put(n,v){var el=f.querySelector('[name='+n+']');if(el&&v)el.value=v;}
+    var e=f.querySelector('[name=empresa]');
+    put('segmento',x.segmento);put('cidade',x.cidade);put('uf',x.uf);put('telefone',x.telefone);
+    put('email',x.email);put('socio',x.socio);put('regime_tributario',x.regime_tributario);put('porte',x.porte);
+    fToast('Preenchido pela Receita ✓ confira e salve');
+  }).catch(function(){fToast('Falha de rede');});}
 </script>
 {% endblock %}"""
 

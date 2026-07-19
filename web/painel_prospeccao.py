@@ -247,7 +247,8 @@ def prospeccao_novo(request: Request, empresa: str = Form(...), segmento: str = 
                     valor: str = Form(""), origem: str = Form("manual"),
                     vendedor_id: str = Form(""), obs: str = Form(""),
                     socio: str = Form(""), regime_tributario: str = Form(""),
-                    porte: str = Form(""), voltar: str = Form("")):
+                    porte: str = Form(""), cargo: str = Form(""), instagram: str = Form(""),
+                    site_url: str = Form(""), receita: str = Form(""), voltar: str = Form("")):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -260,20 +261,33 @@ def prospeccao_novo(request: Request, empresa: str = Form(...), segmento: str = 
         request.session["prosp_aviso"] = "Informe ao menos o nome da empresa."
         return RedirectResponse(destino, status_code=303)
     temperatura = temperatura if temperatura in TEMP_OK else "frio"
+    site_link = (site_url or "").strip()
+    if site_link and "://" not in site_link:
+        site_link = "https://" + site_link
+    tem_site = True if site_link else None   # tem link → tem site; senão desconhecido
+    # pacote da Receita que o "Buscar Receita" capturou (hidden), só as chaves ricas
+    receita_json = None
+    if (receita or "").strip():
+        try:
+            receita_json = json.dumps(_receita_extras(json.loads(receita)))
+        except Exception:  # noqa: BLE001
+            receita_json = None
     pool = get_pool()
     vend = _vendedor_destino(ctx, vendedor_id, pool, ctx["conta_id"])
     with pool.connection() as c:
         row = c.execute(
             """insert into prospeccao (conta_id, vendedor_id, empresa, segmento, cidade,
-                 uf, contato, telefone, whatsapp, email, cnpj, temperatura,
-                 valor_estimado_centavos, origem, obs, socio, regime_tributario, porte, criado_por)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
+                 uf, contato, cargo, telefone, whatsapp, email, cnpj, temperatura,
+                 valor_estimado_centavos, origem, obs, socio, regime_tributario, porte,
+                 instagram, site_url, tem_site, receita, criado_por)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s) returning id""",
             (ctx["conta_id"], vend, empresa, segmento.strip() or None, cidade.strip() or None,
-             (uf or "").strip()[:2].upper() or None, contato.strip() or None,
+             (uf or "").strip()[:2].upper() or None, contato.strip() or None, cargo.strip() or None,
              telefone.strip() or None, whatsapp.strip() or None, email.strip().lower() or None,
              cnpj.strip() or None, temperatura, _reais_para_centavos(valor),
              (origem or "manual").strip() or None, obs.strip() or None,
              socio.strip() or None, regime_tributario.strip() or None, porte.strip() or None,
+             instagram.strip() or None, site_link or None, tem_site, receita_json,
              ctx["membro_id"])).fetchone()
         c.commit()
     if ajax:
@@ -906,22 +920,30 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <div class="captab" data-tab="manual">
       <form id="cap-manual" action="/painel/prospeccao/novo" method="post" onsubmit="return capManual(event)">
         <input type="hidden" name="voltar" value="/painel/prospeccao">
-        <input type="hidden" name="socio"><input type="hidden" name="regime_tributario"><input type="hidden" name="porte">
+        <input type="hidden" name="receita">
         <div style="display:flex;gap:.5rem;align-items:end;background:var(--bg);border:1px solid var(--borda);border-radius:10px;padding:.7rem;margin-bottom:.8rem;flex-wrap:wrap">
           <div style="flex:1;min-width:200px"><label class="lbl">🔎 CNPJ — puxa tudo da Receita</label><input class="fld" name="cnpj" inputmode="numeric" placeholder="digite o CNPJ (só números) e clique buscar"></div>
           <button type="button" class="pbtn" onclick="capCnpj()" style="white-space:nowrap">↓ Buscar Receita</button>
         </div>
         <div class="egrid">
           <div class="full"><label class="lbl">Empresa *</label><input class="fld" name="empresa" required placeholder="Nome da empresa"></div>
+          <div><label class="lbl">Contato</label><input class="fld" name="contato"></div>
+          <div><label class="lbl">Cargo</label><input class="fld" name="cargo" placeholder="Cargo do contato"></div>
+          <div><label class="lbl">Telefone</label><input class="fld" name="telefone"></div>
+          <div><label class="lbl">WhatsApp</label><input class="fld" name="whatsapp"></div>
+          <div><label class="lbl">E-mail</label><input class="fld" name="email" inputmode="email"></div>
           <div><label class="lbl">Segmento</label><input class="fld" name="segmento" placeholder="Ex: pet shop"></div>
           <div><label class="lbl">Cidade</label><input class="fld" name="cidade"></div>
           <div><label class="lbl">UF</label><input class="fld" name="uf" maxlength="2" style="text-transform:uppercase"></div>
-          <div><label class="lbl">Contato</label><input class="fld" name="contato"></div>
-          <div><label class="lbl">Telefone</label><input class="fld" name="telefone"></div>
-          <div><label class="lbl">WhatsApp</label><input class="fld" name="whatsapp"></div>
+          <div><label class="lbl">Sócio</label><input class="fld" name="socio"></div>
+          <div><label class="lbl">Regime</label><input class="fld" name="regime_tributario"></div>
+          <div><label class="lbl">Porte</label><input class="fld" name="porte"></div>
+          <div><label class="lbl">Instagram</label><input class="fld" name="instagram" placeholder="@perfil"></div>
+          <div><label class="lbl">Site (link)</label><input class="fld" name="site_url" inputmode="url" placeholder="https://…"></div>
           <div><label class="lbl">Valor (R$)</label><input class="fld" name="valor" inputmode="decimal" placeholder="0,00"></div>
           <div><label class="lbl">Temperatura</label><select class="fld" name="temperatura">{% for v,l in temperaturas_all %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
           {% if pode_atribuir %}<div><label class="lbl">Vendedor</label><select class="fld" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
+          <div class="full"><label class="lbl">Observações</label><input class="fld" name="obs"></div>
           <div class="full"><button class="pbtn" style="margin:.3rem 0 0">Adicionar</button></div>
         </div>
       </form>
@@ -1040,7 +1062,8 @@ function capCnpj(){var f=document.getElementById('cap-manual');var cnpj=f.queryS
     if(!d.ok){capToast('CNPJ não encontrado ('+(d.erro||'')+')');return;}var x=d.dados;
     function put(n,v,forca){var el=f.querySelector('[name='+n+']');if(el&&v&&(forca||!el.value))el.value=v;}
     put('empresa',x.razao_social,false);put('segmento',x.segmento,true);put('cidade',x.cidade,true);put('uf',x.uf,true);
-    put('telefone',x.telefone,true);put('socio',x.socio,true);put('regime_tributario',x.regime_tributario,true);put('porte',x.porte,true);
+    put('telefone',x.telefone,true);put('email',x.email,true);put('socio',x.socio,true);put('regime_tributario',x.regime_tributario,true);put('porte',x.porte,true);
+    var rc=f.querySelector('[name=receita]');if(rc){try{rc.value=JSON.stringify(x);}catch(e){}}
     capToast('Dados da Receita preenchidos ✓');
   }).catch(function(){capToast('Falha de rede');});}
 function capCsv(ev){ev.preventDefault();capFetch('/painel/prospeccao/captar/csv',new FormData(ev.target)).then(function(d){if(!d.ok){capToast('Erro no CSV');return;}capToast(d.msg||'Importado');setTimeout(function(){location.reload();},800);}).catch(function(){capToast('Falha de rede');});return false;}

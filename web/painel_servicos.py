@@ -66,6 +66,12 @@ def _garantir_tabela(c):
         alter table orcamentos add column if not exists aprovada_por  text;
         alter table orcamentos add column if not exists aprovada_doc  text;
         alter table orcamentos add column if not exists aprovada_ip   text;
+        alter table orcamentos add column if not exists telefone      text;
+        alter table orcamentos add column if not exists cidade        text;
+        alter table orcamentos add column if not exists uf            text;
+        alter table orcamentos add column if not exists site          text;
+        alter table orcamentos add column if not exists cargo         text;
+        alter table orcamentos add column if not exists socio         text;
         create index if not exists idx_orcamentos_status on orcamentos (status, criado_em desc);
         create index if not exists idx_orcamentos_conta on orcamentos (conta_id, status, criado_em desc);
         create unique index if not exists idx_orcamentos_token on orcamentos (token) where token is not null;
@@ -266,6 +272,12 @@ class SalvarIn(BaseModel):
     segmento: str = ""
     whatsapp: str = ""
     email: str = ""
+    telefone: str = ""
+    cidade: str = ""
+    uf: str = ""
+    site: str = ""
+    cargo: str = ""
+    socio: str = ""
     modulos: list[str] = []   # ids dos modulos escolhidos
     itens: list[ItemIn] = []  # snapshot das linhas (nome/setup/mensal) pra a proposta
     escopo: str = ""
@@ -290,6 +302,9 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
     vals = (dados.cliente or None, dados.empresa or None,
             (dados.cnpj or "").strip() or None, dados.segmento or None,
             (dados.whatsapp or "").strip() or None, (dados.email or "").strip() or None,
+            (dados.telefone or "").strip() or None, (dados.cidade or "").strip() or None,
+            (dados.uf or "").strip()[:2].upper() or None, (dados.site or "").strip() or None,
+            (dados.cargo or "").strip() or None, (dados.socio or "").strip() or None,
             json.dumps(modulos), itens_json, (dados.escopo or "").strip() or None,
             (dados.canal or "").strip() or None,
             int(dados.setup) * 100, int(dados.mensal) * 100,
@@ -301,7 +316,8 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
             # atualiza a proposta reaberta (nunca mexe em uma já 'fechado')
             r = c.execute(
                 """update orcamentos set cliente=%s, empresa=%s, cnpj=%s, segmento=%s,
-                       whatsapp=%s, email=%s, modulos=%s::jsonb, itens=%s::jsonb, escopo=%s, canal=%s,
+                       whatsapp=%s, email=%s, telefone=%s, cidade=%s, uf=%s, site=%s,
+                       cargo=%s, socio=%s, modulos=%s::jsonb, itens=%s::jsonb, escopo=%s, canal=%s,
                        setup_centavos=%s, mensal_centavos=%s, primeiro_ano_centavos=%s,
                        n_modulos=%s, atualizado_em=now(),
                        token=coalesce(token, %s),
@@ -323,9 +339,10 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
             r = c.execute(
                 """insert into orcamentos
                    (conta_id, cliente, empresa, cnpj, segmento, whatsapp, email,
+                    telefone, cidade, uf, site, cargo, socio,
                     modulos, itens, escopo, canal, setup_centavos, mensal_centavos,
                     primeiro_ano_centavos, n_modulos, criado_por, token)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,%s,%s,%s,%s)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,%s,%s,%s,%s)
                    returning id, token""",
                 (conta[0],) + vals + (criador, secrets.token_urlsafe(16))).fetchone()
             oid, tok = r
@@ -395,7 +412,8 @@ def painel_servicos_item(request: Request, orc_id: int):
         r = c.execute(
             """select id, cliente, empresa, cnpj, segmento, whatsapp, email,
                       modulos, escopo, status, setup_centavos, mensal_centavos,
-                      primeiro_ano_centavos, n_modulos, itens
+                      primeiro_ano_centavos, n_modulos, itens,
+                      telefone, cidade, uf, site, cargo, socio
                  from orcamentos where id=%s and conta_id=%s""" + dono_filtro,
             args).fetchone()
     if not r:
@@ -414,6 +432,8 @@ def painel_servicos_item(request: Request, orc_id: int):
         "escopo": r[8] or "", "status": r[9] or "rascunho",
         "setup": brl(r[10]), "mensal": brl(r[11]), "total": brl(r[12]),
         "n_modulos": r[13] or 0, "itens": _jsonb(r[14]),
+        "telefone": r[15] or "", "cidade": r[16] or "", "uf": r[17] or "",
+        "site": r[18] or "", "cargo": r[19] or "", "socio": r[20] or "",
     })
 
 
@@ -546,8 +566,14 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:.8rem">
     <div class="oc-field"><label>Empresa</label><input id="oc-empresa" class="oc-inp" placeholder="Nome da empresa"></div>
     <div class="oc-field"><label>Contato</label><input id="oc-contato" class="oc-inp" placeholder="Responsável"></div>
+    <div class="oc-field"><label>Cargo</label><input id="oc-cargo" class="oc-inp" placeholder="Cargo do contato"></div>
+    <div class="oc-field"><label>Sócio</label><input id="oc-socio" class="oc-inp" placeholder="Sócio / dono"></div>
     <div class="oc-field"><label>WhatsApp</label><input id="oc-whats" class="oc-inp" placeholder="(86) 9 9999-9999"></div>
+    <div class="oc-field"><label>Telefone</label><input id="oc-tel" class="oc-inp" placeholder="(86) 3333-0000"></div>
     <div class="oc-field"><label>E-mail</label><input id="oc-email" class="oc-inp" placeholder="contato@empresa.com.br"></div>
+    <div class="oc-field"><label>Site</label><input id="oc-site" class="oc-inp" inputmode="url" placeholder="site.com.br"></div>
+    <div class="oc-field"><label>Cidade</label><input id="oc-cidade" class="oc-inp" placeholder="Teresina"></div>
+    <div class="oc-field"><label>UF</label><input id="oc-uf" class="oc-inp" maxlength="2" placeholder="PI"></div>
     <div class="oc-field"><label>Segmento</label><input id="oc-segmento" class="oc-inp" placeholder="Saúde, Varejo, Logística..."></div>
   </div>
 </div>
@@ -853,6 +879,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         function set(id,v){if(v){document.getElementById(id).value=v;}}
         set('oc-empresa',d.empresa); set('oc-segmento',d.segmento);
         set('oc-whats',d.whatsapp); set('oc-email',d.email);
+        set('oc-cidade',d.cidade); set('oc-uf',d.uf);
         var loc=[d.cidade,d.uf].filter(Boolean).join('/');
         msg.textContent='Preenchido pela Receita'+(loc?' — '+loc:'')+'. Confira e ajuste se precisar.';
       })
@@ -865,7 +892,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     var sel=rows().filter(function(r){return r.getAttribute('data-on')==='1';});
     var itens=sel.map(function(r){return {nome:r.getAttribute('data-nome'),desc:r.getAttribute('data-desc')||'',setup:num(r.querySelector('.oc-setup')),mensal:num(r.querySelector('.oc-mensal'))};});
     var escEl=document.getElementById('oc-escopo-out');
-    return {id:EDIT_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',modulos:sel.map(function(r){return r.getAttribute('data-id');}),itens:itens,escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setup),mensal:Math.round(c.mensal),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods};
+    return {id:EDIT_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',telefone:document.getElementById('oc-tel').value||'',cidade:document.getElementById('oc-cidade').value||'',uf:document.getElementById('oc-uf').value||'',site:document.getElementById('oc-site').value||'',cargo:document.getElementById('oc-cargo').value||'',socio:document.getElementById('oc-socio').value||'',modulos:sel.map(function(r){return r.getAttribute('data-id');}),itens:itens,escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setup),mensal:Math.round(c.mensal),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods};
   }
   function salvarProposta(cb){
     fetch('/painel/servicos/salvar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(coletarBody())})
@@ -889,7 +916,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   var EDIT_ID=null;
   function novo(){
     EDIT_ID=null;
-    ['oc-empresa','oc-contato','oc-cnpj','oc-segmento','oc-whats','oc-email','oc-desc'].forEach(function(id){setv(id,'');});
+    ['oc-empresa','oc-contato','oc-cnpj','oc-segmento','oc-whats','oc-email','oc-tel','oc-cidade','oc-uf','oc-site','oc-cargo','oc-socio','oc-desc'].forEach(function(id){setv(id,'');});
     var out=document.getElementById('oc-escopo-out'); out.style.display='none'; out.removeAttribute('data-escopo'); out.textContent='';
     document.getElementById('oc-editando').style.display='none';
     marcaMods([]);   // proposta nova começa sem nenhum serviço marcado
@@ -901,6 +928,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       EDIT_ID=d.id;
       setv('oc-empresa',d.empresa); setv('oc-contato',d.cliente); setv('oc-cnpj',d.cnpj);
       setv('oc-segmento',d.segmento); setv('oc-whats',d.whatsapp); setv('oc-email',d.email);
+      setv('oc-tel',d.telefone); setv('oc-cidade',d.cidade); setv('oc-uf',d.uf);
+      setv('oc-site',d.site); setv('oc-cargo',d.cargo); setv('oc-socio',d.socio);
       marcaMods(d.modulos);
       // restaura os valores EXATOS que estavam salvos (não recalcula pelo catálogo)
       (d.itens||[]).forEach(function(it){

@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from urllib.parse import quote
 
 from fastapi import APIRouter, Request, Form, UploadFile, File
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 
 from db.conexao import get_pool
 from contas import equipe as eq
@@ -513,14 +513,39 @@ CANAL_ROT = {"email": "✉️ E-mail", "whatsapp": "💬 WhatsApp",
 CANAIS_TODOS = ("email", "whatsapp", "messenger", "instagram")
 
 
-def _canais_status() -> dict:
-    """Quais canais estão conectados (por presença de credencial no ambiente)."""
+def _canal_ident(c, conta_id, canal):
+    """Identificador (número/página) do canal daquela empresa, se configurado."""
+    r = c.execute("select identificador from canais_config where conta_id=%s and canal=%s and ativo",
+                  (conta_id, canal)).fetchone()
+    return r[0] if r else None
+
+
+def _conta_por_ident(c, canal, ident_digitos):
+    """Roteia o inbound: acha a empresa dona do número que recebeu (últimos 11 díg)."""
+    r = c.execute(
+        r"""select conta_id from canais_config
+             where canal=%s and ativo
+               and right(regexp_replace(identificador,'\D','','g'), 11) = right(%s, 11)
+             limit 1""", (canal, ident_digitos)).fetchone()
+    return r[0] if r else None
+
+
+def _canais_status(pool, conta_id: int) -> dict:
+    """Status de cada canal: credencial global + número/página da empresa (banco)."""
     twilio = bool(os.environ.get("TWILIO_ACCOUNT_SID") and os.environ.get("TWILIO_AUTH_TOKEN"))
+    meta = bool(os.environ.get("META_PAGE_TOKEN") and os.environ.get("IG_ACCOUNT_ID"))
+    nums = {}
+    with pool.connection() as c:
+        for (canal, ident) in c.execute(
+                "select canal, identificador from canais_config where conta_id=%s and ativo",
+                (conta_id,)).fetchall():
+            nums[canal] = ident
     return {
         "email": bool(remetente_configurado()),
-        "whatsapp": twilio and bool(os.environ.get("TWILIO_WHATSAPP_FROM")),
-        "messenger": twilio and bool(os.environ.get("TWILIO_MESSENGER_FROM")),
-        "instagram": bool(os.environ.get("META_PAGE_TOKEN") and os.environ.get("IG_ACCOUNT_ID")),
+        "whatsapp": twilio and bool(nums.get("whatsapp")),
+        "messenger": twilio and bool(nums.get("messenger")),
+        "instagram": meta and bool(nums.get("instagram")),
+        "twilio": twilio, "meta": meta, "numeros": nums,
     }
 
 
@@ -594,9 +619,10 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
     vends = _vendedores(pool, ctx["conta_id"]) if ctx["gerencia"] else []
     return _render("prospeccao_comunicacao", request, titulo="Comunicação",
                    secao_ativa="prospeccao", aba=aba, convs=convs, emails=emails, canal=canal,
-                   canais=_canais_status(), canal_rot=CANAL_ROT,
+                   canais=_canais_status(pool, ctx["conta_id"]), canal_rot=CANAL_ROT,
                    gerencia=ctx["gerencia"], vendedores=vends, filtro_vend=filtro_vend,
-                   remetente=remetente_configurado(), tem_ia=_tem_ia())
+                   remetente=remetente_configurado(), tem_ia=_tem_ia(),
+                   aviso=request.session.pop("prosp_aviso", None))
 
 
 @router.get("/painel/prospeccao/comunicacao/thread/{conversa_id}")
@@ -634,11 +660,136 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
         msgs.append({"canal": cn, "direcao": direcao, "autor": autor,
                      "quando": quando.strftime("%d/%m %H:%M") if quando else "",
                      "quem": quem, "cabecalho": cab.strip(), "corpo": (corpo or cab).strip()})
-    lead = {"id": cv[2], "empresa": cv[3], "canal_rot": CANAL_ROT.get(cv[0], cv[0]),
+    from finance import whatsapp_twilio as _wa
+    pode_wa = False
+    if cv[0] == "whatsapp" and _wa.configurado() and bool(cv[7] or cv[8]):
+        with pool.connection() as _c:
+            pode_wa = bool(_canal_ident(_c, ctx["conta_id"], "whatsapp"))
+    lead = {"id": cv[2], "empresa": cv[3], "canal": cv[0], "canal_rot": CANAL_ROT.get(cv[0], cv[0]),
             "segmento": cv[4], "cidade": cv[5], "uf": cv[6],
             "whatsapp": cv[7] or cv[8], "email": cv[9], "vendedor": cv[11],
             "status_rot": STATUS_ROT.get(cv[10], cv[10] or "")}
-    return JSONResponse({"ok": True, "lead": lead, "msgs": msgs})
+    return JSONResponse({"ok": True, "lead": lead, "msgs": msgs,
+                         "conversa_id": conversa_id, "pode_responder": pode_wa})
+
+
+@router.post("/painel/prospeccao/comunicacao/responder")
+def comunicacao_responder(request: Request, conversa_id: int = Form(...), texto: str = Form(...)):
+    """Responde numa conversa (Fase B: WhatsApp via Twilio, dentro da janela 24h)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    texto = (texto or "").strip()
+    if not texto:
+        return JSONResponse({"ok": False, "erro": "vazio"})
+    pool = get_pool()
+    with pool.connection() as c:
+        cv = c.execute(
+            """select cv.canal, cv.prospeccao_id, cv.contato_ref, p.whatsapp, p.telefone, p.vendedor_id
+                 from conversas cv left join prospeccao p on p.id = cv.prospeccao_id
+                where cv.id=%s and cv.conta_id=%s""", (conversa_id, ctx["conta_id"])).fetchone()
+        if not cv:
+            return JSONResponse({"ok": False, "erro": "escopo"}, status_code=404)
+        if not ctx["gerencia"] and cv[5] != ctx["membro_id"]:
+            return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+        canal = cv[0]
+        if canal != "whatsapp":
+            return JSONResponse({"ok": False, "erro": "canal_sem_resposta"})
+        from finance import whatsapp_twilio as wa
+        remetente = _canal_ident(c, ctx["conta_id"], "whatsapp")
+        numero = cv[3] or cv[4] or cv[2]
+        res = wa.enviar_texto(remetente, numero, texto)
+        if not res.get("ok"):
+            erros = {"nao_configurado": "WhatsApp não conectado (falta credencial Twilio no Render).",
+                     "sem_numero_empresa": "Cadastre o número da empresa na aba Canais.",
+                     "numero_invalido": "Número do lead inválido."}
+            return JSONResponse({"ok": False, "erro": erros.get(res.get("erro"), "Não consegui enviar (janela de 24h fechada? use template).")})
+        _registrar_msg(c, ctx["conta_id"], cv[1], "whatsapp", "out", "humano",
+                       texto, ctx["membro_id"], res.get("sid"))
+        c.commit()
+    return JSONResponse({"ok": True})
+
+
+@router.post("/painel/prospeccao/comunicacao/canal-numero")
+def comunicacao_canal_numero(request: Request, canal: str = Form(...), numero: str = Form("")):
+    """Vincula (ou limpa) o número/identificador de um canal à empresa. Só dono/gestor."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    destino = "/painel/prospeccao/comunicacao?aba=canais"
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "Só o dono/gestor configura os canais."
+        return RedirectResponse(destino, status_code=303)
+    if canal not in ("whatsapp", "messenger", "instagram"):
+        return RedirectResponse(destino, status_code=303)
+    from finance import whatsapp_twilio as wa
+    ident = wa.normalizar_from(numero) if canal == "whatsapp" else (numero or "").strip()
+    pool = get_pool()
+    try:
+        with pool.connection() as c:
+            if ident:
+                c.execute(
+                    """insert into canais_config (conta_id, canal, identificador, ativo)
+                       values (%s,%s,%s,true)
+                       on conflict (conta_id, canal)
+                       do update set identificador=excluded.identificador, ativo=true, atualizado_em=now()""",
+                    (ctx["conta_id"], canal, ident))
+                msg = "Número vinculado a esta empresa ✓"
+            else:
+                c.execute("delete from canais_config where conta_id=%s and canal=%s", (ctx["conta_id"], canal))
+                msg = "Número removido."
+            c.commit()
+    except Exception:  # noqa: BLE001 — provável colisão do índice (canal, identificador)
+        msg = "Esse número já está vinculado a outra empresa."
+    request.session["prosp_aviso"] = msg
+    return RedirectResponse(destino, status_code=303)
+
+
+@router.post("/webhooks/twilio")
+async def webhook_twilio(request: Request):
+    """Recebe mensagens do WhatsApp (Twilio). Valida a assinatura, acha/cria a
+    conversa pelo telefone→lead e grava a mensagem (entrada). Abre a janela de 24h."""
+    from finance import whatsapp_twilio as wa
+    form = await request.form()
+    params = {k: str(v) for k, v in form.items()}
+    assinatura = request.headers.get("X-Twilio-Signature", "")
+    url = wa.url_webhook() or str(request.url)
+    if not wa.validar_assinatura(url, params, assinatura):
+        return Response(status_code=403)
+    corpo = params.get("Body", "")
+    remetente = _so_digitos(params.get("From", ""))
+    destino = _so_digitos(params.get("To", ""))       # o número da empresa que recebeu
+    sid = params.get("MessageSid") or params.get("SmsMessageSid")
+    alvo8 = remetente[-8:] if len(remetente) >= 8 else remetente
+    pool = get_pool()
+    with pool.connection() as c:
+        conta_id = _conta_por_ident(c, "whatsapp", destino)
+        if not conta_id:
+            return Response("<Response></Response>", media_type="application/xml")
+        lead = c.execute(
+            r"""select id from prospeccao
+                 where conta_id=%s and right(regexp_replace(coalesce(whatsapp, telefone, ''), '\D', '', 'g'), 8) = %s
+                 order by atualizado_em desc limit 1""", (conta_id, alvo8)).fetchone()
+        lead_id = lead[0] if lead else None
+        if lead_id:
+            conv = c.execute("select id from conversas where conta_id=%s and prospeccao_id=%s and canal='whatsapp'",
+                             (conta_id, lead_id)).fetchone()
+        else:
+            conv = c.execute("select id from conversas where conta_id=%s and contato_ref=%s and canal='whatsapp'",
+                             (conta_id, remetente)).fetchone()
+        if conv:
+            conv_id = conv[0]
+        else:
+            conv_id = c.execute(
+                """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status)
+                   values (%s,%s,'whatsapp',%s,'aberta') returning id""",
+                (conta_id, lead_id, remetente)).fetchone()[0]
+        c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
+                     values (%s,'whatsapp','in','lead',%s,%s)""", (conv_id, corpo[:8000], sid))
+        c.execute("""update conversas set ultima_msg_em=now(), status='aberta',
+                       janela_expira_em=now()+interval '24 hours' where id=%s""", (conv_id,))
+        c.commit()
+    return Response("<Response></Response>", media_type="application/xml")
 
 
 # ================================================================ FICHA DO ALVO
@@ -1810,6 +1961,8 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .cx-m{max-width:82%;align-self:flex-end;background:#123028;border:1px solid #1d5741;border-radius:12px;border-bottom-right-radius:4px;padding:.5rem .7rem;font-size:.86rem;line-height:1.45}
 .cx-m .cab{color:var(--txt-mut);font-size:.72rem;margin-bottom:.25rem}
 .cx-m .meta{display:block;color:var(--txt-mut);font-size:.68rem;margin-top:.3rem;text-align:right}
+.cx-comp{border-top:1px solid var(--borda);padding:.6rem .7rem;display:flex;gap:.5rem;align-items:flex-end;background:#101011}
+.cx-comp textarea{flex:1;resize:none;background:var(--bg);border:1px solid var(--borda);color:var(--txt);border-radius:9px;padding:.5rem .6rem;font:inherit;font-size:.86rem}
 .cx-stub{border-top:1px solid var(--borda);padding:.7rem .85rem;background:#101011;color:var(--txt-mut);font-size:.8rem}
 .cx-stub .lbl2{display:inline-block;font-size:.62rem;padding:.05rem .4rem;border-radius:999px;background:#241634;color:#c9a3e0;border:1px solid #4a3163;margin-left:.3rem}
 .cx-ctx{padding:.85rem}
@@ -1852,6 +2005,8 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     {% for k,rot in [('conversas','💬 Conversas'),('emails','✉️ E-mails'),('agente','🤖 Agente IA'),('canais','⚙️ Canais')] %}
     <a class="cx-tab {% if aba==k %}on{% endif %}" href="/painel/prospeccao/comunicacao?aba={{ k }}">{{ rot }}</a>{% endfor %}
   </div>
+
+  {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
 
   {% if aba=='conversas' %}
   <form class="cx-filtros" method="get" action="/painel/prospeccao/comunicacao">
@@ -1926,10 +2081,20 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="mut" style="margin-top:.4rem;font-size:.8rem">SMTP (Google Workspace). Prospecção fria ✓</div>
     </div>
     <div class="cx-card">
-      <h3>💬 WhatsApp <span class="cx-stat {{ 'st-on' if canais.whatsapp else 'st-off' }}">● {{ 'Conectado' if canais.whatsapp else 'Aguardando número' }}</span></h3>
-      <div class="mut" style="font-size:.8rem">Via Twilio. Adquira o número, ponha no Render e conecta:</div>
-      <div class="cx-env"><b>TWILIO_ACCOUNT_SID</b>=•••••<br><b>TWILIO_AUTH_TOKEN</b>=•••••<br><b>TWILIO_WHATSAPP_FROM</b>=whatsapp:+55••••</div>
-      <div class="mut" style="margin-top:.4rem;font-size:.8rem">Webhook: <code>/webhooks/twilio</code> · fria ✓ (com template)</div>
+      <h3>💬 WhatsApp <span class="cx-stat {{ 'st-on' if canais.whatsapp else 'st-off' }}">● {{ 'Conectado' if canais.whatsapp else ('Falta o número' if canais.twilio else 'Falta credencial') }}</span></h3>
+      <div class="mut" style="font-size:.8rem">Via Twilio. As credenciais da conta ficam no Render (globais, uma vez):</div>
+      <div class="cx-env"><b>TWILIO_ACCOUNT_SID</b>=•••••<br><b>TWILIO_AUTH_TOKEN</b>=•••••</div>
+      {% if gerencia %}
+      <form method="post" action="/painel/prospeccao/comunicacao/canal-numero" style="margin-top:.6rem">
+        <input type="hidden" name="canal" value="whatsapp">
+        <label class="lbl">Número desta empresa (fica vinculado só a ela)</label>
+        <div style="display:flex;gap:.4rem">
+          <input class="fld" name="numero" inputmode="tel" placeholder="+17602847678" value="{{ canais.numeros.get('whatsapp','') }}">
+          <button class="pbtn" style="white-space:nowrap">Salvar</button>
+        </div>
+      </form>
+      {% else %}<div class="mut" style="margin-top:.4rem">Número: <b>{{ canais.numeros.get('whatsapp','—') }}</b></div>{% endif %}
+      <div class="mut" style="margin-top:.4rem;font-size:.8rem">No painel Twilio, aponte o webhook do número pra <code>/webhooks/twilio</code>.</div>
     </div>
     <div class="cx-card">
       <h3>🔵 Messenger <span class="cx-stat {{ 'st-on' if canais.messenger else 'st-off' }}">● {{ 'Conectado' if canais.messenger else 'A conectar' }}</span></h3>
@@ -1963,17 +2128,35 @@ function cxOpen(el,id){
       msgs+='<div class="'+cls+'">'+cab+corpo+'<span class="meta">'+cxEsc(m.quem)+' · '+cxEsc(m.quando)+'</span></div>';
     });
     if(!d.msgs.length)msgs='<div class="cx-empty">Sem mensagens.</div>';
+    var rodape;
+    if(d.pode_responder){
+      rodape='<div class="cx-comp"><textarea id="cx-reply" rows="2" placeholder="Escreva uma resposta…"></textarea>'
+        +'<button class="pbtn" onclick="cxResponder('+d.conversa_id+')">Enviar</button></div>';
+    }else{
+      rodape='<div class="cx-stub">Responder por aqui<span class="lbl2">em breve</span> — disponível quando o canal estiver conectado (aba <b>Canais</b>). O <b>1º contato</b> sai pela ficha.</div>';
+    }
     th.innerHTML=''
       +'<div class="cx-th"><div><b>'+cxEsc(L.empresa)+'</b><small>'+cxEsc(L.canal_rot||'')+(L.cidade?(' · '+cxEsc(L.cidade)+(L.uf?'/'+cxEsc(L.uf):'')):'')+(L.status_rot?(' · '+cxEsc(L.status_rot)):'')+'</small></div>'
       +'<span style="flex:1"></span>'+(L.id?('<a class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem" href="/painel/prospeccao/'+L.id+'">Abrir ficha</a>'):'')+'</div>'
-      +'<div class="cx-msgs">'+msgs+'</div>'
-      +'<div class="cx-stub">Responder por aqui<span class="lbl2">em breve</span> — quando o canal estiver conectado (Twilio/Meta). Por enquanto, o <b>1º contato</b> sai pela ficha.</div>';
+      +'<div class="cx-msgs">'+msgs+'</div>'+rodape;
     var kv=function(k,v){return v?('<div class="cx-kv"><span>'+k+'</span><b>'+cxEsc(v)+'</b></div>'):'';};
     cx.innerHTML=''
       +'<div class="cx-sec"><h4>Lead</h4>'+kv('Empresa',L.empresa)+kv('Segmento',L.segmento)+kv('Cidade',(L.cidade||'')+(L.uf?'/'+L.uf:''))+kv('WhatsApp',L.whatsapp)+kv('E-mail',L.email)+kv('Responsável',L.vendedor)+kv('Status',L.status_rot)+'</div>'
       +'<div class="cx-sec"><h4>🤖 Agente IA <span class="cx-stub" style="border:0;background:none;padding:0"><span class="lbl2">Fase 4</span></span></h4><div class="mut" style="font-size:.8rem;line-height:1.5">Atendimento automático com handoff pro vendedor chega numa próxima fase.</div></div>'
       +'<div class="cx-sec"><a class="pbtn" style="width:100%;text-align:center" href="/painel/prospeccao/'+L.id+'">Abrir ficha do lead</a></div>';
   }).catch(function(){th.innerHTML='<div class="cx-empty">Falha de rede.</div>';});
+}
+function cxResponder(convId){
+  var ta=document.getElementById('cx-reply');if(!ta)return;var t=ta.value.trim();if(!t){return;}
+  var btn=event&&event.target;if(btn){btn.disabled=true;btn.textContent='Enviando…';}
+  var fd=new FormData();fd.append('conversa_id',convId);fd.append('texto',t);
+  fetch('/painel/prospeccao/comunicacao/responder',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
+    .then(function(r){return r.json();}).then(function(d){
+      if(btn){btn.disabled=false;btn.textContent='Enviar';}
+      if(!d.ok){alert(d.erro||'Não consegui enviar.');return;}
+      var el=document.getElementById('cxc-'+convId);
+      cxOpen(el,convId);
+    }).catch(function(){if(btn){btn.disabled=false;btn.textContent='Enviar';}alert('Falha de rede.');});
 }
 </script>
 {% endblock %}"""

@@ -1022,6 +1022,7 @@ def prospeccao_ficha(request: Request, alvo_id: int):
                    tipos=TIPOS, resultados=RESULTADOS, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
                    gerencia=ctx["gerencia"], pode_atribuir=ctx["pode_atribuir"], vendedores=vends,
                    tem_cnpja=fontes.tem_chave_cnpja(), tem_ia=_tem_ia(),
+                   embed=request.query_params.get("embed") == "1",
                    aviso=request.session.pop("prosp_aviso", None))
 
 
@@ -1711,7 +1712,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="kbdrop">
         {% for c in colunas[s] %}
         <div class="kbcard" draggable="true" data-id="{{ c.id }}" ondragstart="kbDrag(event,{{ c.id }})" ondragend="kbEnd(event)"
-             onclick="if(!window._kbMoved)location.href='/painel/prospeccao/{{ c.id }}'">
+             onclick="if(!window._kbMoved)kbAbrir({{ c.id }})">
           <div style="display:flex;align-items:center;gap:.4rem"><span class="tdot" title="{{ c.temperatura }}" style="background:{{ temp_cor[c.temperatura] }}"></span><span class="emp">{{ c.empresa }}</span></div>
           {% if c.segmento or c.cidade %}<div class="sub">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}
           <div class="ft">{% if c.valor %}<span style="font-size:.76rem;color:var(--verde-claro)">{{ brl(c.valor) }}</span>{% else %}<span></span>{% endif %}{% if c.proximo %}<span class="mut" style="font-size:.72rem">📅 {{ c.proximo.strftime('%d/%m') }}</span>{% endif %}</div>
@@ -1724,7 +1725,37 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   </div>
 </div>
 
+<style>
+#kb-drawer{position:fixed;inset:0;z-index:80;display:none}
+#kb-drawer.on{display:block}
+#kb-drawer .bd{position:absolute;inset:0;background:rgba(0,0,0,.55)}
+#kb-drawer .pnl{position:absolute;top:0;right:0;bottom:0;width:min(760px,96vw);background:var(--bg);border-left:1px solid var(--borda);box-shadow:-12px 0 40px rgba(0,0,0,.45);transform:translateX(100%);transition:transform .22s ease;display:flex;flex-direction:column}
+#kb-drawer.on .pnl{transform:translateX(0)}
+#kb-drawer .dh{display:flex;align-items:center;gap:.6rem;padding:.55rem .8rem;border-bottom:1px solid var(--borda);background:#0b0b0c}
+#kb-drawer .dh b{font-size:.9rem}
+#kb-drawer .dh .x{margin-left:auto;background:none;border:1px solid var(--borda);color:var(--txt);border-radius:8px;padding:.3rem .6rem;cursor:pointer}
+#kb-drawer iframe{flex:1;border:0;width:100%;background:var(--bg)}
+</style>
+<div id="kb-drawer">
+  <div class="bd" onclick="kbFechar()"></div>
+  <div class="pnl">
+    <div class="dh"><b id="kb-dtit">Lead</b>
+      <a class="x" id="kb-dfull" href="#" title="Abrir em página cheia">⤢</a>
+      <button class="x" onclick="kbFechar()">✕ Fechar</button></div>
+    <iframe id="kb-dframe" title="Ficha do lead"></iframe>
+  </div>
+</div>
+
 <script>
+function kbAbrir(id){var dr=document.getElementById('kb-drawer');
+  document.getElementById('kb-dframe').src='/painel/prospeccao/'+id+'?embed=1';
+  document.getElementById('kb-dfull').href='/painel/prospeccao/'+id;
+  var card=document.querySelector('.kbcard[data-id="'+id+'"]');
+  var nm=card?(card.querySelector('.emp')||{}).textContent:'';document.getElementById('kb-dtit').textContent=nm||'Lead';
+  dr.classList.add('on');document.body.style.overflow='hidden';}
+function kbFechar(){var dr=document.getElementById('kb-drawer');dr.classList.remove('on');document.body.style.overflow='';
+  setTimeout(function(){document.getElementById('kb-dframe').src='about:blank';},250);}
+document.addEventListener('keydown',function(e){if(e.key==='Escape')kbFechar();});
 function kbTab(s){document.querySelectorAll('.kbcol').forEach(function(c){c.classList.toggle('show',c.getAttribute('data-status')===s);});
   document.querySelectorAll('.kbtab').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===s);});}
 (function(){var cols=document.querySelectorAll('#kbrow .kbcol');var alvo='novo';
@@ -1751,7 +1782,7 @@ function kbDrop(ev,status){ev.preventDefault();ev.currentTarget.classList.remove
 var TEMPCOR={frio:'#5b9bd5',morno:'#e0a33e',quente:'#e0574f'};
 function jsEsc(s){return (s||'').replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];});}
 function jsBrl(c){c=c||0;var s=(c/100).toFixed(2).split('.');var i=s[0].replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.');return 'R$ '+i+','+s[1];}
-function cardGo(id){if(!window._kbMoved)location.href='/painel/prospeccao/'+id;}
+function cardGo(id){if(!window._kbMoved)kbAbrir(id);}
 function updCounts(){var tot=0;document.querySelectorAll('.kbcol').forEach(function(col){var n=col.querySelectorAll('.kbcard').length;tot+=n;var chip=col.querySelector('.kbcnt');if(chip)chip.textContent=n;var tc=document.querySelector('.kbtab[data-tab="'+col.getAttribute('data-status')+'"] .c');if(tc)tc.textContent=n;});var tn=document.getElementById('kb-total-n');if(tn)tn.textContent=tot;}
 function addCard(l){var col=document.querySelector('.kbcol[data-status="novo"]');if(!col)return;var drop=col.querySelector('.kbdrop');var e=drop.querySelector('.kbempty');if(e)e.remove();
   var cor=TEMPCOR[l.temperatura]||'#5b9bd5';

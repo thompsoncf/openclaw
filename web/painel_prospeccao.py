@@ -731,6 +731,8 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
     if cv[0] == "whatsapp" and _wa.configurado() and bool(destino):
         with pool.connection() as _c:
             pode_wa = bool(_canal_ident(_c, ctx["conta_id"], "whatsapp"))
+    elif cv[0] == "email":
+        pode_wa = bool(remetente_configurado()) and bool(cv[9])   # SMTP ok + lead tem e-mail
     lead = {"id": cv[2], "empresa": cv[3] or cv[13] or "—", "canal": cv[0], "canal_rot": CANAL_ROT.get(cv[0], cv[0]),
             "segmento": cv[4], "cidade": cv[5], "uf": cv[6],
             "whatsapp": destino, "email": cv[9], "vendedor": cv[11],
@@ -752,7 +754,8 @@ def comunicacao_responder(request: Request, conversa_id: int = Form(...), texto:
     pool = get_pool()
     with pool.connection() as c:
         cv = c.execute(
-            """select cv.canal, cv.prospeccao_id, cv.contato_ref, p.whatsapp, p.telefone, p.vendedor_id
+            """select cv.canal, cv.prospeccao_id, cv.contato_ref, p.whatsapp, p.telefone,
+                      p.vendedor_id, p.email
                  from conversas cv left join prospeccao p on p.id = cv.prospeccao_id
                 where cv.id=%s and cv.conta_id=%s""", (conversa_id, ctx["conta_id"])).fetchone()
         if not cv:
@@ -760,6 +763,29 @@ def comunicacao_responder(request: Request, conversa_id: int = Form(...), texto:
         if not ctx["gerencia"] and cv[5] != ctx["membro_id"]:
             return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
         canal = cv[0]
+        if canal == "email":
+            destino = (cv[6] or "").strip()
+            if not destino:
+                return JSONResponse({"ok": False, "erro": "Lead sem e-mail cadastrado."})
+            if not remetente_configurado():
+                return JSONResponse({"ok": False, "erro": "E-mail não configurado no ambiente."})
+            ult = c.execute("""select texto from mensagens where conversa_id=%s and canal='email'
+                                order by criado_em desc limit 1""", (conversa_id,)).fetchone()
+            base = (ult[0] or "").split("\n\n", 1)[0].strip() if ult else ""
+            base = re.sub(r"(?i)^\s*(re|fwd?):\s*", "", base).strip()
+            assunto = ("Re: " + base) if base else (f"Contato · {ctx['conta'][2] or ''}").strip()
+            _nome_rem, email_rem = _membro_contato(pool, ctx["conta_id"], ctx["membro_id"])
+            html = ("<div style=\"font-family:system-ui,Arial,sans-serif;font-size:15px;"
+                    "line-height:1.6;color:#222\">"
+                    + "".join(f"<p style=\"margin:0 0 12px\">{_html_escape(par)}</p>"
+                              for par in texto.split("\n\n")) + "</div>")
+            ok = enviar_email(destino, assunto, html, texto_alt=texto,
+                              reply_to=email_rem or None, from_nome=(ctx["conta"][2] or None))
+            if not ok:
+                return JSONResponse({"ok": False, "erro": "Não consegui enviar o e-mail (confira o SMTP no Render)."})
+            _add_msg(c, conversa_id, "email", "out", "humano", f"{assunto}\n\n{texto}", ctx["membro_id"])
+            c.commit()
+            return JSONResponse({"ok": True})
         if canal != "whatsapp":
             return JSONResponse({"ok": False, "erro": "canal_sem_resposta"})
         from finance import whatsapp_twilio as wa
@@ -810,11 +836,19 @@ def comunicacao_email_sync(request: Request):
     from finance import email_inbound as ein
     if not ein.configurado():
         return JSONResponse({"ok": False, "erro": "E-mail não configurado no ambiente (SMTP/IMAP)."})
+    pool = get_pool()
     try:
-        n = ein.sincronizar(get_pool(), ctx["conta_id"])
+        n = ein.sincronizar(pool, ctx["conta_id"])
     except Exception:  # noqa: BLE001
-        return JSONResponse({"ok": False, "erro": "Não consegui sincronizar (a caixa está com IMAP ligado?)."})
-    return JSONResponse({"ok": True, "novos": n})
+        n = 0
+    if n:
+        return JSONResponse({"ok": True, "novos": n})
+    # nada novo: roda o diagnóstico pra explicar o porquê (IMAP off? login? spam?)
+    try:
+        diag = ein.diagnostico(pool)
+    except Exception:  # noqa: BLE001
+        diag = {"msg": "Nenhum e-mail novo."}
+    return JSONResponse({"ok": True, "novos": 0, "detalhe": diag.get("msg") or "Nenhum e-mail novo."})
 
 
 @router.post("/painel/prospeccao/comunicacao/canal-numero")
@@ -2366,7 +2400,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   function emailSync(){var b=document.getElementById('esync-btn'),m=document.getElementById('esync-msg');if(!b)return;b.disabled=true;var t=b.textContent;b.textContent='Sincronizando…';m.textContent='';
     fetch('/painel/prospeccao/comunicacao/email-sync',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){b.disabled=false;b.textContent=t;
       if(!d.ok){m.textContent=d.erro||'Não consegui.';return;}
-      if(d.novos){m.textContent='+'+d.novos+' novo(s) — recarregando…';setTimeout(function(){location.reload();},900);}else{m.textContent='Nenhum e-mail novo (a caixa já está em dia).';}}).catch(function(){b.disabled=false;b.textContent=t;m.textContent='Falha de rede.';});}
+      if(d.novos){m.textContent='+'+d.novos+' novo(s) — recarregando…';setTimeout(function(){location.reload();},900);}else{m.textContent=d.detalhe||'Nenhum e-mail novo.';}}).catch(function(){b.disabled=false;b.textContent=t;m.textContent='Falha de rede.';});}
   </script>
 
   {% elif aba=='agente' %}

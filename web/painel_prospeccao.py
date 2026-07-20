@@ -240,7 +240,8 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
         rows = c.execute(
             f"""select p.id, p.empresa, p.segmento, p.cidade, p.uf, p.status,
                        p.temperatura, p.valor_estimado_centavos, p.proximo_contato_em,
-                       p.telefone, p.whatsapp, p.vendedor_id, m.nome
+                       p.telefone, p.whatsapp, p.vendedor_id, m.nome,
+                       p.email, p.instagram, p.enriquecido_em
                   from prospeccao p
                   left join membros m on m.id = p.vendedor_id
                  where {' and '.join(where)}
@@ -252,7 +253,9 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
         card = {"id": r[0], "empresa": r[1], "segmento": r[2], "cidade": r[3],
                 "uf": r[4], "status": r[5], "temperatura": r[6], "valor": r[7],
                 "proximo": r[8], "telefone": r[9], "whatsapp": r[10],
-                "vendedor_id": r[11], "vendedor": r[12]}
+                "vendedor_id": r[11], "vendedor": r[12],
+                "tem_email": bool(r[13]), "tem_whatsapp": bool(r[10]),
+                "tem_instagram": bool(r[14]), "enriquecido": bool(r[15])}
         colunas.get(r[5], colunas["novo"]).append(card)
         if r[5] != "perdido":
             total_valor += int(r[7] or 0)
@@ -1713,6 +1716,79 @@ def prospeccao_excluir(request: Request, alvo_id: int):
     return JSONResponse({"ok": True})
 
 
+# ---------------------------------------------------------------- enriquecimento de canais
+
+def _enriquecer_lead(pool, conta_id, alvo_id) -> dict:
+    """Raspa o site do lead → e-mail/Instagram/WhatsApp; preenche só o que está vazio
+    (não sobrescreve o que o usuário já tem) e marca email_ok/enriquecido_em."""
+    from finance import enriquecimento as enr
+    with pool.connection() as c:
+        r = c.execute(
+            "select site_url, telefone, email, whatsapp, instagram from prospeccao where id=%s and conta_id=%s",
+            (alvo_id, conta_id)).fetchone()
+        if not r:
+            return {"ok": False}
+        site, tel, email_at, wa_at, ig_at = r
+        f = enr.enriquecer(site or "", tel or "", email_at or "")
+        novo_email = email_at or f["email"]
+        novo_ig = ig_at or f["instagram"]
+        novo_wa = wa_at or f["whatsapp"]
+        c.execute(
+            """update prospeccao set email=%s, instagram=%s, whatsapp=%s, email_ok=%s,
+                 enriquecido_em=now(), atualizado_em=now() where id=%s and conta_id=%s""",
+            (novo_email, novo_ig, novo_wa, f["email_ok"], alvo_id, conta_id))
+        c.commit()
+    return {"ok": True, "email": novo_email, "email_ok": bool(f["email_ok"]),
+            "instagram": novo_ig, "whatsapp": novo_wa}
+
+
+def _enriquecer_lote_bg(pool, conta_id, ids):
+    for aid in ids:
+        try:
+            _enriquecer_lead(pool, conta_id, aid)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+@router.post("/painel/prospeccao/{alvo_id}/enriquecer-canais")
+def prospeccao_enriquecer_canais(request: Request, alvo_id: int):
+    """Verifica os canais de UM lead (raspa o site, valida e-mail)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    pool = get_pool()
+    alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
+    if not alvo or not _pode_ver(alvo, ctx):
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    try:
+        return JSONResponse(_enriquecer_lead(pool, ctx["conta_id"], alvo_id))
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "erro": "Falha ao verificar canais."})
+
+
+@router.post("/painel/prospeccao/enriquecer-lote")
+def prospeccao_enriquecer_lote(request: Request, background_tasks: BackgroundTasks):
+    """Verifica canais de vários leads (que têm site e ainda não foram verificados),
+    em background. Devolve quantos entraram na fila."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    where = ["conta_id=%s", "coalesce(site_url,'')<>''", "enriquecido_em is null"]
+    params = [ctx["conta_id"]]
+    if not ctx["gerencia"]:
+        where.append("vendedor_id=%s")
+        params.append(ctx["membro_id"])
+    with get_pool().connection() as c:
+        ids = [r[0] for r in c.execute(
+            f"select id from prospeccao where {' and '.join(where)} order by criado_em desc limit 80",
+            tuple(params)).fetchall()]
+    if ids:
+        import threading
+        threading.Thread(target=_enriquecer_lote_bg, args=(get_pool(), ctx["conta_id"], ids),
+                         daemon=True).start()
+    return JSONResponse({"ok": True, "n": len(ids)})
+
+
 @router.post("/painel/prospeccao/{alvo_id}/convidar-zaq")
 def prospeccao_convidar_zaq(request: Request, alvo_id: int):
     """Manda pro lead um e-mail convidando a CRIAR conta no Zaq (link pro /cadastro
@@ -1898,8 +1974,10 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <h2 class="tt">Prospecção</h2>
       <div class="mut" style="font-size:.82rem;margin-top:.15rem">{% if conta %}<b style="color:var(--verde-claro)">🏢 {{ conta[2] }}</b> · {% endif %}<span id="kb-total-n">{{ total_alvos }}</span> alvo(s){% if total_valor %} · pipeline {{ brl(total_valor) }}{% endif %}{% if n_contextos and n_contextos > 1 %} · <a href="/trocar" style="color:var(--verde-claro)">trocar empresa ⇄</a>{% endif %}</div>
     </div>
-    <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
       <a class="pbtn ghost" href="/painel/prospeccao/comunicacao" style="display:inline-flex;align-items:center">📨 Comunicação</a>
+      <button type="button" class="pbtn ghost" id="enrq-btn" onclick="enrqLote()" title="Raspa o site dos leads e descobre e-mail, Instagram e WhatsApp">🔎 Verificar canais</button>
+      <span class="mut" id="enrq-msg" style="font-size:.8rem"></span>
       <button type="button" class="pbtn" onclick="capToggle()">🎯 Captar leads</button>
     </div>
   </div>
@@ -2003,6 +2081,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
              onclick="if(!window._kbMoved)kbAbrir({{ c.id }})">
           <div style="display:flex;align-items:center;gap:.4rem"><span class="tdot" title="{{ c.temperatura }}" style="background:{{ temp_cor[c.temperatura] }}"></span><span class="emp">{{ c.empresa }}</span><span style="flex:1"></span><button type="button" class="kbx" title="Excluir lead" onclick="kbExcluir(event,{{ c.id }})">✕</button></div>
           {% if c.segmento or c.cidade %}<div class="sub">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}
+          {% if c.tem_whatsapp or c.tem_email or c.tem_instagram or c.enriquecido %}<div class="kbch">{% if c.tem_whatsapp %}<span title="WhatsApp">💬</span>{% endif %}{% if c.tem_email %}<span title="E-mail">✉️</span>{% endif %}{% if c.tem_instagram %}<span title="Instagram">📸</span>{% endif %}{% if c.enriquecido and not (c.tem_whatsapp or c.tem_email or c.tem_instagram) %}<span class="mut" title="Verificado, sem canal encontrado">— sem canal</span>{% endif %}</div>{% endif %}
           <div class="ft">{% if c.valor %}<span style="font-size:.76rem;color:var(--verde-claro)">{{ brl(c.valor) }}</span>{% else %}<span></span>{% endif %}{% if c.proximo %}<span class="mut" style="font-size:.72rem">📅 {{ c.proximo.strftime('%d/%m') }}</span>{% endif %}</div>
           {% if gerencia and c.vendedor %}<div class="mut" style="font-size:.72rem;margin-top:.28rem">👤 {{ c.vendedor }}</div>{% endif %}
         </div>
@@ -2014,6 +2093,8 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 </div>
 
 <style>
+.kbch{display:flex;gap:.35rem;margin-top:.3rem;font-size:.82rem;align-items:center}
+.kbch .mut{font-size:.7rem}
 .kbx{background:none;border:0;color:#6b6b6b;cursor:pointer;font-size:.82rem;line-height:1;padding:.1rem .25rem;border-radius:6px;opacity:.55}
 .kbx:hover{opacity:1;color:#e0574f;background:rgba(224,87,79,.12)}
 #kb-drawer{position:fixed;inset:0;z-index:80;display:none}
@@ -2073,6 +2154,10 @@ var TEMPCOR={frio:'#5b9bd5',morno:'#e0a33e',quente:'#e0574f'};
 function jsEsc(s){return (s||'').replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];});}
 function jsBrl(c){c=c||0;var s=(c/100).toFixed(2).split('.');var i=s[0].replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.');return 'R$ '+i+','+s[1];}
 function cardGo(id){if(!window._kbMoved)kbAbrir(id);}
+function enrqLote(){var b=document.getElementById('enrq-btn'),m=document.getElementById('enrq-msg');if(!b)return;b.disabled=true;var t=b.textContent;b.textContent='Verificando…';m.textContent='';
+  fetch('/painel/prospeccao/enriquecer-lote',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()}).then(function(r){return r.json();}).then(function(d){b.disabled=false;b.textContent=t;
+    if(!d.ok){m.textContent=d.erro||'Não consegui.';return;}
+    m.textContent=d.n?('Verificando '+d.n+' lead(s) em 2º plano — recarregue em ~1 min pra ver os canais.'):'Nada pra verificar (leads sem site ou já verificados).';}).catch(function(){b.disabled=false;b.textContent=t;m.textContent='Falha de rede.';});}
 function kbExcluir(ev,id){ev.stopPropagation();ev.preventDefault();
   if(!confirm('Excluir este lead? A conversa/e-mail dele continua no inbox — só sai do funil.'))return;
   fetch('/painel/prospeccao/'+id+'/excluir',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()})
@@ -2260,14 +2345,22 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% if not vende_servico %}<button type="button" class="pbtn" disabled title="Disponível pra empresas que vendem serviço">📄 Gerar orçamento</button>
       {% elif a.orcamento_id %}<a class="pbtn" href="/painel/servicos?abrir={{ a.orcamento_id }}">📄 Ver orçamento</a>
       {% else %}<form method="post" action="/painel/prospeccao/{{ a.id }}/orcamento" style="margin:0"><button class="pbtn">📄 Gerar orçamento</button></form>{% endif %}
+      {% if a.site_url %}<button type="button" class="pbtn ghost" id="enrqf-btn" onclick="enrqLead({{ a.id }})" title="Raspa o site e descobre e-mail, Instagram e WhatsApp">🔎 Verificar canais</button>{% endif %}
       {% if a.email %}<button type="button" class="pbtn ghost" id="cvz-btn" onclick="convidarZaq({{ a.id }})" title="Manda um e-mail com link pro cliente criar a conta no Zaq">🎟️ Convidar pro Zaq</button>{% endif %}
     </div>
+    <div class="mut" id="enrqf-msg" style="font-size:.82rem;margin-top:.5rem"></div>
     {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
     <script>
     function convidarZaq(id){var b=document.getElementById('cvz-btn');if(b){b.disabled=true;b.textContent='Enviando…';}
       fetch('/painel/prospeccao/'+id+'/convidar-zaq',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
         if(!d.ok){if(b){b.disabled=false;b.textContent='🎟️ Convidar pro Zaq';}alert(d.erro||'Não consegui enviar.');return;}
         if(b){b.textContent='✓ Convite enviado';}}).catch(function(){if(b){b.disabled=false;b.textContent='🎟️ Convidar pro Zaq';}alert('Falha de rede.');});}
+    function enrqLead(id){var b=document.getElementById('enrqf-btn'),m=document.getElementById('enrqf-msg');if(b){b.disabled=true;b.textContent='Verificando…';}if(m)m.textContent='Raspando o site…';
+      fetch('/painel/prospeccao/'+id+'/enriquecer-canais',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){if(b){b.disabled=false;b.textContent='🔎 Verificar canais';}
+        if(!d.ok){if(m)m.textContent=d.erro||'Não consegui.';return;}
+        var p=[];if(d.whatsapp)p.push('💬 '+d.whatsapp);if(d.email)p.push('✉️ '+d.email+(d.email_ok?' ✓':' (não validou)'));if(d.instagram)p.push('📸 '+d.instagram);
+        if(m)m.textContent=p.length?('Achei: '+p.join('  ·  ')+' — recarregando…'):'Não achei canais no site.';
+        if(p.length)setTimeout(function(){location.reload();},1400);}).catch(function(){if(b){b.disabled=false;b.textContent='🔎 Verificar canais';}if(m)m.textContent='Falha de rede.';});}
     </script>
   </div>
 

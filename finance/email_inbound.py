@@ -44,7 +44,7 @@ def _conta_cfg(pool, conta_id: int) -> dict | None:
     if not r or not r[0]:
         return None
     user = r[0].strip()
-    senha = (r[1] or "").strip() or _env_senha_para(user)
+    senha = "".join((r[1] or "").split()) or _env_senha_para(user)   # senha de app não tem espaços
     if not senha:
         return None
     return {"host": (r[2] or "imap.gmail.com").strip(), "port": 993,
@@ -59,6 +59,7 @@ def salvar_config(pool, conta_id: int, endereco: str, senha: str, host: str = ""
     """Salva/atualiza o canal de e-mail da conta. Senha vazia = mantém a atual."""
     endereco = (endereco or "").strip()
     host = (host or "").strip() or "imap.gmail.com"
+    senha_limpa = "".join((senha or "").split())     # senha de app do Google não tem espaços
     with pool.connection() as c:
         c.execute(
             """insert into canais_config (conta_id, canal, identificador, imap_host, ativo)
@@ -67,9 +68,9 @@ def salvar_config(pool, conta_id: int, endereco: str, senha: str, host: str = ""
                  identificador=excluded.identificador, imap_host=excluded.imap_host,
                  ativo=true, ultimo_uid=null, atualizado_em=now()""",
             (conta_id, endereco, host))
-        if (senha or "").strip():
+        if senha_limpa:
             c.execute("update canais_config set imap_senha=%s where conta_id=%s and canal='email'",
-                      ((senha or "").strip(), conta_id))
+                      (senha_limpa, conta_id))
         c.commit()
 
 
@@ -260,7 +261,8 @@ def diagnostico(pool, conta_id: int) -> dict:
         return {"ok": False, "etapa": "config",
                 "msg": "Nenhum e-mail configurado nesta conta. Preencha o endereço e a senha de app aqui na aba Canais."}
     endereco = r[0].strip()
-    senha = (r[1] or "").strip() or _env_senha_para(endereco)
+    senha_propria = "".join((r[1] or "").split())
+    senha = senha_propria or _env_senha_para(endereco)
     host = (r[2] or "imap.gmail.com").strip()
     if not senha:
         return {"ok": False, "etapa": "senha", "usuario": _mascara(endereco),
@@ -277,10 +279,14 @@ def diagnostico(pool, conta_id: int) -> dict:
             M.logout()
         except Exception:  # noqa: BLE001
             pass
+        dica = ""
+        if "gmail" in host.lower() and senha_propria and len(senha_propria) != 16:
+            dica = (f" ⚠️ A senha salva tem {len(senha_propria)} caractere(s) — a senha de app "
+                    "do Google tem 16 (4 blocos de 4). Parece que não é uma senha de app.")
         return {"ok": False, "etapa": "login", "usuario": _mascara(endereco),
-                "msg": ("Falha no login IMAP. Confira: (1) IMAP ligado na caixa/domínio; "
-                        "(2) a senha é uma SENHA DE APP do Google (não a senha normal). "
-                        f"Detalhe: {e}")}
+                "msg": ("Falha no login IMAP. Confira: (1) verificação em 2 etapas ligada + IMAP "
+                        "ligado na caixa; (2) use uma SENHA DE APP do Google (não a senha normal)."
+                        + dica + f" Detalhe: {e}")}
     try:
         typ, data = M.select("INBOX")
         total = int(data[0]) if typ == "OK" and data and data[0] else 0

@@ -652,23 +652,25 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
         convs = _conversas_list(c, ctx["conta_id"], ctx["gerencia"], ctx["membro_id"],
                                 canal=canal, vend=filtro_vend)
         if aba == "emails":
-            wsql = "cv.conta_id=%s" + ("" if ctx["gerencia"] else " and p.vendedor_id=%s")
             erows = c.execute(f"""
                 select msg.criado_em, coalesce(p.empresa, cv.contato_ref, '—'),
-                       msg.membro_id, mm.nome, msg.texto
+                       msg.membro_id, mm.nome, msg.texto, msg.direcao
                   from mensagens msg
                   join conversas cv on cv.id = msg.conversa_id
                   left join prospeccao p on p.id = cv.prospeccao_id
                   left join membros mm on mm.id = msg.membro_id
-                 where cv.conta_id=%s and msg.canal='email' and msg.direcao='out'
+                 where cv.conta_id=%s and msg.canal='email'
                    {'and p.vendedor_id=%s' if not ctx['gerencia'] else ''}
                  order by msg.criado_em desc limit 100""",
                 (ctx["conta_id"], ctx["membro_id"]) if not ctx["gerencia"] else (ctx["conta_id"],)).fetchall()
             for e in erows:
                 cab, _, corpo = (e[4] or "").partition("\n\n")
-                emails.append({"quando": e[0], "empresa": e[1],
-                               "quem": "Você" if e[2] and e[2] == ctx["membro_id"] else (e[3] or "—"),
-                               "cabecalho": cab.strip(), "preview": " ".join(corpo.split())[:80]})
+                recebido = e[5] == "in"
+                quem = ("📥 Recebido" if recebido
+                        else ("Você" if e[2] and e[2] == ctx["membro_id"] else (e[3] or "—")))
+                emails.append({"quando": e[0], "empresa": e[1], "recebido": recebido,
+                               "quem": quem, "cabecalho": cab.strip(),
+                               "preview": " ".join(corpo.split())[:80]})
         ag_cfg, ag_conhec = None, None
         if aba == "agente":
             ag_cfg = _agente_config(c, ctx["conta_id"])
@@ -797,6 +799,22 @@ def comunicacao_agente_conversa(request: Request, conversa_id: int = Form(...), 
     if not r:
         return JSONResponse({"ok": False, "erro": "escopo"}, status_code=404)
     return JSONResponse({"ok": True, "agente_ativo": on})
+
+
+@router.post("/painel/prospeccao/comunicacao/email-sync")
+def comunicacao_email_sync(request: Request):
+    """Puxa os e-mails recebidos da caixa (IMAP) pra dentro do inbox, sob demanda."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    from finance import email_inbound as ein
+    if not ein.configurado():
+        return JSONResponse({"ok": False, "erro": "E-mail não configurado no ambiente (SMTP/IMAP)."})
+    try:
+        n = ein.sincronizar(get_pool(), ctx["conta_id"])
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "erro": "Não consegui sincronizar (a caixa está com IMAP ligado?)."})
+    return JSONResponse({"ok": True, "novos": n})
 
 
 @router.post("/painel/prospeccao/comunicacao/canal-numero")
@@ -2327,18 +2345,29 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   </div>
 
   {% elif aba=='emails' %}
+  <div style="display:flex;align-items:center;gap:.6rem;margin:.2rem 0 .7rem;flex-wrap:wrap">
+    <button class="pbtn ghost" id="esync-btn" type="button" onclick="emailSync()">🔄 Sincronizar recebidos</button>
+    <span class="mut" id="esync-msg" style="font-size:.82rem"></span>
+  </div>
   <div class="cx-tbl">
     <table>
-      <thead><tr><th style="width:88px">Data</th><th>Lead</th><th style="width:140px">Quem</th><th>Assunto / prévia</th></tr></thead>
+      <thead><tr><th style="width:88px">Data</th><th style="width:104px">Sentido</th><th>Lead</th><th style="width:130px">Quem</th><th>Assunto / prévia</th></tr></thead>
       <tbody>
         {% for e in emails %}
         <tr><td class="mut" style="white-space:nowrap"><b style="color:var(--txt);display:block">{{ e.quando.strftime('%d/%m') if e.quando else '' }}</b>{{ e.quando.strftime('%H:%M') if e.quando else '' }}</td>
+          <td>{% if e.recebido %}<span class="cx-cn cn-mail">📥 Recebido</span>{% else %}<span class="mut">📤 Enviado</span>{% endif %}</td>
           <td><b>{{ e.empresa }}</b></td><td>{{ e.quem }}</td>
           <td><b style="font-size:.85rem">{{ e.cabecalho }}</b><div class="mut" style="font-size:.8rem">{{ e.preview }}</div></td></tr>
-        {% else %}<tr><td colspan="4" class="mut" style="text-align:center;padding:2rem">Nenhum e-mail enviado ainda.</td></tr>{% endfor %}
+        {% else %}<tr><td colspan="5" class="mut" style="text-align:center;padding:2rem">Nenhum e-mail ainda.</td></tr>{% endfor %}
       </tbody>
     </table>
   </div>
+  <script>
+  function emailSync(){var b=document.getElementById('esync-btn'),m=document.getElementById('esync-msg');if(!b)return;b.disabled=true;var t=b.textContent;b.textContent='Sincronizando…';m.textContent='';
+    fetch('/painel/prospeccao/comunicacao/email-sync',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){b.disabled=false;b.textContent=t;
+      if(!d.ok){m.textContent=d.erro||'Não consegui.';return;}
+      if(d.novos){m.textContent='+'+d.novos+' novo(s) — recarregando…';setTimeout(function(){location.reload();},900);}else{m.textContent='Nenhum e-mail novo (a caixa já está em dia).';}}).catch(function(){b.disabled=false;b.textContent=t;m.textContent='Falha de rede.';});}
+  </script>
 
   {% elif aba=='agente' %}
   {% if not gerencia %}

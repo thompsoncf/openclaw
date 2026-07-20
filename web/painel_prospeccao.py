@@ -594,8 +594,9 @@ def _agente_conhecimento(c, conta_id: int) -> dict:
     return {"instrucoes": instr, "faqs": faqs}
 
 
-def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend=""):
-    """Lista de conversas (topo por última msg) — usada na página e no polling."""
+def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=""):
+    """Lista de conversas (topo por última msg) — usada na página e no polling.
+    escopo: 'email' = só e-mail (aba E-mails); 'msg' = só mensageiros (aba Conversas)."""
     where = ["cv.conta_id=%s"]
     params = [conta_id]
     if not gerencia:
@@ -604,9 +605,13 @@ def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend=""):
     elif (vend or "").isdigit():   # filtro por vendedor (só dono/gestor)
         where.append("p.vendedor_id=%s")
         params.append(int(vend))
-    if canal in CANAIS_TODOS:
+    if escopo == "email":
+        where.append("cv.canal='email'")
+    elif canal in CANAIS_TODOS and canal != "email":
         where.append("cv.canal=%s")
         params.append(canal)
+    elif escopo == "msg":
+        where.append("cv.canal <> 'email'")
     rows = c.execute(f"""
         select cv.id, cv.canal, cv.status, cv.ultima_msg_em, cv.prospeccao_id,
                coalesce(p.empresa, cv.contato_ref, '—'), p.cidade, p.uf,
@@ -637,14 +642,15 @@ def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend=""):
 
 
 @router.get("/painel/prospeccao/comunicacao/lista")
-def prospeccao_comunicacao_lista(request: Request, canal: str = "", vendedor: str = ""):
+def prospeccao_comunicacao_lista(request: Request, canal: str = "", vendedor: str = "", escopo: str = ""):
     """Lista de conversas em JSON (pro polling em tempo real)."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False}, status_code=401)
+    escopo = escopo if escopo in ("email", "msg") else "msg"
     with get_pool().connection() as c:
         convs = _conversas_list(c, ctx["conta_id"], ctx["gerencia"], ctx["membro_id"],
-                                canal=canal, vend=vendedor)
+                                canal=canal, vend=vendedor, escopo=escopo)
     for cv in convs:
         cv["quando"] = cv["quando"].strftime("%d/%m %H:%M") if cv["quando"] else ""
     return JSONResponse({"ok": True, "convs": convs})
@@ -659,37 +665,18 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
     aba = aba if aba in ("conversas", "emails", "agente", "canais") else "conversas"
     pool = get_pool()
     filtro_vend = (vendedor or "").strip() if ctx["gerencia"] else ""
-    convs, emails = [], []
+    escopo = "email" if aba == "emails" else "msg"
+    convs = []
     with pool.connection() as c:
         convs = _conversas_list(c, ctx["conta_id"], ctx["gerencia"], ctx["membro_id"],
-                                canal=canal, vend=filtro_vend)
-        if aba == "emails":
-            erows = c.execute(f"""
-                select msg.criado_em, coalesce(p.empresa, cv.contato_ref, '—'),
-                       msg.membro_id, mm.nome, msg.texto, msg.direcao
-                  from mensagens msg
-                  join conversas cv on cv.id = msg.conversa_id
-                  left join prospeccao p on p.id = cv.prospeccao_id
-                  left join membros mm on mm.id = msg.membro_id
-                 where cv.conta_id=%s and msg.canal='email'
-                   {'and p.vendedor_id=%s' if not ctx['gerencia'] else ''}
-                 order by msg.criado_em desc limit 100""",
-                (ctx["conta_id"], ctx["membro_id"]) if not ctx["gerencia"] else (ctx["conta_id"],)).fetchall()
-            for e in erows:
-                cab, _, corpo = (e[4] or "").partition("\n\n")
-                recebido = e[5] == "in"
-                quem = ("📥 Recebido" if recebido
-                        else ("Você" if e[2] and e[2] == ctx["membro_id"] else (e[3] or "—")))
-                emails.append({"quando": e[0], "empresa": e[1], "recebido": recebido,
-                               "quem": quem, "cabecalho": cab.strip(),
-                               "preview": " ".join(corpo.split())[:80]})
+                                canal=canal, vend=filtro_vend, escopo=escopo)
         ag_cfg, ag_conhec = None, None
         if aba == "agente":
             ag_cfg = _agente_config(c, ctx["conta_id"])
             ag_conhec = _agente_conhecimento(c, ctx["conta_id"])
     vends = _vendedores(pool, ctx["conta_id"]) if ctx["gerencia"] else []
     return _render("prospeccao_comunicacao", request, titulo="Comunicação",
-                   secao_ativa="prospeccao", aba=aba, convs=convs, emails=emails, canal=canal,
+                   secao_ativa="prospeccao", aba=aba, convs=convs, escopo=escopo, canal=canal,
                    canais=_canais_status(pool, ctx["conta_id"]), canal_rot=CANAL_ROT,
                    gerencia=ctx["gerencia"], vendedores=vends, filtro_vend=filtro_vend,
                    remetente=remetente_configurado(), tem_ia=_tem_ia(),
@@ -744,7 +731,8 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
         with pool.connection() as _c:
             pode_wa = bool(_canal_ident(_c, ctx["conta_id"], "whatsapp"))
     elif cv[0] == "email":
-        pode_wa = bool(remetente_configurado()) and bool(cv[9])   # SMTP ok + lead tem e-mail
+        _dest_mail = (cv[9] or cv[13] or "")            # e-mail do lead OU do contato órfão
+        pode_wa = bool(remetente_configurado()) and ("@" in _dest_mail)
     lead = {"id": cv[2], "empresa": cv[3] or cv[13] or "—", "canal": cv[0], "canal_rot": CANAL_ROT.get(cv[0], cv[0]),
             "segmento": cv[4], "cidade": cv[5], "uf": cv[6],
             "whatsapp": destino, "email": cv[9], "vendedor": cv[11],
@@ -776,9 +764,9 @@ def comunicacao_responder(request: Request, conversa_id: int = Form(...), texto:
             return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
         canal = cv[0]
         if canal == "email":
-            destino = (cv[6] or "").strip()
-            if not destino:
-                return JSONResponse({"ok": False, "erro": "Lead sem e-mail cadastrado."})
+            destino = (cv[6] or "").strip() or (cv[2] or "").strip()   # e-mail do lead OU contato órfão
+            if "@" not in destino:
+                return JSONResponse({"ok": False, "erro": "Sem e-mail de destino nesta conversa."})
             if not remetente_configurado():
                 return JSONResponse({"ok": False, "erro": "E-mail não configurado no ambiente."})
             ult = c.execute("""select texto from mensagens where conversa_id=%s and canal='email'
@@ -2487,8 +2475,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   <form class="cx-filtros" method="get" action="/painel/prospeccao/comunicacao">
     <input type="hidden" name="aba" value="conversas">
     <select class="fld" name="canal" style="width:auto" onchange="this.form.submit()">
-      <option value="" {% if not canal %}selected{% endif %}>Todos os canais</option>
-      <option value="email" {% if canal=='email' %}selected{% endif %}>✉️ E-mail</option>
+      <option value="" {% if not canal %}selected{% endif %}>Todos os mensageiros</option>
       <option value="whatsapp" {% if canal=='whatsapp' %}selected{% endif %}>💬 WhatsApp</option>
       <option value="messenger" {% if canal=='messenger' %}selected{% endif %}>🔵 Messenger</option>
       <option value="instagram" {% if canal=='instagram' %}selected{% endif %}>📸 Instagram</option>
@@ -2530,19 +2517,26 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   <div style="display:flex;align-items:center;gap:.6rem;margin:.2rem 0 .7rem;flex-wrap:wrap">
     <button class="pbtn ghost" id="esync-btn" type="button" onclick="emailSync()">🔄 Sincronizar recebidos</button>
     <span class="mut" id="esync-msg" style="font-size:.82rem"></span>
+    <span style="flex:1"></span>
+    <span class="mut" style="font-size:.8rem">{{ convs|length }} conversa(s) de e-mail</span>
   </div>
-  <div class="cx-tbl">
-    <table>
-      <thead><tr><th style="width:88px">Data</th><th style="width:104px">Sentido</th><th>Lead</th><th style="width:130px">Quem</th><th>Assunto / prévia</th></tr></thead>
-      <tbody>
-        {% for e in emails %}
-        <tr><td class="mut" style="white-space:nowrap"><b style="color:var(--txt);display:block">{{ e.quando.strftime('%d/%m') if e.quando else '' }}</b>{{ e.quando.strftime('%H:%M') if e.quando else '' }}</td>
-          <td>{% if e.recebido %}<span class="cx-cn cn-mail">📥 Recebido</span>{% else %}<span class="mut">📤 Enviado</span>{% endif %}</td>
-          <td><b>{{ e.empresa }}</b></td><td>{{ e.quem }}</td>
-          <td><b style="font-size:.85rem">{{ e.cabecalho }}</b><div class="mut" style="font-size:.8rem">{{ e.preview }}</div></td></tr>
-        {% else %}<tr><td colspan="5" class="mut" style="text-align:center;padding:2rem">Nenhum e-mail ainda.</td></tr>{% endfor %}
-      </tbody>
-    </table>
+  <div class="cx-grid">
+    <div class="cx-list" id="cx-list">
+      {% for c in convs %}
+      <button type="button" class="cx-conv" id="cxc-{{ c.id }}" onclick="cxOpen(this,{{ c.id }})">
+        <span class="av">{{ (c.empresa[:2]|upper) if c.empresa else '?' }}</span>
+        <span class="mid">
+          <span class="nm"><b>{{ c.empresa }}</b><span class="t">{{ c.quando.strftime('%d/%m') if c.quando else '' }}</span></span>
+          <span class="pre">{{ c.quem }}: {{ c.preview }}</span>
+          <span class="cx-cn cn-mail">✉️ E-mail{% if c.n > 1 %} · {{ c.n }}{% endif %}</span>
+        </span>
+      </button>
+      {% else %}
+      <div class="cx-empty">Nenhum e-mail ainda.<br><span style="font-size:.82rem">Os recebidos aparecem aqui após “Sincronizar recebidos”. Configure a caixa na aba <b>Canais</b>.</span></div>
+      {% endfor %}
+    </div>
+    <div class="cx-thread" id="cx-thread"><div class="cx-empty">← Escolha um e-mail pra ler e responder.</div></div>
+    <div class="cx-ctx" id="cx-ctx"><div class="cx-empty" style="padding:1.4rem 1rem">Selecione um e-mail.</div></div>
   </div>
   <script>
   function emailSync(){var b=document.getElementById('esync-btn'),m=document.getElementById('esync-msg');if(!b)return;b.disabled=true;var t=b.textContent;b.textContent='Sincronizando…';m.textContent='';
@@ -2678,6 +2672,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 </div>
 <script>
 var _cxConv=null,_cxSig='',_cxAg=null,_cxTimer=null,_cxSeen={},_cxList={};
+var _cxEscopo='{{ escopo }}';   // 'email' (aba E-mails) ou 'msg' (aba Conversas)
 function cxEsc(s){var d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
 function cxMsgsHtml(d){
   if(!d.msgs.length)return '<div class="cx-empty">Sem mensagens.</div>';
@@ -2736,7 +2731,7 @@ function cxPollThread(){
     }
   }).catch(function(){});
 }
-function cxParams(){var q=new URLSearchParams(location.search);return 'canal='+(q.get('canal')||'')+'&vendedor='+(q.get('vendedor')||'');}
+function cxParams(){var q=new URLSearchParams(location.search);return 'canal='+(q.get('canal')||'')+'&vendedor='+(q.get('vendedor')||'')+'&escopo='+encodeURIComponent(_cxEscopo||'msg');}
 function cxListItem(c){
   var cnc={whatsapp:'cn-wpp',email:'cn-mail',messenger:'cn-msg',instagram:'cn-ig'}[c.canal]||'cn-mail';
   var unread=(c.id!==_cxConv)&&(c.ult_autor==='lead'||c.ult_autor==='bot')&&((c.ult_msg_id||0)>(_cxSeen[c.id]||0));

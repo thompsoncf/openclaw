@@ -54,10 +54,20 @@ def _conhecimento(c, conta_id):
     return instr, "\n\n".join(faqs)
 
 
-def _add_bot_msg(c, conversa_id, texto, sid=None):
+def _add_bot_msg(c, conversa_id, canal, texto, sid=None):
     c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
-                 values (%s,'whatsapp','out','bot',%s,%s)""", (conversa_id, (texto or "")[:8000], sid))
+                 values (%s,%s,'out','bot',%s,%s)""", (conversa_id, canal, (texto or "")[:8000], sid))
     c.execute("update conversas set ultima_msg_em=now() where id=%s", (conversa_id,))
+
+
+def _mandar(c, conta_id, canal, destino, texto) -> dict:
+    """Envia pelo canal certo: WhatsApp (Twilio) ou Messenger/Instagram (Meta)."""
+    if canal in ("messenger", "instagram"):
+        from finance import meta_msg
+        r = c.execute("select token from canais_config where conta_id=%s and canal=%s and ativo",
+                      (conta_id, canal)).fetchone()
+        return meta_msg.enviar(r[0] if r else None, destino, texto, canal)
+    return wa.enviar_texto(_numero_empresa(c, conta_id), destino, texto)
 
 
 def _numero_empresa(c, conta_id):
@@ -87,7 +97,7 @@ def _atender(pool, conta_id, conversa_id):
             return
         conv = c.execute(
             """select cv.agente_ativo, cv.prospeccao_id, cv.contato_ref, p.empresa,
-                      p.whatsapp, p.telefone, p.segmento, p.cidade, p.uf
+                      p.whatsapp, p.telefone, p.segmento, p.cidade, p.uf, cv.canal
                  from conversas cv left join prospeccao p on p.id = cv.prospeccao_id
                 where cv.id=%s and cv.conta_id=%s""", (conversa_id, conta_id)).fetchone()
         if not conv or not conv[0]:      # conversa não existe ou humano assumiu
@@ -101,8 +111,9 @@ def _atender(pool, conta_id, conversa_id):
         catalogo = scat.listar(pool, conta_id)
         instr, faqs = _conhecimento(c, conta_id)
         lead_empresa = conv[3] or conv[2] or "cliente"
-        numero_dest = conv[4] or conv[5] or conv[2]
-        remetente = _numero_empresa(c, conta_id)
+        # canal + destino: WhatsApp usa nº do lead; Messenger/Instagram usam o PSID/IGSID (contato_ref)
+        canal = conv[9] or "whatsapp"
+        destino = conv[2] if canal in ("messenger", "instagram") else (conv[4] or conv[5] or conv[2])
 
         historico = "\n".join(
             ("Cliente: " if a == "lead" else ("Agente: " if a == "bot" else "Vendedor: ")) + (t or "")
@@ -154,37 +165,27 @@ def _atender(pool, conta_id, conversa_id):
             return
 
         if acao == "orcamento" and cfg["pode_orcamento"]:
-            return _orcamento(c, conta_id, conversa_id, conv, catalogo, d, remetente, numero_dest, resposta)
+            return _orcamento(c, conta_id, conversa_id, conv, catalogo, d, canal, destino, resposta)
 
         # responde tudo (nunca escala/desliga automático)
-        _enviar(c, conta_id, conversa_id, remetente, numero_dest, resposta or
+        _enviar(c, conta_id, conversa_id, canal, destino, resposta or
                 "Boa! Me conta um pouquinho mais que já te ajudo 😊")
 
 
-def _enviar(c, conta_id, conversa_id, remetente, numero, texto):
+def _enviar(c, conta_id, conversa_id, canal, destino, texto):
     if not texto:
         return
-    res = wa.enviar_texto(remetente, numero, texto)
-    _add_bot_msg(c, conversa_id, texto, res.get("sid") if res.get("ok") else None)
+    res = _mandar(c, conta_id, canal, destino, texto)
+    _add_bot_msg(c, conversa_id, canal, texto, res.get("sid") if res.get("ok") else None)
     c.commit()
 
 
-def _handoff(c, conta_id, conversa_id, prospeccao_id, remetente, numero, aviso):
-    # desliga o bot nessa conversa e marca pendente pro humano assumir
-    c.execute("update conversas set agente_ativo=false, status='pendente', ultima_msg_em=now() where id=%s",
-              (conversa_id,))
-    if aviso:
-        res = wa.enviar_texto(remetente, numero, aviso)
-        _add_bot_msg(c, conversa_id, aviso, res.get("sid") if res.get("ok") else None)
-    c.commit()
-
-
-def _orcamento(c, conta_id, conversa_id, conv, catalogo, d, remetente, numero, resposta):
+def _orcamento(c, conta_id, conversa_id, conv, catalogo, d, canal, destino, resposta):
     slugs_ok = {s["slug"]: s for s in catalogo}
     escolhidos = [slugs_ok[s] for s in (d.get("servicos") or []) if s in slugs_ok]
     if not escolhidos:
         # sem serviços válidos → responde o texto e para
-        return _enviar(c, conta_id, conversa_id, remetente, numero, resposta or
+        return _enviar(c, conta_id, conversa_id, canal, destino, resposta or
                        "Me conta rapidinho o que você precisa que eu monto um orçamento 😊")
     setup = sum(s["setup_centavos"] for s in escolhidos)
     mensal = sum(s["mensal_centavos"] for s in escolhidos)
@@ -206,4 +207,4 @@ def _orcamento(c, conta_id, conversa_id, conv, catalogo, d, remetente, numero, r
         + f"Total mensal: R$ {mensal//100}\n\n"
         f"Ver a proposta: {link}\n\n"
         "É um valor de referência — quer que eu chame um consultor pra fechar os detalhes?")
-    _enviar(c, conta_id, conversa_id, remetente, numero, corpo)
+    _enviar(c, conta_id, conversa_id, canal, destino, corpo)

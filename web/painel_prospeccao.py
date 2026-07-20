@@ -1231,6 +1231,129 @@ async def webhook_meta(request: Request, background_tasks: BackgroundTasks):
     return Response("ok", media_type="text/plain")
 
 
+# ================================================================ CAMPANHAS (Fase 2)
+# (definido ANTES de /{alvo_id} pra "campanhas" não cair na rota da ficha)
+_PASSOS_PADRAO = [
+    (0, 0, "Uma ideia pra {empresa}", "", True),                 # D0: o agente escreve
+    (1, 3, "Só reforçando — vale 2 min?",
+     "Oi, {empresa}!\n\nSemana passada te mandei uma ideia rápida pra atender melhor sem "
+     "aumentar a equipe. Vale 2 minutinhos essa semana pra eu te mostrar?", False),
+    (2, 7, "Fecho por aqui 👋",
+     "Oi, {empresa}!\n\nÉ a última vez que passo por aqui 😊 Se fizer sentido, me chama no "
+     "WhatsApp quando quiser — fica à vontade.", False),
+]
+_STATUS_ROT_CP = {"rascunho": "✎ Rascunho", "ativa": "● Ativa",
+                  "pausada": "❚❚ Pausada", "concluida": "✓ Concluída"}
+
+
+def _campanha_publico_where(conta_id, camp_id, seg, cidade, temp):
+    """WHERE dos leads elegíveis: e-mail válido, fora da campanha e não descadastrados."""
+    where = ["p.conta_id=%s", "p.email_ok",
+             "p.id not in (select prospeccao_id from campanha_alvos where campanha_id=%s)",
+             "lower(coalesce(p.email,'')) not in (select lower(email) from descadastros where conta_id=%s)"]
+    params = [conta_id, camp_id, conta_id]
+    if (seg or "").strip():
+        where.append("p.segmento ilike %s"); params.append("%" + seg.strip() + "%")
+    if (cidade or "").strip():
+        where.append("p.cidade ilike %s"); params.append("%" + cidade.strip() + "%")
+    if temp in ("frio", "morno", "quente"):
+        where.append("p.temperatura=%s"); params.append(temp)
+    return " and ".join(where), params
+
+
+@router.get("/painel/prospeccao/campanhas", response_class=HTMLResponse)
+def prospeccao_campanhas(request: Request):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "Só o dono/gestor gerencia campanhas."
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    with get_pool().connection() as c:
+        rows = c.execute(
+            """select cp.id, cp.nome, cp.status, cp.limite_dia,
+                 (select count(*) from campanha_alvos a where a.campanha_id=cp.id),
+                 (select count(*) from campanha_alvos a where a.campanha_id=cp.id and a.status='enviado'),
+                 (select count(*) from campanha_alvos a where a.campanha_id=cp.id and a.status='respondeu')
+               from campanhas cp where cp.conta_id=%s order by cp.criado_em desc""",
+            (ctx["conta_id"],)).fetchall()
+        eleg = c.execute("select count(*) from prospeccao where conta_id=%s and email_ok",
+                         (ctx["conta_id"],)).fetchone()[0]
+    camps = [{"id": r[0], "nome": r[1], "status": r[2], "limite": r[3],
+              "n": r[4], "env": r[5], "resp": r[6], "status_rot": _STATUS_ROT_CP.get(r[2], r[2])}
+             for r in rows]
+    return _render("prospeccao_campanhas", request, titulo="Campanhas", secao_ativa="prospeccao",
+                   camps=camps, elegiveis=eleg, aviso=request.session.pop("prosp_aviso", None))
+
+
+@router.post("/painel/prospeccao/campanhas/nova")
+def prospeccao_campanha_nova(request: Request, nome: str = Form("")):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
+    nome = (nome or "").strip() or "Nova campanha"
+    with get_pool().connection() as c:
+        cid = c.execute("insert into campanhas (conta_id, nome, criado_por) values (%s,%s,%s) returning id",
+                        (ctx["conta_id"], nome[:120], ctx["membro_id"])).fetchone()[0]
+        for (ordem, dias, assunto, corpo, ia) in _PASSOS_PADRAO:
+            c.execute("""insert into campanha_passos (campanha_id, ordem, dias_apos, assunto, corpo, usar_ia)
+                         values (%s,%s,%s,%s,%s,%s)""", (cid, ordem, dias, assunto, corpo, ia))
+        c.commit()
+    return RedirectResponse(f"/painel/prospeccao/campanhas/{cid}", status_code=303)
+
+
+@router.get("/painel/prospeccao/campanhas/{camp_id}", response_class=HTMLResponse)
+def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidade: str = "", temp: str = ""):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
+    with get_pool().connection() as c:
+        cp = c.execute("select id, nome, status, limite_dia from campanhas where id=%s and conta_id=%s",
+                       (camp_id, ctx["conta_id"])).fetchone()
+        if not cp:
+            return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
+        passos = c.execute("""select ordem, dias_apos, assunto, corpo, usar_ia
+                                from campanha_passos where campanha_id=%s order by ordem""",
+                           (camp_id,)).fetchall()
+        st = dict(c.execute("select status, count(*) from campanha_alvos where campanha_id=%s group by status",
+                            (camp_id,)).fetchall())
+        na_camp = c.execute("select count(*) from campanha_alvos where campanha_id=%s", (camp_id,)).fetchone()[0]
+        wsql, wparams = _campanha_publico_where(ctx["conta_id"], camp_id, seg, cidade, temp)
+        eleg = c.execute(f"select count(*) from prospeccao p where {wsql}", tuple(wparams)).fetchone()[0]
+    camp = {"id": cp[0], "nome": cp[1], "status": cp[2], "limite": cp[3],
+            "status_rot": _STATUS_ROT_CP.get(cp[2], cp[2])}
+    passos_l = [{"dias": p[1], "assunto": p[2], "corpo": p[3], "ia": p[4]} for p in passos]
+    return _render("prospeccao_campanha", request, titulo=camp["nome"], secao_ativa="prospeccao",
+                   camp=camp, passos=passos_l, elegiveis=eleg, na_camp=na_camp, st=st,
+                   seg=seg, cidade=cidade, temp=temp, aviso=request.session.pop("prosp_aviso", None))
+
+
+@router.post("/painel/prospeccao/campanhas/{camp_id}/publico")
+def prospeccao_campanha_publico(request: Request, camp_id: int, seg: str = Form(""),
+                                cidade: str = Form(""), temp: str = Form("")):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
+    with get_pool().connection() as c:
+        if not c.execute("select 1 from campanhas where id=%s and conta_id=%s",
+                         (camp_id, ctx["conta_id"])).fetchone():
+            return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
+        wsql, wparams = _campanha_publico_where(ctx["conta_id"], camp_id, seg, cidade, temp)
+        n = c.execute(
+            f"""insert into campanha_alvos (campanha_id, prospeccao_id)
+                select %s, p.id from prospeccao p where {wsql} on conflict do nothing""",
+            (camp_id, *wparams)).rowcount
+        c.commit()
+    request.session["prosp_aviso"] = f"{n} lead(s) adicionado(s) à campanha ✓"
+    return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
+
+
 # ================================================================ FICHA DO ALVO
 @router.get("/painel/prospeccao/{alvo_id}", response_class=HTMLResponse)
 def prospeccao_ficha(request: Request, alvo_id: int):
@@ -1976,6 +2099,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </div>
     <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
       <a class="pbtn ghost" href="/painel/prospeccao/comunicacao" style="display:inline-flex;align-items:center">📨 Comunicação</a>
+      {% if gerencia %}<a class="pbtn ghost" href="/painel/prospeccao/campanhas" style="display:inline-flex;align-items:center">📣 Campanhas</a>{% endif %}
       <button type="button" class="pbtn ghost" id="enrq-btn" onclick="enrqLote()" title="Raspa o site dos leads e descobre e-mail, Instagram e WhatsApp">🔎 Verificar canais</button>
       <span class="mut" id="enrq-msg" style="font-size:.8rem"></span>
       <button type="button" class="pbtn" onclick="capToggle()">🎯 Captar leads</button>
@@ -2991,7 +3115,88 @@ function cxTick(){cxPollList();cxPollThread();}
 </script>
 {% endblock %}"""
 
+_CPILL_CSS = """<style>.cpill{font-size:.68rem;font-weight:700;padding:.14rem .5rem;border-radius:999px;border:1px solid var(--borda);white-space:nowrap}
+.cpill.ativa{color:#3ddc84;border-color:#1e4a34;background:#10241a}
+.cpill.pausada{color:#e0a33e;border-color:#5a4520;background:#2a2113}
+.cpill.rascunho,.cpill.concluida{color:#8a938a}
+.cpill.ia{color:#c9a3e0;border-color:#4a3163;background:#1c1327}
+.cpstep{display:flex;gap:.7rem;align-items:center;padding:.55rem 0;border-top:1px solid var(--borda)}
+.cpstep:first-of-type{border-top:0}
+.cpday{width:54px;text-align:center;flex-shrink:0}.cpday b{font-size:1.05rem}</style>"""
+
+_CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + """
+<div style="max-width:1000px;margin:0 auto">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap">
+    <div><h2 class="tt">📣 Campanhas de E-mail</h2>
+      <div class="mut" style="font-size:.85rem">Prospecção fria automatizada · <b style="color:var(--verde-claro)">{{ elegiveis }}</b> lead(s) com e-mail válido prontos pra abordar</div></div>
+    <div style="display:flex;gap:.5rem"><a class="pbtn ghost" href="/painel/prospeccao">‹ Prospecção</a><a class="pbtn ghost" href="/painel/prospeccao/comunicacao">📨 Comunicação</a></div>
+  </div>
+  {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
+  {% if elegiveis == 0 %}<div class="mut" style="margin-top:.9rem;font-size:.85rem;border:1px solid var(--borda);border-radius:10px;padding:.7rem .9rem">Nenhum lead com e-mail válido ainda. Rode o <b>🔎 Verificar canais</b> na Prospecção pra descobrir os e-mails primeiro.</div>{% endif %}
+  <form method="post" action="/painel/prospeccao/campanhas/nova" style="display:flex;gap:.5rem;margin:1rem 0">
+    <input class="fld" name="nome" placeholder="Nome da campanha (ex.: Salões · Teresina)" style="flex:1" maxlength="120">
+    <button class="pbtn">＋ Nova campanha</button>
+  </form>
+  <div style="display:flex;flex-direction:column;gap:.6rem">
+    {% for c in camps %}
+    <a href="/painel/prospeccao/campanhas/{{ c.id }}" class="card" style="display:block;text-decoration:none;color:inherit;padding:.9rem 1rem">
+      <div style="display:flex;align-items:center;gap:.6rem"><b style="flex:1">{{ c.nome }}</b><span class="cpill {{ c.status }}">{{ c.status_rot }}</span></div>
+      <div class="mut" style="font-size:.8rem;margin-top:.35rem"><b style="color:var(--txt)">{{ c.n }}</b> leads · {{ c.env }} enviados · <span style="color:var(--verde-claro)">{{ c.resp }} respostas</span> · limite {{ c.limite }}/dia</div>
+    </a>
+    {% else %}<div class="mut" style="text-align:center;padding:2rem">Nenhuma campanha ainda — crie a primeira acima.</div>{% endfor %}
+  </div>
+</div>
+{% endblock %}"""
+
+_CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + """
+<div style="max-width:1000px;margin:0 auto">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap">
+    <div><h2 class="tt">{{ camp.nome }} <span class="cpill {{ camp.status }}">{{ camp.status_rot }}</span></h2>
+      <div class="mut" style="font-size:.85rem"><b style="color:var(--txt)">{{ na_camp }}</b> lead(s) na campanha · limite {{ camp.limite }}/dia</div></div>
+    <a class="pbtn ghost" href="/painel/prospeccao/campanhas">‹ Campanhas</a>
+  </div>
+  {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
+
+  <div class="card" style="padding:1rem;margin-top:1rem">
+    <h3 style="margin:0 0 .4rem;font-size:1rem">👥 Público — adicionar leads</h3>
+    <div class="mut" style="font-size:.82rem;margin-bottom:.6rem">Só entram leads com <b>e-mail válido</b> (verificados na Fase 1) e que não descadastraram.</div>
+    <form method="get" action="/painel/prospeccao/campanhas/{{ camp.id }}" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
+      <input class="fld" name="seg" value="{{ seg }}" placeholder="Segmento (ex.: salão)" style="width:auto">
+      <input class="fld" name="cidade" value="{{ cidade }}" placeholder="Cidade" style="width:auto">
+      <select class="fld" name="temp" style="width:auto" onchange="this.form.submit()">
+        <option value="">Qualquer temperatura</option>
+        <option value="frio" {% if temp=='frio' %}selected{% endif %}>Frio</option>
+        <option value="morno" {% if temp=='morno' %}selected{% endif %}>Morno</option>
+        <option value="quente" {% if temp=='quente' %}selected{% endif %}>Quente</option>
+      </select>
+      <button class="pbtn ghost">Filtrar</button>
+    </form>
+    <div style="display:flex;align-items:center;gap:.9rem;margin-top:.8rem;flex-wrap:wrap">
+      <div><span style="font-size:1.7rem;font-weight:750">{{ elegiveis }}</span> <span class="mut">elegíveis com esse filtro</span></div>
+      <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/publico" style="margin:0">
+        <input type="hidden" name="seg" value="{{ seg }}"><input type="hidden" name="cidade" value="{{ cidade }}"><input type="hidden" name="temp" value="{{ temp }}">
+        <button class="pbtn" {% if not elegiveis %}disabled{% endif %}>＋ Adicionar {{ elegiveis }} à campanha</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card" style="padding:1rem;margin-top:1rem">
+    <h3 style="margin:0 0 .5rem;font-size:1rem">🗓️ Sequência <span class="mut" style="font-size:.74rem;font-weight:400">· edição no próximo passo</span></h3>
+    {% for p in passos %}
+    <div class="cpstep"><div class="cpday"><b>D{{ p.dias }}</b></div>
+      <div style="flex:1"><b style="font-size:.9rem">{{ p.assunto or '(sem assunto)' }}</b>{% if p.corpo %}<div class="mut" style="font-size:.78rem">{{ p.corpo[:90] }}{% if p.corpo|length > 90 %}…{% endif %}</div>{% endif %}</div>
+      <span class="cpill {{ 'ia' if p.ia else 'rascunho' }}">{{ '🤖 IA escreve' if p.ia else 'Template' }}</span></div>
+    {% endfor %}
+  </div>
+
+  <div class="mut" style="font-size:.82rem;margin-top:1rem">Fila: {{ st.get('fila',0) }} · Enviados: {{ st.get('enviado',0) }} · Responderam: {{ st.get('respondeu',0) }} · Descadastros: {{ st.get('descadastrou',0) }}</div>
+  <div class="mut" style="font-size:.8rem;margin-top:.5rem">O disparo automático (respeitando o limite/dia), a edição da sequência e o descadastro entram nos próximos passos da construção.</div>
+</div>
+{% endblock %}"""
+
 _env.loader.mapping["prospeccao"] = _KANBAN_TPL
 _env.loader.mapping["prospeccao_captar"] = _CAPTAR_TPL
 _env.loader.mapping["prospeccao_ficha"] = _FICHA_TPL
 _env.loader.mapping["prospeccao_comunicacao"] = _COMUNICACAO_TPL
+_env.loader.mapping["prospeccao_campanhas"] = _CAMPANHAS_TPL
+_env.loader.mapping["prospeccao_campanha"] = _CAMPANHA_TPL

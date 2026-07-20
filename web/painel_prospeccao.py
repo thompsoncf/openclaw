@@ -899,6 +899,36 @@ def comunicacao_email_testar(request: Request):
     return JSONResponse({"ok": bool(diag.get("ok")), "msg": diag.get("msg") or ""})
 
 
+@router.post("/painel/prospeccao/comunicacao/virar-lead")
+def comunicacao_virar_lead(request: Request, conversa_id: int = Form(...)):
+    """Promove uma conversa órfã (e-mail/WhatsApp de remetente novo, sem lead) a um
+    lead da prospecção — só quando VOCÊ decide que vale."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    with get_pool().connection() as c:
+        cv = c.execute(
+            "select canal, prospeccao_id, contato_ref from conversas where id=%s and conta_id=%s",
+            (conversa_id, ctx["conta_id"])).fetchone()
+        if not cv:
+            return JSONResponse({"ok": False, "erro": "escopo"}, status_code=404)
+        if cv[1]:
+            return JSONResponse({"ok": True, "lead_id": cv[1]})     # já é lead
+        ref = (cv[2] or "").strip()
+        eh_email = "@" in ref
+        vend = None if ctx["gerencia"] else ctx["membro_id"]
+        lead_id = c.execute(
+            """insert into prospeccao (conta_id, vendedor_id, empresa, email, whatsapp,
+                 origem, temperatura, status)
+               values (%s,%s,%s,%s,%s,%s,'morno','novo') returning id""",
+            (ctx["conta_id"], vend, ref or "Contato",
+             ref if eh_email else None, None if eh_email else ("+" + ref if ref else None),
+             "email_inbound" if eh_email else "whatsapp_inbound")).fetchone()[0]
+        c.execute("update conversas set prospeccao_id=%s where id=%s", (lead_id, conversa_id))
+        c.commit()
+    return JSONResponse({"ok": True, "lead_id": lead_id})
+
+
 @router.post("/painel/prospeccao/comunicacao/canal-numero")
 def comunicacao_canal_numero(request: Request, canal: str = Form(...), numero: str = Form("")):
     """Vincula (ou limpa) o número/identificador de um canal à empresa. Só dono/gestor."""
@@ -1578,6 +1608,23 @@ def prospeccao_enviar_email(request: Request, alvo_id: int, assunto: str = Form(
     return JSONResponse({"ok": True})
 
 
+@router.post("/painel/prospeccao/{alvo_id}/excluir")
+def prospeccao_excluir(request: Request, alvo_id: int):
+    """Exclui um lead. A conversa/e-mail dele vira órfã (FK SET NULL) e continua no
+    inbox — nada de e-mail perdido; só sai do funil."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    pool = get_pool()
+    alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
+    if not alvo or not _pode_ver(alvo, ctx):
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    with pool.connection() as c:
+        c.execute("delete from prospeccao where id=%s and conta_id=%s", (alvo_id, ctx["conta_id"]))
+        c.commit()
+    return JSONResponse({"ok": True})
+
+
 @router.post("/painel/prospeccao/{alvo_id}/convidar-zaq")
 def prospeccao_convidar_zaq(request: Request, alvo_id: int):
     """Manda pro lead um e-mail convidando a CRIAR conta no Zaq (link pro /cadastro
@@ -1866,7 +1913,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         {% for c in colunas[s] %}
         <div class="kbcard" draggable="true" data-id="{{ c.id }}" ondragstart="kbDrag(event,{{ c.id }})" ondragend="kbEnd(event)"
              onclick="if(!window._kbMoved)kbAbrir({{ c.id }})">
-          <div style="display:flex;align-items:center;gap:.4rem"><span class="tdot" title="{{ c.temperatura }}" style="background:{{ temp_cor[c.temperatura] }}"></span><span class="emp">{{ c.empresa }}</span></div>
+          <div style="display:flex;align-items:center;gap:.4rem"><span class="tdot" title="{{ c.temperatura }}" style="background:{{ temp_cor[c.temperatura] }}"></span><span class="emp">{{ c.empresa }}</span><span style="flex:1"></span><button type="button" class="kbx" title="Excluir lead" onclick="kbExcluir(event,{{ c.id }})">✕</button></div>
           {% if c.segmento or c.cidade %}<div class="sub">{% if c.segmento %}{{ c.segmento }}{% endif %}{% if c.cidade %} · {{ c.cidade }}{% if c.uf %}/{{ c.uf }}{% endif %}{% endif %}</div>{% endif %}
           <div class="ft">{% if c.valor %}<span style="font-size:.76rem;color:var(--verde-claro)">{{ brl(c.valor) }}</span>{% else %}<span></span>{% endif %}{% if c.proximo %}<span class="mut" style="font-size:.72rem">📅 {{ c.proximo.strftime('%d/%m') }}</span>{% endif %}</div>
           {% if gerencia and c.vendedor %}<div class="mut" style="font-size:.72rem;margin-top:.28rem">👤 {{ c.vendedor }}</div>{% endif %}
@@ -1879,6 +1926,8 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 </div>
 
 <style>
+.kbx{background:none;border:0;color:#6b6b6b;cursor:pointer;font-size:.82rem;line-height:1;padding:.1rem .25rem;border-radius:6px;opacity:.55}
+.kbx:hover{opacity:1;color:#e0574f;background:rgba(224,87,79,.12)}
 #kb-drawer{position:fixed;inset:0;z-index:80;display:none}
 #kb-drawer.on{display:block}
 #kb-drawer .bd{position:absolute;inset:0;background:rgba(0,0,0,.55)}
@@ -1936,13 +1985,19 @@ var TEMPCOR={frio:'#5b9bd5',morno:'#e0a33e',quente:'#e0574f'};
 function jsEsc(s){return (s||'').replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];});}
 function jsBrl(c){c=c||0;var s=(c/100).toFixed(2).split('.');var i=s[0].replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.');return 'R$ '+i+','+s[1];}
 function cardGo(id){if(!window._kbMoved)kbAbrir(id);}
+function kbExcluir(ev,id){ev.stopPropagation();ev.preventDefault();
+  if(!confirm('Excluir este lead? A conversa/e-mail dele continua no inbox — só sai do funil.'))return;
+  fetch('/painel/prospeccao/'+id+'/excluir',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()})
+    .then(function(r){return r.json();}).then(function(d){if(!d.ok){alert(d.erro||'Não consegui excluir.');return;}
+      var card=document.querySelector('.kbcard[data-id="'+id+'"]');if(card&&card.parentNode)card.parentNode.removeChild(card);
+      updCounts();}).catch(function(){alert('Falha de rede.');});}
 function updCounts(){var tot=0;document.querySelectorAll('.kbcol').forEach(function(col){var n=col.querySelectorAll('.kbcard').length;tot+=n;var chip=col.querySelector('.kbcnt');if(chip)chip.textContent=n;var tc=document.querySelector('.kbtab[data-tab="'+col.getAttribute('data-status')+'"] .c');if(tc)tc.textContent=n;});var tn=document.getElementById('kb-total-n');if(tn)tn.textContent=tot;}
 function addCard(l){var col=document.querySelector('.kbcol[data-status="novo"]');if(!col)return;var drop=col.querySelector('.kbdrop');var e=drop.querySelector('.kbempty');if(e)e.remove();
   var cor=TEMPCOR[l.temperatura]||'#5b9bd5';
   var sub=(l.segmento||l.cidade)?('<div class="sub">'+(l.segmento?jsEsc(l.segmento):'')+(l.cidade?(' · '+jsEsc(l.cidade)+(l.uf?('/'+jsEsc(l.uf)):'')):'')+'</div>'):'';
   var ft='<div class="ft">'+(l.valor?('<span style="font-size:.76rem;color:var(--verde-claro)">'+jsBrl(l.valor)+'</span>'):'<span></span>')+'<span></span></div>';
   var vd=l.vendedor?('<div class="mut" style="font-size:.72rem;margin-top:.28rem">👤 '+jsEsc(l.vendedor)+'</div>'):'';
-  var html='<div class="kbcard" draggable="true" data-id="'+l.id+'" ondragstart="kbDrag(event,'+l.id+')" ondragend="kbEnd(event)" onclick="cardGo('+l.id+')"><div style="display:flex;align-items:center;gap:.4rem"><span class="tdot" style="background:'+cor+'"></span><span class="emp">'+jsEsc(l.empresa)+'</span></div>'+sub+ft+vd+'</div>';
+  var html='<div class="kbcard" draggable="true" data-id="'+l.id+'" ondragstart="kbDrag(event,'+l.id+')" ondragend="kbEnd(event)" onclick="cardGo('+l.id+')"><div style="display:flex;align-items:center;gap:.4rem"><span class="tdot" style="background:'+cor+'"></span><span class="emp">'+jsEsc(l.empresa)+'</span><span style="flex:1"></span><button type="button" class="kbx" title="Excluir lead" onclick="kbExcluir(event,'+l.id+')">✕</button></div>'+sub+ft+vd+'</div>';
   drop.insertAdjacentHTML('afterbegin',html);updCounts();}
 function capToggle(){var e=document.getElementById('captar');var vis=e.style.display!=='none';e.style.display=vis?'none':'block';if(!vis){var i=e.querySelector('.captab[data-tab=manual] input[name=empresa]');if(i)i.focus();e.scrollIntoView({behavior:'smooth',block:'nearest'});}}
 function capTab(t){document.querySelectorAll('#captar .caba').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===t);});document.querySelectorAll('#captar .captab').forEach(function(d){d.style.display=(d.getAttribute('data-tab')===t)?'block':'none';});}
@@ -2656,13 +2711,13 @@ function cxOpen(el,id){
       :'<button class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem" onclick="cxAgente('+d.conversa_id+',1)" title="Devolver ao agente">🤖 Ativar agente</button>');
     th.innerHTML=''
       +'<div class="cx-th"><div><b>'+cxEsc(L.empresa)+'</b><small>'+cxEsc(L.canal_rot||'')+(L.cidade?(' · '+cxEsc(L.cidade)+(L.uf?'/'+cxEsc(L.uf):'')):'')+(L.status_rot?(' · '+cxEsc(L.status_rot)):'')+(d.agente_ativo?' · <span style=\\'color:#c9a3e0\\'>🤖 no automático</span>':'')+'</small></div>'
-      +'<span style="flex:1"></span>'+agBtn+(L.id?(' <a class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem" href="/painel/prospeccao/'+L.id+'">Abrir ficha</a>'):'')+'</div>'
+      +'<span style="flex:1"></span>'+agBtn+(L.id?(' <a class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem" href="/painel/prospeccao/'+L.id+'">Abrir ficha</a>'):(' <button class="pbtn" style="padding:.35rem .7rem;font-size:.78rem" onclick="cxVirarLead('+d.conversa_id+')" title="Criar um lead a partir deste contato">➕ Levar para o lead</button>'))+'</div>'
       +'<div class="cx-msgs" id="cx-msgs">'+cxMsgsHtml(d)+'</div>'+rodape;
     cxScroll(true);
     var kv=function(k,v){return v?('<div class="cx-kv"><span>'+k+'</span><b>'+cxEsc(v)+'</b></div>'):'';};
     cx.innerHTML=''
       +'<div class="cx-sec"><h4>Lead</h4>'+kv('Empresa',L.empresa)+kv('Segmento',L.segmento)+kv('Cidade',(L.cidade||'')+(L.uf?'/'+L.uf:''))+kv('WhatsApp',L.whatsapp)+kv('E-mail',L.email)+kv('Responsável',L.vendedor)+kv('Status',L.status_rot)+'</div>'
-      +(L.id?('<div class="cx-sec"><a class="pbtn" style="width:100%;text-align:center" href="/painel/prospeccao/'+L.id+'">Abrir ficha do lead</a></div>'):'');
+      +(L.id?('<div class="cx-sec"><a class="pbtn" style="width:100%;text-align:center" href="/painel/prospeccao/'+L.id+'">Abrir ficha do lead</a></div>'):('<div class="cx-sec"><button class="pbtn" style="width:100%" onclick="cxVirarLead('+d.conversa_id+')">➕ Levar para o lead</button><div class="mut" style="font-size:.74rem;margin-top:.4rem">Este contato ainda não é um lead. Crie o lead quando fizer sentido.</div></div>'));
   }).catch(function(){th.innerHTML='<div class="cx-empty">Falha de rede.</div>';});
 }
 function cxPollThread(){
@@ -2705,6 +2760,10 @@ function cxAgente(convId,on){
   fetch('/painel/prospeccao/comunicacao/agente-conversa',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
     .then(function(r){return r.json();}).then(function(d){if(!d.ok){alert(d.erro||'Não consegui.');return;}cxOpen(document.getElementById('cxc-'+convId),convId);}).catch(function(){alert('Falha de rede.');});
 }
+function cxVirarLead(convId){var fd=new FormData();fd.append('conversa_id',convId);
+  fetch('/painel/prospeccao/comunicacao/virar-lead',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
+    .then(function(r){return r.json();}).then(function(d){if(!d.ok){alert(d.erro||'Não consegui.');return;}
+      location.href='/painel/prospeccao/'+d.lead_id;}).catch(function(){alert('Falha de rede.');});}
 function cxResponder(convId){
   var ta=document.getElementById('cx-reply');if(!ta)return;var t=ta.value.trim();if(!t)return;
   var b=document.getElementById('cx-msgs');

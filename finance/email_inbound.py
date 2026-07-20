@@ -208,24 +208,24 @@ def sincronizar(pool, conta_id: int) -> int:
                     """select id from prospeccao where conta_id=%s and lower(email)=%s
                         order by atualizado_em desc limit 1""", (conta_id, addr)).fetchone()
                 if lead:
+                    # remetente JÁ é um lead → anexa na conversa dele
                     lead_id = lead[0]
-                else:
-                    nome = (m["from_nome"] or addr)[:250]
-                    lead_id = c.execute(
-                        """insert into prospeccao (conta_id, vendedor_id, empresa, email,
-                             origem, temperatura, status)
-                           values (%s,null,%s,%s,'email_inbound','morno','novo') returning id""",
-                        (conta_id, nome, addr)).fetchone()[0]
-                conv = c.execute(
-                    "select id from conversas where conta_id=%s and prospeccao_id=%s and canal='email'",
-                    (conta_id, lead_id)).fetchone()
-                if conv:
-                    conv_id = conv[0]
-                else:
-                    conv_id = c.execute(
+                    conv = c.execute(
+                        "select id from conversas where conta_id=%s and prospeccao_id=%s and canal='email'",
+                        (conta_id, lead_id)).fetchone()
+                    conv_id = conv[0] if conv else c.execute(
                         """insert into conversas (conta_id, prospeccao_id, canal, status, ultima_msg_em)
                            values (%s,%s,'email','aberta',now()) returning id""",
                         (conta_id, lead_id)).fetchone()[0]
+                else:
+                    # remetente NOVO → NÃO cria lead; conversa órfã (você decide depois se vira lead)
+                    conv = c.execute(
+                        """select id from conversas where conta_id=%s and canal='email'
+                            and prospeccao_id is null and contato_ref=%s""", (conta_id, addr)).fetchone()
+                    conv_id = conv[0] if conv else c.execute(
+                        """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status, ultima_msg_em)
+                           values (%s,null,'email',%s,'aberta',now()) returning id""",
+                        (conta_id, addr)).fetchone()[0]
                 texto = ((m["assunto"] or "(sem assunto)") + "\n\n" + (m["corpo"] or "")).strip()
                 c.execute(
                     """insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid, criado_em)

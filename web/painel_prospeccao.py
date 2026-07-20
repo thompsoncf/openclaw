@@ -771,6 +771,10 @@ def comunicacao_responder(request: Request, conversa_id: int = Form(...), texto:
             return JSONResponse({"ok": False, "erro": erros.get(res.get("erro"), "Não consegui enviar (janela de 24h fechada? use template).")})
         _add_msg(c, conversa_id, "whatsapp", "out", "humano",
                  texto, ctx["membro_id"], res.get("sid"))
+        # vendedor respondeu = assumiu a conversa: pausa o bot (não fala por cima).
+        # Volta ao automático clicando "devolver ao agente".
+        c.execute("update conversas set status='pendente', agente_ativo=false where id=%s",
+                  (conversa_id,))
         c.commit()
     return JSONResponse({"ok": True})
 
@@ -782,9 +786,13 @@ def comunicacao_agente_conversa(request: Request, conversa_id: int = Form(...), 
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
     on = ativar == "1"
+    # devolver ao agente → 'aberta' (o webhook pode reativar); assumir → 'pendente'
+    # (sticky: o webhook respeita e não reativa sozinho).
+    novo_status = "aberta" if on else "pendente"
     with get_pool().connection() as c:
-        r = c.execute("update conversas set agente_ativo=%s where id=%s and conta_id=%s returning id",
-                      (on, conversa_id, ctx["conta_id"])).fetchone()
+        r = c.execute(
+            "update conversas set agente_ativo=%s, status=%s where id=%s and conta_id=%s returning id",
+            (on, novo_status, conversa_id, ctx["conta_id"])).fetchone()
         c.commit()
     if not r:
         return JSONResponse({"ok": False, "erro": "escopo"}, status_code=404)
@@ -986,8 +994,15 @@ async def webhook_twilio(request: Request, background_tasks: BackgroundTasks):
                 (conta_id, lead_id, remetente, agente_on)).fetchone()[0]
         c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
                      values (%s,'whatsapp','in','lead',%s,%s)""", (conv_id, corpo[:8000], sid))
-        c.execute("""update conversas set ultima_msg_em=now(), status='aberta',
-                       janela_expira_em=now()+interval '24 hours' where id=%s""", (conv_id,))
+        # reabre a janela de 24h e REATIVA o agente — a menos que um humano tenha
+        # assumido a conversa (status='pendente'), aí respeitamos e não reativamos.
+        # (o CASE lê o status ANTIGO da linha, então 'pendente' fica preservado.)
+        c.execute(
+            """update conversas set ultima_msg_em=now(),
+                 janela_expira_em=now()+interval '24 hours',
+                 status = case when status='pendente' then 'pendente' else 'aberta' end,
+                 agente_ativo = case when status='pendente' then agente_ativo else %s end
+               where id=%s""", (agente_on, conv_id))
         c.commit()
     # deixa o agente atender em background (não segura a resposta pro Twilio)
     from finance import agente as _ag

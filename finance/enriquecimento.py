@@ -18,6 +18,7 @@ import httpx
 
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 _IG_RE = re.compile(r"instagram\.com/([A-Za-z0-9_.]+)", re.I)
+_IG_EXT = re.compile(r"\.(php|js|css|html?|ico|png|jpe?g|gif|svg|json|xml|txt)$", re.I)
 _WA_RE = re.compile(r"(?:wa\.me/|api\.whatsapp\.com/send\?phone=)\+?(\d{8,15})", re.I)
 _UA = {"User-Agent": "Mozilla/5.0 (compatible; ZaqBot/1.0; +https://app.zaq-ia.com)"}
 _TIMEOUT = 9
@@ -94,12 +95,13 @@ def enriquecer(site: str = "", telefone: str = "", email_atual: str = "") -> dic
         out["email"] = email
         out["email_ok"] = _validar_email(email)
 
-    # instagram
+    # instagram (descarta reservados e caminhos de arquivo tipo rsrc.php, static.js…)
     for m in _IG_RE.finditer(html):
         h = m.group(1).strip("/").lower()
-        if h not in _IG_RESERVADO and len(h) >= 2:
-            out["instagram"] = "@" + h
-            break
+        if h in _IG_RESERVADO or len(h) < 2 or _IG_EXT.search(h):
+            continue
+        out["instagram"] = "@" + h
+        break
 
     # whatsapp: link wa.me no site é o sinal forte; senão, celular BR é provável
     w = _WA_RE.search(html)

@@ -241,6 +241,63 @@ def sincronizar(pool, conta_id: int | None = None) -> int:
     return n
 
 
+def _mascara(e: str) -> str:
+    e = e or ""
+    if "@" not in e:
+        return e
+    loc, dom = e.split("@", 1)
+    return (loc[:3] + "***@" + dom) if len(loc) > 3 else (loc[:1] + "***@" + dom)
+
+
+def diagnostico(pool) -> dict:
+    """Testa a caixa AO VIVO e devolve o porquê de vir (ou não) e-mail — pra
+    mostrar no painel. Não importa nada, só verifica config → conta → conexão →
+    login → INBOX."""
+    cfg = _cfg()
+    if not cfg:
+        return {"ok": False, "etapa": "config",
+                "msg": "Sem credencial de e-mail no ambiente (SMTP_USER/SMTP_SENHA no Render)."}
+    d = {"usuario": _mascara(cfg["user"]), "host": cfg["host"]}
+    dono, ultimo = _conta_do_mailbox(pool, cfg["user"])
+    d["ultimo_uid"] = ultimo
+    if not dono:
+        d.update(ok=False, etapa="conta",
+                 msg=(f"A caixa {_mascara(cfg['user'])} não bate com nenhum canal 'email' "
+                      "cadastrado. Confira se o SMTP_USER é exatamente o endereço da caixa."))
+        return d
+    try:
+        M = imaplib.IMAP4_SSL(cfg["host"], cfg["port"], timeout=_TIMEOUT)
+    except Exception as e:  # noqa: BLE001
+        d.update(ok=False, etapa="conexao", msg=f"Não conectei no IMAP ({cfg['host']}): {e}")
+        return d
+    try:
+        M.login(cfg["user"], cfg["senha"])
+    except Exception as e:  # noqa: BLE001
+        try:
+            M.logout()
+        except Exception:  # noqa: BLE001
+            pass
+        d.update(ok=False, etapa="login",
+                 msg=("Falha no login IMAP. Ligue o IMAP no Gmail (⚙️ → Ver todas as "
+                      "configurações → Encaminhamento e POP/IMAP → Ativar IMAP) e confirme "
+                      f"que a SMTP_SENHA é uma SENHA DE APP do Google. Detalhe: {e}"))
+        return d
+    try:
+        typ, data = M.select("INBOX")
+        total = int(data[0]) if typ == "OK" and data and data[0] else 0
+        d.update(ok=True, etapa="ok", inbox_total=total,
+                 msg=f"Conectei na caixa! A Caixa de Entrada tem {total} e-mail(s). "
+                     "Se o seu teste não veio, ele pode ter caído em Spam/Promoções.")
+    except Exception as e:  # noqa: BLE001
+        d.update(ok=False, etapa="inbox", msg=f"Loguei, mas não abri a INBOX: {e}")
+    finally:
+        try:
+            M.logout()
+        except Exception:  # noqa: BLE001
+            pass
+    return d
+
+
 def poll_uma_vez(pool) -> int:
     """Uma passada do poller, com advisory lock (só 1 worker sincroniza por vez)."""
     if not configurado():

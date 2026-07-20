@@ -94,11 +94,10 @@ def _atender(pool, conta_id, conversa_id):
             return
         if not _horario_ok(cfg):
             return
-        # histórico + nº de respostas do bot (máx-trocas)
+        # histórico das últimas mensagens (contexto pro Brain)
         msgs = c.execute(
             """select direcao, autor, texto from mensagens
                 where conversa_id=%s order by criado_em desc limit 12""", (conversa_id,)).fetchall()
-        n_bot = sum(1 for (_d, a, _t) in msgs if a == "bot")
         catalogo = scat.listar(pool, conta_id)
         instr, faqs = _conhecimento(c, conta_id)
         lead_empresa = conv[3] or conv[2] or "cliente"
@@ -108,7 +107,6 @@ def _atender(pool, conta_id, conversa_id):
         historico = "\n".join(
             ("Cliente: " if a == "lead" else ("Agente: " if a == "bot" else "Vendedor: ")) + (t or "")
             for (_d, a, t) in reversed(msgs))
-        escala = (n_bot >= cfg["max_trocas"])
 
         cat_txt = "\n".join(
             f"- {s['nome']} (slug {s['slug']}): setup R${s['setup_centavos']//100}, "
@@ -117,32 +115,30 @@ def _atender(pool, conta_id, conversa_id):
         system = (
             "Você é o atendente virtual da empresa, no WhatsApp. Fala em português do "
             f"Brasil, tom {tom}, mensagens curtas. Use SÓ o que está na base abaixo — "
-            "NUNCA invente preço, prazo ou promessa. Se o cliente pedir humano, "
-            "reclamar, negociar preço/fechamento, ou for algo fora do escopo, escale. "
+            "NUNCA invente preço, prazo ou promessa (se não tiver a info na base, diga "
+            "que vai confirmar e siga a conversa). Seu objetivo é atender, tirar dúvidas "
+            "e qualificar sozinho — NÃO ofereça 'chamar um consultor' a não ser que o "
+            "CLIENTE peça explicitamente falar com uma pessoa. "
             "Responda SEMPRE só com JSON válido, sem markdown.\n\n"
             f"INSTRUÇÕES DA EMPRESA:\n{instr or '(nenhuma)'}\n\n"
             f"PERGUNTAS FREQUENTES:\n{faqs or '(nenhuma)'}\n\n"
             f"CATÁLOGO DE SERVIÇOS:\n{cat_txt}")
         pedir = (
             f"Conversa com {lead_empresa}:\n{historico}\n\n"
-            "Decida a próxima ação e responda APENAS com JSON:\n"
-            '{"acao":"responder|orcamento|escalar","resposta":"texto pra mandar ao '
-            'cliente","confianca":0-100,"servicos":["slug"],"temperatura":"frio|morno|quente"}\n'
+            "Responda a última mensagem do cliente. Retorne APENAS JSON:\n"
+            '{"acao":"responder|orcamento","resposta":"texto pra mandar ao '
+            'cliente","servicos":["slug"],"temperatura":"frio|morno|quente"}\n'
             "- acao=orcamento só se o cliente PEDIU preço/orçamento; liste em servicos "
-            "os slugs do catálogo que fazem sentido.\n"
-            "- confianca = quão seguro você está da resposta (0-100)." +
-            ("\n- IMPORTANTE: já houve muitas trocas; prefira escalar." if escala else ""))
+            "os slugs do catálogo que fazem sentido. Senão, acao=responder e responda a "
+            "dúvida direto, com base na base.\n"
+            "- Sempre preencha resposta com um texto útil pra mandar ao cliente.")
 
         from core.brain import Brain
         resp = Brain().chamar(system=system, mensagens=[{"role": "user", "content": pedir}])
         txt = "".join(getattr(b, "text", "") for b in resp.content
                       if getattr(b, "type", None) == "text").strip()
         d = _extrair_json(txt)
-        acao = d.get("acao") if d.get("acao") in ("responder", "orcamento", "escalar") else "escalar"
-        try:
-            conf = int(d.get("confianca") or 0)
-        except (ValueError, TypeError):
-            conf = 0
+        acao = d.get("acao") if d.get("acao") in ("responder", "orcamento") else "responder"
         resposta = (d.get("resposta") or "").strip()
 
         # qualificação: atualiza a temperatura do lead (se ligado e veio no JSON)
@@ -150,16 +146,19 @@ def _atender(pool, conta_id, conversa_id):
             c.execute("update prospeccao set temperatura=%s, atualizado_em=now() where id=%s and conta_id=%s",
                       (d["temperatura"], conv[1], conta_id))
 
-        # decide roteamento
-        if escala or acao == "escalar" or conf < cfg["limiar"] or not cfg["pode_responder"]:
-            return _handoff(c, conta_id, conversa_id, conv[1], remetente, numero_dest,
-                            resposta or "Só um instante que já te passo pra um consultor 😊")
+        # o agente fica SEMPRE ativo e segue o painel: NUNCA se desliga sozinho (nem por
+        # confiança, nem por trocas, nem por 'achar' que precisa de humano). Quem assume
+        # é um humano — botão "Assumir" ou responder pelo chat. Se o dono desligou o
+        # "responder dúvidas" no painel, o agente fica quieto (mas continua ativo).
+        if not cfg["pode_responder"]:
+            return
 
         if acao == "orcamento" and cfg["pode_orcamento"]:
             return _orcamento(c, conta_id, conversa_id, conv, catalogo, d, remetente, numero_dest, resposta)
 
-        # responder normal
-        _enviar(c, conta_id, conversa_id, remetente, numero_dest, resposta)
+        # responde tudo (nunca escala/desliga automático)
+        _enviar(c, conta_id, conversa_id, remetente, numero_dest, resposta or
+                "Boa! Me conta um pouquinho mais que já te ajudo 😊")
 
 
 def _enviar(c, conta_id, conversa_id, remetente, numero, texto):

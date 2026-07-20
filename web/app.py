@@ -105,6 +105,31 @@ app.include_router(equipe_router)
 app.include_router(prospeccao_router)
 app.include_router(proposta_router)
 
+
+@app.on_event("startup")
+def _iniciar_poller_email() -> None:
+    """Poller de e-mail recebido (IMAP): a cada ~2min puxa o que chegou na caixa
+    pro inbox. Só liga se houver credencial (SMTP/IMAP); com 2 workers, o advisory
+    lock garante que só um sincroniza por vez. Best-effort — nunca quebra o app."""
+    try:
+        from finance import email_inbound as _ein
+        if not _ein.configurado():
+            return
+        import time as _time
+
+        def _loop():
+            pool = _setup()
+            while True:
+                try:
+                    _ein.poll_uma_vez(pool)
+                except Exception:  # noqa: BLE001
+                    pass
+                _time.sleep(120)
+
+        threading.Thread(target=_loop, daemon=True, name="email-poller").start()
+    except Exception:  # noqa: BLE001
+        pass
+
 _FAVICON_SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">'
     '<rect width="64" height="64" rx="14" fill="#0f7d5c"/>'

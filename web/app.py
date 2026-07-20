@@ -113,18 +113,16 @@ def _iniciar_poller_email() -> None:
     lock garante que só um sincroniza por vez. Best-effort — nunca quebra o app."""
     try:
         from finance import email_inbound as _ein
-        if not _ein.configurado():
-            return
         import time as _time
 
         def _loop():
             pool = _setup()
             while True:
+                _time.sleep(120)          # sleep-first: não roda em app efêmero (testes)
                 try:
                     _ein.poll_uma_vez(pool)
                 except Exception:  # noqa: BLE001
                     pass
-                _time.sleep(120)
 
         threading.Thread(target=_loop, daemon=True, name="email-poller").start()
     except Exception:  # noqa: BLE001

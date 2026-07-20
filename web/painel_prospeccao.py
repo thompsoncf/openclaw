@@ -535,13 +535,25 @@ def _canais_status(pool, conta_id: int) -> dict:
     twilio = bool(os.environ.get("TWILIO_ACCOUNT_SID") and os.environ.get("TWILIO_AUTH_TOKEN"))
     meta = bool(os.environ.get("META_PAGE_TOKEN") and os.environ.get("IG_ACCOUNT_ID"))
     nums = {}
+    email_senha = None
     with pool.connection() as c:
         for (canal, ident) in c.execute(
                 "select canal, identificador from canais_config where conta_id=%s and ativo",
                 (conta_id,)).fetchall():
             nums[canal] = ident
+        er = c.execute(
+            "select imap_senha from canais_config where conta_id=%s and canal='email'",
+            (conta_id,)).fetchone()
+        email_senha = er[0] if er else None
+    email_ident = nums.get("email")
+    # RECEBER precisa de endereço + senha (própria no banco, ou a do env quando é a mesma caixa do SMTP)
+    env_ok = bool(email_ident) and (email_ident.strip().lower()
+             == (os.environ.get("SMTP_USER") or "").strip().lower()) and bool(os.environ.get("SMTP_SENHA"))
+    email_rx = bool(email_ident) and (bool(email_senha) or env_ok)
     return {
-        "email": bool(remetente_configurado()),
+        "email": bool(remetente_configurado()),           # ENVIAR (SMTP global)
+        "email_rx": email_rx,                             # RECEBER (caixa da conta)
+        "email_ident": email_ident or "",
         "whatsapp": twilio and bool(nums.get("whatsapp")),
         "messenger": twilio and bool(nums.get("messenger")),
         "instagram": meta and bool(nums.get("instagram")),
@@ -834,8 +846,6 @@ def comunicacao_email_sync(request: Request):
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
     from finance import email_inbound as ein
-    if not ein.configurado():
-        return JSONResponse({"ok": False, "erro": "E-mail não configurado no ambiente (SMTP/IMAP)."})
     pool = get_pool()
     try:
         n = ein.sincronizar(pool, ctx["conta_id"])
@@ -845,10 +855,48 @@ def comunicacao_email_sync(request: Request):
         return JSONResponse({"ok": True, "novos": n})
     # nada novo: roda o diagnóstico pra explicar o porquê (IMAP off? login? spam?)
     try:
-        diag = ein.diagnostico(pool)
+        diag = ein.diagnostico(pool, ctx["conta_id"])
     except Exception:  # noqa: BLE001
         diag = {"msg": "Nenhum e-mail novo."}
     return JSONResponse({"ok": True, "novos": 0, "detalhe": diag.get("msg") or "Nenhum e-mail novo."})
+
+
+@router.post("/painel/prospeccao/comunicacao/email-config")
+def comunicacao_email_config(request: Request, endereco: str = Form(...),
+                             senha: str = Form(""), host: str = Form("")):
+    """Salva a caixa de e-mail (endereço + senha de app) da conta pra RECEBER. Só dono/gestor."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    destino = "/painel/prospeccao/comunicacao?aba=canais"
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "Só o dono/gestor configura os canais."
+        return RedirectResponse(destino, status_code=303)
+    endereco = (endereco or "").strip()
+    if "@" not in endereco:
+        request.session["prosp_aviso"] = "Informe um e-mail válido."
+        return RedirectResponse(destino, status_code=303)
+    from finance import email_inbound as ein
+    try:
+        ein.salvar_config(get_pool(), ctx["conta_id"], endereco, senha, host)
+        request.session["prosp_aviso"] = "Caixa de e-mail salva ✓ — clique em “Testar conexão”."
+    except Exception:  # noqa: BLE001
+        request.session["prosp_aviso"] = "Não consegui salvar a caixa de e-mail."
+    return RedirectResponse(destino, status_code=303)
+
+
+@router.post("/painel/prospeccao/comunicacao/email-testar")
+def comunicacao_email_testar(request: Request):
+    """Testa a conexão IMAP da caixa da conta e devolve o diagnóstico (pro botão)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    from finance import email_inbound as ein
+    try:
+        diag = ein.diagnostico(get_pool(), ctx["conta_id"])
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "erro": "Falha no teste."})
+    return JSONResponse({"ok": bool(diag.get("ok")), "msg": diag.get("msg") or ""})
 
 
 @router.post("/painel/prospeccao/comunicacao/canal-numero")
@@ -2520,9 +2568,28 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   <p class="mut" style="margin:.8rem 0 0">Todos os canais num lugar só. As credenciais ficam no ambiente (Render); aqui você vê o status e conecta cada um quando o acesso libera.</p>
   <div class="cx-cc">
     <div class="cx-card">
-      <h3>✉️ E-mail <span class="cx-stat {{ 'st-on' if canais.email else 'st-off' }}">● {{ 'Conectado' if canais.email else 'A configurar' }}</span></h3>
-      <div class="cx-kv"><span>Remetente</span><b>{{ remetente or '—' }}</b></div>
-      <div class="mut" style="margin-top:.4rem;font-size:.8rem">SMTP (Google Workspace). Prospecção fria ✓</div>
+      <h3>✉️ E-mail <span class="cx-stat {{ 'st-on' if canais.email else 'st-off' }}">● {{ 'Enviando' if canais.email else 'A configurar' }}</span></h3>
+      <div class="cx-kv"><span>Enviar (SMTP)</span><b>{{ remetente or '—' }}</b></div>
+      <div class="cx-kv"><span>Receber (IMAP)</span><b>{% if canais.email_rx %}<span style="color:var(--verde-claro)">✓ {{ canais.email_ident }}</span>{% else %}—{% endif %}</b></div>
+      {% if gerencia %}
+      <form method="post" action="/painel/prospeccao/comunicacao/email-config" style="margin-top:.6rem">
+        <label class="lbl">Caixa pra RECEBER (endereço + senha de app)</label>
+        <input class="fld" name="endereco" type="email" placeholder="voce@empresa.com" value="{{ canais.email_ident }}" style="margin-bottom:.35rem">
+        <input class="fld" name="senha" type="password" placeholder="senha de app (deixe vazio p/ manter)" autocomplete="new-password" style="margin-bottom:.35rem">
+        <input class="fld" name="host" placeholder="imap.gmail.com (padrão)" style="margin-bottom:.4rem">
+        <div style="display:flex;gap:.4rem">
+          <button class="pbtn" style="white-space:nowrap">Salvar</button>
+          <button type="button" class="pbtn ghost" id="etest-btn" onclick="emailTestar()" style="white-space:nowrap">Testar conexão</button>
+        </div>
+        <div class="mut" id="etest-msg" style="font-size:.78rem;margin-top:.4rem"></div>
+      </form>
+      <div class="mut" style="margin-top:.4rem;font-size:.76rem">Gmail/Workspace: gere uma <b>senha de app</b> em myaccount.google.com/apppasswords e ligue o IMAP. A senha é guardada só pra esta empresa.</div>
+      <script>
+      function emailTestar(){var b=document.getElementById('etest-btn'),m=document.getElementById('etest-msg');if(!b)return;b.disabled=true;var t=b.textContent;b.textContent='Testando…';m.textContent='';m.style.color='';
+        fetch('/painel/prospeccao/comunicacao/email-testar',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){b.disabled=false;b.textContent=t;
+          m.textContent=d.msg||d.erro||'—';m.style.color=d.ok?'var(--verde-claro)':'#e0a33e';}).catch(function(){b.disabled=false;b.textContent=t;m.textContent='Falha de rede.';m.style.color='#e0a33e';});}
+      </script>
+      {% else %}<div class="mut" style="margin-top:.4rem;font-size:.8rem">SMTP (Google Workspace). Prospecção fria ✓</div>{% endif %}
     </div>
     <div class="cx-card">
       <h3>💬 WhatsApp <span class="cx-stat {{ 'st-on' if canais.whatsapp else 'st-off' }}">● {{ 'Conectado' if canais.whatsapp else ('Falta o número' if canais.twilio else 'Falta credencial') }}</span></h3>

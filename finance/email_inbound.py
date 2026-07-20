@@ -1,20 +1,13 @@
-"""Puxador de e-mails RECEBIDOS via IMAP (Google Workspace) pro inbox omnichannel.
+"""Puxador de e-mails RECEBIDOS via IMAP pro inbox omnichannel.
 
-Reusa a MESMA conta/senha-de-app do envio: a senha de app do Google vale pra IMAP
-e SMTP, então sem SMTP_SENHA nada de novo é preciso — só habilitar o IMAP na caixa
-(Gmail → Configurações → Encaminhamento e POP/IMAP → IMAP ativado). Tolerante a
-falta de config: sem credencial vira no-op e nada quebra. O SDK é só a stdlib.
+Credencial POR CONTA (banco `canais_config`): cada empresa configura o próprio
+endereço + senha de app na aba Canais. Fallback pro env (SMTP_USER/SMTP_SENHA)
+quando o endereço da conta é o mesmo do SMTP global — assim a senha de app do
+envio serve pra receber também. Tolerante a falta de config: no-op, nada quebra.
+Só stdlib (imaplib/email).
 
-Env (todos com fallback pro SMTP já existente):
-- IMAP_HOST   (default imap.gmail.com)
-- IMAP_PORT   (default 993)
-- IMAP_USER   (default SMTP_USER)  — o endereço da caixa
-- IMAP_SENHA  (default SMTP_SENHA) — a senha de app do Google
-
-Roteamento multi-tenant: a caixa (global) pertence à conta que tem um canal 'email'
-em canais_config com identificador == IMAP_USER. O inbound entra como conversa/
-mensagem (canal='email', direcao='in', autor='lead'), casando o remetente com um
-lead (ou criando um lead novo, não-atribuído, igual ao inbound de WhatsApp).
+canais_config (canal='email'): identificador = endereço; imap_senha = senha de app;
+imap_host = servidor (default imap.gmail.com); ultimo_uid = checkpoint.
 """
 from __future__ import annotations
 
@@ -32,24 +25,55 @@ _TIMEOUT = 20
 _LOCK_KEY = 918273645          # advisory lock do poller (evita 2 workers juntos)
 
 
-def _cfg() -> dict | None:
-    user = os.environ.get("IMAP_USER") or os.environ.get("SMTP_USER")
-    senha = os.environ.get("IMAP_SENHA") or os.environ.get("SMTP_SENHA")
-    if not (user and senha):
+# --------------------------------------------------------------- config
+
+def _env_senha_para(endereco: str) -> str | None:
+    """Se o endereço da conta é o mesmo do SMTP global, a senha de app do env serve."""
+    u = (os.environ.get("SMTP_USER") or "").strip().lower()
+    s = os.environ.get("SMTP_SENHA")
+    return s if (u and s and u == (endereco or "").strip().lower()) else None
+
+
+def _conta_cfg(pool, conta_id: int) -> dict | None:
+    """Config IMAP daquela conta (banco + fallback env). None se não dá pra logar."""
+    with pool.connection() as c:
+        r = c.execute(
+            """select identificador, imap_senha, imap_host, ultimo_uid
+                 from canais_config where conta_id=%s and canal='email' and ativo""",
+            (conta_id,)).fetchone()
+    if not r or not r[0]:
         return None
-    return {"host": os.environ.get("IMAP_HOST", "imap.gmail.com"),
-            "port": int(os.environ.get("IMAP_PORT", "993")),
-            "user": user, "senha": senha}
+    user = r[0].strip()
+    senha = (r[1] or "").strip() or _env_senha_para(user)
+    if not senha:
+        return None
+    return {"host": (r[2] or "imap.gmail.com").strip(), "port": 993,
+            "user": user, "senha": senha, "ultimo_uid": r[3]}
 
 
-def configurado() -> bool:
-    return _cfg() is not None
+def configurado_conta(pool, conta_id: int) -> bool:
+    return _conta_cfg(pool, conta_id) is not None
 
 
-def endereco() -> str | None:
-    c = _cfg()
-    return c["user"] if c else None
+def salvar_config(pool, conta_id: int, endereco: str, senha: str, host: str = "") -> None:
+    """Salva/atualiza o canal de e-mail da conta. Senha vazia = mantém a atual."""
+    endereco = (endereco or "").strip()
+    host = (host or "").strip() or "imap.gmail.com"
+    with pool.connection() as c:
+        c.execute(
+            """insert into canais_config (conta_id, canal, identificador, imap_host, ativo)
+               values (%s,'email',%s,%s,true)
+               on conflict (conta_id, canal) do update set
+                 identificador=excluded.identificador, imap_host=excluded.imap_host,
+                 ativo=true, ultimo_uid=null, atualizado_em=now()""",
+            (conta_id, endereco, host))
+        if (senha or "").strip():
+            c.execute("update canais_config set imap_senha=%s where conta_id=%s and canal='email'",
+                      ((senha or "").strip(), conta_id))
+        c.commit()
 
+
+# --------------------------------------------------------------- parsing
 
 def _dec(s: str) -> str:
     try:
@@ -68,7 +92,6 @@ def _strip_html(h: str) -> str:
 
 
 def _corpo(msg) -> str:
-    """Extrai o texto do e-mail (prefere text/plain; cai pro html sem tags)."""
     if msg.is_multipart():
         for part in msg.walk():
             disp = str(part.get("Content-Disposition") or "")
@@ -94,10 +117,18 @@ def _corpo(msg) -> str:
         return ""
 
 
-def buscar_novos(desde_uid: int | None = None, limite: int = 40):
-    """Conecta na INBOX e devolve (lista de e-mails novos, maior_uid_visto).
-    Best-effort: qualquer falha → ([], desde_uid)."""
-    cfg = _cfg()
+def _mascara(e: str) -> str:
+    e = e or ""
+    if "@" not in e:
+        return e
+    loc, dom = e.split("@", 1)
+    return (loc[:3] + "***@" + dom) if len(loc) > 3 else (loc[:1] + "***@" + dom)
+
+
+# --------------------------------------------------------------- IMAP
+
+def buscar_novos(cfg: dict, desde_uid: int | None = None, limite: int = 40):
+    """Conecta na INBOX e devolve (lista de e-mails novos, maior_uid). Best-effort."""
     if not cfg:
         return [], desde_uid
     out, maior = [], int(desde_uid or 0)
@@ -116,9 +147,7 @@ def buscar_novos(desde_uid: int | None = None, limite: int = 40):
         if typ != "OK":
             return [], desde_uid
         uids = [int(u) for u in (data[0] or b"").split()]
-        # UID n:* pode devolver a última msg mesmo sem nova; filtra <= checkpoint
-        uids = [u for u in uids if u > int(desde_uid or 0)]
-        uids = sorted(uids)[-limite:]           # 1ª rodada: só as mais recentes
+        uids = sorted(u for u in uids if u > int(desde_uid or 0))[-limite:]
         for uid in uids:
             try:
                 typ, md = M.uid("fetch", str(uid), "(RFC822)")
@@ -154,36 +183,17 @@ def buscar_novos(desde_uid: int | None = None, limite: int = 40):
     return out, (maior or desde_uid)
 
 
-def _conta_do_mailbox(pool, endereco_caixa: str):
-    """Conta dona da caixa: canal 'email' ativo com identificador == endereço."""
-    with pool.connection() as c:
-        r = c.execute(
-            """select conta_id, ultimo_uid from canais_config
-                where canal='email' and ativo and lower(identificador)=lower(%s) limit 1""",
-            (endereco_caixa,)).fetchone()
-    return (r[0], r[1]) if r else (None, None)
-
-
-def sincronizar(pool, conta_id: int | None = None) -> int:
-    """Puxa os e-mails novos da caixa e grava no inbox. Devolve quantos entraram.
-    Se conta_id vier, confirma que a caixa é daquela conta; senão descobre pela
-    config. Best-effort — nunca estoura."""
-    cfg = _cfg()
+def sincronizar(pool, conta_id: int) -> int:
+    """Puxa os e-mails novos da caixa da conta e grava no inbox. Best-effort."""
+    cfg = _conta_cfg(pool, conta_id)
     if not cfg:
         return 0
-    dono, ultimo = _conta_do_mailbox(pool, cfg["user"])
-    if not dono:
-        return 0
-    if conta_id is not None and conta_id != dono:
-        return 0                      # a caixa global não é dessa conta
-    conta_id = dono
-
-    novos, maior = buscar_novos(desde_uid=ultimo)
+    novos, maior = buscar_novos(cfg, desde_uid=cfg["ultimo_uid"])
     n = 0
     for m in novos:
         addr = m["from_email"]
         if not addr or addr == cfg["user"].strip().lower():
-            continue                  # sem remetente ou é a própria caixa
+            continue
         try:
             with pool.connection() as c:
                 if m["message_id"]:
@@ -225,71 +235,61 @@ def sincronizar(pool, conta_id: int | None = None) -> int:
                     (m["quando"], conv_id))
                 c.commit()
                 n += 1
-        except Exception as e:  # noqa: BLE001 (ex.: corrida entre 2 workers no índice único)
+        except Exception as e:  # noqa: BLE001 (corrida no índice único etc.)
             _log.info("email_in: pulei um e-mail (%s): %s", addr, e)
             continue
 
-    if maior and maior != ultimo:
+    if maior and maior != cfg["ultimo_uid"]:
         try:
             with pool.connection() as c:
-                c.execute(
-                    """update canais_config set ultimo_uid=%s, atualizado_em=now()
-                        where conta_id=%s and canal='email'""", (maior, conta_id))
+                c.execute("""update canais_config set ultimo_uid=%s, atualizado_em=now()
+                              where conta_id=%s and canal='email'""", (maior, conta_id))
                 c.commit()
         except Exception:  # noqa: BLE001
             pass
     return n
 
 
-def _mascara(e: str) -> str:
-    e = e or ""
-    if "@" not in e:
-        return e
-    loc, dom = e.split("@", 1)
-    return (loc[:3] + "***@" + dom) if len(loc) > 3 else (loc[:1] + "***@" + dom)
-
-
-def diagnostico(pool) -> dict:
-    """Testa a caixa AO VIVO e devolve o porquê de vir (ou não) e-mail — pra
-    mostrar no painel. Não importa nada, só verifica config → conta → conexão →
-    login → INBOX."""
-    cfg = _cfg()
-    if not cfg:
+def diagnostico(pool, conta_id: int) -> dict:
+    """Testa a caixa da conta AO VIVO e diz em que etapa parou (pra mostrar no painel)."""
+    with pool.connection() as c:
+        r = c.execute(
+            "select identificador, imap_senha, imap_host from canais_config where conta_id=%s and canal='email' and ativo",
+            (conta_id,)).fetchone()
+    if not r or not r[0]:
         return {"ok": False, "etapa": "config",
-                "msg": "Sem credencial de e-mail no ambiente (SMTP_USER/SMTP_SENHA no Render)."}
-    d = {"usuario": _mascara(cfg["user"]), "host": cfg["host"]}
-    dono, ultimo = _conta_do_mailbox(pool, cfg["user"])
-    d["ultimo_uid"] = ultimo
-    if not dono:
-        d.update(ok=False, etapa="conta",
-                 msg=(f"A caixa {_mascara(cfg['user'])} não bate com nenhum canal 'email' "
-                      "cadastrado. Confira se o SMTP_USER é exatamente o endereço da caixa."))
-        return d
+                "msg": "Nenhum e-mail configurado nesta conta. Preencha o endereço e a senha de app aqui na aba Canais."}
+    endereco = r[0].strip()
+    senha = (r[1] or "").strip() or _env_senha_para(endereco)
+    host = (r[2] or "imap.gmail.com").strip()
+    if not senha:
+        return {"ok": False, "etapa": "senha", "usuario": _mascara(endereco),
+                "msg": "Falta a senha de app dessa caixa. Cole a senha de app do Google no campo abaixo e salve."}
     try:
-        M = imaplib.IMAP4_SSL(cfg["host"], cfg["port"], timeout=_TIMEOUT)
+        M = imaplib.IMAP4_SSL(host, 993, timeout=_TIMEOUT)
     except Exception as e:  # noqa: BLE001
-        d.update(ok=False, etapa="conexao", msg=f"Não conectei no IMAP ({cfg['host']}): {e}")
-        return d
+        return {"ok": False, "etapa": "conexao", "usuario": _mascara(endereco),
+                "msg": f"Não conectei no servidor IMAP ({host}): {e}"}
     try:
-        M.login(cfg["user"], cfg["senha"])
+        M.login(endereco, senha)
     except Exception as e:  # noqa: BLE001
         try:
             M.logout()
         except Exception:  # noqa: BLE001
             pass
-        d.update(ok=False, etapa="login",
-                 msg=("Falha no login IMAP. Ligue o IMAP no Gmail (⚙️ → Ver todas as "
-                      "configurações → Encaminhamento e POP/IMAP → Ativar IMAP) e confirme "
-                      f"que a SMTP_SENHA é uma SENHA DE APP do Google. Detalhe: {e}"))
-        return d
+        return {"ok": False, "etapa": "login", "usuario": _mascara(endereco),
+                "msg": ("Falha no login IMAP. Confira: (1) IMAP ligado na caixa/domínio; "
+                        "(2) a senha é uma SENHA DE APP do Google (não a senha normal). "
+                        f"Detalhe: {e}")}
     try:
         typ, data = M.select("INBOX")
         total = int(data[0]) if typ == "OK" and data and data[0] else 0
-        d.update(ok=True, etapa="ok", inbox_total=total,
-                 msg=f"Conectei na caixa! A Caixa de Entrada tem {total} e-mail(s). "
-                     "Se o seu teste não veio, ele pode ter caído em Spam/Promoções.")
+        d = {"ok": True, "etapa": "ok", "usuario": _mascara(endereco), "inbox_total": total,
+             "msg": f"✅ Conectei em {_mascara(endereco)}! A Caixa de Entrada tem {total} e-mail(s). "
+                    "Se o seu teste não aparecer, ele pode estar em Spam/Promoções."}
     except Exception as e:  # noqa: BLE001
-        d.update(ok=False, etapa="inbox", msg=f"Loguei, mas não abri a INBOX: {e}")
+        d = {"ok": False, "etapa": "inbox", "usuario": _mascara(endereco),
+             "msg": f"Loguei, mas não abri a INBOX: {e}"}
     finally:
         try:
             M.logout()
@@ -299,19 +299,25 @@ def diagnostico(pool) -> dict:
 
 
 def poll_uma_vez(pool) -> int:
-    """Uma passada do poller, com advisory lock (só 1 worker sincroniza por vez)."""
-    if not configurado():
-        return 0
+    """Uma passada do poller: sincroniza toda conta com e-mail configurado, com
+    advisory lock (só 1 worker por vez)."""
+    total = 0
     try:
         with pool.connection() as c:
             got = c.execute("select pg_try_advisory_lock(%s)", (_LOCK_KEY,)).fetchone()[0]
             if not got:
                 return 0
             try:
-                return sincronizar(pool)
+                contas = [row[0] for row in c.execute(
+                    "select conta_id from canais_config where canal='email' and ativo").fetchall()]
+                for cid in contas:
+                    try:
+                        total += sincronizar(pool, cid)
+                    except Exception:  # noqa: BLE001
+                        pass
             finally:
                 c.execute("select pg_advisory_unlock(%s)", (_LOCK_KEY,))
                 c.commit()
     except Exception as e:  # noqa: BLE001
         _log.info("email_in: poll falhou: %s", e)
-        return 0
+    return total

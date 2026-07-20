@@ -533,14 +533,16 @@ def _conta_por_ident(c, canal, ident_digitos):
 def _canais_status(pool, conta_id: int) -> dict:
     """Status de cada canal: credencial global + número/página da empresa (banco)."""
     twilio = bool(os.environ.get("TWILIO_ACCOUNT_SID") and os.environ.get("TWILIO_AUTH_TOKEN"))
-    meta = bool(os.environ.get("META_PAGE_TOKEN") and os.environ.get("IG_ACCOUNT_ID"))
+    meta_app = bool(os.environ.get("META_APP_SECRET") and os.environ.get("META_VERIFY_TOKEN"))
     nums = {}
     email_senha = None
+    tokens = {}
     with pool.connection() as c:
-        for (canal, ident) in c.execute(
-                "select canal, identificador from canais_config where conta_id=%s and ativo",
+        for (canal, ident, tok) in c.execute(
+                "select canal, identificador, token from canais_config where conta_id=%s and ativo",
                 (conta_id,)).fetchall():
             nums[canal] = ident
+            tokens[canal] = tok
         er = c.execute(
             "select imap_senha from canais_config where conta_id=%s and canal='email'",
             (conta_id,)).fetchone()
@@ -550,14 +552,18 @@ def _canais_status(pool, conta_id: int) -> dict:
     env_ok = bool(email_ident) and (email_ident.strip().lower()
              == (os.environ.get("SMTP_USER") or "").strip().lower()) and bool(os.environ.get("SMTP_SENHA"))
     email_rx = bool(email_ident) and (bool(email_senha) or env_ok)
+    # Messenger/Instagram: precisa do app (env) + Página/IG id + Page Token (por conta)
+    messenger_ok = meta_app and bool(nums.get("messenger")) and bool(tokens.get("messenger"))
+    instagram_ok = meta_app and bool(nums.get("instagram")) and bool(tokens.get("instagram"))
     return {
         "email": bool(remetente_configurado()),           # ENVIAR (SMTP global)
         "email_rx": email_rx,                             # RECEBER (caixa da conta)
         "email_ident": email_ident or "",
         "whatsapp": twilio and bool(nums.get("whatsapp")),
-        "messenger": twilio and bool(nums.get("messenger")),
-        "instagram": meta and bool(nums.get("instagram")),
-        "twilio": twilio, "meta": meta, "numeros": nums,
+        "messenger": messenger_ok,
+        "instagram": instagram_ok,
+        "twilio": twilio, "meta": meta_app, "numeros": nums,
+        "tokens_set": {k: bool(v) for k, v in tokens.items()},
     }
 
 
@@ -733,6 +739,11 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
     elif cv[0] == "email":
         _dest_mail = (cv[9] or cv[13] or "")            # e-mail do lead OU do contato órfão
         pode_wa = bool(remetente_configurado()) and ("@" in _dest_mail)
+    elif cv[0] in ("messenger", "instagram"):
+        with pool.connection() as _c:
+            _t = _c.execute("select token from canais_config where conta_id=%s and canal=%s and ativo",
+                            (ctx["conta_id"], cv[0])).fetchone()
+        pode_wa = bool(_t and _t[0]) and bool(cv[13])   # token da Página + PSID/IGSID (contato_ref)
     lead = {"id": cv[2], "empresa": cv[3] or cv[13] or "—", "canal": cv[0], "canal_rot": CANAL_ROT.get(cv[0], cv[0]),
             "segmento": cv[4], "cidade": cv[5], "uf": cv[6],
             "whatsapp": destino, "email": cv[9], "vendedor": cv[11],
@@ -784,6 +795,16 @@ def comunicacao_responder(request: Request, conversa_id: int = Form(...), texto:
             if not ok:
                 return JSONResponse({"ok": False, "erro": "Não consegui enviar o e-mail (confira o SMTP no Render)."})
             _add_msg(c, conversa_id, "email", "out", "humano", f"{assunto}\n\n{texto}", ctx["membro_id"])
+            c.commit()
+            return JSONResponse({"ok": True})
+        if canal in ("messenger", "instagram"):
+            from finance import meta_msg
+            r = c.execute("select token from canais_config where conta_id=%s and canal=%s and ativo",
+                          (ctx["conta_id"], canal)).fetchone()
+            res = meta_msg.enviar(r[0] if r else None, (cv[2] or "").strip(), texto, canal)
+            if not res.get("ok"):
+                return JSONResponse({"ok": False, "erro": "Não consegui enviar (fora da janela de 24h, ou falta conectar a Página/token na aba Canais)."})
+            _add_msg(c, conversa_id, canal, "out", "humano", texto, ctx["membro_id"], res.get("sid"))
             c.commit()
             return JSONResponse({"ok": True})
         if canal != "whatsapp":
@@ -918,8 +939,10 @@ def comunicacao_virar_lead(request: Request, conversa_id: int = Form(...)):
 
 
 @router.post("/painel/prospeccao/comunicacao/canal-numero")
-def comunicacao_canal_numero(request: Request, canal: str = Form(...), numero: str = Form("")):
-    """Vincula (ou limpa) o número/identificador de um canal à empresa. Só dono/gestor."""
+def comunicacao_canal_numero(request: Request, canal: str = Form(...), numero: str = Form(""),
+                             token: str = Form("")):
+    """Vincula (ou limpa) o identificador de um canal à empresa (nº WhatsApp, ou
+    Página/IG id + Page Token da Meta). Só dono/gestor."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -931,6 +954,7 @@ def comunicacao_canal_numero(request: Request, canal: str = Form(...), numero: s
         return RedirectResponse(destino, status_code=303)
     from finance import whatsapp_twilio as wa
     ident = wa.normalizar_from(numero) if canal == "whatsapp" else (numero or "").strip()
+    token = (token or "").strip()
     pool = get_pool()
     try:
         with pool.connection() as c:
@@ -941,10 +965,13 @@ def comunicacao_canal_numero(request: Request, canal: str = Form(...), numero: s
                        on conflict (conta_id, canal)
                        do update set identificador=excluded.identificador, ativo=true, atualizado_em=now()""",
                     (ctx["conta_id"], canal, ident))
-                msg = "Número vinculado a esta empresa ✓"
+                if token:      # Page Access Token (Meta) — vazio mantém o atual
+                    c.execute("update canais_config set token=%s where conta_id=%s and canal=%s",
+                              (token, ctx["conta_id"], canal))
+                msg = "Canal vinculado a esta empresa ✓"
             else:
                 c.execute("delete from canais_config where conta_id=%s and canal=%s", (ctx["conta_id"], canal))
-                msg = "Número removido."
+                msg = "Canal removido."
             c.commit()
     except Exception:  # noqa: BLE001 — provável colisão do índice (canal, identificador)
         msg = "Esse número já está vinculado a outra empresa."
@@ -1126,6 +1153,75 @@ async def webhook_twilio(request: Request, background_tasks: BackgroundTasks):
     from finance import agente as _ag
     background_tasks.add_task(_ag.atender, get_pool(), conta_id, conv_id)
     return Response("<Response></Response>", media_type="application/xml")
+
+
+def _conta_por_meta(c, plataforma, ident):
+    """Roteia o inbound da Meta: acha a empresa dona da Página/IG que recebeu."""
+    r = c.execute(
+        "select conta_id from canais_config where canal=%s and ativo and identificador=%s limit 1",
+        (plataforma, str(ident))).fetchone()
+    return r[0] if r else None
+
+
+def _conversa_meta(c, conta_id, plataforma, sender):
+    """Acha/cria a conversa (órfã, sem lead) daquele remetente Messenger/Instagram."""
+    conv = c.execute(
+        """select id from conversas where conta_id=%s and canal=%s and prospeccao_id is null
+            and contato_ref=%s order by ultima_msg_em desc limit 1""",
+        (conta_id, plataforma, str(sender))).fetchone()
+    if conv:
+        return conv[0]
+    return c.execute(
+        """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status, ultima_msg_em)
+           values (%s,null,%s,%s,'aberta',now()) returning id""",
+        (conta_id, plataforma, str(sender))).fetchone()[0]
+
+
+@router.get("/webhooks/meta")
+def webhook_meta_verify(request: Request):
+    """Verificação do webhook da Meta (GET com hub.challenge)."""
+    from finance import meta_msg
+    q = request.query_params
+    ch = meta_msg.verificar_challenge(q.get("hub.mode"), q.get("hub.verify_token"), q.get("hub.challenge"))
+    if ch is None:
+        return Response(status_code=403)
+    return Response(ch, media_type="text/plain")
+
+
+@router.post("/webhooks/meta")
+async def webhook_meta(request: Request, background_tasks: BackgroundTasks):
+    """Recebe mensagens de Messenger + Instagram (Meta). Valida a assinatura, roteia
+    pela Página/IG que recebeu, grava como conversa órfã (você decide se vira lead) e
+    dispara o agente."""
+    from finance import meta_msg
+    body = await request.body()
+    if not meta_msg.validar_assinatura(body, request.headers.get("x-hub-signature-256", "")):
+        return Response(status_code=403)
+    try:
+        payload = json.loads(body.decode("utf-8") or "{}")
+    except Exception:  # noqa: BLE001
+        return Response("ok", media_type="text/plain")
+    eventos = meta_msg.parse_eventos(payload)
+    pool = get_pool()
+    disparar = []
+    with pool.connection() as c:
+        for ev in eventos:
+            conta_id = _conta_por_meta(c, ev["plataforma"], ev["conta_ident"])
+            if not conta_id:
+                continue
+            conv_id = _conversa_meta(c, conta_id, ev["plataforma"], ev["sender"])
+            _add_msg(c, conv_id, ev["plataforma"], "in", "lead", ev["texto"])
+            master = c.execute("select coalesce(ativo,false) from agente_config where conta_id=%s",
+                               (conta_id,)).fetchone()
+            if master and master[0]:
+                c.execute("update conversas set agente_ativo=true where id=%s and status<>'pendente'",
+                          (conv_id,))
+                disparar.append((conta_id, conv_id))
+        c.commit()
+    from finance import agente as _ag
+    for (cid, cvid) in disparar:
+        background_tasks.add_task(_ag.atender, get_pool(), cid, cvid)
+    return Response("ok", media_type="text/plain")
 
 
 # ================================================================ FICHA DO ALVO
@@ -2657,15 +2753,31 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="mut" style="margin-top:.4rem;font-size:.8rem">No painel Twilio, aponte o webhook do número pra <code>/webhooks/twilio</code>.</div>
     </div>
     <div class="cx-card">
-      <h3>🔵 Messenger <span class="cx-stat {{ 'st-on' if canais.messenger else 'st-off' }}">● {{ 'Conectado' if canais.messenger else 'A conectar' }}</span></h3>
-      <div class="mut" style="font-size:.8rem">Via Twilio (mesmo webhook). Precisa da Página do Facebook + revisão do app na Meta.</div>
-      <div class="mut" style="margin-top:.4rem;font-size:.8rem">📥 Canal de <b>resposta</b> (janela 24h) — não é abordagem fria.</div>
+      <h3>🔵 Messenger <span class="cx-stat {{ 'st-on' if canais.messenger else 'st-off' }}">● {{ 'Conectado' if canais.messenger else ('Falta Página/token' if canais.meta else 'Falta app (env)') }}</span></h3>
+      <div class="mut" style="font-size:.8rem">Via Meta direto. App da Meta (env global) + Página do Facebook. 📥 responde na janela de 24h.</div>
+      <div class="cx-env"><b>META_APP_SECRET</b>=•••••<br><b>META_VERIFY_TOKEN</b>=•••••</div>
+      {% if gerencia %}
+      <form method="post" action="/painel/prospeccao/comunicacao/canal-numero" style="margin-top:.6rem">
+        <input type="hidden" name="canal" value="messenger">
+        <label class="lbl">Page ID (Facebook) + Page Access Token</label>
+        <input class="fld" name="numero" placeholder="Page ID" value="{{ canais.numeros.get('messenger','') }}" style="margin-bottom:.35rem">
+        <input class="fld" name="token" type="password" placeholder="Page Access Token {% if canais.tokens_set.get('messenger') %}(salvo — vazio mantém){% endif %}" autocomplete="new-password" style="margin-bottom:.4rem">
+        <button class="pbtn">Salvar</button>
+      </form>{% endif %}
+      <div class="mut" style="margin-top:.4rem;font-size:.8rem">No app da Meta, aponte o webhook pra <code>/webhooks/meta</code> (verify token = META_VERIFY_TOKEN) e assine <code>messages</code>.</div>
     </div>
     <div class="cx-card">
-      <h3>📸 Instagram <span class="cx-stat {{ 'st-on' if canais.instagram else 'st-off' }}">● {{ 'Conectado' if canais.instagram else 'A conectar' }}</span></h3>
-      <div class="mut" style="font-size:.8rem">Via Meta direto (a Twilio não cobre IG). Conta IG Profissional ligada à Página + App Review.</div>
-      <div class="cx-env"><b>META_APP_ID</b>=•••••<br><b>META_PAGE_TOKEN</b>=•••••<br><b>IG_ACCOUNT_ID</b>=•••••</div>
-      <div class="mut" style="margin-top:.4rem;font-size:.8rem">Webhook: <code>/webhooks/meta</code> · 📥 <b>resposta</b>.</div>
+      <h3>📸 Instagram <span class="cx-stat {{ 'st-on' if canais.instagram else ('Falta conta/token' if canais.meta else 'Falta app (env)') }}">● {{ 'Conectado' if canais.instagram else ('Falta conta/token' if canais.meta else 'Falta app (env)') }}</span></h3>
+      <div class="mut" style="font-size:.8rem">Via Meta direto (mesmo webhook). Conta IG Profissional ligada à Página. 📥 responde na janela de 24h.</div>
+      {% if gerencia %}
+      <form method="post" action="/painel/prospeccao/comunicacao/canal-numero" style="margin-top:.6rem">
+        <input type="hidden" name="canal" value="instagram">
+        <label class="lbl">IG Account ID + Page Access Token</label>
+        <input class="fld" name="numero" placeholder="IG Account ID" value="{{ canais.numeros.get('instagram','') }}" style="margin-bottom:.35rem">
+        <input class="fld" name="token" type="password" placeholder="Page Access Token {% if canais.tokens_set.get('instagram') %}(salvo — vazio mantém){% endif %}" autocomplete="new-password" style="margin-bottom:.4rem">
+        <button class="pbtn">Salvar</button>
+      </form>{% endif %}
+      <div class="mut" style="margin-top:.4rem;font-size:.8rem">Webhook: <code>/webhooks/meta</code> · assine <code>messages</code> no produto Instagram do app.</div>
     </div>
   </div>
   {% endif %}

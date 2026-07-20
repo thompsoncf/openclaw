@@ -550,7 +550,7 @@ def _canais_status(pool, conta_id: int) -> dict:
 
 
 _AGENTE_PADRAO = {"ativo": False, "limiar_confianca": 80, "horario": "comercial",
-                  "tom": "informal", "max_trocas": 4, "escalar_para": "dono_lead",
+                  "tom": "informal", "max_trocas": 20, "escalar_para": "dono_lead",
                   "pode_responder": True, "pode_qualificar": True, "pode_agendar": True,
                   "pode_orcamento": True, "orcamento_proativo": False}
 
@@ -858,7 +858,7 @@ async def comunicacao_agente_config(request: Request):
     tom = f.get("tom") if f.get("tom") in ("informal", "formal") else "informal"
     escalar = f.get("escalar_para") if f.get("escalar_para") in ("dono_lead", "plantao") else "dono_lead"
     vals = (_b("ativo"), _i("limiar_confianca", 80, 50, 95), horario, tom,
-            _i("max_trocas", 4, 1, 20), escalar, _b("pode_responder"), _b("pode_qualificar"),
+            _i("max_trocas", 20, 1, 100), escalar, _b("pode_responder"), _b("pode_qualificar"),
             _b("pode_agendar"), _b("pode_orcamento"), _b("orcamento_proativo"))
     with get_pool().connection() as c:
         c.execute(
@@ -2361,7 +2361,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <div class="aggrid">
           <div class="agfield"><label>Responder em</label><select class="fld" name="horario"><option value="comercial" {% if ag_cfg.horario=='comercial' %}selected{% endif %}>Horário comercial</option><option value="24h" {% if ag_cfg.horario=='24h' %}selected{% endif %}>24 horas</option></select></div>
           <div class="agfield"><label>Tom</label><select class="fld" name="tom"><option value="informal" {% if ag_cfg.tom=='informal' %}selected{% endif %}>Informal</option><option value="formal" {% if ag_cfg.tom=='formal' %}selected{% endif %}>Formal</option></select></div>
-          <div class="agfield"><label>Máx. trocas antes de te chamar</label><input class="fld" name="max_trocas" inputmode="numeric" value="{{ ag_cfg.max_trocas }}"></div>
+          <div class="agfield"><label>Máx. respostas do bot antes de te chamar</label><input class="fld" name="max_trocas" inputmode="numeric" value="{{ ag_cfg.max_trocas }}"><small class="mut" style="font-size:.72rem">12 ou mais = praticamente sempre ativo (não passa pro humano por quantidade)</small></div>
           <div class="agfield"><label>Escalar para</label><select class="fld" name="escalar_para"><option value="dono_lead" {% if ag_cfg.escalar_para=='dono_lead' %}selected{% endif %}>Dono do lead</option><option value="plantao" {% if ag_cfg.escalar_para=='plantao' %}selected{% endif %}>Vendedor de plantão</option></select></div>
         </div>
       </div>
@@ -2496,7 +2496,14 @@ function cxPollThread(){
     if(!d.ok||_cxConv!==id)return;
     if((d.agente_ativo?1:0)!==_cxAg||cxSig(d).split('|')[3]!==_cxSig.split('|')[3]){cxOpen(document.getElementById('cxc-'+id),id);return;}
     var sig=cxSig(d);if(sig===_cxSig)return;_cxSig=sig;
-    var b=document.getElementById('cx-msgs');if(b){b.innerHTML=cxMsgsHtml(d);cxScroll(false);}
+    var b=document.getElementById('cx-msgs');
+    if(b){
+      // se o usuário está acompanhando o rodapé, seguimos a conversa; se ele subiu
+      // pra ler o histórico, preservamos a posição (innerHTML zera o scroll senão).
+      var perto=(b.scrollHeight-b.scrollTop-b.clientHeight)<120;var st=b.scrollTop;
+      b.innerHTML=cxMsgsHtml(d);
+      b.scrollTop=perto?b.scrollHeight:st;
+    }
   }).catch(function(){});
 }
 function cxParams(){var q=new URLSearchParams(location.search);return 'canal='+(q.get('canal')||'')+'&vendedor='+(q.get('vendedor')||'');}

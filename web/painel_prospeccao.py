@@ -720,7 +720,11 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
                 where msg.conversa_id=%s order by msg.criado_em asc""", (conversa_id,)).fetchall()
     msgs = []
     for (cn, direcao, autor, quando, texto, mid, nome) in rows:
-        cab, _, corpo = (texto or "").partition("\n\n")
+        # só e-mail separa assunto (cabeçalho) do corpo; os outros canais são texto puro
+        if cn == "email" and "\n\n" in (texto or ""):
+            cab, _, corpo = (texto or "").partition("\n\n")
+        else:
+            cab, corpo = "", (texto or "")
         if autor == "bot":
             quem = "🤖 Agente"
         elif autor == "lead":
@@ -729,7 +733,7 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
             quem = "Você" if mid and mid == ctx["membro_id"] else (nome or "—")
         msgs.append({"canal": cn, "direcao": direcao, "autor": autor,
                      "quando": quando.strftime("%d/%m %H:%M") if quando else "",
-                     "quem": quem, "cabecalho": cab.strip(), "corpo": (corpo or cab).strip()})
+                     "quem": quem, "cabecalho": cab.strip(), "corpo": corpo.strip()})
     from finance import whatsapp_twilio as _wa
     destino = cv[7] or cv[8] or cv[13]     # telefone do lead OU contato_ref (conversa sem lead)
     pode_wa = False

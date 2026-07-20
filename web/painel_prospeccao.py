@@ -1530,6 +1530,44 @@ def prospeccao_enviar_email(request: Request, alvo_id: int, assunto: str = Form(
     return JSONResponse({"ok": True})
 
 
+@router.post("/painel/prospeccao/{alvo_id}/convidar-zaq")
+def prospeccao_convidar_zaq(request: Request, alvo_id: int):
+    """Manda pro lead um e-mail convidando a CRIAR conta no Zaq (link pro /cadastro
+    pré-preenchido). Reusa o cadastro público — sem token/senha novos."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    pool = get_pool()
+    alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
+    if not alvo or not _pode_ver(alvo, ctx):
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    destino = (alvo.get("email") or "").strip()
+    if not destino:
+        return JSONResponse({"ok": False, "erro": "Lead sem e-mail — cadastre o e-mail antes."})
+    if not remetente_configurado():
+        return JSONResponse({"ok": False, "erro": "E-mail não configurado no ambiente."})
+    from urllib.parse import urlencode
+    from finance.email_sender import _app_url, enviar_convite_zaq
+    q = urlencode({k: v for k, v in {
+        "nome": alvo.get("empresa") or "",
+        "email": destino,
+        "whatsapp": alvo.get("whatsapp") or alvo.get("telefone") or "",
+    }.items() if v})
+    link = _app_url() + "/cadastro" + (("?" + q) if q else "")
+    _nome_rem, email_rem = _membro_contato(pool, ctx["conta_id"], ctx["membro_id"])
+    ok = enviar_convite_zaq(destino, alvo.get("empresa"), link,
+                            from_nome=(ctx["conta"][2] or None), reply_to=email_rem or None)
+    if not ok:
+        return JSONResponse({"ok": False, "erro": "Não consegui enviar o convite (confira o SMTP)."})
+    remetente = remetente_configurado() or ""
+    with pool.connection() as c:
+        _reg_atividade(c, alvo_id, ctx["conta_id"], ctx["membro_id"], "email",
+                       f"De {remetente} · Para {destino} · Convite pro Zaq\n\n"
+                       f"Convite pra criar conta no Zaq: {link}", alvo["status"])
+        c.commit()
+    return JSONResponse({"ok": True})
+
+
 @router.post("/painel/prospeccao/{alvo_id}/registrar-whatsapp")
 def prospeccao_registrar_whatsapp(request: Request, alvo_id: int, texto: str = Form("")):
     """Registra na timeline que o WhatsApp de 1º contato foi disparado (o envio é
@@ -2031,8 +2069,15 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% if not vende_servico %}<button type="button" class="pbtn" disabled title="Disponível pra empresas que vendem serviço">📄 Gerar orçamento</button>
       {% elif a.orcamento_id %}<a class="pbtn" href="/painel/servicos?abrir={{ a.orcamento_id }}">📄 Ver orçamento</a>
       {% else %}<form method="post" action="/painel/prospeccao/{{ a.id }}/orcamento" style="margin:0"><button class="pbtn">📄 Gerar orçamento</button></form>{% endif %}
+      {% if a.email %}<button type="button" class="pbtn ghost" id="cvz-btn" onclick="convidarZaq({{ a.id }})" title="Manda um e-mail com link pro cliente criar a conta no Zaq">🎟️ Convidar pro Zaq</button>{% endif %}
     </div>
     {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
+    <script>
+    function convidarZaq(id){var b=document.getElementById('cvz-btn');if(b){b.disabled=true;b.textContent='Enviando…';}
+      fetch('/painel/prospeccao/'+id+'/convidar-zaq',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
+        if(!d.ok){if(b){b.disabled=false;b.textContent='🎟️ Convidar pro Zaq';}alert(d.erro||'Não consegui enviar.');return;}
+        if(b){b.textContent='✓ Convite enviado';}}).catch(function(){if(b){b.disabled=false;b.textContent='🎟️ Convidar pro Zaq';}alert('Falha de rede.');});}
+    </script>
   </div>
 
   <div class="fgrid">

@@ -415,11 +415,11 @@ _CADASTRO = """{% extends "base" %}{% block conteudo %}
   </label>
   <div class="mut" style="font-size:.7rem;margin-top:.2rem;margin-left:1.6rem">Ao marcar, avisamos seu interesse pra equipe. Você não é cobrado por isso.</div>
 </div>
-<label>Seu nome</label><input name="nome" required maxlength="80">
-<label>E-mail</label><input name="email" type="email" required maxlength="120">
+<label>Seu nome</label><input name="nome" value="{{ pre_nome or '' }}" required maxlength="80">
+<label>E-mail</label><input name="email" type="email" value="{{ pre_email or '' }}" required maxlength="120">
 <label>Senha</label><input name="senha" type="password" required minlength="8" maxlength="72">
 <label>CPF ou CNPJ <span class="mut">(opcional agora)</span></label><input name="documento" maxlength="20">
-<label>Seu WhatsApp (com DDD)</label><input name="whatsapp" required placeholder="86 98888-7777" maxlength="20">
+<label>Seu WhatsApp (com DDD)</label><input name="whatsapp" value="{{ pre_whatsapp or '' }}" required placeholder="86 98888-7777" maxlength="20">
 <label>Seu CEP <span class="mut">(pra comparar preços perto de você)</span></label>
 <input name="cep" required placeholder="64000-000" maxlength="9" inputmode="numeric">
 <button>Começar meu teste grátis de 7 dias</button>
@@ -4744,7 +4744,10 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
 
 @router.get("/cadastro", response_class=HTMLResponse)
 def cadastro_form(request: Request):
-    return _render("cadastro", request, planos=_planos(), erro=None)
+    q = request.query_params
+    return _render("cadastro", request, planos=_planos(), erro=None,
+                   pre_nome=q.get("nome", ""), pre_email=q.get("email", ""),
+                   pre_whatsapp=q.get("whatsapp", ""))
 
 
 @router.post("/cadastro", response_class=HTMLResponse)

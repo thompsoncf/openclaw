@@ -162,6 +162,33 @@ def enviar_boas_vindas(destino: str, nome: str | None = None,
                         _layout("Bem-vindo ao Zaq!", corpo), texto)
 
 
+def enviar_convite_zaq(destino: str, nome: str | None, link: str,
+                       from_nome: str | None = None, reply_to: str | None = None) -> bool:
+    """Convida o lead a CRIAR a conta e acessar o Zaq (link pro /cadastro,
+    pré-preenchido). Reusa o cadastro público — sem token/senha extra. O reply_to
+    é o vendedor; o from_nome é a empresa que está prospectando."""
+    import html as _htmlmod
+    saud = f"Olá, {_htmlmod.escape(nome)}!" if nome else "Olá!"
+    corpo = f"""
+      <p>{saud}</p>
+      <p>Preparei um acesso pra você começar a usar o <b>Zaq</b> — o assistente
+         financeiro que funciona direto no WhatsApp. Criar a conta leva 1 minuto e
+         você já sai usando, com <b>teste grátis</b>.</p>
+      <p style="text-align:center;margin:24px 0;">
+        <a href="{link}" style="background:#0f766e;color:#fff;text-decoration:none;
+           padding:12px 28px;border-radius:8px;font-weight:bold;display:inline-block;">
+           Criar minha conta no Zaq</a>
+      </p>
+      <p style="font-size:13px;color:#666;">Ou copie e cole no navegador:<br>
+         <a href="{link}" style="color:#0f766e;">{link}</a></p>
+      <p style="margin-top:24px;">Qualquer dúvida, é só responder este e-mail. 😊</p>
+    """
+    texto = f"{saud}\n\nCrie sua conta no Zaq (teste grátis): {link}"
+    return enviar_email(destino, "Seu acesso ao Zaq 🚀",
+                        _layout("Comece a usar o Zaq", corpo), texto,
+                        reply_to=reply_to, from_nome=from_nome)
+
+
 def enviar_recuperacao_senha(destino: str, link_reset: str,
                              nome: str | None = None) -> bool:
     """Email de recuperacao de senha (link com token)."""

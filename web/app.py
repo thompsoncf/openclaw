@@ -117,10 +117,15 @@ def _iniciar_poller_email() -> None:
 
         def _loop():
             pool = _setup()
+            from finance import campanhas_motor as _cm
             while True:
                 _time.sleep(120)          # sleep-first: não roda em app efêmero (testes)
                 try:
-                    _ein.poll_uma_vez(pool)
+                    _ein.poll_uma_vez(pool)          # recebe e-mail
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    _cm.enviar_pendentes(pool)       # dispara campanhas ativas
                 except Exception:  # noqa: BLE001
                     pass
 

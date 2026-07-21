@@ -1162,6 +1162,48 @@ async def webhook_twilio(request: Request, background_tasks: BackgroundTasks):
     return Response("<Response></Response>", media_type="application/xml")
 
 
+def _descad_page(titulo: str, corpo: str) -> str:
+    return (
+        "<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        f"<title>{titulo}</title><style>body{{margin:0;background:#0b0b0c;color:#e9eae6;"
+        "font-family:system-ui,Arial,sans-serif;display:grid;place-items:center;min-height:100vh}"
+        ".c{max-width:440px;background:#141416;border:1px solid #26262b;border-radius:14px;padding:1.6rem;margin:1rem}"
+        "h1{font-size:1.2rem;margin:0 0 .6rem}p{color:#b9beb6;line-height:1.5}"
+        ".b{background:#e0574f;border:0;color:#fff;border-radius:9px;padding:.6rem 1rem;font-size:.95rem;cursor:pointer;font-family:inherit}"
+        "</style></head><body><div class='c'><h1>" + titulo + "</h1>" + corpo + "</div></body></html>")
+
+
+@router.get("/descadastrar", response_class=HTMLResponse)
+def descadastrar_form(request: Request, t: str = ""):
+    from finance.campanhas_motor import descad_verify
+    conta_id, email = descad_verify(t)
+    if not conta_id:
+        return HTMLResponse(_descad_page("Link inválido", "<p>Esse link de descadastro não é válido ou expirou.</p>"),
+                            status_code=400)
+    import html as _h
+    return HTMLResponse(_descad_page(
+        "Descadastrar",
+        f"<p>Confirmar que <b>{_h.escape(email)}</b> não quer mais receber estes e-mails?</p>"
+        f"<form method='post' action='/descadastrar'><input type='hidden' name='t' value='{_h.escape(t)}'>"
+        "<button class='b'>Sim, quero descadastrar</button></form>"))
+
+
+@router.post("/descadastrar", response_class=HTMLResponse)
+def descadastrar_do(request: Request, t: str = Form("")):
+    from finance.campanhas_motor import descad_verify, registrar_descadastro
+    conta_id, email = descad_verify(t)
+    if not conta_id:
+        return HTMLResponse(_descad_page("Link inválido", "<p>Link inválido.</p>"), status_code=400)
+    try:
+        registrar_descadastro(get_pool(), conta_id, email, t)
+    except Exception:  # noqa: BLE001
+        pass
+    import html as _h
+    return HTMLResponse(_descad_page("Pronto ✓",
+        f"<p>Feito! <b>{_h.escape(email)}</b> não vai mais receber nossos e-mails. Obrigado! 🙏</p>"))
+
+
 def _conta_por_meta(c, plataforma, ident):
     """Roteia o inbound da Meta: acha a empresa dona da Página/IG que recebeu."""
     r = c.execute(
@@ -3312,8 +3354,8 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
     </div>
   </form>
 
-  <div class="mut" style="font-size:.82rem;margin-top:1rem">Fila: {{ st.get('fila',0) }} · Enviados: {{ st.get('enviado',0) }} · Responderam: {{ st.get('respondeu',0) }} · Descadastros: {{ st.get('descadastrou',0) }}</div>
-  <div class="mut" style="font-size:.8rem;margin-top:.5rem">O <b>disparo automático</b> (respeitando o limite/dia) e o <b>descadastro</b> entram na próxima etapa. "Ativar" já deixa a campanha pronta pra quando o motor ligar.</div>
+  <div class="mut" style="font-size:.82rem;margin-top:1rem">Fila: {{ st.get('fila',0) }} · Enviados: {{ st.get('enviado',0) + st.get('concluido',0) }} · Responderam: {{ st.get('respondeu',0) }} · Descadastros: {{ st.get('descadastrou',0) }} · Erros: {{ st.get('erro',0) }}</div>
+  <div class="mut" style="font-size:.8rem;margin-top:.5rem">{% if camp.status=='ativa' %}✅ <b style="color:var(--verde-claro)">Ativa</b> — o motor dispara automaticamente (até {{ camp.limite }}/dia), para em quem responde ou descadastra.{% else %}Clique <b>▶ Ativar</b> pra o motor começar a disparar (até {{ camp.limite }}/dia).{% endif %} Métricas detalhadas na próxima etapa.</div>
 </div>
 <script>
 function novoPasso(){return '<div class="passo"><div class="prow"><label>D+<input class="fld" name="dias" value="7" inputmode="numeric" style="width:64px"></label>'

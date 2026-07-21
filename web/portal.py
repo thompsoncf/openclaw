@@ -200,6 +200,16 @@ button:hover{background:var(--verde-hover)}
  padding:.6rem .8rem;font-size:.88rem;margin-bottom:.6rem}
 .nowrap{white-space:nowrap}
 .mut{color:var(--txt-mut);font-size:.85rem}
+.plano-banner{width:100%;max-width:720px;box-sizing:border-box;margin:1rem 1rem 0;
+ display:flex;align-items:center;gap:.9rem;flex-wrap:wrap;
+ border-radius:12px;padding:.8rem 1rem;font-size:.9rem;line-height:1.4}
+.plano-banner .pb-txt{flex:1 1 260px;min-width:0}
+.plano-banner .pb-btn{flex:0 0 auto;width:auto;margin:0;padding:.55rem 1.1rem;border-radius:8px;
+ font-size:.9rem;font-weight:600;text-decoration:none;white-space:nowrap;color:#fff;background:var(--verde)}
+.plano-banner .pb-btn:hover{background:var(--verde-hover)}
+.pb-vencido{background:#3a1d1d;border:1px solid #6e2b2b;color:#f0c2c2}
+.pb-avencer{background:#332a12;border:1px solid #6e5a22;color:#f0dca6}
+.pb-avencer .pb-btn{background:#c99a2e}.pb-avencer .pb-btn:hover{background:#d9a832}
 table{width:100%;border-collapse:collapse;margin-top:.8rem}
 td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;font-size:.92rem}
 .tag{display:inline-block;padding:.1rem .55rem;border-radius:999px;font-size:.78rem;
@@ -376,6 +386,24 @@ function maisToggle(v){var sh=document.getElementById('mais-sheet'),bg=document.
 </script>
 {% else %}
 <div class="topo"><span class="logo" style="display:inline-flex;align-items:center;gap:7px"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M16 18 H44 L18 46 H46" stroke="#3ee0a6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M47 10 L49 16 L55 18 L49 20 L47 26 L45 20 L39 18 L45 16 Z" fill="#3ee0a6"/></svg>zaq</span><span id="menu-links"><a href="/login">Entrar</a><a href="/cadastro">Criar conta</a></span></div>
+{% endif %}
+{% if logado and plano_aviso %}
+<div class="plano-banner {% if plano_aviso.nivel == 'vencido' %}pb-vencido{% else %}pb-avencer{% endif %}">
+  <div class="pb-txt">
+    {% if plano_aviso.nivel == 'vencido' %}
+      {% if plano_aviso.status == 'suspensa' %}<b>Seu acesso está suspenso.</b>
+      {% elif plano_aviso.status == 'cancelada' %}<b>Seu plano está cancelado.</b>
+      {% elif plano_aviso.venc_fmt %}<b>Seu plano venceu em {{ plano_aviso.venc_fmt }}.</b>
+      {% else %}<b>Seu plano está vencido.</b>{% endif %}
+      {% if plano_aviso.cortado %} As mensagens pelo WhatsApp (SAC) estão pausadas. Regularize o pagamento pra voltar a usar — e pra não perder o acesso ao painel também.
+      {% else %} Enquanto o beta grátis está ligado você continua usando normalmente (SAC e painel) — mas assim que o beta acabar, sem pagamento o acesso é cortado. Pague pra já deixar em dia.{% endif %}
+    {% else %}
+      <b>Seu plano vence em {{ plano_aviso.dias }} dia{% if plano_aviso.dias != 1 %}s{% endif %}{% if plano_aviso.venc_fmt %} ({{ plano_aviso.venc_fmt }}){% endif %}.</b>
+      Renove pra não ficar sem o SAC nem o painel.
+    {% endif %}
+  </div>
+  <a href="/painel/pagar" class="pb-btn">Pagar agora</a>
+</div>
 {% endif %}
 {% block conteudo %}{% endblock %}
 <a href="https://wa.me/5586981885930?text={% if conta %}Oi%20Thompson%21%20Estou%20no%20Zaq%20%28conta%20%23{{ conta[0] }}%29%20e%20preciso%20de%20ajuda%20com%3A%20{% else %}Oi%20Thompson%21%20Estou%20no%20Zaq%20e%20preciso%20de%20ajuda%20com%3A%20{% endif %}"
@@ -3193,6 +3221,15 @@ _MEU_PLANO = """{% extends "base" %}{% block conteudo %}
 </div>
 {% endblock %}"""
 
+_PAGAR_AVISO = """{% extends "base" %}{% block conteudo %}
+<div class="card"><h1>Pagamento</h1>
+<p class="mut">{{ msg }}</p>
+<a href="https://wa.me/5586981885930?text=Oi%21%20Quero%20pagar%20meu%20plano%20do%20Zaq"
+   target="_blank" rel="noopener"
+   style="display:inline-block;margin-top:1rem;background:#25D366;color:#fff;padding:.6rem 1.1rem;border-radius:8px;text-decoration:none;font-weight:600">Falar no WhatsApp</a>
+<div style="margin-top:1rem"><a href="/painel" style="color:var(--verde-claro)">← Voltar ao painel</a></div>
+</div>{% endblock %}"""
+
 _CESTA_AJUSTE = """{% extends "base" %}{% block conteudo %}
 <div class="card larga"><h2>🧺 Sua cesta da semana</h2>
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
@@ -4636,7 +4673,7 @@ _FINANCEIRO_FORN = """{% extends "base" %}{% block conteudo %}
 
 
 _env = Environment(loader=DictLoader({
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS, "produtos": _PRODUTOS, "abastecimento": _ABASTECIMENTO, "clientes": _CLIENTES, "cliente_detalhe": _CLIENTE_DETALHE, "pdv": _PDV, "venda_detalhe": _VENDA_DETALHE,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "pagar_aviso": _PAGAR_AVISO, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS, "produtos": _PRODUTOS, "abastecimento": _ABASTECIMENTO, "clientes": _CLIENTES, "cliente_detalhe": _CLIENTE_DETALHE, "pdv": _PDV, "venda_detalhe": _VENDA_DETALHE,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 _env.filters["brl"] = brl
@@ -4697,6 +4734,47 @@ def _tem_assinatura_cesta(conta_id: int) -> bool:
         return False
 
 
+def _plano_aviso(conta_row, beta_ativo) -> dict | None:
+    """Estado do plano pro banner do painel. None = nada a mostrar (em dia).
+
+    NAO corta acesso — so' informa. Roda em cima da mesma verdade do
+    contas.acesso_liberado: com o beta ligado o cliente continua usando, mas o
+    aviso ainda aparece pra ele saber que venceu e que precisa pagar (senao
+    perde o SAC e, quando o beta acabar, o proprio painel).
+
+    Niveis:
+      'vencido'  -> venceu (ou suspensa/cancelada) — banner vermelho.
+      'avencer'  -> vence em ate 5 dias — banner amarelo.
+    conta_row: a tupla do conta_logada ([5]=status, [6]=vencimento).
+    """
+    if not conta_row:
+        return None
+    status = conta_row[5]
+    venc = conta_row[6]
+
+    def _fmt(d):
+        return d.strftime("%d/%m/%Y") if hasattr(d, "strftime") else (str(d) if d else "")
+
+    # suspensa/cancelada: cortado de verdade mesmo no beta (decisao explicita).
+    if status in ("suspensa", "cancelada"):
+        return {"nivel": "vencido", "status": status, "vencimento": venc,
+                "venc_fmt": _fmt(venc), "dias": None, "beta": bool(beta_ativo),
+                "cortado": True}
+    if not hasattr(venc, "toordinal"):  # sem data valida -> nada a avisar
+        return None
+    dias = (venc - _date.today()).days
+    if dias < 0:
+        # Venceu por data: so' esta REALMENTE cortado se o beta estiver desligado.
+        return {"nivel": "vencido", "status": status, "vencimento": venc,
+                "venc_fmt": _fmt(venc), "dias": dias, "beta": bool(beta_ativo),
+                "cortado": not beta_ativo}
+    if dias <= 5:
+        return {"nivel": "avencer", "status": status, "vencimento": venc,
+                "venc_fmt": _fmt(venc), "dias": dias, "beta": bool(beta_ativo),
+                "cortado": False}
+    return None
+
+
 def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
     ctx.setdefault("logado", bool(request.session.get("conta_id")))
     ctx.setdefault("titulo", nome.capitalize())
@@ -4737,10 +4815,56 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
             ctx["beta_gratis"] = _cfg.beta_gratis_ativo(get_pool())
         except Exception:
             ctx["beta_gratis"] = True
+    if "plano_aviso" not in ctx:
+        try:
+            ctx["plano_aviso"] = _plano_aviso(ctx.get("conta"), ctx.get("beta_gratis"))
+        except Exception:
+            ctx["plano_aviso"] = None
     return HTMLResponse(_env.get_template(nome).render(**ctx))
 
 
 # ---------- rotas ----------
+
+@router.get("/painel/pagar")
+def painel_pagar(request: Request):
+    """Botao 'Pagar agora' do banner de vencimento: gera (ou reusa) o link de
+    pagamento avulso do plano no Asaas e redireciona o cliente pra la'.
+
+    Reusa a mesma peca do comando 'pagar' do bot (finance.asaas.criar_link_pagamento),
+    entao Pix/boleto/cartao caem na tela hospedada do Asaas e o webhook reativa a
+    conta pelo externalReference. Se a conta nao tem plano SaaS (ex: so' cesta) ou
+    o Asaas falha, cai num aviso claro em vez de engolir o erro.
+    """
+    conta = conta_logada(request)
+    if not conta:
+        return RedirectResponse("/login", status_code=303)
+    codigo_plano = conta[4]
+    if not codigo_plano or codigo_plano == "zaq_cesta":
+        return _render("pagar_aviso", request,
+                       msg="Sua conta não tem um plano mensal pra pagar por aqui. "
+                           "Fale com a gente no WhatsApp que a gente resolve.")
+    with get_pool().connection() as c:
+        prow = c.execute(
+            "select nome, preco_base_centavos from planos where codigo=%s",
+            (codigo_plano,),
+        ).fetchone()
+    if not prow:
+        return _render("pagar_aviso", request,
+                       msg="Não achei o preço do seu plano. Fale com a gente no "
+                           "WhatsApp que a gente gera o pagamento pra você.")
+    try:
+        from finance.asaas import criar_link_pagamento
+        link = criar_link_pagamento(
+            conta_id=conta[0], nome_plano=prow[0],
+            valor_reais=(prow[1] or 0) / 100.0,
+        )
+        return RedirectResponse(link["url"], status_code=303)
+    except Exception as e:  # nao engole: mostra a verdade (mesma linha do assinaturas)
+        logging.error("Erro ao gerar link de pagamento (conta %s): %s", conta[0], e)
+        return _render("pagar_aviso", request,
+                       msg="Não consegui gerar o pagamento agora. Tente de novo em "
+                           "instantes ou fale com a gente no WhatsApp.")
+
 
 @router.get("/cadastro", response_class=HTMLResponse)
 def cadastro_form(request: Request):

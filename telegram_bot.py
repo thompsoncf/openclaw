@@ -195,7 +195,8 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
         await update.message.reply_text(resp + extra)
         return
     membro, conta = achado
-    if not ct.acesso_liberado(conta):
+    from finance import config_app as _cfg
+    if not ct.acesso_liberado(conta, _cfg.beta_gratis_ativo(_pool)):
         await update.message.reply_text(MSG_SEM_ACESSO)
         return
     # check para comandos de pagamento

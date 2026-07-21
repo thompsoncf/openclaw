@@ -13,9 +13,13 @@ Diagnóstico: se um endpoint der 404, o CAMINHO está diferente do assumido
 ('/pj/quadrosocietario' e '/pf/telefonecpf') — ajuste em finance/credify.py.
 """
 import json
+import os
 import sys
 
-from finance import credify as cf
+# roda de qualquer lugar: garante a raiz do repo no path pra achar `finance`
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from finance import credify as cf  # noqa: E402
 
 
 def _mask_cpf(c: str) -> str:

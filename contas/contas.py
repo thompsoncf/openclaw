@@ -71,13 +71,22 @@ def _membro_por(pool, coluna: str, valor) -> tuple[Membro, Conta] | None:
 
 # ---------- Acesso (a conta pode usar?) ----------
 
-def acesso_liberado(conta: Conta) -> bool:
+def acesso_liberado(conta: Conta, beta_ativo: bool = False) -> bool:
     """True se a conta pode usar o servico.
 
     trial/ativa dentro da validade -> ok. Vencida, suspensa ou cancelada -> nao.
+
+    beta_ativo=True (modo beta gratis ligado): ninguem e' cortado por VENCIMENTO
+    (ninguem esta pagando ainda), entao o acesso continua como cortesia do beta.
+    O painel ainda avisa que venceu (ver web/portal._plano_aviso), mas o corte
+    de verdade so' passa a valer quando o botao beta for desligado.
+    Suspensa/cancelada continuam bloqueadas mesmo no beta: sao decisoes
+    explicitas do admin, o beta nao ressuscita quem foi desligado de proposito.
     """
     if conta.status in ("suspensa", "cancelada"):
         return False
+    if beta_ativo:
+        return True
     if conta.vencimento is not None and conta.vencimento < date.today():
         return False
     return conta.status in ("trial", "ativa", "inadimplente")

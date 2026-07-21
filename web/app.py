@@ -337,7 +337,8 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
             _responder_whatsapp(to, resp + extra)
             return
         membro, conta = achado
-        if not ct.acesso_liberado(conta):
+        from finance import config_app as _cfg
+        if not ct.acesso_liberado(conta, _cfg.beta_gratis_ativo(pool)):
             _responder_whatsapp(to, "Seu acesso esta suspenso (pagamento pendente). "
                                     "Assim que o pagamento for confirmado, voce volta a usar.")
             return

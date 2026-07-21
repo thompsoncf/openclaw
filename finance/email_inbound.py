@@ -234,6 +234,9 @@ def sincronizar(pool, conta_id: int) -> int:
                 c.execute(
                     "update conversas set ultima_msg_em=coalesce(%s, now()), status='aberta' where id=%s",
                     (m["quando"], conv_id))
+                if lead:      # lead respondeu → para a sequência de campanha nele
+                    c.execute("""update campanha_alvos set status='respondeu', proximo_envio_em=null
+                                   where prospeccao_id=%s and status in ('fila','enviado')""", (lead_id,))
                 c.commit()
                 n += 1
         except Exception as e:  # noqa: BLE001 (corrida no índice único etc.)

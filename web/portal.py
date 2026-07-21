@@ -395,8 +395,8 @@ function maisToggle(v){var sh=document.getElementById('mais-sheet'),bg=document.
       {% elif plano_aviso.status == 'cancelada' %}<b>Seu plano está cancelado.</b>
       {% elif plano_aviso.venc_fmt %}<b>Seu plano venceu em {{ plano_aviso.venc_fmt }}.</b>
       {% else %}<b>Seu plano está vencido.</b>{% endif %}
-      As mensagens pelo WhatsApp (SAC) estão pausadas.
-      {% if plano_aviso.beta %} Enquanto o beta grátis está ligado você continua usando o painel — mas quando o beta acabar, sem pagamento você perde o acesso ao site também.{% else %} Regularize o pagamento pra não perder o acesso ao painel também.{% endif %}
+      {% if plano_aviso.cortado %} As mensagens pelo WhatsApp (SAC) estão pausadas. Regularize o pagamento pra voltar a usar — e pra não perder o acesso ao painel também.
+      {% else %} Enquanto o beta grátis está ligado você continua usando normalmente (SAC e painel) — mas assim que o beta acabar, sem pagamento o acesso é cortado. Pague pra já deixar em dia.{% endif %}
     {% else %}
       <b>Seu plano vence em {{ plano_aviso.dias }} dia{% if plano_aviso.dias != 1 %}s{% endif %}{% if plano_aviso.venc_fmt %} ({{ plano_aviso.venc_fmt }}){% endif %}.</b>
       Renove pra não ficar sem o SAC nem o painel.
@@ -4755,18 +4755,23 @@ def _plano_aviso(conta_row, beta_ativo) -> dict | None:
     def _fmt(d):
         return d.strftime("%d/%m/%Y") if hasattr(d, "strftime") else (str(d) if d else "")
 
+    # suspensa/cancelada: cortado de verdade mesmo no beta (decisao explicita).
     if status in ("suspensa", "cancelada"):
         return {"nivel": "vencido", "status": status, "vencimento": venc,
-                "venc_fmt": _fmt(venc), "dias": None, "beta": bool(beta_ativo)}
+                "venc_fmt": _fmt(venc), "dias": None, "beta": bool(beta_ativo),
+                "cortado": True}
     if not hasattr(venc, "toordinal"):  # sem data valida -> nada a avisar
         return None
     dias = (venc - _date.today()).days
     if dias < 0:
+        # Venceu por data: so' esta REALMENTE cortado se o beta estiver desligado.
         return {"nivel": "vencido", "status": status, "vencimento": venc,
-                "venc_fmt": _fmt(venc), "dias": dias, "beta": bool(beta_ativo)}
+                "venc_fmt": _fmt(venc), "dias": dias, "beta": bool(beta_ativo),
+                "cortado": not beta_ativo}
     if dias <= 5:
         return {"nivel": "avencer", "status": status, "vencimento": venc,
-                "venc_fmt": _fmt(venc), "dias": dias, "beta": bool(beta_ativo)}
+                "venc_fmt": _fmt(venc), "dias": dias, "beta": bool(beta_ativo),
+                "cortado": False}
     return None
 
 

@@ -1286,6 +1286,8 @@ _PASSOS_PADRAO = [
 ]
 _STATUS_ROT_CP = {"rascunho": "✎ Rascunho", "ativa": "● Ativa",
                   "pausada": "❚❚ Pausada", "concluida": "✓ Concluída"}
+_ALVO_ROT = {"fila": "Na fila", "enviado": "Em sequência", "respondeu": "Respondeu ✓",
+             "descadastrou": "Descadastrou", "erro": "Erro", "concluido": "Concluído"}
 
 
 def _campanha_publico_where(conta_id, camp_id, seg, cidade, temp):
@@ -1354,7 +1356,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
     if not ctx["gerencia"]:
         return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
     with get_pool().connection() as c:
-        cp = c.execute("select id, nome, status, limite_dia from campanhas where id=%s and conta_id=%s",
+        cp = c.execute("select id, nome, status, limite_dia, coalesce(enviados_hoje,0), dia_contagem from campanhas where id=%s and conta_id=%s",
                        (camp_id, ctx["conta_id"])).fetchone()
         if not cp:
             return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
@@ -1364,14 +1366,33 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
         st = dict(c.execute("select status, count(*) from campanha_alvos where campanha_id=%s group by status",
                             (camp_id,)).fetchall())
         na_camp = c.execute("select count(*) from campanha_alvos where campanha_id=%s", (camp_id,)).fetchone()[0]
+        enviados = c.execute("select count(*) from campanha_alvos where campanha_id=%s and ultima_msg_em is not null",
+                             (camp_id,)).fetchone()[0]
+        leads = c.execute(
+            """select p.empresa, p.email, a.status, a.passo_atual,
+                      to_char(a.proximo_envio_em - interval '3 hours','DD/MM HH24:MI'),
+                      to_char(a.ultima_msg_em - interval '3 hours','DD/MM HH24:MI')
+                 from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
+                where a.campanha_id=%s order by a.ultima_msg_em desc nulls last, a.id desc limit 200""",
+            (camp_id,)).fetchall()
         wsql, wparams = _campanha_publico_where(ctx["conta_id"], camp_id, seg, cidade, temp)
         eleg = c.execute(f"select count(*) from prospeccao p where {wsql}", tuple(wparams)).fetchone()[0]
+    resp = st.get("respondeu", 0)
+    from datetime import date as _date
+    hoje = cp[4] if cp[5] == _date.today() else 0
     camp = {"id": cp[0], "nome": cp[1], "status": cp[2], "limite": cp[3],
             "status_rot": _STATUS_ROT_CP.get(cp[2], cp[2])}
+    metr = {"total": na_camp, "fila": st.get("fila", 0), "enviados": enviados, "responderam": resp,
+            "descadastros": st.get("descadastrou", 0), "erros": st.get("erro", 0),
+            "concluidos": st.get("concluido", 0), "hoje": hoje,
+            "taxa": (round(100 * resp / enviados) if enviados else 0)}
     passos_l = [{"dias": p[1], "assunto": p[2], "corpo": p[3], "ia": p[4]} for p in passos]
+    leads_l = [{"empresa": r[0], "email": r[1], "status": r[2], "passo": r[3],
+                "prox": r[4], "ult": r[5], "rot": _ALVO_ROT.get(r[2], r[2])} for r in leads]
     return _render("prospeccao_campanha", request, titulo=camp["nome"], secao_ativa="prospeccao",
-                   camp=camp, passos=passos_l, elegiveis=eleg, na_camp=na_camp, st=st,
-                   seg=seg, cidade=cidade, temp=temp, aviso=request.session.pop("prosp_aviso", None))
+                   camp=camp, passos=passos_l, elegiveis=eleg, na_camp=na_camp, st=st, metr=metr,
+                   leads=leads_l, seg=seg, cidade=cidade, temp=temp,
+                   aviso=request.session.pop("prosp_aviso", None))
 
 
 @router.post("/painel/prospeccao/campanhas/{camp_id}/publico")
@@ -3285,7 +3306,18 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 <style>.passo{border:1px solid var(--borda);border-radius:10px;padding:.6rem .7rem;margin-bottom:.55rem;background:var(--bg)}
 .passo .prow{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
 .passo .prow label{font-size:.8rem;color:var(--mut);display:flex;align-items:center;gap:.3rem}
-.passo textarea{width:100%;resize:vertical}</style>
+.passo textarea{width:100%;resize:vertical}
+.cpstats{display:grid;grid-template-columns:repeat(6,1fr);gap:.6rem}
+@media(max-width:720px){.cpstats{grid-template-columns:repeat(3,1fr)}}
+.cpstat{background:var(--card);border:1px solid var(--borda);border-radius:11px;padding:.7rem .8rem}
+.cpstat .n{font-size:1.45rem;font-weight:750;letter-spacing:-.02em}
+.cpstat .l{font-size:.72rem;color:var(--mut);margin-top:.1rem}
+.cpstat.g .n{color:#3ddc84}.cpstat.r .n{color:#e0574f}
+.apill{font-size:.68rem;font-weight:600;padding:.1rem .45rem;border-radius:999px;border:1px solid var(--borda);white-space:nowrap}
+.apill.respondeu,.apill.concluido{color:#3ddc84;border-color:#1e4a34;background:#10241a}
+.apill.enviado{color:#5b9bd5;border-color:#2f4a63;background:#14212e}
+.apill.descadastrou,.apill.erro{color:#e0a33e;border-color:#5a4520;background:#2a2113}
+.apill.fila{color:#8a938a}</style>
 <div style="max-width:1000px;margin:0 auto">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap">
     <div><h2 class="tt">{{ camp.nome }} <span class="cpill {{ camp.status }}">{{ camp.status_rot }}</span></h2>
@@ -3354,8 +3386,37 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
     </div>
   </form>
 
-  <div class="mut" style="font-size:.82rem;margin-top:1rem">Fila: {{ st.get('fila',0) }} · Enviados: {{ st.get('enviado',0) + st.get('concluido',0) }} · Responderam: {{ st.get('respondeu',0) }} · Descadastros: {{ st.get('descadastrou',0) }} · Erros: {{ st.get('erro',0) }}</div>
-  <div class="mut" style="font-size:.8rem;margin-top:.5rem">{% if camp.status=='ativa' %}✅ <b style="color:var(--verde-claro)">Ativa</b> — o motor dispara automaticamente (até {{ camp.limite }}/dia), para em quem responde ou descadastra.{% else %}Clique <b>▶ Ativar</b> pra o motor começar a disparar (até {{ camp.limite }}/dia).{% endif %} Métricas detalhadas na próxima etapa.</div>
+  <!-- MÉTRICAS -->
+  <h3 style="margin:1.3rem 0 .5rem;font-size:1rem">📊 Desempenho</h3>
+  <div class="cpstats">
+    <div class="cpstat"><div class="n">{{ metr.enviados }}</div><div class="l">Enviados</div></div>
+    <div class="cpstat g"><div class="n">{{ metr.responderam }}</div><div class="l">Responderam</div></div>
+    <div class="cpstat g"><div class="n">{{ metr.taxa }}%</div><div class="l">Taxa de resposta</div></div>
+    <div class="cpstat"><div class="n">{{ metr.fila }}</div><div class="l">Na fila</div></div>
+    <div class="cpstat r"><div class="n">{{ metr.descadastros }}</div><div class="l">Descadastros</div></div>
+    <div class="cpstat"><div class="n">{{ metr.hoje }}<span style="font-size:.9rem;color:var(--mut)">/{{ camp.limite }}</span></div><div class="l">Hoje</div></div>
+  </div>
+  <div class="mut" style="font-size:.8rem;margin-top:.6rem">{% if camp.status=='ativa' %}✅ <b style="color:var(--verde-claro)">Ativa</b> — o motor dispara automaticamente (até {{ camp.limite }}/dia) e para em quem responde ou descadastra.{% else %}Clique <b>▶ Ativar</b> pra o motor começar a disparar.{% endif %}{% if metr.erros %} · <span style="color:#e0574f">{{ metr.erros }} erro(s) de envio</span>{% endif %}</div>
+
+  <!-- LEADS -->
+  <div class="card" style="padding:0;margin-top:1rem;overflow:hidden">
+    <div style="padding:.7rem 1rem;border-bottom:1px solid var(--borda)"><b style="font-size:.92rem">Leads da campanha</b> <span class="mut" style="font-size:.8rem">({{ na_camp }})</span></div>
+    <div style="max-height:420px;overflow:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:.84rem">
+      <thead><tr style="text-align:left;color:var(--mut)"><th style="padding:.5rem 1rem;font-weight:500">Empresa</th><th style="padding:.5rem;font-weight:500">Situação</th><th style="padding:.5rem;font-weight:500">Passo</th><th style="padding:.5rem 1rem;font-weight:500">Próximo/último</th></tr></thead>
+      <tbody>
+        {% for l in leads %}
+        <tr style="border-top:1px solid var(--borda)">
+          <td style="padding:.5rem 1rem"><b>{{ l.empresa }}</b><div class="mut" style="font-size:.76rem">{{ l.email }}</div></td>
+          <td style="padding:.5rem"><span class="apill {{ l.status }}">{{ l.rot }}</span></td>
+          <td style="padding:.5rem" class="mut">D{{ l.passo }}</td>
+          <td class="mut" style="padding:.5rem 1rem;white-space:nowrap">{% if l.status in ('fila','enviado') and l.prox %}⏳ {{ l.prox }}{% elif l.ult %}✓ {{ l.ult }}{% else %}—{% endif %}</td>
+        </tr>
+        {% else %}<tr><td colspan="4" class="mut" style="text-align:center;padding:1.6rem">Nenhum lead ainda — adicione o público acima.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
 </div>
 <script>
 function novoPasso(){return '<div class="passo"><div class="prow"><label>D+<input class="fld" name="dias" value="7" inputmode="numeric" style="width:64px"></label>'

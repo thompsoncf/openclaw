@@ -1354,6 +1354,97 @@ def prospeccao_campanha_publico(request: Request, camp_id: int, seg: str = Form(
     return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
 
 
+def _campanha_dona(c, conta_id, camp_id):
+    return c.execute("select 1 from campanhas where id=%s and conta_id=%s", (camp_id, conta_id)).fetchone()
+
+
+@router.post("/painel/prospeccao/campanhas/{camp_id}/config")
+def prospeccao_campanha_config(request: Request, camp_id: int, nome: str = Form(""),
+                               limite_dia: str = Form("40")):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
+    try:
+        lim = max(1, min(500, int(limite_dia)))
+    except (ValueError, TypeError):
+        lim = 40
+    with get_pool().connection() as c:
+        c.execute("""update campanhas set nome=coalesce(nullif(%s,''),nome), limite_dia=%s,
+                       atualizado_em=now() where id=%s and conta_id=%s""",
+                  ((nome or "").strip()[:120], lim, camp_id, ctx["conta_id"]))
+        c.commit()
+    request.session["prosp_aviso"] = "Configuração salva ✓"
+    return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
+
+
+@router.post("/painel/prospeccao/campanhas/{camp_id}/status")
+def prospeccao_campanha_status(request: Request, camp_id: int, status: str = Form("")):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"] or status not in ("rascunho", "ativa", "pausada", "concluida"):
+        return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
+    with get_pool().connection() as c:
+        c.execute("update campanhas set status=%s, atualizado_em=now() where id=%s and conta_id=%s",
+                  (status, camp_id, ctx["conta_id"]))
+        c.commit()
+    request.session["prosp_aviso"] = {"ativa": "Campanha ativada ✓ (o disparo entra na próxima etapa)",
+                                      "pausada": "Campanha pausada.",
+                                      "rascunho": "Voltou pra rascunho."}.get(status, "Status atualizado.")
+    return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
+
+
+@router.post("/painel/prospeccao/campanhas/{camp_id}/sequencia")
+def prospeccao_campanha_sequencia(request: Request, camp_id: int,
+                                  dias: list[str] = Form([]), assunto: list[str] = Form([]),
+                                  corpo: list[str] = Form([]), usar_ia: list[str] = Form([])):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
+    with get_pool().connection() as c:
+        if not _campanha_dona(c, ctx["conta_id"], camp_id):
+            return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
+        c.execute("delete from campanha_passos where campanha_id=%s", (camp_id,))
+        ordem = 0
+        for i in range(len(dias)):
+            try:
+                d = max(0, min(120, int(dias[i])))
+            except (ValueError, TypeError):
+                d = 0
+            a = (assunto[i] if i < len(assunto) else "").strip()[:300]
+            co = (corpo[i] if i < len(corpo) else "").strip()[:8000]
+            ia = (usar_ia[i] if i < len(usar_ia) else "0") == "1"
+            if not a and not co and not ia:
+                continue                      # passo vazio → ignora
+            c.execute("""insert into campanha_passos (campanha_id, ordem, dias_apos, assunto, corpo, usar_ia)
+                         values (%s,%s,%s,%s,%s,%s)""", (camp_id, ordem, d, a, co, ia))
+            ordem += 1
+        if ordem == 0:                         # garante ao menos 1 passo
+            c.execute("""insert into campanha_passos (campanha_id, ordem, dias_apos, assunto, corpo, usar_ia)
+                         values (%s,0,0,%s,'',true)""", (camp_id, "Uma ideia pra {empresa}"))
+        c.commit()
+    request.session["prosp_aviso"] = "Sequência salva ✓"
+    return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
+
+
+@router.post("/painel/prospeccao/campanhas/{camp_id}/excluir")
+def prospeccao_campanha_excluir(request: Request, camp_id: int):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
+    with get_pool().connection() as c:
+        c.execute("delete from campanhas where id=%s and conta_id=%s", (camp_id, ctx["conta_id"]))
+        c.commit()
+    request.session["prosp_aviso"] = "Campanha excluída."
+    return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
+
+
 # ================================================================ FICHA DO ALVO
 @router.get("/painel/prospeccao/{alvo_id}", response_class=HTMLResponse)
 def prospeccao_ficha(request: Request, alvo_id: int):
@@ -3149,14 +3240,32 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
 {% endblock %}"""
 
 _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + """
+<style>.passo{border:1px solid var(--borda);border-radius:10px;padding:.6rem .7rem;margin-bottom:.55rem;background:var(--bg)}
+.passo .prow{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+.passo .prow label{font-size:.8rem;color:var(--mut);display:flex;align-items:center;gap:.3rem}
+.passo textarea{width:100%;resize:vertical}</style>
 <div style="max-width:1000px;margin:0 auto">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap">
     <div><h2 class="tt">{{ camp.nome }} <span class="cpill {{ camp.status }}">{{ camp.status_rot }}</span></h2>
       <div class="mut" style="font-size:.85rem"><b style="color:var(--txt)">{{ na_camp }}</b> lead(s) na campanha · limite {{ camp.limite }}/dia</div></div>
-    <a class="pbtn ghost" href="/painel/prospeccao/campanhas">‹ Campanhas</a>
+    <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+      {% if camp.status != 'ativa' %}<form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/status" style="margin:0"><input type="hidden" name="status" value="ativa"><button class="pbtn">▶ Ativar</button></form>
+      {% else %}<form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/status" style="margin:0"><input type="hidden" name="status" value="pausada"><button class="pbtn ghost">❚❚ Pausar</button></form>{% endif %}
+      <a class="pbtn ghost" href="/painel/prospeccao/campanhas">‹ Campanhas</a>
+    </div>
   </div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
 
+  <!-- CONFIG -->
+  <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/config" class="card" style="padding:.9rem 1rem;margin-top:1rem;display:flex;gap:.6rem;align-items:flex-end;flex-wrap:wrap">
+    <div><label class="lbl">Nome</label><input class="fld" name="nome" value="{{ camp.nome }}" maxlength="120" style="min-width:240px"></div>
+    <div><label class="lbl">Envios/dia</label><input class="fld" name="limite_dia" value="{{ camp.limite }}" inputmode="numeric" style="width:100px"></div>
+    <button class="pbtn ghost">Salvar</button>
+    <span style="flex:1"></span>
+    <button class="pbtn ghost" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/excluir" formmethod="post" style="color:#e0574f;border-color:#5c2a27" onclick="return confirm('Excluir a campanha? Os leads voltam pro funil.')">🗑 Excluir</button>
+  </form>
+
+  <!-- PÚBLICO -->
   <div class="card" style="padding:1rem;margin-top:1rem">
     <h3 style="margin:0 0 .4rem;font-size:1rem">👥 Público — adicionar leads</h3>
     <div class="mut" style="font-size:.82rem;margin-bottom:.6rem">Só entram leads com <b>e-mail válido</b> (verificados na Fase 1) e que não descadastraram.</div>
@@ -3180,18 +3289,41 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
     </div>
   </div>
 
-  <div class="card" style="padding:1rem;margin-top:1rem">
-    <h3 style="margin:0 0 .5rem;font-size:1rem">🗓️ Sequência <span class="mut" style="font-size:.74rem;font-weight:400">· edição no próximo passo</span></h3>
-    {% for p in passos %}
-    <div class="cpstep"><div class="cpday"><b>D{{ p.dias }}</b></div>
-      <div style="flex:1"><b style="font-size:.9rem">{{ p.assunto or '(sem assunto)' }}</b>{% if p.corpo %}<div class="mut" style="font-size:.78rem">{{ p.corpo[:90] }}{% if p.corpo|length > 90 %}…{% endif %}</div>{% endif %}</div>
-      <span class="cpill {{ 'ia' if p.ia else 'rascunho' }}">{{ '🤖 IA escreve' if p.ia else 'Template' }}</span></div>
-    {% endfor %}
-  </div>
+  <!-- SEQUÊNCIA (editor) -->
+  <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/sequencia" class="card" style="padding:1rem;margin-top:1rem">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem">
+      <h3 style="margin:0;font-size:1rem">🗓️ Sequência</h3>
+      <div style="display:flex;gap:.4rem"><button type="button" class="pbtn ghost" onclick="addPasso()">＋ Passo</button><button class="pbtn">Salvar sequência</button></div>
+    </div>
+    <div class="mut" style="font-size:.8rem;margin-bottom:.7rem"><b>D+</b> = dias após o 1º e-mail (0 = primeiro). <b>IA escreve</b> = o agente monta o e-mail único por lead. <b>Template</b> = usa o texto abaixo (variáveis <code>{empresa}</code>, <code>{cidade}</code>, <code>{segmento}</code>).</div>
+    <div id="passos">
+      {% for p in passos %}
+      <div class="passo">
+        <div class="prow">
+          <label>D+<input class="fld" name="dias" value="{{ p.dias }}" inputmode="numeric" style="width:64px"></label>
+          <select class="fld" name="usar_ia" style="width:auto"><option value="1" {% if p.ia %}selected{% endif %}>🤖 IA escreve</option><option value="0" {% if not p.ia %}selected{% endif %}>Template</option></select>
+          <span style="flex:1"></span>
+          <button type="button" class="pbtn ghost" onclick="remPasso(this)" title="Remover passo">✕</button>
+        </div>
+        <input class="fld" name="assunto" value="{{ p.assunto }}" placeholder="Assunto do e-mail" style="margin-top:.45rem">
+        <textarea class="fld" name="corpo" rows="3" placeholder="Texto do e-mail (Template). Na opção IA, deixe vazio ou use como orientação." style="margin-top:.45rem">{{ p.corpo }}</textarea>
+      </div>
+      {% endfor %}
+    </div>
+  </form>
 
   <div class="mut" style="font-size:.82rem;margin-top:1rem">Fila: {{ st.get('fila',0) }} · Enviados: {{ st.get('enviado',0) }} · Responderam: {{ st.get('respondeu',0) }} · Descadastros: {{ st.get('descadastrou',0) }}</div>
-  <div class="mut" style="font-size:.8rem;margin-top:.5rem">O disparo automático (respeitando o limite/dia), a edição da sequência e o descadastro entram nos próximos passos da construção.</div>
+  <div class="mut" style="font-size:.8rem;margin-top:.5rem">O <b>disparo automático</b> (respeitando o limite/dia) e o <b>descadastro</b> entram na próxima etapa. "Ativar" já deixa a campanha pronta pra quando o motor ligar.</div>
 </div>
+<script>
+function novoPasso(){return '<div class="passo"><div class="prow"><label>D+<input class="fld" name="dias" value="7" inputmode="numeric" style="width:64px"></label>'
+  +'<select class="fld" name="usar_ia" style="width:auto"><option value="0" selected>Template</option><option value="1">\\ud83e\\udd16 IA escreve</option></select>'
+  +'<span style="flex:1"></span><button type="button" class="pbtn ghost" onclick="remPasso(this)" title="Remover passo">\\u2715</button></div>'
+  +'<input class="fld" name="assunto" placeholder="Assunto do e-mail" style="margin-top:.45rem">'
+  +'<textarea class="fld" name="corpo" rows="3" placeholder="Texto do e-mail (use {empresa}, {cidade})" style="margin-top:.45rem"></textarea></div>';}
+function addPasso(){document.getElementById('passos').insertAdjacentHTML('beforeend',novoPasso());}
+function remPasso(b){var ps=document.querySelectorAll('#passos .passo');if(ps.length<=1){alert('Deixe ao menos 1 passo.');return;}b.closest('.passo').remove();}
+</script>
 {% endblock %}"""
 
 _env.loader.mapping["prospeccao"] = _KANBAN_TPL

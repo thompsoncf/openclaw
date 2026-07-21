@@ -42,6 +42,22 @@ _TIMEOUT = 25.0
 _TOKEN: str | None = None
 _TOKEN_EXP: float = 0.0
 _TTL_SEG = 23 * 3600
+# formato de corpo do /auth que funcionou (memoizado após o 1º sucesso), pra não
+# ficar testando todos toda vez.
+_AUTH_SHAPE_OK: int | None = None
+
+# O /auth respondeu "LOGON OU SENHA INVALIDOS" a {ClientID,ClientSecret}: o corpo
+# real é logon/senha. Tentamos os formatos mais prováveis, em ordem; o 1º que
+# devolver token vence. (u = CREDIFY_CLIENT_ID, p = CREDIFY_CLIENT_SECRET — só
+# "recipientes"; ponha ali o login/usuário e a senha que a Credify te deu.)
+_AUTH_SHAPES = [
+    lambda u, p: {"logon": u, "senha": p},
+    lambda u, p: {"Logon": u, "Senha": p},
+    lambda u, p: {"login": u, "senha": p},
+    lambda u, p: {"usuario": u, "senha": p},
+    lambda u, p: {"email": u, "senha": p},
+    lambda u, p: {"ClientID": u, "ClientSecret": p},
+]
 
 
 class CredifyErro(Exception):
@@ -97,9 +113,30 @@ def _eh_movel(ddd: str, numero: str) -> bool:
 
 # ---------- autenticação ----------
 
+def _extrai_token(j) -> str | None:
+    """Tira o JWT do retorno do /auth, tolerante ao envelope. A Credify responde
+    {"Sucess":bool,"Message":...,"Dados":...}; no sucesso o token costuma vir em
+    Dados (string) ou Dados.token."""
+    if not isinstance(j, dict):
+        return None
+    dados = _pega(j, "Dados", "data", "result", "retorno")
+    if isinstance(dados, dict):
+        t = _pega(dados, "token", "access_token", "accessToken", "jwt", "Token")
+        if t:
+            return str(t)
+    elif isinstance(dados, str) and len(dados) >= 20:
+        return dados  # o próprio Dados já é o token
+    t = _pega(j, "token", "access_token", "accessToken", "jwt", "Token")
+    return str(t) if t else None
+
+
 def _obter_token(force: bool = False) -> str:
-    """Devolve um JWT válido (cacheado). Renova se expirou ou se force=True."""
-    global _TOKEN, _TOKEN_EXP
+    """Devolve um JWT válido (cacheado). Renova se expirou ou se force=True.
+
+    Testa os formatos de corpo do /auth (ver _AUTH_SHAPES) e memoiza o que
+    funcionou. Levanta CredifyErro com a Message do servidor se todos falharem
+    (ex.: 'LOGON OU SENHA INVALIDOS' = valores errados, não formato)."""
+    global _TOKEN, _TOKEN_EXP, _AUTH_SHAPE_OK
     agora = time.time()
     if not force and _TOKEN and agora < _TOKEN_EXP:
         return _TOKEN
@@ -107,21 +144,30 @@ def _obter_token(force: bool = False) -> str:
     csec = os.environ.get("CREDIFY_CLIENT_SECRET")
     if not (cid and csec):
         raise CredifyErro("faltam CREDIFY_CLIENT_ID / CREDIFY_CLIENT_SECRET")
-    try:
-        r = httpx.post(_base() + "/auth",
-                       json={"ClientID": cid, "ClientSecret": csec},
-                       timeout=_TIMEOUT)
-    except Exception as e:  # noqa: BLE001
-        raise CredifyErro(f"rede no /auth: {e}") from e
-    if r.status_code >= 300:
-        raise CredifyErro(f"auth {r.status_code}: {r.text[:200]}")
-    j = r.json()
-    tok = _pega(j, "token", "access_token", "accessToken", "jwt", "Token")
-    if not tok:
-        raise CredifyErro(f"auth sem token no retorno: {str(j)[:200]}")
-    _TOKEN = str(tok)
-    _TOKEN_EXP = agora + _TTL_SEG
-    return _TOKEN
+
+    ordem = ([_AUTH_SHAPES[_AUTH_SHAPE_OK]] if _AUTH_SHAPE_OK is not None
+             else []) + [s for i, s in enumerate(_AUTH_SHAPES)
+                         if i != _AUTH_SHAPE_OK]
+    ultimo = "sem resposta"
+    for shape in ordem:
+        corpo = shape(cid, csec)
+        try:
+            r = httpx.post(_base() + "/auth", json=corpo, timeout=_TIMEOUT)
+        except Exception as e:  # noqa: BLE001
+            raise CredifyErro(f"rede no /auth: {e}") from e
+        try:
+            j = r.json()
+        except Exception:  # noqa: BLE001
+            j = {}
+        tok = _extrai_token(j)
+        if tok:
+            _TOKEN = tok
+            _TOKEN_EXP = agora + _TTL_SEG
+            _AUTH_SHAPE_OK = _AUTH_SHAPES.index(shape)
+            return _TOKEN
+        ultimo = str(_pega(j, "Message", "message", "erro", "Erro",
+                           default=f"HTTP {r.status_code}"))
+    raise CredifyErro(f"auth recusada em todos os formatos: {ultimo}")
 
 
 def _post(caminho: str, payload: dict) -> dict:

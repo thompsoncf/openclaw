@@ -42,6 +42,15 @@ def test_escolher_decisor_vazio():
     assert cf._escolher_decisor([]) is None
 
 
+def test_extrai_token_do_envelope_credify():
+    # sucesso: token dentro de Dados (dict)
+    assert cf._extrai_token({"Sucess": True, "Dados": {"token": "abc123def456ghi789xy"}}) == "abc123def456ghi789xy"
+    # sucesso: Dados é a própria string do token
+    assert cf._extrai_token({"Sucess": True, "Dados": "x" * 30}) == "x" * 30
+    # falha típica: sem token
+    assert cf._extrai_token({"Sucess": False, "Message": "LOGON OU SENHA INVALIDOS", "Dados": False}) is None
+
+
 def test_decisor_sem_credenciais(monkeypatch):
     monkeypatch.delenv("CREDIFY_CLIENT_ID", raising=False)
     monkeypatch.delenv("CREDIFY_CLIENT_SECRET", raising=False)

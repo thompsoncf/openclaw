@@ -45,9 +45,12 @@ def main() -> None:
     # 1) auth
     try:
         tok = cf._obter_token()
-        print(f"auth: OK (token de {len(tok)} chars)")
+        shape = cf._AUTH_SHAPES[cf._AUTH_SHAPE_OK](".", ".") if cf._AUTH_SHAPE_OK is not None else {}
+        print(f"auth: OK (token de {len(tok)} chars) — formato aceito: {list(shape.keys())}")
     except Exception as e:  # noqa: BLE001
         print(f"auth FALHOU: {e}")
+        print("  -> 'LOGON OU SENHA INVALIDOS' aqui = os VALORES estão errados "
+              "(confira se são da Credify e não da Credly).")
         return
 
     # 2) quadro societário — RAW

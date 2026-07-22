@@ -3338,6 +3338,13 @@ _CPILL_CSS = """<style>.cpill{font-size:.68rem;font-weight:700;padding:.14rem .5
 /* barra de progresso do card */
 .cpbar{height:6px;border-radius:999px;background:#1e1f22;margin-top:.5rem;overflow:hidden;display:flex}
 .cpbar i{display:block;height:100%}.cpbar .e{background:#5b9bd5}.cpbar .r{background:#3ddc84}
+/* botão excluir no card da lista */
+.cpx{width:32px;height:32px;padding:0;border-radius:8px;background:transparent;border:1px solid var(--borda);color:var(--mut);cursor:pointer;font-size:.9rem;flex-shrink:0;line-height:1}
+.cpx:hover{color:#e0574f;border-color:#5c2a27;background:#231414}
+/* explicação do fluxo */
+.cphelp{border:1px solid var(--borda);border-radius:11px;background:var(--card);padding:.8rem .95rem;margin-top:.5rem}
+.cphelp ol{margin:.4rem 0 0;padding-left:1.15rem;font-size:.82rem;color:var(--mut);line-height:1.7}
+.cphelp ol b{color:var(--txt)}
 /* resumo 3 colunas */
 .cpsum{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.7rem;margin-top:1rem}
 @media(max-width:760px){.cpsum{grid-template-columns:1fr}}
@@ -3370,18 +3377,40 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
     <div class="cppstep"><div>🤝</div><h5>Converte</h5><p>agente assume</p></div>
   </div>
 
-  {% if elegiveis == 0 %}<div class="mut" style="margin-top:.4rem;font-size:.85rem;border:1px solid var(--borda);border-radius:10px;padding:.7rem .9rem">Nenhum lead com e-mail válido ainda. Rode o <b>🔎 Verificar canais</b> na Prospecção pra descobrir os e-mails primeiro.</div>{% endif %}
-  <form method="post" action="/painel/prospeccao/campanhas/nova" style="display:flex;gap:.5rem;margin:1rem 0">
-    <input class="fld" name="nome" placeholder="Nome da campanha (ex.: Salões · Teresina)" style="flex:1" maxlength="120">
-    <button class="pbtn">＋ Nova campanha</button>
-  </form>
+  <div class="cphelp">
+    <b style="font-size:.9rem">Como um lead entra numa campanha</b>
+    <ol>
+      <li>Na <b>Prospecção</b>, rode <b>🔎 Verificar canais</b> — descobre o e-mail do lead pelo site/CNPJ.</li>
+      <li>Só entra quem tem <b>e-mail válido</b> e não descadastrou (os {{ elegiveis }} acima).</li>
+      <li>Abra a campanha → aba <b>👥 Público</b> → filtre por segmento/cidade e clique <b>Adicionar à campanha</b>.</li>
+      <li>Ative: o motor dispara a sequência sozinho (D0 + follow-ups) e <b>para</b> em quem responde — a conversa cai no inbox pro agente assumir.</li>
+    </ol>
+  </div>
+  {% if elegiveis == 0 %}<div class="mut" style="margin-top:.5rem;font-size:.85rem;border:1px solid var(--borda);border-radius:10px;padding:.7rem .9rem">Nenhum lead com e-mail válido ainda. Rode o <b>🔎 Verificar canais</b> na Prospecção pra descobrir os e-mails primeiro.</div>{% endif %}
+
+  <div class="card" style="padding:.9rem 1rem;margin:1rem 0">
+    <form method="post" action="/painel/prospeccao/campanhas/nova" style="margin:0">
+      <label class="lbl">Nome da campanha <span style="color:var(--mut);font-weight:400">— opcional, dá pra renomear depois</span></label>
+      <input class="fld" name="nome" placeholder="ex.: Salões · Teresina" maxlength="120" style="margin-bottom:.6rem">
+      <button class="pbtn" style="width:100%;justify-content:center">＋ Criar campanha</button>
+    </form>
+  </div>
+
   <div style="display:flex;flex-direction:column;gap:.6rem">
     {% for c in camps %}
-    <a href="/painel/prospeccao/campanhas/{{ c.id }}" class="card" style="display:block;text-decoration:none;color:inherit;padding:.9rem 1rem">
-      <div style="display:flex;align-items:center;gap:.6rem"><b style="flex:1">{{ c.nome }}</b><span class="cpill {{ c.status }}">{{ c.status_rot }}</span></div>
-      <div class="mut" style="font-size:.8rem;margin-top:.35rem"><b style="color:var(--txt)">{{ c.n }}</b> leads · {{ c.env }} enviados · <span style="color:var(--verde-claro)">{{ c.resp }} respostas</span> · limite {{ c.limite }}/dia</div>
-      {% if c.n %}<div class="cpbar"><i class="e" style="width:{{ (100*c.env/c.n)|round|int }}%"></i><i class="r" style="width:{{ (100*c.resp/c.n)|round|int }}%"></i></div>{% endif %}
-    </a>
+    <div class="card" style="padding:.9rem 1rem">
+      <div style="display:flex;align-items:center;gap:.6rem">
+        <a href="/painel/prospeccao/campanhas/{{ c.id }}" style="flex:1;text-decoration:none;color:inherit;font-weight:700">{{ c.nome }}</a>
+        <span class="cpill {{ c.status }}">{{ c.status_rot }}</span>
+        <form method="post" action="/painel/prospeccao/campanhas/{{ c.id }}/excluir" style="margin:0" onsubmit="return confirm('Excluir “{{ c.nome }}”? Os leads voltam pro funil.')">
+          <button class="cpx" title="Excluir campanha">🗑</button>
+        </form>
+      </div>
+      <a href="/painel/prospeccao/campanhas/{{ c.id }}" style="display:block;text-decoration:none;color:inherit">
+        <div class="mut" style="font-size:.8rem;margin-top:.35rem"><b style="color:var(--txt)">{{ c.n }}</b> leads · {{ c.env }} enviados · <span style="color:var(--verde-claro)">{{ c.resp }} respostas</span> · limite {{ c.limite }}/dia</div>
+        {% if c.n %}<div class="cpbar"><i class="e" style="width:{{ (100*c.env/c.n)|round|int }}%"></i><i class="r" style="width:{{ (100*c.resp/c.n)|round|int }}%"></i></div>{% endif %}
+      </a>
+    </div>
     {% else %}<div class="mut" style="text-align:center;padding:2rem">Nenhuma campanha ainda — crie a primeira acima.</div>{% endfor %}
   </div>
 </div>

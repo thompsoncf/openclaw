@@ -1377,6 +1377,15 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
             (camp_id,)).fetchall()
         wsql, wparams = _campanha_publico_where(ctx["conta_id"], camp_id, seg, cidade, temp)
         eleg = c.execute(f"select count(*) from prospeccao p where {wsql}", tuple(wparams)).fetchone()[0]
+        sample = c.execute(
+            """select p.empresa, p.segmento, p.cidade, p.uf, p.whatsapp, p.email
+                 from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
+                where a.campanha_id=%s order by a.id limit 1""", (camp_id,)).fetchone()
+        if not sample:
+            sample = c.execute(
+                """select empresa, segmento, cidade, uf, whatsapp, email from prospeccao
+                    where conta_id=%s and email_ok order by atualizado_em desc limit 1""",
+                (ctx["conta_id"],)).fetchone()
     resp = st.get("respondeu", 0)
     from datetime import date as _date
     hoje = cp[4] if cp[5] == _date.today() else 0
@@ -1387,12 +1396,24 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
             "concluidos": st.get("concluido", 0), "hoje": hoje,
             "taxa": (round(100 * resp / enviados) if enviados else 0)}
     passos_l = [{"dias": p[1], "assunto": p[2], "corpo": p[3], "ia": p[4]} for p in passos]
+    from finance.campanhas_motor import _fmt as _cfmt
+    cadencia = " · ".join("D" + str(p["dias"]) for p in passos_l) or "—"
+    previa = None
+    if passos_l and sample:
+        _ld = {"empresa": sample[0], "segmento": sample[1], "cidade": sample[2], "uf": sample[3],
+               "whatsapp": sample[4], "email": sample[5]}
+        p0 = passos_l[0]
+        previa = {"ia": bool(p0["ia"]), "empresa": _ld["empresa"], "email": _ld["email"],
+                  "whatsapp": _ld["whatsapp"],
+                  "assunto": _cfmt(p0["assunto"] or "Uma ideia pra {empresa}", _ld),
+                  "corpo": ("O agente escreve um e-mail único pra este lead — clique em “Gerar prévia com IA” "
+                            "pra ver um exemplo." if p0["ia"] else _cfmt(p0["corpo"] or "", _ld))}
     leads_l = [{"empresa": r[0], "email": r[1], "status": r[2], "passo": r[3],
                 "prox": r[4], "ult": r[5], "rot": _ALVO_ROT.get(r[2], r[2])} for r in leads]
     return _render("prospeccao_campanha", request, titulo=camp["nome"], secao_ativa="prospeccao",
                    camp=camp, passos=passos_l, elegiveis=eleg, na_camp=na_camp, st=st, metr=metr,
-                   leads=leads_l, seg=seg, cidade=cidade, temp=temp,
-                   aviso=request.session.pop("prosp_aviso", None))
+                   leads=leads_l, previa=previa, cadencia=cadencia, remetente=remetente_configurado(),
+                   seg=seg, cidade=cidade, temp=temp, aviso=request.session.pop("prosp_aviso", None))
 
 
 @router.post("/painel/prospeccao/campanhas/{camp_id}/publico")
@@ -1506,6 +1527,37 @@ def prospeccao_campanha_excluir(request: Request, camp_id: int):
         c.commit()
     request.session["prosp_aviso"] = "Campanha excluída."
     return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
+
+
+@router.post("/painel/prospeccao/campanhas/{camp_id}/previa-ia")
+def prospeccao_campanha_previa_ia(request: Request, camp_id: int):
+    """Gera uma prévia real do e-mail que o agente escreveria (1 lead de exemplo)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    pool = get_pool()
+    with pool.connection() as c:
+        if not _campanha_dona(c, ctx["conta_id"], camp_id):
+            return JSONResponse({"ok": False, "erro": "escopo"}, status_code=404)
+        s = c.execute(
+            """select p.empresa, p.segmento, p.cidade, p.uf, p.whatsapp, p.email
+                 from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
+                where a.campanha_id=%s order by a.id limit 1""", (camp_id,)).fetchone()
+        if not s:
+            s = c.execute("""select empresa,segmento,cidade,uf,whatsapp,email from prospeccao
+                              where conta_id=%s and email_ok order by atualizado_em desc limit 1""",
+                          (ctx["conta_id"],)).fetchone()
+    if not s:
+        return JSONResponse({"ok": False, "erro": "Adicione leads (com e-mail) primeiro."})
+    lead = {"empresa": s[0], "segmento": s[1], "cidade": s[2], "uf": s[3], "whatsapp": s[4], "email": s[5]}
+    try:
+        from finance.campanhas_motor import _email_ia
+        m = _email_ia(pool, ctx["conta_id"], lead)
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "erro": "Não consegui gerar a prévia."})
+    return JSONResponse({"ok": True, "empresa": lead["empresa"], "assunto": m["assunto"], "corpo": m["corpo"]})
 
 
 # ================================================================ FICHA DO ALVO
@@ -3276,7 +3328,30 @@ _CPILL_CSS = """<style>.cpill{font-size:.68rem;font-weight:700;padding:.14rem .5
 .cpill.ia{color:#c9a3e0;border-color:#4a3163;background:#1c1327}
 .cpstep{display:flex;gap:.7rem;align-items:center;padding:.55rem 0;border-top:1px solid var(--borda)}
 .cpstep:first-of-type{border-top:0}
-.cpday{width:54px;text-align:center;flex-shrink:0}.cpday b{font-size:1.05rem}</style>"""
+.cpday{width:54px;text-align:center;flex-shrink:0}.cpday b{font-size:1.05rem}
+/* pipeline */
+.cppipe{display:flex;gap:.5rem;background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:.6rem;margin:1rem 0;overflow-x:auto}
+.cppstep{flex:1;min-width:140px;border:1px solid var(--borda);border-radius:9px;padding:.55rem .65rem;position:relative;background:var(--bg)}
+.cppstep h5{margin:.2rem 0 .05rem;font-size:.82rem}.cppstep p{margin:0;font-size:.72rem;color:var(--mut)}
+.cppstep.on{border-color:#1e4a34;background:#10241a}
+.cppstep .arw{position:absolute;right:-.6rem;top:50%;transform:translateY(-50%);color:var(--mut);z-index:2}
+/* barra de progresso do card */
+.cpbar{height:6px;border-radius:999px;background:#1e1f22;margin-top:.5rem;overflow:hidden;display:flex}
+.cpbar i{display:block;height:100%}.cpbar .e{background:#5b9bd5}.cpbar .r{background:#3ddc84}
+/* resumo 3 colunas */
+.cpsum{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.7rem;margin-top:1rem}
+@media(max-width:760px){.cpsum{grid-template-columns:1fr}}
+.cpsum .box{background:var(--card);border:1px solid var(--borda);border-radius:11px;padding:.75rem .85rem}
+.cpsum .box h5{margin:0 0 .4rem;font-size:.82rem}
+.cpkv{display:flex;justify-content:space-between;gap:.5rem;font-size:.82rem;padding:.15rem 0}
+.cpkv span{color:var(--mut)}
+/* prévia do e-mail */
+.mailp{background:#0e0f11;border:1px solid var(--borda);border-radius:11px;overflow:hidden;margin-top:.7rem}
+.mailp .h{padding:.6rem .85rem;border-bottom:1px solid var(--borda);font-size:.78rem;color:var(--mut)}
+.mailp .h b{color:var(--txt)}
+.mailp .b{padding:.9rem 1rem;font-size:.9rem;line-height:1.6;white-space:pre-wrap}
+.mailp .wa{display:inline-block;margin-top:.5rem;color:#3ddc84;border:1px solid #1e4a34;background:#10241a;border-radius:8px;padding:.3rem .65rem;font-size:.82rem;text-decoration:none}
+.mailp .f{padding:.55rem .85rem;border-top:1px solid var(--borda);font-size:.68rem;color:var(--mut)}</style>"""
 
 _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + """
 <div style="max-width:1000px;margin:0 auto">
@@ -3286,7 +3361,16 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
     <div style="display:flex;gap:.5rem"><a class="pbtn ghost" href="/painel/prospeccao">‹ Prospecção</a><a class="pbtn ghost" href="/painel/prospeccao/comunicacao">📨 Comunicação</a></div>
   </div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
-  {% if elegiveis == 0 %}<div class="mut" style="margin-top:.9rem;font-size:.85rem;border:1px solid var(--borda);border-radius:10px;padding:.7rem .9rem">Nenhum lead com e-mail válido ainda. Rode o <b>🔎 Verificar canais</b> na Prospecção pra descobrir os e-mails primeiro.</div>{% endif %}
+
+  <div class="cppipe">
+    <div class="cppstep"><div>🎯</div><h5>Captar</h5><p>Maps + CNPJ</p><span class="arw">›</span></div>
+    <div class="cppstep"><div>🔎</div><h5>Verificar canais</h5><p>site → e-mail ✓</p><span class="arw">›</span></div>
+    <div class="cppstep on"><div>✉️</div><h5>Sequência</h5><p>D0 · follow-ups</p><span class="arw">›</span></div>
+    <div class="cppstep"><div>💬</div><h5>Resposta → inbox</h5><p>para a sequência</p><span class="arw">›</span></div>
+    <div class="cppstep"><div>🤝</div><h5>Converte</h5><p>agente assume</p></div>
+  </div>
+
+  {% if elegiveis == 0 %}<div class="mut" style="margin-top:.4rem;font-size:.85rem;border:1px solid var(--borda);border-radius:10px;padding:.7rem .9rem">Nenhum lead com e-mail válido ainda. Rode o <b>🔎 Verificar canais</b> na Prospecção pra descobrir os e-mails primeiro.</div>{% endif %}
   <form method="post" action="/painel/prospeccao/campanhas/nova" style="display:flex;gap:.5rem;margin:1rem 0">
     <input class="fld" name="nome" placeholder="Nome da campanha (ex.: Salões · Teresina)" style="flex:1" maxlength="120">
     <button class="pbtn">＋ Nova campanha</button>
@@ -3296,6 +3380,7 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
     <a href="/painel/prospeccao/campanhas/{{ c.id }}" class="card" style="display:block;text-decoration:none;color:inherit;padding:.9rem 1rem">
       <div style="display:flex;align-items:center;gap:.6rem"><b style="flex:1">{{ c.nome }}</b><span class="cpill {{ c.status }}">{{ c.status_rot }}</span></div>
       <div class="mut" style="font-size:.8rem;margin-top:.35rem"><b style="color:var(--txt)">{{ c.n }}</b> leads · {{ c.env }} enviados · <span style="color:var(--verde-claro)">{{ c.resp }} respostas</span> · limite {{ c.limite }}/dia</div>
+      {% if c.n %}<div class="cpbar"><i class="e" style="width:{{ (100*c.env/c.n)|round|int }}%"></i><i class="r" style="width:{{ (100*c.resp/c.n)|round|int }}%"></i></div>{% endif %}
     </a>
     {% else %}<div class="mut" style="text-align:center;padding:2rem">Nenhuma campanha ainda — crie a primeira acima.</div>{% endfor %}
   </div>
@@ -3329,6 +3414,20 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
     </div>
   </div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
+
+  <div class="cpsum">
+    <div class="box"><h5>👥 Público</h5>
+      <div class="cpkv"><span>Na campanha</span><b>{{ na_camp }}</b></div>
+      <div class="cpkv"><span>Elegíveis (filtro)</span><b>{{ elegiveis }}</b></div></div>
+    <div class="box"><h5>🗓️ Cadência</h5>
+      <div class="cpkv"><span>Passos</span><b>{{ passos|length }}</b></div>
+      <div class="cpkv"><span>Sequência</span><b>{{ cadencia }}</b></div>
+      <div class="cpkv"><span>Para ao responder</span><b style="color:var(--verde-claro)">Sim</b></div></div>
+    <div class="box"><h5>🛡️ Limites & LGPD</h5>
+      <div class="cpkv"><span>Envios/dia</span><b>{{ camp.limite }}</b></div>
+      <div class="cpkv"><span>Enviados hoje</span><b>{{ metr.hoje }}</b></div>
+      <div class="cpkv"><span>Descadastro</span><b style="color:var(--verde-claro)">Ativo</b></div></div>
+  </div>
 
   <!-- CONFIG -->
   <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/config" class="card" style="padding:.9rem 1rem;margin-top:1rem;display:flex;gap:.6rem;align-items:flex-end;flex-wrap:wrap">
@@ -3386,6 +3485,24 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
     </div>
   </form>
 
+  <!-- PRÉVIA -->
+  {% if previa %}
+  <div class="card" style="padding:1rem;margin-top:1rem">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
+      <h3 style="margin:0;font-size:1rem">✉️ Prévia <span class="mut" style="font-size:.75rem;font-weight:400">· 1º passo · exemplo com {{ previa.empresa }}</span></h3>
+      {% if previa.ia %}<button type="button" class="pbtn ghost" id="pia-btn" onclick="previaIA({{ camp.id }})">🤖 Gerar prévia com IA</button>{% endif %}
+    </div>
+    <div class="mailp">
+      <div class="h">De <b>{{ remetente or 'sua empresa' }}</b> · Para {{ previa.email or '—' }}</div>
+      <div class="b"><b id="pv-assunto">{{ previa.assunto }}</b>
+        <div style="height:.5rem"></div><span id="pv-corpo">{{ previa.corpo }}</span>
+        {% if previa.whatsapp %}<div><a class="wa" href="#">💬 Falar no WhatsApp</a></div>{% endif %}
+      </div>
+      <div class="f">Sua empresa · Se não quiser mais receber, descadastrar (link automático em cada envio).</div>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- MÉTRICAS -->
   <h3 style="margin:1.3rem 0 .5rem;font-size:1rem">📊 Desempenho</h3>
   <div class="cpstats">
@@ -3426,6 +3543,10 @@ function novoPasso(){return '<div class="passo"><div class="prow"><label>D+<inpu
   +'<textarea class="fld" name="corpo" rows="3" placeholder="Texto do e-mail (use {empresa}, {cidade})" style="margin-top:.45rem"></textarea></div>';}
 function addPasso(){document.getElementById('passos').insertAdjacentHTML('beforeend',novoPasso());}
 function remPasso(b){var ps=document.querySelectorAll('#passos .passo');if(ps.length<=1){alert('Deixe ao menos 1 passo.');return;}b.closest('.passo').remove();}
+function previaIA(id){var b=document.getElementById('pia-btn');if(b){b.disabled=true;b.textContent='Gerando…';}
+  fetch('/painel/prospeccao/campanhas/'+id+'/previa-ia',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()}).then(function(r){return r.json();}).then(function(d){if(b){b.disabled=false;b.textContent='🤖 Gerar prévia com IA';}
+    if(!d.ok){alert(d.erro||'Não consegui.');return;}
+    document.getElementById('pv-assunto').textContent=d.assunto;document.getElementById('pv-corpo').textContent=d.corpo;}).catch(function(){if(b){b.disabled=false;b.textContent='🤖 Gerar prévia com IA';}alert('Falha de rede.');});}
 </script>
 {% endblock %}"""
 

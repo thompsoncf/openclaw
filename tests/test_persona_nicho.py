@@ -41,6 +41,12 @@ def test_persona_do_nicho():
     assert "CONTADOR" in nichos.persona_do_nicho("contabilidade")
 
 
+def test_rotulo_receber_por_nicho():
+    assert nichos.rotulo_receber("contabilidade") == "Honorários"
+    assert nichos.rotulo_receber("alimentacao") == "Fiado"      # varejo
+    assert nichos.rotulo_receber("consultoria") == "A receber"  # serviço genérico
+
+
 # ── parte com banco: bloco_persona_pj molda ao nicho ──────────────────────
 @pytest.fixture(scope="module")
 def pool():

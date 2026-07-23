@@ -2821,15 +2821,15 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
   {% if fiados %}
   <div style="background:var(--card);border:1px solid #3a2f17;border-radius:10px;padding:.8rem 1rem;margin-bottom:1rem">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">
-      <span style="color:#e0b878;font-weight:600">Em aberto (fiado)</span>
+      <span style="color:#e0b878;font-weight:600">{{ rotulo_receber or 'A receber' }} em aberto</span>
       <span style="color:#e0b878;font-weight:700">R$ {{ "%.2f"|format(fiado_total/100) }}</span>
     </div>
     {% for f in fiados %}
     <div style="display:flex;justify-content:space-between;align-items:center;padding:.45rem 0;border-top:1px solid #242426">
-      <div style="font-size:.82rem;color:#cfcfcf">Fiado #{{ f.id }} <span style="color:#888;font-size:.74rem">· vence {{ f.vencimento }}</span><br><span style="color:var(--txt)">R$ {{ "%.2f"|format(f.valor_centavos/100) }}</span></div>
+      <div style="font-size:.82rem;color:#cfcfcf">{{ rotulo_receber or 'A receber' }} #{{ f.id }} <span style="color:#888;font-size:.74rem">· vence {{ f.vencimento }}</span><br><span style="color:var(--txt)">R$ {{ "%.2f"|format(f.valor_centavos/100) }}</span></div>
       <div style="display:flex;gap:.4rem;align-items:center">
         {% if f.link %}<a href="{{ f.link }}" target="_blank" style="color:#c99536;font-size:.76rem">link Pix ↗</a>{% else %}<form method="post" action="/painel/clientes/{{ cliente.id }}/fiado/{{ f.id }}/cobrar" style="display:inline"><button style="background:none;border:1px solid #c99536;color:#c99536;border-radius:5px;padding:.25rem .55rem;cursor:pointer;font-size:.74rem;width:auto">cobrar Pix</button></form>{% endif %}
-        <form method="post" action="/painel/clientes/{{ cliente.id }}/fiado/{{ f.id }}/baixar" style="display:inline" onsubmit="return confirm('Confirmar recebimento deste fiado?')"><button style="background:none;border:1px solid var(--verde);color:var(--verde-claro);border-radius:5px;padding:.25rem .55rem;cursor:pointer;font-size:.74rem;width:auto">dar baixa</button></form>
+        <form method="post" action="/painel/clientes/{{ cliente.id }}/fiado/{{ f.id }}/baixar" style="display:inline" onsubmit="return confirm('Confirmar recebimento?')"><button style="background:none;border:1px solid var(--verde);color:var(--verde-claro);border-radius:5px;padding:.25rem .55rem;cursor:pointer;font-size:.74rem;width:auto">dar baixa</button></form>
       </div>
     </div>
     {% endfor %}
@@ -7303,8 +7303,16 @@ def painel_cliente_detalhe(request: Request, cliente_id: int):
     total = agg[1] or 0
     resumo = {"n": n, "total_centavos": total, "ultima": agg[2],
               "ticket_centavos": (total // n) if n else 0}
+    # rótulo do "a receber" conforme o ramo (contador: Honorários; varejo: Fiado)
+    from finance import nichos as _nichos
+    with pool.connection() as conn:
+        _ns = conn.execute("select coalesce(n.slug,'') from contas ct "
+                           "left join nichos n on n.id=ct.nicho_id where ct.id=%s",
+                           (conta[0],)).fetchone()
+    rotulo_receber = _nichos.rotulo_receber(_ns[0] if _ns else "")
     return _render("cliente_detalhe", request, conta=conta, cliente=cl,
                    compras=compras, resumo=resumo, fiados=fiados, fiado_total=fiado_total,
+                   rotulo_receber=rotulo_receber,
                    erro=request.session.pop("erro", None),
                    aviso=request.session.pop("aviso", None))
 
@@ -7920,13 +7928,24 @@ def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
         return RedirectResponse("/painel", status_code=303)
     conta, pool = g
     cent = _reais_para_centavos(valor)
+    tipo_ok = tipo if tipo in ("pagar", "receber") else "pagar"
     if cent > 0 and descricao.strip() and vencimento:
-        # liga a um cliente existente pelo nome (não cria duplicado; ignora se não achar)
-        cli_id = cli.achar_cliente_por_nome(pool, conta[0], cliente) if cliente.strip() else None
+        # Cliente só faz sentido em título A RECEBER (honorário/venda a prazo).
+        # Liga a um existente pelo nome; se não achar, CRIA na hora (o campo é
+        # intenção explícita do dono). Em título a pagar, ignora (é fornecedor).
+        cli_id = None
+        nome_cli = cliente.strip()
+        if tipo_ok == "receber" and nome_cli:
+            cli_id = cli.achar_cliente_por_nome(pool, conta[0], nome_cli)
+            if cli_id is None:
+                try:
+                    cli_id = cli.criar_cliente(pool, conta[0], nome_cli)
+                except Exception:
+                    cli_id = None
         try:
-            emp.criar_titulo(pool, conta[0], tipo if tipo in ("pagar", "receber") else "pagar",
+            emp.criar_titulo(pool, conta[0], tipo_ok,
                              descricao, cent, _date.fromisoformat(vencimento),
-                             contraparte=contraparte or (cliente.strip() if cli_id else ""),
+                             contraparte=contraparte or (nome_cli if cli_id else ""),
                              recorrente=bool(recorrente), criado_por=None,
                              cliente_id=cli_id)
         except Exception:

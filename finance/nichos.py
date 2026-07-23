@@ -272,7 +272,11 @@ _PERSONAS_NICHO: dict[str, str] = {
         "- A folha aqui é a do PRÓPRIO escritório (os funcionários dele). A folha "
         "dos clientes ele cuida por fora — não confunda nem se ofereça pra isso.\n"
         "- \"quem me deve\", \"honorários do mês\", \"carteira de clientes\" -> "
-        "consultar_empresa / títulos a receber."
+        "consultar_empresa / títulos a receber.\n"
+        "- Ao lançar honorário de um cliente que AINDA NÃO está na base, ofereça "
+        "cadastrá-lo (cadastrar_cliente) — assim o título fica ligado à ficha dele "
+        "(a carteira). Se o dono topar, cadastre e crie o título com o nome do "
+        "cliente na contraparte."
     ),
 }
 
@@ -281,6 +285,21 @@ def persona_do_nicho(slug: str | None) -> str:
     """Bloco de persona específico do nicho pra anexar ao prompt PJ (ou '' se o
     nicho não tem molde próprio — cai na persona PJ genérica)."""
     return _PERSONAS_NICHO.get((slug or "").strip().lower(), "")
+
+
+# Rótulo do "a receber em aberto" na ficha do cliente, POR NICHO. Varejo pensa em
+# "fiado"; contador em "honorários"; o resto em "a receber". Molda a linguagem.
+_ROTULO_RECEBER = {"contabilidade": "Honorários"}
+
+
+def rotulo_receber(slug: str | None) -> str:
+    """Como chamar o 'a receber em aberto' de um cliente, conforme o ramo.
+    Ex.: contabilidade -> 'Honorários'; quem vende produto -> 'Fiado'; senão
+    'A receber'."""
+    s = (slug or "").strip().lower()
+    if s in _ROTULO_RECEBER:
+        return _ROTULO_RECEBER[s]
+    return "Fiado" if vende_produto(s) else "A receber"
 
 
 def tem_persona(slug: str | None) -> bool:

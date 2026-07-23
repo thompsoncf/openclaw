@@ -179,6 +179,31 @@ def obter_cliente(pool, dono_id: int, cliente_id: int) -> dict | None:
     return _row_para_dict(r) if r else None
 
 
+def achar_cliente_por_nome(pool, dono_id: int, nome: str) -> int | None:
+    """Acha o cliente do lojista pelo NOME (sem criar). Prioriza match EXATO;
+    senao, um unico match parcial. Retorna o id, ou None se nao achar OU se for
+    ambiguo (dois com o mesmo nome — nao chuta). Usado pra LIGAR um titulo/
+    honorario ao cliente sem duplicar cadastro."""
+    n = (nome or "").strip()
+    if not n:
+        return None
+    with pool.connection() as c:
+        exato = c.execute(
+            "select c.id from clientes c left join pessoas p on p.id=c.pessoa_id "
+            "where c.dono_id=%s and c.ativo "
+            "and lower(coalesce(p.nome,c.nome))=lower(%s) order by c.id limit 2",
+            (dono_id, n)).fetchall()
+        if len(exato) == 1:
+            return exato[0][0]
+        if len(exato) >= 2:
+            return None  # ambiguo: nao arrisca ligar no errado
+        parcial = c.execute(
+            "select c.id from clientes c left join pessoas p on p.id=c.pessoa_id "
+            "where c.dono_id=%s and c.ativo and coalesce(p.nome,c.nome) ilike %s limit 2",
+            (dono_id, f"%{n}%")).fetchall()
+        return parcial[0][0] if len(parcial) == 1 else None
+
+
 def buscar_por_telefone(pool, dono_id: int, telefone: str) -> dict | None:
     """Acha um cliente do lojista pelo telefone (so digitos). None se nao achar.
     Util pra nao duplicar na hora de vender (dedup dentro da propria loja)."""

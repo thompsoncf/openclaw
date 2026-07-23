@@ -26,7 +26,8 @@ from web.painel_servicos import _garantir_tabela as _garantir_orcamentos
 
 # 018 = chave em lancamentos; 053 = titulos; 057 = natureza em lancamentos.
 _MIGRACOES = ["018_chave_nfce_lancamentos.sql", "053_modulo_pj.sql",
-              "057_natureza_lancamento.sql"]
+              "057_natureza_lancamento.sql", "064_clientes_lojista.sql",
+              "066_pessoas_identidade.sql", "067_titulos_cliente.sql"]
 
 
 @pytest.fixture(scope="module")

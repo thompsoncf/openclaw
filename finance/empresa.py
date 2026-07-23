@@ -121,43 +121,51 @@ def criar_titulo(pool, conta_id: int, tipo: str, descricao: str,
                  valor_centavos: int, vencimento: date,
                  contraparte: str = "", categoria: str = "",
                  recorrente: bool = False,
-                 criado_por: int | None = None) -> dict:
-    """Cria um título aberto. tipo: 'pagar' | 'receber'."""
+                 criado_por: int | None = None,
+                 cliente_id: int | None = None) -> dict:
+    """Cria um título aberto. tipo: 'pagar' | 'receber'. cliente_id LIGA o título
+    a um cliente da base (honorário/venda a prazo aparece na ficha dele)."""
     if tipo not in ("pagar", "receber"):
         raise ValueError("tipo deve ser 'pagar' ou 'receber'")
     if not categoria:
         categoria = CAT_FORNECEDORES if tipo == "pagar" else CAT_VENDAS
+    cli_id = int(cliente_id) if cliente_id else None
     with pool.connection() as c:
         r = c.execute(
             """insert into titulos
                  (conta_id, tipo, descricao, contraparte, valor_centavos,
-                  vencimento, categoria, recorrente, criado_por)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
+                  vencimento, categoria, recorrente, criado_por, cliente_id)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
             (conta_id, tipo, (descricao or "").strip(), (contraparte or "").strip(),
              int(valor_centavos), vencimento, categoria, bool(recorrente),
-             criado_por),
+             criado_por, cli_id),
         ).fetchone()
         c.commit()
     return {"id": r[0], "tipo": tipo, "descricao": descricao,
             "valor_centavos": int(valor_centavos), "vencimento": vencimento,
-            "status": "aberto", "recorrente": bool(recorrente)}
+            "status": "aberto", "recorrente": bool(recorrente),
+            "cliente_id": cli_id}
 
 
 def listar_titulos(pool, conta_id: int, status: str = "aberto",
                    tipo: str | None = None, limite: int = 100) -> list[dict]:
     """Títulos da conta. Abertos vêm por vencimento; pagos, do mais recente."""
-    cond = "conta_id=%s and status=%s"
+    cond = "t.conta_id=%s and t.status=%s"
     args: list = [conta_id, status]
     if tipo in ("pagar", "receber"):
-        cond += " and tipo=%s"
+        cond += " and t.tipo=%s"
         args.append(tipo)
-    ordem = "vencimento asc, id asc" if status == "aberto" else "pago_em desc, id desc"
+    ordem = "t.vencimento asc, t.id asc" if status == "aberto" else "t.pago_em desc, t.id desc"
     with pool.connection() as c:
         rows = c.execute(
-            f"""select id, tipo, descricao, contraparte, valor_centavos,
-                       vencimento, status, recorrente, categoria,
-                       cobranca_link_url, pago_em, lancamento_id
-                  from titulos where {cond}
+            f"""select t.id, t.tipo, t.descricao, t.contraparte, t.valor_centavos,
+                       t.vencimento, t.status, t.recorrente, t.categoria,
+                       t.cobranca_link_url, t.pago_em, t.lancamento_id,
+                       t.cliente_id, coalesce(p.nome, cl.nome) as cliente_nome
+                  from titulos t
+                  left join clientes cl on cl.id = t.cliente_id
+                  left join pessoas p on p.id = cl.pessoa_id
+                 where {cond}
                  order by {ordem} limit %s""",
             (*args, limite),
         ).fetchall()
@@ -170,6 +178,7 @@ def listar_titulos(pool, conta_id: int, status: str = "aberto",
             "valor_centavos": int(r[4] or 0), "vencimento": venc,
             "status": r[6], "recorrente": bool(r[7]), "categoria": r[8],
             "cobranca_link_url": r[9], "pago_em": r[10], "lancamento_id": r[11],
+            "cliente_id": r[12], "cliente_nome": r[13],
             "atrasado": (r[6] == "aberto" and venc is not None and venc < hoje),
         })
     return out

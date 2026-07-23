@@ -503,8 +503,8 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
 .dash-div{height:1px;background:var(--borda);margin:18px 0}
 .dash-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
 .kpi{background:var(--bg);border:1px solid var(--borda);border-radius:12px;padding:13px 14px;display:flex;flex-direction:column;gap:5px;min-width:0}
-.kpi .rot{font-size:.73rem;color:var(--txt-mut);font-weight:600}
-.kpi .val{font-size:1.22rem;font-weight:680;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.kpi .rot{font-size:.73rem;color:var(--txt-mut);font-weight:600;overflow-wrap:anywhere}
+.kpi .val{font-size:clamp(.95rem,2.6vw,1.22rem);font-weight:680;font-variant-numeric:tabular-nums;letter-spacing:-.01em;overflow-wrap:anywhere;min-width:0}
 .kpi .val.pos{color:var(--verde-claro)}
 .kpi .val.neg{color:#e07a6b}
 .kpi .peq{font-size:.72rem;color:var(--txt-mut)}
@@ -2991,18 +2991,25 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     <span style="background:#15301f;color:var(--verde-claro);font-size:.72rem;font-weight:600;padding:.25rem .7rem;border-radius:14px;border:1px solid var(--verde)44">Módulo PJ ativo</span>
   </div>
 
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.6rem;margin-top:1rem">
-    <div class="card" style="margin:0"><div class="mut" style="font-size:.72rem">A pagar ({{ res.dias }} dias)</div>
-      <div style="font-size:1.3rem;color:#e07a5f;font-weight:600">{{ res.a_pagar_centavos|brl }}</div>
+  <style>
+    .emp-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.6rem;margin-top:1rem}
+    .emp-kpis>.card{margin:0;min-width:0}
+    .emp-kpis .rot{font-size:.72rem}
+    .emp-kpis .val{font-size:clamp(1rem,4.4vw,1.3rem);font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;white-space:nowrap}
+    @media (max-width:420px){.emp-kpis{grid-template-columns:1fr 1fr}}
+  </style>
+  <div class="emp-kpis">
+    <div class="card"><div class="mut rot">A pagar ({{ res.dias }} dias)</div>
+      <div class="val" style="color:#e07a5f">{{ res.a_pagar_centavos|brl }}</div>
       <div class="mut" style="font-size:.68rem">{{ res.n_pagar }} título(s)</div></div>
-    <div class="card" style="margin:0"><div class="mut" style="font-size:.72rem">A receber ({{ res.dias }} dias)</div>
-      <div style="font-size:1.3rem;color:var(--verde-claro);font-weight:600">{{ res.a_receber_centavos|brl }}</div>
+    <div class="card"><div class="mut rot">A receber ({{ res.dias }} dias)</div>
+      <div class="val" style="color:var(--verde-claro)">{{ res.a_receber_centavos|brl }}</div>
       <div class="mut" style="font-size:.68rem">{{ res.n_receber }} título(s)</div></div>
-    <div class="card" style="margin:0"><div class="mut" style="font-size:.72rem">Atrasados</div>
-      <div style="font-size:1.3rem;color:#f0c05a;font-weight:600">{{ res.n_atrasados }}</div>
+    <div class="card"><div class="mut rot">Atrasados</div>
+      <div class="val" style="color:#f0c05a">{{ res.n_atrasados }}</div>
       <div class="mut" style="font-size:.68rem">{{ res.atrasados_centavos|brl }}</div></div>
-    <div class="card" style="margin:0;border-color:var(--verde)33"><div class="mut" style="font-size:.72rem">Saldo projetado (30d)</div>
-      <div style="font-size:1.3rem;color:var(--verde-claro);font-weight:600">{{ fluxo.saldo_projetado_centavos|brl }}</div>
+    <div class="card" style="border-color:var(--verde)33"><div class="mut rot">Saldo projetado (30d)</div>
+      <div class="val" style="color:var(--verde-claro)">{{ fluxo.saldo_projetado_centavos|brl }}</div>
       <div class="mut" style="font-size:.68rem">caixa + previsto</div></div>
   </div>
 </div>
@@ -3091,22 +3098,30 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     <label style="font-size:.72rem;color:#8a938a;text-align:center" title="descontar 6% de vale-transporte">VT<br><input type="checkbox" name="vale_transporte" value="1" style="width:auto"></label>
     <button type="submit" style="background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.55rem .8rem;font-weight:600;cursor:pointer">+ Add</button>
   </form>
-  {% if folha.itens %}<table style="width:100%;font-size:.85rem">
-    <tr class="mut" style="font-size:.72rem"><td>Funcionário</td><td style="text-align:right">Salário</td><td style="text-align:right">Vale</td><td style="text-align:right" title="INSS progressivo">INSS</td><td style="text-align:right" title="vale-transporte 6%">VT</td><td style="text-align:right">A pagar</td><td style="text-align:right">Custo real</td><td></td></tr>
+  {% if folha.itens %}<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+  <table style="width:100%;font-size:.85rem;min-width:480px">
+    <tr class="mut" style="font-size:.72rem"><td>Funcionário</td><td style="text-align:right">Salário</td><td style="text-align:right">A pagar</td><td style="text-align:right">Custo real</td><td></td></tr>
     {% for f in folha.itens %}<tr style="border-top:1px solid #232325">
-      <td>{{ f.nome }}{% if f.pro_labore %} <span class="mut">· pró-labore</span>{% elif f.cargo %} <span class="mut">· {{ f.cargo }}</span>{% endif %}</td>
-      <td style="text-align:right">{{ f.salario_centavos|brl }}</td>
-      <td style="text-align:right;color:#f0c05a">{% if f.vales_centavos %}-{{ f.vales_centavos|brl }}{% else %}—{% endif %}</td>
-      <td style="text-align:right;color:#e07a5f">{% if f.inss_centavos %}-{{ f.inss_centavos|brl }}{% else %}—{% endif %}</td>
-      <td style="text-align:right;color:#e07a5f">{% if f.vt_centavos %}-{{ f.vt_centavos|brl }}{% else %}—{% endif %}</td>
-      <td style="text-align:right;font-weight:600">{% if f.quitado %}<span style="color:var(--verde-claro)">pago ✓</span>{% else %}{{ f.a_pagar_centavos|brl }}{% endif %}</td>
-      <td style="text-align:right" class="mut">{{ f.custo_real_centavos|brl }}</td>
+      <td>{{ f.nome }}{% if f.pro_labore %} <span class="mut">· pró-labore</span>{% elif f.cargo %} <span class="mut">· {{ f.cargo }}</span>{% endif %}
+        {# breakdown que RECONCILIA com "A pagar": salário + extras − INSS − VT − vale − desconto − já pago #}
+        <div class="mut" style="font-size:.68rem;margin-top:2px;line-height:1.5">
+          {%- if f.extras_centavos %}<span style="color:#7fb48f">+ extra {{ f.extras_centavos|brl }}</span> {% endif -%}
+          {%- if f.inss_centavos %}<span style="color:#e07a5f">− INSS {{ f.inss_centavos|brl }}</span> {% endif -%}
+          {%- if f.vt_centavos %}<span style="color:#e07a5f">− VT {{ f.vt_centavos|brl }}</span> {% endif -%}
+          {%- if f.vales_centavos %}<span style="color:#f0c05a">− vale {{ f.vales_centavos|brl }}</span> {% endif -%}
+          {%- if f.descontos_centavos %}<span style="color:#f0c05a">− desc {{ f.descontos_centavos|brl }}</span> {% endif -%}
+          {%- if f.pago_centavos %}<span>· já pago {{ f.pago_centavos|brl }}</span>{% endif -%}
+          {%- if not (f.extras_centavos or f.inss_centavos or f.vt_centavos or f.vales_centavos or f.descontos_centavos or f.pago_centavos) %}líquido = salário{% endif -%}
+        </div></td>
+      <td style="text-align:right;white-space:nowrap">{{ f.salario_centavos|brl }}</td>
+      <td style="text-align:right;font-weight:600;white-space:nowrap">{% if f.quitado %}<span style="color:var(--verde-claro)">pago ✓</span>{% else %}{{ f.a_pagar_centavos|brl }}{% endif %}</td>
+      <td style="text-align:right;white-space:nowrap" class="mut">{{ f.custo_real_centavos|brl }}</td>
       <td style="text-align:right;white-space:nowrap">
         {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vt" style="display:inline" title="ligar/desligar vale-transporte (6%)"><button style="background:none;border:0;color:{{ '#7fb48f' if f.vale_transporte else '#6a6a6a' }};cursor:pointer;font-size:.78rem">VT {{ '✓' if f.vale_transporte else '✗' }}</button></form>{% endif %}
-        {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vale" style="display:inline"><input name="valor" inputmode="decimal" placeholder="vale R$" style="width:70px;font-size:.75rem"><button style="background:none;border:0;color:#f0c05a;cursor:pointer;font-size:.78rem">dar vale</button></form>{% endif %}
+        {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vale" style="display:inline"><input name="valor" inputmode="decimal" placeholder="vale R$" style="width:64px;font-size:.75rem"><button style="background:none;border:0;color:#f0c05a;cursor:pointer;font-size:.78rem">vale</button></form>{% endif %}
         {% if not f.quitado %}<form method="post" action="/painel/empresa/folha/pagar" style="display:inline"><input type="hidden" name="funcionario_id" value="{{ f.id }}"><button style="background:none;border:0;color:var(--verde-claro);cursor:pointer;font-size:.78rem;margin-left:.4rem">pagar ✓</button></form>{% endif %}
       </td></tr>{% endfor %}
-  </table>
+  </table></div>
   <form method="post" action="/painel/empresa/folha/pagar" style="margin-top:.7rem"><button style="background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.5rem 1rem;font-weight:600;cursor:pointer">Pagar folha inteira ✓</button></form>
   {% else %}<div class="mut" style="font-size:.85rem">Nenhum funcionário cadastrado. Adicione acima.</div>{% endif %}
   <div class="mut" style="font-size:.72rem;margin-top:.7rem">ℹ️ Controle gerencial de pessoal — a folha oficial (eSocial, guias, holerite) segue com seu contador, que recebe tudo no relatório mensal.</div>

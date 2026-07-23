@@ -52,10 +52,31 @@ def registrar_migracao(pool, nome: str):
         if "duplicate" not in str(e).lower():
             raise
 
+# Chave arbitrária do advisory lock (serializa deploys/instâncias concorrentes).
+_LOCK_MIGRACOES = 728194
+
+
 def aplicar_migracoes(pool, forcar: bool = False):
-    """Lê e executa todos os .sql da pasta migracoes/ em ordem numérica."""
+    """Lê e executa todos os .sql da pasta migracoes/ em ordem numérica.
+
+    Serializado por um advisory lock: se dois processos (ex.: web e worker do
+    Render, ou 2 instâncias) subirem/deployarem juntos, um espera o outro em vez
+    de aplicarem a mesma migração em paralelo. O lock é mantido numa conexão
+    dedicada durante todo o processo e solto no fim.
+    """
     criar_tabela_rastreamento(pool)
 
+    with pool.connection() as lock_conn:
+        lock_conn.execute("select pg_advisory_lock(%s)", (_LOCK_MIGRACOES,))
+        lock_conn.commit()
+        try:
+            return _aplicar(pool, forcar)
+        finally:
+            lock_conn.execute("select pg_advisory_unlock(%s)", (_LOCK_MIGRACOES,))
+            lock_conn.commit()
+
+
+def _aplicar(pool, forcar: bool = False):
     migracoes_dir = Path(__file__).parent / "migracoes"
     if not migracoes_dir.exists():
         print("Diretório de migrações não encontrado.")
@@ -112,7 +133,8 @@ def main():
         print("Falta DATABASE_URL na env.")
         sys.exit(1)
 
-    pool = ConnectionPool(url, min_size=1, max_size=1, open=True)
+    # max_size=2: uma conexão segura o advisory lock, a outra roda as migrações.
+    pool = ConnectionPool(url, min_size=1, max_size=2, open=True)
     n = aplicar_migracoes(pool, forcar=forcar)
     print(f"\n✓ {n} migração(ões) executada(s).")
     pool.close()

@@ -3083,22 +3083,26 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center"><strong>Equipe e folha</strong>
     <span class="mut" style="font-size:.72rem">folha de {{ '%02d'|format(dre.mes) }}/{{ dre.ano }}: <b style="color:#e07a5f">{{ folha.total_a_pagar_centavos|brl }}</b> · custo real ≈ {{ folha.custo_real_total_centavos|brl }}</span></div>
-  <form method="post" action="/painel/empresa/funcionario" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:.5rem;margin:.7rem 0;align-items:end">
+  <form method="post" action="/painel/empresa/funcionario" style="display:grid;grid-template-columns:2fr 1fr 1fr .8fr auto auto;gap:.5rem;margin:.7rem 0;align-items:end">
     <label style="font-size:.72rem;color:#8a938a">Nome<input name="nome" required placeholder="Nome do funcionário" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Cargo<input name="cargo" placeholder="Ex: Vendedor" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Salário R$<input name="salario" required inputmode="decimal" placeholder="0,00" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Dia pgto<input name="dia" type="number" min="1" max="28" value="5" style="width:100%"></label>
+    <label style="font-size:.72rem;color:#8a938a;text-align:center" title="descontar 6% de vale-transporte">VT<br><input type="checkbox" name="vale_transporte" value="1" style="width:auto"></label>
     <button type="submit" style="background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.55rem .8rem;font-weight:600;cursor:pointer">+ Add</button>
   </form>
   {% if folha.itens %}<table style="width:100%;font-size:.85rem">
-    <tr class="mut" style="font-size:.72rem"><td>Funcionário</td><td style="text-align:right">Salário</td><td style="text-align:right">Vale</td><td style="text-align:right">A pagar</td><td style="text-align:right">Custo real</td><td></td></tr>
+    <tr class="mut" style="font-size:.72rem"><td>Funcionário</td><td style="text-align:right">Salário</td><td style="text-align:right">Vale</td><td style="text-align:right" title="INSS progressivo">INSS</td><td style="text-align:right" title="vale-transporte 6%">VT</td><td style="text-align:right">A pagar</td><td style="text-align:right">Custo real</td><td></td></tr>
     {% for f in folha.itens %}<tr style="border-top:1px solid #232325">
       <td>{{ f.nome }}{% if f.pro_labore %} <span class="mut">· pró-labore</span>{% elif f.cargo %} <span class="mut">· {{ f.cargo }}</span>{% endif %}</td>
       <td style="text-align:right">{{ f.salario_centavos|brl }}</td>
       <td style="text-align:right;color:#f0c05a">{% if f.vales_centavos %}-{{ f.vales_centavos|brl }}{% else %}—{% endif %}</td>
+      <td style="text-align:right;color:#e07a5f">{% if f.inss_centavos %}-{{ f.inss_centavos|brl }}{% else %}—{% endif %}</td>
+      <td style="text-align:right;color:#e07a5f">{% if f.vt_centavos %}-{{ f.vt_centavos|brl }}{% else %}—{% endif %}</td>
       <td style="text-align:right;font-weight:600">{% if f.quitado %}<span style="color:var(--verde-claro)">pago ✓</span>{% else %}{{ f.a_pagar_centavos|brl }}{% endif %}</td>
       <td style="text-align:right" class="mut">{{ f.custo_real_centavos|brl }}</td>
       <td style="text-align:right;white-space:nowrap">
+        {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vt" style="display:inline" title="ligar/desligar vale-transporte (6%)"><button style="background:none;border:0;color:{{ '#7fb48f' if f.vale_transporte else '#6a6a6a' }};cursor:pointer;font-size:.78rem">VT {{ '✓' if f.vale_transporte else '✗' }}</button></form>{% endif %}
         {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vale" style="display:inline"><input name="valor" inputmode="decimal" placeholder="vale R$" style="width:70px;font-size:.75rem"><button style="background:none;border:0;color:#f0c05a;cursor:pointer;font-size:.78rem">dar vale</button></form>{% endif %}
         {% if not f.quitado %}<form method="post" action="/painel/empresa/folha/pagar" style="display:inline"><input type="hidden" name="funcionario_id" value="{{ f.id }}"><button style="background:none;border:0;color:var(--verde-claro);cursor:pointer;font-size:.78rem;margin-left:.4rem">pagar ✓</button></form>{% endif %}
       </td></tr>{% endfor %}
@@ -7925,7 +7929,8 @@ def empresa_titulo_apagar(request: Request, titulo_id: int):
 @router.post("/painel/empresa/funcionario")
 def empresa_funcionario_criar(request: Request, nome: str = Form(""),
                               cargo: str = Form(""), salario: str = Form(""),
-                              dia: str = Form("5"), pro_labore: str = Form("")):
+                              dia: str = Form("5"), pro_labore: str = Form(""),
+                              vale_transporte: str = Form("")):
     from finance import empresa as emp
     g = _guard_pj(request)
     if not g:
@@ -7939,9 +7944,26 @@ def empresa_funcionario_criar(request: Request, nome: str = Form(""),
         try:
             emp.criar_funcionario(pool, conta[0], nome, cargo=cargo,
                                   salario_centavos=_reais_para_centavos(salario),
-                                  dia_pagamento=dia_i, pro_labore=bool(pro_labore))
+                                  dia_pagamento=dia_i, pro_labore=bool(pro_labore),
+                                  vale_transporte=bool(vale_transporte))
         except Exception:
             pass
+    return RedirectResponse("/painel/empresa", status_code=303)
+
+
+@router.post("/painel/empresa/funcionario/{funcionario_id}/vt")
+def empresa_funcionario_vt(request: Request, funcionario_id: int):
+    """Liga/desliga o vale-transporte (6%) de um funcionário."""
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    funcs = {f["id"]: f for f in emp.listar_funcionarios(pool, conta[0], so_ativos=False)}
+    f = funcs.get(funcionario_id)
+    if f:
+        emp.atualizar_funcionario(pool, conta[0], funcionario_id,
+                                  vale_transporte=not f["vale_transporte"])
     return RedirectResponse("/painel/empresa", status_code=303)
 
 

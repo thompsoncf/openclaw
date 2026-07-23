@@ -106,6 +106,52 @@ CATEGORIAS_RECEITA = [
 DEPARTAMENTOS_RAIOX = {"Mercado", "Saude", "Restaurante", "Pet"}
 
 
+# Formas de pagamento CANONICAS. O que importa pro produto: separar debito de
+# credito (credito pode ser parcelado -> gera previsao de fatura) e saber se foi
+# pix/especie. "outro" e' a rede de seguranca. Editar aqui pra incluir/tirar.
+FORMAS_PAGAMENTO = [
+    "pix", "debito", "credito", "especie", "boleto", "transferencia", "outro",
+]
+
+# Sinonimos -> forma canonica. Casamos por SUBSTRING no texto normalizado (sem
+# acento, minusculo), do mais especifico pro mais generico, pra "cartao de
+# credito" bater em credito antes de "cartao" cair num default. Ordem importa.
+_SINONIMOS_PAGAMENTO = [
+    ("credito", "credito"), ("credit", "credito"),
+    ("no cred", "credito"), ("cartao de cred", "credito"), ("cc", "credito"),
+    ("debito", "debito"), ("debit", "debito"),
+    ("no deb", "debito"), ("cartao de deb", "debito"),
+    ("pix", "pix"),
+    ("especie", "especie"), ("dinheiro", "especie"),
+    ("cash", "especie"), ("vivo", "especie"),  # "no vivo" = em dinheiro (gíria)
+    ("boleto", "boleto"),
+    ("transfer", "transferencia"), ("ted", "transferencia"),
+    ("doc", "transferencia"), ("deposito", "transferencia"),
+    # "cartao" solto (sem credito/debito): default debito (a vista, o mais comum).
+    ("cartao", "debito"), ("cartão", "debito"),
+]
+
+
+def canonizar_forma_pagamento(texto: str | None) -> str:
+    """Normaliza uma forma de pagamento livre pra uma das FORMAS_PAGAMENTO.
+    Ex: 'no crédito' -> 'credito', 'mandei um pix' -> 'pix', 'dinheiro' ->
+    'especie', 'cartão' (sem dizer qual) -> 'debito'. Vazio/desconhecido -> ''.
+    Guarda-se '' (nao 'outro') quando nada foi informado, pra distinguir
+    "nao sei" de "forma exotica que o usuario chamou de outro"."""
+    if not texto:
+        return ""
+    alvo = normalizar_descricao(texto)  # minuscula, sem acento
+    if not alvo:
+        return ""
+    # ja' veio canonico?
+    if alvo in FORMAS_PAGAMENTO:
+        return alvo
+    for chave, canon in _SINONIMOS_PAGAMENTO:
+        if chave in alvo:
+            return canon
+    return "outro"
+
+
 def categorias_de(tipo: Tipo) -> list[str]:
     return CATEGORIAS_DESPESA if Tipo(tipo) == Tipo.DESPESA else CATEGORIAS_RECEITA
 
@@ -168,6 +214,7 @@ class Lancamento:
     descricao: str = ""
     data: date = field(default_factory=date.today)
     pagamento: str = ""
+    forma_pagamento: str = ""  # canonica: pix|debito|credito|especie|... (ou '')
     origem: str = "manual"
     comprovante: str = ""
     natureza: str | None = None  # 'pessoal' | 'empresa' | None (a definir)
@@ -175,7 +222,8 @@ class Lancamento:
 
     @classmethod
     def criar(cls, tipo, valor_reais, categoria, descricao="", data=None,
-              pagamento="", origem="manual", comprovante="", natureza=None):
+              pagamento="", forma_pagamento="", origem="manual", comprovante="",
+              natureza=None):
         tipo = Tipo(tipo)
         return cls(
             tipo=tipo,
@@ -184,6 +232,7 @@ class Lancamento:
             descricao=descricao,
             data=data or date.today(),
             pagamento=pagamento,
+            forma_pagamento=canonizar_forma_pagamento(forma_pagamento),
             origem=origem,
             comprovante=comprovante,
             natureza=natureza,

@@ -28,12 +28,38 @@ def _parse_data(s: str | None) -> date:
 def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                           banco=None, cidade: str | None = None) -> list[Ferramenta]:
     def lancar(tipo: Tipo, entrada: dict) -> str:
-        from .models import canonizar_categoria
+        from .models import canonizar_categoria, canonizar_forma_pagamento
         cat_entrada = entrada.get("categoria", "Outros")
         cat_canon = canonizar_categoria(cat_entrada, tipo.value if hasattr(tipo, "value") else str(tipo))
         _nat = entrada.get("natureza")
         if _nat not in ("pessoal", "empresa"):
             _nat = None
+        forma = canonizar_forma_pagamento(entrada.get("forma_pagamento", ""))
+
+        # DESPESA no CREDITO PARCELADA (parcelas > 1): a 1a parcela vira despesa
+        # agora e as futuras viram previsao da fatura (fora do saldo). So' pra
+        # despesa (receita nao parcela). Modelo fatura - ver livro_caixa.
+        try:
+            n_parc = int(entrada.get("parcelas") or 1)
+        except (TypeError, ValueError):
+            n_parc = 1
+        if tipo == Tipo.DESPESA and n_parc > 1 and forma == "credito":
+            r = livro.registrar_compra_parcelada(
+                valor_total_centavos=reais_para_centavos(entrada["valor"]),
+                parcelas=n_parc,
+                categoria=cat_canon,
+                descricao=entrada.get("descricao", ""),
+                data_compra=_parse_data(entrada.get("data")),
+            )
+            p1 = formatar_brl(r["valor_parcela_centavos"])
+            preg = formatar_brl(r["valor_parcela_regular_centavos"])
+            total = formatar_brl(r["total_centavos"])
+            cauda = "" if r["valor_parcela_centavos"] == r["valor_parcela_regular_centavos"] \
+                    else f" (1a de {p1}, demais de {preg})"
+            return (f"Compra parcelada registrada: {total} em {n_parc}x de {preg} "
+                    f"no credito, {r['categoria']}.{cauda} A 1a parcela ja' entrou "
+                    f"nas despesas; as {n_parc-1} restantes viram previsao da fatura.")
+
         lanc = Lancamento.criar(
             tipo=tipo,
             valor_reais=entrada["valor"],
@@ -41,13 +67,15 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
             descricao=entrada.get("descricao", ""),
             data=_parse_data(entrada.get("data")),
             pagamento=entrada.get("pagamento", ""),
+            forma_pagamento=forma,
             origem=entrada.get("origem", "manual"),
             natureza=_nat,
         )
         salvo = livro.adicionar(lanc)
         rotulo = "Despesa" if tipo == Tipo.DESPESA else "Receita"
+        forma_txt = f", {forma}" if forma else ""
         return (f"{rotulo} registrada: {formatar_brl(salvo.valor_centavos)} em "
-                f"{salvo.categoria} ({salvo.data.strftime('%d/%m/%Y')}). id={salvo.id}")
+                f"{salvo.categoria}{forma_txt} ({salvo.data.strftime('%d/%m/%Y')}). id={salvo.id}")
 
     def lancar_despesa(entrada: dict) -> str:
         return lancar(Tipo.DESPESA, entrada)
@@ -56,9 +84,33 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
         return lancar(Tipo.RECEITA, entrada)
 
     def ver_saldo(_entrada: dict) -> str:
+        livro.materializar_parcelas_devidas()  # parcelas vencidas viram despesa
         return f"Saldo atual: {formatar_brl(livro.saldo_centavos())}"
 
+    def previsao_cartao(entrada: dict) -> str:
+        try:
+            meses = int(entrada.get("meses") or 6)
+        except (TypeError, ValueError):
+            meses = 6
+        meses = max(1, min(meses, 24))
+        livro.materializar_parcelas_devidas()  # tira do futuro o que ja' venceu
+        prev = livro.previsao_cartao(meses=meses)
+        if not prev["pontos"]:
+            return ("Sem parcelas de cartao previstas pros proximos meses. "
+                    "(So' aparece aqui compra parcelada no credito.)")
+        meses_pt = ["jan", "fev", "mar", "abr", "mai", "jun",
+                    "jul", "ago", "set", "out", "nov", "dez"]
+        linhas = []
+        for p in prev["pontos"]:
+            c = p["competencia"]
+            linhas.append(f"- {meses_pt[c.month-1]}/{c.year}: "
+                          f"{formatar_brl(p['total_centavos'])} "
+                          f"({p['parcelas']} parcela(s))")
+        return (f"Previsao da fatura do cartao (proximos {prev['meses']} meses, "
+                f"total {formatar_brl(prev['total_centavos'])}):\n" + "\n".join(linhas))
+
     def relatorio_mes(entrada: dict) -> str:
+        livro.materializar_parcelas_devidas()  # parcelas do mes entram no relatorio
         hoje = date.today()
         ano = int(entrada.get("ano") or hoje.year)
         mes = int(entrada.get("mes") or hoje.month)
@@ -328,7 +380,9 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                     "categoria": {"type": "string", "enum": CATEGORIAS_DESPESA},
                     "descricao": {"type": "string"},
                     "data": {"type": "string", "description": "dd/mm/aaaa; vazio = hoje"},
-                    "pagamento": {"type": "string", "description": "ex: Pix, cartao, dinheiro"},
+                    "forma_pagamento": {"type": "string", "enum": ["pix", "debito", "credito", "especie", "boleto", "transferencia", "outro"], "description": "como foi pago. credito = cartao de credito; debito = cartao de debito; especie = dinheiro. Deduza do texto/cupom quando der ('paguei no credito', 'mandei pix', 'foi no dinheiro'); so' pergunte se nao der pra deduzir E importar (ex: credito pode ser parcelado)."},
+                    "parcelas": {"type": "integer", "description": "numero de parcelas quando for compra PARCELADA no cartao de CREDITO (ex: 12 pra '12x'). Vazio ou 1 = a vista. So' vale com forma_pagamento=credito: a 1a parcela vira despesa agora, as demais viram previsao da fatura."},
+                    "pagamento": {"type": "string", "description": "observacao livre opcional (ex: bandeira do cartao, 'pix do fulano'). NAO use pra forma - pra isso e' o forma_pagamento."},
                     "origem": {"type": "string", "enum": ["manual", "foto"]},
                     "natureza": {"type": "string", "enum": ["pessoal", "empresa"], "description": "só para conta PJ que mistura pessoal e empresa: se a pessoa já disse que foi pessoal ou da empresa, passe aqui na hora do registro (evita 2º passo)"},
                 },
@@ -346,6 +400,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                     "categoria": {"type": "string", "enum": CATEGORIAS_RECEITA},
                     "descricao": {"type": "string"},
                     "data": {"type": "string", "description": "dd/mm/aaaa; vazio = hoje"},
+                    "forma_pagamento": {"type": "string", "enum": ["pix", "debito", "credito", "especie", "boleto", "transferencia", "outro"], "description": "como o dinheiro entrou (pix, especie=dinheiro, transferencia...). Deduza do texto quando der; opcional."},
                     "origem": {"type": "string", "enum": ["manual", "foto"]},
                     "natureza": {"type": "string", "enum": ["pessoal", "empresa"], "description": "só para conta PJ que mistura pessoal e empresa: se a pessoa já disse que foi pessoal ou da empresa, passe aqui na hora do registro (evita 2º passo)"},
                 },
@@ -358,6 +413,21 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
             descricao="Mostra o saldo atual (receitas menos despesas).",
             parametros={"type": "object", "properties": {}},
             executar=ver_saldo,
+        ),
+        Ferramenta(
+            nome="previsao_cartao",
+            descricao=("Previsao da FATURA do cartao de credito: quanto ja' esta' "
+                       "comprometido nos proximos meses por causa de compras "
+                       "PARCELADAS. Use quando perguntarem 'quanto vou pagar de "
+                       "cartao', 'como fica minha fatura', 'quanto ainda devo das "
+                       "parcelas' ou similar."),
+            parametros={
+                "type": "object",
+                "properties": {
+                    "meses": {"type": "integer", "description": "quantos meses a frente (1-24; vazio=6)"},
+                },
+            },
+            executar=previsao_cartao,
         ),
         Ferramenta(
             nome="listar_recentes",

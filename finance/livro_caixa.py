@@ -7,7 +7,7 @@ import logging
 from datetime import date, timedelta
 
 from .models import (
-    Lancamento, Tipo, centavos_para_reais, formatar_brl,
+    Lancamento, Tipo, centavos_para_reais, formatar_brl, normalizar_categoria,
 )
 
 _log = logging.getLogger("openclaw.precos")
@@ -20,6 +20,15 @@ def _intervalo_mes(ano: int, mes: int) -> tuple[date, date]:
     inicio = date(ano, mes, 1)
     proximo = date(ano + 1, 1, 1) if mes == 12 else date(ano, mes + 1, 1)
     return inicio, proximo
+
+
+def _somar_meses(d: date, n: int) -> date:
+    """Soma n meses a uma data e devolve o 1o dia do mes resultante (competencia).
+    Ex: _somar_meses(2026-03-15, 2) -> 2026-05-01. Usado pra espalhar as parcelas
+    do cartao pelos meses seguintes."""
+    total = d.year * 12 + (d.month - 1) + n
+    ano, mes0 = divmod(total, 12)
+    return date(ano, mes0 + 1, 1)
 
 
 # unidades vendidas por PESO/VOLUME (preco e' por kg/L) vs por UNIDADE
@@ -223,11 +232,13 @@ class LivroCaixa:
         # SQL do insert (reutilizado com conexão própria OU externa)
         _sql = """insert into lancamentos
                    (conta_id, membro_id, tipo, valor_centavos, categoria, descricao,
-                    data, pagamento, origem, comprovante, chave, natureza)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id"""
+                    data, pagamento, forma_pagamento, origem, comprovante, chave,
+                    natureza)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id"""
         _args = (self.conta_id, self.membro_id, lanc.tipo.value, lanc.valor_centavos,
                  lanc.categoria, lanc.descricao, lanc.data, lanc.pagamento,
-                 lanc.origem, lanc.comprovante, chave_final, lanc.natureza)
+                 lanc.forma_pagamento, lanc.origem, lanc.comprovante, chave_final,
+                 lanc.natureza)
 
         # conn EXTERNO: o chamador controla a transação (NÃO commita aqui). Serve pra
         # operações que precisam ser atômicas com outros inserts (ex.: pagar_folha,
@@ -245,7 +256,9 @@ class LivroCaixa:
             return lanc
 
     def listar(self, mes: int | None = None, ano: int | None = None, limite: int = 50) -> list[Lancamento]:
-        sql = "select id, tipo, valor_centavos, categoria, descricao, data, pagamento, origem, comprovante from lancamentos where conta_id = %s"
+        sql = ("select id, tipo, valor_centavos, categoria, descricao, data, "
+               "pagamento, forma_pagamento, origem, comprovante "
+               "from lancamentos where conta_id = %s")
         params: list = [self.conta_id]
         if ano:
             sql += " and extract(year from data) = %s"
@@ -259,7 +272,8 @@ class LivroCaixa:
             rows = conn.execute(sql, params).fetchall()
         return [
             Lancamento(id=r[0], tipo=Tipo(r[1]), valor_centavos=r[2], categoria=r[3],
-                       descricao=r[4], data=r[5], pagamento=r[6], origem=r[7], comprovante=r[8])
+                       descricao=r[4], data=r[5], pagamento=r[6], forma_pagamento=r[7],
+                       origem=r[8], comprovante=r[9])
             for r in rows
         ]
 
@@ -273,6 +287,142 @@ class LivroCaixa:
                 (self.conta_id,),
             ).fetchone()
         return int(row[0])
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Cartao de credito parcelado: compra vira 1 despesa (parcela do mes) +
+    # previsao das parcelas futuras (fora do saldo ate' vencerem).
+    # ─────────────────────────────────────────────────────────────────────
+    @staticmethod
+    def _rotulo_parcela(descricao: str, num: int, total: int) -> str:
+        """Anexa 'N/TOTAL' na descricao pra ficar claro no extrato. Ex:
+        'Geladeira' -> 'Geladeira (1/12)'. Sem descricao, so' o marcador."""
+        marca = f"({num}/{total})"
+        base = (descricao or "").strip()
+        return f"{base} {marca}".strip()
+
+    def registrar_compra_parcelada(self, *, valor_total_centavos: int, parcelas: int,
+                                   categoria: str, descricao: str = "",
+                                   data_compra: date | None = None) -> dict:
+        """Registra uma compra PARCELADA no cartao de credito (modelo fatura):
+        - a 1a parcela (mes da compra) vira DESPESA agora, entra no saldo;
+        - as parcelas 2..N ficam em parcelas_cartao como 'previsto' e NAO entram
+          no saldo ate' a competencia chegar (viram despesa via
+          materializar_parcelas_devidas).
+        Divide o total em centavos sem perder resto (o resto vai na 1a parcela).
+        Retorna resumo pro chamador confirmar pro usuario.
+        """
+        import uuid
+        parcelas = max(1, int(parcelas))
+        total = int(valor_total_centavos)
+        if total < 0:
+            raise ValueError("valor_total_centavos nao pode ser negativo")
+        data_compra = data_compra or date.today()
+        categoria = normalizar_categoria(Tipo.DESPESA, categoria)
+        base = total // parcelas
+        resto = total - base * parcelas
+        # resto (centavos) somado na 1a parcela: soma das parcelas == total exato
+        valores = [base + (resto if i == 0 else 0) for i in range(parcelas)]
+        grupo = uuid.uuid4()
+        comp0 = data_compra.replace(day=1)
+
+        # 1a parcela -> despesa agora (entra no saldo). forcar: e' intencional.
+        lanc = Lancamento(
+            tipo=Tipo.DESPESA, valor_centavos=valores[0], categoria=categoria,
+            descricao=self._rotulo_parcela(descricao, 1, parcelas),
+            data=data_compra, forma_pagamento="credito",
+        )
+        salvo = self.adicionar(lanc, forcar=True)
+
+        # grava as N parcelas (1a como 'lancado', futuras como 'previsto')
+        _ins = """insert into parcelas_cartao
+                    (conta_id, membro_id, grupo, descricao, categoria,
+                     valor_centavos, parcela_num, parcela_total, competencia,
+                     status, lancamento_id)
+                  values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"""
+        with self.pool.connection() as conn:
+            for i in range(parcelas):
+                num = i + 1
+                comp = _somar_meses(comp0, i)
+                if i == 0:
+                    conn.execute(_ins, (self.conta_id, self.membro_id, grupo,
+                                        descricao, categoria, valores[i], num,
+                                        parcelas, comp, "lancado", salvo.id))
+                else:
+                    conn.execute(_ins, (self.conta_id, self.membro_id, grupo,
+                                        descricao, categoria, valores[i], num,
+                                        parcelas, comp, "previsto", None))
+            conn.commit()
+
+        return {
+            "grupo": str(grupo),
+            "total_centavos": total,
+            "parcelas": parcelas,
+            "valor_parcela_centavos": valores[0],  # 1a (pode ter o resto)
+            "valor_parcela_regular_centavos": base,
+            "primeira_lancada_id": salvo.id,
+            "descricao": descricao,
+            "categoria": categoria,
+        }
+
+    def materializar_parcelas_devidas(self, hoje: date | None = None) -> int:
+        """Promove a DESPESA toda parcela 'previsto' cuja competencia ja' chegou
+        (competencia <= 1o dia do mes atual). Idempotente: so' mexe em 'previsto'.
+        Roda barato a cada interacao/relatorio pra manter 'quanto gastei' honesto
+        mes a mes, sem depender de agendador. Retorna quantas materializou."""
+        hoje = hoje or date.today()
+        comp_atual = hoje.replace(day=1)
+        _ins = """insert into lancamentos
+                    (conta_id, membro_id, tipo, valor_centavos, categoria,
+                     descricao, data, pagamento, forma_pagamento, origem,
+                     comprovante, chave, natureza)
+                  values (%s,%s,'despesa',%s,%s,%s,%s,'','credito','parcela','',
+                          null,null) returning id"""
+        n = 0
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                """select id, membro_id, descricao, categoria, valor_centavos,
+                          parcela_num, parcela_total, competencia
+                     from parcelas_cartao
+                    where conta_id=%s and status='previsto' and competencia <= %s
+                    order by competencia, parcela_num
+                    for update skip locked""",
+                (self.conta_id, comp_atual),
+            ).fetchall()
+            for r in rows:
+                pid, membro_id, desc, cat, val, num, tot, comp = r
+                rot = self._rotulo_parcela(desc, num, tot)
+                novo_id = conn.execute(
+                    _ins, (self.conta_id, membro_id, val, cat, rot, comp),
+                ).fetchone()[0]
+                conn.execute(
+                    "update parcelas_cartao set status='lancado', lancamento_id=%s "
+                    "where id=%s and status='previsto'",
+                    (novo_id, pid),
+                )
+                n += 1
+            conn.commit()
+        return n
+
+    def previsao_cartao(self, meses: int = 6, hoje: date | None = None) -> dict:
+        """Previsao da FATURA do cartao: soma das parcelas 'previsto' por mes de
+        competencia, dos proximos `meses` meses (a partir do mes atual). NAO
+        materializa nada - so' olha o futuro. Retorna total e pontos por mes."""
+        hoje = hoje or date.today()
+        ini = hoje.replace(day=1)
+        fim = _somar_meses(ini, max(1, int(meses)))  # exclusivo
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                """select competencia, sum(valor_centavos), count(*)
+                     from parcelas_cartao
+                    where conta_id=%s and status='previsto'
+                      and competencia >= %s and competencia < %s
+                    group by competencia order by competencia""",
+                (self.conta_id, ini, fim),
+            ).fetchall()
+        pontos = [{"competencia": r[0], "total_centavos": int(r[1]),
+                   "parcelas": int(r[2])} for r in rows]
+        total = sum(p["total_centavos"] for p in pontos)
+        return {"total_centavos": total, "meses": int(meses), "pontos": pontos}
 
     def total_por_categoria(self, tipo: Tipo, mes: int | None = None, ano: int | None = None) -> dict[str, int]:
         sql = "select categoria, sum(valor_centavos) from lancamentos where conta_id = %s and tipo = %s"

@@ -224,6 +224,16 @@ def construir_ferramentas_pj(pool, conta_id: int,
                       f"(custo real ≈ {formatar_brl(folha['custo_real_total_centavos'])}).")
         partes.append(f"Saldo hoje {formatar_brl(fluxo['saldo_atual_centavos'])}; "
                       f"projetado {formatar_brl(fluxo['saldo_projetado_centavos'])}.")
+        # Carteira: quem está devendo (atrasado) — pro bot poder cobrar proativo.
+        try:
+            cart = emp.resumo_carteira(pool, conta_id)
+            devedores = [c for c in cart["clientes"] if c["atrasado_centavos"] > 0]
+            if devedores:
+                topo = "; ".join(f"{c['nome']} {formatar_brl(c['atrasado_centavos'])}"
+                                 for c in devedores[:3])
+                partes.append(f"Atrasados na carteira: {topo}.")
+        except Exception:
+            pass
         return " ".join(partes)
 
     def marcar_natureza_tool(e: dict) -> str:
@@ -266,8 +276,40 @@ def construir_ferramentas_pj(pool, conta_id: int,
                           "(me diz quais são pessoal ou empresa pra eu incluir).")
         return " ".join(partes)
 
+    def cadastrar_cliente(e: dict) -> str:
+        nome = (e.get("nome") or "").strip()
+        if not nome:
+            return "Preciso do nome do cliente pra cadastrar."
+        from . import clientes as _cli
+        ja = _cli.achar_cliente_por_nome(pool, conta_id, nome)
+        if ja:
+            return f"'{nome}' já está na base de clientes. ✅"
+        try:
+            _cli.criar_cliente(pool, conta_id, nome,
+                               telefone=(e.get("telefone") or "").strip() or None)
+        except Exception:
+            return "Não consegui cadastrar agora."
+        return (f"Cliente '{nome}' cadastrado. ✅ Já pode lançar o honorário/título "
+                "a receber dele que fica ligado à ficha.")
+
     valor_s = {"type": "number", "description": "valor em reais, ex 1500.50"}
     return [
+        Ferramenta(
+            nome="cadastrar_cliente",
+            descricao=("Cadastra um CLIENTE na base (pra ligar honorário/venda a "
+                       "prazo à ficha dele). Use quando for lançar um título a "
+                       "receber e o cliente ainda não existir — depois de confirmar "
+                       "com o dono."),
+            parametros={
+                "type": "object",
+                "properties": {
+                    "nome": {"type": "string", "description": "nome do cliente"},
+                    "telefone": {"type": "string", "description": "telefone (opcional)"},
+                },
+                "required": ["nome"],
+            },
+            executar=cadastrar_cliente,
+        ),
         Ferramenta(
             nome="criar_titulo",
             descricao="Cria uma conta a pagar ou a receber (título) da empresa.",

@@ -96,8 +96,8 @@ CATEGORIAS_DESPESA = [
 ]
 
 CATEGORIAS_RECEITA = [
-    "Salario", "Freela", "Investimentos", "Vendas", "Aluguel",
-    "Beneficio", "Presentes", "Reembolso", "Outros",
+    "Salario", "Honorarios", "Freela", "Consultoria", "Investimentos",
+    "Vendas", "Aluguel", "Beneficio", "Presentes", "Reembolso", "Outros",
 ]
 
 # Departamentos que APARECEM no raio-x do consumo (LISTA BRANCA). So' faz sentido

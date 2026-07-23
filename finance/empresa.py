@@ -184,6 +184,38 @@ def listar_titulos(pool, conta_id: int, status: str = "aberto",
     return out
 
 
+def resumo_carteira(pool, conta_id: int) -> dict:
+    """Carteira de clientes: títulos a RECEBER em aberto agrupados por cliente.
+    A jóia pro negócio de serviço (contador: honorários por cliente). Retorna o
+    total, o quanto está atrasado e a lista por cliente ordenada por valor."""
+    from collections import OrderedDict
+    tits = listar_titulos(pool, conta_id, status="aberto", tipo="receber")
+    por: "OrderedDict" = OrderedDict()
+    total = 0
+    total_atraso = 0
+    for t in tits:
+        v = t["valor_centavos"]
+        total += v
+        atr = bool(t["atrasado"])
+        if atr:
+            total_atraso += v
+        nome = t["cliente_nome"] or (t["contraparte"] or "").strip() or "— sem cliente —"
+        chave = t["cliente_id"] or ("txt:" + nome)
+        d = por.setdefault(chave, {"cliente_id": t["cliente_id"], "nome": nome,
+                                   "total_centavos": 0, "atrasado_centavos": 0,
+                                   "n": 0, "atrasado": False})
+        d["total_centavos"] += v
+        d["n"] += 1
+        if atr:
+            d["atrasado_centavos"] += v
+            d["atrasado"] = True
+    clientes = sorted(por.values(), key=lambda x: x["total_centavos"], reverse=True)
+    return {"total_centavos": total, "atrasado_centavos": total_atraso,
+            "n_titulos": len(tits),
+            "n_clientes": len([c for c in clientes if c["cliente_id"]]),
+            "clientes": clientes}
+
+
 def resumo_titulos(pool, conta_id: int, dias: int = 7) -> dict:
     """Cards da visão geral: a pagar/receber nos próximos N dias + atrasados."""
     hoje = date.today()

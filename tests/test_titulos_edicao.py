@@ -1,0 +1,87 @@
+"""Títulos a pagar/receber: corrigir a descrição e apagar (o que faltava no portal).
+
+- editar_descricao_titulo: troca só a descrição, não mexe em valor/vencimento.
+- apagar_titulo: some com o título em ABERTO; um título já PAGO (que virou
+  lançamento no caixa) NÃO pode ser apagado por aqui.
+"""
+import os
+from datetime import date
+from pathlib import Path
+
+import pytest
+from psycopg_pool import ConnectionPool
+
+from db.conexao import init_schema
+from finance import empresa as emp
+
+_MIGRACOES = ("018_chave_nfce_lancamentos.sql",
+              "053_modulo_pj.sql",
+              "057_natureza_lancamento.sql")
+
+
+@pytest.fixture(scope="module")
+def pool():
+    test_db_url = os.environ["TEST_DATABASE_URL"]
+    p = ConnectionPool(test_db_url, min_size=1, max_size=4, open=True,
+                       kwargs={"prepare_threshold": None})
+    init_schema(p)
+    base = Path(__file__).resolve().parent.parent / "db" / "migracoes"
+    for m in _MIGRACOES:
+        with p.connection() as c:
+            c.execute((base / m).read_text(encoding="utf-8"))
+            c.commit()
+    yield p
+    p.close()
+
+
+@pytest.fixture()
+def conta_id(pool):
+    with pool.connection() as c:
+        cid = c.execute(
+            "insert into contas (tipo, nome) values ('pj', 'Teste Titulos') returning id"
+        ).fetchone()[0]
+        c.commit()
+    return cid
+
+
+def test_editar_descricao_nao_mexe_no_resto(pool, conta_id):
+    t = emp.criar_titulo(pool, conta_id, "pagar", "Aluguel do pnto",
+                         50000, date(2026, 8, 10))
+    ok = emp.editar_descricao_titulo(pool, conta_id, t["id"], "  Aluguel do ponto  ")
+    assert ok
+    achado = next(x for x in emp.listar_titulos(pool, conta_id) if x["id"] == t["id"])
+    assert achado["descricao"] == "Aluguel do ponto"   # corrigido e sem espaços
+    assert achado["valor_centavos"] == 50000           # valor intacto
+    assert achado["vencimento"] == date(2026, 8, 10)   # vencimento intacto
+
+
+def test_editar_descricao_vazia_nao_apaga(pool, conta_id):
+    t = emp.criar_titulo(pool, conta_id, "pagar", "Internet", 12000, date(2026, 8, 5))
+    assert emp.editar_descricao_titulo(pool, conta_id, t["id"], "   ") is False
+    achado = next(x for x in emp.listar_titulos(pool, conta_id) if x["id"] == t["id"])
+    assert achado["descricao"] == "Internet"
+
+
+def test_editar_descricao_so_da_propria_conta(pool, conta_id):
+    t = emp.criar_titulo(pool, conta_id, "pagar", "Luz", 20000, date(2026, 8, 8))
+    # outra conta não consegue mexer
+    assert emp.editar_descricao_titulo(pool, conta_id + 99999, t["id"], "hack") is False
+
+
+def test_apagar_titulo_aberto(pool, conta_id):
+    t = emp.criar_titulo(pool, conta_id, "receber", "Venda X", 30000, date(2026, 8, 1))
+    assert emp.apagar_titulo(pool, conta_id, t["id"]) is True
+    assert all(x["id"] != t["id"] for x in emp.listar_titulos(pool, conta_id, status="aberto"))
+    # apagar de novo: já não existe
+    assert emp.apagar_titulo(pool, conta_id, t["id"]) is False
+
+
+def test_apagar_nao_atinge_titulo_pago(pool, conta_id):
+    t = emp.criar_titulo(pool, conta_id, "pagar", "Fornecedor Y", 45000, date(2026, 8, 3))
+    r = emp.dar_baixa_titulo(pool, conta_id, t["id"])   # vira 'pago' + lançamento
+    assert r.get("ok", True) is not False
+    # título pago NÃO pode ser apagado por aqui (o lançamento no caixa é real)
+    assert emp.apagar_titulo(pool, conta_id, t["id"]) is False
+    # segue existindo como pago
+    pagos = emp.listar_titulos(pool, conta_id, status="pago")
+    assert any(x["id"] == t["id"] for x in pagos)

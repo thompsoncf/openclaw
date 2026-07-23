@@ -80,23 +80,29 @@ def _n_eventos_pagamento(pool, conta_id: int, ano: int, mes: int) -> int:
 
 def test_pagar_folha_happy_path(pool, conta_id):
     """2 funcionários com salário > 0 → paga tudo: 2 lançamentos 'folha', 2 eventos
-    'pagamento', total = soma dos líquidos, e o saldo do caixa cai pelo total."""
+    'pagamento', total = soma dos LÍQUIDOS (salário − INSS), e o saldo do caixa
+    cai pelo total."""
     from datetime import date
     emp.criar_funcionario(pool, conta_id, "Alice", salario_centavos=200000)
     emp.criar_funcionario(pool, conta_id, "Bruno", salario_centavos=300000)
     hoje = date.today()
 
+    # líquido = salário − INSS (sem VT aqui, ninguém optou). Calculado pela própria
+    # função pra o teste seguir correto se a tabela mudar.
+    total = ((200000 - emp.inss_desconto_centavos(200000))
+             + (300000 - emp.inss_desconto_centavos(300000)))
+
     saldo_antes = LivroCaixa(pool, conta_id).saldo_centavos()
     r = emp.pagar_folha(pool, conta_id, hoje.year, hoje.month)
 
     assert r["ok"] is True
-    assert r["total_centavos"] == 500000, r
+    assert r["total_centavos"] == total, r
     assert len(r["pagos"]) == 2
     assert _n_lancamentos_folha(pool, conta_id) == 2
     assert _n_eventos_pagamento(pool, conta_id, hoje.year, hoje.month) == 2
 
     saldo_depois = LivroCaixa(pool, conta_id).saldo_centavos()
-    assert saldo_antes - saldo_depois == 500000, (saldo_antes, saldo_depois)
+    assert saldo_antes - saldo_depois == total, (saldo_antes, saldo_depois)
 
 
 def test_pagar_folha_atomico_rollback(pool, conta_id, monkeypatch):

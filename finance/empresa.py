@@ -31,6 +31,47 @@ CAT_VENDAS = "Vendas"
 # INSS patronal não entra (no Simples está dentro do DAS). Pró-labore: fator 1.
 FATOR_ENCARGOS = 1.0 + 0.08 + (1.0 / 12.0) + (1.0 / 12.0) * (4.0 / 3.0)
 
+# ── Desconto do EMPREGADO na folha (o que sai do líquido dele) ────────────────
+# INSS PROGRESSIVO: cada alíquota incide só sobre a parte do salário DENTRO da
+# faixa (igual ao holerite). Faixas em centavos: (limite_superior, alíquota).
+# Acima do teto (última faixa) o desconto trava no valor do teto. Ajustar aqui
+# quando a tabela do governo mudar (ou o salário mínimo reajustar as faixas).
+INSS_FAIXAS = (
+    (162100, 0.075),   # até 1.621,00
+    (290284, 0.090),   # 1.621,01 até 2.902,84
+    (435427, 0.120),   # 2.902,85 até 4.354,27
+    (847555, 0.140),   # 4.354,28 até 8.475,55 (teto)
+)
+INSS_TETO_CENTAVOS = INSS_FAIXAS[-1][0]
+# percentual do salário descontado de quem opta por vale-transporte (máx. legal)
+VALE_TRANSPORTE_PCT = 0.06
+
+
+def inss_desconto_centavos(base_centavos: int) -> int:
+    """Desconto de INSS do empregado sobre `base_centavos`, PROGRESSIVO por faixa.
+    Cada alíquota incide só sobre o trecho do salário dentro da sua faixa; acima
+    do teto o desconto para no valor do teto. Retorna centavos (arredondado)."""
+    base = max(0, int(base_centavos))
+    base = min(base, INSS_TETO_CENTAVOS)   # trava no teto
+    total = 0.0
+    piso = 0
+    for limite, aliq in INSS_FAIXAS:
+        if base <= piso:
+            break
+        trecho = min(base, limite) - piso
+        total += trecho * aliq
+        piso = limite
+    return int(round(total))
+
+
+def vale_transporte_desconto_centavos(salario_centavos: int,
+                                      opta: bool = True) -> int:
+    """Desconto de vale-transporte: 6% do salário (limite legal do empregado).
+    Só desconta quem opta pelo benefício. Retorna centavos (arredondado)."""
+    if not opta:
+        return 0
+    return int(round(max(0, int(salario_centavos)) * VALE_TRANSPORTE_PCT))
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Gate do módulo
@@ -252,6 +293,38 @@ def cancelar_titulo(pool, conta_id: int, titulo_id: int) -> bool:
     return r is not None
 
 
+def editar_descricao_titulo(pool, conta_id: int, titulo_id: int,
+                            nova_descricao: str) -> bool:
+    """Corrige SO' a descricao de um titulo (o dono digitou errado). NAO mexe em
+    valor, vencimento nem tipo. Multi-tenant: so' o titulo DESTA conta. Corta
+    espacos e limita o tamanho. Retorna True se mudou."""
+    desc = (nova_descricao or "").strip()[:200]
+    if not desc:
+        return False
+    with pool.connection() as c:
+        cur = c.execute(
+            "update titulos set descricao=%s where id=%s and conta_id=%s",
+            (desc, titulo_id, conta_id),
+        )
+        c.commit()
+        return cur.rowcount > 0
+
+
+def apagar_titulo(pool, conta_id: int, titulo_id: int) -> bool:
+    """Apaga de vez um titulo em ABERTO (lancado por engano). So' mexe em titulo
+    'aberto' DESTA conta - um titulo ja' PAGO gerou lancamento no caixa e NAO pode
+    sumir por aqui (o dinheiro e' real; apagar so' o titulo deixaria o caixa
+    orfao). Pra titulo pago, o caminho e' apagar o lancamento no financeiro.
+    Retorna True se apagou."""
+    with pool.connection() as c:
+        cur = c.execute(
+            "delete from titulos where id=%s and conta_id=%s and status='aberto'",
+            (titulo_id, conta_id),
+        )
+        c.commit()
+        return cur.rowcount > 0
+
+
 def registrar_link_cobranca(pool, conta_id: int, titulo_id: int, url: str) -> None:
     """Guarda o link Asaas do 'cobrar via Pix' (títulos a receber)."""
     with pool.connection() as c:
@@ -289,17 +362,17 @@ def custo_real_centavos(salario_centavos: int, pro_labore: bool = False) -> int:
 
 def criar_funcionario(pool, conta_id: int, nome: str, cargo: str = "",
                       salario_centavos: int = 0, dia_pagamento: int = 5,
-                      pro_labore: bool = False,
+                      pro_labore: bool = False, vale_transporte: bool = False,
                       admitido_em: date | None = None) -> dict:
     with pool.connection() as c:
         r = c.execute(
             """insert into funcionarios
                  (conta_id, nome, cargo, salario_centavos, dia_pagamento,
-                  pro_labore, admitido_em)
-               values (%s,%s,%s,%s,%s,%s,%s) returning id""",
+                  pro_labore, vale_transporte, admitido_em)
+               values (%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
             (conta_id, (nome or "").strip(), (cargo or "").strip(),
              int(salario_centavos), int(dia_pagamento), bool(pro_labore),
-             admitido_em),
+             bool(vale_transporte), admitido_em),
         ).fetchone()
         c.commit()
     return {"id": r[0], "nome": nome, "salario_centavos": int(salario_centavos)}
@@ -308,7 +381,8 @@ def criar_funcionario(pool, conta_id: int, nome: str, cargo: str = "",
 def atualizar_funcionario(pool, conta_id: int, funcionario_id: int, *,
                           nome: str | None = None, cargo: str | None = None,
                           salario_centavos: int | None = None,
-                          dia_pagamento: int | None = None) -> bool:
+                          dia_pagamento: int | None = None,
+                          vale_transporte: bool | None = None) -> bool:
     sets, args = [], []
     if nome is not None:
         sets.append("nome=%s"); args.append(nome.strip())
@@ -318,6 +392,8 @@ def atualizar_funcionario(pool, conta_id: int, funcionario_id: int, *,
         sets.append("salario_centavos=%s"); args.append(int(salario_centavos))
     if dia_pagamento is not None:
         sets.append("dia_pagamento=%s"); args.append(int(dia_pagamento))
+    if vale_transporte is not None:
+        sets.append("vale_transporte=%s"); args.append(bool(vale_transporte))
     if not sets:
         return False
     with pool.connection() as c:
@@ -346,7 +422,7 @@ def listar_funcionarios(pool, conta_id: int, so_ativos: bool = True) -> list[dic
     with pool.connection() as c:
         rows = c.execute(
             f"""select id, nome, cargo, salario_centavos, dia_pagamento,
-                       pro_labore, ativo, admitido_em
+                       pro_labore, ativo, admitido_em, vale_transporte
                   from funcionarios where {cond}
                  order by pro_labore, nome""",
             (conta_id,),
@@ -355,6 +431,7 @@ def listar_funcionarios(pool, conta_id: int, so_ativos: bool = True) -> list[dic
         "id": r[0], "nome": r[1], "cargo": r[2],
         "salario_centavos": int(r[3] or 0), "dia_pagamento": int(r[4] or 5),
         "pro_labore": bool(r[5]), "ativo": bool(r[6]), "admitido_em": r[7],
+        "vale_transporte": bool(r[8]),
         "custo_real_centavos": custo_real_centavos(int(r[3] or 0), bool(r[5])),
     } for r in rows]
 
@@ -426,7 +503,17 @@ def folha_do_mes(pool, conta_id: int, ano: int, mes: int) -> dict:
         extras = e.get("extra", 0)
         descontos = e.get("desconto", 0)
         pago = e.get("pagamento", 0)
-        liquido = f["salario_centavos"] + extras - vales - descontos
+        # Descontos legais do líquido do funcionário:
+        # - INSS progressivo sobre a REMUNERAÇÃO (salário + extras/horas-extra;
+        #   vale/desconto não entram na base). Só CLT — pró-labore do sócio não
+        #   usa esta tabela.
+        # - Vale-transporte: 6% do SALÁRIO base (por lei incide sobre o salário,
+        #   não sobre extras), pra quem optou.
+        base_inss = f["salario_centavos"] + extras
+        inss = 0 if f["pro_labore"] else inss_desconto_centavos(base_inss)
+        vt = vale_transporte_desconto_centavos(
+            f["salario_centavos"], f.get("vale_transporte", False))
+        liquido = f["salario_centavos"] + extras - vales - descontos - inss - vt
         a_pagar = max(liquido - pago, 0)
         total_a_pagar += a_pagar
         total_pago += pago
@@ -434,6 +521,8 @@ def folha_do_mes(pool, conta_id: int, ano: int, mes: int) -> dict:
             f["salario_centavos"] + extras, f["pro_labore"])
         itens.append({**f, "vales_centavos": vales, "extras_centavos": extras,
                       "descontos_centavos": descontos, "pago_centavos": pago,
+                      "inss_centavos": inss, "vt_centavos": vt,
+                      "liquido_centavos": liquido,
                       "a_pagar_centavos": a_pagar,
                       "quitado": a_pagar == 0 and liquido > 0})
     return {"competencia": comp, "itens": itens,

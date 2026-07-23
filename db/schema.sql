@@ -68,12 +68,36 @@ create table if not exists lancamentos (
     descricao      text not null default '',
     data           date not null,
     pagamento      text not null default '',
+    forma_pagamento text not null default '',
     origem         text not null default 'manual',
     comprovante    text not null default '',
     criado_em      timestamptz not null default now()
 );
 create index if not exists idx_lanc_conta on lancamentos (conta_id);
 create index if not exists idx_lanc_data  on lancamentos (conta_id, data);
+
+-- Previsao da fatura do cartao: parcelas futuras de uma compra parcelada no
+-- credito. A parcela do mes vira despesa normal; as futuras ficam aqui como
+-- 'previsto' e nao entram no saldo ate' a competencia chegar (ver migracao 088).
+create table if not exists parcelas_cartao (
+    id             bigserial primary key,
+    conta_id       bigint not null references contas(id) on delete restrict,
+    membro_id      bigint references membros(id) on delete set null,
+    grupo          uuid   not null,
+    descricao      text   not null default '',
+    categoria      text   not null,
+    valor_centavos bigint not null check (valor_centavos >= 0),
+    parcela_num    int    not null check (parcela_num >= 1),
+    parcela_total  int    not null check (parcela_total >= 1),
+    competencia    date   not null,
+    status         text   not null default 'previsto'
+                       check (status in ('previsto', 'lancado', 'cancelado')),
+    lancamento_id  bigint references lancamentos(id) on delete set null,
+    criado_em      timestamptz not null default now()
+);
+create index if not exists idx_parcelas_conta on parcelas_cartao (conta_id);
+create index if not exists idx_parcelas_previsao
+    on parcelas_cartao (conta_id, status, competencia);
 
 create table if not exists itens_lancamento (
     id                     bigserial primary key,

@@ -68,6 +68,32 @@ def test_editar_descricao_so_da_propria_conta(pool, conta_id):
     assert emp.editar_descricao_titulo(pool, conta_id + 99999, t["id"], "hack") is False
 
 
+def test_editar_valor_do_titulo(pool, conta_id):
+    t = emp.criar_titulo(pool, conta_id, "pagar", "Fornecedor", 100000, date(2026, 8, 9))
+    # edita SÓ o valor (descrição None) — não mexe na descrição
+    assert emp.editar_titulo(pool, conta_id, t["id"], valor_centavos=175050) is True
+    achado = next(x for x in emp.listar_titulos(pool, conta_id) if x["id"] == t["id"])
+    assert achado["valor_centavos"] == 175050
+    assert achado["descricao"] == "Fornecedor"     # descrição intacta
+
+
+def test_editar_descricao_e_valor_juntos(pool, conta_id):
+    t = emp.criar_titulo(pool, conta_id, "pagar", "Agua", 5000, date(2026, 8, 9))
+    assert emp.editar_titulo(pool, conta_id, t["id"], descricao="Água/esgoto",
+                             valor_centavos=6250) is True
+    achado = next(x for x in emp.listar_titulos(pool, conta_id) if x["id"] == t["id"])
+    assert achado["descricao"] == "Água/esgoto"
+    assert achado["valor_centavos"] == 6250
+
+
+def test_editar_titulo_valor_negativo_ignorado(pool, conta_id):
+    t = emp.criar_titulo(pool, conta_id, "pagar", "X", 8000, date(2026, 8, 9))
+    # valor negativo não entra; sem outros campos, nada muda
+    assert emp.editar_titulo(pool, conta_id, t["id"], valor_centavos=-100) is False
+    achado = next(x for x in emp.listar_titulos(pool, conta_id) if x["id"] == t["id"])
+    assert achado["valor_centavos"] == 8000
+
+
 def test_apagar_titulo_aberto(pool, conta_id):
     t = emp.criar_titulo(pool, conta_id, "receber", "Venda X", 30000, date(2026, 8, 1))
     assert emp.apagar_titulo(pool, conta_id, t["id"]) is True

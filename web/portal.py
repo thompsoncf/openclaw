@@ -3118,6 +3118,28 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   </script>
 </div>
 
+{% if carteira and carteira.n_titulos %}
+<div class="card larga">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.4rem">
+    <strong>👥 Carteira de clientes</strong>
+    <span class="mut" style="font-size:.72rem">{{ (rotulo_receber or 'A receber') }} em aberto: <b style="color:var(--verde-claro)">{{ carteira.total_centavos|brl }}</b>{% if carteira.atrasado_centavos %} · <b style="color:#f0c05a">{{ carteira.atrasado_centavos|brl }} atrasado</b>{% endif %}</span>
+  </div>
+  <style>
+    .cart-lin{display:flex;flex-wrap:wrap;align-items:baseline;gap:.3rem .8rem;padding:.6rem 0;border-top:1px solid #232325}
+    .cart-nome{flex:1 1 160px;min-width:0;font-size:.9rem}
+    .cart-val{margin-left:auto;text-align:right;white-space:nowrap;font-weight:600;font-variant-numeric:tabular-nums}
+  </style>
+  <div style="margin-top:.6rem">
+    {% for c in carteira.clientes %}<div class="cart-lin">
+      <div class="cart-nome">{% if c.cliente_id %}<a href="/painel/clientes/{{ c.cliente_id }}" style="color:var(--txt);text-decoration:none">👤 {{ c.nome }}</a>{% else %}<span class="mut">{{ c.nome }}</span>{% endif %}
+        <span class="mut" style="font-size:.7rem">· {{ c.n }} título(s){% if c.atrasado %} · <span style="color:#f0c05a">⚠ {{ c.atrasado_centavos|brl }} atrasado</span>{% endif %}</span></div>
+      <div class="cart-val" style="color:{{ '#f0c05a' if c.atrasado else 'var(--verde-claro)' }}">{{ c.total_centavos|brl }}</div>
+    </div>{% endfor %}
+  </div>
+  <div class="mut" style="font-size:.7rem;margin-top:.6rem">Vem dos títulos <b>a receber</b> ligados a cada cliente. Cobre pelo botão na ficha do cliente.</div>
+</div>
+{% endif %}
+
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center"><strong>Equipe e folha</strong>
     <span class="mut" style="font-size:.72rem">folha de {{ '%02d'|format(dre.mes) }}/{{ dre.ano }}: <b style="color:#e07a5f">{{ folha.total_a_pagar_centavos|brl }}</b> · custo real ≈ {{ folha.custo_real_total_centavos|brl }}</span></div>
@@ -7525,11 +7547,17 @@ def painel_empresa(request: Request):
         doc = _mascara_cnpj(r[0]) if r else ""
     titulos = emp.listar_titulos(pool, conta[0], status="aberto")
     folha = emp.folha_do_mes(pool, conta[0], hoje.year, hoje.month)
-    from finance import clientes as _cli
+    from finance import clientes as _cli, nichos as _nichos
     clientes_lista = _cli.listar_clientes(pool, conta[0])
+    carteira = emp.resumo_carteira(pool, conta[0])
+    with pool.connection() as c:
+        _r = c.execute("select coalesce(n.slug,'') from contas ct left join nichos n "
+                       "on n.id=ct.nicho_id where ct.id=%s", (conta[0],)).fetchone()
+    rotulo_receber = _nichos.rotulo_receber(_r[0] if _r else "")
     return _render("empresa", request, empresa_nome=conta[2], empresa_doc=doc,
                    res=res, fluxo=fluxo, dre=dre, titulos=titulos, folha=folha,
-                   clientes_lista=clientes_lista, tem_pj=True)
+                   clientes_lista=clientes_lista, carteira=carteira,
+                   rotulo_receber=rotulo_receber, tem_pj=True)
 
 
 @router.get("/painel/produtos")

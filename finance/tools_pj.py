@@ -224,6 +224,16 @@ def construir_ferramentas_pj(pool, conta_id: int,
                       f"(custo real ≈ {formatar_brl(folha['custo_real_total_centavos'])}).")
         partes.append(f"Saldo hoje {formatar_brl(fluxo['saldo_atual_centavos'])}; "
                       f"projetado {formatar_brl(fluxo['saldo_projetado_centavos'])}.")
+        # Carteira: quem está devendo (atrasado) — pro bot poder cobrar proativo.
+        try:
+            cart = emp.resumo_carteira(pool, conta_id)
+            devedores = [c for c in cart["clientes"] if c["atrasado_centavos"] > 0]
+            if devedores:
+                topo = "; ".join(f"{c['nome']} {formatar_brl(c['atrasado_centavos'])}"
+                                 for c in devedores[:3])
+                partes.append(f"Atrasados na carteira: {topo}.")
+        except Exception:
+            pass
         return " ".join(partes)
 
     def marcar_natureza_tool(e: dict) -> str:

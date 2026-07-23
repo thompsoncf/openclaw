@@ -110,6 +110,31 @@ def test_titulo_liga_ao_cliente_e_aparece_na_ficha(pool, conta_id):
     assert achado["cliente_nome"] == "Padaria do Zé"
 
 
+def test_resumo_carteira_agrupa_por_cliente(pool, conta_id):
+    from finance import clientes as cli
+    from datetime import timedelta
+    a = cli.criar_cliente(pool, conta_id, "Cliente A")
+    b = cli.criar_cliente(pool, conta_id, "Cliente B")
+    hoje = date.today()
+    # A: 2 honorários (um vencido = atrasado), B: 1 no futuro
+    emp.criar_titulo(pool, conta_id, "receber", "Hon jul", 80000,
+                     hoje - timedelta(days=5), cliente_id=a)   # atrasado
+    emp.criar_titulo(pool, conta_id, "receber", "Hon ago", 80000,
+                     hoje + timedelta(days=20), cliente_id=a)
+    emp.criar_titulo(pool, conta_id, "receber", "Hon B", 50000,
+                     hoje + timedelta(days=10), cliente_id=b)
+    cart = emp.resumo_carteira(pool, conta_id)
+    assert cart["total_centavos"] == 210000
+    assert cart["atrasado_centavos"] == 80000
+    assert cart["n_clientes"] == 2
+    # ordenado por valor: A (160k) antes de B (50k)
+    assert cart["clientes"][0]["nome"] == "Cliente A"
+    assert cart["clientes"][0]["total_centavos"] == 160000
+    assert cart["clientes"][0]["atrasado"] is True
+    assert cart["clientes"][1]["nome"] == "Cliente B"
+    assert cart["clientes"][1]["atrasado"] is False
+
+
 def test_achar_cliente_por_nome(pool, conta_id):
     from finance import clientes as cli
     cid = cli.criar_cliente(pool, conta_id, "Mercado Central")

@@ -295,16 +295,30 @@ def cancelar_titulo(pool, conta_id: int, titulo_id: int) -> bool:
 
 def editar_descricao_titulo(pool, conta_id: int, titulo_id: int,
                             nova_descricao: str) -> bool:
-    """Corrige SO' a descricao de um titulo (o dono digitou errado). NAO mexe em
-    valor, vencimento nem tipo. Multi-tenant: so' o titulo DESTA conta. Corta
-    espacos e limita o tamanho. Retorna True se mudou."""
-    desc = (nova_descricao or "").strip()[:200]
-    if not desc:
+    """Atalho: edita só a descrição. Mantido por compatibilidade."""
+    return editar_titulo(pool, conta_id, titulo_id, descricao=nova_descricao)
+
+
+def editar_titulo(pool, conta_id: int, titulo_id: int,
+                  descricao: str | None = None,
+                  valor_centavos: int | None = None) -> bool:
+    """Corrige descrição e/ou valor de um título (o dono digitou errado). NÃO mexe
+    em vencimento nem tipo. Multi-tenant: só o título DESTA conta. Passa só o que
+    quer mudar; campo None é ignorado. Descrição vazia é ignorada (não apaga);
+    valor negativo é rejeitado. Retorna True se algo mudou."""
+    sets, args = [], []
+    if descricao is not None:
+        desc = descricao.strip()[:200]
+        if desc:
+            sets.append("descricao=%s"); args.append(desc)
+    if valor_centavos is not None and int(valor_centavos) >= 0:
+        sets.append("valor_centavos=%s"); args.append(int(valor_centavos))
+    if not sets:
         return False
     with pool.connection() as c:
         cur = c.execute(
-            "update titulos set descricao=%s where id=%s and conta_id=%s",
-            (desc, titulo_id, conta_id),
+            f"update titulos set {', '.join(sets)} where id=%s and conta_id=%s",
+            (*args, titulo_id, conta_id),
         )
         c.commit()
         return cur.rowcount > 0

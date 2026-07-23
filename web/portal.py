@@ -2992,11 +2992,17 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   </div>
 
   <style>
-    .emp-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.6rem;margin-top:1rem}
-    .emp-kpis>.card{margin:0;min-width:0}
-    .emp-kpis .rot{font-size:.72rem}
-    .emp-kpis .val{font-size:clamp(1rem,4.4vw,1.3rem);font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;white-space:nowrap}
-    @media (max-width:420px){.emp-kpis{grid-template-columns:1fr 1fr}}
+    .emp-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:.55rem;margin-top:1rem}
+    /* card pequeno: mata o padding:2rem do .card base (era o que apertava e vazava o valor) */
+    .emp-kpis>.card{margin:0;min-width:0;padding:12px 13px;border-radius:12px}
+    .emp-kpis .rot{font-size:.72rem;color:var(--txt-mut);font-weight:600}
+    .emp-kpis .val{font-size:clamp(.92rem,3.4vw,1.2rem);font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em;line-height:1.15;overflow-wrap:anywhere;margin:2px 0}
+    @media (max-width:430px){.emp-kpis{grid-template-columns:1fr 1fr}}
+    /* forms de adicionar (título/funcionário): colapsam no mobile pra não vazar */
+    @media (max-width:560px){
+      .emp-form{grid-template-columns:1fr 1fr !important}
+      .emp-form>button[type=submit]{grid-column:1 / -1}
+    }
   </style>
   <div class="emp-kpis">
     <div class="card"><div class="mut rot">A pagar ({{ res.dias }} dias)</div>
@@ -3048,7 +3054,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
 
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center"><strong>Títulos a pagar e receber</strong></div>
-  <form method="post" action="/painel/empresa/titulo" style="display:grid;grid-template-columns:1fr 2fr 1fr 1fr auto;gap:.5rem;margin:.7rem 0;align-items:end">
+  <form method="post" action="/painel/empresa/titulo" class="emp-form" style="display:grid;grid-template-columns:1fr 2fr 1fr 1fr auto;gap:.5rem;margin:.7rem 0;align-items:end">
     <label style="font-size:.72rem;color:#8a938a">Tipo<select name="tipo" style="width:100%">
       <option value="pagar">A pagar</option><option value="receber">A receber</option></select></label>
     <label style="font-size:.72rem;color:#8a938a">Descrição<input name="descricao" required placeholder="Ex: Aluguel do ponto" style="width:100%"></label>
@@ -3057,31 +3063,48 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     <button type="submit" style="background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.55rem .8rem;font-weight:600;cursor:pointer">+ Add</button>
   </form>
   <label style="font-size:.72rem;color:#8a938a;display:flex;gap:.4rem;align-items:center;margin-bottom:.6rem"><input type="checkbox" form="_nada" disabled style="width:auto"> <span class="mut">Contraparte e recorrência aparecem ao detalhar o título.</span></label>
-  {% if titulos %}<table style="width:100%;font-size:.85rem">
-    <tr class="mut" style="font-size:.72rem"><td>Venc.</td><td>Descrição</td><td>Tipo</td><td style="text-align:right">Valor</td><td></td></tr>
-    {% for t in titulos %}<tr style="border-top:1px solid #232325">
-      <td style="{% if t.atrasado %}color:#f0c05a{% endif %}">{{ t.vencimento.strftime('%d/%m') }}{% if t.atrasado %} ⚠{% endif %}</td>
-      <td>{{ t.descricao }}{% if t.contraparte %} <span class="mut">· {{ t.contraparte }}</span>{% endif %}</td>
-      <td>{% if t.tipo=='pagar' %}<span style="color:#e07a5f">pagar</span>{% else %}<span style="color:var(--verde-claro)">receber</span>{% endif %}</td>
-      <td style="text-align:right;font-weight:600">{{ t.valor_centavos|brl }}</td>
-      <td style="text-align:right;white-space:nowrap">
-        <form method="post" action="/painel/empresa/titulo/{{ t.id }}/baixa" style="display:inline"><button style="background:none;border:0;color:var(--verde-claro);cursor:pointer;font-size:.78rem">dar baixa ✓</button></form>
-        {% if t.tipo=='receber' %}{% if t.cobranca_link_url %}<a href="{{ t.cobranca_link_url }}" target="_blank" style="color:#c99536;font-size:.78rem;margin-left:.5rem">link Pix ↗</a>{% else %}<form method="post" action="/painel/empresa/titulo/{{ t.id }}/cobrar" style="display:inline"><button style="background:none;border:0;color:#c99536;cursor:pointer;font-size:.78rem;margin-left:.5rem">cobrar via Pix →</button></form>{% endif %}{% endif %}
-        <button type="button" data-desc="{{ t.descricao }}" onclick="titEditarDesc({{ t.id }}, this)" title="corrigir a descrição" style="background:none;border:0;color:#8a938a;cursor:pointer;font-size:.78rem;margin-left:.5rem">editar</button>
-        <form method="post" action="/painel/empresa/titulo/{{ t.id }}/apagar" style="display:inline" onsubmit="return confirm('Apagar este título? (só some da lista; não mexe em nada já pago)')"><button title="apagar título" style="background:none;border:0;color:#8a3636;cursor:pointer;font-size:.78rem;margin-left:.5rem">apagar ✕</button></form>
-      </td></tr>{% endfor %}
-  </table>{% else %}<div class="mut" style="font-size:.85rem">Nenhum título em aberto. Adicione acima — ou peça pro Zaq no WhatsApp.</div>{% endif %}
-  <form method="post" id="tit-desc-form" style="display:none"><input type="hidden" name="descricao" id="tit-desc-input"></form>
+  {% if titulos %}
+  <style>
+    .tit-lin{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35rem .9rem;padding:.7rem 0;border-top:1px solid #232325}
+    .tit-id{flex:1 1 200px;min-width:0}
+    .tit-desc{font-size:.9rem}
+    .tit-meta{font-size:.7rem;margin-top:3px;color:var(--txt-mut)}
+    .tit-val{flex:0 0 auto;margin-left:auto;text-align:right;white-space:nowrap;font-weight:600;font-variant-numeric:tabular-nums}
+    .tit-acoes{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.15rem}
+    .tit-acoes button,.tit-acoes a{background:none;border:1px solid #2f2f31;border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;width:auto;text-decoration:none}
+    .tit-acoes form{display:inline;margin:0}
+  </style>
+  <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--txt-mut);padding:.6rem 0 .2rem;border-bottom:1px solid #232325"><span>Título</span><span>Valor</span></div>
+  {% for t in titulos %}<div class="tit-lin">
+    <div class="tit-id">
+      <div class="tit-desc">{{ t.descricao }}{% if t.contraparte %} <span class="mut">· {{ t.contraparte }}</span>{% endif %}</div>
+      <div class="tit-meta"><span style="{% if t.atrasado %}color:#f0c05a{% endif %}">vence {{ t.vencimento.strftime('%d/%m') }}{% if t.atrasado %} ⚠ atrasado{% endif %}</span> · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">a pagar</span>{% else %}<span style="color:var(--verde-claro)">a receber</span>{% endif %}</div>
+    </div>
+    <div class="tit-val" style="color:{{ '#e07a5f' if t.tipo=='pagar' else 'var(--verde-claro)' }}">{{ t.valor_centavos|brl }}</div>
+    <div class="tit-acoes">
+      <form method="post" action="/painel/empresa/titulo/{{ t.id }}/baixa"><button style="color:var(--verde-claro)">dar baixa ✓</button></form>
+      {% if t.tipo=='receber' %}{% if t.cobranca_link_url %}<a href="{{ t.cobranca_link_url }}" target="_blank" style="color:#c99536">link Pix ↗</a>{% else %}<form method="post" action="/painel/empresa/titulo/{{ t.id }}/cobrar"><button style="color:#c99536">cobrar via Pix →</button></form>{% endif %}{% endif %}
+      <button type="button" data-desc="{{ t.descricao }}" data-val="{{ (t.valor_centavos/100)|n2 }}" onclick="titEditar({{ t.id }}, this)" title="corrigir descrição e/ou valor" style="color:#8a938a">editar</button>
+      <form method="post" action="/painel/empresa/titulo/{{ t.id }}/apagar" onsubmit="return confirm('Apagar este título? (só some da lista; não mexe em nada já pago)')"><button title="apagar título" style="color:#c98080">apagar ✕</button></form>
+    </div>
+  </div>{% endfor %}
+  {% else %}<div class="mut" style="font-size:.85rem">Nenhum título em aberto. Adicione acima — ou peça pro Zaq no WhatsApp.</div>{% endif %}
+  <form method="post" id="tit-desc-form" style="display:none"><input type="hidden" name="descricao" id="tit-desc-input"><input type="hidden" name="valor" id="tit-val-input"></form>
   <script>
-  function titEditarDesc(id, btn){
-    var atual = btn.getAttribute('data-desc') || '';
-    var nova = prompt('Corrigir a descrição do título:', atual);
-    if(nova === null) return;              // cancelou
-    nova = nova.trim();
-    if(!nova || nova === atual) return;    // vazio ou sem mudança
+  function titEditar(id, btn){
+    var atualDesc = btn.getAttribute('data-desc') || '';
+    var atualVal  = btn.getAttribute('data-val') || '';
+    var nd = prompt('Descrição do título:', atualDesc);
+    if(nd === null) return;                 // cancelou tudo
+    var nv = prompt('Valor do título (R$):', atualVal);
+    if(nv === null) return;                 // cancelou
+    nd = nd.trim(); nv = nv.trim();
+    if((!nd || nd === atualDesc) && (!nv || nv === atualVal)) return;  // nada mudou
     var f = document.getElementById('tit-desc-form');
     f.action = '/painel/empresa/titulo/' + id + '/descricao';
-    document.getElementById('tit-desc-input').value = nova;
+    // só manda o campo que mudou (vazio = backend ignora)
+    document.getElementById('tit-desc-input').value = (nd && nd !== atualDesc) ? nd : '';
+    document.getElementById('tit-val-input').value  = (nv && nv !== atualVal)  ? nv : '';
     f.submit();
   }
   </script>
@@ -3090,7 +3113,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center"><strong>Equipe e folha</strong>
     <span class="mut" style="font-size:.72rem">folha de {{ '%02d'|format(dre.mes) }}/{{ dre.ano }}: <b style="color:#e07a5f">{{ folha.total_a_pagar_centavos|brl }}</b> · custo real ≈ {{ folha.custo_real_total_centavos|brl }}</span></div>
-  <form method="post" action="/painel/empresa/funcionario" style="display:grid;grid-template-columns:2fr 1fr 1fr .8fr auto auto;gap:.5rem;margin:.7rem 0;align-items:end">
+  <form method="post" action="/painel/empresa/funcionario" class="emp-form" style="display:grid;grid-template-columns:2fr 1fr 1fr .8fr auto auto;gap:.5rem;margin:.7rem 0;align-items:end">
     <label style="font-size:.72rem;color:#8a938a">Nome<input name="nome" required placeholder="Nome do funcionário" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Cargo<input name="cargo" placeholder="Ex: Vendedor" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Salário R$<input name="salario" required inputmode="decimal" placeholder="0,00" style="width:100%"></label>
@@ -3098,31 +3121,46 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     <label style="font-size:.72rem;color:#8a938a;text-align:center" title="descontar 6% de vale-transporte">VT<br><input type="checkbox" name="vale_transporte" value="1" style="width:auto"></label>
     <button type="submit" style="background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.55rem .8rem;font-weight:600;cursor:pointer">+ Add</button>
   </form>
-  {% if folha.itens %}<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-  <table style="width:100%;font-size:.85rem;min-width:480px">
-    <tr class="mut" style="font-size:.72rem"><td>Funcionário</td><td style="text-align:right">Salário</td><td style="text-align:right">A pagar</td><td style="text-align:right">Custo real</td><td></td></tr>
-    {% for f in folha.itens %}<tr style="border-top:1px solid #232325">
-      <td>{{ f.nome }}{% if f.pro_labore %} <span class="mut">· pró-labore</span>{% elif f.cargo %} <span class="mut">· {{ f.cargo }}</span>{% endif %}
-        {# breakdown que RECONCILIA com "A pagar": salário + extras − INSS − VT − vale − desconto − já pago #}
-        <div class="mut" style="font-size:.68rem;margin-top:2px;line-height:1.5">
-          {%- if f.extras_centavos %}<span style="color:#7fb48f">+ extra {{ f.extras_centavos|brl }}</span> {% endif -%}
-          {%- if f.inss_centavos %}<span style="color:#e07a5f">− INSS {{ f.inss_centavos|brl }}</span> {% endif -%}
-          {%- if f.vt_centavos %}<span style="color:#e07a5f">− VT {{ f.vt_centavos|brl }}</span> {% endif -%}
-          {%- if f.vales_centavos %}<span style="color:#f0c05a">− vale {{ f.vales_centavos|brl }}</span> {% endif -%}
-          {%- if f.descontos_centavos %}<span style="color:#f0c05a">− desc {{ f.descontos_centavos|brl }}</span> {% endif -%}
-          {%- if f.pago_centavos %}<span>· já pago {{ f.pago_centavos|brl }}</span>{% endif -%}
-          {%- if not (f.extras_centavos or f.inss_centavos or f.vt_centavos or f.vales_centavos or f.descontos_centavos or f.pago_centavos) %}líquido = salário{% endif -%}
-        </div></td>
-      <td style="text-align:right;white-space:nowrap">{{ f.salario_centavos|brl }}</td>
-      <td style="text-align:right;font-weight:600;white-space:nowrap">{% if f.quitado %}<span style="color:var(--verde-claro)">pago ✓</span>{% else %}{{ f.a_pagar_centavos|brl }}{% endif %}</td>
-      <td style="text-align:right;white-space:nowrap" class="mut">{{ f.custo_real_centavos|brl }}</td>
-      <td style="text-align:right;white-space:nowrap">
-        {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vt" style="display:inline" title="ligar/desligar vale-transporte (6%)"><button style="background:none;border:0;color:{{ '#7fb48f' if f.vale_transporte else '#6a6a6a' }};cursor:pointer;font-size:.78rem">VT {{ '✓' if f.vale_transporte else '✗' }}</button></form>{% endif %}
-        {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vale" style="display:inline"><input name="valor" inputmode="decimal" placeholder="vale R$" style="width:64px;font-size:.75rem"><button style="background:none;border:0;color:#f0c05a;cursor:pointer;font-size:.78rem">vale</button></form>{% endif %}
-        {% if not f.quitado %}<form method="post" action="/painel/empresa/folha/pagar" style="display:inline"><input type="hidden" name="funcionario_id" value="{{ f.id }}"><button style="background:none;border:0;color:var(--verde-claro);cursor:pointer;font-size:.78rem;margin-left:.4rem">pagar ✓</button></form>{% endif %}
-      </td></tr>{% endfor %}
-  </table></div>
-  <form method="post" action="/painel/empresa/folha/pagar" style="margin-top:.7rem"><button style="background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.5rem 1rem;font-weight:600;cursor:pointer">Pagar folha inteira ✓</button></form>
+  {% if folha.itens %}
+  <style>
+    .folha-lin{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35rem .9rem;padding:.7rem 0;border-top:1px solid #232325}
+    .folha-id{flex:1 1 190px;min-width:0}
+    .folha-nome{font-size:.92rem;font-weight:600}
+    .folha-bd{font-size:.7rem;margin-top:3px;line-height:1.6;color:var(--txt-mut)}
+    .folha-bd .neg{color:#e07a5f}.folha-bd .amb{color:#f0c05a}.folha-bd .pos{color:#7fb48f}
+    .folha-val{flex:0 0 auto;margin-left:auto;text-align:right;white-space:nowrap}
+    .folha-apagar{font-size:1.02rem;font-weight:700;font-variant-numeric:tabular-nums}
+    .folha-acoes{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.15rem}
+    .folha-acoes button{background:none;border:1px solid #2f2f31;border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;width:auto}
+    .folha-acoes input{width:74px;font-size:.75rem;padding:.28rem .4rem;border-radius:7px;border:1px solid #333;background:var(--bg);color:var(--txt)}
+    .folha-acoes form{display:inline-flex;gap:.2rem;margin:0}
+  </style>
+  <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--txt-mut);padding:.6rem 0 .2rem;border-bottom:1px solid #232325"><span>Funcionário</span><span>A pagar (líquido)</span></div>
+  {% for f in folha.itens %}<div class="folha-lin">
+    <div class="folha-id">
+      <div class="folha-nome">{{ f.nome }}{% if f.pro_labore %} <span class="mut" style="font-weight:400;font-size:.8rem">· pró-labore</span>{% elif f.cargo %} <span class="mut" style="font-weight:400;font-size:.8rem">· {{ f.cargo }}</span>{% endif %}</div>
+      {# breakdown que RECONCILIA com "A pagar": salário + extras − INSS − VT − vale − desconto − já pago #}
+      <div class="folha-bd">salário {{ f.salario_centavos|brl }}
+        {%- if f.extras_centavos %} <span class="pos">+ extra {{ f.extras_centavos|brl }}</span>{% endif -%}
+        {%- if f.inss_centavos %} <span class="neg">− INSS {{ f.inss_centavos|brl }}</span>{% endif -%}
+        {%- if f.vt_centavos %} <span class="neg">− VT {{ f.vt_centavos|brl }}</span>{% endif -%}
+        {%- if f.vales_centavos %} <span class="amb">− vale {{ f.vales_centavos|brl }}</span>{% endif -%}
+        {%- if f.descontos_centavos %} <span class="amb">− desc {{ f.descontos_centavos|brl }}</span>{% endif -%}
+        {%- if f.pago_centavos %} <span>· já pago {{ f.pago_centavos|brl }}</span>{% endif -%}
+        {%- if f.pro_labore %} <span class="mut">(pró-labore não desconta INSS CLT)</span>{% endif -%}
+      </div>
+    </div>
+    <div class="folha-val">
+      <div class="folha-apagar">{% if f.quitado %}<span style="color:var(--verde-claro)">pago ✓</span>{% else %}{{ f.a_pagar_centavos|brl }}{% endif %}</div>
+      <div class="mut" style="font-size:.7rem;margin-top:2px">custo real {{ f.custo_real_centavos|brl }}</div>
+    </div>
+    <div class="folha-acoes">
+      {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vt" title="ligar/desligar vale-transporte (6%)"><button style="color:{{ '#7fb48f' if f.vale_transporte else '#8a8a85' }}">VT {{ '✓' if f.vale_transporte else '✗' }}</button></form>{% endif %}
+      {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vale"><input name="valor" inputmode="decimal" placeholder="vale R$"><button style="color:#f0c05a">dar vale</button></form>{% endif %}
+      {% if not f.quitado %}<form method="post" action="/painel/empresa/folha/pagar"><input type="hidden" name="funcionario_id" value="{{ f.id }}"><button style="color:var(--verde-claro)">pagar ✓</button></form>{% endif %}
+    </div>
+  </div>{% endfor %}
+  <form method="post" action="/painel/empresa/folha/pagar" style="margin-top:.8rem"><button style="background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.5rem 1rem;font-weight:600;cursor:pointer">Pagar folha inteira ✓</button></form>
   {% else %}<div class="mut" style="font-size:.85rem">Nenhum funcionário cadastrado. Adicione acima.</div>{% endif %}
   <div class="mut" style="font-size:.72rem;margin-top:.7rem">ℹ️ Controle gerencial de pessoal — a folha oficial (eSocial, guias, holerite) segue com seu contador, que recebe tudo no relatório mensal.</div>
 </div>
@@ -7919,14 +7957,18 @@ def empresa_titulo_cobrar(request: Request, titulo_id: int):
 
 @router.post("/painel/empresa/titulo/{titulo_id}/descricao")
 def empresa_titulo_descricao(request: Request, titulo_id: int,
-                             descricao: str = Form("")):
+                             descricao: str = Form(""), valor: str = Form("")):
+    """Edita descrição e/ou valor de um título. valor vazio = não mexe no valor."""
     from finance import empresa as emp
     g = _guard_pj(request)
     if not g:
         return RedirectResponse("/painel", status_code=303)
     conta, pool = g
-    if descricao.strip():
-        emp.editar_descricao_titulo(pool, conta[0], titulo_id, descricao)
+    nova_desc = descricao.strip() or None
+    novo_val = _reais_para_centavos(valor) if valor.strip() else None
+    if nova_desc is not None or novo_val is not None:
+        emp.editar_titulo(pool, conta[0], titulo_id,
+                          descricao=nova_desc, valor_centavos=novo_val)
     return RedirectResponse("/painel/empresa", status_code=303)
 
 

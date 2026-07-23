@@ -5,6 +5,10 @@ services:
     plan: standard
     numInstances: 1
     buildCommand: pip install -r requirements.txt
+    # Aplica migrações pendentes ANTES de subir o código novo (idempotente e
+    # serializado por advisory lock). Blindagem: deploy nunca sobe com o banco
+    # atrasado. Se a migração falhar, o deploy é abortado e a versão antiga fica.
+    preDeployCommand: python -m db.aplicar_migracoes
     startCommand: python telegram_bot.py
     envVars:
       - key: OPENCLAW_MODEL
@@ -28,6 +32,9 @@ services:
     plan: standard
     numInstances: 1
     buildCommand: pip install -r requirements.txt
+    # Mesma blindagem do worker: migrações pendentes rodam antes de servir. O
+    # advisory lock impede que web e worker apliquem em paralelo se deployarem juntos.
+    preDeployCommand: python -m db.aplicar_migracoes
     startCommand: uvicorn web.app:app --host 0.0.0.0 --port $PORT --workers 2
     envVars:
       - key: OPENCLAW_MODEL

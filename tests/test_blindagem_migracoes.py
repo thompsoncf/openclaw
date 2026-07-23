@@ -22,9 +22,17 @@ create table lancamentos (id bigserial primary key, conta_id bigint references c
   chave varchar(44), natureza text, criado_em timestamptz default now());
 create table funcionarios (id bigserial primary key, conta_id bigint references contas(id),
   nome text, salario_centavos int default 0, pro_labore boolean default false, ativo boolean default true);
+create table nichos (id bigserial primary key, nome text, slug text unique, tipo text,
+  ativo boolean not null default true);
 create table schema_migrations (id serial primary key, nome text unique not null,
   executada_em timestamptz default now());
 """
+
+
+def _pendentes_a_partir_de(corte: str) -> list[str]:
+    """Nomes das migrações >= corte (as que ficam pendentes após o baseline)."""
+    nomes = sorted(os.path.basename(f) for f in glob.glob("db/migracoes/*.sql"))
+    return [n for n in nomes if n >= corte]
 
 
 @pytest.fixture()
@@ -79,17 +87,19 @@ def test_aplica_so_pendentes_e_cria_colunas(pool):
     assert not _col_existe(pool, "lancamentos", "forma_pagamento")
     assert not _col_existe(pool, "funcionarios", "vale_transporte")
 
+    esperado = len(_pendentes_a_partir_de("088"))  # 088, 089, 090, ...
     n = aplicar_migracoes(pool)
-    assert n == 2  # só 088 e 089 estavam pendentes
+    assert n == esperado  # aplicou exatamente as pendentes
 
-    # depois: colunas/tabela criadas
-    assert _col_existe(pool, "lancamentos", "forma_pagamento")
-    assert _tabela_existe(pool, "parcelas_cartao")
-    assert _col_existe(pool, "funcionarios", "vale_transporte")
+    # depois: colunas/tabela das migrações sob teste foram criadas
+    assert _col_existe(pool, "lancamentos", "forma_pagamento")   # 088
+    assert _tabela_existe(pool, "parcelas_cartao")               # 088
+    assert _col_existe(pool, "funcionarios", "vale_transporte")  # 089
+    assert _col_existe(pool, "contas", "cnae")                   # 090
 
 
 def test_idempotente_segunda_rodada_nao_aplica_nada(pool):
     _baseline_ate_087(pool)
-    assert aplicar_migracoes(pool) == 2
+    assert aplicar_migracoes(pool) == len(_pendentes_a_partir_de("088"))
     # rodar de novo (ex.: outro deploy/instância) não aplica nada e não quebra
     assert aplicar_migracoes(pool) == 0

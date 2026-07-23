@@ -2301,7 +2301,8 @@ _EMPRESA_DADOS = """{% extends "base" %}{% block conteudo %}
       <option value="{{ n.slug }}" {% if dados.nicho == n.slug %}selected{% endif %}>{{ n.label }}</option>
       {% endfor %}
     </select>
-    <div class="mut" style="font-size:.72rem;margin-top:.2rem">Detectamos pelo CNPJ — confira e ajuste se preciso. Define as unidades/categorias dos seus produtos.</div>
+    <div class="mut" style="font-size:.72rem;margin-top:.2rem">Detectamos pelo CNPJ — confira e ajuste se preciso. Define as unidades/categorias dos seus produtos e como o assistente conversa com você.</div>
+    <input type="hidden" id="cnae" name="cnae" value="{{ dados.cnae or '' }}">
     <button type="submit" style="background:var(--verde);color:#fff;border:0;border-radius:8px;padding:.7rem 1.4rem;font-weight:600;cursor:pointer;margin-top:1rem">Salvar e continuar →</button>
   </form>
 </div>
@@ -2373,6 +2374,7 @@ async function buscarCnpj(){
       if(d.email) document.getElementById('email_empresa').value=d.email;
       if(d.telefone) document.getElementById('telefone').value=d.telefone;
       if(d.nicho){ var ns=document.getElementById('nicho'); if(ns) ns.value=d.nicho; }
+      var ce=document.getElementById('cnae'); if(ce) ce.value=d.cnae||'';
       msg.textContent='✓ Dados encontrados — confira e ajuste se precisar.';
     } else { msg.textContent='Não achei esse CNPJ. Preencha manualmente.'; }
   }catch(e){ msg.textContent='Erro na busca. Preencha manualmente.'; }
@@ -7823,7 +7825,7 @@ def painel_empresa_dados_salvar(
     bairro: str = Form(""), cep: str = Form(""),
     cidade: str = Form(""), uf: str = Form(""),
     email_empresa: str = Form(""), telefone: str = Form(""),
-    nicho: str = Form(""),
+    nicho: str = Form(""), cnae: str = Form(""),
 ):
     from finance import empresa as emp
     conta = conta_logada(request)
@@ -7836,7 +7838,7 @@ def painel_empresa_dados_salvar(
         pool, conta[0], documento=documento, razao_social=razao_social,
         nome_fantasia=nome_fantasia, endereco=endereco, bairro=bairro,
         cep=cep, cidade=cidade, uf=uf, email_empresa=email_empresa,
-        telefone=telefone, nicho=nicho)
+        telefone=telefone, nicho=nicho, cnae=cnae)
     if not ok:
         d = emp.obter_dados_empresa(pool, conta[0])
         # devolve o que o usuário digitou + erro
@@ -7866,7 +7868,8 @@ def painel_empresa_buscar_cnpj(request: Request, cnpj: str = ""):
                          "uf": dados.get("uf") or "",
                          "email": dados.get("email") or "",
                          "telefone": dados.get("telefone") or "",
-                         "nicho": dados.get("nicho") or ""})
+                         "nicho": dados.get("nicho") or "",
+                         "cnae": dados.get("cnae") or ""})
 
 
 def _mascara_cnpj(doc: str) -> str:

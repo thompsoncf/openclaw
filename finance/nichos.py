@@ -94,6 +94,13 @@ NICHOS: dict[str, dict] = {
         "unidades": ["servico", "hora", "diaria", "visita", "orcamento"],
         "categorias": ["manutencao", "reparo", "instalacao", "limpeza", "outro"],
     },
+    "contabilidade": {
+        "label": "Contabilidade / Escritório contábil",
+        "vende_produto": False, "vende_servico": True,
+        "unidades": ["mensal", "honorario", "avulso", "hora", "servico"],
+        "categorias": ["contabil", "fiscal", "folha", "abertura_empresa",
+                       "societario", "imposto_renda", "consultoria", "outro"],
+    },
     # ---- NICHOS MISTOS (vendem PRODUTO e SERVICO) ----
     "oficina": {
         "label": "Oficina / Auto",
@@ -236,9 +243,45 @@ _UNIDADE_LABEL = {
     "hora": "hora", "modulo": "módulo", "projeto": "projeto", "mensal": "mensal",
     "sessao": "sessão", "aula": "aula", "servico": "serviço", "diaria": "diária",
     "visita": "visita", "orcamento": "orçamento",
+    "honorario": "honorário", "avulso": "avulso",
 }
 
 
 def label_unidade(unidade: str | None) -> str:
     u = (unidade or "").strip().lower()
     return _UNIDADE_LABEL.get(u, u or "un")
+
+
+# ---------------------------------------------------------------------------
+# PERSONA POR NICHO — o "sentimento" do sistema molda ao ramo da empresa.
+# Cada bloco é ANEXADO ao prompt PJ (ver tools_pj.bloco_persona_pj) e ensina o
+# bot a falar/ajudar como aquele negócio. Vazio ('') = sem molde (persona PJ
+# genérica). Adicionar um ramo aqui é o único passo pra ele "sentir" diferente.
+# ---------------------------------------------------------------------------
+_PERSONAS_NICHO: dict[str, str] = {
+    "contabilidade": (
+        "RAMO DA EMPRESA: ESCRITÓRIO DE CONTABILIDADE. Você fala com um CONTADOR — "
+        "vá direto e não explique o básico de contabilidade (ele sabe mais que você "
+        "disso). Aqui você é o braço OPERACIONAL rápido do escritório dele.\n"
+        "- HONORÁRIOS (o faturamento é recorrente): quando ele falar de mensalidade/"
+        "honorário de cliente (\"o cliente X paga 800/mês\", \"fechei honorário de "
+        "1200 com a padaria\"), registre como título a RECEBER RECORRENTE "
+        "(recorrente=true) — o sistema já projeta o mês seguinte. O nome do cliente "
+        "vai na contraparte.\n"
+        "- GUIAS/IMPOSTOS do escritório (DAS/Simples, ISS): título a PAGAR.\n"
+        "- A folha aqui é a do PRÓPRIO escritório (os funcionários dele). A folha "
+        "dos clientes ele cuida por fora — não confunda nem se ofereça pra isso.\n"
+        "- \"quem me deve\", \"honorários do mês\", \"carteira de clientes\" -> "
+        "consultar_empresa / títulos a receber."
+    ),
+}
+
+
+def persona_do_nicho(slug: str | None) -> str:
+    """Bloco de persona específico do nicho pra anexar ao prompt PJ (ou '' se o
+    nicho não tem molde próprio — cai na persona PJ genérica)."""
+    return _PERSONAS_NICHO.get((slug or "").strip().lower(), "")
+
+
+def tem_persona(slug: str | None) -> bool:
+    return bool(persona_do_nicho(slug))

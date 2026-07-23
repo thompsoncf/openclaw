@@ -16,8 +16,23 @@ from .models import formatar_brl
 # ─────────────────────────────────────────────────────────────────────────
 # Persona: bloco anexado ao prompt quando a conta é PJ
 # ─────────────────────────────────────────────────────────────────────────
+def _nicho_da_conta(pool, conta_id: int) -> str:
+    """Slug do nicho da conta (ou '' se não tiver). Usado pra moldar a persona."""
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                "select coalesce(n.slug,'') from contas ct "
+                "left join nichos n on n.id = ct.nicho_id where ct.id=%s",
+                (conta_id,)).fetchone()
+        return r[0] if r else ""
+    except Exception:
+        return ""
+
+
 def bloco_persona_pj(pool, conta_id: int, empresa_nome: str = "") -> str:
-    """Contexto empresarial pro prompt: quem é a empresa + o que está aberto."""
+    """Contexto empresarial pro prompt: quem é a empresa + o que está aberto.
+    Molda ao NICHO/CNAE da empresa: anexa o bloco de persona do ramo (o
+    'sentimento') quando houver, pra o bot falar/ajudar como aquele negócio."""
     hoje = date.today().strftime("%d/%m/%Y")
     try:
         res = emp.resumo_titulos(pool, conta_id)
@@ -30,6 +45,16 @@ def bloco_persona_pj(pool, conta_id: int, empresa_nome: str = "") -> str:
     atrasados = res.get("n_atrasados", 0)
     nome = empresa_nome or "a empresa"
 
+    from .nichos import persona_do_nicho
+    slug = _nicho_da_conta(pool, conta_id)
+    bloco_nicho = persona_do_nicho(slug)
+    bloco_nicho = f"\n{bloco_nicho}\n" if bloco_nicho else ""
+    # a linha "a folha oficial é do contador" não faz sentido pra um contador:
+    # pro ramo contabilidade, o próprio molde do nicho já reenquadra a folha.
+    linha_folha = ("" if slug == "contabilidade" else
+                   "- Folha é controle GERENCIAL; a folha oficial (eSocial/guias) "
+                   "segue com a contabilidade. Não prometa cálculo de eSocial.\n")
+
     return f"""
 
 ──────────────────────────────────────────────────────────
@@ -37,7 +62,7 @@ MODO EMPRESA (esta conta é PJ). Hoje é {hoje}.
 
 Você também é o braço financeiro de {nome}. Além do controle pessoal, cuida
 das CONTAS DA EMPRESA: títulos a pagar/receber, funcionários e folha.
-
+{bloco_nicho}
 Situação atual: a pagar {a_pagar} · a receber {a_receber} · {atrasados} título(s) atrasado(s).
 Funcionários: {nomes}.
 
@@ -65,9 +90,7 @@ REGRAS:
   disser "dia 15", assuma o dia 15 do mês atual (ou do próximo se já passou).
 - Ao dar um vale, confirme de forma humana quanto o funcionário fica a receber.
 - Se faltar informação essencial (valor, ou de quem é o vale), PERGUNTE antes.
-- Folha é controle GERENCIAL; a folha oficial é do contador. Não prometa cálculo
-  de INSS/eSocial — isso não é seu papel.
-- NUNCA invente funcionário que não está na lista acima; se não achar, pergunte.
+{linha_folha}- NUNCA invente funcionário que não está na lista acima; se não achar, pergunte.
 ──────────────────────────────────────────────────────────
 """
 

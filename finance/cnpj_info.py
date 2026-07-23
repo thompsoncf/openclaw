@@ -89,6 +89,11 @@ _RAMOS = [
     ("Salao",        ("salao", "cabelei", "manicure", "pedicure", "estetica",
                       "barbearia", "spa")),
     ("Beleza",       ("cosmetic", "perfumaria", "artigos de perfumaria")),
+    # Contabilidade vem ANTES de Consultoria: "assessoria/consultoria contabil"
+    # e' contabilidade, nao consultoria de TI. Palavras bem especificas do ramo.
+    ("Contabilidade",("contabil", "contabilidade", "escritorio contabil",
+                      "escrituracao", "pericia contabil", "auditoria",
+                      "assessoria contabil", "servicos contabeis")),
     ("Consultoria",  ("consultoria", "tecnologia", "software", "sistemas",
                       "desenvolvimento de programas", "desenvolvimento de sistemas",
                       "informatica", "programacao", "assessoria")),
@@ -111,6 +116,7 @@ _RAMO_NICHO = {
     "Vestuario":    "vestuario",
     "Salao":        "salao",
     "Beleza":       "beleza",
+    "Contabilidade": "contabilidade",
     "Consultoria":  "consultoria",
     "Educacao":     "educacao",
     "ServicosGerais": "servicos_gerais",

@@ -793,7 +793,7 @@ def obter_dados_empresa(pool, conta_id: int) -> dict:
                       coalesce(ct.bairro,''), coalesce(ct.cep,''),
                       coalesce(ct.cidade,''), coalesce(ct.uf,''),
                       coalesce(ct.email_empresa,''), coalesce(ct.telefone,''),
-                      coalesce(n.slug,'')
+                      coalesce(n.slug,''), coalesce(ct.cnae,'')
                  from contas ct
                  left join nichos n on n.id = ct.nicho_id
                 where ct.id=%s""",
@@ -802,18 +802,19 @@ def obter_dados_empresa(pool, conta_id: int) -> dict:
     if not r:
         return {"documento": "", "razao_social": "", "nome_fantasia": "",
                 "endereco": "", "bairro": "", "cep": "", "cidade": "", "uf": "",
-                "email_empresa": "", "telefone": "", "nicho": ""}
+                "email_empresa": "", "telefone": "", "nicho": "", "cnae": ""}
     return {"documento": r[0], "razao_social": r[1], "nome_fantasia": r[2],
             "endereco": r[3], "bairro": r[4], "cep": r[5],
             "cidade": r[6], "uf": r[7], "email_empresa": r[8], "telefone": r[9],
-            "nicho": r[10]}
+            "nicho": r[10], "cnae": r[11]}
 
 
 def salvar_dados_empresa(pool, conta_id: int, *, documento: str = "",
                          razao_social: str = "", nome_fantasia: str = "",
                          endereco: str = "", bairro: str = "", cep: str = "",
                          cidade: str = "", uf: str = "", email_empresa: str = "",
-                         telefone: str = "", nicho: str = "") -> tuple[bool, str]:
+                         telefone: str = "", nicho: str = "",
+                         cnae: str = "") -> tuple[bool, str]:
     """Grava os dados da empresa na conta. Valida CNPJ (14 dígitos) e razão.
 
     Retorna (ok, mensagem). Multi-tenant: grava só na própria conta.
@@ -833,7 +834,11 @@ def salvar_dados_empresa(pool, conta_id: int, *, documento: str = "",
     mail = (email_empresa or "").strip().lower() or None
     tel = (telefone or "").strip() or None
     nicho_slug = (nicho or "").strip().lower() or None
+    cnae_val = (cnae or "").strip()[:180] or None
     with pool.connection() as c:
+        # CNAE: guarda a atividade crua da Receita (não sobrescreve com vazio).
+        if cnae_val:
+            c.execute("update contas set cnae=%s where id=%s", (cnae_val, conta_id))
         # resolve o slug do nicho -> nicho_id (FK). Se nao achar, deixa como esta'.
         nicho_id = None
         if nicho_slug:

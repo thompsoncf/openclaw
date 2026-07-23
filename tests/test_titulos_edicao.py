@@ -16,7 +16,10 @@ from finance import empresa as emp
 
 _MIGRACOES = ("018_chave_nfce_lancamentos.sql",
               "053_modulo_pj.sql",
-              "057_natureza_lancamento.sql")
+              "057_natureza_lancamento.sql",
+              "064_clientes_lojista.sql",
+              "066_pessoas_identidade.sql",
+              "067_titulos_cliente.sql")
 
 
 @pytest.fixture(scope="module")
@@ -92,6 +95,31 @@ def test_editar_titulo_valor_negativo_ignorado(pool, conta_id):
     assert emp.editar_titulo(pool, conta_id, t["id"], valor_centavos=-100) is False
     achado = next(x for x in emp.listar_titulos(pool, conta_id) if x["id"] == t["id"])
     assert achado["valor_centavos"] == 8000
+
+
+def test_titulo_liga_ao_cliente_e_aparece_na_ficha(pool, conta_id):
+    from finance import clientes as cli
+    cid = cli.criar_cliente(pool, conta_id, "Padaria do Zé")
+    # honorário/venda a prazo ligado ao cliente
+    t = emp.criar_titulo(pool, conta_id, "receber", "Honorário mensal", 80000,
+                         date(2026, 8, 5), cliente_id=cid)
+    assert t["cliente_id"] == cid
+    # aparece em listar_titulos com o nome do cliente
+    achado = next(x for x in emp.listar_titulos(pool, conta_id) if x["id"] == t["id"])
+    assert achado["cliente_id"] == cid
+    assert achado["cliente_nome"] == "Padaria do Zé"
+
+
+def test_achar_cliente_por_nome(pool, conta_id):
+    from finance import clientes as cli
+    cid = cli.criar_cliente(pool, conta_id, "Mercado Central")
+    assert cli.achar_cliente_por_nome(pool, conta_id, "Mercado Central") == cid
+    assert cli.achar_cliente_por_nome(pool, conta_id, "mercado central") == cid  # case-insensitive
+    assert cli.achar_cliente_por_nome(pool, conta_id, "Central") == cid          # parcial único
+    assert cli.achar_cliente_por_nome(pool, conta_id, "Inexistente") is None
+    # ambíguo: dois "Mercado" -> não chuta
+    cli.criar_cliente(pool, conta_id, "Mercado Sul")
+    assert cli.achar_cliente_por_nome(pool, conta_id, "Mercado") is None
 
 
 def test_apagar_titulo_aberto(pool, conta_id):

@@ -346,6 +346,8 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if vende_servico and caps.vendas %}{{ navi('servicos','/painel/servicos','financeiro','Serviços') }}{% endif %}
   {% if tem_pj and caps.vendas %}{{ navi('prospeccao','/painel/prospeccao','prospeccao','Prospecção') }}{% endif %}
   {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{% endif %}
+  {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
+  {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes') }}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
   {% if _dono and _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
   {% if _dono and (_tem_app or _tem_cesta) %}<div class="side-grp">Pessoal</div>{% endif %}
@@ -372,6 +374,8 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if vende_servico and caps.vendas %}{{ navi('servicos','/painel/servicos','financeiro','Serviços') }}{% endif %}
   {% if tem_pj and caps.vendas %}{{ navi('prospeccao','/painel/prospeccao','prospeccao','Prospecção') }}{% endif %}
   {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{% endif %}
+  {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
+  {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes') }}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
   {% if _dono and _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
   {% if _dono and (_tem_app or _tem_cesta) %}<div class="side-grp">Pessoal</div>{% endif %}
@@ -3056,15 +3060,17 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
 
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center"><strong>Títulos a pagar e receber</strong></div>
-  <form method="post" action="/painel/empresa/titulo" class="emp-form" style="display:grid;grid-template-columns:1fr 2fr 1fr 1fr auto;gap:.5rem;margin:.7rem 0;align-items:end">
+  <form method="post" action="/painel/empresa/titulo" class="emp-form" style="display:grid;grid-template-columns:1fr 2fr 1fr 1fr 1.4fr auto;gap:.5rem;margin:.7rem 0;align-items:end">
     <label style="font-size:.72rem;color:#8a938a">Tipo<select name="tipo" style="width:100%">
       <option value="pagar">A pagar</option><option value="receber">A receber</option></select></label>
     <label style="font-size:.72rem;color:#8a938a">Descrição<input name="descricao" required placeholder="Ex: Aluguel do ponto" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Valor R$<input name="valor" required inputmode="decimal" placeholder="0,00" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Vencimento<input name="vencimento" type="date" required style="width:100%"></label>
+    <label style="font-size:.72rem;color:#8a938a" title="opcional — liga o título à ficha do cliente (honorário/venda a prazo)">Cliente<input name="cliente" list="tit-cli-dl" placeholder="opcional" style="width:100%"></label>
     <button type="submit" style="background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.55rem .8rem;font-weight:600;cursor:pointer">+ Add</button>
   </form>
-  <label style="font-size:.72rem;color:#8a938a;display:flex;gap:.4rem;align-items:center;margin-bottom:.6rem"><input type="checkbox" form="_nada" disabled style="width:auto"> <span class="mut">Contraparte e recorrência aparecem ao detalhar o título.</span></label>
+  <datalist id="tit-cli-dl">{% for c in clientes_lista or [] %}<option value="{{ c.nome }}">{% endfor %}</datalist>
+  <label style="font-size:.72rem;color:#8a938a;display:flex;gap:.4rem;align-items:center;margin-bottom:.6rem"><input type="checkbox" form="_nada" disabled style="width:auto"> <span class="mut">Vincule um cliente pra o título aparecer na ficha dele (carteira). Contraparte/recorrência aparecem ao detalhar.</span></label>
   {% if titulos %}
   <style>
     .tit-lin{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35rem .9rem;padding:.7rem 0;border-top:1px solid #232325}
@@ -3080,7 +3086,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   {% for t in titulos %}<div class="tit-lin">
     <div class="tit-id">
       <div class="tit-desc">{{ t.descricao }}{% if t.contraparte %} <span class="mut">· {{ t.contraparte }}</span>{% endif %}</div>
-      <div class="tit-meta"><span style="{% if t.atrasado %}color:#f0c05a{% endif %}">vence {{ t.vencimento.strftime('%d/%m') }}{% if t.atrasado %} ⚠ atrasado{% endif %}</span> · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">a pagar</span>{% else %}<span style="color:var(--verde-claro)">a receber</span>{% endif %}</div>
+      <div class="tit-meta"><span style="{% if t.atrasado %}color:#f0c05a{% endif %}">vence {{ t.vencimento.strftime('%d/%m') }}{% if t.atrasado %} ⚠ atrasado{% endif %}</span> · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">a pagar</span>{% else %}<span style="color:var(--verde-claro)">a receber</span>{% endif %}{% if t.cliente_nome %} · <a href="/painel/clientes/{{ t.cliente_id }}" style="color:var(--verde-claro);text-decoration:none">👤 {{ t.cliente_nome }}</a>{% endif %}</div>
     </div>
     <div class="tit-val" style="color:{{ '#e07a5f' if t.tipo=='pagar' else 'var(--verde-claro)' }}">{{ t.valor_centavos|brl }}</div>
     <div class="tit-acoes">
@@ -7511,9 +7517,11 @@ def painel_empresa(request: Request):
         doc = _mascara_cnpj(r[0]) if r else ""
     titulos = emp.listar_titulos(pool, conta[0], status="aberto")
     folha = emp.folha_do_mes(pool, conta[0], hoje.year, hoje.month)
+    from finance import clientes as _cli
+    clientes_lista = _cli.listar_clientes(pool, conta[0])
     return _render("empresa", request, empresa_nome=conta[2], empresa_doc=doc,
                    res=res, fluxo=fluxo, dre=dre, titulos=titulos, folha=folha,
-                   tem_pj=True)
+                   clientes_lista=clientes_lista, tem_pj=True)
 
 
 @router.get("/painel/produtos")
@@ -7905,19 +7913,22 @@ def _guard_pj(request: Request):
 def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
                          descricao: str = Form(""), valor: str = Form(""),
                          vencimento: str = Form(""), contraparte: str = Form(""),
-                         recorrente: str = Form("")):
-    from finance import empresa as emp
+                         recorrente: str = Form(""), cliente: str = Form("")):
+    from finance import empresa as emp, clientes as cli
     g = _guard_pj(request)
     if not g:
         return RedirectResponse("/painel", status_code=303)
     conta, pool = g
     cent = _reais_para_centavos(valor)
     if cent > 0 and descricao.strip() and vencimento:
+        # liga a um cliente existente pelo nome (não cria duplicado; ignora se não achar)
+        cli_id = cli.achar_cliente_por_nome(pool, conta[0], cliente) if cliente.strip() else None
         try:
             emp.criar_titulo(pool, conta[0], tipo if tipo in ("pagar", "receber") else "pagar",
                              descricao, cent, _date.fromisoformat(vencimento),
-                             contraparte=contraparte,
-                             recorrente=bool(recorrente), criado_por=None)
+                             contraparte=contraparte or (cliente.strip() if cli_id else ""),
+                             recorrente=bool(recorrente), criado_por=None,
+                             cliente_id=cli_id)
         except Exception:
             pass
     return RedirectResponse("/painel/empresa", status_code=303)

@@ -147,13 +147,24 @@ def construir_ferramentas_pj(pool, conta_id: int,
             return "Preciso do valor e da descrição pra criar o título."
         cent = int(round(float(valor) * 100))
         venc = _parse_data_pj(e.get("vencimento"))
+        contraparte = (e.get("contraparte") or "").strip()
+        # LIGA ao cliente da base pelo nome (contraparte), sem criar duplicado.
+        # Assim o honorário/venda a prazo aparece na ficha do cliente (carteira).
+        cli_id = None
+        if contraparte:
+            try:
+                from . import clientes as _cli
+                cli_id = _cli.achar_cliente_por_nome(pool, conta_id, contraparte)
+            except Exception:
+                cli_id = None
         t = emp.criar_titulo(pool, conta_id, tipo, desc, cent, venc,
-                             contraparte=(e.get("contraparte") or "").strip(),
+                             contraparte=contraparte,
                              recorrente=bool(e.get("recorrente")),
-                             criado_por=membro_id)
+                             criado_por=membro_id, cliente_id=cli_id)
         lado = "a pagar" if tipo == "pagar" else "a receber"
+        extra = " (ligado à ficha do cliente)" if cli_id else ""
         return (f"Título {lado} criado: {desc} — {formatar_brl(cent)}, "
-                f"vence {venc.strftime('%d/%m/%Y')}. id={t['id']}")
+                f"vence {venc.strftime('%d/%m/%Y')}.{extra} id={t['id']}")
 
     def dar_baixa_titulo(e: dict) -> str:
         tid = e.get("titulo_id")

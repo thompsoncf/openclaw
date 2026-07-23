@@ -503,10 +503,14 @@ def folha_do_mes(pool, conta_id: int, ano: int, mes: int) -> dict:
         extras = e.get("extra", 0)
         descontos = e.get("desconto", 0)
         pago = e.get("pagamento", 0)
-        # Descontos legais sobre o SALÁRIO base (não sobre extras/vales):
-        # INSS progressivo (só CLT; pró-labore do sócio não usa esta tabela) e
-        # vale-transporte (6%, quem optou). Saem do líquido do funcionário.
-        inss = 0 if f["pro_labore"] else inss_desconto_centavos(f["salario_centavos"])
+        # Descontos legais do líquido do funcionário:
+        # - INSS progressivo sobre a REMUNERAÇÃO (salário + extras/horas-extra;
+        #   vale/desconto não entram na base). Só CLT — pró-labore do sócio não
+        #   usa esta tabela.
+        # - Vale-transporte: 6% do SALÁRIO base (por lei incide sobre o salário,
+        #   não sobre extras), pra quem optou.
+        base_inss = f["salario_centavos"] + extras
+        inss = 0 if f["pro_labore"] else inss_desconto_centavos(base_inss)
         vt = vale_transporte_desconto_centavos(
             f["salario_centavos"], f.get("vale_transporte", False))
         liquido = f["salario_centavos"] + extras - vales - descontos - inss - vt

@@ -97,6 +97,22 @@ def test_folha_desconta_inss_e_vt(pool, conta_id):
     assert it["vale_transporte"] is True
 
 
+def test_inss_incide_sobre_salario_mais_extras(pool, conta_id):
+    f = emp.criar_funcionario(pool, conta_id, "Carla", salario_centavos=200000)
+    hoje = date.today()
+    # hora-extra de R$500 na competência -> base do INSS = 2500
+    emp.registrar_evento_folha(pool, conta_id, f["id"], "extra", 50000,
+                               competencia=hoje)
+    folha = emp.folha_do_mes(pool, conta_id, hoje.year, hoje.month)
+    it = _item(folha, f["id"])
+    assert it["extras_centavos"] == 50000
+    # INSS sobre 2500 (salário + extra), não sobre 2000
+    assert it["inss_centavos"] == emp.inss_desconto_centavos(250000)
+    assert it["inss_centavos"] != emp.inss_desconto_centavos(200000)
+    # líquido = 2000 + 500 - INSS(2500)
+    assert it["liquido_centavos"] == 250000 - emp.inss_desconto_centavos(250000)
+
+
 def test_prolabore_nao_tem_inss_clt(pool, conta_id):
     f = emp.criar_funcionario(pool, conta_id, "Sócio", salario_centavos=300000,
                               pro_labore=True)

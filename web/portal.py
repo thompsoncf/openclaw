@@ -3081,6 +3081,9 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     .tit-acoes{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.15rem}
     .tit-acoes button,.tit-acoes a{background:none;border:1px solid #2f2f31;border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;width:auto;text-decoration:none}
     .tit-acoes form{display:inline;margin:0}
+    .tit-edit{flex:1 1 100%;flex-wrap:wrap;gap:.4rem;margin-top:.3rem;align-items:center}
+    .tit-edit input{font-size:.8rem;padding:.35rem .5rem;border-radius:7px;border:1px solid #333;background:var(--bg);color:var(--txt)}
+    .tit-edit button{border:1px solid #2f2f31;border-radius:7px;padding:.32rem .7rem;font-size:.78rem;cursor:pointer;width:auto;background:none;color:var(--txt)}
   </style>
   <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--txt-mut);padding:.6rem 0 .2rem;border-bottom:1px solid #232325"><span>Título</span><span>Valor</span></div>
   {% for t in titulos %}<div class="tit-lin">
@@ -3092,28 +3095,26 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     <div class="tit-acoes">
       <form method="post" action="/painel/empresa/titulo/{{ t.id }}/baixa"><button style="color:var(--verde-claro)">dar baixa ✓</button></form>
       {% if t.tipo=='receber' %}{% if t.cobranca_link_url %}<a href="{{ t.cobranca_link_url }}" target="_blank" style="color:#c99536">link Pix ↗</a>{% else %}<form method="post" action="/painel/empresa/titulo/{{ t.id }}/cobrar"><button style="color:#c99536">cobrar via Pix →</button></form>{% endif %}{% endif %}
-      <button type="button" data-desc="{{ t.descricao }}" data-val="{{ (t.valor_centavos/100)|n2 }}" onclick="titEditar({{ t.id }}, this)" title="corrigir descrição e/ou valor" style="color:#8a938a">editar</button>
+      <button type="button" onclick="titEditToggle(this)" title="editar descrição e/ou valor" style="color:#8a938a">editar ✎</button>
       <form method="post" action="/painel/empresa/titulo/{{ t.id }}/apagar" onsubmit="return confirm('Apagar este título? (só some da lista; não mexe em nada já pago)')"><button title="apagar título" style="color:#c98080">apagar ✕</button></form>
     </div>
+    {# edição INLINE (descrição + valor juntos, cada um independente) — evita o vaivém de prompts #}
+    <form method="post" action="/painel/empresa/titulo/{{ t.id }}/descricao" class="tit-edit" style="display:none">
+      <input name="descricao" value="{{ t.descricao }}" placeholder="descrição" style="flex:2 1 150px;min-width:0">
+      <input name="valor" value="{{ (t.valor_centavos/100)|n2 }}" inputmode="decimal" placeholder="valor R$" style="flex:1 1 90px;min-width:0">
+      <button style="background:var(--verde);color:#fff;border:0">salvar</button>
+      <button type="button" onclick="titEditToggle(this)" style="color:#8a938a">cancelar</button>
+    </form>
   </div>{% endfor %}
   {% else %}<div class="mut" style="font-size:.85rem">Nenhum título em aberto. Adicione acima — ou peça pro Zaq no WhatsApp.</div>{% endif %}
-  <form method="post" id="tit-desc-form" style="display:none"><input type="hidden" name="descricao" id="tit-desc-input"><input type="hidden" name="valor" id="tit-val-input"></form>
   <script>
-  function titEditar(id, btn){
-    var atualDesc = btn.getAttribute('data-desc') || '';
-    var atualVal  = btn.getAttribute('data-val') || '';
-    var nd = prompt('Descrição do título:', atualDesc);
-    if(nd === null) return;                 // cancelou tudo
-    var nv = prompt('Valor do título (R$):', atualVal);
-    if(nv === null) return;                 // cancelou
-    nd = nd.trim(); nv = nv.trim();
-    if((!nd || nd === atualDesc) && (!nv || nv === atualVal)) return;  // nada mudou
-    var f = document.getElementById('tit-desc-form');
-    f.action = '/painel/empresa/titulo/' + id + '/descricao';
-    // só manda o campo que mudou (vazio = backend ignora)
-    document.getElementById('tit-desc-input').value = (nd && nd !== atualDesc) ? nd : '';
-    document.getElementById('tit-val-input').value  = (nv && nv !== atualVal)  ? nv : '';
-    f.submit();
+  function titEditToggle(btn){
+    var lin = btn.closest('.tit-lin');
+    var f = lin ? lin.querySelector('.tit-edit') : null;
+    if(!f) return;
+    var aberto = f.style.display === 'flex';
+    f.style.display = aberto ? 'none' : 'flex';
+    if(!aberto){ var d = f.querySelector('input[name=descricao]'); if(d) d.focus(); }
   }
   </script>
 </div>

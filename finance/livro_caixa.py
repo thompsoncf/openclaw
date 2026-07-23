@@ -697,12 +697,14 @@ class LivroCaixa:
         with self.pool.connection() as conn:
             rows = conn.execute(
                 f"""select l.id, l.data, l.descricao, l.categoria, l.tipo, l.valor_centavos,
-                          l.origem, coalesce(m.nome, '-') as quem, l.natureza
+                          l.origem, coalesce(m.nome, '-') as quem, l.natureza,
+                          l.forma_pagamento
                     from lancamentos l left join membros m on m.id = l.membro_id
                     where {cond} order by l.data desc, l.id desc limit %s""",
                 params + [limite]).fetchall()
         return [{"id": r[0], "data": r[1], "descricao": r[2], "categoria": r[3], "tipo": r[4],
-                 "valor": int(r[5]), "origem": r[6], "quem": r[7], "natureza": r[8]} for r in rows]
+                 "valor": int(r[5]), "origem": r[6], "quem": r[7], "natureza": r[8],
+                 "forma_pagamento": r[9]} for r in rows]
 
     def raiox_por_departamento(self, ano: int | None = None, mes: int | None = None,
                                membro_id: int | None = None,
@@ -1021,14 +1023,16 @@ class LivroCaixa:
         with self.pool.connection() as conn:
             rows = conn.execute(
                 """select l.id, l.data, l.descricao, l.categoria, l.tipo, l.valor_centavos,
-                          l.origem, coalesce(m.nome, '-') as quem
+                          l.origem, coalesce(m.nome, '-') as quem, l.natureza,
+                          l.forma_pagamento
                     from lancamentos l left join membros m on m.id = l.membro_id
                     where l.conta_id = %s and l.descricao ilike %s
                     order by l.data desc, l.id desc limit %s""",
                 (self.conta_id, f"%{termo}%", limite),
             ).fetchall()
         return [{"id": r[0], "data": r[1], "descricao": r[2], "categoria": r[3], "tipo": r[4],
-                 "valor": int(r[5]), "origem": r[6], "quem": r[7]} for r in rows]
+                 "valor": int(r[5]), "origem": r[6], "quem": r[7], "natureza": r[8],
+                 "forma_pagamento": r[9]} for r in rows]
 
     def buscar_itens(self, termo: str, dias: int = 60) -> tuple[list[dict], int]:
         """Busca itens cuja descricao casa com 'termo' (nos ultimos N dias).

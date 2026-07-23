@@ -252,6 +252,38 @@ def cancelar_titulo(pool, conta_id: int, titulo_id: int) -> bool:
     return r is not None
 
 
+def editar_descricao_titulo(pool, conta_id: int, titulo_id: int,
+                            nova_descricao: str) -> bool:
+    """Corrige SO' a descricao de um titulo (o dono digitou errado). NAO mexe em
+    valor, vencimento nem tipo. Multi-tenant: so' o titulo DESTA conta. Corta
+    espacos e limita o tamanho. Retorna True se mudou."""
+    desc = (nova_descricao or "").strip()[:200]
+    if not desc:
+        return False
+    with pool.connection() as c:
+        cur = c.execute(
+            "update titulos set descricao=%s where id=%s and conta_id=%s",
+            (desc, titulo_id, conta_id),
+        )
+        c.commit()
+        return cur.rowcount > 0
+
+
+def apagar_titulo(pool, conta_id: int, titulo_id: int) -> bool:
+    """Apaga de vez um titulo em ABERTO (lancado por engano). So' mexe em titulo
+    'aberto' DESTA conta - um titulo ja' PAGO gerou lancamento no caixa e NAO pode
+    sumir por aqui (o dinheiro e' real; apagar so' o titulo deixaria o caixa
+    orfao). Pra titulo pago, o caminho e' apagar o lancamento no financeiro.
+    Retorna True se apagou."""
+    with pool.connection() as c:
+        cur = c.execute(
+            "delete from titulos where id=%s and conta_id=%s and status='aberto'",
+            (titulo_id, conta_id),
+        )
+        c.commit()
+        return cur.rowcount > 0
+
+
 def registrar_link_cobranca(pool, conta_id: int, titulo_id: int, url: str) -> None:
     """Guarda o link Asaas do 'cobrar via Pix' (títulos a receber)."""
     with pool.connection() as c:

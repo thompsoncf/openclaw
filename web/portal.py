@@ -948,6 +948,21 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <div class="cat-lancamentos" style="display:none; padding:.2rem 0 .6rem 1.2rem"></div>
 {% endfor %}{% else %}<p class="mut">Sem receitas neste mês.</p>{% endif %}
 
+{% if not q_search and prev_cartao and prev_cartao.pontos %}
+<div class="card" style="margin-top:1.4rem;border:1px solid #2a3a33">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:.6rem">
+    <strong style="font-size:.95rem">💳 Previsão da fatura do cartão</strong>
+    <b style="color:#f0c05a;white-space:nowrap">{{ prev_cartao.total_centavos|brl }}</b>
+  </div>
+  <div class="mut" style="font-size:.72rem;margin:.15rem 0 .6rem">parcelas que ainda vão cair nos próximos meses</div>
+  <table style="width:100%;font-size:.85rem">
+    {% for p in prev_cartao.pontos %}<tr style="border-top:1px solid #232325">
+      <td style="padding:.3rem 0">{{ ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][p.competencia.month-1] }}/{{ p.competencia.year }}
+        <span class="mut" style="font-size:.72rem">· {{ p.parcelas }} parcela{{ 's' if p.parcelas != 1 else '' }}</span></td>
+      <td style="text-align:right;font-weight:600;color:#f0b8b8">{{ p.total_centavos|brl }}</td></tr>{% endfor %}
+  </table>
+</div>
+{% endif %}
 <h1 style="font-size:1.05rem; margin-top:1.6rem">Lançamentos</h1>
 <form method="get" action="/painel/financeiro" style="margin:.5rem 0 1rem">
 <input type="search" name="q" value="{{ q_search or '' }}" placeholder="🔎 Buscar lançamento..."
@@ -973,7 +988,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 {% for l in lancamentos %}
 <tr data-tipo="{{ l.tipo }}" style="border-bottom:1px solid var(--borda)">
 <td style="padding:.7rem .8rem;font-size:.9rem;white-space:nowrap">{{ l.data.strftime('%d/%m/%Y') }}</td>
-<td style="padding:.7rem .8rem">{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}</td>
+<td style="padding:.7rem .8rem">{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}{% if l.forma_pagamento %}<span style="font-size:.62rem;background:#242426;color:#9aa39a;padding:1px 7px;border-radius:8px;margin-left:.3rem;white-space:nowrap">💳 {{ forma_pag_label(l.forma_pagamento) }}</span>{% endif %}</td>
 <td style="padding:.7rem .8rem;font-size:.85rem;color:var(--txt-mut)">{{ l.categoria }}</td>
 <td style="padding:.7rem .8rem;text-align:right;font-weight:500;color:{{ 'var(--verde-claro)' if l.tipo=='receita' else '#f0b8b8' }}">
 {{ '+' if l.tipo=='receita' else '−' }} {{ brl(l.valor).replace('R$ ','') }}</td>
@@ -998,6 +1013,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <table style="margin:0">
 {% for l in dia.itens %}<tr data-tipo="{{ l.tipo }}" data-cat="{{ canon(l.categoria, l.tipo) }}" data-desc="{{ l.descricao }}" data-valor="{{ brl(l.valor) }}">
 <td>{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}
+{% if l.forma_pagamento %}<span class="fpag-tag" style="font-size:.62rem;background:#242426;color:#9aa39a;padding:1px 7px;border-radius:8px;margin-left:.3rem;white-space:nowrap">💳 {{ forma_pag_label(l.forma_pagamento) }}</span>{% endif %}
 {% if eh_pj %}{% if l.natureza=='empresa' %}<span class="nat-tag" style="font-size:.62rem;background:#1d3a2e;color:var(--verde-claro);padding:1px 7px;border-radius:8px;margin-left:.3rem">🏢 empresa</span>{% elif l.natureza=='pessoal' %}<span class="nat-tag" style="font-size:.62rem;background:#3a2c1d;color:#f0c05a;padding:1px 7px;border-radius:8px;margin-left:.3rem">👤 pessoal</span>{% else %}<span style="display:inline-flex;gap:.25rem;margin-left:.3rem"><button type="button" onclick="marcarNat({{ l.id }},'pessoal',this)" style="font-size:.6rem;padding:1px 6px;background:#3a2c1d;color:#f0c05a;border:0;border-radius:7px;cursor:pointer">pessoal?</button><button type="button" onclick="marcarNat({{ l.id }},'empresa',this)" style="font-size:.6rem;padding:1px 6px;background:#1d3a2e;color:var(--verde-claro);border:0;border-radius:7px;cursor:pointer">empresa?</button></span>{% endif %}{% endif %}</td>
 <td class="nowrap">
 <span style="display:inline-flex;align-items:center;gap:.4rem">
@@ -3044,8 +3060,24 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
       <td style="text-align:right;white-space:nowrap">
         <form method="post" action="/painel/empresa/titulo/{{ t.id }}/baixa" style="display:inline"><button style="background:none;border:0;color:var(--verde-claro);cursor:pointer;font-size:.78rem">dar baixa ✓</button></form>
         {% if t.tipo=='receber' %}{% if t.cobranca_link_url %}<a href="{{ t.cobranca_link_url }}" target="_blank" style="color:#c99536;font-size:.78rem;margin-left:.5rem">link Pix ↗</a>{% else %}<form method="post" action="/painel/empresa/titulo/{{ t.id }}/cobrar" style="display:inline"><button style="background:none;border:0;color:#c99536;cursor:pointer;font-size:.78rem;margin-left:.5rem">cobrar via Pix →</button></form>{% endif %}{% endif %}
+        <button type="button" data-desc="{{ t.descricao }}" onclick="titEditarDesc({{ t.id }}, this)" title="corrigir a descrição" style="background:none;border:0;color:#8a938a;cursor:pointer;font-size:.78rem;margin-left:.5rem">editar</button>
+        <form method="post" action="/painel/empresa/titulo/{{ t.id }}/apagar" style="display:inline" onsubmit="return confirm('Apagar este título? (só some da lista; não mexe em nada já pago)')"><button title="apagar título" style="background:none;border:0;color:#8a3636;cursor:pointer;font-size:.78rem;margin-left:.5rem">apagar ✕</button></form>
       </td></tr>{% endfor %}
   </table>{% else %}<div class="mut" style="font-size:.85rem">Nenhum título em aberto. Adicione acima — ou peça pro Zaq no WhatsApp.</div>{% endif %}
+  <form method="post" id="tit-desc-form" style="display:none"><input type="hidden" name="descricao" id="tit-desc-input"></form>
+  <script>
+  function titEditarDesc(id, btn){
+    var atual = btn.getAttribute('data-desc') || '';
+    var nova = prompt('Corrigir a descrição do título:', atual);
+    if(nova === null) return;              // cancelou
+    nova = nova.trim();
+    if(!nova || nova === atual) return;    // vazio ou sem mudança
+    var f = document.getElementById('tit-desc-form');
+    f.action = '/painel/empresa/titulo/' + id + '/descricao';
+    document.getElementById('tit-desc-input').value = nova;
+    f.submit();
+  }
+  </script>
 </div>
 
 <div class="card larga">
@@ -4681,6 +4713,13 @@ _env.filters["n2"] = _n2
 from finance.models import canonizar_categoria, categorias_de
 _env.globals["canon"] = lambda c, t="despesa": canonizar_categoria(c, t)
 _env.globals["categorias_de"] = categorias_de
+# rotulo amigavel da forma de pagamento (canonica -> texto + icone). '' = sem info.
+_FORMA_PAG_LABEL = {
+    "pix": "Pix", "debito": "Débito", "credito": "Crédito",
+    "especie": "Dinheiro", "boleto": "Boleto", "transferencia": "Transf.",
+    "outro": "Outro",
+}
+_env.globals["forma_pag_label"] = lambda f: _FORMA_PAG_LABEL.get(f or "", "")
 from finance import cidades as _cidades_mod
 _env.globals["cidades"] = _cidades_mod.opcoes()
 from finance import nichos as _nichos
@@ -7859,6 +7898,30 @@ def empresa_titulo_cobrar(request: Request, titulo_id: int):
     return RedirectResponse("/painel/empresa", status_code=303)
 
 
+@router.post("/painel/empresa/titulo/{titulo_id}/descricao")
+def empresa_titulo_descricao(request: Request, titulo_id: int,
+                             descricao: str = Form("")):
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    if descricao.strip():
+        emp.editar_descricao_titulo(pool, conta[0], titulo_id, descricao)
+    return RedirectResponse("/painel/empresa", status_code=303)
+
+
+@router.post("/painel/empresa/titulo/{titulo_id}/apagar")
+def empresa_titulo_apagar(request: Request, titulo_id: int):
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    emp.apagar_titulo(pool, conta[0], titulo_id)
+    return RedirectResponse("/painel/empresa", status_code=303)
+
+
 @router.post("/painel/empresa/funcionario")
 def empresa_funcionario_criar(request: Request, nome: str = Form(""),
                               cargo: str = Form(""), salario: str = Form(""),
@@ -7954,6 +8017,15 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
 
     livro = LivroCaixa(pool, conta[0])
 
+    # Previsao da fatura do cartao (compras parceladas no credito). Materializa as
+    # parcelas ja' vencidas (viram despesa do mes) e olha as futuras. Tolerante:
+    # nunca deixa derrubar o painel.
+    try:
+        livro.materializar_parcelas_devidas()
+        prev_cartao = livro.previsao_cartao(meses=6)
+    except Exception:
+        prev_cartao = {"total_centavos": 0, "pontos": [], "meses": 6}
+
     # Se há busca, usa buscar_lancamentos; senão fluxo normal
     if q:
         lancamentos = livro.buscar_lancamentos(q, limite=100)
@@ -8034,6 +8106,7 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
                    natureza_sel=(natureza if eh_pj else ""),
                    n_a_definir=n_a_definir,
                    quebra=quebra,
+                   prev_cartao=prev_cartao,
                    eh_pj=eh_pj)
 
 

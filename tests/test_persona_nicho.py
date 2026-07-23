@@ -15,7 +15,8 @@ from finance import cnpj_info, nichos
 from finance.tools_pj import bloco_persona_pj
 
 _MIGRACOES = ("053_modulo_pj.sql", "031_fornecedor_fase0.sql",
-              "090_nicho_contabilidade_e_cnae.sql")
+              "090_nicho_contabilidade_e_cnae.sql",
+              "091_nichos_servico_profissional.sql")
 
 
 # ── parte pura ────────────────────────────────────────────────────────────
@@ -30,9 +31,11 @@ def test_cnae_contabilidade_vira_nicho(desc):
     assert cnpj_info.nicho_do_cnae(desc) == "contabilidade"
 
 
-def test_consultoria_ti_nao_vira_contabilidade():
-    # "consultoria em TI" continua consultoria, não contabilidade (ordem importa)
-    assert cnpj_info.nicho_do_cnae("Consultoria em tecnologia da informação") == "consultoria"
+def test_ti_vira_tecnologia_nao_consultoria_nem_contabilidade():
+    # o "limpar": TI/software vai pra 'tecnologia', separado da consultoria de
+    # gestão (e nunca contabilidade). Consultoria de gestão continua 'consultoria'.
+    assert cnpj_info.nicho_do_cnae("Consultoria em tecnologia da informação") == "tecnologia"
+    assert cnpj_info.nicho_do_cnae("Consultoria em gestão empresarial") == "consultoria"
 
 
 def test_persona_do_nicho():
@@ -43,8 +46,30 @@ def test_persona_do_nicho():
 
 def test_rotulo_receber_por_nicho():
     assert nichos.rotulo_receber("contabilidade") == "Honorários"
-    assert nichos.rotulo_receber("alimentacao") == "Fiado"      # varejo
-    assert nichos.rotulo_receber("consultoria") == "A receber"  # serviço genérico
+    assert nichos.rotulo_receber("alimentacao") == "Fiado"        # varejo
+    assert nichos.rotulo_receber("advocacia") == "Honorários"
+    assert nichos.rotulo_receber("agencia") == "Mensalidades"
+    assert nichos.rotulo_receber("servicos_gerais") == "A receber"  # serviço sem molde
+
+
+@pytest.mark.parametrize("cnae,nicho", [
+    ("Atividades jurídicas", "advocacia"),
+    ("Serviços advocatícios", "advocacia"),
+    ("Atividades de consultoria em gestão empresarial", "consultoria"),
+    ("Serviços de arquitetura", "arquitetura"),
+    ("Serviços de engenharia", "arquitetura"),
+    ("Agências de publicidade", "agencia"),
+    ("Gestão de mídias sociais", "agencia"),
+    ("Desenvolvimento de programas de computador", "tecnologia"),
+    ("Suporte técnico em informática", "tecnologia"),
+])
+def test_cnae_ramos_servico(cnae, nicho):
+    assert cnpj_info.nicho_do_cnae(cnae) == nicho
+
+
+def test_todos_os_ramos_servico_tem_molde():
+    for s in ("advocacia", "consultoria", "arquitetura", "agencia", "tecnologia"):
+        assert nichos.tem_persona(s), s
 
 
 # ── parte com banco: bloco_persona_pj molda ao nicho ──────────────────────
@@ -82,6 +107,15 @@ def test_persona_molda_para_contabilidade(pool):
     assert "HONORÁRIOS" in txt
     # a linha genérica "folha oficial é do contador" NÃO aparece (ele é o contador)
     assert "a folha oficial" not in txt
+
+
+def test_persona_molda_para_advocacia(pool):
+    cid = _conta_com_nicho(pool, "advocacia")
+    txt = bloco_persona_pj(pool, cid, "Advocacia Silva")
+    assert "ESCRITÓRIO DE ADVOCACIA" in txt
+    assert "CARTEIRA" in txt   # reaproveita o framework da carteira
+    # advogado NÃO é contador: a linha genérica da folha (contador cuida) continua
+    assert "eSocial" in txt
 
 
 def test_persona_generica_sem_nicho(pool):

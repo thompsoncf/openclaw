@@ -71,10 +71,34 @@ NICHOS: dict[str, dict] = {
     },
     # ---- NICHOS DE SERVIÇO (nao tem estoque: presta e registra) ----
     "consultoria": {
-        "label": "Consultoria / Tecnologia",
+        "label": "Consultoria / Assessoria empresarial",
         "vende_produto": False, "vende_servico": True,
-        "unidades": ["hora", "modulo", "projeto", "pacote", "mensal"],
-        "categorias": ["consultoria", "desenvolvimento", "suporte", "treinamento", "outro"],
+        "unidades": ["mensal", "hora", "projeto", "diagnostico", "avulso"],
+        "categorias": ["gestao", "financeira", "rh", "marketing", "processos", "outro"],
+    },
+    "tecnologia": {
+        "label": "Tecnologia / Software",
+        "vende_produto": False, "vende_servico": True,
+        "unidades": ["mensal", "projeto", "hora", "sprint", "licenca"],
+        "categorias": ["desenvolvimento", "suporte", "infra", "consultoria", "licenca", "outro"],
+    },
+    "advocacia": {
+        "label": "Advocacia / Escritório de advocacia",
+        "vende_produto": False, "vende_servico": True,
+        "unidades": ["mensal", "honorario", "processo", "hora", "avulso"],
+        "categorias": ["consultivo", "contencioso", "trabalhista", "civel", "criminal", "tributario", "outro"],
+    },
+    "arquitetura": {
+        "label": "Arquitetura / Engenharia",
+        "vende_produto": False, "vende_servico": True,
+        "unidades": ["projeto", "etapa", "medicao", "hora", "m2", "mensal"],
+        "categorias": ["projeto", "execucao", "reforma", "laudo", "acompanhamento", "outro"],
+    },
+    "agencia": {
+        "label": "Agência de marketing / publicidade",
+        "vende_produto": False, "vende_servico": True,
+        "unidades": ["mensal", "projeto", "campanha", "hora", "avulso"],
+        "categorias": ["social_media", "trafego", "criacao", "site", "consultoria", "outro"],
     },
     "salao": {
         "label": "Beleza / Salão (serviço)",
@@ -244,6 +268,9 @@ _UNIDADE_LABEL = {
     "sessao": "sessão", "aula": "aula", "servico": "serviço", "diaria": "diária",
     "visita": "visita", "orcamento": "orçamento",
     "honorario": "honorário", "avulso": "avulso",
+    "processo": "processo", "diagnostico": "diagnóstico", "sprint": "sprint",
+    "licenca": "licença", "etapa": "etapa", "medicao": "medição", "m2": "m²",
+    "campanha": "campanha",
 }
 
 
@@ -258,6 +285,30 @@ def label_unidade(unidade: str | None) -> str:
 # bot a falar/ajudar como aquele negócio. Vazio ('') = sem molde (persona PJ
 # genérica). Adicionar um ramo aqui é o único passo pra ele "sentir" diferente.
 # ---------------------------------------------------------------------------
+def _molde_servico(ramo: str, com_quem: str, faturamento: str, a_pagar: str) -> str:
+    """Molde comum dos ramos de SERVIÇO que faturam por honorário/mensalidade
+    (advocacia, consultoria, arquitetura, agência, tecnologia). Mesma espinha da
+    contabilidade: recebível recorrente por cliente + carteira + proativo."""
+    return (
+        f"RAMO DA EMPRESA: {ramo}. Você fala com {com_quem} — vá direto, sem "
+        f"explicar o básico da área (ele é o especialista). Você é o braço "
+        f"OPERACIONAL rápido do negócio dele.\n"
+        f"- FATURAMENTO: {faturamento} O nome do cliente vai na CONTRAPARTE; "
+        f"mensalidade/retainer -> título a RECEBER RECORRENTE (recorrente=true, o "
+        f"sistema projeta o mês seguinte); recebimento pontual -> a receber avulso.\n"
+        f"- A PAGAR (só custos SEUS): {a_pagar}\n"
+        "- A folha aqui é a da SUA equipe (não a dos clientes).\n"
+        "- CARTEIRA: \"quem me deve\", \"clientes do mês\" -> consultar_empresa. Ao "
+        "receber de um cliente que ainda não está na base, ofereça cadastrá-lo "
+        "(cadastrar_cliente) e ligue o título à ficha dele.\n"
+        "- CATEGORIA da receita: 'Honorarios' (recorrente/serviço principal) ou "
+        "'Consultoria' (projeto/assessoria pontual).\n"
+        "- SEJA PROATIVO (sem encher): se notar atrasado na carteira, avise em 1 "
+        "linha quem está devendo e ofereça cobrar (Pix); no início do mês lembre "
+        "dos recorrentes. Nunca insista nem repita a cada mensagem."
+    )
+
+
 _PERSONAS_NICHO: dict[str, str] = {
     "contabilidade": (
         "RAMO DA EMPRESA: ESCRITÓRIO DE CONTABILIDADE. Você fala com um CONTADOR — "
@@ -287,6 +338,34 @@ _PERSONAS_NICHO: dict[str, str] = {
         "ofereça cobrar (Pix). No começo do mês, se houver honorários recorrentes, "
         "pode lembrar de lançá-los. Nunca insista nem repita a cada mensagem."
     ),
+    "advocacia": _molde_servico(
+        "ESCRITÓRIO DE ADVOCACIA", "um(a) advogado(a)",
+        "honorário contratual/assessoria é MENSAL; honorário de êxito e atos "
+        "pontuais são avulsos.",
+        "anuidade da OAB, custas e DAS/impostos -> 'Impostos'; sistemas jurídicos/"
+        "assinaturas -> 'Assinaturas'."),
+    "consultoria": _molde_servico(
+        "CONSULTORIA / ASSESSORIA EMPRESARIAL", "um(a) consultor(a)",
+        "retainer/mensalidade de cliente é o forte; diagnóstico ou projeto pontual "
+        "é avulso.",
+        "ferramentas/assinaturas -> 'Assinaturas'; DAS/impostos -> 'Impostos'."),
+    "arquitetura": _molde_servico(
+        "ARQUITETURA / ENGENHARIA", "um(a) arquiteto(a)/engenheiro(a)",
+        "honorário por ETAPA/MEDIÇÃO do projeto; acompanhamento de obra pode ser "
+        "mensal.",
+        "anuidade CAU/CREA e impostos -> 'Impostos'; softwares (CAD/BIM) -> "
+        "'Assinaturas'."),
+    "agencia": _molde_servico(
+        "AGÊNCIA DE MARKETING / PUBLICIDADE", "o dono da agência",
+        "FEE MENSAL de cliente é o forte; campanha/projeto é avulso. ATENÇÃO: verba "
+        "de tráfego pago (ADS) é DO CLIENTE — não é sua receita nem seu custo, só "
+        "entra se você de fato repassa.",
+        "ferramentas/assinaturas -> 'Assinaturas'; DAS/impostos -> 'Impostos'."),
+    "tecnologia": _molde_servico(
+        "TECNOLOGIA / SOFTWARE", "o dono de uma software house / TI",
+        "mensalidade de SaaS/suporte é recorrente; projeto ou sprint é avulso.",
+        "infra (nuvem/servidores) e licenças -> 'Assinaturas'; DAS/impostos -> "
+        "'Impostos'."),
 }
 
 
@@ -297,8 +376,16 @@ def persona_do_nicho(slug: str | None) -> str:
 
 
 # Rótulo do "a receber em aberto" na ficha do cliente, POR NICHO. Varejo pensa em
-# "fiado"; contador em "honorários"; o resto em "a receber". Molda a linguagem.
-_ROTULO_RECEBER = {"contabilidade": "Honorários"}
+# "fiado"; profissional liberal em "honorários"; agência/SaaS em "mensalidades";
+# o resto em "a receber". Molda a linguagem ao ramo.
+_ROTULO_RECEBER = {
+    "contabilidade": "Honorários",
+    "advocacia": "Honorários",
+    "consultoria": "Honorários",
+    "arquitetura": "Honorários",
+    "agencia": "Mensalidades",
+    "tecnologia": "Mensalidades",
+}
 
 
 def rotulo_receber(slug: str | None) -> str:

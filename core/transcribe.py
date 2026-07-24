@@ -27,9 +27,17 @@ class Transcritor:
                     idioma: str = "pt") -> str:
         arquivo = io.BytesIO(audio_bytes)
         arquivo.name = nome  # a API usa a extensao pra saber o formato
-        resp = self.client.audio.transcriptions.create(
-            model=self.model, file=arquivo, language=idioma,
-        )
+        try:
+            resp = self.client.audio.transcriptions.create(
+                model=self.model, file=arquivo, language=idioma,
+            )
+        except Exception as e:  # noqa: BLE001
+            # Ponto unico de alerta do STT: se a falha for sistemica (sem
+            # credito/chave invalida/quota) o admin e' avisado. Re-levanta pra
+            # quem chama tratar (mostrar msg amigavel / degradar).
+            from core.falhas import avaliar_falha_provedor
+            avaliar_falha_provedor(e, servico="STT (transcricao)")
+            raise
         return (resp.text or "").strip()
 
 

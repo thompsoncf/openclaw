@@ -296,7 +296,15 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
         except Exception:  # noqa: BLE001
             pass
     # O agente e' sincrono (rede + LLM): roda fora do event loop pra nao travar o bot.
-    resposta = await asyncio.to_thread(agente.responder, texto, imagem_b64, media_type)
+    try:
+        resposta = await asyncio.to_thread(agente.responder, texto, imagem_b64, media_type)
+    except Exception as e:  # noqa: BLE001
+        # NUNCA vaza o erro tecnico pro cliente (ex: saldo da Anthropic).
+        # tratar_falha_ia devolve mensagem amigavel e avisa o admin se for saldo.
+        logging.exception("erro no agente (telegram)")
+        from core.falhas import tratar_falha_ia
+        await update.message.reply_text(tratar_falha_ia(e, canal="telegram"))
+        return
     resposta = resposta or "(sem resposta)"
     if dica_qr:
         # se a chave foi lida: dica genérica (sempre melhorar a foto do QR)
@@ -348,13 +356,32 @@ def _disparar_qr(update: Update, dados: bytes, media_type: str) -> None:
         pass
 
 
+async def _baixar_arquivo_tg(update: Update, ctx: ContextTypes.DEFAULT_TYPE,
+                             file_id: str) -> bytes | None:
+    """Baixa um arquivo do Telegram (get_file + download). Se o Telegram falhar,
+    avisa o cliente com mensagem AMIGAVEL (sem vazar erro tecnico), avisa o admin
+    se for falha sistemica, e devolve None (o handler deve abortar)."""
+    try:
+        arq = await ctx.bot.get_file(file_id)
+        dados = await arq.download_as_bytearray()
+        return bytes(dados)
+    except Exception as e:  # noqa: BLE001
+        logging.exception("falha ao baixar arquivo do telegram")
+        from core.falhas import avaliar_falha_provedor
+        avaliar_falha_provedor(e, servico="Telegram (download)", canal="telegram")
+        await update.message.reply_text(
+            "Nao consegui baixar seu arquivo agora 😕 Tenta mandar de novo daqui a pouco?")
+        return None
+
+
 async def on_photo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     foto = update.message.photo[-1]            # maior resolucao disponivel
-    arq = await ctx.bot.get_file(foto.file_id)
-    dados = await arq.download_as_bytearray()
-    b64 = base64.b64encode(bytes(dados)).decode("ascii")
+    dados = await _baixar_arquivo_tg(update, ctx, foto.file_id)
+    if dados is None:
+        return
+    b64 = base64.b64encode(dados).decode("ascii")
     legenda = update.message.caption or "Segue o cupom para registrar."
-    _disparar_qr(update, bytes(dados), "image/jpeg")
+    _disparar_qr(update, dados, "image/jpeg")
     await _processar(update, legenda, imagem_b64=b64, dica_qr=True)
 
 
@@ -367,9 +394,10 @@ async def on_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if doc.file_size and doc.file_size > 18 * 1024 * 1024:
         await update.message.reply_text("Esse arquivo e' muito grande. Pode mandar uma foto do comprovante? 📸")
         return
-    arq = await ctx.bot.get_file(doc.file_id)
-    dados = await arq.download_as_bytearray()
-    b64 = base64.b64encode(bytes(dados)).decode("ascii")
+    dados = await _baixar_arquivo_tg(update, ctx, doc.file_id)
+    if dados is None:
+        return
+    b64 = base64.b64encode(dados).decode("ascii")
     if "pdf" in mime or nome.endswith(".pdf"):
         _disparar_qr(update, bytes(dados), "application/pdf")
         await _processar(update, legenda, imagem_b64=b64, media_type="application/pdf")
@@ -391,12 +419,17 @@ async def on_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
     voz = update.message.voice or update.message.audio
-    arq = await ctx.bot.get_file(voz.file_id)
-    dados = await arq.download_as_bytearray()
+    dados = await _baixar_arquivo_tg(update, ctx, voz.file_id)
+    if dados is None:
+        return
     try:
-        texto = await asyncio.to_thread(_transcritor.transcrever, bytes(dados))
-    except Exception as e:  # noqa: BLE001
-        await update.message.reply_text(f"Nao consegui entender o audio: {e}")
+        texto = await asyncio.to_thread(_transcritor.transcrever, dados)
+    except Exception:  # noqa: BLE001 - NUNCA vaza o erro do STT pro cliente
+        # o alerta ao admin (se sistemico) ja' sai de dentro do transcrever()
+        logging.exception("falha ao transcrever audio (telegram)")
+        await update.message.reply_text(
+            "Recebi seu audio, mas nao consegui entender dessa vez. 🎧 "
+            "Pode repetir com mais calma ou me mandar por texto?")
         return
     if not texto:
         await update.message.reply_text("Nao consegui entender o audio. Tenta de novo?")

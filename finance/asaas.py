@@ -47,7 +47,10 @@ def _post(caminho: str, payload: dict, timeout: float = 30.0) -> dict:
     with httpx.Client(timeout=timeout) as c:
         r = c.post(url, json=payload, headers=_headers())
     if r.status_code >= 300:
-        raise AsaasErro(f"Asaas {r.status_code} em {caminho}: {r.text[:300]}")
+        msg = f"Asaas {r.status_code} em {caminho}: {r.text[:300]}"
+        from core.falhas import avaliar_falha_provedor
+        avaliar_falha_provedor(msg, servico="Asaas")  # avisa admin se auth/quota/credito
+        raise AsaasErro(msg)
     return r.json()
 
 
@@ -61,7 +64,11 @@ def _get(caminho: str, timeout: float = 15.0) -> dict:
     with httpx.Client(timeout=timeout) as c:
         r = c.get(url, headers=_headers())
     if r.status_code >= 300:
-        raise AsaasErro(f"Asaas {r.status_code} em {caminho}: {r.text[:300]}")
+        msg = f"Asaas {r.status_code} em {caminho}: {r.text[:300]}"
+        # 404 (pagamento inexistente) NAO e' sistemico -> avaliar ignora e nao avisa.
+        from core.falhas import avaliar_falha_provedor
+        avaliar_falha_provedor(msg, servico="Asaas")
+        raise AsaasErro(msg)
     return r.json()
 
 

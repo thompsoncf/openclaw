@@ -126,6 +126,113 @@ def notificar_admin(texto: str) -> bool:
     return _enviar_telegram(chat, texto)
 
 
+def avisar_admin(assunto: str, mensagem: str) -> bool:
+    """Alerta GENERICO pro ADMIN do SaaS por E-MAIL (ADMIN_EMAIL, fallback pro
+    remetente SMTP) + Telegram (ADMIN_TELEGRAM_ID). Usado pelos monitores
+    proativos (saldo Twilio/Asaas, gasto da IA). Tolerante a falha: nunca
+    levanta excecao."""
+    ok = False
+    destino = os.environ.get("ADMIN_EMAIL")
+    if not destino:
+        try:
+            from finance.email_sender import remetente_configurado
+            destino = remetente_configurado()
+        except Exception:  # noqa: BLE001
+            destino = None
+    if destino:
+        try:
+            from finance.email_sender import enviar_aviso
+            ok = enviar_aviso(destino, assunto, mensagem.replace("\n", "<br>")) or ok
+        except Exception as e:  # noqa: BLE001
+            _log.warning("avisar_admin: falha no e-mail: %s", e)
+    try:
+        ok = notificar_admin(f"*{assunto}*\n{mensagem}") or ok
+    except Exception as e:  # noqa: BLE001
+        _log.warning("avisar_admin: falha no telegram: %s", e)
+    return ok
+
+
+# Texto por categoria de falha (assunto do e-mail, frase curta, e acao sugerida).
+# Serve pra QUALQUER provedor externo pago (IA, Twilio, Asaas, STT, Credify...).
+_TEXTO_CATEGORIA = {
+    "credito": (
+        "sem credito/saldo",
+        "o saldo/credito acabou ou esta' no limite",
+        "Recarregue os creditos no painel de billing do provedor.",
+    ),
+    "auth": (
+        "chave invalida",
+        "a chave/credencial foi recusada (invalida, expirada ou sem permissao)",
+        "Gere/atualize a chave nas variaveis de ambiente (Render).",
+    ),
+    "quota": (
+        "limite (quota) estourado",
+        "o limite de uso (rate limit/quota) foi atingido",
+        "Considere subir o plano do provedor ou reduzir a frequencia.",
+    ),
+}
+
+
+def avisar_admin_falha_provedor(servico: str, categoria: str = "credito",
+                                detalhe: str = "", canal: str = "") -> bool:
+    """Avisa o ADMIN do SaaS que um PROVEDOR EXTERNO pago falhou de forma
+    ACIONAVEL (sem credito / chave invalida / quota estourada). O cliente ja'
+    recebeu uma mensagem de instabilidade e NAO viu o erro tecnico. Manda por
+    E-MAIL (env ADMIN_EMAIL, fallback pro remetente SMTP) + Telegram
+    (ADMIN_TELEGRAM_ID). Tolerante a falha: nunca levanta excecao.
+
+    `servico`: nome do provedor (ex "Anthropic (IA)", "Asaas", "Twilio").
+    `categoria`: 'credito' | 'auth' | 'quota' (default 'credito').
+    `detalhe`: texto tecnico do erro (so' pro admin, nunca pro cliente).
+    `canal`: onde ocorreu, se aplicavel (ex "whatsapp", "telegram")."""
+    rotulo, frase, acao = _TEXTO_CATEGORIA.get(categoria, _TEXTO_CATEGORIA["credito"])
+    origem = f" ({canal})" if canal else ""
+    assunto = f"⚠️ {servico}: {rotulo}"
+    corpo = (
+        f"O provedor *{servico}* falhou{origem}: {frase}.\n\n"
+        "Os clientes estao recebendo uma mensagem de 'instabilidade tecnica' no "
+        "lugar do erro — ninguem viu nada de errado, mas essa integracao NAO "
+        "funciona ate' resolver.\n\n"
+        f"Acao: {acao}\n\n"
+        f"Detalhe tecnico:\n{detalhe or '(sem detalhe)'}"
+    )
+    ok = False
+
+    # 1) E-mail pro admin
+    destino = os.environ.get("ADMIN_EMAIL")
+    if not destino:
+        try:
+            from finance.email_sender import remetente_configurado
+            destino = remetente_configurado()  # fallback: o proprio remetente SMTP
+        except Exception:  # noqa: BLE001
+            destino = None
+    if destino:
+        try:
+            from finance.email_sender import enviar_aviso
+            ok = enviar_aviso(destino, assunto, corpo.replace("\n", "<br>")) or ok
+        except Exception as e:  # noqa: BLE001
+            _log.warning("avisar_admin_falha_provedor: falha no e-mail: %s", e)
+    else:
+        _log.info("avisar_admin_falha_provedor: sem ADMIN_EMAIL nem remetente SMTP")
+
+    # 2) Telegram pro admin (reaproveita notificar_admin)
+    try:
+        ok = notificar_admin(
+            f"⚠️ *{servico}: {rotulo}*{origem}. Os clientes estao vendo "
+            f"'instabilidade' no lugar do erro. {acao}"
+        ) or ok
+    except Exception as e:  # noqa: BLE001
+        _log.warning("avisar_admin_falha_provedor: falha no telegram: %s", e)
+
+    return ok
+
+
+def avisar_admin_saldo_ia(detalhe: str = "", canal: str = "") -> bool:
+    """Atalho historico: falha de SALDO da Anthropic (IA). Mantido por compat —
+    delega pro aviso generico de provedor."""
+    return avisar_admin_falha_provedor("Anthropic (IA)", "credito", detalhe, canal)
+
+
 def alerta_fase_b(pool, sempre: bool = False) -> bool:
     """Checa o gatilho da Fase B e avisa o admin no Telegram.
     Por padrao SO' avisa quando LIBERADA (nao enche o saco). Com sempre=True,

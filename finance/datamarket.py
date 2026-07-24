@@ -44,8 +44,10 @@ def consultar_preco_ean(ean: str, timeout: float = 8.0) -> dict | None:
             return None                      # produto nao esta' na base
         r.raise_for_status()
         data = r.json()
-    except Exception:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001
         _log.exception("falha consultando Data Market (ean=%s)", ean)
+        from core.falhas import avaliar_falha_provedor
+        avaliar_falha_provedor(e, servico="Data Market")
         return None
     return _normalizar(data)
 

@@ -184,7 +184,10 @@ def _post(caminho: str, payload: dict) -> dict:
         if r.status_code == 401 and tentativa == 1:
             continue  # token expirou/inválido -> reautentica e tenta de novo
         if r.status_code >= 300:
-            raise CredifyErro(f"{caminho} {r.status_code}: {r.text[:200]}")
+            msg = f"{caminho} {r.status_code}: {r.text[:200]}"
+            from core.falhas import avaliar_falha_provedor
+            avaliar_falha_provedor(msg, servico="Credify")  # avisa admin se auth/quota/credito
+            raise CredifyErro(msg)
         return r.json()
     raise CredifyErro(f"{caminho}: 401 mesmo após reautenticar")
 

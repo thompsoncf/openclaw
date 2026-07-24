@@ -68,6 +68,10 @@ def enviar_texto(remetente: str, numero: str, corpo: str) -> dict:
             from_=remetente, to=to, body=(corpo or "")[:1500])
         return {"ok": True, "sid": msg.sid}
     except Exception as e:  # noqa: BLE001
+        # Provedor pago: avisa o admin se a falha for sistemica (sem saldo Twilio,
+        # SID/token invalido, etc). Best-effort — nao muda o retorno.
+        from core.falhas import avaliar_falha_provedor
+        avaliar_falha_provedor(e, servico="Twilio (WhatsApp)")
         return {"ok": False, "erro": str(e)[:200]}
 
 

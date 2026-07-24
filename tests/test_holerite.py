@@ -234,6 +234,27 @@ def test_departamento_default_geral_no_holerite(pool, empresa_id):
     assert h["func"]["departamento"] == "GERAL"
 
 
+def test_folha_mostra_fgts_por_funcionario_e_total(pool, empresa_id):
+    # FGTS (8% da remuneração) aparece na folha por funcionário e no total —
+    # é o depósito do empregador, não desconta do líquido.
+    f = emp.criar_funcionario(pool, empresa_id, "Gina", salario_centavos=200000)
+    hoje = date.today()
+    folha = emp.folha_do_mes(pool, empresa_id, hoje.year, hoje.month)
+    item = next(i for i in folha["itens"] if i["id"] == f["id"])
+    assert item["fgts_centavos"] == emp.fgts_mes_centavos(200000)   # 8%
+    assert item["liquido_centavos"] == 200000 - emp.inss_desconto_centavos(200000)
+    assert folha["total_fgts_centavos"] >= item["fgts_centavos"]
+
+
+def test_prolabore_nao_gera_fgts_na_folha(pool, empresa_id):
+    f = emp.criar_funcionario(pool, empresa_id, "Sócio Léo", salario_centavos=500000,
+                              pro_labore=True)
+    hoje = date.today()
+    item = next(i for i in emp.folha_do_mes(pool, empresa_id, hoje.year, hoje.month)["itens"]
+                if i["id"] == f["id"])
+    assert item["fgts_centavos"] == 0
+
+
 def test_remover_evento_reverte_o_caixa(pool, empresa_id):
     # adiantamento vira despesa no caixa; remover deve apagar essa despesa
     from finance.livro_caixa import LivroCaixa

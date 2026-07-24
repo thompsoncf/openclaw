@@ -624,7 +624,7 @@ def folha_do_mes(pool, conta_id: int, ano: int, mes: int) -> dict:
     for fid, tipo, soma in rows:
         ev.setdefault(fid, {})[tipo] = int(soma or 0)
 
-    itens, total_a_pagar, total_pago, total_custo = [], 0, 0, 0
+    itens, total_a_pagar, total_pago, total_custo, total_fgts = [], 0, 0, 0, 0
     for f in funcs:
         e = ev.get(f["id"], {})
         vales = e.get("vale", 0)          # adiantamento salarial (desconta)
@@ -642,24 +642,30 @@ def folha_do_mes(pool, conta_id: int, ano: int, mes: int) -> dict:
         inss = 0 if f["pro_labore"] else inss_desconto_centavos(base_inss)
         vt = vale_transporte_desconto_centavos(
             f["salario_centavos"], f.get("vale_transporte", False))
+        # FGTS 8% da remuneração: é o que o EMPREGADOR deposita no mês (não
+        # desconta do funcionário). Pró-labore de sócio não gera FGTS.
+        fgts = 0 if f["pro_labore"] else fgts_mes_centavos(base_inss)
         # BENEFÍCIO (VR/VA) NÃO entra no líquido — é custo do empregador, não
         # desconto do funcionário. Só o adiantamento (vales) desconta.
         liquido = f["salario_centavos"] + extras - vales - descontos - inss - vt
         a_pagar = max(liquido - pago, 0)
         total_a_pagar += a_pagar
         total_pago += pago
+        total_fgts += fgts
         total_custo += custo_real_centavos(
             f["salario_centavos"] + extras, f["pro_labore"]) + beneficios
         itens.append({**f, "vales_centavos": vales, "extras_centavos": extras,
                       "beneficios_centavos": beneficios,
                       "descontos_centavos": descontos, "pago_centavos": pago,
                       "inss_centavos": inss, "vt_centavos": vt,
+                      "fgts_centavos": fgts,
                       "liquido_centavos": liquido,
                       "a_pagar_centavos": a_pagar,
                       "quitado": a_pagar == 0 and liquido > 0})
     return {"competencia": comp, "itens": itens,
             "total_a_pagar_centavos": total_a_pagar,
             "total_pago_centavos": total_pago,
+            "total_fgts_centavos": total_fgts,
             "custo_real_total_centavos": total_custo}
 
 

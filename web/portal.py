@@ -3156,7 +3156,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
 
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center"><strong>Equipe e folha</strong>
-    <span class="mut" style="font-size:.72rem">folha de {{ '%02d'|format(dre.mes) }}/{{ dre.ano }}: <b style="color:#e07a5f">{{ folha.total_a_pagar_centavos|brl }}</b> · custo real ≈ {{ folha.custo_real_total_centavos|brl }}</span></div>
+    <span class="mut" style="font-size:.72rem">folha de {{ '%02d'|format(dre.mes) }}/{{ dre.ano }}: <b style="color:#e07a5f">{{ folha.total_a_pagar_centavos|brl }}</b> · FGTS do mês {{ folha.total_fgts_centavos|brl }} · custo real ≈ {{ folha.custo_real_total_centavos|brl }}</span></div>
   <form method="post" action="/painel/empresa/funcionario" class="emp-form" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr .8fr auto auto;gap:.5rem;margin:.7rem 0;align-items:end">
     <label style="font-size:.72rem;color:#8a938a">Nome<input name="nome" required placeholder="Nome do funcionário" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Cargo<input name="cargo" placeholder="Ex: Vendedor" style="width:100%"></label>
@@ -3168,8 +3168,15 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   </form>
   {% if folha.itens %}
   <style>
-    .folha-lin{padding:.9rem 0;border-top:1px solid #232325}
-    .folha-head{display:flex;justify-content:space-between;align-items:flex-start;gap:.9rem}
+    /* cada funcionário é um card colapsável (minimiza; expande no clique) */
+    details.folha-lin{border-top:1px solid #232325}
+    details.folha-lin > summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:.9rem;padding:.8rem .25rem}
+    details.folha-lin > summary::-webkit-details-marker{display:none}
+    details.folha-lin > summary:hover{background:#141416}
+    .folha-sum-id{display:flex;align-items:center;gap:.5rem;min-width:0}
+    .folha-chev{color:var(--txt-mut);font-size:.7rem;transition:transform .15s;flex:none}
+    details.folha-lin[open] .folha-chev{transform:rotate(90deg)}
+    .folha-body{padding:0 .25rem .9rem}
     .folha-nome{font-size:.95rem;font-weight:600}
     .folha-bd{font-size:.7rem;margin-top:4px;line-height:1.6;color:var(--txt-mut)}
     .folha-bd .neg{color:#e07a5f}.folha-bd .amb{color:#f0c05a}.folha-bd .pos{color:#7fb48f}
@@ -3177,17 +3184,23 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     .folha-rot{font-size:.66rem;text-transform:uppercase;letter-spacing:.03em;color:var(--txt-mut)}
     .folha-apagar{font-size:1.05rem;font-weight:700;font-variant-numeric:tabular-nums}
     .badge-dem{display:inline-block;background:#3a1e1e;color:#e08a8a;font-size:.62rem;padding:.1rem .45rem;border-radius:6px;margin-left:.35rem;vertical-align:middle}
-    /* área de ações em grupos */
+    /* área de ações em grupos.
+       RESETS: o CSS global do app tem button{width:100%;margin-top:1.4rem},
+       label{display:block;margin:.9rem 0 .3rem} e input{width:100%} — aqui a
+       gente zera isso pra os campos ficarem "no esquadro". */
     .fa{margin-top:.7rem;display:flex;flex-direction:column;gap:.5rem}
-    .fa-grp{background:#141416;border:1px solid #232325;border-radius:9px;padding:.55rem .7rem}
-    .fa-tit{font-size:.64rem;text-transform:uppercase;letter-spacing:.05em;color:var(--txt-mut);margin-bottom:.5rem}
-    .fa-lin{display:flex;flex-wrap:wrap;gap:.6rem .9rem;align-items:center}
-    .fa-campo{display:flex;align-items:center;gap:.35rem}
-    .fa-campo label{font-size:.72rem;color:var(--txt-mut)}
-    .fa form{display:inline-flex;gap:.3rem;align-items:center;margin:0}
-    .fa input{font-size:.76rem;padding:.3rem .45rem;border-radius:7px;border:1px solid #333;background:var(--bg);color:var(--txt)}
-    .fa input.money{width:92px}.fa input.date{width:132px}.fa input.org{width:82px}
-    .fa button{background:none;border:1px solid #2f2f31;border-radius:7px;padding:.32rem .7rem;font-size:.76rem;cursor:pointer;color:var(--txt);width:auto}
+    .fa-grp{background:#141416;border:1px solid #232325;border-radius:9px;padding:.6rem .75rem}
+    .fa-tit{font-size:.64rem;text-transform:uppercase;letter-spacing:.05em;color:var(--txt-mut);margin-bottom:.6rem}
+    .fa form{margin:0}
+    .fa label{display:inline;margin:0;font-size:.74rem;color:var(--txt-mut)}
+    /* cada linha = [rótulo largura fixa] [controles] — inputs alinham em coluna */
+    .fa-row{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .5rem;margin:0}
+    .fa-row + .fa-row{margin-top:.5rem}
+    .fa-row > .lbl{flex:0 0 150px;max-width:150px;font-size:.74rem;color:var(--txt-mut)}
+    @media (max-width:560px){.fa-row > .lbl{flex-basis:100%;max-width:100%;margin-bottom:.1rem}}
+    .fa input{font-size:.78rem;padding:.34rem .5rem;border-radius:7px;border:1px solid #333;background:var(--bg);color:var(--txt);margin:0;width:auto}
+    .fa input.money{width:96px}.fa input.date{width:150px}.fa input.org{width:78px}
+    .fa button{background:none;border:1px solid #2f2f31;border-radius:7px;padding:.36rem .75rem;font-size:.78rem;cursor:pointer;color:var(--txt);width:auto;margin:0}
     .fa button.add{border-color:#2f5a41;color:var(--verde-claro)}
     .fa button.amb{border-color:#5a4a1e;color:#f0c05a}
     .fa button.pay{background:var(--verde);border-color:var(--verde);color:#fff;font-weight:600}
@@ -3211,54 +3224,58 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     .ev-rm{border:1px solid #5a2e2e !important;color:#e08a8a !important;padding:.24rem .55rem !important}
   </style>
   <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--txt-mut);padding:.6rem 0 .2rem;border-bottom:1px solid #232325"><span>Funcionário</span><span>A pagar (líquido)</span></div>
-  {% for f in folha.itens %}<div class="folha-lin">
-    <div class="folha-head">
-      <div style="min-width:0">
-        <div class="folha-nome">{{ f.nome }}{% if f.pro_labore %} <span class="mut" style="font-weight:400;font-size:.8rem">· pró-labore</span>{% elif f.cargo %} <span class="mut" style="font-weight:400;font-size:.8rem">· {{ f.cargo }}</span>{% endif %}{% if f.demitido_em %}<span class="badge-dem">demitido em {{ f.demitido_em.strftime('%d/%m/%Y') }}</span>{% endif %}</div>
-        {# breakdown que RECONCILIA com "A pagar": salário + extras − INSS − VT − adiant. − desconto − já pago.
-           Benefício (VR/VA) NÃO entra no líquido — aparece só como informação (custo do empregador). #}
-        <div class="folha-bd">salário {{ f.salario_centavos|brl }}
-          {%- if f.extras_centavos %} <span class="pos">+ extra {{ f.extras_centavos|brl }}</span>{% endif -%}
-          {%- if f.inss_centavos %} <span class="neg">− INSS {{ f.inss_centavos|brl }}</span>{% endif -%}
-          {%- if f.vt_centavos %} <span class="neg">− VT {{ f.vt_centavos|brl }}</span>{% endif -%}
-          {%- if f.vales_centavos %} <span class="amb">− adiant. {{ f.vales_centavos|brl }}</span>{% endif -%}
-          {%- if f.descontos_centavos %} <span class="amb">− desc {{ f.descontos_centavos|brl }}</span>{% endif -%}
-          {%- if f.pago_centavos %} <span>· já pago {{ f.pago_centavos|brl }}</span>{% endif -%}
-          {%- if f.beneficios_centavos %} <span class="mut">· benefício VR/VA {{ f.beneficios_centavos|brl }} (não desconta)</span>{% endif -%}
-          {%- if f.pro_labore %} <span class="mut">(pró-labore não desconta INSS CLT)</span>{% endif -%}
-        </div>
+  {% for f in folha.itens %}<details class="folha-lin">
+    <summary class="folha-head">
+      <div class="folha-sum-id">
+        <span class="folha-chev" aria-hidden="true">▶</span>
+        <span class="folha-nome">{{ f.nome }}{% if f.pro_labore %} <span class="mut" style="font-weight:400;font-size:.8rem">· pró-labore</span>{% elif f.cargo %} <span class="mut" style="font-weight:400;font-size:.8rem">· {{ f.cargo }}</span>{% endif %}{% if f.demitido_em %}<span class="badge-dem">demitido em {{ f.demitido_em.strftime('%d/%m/%Y') }}</span>{% endif %}</span>
       </div>
       <div class="folha-val">
         <div class="folha-rot">A pagar (líquido)</div>
         <div class="folha-apagar">{% if f.quitado %}<span style="color:var(--verde-claro)">pago ✓</span>{% else %}{{ f.a_pagar_centavos|brl }}{% endif %}</div>
-        <div class="mut" style="font-size:.7rem;margin-top:2px">custo real {{ f.custo_real_centavos|brl }}</div>
       </div>
-    </div>
+    </summary>
+    <div class="folha-body">
+      {# breakdown que RECONCILIA com "A pagar": salário + extras − INSS − VT − adiant. − desconto − já pago.
+         Benefício (VR/VA) NÃO entra no líquido — aparece só como informação (custo do empregador). #}
+      <div class="folha-bd">salário {{ f.salario_centavos|brl }}
+        {%- if f.extras_centavos %} <span class="pos">+ extra {{ f.extras_centavos|brl }}</span>{% endif -%}
+        {%- if f.inss_centavos %} <span class="neg">− INSS {{ f.inss_centavos|brl }}</span>{% endif -%}
+        {%- if f.vt_centavos %} <span class="neg">− VT {{ f.vt_centavos|brl }}</span>{% endif -%}
+        {%- if f.vales_centavos %} <span class="amb">− adiant. {{ f.vales_centavos|brl }}</span>{% endif -%}
+        {%- if f.descontos_centavos %} <span class="amb">− desc {{ f.descontos_centavos|brl }}</span>{% endif -%}
+        {%- if f.pago_centavos %} <span>· já pago {{ f.pago_centavos|brl }}</span>{% endif -%}
+        {%- if f.beneficios_centavos %} <span class="mut">· benefício VR/VA {{ f.beneficios_centavos|brl }} (não desconta)</span>{% endif -%}
+        {%- if f.fgts_centavos %} <span class="mut">· FGTS {{ f.fgts_centavos|brl }} (empresa deposita)</span>{% endif -%}
+        {% if f.pro_labore %} <span class="mut">(pró-labore não desconta INSS CLT)</span>{% endif %}
+        <span class="mut">· custo real {{ f.custo_real_centavos|brl }}</span>
+      </div>
 
     <div class="fa">
       {% if not f.pro_labore %}
       <div class="fa-grp">
         <div class="fa-tit">Lançar no mês</div>
-        <div class="fa-lin">
-          <form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vale" title="Adiantamento salarial — dinheiro adiantado ao funcionário; desconta no fechamento.">
-            <label class="fa-campo" style="gap:.35rem"><span style="font-size:.72rem;color:var(--txt-mut)">Adiantamento</span><input class="money" name="valor" inputmode="decimal" placeholder="R$ 0,00"></label><button class="amb">+ adiantar</button></form>
-          <form method="post" action="/painel/empresa/funcionario/{{ f.id }}/beneficio" title="Vale-refeição/alimentação — benefício (custo da empresa); NÃO desconta do funcionário.">
-            <label class="fa-campo" style="gap:.35rem"><span style="font-size:.72rem;color:var(--txt-mut)">Vale-refeição/alim.</span><input class="money" name="valor" inputmode="decimal" placeholder="R$ 0,00"></label><button class="add">+ benefício</button></form>
-        </div>
+        <form class="fa-row" method="post" action="/painel/empresa/funcionario/{{ f.id }}/vale" title="Adiantamento salarial — dinheiro adiantado ao funcionário; desconta no fechamento.">
+          <span class="lbl">Adiantamento salarial</span><input class="money" name="valor" inputmode="decimal" placeholder="R$ 0,00"><button class="amb">+ adiantar</button>
+        </form>
+        <form class="fa-row" method="post" action="/painel/empresa/funcionario/{{ f.id }}/beneficio" title="Vale-refeição/alimentação — benefício (custo da empresa); NÃO desconta do funcionário.">
+          <span class="lbl">Vale-refeição / alim.</span><input class="money" name="valor" inputmode="decimal" placeholder="R$ 0,00"><button class="add">+ benefício</button>
+        </form>
       </div>
       {% endif %}
       <div class="fa-grp">
         <div class="fa-tit">Dados &amp; configuração</div>
-        <div class="fa-lin" style="margin-bottom:.55rem">
-          {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vt" title="Descontar 6% de vale-transporte é opcional — fica a cargo do empregador."><button type="submit" class="vt-pill"><span>Descontar VT (6%)</span><span class="vt-sw {{ 'on' if f.vale_transporte else 'off' }}"></span><span class="vt-st">{{ 'ligado' if f.vale_transporte else 'desligado' }}</span></button></form>{% endif %}
+        {% if not f.pro_labore %}
+        <div class="fa-row">
+          <span class="lbl">Descontar VT (6%)</span>
+          <form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vt" title="Descontar 6% de vale-transporte é opcional — fica a cargo do empregador."><button type="submit" class="vt-pill"><span class="vt-sw {{ 'on' if f.vale_transporte else 'off' }}"></span><span class="vt-st">{{ 'ligado' if f.vale_transporte else 'desligado' }}</span></button></form>
         </div>
+        {% endif %}
         <form method="post" action="/painel/empresa/funcionario/{{ f.id }}/org" title="Dados do funcionário — admissão/demissão e departamento (aparecem no holerite).">
-          <div class="fa-lin">
-            <div class="fa-campo"><label>Admissão</label><input class="date" type="date" name="admissao" value="{{ f.admitido_em.isoformat() if f.admitido_em else '' }}"></div>
-            <div class="fa-campo"><label title="Ao preencher, o funcionário sai da folha a partir do mês seguinte.">Demissão</label><input class="date" type="date" name="demissao" value="{{ f.demitido_em.isoformat() if f.demitido_em else '' }}"></div>
-            <div class="fa-campo"><label>Depto</label><input class="org" name="departamento" value="{{ f.departamento }}" placeholder="GERAL"><input class="org" name="setor" value="{{ f.setor }}" placeholder="Setor"><input class="org" name="secao" value="{{ f.secao }}" placeholder="Seção"></div>
-            <button>salvar dados</button>
-          </div>
+          <div class="fa-row"><span class="lbl">Admissão</span><input class="date" type="date" name="admissao" value="{{ f.admitido_em.isoformat() if f.admitido_em else '' }}"></div>
+          <div class="fa-row"><span class="lbl" title="Ao preencher, o funcionário sai da folha a partir do mês seguinte.">Demissão</span><input class="date" type="date" name="demissao" value="{{ f.demitido_em.isoformat() if f.demitido_em else '' }}"></div>
+          <div class="fa-row"><span class="lbl">Depto / setor / seção</span><input class="org" name="departamento" value="{{ f.departamento }}" placeholder="GERAL"><input class="org" name="setor" value="{{ f.setor }}" placeholder="Setor"><input class="org" name="secao" value="{{ f.secao }}" placeholder="Seção"></div>
+          <div class="fa-row"><span class="lbl"></span><button>salvar dados</button></div>
         </form>
       </div>
       <div class="fa-tool">
@@ -3277,7 +3294,8 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
       </details>
       {% endif %}
     </div>
-  </div>{% endfor %}
+    </div>
+  </details>{% endfor %}
   <form method="post" action="/painel/empresa/folha/pagar" style="margin-top:.8rem"><button style="background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.5rem 1rem;font-weight:600;cursor:pointer">Pagar folha inteira ✓</button></form>
   {% else %}<div class="mut" style="font-size:.85rem">Nenhum funcionário cadastrado. Adicione acima.</div>{% endif %}
   <div class="mut" style="font-size:.72rem;margin-top:.7rem">ℹ️ Controle gerencial de pessoal — a folha oficial (eSocial, guias, holerite) segue com seu contador, que recebe tudo no relatório mensal.</div>

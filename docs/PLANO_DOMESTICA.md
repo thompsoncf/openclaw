@@ -34,36 +34,48 @@ O empregador doméstico é **pessoa física**. Consequência de arquitetura:
   no empresarial (`natureza="empresa"`).
 - Por isso ela vive no "zaq PF", ao lado do financeiro pessoal, e **não** herda
   o `tipo_conta='pj'`.
+- **Babá, caseiro, cuidador(a), motorista particular, cozinheira, jardineiro,
+  governanta, diarista mensalista = a MESMA categoria** ("empregado doméstico",
+  **LC 150/2015**: 3+ dias/semana pra família, sem fim lucrativo). Mesmo eSocial
+  Doméstico, mesma DAE, mesmo cálculo. **Um módulo só** cobre todos — o que muda
+  é apenas o campo `cargo` do vínculo. Não há sub-módulo "babá".
 
 ---
 
-## 2. Colisão com o PJ — reusar o encanamento, **não** o cálculo
+## 2. Fronteira com o PJ — **PJ intocado**, importar só o estável
 
-O `finance/empresa.py` já tem um motor de folha maduro. Ele **não serve** pro
-cálculo doméstico (domínios diferentes), mas o **encanamento** é reaproveitável.
+**Decisão (dono):** a folha PJ (`empresa.py`) **NÃO é tocada agora** — nenhum
+edit, nenhuma refatoração. Ela está viva e em evolução (commits recentes `#90`
+holerite pronto pra imprimir, `#91` adiantamento/benefício/VT); acoplar a um
+alvo que se mexe é pedir regressão. "Incrementar lá" fica pra um refactor
+deliberado no futuro, com os dois módulos já estáveis.
+
+Régua de reuso: **importa o estável, espelha o que muda, nunca edita o PJ.**
+
+| | Como | Toca no PJ? |
+|---|---|---|
+| ✅ **Importar** (read-only) | só o genérico e **estável** — ex. `formatar_brl` (já mora em `models.py`, util compartilhado) | Não |
+| 🪞 **Espelhar** (copiar a forma, código local) | o que **muda** ou é volátil — layout do recibo (em evolução no PJ), transação atômica do fechamento, eventos por competência | Não |
+| ❌ **Não reusar** | o **cálculo** — bases/encargos diferentes (ver tabela abaixo); as funções de INSS/FGTS do PJ não servem | — |
+
+Por que o cálculo **não** se reusa:
 
 | Domínio | PJ (`empresa.py`) | **Doméstica** |
 |---|---|---|
 | Empregador | CNPJ | **Pessoa física** |
-| Regime | Simples → INSS patronal **dentro do DAS** (por isso `FATOR_ENCARGOS` omite patronal) | **Simples Doméstico → DAE única** |
+| Regime | Simples → INSS patronal **dentro do DAS** (`FATOR_ENCARGOS` omite patronal) | **Simples Doméstico → DAE única** |
 | Encargos | FGTS 8% + provisão 13º + provisão férias | INSS patronal 8% + **GILRAT 0,8%** + FGTS 8% + **FGTS compensatório 3,2%** + IRRF retido |
 | Arredondamento | `round` | **truncado em 2 casas** (67,776 → 67,77) |
 | Natureza do lançamento | `"empresa"` | **`"pessoal"`** |
 
-**Reusa-se (não duplicar):**
-- padrão de `folha_eventos` / competência (§4);
-- renderizador de recibo, espelhando `empresa.holerite_funcionario()`;
-- o `empresa.pagar_folha()` **atômico** (ledger + eventos numa transação) como
-  molde do fechamento;
-- gate por `modulos` / `conta_modulos` (§5);
-- padrão de tools `tools_pj.py` (`Ferramenta`, `bloco_persona_*`) (§6);
-- **visão do agente** do cupom NFC-e como molde da leitura do demonstrativo (§8).
+O motor `domestica.py` sobe como **stdlib pura, zero import do repo,
+autoverificável** — o cálculo bate centavo a centavo contra o demonstrativo real
+(competência **11/2025**, 2 empregadas). Regra do handoff mantida: **se algo não
+encaixar, reportar em vez de reescrever** — a autoverificação é a prova.
 
-**Não reusa-se (fica separado e puro):** o cálculo. O motor `domestica.py` sobe
-como **stdlib pura, zero import do repo, autoverificável** — o cálculo dele bate
-centavo a centavo contra o demonstrativo real (competência **11/2025**, 2
-empregadas). Regra do handoff mantida: **se algo não encaixar, reportar em vez
-de reescrever** — a autoverificação é a prova.
+O gate (`conta_modulos`, §5), o padrão de tools (`tools_pj.py` como molde, §6) e
+a visão-de-agente do cupom NFC-e (§8) entram como **molde a espelhar**, não como
+import de `empresa.py`.
 
 ---
 

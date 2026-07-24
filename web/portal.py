@@ -3163,7 +3163,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     <label style="font-size:.72rem;color:#8a938a" title="Classificação Brasileira de Ocupações (opcional, aparece no holerite)">CBO<input name="cbo" placeholder="Opcional" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Salário R$<input name="salario" required inputmode="decimal" placeholder="0,00" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Dia pgto<input name="dia" type="number" min="1" max="28" value="5" style="width:100%"></label>
-    <label style="font-size:.72rem;color:#8a938a;text-align:center" title="descontar 6% de vale-transporte">VT<br><input type="checkbox" name="vale_transporte" value="1" style="width:auto"></label>
+    <label style="font-size:.72rem;color:#8a938a;text-align:center" title="Descontar 6% de vale-transporte (opcional — a cargo do empregador). Dá pra mudar depois.">Desc. VT<br><input type="checkbox" name="vale_transporte" value="1" style="width:auto"></label>
     <button type="submit" style="background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.55rem .8rem;font-weight:600;cursor:pointer">+ Add</button>
   </form>
   {% if folha.itens %}
@@ -3202,7 +3202,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
       <div class="mut" style="font-size:.7rem;margin-top:2px">custo real {{ f.custo_real_centavos|brl }}</div>
     </div>
     <div class="folha-acoes">
-      {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vt" title="ligar/desligar vale-transporte (6%)"><button style="color:{{ '#7fb48f' if f.vale_transporte else '#8a8a85' }}">VT {{ '✓' if f.vale_transporte else '✗' }}</button></form>{% endif %}
+      {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vt" title="Descontar 6% de vale-transporte é opcional — fica a cargo do empregador. Clique pra ligar/desligar o desconto."><button style="color:{{ '#7fb48f' if f.vale_transporte else '#8a8a85' }}">descontar VT: {{ 'sim ✓' if f.vale_transporte else 'não' }}</button></form>{% endif %}
       {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vale" title="adiantamento salarial — dinheiro adiantado ao funcionário; desconta no fechamento"><input name="valor" inputmode="decimal" placeholder="adiant. R$"><button style="color:#f0c05a">adiantar</button></form>{% endif %}
       {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/beneficio" title="vale-refeição/alimentação — benefício (custo da empresa); NÃO desconta do funcionário"><input name="valor" inputmode="decimal" placeholder="VR/VA R$"><button style="color:#7fb48f">benefício</button></form>{% endif %}
       {% if not f.quitado %}<form method="post" action="/painel/empresa/folha/pagar"><input type="hidden" name="funcionario_id" value="{{ f.id }}"><button style="color:var(--verde-claro)">pagar ✓</button></form>{% endif %}

@@ -425,11 +425,15 @@ _CADASTRO = """{% extends "base" %}{% block conteudo %}
 <form method="post" action="/cadastro">
 <label style="margin-bottom:.3rem;display:block">Escolha seu plano</label>
 <div class="mut" style="font-size:.8rem;margin-bottom:.6rem">Tudo grátis durante o beta — experimente sem compromisso.</div>
+<style>
+  .plano-opt{display:block;background:var(--card);border:1px solid #232325;border-radius:10px;padding:.7rem .9rem;cursor:pointer;transition:border-color .12s,background .12s}
+  .plano-opt.sel{background:#14251c;border:2px solid var(--verde);padding:calc(.7rem - 1px) calc(.9rem - 1px)}
+</style>
 <div style="display:grid;gap:.5rem;margin-bottom:1rem">
 {% for p in planos %}{% if p[0] != 'zaq_cesta' %}
-<label style="display:block;background:{% if p[2]=='pj' %}#14251c{% else %}var(--card){% endif %};border:{% if p[2]=='pj' %}2px solid var(--verde){% else %}1px solid #232325{% endif %};border-radius:10px;padding:.7rem .9rem;cursor:pointer">
+<label class="plano-opt{% if p[2]=='pj' %} sel{% endif %}">
   <div style="display:flex;justify-content:space-between;align-items:center">
-    <span style="color:#f4f4f4;font-weight:600;font-size:.95rem"><input type="radio" name="plano" value="{{ p[0] }}" {% if p[2]=='pj' %}checked{% endif %} style="width:auto;margin-right:.5rem">{% if p[2]=='pj' %}🏢 {% endif %}{{ p[1] }}</span>
+    <span style="color:#f4f4f4;font-weight:600;font-size:.95rem"><input type="radio" name="plano" value="{{ p[0] }}" {% if p[2]=='pj' %}checked{% endif %} onchange="planoPick(this)" style="width:auto;margin-right:.5rem">{% if p[2]=='pj' %}🏢 {% endif %}{{ p[1] }}</span>
     <span style="background:#15301f;color:var(--verde-claro);font-size:.62rem;padding:.1rem .5rem;border-radius:9px">{% if beta_gratis %}Grátis (beta){% else %}{{ brl(p[3]) }}/mês{% endif %}</span>
   </div>
   <div class="mut" style="font-size:.74rem;margin-top:.35rem;margin-left:1.4rem">
@@ -438,6 +442,15 @@ _CADASTRO = """{% extends "base" %}{% block conteudo %}
 </label>
 {% endif %}{% endfor %}
 </div>
+<script>
+  function planoPick(radio){
+    document.querySelectorAll('.plano-opt').forEach(function(l){ l.classList.remove('sel'); });
+    var lab = radio.closest('.plano-opt');
+    if(lab) lab.classList.add('sel');
+  }
+  // sincroniza o destaque com o que estiver realmente marcado ao carregar
+  (function(){ var m=document.querySelector('input[name="plano"]:checked'); if(m) planoPick(m); })();
+</script>
 
 <div style="background:var(--card);border:1px dashed #3a3a3d;border-radius:10px;padding:.7rem .9rem;margin-bottom:1rem">
   <div style="color:#b4b2a9;font-size:.82rem;font-weight:600;margin-bottom:.4rem">Quer vender também? (nossa equipe ativa e te ajuda)</div>
@@ -4993,6 +5006,21 @@ def painel_pagar(request: Request):
                            "instantes ou fale com a gente no WhatsApp.")
 
 
+def _triagem_whatsapp_cadastro(rows):
+    """Decide o que fazer no cadastro quando o WhatsApp já existe em `membros`.
+
+    rows: lista de (id, papel, email) dos membros que já usam esse WhatsApp.
+    Retorna (bloqueia, ids_a_desvincular):
+      • bloqueia=True  → o número já é DONO de uma conta ou tem login web
+        próprio (equipe PJ). Não pode criar outra conta; deve entrar.
+      • senão, os membros de família (convite por código, sem login) são
+        desvinculados pra liberar o número (unique) e o cadastro segue.
+    """
+    bloqueia = any(r[1] == "dono" or r[2] for r in rows)
+    desvincular = [r[0] for r in rows if r[1] != "dono" and not r[2]]
+    return bloqueia, desvincular
+
+
 @router.get("/cadastro", response_class=HTMLResponse)
 def cadastro_form(request: Request):
     q = request.query_params
@@ -5031,13 +5059,22 @@ def cadastro_envia(request: Request, background: BackgroundTasks,
 
     with pool.connection() as c:
         ja = c.execute("select 1 from contas where lower(email)=%s", (email,)).fetchone()
-        zap_ja = c.execute("select 1 from membros where whatsapp_id=%s", (zap,)).fetchone()
+        # Todas as memberships que já usam esse WhatsApp (dono, membro de família,
+        # equipe PJ...). Um número pode ser só membro de uma família e ainda querer
+        # a PRÓPRIA conta — nesse caso ele se desvincula e segue o cadastro.
+        zap_rows = c.execute(
+            "select id, papel, email from membros where whatsapp_id=%s", (zap,)
+        ).fetchall()
     if ja:
         return _render("cadastro", request, planos=_planos(),
                        erro="Ja existe uma conta com esse e-mail. Tente entrar.")
-    if zap_ja:
+    # Bloqueia só quem já é DONO de uma conta ou já tem login web próprio (equipe
+    # PJ). Membro de família (convite por código, sem login) pode virar conta
+    # própria: desvincula da família e libera o WhatsApp pro novo cadastro.
+    zap_bloqueia, zap_desvincular = _triagem_whatsapp_cadastro(zap_rows)
+    if zap_bloqueia:
         return _render("cadastro", request, planos=_planos(),
-                       erro="Esse WhatsApp ja esta cadastrado em outra conta.")
+                       erro="Esse WhatsApp ja esta cadastrado em outra conta. Tente entrar.")
 
     doc = "".join(ch for ch in documento if ch.isdigit()) or None
     from finance import cidades as _cid
@@ -5055,6 +5092,13 @@ def cadastro_envia(request: Request, background: BackgroundTasks,
     # TUDO NUMA TRANSAÇÃO ATÔMICA: criar conta + membro de uma vez
     try:
         with pool.connection() as c:
+            # 0. Se o WhatsApp era de um membro de família (convite por código),
+            #    desvincula: libera o número (unique) e desativa a antiga
+            #    participação, preservando o histórico dela na conta da família.
+            for mid in zap_desvincular:
+                c.execute(
+                    "update membros set whatsapp_id=null, ativo=false where id=%s",
+                    (mid,))
             # 1. Criar conta (completa, com email/senha/limites)
             conta_id = ct.criar_conta(
                 pool, tipo, nome.strip(), plano=plano_gravar, documento=doc,

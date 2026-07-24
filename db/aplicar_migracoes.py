@@ -9,6 +9,7 @@ Uso:
 """
 import os
 import sys
+import time
 from pathlib import Path
 from psycopg_pool import ConnectionPool
 
@@ -56,24 +57,58 @@ def registrar_migracao(pool, nome: str):
 _LOCK_MIGRACOES = 728194
 
 
+def _obter_lock(lock_conn, tentativas: int = 12, espera: float = 1.5) -> bool:
+    """Tenta o advisory lock SEM bloquear (pg_try_advisory_lock), com algumas
+    tentativas curtas. Retorna True se pegou (a transação fica ABERTA segurando o
+    lock/backend até o unlock no fim).
+
+    Por que não pg_advisory_lock (bloqueante)? Os dois preDeployCommand do Render
+    (web + worker) sobem juntos: um pega o lock, o outro ficava BLOQUEADO em
+    pg_advisory_lock e era morto pelo statement_timeout do banco ("canceling
+    statement due to statement timeout"). Com o try não-bloqueante isso não
+    acontece: ou espera educadamente o outro terminar, ou segue mesmo assim —
+    as migrações são idempotentes e o próprio Postgres serializa o DDL.
+    """
+    for i in range(tentativas):
+        try:
+            with lock_conn.cursor() as cur:
+                cur.execute("select pg_try_advisory_lock(%s)", (_LOCK_MIGRACOES,))
+                if cur.fetchone()[0]:
+                    return True     # deixa a transação aberta segurando o lock
+        except Exception:
+            pass
+        lock_conn.rollback()        # solta a transação/backend e tenta de novo
+        if i < tentativas - 1:
+            time.sleep(espera)
+    return False
+
+
 def aplicar_migracoes(pool, forcar: bool = False):
     """Lê e executa todos os .sql da pasta migracoes/ em ordem numérica.
 
-    Serializado por um advisory lock: se dois processos (ex.: web e worker do
-    Render, ou 2 instâncias) subirem/deployarem juntos, um espera o outro em vez
-    de aplicarem a mesma migração em paralelo. O lock é mantido numa conexão
-    dedicada durante todo o processo e solto no fim.
+    Serializado (best-effort) por um advisory lock não-bloqueante: se dois
+    processos (web e worker do Render, ou 2 instâncias) deployarem juntos, um
+    espera o outro. Se o lock não vier a tempo, segue mesmo assim — as migrações
+    são idempotentes (if not exists / registro em schema_migrations) e o Postgres
+    serializa o DDL, então não há corrida perigosa.
     """
     criar_tabela_rastreamento(pool)
 
     with pool.connection() as lock_conn:
-        lock_conn.execute("select pg_advisory_lock(%s)", (_LOCK_MIGRACOES,))
-        lock_conn.commit()
+        pegou = _obter_lock(lock_conn)
+        if not pegou:
+            print("⚠ advisory lock ocupado (outra instância migrando?) — "
+                  "seguindo mesmo assim; migrações são idempotentes.")
         try:
             return _aplicar(pool, forcar)
         finally:
-            lock_conn.execute("select pg_advisory_unlock(%s)", (_LOCK_MIGRACOES,))
-            lock_conn.commit()
+            if pegou:
+                try:
+                    lock_conn.execute("select pg_advisory_unlock(%s)",
+                                      (_LOCK_MIGRACOES,))
+                    lock_conn.commit()
+                except Exception:
+                    pass
 
 
 def _aplicar(pool, forcar: bool = False):
@@ -98,6 +133,10 @@ def _aplicar(pool, forcar: bool = False):
         try:
             with pool.connection() as conn:
                 with conn.cursor() as cur:
+                    # migração não pode morrer por statement_timeout curto do
+                    # banco (Supabase/Render impõem um); SET LOCAL vale só nesta
+                    # transação, sem afetar as conexões normais do app.
+                    cur.execute("set local statement_timeout = 0")
                     cur.execute(sql)
                 conn.commit()
             registrar_migracao(pool, nome)

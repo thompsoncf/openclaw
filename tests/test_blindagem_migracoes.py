@@ -108,3 +108,30 @@ def test_idempotente_segunda_rodada_nao_aplica_nada(pool):
     assert aplicar_migracoes(pool) == len(_pendentes_a_partir_de("088"))
     # rodar de novo (ex.: outro deploy/instância) não aplica nada e não quebra
     assert aplicar_migracoes(pool) == 0
+
+
+def test_lock_nao_bloqueia_quando_ja_ocupado(pool):
+    """Com o lock preso por outra sessão, _obter_lock NÃO bloqueia (evita o
+    'canceling statement due to statement timeout' dos dois preDeploy do Render):
+    tenta poucas vezes e desiste."""
+    from db import aplicar_migracoes as am
+    with pool.connection() as dono:
+        dono.execute("select pg_advisory_lock(%s)", (am._LOCK_MIGRACOES,))
+        dono.commit()
+        try:
+            with pool.connection() as outra:
+                assert am._obter_lock(outra, tentativas=2, espera=0.05) is False
+        finally:
+            dono.execute("select pg_advisory_unlock(%s)", (am._LOCK_MIGRACOES,))
+            dono.commit()
+
+
+def test_segue_e_aplica_mesmo_sem_o_lock(pool, monkeypatch):
+    """Se o lock não vier (outra instância migrando/lock vazado), as migrações
+    ainda são aplicadas — são idempotentes e o Postgres serializa o DDL."""
+    from db import aplicar_migracoes as am
+    _baseline_ate_087(pool)
+    monkeypatch.setattr(am, "_obter_lock", lambda *a, **k: False)
+    n = am.aplicar_migracoes(pool)
+    assert n == len(_pendentes_a_partir_de("088"))
+    assert _col_existe(pool, "funcionarios", "demitido_em")   # 094 aplicou

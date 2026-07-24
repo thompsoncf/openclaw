@@ -13,7 +13,8 @@ from psycopg_pool import ConnectionPool
 from db.conexao import init_schema
 from finance import empresa as emp
 
-_MIGRACOES = ("053_modulo_pj.sql", "089_funcionario_vale_transporte.sql")
+_MIGRACOES = ("053_modulo_pj.sql", "089_funcionario_vale_transporte.sql",
+              "092_funcionario_cbo.sql")
 
 
 # ── parte pura: INSS progressivo e VT (sem banco) ────────────────────────────

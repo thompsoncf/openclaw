@@ -126,6 +126,59 @@ def notificar_admin(texto: str) -> bool:
     return _enviar_telegram(chat, texto)
 
 
+def avisar_admin_saldo_ia(detalhe: str = "", canal: str = "") -> bool:
+    """Avisa o ADMIN do SaaS que o SALDO/credito da Anthropic (IA) acabou ou
+    esta' no limite — o cliente ja' recebeu uma mensagem de instabilidade e NAO
+    viu o erro tecnico. Manda por E-MAIL (env ADMIN_EMAIL, fallback pro remetente
+    SMTP) e tambem por Telegram (ADMIN_TELEGRAM_ID), pra maximizar a chance de
+    voce ver a tempo de recarregar. Tolerante a falha: nunca levanta excecao.
+
+    `detalhe` e' o texto tecnico do erro (so' pro admin, nunca pro cliente).
+    `canal` e' o canal onde ocorreu (ex "whatsapp", "telegram")."""
+    origem = f" ({canal})" if canal else ""
+    corpo = (
+        f"O saldo/credito da API da Anthropic (IA) acabou ou esta' no limite{origem}.\n\n"
+        "Os clientes estao recebendo uma mensagem de 'instabilidade tecnica' no "
+        "lugar do erro — ninguem viu nada de errado, mas o Zaq NAO consegue "
+        "responder ate' recarregar.\n\n"
+        "Acao: recarregue os creditos em Plans & Billing da Anthropic "
+        "(https://console.anthropic.com/settings/billing).\n\n"
+        f"Detalhe tecnico:\n{detalhe or '(sem detalhe)'}"
+    )
+    ok = False
+
+    # 1) E-mail pro admin
+    destino = os.environ.get("ADMIN_EMAIL")
+    if not destino:
+        try:
+            from finance.email_sender import remetente_configurado
+            destino = remetente_configurado()  # fallback: o proprio remetente SMTP
+        except Exception:  # noqa: BLE001
+            destino = None
+    if destino:
+        try:
+            from finance.email_sender import enviar_aviso
+            ok = enviar_aviso(
+                destino, "⚠️ Saldo da IA (Anthropic) acabou", corpo.replace("\n", "<br>")
+            ) or ok
+        except Exception as e:  # noqa: BLE001
+            _log.warning("avisar_admin_saldo_ia: falha no e-mail: %s", e)
+    else:
+        _log.info("avisar_admin_saldo_ia: sem ADMIN_EMAIL nem remetente SMTP")
+
+    # 2) Telegram pro admin (reaproveita notificar_admin)
+    try:
+        ok = notificar_admin(
+            f"⚠️ *Saldo da IA (Anthropic) acabou*{origem}. Os clientes estao "
+            "vendo 'instabilidade' no lugar do erro. Recarregue os creditos em "
+            "Plans & Billing pra voltar a responder."
+        ) or ok
+    except Exception as e:  # noqa: BLE001
+        _log.warning("avisar_admin_saldo_ia: falha no telegram: %s", e)
+
+    return ok
+
+
 def alerta_fase_b(pool, sempre: bool = False) -> bool:
     """Checa o gatilho da Fase B e avisa o admin no Telegram.
     Por padrao SO' avisa quando LIBERADA (nao enche o saco). Com sempre=True,

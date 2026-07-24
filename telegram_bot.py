@@ -296,7 +296,15 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
         except Exception:  # noqa: BLE001
             pass
     # O agente e' sincrono (rede + LLM): roda fora do event loop pra nao travar o bot.
-    resposta = await asyncio.to_thread(agente.responder, texto, imagem_b64, media_type)
+    try:
+        resposta = await asyncio.to_thread(agente.responder, texto, imagem_b64, media_type)
+    except Exception as e:  # noqa: BLE001
+        # NUNCA vaza o erro tecnico pro cliente (ex: saldo da Anthropic).
+        # tratar_falha_ia devolve mensagem amigavel e avisa o admin se for saldo.
+        logging.exception("erro no agente (telegram)")
+        from core.falhas import tratar_falha_ia
+        await update.message.reply_text(tratar_falha_ia(e, canal="telegram"))
+        return
     resposta = resposta or "(sem resposta)"
     if dica_qr:
         # se a chave foi lida: dica genérica (sempre melhorar a foto do QR)

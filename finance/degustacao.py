@@ -69,5 +69,11 @@ def responder_degustacao(pool, brain: Brain, texto: str,
         brain, livro, memoria,
         lista=None, papel="dono", banco=None, cidade=cidade,
     )
-    resposta = agente.responder(texto, None, "image/jpeg")
+    try:
+        resposta = agente.responder(texto, None, "image/jpeg")
+    except Exception as e:  # noqa: BLE001
+        # Lead NUNCA pode ver erro tecnico (ex: saldo da Anthropic acabou).
+        # Devolve mensagem amigavel e avisa o admin se for falha de saldo.
+        from core.falhas import tratar_falha_ia
+        return tratar_falha_ia(e, canal="degustacao")
     return resposta or "Pronto! Anotei aqui. 👍"

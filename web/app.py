@@ -492,7 +492,11 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
     except Exception as e:  # noqa: BLE001
         log.exception("erro no whatsapp")
         try:
-            _responder_whatsapp(to, f"Ops, deu um erro aqui: {e}")
+            # NUNCA vaza o erro tecnico pro cliente (ex: saldo da Anthropic).
+            # tratar_falha_ia devolve uma mensagem amigavel e avisa o admin por
+            # e-mail/Telegram se a causa for saldo/credito da IA.
+            from core.falhas import tratar_falha_ia
+            _responder_whatsapp(to, tratar_falha_ia(e, canal="whatsapp"))
         except Exception:
             pass
 

@@ -93,6 +93,9 @@ def buscar_places(termo: str, cidade: str, api_key: str | None = None,
     try:
         r = httpx.post(url, json=body, headers=headers, timeout=25)
         if r.status_code != 200:
+            from core.falhas import avaliar_falha_provedor
+            avaliar_falha_provedor(f"http_{r.status_code}: {r.text[:200]}",
+                                   servico="Google Places")
             return {"ok": False, "erro": f"http_{r.status_code}", "itens": [],
                     "detalhe": r.text[:300]}
         data = r.json()
@@ -171,6 +174,9 @@ def enriquecer_cnpj_cnpja(cnpj: str, token: str | None = None) -> dict:
                       params={"simples": "true", "registrations": "BR"},
                       headers={"Authorization": key}, timeout=20)
         if r.status_code != 200:
+            from core.falhas import avaliar_falha_provedor
+            avaliar_falha_provedor(f"http_{r.status_code}: {r.text[:200]}",
+                                   servico="CNPJa")
             return {"ok": False, "erro": f"http_{r.status_code}", "detalhe": r.text[:200]}
         j = r.json()
     except Exception as e:  # noqa: BLE001

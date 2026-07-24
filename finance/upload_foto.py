@@ -115,7 +115,12 @@ def subir_foto(conteudo: bytes, nome_arquivo: str = "",
     except Exception as e:
         raise ValueError(f"Falha no upload: {e}")
     if r.status_code >= 300:
-        raise ValueError(f"Falha no upload (HTTP {r.status_code}): {r.text[:200]}")
+        # avalia com o corpo cru (so' pro admin: pode conter auth/quota do Supabase)
+        from core.falhas import avaliar_falha_provedor
+        avaliar_falha_provedor(f"HTTP {r.status_code}: {r.text[:200]}",
+                               servico="Supabase Storage")
+        # excecao SEM o corpo cru: se vazar pra um tool/painel, nao expoe interno.
+        raise ValueError(f"Falha no upload da foto (HTTP {r.status_code}).")
 
     # URL pública (o bucket precisa ser público – ver guia de setup)
     return f"{url}/storage/v1/object/public/{bucket}/{nome}"

@@ -82,6 +82,7 @@ from web.admin import router as admin_router
 from web.admin_precos import router as precos_router
 from web.painel_servicos import router as servicos_router
 from web.painel_equipe import router as equipe_router
+from web.painel_domestica import router as domestica_router
 from web.painel_prospeccao import router as prospeccao_router
 from web.proposta import router as proposta_router
 app.add_middleware(
@@ -102,6 +103,7 @@ app.include_router(admin_router)
 app.include_router(precos_router)
 app.include_router(servicos_router)
 app.include_router(equipe_router)
+app.include_router(domestica_router)
 app.include_router(prospeccao_router)
 app.include_router(proposta_router)
 

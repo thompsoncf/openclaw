@@ -350,8 +350,9 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes') }}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
   {% if _dono and _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
-  {% if _dono and (_tem_app or _tem_cesta) %}<div class="side-grp">Pessoal</div>{% endif %}
+  {% if _dono and (_tem_app or _tem_cesta or tem_domestica) %}<div class="side-grp">Pessoal</div>{% endif %}
   {% if _dono and _tem_app %}{{ navi('painel','/painel','painel','Painel') }}{{ navi('compras','/painel/compras','compras','Lista de compras') }}{% endif %}
+  {% if _dono and tem_domestica %}{{ navi('domestica','/painel/domestica','clientes','Doméstica') }}{% endif %}
   {% if _dono and _tem_cesta %}{{ navi('assinaturas','/painel/assinaturas','cesta','Assinaturas') }}{{ navi('pedidos','/painel/meus-pedidos','compras','Meus pedidos') }}{% endif %}
   {% if n_contextos > 1 %}{{ navi('trocar','/trocar','fornecedor','Trocar empresa') }}{% endif %}
   <div style="flex:1"></div>
@@ -378,8 +379,9 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes') }}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
   {% if _dono and _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
-  {% if _dono and (_tem_app or _tem_cesta) %}<div class="side-grp">Pessoal</div>{% endif %}
+  {% if _dono and (_tem_app or _tem_cesta or tem_domestica) %}<div class="side-grp">Pessoal</div>{% endif %}
   {% if _dono and _tem_app %}{{ navi('painel','/painel','painel','Painel') }}{{ navi('compras','/painel/compras','compras','Lista de compras') }}{% endif %}
+  {% if _dono and tem_domestica %}{{ navi('domestica','/painel/domestica','clientes','Doméstica') }}{% endif %}
   {% if _dono and _tem_cesta %}{{ navi('assinaturas','/painel/assinaturas','cesta','Assinaturas') }}{{ navi('pedidos','/painel/meus-pedidos','compras','Meus pedidos') }}{% endif %}
   {% if n_contextos > 1 %}{{ navi('trocar','/trocar','fornecedor','Trocar empresa') }}{% endif %}
   {{ navi('','/sair','sair','Sair') }}
@@ -5094,6 +5096,15 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
             ctx["tem_cesta"] = bool(_c and _c[15])
         if "tem_pj" not in ctx:
             ctx["tem_pj"] = bool(_c and _c[11])
+        if "tem_domestica" not in ctx:
+            # Módulo doméstica (PF) é liberado por conta_modulos (cortesia/piloto);
+            # não vem na query do conta_logada. Lookup por PK, isolado.
+            try:
+                from finance.domestica_repo import modulo_domestica_ativo
+                ctx["tem_domestica"] = bool(
+                    _c and modulo_domestica_ativo(get_pool(), _c[0]))
+            except Exception:
+                ctx["tem_domestica"] = False
         if "vende_produto" not in ctx:
             ctx["vende_produto"] = bool(_c and _c[13])
             ctx["vende_servico"] = bool(_c and _c[14])

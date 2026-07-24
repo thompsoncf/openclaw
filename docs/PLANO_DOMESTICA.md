@@ -1,8 +1,25 @@
 # PLANO_DOMESTICA.md — Módulo Doméstica (eSocial Doméstico) · design
 
-> **Status:** design aprovado, **zero código escrito**. Este arquivo é o plano
-> pra o próximo builder. Segue a régua do `PLANO.md` (lucro/economia do cliente)
-> e os guard-rails de dinheiro real.
+> **Status:** Fase 1 **construída** (motor → migração → persistência → tools →
+> tela). Segue a régua do `PLANO.md` (lucro/economia do cliente) e os guard-rails
+> de dinheiro real.
+>
+> **Implementado:**
+> - `finance/domestica.py` — motor puro + autoverificação **26/26** batendo
+>   centavo a centavo com o demonstrativo real (`python -m finance.domestica`).
+> - `db/migracoes/094_modulo_domestica.sql` — validada no pglast (7 statements).
+>   O runner `db.aplicar_migracoes` registra por nome de arquivo — **não** precisa
+>   do insert manual em `schema_migrations` que o handoff antigo mencionava.
+> - `finance/domestica_repo.py` — gate (`conta_modulos`), CRUD de vínculo,
+>   variáveis do mês, fechamento atômico no livro-caixa **pessoal**, conferência.
+> - `finance/tools_domestica.py` — 5 ferramentas + persona, plugadas no PF em
+>   `agente_financeiro.py` (bloco isolado, gate por `conta_modulos`).
+> - `web/painel_domestica.py` — tela `/painel/domestica` (abas Empregados ·
+>   Folha do mês · Conferência), nav no grupo "Pessoal", sem `location.reload()`.
+>
+> **Falta (pendências abertas, ver §10):** decidir piso 2026 (avisa/impede — hoje
+> **avisa**, não bloqueia), validar 2026 contra DAE real, rescisão (Fase 2), e
+> liberar o módulo pra a conta piloto (`conta_modulos`/admin).
 
 ---
 

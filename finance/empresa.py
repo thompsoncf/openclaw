@@ -484,7 +484,11 @@ def atualizar_funcionario(pool, conta_id: int, funcionario_id: int, *,
                           cbo: str | None = None,
                           departamento: str | None = None,
                           setor: str | None = None,
-                          secao: str | None = None) -> bool:
+                          secao: str | None = None,
+                          admitido_em: "date | bool | None" = False,
+                          demitido_em: "date | bool | None" = False) -> bool:
+    # admitido_em/demitido_em usam sentinela False = "não mexer" (None é um
+    # valor válido: limpar a data).
     sets, args = [], []
     if nome is not None:
         sets.append("nome=%s"); args.append(nome.strip())
@@ -504,6 +508,10 @@ def atualizar_funcionario(pool, conta_id: int, funcionario_id: int, *,
         sets.append("setor=%s"); args.append((setor or "").strip() or None)
     if secao is not None:
         sets.append("secao=%s"); args.append((secao or "").strip() or None)
+    if admitido_em is not False:
+        sets.append("admitido_em=%s"); args.append(admitido_em)
+    if demitido_em is not False:
+        sets.append("demitido_em=%s"); args.append(demitido_em)
     if not sets:
         return False
     with pool.connection() as c:
@@ -533,7 +541,7 @@ def listar_funcionarios(pool, conta_id: int, so_ativos: bool = True) -> list[dic
         rows = c.execute(
             f"""select id, nome, cargo, salario_centavos, dia_pagamento,
                        pro_labore, ativo, admitido_em, vale_transporte, cbo,
-                       departamento, setor, secao
+                       departamento, setor, secao, demitido_em
                   from funcionarios where {cond}
                  order by pro_labore, nome""",
             (conta_id,),
@@ -544,6 +552,7 @@ def listar_funcionarios(pool, conta_id: int, so_ativos: bool = True) -> list[dic
         "pro_labore": bool(r[5]), "ativo": bool(r[6]), "admitido_em": r[7],
         "vale_transporte": bool(r[8]), "cbo": r[9] or "",
         "departamento": r[10] or "", "setor": r[11] or "", "secao": r[12] or "",
+        "demitido_em": r[13],
         "custo_real_centavos": custo_real_centavos(int(r[3] or 0), bool(r[5])),
     } for r in rows]
 
@@ -599,7 +608,10 @@ def folha_do_mes(pool, conta_id: int, ano: int, mes: int) -> dict:
     """A folha da competência: por funcionário, salário + extras − vales −
     descontos = a pagar; o que já foi pago; e o custo real total estimado."""
     comp = date(ano, mes, 1)
-    funcs = listar_funcionarios(pool, conta_id, so_ativos=True)
+    # Demitido sai da folha a partir do mês SEGUINTE ao da demissão: aparece no
+    # mês da demissão (pra acertar), some depois (fica só no histórico/relatório).
+    funcs = [f for f in listar_funcionarios(pool, conta_id, so_ativos=True)
+             if f.get("demitido_em") is None or f["demitido_em"] >= comp]
     with pool.connection() as c:
         rows = c.execute(
             """select funcionario_id, tipo, coalesce(sum(valor_centavos),0)
@@ -649,6 +661,62 @@ def folha_do_mes(pool, conta_id: int, ano: int, mes: int) -> dict:
             "total_a_pagar_centavos": total_a_pagar,
             "total_pago_centavos": total_pago,
             "custo_real_total_centavos": total_custo}
+
+
+# rótulos amigáveis dos lançamentos da folha (pro histórico "corrigir")
+_EVENTO_ROTULO = {"vale": "Adiantamento", "beneficio": "Benefício VR/VA",
+                  "extra": "Adicional", "desconto": "Desconto"}
+
+
+def eventos_folha_do_mes(pool, conta_id: int, ano: int,
+                         mes: int) -> dict[int, list[dict]]:
+    """Lançamentos manuais da folha na competência, por funcionário — pra listar
+    e permitir CORRIGIR (remover o errado e relançar). Não inclui 'pagamento'.
+    Retorna {funcionario_id: [{id, tipo, rotulo, valor_centavos, descricao, data}]}."""
+    comp = date(ano, mes, 1)
+    with pool.connection() as c:
+        rows = c.execute(
+            """select funcionario_id, id, tipo, valor_centavos, descricao, criado_em
+                 from folha_eventos
+                where conta_id=%s and competencia=%s
+                  and tipo in ('vale','beneficio','extra','desconto')
+                order by criado_em""",
+            (conta_id, comp),
+        ).fetchall()
+    out: dict[int, list[dict]] = {}
+    for fid, eid, tipo, valor, desc, criado in rows:
+        out.setdefault(fid, []).append({
+            "id": eid, "tipo": tipo, "rotulo": _EVENTO_ROTULO.get(tipo, tipo),
+            "valor_centavos": int(valor or 0), "descricao": desc or "",
+            "data": criado.date() if criado else None})
+    return out
+
+
+def remover_evento_folha(pool, conta_id: int, evento_id: int,
+                         membro_id: int | None = None) -> bool:
+    """Remove um lançamento da folha (adiantamento/benefício/extra/desconto) —
+    a correção quando o valor foi digitado errado. Se o evento tinha gerado uma
+    despesa no caixa (adiantamento/benefício), ela é REVERTIDA junto. Não mexe em
+    'pagamento'. Multi-tenant: só remove da própria conta."""
+    with pool.connection() as c:
+        row = c.execute(
+            """select lancamento_id, tipo from folha_eventos
+                where id=%s and conta_id=%s
+                  and tipo in ('vale','beneficio','extra','desconto')""",
+            (evento_id, conta_id),
+        ).fetchone()
+        if not row:
+            return False
+    lanc_id = row[0]
+    if lanc_id is not None:      # reverte a despesa que tinha entrado no caixa
+        LivroCaixa(pool, conta_id, membro_id).apagar_lancamento(lanc_id)
+    with pool.connection() as c:
+        r = c.execute(
+            "delete from folha_eventos where id=%s and conta_id=%s returning id",
+            (evento_id, conta_id),
+        ).fetchone()
+        c.commit()
+    return r is not None
 
 
 _MESES_PT = ("", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",

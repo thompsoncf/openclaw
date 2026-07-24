@@ -17,7 +17,8 @@ from finance.tools_pj import bloco_persona_pj
 _MIGRACOES = ("053_modulo_pj.sql", "031_fornecedor_fase0.sql",
               "090_nicho_contabilidade_e_cnae.sql",
               "091_nichos_servico_profissional.sql",
-              "092_funcionario_cbo.sql", "093_folha_beneficios_e_org.sql")
+              "092_funcionario_cbo.sql", "093_folha_beneficios_e_org.sql",
+              "094_funcionario_demissao.sql")
 
 
 # ── parte pura ────────────────────────────────────────────────────────────

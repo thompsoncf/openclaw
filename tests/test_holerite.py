@@ -30,7 +30,7 @@ _MIGRACOES = ("018_chave_nfce_lancamentos.sql", "038_endereco_conta.sql",
               "058_dados_empresa.sql", "059_contato_empresa.sql",
               "088_forma_pagamento_parcelas.sql",
               "089_funcionario_vale_transporte.sql", "092_funcionario_cbo.sql",
-              "093_folha_beneficios_e_org.sql")
+              "093_folha_beneficios_e_org.sql", "094_funcionario_demissao.sql")
 
 # Colunas que obter_dados_empresa lê e que, nas migrações reais, vêm junto de
 # DDL de tabelas do marketplace (carrinhos/nichos). A tabela `nichos` é criada
@@ -49,6 +49,9 @@ create table if not exists nichos (
 alter table contas add column if not exists nicho_id bigint references nichos(id);
 alter table contas add column if not exists cnae text;
 alter table contas add column if not exists bairro text;
+-- apagar_lancamento (usado ao remover um evento) limpa precos_observados (mig 017);
+-- aqui basta um stub com item_id pra o DELETE rodar (não apaga nada).
+create table if not exists precos_observados (id bigserial primary key, item_id bigint);
 """
 
 
@@ -229,6 +232,72 @@ def test_departamento_default_geral_no_holerite(pool, empresa_id):
     hoje = date.today()
     h = emp.holerite_funcionario(pool, empresa_id, f["id"], hoje.year, hoje.month)
     assert h["func"]["departamento"] == "GERAL"
+
+
+def test_remover_evento_reverte_o_caixa(pool, empresa_id):
+    # adiantamento vira despesa no caixa; remover deve apagar essa despesa
+    from finance.livro_caixa import LivroCaixa
+    f = emp.criar_funcionario(pool, empresa_id, "Gil", salario_centavos=300000)
+    hoje = date.today()
+    comp = date(hoje.year, hoje.month, 1)
+    emp.registrar_evento_folha(pool, empresa_id, f["id"], "vale", 50000, competencia=comp)
+
+    evs = emp.eventos_folha_do_mes(pool, empresa_id, hoje.year, hoje.month)[f["id"]]
+    assert len(evs) == 1 and evs[0]["tipo"] == "vale" and evs[0]["valor_centavos"] == 50000
+    ev_id = evs[0]["id"]
+
+    saldo_antes = LivroCaixa(pool, empresa_id).saldo_centavos()
+    assert emp.remover_evento_folha(pool, empresa_id, ev_id) is True
+    # o adiantamento sumiu da folha
+    assert emp.eventos_folha_do_mes(pool, empresa_id, hoje.year, hoje.month).get(f["id"], []) == []
+    # e a despesa de -500 foi revertida (saldo sobe 500)
+    assert LivroCaixa(pool, empresa_id).saldo_centavos() == saldo_antes + 50000
+    # remover de novo: já não existe
+    assert emp.remover_evento_folha(pool, empresa_id, ev_id) is False
+
+
+def test_remover_evento_so_da_propria_conta(pool, empresa_id):
+    f = emp.criar_funcionario(pool, empresa_id, "Hugo", salario_centavos=200000)
+    hoje = date.today()
+    emp.registrar_evento_folha(pool, empresa_id, f["id"], "beneficio", 20000,
+                               competencia=date(hoje.year, hoje.month, 1))
+    ev_id = emp.eventos_folha_do_mes(pool, empresa_id, hoje.year, hoje.month)[f["id"]][0]["id"]
+    # outra conta não remove
+    assert emp.remover_evento_folha(pool, empresa_id + 99999, ev_id) is False
+    # segue existindo
+    assert len(emp.eventos_folha_do_mes(pool, empresa_id, hoje.year, hoje.month)[f["id"]]) == 1
+
+
+def test_demissao_tira_da_folha_no_mes_seguinte(pool, empresa_id):
+    from datetime import date as _d
+    f = emp.criar_funcionario(pool, empresa_id, "Ivo", salario_centavos=200000)
+    # demitido em 30/06/2026
+    assert emp.atualizar_funcionario(pool, empresa_id, f["id"],
+                                     demitido_em=_d(2026, 6, 30)) is True
+    # no mês da demissão (junho) ele AINDA aparece
+    fol_jun = emp.folha_do_mes(pool, empresa_id, 2026, 6)
+    assert any(i["id"] == f["id"] for i in fol_jun["itens"])
+    # no mês seguinte (julho) ele SAI da folha
+    fol_jul = emp.folha_do_mes(pool, empresa_id, 2026, 7)
+    assert all(i["id"] != f["id"] for i in fol_jul["itens"])
+    # e o holerite de julho não é gerado pra ele
+    assert emp.holerite_funcionario(pool, empresa_id, f["id"], 2026, 7) is None
+    # mas o de junho (mês da demissão) ainda sai
+    assert emp.holerite_funcionario(pool, empresa_id, f["id"], 2026, 6) is not None
+
+
+def test_editar_admissao_e_limpar_demissao(pool, empresa_id):
+    from datetime import date as _d
+    f = emp.criar_funcionario(pool, empresa_id, "Jonas", salario_centavos=200000)
+    emp.atualizar_funcionario(pool, empresa_id, f["id"],
+                              admitido_em=_d(2024, 1, 15), demitido_em=_d(2026, 5, 1))
+    achado = next(x for x in emp.listar_funcionarios(pool, empresa_id) if x["id"] == f["id"])
+    assert achado["admitido_em"] == _d(2024, 1, 15)
+    assert achado["demitido_em"] == _d(2026, 5, 1)
+    # limpar a demissão (None) — funcionário volta pra folha
+    emp.atualizar_funcionario(pool, empresa_id, f["id"], demitido_em=None)
+    achado = next(x for x in emp.listar_funcionarios(pool, empresa_id) if x["id"] == f["id"])
+    assert achado["demitido_em"] is None
 
 
 def test_holerite_funcionario_de_outra_conta_eh_none(pool, empresa_id):

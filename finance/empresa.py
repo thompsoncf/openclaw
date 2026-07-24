@@ -456,16 +456,21 @@ def custo_real_centavos(salario_centavos: int, pro_labore: bool = False) -> int:
 def criar_funcionario(pool, conta_id: int, nome: str, cargo: str = "",
                       salario_centavos: int = 0, dia_pagamento: int = 5,
                       pro_labore: bool = False, vale_transporte: bool = False,
-                      admitido_em: date | None = None, cbo: str = "") -> dict:
+                      admitido_em: date | None = None, cbo: str = "",
+                      departamento: str = "", setor: str = "",
+                      secao: str = "") -> dict:
     with pool.connection() as c:
         r = c.execute(
             """insert into funcionarios
                  (conta_id, nome, cargo, salario_centavos, dia_pagamento,
-                  pro_labore, vale_transporte, admitido_em, cbo)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
+                  pro_labore, vale_transporte, admitido_em, cbo,
+                  departamento, setor, secao)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
             (conta_id, (nome or "").strip(), (cargo or "").strip(),
              int(salario_centavos), int(dia_pagamento), bool(pro_labore),
-             bool(vale_transporte), admitido_em, (cbo or "").strip() or None),
+             bool(vale_transporte), admitido_em, (cbo or "").strip() or None,
+             (departamento or "").strip() or None, (setor or "").strip() or None,
+             (secao or "").strip() or None),
         ).fetchone()
         c.commit()
     return {"id": r[0], "nome": nome, "salario_centavos": int(salario_centavos)}
@@ -476,7 +481,10 @@ def atualizar_funcionario(pool, conta_id: int, funcionario_id: int, *,
                           salario_centavos: int | None = None,
                           dia_pagamento: int | None = None,
                           vale_transporte: bool | None = None,
-                          cbo: str | None = None) -> bool:
+                          cbo: str | None = None,
+                          departamento: str | None = None,
+                          setor: str | None = None,
+                          secao: str | None = None) -> bool:
     sets, args = [], []
     if nome is not None:
         sets.append("nome=%s"); args.append(nome.strip())
@@ -490,6 +498,12 @@ def atualizar_funcionario(pool, conta_id: int, funcionario_id: int, *,
         sets.append("vale_transporte=%s"); args.append(bool(vale_transporte))
     if cbo is not None:
         sets.append("cbo=%s"); args.append((cbo or "").strip() or None)
+    if departamento is not None:
+        sets.append("departamento=%s"); args.append((departamento or "").strip() or None)
+    if setor is not None:
+        sets.append("setor=%s"); args.append((setor or "").strip() or None)
+    if secao is not None:
+        sets.append("secao=%s"); args.append((secao or "").strip() or None)
     if not sets:
         return False
     with pool.connection() as c:
@@ -518,7 +532,8 @@ def listar_funcionarios(pool, conta_id: int, so_ativos: bool = True) -> list[dic
     with pool.connection() as c:
         rows = c.execute(
             f"""select id, nome, cargo, salario_centavos, dia_pagamento,
-                       pro_labore, ativo, admitido_em, vale_transporte, cbo
+                       pro_labore, ativo, admitido_em, vale_transporte, cbo,
+                       departamento, setor, secao
                   from funcionarios where {cond}
                  order by pro_labore, nome""",
             (conta_id,),
@@ -528,6 +543,7 @@ def listar_funcionarios(pool, conta_id: int, so_ativos: bool = True) -> list[dic
         "salario_centavos": int(r[3] or 0), "dia_pagamento": int(r[4] or 5),
         "pro_labore": bool(r[5]), "ativo": bool(r[6]), "admitido_em": r[7],
         "vale_transporte": bool(r[8]), "cbo": r[9] or "",
+        "departamento": r[10] or "", "setor": r[11] or "", "secao": r[12] or "",
         "custo_real_centavos": custo_real_centavos(int(r[3] or 0), bool(r[5])),
     } for r in rows]
 
@@ -536,13 +552,16 @@ def registrar_evento_folha(pool, conta_id: int, funcionario_id: int, tipo: str,
                            valor_centavos: int, competencia: date | None = None,
                            descricao: str = "",
                            membro_id: int | None = None) -> dict:
-    """Vale / extra / desconto na competência (mês).
+    """Adiantamento / benefício / extra / desconto na competência (mês).
 
-    VALE também SAI DO CAIXA na hora (despesa Pessoal) — dinheiro que já foi.
-    Extra e desconto só ajustam a folha; viram caixa no 'pagar folha'.
+    ADIANTAMENTO ('vale') e BENEFÍCIO ('beneficio', ex: vale-refeição/alimentação)
+    saem do caixa na hora (despesa Pessoal) — dinheiro que já foi. A diferença:
+    o ADIANTAMENTO é descontado do líquido do funcionário no fechamento (é salário
+    dele pago antes); o BENEFÍCIO é custo do empregador e NÃO desconta do
+    funcionário. Extra e desconto só ajustam a folha; viram caixa no 'pagar folha'.
     """
-    if tipo not in ("vale", "extra", "desconto"):
-        raise ValueError("tipo deve ser 'vale', 'extra' ou 'desconto'")
+    if tipo not in ("vale", "beneficio", "extra", "desconto"):
+        raise ValueError("tipo deve ser 'vale', 'beneficio', 'extra' ou 'desconto'")
     comp = _competencia(competencia)
     with pool.connection() as c:
         f = c.execute(
@@ -553,10 +572,11 @@ def registrar_evento_folha(pool, conta_id: int, funcionario_id: int, tipo: str,
         return {"ok": False, "erro": "Funcionário não encontrado."}
 
     lanc_id = None
-    if tipo == "vale":
+    if tipo in ("vale", "beneficio"):
+        rotulo = "Adiantamento salarial" if tipo == "vale" else "Benefício (VR/VA)"
         lanc = Lancamento(tipo=Tipo.DESPESA, valor_centavos=int(valor_centavos),
                           categoria=CAT_PESSOAL,
-                          descricao=f"Vale/adiantamento — {f[0]}"
+                          descricao=f"{rotulo} — {f[0]}"
                                     + (f" ({descricao})" if descricao else ""),
                           origem="folha", natureza="empresa")
         salvo = LivroCaixa(pool, conta_id, membro_id).adicionar(lanc, forcar=True)
@@ -595,7 +615,8 @@ def folha_do_mes(pool, conta_id: int, ano: int, mes: int) -> dict:
     itens, total_a_pagar, total_pago, total_custo = [], 0, 0, 0
     for f in funcs:
         e = ev.get(f["id"], {})
-        vales = e.get("vale", 0)
+        vales = e.get("vale", 0)          # adiantamento salarial (desconta)
+        beneficios = e.get("beneficio", 0)  # VR/VA — custo do empregador (NÃO desconta)
         extras = e.get("extra", 0)
         descontos = e.get("desconto", 0)
         pago = e.get("pagamento", 0)
@@ -609,13 +630,16 @@ def folha_do_mes(pool, conta_id: int, ano: int, mes: int) -> dict:
         inss = 0 if f["pro_labore"] else inss_desconto_centavos(base_inss)
         vt = vale_transporte_desconto_centavos(
             f["salario_centavos"], f.get("vale_transporte", False))
+        # BENEFÍCIO (VR/VA) NÃO entra no líquido — é custo do empregador, não
+        # desconto do funcionário. Só o adiantamento (vales) desconta.
         liquido = f["salario_centavos"] + extras - vales - descontos - inss - vt
         a_pagar = max(liquido - pago, 0)
         total_a_pagar += a_pagar
         total_pago += pago
         total_custo += custo_real_centavos(
-            f["salario_centavos"] + extras, f["pro_labore"])
+            f["salario_centavos"] + extras, f["pro_labore"]) + beneficios
         itens.append({**f, "vales_centavos": vales, "extras_centavos": extras,
+                      "beneficios_centavos": beneficios,
                       "descontos_centavos": descontos, "pago_centavos": pago,
                       "inss_centavos": inss, "vt_centavos": vt,
                       "liquido_centavos": liquido,
@@ -654,6 +678,7 @@ def holerite_funcionario(pool, conta_id: int, funcionario_id: int,
     inss = item["inss_centavos"]
     vt = item["vt_centavos"]
     vales = item["vales_centavos"]
+    beneficios = item.get("beneficios_centavos", 0)   # VR/VA — NÃO desconta
     outros_desc = item["descontos_centavos"]
 
     # Verbas: proventos (vencimentos) × descontos. Só entram as que têm valor.
@@ -689,10 +714,13 @@ def holerite_funcionario(pool, conta_id: int, funcionario_id: int,
             "codigo": f"{funcionario_id:05d}",
             "nome": item["nome"], "cargo": item["cargo"],
             "cbo": item.get("cbo", ""),
+            "departamento": item.get("departamento", "") or "GERAL",
+            "setor": item.get("setor", ""), "secao": item.get("secao", ""),
             "admitido_em": item.get("admitido_em"),
             "pro_labore": item["pro_labore"],
         },
         "func_salario_centavos": salario,
+        "beneficios_centavos": beneficios,
         "vencimentos": vencimentos, "descontos": descontos,
         "total_vencimentos_centavos": total_venc,
         "total_descontos_centavos": total_desc,

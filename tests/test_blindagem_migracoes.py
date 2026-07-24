@@ -22,6 +22,11 @@ create table lancamentos (id bigserial primary key, conta_id bigint references c
   chave varchar(44), natureza text, criado_em timestamptz default now());
 create table funcionarios (id bigserial primary key, conta_id bigint references contas(id),
   nome text, salario_centavos int default 0, pro_labore boolean default false, ativo boolean default true);
+create table folha_eventos (id bigserial primary key, conta_id bigint references contas(id),
+  funcionario_id bigint references funcionarios(id),
+  tipo text not null check (tipo in ('vale','extra','desconto','pagamento')),
+  valor_centavos int, competencia date, descricao text default '', lancamento_id bigint,
+  criado_em timestamptz default now());
 create table nichos (id bigserial primary key, nome text, slug text unique, tipo text,
   ativo boolean not null default true);
 create table schema_migrations (id serial primary key, nome text unique not null,

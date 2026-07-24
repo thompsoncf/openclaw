@@ -29,7 +29,8 @@ _MIGRACOES = ("018_chave_nfce_lancamentos.sql", "038_endereco_conta.sql",
               "053_modulo_pj.sql", "057_natureza_lancamento.sql",
               "058_dados_empresa.sql", "059_contato_empresa.sql",
               "088_forma_pagamento_parcelas.sql",
-              "089_funcionario_vale_transporte.sql", "092_funcionario_cbo.sql")
+              "089_funcionario_vale_transporte.sql", "092_funcionario_cbo.sql",
+              "093_folha_beneficios_e_org.sql")
 
 # Colunas que obter_dados_empresa lê e que, nas migrações reais, vêm junto de
 # DDL de tabelas do marketplace (carrinhos/nichos). A tabela `nichos` é criada
@@ -169,6 +170,65 @@ def test_holerite_pro_labore_sem_fgts_nem_inss(pool, empresa_id):
     # pró-labore não desconta INSS CLT → não há linha de INSS
     assert all(d[1] != "DESCONTO INSS" for d in h["descontos"])
     assert h["liquido_centavos"] == 500000
+
+
+def test_beneficio_nao_desconta_do_liquido(pool, empresa_id):
+    # benefício (VR/VA) é custo do empregador — entra no custo, NÃO no líquido
+    f = emp.criar_funcionario(pool, empresa_id, "Carla", salario_centavos=200000)
+    hoje = date.today()
+    comp = date(hoje.year, hoje.month, 1)
+    emp.registrar_evento_folha(pool, empresa_id, f["id"], "beneficio", 30000,
+                               competencia=comp)
+    folha = emp.folha_do_mes(pool, empresa_id, hoje.year, hoje.month)
+    item = next(i for i in folha["itens"] if i["id"] == f["id"])
+    inss = emp.inss_desconto_centavos(200000)   # Carla é CLT: INSS incide
+    liquido_sem_benef = 200000 - inss
+    assert item["beneficios_centavos"] == 30000
+    # o benefício NÃO mexe no líquido (só o INSS desconta aqui)
+    assert item["liquido_centavos"] == liquido_sem_benef
+    # mas entra no custo do empregador (total da folha = custo real + benefício)
+    assert folha["custo_real_total_centavos"] == emp.custo_real_centavos(200000, False) + 30000
+
+    h = emp.holerite_funcionario(pool, empresa_id, f["id"], hoje.year, hoje.month)
+    assert h["beneficios_centavos"] == 30000
+    assert h["liquido_centavos"] == liquido_sem_benef
+    # e não vira linha de desconto
+    assert all("BENEF" not in d[1].upper() for d in h["descontos"])
+
+
+def test_adiantamento_desconta_beneficio_nao(pool, empresa_id):
+    # o mesmo funcionário com adiantamento (desconta) E benefício (não desconta)
+    f = emp.criar_funcionario(pool, empresa_id, "Diego", salario_centavos=300000)
+    hoje = date.today()
+    comp = date(hoje.year, hoje.month, 1)
+    emp.registrar_evento_folha(pool, empresa_id, f["id"], "vale", 50000, competencia=comp)
+    emp.registrar_evento_folha(pool, empresa_id, f["id"], "beneficio", 20000, competencia=comp)
+    folha = emp.folha_do_mes(pool, empresa_id, hoje.year, hoje.month)
+    item = next(i for i in folha["itens"] if i["id"] == f["id"])
+    inss = emp.inss_desconto_centavos(300000)
+    # adiantamento (50k) desconta; benefício (20k) não
+    assert item["liquido_centavos"] == 300000 - 50000 - inss
+    assert item["beneficios_centavos"] == 20000
+
+
+def test_org_aparece_no_holerite(pool, empresa_id):
+    f = emp.criar_funcionario(pool, empresa_id, "Elaine", salario_centavos=200000)
+    # depto/setor/seção editados depois (fluxo do painel)
+    emp.atualizar_funcionario(pool, empresa_id, f["id"], departamento="ADMIN",
+                              setor="RH", secao="002")
+    hoje = date.today()
+    h = emp.holerite_funcionario(pool, empresa_id, f["id"], hoje.year, hoje.month)
+    assert h["func"]["departamento"] == "ADMIN"
+    assert h["func"]["setor"] == "RH"
+    assert h["func"]["secao"] == "002"
+
+
+def test_departamento_default_geral_no_holerite(pool, empresa_id):
+    # sem departamento definido, o holerite mostra GERAL
+    f = emp.criar_funcionario(pool, empresa_id, "Fábio", salario_centavos=200000)
+    hoje = date.today()
+    h = emp.holerite_funcionario(pool, empresa_id, f["id"], hoje.year, hoje.month)
+    assert h["func"]["departamento"] == "GERAL"
 
 
 def test_holerite_funcionario_de_outra_conta_eh_none(pool, empresa_id):

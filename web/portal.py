@@ -3184,14 +3184,16 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   {% for f in folha.itens %}<div class="folha-lin">
     <div class="folha-id">
       <div class="folha-nome">{{ f.nome }}{% if f.pro_labore %} <span class="mut" style="font-weight:400;font-size:.8rem">· pró-labore</span>{% elif f.cargo %} <span class="mut" style="font-weight:400;font-size:.8rem">· {{ f.cargo }}</span>{% endif %}</div>
-      {# breakdown que RECONCILIA com "A pagar": salário + extras − INSS − VT − vale − desconto − já pago #}
+      {# breakdown que RECONCILIA com "A pagar": salário + extras − INSS − VT − adiant. − desconto − já pago.
+         Benefício (VR/VA) NÃO entra no líquido — aparece só como informação (custo do empregador). #}
       <div class="folha-bd">salário {{ f.salario_centavos|brl }}
         {%- if f.extras_centavos %} <span class="pos">+ extra {{ f.extras_centavos|brl }}</span>{% endif -%}
         {%- if f.inss_centavos %} <span class="neg">− INSS {{ f.inss_centavos|brl }}</span>{% endif -%}
         {%- if f.vt_centavos %} <span class="neg">− VT {{ f.vt_centavos|brl }}</span>{% endif -%}
-        {%- if f.vales_centavos %} <span class="amb">− vale {{ f.vales_centavos|brl }}</span>{% endif -%}
+        {%- if f.vales_centavos %} <span class="amb">− adiant. {{ f.vales_centavos|brl }}</span>{% endif -%}
         {%- if f.descontos_centavos %} <span class="amb">− desc {{ f.descontos_centavos|brl }}</span>{% endif -%}
         {%- if f.pago_centavos %} <span>· já pago {{ f.pago_centavos|brl }}</span>{% endif -%}
+        {%- if f.beneficios_centavos %} <span class="mut">· benefício VR/VA {{ f.beneficios_centavos|brl }} (não desconta)</span>{% endif -%}
         {%- if f.pro_labore %} <span class="mut">(pró-labore não desconta INSS CLT)</span>{% endif -%}
       </div>
     </div>
@@ -3201,9 +3203,16 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     </div>
     <div class="folha-acoes">
       {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vt" title="ligar/desligar vale-transporte (6%)"><button style="color:{{ '#7fb48f' if f.vale_transporte else '#8a8a85' }}">VT {{ '✓' if f.vale_transporte else '✗' }}</button></form>{% endif %}
-      {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vale"><input name="valor" inputmode="decimal" placeholder="vale R$"><button style="color:#f0c05a">dar vale</button></form>{% endif %}
+      {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vale" title="adiantamento salarial — dinheiro adiantado ao funcionário; desconta no fechamento"><input name="valor" inputmode="decimal" placeholder="adiant. R$"><button style="color:#f0c05a">adiantar</button></form>{% endif %}
+      {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/beneficio" title="vale-refeição/alimentação — benefício (custo da empresa); NÃO desconta do funcionário"><input name="valor" inputmode="decimal" placeholder="VR/VA R$"><button style="color:#7fb48f">benefício</button></form>{% endif %}
       {% if not f.quitado %}<form method="post" action="/painel/empresa/folha/pagar"><input type="hidden" name="funcionario_id" value="{{ f.id }}"><button style="color:var(--verde-claro)">pagar ✓</button></form>{% endif %}
       <a href="/painel/empresa/holerite/{{ f.id }}" target="_blank" rel="noopener" style="border:1px solid #2f2f31;border-radius:7px;padding:.28rem .6rem;font-size:.75rem;text-decoration:none;color:var(--txt);align-self:center" title="abrir o recibo de pagamento pra imprimir">🖨️ holerite</a>
+      <form method="post" action="/painel/empresa/funcionario/{{ f.id }}/org" title="departamento / setor / seção (aparecem no holerite)" style="flex:1 1 100%;gap:.3rem">
+        <input name="departamento" value="{{ f.departamento }}" placeholder="Depto" style="width:96px">
+        <input name="setor" value="{{ f.setor }}" placeholder="Setor" style="width:80px">
+        <input name="secao" value="{{ f.secao }}" placeholder="Seção" style="width:80px">
+        <button style="color:#8a938a">salvar dados</button>
+      </form>
     </div>
   </div>{% endfor %}
   <form method="post" action="/painel/empresa/folha/pagar" style="margin-top:.8rem"><button style="background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.5rem 1rem;font-weight:600;cursor:pointer">Pagar folha inteira ✓</button></form>
@@ -4860,6 +4869,14 @@ _HOLERITE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 </style></head><body>
 <div class="barra">
   <a href="/painel/empresa">← Voltar</a>
+  <form method="get" action="/painel/empresa/holerite/{{ h.func.id }}" style="display:flex;gap:.4rem;align-items:center">
+    <span style="font-size:.78rem;color:#555">Competência:</span>
+    <select name="mes" onchange="this.form.submit()" style="font:inherit;font-size:.82rem;padding:.45rem;border-radius:7px;border:1px solid #bcbcc2;background:#fff">
+      {% for m in range(1,13) %}<option value="{{ m }}"{% if m==h.competencia_mes %} selected{% endif %}>{{ '%02d'|format(m) }}</option>{% endfor %}
+    </select>
+    <input name="ano" value="{{ h.competencia_ano }}" inputmode="numeric" style="width:70px;font:inherit;font-size:.82rem;padding:.45rem;border-radius:7px;border:1px solid #bcbcc2;background:#fff">
+    <button style="font:inherit;font-size:.82rem;padding:.45rem .7rem;border-radius:7px;border:1px solid #bcbcc2;background:#fff;cursor:pointer">ver</button>
+  </form>
   <button class="pr" onclick="window.print()">🖨️ Imprimir / salvar PDF</button>
 </div>
 <div class="folha">
@@ -4878,9 +4895,11 @@ _HOLERITE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
   <table class="func"><tr>
     <td style="width:66px"><span class="rot">Código</span><span class="val">{{ h.func.codigo }}</span></td>
     <td><span class="rot">Nome do Funcionário</span><span class="val">{{ h.func.nome }}{% if h.func.cargo %} <span style="color:#555">— {{ h.func.cargo }}</span>{% endif %}</span></td>
-    <td style="width:88px"><span class="rot">CBO</span><span class="val">{{ h.func.cbo or '—' }}</span></td>
-    <td style="width:92px"><span class="rot">Depto</span><span class="val">GERAL</span></td>
-    <td style="width:104px"><span class="rot">Admissão</span><span class="val">{% if h.func.admitido_em %}{{ h.func.admitido_em.strftime('%d/%m/%Y') }}{% else %}—{% endif %}</span></td>
+    <td style="width:76px"><span class="rot">CBO</span><span class="val">{{ h.func.cbo or '—' }}</span></td>
+    <td style="width:80px"><span class="rot">Depto</span><span class="val">{{ h.func.departamento }}</span></td>
+    <td style="width:62px"><span class="rot">Setor</span><span class="val">{{ h.func.setor or '—' }}</span></td>
+    <td style="width:62px"><span class="rot">Seção</span><span class="val">{{ h.func.secao or '—' }}</span></td>
+    <td style="width:96px"><span class="rot">Admissão</span><span class="val">{% if h.func.admitido_em %}{{ h.func.admitido_em.strftime('%d/%m/%Y') }}{% else %}—{% endif %}</span></td>
   </tr></table>
 
   <table class="verbas">
@@ -4897,6 +4916,9 @@ _HOLERITE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
       <tr><td class="cod">{{ cod }}</td><td>{{ desc }}</td><td>{{ ref }}</td>
           <td class="num"></td><td class="num">{{ val|brl }}</td></tr>
     {% endfor %}
+    {% if h.beneficios_centavos %}
+      <tr><td class="cod">—</td><td colspan="4" style="color:#555;font-size:11px">Benefício concedido (não descontado): VALE-REFEIÇÃO/ALIMENTAÇÃO — {{ h.beneficios_centavos|brl }}</td></tr>
+    {% endif %}
       <tr class="filler"><td colspan="5"></td></tr>
     </tbody>
   </table>
@@ -8258,6 +8280,8 @@ def empresa_funcionario_vt(request: Request, funcionario_id: int):
 
 @router.post("/painel/empresa/funcionario/{funcionario_id}/vale")
 def empresa_vale(request: Request, funcionario_id: int, valor: str = Form("")):
+    """Adiantamento salarial: dinheiro adiantado ao funcionário; desconta no
+    fechamento (o tipo interno segue 'vale')."""
     from finance import empresa as emp
     g = _guard_pj(request)
     if not g:
@@ -8266,6 +8290,36 @@ def empresa_vale(request: Request, funcionario_id: int, valor: str = Form("")):
     cent = _reais_para_centavos(valor)
     if cent > 0:
         emp.registrar_evento_folha(pool, conta[0], funcionario_id, "vale", cent)
+    return RedirectResponse("/painel/empresa", status_code=303)
+
+
+@router.post("/painel/empresa/funcionario/{funcionario_id}/beneficio")
+def empresa_beneficio(request: Request, funcionario_id: int, valor: str = Form("")):
+    """Benefício (vale-refeição/alimentação): custo do empregador; NÃO desconta
+    do funcionário."""
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    cent = _reais_para_centavos(valor)
+    if cent > 0:
+        emp.registrar_evento_folha(pool, conta[0], funcionario_id, "beneficio", cent)
+    return RedirectResponse("/painel/empresa", status_code=303)
+
+
+@router.post("/painel/empresa/funcionario/{funcionario_id}/org")
+def empresa_funcionario_org(request: Request, funcionario_id: int,
+                            departamento: str = Form(""), setor: str = Form(""),
+                            secao: str = Form("")):
+    """Departamento / setor / seção do funcionário (aparecem no holerite)."""
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    emp.atualizar_funcionario(pool, conta[0], funcionario_id,
+                              departamento=departamento, setor=setor, secao=secao)
     return RedirectResponse("/painel/empresa", status_code=303)
 
 

@@ -3168,8 +3168,15 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   </form>
   {% if folha.itens %}
   <style>
-    .folha-lin{padding:.9rem 0;border-top:1px solid #232325}
-    .folha-head{display:flex;justify-content:space-between;align-items:flex-start;gap:.9rem}
+    /* cada funcionário é um card colapsável (minimiza; expande no clique) */
+    details.folha-lin{border-top:1px solid #232325}
+    details.folha-lin > summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:.9rem;padding:.8rem .25rem}
+    details.folha-lin > summary::-webkit-details-marker{display:none}
+    details.folha-lin > summary:hover{background:#141416}
+    .folha-sum-id{display:flex;align-items:center;gap:.5rem;min-width:0}
+    .folha-chev{color:var(--txt-mut);font-size:.7rem;transition:transform .15s;flex:none}
+    details.folha-lin[open] .folha-chev{transform:rotate(90deg)}
+    .folha-body{padding:0 .25rem .9rem}
     .folha-nome{font-size:.95rem;font-weight:600}
     .folha-bd{font-size:.7rem;margin-top:4px;line-height:1.6;color:var(--txt-mut)}
     .folha-bd .neg{color:#e07a5f}.folha-bd .amb{color:#f0c05a}.folha-bd .pos{color:#7fb48f}
@@ -3217,30 +3224,32 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     .ev-rm{border:1px solid #5a2e2e !important;color:#e08a8a !important;padding:.24rem .55rem !important}
   </style>
   <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--txt-mut);padding:.6rem 0 .2rem;border-bottom:1px solid #232325"><span>Funcionário</span><span>A pagar (líquido)</span></div>
-  {% for f in folha.itens %}<div class="folha-lin">
-    <div class="folha-head">
-      <div style="min-width:0">
-        <div class="folha-nome">{{ f.nome }}{% if f.pro_labore %} <span class="mut" style="font-weight:400;font-size:.8rem">· pró-labore</span>{% elif f.cargo %} <span class="mut" style="font-weight:400;font-size:.8rem">· {{ f.cargo }}</span>{% endif %}{% if f.demitido_em %}<span class="badge-dem">demitido em {{ f.demitido_em.strftime('%d/%m/%Y') }}</span>{% endif %}</div>
-        {# breakdown que RECONCILIA com "A pagar": salário + extras − INSS − VT − adiant. − desconto − já pago.
-           Benefício (VR/VA) NÃO entra no líquido — aparece só como informação (custo do empregador). #}
-        <div class="folha-bd">salário {{ f.salario_centavos|brl }}
-          {%- if f.extras_centavos %} <span class="pos">+ extra {{ f.extras_centavos|brl }}</span>{% endif -%}
-          {%- if f.inss_centavos %} <span class="neg">− INSS {{ f.inss_centavos|brl }}</span>{% endif -%}
-          {%- if f.vt_centavos %} <span class="neg">− VT {{ f.vt_centavos|brl }}</span>{% endif -%}
-          {%- if f.vales_centavos %} <span class="amb">− adiant. {{ f.vales_centavos|brl }}</span>{% endif -%}
-          {%- if f.descontos_centavos %} <span class="amb">− desc {{ f.descontos_centavos|brl }}</span>{% endif -%}
-          {%- if f.pago_centavos %} <span>· já pago {{ f.pago_centavos|brl }}</span>{% endif -%}
-          {%- if f.beneficios_centavos %} <span class="mut">· benefício VR/VA {{ f.beneficios_centavos|brl }} (não desconta)</span>{% endif -%}
-          {%- if f.fgts_centavos %} <span class="mut">· FGTS {{ f.fgts_centavos|brl }} (empresa deposita)</span>{% endif -%}
-          {%- if f.pro_labore %} <span class="mut">(pró-labore não desconta INSS CLT)</span>{% endif -%}
-        </div>
+  {% for f in folha.itens %}<details class="folha-lin">
+    <summary class="folha-head">
+      <div class="folha-sum-id">
+        <span class="folha-chev" aria-hidden="true">▶</span>
+        <span class="folha-nome">{{ f.nome }}{% if f.pro_labore %} <span class="mut" style="font-weight:400;font-size:.8rem">· pró-labore</span>{% elif f.cargo %} <span class="mut" style="font-weight:400;font-size:.8rem">· {{ f.cargo }}</span>{% endif %}{% if f.demitido_em %}<span class="badge-dem">demitido em {{ f.demitido_em.strftime('%d/%m/%Y') }}</span>{% endif %}</span>
       </div>
       <div class="folha-val">
         <div class="folha-rot">A pagar (líquido)</div>
         <div class="folha-apagar">{% if f.quitado %}<span style="color:var(--verde-claro)">pago ✓</span>{% else %}{{ f.a_pagar_centavos|brl }}{% endif %}</div>
-        <div class="mut" style="font-size:.7rem;margin-top:2px">custo real {{ f.custo_real_centavos|brl }}</div>
       </div>
-    </div>
+    </summary>
+    <div class="folha-body">
+      {# breakdown que RECONCILIA com "A pagar": salário + extras − INSS − VT − adiant. − desconto − já pago.
+         Benefício (VR/VA) NÃO entra no líquido — aparece só como informação (custo do empregador). #}
+      <div class="folha-bd">salário {{ f.salario_centavos|brl }}
+        {%- if f.extras_centavos %} <span class="pos">+ extra {{ f.extras_centavos|brl }}</span>{% endif -%}
+        {%- if f.inss_centavos %} <span class="neg">− INSS {{ f.inss_centavos|brl }}</span>{% endif -%}
+        {%- if f.vt_centavos %} <span class="neg">− VT {{ f.vt_centavos|brl }}</span>{% endif -%}
+        {%- if f.vales_centavos %} <span class="amb">− adiant. {{ f.vales_centavos|brl }}</span>{% endif -%}
+        {%- if f.descontos_centavos %} <span class="amb">− desc {{ f.descontos_centavos|brl }}</span>{% endif -%}
+        {%- if f.pago_centavos %} <span>· já pago {{ f.pago_centavos|brl }}</span>{% endif -%}
+        {%- if f.beneficios_centavos %} <span class="mut">· benefício VR/VA {{ f.beneficios_centavos|brl }} (não desconta)</span>{% endif -%}
+        {%- if f.fgts_centavos %} <span class="mut">· FGTS {{ f.fgts_centavos|brl }} (empresa deposita)</span>{% endif -%}
+        {% if f.pro_labore %} <span class="mut">(pró-labore não desconta INSS CLT)</span>{% endif %}
+        <span class="mut">· custo real {{ f.custo_real_centavos|brl }}</span>
+      </div>
 
     <div class="fa">
       {% if not f.pro_labore %}
@@ -3285,7 +3294,8 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
       </details>
       {% endif %}
     </div>
-  </div>{% endfor %}
+    </div>
+  </details>{% endfor %}
   <form method="post" action="/painel/empresa/folha/pagar" style="margin-top:.8rem"><button style="background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.5rem 1rem;font-weight:600;cursor:pointer">Pagar folha inteira ✓</button></form>
   {% else %}<div class="mut" style="font-size:.85rem">Nenhum funcionário cadastrado. Adicione acima.</div>{% endif %}
   <div class="mut" style="font-size:.72rem;margin-top:.7rem">ℹ️ Controle gerencial de pessoal — a folha oficial (eSocial, guias, holerite) segue com seu contador, que recebe tudo no relatório mensal.</div>

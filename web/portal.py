@@ -3157,9 +3157,10 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center"><strong>Equipe e folha</strong>
     <span class="mut" style="font-size:.72rem">folha de {{ '%02d'|format(dre.mes) }}/{{ dre.ano }}: <b style="color:#e07a5f">{{ folha.total_a_pagar_centavos|brl }}</b> · custo real ≈ {{ folha.custo_real_total_centavos|brl }}</span></div>
-  <form method="post" action="/painel/empresa/funcionario" class="emp-form" style="display:grid;grid-template-columns:2fr 1fr 1fr .8fr auto auto;gap:.5rem;margin:.7rem 0;align-items:end">
+  <form method="post" action="/painel/empresa/funcionario" class="emp-form" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr .8fr auto auto;gap:.5rem;margin:.7rem 0;align-items:end">
     <label style="font-size:.72rem;color:#8a938a">Nome<input name="nome" required placeholder="Nome do funcionário" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Cargo<input name="cargo" placeholder="Ex: Vendedor" style="width:100%"></label>
+    <label style="font-size:.72rem;color:#8a938a" title="Classificação Brasileira de Ocupações (opcional, aparece no holerite)">CBO<input name="cbo" placeholder="Opcional" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Salário R$<input name="salario" required inputmode="decimal" placeholder="0,00" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Dia pgto<input name="dia" type="number" min="1" max="28" value="5" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a;text-align:center" title="descontar 6% de vale-transporte">VT<br><input type="checkbox" name="vale_transporte" value="1" style="width:auto"></label>
@@ -3202,6 +3203,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
       {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vt" title="ligar/desligar vale-transporte (6%)"><button style="color:{{ '#7fb48f' if f.vale_transporte else '#8a8a85' }}">VT {{ '✓' if f.vale_transporte else '✗' }}</button></form>{% endif %}
       {% if not f.pro_labore %}<form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vale"><input name="valor" inputmode="decimal" placeholder="vale R$"><button style="color:#f0c05a">dar vale</button></form>{% endif %}
       {% if not f.quitado %}<form method="post" action="/painel/empresa/folha/pagar"><input type="hidden" name="funcionario_id" value="{{ f.id }}"><button style="color:var(--verde-claro)">pagar ✓</button></form>{% endif %}
+      <a href="/painel/empresa/holerite/{{ f.id }}" target="_blank" rel="noopener" style="border:1px solid #2f2f31;border-radius:7px;padding:.28rem .6rem;font-size:.75rem;text-decoration:none;color:var(--txt);align-self:center" title="abrir o recibo de pagamento pra imprimir">🖨️ holerite</a>
     </div>
   </div>{% endfor %}
   <form method="post" action="/painel/empresa/folha/pagar" style="margin-top:.8rem"><button style="background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.5rem 1rem;font-weight:600;cursor:pointer">Pagar folha inteira ✓</button></form>
@@ -4805,7 +4807,131 @@ _FINANCEIRO_FORN = """{% extends "base" %}{% block conteudo %}
 {% endblock %}"""
 
 
+_HOLERITE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Holerite — {{ h.func.nome }} — {{ h.competencia_label }}</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#e9e9ec;color:#111;font-family:Arial,Helvetica,sans-serif;font-size:13px}
+  .barra{max-width:820px;margin:14px auto 0;display:flex;gap:.6rem;justify-content:flex-end;padding:0 10px}
+  .barra button,.barra a{font:inherit;font-size:.82rem;padding:.5rem .9rem;border-radius:7px;border:1px solid #bcbcc2;background:#fff;color:#111;cursor:pointer;text-decoration:none}
+  .barra .pr{background:#127a45;border-color:#127a45;color:#fff;font-weight:600}
+  .folha{max-width:820px;margin:12px auto 40px;background:#fff;border:1px solid #000;padding:0}
+  .folha .pad{padding:10px 12px}
+  .topo{display:flex;border-bottom:1px solid #000}
+  .topo .emp{flex:1;padding:10px 12px;border-right:1px solid #000}
+  .topo .tit{width:36%;padding:10px 12px;text-align:right}
+  .emp .rz{font-weight:700;font-size:15px;text-transform:uppercase}
+  .emp .ln{margin-top:2px;color:#222}
+  .tit h1{margin:0;font-size:18px}
+  .tit .mes{margin-top:6px;font-size:13px}
+  table{width:100%;border-collapse:collapse}
+  .func td{border-bottom:1px solid #000;border-right:1px solid #000;padding:5px 8px;vertical-align:top}
+  .func td:last-child{border-right:0}
+  .rot{display:block;font-size:9.5px;color:#555;text-transform:uppercase;letter-spacing:.02em}
+  .val{font-size:13px;margin-top:1px}
+  .verbas th{border-bottom:1px solid #000;padding:5px 8px;font-size:11px;text-transform:uppercase;text-align:left;background:#f3f3f3}
+  .verbas th.num,.verbas td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .verbas td{padding:4px 8px;vertical-align:top}
+  .verbas .cod{color:#444;width:52px}
+  .verbas .filler td{height:120px;border:0}
+  .verbas tbody tr td{border-right:1px solid #000}
+  .verbas tbody tr td:last-child{border-right:0}
+  .totais{display:flex;border-top:1px solid #000}
+  .totais .msg{flex:1;padding:8px 12px;border-right:1px solid #000;font-size:11px;color:#333;display:flex;align-items:flex-end}
+  .totais .tt{width:46%}
+  .totais .tt .lin{display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #000}
+  .totais .tt .lin.liq{border-bottom:0;font-weight:700;font-size:15px}
+  .totais .tt .lin .num{font-variant-numeric:tabular-nums}
+  .rodape{display:flex;border-top:1px solid #000;flex-wrap:wrap}
+  .rodape .bx{flex:1 1 16%;min-width:110px;padding:6px 10px;border-right:1px solid #000;border-top:0}
+  .rodape .bx:last-child{border-right:0}
+  .assina{display:flex;border-top:1px solid #000}
+  .assina .dt{width:34%;padding:14px 12px;border-right:1px solid #000}
+  .assina .fm{flex:1;padding:14px 12px;text-align:center}
+  .assina .risco{margin-top:22px;border-top:1px solid #000;padding-top:3px;font-size:10px;color:#333;text-transform:uppercase}
+  .aviso{max-width:820px;margin:0 auto 30px;padding:0 12px;color:#555;font-size:11px;line-height:1.5}
+  @media print{
+    body{background:#fff}
+    .barra,.aviso{display:none}
+    .folha{border:1px solid #000;margin:0;max-width:100%}
+    @page{size:A4;margin:12mm}
+  }
+</style></head><body>
+<div class="barra">
+  <a href="/painel/empresa">← Voltar</a>
+  <button class="pr" onclick="window.print()">🖨️ Imprimir / salvar PDF</button>
+</div>
+<div class="folha">
+  <div class="topo">
+    <div class="emp">
+      <div class="rz">{{ h.empresa.razao_social or h.empresa.nome_fantasia or empresa_nome }}</div>
+      {% if h.empresa.endereco %}<div class="ln">{{ h.empresa.endereco }}{% if h.empresa.bairro %} — {{ h.empresa.bairro }}{% endif %}</div>{% endif %}
+      <div class="ln">{% if cnpj_fmt %}{{ cnpj_fmt }}{% endif %}{% if h.empresa.cidade %} · {{ h.empresa.cidade }}{% if h.empresa.uf %}/{{ h.empresa.uf }}{% endif %}{% endif %}</div>
+    </div>
+    <div class="tit">
+      <h1>Recibo de Pagamento de Salário</h1>
+      <div class="mes">Mês: <b>{{ h.competencia_label }}</b></div>
+    </div>
+  </div>
+
+  <table class="func"><tr>
+    <td style="width:66px"><span class="rot">Código</span><span class="val">{{ h.func.codigo }}</span></td>
+    <td><span class="rot">Nome do Funcionário</span><span class="val">{{ h.func.nome }}{% if h.func.cargo %} <span style="color:#555">— {{ h.func.cargo }}</span>{% endif %}</span></td>
+    <td style="width:88px"><span class="rot">CBO</span><span class="val">{{ h.func.cbo or '—' }}</span></td>
+    <td style="width:92px"><span class="rot">Depto</span><span class="val">GERAL</span></td>
+    <td style="width:104px"><span class="rot">Admissão</span><span class="val">{% if h.func.admitido_em %}{{ h.func.admitido_em.strftime('%d/%m/%Y') }}{% else %}—{% endif %}</span></td>
+  </tr></table>
+
+  <table class="verbas">
+    <thead><tr>
+      <th class="cod">Cód.</th><th>Descrição</th><th>Referência</th>
+      <th class="num">Vencimentos</th><th class="num">Descontos</th>
+    </tr></thead>
+    <tbody>
+    {% for cod, desc, ref, val in h.vencimentos %}
+      <tr><td class="cod">{{ cod }}</td><td>{{ desc }}</td><td>{{ ref }}</td>
+          <td class="num">{{ val|brl }}</td><td class="num"></td></tr>
+    {% endfor %}
+    {% for cod, desc, ref, val in h.descontos %}
+      <tr><td class="cod">{{ cod }}</td><td>{{ desc }}</td><td>{{ ref }}</td>
+          <td class="num"></td><td class="num">{{ val|brl }}</td></tr>
+    {% endfor %}
+      <tr class="filler"><td colspan="5"></td></tr>
+    </tbody>
+  </table>
+
+  <div class="totais">
+    <div class="msg">Declaro ter recebido a importância líquida discriminada neste recibo.</div>
+    <div class="tt">
+      <div class="lin"><span>Total de Vencimentos</span><span class="num">{{ h.total_vencimentos_centavos|brl }}</span></div>
+      <div class="lin"><span>Total de Descontos</span><span class="num">{{ h.total_descontos_centavos|brl }}</span></div>
+      <div class="lin liq"><span>Valor Líquido</span><span class="num">{{ h.liquido_centavos|brl }}</span></div>
+    </div>
+  </div>
+
+  <div class="rodape">
+    <div class="bx"><span class="rot">Salário Base</span><span class="val">{{ h.func_salario_centavos|brl }}</span></div>
+    <div class="bx"><span class="rot">Sal. Contr. INSS</span><span class="val">{{ h.base_inss_centavos|brl }}</span></div>
+    <div class="bx"><span class="rot">Base Cálc. FGTS</span><span class="val">{{ h.base_fgts_centavos|brl }}</span></div>
+    <div class="bx"><span class="rot">FGTS do mês</span><span class="val">{{ h.fgts_centavos|brl }}</span></div>
+    <div class="bx"><span class="rot">Base Cálc. IRRF</span><span class="val">{{ h.base_irrf_centavos|brl }}</span></div>
+    <div class="bx"><span class="rot">Faixa IRRF</span><span class="val">{% if h.irrf_isento %}Isento{% else %}{{ (h.irrf_aliquota*100)|round(1) }}%{% endif %}</span></div>
+  </div>
+
+  <div class="assina">
+    <div class="dt"><span class="rot">Data</span><div style="margin-top:20px">___/___/______</div></div>
+    <div class="fm"><div class="risco">Assinatura do Funcionário</div></div>
+  </div>
+</div>
+<div class="aviso">
+  ℹ️ Documento gerencial gerado pelo Zaq a partir da folha do mês. INSS, vale-transporte e FGTS seguem a lei; o IRRF é informativo (faixa, sem dependentes). A folha oficial (eSocial, guias e retenções) segue com o seu contador — pequenas diferenças de centavos podem ocorrer por arredondamento.
+</div>
+</body></html>"""
+
+
 _env = Environment(loader=DictLoader({
+    "holerite": _HOLERITE,
     "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "pagar_aviso": _PAGAR_AVISO, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS, "produtos": _PRODUTOS, "abastecimento": _ABASTECIMENTO, "clientes": _CLIENTES, "cliente_detalhe": _CLIENTE_DETALHE, "pdv": _PDV, "venda_detalhe": _VENDA_DETALHE,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
@@ -8093,7 +8219,7 @@ def empresa_titulo_apagar(request: Request, titulo_id: int):
 def empresa_funcionario_criar(request: Request, nome: str = Form(""),
                               cargo: str = Form(""), salario: str = Form(""),
                               dia: str = Form("5"), pro_labore: str = Form(""),
-                              vale_transporte: str = Form("")):
+                              vale_transporte: str = Form(""), cbo: str = Form("")):
     from finance import empresa as emp
     g = _guard_pj(request)
     if not g:
@@ -8108,7 +8234,7 @@ def empresa_funcionario_criar(request: Request, nome: str = Form(""),
             emp.criar_funcionario(pool, conta[0], nome, cargo=cargo,
                                   salario_centavos=_reais_para_centavos(salario),
                                   dia_pagamento=dia_i, pro_labore=bool(pro_labore),
-                                  vale_transporte=bool(vale_transporte))
+                                  vale_transporte=bool(vale_transporte), cbo=cbo)
         except Exception:
             pass
     return RedirectResponse("/painel/empresa", status_code=303)
@@ -8154,6 +8280,26 @@ def empresa_folha_pagar(request: Request, funcionario_id: str = Form("")):
     fid = int(funcionario_id) if funcionario_id.strip().isdigit() else None
     emp.pagar_folha(pool, conta[0], hoje.year, hoje.month, funcionario_id=fid)
     return RedirectResponse("/painel/empresa", status_code=303)
+
+
+@router.get("/painel/empresa/holerite/{funcionario_id}", response_class=HTMLResponse)
+def empresa_holerite(request: Request, funcionario_id: int, ano: int = 0, mes: int = 0):
+    """Recibo de pagamento (holerite) de um funcionário, pronto pra imprimir.
+    Espelha a folha gerencial do mês; competência default = mês atual."""
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    hoje = _date.today()
+    ano = ano or hoje.year
+    mes = mes if 1 <= mes <= 12 else hoje.month
+    h = emp.holerite_funcionario(pool, conta[0], funcionario_id, ano, mes)
+    if h is None:
+        return RedirectResponse("/painel/empresa", status_code=303)
+    cnpj_fmt = _mascara_cnpj(h["empresa"].get("documento", ""))
+    return HTMLResponse(_env.get_template("holerite").render(
+        h=h, cnpj_fmt=cnpj_fmt, empresa_nome=conta[2]))
 
 
 @router.get("/painel/empresa/contador.csv")

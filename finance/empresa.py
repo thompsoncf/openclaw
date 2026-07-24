@@ -73,6 +73,44 @@ def vale_transporte_desconto_centavos(salario_centavos: int,
     return int(round(max(0, int(salario_centavos)) * VALE_TRANSPORTE_PCT))
 
 
+# ── FGTS: recolhido pela EMPRESA (não sai do líquido do funcionário) ──────────
+FGTS_PCT = 0.08
+
+
+def fgts_mes_centavos(base_centavos: int) -> int:
+    """FGTS do mês: 8% da base (salário + verbas de natureza salarial). É custo
+    do EMPREGADOR — informativo no holerite, não desconta do funcionário."""
+    return int(round(max(0, int(base_centavos)) * FGTS_PCT))
+
+
+# ── IRRF: tabela progressiva oficial (informativa no holerite) ────────────────
+# Faixas mensais em centavos: (limite_superior, alíquota, parcela_a_deduzir).
+# Base = salário + extras − INSS (sem dependentes, que não rastreamos aqui).
+# A folha do zaq é GERENCIAL: mostramos a faixa pra referência; a retenção
+# oficial (com dependentes/outras deduções) segue com o contador.
+IRRF_FAIXAS = (
+    (225920, 0.000,      0),   # até 2.259,20 → isento
+    (282665, 0.075,  16944),   # 2.259,21–2.826,65
+    (375105, 0.150,  38144),   # 2.826,66–3.751,05
+    (466468, 0.225,  66277),   # 3.751,06–4.664,68
+)
+_IRRF_ULTIMA = (0.275, 89600)  # acima de 4.664,68
+
+
+def irrf_info(base_centavos: int) -> dict:
+    """Faixa de IRRF pra `base_centavos` (base = salário + extras − INSS).
+    Retorna {aliquota, imposto_centavos, isento}. Informativo — não desconta do
+    líquido gerencial (a retenção oficial segue com o contador)."""
+    base = max(0, int(base_centavos))
+    aliq, deduzir = _IRRF_ULTIMA
+    for limite, a, d in IRRF_FAIXAS:
+        if base <= limite:
+            aliq, deduzir = a, d
+            break
+    imposto = max(0, int(round(base * aliq)) - deduzir)
+    return {"aliquota": aliq, "imposto_centavos": imposto, "isento": imposto <= 0}
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Gate do módulo
 # ─────────────────────────────────────────────────────────────────────────
@@ -418,16 +456,16 @@ def custo_real_centavos(salario_centavos: int, pro_labore: bool = False) -> int:
 def criar_funcionario(pool, conta_id: int, nome: str, cargo: str = "",
                       salario_centavos: int = 0, dia_pagamento: int = 5,
                       pro_labore: bool = False, vale_transporte: bool = False,
-                      admitido_em: date | None = None) -> dict:
+                      admitido_em: date | None = None, cbo: str = "") -> dict:
     with pool.connection() as c:
         r = c.execute(
             """insert into funcionarios
                  (conta_id, nome, cargo, salario_centavos, dia_pagamento,
-                  pro_labore, vale_transporte, admitido_em)
-               values (%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
+                  pro_labore, vale_transporte, admitido_em, cbo)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
             (conta_id, (nome or "").strip(), (cargo or "").strip(),
              int(salario_centavos), int(dia_pagamento), bool(pro_labore),
-             bool(vale_transporte), admitido_em),
+             bool(vale_transporte), admitido_em, (cbo or "").strip() or None),
         ).fetchone()
         c.commit()
     return {"id": r[0], "nome": nome, "salario_centavos": int(salario_centavos)}
@@ -437,7 +475,8 @@ def atualizar_funcionario(pool, conta_id: int, funcionario_id: int, *,
                           nome: str | None = None, cargo: str | None = None,
                           salario_centavos: int | None = None,
                           dia_pagamento: int | None = None,
-                          vale_transporte: bool | None = None) -> bool:
+                          vale_transporte: bool | None = None,
+                          cbo: str | None = None) -> bool:
     sets, args = [], []
     if nome is not None:
         sets.append("nome=%s"); args.append(nome.strip())
@@ -449,6 +488,8 @@ def atualizar_funcionario(pool, conta_id: int, funcionario_id: int, *,
         sets.append("dia_pagamento=%s"); args.append(int(dia_pagamento))
     if vale_transporte is not None:
         sets.append("vale_transporte=%s"); args.append(bool(vale_transporte))
+    if cbo is not None:
+        sets.append("cbo=%s"); args.append((cbo or "").strip() or None)
     if not sets:
         return False
     with pool.connection() as c:
@@ -477,7 +518,7 @@ def listar_funcionarios(pool, conta_id: int, so_ativos: bool = True) -> list[dic
     with pool.connection() as c:
         rows = c.execute(
             f"""select id, nome, cargo, salario_centavos, dia_pagamento,
-                       pro_labore, ativo, admitido_em, vale_transporte
+                       pro_labore, ativo, admitido_em, vale_transporte, cbo
                   from funcionarios where {cond}
                  order by pro_labore, nome""",
             (conta_id,),
@@ -486,7 +527,7 @@ def listar_funcionarios(pool, conta_id: int, so_ativos: bool = True) -> list[dic
         "id": r[0], "nome": r[1], "cargo": r[2],
         "salario_centavos": int(r[3] or 0), "dia_pagamento": int(r[4] or 5),
         "pro_labore": bool(r[5]), "ativo": bool(r[6]), "admitido_em": r[7],
-        "vale_transporte": bool(r[8]),
+        "vale_transporte": bool(r[8]), "cbo": r[9] or "",
         "custo_real_centavos": custo_real_centavos(int(r[3] or 0), bool(r[5])),
     } for r in rows]
 
@@ -584,6 +625,85 @@ def folha_do_mes(pool, conta_id: int, ano: int, mes: int) -> dict:
             "total_a_pagar_centavos": total_a_pagar,
             "total_pago_centavos": total_pago,
             "custo_real_total_centavos": total_custo}
+
+
+_MESES_PT = ("", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+             "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro")
+
+
+def holerite_funcionario(pool, conta_id: int, funcionario_id: int,
+                         ano: int, mes: int) -> dict | None:
+    """Monta o RECIBO DE PAGAMENTO DE SALÁRIO (holerite) de um funcionário na
+    competência (mês/ano): cabeçalho da empresa, dados do funcionário, verbas
+    (vencimentos × descontos), totais e o rodapé (bases de INSS/FGTS/IRRF).
+
+    Espelha EXATAMENTE a folha gerencial (folha_do_mes) — o líquido impresso é o
+    mesmo que o painel mostra e que é pago. INSS/VT/FGTS conforme a lei; IRRF é
+    informativo (faixa), sem retenção automática (segue com o contador).
+
+    Retorna None se o funcionário não for da conta (ou não estiver na folha).
+    """
+    folha = folha_do_mes(pool, conta_id, ano, mes)
+    item = next((i for i in folha["itens"] if i["id"] == funcionario_id), None)
+    if item is None:
+        return None
+
+    empresa = obter_dados_empresa(pool, conta_id)
+    salario = item["salario_centavos"]
+    extras = item["extras_centavos"]
+    inss = item["inss_centavos"]
+    vt = item["vt_centavos"]
+    vales = item["vales_centavos"]
+    outros_desc = item["descontos_centavos"]
+
+    # Verbas: proventos (vencimentos) × descontos. Só entram as que têm valor.
+    vencimentos = [("00001", "SALÁRIO BASE", "30/30", salario)]
+    if extras:
+        vencimentos.append(("00050", "VENCIMENTOS/ADICIONAIS", "", extras))
+    descontos = []
+    if vt:
+        descontos.append(("00075", "DESCONTO DE VALE TRANSPORTE", "6,00%", vt))
+    if inss:
+        descontos.append(("00080", "DESCONTO INSS", "", inss))
+    if vales:
+        descontos.append(("00215", "DESCONTO ADIANTAMENTO SALARIAL", "", vales))
+    if outros_desc:
+        descontos.append(("00230", "OUTROS DESCONTOS", "", outros_desc))
+
+    total_venc = salario + extras
+    total_desc = vt + inss + vales + outros_desc
+    liquido = total_venc - total_desc          # == item["liquido_centavos"]
+
+    base_inss = salario + extras               # remuneração (base de INSS/FGTS)
+    base_fgts = base_inss
+    fgts = 0 if item["pro_labore"] else fgts_mes_centavos(base_fgts)
+    base_irrf = max(0, base_inss - inss)
+    irrf = irrf_info(base_irrf)
+
+    return {
+        "empresa": empresa,
+        "competencia_mes": mes, "competencia_ano": ano,
+        "competencia_label": f"{_MESES_PT[mes]}/{ano}",
+        "func": {
+            "id": funcionario_id,
+            "codigo": f"{funcionario_id:05d}",
+            "nome": item["nome"], "cargo": item["cargo"],
+            "cbo": item.get("cbo", ""),
+            "admitido_em": item.get("admitido_em"),
+            "pro_labore": item["pro_labore"],
+        },
+        "func_salario_centavos": salario,
+        "vencimentos": vencimentos, "descontos": descontos,
+        "total_vencimentos_centavos": total_venc,
+        "total_descontos_centavos": total_desc,
+        "liquido_centavos": liquido,
+        "base_inss_centavos": base_inss,
+        "base_fgts_centavos": base_fgts,
+        "fgts_centavos": fgts,
+        "base_irrf_centavos": base_irrf,
+        "irrf_aliquota": irrf["aliquota"],
+        "irrf_isento": irrf["isento"],
+    }
 
 
 def pagar_folha(pool, conta_id: int, ano: int, mes: int,

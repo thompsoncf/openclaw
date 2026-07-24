@@ -126,6 +126,32 @@ def notificar_admin(texto: str) -> bool:
     return _enviar_telegram(chat, texto)
 
 
+def avisar_admin(assunto: str, mensagem: str) -> bool:
+    """Alerta GENERICO pro ADMIN do SaaS por E-MAIL (ADMIN_EMAIL, fallback pro
+    remetente SMTP) + Telegram (ADMIN_TELEGRAM_ID). Usado pelos monitores
+    proativos (saldo Twilio/Asaas, gasto da IA). Tolerante a falha: nunca
+    levanta excecao."""
+    ok = False
+    destino = os.environ.get("ADMIN_EMAIL")
+    if not destino:
+        try:
+            from finance.email_sender import remetente_configurado
+            destino = remetente_configurado()
+        except Exception:  # noqa: BLE001
+            destino = None
+    if destino:
+        try:
+            from finance.email_sender import enviar_aviso
+            ok = enviar_aviso(destino, assunto, mensagem.replace("\n", "<br>")) or ok
+        except Exception as e:  # noqa: BLE001
+            _log.warning("avisar_admin: falha no e-mail: %s", e)
+    try:
+        ok = notificar_admin(f"*{assunto}*\n{mensagem}") or ok
+    except Exception as e:  # noqa: BLE001
+        _log.warning("avisar_admin: falha no telegram: %s", e)
+    return ok
+
+
 # Texto por categoria de falha (assunto do e-mail, frase curta, e acao sugerida).
 # Serve pra QUALQUER provedor externo pago (IA, Twilio, Asaas, STT, Credify...).
 _TEXTO_CATEGORIA = {

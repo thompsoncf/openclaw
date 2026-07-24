@@ -59,3 +59,48 @@ services:
         sync: false
       - key: STT_MODEL
         sync: false
+
+  # Monitor PROATIVO de saldo/gasto dos provedores pagos (avisa o admin ANTES
+  # de acabar). Roda 1x/dia. Cada checagem so' age se o limiar estiver setado:
+  #   ANTHROPIC_GASTO_DIA_MAX_USD  -> alerta de gasto diario anomalo da IA
+  #   TWILIO_SALDO_MIN_USD         -> alerta de saldo baixo do WhatsApp
+  #   ASAAS_SALDO_MIN              -> alerta de saldo baixo do Asaas
+  # Precisa de ADMIN_EMAIL + SMTP_* (e-mail) e/ou ADMIN_TELEGRAM_ID (Telegram).
+  - type: cron
+    name: openclaw-monitor-saldos
+    runtime: python
+    plan: standard
+    schedule: "0 12 * * *"   # 12:00 UTC (~09:00 BRT) todo dia
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m scripts.monitor_saldos
+    envVars:
+      - key: ANTHROPIC_ADMIN_KEY
+        sync: false
+      - key: ANTHROPIC_GASTO_DIA_MAX_USD
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_SALDO_MIN_USD
+        sync: false
+      - key: ASAAS_API_KEY
+        sync: false
+      - key: ASAAS_AMBIENTE
+        sync: false
+      - key: ASAAS_SALDO_MIN
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_TELEGRAM_ID
+        sync: false
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_SENHA
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false

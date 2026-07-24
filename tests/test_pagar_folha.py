@@ -26,7 +26,8 @@ from finance.livro_caixa import LivroCaixa
 # Só as migrações que este teste precisa. 018 = coluna chave em lancamentos;
 # 053 = titulos/funcionarios/folha_eventos; 057 = coluna natureza em lancamentos.
 _MIGRACOES = ["018_chave_nfce_lancamentos.sql", "053_modulo_pj.sql",
-              "057_natureza_lancamento.sql"]
+              "057_natureza_lancamento.sql", "092_funcionario_cbo.sql",
+              "093_folha_beneficios_e_org.sql", "094_funcionario_demissao.sql"]
 
 
 @pytest.fixture(scope="module")

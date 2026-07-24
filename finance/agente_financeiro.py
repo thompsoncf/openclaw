@@ -257,6 +257,19 @@ def criar_agente_financeiro(brain: Brain, livro: LivroCaixa,
                     pool, conta_id, getattr(livro, "membro_id", None))
         except Exception:
             pass  # qualquer erro no módulo PJ NÃO pode derrubar o agente PF
+    # MÓDULO DOMÉSTICA: lado PF (empregador é pessoa física). Gate por
+    # conta_modulos; isolado no seu próprio try/except pra nunca derrubar o PF.
+    if pool is not None and conta_id is not None and papel == "dono":
+        try:
+            from . import domestica_repo as _dom
+            if _dom.modulo_domestica_ativo(pool, conta_id):
+                from .tools_domestica import (bloco_persona_domestica,
+                                              construir_ferramentas_domestica)
+                persona = persona + bloco_persona_domestica(pool, conta_id)
+                ferramentas = ferramentas + construir_ferramentas_domestica(
+                    pool, conta_id, getattr(livro, "membro_id", None))
+        except Exception:
+            pass  # qualquer erro no módulo Doméstica NÃO pode derrubar o PF
     return criar_agente(
         nome="Financeiro",
         persona=persona,

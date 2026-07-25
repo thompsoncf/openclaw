@@ -3274,6 +3274,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
         <form method="post" action="/painel/empresa/funcionario/{{ f.id }}/org" title="Dados do funcionário — admissão/demissão e departamento (aparecem no holerite).">
           <div class="fa-row"><span class="lbl">Admissão</span><input class="date" type="date" name="admissao" value="{{ f.admitido_em.isoformat() if f.admitido_em else '' }}"></div>
           <div class="fa-row"><span class="lbl" title="Ao preencher, o funcionário sai da folha a partir do mês seguinte.">Demissão</span><input class="date" type="date" name="demissao" value="{{ f.demitido_em.isoformat() if f.demitido_em else '' }}"></div>
+          <div class="fa-row"><span class="lbl">CPF <span class="mut">(holerite)</span></span><input class="date" name="cpf" value="{{ f.cpf }}" placeholder="000.000.000-00" maxlength="14" inputmode="numeric"></div>
           <div class="fa-row"><span class="lbl">Depto / setor / seção</span><input class="org" name="departamento" value="{{ f.departamento }}" placeholder="GERAL"><input class="org" name="setor" value="{{ f.setor }}" placeholder="Setor"><input class="org" name="secao" value="{{ f.secao }}" placeholder="Seção"></div>
           <div class="fa-row"><span class="lbl"></span><button>salvar dados</button></div>
         </form>
@@ -4899,136 +4900,103 @@ _FINANCEIRO_FORN = """{% extends "base" %}{% block conteudo %}
 
 _HOLERITE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Holerite — {{ h.func.nome }} — {{ h.competencia_label }}</title>
+<title>Recibo de Pagamento — {{ h.func.nome }} — {{ h.competencia_label }}</title>
 <style>
   *{box-sizing:border-box}
-  body{margin:0;background:#e9e9ec;color:#111;font-family:Arial,Helvetica,sans-serif;font-size:13px}
-  .barra{max-width:820px;margin:14px auto 0;display:flex;gap:.6rem;justify-content:flex-end;padding:0 10px}
-  .barra button,.barra a{font:inherit;font-size:.82rem;padding:.5rem .9rem;border-radius:7px;border:1px solid #bcbcc2;background:#fff;color:#111;cursor:pointer;text-decoration:none}
+  body{margin:0;background:#e9e9ec;color:#111;font-family:Arial,Helvetica,sans-serif;font-size:12.5px}
+  .barra{max-width:760px;margin:14px auto 0;display:flex;gap:.5rem;justify-content:flex-end;align-items:center;padding:0 10px;flex-wrap:wrap}
+  .barra a,.barra button,.barra select,.barra input{font:inherit;font-size:.82rem;padding:.42rem .7rem;border-radius:7px;border:1px solid #bcbcc2;background:#fff;color:#111;cursor:pointer;text-decoration:none}
   .barra .pr{background:#127a45;border-color:#127a45;color:#fff;font-weight:600}
-  .folha{max-width:820px;margin:12px auto 40px;background:#fff;border:1px solid #000;padding:0}
-  .folha .pad{padding:10px 12px}
-  .topo{display:flex;border-bottom:1px solid #000}
-  .topo .emp{flex:1;padding:10px 12px;border-right:1px solid #000}
-  .topo .tit{width:36%;padding:10px 12px;text-align:right}
-  .emp .rz{font-weight:700;font-size:15px;text-transform:uppercase}
-  .emp .ln{margin-top:2px;color:#222}
-  .tit h1{margin:0;font-size:18px}
-  .tit .mes{margin-top:6px;font-size:13px}
-  table{width:100%;border-collapse:collapse}
-  .func td{border-bottom:1px solid #000;border-right:1px solid #000;padding:5px 8px;vertical-align:top}
-  .func td:last-child{border-right:0}
-  .rot{display:block;font-size:9.5px;color:#555;text-transform:uppercase;letter-spacing:.02em}
-  .val{font-size:13px;margin-top:1px}
-  .verbas th{border-bottom:1px solid #000;padding:5px 8px;font-size:11px;text-transform:uppercase;text-align:left;background:#f3f3f3}
-  .verbas th.num,.verbas td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-  .verbas td{padding:4px 8px;vertical-align:top}
-  .verbas .cod{color:#444;width:52px}
-  .verbas .filler td{height:120px;border:0}
-  .verbas tbody tr td{border-right:1px solid #000}
-  .verbas tbody tr td:last-child{border-right:0}
-  .totais{display:flex;border-top:1px solid #000}
-  .totais .msg{flex:1;padding:8px 12px;border-right:1px solid #000;font-size:11px;color:#333;display:flex;align-items:flex-end}
-  .totais .tt{width:46%}
-  .totais .tt .lin{display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #000}
-  .totais .tt .lin.liq{border-bottom:0;font-weight:700;font-size:15px}
-  .totais .tt .lin .num{font-variant-numeric:tabular-nums}
-  .rodape{display:flex;border-top:1px solid #000;flex-wrap:wrap}
-  .rodape .bx{flex:1 1 16%;min-width:110px;padding:6px 10px;border-right:1px solid #000;border-top:0}
-  .rodape .bx:last-child{border-right:0}
-  .assina{display:flex;border-top:1px solid #000}
-  .assina .dt{width:34%;padding:14px 12px;border-right:1px solid #000}
-  .assina .fm{flex:1;padding:14px 12px;text-align:center}
-  .assina .risco{margin-top:22px;border-top:1px solid #000;padding-top:3px;font-size:10px;color:#333;text-transform:uppercase}
-  .aviso{max-width:820px;margin:0 auto 30px;padding:0 12px;color:#555;font-size:11px;line-height:1.5}
-  @media print{
-    body{background:#fff}
-    .barra,.aviso{display:none}
-    .folha{border:1px solid #000;margin:0;max-width:100%}
-    @page{size:A4;margin:12mm}
-  }
+  .barra form{display:flex;gap:.4rem;align-items:center;margin:0}
+  .folha{max-width:760px;margin:12px auto 8px;background:#fff;border:1px solid #000;border-bottom:0}
+  .lin{display:flex;border-bottom:1px solid #000}
+  .cel{flex:1;padding:5px 9px;border-right:1px solid #000;min-width:0}
+  .cel:last-child{border-right:0}
+  .rot{display:block;font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.02em}
+  .val{font-size:12.5px}
+  .topo .tit{flex:2}
+  .topo .tit .t1{font-size:16px;font-weight:700}
+  .topo .tit .t2{font-size:10px;color:#333;margin-top:1px}
+  .topo .comp{text-align:right}
+  .topo .comp .val{font-weight:700}
+  table.verbas{width:100%;border-collapse:collapse;border-bottom:1px solid #000}
+  .verbas th{border-bottom:1px solid #000;border-right:1px solid #000;padding:4px 9px;font-size:10px;text-transform:uppercase;text-align:left;background:#f2f2f2}
+  .verbas th:last-child{border-right:0}
+  .verbas td{padding:3px 9px;border-right:1px solid #000;vertical-align:top}
+  .verbas td:last-child{border-right:0}
+  .verbas .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .verbas .cod{width:44px;color:#444}.verbas .ref{width:96px;color:#333}
+  .verbas .filler td{height:96px}
+  .totais{border-bottom:1px solid #000}
+  .totais .msg{flex:1;display:flex;align-items:flex-end;font-size:10px;color:#555}
+  .totais .tt{flex:0 0 300px;max-width:300px;padding:0;border-right:0}
+  .totais .tt .tl{display:flex;justify-content:space-between;padding:4px 9px;border-bottom:1px solid #000;border-left:1px solid #000}
+  .totais .tt .tl.liq{border-bottom:0;font-weight:700;font-size:14px}
+  .rodape .cel{padding:4px 8px}
+  .rodape .val{font-variant-numeric:tabular-nums}
+  .assina .cel{padding:8px 9px;min-height:44px}
+  .assina .l{margin-top:16px;font-size:12px;color:#333}
+  .aviso{max-width:760px;margin:0 auto 30px;padding:6px 12px;color:#555;font-size:10.5px;line-height:1.5}
+  @media print{ body{background:#fff} .barra,.aviso{display:none} .folha{margin:0;max-width:100%} @page{size:A4;margin:12mm} }
 </style></head><body>
 <div class="barra">
   <a href="/painel/empresa">← Voltar</a>
-  <form method="get" action="/painel/empresa/holerite/{{ h.func.id }}" style="display:flex;gap:.4rem;align-items:center">
-    <span style="font-size:.78rem;color:#555">Competência:</span>
-    <select name="mes" onchange="this.form.submit()" style="font:inherit;font-size:.82rem;padding:.45rem;border-radius:7px;border:1px solid #bcbcc2;background:#fff">
-      {% for m in range(1,13) %}<option value="{{ m }}"{% if m==h.competencia_mes %} selected{% endif %}>{{ '%02d'|format(m) }}</option>{% endfor %}
-    </select>
-    <input name="ano" value="{{ h.competencia_ano }}" inputmode="numeric" style="width:70px;font:inherit;font-size:.82rem;padding:.45rem;border-radius:7px;border:1px solid #bcbcc2;background:#fff">
-    <button style="font:inherit;font-size:.82rem;padding:.45rem .7rem;border-radius:7px;border:1px solid #bcbcc2;background:#fff;cursor:pointer">ver</button>
+  <form method="get" action="/painel/empresa/holerite/{{ h.func.id }}">
+    <span style="font-size:.78rem;color:#555;border:0;background:none;padding:0">Competência</span>
+    <select name="mes" onchange="this.form.submit()">{% for m in range(1,13) %}<option value="{{ m }}"{% if m==h.competencia_mes %} selected{% endif %}>{{ '%02d'|format(m) }}</option>{% endfor %}</select>
+    <input name="ano" value="{{ h.competencia_ano }}" inputmode="numeric" style="width:66px">
+    <button>ver</button>
   </form>
   <button class="pr" onclick="window.print()">🖨️ Imprimir / salvar PDF</button>
 </div>
 <div class="folha">
-  <div class="topo">
-    <div class="emp">
-      <div class="rz">{{ h.empresa.razao_social or h.empresa.nome_fantasia or empresa_nome }}</div>
-      {% if h.empresa.endereco %}<div class="ln">{{ h.empresa.endereco }}{% if h.empresa.bairro %} — {{ h.empresa.bairro }}{% endif %}</div>{% endif %}
-      <div class="ln">{% if cnpj_fmt %}{{ cnpj_fmt }}{% endif %}{% if h.empresa.cidade %} · {{ h.empresa.cidade }}{% if h.empresa.uf %}/{{ h.empresa.uf }}{% endif %}{% endif %}</div>
-    </div>
-    <div class="tit">
-      <h1>Recibo de Pagamento de Salário</h1>
-      <div class="mes">Mês: <b>{{ h.competencia_label }}</b></div>
-    </div>
+  <div class="lin topo">
+    <div class="cel tit"><div class="t1">Recibo de Pagamento</div><div class="t2">( Folha de Pagamento )</div></div>
+    <div class="cel comp"><span class="rot">Competência</span><span class="val">{{ h.competencia_extenso }}</span></div>
   </div>
-
-  <table class="func"><tr>
-    <td style="width:66px"><span class="rot">Código</span><span class="val">{{ h.func.codigo }}</span></td>
-    <td><span class="rot">Nome do Funcionário</span><span class="val">{{ h.func.nome }}{% if h.func.cargo %} <span style="color:#555">— {{ h.func.cargo }}</span>{% endif %}</span></td>
-    <td style="width:76px"><span class="rot">CBO</span><span class="val">{{ h.func.cbo or '—' }}</span></td>
-    <td style="width:80px"><span class="rot">Depto</span><span class="val">{{ h.func.departamento }}</span></td>
-    <td style="width:62px"><span class="rot">Setor</span><span class="val">{{ h.func.setor or '—' }}</span></td>
-    <td style="width:62px"><span class="rot">Seção</span><span class="val">{{ h.func.secao or '—' }}</span></td>
-    <td style="width:96px"><span class="rot">Admissão</span><span class="val">{% if h.func.admitido_em %}{{ h.func.admitido_em.strftime('%d/%m/%Y') }}{% else %}—{% endif %}</span></td>
-  </tr></table>
-
+  <div class="lin">
+    <div class="cel" style="flex:0 0 42%"><span class="rot">Inscrição</span><span class="val">{{ cnpj_fmt or '—' }}</span></div>
+    <div class="cel"><span class="rot">Empregador</span><span class="val">{{ h.empresa.razao_social or h.empresa.nome_fantasia or empresa_nome }}</span></div>
+  </div>
+  <div class="lin">
+    <div class="cel"><span class="rot">Admissão</span><span class="val">{% if h.func.admitido_em %}{{ h.func.admitido_em.strftime('%d/%m/%Y') }}{% else %}—{% endif %}</span></div>
+    <div class="cel"><span class="rot">Lotação</span><span class="val">{{ h.func.lotacao }}</span></div>
+    <div class="cel" style="flex:2"><span class="rot">Cargo</span><span class="val">{{ h.func.cargo or '—' }}</span></div>
+  </div>
+  <div class="lin">
+    <div class="cel" style="flex:2"><span class="rot">Empregado</span><span class="val">{{ h.func.codigo }} &nbsp; {{ h.func.nome }}</span></div>
+    <div class="cel"><span class="rot">CPF</span><span class="val">{{ h.func.cpf or '—' }}</span></div>
+  </div>
   <table class="verbas">
-    <thead><tr>
-      <th class="cod">Cód.</th><th>Descrição</th><th>Referência</th>
-      <th class="num">Vencimentos</th><th class="num">Descontos</th>
-    </tr></thead>
+    <thead><tr><th class="cod">Cód.</th><th>Descrição</th><th class="ref">Referência</th><th class="num">Provento</th><th class="num">Desconto</th></tr></thead>
     <tbody>
-    {% for cod, desc, ref, val in h.vencimentos %}
-      <tr><td class="cod">{{ cod }}</td><td>{{ desc }}</td><td>{{ ref }}</td>
-          <td class="num">{{ val|brl }}</td><td class="num"></td></tr>
-    {% endfor %}
-    {% for cod, desc, ref, val in h.descontos %}
-      <tr><td class="cod">{{ cod }}</td><td>{{ desc }}</td><td>{{ ref }}</td>
-          <td class="num"></td><td class="num">{{ val|brl }}</td></tr>
-    {% endfor %}
-    {% if h.beneficios_centavos %}
-      <tr><td class="cod">—</td><td colspan="4" style="color:#555;font-size:11px">Benefício concedido (não descontado): VALE-REFEIÇÃO/ALIMENTAÇÃO — {{ h.beneficios_centavos|brl }}</td></tr>
-    {% endif %}
+      {% for cod, desc, ref, val in h.proventos %}<tr><td class="cod">{{ cod }}</td><td>{{ desc }}</td><td class="ref">{{ ref }}</td><td class="num">{{ val|brl }}</td><td class="num"></td></tr>{% endfor %}
+      {% for cod, desc, ref, val in h.descontos %}<tr><td class="cod">{{ cod }}</td><td>{{ desc }}</td><td class="ref">{{ ref }}</td><td class="num"></td><td class="num">{{ val|brl }}</td></tr>{% endfor %}
       <tr class="filler"><td colspan="5"></td></tr>
     </tbody>
   </table>
-
-  <div class="totais">
-    <div class="msg">Declaro ter recebido a importância líquida discriminada neste recibo.</div>
-    <div class="tt">
-      <div class="lin"><span>Total de Vencimentos</span><span class="num">{{ h.total_vencimentos_centavos|brl }}</span></div>
-      <div class="lin"><span>Total de Descontos</span><span class="num">{{ h.total_descontos_centavos|brl }}</span></div>
-      <div class="lin liq"><span>Valor Líquido</span><span class="num">{{ h.liquido_centavos|brl }}</span></div>
+  <div class="lin totais">
+    <div class="cel msg">{% if h.beneficios_centavos %}Benefício concedido (não descontado): Vale-refeição/alimentação — {{ h.beneficios_centavos|brl }}{% endif %}</div>
+    <div class="cel tt">
+      <div class="tl"><span>Total de Proventos</span><span>{{ h.total_proventos_centavos|brl }}</span></div>
+      <div class="tl"><span>Total de Descontos</span><span>{{ h.total_descontos_centavos|brl }}</span></div>
+      <div class="tl liq"><span>Líquido a Receber</span><span>{{ h.liquido_centavos|brl }}</span></div>
     </div>
   </div>
-
-  <div class="rodape">
-    <div class="bx"><span class="rot">Salário Base</span><span class="val">{{ h.func_salario_centavos|brl }}</span></div>
-    <div class="bx"><span class="rot">Sal. Contr. INSS</span><span class="val">{{ h.base_inss_centavos|brl }}</span></div>
-    <div class="bx"><span class="rot">Base Cálc. FGTS</span><span class="val">{{ h.base_fgts_centavos|brl }}</span></div>
-    <div class="bx"><span class="rot">FGTS do mês</span><span class="val">{{ h.fgts_centavos|brl }}</span></div>
-    <div class="bx"><span class="rot">Base Cálc. IRRF</span><span class="val">{{ h.base_irrf_centavos|brl }}</span></div>
-    <div class="bx"><span class="rot">Faixa IRRF</span><span class="val">{% if h.irrf_isento %}Isento{% else %}{{ (h.irrf_aliquota*100)|round(1) }}%{% endif %}</span></div>
+  <div class="lin rodape">
+    <div class="cel"><span class="rot">Salário Contratual</span><span class="val">{{ h.salario_contratual_centavos|brl }}</span></div>
+    <div class="cel"><span class="rot">Base Cálc. IRRF</span><span class="val">{% if h.irrf_isento %}—{% else %}{{ h.base_irrf_centavos|brl }}{% endif %}</span></div>
+    <div class="cel"><span class="rot">Base Cálc. INSS</span><span class="val">{{ h.base_inss_centavos|brl }}</span></div>
+    <div class="cel"><span class="rot">FGTS do mês</span><span class="val">{{ h.fgts_centavos|brl }}</span></div>
+    <div class="cel"><span class="rot">Base Cálc. FGTS</span><span class="val">{{ h.base_fgts_centavos|brl }}</span></div>
   </div>
-
-  <div class="assina">
-    <div class="dt"><span class="rot">Data</span><div style="margin-top:20px">___/___/______</div></div>
-    <div class="fm"><div class="risco">Assinatura do Funcionário</div></div>
+  <div class="lin assina">
+    <div class="cel" style="flex:0 0 34%"><span class="rot">Data e Assinatura</span><div class="l">___/___/______</div></div>
+    <div class="cel" style="flex:2"><span class="rot">&nbsp;</span><div class="l">__________________________________________</div></div>
   </div>
 </div>
 <div class="aviso">
-  ℹ️ Documento gerencial gerado pelo Zaq a partir da folha do mês. INSS, vale-transporte e FGTS seguem a lei; o IRRF é informativo (faixa, sem dependentes). A folha oficial (eSocial, guias e retenções) segue com o seu contador — pequenas diferenças de centavos podem ocorrer por arredondamento.
+  ℹ️ Documento gerencial no padrão de recibo de pagamento. INSS, vale-transporte e FGTS seguem a lei; o IRRF é informativo (faixa, sem dependentes). A folha oficial (eSocial, guias e retenções) segue com o seu contador — pequenas diferenças de centavos podem ocorrer por arredondamento.
 </div>
 </body></html>"""
 
@@ -8408,8 +8376,8 @@ def _data_iso(s: str):
 def empresa_funcionario_org(request: Request, funcionario_id: int,
                             departamento: str = Form(""), setor: str = Form(""),
                             secao: str = Form(""), admissao: str = Form(""),
-                            demissao: str = Form("")):
-    """Dados do funcionário: depto/setor/seção (holerite) + admissão/demissão.
+                            demissao: str = Form(""), cpf: str = Form("")):
+    """Dados do funcionário: depto/setor/seção + CPF (holerite) + admissão/demissão.
     Ao gravar demissão, ele sai da folha a partir do mês seguinte."""
     from finance import empresa as emp
     g = _guard_pj(request)
@@ -8418,7 +8386,7 @@ def empresa_funcionario_org(request: Request, funcionario_id: int,
     conta, pool = g
     emp.atualizar_funcionario(pool, conta[0], funcionario_id,
                               departamento=departamento, setor=setor, secao=secao,
-                              admitido_em=_data_iso(admissao),
+                              cpf=cpf, admitido_em=_data_iso(admissao),
                               demitido_em=_data_iso(demissao))
     return RedirectResponse("/painel/empresa", status_code=303)
 

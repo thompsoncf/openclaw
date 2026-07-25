@@ -29,10 +29,20 @@ from finance.models import Lancamento, Tipo
 # --- dedupe key: PURO, nao toca banco -----------------------------------------
 
 def test_chave_dedupe_prefere_codigo():
-    # mesmo codigo de barras => mesma chave, mesmo com descricao/valor diferentes
+    # mesmo codigo de barras + mesmo total => mesma chave (usa o codigo, ignora
+    # variacao de descricao). Isso e' reenvio da MESMA linha.
     a = _chave_dedupe_item("REFRI COLA 2L", 799, "7894900011517")
-    b = _chave_dedupe_item("Refrigerante Coca 2L", 850, "7894900011517")
-    assert a == b == ("cod", "7894900011517")
+    b = _chave_dedupe_item("Refrigerante Coca 2L", 799, "7894900011517")
+    assert a == b == ("cod", "7894900011517", 799)
+
+
+def test_chave_dedupe_mesmo_codigo_totais_diferentes_sao_distintos():
+    # MESMO produto (EAN igual) em DUAS linhas do cupom com quantidades/valores
+    # diferentes (ex: Sprite 1un a 3,09 e Sprite 5un a 15,45) => itens DISTINTOS,
+    # os dois tem que ser salvos. O total no key evita perder a 2a linha.
+    a = _chave_dedupe_item("Sprite", 309, "7894900060010")
+    b = _chave_dedupe_item("Sprite", 1545, "7894900060010")
+    assert a != b
 
 
 def test_chave_dedupe_sem_codigo_usa_descricao_normalizada_e_total():

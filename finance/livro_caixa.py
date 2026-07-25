@@ -94,8 +94,13 @@ def _validar_item_preco(it: dict) -> tuple[int, float, int, str]:
 def _chave_dedupe_item(descricao, valor_total_centavos, codigo) -> tuple:
     """Chave de identidade de um item DENTRO de um mesmo cupom, pra nao duplicar
     quando o cupom chega em VARIAS FOTOS/lotes (o usuario reenvia uma parte, ou
-    as fotos se sobrepoem). Prefere o codigo de barras (identidade forte); sem
-    codigo, cai pra descricao normalizada + valor total pago no item.
+    as fotos se sobrepoem). Usa codigo de barras quando ha (identidade forte),
+    senao descricao normalizada - SEMPRE combinado com o valor total pago no item.
+
+    O valor total entra na chave DE PROPOSITO: o MESMO produto pode aparecer em
+    DUAS linhas distintas do cupom (ex: Sprite 1un a 3,09 e Sprite 5un a 15,45,
+    mesmo EAN) - sao itens diferentes e os dois tem que ser salvos. So' colapsa
+    quando codigo/descricao E total batem (isso sim e' reenvio da mesma linha).
 
     Nao e' uma chave global (dois cupons podem ter o mesmo item) - so' faz sentido
     comparada aos itens do MESMO lancamento. Usada so' no modo anexar."""
@@ -108,13 +113,13 @@ def _chave_dedupe_item(descricao, valor_total_centavos, codigo) -> tuple:
             return bytes(v).decode("utf-8", "ignore")
         return str(v)
 
-    cod = "".join(c for c in _txt(codigo) if c.isdigit())
-    if len(cod) >= 8:
-        return ("cod", cod)
     try:
         vt = int(valor_total_centavos or 0)
     except (TypeError, ValueError):
         vt = 0
+    cod = "".join(c for c in _txt(codigo) if c.isdigit())
+    if len(cod) >= 8:
+        return ("cod", cod, vt)
     return ("desc", normalizar_descricao(_txt(descricao)), vt)
 
 

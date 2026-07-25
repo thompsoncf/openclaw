@@ -15,7 +15,8 @@ from finance import empresa as emp
 
 _MIGRACOES = ("053_modulo_pj.sql", "089_funcionario_vale_transporte.sql",
               "092_funcionario_cbo.sql", "093_folha_beneficios_e_org.sql",
-              "094_funcionario_demissao.sql")
+              "094_funcionario_demissao.sql",
+              "095_funcionario_cpf.sql")
 
 
 # ── parte pura: INSS progressivo e VT (sem banco) ────────────────────────────
@@ -42,6 +43,14 @@ def test_vale_transporte_6pct():
     assert emp.vale_transporte_desconto_centavos(300000) == 18000      # 6% de 3000
     assert emp.vale_transporte_desconto_centavos(300000, True) == 18000
     assert emp.vale_transporte_desconto_centavos(300000, False) == 0   # não optou
+
+
+def test_inss_faixa_pct():
+    # alíquota da faixa (marginal) que aparece na Referência do recibo
+    assert emp.inss_faixa_pct(162100) == "7,5%"    # topo da 1a faixa
+    assert emp.inss_faixa_pct(198038) == "9%"       # 2a faixa
+    assert emp.inss_faixa_pct(400000) == "12%"      # 3a faixa
+    assert emp.inss_faixa_pct(900000) == "14%"      # acima do teto -> última faixa
 
 
 # ── parte com banco: folha_do_mes desconta INSS + VT do líquido ──────────────

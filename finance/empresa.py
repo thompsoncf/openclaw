@@ -64,6 +64,19 @@ def inss_desconto_centavos(base_centavos: int) -> int:
     return int(round(total))
 
 
+def inss_faixa_pct(base_centavos: int) -> str:
+    """Alíquota da FAIXA em que o salário cai (a marginal, como o holerite mostra
+    na coluna Referência). Ex.: 1.621,00 -> '7,5%'; 1.980,38 -> '9%'."""
+    base = min(max(0, int(base_centavos)), INSS_TETO_CENTAVOS)
+    piso, aliq = 0, INSS_FAIXAS[0][1]
+    for limite, a in INSS_FAIXAS:
+        if base > piso:
+            aliq = a
+        piso = limite
+    s = f"{aliq * 100:.1f}".rstrip("0").rstrip(".").replace(".", ",")
+    return s + "%"
+
+
 def vale_transporte_desconto_centavos(salario_centavos: int,
                                       opta: bool = True) -> int:
     """Desconto de vale-transporte: 6% do salário (limite legal do empregado).
@@ -458,19 +471,20 @@ def criar_funcionario(pool, conta_id: int, nome: str, cargo: str = "",
                       pro_labore: bool = False, vale_transporte: bool = False,
                       admitido_em: date | None = None, cbo: str = "",
                       departamento: str = "", setor: str = "",
-                      secao: str = "") -> dict:
+                      secao: str = "", cpf: str = "") -> dict:
     with pool.connection() as c:
         r = c.execute(
             """insert into funcionarios
                  (conta_id, nome, cargo, salario_centavos, dia_pagamento,
                   pro_labore, vale_transporte, admitido_em, cbo,
-                  departamento, setor, secao)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
+                  departamento, setor, secao, cpf)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
             (conta_id, (nome or "").strip(), (cargo or "").strip(),
              int(salario_centavos), int(dia_pagamento), bool(pro_labore),
              bool(vale_transporte), admitido_em, (cbo or "").strip() or None,
              (departamento or "").strip() or None, (setor or "").strip() or None,
-             (secao or "").strip() or None),
+             (secao or "").strip() or None,
+             "".join(ch for ch in (cpf or "") if ch.isdigit()) or None),
         ).fetchone()
         c.commit()
     return {"id": r[0], "nome": nome, "salario_centavos": int(salario_centavos)}
@@ -486,7 +500,8 @@ def atualizar_funcionario(pool, conta_id: int, funcionario_id: int, *,
                           setor: str | None = None,
                           secao: str | None = None,
                           admitido_em: "date | bool | None" = False,
-                          demitido_em: "date | bool | None" = False) -> bool:
+                          demitido_em: "date | bool | None" = False,
+                          cpf: str | None = None) -> bool:
     # admitido_em/demitido_em usam sentinela False = "não mexer" (None é um
     # valor válido: limpar a data).
     sets, args = [], []
@@ -512,6 +527,8 @@ def atualizar_funcionario(pool, conta_id: int, funcionario_id: int, *,
         sets.append("admitido_em=%s"); args.append(admitido_em)
     if demitido_em is not False:
         sets.append("demitido_em=%s"); args.append(demitido_em)
+    if cpf is not None:
+        sets.append("cpf=%s"); args.append("".join(ch for ch in cpf if ch.isdigit()) or None)
     if not sets:
         return False
     with pool.connection() as c:
@@ -541,7 +558,7 @@ def listar_funcionarios(pool, conta_id: int, so_ativos: bool = True) -> list[dic
         rows = c.execute(
             f"""select id, nome, cargo, salario_centavos, dia_pagamento,
                        pro_labore, ativo, admitido_em, vale_transporte, cbo,
-                       departamento, setor, secao, demitido_em
+                       departamento, setor, secao, demitido_em, cpf
                   from funcionarios where {cond}
                  order by pro_labore, nome""",
             (conta_id,),
@@ -552,7 +569,7 @@ def listar_funcionarios(pool, conta_id: int, so_ativos: bool = True) -> list[dic
         "pro_labore": bool(r[5]), "ativo": bool(r[6]), "admitido_em": r[7],
         "vale_transporte": bool(r[8]), "cbo": r[9] or "",
         "departamento": r[10] or "", "setor": r[11] or "", "secao": r[12] or "",
-        "demitido_em": r[13],
+        "demitido_em": r[13], "cpf": r[14] or "",
         "custo_real_centavos": custo_real_centavos(int(r[3] or 0), bool(r[5])),
     } for r in rows]
 
@@ -754,51 +771,65 @@ def holerite_funcionario(pool, conta_id: int, funcionario_id: int,
     vales = item["vales_centavos"]
     beneficios = item.get("beneficios_centavos", 0)   # VR/VA — NÃO desconta
     outros_desc = item["descontos_centavos"]
-
-    # Verbas: proventos (vencimentos) × descontos. Só entram as que têm valor.
-    vencimentos = [("00001", "SALÁRIO BASE", "30/30", salario)]
-    if extras:
-        vencimentos.append(("00050", "VENCIMENTOS/ADICIONAIS", "", extras))
-    descontos = []
-    if vt:
-        descontos.append(("00075", "DESCONTO DE VALE TRANSPORTE", "6,00%", vt))
-    if inss:
-        descontos.append(("00080", "DESCONTO INSS", "", inss))
-    if vales:
-        descontos.append(("00215", "DESCONTO ADIANTAMENTO SALARIAL", "", vales))
-    if outros_desc:
-        descontos.append(("00230", "OUTROS DESCONTOS", "", outros_desc))
-
-    total_venc = salario + extras
-    total_desc = vt + inss + vales + outros_desc
-    liquido = total_venc - total_desc          # == item["liquido_centavos"]
+    pro_labore = item["pro_labore"]
 
     base_inss = salario + extras               # remuneração (base de INSS/FGTS)
+
+    # Verbas no padrão do escritório: (código, descrição, referência, valor).
+    # Proventos × Descontos, com os códigos usuais da folha.
+    proventos = []
+    if pro_labore:
+        proventos.append(("962", "Pró-labore", "30 dia(s)", salario))
+    else:
+        proventos.append(("011", "Salário-Base", "30 dia(s)", salario))
+    if extras:
+        proventos.append(("012", "Adicionais/Vantagens", "", extras))
+
+    descontos = []
+    if inss:
+        rot_inss = "11%" if pro_labore else inss_faixa_pct(base_inss)
+        descontos.append(("310", "INSS", rot_inss, inss))
+    if vt:
+        descontos.append(("320", "Vale-Transporte", "6%", vt))
+    if vales:
+        descontos.append(("961", "Adiantamento Salarial", "", vales))
+    if outros_desc:
+        descontos.append(("990", "Outros Descontos", "", outros_desc))
+
+    total_prov = salario + extras
+    total_desc = vt + inss + vales + outros_desc
+    liquido = total_prov - total_desc          # == item["liquido_centavos"]
+
     base_fgts = base_inss
-    fgts = 0 if item["pro_labore"] else fgts_mes_centavos(base_fgts)
+    fgts = 0 if pro_labore else fgts_mes_centavos(base_fgts)
     base_irrf = max(0, base_inss - inss)
     irrf = irrf_info(base_irrf)
+
+    cpf = item.get("cpf", "") or ""
+    cpf_fmt = (f"{cpf[:3]}.{cpf[3:6]}.{cpf[6:9]}-{cpf[9:]}" if len(cpf) == 11 else cpf)
 
     return {
         "empresa": empresa,
         "competencia_mes": mes, "competencia_ano": ano,
         "competencia_label": f"{_MESES_PT[mes]}/{ano}",
+        "competencia_extenso": f"{_MESES_PT[mes]} de {ano}",
         "func": {
             "id": funcionario_id,
-            "codigo": f"{funcionario_id:05d}",
+            "codigo": f"{funcionario_id:06d}",
             "nome": item["nome"], "cargo": item["cargo"],
-            "cbo": item.get("cbo", ""),
-            "departamento": item.get("departamento", "") or "GERAL",
+            "cbo": item.get("cbo", ""), "cpf": cpf_fmt,
+            "lotacao": item.get("departamento", "") or "GERAL",
             "setor": item.get("setor", ""), "secao": item.get("secao", ""),
             "admitido_em": item.get("admitido_em"),
-            "pro_labore": item["pro_labore"],
+            "pro_labore": pro_labore,
         },
         "func_salario_centavos": salario,
         "beneficios_centavos": beneficios,
-        "vencimentos": vencimentos, "descontos": descontos,
-        "total_vencimentos_centavos": total_venc,
+        "proventos": proventos, "descontos": descontos,
+        "total_proventos_centavos": total_prov,
         "total_descontos_centavos": total_desc,
         "liquido_centavos": liquido,
+        "salario_contratual_centavos": salario,
         "base_inss_centavos": base_inss,
         "base_fgts_centavos": base_fgts,
         "fgts_centavos": fgts,

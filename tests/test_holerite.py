@@ -30,7 +30,8 @@ _MIGRACOES = ("018_chave_nfce_lancamentos.sql", "038_endereco_conta.sql",
               "058_dados_empresa.sql", "059_contato_empresa.sql",
               "088_forma_pagamento_parcelas.sql",
               "089_funcionario_vale_transporte.sql", "092_funcionario_cbo.sql",
-              "093_folha_beneficios_e_org.sql", "094_funcionario_demissao.sql")
+              "093_folha_beneficios_e_org.sql", "094_funcionario_demissao.sql",
+              "095_funcionario_cpf.sql")
 
 # Colunas que obter_dados_empresa lê e que, nas migrações reais, vêm junto de
 # DDL de tabelas do marketplace (carrinhos/nichos). A tabela `nichos` é criada
@@ -128,8 +129,8 @@ def test_holerite_espelha_a_folha(pool, empresa_id):
     assert h["empresa"]["razao_social"] == "RSAL COMERCIO DE OCULOS LTDA"
     assert h["empresa"]["cidade"] == "Belém" and h["empresa"]["uf"] == "PA"
 
-    # funcionário
-    assert h["func"]["codigo"] == f"{fid:05d}"
+    # funcionário (código no padrão 6 dígitos)
+    assert h["func"]["codigo"] == f"{fid:06d}"
     assert h["func"]["cargo"] == "MONITOR DE CFTV"
     assert h["func"]["cbo"] == "372115"
     assert h["func"]["admitido_em"] == date(2025, 7, 21)
@@ -137,17 +138,20 @@ def test_holerite_espelha_a_folha(pool, empresa_id):
     inss = emp.inss_desconto_centavos(188100 + 8721)
     vt = emp.vale_transporte_desconto_centavos(188100, True)   # 11286
 
-    # vencimentos: salário base + adicional
-    assert h["vencimentos"][0] == ("00001", "SALÁRIO BASE", "30/30", 188100)
-    assert ("00050", "VENCIMENTOS/ADICIONAIS", "", 8721) in h["vencimentos"]
-    # descontos: VT (6%), INSS e adiantamento
+    # proventos: Salário-Base + adicional (padrão do escritório)
+    assert h["proventos"][0] == ("011", "Salário-Base", "30 dia(s)", 188100)
+    assert ("012", "Adicionais/Vantagens", "", 8721) in h["proventos"]
+    # descontos: INSS (310), VT (320, 6%) e adiantamento (961)
     desc_valores = {d[1]: d[3] for d in h["descontos"]}
-    assert desc_valores["DESCONTO DE VALE TRANSPORTE"] == vt
-    assert desc_valores["DESCONTO INSS"] == inss
-    assert desc_valores["DESCONTO ADIANTAMENTO SALARIAL"] == 16860
+    assert desc_valores["Vale-Transporte"] == vt
+    assert desc_valores["INSS"] == inss
+    assert desc_valores["Adiantamento Salarial"] == 16860
+    # os códigos padrão aparecem
+    cods = {d[0] for d in h["descontos"]}
+    assert {"310", "320", "961"} <= cods
 
     # totais espelham a folha
-    assert h["total_vencimentos_centavos"] == 188100 + 8721      # 196821
+    assert h["total_proventos_centavos"] == 188100 + 8721      # 196821
     assert h["total_descontos_centavos"] == vt + inss + 16860
     assert h["liquido_centavos"] == 196821 - (vt + inss + 16860)
 
@@ -170,8 +174,10 @@ def test_holerite_pro_labore_sem_fgts_nem_inss(pool, empresa_id):
     hoje = date.today()
     h = emp.holerite_funcionario(pool, empresa_id, f["id"], hoje.year, hoje.month)
     assert h["fgts_centavos"] == 0                 # pró-labore não gera FGTS aqui
+    # provento vira Pró-labore (962), não Salário-Base
+    assert h["proventos"][0] == ("962", "Pró-labore", "30 dia(s)", 500000)
     # pró-labore não desconta INSS CLT → não há linha de INSS
-    assert all(d[1] != "DESCONTO INSS" for d in h["descontos"])
+    assert all(d[1] != "INSS" for d in h["descontos"])
     assert h["liquido_centavos"] == 500000
 
 
@@ -221,17 +227,26 @@ def test_org_aparece_no_holerite(pool, empresa_id):
                               setor="RH", secao="002")
     hoje = date.today()
     h = emp.holerite_funcionario(pool, empresa_id, f["id"], hoje.year, hoje.month)
-    assert h["func"]["departamento"] == "ADMIN"
+    assert h["func"]["lotacao"] == "ADMIN"     # depto vira "Lotação" no recibo
     assert h["func"]["setor"] == "RH"
     assert h["func"]["secao"] == "002"
 
 
-def test_departamento_default_geral_no_holerite(pool, empresa_id):
-    # sem departamento definido, o holerite mostra GERAL
+def test_lotacao_default_geral_no_holerite(pool, empresa_id):
+    # sem departamento definido, o holerite mostra GERAL na Lotação
     f = emp.criar_funcionario(pool, empresa_id, "Fábio", salario_centavos=200000)
     hoje = date.today()
     h = emp.holerite_funcionario(pool, empresa_id, f["id"], hoje.year, hoje.month)
-    assert h["func"]["departamento"] == "GERAL"
+    assert h["func"]["lotacao"] == "GERAL"
+
+
+def test_cpf_aparece_formatado_no_holerite(pool, empresa_id):
+    f = emp.criar_funcionario(pool, empresa_id, "Gilda", salario_centavos=200000,
+                              cpf="03592657313")
+    hoje = date.today()
+    h = emp.holerite_funcionario(pool, empresa_id, f["id"], hoje.year, hoje.month)
+    assert h["func"]["cpf"] == "035.926.573-13"       # formatado
+    assert h["competencia_extenso"].endswith(str(hoje.year))
 
 
 def test_folha_mostra_fgts_por_funcionario_e_total(pool, empresa_id):

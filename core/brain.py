@@ -15,11 +15,23 @@ import os
 
 class Brain:
     def __init__(self, model: str = "claude-sonnet-4-6", api_key: str | None = None,
-                 max_tokens: int = 4096, usar_cache: bool = True):
+                 max_tokens: int | None = None, usar_cache: bool = True):
         # Import tardio pra biblioteca nao ser obrigatoria so' pra rodar os testes do livro-caixa.
         from anthropic import Anthropic
         self.client = Anthropic(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"))
         self.model = model
+        # Teto de tokens de SAIDA por chamada. Subimos de 4096 pra 8192 porque
+        # cupom grande (dezenas de itens) estourava 4096 no meio do tool_use e a
+        # resposta vinha CORTADA (stop_reason=max_tokens) - o cupom "sumia". Com
+        # 8192 cabe bem mais item por lote; alem disso a persona agora salva em
+        # lotes (anexar=true), entao mesmo cupom gigante nao depende so' do teto.
+        # So' paga pelos tokens REALMENTE gerados, entao o teto maior nao encarece
+        # as respostas curtas. Configuravel por env.
+        if max_tokens is None:
+            try:
+                max_tokens = int(os.environ.get("MAX_TOKENS_SAIDA", "8192"))
+            except (TypeError, ValueError):
+                max_tokens = 8192
         self.max_tokens = max_tokens
         self.usar_cache = usar_cache
         self.ultimo_uso = None   # guarda o usage da ultima chamada (pra medir economia)

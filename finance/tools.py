@@ -181,14 +181,22 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
             "endereco": (entrada.get("endereco") or "").strip() or None,
             "nome": (entrada.get("estabelecimento") or "").strip() or None,
         }
-        n = livro.registrar_itens(int(lanc_id), itens, loja_info=loja_info)
+        anexar = bool(entrada.get("anexar"))
+        n = livro.registrar_itens(int(lanc_id), itens, loja_info=loja_info, anexar=anexar)
         if n == 0:
             return "Nao consegui salvar os itens (lancamento nao encontrado)."
         if n == -1:
             return ("Esse cupom JA' tem itens salvos - nao registrei de novo pra nao duplicar. "
-                    "Se quiser substituir os itens antigos pelos novos, peca explicitamente "
+                    "Se for um cupom GRANDE que voce esta' salvando em LOTES (ou que chegou "
+                    "em varias fotos), chame de novo com anexar=true que eu acrescento so' os "
+                    "itens que faltam. Se quiser trocar os antigos pelos novos, peca "
                     "'substituir os itens'.")
-        return f"Salvei {n} itens do cupom. Agora da' pra perguntar coisas tipo 'quanto gastei em X'."
+        if n == -2:
+            return ("Esses itens desse lote ja' estavam salvos nesse cupom - nao dupliquei. "
+                    "Pode mandar o proximo lote / a proxima parte do cupom.")
+        sufixo = (" Manda o proximo lote que eu continuo anexando." if anexar
+                  else " Agora da' pra perguntar coisas tipo 'quanto gastei em X'.")
+        return f"Salvei {n} itens do cupom.{sufixo}"
 
     def buscar_itens(entrada: dict) -> str:
         termo = (entrada.get("termo") or "").strip()
@@ -487,12 +495,16 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
         Ferramenta(
             nome="registrar_itens_cupom",
             descricao=("Salva os itens individuais de um cupom (produto a produto). "
-                       "Use SO' quando o usuario pedir pra registrar/detalhar os itens. "
-                       "Por padrao, anexa ao ultimo lancamento registrado."),
+                       "Por padrao, anexa ao ultimo lancamento registrado. Cupom GRANDE "
+                       "(muitos itens) ou que chegou em VARIAS FOTOS: salve em LOTES de ~20 "
+                       "itens, chamando esta ferramenta varias vezes com anexar=true - o "
+                       "sistema junta tudo no mesmo cupom sem duplicar. Nao tente mandar 40+ "
+                       "itens de uma vez (a resposta corta e nada e' salvo)."),
             parametros={
                 "type": "object",
                 "properties": {
                     "itens": {"type": "array", "items": item_schema},
+                    "anexar": {"type": "boolean", "description": "true = ACRESCENTA este lote aos itens ja' salvos do MESMO cupom, sem duplicar (dedupe por codigo/descricao+total). Use SEMPRE que estiver salvando um cupom GRANDE em LOTES ou que chegou em varias FOTOS/partes. So' o 1o lote pode ir sem anexar; do 2o em diante, anexar=true."},
                     "lancamento_id": {"type": "integer", "description": "opcional; vazio = ultimo cupom"},
                     "cnpj_emitente": {"type": "string", "description": "CNPJ do estabelecimento (14 digitos), do cabecalho do cupom - identifica a loja exata"},
                     "chave": {"type": "string", "description": "CHAVE DE ACESSO do cupom (44 digitos), do rodape perto do QR. SEMPRE inclua se conseguir ler com certeza - alimenta o banco de precos quando o QR nao foi lido. So' digitos."},

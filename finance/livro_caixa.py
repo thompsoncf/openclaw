@@ -91,6 +91,33 @@ def _validar_item_preco(it: dict) -> tuple[int, float, int, str]:
     return int(vu), qtd, int(vt), unidade
 
 
+def _chave_dedupe_item(descricao, valor_total_centavos, codigo) -> tuple:
+    """Chave de identidade de um item DENTRO de um mesmo cupom, pra nao duplicar
+    quando o cupom chega em VARIAS FOTOS/lotes (o usuario reenvia uma parte, ou
+    as fotos se sobrepoem). Prefere o codigo de barras (identidade forte); sem
+    codigo, cai pra descricao normalizada + valor total pago no item.
+
+    Nao e' uma chave global (dois cupons podem ter o mesmo item) - so' faz sentido
+    comparada aos itens do MESMO lancamento. Usada so' no modo anexar."""
+    from .models import normalizar_descricao
+
+    def _txt(v) -> str:
+        if v is None:
+            return ""
+        if isinstance(v, (bytes, bytearray, memoryview)):
+            return bytes(v).decode("utf-8", "ignore")
+        return str(v)
+
+    cod = "".join(c for c in _txt(codigo) if c.isdigit())
+    if len(cod) >= 8:
+        return ("cod", cod)
+    try:
+        vt = int(valor_total_centavos or 0)
+    except (TypeError, ValueError):
+        vt = 0
+    return ("desc", normalizar_descricao(_txt(descricao)), vt)
+
+
 def _cond_natureza(cond: str, params: list, natureza: str | None, col: str = "natureza"):
     """Acrescenta filtro de natureza a uma query. 'a_definir' => null;
     'pessoal'/'empresa' => igual; None/'todos' => sem filtro."""
@@ -859,7 +886,8 @@ class LivroCaixa:
             return (int(centavos), texto)
 
     def registrar_itens(self, lancamento_id: int, itens: list[dict],
-                        substituir: bool = False, loja_info: dict | None = None) -> int:
+                        substituir: bool = False, loja_info: dict | None = None,
+                        anexar: bool = False) -> int:
         """Salva os itens de um cupom, ligados a um lancamento do PROPRIO usuario.
 
         Cada item: {descricao, quantidade, valor_unitario_centavos, valor_total_centavos}.
@@ -868,6 +896,13 @@ class LivroCaixa:
         Protecao contra DUPLICACAO: se o lancamento ja' tiver itens, por padrao
         NAO empilha de novo (retorna -1). Com substituir=True, troca os antigos
         pelos novos. Isso evita o "cupom com itens em dobro".
+
+        Modo ANEXAR (anexar=True): pra cupom GRANDE ou que chega em VARIAS FOTOS,
+        os itens sao salvos em LOTES. Nesse modo, em vez de recusar quando ja' ha
+        itens, ACRESCENTA so' os itens ainda nao salvos (dedupe por codigo ou por
+        descricao+valor_total dentro do mesmo lancamento). Assim da' pra reenviar
+        uma parte / mandar fotos sobrepostas sem duplicar. Retorna -2 quando o
+        lote inteiro ja' estava salvo (nada novo a acrescentar).
         """
         with self.pool.connection() as conn:
             dono = conn.execute(
@@ -880,11 +915,26 @@ class LivroCaixa:
                 "select count(*) from itens_lancamento where lancamento_id = %s",
                 (lancamento_id,),
             ).fetchone()[0]
-            if ja and not substituir:
-                return -1                      # ja tem itens: nao duplica
             if ja and substituir:
                 conn.execute("delete from itens_lancamento where lancamento_id = %s",
                              (lancamento_id,))
+            elif ja and anexar:
+                # lote adicional: filtra os itens que JA' estao salvos neste cupom
+                existentes = conn.execute(
+                    "select descricao, valor_total_centavos, codigo "
+                    "from itens_lancamento where lancamento_id = %s",
+                    (lancamento_id,),
+                ).fetchall()
+                vistos = {_chave_dedupe_item(d, vt, cod) for d, vt, cod in existentes}
+                novos = [it for it in itens
+                         if _chave_dedupe_item(it.get("descricao"),
+                                               it.get("valor_total_centavos"),
+                                               it.get("codigo")) not in vistos]
+                if not novos:
+                    return -2                  # lote ja' estava salvo (nada novo)
+                itens = novos
+            elif ja and not substituir:
+                return -1                      # ja tem itens: nao duplica
             # Grava em LOTES (executemany): robusto pra 10 ou 3000 itens.
             # CAMADA 2: valida/corrige unitario, qtd, total e unidade de cada item.
             params = []

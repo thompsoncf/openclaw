@@ -26,7 +26,7 @@ class Ferramenta:
 class Agente:
     def __init__(self, nome: str, persona: str, ferramentas: list[Ferramenta],
                  brain: Brain, memoria: MemoriaConversa | None = None,
-                 max_iteracoes: int = 10, livro=None):
+                 max_iteracoes: int = 14, livro=None):
         self.nome = nome
         self.persona = persona
         self.ferramentas = {f.nome: f for f in ferramentas}
@@ -180,8 +180,9 @@ class Agente:
                 tem_tool = any(getattr(b, "type", None) == "tool_use" for b in resp.content)
                 if tem_tool:
                     return ("Esse cupom tem itens demais pra salvar de uma vez! "
-                            "Me manda de novo pedindo pra salvar METADE dos itens "
-                            "primeiro, depois a outra metade. Assim nao perco nenhum.")
+                            "Me pede pra salvar em PARTES (ex: os 20 primeiros itens, "
+                            "depois os 20 seguintes) - eu junto tudo no mesmo cupom "
+                            "sem duplicar.")
                 # so' texto cortado: salva o que veio e devolve
                 self.memoria.adicionar("assistant", resp.content)
                 return self._texto(resp) or "Pode repetir, por favor?"

@@ -438,22 +438,52 @@ async def on_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await _processar(update, texto)
 
 
-def main():
-    global _pool, _brain, _transcritor
-    _pool = get_pool()
-    init_schema(_pool)
-    _brain = Brain(model=os.environ.get("OPENCLAW_MODEL", "claude-sonnet-4-6"))
-    _transcritor = transcritor_se_configurado()
-    logging.info("Transcricao de voz: %s", "ATIVA" if _transcritor else "desligada")
+def preparar_globais(pool, brain, transcritor) -> None:
+    """Compartilha pool/brain/transcritor com os handlers deste modulo.
 
-    token = os.environ["TELEGRAM_TOKEN"]
-    app = Application.builder().token(token).build()
+    Os handlers (on_text, on_photo...) leem esses globais. Quem monta a
+    Application - o polling (main) OU o webhook servido pelo web/app.py - chama
+    isto primeiro pra os handlers terem o nucleo pronto."""
+    global _pool, _brain, _transcritor
+    _pool, _brain, _transcritor = pool, brain, transcritor
+
+
+def registrar_handlers(app: "Application") -> None:
+    """Registra os mesmos handlers, seja no polling ou no webhook."""
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))
     app.add_handler(MessageHandler(filters.Document.ALL, on_document))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, on_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
-    logging.info("OpenClaw no ar. Aguardando mensagens...")
+
+
+def construir_application(token: str, pool, brain, transcritor, *,
+                          com_updater: bool = True):
+    """Monta a Application do Telegram com o nucleo compartilhado.
+
+    com_updater=True  -> modo POLLING (worker dedicado, run_polling).
+    com_updater=False -> modo WEBHOOK (updater(None)): o web/app.py alimenta os
+    updates via update_queue; nao ha poller. Isso permite um SO' servico
+    (web) atender Telegram + WhatsApp + portal, em vez de 2."""
+    preparar_globais(pool, brain, transcritor)
+    builder = Application.builder().token(token)
+    if not com_updater:
+        builder = builder.updater(None)      # sem poller: entrega via webhook
+    app = builder.build()
+    registrar_handlers(app)
+    return app
+
+
+def main():
+    pool = get_pool()
+    init_schema(pool)
+    brain = Brain(model=os.environ.get("OPENCLAW_MODEL", "claude-sonnet-4-6"))
+    transcritor = transcritor_se_configurado()
+    logging.info("Transcricao de voz: %s", "ATIVA" if transcritor else "desligada")
+
+    app = construir_application(os.environ["TELEGRAM_TOKEN"], pool, brain,
+                                transcritor, com_updater=True)
+    logging.info("OpenClaw (Telegram/polling) no ar. Aguardando mensagens...")
     app.run_polling()
 
 

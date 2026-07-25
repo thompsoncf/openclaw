@@ -59,6 +59,20 @@ services:
         sync: false
       - key: STT_MODEL
         sync: false
+      # --- Telegram por webhook (unifica os servidores; aposenta o worker) ---
+      # TELEGRAM_TOKEN: o MESMO token do bot. Com ele setado aqui, o web ja'
+      #   consegue processar updates do Telegram na rota /webhook/telegram.
+      # TELEGRAM_WEBHOOK_SECRET: string aleatoria; valida que o update veio mesmo
+      #   do Telegram (header X-Telegram-Bot-Api-Secret-Token).
+      # TELEGRAM_WEBHOOK_URL: o INTERRUPTOR. Ex: https://<web>.onrender.com/webhook/telegram
+      #   So' quando setar isto o Telegram passa a entregar AQUI (e o worker de
+      #   polling para de receber). Deixe VAZIO ate' terminar o teste.
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
+      - key: TELEGRAM_WEBHOOK_URL
+        sync: false
 
   # Monitor PROATIVO de saldo/gasto dos provedores pagos (avisa o admin ANTES
   # de acabar). Roda 1x/dia. Cada checagem so' age se o limiar estiver setado:

@@ -133,6 +133,61 @@ def _iniciar_poller_email() -> None:
     except Exception:  # noqa: BLE001
         pass
 
+
+# ---------------------------------------------------------------------------
+# TELEGRAM POR WEBHOOK (unifica os servidores)
+# ---------------------------------------------------------------------------
+# O bot do Telegram historicamente rodava num WORKER separado so' pra ficar
+# fazendo long polling (getUpdates em loop). Como o nucleo (agente, memoria,
+# banco) ja' e' o mesmo do WhatsApp, da' pra atender o Telegram AQUI, por
+# webhook, e aposentar o worker - 1 servico em vez de 2 (corta ~metade do
+# compute fixo). Ativa so' se TELEGRAM_TOKEN estiver setado neste servico.
+_tg_app = None   # Application do python-telegram-bot (modo webhook), por processo
+
+
+@app.on_event("startup")
+async def _iniciar_telegram_webhook() -> None:
+    global _tg_app
+    token = os.environ.get("TELEGRAM_TOKEN")
+    if not token:
+        return   # Telegram nao configurado neste servico: rota fica inativa
+    try:
+        import telegram_bot as _tg
+        _setup()   # garante _pool/_brain/_transcritor
+        _tg_app = _tg.construir_application(token, _pool, _brain, _transcritor,
+                                            com_updater=False)
+        await _tg_app.initialize()
+        await _tg_app.start()   # sobe o consumidor da update_queue (sem poller)
+        # Registrar o webhook no Telegram e' o INTERRUPTOR que troca a entrega do
+        # polling pra ca'. So' faz se TELEGRAM_WEBHOOK_URL estiver setada, pra voce
+        # controlar QUANDO virar (e poder testar antes de aposentar o worker).
+        url = os.environ.get("TELEGRAM_WEBHOOK_URL")
+        if url:
+            secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET") or None
+            await _tg_app.bot.set_webhook(
+                url=url, secret_token=secret,
+                allowed_updates=["message", "edited_message", "callback_query"],
+                drop_pending_updates=False)
+            log.info("Telegram webhook registrado em %s", url)
+        else:
+            log.info("Telegram pronto (webhook), aguardando TELEGRAM_WEBHOOK_URL "
+                     "pra registrar a entrega.")
+    except Exception:  # noqa: BLE001 - nunca derruba o web por causa do Telegram
+        log.exception("falha ao iniciar Telegram por webhook")
+        _tg_app = None
+
+
+@app.on_event("shutdown")
+async def _parar_telegram_webhook() -> None:
+    global _tg_app
+    if _tg_app is not None:
+        try:
+            await _tg_app.stop()
+            await _tg_app.shutdown()
+        except Exception:  # noqa: BLE001
+            pass
+        _tg_app = None
+
 _FAVICON_SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">'
     '<rect width="64" height="64" rx="14" fill="#0f7d5c"/>'
@@ -676,6 +731,30 @@ async def whatsapp(request: Request, background: BackgroundTasks):
             background.add_task(processar_whatsapp, numero, nome, body, media_url, media_ctype)
     # responde rapido (200) pra nao estourar o timeout do Twilio
     return Response(content="<Response></Response>", media_type="application/xml")
+
+
+@app.post("/webhook/telegram")
+async def telegram_webhook(request: Request):
+    """Recebe updates do Telegram (quando o bot esta' em modo webhook).
+
+    Responde 200 na hora e processa em background (via update_queue do PTB),
+    igual ao WhatsApp - assim o Telegram nao re-entrega por timeout."""
+    if _tg_app is None:
+        return JSONResponse({"ok": False, "reason": "telegram nao configurado"},
+                            status_code=503)
+    # Autenticidade: o Telegram devolve o secret_token no header. Sem ele bater,
+    # rejeita (evita update forjado por quem descobrir a URL).
+    segredo = os.environ.get("TELEGRAM_WEBHOOK_SECRET")
+    if segredo and request.headers.get("X-Telegram-Bot-Api-Secret-Token") != segredo:
+        return JSONResponse({"ok": False}, status_code=403)
+    try:
+        dados = await request.json()
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "reason": "json invalido"}, status_code=400)
+    from telegram import Update
+    update = Update.de_json(dados, _tg_app.bot)
+    await _tg_app.update_queue.put(update)   # PTB processa em background
+    return {"ok": True}
 
 
 @app.get("/", response_class=HTMLResponse)

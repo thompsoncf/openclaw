@@ -929,6 +929,36 @@ def comunicacao_email_testar(request: Request):
     return JSONResponse({"ok": bool(diag.get("ok")), "msg": diag.get("msg") or ""})
 
 
+@router.post("/painel/prospeccao/comunicacao/whatsapp-testar")
+def comunicacao_whatsapp_testar(request: Request, numero: str = Form("")):
+    """Manda um WhatsApp de teste pelo Cloud API da conta (confirma phone_id+token)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "Só o dono/gestor testa os canais."}, status_code=403)
+    numero = (numero or "").strip()
+    if not numero:
+        return JSONResponse({"ok": False, "msg": "Informe um número (com DDD) pra receber o teste."})
+    with get_pool().connection() as c:
+        r = c.execute("""select coalesce(provedor,'twilio'), wa_phone_id, token
+                           from canais_config where conta_id=%s and canal='whatsapp' and ativo""",
+                      (ctx["conta_id"],)).fetchone()
+    if not r or r[0] != "cloud":
+        return JSONResponse({"ok": False, "msg": "Salve primeiro o WhatsApp no modo Cloud API (Phone Number ID + token)."})
+    if not (r[1] and r[2]):
+        return JSONResponse({"ok": False, "msg": "Falta o Phone Number ID ou o token — salve os dois e tente de novo."})
+    from finance import whatsapp_cloud as wac
+    res = wac.enviar_texto(r[1], r[2], numero,
+                           "✅ Teste do ZAQ — se você recebeu esta mensagem, seu WhatsApp "
+                           "(Cloud API) está conectado e pronto pra captar leads. 🎉")
+    if res.get("ok"):
+        return JSONResponse({"ok": True, "msg": "Enviado! Confira o WhatsApp desse número. 📲"})
+    det = str(res.get("erro") or "")[:180]
+    return JSONResponse({"ok": False, "msg": "Não enviou. A Meta respondeu: " + (det or "erro desconhecido")
+                         + " · (token válido? número do destino verificado no painel da Meta?)"})
+
+
 @router.post("/painel/prospeccao/comunicacao/virar-lead")
 def comunicacao_virar_lead(request: Request, conversa_id: int = Form(...)):
     """Promove uma conversa órfã (e-mail/WhatsApp de remetente novo, sem lead) a um
@@ -3270,6 +3300,20 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <input class="fld" name="token" type="password" placeholder="token da Cloud API {% if canais.tokens_set.get('whatsapp') and canais.wa_provedor=='cloud' %}(salvo — vazio mantém){% endif %}" autocomplete="new-password" style="margin-bottom:.45rem">
           <button class="pbtn">Conectar número próprio</button>
         </form>
+        {% if canais.wa_provedor=='cloud' and canais.wa_phone_set %}
+        <div style="display:flex;gap:.4rem;margin-top:.5rem;flex-wrap:wrap;align-items:center">
+          <input class="fld" id="watest-num" inputmode="tel" placeholder="Seu nº p/ receber o teste (+55...)" style="flex:1;min-width:180px">
+          <button type="button" class="pbtn ghost" id="watest-btn" onclick="waTestar()" style="white-space:nowrap">📤 Testar envio</button>
+        </div>
+        <div class="mut" id="watest-msg" style="font-size:.78rem;margin-top:.35rem"></div>
+        <script>
+        function waTestar(){var b=document.getElementById('watest-btn'),m=document.getElementById('watest-msg'),n=document.getElementById('watest-num');if(!b)return;
+          var num=(n&&n.value||'').trim();b.disabled=true;var t=b.textContent;b.textContent='Enviando…';m.textContent='';m.style.color='';
+          var fd=new FormData();fd.append('numero',num);
+          fetch('/painel/prospeccao/comunicacao/whatsapp-testar',{method:'POST',body:fd,headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
+            b.disabled=false;b.textContent=t;m.textContent=d.msg||d.erro||'—';m.style.color=d.ok?'var(--verde-claro)':'#e0a33e';}).catch(function(){b.disabled=false;b.textContent=t;m.textContent='Falha de rede.';m.style.color='#e0a33e';});}
+        </script>
+        {% endif %}
         <div class="mut" style="margin-top:.4rem;font-size:.78rem">Pega o <b>Phone Number ID</b> e o <b>token</b> em developers.facebook.com → seu app → WhatsApp → API Setup. Assine <code>messages</code>.</div>
       </div>
 

@@ -8,6 +8,23 @@ from __future__ import annotations
 from datetime import datetime, date
 
 
+def deve_mandar_dica_qr(dica_qr: bool, chave_nfce, tools_usadas) -> bool:
+    """A dica de QR ('deixe o QR visivel') so' faz sentido em CUPOM FISCAL - que
+    tem QR. Comprovante de Pix/banco NAO tem QR, entao nao deve receber a dica
+    (a mensagem tem que bater com o que a pessoa enviou).
+
+    Sinais de que foi um cupom fiscal: a chave foi lida (tem QR) OU o agente
+    registrou itens (registrar_itens_cupom). Pix/comprovante nao aciona nenhum."""
+    if not dica_qr:
+        return False
+    if chave_nfce:
+        return True
+    try:
+        return "registrar_itens_cupom" in (tools_usadas or ())
+    except TypeError:
+        return False
+
+
 def extrair_chave(texto: str) -> str | None:
     """Extrai a chave de 44 digitos de uma URL de QR OU do TEXTO de um cupom.
     Aceita a chave colada a rotulo ('CHAVE DE ACESSO2226...') e em grupos de 4

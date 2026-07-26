@@ -17,7 +17,6 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from finance import servicos_catalogo as scat
-from finance import whatsapp_twilio as wa
 
 _log = logging.getLogger("agente")
 
@@ -61,19 +60,14 @@ def _add_bot_msg(c, conversa_id, canal, texto, sid=None):
 
 
 def _mandar(c, conta_id, canal, destino, texto) -> dict:
-    """Envia pelo canal certo: WhatsApp (Twilio) ou Messenger/Instagram (Meta)."""
+    """Envia pelo canal certo: WhatsApp (Twilio/Cloud API) ou Messenger/Instagram (Meta)."""
     if canal in ("messenger", "instagram"):
         from finance import meta_msg
         r = c.execute("select token from canais_config where conta_id=%s and canal=%s and ativo",
                       (conta_id, canal)).fetchone()
         return meta_msg.enviar(r[0] if r else None, destino, texto, canal)
-    return wa.enviar_texto(_numero_empresa(c, conta_id), destino, texto)
-
-
-def _numero_empresa(c, conta_id):
-    r = c.execute("select identificador from canais_config where conta_id=%s and canal='whatsapp' and ativo",
-                  (conta_id,)).fetchone()
-    return r[0] if r else None
+    from finance import whatsapp_out
+    return whatsapp_out.enviar(c, conta_id, destino, texto)
 
 
 def _extrair_json(txt: str) -> dict:

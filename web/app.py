@@ -328,6 +328,44 @@ def _responder_whatsapp(to: str, texto: str):
     )
 
 
+# Avisos de progresso no WhatsApp: o Twilio (Programmable Messaging) NAO tem
+# "digitando..." como o Telegram, entao pra foto/PDF (o caso lento: QR + varias
+# idas ao modelo) a gente avisa por MENSAGEM que esta' trabalhando. Cada aviso e'
+# uma msg Twilio (custa), entao: 1 ack imediato + no maximo 2 "ainda trabalhando"
+# espacados, e para assim que a resposta final sai. Intervalos configuraveis.
+def _intervalos_progresso_wpp() -> list[int]:
+    try:
+        brutos = os.environ.get("WPP_PROGRESSO_SEGUNDOS", "15,20")
+        vals = [int(x) for x in brutos.split(",") if x.strip()]
+        return vals[:2] or [15, 20]      # cap em 2 avisos
+    except (TypeError, ValueError):
+        return [15, 20]
+
+
+def _avisador_progresso_wpp(to: str):
+    """Dispara avisos de 'ainda trabalhando' enquanto a leitura do cupom/PDF roda.
+    Devolve uma funcao parar() que encerra os avisos (chame quando a resposta sair).
+    Best-effort: nunca levanta, nunca bloqueia o processamento."""
+    import threading
+    done = threading.Event()
+    avisos = ["Ainda tô lendo seu cupom... quase lá! ⏳",
+              "Só mais um instante, finalizando o registro pra você... 🙏"]
+
+    def _loop():
+        for espera, msg in zip(_intervalos_progresso_wpp(), avisos):
+            if done.wait(espera):
+                return                    # resposta ja' saiu: para
+            if done.is_set():
+                return
+            try:
+                _responder_whatsapp(to, msg)
+            except Exception:  # noqa: BLE001
+                return
+
+    threading.Thread(target=_loop, daemon=True, name="wpp-progresso").start()
+    return done.set
+
+
 def _baixar_midia(url: str) -> bytes:
     auth = (os.environ["TWILIO_ACCOUNT_SID"], os.environ["TWILIO_AUTH_TOKEN"])
     with httpx.Client(timeout=30) as c:
@@ -390,6 +428,7 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
     """Roda em background: identifica o MEMBRO, checa a CONTA, agente, responde."""
     pool = _setup()
     to = f"whatsapp:{numero}"
+    parar_avisos = (lambda: None)   # vira o stopper dos avisos quando for foto/PDF
     try:
         achado = ct.membro_por_whatsapp(pool, numero)
         if achado is not None and _codigo_convite((body or "").strip()) == (body or "").strip().upper():
@@ -502,6 +541,12 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
         if media_url:
             dados = _baixar_midia(media_url)
             ctype = (media_ctype or "")
+            # AGILIDADE: foto/PDF sao o caso lento (QR + varias idas ao modelo).
+            # Avisa NA HORA que recebeu e, se demorar, manda "ainda trabalhando"
+            # ate' a resposta sair - o WhatsApp nao tem "digitando..." (Twilio).
+            if ctype.startswith("image/") or "pdf" in ctype:
+                _responder_whatsapp(to, "👀 Recebi! Já tô lendo seu cupom, um segundinho...")
+                parar_avisos = _avisador_progresso_wpp(to)
             if ctype.startswith("image/"):
                 imagem_b64 = base64.b64encode(dados).decode("ascii")
                 media_type = ctype
@@ -601,6 +646,12 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
             from core.falhas import tratar_falha_ia
             _responder_whatsapp(to, tratar_falha_ia(e, canal="whatsapp"))
         except Exception:
+            pass
+    finally:
+        # encerra os avisos de progresso em QUALQUER saida (resposta, dup, erro).
+        try:
+            parar_avisos()
+        except Exception:  # noqa: BLE001
             pass
 
 

@@ -153,7 +153,15 @@ async def _iniciar_telegram_webhook() -> None:
         return   # Telegram nao configurado neste servico: rota fica inativa
     try:
         import telegram_bot as _tg
-        _setup()   # garante _pool/_brain/_transcritor
+        _setup()   # garante _pool/_brain/_transcritor (publica _pool por ultimo)
+        if _pool is None or _brain is None:
+            # nao deve acontecer (com o _setup corrigido), mas se acontecer NAO
+            # ligamos o Telegram com um brain None (agente sem cerebro) - melhor a
+            # rota ficar inativa e logar do que responder erro a cada mensagem.
+            log.error("Telegram nao iniciado: nucleo incompleto (pool=%s brain=%s)",
+                      _pool is not None, _brain is not None)
+            _tg_app = None
+            return
         _tg_app = _tg.construir_application(token, _pool, _brain, _transcritor,
                                             com_updater=False)
         await _tg_app.initialize()
@@ -271,13 +279,25 @@ def _codigo_convite(texto: str) -> str | None:
     return m.group(1) if m else None
 
 
+_setup_lock = threading.Lock()
+
+
 def _setup():
     global _pool, _brain, _transcritor
     if _pool is None:
-        _pool = get_pool()
-        init_schema(_pool)
-        _brain = Brain(model=os.environ.get("OPENCLAW_MODEL", "claude-sonnet-4-6"))
-        _transcritor = transcritor_se_configurado()
+        # CRITICO: _pool e' o SENTINELA ('if _pool is None'), entao tem que ser o
+        # ULTIMO a ser publicado - senao outro chamador concorrente (ex: o startup
+        # do Telegram vs a thread do poller de e-mail) ve _pool setado enquanto
+        # _brain ainda e' None, e captura um brain None (agente sem cerebro ->
+        # 'NoneType' has no attribute 'chamar'). O lock evita init duplicada; o
+        # double-check garante uma so' inicializacao.
+        with _setup_lock:
+            if _pool is None:
+                pool = get_pool()
+                init_schema(pool)
+                _brain = Brain(model=os.environ.get("OPENCLAW_MODEL", "claude-sonnet-4-6"))
+                _transcritor = transcritor_se_configurado()
+                _pool = pool          # publica o sentinela POR ULTIMO
     return _pool
 
 

@@ -120,3 +120,32 @@ def test_registrar_webhook_nunca_propaga():
     ok = asyncio.run(wa._registrar_webhook_telegram(_BotSempreFalha(),
                                                     "https://x/webhook/telegram", None))
     assert ok is False
+
+
+# --- _setup publica _pool por ultimo (regressao do brain=None) ---------------
+# Bug: _setup setava _pool ANTES de _brain. Com o startup do Telegram e a thread
+# do poller de e-mail chamando _setup concorrente, o Telegram via _pool setado e
+# _brain ainda None -> agente com brain None -> 'NoneType' has no attribute
+# 'chamar'. A correcao publica o sentinela _pool DEPOIS de _brain.
+
+def test_setup_publica_pool_por_ultimo(monkeypatch):
+    monkeypatch.setattr(wa, "_pool", None)
+    monkeypatch.setattr(wa, "_brain", None)
+    monkeypatch.setattr(wa, "_transcritor", None)
+    monkeypatch.setattr(wa, "get_pool", lambda: object())
+    monkeypatch.setattr(wa, "init_schema", lambda p: None)
+    monkeypatch.setattr(wa, "transcritor_se_configurado", lambda: None)
+
+    visto = {}
+
+    class _BrainSpy:
+        def __init__(self, **kw):
+            # no instante em que o Brain e' construido, _pool AINDA deve ser None
+            # (sentinela publicado por ultimo) e _brain ainda nao publicado.
+            visto["pool_durante_brain"] = wa._pool
+
+    monkeypatch.setattr(wa, "Brain", _BrainSpy)
+    wa._setup()
+
+    assert visto["pool_durante_brain"] is None      # _pool NAO visivel antes de _brain
+    assert wa._brain is not None and wa._pool is not None

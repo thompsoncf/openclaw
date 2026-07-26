@@ -29,6 +29,10 @@ create table folha_eventos (id bigserial primary key, conta_id bigint references
   criado_em timestamptz default now());
 create table nichos (id bigserial primary key, nome text, slug text unique, tipo text,
   ativo boolean not null default true);
+-- canais_config vem da 081 (marcada como aplicada no baseline); a 096 a altera,
+-- então precisa existir aqui. Colunas mínimas que a 096 assume (+ token da 084).
+create table canais_config (id bigserial primary key, conta_id bigint, canal text,
+  identificador text, ativo boolean default true, token text);
 create table schema_migrations (id serial primary key, nome text unique not null,
   executada_em timestamptz default now());
 """

@@ -1,4 +1,4 @@
--- 088_whatsapp_cloud.sql
+-- 096_whatsapp_cloud.sql
 -- WhatsApp do PRÓPRIO cliente, sem BSP/Twilio. Duas formas de conectar o número:
 --   * 'cloud' = WhatsApp Cloud API oficial da Meta (número migra pro sistema; grátis,
 --     sem risco de ban). Reaproveita o mesmo webhook /webhooks/meta (assinatura HMAC).

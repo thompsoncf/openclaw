@@ -348,7 +348,7 @@ def _avisador_progresso_wpp(to: str):
     Best-effort: nunca levanta, nunca bloqueia o processamento."""
     import threading
     done = threading.Event()
-    avisos = ["Ainda tô lendo seu cupom... quase lá! ⏳",
+    avisos = ["Ainda tô lendo... quase lá! ⏳",
               "Só mais um instante, finalizando o registro pra você... 🙏"]
 
     def _loop():
@@ -545,7 +545,7 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
             # Avisa NA HORA que recebeu e, se demorar, manda "ainda trabalhando"
             # ate' a resposta sair - o WhatsApp nao tem "digitando..." (Twilio).
             if ctype.startswith("image/") or "pdf" in ctype:
-                _responder_whatsapp(to, "👀 Recebi! Já tô lendo seu cupom, um segundinho...")
+                _responder_whatsapp(to, "👀 Recebi! Já tô lendo, um segundinho...")
                 parar_avisos = _avisador_progresso_wpp(to)
             if ctype.startswith("image/"):
                 imagem_b64 = base64.b64encode(dados).decode("ascii")
@@ -634,7 +634,10 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
         if chave_nfce:
             agente.livro.chave_nfce_atual = chave_nfce
         resposta = agente.responder(texto, imagem_b64, media_type)
-        if dica_qr:
+        # Dica de QR SO' pra cupom fiscal (chave lida OU itens registrados);
+        # comprovante de Pix/banco nao tem QR - nada de dica de QR nesse caso.
+        from finance.nfce_qr import deve_mandar_dica_qr
+        if deve_mandar_dica_qr(dica_qr, chave_nfce, getattr(agente, "_obs_tools", set())):
             resposta = (resposta or "") + DICA_QR_WPP
         _responder_whatsapp(to, resposta)
     except Exception as e:  # noqa: BLE001

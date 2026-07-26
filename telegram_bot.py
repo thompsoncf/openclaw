@@ -318,13 +318,12 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
         await update.message.reply_text(tratar_falha_ia(e, canal="telegram"))
         return
     resposta = resposta or "(sem resposta)"
-    if dica_qr:
-        # se a chave foi lida: dica genérica (sempre melhorar a foto do QR)
-        # se NÃO foi lida mas a imagem foi processada: dica específica (orientar sobre qualidade)
-        if chave_nfce is None:
-            resposta += DICA_QR_FALHOU
-        else:
-            resposta += DICA_QR
+    # Dica de QR SO' quando foi mesmo um CUPOM FISCAL (chave lida OU itens
+    # registrados). Comprovante de Pix/banco nao tem QR - a mensagem tem que
+    # bater com o que a pessoa enviou.
+    from finance.nfce_qr import deve_mandar_dica_qr
+    if deve_mandar_dica_qr(dica_qr, chave_nfce, getattr(agente, "_obs_tools", set())):
+        resposta += (DICA_QR if chave_nfce else DICA_QR_FALHOU)
     await update.message.reply_text(resposta)
 
 

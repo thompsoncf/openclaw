@@ -88,8 +88,12 @@ def enviar(page_token: str, destino_id: str, texto: str, plataforma: str = "mess
 
 def parse_eventos(payload: dict) -> list[dict]:
     """Extrai as mensagens de texto recebidas do payload do webhook. Devolve
-    [{plataforma, conta_ident, sender, texto}] — ignora ecos e não-texto."""
+    [{plataforma, conta_ident, sender, texto, nome?}] — ignora ecos e não-texto.
+    Cobre Messenger/Instagram (object 'page'/'instagram') e WhatsApp Cloud API
+    (object 'whatsapp_business_account')."""
     obj = payload.get("object")
+    if obj == "whatsapp_business_account":
+        return _parse_whatsapp(payload)
     plataforma = "instagram" if obj == "instagram" else "messenger"
     saida = []
     for entry in payload.get("entry", []) or []:
@@ -104,4 +108,28 @@ def parse_eventos(payload: dict) -> list[dict]:
                 continue
             saida.append({"plataforma": plataforma, "conta_ident": recv_id,
                           "sender": sender, "texto": texto})
+    return saida
+
+
+def _parse_whatsapp(payload: dict) -> list[dict]:
+    """WhatsApp Cloud API: entry[].changes[].value.messages[]. Roteia pelo
+    phone_number_id (metadata) e ignora status (delivered/read) e não-texto."""
+    saida = []
+    for entry in payload.get("entry", []) or []:
+        for ch in (entry.get("changes") or []):
+            val = ch.get("value") or {}
+            phone_id = str(((val.get("metadata") or {}).get("phone_number_id")) or "")
+            nomes = {}
+            for ct in (val.get("contacts") or []):
+                nomes[str(ct.get("wa_id") or "")] = ((ct.get("profile") or {}).get("name") or "").strip()
+            for msg in (val.get("messages") or []):
+                if msg.get("type") != "text":
+                    continue                   # ignora mídia/áudio/etc por enquanto
+                texto = ((msg.get("text") or {}).get("body") or "").strip()
+                sender = str(msg.get("from") or "")
+                if not texto or not sender or not phone_id:
+                    continue
+                saida.append({"plataforma": "whatsapp", "conta_ident": phone_id,
+                              "sender": sender, "texto": texto, "nome": nomes.get(sender, ""),
+                              "sid": str(msg.get("id") or "") or None})
     return saida

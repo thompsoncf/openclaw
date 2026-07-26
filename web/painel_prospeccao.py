@@ -540,12 +540,17 @@ def _canais_status(pool, conta_id: int) -> dict:
     nums = {}
     email_senha = None
     tokens = {}
+    provs = {}
+    wa_phone = {}
     with pool.connection() as c:
-        for (canal, ident, tok) in c.execute(
-                "select canal, identificador, token from canais_config where conta_id=%s and ativo",
+        for (canal, ident, tok, prov, waid) in c.execute(
+                """select canal, identificador, token, coalesce(provedor,'twilio'), wa_phone_id
+                     from canais_config where conta_id=%s and ativo""",
                 (conta_id,)).fetchall():
             nums[canal] = ident
             tokens[canal] = tok
+            provs[canal] = prov
+            wa_phone[canal] = waid
         er = c.execute(
             "select imap_senha from canais_config where conta_id=%s and canal='email'",
             (conta_id,)).fetchone()
@@ -558,11 +563,20 @@ def _canais_status(pool, conta_id: int) -> dict:
     # Messenger/Instagram: precisa do app (env) + Página/IG id + Page Token (por conta)
     messenger_ok = meta_app and bool(nums.get("messenger")) and bool(tokens.get("messenger"))
     instagram_ok = meta_app and bool(nums.get("instagram")) and bool(tokens.get("instagram"))
+    # WhatsApp: por provedor — Cloud API (número próprio) precisa de phone_id + token +
+    # app da Meta; Twilio precisa das credenciais globais + número da empresa.
+    wa_prov = provs.get("whatsapp") or "twilio"
+    if wa_prov == "cloud":
+        whatsapp_ok = meta_app and bool(wa_phone.get("whatsapp")) and bool(tokens.get("whatsapp"))
+    else:
+        whatsapp_ok = twilio and bool(nums.get("whatsapp"))
     return {
         "email": bool(remetente_configurado()),           # ENVIAR (SMTP global)
         "email_rx": email_rx,                             # RECEBER (caixa da conta)
         "email_ident": email_ident or "",
-        "whatsapp": twilio and bool(nums.get("whatsapp")),
+        "whatsapp": whatsapp_ok,
+        "wa_provedor": wa_prov,
+        "wa_phone_set": bool(wa_phone.get("whatsapp")),
         "messenger": messenger_ok,
         "instagram": instagram_ok,
         "twilio": twilio, "meta": meta_app, "numeros": nums,
@@ -737,12 +751,12 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
         msgs.append({"canal": cn, "direcao": direcao, "autor": autor,
                      "quando": quando.strftime("%d/%m %H:%M") if quando else "",
                      "quem": quem, "cabecalho": cab.strip(), "corpo": corpo.strip()})
-    from finance import whatsapp_twilio as _wa
     destino = cv[7] or cv[8] or cv[13]     # telefone do lead OU contato_ref (conversa sem lead)
     pode_wa = False
-    if cv[0] == "whatsapp" and _wa.configurado() and bool(destino):
+    if cv[0] == "whatsapp" and bool(destino):
+        from finance import whatsapp_out
         with pool.connection() as _c:
-            pode_wa = bool(_canal_ident(_c, ctx["conta_id"], "whatsapp"))
+            pode_wa = whatsapp_out.configurado_conta(_c, ctx["conta_id"])
     elif cv[0] == "email":
         _dest_mail = (cv[9] or cv[13] or "")            # e-mail do lead OU do contato órfão
         pode_wa = bool(remetente_configurado()) and ("@" in _dest_mail)
@@ -816,14 +830,14 @@ def comunicacao_responder(request: Request, conversa_id: int = Form(...), texto:
             return JSONResponse({"ok": True})
         if canal != "whatsapp":
             return JSONResponse({"ok": False, "erro": "canal_sem_resposta"})
-        from finance import whatsapp_twilio as wa
-        remetente = _canal_ident(c, ctx["conta_id"], "whatsapp")
+        from finance import whatsapp_out
         numero = cv[3] or cv[4] or cv[2]
-        res = wa.enviar_texto(remetente, numero, texto)
+        res = whatsapp_out.enviar(c, ctx["conta_id"], numero, texto)
         if not res.get("ok"):
             erros = {"nao_configurado": "WhatsApp não conectado (falta credencial Twilio no Render).",
-                     "sem_numero_empresa": "Cadastre o número da empresa na aba Canais.",
-                     "numero_invalido": "Número do lead inválido."}
+                     "sem_numero_empresa": "Configure o WhatsApp desta empresa na aba Canais.",
+                     "numero_invalido": "Número do lead inválido.",
+                     "qr_indisponivel": "A conexão por QR ainda não está ligada — use Twilio ou Cloud API."}
             return JSONResponse({"ok": False, "erro": erros.get(res.get("erro"), "Não consegui enviar (janela de 24h fechada? use template).")})
         _add_msg(c, conversa_id, "whatsapp", "out", "humano",
                  texto, ctx["membro_id"], res.get("sid"))
@@ -947,9 +961,10 @@ def comunicacao_virar_lead(request: Request, conversa_id: int = Form(...)):
 
 @router.post("/painel/prospeccao/comunicacao/canal-numero")
 def comunicacao_canal_numero(request: Request, canal: str = Form(...), numero: str = Form(""),
-                             token: str = Form("")):
-    """Vincula (ou limpa) o identificador de um canal à empresa (nº WhatsApp, ou
-    Página/IG id + Page Token da Meta). Só dono/gestor."""
+                             token: str = Form(""), provedor: str = Form(""),
+                             wa_phone_id: str = Form("")):
+    """Vincula (ou limpa) o identificador de um canal à empresa (nº WhatsApp Twilio,
+    WhatsApp Cloud API do número próprio, ou Página/IG id + Page Token). Só dono/gestor."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -960,17 +975,41 @@ def comunicacao_canal_numero(request: Request, canal: str = Form(...), numero: s
     if canal not in ("whatsapp", "messenger", "instagram"):
         return RedirectResponse(destino, status_code=303)
     from finance import whatsapp_twilio as wa
-    ident = wa.normalizar_from(numero) if canal == "whatsapp" else (numero or "").strip()
     token = (token or "").strip()
+    provedor = (provedor or "").strip()
+    wa_phone_id = (wa_phone_id or "").strip()
     pool = get_pool()
     try:
         with pool.connection() as c:
-            if ident:
+            if canal == "whatsapp" and provedor == "cloud":
+                # WhatsApp Cloud API (número próprio na Meta): precisa do Phone Number ID.
+                if not wa_phone_id:
+                    request.session["prosp_aviso"] = "Informe o Phone Number ID da Cloud API."
+                    return RedirectResponse(destino, status_code=303)
+                ident = wa.normalizar_from(numero) or ("wa:" + wa_phone_id)
                 c.execute(
-                    """insert into canais_config (conta_id, canal, identificador, ativo)
-                       values (%s,%s,%s,true)
+                    """insert into canais_config (conta_id, canal, identificador, provedor, wa_phone_id, ativo)
+                       values (%s,'whatsapp',%s,'cloud',%s,true)
                        on conflict (conta_id, canal)
-                       do update set identificador=excluded.identificador, ativo=true, atualizado_em=now()""",
+                       do update set identificador=excluded.identificador, provedor='cloud',
+                                     wa_phone_id=excluded.wa_phone_id, ativo=true, atualizado_em=now()""",
+                    (ctx["conta_id"], ident, wa_phone_id))
+                if token:      # access token — vazio mantém o atual
+                    c.execute("update canais_config set token=%s where conta_id=%s and canal='whatsapp'",
+                              (token, ctx["conta_id"]))
+                msg = "WhatsApp (Cloud API) conectado ✓ — aponte o webhook do número pra /webhooks/meta."
+                c.commit()
+                request.session["prosp_aviso"] = msg
+                return RedirectResponse(destino, status_code=303)
+            ident = wa.normalizar_from(numero) if canal == "whatsapp" else (numero or "").strip()
+            if ident:
+                extra = ", provedor='twilio', wa_phone_id=null" if canal == "whatsapp" else ""
+                c.execute(
+                    f"""insert into canais_config (conta_id, canal, identificador, provedor, ativo)
+                       values (%s,%s,%s,'twilio',true)
+                       on conflict (conta_id, canal)
+                       do update set identificador=excluded.identificador, ativo=true,
+                                     atualizado_em=now(){extra}""",
                     (ctx["conta_id"], canal, ident))
                 if token:      # Page Access Token (Meta) — vazio mantém o atual
                     c.execute("update canais_config set token=%s where conta_id=%s and canal=%s",
@@ -1076,6 +1115,56 @@ def comunicacao_agente_faq(request: Request, pergunta: str = Form(""), resposta:
     return RedirectResponse(_AG_DESTINO, status_code=303)
 
 
+def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente_on):
+    """WhatsApp de ENTRADA (Twilio OU Cloud API): resolve lead+conversa pelo telefone,
+    grava a mensagem (dedup por provider_sid) e reabre a janela/reativa o agente.
+    Devolve conv_id. Um humano que 'assumiu' (status='pendente') não é reativado."""
+    remetente = _so_digitos(remetente)
+    alvo8 = remetente[-8:] if len(remetente) >= 8 else remetente
+    lead = c.execute(
+        r"""select id from prospeccao
+             where conta_id=%s and right(regexp_replace(coalesce(whatsapp, telefone, ''), '\D', '', 'g'), 8) = %s
+             order by atualizado_em desc limit 1""", (conta_id, alvo8)).fetchone()
+    lead_id = lead[0] if lead else None
+    if not lead_id:
+        # contato NOVO (landing/WhatsApp) → vira lead QUENTE, não atribuído (o dono distribui).
+        nome = (nome_perfil or "").strip() or "Contato WhatsApp"
+        lead_id = c.execute(
+            """insert into prospeccao (conta_id, vendedor_id, empresa, whatsapp,
+                 origem, temperatura, status)
+               values (%s, null, %s, %s, 'whatsapp_inbound', 'quente', 'novo') returning id""",
+            (conta_id, nome[:250], "+" + remetente)).fetchone()[0]
+    # acha a conversa do lead OU uma órfã por contato_ref (e vincula ela ao lead)
+    conv = c.execute(
+        """select id, prospeccao_id from conversas
+            where conta_id=%s and canal='whatsapp'
+              and (prospeccao_id=%s or (prospeccao_id is null and contato_ref=%s))
+            order by ultima_msg_em desc limit 1""",
+        (conta_id, lead_id, remetente)).fetchone()
+    if conv:
+        conv_id = conv[0]
+        if conv[1] is None:
+            c.execute("update conversas set prospeccao_id=%s where id=%s", (lead_id, conv_id))
+    else:
+        conv_id = c.execute(
+            """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status, agente_ativo)
+               values (%s,%s,'whatsapp',%s,'aberta',%s) returning id""",
+            (conta_id, lead_id, remetente, agente_on)).fetchone()[0]
+    c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
+                 values (%s,'whatsapp','in','lead',%s,%s)
+                 on conflict (provider_sid) where provider_sid is not null do nothing""",
+              (conv_id, (corpo or "")[:8000], sid))
+    # reabre a janela de 24h e REATIVA o agente — a menos que um humano tenha assumido
+    # (status='pendente'). O CASE lê o status ANTIGO da linha, então 'pendente' fica preservado.
+    c.execute(
+        """update conversas set ultima_msg_em=now(),
+             janela_expira_em=now()+interval '24 hours',
+             status = case when status='pendente' then 'pendente' else 'aberta' end,
+             agente_ativo = case when status='pendente' then agente_ativo else %s end
+           where id=%s""", (agente_on, conv_id))
+    return conv_id
+
+
 @router.post("/webhooks/twilio")
 async def webhook_twilio(request: Request, background_tasks: BackgroundTasks):
     """Recebe mensagens do WhatsApp (Twilio). Valida a assinatura, acha/cria a
@@ -1103,58 +1192,18 @@ async def webhook_twilio(request: Request, background_tasks: BackgroundTasks):
     remetente = _so_digitos(params.get("From", ""))
     destino = _so_digitos(params.get("To", ""))       # o número da empresa que recebeu
     sid = params.get("MessageSid") or params.get("SmsMessageSid")
-    alvo8 = remetente[-8:] if len(remetente) >= 8 else remetente
     pool = get_pool()
     with pool.connection() as c:
         conta_id = _conta_por_ident(c, "whatsapp", destino)
         if not conta_id:
             return Response("<Response></Response>", media_type="application/xml")
-        lead = c.execute(
-            r"""select id from prospeccao
-                 where conta_id=%s and right(regexp_replace(coalesce(whatsapp, telefone, ''), '\D', '', 'g'), 8) = %s
-                 order by atualizado_em desc limit 1""", (conta_id, alvo8)).fetchone()
-        lead_id = lead[0] if lead else None
-        if not lead_id:
-            # contato NOVO (landing/WhatsApp) → vira lead QUENTE, não atribuído (o
-            # dono distribui). Usa o nome do perfil do WhatsApp quando a Twilio manda.
-            nome = (params.get("ProfileName") or "").strip() or "Contato WhatsApp"
-            lead_id = c.execute(
-                """insert into prospeccao (conta_id, vendedor_id, empresa, whatsapp,
-                     origem, temperatura, status)
-                   values (%s, null, %s, %s, 'whatsapp_inbound', 'quente', 'novo') returning id""",
-                (conta_id, nome[:250], "+" + remetente)).fetchone()[0]
-        # acha a conversa do lead OU uma órfã por contato_ref (e vincula ela ao lead)
-        conv = c.execute(
-            """select id, prospeccao_id from conversas
-                where conta_id=%s and canal='whatsapp'
-                  and (prospeccao_id=%s or (prospeccao_id is null and contato_ref=%s))
-                order by ultima_msg_em desc limit 1""",
-            (conta_id, lead_id, remetente)).fetchone()
         # o agente assume conversa nova quando o master está ligado (o vendedor pode
         # "assumir" depois, o que desliga o bot só naquela conversa).
         master = c.execute("select coalesce(ativo,false) from agente_config where conta_id=%s",
                            (conta_id,)).fetchone()
         agente_on = bool(master and master[0])
-        if conv:
-            conv_id = conv[0]
-            if conv[1] is None:
-                c.execute("update conversas set prospeccao_id=%s where id=%s", (lead_id, conv_id))
-        else:
-            conv_id = c.execute(
-                """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status, agente_ativo)
-                   values (%s,%s,'whatsapp',%s,'aberta',%s) returning id""",
-                (conta_id, lead_id, remetente, agente_on)).fetchone()[0]
-        c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
-                     values (%s,'whatsapp','in','lead',%s,%s)""", (conv_id, corpo[:8000], sid))
-        # reabre a janela de 24h e REATIVA o agente — a menos que um humano tenha
-        # assumido a conversa (status='pendente'), aí respeitamos e não reativamos.
-        # (o CASE lê o status ANTIGO da linha, então 'pendente' fica preservado.)
-        c.execute(
-            """update conversas set ultima_msg_em=now(),
-                 janela_expira_em=now()+interval '24 hours',
-                 status = case when status='pendente' then 'pendente' else 'aberta' end,
-                 agente_ativo = case when status='pendente' then agente_ativo else %s end
-               where id=%s""", (agente_on, conv_id))
+        conv_id = _wa_inbound_conversa(c, conta_id, remetente, corpo, sid,
+                                       params.get("ProfileName"), agente_on)
         c.commit()
     # deixa o agente atender em background (não segura a resposta pro Twilio)
     from finance import agente as _ag
@@ -1255,6 +1304,22 @@ async def webhook_meta(request: Request, background_tasks: BackgroundTasks):
     disparar = []
     with pool.connection() as c:
         for ev in eventos:
+            if ev["plataforma"] == "whatsapp":
+                # WhatsApp Cloud API (número próprio): roteia pelo phone_number_id
+                r = c.execute("""select conta_id from canais_config
+                                  where canal='whatsapp' and ativo and wa_phone_id=%s limit 1""",
+                              (ev["conta_ident"],)).fetchone()
+                conta_id = r[0] if r else None
+                if not conta_id:
+                    continue
+                m = c.execute("select coalesce(ativo,false) from agente_config where conta_id=%s",
+                              (conta_id,)).fetchone()
+                agente_on = bool(m and m[0])
+                conv_id = _wa_inbound_conversa(c, conta_id, ev["sender"], ev["texto"],
+                                               ev.get("sid"), ev.get("nome"), agente_on)
+                if agente_on:
+                    disparar.append((conta_id, conv_id))
+                continue
             conta_id = _conta_por_meta(c, ev["plataforma"], ev["conta_ident"])
             if not conta_id:
                 continue
@@ -2962,6 +3027,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .st-off{color:#e0a33e;border-color:#5a4520;background:#241d10}
 .cx-env{font-family:ui-monospace,Menlo,monospace;font-size:.76rem;background:var(--bg);border:1px solid var(--borda);border-radius:8px;padding:.5rem .6rem;color:var(--txt-mut);margin-top:.5rem}
 .cx-env b{color:var(--verde-claro)}
+.waseg{display:flex;gap:.3rem;flex-wrap:wrap;margin-bottom:.6rem}
+.waseg label{font-size:.76rem;border:1px solid var(--borda);border-radius:999px;padding:.28rem .6rem;cursor:pointer;color:var(--txt-mut);display:inline-flex;align-items:center;gap:.3rem}
+.waseg label.on{border-color:var(--verde);color:var(--txt);background:#10241a}
+.waseg label input{accent-color:var(--verde)}
+.waprov{display:none}
 .sw{position:relative;display:inline-block;width:42px;height:24px;flex-shrink:0}
 .sw input{opacity:0;width:0;height:0}
 .sw span{position:absolute;inset:0;background:#333;border-radius:999px;cursor:pointer;transition:.15s}
@@ -3164,20 +3234,60 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% else %}<div class="mut" style="margin-top:.4rem;font-size:.8rem">SMTP (Google Workspace). Prospecção fria ✓</div>{% endif %}
     </div>
     <div class="cx-card">
-      <h3>💬 WhatsApp <span class="cx-stat {{ 'st-on' if canais.whatsapp else 'st-off' }}">● {{ 'Conectado' if canais.whatsapp else ('Falta o número' if canais.twilio else 'Falta credencial') }}</span></h3>
-      <div class="mut" style="font-size:.8rem">Via Twilio. As credenciais da conta ficam no Render (globais, uma vez):</div>
-      <div class="cx-env"><b>TWILIO_ACCOUNT_SID</b>=•••••<br><b>TWILIO_AUTH_TOKEN</b>=•••••</div>
+      <h3>💬 WhatsApp <span class="cx-stat {{ 'st-on' if canais.whatsapp else 'st-off' }}">● {{ 'Conectado' if canais.whatsapp else 'A configurar' }}</span></h3>
       {% if gerencia %}
-      <form method="post" action="/painel/prospeccao/comunicacao/canal-numero" style="margin-top:.6rem">
-        <input type="hidden" name="canal" value="whatsapp">
-        <label class="lbl">Número desta empresa (fica vinculado só a ela)</label>
-        <div style="display:flex;gap:.4rem">
-          <input class="fld" name="numero" inputmode="tel" placeholder="+17602847678" value="{{ canais.numeros.get('whatsapp','') }}">
-          <button class="pbtn" style="white-space:nowrap">Salvar</button>
+      <div class="mut" style="font-size:.8rem;margin-bottom:.5rem">Como este cliente conecta o WhatsApp:</div>
+      <div class="waseg">
+        <label class="{{ 'on' if canais.wa_provedor!='cloud' else '' }}"><input type="radio" name="wa_prov_sel" value="twilio" {{ 'checked' if canais.wa_provedor!='cloud' else '' }} onchange="waProv('twilio')">Twilio</label>
+        <label class="{{ 'on' if canais.wa_provedor=='cloud' else '' }}"><input type="radio" name="wa_prov_sel" value="cloud" {{ 'checked' if canais.wa_provedor=='cloud' else '' }} onchange="waProv('cloud')">Número próprio (Cloud API)</label>
+        <label><input type="radio" name="wa_prov_sel" value="qr" onchange="waProv('qr')">QR Code</label>
+      </div>
+
+      <div id="wa-twilio" class="waprov">
+        <div class="mut" style="font-size:.78rem">Via Twilio (BSP). Credenciais globais no Render:</div>
+        <div class="cx-env"><b>TWILIO_ACCOUNT_SID</b>=•••••<br><b>TWILIO_AUTH_TOKEN</b>=•••••</div>
+        <form method="post" action="/painel/prospeccao/comunicacao/canal-numero" style="margin-top:.5rem">
+          <input type="hidden" name="canal" value="whatsapp"><input type="hidden" name="provedor" value="twilio">
+          <label class="lbl">Número desta empresa</label>
+          <div style="display:flex;gap:.4rem">
+            <input class="fld" name="numero" inputmode="tel" placeholder="+17602847678" value="{{ canais.numeros.get('whatsapp','') if canais.wa_provedor!='cloud' else '' }}">
+            <button class="pbtn" style="white-space:nowrap">Salvar</button>
+          </div>
+        </form>
+        <div class="mut" style="margin-top:.4rem;font-size:.78rem">No painel Twilio, aponte o webhook pra <code>/webhooks/twilio</code>.</div>
+      </div>
+
+      <div id="wa-cloud" class="waprov">
+        <div class="mut" style="font-size:.78rem">Número <b>próprio</b> do cliente, direto na Meta — sem Twilio, grátis e sem risco de ban. Usa o mesmo app da Meta (env) + webhook <code>/webhooks/meta</code>.</div>
+        <div style="font-size:.72rem;color:var(--txt-mut);background:#181a17;border:1px solid var(--borda);border-radius:8px;padding:.45rem .6rem;margin:.5rem 0">⚠️ Ao registrar o número na Cloud API ele <b>sai do app do celular</b> e passa a ser operado pelo sistema. Requer conta Meta Business + verificar o número.</div>
+        <form method="post" action="/painel/prospeccao/comunicacao/canal-numero" style="margin-top:.2rem">
+          <input type="hidden" name="canal" value="whatsapp"><input type="hidden" name="provedor" value="cloud">
+          <label class="lbl">Número (opcional, só p/ exibir)</label>
+          <input class="fld" name="numero" inputmode="tel" placeholder="+5586999999999" value="{{ canais.numeros.get('whatsapp','') if canais.wa_provedor=='cloud' else '' }}" style="margin-bottom:.35rem">
+          <label class="lbl">Phone Number ID (Cloud API)</label>
+          <input class="fld" name="wa_phone_id" placeholder="ex.: 123456789012345" style="margin-bottom:.35rem">
+          <label class="lbl">Access Token</label>
+          <input class="fld" name="token" type="password" placeholder="token da Cloud API {% if canais.tokens_set.get('whatsapp') and canais.wa_provedor=='cloud' %}(salvo — vazio mantém){% endif %}" autocomplete="new-password" style="margin-bottom:.45rem">
+          <button class="pbtn">Conectar número próprio</button>
+        </form>
+        <div class="mut" style="margin-top:.4rem;font-size:.78rem">Pega o <b>Phone Number ID</b> e o <b>token</b> em developers.facebook.com → seu app → WhatsApp → API Setup. Assine <code>messages</code>.</div>
+      </div>
+
+      <div id="wa-qr" class="waprov">
+        <div style="font-size:.78rem;color:#e0a33e;background:#2a2113;border:1px solid #5a4520;border-radius:8px;padding:.55rem .7rem">
+          <b>QR Code (tipo WhatsApp Web)</b><br>Usa o número <b>como está</b>, sem migrar nada. Mas: viola os termos do WhatsApp (<b>risco de banimento</b>) e exige um serviço à parte sempre-ligado.
         </div>
-      </form>
-      {% else %}<div class="mut" style="margin-top:.4rem">Número: <b>{{ canais.numeros.get('whatsapp','—') }}</b></div>{% endif %}
-      <div class="mut" style="margin-top:.4rem;font-size:.8rem">No painel Twilio, aponte o webhook do número pra <code>/webhooks/twilio</code>.</div>
+        <button class="pbtn ghost" disabled style="margin-top:.5rem">📱 Gerar QR — em breve</button>
+        <div class="mut" style="margin-top:.4rem;font-size:.78rem">Me avise se quiser ligar essa via; deixo o serviço de sessão pronto num próximo passo.</div>
+      </div>
+      <script>
+      function waProv(v){['twilio','cloud','qr'].forEach(function(k){var e=document.getElementById('wa-'+k);if(e)e.style.display=(k===v)?'block':'none';});
+        document.querySelectorAll('.waseg label').forEach(function(l){var r=l.querySelector('input');l.classList.toggle('on',!!r&&r.value===v);});}
+      waProv('{{ 'cloud' if canais.wa_provedor=='cloud' else 'twilio' }}');
+      </script>
+      {% else %}
+      <div class="mut" style="margin-top:.4rem">Provedor: <b>{{ 'Cloud API (número próprio)' if canais.wa_provedor=='cloud' else 'Twilio' }}</b> · Número: <b>{{ canais.numeros.get('whatsapp','—') }}</b></div>
+      {% endif %}
     </div>
     <div class="cx-card">
       <h3>🔵 Messenger <span class="cx-stat {{ 'st-on' if canais.messenger else 'st-off' }}">● {{ 'Conectado' if canais.messenger else ('Falta Página/token' if canais.meta else 'Falta app (env)') }}</span></h3>

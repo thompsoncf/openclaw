@@ -3057,11 +3057,13 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .st-off{color:#e0a33e;border-color:#5a4520;background:#241d10}
 .cx-env{font-family:ui-monospace,Menlo,monospace;font-size:.76rem;background:var(--bg);border:1px solid var(--borda);border-radius:8px;padding:.5rem .6rem;color:var(--txt-mut);margin-top:.5rem}
 .cx-env b{color:var(--verde-claro)}
-.waseg{display:flex;gap:.3rem;flex-wrap:wrap;margin-bottom:.6rem}
-.waseg label{font-size:.76rem;border:1px solid var(--borda);border-radius:999px;padding:.28rem .6rem;cursor:pointer;color:var(--txt-mut);display:inline-flex;align-items:center;gap:.3rem}
-.waseg label.on{border-color:var(--verde);color:var(--txt);background:#10241a}
-.waseg label input{accent-color:var(--verde)}
+.waseg{display:grid;grid-template-columns:repeat(3,1fr);gap:.25rem;margin:.3rem 0 .75rem;background:var(--bg);border:1px solid var(--borda);border-radius:10px;padding:.25rem}
+.waseg label{font-size:.75rem;border-radius:7px;padding:.42rem .25rem;cursor:pointer;color:var(--txt-mut);text-align:center;line-height:1.15;display:flex;align-items:center;justify-content:center;transition:background .12s,color .12s}
+.waseg label:hover{color:var(--txt)}
+.waseg label.on{color:#fff;background:var(--verde);font-weight:600}
+.waseg label input{display:none}
 .waprov{display:none}
+.waprov .lbl{margin-top:.5rem}
 .sw{position:relative;display:inline-block;width:42px;height:24px;flex-shrink:0}
 .sw input{opacity:0;width:0;height:0}
 .sw span{position:absolute;inset:0;background:#333;border-radius:999px;cursor:pointer;transition:.15s}
@@ -3266,15 +3268,16 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <div class="cx-card">
       <h3>💬 WhatsApp <span class="cx-stat {{ 'st-on' if canais.whatsapp else 'st-off' }}">● {{ 'Conectado' if canais.whatsapp else 'A configurar' }}</span></h3>
       {% if gerencia %}
-      <div class="mut" style="font-size:.8rem;margin-bottom:.5rem">Como este cliente conecta o WhatsApp:</div>
+      <div class="mut" style="font-size:.8rem;margin-bottom:.1rem">Como este cliente conecta o WhatsApp:</div>
       <div class="waseg">
         <label class="{{ 'on' if canais.wa_provedor!='cloud' else '' }}"><input type="radio" name="wa_prov_sel" value="twilio" {{ 'checked' if canais.wa_provedor!='cloud' else '' }} onchange="waProv('twilio')">Twilio</label>
-        <label class="{{ 'on' if canais.wa_provedor=='cloud' else '' }}"><input type="radio" name="wa_prov_sel" value="cloud" {{ 'checked' if canais.wa_provedor=='cloud' else '' }} onchange="waProv('cloud')">Número próprio (Cloud API)</label>
+        <label class="{{ 'on' if canais.wa_provedor=='cloud' else '' }}"><input type="radio" name="wa_prov_sel" value="cloud" {{ 'checked' if canais.wa_provedor=='cloud' else '' }} onchange="waProv('cloud')">Número próprio</label>
         <label><input type="radio" name="wa_prov_sel" value="qr" onchange="waProv('qr')">QR Code</label>
       </div>
 
       <div id="wa-twilio" class="waprov">
-        <div class="mut" style="font-size:.78rem">Via Twilio (BSP). Credenciais globais no Render:</div>
+        <div style="font-weight:600;font-size:.85rem;margin-bottom:.15rem">Via Twilio (BSP)</div>
+        <div class="mut" style="font-size:.78rem">Credenciais globais no Render:</div>
         <div class="cx-env"><b>TWILIO_ACCOUNT_SID</b>=•••••<br><b>TWILIO_AUTH_TOKEN</b>=•••••</div>
         <form method="post" action="/painel/prospeccao/comunicacao/canal-numero" style="margin-top:.5rem">
           <input type="hidden" name="canal" value="whatsapp"><input type="hidden" name="provedor" value="twilio">
@@ -3288,6 +3291,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       </div>
 
       <div id="wa-cloud" class="waprov">
+        <div style="font-weight:600;font-size:.85rem;margin-bottom:.15rem">Cloud API oficial da Meta</div>
         <div class="mut" style="font-size:.78rem">Número <b>próprio</b> do cliente, direto na Meta — sem Twilio, grátis e sem risco de ban. Usa o mesmo app da Meta (env) + webhook <code>/webhooks/meta</code>.</div>
         <div style="font-size:.72rem;color:var(--txt-mut);background:#181a17;border:1px solid var(--borda);border-radius:8px;padding:.45rem .6rem;margin:.5rem 0">⚠️ Ao registrar o número na Cloud API ele <b>sai do app do celular</b> e passa a ser operado pelo sistema. Requer conta Meta Business + verificar o número.</div>
         <form method="post" action="/painel/prospeccao/comunicacao/canal-numero" style="margin-top:.2rem">
@@ -3301,11 +3305,14 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <button class="pbtn">Conectar número próprio</button>
         </form>
         {% if canais.wa_provedor=='cloud' and canais.wa_phone_set %}
-        <div style="display:flex;gap:.4rem;margin-top:.5rem;flex-wrap:wrap;align-items:center">
-          <input class="fld" id="watest-num" inputmode="tel" placeholder="Seu nº p/ receber o teste (+55...)" style="flex:1;min-width:180px">
-          <button type="button" class="pbtn ghost" id="watest-btn" onclick="waTestar()" style="white-space:nowrap">📤 Testar envio</button>
+        <div style="border:1px solid var(--borda);border-radius:9px;padding:.55rem .6rem;margin-top:.6rem;background:var(--bg)">
+          <div class="lbl" style="margin:0 0 .35rem">Testar envio</div>
+          <div style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center">
+            <input class="fld" id="watest-num" inputmode="tel" placeholder="Seu nº (+55...)" style="flex:1;min-width:150px">
+            <button type="button" class="pbtn ghost" id="watest-btn" onclick="waTestar()" style="white-space:nowrap">📤 Enviar teste</button>
+          </div>
+          <div class="mut" id="watest-msg" style="font-size:.78rem;margin-top:.35rem"></div>
         </div>
-        <div class="mut" id="watest-msg" style="font-size:.78rem;margin-top:.35rem"></div>
         <script>
         function waTestar(){var b=document.getElementById('watest-btn'),m=document.getElementById('watest-msg'),n=document.getElementById('watest-num');if(!b)return;
           var num=(n&&n.value||'').trim();b.disabled=true;var t=b.textContent;b.textContent='Enviando…';m.textContent='';m.style.color='';

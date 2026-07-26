@@ -152,8 +152,8 @@ Regras:
   tem itens demais pra caber numa unica chamada de registrar_itens_cupom (a
   resposta corta no meio e NADA e' salvo). Entao SEMPRE que o cupom tiver MUITOS
   itens (mais de ~25) OU chegar em PARTES/varias fotos, salve os itens em LOTES:
-  * 1o lote: registrar_itens_cupom com os ~20 primeiros itens (pode ir sem anexar).
-  * Lotes seguintes: chame de novo com os proximos ~20 itens e anexar=true - o
+  * 1o lote: registrar_itens_cupom com os ~30 primeiros itens (pode ir sem anexar).
+  * Lotes seguintes: chame de novo com os proximos ~30 itens e anexar=true - o
     sistema junta tudo no MESMO cupom e NAO duplica (dedupe por codigo/descricao).
     Repita ate' salvar TODOS os itens. Nunca pare no meio.
   * Passe o cnpj_emitente/chave/estabelecimento so' precisa em UM dos lotes.

@@ -4,7 +4,11 @@ services:
   # /webhook/telegram), junto com o WhatsApp e o portal - 1 servico em vez de 2.
   # Pra dev local, telegram_bot.py (run_polling) continua funcionando.
   - type: web
-    name: openclaw-web
+    # NOME casa com o servico que JA' roda no Render (sufixo -bcu3). Sem isso, o
+    # Blueprint cria um "openclaw-web" novo e vazio (que falha por nao ter os
+    # secrets) - o duplicado. Mantendo o -bcu3, o Blueprint GERENCIA o servico
+    # vivo (webhook do Telegram + dominio app.zaq-ia.com apontam pra ele).
+    name: openclaw-web-bcu3
     runtime: python
     plan: standard
     numInstances: 1
@@ -58,7 +62,8 @@ services:
   #   ASAAS_SALDO_MIN              -> alerta de saldo baixo do Asaas
   # Precisa de ADMIN_EMAIL + SMTP_* (e-mail) e/ou ADMIN_TELEGRAM_ID (Telegram).
   - type: cron
-    name: openclaw-monitor-saldos
+    # idem: casa com o cron que ja' existe (sufixo -bcu3), pra nao duplicar.
+    name: openclaw-monitor-saldos-bcu3
     runtime: python
     plan: standard
     schedule: "0 12 * * *"   # 12:00 UTC (~09:00 BRT) todo dia

@@ -277,24 +277,36 @@ async def _processar(update: Update, texto: str, imagem_b64: str | None = None,
             pass  # trava falha gracefully, segue o fluxo normal
 
     agente = _agente_do(membro, conta)
-    # Se lemos uma chave (na trava anterior), passa pro livro pra que tools a usem
+    # Se lemos uma chave (na trava anterior), passa pro livro pra que tools a usem.
+    # AGILIDADE: a leitura do QR e' OpenCV pesado - roda FORA do event loop
+    # (to_thread), senao trava o bot inteiro enquanto decodifica (agora que um so'
+    # servico atende Telegram+WhatsApp+portal, bloquear o loop atrasa todo mundo).
     chave_nfce = None
     if imagem_b64:
         try:
             import base64
             dados = base64.b64decode(imagem_b64)
-            from finance.nfce_qr import ler_chave_da_imagem
-            chave_nfce = ler_chave_da_imagem(dados) if media_type.startswith("image/") else None
-            if media_type == "application/pdf":
-                try:
-                    from finance.nfce_qr import ler_chave
-                    chave_nfce = ler_chave(dados, media_type)
-                except Exception:  # noqa: BLE001
-                    chave_nfce = None
+
+            def _ler_chave_sync():
+                from finance.nfce_qr import ler_chave_da_imagem, ler_chave
+                if media_type == "application/pdf":
+                    return ler_chave(dados, media_type)
+                if media_type.startswith("image/"):
+                    return ler_chave_da_imagem(dados)
+                return None
+
+            chave_nfce = await asyncio.to_thread(_ler_chave_sync)
             if chave_nfce:
                 agente.livro.chave_nfce_atual = chave_nfce
         except Exception:  # noqa: BLE001
             pass
+    # AGILIDADE (percepcao): o loop do agente leva alguns segundos (varias chamadas
+    # ao modelo). Mostra "digitando..." na hora pra pessoa saber que estamos nessa.
+    try:
+        from telegram.constants import ChatAction
+        await update.effective_chat.send_action(ChatAction.TYPING)
+    except Exception:  # noqa: BLE001 - feedback opcional, nunca atrapalha
+        pass
     # O agente e' sincrono (rede + LLM): roda fora do event loop pra nao travar o bot.
     try:
         resposta = await asyncio.to_thread(agente.responder, texto, imagem_b64, media_type)

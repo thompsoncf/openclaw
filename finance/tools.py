@@ -496,7 +496,7 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
             nome="registrar_itens_cupom",
             descricao=("Salva os itens individuais de um cupom (produto a produto). "
                        "Por padrao, anexa ao ultimo lancamento registrado. Cupom GRANDE "
-                       "(muitos itens) ou que chegou em VARIAS FOTOS: salve em LOTES de ~20 "
+                       "(muitos itens) ou que chegou em VARIAS FOTOS: salve em LOTES de ~30 "
                        "itens, chamando esta ferramenta varias vezes com anexar=true - o "
                        "sistema junta tudo no mesmo cupom sem duplicar. Nao tente mandar 40+ "
                        "itens de uma vez (a resposta corta e nada e' salvo)."),

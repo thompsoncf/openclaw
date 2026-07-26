@@ -158,23 +158,51 @@ async def _iniciar_telegram_webhook() -> None:
                                             com_updater=False)
         await _tg_app.initialize()
         await _tg_app.start()   # sobe o consumidor da update_queue (sem poller)
-        # Registrar o webhook no Telegram e' o INTERRUPTOR que troca a entrega do
-        # polling pra ca'. So' faz se TELEGRAM_WEBHOOK_URL estiver setada, pra voce
-        # controlar QUANDO virar (e poder testar antes de aposentar o worker).
-        url = os.environ.get("TELEGRAM_WEBHOOK_URL")
-        if url:
-            secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET") or None
-            await _tg_app.bot.set_webhook(
+    except Exception:  # noqa: BLE001 - Application nao subiu: rota fica inativa
+        log.exception("falha ao iniciar a Application do Telegram")
+        _tg_app = None
+        return
+    # Registrar o webhook e' um efeito GLOBAL (do bot, nao do processo) e o
+    # INTERRUPTOR que troca a entrega do polling pra ca'. So' faz se
+    # TELEGRAM_WEBHOOK_URL estiver setada. CRITICO: com 2 workers do uvicorn, os
+    # dois chamam setWebhook quase juntos e o Telegram responde 429 (flood) pra
+    # um deles - isso NAO pode derrubar o _tg_app (basta UM worker registrar; os
+    # dois processam updates igual). Entao a falha aqui e' tolerada.
+    url = os.environ.get("TELEGRAM_WEBHOOK_URL")
+    if not url:
+        log.info("Telegram pronto (webhook), aguardando TELEGRAM_WEBHOOK_URL "
+                 "pra registrar a entrega.")
+        return
+    secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET") or None
+    await _registrar_webhook_telegram(_tg_app.bot, url, secret)
+
+
+async def _registrar_webhook_telegram(bot, url: str, secret: str | None,
+                                      tentativas: int = 2) -> bool:
+    """Registra o webhook, tolerando flood (429). Retorna True se registrou.
+
+    NUNCA propaga excecao: registrar o webhook e' efeito GLOBAL do bot; com 2
+    workers, um pega 429 - basta o outro registrar. A falha aqui nao pode
+    derrubar quem chamou (o _tg_app tem que seguir vivo pra processar updates)."""
+    from telegram.error import RetryAfter
+    import asyncio as _aio
+    for _ in range(max(1, tentativas)):
+        try:
+            await bot.set_webhook(
                 url=url, secret_token=secret,
                 allowed_updates=["message", "edited_message", "callback_query"],
                 drop_pending_updates=False)
             log.info("Telegram webhook registrado em %s", url)
-        else:
-            log.info("Telegram pronto (webhook), aguardando TELEGRAM_WEBHOOK_URL "
-                     "pra registrar a entrega.")
-    except Exception:  # noqa: BLE001 - nunca derruba o web por causa do Telegram
-        log.exception("falha ao iniciar Telegram por webhook")
-        _tg_app = None
+            return True
+        except RetryAfter as e:                       # 429 flood: espera e tenta
+            await _aio.sleep(getattr(e, "retry_after", 1) or 1)
+        except Exception:  # noqa: BLE001 - outro worker pode ter registrado; segue
+            log.warning("nao registrei o webhook agora (outro worker pode ter "
+                        "feito); a rota /webhook/telegram segue ATIVA", exc_info=True)
+            return False
+    log.warning("webhook nao registrado apos %s tentativas (flood); a rota segue "
+                "ATIVA e outro worker/deploy registra", tentativas)
+    return False
 
 
 @app.on_event("shutdown")

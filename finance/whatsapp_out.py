@@ -31,7 +31,8 @@ def configurado_conta(c, conta_id) -> bool:
     if prov == "cloud":
         return _cloud.configurado(r[2], r[3])
     if prov == "qr":
-        return False        # serviço externo (futuro)
+        from finance import whatsapp_qr as _qr
+        return _qr.configurado()   # serviço ligado; a sessão em si é checada no envio
     return _twilio.configurado() and bool(r[1])
 
 
@@ -44,5 +45,6 @@ def enviar(c, conta_id, numero, texto) -> dict:
     if prov == "cloud":
         return _cloud.enviar_texto(r[2], r[3], numero, texto)
     if prov == "qr":
-        return {"ok": False, "erro": "qr_indisponivel"}
+        from finance import whatsapp_qr as _qr
+        return _qr.enviar_texto(conta_id, numero, texto)
     return _twilio.enviar_texto(r[1], numero, texto)

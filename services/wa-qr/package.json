@@ -1,0 +1,20 @@
+{
+  "name": "zaq-wa-qr",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Serviço de sessão do WhatsApp via QR Code (Baileys) para o ZAQ. Multi-tenant por conta_id; estado de auth no Postgres.",
+  "type": "commonjs",
+  "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.9",
+    "pg": "^8.13.1",
+    "pino": "^9.5.0",
+    "qrcode": "^1.5.4"
+  }
+}

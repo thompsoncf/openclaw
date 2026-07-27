@@ -30,6 +30,17 @@ def pool():
     p.close()
 
 
+@pytest.fixture(autouse=True)
+def _isola(pool):
+    """rodar() varre TODAS as contas (certo em produção). No teste, limpa as tabelas
+    da agenda antes de cada caso pra config/eventos de um teste não vazarem pro outro."""
+    with pool.connection() as c:
+        c.execute("truncate table lembretes_enviados, agenda_config, eventos_agenda "
+                  "restart identity cascade")
+        c.commit()
+    yield
+
+
 @pytest.fixture()
 def conta_id(pool):
     with pool.connection() as c:

@@ -52,26 +52,33 @@ def parse_datahora(s: str | None) -> datetime | None:
     return None
 
 
+# Categorias do compromisso (pro portal colorir e separar pessoal/empresa).
+TIPOS = ("pessoal", "empresa", "fornecedor")
+
+
 def _fmt_evento(row) -> dict:
     return {"id": row[0], "titulo": row[1], "inicio": row[2], "fim": row[3],
             "local": row[4], "descricao": row[5], "lembrete_min": row[6],
-            "criado_em": row[7] if len(row) > 7 else None}
+            "criado_em": row[7] if len(row) > 7 else None,
+            "tipo": (row[8] if len(row) > 8 else None) or "pessoal"}
 
 
-_COLS = "id, titulo, inicio, fim, local, descricao, lembrete_min, criado_em"
+_COLS = "id, titulo, inicio, fim, local, descricao, lembrete_min, criado_em, tipo"
 
 
 def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
                  membro_id: int | None = None, fim: datetime | None = None,
                  local: str | None = None, descricao: str | None = None,
-                 lembrete_min: int | None = None) -> dict:
+                 lembrete_min: int | None = None, tipo: str = "pessoal") -> dict:
+    tipo = tipo if tipo in TIPOS else "pessoal"
     with pool.connection() as c:
         row = c.execute(
             """insert into eventos_agenda
-               (conta_id, membro_id, titulo, inicio, fim, local, descricao, lembrete_min)
-               values (%s,%s,%s,%s,%s,%s,%s,%s)
+               (conta_id, membro_id, titulo, inicio, fim, local, descricao, lembrete_min, tipo)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                returning """ + _COLS,
-            (conta_id, membro_id, titulo.strip(), inicio, fim, local, descricao, lembrete_min),
+            (conta_id, membro_id, titulo.strip(), inicio, fim, local, descricao,
+             lembrete_min, tipo),
         ).fetchone()
         c.commit()
     return _fmt_evento(row)
@@ -188,3 +195,87 @@ def feed_ics(eventos: list[dict]) -> str:
 def fmt_hora(ev: dict) -> str:
     """dd/mm HH:MM em Brasília, pra mostrar pro usuário."""
     return ev["inicio"].astimezone(BRT).strftime("%d/%m %H:%M")
+
+
+# ---------- calendário do mês (pro portal) ----------
+
+def eventos_mes(pool, conta_id: int, ano: int, mes: int) -> list[dict]:
+    """Todos os eventos ativos que caem no mês (Brasília). Pra pintar o calendário."""
+    de = datetime(ano, mes, 1, tzinfo=BRT)
+    ate = datetime(ano + 1, 1, 1, tzinfo=BRT) if mes == 12 else datetime(ano, mes + 1, 1, tzinfo=BRT)
+    return listar_eventos(pool, conta_id, de, ate)
+
+
+# ---------- config do lembrete (opt-in) + feed .ics assinável ----------
+
+def get_config(pool, conta_id: int) -> dict:
+    """Config do lembrete da conta (cria defaults na memória se ainda não salvou)."""
+    with pool.connection() as c:
+        r = c.execute(
+            "select lembrete_ativo, hora_resumo, aviso_antes_min, feed_token "
+            "from agenda_config where conta_id=%s", (conta_id,)).fetchone()
+    if not r:
+        return {"lembrete_ativo": False, "hora_resumo": 7, "aviso_antes_min": None,
+                "feed_token": None}
+    return {"lembrete_ativo": bool(r[0]), "hora_resumo": r[1],
+            "aviso_antes_min": r[2], "feed_token": r[3]}
+
+
+def salvar_config(pool, conta_id: int, *, lembrete_ativo: bool, hora_resumo: int,
+                  aviso_antes_min: int | None) -> None:
+    """Grava (upsert) a config do lembrete. hora_resumo 0-23; aviso None = sem aviso."""
+    hora = hora_resumo if 0 <= (hora_resumo or 0) <= 23 else 7
+    with pool.connection() as c:
+        c.execute(
+            """insert into agenda_config (conta_id, lembrete_ativo, hora_resumo, aviso_antes_min, atualizado_em)
+               values (%s,%s,%s,%s, now())
+               on conflict (conta_id) do update set
+                 lembrete_ativo = excluded.lembrete_ativo,
+                 hora_resumo    = excluded.hora_resumo,
+                 aviso_antes_min= excluded.aviso_antes_min,
+                 atualizado_em  = now()""",
+            (conta_id, bool(lembrete_ativo), hora, aviso_antes_min))
+        c.commit()
+
+
+def garantir_feed_token(pool, conta_id: int) -> str:
+    """Devolve o token do feed .ics da conta, criando um (e a linha de config) se preciso.
+    O token é o segredo que deixa o link .ics ser público sem expor a conta."""
+    import secrets
+    cfg = get_config(pool, conta_id)
+    if cfg.get("feed_token"):
+        return cfg["feed_token"]
+    token = secrets.token_urlsafe(18)
+    with pool.connection() as c:
+        c.execute(
+            """insert into agenda_config (conta_id, feed_token) values (%s,%s)
+               on conflict (conta_id) do update set feed_token =
+                 coalesce(agenda_config.feed_token, excluded.feed_token)""",
+            (conta_id, token))
+        r = c.execute("select feed_token from agenda_config where conta_id=%s",
+                      (conta_id,)).fetchone()
+        c.commit()
+    return r[0]
+
+
+def conta_por_feed_token(pool, token: str) -> int | None:
+    """Acha a conta dona de um feed .ics pelo token (rota pública do .ics)."""
+    token = (token or "").strip()
+    if not token:
+        return None
+    with pool.connection() as c:
+        r = c.execute("select conta_id from agenda_config where feed_token=%s",
+                      (token,)).fetchone()
+    return r[0] if r else None
+
+
+def eventos_para_feed(pool, conta_id: int) -> list[dict]:
+    """Eventos que vão no feed .ics: dos últimos 30 dias em diante (histórico curto
+    + tudo que vem), com teto pra não estourar."""
+    with pool.connection() as c:
+        rows = c.execute(
+            "select " + _COLS + " from eventos_agenda "
+            "where conta_id=%s and status='ativo' and inicio >= %s "
+            "order by inicio limit 500",
+            (conta_id, agora_brt() - timedelta(days=30))).fetchall()
+    return [_fmt_evento(r) for r in rows]

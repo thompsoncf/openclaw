@@ -1,0 +1,95 @@
+"""Convidados de reunião + confirmação por link público (finance/convites.py).
+
+Roda com banco de TESTE separado (ver tests/conftest.py).
+"""
+import os
+from datetime import timedelta
+from pathlib import Path
+
+import pytest
+from psycopg_pool import ConnectionPool
+
+from db.conexao import init_schema
+from finance import agenda as ag
+from finance import convites as cv
+
+
+@pytest.fixture(scope="module")
+def pool():
+    p = ConnectionPool(os.environ["TEST_DATABASE_URL"], min_size=1, max_size=4,
+                       open=True, kwargs={"prepare_threshold": None})
+    init_schema(p)
+    migr = Path(__file__).resolve().parent.parent / "db" / "migracoes"
+    with p.connection() as c:
+        for nome in ("098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql"):
+            c.execute((migr / nome).read_text(encoding="utf-8"))
+        c.commit()
+    yield p
+    p.close()
+
+
+@pytest.fixture()
+def conta_id(pool):
+    with pool.connection() as c:
+        cid = c.execute("insert into contas (tipo, nome) values ('pj','Padaria Central') returning id").fetchone()[0]
+        c.commit()
+    return cid
+
+
+def _evento(pool, conta_id, titulo="Reunião de fechamento"):
+    return ag.criar_evento(pool, conta_id, titulo,
+                           ag.agora_brt() + timedelta(days=1), tipo="empresa",
+                           local="Online")
+
+
+def test_criar_e_resolver_por_token(pool, conta_id):
+    ev = _evento(pool, conta_id)
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "João da Padaria", "(86) 99999-0000")
+    assert conv["token"] and conv["status"] == "pendente"
+    c = cv.por_token(pool, conv["token"])
+    assert c is not None
+    assert c["nome"] == "João da Padaria" and c["conta_id"] == conta_id
+    assert c["evento"]["titulo"] == "Reunião de fechamento"
+    assert c["empresa"] == "Padaria Central"          # nome da empresa vem junto
+
+
+def test_por_token_desconhecido_volta_none(pool, conta_id):
+    assert cv.por_token(pool, "nao-existe") is None
+    assert cv.por_token(pool, "") is None
+
+
+def test_responder_confirma_e_reflete(pool, conta_id):
+    ev = _evento(pool, conta_id)
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Maria", "")
+    r = cv.responder(pool, conv["token"], "confirmado")
+    assert r is not None and r["status"] == "confirmado"
+    # persistiu
+    assert cv.por_token(pool, conv["token"])["status"] == "confirmado"
+
+
+def test_responder_remarcar_guarda_resposta(pool, conta_id):
+    ev = _evento(pool, conta_id)
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Ana", "")
+    r = cv.responder(pool, conv["token"], "remarcar", "Podia ser 16h?")
+    assert r["status"] == "remarcar" and r["resposta"] == "Podia ser 16h?"
+
+
+def test_responder_status_invalido_ou_token_ruim(pool, conta_id):
+    ev = _evento(pool, conta_id)
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Zé", "")
+    assert cv.responder(pool, conv["token"], "pendente") is None   # não pode "des-responder"
+    assert cv.responder(pool, conv["token"], "qualquer") is None   # status inválido
+    assert cv.responder(pool, "token-ruim", "confirmado") is None  # token inexistente
+
+
+def test_por_evento_agrupa_e_isola_por_conta(pool, conta_id):
+    ev = _evento(pool, conta_id)
+    cv.criar_convidado(pool, conta_id, ev["id"], "A", "")
+    cv.criar_convidado(pool, conta_id, ev["id"], "B", "")
+    mapa = cv.por_evento(pool, conta_id, [ev["id"]])
+    assert len(mapa[ev["id"]]) == 2
+    # outra conta não enxerga
+    with pool.connection() as c:
+        outra = c.execute("insert into contas (tipo,nome) values ('pf','Outra') returning id").fetchone()[0]
+        c.commit()
+    assert cv.por_evento(pool, outra, [ev["id"]]) == {}

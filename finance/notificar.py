@@ -112,6 +112,29 @@ def avisar_proposta_assinada(pool, conta_id: int, cliente: str, assinante: str,
     return ok
 
 
+def avisar_dono_convite(pool, conta_id: int, convidado: str, titulo: str,
+                        quando: str, status: str, resposta: str = "") -> bool:
+    """Avisa o dono (Telegram) que um convidado respondeu ao convite de reunião.
+    status: confirmado | remarcar | recusado. Best-effort (nunca quebra o fluxo)."""
+    chat = _telegram_id_do_dono(pool, conta_id)
+    if not chat:
+        _log.info("notificar: dono da conta %s sem telegram (convite)", conta_id)
+        return False
+    quem = convidado or "O convidado"
+    if status == "confirmado":
+        cab = f"✅ *{quem}* confirmou presença"
+    elif status == "remarcar":
+        cab = f"🔁 *{quem}* quer remarcar"
+    else:
+        cab = f"❌ *{quem}* não vai poder ir"
+    linhas = [f"{cab} na reunião *{titulo}* ({quando})."]
+    if resposta:
+        linhas.append(f"💬 _{resposta}_")
+    if status != "confirmado":
+        linhas.append("Abra a agenda pra ajustar quando puder.")
+    return _enviar_telegram(chat, "\n".join(linhas))
+
+
 def notificar_admin(texto: str) -> bool:
     """Manda uma mensagem pro Telegram do ADMIN do SaaS (env ADMIN_TELEGRAM_ID).
     Tolerante a falha: sem env ou sem rede, loga e devolve False."""

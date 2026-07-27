@@ -257,6 +257,21 @@ Regras:
 - Nunca invente numeros: se nao tiver certeza do valor, pergunte."""
 
 
+_BLOCO_AGENDA = """
+
+AGENDA (compromissos): a pessoa pode marcar/ver/remarcar/cancelar compromissos.
+- "marca reuniao com o contador amanha 15h", "consulta dia 20 as 9h", "me lembra
+  de pagar o boleto sexta" -> marcar_evento. CONVERTA a data/hora pro formato
+  dd/mm/aaaa HH:MM em horario de BRASILIA (ex: se hoje e' 27/07/2026 e a pessoa
+  diz "amanha 15h", passe inicio="28/07/2026 15:00"). Sem hora, pergunte ou
+  assuma um horario e confirme.
+- "o que tenho hoje?", "minha agenda", "o que vem essa semana?" -> ver_agenda.
+- "remarca pra sexta", "muda pra 16h" -> remarcar_evento (pelo titulo).
+- "cancela a consulta", "apaga o compromisso" -> cancelar_evento.
+A ferramenta ja' devolve o link "adicionar ao Google/Apple/Outlook" ao marcar -
+nao monte link na mao. NUNCA invente compromisso que a pessoa nao pediu."""
+
+
 def criar_agente_financeiro(brain: Brain, livro: LivroCaixa,
                             memoria: MemoriaConversa | None = None,
                             lista=None, papel: str = "dono", banco=None,
@@ -276,6 +291,15 @@ def criar_agente_financeiro(brain: Brain, livro: LivroCaixa,
                     pool, conta_id, getattr(livro, "membro_id", None))
         except Exception:
             pass  # qualquer erro no módulo PJ NÃO pode derrubar o agente PF
+    # AGENDA própria do Zaq: disponível pra QUALQUER conta (PF e PJ).
+    if pool is not None and conta_id is not None:
+        try:
+            from .agenda_tools import construir_ferramentas_agenda
+            ferramentas = ferramentas + construir_ferramentas_agenda(
+                pool, conta_id, getattr(livro, "membro_id", None))
+            persona = persona + _BLOCO_AGENDA
+        except Exception:
+            pass  # agenda nunca derruba o agente
     return criar_agente(
         nome="Financeiro",
         persona=persona,

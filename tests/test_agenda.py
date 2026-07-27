@@ -67,9 +67,10 @@ def pool():
     p = ConnectionPool(os.environ["TEST_DATABASE_URL"], min_size=1, max_size=4,
                        open=True, kwargs={"prepare_threshold": None})
     init_schema(p)
-    ddl = (Path(__file__).resolve().parent.parent / "db" / "migracoes" / "098_agenda.sql")
+    migr = Path(__file__).resolve().parent.parent / "db" / "migracoes"
     with p.connection() as c:
-        c.execute(ddl.read_text(encoding="utf-8"))
+        for nome in ("098_agenda.sql", "099_agenda_tipo.sql"):
+            c.execute((migr / nome).read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()
@@ -116,3 +117,55 @@ def test_ferramenta_marcar_pede_data_quando_nao_entende(pool, conta_id):
     ferrs = {f.nome: f for f in construir_ferramentas_agenda(pool, conta_id)}
     r = ferrs["marcar_evento"].executar({"titulo": "X", "inicio": "sei la quando"})
     assert "data" in r.lower() or "quando" in r.lower()      # pede a data, não quebra
+
+
+# ---------- portal: tipo, mês, config do lembrete e feed .ics (banco) ----------
+
+def test_tipo_persiste_e_default(pool, conta_id):
+    amanha = ag.agora_brt() + timedelta(days=1)
+    ev = ag.criar_evento(pool, conta_id, "Reunião", amanha, tipo="empresa")
+    assert ev["tipo"] == "empresa"
+    ev2 = ag.criar_evento(pool, conta_id, "Consulta", amanha)   # default
+    assert ev2["tipo"] == "pessoal"
+    ev3 = ag.criar_evento(pool, conta_id, "X", amanha, tipo="invalido")  # sanitiza
+    assert ev3["tipo"] == "pessoal"
+
+
+def test_eventos_mes_pega_so_o_mes(pool, conta_id):
+    dentro = ag.agora_brt().replace(year=2099, month=3, day=15, hour=10, minute=0,
+                                    second=0, microsecond=0)
+    fora = dentro.replace(month=4, day=2)
+    ag.criar_evento(pool, conta_id, "No mês", dentro)
+    ag.criar_evento(pool, conta_id, "Mês seguinte", fora)
+    do_mes = ag.eventos_mes(pool, conta_id, 2099, 3)
+    titulos = {e["titulo"] for e in do_mes}
+    assert "No mês" in titulos and "Mês seguinte" not in titulos
+
+
+def test_config_lembrete_default_e_salvar(pool, conta_id):
+    cfg = ag.get_config(pool, conta_id)          # sem linha -> defaults
+    assert cfg["lembrete_ativo"] is False and cfg["hora_resumo"] == 7
+    ag.salvar_config(pool, conta_id, lembrete_ativo=True, hora_resumo=8, aviso_antes_min=30)
+    cfg = ag.get_config(pool, conta_id)
+    assert cfg["lembrete_ativo"] is True and cfg["hora_resumo"] == 8 and cfg["aviso_antes_min"] == 30
+    # upsert: salvar de novo atualiza no lugar
+    ag.salvar_config(pool, conta_id, lembrete_ativo=False, hora_resumo=7, aviso_antes_min=None)
+    cfg = ag.get_config(pool, conta_id)
+    assert cfg["lembrete_ativo"] is False and cfg["aviso_antes_min"] is None
+
+
+def test_feed_token_idempotente_e_resolve(pool, conta_id):
+    t1 = ag.garantir_feed_token(pool, conta_id)
+    t2 = ag.garantir_feed_token(pool, conta_id)   # não gera outro
+    assert t1 and t1 == t2
+    assert ag.conta_por_feed_token(pool, t1) == conta_id
+    assert ag.conta_por_feed_token(pool, "nao-existe") is None
+    # salvar_config depois NÃO apaga o token (upsert preserva)
+    ag.salvar_config(pool, conta_id, lembrete_ativo=True, hora_resumo=7, aviso_antes_min=None)
+    assert ag.get_config(pool, conta_id)["feed_token"] == t1
+
+
+def test_feed_ics_isolado_por_conta(pool, conta_id):
+    ag.criar_evento(pool, conta_id, "Meu evento feed", ag.agora_brt() + timedelta(days=2))
+    ics = ag.feed_ics(ag.eventos_para_feed(pool, conta_id))
+    assert "Meu evento feed" in ics and ics.startswith("BEGIN:VCALENDAR")

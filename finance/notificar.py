@@ -112,6 +112,15 @@ def avisar_proposta_assinada(pool, conta_id: int, cliente: str, assinante: str,
     return ok
 
 
+def enviar_para_dono(pool, conta_id: int, texto: str) -> bool:
+    """Manda um texto (Markdown) pro dono da conta no Telegram. Best-effort — False
+    se não houver dono com telegram vinculado ou a rede falhar."""
+    chat = _telegram_id_do_dono(pool, conta_id)
+    if not chat:
+        return False
+    return _enviar_telegram(chat, texto)
+
+
 def avisar_dono_convite(pool, conta_id: int, convidado: str, titulo: str,
                         quando: str, status: str, resposta: str = "") -> bool:
     """Avisa o dono (Telegram) que um convidado respondeu ao convite de reunião.

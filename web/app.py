@@ -130,6 +130,11 @@ def _iniciar_poller_email() -> None:
                     _cm.enviar_pendentes(pool)       # dispara campanhas ativas
                 except Exception:  # noqa: BLE001
                     pass
+                try:
+                    from finance import lembretes as _lb
+                    _lb.rodar(pool)                  # resumo do dia + aviso antes (agenda)
+                except Exception:  # noqa: BLE001
+                    pass
 
         threading.Thread(target=_loop, daemon=True, name="email-poller").start()
     except Exception:  # noqa: BLE001

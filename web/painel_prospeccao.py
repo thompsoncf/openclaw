@@ -514,6 +514,10 @@ def _preview(descricao: str) -> str:
 CANAL_ROT = {"email": "✉️ E-mail", "whatsapp": "💬 WhatsApp",
              "messenger": "🔵 Messenger", "instagram": "📸 Instagram"}
 CANAIS_TODOS = ("email", "whatsapp", "messenger", "instagram")
+_QR_ROT = {"conectado": "✅ Conectado! Já pode captar leads por aqui.",
+           "aguardando_qr": "📱 Escaneie o QR no WhatsApp do celular (Aparelhos conectados › Conectar aparelho).",
+           "reconectando": "🔄 Reconectando…",
+           "desconectado": "Desconectado. Clique em Gerar QR."}
 
 
 def _canal_ident(c, conta_id, canal):
@@ -568,6 +572,9 @@ def _canais_status(pool, conta_id: int) -> dict:
     wa_prov = provs.get("whatsapp") or "twilio"
     if wa_prov == "cloud":
         whatsapp_ok = meta_app and bool(wa_phone.get("whatsapp")) and bool(tokens.get("whatsapp"))
+    elif wa_prov == "qr":
+        from finance import whatsapp_qr as _wq
+        whatsapp_ok = _wq.configurado()   # serviço ligado; a sessão em si aparece na aba QR
     else:
         whatsapp_ok = twilio and bool(nums.get("whatsapp"))
     return {
@@ -957,6 +964,61 @@ def comunicacao_whatsapp_testar(request: Request, numero: str = Form("")):
     det = str(res.get("erro") or "")[:180]
     return JSONResponse({"ok": False, "msg": "Não enviou. A Meta respondeu: " + (det or "erro desconhecido")
                          + " · (token válido? número do destino verificado no painel da Meta?)"})
+
+
+@router.post("/painel/prospeccao/comunicacao/whatsapp-qr-iniciar")
+def comunicacao_whatsapp_qr_iniciar(request: Request):
+    """Coloca a empresa no modo QR e pede o QR ao serviço Node pra exibir/escanear."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    from finance import whatsapp_qr as wq
+    if not wq.configurado():
+        return JSONResponse({"ok": False, "msg": "O serviço de QR ainda não está ligado (falta WA_QR_SERVICE_URL no ambiente)."})
+    with get_pool().connection() as c:
+        c.execute(
+            """insert into canais_config (conta_id, canal, identificador, provedor, ativo)
+               values (%s,'whatsapp',%s,'qr',true)
+               on conflict (conta_id, canal)
+               do update set provedor='qr', identificador=excluded.identificador,
+                             ativo=true, atualizado_em=now()""",
+            (ctx["conta_id"], "qr:" + str(ctx["conta_id"])))
+        c.commit()
+    r = wq.iniciar(ctx["conta_id"])
+    return JSONResponse({"ok": bool(r.get("ok", True) and not r.get("erro")),
+                         "status": r.get("status"), "qr": r.get("qr"),
+                         "msg": _QR_ROT.get(r.get("status"), "") if r.get("status") else (r.get("erro") or "")})
+
+
+@router.get("/painel/prospeccao/comunicacao/whatsapp-qr-status")
+def comunicacao_whatsapp_qr_status(request: Request):
+    """Consulta o status da sessão QR (pro polling do painel enquanto escaneia)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    from finance import whatsapp_qr as wq
+    r = wq.status(ctx["conta_id"])
+    st = r.get("status") or "desconectado"
+    return JSONResponse({"ok": True, "status": st, "qr": r.get("qr"), "msg": _QR_ROT.get(st, "")})
+
+
+@router.post("/painel/prospeccao/comunicacao/whatsapp-qr-sair")
+def comunicacao_whatsapp_qr_sair(request: Request):
+    """Desconecta a sessão QR e volta a empresa pro Twilio (padrão)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    from finance import whatsapp_qr as wq
+    wq.sair(ctx["conta_id"])
+    with get_pool().connection() as c:
+        c.execute("delete from canais_config where conta_id=%s and canal='whatsapp' and coalesce(provedor,'twilio')='qr'",
+                  (ctx["conta_id"],))
+        c.commit()
+    return JSONResponse({"ok": True})
 
 
 @router.post("/painel/prospeccao/comunicacao/virar-lead")
@@ -1365,6 +1427,46 @@ async def webhook_meta(request: Request, background_tasks: BackgroundTasks):
     from finance import agente as _ag
     for (cid, cvid) in disparar:
         background_tasks.add_task(_ag.atender, get_pool(), cid, cvid)
+    return Response("ok", media_type="text/plain")
+
+
+@router.post("/webhooks/wa-qr")
+async def webhook_wa_qr(request: Request, background_tasks: BackgroundTasks):
+    """Entrada do WhatsApp por QR (serviço Node services/wa-qr). Autentica pelo
+    segredo compartilhado, roteia pela conta_id que o serviço já resolveu e trata
+    igual aos outros canais (lead + agente)."""
+    segredo = os.environ.get("WA_QR_SHARED_SECRET") or ""
+    if not segredo or request.headers.get("x-wa-secret") != segredo:
+        return Response(status_code=403)
+    try:
+        payload = json.loads((await request.body()).decode("utf-8") or "{}")
+    except Exception:  # noqa: BLE001
+        return Response("ok", media_type="text/plain")
+    try:
+        conta_id = int(payload.get("conta_id") or 0)
+    except (TypeError, ValueError):
+        conta_id = 0
+    sender = str(payload.get("sender") or "").strip()
+    texto = (payload.get("texto") or "").strip()
+    if not conta_id or not sender or not texto:
+        return Response("ok", media_type="text/plain")
+    pool = get_pool()
+    with pool.connection() as c:
+        # confere que a empresa está mesmo no modo QR (evita conta_id forjado tocar outra via)
+        dono = c.execute("""select 1 from canais_config
+                              where conta_id=%s and canal='whatsapp' and ativo and coalesce(provedor,'twilio')='qr'""",
+                         (conta_id,)).fetchone()
+        if not dono:
+            return Response("ok", media_type="text/plain")
+        m = c.execute("select coalesce(ativo,false) from agente_config where conta_id=%s",
+                      (conta_id,)).fetchone()
+        agente_on = bool(m and m[0])
+        conv_id = _wa_inbound_conversa(c, conta_id, sender, texto,
+                                       payload.get("id") or None, payload.get("nome"), agente_on)
+        c.commit()
+    if agente_on:
+        from finance import agente as _ag
+        background_tasks.add_task(_ag.atender, get_pool(), conta_id, conv_id)
     return Response("ok", media_type="text/plain")
 
 
@@ -3270,9 +3372,9 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% if gerencia %}
       <div class="mut" style="font-size:.8rem;margin-bottom:.1rem">Como este cliente conecta o WhatsApp:</div>
       <div class="waseg">
-        <label class="{{ 'on' if canais.wa_provedor!='cloud' else '' }}"><input type="radio" name="wa_prov_sel" value="twilio" {{ 'checked' if canais.wa_provedor!='cloud' else '' }} onchange="waProv('twilio')">Twilio</label>
+        <label class="{{ 'on' if canais.wa_provedor not in ['cloud','qr'] else '' }}"><input type="radio" name="wa_prov_sel" value="twilio" {{ 'checked' if canais.wa_provedor not in ['cloud','qr'] else '' }} onchange="waProv('twilio')">Twilio</label>
         <label class="{{ 'on' if canais.wa_provedor=='cloud' else '' }}"><input type="radio" name="wa_prov_sel" value="cloud" {{ 'checked' if canais.wa_provedor=='cloud' else '' }} onchange="waProv('cloud')">Número próprio</label>
-        <label><input type="radio" name="wa_prov_sel" value="qr" onchange="waProv('qr')">QR Code</label>
+        <label class="{{ 'on' if canais.wa_provedor=='qr' else '' }}"><input type="radio" name="wa_prov_sel" value="qr" {{ 'checked' if canais.wa_provedor=='qr' else '' }} onchange="waProv('qr')">QR Code</label>
       </div>
 
       <div id="wa-twilio" class="waprov">
@@ -3325,16 +3427,47 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       </div>
 
       <div id="wa-qr" class="waprov">
+        <div style="font-weight:600;font-size:.85rem;margin-bottom:.15rem">QR Code (tipo WhatsApp Web)</div>
         <div style="font-size:.78rem;color:#e0a33e;background:#2a2113;border:1px solid #5a4520;border-radius:8px;padding:.55rem .7rem">
-          <b>QR Code (tipo WhatsApp Web)</b><br>Usa o número <b>como está</b>, sem migrar nada. Mas: viola os termos do WhatsApp (<b>risco de banimento</b>) e exige um serviço à parte sempre-ligado.
+          Usa o número <b>como está</b>, sem migrar nada. Mas: <b>viola os termos</b> do WhatsApp (risco de banimento) e depende de um serviço à parte sempre-ligado.
         </div>
-        <button class="pbtn ghost" disabled style="margin-top:.5rem">📱 Gerar QR — em breve</button>
-        <div class="mut" style="margin-top:.4rem;font-size:.78rem">Me avise se quiser ligar essa via; deixo o serviço de sessão pronto num próximo passo.</div>
+        <div style="display:flex;gap:.4rem;margin-top:.6rem;flex-wrap:wrap">
+          <button type="button" class="pbtn" id="qr-btn" onclick="qrIniciar()">📱 Gerar QR</button>
+          <button type="button" class="pbtn ghost" id="qr-sair" onclick="qrSair()" style="display:none">Desconectar</button>
+        </div>
+        <div id="qr-box" style="margin-top:.6rem;text-align:center;display:none">
+          <img id="qr-img" alt="QR do WhatsApp" style="width:220px;max-width:100%;border-radius:10px;background:#fff;padding:.4rem">
+        </div>
+        <div class="mut" id="qr-msg" style="font-size:.78rem;margin-top:.45rem"></div>
+        <script>
+        var _qrTimer=null;
+        function qrShow(d){var box=document.getElementById('qr-box'),img=document.getElementById('qr-img'),
+            msg=document.getElementById('qr-msg'),sair=document.getElementById('qr-sair'),btn=document.getElementById('qr-btn');
+          if(d.qr){img.src=d.qr;box.style.display='block';}else{box.style.display='none';}
+          if(msg)msg.textContent=d.msg||'';
+          var conectado=d.status==='conectado';
+          if(sair)sair.style.display=(d.status&&d.status!=='desconectado')?'inline-flex':'none';
+          if(btn)btn.textContent=conectado?'Reconectar':'📱 Gerar QR';
+          if(msg)msg.style.color=conectado?'var(--verde-claro)':'';
+          if(d.status==='conectado'||d.status==='desconectado'){if(_qrTimer){clearInterval(_qrTimer);_qrTimer=null;}}}
+        function qrPoll(){fetch('/painel/prospeccao/comunicacao/whatsapp-qr-status').then(function(r){return r.json();}).then(qrShow).catch(function(){});}
+        function qrIniciar(){var btn=document.getElementById('qr-btn'),msg=document.getElementById('qr-msg');
+          btn.disabled=true;var t=btn.textContent;btn.textContent='Gerando…';if(msg)msg.textContent='';
+          fetch('/painel/prospeccao/comunicacao/whatsapp-qr-iniciar',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
+            btn.disabled=false;btn.textContent=t;qrShow(d);
+            if(!d.ok&&msg){msg.textContent=d.msg||d.erro||'Falha.';msg.style.color='#e0a33e';return;}
+            if(_qrTimer)clearInterval(_qrTimer);_qrTimer=setInterval(qrPoll,3000);
+          }).catch(function(){btn.disabled=false;btn.textContent=t;if(msg){msg.textContent='Falha de rede.';msg.style.color='#e0a33e';}});}
+        function qrSair(){if(!confirm('Desconectar o WhatsApp por QR desta empresa?'))return;
+          fetch('/painel/prospeccao/comunicacao/whatsapp-qr-sair',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(){
+            if(_qrTimer){clearInterval(_qrTimer);_qrTimer=null;}qrShow({status:'desconectado',msg:'Desconectado.'});}).catch(function(){});}
+        {% if canais.wa_provedor=='qr' %}qrPoll();{% endif %}
+        </script>
       </div>
       <script>
       function waProv(v){['twilio','cloud','qr'].forEach(function(k){var e=document.getElementById('wa-'+k);if(e)e.style.display=(k===v)?'block':'none';});
         document.querySelectorAll('.waseg label').forEach(function(l){var r=l.querySelector('input');l.classList.toggle('on',!!r&&r.value===v);});}
-      waProv('{{ 'cloud' if canais.wa_provedor=='cloud' else 'twilio' }}');
+      waProv('{{ canais.wa_provedor if canais.wa_provedor in ['twilio','cloud','qr'] else 'twilio' }}');
       </script>
       {% else %}
       <div class="mut" style="margin-top:.4rem">Provedor: <b>{{ 'Cloud API (número próprio)' if canais.wa_provedor=='cloud' else 'Twilio' }}</b> · Número: <b>{{ canais.numeros.get('whatsapp','—') }}</b></div>

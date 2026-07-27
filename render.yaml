@@ -60,6 +60,38 @@ services:
         sync: false
       - key: TELEGRAM_WEBHOOK_URL
         sync: false
+      # --- WhatsApp por QR Code (serviço Node à parte, services/wa-qr) ---
+      # WA_QR_SERVICE_URL: URL pública do serviço wa-qr (ex.:
+      #   https://openclaw-waqr.onrender.com). Sem ela, a via QR fica inerte.
+      # WA_QR_SHARED_SECRET: MESMO segredo dos dois lados (autentica web<->wa-qr).
+      - key: WA_QR_SERVICE_URL
+        sync: false
+      - key: WA_QR_SHARED_SECRET
+        sync: false
+
+  # WhatsApp por QR Code (tipo WhatsApp Web / Baileys). Serviço Node SEMPRE
+  # ligado, 1 instância (a sessão é stateful em memória — NÃO escale horizontal).
+  # Estado da sessão fica no Postgres (tabela wa_qr_auth, migração 097). Só suba
+  # este serviço quando um cliente exigir o QR e aceitar o risco de ban.
+  #   Root Directory: services/wa-qr · Build: npm install · Start: npm start
+  #   Health check path: /saude
+  - type: web
+    name: openclaw-waqr
+    runtime: node
+    plan: standard
+    numInstances: 1
+    rootDir: services/wa-qr
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /saude
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: WA_QR_SHARED_SECRET
+        sync: false
+      # APP_URL = URL pública do web (pra onde as mensagens recebidas são repassadas)
+      - key: APP_URL
+        sync: false
 
   # Monitor PROATIVO de saldo/gasto dos provedores pagos (avisa o admin ANTES
   # de acabar). Roda 1x/dia. Cada checagem so' age se o limiar estiver setado:

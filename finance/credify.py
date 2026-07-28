@@ -46,17 +46,17 @@ _TTL_SEG = 23 * 3600
 # ficar testando todos toda vez.
 _AUTH_SHAPE_OK: int | None = None
 
-# O /auth respondeu "LOGON OU SENHA INVALIDOS" a {ClientID,ClientSecret}: o corpo
-# real é logon/senha. Tentamos os formatos mais prováveis, em ordem; o 1º que
-# devolver token vence. (u = CREDIFY_CLIENT_ID, p = CREDIFY_CLIENT_SECRET — só
-# "recipientes"; ponha ali o login/usuário e a senha que a Credify te deu.)
+# CONFIRMADO num teste real (Render): o /auth aceita {ClientID, ClientSecret} e
+# devolve o JWT. Fica em 1º na lista (economiza tentativas); os outros formatos
+# ficam de fallback. (u = CREDIFY_CLIENT_ID = "Logon" da Credify; p =
+# CREDIFY_CLIENT_SECRET = "Senha".)
 _AUTH_SHAPES = [
+    lambda u, p: {"ClientID": u, "ClientSecret": p},
     lambda u, p: {"logon": u, "senha": p},
     lambda u, p: {"Logon": u, "Senha": p},
     lambda u, p: {"login": u, "senha": p},
     lambda u, p: {"usuario": u, "senha": p},
     lambda u, p: {"email": u, "senha": p},
-    lambda u, p: {"ClientID": u, "ClientSecret": p},
 ]
 
 

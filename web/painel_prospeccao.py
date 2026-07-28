@@ -143,7 +143,7 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
                       p.ultimo_contato_em, p.proximo_contato_em, p.vendedor_id,
                       m.nome, p.orcamento_id, p.tem_site, p.maps_url, p.receita,
                       p.site_url, p.decisor_nome, p.decisor_cargo, p.decisor_telefone,
-                      p.decisor_whatsapp, p.decisor_em
+                      p.decisor_whatsapp, p.decisor_em, p.decisor_telefones
                  from prospeccao p
                  left join membros m on m.id = p.vendedor_id
                 where p.id=%s and p.conta_id=%s""", (alvo_id, conta_id)).fetchone()
@@ -154,13 +154,24 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
             "origem", "obs", "instagram", "socio", "regime_tributario", "porte",
             "ultimo_contato_em", "proximo_contato_em", "vendedor_id", "vendedor_nome",
             "orcamento_id", "tem_site", "maps_url", "receita", "site_url",
-            "decisor_nome", "decisor_cargo", "decisor_telefone", "decisor_whatsapp", "decisor_em"]
+            "decisor_nome", "decisor_cargo", "decisor_telefone", "decisor_whatsapp", "decisor_em",
+            "decisor_telefones"]
     d = dict(zip(cols, r))
     d["zap_link"] = _zap_link(d["whatsapp"] or d["telefone"])
     d["tel_link"] = "tel:" + _so_digitos(d["telefone"]) if d["telefone"] else ""
     d["site_dominio"] = _dominio(d.get("site_url"))
     d["decisor_zap"] = _zap_link(d["decisor_telefone"]) if d.get("decisor_whatsapp") else ""
     d["decisor_tel_link"] = "tel:" + _so_digitos(d["decisor_telefone"]) if d.get("decisor_telefone") else ""
+    # enriquece cada telefone do decisor com links (ligar / WhatsApp) pro template
+    _TIPO_TEL = {"COMERCIAL": "Comercial", "RESIDENCIAL": "Residencial", "RECADO": "Recado",
+                 "CELULAR": "Celular"}
+    tels = d.get("decisor_telefones") if isinstance(d.get("decisor_telefones"), list) else []
+    for t in tels:
+        fmt = t.get("formatado") or ""
+        t["tel_link"] = "tel:" + _so_digitos(fmt) if fmt else ""
+        t["zap_link"] = _zap_link(fmt) if t.get("whatsapp") and fmt else ""
+        t["tipo_rot"] = _TIPO_TEL.get((t.get("tipo") or "").upper(), (t.get("tipo") or "").title())
+    d["decisor_telefones"] = tels
     return d
 
 
@@ -2351,18 +2362,20 @@ def prospeccao_decisor_credify(request: Request, alvo_id: int):
         else:
             msg = "Não achei o quadro societário desse CNPJ na Credify."
         return JSONResponse({"ok": False, "erro": msg})
+    tels = r.get("telefones") or []
     with pool.connection() as c:
         c.execute(
             """update prospeccao set decisor_nome=%s, decisor_cargo=%s, decisor_telefone=%s,
-                 decisor_whatsapp=%s, decisor_em=now(), atualizado_em=now()
+                 decisor_whatsapp=%s, decisor_telefones=%s::jsonb, decisor_em=now(), atualizado_em=now()
                where id=%s and conta_id=%s""",
             (nome, r.get("decisor_qualificacao"), r.get("decisor_telefone"),
-             bool(r.get("decisor_whatsapp")), alvo_id, ctx["conta_id"]))
+             bool(r.get("decisor_whatsapp")), json.dumps(tels), alvo_id, ctx["conta_id"]))
         c.commit()
     return JSONResponse({"ok": True, "nome": nome, "cargo": r.get("decisor_qualificacao"),
                          "telefone": r.get("decisor_telefone"),
                          "whatsapp": bool(r.get("decisor_whatsapp")),
-                         "sem_telefone": not r.get("decisor_telefone")})
+                         "n_telefones": len(tels),
+                         "sem_telefone": not tels})
 
 
 @router.post("/painel/prospeccao/enriquecer-lote")
@@ -2971,7 +2984,7 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       fetch('/painel/prospeccao/'+id+'/decisor-credify',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){if(b){b.disabled=false;b.textContent=t;}
         if(!d.ok){if(m){m.textContent=d.erro||'Não consegui.';m.style.color='#e0a33e';}return;}
         var msg='Decisor: '+d.nome+(d.cargo?(' ('+d.cargo+')'):'');
-        msg+=d.telefone?(' · '+d.telefone+(d.whatsapp?' 💬':'')):' · telefone não liberado na sua conta Credify';
+        msg+=d.n_telefones?(' · '+d.n_telefones+' telefone(s)'):' · telefone não liberado na sua conta Credify';
         if(m){m.textContent=msg+' — recarregando…';m.style.color='var(--verde-claro)';}
         setTimeout(function(){location.reload();},1200);}).catch(function(){if(b){b.disabled=false;b.textContent=t;}if(m){m.textContent='Falha de rede.';m.style.color='#e0a33e';}});}
     function enrqLead(id){var b=document.getElementById('enrqf-btn'),m=document.getElementById('enrqf-msg');if(b){b.disabled=true;b.textContent='Verificando…';}if(m)m.textContent='Raspando o site…';
@@ -3013,12 +3026,21 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         {% if a.decisor_nome %}
         <div class="drow" style="align-items:flex-start">
           <span class="ic">🕵️</span><span class="lb">Decisor</span>
-          <span><b>{{ a.decisor_nome }}</b>{% if a.decisor_cargo %} · <span class="mut">{{ a.decisor_cargo }}</span>{% endif %}
-            {% if a.decisor_telefone %}<br><span style="color:var(--verde-claro)">{{ a.decisor_telefone }}</span>
+          <span style="flex:1"><b>{{ a.decisor_nome }}</b>{% if a.decisor_cargo %} · <span class="mut">{{ a.decisor_cargo }}</span>{% endif %}<span class="badge" style="margin-left:.3rem">Credify</span>
+            {% if a.decisor_telefones %}
+              {% for t in a.decisor_telefones %}
+              <div style="margin-top:.3rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+                <span style="color:var(--verde-claro)">{{ t.formatado }}</span>
+                {% if t.tipo_rot %}<span class="mut" style="font-size:.74rem">{{ t.tipo_rot }}</span>{% endif %}
+                {% if t.whatsapp %}<span class="badge" style="background:#10241a;border-color:#1e4a34;color:#3ddc84">WhatsApp</span>{% endif %}
+                {% if t.tel_link %}<a href="{{ t.tel_link }}" style="color:var(--txt-mut);font-size:.78rem">ligar</a>{% endif %}
+                {% if t.zap_link %}<a href="{{ t.zap_link }}" target="_blank" rel="noopener" style="color:#3ddc84;font-size:.78rem">abrir WhatsApp</a>{% endif %}
+              </div>
+              {% endfor %}
+            {% elif a.decisor_telefone %}<br><span style="color:var(--verde-claro)">{{ a.decisor_telefone }}</span>
               {% if a.decisor_tel_link %} · <a href="{{ a.decisor_tel_link }}" style="color:var(--verde-claro)">ligar</a>{% endif %}
               {% if a.decisor_zap %} · <a href="{{ a.decisor_zap }}" target="_blank" rel="noopener" style="color:#3ddc84">WhatsApp</a>{% endif %}
             {% else %}<br><span class="mut" style="font-size:.78rem">telefone indisponível (consulta de telefone não liberada na Credify)</span>{% endif %}
-            <span class="badge" style="margin-left:.3rem">Credify</span>
           </span>
         </div>
         {% endif %}

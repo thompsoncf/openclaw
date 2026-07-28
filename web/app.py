@@ -841,7 +841,8 @@ async def whatsapp(request: Request, background: BackgroundTasks):
     form = await request.form()
     numero = _normalizar_br(form.get("From", "") or "")
     nome = form.get("ProfileName") or None
-    body = form.get("Body", "") or ""
+    # Body vazio + botão tocado (quick reply do template): o texto vem em ButtonText.
+    body = form.get("Body", "") or form.get("ButtonText", "") or form.get("ButtonPayload", "") or ""
     media_url = None
     media_ctype = ""
     if int(form.get("NumMedia", "0") or 0) > 0:

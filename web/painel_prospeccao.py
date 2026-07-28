@@ -1289,6 +1289,22 @@ async def webhook_twilio(request: Request, background_tasks: BackgroundTasks):
         conta_id = _conta_por_ident(c, "whatsapp", destino)
         if not conta_id:
             return Response("<Response></Response>", media_type="application/xml")
+        # --- RSVP de convite de reunião (botões do template) ---
+        # O convite sai pelo número da empresa, então a resposta do convidado volta
+        # PRA CÁ. Intercepta ANTES do inbox de prospecção, senão o "Confirmar"
+        # viraria uma conversa de lead e o status do convite não mudaria.
+        from finance import convites as _cv, whatsapp_out as _wout
+        _txt = corpo or params.get("ButtonText") or params.get("ButtonPayload") or ""
+        _st = _cv.rsvp_por_texto(_txt)
+        if _st:
+            _pend = _cv.pendentes_por_numero(pool, remetente)
+            if _pend:
+                _conv = _cv.responder(pool, _pend[0]["token"], _st)
+                if _conv:
+                    _cv.pos_resposta(pool, _conv)                       # avisa o dono
+                    _wout.enviar(c, conta_id, remetente, _cv.confirmacao_texto(_conv))
+                    c.commit()
+                    return Response("<Response></Response>", media_type="application/xml")
         # o agente assume conversa nova quando o master está ligado (o vendedor pode
         # "assumir" depois, o que desliga o bot só naquela conversa).
         master = c.execute("select coalesce(ativo,false) from agente_config where conta_id=%s",

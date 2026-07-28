@@ -246,22 +246,8 @@ def _post(caminho: str, payload: dict) -> dict:
 
 # ---------- consultas de dados ----------
 
-def quadro_societario(cnpj: str) -> list[dict]:
-    """CNPJ -> lista de sócios [{nome, cpf, qualificacao}]. [] em falha.
-
-    Envelope: POST /quadrosocietario {"Consulta":{IdConsulta, CpfCnpj, TipoPessoa:"J"}}.
-    Precisa do IdConsulta da consulta 'Quadro Societário' em CREDIFY_ID_QS. Parser
-    tolerante ao retorno (bloco SOCIOS/QUADROSOCIETARIO com REGISTRO_N ou lista).
-    """
-    d = _so_digitos(cnpj)
-    if len(d) != 14:
-        return []
-    try:
-        j = _post("/quadrosocietario", _corpo_consulta(_id_qs(), d))   # QS não exige TipoPessoa
-    except CredifyErro:
-        return []
-    if not _codigo_ok(j):
-        return []
+def _parse_socios(j) -> list[dict]:
+    """Extrai [{nome, cpf, qualificacao}] do retorno da QS (bloco dentro de RESPOSTA)."""
     bloco = _pega(_resposta(j), "QUADROSOCIETARIO", "quadroSocietario", "quadro_societario",
                   "SOCIOS", "socios", "QSA", "qsa", default=None)
     out = []
@@ -274,6 +260,41 @@ def quadro_societario(cnpj: str) -> list[dict]:
             out.append({"nome": nome, "cpf": cpf if len(cpf) == 11 else None,
                         "qualificacao": qual})
     return out
+
+
+_MSG_CODIGO = {"2": "CNPJ não encontrado na base da Credify",
+               "3": "erro na consulta na Credify", "0": "documento obrigatório"}
+
+
+def _qs_consulta(cnpj: str) -> dict:
+    """Consulta o Quadro Societário e devolve {socios, codigo, mensagem, permissao}
+    — expõe o MOTIVO quando volta vazio (não encontrado / sem permissão / erro)."""
+    d = _so_digitos(cnpj)
+    if len(d) != 14:
+        return {"socios": [], "codigo": "", "mensagem": "CNPJ inválido", "permissao": False}
+    try:
+        j = _post("/quadrosocietario", _corpo_consulta(_id_qs(), d))   # QS não exige TipoPessoa
+    except CredifyErro as e:
+        m = str(e)
+        return {"socios": [], "codigo": "", "mensagem": m[:140], "permissao": "permiss" in m.lower()}
+    resp = _pega(j, "RESPOSTA", "resposta")
+    cod_resp = str(_pega(_pega(j, "CONSULTA", "consulta", default={}) or {},
+                         "CODIGORESPOSTA", "codigoResposta", default="") or "")
+    if "PERMISS" in (str(resp) + " " + cod_resp).upper():
+        return {"socios": [], "codigo": "", "permissao": True,
+                "mensagem": "sem permissão nesta consulta"}
+    codigo = str(_pega(resp, "CODIGO", "codigo", default="")).strip() if isinstance(resp, dict) else ""
+    socios = _parse_socios(j)
+    mensagem = "" if socios else _MSG_CODIGO.get(codigo, "quadro societário não retornado")
+    return {"socios": socios, "codigo": codigo, "mensagem": mensagem, "permissao": False}
+
+
+def quadro_societario(cnpj: str) -> list[dict]:
+    """CNPJ -> lista de sócios [{nome, cpf, qualificacao}]. [] em falha.
+
+    Envelope: POST /quadrosocietario {"Consulta":{IdConsulta, CpfCnpj}}. IdConsulta da
+    consulta 'Quadro Societário' em CREDIFY_ID_QS (default 567)."""
+    return _qs_consulta(cnpj)["socios"]
 
 
 def telefones_por_cpf(cpf: str) -> list[dict]:
@@ -338,9 +359,11 @@ def decisor_com_telefone(cnpj: str) -> dict:
     """
     if not tem_credenciais():
         return {"ok": False, "erro": "sem_credenciais"}
-    socios = quadro_societario(cnpj)
+    qs = _qs_consulta(cnpj)
+    socios = qs["socios"]
     if not socios:
-        return {"ok": False, "erro": "sem_socios"}
+        return {"ok": False, "erro": "sem_socios",
+                "motivo": qs.get("mensagem"), "permissao": qs.get("permissao", False)}
     dec = _escolher_decisor(socios)
     if not dec or not dec.get("cpf"):
         # tem nome mas não veio CPF completo -> não dá pra achar o telefone

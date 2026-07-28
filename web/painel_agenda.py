@@ -233,7 +233,8 @@ _ERRO_ENVIO = {
     "sem_numero": "esse convidado não tem número de WhatsApp",
     "sem_template": "o template ainda não está configurado (falta a aprovação / o SID)",
     "nao_configurado": "o WhatsApp (Twilio) não está configurado",
-    "sem_numero_empresa": "falta o número do Zaq (TWILIO_WHATSAPP_FROM)",
+    "sem_numero_empresa": "esta empresa ainda não tem número de WhatsApp configurado (aba Canais)",
+    "provedor_sem_template": "o número desta empresa não é Twilio — o template só sai por número Twilio",
     "numero_invalido": "o número do convidado parece inválido",
     "convite_nao_encontrado": "convite não encontrado",
 }

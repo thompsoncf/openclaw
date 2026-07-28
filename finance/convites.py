@@ -203,19 +203,20 @@ def confirmacao_texto(c: dict) -> str:
 
 def template_configurado() -> bool:
     """True quando dá pra o Zaq disparar o convite sozinho: template aprovado
-    (SID na env), número do Zaq e credenciais Twilio presentes. Enquanto for
-    False, a UI mostra só o envio manual (link)."""
+    (SID na env) + credenciais Twilio presentes. O número usado é o DA EMPRESA
+    (canais_config), resolvido no envio. Enquanto for False, a UI mostra só o
+    envio manual (link)."""
     from . import whatsapp_twilio as wa
-    return bool(os.environ.get("TWILIO_TMPL_CONVITE_SID")
-                and os.environ.get("TWILIO_WHATSAPP_FROM") and wa.configurado())
+    return bool(os.environ.get("TWILIO_TMPL_CONVITE_SID") and wa.configurado())
 
 
 def enviar_convite_whatsapp(pool, token: str) -> dict:
-    """Dispara o template de convite pro número do convidado (funciona 'frio',
-    fora da janela de 24h). As variáveis batem com o corpo aprovado no Twilio,
-    NA ORDEM: {{1}} assunto/título · {{2}} data e horário. Retorno tolerante —
-    nunca levanta; devolve {'ok': bool, ...}."""
-    from . import whatsapp_twilio as wa
+    """Dispara o template de convite pro número do convidado, PELO NÚMERO DA
+    EMPRESA (canais_config, provedor Twilio). Funciona 'frio' (fora da janela de
+    24h). As variáveis batem com o corpo aprovado no Twilio, NA ORDEM:
+    {{1}} assunto/título · {{2}} data e horário. Retorno tolerante — nunca
+    levanta; devolve {'ok': bool, ...}."""
+    from . import whatsapp_out as wout
     c = por_token(pool, token)
     if not c:
         return {"ok": False, "erro": "convite_nao_encontrado"}
@@ -226,5 +227,5 @@ def enviar_convite_whatsapp(pool, token: str) -> dict:
         return {"ok": False, "erro": "sem_template"}
     ev = c["evento"]
     variaveis = {"1": ev["titulo"], "2": ag.fmt_hora(ev)}
-    return wa.enviar_template(os.environ.get("TWILIO_WHATSAPP_FROM") or "",
-                              c["contato"], sid, variaveis)
+    with pool.connection() as conn:
+        return wout.enviar_template(conn, c["conta_id"], c["contato"], sid, variaveis)

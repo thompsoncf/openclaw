@@ -159,21 +159,21 @@ def test_enviar_convite_monta_variaveis(pool, conta_id, monkeypatch):
     ev = _evento(pool, conta_id, titulo="Reunião X")
     conv = cv.criar_convidado(pool, conta_id, ev["id"], "Rui", "86 98888-7777")
     capt = {}
-    from finance import whatsapp_twilio as wa
+    from finance import whatsapp_out as wout
 
-    def fake(remetente, numero, content_sid, variaveis):
-        capt.update(remetente=remetente, numero=numero, sid=content_sid, vars=variaveis)
+    def fake(c, cid, numero, content_sid, variaveis):
+        capt.update(conta_id=cid, numero=numero, sid=content_sid, vars=variaveis)
         return {"ok": True, "sid": "SM1"}
 
-    monkeypatch.setattr(wa, "enviar_template", fake)
+    monkeypatch.setattr(wout, "enviar_template", fake)
     monkeypatch.setenv("TWILIO_TMPL_CONVITE_SID", "HXtest")
-    monkeypatch.setenv("TWILIO_WHATSAPP_FROM", "whatsapp:+5586990000000")
     r = cv.enviar_convite_whatsapp(pool, conv["token"])
     assert r["ok"] and capt["sid"] == "HXtest"
+    assert capt["conta_id"] == conta_id                # roteia pela conta (nº da empresa)
+    assert capt["numero"] == "86 98888-7777"           # nº do convidado
     assert capt["vars"]["1"] == "Reunião X"            # {{1}} assunto/título
     assert capt["vars"]["2"]                            # {{2}} data e horário
     assert "3" not in capt["vars"]                      # só 2 variáveis (bate com o template)
-    assert capt["numero"] == "86 98888-7777"           # o adaptador normaliza depois
 
 
 def test_enviar_convite_sem_numero_ou_sem_template(pool, conta_id, monkeypatch):
@@ -183,6 +183,37 @@ def test_enviar_convite_sem_numero_ou_sem_template(pool, conta_id, monkeypatch):
     com_num = cv.criar_convidado(pool, conta_id, ev["id"], "ComZap", "86 98888-7777")
     monkeypatch.delenv("TWILIO_TMPL_CONVITE_SID", raising=False)
     assert cv.enviar_convite_whatsapp(pool, com_num["token"])["erro"] == "sem_template"
+
+
+class _FakeCur:
+    """Cursor fake pra testar a resolução do número da empresa sem banco."""
+    def __init__(self, row):
+        self._row = row
+
+    def execute(self, *a, **k):
+        return self
+
+    def fetchone(self):
+        return self._row
+
+
+def test_whatsapp_out_template_usa_numero_da_empresa(monkeypatch):
+    from finance import whatsapp_out as wout, whatsapp_twilio as wa
+    capt = {}
+    monkeypatch.setattr(wa, "enviar_template",
+                        lambda rem, num, sid, v: capt.update(rem=rem, num=num) or {"ok": True})
+    # empresa com número Twilio próprio -> usa ELE (final 7678)
+    r = wout.enviar_template(_FakeCur(("twilio", "whatsapp:+5586990007678", None, None)),
+                             1, "86 98888-7777", "HXx", {"1": "a", "2": "b"})
+    assert r["ok"] and capt["rem"] == "whatsapp:+5586990007678"
+    # sem canal configurado -> cai pro número global do Zaq
+    monkeypatch.setenv("TWILIO_WHATSAPP_FROM", "whatsapp:+5586990000000")
+    capt.clear()
+    wout.enviar_template(_FakeCur(None), 1, "86999", "HXx", {"1": "a", "2": "b"})
+    assert capt["rem"] == "whatsapp:+5586990000000"
+    # provedor cloud -> template do Twilio não se aplica
+    assert wout.enviar_template(_FakeCur(("cloud", None, "PID", "tok")),
+                                1, "86999", "HXx", {})["erro"] == "provedor_sem_template"
 
 
 def test_grupo_resumo_e_fechamento(pool, conta_id):

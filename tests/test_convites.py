@@ -196,6 +196,39 @@ def test_enviar_convite_sem_numero_ou_sem_template(pool, conta_id, monkeypatch):
     assert cv.enviar_convite_whatsapp(pool, com_num["token"])["erro"] == "sem_template"
 
 
+def test_marcar_evento_com_convidados_dispara(pool, conta_id, monkeypatch):
+    """Pulo do gato: marcar reunião + convidar + disparar, tudo pelo chat."""
+    from finance.agenda_tools import construir_ferramentas_agenda
+    enviados = []
+    monkeypatch.setattr(cv, "enviar_convite_whatsapp",
+                        lambda p, token: enviados.append(token) or {"ok": True, "sid": "SM1"})
+    ferrs = {f.nome: f for f in construir_ferramentas_agenda(pool, conta_id)}
+    r = ferrs["marcar_evento"].executar({
+        "titulo": "Reunião clínica", "inicio": "28/07/2099 09:00",
+        "convidados": [{"nome": "Paulo", "contato": "86 98888-7777"}]})
+    assert "Marquei" in r and "Paulo" in r and "enviado" in r.lower()
+    assert len(enviados) == 1
+    assert cv.pendentes_por_numero(pool, "+5586988887777")     # convite pendente criado
+
+
+def test_convidar_reuniao_em_evento_existente(pool, conta_id, monkeypatch):
+    from finance.agenda_tools import construir_ferramentas_agenda
+    monkeypatch.setattr(cv, "enviar_convite_whatsapp", lambda p, t: {"ok": True})
+    ferrs = {f.nome: f for f in construir_ferramentas_agenda(pool, conta_id)}
+    ferrs["marcar_evento"].executar({"titulo": "Alinhamento semanal", "inicio": "29/07/2099 10:00"})
+    r = ferrs["convidar_reuniao"].executar(
+        {"titulo": "Alinhamento semanal", "convidados": [{"nome": "Bia", "contato": "86 97777-6666"}]})
+    assert "Bia" in r and "enviado" in r.lower()
+
+
+def test_marcar_com_convidado_sem_numero_da_link(pool, conta_id):
+    from finance.agenda_tools import construir_ferramentas_agenda
+    ferrs = {f.nome: f for f in construir_ferramentas_agenda(pool, conta_id)}
+    r = ferrs["marcar_evento"].executar(
+        {"titulo": "Café", "inicio": "30/07/2099 08:00", "convidados": [{"nome": "SemZap"}]})
+    assert "SemZap" in r and "/convite/" in r        # sem número -> devolve o link pra mandar
+
+
 class _FakeCur:
     """Cursor fake pra testar a resolução do número da empresa sem banco."""
     def __init__(self, row):

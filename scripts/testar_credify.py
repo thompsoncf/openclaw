@@ -55,7 +55,8 @@ def main() -> None:
 
     # 2) quadro societário — RAW
     try:
-        raw_qs = cf._post("/quadrosocietario", {"cnpj": cf._so_digitos(cnpj)})
+        raw_qs = cf._post("/quadrosocietario",
+                          cf._corpo_consulta(cf._id_qs(), cf._so_digitos(cnpj), "J"))
         _dump("QUADRO SOCIETÁRIO (raw)", raw_qs)
     except Exception as e:  # noqa: BLE001
         print(f"\nquadro societário FALHOU: {e}")
@@ -74,7 +75,8 @@ def main() -> None:
     # 3) telefone por CPF — RAW (só se o decisor tem CPF)
     if dec and dec.get("cpf"):
         try:
-            raw_tel = cf._post("/pftelefonecpf", {"cpf": dec["cpf"]})
+            raw_tel = cf._post("/pftelefonecpf",
+                               cf._corpo_consulta(cf._id_tel(), dec["cpf"], "F"))
             _dump("TELEFONE POR CPF (raw)", raw_tel)
         except Exception as e:  # noqa: BLE001
             print(f"\ntelefone por CPF FALHOU: {e}")

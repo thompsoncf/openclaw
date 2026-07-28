@@ -449,7 +449,8 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
                 if _pend:
                     _c = _cv.responder(pool, _pend[0]["token"], _st)
                     if _c:
-                        _cv.pos_resposta(pool, _c)          # avisa o dono + fechamento
+                        if _c.get("mudou"):                 # só avisa se mudou (não repete)
+                            _cv.pos_resposta(pool, _c)
                         _responder_whatsapp(to, _cv.confirmacao_texto(_c))
                         return
 

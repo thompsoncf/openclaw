@@ -251,6 +251,8 @@ def agenda_convite_enviar(request: Request, token: str = Form(...),
     c = cv.por_token(pool, token)
     if not c or c["conta_id"] != ctx["conta_id"]:      # ownership sagrado
         request.session["agenda_aviso"] = "Convite não encontrado."
+    elif c["status"] == "confirmado":                  # já confirmou: não reenvia
+        request.session["agenda_aviso"] = f"{c['nome'] or 'O convidado'} já confirmou — não precisa reenviar. ✅"
     else:
         r = cv.enviar_convite_whatsapp(pool, token)
         quem = c["nome"] or "convidado"
@@ -469,6 +471,8 @@ _CSS = """<style>
 .sr-wa:hover{background:#2ee578}
 .sr-za{width:auto;margin:0;background:var(--verde);color:#04160e;border:0;border-radius:8px;padding:.42rem .7rem;font-size:.8rem;font-weight:700;cursor:pointer;white-space:nowrap}
 .sr-za:hover{background:var(--verde-hover)}
+.sr-za:disabled{background:var(--card-2);color:var(--txt-mut);border:1px solid var(--borda);cursor:default;opacity:.6}
+.sr-za:disabled:hover{background:var(--card-2)}
 .share-row form{margin:0;flex:0 0 auto}
 .sr-cp{width:auto;margin:0;background:var(--card);border:1px solid var(--borda);color:var(--txt);border-radius:8px;padding:.42rem .55rem;cursor:pointer;font-size:.86rem}
 .sr-cp:hover{border-color:var(--verde)}
@@ -507,12 +511,16 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <div class="sr-av">{{ (g.nome or '?')[0]|upper }}</div>
         <div class="sr-who"><b>{{ g.nome or 'Convidado' }}</b><small>{{ g.contato or 'sem número' }} · {{ g.status_rot }}</small></div>
         {% if share.auto_on and g.contato %}
-        <form method="post" action="/painel/agenda/convite/enviar" style="margin:0">
-          <input type="hidden" name="token" value="{{ g.token }}">
-          <input type="hidden" name="ev_id" value="{{ share.ev_id }}">
-          <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
-          <button type="submit" class="sr-za" title="O Zaq envia o convite pelo WhatsApp">📲 Zaq</button>
-        </form>
+          {% if g.status == 'confirmado' %}
+          <button type="button" class="sr-za" disabled title="Já confirmou — não precisa reenviar">📲 Zaq</button>
+          {% else %}
+          <form method="post" action="/painel/agenda/convite/enviar" style="margin:0">
+            <input type="hidden" name="token" value="{{ g.token }}">
+            <input type="hidden" name="ev_id" value="{{ share.ev_id }}">
+            <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+            <button type="submit" class="sr-za" title="O Zaq envia o convite pelo WhatsApp">📲 Zaq</button>
+          </form>
+          {% endif %}
         {% endif %}
         <a class="sr-wa" href="{{ g.wa }}" target="_blank" rel="noopener">💬 Enviar</a>
         <button type="button" class="sr-cp" onclick="cpRow(this)" title="Copiar link">📋</button>

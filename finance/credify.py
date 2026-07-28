@@ -382,6 +382,8 @@ def decisor_com_telefone(cnpj: str) -> dict:
         "decisor_qualificacao": dec.get("qualificacao"),
         "decisor_telefone": principal.get("formatado") if principal else None,
         "decisor_whatsapp": bool(principal.get("whatsapp")) if principal else False,
-        "telefones": [t.get("formatado") for t in tels],
+        # lista RICA (todos os telefones, com tipo + whatsapp) pra ficha mostrar todos
+        "telefones": [{"formatado": t.get("formatado"), "tipo": t.get("tipo"),
+                       "whatsapp": bool(t.get("whatsapp"))} for t in tels if t.get("formatado")],
         "erro": None if principal else "sem_telefone",
     }

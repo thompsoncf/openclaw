@@ -447,9 +447,9 @@ _CSS = """<style>
 .sub-opt select,.sub-opt input{width:auto;background:var(--card-2);border:1px solid var(--borda);border-radius:8px;color:var(--txt);padding:.35rem .5rem;font-size:.84rem;font-family:inherit}
 .canal-tag{display:inline-flex;align-items:center;gap:5px;font-size:.76rem;color:var(--txt-mut);margin-top:10px}
 /* sincronizar */
-.feed{display:flex;gap:8px;margin:2px 0 10px}
-.feed input{flex:1;background:var(--card-2);border:1px solid var(--borda);border-radius:9px;color:var(--txt);padding:.5rem .6rem;font-size:.8rem;font-family:ui-monospace,monospace}
-.feed button{background:var(--card-2);border:1px solid var(--borda);border-radius:9px;color:var(--txt);padding:0 12px;cursor:pointer;font-size:.84rem}
+.feed{display:flex;align-items:center;gap:8px;margin:2px 0 10px}
+.feed input{flex:1;min-width:0;margin:0;background:var(--card-2);border:1px solid var(--borda);border-radius:9px;color:var(--txt);padding:.5rem .6rem;font-size:.8rem;font-family:ui-monospace,monospace}
+.feed button{width:auto;margin:0;flex:0 0 auto;background:var(--card-2);border:1px solid var(--borda);border-radius:9px;color:var(--txt);padding:.5rem 14px;cursor:pointer;font-size:.84rem}
 .feed button:hover{border-color:var(--verde)}
 .sync-steps{list-style:none;padding:0;margin:8px 0 0;display:flex;flex-direction:column;gap:9px}
 .sync-steps li{font-size:.82rem;color:var(--txt-mut);line-height:1.4}

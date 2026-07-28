@@ -107,6 +107,54 @@ def test_evento_por_id(pool, conta_id):
     assert ag.evento_por_id(pool, outra, ev["id"]) is None
 
 
+def test_rsvp_por_texto_mapeia_botoes():
+    assert cv.rsvp_por_texto("✅ Confirmar") == "confirmado"
+    assert cv.rsvp_por_texto("CONFIRMAR") == "confirmado"
+    assert cv.rsvp_por_texto("🔁 Remarcar") == "remarcar"
+    assert cv.rsvp_por_texto("❌ Não vou poder") == "recusado"
+    assert cv.rsvp_por_texto("nao vou poder") == "recusado"
+    # não-RSVP não dispara (protege o fluxo normal do agente)
+    assert cv.rsvp_por_texto("uber 22") is None
+    assert cv.rsvp_por_texto("oi, tudo bem?") is None
+    assert cv.rsvp_por_texto("") is None
+
+
+def test_pendentes_por_numero_casa_por_sufixo(pool, conta_id):
+    ev = _evento(pool, conta_id, titulo="Reunião com o número")
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Bia", "(86) 98111-1111")
+    # quem responde chega como +55 86 98111-1111 (DDI + 9º dígito) e ainda casa
+    achados = cv.pendentes_por_numero(pool, "+5586981111111")
+    assert conv["token"] in {a["token"] for a in achados}
+    # número diferente não casa com este convite
+    assert conv["token"] not in {a["token"] for a in cv.pendentes_por_numero(pool, "+5511970000000")}
+    # depois de responder, deixa de ser pendente
+    cv.responder(pool, conv["token"], "confirmado")
+    assert conv["token"] not in {a["token"] for a in cv.pendentes_por_numero(pool, "+5586981111111")}
+
+
+def test_pendentes_ignora_evento_passado(pool, conta_id):
+    with pool.connection() as c:
+        # evento no passado -> não deve casar (janela de -2h)
+        eid = c.execute(
+            "insert into eventos_agenda (conta_id, titulo, inicio, tipo) "
+            "values (%s,%s, now() - interval '1 day', 'empresa') returning id",
+            (conta_id, "Já passou")).fetchone()[0]
+        c.commit()
+    conv = cv.criar_convidado(pool, conta_id, eid, "Léo", "86 98222-2222")
+    assert conv["token"] not in {a["token"] for a in cv.pendentes_por_numero(pool, "+5586982222222")}
+
+
+def test_confirmacao_texto_por_status(pool, conta_id):
+    ev = _evento(pool, conta_id, titulo="Café")
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Carla Silva", "86988887777")
+    c = cv.responder(pool, conv["token"], "confirmado")
+    txt = cv.confirmacao_texto(c)
+    assert "Carla" in txt and "Café" in txt and "confirmada" in txt.lower()
+    assert "calend" in txt.lower()                       # traz o link do calendário
+    c2 = cv.responder(pool, conv["token"], "recusado")
+    assert "não vai poder" in cv.confirmacao_texto(c2).lower()
+
+
 def test_grupo_resumo_e_fechamento(pool, conta_id):
     ev = _evento(pool, conta_id)
     ca = cv.criar_convidado(pool, conta_id, ev["id"], "A", "")

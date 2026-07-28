@@ -17,7 +17,6 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from db.conexao import get_pool
 from finance import agenda as ag
 from finance import convites as cv
-from finance import notificar
 from web.portal import _env, _render, conta_logada
 
 router = APIRouter()
@@ -321,17 +320,7 @@ def convite_responder(request: Request, token: str, acao: str = Form(...),
     c = cv.responder(pool, token, status, resposta)
     if not c:
         return HTMLResponse(_env.get_template("convite_404").render(), status_code=404)
-    notificar.avisar_dono_convite(pool, c["conta_id"], c["nome"] or "O convidado",
-                                  c["evento"]["titulo"], ag.fmt_hora(c["evento"]),
-                                  status, c.get("resposta") or "")
-    # Grupo (2+): quando o último responde, avisa que fechou.
-    grupo = cv.por_evento(pool, c["conta_id"], [c["evento"]["id"]]).get(c["evento"]["id"], [])
-    if len(grupo) > 1:
-        r = cv.resumo(grupo)
-        if r["fechado"]:
-            notificar.avisar_dono_grupo_fechado(
-                pool, c["conta_id"], c["evento"]["titulo"], ag.fmt_hora(c["evento"]),
-                r["confirmados"], r["remarcar"], r["recusados"])
+    cv.pos_resposta(pool, c)   # avisa o dono + fechamento de grupo (fonte única)
     return _render_convite(c, resultado=status)
 
 

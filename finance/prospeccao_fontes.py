@@ -59,8 +59,11 @@ def tem_chave_places() -> bool:
 
 
 def buscar_places(termo: str, cidade: str, api_key: str | None = None,
-                  max_resultados: int = 20) -> dict:
+                  max_resultados: int = 20, bairro: str = "", rua: str = "") -> dict:
     """Text Search (Places API New). Devolve {"ok", "itens": [...], "erro"}.
+
+    `bairro` e `rua` são opcionais: refinam a busca por região (entram na frase da
+    consulta, do mais específico pro mais geral: rua, bairro, cidade).
 
     Cada item: empresa, endereco, telefone, place_id, tem_site, rating,
     avaliacoes, rede (bool), temperatura.
@@ -70,6 +73,8 @@ def buscar_places(termo: str, cidade: str, api_key: str | None = None,
         return {"ok": False, "erro": "sem_chave", "itens": []}
     termo = (termo or "").strip()
     cidade = (cidade or "").strip()
+    bairro = (bairro or "").strip()
+    rua = (rua or "").strip()
     if not termo:
         return {"ok": False, "erro": "sem_termo", "itens": []}
     url = "https://places.googleapis.com/v1/places:searchText"
@@ -87,7 +92,10 @@ def buscar_places(termo: str, cidade: str, api_key: str | None = None,
             "places.businessStatus,places.googleMapsUri"
         ),
     }
-    consulta = f"{termo} em {cidade}" if cidade else termo
+    # frase de busca do mais específico pro mais geral (o Text Search entende
+    # linguagem natural): "pet shop em Rua X, Jardim, Teresina - PI".
+    local = ", ".join(p for p in (rua, bairro, cidade) if p)
+    consulta = f"{termo} em {local}" if local else termo
     body = {"textQuery": consulta, "languageCode": "pt-BR",
             "regionCode": "BR", "maxResultCount": min(max(max_resultados, 1), 20)}
     try:

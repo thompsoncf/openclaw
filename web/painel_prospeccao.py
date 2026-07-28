@@ -420,11 +420,12 @@ async def captar_csv(request: Request, arquivo: UploadFile = File(...),
 
 @router.post("/painel/prospeccao/captar/buscar", response_class=HTMLResponse)
 def captar_buscar(request: Request, segmento: str = Form(...), cidade: str = Form(""),
+                  bairro: str = Form(""), rua: str = Form(""),
                   esconder_redes: str = Form("")):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
-    res = fontes.buscar_places(segmento, cidade)
+    res = fontes.buscar_places(segmento, cidade, bairro=bairro, rua=rua)
     itens = res.get("itens", [])
     esconder = esconder_redes == "1"
     if esconder:
@@ -438,8 +439,8 @@ def captar_buscar(request: Request, segmento: str = Form(...), cidade: str = For
                            "m": i.get("maps_uri") or "", "st": i.get("status") or "",
                            "w": i.get("site") or ""})
     n_redes = sum(1 for x in res.get("itens", []) if x["rede"]) if esconder else 0
-    busca = {"segmento": segmento, "cidade": cidade, "esconder": esconder,
-             "ok": res.get("ok"), "erro": res.get("erro"), "n_redes": n_redes}
+    busca = {"segmento": segmento, "cidade": cidade, "bairro": bairro, "rua": rua,
+             "esconder": esconder, "ok": res.get("ok"), "erro": res.get("erro"), "n_redes": n_redes}
     if _eh_ajax(request):
         enxuto = [{"empresa": i["empresa"], "telefone": i["telefone"], "rating": i.get("rating"),
                    "tem_site": i["tem_site"], "endereco": i["endereco"],
@@ -2587,6 +2588,12 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <div><label class="lbl">Segmento</label><input class="fld" name="segmento" required placeholder="Ex: pet shop"></div>
           <div><label class="lbl">Cidade</label><input class="fld" name="cidade" placeholder="Ex: Teresina - PI"></div>
         </div>
+        <div class="lbl" style="margin-top:.7rem;color:var(--txt-mut)">📍 Refinar por região <span style="font-weight:400">— opcional, pra buscar numa área específica</span></div>
+        <div class="egrid" style="margin-top:.25rem">
+          <div><label class="lbl">Bairro</label><input class="fld" name="bairro" placeholder="Ex: Jardim Renascença"></div>
+          <div><label class="lbl">Rua</label><input class="fld" name="rua" placeholder="Ex: Av. Nossa Sra. de Fátima"></div>
+        </div>
+        <div class="mut" style="font-size:.76rem;margin-top:.3rem">Bairro filtra a vizinhança toda. Rua afunila bastante (poucos resultados) — use pra mira fina.</div>
         <label class="rrow" style="border:1px solid var(--borda);border-radius:10px;margin-top:.6rem;cursor:pointer">
           <span class="toggle"><input type="checkbox" name="esconder_redes" value="1" checked><span class="tgl"></span></span>
           <span style="font-size:.88rem">Esconder redes grandes (Petz, Drogasil…)</span>
@@ -2813,6 +2820,12 @@ _CAPTAR_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <div><label class="lbl">Segmento</label><input class="fld" name="segmento" required placeholder="Ex: pet shop" value="{{ busca.segmento or '' }}"></div>
         <div><label class="lbl">Cidade</label><input class="fld" name="cidade" placeholder="Ex: Teresina - PI" value="{{ busca.cidade or '' }}"></div>
       </div>
+      <div class="lbl" style="margin-top:.7rem;color:var(--txt-mut)">📍 Refinar por região <span style="font-weight:400">— opcional, pra buscar numa área específica</span></div>
+      <div class="egrid" style="margin-top:.25rem">
+        <div><label class="lbl">Bairro</label><input class="fld" name="bairro" placeholder="Ex: Jardim Renascença" value="{{ busca.bairro or '' }}"></div>
+        <div><label class="lbl">Rua</label><input class="fld" name="rua" placeholder="Ex: Av. Nossa Sra. de Fátima" value="{{ busca.rua or '' }}"></div>
+      </div>
+      <div class="mut" style="font-size:.76rem;margin-top:.3rem">Bairro filtra a vizinhança toda. Rua afunila bastante (poucos resultados) — use pra mira fina.</div>
       <label class="rrow" style="border:1px solid var(--borda);border-radius:10px;margin-top:.6rem;cursor:pointer">
         <span class="toggle"><input type="checkbox" name="esconder_redes" value="1" {% if busca.esconder %}checked{% endif %}><span class="tgl"></span></span>
         <span style="font-size:.88rem">Esconder redes grandes (Petz, Drogasil…)</span>

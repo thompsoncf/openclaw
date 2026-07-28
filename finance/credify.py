@@ -15,7 +15,7 @@ ou num 401).
 Config (env, no Render):
   CREDIFY_CLIENT_ID          (o "Logon" da Credify)
   CREDIFY_CLIENT_SECRET      (a "Senha")
-  CREDIFY_ID_QS              (IdConsulta da consulta "Quadro Societário")
+  CREDIFY_ID_QS              (IdConsulta do "Quadro Societário"; default 567)
   CREDIFY_ID_TEL             (IdConsulta do "Telefone por CPF"; default 576)
   CREDIFY_BASE_URL           (opcional; default https://api.credify.com.br)
 
@@ -75,23 +75,27 @@ def _base() -> str:
 
 # ---------- contrato da Credify (gateway de consultas) ----------
 # Todo endpoint de dados recebe o MESMO envelope aninhado:
-#   {"Consulta": {"IdConsulta": <id do produto>, "CpfCnpj": <documento>, "TipoPessoa": "F"|"J"}}
-# O IdConsulta identifica a consulta contratada (por env, por conta). Confirmado
-# na referência: PF Telefone-CPF usa IdConsulta 576 e TipoPessoa "F".
+#   {"Consulta": {"IdConsulta": <id do produto>, "CpfCnpj": <documento>[, "TipoPessoa": "F"|"J"]}}
+# IdConsulta identifica a consulta contratada. Confirmado na referência:
+#   Quadro Societário -> 567 (só IdConsulta+CpfCnpj); Telefone por CPF -> 576 (+TipoPessoa "F").
+# Dá pra sobrescrever por env (CREDIFY_ID_QS / CREDIFY_ID_TEL) se a conta usar outro.
+_ID_QS_PADRAO = "567"
 _ID_TEL_PADRAO = "576"
 
 
 def _id_qs() -> str:
-    return (os.environ.get("CREDIFY_ID_QS") or "").strip()
+    return (os.environ.get("CREDIFY_ID_QS") or _ID_QS_PADRAO).strip()
 
 
 def _id_tel() -> str:
     return (os.environ.get("CREDIFY_ID_TEL") or _ID_TEL_PADRAO).strip()
 
 
-def _corpo_consulta(id_consulta: str, documento: str, tipo_pessoa: str) -> dict:
-    return {"Consulta": {"IdConsulta": str(id_consulta), "CpfCnpj": documento,
-                         "TipoPessoa": tipo_pessoa}}
+def _corpo_consulta(id_consulta: str, documento: str, tipo_pessoa: str | None = None) -> dict:
+    consulta = {"IdConsulta": str(id_consulta), "CpfCnpj": documento}
+    if tipo_pessoa:
+        consulta["TipoPessoa"] = tipo_pessoa
+    return {"Consulta": consulta}
 
 
 def _registros(bloco) -> list[dict]:
@@ -243,21 +247,22 @@ def quadro_societario(cnpj: str) -> list[dict]:
     tolerante ao retorno (bloco SOCIOS/QUADROSOCIETARIO com REGISTRO_N ou lista).
     """
     d = _so_digitos(cnpj)
-    if len(d) != 14 or not _id_qs():
+    if len(d) != 14:
         return []
     try:
-        j = _post("/quadrosocietario", _corpo_consulta(_id_qs(), d, "J"))
+        j = _post("/quadrosocietario", _corpo_consulta(_id_qs(), d))   # QS não exige TipoPessoa
     except CredifyErro:
         return []
     if not _codigo_ok(j):
         return []
-    bloco = _pega(j, "SOCIOS", "socios", "QUADROSOCIETARIO", "quadroSocietario",
-                  "quadro_societario", "QSA", "qsa", "PARTNERS", default=None)
+    bloco = _pega(j, "QUADROSOCIETARIO", "quadroSocietario", "quadro_societario",
+                  "SOCIOS", "socios", "QSA", "qsa", default=None)
     out = []
     for s in _registros(bloco):
-        nome = _pega(s, "NOME", "nome", "name", "nomeSocio", "RAZAOSOCIAL", "NOMESOCIO")
-        cpf = _so_digitos(_pega(s, "CPF", "cpf", "CPFCNPJ", "CpfCnpj", "documento", "DOCUMENTO", ""))
-        qual = _pega(s, "QUALIFICACAO", "qualificacao", "CARGO", "cargo", "qualification", default="")
+        # a PESSOA: NOME + DOCUMENTO (o CPF dela). CPFCNPJ/NOMERAZAO são da EMPRESA.
+        nome = _pega(s, "NOME", "nome", "name", "nomeSocio")
+        cpf = _so_digitos(_pega(s, "DOCUMENTO", "documento", "CPF", "cpf", ""))
+        qual = _pega(s, "QUALIFICACAO", "qualificacao", "CARGO", "cargo", default="")
         if nome or len(cpf) == 11:
             out.append({"nome": nome, "cpf": cpf if len(cpf) == 11 else None,
                         "qualificacao": qual})

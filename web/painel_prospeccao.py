@@ -1383,6 +1383,24 @@ def descadastrar_do(request: Request, t: str = Form("")):
         f"<p>Feito! <b>{_h.escape(email)}</b> não vai mais receber nossos e-mails. Obrigado! 🙏</p>"))
 
 
+@router.get("/tenho-interesse", response_class=HTMLResponse)
+def tenho_interesse(request: Request, t: str = ""):
+    """CTA da campanha: o lead clicou 'Tenho interesse'. Para a sequência, esquenta o
+    lead, manda o material na hora e o agente IA assume. Página pública (sem login)."""
+    from finance.campanhas_motor import interesse_verify, registrar_interesse
+    conta_id, pid, camp_id = interesse_verify(t)
+    if not conta_id:
+        return HTMLResponse(_descad_page("Link inválido", "<p>Esse link não é válido ou expirou.</p>"),
+                            status_code=400)
+    try:
+        registrar_interesse(get_pool(), conta_id, pid, camp_id)
+    except Exception:  # noqa: BLE001
+        pass
+    return HTMLResponse(_descad_page("Recebemos! 🎉",
+        "<p>Obrigado pelo interesse! Acabamos de te enviar um material por e-mail e "
+        "já vamos falar com você. 😊</p>"))
+
+
 def _conta_por_meta(c, plataforma, ident):
     """Roteia o inbound da Meta: acha a empresa dona da Página/IG que recebeu."""
     r = c.execute(
@@ -1591,7 +1609,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
     if not ctx["gerencia"]:
         return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
     with get_pool().connection() as c:
-        cp = c.execute("select id, nome, status, limite_dia, coalesce(enviados_hoje,0), dia_contagem from campanhas where id=%s and conta_id=%s",
+        cp = c.execute("select id, nome, status, limite_dia, coalesce(enviados_hoje,0), dia_contagem, coalesce(material,'') from campanhas where id=%s and conta_id=%s",
                        (camp_id, ctx["conta_id"])).fetchone()
         if not cp:
             return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
@@ -1625,7 +1643,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
     from datetime import date as _date
     hoje = cp[4] if cp[5] == _date.today() else 0
     camp = {"id": cp[0], "nome": cp[1], "status": cp[2], "limite": cp[3],
-            "status_rot": _STATUS_ROT_CP.get(cp[2], cp[2])}
+            "status_rot": _STATUS_ROT_CP.get(cp[2], cp[2]), "material": cp[6]}
     metr = {"total": na_camp, "fila": st.get("fila", 0), "enviados": enviados, "responderam": resp,
             "descadastros": st.get("descadastrou", 0), "erros": st.get("erro", 0),
             "concluidos": st.get("concluido", 0), "hoje": hoje,
@@ -1679,7 +1697,7 @@ def _campanha_dona(c, conta_id, camp_id):
 
 @router.post("/painel/prospeccao/campanhas/{camp_id}/config")
 def prospeccao_campanha_config(request: Request, camp_id: int, nome: str = Form(""),
-                               limite_dia: str = Form("40")):
+                               limite_dia: str = Form("40"), material: str = Form("")):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -1691,8 +1709,9 @@ def prospeccao_campanha_config(request: Request, camp_id: int, nome: str = Form(
         lim = 40
     with get_pool().connection() as c:
         c.execute("""update campanhas set nome=coalesce(nullif(%s,''),nome), limite_dia=%s,
-                       atualizado_em=now() where id=%s and conta_id=%s""",
-                  ((nome or "").strip()[:120], lim, camp_id, ctx["conta_id"]))
+                       material=%s, atualizado_em=now() where id=%s and conta_id=%s""",
+                  ((nome or "").strip()[:120], lim, (material or "").strip()[:2000],
+                   camp_id, ctx["conta_id"]))
         c.commit()
     request.session["prosp_aviso"] = "Configuração salva ✓"
     return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
@@ -3942,12 +3961,18 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
   </div>
 
   <!-- CONFIG -->
-  <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/config" class="card" style="padding:.9rem 1rem;margin-top:1rem;display:flex;gap:.6rem;align-items:flex-end;flex-wrap:wrap">
-    <div><label class="lbl">Nome</label><input class="fld" name="nome" value="{{ camp.nome }}" maxlength="120" style="min-width:240px"></div>
-    <div><label class="lbl">Envios/dia</label><input class="fld" name="limite_dia" value="{{ camp.limite }}" inputmode="numeric" style="width:100px"></div>
-    <button class="pbtn ghost">Salvar</button>
-    <span style="flex:1"></span>
-    <button class="pbtn ghost" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/excluir" formmethod="post" style="color:#e0574f;border-color:#5c2a27" onclick="return confirm('Excluir a campanha? Os leads voltam pro funil.')">🗑 Excluir</button>
+  <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/config" class="card" style="padding:.9rem 1rem;margin-top:1rem">
+    <div style="display:flex;gap:.6rem;align-items:flex-end;flex-wrap:wrap">
+      <div><label class="lbl">Nome</label><input class="fld" name="nome" value="{{ camp.nome }}" maxlength="120" style="min-width:240px"></div>
+      <div><label class="lbl">Envios/dia</label><input class="fld" name="limite_dia" value="{{ camp.limite }}" inputmode="numeric" style="width:100px"></div>
+      <span style="flex:1"></span>
+      <button class="pbtn ghost" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/excluir" formmethod="post" style="color:#e0574f;border-color:#5c2a27" onclick="return confirm('Excluir a campanha? Os leads voltam pro funil.')">🗑 Excluir</button>
+    </div>
+    <div style="margin-top:.7rem">
+      <label class="lbl">📎 Material <span style="color:var(--mut);font-weight:400">— enviado quando o lead clica “✅ Tenho interesse” no e-mail</span></label>
+      <textarea class="fld" name="material" rows="2" placeholder="Link da apresentação, PDF, vídeo… (ex.: https://... ). O agente manda isso na hora e assume a conversa.">{{ camp.material or '' }}</textarea>
+    </div>
+    <div style="margin-top:.6rem"><button class="pbtn">Salvar</button></div>
   </form>
 
   <!-- PÚBLICO -->

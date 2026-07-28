@@ -50,6 +50,28 @@ def descad_verify(token: str):
     return None, None
 
 
+# ------------------------------------------------------------ interesse (CTA)
+
+def interesse_token(conta_id: int, prospeccao_id: int, campanha_id: int) -> str:
+    raw = f"{conta_id}:{prospeccao_id}:{campanha_id}"
+    sig = hmac.new(_seg(), ("int:" + raw).encode(), hashlib.sha256).hexdigest()[:16]
+    return base64.urlsafe_b64encode(f"{raw}:{sig}".encode()).decode().rstrip("=")
+
+
+def interesse_verify(token: str):
+    try:
+        pad = token + "=" * (-len(token) % 4)
+        s = base64.urlsafe_b64decode(pad.encode()).decode()
+        conta_id, pid, camp_id, sig = s.rsplit(":", 3)
+        good = hmac.new(_seg(), f"int:{conta_id}:{pid}:{camp_id}".encode(),
+                        hashlib.sha256).hexdigest()[:16]
+        if hmac.compare_digest(good, sig):
+            return int(conta_id), int(pid), int(camp_id)
+    except Exception:  # noqa: BLE001
+        pass
+    return None, None, None
+
+
 # ------------------------------------------------------------ conteúdo
 
 def _fmt(txt: str, lead: dict) -> str:
@@ -111,9 +133,20 @@ def _email_ia(pool, conta_id: int, lead: dict) -> dict:
     return fallback
 
 
-def _html(corpo: str, lead: dict, conta_nome: str, link_descad: str) -> str:
+def _html(corpo: str, lead: dict, conta_nome: str, link_descad: str,
+          link_interesse: str = "") -> str:
     paras = "".join(
         f'<p style="margin:0 0 12px">{_esc(p)}</p>' for p in (corpo or "").split("\n\n") if p.strip())
+    cta = ""
+    if link_interesse:
+        cta = (
+            '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:18px 0 4px">'
+            f'<tr><td style="border-radius:8px;background:#16a34a">'
+            f'<a href="{link_interesse}" style="display:inline-block;padding:11px 22px;color:#fff;'
+            'font-weight:bold;font-size:15px;text-decoration:none;border-radius:8px">✅ Tenho interesse</a>'
+            '</td></tr></table>'
+            '<p style="font-size:12px;color:#999;margin:2px 0 0">Clique acima e a gente te manda o material '
+            'na hora.</p>')
     wa = ""
     num = "".join(ch for ch in (lead.get("whatsapp") or "") if ch.isdigit())
     if num:
@@ -121,7 +154,7 @@ def _html(corpo: str, lead: dict, conta_nome: str, link_descad: str) -> str:
               'style="color:#0f766e;font-weight:bold;text-decoration:none">💬 Falar no WhatsApp</a></p>')
     return (
         '<div style="font-family:system-ui,Arial,sans-serif;font-size:15px;line-height:1.6;color:#222">'
-        f'{paras}{wa}'
+        f'{paras}{cta}{wa}'
         f'<hr style="border:0;border-top:1px solid #eee;margin:20px 0 10px">'
         f'<p style="font-size:12px;color:#999;margin:0">{_esc(conta_nome or "")} · Se não quiser mais '
         f'receber, <a href="{link_descad}" style="color:#888">descadastrar</a>.</p></div>')
@@ -222,8 +255,10 @@ def _disparar_campanha(pool, camp_id, conta_id, camp_nome, teto) -> int:
             assunto = _fmt(passo["assunto"] or f"Contato · {camp_nome}", lead)
             corpo = _fmt(passo["corpo"] or "", lead)
         link = _app_url() + "/descadastrar?t=" + descad_token(conta_id, email)
-        ok = enviar_email(email, assunto, _html(corpo, lead, conta_nome, link),
-                          texto_alt=corpo, from_nome=(conta_nome or None))
+        link_int = _app_url() + "/tenho-interesse?t=" + interesse_token(conta_id, pid, camp_id)
+        ok = enviar_email(email, assunto, _html(corpo, lead, conta_nome, link, link_int),
+                          texto_alt=corpo + "\n\nTenho interesse: " + link_int,
+                          from_nome=(conta_nome or None))
         if not ok:
             _marcar(pool, aid, "erro")
             continue
@@ -282,6 +317,66 @@ def _marcar(pool, aid, status):
 
 def _finalizar(pool, aid):
     _marcar(pool, aid, "concluido")
+
+
+def registrar_interesse(pool, conta_id: int, prospeccao_id: int, campanha_id: int) -> dict:
+    """Lead clicou 'Tenho interesse': para a sequência, marca QUENTE, manda o material
+    da campanha por e-mail e deixa o agente IA assumir a conversa. Best-effort."""
+    with pool.connection() as c:
+        lead = c.execute(
+            "select empresa, email, whatsapp from prospeccao where id=%s and conta_id=%s",
+            (prospeccao_id, conta_id)).fetchone()
+        if not lead:
+            return {"ok": False}
+        empresa, email, _wa = lead
+        material = (c.execute("select coalesce(material,'') from campanhas where id=%s and conta_id=%s",
+                              (campanha_id, conta_id)).fetchone() or [""])[0]
+        conta_nome = (c.execute("select nome from contas where id=%s", (conta_id,)).fetchone() or [""])[0]
+        # para a sequência deste lead
+        c.execute("""update campanha_alvos set status='respondeu', proximo_envio_em=null
+                       where campanha_id=%s and prospeccao_id=%s""", (campanha_id, prospeccao_id))
+        # esquenta o lead
+        c.execute("update prospeccao set temperatura='quente', atualizado_em=now() where id=%s and conta_id=%s",
+                  (prospeccao_id, conta_id))
+        # conversa de e-mail do lead
+        conv = c.execute("select id, agente_ativo from conversas where conta_id=%s and prospeccao_id=%s and canal='email'",
+                         (conta_id, prospeccao_id)).fetchone()
+        conv_id = conv[0] if conv else c.execute(
+            """insert into conversas (conta_id, prospeccao_id, canal, status, ultima_msg_em)
+               values (%s,%s,'email','aberta',now()) returning id""", (conta_id, prospeccao_id)).fetchone()[0]
+        # registra o clique como entrada (o motor/agente entende que respondeu)
+        c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto)
+                     values (%s,'email','in','lead','[clicou: Tenho interesse]')""", (conv_id,))
+        master = c.execute("select coalesce(ativo,false) from agente_config where conta_id=%s",
+                           (conta_id,)).fetchone()
+        agente_on = bool(master and master[0])
+        if agente_on:
+            c.execute("update conversas set agente_ativo=true, status='aberta', ultima_msg_em=now() where id=%s",
+                      (conv_id,))
+        c.commit()
+    # manda o material na hora (por e-mail), gravado como msg do bot
+    enviado = False
+    if email and "@" in email:
+        corpo = (f"Que bom, {empresa or 'tudo bem'}! 🎉\n\n"
+                 + (f"Segue nosso material pra você conhecer melhor:\n{material}\n\n" if material else "")
+                 + "Posso te mostrar em 2 minutinhos como fica aí? É só responder este e-mail. 😊")
+        assunto = "Seu material — " + (conta_nome or "ZAQ")
+        try:
+            enviado = enviar_email(email, assunto, _html(corpo, {"whatsapp": None}, conta_nome,
+                                   _app_url() + "/descadastrar?t=" + descad_token(conta_id, email)),
+                                   texto_alt=corpo, from_nome=(conta_nome or None))
+        except Exception:  # noqa: BLE001
+            enviado = False
+        if enviado:
+            with pool.connection() as c:
+                conv = c.execute("select id from conversas where conta_id=%s and prospeccao_id=%s and canal='email'",
+                                 (conta_id, prospeccao_id)).fetchone()
+                if conv:
+                    c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto)
+                                 values (%s,'email','out','bot',%s)""", (conv[0], f"{assunto}\n\n{corpo}"[:8000]))
+                    c.execute("update conversas set ultima_msg_em=now() where id=%s", (conv[0],))
+                    c.commit()
+    return {"ok": True, "empresa": empresa, "material_enviado": enviado}
 
 
 def registrar_descadastro(pool, conta_id: int, email: str, token: str = "") -> None:

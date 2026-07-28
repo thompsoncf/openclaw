@@ -155,6 +155,36 @@ def test_confirmacao_texto_por_status(pool, conta_id):
     assert "não vai poder" in cv.confirmacao_texto(c2).lower()
 
 
+def test_enviar_convite_monta_variaveis(pool, conta_id, monkeypatch):
+    ev = _evento(pool, conta_id, titulo="Reunião X")
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Rui", "86 98888-7777")
+    capt = {}
+    from finance import whatsapp_twilio as wa
+
+    def fake(remetente, numero, content_sid, variaveis):
+        capt.update(remetente=remetente, numero=numero, sid=content_sid, vars=variaveis)
+        return {"ok": True, "sid": "SM1"}
+
+    monkeypatch.setattr(wa, "enviar_template", fake)
+    monkeypatch.setenv("TWILIO_TMPL_CONVITE_SID", "HXtest")
+    monkeypatch.setenv("TWILIO_WHATSAPP_FROM", "whatsapp:+5586990000000")
+    r = cv.enviar_convite_whatsapp(pool, conv["token"])
+    assert r["ok"] and capt["sid"] == "HXtest"
+    assert capt["vars"]["1"] == "Padaria Central"     # quem convida (empresa)
+    assert capt["vars"]["2"] == "Reunião X"           # título
+    assert capt["vars"]["3"]                           # quando preenchido
+    assert capt["numero"] == "86 98888-7777"           # o adaptador normaliza depois
+
+
+def test_enviar_convite_sem_numero_ou_sem_template(pool, conta_id, monkeypatch):
+    ev = _evento(pool, conta_id)
+    sem_num = cv.criar_convidado(pool, conta_id, ev["id"], "SemZap", "")
+    assert cv.enviar_convite_whatsapp(pool, sem_num["token"])["erro"] == "sem_numero"
+    com_num = cv.criar_convidado(pool, conta_id, ev["id"], "ComZap", "86 98888-7777")
+    monkeypatch.delenv("TWILIO_TMPL_CONVITE_SID", raising=False)
+    assert cv.enviar_convite_whatsapp(pool, com_num["token"])["erro"] == "sem_template"
+
+
 def test_grupo_resumo_e_fechamento(pool, conta_id):
     ev = _evento(pool, conta_id)
     ca = cv.criar_convidado(pool, conta_id, ev["id"], "A", "")

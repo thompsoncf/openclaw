@@ -10,6 +10,7 @@ query de portal filtra por ele. A página pública só resolve pelo token (segre
 """
 from __future__ import annotations
 
+import os
 import secrets
 
 from . import agenda as ag
@@ -196,3 +197,36 @@ def confirmacao_texto(c: dict) -> str:
                 f"pra combinarem um novo horário. 👍")
     return (f"❌ Tudo bem{(', ' + primeiro) if primeiro else ''}! Anotei que você não "
             f"vai poder em *{ev['titulo']}* ({quando}). Obrigado por avisar! 🙏")
+
+
+# ---- Disparo do convite pelo WhatsApp (outbound, via template aprovado) -------
+
+def template_configurado() -> bool:
+    """True quando dá pra o Zaq disparar o convite sozinho: template aprovado
+    (SID na env), número do Zaq e credenciais Twilio presentes. Enquanto for
+    False, a UI mostra só o envio manual (link)."""
+    from . import whatsapp_twilio as wa
+    return bool(os.environ.get("TWILIO_TMPL_CONVITE_SID")
+                and os.environ.get("TWILIO_WHATSAPP_FROM") and wa.configurado())
+
+
+def enviar_convite_whatsapp(pool, token: str) -> dict:
+    """Dispara o template de convite pro número do convidado (funciona 'frio',
+    fora da janela de 24h). As variáveis batem com o corpo aprovado no Twilio:
+    {{1}} quem convida · {{2}} título · {{3}} quando. Retorno tolerante — nunca
+    levanta; devolve {'ok': bool, ...}."""
+    from . import whatsapp_twilio as wa
+    c = por_token(pool, token)
+    if not c:
+        return {"ok": False, "erro": "convite_nao_encontrado"}
+    if not (c.get("contato") or "").strip():
+        return {"ok": False, "erro": "sem_numero"}
+    sid = os.environ.get("TWILIO_TMPL_CONVITE_SID")
+    if not sid:
+        return {"ok": False, "erro": "sem_template"}
+    ev = c["evento"]
+    variaveis = {"1": (c.get("empresa") or "Zaq"),
+                 "2": ev["titulo"],
+                 "3": ag.fmt_hora(ev)}
+    return wa.enviar_template(os.environ.get("TWILIO_WHATSAPP_FROM") or "",
+                              c["contato"], sid, variaveis)

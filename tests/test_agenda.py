@@ -174,3 +174,29 @@ def test_feed_ics_isolado_por_conta(pool, conta_id):
     ag.criar_evento(pool, conta_id, "Meu evento feed", ag.agora_brt() + timedelta(days=2))
     ics = ag.feed_ics(ag.eventos_para_feed(pool, conta_id))
     assert "Meu evento feed" in ics and ics.startswith("BEGIN:VCALENDAR")
+
+
+def test_sugerir_por_titulo(pool, conta_id):
+    ag.criar_evento(pool, conta_id, "Reunião com Mailson - Sistema Zaq",
+                    ag.agora_brt() + timedelta(days=1), tipo="empresa")
+    ag.criar_evento(pool, conta_id, "Consulta médica",
+                    ag.agora_brt() + timedelta(days=2), tipo="pessoal")
+    # termo com palavra em comum ("sistema") -> a reunião do Mailson vem primeiro
+    sug = ag.sugerir_por_titulo(pool, conta_id, "reunião sistema alinhamento")
+    assert sug and "Mailson" in sug[0]["titulo"]
+    # termo sem nada a ver ainda devolve algo (nunca dá dead-end)
+    assert ag.sugerir_por_titulo(pool, conta_id, "xyzabc")
+    # agenda vazia -> lista vazia
+    with pool.connection() as c:
+        outra = c.execute("insert into contas (tipo,nome) values ('pf','Nova') returning id").fetchone()[0]
+        c.commit()
+    assert ag.sugerir_por_titulo(pool, outra, "qualquer") == []
+
+
+def test_resolver_sugere_quando_nao_bate(pool, conta_id):
+    ag.criar_evento(pool, conta_id, "Reunião com Mailson - Sistema Zaq",
+                    ag.agora_brt() + timedelta(days=1), tipo="empresa")
+    ferrs = {f.nome: f for f in construir_ferramentas_agenda(pool, conta_id)}
+    # nome mangado pela voz -> em vez de "não achei", sugere o que tem na agenda
+    r = ferrs["cancelar_evento"].executar({"titulo": "alinhamento smartcenter"})
+    assert "Mailson" in r and "agenda tem" in r

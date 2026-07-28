@@ -118,13 +118,21 @@ def construir_ferramentas_agenda(pool, conta_id: int,
                 for ev in ag.proximos(pool, conta_id, limite=100):
                     if ev["id"] == alvo:
                         return ev, None
-        cand = ag.achar_por_titulo(pool, conta_id, e.get("titulo") or "")
+        termo = e.get("titulo") or ""
+        cand = ag.achar_por_titulo(pool, conta_id, termo)
         if len(cand) == 1:
             return cand[0], None
         if len(cand) > 1:
             return None, ("Tem mais de um compromisso parecido: "
                           + "; ".join(f"{ag.fmt_hora(c)} {c['titulo']}" for c in cand[:5])
                           + ". Qual deles?")
+        # Não bateu exato (a voz costuma trocar o nome) -> SUGERE o que tem na agenda.
+        sug = ag.sugerir_por_titulo(pool, conta_id, termo)
+        if sug:
+            lista = "; ".join(f"{ag.fmt_hora(s)} {s['titulo']}" for s in sug)
+            alvo = f" '{termo}'" if termo else ""
+            return None, (f"Não achei{alvo} com esse nome exato. Na sua agenda tem: {lista}. "
+                          f"É algum desses? Me diz o nome certinho (ou o horário).")
         return None, "Não achei esse compromisso na agenda. Confere o nome ou a data?"
 
     def remarcar_evento(e: dict) -> str:

@@ -131,6 +131,36 @@ def achar_por_titulo(pool, conta_id: int, termo: str) -> list[dict]:
     return [_fmt_evento(r) for r in rows]
 
 
+def _sem_acento(s: str) -> str:
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", (s or "").lower())
+                   if unicodedata.category(c) != "Mn")
+
+
+def sugerir_por_titulo(pool, conta_id: int, termo: str, limite: int = 4) -> list[dict]:
+    """Eventos futuros ORDENADOS por semelhança com o termo — pra SUGERIR quando
+    não bate exato (a voz costuma trocar/mangar o nome). Combina sobreposição de
+    palavras (peso maior) com similaridade de string (difflib)."""
+    import difflib
+    evs = proximos(pool, conta_id, limite=100)
+    if not evs:
+        return []
+    alvo = _sem_acento(termo)
+    if not alvo:
+        return evs[:limite]
+    palavras = {p for p in alvo.split() if len(p) >= 3}
+
+    def score(ev: dict) -> float:
+        t = _sem_acento(ev["titulo"])
+        ratio = difflib.SequenceMatcher(None, alvo, t).ratio()
+        overlap = len(palavras & {p for p in t.split() if len(p) >= 3})
+        return overlap * 2.0 + ratio
+
+    ranked = sorted(evs, key=score, reverse=True)
+    bons = [e for e in ranked if score(e) >= 0.34]     # tem ALGUMA semelhança
+    return (bons or ranked)[:limite]
+
+
 def remarcar_evento(pool, conta_id: int, evento_id: int, inicio: datetime,
                     fim: datetime | None = None) -> bool:
     with pool.connection() as c:

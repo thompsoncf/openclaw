@@ -109,81 +109,84 @@ def _extrai_cpf(r):
     return m.group(1) if m else None
 
 
-def fase_cnpj(token, cnpj):
-    print("\n===== [1] sondando QUADRO SOCIETÁRIO (para no 1º HTTP 200) =====")
-    cpf_achado = None
-    # 1a) caminho + body-key
-    for caminho in PATHS_CNPJ:
+# O endpoint confirmou que o corpo precisa de um "IdConsulta" (o ID do produto/
+# consulta contratado). Passe-o por env: CREDIFY_ID_QS (quadro societário) e
+# CREDIFY_ID_TEL (telefone). Testamos o campo do documento e o IdConsulta como
+# número e como string.
+def _ids(valor):
+    """Variantes do IdConsulta pra tentar: int e string."""
+    out = []
+    for v in (valor,):
+        try:
+            out.append(int(v))
+        except (TypeError, ValueError):
+            pass
+        out.append(str(v))
+    return out
+
+
+def fase_cnpj(token, cnpj, id_consulta):
+    print("\n===== [1] QUADRO SOCIETÁRIO =====")
+    if not id_consulta:
+        r = _try("POST", "/quadrosocietario", token=token, json_body={"cnpj": cnpj})
+        print(f"  POST /quadrosocietario body={{cnpj}} -> {r.status_code if r else '—'}"
+              + (f"  {_corpo(r,220)}" if r and r.text else ""))
+        print("  >>> FALTA o IdConsulta. Descubra o ID da consulta 'Quadro Societário' "
+              "e rode com:  export CREDIFY_ID_QS=<id>")
+        return None, None, None
+    for id_v in _ids(id_consulta):
         for k in BODYKEYS_CNPJ:
-            r = _try("POST", caminho, token=token, json_body={k: cnpj})
+            body = {"IdConsulta": id_v, k: cnpj}
+            r = _try("POST", "/quadrosocietario", token=token, json_body=body)
             if r is None:
                 continue
-            print(f"  POST {caminho:26} body={{{k}}} -> {r.status_code}"
-                  + (f"  {_corpo(r,180)}" if r.text else ""))
+            print(f"  POST /quadrosocietario IdConsulta={id_v!r:>16} doc={{{k}}} -> {r.status_code}"
+                  + (f"  {_corpo(r,200)}" if r.text else ""))
             if _tem_dado(r):
-                print(f"\n  >>> ACHOU! POST {caminho} body={{{k}: cnpj}}")
-                print("  RESPOSTA (mascarada):\n" + _corpo(r, 3000))
-                cpf_achado = _extrai_cpf(r)
-                return caminho, k, cpf_achado
-    # 1b) formato "produto"
-    print("  -- tentando formato {produto, documento} em /consulta e /consultas --")
-    for caminho in ["/consulta", "/consultas", "/pj/consulta"]:
-        for prod in PRODUTOS_QS:
-            r = _try("POST", caminho, token=token,
-                     json_body={"produto": prod, "documento": cnpj})
-            if r is None:
-                continue
-            print(f"  POST {caminho:16} produto={prod:20} -> {r.status_code}"
-                  + (f"  {_corpo(r,150)}" if r.text else ""))
-            if _tem_dado(r):
-                print(f"\n  >>> ACHOU! POST {caminho} produto={prod}")
-                print("  RESPOSTA (mascarada):\n" + _corpo(r, 3000))
-                return caminho, f"produto={prod}", _extrai_cpf(r)
-    # 1c) GET com path/{cnpj} e ?cnpj=
-    print("  -- tentando GET path/{cnpj} e ?cnpj= --")
-    for caminho in PATHS_CNPJ[:6]:
-        for r in (_try("GET", f"{caminho}/{cnpj}", token=token),
-                  _try("GET", caminho, token=token, params={"cnpj": cnpj})):
-            if r is None:
-                continue
-            print(f"  GET  {caminho:26} -> {r.status_code}"
-                  + (f"  {_corpo(r,150)}" if r.text else ""))
-            if _tem_dado(r):
-                print(f"\n  >>> ACHOU (GET)! {caminho}")
-                print("  RESPOSTA (mascarada):\n" + _corpo(r, 3000))
-                return caminho, "GET", _extrai_cpf(r)
-    print("  (nenhum combo do quadro societário respondeu 200)")
-    return None, None, cpf_achado
+                print(f"\n  >>> ACHOU! body={{IdConsulta:{id_v!r}, {k}:cnpj}}")
+                print("  RESPOSTA (mascarada):\n" + _corpo(r, 3500))
+                return k, id_v, _extrai_cpf(r)
+    print("  (nenhum combo com esse IdConsulta trouxe dados — confira o ID)")
+    return None, None, None
 
 
 # --------------------------------------------------------------- fase 2: telefone
-# caminho CONFIRMADO: raiz /pftelefonecpf.
-PATHS_CPF = ["/pftelefonecpf", "/pf/telefonecpf"]
+PATHS_CPF = ["/pftelefonecpf"]
 BODYKEYS_CPF = ["cpf", "documento", "doc", "Cpf", "CPF", "numeroDocumento"]
 
 
-def fase_cpf(token, cpf):
-    print("\n===== [2] sondando TELEFONE POR CPF (para no 1º HTTP 200) =====")
-    for caminho in PATHS_CPF:
+def fase_cpf(token, cpf, id_consulta):
+    print("\n===== [2] TELEFONE POR CPF =====")
+    if not id_consulta:
+        r = _try("POST", "/pftelefonecpf", token=token, json_body={"cpf": cpf})
+        print(f"  POST /pftelefonecpf body={{cpf}} -> {r.status_code if r else '—'}"
+              + (f"  {_corpo(r,220)}" if r and r.text else ""))
+        print("  >>> FALTA o IdConsulta. Descubra o ID da consulta 'Telefone por CPF' "
+              "e rode com:  export CREDIFY_ID_TEL=<id>")
+        return None, None
+    for id_v in _ids(id_consulta):
         for k in BODYKEYS_CPF:
-            r = _try("POST", caminho, token=token, json_body={k: cpf})
+            body = {"IdConsulta": id_v, k: cpf}
+            r = _try("POST", "/pftelefonecpf", token=token, json_body=body)
             if r is None:
                 continue
-            print(f"  POST {caminho:24} body={{{k}}} -> {r.status_code}"
-                  + (f"  {_corpo(r,150)}" if r.text else ""))
+            print(f"  POST /pftelefonecpf IdConsulta={id_v!r:>16} doc={{{k}}} -> {r.status_code}"
+                  + (f"  {_corpo(r,200)}" if r.text else ""))
             if r.status_code == 200 and any(x in (r.text or "").lower()
                                             for x in ("telefone", "phone", "ddd", "numero", "sucess")):
-                print(f"\n  >>> ACHOU! POST {caminho} body={{{k}: cpf}}")
-                print("  RESPOSTA (mascarada):\n" + _corpo(r, 3000))
-                return caminho, k
-    print("  (nenhum combo de telefone respondeu 200)")
+                print(f"\n  >>> ACHOU! body={{IdConsulta:{id_v!r}, {k}:cpf}}")
+                print("  RESPOSTA (mascarada):\n" + _corpo(r, 3500))
+                return k, id_v
+    print("  (nenhum combo com esse IdConsulta trouxe telefone — confira o ID)")
     return None, None
 
 
 def main():
     cnpj = cf._so_digitos(sys.argv[1]) if len(sys.argv) > 1 else "28276766000112"
     cpf_arg = cf._so_digitos(sys.argv[2]) if len(sys.argv) > 2 else None
-    print(f"BASE={BASE}  CNPJ={cnpj}  CPF_arg={'sim' if cpf_arg else 'não'}")
+    id_qs = os.environ.get("CREDIFY_ID_QS")
+    id_tel = os.environ.get("CREDIFY_ID_TEL")
+    print(f"BASE={BASE}  CNPJ={cnpj}  ID_QS={id_qs or '(não setado)'}  ID_TEL={id_tel or '(não setado)'}")
     if not cf.tem_credenciais():
         print("FALTAM CREDIFY_CLIENT_ID/SECRET no ambiente."); return
     try:
@@ -192,23 +195,16 @@ def main():
     except Exception as e:  # noqa: BLE001
         print(f"auth FALHOU: {e}"); return
 
-    if fase_swagger():
-        print("\n>>> Achei o spec acima — cole aqui e eu corrijo tudo de uma vez. "
-              "(pulei a sondagem por tentativa)")
-        return
-
-    caminho_qs, chave_qs, cpf = fase_cnpj(token, cnpj)
-    if caminho_qs:
-        print(f"\n[resumo] QUADRO SOCIETÁRIO: POST {caminho_qs}  ({chave_qs})")
+    _k, _id, cpf = fase_cnpj(token, cnpj, id_qs)
     cpf = cpf_arg or cpf
-    if cpf:
-        cam_tel, chave_tel = fase_cpf(token, cpf)
-        if cam_tel:
-            print(f"[resumo] TELEFONE: POST {cam_tel}  ({chave_tel})")
+    if id_tel and cpf:
+        fase_cpf(token, cpf, id_tel)
+    elif id_tel and not cpf:
+        print("\n[2] pulado: não saiu CPF do quadro societário. Rode passando um CPF "
+              "como 2º argumento:  python scripts/sonda_credify.py <CNPJ> <CPF>")
     else:
-        print("\n[2] pulado: não saiu CPF do quadro societário. Rode de novo passando "
-              "um CPF conhecido como 2º argumento pra testar o telefone.")
-    print("\nCole TODA esta saída aqui que eu corrijo o finance/credify.py.")
+        fase_cpf(token, cpf or "00000000000", id_tel)   # mostra o erro/pedido de IdConsulta
+    print("\nCole TODA esta saída aqui.")
 
 
 if __name__ == "__main__":

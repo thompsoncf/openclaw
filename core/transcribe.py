@@ -35,10 +35,13 @@ class Transcritor:
         self.model = model or os.environ.get("STT_MODEL", "whisper-1")
 
     def transcrever(self, audio_bytes: bytes, nome: str = "audio.oga",
-                    idioma: str = "pt", prompt: str | None = None) -> str:
+                    idioma: str = "pt", prompt: str | None = None,
+                    vocab: str | None = None) -> str:
         arquivo = io.BytesIO(audio_bytes)
         arquivo.name = nome  # a API usa a extensao pra saber o formato
         dica = prompt if prompt is not None else os.environ.get("STT_PROMPT", _PROMPT_PADRAO)
+        if vocab:  # nomes da agenda da pessoa (títulos/convidados) — ajuda a voz
+            dica = (f"{dica} {vocab}".strip() if dica else vocab)[:900]
         kwargs = {"model": self.model, "file": arquivo, "language": idioma,
                   "temperature": 0}
         if dica:

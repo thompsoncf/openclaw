@@ -291,3 +291,13 @@ def test_grupo_resumo_e_fechamento(pool, conta_id):
     cv.responder(pool, cc["token"], "recusado")          # último responde -> fecha
     r = cv.resumo(cv.por_evento(pool, conta_id, [ev["id"]])[ev["id"]])
     assert r["fechado"] is True and r["confirmados"] == 2 and r["recusados"] == 1
+
+
+def test_vocabulario_stt_traz_titulos_e_convidados(pool, conta_id):
+    from finance import agenda as ag
+    from datetime import timedelta
+    ev = ag.criar_evento(pool, conta_id, "Reunião com Mailson",
+                         ag.agora_brt() + timedelta(days=1), tipo="empresa")
+    cv.criar_convidado(pool, conta_id, ev["id"], "Mailson Souza", "86 98888-7777")
+    voc = ag.vocabulario_stt(pool, conta_id)
+    assert "Reunião com Mailson" in voc and "Mailson Souza" in voc

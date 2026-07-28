@@ -433,8 +433,18 @@ async def on_voice(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     dados = await _baixar_arquivo_tg(update, ctx, voz.file_id)
     if dados is None:
         return
+    # Dica de vocabulário: se for membro, passa os nomes da agenda dele (títulos +
+    # convidados) pra voz acertar 'Mailson', 'Smart Center' etc.
+    _vocab = ""
     try:
-        texto = await asyncio.to_thread(_transcritor.transcrever, dados)
+        _achado = ct.membro_por_telegram(_pool, update.effective_user.id)
+        if _achado:
+            from finance.agenda import vocabulario_stt
+            _vocab = vocabulario_stt(_pool, _achado[1].id)
+    except Exception:  # noqa: BLE001
+        _vocab = ""
+    try:
+        texto = await asyncio.to_thread(_transcritor.transcrever, dados, vocab=_vocab)
     except Exception:  # noqa: BLE001 - NUNCA vaza o erro do STT pro cliente
         # o alerta ao admin (se sistemico) ja' sai de dentro do transcrever()
         logging.exception("falha ao transcrever audio (telegram)")

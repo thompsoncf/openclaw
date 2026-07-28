@@ -131,6 +131,35 @@ def achar_por_titulo(pool, conta_id: int, termo: str) -> list[dict]:
     return [_fmt_evento(r) for r in rows]
 
 
+def vocabulario_stt(pool, conta_id: int, limite_chars: int = 200) -> str:
+    """Nomes que aparecem na agenda da conta (títulos dos próximos + convidados)
+    pra dar de DICA pro transcritor de voz — ajuda a acertar 'Mailson', 'Smart
+    Center' etc. Curto (o prompt do Whisper é limitado) e best-effort."""
+    palavras: list[str] = []
+    try:
+        for ev in proximos(pool, conta_id, limite=20):
+            palavras.append(ev["titulo"])
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        with pool.connection() as c:
+            rows = c.execute(
+                "select distinct nome from evento_convidados "
+                "where conta_id=%s and nome is not null limit 40", (conta_id,)).fetchall()
+        palavras += [r[0] for r in rows]
+    except Exception:  # noqa: BLE001
+        pass
+    vistos: set[str] = set()
+    out: list[str] = []
+    for p in palavras:
+        p = (p or "").strip()
+        k = p.lower()
+        if p and k not in vistos:
+            vistos.add(k)
+            out.append(p)
+    return ", ".join(out)[:limite_chars]
+
+
 def _sem_acento(s: str) -> str:
     import unicodedata
     return "".join(c for c in unicodedata.normalize("NFD", (s or "").lower())

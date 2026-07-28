@@ -446,10 +446,12 @@ _CSS = """<style>
 .gconv{margin-top:14px;padding-top:14px;border-top:1px dashed var(--borda)}
 .gconv .gt{font-size:.82rem;color:var(--verde-claro);font-weight:700}
 .gconv .gd{font-size:.74rem;color:var(--txt-mut);margin:1px 0 8px}
-.guest-row{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-bottom:8px}
-.guest-row .g-rm{background:transparent;border:1px solid var(--borda);color:var(--txt-mut);border-radius:8px;width:38px;cursor:pointer;font-size:.9rem}
+.guest-row{display:grid;grid-template-columns:1fr 1fr 42px;gap:8px;align-items:stretch;margin-bottom:8px}
+.guest-row>div{min-width:0}
+.guest-row input{margin:0}
+.guest-row .g-rm{margin:0;padding:0;height:auto;display:flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--borda);color:var(--txt-mut);border-radius:9px;cursor:pointer;font-size:1rem;line-height:1}
 .guest-row .g-rm:hover{border-color:#e0574f;color:#f0917f}
-.g-add{background:transparent;border:1px dashed var(--borda);color:var(--verde-claro);border-radius:9px;padding:.5rem;width:100%;cursor:pointer;font-weight:600;font-size:.84rem}
+.g-add{margin-top:2px;background:transparent;border:1px dashed var(--borda);color:var(--verde-claro);border-radius:9px;padding:.5rem;width:100%;cursor:pointer;font-weight:600;font-size:.84rem}
 .g-add:hover{border-color:var(--verde)}
 /* status de convidados nos próximos */
 .px-conv{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}

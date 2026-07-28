@@ -192,10 +192,14 @@ def _obter_token(force: bool = False) -> str:
     agora = time.time()
     if not force and _TOKEN and agora < _TOKEN_EXP:
         return _TOKEN
-    cid = os.environ.get("CREDIFY_CLIENT_ID")
-    csec = os.environ.get("CREDIFY_CLIENT_SECRET")
+    # .strip() protege contra espaço/quebra colados no valor da env (comum ao colar
+    # no painel do Render) — que fariam o /auth ver o campo "vazio".
+    cid = (os.environ.get("CREDIFY_CLIENT_ID") or "").strip()
+    csec = (os.environ.get("CREDIFY_CLIENT_SECRET") or "").strip()
     if not (cid and csec):
-        raise CredifyErro("faltam CREDIFY_CLIENT_ID / CREDIFY_CLIENT_SECRET")
+        faltam = " e ".join(n for n, v in (("CREDIFY_CLIENT_ID", cid),
+                                           ("CREDIFY_CLIENT_SECRET", csec)) if not v)
+        raise CredifyErro(f"faltam credenciais no ambiente: {faltam}")
 
     ordem = ([_AUTH_SHAPES[_AUTH_SHAPE_OK]] if _AUTH_SHAPE_OK is not None
              else []) + [s for i, s in enumerate(_AUTH_SHAPES)

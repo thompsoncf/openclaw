@@ -136,7 +136,7 @@ def avisar_dono_convite(pool, conta_id: int, convidado: str, titulo: str,
         cab = f"🔁 *{quem}* quer remarcar"
     else:
         cab = f"❌ *{quem}* não vai poder ir"
-    linhas = [f"{cab} na reunião *{titulo}* ({quando})."]
+    linhas = [cab, f"📌 *{titulo}* · {quando}"]
     if resposta:
         linhas.append(f"💬 _{resposta}_")
     if status != "confirmado":
@@ -152,8 +152,9 @@ def avisar_dono_grupo_fechado(pool, conta_id: int, titulo: str, quando: str,
     if not chat:
         return False
     total = confirmados + remarcar + recusados
+    cab = f"📌 *{titulo}* · {quando}"
     if remarcar == 0 and recusados == 0:
-        txt = f"🎉 *Fechou!* Todos os {total} confirmaram presença na reunião *{titulo}* ({quando})."
+        txt = f"🎉 *Fechou!* Todos os {total} confirmaram presença.\n{cab}"
     else:
         partes = []
         if confirmados:
@@ -162,7 +163,7 @@ def avisar_dono_grupo_fechado(pool, conta_id: int, titulo: str, quando: str,
             partes.append(f"🔁 {remarcar} querem remarcar")
         if recusados:
             partes.append(f"❌ {recusados} não vão")
-        txt = f"Todos responderam à reunião *{titulo}* ({quando}): " + ", ".join(partes) + "."
+        txt = f"Todos responderam:\n{cab}\n" + ", ".join(partes) + "."
     return _enviar_telegram(chat, txt)
 
 

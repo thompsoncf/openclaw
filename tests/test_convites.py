@@ -211,6 +211,21 @@ def test_marcar_evento_com_convidados_dispara(pool, conta_id, monkeypatch):
     assert cv.pendentes_por_numero(pool, "+5586988887777")     # convite pendente criado
 
 
+def test_marcar_evento_com_varios_convidados(pool, conta_id, monkeypatch):
+    """Grupo pelo chat: um comando convida e dispara pra vários de uma vez."""
+    from finance.agenda_tools import construir_ferramentas_agenda
+    enviados = []
+    monkeypatch.setattr(cv, "enviar_convite_whatsapp",
+                        lambda p, token: enviados.append(token) or {"ok": True})
+    ferrs = {f.nome: f for f in construir_ferramentas_agenda(pool, conta_id)}
+    r = ferrs["marcar_evento"].executar({
+        "titulo": "Alinhamento", "inicio": "28/07/2099 14:00",
+        "convidados": [{"nome": "Paulo", "contato": "86 98888-7777"},
+                       {"nome": "Ana", "contato": "86 97777-6666"}]})
+    assert "Paulo" in r and "Ana" in r
+    assert len(enviados) == 2                                # disparou pros dois
+
+
 def test_convidar_reuniao_em_evento_existente(pool, conta_id, monkeypatch):
     from finance.agenda_tools import construir_ferramentas_agenda
     monkeypatch.setattr(cv, "enviar_convite_whatsapp", lambda p, t: {"ok": True})

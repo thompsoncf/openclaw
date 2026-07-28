@@ -85,6 +85,11 @@ def _tem_ia() -> bool:
     return bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
+def _tem_credify() -> bool:
+    from finance import credify as cf
+    return cf.tem_credenciais()
+
+
 def _membro_contato(pool, conta_id: int, vid):
     """nome + e-mail do responsável (pra assinar a mensagem e virar Reply-To)."""
     if not vid:
@@ -137,7 +142,8 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
                       p.obs, p.instagram, p.socio, p.regime_tributario, p.porte,
                       p.ultimo_contato_em, p.proximo_contato_em, p.vendedor_id,
                       m.nome, p.orcamento_id, p.tem_site, p.maps_url, p.receita,
-                      p.site_url
+                      p.site_url, p.decisor_nome, p.decisor_cargo, p.decisor_telefone,
+                      p.decisor_whatsapp, p.decisor_em
                  from prospeccao p
                  left join membros m on m.id = p.vendedor_id
                 where p.id=%s and p.conta_id=%s""", (alvo_id, conta_id)).fetchone()
@@ -147,11 +153,14 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
             "telefone", "whatsapp", "email", "status", "temperatura", "valor",
             "origem", "obs", "instagram", "socio", "regime_tributario", "porte",
             "ultimo_contato_em", "proximo_contato_em", "vendedor_id", "vendedor_nome",
-            "orcamento_id", "tem_site", "maps_url", "receita", "site_url"]
+            "orcamento_id", "tem_site", "maps_url", "receita", "site_url",
+            "decisor_nome", "decisor_cargo", "decisor_telefone", "decisor_whatsapp", "decisor_em"]
     d = dict(zip(cols, r))
     d["zap_link"] = _zap_link(d["whatsapp"] or d["telefone"])
     d["tel_link"] = "tel:" + _so_digitos(d["telefone"]) if d["telefone"] else ""
     d["site_dominio"] = _dominio(d.get("site_url"))
+    d["decisor_zap"] = _zap_link(d["decisor_telefone"]) if d.get("decisor_whatsapp") else ""
+    d["decisor_tel_link"] = "tel:" + _so_digitos(d["decisor_telefone"]) if d.get("decisor_telefone") else ""
     return d
 
 
@@ -1802,6 +1811,7 @@ def prospeccao_ficha(request: Request, alvo_id: int):
                    tipos=TIPOS, resultados=RESULTADOS, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
                    gerencia=ctx["gerencia"], pode_atribuir=ctx["pode_atribuir"], vendedores=vends,
                    tem_cnpja=fontes.tem_chave_cnpja(), tem_ia=_tem_ia(),
+                   tem_credify=_tem_credify(),
                    embed=request.query_params.get("embed") == "1",
                    aviso=request.session.pop("prosp_aviso", None))
 
@@ -2308,6 +2318,45 @@ def prospeccao_enriquecer_canais(request: Request, alvo_id: int):
         return JSONResponse(_enriquecer_lead(pool, ctx["conta_id"], alvo_id))
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "erro": "Falha ao verificar canais."})
+
+
+@router.post("/painel/prospeccao/{alvo_id}/decisor-credify")
+def prospeccao_decisor_credify(request: Request, alvo_id: int):
+    """Descobre o DECISOR (sócio-administrador) do lead via Credify, pelo CNPJ:
+    nome + cargo (+ telefone/WhatsApp se a conta tiver a consulta liberada). Salva
+    em colunas dedicadas do lead. Consulta PAGA + dado de pessoa (LGPD) — ação
+    deliberada por lead, só dono/gestor ou o dono do lead."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    pool = get_pool()
+    alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
+    if not alvo or not _pode_ver(alvo, ctx):
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    from finance import credify as cf
+    if not cf.tem_credenciais():
+        return JSONResponse({"ok": False, "erro": "Credify não configurada (CREDIFY_CLIENT_ID/SECRET no Render)."})
+    if not (alvo.get("cnpj") and len(_so_digitos(alvo["cnpj"])) == 14):
+        return JSONResponse({"ok": False, "erro": "Preencha o CNPJ do lead primeiro."})
+    try:
+        r = cf.decisor_com_telefone(alvo["cnpj"])
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "erro": "Falha ao consultar a Credify."})
+    nome = r.get("decisor_nome")
+    if not nome:
+        return JSONResponse({"ok": False, "erro": "Não achei o quadro societário desse CNPJ na Credify."})
+    with pool.connection() as c:
+        c.execute(
+            """update prospeccao set decisor_nome=%s, decisor_cargo=%s, decisor_telefone=%s,
+                 decisor_whatsapp=%s, decisor_em=now(), atualizado_em=now()
+               where id=%s and conta_id=%s""",
+            (nome, r.get("decisor_qualificacao"), r.get("decisor_telefone"),
+             bool(r.get("decisor_whatsapp")), alvo_id, ctx["conta_id"]))
+        c.commit()
+    return JSONResponse({"ok": True, "nome": nome, "cargo": r.get("decisor_qualificacao"),
+                         "telefone": r.get("decisor_telefone"),
+                         "whatsapp": bool(r.get("decisor_whatsapp")),
+                         "sem_telefone": not r.get("decisor_telefone")})
 
 
 @router.post("/painel/prospeccao/enriquecer-lote")
@@ -2912,6 +2961,13 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       fetch('/painel/prospeccao/'+id+'/convidar-zaq',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
         if(!d.ok){if(b){b.disabled=false;b.textContent='🎟️ Convidar pro Zaq';}alert(d.erro||'Não consegui enviar.');return;}
         if(b){b.textContent='✓ Convite enviado';}}).catch(function(){if(b){b.disabled=false;b.textContent='🎟️ Convidar pro Zaq';}alert('Falha de rede.');});}
+    function buscarDecisor(id){var b=document.getElementById('dec-btn'),m=document.getElementById('dec-msg');if(b){b.disabled=true;var t=b.textContent;b.textContent='Consultando…';}if(m){m.textContent='Consultando o quadro societário na Credify…';m.style.color='';}
+      fetch('/painel/prospeccao/'+id+'/decisor-credify',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){if(b){b.disabled=false;b.textContent=t;}
+        if(!d.ok){if(m){m.textContent=d.erro||'Não consegui.';m.style.color='#e0a33e';}return;}
+        var msg='Decisor: '+d.nome+(d.cargo?(' ('+d.cargo+')'):'');
+        msg+=d.telefone?(' · '+d.telefone+(d.whatsapp?' 💬':'')):' · telefone não liberado na sua conta Credify';
+        if(m){m.textContent=msg+' — recarregando…';m.style.color='var(--verde-claro)';}
+        setTimeout(function(){location.reload();},1200);}).catch(function(){if(b){b.disabled=false;b.textContent=t;}if(m){m.textContent='Falha de rede.';m.style.color='#e0a33e';}});}
     function enrqLead(id){var b=document.getElementById('enrqf-btn'),m=document.getElementById('enrqf-msg');if(b){b.disabled=true;b.textContent='Verificando…';}if(m)m.textContent='Raspando o site…';
       fetch('/painel/prospeccao/'+id+'/enriquecer-canais',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){if(b){b.disabled=false;b.textContent='🔎 Verificar canais';}
         if(!d.ok){if(m)m.textContent=d.erro||'Não consegui.';return;}
@@ -2942,10 +2998,24 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
               <form method="post" action="/painel/prospeccao/{{ a.id }}/limpar-cnpj" style="margin:0" onsubmit="return confirm('Remover o CNPJ e os dados da Receita deste lead?')"><button class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" title="Remover o CNPJ (escolhido errado)">🗑 limpar</button></form>
             {% elif tem_cnpja %}<button type="button" class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" data-endereco="{{ _end_lead }}" onclick="acharCnpj({{ a.id }},this)" title="Achar o CNPJ por nome+cidade (CNPJá)">🔎 achar CNPJ</button>
             {% else %}<a class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" target="_blank" rel="noopener" title="Achar o CNPJ na web (nome + cidade)" href="https://www.google.com/search?q={{ (a.empresa ~ ' ' ~ (a.cidade or '') ~ ' cnpj')|urlencode }}">🔎 achar CNPJ</a>{% endif %}
+            {% if a.cnpj and tem_credify %}<button type="button" class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" id="dec-btn" onclick="buscarDecisor({{ a.id }})" title="Descobre o sócio-administrador (decisor) pelo CNPJ via Credify — consulta paga">🕵️ {% if a.decisor_nome %}Atualizar decisor{% else %}Buscar decisor{% endif %}</button>{% endif %}
             <button type="button" class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" onclick="prospToggle('edit-dados')">editar</button>
           </div>
         </div>
+        <div class="mut" id="dec-msg" style="font-size:.8rem;margin:.1rem 0"></div>
         <div id="cnpj-cands" style="margin:.2rem 0"></div>
+        {% if a.decisor_nome %}
+        <div class="drow" style="align-items:flex-start">
+          <span class="ic">🕵️</span><span class="lb">Decisor</span>
+          <span><b>{{ a.decisor_nome }}</b>{% if a.decisor_cargo %} · <span class="mut">{{ a.decisor_cargo }}</span>{% endif %}
+            {% if a.decisor_telefone %}<br><span style="color:var(--verde-claro)">{{ a.decisor_telefone }}</span>
+              {% if a.decisor_tel_link %} · <a href="{{ a.decisor_tel_link }}" style="color:var(--verde-claro)">ligar</a>{% endif %}
+              {% if a.decisor_zap %} · <a href="{{ a.decisor_zap }}" target="_blank" rel="noopener" style="color:#3ddc84">WhatsApp</a>{% endif %}
+            {% else %}<br><span class="mut" style="font-size:.78rem">telefone indisponível (consulta de telefone não liberada na Credify)</span>{% endif %}
+            <span class="badge" style="margin-left:.3rem">Credify</span>
+          </span>
+        </div>
+        {% endif %}
         {% if a.contato %}<div class="drow"><span class="ic">👤</span><span class="lb">Contato</span><span>{{ a.contato }}{% if a.cargo %} · {{ a.cargo }}{% endif %}</span></div>{% endif %}
         {% if a.cnpj %}<div class="drow"><span class="ic">🏢</span><span class="lb">CNPJ</span><span>{{ a.cnpj }}</span></div>{% endif %}
         {% if a.socio %}<div class="drow"><span class="ic">🧑‍💼</span><span class="lb">Sócio</span><span>{{ a.socio }}</span></div>{% endif %}

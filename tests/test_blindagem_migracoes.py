@@ -33,6 +33,8 @@ create table nichos (id bigserial primary key, nome text, slug text unique, tipo
 -- então precisa existir aqui. Colunas mínimas que a 096 assume (+ token da 084).
 create table canais_config (id bigserial primary key, conta_id bigint, canal text,
   identificador text, ativo boolean default true, token text);
+-- prospeccao vem da 075 (marcada como aplicada); a 102 adiciona colunas de decisor.
+create table prospeccao (id bigserial primary key, conta_id bigint);
 create table schema_migrations (id serial primary key, nome text unique not null,
   executada_em timestamptz default now());
 """

@@ -87,10 +87,13 @@ def _id_qs() -> str:
     return (os.environ.get("CREDIFY_ID_QS") or _ID_QS_PADRAO).strip()
 
 
+_ID_TELREV_PADRAO = "7"   # 'PF Telefone' (reverso) — ID confirmado na conta
+
+
 def _id_telrev() -> str:
     # Telefone REVERSO ('PF Telefone', /pftelefone): número -> titular. IdConsulta
-    # próprio (a conta libera à parte); sem default — precisa vir de CREDIFY_ID_TELREV.
-    return (os.environ.get("CREDIFY_ID_TELREV") or "").strip()
+    # próprio (a conta libera à parte). Default 7; override por CREDIFY_ID_TELREV.
+    return (os.environ.get("CREDIFY_ID_TELREV") or _ID_TELREV_PADRAO).strip()
 
 
 def _id_tel() -> str:

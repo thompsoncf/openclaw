@@ -2378,6 +2378,43 @@ def prospeccao_decisor_credify(request: Request, alvo_id: int):
                          "sem_telefone": not tels})
 
 
+@router.post("/painel/prospeccao/identificar-numero")
+def prospeccao_identificar_numero(request: Request, numero: str = Form("")):
+    """Telefone reverso (Credify 'PF Telefone'): número -> em que NOME está cadastrado.
+    Consulta paga + dado de pessoa (LGPD) — ação deliberada. Não persiste o CPF."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    from finance import credify as cf
+    if not cf.tem_credenciais():
+        return JSONResponse({"ok": False, "erro": "Credify não configurada no ambiente."})
+    dig = _so_digitos(numero)
+    if len(dig) < 10:
+        return JSONResponse({"ok": False, "erro": "Informe DDD + número (ex.: 86981885930)."})
+    try:
+        r = cf.titular_por_telefone("", dig)
+    except Exception:  # noqa: BLE001
+        return JSONResponse({"ok": False, "erro": "Falha ao consultar a Credify."})
+    if not r.get("ok"):
+        e = (r.get("erro") or "").lower()
+        if "permiss" in e:
+            msg = "A consulta de telefone reverso (PF Telefone) ainda não está liberada na sua conta Credify."
+        elif "idconsulta" in e:
+            msg = "Falta o IdConsulta da PF Telefone (CREDIFY_ID_TELREV) — avise o suporte."
+        elif "não encontrado" in e or "sem_titular" in e:
+            msg = "Nenhum titular encontrado pra esse número na base."
+        else:
+            msg = "Credify: " + (r.get("erro") or "não consegui")
+        return JSONResponse({"ok": False, "erro": msg})
+    def _mask(c):
+        c = _so_digitos(c or "")
+        return f"***.{c[3:6]}.***-{c[9:]}" if len(c) == 11 else ""
+    tit = [{"nome": t.get("nome"), "cidade": t.get("cidade"), "uf": t.get("uf"),
+            "tipo": t.get("tipo"), "cpf_mask": _mask(t.get("cpf")),
+            "endereco": t.get("endereco")} for t in (r.get("titulares") or [])]
+    return JSONResponse({"ok": True, "titulares": tit})
+
+
 @router.post("/painel/prospeccao/enriquecer-lote")
 def prospeccao_enriquecer_lote(request: Request, background_tasks: BackgroundTasks):
     """Verifica canais de vários leads (que têm site e ainda não foram verificados),
@@ -2980,6 +3017,18 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       fetch('/painel/prospeccao/'+id+'/convidar-zaq',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
         if(!d.ok){if(b){b.disabled=false;b.textContent='🎟️ Convidar pro Zaq';}alert(d.erro||'Não consegui enviar.');return;}
         if(b){b.textContent='✓ Convite enviado';}}).catch(function(){if(b){b.disabled=false;b.textContent='🎟️ Convidar pro Zaq';}alert('Falha de rede.');});}
+    function identificarNumero(){var b=document.getElementById('idn-btn'),m=document.getElementById('idn-msg'),n=document.getElementById('idn-num');
+      var num=(n&&n.value||'').trim();if(!num){if(m){m.textContent='Digite o número com DDD.';m.style.color='#e0a33e';}return;}
+      if(b){b.disabled=true;var t=b.textContent;b.textContent='Consultando…';}if(m){m.textContent='Consultando o titular na Credify…';m.style.color='';}
+      var fd=new FormData();fd.append('numero',num);
+      fetch('/painel/prospeccao/identificar-numero',{method:'POST',body:fd,headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
+        if(b){b.disabled=false;b.textContent=t;}
+        if(!d.ok){if(m){m.textContent=d.erro||'Não consegui.';m.style.color='#e0a33e';}return;}
+        if(!d.titulares||!d.titulares.length){if(m){m.textContent='Nenhum titular encontrado.';m.style.color='#e0a33e';}return;}
+        var h=d.titulares.map(function(t){var l='<b style=\\'color:var(--verde-claro)\\'>'+(t.nome||'—')+'</b>';
+          if(t.cidade||t.uf)l+=' <span class=\\'mut\\'>· '+(t.cidade||'')+(t.uf?('/'+t.uf):'')+'</span>';
+          if(t.tipo)l+=' <span class=\\'mut\\' style=\\'font-size:.72rem\\'>('+t.tipo+')</span>';return l;}).join('<br>');
+        if(m){m.innerHTML=h;m.style.color='';}}).catch(function(){if(b){b.disabled=false;b.textContent=t;}if(m){m.textContent='Falha de rede.';m.style.color='#e0a33e';}});}
     function buscarDecisor(id){var b=document.getElementById('dec-btn'),m=document.getElementById('dec-msg');if(b){b.disabled=true;var t=b.textContent;b.textContent='Consultando…';}if(m){m.textContent='Consultando o quadro societário na Credify…';m.style.color='';}
       fetch('/painel/prospeccao/'+id+'/decisor-credify',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){if(b){b.disabled=false;b.textContent=t;}
         if(!d.ok){if(m){m.textContent=d.erro||'Não consegui.';m.style.color='#e0a33e';}return;}
@@ -3041,6 +3090,18 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
               {% if a.decisor_tel_link %} · <a href="{{ a.decisor_tel_link }}" style="color:var(--verde-claro)">ligar</a>{% endif %}
               {% if a.decisor_zap %} · <a href="{{ a.decisor_zap }}" target="_blank" rel="noopener" style="color:#3ddc84">WhatsApp</a>{% endif %}
             {% else %}<br><span class="mut" style="font-size:.78rem">telefone indisponível (consulta de telefone não liberada na Credify)</span>{% endif %}
+          </span>
+        </div>
+        {% endif %}
+        {% if tem_credify %}
+        <div class="drow" style="align-items:flex-start">
+          <span class="ic">🔎</span><span class="lb">Identificar nº</span>
+          <span style="flex:1">
+            <div style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center">
+              <input class="fld" id="idn-num" inputmode="tel" placeholder="DDD+número (86981885930)" style="flex:1;min-width:150px;max-width:240px">
+              <button type="button" class="pbtn ghost" id="idn-btn" style="padding:.35rem .7rem;font-size:.78rem" onclick="identificarNumero()">Consultar titular</button>
+            </div>
+            <div class="mut" id="idn-msg" style="font-size:.78rem;margin-top:.3rem">Descobre em que nome um telefone está cadastrado (Credify · consulta paga).</div>
           </span>
         </div>
         {% endif %}

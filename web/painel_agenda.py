@@ -17,7 +17,6 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from db.conexao import get_pool
 from finance import agenda as ag
 from finance import convites as cv
-from finance import notificar
 from web.portal import _env, _render, conta_logada
 
 router = APIRouter()
@@ -130,10 +129,11 @@ def _montar_share(request: Request, pool, conta_id: int, convite_ev: str, convit
                f"{ev['titulo']} — {quando}{(' (' + local + ')') if local else ''}. "
                f"Confirma pra mim aqui: {url}")
         lista.append({"nome": g["nome"], "contato": g["contato"], "url": url,
-                      "wa": _wa_share(g["contato"] or "", msg),
+                      "wa": _wa_share(g["contato"] or "", msg), "token": g["token"],
                       "status": g["status"], "status_rot": g["status_rot"]})
-    return {"titulo": ev["titulo"], "quando": quando, "guests": lista,
-            "total": len(lista), "resumo": cv.resumo(guests)}
+    return {"titulo": ev["titulo"], "quando": quando, "guests": lista, "ev_id": ev_id,
+            "total": len(lista), "resumo": cv.resumo(guests),
+            "auto_on": cv.template_configurado()}
 
 
 # ================================================================ CALENDÁRIO
@@ -229,6 +229,41 @@ def agenda_cancelar(request: Request, evento_id: int = Form(...), m: str = Form(
     return RedirectResponse(voltar, status_code=303)
 
 
+_ERRO_ENVIO = {
+    "sem_numero": "esse convidado não tem número de WhatsApp",
+    "sem_template": "o template ainda não está configurado (falta a aprovação / o SID)",
+    "nao_configurado": "o WhatsApp (Twilio) não está configurado",
+    "sem_numero_empresa": "falta o número do Zaq (TWILIO_WHATSAPP_FROM)",
+    "numero_invalido": "o número do convidado parece inválido",
+    "convite_nao_encontrado": "convite não encontrado",
+}
+
+
+@router.post("/painel/agenda/convite/enviar")
+def agenda_convite_enviar(request: Request, token: str = Form(...),
+                          ev_id: str = Form(""), m: str = Form("")):
+    """Dispara o convite pelo WhatsApp (template) pro número do convidado."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    pool = get_pool()
+    c = cv.por_token(pool, token)
+    if not c or c["conta_id"] != ctx["conta_id"]:      # ownership sagrado
+        request.session["agenda_aviso"] = "Convite não encontrado."
+    else:
+        r = cv.enviar_convite_whatsapp(pool, token)
+        quem = c["nome"] or "convidado"
+        if r.get("ok"):
+            request.session["agenda_aviso"] = f"Convite enviado pelo WhatsApp pra {quem}! ✅"
+        else:
+            motivo = _ERRO_ENVIO.get(r.get("erro"), r.get("erro") or "erro desconhecido")
+            request.session["agenda_aviso"] = f"Não consegui enviar pra {quem}: {motivo}."
+    destino = f"/painel/agenda?m={m}" if m else "/painel/agenda"
+    if ev_id:
+        destino += ("&" if "?" in destino else "?") + f"convite_ev={ev_id}"
+    return RedirectResponse(destino, status_code=303)
+
+
 # ================================================================ LEMBRETE (opt-in)
 @router.post("/painel/agenda/lembrete")
 def agenda_lembrete(request: Request, resumo_dia: str = Form(""),
@@ -321,17 +356,7 @@ def convite_responder(request: Request, token: str, acao: str = Form(...),
     c = cv.responder(pool, token, status, resposta)
     if not c:
         return HTMLResponse(_env.get_template("convite_404").render(), status_code=404)
-    notificar.avisar_dono_convite(pool, c["conta_id"], c["nome"] or "O convidado",
-                                  c["evento"]["titulo"], ag.fmt_hora(c["evento"]),
-                                  status, c.get("resposta") or "")
-    # Grupo (2+): quando o último responde, avisa que fechou.
-    grupo = cv.por_evento(pool, c["conta_id"], [c["evento"]["id"]]).get(c["evento"]["id"], [])
-    if len(grupo) > 1:
-        r = cv.resumo(grupo)
-        if r["fechado"]:
-            notificar.avisar_dono_grupo_fechado(
-                pool, c["conta_id"], c["evento"]["titulo"], ag.fmt_hora(c["evento"]),
-                r["confirmados"], r["remarcar"], r["recusados"])
+    cv.pos_resposta(pool, c)   # avisa o dono + fechamento de grupo (fonte única)
     return _render_convite(c, resultado=status)
 
 
@@ -440,7 +465,10 @@ _CSS = """<style>
 .sr-who small{font-size:.72rem;color:var(--txt-mut)}
 .sr-wa{background:#25d366;color:#04160e;border:0;border-radius:8px;padding:.42rem .7rem;font-size:.8rem;font-weight:700;cursor:pointer;text-decoration:none;white-space:nowrap}
 .sr-wa:hover{background:#2ee578}
-.sr-cp{background:var(--card);border:1px solid var(--borda);color:var(--txt);border-radius:8px;padding:.42rem .55rem;cursor:pointer;font-size:.86rem}
+.sr-za{width:auto;margin:0;background:var(--verde);color:#04160e;border:0;border-radius:8px;padding:.42rem .7rem;font-size:.8rem;font-weight:700;cursor:pointer;white-space:nowrap}
+.sr-za:hover{background:var(--verde-hover)}
+.share-row form{margin:0;flex:0 0 auto}
+.sr-cp{width:auto;margin:0;background:var(--card);border:1px solid var(--borda);color:var(--txt);border-radius:8px;padding:.42rem .55rem;cursor:pointer;font-size:.86rem}
 .sr-cp:hover{border-color:var(--verde)}
 /* convidado / bloco no form */
 .gconv{margin-top:14px;padding-top:14px;border-top:1px dashed var(--borda)}
@@ -470,12 +498,20 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   {% if share %}
   <div class="share">
     <h2>✅ {{ share.total }} convite{{ 's' if share.total != 1 }} pronto{{ 's' if share.total != 1 }} pra enviar</h2>
-    <p><b>{{ share.titulo }}</b> — {{ share.quando }}. Mande o link de cada um; cada pessoa confirma o seu e você é avisado aqui.</p>
+    <p><b>{{ share.titulo }}</b> — {{ share.quando }}. {% if share.auto_on %}Toque em <b>📲 Zaq</b> pra ele mandar o convite sozinho pelo WhatsApp (a pessoa confirma num toque), ou use o link.{% else %}Mande o link de cada um; cada pessoa confirma o seu e você é avisado aqui.{% endif %}</p>
     <div class="share-list">
       {% for g in share.guests %}
       <div class="share-row" data-link="{{ g.url }}">
         <div class="sr-av">{{ (g.nome or '?')[0]|upper }}</div>
         <div class="sr-who"><b>{{ g.nome or 'Convidado' }}</b><small>{{ g.contato or 'sem número' }} · {{ g.status_rot }}</small></div>
+        {% if share.auto_on and g.contato %}
+        <form method="post" action="/painel/agenda/convite/enviar" style="margin:0">
+          <input type="hidden" name="token" value="{{ g.token }}">
+          <input type="hidden" name="ev_id" value="{{ share.ev_id }}">
+          <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+          <button type="submit" class="sr-za" title="O Zaq envia o convite pelo WhatsApp">📲 Zaq</button>
+        </form>
+        {% endif %}
         <a class="sr-wa" href="{{ g.wa }}" target="_blank" rel="noopener">💬 Enviar</a>
         <button type="button" class="sr-cp" onclick="cpRow(this)" title="Copiar link">📋</button>
       </div>

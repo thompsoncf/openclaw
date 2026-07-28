@@ -10,6 +10,7 @@ query de portal filtra por ele. A página pública só resolve pelo token (segre
 """
 from __future__ import annotations
 
+import os
 import secrets
 
 from . import agenda as ag
@@ -107,3 +108,123 @@ def resumo(convidados: list[dict]) -> dict:
 def link_calendario(ev: dict) -> str:
     """Link 'adicionar ao meu calendário' pro cliente depois de confirmar."""
     return ag.link_google(ev)
+
+
+def pos_resposta(pool, c: dict) -> None:
+    """Efeitos colaterais de uma resposta de convidado — MESMO fluxo pro link web
+    e pros botões do WhatsApp: avisa o dono e, se for grupo (2+) e todos já
+    responderam, avisa que o grupo fechou. Best-effort (não levanta)."""
+    from . import notificar
+    try:
+        notificar.avisar_dono_convite(
+            pool, c["conta_id"], c["nome"] or "O convidado",
+            c["evento"]["titulo"], ag.fmt_hora(c["evento"]),
+            c["status"], c.get("resposta") or "")
+        grupo = por_evento(pool, c["conta_id"], [c["evento"]["id"]]).get(
+            c["evento"]["id"], [])
+        if len(grupo) > 1:
+            r = resumo(grupo)
+            if r["fechado"]:
+                notificar.avisar_dono_grupo_fechado(
+                    pool, c["conta_id"], c["evento"]["titulo"],
+                    ag.fmt_hora(c["evento"]), r["confirmados"], r["remarcar"],
+                    r["recusados"])
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning("pos_resposta falhou", exc_info=True)
+
+
+# ---- RSVP pelos botões do WhatsApp (quick reply do template) -----------------
+
+def _digitos(s: str) -> str:
+    return "".join(ch for ch in (s or "") if ch.isdigit())
+
+
+def rsvp_por_texto(texto: str) -> str | None:
+    """Mapeia o texto de um botão (ou resposta livre equivalente) pro status.
+    None se não parecer um RSVP. Tolerante a acento/emoji/caixa."""
+    import unicodedata
+    t = "".join(ch for ch in unicodedata.normalize("NFD", (texto or "").strip().lower())
+                if unicodedata.category(ch) != "Mn")   # remove acentos
+    if not t:
+        return None
+    if "confirm" in t:
+        return "confirmado"
+    if "remarc" in t:
+        return "remarcar"
+    if "nao vou" in t or "nao poss" in t or "nao poder" in t or "recus" in t:
+        return "recusado"
+    return None
+
+
+def pendentes_por_numero(pool, numero: str) -> list[dict]:
+    """Convites PENDENTES cujo contato casa com o número que respondeu (compara
+    pelos últimos 8 dígitos — tolera DDI/9º dígito). Só eventos ainda por vir,
+    do mais próximo pro mais distante (o convidado quase sempre tem 1 aberto)."""
+    alvo = _digitos(numero)[-8:]
+    if len(alvo) < 8:
+        return []
+    with pool.connection() as c:
+        rows = c.execute(
+            """select cv.token, cv.contato, cv.nome, cv.conta_id,
+                      e.id, e.titulo, e.inicio
+                 from evento_convidados cv
+                 join eventos_agenda e on e.id = cv.evento_id
+                where cv.status = 'pendente' and cv.contato is not null
+                  and e.inicio >= now() - interval '2 hours'
+                order by e.inicio asc""").fetchall()
+    out = []
+    for r in rows:
+        if _digitos(r[1]).endswith(alvo):
+            out.append({"token": r[0], "nome": r[2], "conta_id": r[3],
+                        "evento_id": r[4], "titulo": r[5], "inicio": r[6]})
+    return out
+
+
+def confirmacao_texto(c: dict) -> str:
+    """Resposta que o Zaq manda de volta pro convidado logo após o botão."""
+    ev = c["evento"]
+    quando = ag.fmt_hora(ev)
+    primeiro = (c.get("nome") or "").split()[0] if c.get("nome") else ""
+    oi = f"{primeiro}, " if primeiro else ""
+    st = c["status"]
+    if st == "confirmado":
+        return (f"✅ {oi}presença confirmada em *{ev['titulo']}* — {quando}! "
+                f"Obrigado 🙌\n\n📆 Adicionar ao seu calendário: {link_calendario(ev)}")
+    if st == "remarcar":
+        return (f"🔁 Anotado{(' ' + primeiro) if primeiro else ''}! Vou avisar o "
+                f"organizador que você precisa remarcar *{ev['titulo']}* ({quando}) "
+                f"pra combinarem um novo horário. 👍")
+    return (f"❌ Tudo bem{(', ' + primeiro) if primeiro else ''}! Anotei que você não "
+            f"vai poder em *{ev['titulo']}* ({quando}). Obrigado por avisar! 🙏")
+
+
+# ---- Disparo do convite pelo WhatsApp (outbound, via template aprovado) -------
+
+def template_configurado() -> bool:
+    """True quando dá pra o Zaq disparar o convite sozinho: template aprovado
+    (SID na env), número do Zaq e credenciais Twilio presentes. Enquanto for
+    False, a UI mostra só o envio manual (link)."""
+    from . import whatsapp_twilio as wa
+    return bool(os.environ.get("TWILIO_TMPL_CONVITE_SID")
+                and os.environ.get("TWILIO_WHATSAPP_FROM") and wa.configurado())
+
+
+def enviar_convite_whatsapp(pool, token: str) -> dict:
+    """Dispara o template de convite pro número do convidado (funciona 'frio',
+    fora da janela de 24h). As variáveis batem com o corpo aprovado no Twilio,
+    NA ORDEM: {{1}} assunto/título · {{2}} data e horário. Retorno tolerante —
+    nunca levanta; devolve {'ok': bool, ...}."""
+    from . import whatsapp_twilio as wa
+    c = por_token(pool, token)
+    if not c:
+        return {"ok": False, "erro": "convite_nao_encontrado"}
+    if not (c.get("contato") or "").strip():
+        return {"ok": False, "erro": "sem_numero"}
+    sid = os.environ.get("TWILIO_TMPL_CONVITE_SID")
+    if not sid:
+        return {"ok": False, "erro": "sem_template"}
+    ev = c["evento"]
+    variaveis = {"1": ev["titulo"], "2": ag.fmt_hora(ev)}
+    return wa.enviar_template(os.environ.get("TWILIO_WHATSAPP_FROM") or "",
+                              c["contato"], sid, variaveis)

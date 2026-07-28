@@ -437,6 +437,22 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
     to = f"whatsapp:{numero}"
     parar_avisos = (lambda: None)   # vira o stopper dos avisos quando for foto/PDF
     try:
+        # --- RSVP de convite de reunião pelos botões do WhatsApp (quick reply) ---
+        # Intercepta ANTES de membro/lead: o convidado costuma ser número "frio"
+        # (ainda não tem conta), então cairia no fluxo de lead por engano. Só age
+        # se houver um convite PENDENTE pra este número — bem restrito.
+        if body and not media_url:
+            from finance import convites as _cv
+            _st = _cv.rsvp_por_texto(body)
+            if _st:
+                _pend = _cv.pendentes_por_numero(pool, numero)
+                if _pend:
+                    _c = _cv.responder(pool, _pend[0]["token"], _st)
+                    if _c:
+                        _cv.pos_resposta(pool, _c)          # avisa o dono + fechamento
+                        _responder_whatsapp(to, _cv.confirmacao_texto(_c))
+                        return
+
         achado = ct.membro_por_whatsapp(pool, numero)
         if achado is not None and _codigo_convite((body or "").strip()) == (body or "").strip().upper():
             # membro JA conectado mandou so' o codigo (1o acesso com o numero

@@ -212,9 +212,9 @@ def template_configurado() -> bool:
 
 def enviar_convite_whatsapp(pool, token: str) -> dict:
     """Dispara o template de convite pro número do convidado (funciona 'frio',
-    fora da janela de 24h). As variáveis batem com o corpo aprovado no Twilio:
-    {{1}} quem convida · {{2}} título · {{3}} quando. Retorno tolerante — nunca
-    levanta; devolve {'ok': bool, ...}."""
+    fora da janela de 24h). As variáveis batem com o corpo aprovado no Twilio,
+    NA ORDEM: {{1}} assunto/título · {{2}} data e horário. Retorno tolerante —
+    nunca levanta; devolve {'ok': bool, ...}."""
     from . import whatsapp_twilio as wa
     c = por_token(pool, token)
     if not c:
@@ -225,8 +225,6 @@ def enviar_convite_whatsapp(pool, token: str) -> dict:
     if not sid:
         return {"ok": False, "erro": "sem_template"}
     ev = c["evento"]
-    variaveis = {"1": (c.get("empresa") or "Zaq"),
-                 "2": ev["titulo"],
-                 "3": ag.fmt_hora(ev)}
+    variaveis = {"1": ev["titulo"], "2": ag.fmt_hora(ev)}
     return wa.enviar_template(os.environ.get("TWILIO_WHATSAPP_FROM") or "",
                               c["contato"], sid, variaveis)

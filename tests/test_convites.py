@@ -170,9 +170,9 @@ def test_enviar_convite_monta_variaveis(pool, conta_id, monkeypatch):
     monkeypatch.setenv("TWILIO_WHATSAPP_FROM", "whatsapp:+5586990000000")
     r = cv.enviar_convite_whatsapp(pool, conv["token"])
     assert r["ok"] and capt["sid"] == "HXtest"
-    assert capt["vars"]["1"] == "Padaria Central"     # quem convida (empresa)
-    assert capt["vars"]["2"] == "Reunião X"           # título
-    assert capt["vars"]["3"]                           # quando preenchido
+    assert capt["vars"]["1"] == "Reunião X"            # {{1}} assunto/título
+    assert capt["vars"]["2"]                            # {{2}} data e horário
+    assert "3" not in capt["vars"]                      # só 2 variáveis (bate com o template)
     assert capt["numero"] == "86 98888-7777"           # o adaptador normaliza depois
 
 

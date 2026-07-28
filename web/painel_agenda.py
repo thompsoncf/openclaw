@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta
 from urllib.parse import quote
 
 from fastapi import APIRouter, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from db.conexao import get_pool
 from finance import agenda as ag
@@ -220,10 +220,14 @@ def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
 # ================================================================ CANCELAR
 @router.post("/painel/agenda/cancelar")
 def agenda_cancelar(request: Request, evento_id: int = Form(...), m: str = Form("")):
+    ajax = bool(request.headers.get("x-zaq-ajax"))
     ctx, redir = _acesso(request)
     if redir is not None:
-        return redir
-    if ag.cancelar_evento(get_pool(), ctx["conta_id"], evento_id):
+        return JSONResponse({"ok": False, "erro": "auth"}, status_code=401) if ajax else redir
+    ok = ag.cancelar_evento(get_pool(), ctx["conta_id"], evento_id)
+    if ajax:
+        return JSONResponse({"ok": bool(ok)})
+    if ok:
         request.session["agenda_aviso"] = "Compromisso cancelado."
     voltar = f"/painel/agenda?m={m}" if m else "/painel/agenda"
     return RedirectResponse(voltar, status_code=303)
@@ -244,23 +248,27 @@ _ERRO_ENVIO = {
 def agenda_convite_enviar(request: Request, token: str = Form(...),
                           ev_id: str = Form(""), m: str = Form("")):
     """Dispara o convite pelo WhatsApp (template) pro número do convidado."""
+    ajax = bool(request.headers.get("x-zaq-ajax"))
     ctx, redir = _acesso(request)
     if redir is not None:
-        return redir
+        return JSONResponse({"ok": False, "msg": "Faça login."}, status_code=401) if ajax else redir
     pool = get_pool()
     c = cv.por_token(pool, token)
     if not c or c["conta_id"] != ctx["conta_id"]:      # ownership sagrado
-        request.session["agenda_aviso"] = "Convite não encontrado."
+        ok, msg = False, "Convite não encontrado."
     elif c["status"] == "confirmado":                  # já confirmou: não reenvia
-        request.session["agenda_aviso"] = f"{c['nome'] or 'O convidado'} já confirmou — não precisa reenviar. ✅"
+        ok, msg = False, f"{c['nome'] or 'O convidado'} já confirmou — não precisa reenviar. ✅"
     else:
         r = cv.enviar_convite_whatsapp(pool, token)
         quem = c["nome"] or "convidado"
         if r.get("ok"):
-            request.session["agenda_aviso"] = f"Convite enviado pelo WhatsApp pra {quem}! ✅"
+            ok, msg = True, f"Convite enviado pelo WhatsApp pra {quem}! ✅"
         else:
             motivo = _ERRO_ENVIO.get(r.get("erro"), r.get("erro") or "erro desconhecido")
-            request.session["agenda_aviso"] = f"Não consegui enviar pra {quem}: {motivo}."
+            ok, msg = False, f"Não consegui enviar pra {quem}: {motivo}."
+    if ajax:
+        return JSONResponse({"ok": ok, "msg": msg})
+    request.session["agenda_aviso"] = msg
     destino = f"/painel/agenda?m={m}" if m else "/painel/agenda"
     if ev_id:
         destino += ("&" if "?" in destino else "?") + f"convite_ev={ev_id}"
@@ -377,6 +385,11 @@ _CSS = """<style>
 .ag-btn{width:auto;margin:0;display:inline-flex;align-items:center;gap:7px;background:var(--verde);color:#04160e;font-weight:700;border:0;border-radius:10px;padding:.6rem 1rem;font-size:.92rem;cursor:pointer;text-decoration:none}
 /* feedback instantâneo: botão "reagindo" enquanto o back processa */
 .is-busy{opacity:.62;cursor:progress!important;pointer-events:none}
+/* toast (aviso flutuante) — usado nas ações sem reload */
+.zaq-toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(12px);background:var(--card-2);border:1px solid var(--verde);color:var(--txt);padding:.7rem 1.05rem;border-radius:12px;font-size:.9rem;box-shadow:0 10px 34px rgba(0,0,0,.45);opacity:0;transition:transform .28s,opacity .28s;z-index:9999;max-width:92vw;text-align:center}
+.zaq-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.zaq-toast.err{border-color:#e0574f}
+.px-row.saindo{opacity:0;transform:translateX(8px);transition:.22s}
 .ag-btn:hover{background:var(--verde-hover)}
 .ag-grid{display:grid;grid-template-columns:1.7fr .95fr;gap:18px;align-items:start}
 @media(max-width:860px){.ag-grid{grid-template-columns:1fr}}
@@ -516,7 +529,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           {% if g.status == 'confirmado' %}
           <button type="button" class="sr-za" disabled title="Já confirmou — não precisa reenviar">📲 Zaq</button>
           {% else %}
-          <form method="post" action="/painel/agenda/convite/enviar" style="margin:0">
+          <form method="post" action="/painel/agenda/convite/enviar" data-ajax="enviar" style="margin:0">
             <input type="hidden" name="token" value="{{ g.token }}">
             <input type="hidden" name="ev_id" value="{{ share.ev_id }}">
             <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
@@ -553,7 +566,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <div class="cal-cell{% if c.fora %} fora{% endif %}{% if c.hoje %} hoje{% endif %}">
             <span class="cal-num">{{ c.dia }}</span>
             {% for e in c.eventos[:3] %}
-            <span class="chip t-{{ e.tipo }}" title="{{ e.hora }} {{ e.titulo }}"><b>{{ e.hora }}</b>{{ e.titulo }}</span>
+            <span class="chip t-{{ e.tipo }}" data-ev="{{ e.id }}" title="{{ e.hora }} {{ e.titulo }}"><b>{{ e.hora }}</b>{{ e.titulo }}</span>
             {% endfor %}
             {% if c.eventos|length > 3 %}<span class="cal-mais">+{{ c.eventos|length - 3 }} mais</span>{% endif %}
           </div>
@@ -570,7 +583,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <h2>Próximos compromissos</h2>
         <div class="px">
           {% for e in proximos %}
-          <div class="px-row">
+          <div class="px-row" data-ev="{{ e.id }}">
             <div class="px-dot d-{{ e.tipo }}"></div>
             <div class="px-when"><div class="d">{{ e.dia_rot }}</div><div class="h">{{ e.hora_rot }}</div></div>
             <div class="px-body">
@@ -586,7 +599,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
               </div>
               {% endif %}
             </div>
-            <form method="post" action="/painel/agenda/cancelar" onsubmit="return confirm('Cancelar “{{ e.titulo }}”?')">
+            <form method="post" action="/painel/agenda/cancelar" data-ajax="cancelar" onsubmit="return confirm('Cancelar “{{ e.titulo }}”?')">
               <input type="hidden" name="evento_id" value="{{ e.id }}">
               <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
               <button class="px-x" type="submit" title="Cancelar">✕</button>
@@ -700,6 +713,7 @@ function rmGuest(b){var box=document.getElementById('guests');var row=b.closest(
 document.addEventListener('submit', function(ev){
   if(ev.defaultPrevented) return;                         // ex.: Cancelar -> confirm() = não
   var f=ev.target; if(!f||f.tagName!=='FORM') return;
+  if(f.dataset && f.dataset.ajax) return;                 // forms AJAX se gerenciam sozinhos
   var b=f.querySelector('button[type=submit],button:not([type])');
   if(!b||b.disabled) return;
   var busy=b.getAttribute('data-busy');
@@ -707,6 +721,49 @@ document.addEventListener('submit', function(ev){
   if(busy) b.innerHTML=busy;
   b.classList.add('is-busy'); b.disabled=true;
   setTimeout(function(){ if(b.dataset.orig!=null){ b.innerHTML=b.dataset.orig; b.disabled=false; b.classList.remove('is-busy'); delete b.dataset.orig; } }, 8000);
+}, false);
+
+// Toast flutuante
+function zaqToast(msg, ok){
+  var t=document.createElement('div');
+  t.className='zaq-toast'+(ok===false?' err':'');
+  t.textContent=msg; document.body.appendChild(t);
+  requestAnimationFrame(function(){ t.classList.add('show'); });
+  setTimeout(function(){ t.classList.remove('show'); setTimeout(function(){ t.remove(); },300); }, 3400);
+}
+function zaqVazioProximos(){
+  var px=document.querySelector('.px'); if(!px) return;
+  if(!px.querySelector('.px-row') && !px.querySelector('.px-vazio')){
+    var d=document.createElement('div'); d.className='px-vazio';
+    d.textContent='Nada por vir. Marque um compromisso ali em cima. 🎉'; px.appendChild(d);
+  }
+}
+// Ações SEM reload (fetch): Cancelar remove a linha/chip na hora; 📲 Zaq envia e
+// dá um toast. Fallback: sem JS, os <form> continuam funcionando por POST normal.
+document.addEventListener('submit', function(ev){
+  var f=ev.target; if(!f||!f.dataset||!f.dataset.ajax) return;
+  if(ev.defaultPrevented) return;                         // confirm() cancelado
+  ev.preventDefault();
+  var tipo=f.dataset.ajax, btn=f.querySelector('button[type=submit]');
+  var orig=btn?btn.innerHTML:'';
+  if(btn){ btn.disabled=true; btn.classList.add('is-busy'); if(btn.getAttribute('data-busy')) btn.innerHTML=btn.getAttribute('data-busy'); }
+  function restore(){ if(btn){ btn.disabled=false; btn.classList.remove('is-busy'); btn.innerHTML=orig; } }
+  fetch(f.action, {method:'POST', headers:{'X-Zaq-Ajax':'1'}, body:new FormData(f)})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(tipo==='cancelar'){
+        if(d && d.ok){
+          var id=(f.querySelector('[name=evento_id]')||{}).value;
+          var row=f.closest('.px-row'); if(row){ row.classList.add('saindo'); setTimeout(function(){ row.remove(); zaqVazioProximos(); },200); }
+          if(id){ document.querySelectorAll('.chip[data-ev="'+id+'"]').forEach(function(x){ x.remove(); }); }
+          zaqToast('Compromisso cancelado.');
+        } else { restore(); zaqToast('Não consegui cancelar.', false); }
+      } else {   // enviar convite
+        if(d && d.ok){ zaqToast(d.msg||'Convite enviado! ✅'); if(btn){ btn.innerHTML='✓ Enviado'; btn.classList.remove('is-busy'); } }
+        else { restore(); zaqToast((d && d.msg)||'Não consegui enviar.', false); }
+      }
+    })
+    .catch(function(){ restore(); zaqToast('Erro de conexão — tenta de novo.', false); });
 }, false);
 </script>
 {% endblock %}"""

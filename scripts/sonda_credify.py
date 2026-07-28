@@ -84,10 +84,10 @@ def fase_swagger():
 
 
 # --------------------------------------------------------------- fase 1: CNPJ
-PATHS_CNPJ = ["/pj/quadrosocietario", "/pj/quadro-societario", "/pj/socios", "/pj/qsa",
-              "/pj/dadoscadastrais", "/pj/receita", "/pj/cnpj", "/pj/completo",
-              "/pj", "/cnpj", "/consulta/pj", "/consulta/quadrosocietario"]
-BODYKEYS_CNPJ = ["cnpj", "documento", "doc", "Cnpj", "CNPJ", "Documento"]
+# caminho CONFIRMADO na referência (readme): raiz /quadrosocietario. Mantém alguns
+# fallbacks só por garantia. O que falta descobrir é o NOME DO CAMPO do corpo.
+PATHS_CNPJ = ["/quadrosocietario", "/pj/quadrosocietario"]
+BODYKEYS_CNPJ = ["cnpj", "documento", "doc", "Cnpj", "CNPJ", "Documento", "cnpjBusca", "numeroDocumento"]
 # formato "consulta com produto" (muitos agregadores BR usam isso)
 PRODUTOS_QS = ["quadrosocietario", "quadro_societario", "QUADRO_SOCIETARIO", "qsa", "socios"]
 
@@ -119,7 +119,7 @@ def fase_cnpj(token, cnpj):
             if r is None:
                 continue
             print(f"  POST {caminho:26} body={{{k}}} -> {r.status_code}"
-                  + (f"  {_corpo(r,180)}" if r.text and r.status_code != 500 else ""))
+                  + (f"  {_corpo(r,180)}" if r.text else ""))
             if _tem_dado(r):
                 print(f"\n  >>> ACHOU! POST {caminho} body={{{k}: cnpj}}")
                 print("  RESPOSTA (mascarada):\n" + _corpo(r, 3000))
@@ -134,7 +134,7 @@ def fase_cnpj(token, cnpj):
             if r is None:
                 continue
             print(f"  POST {caminho:16} produto={prod:20} -> {r.status_code}"
-                  + (f"  {_corpo(r,150)}" if r.text and r.status_code != 500 else ""))
+                  + (f"  {_corpo(r,150)}" if r.text else ""))
             if _tem_dado(r):
                 print(f"\n  >>> ACHOU! POST {caminho} produto={prod}")
                 print("  RESPOSTA (mascarada):\n" + _corpo(r, 3000))
@@ -147,7 +147,7 @@ def fase_cnpj(token, cnpj):
             if r is None:
                 continue
             print(f"  GET  {caminho:26} -> {r.status_code}"
-                  + (f"  {_corpo(r,150)}" if r.text and r.status_code != 500 else ""))
+                  + (f"  {_corpo(r,150)}" if r.text else ""))
             if _tem_dado(r):
                 print(f"\n  >>> ACHOU (GET)! {caminho}")
                 print("  RESPOSTA (mascarada):\n" + _corpo(r, 3000))
@@ -157,9 +157,9 @@ def fase_cnpj(token, cnpj):
 
 
 # --------------------------------------------------------------- fase 2: telefone
-PATHS_CPF = ["/pf/telefonecpf", "/pf/telefone", "/pf/telefones", "/pf/cpf",
-             "/pf/dadoscadastrais", "/pf/contato", "/pf", "/telefone", "/consulta/pf"]
-BODYKEYS_CPF = ["cpf", "documento", "doc", "Cpf", "CPF"]
+# caminho CONFIRMADO: raiz /pftelefonecpf.
+PATHS_CPF = ["/pftelefonecpf", "/pf/telefonecpf"]
+BODYKEYS_CPF = ["cpf", "documento", "doc", "Cpf", "CPF", "numeroDocumento"]
 
 
 def fase_cpf(token, cpf):
@@ -170,7 +170,7 @@ def fase_cpf(token, cpf):
             if r is None:
                 continue
             print(f"  POST {caminho:24} body={{{k}}} -> {r.status_code}"
-                  + (f"  {_corpo(r,150)}" if r.text and r.status_code != 500 else ""))
+                  + (f"  {_corpo(r,150)}" if r.text else ""))
             if r.status_code == 200 and any(x in (r.text or "").lower()
                                             for x in ("telefone", "phone", "ddd", "numero", "sucess")):
                 print(f"\n  >>> ACHOU! POST {caminho} body={{{k}: cpf}}")

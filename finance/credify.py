@@ -204,7 +204,7 @@ def quadro_societario(cnpj: str) -> list[dict]:
     if len(d) != 14:
         return []
     try:
-        j = _post("/pj/quadrosocietario", {"cnpj": d})
+        j = _post("/quadrosocietario", {"cnpj": d})
     except CredifyErro:
         return []
     # o retorno pode vir como {socios:[...]} , {quadroSocietario:[...]} ou {data:{...}}
@@ -234,7 +234,7 @@ def telefones_por_cpf(cpf: str) -> list[dict]:
     if len(d) != 11:
         return []
     try:
-        j = _post("/pf/telefonecpf", {"cpf": d})
+        j = _post("/pftelefonecpf", {"cpf": d})
     except CredifyErro:
         return []
     raiz = j.get("data") if isinstance(j.get("data"), dict) else j

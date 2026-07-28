@@ -2344,7 +2344,13 @@ def prospeccao_decisor_credify(request: Request, alvo_id: int):
         return JSONResponse({"ok": False, "erro": "Falha ao consultar a Credify."})
     nome = r.get("decisor_nome")
     if not nome:
-        return JSONResponse({"ok": False, "erro": "Não achei o quadro societário desse CNPJ na Credify."})
+        if r.get("permissao"):
+            msg = "A consulta de Quadro Societário não está liberada na sua conta Credify."
+        elif r.get("motivo"):
+            msg = "Credify: " + str(r["motivo"]) + "."
+        else:
+            msg = "Não achei o quadro societário desse CNPJ na Credify."
+        return JSONResponse({"ok": False, "erro": msg})
     with pool.connection() as c:
         c.execute(
             """update prospeccao set decisor_nome=%s, decisor_cargo=%s, decisor_telefone=%s,

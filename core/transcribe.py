@@ -12,6 +12,17 @@ Config por variaveis de ambiente:
 import io
 import os
 
+# Dica de vocabulário (prompt do Whisper): "empurra" a transcrição pros termos do
+# nosso contexto — o maior ganho é grafar "Zaq" certo (senão vira "Zac/ZAC") e
+# firmar o português. Não resolve nome próprio incomum (STT sempre varia alguns),
+# mas trava o que é do domínio. Ajustável por env STT_PROMPT (ex: pra somar nomes
+# de contatos frequentes).
+_PROMPT_PADRAO = (
+    "Assistente financeiro Zaq no WhatsApp e Telegram, em português do Brasil. "
+    "Termos comuns: Zaq, Pix, boleto, CNPJ, CPF, nota fiscal, cupom, reunião, "
+    "agenda, compromisso, remarcar, confirmar, reais."
+)
+
 
 class Transcritor:
     def __init__(self, api_key: str | None = None, base_url: str | None = None,
@@ -24,13 +35,21 @@ class Transcritor:
         self.model = model or os.environ.get("STT_MODEL", "whisper-1")
 
     def transcrever(self, audio_bytes: bytes, nome: str = "audio.oga",
-                    idioma: str = "pt") -> str:
+                    idioma: str = "pt", prompt: str | None = None) -> str:
         arquivo = io.BytesIO(audio_bytes)
         arquivo.name = nome  # a API usa a extensao pra saber o formato
+        dica = prompt if prompt is not None else os.environ.get("STT_PROMPT", _PROMPT_PADRAO)
+        kwargs = {"model": self.model, "file": arquivo, "language": idioma,
+                  "temperature": 0}
+        if dica:
+            kwargs["prompt"] = dica
         try:
+            resp = self.client.audio.transcriptions.create(**kwargs)
+        except TypeError:
+            # provedor nao aceita prompt/temperature -> tenta o basico
+            arquivo.seek(0)
             resp = self.client.audio.transcriptions.create(
-                model=self.model, file=arquivo, language=idioma,
-            )
+                model=self.model, file=arquivo, language=idioma)
         except Exception as e:  # noqa: BLE001
             # Ponto unico de alerta do STT: se a falha for sistemica (sem
             # credito/chave invalida/quota) o admin e' avisado. Re-levanta pra

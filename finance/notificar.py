@@ -144,6 +144,28 @@ def avisar_dono_convite(pool, conta_id: int, convidado: str, titulo: str,
     return _enviar_telegram(chat, "\n".join(linhas))
 
 
+def avisar_dono_grupo_fechado(pool, conta_id: int, titulo: str, quando: str,
+                              confirmados: int, remarcar: int, recusados: int) -> bool:
+    """Avisa o dono quando TODOS os convidados de uma reunião já responderam.
+    Só faz sentido pra grupo (2+); best-effort."""
+    chat = _telegram_id_do_dono(pool, conta_id)
+    if not chat:
+        return False
+    total = confirmados + remarcar + recusados
+    if remarcar == 0 and recusados == 0:
+        txt = f"🎉 *Fechou!* Todos os {total} confirmaram presença na reunião *{titulo}* ({quando})."
+    else:
+        partes = []
+        if confirmados:
+            partes.append(f"✅ {confirmados} confirmaram")
+        if remarcar:
+            partes.append(f"🔁 {remarcar} querem remarcar")
+        if recusados:
+            partes.append(f"❌ {recusados} não vão")
+        txt = f"Todos responderam à reunião *{titulo}* ({quando}): " + ", ".join(partes) + "."
+    return _enviar_telegram(chat, txt)
+
+
 def notificar_admin(texto: str) -> bool:
     """Manda uma mensagem pro Telegram do ADMIN do SaaS (env ADMIN_TELEGRAM_ID).
     Tolerante a falha: sem env ou sem rede, loga e devolve False."""

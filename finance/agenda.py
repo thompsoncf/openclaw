@@ -84,6 +84,16 @@ def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
     return _fmt_evento(row)
 
 
+def evento_por_id(pool, conta_id: int, evento_id: int) -> dict | None:
+    """Um evento ativo da conta (pra montar o card de compartilhar convites)."""
+    with pool.connection() as c:
+        r = c.execute(
+            "select " + _COLS + " from eventos_agenda "
+            "where id=%s and conta_id=%s and status='ativo'",
+            (evento_id, conta_id)).fetchone()
+    return _fmt_evento(r) if r else None
+
+
 def listar_eventos(pool, conta_id: int, de: datetime, ate: datetime) -> list[dict]:
     with pool.connection() as c:
         rows = c.execute(

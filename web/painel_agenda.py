@@ -215,10 +215,9 @@ def agenda_lembrete(request: Request, resumo_dia: str = Form(""),
         antes = int(aviso_antes_min) if aviso_on else None
     except (TypeError, ValueError):
         antes = 30 if aviso_on else None
-    # "lembrete ativo" = pelo menos um dos dois ligado (é o opt-in geral)
     ag.salvar_config(get_pool(), ctx["conta_id"],
-                     lembrete_ativo=(resumo_on or aviso_on),
-                     hora_resumo=hora if resumo_on else 7,
+                     resumo_ativo=resumo_on,
+                     hora_resumo=hora,
                      aviso_antes_min=antes)
     if resumo_on or aviso_on:
         request.session["agenda_aviso"] = "Lembrete ligado. 🔔"
@@ -527,9 +526,9 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
           <div class="tg">
             <div><div class="tg-t">Resumo do dia</div><div class="tg-s">De manhã, o que você tem no dia</div></div>
-            <label class="sw"><input type="checkbox" name="resumo_dia" value="1" {% if cfg.lembrete_ativo and cfg.hora_resumo is not none %}checked{% endif %} onchange="document.getElementById('subResumo').style.display=this.checked?'flex':'none'"><span class="track"></span><span class="knob"></span></label>
+            <label class="sw"><input type="checkbox" name="resumo_dia" value="1" {% if cfg.resumo_ativo %}checked{% endif %} onchange="document.getElementById('subResumo').style.display=this.checked?'flex':'none'"><span class="track"></span><span class="knob"></span></label>
           </div>
-          <div class="sub-opt" id="subResumo"{% if not cfg.lembrete_ativo %} style="display:none"{% endif %}>
+          <div class="sub-opt" id="subResumo"{% if not cfg.resumo_ativo %} style="display:none"{% endif %}>
             <span>às</span>
             <select name="hora_resumo">
               {% for h in range(5,12) %}<option value="{{ h }}" {% if cfg.hora_resumo==h %}selected{% endif %}>{{ '%02d:00'|format(h) }}</option>{% endfor %}
@@ -648,7 +647,7 @@ _CONVITE_TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
       <input type="hidden" name="acao" value="confirmar">
       <button class="btn b-conf" type="submit">✅ Confirmar presença</button>
     </form>
-    <button class="btn b-sec" type="button" onclick="tog('rem')">🔁 Preciso de outro horário</button>
+    <button class="btn b-sec" type="button" onclick="tog('rem')">🔁 Remarcar — sugerir outro horário</button>
     <div class="expand" id="rem">
       <form method="post" action="/convite/{{ token }}/responder">
         <input type="hidden" name="acao" value="remarcar">

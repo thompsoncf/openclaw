@@ -69,7 +69,7 @@ def pool():
     init_schema(p)
     migr = Path(__file__).resolve().parent.parent / "db" / "migracoes"
     with p.connection() as c:
-        for nome in ("098_agenda.sql", "099_agenda_tipo.sql"):
+        for nome in ("098_agenda.sql", "099_agenda_tipo.sql", "101_agenda_lembretes.sql"):
             c.execute((migr / nome).read_text(encoding="utf-8"))
         c.commit()
     yield p
@@ -144,12 +144,17 @@ def test_eventos_mes_pega_so_o_mes(pool, conta_id):
 
 def test_config_lembrete_default_e_salvar(pool, conta_id):
     cfg = ag.get_config(pool, conta_id)          # sem linha -> defaults
-    assert cfg["lembrete_ativo"] is False and cfg["hora_resumo"] == 7
-    ag.salvar_config(pool, conta_id, lembrete_ativo=True, hora_resumo=8, aviso_antes_min=30)
+    assert cfg["resumo_ativo"] is False and cfg["hora_resumo"] == 7
+    ag.salvar_config(pool, conta_id, resumo_ativo=True, hora_resumo=8, aviso_antes_min=30)
     cfg = ag.get_config(pool, conta_id)
-    assert cfg["lembrete_ativo"] is True and cfg["hora_resumo"] == 8 and cfg["aviso_antes_min"] == 30
-    # upsert: salvar de novo atualiza no lugar
-    ag.salvar_config(pool, conta_id, lembrete_ativo=False, hora_resumo=7, aviso_antes_min=None)
+    assert cfg["resumo_ativo"] is True and cfg["hora_resumo"] == 8 and cfg["aviso_antes_min"] == 30
+    assert cfg["lembrete_ativo"] is True          # derivado
+    # só aviso ligado -> resumo fica desligado (não manda resumo)
+    ag.salvar_config(pool, conta_id, resumo_ativo=False, hora_resumo=7, aviso_antes_min=15)
+    cfg = ag.get_config(pool, conta_id)
+    assert cfg["resumo_ativo"] is False and cfg["aviso_antes_min"] == 15 and cfg["lembrete_ativo"] is True
+    # tudo desligado
+    ag.salvar_config(pool, conta_id, resumo_ativo=False, hora_resumo=7, aviso_antes_min=None)
     cfg = ag.get_config(pool, conta_id)
     assert cfg["lembrete_ativo"] is False and cfg["aviso_antes_min"] is None
 
@@ -161,7 +166,7 @@ def test_feed_token_idempotente_e_resolve(pool, conta_id):
     assert ag.conta_por_feed_token(pool, t1) == conta_id
     assert ag.conta_por_feed_token(pool, "nao-existe") is None
     # salvar_config depois NÃO apaga o token (upsert preserva)
-    ag.salvar_config(pool, conta_id, lembrete_ativo=True, hora_resumo=7, aviso_antes_min=None)
+    ag.salvar_config(pool, conta_id, resumo_ativo=True, hora_resumo=7, aviso_antes_min=None)
     assert ag.get_config(pool, conta_id)["feed_token"] == t1
 
 

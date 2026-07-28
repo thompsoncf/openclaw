@@ -13,19 +13,19 @@ demais chamadas. O token é cacheado em memória e renovado sozinho (na expiraç
 ou num 401).
 
 Config (env, no Render):
-  CREDIFY_CLIENT_ID
-  CREDIFY_CLIENT_SECRET
-  CREDIFY_BASE_URL   (opcional; default https://api.credify.com.br)
+  CREDIFY_CLIENT_ID          (o "Logon" da Credify)
+  CREDIFY_CLIENT_SECRET      (a "Senha")
+  CREDIFY_ID_QS              (IdConsulta da consulta "Quadro Societário")
+  CREDIFY_ID_TEL             (IdConsulta do "Telefone por CPF"; default 576)
+  CREDIFY_BASE_URL           (opcional; default https://api.credify.com.br)
+
+Contrato (confirmado na referência): o corpo dos endpoints de DADOS é aninhado —
+  {"Consulta": {"IdConsulta": <id>, "CpfCnpj": <documento>, "TipoPessoa": "F"|"J"}}
+e a resposta traz blocos {RESPOSTA:{CODIGO}, TELEFONES:{REGISTRO_1:{...}}} etc.
 
 CUIDADO (LGPD + custo): é dado de PESSOA REAL e consulta PAGA (2 chamadas por
 lead). Use só em lead qualificado e com base legal pra abordagem. Tudo é
 best-effort: qualquer falha -> retorna None/{} e o lead fica como está.
-
-⚠️ CAMPOS A CONFIRMAR: os nomes de request/response dos endpoints de DADOS
-(quadro societário e telefone) vêm da doc paga da Credify e ainda não foram
-validados contra uma resposta real. Por isso os parsers abaixo são TOLERANTES
-(tentam os nomes mais prováveis via _pega/_lista). Ao rodar a 1ª consulta real,
-ajuste os nomes se preciso — é mudança de 1-2 linhas. Ver os TODO marcados.
 """
 from __future__ import annotations
 
@@ -71,6 +71,47 @@ def tem_credenciais() -> bool:
 
 def _base() -> str:
     return (os.environ.get("CREDIFY_BASE_URL") or _DEFAULT_BASE).rstrip("/")
+
+
+# ---------- contrato da Credify (gateway de consultas) ----------
+# Todo endpoint de dados recebe o MESMO envelope aninhado:
+#   {"Consulta": {"IdConsulta": <id do produto>, "CpfCnpj": <documento>, "TipoPessoa": "F"|"J"}}
+# O IdConsulta identifica a consulta contratada (por env, por conta). Confirmado
+# na referência: PF Telefone-CPF usa IdConsulta 576 e TipoPessoa "F".
+_ID_TEL_PADRAO = "576"
+
+
+def _id_qs() -> str:
+    return (os.environ.get("CREDIFY_ID_QS") or "").strip()
+
+
+def _id_tel() -> str:
+    return (os.environ.get("CREDIFY_ID_TEL") or _ID_TEL_PADRAO).strip()
+
+
+def _corpo_consulta(id_consulta: str, documento: str, tipo_pessoa: str) -> dict:
+    return {"Consulta": {"IdConsulta": str(id_consulta), "CpfCnpj": documento,
+                         "TipoPessoa": tipo_pessoa}}
+
+
+def _registros(bloco) -> list[dict]:
+    """A Credify devolve blocos como {REGISTRO_1:{...}, REGISTRO_2:{...}} (dict) ou
+    como lista. Normaliza pra lista de dicts."""
+    if isinstance(bloco, dict):
+        return [v for v in bloco.values() if isinstance(v, dict)]
+    if isinstance(bloco, list):
+        return [v for v in bloco if isinstance(v, dict)]
+    return []
+
+
+def _codigo_ok(j) -> bool:
+    """RESPOSTA.CODIGO: 1=sucesso, 2=não encontrado, 3=erro. Sem o bloco, assume ok
+    (deixa o parser tentar)."""
+    resp = _pega(j, "RESPOSTA", "resposta", default=None)
+    if isinstance(resp, dict):
+        cod = str(_pega(resp, "CODIGO", "codigo", default="")).strip()
+        return cod in ("", "1")
+    return True
 
 
 # ---------- helpers tolerantes (parsing sem depender do nome exato) ----------
@@ -197,27 +238,26 @@ def _post(caminho: str, payload: dict) -> dict:
 def quadro_societario(cnpj: str) -> list[dict]:
     """CNPJ -> lista de sócios [{nome, cpf, qualificacao}]. [] em falha.
 
-    TODO(confirmar): caminho '/pj/quadrosocietario', chave do CNPJ no body, e os
-    nomes dos campos de sócio no retorno. Os parsers são tolerantes.
+    Envelope: POST /quadrosocietario {"Consulta":{IdConsulta, CpfCnpj, TipoPessoa:"J"}}.
+    Precisa do IdConsulta da consulta 'Quadro Societário' em CREDIFY_ID_QS. Parser
+    tolerante ao retorno (bloco SOCIOS/QUADROSOCIETARIO com REGISTRO_N ou lista).
     """
     d = _so_digitos(cnpj)
-    if len(d) != 14:
+    if len(d) != 14 or not _id_qs():
         return []
     try:
-        j = _post("/quadrosocietario", {"cnpj": d})
+        j = _post("/quadrosocietario", _corpo_consulta(_id_qs(), d, "J"))
     except CredifyErro:
         return []
-    # o retorno pode vir como {socios:[...]} , {quadroSocietario:[...]} ou {data:{...}}
-    raiz = j.get("data") if isinstance(j.get("data"), dict) else j
-    socios_raw = _lista(raiz, "socios", "quadroSocietario", "quadro_societario",
-                        "members", "qsa", "partners")
+    if not _codigo_ok(j):
+        return []
+    bloco = _pega(j, "SOCIOS", "socios", "QUADROSOCIETARIO", "quadroSocietario",
+                  "quadro_societario", "QSA", "qsa", "PARTNERS", default=None)
     out = []
-    for s in socios_raw:
-        if not isinstance(s, dict):
-            continue
-        nome = _pega(s, "nome", "name", "nomeSocio")
-        cpf = _so_digitos(_pega(s, "cpf", "documento", "cpfCnpj", "taxId", ""))
-        qual = _pega(s, "qualificacao", "qualification", "cargo", "role", default="")
+    for s in _registros(bloco):
+        nome = _pega(s, "NOME", "nome", "name", "nomeSocio", "RAZAOSOCIAL", "NOMESOCIO")
+        cpf = _so_digitos(_pega(s, "CPF", "cpf", "CPFCNPJ", "CpfCnpj", "documento", "DOCUMENTO", ""))
+        qual = _pega(s, "QUALIFICACAO", "qualificacao", "CARGO", "cargo", "qualification", default="")
         if nome or len(cpf) == 11:
             out.append({"nome": nome, "cpf": cpf if len(cpf) == 11 else None,
                         "qualificacao": qual})
@@ -227,34 +267,33 @@ def quadro_societario(cnpj: str) -> list[dict]:
 def telefones_por_cpf(cpf: str) -> list[dict]:
     """CPF -> lista de telefones [{numero, ddd, formatado, whatsapp, tipo}]. [] em falha.
 
-    TODO(confirmar): caminho '/pf/telefonecpf', chave do CPF no body e os nomes
-    dos campos de telefone no retorno. Parsers tolerantes.
+    Envelope: POST /pftelefonecpf {"Consulta":{IdConsulta, CpfCnpj, TipoPessoa:"F"}}.
+    IdConsulta = CREDIFY_ID_TEL (default 576). Retorno: TELEFONES.REGISTRO_N.
     """
     d = _so_digitos(cpf)
     if len(d) != 11:
         return []
     try:
-        j = _post("/pftelefonecpf", {"cpf": d})
+        j = _post("/pftelefonecpf", _corpo_consulta(_id_tel(), d, "F"))
     except CredifyErro:
         return []
-    raiz = j.get("data") if isinstance(j.get("data"), dict) else j
-    tels_raw = _lista(raiz, "telefones", "phones", "telefone", "phone")
+    if not _codigo_ok(j):
+        return []
+    bloco = _pega(j, "TELEFONES", "telefones", "phones", default=None)
     out = []
-    for t in tels_raw:
-        if isinstance(t, str):  # veio só a string do número
-            t = {"numero": t}
-        if not isinstance(t, dict):
-            continue
-        ddd = _pega(t, "ddd", "area", "areaCode", default="")
-        num = _pega(t, "numero", "number", "telefone", "phone", default="")
+    for t in _registros(bloco):
+        ddd = _pega(t, "DDD", "ddd", "area", default="")
+        num = _pega(t, "TELEFONE", "telefone", "numero", "number", default="")
         formatado = _fmt_tel(ddd, num)
         if not formatado:
             continue
-        wpp = _pega(t, "whatsapp", "isWhatsapp", "possuiWhatsapp")
+        wpp = _pega(t, "WHATSAPP", "whatsapp", "isWhatsapp")
+        wpp_bool = (str(wpp).strip().upper() in ("SIM", "S", "TRUE", "1", "YES")
+                    if wpp is not None else _eh_movel(ddd, num))
         out.append({
             "numero": num, "ddd": ddd, "formatado": formatado,
-            "whatsapp": bool(wpp) if wpp is not None else _eh_movel(ddd, num),
-            "tipo": _pega(t, "tipo", "type", default=None),
+            "whatsapp": wpp_bool,
+            "tipo": _pega(t, "TIPO_CONTATO_TELEFONE", "tipo", "type", default=None),
         })
     return out
 

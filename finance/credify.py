@@ -217,8 +217,13 @@ def _obter_token(force: bool = False) -> str:
             _TOKEN_EXP = agora + _TTL_SEG
             _AUTH_SHAPE_OK = _AUTH_SHAPES.index(shape)
             return _TOKEN
+        corpo_txt = (r.text or "").strip()[:200]
         ultimo = str(_pega(j, "Message", "message", "erro", "Erro",
-                           default=f"HTTP {r.status_code}"))
+                           default=(corpo_txt or f"HTTP {r.status_code}")))
+        # Erro de SERVIDOR/LIMITE (não é "formato errado"): não adianta testar os
+        # outros formatos — só gera mais requisições ao /auth (piora rate limit).
+        if r.status_code in (400, 429) or r.status_code >= 500:
+            raise CredifyErro(f"/auth {r.status_code}: {ultimo}")
     raise CredifyErro(f"auth recusada em todos os formatos: {ultimo}")
 
 

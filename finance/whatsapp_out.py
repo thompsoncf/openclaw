@@ -48,3 +48,20 @@ def enviar(c, conta_id, numero, texto) -> dict:
         from finance import whatsapp_qr as _qr
         return _qr.enviar_texto(conta_id, numero, texto)
     return _twilio.enviar_texto(r[1], numero, texto)
+
+
+def enviar_template(c, conta_id, numero, content_sid, variaveis) -> dict:
+    """Dispara um TEMPLATE aprovado (fora da janela de 24h) pelo número da empresa.
+    O `content_sid` é do Twilio (Content API), então só vale pra provedor 'twilio'.
+    Usa o número Twilio da empresa (`identificador`); se a empresa não tiver número
+    próprio, cai pro número global do Zaq (env TWILIO_WHATSAPP_FROM)."""
+    import os
+    r = _row(c, conta_id)
+    prov = r[0] if r else "twilio"
+    if prov != "twilio":
+        return {"ok": False, "erro": "provedor_sem_template"}
+    remetente = (r[1] if r and r[1] else "") or (os.environ.get("TWILIO_WHATSAPP_FROM") or "")
+    if not remetente:
+        return {"ok": False, "erro": "sem_numero_empresa"}
+    return _twilio.enviar_template(_twilio.normalizar_from(remetente), numero,
+                                   content_sid, variaveis)

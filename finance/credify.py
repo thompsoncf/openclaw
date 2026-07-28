@@ -108,6 +108,13 @@ def _registros(bloco) -> list[dict]:
     return []
 
 
+def _resposta(j) -> dict:
+    """Os dados (QUADROSOCIETARIO / TELEFONES / ...) vêm ANINHADOS dentro de
+    RESPOSTA. Devolve esse bloco (ou o próprio j se algum endpoint não aninhar)."""
+    resp = _pega(j, "RESPOSTA", "resposta", default=None)
+    return resp if isinstance(resp, dict) else (j if isinstance(j, dict) else {})
+
+
 def _codigo_ok(j) -> bool:
     """RESPOSTA.CODIGO: 1=sucesso, 2=não encontrado, 3=erro. Sem o bloco, assume ok
     (deixa o parser tentar)."""
@@ -255,7 +262,7 @@ def quadro_societario(cnpj: str) -> list[dict]:
         return []
     if not _codigo_ok(j):
         return []
-    bloco = _pega(j, "QUADROSOCIETARIO", "quadroSocietario", "quadro_societario",
+    bloco = _pega(_resposta(j), "QUADROSOCIETARIO", "quadroSocietario", "quadro_societario",
                   "SOCIOS", "socios", "QSA", "qsa", default=None)
     out = []
     for s in _registros(bloco):
@@ -284,7 +291,7 @@ def telefones_por_cpf(cpf: str) -> list[dict]:
         return []
     if not _codigo_ok(j):
         return []
-    bloco = _pega(j, "TELEFONES", "telefones", "phones", default=None)
+    bloco = _pega(_resposta(j), "TELEFONES", "telefones", "phones", default=None)
     out = []
     for t in _registros(bloco):
         ddd = _pega(t, "DDD", "ddd", "area", default="")

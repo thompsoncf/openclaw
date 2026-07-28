@@ -75,6 +75,43 @@ def enviar_texto(remetente: str, numero: str, corpo: str) -> dict:
         return {"ok": False, "erro": str(e)[:200]}
 
 
+def enviar_template(remetente: str, numero: str, content_sid: str,
+                    variaveis: dict) -> dict:
+    """Envia uma mensagem de TEMPLATE aprovado (Twilio Content API). Diferente do
+    texto livre, o template funciona FORA da janela de 24h — é o que permite o
+    convite 'frio' (o cliente ainda não falou com o Zaq).
+
+    - `remetente`: número do Zaq/empresa ('whatsapp:+55...').
+    - `content_sid`: o 'HX...' do template já APROVADO no Twilio.
+    - `variaveis`: mapeia as posições do corpo, ex {"1": nome, "2": titulo, ...}
+      pros {{1}}, {{2}}... do template. Valores vazios são recusados pelo WhatsApp,
+      então caem pra '-' aqui como salvaguarda.
+    """
+    cfg = _cfg()
+    if not cfg:
+        return {"ok": False, "erro": "nao_configurado"}
+    if not remetente:
+        return {"ok": False, "erro": "sem_numero_empresa"}
+    if not content_sid:
+        return {"ok": False, "erro": "sem_template"}
+    to = _wa_addr(numero)
+    if not to:
+        return {"ok": False, "erro": "numero_invalido"}
+    try:
+        import json
+        from twilio.rest import Client
+        vars_json = json.dumps(
+            {str(k): (str(v).strip() or "-") for k, v in (variaveis or {}).items()})
+        msg = Client(cfg["sid"], cfg["token"]).messages.create(
+            from_=remetente, to=to, content_sid=content_sid,
+            content_variables=vars_json)
+        return {"ok": True, "sid": msg.sid}
+    except Exception as e:  # noqa: BLE001
+        from core.falhas import avaliar_falha_provedor
+        avaliar_falha_provedor(e, servico="Twilio (WhatsApp template)")
+        return {"ok": False, "erro": str(e)[:200]}
+
+
 def validar_assinatura(url: str, params: dict, assinatura: str) -> bool:
     """Valida o X-Twilio-Signature (RequestValidator do SDK)."""
     cfg = _cfg()

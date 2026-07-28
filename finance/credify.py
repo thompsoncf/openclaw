@@ -87,6 +87,12 @@ def _id_qs() -> str:
     return (os.environ.get("CREDIFY_ID_QS") or _ID_QS_PADRAO).strip()
 
 
+def _id_telrev() -> str:
+    # Telefone REVERSO ('PF Telefone', /pftelefone): número -> titular. IdConsulta
+    # próprio (a conta libera à parte); sem default — precisa vir de CREDIFY_ID_TELREV.
+    return (os.environ.get("CREDIFY_ID_TELREV") or "").strip()
+
+
 def _id_tel() -> str:
     return (os.environ.get("CREDIFY_ID_TEL") or _ID_TEL_PADRAO).strip()
 
@@ -338,6 +344,60 @@ def telefones_por_cpf(cpf: str) -> list[dict]:
             "tipo": _pega(t, "TIPO_CONTATO_TELEFONE", "tipo", "type", default=None),
         })
     return out
+
+
+# ---------- telefone REVERSO: número -> titular ----------
+
+def _titulares(bloco) -> list[dict]:
+    """BUSCATELEFONE pode vir como um único titular {CPF,NOME,...} ou como
+    {REGISTRO_1:{...}} ou lista. Normaliza pra lista de dicts."""
+    if isinstance(bloco, dict):
+        if any(str(k).upper().startswith("REGISTRO") for k in bloco):
+            return _registros(bloco)
+        return [bloco]
+    return _registros(bloco)
+
+
+def titular_por_telefone(ddd, telefone, id_consulta: str | None = None) -> dict:
+    """Telefone -> titular (nome, cpf, endereço). Consulta 'PF Telefone' (reversa,
+    /pftelefone). IdConsulta em CREDIFY_ID_TELREV (a Credify libera à parte).
+
+    Devolve {ok, titulares:[{nome, cpf, endereco, cidade, uf, tipo}], erro}.
+    Best-effort: em falha, ok=False + erro. NÃO persiste o CPF (LGPD)."""
+    idc = (id_consulta or _id_telrev()).strip()
+    dd = _so_digitos(ddd)
+    nn = _so_digitos(telefone)
+    if not dd and len(nn) >= 10:          # veio o número inteiro em 'telefone'
+        dd, nn = nn[:2], nn[2:]
+    if not idc:
+        return {"ok": False, "erro": "sem_idconsulta"}
+    if len(dd) != 2 or len(nn) < 8:
+        return {"ok": False, "erro": "telefone_invalido"}
+    corpo = {"Consulta": {"IdConsulta": idc, "Ddd": dd, "Telefone": nn, "TipoPessoa": "F"}}
+    try:
+        j = _post("/pftelefone", corpo)
+    except CredifyErro as e:
+        return {"ok": False, "erro": str(e)[:160]}
+    if not _codigo_ok(j):
+        return {"ok": False, "erro": "titular não encontrado pra esse número"}
+    bloco = _pega(_resposta(j), "BUSCATELEFONE", "buscaTelefone", "buscatelefone", default=None)
+    out = []
+    for t in _titulares(bloco):
+        if not isinstance(t, dict):
+            continue
+        nome = _pega(t, "NOME", "nome")
+        cpf = _so_digitos(_pega(t, "CPF", "cpf", "documento", ""))
+        if not (nome or len(cpf) == 11):
+            continue
+        out.append({
+            "nome": nome,
+            "cpf": cpf if len(cpf) == 11 else None,
+            "endereco": _pega(t, "ENDERECO", "endereco", default=""),
+            "cidade": _pega(t, "CIDADE", "cidade", default=""),
+            "uf": _pega(t, "UF", "uf", default=""),
+            "tipo": _pega(t, "TP", "tp", "tipo", default=""),
+        })
+    return {"ok": bool(out), "titulares": out, "erro": None if out else "sem_titular"}
 
 
 # ---------- orquestração: CNPJ -> decisor com telefone ----------

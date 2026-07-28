@@ -93,3 +93,33 @@ def test_por_evento_agrupa_e_isola_por_conta(pool, conta_id):
         outra = c.execute("insert into contas (tipo,nome) values ('pf','Outra') returning id").fetchone()[0]
         c.commit()
     assert cv.por_evento(pool, outra, [ev["id"]]) == {}
+
+
+def test_evento_por_id(pool, conta_id):
+    ev = _evento(pool, conta_id, titulo="Alinhamento")
+    got = ag.evento_por_id(pool, conta_id, ev["id"])
+    assert got and got["titulo"] == "Alinhamento" and got["tipo"] == "empresa"
+    assert ag.evento_por_id(pool, conta_id, 999999) is None
+    # outra conta não pega o evento
+    with pool.connection() as c:
+        outra = c.execute("insert into contas (tipo,nome) values ('pf','Outra') returning id").fetchone()[0]
+        c.commit()
+    assert ag.evento_por_id(pool, outra, ev["id"]) is None
+
+
+def test_grupo_resumo_e_fechamento(pool, conta_id):
+    ev = _evento(pool, conta_id)
+    ca = cv.criar_convidado(pool, conta_id, ev["id"], "A", "")
+    cb = cv.criar_convidado(pool, conta_id, ev["id"], "B", "")
+    cc = cv.criar_convidado(pool, conta_id, ev["id"], "C", "")
+    gs = cv.por_evento(pool, conta_id, [ev["id"]])[ev["id"]]
+    r = cv.resumo(gs)
+    assert r["total"] == 3 and r["confirmados"] == 0 and r["fechado"] is False
+    cv.responder(pool, ca["token"], "confirmado")
+    cv.responder(pool, cb["token"], "confirmado")
+    gs = cv.por_evento(pool, conta_id, [ev["id"]])[ev["id"]]
+    r = cv.resumo(gs)
+    assert r["confirmados"] == 2 and r["respondidos"] == 2 and r["fechado"] is False
+    cv.responder(pool, cc["token"], "recusado")          # último responde -> fecha
+    r = cv.resumo(cv.por_evento(pool, conta_id, [ev["id"]])[ev["id"]])
+    assert r["fechado"] is True and r["confirmados"] == 2 and r["recusados"] == 1

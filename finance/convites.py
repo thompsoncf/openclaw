@@ -93,6 +93,17 @@ def por_evento(pool, conta_id: int, evento_ids: list[int]) -> dict[int, list[dic
     return out
 
 
+def resumo(convidados: list[dict]) -> dict:
+    """Contagem pro 'X de N confirmaram' e pra saber se o grupo já fechou."""
+    total = len(convidados)
+    conf = sum(1 for g in convidados if g["status"] == "confirmado")
+    rem = sum(1 for g in convidados if g["status"] == "remarcar")
+    rec = sum(1 for g in convidados if g["status"] == "recusado")
+    pend = total - conf - rem - rec
+    return {"total": total, "confirmados": conf, "remarcar": rem, "recusados": rec,
+            "respondidos": total - pend, "fechado": total > 0 and pend == 0}
+
+
 def link_calendario(ev: dict) -> str:
     """Link 'adicionar ao meu calendário' pro cliente depois de confirmar."""
     return ag.link_google(ev)

@@ -104,9 +104,42 @@ def _wa_share(contato: str, texto: str) -> str:
     return f"https://wa.me/{alvo}?text={quote(texto)}"
 
 
+def _montar_share(request: Request, pool, conta_id: int, convite_ev: str, convite: str):
+    """Card de compartilhar os convites de UM evento (todos os convidados dele)."""
+    ev_id = None
+    if convite_ev and convite_ev.isdigit():
+        ev_id = int(convite_ev)
+    elif convite:                                  # retrocompat: token -> evento dele
+        c = cv.por_token(pool, convite)
+        if c and c["conta_id"] == conta_id:
+            ev_id = c["evento"]["id"]
+    if not ev_id:
+        return None
+    ev = ag.evento_por_id(pool, conta_id, ev_id)
+    if not ev:
+        return None
+    guests = cv.por_evento(pool, conta_id, [ev_id]).get(ev_id, [])
+    if not guests:
+        return None
+    quando = ag.fmt_hora(ev)
+    local = ev.get("local")
+    lista = []
+    for g in guests:
+        url = _convite_url(request, g["token"])
+        msg = (f"Oi{(' ' + g['nome']) if g['nome'] else ''}! Quero marcar uma reunião: "
+               f"{ev['titulo']} — {quando}{(' (' + local + ')') if local else ''}. "
+               f"Confirma pra mim aqui: {url}")
+        lista.append({"nome": g["nome"], "contato": g["contato"], "url": url,
+                      "wa": _wa_share(g["contato"] or "", msg),
+                      "status": g["status"], "status_rot": g["status_rot"]})
+    return {"titulo": ev["titulo"], "quando": quando, "guests": lista,
+            "total": len(lista), "resumo": cv.resumo(guests)}
+
+
 # ================================================================ CALENDÁRIO
 @router.get("/painel/agenda", response_class=HTMLResponse)
-def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""):
+def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = "",
+                convite_ev: str = ""):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -123,22 +156,12 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
         ev["hora_rot"] = ev["inicio"].astimezone(ag.BRT).strftime("%H:%M")
         ev["tipo_rot"] = TIPO_ROT.get(ev["tipo"], "Pessoal")
         ev["convidados"] = convidados.get(ev["id"], [])
+        ev["conv_resumo"] = cv.resumo(ev["convidados"]) if ev["convidados"] else None
     cfg = ag.get_config(pool, conta_id)
     feed_url = _feed_url(request, cfg["feed_token"]) if cfg.get("feed_token") else ""
-    # Card de compartilhar o convite recém-criado (?convite=<token>).
-    share = None
-    if convite:
-        c = cv.por_token(pool, convite)
-        if c and c["conta_id"] == conta_id:
-            url = _convite_url(request, c["token"])
-            quando = ag.fmt_hora(c["evento"])
-            msg = (f"Oi{(' ' + c['nome']) if c['nome'] else ''}! Quero marcar uma reunião: "
-                   f"{c['evento']['titulo']} — {quando}"
-                   f"{(' (' + c['evento']['local'] + ')') if c['evento'].get('local') else ''}. "
-                   f"Confirma pra mim aqui: {url}")
-            share = {"nome": c["nome"], "url": url, "wa": _wa_share(c["contato"] or "", msg),
-                     "titulo": c["evento"]["titulo"], "quando": quando,
-                     "tem_num": bool(_so_digitos(c["contato"] or ""))}
+    # Card de compartilhar os convites de um evento (?convite_ev=<id>; aceita também
+    # ?convite=<token> por retrocompat, resolvendo pro evento dele).
+    share = _montar_share(request, pool, conta_id, convite_ev, convite)
     return _render("agenda", request, titulo="Agenda", secao_ativa="agenda",
                    ano=ano, mes=mes, mes_nome=MESES[mes], dias_sem=DIAS_SEM,
                    semanas=semanas, proximos=proximos, tipo_rot=TIPO_ROT,
@@ -154,7 +177,8 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
 @router.post("/painel/agenda/novo")
 def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
                 hora: str = Form(""), local: str = Form(""), tipo: str = Form("pessoal"),
-                convidado_nome: str = Form(""), convidado_contato: str = Form(""),
+                convidado_nome: list[str] = Form(default=[]),
+                convidado_contato: list[str] = Form(default=[]),
                 m: str = Form("")):
     ctx, redir = _acesso(request)
     if redir is not None:
@@ -175,12 +199,20 @@ def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
                          local=(local or "").strip() or None,
                          tipo=tipo if tipo in ag.TIPOS else "pessoal")
     destino = f"/painel/agenda?m={inicio.year:04d}-{inicio.month:02d}"
-    # Convidou alguém? Cria o convite e leva pro card de compartilhar o link.
-    if (convidado_nome or "").strip() or (convidado_contato or "").strip():
-        conv = cv.criar_convidado(pool, ctx["conta_id"], ev["id"],
-                                  convidado_nome, convidado_contato)
-        request.session["agenda_aviso"] = f"“{titulo}” marcado. Agora é só enviar o convite pro {conv['nome'] or 'convidado'}."
-        return RedirectResponse(destino + f"&convite={conv['token']}", status_code=303)
+    # Convidados (um ou vários): cria um convite por linha preenchida.
+    pares = []
+    for i in range(max(len(convidado_nome), len(convidado_contato))):
+        nm = convidado_nome[i] if i < len(convidado_nome) else ""
+        ct = convidado_contato[i] if i < len(convidado_contato) else ""
+        if (nm or "").strip() or (ct or "").strip():
+            pares.append((nm, ct))
+    if pares:
+        for nm, ct in pares:
+            cv.criar_convidado(pool, ctx["conta_id"], ev["id"], nm, ct)
+        n = len(pares)
+        request.session["agenda_aviso"] = (
+            f"“{titulo}” marcado. Agora é só enviar {'o convite' if n == 1 else f'os {n} convites'}.")
+        return RedirectResponse(destino + f"&convite_ev={ev['id']}", status_code=303)
     request.session["agenda_aviso"] = f"“{titulo}” marcado pra {inicio.strftime('%d/%m às %H:%M')}."
     return RedirectResponse(destino, status_code=303)
 
@@ -292,6 +324,14 @@ def convite_responder(request: Request, token: str, acao: str = Form(...),
     notificar.avisar_dono_convite(pool, c["conta_id"], c["nome"] or "O convidado",
                                   c["evento"]["titulo"], ag.fmt_hora(c["evento"]),
                                   status, c.get("resposta") or "")
+    # Grupo (2+): quando o último responde, avisa que fechou.
+    grupo = cv.por_evento(pool, c["conta_id"], [c["evento"]["id"]]).get(c["evento"]["id"], [])
+    if len(grupo) > 1:
+        r = cv.resumo(grupo)
+        if r["fechado"]:
+            notificar.avisar_dono_grupo_fechado(
+                pool, c["conta_id"], c["evento"]["titulo"], ag.fmt_hora(c["evento"]),
+                r["confirmados"], r["remarcar"], r["recusados"])
     return _render_convite(c, resultado=status)
 
 
@@ -392,18 +432,29 @@ _CSS = """<style>
 .share h2{font-size:.95rem;margin:0 0 4px;color:var(--txt)}
 .share p{font-size:.86rem;color:var(--txt-mut);margin:0 0 12px}
 .share p b{color:var(--txt)}
-.share-actions{display:flex;gap:10px;flex-wrap:wrap}
-.share-wa{display:inline-flex;align-items:center;gap:8px;background:#25d366;color:#04160e;font-weight:700;border:0;border-radius:10px;padding:.62rem 1.1rem;font-size:.92rem;text-decoration:none}
-.share-wa:hover{background:#2ee578}
-.share-cp{display:inline-flex;align-items:center;gap:8px;background:var(--card-2);border:1px solid var(--borda);color:var(--txt);border-radius:10px;padding:.62rem 1.1rem;font-size:.9rem;cursor:pointer}
-.share-cp:hover{border-color:var(--verde)}
-.share-link{margin-top:10px;font-size:.76rem;color:var(--txt-mut);word-break:break-all;font-family:ui-monospace,monospace}
+.share-list{display:flex;flex-direction:column;gap:8px}
+.share-row{display:flex;align-items:center;gap:10px;background:var(--card-2);border:1px solid var(--borda);border-radius:10px;padding:8px 10px}
+.sr-av{width:30px;height:30px;border-radius:50%;background:#333;display:flex;align-items:center;justify-content:center;font-size:.82rem;font-weight:700;flex:0 0 30px}
+.sr-who{flex:1;min-width:0}
+.sr-who b{font-size:.9rem;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sr-who small{font-size:.72rem;color:var(--txt-mut)}
+.sr-wa{background:#25d366;color:#04160e;border:0;border-radius:8px;padding:.42rem .7rem;font-size:.8rem;font-weight:700;cursor:pointer;text-decoration:none;white-space:nowrap}
+.sr-wa:hover{background:#2ee578}
+.sr-cp{background:var(--card);border:1px solid var(--borda);color:var(--txt);border-radius:8px;padding:.42rem .55rem;cursor:pointer;font-size:.86rem}
+.sr-cp:hover{border-color:var(--verde)}
 /* convidado / bloco no form */
 .gconv{margin-top:14px;padding-top:14px;border-top:1px dashed var(--borda)}
 .gconv .gt{font-size:.82rem;color:var(--verde-claro);font-weight:700}
-.gconv .gd{font-size:.74rem;color:var(--txt-mut);margin:1px 0 4px}
+.gconv .gd{font-size:.74rem;color:var(--txt-mut);margin:1px 0 8px}
+.guest-row{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-bottom:8px}
+.guest-row .g-rm{background:transparent;border:1px solid var(--borda);color:var(--txt-mut);border-radius:8px;width:38px;cursor:pointer;font-size:.9rem}
+.guest-row .g-rm:hover{border-color:#e0574f;color:#f0917f}
+.g-add{background:transparent;border:1px dashed var(--borda);color:var(--verde-claro);border-radius:9px;padding:.5rem;width:100%;cursor:pointer;font-weight:600;font-size:.84rem}
+.g-add:hover{border-color:var(--verde)}
 /* status de convidados nos próximos */
 .px-conv{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}
+.cgrp{font-size:.7rem;font-weight:700;padding:2px 9px;border-radius:20px;white-space:nowrap;background:rgba(57,135,229,.14);color:#bcd8f6;border:1px solid rgba(57,135,229,.4)}
+.cgrp-ok{background:rgba(29,158,117,.16);color:var(--verde-claro);border-color:var(--verde)}
 .cpill{font-size:.68rem;font-weight:700;padding:2px 8px;border-radius:20px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
 .cp-pendente{background:rgba(224,163,62,.14);color:var(--ambar);border:1px solid rgba(224,163,62,.4)}
 .cp-confirmado{background:rgba(29,158,117,.16);color:var(--verde-claro);border:1px solid var(--verde)}
@@ -416,13 +467,18 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   {% if aviso %}<div class="ag-aviso">{{ aviso }}</div>{% endif %}
   {% if share %}
   <div class="share">
-    <h2>✅ Convite pronto pra enviar{% if share.nome %} pro {{ share.nome }}{% endif %}</h2>
-    <p><b>{{ share.titulo }}</b> — {{ share.quando }}. Mande o link abaixo; a pessoa confirma num toque e você é avisado aqui.</p>
-    <div class="share-actions">
-      <a class="share-wa" href="{{ share.wa }}" target="_blank" rel="noopener">💬 Enviar pelo WhatsApp</a>
-      <button type="button" class="share-cp" onclick="cpConvite()">📋 Copiar link</button>
+    <h2>✅ {{ share.total }} convite{{ 's' if share.total != 1 }} pronto{{ 's' if share.total != 1 }} pra enviar</h2>
+    <p><b>{{ share.titulo }}</b> — {{ share.quando }}. Mande o link de cada um; cada pessoa confirma o seu e você é avisado aqui.</p>
+    <div class="share-list">
+      {% for g in share.guests %}
+      <div class="share-row" data-link="{{ g.url }}">
+        <div class="sr-av">{{ (g.nome or '?')[0]|upper }}</div>
+        <div class="sr-who"><b>{{ g.nome or 'Convidado' }}</b><small>{{ g.contato or 'sem número' }} · {{ g.status_rot }}</small></div>
+        <a class="sr-wa" href="{{ g.wa }}" target="_blank" rel="noopener">💬 Enviar</a>
+        <button type="button" class="sr-cp" onclick="cpRow(this)" title="Copiar link">📋</button>
+      </div>
+      {% endfor %}
     </div>
-    <div class="share-link" id="cvLink">{{ share.url }}</div>
   </div>
   {% endif %}
   <div class="ag-top">
@@ -472,7 +528,11 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
               <div class="mt">{{ e.tipo_rot }}{% if e.local %} · {{ e.local }}{% endif %}</div>
               {% if e.convidados %}
               <div class="px-conv">
-                {% for g in e.convidados %}<a href="/painel/agenda?m={{ '%04d-%02d'|format(ano, mes) }}&convite={{ g.token }}" class="cpill cp-{{ g.status }}" style="text-decoration:none" title="Reenviar o link do convite de {{ g.nome or 'convidado' }}">👤 {{ g.nome or 'Convidado' }}: {{ g.status_rot }}</a>{% endfor %}
+                {% if e.conv_resumo.total > 1 %}
+                <a href="/painel/agenda?m={{ '%04d-%02d'|format(ano, mes) }}&convite_ev={{ e.id }}" class="cgrp{% if e.conv_resumo.fechado %} cgrp-ok{% endif %}" style="text-decoration:none" title="Ver e reenviar os convites">👥 {{ e.conv_resumo.confirmados }} de {{ e.conv_resumo.total }} confirmaram{% if e.conv_resumo.fechado %} 🎉{% endif %}</a>
+                {% else %}
+                {% for g in e.convidados %}<a href="/painel/agenda?m={{ '%04d-%02d'|format(ano, mes) }}&convite_ev={{ e.id }}" class="cpill cp-{{ g.status }}" style="text-decoration:none" title="Reenviar o link do convite de {{ g.nome or 'convidado' }}">👤 {{ g.nome or 'Convidado' }}: {{ g.status_rot }}</a>{% endfor %}
+                {% endif %}
               </div>
               {% endif %}
             </div>
@@ -508,12 +568,16 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <label class="s-fornecedor"><input type="radio" name="tipo" value="fornecedor"><span>Fornecedor</span></label>
           </div>
           <div class="gconv">
-            <div class="gt">👤 Convidar alguém (opcional)</div>
-            <div class="gd">O Zaq gera um link de confirmação pra você enviar. A pessoa confirma num toque e você é avisado.</div>
-            <div class="row2">
-              <div><label>Nome</label><input name="convidado_nome" placeholder="Ex: João da Padaria" autocomplete="off"></div>
-              <div><label>WhatsApp</label><input name="convidado_contato" placeholder="(86) 90000-0000" autocomplete="off"></div>
+            <div class="gt">👥 Convidar (opcional)</div>
+            <div class="gd">Um ou vários. Cada convidado recebe o próprio link e confirma o seu — você vê "quantos de quantos".</div>
+            <div id="guests">
+              <div class="guest-row">
+                <div><input name="convidado_nome" placeholder="Nome" autocomplete="off"></div>
+                <div><input name="convidado_contato" placeholder="(86) 90000-0000" autocomplete="off"></div>
+                <button type="button" class="g-rm" onclick="rmGuest(this)" title="Remover" aria-label="Remover">✕</button>
+              </div>
             </div>
+            <button type="button" class="g-add" onclick="addGuest()">+ adicionar convidado</button>
           </div>
           <button class="ok" type="submit">Marcar</button>
         </form>
@@ -576,7 +640,9 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 <script>
 function agNovo(v){var n=document.getElementById('novo');if(n){n.style.display='';n.scrollIntoView({behavior:'smooth',block:'center'});var i=n.querySelector('input[name=titulo]');if(i)setTimeout(function(){i.focus()},300);}return false;}
 function agCopiar(){var i=document.getElementById('feedUrl');if(!i)return;i.select();try{document.execCommand('copy');}catch(e){}if(navigator.clipboard)navigator.clipboard.writeText(i.value);var b=event.target;var t=b.textContent;b.textContent='Copiado ✓';setTimeout(function(){b.textContent=t},1600);}
-function cpConvite(){var el=document.getElementById('cvLink');if(!el)return;var txt=el.textContent.trim();if(navigator.clipboard)navigator.clipboard.writeText(txt);var b=event.target;var t=b.textContent;b.textContent='Copiado ✓';setTimeout(function(){b.textContent=t},1600);}
+function cpRow(b){var row=b.closest('.share-row');if(!row)return;var txt=row.getAttribute('data-link')||'';if(navigator.clipboard)navigator.clipboard.writeText(txt);var t=b.textContent;b.textContent='✓';setTimeout(function(){b.textContent=t},1400);}
+function addGuest(){var box=document.getElementById('guests');var d=document.createElement('div');d.className='guest-row';d.innerHTML='<div><input name="convidado_nome" placeholder="Nome" autocomplete="off"></div><div><input name="convidado_contato" placeholder="(86) 90000-0000" autocomplete="off"></div><button type="button" class="g-rm" onclick="rmGuest(this)" title="Remover" aria-label="Remover">✕</button>';box.appendChild(d);var i=d.querySelector('input');if(i)i.focus();}
+function rmGuest(b){var box=document.getElementById('guests');var row=b.closest('.guest-row');if(box&&box.children.length>1){row.remove();}else{row.querySelectorAll('input').forEach(function(x){x.value='';});}}
 </script>
 {% endblock %}"""
 

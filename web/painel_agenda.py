@@ -357,7 +357,8 @@ def convite_responder(request: Request, token: str, acao: str = Form(...),
     c = cv.responder(pool, token, status, resposta)
     if not c:
         return HTMLResponse(_env.get_template("convite_404").render(), status_code=404)
-    cv.pos_resposta(pool, c)   # avisa o dono + fechamento de grupo (fonte única)
+    if c.get("mudou"):         # só avisa quando o status REALMENTE mudou (não repete)
+        cv.pos_resposta(pool, c)
     return _render_convite(c, resultado=status)
 
 

@@ -62,18 +62,28 @@ def por_token(pool, token: str) -> dict | None:
 
 def responder(pool, token: str, status: str, resposta: str | None = None) -> dict | None:
     """Registra a resposta do convidado (confirmado/remarcar/recusado). Devolve o
-    convidado atualizado (com evento + empresa) pra avisar o dono, ou None."""
+    convidado atualizado (com evento + empresa) pra avisar o dono, ou None.
+
+    Traz `mudou`: True só quando o status REALMENTE mudou de valor. Assim, re-tocar
+    o botão / reabrir o link com a MESMA resposta não avisa o dono de novo (evita a
+    notificação repetida). Uma mudança de verdade (ex.: confirmado → recusado) avisa."""
+    tok = (token or "").strip()
     if status not in STATUS_OK or status == "pendente":
         return None
     with pool.connection() as c:
-        cur = c.execute(
-            "update evento_convidados set status=%s, resposta=%s, respondido_em=now() "
-            "where token=%s",
-            (status, (resposta or "").strip() or None, (token or "").strip()))
-        c.commit()
-        if cur.rowcount == 0:
+        atual = c.execute("select status from evento_convidados where token=%s",
+                          (tok,)).fetchone()
+        if not atual:
             return None
-    return por_token(pool, token)
+        anterior = atual[0]
+        c.execute(
+            "update evento_convidados set status=%s, resposta=%s, respondido_em=now() "
+            "where token=%s", (status, (resposta or "").strip() or None, tok))
+        c.commit()
+    conv = por_token(pool, tok)
+    if conv is not None:
+        conv["mudou"] = (anterior != status)
+    return conv
 
 
 def por_evento(pool, conta_id: int, evento_ids: list[int]) -> dict[int, list[dict]]:

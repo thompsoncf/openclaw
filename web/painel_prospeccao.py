@@ -1301,7 +1301,8 @@ async def webhook_twilio(request: Request, background_tasks: BackgroundTasks):
             if _pend:
                 _conv = _cv.responder(pool, _pend[0]["token"], _st)
                 if _conv:
-                    _cv.pos_resposta(pool, _conv)                       # avisa o dono
+                    if _conv.get("mudou"):                             # só avisa se mudou
+                        _cv.pos_resposta(pool, _conv)
                     _wout.enviar(c, conta_id, remetente, _cv.confirmacao_texto(_conv))
                     c.commit()
                     return Response("<Response></Response>", media_type="application/xml")

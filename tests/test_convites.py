@@ -67,6 +67,17 @@ def test_responder_confirma_e_reflete(pool, conta_id):
     assert cv.por_token(pool, conv["token"])["status"] == "confirmado"
 
 
+def test_responder_mudou_evita_aviso_repetido(pool, conta_id):
+    ev = _evento(pool, conta_id)
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Paulo", "86 98888-7777")
+    r1 = cv.responder(pool, conv["token"], "confirmado")
+    assert r1["mudou"] is True                    # 1ª resposta: avisa
+    r2 = cv.responder(pool, conv["token"], "confirmado")
+    assert r2["mudou"] is False                   # re-tocou o MESMO -> não avisa de novo
+    r3 = cv.responder(pool, conv["token"], "recusado")
+    assert r3["mudou"] is True                    # mudou de verdade -> avisa
+
+
 def test_responder_remarcar_guarda_resposta(pool, conta_id):
     ev = _evento(pool, conta_id)
     conv = cv.criar_convidado(pool, conta_id, ev["id"], "Ana", "")

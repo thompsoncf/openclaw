@@ -374,7 +374,9 @@ _CSS = """<style>
 .ag-nav a,.ag-hoje{display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:34px;padding:0 10px;border:1px solid var(--borda);border-radius:9px;background:var(--card-2);color:var(--txt);text-decoration:none;font-size:.9rem}
 .ag-nav a:hover,.ag-hoje:hover{border-color:var(--verde)}
 .ag-hoje{font-size:.82rem}
-.ag-btn{display:inline-flex;align-items:center;gap:7px;background:var(--verde);color:#04160e;font-weight:700;border:0;border-radius:10px;padding:.6rem 1rem;font-size:.92rem;cursor:pointer;text-decoration:none}
+.ag-btn{width:auto;margin:0;display:inline-flex;align-items:center;gap:7px;background:var(--verde);color:#04160e;font-weight:700;border:0;border-radius:10px;padding:.6rem 1rem;font-size:.92rem;cursor:pointer;text-decoration:none}
+/* feedback instantâneo: botão "reagindo" enquanto o back processa */
+.is-busy{opacity:.62;cursor:progress!important;pointer-events:none}
 .ag-btn:hover{background:var(--verde-hover)}
 .ag-grid{display:grid;grid-template-columns:1.7fr .95fr;gap:18px;align-items:start}
 @media(max-width:860px){.ag-grid{grid-template-columns:1fr}}
@@ -413,7 +415,7 @@ _CSS = """<style>
 .px-body .mt{font-size:.74rem;color:var(--txt-mut);margin-top:1px}
 .px-dot{width:8px;height:8px;border-radius:50%;margin-top:6px;flex:0 0 8px}
 .d-pessoal{background:var(--verde-claro)}.d-empresa{background:#3987e5}.d-fornecedor{background:#e0a33e}
-.px-x{background:none;border:0;color:var(--txt-mut);cursor:pointer;font-size:1rem;line-height:1;padding:2px 4px;border-radius:6px}
+.px-x{width:auto;margin:0;background:none;border:0;color:var(--txt-mut);cursor:pointer;font-size:1rem;line-height:1;padding:2px 4px;border-radius:6px}
 .px-x:hover{color:#f0917f;background:rgba(224,87,79,.12)}
 .px-vazio{color:var(--txt-mut);font-size:.86rem;padding:8px 2px}
 /* formulários / cards laterais */
@@ -518,7 +520,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <input type="hidden" name="token" value="{{ g.token }}">
             <input type="hidden" name="ev_id" value="{{ share.ev_id }}">
             <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
-            <button type="submit" class="sr-za" title="O Zaq envia o convite pelo WhatsApp">📲 Zaq</button>
+            <button type="submit" class="sr-za" data-busy="⏳ Enviando…" title="O Zaq envia o convite pelo WhatsApp">📲 Zaq</button>
           </form>
           {% endif %}
         {% endif %}
@@ -627,7 +629,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             </div>
             <button type="button" class="g-add" onclick="addGuest()">+ adicionar convidado</button>
           </div>
-          <button class="ok" type="submit">Marcar</button>
+          <button class="ok" type="submit" data-busy="⏳ Marcando…">Marcar</button>
         </form>
       </div>
 
@@ -656,7 +658,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             </select>
           </div>
           <div class="canal-tag">📲 Vai chegar no seu WhatsApp/Telegram, onde você fala com o Zaq.</div>
-          <button class="ok" type="submit">Salvar lembrete</button>
+          <button class="ok" type="submit" data-busy="⏳ Salvando…">Salvar lembrete</button>
         </form>
       </div>
 
@@ -678,7 +680,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <p class="hint" style="margin-top:0">Gere um link seguro pra abrir seus compromissos no Google Agenda, Apple ou Outlook — sem senha, sem login.</p>
         <form method="post" action="/painel/agenda/sincronizar">
           <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
-          <button class="ag-btn" type="submit" style="margin-top:6px">Ativar sincronização</button>
+          <button class="ag-btn" type="submit" style="margin-top:6px" data-busy="⏳ Ativando…">Ativar sincronização</button>
         </form>
         {% endif %}
       </div>
@@ -691,6 +693,21 @@ function agCopiar(){var i=document.getElementById('feedUrl');if(!i)return;i.sele
 function cpRow(b){var row=b.closest('.share-row');if(!row)return;var txt=row.getAttribute('data-link')||'';if(navigator.clipboard)navigator.clipboard.writeText(txt);var t=b.textContent;b.textContent='✓';setTimeout(function(){b.textContent=t},1400);}
 function addGuest(){var box=document.getElementById('guests');var d=document.createElement('div');d.className='guest-row';d.innerHTML='<div><input name="convidado_nome" placeholder="Nome" autocomplete="off"></div><div><input name="convidado_contato" placeholder="(86) 90000-0000" autocomplete="off"></div><button type="button" class="g-rm" onclick="rmGuest(this)" title="Remover" aria-label="Remover">✕</button>';box.appendChild(d);var i=d.querySelector('input');if(i)i.focus();}
 function rmGuest(b){var box=document.getElementById('guests');var row=b.closest('.guest-row');if(box&&box.children.length>1){row.remove();}else{row.querySelectorAll('input').forEach(function(x){x.value='';});}}
+// Feedback instantâneo: ao enviar QUALQUER form, o botão reage na hora (apaga +
+// "⏳ …"), enquanto o back processa — pro clique nunca parecer travado. Como a
+// maioria recarrega, isso só precisa durar até a navegação; o timeout destrava
+// caso algo impeça o envio (ex.: erro de rede). Respeita confirm() cancelado.
+document.addEventListener('submit', function(ev){
+  if(ev.defaultPrevented) return;                         // ex.: Cancelar -> confirm() = não
+  var f=ev.target; if(!f||f.tagName!=='FORM') return;
+  var b=f.querySelector('button[type=submit],button:not([type])');
+  if(!b||b.disabled) return;
+  var busy=b.getAttribute('data-busy');
+  b.dataset.orig=b.innerHTML;
+  if(busy) b.innerHTML=busy;
+  b.classList.add('is-busy'); b.disabled=true;
+  setTimeout(function(){ if(b.dataset.orig!=null){ b.innerHTML=b.dataset.orig; b.disabled=false; b.classList.remove('is-busy'); delete b.dataset.orig; } }, 8000);
+}, false);
 </script>
 {% endblock %}"""
 

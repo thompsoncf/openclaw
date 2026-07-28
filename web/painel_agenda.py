@@ -465,9 +465,10 @@ _CSS = """<style>
 .sr-who small{font-size:.72rem;color:var(--txt-mut)}
 .sr-wa{background:#25d366;color:#04160e;border:0;border-radius:8px;padding:.42rem .7rem;font-size:.8rem;font-weight:700;cursor:pointer;text-decoration:none;white-space:nowrap}
 .sr-wa:hover{background:#2ee578}
-.sr-za{background:var(--verde);color:#04160e;border:0;border-radius:8px;padding:.42rem .7rem;font-size:.8rem;font-weight:700;cursor:pointer;white-space:nowrap}
+.sr-za{width:auto;margin:0;background:var(--verde);color:#04160e;border:0;border-radius:8px;padding:.42rem .7rem;font-size:.8rem;font-weight:700;cursor:pointer;white-space:nowrap}
 .sr-za:hover{background:var(--verde-hover)}
-.sr-cp{background:var(--card);border:1px solid var(--borda);color:var(--txt);border-radius:8px;padding:.42rem .55rem;cursor:pointer;font-size:.86rem}
+.share-row form{margin:0;flex:0 0 auto}
+.sr-cp{width:auto;margin:0;background:var(--card);border:1px solid var(--borda);color:var(--txt);border-radius:8px;padding:.42rem .55rem;cursor:pointer;font-size:.86rem}
 .sr-cp:hover{border-color:var(--verde)}
 /* convidado / bloco no form */
 .gconv{margin-top:14px;padding-top:14px;border-top:1px dashed var(--borda)}

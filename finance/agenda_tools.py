@@ -10,6 +10,7 @@ from datetime import timedelta
 
 from core.agent import Ferramenta
 from . import agenda as ag
+from . import convites as cv
 
 
 def construir_ferramentas_agenda(pool, conta_id: int,
@@ -20,6 +21,32 @@ def construir_ferramentas_agenda(pool, conta_id: int,
         if ev.get("local"):
             base += f" ({ev['local']})"
         return base
+
+    def _convidar_e_enviar(ev: dict, convidados: list) -> list[str]:
+        """Cria os convites do evento e TENTA disparar o template no WhatsApp de
+        cada um (pelo número da empresa). Devolve linhas de status pro dono."""
+        linhas = []
+        for g in convidados or []:
+            if not isinstance(g, dict):
+                continue
+            nome = (g.get("nome") or "").strip()
+            contato = (g.get("contato") or "").strip()
+            if not (nome or contato):
+                continue
+            conv = cv.criar_convidado(pool, conta_id, ev["id"], nome or None, contato or None)
+            quem = nome or contato or "convidado"
+            if not contato:
+                linhas.append(f"• {quem}: sem número — me passa o WhatsApp (com DDD) "
+                              f"que eu envio, ou compartilhe: {cv.url_convite(conv['token'])}")
+                continue
+            r = cv.enviar_convite_whatsapp(pool, conv["token"])
+            if r.get("ok"):
+                linhas.append(f"• {quem}: convite enviado no WhatsApp ✅")
+            else:
+                linhas.append(f"• {quem}: convite criado, mas não enviei automático "
+                              f"({cv.motivo_erro(r.get('erro'))}). Link pra mandar: "
+                              f"{cv.url_convite(conv['token'])}")
+        return linhas
 
     def marcar_evento(e: dict) -> str:
         titulo = (e.get("titulo") or "").strip()
@@ -38,8 +65,25 @@ def construir_ferramentas_agenda(pool, conta_id: int,
                              fim=fim, local=(e.get("local") or None),
                              descricao=(e.get("descricao") or None), lembrete_min=lembrete)
         aviso_passado = " (repara que essa data já passou, hein!)" if inicio < ag.agora_brt() else ""
-        return (f"📅 Marquei: {titulo} — {ag.fmt_hora(ev)}.{aviso_passado}\n"
+        resp = (f"📅 Marquei: {titulo} — {ag.fmt_hora(ev)}.{aviso_passado}\n"
                 f"Adicionar ao seu calendário (Google/Apple/Outlook): {ag.link_google(ev)}")
+        linhas = _convidar_e_enviar(ev, e.get("convidados") or [])
+        if linhas:
+            resp += "\n\n👥 Convites:\n" + "\n".join(linhas)
+        return resp
+
+    def convidar_reuniao(e: dict) -> str:
+        convidados = e.get("convidados") or []
+        if not convidados:
+            return "Quem você quer convidar? Me diz o nome e o WhatsApp (com DDD)."
+        ev, erro = _resolver(e)
+        if erro:
+            return erro
+        linhas = _convidar_e_enviar(ev, convidados)
+        if not linhas:
+            return "Não entendi os convidados. Me passa nome + WhatsApp (com DDD)."
+        return (f"👥 Convites de *{ev['titulo']}* ({ag.fmt_hora(ev)}):\n"
+                + "\n".join(linhas))
 
     def ver_agenda(e: dict) -> str:
         periodo = (e.get("periodo") or "").strip().lower()
@@ -106,6 +150,19 @@ def construir_ferramentas_agenda(pool, conta_id: int,
         return "Não consegui cancelar esse compromisso."
 
     _quando = {"type": "string", "description": "data/hora, ex: 'amanhã 15h', '28/07 14:30', 'sexta 10h'"}
+    _convidados = {
+        "type": "array",
+        "description": ("opcional; pessoas a convidar pra reunião. O Zaq cria o convite "
+                        "e DISPARA no WhatsApp de cada uma (ela confirma num botão). "
+                        "Só inclua se a pessoa pediu pra convidar alguém."),
+        "items": {
+            "type": "object",
+            "properties": {
+                "nome": {"type": "string", "description": "nome do convidado"},
+                "contato": {"type": "string", "description": "WhatsApp com DDD, ex: '86 98888-7777'"},
+            },
+        },
+    }
 
     return [
         Ferramenta(
@@ -122,10 +179,27 @@ def construir_ferramentas_agenda(pool, conta_id: int,
                     "local": {"type": "string", "description": "opcional; onde"},
                     "descricao": {"type": "string", "description": "opcional; detalhes"},
                     "lembrete_min": {"type": "integer", "description": "opcional; min antes pra avisar (ex: 30)"},
+                    "convidados": _convidados,
                 },
                 "required": ["titulo", "inicio"],
             },
             executar=marcar_evento,
+        ),
+        Ferramenta(
+            nome="convidar_reuniao",
+            descricao=("Convida pessoa(s) pra uma reunião JÁ marcada e dispara o convite "
+                       "no WhatsApp de cada uma. Identifique a reunião por titulo (ou "
+                       "evento_id). Use pra 'convida o Paulo pra reunião de amanhã'."),
+            parametros={
+                "type": "object",
+                "properties": {
+                    "titulo": {"type": "string", "description": "título da reunião já marcada"},
+                    "evento_id": {"type": "integer", "description": "opcional; id do evento"},
+                    "convidados": _convidados,
+                },
+                "required": ["convidados"],
+            },
+            executar=convidar_reuniao,
         ),
         Ferramenta(
             nome="ver_agenda",

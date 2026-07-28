@@ -120,6 +120,28 @@ def link_calendario(ev: dict) -> str:
     return ag.link_google(ev)
 
 
+def url_convite(token: str) -> str:
+    """Link público /convite/<token> a partir do APP_URL (pro agente, que não tem
+    request). Sem APP_URL, devolve o caminho relativo."""
+    base = (os.environ.get("APP_URL") or "").rstrip("/")
+    return f"{base}/convite/{token}" if base else f"/convite/{token}"
+
+
+_ERRO_ENVIO_ROT = {
+    "sem_numero": "esse convidado está sem número de WhatsApp",
+    "sem_template": "o disparo automático ainda não está ligado",
+    "provedor_sem_template": "o número da empresa não é Twilio (o template só sai por Twilio)",
+    "nao_configurado": "o WhatsApp não está configurado",
+    "sem_numero_empresa": "a empresa ainda não tem número de WhatsApp",
+    "numero_invalido": "o número do convidado parece inválido",
+}
+
+
+def motivo_erro(codigo: str) -> str:
+    """Traduz o código de erro do envio pra algo que dá pra mostrar a humano."""
+    return _ERRO_ENVIO_ROT.get(codigo, codigo or "erro desconhecido")
+
+
 def pos_resposta(pool, c: dict) -> None:
     """Efeitos colaterais de uma resposta de convidado — MESMO fluxo pro link web
     e pros botões do WhatsApp: avisa o dono e, se for grupo (2+) e todos já

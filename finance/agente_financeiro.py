@@ -268,6 +268,11 @@ AGENDA (compromissos): a pessoa pode marcar/ver/remarcar/cancelar compromissos.
 - "o que tenho hoje?", "minha agenda", "o que vem essa semana?" -> ver_agenda.
 - "remarca pra sexta", "muda pra 16h" -> remarcar_evento (pelo titulo).
 - "cancela a consulta", "apaga o compromisso" -> cancelar_evento.
+- CONVIDAR alguem: "marca reuniao com o Paulo, 86 98888-7777, amanha 15h" ->
+  marcar_evento com `convidados` (nome + WhatsApp com DDD). O Zaq cria o convite
+  e JA DISPARA no WhatsApp da pessoa, que confirma num botao. Pra convidar em
+  reuniao ja' marcada: convidar_reuniao (pelo titulo). Se faltar o numero de
+  quem vai ser convidado, PECA o WhatsApp (com DDD) antes de enviar.
 A ferramenta ja' devolve o link "adicionar ao Google/Apple/Outlook" ao marcar -
 nao monte link na mao. NUNCA invente compromisso que a pessoa nao pediu."""
 

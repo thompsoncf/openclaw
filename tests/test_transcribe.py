@@ -50,3 +50,12 @@ def test_fallback_quando_provedor_nao_aceita_prompt():
     assert t.transcrever(b"x") == "funcionou"
     assert len(chamadas) == 2                             # tentou com extras, caiu pro básico
     assert "prompt" not in chamadas[1]
+
+
+def test_vocab_anexa_a_dica_base():
+    import types
+    capt = {}
+    t = _fake_transcritor(lambda **kw: capt.update(kw) or types.SimpleNamespace(text="ok"))
+    t.transcrever(b"x", vocab="Mailson, Smart Center")
+    # a dica final tem a base (com 'Zaq') E o vocabulário da agenda
+    assert "Zaq" in capt["prompt"] and "Mailson" in capt["prompt"]

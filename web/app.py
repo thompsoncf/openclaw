@@ -643,7 +643,12 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
                         "resolvo rapidinho. 😊")
                     return
                 try:
-                    texto = (_transcritor.transcrever(dados, "audio.ogg") or "").strip()
+                    from finance.agenda import vocabulario_stt
+                    _vocab = vocabulario_stt(pool, conta.id)
+                except Exception:  # noqa: BLE001
+                    _vocab = ""
+                try:
+                    texto = (_transcritor.transcrever(dados, "audio.ogg", vocab=_vocab) or "").strip()
                 except Exception:  # noqa: BLE001
                     log.exception("falha ao transcrever audio")
                     texto = ""

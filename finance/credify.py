@@ -395,9 +395,15 @@ def titular_por_telefone(ddd, telefone, id_consulta: str | None = None) -> dict:
         out.append({
             "nome": nome,
             "cpf": cpf if len(cpf) == 11 else None,
+            "tplogradouro": _pega(t, "TPLOGRADOURO", "tplogradouro", default=""),
+            "logradouro": _pega(t, "LOGRADOURO", "logradouro", default=""),
+            "numero": _pega(t, "NUMERO", "numero", default=""),
+            "complemento": _pega(t, "COMPLEMENTO", "complemento", default=""),
+            "bairro": _pega(t, "BAIRRO", "bairro", default=""),
             "endereco": _pega(t, "ENDERECO", "endereco", default=""),
             "cidade": _pega(t, "CIDADE", "cidade", default=""),
             "uf": _pega(t, "UF", "uf", default=""),
+            "cep": _so_digitos(_pega(t, "CEP", "cep", default="")),
             "tipo": _pega(t, "TP", "tp", "tipo", default=""),
         })
     return {"ok": bool(out), "titulares": out, "erro": None if out else "sem_titular"}

@@ -2438,9 +2438,16 @@ def prospeccao_identificar_numero(request: Request, numero: str = Form("")):
     def _mask(c):
         c = _so_digitos(c or "")
         return f"***.{c[3:6]}.***-{c[9:]}" if len(c) == 11 else ""
-    def _tipo_ok(tp):   # a Credify manda códigos tipo "0"; só mostra rótulo de verdade
-        tp = (tp or "").strip()
-        return tp if (len(tp) > 1 and not tp.isdigit()) else ""
+    def _cep(c):
+        c = _so_digitos(c or "")
+        return f"{c[:5]}-{c[5:]}" if len(c) == 8 else (c or "")
+    def _endereco(t):
+        # monta o endereço completo a partir das partes (fallback pro ENDERECO cru)
+        rua = " ".join(x for x in [(t.get("tplogradouro") or "").strip(),
+                                   (t.get("logradouro") or "").strip()] if x)
+        p = [x for x in [rua, (t.get("numero") or "").strip(), (t.get("complemento") or "").strip()] if x]
+        linha1 = ", ".join(p)
+        return linha1 or (t.get("endereco") or "")
     tit, vistos = [], set()
     for t in (r.get("titulares") or []):
         nome = (t.get("nome") or "").strip()
@@ -2448,9 +2455,10 @@ def prospeccao_identificar_numero(request: Request, numero: str = Form("")):
         if not nome or chave in vistos:      # dedup: mesmo titular repetido
             continue
         vistos.add(chave)
-        tit.append({"nome": nome, "cidade": t.get("cidade"), "uf": t.get("uf"),
-                    "tipo": _tipo_ok(t.get("tipo")), "cpf_mask": _mask(t.get("cpf")),
-                    "endereco": t.get("endereco")})
+        tit.append({"nome": nome, "cpf_mask": _mask(t.get("cpf")),
+                    "endereco": _endereco(t), "bairro": (t.get("bairro") or "").strip(),
+                    "cidade": (t.get("cidade") or "").strip(), "uf": (t.get("uf") or "").strip(),
+                    "cep": _cep(t.get("cep"))})
     return JSONResponse({"ok": True, "titulares": tit})
 
 
@@ -3064,9 +3072,14 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         if(b){b.disabled=false;b.textContent=t;}
         if(!d.ok){if(m){m.textContent=d.erro||'Não consegui.';m.style.color='#e0a33e';}return;}
         if(!d.titulares||!d.titulares.length){if(m){m.textContent='Nenhum titular encontrado.';m.style.color='#e0a33e';}return;}
-        var h=d.titulares.map(function(t){var l='<b style=\\'color:var(--verde-claro)\\'>'+(t.nome||'—')+'</b>';
-          if(t.cidade||t.uf)l+=' <span class=\\'mut\\'>· '+(t.cidade||'')+(t.uf?('/'+t.uf):'')+'</span>';
-          if(t.tipo)l+=' <span class=\\'mut\\' style=\\'font-size:.72rem\\'>('+t.tipo+')</span>';return l;}).join('<br>');
+        function esc(s){var e=document.createElement('div');e.textContent=s==null?'':s;return e.innerHTML;}
+        function ln(rot,val){return val?('<div style=\\'display:flex;gap:.5rem;font-size:.8rem;padding:.1rem 0\\'><span style=\\'color:var(--mut);min-width:74px\\'>'+rot+'</span><b>'+esc(val)+'</b></div>'):'';}
+        var h=d.titulares.map(function(t){
+          var loc=[(t.cidade||''),(t.uf||'')].filter(Boolean).join('/');
+          return '<div style=\\'border:1px solid var(--borda);border-radius:9px;padding:.5rem .65rem;margin-top:.4rem;background:var(--bg)\\'>'
+            +'<div style=\\'font-weight:700;color:var(--verde-claro);margin-bottom:.15rem\\'>'+esc(t.nome||'—')+'</div>'
+            +ln('CPF',t.cpf_mask)+ln('Endereço',t.endereco)+ln('Bairro',t.bairro)
+            +ln('Cidade/UF',loc)+ln('CEP',t.cep)+'</div>';}).join('');
         if(m){m.innerHTML=h;m.style.color='';}}).catch(function(){if(b){b.disabled=false;b.textContent=t;}if(m){m.textContent='Falha de rede.';m.style.color='#e0a33e';}});}
     function buscarDecisor(id){var b=document.getElementById('dec-btn'),m=document.getElementById('dec-msg');if(b){b.disabled=true;var t=b.textContent;b.textContent='Consultando…';}if(m){m.textContent='Consultando o quadro societário na Credify…';m.style.color='';}
       fetch('/painel/prospeccao/'+id+'/decisor-credify',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){if(b){b.disabled=false;b.textContent=t;}

@@ -256,9 +256,11 @@ def _disparar_campanha(pool, camp_id, conta_id, camp_nome, teto) -> int:
             corpo = _fmt(passo["corpo"] or "", lead)
         link = _app_url() + "/descadastrar?t=" + descad_token(conta_id, email)
         link_int = _app_url() + "/tenho-interesse?t=" + interesse_token(conta_id, pid, camp_id)
-        ok = enviar_email(email, assunto, _html(corpo, lead, conta_nome, link, link_int),
-                          texto_alt=corpo + "\n\nTenho interesse: " + link_int,
-                          from_nome=(conta_nome or None))
+        from finance import email_inbound as _ein
+        ok = _ein.enviar_conta(pool, conta_id, email, assunto,
+                               _html(corpo, lead, conta_nome, link, link_int),
+                               texto_alt=corpo + "\n\nTenho interesse: " + link_int,
+                               from_nome=(conta_nome or None))
         if not ok:
             _marcar(pool, aid, "erro")
             continue
@@ -362,9 +364,11 @@ def registrar_interesse(pool, conta_id: int, prospeccao_id: int, campanha_id: in
                  + "Posso te mostrar em 2 minutinhos como fica aí? É só responder este e-mail. 😊")
         assunto = "Seu material — " + (conta_nome or "ZAQ")
         try:
-            enviado = enviar_email(email, assunto, _html(corpo, {"whatsapp": None}, conta_nome,
-                                   _app_url() + "/descadastrar?t=" + descad_token(conta_id, email)),
-                                   texto_alt=corpo, from_nome=(conta_nome or None))
+            from finance import email_inbound as _ein
+            enviado = _ein.enviar_conta(pool, conta_id, email, assunto,
+                                        _html(corpo, {"whatsapp": None}, conta_nome,
+                                              _app_url() + "/descadastrar?t=" + descad_token(conta_id, email)),
+                                        texto_alt=corpo, from_nome=(conta_nome or None))
         except Exception:  # noqa: BLE001
             enviado = False
         if enviado:

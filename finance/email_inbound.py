@@ -55,6 +55,34 @@ def configurado_conta(pool, conta_id: int) -> bool:
     return _conta_cfg(pool, conta_id) is not None
 
 
+def remetente_conta(pool, conta_id: int) -> str | None:
+    """O e-mail que a EMPRESA usa pra ENVIAR: a caixa própria (se configurada), senão
+    o SMTP global do ambiente. É o que deve aparecer no painel e no From."""
+    cfg = _conta_cfg(pool, conta_id)
+    if cfg:
+        return cfg["user"]
+    from finance.email_sender import remetente_configurado
+    return remetente_configurado()
+
+
+def _smtp_host(imap_host: str) -> str:
+    h = (imap_host or "").strip().lower()
+    return h.replace("imap", "smtp", 1) if "imap" in h else (h or "smtp.gmail.com")
+
+
+def enviar_conta(pool, conta_id: int, destino: str, assunto: str, html: str,
+                 texto_alt: str | None = None, from_nome: str | None = None,
+                 reply_to: str | None = None) -> bool:
+    """Envia PELO e-mail da empresa (mesma senha de app do IMAP serve pro SMTP). Se a
+    empresa não tem caixa própria, cai no SMTP global (enviar_email)."""
+    from finance import email_sender as es
+    cfg = _conta_cfg(pool, conta_id)
+    if cfg:
+        return es.enviar_com_creds(cfg["user"], cfg["senha"], _smtp_host(cfg["host"]), 587,
+                                   destino, assunto, html, texto_alt, from_nome, reply_to)
+    return es.enviar_email(destino, assunto, html, texto_alt, reply_to, from_nome)
+
+
 def salvar_config(pool, conta_id: int, endereco: str, senha: str, host: str = "") -> None:
     """Salva/atualiza o canal de e-mail da conta. Senha vazia = mantém a atual."""
     endereco = (endereco or "").strip()

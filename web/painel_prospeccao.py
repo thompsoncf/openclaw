@@ -90,6 +90,12 @@ def _tem_credify() -> bool:
     return cf.tem_credenciais()
 
 
+def _ein_remetente(pool, conta_id):
+    """E-mail que a empresa usa pra enviar (caixa própria ou global)."""
+    from finance import email_inbound as _ein
+    return _ein.remetente_conta(pool, conta_id)
+
+
 def _membro_contato(pool, conta_id: int, vid):
     """nome + e-mail do responsável (pra assinar a mensagem e virar Reply-To)."""
     if not vid:
@@ -598,8 +604,11 @@ def _canais_status(pool, conta_id: int) -> dict:
         whatsapp_ok = _wq.configurado()   # serviço ligado; a sessão em si aparece na aba QR
     else:
         whatsapp_ok = twilio and bool(nums.get("whatsapp"))
+    from finance import email_inbound as _ein
+    rem_conta = _ein.remetente_conta(pool, conta_id)     # caixa da EMPRESA (ou global)
     return {
-        "email": bool(remetente_configurado()),           # ENVIAR (SMTP global)
+        "email": bool(rem_conta),                         # ENVIAR (caixa da empresa/global)
+        "email_remetente": rem_conta or "",               # o e-mail que vai no From
         "email_rx": email_rx,                             # RECEBER (caixa da conta)
         "email_ident": email_ident or "",
         "whatsapp": whatsapp_ok,
@@ -730,7 +739,7 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
                    secao_ativa="prospeccao", aba=aba, convs=convs, escopo=escopo, canal=canal,
                    canais=_canais_status(pool, ctx["conta_id"]), canal_rot=CANAL_ROT,
                    gerencia=ctx["gerencia"], vendedores=vends, filtro_vend=filtro_vend,
-                   remetente=remetente_configurado(), tem_ia=_tem_ia(),
+                   remetente=_ein_remetente(pool, ctx["conta_id"]), tem_ia=_tem_ia(),
                    ag_cfg=ag_cfg, ag_conhec=ag_conhec,
                    aviso=request.session.pop("prosp_aviso", None))
 
@@ -827,8 +836,8 @@ def comunicacao_responder(request: Request, conversa_id: int = Form(...), texto:
             destino = (cv[6] or "").strip() or (cv[2] or "").strip()   # e-mail do lead OU contato órfão
             if "@" not in destino:
                 return JSONResponse({"ok": False, "erro": "Sem e-mail de destino nesta conversa."})
-            if not remetente_configurado():
-                return JSONResponse({"ok": False, "erro": "E-mail não configurado no ambiente."})
+            if not _ein_remetente(pool, ctx["conta_id"]):
+                return JSONResponse({"ok": False, "erro": "E-mail não configurado (configure a caixa da empresa na aba Canais)."})
             ult = c.execute("""select texto from mensagens where conversa_id=%s and canal='email'
                                 order by criado_em desc limit 1""", (conversa_id,)).fetchone()
             base = (ult[0] or "").split("\n\n", 1)[0].strip() if ult else ""
@@ -839,10 +848,11 @@ def comunicacao_responder(request: Request, conversa_id: int = Form(...), texto:
                     "line-height:1.6;color:#222\">"
                     + "".join(f"<p style=\"margin:0 0 12px\">{_html_escape(par)}</p>"
                               for par in texto.split("\n\n")) + "</div>")
-            ok = enviar_email(destino, assunto, html, texto_alt=texto,
-                              reply_to=email_rem or None, from_nome=(ctx["conta"][2] or None))
+            from finance import email_inbound as _ein
+            ok = _ein.enviar_conta(pool, ctx["conta_id"], destino, assunto, html, texto_alt=texto,
+                                   reply_to=email_rem or None, from_nome=(ctx["conta"][2] or None))
             if not ok:
-                return JSONResponse({"ok": False, "erro": "Não consegui enviar o e-mail (confira o SMTP no Render)."})
+                return JSONResponse({"ok": False, "erro": "Não consegui enviar o e-mail (confira a caixa da empresa na aba Canais)."})
             _add_msg(c, conversa_id, "email", "out", "humano", f"{assunto}\n\n{texto}", ctx["membro_id"])
             c.commit()
             return JSONResponse({"ok": True})
@@ -3553,8 +3563,9 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   <div class="cx-cc">
     <div class="cx-card">
       <h3>✉️ E-mail <span class="cx-stat {{ 'st-on' if canais.email else 'st-off' }}">● {{ 'Enviando' if canais.email else 'A configurar' }}</span></h3>
-      <div class="cx-kv"><span>Enviar (SMTP)</span><b>{{ remetente or '—' }}</b></div>
+      <div class="cx-kv"><span>Enviar (De:)</span><b>{{ remetente or '—' }}</b></div>
       <div class="cx-kv"><span>Receber (IMAP)</span><b>{% if canais.email_rx %}<span style="color:var(--verde-claro)">✓ {{ canais.email_ident }}</span>{% else %}—{% endif %}</b></div>
+      <div class="mut" style="font-size:.72rem">A empresa <b>envia e recebe</b> pelo próprio e-mail (a mesma caixa abaixo). Só cai no e-mail global se você não configurar nenhuma.</div>
       {% if gerencia %}
       <form method="post" action="/painel/prospeccao/comunicacao/email-config" style="margin-top:.6rem">
         <label class="lbl">Caixa pra RECEBER (endereço + senha de app)</label>

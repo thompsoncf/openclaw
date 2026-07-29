@@ -89,6 +89,35 @@ def enviar_email(destino: str, assunto: str, html: str,
         return False
 
 
+def enviar_com_creds(user: str, senha: str, host: str, port: int, destino: str,
+                     assunto: str, html: str, texto_alt: str | None = None,
+                     from_nome: str | None = None, reply_to: str | None = None) -> bool:
+    """Envia usando credenciais EXPLÍCITAS (SMTP da própria empresa) — o From é o
+    `user`. Mesma tolerância a falha do enviar_email. Usado pelo envio por-conta."""
+    if not (user and senha and destino):
+        return False
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = assunto
+        msg["From"] = f"{(from_nome or user)} <{user}>"
+        msg["To"] = destino
+        if reply_to:
+            msg["Reply-To"] = reply_to
+        if texto_alt:
+            msg.attach(MIMEText(texto_alt, "plain", "utf-8"))
+        msg.attach(MIMEText(html, "html", "utf-8"))
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP(host, port, timeout=_TIMEOUT) as s:
+            s.starttls(context=ctx)
+            s.login(user, senha)
+            s.sendmail(user, [destino], msg.as_string())
+        _log.info("email(por-conta) enviado de %s para %s", user, destino)
+        return True
+    except Exception as e:  # noqa: BLE001
+        _log.warning("email(por-conta) falhou de %s para %s: %s: %s", user, destino, type(e).__name__, e)
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Templates de email (cada tipo tem sua funcao)
 # ---------------------------------------------------------------------------

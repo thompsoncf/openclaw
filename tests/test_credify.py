@@ -42,6 +42,29 @@ def test_escolher_decisor_vazio():
     assert cf._escolher_decisor([]) is None
 
 
+def test_ranquear_telefones_marca_o_mais_provavel():
+    tels = [
+        {"formatado": "(86) 3223-1111", "ddd": "86", "numero": "32231111",
+         "whatsapp": False, "tipo": "COMERCIAL"},
+        {"formatado": "(86) 98188-5930", "ddd": "86", "numero": "988185930",
+         "whatsapp": True, "tipo": "CELULAR"},
+        {"formatado": "(86) 99999-0000", "ddd": "86", "numero": "999990000",
+         "whatsapp": False, "tipo": "CELULAR"},
+    ]
+    r = cf._ranquear_telefones(tels)
+    # WhatsApp + celular = mais provável, e vem primeiro
+    assert r[0]["formatado"] == "(86) 98188-5930"
+    assert r[0]["provavel"] is True
+    # exatamente um marcado como provável
+    assert sum(1 for t in r if t["provavel"]) == 1
+    # fixo (não-celular, sem whatsapp) fica por último
+    assert r[-1]["formatado"] == "(86) 3223-1111"
+
+
+def test_ranquear_telefones_vazio():
+    assert cf._ranquear_telefones([]) == []
+
+
 def test_extrai_token_do_envelope_credify():
     # sucesso: token dentro de Dados (dict)
     assert cf._extrai_token({"Sucess": True, "Dados": {"token": "abc123def456ghi789xy"}}) == "abc123def456ghi789xy"

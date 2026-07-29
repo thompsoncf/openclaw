@@ -2884,7 +2884,7 @@ function capCnpj(){var f=document.getElementById('cap-manual');var cnpj=f.queryS
   fetch('/painel/prospeccao/cnpj?cnpj='+cnpj,{headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
     if(!d.ok){capToast('CNPJ não encontrado ('+(d.erro||'')+')');return;}var x=d.dados;
     function put(n,v,forca){var el=f.querySelector('[name='+n+']');if(el&&v&&(forca||!el.value))el.value=v;}
-    put('empresa',x.razao_social,false);put('segmento',x.segmento,true);put('cidade',x.cidade,true);put('uf',x.uf,true);
+    put('empresa',x.nome_fantasia||x.razao_social,false);put('segmento',x.segmento,true);put('cidade',x.cidade,true);put('uf',x.uf,true);
     put('telefone',x.telefone,true);put('email',x.email,true);put('socio',x.socio,true);put('regime_tributario',x.regime_tributario,true);put('porte',x.porte,true);
     var rc=f.querySelector('[name=receita]');if(rc){try{rc.value=JSON.stringify(x);}catch(e){}}
     capToast('Dados da Receita preenchidos ✓');
@@ -3131,7 +3131,8 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             {% if a.decisor_telefones %}
               {% for t in a.decisor_telefones %}
               <div style="margin-top:.3rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
-                <span style="color:var(--verde-claro)">{{ t.formatado }}</span>
+                <span style="color:var(--verde-claro){% if t.provavel %};font-weight:700{% endif %}">{{ t.formatado }}</span>
+                {% if t.provavel %}<span class="badge" style="background:#2a2410;border-color:#5a4a1e;color:#e0b25a" title="Número que a Credify indica como o mais provável do decisor">⭐ mais provável</span>{% endif %}
                 {% if t.tipo_rot %}<span class="mut" style="font-size:.74rem">{{ t.tipo_rot }}</span>{% endif %}
                 {% if t.whatsapp %}<span class="badge" style="background:#10241a;border-color:#1e4a34;color:#3ddc84">WhatsApp</span>{% endif %}
                 {% if t.tel_link %}<a href="{{ t.tel_link }}" style="color:var(--txt-mut);font-size:.78rem">ligar</a>{% endif %}

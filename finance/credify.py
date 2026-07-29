@@ -447,21 +447,40 @@ def decisor_com_telefone(cnpj: str) -> dict:
         # tem nome mas não veio CPF completo -> não dá pra achar o telefone
         return {"ok": False, "erro": "sem_cpf_do_decisor",
                 "decisor_nome": (dec or {}).get("nome")}
-    tels = telefones_por_cpf(dec["cpf"])
-    principal = None
-    for t in tels:  # prioriza um celular/WhatsApp
-        if t.get("whatsapp"):
-            principal = t
-            break
-    principal = principal or (tels[0] if tels else None)
+    tels = _ranquear_telefones(telefones_por_cpf(dec["cpf"]))
+    principal = tels[0] if tels else None
     return {
         "ok": bool(principal),
         "decisor_nome": dec.get("nome"),
         "decisor_qualificacao": dec.get("qualificacao"),
         "decisor_telefone": principal.get("formatado") if principal else None,
         "decisor_whatsapp": bool(principal.get("whatsapp")) if principal else False,
-        # lista RICA (todos os telefones, com tipo + whatsapp) pra ficha mostrar todos
+        # lista RICA (ordenada por probabilidade; o 1º vem marcado provavel=True)
         "telefones": [{"formatado": t.get("formatado"), "tipo": t.get("tipo"),
-                       "whatsapp": bool(t.get("whatsapp"))} for t in tels if t.get("formatado")],
+                       "whatsapp": bool(t.get("whatsapp")), "provavel": t.get("provavel", False)}
+                      for t in tels if t.get("formatado")],
         "erro": None if principal else "sem_telefone",
     }
+
+
+def _ranquear_telefones(tels: list[dict]) -> list[dict]:
+    """Ordena os telefones do decisor por probabilidade de ser o número dele e marca
+    o mais provável (provavel=True no 1º). Sinais, do mais forte pro mais fraco:
+    WhatsApp ativo > celular > tipo 'PRINCIPAL'/'CELULAR' > ordem que a Credify devolveu
+    (ela costuma trazer o melhor primeiro). Função pura (sem rede)."""
+    def _score(idx_t):
+        idx, t = idx_t
+        s = 0
+        if t.get("whatsapp"):
+            s += 100
+        if _eh_movel(t.get("ddd", ""), t.get("numero", "")):
+            s += 40
+        tp = (t.get("tipo") or "").upper()
+        if "PRINCIPAL" in tp or "CELULAR" in tp:
+            s += 15
+        s -= idx  # desempate: preserva a ordem original da Credify
+        return s
+    ordenados = [t for _, t in sorted(enumerate(tels), key=_score, reverse=True)]
+    for i, t in enumerate(ordenados):
+        t["provavel"] = (i == 0)
+    return ordenados

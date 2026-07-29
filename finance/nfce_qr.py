@@ -5,7 +5,33 @@ Tolerante a falha: qualquer erro retorna None e o fluxo continua.
 """
 from __future__ import annotations
 
+import threading
 from datetime import datetime, date
+
+# Cache dos detectores POR THREAD. Instanciar o WeChatQRCode carrega 2 redes
+# neurais (detect + super-resolucao, ~arquivos caffemodel) - caro em CPU e,
+# principalmente, em MEMORIA. A leitura do QR roda em threads separadas
+# (threading.Thread / asyncio.to_thread), e cv2.dnn.Net NAO e' thread-safe,
+# entao NAO da' pra compartilhar UMA instancia global entre threads. Um cache
+# thread-local resolve os dois lados: cada thread constroi UMA vez e reusa
+# (evita recarregar os modelos a cada foto/pagina de PDF) sem corrida entre
+# threads. Antes isso vazava: um PDF de 3 paginas reinstanciava as redes 3x.
+_tls = threading.local()
+
+# Teto de tamanho pra leitura pesada de QR. Acima disso, PULAMOS o processamento
+# (decode da imagem + cascata de ampliacao, ou render de pagina de PDF) - que e'
+# o que estourava a memoria do servico (OOM no Render com PDF escaneado de ~4MB:
+# render a 200 DPI -> array de ~11MB/pagina -> ampliacoes 2x/3x/4x/5x -> centenas
+# de MB de pico). A leitura de QR e' auditoria em SEGUNDO PLANO e NUNCA bloqueia
+# o cliente, entao pular um arquivo gigante nao afeta o fluxo - so' nao enriquece
+# aquela auditoria. Ajuste este numero se precisar (arquivos legitimos de cupom,
+# ja' comprimidos pelo WhatsApp/Telegram, ficam bem abaixo disso).
+_MAX_QR_BYTES = 3 * 1024 * 1024  # 3 MB
+
+
+def _grande_demais(dados: bytes) -> bool:
+    """True se o conteudo passa do teto de leitura de QR (evita o OOM)."""
+    return bool(dados) and len(dados) > _MAX_QR_BYTES
 
 
 def deve_mandar_dica_qr(dica_qr: bool, chave_nfce, tools_usadas) -> bool:
@@ -67,7 +93,14 @@ def _detectores():
     muito superior pra QR degradado (foto comprimida de WhatsApp/Telegram), mas
     SO' funciona de verdade com os arquivos de modelo - por isso os embarcamos
     em finance/wechat_models/ e passamos explicitamente (senao, dependendo do
-    build do opencv, ele instancia mas nao decodifica - foi o bug do Render)."""
+    build do opencv, ele instancia mas nao decodifica - foi o bug do Render).
+
+    Cacheado POR THREAD (_tls): constroi UMA vez por thread e reusa. Sem isso,
+    cada leitura reinstanciava as redes neurais (detect + super-resolucao),
+    estourando a memoria do servico sob carga (o alerta de OOM do Render)."""
+    cached = getattr(_tls, "dets", None)
+    if cached is not None:
+        return cached
     import cv2
     import os
     dets = []
@@ -85,6 +118,7 @@ def _detectores():
     except Exception:  # noqa: BLE001
         pass
     dets.append(("padrao", cv2.QRCodeDetector()))
+    _tls.dets = dets
     return dets
 
 
@@ -164,6 +198,14 @@ def ler_chave_da_imagem(imagem_bytes: bytes) -> str | None:
     degradado. Pra maximizar a leitura combinamos: detector WeChat (otimo pra
     QR ruim) + detector padrao; na imagem inteira, ampliada, e em recortes da
     regiao central ampliados em varias escalas."""
+    # Trava de memoria: imagem grande demais dispara a cascata de ampliacao que
+    # estourava o servico. Pula a leitura (auditoria, nao bloqueia o cliente).
+    if _grande_demais(imagem_bytes):
+        import logging
+        logging.getLogger("openclaw.qr").warning(
+            "QR: imagem de %d bytes acima do teto (%d) - leitura pesada pulada",
+            len(imagem_bytes), _MAX_QR_BYTES)
+        return None
     try:
         import cv2
         import numpy as np
@@ -177,33 +219,6 @@ def ler_chave_da_imagem(imagem_bytes: bytes) -> str | None:
         return None
 
     dets = _detectores()
-
-    # --- DIAGNOSTICO TEMPORARIO: loga o que cada detector ve na imagem inteira
-    try:
-        import logging
-        import re as _re
-        _dlog = logging.getLogger("openclaw.qr")
-        for _nome, _det in dets:
-            try:
-                if _nome == "wechat":
-                    _res, _ = _det.detectAndDecode(arr)
-                    if _res:
-                        _url = _res[0]
-                        _dlog.info("DIAG url tipo=%s len=%d", type(_url).__name__, len(_url))
-                        _m = _re.search(r"[?&]p=(\d{44})", _url)
-                        _dlog.info("DIAG regex p= casou=%s", bool(_m))
-                        if _m:
-                            _ch = _m.group(1)
-                            _dlog.info("DIAG chave=%r len=%d pos20-22=%r",
-                                       _ch, len(_ch), _ch[20:22])
-                        _dlog.info("DIAG extrair_chave final=%r", extrair_chave(_url))
-                    else:
-                        _dlog.info("DIAG wechat: VAZIO")
-            except Exception as _e:  # noqa: BLE001
-                _dlog.info("DIAG %s erro: %s", _nome, _e)
-    except Exception:  # noqa: BLE001
-        pass
-    # --- fim diagnostico
 
     def _le(img) -> str | None:
         for nome, det in dets:
@@ -312,6 +327,16 @@ def ler_chave_de_pdf(pdf_bytes: bytes, max_paginas: int = 3) -> str | None:
                     if cand[20:22] in ("65", "55"):
                         return cand
         # 2) QR renderizado (pega PDF escaneado/sem texto, como antes).
+        # SO' se o PDF nao for grande demais: renderizar a pagina (get_pixmap a
+        # 200 DPI) + a cascata de leitura de imagem e' o passo que estoura a
+        # memoria. O texto acima ja' rodou (barato, seguro); num PDF gigante
+        # (tipicamente escaneado) o render fica de fora de proposito.
+        if _grande_demais(pdf_bytes):
+            import logging
+            logging.getLogger("openclaw.qr").warning(
+                "QR: PDF de %d bytes acima do teto (%d) - render pulado (so' texto)",
+                len(pdf_bytes), _MAX_QR_BYTES)
+            return None
         for i in range(min(max_paginas, doc.page_count)):
             try:
                 png = doc[i].get_pixmap(dpi=200).tobytes("png")

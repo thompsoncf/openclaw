@@ -5,7 +5,18 @@ Tolerante a falha: qualquer erro retorna None e o fluxo continua.
 """
 from __future__ import annotations
 
+import threading
 from datetime import datetime, date
+
+# Cache dos detectores POR THREAD. Instanciar o WeChatQRCode carrega 2 redes
+# neurais (detect + super-resolucao, ~arquivos caffemodel) - caro em CPU e,
+# principalmente, em MEMORIA. A leitura do QR roda em threads separadas
+# (threading.Thread / asyncio.to_thread), e cv2.dnn.Net NAO e' thread-safe,
+# entao NAO da' pra compartilhar UMA instancia global entre threads. Um cache
+# thread-local resolve os dois lados: cada thread constroi UMA vez e reusa
+# (evita recarregar os modelos a cada foto/pagina de PDF) sem corrida entre
+# threads. Antes isso vazava: um PDF de 3 paginas reinstanciava as redes 3x.
+_tls = threading.local()
 
 
 def deve_mandar_dica_qr(dica_qr: bool, chave_nfce, tools_usadas) -> bool:
@@ -67,7 +78,14 @@ def _detectores():
     muito superior pra QR degradado (foto comprimida de WhatsApp/Telegram), mas
     SO' funciona de verdade com os arquivos de modelo - por isso os embarcamos
     em finance/wechat_models/ e passamos explicitamente (senao, dependendo do
-    build do opencv, ele instancia mas nao decodifica - foi o bug do Render)."""
+    build do opencv, ele instancia mas nao decodifica - foi o bug do Render).
+
+    Cacheado POR THREAD (_tls): constroi UMA vez por thread e reusa. Sem isso,
+    cada leitura reinstanciava as redes neurais (detect + super-resolucao),
+    estourando a memoria do servico sob carga (o alerta de OOM do Render)."""
+    cached = getattr(_tls, "dets", None)
+    if cached is not None:
+        return cached
     import cv2
     import os
     dets = []
@@ -85,6 +103,7 @@ def _detectores():
     except Exception:  # noqa: BLE001
         pass
     dets.append(("padrao", cv2.QRCodeDetector()))
+    _tls.dets = dets
     return dets
 
 
@@ -177,33 +196,6 @@ def ler_chave_da_imagem(imagem_bytes: bytes) -> str | None:
         return None
 
     dets = _detectores()
-
-    # --- DIAGNOSTICO TEMPORARIO: loga o que cada detector ve na imagem inteira
-    try:
-        import logging
-        import re as _re
-        _dlog = logging.getLogger("openclaw.qr")
-        for _nome, _det in dets:
-            try:
-                if _nome == "wechat":
-                    _res, _ = _det.detectAndDecode(arr)
-                    if _res:
-                        _url = _res[0]
-                        _dlog.info("DIAG url tipo=%s len=%d", type(_url).__name__, len(_url))
-                        _m = _re.search(r"[?&]p=(\d{44})", _url)
-                        _dlog.info("DIAG regex p= casou=%s", bool(_m))
-                        if _m:
-                            _ch = _m.group(1)
-                            _dlog.info("DIAG chave=%r len=%d pos20-22=%r",
-                                       _ch, len(_ch), _ch[20:22])
-                        _dlog.info("DIAG extrair_chave final=%r", extrair_chave(_url))
-                    else:
-                        _dlog.info("DIAG wechat: VAZIO")
-            except Exception as _e:  # noqa: BLE001
-                _dlog.info("DIAG %s erro: %s", _nome, _e)
-    except Exception:  # noqa: BLE001
-        pass
-    # --- fim diagnostico
 
     def _le(img) -> str | None:
         for nome, det in dets:

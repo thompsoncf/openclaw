@@ -18,6 +18,21 @@ from datetime import datetime, date
 # threads. Antes isso vazava: um PDF de 3 paginas reinstanciava as redes 3x.
 _tls = threading.local()
 
+# Teto de tamanho pra leitura pesada de QR. Acima disso, PULAMOS o processamento
+# (decode da imagem + cascata de ampliacao, ou render de pagina de PDF) - que e'
+# o que estourava a memoria do servico (OOM no Render com PDF escaneado de ~4MB:
+# render a 200 DPI -> array de ~11MB/pagina -> ampliacoes 2x/3x/4x/5x -> centenas
+# de MB de pico). A leitura de QR e' auditoria em SEGUNDO PLANO e NUNCA bloqueia
+# o cliente, entao pular um arquivo gigante nao afeta o fluxo - so' nao enriquece
+# aquela auditoria. Ajuste este numero se precisar (arquivos legitimos de cupom,
+# ja' comprimidos pelo WhatsApp/Telegram, ficam bem abaixo disso).
+_MAX_QR_BYTES = 3 * 1024 * 1024  # 3 MB
+
+
+def _grande_demais(dados: bytes) -> bool:
+    """True se o conteudo passa do teto de leitura de QR (evita o OOM)."""
+    return bool(dados) and len(dados) > _MAX_QR_BYTES
+
 
 def deve_mandar_dica_qr(dica_qr: bool, chave_nfce, tools_usadas) -> bool:
     """A dica de QR ('deixe o QR visivel') so' faz sentido em CUPOM FISCAL - que
@@ -183,6 +198,14 @@ def ler_chave_da_imagem(imagem_bytes: bytes) -> str | None:
     degradado. Pra maximizar a leitura combinamos: detector WeChat (otimo pra
     QR ruim) + detector padrao; na imagem inteira, ampliada, e em recortes da
     regiao central ampliados em varias escalas."""
+    # Trava de memoria: imagem grande demais dispara a cascata de ampliacao que
+    # estourava o servico. Pula a leitura (auditoria, nao bloqueia o cliente).
+    if _grande_demais(imagem_bytes):
+        import logging
+        logging.getLogger("openclaw.qr").warning(
+            "QR: imagem de %d bytes acima do teto (%d) - leitura pesada pulada",
+            len(imagem_bytes), _MAX_QR_BYTES)
+        return None
     try:
         import cv2
         import numpy as np
@@ -304,6 +327,16 @@ def ler_chave_de_pdf(pdf_bytes: bytes, max_paginas: int = 3) -> str | None:
                     if cand[20:22] in ("65", "55"):
                         return cand
         # 2) QR renderizado (pega PDF escaneado/sem texto, como antes).
+        # SO' se o PDF nao for grande demais: renderizar a pagina (get_pixmap a
+        # 200 DPI) + a cascata de leitura de imagem e' o passo que estoura a
+        # memoria. O texto acima ja' rodou (barato, seguro); num PDF gigante
+        # (tipicamente escaneado) o render fica de fora de proposito.
+        if _grande_demais(pdf_bytes):
+            import logging
+            logging.getLogger("openclaw.qr").warning(
+                "QR: PDF de %d bytes acima do teto (%d) - render pulado (so' texto)",
+                len(pdf_bytes), _MAX_QR_BYTES)
+            return None
         for i in range(min(max_paginas, doc.page_count)):
             try:
                 png = doc[i].get_pixmap(dpi=200).tobytes("png")

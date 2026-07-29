@@ -4033,6 +4033,8 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
       <div class="h">De <b>{{ remetente or 'sua empresa' }}</b> · Para {{ previa.email or '—' }}</div>
       <div class="b"><b id="pv-assunto">{{ previa.assunto }}</b>
         <div style="height:.5rem"></div><span id="pv-corpo">{{ previa.corpo }}</span>
+        <div style="margin:16px 0 2px"><span style="display:inline-block;padding:11px 22px;background:#16a34a;color:#fff;font-weight:bold;border-radius:8px">✅ Tenho interesse</span></div>
+        <div class="mut" style="font-size:.72rem">Ao clicar, o lead recebe o material{% if camp.material %} (você já configurou){% else %} — <b>configure o Material</b> lá em cima{% endif %} e o agente assume.</div>
         {% if previa.whatsapp %}<div><a class="wa" href="#">💬 Falar no WhatsApp</a></div>{% endif %}
       </div>
       <div class="f">Sua empresa · Se não quiser mais receber, descadastrar (link automático em cada envio).</div>

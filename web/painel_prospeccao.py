@@ -2438,9 +2438,19 @@ def prospeccao_identificar_numero(request: Request, numero: str = Form("")):
     def _mask(c):
         c = _so_digitos(c or "")
         return f"***.{c[3:6]}.***-{c[9:]}" if len(c) == 11 else ""
-    tit = [{"nome": t.get("nome"), "cidade": t.get("cidade"), "uf": t.get("uf"),
-            "tipo": t.get("tipo"), "cpf_mask": _mask(t.get("cpf")),
-            "endereco": t.get("endereco")} for t in (r.get("titulares") or [])]
+    def _tipo_ok(tp):   # a Credify manda códigos tipo "0"; só mostra rótulo de verdade
+        tp = (tp or "").strip()
+        return tp if (len(tp) > 1 and not tp.isdigit()) else ""
+    tit, vistos = [], set()
+    for t in (r.get("titulares") or []):
+        nome = (t.get("nome") or "").strip()
+        chave = (nome.upper(), _so_digitos(t.get("cpf")))
+        if not nome or chave in vistos:      # dedup: mesmo titular repetido
+            continue
+        vistos.add(chave)
+        tit.append({"nome": nome, "cidade": t.get("cidade"), "uf": t.get("uf"),
+                    "tipo": _tipo_ok(t.get("tipo")), "cpf_mask": _mask(t.get("cpf")),
+                    "endereco": t.get("endereco")})
     return JSONResponse({"ok": True, "titulares": tit})
 
 

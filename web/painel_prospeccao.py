@@ -356,9 +356,12 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
                       "toque_wa": 1 if r[9] == "enviado" else 0, "toque_mail": int(r[10] or 0),
                       "ult": r[11]})
     metr = {"na_base": na_base, "com_wpp": com_wpp, "com_mail": com_mail, "em_camp": em_camp, "virou": virou}
+    vends = _vendedores(get_pool(), conta_id) if ctx["gerencia"] else []
     return _render("prospeccao_base", request, titulo="Base", secao_ativa="prospeccao",
                    leads=leads, metr=metr, q=q, segmento=segmento, cidade=cidade,
-                   gerencia=ctx["gerencia"], aviso=request.session.pop("prosp_aviso", None))
+                   gerencia=ctx["gerencia"], pode_atribuir=ctx["pode_atribuir"], vendedores=vends,
+                   temperaturas_all=TEMPERATURAS, tem_places=fontes.tem_chave_places(),
+                   aviso=request.session.pop("prosp_aviso", None))
 
 
 @router.post("/painel/prospeccao/base/promover")
@@ -2913,8 +2916,8 @@ _CSS = _CSS + _NAV_ASSETS
 
 def _navbar(active):
     """Barra de navegação do módulo, na ordem da história. `active` marca a aba atual."""
-    tabs = [("captar", "🎯 Captar", "/painel/prospeccao/captar", False),
-            ("base", "📇 Base", "/painel/prospeccao/base", False),
+    # "Captar" foi absorvida pela Base (capta e gerencia no mesmo lugar).
+    tabs = [("base", "📇 Base", "/painel/prospeccao/base", False),
             ("campanhas", "📣 Campanhas", "/painel/prospeccao/campanhas", True),
             ("comunicacao", "💬 Comunicação", "/painel/prospeccao/comunicacao", False),
             ("funil", "🔥 Funil", "/painel/prospeccao", False),
@@ -2932,6 +2935,124 @@ def _navbar(active):
     return "\n".join(out)
 
 
+# ---- Captação dentro da Base (Maps/CNPJ/CSV/Manual). Espelha o painel do Funil
+# (#captar do kanban, que segue sendo a fonte de verdade); aqui é a cópia da Base,
+# com o Google Maps aberto por padrão e recarregando a lista após adicionar.
+_CAPTURA_PANEL_HTML = """
+<div class="cabas">
+  <button type="button" class="caba@@GOOGLE_ON@@" data-tab="google" onclick="capTab('google')">📍 Google Maps</button>
+  <button type="button" class="caba@@CNPJ_ON@@" data-tab="manual" onclick="capTab('manual')">🏢 CNPJ / ✏️ Manual</button>
+  <button type="button" class="caba@@CSV_ON@@" data-tab="csv" onclick="capTab('csv')">📄 CSV</button>
+</div>
+
+<div class="captab" data-tab="google"@@GOOGLE_HIDE@@>
+  {% if not tem_places %}
+  <div class="mut" style="font-size:.84rem;line-height:1.6">📍 Pra buscar no Google Maps falta a chave. No Render (openclaw-web → Environment) adicione <code style="background:var(--bg);padding:.1rem .35rem;border-radius:5px;border:1px solid var(--borda)">GOOGLE_PLACES_API_KEY</code> (Places API New, billing ativo).</div>
+  {% else %}
+  <form id="cap-google" action="/painel/prospeccao/captar/buscar" method="post" onsubmit="return capBuscar(event)">
+    <div class="egrid">
+      <div><label class="lbl">Segmento</label><input class="fld" name="segmento" required placeholder="Ex: pet shop"></div>
+      <div><label class="lbl">Cidade</label><input class="fld" name="cidade" placeholder="Ex: Teresina - PI"></div>
+    </div>
+    <div class="lbl" style="margin-top:.7rem;color:var(--verde-claro)">📍 Refinar por região <span style="font-weight:400;color:var(--txt-mut)">— opcional, pra buscar numa área específica</span></div>
+    <div class="egrid" style="margin-top:.25rem">
+      <div><label class="lbl">Bairro</label><input class="fld" name="bairro" placeholder="Ex: Jardim Renascença"></div>
+      <div><label class="lbl">Rua</label><input class="fld" name="rua" placeholder="Ex: Av. Nossa Sra. de Fátima"></div>
+    </div>
+    <div class="mut" style="font-size:.76rem;margin-top:.3rem">Bairro filtra a vizinhança toda. Rua afunila bastante (poucos resultados) — use pra mira fina.</div>
+    <label class="rrow" style="border:1px solid var(--borda);border-radius:10px;margin-top:.6rem;cursor:pointer">
+      <span class="toggle"><input type="checkbox" name="esconder_redes" value="1" checked><span class="tgl"></span></span>
+      <span style="font-size:.88rem">Esconder redes grandes (Petz, Drogasil…)</span>
+    </label>
+    {% if pode_atribuir %}<div style="max-width:280px;margin-top:.6rem"><label class="lbl">Atribuir a</label><select class="fld" id="cap-g-vend" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
+    <button class="pbtn" style="margin-top:.8rem" id="cap-g-btn">🔍 Buscar</button>
+  </form>
+  <div id="cap-res" style="margin-top:.9rem"></div>
+  {% endif %}
+</div>
+
+<div class="captab" data-tab="manual"@@CNPJ_HIDE@@>
+  <form id="cap-manual" action="/painel/prospeccao/novo" method="post" onsubmit="return capManual(event)">
+    <input type="hidden" name="voltar" value="@@VOLTAR@@">
+    <input type="hidden" name="receita">
+    <div style="display:flex;gap:.5rem;align-items:end;background:var(--bg);border:1px solid var(--borda);border-radius:10px;padding:.7rem;margin-bottom:.8rem;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px"><label class="lbl">🔎 CNPJ — puxa tudo da Receita</label><input class="fld" name="cnpj" inputmode="numeric" placeholder="digite o CNPJ (só números) e clique buscar"></div>
+      <button type="button" class="pbtn" onclick="capCnpj()" style="white-space:nowrap">↓ Buscar Receita</button>
+    </div>
+    <div class="egrid">
+      <div class="full"><label class="lbl">Empresa *</label><input class="fld" name="empresa" required placeholder="Nome da empresa"></div>
+      <div><label class="lbl">Contato</label><input class="fld" name="contato"></div>
+      <div><label class="lbl">Cargo</label><input class="fld" name="cargo" placeholder="Cargo do contato"></div>
+      <div><label class="lbl">Telefone</label><input class="fld" name="telefone"></div>
+      <div><label class="lbl">WhatsApp</label><input class="fld" name="whatsapp"></div>
+      <div><label class="lbl">E-mail</label><input class="fld" name="email" inputmode="email"></div>
+      <div><label class="lbl">Segmento</label><input class="fld" name="segmento" placeholder="Ex: pet shop"></div>
+      <div><label class="lbl">Cidade</label><input class="fld" name="cidade"></div>
+      <div><label class="lbl">UF</label><input class="fld" name="uf" maxlength="2" style="text-transform:uppercase"></div>
+      <div><label class="lbl">Temperatura</label><select class="fld" name="temperatura">{% for v,l in temperaturas_all %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
+      {% if pode_atribuir %}<div><label class="lbl">Vendedor</label><select class="fld" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
+      <div class="full"><label class="lbl">Observações</label><input class="fld" name="obs"></div>
+      <div class="full"><button class="pbtn" style="margin:.3rem 0 0">＋ Adicionar à base</button></div>
+    </div>
+  </form>
+</div>
+
+<div class="captab" data-tab="csv"@@CSV_HIDE@@>
+  <form id="cap-csv" action="/painel/prospeccao/captar/csv" method="post" enctype="multipart/form-data" onsubmit="return capCsv(event)">
+    <label class="lbl">Arquivo CSV</label>
+    <input class="fld" type="file" name="arquivo" accept=".csv,text/csv" required>
+    <div class="mut" style="font-size:.8rem;margin-top:.5rem">1ª linha = cabeçalho. Colunas: <b>empresa</b>, telefone, whatsapp, cidade, uf, segmento, contato, email, cnpj. Separador , ou ;.</div>
+    {% if pode_atribuir %}<div style="max-width:280px;margin-top:.6rem"><label class="lbl">Atribuir a</label><select class="fld" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
+    <button class="pbtn" style="margin-top:.8rem">Importar CSV</button>
+  </form>
+</div>
+"""
+
+
+def _captura_panel(default_tab, voltar):
+    """Painel de captação parametrizado (aba padrão + pra onde volta o form manual)."""
+    p = _CAPTURA_PANEL_HTML
+    for t in ("google", "cnpj", "csv"):
+        p = p.replace(f"@@{t.upper()}_ON@@", " on" if t == default_tab else "")
+        p = p.replace(f"@@{t.upper()}_HIDE@@", "" if t == default_tab else ' style="display:none"')
+    return p.replace("@@VOLTAR@@", voltar)
+
+
+# JS da captação da Base (recarrega a lista após adicionar; sem addCard do kanban).
+_CAPTURA_JS = """<script>
+function capTab(t){document.querySelectorAll('.caba').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===t);});document.querySelectorAll('.captab').forEach(function(d){d.style.display=(d.getAttribute('data-tab')===t)?'block':'none';});}
+function capFetch(url,fd){return fetch(url,{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();});}
+function _capReload(msg){capToast(msg||'Adicionado à base ✓');setTimeout(function(){location.reload();},700);}
+function capManual(ev){ev.preventDefault();var f=ev.target;capFetch('/painel/prospeccao/novo',new FormData(f)).then(function(d){if(!d.ok){capToast(d.erro||'Erro');return;}f.reset();_capReload('Lead adicionado à base ✓');}).catch(function(){capToast('Falha de rede');});return false;}
+function capCnpj(){var f=document.getElementById('cap-manual');var cnpj=f.querySelector('[name=cnpj]').value.replace(/\\D/g,'');if(cnpj.length!==14){capToast('CNPJ precisa ter 14 dígitos');return;}
+  capToast('Consultando Receita…');
+  fetch('/painel/prospeccao/cnpj?cnpj='+cnpj,{headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
+    if(!d.ok){capToast('CNPJ não encontrado ('+(d.erro||'')+')');return;}var x=d.dados;
+    function put(n,v,forca){var el=f.querySelector('[name='+n+']');if(el&&v&&(forca||!el.value))el.value=v;}
+    put('empresa',x.nome_fantasia||x.razao_social,false);put('segmento',x.segmento,true);put('cidade',x.cidade,true);put('uf',x.uf,true);
+    put('telefone',x.telefone,true);put('email',x.email,true);
+    var rc=f.querySelector('[name=receita]');if(rc){try{rc.value=JSON.stringify(x);}catch(e){}}
+    capToast('Dados da Receita preenchidos ✓');
+  }).catch(function(){capToast('Falha de rede');});}
+function capCsv(ev){ev.preventDefault();capFetch('/painel/prospeccao/captar/csv',new FormData(ev.target)).then(function(d){if(!d.ok){capToast('Erro no CSV');return;}_capReload(d.msg||'Importado ✓');}).catch(function(){capToast('Falha de rede');});return false;}
+function capBuscar(ev){ev.preventDefault();var f=ev.target;var btn=document.getElementById('cap-g-btn');if(btn){btn.disabled=true;btn.textContent='Buscando…';}
+  capFetch('/painel/prospeccao/captar/buscar',new FormData(f)).then(function(d){if(btn){btn.disabled=false;btn.textContent='🔍 Buscar';}var box=document.getElementById('cap-res');
+    if(!d.ok){box.innerHTML='<div class="mut" style="color:#e0a33e">Não consegui buscar ('+(d.erro||'?')+'). Confira a chave/billing e tente de novo.</div>';return;}
+    if(!d.itens.length){box.innerHTML='<div class="mut">Nada encontrado'+(d.n_redes?(' ('+d.n_redes+' rede(s) oculta(s))'):'')+'. Tente outro termo/cidade.</div>';return;}
+    var TP={quente:'#f0917f',morno:'#e0b25a',frio:'#7bb8e6'};
+    var h='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem"><div class="mut" style="font-size:.82rem">'+d.itens.length+' encontrado(s)'+(d.n_redes?(' · '+d.n_redes+' oculta(s)'):'')+'</div><label class="mut" style="font-size:.8rem;cursor:pointer"><input type="checkbox" onclick="capAll(this)" style="width:auto;vertical-align:middle;accent-color:var(--verde)"> marcar todos</label></div><div class="rlist" id="cap-list">';
+    d.itens.forEach(function(it){var loc=(it.cidade?(' · '+jsEsc(it.cidade)+(it.uf?('/'+jsEsc(it.uf)):'')):'');h+='<label class="rrow" style="cursor:pointer"><input type="checkbox" name="itens" value="'+it.pack+'"><span style="flex:1"><span style="display:flex;align-items:center;gap:.4rem"><b style="font-size:.88rem">'+jsEsc(it.empresa)+'</b></span><span class="mut" style="font-size:.76rem">'+(it.segmento?(jsEsc(it.segmento)+' · '):'')+(it.telefone?jsEsc(it.telefone):'')+(it.rating?(' · nota '+it.rating):'')+(it.tem_site?'':' · sem site')+loc+'</span></span><span class="tpill" style="background:transparent;border:1px solid '+(TP[it.temperatura]||'#7bb8e6')+';color:'+(TP[it.temperatura]||'#7bb8e6')+'">'+it.temperatura+'</span></label>';});
+    h+='</div><div style="margin-top:.8rem"><button type="button" class="pbtn" onclick="capImport()">＋ Adicionar selecionados à base</button></div>';box.innerHTML=h;
+  }).catch(function(){if(btn){btn.disabled=false;btn.textContent='🔍 Buscar';}capToast('Falha de rede');});return false;}
+function capAll(el){document.querySelectorAll('#cap-list input[name=itens]').forEach(function(c){c.checked=el.checked;});}
+function capImport(){var packs=[];document.querySelectorAll('#cap-list input[name=itens]:checked').forEach(function(c){packs.push(c.value);});if(!packs.length){capToast('Marque ao menos um');return;}
+  var fd=new FormData();packs.forEach(function(p){fd.append('itens',p);});var vs=document.getElementById('cap-g-vend');if(vs)fd.append('vendedor_id',vs.value);
+  capFetch('/painel/prospeccao/captar/importar',fd).then(function(d){if(!d.ok){capToast('Erro ao importar');return;}_capReload((d.msg||'Adicionados')+' ✓');}).catch(function(){capToast('Falha de rede');});}
+function jsEsc(s){return (s||'').replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];});}
+function capToast(msg){var t=document.getElementById('cap-toast');if(!t){t=document.createElement('div');t.id='cap-toast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--card);border:1px solid var(--verde);color:var(--verde-claro);padding:.6rem 1rem;border-radius:10px;z-index:200;font-size:.85rem;box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .4s';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';clearTimeout(window._captoastT);window._captoastT=setTimeout(function(){t.style.opacity='0';},2600);}
+</script>"""
+
+
 _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 <style>
  .bt-tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:.6rem;margin:.9rem 0}
@@ -2946,17 +3067,26 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
  .bt-tbl tr:last-child td{border-bottom:0}
  .bt-chip{font-size:.68rem;padding:.1rem .45rem;border-radius:999px;border:1px solid var(--borda);color:var(--mut);white-space:nowrap}
  @media(max-width:820px){.bt-tiles{grid-template-columns:repeat(2,1fr)}}
+ .capcard{border:1px solid var(--borda);border-radius:14px;background:var(--card);padding:.85rem 1rem;margin:.2rem 0 1.2rem}
+ .capttl{font-weight:700;font-size:1rem;display:flex;align-items:center;gap:.45rem;margin-bottom:.75rem}
+ .capcard .cabas{margin-bottom:.85rem}
 </style>
 <div class="pw">
 """ + _navbar('base') + """
   <div style="display:flex;align-items:flex-start;gap:.6rem;flex-wrap:wrap">
     <div style="flex:1;min-width:170px">
       <h2 class="tt">📇 Base de captação</h2>
-      <div class="mut" style="font-size:.82rem;margin-top:.15rem">Matéria-prima das campanhas — vira <b style="color:var(--verde-claro)">lead</b> quando topa no WhatsApp ou responde o e-mail.</div>
+      <div class="mut" style="font-size:.82rem;margin-top:.15rem">Capte e gerencie a matéria-prima das campanhas — vira <b style="color:var(--verde-claro)">lead</b> quando topa no WhatsApp ou responde o e-mail.</div>
     </div>
   </div>
 
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
+
+  <div class="capcard">
+    <div class="capttl">➕ Adicionar leads à base</div>
+""" + _captura_panel('google', '/painel/prospeccao/base') + """
+  </div>
+""" + _CAPTURA_JS + """
 
   <div class="bt-tiles">
     <div class="bt-tile"><div class="v">{{ metr.na_base }}</div><div class="l">Na base</div></div>
@@ -2999,7 +3129,7 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <td><button class="pbtn ghost" name="only" value="{{ l.id }}" style="padding:.2rem .5rem;font-size:.76rem" title="Promover a lead">⬆︎</button></td>
           </tr>
         {% else %}
-          <tr><td colspan="7" class="mut" style="text-align:center;padding:1.5rem">Nada na base ainda. <a href="/painel/prospeccao/captar" style="color:var(--verde-claro)">Capte leads</a> pra começar.</td></tr>
+          <tr><td colspan="7" class="mut" style="text-align:center;padding:1.5rem">Nada na base ainda. Use o <b style="color:var(--verde-claro)">➕ Adicionar leads à base</b> acima ↑ pra começar.</td></tr>
         {% endfor %}
         </tbody>
       </table>

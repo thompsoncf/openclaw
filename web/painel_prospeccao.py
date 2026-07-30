@@ -243,6 +243,19 @@ def _receita_extras(d: dict) -> dict:
 
 
 # ================================================================ KANBAN
+def _promover_para_lead(c, conta_id, pros_id) -> None:
+    """Engajou (topou/respondeu/interesse/manual) → dado da base vira lead: entra no
+    funil em Novo + Quente. Quem já é lead só esquenta, sem resetar a etapa do funil."""
+    c.execute(
+        """update prospeccao
+              set estagio='lead',
+                  status = case when estagio='base' then 'novo' else status end,
+                  temperatura='quente',
+                  atualizado_em=now()
+            where id=%s and conta_id=%s""",
+        (pros_id, conta_id))
+
+
 @router.get("/painel/prospeccao", response_class=HTMLResponse)
 def prospeccao_kanban(request: Request, vendedor: str = ""):
     ctx, redir = _acesso(request)
@@ -263,6 +276,7 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
         elif filtro_vend.isdigit():
             where.append("p.vendedor_id = %s")
             params.append(int(filtro_vend))
+    where.append("p.estagio = 'lead'")   # funil = só quem engajou; o resto fica na aba Base
     with pool.connection() as c:
         rows = c.execute(
             f"""select p.id, p.empresa, p.segmento, p.cidade, p.uf, p.status,
@@ -293,6 +307,79 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
                    vendedores=vends, filtro_vend=filtro_vend, total_valor=total_valor,
                    total_alvos=len(rows), tem_places=fontes.tem_chave_places(),
                    aviso=request.session.pop("prosp_aviso", None))
+
+
+# ================================================================ BASE (captados)
+@router.get("/painel/prospeccao/base", response_class=HTMLResponse)
+def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: str = ""):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    conta_id = ctx["conta_id"]
+    where = ["p.conta_id=%s", "p.estagio='base'"]
+    params: list = [conta_id]
+    if not ctx["gerencia"]:
+        where.append("p.vendedor_id=%s"); params.append(ctx["membro_id"])
+    if (q or "").strip():
+        where.append("p.empresa ilike %s"); params.append("%" + q.strip() + "%")
+    if (segmento or "").strip():
+        where.append("p.segmento ilike %s"); params.append("%" + segmento.strip() + "%")
+    if (cidade or "").strip():
+        where.append("p.cidade ilike %s"); params.append("%" + cidade.strip() + "%")
+    wsql = " and ".join(where)
+    esc = "" if ctx["gerencia"] else " and p.vendedor_id=%s"
+    bp = [conta_id] if ctx["gerencia"] else [conta_id, ctx["membro_id"]]
+    with get_pool().connection() as c:
+        rows = c.execute(f"""
+            select p.id, p.empresa, p.segmento, p.cidade, p.uf, p.whatsapp, p.email, p.telefone,
+                   ca.cnome, ca.wa_status, ca.passo_atual, ca.ult_txt, ca.ult_raw
+              from prospeccao p
+              left join lateral (
+                 select cp.nome as cnome, a.wa_status, a.passo_atual, a.ultima_msg_em as ult_raw,
+                        to_char(a.ultima_msg_em - interval '3 hours','DD/MM HH24:MI') as ult_txt
+                   from campanha_alvos a join campanhas cp on cp.id=a.campanha_id
+                  where a.prospeccao_id=p.id
+                  order by a.ultima_msg_em desc nulls last, a.id desc limit 1
+              ) ca on true
+             where {wsql}
+             order by coalesce(ca.ult_raw, p.atualizado_em) desc nulls last, p.id desc
+             limit 300""", tuple(params)).fetchall()
+        na_base = c.execute(f"select count(*) from prospeccao p where p.conta_id=%s and p.estagio='base'{esc}", tuple(bp)).fetchone()[0]
+        com_wpp = c.execute(f"select count(*) from prospeccao p where p.conta_id=%s and p.estagio='base'{esc} and coalesce(nullif(p.whatsapp,''),nullif(p.telefone,'')) is not null", tuple(bp)).fetchone()[0]
+        com_mail = c.execute(f"select count(*) from prospeccao p where p.conta_id=%s and p.estagio='base'{esc} and coalesce(nullif(p.email,''),'')<>''", tuple(bp)).fetchone()[0]
+        em_camp = c.execute(f"select count(distinct p.id) from prospeccao p join campanha_alvos a on a.prospeccao_id=p.id where p.conta_id=%s and p.estagio='base'{esc}", tuple(bp)).fetchone()[0]
+        virou = c.execute(f"select count(*) from prospeccao p where p.conta_id=%s and p.estagio='lead'{esc}", tuple(bp)).fetchone()[0]
+    leads = []
+    for r in rows:
+        leads.append({"id": r[0], "empresa": r[1], "segmento": r[2], "cidade": r[3], "uf": r[4],
+                      "tem_wpp": bool(r[5] or r[7]), "tem_mail": bool(r[6]), "campanha": r[8],
+                      "toque_wa": 1 if r[9] == "enviado" else 0, "toque_mail": int(r[10] or 0),
+                      "ult": r[11]})
+    metr = {"na_base": na_base, "com_wpp": com_wpp, "com_mail": com_mail, "em_camp": em_camp, "virou": virou}
+    return _render("prospeccao_base", request, titulo="Base", secao_ativa="prospeccao",
+                   leads=leads, metr=metr, q=q, segmento=segmento, cidade=cidade,
+                   gerencia=ctx["gerencia"], aviso=request.session.pop("prosp_aviso", None))
+
+
+@router.post("/painel/prospeccao/base/promover")
+def prospeccao_base_promover(request: Request, ids: list[str] = Form([]), only: str = Form("")):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    alvos = [only] if (only or "").strip() else ids
+    n = 0
+    with get_pool().connection() as c:
+        for i in alvos:
+            try:
+                pid = int(i)
+            except (ValueError, TypeError):
+                continue
+            _promover_para_lead(c, ctx["conta_id"], pid)
+            n += 1
+        c.commit()
+    request.session["prosp_aviso"] = (f"{n} contato(s) promovido(s) a lead 🔥 — já estão no funil."
+                                      if n else "Selecione ao menos um contato pra promover.")
+    return RedirectResponse("/painel/prospeccao/base", status_code=303)
 
 
 # ================================================================ ADD MANUAL
@@ -1073,8 +1160,8 @@ def comunicacao_virar_lead(request: Request, conversa_id: int = Form(...)):
         vend = None if ctx["gerencia"] else ctx["membro_id"]
         lead_id = c.execute(
             """insert into prospeccao (conta_id, vendedor_id, empresa, email, whatsapp,
-                 origem, temperatura, status)
-               values (%s,%s,%s,%s,%s,%s,'morno','novo') returning id""",
+                 origem, temperatura, status, estagio)
+               values (%s,%s,%s,%s,%s,%s,'morno','novo','lead') returning id""",
             (ctx["conta_id"], vend, ref or "Contato",
              ref if eh_email else None, None if eh_email else ("+" + ref if ref else None),
              "email_inbound" if eh_email else "whatsapp_inbound")).fetchone()[0]
@@ -1255,9 +1342,12 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
         nome = (nome_perfil or "").strip() or "Contato WhatsApp"
         lead_id = c.execute(
             """insert into prospeccao (conta_id, vendedor_id, empresa, whatsapp,
-                 origem, temperatura, status)
-               values (%s, null, %s, %s, 'whatsapp_inbound', 'quente', 'novo') returning id""",
+                 origem, temperatura, status, estagio)
+               values (%s, null, %s, %s, 'whatsapp_inbound', 'quente', 'novo', 'lead') returning id""",
             (conta_id, nome[:250], "+" + remetente)).fetchone()[0]
+    else:
+        # lead da BASE respondeu/topou no WhatsApp → promove pro funil (Novo + Quente)
+        _promover_para_lead(c, conta_id, lead_id)
     # acha a conversa do lead OU uma órfã por contato_ref (e vincula ela ao lead)
     conv = c.execute(
         """select id, prospeccao_id from conversas
@@ -2784,6 +2874,86 @@ _CSS = """<style>
 .toggle input:checked+.tgl:before{transform:translateX(20px)}
 </style>"""
 
+_BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
+<style>
+ .bt-tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:.6rem;margin:.9rem 0}
+ .bt-tile{border:1px solid var(--borda);border-radius:12px;background:var(--card);padding:.7rem .8rem}
+ .bt-tile .v{font-size:1.4rem;font-weight:800;font-variant-numeric:tabular-nums}
+ .bt-tile .l{font-size:.72rem;color:var(--mut);margin-top:.1rem}
+ .bt-tile.k .v{color:var(--verde-claro)}
+ .bt-wrap{overflow-x:auto;border:1px solid var(--borda);border-radius:12px}
+ .bt-tbl{width:100%;border-collapse:collapse;font-size:.86rem;min-width:720px}
+ .bt-tbl th{text-align:left;font-size:.66rem;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);padding:.5rem .7rem;border-bottom:1px solid var(--borda)}
+ .bt-tbl td{padding:.55rem .7rem;border-bottom:1px solid var(--borda);vertical-align:middle}
+ .bt-tbl tr:last-child td{border-bottom:0}
+ .bt-chip{font-size:.68rem;padding:.1rem .45rem;border-radius:999px;border:1px solid var(--borda);color:var(--mut);white-space:nowrap}
+ @media(max-width:820px){.bt-tiles{grid-template-columns:repeat(2,1fr)}}
+</style>
+<div class="pw">
+  <div style="display:flex;align-items:flex-start;gap:.6rem;flex-wrap:wrap">
+    <div style="flex:1;min-width:170px">
+      <h2 class="tt">📇 Base de captação</h2>
+      <div class="mut" style="font-size:.82rem;margin-top:.15rem">Matéria-prima das campanhas — vira <b style="color:var(--verde-claro)">lead</b> quando topa no WhatsApp ou responde o e-mail.</div>
+    </div>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
+      <a class="pbtn ghost" href="/painel/prospeccao">‹ Funil</a>
+      <a class="pbtn" href="/painel/prospeccao/captar">🎯 Captar</a>
+    </div>
+  </div>
+
+  {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
+
+  <div class="bt-tiles">
+    <div class="bt-tile"><div class="v">{{ metr.na_base }}</div><div class="l">Na base</div></div>
+    <div class="bt-tile"><div class="v">{{ metr.com_wpp }}</div><div class="l">Com WhatsApp</div></div>
+    <div class="bt-tile"><div class="v">{{ metr.com_mail }}</div><div class="l">Com e-mail</div></div>
+    <div class="bt-tile"><div class="v">{{ metr.em_camp }}</div><div class="l">Em campanha</div></div>
+    <div class="bt-tile k"><div class="v">{{ metr.virou }}</div><div class="l">Viraram lead 🔥</div></div>
+  </div>
+
+  <form method="get" action="/painel/prospeccao/base" style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.7rem">
+    <input class="fld" name="q" value="{{ q }}" placeholder="Buscar empresa…" style="min-width:180px">
+    <input class="fld" name="segmento" value="{{ segmento }}" placeholder="Segmento" style="width:150px">
+    <input class="fld" name="cidade" value="{{ cidade }}" placeholder="Cidade" style="width:130px">
+    <button class="pbtn ghost">Filtrar</button>
+  </form>
+
+  <form method="post" action="/painel/prospeccao/base/promover">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem;gap:.5rem;flex-wrap:wrap">
+      <div class="mut" style="font-size:.8rem">{{ leads|length }} contato(s){% if leads|length>=300 %} (mostrando 300){% endif %}</div>
+      <div style="display:flex;gap:.5rem">
+        {% if gerencia %}<a class="pbtn ghost" href="/painel/prospeccao/campanhas">📣 Adicionar à campanha</a>{% endif %}
+        <button class="pbtn" name="only" value="">⬆︎ Promover selecionados a lead</button>
+      </div>
+    </div>
+    <div class="bt-wrap">
+      <table class="bt-tbl">
+        <thead><tr>
+          <th style="width:26px"><input type="checkbox" onclick="var s=this.checked;document.querySelectorAll('.bt-ck').forEach(function(c){c.checked=s})"></th>
+          <th>Empresa</th><th>Contato</th><th>Campanha</th><th>Toques</th><th>Última atividade</th><th></th>
+        </tr></thead>
+        <tbody>
+        {% for l in leads %}
+          <tr>
+            <td><input class="bt-ck" type="checkbox" name="ids" value="{{ l.id }}"></td>
+            <td><b>{{ l.empresa }}</b><div class="mut" style="font-size:.76rem">{{ l.segmento or '—' }}{% if l.cidade %} · {{ l.cidade }}{% if l.uf %}/{{ l.uf }}{% endif %}{% endif %}</div></td>
+            <td style="white-space:nowrap">{% if l.tem_wpp %}💬{% else %}<span style="opacity:.25">💬</span>{% endif %} {% if l.tem_mail %}✉️{% else %}<span style="opacity:.25">✉️</span>{% endif %}</td>
+            <td>{% if l.campanha %}<span class="bt-chip">{{ l.campanha }}</span>{% else %}<span class="mut">—</span>{% endif %}</td>
+            <td class="mut" style="font-variant-numeric:tabular-nums;white-space:nowrap">💬 {{ l.toque_wa }} · ✉️ {{ l.toque_mail }}</td>
+            <td class="mut" style="font-size:.78rem;white-space:nowrap">{{ l.ult or '—' }}</td>
+            <td><button class="pbtn ghost" name="only" value="{{ l.id }}" style="padding:.2rem .5rem;font-size:.76rem" title="Promover a lead">⬆︎</button></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="mut" style="text-align:center;padding:1.5rem">Nada na base ainda. <a href="/painel/prospeccao/captar" style="color:var(--verde-claro)">Capte leads</a> pra começar.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </form>
+</div>
+{% endblock %}"""
+
+
 _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 <div class="pw">
   <div style="display:flex;align-items:flex-start;gap:.6rem;flex-wrap:wrap">
@@ -2792,11 +2962,11 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="mut" style="font-size:.82rem;margin-top:.15rem">{% if conta %}<b style="color:var(--verde-claro)">🏢 {{ conta[2] }}</b> · {% endif %}<span id="kb-total-n">{{ total_alvos }}</span> alvo(s){% if total_valor %} · pipeline {{ brl(total_valor) }}{% endif %}{% if n_contextos and n_contextos > 1 %} · <a href="/trocar" style="color:var(--verde-claro)">trocar empresa ⇄</a>{% endif %}</div>
     </div>
     <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
-      <a class="pbtn ghost" href="/painel/prospeccao/comunicacao" style="display:inline-flex;align-items:center">📨 Comunicação</a>
-      {% if gerencia %}<a class="pbtn ghost" href="/painel/prospeccao/campanhas" style="display:inline-flex;align-items:center">📣 Campanhas</a>{% endif %}
-      <button type="button" class="pbtn ghost" id="enrq-btn" onclick="enrqLote()" title="Raspa o site dos leads e descobre e-mail, Instagram e WhatsApp">🔎 Verificar canais</button>
-      <span class="mut" id="enrq-msg" style="font-size:.8rem"></span>
       <button type="button" class="pbtn" onclick="capToggle()">🎯 Captar leads</button>
+      <a class="pbtn ghost" href="/painel/prospeccao/base" style="display:inline-flex;align-items:center">📇 Base</a>
+      {% if gerencia %}<a class="pbtn ghost" href="/painel/prospeccao/campanhas" style="display:inline-flex;align-items:center">📣 Campanhas</a>{% endif %}
+      <a class="pbtn ghost" href="/painel/prospeccao/comunicacao" style="display:inline-flex;align-items:center">📨 Comunicação</a>
+      <a class="pbtn ghost" href="/painel/prospeccao/comunicacao?aba=canais" style="display:inline-flex;align-items:center">⚙️ Canais</a>
     </div>
   </div>
 
@@ -3580,7 +3750,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   </div>
 
   <div class="cx-tabs">
-    {% for k,rot in [('conversas','💬 Conversas'),('emails','✉️ E-mails'),('agente','🤖 Agente IA'),('canais','⚙️ Canais')] %}
+    {% for k,rot in [('conversas','💬 Conversas'),('emails','✉️ E-mails'),('agente','🤖 Agente IA')] %}
     <a class="cx-tab {% if aba==k %}on{% endif %}" href="/painel/prospeccao/comunicacao?aba={{ k }}">{{ rot }}</a>{% endfor %}
   </div>
 
@@ -4289,6 +4459,7 @@ function previaIA(id){var b=document.getElementById('pia-btn');if(b){b.disabled=
 {% endblock %}"""
 
 _env.loader.mapping["prospeccao"] = _KANBAN_TPL
+_env.loader.mapping["prospeccao_base"] = _BASE_TPL
 _env.loader.mapping["prospeccao_captar"] = _CAPTAR_TPL
 _env.loader.mapping["prospeccao_ficha"] = _FICHA_TPL
 _env.loader.mapping["prospeccao_comunicacao"] = _COMUNICACAO_TPL

@@ -550,8 +550,10 @@ def registrar_interesse(pool, conta_id: int, prospeccao_id: int, campanha_id: in
         # para a sequência deste lead
         c.execute("""update campanha_alvos set status='respondeu', proximo_envio_em=null
                        where campanha_id=%s and prospeccao_id=%s""", (campanha_id, prospeccao_id))
-        # esquenta o lead
-        c.execute("update prospeccao set temperatura='quente', atualizado_em=now() where id=%s and conta_id=%s",
+        # esquenta o lead e promove base → lead (entra no funil em Novo, se ainda era base)
+        c.execute("""update prospeccao set temperatura='quente', estagio='lead',
+                       status=case when estagio='base' then 'novo' else status end,
+                       atualizado_em=now() where id=%s and conta_id=%s""",
                   (prospeccao_id, conta_id))
         # conversa de e-mail do lead
         conv = c.execute("select id, agente_ativo from conversas where conta_id=%s and prospeccao_id=%s and canal='email'",

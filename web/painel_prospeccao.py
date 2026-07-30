@@ -482,6 +482,129 @@ async def prospeccao_base_explorium(request: Request):
                          "resposta": ex.match_business(empresa or "", dom)})
 
 
+def _explorium_filtros(form) -> dict:
+    """Monta os filtros da Explorium a partir do formulário da Base."""
+    filtros: dict = {}
+    pais = (form.get("pais", "br") or "br").strip().lower()
+    if pais:
+        filtros["country_code"] = {"values": [pais]}
+    tamanhos = [t for t in form.getlist("tamanho") if t.strip()]
+    if tamanhos:
+        filtros["company_size"] = {"values": tamanhos}
+    regioes = [r.strip().upper() for r in (form.get("regioes", "") or "").split(",") if r.strip()]
+    if regioes:
+        filtros["company_region_country_code"] = {"values": regioes}
+    categoria = (form.get("categoria", "") or "").strip()
+    if categoria:
+        campo = "linkedin_category" if form.get("cat_tipo") == "linkedin" else "google_category"
+        filtros[campo] = {"values": [categoria]}
+    return filtros
+
+
+@router.post("/painel/prospeccao/base/explorium-estimar")
+async def prospeccao_explorium_estimar(request: Request):
+    """Tamanho do mercado pro filtro (grátis) — antes de gastar crédito importando."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "Só o dono/gestor."})
+    from finance import explorium as ex
+    if not ex.tem_credenciais():
+        return JSONResponse({"ok": False, "erro": "EXPLORIUM_API_KEY não configurada no Render."})
+    form = await request.form()
+    r = ex.stats(_explorium_filtros(form))
+    if not r.get("ok"):
+        return JSONResponse({"ok": False, "erro": f"Explorium status {r.get('status')}: {r.get('data') or r.get('erro')}"})
+    data = r.get("data") or {}
+    return JSONResponse({"ok": True, "total": data.get("total_results", 0), "bruto": data})
+
+
+@router.post("/painel/prospeccao/base/explorium-importar")
+async def prospeccao_explorium_importar(request: Request):
+    """Importa empresas do filtro para a Base, já com o DECISOR + contato (Explorium).
+    Consome crédito: fetch empresas + prospects + enrich de contato. Teto por rodada."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "Só o dono/gestor."})
+    from finance import explorium as ex
+    if not ex.tem_credenciais():
+        return JSONResponse({"ok": False, "erro": "EXPLORIUM_API_KEY não configurada no Render."})
+    form = await request.form()
+    try:
+        qtd = max(1, min(10, int(form.get("qtd", "5"))))   # teto: 10 por rodada (protege crédito)
+    except (ValueError, TypeError):
+        qtd = 5
+    filtros = _explorium_filtros(form)
+    cargos = [c for c in form.getlist("cargo") if c.strip()] or ["owner", "founder", "cxo", "partner"]
+    conta_id = ctx["conta_id"]
+
+    rb = ex.fetch_businesses(filtros, size=qtd)
+    if not rb.get("ok"):
+        return JSONResponse({"ok": False, "erro": f"fetch empresas: status {rb.get('status')}: {rb.get('data') or rb.get('erro')}"})
+    empresas = ((rb.get("data") or {}).get("data")) or []
+    if not empresas:
+        return JSONResponse({"ok": True, "n": 0, "msg": "Nenhuma empresa achada pro filtro."})
+    bmap = {b.get("business_id"): b for b in empresas if b.get("business_id")}
+    ids = list(bmap.keys())
+
+    rp = ex.fetch_prospects(ids, job_levels=cargos, size=qtd)
+    prospects = ((rp.get("data") or {}).get("data")) if rp.get("ok") else []
+    prospects = prospects or []
+
+    inseridos, ja_tinha = 0, 0
+    import json as _json
+    with get_pool().connection() as c:
+        vistos_biz = set()
+        for p in prospects[:qtd]:
+            try:
+                bid = p.get("business_id")
+                if bid in vistos_biz:      # 1 decisor por empresa nesta rodada
+                    continue
+                vistos_biz.add(bid)
+                b = bmap.get(bid, {})
+                empresa = (p.get("company_name") or b.get("name") or "").strip()
+                if not empresa:
+                    continue
+                dominio = (b.get("domain") or "").strip()
+                # dedup por domínio/empresa
+                dup = c.execute(
+                    "select 1 from prospeccao where conta_id=%s and (lower(empresa)=lower(%s) "
+                    "or (%s<>'' and site_url ilike %s)) limit 1",
+                    (conta_id, empresa, dominio, "%" + dominio + "%")).fetchone()
+                if dup:
+                    ja_tinha += 1
+                    continue
+                # contato direto do decisor (enrich — consome crédito)
+                ci = {}
+                if p.get("prospect_id"):
+                    ec = ex.enrich_contact(p["prospect_id"])
+                    ci = (ec.get("data") or {}).get("data") if ec.get("ok") else {}
+                    ci = ci or {}
+                email = ci.get("professions_email") or (ci.get("emails") or [None])[0] or (p.get("emails") or [None])[0]
+                fone = ci.get("mobile_phone") or ci.get("phone_numbers")
+                tels = [t for t in [ci.get("mobile_phone"), ci.get("phone_numbers")] if t]
+                obs = f"Explorium · funcionários {b.get('number_of_employees_range','?')} · {b.get('country_name','')}".strip()
+                c.execute(
+                    """insert into prospeccao (conta_id, empresa, site_url, segmento, email, whatsapp,
+                         decisor_nome, decisor_cargo, decisor_telefone, decisor_whatsapp,
+                         decisor_telefones, decisor_em, obs, origem, temperatura, status, estagio,
+                         enriquecido_em, criado_por)
+                       values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,now(),%s,'explorium','frio','novo','base',now(),%s)""",
+                    (conta_id, empresa[:250], dominio, (b.get("google_category") or b.get("linkedin_category") or "")[:120],
+                     email, fone, (p.get("full_name") or "")[:200], (p.get("job_title") or "")[:120],
+                     fone, bool(ci.get("mobile_phone")),
+                     _json.dumps([{"formatado": t, "provavel": (i == 0)} for i, t in enumerate(tels)]),
+                     obs[:500], ctx["membro_id"]))
+                inseridos += 1
+            except Exception:  # noqa: BLE001
+                pass
+    return JSONResponse({"ok": True, "n": inseridos, "ja_tinha": ja_tinha,
+                         "empresas": len(empresas), "prospects": len(prospects)})
+
+
 # ================================================================ ADD MANUAL
 @router.post("/painel/prospeccao/novo")
 def prospeccao_novo(request: Request, empresa: str = Form(...), segmento: str = Form(""),
@@ -3136,6 +3259,7 @@ _CAPTURA_PANEL_HTML = """
   <button type="button" class="caba@@GOOGLE_ON@@" data-tab="google" onclick="capTab('google')">📍 Google Maps</button>
   <button type="button" class="caba@@CNPJ_ON@@" data-tab="manual" onclick="capTab('manual')">🏢 CNPJ / ✏️ Manual</button>
   <button type="button" class="caba@@CSV_ON@@" data-tab="csv" onclick="capTab('csv')">📄 CSV</button>
+  {% if gerencia %}<button type="button" class="caba" data-tab="explorium" onclick="capTab('explorium')">🔮 Explorium</button>{% endif %}
 </div>
 
 <div class="captab" data-tab="google"@@GOOGLE_HIDE@@>
@@ -3199,6 +3323,33 @@ _CAPTURA_PANEL_HTML = """
     <button class="pbtn" style="margin-top:.8rem">Importar CSV</button>
   </form>
 </div>
+
+{% if gerencia %}
+<div class="captab" data-tab="explorium" style="display:none">
+  <div class="mut" style="font-size:.8rem;margin-bottom:.7rem">Busca empresas de <b>médio/grande porte</b> na Explorium (Vibe) e importa <b>já com o decisor + contato</b>. <b>Estimar é grátis</b>; importar consome crédito.</div>
+  <div class="egrid">
+    <div><label class="lbl">Categoria / segmento</label><input class="fld" id="ex-cat" placeholder="ex: food production, software company"></div>
+    <div><label class="lbl">Taxonomia</label><select class="fld" id="ex-cattipo"><option value="google">Google</option><option value="linkedin">LinkedIn</option></select></div>
+    <div><label class="lbl">País (código)</label><input class="fld" id="ex-pais" value="br"></div>
+    <div><label class="lbl">Regiões (opcional)</label><input class="fld" id="ex-reg" placeholder="BR-PE,BR-CE,BR-BA…"></div>
+  </div>
+  <label class="lbl" style="margin-top:.7rem">Tamanho (funcionários)</label>
+  <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+    {% for s in ['1-10','11-50','51-200','201-500','501-1000','1001-5000'] %}<label style="font-size:.8rem;border:1px solid var(--borda);border-radius:8px;padding:.25rem .55rem;cursor:pointer;color:var(--txt-mut)"><input type="checkbox" class="ex-size" value="{{ s }}" style="width:auto;vertical-align:middle;accent-color:var(--verde)"> {{ s }}</label>{% endfor %}
+  </div>
+  <label class="lbl" style="margin-top:.6rem">Cargo do decisor</label>
+  <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+    {% for cg,rot in [('owner','Dono'),('founder','Fundador'),('cxo','C-level'),('partner','Sócio'),('director','Diretor')] %}<label style="font-size:.8rem;border:1px solid var(--borda);border-radius:8px;padding:.25rem .55rem;cursor:pointer;color:var(--txt-mut)"><input type="checkbox" class="ex-cargo" value="{{ cg }}" {% if cg in ['owner','founder','cxo','partner'] %}checked{% endif %} style="width:auto;vertical-align:middle;accent-color:var(--verde)"> {{ rot }}</label>{% endfor %}
+  </div>
+  <div style="display:flex;gap:.5rem;align-items:center;margin-top:.8rem;flex-wrap:wrap">
+    <button type="button" class="pbtn ghost" onclick="exEstimar()">📊 Estimar (grátis)</button>
+    <span id="ex-total" class="mut" style="font-size:.85rem"></span>
+    <span style="flex:1"></span>
+    <label class="lbl" style="margin:0">Importar</label><input class="fld" id="ex-qtd" value="5" style="width:70px" inputmode="numeric">
+    <button type="button" class="pbtn" onclick="exImportar()">🔮 Importar (créditos)</button>
+  </div>
+</div>
+{% endif %}
 """
 
 
@@ -3243,6 +3394,9 @@ function capImport(){var packs=[];document.querySelectorAll('#cap-list input[nam
   capFetch('/painel/prospeccao/captar/importar',fd).then(function(d){if(!d.ok){capToast('Erro ao importar');return;}_capReload((d.msg||'Adicionados')+' ✓');}).catch(function(){capToast('Falha de rede');});}
 function jsEsc(s){return (s||'').replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];});}
 function capToast(msg){var t=document.getElementById('cap-toast');if(!t){t=document.createElement('div');t.id='cap-toast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--card);border:1px solid var(--verde);color:var(--verde-claro);padding:.6rem 1rem;border-radius:10px;z-index:200;font-size:.85rem;box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .4s';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';clearTimeout(window._captoastT);window._captoastT=setTimeout(function(){t.style.opacity='0';},2600);}
+function _exForm(){var b=new URLSearchParams();var cat=document.getElementById('ex-cat');if(cat&&cat.value.trim())b.append('categoria',cat.value.trim());var ct=document.getElementById('ex-cattipo');if(ct)b.append('cat_tipo',ct.value);var p=document.getElementById('ex-pais');b.append('pais',(p&&p.value.trim())||'br');var rg=document.getElementById('ex-reg');if(rg&&rg.value.trim())b.append('regioes',rg.value.trim());document.querySelectorAll('.ex-size:checked').forEach(function(c){b.append('tamanho',c.value);});document.querySelectorAll('.ex-cargo:checked').forEach(function(c){b.append('cargo',c.value);});return b;}
+function exEstimar(){var b=_exForm();capToast('Estimando…');fetch('/painel/prospeccao/base/explorium-estimar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:b}).then(function(r){return r.json();}).then(function(d){var el=document.getElementById('ex-total');if(!d.ok){if(el)el.textContent='';alert('⚠️ Explorium: '+(d.erro||'erro'));return;}if(el)el.innerHTML='<b style="color:var(--verde-claro)">'+(d.total||0)+'</b> empresas no filtro';capToast((d.total||0)+' empresas no filtro');}).catch(function(){capToast('Falha de rede.');});}
+function exImportar(){var q=document.getElementById('ex-qtd');var qtd=(q&&parseInt(q.value,10))||5;if(qtd>10)qtd=10;if(!confirm('Importar '+qtd+' empresa(s) da Explorium com decisor + contato?\\nConsome crédito (fetch + enrich por lead).'))return;var b=_exForm();b.append('qtd',qtd);capToast('Importando da Explorium… (alguns segundos)');fetch('/painel/prospeccao/base/explorium-importar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:b}).then(function(r){return r.json();}).then(function(d){if(!d.ok){alert('⚠️ Explorium: '+(d.erro||'erro'));return;}alert('🔮 Explorium: '+(d.n||0)+' lead(s) importado(s) com decisor'+(d.ja_tinha?(' · '+d.ja_tinha+' já existiam'):'')+'.\\n(de '+(d.empresas||0)+' empresas · '+(d.prospects||0)+' decisores achados)');location.reload();}).catch(function(){capToast('Falha de rede.');});}
 </script>"""
 
 

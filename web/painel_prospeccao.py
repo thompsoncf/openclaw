@@ -2536,22 +2536,24 @@ def _enriquecer_lead(pool, conta_id, alvo_id) -> dict:
     from finance import enriquecimento as enr
     with pool.connection() as c:
         r = c.execute(
-            "select site_url, telefone, email, whatsapp, instagram from prospeccao where id=%s and conta_id=%s",
+            "select site_url, telefone, email, whatsapp, instagram, cnpj from prospeccao where id=%s and conta_id=%s",
             (alvo_id, conta_id)).fetchone()
         if not r:
             return {"ok": False}
-        site, tel, email_at, wa_at, ig_at = r
+        site, tel, email_at, wa_at, ig_at, cnpj_at = r
         f = enr.enriquecer(site or "", tel or "", email_at or "")
         novo_email = email_at or f["email"]
         novo_ig = ig_at or f["instagram"]
         novo_wa = wa_at or f["whatsapp"]
+        novo_cnpj = (cnpj_at or "").strip() or (f.get("cnpj") or "")
         c.execute(
             """update prospeccao set email=%s, instagram=%s, whatsapp=%s, email_ok=%s,
-                 enriquecido_em=now(), atualizado_em=now() where id=%s and conta_id=%s""",
-            (novo_email, novo_ig, novo_wa, f["email_ok"], alvo_id, conta_id))
+                 cnpj=coalesce(nullif(%s,''), cnpj), enriquecido_em=now(), atualizado_em=now()
+               where id=%s and conta_id=%s""",
+            (novo_email, novo_ig, novo_wa, f["email_ok"], novo_cnpj, alvo_id, conta_id))
         c.commit()
     return {"ok": True, "email": novo_email, "email_ok": bool(f["email_ok"]),
-            "instagram": novo_ig, "whatsapp": novo_wa}
+            "instagram": novo_ig, "whatsapp": novo_wa, "cnpj": novo_cnpj or None}
 
 
 def _enriquecer_lote_bg(pool, conta_id, ids):
@@ -2639,7 +2641,7 @@ async def prospeccao_base_enriquecer(request: Request):
         params.append(ctx["membro_id"])
     with pool.connection() as c:
         sel = [r[0] for r in c.execute(q, tuple(params)).fetchall()]
-    com_email, com_wa, sem = 0, 0, 0
+    com_email, com_wa, com_cnpj, sem = 0, 0, 0, 0
     for pid in sel:
         try:
             r = _enriquecer_lead(pool, conta_id, pid)
@@ -2649,9 +2651,11 @@ async def prospeccao_base_enriquecer(request: Request):
         w = bool(r.get("whatsapp"))
         com_email += 1 if e else 0
         com_wa += 1 if w else 0
-        sem += 0 if (e or w) else 1
+        com_cnpj += 1 if r.get("cnpj") else 0
+        sem += 0 if (e or w or r.get("cnpj")) else 1
     return JSONResponse({"ok": True, "tipo": "canais", "n": len(sel), "com_email": com_email,
-                         "com_wa": com_wa, "sem": sem, "sem_site": len(pids) - len(sel), "resto": resto})
+                         "com_wa": com_wa, "com_cnpj": com_cnpj, "sem": sem,
+                         "sem_site": len(pids) - len(sel), "resto": resto})
 
 
 @router.post("/painel/prospeccao/{alvo_id}/enriquecer-canais")
@@ -3323,7 +3327,7 @@ function baseEnriquecer(tipo){
       msg='🎯 '+d.n+' consultado(s) · '+d.achou+' decisor(es) encontrado(s)'+(d.sem?(' · '+d.sem+' sem quadro/telefone na Credify'):'');
     }else{
       if(!d.n){alert('Nenhum lead marcado tem site pra raspar'+(d.sem_site?(' ('+d.sem_site+' sem site)'):'')+'.');return;}
-      msg='🔎 '+d.n+' site(s) verificado(s) · '+d.com_email+' com e-mail · '+d.com_wa+' com WhatsApp'+(d.sem?(' · '+d.sem+' sem nada no site'):'');
+      msg='🔎 '+d.n+' site(s) verificado(s) · '+d.com_email+' com e-mail · '+d.com_wa+' com WhatsApp · '+d.com_cnpj+' com CNPJ'+(d.sem?(' · '+d.sem+' sem nada'):'')+'\\n(CNPJ achado destrava o 🎯 Buscar decisor)';
     }
     if(d.resto)msg+='\\n(processei os primeiros '+(d.n)+'; marque menos ou repita pros demais)';
     alert(msg);location.reload();

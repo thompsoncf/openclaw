@@ -333,7 +333,8 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
         rows = c.execute(f"""
             select p.id, p.empresa, p.segmento, p.cidade, p.uf, p.whatsapp, p.email, p.telefone,
                    ca.cnome, ca.wa_status, ca.passo_atual, ca.ult_txt, ca.ult_raw,
-                   (case when coalesce(p.decisor_nome,'')<>'' then 1 else 0 end)
+                   (case when coalesce(p.decisor_nome,'')<>'' then 1 else 0 end),
+                   (case when p.enriquecido_em is not null then 1 else 0 end)
               from prospeccao p
               left join lateral (
                  select cp.nome as cnome, a.wa_status, a.passo_atual, a.ultima_msg_em as ult_raw,
@@ -358,7 +359,7 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
         leads.append({"id": r[0], "empresa": r[1], "segmento": r[2], "cidade": r[3], "uf": r[4],
                       "tem_wpp": bool(r[5] or r[7]), "tem_mail": bool(r[6]), "campanha": r[8],
                       "toque_wa": 1 if r[9] == "enviado" else 0, "toque_mail": int(r[10] or 0),
-                      "ult": r[11], "tem_decisor": bool(r[13])})
+                      "ult": r[11], "tem_decisor": bool(r[13]), "verificado": bool(r[14])})
     metr = {"na_base": na_base, "com_wpp": com_wpp, "com_mail": com_mail, "em_camp": em_camp, "virou": virou}
     vends = _vendedores(get_pool(), conta_id) if ctx["gerencia"] else []
     return _render("prospeccao_base", request, titulo="Base", secao_ativa="prospeccao",
@@ -2557,45 +2558,40 @@ def _enriquecer_lote_bg(pool, conta_id, ids):
             pass
 
 
-def _decisor_lote_bg(pool, conta_id, ids):
-    """Busca o decisor (Credify) de cada lead com CNPJ que ainda não tem, e salva.
-    Best-effort, em background. Pula quem já tem decisor (não paga de novo)."""
+def _enriquecer_decisor_um(pool, conta_id, aid) -> bool:
+    """Busca o decisor (Credify) de UM lead com CNPJ e salva. Devolve True se achou.
+    Pula quem já tem decisor (não paga de novo)."""
     from finance import credify as cf
-    if not cf.tem_credenciais():
-        return
-    for aid in ids:
-        try:
-            with pool.connection() as c:
-                row = c.execute("select cnpj, decisor_em from prospeccao where id=%s and conta_id=%s",
-                                (aid, conta_id)).fetchone()
-            if not row or row[1] is not None:
-                continue
-            cd = _so_digitos(row[0] or "")
-            if len(cd) != 14:
-                continue
-            r = cf.decisor_com_telefone(cd)
-            nome = r.get("decisor_nome")
-            if not nome:
-                continue
-            tels = r.get("telefones") or []
-            with pool.connection() as c:
-                c.execute(
-                    """update prospeccao set decisor_nome=%s, decisor_cargo=%s, decisor_telefone=%s,
-                         decisor_whatsapp=%s, decisor_telefones=%s::jsonb, decisor_em=now(), atualizado_em=now()
-                       where id=%s and conta_id=%s""",
-                    (nome, r.get("decisor_qualificacao"), r.get("decisor_telefone"),
-                     bool(r.get("decisor_whatsapp")), json.dumps(tels), aid, conta_id))
-                c.commit()
-        except Exception:  # noqa: BLE001
-            pass
+    with pool.connection() as c:
+        row = c.execute("select cnpj, decisor_em from prospeccao where id=%s and conta_id=%s",
+                        (aid, conta_id)).fetchone()
+    if not row or row[1] is not None:
+        return False
+    cd = _so_digitos(row[0] or "")
+    if len(cd) != 14:
+        return False
+    r = cf.decisor_com_telefone(cd)
+    nome = r.get("decisor_nome")
+    if not nome:
+        return False
+    tels = r.get("telefones") or []
+    with pool.connection() as c:
+        c.execute(
+            """update prospeccao set decisor_nome=%s, decisor_cargo=%s, decisor_telefone=%s,
+                 decisor_whatsapp=%s, decisor_telefones=%s::jsonb, decisor_em=now(), atualizado_em=now()
+               where id=%s and conta_id=%s""",
+            (nome, r.get("decisor_qualificacao"), r.get("decisor_telefone"),
+             bool(r.get("decisor_whatsapp")), json.dumps(tels), aid, conta_id))
+        c.commit()
+    return True
 
 
 @router.post("/painel/prospeccao/base/qualificar")
 async def prospeccao_base_enriquecer(request: Request):
-    """Qualifica os leads MARCADOS na Base, em background:
+    """Qualifica os leads MARCADOS na Base, SÍNCRONO e com resumo do que achou:
     - tipo='canais': raspa o site → e-mail/Instagram/WhatsApp (grátis).
     - tipo='decisor': acha o dono via Credify pelo CNPJ (paga, só gestão, pula quem já tem).
-    Lê o form manual (fetch/FormData com 'ids' repetido não bate com Form(list))."""
+    Lê o form manual (fetch/urlencoded com 'ids' repetido)."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
@@ -2605,32 +2601,53 @@ async def prospeccao_base_enriquecer(request: Request):
     if not pids:
         return JSONResponse({"ok": False, "erro": "Marque ao menos um contato."})
     conta_id = ctx["conta_id"]
-    import threading
+    pool = get_pool()
+    CAP = 20                               # teto por rodada (não travar o request)
+    resto = max(0, len(pids) - CAP)
+    pids = pids[:CAP]
+
     if tipo == "decisor":
         if not ctx["gerencia"]:
             return JSONResponse({"ok": False, "erro": "Só o dono/gestor busca decisor (consulta paga)."})
         from finance import credify as cf
         if not cf.tem_credenciais():
             return JSONResponse({"ok": False, "erro": "Credify não configurada (CREDIFY_CLIENT_ID/SECRET no Render)."})
-        with get_pool().connection() as c:
+        with pool.connection() as c:
             sel = [r[0] for r in c.execute(
                 "select id from prospeccao where conta_id=%s and id = any(%s)"
                 " and length(regexp_replace(coalesce(cnpj,''),'\\D','','g'))=14 and decisor_em is null",
                 (conta_id, pids)).fetchall()]
-        if sel:
-            threading.Thread(target=_decisor_lote_bg, args=(get_pool(), conta_id, sel), daemon=True).start()
-        return JSONResponse({"ok": True, "n": len(sel), "tipo": "decisor"})
+        achou = 0
+        for pid in sel:
+            try:
+                if _enriquecer_decisor_um(pool, conta_id, pid):
+                    achou += 1
+            except Exception:  # noqa: BLE001
+                pass
+        return JSONResponse({"ok": True, "tipo": "decisor", "n": len(sel), "achou": achou,
+                             "sem": len(sel) - achou, "sem_cnpj": len(pids) - len(sel), "resto": resto})
+
     # canais (grátis) — escopo do vendedor se não for gestão
     q = "select id from prospeccao where conta_id=%s and id = any(%s) and coalesce(site_url,'')<>''"
     params = [conta_id, pids]
     if not ctx["gerencia"]:
         q += " and vendedor_id=%s"
         params.append(ctx["membro_id"])
-    with get_pool().connection() as c:
+    with pool.connection() as c:
         sel = [r[0] for r in c.execute(q, tuple(params)).fetchall()]
-    if sel:
-        threading.Thread(target=_enriquecer_lote_bg, args=(get_pool(), conta_id, sel), daemon=True).start()
-    return JSONResponse({"ok": True, "n": len(sel), "tipo": "canais"})
+    com_email, com_wa, sem = 0, 0, 0
+    for pid in sel:
+        try:
+            r = _enriquecer_lead(pool, conta_id, pid)
+        except Exception:  # noqa: BLE001
+            r = {}
+        e = bool(r.get("email") and r.get("email_ok"))
+        w = bool(r.get("whatsapp"))
+        com_email += 1 if e else 0
+        com_wa += 1 if w else 0
+        sem += 0 if (e or w) else 1
+    return JSONResponse({"ok": True, "tipo": "canais", "n": len(sel), "com_email": com_email,
+                         "com_wa": com_wa, "sem": sem, "sem_site": len(pids) - len(sel), "resto": resto})
 
 
 @router.post("/painel/prospeccao/{alvo_id}/enriquecer-canais")
@@ -3265,7 +3282,7 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <tr>
             <td><input class="bt-ck" type="checkbox" name="ids" value="{{ l.id }}"></td>
             <td><b>{{ l.empresa }}</b><div class="mut" style="font-size:.76rem">{{ l.segmento or '—' }}{% if l.cidade %} · {{ l.cidade }}{% if l.uf %}/{{ l.uf }}{% endif %}{% endif %}</div></td>
-            <td style="white-space:nowrap">{% if l.tem_wpp %}💬{% else %}<span style="opacity:.25">💬</span>{% endif %} {% if l.tem_mail %}✉️{% else %}<span style="opacity:.25">✉️</span>{% endif %}{% if l.tem_decisor %} <span title="Decisor mapeado">🎯</span>{% endif %}</td>
+            <td style="white-space:nowrap">{% if l.tem_wpp %}💬{% else %}<span style="opacity:.25">💬</span>{% endif %} {% if l.tem_mail %}✉️{% else %}<span style="opacity:.25">✉️</span>{% endif %}{% if l.tem_decisor %} <span title="Decisor mapeado">🎯</span>{% endif %}{% if l.verificado and not l.tem_mail and not l.tem_wpp %} <span class="mut" style="font-size:.7rem" title="Site verificado, sem e-mail/WhatsApp">✓ sem dados</span>{% endif %}</td>
             <td>{% if l.campanha %}<span class="bt-chip">{{ l.campanha }}</span>{% else %}<span class="mut">—</span>{% endif %}</td>
             <td class="mut" style="font-variant-numeric:tabular-nums;white-space:nowrap">💬 {{ l.toque_wa }} · ✉️ {{ l.toque_mail }}</td>
             <td class="mut" style="font-size:.78rem;white-space:nowrap">{{ l.ult or '—' }}</td>
@@ -3287,12 +3304,20 @@ function baseEnriquecer(tipo){
   if(!ids.length){alert('Marque ao menos um contato pra enriquecer.');return;}
   if(tipo==='decisor' && !confirm('Buscar o decisor de '+ids.length+' lead(s) na Credify?\\nÉ consulta paga — só usa quem tem CNPJ e pula quem já tem decisor.'))return;
   var body=new URLSearchParams();ids.forEach(function(i){body.append('ids',i);});body.append('tipo',tipo);
-  capToast(tipo==='decisor'?'Buscando decisores…':'Enriquecendo canais…');
+  capToast(tipo==='decisor'?'Buscando decisores… (alguns segundos)':'Verificando os sites… (alguns segundos)');
   fetch('/painel/prospeccao/base/qualificar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body}).then(function(r){return r.json();}).then(function(d){
     if(!d.ok){capToast(d.erro||'Erro');return;}
-    if(!d.n){capToast('Nenhum marcado elegível ('+(tipo==='decisor'?'precisa de CNPJ e ainda não ter decisor':'precisa ter site')+').');return;}
-    capToast(d.n+' em segundo plano — a lista atualiza em instantes…');setTimeout(function(){location.reload();},7000);
-  }).catch(function(){capToast('Falha de rede');});
+    var msg;
+    if(tipo==='decisor'){
+      if(!d.n){capToast('Nenhum marcado elegível'+(d.sem_cnpj?(' — '+d.sem_cnpj+' sem CNPJ'):'')+' (ou já tinham decisor).');return;}
+      msg='🎯 '+d.n+' consultado(s) · '+d.achou+' decisor(es) encontrado(s)'+(d.sem?(' · '+d.sem+' sem quadro/telefone na Credify'):'');
+    }else{
+      if(!d.n){capToast('Nenhum marcado tem site pra raspar'+(d.sem_site?(' ('+d.sem_site+' sem site)'):'')+'.');return;}
+      msg='🔎 '+d.n+' site(s) verificado(s) · '+d.com_email+' com e-mail · '+d.com_wa+' com WhatsApp'+(d.sem?(' · '+d.sem+' sem nada no site'):'');
+    }
+    if(d.resto)msg+='\\n(processei os primeiros '+(d.n)+'; marque menos ou repita pros demais)';
+    alert(msg);location.reload();
+  }).catch(function(){capToast('Falha de rede — tente de novo.');});
 }
 function baseMarcados(){return document.querySelectorAll('.bt-ck:checked').length;}
 function baseUpd(){var n=document.getElementById('base-sel-n');if(n)n.textContent=baseMarcados();}

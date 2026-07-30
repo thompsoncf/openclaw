@@ -24,6 +24,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Resp
 
 from db.conexao import get_pool
 from contas import equipe as eq
+from finance import prospec_convite as _prospec_convite
 from finance import prospeccao_fontes as fontes
 from finance import servicos_catalogo as scat
 from finance.email_sender import enviar_email, remetente_configurado
@@ -1855,6 +1856,7 @@ def prospeccao_ficha(request: Request, alvo_id: int):
                    gerencia=ctx["gerencia"], pode_atribuir=ctx["pode_atribuir"], vendedores=vends,
                    tem_cnpja=fontes.tem_chave_cnpja(), tem_ia=_tem_ia(),
                    tem_credify=_tem_credify(),
+                   wa_template=_prospec_convite.template_configurado(),
                    embed=request.query_params.get("embed") == "1",
                    aviso=request.session.pop("prosp_aviso", None))
 
@@ -2581,6 +2583,34 @@ def prospeccao_enviar_whatsapp(request: Request, alvo_id: int, texto: str = Form
     return JSONResponse({"ok": True})
 
 
+@router.post("/painel/prospeccao/{alvo_id}/enviar-convite-wa")
+def prospeccao_enviar_convite_wa(request: Request, alvo_id: int):
+    """Dispara o TEMPLATE aprovado de 1º contato (WhatsApp frio, fora da janela de
+    24h) pelo número da empresa e registra na timeline."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    pool = get_pool()
+    alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
+    if not alvo or not _pode_ver(alvo, ctx):
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    from finance import prospec_convite
+    res = prospec_convite.enviar_convite(pool, ctx["conta_id"], alvo_id)
+    if not res.get("ok"):
+        msgs = {"sem_template": "Template ainda não configurado (falta o SID aprovado no Twilio).",
+                "sem_numero": "Lead sem número de WhatsApp/telefone.",
+                "sem_numero_empresa": "Configure o WhatsApp desta empresa na aba Canais.",
+                "provedor_sem_template": "Template só funciona no provedor Twilio.",
+                "numero_invalido": "Número do lead inválido."}
+        return JSONResponse({"ok": False, "erro": res.get("erro"),
+                             "msg": msgs.get(res.get("erro"), "Não consegui enviar o convite.")})
+    with pool.connection() as c:
+        _reg_atividade(c, alvo_id, ctx["conta_id"], ctx["membro_id"], "whatsapp",
+                       "Convite de 1º contato enviado (template aprovado, WhatsApp)", alvo["status"])
+        c.commit()
+    return JSONResponse({"ok": True})
+
+
 def _html_escape(s: str) -> str:
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
 
@@ -3144,6 +3174,7 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <div style="display:flex;gap:.5rem;flex-wrap:wrap">
           {% if a.email %}<button type="button" class="pbtn ghost" id="ia-btn-email" onclick="iaMsg('email')">✉️ E-mail com IA</button>{% endif %}
           {% if a.whatsapp or a.telefone %}<button type="button" class="pbtn ghost" id="ia-btn-wpp" onclick="iaMsg('whatsapp')">💬 WhatsApp com IA</button>{% endif %}
+          {% if wa_template and (a.whatsapp or a.telefone) %}<button type="button" class="pbtn ghost" id="wa-tpl-btn" onclick="enviarConviteWa()" title="Mensagem aprovada — funciona mesmo no 1º contato frio (fora da janela de 24h)">📨 Convite WhatsApp</button>{% endif %}
         </div>
         <div id="ia-box" style="display:none;margin-top:.7rem"></div>
       </div>
@@ -3376,6 +3407,14 @@ function iaWhats(){var t=(document.getElementById('ia-texto')||{}).value||'';if(
     if(!d.ok){fToast(d.msg||'Não consegui enviar');return;}
     fToast('Mensagem enviada ✓');setTimeout(function(){location.reload();},900);
   }).catch(function(){if(b){b.disabled=false;b.textContent='💬 Enviar pelo sistema';}fToast('Falha de rede');});}
+function enviarConviteWa(){var b=document.getElementById('wa-tpl-btn');
+  if(!confirm('Enviar o convite de 1º contato por WhatsApp (mensagem aprovada) para este lead?'))return;
+  if(b){b.disabled=true;b.textContent='Enviando…';}
+  fetch('/painel/prospeccao/{{ a.id }}/enviar-convite-wa',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()}).then(function(r){return r.json();}).then(function(d){
+    if(b){b.disabled=false;b.textContent='📨 Convite WhatsApp';}
+    if(!d.ok){fToast(d.msg||'Não consegui enviar');return;}
+    fToast('Convite enviado ✓');setTimeout(function(){location.reload();},900);
+  }).catch(function(){if(b){b.disabled=false;b.textContent='📨 Convite WhatsApp';}fToast('Falha de rede');});}
 </script>
 {% endblock %}"""
 

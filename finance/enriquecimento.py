@@ -17,6 +17,8 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+_CNPJ_RE = re.compile(r"\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}")            # CNPJ formatado no site
+_CNPJ_LABEL_RE = re.compile(r"cnpj[:\s]*([\d./\-]{14,20})", re.I)     # "CNPJ: 12.345..."
 _IG_RE = re.compile(r"instagram\.com/([A-Za-z0-9_.]+)", re.I)
 _IG_EXT = re.compile(r"\.(php|js|css|html?|ico|png|jpe?g|gif|svg|json|xml|txt)$", re.I)
 _WA_RE = re.compile(r"(?:wa\.me/|api\.whatsapp\.com/send\?phone=)\+?(\d{8,15})", re.I)
@@ -67,6 +69,30 @@ def _validar_email(email: str) -> bool:
         return False
 
 
+def _valida_cnpj(c: str) -> bool:
+    c = re.sub(r"\D", "", c or "")
+    if len(c) != 14 or c == c[0] * 14:
+        return False
+
+    def _dv(base: str, pesos: list[int]) -> str:
+        s = sum(int(n) * p for n, p in zip(base, pesos))
+        r = s % 11
+        return "0" if r < 2 else str(11 - r)
+
+    p1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+    d1 = _dv(c[:12], p1)
+    d2 = _dv(c[:12] + d1, [6] + p1)
+    return c[12] == d1 and c[13] == d2
+
+
+def _achar_cnpj(html: str) -> str | None:
+    cands = _CNPJ_RE.findall(html) + [m.group(1) for m in _CNPJ_LABEL_RE.finditer(html)]
+    for c in cands:
+        if _valida_cnpj(c):
+            return re.sub(r"\D", "", c)
+    return None
+
+
 def _eh_movel_br(telefone: str) -> bool:
     d = re.sub(r"\D", "", telefone or "")
     if d.startswith("55"):
@@ -76,7 +102,7 @@ def _eh_movel_br(telefone: str) -> bool:
 
 def enriquecer(site: str = "", telefone: str = "", email_atual: str = "") -> dict:
     """Raspa o site e devolve {email, email_ok, instagram, whatsapp}. Best-effort."""
-    out = {"email": None, "email_ok": False, "instagram": None, "whatsapp": None}
+    out = {"email": None, "email_ok": False, "instagram": None, "whatsapp": None, "cnpj": None}
     base = _norm_site(site)
     html = ""
     if base:
@@ -113,4 +139,7 @@ def enriquecer(site: str = "", telefone: str = "", email_atual: str = "") -> dic
     elif _eh_movel_br(telefone):
         d = re.sub(r"\D", "", telefone)
         out["whatsapp"] = "+" + (d if d.startswith("55") else "55" + d)
+
+    # cnpj: rodapé/contato costumam trazer (destrava a busca do decisor na Credify)
+    out["cnpj"] = _achar_cnpj(html)
     return out

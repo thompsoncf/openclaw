@@ -2590,7 +2590,7 @@ def _decisor_lote_bg(pool, conta_id, ids):
             pass
 
 
-@router.post("/painel/prospeccao/base/enriquecer")
+@router.post("/painel/prospeccao/base/qualificar")
 async def prospeccao_base_enriquecer(request: Request):
     """Qualifica os leads MARCADOS na Base, em background:
     - tipo='canais': raspa o site → e-mail/Instagram/WhatsApp (grátis).
@@ -3288,7 +3288,7 @@ function baseEnriquecer(tipo){
   if(tipo==='decisor' && !confirm('Buscar o decisor de '+ids.length+' lead(s) na Credify?\\nÉ consulta paga — só usa quem tem CNPJ e pula quem já tem decisor.'))return;
   var body=new URLSearchParams();ids.forEach(function(i){body.append('ids',i);});body.append('tipo',tipo);
   capToast(tipo==='decisor'?'Buscando decisores…':'Enriquecendo canais…');
-  fetch('/painel/prospeccao/base/enriquecer',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body}).then(function(r){return r.json();}).then(function(d){
+  fetch('/painel/prospeccao/base/qualificar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body}).then(function(r){return r.json();}).then(function(d){
     if(!d.ok){capToast(d.erro||'Erro');return;}
     if(!d.n){capToast('Nenhum marcado elegível ('+(tipo==='decisor'?'precisa de CNPJ e ainda não ter decisor':'precisa ter site')+').');return;}
     capToast(d.n+' em segundo plano — a lista atualiza em instantes…');setTimeout(function(){location.reload();},7000);

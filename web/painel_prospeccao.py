@@ -446,6 +446,42 @@ def prospeccao_base_add_campanha(request: Request, ids: list[str] = Form([]),
     return RedirectResponse("/painel/prospeccao/base", status_code=303)
 
 
+@router.post("/painel/prospeccao/base/explorium")
+async def prospeccao_base_explorium(request: Request):
+    """TESTE de conexão com a Explorium (Vibe): pega o 1º lead marcado, roda o
+    businesses/match (nome + domínio do site) e devolve a resposta CRUA — pra
+    confirmar que a EXPLORIUM_API_KEY funciona e ver o formato real antes de
+    construir o enrich de firmografia/decisor."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "Só o dono/gestor."})
+    from finance import explorium as ex
+    if not ex.tem_credenciais():
+        return JSONResponse({"ok": False, "erro": "EXPLORIUM_API_KEY não configurada no Render (Environment)."})
+    form = await request.form()
+    ids = [int(i) for i in form.getlist("ids") if str(i).isdigit()]
+    if not ids:
+        return JSONResponse({"ok": False, "erro": "Marque um lead pra testar."})
+    with get_pool().connection() as c:
+        row = c.execute("select empresa, site_url from prospeccao where id=%s and conta_id=%s",
+                        (ids[0], ctx["conta_id"])).fetchone()
+    if not row:
+        return JSONResponse({"ok": False, "erro": "Lead não encontrado."})
+    empresa, site = row
+    from urllib.parse import urlparse
+    s = (site or "").strip()
+    if s and not s.startswith("http"):
+        s = "https://" + s
+    try:
+        dom = (urlparse(s).hostname or "").lower().replace("www.", "") if s else ""
+    except Exception:  # noqa: BLE001
+        dom = ""
+    return JSONResponse({"ok": True, "empresa": empresa, "dominio": dom,
+                         "resposta": ex.match_business(empresa or "", dom)})
+
+
 # ================================================================ ADD MANUAL
 @router.post("/painel/prospeccao/novo")
 def prospeccao_novo(request: Request, empresa: str = Form(...), segmento: str = Form(""),
@@ -3266,6 +3302,7 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
         <button type="button" class="pbtn ghost" onclick="baseEnriquecer('canais')" title="Raspa o site dos marcados e acha e-mail / Instagram / WhatsApp (grátis)">🔎 Enriquecer canais</button>
         {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseEnriquecer('decisor')" title="Acha o dono (nome + telefone) dos marcados na Credify pelo CNPJ — consulta paga">🎯 Buscar decisor</button>{% endif %}
+        {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseExplorium()" title="Teste de conexão com a Explorium (Vibe) no lead marcado">🔮 Explorium (teste)</button>{% endif %}
         <span style="width:1px;height:24px;background:var(--borda);margin:0 .15rem"></span>
         {% if gerencia %}
         <select name="campanha_id" class="fld" style="max-width:220px;width:auto" onchange="baseCampSel(this)">
@@ -3313,6 +3350,16 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 <script>
 function baseCampSel(s){var i=document.getElementById('base-novo-nome');if(!i)return;var nova=(s.value==='__nova__');i.style.display=nova?'':'none';if(nova){i.focus();}}
 function baseChecked(){var a=[];document.querySelectorAll('.bt-ck:checked').forEach(function(c){a.push(c.value);});return a;}
+function baseExplorium(){
+  var ids=baseChecked();
+  if(!ids.length){alert('Marque um lead pra testar o Explorium.');return;}
+  var body=new URLSearchParams();body.append('ids',ids[0]);
+  capToast('Consultando Explorium…');
+  fetch('/painel/prospeccao/base/explorium',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body}).then(function(r){return r.json();}).then(function(d){
+    if(!d.ok){alert('⚠️ Explorium: '+(d.erro||'erro'));return;}
+    alert('🔮 Explorium — '+(d.empresa||'')+' ('+(d.dominio||'sem domínio')+')\\n\\n'+JSON.stringify(d.resposta,null,2).slice(0,1600));
+  }).catch(function(){capToast('Falha de rede.');});
+}
 function baseEnriquecer(tipo){
   var ids=baseChecked();
   if(!ids.length){alert('Marque ao menos um contato pra enriquecer.');return;}

@@ -2545,6 +2545,42 @@ def prospeccao_registrar_whatsapp(request: Request, alvo_id: int, texto: str = F
     return JSONResponse({"ok": True})
 
 
+@router.post("/painel/prospeccao/{alvo_id}/enviar-whatsapp")
+def prospeccao_enviar_whatsapp(request: Request, alvo_id: int, texto: str = Form(...)):
+    """Envia o WhatsApp de 1º contato PELO CANAL da empresa (sem abrir wa.me) e
+    registra na timeline. Retorna erro amigável se o canal não estiver pronto."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    pool = get_pool()
+    alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
+    if not alvo or not _pode_ver(alvo, ctx):
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    texto = (texto or "").strip()
+    if not texto:
+        return JSONResponse({"ok": False, "erro": "sem_texto"})
+    numero = (alvo.get("whatsapp") or alvo.get("telefone") or "").strip()
+    if not numero:
+        return JSONResponse({"ok": False, "erro": "sem_numero"})
+    from finance import whatsapp_out
+    with pool.connection() as c:
+        res = whatsapp_out.enviar(c, ctx["conta_id"], numero, texto)
+        if not res.get("ok"):
+            erros = {
+                "nao_configurado": "WhatsApp não conectado — configure na aba Canais.",
+                "sem_numero_empresa": "Configure o WhatsApp desta empresa na aba Canais.",
+                "numero_invalido": "Número do lead inválido.",
+                "qr_indisponivel": "A conexão por QR ainda não está ligada.",
+            }
+            return JSONResponse({"ok": False, "erro": res.get("erro"),
+                                 "msg": erros.get(res.get("erro"),
+                                        "Não consegui enviar (janela de 24h fechada? 1º contato pode exigir template aprovado).")})
+        _reg_atividade(c, alvo_id, ctx["conta_id"], ctx["membro_id"], "whatsapp",
+                       f"WhatsApp de 1º contato (enviado pelo sistema)\n\n{texto}", alvo["status"])
+        c.commit()
+    return JSONResponse({"ok": True})
+
+
 def _html_escape(s: str) -> str:
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
 
@@ -2806,7 +2842,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 #kb-drawer{position:fixed;inset:0;z-index:80;display:none}
 #kb-drawer.on{display:block}
 #kb-drawer .bd{position:absolute;inset:0;background:rgba(0,0,0,.55)}
-#kb-drawer .pnl{position:absolute;top:0;right:0;bottom:0;width:min(760px,96vw);background:var(--bg);border-left:1px solid var(--borda);box-shadow:-12px 0 40px rgba(0,0,0,.45);transform:translateX(100%);transition:transform .22s ease;display:flex;flex-direction:column}
+#kb-drawer .pnl{position:absolute;top:0;right:0;bottom:0;width:min(1080px,96vw);background:var(--bg);border-left:1px solid var(--borda);box-shadow:-12px 0 40px rgba(0,0,0,.45);transform:translateX(100%);transition:transform .22s ease;display:flex;flex-direction:column}
 #kb-drawer.on .pnl{transform:translateX(0)}
 #kb-drawer .dh{display:flex;align-items:center;gap:.6rem;padding:.55rem .8rem;border-bottom:1px solid var(--borda);background:#0b0b0c}
 #kb-drawer .dh b{font-size:.9rem}
@@ -3314,9 +3350,9 @@ function iaMsg(canal){var box=document.getElementById('ia-box');var eb=document.
     if(!d.ok){box.innerHTML='<div class="mut" style="color:#e0a33e;font-size:.82rem">'+(d.erro==='sem_ia'?'IA não configurada (falta a chave da IA).':'Não consegui gerar ('+(d.erro||'?')+').')+'</div>';return;}
     if(d.canal==='whatsapp'){
       box.innerHTML='<label class="lbl">Mensagem de WhatsApp</label><textarea class="fld" id="ia-texto" rows="5"></textarea>'
-        +'<div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap"><button type="button" class="pbtn" onclick="iaWhats()">💬 Abrir no WhatsApp</button>'
+        +'<div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap"><button type="button" class="pbtn" id="ia-wa-btn" onclick="iaWhats()">💬 Enviar pelo sistema</button>'
         +'<button type="button" class="pbtn ghost" onclick="iaMsg(&quot;whatsapp&quot;)">↻ gerar outra</button></div>'
-        +'<div class="mut" style="font-size:.74rem;margin-top:.35rem">Abre seu WhatsApp com o texto pronto e registra no histórico.</div>';
+        +'<div class="mut" style="font-size:.74rem;margin-top:.35rem">Envia pelo seu canal de WhatsApp conectado e registra no histórico — sem abrir outra página. (Use o botão “WhatsApp” lá em cima para abrir o WhatsApp externo.)</div>';
       document.getElementById('ia-texto').value=d.texto||'';box.setAttribute('data-link',d.link||'');
     }else{
       box.innerHTML='<label class="lbl">Assunto</label><input class="fld" id="ia-assunto">'
@@ -3332,10 +3368,14 @@ function iaSendEmail(){var a=document.getElementById('ia-assunto').value,c=docum
   fetch('/painel/prospeccao/{{ a.id }}/enviar-email',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();}).then(function(d){
     if(!d.ok){fToast(d.erro==='envio_falhou'?'Não consegui enviar (confira a config de e-mail).':d.erro==='sem_email'?'Lead sem e-mail.':'Erro ao enviar');return;}
     fToast('E-mail enviado ✓');setTimeout(function(){location.reload();},900);}).catch(function(){fToast('Falha de rede');});}
-function iaWhats(){var box=document.getElementById('ia-box');var base=(box.getAttribute('data-link')||'').split('?text=')[0];var t=document.getElementById('ia-texto').value;
-  if(base)window.open(base+'?text='+encodeURIComponent(t),'_blank');
+function iaWhats(){var t=(document.getElementById('ia-texto')||{}).value||'';if(!t.trim()){fToast('Escreva a mensagem');return;}
+  var b=document.getElementById('ia-wa-btn');if(b){b.disabled=true;b.textContent='Enviando…';}
   var fd=new FormData();fd.append('texto',t);
-  fetch('/painel/prospeccao/{{ a.id }}/registrar-whatsapp',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();}).then(function(){fToast('Registrado no histórico ✓');setTimeout(function(){location.reload();},900);}).catch(function(){});}
+  fetch('/painel/prospeccao/{{ a.id }}/enviar-whatsapp',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();}).then(function(d){
+    if(b){b.disabled=false;b.textContent='💬 Enviar pelo sistema';}
+    if(!d.ok){fToast(d.msg||'Não consegui enviar');return;}
+    fToast('Mensagem enviada ✓');setTimeout(function(){location.reload();},900);
+  }).catch(function(){if(b){b.disabled=false;b.textContent='💬 Enviar pelo sistema';}fToast('Falha de rede');});}
 </script>
 {% endblock %}"""
 

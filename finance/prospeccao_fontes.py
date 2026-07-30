@@ -59,11 +59,17 @@ def tem_chave_places() -> bool:
 
 
 def buscar_places(termo: str, cidade: str, api_key: str | None = None,
-                  max_resultados: int = 20, bairro: str = "", rua: str = "") -> dict:
+                  max_resultados: int = 60, bairro: str = "", rua: str = "") -> dict:
     """Text Search (Places API New). Devolve {"ok", "itens": [...], "erro"}.
 
     `bairro` e `rua` são opcionais: refinam a busca por região (entram na frase da
     consulta, do mais específico pro mais geral: rua, bairro, cidade).
+
+    Paginação: o Text Search devolve no máximo 20 por página, mas manda um
+    `nextPageToken` quando há mais. A gente segue as páginas (passando o token no
+    corpo) até juntar `max_resultados` (o Google entrega até ~60 no total) ou acabar
+    o token. Cada página é uma requisição — o custo por página é o mesmo do field
+    mask atual (faixa Pro), então 60 resultados ≈ 3 buscas.
 
     Cada item: empresa, endereco, telefone, place_id, tem_site, rating,
     avaliacoes, rede (bool), temperatura.
@@ -77,14 +83,17 @@ def buscar_places(termo: str, cidade: str, api_key: str | None = None,
     rua = (rua or "").strip()
     if not termo:
         return {"ok": False, "erro": "sem_termo", "itens": []}
+    alvo = min(max(max_resultados, 1), 60)      # teto prático do Text Search
     url = "https://places.googleapis.com/v1/places:searchText"
     # Campos na MESMA faixa de cobrança que já usamos (telefone + nota): dá pra
     # incluir cidade/UF exatas, segmento, status e link do mapa sem subir o preço.
     # (horários/reviews subiriam pra faixa "Atmosphere", mais cara — ficam de fora.)
+    # `nextPageToken` é grátis e habilita a paginação.
     headers = {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": key,
         "X-Goog-FieldMask": (
+            "nextPageToken,"
             "places.id,places.displayName,places.formattedAddress,"
             "places.addressComponents,places.nationalPhoneNumber,"
             "places.internationalPhoneNumber,places.websiteUri,places.rating,"
@@ -96,47 +105,67 @@ def buscar_places(termo: str, cidade: str, api_key: str | None = None,
     # linguagem natural): "pet shop em Rua X, Jardim, Teresina - PI".
     local = ", ".join(p for p in (rua, bairro, cidade) if p)
     consulta = f"{termo} em {local}" if local else termo
-    body = {"textQuery": consulta, "languageCode": "pt-BR",
-            "regionCode": "BR", "maxResultCount": min(max(max_resultados, 1), 20)}
-    try:
-        r = httpx.post(url, json=body, headers=headers, timeout=25)
-        if r.status_code != 200:
-            from core.falhas import avaliar_falha_provedor
-            avaliar_falha_provedor(f"http_{r.status_code}: {r.text[:200]}",
-                                   servico="Google Places")
-            return {"ok": False, "erro": f"http_{r.status_code}", "itens": [],
-                    "detalhe": r.text[:300]}
-        data = r.json()
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "erro": "rede", "detalhe": str(e)[:200], "itens": []}
+    base_body = {"textQuery": consulta, "languageCode": "pt-BR", "regionCode": "BR"}
 
-    itens = []
-    for p in data.get("places", []):
-        nome = (p.get("displayName") or {}).get("text") or ""
-        if not nome:
-            continue
-        tem_site = "websiteUri" in p
-        cid, uf = _endereco_partes(p.get("addressComponents"))
-        seg = (p.get("primaryTypeDisplayName") or {}).get("text") or ""
-        status = p.get("businessStatus") or ""
-        itens.append({
-            "empresa": nome,
-            "endereco": p.get("formattedAddress") or "",
-            "telefone": p.get("nationalPhoneNumber") or p.get("internationalPhoneNumber") or "",
-            "place_id": p.get("id") or "",
-            "tem_site": tem_site,
-            "site": p.get("websiteUri") or "",
-            "rating": p.get("rating"),
-            "avaliacoes": p.get("userRatingCount") or 0,
-            "segmento": seg,
-            "cidade": cid or cidade,
-            "uf": uf,
-            "maps_uri": p.get("googleMapsUri") or "",
-            "status": status,
-            "aberto": status != "CLOSED_PERMANENTLY",
-            "rede": eh_rede_grande(nome),
-            "temperatura": temperatura_auto(tem_site),
-        })
+    itens: list[dict] = []
+    vistos: set[str] = set()
+    token = ""
+    for _pagina in range(4):        # 1ª + até 3 páginas de continuação (limite do provedor)
+        falta = alvo - len(itens)
+        if falta <= 0:
+            break
+        body = dict(base_body, maxResultCount=min(falta, 20))
+        if token:
+            body["pageToken"] = token
+        try:
+            r = httpx.post(url, json=body, headers=headers, timeout=25)
+            if r.status_code != 200:
+                if itens:       # já tem página(s) boa(s): entrega o que juntou
+                    break
+                from core.falhas import avaliar_falha_provedor
+                avaliar_falha_provedor(f"http_{r.status_code}: {r.text[:200]}",
+                                       servico="Google Places")
+                return {"ok": False, "erro": f"http_{r.status_code}", "itens": [],
+                        "detalhe": r.text[:300]}
+            data = r.json()
+        except Exception as e:  # noqa: BLE001
+            if itens:
+                break
+            return {"ok": False, "erro": "rede", "detalhe": str(e)[:200], "itens": []}
+
+        for p in data.get("places", []):
+            nome = (p.get("displayName") or {}).get("text") or ""
+            pid = p.get("id") or ""
+            if not nome or (pid and pid in vistos):
+                continue
+            if pid:
+                vistos.add(pid)
+            tem_site = "websiteUri" in p
+            cid, uf = _endereco_partes(p.get("addressComponents"))
+            seg = (p.get("primaryTypeDisplayName") or {}).get("text") or ""
+            status = p.get("businessStatus") or ""
+            itens.append({
+                "empresa": nome,
+                "endereco": p.get("formattedAddress") or "",
+                "telefone": p.get("nationalPhoneNumber") or p.get("internationalPhoneNumber") or "",
+                "place_id": pid,
+                "tem_site": tem_site,
+                "site": p.get("websiteUri") or "",
+                "rating": p.get("rating"),
+                "avaliacoes": p.get("userRatingCount") or 0,
+                "segmento": seg,
+                "cidade": cid or cidade,
+                "uf": uf,
+                "maps_uri": p.get("googleMapsUri") or "",
+                "status": status,
+                "aberto": status != "CLOSED_PERMANENTLY",
+                "rede": eh_rede_grande(nome),
+                "temperatura": temperatura_auto(tem_site),
+            })
+
+        token = (data.get("nextPageToken") or "").strip()
+        if not token:
+            break
     return {"ok": True, "itens": itens, "erro": None}
 
 

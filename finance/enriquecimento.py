@@ -43,8 +43,11 @@ def _dominio(url: str) -> str:
 
 
 def _baixar(url: str) -> str:
+    # max_redirects baixo: alguns sites entram em loop de /error (302 infinito) e
+    # travariam a raspagem — 3 saltos bastam pro caso normal.
     try:
-        r = httpx.get(url, headers=_UA, timeout=_TIMEOUT, follow_redirects=True)
+        with httpx.Client(headers=_UA, timeout=_TIMEOUT, follow_redirects=True, max_redirects=3) as cli:
+            r = cli.get(url)
         if r.status_code < 400 and "html" in r.headers.get("content-type", ""):
             return r.text[:500000]
     except Exception:  # noqa: BLE001

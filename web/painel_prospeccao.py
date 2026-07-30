@@ -2591,14 +2591,17 @@ def _decisor_lote_bg(pool, conta_id, ids):
 
 
 @router.post("/painel/prospeccao/base/enriquecer")
-def prospeccao_base_enriquecer(request: Request, ids: list[str] = Form([]), tipo: str = Form("canais")):
+async def prospeccao_base_enriquecer(request: Request):
     """Qualifica os leads MARCADOS na Base, em background:
     - tipo='canais': raspa o site → e-mail/Instagram/WhatsApp (grátis).
-    - tipo='decisor': acha o dono via Credify pelo CNPJ (paga, só gestão, pula quem já tem)."""
+    - tipo='decisor': acha o dono via Credify pelo CNPJ (paga, só gestão, pula quem já tem).
+    Lê o form manual (fetch/FormData com 'ids' repetido não bate com Form(list))."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    pids = [int(i) for i in ids if str(i).isdigit()]
+    form = await request.form()
+    tipo = form.get("tipo", "canais")
+    pids = [int(i) for i in form.getlist("ids") if str(i).isdigit()]
     if not pids:
         return JSONResponse({"ok": False, "erro": "Marque ao menos um contato."})
     conta_id = ctx["conta_id"]
@@ -3283,9 +3286,9 @@ function baseEnriquecer(tipo){
   var ids=baseChecked();
   if(!ids.length){alert('Marque ao menos um contato pra enriquecer.');return;}
   if(tipo==='decisor' && !confirm('Buscar o decisor de '+ids.length+' lead(s) na Credify?\\nÉ consulta paga — só usa quem tem CNPJ e pula quem já tem decisor.'))return;
-  var fd=new FormData();ids.forEach(function(i){fd.append('ids',i);});fd.append('tipo',tipo);
+  var body=new URLSearchParams();ids.forEach(function(i){body.append('ids',i);});body.append('tipo',tipo);
   capToast(tipo==='decisor'?'Buscando decisores…':'Enriquecendo canais…');
-  fetch('/painel/prospeccao/base/enriquecer',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();}).then(function(d){
+  fetch('/painel/prospeccao/base/enriquecer',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body}).then(function(r){return r.json();}).then(function(d){
     if(!d.ok){capToast(d.erro||'Erro');return;}
     if(!d.n){capToast('Nenhum marcado elegível ('+(tipo==='decisor'?'precisa de CNPJ e ainda não ter decisor':'precisa ter site')+').');return;}
     capToast(d.n+' em segundo plano — a lista atualiza em instantes…');setTimeout(function(){location.reload();},7000);

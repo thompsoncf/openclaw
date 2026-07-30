@@ -479,7 +479,9 @@ def decisor_por_lead(cnpj: str = "", telefones: list | None = None) -> dict:
     # fallback: quem é o titular do número que o Maps trouxe
     for tel in (telefones or []):
         d = _so_digitos(tel)
-        if len(d) < 10:
+        if len(d) >= 12 and d.startswith("55"):    # tira o código do país (+55) antes do DDD
+            d = d[2:]
+        if len(d) < 10 or len(d) > 11:
             continue
         rt = titular_por_telefone("", d)
         if not rt.get("ok") or not rt.get("titulares"):

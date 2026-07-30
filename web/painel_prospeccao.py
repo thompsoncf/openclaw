@@ -1645,8 +1645,11 @@ _ALVO_ROT = {"fila": "Na fila", "enviado": "Em sequência", "respondeu": "Respon
 
 
 def _campanha_publico_where(conta_id, camp_id, seg, cidade, temp):
-    """WHERE dos leads elegíveis: e-mail válido, fora da campanha e não descadastrados."""
-    where = ["p.conta_id=%s", "p.email_ok",
+    """WHERE dos leads elegíveis: tem um canal validado (e-mail válido OU WhatsApp/
+    telefone), está fora da campanha e não descadastrou. Google Maps às vezes traz só
+    o número — o lead entra na mesma, e a campanha usa o canal que tiver."""
+    where = ["p.conta_id=%s",
+             "(p.email_ok or coalesce(nullif(trim(p.whatsapp),''), nullif(trim(p.telefone),'')) is not null)",
              "p.id not in (select prospeccao_id from campanha_alvos where campanha_id=%s)",
              "lower(coalesce(p.email,'')) not in (select lower(email) from descadastros where conta_id=%s)"]
     params = [conta_id, camp_id, conta_id]
@@ -1675,7 +1678,8 @@ def prospeccao_campanhas(request: Request):
                  (select count(*) from campanha_alvos a where a.campanha_id=cp.id and a.status='respondeu')
                from campanhas cp where cp.conta_id=%s order by cp.criado_em desc""",
             (ctx["conta_id"],)).fetchall()
-        eleg = c.execute("select count(*) from prospeccao where conta_id=%s and email_ok",
+        eleg = c.execute("""select count(*) from prospeccao where conta_id=%s
+                             and (email_ok or coalesce(nullif(trim(whatsapp),''), nullif(trim(telefone),'')) is not null)""",
                          (ctx["conta_id"],)).fetchone()[0]
     camps = [{"id": r[0], "nome": r[1], "status": r[2], "limite": r[3],
               "n": r[4], "env": r[5], "resp": r[6], "status_rot": _STATUS_ROT_CP.get(r[2], r[2])}
@@ -1741,7 +1745,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
         if not sample:
             sample = c.execute(
                 """select empresa, segmento, cidade, uf, whatsapp, email from prospeccao
-                    where conta_id=%s and email_ok order by atualizado_em desc limit 1""",
+                    where conta_id=%s and (email_ok or coalesce(nullif(trim(whatsapp),''), nullif(trim(telefone),'')) is not null) order by atualizado_em desc limit 1""",
                 (ctx["conta_id"],)).fetchone()
     resp = st.get("respondeu", 0)
     from datetime import date as _date
@@ -1919,7 +1923,7 @@ def prospeccao_campanha_previa_ia(request: Request, camp_id: int):
                 where a.campanha_id=%s order by a.id limit 1""", (camp_id,)).fetchone()
         if not s:
             s = c.execute("""select empresa,segmento,cidade,uf,whatsapp,email from prospeccao
-                              where conta_id=%s and email_ok order by atualizado_em desc limit 1""",
+                              where conta_id=%s and (email_ok or coalesce(nullif(trim(whatsapp),''), nullif(trim(telefone),'')) is not null) order by atualizado_em desc limit 1""",
                           (ctx["conta_id"],)).fetchone()
     if not s:
         return JSONResponse({"ok": False, "erro": "Adicione leads (com e-mail) primeiro."})
@@ -4217,7 +4221,7 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
 <div style="max-width:1000px;margin:0 auto">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap">
     <div><h2 class="tt">📣 Campanhas de E-mail</h2>
-      <div class="mut" style="font-size:.85rem">Prospecção fria automatizada · <b style="color:var(--verde-claro)">{{ elegiveis }}</b> lead(s) com e-mail válido prontos pra abordar</div></div>
+      <div class="mut" style="font-size:.85rem">Prospecção fria automatizada · <b style="color:var(--verde-claro)">{{ elegiveis }}</b> lead(s) com e-mail ou WhatsApp prontos pra abordar</div></div>
     <div style="display:flex;gap:.5rem"><a class="pbtn ghost" href="/painel/prospeccao">‹ Prospecção</a><a class="pbtn ghost" href="/painel/prospeccao/comunicacao">📨 Comunicação</a></div>
   </div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
@@ -4234,12 +4238,12 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
     <b style="font-size:.9rem">Como um lead entra numa campanha</b>
     <ol>
       <li>Na <b>Prospecção</b>, rode <b>🔎 Verificar canais</b> — descobre o e-mail do lead pelo site/CNPJ.</li>
-      <li>Só entra quem tem <b>e-mail válido</b> e não descadastrou (os {{ elegiveis }} acima).</li>
+      <li>Entra quem tem <b>e-mail válido ou WhatsApp/telefone</b> e não descadastrou (os {{ elegiveis }} acima). Cada canal dispara pra quem tiver.</li>
       <li>Abra a campanha → aba <b>👥 Público</b> → filtre por segmento/cidade e clique <b>Adicionar à campanha</b>.</li>
       <li>Ative: o motor dispara a sequência sozinho (D0 + follow-ups) e <b>para</b> em quem responde — a conversa cai no inbox pro agente assumir.</li>
     </ol>
   </div>
-  {% if elegiveis == 0 %}<div class="mut" style="margin-top:.5rem;font-size:.85rem;border:1px solid var(--borda);border-radius:10px;padding:.7rem .9rem">Nenhum lead com e-mail válido ainda. Rode o <b>🔎 Verificar canais</b> na Prospecção pra descobrir os e-mails primeiro.</div>{% endif %}
+  {% if elegiveis == 0 %}<div class="mut" style="margin-top:.5rem;font-size:.85rem;border:1px solid var(--borda);border-radius:10px;padding:.7rem .9rem">Nenhum lead com e-mail ou WhatsApp ainda. Capte leads (Google Maps traz o telefone) pra começar.</div>{% endif %}
 
   <div class="card" style="padding:.9rem 1rem;margin:1rem 0">
     <form method="post" action="/painel/prospeccao/campanhas/nova" style="margin:0">
@@ -4347,7 +4351,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
   <!-- PÚBLICO -->
   <div class="card" style="padding:1rem;margin-top:1rem">
     <h3 style="margin:0 0 .4rem;font-size:1rem">👥 Público — adicionar leads</h3>
-    <div class="mut" style="font-size:.82rem;margin-bottom:.6rem">Só entram leads com <b>e-mail válido</b> (verificados na Fase 1) e que não descadastraram.</div>
+    <div class="mut" style="font-size:.82rem;margin-bottom:.6rem">Entram leads com <b>e-mail válido ou WhatsApp/telefone</b> e que não descadastraram — cada canal dispara pra quem tiver.</div>
     <form method="get" action="/painel/prospeccao/campanhas/{{ camp.id }}" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
       <input class="fld" name="seg" value="{{ seg }}" placeholder="Segmento (ex.: salão)" style="width:auto">
       <input class="fld" name="cidade" value="{{ cidade }}" placeholder="Cidade" style="width:auto">

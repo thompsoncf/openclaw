@@ -435,6 +435,7 @@ def _disparar_campanha(pool, camp_id, conta_id, camp_nome, teto) -> int:
                       p.empresa, p.segmento, p.cidade, p.uf, p.email, p.whatsapp
                  from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
                 where a.campanha_id=%s and a.status in ('fila','enviado')
+                  and position('@' in coalesce(p.email,'')) > 1
                   and (a.proximo_envio_em is null or a.proximo_envio_em <= now())
                 order by a.proximo_envio_em asc nulls first limit %s""", (camp_id, teto)).fetchall()
     feitos = 0
@@ -445,7 +446,8 @@ def _disparar_campanha(pool, camp_id, conta_id, camp_nome, teto) -> int:
             continue
         email = (email or "").strip().lower()
         if not email or "@" not in email:
-            _marcar(pool, aid, "erro")
+            # sem e-mail → o e-mail não tem o que fazer; o canal WhatsApp cuida dele.
+            # (não marca 'erro' pra não tirar da fila do WhatsApp)
             continue
         # descadastrado? já respondeu? → não manda
         with pool.connection() as c:

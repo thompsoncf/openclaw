@@ -37,8 +37,9 @@ create table canais_config (id bigserial primary key, conta_id bigint, canal tex
 create table prospeccao (id bigserial primary key, conta_id bigint);
 -- campanhas vem da 086 (marcada como aplicada); a 104/105 adicionam colunas.
 create table campanhas (id bigserial primary key, conta_id bigint);
--- campanha_alvos vem da 086; a 105 adiciona wa_status/wa_em.
-create table campanha_alvos (id bigserial primary key, campanha_id bigint, prospeccao_id bigint);
+-- campanha_alvos vem da 086 (com status); a 105 adiciona wa_status/wa_em e a 107 indexa.
+create table campanha_alvos (id bigserial primary key, campanha_id bigint, prospeccao_id bigint,
+  status text);
 create table schema_migrations (id serial primary key, nome text unique not null,
   executada_em timestamptz default now());
 """

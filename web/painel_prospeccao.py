@@ -1675,17 +1675,22 @@ def prospeccao_campanhas(request: Request):
             """select cp.id, cp.nome, cp.status, cp.limite_dia,
                  (select count(*) from campanha_alvos a where a.campanha_id=cp.id),
                  (select count(*) from campanha_alvos a where a.campanha_id=cp.id and a.status='enviado'),
-                 (select count(*) from campanha_alvos a where a.campanha_id=cp.id and a.status='respondeu')
+                 (select count(*) from campanha_alvos a where a.campanha_id=cp.id and a.status='respondeu'),
+                 coalesce(cp.wa_ativo,false),
+                 (select count(*) from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
+                    where a.campanha_id=cp.id and p.estagio='lead')
                from campanhas cp where cp.conta_id=%s order by cp.criado_em desc""",
             (ctx["conta_id"],)).fetchall()
         eleg = c.execute("""select count(*) from prospeccao where conta_id=%s
                              and (email_ok or coalesce(nullif(trim(whatsapp),''), nullif(trim(telefone),'')) is not null)""",
                          (ctx["conta_id"],)).fetchone()[0]
     camps = [{"id": r[0], "nome": r[1], "status": r[2], "limite": r[3],
-              "n": r[4], "env": r[5], "resp": r[6], "status_rot": _STATUS_ROT_CP.get(r[2], r[2])}
+              "n": r[4], "env": r[5], "resp": r[6], "status_rot": _STATUS_ROT_CP.get(r[2], r[2]),
+              "wa": r[7], "virou": r[8]}
              for r in rows]
     return _render("prospeccao_campanhas", request, titulo="Campanhas", secao_ativa="prospeccao",
-                   camps=camps, elegiveis=eleg, aviso=request.session.pop("prosp_aviso", None))
+                   camps=camps, elegiveis=eleg, gerencia=ctx["gerencia"],
+                   aviso=request.session.pop("prosp_aviso", None))
 
 
 @router.post("/painel/prospeccao/campanhas/nova")
@@ -2878,6 +2883,56 @@ _CSS = """<style>
 .toggle input:checked+.tgl:before{transform:translateX(20px)}
 </style>"""
 
+# ---- barra de navegação do módulo + agilidade no front (prefetch no hover + barra
+# de progresso). O <script> entra no _CSS, então TODA tela de prospecção ganha a
+# navegação instantânea sem recarregar sensação de lentidão; o back segue rendrizando.
+_NAV_ASSETS = """<style>
+.pnavbar{display:flex;gap:.35rem;flex-wrap:wrap;align-items:center;padding:.4rem;border:1px solid var(--borda);border-radius:12px;background:var(--card);margin:.2rem 0 1rem}
+.pnav{display:inline-flex;align-items:center;gap:.35rem;font-size:.85rem;padding:.42rem .7rem;border-radius:9px;border:1px solid transparent;color:var(--mut);text-decoration:none;white-space:nowrap;background:none;font-family:inherit;cursor:pointer}
+.pnav:hover{color:var(--txt);background:var(--bg)}
+.pnav.on{color:var(--verde-claro);border-color:#1e4a34;background:#10241a;font-weight:600}
+.pnav.cfg{margin-left:auto}
+#pnavprog{position:fixed;top:0;left:0;height:2px;width:0;background:var(--verde);z-index:99999;transition:width .35s ease;opacity:0}
+#pnavprog.go{opacity:1}
+</style><script>(function(){
+ if(window.__pnav)return; window.__pnav=1;
+ var bar=document.createElement('div'); bar.id='pnavprog';
+ function mount(){ if(document.body && !document.getElementById('pnavprog')) document.body.appendChild(bar); }
+ if(document.body)mount(); else document.addEventListener('DOMContentLoaded',mount);
+ var seen={};
+ function pre(u){ if(!u||seen[u]||u.indexOf(location.origin)!==0)return; seen[u]=1;
+   var l=document.createElement('link'); l.rel='prefetch'; l.href=u; document.head.appendChild(l); }
+ function near(t){ return (t && t.closest)?t.closest('a[href^=\\"/painel/prospeccao\\"]'):null; }
+ document.addEventListener('mouseover',function(e){var a=near(e.target);if(a)pre(a.href);},{passive:true});
+ document.addEventListener('touchstart',function(e){var a=near(e.target);if(a)pre(a.href);},{passive:true});
+ document.addEventListener('click',function(e){var a=near(e.target);
+   if(a && a.getAttribute('href') && !e.metaKey && !e.ctrlKey && !e.shiftKey && a.target!=='_blank'){ bar.className='go'; bar.style.width='82%'; }},true);
+ window.addEventListener('pageshow',function(){ bar.className=''; bar.style.width='0'; });
+})();</script>"""
+_CSS = _CSS + _NAV_ASSETS
+
+
+def _navbar(active):
+    """Barra de navegação do módulo, na ordem da história. `active` marca a aba atual."""
+    tabs = [("captar", "🎯 Captar", "/painel/prospeccao/captar", False),
+            ("base", "📇 Base", "/painel/prospeccao/base", False),
+            ("campanhas", "📣 Campanhas", "/painel/prospeccao/campanhas", True),
+            ("comunicacao", "💬 Comunicação", "/painel/prospeccao/comunicacao", False),
+            ("funil", "🔥 Funil", "/painel/prospeccao", False),
+            ("canais", "⚙️ Canais", "/painel/prospeccao/comunicacao?aba=canais", False)]
+    out = ['<nav class="pnavbar" aria-label="Prospecção">']
+    for key, label, href, gated in tabs:
+        cls = "pnav on" if key == active else "pnav"
+        if key == "canais":
+            cls += " cfg"
+        a = f'<a class="{cls}" href="{href}">{label}</a>'
+        if gated:  # Campanhas só pra gestão
+            a = "{% if gerencia %}" + a + "{% endif %}"
+        out.append(a)
+    out.append("</nav>")
+    return "\n".join(out)
+
+
 _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 <style>
  .bt-tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:.6rem;margin:.9rem 0}
@@ -2894,14 +2949,11 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
  @media(max-width:820px){.bt-tiles{grid-template-columns:repeat(2,1fr)}}
 </style>
 <div class="pw">
+""" + _navbar('base') + """
   <div style="display:flex;align-items:flex-start;gap:.6rem;flex-wrap:wrap">
     <div style="flex:1;min-width:170px">
       <h2 class="tt">📇 Base de captação</h2>
       <div class="mut" style="font-size:.82rem;margin-top:.15rem">Matéria-prima das campanhas — vira <b style="color:var(--verde-claro)">lead</b> quando topa no WhatsApp ou responde o e-mail.</div>
-    </div>
-    <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
-      <a class="pbtn ghost" href="/painel/prospeccao">‹ Funil</a>
-      <a class="pbtn" href="/painel/prospeccao/captar">🎯 Captar</a>
     </div>
   </div>
 
@@ -2960,17 +3012,18 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 
 _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 <div class="pw">
+  <nav class="pnavbar" aria-label="Prospecção">
+    <button type="button" class="pnav" onclick="capToggle()">🎯 Captar</button>
+    <a class="pnav" href="/painel/prospeccao/base">📇 Base</a>
+    {% if gerencia %}<a class="pnav" href="/painel/prospeccao/campanhas">📣 Campanhas</a>{% endif %}
+    <a class="pnav" href="/painel/prospeccao/comunicacao">💬 Comunicação</a>
+    <a class="pnav on" href="/painel/prospeccao">🔥 Funil</a>
+    <a class="pnav cfg" href="/painel/prospeccao/comunicacao?aba=canais">⚙️ Canais</a>
+  </nav>
   <div style="display:flex;align-items:flex-start;gap:.6rem;flex-wrap:wrap">
     <div style="flex:1;min-width:170px">
       <h2 class="tt">Prospecção</h2>
       <div class="mut" style="font-size:.82rem;margin-top:.15rem">{% if conta %}<b style="color:var(--verde-claro)">🏢 {{ conta[2] }}</b> · {% endif %}<span id="kb-total-n">{{ total_alvos }}</span> alvo(s){% if total_valor %} · pipeline {{ brl(total_valor) }}{% endif %}{% if n_contextos and n_contextos > 1 %} · <a href="/trocar" style="color:var(--verde-claro)">trocar empresa ⇄</a>{% endif %}</div>
-    </div>
-    <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
-      <button type="button" class="pbtn" onclick="capToggle()">🎯 Captar leads</button>
-      <a class="pbtn ghost" href="/painel/prospeccao/base" style="display:inline-flex;align-items:center">📇 Base</a>
-      {% if gerencia %}<a class="pbtn ghost" href="/painel/prospeccao/campanhas" style="display:inline-flex;align-items:center">📣 Campanhas</a>{% endif %}
-      <a class="pbtn ghost" href="/painel/prospeccao/comunicacao" style="display:inline-flex;align-items:center">📨 Comunicação</a>
-      <a class="pbtn ghost" href="/painel/prospeccao/comunicacao?aba=canais" style="display:inline-flex;align-items:center">⚙️ Canais</a>
     </div>
   </div>
 
@@ -3745,12 +3798,12 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 @media(max-width:900px){.cx-grid{grid-template-columns:1fr}.cx-ctx{order:3}.cx-cc{grid-template-columns:1fr}.aggrid{grid-template-columns:1fr}}
 </style>
 <div class="cx-wrap">
+""" + _navbar('comunicacao') + """
   <div class="cx-head">
     <div>
       <h2 class="tt">📨 Comunicação</h2>
       <div class="mut" style="font-size:.82rem;margin-top:.15rem">Enviando e-mails como {% if remetente %}<code>{{ remetente }}</code> · respostas voltam pro e-mail de quem enviou{% else %}<span style="color:#e0574f">(e-mail ainda não configurado)</span>{% endif %}</div>
     </div>
-    <a class="pbtn ghost" href="/painel/prospeccao" style="display:inline-flex;align-items:center">‹ Prospecção</a>
   </div>
 
   <div class="cx-tabs">
@@ -4219,28 +4272,27 @@ _CPILL_CSS = """<style>.cpill{font-size:.68rem;font-weight:700;padding:.14rem .5
 
 _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + """
 <div style="max-width:1000px;margin:0 auto">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap">
-    <div><h2 class="tt">📣 Campanhas de E-mail</h2>
-      <div class="mut" style="font-size:.85rem">Prospecção fria automatizada · <b style="color:var(--verde-claro)">{{ elegiveis }}</b> lead(s) com e-mail ou WhatsApp prontos pra abordar</div></div>
-    <div style="display:flex;gap:.5rem"><a class="pbtn ghost" href="/painel/prospeccao">‹ Prospecção</a><a class="pbtn ghost" href="/painel/prospeccao/comunicacao">📨 Comunicação</a></div>
+""" + _navbar('campanhas') + """
+  <div>
+    <h2 class="tt">📣 Campanhas</h2>
+    <div class="mut" style="font-size:.85rem">Prospecção fria multicanal · <b style="color:var(--verde-claro)">{{ elegiveis }}</b> lead(s) com e-mail ou WhatsApp prontos pra abordar</div>
   </div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
 
   <div class="cppipe">
-    <div class="cppstep"><div>🎯</div><h5>Captar</h5><p>Maps + CNPJ</p><span class="arw">›</span></div>
-    <div class="cppstep"><div>🔎</div><h5>Verificar canais</h5><p>site → e-mail ✓</p><span class="arw">›</span></div>
-    <div class="cppstep on"><div>✉️</div><h5>Sequência</h5><p>D0 · follow-ups</p><span class="arw">›</span></div>
-    <div class="cppstep"><div>💬</div><h5>Resposta → inbox</h5><p>para a sequência</p><span class="arw">›</span></div>
-    <div class="cppstep"><div>🤝</div><h5>Converte</h5><p>agente assume</p></div>
+    <div class="cppstep"><div>📇</div><h5>Base</h5><p>captados</p><span class="arw">›</span></div>
+    <div class="cppstep on"><div>📣</div><h5>Dispara</h5><p>💬 zap + ✉️ e-mail</p><span class="arw">›</span></div>
+    <div class="cppstep"><div>💬</div><h5>Resposta → inbox</h5><p>agente assume</p><span class="arw">›</span></div>
+    <div class="cppstep"><div>🔥</div><h5>Vira lead</h5><p>entra no funil</p></div>
   </div>
 
   <div class="cphelp">
     <b style="font-size:.9rem">Como um lead entra numa campanha</b>
     <ol>
-      <li>Na <b>Prospecção</b>, rode <b>🔎 Verificar canais</b> — descobre o e-mail do lead pelo site/CNPJ.</li>
-      <li>Entra quem tem <b>e-mail válido ou WhatsApp/telefone</b> e não descadastrou (os {{ elegiveis }} acima). Cada canal dispara pra quem tiver.</li>
+      <li>Os contatos vêm da <b>📇 Base</b> (captados no Google Maps, CNPJ ou CSV).</li>
+      <li>Entra quem tem <b>e-mail válido ou WhatsApp/telefone</b> e não descadastrou (os {{ elegiveis }} acima) — cada canal dispara pra quem tiver.</li>
       <li>Abra a campanha → aba <b>👥 Público</b> → filtre por segmento/cidade e clique <b>Adicionar à campanha</b>.</li>
-      <li>Ative: o motor dispara a sequência sozinho (D0 + follow-ups) e <b>para</b> em quem responde — a conversa cai no inbox pro agente assumir.</li>
+      <li>Ative: dispara sozinho (<b>WhatsApp pro decisor + e-mail</b>), <b>para</b> em quem responde, e <b>quem topa vira lead no funil</b>.</li>
     </ol>
   </div>
   {% if elegiveis == 0 %}<div class="mut" style="margin-top:.5rem;font-size:.85rem;border:1px solid var(--borda);border-radius:10px;padding:.7rem .9rem">Nenhum lead com e-mail ou WhatsApp ainda. Capte leads (Google Maps traz o telefone) pra começar.</div>{% endif %}
@@ -4256,15 +4308,17 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
   <div style="display:flex;flex-direction:column;gap:.6rem">
     {% for c in camps %}
     <div class="card" style="padding:.9rem 1rem">
-      <div style="display:flex;align-items:center;gap:.6rem">
+      <div style="display:flex;align-items:center;gap:.5rem">
         <a href="/painel/prospeccao/campanhas/{{ c.id }}" style="flex:1;text-decoration:none;color:inherit;font-weight:700">{{ c.nome }}</a>
+        <span style="font-size:.64rem;color:#6fb0e6;border:1px solid #2f4a63;background:#11212e;border-radius:999px;padding:.05rem .4rem;font-weight:700" title="E-mail">✉️</span>
+        {% if c.wa %}<span style="font-size:.64rem;color:#3ddc84;border:1px solid #1e5c39;background:#0e2418;border-radius:999px;padding:.05rem .4rem;font-weight:700" title="WhatsApp">💬</span>{% endif %}
         <span class="cpill {{ c.status }}">{{ c.status_rot }}</span>
         <form method="post" action="/painel/prospeccao/campanhas/{{ c.id }}/excluir" style="margin:0" onsubmit="return confirm('Excluir “{{ c.nome }}”? Os leads voltam pro funil.')">
           <button class="cpx" title="Excluir campanha">🗑</button>
         </form>
       </div>
       <a href="/painel/prospeccao/campanhas/{{ c.id }}" style="display:block;text-decoration:none;color:inherit">
-        <div class="mut" style="font-size:.8rem;margin-top:.35rem"><b style="color:var(--txt)">{{ c.n }}</b> leads · {{ c.env }} enviados · <span style="color:var(--verde-claro)">{{ c.resp }} respostas</span> · limite {{ c.limite }}/dia</div>
+        <div class="mut" style="font-size:.8rem;margin-top:.35rem"><b style="color:var(--txt)">{{ c.n }}</b> leads · {{ c.env }} enviados · <span style="color:var(--verde-claro)">{{ c.resp }} respostas</span> · <span style="color:var(--verde-claro)">{{ c.virou }} viraram lead 🔥</span> · limite {{ c.limite }}/dia</div>
         {% if c.n %}<div class="cpbar"><i class="e" style="width:{{ (100*c.env/c.n)|round|int }}%"></i><i class="r" style="width:{{ (100*c.resp/c.n)|round|int }}%"></i></div>{% endif %}
       </a>
     </div>

@@ -332,7 +332,8 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
     with get_pool().connection() as c:
         rows = c.execute(f"""
             select p.id, p.empresa, p.segmento, p.cidade, p.uf, p.whatsapp, p.email, p.telefone,
-                   ca.cnome, ca.wa_status, ca.passo_atual, ca.ult_txt, ca.ult_raw
+                   ca.cnome, ca.wa_status, ca.passo_atual, ca.ult_txt, ca.ult_raw,
+                   (case when coalesce(p.decisor_nome,'')<>'' then 1 else 0 end)
               from prospeccao p
               left join lateral (
                  select cp.nome as cnome, a.wa_status, a.passo_atual, a.ultima_msg_em as ult_raw,
@@ -357,7 +358,7 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
         leads.append({"id": r[0], "empresa": r[1], "segmento": r[2], "cidade": r[3], "uf": r[4],
                       "tem_wpp": bool(r[5] or r[7]), "tem_mail": bool(r[6]), "campanha": r[8],
                       "toque_wa": 1 if r[9] == "enviado" else 0, "toque_mail": int(r[10] or 0),
-                      "ult": r[11]})
+                      "ult": r[11], "tem_decisor": bool(r[13])})
     metr = {"na_base": na_base, "com_wpp": com_wpp, "com_mail": com_mail, "em_camp": em_camp, "virou": virou}
     vends = _vendedores(get_pool(), conta_id) if ctx["gerencia"] else []
     return _render("prospeccao_base", request, titulo="Base", secao_ativa="prospeccao",
@@ -2556,6 +2557,79 @@ def _enriquecer_lote_bg(pool, conta_id, ids):
             pass
 
 
+def _decisor_lote_bg(pool, conta_id, ids):
+    """Busca o decisor (Credify) de cada lead com CNPJ que ainda não tem, e salva.
+    Best-effort, em background. Pula quem já tem decisor (não paga de novo)."""
+    from finance import credify as cf
+    if not cf.tem_credenciais():
+        return
+    for aid in ids:
+        try:
+            with pool.connection() as c:
+                row = c.execute("select cnpj, decisor_em from prospeccao where id=%s and conta_id=%s",
+                                (aid, conta_id)).fetchone()
+            if not row or row[1] is not None:
+                continue
+            cd = _so_digitos(row[0] or "")
+            if len(cd) != 14:
+                continue
+            r = cf.decisor_com_telefone(cd)
+            nome = r.get("decisor_nome")
+            if not nome:
+                continue
+            tels = r.get("telefones") or []
+            with pool.connection() as c:
+                c.execute(
+                    """update prospeccao set decisor_nome=%s, decisor_cargo=%s, decisor_telefone=%s,
+                         decisor_whatsapp=%s, decisor_telefones=%s::jsonb, decisor_em=now(), atualizado_em=now()
+                       where id=%s and conta_id=%s""",
+                    (nome, r.get("decisor_qualificacao"), r.get("decisor_telefone"),
+                     bool(r.get("decisor_whatsapp")), json.dumps(tels), aid, conta_id))
+                c.commit()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+@router.post("/painel/prospeccao/base/enriquecer")
+def prospeccao_base_enriquecer(request: Request, ids: list[str] = Form([]), tipo: str = Form("canais")):
+    """Qualifica os leads MARCADOS na Base, em background:
+    - tipo='canais': raspa o site → e-mail/Instagram/WhatsApp (grátis).
+    - tipo='decisor': acha o dono via Credify pelo CNPJ (paga, só gestão, pula quem já tem)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    pids = [int(i) for i in ids if str(i).isdigit()]
+    if not pids:
+        return JSONResponse({"ok": False, "erro": "Marque ao menos um contato."})
+    conta_id = ctx["conta_id"]
+    import threading
+    if tipo == "decisor":
+        if not ctx["gerencia"]:
+            return JSONResponse({"ok": False, "erro": "Só o dono/gestor busca decisor (consulta paga)."})
+        from finance import credify as cf
+        if not cf.tem_credenciais():
+            return JSONResponse({"ok": False, "erro": "Credify não configurada (CREDIFY_CLIENT_ID/SECRET no Render)."})
+        with get_pool().connection() as c:
+            sel = [r[0] for r in c.execute(
+                "select id from prospeccao where conta_id=%s and id = any(%s)"
+                " and length(regexp_replace(coalesce(cnpj,''),'\\D','','g'))=14 and decisor_em is null",
+                (conta_id, pids)).fetchall()]
+        if sel:
+            threading.Thread(target=_decisor_lote_bg, args=(get_pool(), conta_id, sel), daemon=True).start()
+        return JSONResponse({"ok": True, "n": len(sel), "tipo": "decisor"})
+    # canais (grátis) — escopo do vendedor se não for gestão
+    q = "select id from prospeccao where conta_id=%s and id = any(%s) and coalesce(site_url,'')<>''"
+    params = [conta_id, pids]
+    if not ctx["gerencia"]:
+        q += " and vendedor_id=%s"
+        params.append(ctx["membro_id"])
+    with get_pool().connection() as c:
+        sel = [r[0] for r in c.execute(q, tuple(params)).fetchall()]
+    if sel:
+        threading.Thread(target=_enriquecer_lote_bg, args=(get_pool(), conta_id, sel), daemon=True).start()
+    return JSONResponse({"ok": True, "n": len(sel), "tipo": "canais"})
+
+
 @router.post("/painel/prospeccao/{alvo_id}/enriquecer-canais")
 def prospeccao_enriquecer_canais(request: Request, alvo_id: int):
     """Verifica os canais de UM lead (raspa o site, valida e-mail)."""
@@ -3162,6 +3236,9 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem;gap:.5rem;flex-wrap:wrap">
       <div class="mut" style="font-size:.8rem"><b style="color:var(--txt)" id="base-sel-n">0</b> marcado(s) · {{ leads|length }} na página{% if leads|length>=300 %} (máx 300){% endif %}</div>
       <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
+        <button type="button" class="pbtn ghost" onclick="baseEnriquecer('canais')" title="Raspa o site dos marcados e acha e-mail / Instagram / WhatsApp (grátis)">🔎 Enriquecer canais</button>
+        {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseEnriquecer('decisor')" title="Acha o dono (nome + telefone) dos marcados na Credify pelo CNPJ — consulta paga">🎯 Buscar decisor</button>{% endif %}
+        <span style="width:1px;height:24px;background:var(--borda);margin:0 .15rem"></span>
         {% if gerencia %}
         <select name="campanha_id" class="fld" style="max-width:220px;width:auto" onchange="baseCampSel(this)">
           <option value="">📣 Jogar na campanha…</option>
@@ -3185,7 +3262,7 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <tr>
             <td><input class="bt-ck" type="checkbox" name="ids" value="{{ l.id }}"></td>
             <td><b>{{ l.empresa }}</b><div class="mut" style="font-size:.76rem">{{ l.segmento or '—' }}{% if l.cidade %} · {{ l.cidade }}{% if l.uf %}/{{ l.uf }}{% endif %}{% endif %}</div></td>
-            <td style="white-space:nowrap">{% if l.tem_wpp %}💬{% else %}<span style="opacity:.25">💬</span>{% endif %} {% if l.tem_mail %}✉️{% else %}<span style="opacity:.25">✉️</span>{% endif %}</td>
+            <td style="white-space:nowrap">{% if l.tem_wpp %}💬{% else %}<span style="opacity:.25">💬</span>{% endif %} {% if l.tem_mail %}✉️{% else %}<span style="opacity:.25">✉️</span>{% endif %}{% if l.tem_decisor %} <span title="Decisor mapeado">🎯</span>{% endif %}</td>
             <td>{% if l.campanha %}<span class="bt-chip">{{ l.campanha }}</span>{% else %}<span class="mut">—</span>{% endif %}</td>
             <td class="mut" style="font-variant-numeric:tabular-nums;white-space:nowrap">💬 {{ l.toque_wa }} · ✉️ {{ l.toque_mail }}</td>
             <td class="mut" style="font-size:.78rem;white-space:nowrap">{{ l.ult or '—' }}</td>
@@ -3201,6 +3278,19 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 </div>
 <script>
 function baseCampSel(s){var i=document.getElementById('base-novo-nome');if(!i)return;var nova=(s.value==='__nova__');i.style.display=nova?'':'none';if(nova){i.focus();}}
+function baseChecked(){var a=[];document.querySelectorAll('.bt-ck:checked').forEach(function(c){a.push(c.value);});return a;}
+function baseEnriquecer(tipo){
+  var ids=baseChecked();
+  if(!ids.length){alert('Marque ao menos um contato pra enriquecer.');return;}
+  if(tipo==='decisor' && !confirm('Buscar o decisor de '+ids.length+' lead(s) na Credify?\\nÉ consulta paga — só usa quem tem CNPJ e pula quem já tem decisor.'))return;
+  var fd=new FormData();ids.forEach(function(i){fd.append('ids',i);});fd.append('tipo',tipo);
+  capToast(tipo==='decisor'?'Buscando decisores…':'Enriquecendo canais…');
+  fetch('/painel/prospeccao/base/enriquecer',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();}).then(function(d){
+    if(!d.ok){capToast(d.erro||'Erro');return;}
+    if(!d.n){capToast('Nenhum marcado elegível ('+(tipo==='decisor'?'precisa de CNPJ e ainda não ter decisor':'precisa ter site')+').');return;}
+    capToast(d.n+' em segundo plano — a lista atualiza em instantes…');setTimeout(function(){location.reload();},7000);
+  }).catch(function(){capToast('Falha de rede');});
+}
 function baseMarcados(){return document.querySelectorAll('.bt-ck:checked').length;}
 function baseUpd(){var n=document.getElementById('base-sel-n');if(n)n.textContent=baseMarcados();}
 document.addEventListener('change',function(e){if(e.target&&e.target.classList&&e.target.classList.contains('bt-ck'))baseUpd();});

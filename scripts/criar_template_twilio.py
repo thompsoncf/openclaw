@@ -24,24 +24,25 @@ import httpx
 FRIENDLY = "prospec_1contato_ptbr"
 LANG = "pt_BR"
 
-# Corpo do template. Precisa FISGAR no 1º contato frio: dor concreta + benefício
-# + CTA de baixo atrito ("1 minuto") + botão. Curto e sem promessa exagerada
+# Corpo do template. Pegada de DESAFIO no 1º contato frio: provoca o lead a deixar
+# mostrar, de graça, o que dá pra melhorar com IA. Concreto ("3 coisas"), com saída
+# fácil ("é só me dizer") e CTA de baixo atrito. Curto e sem promessa exagerada
 # (ajuda na aprovação do WhatsApp).
-BODY = ("Oi! 👋 Aqui é da {{1}}. A gente ajuda empresas como a {{2}} a organizar "
-        "o atendimento e parar de perder cliente por demora na resposta. "
-        "Posso te mostrar em 1 minuto como ficaria aí? 👇")
+BODY = ("Oi! 👋 Aqui é da {{1}}. Desafio de 60 segundos: me deixa apontar 3 coisas "
+        "que dá pra automatizar com IA na {{2}} hoje. Se não fizer sentido, é só me "
+        "dizer. Topa? 👇")
 
 TYPES = {
     "twilio/quick-reply": {
         "body": BODY,
         "actions": [
-            {"id": "interesse", "title": "Quero ver"},
+            {"id": "interesse", "title": "Topo o desafio"},
             {"id": "agora_nao", "title": "Agora não"},
         ],
     },
     # fallback de texto puro (WhatsApp usa o quick-reply; o texto cobre outros canais)
     "twilio/text": {
-        "body": BODY + "\n\nResponda *QUERO* que eu te mando na hora.",
+        "body": BODY + "\n\nResponda *TOPO* que eu já te mostro.",
     },
 }
 

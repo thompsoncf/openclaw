@@ -44,3 +44,34 @@ def match_business(nome: str, dominio: str = "") -> dict:
     if (dominio or "").strip():
         b["domain"] = dominio.strip()
     return _post("/businesses/match", {"businesses_to_match": [b]})
+
+
+# ---- Fluxo de prospecção (doc oficial): stats → businesses → prospects → contact enrich
+
+def stats(filters: dict) -> dict:
+    """Tamanho do mercado pro filtro (exploração, sem baixar registros)."""
+    return _post("/businesses/stats", {"filters": filters})
+
+
+def fetch_businesses(filters: dict, size: int = 25, page: int = 1) -> dict:
+    """Registros de empresas (mode=full traz business_id + firmografia)."""
+    return _post("/businesses", {"mode": "full", "size": size,
+                                 "page_size": min(size, 100), "page": page, "filters": filters})
+
+
+def fetch_prospects(business_ids: list, job_levels: list | None = None,
+                    job_departments: list | None = None, size: int = 50) -> dict:
+    """Pessoas (decisores) nas empresas dadas — só quem tem e-mail."""
+    f: dict = {"business_id": {"type": "includes", "values": business_ids},
+               "has_email": {"type": "exists", "value": True}}
+    if job_levels:
+        f["job_level"] = {"type": "includes", "values": job_levels}
+    if job_departments:
+        f["job_department"] = {"type": "includes", "values": job_departments}
+    return _post("/prospects", {"mode": "full", "size": size,
+                                "page_size": min(size, 100), "page": 1, "filters": f})
+
+
+def enrich_contact(prospect_id: str) -> dict:
+    """E-mail(s) + telefone(s) diretos do prospect (consome crédito)."""
+    return _post("/prospects/contacts_information/enrich", {"prospect_id": prospect_id})

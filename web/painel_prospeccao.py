@@ -335,7 +335,8 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
                    ca.cnome, ca.wa_status, ca.passo_atual, ca.ult_txt, ca.ult_raw,
                    (case when coalesce(p.decisor_nome,'')<>'' then 1 else 0 end),
                    (case when p.enriquecido_em is not null then 1 else 0 end),
-                   p.instagram
+                   p.instagram, p.decisor_nome, p.decisor_telefone,
+                   (case when jsonb_typeof(p.decisor_telefones)='array' then jsonb_array_length(p.decisor_telefones) else 0 end)
               from prospeccao p
               left join lateral (
                  select cp.nome as cnome, a.wa_status, a.passo_atual, a.ultima_msg_em as ult_raw,
@@ -361,7 +362,8 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
                       "tem_wpp": bool(r[5] or r[7]), "tem_mail": bool(r[6]), "campanha": r[8],
                       "toque_wa": 1 if r[9] == "enviado" else 0, "toque_mail": int(r[10] or 0),
                       "ult": r[11], "tem_decisor": bool(r[13]), "verificado": bool(r[14]),
-                      "whats": (r[5] or r[7] or ""), "email_v": (r[6] or ""), "insta": (r[15] or "")})
+                      "whats": (r[5] or r[7] or ""), "email_v": (r[6] or ""), "insta": (r[15] or ""),
+                      "dec_nome": (r[16] or ""), "dec_tel": (r[17] or ""), "dec_ntel": int(r[18] or 0)})
     metr = {"na_base": na_base, "com_wpp": com_wpp, "com_mail": com_mail, "em_camp": em_camp, "virou": virou}
     vends = _vendedores(get_pool(), conta_id) if ctx["gerencia"] else []
     return _render("prospeccao_base", request, titulo="Base", secao_ativa="prospeccao",
@@ -3288,7 +3290,7 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
               {% if l.whats %}<div>💬 {{ l.whats }}</div>{% endif %}
               {% if l.email_v %}<div>✉️ {{ l.email_v }}</div>{% endif %}
               {% if l.insta %}<div class="mut">📷 {{ l.insta }}</div>{% endif %}
-              {% if l.tem_decisor %}<div style="color:var(--verde-claro)">🎯 decisor mapeado</div>{% endif %}
+              {% if l.tem_decisor %}<div style="color:var(--verde-claro)">🎯 {{ l.dec_nome or 'Decisor' }}{% if l.dec_tel %} · {{ l.dec_tel }}{% if l.dec_ntel > 1 %} <span class="mut">(+{{ l.dec_ntel - 1 }} nº)</span>{% endif %}{% else %} · <span class="mut">(sem telefone na Credify)</span>{% endif %}</div>{% endif %}
               {% if not l.whats and not l.email_v and not l.insta %}<span class="mut">{% if l.verificado %}✓ verificado · sem dados no site{% else %}—{% endif %}</span>{% endif %}
             </td>
             <td>{% if l.campanha %}<span class="bt-chip">{{ l.campanha }}</span>{% else %}<span class="mut">—</span>{% endif %}</td>
@@ -3314,13 +3316,13 @@ function baseEnriquecer(tipo){
   var body=new URLSearchParams();ids.forEach(function(i){body.append('ids',i);});body.append('tipo',tipo);
   capToast(tipo==='decisor'?'Buscando decisores… (alguns segundos)':'Verificando os sites… (alguns segundos)');
   fetch('/painel/prospeccao/base/qualificar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body}).then(function(r){return r.json();}).then(function(d){
-    if(!d.ok){capToast(d.erro||'Erro');return;}
+    if(!d.ok){alert('⚠️ '+(d.erro||'Não consegui rodar.'));return;}
     var msg;
     if(tipo==='decisor'){
-      if(!d.n){capToast('Nenhum marcado elegível'+(d.sem_cnpj?(' — '+d.sem_cnpj+' sem CNPJ'):'')+' (ou já tinham decisor).');return;}
+      if(!d.n){alert('Nenhum lead marcado é elegível pra decisor.'+(d.sem_cnpj?('\\n'+d.sem_cnpj+' sem CNPJ preenchido.'):'')+'\\n(Também pula quem já tem decisor.)');return;}
       msg='🎯 '+d.n+' consultado(s) · '+d.achou+' decisor(es) encontrado(s)'+(d.sem?(' · '+d.sem+' sem quadro/telefone na Credify'):'');
     }else{
-      if(!d.n){capToast('Nenhum marcado tem site pra raspar'+(d.sem_site?(' ('+d.sem_site+' sem site)'):'')+'.');return;}
+      if(!d.n){alert('Nenhum lead marcado tem site pra raspar'+(d.sem_site?(' ('+d.sem_site+' sem site)'):'')+'.');return;}
       msg='🔎 '+d.n+' site(s) verificado(s) · '+d.com_email+' com e-mail · '+d.com_wa+' com WhatsApp'+(d.sem?(' · '+d.sem+' sem nada no site'):'');
     }
     if(d.resto)msg+='\\n(processei os primeiros '+(d.n)+'; marque menos ou repita pros demais)';

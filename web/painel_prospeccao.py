@@ -334,7 +334,8 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
             select p.id, p.empresa, p.segmento, p.cidade, p.uf, p.whatsapp, p.email, p.telefone,
                    ca.cnome, ca.wa_status, ca.passo_atual, ca.ult_txt, ca.ult_raw,
                    (case when coalesce(p.decisor_nome,'')<>'' then 1 else 0 end),
-                   (case when p.enriquecido_em is not null then 1 else 0 end)
+                   (case when p.enriquecido_em is not null then 1 else 0 end),
+                   p.instagram
               from prospeccao p
               left join lateral (
                  select cp.nome as cnome, a.wa_status, a.passo_atual, a.ultima_msg_em as ult_raw,
@@ -359,7 +360,8 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
         leads.append({"id": r[0], "empresa": r[1], "segmento": r[2], "cidade": r[3], "uf": r[4],
                       "tem_wpp": bool(r[5] or r[7]), "tem_mail": bool(r[6]), "campanha": r[8],
                       "toque_wa": 1 if r[9] == "enviado" else 0, "toque_mail": int(r[10] or 0),
-                      "ult": r[11], "tem_decisor": bool(r[13]), "verificado": bool(r[14])})
+                      "ult": r[11], "tem_decisor": bool(r[13]), "verificado": bool(r[14]),
+                      "whats": (r[5] or r[7] or ""), "email_v": (r[6] or ""), "insta": (r[15] or "")})
     metr = {"na_base": na_base, "com_wpp": com_wpp, "com_mail": com_mail, "em_camp": em_camp, "virou": virou}
     vends = _vendedores(get_pool(), conta_id) if ctx["gerencia"] else []
     return _render("prospeccao_base", request, titulo="Base", secao_ativa="prospeccao",
@@ -3282,7 +3284,13 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <tr>
             <td><input class="bt-ck" type="checkbox" name="ids" value="{{ l.id }}"></td>
             <td><b>{{ l.empresa }}</b><div class="mut" style="font-size:.76rem">{{ l.segmento or '—' }}{% if l.cidade %} · {{ l.cidade }}{% if l.uf %}/{{ l.uf }}{% endif %}{% endif %}</div></td>
-            <td style="white-space:nowrap">{% if l.tem_wpp %}💬{% else %}<span style="opacity:.25">💬</span>{% endif %} {% if l.tem_mail %}✉️{% else %}<span style="opacity:.25">✉️</span>{% endif %}{% if l.tem_decisor %} <span title="Decisor mapeado">🎯</span>{% endif %}{% if l.verificado and not l.tem_mail and not l.tem_wpp %} <span class="mut" style="font-size:.7rem" title="Site verificado, sem e-mail/WhatsApp">✓ sem dados</span>{% endif %}</td>
+            <td style="font-size:.76rem;line-height:1.5;min-width:190px">
+              {% if l.whats %}<div>💬 {{ l.whats }}</div>{% endif %}
+              {% if l.email_v %}<div>✉️ {{ l.email_v }}</div>{% endif %}
+              {% if l.insta %}<div class="mut">📷 {{ l.insta }}</div>{% endif %}
+              {% if l.tem_decisor %}<div style="color:var(--verde-claro)">🎯 decisor mapeado</div>{% endif %}
+              {% if not l.whats and not l.email_v and not l.insta %}<span class="mut">{% if l.verificado %}✓ verificado · sem dados no site{% else %}—{% endif %}</span>{% endif %}
+            </td>
             <td>{% if l.campanha %}<span class="bt-chip">{{ l.campanha }}</span>{% else %}<span class="mut">—</span>{% endif %}</td>
             <td class="mut" style="font-variant-numeric:tabular-nums;white-space:nowrap">💬 {{ l.toque_wa }} · ✉️ {{ l.toque_mail }}</td>
             <td class="mut" style="font-size:.78rem;white-space:nowrap">{{ l.ult or '—' }}</td>

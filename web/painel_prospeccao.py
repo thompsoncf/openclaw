@@ -1817,11 +1817,14 @@ def prospeccao_campanha_previa_ia(request: Request, camp_id: int):
         return JSONResponse({"ok": False, "erro": "Adicione leads (com e-mail) primeiro."})
     lead = {"empresa": s[0], "segmento": s[1], "cidade": s[2], "uf": s[3], "whatsapp": s[4], "email": s[5]}
     try:
-        from finance.campanhas_motor import _email_ia
+        from finance.campanhas_motor import _email_ia, _conta_identidade, _tira_assinatura, _assinatura_texto
         m = _email_ia(pool, ctx["conta_id"], lead)
+        with pool.connection() as c:
+            idn = _conta_identidade(c, ctx["conta_id"])
+        corpo = _tira_assinatura(m["corpo"]) + "\n\n" + _assinatura_texto(idn)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "erro": "Não consegui gerar a prévia."})
-    return JSONResponse({"ok": True, "empresa": lead["empresa"], "assunto": m["assunto"], "corpo": m["corpo"]})
+    return JSONResponse({"ok": True, "empresa": lead["empresa"], "assunto": m["assunto"], "corpo": corpo})
 
 
 # ================================================================ FICHA DO ALVO

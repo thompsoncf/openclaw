@@ -106,14 +106,22 @@ def _email_ia(pool, conta_id: int, lead: dict) -> dict:
             instr, faqs = _conhecimento(c, conta_id)
         catalogo = scat.listar(pool, conta_id)
         cat = "\n".join(f"- {s['nome']}: mensal R${s['mensal_centavos'] // 100}" for s in catalogo[:8])
+        with pool.connection() as c:
+            idn = _conta_identidade(c, conta_id)
+        remetente = idn.get("empresa") or "nossa empresa"
         system = (
             "Você escreve e-mails de 1º contato (prospecção fria B2B) em português do Brasil, "
             "curtos (4-6 linhas), calorosos e diretos, focados no benefício. Sem enrolação, "
             "sem exagero. Termine com uma pergunta leve de call-to-action. Use SÓ o que está na "
-            "base; não invente preço/promessa. Responda em JSON: "
-            '{"assunto":"...","corpo":"..."}\n\n'
-            f"EMPRESA (quem envia):\n{instr or '(nada)'}\n\nSERVIÇOS:\n{cat or '(sem catálogo)'}")
-        pedir = (f"Escreva pra este lead:\nEmpresa: {lead.get('empresa')}\n"
+            "base; não invente preço/promessa.\n"
+            "REGRAS DA SAUDAÇÃO E ASSINATURA:\n"
+            "- Comece cumprimentando a EMPRESA do lead pelo nome (ex.: 'Olá, equipe {nome do lead}!'). "
+            "Nunca cumprimente com o nome de uma pessoa.\n"
+            f"- Quem envia é a empresa '{remetente}'. NÃO escreva despedida nem assinatura "
+            "('Atenciosamente', 'Equipe ...', nome, telefone) — a assinatura é adicionada automaticamente.\n"
+            "Responda em JSON: {\"assunto\":\"...\",\"corpo\":\"...\"}\n\n"
+            f"QUEM ENVIA (empresa '{remetente}'):\n{instr or '(nada)'}\n\nSERVIÇOS:\n{cat or '(sem catálogo)'}")
+        pedir = (f"Escreva pra este lead:\nEmpresa (cumprimente por este nome): {lead.get('empresa')}\n"
                  f"Segmento: {lead.get('segmento') or '—'}\nCidade: {lead.get('cidade') or '—'}\n\n"
                  "Só o JSON.")
         from core.brain import Brain
@@ -133,10 +141,68 @@ def _email_ia(pool, conta_id: int, lead: dict) -> dict:
     return fallback
 
 
-def _html(corpo: str, lead: dict, conta_nome: str, link_descad: str,
+def _conta_identidade(c, conta_id: int) -> dict:
+    """Identidade da conta pro rodapé do e-mail: nome da EMPRESA (nome fantasia,
+    não o do responsável), nome do RESPONSÁVEL e telefone cadastrado no ZAQ."""
+    row = c.execute(
+        "select coalesce(nullif(trim(nome_fantasia),''), nome), nome, coalesce(telefone,'') "
+        "from contas where id=%s", (conta_id,)).fetchone() or ("", "", "")
+    return {"empresa": (row[0] or "").strip(),
+            "responsavel": (row[1] or "").strip(),
+            "telefone": (row[2] or "").strip()}
+
+
+# despedidas que a IA às vezes cola no fim — a gente corta e usa a nossa assinatura
+_DESPEDIDAS = ("atenciosamente", "abraços", "abraço", "att", "cordialmente",
+               "saudações", "grande abraço", "obrigado", "obrigada")
+
+
+def _tira_assinatura(corpo: str) -> str:
+    """Corta uma despedida/assinatura que a IA tenha escrito no fim (a assinatura
+    correta — Equipe/empresa/responsável/telefone — é montada em código)."""
+    linhas = (corpo or "").split("\n")
+    for i, l in enumerate(linhas):
+        s = l.strip().lower().rstrip(",.:!")
+        if s in _DESPEDIDAS:
+            return "\n".join(linhas[:i]).rstrip()
+    return (corpo or "").rstrip()
+
+
+def _assinatura_texto(idn: dict) -> str:
+    emp, resp, tel = idn.get("empresa") or "", idn.get("responsavel") or "", idn.get("telefone") or ""
+    out = ["Atenciosamente,"]
+    if emp:
+        out.append(f"Equipe {emp}")
+    if resp and resp != emp:
+        out.append(resp)
+    if tel:
+        out.append(tel)
+    return "\n".join(out)
+
+
+def _assinatura_html(idn: dict) -> str:
+    emp, resp, tel = _esc(idn.get("empresa") or ""), _esc(idn.get("responsavel") or ""), _esc(idn.get("telefone") or "")
+    p = ['<p style="margin:20px 0 0;line-height:1.5;color:#222">Atenciosamente,']
+    if emp:
+        p.append(f'<br><b>Equipe {emp}</b>')
+    if resp and resp != idn.get("empresa"):
+        p.append(f'<br>{resp}')
+    if tel:
+        p.append(f'<br><span style="color:#555">📞 {tel}</span>')
+    p.append('</p>')
+    return "".join(p)
+
+
+def _html(corpo: str, lead: dict, idn, link_descad: str,
           link_interesse: str = "") -> str:
+    # idn pode ser o dict de identidade ou (compat) só o nome da empresa em string
+    if isinstance(idn, str):
+        idn = {"empresa": idn, "responsavel": "", "telefone": ""}
+    idn = idn or {}
+    conta_nome = idn.get("empresa") or ""
     paras = "".join(
-        f'<p style="margin:0 0 12px">{_esc(p)}</p>' for p in (corpo or "").split("\n\n") if p.strip())
+        f'<p style="margin:0 0 12px">{_esc(p)}</p>'
+        for p in _tira_assinatura(corpo).split("\n\n") if p.strip())
     cta = ""
     if link_interesse:
         cta = (
@@ -154,7 +220,7 @@ def _html(corpo: str, lead: dict, conta_nome: str, link_descad: str,
               'style="color:#0f766e;font-weight:bold;text-decoration:none">💬 Falar no WhatsApp</a></p>')
     return (
         '<div style="font-family:system-ui,Arial,sans-serif;font-size:15px;line-height:1.6;color:#222">'
-        f'{paras}{cta}{wa}'
+        f'{paras}{cta}{_assinatura_html(idn)}{wa}'
         f'<hr style="border:0;border-top:1px solid #eee;margin:20px 0 10px">'
         f'<p style="font-size:12px;color:#999;margin:0">{_esc(conta_nome or "")} · Se não quiser mais '
         f'receber, <a href="{link_descad}" style="color:#888">descadastrar</a>.</p></div>')
@@ -212,7 +278,8 @@ def _disparar(pool) -> int:
 
 def _disparar_campanha(pool, camp_id, conta_id, camp_nome, teto) -> int:
     with pool.connection() as c:
-        conta_nome = (c.execute("select nome from contas where id=%s", (conta_id,)).fetchone() or [""])[0]
+        idn = _conta_identidade(c, conta_id)
+        conta_nome = idn.get("empresa") or ""
         passos = c.execute(
             "select ordem, dias_apos, assunto, corpo, usar_ia from campanha_passos where campanha_id=%s order by ordem",
             (camp_id,)).fetchall()
@@ -257,9 +324,10 @@ def _disparar_campanha(pool, camp_id, conta_id, camp_nome, teto) -> int:
         link = _app_url() + "/descadastrar?t=" + descad_token(conta_id, email)
         link_int = _app_url() + "/tenho-interesse?t=" + interesse_token(conta_id, pid, camp_id)
         from finance import email_inbound as _ein
+        corpo_txt = _tira_assinatura(corpo) + "\n\n" + _assinatura_texto(idn)
         ok = _ein.enviar_conta(pool, conta_id, email, assunto,
-                               _html(corpo, lead, conta_nome, link, link_int),
-                               texto_alt=corpo + "\n\nTenho interesse: " + link_int,
+                               _html(corpo, lead, idn, link, link_int),
+                               texto_alt=corpo_txt + "\n\nTenho interesse: " + link_int,
                                from_nome=(conta_nome or None))
         if not ok:
             _marcar(pool, aid, "erro")
@@ -333,7 +401,8 @@ def registrar_interesse(pool, conta_id: int, prospeccao_id: int, campanha_id: in
         empresa, email, _wa = lead
         material = (c.execute("select coalesce(material,'') from campanhas where id=%s and conta_id=%s",
                               (campanha_id, conta_id)).fetchone() or [""])[0]
-        conta_nome = (c.execute("select nome from contas where id=%s", (conta_id,)).fetchone() or [""])[0]
+        idn = _conta_identidade(c, conta_id)
+        conta_nome = idn.get("empresa") or ""
         # para a sequência deste lead
         c.execute("""update campanha_alvos set status='respondeu', proximo_envio_em=null
                        where campanha_id=%s and prospeccao_id=%s""", (campanha_id, prospeccao_id))
@@ -366,9 +435,10 @@ def registrar_interesse(pool, conta_id: int, prospeccao_id: int, campanha_id: in
         try:
             from finance import email_inbound as _ein
             enviado = _ein.enviar_conta(pool, conta_id, email, assunto,
-                                        _html(corpo, {"whatsapp": None}, conta_nome,
+                                        _html(corpo, {"whatsapp": None}, idn,
                                               _app_url() + "/descadastrar?t=" + descad_token(conta_id, email)),
-                                        texto_alt=corpo, from_nome=(conta_nome or None))
+                                        texto_alt=corpo + "\n\n" + _assinatura_texto(idn),
+                                        from_nome=(conta_nome or None))
         except Exception:  # noqa: BLE001
             enviado = False
         if enviado:

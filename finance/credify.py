@@ -463,6 +463,48 @@ def decisor_com_telefone(cnpj: str) -> dict:
     }
 
 
+def decisor_por_lead(cnpj: str = "", telefones: list | None = None) -> dict:
+    """Acha o decisor com telefone EM CASCATA — o jeito certo pra lead do Google Maps:
+    1) tem CNPJ → sócio-administrador (quadro societário);
+    2) sem CNPJ mas com telefone → TITULAR do número (busca reversa) = dono provável
+       do comércio; com o CPF dele, puxa todos os números que ele tem.
+    Devolve o mesmo formato de decisor_com_telefone, + 'origem' ('cnpj'|'telefone').
+    """
+    cd = _so_digitos(cnpj or "")
+    if len(cd) == 14:
+        r = decisor_com_telefone(cd)
+        if r.get("decisor_nome"):          # achou o sócio (com ou sem telefone)
+            r["origem"] = "cnpj"
+            return r
+    # fallback: quem é o titular do número que o Maps trouxe
+    for tel in (telefones or []):
+        d = _so_digitos(tel)
+        if len(d) < 10:
+            continue
+        rt = titular_por_telefone("", d)
+        if not rt.get("ok") or not rt.get("titulares"):
+            continue
+        tit = rt["titulares"][0]
+        nome = tit.get("nome")
+        if not nome:
+            continue
+        tels = _ranquear_telefones(telefones_por_cpf(tit["cpf"])) if tit.get("cpf") else []
+        if not tels:                        # sem CPF/telefones extras: fica com o número achado
+            tels = [{"formatado": tel, "whatsapp": False, "provavel": True, "tipo": ""}]
+        principal = tels[0]
+        return {
+            "ok": True, "origem": "telefone",
+            "decisor_nome": nome, "decisor_qualificacao": "Titular do telefone (provável dono)",
+            "decisor_telefone": principal.get("formatado"),
+            "decisor_whatsapp": bool(principal.get("whatsapp")),
+            "telefones": [{"formatado": t.get("formatado"), "tipo": t.get("tipo", ""),
+                           "whatsapp": bool(t.get("whatsapp")), "provavel": t.get("provavel", False)}
+                          for t in tels if t.get("formatado")],
+            "erro": None,
+        }
+    return {"ok": False, "erro": "sem_cnpj_e_sem_titular"}
+
+
 def _ranquear_telefones(tels: list[dict]) -> list[dict]:
     """Ordena os telefones do decisor por probabilidade de ser o número dele e marca
     o mais provável (provavel=True no 1º). Sinais, do mais forte pro mais fraco:

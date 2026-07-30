@@ -2724,18 +2724,17 @@ def _enriquecer_lote_bg(pool, conta_id, ids):
 
 
 def _enriquecer_decisor_um(pool, conta_id, aid) -> bool:
-    """Busca o decisor (Credify) de UM lead com CNPJ e salva. Devolve True se achou.
-    Pula quem já tem decisor (não paga de novo)."""
+    """Acha o decisor de UM lead em CASCATA (CNPJ → sócio; senão telefone → titular)
+    e salva. Devolve True se achou. Pula quem já tem decisor (não paga de novo)."""
     from finance import credify as cf
     with pool.connection() as c:
-        row = c.execute("select cnpj, decisor_em from prospeccao where id=%s and conta_id=%s",
-                        (aid, conta_id)).fetchone()
+        row = c.execute(
+            "select cnpj, decisor_em, whatsapp, telefone from prospeccao where id=%s and conta_id=%s",
+            (aid, conta_id)).fetchone()
     if not row or row[1] is not None:
         return False
-    cd = _so_digitos(row[0] or "")
-    if len(cd) != 14:
-        return False
-    r = cf.decisor_com_telefone(cd)
+    cnpj, _dec, wa, tel = row
+    r = cf.decisor_por_lead(cnpj or "", [t for t in (wa, tel) if t])
     nome = r.get("decisor_nome")
     if not nome:
         return False
@@ -2779,8 +2778,9 @@ async def prospeccao_base_enriquecer(request: Request):
             return JSONResponse({"ok": False, "erro": "Credify não configurada (CREDIFY_CLIENT_ID/SECRET no Render)."})
         with pool.connection() as c:
             sel = [r[0] for r in c.execute(
-                "select id from prospeccao where conta_id=%s and id = any(%s)"
-                " and length(regexp_replace(coalesce(cnpj,''),'\\D','','g'))=14 and decisor_em is null",
+                "select id from prospeccao where conta_id=%s and id = any(%s) and decisor_em is null"
+                " and (length(regexp_replace(coalesce(cnpj,''),'\\D','','g'))=14"
+                "      or coalesce(nullif(trim(whatsapp),''), nullif(trim(telefone),'')) is not null)",
                 (conta_id, pids)).fetchall()]
         achou = 0
         for pid in sel:
@@ -2849,10 +2849,11 @@ def prospeccao_decisor_credify(request: Request, alvo_id: int):
     from finance import credify as cf
     if not cf.tem_credenciais():
         return JSONResponse({"ok": False, "erro": "Credify não configurada (CREDIFY_CLIENT_ID/SECRET no Render)."})
-    if not (alvo.get("cnpj") and len(_so_digitos(alvo["cnpj"])) == 14):
-        return JSONResponse({"ok": False, "erro": "Preencha o CNPJ do lead primeiro."})
+    fones = [t for t in (alvo.get("whatsapp"), alvo.get("telefone")) if t]
+    if not ((alvo.get("cnpj") and len(_so_digitos(alvo["cnpj"])) == 14) or fones):
+        return JSONResponse({"ok": False, "erro": "Preencha o CNPJ ou um telefone do lead primeiro."})
     try:
-        r = cf.decisor_com_telefone(alvo["cnpj"])
+        r = cf.decisor_por_lead(alvo.get("cnpj") or "", fones)   # cascata: CNPJ → telefone
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "erro": "Falha ao consultar a Credify."})
     nome = r.get("decisor_nome")
@@ -2862,7 +2863,7 @@ def prospeccao_decisor_credify(request: Request, alvo_id: int):
         elif r.get("motivo"):
             msg = "Credify: " + str(r["motivo"]) + "."
         else:
-            msg = "Não achei o quadro societário desse CNPJ na Credify."
+            msg = "Não achei o dono — nem pelo CNPJ (quadro societário) nem pelo telefone (titular)."
         return JSONResponse({"ok": False, "erro": msg})
     tels = r.get("telefones") or []
     with pool.connection() as c:
@@ -2874,7 +2875,7 @@ def prospeccao_decisor_credify(request: Request, alvo_id: int):
              bool(r.get("decisor_whatsapp")), json.dumps(tels), alvo_id, ctx["conta_id"]))
         c.commit()
     return JSONResponse({"ok": True, "nome": nome, "cargo": r.get("decisor_qualificacao"),
-                         "telefone": r.get("decisor_telefone"),
+                         "telefone": r.get("decisor_telefone"), "origem": r.get("origem", "cnpj"),
                          "whatsapp": bool(r.get("decisor_whatsapp")),
                          "n_telefones": len(tels),
                          "sem_telefone": not tels})
@@ -3455,7 +3456,7 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="mut" style="font-size:.8rem"><b style="color:var(--txt)" id="base-sel-n">0</b> marcado(s) · {{ leads|length }} na página{% if leads|length>=300 %} (máx 300){% endif %}</div>
       <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
         <button type="button" class="pbtn ghost" onclick="baseEnriquecer('canais')" title="Raspa o site dos marcados e acha e-mail / Instagram / WhatsApp (grátis)">🔎 Enriquecer canais</button>
-        {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseEnriquecer('decisor')" title="Acha o dono (nome + telefone) dos marcados na Credify pelo CNPJ — consulta paga">🎯 Buscar decisor</button>{% endif %}
+        {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseEnriquecer('decisor')" title="Acha o dono dos marcados na Credify: por CNPJ (sócio) ou pelo telefone do Google (titular/dono) — consulta paga">🎯 Buscar decisor</button>{% endif %}
         {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseExplorium()" title="Teste de conexão com a Explorium (Vibe) no lead marcado">🔮 Explorium (teste)</button>{% endif %}
         <span style="width:1px;height:24px;background:var(--borda);margin:0 .15rem"></span>
         {% if gerencia %}
@@ -3517,14 +3518,14 @@ function baseExplorium(){
 function baseEnriquecer(tipo){
   var ids=baseChecked();
   if(!ids.length){alert('Marque ao menos um contato pra enriquecer.');return;}
-  if(tipo==='decisor' && !confirm('Buscar o decisor de '+ids.length+' lead(s) na Credify?\\nÉ consulta paga — só usa quem tem CNPJ e pula quem já tem decisor.'))return;
+  if(tipo==='decisor' && !confirm('Buscar o decisor de '+ids.length+' lead(s) na Credify?\\nÉ consulta paga — usa o CNPJ (sócio) OU o telefone (titular/dono) e pula quem já tem decisor.'))return;
   var body=new URLSearchParams();ids.forEach(function(i){body.append('ids',i);});body.append('tipo',tipo);
   capToast(tipo==='decisor'?'Buscando decisores… (alguns segundos)':'Verificando os sites… (alguns segundos)');
   fetch('/painel/prospeccao/base/qualificar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body}).then(function(r){return r.json();}).then(function(d){
     if(!d.ok){alert('⚠️ '+(d.erro||'Não consegui rodar.'));return;}
     var msg;
     if(tipo==='decisor'){
-      if(!d.n){alert('Nenhum lead marcado é elegível pra decisor.'+(d.sem_cnpj?('\\n'+d.sem_cnpj+' sem CNPJ preenchido.'):'')+'\\n(Também pula quem já tem decisor.)');return;}
+      if(!d.n){alert('Nenhum lead marcado é elegível pra decisor.'+(d.sem_cnpj?('\\n'+d.sem_cnpj+' sem CNPJ nem telefone.'):'')+'\\n(Também pula quem já tem decisor.)');return;}
       msg='🎯 '+d.n+' consultado(s) · '+d.achou+' decisor(es) encontrado(s)'+(d.sem?(' · '+d.sem+' sem quadro/telefone na Credify'):'');
     }else{
       if(!d.n){alert('Nenhum lead marcado tem site pra raspar'+(d.sem_site?(' ('+d.sem_site+' sem site)'):'')+'.');return;}

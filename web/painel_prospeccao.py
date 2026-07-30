@@ -2887,12 +2887,11 @@ _CSS = """<style>
 # de progresso). O <script> entra no _CSS, então TODA tela de prospecção ganha a
 # navegação instantânea sem recarregar sensação de lentidão; o back segue rendrizando.
 _NAV_ASSETS = """<style>
-.pnavbar{display:flex;gap:.35rem;flex-wrap:wrap;align-items:center;padding:.4rem;border:1px solid var(--borda);border-radius:12px;background:var(--card);margin:.2rem 0 1rem}
-.pnav{display:inline-flex;align-items:center;gap:.35rem;font-size:.85rem;padding:.42rem .7rem;border-radius:9px;border:1px solid transparent;color:var(--mut);text-decoration:none;white-space:nowrap;background:none;font-family:inherit;cursor:pointer}
-.pnav:hover{color:var(--txt);background:var(--bg)}
-.pnav.on{color:var(--verde-claro);border-color:#1e4a34;background:#10241a;font-weight:600}
-.pnav.cfg{margin-left:auto}
-#pnavprog{position:fixed;top:0;left:0;height:2px;width:0;background:var(--verde);z-index:99999;transition:width .35s ease;opacity:0}
+.pnavbar{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin:.2rem 0 1.1rem}
+.pnav{display:inline-flex;align-items:center;gap:.35rem;font-size:.84rem;font-weight:600;padding:.45rem .8rem;border-radius:9px;border:1px solid var(--borda);color:var(--txt);background:transparent;text-decoration:none;white-space:nowrap;font-family:inherit;cursor:pointer;line-height:1}
+.pnav:hover{border-color:var(--verde);color:#fff}
+.pnav.on{color:#fff;background:var(--verde);border-color:var(--verde)}
+#pnavprog{position:fixed;top:0;left:0;height:3px;width:0;background:var(--verde);box-shadow:0 0 8px var(--verde);z-index:99999;transition:width .3s ease;opacity:0}
 #pnavprog.go{opacity:1}
 </style><script>(function(){
  if(window.__pnav)return; window.__pnav=1;
@@ -4268,7 +4267,7 @@ _CPILL_CSS = """<style>.cpill{font-size:.68rem;font-weight:700;padding:.14rem .5
 .mailp .h b{color:var(--txt)}
 .mailp .b{padding:.9rem 1rem;font-size:.9rem;line-height:1.6;white-space:pre-wrap}
 .mailp .wa{display:inline-block;margin-top:.5rem;color:#3ddc84;border:1px solid #1e4a34;background:#10241a;border-radius:8px;padding:.3rem .65rem;font-size:.82rem;text-decoration:none}
-.mailp .f{padding:.55rem .85rem;border-top:1px solid var(--borda);font-size:.68rem;color:var(--mut)}</style>"""
+.mailp .f{padding:.55rem .85rem;border-top:1px solid var(--borda);font-size:.68rem;color:var(--mut)}</style>""" + _NAV_ASSETS
 
 _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + """
 <div style="max-width:1000px;margin:0 auto">

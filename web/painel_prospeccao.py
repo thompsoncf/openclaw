@@ -1828,6 +1828,38 @@ def prospeccao_campanha_previa_ia(request: Request, camp_id: int):
     return JSONResponse({"ok": True, "empresa": lead["empresa"], "assunto": m["assunto"], "corpo": corpo})
 
 
+def _numeros_candidatos(alvo: dict) -> list[dict]:
+    """Todos os números já captados do lead, ORDENADOS do mais provável/quente pra
+    baixo, pro seletor de envio no WhatsApp. Prioriza: telefone do decisor marcado
+    ⭐ (mais provável) > decisor com WhatsApp > decisor > WhatsApp do lead > telefone
+    da empresa. Dedup por dígitos."""
+    vistos, out = set(), []
+
+    def add(numero, label, score, whatsapp=False):
+        d = _so_digitos(numero or "")
+        if len(d) < 10 or d in vistos:
+            return
+        vistos.add(d)
+        out.append({"numero": numero, "label": label, "score": score, "whatsapp": whatsapp})
+
+    for t in (alvo.get("decisor_telefones") or []):
+        fmt = t.get("formatado") or ""
+        wpp = bool(t.get("whatsapp"))
+        prov = bool(t.get("provavel"))
+        rot = ("⭐ " if prov else "") + "Decisor"
+        if wpp:
+            rot += " · WhatsApp"
+        if t.get("tipo_rot"):
+            rot += " · " + t["tipo_rot"]
+        add(fmt, rot, 60 + (40 if prov else 0) + (30 if wpp else 0), wpp)
+    if alvo.get("whatsapp"):
+        add(alvo["whatsapp"], "WhatsApp do lead", 45, True)
+    if alvo.get("telefone"):
+        add(alvo["telefone"], "Telefone da empresa", 20, False)
+    out.sort(key=lambda x: x["score"], reverse=True)
+    return out
+
+
 # ================================================================ FICHA DO ALVO
 @router.get("/painel/prospeccao/{alvo_id}", response_class=HTMLResponse)
 def prospeccao_ficha(request: Request, alvo_id: int):
@@ -1857,6 +1889,7 @@ def prospeccao_ficha(request: Request, alvo_id: int):
                    tem_cnpja=fontes.tem_chave_cnpja(), tem_ia=_tem_ia(),
                    tem_credify=_tem_credify(),
                    wa_template=_prospec_convite.template_configurado(),
+                   wa_numeros=_numeros_candidatos(alvo),
                    embed=request.query_params.get("embed") == "1",
                    aviso=request.session.pop("prosp_aviso", None))
 
@@ -2548,7 +2581,8 @@ def prospeccao_registrar_whatsapp(request: Request, alvo_id: int, texto: str = F
 
 
 @router.post("/painel/prospeccao/{alvo_id}/enviar-whatsapp")
-def prospeccao_enviar_whatsapp(request: Request, alvo_id: int, texto: str = Form(...)):
+def prospeccao_enviar_whatsapp(request: Request, alvo_id: int, texto: str = Form(...),
+                               numero: str = Form("")):
     """Envia o WhatsApp de 1º contato PELO CANAL da empresa (sem abrir wa.me) e
     registra na timeline. Retorna erro amigável se o canal não estiver pronto."""
     ctx, redir = _acesso(request)
@@ -2561,7 +2595,7 @@ def prospeccao_enviar_whatsapp(request: Request, alvo_id: int, texto: str = Form
     texto = (texto or "").strip()
     if not texto:
         return JSONResponse({"ok": False, "erro": "sem_texto"})
-    numero = (alvo.get("whatsapp") or alvo.get("telefone") or "").strip()
+    numero = (numero or alvo.get("whatsapp") or alvo.get("telefone") or "").strip()
     if not numero:
         return JSONResponse({"ok": False, "erro": "sem_numero"})
     from finance import whatsapp_out
@@ -2584,7 +2618,7 @@ def prospeccao_enviar_whatsapp(request: Request, alvo_id: int, texto: str = Form
 
 
 @router.post("/painel/prospeccao/{alvo_id}/enviar-convite-wa")
-def prospeccao_enviar_convite_wa(request: Request, alvo_id: int):
+def prospeccao_enviar_convite_wa(request: Request, alvo_id: int, numero: str = Form("")):
     """Dispara o TEMPLATE aprovado de 1º contato (WhatsApp frio, fora da janela de
     24h) pelo número da empresa e registra na timeline."""
     ctx, redir = _acesso(request)
@@ -2595,7 +2629,8 @@ def prospeccao_enviar_convite_wa(request: Request, alvo_id: int):
     if not alvo or not _pode_ver(alvo, ctx):
         return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
     from finance import prospec_convite
-    res = prospec_convite.enviar_convite(pool, ctx["conta_id"], alvo_id)
+    res = prospec_convite.enviar_convite(pool, ctx["conta_id"], alvo_id,
+                                         numero=(numero or "").strip() or None)
     if not res.get("ok"):
         msgs = {"sem_template": "Template ainda não configurado (falta o SID aprovado no Twilio).",
                 "sem_numero": "Lead sem número de WhatsApp/telefone.",
@@ -3176,6 +3211,15 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           {% if a.whatsapp or a.telefone %}<button type="button" class="pbtn ghost" id="ia-btn-wpp" onclick="iaMsg('whatsapp')">💬 WhatsApp com IA</button>{% endif %}
           {% if wa_template and (a.whatsapp or a.telefone) %}<button type="button" class="pbtn ghost" id="wa-tpl-btn" onclick="enviarConviteWa()" title="Mensagem aprovada — funciona mesmo no 1º contato frio (fora da janela de 24h)">📨 Convite WhatsApp</button>{% endif %}
         </div>
+        {% if wa_numeros %}
+        <div id="wa-num-wrap" style="margin-top:.6rem;max-width:420px">
+          <label class="lbl" style="font-size:.74rem">📱 Enviar para (número já captado)</label>
+          <select class="fld" id="wa-numero">
+            {% for n in wa_numeros %}<option value="{{ n.numero }}">{{ n.label }} — {{ n.numero }}</option>{% endfor %}
+          </select>
+          <div class="mut" style="font-size:.72rem;margin-top:.25rem">Ordenados do mais provável/quente (⭐ decisor) pra baixo. Usado nos envios de WhatsApp acima.</div>
+        </div>
+        {% endif %}
         <div id="ia-box" style="display:none;margin-top:.7rem"></div>
       </div>
       {% endif %}
@@ -3401,16 +3445,19 @@ function iaSendEmail(){var a=document.getElementById('ia-assunto').value,c=docum
     fToast('E-mail enviado ✓');setTimeout(function(){location.reload();},900);}).catch(function(){fToast('Falha de rede');});}
 function iaWhats(){var t=(document.getElementById('ia-texto')||{}).value||'';if(!t.trim()){fToast('Escreva a mensagem');return;}
   var b=document.getElementById('ia-wa-btn');if(b){b.disabled=true;b.textContent='Enviando…';}
-  var fd=new FormData();fd.append('texto',t);
+  var ns=document.getElementById('wa-numero');
+  var fd=new FormData();fd.append('texto',t);if(ns&&ns.value)fd.append('numero',ns.value);
   fetch('/painel/prospeccao/{{ a.id }}/enviar-whatsapp',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();}).then(function(d){
     if(b){b.disabled=false;b.textContent='💬 Enviar pelo sistema';}
     if(!d.ok){fToast(d.msg||'Não consegui enviar');return;}
     fToast('Mensagem enviada ✓');setTimeout(function(){location.reload();},900);
   }).catch(function(){if(b){b.disabled=false;b.textContent='💬 Enviar pelo sistema';}fToast('Falha de rede');});}
 function enviarConviteWa(){var b=document.getElementById('wa-tpl-btn');
-  if(!confirm('Enviar o convite de 1º contato por WhatsApp (mensagem aprovada) para este lead?'))return;
+  var ns=document.getElementById('wa-numero');var alvo=ns&&ns.value?ns.value:'este lead';
+  if(!confirm('Enviar o convite de 1º contato por WhatsApp (mensagem aprovada) para '+alvo+'?'))return;
   if(b){b.disabled=true;b.textContent='Enviando…';}
-  fetch('/painel/prospeccao/{{ a.id }}/enviar-convite-wa',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()}).then(function(r){return r.json();}).then(function(d){
+  var fd=new FormData();if(ns&&ns.value)fd.append('numero',ns.value);
+  fetch('/painel/prospeccao/{{ a.id }}/enviar-convite-wa',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();}).then(function(d){
     if(b){b.disabled=false;b.textContent='📨 Convite WhatsApp';}
     if(!d.ok){fToast(d.msg||'Não consegui enviar');return;}
     fToast('Convite enviado ✓');setTimeout(function(){location.reload();},900);

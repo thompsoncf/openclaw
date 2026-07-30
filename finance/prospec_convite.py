@@ -29,9 +29,12 @@ def template_configurado() -> bool:
     return bool(sid_template() and wa.configurado())
 
 
-def enviar_convite(pool, conta_id: int, alvo_id: int) -> dict:
+def enviar_convite(pool, conta_id: int, alvo_id: int, numero: str | None = None) -> dict:
     """Dispara o template de 1º contato pro número do lead, PELO NÚMERO DA EMPRESA
-    (Twilio). Funciona fora da janela de 24h. Retorno tolerante: {'ok': bool, ...}."""
+    (Twilio). Funciona fora da janela de 24h. Retorno tolerante: {'ok': bool, ...}.
+
+    `numero`: número escolhido no seletor da ficha; se vazio, usa o WhatsApp/telefone
+    do lead."""
     sid = sid_template()
     if not sid:
         return {"ok": False, "erro": "sem_template"}
@@ -44,7 +47,7 @@ def enviar_convite(pool, conta_id: int, alvo_id: int) -> dict:
         if not row:
             return {"ok": False, "erro": "lead_nao_encontrado"}
         empresa_lead, wa_num, tel = row
-        numero = (wa_num or tel or "").strip()
+        numero = ((numero or "").strip() or wa_num or tel or "").strip()
         if not numero:
             return {"ok": False, "erro": "sem_numero"}
         idn = _conta_identidade(c, conta_id)

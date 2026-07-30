@@ -349,6 +349,9 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
         com_mail = c.execute(f"select count(*) from prospeccao p where p.conta_id=%s and p.estagio='base'{esc} and coalesce(nullif(p.email,''),'')<>''", tuple(bp)).fetchone()[0]
         em_camp = c.execute(f"select count(distinct p.id) from prospeccao p join campanha_alvos a on a.prospeccao_id=p.id where p.conta_id=%s and p.estagio='base'{esc}", tuple(bp)).fetchone()[0]
         virou = c.execute(f"select count(*) from prospeccao p where p.conta_id=%s and p.estagio='lead'{esc}", tuple(bp)).fetchone()[0]
+        camp_rows = c.execute("select id, nome, status from campanhas where conta_id=%s order by criado_em desc",
+                              (conta_id,)).fetchall() if ctx["gerencia"] else []
+    campanhas = [{"id": r[0], "nome": r[1], "status_rot": _STATUS_ROT_CP.get(r[2], r[2])} for r in camp_rows]
     leads = []
     for r in rows:
         leads.append({"id": r[0], "empresa": r[1], "segmento": r[2], "cidade": r[3], "uf": r[4],
@@ -360,7 +363,7 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
     return _render("prospeccao_base", request, titulo="Base", secao_ativa="prospeccao",
                    leads=leads, metr=metr, q=q, segmento=segmento, cidade=cidade,
                    gerencia=ctx["gerencia"], pode_atribuir=ctx["pode_atribuir"], vendedores=vends,
-                   temperaturas_all=TEMPERATURAS, tem_places=fontes.tem_chave_places(),
+                   campanhas=campanhas, temperaturas_all=TEMPERATURAS, tem_places=fontes.tem_chave_places(),
                    aviso=request.session.pop("prosp_aviso", None))
 
 
@@ -382,6 +385,58 @@ def prospeccao_base_promover(request: Request, ids: list[str] = Form([]), only: 
         c.commit()
     request.session["prosp_aviso"] = (f"{n} contato(s) promovido(s) a lead 🔥 — já estão no funil."
                                       if n else "Selecione ao menos um contato pra promover.")
+    return RedirectResponse("/painel/prospeccao/base", status_code=303)
+
+
+@router.post("/painel/prospeccao/base/add-campanha")
+def prospeccao_base_add_campanha(request: Request, ids: list[str] = Form([]),
+                                 campanha_id: str = Form(""), novo_nome: str = Form("")):
+    """Da Base: joga os contatos MARCADOS numa campanha específica — existente ou uma
+    NOVA (nasce em rascunho, com a sequência padrão, pra você definir a abordagem antes
+    de ativar). Cada campanha = uma abordagem; nada entra no lugar errado."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "Só o dono/gestor gerencia campanhas."
+        return RedirectResponse("/painel/prospeccao/base", status_code=303)
+    pids = [int(i) for i in ids if str(i).isdigit()]
+    if not pids:
+        request.session["prosp_aviso"] = "Marque ao menos um contato pra jogar na campanha."
+        return RedirectResponse("/painel/prospeccao/base", status_code=303)
+    nova = (campanha_id == "__nova__") or (not campanha_id and (novo_nome or "").strip())
+    with get_pool().connection() as c:
+        if nova:
+            nome = (novo_nome or "").strip()[:120] or "Nova campanha"
+            cid = c.execute("insert into campanhas (conta_id, nome, criado_por) values (%s,%s,%s) returning id",
+                            (ctx["conta_id"], nome, ctx["membro_id"])).fetchone()[0]
+            for (ordem, dias, assunto, corpo, ia) in _PASSOS_PADRAO:
+                c.execute("""insert into campanha_passos (campanha_id, ordem, dias_apos, assunto, corpo, usar_ia)
+                             values (%s,%s,%s,%s,%s,%s)""", (cid, ordem, dias, assunto, corpo, ia))
+        else:
+            try:
+                cid = int(campanha_id)
+            except (ValueError, TypeError):
+                request.session["prosp_aviso"] = "Escolha uma campanha ou crie uma nova."
+                return RedirectResponse("/painel/prospeccao/base", status_code=303)
+            row = c.execute("select nome from campanhas where id=%s and conta_id=%s",
+                            (cid, ctx["conta_id"])).fetchone()
+            if not row:
+                request.session["prosp_aviso"] = "Campanha não encontrada."
+                return RedirectResponse("/painel/prospeccao/base", status_code=303)
+            nome = row[0]
+        n = c.execute(
+            """insert into campanha_alvos (campanha_id, prospeccao_id)
+                 select %s, p.id from prospeccao p
+                  where p.conta_id=%s and p.id = any(%s) on conflict do nothing""",
+            (cid, ctx["conta_id"], pids)).rowcount
+        c.commit()
+    # nova campanha → vai pra tela dela (define abordagem + ativar); existente → volta pra Base
+    if nova:
+        request.session["prosp_aviso"] = (f"Campanha '{nome}' criada com {n} contato(s) ✓ — "
+                                          "ajuste a abordagem e ative quando quiser.")
+        return RedirectResponse(f"/painel/prospeccao/campanhas/{cid}", status_code=303)
+    request.session["prosp_aviso"] = f"{n} contato(s) adicionados à campanha '{nome}' ✓"
     return RedirectResponse("/painel/prospeccao/base", status_code=303)
 
 
@@ -3105,16 +3160,24 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 
   <form method="post" action="/painel/prospeccao/base/promover">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem;gap:.5rem;flex-wrap:wrap">
-      <div class="mut" style="font-size:.8rem">{{ leads|length }} contato(s){% if leads|length>=300 %} (mostrando 300){% endif %}</div>
-      <div style="display:flex;gap:.5rem">
-        {% if gerencia %}<a class="pbtn ghost" href="/painel/prospeccao/campanhas">📣 Adicionar à campanha</a>{% endif %}
-        <button class="pbtn" name="only" value="">⬆︎ Promover selecionados a lead</button>
+      <div class="mut" style="font-size:.8rem"><b style="color:var(--txt)" id="base-sel-n">0</b> marcado(s) · {{ leads|length }} na página{% if leads|length>=300 %} (máx 300){% endif %}</div>
+      <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
+        {% if gerencia %}
+        <select name="campanha_id" class="fld" style="max-width:220px;width:auto" onchange="baseCampSel(this)">
+          <option value="">📣 Jogar na campanha…</option>
+          {% for c in campanhas %}<option value="{{ c.id }}">{{ c.nome }} · {{ c.status_rot }}</option>{% endfor %}
+          <option value="__nova__">➕ Nova campanha…</option>
+        </select>
+        <input name="novo_nome" id="base-novo-nome" class="fld" placeholder="Nome da nova campanha" maxlength="120" style="display:none;max-width:200px;width:auto">
+        <button class="pbtn" formaction="/painel/prospeccao/base/add-campanha" onclick="return baseJogarCheck()" title="Joga os marcados na campanha escolhida">Jogar →</button>
+        {% endif %}
+        <button class="pbtn ghost" name="only" value="">⬆︎ Promover a lead</button>
       </div>
     </div>
     <div class="bt-wrap">
       <table class="bt-tbl">
         <thead><tr>
-          <th style="width:26px"><input type="checkbox" onclick="var s=this.checked;document.querySelectorAll('.bt-ck').forEach(function(c){c.checked=s})"></th>
+          <th style="width:26px"><input type="checkbox" onclick="var s=this.checked;document.querySelectorAll('.bt-ck').forEach(function(c){c.checked=s});baseUpd()"></th>
           <th>Empresa</th><th>Contato</th><th>Campanha</th><th>Toques</th><th>Última atividade</th><th></th>
         </tr></thead>
         <tbody>
@@ -3136,6 +3199,19 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </div>
   </form>
 </div>
+<script>
+function baseCampSel(s){var i=document.getElementById('base-novo-nome');if(!i)return;var nova=(s.value==='__nova__');i.style.display=nova?'':'none';if(nova){i.focus();}}
+function baseMarcados(){return document.querySelectorAll('.bt-ck:checked').length;}
+function baseUpd(){var n=document.getElementById('base-sel-n');if(n)n.textContent=baseMarcados();}
+document.addEventListener('change',function(e){if(e.target&&e.target.classList&&e.target.classList.contains('bt-ck'))baseUpd();});
+function baseJogarCheck(){
+  if(baseMarcados()===0){alert('Marque ao menos um contato na lista pra jogar na campanha.');return false;}
+  var s=document.querySelector('select[name=campanha_id]');if(!s)return true;
+  if(!s.value){alert('Escolha uma campanha (ou crie uma nova) no seletor.');s.focus();return false;}
+  if(s.value==='__nova__'){var i=document.getElementById('base-novo-nome');if(i&&!i.value.trim()){alert('Dê um nome pra nova campanha.');i.focus();return false;}}
+  return true;
+}
+</script>
 {% endblock %}"""
 
 

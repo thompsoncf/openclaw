@@ -24,23 +24,24 @@ import httpx
 FRIENDLY = "prospec_1contato_ptbr"
 LANG = "pt_BR"
 
-# Corpo do template. Mantido curto, cordial e sem promessa exagerada (ajuda na
-# aprovação). Os botões de resposta rápida deixam o lead responder num toque.
-BODY = ("Olá! 👋 Somos da {{1}} e ajudamos empresas como a {{2}} a organizar o "
-        "atendimento e crescer com mais previsibilidade. Podemos te enviar um "
-        "material rápido mostrando como? Se tiver interesse, é só tocar abaixo. 🙂")
+# Corpo do template. Precisa FISGAR no 1º contato frio: dor concreta + benefício
+# + CTA de baixo atrito ("1 minuto") + botão. Curto e sem promessa exagerada
+# (ajuda na aprovação do WhatsApp).
+BODY = ("Oi! 👋 Aqui é da {{1}}. A gente ajuda empresas como a {{2}} a organizar "
+        "o atendimento e parar de perder cliente por demora na resposta. "
+        "Posso te mostrar em 1 minuto como ficaria aí? 👇")
 
 TYPES = {
     "twilio/quick-reply": {
         "body": BODY,
         "actions": [
-            {"id": "interesse", "title": "Tenho interesse"},
+            {"id": "interesse", "title": "Quero ver"},
             {"id": "agora_nao", "title": "Agora não"},
         ],
     },
     # fallback de texto puro (WhatsApp usa o quick-reply; o texto cobre outros canais)
     "twilio/text": {
-        "body": BODY + "\n\nResponda *SIM* que a gente te manda o material.",
+        "body": BODY + "\n\nResponda *QUERO* que eu te mando na hora.",
     },
 }
 

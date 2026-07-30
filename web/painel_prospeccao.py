@@ -1620,7 +1620,10 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
     if not ctx["gerencia"]:
         return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
     with get_pool().connection() as c:
-        cp = c.execute("select id, nome, status, limite_dia, coalesce(enviados_hoje,0), dia_contagem, coalesce(material,'') from campanhas where id=%s and conta_id=%s",
+        cp = c.execute("""select id, nome, status, limite_dia, coalesce(enviados_hoje,0), dia_contagem,
+                                 coalesce(material,''), coalesce(wa_ativo,false), coalesce(limite_wa_dia,30),
+                                 coalesce(wa_enviados_hoje,0), wa_dia_contagem
+                            from campanhas where id=%s and conta_id=%s""",
                        (camp_id, ctx["conta_id"])).fetchone()
         if not cp:
             return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
@@ -1653,8 +1656,15 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
     resp = st.get("respondeu", 0)
     from datetime import date as _date
     hoje = cp[4] if cp[5] == _date.today() else 0
+    wa_hoje = cp[9] if cp[10] == _date.today() else 0
+    with get_pool().connection() as c:
+        wa_enviados = c.execute(
+            "select count(*) from campanha_alvos where campanha_id=%s and wa_status='enviado'",
+            (camp_id,)).fetchone()[0]
     camp = {"id": cp[0], "nome": cp[1], "status": cp[2], "limite": cp[3],
-            "status_rot": _STATUS_ROT_CP.get(cp[2], cp[2]), "material": cp[6]}
+            "status_rot": _STATUS_ROT_CP.get(cp[2], cp[2]), "material": cp[6],
+            "wa_ativo": cp[7], "limite_wa": cp[8], "wa_hoje": wa_hoje, "wa_enviados": wa_enviados,
+            "wa_pronto": _prospec_convite.template_configurado()}
     metr = {"total": na_camp, "fila": st.get("fila", 0), "enviados": enviados, "responderam": resp,
             "descadastros": st.get("descadastrou", 0), "erros": st.get("erro", 0),
             "concluidos": st.get("concluido", 0), "hoje": hoje,
@@ -1708,7 +1718,8 @@ def _campanha_dona(c, conta_id, camp_id):
 
 @router.post("/painel/prospeccao/campanhas/{camp_id}/config")
 def prospeccao_campanha_config(request: Request, camp_id: int, nome: str = Form(""),
-                               limite_dia: str = Form("40"), material: str = Form("")):
+                               limite_dia: str = Form("40"), material: str = Form(""),
+                               wa_ativo: str = Form(""), limite_wa_dia: str = Form("30")):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -1718,11 +1729,17 @@ def prospeccao_campanha_config(request: Request, camp_id: int, nome: str = Form(
         lim = max(1, min(500, int(limite_dia)))
     except (ValueError, TypeError):
         lim = 40
+    try:
+        lim_wa = max(1, min(200, int(limite_wa_dia)))
+    except (ValueError, TypeError):
+        lim_wa = 30
+    wa_on = str(wa_ativo).strip().lower() in ("1", "on", "true", "sim")
     with get_pool().connection() as c:
         c.execute("""update campanhas set nome=coalesce(nullif(%s,''),nome), limite_dia=%s,
-                       material=%s, atualizado_em=now() where id=%s and conta_id=%s""",
+                       material=%s, wa_ativo=%s, limite_wa_dia=%s, atualizado_em=now()
+                     where id=%s and conta_id=%s""",
                   ((nome or "").strip()[:120], lim, (material or "").strip()[:2000],
-                   camp_id, ctx["conta_id"]))
+                   wa_on, lim_wa, camp_id, ctx["conta_id"]))
         c.commit()
     request.session["prosp_aviso"] = "Configuração salva ✓"
     return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
@@ -4119,8 +4136,11 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
       <div class="cpkv"><span>Sequência</span><b>{{ cadencia }}</b></div>
       <div class="cpkv"><span>Para ao responder</span><b style="color:var(--verde-claro)">Sim</b></div></div>
     <div class="box"><h5>🛡️ Limites & LGPD</h5>
-      <div class="cpkv"><span>Envios/dia</span><b>{{ camp.limite }}</b></div>
-      <div class="cpkv"><span>Enviados hoje</span><b>{{ metr.hoje }}</b></div>
+      <div class="cpkv"><span>E-mail/dia</span><b>{{ camp.limite }}</b></div>
+      <div class="cpkv"><span>E-mail hoje</span><b>{{ metr.hoje }}</b></div>
+      {% if camp.wa_ativo %}<div class="cpkv"><span>WhatsApp/dia</span><b>{{ camp.limite_wa }}</b></div>
+      <div class="cpkv"><span>WhatsApp hoje</span><b>{{ camp.wa_hoje }}</b></div>
+      <div class="cpkv"><span>WhatsApp enviados</span><b>{{ camp.wa_enviados }}</b></div>{% endif %}
       <div class="cpkv"><span>Descadastro</span><b style="color:var(--verde-claro)">Ativo</b></div></div>
   </div>
 
@@ -4135,6 +4155,21 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
     <div style="margin-top:.7rem">
       <label class="lbl">📎 Material <span style="color:var(--mut);font-weight:400">— enviado quando o lead clica “✅ Tenho interesse” no e-mail</span></label>
       <textarea class="fld" name="material" rows="2" placeholder="Link da apresentação, PDF, vídeo… (ex.: https://... ). O agente manda isso na hora e assume a conversa.">{{ camp.material or '' }}</textarea>
+    </div>
+    <div style="margin-top:.8rem;border-top:1px solid var(--borda);padding-top:.7rem">
+      <label class="lbl" style="font-size:.82rem">💬 1º contato por WhatsApp (template aprovado)</label>
+      {% if camp.wa_pronto %}
+      <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-top:.3rem">
+        <label style="display:flex;gap:.4rem;align-items:center;cursor:pointer;font-size:.86rem">
+          <input type="checkbox" name="wa_ativo" value="1" {% if camp.wa_ativo %}checked{% endif %} style="width:auto;accent-color:var(--verde)">
+          Disparar o convite por WhatsApp junto com o e-mail
+        </label>
+        <div><label class="lbl">WhatsApp/dia</label><input class="fld" name="limite_wa_dia" value="{{ camp.limite_wa }}" inputmode="numeric" style="width:90px"></div>
+      </div>
+      <div class="mut" style="font-size:.74rem;margin-top:.3rem">Mira o <b>decisor</b> (busca na Credify pelo CNPJ e usa o ⭐ número dele); sem decisor, usa o melhor número já captado. Lead sem número recebe só o e-mail; sem contato nenhum, é pulado.</div>
+      {% else %}
+      <div class="mut" style="font-size:.78rem;margin-top:.3rem">Canal de WhatsApp ainda não está pronto pra disparo frio. Configure o template aprovado (Twilio) pra liberar esta opção.</div>
+      {% endif %}
     </div>
     <div style="margin-top:.6rem"><button class="pbtn">Salvar</button></div>
   </form>

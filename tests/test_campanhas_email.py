@@ -42,3 +42,20 @@ def test_html_tem_assinatura_unica_e_com_empresa():
 def test_html_aceita_string_por_compatibilidade():
     html = m._html("corpo", {"whatsapp": None}, "OPAPAY", "http://x/d")
     assert "Equipe OPAPAY" in html
+
+
+def test_melhor_de_lista_prefere_provavel():
+    tels = [{"formatado": "(86) 3223-1111", "provavel": False},
+            {"formatado": "(86) 98188-5930", "provavel": True}]
+    assert m._melhor_de_lista(tels) == "(86) 98188-5930"
+
+
+def test_melhor_de_lista_cai_pro_primeiro_valido():
+    tels = [{"formatado": "123", "provavel": False},          # curto demais, ignora
+            {"formatado": "(86) 3223-1111", "provavel": False}]
+    assert m._melhor_de_lista(tels) == "(86) 3223-1111"
+
+
+def test_melhor_de_lista_vazio():
+    assert m._melhor_de_lista([]) is None
+    assert m._melhor_de_lista(None) is None

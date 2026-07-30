@@ -237,14 +237,19 @@ def _agora():
 
 
 def enviar_pendentes(pool) -> int:
-    """Uma passada do motor. Best-effort."""
-    if not remetente_configurado():
-        return 0
+    """Uma passada do motor. Best-effort. E-mail e WhatsApp são canais paralelos e
+    independentes — um roda mesmo que o outro não esteja configurado."""
+    total = 0
+    if remetente_configurado():
+        try:
+            total += _disparar(pool)
+        except Exception as e:  # noqa: BLE001
+            _log.info("campanhas.enviar_pendentes(email) falhou: %s: %s", type(e).__name__, e)
     try:
-        return _disparar(pool)
+        total += _disparar_wa(pool)
     except Exception as e:  # noqa: BLE001
-        _log.info("campanhas.enviar_pendentes falhou: %s: %s", type(e).__name__, e)
-        return 0
+        _log.info("campanhas.enviar_pendentes(wa) falhou: %s: %s", type(e).__name__, e)
+    return total
 
 
 def _disparar(pool) -> int:
@@ -274,6 +279,145 @@ def _disparar(pool) -> int:
             lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
             lockc.commit()
     return enviados
+
+
+# ------------------------------------------------------------ disparo WhatsApp
+
+_LOCK_WA = 771145  # lock separado do e-mail (canais correm em paralelo)
+
+
+def _so_dig(s) -> str:
+    return "".join(ch for ch in str(s or "") if ch.isdigit())
+
+
+def _melhor_de_lista(decisor_telefones) -> str | None:
+    """Do jsonb decisor_telefones, pega o ⭐ mais provável; senão o 1º com número."""
+    provavel, primeiro = None, None
+    for t in (decisor_telefones or []):
+        if not isinstance(t, dict):
+            continue
+        f = (t.get("formatado") or "").strip()
+        if len(_so_dig(f)) < 10:
+            continue
+        primeiro = primeiro or f
+        if t.get("provavel"):
+            provavel = provavel or f
+    return provavel or primeiro
+
+
+def _numero_alvo_wa(c, conta_id, pros) -> tuple[str | None, str]:
+    """Escolhe o número do WhatsApp do lead priorizando o DECISOR (opção A):
+    1) se já tem os telefones do decisor salvos → usa o ⭐ dele;
+    2) senão, se tem CNPJ → busca o decisor na Credify AGORA, salva e usa o ⭐;
+    3) senão → cai pro WhatsApp/telefone geral já captado.
+    Devolve (numero|None, origem)."""
+    pid, empresa, cnpj, whatsapp, telefone, dec_tels = pros
+    n = _melhor_de_lista(dec_tels)
+    if n:
+        return n, "decisor"
+    cnpj_d = _so_dig(cnpj)
+    if len(cnpj_d) == 14:
+        try:
+            from finance import credify
+            r = credify.decisor_com_telefone(cnpj_d)
+        except Exception:  # noqa: BLE001
+            r = {"ok": False}
+        if r.get("ok"):
+            import json
+            tels = r.get("telefones") or []
+            c.execute(
+                """update prospeccao set decisor_nome=coalesce(decisor_nome,%s),
+                       decisor_cargo=coalesce(decisor_cargo,%s), decisor_telefone=%s,
+                       decisor_whatsapp=%s, decisor_telefones=%s::jsonb, decisor_em=now(),
+                       atualizado_em=now() where id=%s and conta_id=%s""",
+                (r.get("decisor_nome"), r.get("decisor_qualificacao"),
+                 r.get("decisor_telefone"), bool(r.get("decisor_whatsapp")),
+                 json.dumps(tels), pid, conta_id))
+            c.commit()
+            n = _melhor_de_lista(tels) or (r.get("decisor_telefone") or None)
+            if n:
+                return n, "decisor"
+    geral = (whatsapp or telefone or "").strip()
+    return (geral or None), ("empresa" if geral else "")
+
+
+def _disparar_wa(pool) -> int:
+    """Passada do WhatsApp: pra cada campanha ATIVA com wa_ativo e canal pronto,
+    dispara o template de 1º contato pro melhor número (decisor primeiro), até o
+    limite/dia. Dedup por campanha_alvos.wa_status."""
+    from finance import prospec_convite
+    if not prospec_convite.template_configurado():
+        return 0
+    sid = prospec_convite.sid_template()
+    from finance import whatsapp_out
+    enviados = 0
+    with pool.connection() as lockc:
+        if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK_WA,)).fetchone()[0]:
+            return 0
+        try:
+            with pool.connection() as c:
+                camps = c.execute(
+                    """select id, conta_id, coalesce(limite_wa_dia,30),
+                              coalesce(wa_enviados_hoje,0), wa_dia_contagem
+                         from campanhas where status='ativa' and coalesce(wa_ativo,false)""").fetchall()
+            hoje = date.today()
+            for (cid, conta_id, limite, env_hoje, dia) in camps:
+                if dia != hoje:
+                    env_hoje = 0
+                    with pool.connection() as c:
+                        c.execute("update campanhas set wa_enviados_hoje=0, wa_dia_contagem=%s where id=%s",
+                                  (hoje, cid))
+                        c.commit()
+                restante = max(0, (limite or 0) - (env_hoje or 0))
+                if restante <= 0:
+                    continue
+                enviados += _disparar_wa_campanha(pool, cid, conta_id, sid,
+                                                  min(restante, _MAX_PASS), whatsapp_out)
+        finally:
+            lockc.execute("select pg_advisory_unlock(%s)", (_LOCK_WA,))
+            lockc.commit()
+    return enviados
+
+
+def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> int:
+    with pool.connection() as c:
+        idn = _conta_identidade(c, conta_id)
+        alvos = c.execute(
+            """select a.id, p.id, p.empresa, p.cnpj, p.whatsapp, p.telefone, p.decisor_telefones
+                 from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
+                where a.campanha_id=%s and a.wa_status is null
+                  and a.status in ('fila','enviado') limit %s""", (camp_id, teto)).fetchall()
+    feitos = 0
+    for (aid, pid, empresa, cnpj, whatsapp, telefone, dec_tels) in alvos:
+        # já respondeu por qualquer canal? então não incomoda no WhatsApp
+        if _respondeu(pool, conta_id, pid):
+            _wa_marca(pool, aid, "enviado")  # trava reenvio sem gastar limite
+            continue
+        with pool.connection() as c:
+            numero, _origem = _numero_alvo_wa(c, conta_id,
+                                              (pid, empresa, cnpj, whatsapp, telefone, dec_tels))
+        if not numero:
+            _wa_marca(pool, aid, "sem_numero")
+            continue
+        variaveis = {"1": (idn.get("empresa") or "nós"), "2": (empresa or "sua empresa")}
+        with pool.connection() as c:
+            res = whatsapp_out.enviar_template(c, conta_id, numero, sid, variaveis)
+        if not res.get("ok"):
+            _wa_marca(pool, aid, "erro")
+            continue
+        _wa_marca(pool, aid, "enviado")
+        with pool.connection() as c:
+            c.execute("update campanhas set wa_enviados_hoje=coalesce(wa_enviados_hoje,0)+1 where id=%s",
+                      (camp_id,))
+            c.commit()
+        feitos += 1
+    return feitos
+
+
+def _wa_marca(pool, aid, status):
+    with pool.connection() as c:
+        c.execute("update campanha_alvos set wa_status=%s, wa_em=now() where id=%s", (status, aid))
+        c.commit()
 
 
 def _disparar_campanha(pool, camp_id, conta_id, camp_nome, teto) -> int:

@@ -3266,10 +3266,11 @@ def _navbar(active):
             ("canais", "⚙️ Canais", "/painel/prospeccao/comunicacao?aba=canais", False)]
     out = ['<nav class="pnavbar" aria-label="Prospecção">']
     for key, label, href, gated in tabs:
-        cls = "pnav on" if key == active else "pnav"
-        if key == "canais":
-            cls += " cfg"
-        a = f'<a class="{cls}" href="{href}">{label}</a>'
+        extra = " cfg" if key == "canais" else ""
+        # ativo dinâmico: a var de render `nav_ativo` sobrepõe o default estático
+        # `active` (ex.: na Comunicação, Canais fica ativo quando aba=canais).
+        cond = "{% if (nav_ativo|default('" + active + "')) == '" + key + "' %} on{% endif %}"
+        a = '<a class="pnav' + cond + extra + '" href="' + href + '">' + label + '</a>'
         if gated:  # Campanhas só pra gestão
             a = "{% if gerencia %}" + a + "{% endif %}"
         out.append(a)
@@ -4281,7 +4282,12 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .cx-head{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap}
 .cx-head code{background:var(--card);border:1px solid var(--borda);border-radius:6px;padding:.12rem .45rem;color:var(--verde-claro);font-size:.82rem}
 .cx-filtros{display:flex;gap:.5rem;flex-wrap:wrap;margin:.8rem 0}
-.cx-grid{display:grid;grid-template-columns:300px 1fr 280px;gap:.7rem;align-items:start}
+/* 2 colunas (lista + conversa) enquanto nada está aberto; vira 3 (com contexto)
+   só ao abrir uma conversa — evita os 2 quadros vazios e dá mais respiro. */
+.cx-grid{display:grid;grid-template-columns:minmax(280px,330px) minmax(0,1fr);gap:.8rem;align-items:start}
+.cx-grid.open{grid-template-columns:minmax(280px,330px) minmax(0,1fr) 300px}
+.cx-ctx{display:none}
+.cx-grid.open .cx-ctx{display:block}
 .cx-list{border:1px solid var(--borda);border-radius:12px;background:var(--card);overflow:hidden;max-height:72vh;overflow-y:auto}
 .cx-conv{display:flex;gap:.6rem;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--borda);padding:.7rem .75rem;cursor:pointer;color:var(--txt)}
 .cx-conv:hover{background:#141416}
@@ -4361,9 +4367,10 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .agfaq{border:1px solid var(--borda);border-radius:10px;padding:.55rem .65rem;margin-bottom:.45rem;background:var(--bg);display:flex;gap:.6rem;align-items:flex-start}
 .agfaq .q b{font-size:.85rem}.agfaq .q p{margin:.15rem 0 0;color:var(--txt-mut);font-size:.8rem}
 .tag-new{font-size:.6rem;padding:.05rem .4rem;border-radius:999px;background:#241634;color:#c9a3e0;border:1px solid #4a3163;margin-left:.35rem}
-@media(max-width:900px){.cx-grid{grid-template-columns:1fr}.cx-ctx{order:3}.cx-cc{grid-template-columns:1fr}.aggrid{grid-template-columns:1fr}}
+@media(max-width:1024px){.cx-grid,.cx-grid.open{grid-template-columns:1fr}.cx-ctx{order:3}.cx-cc{grid-template-columns:1fr}.aggrid{grid-template-columns:1fr}}
 </style>
 <div class="pw">
+{% set nav_ativo = 'canais' if aba == 'canais' else 'comunicacao' %}
 """ + _navbar('comunicacao') + """
   <div class="cx-head">
     <div>
@@ -4395,7 +4402,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <span class="mut" style="align-self:center;font-size:.8rem">{{ convs|length }} conversa(s)</span>
   </form>
 
-  <div class="cx-grid">
+  <div class="cx-grid" id="cx-grid">
     <div class="cx-list" id="cx-list">
       {% for c in convs %}
       <button type="button" class="cx-conv" id="cxc-{{ c.id }}" onclick="cxOpen(this,{{ c.id }})">
@@ -4428,7 +4435,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <span style="flex:1"></span>
     <span class="mut" style="font-size:.8rem">{{ convs|length }} conversa(s) de e-mail</span>
   </div>
-  <div class="cx-grid">
+  <div class="cx-grid" id="cx-grid">
     <div class="cx-list" id="cx-list">
       {% for c in convs %}
       <button type="button" class="cx-conv" id="cxc-{{ c.id }}" onclick="cxOpen(this,{{ c.id }})">
@@ -4705,6 +4712,7 @@ function cxScroll(force){var b=document.getElementById('cx-msgs');if(!b)return;
   if(force||b.scrollHeight-b.scrollTop-b.clientHeight<80)b.scrollTop=b.scrollHeight;}
 function cxOpen(el,id){
   _cxConv=id;if(el&&_cxList[id])_cxSeen[id]=_cxList[id].ult_msg_id||0;
+  var g=document.getElementById('cx-grid');if(g)g.classList.add('open');
   var th=document.getElementById('cx-thread'),cx=document.getElementById('cx-ctx');
   document.querySelectorAll('.cx-conv').forEach(function(x){x.classList.remove('on');});
   var lb=document.getElementById('cxc-'+id);if(lb){lb.classList.add('on');var dt=lb.querySelector('.cx-undot');if(dt)dt.remove();}

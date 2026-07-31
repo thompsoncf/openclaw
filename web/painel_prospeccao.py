@@ -3232,7 +3232,7 @@ _CSS = """<style>
 # navegação instantânea sem recarregar sensação de lentidão; o back segue rendrizando.
 _NAV_ASSETS = """<style>
 .pnavbar{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin:.2rem 0 1.1rem}
-.pnav{display:inline-flex;align-items:center;gap:.35rem;font:inherit;font-size:.84rem;font-weight:600;padding:.45rem .8rem;border-radius:9px;border:1px solid var(--borda);color:var(--txt);background:transparent;text-decoration:none;white-space:nowrap;cursor:pointer;line-height:1;box-sizing:border-box;margin:0;-webkit-appearance:none;appearance:none;vertical-align:middle}
+.pnav{display:inline-flex;align-items:center;gap:.35rem;font:inherit;font-size:.84rem;font-weight:600;padding:.45rem .8rem;border-radius:9px;border:1px solid var(--borda);color:var(--txt);background:transparent;text-decoration:none;white-space:nowrap;cursor:pointer;line-height:1;box-sizing:border-box;width:auto;margin:0;-webkit-appearance:none;appearance:none;vertical-align:middle;height:auto}
 .pnav:hover{border-color:var(--verde);color:#fff}
 .pnav.on{color:#fff;background:var(--verde);border-color:var(--verde)}
 #pnavprog{position:fixed;top:0;left:0;height:3px;width:0;background:var(--verde);box-shadow:0 0 8px var(--verde);z-index:99999;transition:width .3s ease;opacity:0}
@@ -3257,8 +3257,8 @@ _CSS = _CSS + _NAV_ASSETS
 
 def _navbar(active):
     """Barra de navegação do módulo, na ordem da história. `active` marca a aba atual."""
-    # "Captar" foi absorvida pela Base (capta e gerencia no mesmo lugar).
     tabs = [("base", "📇 Base", "/painel/prospeccao/base", False),
+            ("captar", "🎯 Captar Lead", "/painel/prospeccao/captar", False),
             ("campanhas", "📣 Campanhas", "/painel/prospeccao/campanhas", True),
             ("comunicacao", "💬 Comunicação", "/painel/prospeccao/comunicacao", False),
             ("funil", "🔥 Funil", "/painel/prospeccao", False),
@@ -3575,14 +3575,7 @@ function baseJogarCheck(){
 
 _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 <div class="pw">
-  <nav class="pnavbar" aria-label="Prospecção">
-    <a class="pnav" href="/painel/prospeccao/base">📇 Base</a>
-    <button type="button" class="pnav" onclick="capToggle()">🎯 Captar Lead</button>
-    {% if gerencia %}<a class="pnav" href="/painel/prospeccao/campanhas">📣 Campanhas</a>{% endif %}
-    <a class="pnav" href="/painel/prospeccao/comunicacao">💬 Comunicação</a>
-    <a class="pnav on" href="/painel/prospeccao">🔥 Funil</a>
-    <a class="pnav cfg" href="/painel/prospeccao/comunicacao?aba=canais">⚙️ Canais</a>
-  </nav>
+""" + _navbar('funil') + """
   <div style="display:flex;align-items:flex-start;gap:.6rem;flex-wrap:wrap">
     <div style="flex:1;min-width:170px">
       <h2 class="tt">Prospecção</h2>
@@ -3820,10 +3813,7 @@ function capToast(msg){var t=document.getElementById('cap-toast');if(!t){t=docum
 
 _CAPTAR_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 <div class="pw" style="max-width:760px">
-  <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
-    <a href="/painel/prospeccao" class="mut" style="text-decoration:none;font-size:.85rem">‹ Prospecção</a>
-    <span style="flex:1"></span>
-  </div>
+""" + _navbar('captar') + """
   <h2 class="tt" style="margin-top:.3rem">Captar leads</h2>
   {% if aviso %}<div class="ok" style="margin-top:.6rem">{{ aviso }}</div>{% endif %}
 

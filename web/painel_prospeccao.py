@@ -4363,7 +4363,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .tag-new{font-size:.6rem;padding:.05rem .4rem;border-radius:999px;background:#241634;color:#c9a3e0;border:1px solid #4a3163;margin-left:.35rem}
 @media(max-width:900px){.cx-grid{grid-template-columns:1fr}.cx-ctx{order:3}.cx-cc{grid-template-columns:1fr}.aggrid{grid-template-columns:1fr}}
 </style>
-<div class="cx-wrap">
+<div class="pw">
 """ + _navbar('comunicacao') + """
   <div class="cx-head">
     <div>
@@ -4865,7 +4865,7 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
 .ckpis .kv.g b{color:var(--verde-claro)}
 .ckpis .sep{color:#3a3a3c}
 </style>
-<div class="cwrap">
+<div class="pw">
 """ + _navbar('campanhas') + """
   <div>
     <h2 class="tt">📣 Campanhas</h2>

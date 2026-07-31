@@ -311,13 +311,18 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
 
 # ================================================================ BASE (captados)
 @router.get("/painel/prospeccao/base", response_class=HTMLResponse)
-def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: str = ""):
+def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: str = "",
+                    ver_camp: str = ""):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
     conta_id = ctx["conta_id"]
     where = ["p.conta_id=%s", "p.estagio='base'"]
     params: list = [conta_id]
+    # por padrão a lista "enxuga": quem já está numa campanha some (evita reenviar/
+    # duplicar). O toggle ?ver_camp=1 mostra todos de novo.
+    if ver_camp != "1":
+        where.append("not exists (select 1 from campanha_alvos a where a.prospeccao_id=p.id)")
     if not ctx["gerencia"]:
         where.append("p.vendedor_id=%s"); params.append(ctx["membro_id"])
     if (q or "").strip():
@@ -370,6 +375,7 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
                    leads=leads, metr=metr, q=q, segmento=segmento, cidade=cidade,
                    gerencia=ctx["gerencia"], pode_atribuir=ctx["pode_atribuir"], vendedores=vends,
                    campanhas=campanhas, temperaturas_all=TEMPERATURAS, tem_places=fontes.tem_chave_places(),
+                   ver_camp=(ver_camp == "1"),
                    aviso=request.session.pop("prosp_aviso", None))
 
 
@@ -1960,7 +1966,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
         leads = c.execute(
             """select p.empresa, p.email, a.status, a.passo_atual,
                       to_char(a.proximo_envio_em - interval '3 hours','DD/MM HH24:MI'),
-                      to_char(a.ultima_msg_em - interval '3 hours','DD/MM HH24:MI')
+                      to_char(a.ultima_msg_em - interval '3 hours','DD/MM HH24:MI'), p.id
                  from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
                 where a.campanha_id=%s order by a.ultima_msg_em desc nulls last, a.id desc limit 200""",
             (camp_id,)).fetchall()
@@ -2005,7 +2011,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                   "corpo": ("O agente escreve um e-mail único pra este lead — clique em “Gerar prévia com IA” "
                             "pra ver um exemplo." if p0["ia"] else _cfmt(p0["corpo"] or "", _ld))}
     leads_l = [{"empresa": r[0], "email": r[1], "status": r[2], "passo": r[3],
-                "prox": r[4], "ult": r[5], "rot": _ALVO_ROT.get(r[2], r[2])} for r in leads]
+                "prox": r[4], "ult": r[5], "pid": r[6], "rot": _ALVO_ROT.get(r[2], r[2])} for r in leads]
     return _render("prospeccao_campanha", request, titulo=camp["nome"], secao_ativa="prospeccao",
                    camp=camp, passos=passos_l, elegiveis=eleg, na_camp=na_camp, st=st, metr=metr,
                    leads=leads_l, previa=previa, cadencia=cadencia, remetente=remetente_configurado(),
@@ -2089,6 +2095,28 @@ async def prospeccao_campanha_config(request: Request, camp_id: int):
         c.commit()
     request.session["prosp_aviso"] = "Configuração salva ✓"
     return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
+
+
+@router.post("/painel/prospeccao/campanhas/{camp_id}/remover-lead")
+def prospeccao_campanha_remover_lead(request: Request, camp_id: int, prospeccao_id: str = Form("")):
+    """Tira um lead da campanha (apaga só o vínculo em campanha_alvos). O lead
+    continua na Base, disponível pra reenviar certo. Usado quando cai errado."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    try:
+        pid = int(prospeccao_id)
+    except (ValueError, TypeError):
+        return JSONResponse({"ok": False, "erro": "id"}, status_code=400)
+    with get_pool().connection() as c:
+        if not _campanha_dona(c, ctx["conta_id"], camp_id):
+            return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+        n = c.execute("delete from campanha_alvos where campanha_id=%s and prospeccao_id=%s",
+                      (camp_id, pid)).rowcount
+        c.commit()
+    return JSONResponse({"ok": True, "removidos": n})
 
 
 @router.post("/painel/prospeccao/campanhas/{camp_id}/status")
@@ -3497,6 +3525,13 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <button class="pbtn ghost" name="only" value="">⬆︎ Promover a lead</button>
       </div>
     </div>
+    {% if metr.em_camp %}
+    <div class="mut" style="font-size:.8rem;margin:.2rem 0 .6rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+      📣 <b style="color:var(--txt)">{{ metr.em_camp }}</b> lead(s) já em campanha {% if not ver_camp %}(ocultos da lista){% endif %}
+      {% if ver_camp %}<a href="/painel/prospeccao/base?q={{ q|urlencode }}&segmento={{ segmento|urlencode }}&cidade={{ cidade|urlencode }}" style="color:var(--verde-claro)">ocultar</a>
+      {% else %}<a href="/painel/prospeccao/base?q={{ q|urlencode }}&segmento={{ segmento|urlencode }}&cidade={{ cidade|urlencode }}&ver_camp=1" style="color:var(--verde-claro)">mostrar</a>{% endif %}
+    </div>
+    {% endif %}
     <div class="bt-wrap">
       <table class="bt-tbl">
         <thead><tr>
@@ -3506,7 +3541,7 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <tbody>
         {% for l in leads %}
           <tr>
-            <td><input class="bt-ck" type="checkbox" name="ids" value="{{ l.id }}"></td>
+            <td><input class="bt-ck" type="checkbox" name="ids" value="{{ l.id }}"{% if l.campanha %} disabled title="Já está na campanha {{ l.campanha }}"{% endif %}></td>
             <td><b>{{ l.empresa }}</b><div class="mut" style="font-size:.76rem">{{ l.segmento or '—' }}{% if l.cidade %} · {{ l.cidade }}{% if l.uf %}/{{ l.uf }}{% endif %}{% endif %}</div></td>
             <td style="font-size:.76rem;line-height:1.5;min-width:190px">
               {% if l.whats %}<div>💬 {{ l.whats }}</div>{% endif %}
@@ -3518,7 +3553,8 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <td>{% if l.campanha %}<span class="bt-chip">{{ l.campanha }}</span>{% else %}<span class="mut">—</span>{% endif %}</td>
             <td class="mut" style="font-variant-numeric:tabular-nums;white-space:nowrap">💬 {{ l.toque_wa }} · ✉️ {{ l.toque_mail }}</td>
             <td class="mut" style="font-size:.78rem;white-space:nowrap">{{ l.ult or '—' }}</td>
-            <td><button class="pbtn ghost" name="only" value="{{ l.id }}" style="padding:.2rem .5rem;font-size:.76rem" title="Promover a lead">⬆︎</button></td>
+            <td style="white-space:nowrap"><button class="pbtn ghost" name="only" value="{{ l.id }}" style="padding:.2rem .5rem;font-size:.76rem" title="Promover a lead">⬆︎</button>
+              <button type="button" class="pbtn ghost" onclick="baseExcluir({{ l.id }},this)" style="padding:.2rem .5rem;font-size:.76rem;color:#e0574f;border-color:#5c2a27" title="Excluir lead da base">🗑</button></td>
           </tr>
         {% else %}
           <tr><td colspan="7" class="mut" style="text-align:center;padding:1.5rem">Nada na base ainda. Use o <b style="color:var(--verde-claro)">➕ Adicionar leads à base</b> acima ↑ pra começar.</td></tr>
@@ -3531,6 +3567,14 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 <script>
 function baseCampSel(s){var i=document.getElementById('base-novo-nome');if(!i)return;var nova=(s.value==='__nova__');i.style.display=nova?'':'none';if(nova){i.focus();}}
 function baseChecked(){var a=[];document.querySelectorAll('.bt-ck:checked').forEach(function(c){a.push(c.value);});return a;}
+function baseExcluir(id,btn){
+  if(!confirm('Excluir este lead da base? Sai também de qualquer campanha e não dá pra desfazer.'))return;
+  fetch('/painel/prospeccao/'+id+'/excluir',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()})
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){alert('Não consegui excluir ('+(d.erro||'?')+').');return;}
+      var tr=btn.closest('tr');if(tr)tr.remove();
+    }).catch(function(){alert('Falha de rede.');});
+}
 function baseExplorium(){
   var ids=baseChecked();
   if(!ids.length){alert('Marque um lead pra testar o Explorium.');return;}
@@ -5164,14 +5208,15 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
     <div class="mut" style="font-size:.8rem;margin-top:.6rem">{% if camp.status=='ativa' %}✅ <b style="color:var(--verde-claro)">Ativa</b> — dispara sozinho (até {{ camp.limite }}/dia) e para em quem responde ou descadastra.{% else %}Clique <b>▶ Ativar</b> pra o motor começar a disparar.{% endif %}{% if metr.erros %} · <span style="color:#e0574f">{{ metr.erros }} erro(s) de envio</span>{% endif %}</div>
     <div class="tbl-wrap">
       <table>
-        <thead><tr><th>Empresa</th><th>Situação</th><th>Passo</th><th>Próximo/último</th></tr></thead>
+        <thead><tr><th>Empresa</th><th>Situação</th><th>Passo</th><th>Próximo/último</th><th></th></tr></thead>
         <tbody>
           {% for l in leads %}
           <tr><td><b>{{ l.empresa }}</b><div class="mut" style="font-size:.76rem">{{ l.email }}</div></td>
             <td><span class="apill {{ l.status }}">{{ l.rot }}</span></td>
             <td class="mut">D{{ l.passo }}</td>
-            <td class="mut" style="white-space:nowrap">{% if l.status in ('fila','enviado') and l.prox %}⏳ {{ l.prox }}{% elif l.ult %}✓ {{ l.ult }}{% else %}—{% endif %}</td></tr>
-          {% else %}<tr><td colspan="4" class="mut" style="text-align:center;padding:1.6rem">Nenhum lead ainda — mande da <b>Base</b> (marque os leads → “Jogar na campanha”).</td></tr>{% endfor %}
+            <td class="mut" style="white-space:nowrap">{% if l.status in ('fila','enviado') and l.prox %}⏳ {{ l.prox }}{% elif l.ult %}✓ {{ l.ult }}{% else %}—{% endif %}</td>
+            <td style="text-align:right"><button type="button" class="cpx" onclick="campRemLead(this,{{ camp.id }},{{ l.pid }})" title="Remover da campanha (o lead volta pra Base)">✕</button></td></tr>
+          {% else %}<tr><td colspan="5" class="mut" style="text-align:center;padding:1.6rem">Nenhum lead ainda — mande da <b>Base</b> (marque os leads → “Jogar na campanha”).</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>
@@ -5185,6 +5230,15 @@ function mtab(btn,tipo){
   document.getElementById('mtipo').value=tipo;
   var P=document.querySelectorAll('.mpane');
   for(var j=0;j<P.length;j++)P[j].classList.toggle('on',P[j].getAttribute('data-m')===tipo);
+}
+function campRemLead(btn,camp,pid){
+  if(!confirm('Remover este lead da campanha? Ele volta pra Base e pode ser reenviado depois.'))return;
+  var body=new URLSearchParams();body.append('prospeccao_id',pid);
+  fetch('/painel/prospeccao/campanhas/'+camp+'/remover-lead',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body})
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){alert('Não consegui remover ('+(d.erro||'?')+').');return;}
+      var tr=btn.closest('tr');if(tr)tr.remove();
+    }).catch(function(){alert('Falha de rede.');});
 }
 function mfile(inp){
   var f=inp.files&&inp.files[0]; if(!f)return;

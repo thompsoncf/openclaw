@@ -19,7 +19,7 @@ _MIGRACOES = ("053_modulo_pj.sql", "031_fornecedor_fase0.sql",
               "091_nichos_servico_profissional.sql",
               "092_funcionario_cbo.sql", "093_folha_beneficios_e_org.sql",
               "094_funcionario_demissao.sql",
-              "095_funcionario_cpf.sql")
+              "095_funcionario_cpf.sql", "109_nicho_construcao.sql")
 
 
 # ── parte pura ────────────────────────────────────────────────────────────
@@ -52,6 +52,7 @@ def test_rotulo_receber_por_nicho():
     assert nichos.rotulo_receber("alimentacao") == "Fiado"        # varejo
     assert nichos.rotulo_receber("advocacia") == "Honorários"
     assert nichos.rotulo_receber("agencia") == "Mensalidades"
+    assert nichos.rotulo_receber("construcao") == "Medições"        # obra fatura por medição
     assert nichos.rotulo_receber("servicos_gerais") == "A receber"  # serviço sem molde
 
 
@@ -65,14 +66,23 @@ def test_rotulo_receber_por_nicho():
     ("Gestão de mídias sociais", "agencia"),
     ("Desenvolvimento de programas de computador", "tecnologia"),
     ("Suporte técnico em informática", "tecnologia"),
+    # construção civil (OBRAS) -> construcao; projeto/engenharia segue arquitetura
+    ("Construção de edifícios", "construcao"),
+    ("Obras de infraestrutura", "construcao"),
+    ("Incorporação de empreendimentos imobiliários", "construcao"),
+    ("Serviços de engenharia", "arquitetura"),
 ])
 def test_cnae_ramos_servico(cnae, nicho):
     assert cnpj_info.nicho_do_cnae(cnae) == nicho
 
 
 def test_todos_os_ramos_servico_tem_molde():
-    for s in ("advocacia", "consultoria", "arquitetura", "agencia", "tecnologia"):
+    for s in ("advocacia", "consultoria", "arquitetura", "agencia", "tecnologia",
+              "construcao"):
         assert nichos.tem_persona(s), s
+    # o molde de construção fala de MEDIÇÃO/OBRA
+    assert "MEDIÇÃO" in nichos.persona_do_nicho("construcao")
+    assert "OBRAS" in nichos.persona_do_nicho("construcao")
 
 
 # ── parte com banco: bloco_persona_pj molda ao nicho ──────────────────────
@@ -128,3 +138,21 @@ def test_persona_generica_sem_nicho(pool):
     assert "ESCRITÓRIO DE CONTABILIDADE" not in txt
     # ...e mantém a regra genérica da folha
     assert "eSocial" in txt
+
+
+def test_persona_molda_para_construcao(pool):
+    cid = _conta_com_nicho(pool, "construcao")   # seed vem da migração 109
+    txt = bloco_persona_pj(pool, cid, "Construtora Costa")
+    assert "CONSTRUÇÃO CIVIL / OBRAS" in txt
+    assert "MEDIÇÃO" in txt
+
+
+# ── raio-x: departamento de construção (lista branca do consumo) ──────────
+def test_construcao_aparece_no_raiox():
+    from finance.models import (CATEGORIAS_DESPESA, DEPARTAMENTOS_RAIOX,
+                                canonizar_categoria)
+    assert "Construcao" in CATEGORIAS_DESPESA
+    assert "Construcao" in DEPARTAMENTOS_RAIOX       # entra na lista branca
+    # 'Construção'/'CONSTRUCAO' canonizam pro departamento oficial 'Construcao'
+    assert canonizar_categoria("Construção") == "Construcao"
+    assert canonizar_categoria("CONSTRUCAO") == "Construcao"

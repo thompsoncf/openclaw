@@ -98,6 +98,12 @@ _RAMOS = [
     # os específicos vêm ANTES de Consultoria/Tecnologia, que são mais genéricos).
     ("Advocacia",    ("advocacia", "advogad", "atividades juridicas", "juridic",
                       "escritorio de advocacia", "servicos advocaticios")),
+    # Construção civil (OBRAS) vem ANTES de Arquitetura: quem CONSTRÓI é obra;
+    # Arquitetura fica com projeto/engenharia de projeto (design/laudo).
+    ("Construcao",   ("construc", "obras", "empreiteira", "empreitada",
+                      "edificac", "incorporac", "terraplenagem", "pavimentac",
+                      "alvenaria", "obras de infraestrutura",
+                      "instalacoes hidraulicas", "instalacoes eletricas")),
     ("Arquitetura",  ("arquitetur", "servicos de arquitetura", "servicos de engenharia",
                       "engenharia civil", "projetos de engenharia", "paisagismo",
                       "design de interiores")),
@@ -130,6 +136,7 @@ _RAMO_NICHO = {
     "Beleza":       "beleza",
     "Contabilidade": "contabilidade",
     "Advocacia":    "advocacia",
+    "Construcao":   "construcao",
     "Arquitetura":  "arquitetura",
     "Agencia":      "agencia",
     "Tecnologia":   "tecnologia",

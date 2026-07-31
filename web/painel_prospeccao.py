@@ -2611,11 +2611,15 @@ async def prospeccao_status(request: Request, alvo_id: int):
     alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
     if not alvo or not _pode_ver(alvo, ctx):
         return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    # Mudar a fase no funil implica que é um lead sendo trabalhado: se ainda estava
+    # na base, promove pro funil (estagio='lead') mantendo a fase escolhida — senão
+    # ele sumiria (base não aparece no funil). Quem já é lead só troca de coluna.
     with pool.connection() as c:
-        c.execute("update prospeccao set status=%s, atualizado_em=now() where id=%s and conta_id=%s",
+        c.execute("""update prospeccao set status=%s, estagio='lead', atualizado_em=now()
+                       where id=%s and conta_id=%s""",
                   (status, alvo_id, ctx["conta_id"]))
         c.commit()
-    return JSONResponse({"ok": True, "status": status})
+    return JSONResponse({"ok": True, "status": status, "estagio": "lead"})
 
 
 # ================================================================ 1º CONTATO (IA)

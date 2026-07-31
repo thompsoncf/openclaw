@@ -3257,8 +3257,9 @@ _CSS = _CSS + _NAV_ASSETS
 
 def _navbar(active):
     """Barra de navegação do módulo, na ordem da história. `active` marca a aba atual."""
-    tabs = [("base", "📇 Base", "/painel/prospeccao/base", False),
-            ("captar", "🎯 Captar Lead", "/painel/prospeccao/captar", False),
+    # "Captar Lead" abre o painel de captação embutido no funil (âncora ?captar=1).
+    tabs = [("captar", "🎯 Captar Lead", "/painel/prospeccao?captar=1", False),
+            ("base", "📇 Base", "/painel/prospeccao/base", False),
             ("campanhas", "📣 Campanhas", "/painel/prospeccao/campanhas", True),
             ("comunicacao", "💬 Comunicação", "/painel/prospeccao/comunicacao", False),
             ("funil", "🔥 Funil", "/painel/prospeccao", False),
@@ -3575,7 +3576,14 @@ function baseJogarCheck(){
 
 _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 <div class="pw">
-""" + _navbar('funil') + """
+  <nav class="pnavbar" aria-label="Prospecção">
+    <button type="button" class="pnav" onclick="capToggle()">🎯 Captar Lead</button>
+    <a class="pnav" href="/painel/prospeccao/base">📇 Base</a>
+    {% if gerencia %}<a class="pnav" href="/painel/prospeccao/campanhas">📣 Campanhas</a>{% endif %}
+    <a class="pnav" href="/painel/prospeccao/comunicacao">💬 Comunicação</a>
+    <a class="pnav on" href="/painel/prospeccao">🔥 Funil</a>
+    <a class="pnav cfg" href="/painel/prospeccao/comunicacao?aba=canais">⚙️ Canais</a>
+  </nav>
   <div style="display:flex;align-items:flex-start;gap:.6rem;flex-wrap:wrap">
     <div style="flex:1;min-width:170px">
       <h2 class="tt">Prospecção</h2>
@@ -3808,12 +3816,17 @@ function capImport(){var packs=[];document.querySelectorAll('#cap-list input[nam
   var fd=new FormData();packs.forEach(function(p){fd.append('itens',p);});var vs=document.getElementById('cap-g-vend');if(vs)fd.append('vendedor_id',vs.value);
   capFetch('/painel/prospeccao/captar/importar',fd).then(function(d){if(!d.ok){capToast('Erro ao importar');return;}(d.leads||[]).forEach(addCard);capToast(d.msg||'Adicionados');document.getElementById('cap-res').innerHTML='';var gf=document.getElementById('cap-google');if(gf)gf.reset();}).catch(function(){capToast('Falha de rede');});}
 function capToast(msg){var t=document.getElementById('cap-toast');if(!t){t=document.createElement('div');t.id='cap-toast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--card);border:1px solid var(--verde);color:var(--verde-claro);padding:.6rem 1rem;border-radius:10px;z-index:200;font-size:.85rem;box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .4s';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';clearTimeout(window._captoastT);window._captoastT=setTimeout(function(){t.style.opacity='0';},2600);}
+// vindo de "Captar Lead" de outra página (?captar=1) → já abre o painel embutido
+if(location.search.indexOf('captar=1')>=0){try{capToggle();}catch(e){}}
 </script>
 {% endblock %}"""
 
 _CAPTAR_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 <div class="pw" style="max-width:760px">
-""" + _navbar('captar') + """
+  <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+    <a href="/painel/prospeccao" class="mut" style="text-decoration:none;font-size:.85rem">‹ Prospecção</a>
+    <span style="flex:1"></span>
+  </div>
   <h2 class="tt" style="margin-top:.3rem">Captar leads</h2>
   {% if aviso %}<div class="ok" style="margin-top:.6rem">{{ aviso }}</div>{% endif %}
 

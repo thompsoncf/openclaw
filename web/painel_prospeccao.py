@@ -69,6 +69,10 @@ def _zap_link(numero: str) -> str:
     d = _so_digitos(numero)
     if not d:
         return ""
+    if len(d) in (12, 13) and d.startswith("55"):
+        d = d[2:]                          # tira o DDI pra normalizar o miolo
+    if len(d) == 10 and d[2] in "6789":
+        d = d[:2] + "9" + d[2:]            # celular sem o 9 → insere (ex.: 86 9434-8180)
     if not d.startswith("55"):
         d = "55" + d
     return "https://wa.me/" + d
@@ -4078,11 +4082,9 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         </div>
         <div class="mut" style="font-size:.82rem;margin-top:.25rem">{% if a.segmento %}{{ a.segmento }}{% endif %}{% if a.cidade %}{% if a.segmento %} · {% endif %}{{ a.cidade }}{% if a.uf %}/{{ a.uf }}{% endif %}{% endif %}{% if a.vendedor_nome %} · 👤 {{ a.vendedor_nome }}{% endif %}</div>
       </div>
-      <form method="post" action="/painel/prospeccao/{{ a.id }}/status" style="margin:0">
-        <select name="status" onchange="this.form.submit()" class="spill" style="width:auto;padding:.25rem .6rem;border-radius:999px">
-          {% for s,rot in status %}<option value="{{ s }}" {% if s==a.status %}selected{% endif %}>{{ rot }}</option>{% endfor %}
-        </select>
-      </form>
+      <select onchange="fichaStatus(this,{{ a.id }})" data-prev="{{ a.status }}" class="spill" style="width:auto;padding:.25rem .6rem;border-radius:999px" title="Mudar a situação no funil">
+        {% for s,rot in status %}<option value="{{ s }}" {% if s==a.status %}selected{% endif %}>{{ rot }}</option>{% endfor %}
+      </select>
     </div>
     <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-top:.8rem">
       {% if a.tel_link %}<a class="pbtn ghost" href="{{ a.tel_link }}">📞 Ligar</a>{% endif %}
@@ -4099,6 +4101,15 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <div class="mut" id="enrqf-msg" style="font-size:.82rem;margin-top:.5rem"></div>
     {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
     <script>
+    function fichaStatus(sel,id){
+      var prev=sel.getAttribute('data-prev')||'';
+      var body=new URLSearchParams();body.append('status',sel.value);
+      fetch('/painel/prospeccao/'+id+'/status',{method:'POST',headers:{'X-Requested-With':'fetch','Content-Type':'application/x-www-form-urlencoded'},body:body})
+        .then(function(r){return r.json();}).then(function(d){
+          if(!d.ok){alert('Não consegui mudar a situação ('+(d.erro||'?')+').');if(prev)sel.value=prev;return;}
+          sel.setAttribute('data-prev',sel.value);
+        }).catch(function(){alert('Falha de rede.');if(prev)sel.value=prev;});
+    }
     function convidarZaq(id){var b=document.getElementById('cvz-btn');if(b){b.disabled=true;b.textContent='Enviando…';}
       fetch('/painel/prospeccao/'+id+'/convidar-zaq',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
         if(!d.ok){if(b){b.disabled=false;b.textContent='🎟️ Convidar pro Zaq';}alert(d.erro||'Não consegui enviar.');return;}

@@ -34,11 +34,23 @@ def _so_digitos(s: str) -> str:
     return "".join(ch for ch in (s or "") if ch.isdigit())
 
 
+def _br_insere_nono(d: str) -> str:
+    """Miolo nacional BR: se veio DDD(2)+8 dígitos e o assinante começa com 6-9,
+    é celular que perdeu o 9 (ex.: 86 9434-8180) — insere o 9: 86 99434-8180."""
+    if len(d) == 10 and d[2] in "6789":
+        return d[:2] + "9" + d[2:]
+    return d
+
+
 def _wa_addr(numero: str) -> str:
-    """Normaliza um telefone pra 'whatsapp:+55DDDNUMERO' (assume BR se sem DDI)."""
+    """Normaliza um telefone pra 'whatsapp:+55DDD9XXXXXXXX' (assume BR se sem DDI).
+    Insere o 9 do celular quando o número vem sem ele."""
     d = _so_digitos(numero)
     if not d:
         return ""
+    if len(d) in (12, 13) and d.startswith("55"):
+        d = d[2:]                       # tira o DDI pra normalizar o miolo nacional
+    d = _br_insere_nono(d)
     if not d.startswith("55") and len(d) <= 11:
         d = "55" + d
     return "whatsapp:+" + d

@@ -3232,7 +3232,7 @@ _CSS = """<style>
 # navegação instantânea sem recarregar sensação de lentidão; o back segue rendrizando.
 _NAV_ASSETS = """<style>
 .pnavbar{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin:.2rem 0 1.1rem}
-.pnav{display:inline-flex;align-items:center;gap:.35rem;font-size:.84rem;font-weight:600;padding:.45rem .8rem;border-radius:9px;border:1px solid var(--borda);color:var(--txt);background:transparent;text-decoration:none;white-space:nowrap;font-family:inherit;cursor:pointer;line-height:1}
+.pnav{display:inline-flex;align-items:center;gap:.35rem;font:inherit;font-size:.84rem;font-weight:600;padding:.45rem .8rem;border-radius:9px;border:1px solid var(--borda);color:var(--txt);background:transparent;text-decoration:none;white-space:nowrap;cursor:pointer;line-height:1;box-sizing:border-box;margin:0;-webkit-appearance:none;appearance:none;vertical-align:middle}
 .pnav:hover{border-color:var(--verde);color:#fff}
 .pnav.on{color:#fff;background:var(--verde);border-color:var(--verde)}
 #pnavprog{position:fixed;top:0;left:0;height:3px;width:0;background:var(--verde);box-shadow:0 0 8px var(--verde);z-index:99999;transition:width .3s ease;opacity:0}
@@ -3576,8 +3576,8 @@ function baseJogarCheck(){
 _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 <div class="pw">
   <nav class="pnavbar" aria-label="Prospecção">
-    <button type="button" class="pnav" onclick="capToggle()">🎯 Captar</button>
     <a class="pnav" href="/painel/prospeccao/base">📇 Base</a>
+    <button type="button" class="pnav" onclick="capToggle()">🎯 Captar Lead</button>
     {% if gerencia %}<a class="pnav" href="/painel/prospeccao/campanhas">📣 Campanhas</a>{% endif %}
     <a class="pnav" href="/painel/prospeccao/comunicacao">💬 Comunicação</a>
     <a class="pnav on" href="/painel/prospeccao">🔥 Funil</a>
@@ -5028,10 +5028,9 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 
   <nav class="flow" aria-label="Etapas da campanha">
     <a class="step done" href="#s1"><span class="n">✓</span><span class="lbl2"><span class="tt2">Configuração</span><span class="st">nome, ritmo, canais</span></span></a>
-    <a class="step {% if na_camp %}done{% else %}now{% endif %}" href="#s2"><span class="n">{% if na_camp %}✓{% else %}2{% endif %}</span><span class="lbl2"><span class="tt2">Público</span><span class="st">{% if na_camp %}{{ na_camp }} na campanha{% else %}{{ elegiveis }} prontos p/ entrar{% endif %}</span></span></a>
-    <a class="step" href="#s3"><span class="n">3</span><span class="lbl2"><span class="tt2">Sequência</span><span class="st">{{ passos|length }} passo(s)</span></span></a>
-    <a class="step" href="#s4"><span class="n">4</span><span class="lbl2"><span class="tt2">Prévia</span><span class="st">confira o e-mail</span></span></a>
-    <a class="step {% if camp.status=='ativa' %}done{% else %}todo{% endif %}" href="#s5"><span class="n">{% if camp.status=='ativa' %}✓{% else %}5{% endif %}</span><span class="lbl2"><span class="tt2">Ativar</span><span class="st">e acompanhar</span></span></a>
+    <a class="step" href="#s2"><span class="n">2</span><span class="lbl2"><span class="tt2">Sequência</span><span class="st">{{ passos|length }} passo(s)</span></span></a>
+    <a class="step" href="#s3"><span class="n">3</span><span class="lbl2"><span class="tt2">Prévia</span><span class="st">confira o e-mail</span></span></a>
+    <a class="step {% if camp.status=='ativa' %}done{% else %}todo{% endif %}" href="#s4"><span class="n">{% if camp.status=='ativa' %}✓{% else %}4{% endif %}</span><span class="lbl2"><span class="tt2">Ativar</span><span class="st">e acompanhar</span></span></a>
   </nav>
 
   <div class="body">
@@ -5087,31 +5086,9 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         </div>
       </form>
 
-      <!-- 2 · PÚBLICO -->
-      <div class="card sec" id="s2"{% if not na_camp %} style="border-color:var(--verde)"{% endif %}>
-        <header><span class="idx"{% if not na_camp %} style="background:var(--verde);border-color:var(--verde);color:#fff"{% endif %}>2</span><h3>Público</h3></header>
-        <p class="desc">Quem entra: leads da base com <b>e-mail válido ou WhatsApp</b> que não descadastraram.</p>
-        <form method="get" action="/painel/prospeccao/campanhas/{{ camp.id }}" class="row" style="align-items:center">
-          <input class="fld" name="seg" value="{{ seg }}" placeholder="Segmento" style="flex:1;min-width:120px">
-          <input class="fld" name="cidade" value="{{ cidade }}" placeholder="Cidade" style="flex:1;min-width:100px">
-          <select class="fld" name="temp" style="width:auto" onchange="this.form.submit()">
-            <option value="">Qualquer temperatura</option>
-            <option value="frio" {% if temp=='frio' %}selected{% endif %}>Frio</option>
-            <option value="morno" {% if temp=='morno' %}selected{% endif %}>Morno</option>
-            <option value="quente" {% if temp=='quente' %}selected{% endif %}>Quente</option>
-          </select>
-          <button class="pbtn ghost">Filtrar</button>
-        </form>
-        <div class="bigcount"><b>{{ elegiveis }}</b><span class="mut">leads elegíveis com esse filtro</span></div>
-        <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/publico" style="margin:0">
-          <input type="hidden" name="seg" value="{{ seg }}"><input type="hidden" name="cidade" value="{{ cidade }}"><input type="hidden" name="temp" value="{{ temp }}">
-          <button class="pbtn" {% if not elegiveis %}disabled{% endif %}>＋ Adicionar {{ elegiveis }} à campanha</button>
-        </form>
-      </div>
-
-      <!-- 3 · SEQUÊNCIA -->
-      <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/sequencia" class="card sec" id="s3">
-        <header><span class="idx">3</span><h3>Sequência</h3><span class="grow"></span>
+      <!-- 2 · SEQUÊNCIA -->
+      <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/sequencia" class="card sec" id="s2">
+        <header><span class="idx">2</span><h3>Sequência</h3><span class="grow"></span>
           <button type="button" class="pbtn ghost sm" onclick="addPasso()">＋ Passo</button><button class="pbtn sm">Salvar</button></header>
         <p class="desc"><b>D+</b> = dias após o 1º e-mail (0 = primeiro). <b>🤖 IA</b> escreve único por lead; <b>Template</b> usa o texto (<code>{empresa}</code>, <code>{cidade}</code>, <code>{segmento}</code>).</p>
         <div id="passos">
@@ -5134,8 +5111,8 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
     <!-- RAIL: prévia + checklist -->
     <div class="rail">
       {% if previa %}
-      <div class="card sec" id="s4">
-        <header><span class="idx">4</span><h3>Prévia</h3><span class="grow"></span>{% if previa.ia %}<button type="button" class="pbtn ghost sm" id="pia-btn" onclick="previaIA({{ camp.id }})">🤖 Gerar</button>{% endif %}</header>
+      <div class="card sec" id="s3">
+        <header><span class="idx">3</span><h3>Prévia</h3><span class="grow"></span>{% if previa.ia %}<button type="button" class="pbtn ghost sm" id="pia-btn" onclick="previaIA({{ camp.id }})">🤖 Gerar</button>{% endif %}</header>
         <p class="desc" style="margin-bottom:.4rem">1º passo · exemplo com <b>{{ previa.empresa }}</b></p>
         <div class="mailp">
           <div class="h">De <b>{{ remetente or 'sua empresa' }}</b> · Para {{ previa.email or '—' }}</div>
@@ -5151,7 +5128,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
       <div class="card ready">
         <h4>Pronto pra ativar?</h4>
         <div class="ck {% if passos %}ok{% else %}no{% endif %}"><span class="dot">{% if passos %}✓{% else %}!{% endif %}</span> Sequência com {{ passos|length }} passo(s)</div>
-        <div class="ck {% if na_camp %}ok{% else %}no{% endif %}"><span class="dot">{% if na_camp %}✓{% else %}!{% endif %}</span> {% if na_camp %}{{ na_camp }} lead(s) no público{% else %}Público ainda vazio — adicione acima{% endif %}</div>
+        <div class="ck {% if na_camp %}ok{% else %}no{% endif %}"><span class="dot">{% if na_camp %}✓{% else %}!{% endif %}</span> {% if na_camp %}{{ na_camp }} lead(s) na campanha{% else %}Sem leads — mande da <b>Base</b> (Jogar na campanha){% endif %}</div>
         <div class="ck {% if camp.material %}ok{% else %}no{% endif %}"><span class="dot">{% if camp.material %}✓{% else %}!{% endif %}</span> {% if camp.material %}Material configurado{% else %}Material não configurado{% endif %}</div>
         {% if camp.status != 'ativa' %}
         <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/status" style="margin:.7rem 0 0"><input type="hidden" name="status" value="ativa"><button class="pbtn" style="width:100%;justify-content:center" {% if not na_camp %}disabled{% endif %}>▶ Ativar campanha</button></form>
@@ -5162,9 +5139,9 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
     </div>
   </div>
 
-  <!-- 5 · DESEMPENHO + LEADS -->
-  <div class="wide" id="s5">
-    <h3 class="secttl"><span class="idx">5</span> Desempenho &amp; acompanhamento</h3>
+  <!-- 4 · DESEMPENHO + LEADS -->
+  <div class="wide" id="s4">
+    <h3 class="secttl"><span class="idx">4</span> Desempenho &amp; acompanhamento</h3>
     <div class="cpstats" style="margin-top:.7rem">
       <div class="cpstat"><div class="n">{{ metr.enviados }}</div><div class="l">Enviados</div></div>
       <div class="cpstat g"><div class="n">{{ metr.responderam }}</div><div class="l">Responderam</div></div>
@@ -5183,7 +5160,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
             <td><span class="apill {{ l.status }}">{{ l.rot }}</span></td>
             <td class="mut">D{{ l.passo }}</td>
             <td class="mut" style="white-space:nowrap">{% if l.status in ('fila','enviado') and l.prox %}⏳ {{ l.prox }}{% elif l.ult %}✓ {{ l.ult }}{% else %}—{% endif %}</td></tr>
-          {% else %}<tr><td colspan="4" class="mut" style="text-align:center;padding:1.6rem">Nenhum lead ainda — adicione o público acima.</td></tr>{% endfor %}
+          {% else %}<tr><td colspan="4" class="mut" style="text-align:center;padding:1.6rem">Nenhum lead ainda — mande da <b>Base</b> (marque os leads → “Jogar na campanha”).</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>

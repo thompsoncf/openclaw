@@ -125,6 +125,13 @@ NICHOS: dict[str, dict] = {
         "categorias": ["contabil", "fiscal", "folha", "abertura_empresa",
                        "societario", "imposto_renda", "consultoria", "outro"],
     },
+    "construcao": {
+        "label": "Construção civil / Obras",
+        "vende_produto": False, "vende_servico": True,
+        "unidades": ["obra", "etapa", "medicao", "m2", "diaria", "empreitada"],
+        "categorias": ["material", "mao_de_obra", "equipamento", "subempreiteiro",
+                       "projeto", "outro"],
+    },
     # ---- NICHOS MISTOS (vendem PRODUTO e SERVICO) ----
     "oficina": {
         "label": "Oficina / Auto",
@@ -366,6 +373,14 @@ _PERSONAS_NICHO: dict[str, str] = {
         "mensalidade de SaaS/suporte é recorrente; projeto ou sprint é avulso.",
         "infra (nuvem/servidores) e licenças -> 'Assinaturas'; DAS/impostos -> "
         "'Impostos'."),
+    "construcao": _molde_servico(
+        "CONSTRUÇÃO CIVIL / OBRAS", "um construtor/engenheiro de obras",
+        "o faturamento é por MEDIÇÃO/ETAPA da obra (o cliente paga conforme a obra "
+        "avança); empreitada fechada ou por administração. Cada obra/cliente é uma "
+        "carteira de medições a receber.",
+        "MATERIAL, mão de obra e diárias, aluguel de equipamento e subempreiteiros "
+        "são os custos da obra -> 'Servicos'/'Compras'; INSS da obra, ISS e DAS -> "
+        "'Impostos'."),
 }
 
 
@@ -385,6 +400,7 @@ _ROTULO_RECEBER = {
     "arquitetura": "Honorários",
     "agencia": "Mensalidades",
     "tecnologia": "Mensalidades",
+    "construcao": "Medições",
 }
 
 

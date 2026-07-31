@@ -92,7 +92,8 @@ class Tipo(str, Enum):
 CATEGORIAS_DESPESA = [
     "Mercado", "Restaurante", "Transporte", "Moradia", "Contas de casa",
     "Saude", "Educacao", "Lazer", "Compras", "Vestuario", "Beleza",
-    "Presentes", "Servicos", "Assinaturas", "Impostos", "Pet", "Outros",
+    "Presentes", "Servicos", "Assinaturas", "Impostos", "Pet",
+    "Construcao", "Outros",
 ]
 
 CATEGORIAS_RECEITA = [
@@ -103,7 +104,7 @@ CATEGORIAS_RECEITA = [
 # Departamentos que APARECEM no raio-x do consumo (LISTA BRANCA). So' faz sentido
 # detalhar item de cupom nesses. Tudo que nao estiver aqui fica fora do raio-x -
 # no cliente E no admin. Editar aqui pra incluir/tirar departamento.
-DEPARTAMENTOS_RAIOX = {"Mercado", "Saude", "Restaurante", "Pet"}
+DEPARTAMENTOS_RAIOX = {"Mercado", "Saude", "Restaurante", "Pet", "Construcao"}
 
 
 # Formas de pagamento CANONICAS. O que importa pro produto: separar debito de

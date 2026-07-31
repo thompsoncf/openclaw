@@ -358,8 +358,15 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
         com_mail = c.execute(f"select count(*) from prospeccao p where p.conta_id=%s and p.estagio='base'{esc} and coalesce(nullif(p.email,''),'')<>''", tuple(bp)).fetchone()[0]
         em_camp = c.execute(f"select count(distinct p.id) from prospeccao p join campanha_alvos a on a.prospeccao_id=p.id where p.conta_id=%s and p.estagio='base'{esc}", tuple(bp)).fetchone()[0]
         virou = c.execute(f"select count(*) from prospeccao p where p.conta_id=%s and p.estagio='lead'{esc}", tuple(bp)).fetchone()[0]
+        # empresas que aparecem 2+ vezes na base (duplicadas) — pra marcar/alertar
+        dup_rows = c.execute(f"""select lower(trim(p.empresa)) from prospeccao p
+                                  where p.conta_id=%s and p.estagio='base'{esc}
+                                    and coalesce(trim(p.empresa),'')<>''
+                                  group by lower(trim(p.empresa)) having count(*)>1""",
+                             tuple(bp)).fetchall()
         camp_rows = c.execute("select id, nome, status from campanhas where conta_id=%s order by criado_em desc",
                               (conta_id,)).fetchall() if ctx["gerencia"] else []
+    dup_set = {r[0] for r in dup_rows}
     campanhas = [{"id": r[0], "nome": r[1], "status_rot": _STATUS_ROT_CP.get(r[2], r[2])} for r in camp_rows]
     leads = []
     for r in rows:
@@ -368,8 +375,10 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
                       "toque_wa": 1 if r[9] == "enviado" else 0, "toque_mail": int(r[10] or 0),
                       "ult": r[11], "tem_decisor": bool(r[13]), "verificado": bool(r[14]),
                       "whats": (r[5] or r[7] or ""), "email_v": (r[6] or ""), "insta": (r[15] or ""),
-                      "dec_nome": (r[16] or ""), "dec_tel": (r[17] or ""), "dec_ntel": int(r[18] or 0)})
-    metr = {"na_base": na_base, "com_wpp": com_wpp, "com_mail": com_mail, "em_camp": em_camp, "virou": virou}
+                      "dec_nome": (r[16] or ""), "dec_tel": (r[17] or ""), "dec_ntel": int(r[18] or 0),
+                      "dup": ((r[1] or "").strip().lower() in dup_set)})
+    metr = {"na_base": na_base, "com_wpp": com_wpp, "com_mail": com_mail, "em_camp": em_camp,
+            "virou": virou, "n_dup": len(dup_set)}
     vends = _vendedores(get_pool(), conta_id) if ctx["gerencia"] else []
     return _render("prospeccao_base", request, titulo="Base", secao_ativa="prospeccao",
                    leads=leads, metr=metr, q=q, segmento=segmento, cidade=cidade,
@@ -450,6 +459,46 @@ def prospeccao_base_add_campanha(request: Request, ids: list[str] = Form([]),
         return RedirectResponse(f"/painel/prospeccao/campanhas/{cid}", status_code=303)
     request.session["prosp_aviso"] = f"{n} contato(s) adicionados à campanha '{nome}' ✓"
     return RedirectResponse("/painel/prospeccao/base", status_code=303)
+
+
+@router.get("/painel/prospeccao/base/historico")
+def prospeccao_base_historico(request: Request):
+    """Histórico de envios às campanhas: dia → campanha → empresas. Alimenta o
+    painel embutido na Base (JSON, carregado sob demanda)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    esc = "" if ctx["gerencia"] else " and p.vendedor_id=%s"
+    params = [ctx["conta_id"]] if ctx["gerencia"] else [ctx["conta_id"], ctx["membro_id"]]
+    with get_pool().connection() as c:
+        rows = c.execute(f"""
+            select to_char(a.criado_em - interval '3 hours','DD/MM/YYYY') as dia,
+                   cp.nome, p.empresa
+              from campanha_alvos a
+              join campanhas cp on cp.id=a.campanha_id
+              join prospeccao p on p.id=a.prospeccao_id
+             where p.conta_id=%s{esc}
+             order by a.criado_em desc, cp.nome, p.empresa
+             limit 3000""", tuple(params)).fetchall()
+    dias: list = []
+    idx_dia: dict = {}
+    for dia, cnome, empresa in rows:
+        d = idx_dia.get(dia)
+        if d is None:
+            d = {"dia": dia, "total": 0, "_camp": {}, "campanhas": []}
+            idx_dia[dia] = d
+            dias.append(d)
+        cg = d["_camp"].get(cnome)
+        if cg is None:
+            cg = {"nome": cnome or "(sem nome)", "n": 0, "empresas": []}
+            d["_camp"][cnome] = cg
+            d["campanhas"].append(cg)
+        cg["empresas"].append(empresa or "—")
+        cg["n"] += 1
+        d["total"] += 1
+    for d in dias:
+        d.pop("_camp", None)
+    return JSONResponse({"ok": True, "dias": dias})
 
 
 @router.post("/painel/prospeccao/base/explorium")
@@ -3468,6 +3517,16 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
  .bt-tbl td{padding:.55rem .7rem;border-bottom:1px solid var(--borda);vertical-align:middle}
  .bt-tbl tr:last-child td{border-bottom:0}
  .bt-chip{font-size:.68rem;padding:.1rem .45rem;border-radius:999px;border:1px solid var(--borda);color:var(--mut);white-space:nowrap}
+ .bt-dup{font-size:.62rem;font-weight:700;padding:.05rem .4rem;border-radius:999px;color:#e0a33e;border:1px solid #5a4520;background:#2a2113;white-space:nowrap}
+ .hist-warn{border:1px solid #5a4520;background:#2a2113;color:#e0a33e;border-radius:10px;padding:.55rem .8rem;font-size:.84rem;margin:.2rem 0 .7rem}
+ .hist{border:1px solid var(--borda);border-radius:12px;background:var(--card);padding:.6rem .8rem}
+ .hist details{border-top:1px solid var(--borda)}.hist details:first-child{border-top:0}
+ .hist summary{list-style:none;cursor:pointer;padding:.5rem .1rem;display:flex;align-items:center;gap:.5rem;font-size:.86rem}
+ .hist summary::-webkit-details-marker{display:none}
+ .hist summary .cnt{margin-left:auto;color:var(--mut);font-size:.78rem}
+ .hist .camp{padding:.3rem 0 .3rem 1rem}
+ .hist .camp summary{font-size:.83rem;padding:.35rem .1rem}
+ .hist .emps{padding:.1rem 0 .5rem 1.6rem;font-size:.8rem;color:var(--mut);line-height:1.7}
  @media(max-width:820px){.bt-tiles{grid-template-columns:repeat(2,1fr)}}
  .capcard{border:1px solid var(--borda);border-radius:14px;background:var(--card);padding:.85rem 1rem;margin:.2rem 0 1.2rem}
  .capttl{font-weight:700;font-size:1rem;display:flex;align-items:center;gap:.45rem;margin-bottom:.75rem}
@@ -3525,13 +3584,14 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <button class="pbtn ghost" name="only" value="">⬆︎ Promover a lead</button>
       </div>
     </div>
-    {% if metr.em_camp %}
-    <div class="mut" style="font-size:.8rem;margin:.2rem 0 .6rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
-      📣 <b style="color:var(--txt)">{{ metr.em_camp }}</b> lead(s) já em campanha {% if not ver_camp %}(ocultos da lista){% endif %}
-      {% if ver_camp %}<a href="/painel/prospeccao/base?q={{ q|urlencode }}&segmento={{ segmento|urlencode }}&cidade={{ cidade|urlencode }}" style="color:var(--verde-claro)">ocultar</a>
-      {% else %}<a href="/painel/prospeccao/base?q={{ q|urlencode }}&segmento={{ segmento|urlencode }}&cidade={{ cidade|urlencode }}&ver_camp=1" style="color:var(--verde-claro)">mostrar</a>{% endif %}
-    </div>
+    {% if metr.n_dup %}
+    <div class="hist-warn">⚠️ <b>{{ metr.n_dup }}</b> empresa(s) aparecem <b>duplicadas</b> na base — revise e exclua a sobra com o 🗑.</div>
     {% endif %}
+    <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin:.2rem 0 .6rem">
+      {% if metr.em_camp %}<span class="mut" style="font-size:.8rem">📣 <b style="color:var(--txt)">{{ metr.em_camp }}</b> já em campanha (fora da lista)</span>{% endif %}
+      <button type="button" class="pbtn ghost" onclick="baseHistorico(this)" style="font-size:.8rem;padding:.35rem .7rem">📅 Histórico de envios</button>
+    </div>
+    <div id="historico" class="hist" style="display:none;margin:.2rem 0 .8rem"></div>
     <div class="bt-wrap">
       <table class="bt-tbl">
         <thead><tr>
@@ -3542,7 +3602,7 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         {% for l in leads %}
           <tr>
             <td><input class="bt-ck" type="checkbox" name="ids" value="{{ l.id }}"{% if l.campanha %} disabled title="Já está na campanha {{ l.campanha }}"{% endif %}></td>
-            <td><b>{{ l.empresa }}</b><div class="mut" style="font-size:.76rem">{{ l.segmento or '—' }}{% if l.cidade %} · {{ l.cidade }}{% if l.uf %}/{{ l.uf }}{% endif %}{% endif %}</div></td>
+            <td><b>{{ l.empresa }}</b>{% if l.dup %} <span class="bt-dup" title="Empresa aparece mais de uma vez na base">⚠️ dup</span>{% endif %}<div class="mut" style="font-size:.76rem">{{ l.segmento or '—' }}{% if l.cidade %} · {{ l.cidade }}{% if l.uf %}/{{ l.uf }}{% endif %}{% endif %}</div></td>
             <td style="font-size:.76rem;line-height:1.5;min-width:190px">
               {% if l.whats %}<div>💬 {{ l.whats }}</div>{% endif %}
               {% if l.email_v %}<div>✉️ {{ l.email_v }}</div>{% endif %}
@@ -3574,6 +3634,26 @@ function baseExcluir(id,btn){
       if(!d.ok){alert('Não consegui excluir ('+(d.erro||'?')+').');return;}
       var tr=btn.closest('tr');if(tr)tr.remove();
     }).catch(function(){alert('Falha de rede.');});
+}
+function baseHistorico(btn){
+  var p=document.getElementById('historico');
+  if(p.style.display!=='none'){p.style.display='none';return;}
+  p.style.display='block';
+  if(p.getAttribute('data-loaded')==='1')return;
+  p.innerHTML='<div class="mut" style="font-size:.82rem">Carregando…</div>';
+  fetch('/painel/prospeccao/base/historico').then(function(r){return r.json();}).then(function(d){
+    if(!d.ok){p.innerHTML='<div class="mut" style="font-size:.82rem">Não consegui carregar.</div>';return;}
+    if(!d.dias.length){p.innerHTML='<div class="mut" style="font-size:.82rem">Nenhum envio a campanha ainda.</div>';return;}
+    var h='';
+    d.dias.forEach(function(dia){
+      h+='<details><summary>📅 <b>'+jsEsc(dia.dia)+'</b> <span class="cnt">'+dia.total+' lead(s) · '+dia.campanhas.length+' campanha(s)</span></summary>';
+      dia.campanhas.forEach(function(cg){
+        h+='<details class="camp"><summary>📣 '+jsEsc(cg.nome)+' <span class="cnt">'+cg.n+'</span></summary><div class="emps">'+cg.empresas.map(jsEsc).join(' · ')+'</div></details>';
+      });
+      h+='</details>';
+    });
+    p.innerHTML=h;p.setAttribute('data-loaded','1');
+  }).catch(function(){p.innerHTML='<div class="mut" style="font-size:.82rem">Falha de rede.</div>';});
 }
 function baseExplorium(){
   var ids=baseChecked();

@@ -124,3 +124,47 @@ def subir_foto(conteudo: bytes, nome_arquivo: str = "",
 
     # URL pública (o bucket precisa ser público – ver guia de setup)
     return f"{url}/storage/v1/object/public/{bucket}/{nome}"
+
+
+# ---- Material de campanha (PDF ou imagem) --------------------------------
+# Reaproveita o mesmo bucket do Supabase, numa pasta "materiais/". Imagem passa
+# pelo redimensionamento normal (subir_foto); PDF sobe cru (até 10 MB).
+_MAX_PDF = 10 * 1024 * 1024
+
+
+def subir_material(conteudo: bytes, nome_arquivo: str = "",
+                   content_type: str = "") -> str:
+    """Sobe o material da campanha (PDF ou imagem) pro Supabase e devolve a URL
+    pública. Imagem é redimensionada; PDF sobe como está. Levanta ValueError se o
+    tipo não for suportado ou o upload falhar."""
+    if not conteudo:
+        raise ValueError("Arquivo vazio.")
+    ct = (content_type or "").lower().split(";")[0].strip()
+    # imagem → mesma rota das fotos (valida + redimensiona)
+    if ct in _TIPOS_OK:
+        return subir_foto(conteudo, nome_arquivo, ct)
+    if ct != "application/pdf":
+        raise ValueError("Aceitamos PDF ou imagem (JPG, PNG, WEBP).")
+    if len(conteudo) > _MAX_PDF:
+        raise ValueError("PDF muito grande (max 10 MB).")
+
+    url, key, bucket = _config()
+    nome = f"materiais/{int(time.time())}_{uuid.uuid4().hex[:8]}.pdf"
+    destino = f"{url}/storage/v1/object/{bucket}/{nome}"
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/pdf",
+        "x-upsert": "true",
+        "Cache-Control": "max-age=31536000",
+    }
+    try:
+        with httpx.Client(timeout=30.0) as c:
+            r = c.post(destino, content=conteudo, headers=headers)
+    except Exception as e:
+        raise ValueError(f"Falha no upload: {e}")
+    if r.status_code >= 300:
+        from core.falhas import avaliar_falha_provedor
+        avaliar_falha_provedor(f"HTTP {r.status_code}: {r.text[:200]}",
+                               servico="Supabase Storage")
+        raise ValueError(f"Falha no upload do material (HTTP {r.status_code}).")
+    return f"{url}/storage/v1/object/public/{bucket}/{nome}"

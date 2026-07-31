@@ -1944,7 +1944,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
     with get_pool().connection() as c:
         cp = c.execute("""select id, nome, status, limite_dia, coalesce(enviados_hoje,0), dia_contagem,
                                  coalesce(material,''), coalesce(wa_ativo,false), coalesce(limite_wa_dia,30),
-                                 coalesce(wa_enviados_hoje,0), wa_dia_contagem
+                                 coalesce(wa_enviados_hoje,0), wa_dia_contagem, coalesce(material_tipo,'link')
                             from campanhas where id=%s and conta_id=%s""",
                        (camp_id, ctx["conta_id"])).fetchone()
         if not cp:
@@ -1986,7 +1986,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
     camp = {"id": cp[0], "nome": cp[1], "status": cp[2], "limite": cp[3],
             "status_rot": _STATUS_ROT_CP.get(cp[2], cp[2]), "material": cp[6],
             "wa_ativo": cp[7], "limite_wa": cp[8], "wa_hoje": wa_hoje, "wa_enviados": wa_enviados,
-            "wa_pronto": _prospec_convite.template_configurado()}
+            "wa_pronto": _prospec_convite.template_configurado(), "material_tipo": cp[11]}
     metr = {"total": na_camp, "fila": st.get("fila", 0), "enviados": enviados, "responderam": resp,
             "descadastros": st.get("descadastrou", 0), "erros": st.get("erro", 0),
             "concluidos": st.get("concluido", 0), "hoje": hoje,
@@ -2039,29 +2039,53 @@ def _campanha_dona(c, conta_id, camp_id):
 
 
 @router.post("/painel/prospeccao/campanhas/{camp_id}/config")
-def prospeccao_campanha_config(request: Request, camp_id: int, nome: str = Form(""),
-                               limite_dia: str = Form("40"), material: str = Form(""),
-                               wa_ativo: str = Form(""), limite_wa_dia: str = Form("30")):
+async def prospeccao_campanha_config(request: Request, camp_id: int):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
     if not ctx["gerencia"]:
         return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
+    form = await request.form()
+    nome = (form.get("nome") or "").strip()
     try:
-        lim = max(1, min(500, int(limite_dia)))
+        lim = max(1, min(500, int(form.get("limite_dia") or 40)))
     except (ValueError, TypeError):
         lim = 40
     try:
-        lim_wa = max(1, min(200, int(limite_wa_dia)))
+        lim_wa = max(1, min(200, int(form.get("limite_wa_dia") or 30)))
     except (ValueError, TypeError):
         lim_wa = 30
-    wa_on = str(wa_ativo).strip().lower() in ("1", "on", "true", "sim")
+    wa_on = str(form.get("wa_ativo") or "").strip().lower() in ("1", "on", "true", "sim")
+    tipo = (form.get("material_tipo") or "link").strip().lower()
+    if tipo not in ("link", "video", "pdf", "foto"):
+        tipo = "link"
+    # material: None = mantém o que já está (troca de aba sem novo arquivo não apaga)
+    material = None
+    if tipo == "link":
+        material = (form.get("material_link") or "").strip()[:2000]
+    elif tipo == "video":
+        material = (form.get("material_video") or "").strip()[:2000]
+    else:  # pdf/foto → upload (se veio arquivo novo)
+        up = form.get("material_pdf") if tipo == "pdf" else form.get("material_foto")
+        if up is not None and getattr(up, "filename", ""):
+            try:
+                conteudo = await up.read()
+                from finance.upload_foto import subir_material
+                material = subir_material(conteudo, up.filename, getattr(up, "content_type", "") or "")
+            except Exception as e:  # noqa: BLE001
+                request.session["prosp_aviso"] = f"Não consegui subir o arquivo: {e}"
+                return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
     with get_pool().connection() as c:
-        c.execute("""update campanhas set nome=coalesce(nullif(%s,''),nome), limite_dia=%s,
-                       material=%s, wa_ativo=%s, limite_wa_dia=%s, atualizado_em=now()
-                     where id=%s and conta_id=%s""",
-                  ((nome or "").strip()[:120], lim, (material or "").strip()[:2000],
-                   wa_on, lim_wa, camp_id, ctx["conta_id"]))
+        if material is None:
+            c.execute("""update campanhas set nome=coalesce(nullif(%s,''),nome), limite_dia=%s,
+                           material_tipo=%s, wa_ativo=%s, limite_wa_dia=%s, atualizado_em=now()
+                         where id=%s and conta_id=%s""",
+                      (nome[:120], lim, tipo, wa_on, lim_wa, camp_id, ctx["conta_id"]))
+        else:
+            c.execute("""update campanhas set nome=coalesce(nullif(%s,''),nome), limite_dia=%s,
+                           material=%s, material_tipo=%s, wa_ativo=%s, limite_wa_dia=%s, atualizado_em=now()
+                         where id=%s and conta_id=%s""",
+                      (nome[:120], lim, material, tipo, wa_on, lim_wa, camp_id, ctx["conta_id"]))
         c.commit()
     request.session["prosp_aviso"] = "Configuração salva ✓"
     return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
@@ -4810,7 +4834,35 @@ _CPILL_CSS = """<style>.cpill{font-size:.68rem;font-weight:700;padding:.14rem .5
 .mailp .f{padding:.55rem .85rem;border-top:1px solid var(--borda);font-size:.68rem;color:var(--mut)}</style>""" + _NAV_ASSETS
 
 _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + """
-<div style="max-width:1000px;margin:0 auto">
+<style>
+.cwrap{max-width:1000px;margin:0 auto}
+/* guia "como criar e configurar" */
+.guia{border:1px solid #1e4a34;border-radius:12px;background:linear-gradient(180deg,#10241a,transparent 60%);padding:.9rem 1rem;margin:1rem 0}
+.guia>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:.5rem;font-weight:700;font-size:.92rem}
+.guia>summary::-webkit-details-marker{display:none}
+.guia>summary .chev{margin-left:auto;color:var(--mut);transition:transform .2s}
+.guia[open]>summary .chev{transform:rotate(90deg)}
+.guia .steps{list-style:none;margin:.8rem 0 0;padding:0;display:grid;gap:.5rem}
+@media(min-width:760px){.guia .steps{grid-template-columns:1fr 1fr}}
+.guia .steps li{display:flex;gap:.6rem;align-items:flex-start;background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.55rem .65rem}
+.guia .steps .gn{width:22px;height:22px;flex-shrink:0;border-radius:50%;display:grid;place-items:center;font-size:.74rem;font-weight:700;background:#10241a;border:1px solid #1e4a34;color:#3ddc84}
+.guia .steps .gt{font-size:.83rem;line-height:1.4}
+.guia .steps .gt b{color:var(--txt)}.guia .steps .gt span{color:var(--mut)}
+/* card de campanha */
+.ccard{background:var(--card);border:1px solid var(--borda);border-radius:14px;padding:.9rem 1rem}
+.ccard .top{display:flex;align-items:center;gap:.5rem;min-width:0}
+.ccard .nome{flex:1;min-width:0;font-weight:700;color:inherit;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ccard .nome:hover{color:var(--verde-claro)}
+.ccard .badge{flex-shrink:0;font-size:.64rem;font-weight:700;border-radius:999px;padding:.05rem .4rem}
+.ccard .badge.mail{color:#6fb0e6;border:1px solid #2f4a63;background:#11212e}
+.ccard .badge.wa{color:#3ddc84;border:1px solid #1e5c39;background:#0e2418}
+.ckpis{display:flex;flex-wrap:wrap;gap:.35rem .55rem;margin-top:.5rem;font-size:.8rem;color:var(--mut)}
+.ckpis .kv{display:inline-flex;align-items:baseline;gap:.28rem;white-space:nowrap}
+.ckpis .kv b{color:var(--txt);font-variant-numeric:tabular-nums}
+.ckpis .kv.g b{color:var(--verde-claro)}
+.ckpis .sep{color:#3a3a3c}
+</style>
+<div class="cwrap">
 """ + _navbar('campanhas') + """
   <div>
     <h2 class="tt">📣 Campanhas</h2>
@@ -4825,39 +4877,47 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
     <div class="cppstep"><div>🔥</div><h5>Vira lead</h5><p>entra no funil</p></div>
   </div>
 
-  <div class="cphelp">
-    <b style="font-size:.9rem">Como um lead entra numa campanha</b>
-    <ol>
-      <li>Os contatos vêm da <b>📇 Base</b> (captados no Google Maps, CNPJ ou CSV).</li>
-      <li>Entra quem tem <b>e-mail válido ou WhatsApp/telefone</b> e não descadastrou (os {{ elegiveis }} acima) — cada canal dispara pra quem tiver.</li>
-      <li>Abra a campanha → aba <b>👥 Público</b> → filtre por segmento/cidade e clique <b>Adicionar à campanha</b>.</li>
-      <li>Ative: dispara sozinho (<b>WhatsApp pro decisor + e-mail</b>), <b>para</b> em quem responde, e <b>quem topa vira lead no funil</b>.</li>
+  <details class="guia" open>
+    <summary>📖 Como criar e configurar uma campanha <span class="chev">›</span></summary>
+    <ol class="steps">
+      <li><span class="gn">1</span><span class="gt"><b>Criar</b> <span>— dê um nome (ex.: <code>Dentistas · Teresina</code>) e clique <b>Criar campanha</b>. Nasce como Rascunho.</span></span></li>
+      <li><span class="gn">2</span><span class="gt"><b>Configurar</b> <span>— envios/dia, ligue o 💬 WhatsApp pro decisor e escolha o <b>material</b> (link, PDF, vídeo ou foto).</span></span></li>
+      <li><span class="gn">3</span><span class="gt"><b>Público</b> <span>— filtre a base por segmento/cidade e adicione quem tem e-mail ou WhatsApp.</span></span></li>
+      <li><span class="gn">4</span><span class="gt"><b>Sequência</b> <span>— monte os passos (<code>D+0</code>, <code>D+3</code>…) com 🤖 IA ou template.</span></span></li>
+      <li><span class="gn">5</span><span class="gt"><b>Prévia</b> <span>— confira como o e-mail chega ao lead antes de disparar.</span></span></li>
+      <li><span class="gn">6</span><span class="gt"><b>Ativar</b> <span>— dispara sozinho, <b>para</b> em quem responde e quem topa vira lead 🔥 no funil.</span></span></li>
     </ol>
-  </div>
+  </details>
   {% if elegiveis == 0 %}<div class="mut" style="margin-top:.5rem;font-size:.85rem;border:1px solid var(--borda);border-radius:10px;padding:.7rem .9rem">Nenhum lead com e-mail ou WhatsApp ainda. Capte leads (Google Maps traz o telefone) pra começar.</div>{% endif %}
 
   <div class="card" style="padding:.9rem 1rem;margin:1rem 0">
     <form method="post" action="/painel/prospeccao/campanhas/nova" style="margin:0">
       <label class="lbl">Nome da campanha <span style="color:var(--mut);font-weight:400">— opcional, dá pra renomear depois</span></label>
-      <input class="fld" name="nome" placeholder="ex.: Salões · Teresina" maxlength="120" style="margin-bottom:.6rem">
+      <input class="fld" name="nome" placeholder="ex.: Dentistas · Teresina" maxlength="120" style="margin-bottom:.6rem">
       <button class="pbtn" style="width:100%;justify-content:center">＋ Criar campanha</button>
     </form>
   </div>
 
   <div style="display:flex;flex-direction:column;gap:.6rem">
     {% for c in camps %}
-    <div class="card" style="padding:.9rem 1rem">
-      <div style="display:flex;align-items:center;gap:.5rem">
-        <a href="/painel/prospeccao/campanhas/{{ c.id }}" style="flex:1;text-decoration:none;color:inherit;font-weight:700">{{ c.nome }}</a>
-        <span style="font-size:.64rem;color:#6fb0e6;border:1px solid #2f4a63;background:#11212e;border-radius:999px;padding:.05rem .4rem;font-weight:700" title="E-mail">✉️</span>
-        {% if c.wa %}<span style="font-size:.64rem;color:#3ddc84;border:1px solid #1e5c39;background:#0e2418;border-radius:999px;padding:.05rem .4rem;font-weight:700" title="WhatsApp">💬</span>{% endif %}
+    <div class="ccard">
+      <div class="top">
+        <a class="nome" href="/painel/prospeccao/campanhas/{{ c.id }}" title="{{ c.nome }}">{{ c.nome }}</a>
+        <span class="badge mail" title="E-mail">✉️</span>
+        {% if c.wa %}<span class="badge wa" title="WhatsApp">💬</span>{% endif %}
         <span class="cpill {{ c.status }}">{{ c.status_rot }}</span>
         <form method="post" action="/painel/prospeccao/campanhas/{{ c.id }}/excluir" style="margin:0" onsubmit="return confirm('Excluir “{{ c.nome }}”? Os leads voltam pro funil.')">
           <button class="cpx" title="Excluir campanha">🗑</button>
         </form>
       </div>
       <a href="/painel/prospeccao/campanhas/{{ c.id }}" style="display:block;text-decoration:none;color:inherit">
-        <div class="mut" style="font-size:.8rem;margin-top:.35rem"><b style="color:var(--txt)">{{ c.n }}</b> leads · {{ c.env }} enviados · <span style="color:var(--verde-claro)">{{ c.resp }} respostas</span> · <span style="color:var(--verde-claro)">{{ c.virou }} viraram lead 🔥</span> · limite {{ c.limite }}/dia</div>
+        <div class="ckpis">
+          <span class="kv"><b>{{ c.n }}</b> {{ 'lead' if c.n == 1 else 'leads' }}</span><span class="sep">·</span>
+          <span class="kv"><b>{{ c.env }}</b> enviados</span><span class="sep">·</span>
+          <span class="kv g"><b>{{ c.resp }}</b> respostas</span><span class="sep">·</span>
+          <span class="kv g"><b>{{ c.virou }}</b> viraram lead 🔥</span><span class="sep">·</span>
+          <span class="kv">limite <b>{{ c.limite }}</b>/dia</span>
+        </div>
         {% if c.n %}<div class="cpbar"><i class="e" style="width:{{ (100*c.env/c.n)|round|int }}%"></i><i class="r" style="width:{{ (100*c.resp/c.n)|round|int }}%"></i></div>{% endif %}
       </a>
     </div>
@@ -4867,26 +4927,98 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
 {% endblock %}"""
 
 _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + """
-<style>.passo{border:1px solid var(--borda);border-radius:10px;padding:.6rem .7rem;margin-bottom:.55rem;background:var(--bg)}
+<style>
+.cdwrap{max-width:1120px;margin:0 auto}
+.head{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap}
+.head h1{margin:0;font-size:1.4rem;display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;min-width:0}
+.head h1 .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.head .sub{font-size:.85rem;color:var(--mut);margin-top:.25rem}
+.head .acts{display:flex;gap:.45rem;flex-wrap:wrap;flex-shrink:0}
+.pbtn.sm{padding:.36rem .6rem;font-size:.8rem}
+/* stepper */
+.flow{display:flex;gap:.4rem;margin:1rem 0 1.3rem;overflow-x:auto;padding-bottom:.3rem;-webkit-overflow-scrolling:touch}
+.step{flex:1;min-width:132px;display:flex;gap:.55rem;align-items:center;padding:.6rem .7rem;background:var(--card);border:1px solid var(--borda);border-radius:11px;text-decoration:none;color:var(--txt)}
+.step .n{width:22px;height:22px;flex-shrink:0;border-radius:50%;display:grid;place-items:center;font-size:.74rem;font-weight:700;background:var(--card-2);border:1px solid var(--borda);color:var(--mut)}
+.step>.lbl2{display:flex;flex-direction:column;min-width:0}
+.step .tt2{display:block;font-size:.82rem;font-weight:600;line-height:1.2}
+.step .st{display:block;font-size:.68rem;color:var(--mut);margin-top:.05rem}
+.step.done .n{background:#10241a;border-color:#1e4a34;color:#3ddc84}
+.step.now{border-color:var(--verde)}.step.now .n{background:var(--verde);border-color:var(--verde);color:#fff}
+.step.todo .st{color:#e0a33e}
+/* corpo 2 colunas */
+.body{display:grid;gap:1rem;align-items:start}
+@media(min-width:1000px){.body{grid-template-columns:1.5fr 1fr}.rail{position:sticky;top:1rem}}
+.stack{display:flex;flex-direction:column;gap:1rem;min-width:0}
+.rail{display:flex;flex-direction:column;gap:1rem;min-width:0}
+/* seção numerada */
+.sec{padding:1rem 1.05rem}
+.sec>header{display:flex;align-items:center;gap:.6rem;margin-bottom:.2rem;flex-wrap:wrap}
+.sec>header .idx{width:26px;height:26px;flex-shrink:0;border-radius:8px;display:grid;place-items:center;font-size:.82rem;font-weight:750;background:var(--card-2);border:1px solid var(--borda);color:var(--verde-claro)}
+.sec>header h3{margin:0;font-size:1rem}.sec>header .grow{flex:1}
+.sec .desc{font-size:.8rem;color:var(--mut);margin:.35rem 0 .8rem}
+.row{display:flex;gap:.6rem;flex-wrap:wrap;align-items:flex-end}
+.divi{border-top:1px solid var(--borda);margin:.85rem 0 .8rem}
+.chk{display:flex;gap:.45rem;align-items:center;font-size:.85rem;cursor:pointer}
+.chk input{width:16px;height:16px;accent-color:var(--verde)}
+.bigcount{display:flex;align-items:baseline;gap:.5rem;margin:.7rem 0}
+.bigcount b{font-size:1.9rem;font-weight:750;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+/* material selector */
+.mtabs{display:flex;gap:.4rem;flex-wrap:wrap;margin:.35rem 0 .6rem}
+.mtab{display:inline-flex;align-items:center;gap:.35rem;padding:.4rem .7rem;border-radius:999px;font-size:.8rem;font-weight:600;background:transparent;border:1px solid var(--borda);color:var(--mut);cursor:pointer}
+.mtab:hover{color:var(--txt);border-color:var(--verde)}
+.mtab.on{background:var(--verde);border-color:var(--verde);color:#fff}
+.mpane{display:none}.mpane.on{display:block}
+.drop{display:block;border:1px dashed var(--borda);border-radius:10px;background:var(--bg);padding:1rem;text-align:center;color:var(--mut);font-size:.85rem;cursor:pointer}
+.drop:hover{border-color:var(--verde);color:var(--txt)}.drop b{color:var(--verde-claro)}
+.mfile{display:flex;align-items:center;gap:.55rem;border:1px solid #1e4a34;background:#10241a;border-radius:10px;padding:.5rem .7rem;margin-top:.5rem;font-size:.84rem}
+.mhint{font-size:.74rem;color:var(--mut);margin-top:.5rem}
+/* prévia + checklist */
+.mailp{background:#0e0f11;border:1px solid var(--borda);border-radius:11px;overflow:hidden;margin-top:.2rem}
+.mailp .h{padding:.55rem .8rem;border-bottom:1px solid var(--borda);font-size:.76rem;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mailp .h b{color:var(--txt)}
+.mailp .b{padding:.85rem .95rem;font-size:.88rem;line-height:1.6;white-space:pre-wrap}
+.mailp .f{padding:.5rem .8rem;border-top:1px solid var(--borda);font-size:.68rem;color:var(--mut)}
+.ready{padding:.85rem .95rem}.ready h4{margin:0 0 .5rem;font-size:.86rem}
+.ck{display:flex;align-items:center;gap:.5rem;font-size:.83rem;padding:.22rem 0}
+.ck .dot{width:16px;height:16px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;font-size:.68rem}
+.ck.ok .dot{background:#10241a;border:1px solid #1e4a34;color:#3ddc84}
+.ck.no{color:var(--mut)}.ck.no .dot{background:#2a2113;border:1px solid #5a4520;color:#e0a33e}
+/* passo */
+.passo{border:1px solid var(--borda);border-radius:10px;padding:.6rem .7rem;background:var(--bg)}
+.passo+.passo{margin-top:.55rem}
 .passo .prow{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
-.passo .prow label{font-size:.8rem;color:var(--mut);display:flex;align-items:center;gap:.3rem}
-.passo textarea{width:100%;resize:vertical}
+.passo .dtag{font-size:.72rem;color:var(--mut);display:flex;align-items:center;gap:.3rem}
+.passo .dtag .fld{width:60px;text-align:center;padding:.35rem}
+.passo textarea.fld{resize:vertical}
+/* desempenho */
+.wide{margin-top:1.4rem}
+.secttl{margin:.2rem 0 0;font-size:1rem;display:flex;align-items:center;gap:.6rem}
+.secttl .idx{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-size:.82rem;font-weight:750;background:var(--card-2);border:1px solid var(--borda);color:var(--verde-claro)}
 .cpstats{display:grid;grid-template-columns:repeat(6,1fr);gap:.6rem}
 @media(max-width:720px){.cpstats{grid-template-columns:repeat(3,1fr)}}
-.cpstat{background:var(--card);border:1px solid var(--borda);border-radius:11px;padding:.7rem .8rem}
-.cpstat .n{font-size:1.45rem;font-weight:750;letter-spacing:-.02em}
-.cpstat .l{font-size:.72rem;color:var(--mut);margin-top:.1rem}
+@media(max-width:460px){.cpstats{grid-template-columns:repeat(2,1fr)}}
+.cpstat{background:var(--card);border:1px solid var(--borda);border-radius:11px;padding:.7rem .8rem;min-width:0}
+.cpstat .n{font-size:1.4rem;font-weight:750;letter-spacing:-.02em;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cpstat .l{font-size:.7rem;color:var(--mut);margin-top:.1rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cpstat.g .n{color:#3ddc84}.cpstat.r .n{color:#e0574f}
+.tbl-wrap{overflow-x:auto;border-radius:12px;border:1px solid var(--borda);margin-top:.8rem}
+.tbl-wrap table{width:100%;border-collapse:collapse;font-size:.84rem;min-width:460px}
+.tbl-wrap thead th{text-align:left;color:var(--mut);font-weight:500;padding:.55rem .9rem;background:var(--card)}
+.tbl-wrap tbody td{padding:.55rem .9rem;border-top:1px solid var(--borda)}
 .apill{font-size:.68rem;font-weight:600;padding:.1rem .45rem;border-radius:999px;border:1px solid var(--borda);white-space:nowrap}
 .apill.respondeu,.apill.concluido{color:#3ddc84;border-color:#1e4a34;background:#10241a}
 .apill.enviado{color:#5b9bd5;border-color:#2f4a63;background:#14212e}
 .apill.descadastrou,.apill.erro{color:#e0a33e;border-color:#5a4520;background:#2a2113}
-.apill.fila{color:#8a938a}</style>
-<div style="max-width:1000px;margin:0 auto">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap">
-    <div><h2 class="tt">{{ camp.nome }} <span class="cpill {{ camp.status }}">{{ camp.status_rot }}</span></h2>
-      <div class="mut" style="font-size:.85rem"><b style="color:var(--txt)">{{ na_camp }}</b> lead(s) na campanha · limite {{ camp.limite }}/dia</div></div>
-    <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+.apill.fila{color:#8a938a}
+</style>
+{% set mt = camp.material_tipo or 'link' %}
+<div class="cdwrap">
+  <div class="head">
+    <div style="min-width:0">
+      <h1><span class="nm">{{ camp.nome }}</span> <span class="cpill {{ camp.status }}">{{ camp.status_rot }}</span></h1>
+      <div class="sub"><b style="color:var(--txt)">{{ na_camp }}</b> lead(s) na campanha · limite <b style="color:var(--txt)">{{ camp.limite }}</b>/dia · ✉️ e-mail{% if camp.wa_ativo %} + 💬 WhatsApp{% endif %}</div>
+    </div>
+    <div class="acts">
       {% if camp.status != 'ativa' %}<form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/status" style="margin:0"><input type="hidden" name="status" value="ativa"><button class="pbtn">▶ Ativar</button></form>
       {% else %}<form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/status" style="margin:0"><input type="hidden" name="status" value="pausada"><button class="pbtn ghost">❚❚ Pausar</button></form>{% endif %}
       <a class="pbtn ghost" href="/painel/prospeccao/campanhas">‹ Campanhas</a>
@@ -4894,164 +5026,194 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
   </div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
 
-  <div class="cpsum">
-    <div class="box"><h5>👥 Público</h5>
-      <div class="cpkv"><span>Na campanha</span><b>{{ na_camp }}</b></div>
-      <div class="cpkv"><span>Elegíveis (filtro)</span><b>{{ elegiveis }}</b></div></div>
-    <div class="box"><h5>🗓️ Cadência</h5>
-      <div class="cpkv"><span>Passos</span><b>{{ passos|length }}</b></div>
-      <div class="cpkv"><span>Sequência</span><b>{{ cadencia }}</b></div>
-      <div class="cpkv"><span>Para ao responder</span><b style="color:var(--verde-claro)">Sim</b></div></div>
-    <div class="box"><h5>🛡️ Limites & LGPD</h5>
-      <div class="cpkv"><span>E-mail/dia</span><b>{{ camp.limite }}</b></div>
-      <div class="cpkv"><span>E-mail hoje</span><b>{{ metr.hoje }}</b></div>
-      {% if camp.wa_ativo %}<div class="cpkv"><span>WhatsApp/dia</span><b>{{ camp.limite_wa }}</b></div>
-      <div class="cpkv"><span>WhatsApp hoje</span><b>{{ camp.wa_hoje }}</b></div>
-      <div class="cpkv"><span>WhatsApp enviados</span><b>{{ camp.wa_enviados }}</b></div>{% endif %}
-      <div class="cpkv"><span>Descadastro</span><b style="color:var(--verde-claro)">Ativo</b></div></div>
-  </div>
+  <nav class="flow" aria-label="Etapas da campanha">
+    <a class="step done" href="#s1"><span class="n">✓</span><span class="lbl2"><span class="tt2">Configuração</span><span class="st">nome, ritmo, canais</span></span></a>
+    <a class="step {% if na_camp %}done{% else %}now{% endif %}" href="#s2"><span class="n">{% if na_camp %}✓{% else %}2{% endif %}</span><span class="lbl2"><span class="tt2">Público</span><span class="st">{% if na_camp %}{{ na_camp }} na campanha{% else %}{{ elegiveis }} prontos p/ entrar{% endif %}</span></span></a>
+    <a class="step" href="#s3"><span class="n">3</span><span class="lbl2"><span class="tt2">Sequência</span><span class="st">{{ passos|length }} passo(s)</span></span></a>
+    <a class="step" href="#s4"><span class="n">4</span><span class="lbl2"><span class="tt2">Prévia</span><span class="st">confira o e-mail</span></span></a>
+    <a class="step {% if camp.status=='ativa' %}done{% else %}todo{% endif %}" href="#s5"><span class="n">{% if camp.status=='ativa' %}✓{% else %}5{% endif %}</span><span class="lbl2"><span class="tt2">Ativar</span><span class="st">e acompanhar</span></span></a>
+  </nav>
 
-  <!-- CONFIG -->
-  <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/config" class="card" style="padding:.9rem 1rem;margin-top:1rem">
-    <div style="display:flex;gap:.6rem;align-items:flex-end;flex-wrap:wrap">
-      <div><label class="lbl">Nome</label><input class="fld" name="nome" value="{{ camp.nome }}" maxlength="120" style="min-width:240px"></div>
-      <div><label class="lbl">Envios/dia</label><input class="fld" name="limite_dia" value="{{ camp.limite }}" inputmode="numeric" style="width:100px"></div>
-      <span style="flex:1"></span>
-      <button class="pbtn ghost" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/excluir" formmethod="post" style="color:#e0574f;border-color:#5c2a27" onclick="return confirm('Excluir a campanha? Os leads voltam pro funil.')">🗑 Excluir</button>
-    </div>
-    <div style="margin-top:.7rem">
-      <label class="lbl">📎 Material <span style="color:var(--mut);font-weight:400">— enviado quando o lead clica “✅ Tenho interesse” no e-mail</span></label>
-      <textarea class="fld" name="material" rows="2" placeholder="Link da apresentação, PDF, vídeo… (ex.: https://... ). O agente manda isso na hora e assume a conversa.">{{ camp.material or '' }}</textarea>
-    </div>
-    <div style="margin-top:.8rem;border-top:1px solid var(--borda);padding-top:.7rem">
-      <label class="lbl" style="font-size:.82rem">💬 1º contato por WhatsApp (template aprovado)</label>
-      {% if camp.wa_pronto %}
-      <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-top:.3rem">
-        <label style="display:flex;gap:.4rem;align-items:center;cursor:pointer;font-size:.86rem">
-          <input type="checkbox" name="wa_ativo" value="1" {% if camp.wa_ativo %}checked{% endif %} style="width:auto;accent-color:var(--verde)">
-          Disparar o convite por WhatsApp junto com o e-mail
-        </label>
-        <div><label class="lbl">WhatsApp/dia</label><input class="fld" name="limite_wa_dia" value="{{ camp.limite_wa }}" inputmode="numeric" style="width:90px"></div>
+  <div class="body">
+    <div class="stack">
+      <!-- 1 · CONFIGURAÇÃO -->
+      <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/config" enctype="multipart/form-data" class="card sec" id="s1">
+        <header><span class="idx">1</span><h3>Configuração</h3><span class="grow"></span><button class="pbtn ghost sm">Salvar</button></header>
+        <p class="desc">O básico: nome, ritmo de envio e o material que o lead recebe.</p>
+        <div class="row">
+          <div style="flex:1;min-width:180px"><label class="lbl">Nome</label><input class="fld" name="nome" value="{{ camp.nome }}" maxlength="120"></div>
+          <div><label class="lbl">Envios/dia</label><input class="fld" name="limite_dia" value="{{ camp.limite }}" inputmode="numeric" style="width:90px"></div>
+        </div>
+
+        <div style="margin-top:.75rem">
+          <label class="lbl">📎 Material <span style="color:var(--mut);font-weight:400">— o que o lead recebe ao clicar “✅ Tenho interesse”</span></label>
+          <input type="hidden" name="material_tipo" id="mtipo" value="{{ mt }}">
+          <div class="mtabs">
+            <button type="button" class="mtab {% if mt=='link' %}on{% endif %}" onclick="mtab(this,'link')">🔗 Link</button>
+            <button type="button" class="mtab {% if mt=='pdf' %}on{% endif %}" onclick="mtab(this,'pdf')">📄 PDF</button>
+            <button type="button" class="mtab {% if mt=='video' %}on{% endif %}" onclick="mtab(this,'video')">🎬 Vídeo</button>
+            <button type="button" class="mtab {% if mt=='foto' %}on{% endif %}" onclick="mtab(this,'foto')">🖼 Foto</button>
+          </div>
+          <div class="mpane {% if mt=='link' %}on{% endif %}" data-m="link"><input class="fld" name="material_link" value="{% if mt=='link' %}{{ camp.material }}{% endif %}" placeholder="https://sua-apresentacao.com  ·  site, página, proposta…"></div>
+          <div class="mpane {% if mt=='video' %}on{% endif %}" data-m="video"><input class="fld" name="material_video" value="{% if mt=='video' %}{{ camp.material }}{% endif %}" placeholder="Cole o link do YouTube, Loom ou Google Drive"><div class="mhint">Vídeo entra por link — mais leve pro lead abrir do que um arquivo pesado.</div></div>
+          <div class="mpane {% if mt=='pdf' %}on{% endif %}" data-m="pdf">
+            {% if mt=='pdf' and camp.material %}<div class="mfile">📄 <a href="{{ camp.material }}" target="_blank" rel="noopener" style="color:var(--verde-claro);text-decoration:none">material atual (PDF)</a><span class="mut" style="margin-left:auto;font-size:.74rem">enviar outro ↓</span></div>{% endif %}
+            <label class="drop">📄 Escolher o PDF <b>(clique aqui)</b><div style="font-size:.72rem;margin-top:.2rem">até 10 MB</div><input type="file" name="material_pdf" accept="application/pdf" hidden onchange="mfile(this)"></label>
+            <div class="mfile mfpick" style="display:none"></div>
+          </div>
+          <div class="mpane {% if mt=='foto' %}on{% endif %}" data-m="foto">
+            {% if mt=='foto' and camp.material %}<img src="{{ camp.material }}" alt="material" style="max-height:120px;max-width:100%;border-radius:8px;border:1px solid var(--borda);margin-bottom:.4rem">{% endif %}
+            <label class="drop">🖼 Escolher a imagem <b>(clique aqui)</b><div style="font-size:.72rem;margin-top:.2rem">JPG/PNG · até 6 MB</div><input type="file" name="material_foto" accept="image/*" hidden onchange="mfile(this)"></label>
+            <div class="mfile mfpick" style="display:none"></div>
+          </div>
+          <div class="mhint">✨ O ZAQ envia sozinho na hora do interesse e o <b>agente IA assume a conversa</b> — você não precisa fazer nada.</div>
+        </div>
+
+        <div class="divi"></div>
+        <label class="lbl" style="font-size:.82rem">💬 1º contato por WhatsApp (template aprovado)</label>
+        {% if camp.wa_pronto %}
+        <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-top:.3rem">
+          <label class="chk"><input type="checkbox" name="wa_ativo" value="1" {% if camp.wa_ativo %}checked{% endif %}> <span>Disparar o convite por WhatsApp junto com o e-mail</span></label>
+          <div><label class="lbl">WhatsApp/dia</label><input class="fld" name="limite_wa_dia" value="{{ camp.limite_wa }}" inputmode="numeric" style="width:90px"></div>
+        </div>
+        <div class="mut" style="font-size:.74rem;margin-top:.3rem">Mira o <b>decisor</b> (Credify pelo CNPJ, ⭐ número dele); sem decisor, usa o melhor número captado. Lead sem número recebe só o e-mail.</div>
+        {% else %}
+        <div class="mut" style="font-size:.78rem;margin-top:.3rem">Canal de WhatsApp ainda não está pronto pra disparo frio. Configure o template aprovado (Twilio) pra liberar esta opção.</div>
+        <input type="hidden" name="wa_ativo" value="{% if camp.wa_ativo %}1{% endif %}"><input type="hidden" name="limite_wa_dia" value="{{ camp.limite_wa }}">
+        {% endif %}
+        <div style="margin-top:.8rem;display:flex;gap:.5rem;flex-wrap:wrap">
+          <button class="pbtn">Salvar configuração</button>
+          <button class="pbtn ghost" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/excluir" formmethod="post" formnovalidate style="color:#e0574f;border-color:#5c2a27" onclick="return confirm('Excluir a campanha? Os leads voltam pro funil.')">🗑 Excluir</button>
+        </div>
+      </form>
+
+      <!-- 2 · PÚBLICO -->
+      <div class="card sec" id="s2"{% if not na_camp %} style="border-color:var(--verde)"{% endif %}>
+        <header><span class="idx"{% if not na_camp %} style="background:var(--verde);border-color:var(--verde);color:#fff"{% endif %}>2</span><h3>Público</h3></header>
+        <p class="desc">Quem entra: leads da base com <b>e-mail válido ou WhatsApp</b> que não descadastraram.</p>
+        <form method="get" action="/painel/prospeccao/campanhas/{{ camp.id }}" class="row" style="align-items:center">
+          <input class="fld" name="seg" value="{{ seg }}" placeholder="Segmento" style="flex:1;min-width:120px">
+          <input class="fld" name="cidade" value="{{ cidade }}" placeholder="Cidade" style="flex:1;min-width:100px">
+          <select class="fld" name="temp" style="width:auto" onchange="this.form.submit()">
+            <option value="">Qualquer temperatura</option>
+            <option value="frio" {% if temp=='frio' %}selected{% endif %}>Frio</option>
+            <option value="morno" {% if temp=='morno' %}selected{% endif %}>Morno</option>
+            <option value="quente" {% if temp=='quente' %}selected{% endif %}>Quente</option>
+          </select>
+          <button class="pbtn ghost">Filtrar</button>
+        </form>
+        <div class="bigcount"><b>{{ elegiveis }}</b><span class="mut">leads elegíveis com esse filtro</span></div>
+        <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/publico" style="margin:0">
+          <input type="hidden" name="seg" value="{{ seg }}"><input type="hidden" name="cidade" value="{{ cidade }}"><input type="hidden" name="temp" value="{{ temp }}">
+          <button class="pbtn" {% if not elegiveis %}disabled{% endif %}>＋ Adicionar {{ elegiveis }} à campanha</button>
+        </form>
       </div>
-      <div class="mut" style="font-size:.74rem;margin-top:.3rem">Mira o <b>decisor</b> (busca na Credify pelo CNPJ e usa o ⭐ número dele); sem decisor, usa o melhor número já captado. Lead sem número recebe só o e-mail; sem contato nenhum, é pulado.</div>
-      {% else %}
-      <div class="mut" style="font-size:.78rem;margin-top:.3rem">Canal de WhatsApp ainda não está pronto pra disparo frio. Configure o template aprovado (Twilio) pra liberar esta opção.</div>
-      {% endif %}
-    </div>
-    <div style="margin-top:.6rem"><button class="pbtn">Salvar</button></div>
-  </form>
 
-  <!-- PÚBLICO -->
-  <div class="card" style="padding:1rem;margin-top:1rem">
-    <h3 style="margin:0 0 .4rem;font-size:1rem">👥 Público — adicionar leads</h3>
-    <div class="mut" style="font-size:.82rem;margin-bottom:.6rem">Entram leads com <b>e-mail válido ou WhatsApp/telefone</b> e que não descadastraram — cada canal dispara pra quem tiver.</div>
-    <form method="get" action="/painel/prospeccao/campanhas/{{ camp.id }}" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
-      <input class="fld" name="seg" value="{{ seg }}" placeholder="Segmento (ex.: salão)" style="width:auto">
-      <input class="fld" name="cidade" value="{{ cidade }}" placeholder="Cidade" style="width:auto">
-      <select class="fld" name="temp" style="width:auto" onchange="this.form.submit()">
-        <option value="">Qualquer temperatura</option>
-        <option value="frio" {% if temp=='frio' %}selected{% endif %}>Frio</option>
-        <option value="morno" {% if temp=='morno' %}selected{% endif %}>Morno</option>
-        <option value="quente" {% if temp=='quente' %}selected{% endif %}>Quente</option>
-      </select>
-      <button class="pbtn ghost">Filtrar</button>
-    </form>
-    <div style="display:flex;align-items:center;gap:.9rem;margin-top:.8rem;flex-wrap:wrap">
-      <div><span style="font-size:1.7rem;font-weight:750">{{ elegiveis }}</span> <span class="mut">elegíveis com esse filtro</span></div>
-      <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/publico" style="margin:0">
-        <input type="hidden" name="seg" value="{{ seg }}"><input type="hidden" name="cidade" value="{{ cidade }}"><input type="hidden" name="temp" value="{{ temp }}">
-        <button class="pbtn" {% if not elegiveis %}disabled{% endif %}>＋ Adicionar {{ elegiveis }} à campanha</button>
+      <!-- 3 · SEQUÊNCIA -->
+      <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/sequencia" class="card sec" id="s3">
+        <header><span class="idx">3</span><h3>Sequência</h3><span class="grow"></span>
+          <button type="button" class="pbtn ghost sm" onclick="addPasso()">＋ Passo</button><button class="pbtn sm">Salvar</button></header>
+        <p class="desc"><b>D+</b> = dias após o 1º e-mail (0 = primeiro). <b>🤖 IA</b> escreve único por lead; <b>Template</b> usa o texto (<code>{empresa}</code>, <code>{cidade}</code>, <code>{segmento}</code>).</p>
+        <div id="passos">
+          {% for p in passos %}
+          <div class="passo">
+            <div class="prow">
+              <span class="dtag">D+<input class="fld" name="dias" value="{{ p.dias }}" inputmode="numeric"></span>
+              <select class="fld" name="usar_ia" style="width:auto"><option value="1" {% if p.ia %}selected{% endif %}>🤖 IA escreve</option><option value="0" {% if not p.ia %}selected{% endif %}>Template</option></select>
+              <span style="flex:1"></span>
+              <button type="button" class="pbtn ghost sm" onclick="remPasso(this)" title="Remover passo">✕</button>
+            </div>
+            <input class="fld" name="assunto" value="{{ p.assunto }}" placeholder="Assunto do e-mail" style="margin-top:.45rem">
+            <textarea class="fld" name="corpo" rows="3" placeholder="Texto do e-mail (Template). Na opção IA, deixe vazio ou use como orientação." style="margin-top:.45rem">{{ p.corpo }}</textarea>
+          </div>
+          {% endfor %}
+        </div>
       </form>
     </div>
-  </div>
 
-  <!-- SEQUÊNCIA (editor) -->
-  <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/sequencia" class="card" style="padding:1rem;margin-top:1rem">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem">
-      <h3 style="margin:0;font-size:1rem">🗓️ Sequência</h3>
-      <div style="display:flex;gap:.4rem"><button type="button" class="pbtn ghost" onclick="addPasso()">＋ Passo</button><button class="pbtn">Salvar sequência</button></div>
-    </div>
-    <div class="mut" style="font-size:.8rem;margin-bottom:.7rem"><b>D+</b> = dias após o 1º e-mail (0 = primeiro). <b>IA escreve</b> = o agente monta o e-mail único por lead. <b>Template</b> = usa o texto abaixo (variáveis <code>{empresa}</code>, <code>{cidade}</code>, <code>{segmento}</code>).</div>
-    <div id="passos">
-      {% for p in passos %}
-      <div class="passo">
-        <div class="prow">
-          <label>D+<input class="fld" name="dias" value="{{ p.dias }}" inputmode="numeric" style="width:64px"></label>
-          <select class="fld" name="usar_ia" style="width:auto"><option value="1" {% if p.ia %}selected{% endif %}>🤖 IA escreve</option><option value="0" {% if not p.ia %}selected{% endif %}>Template</option></select>
-          <span style="flex:1"></span>
-          <button type="button" class="pbtn ghost" onclick="remPasso(this)" title="Remover passo">✕</button>
+    <!-- RAIL: prévia + checklist -->
+    <div class="rail">
+      {% if previa %}
+      <div class="card sec" id="s4">
+        <header><span class="idx">4</span><h3>Prévia</h3><span class="grow"></span>{% if previa.ia %}<button type="button" class="pbtn ghost sm" id="pia-btn" onclick="previaIA({{ camp.id }})">🤖 Gerar</button>{% endif %}</header>
+        <p class="desc" style="margin-bottom:.4rem">1º passo · exemplo com <b>{{ previa.empresa }}</b></p>
+        <div class="mailp">
+          <div class="h">De <b>{{ remetente or 'sua empresa' }}</b> · Para {{ previa.email or '—' }}</div>
+          <div class="b"><b id="pv-assunto">{{ previa.assunto }}</b>
+            <div style="height:.5rem"></div><span id="pv-corpo">{{ previa.corpo }}</span>
+            <div style="margin:14px 0 2px"><span style="display:inline-block;padding:10px 20px;background:#16a34a;color:#fff;font-weight:bold;border-radius:8px">✅ Tenho interesse</span></div>
+            <div class="mut" style="font-size:.72rem">Ao clicar, recebe o material{% if camp.material %} (já configurado){% else %} — <b>configure acima</b>{% endif %} e o agente assume.</div>
+          </div>
+          <div class="f">Sua empresa · descadastrar (link automático em cada envio).</div>
         </div>
-        <input class="fld" name="assunto" value="{{ p.assunto }}" placeholder="Assunto do e-mail" style="margin-top:.45rem">
-        <textarea class="fld" name="corpo" rows="3" placeholder="Texto do e-mail (Template). Na opção IA, deixe vazio ou use como orientação." style="margin-top:.45rem">{{ p.corpo }}</textarea>
       </div>
-      {% endfor %}
-    </div>
-  </form>
-
-  <!-- PRÉVIA -->
-  {% if previa %}
-  <div class="card" style="padding:1rem;margin-top:1rem">
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
-      <h3 style="margin:0;font-size:1rem">✉️ Prévia <span class="mut" style="font-size:.75rem;font-weight:400">· 1º passo · exemplo com {{ previa.empresa }}</span></h3>
-      {% if previa.ia %}<button type="button" class="pbtn ghost" id="pia-btn" onclick="previaIA({{ camp.id }})">🤖 Gerar prévia com IA</button>{% endif %}
-    </div>
-    <div class="mailp">
-      <div class="h">De <b>{{ remetente or 'sua empresa' }}</b> · Para {{ previa.email or '—' }}</div>
-      <div class="b"><b id="pv-assunto">{{ previa.assunto }}</b>
-        <div style="height:.5rem"></div><span id="pv-corpo">{{ previa.corpo }}</span>
-        <div style="margin:16px 0 2px"><span style="display:inline-block;padding:11px 22px;background:#16a34a;color:#fff;font-weight:bold;border-radius:8px">✅ Tenho interesse</span></div>
-        <div class="mut" style="font-size:.72rem">Ao clicar, o lead recebe o material{% if camp.material %} (você já configurou){% else %} — <b>configure o Material</b> lá em cima{% endif %} e o agente assume.</div>
-        {% if previa.whatsapp %}<div><a class="wa" href="#">💬 Falar no WhatsApp</a></div>{% endif %}
+      {% endif %}
+      <div class="card ready">
+        <h4>Pronto pra ativar?</h4>
+        <div class="ck {% if passos %}ok{% else %}no{% endif %}"><span class="dot">{% if passos %}✓{% else %}!{% endif %}</span> Sequência com {{ passos|length }} passo(s)</div>
+        <div class="ck {% if na_camp %}ok{% else %}no{% endif %}"><span class="dot">{% if na_camp %}✓{% else %}!{% endif %}</span> {% if na_camp %}{{ na_camp }} lead(s) no público{% else %}Público ainda vazio — adicione acima{% endif %}</div>
+        <div class="ck {% if camp.material %}ok{% else %}no{% endif %}"><span class="dot">{% if camp.material %}✓{% else %}!{% endif %}</span> {% if camp.material %}Material configurado{% else %}Material não configurado{% endif %}</div>
+        {% if camp.status != 'ativa' %}
+        <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/status" style="margin:.7rem 0 0"><input type="hidden" name="status" value="ativa"><button class="pbtn" style="width:100%;justify-content:center" {% if not na_camp %}disabled{% endif %}>▶ Ativar campanha</button></form>
+        {% else %}
+        <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/status" style="margin:.7rem 0 0"><input type="hidden" name="status" value="pausada"><button class="pbtn ghost" style="width:100%;justify-content:center">❚❚ Pausar</button></form>
+        {% endif %}
       </div>
-      <div class="f">Sua empresa · Se não quiser mais receber, descadastrar (link automático em cada envio).</div>
     </div>
   </div>
-  {% endif %}
 
-  <!-- MÉTRICAS -->
-  <h3 style="margin:1.3rem 0 .5rem;font-size:1rem">📊 Desempenho</h3>
-  <div class="cpstats">
-    <div class="cpstat"><div class="n">{{ metr.enviados }}</div><div class="l">Enviados</div></div>
-    <div class="cpstat g"><div class="n">{{ metr.responderam }}</div><div class="l">Responderam</div></div>
-    <div class="cpstat g"><div class="n">{{ metr.taxa }}%</div><div class="l">Taxa de resposta</div></div>
-    <div class="cpstat"><div class="n">{{ metr.fila }}</div><div class="l">Na fila</div></div>
-    <div class="cpstat r"><div class="n">{{ metr.descadastros }}</div><div class="l">Descadastros</div></div>
-    <div class="cpstat"><div class="n">{{ metr.hoje }}<span style="font-size:.9rem;color:var(--mut)">/{{ camp.limite }}</span></div><div class="l">Hoje</div></div>
-  </div>
-  <div class="mut" style="font-size:.8rem;margin-top:.6rem">{% if camp.status=='ativa' %}✅ <b style="color:var(--verde-claro)">Ativa</b> — o motor dispara automaticamente (até {{ camp.limite }}/dia) e para em quem responde ou descadastra.{% else %}Clique <b>▶ Ativar</b> pra o motor começar a disparar.{% endif %}{% if metr.erros %} · <span style="color:#e0574f">{{ metr.erros }} erro(s) de envio</span>{% endif %}</div>
-
-  <!-- LEADS -->
-  <div class="card" style="padding:0;margin-top:1rem;overflow:hidden">
-    <div style="padding:.7rem 1rem;border-bottom:1px solid var(--borda)"><b style="font-size:.92rem">Leads da campanha</b> <span class="mut" style="font-size:.8rem">({{ na_camp }})</span></div>
-    <div style="max-height:420px;overflow:auto">
-    <table style="width:100%;border-collapse:collapse;font-size:.84rem">
-      <thead><tr style="text-align:left;color:var(--mut)"><th style="padding:.5rem 1rem;font-weight:500">Empresa</th><th style="padding:.5rem;font-weight:500">Situação</th><th style="padding:.5rem;font-weight:500">Passo</th><th style="padding:.5rem 1rem;font-weight:500">Próximo/último</th></tr></thead>
-      <tbody>
-        {% for l in leads %}
-        <tr style="border-top:1px solid var(--borda)">
-          <td style="padding:.5rem 1rem"><b>{{ l.empresa }}</b><div class="mut" style="font-size:.76rem">{{ l.email }}</div></td>
-          <td style="padding:.5rem"><span class="apill {{ l.status }}">{{ l.rot }}</span></td>
-          <td style="padding:.5rem" class="mut">D{{ l.passo }}</td>
-          <td class="mut" style="padding:.5rem 1rem;white-space:nowrap">{% if l.status in ('fila','enviado') and l.prox %}⏳ {{ l.prox }}{% elif l.ult %}✓ {{ l.ult }}{% else %}—{% endif %}</td>
-        </tr>
-        {% else %}<tr><td colspan="4" class="mut" style="text-align:center;padding:1.6rem">Nenhum lead ainda — adicione o público acima.</td></tr>{% endfor %}
-      </tbody>
-    </table>
+  <!-- 5 · DESEMPENHO + LEADS -->
+  <div class="wide" id="s5">
+    <h3 class="secttl"><span class="idx">5</span> Desempenho &amp; acompanhamento</h3>
+    <div class="cpstats" style="margin-top:.7rem">
+      <div class="cpstat"><div class="n">{{ metr.enviados }}</div><div class="l">Enviados</div></div>
+      <div class="cpstat g"><div class="n">{{ metr.responderam }}</div><div class="l">Responderam</div></div>
+      <div class="cpstat g"><div class="n">{{ metr.taxa }}%</div><div class="l">Taxa resposta</div></div>
+      <div class="cpstat"><div class="n">{{ metr.fila }}</div><div class="l">Na fila</div></div>
+      <div class="cpstat r"><div class="n">{{ metr.descadastros }}</div><div class="l">Descadastros</div></div>
+      <div class="cpstat"><div class="n">{{ metr.hoje }}<span style="font-size:.9rem;color:var(--mut)">/{{ camp.limite }}</span></div><div class="l">Hoje</div></div>
+    </div>
+    <div class="mut" style="font-size:.8rem;margin-top:.6rem">{% if camp.status=='ativa' %}✅ <b style="color:var(--verde-claro)">Ativa</b> — dispara sozinho (até {{ camp.limite }}/dia) e para em quem responde ou descadastra.{% else %}Clique <b>▶ Ativar</b> pra o motor começar a disparar.{% endif %}{% if metr.erros %} · <span style="color:#e0574f">{{ metr.erros }} erro(s) de envio</span>{% endif %}</div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Empresa</th><th>Situação</th><th>Passo</th><th>Próximo/último</th></tr></thead>
+        <tbody>
+          {% for l in leads %}
+          <tr><td><b>{{ l.empresa }}</b><div class="mut" style="font-size:.76rem">{{ l.email }}</div></td>
+            <td><span class="apill {{ l.status }}">{{ l.rot }}</span></td>
+            <td class="mut">D{{ l.passo }}</td>
+            <td class="mut" style="white-space:nowrap">{% if l.status in ('fila','enviado') and l.prox %}⏳ {{ l.prox }}{% elif l.ult %}✓ {{ l.ult }}{% else %}—{% endif %}</td></tr>
+          {% else %}<tr><td colspan="4" class="mut" style="text-align:center;padding:1.6rem">Nenhum lead ainda — adicione o público acima.</td></tr>{% endfor %}
+        </tbody>
+      </table>
     </div>
   </div>
 </div>
 <script>
-function novoPasso(){return '<div class="passo"><div class="prow"><label>D+<input class="fld" name="dias" value="7" inputmode="numeric" style="width:64px"></label>'
-  +'<select class="fld" name="usar_ia" style="width:auto"><option value="0" selected>Template</option><option value="1">\\ud83e\\udd16 IA escreve</option></select>'
-  +'<span style="flex:1"></span><button type="button" class="pbtn ghost" onclick="remPasso(this)" title="Remover passo">\\u2715</button></div>'
+function mtab(btn,tipo){
+  var box=btn.parentNode; var A=box.querySelectorAll('.mtab');
+  for(var i=0;i<A.length;i++)A[i].classList.remove('on');
+  btn.classList.add('on');
+  document.getElementById('mtipo').value=tipo;
+  var P=document.querySelectorAll('.mpane');
+  for(var j=0;j<P.length;j++)P[j].classList.toggle('on',P[j].getAttribute('data-m')===tipo);
+}
+function mfile(inp){
+  var f=inp.files&&inp.files[0]; if(!f)return;
+  var box=inp.closest('.mpane').querySelector('.mfpick');
+  if(box){var mb=(f.size/1048576).toFixed(1);box.style.display='flex';box.innerHTML='📎 <b>'+f.name+'</b> <span class="mut" style="margin-left:auto;font-size:.75rem">'+mb+' MB</span>';}
+}
+function novoPasso(){return '<div class="passo"><div class="prow"><span class="dtag">D+<input class="fld" name="dias" value="7" inputmode="numeric"></span>'
+  +'<select class="fld" name="usar_ia" style="width:auto"><option value="0" selected>Template</option><option value="1">🤖 IA escreve</option></select>'
+  +'<span style="flex:1"></span><button type="button" class="pbtn ghost sm" onclick="remPasso(this)" title="Remover passo">✕</button></div>'
   +'<input class="fld" name="assunto" placeholder="Assunto do e-mail" style="margin-top:.45rem">'
   +'<textarea class="fld" name="corpo" rows="3" placeholder="Texto do e-mail (use {empresa}, {cidade})" style="margin-top:.45rem"></textarea></div>';}
 function addPasso(){document.getElementById('passos').insertAdjacentHTML('beforeend',novoPasso());}
 function remPasso(b){var ps=document.querySelectorAll('#passos .passo');if(ps.length<=1){alert('Deixe ao menos 1 passo.');return;}b.closest('.passo').remove();}
 function previaIA(id){var b=document.getElementById('pia-btn');if(b){b.disabled=true;b.textContent='Gerando…';}
-  fetch('/painel/prospeccao/campanhas/'+id+'/previa-ia',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()}).then(function(r){return r.json();}).then(function(d){if(b){b.disabled=false;b.textContent='🤖 Gerar prévia com IA';}
+  fetch('/painel/prospeccao/campanhas/'+id+'/previa-ia',{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData()}).then(function(r){return r.json();}).then(function(d){if(b){b.disabled=false;b.textContent='🤖 Gerar';}
     if(!d.ok){alert(d.erro||'Não consegui.');return;}
-    document.getElementById('pv-assunto').textContent=d.assunto;document.getElementById('pv-corpo').textContent=d.corpo;}).catch(function(){if(b){b.disabled=false;b.textContent='🤖 Gerar prévia com IA';}alert('Falha de rede.');});}
+    document.getElementById('pv-assunto').textContent=d.assunto;document.getElementById('pv-corpo').textContent=d.corpo;}).catch(function(){if(b){b.disabled=false;b.textContent='🤖 Gerar';}alert('Falha de rede.');});}
 </script>
 {% endblock %}"""
 

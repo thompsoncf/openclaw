@@ -194,7 +194,8 @@ def _assinatura_html(idn: dict) -> str:
 
 
 def _html(corpo: str, lead: dict, idn, link_descad: str,
-          link_interesse: str = "") -> str:
+          link_interesse: str = "", material_url: str = "",
+          material_tipo: str = "") -> str:
     # idn pode ser o dict de identidade ou (compat) só o nome da empresa em string
     if isinstance(idn, str):
         idn = {"empresa": idn, "responsavel": "", "telefone": ""}
@@ -213,6 +214,17 @@ def _html(corpo: str, lead: dict, idn, link_descad: str,
             '</td></tr></table>'
             '<p style="font-size:12px;color:#999;margin:2px 0 0">Clique acima e a gente te manda o material '
             'na hora.</p>')
+    # botão do material (PDF/foto subidos ou link/vídeo colado) — só no e-mail pós-interesse
+    mat = ""
+    if material_url:
+        _rot = {"pdf": "📄 Abrir PDF", "video": "🎬 Assistir ao vídeo",
+                "foto": "🖼 Ver imagem"}.get((material_tipo or "").lower(), "🔗 Ver material")
+        _href = _esc(material_url).replace('"', "%22")
+        mat = ('<table role="presentation" cellpadding="0" cellspacing="0" style="margin:16px 0 4px">'
+               '<tr><td style="border-radius:8px;background:#16a34a">'
+               f'<a href="{_href}" style="display:inline-block;padding:11px 22px;color:#fff;'
+               f'font-weight:bold;font-size:15px;text-decoration:none;border-radius:8px">{_rot}</a>'
+               '</td></tr></table>')
     wa = ""
     num = "".join(ch for ch in (lead.get("whatsapp") or "") if ch.isdigit())
     if num:
@@ -220,7 +232,7 @@ def _html(corpo: str, lead: dict, idn, link_descad: str,
               'style="color:#0f766e;font-weight:bold;text-decoration:none">💬 Falar no WhatsApp</a></p>')
     return (
         '<div style="font-family:system-ui,Arial,sans-serif;font-size:15px;line-height:1.6;color:#222">'
-        f'{paras}{cta}{_assinatura_html(idn)}{wa}'
+        f'{paras}{cta}{mat}{_assinatura_html(idn)}{wa}'
         f'<hr style="border:0;border-top:1px solid #eee;margin:20px 0 10px">'
         f'<p style="font-size:12px;color:#999;margin:0">{_esc(conta_nome or "")} · Se não quiser mais '
         f'receber, <a href="{link_descad}" style="color:#888">descadastrar</a>.</p></div>')
@@ -545,8 +557,10 @@ def registrar_interesse(pool, conta_id: int, prospeccao_id: int, campanha_id: in
         if not lead:
             return {"ok": False}
         empresa, email, _wa = lead
-        material = (c.execute("select coalesce(material,'') from campanhas where id=%s and conta_id=%s",
-                              (campanha_id, conta_id)).fetchone() or [""])[0]
+        _mrow = (c.execute("""select coalesce(material,''), coalesce(material_tipo,'link')
+                                 from campanhas where id=%s and conta_id=%s""",
+                           (campanha_id, conta_id)).fetchone() or ["", "link"])
+        material, material_tipo = _mrow[0], _mrow[1]
         idn = _conta_identidade(c, conta_id)
         conta_nome = idn.get("empresa") or ""
         # para a sequência deste lead
@@ -577,15 +591,18 @@ def registrar_interesse(pool, conta_id: int, prospeccao_id: int, campanha_id: in
     enviado = False
     if email and "@" in email:
         corpo = (f"Que bom, {empresa or 'tudo bem'}! 🎉\n\n"
-                 + (f"Segue nosso material pra você conhecer melhor:\n{material}\n\n" if material else "")
+                 + ("Preparei um material pra você conhecer melhor a gente — é só abrir no botão abaixo.\n\n"
+                    if material else "")
                  + "Posso te mostrar em 2 minutinhos como fica aí? É só responder este e-mail. 😊")
         assunto = "Seu material — " + (conta_nome or "ZAQ")
+        texto_alt = corpo + (f"\n\nMaterial: {material}" if material else "") + "\n\n" + _assinatura_texto(idn)
         try:
             from finance import email_inbound as _ein
             enviado = _ein.enviar_conta(pool, conta_id, email, assunto,
                                         _html(corpo, {"whatsapp": None}, idn,
-                                              _app_url() + "/descadastrar?t=" + descad_token(conta_id, email)),
-                                        texto_alt=corpo + "\n\n" + _assinatura_texto(idn),
+                                              _app_url() + "/descadastrar?t=" + descad_token(conta_id, email),
+                                              material_url=material, material_tipo=material_tipo),
+                                        texto_alt=texto_alt,
                                         from_nome=(conta_nome or None))
         except Exception:  # noqa: BLE001
             enviado = False

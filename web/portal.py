@@ -7793,7 +7793,7 @@ def painel_empresa(request: Request):
     _evs = emp.eventos_folha_do_mes(pool, conta[0], hoje.year, hoje.month)
     for _it in folha["itens"]:
         _it["eventos"] = _evs.get(_it["id"], [])
-    from finance import clientes as _cli, nichos as _nichos
+    from finance import clientes as _cli   # _nichos já é import de módulo (topo)
     clientes_lista = _cli.listar_clientes(pool, conta[0])
     carteira = emp.resumo_carteira(pool, conta[0])
     with pool.connection() as c:

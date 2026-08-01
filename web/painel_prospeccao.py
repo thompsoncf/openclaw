@@ -2877,8 +2877,33 @@ def prospeccao_ficha(request: Request, alvo_id: int):
         cor = "#3ee0a6" if rr in _RES_VERDE else "#e0a33e" if rr in _RES_AMBAR else "#7a7a7a"
         timeline.append({"tipo_rot": TIPO_ROT.get(t, t), "resultado_rot": RESULTADO_ROT.get(rr or "", ""),
                          "descricao": d, "agendado_para": ag, "criado_em": cr, "quem": nome, "cor": cor})
+    # canais por onde o lead se comunicou (das conversas/mensagens) — pra mostrar
+    # as "caixinhas" no topo da ficha e o "entrou por X" no histórico.
+    with pool.connection() as c:
+        canais_ct = c.execute(
+            """select cv.canal,
+                      count(*) filter (where m.direcao='in')             as ins,
+                      min(m.criado_em) filter (where m.direcao='in')     as primeiro_in,
+                      max(m.criado_em)                                    as ultimo
+                 from conversas cv join mensagens m on m.conversa_id=cv.id
+                where cv.prospeccao_id=%s
+                group by cv.canal""", (alvo_id,)).fetchall()
+    _CANAL_META = {"whatsapp": ("💬", "WhatsApp"), "email": ("✉️", "E-mail"),
+                   "email2": ("✉️", "E-mail"), "instagram": ("📷", "Instagram"),
+                   "messenger": ("💬", "Messenger")}
+    canais_contato, origem_ch = [], None
+    for (canal, ins, primeiro_in, ultimo) in canais_ct:
+        ic, lb = _CANAL_META.get(canal, ("•", (canal or "canal").title()))
+        item = {"canal": canal, "ic": ic, "label": lb, "ins": ins or 0,
+                "respondeu": (ins or 0) > 0, "primeiro_in": primeiro_in, "ultimo": ultimo}
+        canais_contato.append(item)
+        if primeiro_in and (origem_ch is None or primeiro_in < origem_ch["em"]):
+            origem_ch = {"ic": ic, "label": lb, "em": primeiro_in}
+    # quem o lead usou pra falar (respondeu) primeiro; depois os só-enviados
+    canais_contato.sort(key=lambda x: (not x["respondeu"], x["primeiro_in"] or x["ultimo"]))
     vends = _vendedores(pool, ctx["conta_id"]) if ctx["gerencia"] else []
     return _render("prospeccao_ficha", request, titulo=alvo["empresa"], secao_ativa="prospeccao",
+                   canais_contato=canais_contato, origem_ch=origem_ch,
                    a=alvo, timeline=timeline, status=STATUS, temperaturas=TEMPERATURAS,
                    tipos=TIPOS, resultados=RESULTADOS, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
                    gerencia=ctx["gerencia"], pode_atribuir=ctx["pode_atribuir"], vendedores=vends,
@@ -4652,6 +4677,9 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           {% set tp = temp_pill[a.temperatura] %}<span class="tpill" style="background:{{ tp[0] }};color:{{ tp[1] }}">{{ a.temperatura }}</span>
         </div>
         <div class="mut" style="font-size:.82rem;margin-top:.25rem">{% if a.segmento %}{{ a.segmento }}{% endif %}{% if a.cidade %}{% if a.segmento %} · {% endif %}{{ a.cidade }}{% if a.uf %}/{{ a.uf }}{% endif %}{% endif %}{% if a.vendedor_nome %} · 👤 {{ a.vendedor_nome }}{% endif %}</div>
+        {% if canais_contato %}<div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.5rem">
+          {% for ch in canais_contato %}<span title="{% if ch.respondeu %}{{ ch.ins }} mensagem(ns) recebida(s){% if ch.primeiro_in %} · 1ª em {{ ch.primeiro_in.strftime('%d/%m/%Y') }}{% endif %}{% else %}só enviado — ainda sem resposta{% endif %}" style="display:inline-flex;align-items:center;gap:.3rem;font-size:.76rem;padding:.2rem .55rem;border-radius:999px;border:1px solid {% if ch.respondeu %}var(--verde){% else %}var(--borda){% endif %};background:{% if ch.respondeu %}rgba(62,224,166,.10){% else %}transparent{% endif %};color:{% if ch.respondeu %}var(--verde-claro){% else %}var(--mut){% endif %}">{{ ch.ic }} {{ ch.label }}{% if ch.respondeu %} ✓{% endif %}</span>{% endfor %}
+        </div>{% endif %}
       </div>
       <select onchange="fichaStatus(this,{{ a.id }})" data-prev="{{ a.status }}" class="spill" style="width:auto;padding:.25rem .6rem;border-radius:999px" title="Mudar a situação no funil">
         {% for s,rot in status %}<option value="{{ s }}" {% if s==a.status %}selected{% endif %}>{{ rot }}</option>{% endfor %}
@@ -4875,7 +4903,11 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 
       <div class="fsec">
         <div class="sh"><b>Histórico</b></div>
-        {% if not timeline %}<p class="mut" style="margin:.2rem 0 0">Nenhum contato registrado ainda.</p>{% endif %}
+        {% if origem_ch %}<div class="tl"><span class="dt" style="background:#3ee0a6"></span>
+          <div style="font-size:.86rem"><b>Entrou por {{ origem_ch.ic }} {{ origem_ch.label }}</b> <span class="mut">— 1º contato do lead</span></div>
+          <div class="mut" style="font-size:.72rem;margin-top:.2rem">{{ origem_ch.em.strftime('%d/%m/%Y %H:%M') if origem_ch.em else '' }}</div>
+        </div>{% endif %}
+        {% if not timeline and not origem_ch %}<p class="mut" style="margin:.2rem 0 0">Nenhum contato registrado ainda.</p>{% endif %}
         {% for ev in timeline %}
         <div class="tl"><span class="dt" style="background:{{ ev.cor }}"></span>
           <div style="font-size:.86rem"><b>{{ ev.tipo_rot }}</b>{% if ev.resultado_rot %} — <span class="mut">{{ ev.resultado_rot }}</span>{% endif %}</div>

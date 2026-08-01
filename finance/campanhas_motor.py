@@ -72,6 +72,28 @@ def interesse_verify(token: str):
     return None, None, None
 
 
+# --------------------------------------------------- abertura (pixel de rastreio)
+
+def abrir_token(conta_id: int, prospeccao_id: int, campanha_id: int) -> str:
+    raw = f"{conta_id}:{prospeccao_id}:{campanha_id}"
+    sig = hmac.new(_seg(), ("abr:" + raw).encode(), hashlib.sha256).hexdigest()[:16]
+    return base64.urlsafe_b64encode(f"{raw}:{sig}".encode()).decode().rstrip("=")
+
+
+def abrir_verify(token: str):
+    try:
+        pad = token + "=" * (-len(token) % 4)
+        s = base64.urlsafe_b64decode(pad.encode()).decode()
+        conta_id, pid, camp_id, sig = s.rsplit(":", 3)
+        good = hmac.new(_seg(), f"abr:{conta_id}:{pid}:{camp_id}".encode(),
+                        hashlib.sha256).hexdigest()[:16]
+        if hmac.compare_digest(good, sig):
+            return int(conta_id), int(pid), int(camp_id)
+    except Exception:  # noqa: BLE001
+        pass
+    return None, None, None
+
+
 # ------------------------------------------------------------ conteúdo
 
 def _fmt(txt: str, lead: dict) -> str:
@@ -199,7 +221,7 @@ def _assinatura_html(idn: dict) -> str:
 
 def _html(corpo: str, lead: dict, idn, link_descad: str,
           link_interesse: str = "", material_url: str = "",
-          material_tipo: str = "") -> str:
+          material_tipo: str = "", link_abrir: str = "") -> str:
     # idn pode ser o dict de identidade ou (compat) só o nome da empresa em string
     if isinstance(idn, str):
         idn = {"empresa": idn, "responsavel": "", "telefone": ""}
@@ -239,7 +261,11 @@ def _html(corpo: str, lead: dict, idn, link_descad: str,
         f'{paras}{cta}{mat}{_assinatura_html(idn)}{wa}'
         f'<hr style="border:0;border-top:1px solid #eee;margin:20px 0 10px">'
         f'<p style="font-size:12px;color:#999;margin:0">{_esc(conta_nome or "")} · Se não quiser mais '
-        f'receber, <a href="{link_descad}" style="color:#888">descadastrar</a>.</p></div>')
+        f'receber, <a href="{link_descad}" style="color:#888">descadastrar</a>.</p>'
+        # pixel de rastreio de abertura (1x1) — best-effort; alguns clientes bloqueiam imagens
+        + (f'<img src="{link_abrir}" width="1" height="1" alt="" '
+           'style="display:none;width:1px;height:1px">' if link_abrir else '')
+        + '</div>')
 
 
 def _esc(s: str) -> str:
@@ -490,10 +516,11 @@ def _disparar_campanha(pool, camp_id, conta_id, camp_nome, teto) -> int:
             corpo = _fmt(passo["corpo"] or "", lead)
         link = _app_url() + "/descadastrar?t=" + descad_token(conta_id, email)
         link_int = _app_url() + "/tenho-interesse?t=" + interesse_token(conta_id, pid, camp_id)
+        link_abr = _app_url() + "/e/abrir.gif?t=" + abrir_token(conta_id, pid, camp_id)
         from finance import email_inbound as _ein
         corpo_txt = _tira_assinatura(corpo) + "\n\n" + _assinatura_texto(idn)
         ok = _ein.enviar_conta(pool, conta_id, email, assunto,
-                               _html(corpo, lead, idn, link, link_int),
+                               _html(corpo, lead, idn, link, link_int, link_abrir=link_abr),
                                texto_alt=corpo_txt + "\n\nTenho interesse: " + link_int,
                                from_nome=(conta_nome or None))
         if not ok:

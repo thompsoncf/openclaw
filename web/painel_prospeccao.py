@@ -1911,6 +1911,31 @@ def descadastrar_do(request: Request, t: str = Form("")):
         f"<p>Feito! <b>{_h.escape(email)}</b> não vai mais receber nossos e-mails. Obrigado! 🙏</p>"))
 
 
+# GIF transparente 1x1 (pixel de rastreio de abertura de e-mail)
+_PIXEL_GIF = base64.b64decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")
+
+
+@router.get("/e/abrir.gif")
+def email_pixel(t: str = ""):
+    """Pixel de abertura: quando o e-mail é aberto e as imagens carregam, registra a
+    abertura no alvo da campanha. Público (sem login) e best-effort — sempre devolve
+    o GIF, mesmo com token inválido, pra nunca quebrar a imagem no cliente."""
+    from finance.campanhas_motor import abrir_verify
+    conta_id, pid, camp_id = abrir_verify(t)
+    if conta_id:
+        try:
+            with get_pool().connection() as c:
+                c.execute("""update campanha_alvos set aberturas=coalesce(aberturas,0)+1,
+                               aberto_em=coalesce(aberto_em, now())
+                             where campanha_id=%s and prospeccao_id=%s""", (camp_id, pid))
+                c.commit()
+        except Exception:  # noqa: BLE001
+            pass
+    return Response(content=_PIXEL_GIF, media_type="image/gif",
+                    headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                             "Pragma": "no-cache"})
+
+
 @router.get("/tenho-interesse", response_class=HTMLResponse)
 def tenho_interesse(request: Request, t: str = ""):
     """CTA da campanha: o lead clicou 'Tenho interesse'. Para a sequência, esquenta o
@@ -2250,10 +2275,15 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
         na_camp = c.execute("select count(*) from campanha_alvos where campanha_id=%s", (camp_id,)).fetchone()[0]
         enviados = c.execute("select count(*) from campanha_alvos where campanha_id=%s and ultima_msg_em is not null",
                              (camp_id,)).fetchone()[0]
+        abriram = c.execute("select count(*) from campanha_alvos where campanha_id=%s and aberto_em is not null",
+                            (camp_id,)).fetchone()[0]
         leads = c.execute(
             """select p.empresa, p.email, a.status, a.passo_atual,
                       to_char(a.proximo_envio_em - interval '3 hours','DD/MM HH24:MI'),
-                      to_char(a.ultima_msg_em - interval '3 hours','DD/MM HH24:MI'), p.id
+                      to_char(a.ultima_msg_em - interval '3 hours','DD/MM HH24:MI'), p.id,
+                      coalesce(a.aberturas,0),
+                      to_char(a.aberto_em - interval '3 hours','DD/MM HH24:MI'),
+                      coalesce(a.wa_status,'')
                  from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
                 where a.campanha_id=%s order by a.ultima_msg_em desc nulls last, a.id desc limit 200""",
             (camp_id,)).fetchall()
@@ -2285,8 +2315,9 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
             "modelo_codigo": cp[12]}
     metr = {"total": na_camp, "fila": st.get("fila", 0), "enviados": enviados, "responderam": resp,
             "descadastros": st.get("descadastrou", 0), "erros": st.get("erro", 0),
-            "concluidos": st.get("concluido", 0), "hoje": hoje,
-            "taxa": (round(100 * resp / enviados) if enviados else 0)}
+            "concluidos": st.get("concluido", 0), "hoje": hoje, "abriram": abriram,
+            "taxa": (round(100 * resp / enviados) if enviados else 0),
+            "taxa_abertura": (round(100 * abriram / enviados) if enviados else 0)}
     passos_l = [{"dias": p[1], "assunto": p[2], "corpo": p[3], "ia": p[4]} for p in passos]
     from finance.campanhas_motor import _fmt as _cfmt
     cadencia = " · ".join("D" + str(p["dias"]) for p in passos_l) or "—"
@@ -2300,8 +2331,11 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                   "assunto": _cfmt(p0["assunto"] or "Uma ideia pra {empresa}", _ld),
                   "corpo": ("O agente escreve um e-mail único pra este lead — clique em “Gerar prévia com IA” "
                             "pra ver um exemplo." if p0["ia"] else _cfmt(p0["corpo"] or "", _ld))}
+    _WA_ROT = {"enviado": "💬 enviado", "erro": "💬 erro", "sem_numero": "💬 sem nº"}
     leads_l = [{"empresa": r[0], "email": r[1], "status": r[2], "passo": r[3],
-                "prox": r[4], "ult": r[5], "pid": r[6], "rot": _ALVO_ROT.get(r[2], r[2])} for r in leads]
+                "prox": r[4], "ult": r[5], "pid": r[6], "rot": _ALVO_ROT.get(r[2], r[2]),
+                "abriu": r[7], "aberto": r[8], "wa": r[9], "wa_rot": _WA_ROT.get(r[9], "")}
+               for r in leads]
     return _render("prospeccao_campanha", request, titulo=camp["nome"], secao_ativa="prospeccao",
                    camp=camp, passos=passos_l, elegiveis=eleg, na_camp=na_camp, st=st, metr=metr,
                    leads=leads_l, previa=previa, cadencia=cadencia, remetente=remetente_configurado(),
@@ -5666,6 +5700,8 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
     <h3 class="secttl"><span class="idx">4</span> Desempenho &amp; acompanhamento</h3>
     <div class="cpstats" style="margin-top:.7rem">
       <div class="cpstat"><div class="n">{{ metr.enviados }}</div><div class="l">Enviados</div></div>
+      <div class="cpstat"><div class="n">{{ metr.abriram }}</div><div class="l">Abriram 👁</div></div>
+      <div class="cpstat"><div class="n">{{ metr.taxa_abertura }}%</div><div class="l">Taxa abertura</div></div>
       <div class="cpstat g"><div class="n">{{ metr.responderam }}</div><div class="l">Responderam</div></div>
       <div class="cpstat g"><div class="n">{{ metr.taxa }}%</div><div class="l">Taxa resposta</div></div>
       <div class="cpstat"><div class="n">{{ metr.fila }}</div><div class="l">Na fila</div></div>
@@ -5675,15 +5711,17 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
     <div class="mut" style="font-size:.8rem;margin-top:.6rem">{% if camp.status=='ativa' %}✅ <b style="color:var(--verde-claro)">Ativa</b> — dispara sozinho (até {{ camp.limite }}/dia) e para em quem responde ou descadastra.{% else %}Clique <b>▶ Ativar</b> pra o motor começar a disparar.{% endif %}{% if metr.erros %} · <span style="color:#e0574f">{{ metr.erros }} erro(s) de envio</span>{% endif %}</div>
     <div class="tbl-wrap">
       <table>
-        <thead><tr><th>Empresa</th><th>Situação</th><th>Passo</th><th>Próximo/último</th><th></th></tr></thead>
+        <thead><tr><th>Empresa</th><th>Situação</th><th>Passo</th><th>Abriu</th><th>WhatsApp</th><th>Próximo/último</th><th></th></tr></thead>
         <tbody>
           {% for l in leads %}
           <tr><td><b>{{ l.empresa }}</b><div class="mut" style="font-size:.76rem">{{ l.email }}</div></td>
             <td><span class="apill {{ l.status }}">{{ l.rot }}</span></td>
             <td class="mut">D{{ l.passo }}</td>
+            <td class="mut" style="white-space:nowrap">{% if l.abriu %}<span style="color:var(--verde-claro)" title="Abriu {{ l.abriu }}x · 1ª em {{ l.aberto }}">👁 {{ l.aberto }}{% if l.abriu > 1 %} ({{ l.abriu }}x){% endif %}</span>{% else %}<span class="mut">—</span>{% endif %}</td>
+            <td class="mut" style="white-space:nowrap">{{ l.wa_rot or '—' }}</td>
             <td class="mut" style="white-space:nowrap">{% if l.status in ('fila','enviado') and l.prox %}⏳ {{ l.prox }}{% elif l.ult %}✓ {{ l.ult }}{% else %}—{% endif %}</td>
             <td style="text-align:right"><button type="button" class="cpx" onclick="campRemLead(this,{{ camp.id }},{{ l.pid }})" title="Remover da campanha (o lead volta pra Base)">✕</button></td></tr>
-          {% else %}<tr><td colspan="5" class="mut" style="text-align:center;padding:1.6rem">Nenhum lead ainda — mande da <b>Base</b> (marque os leads → “Jogar na campanha”).</td></tr>{% endfor %}
+          {% else %}<tr><td colspan="7" class="mut" style="text-align:center;padding:1.6rem">Nenhum lead ainda — mande da <b>Base</b> (marque os leads → “Jogar na campanha”).</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>

@@ -291,6 +291,10 @@ def enviar_pendentes(pool) -> int:
         total += _disparar_wa(pool)
     except Exception as e:  # noqa: BLE001
         _log.info("campanhas.enviar_pendentes(wa) falhou: %s: %s", type(e).__name__, e)
+    try:
+        total += _disparar_reengajamento(pool)
+    except Exception as e:  # noqa: BLE001
+        _log.info("campanhas.enviar_pendentes(reengajar) falhou: %s: %s", type(e).__name__, e)
     return total
 
 
@@ -521,6 +525,127 @@ def engajou_lead(pool, prospeccao_id: int, motivo: str, alerta: bool = False) ->
                                 nome=(mrow[1] if mrow else None))
         except Exception:  # noqa: BLE001
             pass
+
+
+_LOCK_REENG = 771146  # lock do passo de reengajamento (follow-up)
+
+
+def _disparar_reengajamento(pool) -> int:
+    """Passada do follow-up: campanhas ATIVAS com reengajar_ativo. Quem recebeu a
+    sequência e não respondeu em N dias leva 1 toque pelo outro canal. Dispara 1x
+    por lead (reengajado_em) e respeita os limites/dia da campanha."""
+    enviados = 0
+    with pool.connection() as lockc:
+        if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK_REENG,)).fetchone()[0]:
+            return 0
+        try:
+            with pool.connection() as c:
+                camps = c.execute(
+                    """select id, conta_id, coalesce(reengajar_dias,3), coalesce(wa_ativo,false),
+                              coalesce(wa_template_sid,''), limite_dia, coalesce(enviados_hoje,0),
+                              dia_contagem
+                         from campanhas
+                        where status='ativa' and coalesce(reengajar_ativo,false)""").fetchall()
+            hoje = date.today()
+            for (cid, conta_id, dias, wa_ativo, camp_sid, limite, env_hoje, dia_cont) in camps:
+                restante = max(0, (limite or 0) - (0 if dia_cont != hoje else (env_hoje or 0)))
+                if restante <= 0:
+                    continue
+                enviados += _reengajar_campanha(pool, cid, conta_id, int(dias or 3), bool(wa_ativo),
+                                                camp_sid, min(restante, _MAX_PASS))
+        finally:
+            lockc.execute("select pg_advisory_unlock(%s)", (_LOCK_REENG,))
+            lockc.commit()
+    return enviados
+
+
+def _reeng_marca(pool, aid) -> None:
+    with pool.connection() as c:
+        c.execute("update campanha_alvos set reengajado_em=now() where id=%s", (aid,))
+        c.commit()
+
+
+def _reengajar_campanha(pool, camp_id, conta_id, dias, wa_ativo, camp_sid, teto) -> int:
+    from finance import prospec_convite, whatsapp_out
+    sid = (camp_sid or "").strip() or prospec_convite.sid_template()
+    with pool.connection() as c:
+        idn = _conta_identidade(c, conta_id)
+        alvos = c.execute(
+            """select a.id, p.id, coalesce(p.empresa,''), coalesce(p.email,''),
+                      coalesce(p.whatsapp,''), coalesce(p.telefone,''), p.decisor_telefones,
+                      coalesce(a.wa_status,'')
+                 from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
+                where a.campanha_id=%s and a.reengajado_em is null
+                  and a.status in ('enviado','concluido')
+                  and a.ultima_msg_em is not null
+                  and a.ultima_msg_em < now() - (%s || ' days')::interval
+                  and coalesce(p.email_ok, true) is not false
+                order by a.ultima_msg_em asc limit %s""",
+            (camp_id, str(int(dias)), teto)).fetchall()
+    conta_nome = idn.get("empresa") or ""
+    feitos = 0
+    for (aid, pid, empresa, email, whatsapp, telefone, dec_tels, wa_status) in alvos:
+        if _respondeu(pool, conta_id, pid):        # respondeu por qualquer canal → não insiste
+            _reeng_marca(pool, aid)
+            continue
+        numero = _melhor_de_lista(dec_tels) or (whatsapp or telefone or "").strip()
+        usou_wa = False
+        # 1) prioriza WhatsApp (canal novo, se ativo/pronto/número e ainda não mandado)
+        if wa_ativo and sid and numero and not wa_status:
+            variaveis = {"1": (idn.get("responsavel") or idn.get("empresa") or "nós"),
+                         "2": (idn.get("cargo") or "CEO"),
+                         "3": (idn.get("empresa") or "nós"),
+                         "4": (empresa or "sua empresa")}
+            with pool.connection() as c:
+                res = whatsapp_out.enviar_template(c, conta_id, numero, sid, variaveis)
+            if res.get("ok"):
+                usou_wa = True
+                with pool.connection() as c:
+                    c.execute("""update campanha_alvos set wa_status='enviado', wa_em=now(),
+                                   wa_sid=%s, reengajado_em=now() where id=%s""", (res.get("sid"), aid))
+                    c.execute("update campanhas set wa_enviados_hoje=coalesce(wa_enviados_hoje,0)+1 where id=%s",
+                              (camp_id,))
+                    evento(c, camp_id, pid, "whatsapp", "enviado", "follow-up")
+                    c.commit()
+                feitos += 1
+        # 2) senão, e-mail curto de reforço
+        if not usou_wa:
+            if not (email and "@" in email):
+                _reeng_marca(pool, aid)           # sem canal disponível → não tenta de novo
+                continue
+            assunto = f"Uma última ideia pra {empresa or 'você'}"
+            corpo = (f"Oi{(', ' + empresa) if empresa else ''}! Passei por aqui de novo porque acho que "
+                     "faz sentido a gente trocar uma ideia rápida — em 5 minutinhos te mostro como pode "
+                     "ajudar aí. Se não for o momento, é só me dizer que eu paro por aqui. 😊")
+            link = _app_url() + "/descadastrar?t=" + descad_token(conta_id, email)
+            link_int = _app_url() + "/tenho-interesse?t=" + interesse_token(conta_id, pid, camp_id)
+            link_abr = _app_url() + "/e/abrir.gif?t=" + abrir_token(conta_id, pid, camp_id)
+            link_unsub = _app_url() + "/descadastrar-oc?t=" + descad_token(conta_id, email)
+            from finance import email_inbound as _ein
+            ok = _ein.enviar_conta(pool, conta_id, email, assunto,
+                                   _html(corpo, {"empresa": empresa, "whatsapp": whatsapp}, idn,
+                                         link, link_int, link_abrir=link_abr),
+                                   texto_alt=corpo + "\n\n" + _assinatura_texto(idn)
+                                             + "\n\nTenho interesse: " + link_int,
+                                   from_nome=(conta_nome or None), list_unsub=link_unsub)
+            with pool.connection() as c:
+                if ok:
+                    c.execute("update campanhas set enviados_hoje=coalesce(enviados_hoje,0)+1 where id=%s",
+                              (camp_id,))
+                    conv = c.execute("select id from conversas where conta_id=%s and prospeccao_id=%s and canal='email'",
+                                     (conta_id, pid)).fetchone()
+                    conv_id = conv[0] if conv else c.execute(
+                        """insert into conversas (conta_id, prospeccao_id, canal, status, ultima_msg_em)
+                           values (%s,%s,'email','aberta',now()) returning id""", (conta_id, pid)).fetchone()[0]
+                    c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto)
+                                 values (%s,'email','out','bot',%s)""", (conv_id, f"{assunto}\n\n{corpo}"[:8000]))
+                    c.execute("update conversas set ultima_msg_em=now() where id=%s", (conv_id,))
+                    evento(c, camp_id, pid, "email", "enviado", "follow-up")
+                c.execute("update campanha_alvos set reengajado_em=now() where id=%s", (aid,))
+                c.commit()
+            if ok:
+                feitos += 1
+    return feitos
 
 
 def _wa_marca(pool, aid, status, wa_sid=None):

@@ -2731,6 +2731,37 @@ def prospeccao_campanha_excluir(request: Request, camp_id: int):
     return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
 
 
+@router.post("/painel/prospeccao/campanhas/{camp_id}/reiniciar")
+def prospeccao_campanha_reiniciar(request: Request, camp_id: int):
+    """Recomeça a campanha do zero: todos os leads voltam pra fila (passo 0), o
+    acompanhamento (aberturas, status de WhatsApp, timeline de Desempenho) é
+    zerado e a campanha fica PAUSADA — o disparo só recomeça no ▶ Ativar. As
+    conversas do inbox (mensagens) são preservadas."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
+    with get_pool().connection() as c:
+        if not c.execute("select 1 from campanhas where id=%s and conta_id=%s",
+                         (camp_id, ctx["conta_id"])).fetchone():
+            return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
+        n = c.execute(
+            """update campanha_alvos
+                  set status='fila', passo_atual=0, proximo_envio_em=null,
+                      ultima_msg_em=null, wa_status=null, wa_em=null, wa_sid=null,
+                      aberto_em=null, aberturas=0, reengajado_em=null
+                where campanha_id=%s""", (camp_id,)).rowcount
+        c.execute("delete from campanha_eventos where campanha_id=%s", (camp_id,))
+        c.execute("""update campanhas set status='pausada', enviados_hoje=0,
+                        wa_enviados_hoje=0, atualizado_em=now() where id=%s""", (camp_id,))
+        c.commit()
+    request.session["prosp_aviso"] = (
+        f"Campanha reiniciada 🔄 — {n} lead(s) voltaram pra fila (passo 0) e o acompanhamento foi zerado. "
+        "Está pausada; clique ▶ Ativar pra o motor recomeçar o disparo do 1º e-mail.")
+    return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
+
+
 @router.post("/painel/prospeccao/campanhas/{camp_id}/previa-ia")
 def prospeccao_campanha_previa_ia(request: Request, camp_id: int):
     """Gera uma prévia real do e-mail que o agente escreveria (1 lead de exemplo)."""
@@ -5883,6 +5914,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 
         <div class="foot">
           <button type="button" class="pbtn ghost sm" onclick="secToggle('s1')">Fechar</button>
+          <button class="pbtn ghost sm" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/reiniciar" formmethod="post" formnovalidate style="color:#d98a2b;border-color:#5c4a27" onclick="return confirm('Reiniciar a campanha do zero?\n\nTodos os leads voltam pra fila no passo 0 e o acompanhamento (aberturas, status, histórico de Desempenho) é zerado. As conversas do inbox são preservadas.\n\nA campanha fica pausada até você clicar em Ativar — aí o motor recomeça do 1º e-mail.')">🔄 Reiniciar</button>
           <button class="pbtn ghost sm" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/excluir" formmethod="post" formnovalidate style="color:#e0574f;border-color:#5c2a27" onclick="return confirm('Excluir a campanha? Os leads voltam pro funil.')">🗑 Excluir</button>
           <button class="pbtn sm">Salvar configuração</button>
         </div>

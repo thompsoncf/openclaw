@@ -1101,15 +1101,17 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
         convs = _conversas_list(c, ctx["conta_id"], ctx["gerencia"], ctx["membro_id"],
                                 canal=canal, vend=filtro_vend, escopo=escopo)
         ag_cfg, ag_conhec = None, None
-        perfil = {"instagram": "", "cargo": "", "material": ""}
+        perfil = {"instagram": "", "cargo": "", "material": "", "material_tipo": "link"}
         if aba == "agente":
             ag_cfg = _agente_config(c, ctx["conta_id"])
             ag_conhec = _agente_conhecimento(c, ctx["conta_id"])
             prow = c.execute(
                 "select coalesce(prospec_instagram,''), coalesce(prospec_cargo,''), "
-                "coalesce(prospec_material,'') from contas where id=%s",
-                (ctx["conta_id"],)).fetchone() or ("", "", "")
-            perfil = {"instagram": prow[0], "cargo": prow[1], "material": prow[2]}
+                "coalesce(prospec_material,''), coalesce(nullif(prospec_material_tipo,''),'link') "
+                "from contas where id=%s",
+                (ctx["conta_id"],)).fetchone() or ("", "", "", "link")
+            perfil = {"instagram": prow[0], "cargo": prow[1], "material": prow[2],
+                      "material_tipo": prow[3]}
     vends = _vendedores(pool, ctx["conta_id"]) if ctx["gerencia"] else []
     return _render("prospeccao_comunicacao", request, titulo="Comunicação",
                    secao_ativa="prospeccao", aba=aba, convs=convs, escopo=escopo, canal=canal,
@@ -1615,22 +1617,46 @@ def comunicacao_agente_faq(request: Request, pergunta: str = Form(""), resposta:
 
 
 @router.post("/painel/prospeccao/comunicacao/prospec-perfil")
-def comunicacao_prospec_perfil(request: Request, prospec_instagram: str = Form(""),
-                               prospec_cargo: str = Form(""), prospec_material: str = Form("")):
+async def comunicacao_prospec_perfil(request: Request):
     """Perfil do 1º contato: Instagram (referência do lead), cargo de quem envia e
-    material padrão (link enviado no 'Quero o material' quando o lead está fora de
-    campanha). Alimenta o template do convite e as respostas aos botões."""
+    material padrão. O material tem os mesmos tipos da campanha (link/vídeo/PDF/foto,
+    com upload) e é enviado no 'Quero o material' quando o lead está fora de campanha."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
     if not ctx["gerencia"]:
         return RedirectResponse(_AG_DESTINO, status_code=303)
-    insta = (prospec_instagram or "").strip()[:200]
-    cargo = (prospec_cargo or "").strip()[:60]
-    material = (prospec_material or "").strip()[:2000]
+    form = await request.form()
+    insta = (form.get("prospec_instagram") or "").strip()[:200]
+    cargo = (form.get("prospec_cargo") or "").strip()[:60]
+    tipo = (form.get("prospec_material_tipo") or "link").strip().lower()
+    if tipo not in ("link", "video", "pdf", "foto"):
+        tipo = "link"
+    # material: None = mantém o que já está (trocar de aba sem novo arquivo não apaga)
+    material = None
+    if tipo == "link":
+        material = (form.get("material_link") or "").strip()[:2000]
+    elif tipo == "video":
+        material = (form.get("material_video") or "").strip()[:2000]
+    else:  # pdf/foto → upload (se veio arquivo novo)
+        up = form.get("material_pdf") if tipo == "pdf" else form.get("material_foto")
+        if up is not None and getattr(up, "filename", ""):
+            try:
+                conteudo = await up.read()
+                from finance.upload_foto import subir_material
+                material = subir_material(conteudo, up.filename, getattr(up, "content_type", "") or "")
+            except Exception as e:  # noqa: BLE001
+                request.session["prosp_aviso"] = f"Não consegui subir o arquivo: {e}"
+                return RedirectResponse(_AG_DESTINO, status_code=303)
     with get_pool().connection() as c:
-        c.execute("update contas set prospec_instagram=%s, prospec_cargo=%s, prospec_material=%s where id=%s",
-                  (insta or None, cargo or None, material or None, ctx["conta_id"]))
+        if material is None:
+            c.execute("""update contas set prospec_instagram=%s, prospec_cargo=%s,
+                           prospec_material_tipo=%s where id=%s""",
+                      (insta or None, cargo or None, tipo, ctx["conta_id"]))
+        else:
+            c.execute("""update contas set prospec_instagram=%s, prospec_cargo=%s,
+                           prospec_material=%s, prospec_material_tipo=%s where id=%s""",
+                      (insta or None, cargo or None, (material or None), tipo, ctx["conta_id"]))
         c.commit()
     request.session["prosp_aviso"] = "Perfil do 1º contato salvo ✓"
     return RedirectResponse(_AG_DESTINO, status_code=303)
@@ -4945,15 +4971,62 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   <div class="cx-card">
     <h3>📇 Perfil do 1º contato (WhatsApp)</h3>
     <p class="mut" style="font-size:.82rem;margin:.1rem 0 .6rem">Personaliza o convite frio e as respostas dos botões. Quem toca <b>“Quero te conhecer”</b> recebe seu Instagram; quem toca <b>“Quero o material”</b> recebe o material da campanha.</p>
-    <form method="post" action="/painel/prospeccao/comunicacao/prospec-perfil">
+    <form method="post" action="/painel/prospeccao/comunicacao/prospec-perfil" enctype="multipart/form-data">
       <div class="aggrid">
         <div class="agfield"><label>Seu Instagram</label><input class="fld" name="prospec_instagram" value="{{ perfil.instagram }}" placeholder="@seuperfil"><small class="mut" style="font-size:.72rem">@ ou link — é a referência que o lead recebe pra te conhecer.</small></div>
         <div class="agfield"><label>Seu cargo</label><input class="fld" name="prospec_cargo" value="{{ perfil.cargo }}" placeholder="CEO"><small class="mut" style="font-size:.72rem">Aparece no convite: “Aqui é o Fulano, {cargo} da Empresa…”.</small></div>
       </div>
-      <div class="agfield" style="margin-top:.5rem"><label>Material padrão (link)</label><input class="fld" name="prospec_material" value="{{ perfil.material }}" placeholder="https://... (PDF, vídeo, página)"><small class="mut" style="font-size:.72rem">Enviado no “Quero o material” quando o lead não está em nenhuma campanha. Dentro de campanha, vale o material da campanha.</small></div>
+      <div class="agfield" style="margin-top:.6rem">
+        <label>Material padrão</label>
+        <small class="mut" style="font-size:.72rem;display:block;margin-bottom:.3rem">Enviado no “Quero o material” quando o lead <b>não está em campanha</b>. Dentro de campanha, vale o material da campanha.</small>
+        <input type="hidden" name="prospec_material_tipo" id="pm-tipo" value="{{ perfil.material_tipo }}">
+        <div class="pmtabs">
+          <button type="button" class="pmtab {% if perfil.material_tipo=='link' %}on{% endif %}" onclick="pmtab(this,'link')">🔗 Link</button>
+          <button type="button" class="pmtab {% if perfil.material_tipo=='pdf' %}on{% endif %}" onclick="pmtab(this,'pdf')">📄 PDF</button>
+          <button type="button" class="pmtab {% if perfil.material_tipo=='video' %}on{% endif %}" onclick="pmtab(this,'video')">🎬 Vídeo</button>
+          <button type="button" class="pmtab {% if perfil.material_tipo=='foto' %}on{% endif %}" onclick="pmtab(this,'foto')">🖼 Foto</button>
+        </div>
+        <div class="pmpane {% if perfil.material_tipo=='link' %}on{% endif %}" data-pm="link"><input class="fld" name="material_link" value="{% if perfil.material_tipo=='link' %}{{ perfil.material }}{% endif %}" placeholder="https://sua-apresentacao.com · site, página, proposta…"></div>
+        <div class="pmpane {% if perfil.material_tipo=='video' %}on{% endif %}" data-pm="video"><input class="fld" name="material_video" value="{% if perfil.material_tipo=='video' %}{{ perfil.material }}{% endif %}" placeholder="Link do YouTube, Loom ou Google Drive"></div>
+        <div class="pmpane {% if perfil.material_tipo=='pdf' %}on{% endif %}" data-pm="pdf">
+          {% if perfil.material_tipo=='pdf' and perfil.material %}<div class="pmfile">📄 <a href="{{ perfil.material }}" target="_blank" rel="noopener" style="color:var(--verde-claro);text-decoration:none">material atual (PDF)</a><span class="mut" style="margin-left:auto;font-size:.74rem">enviar outro ↓</span></div>{% endif %}
+          <label class="pmdrop">📄 Escolher o PDF <b>(clique aqui)</b><div style="font-size:.72rem;margin-top:.2rem">até 10 MB</div><input type="file" name="material_pdf" accept="application/pdf" hidden onchange="pmfile(this)"></label>
+          <div class="pmfile pmpick" style="display:none"></div>
+        </div>
+        <div class="pmpane {% if perfil.material_tipo=='foto' %}on{% endif %}" data-pm="foto">
+          {% if perfil.material_tipo=='foto' and perfil.material %}<img src="{{ perfil.material }}" alt="material" style="max-height:120px;max-width:100%;border-radius:8px;border:1px solid var(--borda);margin-bottom:.4rem">{% endif %}
+          <label class="pmdrop">🖼 Escolher a imagem <b>(clique aqui)</b><div style="font-size:.72rem;margin-top:.2rem">JPG/PNG · até 6 MB</div><input type="file" name="material_foto" accept="image/*" hidden onchange="pmfile(this)"></label>
+          <div class="pmfile pmpick" style="display:none"></div>
+        </div>
+      </div>
       <div style="display:flex;justify-content:flex-end;margin-top:.4rem"><button class="pbtn">Salvar perfil</button></div>
     </form>
   </div>
+  <style>
+    .pmtabs{display:flex;gap:.4rem;flex-wrap:wrap;margin:.15rem 0 .55rem}
+    .pmtab{display:inline-flex;align-items:center;gap:.35rem;padding:.4rem .7rem;border-radius:999px;font-size:.8rem;font-weight:600;background:transparent;border:1px solid var(--borda);color:var(--mut);cursor:pointer}
+    .pmtab:hover{color:var(--txt);border-color:var(--verde)}
+    .pmtab.on{background:var(--verde);border-color:var(--verde);color:#fff}
+    .pmpane{display:none}.pmpane.on{display:block}
+    .pmdrop{display:block;border:1px dashed var(--borda);border-radius:10px;background:var(--bg);padding:1rem;text-align:center;color:var(--mut);font-size:.85rem;cursor:pointer}
+    .pmdrop:hover{border-color:var(--verde);color:var(--txt)}.pmdrop b{color:var(--verde-claro)}
+    .pmfile{display:flex;align-items:center;gap:.55rem;border:1px solid #1e4a34;background:#10241a;border-radius:10px;padding:.5rem .7rem;margin-top:.5rem;font-size:.84rem}
+  </style>
+  <script>
+    function pmtab(btn,tipo){
+      var A=btn.parentNode.querySelectorAll('.pmtab');
+      for(var i=0;i<A.length;i++)A[i].classList.remove('on');
+      btn.classList.add('on');
+      document.getElementById('pm-tipo').value=tipo;
+      var P=document.querySelectorAll('.pmpane');
+      for(var j=0;j<P.length;j++)P[j].classList.toggle('on',P[j].getAttribute('data-pm')===tipo);
+    }
+    function pmfile(inp){
+      var f=inp.files&&inp.files[0]; if(!f)return;
+      var box=inp.closest('.pmpane').querySelector('.pmpick');
+      if(box){var mb=(f.size/1048576).toFixed(1);box.style.display='flex';box.innerHTML='📎 <b>'+f.name+'</b> <span class="mut" style="margin-left:auto;font-size:.75rem">'+mb+' MB</span>';}
+    }
+  </script>
   {% endif %}
 
   {% else %}

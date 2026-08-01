@@ -979,6 +979,13 @@ def _conta_por_ident(c, canal, ident_digitos):
     return r[0] if r else None
 
 
+def _meta_token_valido(tok) -> bool:
+    """Um Page Access Token de verdade da Meta começa com 'EAA' e é longo (~200).
+    Serve pra não mostrar 'Conectado' com um token de teste/placeholder."""
+    t = (tok or "").strip()
+    return t.startswith("EAA") and len(t) >= 50
+
+
 def _canais_status(pool, conta_id: int) -> dict:
     """Status de cada canal: credencial global + número/página da empresa (banco)."""
     twilio = bool(os.environ.get("TWILIO_ACCOUNT_SID") and os.environ.get("TWILIO_AUTH_TOKEN"))
@@ -1012,14 +1019,17 @@ def _canais_status(pool, conta_id: int) -> dict:
     env_ok = bool(email_ident) and (email_ident.strip().lower()
              == (os.environ.get("SMTP_USER") or "").strip().lower()) and bool(os.environ.get("SMTP_SENHA"))
     email_rx = bool(email_ident) and (bool(email_senha) or env_ok)
-    # Messenger/Instagram: precisa do app (env) + Página/IG id + Page Token (por conta)
-    messenger_ok = meta_app and bool(nums.get("messenger")) and bool(tokens.get("messenger"))
-    instagram_ok = meta_app and bool(nums.get("instagram")) and bool(tokens.get("instagram"))
+    # Messenger/Instagram: precisa do app (env) + Página/IG id + Page Token VÁLIDO (por conta)
+    messenger_ok = meta_app and bool(nums.get("messenger")) and _meta_token_valido(tokens.get("messenger"))
+    instagram_ok = meta_app and bool(nums.get("instagram")) and _meta_token_valido(tokens.get("instagram"))
+    # token preenchido mas com cara de inválido (ex.: placeholder) → alerta em vez de "Conectado"
+    msg_tok_ruim = bool(tokens.get("messenger")) and not _meta_token_valido(tokens.get("messenger"))
+    ig_tok_ruim = bool(tokens.get("instagram")) and not _meta_token_valido(tokens.get("instagram"))
     # WhatsApp: por provedor — Cloud API (número próprio) precisa de phone_id + token +
     # app da Meta; Twilio precisa das credenciais globais + número da empresa.
     wa_prov = provs.get("whatsapp") or "twilio"
     if wa_prov == "cloud":
-        whatsapp_ok = meta_app and bool(wa_phone.get("whatsapp")) and bool(tokens.get("whatsapp"))
+        whatsapp_ok = meta_app and bool(wa_phone.get("whatsapp")) and _meta_token_valido(tokens.get("whatsapp"))
     elif wa_prov == "qr":
         from finance import whatsapp_qr as _wq
         whatsapp_ok = _wq.configurado()   # serviço ligado; a sessão em si aparece na aba QR
@@ -1046,6 +1056,7 @@ def _canais_status(pool, conta_id: int) -> dict:
         "wa_phone_set": bool(wa_phone.get("whatsapp")),
         "messenger": messenger_ok,
         "instagram": instagram_ok,
+        "msg_tok_ruim": msg_tok_ruim, "ig_tok_ruim": ig_tok_ruim,
         "twilio": twilio, "meta": meta_app, "numeros": nums,
         "tokens_set": {k: bool(v) for k, v in tokens.items()},
     }
@@ -5579,7 +5590,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% endif %}
     </div>
     <div class="cx-card">
-      <h3>🔵 Messenger <span class="cx-stat {{ 'st-on' if canais.messenger else 'st-off' }}">● {{ 'Conectado' if canais.messenger else ('Falta Página/token' if canais.meta else 'Falta app (env)') }}</span></h3>
+      <h3>🔵 Messenger <span class="cx-stat {{ 'st-on' if canais.messenger else 'st-off' }}">● {{ 'Conectado' if canais.messenger else ('⚠ Token inválido — reconecte' if canais.msg_tok_ruim else ('Falta Página/token' if canais.meta else 'Falta app (env)')) }}</span></h3>
       <div class="mut" style="font-size:.8rem">Via Meta direto. App da Meta (env global) + Página do Facebook. 📥 responde na janela de 24h.</div>
       <div class="mut" style="font-size:.8rem;margin-top:.25rem">📥 Última recebida: {% if canais.ult_in.get('messenger') %}<b style="color:var(--verde-claro)">{{ canais.ult_in['messenger'] }}</b>{% else %}<span style="color:var(--mut)">nenhuma ainda</span>{% endif %}</div>
       <div class="cx-env"><b>META_APP_SECRET</b>=•••••<br><b>META_VERIFY_TOKEN</b>=•••••</div>
@@ -5594,7 +5605,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="mut" style="margin-top:.4rem;font-size:.8rem">No app da Meta, aponte o webhook pra <code>/webhooks/meta</code> (verify token = META_VERIFY_TOKEN) e assine <code>messages</code>.</div>
     </div>
     <div class="cx-card">
-      <h3>📸 Instagram <span class="cx-stat {{ 'st-on' if canais.instagram else 'st-off' }}">● {{ 'Conectado' if canais.instagram else ('Falta conta/token' if canais.meta else 'Falta app (env)') }}</span></h3>
+      <h3>📸 Instagram <span class="cx-stat {{ 'st-on' if canais.instagram else 'st-off' }}">● {{ 'Conectado' if canais.instagram else ('⚠ Token inválido — reconecte' if canais.ig_tok_ruim else ('Falta conta/token' if canais.meta else 'Falta app (env)')) }}</span></h3>
       <div class="mut" style="font-size:.8rem">Via Meta direto (mesmo webhook). Conta IG Profissional ligada à Página. 📥 responde na janela de 24h.</div>
       <div class="mut" style="font-size:.8rem;margin-top:.25rem">📥 Última recebida: {% if canais.ult_in.get('instagram') %}<b style="color:var(--verde-claro)">{{ canais.ult_in['instagram'] }}</b>{% else %}<span style="color:var(--mut)">nenhuma ainda</span>{% endif %}</div>
       {% if gerencia %}

@@ -5708,13 +5708,13 @@ function cxResponder(convId){
       _cxSig='';cxPollThread();cxPollList();
     }).catch(function(){if(sd){sd.disabled=false;sd.textContent='Enviar';}alert('Falha de rede.');ta.value=t;});
 }
-function cxTick(){cxPollList();cxPollThread();}
+function cxPoll(){cxPollList();cxPollThread();}
 (function(){var box=document.getElementById('cx-list');if(box){document.querySelectorAll('#cx-list .cx-conv').forEach(function(b){var id=parseInt(b.id.replace('cxc-',''));_cxList[id]={id:id,ult_msg_id:0};});
-  _cxTimer=setInterval(cxTick,4000);
+  _cxTimer=setInterval(cxPoll,4000);
   // o navegador congela o timer quando a aba fica em segundo plano — ao voltar o
   // foco/visibilidade, atualiza na hora pra conversa subir e mostrar as msgs novas.
-  document.addEventListener('visibilitychange',function(){if(!document.hidden)cxTick();});
-  window.addEventListener('focus',cxTick);}})();
+  document.addEventListener('visibilitychange',function(){if(!document.hidden)cxPoll();});
+  window.addEventListener('focus',cxPoll);}})();
 </script>
 {% endblock %}"""
 

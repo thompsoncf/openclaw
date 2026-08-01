@@ -5691,8 +5691,15 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 .passo .dtag{font-size:.72rem;color:var(--mut);display:flex;align-items:center;gap:.3rem}
 .passo .dtag .fld{width:60px;text-align:center;padding:.35rem}
 .passo textarea.fld{resize:vertical}
-/* desempenho */
-.wide{margin-top:1.4rem}
+/* desempenho no TOPO: ordena os filhos do wrapper (head, aviso, s4, nav, body) */
+.cdwrap{display:flex;flex-direction:column}
+.cdwrap>.head{order:0}.cdwrap>.ok{order:1}.cdwrap>#s4{order:2}.cdwrap>.flow{order:3}.cdwrap>.body{order:4}
+.wide{margin-top:.4rem}
+/* link "voltar" (breadcrumb) acima do título */
+.voltar{display:inline-block;color:var(--txt-mut,#8a938a);text-decoration:none;font-size:.82rem;margin-bottom:.35rem}
+.voltar:hover{color:var(--verde-claro)}
+/* trava as abas de material como pílulas (não esticam) */
+.mtabs .mtab{flex:0 0 auto}
 .secttl{margin:.2rem 0 0;font-size:1rem;display:flex;align-items:center;gap:.6rem}
 .secttl .idx{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-size:.82rem;font-weight:750;background:var(--card-2);border:1px solid var(--borda);color:var(--verde-claro)}
 .cpstats{display:grid;grid-template-columns:repeat(6,1fr);gap:.6rem}
@@ -5726,13 +5733,13 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 <div class="cdwrap">
   <div class="head">
     <div style="min-width:0">
+      <a class="voltar" href="/painel/prospeccao/campanhas">‹ Voltar para Campanhas</a>
       <h1><span class="nm">{{ camp.nome }}</span> <span class="cpill {{ camp.status }}">{{ camp.status_rot }}</span></h1>
       <div class="sub"><b style="color:var(--txt)">{{ na_camp }}</b> lead(s) na campanha · limite <b style="color:var(--txt)">{{ camp.limite }}</b>/dia · ✉️ e-mail{% if camp.wa_ativo %} + 💬 WhatsApp{% endif %}</div>
     </div>
     <div class="acts">
       {% if camp.status != 'ativa' %}<form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/status" style="margin:0"><input type="hidden" name="status" value="ativa"><button class="pbtn">▶ Ativar</button></form>
       {% else %}<form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/status" style="margin:0"><input type="hidden" name="status" value="pausada"><button class="pbtn ghost">❚❚ Pausar</button></form>{% endif %}
-      <a class="pbtn ghost" href="/painel/prospeccao/campanhas">‹ Campanhas</a>
     </div>
   </div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}

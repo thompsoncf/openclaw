@@ -214,6 +214,49 @@ def buscar_novos(cfg: dict, desde_uid: int | None = None, limite: int = 40):
     return out, (maior or desde_uid)
 
 
+import re as _re
+
+_BOUNCE_REMET = ("mailer-daemon", "postmaster", "mail-daemon", "maildelivery")
+_BOUNCE_ASSUNTO = ("undeliver", "delivery status", "delivery failure", "delivery incomplete",
+                   "failure notice", "returned mail", "mail delivery", "delivery has failed",
+                   "não foi entregue", "nao foi entregue", "falha na entrega", "address not found",
+                   "recusado", "mensagem não entregue", "mensagem nao entregue")
+_EMAIL_RE = _re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+
+
+def _eh_bounce(m: dict) -> bool:
+    """Heurística: e-mail de retorno (mailer-daemon/DSN). Cobre os bounces do Gmail."""
+    de = (m.get("from_email") or "").lower()
+    assunto = (m.get("assunto") or "").lower()
+    if any(t in de for t in _BOUNCE_REMET):
+        return True
+    return (not de) and any(t in assunto for t in _BOUNCE_ASSUNTO)
+
+
+def _tratar_bounce(c, conta_id: int, m: dict) -> int:
+    """Acha no corpo do retorno o(s) endereço(s) que falharam, casa com leads da conta,
+    marca email_ok=false e PARA a sequência (protege a reputação de envio)."""
+    texto = ((m.get("assunto") or "") + "\n" + (m.get("corpo") or "")).lower()
+    cands = {a for a in _EMAIL_RE.findall(texto)
+             if not any(t in a for t in _BOUNCE_REMET) and "@" in a}
+    if not cands:
+        return 0
+    n = 0
+    for lead_id, in (c.execute(
+            "select id from prospeccao where conta_id=%s and lower(email) = any(%s)",
+            (conta_id, list(cands))).fetchall() or []):
+        c.execute("update prospeccao set email_ok=false, atualizado_em=now() where id=%s", (lead_id,))
+        c.execute("""update campanha_alvos set status='erro', proximo_envio_em=null
+                       where prospeccao_id=%s and status in ('fila','enviado')""", (lead_id,))
+        c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id, tipo, descricao)
+                     values (%s, null, 'bounce', 'E-mail retornou (inválido) — sequência parada')""",
+                  (lead_id,))
+        n += 1
+    if n:
+        c.commit()
+    return n
+
+
 def sincronizar(pool, conta_id: int) -> int:
     """Puxa os e-mails novos da caixa da conta e grava no inbox. Best-effort."""
     cfg = _conta_cfg(pool, conta_id)
@@ -223,6 +266,14 @@ def sincronizar(pool, conta_id: int) -> int:
     n = 0
     for m in novos:
         addr = m["from_email"]
+        # bounce (retorno de e-mail inválido) → marca e para a sequência; não vira conversa
+        if _eh_bounce(m):
+            try:
+                with pool.connection() as c:
+                    _tratar_bounce(c, conta_id, m)
+            except Exception as e:  # noqa: BLE001
+                _log.info("email_in: bounce não tratado: %s", e)
+            continue
         if not addr or addr == cfg["user"].strip().lower():
             continue
         try:

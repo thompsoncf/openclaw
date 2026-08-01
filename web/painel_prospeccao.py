@@ -21,6 +21,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Request, Form, UploadFile, File, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
+from psycopg.errors import UniqueViolation
 
 from db.conexao import get_pool
 from contas import equipe as eq
@@ -700,22 +701,31 @@ def prospeccao_novo(request: Request, empresa: str = Form(...), segmento: str = 
             receita_json = None
     pool = get_pool()
     vend = _vendedor_destino(ctx, vendedor_id, pool, ctx["conta_id"])
-    with pool.connection() as c:
-        row = c.execute(
-            """insert into prospeccao (conta_id, vendedor_id, empresa, segmento, cidade,
-                 uf, contato, cargo, telefone, whatsapp, email, cnpj, temperatura,
-                 valor_estimado_centavos, origem, obs, socio, regime_tributario, porte,
-                 instagram, site_url, tem_site, receita, criado_por)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s) returning id""",
-            (ctx["conta_id"], vend, empresa, segmento.strip() or None, cidade.strip() or None,
-             (uf or "").strip()[:2].upper() or None, contato.strip() or None, cargo.strip() or None,
-             telefone.strip() or None, whatsapp.strip() or None, email.strip().lower() or None,
-             cnpj.strip() or None, temperatura, _reais_para_centavos(valor),
-             (origem or "manual").strip() or None, obs.strip() or None,
-             socio.strip() or None, regime_tributario.strip() or None, porte.strip() or None,
-             instagram.strip() or None, site_link or None, tem_site, receita_json,
-             ctx["membro_id"])).fetchone()
-        c.commit()
+    cnpj_limpo = cnpj.strip() or None
+    try:
+        with pool.connection() as c:
+            row = c.execute(
+                """insert into prospeccao (conta_id, vendedor_id, empresa, segmento, cidade,
+                     uf, contato, cargo, telefone, whatsapp, email, cnpj, temperatura,
+                     valor_estimado_centavos, origem, obs, socio, regime_tributario, porte,
+                     instagram, site_url, tem_site, receita, criado_por)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s) returning id""",
+                (ctx["conta_id"], vend, empresa, segmento.strip() or None, cidade.strip() or None,
+                 (uf or "").strip()[:2].upper() or None, contato.strip() or None, cargo.strip() or None,
+                 telefone.strip() or None, whatsapp.strip() or None, email.strip().lower() or None,
+                 cnpj_limpo, temperatura, _reais_para_centavos(valor),
+                 (origem or "manual").strip() or None, obs.strip() or None,
+                 socio.strip() or None, regime_tributario.strip() or None, porte.strip() or None,
+                 instagram.strip() or None, site_link or None, tem_site, receita_json,
+                 ctx["membro_id"])).fetchone()
+            c.commit()
+    except UniqueViolation:
+        msg = (f"Já existe um lead com o CNPJ {cnpj_limpo} nesta conta — “{empresa}” não foi cadastrado de novo."
+               if cnpj_limpo else f"“{empresa}” já está cadastrado — não dá pra duplicar.")
+        if ajax:
+            return JSONResponse({"ok": False, "erro": msg}, status_code=409)
+        request.session["prosp_aviso"] = msg
+        return RedirectResponse(destino, status_code=303)
     if ajax:
         lead = _lead_card(row[0], empresa, segmento.strip(), cidade.strip(),
                           (uf or "").strip()[:2].upper(), temperatura, _reais_para_centavos(valor),

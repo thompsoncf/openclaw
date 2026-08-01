@@ -1027,7 +1027,15 @@ def _canais_status(pool, conta_id: int) -> dict:
         whatsapp_ok = twilio and bool(nums.get("whatsapp"))
     from finance import email_inbound as _ein
     rem_conta = _ein.remetente_conta(pool, conta_id)     # caixa da EMPRESA (ou global)
+    # última mensagem RECEBIDA por canal — prova de que o inbound está chegando
+    with pool.connection() as c:
+        ult_in = dict(c.execute(
+            """select cv.canal, to_char(max(m.criado_em) - interval '3 hours','DD/MM HH24:MI')
+                 from conversas cv join mensagens m on m.conversa_id=cv.id
+                where cv.conta_id=%s and m.direcao='in'
+                group by cv.canal""", (conta_id,)).fetchall())
     return {
+        "ult_in": ult_in,
         "email": bool(rem_conta),                         # ENVIAR (caixa da empresa/global)
         "email_remetente": rem_conta or "",               # o e-mail que vai no From
         "email_rx": email_rx,                             # RECEBER (caixa da conta)
@@ -5465,6 +5473,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </div>
     <div class="cx-card">
       <h3>💬 WhatsApp <span class="cx-stat {{ 'st-on' if canais.whatsapp else 'st-off' }}">● {{ 'Conectado' if canais.whatsapp else 'A configurar' }}</span></h3>
+      <div class="mut" style="font-size:.8rem;margin-bottom:.2rem">📥 Última recebida: {% if canais.ult_in.get('whatsapp') %}<b style="color:var(--verde-claro)">{{ canais.ult_in['whatsapp'] }}</b>{% else %}<span style="color:var(--mut)">nenhuma ainda</span>{% endif %}</div>
       {% if gerencia %}
       <div class="mut" style="font-size:.8rem;margin-bottom:.1rem">Como este cliente conecta o WhatsApp:</div>
       <div class="waseg">
@@ -5572,6 +5581,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <div class="cx-card">
       <h3>🔵 Messenger <span class="cx-stat {{ 'st-on' if canais.messenger else 'st-off' }}">● {{ 'Conectado' if canais.messenger else ('Falta Página/token' if canais.meta else 'Falta app (env)') }}</span></h3>
       <div class="mut" style="font-size:.8rem">Via Meta direto. App da Meta (env global) + Página do Facebook. 📥 responde na janela de 24h.</div>
+      <div class="mut" style="font-size:.8rem;margin-top:.25rem">📥 Última recebida: {% if canais.ult_in.get('messenger') %}<b style="color:var(--verde-claro)">{{ canais.ult_in['messenger'] }}</b>{% else %}<span style="color:var(--mut)">nenhuma ainda</span>{% endif %}</div>
       <div class="cx-env"><b>META_APP_SECRET</b>=•••••<br><b>META_VERIFY_TOKEN</b>=•••••</div>
       {% if gerencia %}
       <form method="post" action="/painel/prospeccao/comunicacao/canal-numero" style="margin-top:.6rem">
@@ -5584,8 +5594,9 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="mut" style="margin-top:.4rem;font-size:.8rem">No app da Meta, aponte o webhook pra <code>/webhooks/meta</code> (verify token = META_VERIFY_TOKEN) e assine <code>messages</code>.</div>
     </div>
     <div class="cx-card">
-      <h3>📸 Instagram <span class="cx-stat {{ 'st-on' if canais.instagram else ('Falta conta/token' if canais.meta else 'Falta app (env)') }}">● {{ 'Conectado' if canais.instagram else ('Falta conta/token' if canais.meta else 'Falta app (env)') }}</span></h3>
+      <h3>📸 Instagram <span class="cx-stat {{ 'st-on' if canais.instagram else 'st-off' }}">● {{ 'Conectado' if canais.instagram else ('Falta conta/token' if canais.meta else 'Falta app (env)') }}</span></h3>
       <div class="mut" style="font-size:.8rem">Via Meta direto (mesmo webhook). Conta IG Profissional ligada à Página. 📥 responde na janela de 24h.</div>
+      <div class="mut" style="font-size:.8rem;margin-top:.25rem">📥 Última recebida: {% if canais.ult_in.get('instagram') %}<b style="color:var(--verde-claro)">{{ canais.ult_in['instagram'] }}</b>{% else %}<span style="color:var(--mut)">nenhuma ainda</span>{% endif %}</div>
       {% if gerencia %}
       <form method="post" action="/painel/prospeccao/comunicacao/canal-numero" style="margin-top:.6rem">
         <input type="hidden" name="canal" value="instagram">

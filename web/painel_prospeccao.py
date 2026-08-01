@@ -5241,6 +5241,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="cx-kv"><span>Principal (De:)</span><b>{{ canais.email_ident or remetente or '—' }}</b></div>
       <div class="cx-kv"><span>Secundária</span><b>{% if canais.email2_ident %}<span style="color:var(--verde-claro)">✓ {{ canais.email2_ident }}</span>{% else %}—{% endif %}</b></div>
       <div class="mut" style="font-size:.72rem">Cada campanha escolhe de qual caixa sai. As respostas de <b>ambas</b> caem no inbox.</div>
+      {% if canais.email_ident %}{% if '@gmail.com' in (canais.email_ident|lower) %}
+      <div style="font-size:.75rem;color:#e0a33e;margin-top:.35rem;border:1px solid #5a4520;background:#2a2113;border-radius:8px;padding:.45rem .6rem">⚠️ A principal é <b>Gmail pessoal</b>. Pra prospecção o ideal é o <b>e-mail do domínio</b> (Workspace): entrega melhor e sem o limite baixo do Gmail. Troque a caixa principal pelo domínio.</div>
+      {% else %}
+      <div style="font-size:.75rem;color:var(--verde-claro);margin-top:.35rem">✓ Principal em <b>domínio próprio</b> — ótimo pra entrega (confirme SPF/DKIM/DMARC no DNS).</div>
+      {% endif %}{% endif %}
       {% if gerencia %}
       <form method="post" action="/painel/prospeccao/comunicacao/email-config" style="margin-top:.6rem">
         <input type="hidden" name="slot" value="principal">

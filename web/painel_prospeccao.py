@@ -5581,11 +5581,12 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         </div>
 
         <div class="divi"></div>
-        <label class="lbl" style="font-size:.82rem">💬 1º contato por WhatsApp (template aprovado)</label>
-        <div style="margin-top:.3rem">
-          <label class="lbl">Content SID do template (Twilio)</label>
+        <label class="lbl" style="font-size:.82rem">💬 Template de WhatsApp — 1º contato frio (aprovado no Twilio)</label>
+        <div class="mut" style="font-size:.74rem;margin-top:.15rem">A mensagem aprovada que fura a janela de 24h (o convite com os botões). <b>É diferente do modelo de e‑mail</b> da etapa 2 — aqui você cola o código do template do WhatsApp.</div>
+        <div style="margin-top:.4rem">
+          <label class="lbl">Content SID do template de WhatsApp (Twilio)</label>
           <input class="fld" name="wa_template_sid" value="{{ camp.wa_template_sid }}" placeholder="HX..." spellcheck="false" style="font-family:ui-monospace,monospace">
-          <div class="mut" style="font-size:.74rem;margin-top:.2rem">Cole o SID do template aprovado <b>desta campanha</b>. Cada campanha pode ter o seu — não precisa mexer no Render. {% if camp.wa_pronto %}<span style="color:var(--verde-claro)">● pronto pra disparo frio</span>{% else %}<span style="color:#e0a33e">● defina o SID pra liberar o disparo</span>{% endif %}</div>
+          <div class="mut" style="font-size:.74rem;margin-top:.2rem">Cole o SID do template aprovado <b>desta campanha</b> (começa com <code>HX</code>). Cada campanha pode ter o seu — não precisa mexer no Render. {% if camp.wa_pronto %}<span style="color:var(--verde-claro)">● pronto pra disparo frio</span>{% else %}<span style="color:#e0a33e">● defina o SID pra liberar o disparo</span>{% endif %}</div>
         </div>
         <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-top:.5rem">
           <label class="chk"><input type="checkbox" name="wa_ativo" value="1" {% if camp.wa_ativo %}checked{% endif %}> <span>Disparar o convite por WhatsApp junto com o e-mail</span></label>
@@ -5600,11 +5601,11 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 
       <!-- 2 · SEQUÊNCIA -->
       <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/sequencia" class="card sec" id="s2">
-        <header><span class="idx">2</span><h3>Sequência</h3><span class="grow"></span>
+        <header><span class="idx">2</span><h3>Sequência de e-mail</h3><span class="grow"></span>
           <button type="button" class="pbtn ghost sm" onclick="addPasso()">＋ Passo</button><button class="pbtn sm">Salvar</button></header>
-        <p class="desc"><b>D+</b> = dias após o 1º e-mail (0 = primeiro). <b>🤖 IA</b> escreve único por lead; <b>Template</b> usa o texto (<code>{empresa}</code>, <code>{cidade}</code>, <code>{segmento}</code>).</p>
+        <p class="desc">Os e-mails da campanha (isto <b>não</b> é o template de WhatsApp da etapa 1). <b>D+</b> = dias após o 1º e-mail (0 = primeiro). <b>🤖 IA</b> escreve único por lead; <b>Template</b> usa o texto (<code>{empresa}</code>, <code>{cidade}</code>, <code>{segmento}</code>).</p>
         <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.8rem;padding:.5rem .6rem;border:1px solid var(--borda);border-radius:10px;background:var(--bg)">
-          <label class="lbl" style="margin:0">📋 Modelo por nicho:</label>
+          <label class="lbl" style="margin:0" title="Modelo da sequência de e-mail por nicho — não confundir com o template de WhatsApp">📋 Modelo de e-mail (por nicho):</label>
           <select class="fld" id="modelo-sel" style="width:auto">
             {% for m in modelos %}<option value="{{ m.codigo }}" {% if m.codigo==camp.modelo_codigo %}selected{% endif %}>{{ m.nome }}{% if m.origem=='meu' %} (meu){% endif %}</option>{% endfor %}
           </select>

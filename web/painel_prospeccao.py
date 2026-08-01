@@ -1824,7 +1824,7 @@ def _tratar_botao_prospec(c, conta_id, remetente, tipo, texto, sid, nome) -> boo
                            (conta_id,)).fetchone()
         agente_on = bool(master and master[0])
         conv_id = _wa_inbound_conversa(c, conta_id, rem, texto, sid, nome, agente_on)
-        c.execute("""update campanha_alvos set status='respondeu', proximo_envio_em=null
+        c.execute("""update campanha_alvos set status='respondeu', wa_status='respondeu', proximo_envio_em=null
                        where prospeccao_id=%s and status in ('fila','enviado')""", (lead_id,))
     idn = _conta_identidade(c, conta_id)
     material = ""
@@ -1937,7 +1937,7 @@ async def webhook_twilio(request: Request, background_tasks: BackgroundTasks):
 _WA_STATUS_MAP = {"delivered": "entregue", "read": "lido",
                   "sent": "enviado", "queued": "enviado", "sending": "enviado",
                   "failed": "erro", "undelivered": "erro"}
-_WA_STATUS_RANK = {"enviado": 1, "entregue": 2, "lido": 3}
+_WA_STATUS_RANK = {"enviado": 1, "entregue": 2, "lido": 3, "respondeu": 4}
 
 
 @router.post("/webhooks/twilio-status")
@@ -2461,8 +2461,10 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
         modelos = _modelos_lista(c, ctx["conta_id"])
     # "pulado" (já respondeu) e "sem_numero" não são disparos reais — fora da conta
     wa_enviados = sum(v for k, v in wa_counts.items() if k not in ("pulado", "sem_numero"))
-    wa_entregues = wa_counts.get("entregue", 0) + wa_counts.get("lido", 0)  # entregou (ou já leu)
-    wa_lidos = wa_counts.get("lido", 0)
+    # "respondeu" implica que já foi entregue e lido — soma nos dois (não é status
+    # exclusivo, é o próximo degrau depois de "lido")
+    wa_entregues = wa_counts.get("entregue", 0) + wa_counts.get("lido", 0) + wa_counts.get("respondeu", 0)
+    wa_lidos = wa_counts.get("lido", 0) + wa_counts.get("respondeu", 0)
     wa_erros = wa_counts.get("erro", 0)
     camp = {"id": cp[0], "nome": cp[1], "status": cp[2], "limite": cp[3],
             "status_rot": _STATUS_ROT_CP.get(cp[2], cp[2]), "material": cp[6],
@@ -2494,7 +2496,8 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                   "corpo": ("O agente escreve um e-mail único pra este lead — clique em “Gerar prévia com IA” "
                             "pra ver um exemplo." if p0["ia"] else _cfmt(p0["corpo"] or "", _ld))}
     _WA_ROT = {"enviado": "💬 enviado", "entregue": "✅ entregue", "lido": "👀 lido",
-               "erro": "💬 erro", "sem_numero": "💬 sem nº", "pulado": "↩︎ já respondeu"}
+               "respondeu": "🔥 respondeu", "erro": "💬 erro", "sem_numero": "💬 sem nº",
+               "pulado": "↩︎ já respondeu"}
     leads_l = [{"empresa": r[0], "email": r[1], "status": r[2], "passo": r[3],
                 "prox": r[4], "ult": r[5], "pid": r[6], "rot": _ALVO_ROT.get(r[2], r[2]),
                 "abriu": r[7], "aberto": r[8], "wa": r[9], "wa_rot": _WA_ROT.get(r[9], ""),

@@ -2605,6 +2605,33 @@ def prospeccao_campanha_remover_lead(request: Request, camp_id: int, prospeccao_
     return JSONResponse({"ok": True, "removidos": n})
 
 
+@router.post("/painel/prospeccao/campanhas/{camp_id}/remover-leads")
+def prospeccao_campanha_remover_leads(request: Request, camp_id: int, ids: list[str] = Form([])):
+    """Tira vários leads da campanha de uma vez (mesmo efeito do ✕ individual, em lote).
+    Os leads continuam na Base, disponíveis pra reenviar certo — usado quando um lote
+    caiu sem a riqueza de informação necessária ou sem interesse."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    pids = []
+    for v in ids:
+        try:
+            pids.append(int(v))
+        except (ValueError, TypeError):
+            pass
+    if not pids:
+        return JSONResponse({"ok": False, "erro": "sem_ids"}, status_code=400)
+    with get_pool().connection() as c:
+        if not _campanha_dona(c, ctx["conta_id"], camp_id):
+            return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+        n = c.execute("delete from campanha_alvos where campanha_id=%s and prospeccao_id = any(%s)",
+                      (camp_id, pids)).rowcount
+        c.commit()
+    return JSONResponse({"ok": True, "removidos": n})
+
+
 @router.post("/painel/prospeccao/campanhas/{camp_id}/usar-modelo")
 def prospeccao_campanha_usar_modelo(request: Request, camp_id: int, codigo: str = Form("")):
     """Copia (snapshot) os passos do modelo escolhido pra sequência da campanha."""
@@ -6048,18 +6075,26 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         {% if metr.erros or metr.wa_erros %}<div class="mut" style="font-size:.78rem;margin-top:.5rem"><span style="color:#e0574f">{% if metr.erros %}{{ metr.erros }} erro(s) de e-mail{% endif %}{% if metr.erros and metr.wa_erros %} · {% endif %}{% if metr.wa_erros %}{{ metr.wa_erros }} erro(s) de WhatsApp{% endif %}</span></div>{% endif %}
 
         <div class="kpihead" style="margin-top:1.1rem">Contatos &amp; histórico</div>
+        {% if leads %}
+        <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-top:.3rem">
+          <span id="cl-count" class="mut" style="font-size:.78rem">Marque os leads na tabela pra agir em lote (ex.: base sem riqueza de dados, sem interesse)</span>
+          <span style="flex:1"></span>
+          <button type="button" class="pbtn ghost sm" id="cl-rem-btn" onclick="clRemSelecionados({{ camp.id }})" disabled>🗑 Remover selecionados</button>
+        </div>
+        {% endif %}
         <div class="tbl-wrap">
           <table>
-            <thead><tr><th>Empresa</th><th>Situação</th><th>📧 E-mail</th><th>💬 WhatsApp</th><th>Próximo/último</th><th></th></tr></thead>
+            <thead><tr><th style="width:26px"><input type="checkbox" id="cl-all" onclick="clToggleAll(this)" title="Selecionar todos"></th><th>Empresa</th><th>Situação</th><th>📧 E-mail</th><th>💬 WhatsApp</th><th>Próximo/último</th><th></th></tr></thead>
             <tbody>
               {% for l in leads %}
-              <tr><td><b>{{ l.empresa }}</b><div class="mut" style="font-size:.76rem">{% if l.email %}✉️ {{ l.email }}{% endif %}{% if l.email and l.fone %} · {% endif %}{% if l.fone %}💬 {{ l.fone }}{% endif %}{% if not l.email and not l.fone %}—{% endif %}</div></td>
+              <tr><td><input class="cl-ck" type="checkbox" value="{{ l.pid }}" onchange="clUpd()"></td>
+                <td><b>{{ l.empresa }}</b><div class="mut" style="font-size:.76rem">{% if l.email %}✉️ {{ l.email }}{% endif %}{% if l.email and l.fone %} · {% endif %}{% if l.fone %}💬 {{ l.fone }}{% endif %}{% if not l.email and not l.fone %}—{% endif %}</div></td>
                 <td><span class="apill {{ l.status }}">{{ l.rot }}</span></td>
                 <td class="mut" style="white-space:nowrap">D{{ l.passo }}{% if l.abriu %} · <span style="color:var(--verde-claro)" title="Abriu {{ l.abriu }}x · 1ª em {{ l.aberto }}">👁 {{ l.aberto }}{% if l.abriu > 1 %} ({{ l.abriu }}x){% endif %}</span>{% endif %}</td>
                 <td class="mut" style="white-space:nowrap">{% if l.fone %}{{ l.fone }}{% if l.wa_rot %}<div style="font-size:.76rem">{{ l.wa_rot }}</div>{% endif %}{% else %}{{ l.wa_rot or '—' }}{% endif %}</td>
                 <td class="mut" style="white-space:nowrap">{% if l.status in ('fila','enviado') and l.prox %}⏳ {{ l.prox }}{% elif l.ult %}✓ {{ l.ult }}{% else %}—{% endif %}</td>
                 <td style="text-align:right;white-space:nowrap"><button type="button" class="cpx" onclick="campHist({{ camp.id }},{{ l.pid }},this)" title="Ver histórico (data/hora por canal)">🕘</button> <button type="button" class="cpx" onclick="campRemLead(this,{{ camp.id }},{{ l.pid }})" title="Remover da campanha (o lead volta pra Base)">✕</button></td></tr>
-              {% else %}<tr><td colspan="6" class="mut" style="text-align:center;padding:1.6rem">Nenhum lead ainda — mande da <b>Base</b> (marque os leads → “Jogar na campanha”).</td></tr>{% endfor %}
+              {% else %}<tr><td colspan="7" class="mut" style="text-align:center;padding:1.6rem">Nenhum lead ainda — mande da <b>Base</b> (marque os leads → “Jogar na campanha”).</td></tr>{% endfor %}
             </tbody>
           </table>
         </div>
@@ -6086,7 +6121,36 @@ function campRemLead(btn,camp,pid){
     .then(function(r){return r.json();}).then(function(d){
       if(!d.ok){alert('Não consegui remover ('+(d.erro||'?')+').');return;}
       var tr=btn.closest('tr');if(tr){var nx=tr.nextElementSibling;if(nx&&nx.classList.contains('histrow'))nx.remove();tr.remove();}
+      clUpd();
     }).catch(function(){alert('Falha de rede.');});
+}
+function clChecked(){var a=[];document.querySelectorAll('.cl-ck:checked').forEach(function(c){a.push(c.value);});return a;}
+function clToggleAll(el){document.querySelectorAll('.cl-ck').forEach(function(c){c.checked=el.checked;});clUpd();}
+function clUpd(){
+  var total=document.querySelectorAll('.cl-ck').length;
+  var n=clChecked().length;
+  var btn=document.getElementById('cl-rem-btn');
+  if(btn){btn.disabled=!n;btn.textContent=n?'🗑 Remover selecionados ('+n+')':'🗑 Remover selecionados';}
+  var cnt=document.getElementById('cl-count');
+  if(cnt)cnt.textContent=n?n+' selecionado(s)':'Marque os leads na tabela pra agir em lote (ex.: base sem riqueza de dados, sem interesse)';
+  var all=document.getElementById('cl-all');
+  if(all){all.checked=total>0&&n===total;all.indeterminate=n>0&&n<total;}
+}
+function clRemSelecionados(camp){
+  var ids=clChecked();
+  if(!ids.length)return;
+  if(!confirm('Remover '+ids.length+' lead(s) da campanha? Eles voltam pra Base e podem ser reenviados depois.'))return;
+  var body=new URLSearchParams();ids.forEach(function(id){body.append('ids',id);});
+  var btn=document.getElementById('cl-rem-btn');if(btn)btn.disabled=true;
+  fetch('/painel/prospeccao/campanhas/'+camp+'/remover-leads',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body})
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){alert('Não consegui remover ('+(d.erro||'?')+').');clUpd();return;}
+      ids.forEach(function(id){
+        var cb=document.querySelector('.cl-ck[value="'+id+'"]');if(!cb)return;
+        var tr=cb.closest('tr');if(tr){var nx=tr.nextElementSibling;if(nx&&nx.classList.contains('histrow'))nx.remove();tr.remove();}
+      });
+      clUpd();
+    }).catch(function(){alert('Falha de rede.');clUpd();});
 }
 function hEsc(s){var d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
 function campHist(camp,pid,btn){

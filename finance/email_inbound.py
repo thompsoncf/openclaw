@@ -34,13 +34,14 @@ def _env_senha_para(endereco: str) -> str | None:
     return s if (u and s and u == (endereco or "").strip().lower()) else None
 
 
-def _conta_cfg(pool, conta_id: int) -> dict | None:
-    """Config IMAP daquela conta (banco + fallback env). None se não dá pra logar."""
+def _conta_cfg(pool, conta_id: int, canal: str = "email") -> dict | None:
+    """Config IMAP de uma CAIXA da conta (banco + fallback env). `canal`='email' é a
+    caixa principal; 'email2' é a secundária. None se não dá pra logar."""
     with pool.connection() as c:
         r = c.execute(
             """select identificador, imap_senha, imap_host, ultimo_uid
-                 from canais_config where conta_id=%s and canal='email' and ativo""",
-            (conta_id,)).fetchone()
+                 from canais_config where conta_id=%s and canal=%s and ativo""",
+            (conta_id, canal)).fetchone()
     if not r or not r[0]:
         return None
     user = r[0].strip()
@@ -51,16 +52,18 @@ def _conta_cfg(pool, conta_id: int) -> dict | None:
             "user": user, "senha": senha, "ultimo_uid": r[3]}
 
 
-def configurado_conta(pool, conta_id: int) -> bool:
-    return _conta_cfg(pool, conta_id) is not None
+def configurado_conta(pool, conta_id: int, canal: str = "email") -> bool:
+    return _conta_cfg(pool, conta_id, canal) is not None
 
 
-def remetente_conta(pool, conta_id: int) -> str | None:
-    """O e-mail que a EMPRESA usa pra ENVIAR: a caixa própria (se configurada), senão
-    o SMTP global do ambiente. É o que deve aparecer no painel e no From."""
-    cfg = _conta_cfg(pool, conta_id)
+def remetente_conta(pool, conta_id: int, canal: str = "email") -> str | None:
+    """O e-mail que a EMPRESA usa pra ENVIAR pela caixa `canal`: a caixa própria (se
+    configurada), senão o SMTP global do ambiente. É o From que aparece no painel."""
+    cfg = _conta_cfg(pool, conta_id, canal)
     if cfg:
         return cfg["user"]
+    if canal != "email":
+        return None
     from finance.email_sender import remetente_configurado
     return remetente_configurado()
 
@@ -72,35 +75,39 @@ def _smtp_host(imap_host: str) -> str:
 
 def enviar_conta(pool, conta_id: int, destino: str, assunto: str, html: str,
                  texto_alt: str | None = None, from_nome: str | None = None,
-                 reply_to: str | None = None, list_unsub: str = "") -> bool:
-    """Envia PELO e-mail da empresa (mesma senha de app do IMAP serve pro SMTP). Se a
-    empresa não tem caixa própria, cai no SMTP global (enviar_email)."""
+                 reply_to: str | None = None, list_unsub: str = "", canal: str = "email") -> bool:
+    """Envia PELA caixa `canal` da empresa (mesma senha de app do IMAP serve pro SMTP).
+    Se a caixa não existe, cai no SMTP global (só pra a principal)."""
     from finance import email_sender as es
-    cfg = _conta_cfg(pool, conta_id)
+    cfg = _conta_cfg(pool, conta_id, canal)
     if cfg:
         return es.enviar_com_creds(cfg["user"], cfg["senha"], _smtp_host(cfg["host"]), 587,
                                    destino, assunto, html, texto_alt, from_nome, reply_to,
                                    list_unsub=list_unsub)
+    if canal != "email":            # caixa secundária sem config → não envia (evita usar o From errado)
+        return False
     return es.enviar_email(destino, assunto, html, texto_alt, reply_to, from_nome,
                            list_unsub=list_unsub)
 
 
-def salvar_config(pool, conta_id: int, endereco: str, senha: str, host: str = "") -> None:
-    """Salva/atualiza o canal de e-mail da conta. Senha vazia = mantém a atual."""
+def salvar_config(pool, conta_id: int, endereco: str, senha: str, host: str = "",
+                  canal: str = "email") -> None:
+    """Salva/atualiza uma CAIXA de e-mail da conta (canal 'email' ou 'email2'). Senha
+    vazia = mantém a atual."""
     endereco = (endereco or "").strip()
     host = (host or "").strip() or "imap.gmail.com"
     senha_limpa = "".join((senha or "").split())     # senha de app do Google não tem espaços
     with pool.connection() as c:
         c.execute(
             """insert into canais_config (conta_id, canal, identificador, imap_host, ativo)
-               values (%s,'email',%s,%s,true)
+               values (%s,%s,%s,%s,true)
                on conflict (conta_id, canal) do update set
                  identificador=excluded.identificador, imap_host=excluded.imap_host,
                  ativo=true, ultimo_uid=null, atualizado_em=now()""",
-            (conta_id, endereco, host))
+            (conta_id, canal, endereco, host))
         if senha_limpa:
-            c.execute("update canais_config set imap_senha=%s where conta_id=%s and canal='email'",
-                      (senha_limpa, conta_id))
+            c.execute("update canais_config set imap_senha=%s where conta_id=%s and canal=%s",
+                      (senha_limpa, conta_id, canal))
         c.commit()
 
 
@@ -262,9 +269,10 @@ def _tratar_bounce(c, conta_id: int, m: dict) -> int:
     return n
 
 
-def sincronizar(pool, conta_id: int) -> int:
-    """Puxa os e-mails novos da caixa da conta e grava no inbox. Best-effort."""
-    cfg = _conta_cfg(pool, conta_id)
+def sincronizar(pool, conta_id: int, canal: str = "email") -> int:
+    """Puxa os e-mails novos de uma CAIXA da conta ('email' ou 'email2') e grava no
+    inbox. Best-effort."""
+    cfg = _conta_cfg(pool, conta_id, canal)
     if not cfg:
         return 0
     novos, maior = buscar_novos(cfg, desde_uid=cfg["ultimo_uid"])
@@ -342,19 +350,19 @@ def sincronizar(pool, conta_id: int) -> int:
         try:
             with pool.connection() as c:
                 c.execute("""update canais_config set ultimo_uid=%s, atualizado_em=now()
-                              where conta_id=%s and canal='email'""", (maior, conta_id))
+                              where conta_id=%s and canal=%s""", (maior, conta_id, canal))
                 c.commit()
         except Exception:  # noqa: BLE001
             pass
     return n
 
 
-def diagnostico(pool, conta_id: int) -> dict:
-    """Testa a caixa da conta AO VIVO e diz em que etapa parou (pra mostrar no painel)."""
+def diagnostico(pool, conta_id: int, canal: str = "email") -> dict:
+    """Testa uma CAIXA da conta AO VIVO e diz em que etapa parou (pra mostrar no painel)."""
     with pool.connection() as c:
         r = c.execute(
-            "select identificador, imap_senha, imap_host from canais_config where conta_id=%s and canal='email' and ativo",
-            (conta_id,)).fetchone()
+            "select identificador, imap_senha, imap_host from canais_config where conta_id=%s and canal=%s and ativo",
+            (conta_id, canal)).fetchone()
     if not r or not r[0]:
         return {"ok": False, "etapa": "config",
                 "msg": "Nenhum e-mail configurado nesta conta. Preencha o endereço e a senha de app aqui na aba Canais."}
@@ -412,11 +420,11 @@ def poll_uma_vez(pool) -> int:
             if not got:
                 return 0
             try:
-                contas = [row[0] for row in c.execute(
-                    "select conta_id from canais_config where canal='email' and ativo").fetchall()]
-                for cid in contas:
+                caixas = c.execute(
+                    "select conta_id, canal from canais_config where canal in ('email','email2') and ativo").fetchall()
+                for cid, canal in caixas:
                     try:
-                        total += sincronizar(pool, cid)
+                        total += sincronizar(pool, cid, canal)
                     except Exception:  # noqa: BLE001
                         pass
             finally:

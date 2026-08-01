@@ -142,14 +142,18 @@ def _email_ia(pool, conta_id: int, lead: dict) -> dict:
 
 
 def _conta_identidade(c, conta_id: int) -> dict:
-    """Identidade da conta pro rodapé do e-mail: nome da EMPRESA (nome fantasia,
-    não o do responsável), nome do RESPONSÁVEL e telefone cadastrado no ZAQ."""
+    """Identidade da conta pro rodapé do e-mail e pro 1º contato da prospecção:
+    nome da EMPRESA (nome fantasia, não o do responsável), nome do RESPONSÁVEL,
+    telefone, e o perfil de prospecção (Instagram + cargo de quem envia)."""
     row = c.execute(
-        "select coalesce(nullif(trim(nome_fantasia),''), nome), nome, coalesce(telefone,'') "
-        "from contas where id=%s", (conta_id,)).fetchone() or ("", "", "")
+        "select coalesce(nullif(trim(nome_fantasia),''), nome), nome, coalesce(telefone,''), "
+        "coalesce(prospec_instagram,''), coalesce(nullif(trim(prospec_cargo),''),'CEO') "
+        "from contas where id=%s", (conta_id,)).fetchone() or ("", "", "", "", "CEO")
     return {"empresa": (row[0] or "").strip(),
             "responsavel": (row[1] or "").strip(),
-            "telefone": (row[2] or "").strip()}
+            "telefone": (row[2] or "").strip(),
+            "instagram": (row[3] or "").strip(),
+            "cargo": (row[4] or "CEO").strip()}
 
 
 # despedidas que a IA às vezes cola no fim — a gente corta e usa a nossa assinatura

@@ -9,8 +9,10 @@ Config: TWILIO_TMPL_PROSPEC_SID = o 'HX...' do template já aprovado no Twilio
 mostra o envio de texto (dentro da janela) e o wa.me externo.
 
 Corpo aprovado (variáveis, NA ORDEM):
-  {{1}} = nome da empresa que envia (nome fantasia da conta)
-  {{2}} = nome da empresa do lead
+  {{1}} = nome de quem envia (responsável da conta)
+  {{2}} = cargo de quem envia (ex.: CEO)
+  {{3}} = nome da empresa que envia (nome fantasia da conta)
+  {{4}} = nome da empresa do lead
 """
 from __future__ import annotations
 
@@ -51,6 +53,8 @@ def enviar_convite(pool, conta_id: int, alvo_id: int, numero: str | None = None)
         if not numero:
             return {"ok": False, "erro": "sem_numero"}
         idn = _conta_identidade(c, conta_id)
-        variaveis = {"1": (idn.get("empresa") or "nós"),
-                     "2": (empresa_lead or "sua empresa")}
+        variaveis = {"1": (idn.get("responsavel") or idn.get("empresa") or "nós"),
+                     "2": (idn.get("cargo") or "CEO"),
+                     "3": (idn.get("empresa") or "nós"),
+                     "4": (empresa_lead or "sua empresa")}
         return wout.enviar_template(c, conta_id, numero, sid, variaveis)

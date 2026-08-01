@@ -5688,8 +5688,8 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 .mailp .f{padding:.5rem .8rem;border-top:1px solid var(--borda);font-size:.68rem;color:var(--mut)}
 .ck{display:flex;align-items:center;gap:.5rem;font-size:.83rem;padding:.22rem 0}
 .ck .dot{width:16px;height:16px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;font-size:.68rem}
-.ck.ok .dot{background:#10241a;border:1px solid #1e4a34;color:#3ddc84}
-.ck.no{color:var(--mut)}.ck.no .dot{background:#2a2113;border:1px solid #5a4520;color:#e0a33e}
+.ck.good .dot{background:#10241a;border:1px solid #1e4a34;color:#3ddc84}
+.ck.miss{color:var(--mut)}.ck.miss .dot{background:#2a2113;border:1px solid #5a4520;color:#e0a33e}
 /* passo */
 .passo{border:1px solid var(--borda);border-radius:10px;padding:.6rem .7rem;background:var(--bg)}
 .passo+.passo{margin-top:.55rem}
@@ -5900,9 +5900,9 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         <p class="desc">Sem exemplo ainda — adicione um passo na Sequência e um lead na campanha pra ver a prévia.</p>
         {% endif %}
         <div style="margin-top:1rem">
-          <div class="ck {% if passos %}ok{% else %}no{% endif %}"><span class="dot">{% if passos %}✓{% else %}!{% endif %}</span> Sequência com {{ passos|length }} passo(s)</div>
-          <div class="ck {% if na_camp %}ok{% else %}no{% endif %}"><span class="dot">{% if na_camp %}✓{% else %}!{% endif %}</span> {% if na_camp %}{{ na_camp }} lead(s) na campanha{% else %}Sem leads — mande da <b>Base</b> (Jogar na campanha){% endif %}</div>
-          <div class="ck {% if camp.material %}ok{% else %}no{% endif %}"><span class="dot">{% if camp.material %}✓{% else %}!{% endif %}</span> {% if camp.material %}Material configurado{% else %}Material não configurado{% endif %}</div>
+          <div class="ck {% if passos %}good{% else %}miss{% endif %}"><span class="dot">{% if passos %}✓{% else %}!{% endif %}</span> Sequência com {{ passos|length }} passo(s)</div>
+          <div class="ck {% if na_camp %}good{% else %}miss{% endif %}"><span class="dot">{% if na_camp %}✓{% else %}!{% endif %}</span> {% if na_camp %}{{ na_camp }} lead(s) na campanha{% else %}Sem leads — mande da <b>Base</b> (Jogar na campanha){% endif %}</div>
+          <div class="ck {% if camp.material %}good{% else %}miss{% endif %}"><span class="dot">{% if camp.material %}✓{% else %}!{% endif %}</span> {% if camp.material %}Material configurado{% else %}Material não configurado{% endif %}</div>
         </div>
         <div class="foot">
           <button type="button" class="pbtn ghost sm" onclick="secToggle('s3')">Fechar</button>

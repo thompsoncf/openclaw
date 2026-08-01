@@ -461,6 +461,46 @@ def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> i
     return feitos
 
 
+def engajou_lead(pool, prospeccao_id: int, motivo: str, alerta: bool = False) -> None:
+    """Sinal de engajamento (abriu e-mail, leu no WhatsApp). Registra na timeline e
+    esquenta a TEMPERATURA (frio→morno) — NUNCA mexe no estágio: abrir/ler não vira
+    lead (só responder/clicar promove). Com alerta=True, avisa o vendedor por e-mail
+    (usar só em sinais confiáveis, ex.: leitura no WhatsApp — abertura de e-mail é
+    ruidosa por causa do proxy de imagens do Gmail). Best-effort."""
+    conta_id = vendedor_id = None
+    empresa = ""
+    try:
+        with pool.connection() as c:
+            row = c.execute("""select conta_id, vendedor_id, coalesce(empresa,''),
+                                      coalesce(temperatura,'frio')
+                                 from prospeccao where id=%s""", (prospeccao_id,)).fetchone()
+            if not row:
+                return
+            conta_id, vendedor_id, empresa, temp = row
+            c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id, tipo, descricao)
+                         values (%s, null, 'engajamento', %s)""", (prospeccao_id, (motivo or "")[:400]))
+            if temp == "frio":
+                c.execute("update prospeccao set temperatura='morno', atualizado_em=now() where id=%s",
+                          (prospeccao_id,))
+            c.commit()
+    except Exception:  # noqa: BLE001
+        return
+    if alerta and vendedor_id:
+        try:
+            with pool.connection() as c:
+                mrow = c.execute("select coalesce(email,''), coalesce(nullif(nome,''),email) "
+                                 "from membros where id=%s and conta_id=%s",
+                                 (vendedor_id, conta_id)).fetchone()
+            email = ((mrow[0] if mrow else "") or "").strip()
+            if email and "@" in email:
+                from finance import email_sender as es
+                es.enviar_aviso(email, f"🔥 {empresa or 'Um lead'} {motivo}",
+                                f"{empresa or 'Um lead'} {motivo}. Pode ser uma boa hora pra chamar.",
+                                nome=(mrow[1] if mrow else None))
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _wa_marca(pool, aid, status, wa_sid=None):
     with pool.connection() as c:
         if wa_sid:

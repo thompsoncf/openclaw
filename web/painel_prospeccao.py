@@ -1869,6 +1869,52 @@ async def webhook_twilio(request: Request, background_tasks: BackgroundTasks):
     return Response("<Response></Response>", media_type="application/xml")
 
 
+# Twilio → status por mensagem (queued/sent/delivered/read/failed). Mapeia pro alvo
+# da campanha pelo SID de saída (wa_sid) e sobe o status sem deixar rebaixar por
+# callback fora de ordem (enviado < entregue < lido).
+_WA_STATUS_MAP = {"delivered": "entregue", "read": "lido",
+                  "sent": "enviado", "queued": "enviado", "sending": "enviado",
+                  "failed": "erro", "undelivered": "erro"}
+_WA_STATUS_RANK = {"enviado": 1, "entregue": 2, "lido": 3}
+
+
+@router.post("/webhooks/twilio-status")
+async def webhook_twilio_status(request: Request):
+    """StatusCallback do Twilio (entregue/lido/falhou) por mensagem de WhatsApp."""
+    from finance import whatsapp_twilio as wa
+    form = await request.form()
+    params = {k: str(v) for k, v in form.items()}
+    assinatura = request.headers.get("X-Twilio-Signature", "")
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+    if host:
+        proto = request.headers.get("x-forwarded-proto", "https")
+        url = f"{proto}://{host}{request.url.path}"
+    else:
+        url = wa.url_status() or str(request.url)
+    if not wa.validar_assinatura(url, params, assinatura):
+        return Response(status_code=403)
+    msid = params.get("MessageSid") or params.get("SmsSid") or ""
+    novo = _WA_STATUS_MAP.get((params.get("MessageStatus") or "").lower())
+    if msid and novo:
+        try:
+            with get_pool().connection() as c:
+                if novo == "erro":
+                    c.execute("""update campanha_alvos set wa_status='erro', wa_em=now()
+                                   where wa_sid=%s and coalesce(wa_status,'') not in ('entregue','lido')""",
+                              (msid,))
+                else:
+                    rank = _WA_STATUS_RANK[novo]
+                    c.execute("""update campanha_alvos set wa_status=%s, wa_em=now()
+                                   where wa_sid=%s
+                                     and coalesce(case wa_status when 'enviado' then 1 when 'entregue' then 2
+                                                                 when 'lido' then 3 else 0 end, 0) < %s""",
+                              (novo, msid, rank))
+                c.commit()
+        except Exception:  # noqa: BLE001
+            pass
+    return Response("", media_type="text/plain")
+
+
 def _descad_page(titulo: str, corpo: str) -> str:
     return (
         "<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'>"
@@ -2331,7 +2377,8 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                   "assunto": _cfmt(p0["assunto"] or "Uma ideia pra {empresa}", _ld),
                   "corpo": ("O agente escreve um e-mail único pra este lead — clique em “Gerar prévia com IA” "
                             "pra ver um exemplo." if p0["ia"] else _cfmt(p0["corpo"] or "", _ld))}
-    _WA_ROT = {"enviado": "💬 enviado", "erro": "💬 erro", "sem_numero": "💬 sem nº"}
+    _WA_ROT = {"enviado": "💬 enviado", "entregue": "✅ entregue", "lido": "👀 lido",
+               "erro": "💬 erro", "sem_numero": "💬 sem nº"}
     leads_l = [{"empresa": r[0], "email": r[1], "status": r[2], "passo": r[3],
                 "prox": r[4], "ult": r[5], "pid": r[6], "rot": _ALVO_ROT.get(r[2], r[2]),
                 "abriu": r[7], "aberto": r[8], "wa": r[9], "wa_rot": _WA_ROT.get(r[9], "")}

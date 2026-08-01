@@ -72,15 +72,17 @@ def _smtp_host(imap_host: str) -> str:
 
 def enviar_conta(pool, conta_id: int, destino: str, assunto: str, html: str,
                  texto_alt: str | None = None, from_nome: str | None = None,
-                 reply_to: str | None = None) -> bool:
+                 reply_to: str | None = None, list_unsub: str = "") -> bool:
     """Envia PELO e-mail da empresa (mesma senha de app do IMAP serve pro SMTP). Se a
     empresa não tem caixa própria, cai no SMTP global (enviar_email)."""
     from finance import email_sender as es
     cfg = _conta_cfg(pool, conta_id)
     if cfg:
         return es.enviar_com_creds(cfg["user"], cfg["senha"], _smtp_host(cfg["host"]), 587,
-                                   destino, assunto, html, texto_alt, from_nome, reply_to)
-    return es.enviar_email(destino, assunto, html, texto_alt, reply_to, from_nome)
+                                   destino, assunto, html, texto_alt, from_nome, reply_to,
+                                   list_unsub=list_unsub)
+    return es.enviar_email(destino, assunto, html, texto_alt, reply_to, from_nome,
+                           list_unsub=list_unsub)
 
 
 def salvar_config(pool, conta_id: int, endereco: str, senha: str, host: str = "") -> None:

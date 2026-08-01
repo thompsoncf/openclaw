@@ -52,9 +52,18 @@ def remetente_configurado() -> str | None:
     return os.environ.get("SMTP_USER") or None
 
 
+def _set_list_unsub(msg, list_unsub: str) -> None:
+    """Cabeçalhos de descadastro em 1 clique (RFC 8058). Grande sinal de
+    deliverability — Gmail/Yahoo exigem de quem manda em volume."""
+    u = (list_unsub or "").strip()
+    if u:
+        msg["List-Unsubscribe"] = f"<{u}>"
+        msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+
+
 def enviar_email(destino: str, assunto: str, html: str,
                  texto_alt: str | None = None, reply_to: str | None = None,
-                 from_nome: str | None = None) -> bool:
+                 from_nome: str | None = None, list_unsub: str = "") -> bool:
     """Envia um email (HTML + alternativa texto). Tolerante a falha: retorna
     True se enviou, False se faltou config / deu erro (sem levantar excecao).
 
@@ -72,6 +81,7 @@ def enviar_email(destino: str, assunto: str, html: str,
         msg["To"] = destino
         if reply_to:
             msg["Reply-To"] = reply_to
+        _set_list_unsub(msg, list_unsub)
         # parte texto (fallback) + parte html
         if texto_alt:
             msg.attach(MIMEText(texto_alt, "plain", "utf-8"))
@@ -91,7 +101,8 @@ def enviar_email(destino: str, assunto: str, html: str,
 
 def enviar_com_creds(user: str, senha: str, host: str, port: int, destino: str,
                      assunto: str, html: str, texto_alt: str | None = None,
-                     from_nome: str | None = None, reply_to: str | None = None) -> bool:
+                     from_nome: str | None = None, reply_to: str | None = None,
+                     list_unsub: str = "") -> bool:
     """Envia usando credenciais EXPLÍCITAS (SMTP da própria empresa) — o From é o
     `user`. Mesma tolerância a falha do enviar_email. Usado pelo envio por-conta."""
     if not (user and senha and destino):
@@ -103,6 +114,7 @@ def enviar_com_creds(user: str, senha: str, host: str, port: int, destino: str,
         msg["To"] = destino
         if reply_to:
             msg["Reply-To"] = reply_to
+        _set_list_unsub(msg, list_unsub)
         if texto_alt:
             msg.attach(MIMEText(texto_alt, "plain", "utf-8"))
         msg.attach(MIMEText(html, "html", "utf-8"))

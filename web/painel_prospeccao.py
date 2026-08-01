@@ -1957,6 +1957,21 @@ def descadastrar_do(request: Request, t: str = Form("")):
         f"<p>Feito! <b>{_h.escape(email)}</b> não vai mais receber nossos e-mails. Obrigado! 🙏</p>"))
 
 
+@router.post("/descadastrar-oc")
+async def descadastrar_oneclick(t: str = ""):
+    """Descadastro em 1 clique (List-Unsubscribe-Post, RFC 8058). O Gmail/Yahoo faz
+    POST aqui com o corpo 'List-Unsubscribe=One-Click'; a gente lê o token da URL,
+    registra e devolve 200. Sem login, idempotente."""
+    from finance.campanhas_motor import descad_verify, registrar_descadastro
+    conta_id, email = descad_verify(t)
+    if conta_id:
+        try:
+            registrar_descadastro(get_pool(), conta_id, email, t)
+        except Exception:  # noqa: BLE001
+            pass
+    return Response("", media_type="text/plain")
+
+
 # GIF transparente 1x1 (pixel de rastreio de abertura de e-mail)
 _PIXEL_GIF = base64.b64decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7")
 

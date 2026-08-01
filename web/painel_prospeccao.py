@@ -1920,6 +1920,94 @@ _PASSOS_PADRAO = [
      "Oi, {empresa}!\n\nÉ a última vez que passo por aqui 😊 Se fizer sentido, me chama no "
      "WhatsApp quando quiser — fica à vontade.", False),
 ]
+# ---- Biblioteca de modelos de sequência por nicho (ponto de partida frio) -------
+# A campanha COPIA (snapshot) os passos do modelo escolhido; depois é dona da própria
+# sequência. O dono ainda pode salvar os seus próprios modelos (tabela campanha_modelos).
+_MODELOS_BASE = [
+    {"codigo": "generico", "nome": "Genérico", "wa_texto": "", "passos": [
+        {"dias": 0, "assunto": "Uma ideia pra {empresa}", "corpo": "", "ia": True},
+        {"dias": 3, "assunto": "Só reforçando — vale 2 min?",
+         "corpo": "Oi, {empresa}!\n\nSemana passada te mandei uma ideia rápida pra atender melhor sem "
+                  "aumentar a equipe. Vale 2 minutinhos essa semana pra eu te mostrar?", "ia": False},
+        {"dias": 7, "assunto": "Fecho por aqui 👋",
+         "corpo": "Oi, {empresa}!\n\nÉ a última vez que passo por aqui 😊 Se fizer sentido, me chama no "
+                  "WhatsApp quando quiser — fica à vontade.", "ia": False},
+    ]},
+    {"codigo": "petshop", "nome": "Pet shop · Banho & tosa", "wa_texto": "", "passos": [
+        {"dias": 0, "assunto": "Mais banho & tosa na agenda da {empresa}?",
+         "corpo": "Oi, {empresa}! 🐾\n\nAjudo pet shops de {cidade} a encher a agenda de banho & tosa e a "
+                  "fazer o tutor voltar sempre (lembrete automático da próxima vez, retorno com desconto…).\n\n"
+                  "Posso te mostrar em 2 minutinhos como ficaria aí?", "ia": False},
+        {"dias": 3, "assunto": "Lembrete que traz o cliente de volta",
+         "corpo": "Oi, {empresa}!\n\nSó reforçando: dá pra avisar o tutor sozinho quando chega a hora do "
+                  "próximo banho — enche a agenda sem esforço. Vale 2 min essa semana?", "ia": False},
+        {"dias": 7, "assunto": "Fecho por aqui 🐶",
+         "corpo": "Oi, {empresa}! É a última vez que passo por aqui 😊 Se quiser ver como fica, me chama no "
+                  "WhatsApp quando puder.", "ia": False},
+    ]},
+    {"codigo": "frutaria", "nome": "Frutaria · Hortifruti", "wa_texto": "", "passos": [
+        {"dias": 0, "assunto": "Menos perda e mais giro na {empresa}",
+         "corpo": "Oi, {empresa}! 🍎\n\nAjudo hortifrutis de {cidade} a perder menos (controle do que sai e "
+                  "do que está vencendo) e a acertar o preço no dia certo pra girar mais rápido.\n\n"
+                  "Posso te mostrar em 2 minutinhos como funcionaria aí?", "ia": False},
+        {"dias": 3, "assunto": "Controle rápido pra não perder fruta",
+         "corpo": "Oi, {empresa}!\n\nSó reforçando: dá pra ver na hora o que está saindo e o que precisa "
+                  "vender hoje pra não perder. Vale 2 min essa semana?", "ia": False},
+        {"dias": 7, "assunto": "Fecho por aqui 🍊",
+         "corpo": "Oi, {empresa}! Última vez que passo por aqui 😊 Se fizer sentido, me chama no WhatsApp "
+                  "quando quiser.", "ia": False},
+    ]},
+    {"codigo": "clinica", "nome": "Clínica · Consultório", "wa_texto": "", "passos": [
+        {"dias": 0, "assunto": "Agenda mais cheia na {empresa}",
+         "corpo": "Oi, {empresa}! 🦷\n\nAjudo clínicas de {cidade} a reduzir faltas (confirmação automática) e "
+                  "a reativar pacientes antigos — a agenda enche sem depender só de indicação.\n\n"
+                  "Posso te mostrar em 2 minutinhos como ficaria aí?", "ia": False},
+        {"dias": 3, "assunto": "Menos falta, agenda cheia",
+         "corpo": "Oi, {empresa}!\n\nSó reforçando: confirmação automática e retorno de paciente antigo "
+                  "costumam encher a agenda rápido. Vale 2 min essa semana pra eu te mostrar?", "ia": False},
+        {"dias": 7, "assunto": "Fecho por aqui 😊",
+         "corpo": "Oi, {empresa}! É a última vez que passo por aqui. Se quiser ver como fica, me chama no "
+                  "WhatsApp quando puder.", "ia": False},
+    ]},
+]
+_MODELOS_BASE_COD = {m["codigo"] for m in _MODELOS_BASE}
+
+
+def _slug_modelo(s: str) -> str:
+    import re
+    import unicodedata
+    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode()
+    s = re.sub(r"[^A-Za-z0-9]+", "-", s).strip("-").lower()
+    return s[:40] or "modelo"
+
+
+def _modelos_lista(c, conta_id) -> list:
+    """Modelos disponíveis pro dropdown: os do dono (override) + os base."""
+    user = c.execute("select codigo, nome from campanha_modelos where conta_id=%s order by nome",
+                     (conta_id,)).fetchall()
+    ucod = {r[0] for r in user}
+    out = [{"codigo": m["codigo"], "nome": m["nome"], "origem": "base"}
+           for m in _MODELOS_BASE if m["codigo"] not in ucod]
+    out += [{"codigo": r[0], "nome": r[1], "origem": "meu"} for r in user]
+    return out
+
+
+def _modelo_passos(c, conta_id, codigo) -> list | None:
+    """Passos de um modelo (do dono primeiro; senão o base). None se não existir."""
+    row = c.execute("select passos from campanha_modelos where conta_id=%s and codigo=%s",
+                    (conta_id, codigo)).fetchone()
+    if row:
+        p = row[0]
+        if isinstance(p, str):
+            import json
+            p = json.loads(p or "[]")
+        return p or []
+    for m in _MODELOS_BASE:
+        if m["codigo"] == codigo:
+            return m["passos"]
+    return None
+
+
 _STATUS_ROT_CP = {"rascunho": "✎ Rascunho", "ativa": "● Ativa",
                   "pausada": "❚❚ Pausada", "concluida": "✓ Concluída"}
 _ALVO_ROT = {"fila": "Na fila", "enviado": "Em sequência", "respondeu": "Respondeu ✓",
@@ -2003,7 +2091,8 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
     with get_pool().connection() as c:
         cp = c.execute("""select id, nome, status, limite_dia, coalesce(enviados_hoje,0), dia_contagem,
                                  coalesce(material,''), coalesce(wa_ativo,false), coalesce(limite_wa_dia,30),
-                                 coalesce(wa_enviados_hoje,0), wa_dia_contagem, coalesce(material_tipo,'link')
+                                 coalesce(wa_enviados_hoje,0), wa_dia_contagem, coalesce(material_tipo,'link'),
+                                 coalesce(modelo_codigo,'')
                             from campanhas where id=%s and conta_id=%s""",
                        (camp_id, ctx["conta_id"])).fetchone()
         if not cp:
@@ -2042,10 +2131,12 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
         wa_enviados = c.execute(
             "select count(*) from campanha_alvos where campanha_id=%s and wa_status='enviado'",
             (camp_id,)).fetchone()[0]
+        modelos = _modelos_lista(c, ctx["conta_id"])
     camp = {"id": cp[0], "nome": cp[1], "status": cp[2], "limite": cp[3],
             "status_rot": _STATUS_ROT_CP.get(cp[2], cp[2]), "material": cp[6],
             "wa_ativo": cp[7], "limite_wa": cp[8], "wa_hoje": wa_hoje, "wa_enviados": wa_enviados,
-            "wa_pronto": _prospec_convite.template_configurado(), "material_tipo": cp[11]}
+            "wa_pronto": _prospec_convite.template_configurado(), "material_tipo": cp[11],
+            "modelo_codigo": cp[12]}
     metr = {"total": na_camp, "fila": st.get("fila", 0), "enviados": enviados, "responderam": resp,
             "descadastros": st.get("descadastrou", 0), "erros": st.get("erro", 0),
             "concluidos": st.get("concluido", 0), "hoje": hoje,
@@ -2068,7 +2159,8 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
     return _render("prospeccao_campanha", request, titulo=camp["nome"], secao_ativa="prospeccao",
                    camp=camp, passos=passos_l, elegiveis=eleg, na_camp=na_camp, st=st, metr=metr,
                    leads=leads_l, previa=previa, cadencia=cadencia, remetente=remetente_configurado(),
-                   seg=seg, cidade=cidade, temp=temp, aviso=request.session.pop("prosp_aviso", None))
+                   modelos=modelos, seg=seg, cidade=cidade, temp=temp,
+                   aviso=request.session.pop("prosp_aviso", None))
 
 
 @router.post("/painel/prospeccao/campanhas/{camp_id}/publico")
@@ -2170,6 +2262,66 @@ def prospeccao_campanha_remover_lead(request: Request, camp_id: int, prospeccao_
                       (camp_id, pid)).rowcount
         c.commit()
     return JSONResponse({"ok": True, "removidos": n})
+
+
+@router.post("/painel/prospeccao/campanhas/{camp_id}/usar-modelo")
+def prospeccao_campanha_usar_modelo(request: Request, camp_id: int, codigo: str = Form("")):
+    """Copia (snapshot) os passos do modelo escolhido pra sequência da campanha."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    codigo = (codigo or "").strip()
+    with get_pool().connection() as c:
+        if not _campanha_dona(c, ctx["conta_id"], camp_id):
+            return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+        passos = _modelo_passos(c, ctx["conta_id"], codigo)
+        if passos is None:
+            return JSONResponse({"ok": False, "erro": "modelo"}, status_code=404)
+        c.execute("delete from campanha_passos where campanha_id=%s", (camp_id,))
+        for ordem, p in enumerate(passos):
+            c.execute("""insert into campanha_passos (campanha_id, ordem, dias_apos, assunto, corpo, usar_ia)
+                         values (%s,%s,%s,%s,%s,%s)""",
+                      (camp_id, ordem, max(0, min(120, int(p.get("dias") or 0))),
+                       (p.get("assunto") or "").strip()[:300], (p.get("corpo") or "").strip()[:8000],
+                       bool(p.get("ia"))))
+        c.execute("update campanhas set modelo_codigo=%s, atualizado_em=now() where id=%s and conta_id=%s",
+                  (codigo, camp_id, ctx["conta_id"]))
+        c.commit()
+    return JSONResponse({"ok": True, "codigo": codigo})
+
+
+@router.post("/painel/prospeccao/campanhas/{camp_id}/salvar-modelo")
+def prospeccao_campanha_salvar_modelo(request: Request, camp_id: int, nome: str = Form("")):
+    """Salva a sequência atual da campanha como um modelo do dono (reutilizável)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    nome = (nome or "").strip()[:80]
+    if not nome:
+        return JSONResponse({"ok": False, "erro": "nome"}, status_code=400)
+    codigo = _slug_modelo(nome)
+    if codigo in _MODELOS_BASE_COD:
+        codigo += "-meu"          # não sombreia um modelo base
+    import json
+    with get_pool().connection() as c:
+        if not _campanha_dona(c, ctx["conta_id"], camp_id):
+            return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+        rows = c.execute("""select dias_apos, assunto, corpo, usar_ia from campanha_passos
+                             where campanha_id=%s order by ordem""", (camp_id,)).fetchall()
+        arr = [{"dias": r[0], "assunto": r[1], "corpo": r[2], "ia": bool(r[3])} for r in rows]
+        c.execute("""insert into campanha_modelos (conta_id, codigo, nome, passos)
+                       values (%s,%s,%s,%s::jsonb)
+                     on conflict (conta_id, codigo) do update
+                       set nome=excluded.nome, passos=excluded.passos, atualizado_em=now()""",
+                  (ctx["conta_id"], codigo, nome, json.dumps(arr)))
+        c.execute("update campanhas set modelo_codigo=%s where id=%s and conta_id=%s",
+                  (codigo, camp_id, ctx["conta_id"]))
+        c.commit()
+    return JSONResponse({"ok": True, "codigo": codigo, "nome": nome})
 
 
 @router.post("/painel/prospeccao/campanhas/{camp_id}/status")
@@ -5241,6 +5393,15 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         <header><span class="idx">2</span><h3>Sequência</h3><span class="grow"></span>
           <button type="button" class="pbtn ghost sm" onclick="addPasso()">＋ Passo</button><button class="pbtn sm">Salvar</button></header>
         <p class="desc"><b>D+</b> = dias após o 1º e-mail (0 = primeiro). <b>🤖 IA</b> escreve único por lead; <b>Template</b> usa o texto (<code>{empresa}</code>, <code>{cidade}</code>, <code>{segmento}</code>).</p>
+        <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.8rem;padding:.5rem .6rem;border:1px solid var(--borda);border-radius:10px;background:var(--bg)">
+          <label class="lbl" style="margin:0">📋 Modelo por nicho:</label>
+          <select class="fld" id="modelo-sel" style="width:auto">
+            {% for m in modelos %}<option value="{{ m.codigo }}" {% if m.codigo==camp.modelo_codigo %}selected{% endif %}>{{ m.nome }}{% if m.origem=='meu' %} (meu){% endif %}</option>{% endfor %}
+          </select>
+          <button type="button" class="pbtn ghost sm" onclick="aplicarModelo({{ camp.id }})">Aplicar à sequência</button>
+          <span style="flex:1"></span>
+          <button type="button" class="pbtn ghost sm" onclick="salvarModelo({{ camp.id }})" title="Salvar a sequência atual como um modelo seu, reutilizável">💾 Salvar como modelo</button>
+        </div>
         <div id="passos">
           {% for p in passos %}
           <div class="passo">
@@ -5345,6 +5506,26 @@ function novoPasso(){return '<div class="passo"><div class="prow"><span class="d
   +'<span style="flex:1"></span><button type="button" class="pbtn ghost sm" onclick="remPasso(this)" title="Remover passo">✕</button></div>'
   +'<input class="fld" name="assunto" placeholder="Assunto do e-mail" style="margin-top:.45rem">'
   +'<textarea class="fld" name="corpo" rows="3" placeholder="Texto do e-mail (use {empresa}, {cidade})" style="margin-top:.45rem"></textarea></div>';}
+function aplicarModelo(id){
+  var sel=document.getElementById('modelo-sel');var cod=sel.value,nome=sel.options[sel.selectedIndex].text;
+  if(!confirm('Aplicar o modelo "'+nome+'"? Isso substitui a sequência atual (você ainda pode editar e salvar).'))return;
+  var body=new URLSearchParams();body.append('codigo',cod);
+  fetch('/painel/prospeccao/campanhas/'+id+'/usar-modelo',{method:'POST',headers:{'X-Requested-With':'fetch','Content-Type':'application/x-www-form-urlencoded'},body:body})
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){alert('Não consegui aplicar ('+(d.erro||'?')+').');return;}
+      location.reload();
+    }).catch(function(){alert('Falha de rede.');});
+}
+function salvarModelo(id){
+  var nome=prompt('Nome do modelo (ex.: Pet shop · meu jeito):');
+  if(!nome||!nome.trim())return;
+  var body=new URLSearchParams();body.append('nome',nome.trim());
+  fetch('/painel/prospeccao/campanhas/'+id+'/salvar-modelo',{method:'POST',headers:{'X-Requested-With':'fetch','Content-Type':'application/x-www-form-urlencoded'},body:body})
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){alert('Não consegui salvar ('+(d.erro||'?')+').');return;}
+      alert('Modelo salvo ✓ — já aparece na lista.');location.reload();
+    }).catch(function(){alert('Falha de rede.');});
+}
 function addPasso(){document.getElementById('passos').insertAdjacentHTML('beforeend',novoPasso());}
 function remPasso(b){var ps=document.querySelectorAll('#passos .passo');if(ps.length<=1){alert('Deixe ao menos 1 passo.');return;}b.closest('.passo').remove();}
 function previaIA(id){var b=document.getElementById('pia-btn');if(b){b.disabled=true;b.textContent='Gerando…';}

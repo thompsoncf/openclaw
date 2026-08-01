@@ -72,6 +72,31 @@ def interesse_verify(token: str):
     return None, None, None
 
 
+# ------------------------------------------------------------ material (link rastreado)
+# O botão de material (PDF/foto/vídeo/link) não pode apontar direto pro arquivo —
+# senão a gente nunca sabe se o lead realmente abriu. Esse token faz o link passar
+# pela rota /material antes de redirecionar, logando o evento "baixou".
+
+def material_token(conta_id: int, prospeccao_id: int, campanha_id: int) -> str:
+    raw = f"{conta_id}:{prospeccao_id}:{campanha_id}"
+    sig = hmac.new(_seg(), ("mat:" + raw).encode(), hashlib.sha256).hexdigest()[:16]
+    return base64.urlsafe_b64encode(f"{raw}:{sig}".encode()).decode().rstrip("=")
+
+
+def material_verify(token: str):
+    try:
+        pad = token + "=" * (-len(token) % 4)
+        s = base64.urlsafe_b64decode(pad.encode()).decode()
+        conta_id, pid, camp_id, sig = s.rsplit(":", 3)
+        good = hmac.new(_seg(), f"mat:{conta_id}:{pid}:{camp_id}".encode(),
+                        hashlib.sha256).hexdigest()[:16]
+        if hmac.compare_digest(good, sig):
+            return int(conta_id), int(pid), int(camp_id)
+    except Exception:  # noqa: BLE001
+        pass
+    return None, None, None
+
+
 # --------------------------------------------------- abertura (pixel de rastreio)
 
 def abrir_token(conta_id: int, prospeccao_id: int, campanha_id: int) -> str:
@@ -837,18 +862,20 @@ def registrar_interesse(pool, conta_id: int, prospeccao_id: int, campanha_id: in
     # (clique repetido/pré-carga não reenvia)
     enviado = False
     if email and "@" in email and not repetido:
+        material_link = (_app_url() + "/material?t=" + material_token(conta_id, prospeccao_id, campanha_id)
+                          + "&canal=email") if material else ""
         corpo = (f"Que bom, {empresa or 'tudo bem'}! 🎉\n\n"
                  + ("Preparei um material pra você conhecer melhor a gente — é só abrir no botão abaixo.\n\n"
                     if material else "")
                  + "Posso te mostrar em 2 minutinhos como fica aí? É só responder este e-mail. 😊")
         assunto = "Seu material — " + (conta_nome or "ZAQ")
-        texto_alt = corpo + (f"\n\nMaterial: {material}" if material else "") + "\n\n" + _assinatura_texto(idn)
+        texto_alt = corpo + (f"\n\nMaterial: {material_link}" if material else "") + "\n\n" + _assinatura_texto(idn)
         try:
             from finance import email_inbound as _ein
             enviado = _ein.enviar_conta(pool, conta_id, email, assunto,
                                         _html(corpo, {"whatsapp": None}, idn,
                                               _app_url() + "/descadastrar?t=" + descad_token(conta_id, email),
-                                              material_url=material, material_tipo=material_tipo),
+                                              material_url=material_link, material_tipo=material_tipo),
                                         texto_alt=texto_alt,
                                         from_nome=(conta_nome or None), canal=canal_rem)
         except Exception:  # noqa: BLE001

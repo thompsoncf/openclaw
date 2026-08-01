@@ -1829,13 +1829,16 @@ def _tratar_botao_prospec(c, conta_id, remetente, tipo, texto, sid, nome) -> boo
     idn = _conta_identidade(c, conta_id)
     material = ""
     if tipo == "material":
+        from finance.campanhas_motor import material_token, _app_url as _mat_app_url
         mrow = c.execute(
-            """select coalesce(cp.material,'') from campanha_alvos a
+            """select coalesce(cp.material,''), cp.id from campanha_alvos a
                  join campanhas cp on cp.id=a.campanha_id
                 where a.prospeccao_id=%s and cp.conta_id=%s and coalesce(cp.material,'')<>''
                 order by cp.criado_em desc limit 1""", (lead_id, conta_id)).fetchone()
-        material = mrow[0] if mrow else ""
-        if not material:      # fora de campanha → material padrão da conta (fallback)
+        if mrow and mrow[0]:
+            material = (_mat_app_url() + "/material?t=" + material_token(conta_id, lead_id, mrow[1])
+                        + "&canal=whatsapp")
+        else:                  # fora de campanha → material padrão da conta (fallback, sem tracking)
             drow = c.execute("select coalesce(prospec_material,'') from contas where id=%s",
                              (conta_id,)).fetchone()
             material = (drow[0] if drow else "") or ""
@@ -2101,6 +2104,30 @@ def tenho_interesse(request: Request, t: str = ""):
     return HTMLResponse(_descad_page("Recebemos! 🎉",
         "<p>Obrigado pelo interesse! Acabamos de te enviar um material por e-mail e "
         "já vamos falar com você. 😊</p>"))
+
+
+@router.get("/material")
+def abrir_material(t: str = "", canal: str = "email"):
+    """Link rastreado do material (PDF/foto/vídeo/link) mandado por e-mail ou
+    WhatsApp: loga o evento 'baixou' no histórico da campanha e manda o lead pro
+    arquivo/link de verdade. Página pública (sem login) — é o que o lead clica."""
+    from finance.campanhas_motor import material_verify, evento as _ev
+    conta_id, pid, camp_id = material_verify(t)
+    if not conta_id:
+        return HTMLResponse(_descad_page("Link inválido", "<p>Esse link não é válido ou expirou.</p>"),
+                            status_code=400)
+    with get_pool().connection() as c:
+        row = c.execute("select coalesce(material,'') from campanhas where id=%s and conta_id=%s",
+                        (camp_id, conta_id)).fetchone()
+        url = (row[0] if row else "") or ""
+        if url:
+            _ev(c, camp_id, pid, canal if canal in ("email", "whatsapp") else "email", "baixou")
+            c.commit()
+    if not url:
+        return HTMLResponse(_descad_page("Material indisponível",
+            "<p>Esse material não está mais disponível — chama a gente que a "
+            "gente te manda de novo.</p>"), status_code=404)
+    return RedirectResponse(url, status_code=302)
 
 
 def _conta_por_meta(c, plataforma, ident):
@@ -2530,8 +2557,8 @@ def prospeccao_campanha_historico(request: Request, camp_id: int, pid: int):
                  from campanha_eventos where campanha_id=%s and prospeccao_id=%s
                 order by quando asc, id asc""", (camp_id, pid)).fetchall()
     _rot = {"enviado": "Enviado", "aberto": "Abriu 👁", "entregue": "Entregue ✓✓", "lido": "Leu 👀",
-            "respondeu": "Respondeu 🔥", "clicou": "Clicou", "bounce": "Retornou (inválido) ⚠",
-            "erro": "Falhou ⚠", "descadastrou": "Descadastrou"}
+            "respondeu": "Respondeu 🔥", "clicou": "Clicou", "baixou": "Abriu o material 📎",
+            "bounce": "Retornou (inválido) ⚠", "erro": "Falhou ⚠", "descadastrou": "Descadastrou"}
     email = [{"rot": _rot.get(e, e), "detalhe": d, "quando": q} for (cn, e, d, q) in rows if cn == "email"]
     wpp = [{"rot": _rot.get(e, e), "detalhe": d, "quando": q} for (cn, e, d, q) in rows if cn == "whatsapp"]
     return JSONResponse({"ok": True, "email": email, "whatsapp": wpp})

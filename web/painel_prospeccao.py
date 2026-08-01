@@ -2357,7 +2357,8 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
         cp = c.execute("""select id, nome, status, limite_dia, coalesce(enviados_hoje,0), dia_contagem,
                                  coalesce(material,''), coalesce(wa_ativo,false), coalesce(limite_wa_dia,30),
                                  coalesce(wa_enviados_hoje,0), wa_dia_contagem, coalesce(material_tipo,'link'),
-                                 coalesce(modelo_codigo,''), coalesce(wa_template_sid,'')
+                                 coalesce(modelo_codigo,''), coalesce(wa_template_sid,''),
+                                 coalesce(reengajar_ativo,false), coalesce(reengajar_dias,3)
                             from campanhas where id=%s and conta_id=%s""",
                        (camp_id, ctx["conta_id"])).fetchone()
         if not cp:
@@ -2411,7 +2412,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
             "wa_ativo": cp[7], "limite_wa": cp[8], "wa_hoje": wa_hoje, "wa_enviados": wa_enviados,
             "wa_template_sid": cp[13],
             "wa_pronto": _prospec_convite.template_configurado(cp[13]), "material_tipo": cp[11],
-            "modelo_codigo": cp[12]}
+            "modelo_codigo": cp[12], "reengajar_ativo": cp[14], "reengajar_dias": cp[15]}
     metr = {"total": na_camp, "fila": st.get("fila", 0), "enviados": enviados, "responderam": resp,
             "descadastros": st.get("descadastrou", 0), "erros": st.get("erro", 0),
             "concluidos": st.get("concluido", 0), "hoje": hoje, "abriram": abriram,
@@ -2515,6 +2516,11 @@ async def prospeccao_campanha_config(request: Request, camp_id: int):
         lim_wa = 30
     wa_on = str(form.get("wa_ativo") or "").strip().lower() in ("1", "on", "true", "sim")
     wa_sid = (form.get("wa_template_sid") or "").strip()[:64]
+    reeng_on = str(form.get("reengajar_ativo") or "").strip().lower() in ("1", "on", "true", "sim")
+    try:
+        reeng_dias = max(1, min(30, int(form.get("reengajar_dias") or 3)))
+    except (ValueError, TypeError):
+        reeng_dias = 3
     tipo = (form.get("material_tipo") or "link").strip().lower()
     if tipo not in ("link", "video", "pdf", "foto"):
         tipo = "link"
@@ -2538,16 +2544,17 @@ async def prospeccao_campanha_config(request: Request, camp_id: int):
         if material is None:
             c.execute("""update campanhas set nome=coalesce(nullif(%s,''),nome), limite_dia=%s,
                            material_tipo=%s, wa_ativo=%s, limite_wa_dia=%s, wa_template_sid=%s,
-                           atualizado_em=now()
+                           reengajar_ativo=%s, reengajar_dias=%s, atualizado_em=now()
                          where id=%s and conta_id=%s""",
-                      (nome[:120], lim, tipo, wa_on, lim_wa, (wa_sid or None), camp_id, ctx["conta_id"]))
+                      (nome[:120], lim, tipo, wa_on, lim_wa, (wa_sid or None),
+                       reeng_on, reeng_dias, camp_id, ctx["conta_id"]))
         else:
             c.execute("""update campanhas set nome=coalesce(nullif(%s,''),nome), limite_dia=%s,
                            material=%s, material_tipo=%s, wa_ativo=%s, limite_wa_dia=%s,
-                           wa_template_sid=%s, atualizado_em=now()
+                           wa_template_sid=%s, reengajar_ativo=%s, reengajar_dias=%s, atualizado_em=now()
                          where id=%s and conta_id=%s""",
                       (nome[:120], lim, material, tipo, wa_on, lim_wa, (wa_sid or None),
-                       camp_id, ctx["conta_id"]))
+                       reeng_on, reeng_dias, camp_id, ctx["conta_id"]))
         c.commit()
     request.session["prosp_aviso"] = "Configuração salva ✓"
     return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
@@ -5785,6 +5792,15 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
           <div><label class="lbl">WhatsApp/dia</label><input class="fld" name="limite_wa_dia" value="{{ camp.limite_wa }}" inputmode="numeric" style="width:90px"></div>
         </div>
         <div class="mut" style="font-size:.74rem;margin-top:.3rem">Mira o <b>decisor</b> (Credify pelo CNPJ, ⭐ número dele); sem decisor, usa o melhor número captado. Lead sem número recebe só o e-mail.</div>
+
+        <div class="divi"></div>
+        <label class="lbl" style="font-size:.82rem">🔁 Follow-up automático (reengajamento)</label>
+        <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-top:.3rem">
+          <label class="chk"><input type="checkbox" name="reengajar_ativo" value="1" {% if camp.reengajar_ativo %}checked{% endif %}> <span>Reengajar quem não respondeu</span></label>
+          <div><label class="lbl">após (dias)</label><input class="fld" name="reengajar_dias" value="{{ camp.reengajar_dias }}" inputmode="numeric" style="width:80px"></div>
+        </div>
+        <div class="mut" style="font-size:.74rem;margin-top:.3rem">Quem recebeu a sequência e <b>não respondeu</b> em X dias leva <b>1 toque pelo outro canal</b>: WhatsApp (se ativo + número), senão um e-mail curto de reforço. Dispara <b>uma vez</b>, respeita o limite/dia e para quando o lead responde ou descadastra.</div>
+
         <div style="margin-top:.8rem;display:flex;gap:.5rem;flex-wrap:wrap">
           <button class="pbtn">Salvar configuração</button>
           <button class="pbtn ghost" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/excluir" formmethod="post" formnovalidate style="color:#e0574f;border-color:#5c2a27" onclick="return confirm('Excluir a campanha? Os leads voltam pro funil.')">🗑 Excluir</button>

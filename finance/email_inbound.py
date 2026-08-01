@@ -251,6 +251,11 @@ def _tratar_bounce(c, conta_id: int, m: dict) -> int:
         c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id, tipo, descricao)
                      values (%s, null, 'bounce', 'E-mail retornou (inválido) — sequência parada')""",
                   (lead_id,))
+        try:
+            from finance.campanhas_motor import evento as _ev, _campanha_do_lead as _cdl
+            _ev(c, _cdl(c, lead_id), lead_id, "email", "bounce")
+        except Exception:  # noqa: BLE001
+            pass
         n += 1
     if n:
         c.commit()
@@ -322,6 +327,11 @@ def sincronizar(pool, conta_id: int) -> int:
                                    status=case when estagio='base' then 'novo' else status end,
                                    atualizado_em=now() where id=%s and conta_id=%s""",
                               (lead_id, conta_id))
+                    try:
+                        from finance.campanhas_motor import evento as _ev, _campanha_do_lead as _cdl
+                        _ev(c, _cdl(c, lead_id), lead_id, "email", "respondeu")
+                    except Exception:  # noqa: BLE001
+                        pass
                 c.commit()
                 n += 1
         except Exception as e:  # noqa: BLE001 (corrida no índice único etc.)

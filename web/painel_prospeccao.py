@@ -1795,6 +1795,10 @@ def _tratar_botao_prospec(c, conta_id, remetente, tipo, texto, sid, nome) -> boo
                  values (%s,'whatsapp','out','bot',%s,%s,%s)""",
               (conv_id, txt[:8000], _res.get("sid"), "enviado" if _res.get("sid") else None))
     c.execute("update conversas set ultima_msg_em=now() where id=%s", (conv_id,))
+    from finance.campanhas_motor import evento as _ev, _campanha_do_lead as _cdl
+    _rot_btn = {"conhecer": "Quero te conhecer", "material": "Quero o material", "nao": "Agora não"}
+    _ev(c, _cdl(c, lead_id), lead_id, "whatsapp",
+        "respondeu" if tipo != "nao" else "clicou", _rot_btn.get(tipo, tipo))
     return True
 
 
@@ -1917,12 +1921,16 @@ async def webhook_twilio_status(request: Request):
                     cur = c.execute("""update campanha_alvos set wa_status=%s, wa_em=now()
                                    where wa_sid=%s and coalesce(case wa_status
                                      when 'enviado' then 1 when 'entregue' then 2 when 'lido' then 3
-                                     else 0 end, 0) < %s returning prospeccao_id""", (novo, msid, rank))
+                                     else 0 end, 0) < %s returning prospeccao_id, campanha_id""",
+                                    (novo, msid, rank))
                     _transicao = cur.fetchone()
                     c.execute("""update mensagens set status=%s
                                    where provider_sid=%s and coalesce(case status
                                      when 'enviado' then 1 when 'entregue' then 2 when 'lido' then 3
                                      else 0 end, 0) < %s""", (novo, msid, rank))
+                    if _transicao:
+                        from finance.campanhas_motor import evento
+                        evento(c, _transicao[1], _transicao[0], "whatsapp", novo)
                     c.commit()
                     # leu no WhatsApp (sinal confiável) → esquenta + avisa o vendedor
                     if novo == "lido" and _transicao:
@@ -2009,6 +2017,9 @@ def email_pixel(t: str = ""):
                 primeira = c.execute("""update campanha_alvos set aberto_em=now()
                                           where campanha_id=%s and prospeccao_id=%s and aberto_em is null
                                           returning 1""", (camp_id, pid)).fetchone()
+                if primeira:
+                    from finance.campanhas_motor import evento
+                    evento(c, camp_id, pid, "email", "aberto")
                 c.commit()
             if primeira:   # 1ª abertura → timeline + esquenta (sem alerta: Gmail infla abertura)
                 from finance.campanhas_motor import engajou_lead
@@ -2387,10 +2398,14 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
     hoje = cp[4] if cp[5] == _date.today() else 0
     wa_hoje = cp[9] if cp[10] == _date.today() else 0
     with get_pool().connection() as c:
-        wa_enviados = c.execute(
-            "select count(*) from campanha_alvos where campanha_id=%s and wa_status='enviado'",
-            (camp_id,)).fetchone()[0]
+        wa_counts = dict(c.execute(
+            "select wa_status, count(*) from campanha_alvos where campanha_id=%s and wa_status is not null group by wa_status",
+            (camp_id,)).fetchall())
         modelos = _modelos_lista(c, ctx["conta_id"])
+    wa_enviados = sum(wa_counts.values())                                   # mandados (qualquer status)
+    wa_entregues = wa_counts.get("entregue", 0) + wa_counts.get("lido", 0)  # entregou (ou já leu)
+    wa_lidos = wa_counts.get("lido", 0)
+    wa_erros = wa_counts.get("erro", 0)
     camp = {"id": cp[0], "nome": cp[1], "status": cp[2], "limite": cp[3],
             "status_rot": _STATUS_ROT_CP.get(cp[2], cp[2]), "material": cp[6],
             "wa_ativo": cp[7], "limite_wa": cp[8], "wa_hoje": wa_hoje, "wa_enviados": wa_enviados,
@@ -2401,7 +2416,11 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
             "descadastros": st.get("descadastrou", 0), "erros": st.get("erro", 0),
             "concluidos": st.get("concluido", 0), "hoje": hoje, "abriram": abriram,
             "taxa": (round(100 * resp / enviados) if enviados else 0),
-            "taxa_abertura": (round(100 * abriram / enviados) if enviados else 0)}
+            "taxa_abertura": (round(100 * abriram / enviados) if enviados else 0),
+            "wa_enviados": wa_enviados, "wa_entregues": wa_entregues, "wa_lidos": wa_lidos,
+            "wa_erros": wa_erros,
+            "wa_taxa_entrega": (round(100 * wa_entregues / wa_enviados) if wa_enviados else 0),
+            "wa_taxa_leitura": (round(100 * wa_lidos / wa_enviados) if wa_enviados else 0)}
     passos_l = [{"dias": p[1], "assunto": p[2], "corpo": p[3], "ia": p[4]} for p in passos]
     from finance.campanhas_motor import _fmt as _cfmt
     cadencia = " · ".join("D" + str(p["dias"]) for p in passos_l) or "—"
@@ -2426,6 +2445,29 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                    leads=leads_l, previa=previa, cadencia=cadencia, remetente=remetente_configurado(),
                    modelos=modelos, seg=seg, cidade=cidade, temp=temp,
                    aviso=request.session.pop("prosp_aviso", None))
+
+
+@router.get("/painel/prospeccao/campanhas/{camp_id}/lead/{pid}/historico")
+def prospeccao_campanha_historico(request: Request, camp_id: int, pid: int):
+    """Linha do tempo de um lead na campanha, separada por canal (📧 / 💬)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    with get_pool().connection() as c:
+        if not c.execute("select 1 from campanhas where id=%s and conta_id=%s",
+                         (camp_id, ctx["conta_id"])).fetchone():
+            return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+        rows = c.execute(
+            """select canal, evento, coalesce(detalhe,''),
+                      to_char(quando - interval '3 hours','DD/MM HH24:MI')
+                 from campanha_eventos where campanha_id=%s and prospeccao_id=%s
+                order by quando asc, id asc""", (camp_id, pid)).fetchall()
+    _rot = {"enviado": "Enviado", "aberto": "Abriu 👁", "entregue": "Entregue ✓✓", "lido": "Leu 👀",
+            "respondeu": "Respondeu 🔥", "clicou": "Clicou", "bounce": "Retornou (inválido) ⚠",
+            "erro": "Falhou ⚠", "descadastrou": "Descadastrou"}
+    email = [{"rot": _rot.get(e, e), "detalhe": d, "quando": q} for (cn, e, d, q) in rows if cn == "email"]
+    wpp = [{"rot": _rot.get(e, e), "detalhe": d, "quando": q} for (cn, e, d, q) in rows if cn == "whatsapp"]
+    return JSONResponse({"ok": True, "email": email, "whatsapp": wpp})
 
 
 @router.post("/painel/prospeccao/campanhas/{camp_id}/publico")
@@ -5649,6 +5691,16 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 .cpstats{display:grid;grid-template-columns:repeat(6,1fr);gap:.6rem}
 @media(max-width:720px){.cpstats{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:460px){.cpstats{grid-template-columns:repeat(2,1fr)}}
+.kpigrp{margin-top:.7rem}
+.kpihead{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);font-weight:700;margin:0 0 .35rem}
+.cpstats4{display:grid;grid-template-columns:repeat(4,1fr);gap:.6rem}
+@media(max-width:560px){.cpstats4{grid-template-columns:repeat(2,1fr)}}
+.histrow>td{background:var(--bg)}
+.histbox{display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;padding:.7rem .4rem}
+@media(max-width:600px){.histbox{grid-template-columns:1fr}}
+.histcol h5{margin:0 0 .4rem;font-size:.78rem;color:var(--txt)}
+.histev{display:flex;gap:.6rem;font-size:.8rem;padding:.25rem 0;border-bottom:1px solid var(--borda)}
+.histev .qd{color:var(--mut);white-space:nowrap;min-width:82px}
 .cpstat{background:var(--card);border:1px solid var(--borda);border-radius:11px;padding:.7rem .8rem;min-width:0}
 .cpstat .n{font-size:1.4rem;font-weight:750;letter-spacing:-.02em;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cpstat .l{font-size:.7rem;color:var(--mut);margin-top:.1rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -5804,30 +5856,47 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
   <!-- 4 · DESEMPENHO + LEADS -->
   <div class="wide" id="s4">
     <h3 class="secttl"><span class="idx">4</span> Desempenho &amp; acompanhamento</h3>
-    <div class="cpstats" style="margin-top:.7rem">
-      <div class="cpstat"><div class="n">{{ metr.enviados }}</div><div class="l">Enviados</div></div>
-      <div class="cpstat"><div class="n">{{ metr.abriram }}</div><div class="l">Abriram 👁</div></div>
-      <div class="cpstat"><div class="n">{{ metr.taxa_abertura }}%</div><div class="l">Taxa abertura</div></div>
-      <div class="cpstat g"><div class="n">{{ metr.responderam }}</div><div class="l">Responderam</div></div>
-      <div class="cpstat g"><div class="n">{{ metr.taxa }}%</div><div class="l">Taxa resposta</div></div>
-      <div class="cpstat"><div class="n">{{ metr.fila }}</div><div class="l">Na fila</div></div>
-      <div class="cpstat r"><div class="n">{{ metr.descadastros }}</div><div class="l">Descadastros</div></div>
-      <div class="cpstat"><div class="n">{{ metr.hoje }}<span style="font-size:.9rem;color:var(--mut)">/{{ camp.limite }}</span></div><div class="l">Hoje</div></div>
+    {% if camp.status=='ativa' %}<div class="mut" style="font-size:.8rem;margin-top:.3rem">✅ <b style="color:var(--verde-claro)">Ativa</b> — dispara sozinho (até {{ camp.limite }}/dia) e para em quem responde ou descadastra.</div>{% else %}<div class="mut" style="font-size:.8rem;margin-top:.3rem">Clique <b>▶ Ativar</b> pra o motor começar a disparar.</div>{% endif %}
+
+    <div class="kpigrp"><div class="kpihead">📧 E-mail</div>
+      <div class="cpstats4">
+        <div class="cpstat"><div class="n">{{ metr.enviados }}</div><div class="l">Enviados</div></div>
+        <div class="cpstat"><div class="n">{{ metr.abriram }}</div><div class="l">Abriram 👁</div></div>
+        <div class="cpstat"><div class="n">{{ metr.taxa_abertura }}%</div><div class="l">Taxa abertura</div></div>
+        <div class="cpstat g"><div class="n">{{ metr.responderam }}</div><div class="l">Responderam</div></div>
+      </div>
     </div>
-    <div class="mut" style="font-size:.8rem;margin-top:.6rem">{% if camp.status=='ativa' %}✅ <b style="color:var(--verde-claro)">Ativa</b> — dispara sozinho (até {{ camp.limite }}/dia) e para em quem responde ou descadastra.{% else %}Clique <b>▶ Ativar</b> pra o motor começar a disparar.{% endif %}{% if metr.erros %} · <span style="color:#e0574f">{{ metr.erros }} erro(s) de envio</span>{% endif %}</div>
+    <div class="kpigrp"><div class="kpihead">💬 WhatsApp</div>
+      <div class="cpstats4">
+        <div class="cpstat"><div class="n">{{ metr.wa_enviados }}</div><div class="l">Enviados</div></div>
+        <div class="cpstat"><div class="n">{{ metr.wa_entregues }}</div><div class="l">Entregues ✓✓</div></div>
+        <div class="cpstat"><div class="n">{{ metr.wa_lidos }}</div><div class="l">Lidos 👀</div></div>
+        <div class="cpstat"><div class="n">{{ metr.wa_taxa_leitura }}%</div><div class="l">Taxa leitura</div></div>
+      </div>
+    </div>
+    <div class="kpigrp"><div class="kpihead">📊 Geral</div>
+      <div class="cpstats4">
+        <div class="cpstat g"><div class="n">{{ metr.taxa }}%</div><div class="l">Taxa resposta</div></div>
+        <div class="cpstat"><div class="n">{{ metr.fila }}</div><div class="l">Na fila</div></div>
+        <div class="cpstat r"><div class="n">{{ metr.descadastros }}</div><div class="l">Descadastros</div></div>
+        <div class="cpstat"><div class="n">{{ metr.hoje }}<span style="font-size:.9rem;color:var(--mut)">/{{ camp.limite }}</span></div><div class="l">Hoje</div></div>
+      </div>
+    </div>
+    {% if metr.erros or metr.wa_erros %}<div class="mut" style="font-size:.78rem;margin-top:.5rem"><span style="color:#e0574f">{% if metr.erros %}{{ metr.erros }} erro(s) de e-mail{% endif %}{% if metr.erros and metr.wa_erros %} · {% endif %}{% if metr.wa_erros %}{{ metr.wa_erros }} erro(s) de WhatsApp{% endif %}</span></div>{% endif %}
+
+    <div class="kpihead" style="margin-top:1rem">Contatos &amp; histórico</div>
     <div class="tbl-wrap">
       <table>
-        <thead><tr><th>Empresa</th><th>Situação</th><th>Passo</th><th>Abriu</th><th>WhatsApp</th><th>Próximo/último</th><th></th></tr></thead>
+        <thead><tr><th>Empresa</th><th>Situação</th><th>📧 E-mail</th><th>💬 WhatsApp</th><th>Próximo/último</th><th></th></tr></thead>
         <tbody>
           {% for l in leads %}
           <tr><td><b>{{ l.empresa }}</b><div class="mut" style="font-size:.76rem">{{ l.email }}</div></td>
             <td><span class="apill {{ l.status }}">{{ l.rot }}</span></td>
-            <td class="mut">D{{ l.passo }}</td>
-            <td class="mut" style="white-space:nowrap">{% if l.abriu %}<span style="color:var(--verde-claro)" title="Abriu {{ l.abriu }}x · 1ª em {{ l.aberto }}">👁 {{ l.aberto }}{% if l.abriu > 1 %} ({{ l.abriu }}x){% endif %}</span>{% else %}<span class="mut">—</span>{% endif %}</td>
+            <td class="mut" style="white-space:nowrap">D{{ l.passo }}{% if l.abriu %} · <span style="color:var(--verde-claro)" title="Abriu {{ l.abriu }}x · 1ª em {{ l.aberto }}">👁 {{ l.aberto }}{% if l.abriu > 1 %} ({{ l.abriu }}x){% endif %}</span>{% endif %}</td>
             <td class="mut" style="white-space:nowrap">{{ l.wa_rot or '—' }}</td>
             <td class="mut" style="white-space:nowrap">{% if l.status in ('fila','enviado') and l.prox %}⏳ {{ l.prox }}{% elif l.ult %}✓ {{ l.ult }}{% else %}—{% endif %}</td>
-            <td style="text-align:right"><button type="button" class="cpx" onclick="campRemLead(this,{{ camp.id }},{{ l.pid }})" title="Remover da campanha (o lead volta pra Base)">✕</button></td></tr>
-          {% else %}<tr><td colspan="7" class="mut" style="text-align:center;padding:1.6rem">Nenhum lead ainda — mande da <b>Base</b> (marque os leads → “Jogar na campanha”).</td></tr>{% endfor %}
+            <td style="text-align:right;white-space:nowrap"><button type="button" class="cpx" onclick="campHist({{ camp.id }},{{ l.pid }},this)" title="Ver histórico (data/hora por canal)">🕘</button> <button type="button" class="cpx" onclick="campRemLead(this,{{ camp.id }},{{ l.pid }})" title="Remover da campanha (o lead volta pra Base)">✕</button></td></tr>
+          {% else %}<tr><td colspan="6" class="mut" style="text-align:center;padding:1.6rem">Nenhum lead ainda — mande da <b>Base</b> (marque os leads → “Jogar na campanha”).</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>
@@ -5848,8 +5917,31 @@ function campRemLead(btn,camp,pid){
   fetch('/painel/prospeccao/campanhas/'+camp+'/remover-lead',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body})
     .then(function(r){return r.json();}).then(function(d){
       if(!d.ok){alert('Não consegui remover ('+(d.erro||'?')+').');return;}
-      var tr=btn.closest('tr');if(tr)tr.remove();
+      var tr=btn.closest('tr');if(tr){var nx=tr.nextElementSibling;if(nx&&nx.classList.contains('histrow'))nx.remove();tr.remove();}
     }).catch(function(){alert('Falha de rede.');});
+}
+function hEsc(s){var d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
+function campHist(camp,pid,btn){
+  var tr=btn.closest('tr');
+  var nx=tr.nextElementSibling;
+  if(nx&&nx.classList.contains('histrow')){nx.remove();return;}   // toggle: fecha se já aberto
+  var ncols=tr.children.length;
+  var row=document.createElement('tr');row.className='histrow';
+  row.innerHTML='<td colspan="'+ncols+'"><div class="mut" style="padding:.6rem;font-size:.8rem">carregando histórico…</div></td>';
+  tr.parentNode.insertBefore(row,tr.nextSibling);
+  fetch('/painel/prospeccao/campanhas/'+camp+'/lead/'+pid+'/historico',{headers:{'X-Requested-With':'fetch'}})
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){row.firstChild.innerHTML='<div class="mut" style="padding:.6rem">não consegui carregar</div>';return;}
+      function col(titulo,arr){
+        var h='<div class="histcol"><h5>'+titulo+'</h5>';
+        if(!arr||!arr.length){h+='<div class="mut" style="font-size:.78rem">sem eventos ainda</div>';}
+        else{arr.forEach(function(e){
+          h+='<div class="histev"><span class="qd">'+hEsc(e.quando)+'</span><span>'+hEsc(e.rot)
+            +(e.detalhe?(' <span class="mut">· '+hEsc(e.detalhe)+'</span>'):'')+'</span></div>';});}
+        return h+'</div>';
+      }
+      row.firstChild.innerHTML='<div class="histbox">'+col('📧 E-mail',d.email)+col('💬 WhatsApp',d.whatsapp)+'</div>';
+    }).catch(function(){row.firstChild.innerHTML='<div class="mut" style="padding:.6rem">falha de rede</div>';});
 }
 function mfile(inp){
   var f=inp.files&&inp.files[0]; if(!f)return;

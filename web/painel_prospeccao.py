@@ -1910,18 +1910,24 @@ async def webhook_twilio_status(request: Request):
                     c.execute("""update mensagens set status='erro'
                                    where provider_sid=%s and coalesce(status,'') not in ('entregue','lido')""",
                               (msid,))
+                    c.commit()
                 else:
                     # guarda de rank: nunca rebaixa (enviado<entregue<lido)
                     rank = _WA_STATUS_RANK[novo]
-                    c.execute("""update campanha_alvos set wa_status=%s, wa_em=now()
+                    cur = c.execute("""update campanha_alvos set wa_status=%s, wa_em=now()
                                    where wa_sid=%s and coalesce(case wa_status
                                      when 'enviado' then 1 when 'entregue' then 2 when 'lido' then 3
-                                     else 0 end, 0) < %s""", (novo, msid, rank))
+                                     else 0 end, 0) < %s returning prospeccao_id""", (novo, msid, rank))
+                    _transicao = cur.fetchone()
                     c.execute("""update mensagens set status=%s
                                    where provider_sid=%s and coalesce(case status
                                      when 'enviado' then 1 when 'entregue' then 2 when 'lido' then 3
                                      else 0 end, 0) < %s""", (novo, msid, rank))
-                c.commit()
+                    c.commit()
+                    # leu no WhatsApp (sinal confiável) → esquenta + avisa o vendedor
+                    if novo == "lido" and _transicao:
+                        from finance.campanhas_motor import engajou_lead
+                        engajou_lead(get_pool(), _transicao[0], "leu seu WhatsApp", alerta=True)
         except Exception:  # noqa: BLE001
             pass
     return Response("", media_type="text/plain")
@@ -1998,10 +2004,15 @@ def email_pixel(t: str = ""):
     if conta_id:
         try:
             with get_pool().connection() as c:
-                c.execute("""update campanha_alvos set aberturas=coalesce(aberturas,0)+1,
-                               aberto_em=coalesce(aberto_em, now())
+                c.execute("""update campanha_alvos set aberturas=coalesce(aberturas,0)+1
                              where campanha_id=%s and prospeccao_id=%s""", (camp_id, pid))
+                primeira = c.execute("""update campanha_alvos set aberto_em=now()
+                                          where campanha_id=%s and prospeccao_id=%s and aberto_em is null
+                                          returning 1""", (camp_id, pid)).fetchone()
                 c.commit()
+            if primeira:   # 1ª abertura → timeline + esquenta (sem alerta: Gmail infla abertura)
+                from finance.campanhas_motor import engajou_lead
+                engajou_lead(get_pool(), pid, "abriu o e-mail", alerta=False)
         except Exception:  # noqa: BLE001
             pass
     return Response(content=_PIXEL_GIF, media_type="image/gif",

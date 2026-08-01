@@ -1147,11 +1147,12 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
         if not ctx["gerencia"] and cv[2] is None:
             return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
         rows = c.execute(
-            """select msg.canal, msg.direcao, msg.autor, msg.criado_em, msg.texto, msg.membro_id, mm.nome
+            """select msg.canal, msg.direcao, msg.autor, msg.criado_em, msg.texto, msg.membro_id, mm.nome,
+                      msg.status
                  from mensagens msg left join membros mm on mm.id = msg.membro_id
                 where msg.conversa_id=%s order by msg.criado_em asc""", (conversa_id,)).fetchall()
     msgs = []
-    for (cn, direcao, autor, quando, texto, mid, nome) in rows:
+    for (cn, direcao, autor, quando, texto, mid, nome, mstatus) in rows:
         # só e-mail separa assunto (cabeçalho) do corpo; os outros canais são texto puro
         if cn == "email" and "\n\n" in (texto or ""):
             cab, _, corpo = (texto or "").partition("\n\n")
@@ -1165,7 +1166,8 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
             quem = "Você" if mid and mid == ctx["membro_id"] else (nome or "—")
         msgs.append({"canal": cn, "direcao": direcao, "autor": autor,
                      "quando": quando.strftime("%d/%m %H:%M") if quando else "",
-                     "quem": quem, "cabecalho": cab.strip(), "corpo": corpo.strip()})
+                     "quem": quem, "cabecalho": cab.strip(), "corpo": corpo.strip(),
+                     "status": mstatus or ""})
     destino = cv[7] or cv[8] or cv[13]     # telefone do lead OU contato_ref (conversa sem lead)
     pode_wa = False
     if cv[0] == "whatsapp" and bool(destino):
@@ -1784,12 +1786,14 @@ def _tratar_botao_prospec(c, conta_id, remetente, tipo, texto, sid, nome) -> boo
                              (conta_id,)).fetchone()
             material = (drow[0] if drow else "") or ""
     txt = _pi.resposta(tipo, idn, material)
+    _res = {}
     try:
-        _wout.enviar(c, conta_id, rem, txt)
+        _res = _wout.enviar(c, conta_id, rem, txt) or {}
     except Exception:  # noqa: BLE001
         pass
-    c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto)
-                 values (%s,'whatsapp','out','bot',%s)""", (conv_id, txt[:8000]))
+    c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid, status)
+                 values (%s,'whatsapp','out','bot',%s,%s,%s)""",
+              (conv_id, txt[:8000], _res.get("sid"), "enviado" if _res.get("sid") else None))
     c.execute("update conversas set ultima_msg_em=now() where id=%s", (conv_id,))
     return True
 
@@ -1899,16 +1903,24 @@ async def webhook_twilio_status(request: Request):
         try:
             with get_pool().connection() as c:
                 if novo == "erro":
+                    # erro só marca se ainda não chegou a entregue/lido
                     c.execute("""update campanha_alvos set wa_status='erro', wa_em=now()
                                    where wa_sid=%s and coalesce(wa_status,'') not in ('entregue','lido')""",
                               (msid,))
+                    c.execute("""update mensagens set status='erro'
+                                   where provider_sid=%s and coalesce(status,'') not in ('entregue','lido')""",
+                              (msid,))
                 else:
+                    # guarda de rank: nunca rebaixa (enviado<entregue<lido)
                     rank = _WA_STATUS_RANK[novo]
                     c.execute("""update campanha_alvos set wa_status=%s, wa_em=now()
-                                   where wa_sid=%s
-                                     and coalesce(case wa_status when 'enviado' then 1 when 'entregue' then 2
-                                                                 when 'lido' then 3 else 0 end, 0) < %s""",
-                              (novo, msid, rank))
+                                   where wa_sid=%s and coalesce(case wa_status
+                                     when 'enviado' then 1 when 'entregue' then 2 when 'lido' then 3
+                                     else 0 end, 0) < %s""", (novo, msid, rank))
+                    c.execute("""update mensagens set status=%s
+                                   where provider_sid=%s and coalesce(case status
+                                     when 'enviado' then 1 when 'entregue' then 2 when 'lido' then 3
+                                     else 0 end, 0) < %s""", (novo, msid, rank))
                 c.commit()
         except Exception:  # noqa: BLE001
             pass
@@ -3585,6 +3597,21 @@ def prospeccao_enviar_convite_wa(request: Request, alvo_id: int, numero: str = F
     with pool.connection() as c:
         _reg_atividade(c, alvo_id, ctx["conta_id"], ctx["membro_id"], "whatsapp",
                        "Convite de 1º contato enviado (template aprovado, WhatsApp)", alvo["status"])
+        # registra como mensagem de saída (aparece no inbox e recebe status de entrega)
+        sid_msg = res.get("sid")
+        if sid_msg:
+            rem = _so_digitos(alvo.get("whatsapp") or alvo.get("telefone") or numero or "")
+            conv = c.execute("""select id from conversas where conta_id=%s and canal='whatsapp'
+                                  and prospeccao_id=%s order by ultima_msg_em desc limit 1""",
+                             (ctx["conta_id"], alvo_id)).fetchone()
+            conv_id = conv[0] if conv else c.execute(
+                """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status, agente_ativo)
+                   values (%s,%s,'whatsapp',%s,'aberta',false) returning id""",
+                (ctx["conta_id"], alvo_id, rem or None)).fetchone()[0]
+            c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid, status)
+                         values (%s,'whatsapp','out','bot','📨 Convite de 1º contato (template aprovado)',%s,'enviado')""",
+                      (conv_id, sid_msg))
+            c.execute("update conversas set ultima_msg_em=now() where id=%s", (conv_id,))
         c.commit()
     return JSONResponse({"ok": True})
 
@@ -5300,11 +5327,17 @@ function cxMsgsHtml(d){
     var cls=(m.direcao==='in')?'cx-m cin':((m.autor==='bot')?'cx-m cbot':'cx-m');
     var cab=m.cabecalho?('<div class="cab">'+cxEsc(m.cabecalho)+'</div>'):'';
     var corpo=cxEsc(m.corpo||m.cabecalho).replace(/\\n/g,'<br>');
-    h+='<div class="'+cls+'">'+cab+corpo+'<span class="meta">'+cxEsc(m.quem)+' · '+cxEsc(m.quando)+'</span></div>';
+    h+='<div class="'+cls+'">'+cab+corpo+'<span class="meta">'+cxEsc(m.quem)+' · '+cxEsc(m.quando)+cxTick(m)+'</span></div>';
   });
   return h;
 }
-function cxSig(d){return d.msgs.length+'|'+(d.msgs.length?(d.msgs[d.msgs.length-1].corpo||''):'')+'|'+(d.agente_ativo?1:0)+'|'+(d.pode_responder?1:0);}
+// selo de entrega só nas mensagens que SAÍRAM (WhatsApp): ✓ enviado · ✓✓ entregue · 👀 lido · ⚠ erro
+function cxTick(m){
+  if(m.direcao!=='out'||m.canal!=='whatsapp')return '';
+  var s={enviado:' · ✓',entregue:' · ✓✓',lido:' · <span style="color:#4aa3ff">👀 lido</span>',erro:' · <span style="color:#e0574f">⚠ falhou</span>'}[m.status];
+  return s||'';
+}
+function cxSig(d){return d.msgs.length+'|'+(d.msgs.length?(d.msgs[d.msgs.length-1].corpo||''):'')+'|'+(d.msgs.length?(d.msgs[d.msgs.length-1].status||''):'')+'|'+(d.agente_ativo?1:0)+'|'+(d.pode_responder?1:0);}
 function cxScroll(force){var b=document.getElementById('cx-msgs');if(!b)return;
   if(force||b.scrollHeight-b.scrollTop-b.clientHeight<80)b.scrollTop=b.scrollHeight;}
 function cxOpen(el,id){

@@ -456,9 +456,31 @@ def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> i
         with pool.connection() as c:
             c.execute("update campanhas set wa_enviados_hoje=coalesce(wa_enviados_hoje,0)+1 where id=%s",
                       (camp_id,))
+            evento(c, camp_id, pid, "whatsapp", "enviado")
             c.commit()
         feitos += 1
     return feitos
+
+
+def evento(c, campanha_id, prospeccao_id, canal: str, evento: str, detalhe: str = "") -> None:
+    """Registra um evento no histórico da campanha (append-only). Usa o cursor do
+    chamador (mesma transação). Best-effort: nunca quebra o fluxo de envio."""
+    if not (campanha_id and prospeccao_id):
+        return
+    try:
+        c.execute("""insert into campanha_eventos (campanha_id, prospeccao_id, canal, evento, detalhe)
+                     values (%s,%s,%s,%s,%s)""",
+                  (campanha_id, prospeccao_id, canal, evento, (detalhe or "")[:200]))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _campanha_do_lead(c, prospeccao_id) -> int | None:
+    """Campanha mais recente do lead (pra amarrar eventos de resposta/bounce/clique
+    que não carregam o campanha_id na mão)."""
+    row = c.execute("""select campanha_id from campanha_alvos where prospeccao_id=%s
+                        order by id desc limit 1""", (prospeccao_id,)).fetchone()
+    return row[0] if row else None
 
 
 def engajou_lead(pool, prospeccao_id: int, motivo: str, alerta: bool = False) -> None:
@@ -604,6 +626,7 @@ def _registrar_e_avancar(pool, conta_id, camp_id, aid, pid, passo_atual, pmap, a
         c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto)
                      values (%s,'email','out','bot',%s)""", (conv_id, f"{assunto}\n\n{corpo}"[:8000]))
         c.execute("update conversas set ultima_msg_em=now() where id=%s", (conv_id,))
+        evento(c, camp_id, pid, "email", "enviado", f"D{passo_atual}: {assunto}")
         # avança o alvo
         if prox is None:
             c.execute("""update campanha_alvos set status='concluido', passo_atual=%s,

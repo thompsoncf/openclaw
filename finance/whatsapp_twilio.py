@@ -76,8 +76,11 @@ def enviar_texto(remetente: str, numero: str, corpo: str) -> dict:
         return {"ok": False, "erro": "numero_invalido"}
     try:
         from twilio.rest import Client
-        msg = Client(cfg["sid"], cfg["token"]).messages.create(
-            from_=remetente, to=to, body=(corpo or "")[:1500])
+        kwargs = {"from_": remetente, "to": to, "body": (corpo or "")[:1500]}
+        _cb = url_status()
+        if _cb:
+            kwargs["status_callback"] = _cb
+        msg = Client(cfg["sid"], cfg["token"]).messages.create(**kwargs)
         return {"ok": True, "sid": msg.sid}
     except Exception as e:  # noqa: BLE001
         # Provedor pago: avisa o admin se a falha for sistemica (sem saldo Twilio,
@@ -114,9 +117,12 @@ def enviar_template(remetente: str, numero: str, content_sid: str,
         from twilio.rest import Client
         vars_json = json.dumps(
             {str(k): (str(v).strip() or "-") for k, v in (variaveis or {}).items()})
-        msg = Client(cfg["sid"], cfg["token"]).messages.create(
-            from_=remetente, to=to, content_sid=content_sid,
-            content_variables=vars_json)
+        kwargs = {"from_": remetente, "to": to, "content_sid": content_sid,
+                  "content_variables": vars_json}
+        _cb = url_status()
+        if _cb:
+            kwargs["status_callback"] = _cb
+        msg = Client(cfg["sid"], cfg["token"]).messages.create(**kwargs)
         return {"ok": True, "sid": msg.sid}
     except Exception as e:  # noqa: BLE001
         from core.falhas import avaliar_falha_provedor
@@ -140,3 +146,10 @@ def url_webhook() -> str:
     """URL pública que o Twilio chama — precisa bater exatamente pra assinar."""
     base = (os.environ.get("APP_URL") or "").rstrip("/")
     return base + "/webhooks/twilio"
+
+
+def url_status() -> str:
+    """URL de StatusCallback (entregue/lido/falhou) por mensagem. Vazia se não há
+    APP_URL — aí simplesmente não pedimos callback."""
+    base = (os.environ.get("APP_URL") or "").rstrip("/")
+    return (base + "/webhooks/twilio-status") if base else ""

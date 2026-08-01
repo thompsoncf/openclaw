@@ -452,7 +452,7 @@ def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> i
         if not res.get("ok"):
             _wa_marca(pool, aid, "erro")
             continue
-        _wa_marca(pool, aid, "enviado")
+        _wa_marca(pool, aid, "enviado", wa_sid=res.get("sid"))
         with pool.connection() as c:
             c.execute("update campanhas set wa_enviados_hoje=coalesce(wa_enviados_hoje,0)+1 where id=%s",
                       (camp_id,))
@@ -461,9 +461,13 @@ def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> i
     return feitos
 
 
-def _wa_marca(pool, aid, status):
+def _wa_marca(pool, aid, status, wa_sid=None):
     with pool.connection() as c:
-        c.execute("update campanha_alvos set wa_status=%s, wa_em=now() where id=%s", (status, aid))
+        if wa_sid:
+            c.execute("update campanha_alvos set wa_status=%s, wa_em=now(), wa_sid=%s where id=%s",
+                      (status, wa_sid, aid))
+        else:
+            c.execute("update campanha_alvos set wa_status=%s, wa_em=now() where id=%s", (status, aid))
         c.commit()
 
 

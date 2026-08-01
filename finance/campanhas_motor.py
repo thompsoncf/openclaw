@@ -142,14 +142,18 @@ def _email_ia(pool, conta_id: int, lead: dict) -> dict:
 
 
 def _conta_identidade(c, conta_id: int) -> dict:
-    """Identidade da conta pro rodapé do e-mail: nome da EMPRESA (nome fantasia,
-    não o do responsável), nome do RESPONSÁVEL e telefone cadastrado no ZAQ."""
+    """Identidade da conta pro rodapé do e-mail e pro 1º contato da prospecção:
+    nome da EMPRESA (nome fantasia, não o do responsável), nome do RESPONSÁVEL,
+    telefone, e o perfil de prospecção (Instagram + cargo de quem envia)."""
     row = c.execute(
-        "select coalesce(nullif(trim(nome_fantasia),''), nome), nome, coalesce(telefone,'') "
-        "from contas where id=%s", (conta_id,)).fetchone() or ("", "", "")
+        "select coalesce(nullif(trim(nome_fantasia),''), nome), nome, coalesce(telefone,''), "
+        "coalesce(prospec_instagram,''), coalesce(nullif(trim(prospec_cargo),''),'CEO') "
+        "from contas where id=%s", (conta_id,)).fetchone() or ("", "", "", "", "CEO")
     return {"empresa": (row[0] or "").strip(),
             "responsavel": (row[1] or "").strip(),
-            "telefone": (row[2] or "").strip()}
+            "telefone": (row[2] or "").strip(),
+            "instagram": (row[3] or "").strip(),
+            "cargo": (row[4] or "CEO").strip()}
 
 
 # despedidas que a IA às vezes cola no fim — a gente corta e usa a nossa assinatura
@@ -358,9 +362,7 @@ def _disparar_wa(pool) -> int:
     dispara o template de 1º contato pro melhor número (decisor primeiro), até o
     limite/dia. Dedup por campanha_alvos.wa_status."""
     from finance import prospec_convite
-    if not prospec_convite.template_configurado():
-        return 0
-    sid = prospec_convite.sid_template()
+    env_sid = prospec_convite.sid_template()   # fallback global (env)
     from finance import whatsapp_out
     enviados = 0
     with pool.connection() as lockc:
@@ -370,10 +372,14 @@ def _disparar_wa(pool) -> int:
             with pool.connection() as c:
                 camps = c.execute(
                     """select id, conta_id, coalesce(limite_wa_dia,30),
-                              coalesce(wa_enviados_hoje,0), wa_dia_contagem
+                              coalesce(wa_enviados_hoje,0), wa_dia_contagem,
+                              coalesce(wa_template_sid,'')
                          from campanhas where status='ativa' and coalesce(wa_ativo,false)""").fetchall()
             hoje = date.today()
-            for (cid, conta_id, limite, env_hoje, dia) in camps:
+            for (cid, conta_id, limite, env_hoje, dia, camp_sid) in camps:
+                sid = (camp_sid or "").strip() or env_sid   # template da campanha > env
+                if not sid:
+                    continue                                # campanha sem template → pula
                 if dia != hoje:
                     env_hoje = 0
                     with pool.connection() as c:
@@ -411,7 +417,10 @@ def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> i
         if not numero:
             _wa_marca(pool, aid, "sem_numero")
             continue
-        variaveis = {"1": (idn.get("empresa") or "nós"), "2": (empresa or "sua empresa")}
+        variaveis = {"1": (idn.get("responsavel") or idn.get("empresa") or "nós"),
+                     "2": (idn.get("cargo") or "CEO"),
+                     "3": (idn.get("empresa") or "nós"),
+                     "4": (empresa or "sua empresa")}
         with pool.connection() as c:
             res = whatsapp_out.enviar_template(c, conta_id, numero, sid, variaveis)
         if not res.get("ok"):

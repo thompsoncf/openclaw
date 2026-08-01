@@ -13,8 +13,10 @@ Depois que o WhatsApp APROVAR (pode levar de minutos a horas), o botão
 "Enviar convite (WhatsApp)" na ficha do lead passa a funcionar 'frio'.
 
 Corpo aprovado (variáveis, NA ORDEM):
-    {{1}} = empresa que envia (nome fantasia da conta)
-    {{2}} = empresa do lead
+    {{1}} = nome de quem envia (responsável da conta)
+    {{2}} = cargo de quem envia (ex.: CEO)
+    {{3}} = empresa que envia (nome fantasia da conta)
+    {{4}} = empresa do lead
 """
 import os
 import sys
@@ -24,25 +26,30 @@ import httpx
 FRIENDLY = "prospec_1contato_ptbr"
 LANG = "pt_BR"
 
-# Corpo do template. Pegada de DESAFIO no 1º contato frio: provoca o lead a deixar
-# mostrar, de graça, o que dá pra melhorar com IA. Concreto ("3 coisas"), com saída
-# fácil ("é só me dizer") e CTA de baixo atrito. Curto e sem promessa exagerada
-# (ajuda na aprovação do WhatsApp).
-BODY = ("Oi! 👋 Aqui é da {{1}}. Desafio de 60 segundos: me deixa apontar 3 coisas "
-        "que dá pra automatizar com IA na {{2}} hoje. Se não fizer sentido, é só me "
-        "dizer. Topa? 👇")
+# Corpo do template. Pegada de APRESENTAÇÃO + REFERÊNCIA: quem envia se apresenta
+# (nome/cargo/empresa) e convida o lead a conhecê-lo ANTES de qualquer oferta —
+# "quem me conhece antes, engaja melhor". Os 3 botões são de resposta rápida, então
+# QUALQUER clique volta pra gente (esquenta o lead): "Quero te conhecer" recebe o
+# Instagram, "Quero o material" recebe o material, "Agora não" encerra sem queimar.
+# Curto e sem promessa exagerada (ajuda na aprovação do WhatsApp). Sem link no
+# corpo (o Instagram/material vão na resposta ao clique).
+BODY = ("Oi! 👋 Aqui é o {{1}}, {{2}} da {{3}} — a gente usa tecnologia e IA pra "
+        "ajudar negócios como a {{4}} a atender e vender melhor, sem complicar. "
+        "Antes de qualquer coisa, prefiro que você me conheça. Como quer começar? 👇")
 
 TYPES = {
     "twilio/quick-reply": {
         "body": BODY,
+        # títulos sem emoji e ≤ 20 chars (limite do WhatsApp/Twilio p/ quick-reply)
         "actions": [
-            {"id": "interesse", "title": "Topo o desafio"},
+            {"id": "conhecer", "title": "Quero te conhecer"},
+            {"id": "material", "title": "Quero o material"},
             {"id": "agora_nao", "title": "Agora não"},
         ],
     },
     # fallback de texto puro (WhatsApp usa o quick-reply; o texto cobre outros canais)
     "twilio/text": {
-        "body": BODY + "\n\nResponda *TOPO* que eu já te mostro.",
+        "body": BODY + "\n\nResponda *CONHECER* pra ver meu perfil ou *MATERIAL* que eu te envio.",
     },
 }
 
@@ -60,7 +67,8 @@ def criar_conteudo(auth) -> str:
     payload = {
         "friendly_name": FRIENDLY,
         "language": LANG,
-        "variables": {"1": "Sua Empresa", "2": "Empresa do Lead"},
+        "variables": {"1": "Thompson", "2": "CEO", "3": "Sua Empresa",
+                      "4": "Empresa do Lead"},
         "types": TYPES,
     }
     r = httpx.post("https://content.twilio.com/v1/Content",

@@ -1101,16 +1101,22 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
         convs = _conversas_list(c, ctx["conta_id"], ctx["gerencia"], ctx["membro_id"],
                                 canal=canal, vend=filtro_vend, escopo=escopo)
         ag_cfg, ag_conhec = None, None
+        perfil = {"instagram": "", "cargo": "", "material": ""}
         if aba == "agente":
             ag_cfg = _agente_config(c, ctx["conta_id"])
             ag_conhec = _agente_conhecimento(c, ctx["conta_id"])
+            prow = c.execute(
+                "select coalesce(prospec_instagram,''), coalesce(prospec_cargo,''), "
+                "coalesce(prospec_material,'') from contas where id=%s",
+                (ctx["conta_id"],)).fetchone() or ("", "", "")
+            perfil = {"instagram": prow[0], "cargo": prow[1], "material": prow[2]}
     vends = _vendedores(pool, ctx["conta_id"]) if ctx["gerencia"] else []
     return _render("prospeccao_comunicacao", request, titulo="Comunicação",
                    secao_ativa="prospeccao", aba=aba, convs=convs, escopo=escopo, canal=canal,
                    canais=_canais_status(pool, ctx["conta_id"]), canal_rot=CANAL_ROT,
                    gerencia=ctx["gerencia"], vendedores=vends, filtro_vend=filtro_vend,
                    remetente=_ein_remetente(pool, ctx["conta_id"]), tem_ia=_tem_ia(),
-                   ag_cfg=ag_cfg, ag_conhec=ag_conhec,
+                   ag_cfg=ag_cfg, ag_conhec=ag_conhec, perfil=perfil,
                    aviso=request.session.pop("prosp_aviso", None))
 
 
@@ -1608,6 +1614,28 @@ def comunicacao_agente_faq(request: Request, pergunta: str = Form(""), resposta:
     return RedirectResponse(_AG_DESTINO, status_code=303)
 
 
+@router.post("/painel/prospeccao/comunicacao/prospec-perfil")
+def comunicacao_prospec_perfil(request: Request, prospec_instagram: str = Form(""),
+                               prospec_cargo: str = Form(""), prospec_material: str = Form("")):
+    """Perfil do 1º contato: Instagram (referência do lead), cargo de quem envia e
+    material padrão (link enviado no 'Quero o material' quando o lead está fora de
+    campanha). Alimenta o template do convite e as respostas aos botões."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        return RedirectResponse(_AG_DESTINO, status_code=303)
+    insta = (prospec_instagram or "").strip()[:200]
+    cargo = (prospec_cargo or "").strip()[:60]
+    material = (prospec_material or "").strip()[:2000]
+    with get_pool().connection() as c:
+        c.execute("update contas set prospec_instagram=%s, prospec_cargo=%s, prospec_material=%s where id=%s",
+                  (insta or None, cargo or None, material or None, ctx["conta_id"]))
+        c.commit()
+    request.session["prosp_aviso"] = "Perfil do 1º contato salvo ✓"
+    return RedirectResponse(_AG_DESTINO, status_code=303)
+
+
 def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente_on):
     """WhatsApp de ENTRADA (Twilio OU Cloud API): resolve lead+conversa pelo telefone,
     grava a mensagem (dedup por provider_sid) e reabre a janela/reativa o agente.
@@ -1661,6 +1689,85 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     return conv_id
 
 
+def _wa_conversa_simples(c, conta_id, lead_id, remetente, corpo, sid) -> int:
+    """Acha/cria a conversa de WhatsApp do lead e grava a mensagem de entrada, SEM
+    esquentar/promover (usado no "Agora não": o lead recusou, não vira lead quente)."""
+    conv = c.execute(
+        """select id, prospeccao_id from conversas
+            where conta_id=%s and canal='whatsapp'
+              and (prospeccao_id=%s or (prospeccao_id is null and contato_ref=%s))
+            order by ultima_msg_em desc limit 1""",
+        (conta_id, lead_id, remetente)).fetchone()
+    if conv:
+        conv_id = conv[0]
+        if conv[1] is None:
+            c.execute("update conversas set prospeccao_id=%s where id=%s", (lead_id, conv_id))
+    else:
+        conv_id = c.execute(
+            """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status, agente_ativo)
+               values (%s,%s,'whatsapp',%s,'aberta',false) returning id""",
+            (conta_id, lead_id, remetente)).fetchone()[0]
+    c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
+                 values (%s,'whatsapp','in','lead',%s,%s)
+                 on conflict (provider_sid) where provider_sid is not null do nothing""",
+              (conv_id, (corpo or "")[:8000], sid))
+    c.execute("update conversas set ultima_msg_em=now() where id=%s", (conv_id,))
+    return conv_id
+
+
+def _tratar_botao_prospec(c, conta_id, remetente, tipo, texto, sid, nome) -> bool:
+    """Clique num botão do template de 1º contato ("Quero te conhecer" / "Quero o
+    material" / "Agora não"). Responde deterministicamente (Instagram/material),
+    esquenta o lead e para a sequência. Devolve True se agiu; False pra deixar o
+    fluxo normal (IA) seguir (ex.: número que não é de nenhum lead da conta)."""
+    from finance import prospec_inbound as _pi, whatsapp_out as _wout
+    from finance.campanhas_motor import _conta_identidade
+    rem = _so_digitos(remetente)
+    alvo8 = rem[-8:] if len(rem) >= 8 else rem
+    lead = c.execute(
+        r"""select id from prospeccao
+             where conta_id=%s and right(regexp_replace(coalesce(whatsapp, telefone, ''), '\D', '', 'g'), 8) = %s
+             order by atualizado_em desc limit 1""", (conta_id, alvo8)).fetchone()
+    if not lead:
+        return False
+    lead_id = lead[0]
+    if tipo == "nao":
+        # recusou: para a sequência e NÃO esquenta
+        c.execute("""update campanha_alvos set status='concluido', proximo_envio_em=null
+                       where prospeccao_id=%s and status in ('fila','enviado')""", (lead_id,))
+        conv_id = _wa_conversa_simples(c, conta_id, lead_id, rem, texto, sid)
+    else:
+        # aceitou: cria/acha conversa, esquenta (promove base→lead) e reativa o agente
+        master = c.execute("select coalesce(ativo,false) from agente_config where conta_id=%s",
+                           (conta_id,)).fetchone()
+        agente_on = bool(master and master[0])
+        conv_id = _wa_inbound_conversa(c, conta_id, rem, texto, sid, nome, agente_on)
+        c.execute("""update campanha_alvos set status='respondeu', proximo_envio_em=null
+                       where prospeccao_id=%s and status in ('fila','enviado')""", (lead_id,))
+    idn = _conta_identidade(c, conta_id)
+    material = ""
+    if tipo == "material":
+        mrow = c.execute(
+            """select coalesce(cp.material,'') from campanha_alvos a
+                 join campanhas cp on cp.id=a.campanha_id
+                where a.prospeccao_id=%s and cp.conta_id=%s and coalesce(cp.material,'')<>''
+                order by cp.criado_em desc limit 1""", (lead_id, conta_id)).fetchone()
+        material = mrow[0] if mrow else ""
+        if not material:      # fora de campanha → material padrão da conta (fallback)
+            drow = c.execute("select coalesce(prospec_material,'') from contas where id=%s",
+                             (conta_id,)).fetchone()
+            material = (drow[0] if drow else "") or ""
+    txt = _pi.resposta(tipo, idn, material)
+    try:
+        _wout.enviar(c, conta_id, rem, txt)
+    except Exception:  # noqa: BLE001
+        pass
+    c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto)
+                 values (%s,'whatsapp','out','bot',%s)""", (conv_id, txt[:8000]))
+    c.execute("update conversas set ultima_msg_em=now() where id=%s", (conv_id,))
+    return True
+
+
 @router.post("/webhooks/twilio")
 async def webhook_twilio(request: Request, background_tasks: BackgroundTasks):
     """Recebe mensagens do WhatsApp (Twilio). Valida a assinatura, acha/cria a
@@ -1710,6 +1817,18 @@ async def webhook_twilio(request: Request, background_tasks: BackgroundTasks):
                     _wout.enviar(c, conta_id, remetente, _cv.confirmacao_texto(_conv))
                     c.commit()
                     return Response("<Response></Response>", media_type="application/xml")
+        # --- Botões do template de 1º contato da prospecção (quick reply) ---
+        # O convite frio sai com 3 botões; o clique volta PRA CÁ. Respondemos
+        # deterministicamente (Instagram/material), esquentamos e paramos a sequência
+        # ANTES do inbox/IA — assim "Quero o material" manda o material na hora, em
+        # vez de virar uma conversa que depende da IA adivinhar. Só age se o número
+        # for de um lead conhecido da conta; senão, segue o fluxo normal.
+        from finance import prospec_inbound as _pi
+        _botao = _pi.classificar(_txt)
+        if _botao and _tratar_botao_prospec(c, conta_id, remetente, _botao, _txt, sid,
+                                            params.get("ProfileName")):
+            c.commit()
+            return Response("<Response></Response>", media_type="application/xml")
         # o agente assume conversa nova quando o master está ligado (o vendedor pode
         # "assumir" depois, o que desliga o bot só naquela conversa).
         master = c.execute("select coalesce(ativo,false) from agente_config where conta_id=%s",
@@ -2092,7 +2211,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
         cp = c.execute("""select id, nome, status, limite_dia, coalesce(enviados_hoje,0), dia_contagem,
                                  coalesce(material,''), coalesce(wa_ativo,false), coalesce(limite_wa_dia,30),
                                  coalesce(wa_enviados_hoje,0), wa_dia_contagem, coalesce(material_tipo,'link'),
-                                 coalesce(modelo_codigo,'')
+                                 coalesce(modelo_codigo,''), coalesce(wa_template_sid,'')
                             from campanhas where id=%s and conta_id=%s""",
                        (camp_id, ctx["conta_id"])).fetchone()
         if not cp:
@@ -2135,7 +2254,8 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
     camp = {"id": cp[0], "nome": cp[1], "status": cp[2], "limite": cp[3],
             "status_rot": _STATUS_ROT_CP.get(cp[2], cp[2]), "material": cp[6],
             "wa_ativo": cp[7], "limite_wa": cp[8], "wa_hoje": wa_hoje, "wa_enviados": wa_enviados,
-            "wa_pronto": _prospec_convite.template_configurado(), "material_tipo": cp[11],
+            "wa_template_sid": cp[13],
+            "wa_pronto": _prospec_convite.template_configurado(cp[13]), "material_tipo": cp[11],
             "modelo_codigo": cp[12]}
     metr = {"total": na_camp, "fila": st.get("fila", 0), "enviados": enviados, "responderam": resp,
             "descadastros": st.get("descadastrou", 0), "erros": st.get("erro", 0),
@@ -2207,6 +2327,7 @@ async def prospeccao_campanha_config(request: Request, camp_id: int):
     except (ValueError, TypeError):
         lim_wa = 30
     wa_on = str(form.get("wa_ativo") or "").strip().lower() in ("1", "on", "true", "sim")
+    wa_sid = (form.get("wa_template_sid") or "").strip()[:64]
     tipo = (form.get("material_tipo") or "link").strip().lower()
     if tipo not in ("link", "video", "pdf", "foto"):
         tipo = "link"
@@ -2229,14 +2350,17 @@ async def prospeccao_campanha_config(request: Request, camp_id: int):
     with get_pool().connection() as c:
         if material is None:
             c.execute("""update campanhas set nome=coalesce(nullif(%s,''),nome), limite_dia=%s,
-                           material_tipo=%s, wa_ativo=%s, limite_wa_dia=%s, atualizado_em=now()
+                           material_tipo=%s, wa_ativo=%s, limite_wa_dia=%s, wa_template_sid=%s,
+                           atualizado_em=now()
                          where id=%s and conta_id=%s""",
-                      (nome[:120], lim, tipo, wa_on, lim_wa, camp_id, ctx["conta_id"]))
+                      (nome[:120], lim, tipo, wa_on, lim_wa, (wa_sid or None), camp_id, ctx["conta_id"]))
         else:
             c.execute("""update campanhas set nome=coalesce(nullif(%s,''),nome), limite_dia=%s,
-                           material=%s, material_tipo=%s, wa_ativo=%s, limite_wa_dia=%s, atualizado_em=now()
+                           material=%s, material_tipo=%s, wa_ativo=%s, limite_wa_dia=%s,
+                           wa_template_sid=%s, atualizado_em=now()
                          where id=%s and conta_id=%s""",
-                      (nome[:120], lim, material, tipo, wa_on, lim_wa, camp_id, ctx["conta_id"]))
+                      (nome[:120], lim, material, tipo, wa_on, lim_wa, (wa_sid or None),
+                       camp_id, ctx["conta_id"]))
         c.commit()
     request.session["prosp_aviso"] = "Configuração salva ✓"
     return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
@@ -4817,6 +4941,19 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       </form>
     </div>
   </div>
+
+  <div class="cx-card">
+    <h3>📇 Perfil do 1º contato (WhatsApp)</h3>
+    <p class="mut" style="font-size:.82rem;margin:.1rem 0 .6rem">Personaliza o convite frio e as respostas dos botões. Quem toca <b>“Quero te conhecer”</b> recebe seu Instagram; quem toca <b>“Quero o material”</b> recebe o material da campanha.</p>
+    <form method="post" action="/painel/prospeccao/comunicacao/prospec-perfil">
+      <div class="aggrid">
+        <div class="agfield"><label>Seu Instagram</label><input class="fld" name="prospec_instagram" value="{{ perfil.instagram }}" placeholder="@seuperfil"><small class="mut" style="font-size:.72rem">@ ou link — é a referência que o lead recebe pra te conhecer.</small></div>
+        <div class="agfield"><label>Seu cargo</label><input class="fld" name="prospec_cargo" value="{{ perfil.cargo }}" placeholder="CEO"><small class="mut" style="font-size:.72rem">Aparece no convite: “Aqui é o Fulano, {cargo} da Empresa…”.</small></div>
+      </div>
+      <div class="agfield" style="margin-top:.5rem"><label>Material padrão (link)</label><input class="fld" name="prospec_material" value="{{ perfil.material }}" placeholder="https://... (PDF, vídeo, página)"><small class="mut" style="font-size:.72rem">Enviado no “Quero o material” quando o lead não está em nenhuma campanha. Dentro de campanha, vale o material da campanha.</small></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:.4rem"><button class="pbtn">Salvar perfil</button></div>
+    </form>
+  </div>
   {% endif %}
 
   {% else %}
@@ -5372,16 +5509,16 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 
         <div class="divi"></div>
         <label class="lbl" style="font-size:.82rem">💬 1º contato por WhatsApp (template aprovado)</label>
-        {% if camp.wa_pronto %}
-        <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-top:.3rem">
+        <div style="margin-top:.3rem">
+          <label class="lbl">Content SID do template (Twilio)</label>
+          <input class="fld" name="wa_template_sid" value="{{ camp.wa_template_sid }}" placeholder="HX..." spellcheck="false" style="font-family:ui-monospace,monospace">
+          <div class="mut" style="font-size:.74rem;margin-top:.2rem">Cole o SID do template aprovado <b>desta campanha</b>. Cada campanha pode ter o seu — não precisa mexer no Render. {% if camp.wa_pronto %}<span style="color:var(--verde-claro)">● pronto pra disparo frio</span>{% else %}<span style="color:#e0a33e">● defina o SID pra liberar o disparo</span>{% endif %}</div>
+        </div>
+        <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-top:.5rem">
           <label class="chk"><input type="checkbox" name="wa_ativo" value="1" {% if camp.wa_ativo %}checked{% endif %}> <span>Disparar o convite por WhatsApp junto com o e-mail</span></label>
           <div><label class="lbl">WhatsApp/dia</label><input class="fld" name="limite_wa_dia" value="{{ camp.limite_wa }}" inputmode="numeric" style="width:90px"></div>
         </div>
         <div class="mut" style="font-size:.74rem;margin-top:.3rem">Mira o <b>decisor</b> (Credify pelo CNPJ, ⭐ número dele); sem decisor, usa o melhor número captado. Lead sem número recebe só o e-mail.</div>
-        {% else %}
-        <div class="mut" style="font-size:.78rem;margin-top:.3rem">Canal de WhatsApp ainda não está pronto pra disparo frio. Configure o template aprovado (Twilio) pra liberar esta opção.</div>
-        <input type="hidden" name="wa_ativo" value="{% if camp.wa_ativo %}1{% endif %}"><input type="hidden" name="limite_wa_dia" value="{{ camp.limite_wa }}">
-        {% endif %}
         <div style="margin-top:.8rem;display:flex;gap:.5rem;flex-wrap:wrap">
           <button class="pbtn">Salvar configuração</button>
           <button class="pbtn ghost" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/excluir" formmethod="post" formnovalidate style="color:#e0574f;border-color:#5c2a27" onclick="return confirm('Excluir a campanha? Os leads voltam pro funil.')">🗑 Excluir</button>

@@ -439,7 +439,7 @@ def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> i
     for (aid, pid, empresa, cnpj, whatsapp, telefone, dec_tels) in alvos:
         # já respondeu por qualquer canal? então não incomoda no WhatsApp
         if _respondeu(pool, conta_id, pid):
-            _wa_marca(pool, aid, "enviado")  # trava reenvio sem gastar limite
+            _wa_marca(pool, aid, "pulado")  # já respondeu → não envia (trava reenvio, não é "enviado")
             continue
         with pool.connection() as c:
             numero, _origem = _numero_alvo_wa(c, conta_id,

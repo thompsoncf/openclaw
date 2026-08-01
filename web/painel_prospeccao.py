@@ -2416,7 +2416,8 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
             "select wa_status, count(*) from campanha_alvos where campanha_id=%s and wa_status is not null group by wa_status",
             (camp_id,)).fetchall())
         modelos = _modelos_lista(c, ctx["conta_id"])
-    wa_enviados = sum(wa_counts.values())                                   # mandados (qualquer status)
+    # "pulado" (já respondeu) e "sem_numero" não são disparos reais — fora da conta
+    wa_enviados = sum(v for k, v in wa_counts.items() if k not in ("pulado", "sem_numero"))
     wa_entregues = wa_counts.get("entregue", 0) + wa_counts.get("lido", 0)  # entregou (ou já leu)
     wa_lidos = wa_counts.get("lido", 0)
     wa_erros = wa_counts.get("erro", 0)
@@ -2450,7 +2451,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                   "corpo": ("O agente escreve um e-mail único pra este lead — clique em “Gerar prévia com IA” "
                             "pra ver um exemplo." if p0["ia"] else _cfmt(p0["corpo"] or "", _ld))}
     _WA_ROT = {"enviado": "💬 enviado", "entregue": "✅ entregue", "lido": "👀 lido",
-               "erro": "💬 erro", "sem_numero": "💬 sem nº"}
+               "erro": "💬 erro", "sem_numero": "💬 sem nº", "pulado": "↩︎ já respondeu"}
     leads_l = [{"empresa": r[0], "email": r[1], "status": r[2], "passo": r[3],
                 "prox": r[4], "ult": r[5], "pid": r[6], "rot": _ALVO_ROT.get(r[2], r[2]),
                 "abriu": r[7], "aberto": r[8], "wa": r[9], "wa_rot": _WA_ROT.get(r[9], ""),

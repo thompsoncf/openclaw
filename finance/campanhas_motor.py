@@ -523,10 +523,11 @@ def _disparar_campanha(pool, camp_id, conta_id, camp_nome, teto) -> int:
         link_abr = _app_url() + "/e/abrir.gif?t=" + abrir_token(conta_id, pid, camp_id)
         from finance import email_inbound as _ein
         corpo_txt = _tira_assinatura(corpo) + "\n\n" + _assinatura_texto(idn)
+        link_unsub = _app_url() + "/descadastrar-oc?t=" + descad_token(conta_id, email)
         ok = _ein.enviar_conta(pool, conta_id, email, assunto,
                                _html(corpo, lead, idn, link, link_int, link_abrir=link_abr),
                                texto_alt=corpo_txt + "\n\nTenho interesse: " + link_int,
-                               from_nome=(conta_nome or None))
+                               from_nome=(conta_nome or None), list_unsub=link_unsub)
         if not ok:
             _marcar(pool, aid, "erro")
             continue

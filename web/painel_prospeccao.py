@@ -5636,36 +5636,43 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 .head .sub{font-size:.85rem;color:var(--mut);margin-top:.25rem}
 .head .acts{display:flex;gap:.45rem;flex-wrap:wrap;flex-shrink:0}
 .pbtn.sm{padding:.36rem .6rem;font-size:.8rem}
-/* stepper */
+/* stepper — clica e abre a seção correspondente */
 .flow{display:flex;gap:.4rem;margin:1rem 0 1.3rem;overflow-x:auto;padding-bottom:.3rem;-webkit-overflow-scrolling:touch}
-.step{flex:1;min-width:132px;display:flex;gap:.55rem;align-items:center;padding:.6rem .7rem;background:var(--card);border:1px solid var(--borda);border-radius:11px;text-decoration:none;color:var(--txt)}
+.step{flex:1;min-width:132px;display:flex;gap:.55rem;align-items:center;padding:.6rem .7rem;background:var(--card);border:1px solid var(--borda);border-radius:11px;text-decoration:none;color:var(--txt);cursor:pointer}
 .step .n{width:22px;height:22px;flex-shrink:0;border-radius:50%;display:grid;place-items:center;font-size:.74rem;font-weight:700;background:var(--card-2);border:1px solid var(--borda);color:var(--mut)}
 .step>.lbl2{display:flex;flex-direction:column;min-width:0}
 .step .tt2{display:block;font-size:.82rem;font-weight:600;line-height:1.2}
 .step .st{display:block;font-size:.68rem;color:var(--mut);margin-top:.05rem}
 .step.done .n{background:#10241a;border-color:#1e4a34;color:#3ddc84}
-.step.now{border-color:var(--verde)}.step.now .n{background:var(--verde);border-color:var(--verde);color:#fff}
 .step.todo .st{color:#e0a33e}
-/* corpo 2 colunas */
-.body{display:grid;gap:1rem;align-items:start}
-@media(min-width:1000px){.body{grid-template-columns:1.5fr 1fr}.rail{position:sticky;top:1rem}}
-.stack{display:flex;flex-direction:column;gap:1rem;min-width:0}
-.rail{display:flex;flex-direction:column;gap:1rem;min-width:0}
-/* seção numerada */
-.sec{padding:1rem 1.05rem}
-.sec>header{display:flex;align-items:center;gap:.6rem;margin-bottom:.2rem;flex-wrap:wrap}
-.sec>header .idx{width:26px;height:26px;flex-shrink:0;border-radius:8px;display:grid;place-items:center;font-size:.82rem;font-weight:750;background:var(--card-2);border:1px solid var(--borda);color:var(--verde-claro)}
-.sec>header h3{margin:0;font-size:1rem}.sec>header .grow{flex:1}
-.sec .desc{font-size:.8rem;color:var(--mut);margin:.35rem 0 .8rem}
+/* ===== seção colapsável ===== */
+.secs{display:flex;flex-direction:column;gap:.85rem}
+.sec{background:var(--card);border:1px solid var(--borda);border-radius:13px;overflow:hidden}
+.sumrow{display:flex;align-items:center;gap:.8rem;padding:.85rem 1.05rem;cursor:pointer;user-select:none;background:none;border:0;width:100%;text-align:left;font:inherit;color:inherit}
+.sumrow:hover{background:var(--card-2)}
+.sumrow .idx{width:26px;height:26px;flex-shrink:0;border-radius:8px;display:grid;place-items:center;font-size:.82rem;font-weight:750;background:var(--card-2);border:1px solid var(--borda);color:var(--verde-claro)}
+.sec.done .sumrow .idx{background:#10241a;border-color:#1e4a34;color:#3ddc84}
+.sumrow h3{margin:0;font-size:.95rem;flex-shrink:0;font-weight:700}
+.chips{display:flex;gap:.4rem;flex-wrap:wrap;flex:1;min-width:0;align-items:center}
+.chip{font-size:.76rem;color:var(--mut);white-space:nowrap;padding:.18rem .55rem;border-radius:999px;border:1px solid var(--borda);background:var(--bg);display:inline-flex;align-items:center;gap:.3rem}
+.chip b{color:var(--txt);font-weight:600;font-variant-numeric:tabular-nums}
+.chip.warn{color:#e0a33e;border-color:#5a4520;background:#2a2113}
+.chip.on{color:var(--verde-claro);border-color:#1e4a34;background:#10241a}
+.caret{flex-shrink:0;width:30px;height:30px;border-radius:8px;border:1px solid var(--borda);display:grid;place-items:center;color:var(--mut);transition:transform .18s ease,background .15s ease}
+.sumrow:hover .caret{border-color:var(--verde);color:var(--txt)}
+.sec.open .caret{transform:rotate(180deg);background:var(--card-2)}
+.secbody{max-height:0;overflow:hidden;transition:max-height .25s ease}
+.sec.open .secbody{max-height:3600px}
+.bodyin{padding:0 1.05rem 1.1rem;border-top:1px solid var(--borda)}
+.sec .desc{font-size:.8rem;color:var(--mut);margin:.8rem 0 .8rem}
 .row{display:flex;gap:.6rem;flex-wrap:wrap;align-items:flex-end}
 .divi{border-top:1px solid var(--borda);margin:.85rem 0 .8rem}
 .chk{display:flex;gap:.45rem;align-items:center;font-size:.85rem;cursor:pointer}
 .chk input{width:16px;height:16px;accent-color:var(--verde)}
-.bigcount{display:flex;align-items:baseline;gap:.5rem;margin:.7rem 0}
-.bigcount b{font-size:1.9rem;font-weight:750;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.foot{display:flex;justify-content:flex-end;gap:.5rem;margin-top:.9rem;flex-wrap:wrap}
 /* material selector */
-.mtabs{display:flex;gap:.4rem;flex-wrap:wrap;margin:.35rem 0 .6rem}
-.mtab{display:inline-flex;align-items:center;gap:.35rem;padding:.4rem .7rem;border-radius:999px;font-size:.8rem;font-weight:600;background:transparent;border:1px solid var(--borda);color:var(--mut);cursor:pointer}
+.mtabs{display:flex;gap:.4rem;flex-wrap:wrap;margin:.8rem 0 .6rem}
+.mtab{display:inline-flex;align-items:center;gap:.35rem;padding:.4rem .7rem;border-radius:999px;font-size:.8rem;font-weight:600;background:transparent;border:1px solid var(--borda);color:var(--mut);cursor:pointer;flex:0 0 auto}
 .mtab:hover{color:var(--txt);border-color:var(--verde)}
 .mtab.on{background:var(--verde);border-color:var(--verde);color:#fff}
 .mpane{display:none}.mpane.on{display:block}
@@ -5674,12 +5681,11 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 .mfile{display:flex;align-items:center;gap:.55rem;border:1px solid #1e4a34;background:#10241a;border-radius:10px;padding:.5rem .7rem;margin-top:.5rem;font-size:.84rem}
 .mhint{font-size:.74rem;color:var(--mut);margin-top:.5rem}
 /* prévia + checklist */
-.mailp{background:#0e0f11;border:1px solid var(--borda);border-radius:11px;overflow:hidden;margin-top:.2rem}
+.mailp{background:#0e0f11;border:1px solid var(--borda);border-radius:11px;overflow:hidden;margin-top:.8rem}
 .mailp .h{padding:.55rem .8rem;border-bottom:1px solid var(--borda);font-size:.76rem;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mailp .h b{color:var(--txt)}
 .mailp .b{padding:.85rem .95rem;font-size:.88rem;line-height:1.6;white-space:pre-wrap}
 .mailp .f{padding:.5rem .8rem;border-top:1px solid var(--borda);font-size:.68rem;color:var(--mut)}
-.ready{padding:.85rem .95rem}.ready h4{margin:0 0 .5rem;font-size:.86rem}
 .ck{display:flex;align-items:center;gap:.5rem;font-size:.83rem;padding:.22rem 0}
 .ck .dot{width:16px;height:16px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;font-size:.68rem}
 .ck.ok .dot{background:#10241a;border:1px solid #1e4a34;color:#3ddc84}
@@ -5691,21 +5697,12 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 .passo .dtag{font-size:.72rem;color:var(--mut);display:flex;align-items:center;gap:.3rem}
 .passo .dtag .fld{width:60px;text-align:center;padding:.35rem}
 .passo textarea.fld{resize:vertical}
-/* desempenho no TOPO: ordena os filhos do wrapper (head, aviso, s4, nav, body) */
-.cdwrap{display:flex;flex-direction:column}
-.cdwrap>.head{order:0}.cdwrap>.ok{order:1}.cdwrap>#s4{order:2}.cdwrap>.flow{order:3}.cdwrap>.body{order:4}
-.wide{margin-top:.4rem}
 /* link "voltar" (breadcrumb) acima do título */
 .voltar{display:inline-block;color:var(--txt-mut,#8a938a);text-decoration:none;font-size:.82rem;margin-bottom:.35rem}
 .voltar:hover{color:var(--verde-claro)}
-/* trava as abas de material como pílulas (não esticam) */
-.mtabs .mtab{flex:0 0 auto}
-.secttl{margin:.2rem 0 0;font-size:1rem;display:flex;align-items:center;gap:.6rem}
-.secttl .idx{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-size:.82rem;font-weight:750;background:var(--card-2);border:1px solid var(--borda);color:var(--verde-claro)}
-.cpstats{display:grid;grid-template-columns:repeat(6,1fr);gap:.6rem}
-@media(max-width:720px){.cpstats{grid-template-columns:repeat(3,1fr)}}
-@media(max-width:460px){.cpstats{grid-template-columns:repeat(2,1fr)}}
-.kpigrp{margin-top:.7rem}
+/* desempenho */
+.kpigrp{margin-top:.9rem}
+.kpigrp:first-child{margin-top:.8rem}
 .kpihead{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);font-weight:700;margin:0 0 .35rem}
 .cpstats4{display:grid;grid-template-columns:repeat(4,1fr);gap:.6rem}
 @media(max-width:560px){.cpstats4{grid-template-columns:repeat(2,1fr)}}
@@ -5715,13 +5712,13 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 .histcol h5{margin:0 0 .4rem;font-size:.78rem;color:var(--txt)}
 .histev{display:flex;gap:.6rem;font-size:.8rem;padding:.25rem 0;border-bottom:1px solid var(--borda)}
 .histev .qd{color:var(--mut);white-space:nowrap;min-width:82px}
-.cpstat{background:var(--card);border:1px solid var(--borda);border-radius:11px;padding:.7rem .8rem;min-width:0}
+.cpstat{background:var(--bg);border:1px solid var(--borda);border-radius:11px;padding:.7rem .8rem;min-width:0}
 .cpstat .n{font-size:1.4rem;font-weight:750;letter-spacing:-.02em;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cpstat .l{font-size:.7rem;color:var(--mut);margin-top:.1rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cpstat.g .n{color:#3ddc84}.cpstat.r .n{color:#e0574f}
 .tbl-wrap{overflow-x:auto;border-radius:12px;border:1px solid var(--borda);margin-top:.8rem}
 .tbl-wrap table{width:100%;border-collapse:collapse;font-size:.84rem;min-width:460px}
-.tbl-wrap thead th{text-align:left;color:var(--mut);font-weight:500;padding:.55rem .9rem;background:var(--card)}
+.tbl-wrap thead th{text-align:left;color:var(--mut);font-weight:500;padding:.55rem .9rem;background:var(--card-2)}
 .tbl-wrap tbody td{padding:.55rem .9rem;border-top:1px solid var(--borda)}
 .apill{font-size:.68rem;font-weight:600;padding:.1rem .45rem;border-radius:999px;border:1px solid var(--borda);white-space:nowrap}
 .apill.respondeu,.apill.concluido{color:#3ddc84;border-color:#1e4a34;background:#10241a}
@@ -5730,6 +5727,9 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 .apill.fila{color:#8a938a}
 </style>
 {% set mt = camp.material_tipo or 'link' %}
+{% set micon = {'link':'🔗','pdf':'📄','video':'🎬','foto':'🖼'} %}
+{% set ns = namespace(modelo_nome='') %}
+{% for m in modelos %}{% if m.codigo==camp.modelo_codigo %}{% set ns.modelo_nome = m.nome %}{% endif %}{% endfor %}
 <div class="cdwrap">
   <div class="head">
     <div style="min-width:0">
@@ -5738,24 +5738,34 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
       <div class="sub"><b style="color:var(--txt)">{{ na_camp }}</b> lead(s) na campanha · limite <b style="color:var(--txt)">{{ camp.limite }}</b>/dia · ✉️ e-mail{% if camp.wa_ativo %} + 💬 WhatsApp{% endif %}</div>
     </div>
     <div class="acts">
-      {% if camp.status != 'ativa' %}<form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/status" style="margin:0"><input type="hidden" name="status" value="ativa"><button class="pbtn">▶ Ativar</button></form>
+      {% if camp.status != 'ativa' %}<form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/status" style="margin:0"><input type="hidden" name="status" value="ativa"><button class="pbtn" {% if not na_camp %}disabled title="Adicione leads antes de ativar"{% endif %}>▶ Ativar</button></form>
       {% else %}<form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/status" style="margin:0"><input type="hidden" name="status" value="pausada"><button class="pbtn ghost">❚❚ Pausar</button></form>{% endif %}
     </div>
   </div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
 
   <nav class="flow" aria-label="Etapas da campanha">
-    <a class="step done" href="#s1"><span class="n">✓</span><span class="lbl2"><span class="tt2">Configuração</span><span class="st">nome, ritmo, canais</span></span></a>
-    <a class="step" href="#s2"><span class="n">2</span><span class="lbl2"><span class="tt2">Sequência</span><span class="st">{{ passos|length }} passo(s)</span></span></a>
-    <a class="step" href="#s3"><span class="n">3</span><span class="lbl2"><span class="tt2">Prévia</span><span class="st">confira o e-mail</span></span></a>
-    <a class="step {% if camp.status=='ativa' %}done{% else %}todo{% endif %}" href="#s4"><span class="n">{% if camp.status=='ativa' %}✓{% else %}4{% endif %}</span><span class="lbl2"><span class="tt2">Ativar</span><span class="st">e acompanhar</span></span></a>
+    <span class="step done" onclick="secOpen('s1')"><span class="n">✓</span><span class="lbl2"><span class="tt2">Configuração</span><span class="st">nome, ritmo, canais</span></span></span>
+    <span class="step {% if passos %}done{% endif %}" onclick="secOpen('s2')"><span class="n">{% if passos %}✓{% else %}2{% endif %}</span><span class="lbl2"><span class="tt2">Sequência</span><span class="st">{{ passos|length }} passo(s)</span></span></span>
+    <span class="step" onclick="secOpen('s3')"><span class="n">3</span><span class="lbl2"><span class="tt2">Prévia</span><span class="st">confira o e-mail</span></span></span>
+    <span class="step {% if camp.status=='ativa' %}done{% else %}todo{% endif %}" onclick="secOpen('s4')"><span class="n">{% if camp.status=='ativa' %}✓{% else %}4{% endif %}</span><span class="lbl2"><span class="tt2">Ativar</span><span class="st">e acompanhar</span></span></span>
   </nav>
 
-  <div class="body">
-    <div class="stack">
-      <!-- 1 · CONFIGURAÇÃO -->
-      <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/config" enctype="multipart/form-data" class="card sec" id="s1">
-        <header><span class="idx">1</span><h3>Configuração</h3><span class="grow"></span><button class="pbtn ghost sm">Salvar</button></header>
+  <div class="secs">
+    <!-- 1 · CONFIGURAÇÃO -->
+    <div class="sec done" id="s1">
+      <button type="button" class="sumrow" onclick="secToggle('s1')">
+        <span class="idx">1</span><h3>Configuração</h3>
+        <span class="chips">
+          <span class="chip">Envios/dia <b>{{ camp.limite }}</b></span>
+          <span class="chip {% if not camp.material %}warn{% endif %}">{{ micon[mt] }} Material: <b>{% if camp.material %}{{ mt }}{% else %}não configurado{% endif %}</b></span>
+          <span class="chip {% if camp.wa_ativo and camp.wa_pronto %}on{% elif camp.wa_ativo %}warn{% endif %}">💬 WhatsApp {% if camp.wa_ativo and camp.wa_pronto %}ativo{% elif camp.wa_ativo %}SID pendente{% else %}desligado{% endif %}</span>
+          <span class="chip {% if camp.reengajar_ativo %}on{% endif %}">🔁 Reengajar {% if camp.reengajar_ativo %}em <b>{{ camp.reengajar_dias }}d</b>{% else %}desligado{% endif %}</span>
+        </span>
+        <span class="caret">▾</span>
+      </button>
+      <div class="secbody"><div class="bodyin">
+      <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/config" enctype="multipart/form-data">
         <p class="desc">O básico: nome, ritmo de envio e o material que o lead recebe.</p>
         <div class="row">
           <div style="flex:1;min-width:180px"><label class="lbl">Nome</label><input class="fld" name="nome" value="{{ camp.nome }}" maxlength="120"></div>
@@ -5808,16 +5818,28 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         </div>
         <div class="mut" style="font-size:.74rem;margin-top:.3rem">Quem recebeu a sequência e <b>não respondeu</b> em X dias leva <b>1 toque pelo outro canal</b>: WhatsApp (se ativo + número), senão um e-mail curto de reforço. Dispara <b>uma vez</b>, respeita o limite/dia e para quando o lead responde ou descadastra.</div>
 
-        <div style="margin-top:.8rem;display:flex;gap:.5rem;flex-wrap:wrap">
-          <button class="pbtn">Salvar configuração</button>
-          <button class="pbtn ghost" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/excluir" formmethod="post" formnovalidate style="color:#e0574f;border-color:#5c2a27" onclick="return confirm('Excluir a campanha? Os leads voltam pro funil.')">🗑 Excluir</button>
+        <div class="foot">
+          <button type="button" class="pbtn ghost sm" onclick="secToggle('s1')">Fechar</button>
+          <button class="pbtn ghost sm" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/excluir" formmethod="post" formnovalidate style="color:#e0574f;border-color:#5c2a27" onclick="return confirm('Excluir a campanha? Os leads voltam pro funil.')">🗑 Excluir</button>
+          <button class="pbtn sm">Salvar configuração</button>
         </div>
       </form>
+      </div></div>
+    </div>
 
-      <!-- 2 · SEQUÊNCIA -->
-      <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/sequencia" class="card sec" id="s2">
-        <header><span class="idx">2</span><h3>Sequência de e-mail</h3><span class="grow"></span>
-          <button type="button" class="pbtn ghost sm" onclick="addPasso()">＋ Passo</button><button class="pbtn sm">Salvar</button></header>
+    <!-- 2 · SEQUÊNCIA -->
+    <div class="sec {% if passos %}done{% endif %}" id="s2">
+      <button type="button" class="sumrow" onclick="secToggle('s2')">
+        <span class="idx">2</span><h3>Sequência</h3>
+        <span class="chips">
+          <span class="chip {% if not passos %}warn{% endif %}"><b>{{ passos|length }}</b> passo(s)</span>
+          {% if ns.modelo_nome %}<span class="chip">Modelo: <b>{{ ns.modelo_nome }}</b></span>{% endif %}
+          {% if cadencia != '—' %}<span class="chip">{{ cadencia }}</span>{% endif %}
+        </span>
+        <span class="caret">▾</span>
+      </button>
+      <div class="secbody"><div class="bodyin">
+      <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/sequencia">
         <p class="desc">Os e-mails da campanha (isto <b>não</b> é o template de WhatsApp da etapa 1). <b>D+</b> = dias após o 1º e-mail (0 = primeiro). <b>🤖 IA</b> escreve único por lead; <b>Template</b> usa o texto (<code>{empresa}</code>, <code>{cidade}</code>, <code>{segmento}</code>).</p>
         <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.8rem;padding:.5rem .6rem;border:1px solid var(--borda);border-radius:10px;background:var(--bg)">
           <label class="lbl" style="margin:0" title="Modelo da sequência de e-mail por nicho — não confundir com o template de WhatsApp">📋 Modelo de e-mail (por nicho):</label>
@@ -5826,6 +5848,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
           </select>
           <button type="button" class="pbtn ghost sm" onclick="aplicarModelo({{ camp.id }})">Aplicar à sequência</button>
           <span style="flex:1"></span>
+          <button type="button" class="pbtn ghost sm" onclick="addPasso()">＋ Passo</button>
           <button type="button" class="pbtn ghost sm" onclick="salvarModelo({{ camp.id }})" title="Salvar a sequência atual como um modelo seu, reutilizável">💾 Salvar como modelo</button>
         </div>
         <div id="passos">
@@ -5842,14 +5865,27 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
           </div>
           {% endfor %}
         </div>
+        <div class="foot">
+          <button type="button" class="pbtn ghost sm" onclick="secToggle('s2')">Fechar</button>
+          <button class="pbtn sm">Salvar sequência</button>
+        </div>
       </form>
+      </div></div>
     </div>
 
-    <!-- RAIL: prévia + checklist -->
-    <div class="rail">
-      {% if previa %}
-      <div class="card sec" id="s3">
-        <header><span class="idx">3</span><h3>Prévia</h3><span class="grow"></span>{% if previa.ia %}<button type="button" class="pbtn ghost sm" id="pia-btn" onclick="previaIA({{ camp.id }})">🤖 Gerar</button>{% endif %}</header>
+    <!-- 3 · PRÉVIA -->
+    <div class="sec {% if previa and na_camp and camp.material %}done{% endif %}" id="s3">
+      <button type="button" class="sumrow" onclick="secToggle('s3')">
+        <span class="idx">3</span><h3>Prévia</h3>
+        <span class="chips">
+          <span class="chip {% if passos %}on{% else %}warn{% endif %}">{% if passos %}✓{% else %}!{% endif %} sequência</span>
+          <span class="chip {% if na_camp %}on{% else %}warn{% endif %}">{% if na_camp %}✓{% else %}!{% endif %} <b>{{ na_camp }}</b> lead(s)</span>
+          <span class="chip {% if camp.material %}on{% else %}warn{% endif %}">{% if camp.material %}✓{% else %}!{% endif %} material</span>
+        </span>
+        <span class="caret">▾</span>
+      </button>
+      <div class="secbody"><div class="bodyin">
+        {% if previa %}
         <p class="desc" style="margin-bottom:.4rem">1º passo · exemplo com <b>{{ previa.empresa }}</b></p>
         <div class="mailp">
           <div class="h">De <b>{{ remetente or 'sua empresa' }}</b> · Para {{ previa.email or '—' }}</div>
@@ -5860,72 +5896,86 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
           </div>
           <div class="f">Sua empresa · descadastrar (link automático em cada envio).</div>
         </div>
-      </div>
-      {% endif %}
-      <div class="card ready">
-        <h4>Pronto pra ativar?</h4>
-        <div class="ck {% if passos %}ok{% else %}no{% endif %}"><span class="dot">{% if passos %}✓{% else %}!{% endif %}</span> Sequência com {{ passos|length }} passo(s)</div>
-        <div class="ck {% if na_camp %}ok{% else %}no{% endif %}"><span class="dot">{% if na_camp %}✓{% else %}!{% endif %}</span> {% if na_camp %}{{ na_camp }} lead(s) na campanha{% else %}Sem leads — mande da <b>Base</b> (Jogar na campanha){% endif %}</div>
-        <div class="ck {% if camp.material %}ok{% else %}no{% endif %}"><span class="dot">{% if camp.material %}✓{% else %}!{% endif %}</span> {% if camp.material %}Material configurado{% else %}Material não configurado{% endif %}</div>
-        {% if camp.status != 'ativa' %}
-        <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/status" style="margin:.7rem 0 0"><input type="hidden" name="status" value="ativa"><button class="pbtn" style="width:100%;justify-content:center" {% if not na_camp %}disabled{% endif %}>▶ Ativar campanha</button></form>
         {% else %}
-        <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/status" style="margin:.7rem 0 0"><input type="hidden" name="status" value="pausada"><button class="pbtn ghost" style="width:100%;justify-content:center">❚❚ Pausar</button></form>
+        <p class="desc">Sem exemplo ainda — adicione um passo na Sequência e um lead na campanha pra ver a prévia.</p>
         {% endif %}
-      </div>
+        <div style="margin-top:1rem">
+          <div class="ck {% if passos %}ok{% else %}no{% endif %}"><span class="dot">{% if passos %}✓{% else %}!{% endif %}</span> Sequência com {{ passos|length }} passo(s)</div>
+          <div class="ck {% if na_camp %}ok{% else %}no{% endif %}"><span class="dot">{% if na_camp %}✓{% else %}!{% endif %}</span> {% if na_camp %}{{ na_camp }} lead(s) na campanha{% else %}Sem leads — mande da <b>Base</b> (Jogar na campanha){% endif %}</div>
+          <div class="ck {% if camp.material %}ok{% else %}no{% endif %}"><span class="dot">{% if camp.material %}✓{% else %}!{% endif %}</span> {% if camp.material %}Material configurado{% else %}Material não configurado{% endif %}</div>
+        </div>
+        <div class="foot">
+          <button type="button" class="pbtn ghost sm" onclick="secToggle('s3')">Fechar</button>
+          {% if previa and previa.ia %}<button type="button" class="pbtn ghost sm" id="pia-btn" onclick="previaIA({{ camp.id }})">🤖 Gerar outro exemplo</button>{% endif %}
+        </div>
+      </div></div>
     </div>
-  </div>
 
-  <!-- 4 · DESEMPENHO + LEADS -->
-  <div class="wide" id="s4">
-    <h3 class="secttl"><span class="idx">4</span> Desempenho &amp; acompanhamento</h3>
-    {% if camp.status=='ativa' %}<div class="mut" style="font-size:.8rem;margin-top:.3rem">✅ <b style="color:var(--verde-claro)">Ativa</b> — dispara sozinho (até {{ camp.limite }}/dia) e para em quem responde ou descadastra.</div>{% else %}<div class="mut" style="font-size:.8rem;margin-top:.3rem">Clique <b>▶ Ativar</b> pra o motor começar a disparar.</div>{% endif %}
+    <!-- 4 · DESEMPENHO + LEADS -->
+    <div class="sec {% if camp.status=='ativa' %}done{% endif %}" id="s4">
+      <button type="button" class="sumrow" onclick="secToggle('s4')">
+        <span class="idx">4</span><h3>Desempenho</h3>
+        <span class="chips">
+          <span class="chip">{{ metr.enviados }} enviados</span>
+          <span class="chip {% if metr.responderam %}on{% endif %}">{{ metr.responderam }} responderam</span>
+          <span class="chip">{{ metr.taxa }}% taxa</span>
+          <span class="chip">{{ metr.fila }} na fila</span>
+        </span>
+        <span class="caret">▾</span>
+      </button>
+      <div class="secbody"><div class="bodyin">
+        {% if camp.status=='ativa' %}<div class="mut" style="font-size:.8rem;margin-top:.8rem">✅ <b style="color:var(--verde-claro)">Ativa</b> — dispara sozinho (até {{ camp.limite }}/dia) e para em quem responde ou descadastra.</div>{% else %}<div class="mut" style="font-size:.8rem;margin-top:.8rem">Clique <b>▶ Ativar</b> (no topo) pra o motor começar a disparar.</div>{% endif %}
 
-    <div class="kpigrp"><div class="kpihead">📧 E-mail</div>
-      <div class="cpstats4">
-        <div class="cpstat"><div class="n">{{ metr.enviados }}</div><div class="l">Enviados</div></div>
-        <div class="cpstat"><div class="n">{{ metr.abriram }}</div><div class="l">Abriram 👁</div></div>
-        <div class="cpstat"><div class="n">{{ metr.taxa_abertura }}%</div><div class="l">Taxa abertura</div></div>
-        <div class="cpstat g"><div class="n">{{ metr.responderam }}</div><div class="l">Responderam</div></div>
-      </div>
-    </div>
-    <div class="kpigrp"><div class="kpihead">💬 WhatsApp</div>
-      <div class="cpstats4">
-        <div class="cpstat"><div class="n">{{ metr.wa_enviados }}</div><div class="l">Enviados</div></div>
-        <div class="cpstat"><div class="n">{{ metr.wa_entregues }}</div><div class="l">Entregues ✓✓</div></div>
-        <div class="cpstat"><div class="n">{{ metr.wa_lidos }}</div><div class="l">Lidos 👀</div></div>
-        <div class="cpstat"><div class="n">{{ metr.wa_taxa_leitura }}%</div><div class="l">Taxa leitura</div></div>
-      </div>
-    </div>
-    <div class="kpigrp"><div class="kpihead">📊 Geral</div>
-      <div class="cpstats4">
-        <div class="cpstat g"><div class="n">{{ metr.taxa }}%</div><div class="l">Taxa resposta</div></div>
-        <div class="cpstat"><div class="n">{{ metr.fila }}</div><div class="l">Na fila</div></div>
-        <div class="cpstat r"><div class="n">{{ metr.descadastros }}</div><div class="l">Descadastros</div></div>
-        <div class="cpstat"><div class="n">{{ metr.hoje }}<span style="font-size:.9rem;color:var(--mut)">/{{ camp.limite }}</span></div><div class="l">Hoje</div></div>
-      </div>
-    </div>
-    {% if metr.erros or metr.wa_erros %}<div class="mut" style="font-size:.78rem;margin-top:.5rem"><span style="color:#e0574f">{% if metr.erros %}{{ metr.erros }} erro(s) de e-mail{% endif %}{% if metr.erros and metr.wa_erros %} · {% endif %}{% if metr.wa_erros %}{{ metr.wa_erros }} erro(s) de WhatsApp{% endif %}</span></div>{% endif %}
+        <div class="kpigrp"><div class="kpihead">📧 E-mail</div>
+          <div class="cpstats4">
+            <div class="cpstat"><div class="n">{{ metr.enviados }}</div><div class="l">Enviados</div></div>
+            <div class="cpstat"><div class="n">{{ metr.abriram }}</div><div class="l">Abriram 👁</div></div>
+            <div class="cpstat"><div class="n">{{ metr.taxa_abertura }}%</div><div class="l">Taxa abertura</div></div>
+            <div class="cpstat g"><div class="n">{{ metr.responderam }}</div><div class="l">Responderam</div></div>
+          </div>
+        </div>
+        <div class="kpigrp"><div class="kpihead">💬 WhatsApp</div>
+          <div class="cpstats4">
+            <div class="cpstat"><div class="n">{{ metr.wa_enviados }}</div><div class="l">Enviados</div></div>
+            <div class="cpstat"><div class="n">{{ metr.wa_entregues }}</div><div class="l">Entregues ✓✓</div></div>
+            <div class="cpstat"><div class="n">{{ metr.wa_lidos }}</div><div class="l">Lidos 👀</div></div>
+            <div class="cpstat"><div class="n">{{ metr.wa_taxa_leitura }}%</div><div class="l">Taxa leitura</div></div>
+          </div>
+        </div>
+        <div class="kpigrp"><div class="kpihead">📊 Geral</div>
+          <div class="cpstats4">
+            <div class="cpstat g"><div class="n">{{ metr.taxa }}%</div><div class="l">Taxa resposta</div></div>
+            <div class="cpstat"><div class="n">{{ metr.fila }}</div><div class="l">Na fila</div></div>
+            <div class="cpstat r"><div class="n">{{ metr.descadastros }}</div><div class="l">Descadastros</div></div>
+            <div class="cpstat"><div class="n">{{ metr.hoje }}<span style="font-size:.9rem;color:var(--mut)">/{{ camp.limite }}</span></div><div class="l">Hoje</div></div>
+          </div>
+        </div>
+        {% if metr.erros or metr.wa_erros %}<div class="mut" style="font-size:.78rem;margin-top:.5rem"><span style="color:#e0574f">{% if metr.erros %}{{ metr.erros }} erro(s) de e-mail{% endif %}{% if metr.erros and metr.wa_erros %} · {% endif %}{% if metr.wa_erros %}{{ metr.wa_erros }} erro(s) de WhatsApp{% endif %}</span></div>{% endif %}
 
-    <div class="kpihead" style="margin-top:1rem">Contatos &amp; histórico</div>
-    <div class="tbl-wrap">
-      <table>
-        <thead><tr><th>Empresa</th><th>Situação</th><th>📧 E-mail</th><th>💬 WhatsApp</th><th>Próximo/último</th><th></th></tr></thead>
-        <tbody>
-          {% for l in leads %}
-          <tr><td><b>{{ l.empresa }}</b><div class="mut" style="font-size:.76rem">{{ l.email }}</div></td>
-            <td><span class="apill {{ l.status }}">{{ l.rot }}</span></td>
-            <td class="mut" style="white-space:nowrap">D{{ l.passo }}{% if l.abriu %} · <span style="color:var(--verde-claro)" title="Abriu {{ l.abriu }}x · 1ª em {{ l.aberto }}">👁 {{ l.aberto }}{% if l.abriu > 1 %} ({{ l.abriu }}x){% endif %}</span>{% endif %}</td>
-            <td class="mut" style="white-space:nowrap">{{ l.wa_rot or '—' }}</td>
-            <td class="mut" style="white-space:nowrap">{% if l.status in ('fila','enviado') and l.prox %}⏳ {{ l.prox }}{% elif l.ult %}✓ {{ l.ult }}{% else %}—{% endif %}</td>
-            <td style="text-align:right;white-space:nowrap"><button type="button" class="cpx" onclick="campHist({{ camp.id }},{{ l.pid }},this)" title="Ver histórico (data/hora por canal)">🕘</button> <button type="button" class="cpx" onclick="campRemLead(this,{{ camp.id }},{{ l.pid }})" title="Remover da campanha (o lead volta pra Base)">✕</button></td></tr>
-          {% else %}<tr><td colspan="6" class="mut" style="text-align:center;padding:1.6rem">Nenhum lead ainda — mande da <b>Base</b> (marque os leads → “Jogar na campanha”).</td></tr>{% endfor %}
-        </tbody>
-      </table>
+        <div class="kpihead" style="margin-top:1.1rem">Contatos &amp; histórico</div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>Empresa</th><th>Situação</th><th>📧 E-mail</th><th>💬 WhatsApp</th><th>Próximo/último</th><th></th></tr></thead>
+            <tbody>
+              {% for l in leads %}
+              <tr><td><b>{{ l.empresa }}</b><div class="mut" style="font-size:.76rem">{{ l.email }}</div></td>
+                <td><span class="apill {{ l.status }}">{{ l.rot }}</span></td>
+                <td class="mut" style="white-space:nowrap">D{{ l.passo }}{% if l.abriu %} · <span style="color:var(--verde-claro)" title="Abriu {{ l.abriu }}x · 1ª em {{ l.aberto }}">👁 {{ l.aberto }}{% if l.abriu > 1 %} ({{ l.abriu }}x){% endif %}</span>{% endif %}</td>
+                <td class="mut" style="white-space:nowrap">{{ l.wa_rot or '—' }}</td>
+                <td class="mut" style="white-space:nowrap">{% if l.status in ('fila','enviado') and l.prox %}⏳ {{ l.prox }}{% elif l.ult %}✓ {{ l.ult }}{% else %}—{% endif %}</td>
+                <td style="text-align:right;white-space:nowrap"><button type="button" class="cpx" onclick="campHist({{ camp.id }},{{ l.pid }},this)" title="Ver histórico (data/hora por canal)">🕘</button> <button type="button" class="cpx" onclick="campRemLead(this,{{ camp.id }},{{ l.pid }})" title="Remover da campanha (o lead volta pra Base)">✕</button></td></tr>
+              {% else %}<tr><td colspan="6" class="mut" style="text-align:center;padding:1.6rem">Nenhum lead ainda — mande da <b>Base</b> (marque os leads → “Jogar na campanha”).</td></tr>{% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div></div>
     </div>
   </div>
 </div>
 <script>
+function secToggle(id){document.getElementById(id).classList.toggle('open');}
+function secOpen(id){var el=document.getElementById(id);el.classList.add('open');el.scrollIntoView({behavior:'smooth',block:'start'});}
+if(location.hash){var _h=location.hash.slice(1);document.addEventListener('DOMContentLoaded',function(){var el=document.getElementById(_h);if(el&&el.classList.contains('sec')){el.classList.add('open');el.scrollIntoView({block:'start'});}});}
 function mtab(btn,tipo){
   var box=btn.parentNode; var A=box.querySelectorAll('.mtab');
   for(var i=0;i<A.length;i++)A[i].classList.remove('on');

@@ -1101,14 +1101,15 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
         convs = _conversas_list(c, ctx["conta_id"], ctx["gerencia"], ctx["membro_id"],
                                 canal=canal, vend=filtro_vend, escopo=escopo)
         ag_cfg, ag_conhec = None, None
-        perfil = {"instagram": "", "cargo": ""}
+        perfil = {"instagram": "", "cargo": "", "material": ""}
         if aba == "agente":
             ag_cfg = _agente_config(c, ctx["conta_id"])
             ag_conhec = _agente_conhecimento(c, ctx["conta_id"])
             prow = c.execute(
-                "select coalesce(prospec_instagram,''), coalesce(prospec_cargo,'') from contas where id=%s",
-                (ctx["conta_id"],)).fetchone() or ("", "")
-            perfil = {"instagram": prow[0], "cargo": prow[1]}
+                "select coalesce(prospec_instagram,''), coalesce(prospec_cargo,''), "
+                "coalesce(prospec_material,'') from contas where id=%s",
+                (ctx["conta_id"],)).fetchone() or ("", "", "")
+            perfil = {"instagram": prow[0], "cargo": prow[1], "material": prow[2]}
     vends = _vendedores(pool, ctx["conta_id"]) if ctx["gerencia"] else []
     return _render("prospeccao_comunicacao", request, titulo="Comunicação",
                    secao_ativa="prospeccao", aba=aba, convs=convs, escopo=escopo, canal=canal,
@@ -1615,9 +1616,10 @@ def comunicacao_agente_faq(request: Request, pergunta: str = Form(""), resposta:
 
 @router.post("/painel/prospeccao/comunicacao/prospec-perfil")
 def comunicacao_prospec_perfil(request: Request, prospec_instagram: str = Form(""),
-                               prospec_cargo: str = Form("")):
-    """Perfil do 1º contato: Instagram (referência do lead) e cargo de quem envia.
-    Alimenta o template do convite e a resposta ao botão 'Quero te conhecer'."""
+                               prospec_cargo: str = Form(""), prospec_material: str = Form("")):
+    """Perfil do 1º contato: Instagram (referência do lead), cargo de quem envia e
+    material padrão (link enviado no 'Quero o material' quando o lead está fora de
+    campanha). Alimenta o template do convite e as respostas aos botões."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -1625,9 +1627,10 @@ def comunicacao_prospec_perfil(request: Request, prospec_instagram: str = Form("
         return RedirectResponse(_AG_DESTINO, status_code=303)
     insta = (prospec_instagram or "").strip()[:200]
     cargo = (prospec_cargo or "").strip()[:60]
+    material = (prospec_material or "").strip()[:2000]
     with get_pool().connection() as c:
-        c.execute("update contas set prospec_instagram=%s, prospec_cargo=%s where id=%s",
-                  (insta or None, cargo or None, ctx["conta_id"]))
+        c.execute("update contas set prospec_instagram=%s, prospec_cargo=%s, prospec_material=%s where id=%s",
+                  (insta or None, cargo or None, material or None, ctx["conta_id"]))
         c.commit()
     request.session["prosp_aviso"] = "Perfil do 1º contato salvo ✓"
     return RedirectResponse(_AG_DESTINO, status_code=303)
@@ -1750,6 +1753,10 @@ def _tratar_botao_prospec(c, conta_id, remetente, tipo, texto, sid, nome) -> boo
                 where a.prospeccao_id=%s and cp.conta_id=%s and coalesce(cp.material,'')<>''
                 order by cp.criado_em desc limit 1""", (lead_id, conta_id)).fetchone()
         material = mrow[0] if mrow else ""
+        if not material:      # fora de campanha → material padrão da conta (fallback)
+            drow = c.execute("select coalesce(prospec_material,'') from contas where id=%s",
+                             (conta_id,)).fetchone()
+            material = (drow[0] if drow else "") or ""
     txt = _pi.resposta(tipo, idn, material)
     try:
         _wout.enviar(c, conta_id, rem, txt)
@@ -4943,6 +4950,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <div class="agfield"><label>Seu Instagram</label><input class="fld" name="prospec_instagram" value="{{ perfil.instagram }}" placeholder="@seuperfil"><small class="mut" style="font-size:.72rem">@ ou link — é a referência que o lead recebe pra te conhecer.</small></div>
         <div class="agfield"><label>Seu cargo</label><input class="fld" name="prospec_cargo" value="{{ perfil.cargo }}" placeholder="CEO"><small class="mut" style="font-size:.72rem">Aparece no convite: “Aqui é o Fulano, {cargo} da Empresa…”.</small></div>
       </div>
+      <div class="agfield" style="margin-top:.5rem"><label>Material padrão (link)</label><input class="fld" name="prospec_material" value="{{ perfil.material }}" placeholder="https://... (PDF, vídeo, página)"><small class="mut" style="font-size:.72rem">Enviado no “Quero o material” quando o lead não está em nenhuma campanha. Dentro de campanha, vale o material da campanha.</small></div>
       <div style="display:flex;justify-content:flex-end;margin-top:.4rem"><button class="pbtn">Salvar perfil</button></div>
     </form>
   </div>

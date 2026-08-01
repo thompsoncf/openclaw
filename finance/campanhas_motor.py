@@ -803,6 +803,10 @@ def registrar_interesse(pool, conta_id: int, prospeccao_id: int, campanha_id: in
         idn = _conta_identidade(c, conta_id)
         conta_nome = idn.get("empresa") or ""
         canal_rem = _canal_remetente(c, campanha_id)
+        # clique repetido / pré-carga do link (GET) → não reenvia o material nem re-loga
+        _prev = c.execute("select status from campanha_alvos where campanha_id=%s and prospeccao_id=%s",
+                          (campanha_id, prospeccao_id)).fetchone()
+        repetido = bool(_prev and _prev[0] == "respondeu")
         # para a sequência deste lead
         c.execute("""update campanha_alvos set status='respondeu', proximo_envio_em=null
                        where campanha_id=%s and prospeccao_id=%s""", (campanha_id, prospeccao_id))
@@ -817,9 +821,11 @@ def registrar_interesse(pool, conta_id: int, prospeccao_id: int, campanha_id: in
         conv_id = conv[0] if conv else c.execute(
             """insert into conversas (conta_id, prospeccao_id, canal, status, ultima_msg_em)
                values (%s,%s,'email','aberta',now()) returning id""", (conta_id, prospeccao_id)).fetchone()[0]
-        # registra o clique como entrada (o motor/agente entende que respondeu)
-        c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto)
-                     values (%s,'email','in','lead','[clicou: Tenho interesse]')""", (conv_id,))
+        # registra o clique como entrada (o motor/agente entende que respondeu) — só na 1ª vez
+        if not repetido:
+            c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto)
+                         values (%s,'email','in','lead','[clicou: Tenho interesse]')""", (conv_id,))
+            evento(c, campanha_id, prospeccao_id, "email", "respondeu", "Tenho interesse")
         master = c.execute("select coalesce(ativo,false) from agente_config where conta_id=%s",
                            (conta_id,)).fetchone()
         agente_on = bool(master and master[0])
@@ -827,9 +833,10 @@ def registrar_interesse(pool, conta_id: int, prospeccao_id: int, campanha_id: in
             c.execute("update conversas set agente_ativo=true, status='aberta', ultima_msg_em=now() where id=%s",
                       (conv_id,))
         c.commit()
-    # manda o material na hora (por e-mail), gravado como msg do bot
+    # manda o material na hora (por e-mail), gravado como msg do bot — só na 1ª vez
+    # (clique repetido/pré-carga não reenvia)
     enviado = False
-    if email and "@" in email:
+    if email and "@" in email and not repetido:
         corpo = (f"Que bom, {empresa or 'tudo bem'}! 🎉\n\n"
                  + ("Preparei um material pra você conhecer melhor a gente — é só abrir no botão abaixo.\n\n"
                     if material else "")
@@ -854,6 +861,7 @@ def registrar_interesse(pool, conta_id: int, prospeccao_id: int, campanha_id: in
                     c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto)
                                  values (%s,'email','out','bot',%s)""", (conv[0], f"{assunto}\n\n{corpo}"[:8000]))
                     c.execute("update conversas set ultima_msg_em=now() where id=%s", (conv[0],))
+                    evento(c, campanha_id, prospeccao_id, "email", "enviado", "material")
                     c.commit()
     return {"ok": True, "empresa": empresa, "material_enviado": enviado}
 

@@ -2391,7 +2391,8 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                       to_char(a.ultima_msg_em - interval '3 hours','DD/MM HH24:MI'), p.id,
                       coalesce(a.aberturas,0),
                       to_char(a.aberto_em - interval '3 hours','DD/MM HH24:MI'),
-                      coalesce(a.wa_status,'')
+                      coalesce(a.wa_status,''),
+                      coalesce(nullif(trim(p.whatsapp),''), nullif(trim(p.telefone),''))
                  from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
                 where a.campanha_id=%s order by a.ultima_msg_em desc nulls last, a.id desc limit 200""",
             (camp_id,)).fetchall()
@@ -2452,7 +2453,8 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                "erro": "💬 erro", "sem_numero": "💬 sem nº"}
     leads_l = [{"empresa": r[0], "email": r[1], "status": r[2], "passo": r[3],
                 "prox": r[4], "ult": r[5], "pid": r[6], "rot": _ALVO_ROT.get(r[2], r[2]),
-                "abriu": r[7], "aberto": r[8], "wa": r[9], "wa_rot": _WA_ROT.get(r[9], "")}
+                "abriu": r[7], "aberto": r[8], "wa": r[9], "wa_rot": _WA_ROT.get(r[9], ""),
+                "fone": r[10] or ""}
                for r in leads]
     from finance import email_inbound as _ein_mod
     email_principal = _ein_mod.remetente_conta(get_pool(), ctx["conta_id"], "email") or ""
@@ -6019,10 +6021,10 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
             <thead><tr><th>Empresa</th><th>Situação</th><th>📧 E-mail</th><th>💬 WhatsApp</th><th>Próximo/último</th><th></th></tr></thead>
             <tbody>
               {% for l in leads %}
-              <tr><td><b>{{ l.empresa }}</b><div class="mut" style="font-size:.76rem">{{ l.email }}</div></td>
+              <tr><td><b>{{ l.empresa }}</b><div class="mut" style="font-size:.76rem">{% if l.email %}✉️ {{ l.email }}{% endif %}{% if l.email and l.fone %} · {% endif %}{% if l.fone %}💬 {{ l.fone }}{% endif %}{% if not l.email and not l.fone %}—{% endif %}</div></td>
                 <td><span class="apill {{ l.status }}">{{ l.rot }}</span></td>
                 <td class="mut" style="white-space:nowrap">D{{ l.passo }}{% if l.abriu %} · <span style="color:var(--verde-claro)" title="Abriu {{ l.abriu }}x · 1ª em {{ l.aberto }}">👁 {{ l.aberto }}{% if l.abriu > 1 %} ({{ l.abriu }}x){% endif %}</span>{% endif %}</td>
-                <td class="mut" style="white-space:nowrap">{{ l.wa_rot or '—' }}</td>
+                <td class="mut" style="white-space:nowrap">{% if l.fone %}{{ l.fone }}{% if l.wa_rot %}<div style="font-size:.76rem">{{ l.wa_rot }}</div>{% endif %}{% else %}{{ l.wa_rot or '—' }}{% endif %}</td>
                 <td class="mut" style="white-space:nowrap">{% if l.status in ('fila','enviado') and l.prox %}⏳ {{ l.prox }}{% elif l.ult %}✓ {{ l.ult }}{% else %}—{% endif %}</td>
                 <td style="text-align:right;white-space:nowrap"><button type="button" class="cpx" onclick="campHist({{ camp.id }},{{ l.pid }},this)" title="Ver histórico (data/hora por canal)">🕘</button> <button type="button" class="cpx" onclick="campRemLead(this,{{ camp.id }},{{ l.pid }})" title="Remover da campanha (o lead volta pra Base)">✕</button></td></tr>
               {% else %}<tr><td colspan="6" class="mut" style="text-align:center;padding:1.6rem">Nenhum lead ainda — mande da <b>Base</b> (marque os leads → “Jogar na campanha”).</td></tr>{% endfor %}

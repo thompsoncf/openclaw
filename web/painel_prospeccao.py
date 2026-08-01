@@ -236,6 +236,36 @@ def _lead_card(id_, empresa, segmento, cidade, uf, temperatura, valor, vendedor)
             "uf": uf or "", "temperatura": temperatura, "valor": int(valor or 0), "vendedor": vendedor}
 
 
+def _lead_duplicado_info(pool, conta_id: int, cnpj: str, empresa_tentativa: str) -> dict:
+    """Depois de um UniqueViolation em (conta_id, cnpj): acha o lead que já existe e
+    onde ele está (Base, funil ou campanha) — quem tentou cadastrar de novo geralmente
+    quer ir direto ver/ajustar aquele lead, não só saber que ele já existe."""
+    with pool.connection() as c:
+        ex = c.execute("select id, empresa, estagio from prospeccao where conta_id=%s and cnpj=%s",
+                        (conta_id, cnpj)).fetchone()
+        if not ex:
+            return {"msg": f"“{empresa_tentativa}” já está cadastrado — não dá pra duplicar.",
+                    "link_url": None, "link_label": None}
+        ex_id, ex_nome, ex_estagio = ex
+        camps = c.execute(
+            """select cp.id, cp.nome from campanha_alvos a join campanhas cp on cp.id=a.campanha_id
+                where a.prospeccao_id=%s order by a.criado_em desc""", (ex_id,)).fetchall()
+    ficha_url = f"/painel/prospeccao/{ex_id}"
+    if camps:
+        nomes = ", ".join(f"“{n}”" for _, n in camps)
+        onde = f"está na campanha {nomes}" if len(camps) == 1 else f"está em {len(camps)} campanhas: {nomes}"
+        if len(camps) == 1:
+            link_url, link_label = f"/painel/prospeccao/campanhas/{camps[0][0]}", "Ver campanha ›"
+        else:
+            link_url, link_label = ficha_url, "Ver lead ›"
+    elif ex_estagio == "lead":
+        onde, link_url, link_label = "já virou lead e está no funil", ficha_url, "Ver lead ›"
+    else:
+        onde, link_url, link_label = "está na Base, ainda sem campanha", ficha_url, "Ver lead ›"
+    return {"msg": f"“{ex_nome}” já está cadastrado (CNPJ {cnpj}) — {onde}.",
+            "link_url": link_url, "link_label": link_label}
+
+
 _RECEITA_KEYS = ["fonte", "razao_social", "nome_fantasia", "situacao", "abertura",
                  "capital_social", "natureza", "endereco", "inscricao_estadual",
                  "atividade_principal", "atividades_secundarias"]
@@ -720,11 +750,14 @@ def prospeccao_novo(request: Request, empresa: str = Form(...), segmento: str = 
                  ctx["membro_id"])).fetchone()
             c.commit()
     except UniqueViolation:
-        msg = (f"Já existe um lead com o CNPJ {cnpj_limpo} nesta conta — “{empresa}” não foi cadastrado de novo."
-               if cnpj_limpo else f"“{empresa}” já está cadastrado — não dá pra duplicar.")
+        info = (_lead_duplicado_info(pool, ctx["conta_id"], cnpj_limpo, empresa) if cnpj_limpo
+                else {"msg": f"“{empresa}” já está cadastrado — não dá pra duplicar.",
+                      "link_url": None, "link_label": None})
         if ajax:
-            return JSONResponse({"ok": False, "erro": msg}, status_code=409)
-        request.session["prosp_aviso"] = msg
+            return JSONResponse({"ok": False, "erro": info["msg"],
+                                  "link_url": info["link_url"], "link_label": info["link_label"]},
+                                 status_code=409)
+        request.session["prosp_aviso"] = info["msg"]
         return RedirectResponse(destino, status_code=303)
     if ajax:
         lead = _lead_card(row[0], empresa, segmento.strip(), cidade.strip(),
@@ -4081,7 +4114,7 @@ _CAPTURA_JS = """<script>
 function capTab(t){document.querySelectorAll('.caba').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===t);});document.querySelectorAll('.captab').forEach(function(d){d.style.display=(d.getAttribute('data-tab')===t)?'block':'none';});}
 function capFetch(url,fd){return fetch(url,{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();});}
 function _capReload(msg){capToast(msg||'Adicionado à base ✓');setTimeout(function(){location.reload();},700);}
-function capManual(ev){ev.preventDefault();var f=ev.target;capFetch('/painel/prospeccao/novo',new FormData(f)).then(function(d){if(!d.ok){capToast(d.erro||'Erro');return;}f.reset();_capReload('Lead adicionado à base ✓');}).catch(function(){capToast('Falha de rede');});return false;}
+function capManual(ev){ev.preventDefault();var f=ev.target;capFetch('/painel/prospeccao/novo',new FormData(f)).then(function(d){if(!d.ok){capToast(d.erro||'Erro',d.link_url?{url:d.link_url,label:d.link_label}:null);return;}f.reset();_capReload('Lead adicionado à base ✓');}).catch(function(){capToast('Falha de rede');});return false;}
 function capCnpj(){var f=document.getElementById('cap-manual');var cnpj=f.querySelector('[name=cnpj]').value.replace(/\\D/g,'');if(cnpj.length!==14){capToast('CNPJ precisa ter 14 dígitos');return;}
   capToast('Consultando Receita…');
   fetch('/painel/prospeccao/cnpj?cnpj='+cnpj,{headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
@@ -4107,7 +4140,10 @@ function capImport(){var packs=[];document.querySelectorAll('#cap-list input[nam
   var fd=new FormData();packs.forEach(function(p){fd.append('itens',p);});var vs=document.getElementById('cap-g-vend');if(vs)fd.append('vendedor_id',vs.value);
   capFetch('/painel/prospeccao/captar/importar',fd).then(function(d){if(!d.ok){capToast('Erro ao importar');return;}_capReload((d.msg||'Adicionados')+' ✓');}).catch(function(){capToast('Falha de rede');});}
 function jsEsc(s){return (s||'').replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];});}
-function capToast(msg){var t=document.getElementById('cap-toast');if(!t){t=document.createElement('div');t.id='cap-toast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--card);border:1px solid var(--verde);color:var(--verde-claro);padding:.6rem 1rem;border-radius:10px;z-index:200;font-size:.85rem;box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .4s';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';clearTimeout(window._captoastT);window._captoastT=setTimeout(function(){t.style.opacity='0';},2600);}
+function capToast(msg,link){var t=document.getElementById('cap-toast');if(!t){t=document.createElement('div');t.id='cap-toast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--card);border:1px solid var(--verde);color:var(--verde-claro);padding:.6rem 1rem;border-radius:10px;z-index:200;font-size:.85rem;box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .4s;display:flex;align-items:center;gap:.7rem';document.body.appendChild(t);}
+  t.textContent='';var span=document.createElement('span');span.textContent=msg;t.appendChild(span);
+  if(link&&link.url){var a=document.createElement('a');a.href=link.url;a.textContent=link.label||'Ver ›';a.style.cssText='color:#fff;font-weight:700;text-decoration:underline;white-space:nowrap;flex-shrink:0';t.appendChild(a);}
+  t.style.opacity='1';clearTimeout(window._captoastT);window._captoastT=setTimeout(function(){t.style.opacity='0';},link&&link.url?7000:2600);}
 function _exForm(){var b=new URLSearchParams();var cat=document.getElementById('ex-cat');if(cat&&cat.value.trim())b.append('categoria',cat.value.trim());var ct=document.getElementById('ex-cattipo');if(ct)b.append('cat_tipo',ct.value);var p=document.getElementById('ex-pais');b.append('pais',(p&&p.value.trim())||'br');var rg=document.getElementById('ex-reg');if(rg&&rg.value.trim())b.append('regioes',rg.value.trim());document.querySelectorAll('.ex-size:checked').forEach(function(c){b.append('tamanho',c.value);});document.querySelectorAll('.ex-cargo:checked').forEach(function(c){b.append('cargo',c.value);});return b;}
 function exEstimar(){var b=_exForm();capToast('Estimando…');fetch('/painel/prospeccao/base/explorium-estimar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:b}).then(function(r){return r.json();}).then(function(d){var el=document.getElementById('ex-total');if(!d.ok){if(el)el.textContent='';alert('⚠️ Explorium: '+(d.erro||'erro'));return;}if(el)el.innerHTML='<b style="color:var(--verde-claro)">'+(d.total||0)+'</b> empresas no filtro';capToast((d.total||0)+' empresas no filtro');}).catch(function(){capToast('Falha de rede.');});}
 function exImportar(){var q=document.getElementById('ex-qtd');var qtd=(q&&parseInt(q.value,10))||5;if(qtd>10)qtd=10;if(!confirm('Importar '+qtd+' empresa(s) da Explorium com decisor + contato?\\nConsome crédito (fetch + enrich por lead).'))return;var b=_exForm();b.append('qtd',qtd);capToast('Importando da Explorium… (alguns segundos)');fetch('/painel/prospeccao/base/explorium-importar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:b}).then(function(r){return r.json();}).then(function(d){if(!d.ok){alert('⚠️ Explorium: '+(d.erro||'erro'));return;}alert('🔮 Explorium: '+(d.n||0)+' lead(s) importado(s) com decisor'+(d.ja_tinha?(' · '+d.ja_tinha+' já existiam'):'')+'.\\n(de '+(d.empresas||0)+' empresas · '+(d.prospects||0)+' decisores achados)');location.reload();}).catch(function(){capToast('Falha de rede.');});}
@@ -4525,7 +4561,7 @@ function addCard(l){var col=document.querySelector('.kbcol[data-status="novo"]')
 function capToggle(){var e=document.getElementById('captar');var vis=e.style.display!=='none';e.style.display=vis?'none':'block';if(!vis){var i=e.querySelector('.captab[data-tab=manual] input[name=empresa]');if(i)i.focus();e.scrollIntoView({behavior:'smooth',block:'nearest'});}}
 function capTab(t){document.querySelectorAll('#captar .caba').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===t);});document.querySelectorAll('#captar .captab').forEach(function(d){d.style.display=(d.getAttribute('data-tab')===t)?'block':'none';});}
 function capFetch(url,fd){return fetch(url,{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();});}
-function capManual(ev){ev.preventDefault();var f=ev.target;capFetch('/painel/prospeccao/novo',new FormData(f)).then(function(d){if(!d.ok){capToast(d.erro||'Erro');return;}addCard(d.lead);f.reset();capToast('Lead adicionado');}).catch(function(){capToast('Falha de rede');});return false;}
+function capManual(ev){ev.preventDefault();var f=ev.target;capFetch('/painel/prospeccao/novo',new FormData(f)).then(function(d){if(!d.ok){capToast(d.erro||'Erro',d.link_url?{url:d.link_url,label:d.link_label}:null);return;}addCard(d.lead);f.reset();capToast('Lead adicionado');}).catch(function(){capToast('Falha de rede');});return false;}
 function capCnpj(){var f=document.getElementById('cap-manual');var cnpj=f.querySelector('[name=cnpj]').value.replace(/\\D/g,'');if(cnpj.length!==14){capToast('CNPJ precisa ter 14 dígitos');return;}
   capToast('Consultando Receita…');
   fetch('/painel/prospeccao/cnpj?cnpj='+cnpj,{headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
@@ -4550,7 +4586,10 @@ function capAll(el){document.querySelectorAll('#cap-list input[name=itens]').for
 function capImport(){var packs=[];document.querySelectorAll('#cap-list input[name=itens]:checked').forEach(function(c){packs.push(c.value);});if(!packs.length){capToast('Marque ao menos um');return;}
   var fd=new FormData();packs.forEach(function(p){fd.append('itens',p);});var vs=document.getElementById('cap-g-vend');if(vs)fd.append('vendedor_id',vs.value);
   capFetch('/painel/prospeccao/captar/importar',fd).then(function(d){if(!d.ok){capToast('Erro ao importar');return;}(d.leads||[]).forEach(addCard);capToast(d.msg||'Adicionados');document.getElementById('cap-res').innerHTML='';var gf=document.getElementById('cap-google');if(gf)gf.reset();}).catch(function(){capToast('Falha de rede');});}
-function capToast(msg){var t=document.getElementById('cap-toast');if(!t){t=document.createElement('div');t.id='cap-toast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--card);border:1px solid var(--verde);color:var(--verde-claro);padding:.6rem 1rem;border-radius:10px;z-index:200;font-size:.85rem;box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .4s';document.body.appendChild(t);}t.textContent=msg;t.style.opacity='1';clearTimeout(window._captoastT);window._captoastT=setTimeout(function(){t.style.opacity='0';},2600);}
+function capToast(msg,link){var t=document.getElementById('cap-toast');if(!t){t=document.createElement('div');t.id='cap-toast';t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--card);border:1px solid var(--verde);color:var(--verde-claro);padding:.6rem 1rem;border-radius:10px;z-index:200;font-size:.85rem;box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .4s;display:flex;align-items:center;gap:.7rem';document.body.appendChild(t);}
+  t.textContent='';var span=document.createElement('span');span.textContent=msg;t.appendChild(span);
+  if(link&&link.url){var a=document.createElement('a');a.href=link.url;a.textContent=link.label||'Ver ›';a.style.cssText='color:#fff;font-weight:700;text-decoration:underline;white-space:nowrap;flex-shrink:0';t.appendChild(a);}
+  t.style.opacity='1';clearTimeout(window._captoastT);window._captoastT=setTimeout(function(){t.style.opacity='0';},link&&link.url?7000:2600);}
 // vindo de "Captar Lead" de outra página (?captar=1) → já abre o painel embutido
 if(location.search.indexOf('captar=1')>=0){try{capToggle();}catch(e){}}
 </script>

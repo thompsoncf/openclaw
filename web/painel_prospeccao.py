@@ -26,6 +26,7 @@ from psycopg.errors import UniqueViolation
 from db.conexao import get_pool
 from contas import equipe as eq
 from finance import prospec_convite as _prospec_convite
+from finance import prospec_inbound as _prospec_inbound
 from finance import prospeccao_fontes as fontes
 from finance import servicos_catalogo as scat
 from finance.email_sender import enviar_email, remetente_configurado
@@ -170,6 +171,7 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
             "decisor_telefones"]
     d = dict(zip(cols, r))
     d["zap_link"] = _zap_link(d["whatsapp"] or d["telefone"])
+    d["insta_url"] = _prospec_inbound.normalizar_instagram(d.get("instagram") or "")
     d["tel_link"] = "tel:" + _so_digitos(d["telefone"]) if d["telefone"] else ""
     d["site_dominio"] = _dominio(d.get("site_url"))
     d["decisor_zap"] = _zap_link(d["decisor_telefone"]) if d.get("decisor_whatsapp") else ""
@@ -4767,6 +4769,7 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-top:.8rem">
       {% if a.tel_link %}<a class="pbtn ghost" href="{{ a.tel_link }}">📞 Ligar</a>{% endif %}
       {% if a.zap_link %}<a class="pbtn ghost" href="{{ a.zap_link }}" target="_blank" rel="noopener">💬 WhatsApp</a>{% endif %}
+      {% if a.insta_url %}<a class="pbtn ghost" href="{{ a.insta_url }}" target="_blank" rel="noopener" title="Abre o perfil pra você mandar a DM na mão (Instagram não permite DM automática/fria)">📷 Abrir Instagram</a>{% endif %}
       {% if a.maps_url %}<a class="pbtn ghost" href="{{ a.maps_url }}" target="_blank" rel="noopener">🗺️ Mapa</a>{% endif %}
       {% if a.site_url %}<a class="pbtn ghost" href="{{ a.site_url }}" target="_blank" rel="noopener">🌐 Site</a>{% endif %}
       <span style="flex:1"></span>

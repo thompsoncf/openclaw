@@ -20,15 +20,22 @@ import os
 
 
 def sid_template() -> str:
+    """SID de fallback (env global). Usado pelo convite 1-a-1 da ficha e por
+    campanhas que não têm um template próprio setado."""
     return (os.environ.get("TWILIO_TMPL_PROSPEC_SID") or "").strip()
 
 
-def template_configurado() -> bool:
-    """True quando dá pra disparar o convite frio sozinho: template aprovado (SID
-    na env) + credenciais Twilio presentes. O número é o da empresa (resolvido no
-    envio)."""
+def sid_efetivo(camp_sid: str | None = None) -> str:
+    """O template que vale de verdade: o da campanha (se setado) ou o da env."""
+    return (camp_sid or "").strip() or sid_template()
+
+
+def template_configurado(camp_sid: str | None = None) -> bool:
+    """True quando dá pra disparar o convite frio sozinho: template aprovado
+    (SID da campanha OU da env) + credenciais Twilio presentes. O número é o da
+    empresa (resolvido no envio)."""
     from . import whatsapp_twilio as wa
-    return bool(sid_template() and wa.configurado())
+    return bool(sid_efetivo(camp_sid) and wa.configurado())
 
 
 def enviar_convite(pool, conta_id: int, alvo_id: int, numero: str | None = None) -> dict:

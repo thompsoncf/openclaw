@@ -2204,7 +2204,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
         cp = c.execute("""select id, nome, status, limite_dia, coalesce(enviados_hoje,0), dia_contagem,
                                  coalesce(material,''), coalesce(wa_ativo,false), coalesce(limite_wa_dia,30),
                                  coalesce(wa_enviados_hoje,0), wa_dia_contagem, coalesce(material_tipo,'link'),
-                                 coalesce(modelo_codigo,'')
+                                 coalesce(modelo_codigo,''), coalesce(wa_template_sid,'')
                             from campanhas where id=%s and conta_id=%s""",
                        (camp_id, ctx["conta_id"])).fetchone()
         if not cp:
@@ -2247,7 +2247,8 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
     camp = {"id": cp[0], "nome": cp[1], "status": cp[2], "limite": cp[3],
             "status_rot": _STATUS_ROT_CP.get(cp[2], cp[2]), "material": cp[6],
             "wa_ativo": cp[7], "limite_wa": cp[8], "wa_hoje": wa_hoje, "wa_enviados": wa_enviados,
-            "wa_pronto": _prospec_convite.template_configurado(), "material_tipo": cp[11],
+            "wa_template_sid": cp[13],
+            "wa_pronto": _prospec_convite.template_configurado(cp[13]), "material_tipo": cp[11],
             "modelo_codigo": cp[12]}
     metr = {"total": na_camp, "fila": st.get("fila", 0), "enviados": enviados, "responderam": resp,
             "descadastros": st.get("descadastrou", 0), "erros": st.get("erro", 0),
@@ -2319,6 +2320,7 @@ async def prospeccao_campanha_config(request: Request, camp_id: int):
     except (ValueError, TypeError):
         lim_wa = 30
     wa_on = str(form.get("wa_ativo") or "").strip().lower() in ("1", "on", "true", "sim")
+    wa_sid = (form.get("wa_template_sid") or "").strip()[:64]
     tipo = (form.get("material_tipo") or "link").strip().lower()
     if tipo not in ("link", "video", "pdf", "foto"):
         tipo = "link"
@@ -2341,14 +2343,17 @@ async def prospeccao_campanha_config(request: Request, camp_id: int):
     with get_pool().connection() as c:
         if material is None:
             c.execute("""update campanhas set nome=coalesce(nullif(%s,''),nome), limite_dia=%s,
-                           material_tipo=%s, wa_ativo=%s, limite_wa_dia=%s, atualizado_em=now()
+                           material_tipo=%s, wa_ativo=%s, limite_wa_dia=%s, wa_template_sid=%s,
+                           atualizado_em=now()
                          where id=%s and conta_id=%s""",
-                      (nome[:120], lim, tipo, wa_on, lim_wa, camp_id, ctx["conta_id"]))
+                      (nome[:120], lim, tipo, wa_on, lim_wa, (wa_sid or None), camp_id, ctx["conta_id"]))
         else:
             c.execute("""update campanhas set nome=coalesce(nullif(%s,''),nome), limite_dia=%s,
-                           material=%s, material_tipo=%s, wa_ativo=%s, limite_wa_dia=%s, atualizado_em=now()
+                           material=%s, material_tipo=%s, wa_ativo=%s, limite_wa_dia=%s,
+                           wa_template_sid=%s, atualizado_em=now()
                          where id=%s and conta_id=%s""",
-                      (nome[:120], lim, material, tipo, wa_on, lim_wa, camp_id, ctx["conta_id"]))
+                      (nome[:120], lim, material, tipo, wa_on, lim_wa, (wa_sid or None),
+                       camp_id, ctx["conta_id"]))
         c.commit()
     request.session["prosp_aviso"] = "Configuração salva ✓"
     return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
@@ -5496,16 +5501,16 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 
         <div class="divi"></div>
         <label class="lbl" style="font-size:.82rem">💬 1º contato por WhatsApp (template aprovado)</label>
-        {% if camp.wa_pronto %}
-        <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-top:.3rem">
+        <div style="margin-top:.3rem">
+          <label class="lbl">Content SID do template (Twilio)</label>
+          <input class="fld" name="wa_template_sid" value="{{ camp.wa_template_sid }}" placeholder="HX..." spellcheck="false" style="font-family:ui-monospace,monospace">
+          <div class="mut" style="font-size:.74rem;margin-top:.2rem">Cole o SID do template aprovado <b>desta campanha</b>. Cada campanha pode ter o seu — não precisa mexer no Render. {% if camp.wa_pronto %}<span style="color:var(--verde-claro)">● pronto pra disparo frio</span>{% else %}<span style="color:#e0a33e">● defina o SID pra liberar o disparo</span>{% endif %}</div>
+        </div>
+        <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-top:.5rem">
           <label class="chk"><input type="checkbox" name="wa_ativo" value="1" {% if camp.wa_ativo %}checked{% endif %}> <span>Disparar o convite por WhatsApp junto com o e-mail</span></label>
           <div><label class="lbl">WhatsApp/dia</label><input class="fld" name="limite_wa_dia" value="{{ camp.limite_wa }}" inputmode="numeric" style="width:90px"></div>
         </div>
         <div class="mut" style="font-size:.74rem;margin-top:.3rem">Mira o <b>decisor</b> (Credify pelo CNPJ, ⭐ número dele); sem decisor, usa o melhor número captado. Lead sem número recebe só o e-mail.</div>
-        {% else %}
-        <div class="mut" style="font-size:.78rem;margin-top:.3rem">Canal de WhatsApp ainda não está pronto pra disparo frio. Configure o template aprovado (Twilio) pra liberar esta opção.</div>
-        <input type="hidden" name="wa_ativo" value="{% if camp.wa_ativo %}1{% endif %}"><input type="hidden" name="limite_wa_dia" value="{{ camp.limite_wa }}">
-        {% endif %}
         <div style="margin-top:.8rem;display:flex;gap:.5rem;flex-wrap:wrap">
           <button class="pbtn">Salvar configuração</button>
           <button class="pbtn ghost" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/excluir" formmethod="post" formnovalidate style="color:#e0574f;border-color:#5c2a27" onclick="return confirm('Excluir a campanha? Os leads voltam pro funil.')">🗑 Excluir</button>

@@ -956,7 +956,13 @@ def _canais_status(pool, conta_id: int) -> dict:
             "select imap_senha from canais_config where conta_id=%s and canal='email'",
             (conta_id,)).fetchone()
         email_senha = er[0] if er else None
+        er2 = c.execute(
+            "select imap_senha from canais_config where conta_id=%s and canal='email2'",
+            (conta_id,)).fetchone()
+        email2_senha = er2[0] if er2 else None
     email_ident = nums.get("email")
+    email2_ident = nums.get("email2")
+    email2_rx = bool(email2_ident) and bool(email2_senha)
     # RECEBER precisa de endereço + senha (própria no banco, ou a do env quando é a mesma caixa do SMTP)
     env_ok = bool(email_ident) and (email_ident.strip().lower()
              == (os.environ.get("SMTP_USER") or "").strip().lower()) and bool(os.environ.get("SMTP_SENHA"))
@@ -981,6 +987,7 @@ def _canais_status(pool, conta_id: int) -> dict:
         "email_remetente": rem_conta or "",               # o e-mail que vai no From
         "email_rx": email_rx,                             # RECEBER (caixa da conta)
         "email_ident": email_ident or "",
+        "email2": bool(email2_ident), "email2_ident": email2_ident or "", "email2_rx": email2_rx,
         "whatsapp": whatsapp_ok,
         "wa_provedor": wa_prov,
         "wa_phone_set": bool(wa_phone.get("whatsapp")),
@@ -1311,8 +1318,9 @@ def comunicacao_email_sync(request: Request):
 
 @router.post("/painel/prospeccao/comunicacao/email-config")
 def comunicacao_email_config(request: Request, endereco: str = Form(...),
-                             senha: str = Form(""), host: str = Form("")):
-    """Salva a caixa de e-mail (endereço + senha de app) da conta pra RECEBER. Só dono/gestor."""
+                             senha: str = Form(""), host: str = Form(""), slot: str = Form("principal")):
+    """Salva uma CAIXA de e-mail (endereço + senha de app) da conta pra ENVIAR/RECEBER.
+    slot='principal' → caixa 'email'; slot='secundario' → caixa 'email2'. Só dono/gestor."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -1324,9 +1332,10 @@ def comunicacao_email_config(request: Request, endereco: str = Form(...),
     if "@" not in endereco:
         request.session["prosp_aviso"] = "Informe um e-mail válido."
         return RedirectResponse(destino, status_code=303)
+    canal = "email2" if (slot or "").strip().lower() == "secundario" else "email"
     from finance import email_inbound as ein
     try:
-        ein.salvar_config(get_pool(), ctx["conta_id"], endereco, senha, host)
+        ein.salvar_config(get_pool(), ctx["conta_id"], endereco, senha, host, canal=canal)
         request.session["prosp_aviso"] = "Caixa de e-mail salva ✓ — clique em “Testar conexão”."
     except Exception:  # noqa: BLE001
         request.session["prosp_aviso"] = "Não consegui salvar a caixa de e-mail."
@@ -1334,14 +1343,16 @@ def comunicacao_email_config(request: Request, endereco: str = Form(...),
 
 
 @router.post("/painel/prospeccao/comunicacao/email-testar")
-def comunicacao_email_testar(request: Request):
-    """Testa a conexão IMAP da caixa da conta e devolve o diagnóstico (pro botão)."""
+def comunicacao_email_testar(request: Request, slot: str = Form("principal")):
+    """Testa a conexão IMAP de uma caixa da conta (principal/secundária) e devolve o
+    diagnóstico (pro botão)."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    canal = "email2" if (slot or "").strip().lower() == "secundario" else "email"
     from finance import email_inbound as ein
     try:
-        diag = ein.diagnostico(get_pool(), ctx["conta_id"])
+        diag = ein.diagnostico(get_pool(), ctx["conta_id"], canal)
     except Exception:  # noqa: BLE001
         return JSONResponse({"ok": False, "erro": "Falha no teste."})
     return JSONResponse({"ok": bool(diag.get("ok")), "msg": diag.get("msg") or ""})
@@ -2358,7 +2369,8 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                                  coalesce(material,''), coalesce(wa_ativo,false), coalesce(limite_wa_dia,30),
                                  coalesce(wa_enviados_hoje,0), wa_dia_contagem, coalesce(material_tipo,'link'),
                                  coalesce(modelo_codigo,''), coalesce(wa_template_sid,''),
-                                 coalesce(reengajar_ativo,false), coalesce(reengajar_dias,3)
+                                 coalesce(reengajar_ativo,false), coalesce(reengajar_dias,3),
+                                 coalesce(remetente_slot,'principal')
                             from campanhas where id=%s and conta_id=%s""",
                        (camp_id, ctx["conta_id"])).fetchone()
         if not cp:
@@ -2412,7 +2424,8 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
             "wa_ativo": cp[7], "limite_wa": cp[8], "wa_hoje": wa_hoje, "wa_enviados": wa_enviados,
             "wa_template_sid": cp[13],
             "wa_pronto": _prospec_convite.template_configurado(cp[13]), "material_tipo": cp[11],
-            "modelo_codigo": cp[12], "reengajar_ativo": cp[14], "reengajar_dias": cp[15]}
+            "modelo_codigo": cp[12], "reengajar_ativo": cp[14], "reengajar_dias": cp[15],
+            "remetente_slot": cp[16]}
     metr = {"total": na_camp, "fila": st.get("fila", 0), "enviados": enviados, "responderam": resp,
             "descadastros": st.get("descadastrou", 0), "erros": st.get("erro", 0),
             "concluidos": st.get("concluido", 0), "hoje": hoje, "abriram": abriram,
@@ -2441,10 +2454,14 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                 "prox": r[4], "ult": r[5], "pid": r[6], "rot": _ALVO_ROT.get(r[2], r[2]),
                 "abriu": r[7], "aberto": r[8], "wa": r[9], "wa_rot": _WA_ROT.get(r[9], "")}
                for r in leads]
+    from finance import email_inbound as _ein_mod
+    email_principal = _ein_mod.remetente_conta(get_pool(), ctx["conta_id"], "email") or ""
+    email_secundario = _ein_mod.remetente_conta(get_pool(), ctx["conta_id"], "email2") or ""
     return _render("prospeccao_campanha", request, titulo=camp["nome"], secao_ativa="prospeccao",
                    camp=camp, passos=passos_l, elegiveis=eleg, na_camp=na_camp, st=st, metr=metr,
                    leads=leads_l, previa=previa, cadencia=cadencia, remetente=remetente_configurado(),
                    modelos=modelos, seg=seg, cidade=cidade, temp=temp,
+                   email_principal=email_principal, email_secundario=email_secundario,
                    aviso=request.session.pop("prosp_aviso", None))
 
 
@@ -2521,6 +2538,9 @@ async def prospeccao_campanha_config(request: Request, camp_id: int):
         reeng_dias = max(1, min(30, int(form.get("reengajar_dias") or 3)))
     except (ValueError, TypeError):
         reeng_dias = 3
+    remet_slot = (form.get("remetente_slot") or "principal").strip().lower()
+    if remet_slot not in ("principal", "secundario"):
+        remet_slot = "principal"
     tipo = (form.get("material_tipo") or "link").strip().lower()
     if tipo not in ("link", "video", "pdf", "foto"):
         tipo = "link"
@@ -2544,17 +2564,18 @@ async def prospeccao_campanha_config(request: Request, camp_id: int):
         if material is None:
             c.execute("""update campanhas set nome=coalesce(nullif(%s,''),nome), limite_dia=%s,
                            material_tipo=%s, wa_ativo=%s, limite_wa_dia=%s, wa_template_sid=%s,
-                           reengajar_ativo=%s, reengajar_dias=%s, atualizado_em=now()
+                           reengajar_ativo=%s, reengajar_dias=%s, remetente_slot=%s, atualizado_em=now()
                          where id=%s and conta_id=%s""",
                       (nome[:120], lim, tipo, wa_on, lim_wa, (wa_sid or None),
-                       reeng_on, reeng_dias, camp_id, ctx["conta_id"]))
+                       reeng_on, reeng_dias, remet_slot, camp_id, ctx["conta_id"]))
         else:
             c.execute("""update campanhas set nome=coalesce(nullif(%s,''),nome), limite_dia=%s,
                            material=%s, material_tipo=%s, wa_ativo=%s, limite_wa_dia=%s,
-                           wa_template_sid=%s, reengajar_ativo=%s, reengajar_dias=%s, atualizado_em=now()
+                           wa_template_sid=%s, reengajar_ativo=%s, reengajar_dias=%s,
+                           remetente_slot=%s, atualizado_em=now()
                          where id=%s and conta_id=%s""",
                       (nome[:120], lim, material, tipo, wa_on, lim_wa, (wa_sid or None),
-                       reeng_on, reeng_dias, camp_id, ctx["conta_id"]))
+                       reeng_on, reeng_dias, remet_slot, camp_id, ctx["conta_id"]))
         c.commit()
     request.session["prosp_aviso"] = "Configuração salva ✓"
     return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
@@ -5217,25 +5238,39 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   <div class="cx-cc">
     <div class="cx-card">
       <h3>✉️ E-mail <span class="cx-stat {{ 'st-on' if canais.email else 'st-off' }}">● {{ 'Enviando' if canais.email else 'A configurar' }}</span></h3>
-      <div class="cx-kv"><span>Enviar (De:)</span><b>{{ remetente or '—' }}</b></div>
-      <div class="cx-kv"><span>Receber (IMAP)</span><b>{% if canais.email_rx %}<span style="color:var(--verde-claro)">✓ {{ canais.email_ident }}</span>{% else %}—{% endif %}</b></div>
-      <div class="mut" style="font-size:.72rem">A empresa <b>envia e recebe</b> pelo próprio e-mail (a mesma caixa abaixo). Só cai no e-mail global se você não configurar nenhuma.</div>
+      <div class="cx-kv"><span>Principal (De:)</span><b>{{ canais.email_ident or remetente or '—' }}</b></div>
+      <div class="cx-kv"><span>Secundária</span><b>{% if canais.email2_ident %}<span style="color:var(--verde-claro)">✓ {{ canais.email2_ident }}</span>{% else %}—{% endif %}</b></div>
+      <div class="mut" style="font-size:.72rem">Cada campanha escolhe de qual caixa sai. As respostas de <b>ambas</b> caem no inbox.</div>
       {% if gerencia %}
       <form method="post" action="/painel/prospeccao/comunicacao/email-config" style="margin-top:.6rem">
-        <label class="lbl">Caixa pra RECEBER (endereço + senha de app)</label>
-        <input class="fld" name="endereco" type="email" placeholder="voce@empresa.com" value="{{ canais.email_ident }}" style="margin-bottom:.35rem">
+        <input type="hidden" name="slot" value="principal">
+        <label class="lbl">Caixa PRINCIPAL <span style="color:var(--mut);font-weight:400">— recomendo o e-mail do domínio</span></label>
+        <input class="fld" name="endereco" type="email" placeholder="voce@seudominio.com" value="{{ canais.email_ident }}" style="margin-bottom:.35rem">
         <input class="fld" name="senha" type="password" placeholder="senha de app (deixe vazio p/ manter)" autocomplete="new-password" style="margin-bottom:.35rem">
         <input class="fld" name="host" placeholder="imap.gmail.com (padrão)" style="margin-bottom:.4rem">
         <div style="display:flex;gap:.4rem">
-          <button class="pbtn" style="white-space:nowrap">Salvar</button>
-          <button type="button" class="pbtn ghost" id="etest-btn" onclick="emailTestar()" style="white-space:nowrap">Testar conexão</button>
+          <button class="pbtn">Salvar</button>
+          <button type="button" class="pbtn ghost" id="etest-principal-btn" onclick="emailTestar('principal')" style="white-space:nowrap">Testar</button>
         </div>
-        <div class="mut" id="etest-msg" style="font-size:.78rem;margin-top:.4rem"></div>
+        <div class="mut" id="etest-principal-msg" style="font-size:.78rem;margin-top:.4rem"></div>
       </form>
-      <div class="mut" style="margin-top:.4rem;font-size:.76rem">Gmail/Workspace: gere uma <b>senha de app</b> em myaccount.google.com/apppasswords e ligue o IMAP. A senha é guardada só pra esta empresa.</div>
+      <form method="post" action="/painel/prospeccao/comunicacao/email-config" style="margin-top:.8rem;border-top:1px solid var(--borda);padding-top:.7rem">
+        <input type="hidden" name="slot" value="secundario">
+        <label class="lbl">Caixa SECUNDÁRIA <span style="color:var(--mut);font-weight:400">— opcional (ex.: seu Gmail)</span></label>
+        <input class="fld" name="endereco" type="email" placeholder="voce@gmail.com" value="{{ canais.email2_ident }}" style="margin-bottom:.35rem">
+        <input class="fld" name="senha" type="password" placeholder="senha de app (deixe vazio p/ manter)" autocomplete="new-password" style="margin-bottom:.35rem">
+        <input class="fld" name="host" placeholder="imap.gmail.com (padrão)" style="margin-bottom:.4rem">
+        <div style="display:flex;gap:.4rem">
+          <button class="pbtn">Salvar</button>
+          <button type="button" class="pbtn ghost" id="etest-secundario-btn" onclick="emailTestar('secundario')" style="white-space:nowrap">Testar</button>
+        </div>
+        <div class="mut" id="etest-secundario-msg" style="font-size:.78rem;margin-top:.4rem"></div>
+      </form>
+      <div class="mut" style="margin-top:.4rem;font-size:.76rem">Gmail/Workspace: gere uma <b>senha de app</b> em myaccount.google.com/apppasswords e ligue o IMAP. A senha fica só nesta empresa.</div>
       <script>
-      function emailTestar(){var b=document.getElementById('etest-btn'),m=document.getElementById('etest-msg');if(!b)return;b.disabled=true;var t=b.textContent;b.textContent='Testando…';m.textContent='';m.style.color='';
-        fetch('/painel/prospeccao/comunicacao/email-testar',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){b.disabled=false;b.textContent=t;
+      function emailTestar(slot){var b=document.getElementById('etest-'+slot+'-btn'),m=document.getElementById('etest-'+slot+'-msg');if(!b)return;b.disabled=true;var t=b.textContent;b.textContent='Testando…';m.textContent='';m.style.color='';
+        var body=new URLSearchParams();body.append('slot',slot);
+        fetch('/painel/prospeccao/comunicacao/email-testar',{method:'POST',headers:{'X-Requested-With':'fetch','Content-Type':'application/x-www-form-urlencoded'},body:body}).then(function(r){return r.json();}).then(function(d){b.disabled=false;b.textContent=t;
           m.textContent=d.msg||d.erro||'—';m.style.color=d.ok?'var(--verde-claro)':'#e0a33e';}).catch(function(){b.disabled=false;b.textContent=t;m.textContent='Falha de rede.';m.style.color='#e0a33e';});}
       </script>
       {% else %}<div class="mut" style="margin-top:.4rem;font-size:.8rem">SMTP (Google Workspace). Prospecção fria ✓</div>{% endif %}
@@ -5770,6 +5805,19 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         <div class="row">
           <div style="flex:1;min-width:180px"><label class="lbl">Nome</label><input class="fld" name="nome" value="{{ camp.nome }}" maxlength="120"></div>
           <div><label class="lbl">Envios/dia</label><input class="fld" name="limite_dia" value="{{ camp.limite }}" inputmode="numeric" style="width:90px"></div>
+        </div>
+
+        <div style="margin-top:.75rem">
+          <label class="lbl">✉️ Remetente <span style="color:var(--mut);font-weight:400">— de qual e-mail a campanha sai</span></label>
+          {% if email_secundario %}
+          <select class="fld" name="remetente_slot">
+            <option value="principal" {% if camp.remetente_slot!='secundario' %}selected{% endif %}>Principal — {{ email_principal or 'e-mail da conta' }}</option>
+            <option value="secundario" {% if camp.remetente_slot=='secundario' %}selected{% endif %}>Secundária — {{ email_secundario }}</option>
+          </select>
+          {% else %}
+          <input type="hidden" name="remetente_slot" value="{{ camp.remetente_slot }}">
+          <div class="mut" style="font-size:.74rem;margin-top:.2rem">Sai de <b>{{ email_principal or 'e-mail da conta' }}</b>. Configure uma <b>2ª caixa</b> em <a href="/painel/prospeccao/comunicacao?aba=canais" style="color:var(--verde-claro)">Comunicação › Canais</a> pra poder escolher aqui.</div>
+          {% endif %}
         </div>
 
         <div style="margin-top:.75rem">

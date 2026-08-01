@@ -479,6 +479,14 @@ def evento(c, campanha_id, prospeccao_id, canal: str, evento: str, detalhe: str 
         pass
 
 
+def _canal_remetente(c, campanha_id) -> str:
+    """Caixa de e-mail que a campanha usa pra enviar: 'email' (principal) ou 'email2'
+    (secundária), conforme o remetente escolhido na campanha."""
+    row = c.execute("select coalesce(remetente_slot,'principal') from campanhas where id=%s",
+                    (campanha_id,)).fetchone()
+    return "email2" if (row and row[0] == "secundario") else "email"
+
+
 def _campanha_do_lead(c, prospeccao_id) -> int | None:
     """Campanha mais recente do lead (pra amarrar eventos de resposta/bounce/clique
     que não carregam o campanha_id na mão)."""
@@ -570,6 +578,7 @@ def _reengajar_campanha(pool, camp_id, conta_id, dias, wa_ativo, camp_sid, teto)
     sid = (camp_sid or "").strip() or prospec_convite.sid_template()
     with pool.connection() as c:
         idn = _conta_identidade(c, conta_id)
+        canal_rem = _canal_remetente(c, camp_id)
         alvos = c.execute(
             """select a.id, p.id, coalesce(p.empresa,''), coalesce(p.email,''),
                       coalesce(p.whatsapp,''), coalesce(p.telefone,''), p.decisor_telefones,
@@ -627,7 +636,7 @@ def _reengajar_campanha(pool, camp_id, conta_id, dias, wa_ativo, camp_sid, teto)
                                          link, link_int, link_abrir=link_abr),
                                    texto_alt=corpo + "\n\n" + _assinatura_texto(idn)
                                              + "\n\nTenho interesse: " + link_int,
-                                   from_nome=(conta_nome or None), list_unsub=link_unsub)
+                                   from_nome=(conta_nome or None), list_unsub=link_unsub, canal=canal_rem)
             with pool.connection() as c:
                 if ok:
                     c.execute("update campanhas set enviados_hoje=coalesce(enviados_hoje,0)+1 where id=%s",
@@ -662,6 +671,7 @@ def _disparar_campanha(pool, camp_id, conta_id, camp_nome, teto) -> int:
     with pool.connection() as c:
         idn = _conta_identidade(c, conta_id)
         conta_nome = idn.get("empresa") or ""
+        canal_rem = _canal_remetente(c, camp_id)
         passos = c.execute(
             "select ordem, dias_apos, assunto, corpo, usar_ia from campanha_passos where campanha_id=%s order by ordem",
             (camp_id,)).fetchall()
@@ -714,7 +724,7 @@ def _disparar_campanha(pool, camp_id, conta_id, camp_nome, teto) -> int:
         ok = _ein.enviar_conta(pool, conta_id, email, assunto,
                                _html(corpo, lead, idn, link, link_int, link_abrir=link_abr),
                                texto_alt=corpo_txt + "\n\nTenho interesse: " + link_int,
-                               from_nome=(conta_nome or None), list_unsub=link_unsub)
+                               from_nome=(conta_nome or None), list_unsub=link_unsub, canal=canal_rem)
         if not ok:
             _marcar(pool, aid, "erro")
             continue
@@ -792,6 +802,7 @@ def registrar_interesse(pool, conta_id: int, prospeccao_id: int, campanha_id: in
         material, material_tipo = _mrow[0], _mrow[1]
         idn = _conta_identidade(c, conta_id)
         conta_nome = idn.get("empresa") or ""
+        canal_rem = _canal_remetente(c, campanha_id)
         # para a sequência deste lead
         c.execute("""update campanha_alvos set status='respondeu', proximo_envio_em=null
                        where campanha_id=%s and prospeccao_id=%s""", (campanha_id, prospeccao_id))
@@ -832,7 +843,7 @@ def registrar_interesse(pool, conta_id: int, prospeccao_id: int, campanha_id: in
                                               _app_url() + "/descadastrar?t=" + descad_token(conta_id, email),
                                               material_url=material, material_tipo=material_tipo),
                                         texto_alt=texto_alt,
-                                        from_nome=(conta_nome or None))
+                                        from_nome=(conta_nome or None), canal=canal_rem)
         except Exception:  # noqa: BLE001
             enviado = False
         if enviado:

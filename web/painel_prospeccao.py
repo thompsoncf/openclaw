@@ -5254,20 +5254,28 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         </div>
         <div class="mut" id="etest-principal-msg" style="font-size:.78rem;margin-top:.4rem"></div>
       </form>
-      <form method="post" action="/painel/prospeccao/comunicacao/email-config" style="margin-top:.8rem;border-top:1px solid var(--borda);padding-top:.7rem">
-        <input type="hidden" name="slot" value="secundario">
-        <label class="lbl">Caixa SECUNDÁRIA <span style="color:var(--mut);font-weight:400">— opcional (ex.: seu Gmail)</span></label>
-        <input class="fld" name="endereco" type="email" placeholder="voce@gmail.com" value="{{ canais.email2_ident }}" style="margin-bottom:.35rem">
-        <input class="fld" name="senha" type="password" placeholder="senha de app (deixe vazio p/ manter)" autocomplete="new-password" style="margin-bottom:.35rem">
-        <input class="fld" name="host" placeholder="imap.gmail.com (padrão)" style="margin-bottom:.4rem">
-        <div style="display:flex;gap:.4rem">
-          <button class="pbtn">Salvar</button>
-          <button type="button" class="pbtn ghost" id="etest-secundario-btn" onclick="emailTestar('secundario')" style="white-space:nowrap">Testar</button>
-        </div>
-        <div class="mut" id="etest-secundario-msg" style="font-size:.78rem;margin-top:.4rem"></div>
-      </form>
+      <div style="margin-top:.7rem;border-top:1px solid var(--borda);padding-top:.6rem">
+        {% if canais.email2_ident %}
+        <div class="mut" style="font-size:.8rem">2ª caixa: <b style="color:var(--verde-claro)">✓ {{ canais.email2_ident }}</b> · <a href="javascript:void(0)" onclick="toggleEmail2()" style="color:var(--verde-claro)">editar / trocar</a></div>
+        {% else %}
+        <a href="javascript:void(0)" onclick="toggleEmail2()" style="color:var(--verde-claro);font-size:.82rem">＋ Adicionar 2ª caixa de e-mail (opcional)</a>
+        {% endif %}
+        <form id="email2-wrap" method="post" action="/painel/prospeccao/comunicacao/email-config" style="display:none;margin-top:.55rem">
+          <input type="hidden" name="slot" value="secundario">
+          <label class="lbl">Caixa SECUNDÁRIA <span style="color:var(--mut);font-weight:400">— ex.: seu Gmail</span></label>
+          <input class="fld" name="endereco" type="email" placeholder="voce@gmail.com" value="{{ canais.email2_ident }}" style="margin-bottom:.35rem">
+          <input class="fld" name="senha" type="password" placeholder="senha de app (deixe vazio p/ manter)" autocomplete="new-password" style="margin-bottom:.35rem">
+          <input class="fld" name="host" placeholder="imap.gmail.com (padrão)" style="margin-bottom:.4rem">
+          <div style="display:flex;gap:.4rem">
+            <button class="pbtn">Salvar</button>
+            <button type="button" class="pbtn ghost" id="etest-secundario-btn" onclick="emailTestar('secundario')" style="white-space:nowrap">Testar</button>
+          </div>
+          <div class="mut" id="etest-secundario-msg" style="font-size:.78rem;margin-top:.4rem"></div>
+        </form>
+      </div>
       <div class="mut" style="margin-top:.4rem;font-size:.76rem">Gmail/Workspace: gere uma <b>senha de app</b> em myaccount.google.com/apppasswords e ligue o IMAP. A senha fica só nesta empresa.</div>
       <script>
+      function toggleEmail2(){var w=document.getElementById('email2-wrap');if(w)w.style.display=(w.style.display==='none'||!w.style.display)?'block':'none';}
       function emailTestar(slot){var b=document.getElementById('etest-'+slot+'-btn'),m=document.getElementById('etest-'+slot+'-msg');if(!b)return;b.disabled=true;var t=b.textContent;b.textContent='Testando…';m.textContent='';m.style.color='';
         var body=new URLSearchParams();body.append('slot',slot);
         fetch('/painel/prospeccao/comunicacao/email-testar',{method:'POST',headers:{'X-Requested-With':'fetch','Content-Type':'application/x-www-form-urlencoded'},body:body}).then(function(r){return r.json();}).then(function(d){b.disabled=false;b.textContent=t;

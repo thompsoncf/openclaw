@@ -40,6 +40,10 @@ create table campanhas (id bigserial primary key, conta_id bigint);
 -- campanha_alvos vem da 086 (com status); a 105 adiciona wa_status/wa_em e a 107 indexa.
 create table campanha_alvos (id bigserial primary key, campanha_id bigint, prospeccao_id bigint,
   status text);
+-- mensagens vem da 080 (marcada como aplicada); a 116 adiciona a coluna 'status'.
+create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
+  direcao text, autor text, texto text, provider_sid text, membro_id bigint,
+  criado_em timestamptz default now());
 create table schema_migrations (id serial primary key, nome text unique not null,
   executada_em timestamptz default now());
 """

@@ -4492,7 +4492,13 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <div class="hist-warn">⚠️ <b>{{ metr.n_dup }}</b> empresa(s) aparecem <b>duplicadas</b> na base — revise e exclua a sobra com o 🗑.</div>
     {% endif %}
     <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin:.2rem 0 .6rem">
-      {% if metr.em_camp %}<span class="mut" style="font-size:.8rem">📣 <b style="color:var(--txt)">{{ metr.em_camp }}</b> já em campanha (fora da lista)</span>{% endif %}
+      {% if metr.em_camp %}
+      {% if ver_camp %}
+      <a href="/painel/prospeccao/base?{% if q %}q={{ q|urlencode }}&{% endif %}{% if segmento %}segmento={{ segmento|urlencode }}&{% endif %}{% if cidade %}cidade={{ cidade|urlencode }}&{% endif %}ver_camp=0" style="font-size:.8rem;color:var(--verde-claro);text-decoration:none">📣 <b style="color:var(--txt)">{{ metr.em_camp }}</b> já em campanha — ‹ esconder de novo</a>
+      {% else %}
+      <a href="/painel/prospeccao/base?{% if q %}q={{ q|urlencode }}&{% endif %}{% if segmento %}segmento={{ segmento|urlencode }}&{% endif %}{% if cidade %}cidade={{ cidade|urlencode }}&{% endif %}ver_camp=1" style="font-size:.8rem;color:var(--verde-claro);text-decoration:none">📣 <b style="color:var(--txt)">{{ metr.em_camp }}</b> já em campanha (fora da lista) — ver quais ›</a>
+      {% endif %}
+      {% endif %}
       <button type="button" class="pbtn ghost" onclick="baseHistorico(this)" style="font-size:.8rem;padding:.35rem .7rem">📅 Histórico de envios</button>
     </div>
     <div id="historico" class="hist" style="display:none;margin:.2rem 0 .8rem"></div>

@@ -907,6 +907,7 @@ def captar_buscar(request: Request, segmento: str = Form(...), cidade: str = For
                            "r": i.get("rating"), "n": i.get("avaliacoes"),
                            "m": i.get("maps_uri") or "", "st": i.get("status") or "",
                            "w": i.get("site") or ""})
+    _marcar_duplicados(itens, ctx["conta_id"])
     n_redes = sum(1 for x in res.get("itens", []) if x["rede"]) if esconder else 0
     busca = {"segmento": segmento, "cidade": cidade, "bairro": bairro, "rua": rua,
              "esconder": esconder, "ok": res.get("ok"), "erro": res.get("erro"), "n_redes": n_redes}
@@ -915,10 +916,46 @@ def captar_buscar(request: Request, segmento: str = Form(...), cidade: str = For
                    "tem_site": i["tem_site"], "endereco": i["endereco"],
                    "segmento": i.get("segmento") or "", "cidade": i.get("cidade") or "",
                    "uf": i.get("uf") or "", "aberto": i.get("aberto", True),
-                   "temperatura": i["temperatura"], "pack": i["pack"]} for i in itens]
+                   "temperatura": i["temperatura"], "pack": i["pack"],
+                   "dup": i.get("dup", False), "dup_campanha": i.get("dup_campanha", "")} for i in itens]
         return JSONResponse({"ok": res.get("ok"), "erro": res.get("erro"),
                              "itens": enxuto, "n_redes": n_redes})
     return _render_captar(request, ctx, aba="google", resultados=itens, busca=busca)
+
+
+def _marcar_duplicados(itens: list, conta_id: int) -> None:
+    """Cruza os resultados recém-buscados (Google Maps) com a base da conta ANTES
+    de importar — por place_id ou telefone. Marca em cada item se já existe
+    (`dup`) e, principalmente, se já está numa campanha (`dup_campanha` = nome
+    dela) — pra decidir na hora de olhar a lista, sem descobrir só depois."""
+    place_ids = [i["place_id"] for i in itens if i.get("place_id")]
+    fones = list({_so_digitos(i.get("telefone") or "") for i in itens if _so_digitos(i.get("telefone") or "")})
+    if not place_ids and not fones:
+        return
+    dup_by_place, dup_by_fone = {}, {}
+    with get_pool().connection() as c:
+        rows = c.execute(
+            """select p.place_id, regexp_replace(coalesce(p.telefone,''), '\\D', '', 'g'), cp.nome
+                 from prospeccao p
+                 left join lateral (
+                    select camp.nome from campanha_alvos a join campanhas camp on camp.id=a.campanha_id
+                     where a.prospeccao_id=p.id order by a.id desc limit 1
+                 ) cp on true
+                where p.conta_id=%s and (p.place_id = any(%s) or
+                      regexp_replace(coalesce(p.telefone,''), '\\D', '', 'g') = any(%s))""",
+            (conta_id, place_ids or [""], fones or [""])).fetchall()
+    for pid_, fone_, camp_nome in rows:
+        if pid_:
+            dup_by_place[pid_] = camp_nome
+        if fone_:
+            dup_by_fone[fone_] = camp_nome
+    for i in itens:
+        fone_norm = _so_digitos(i.get("telefone") or "")
+        existe_place = i.get("place_id") in dup_by_place
+        existe_fone = bool(fone_norm) and fone_norm in dup_by_fone
+        i["dup"] = existe_place or existe_fone
+        i["dup_campanha"] = (dup_by_place.get(i.get("place_id")) if existe_place else None) \
+            or (dup_by_fone.get(fone_norm) if existe_fone else None) or ""
 
 
 @router.post("/painel/prospeccao/captar/importar")
@@ -4224,6 +4261,7 @@ _CSS = """<style>
 .rlist{border:1px solid var(--borda);border-radius:12px;overflow:hidden;margin-top:.5rem}
 .rrow{display:flex;align-items:center;gap:.7rem;padding:.6rem .8rem;border-top:1px solid var(--borda)}
 .rrow:first-child{border-top:0}
+.dupb{font-size:.68rem;font-weight:700;padding:.05rem .45rem;border-radius:999px;color:#e0a33e;border:1px solid #5a4520;background:#2a2113;white-space:nowrap}
 .rrow input[type=checkbox]{width:auto;margin:0;flex-shrink:0;width:18px;height:18px;accent-color:var(--verde)}
 .toggle{position:relative;width:44px;height:24px;flex-shrink:0}
 .toggle input{opacity:0;width:0;height:0;position:absolute}
@@ -4418,7 +4456,7 @@ function capBuscar(ev){ev.preventDefault();var f=ev.target;var btn=document.getE
     if(!d.itens.length){box.innerHTML='<div class="mut">Nada encontrado'+(d.n_redes?(' ('+d.n_redes+' rede(s) oculta(s))'):'')+'. Tente outro termo/cidade.</div>';return;}
     var TP={quente:'#f0917f',morno:'#e0b25a',frio:'#7bb8e6'};
     var h='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem"><div class="mut" style="font-size:.82rem">'+d.itens.length+' encontrado(s)'+(d.n_redes?(' · '+d.n_redes+' oculta(s)'):'')+'</div><label class="mut" style="font-size:.8rem;cursor:pointer"><input type="checkbox" onclick="capAll(this)" style="width:auto;vertical-align:middle;accent-color:var(--verde)"> marcar todos</label></div><div class="rlist" id="cap-list">';
-    d.itens.forEach(function(it){var loc=(it.cidade?(' · '+jsEsc(it.cidade)+(it.uf?('/'+jsEsc(it.uf)):'')):'');h+='<label class="rrow" style="cursor:pointer"><input type="checkbox" name="itens" value="'+it.pack+'"><span style="flex:1"><span style="display:flex;align-items:center;gap:.4rem"><b style="font-size:.88rem">'+jsEsc(it.empresa)+'</b></span><span class="mut" style="font-size:.76rem">'+(it.segmento?(jsEsc(it.segmento)+' · '):'')+(it.telefone?jsEsc(it.telefone):'')+(it.rating?(' · nota '+it.rating):'')+(it.tem_site?'':' · sem site')+loc+'</span></span><span class="tpill" style="background:transparent;border:1px solid '+(TP[it.temperatura]||'#7bb8e6')+';color:'+(TP[it.temperatura]||'#7bb8e6')+'">'+it.temperatura+'</span></label>';});
+    d.itens.forEach(function(it){var loc=(it.cidade?(' · '+jsEsc(it.cidade)+(it.uf?('/'+jsEsc(it.uf)):'')):'');var dupB=it.dup_campanha?(' <span class="dupb">🚫 já em campanha: '+jsEsc(it.dup_campanha)+'</span>'):(it.dup?' <span class="dupb">⚠️ já na base</span>':'');h+='<label class="rrow" style="cursor:pointer"><input type="checkbox" name="itens" value="'+it.pack+'"><span style="flex:1"><span style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap"><b style="font-size:.88rem">'+jsEsc(it.empresa)+'</b>'+dupB+'</span><span class="mut" style="font-size:.76rem">'+(it.segmento?(jsEsc(it.segmento)+' · '):'')+(it.telefone?jsEsc(it.telefone):'')+(it.rating?(' · nota '+it.rating):'')+(it.tem_site?'':' · sem site')+loc+'</span></span><span class="tpill" style="background:transparent;border:1px solid '+(TP[it.temperatura]||'#7bb8e6')+';color:'+(TP[it.temperatura]||'#7bb8e6')+'">'+it.temperatura+'</span></label>';});
     h+='</div><div style="margin-top:.8rem"><button type="button" class="pbtn" onclick="capImport()">＋ Adicionar selecionados à base</button></div>';box.innerHTML=h;
   }).catch(function(){if(btn){btn.disabled=false;btn.textContent='🔍 Buscar';}capToast('Falha de rede');});return false;}
 function capAll(el){document.querySelectorAll('#cap-list input[name=itens]').forEach(function(c){c.checked=el.checked;});}
@@ -4880,7 +4918,7 @@ function capBuscar(ev){ev.preventDefault();var f=ev.target;var btn=document.getE
     if(!d.itens.length){box.innerHTML='<div class="mut">Nada encontrado'+(d.n_redes?(' ('+d.n_redes+' rede(s) oculta(s))'):'')+'. Tente outro termo/cidade.</div>';return;}
     var TP={quente:'#f0917f',morno:'#e0b25a',frio:'#7bb8e6'};
     var h='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem"><div class="mut" style="font-size:.82rem">'+d.itens.length+' encontrado(s)'+(d.n_redes?(' · '+d.n_redes+' oculta(s)'):'')+'</div><label class="mut" style="font-size:.8rem;cursor:pointer"><input type="checkbox" onclick="capAll(this)" style="width:auto;vertical-align:middle;accent-color:var(--verde)"> marcar todos</label></div><div class="rlist" id="cap-list">';
-    d.itens.forEach(function(it){var loc=(it.cidade?(' · '+jsEsc(it.cidade)+(it.uf?('/'+jsEsc(it.uf)):'')):'');h+='<label class="rrow" style="cursor:pointer"><input type="checkbox" name="itens" value="'+it.pack+'"><span style="flex:1"><span style="display:flex;align-items:center;gap:.4rem"><span class="tdot" style="background:'+(TEMPCOR[it.temperatura]||'#5b9bd5')+'"></span><b style="font-size:.88rem">'+jsEsc(it.empresa)+'</b>'+(it.aberto===false?' <span style=\\'color:#e0574f;font-size:.7rem\\'>(fechado)</span>':'')+'</span><span class="mut" style="font-size:.76rem">'+(it.segmento?(jsEsc(it.segmento)+' · '):'')+(it.telefone?jsEsc(it.telefone):'')+(it.rating?(' · nota '+it.rating):'')+(it.tem_site?'':' · <span style=\\'color:#e0574f\\'>sem site</span>')+loc+'</span></span><span class="tpill" style="background:transparent;border:1px solid '+(TP[it.temperatura]||'#7bb8e6')+';color:'+(TP[it.temperatura]||'#7bb8e6')+'">'+it.temperatura+'</span></label>';});
+    d.itens.forEach(function(it){var loc=(it.cidade?(' · '+jsEsc(it.cidade)+(it.uf?('/'+jsEsc(it.uf)):'')):'');var dupB=it.dup_campanha?(' <span class="dupb">🚫 já em campanha: '+jsEsc(it.dup_campanha)+'</span>'):(it.dup?' <span class="dupb">⚠️ já na base</span>':'');h+='<label class="rrow" style="cursor:pointer"><input type="checkbox" name="itens" value="'+it.pack+'"><span style="flex:1"><span style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap"><span class="tdot" style="background:'+(TEMPCOR[it.temperatura]||'#5b9bd5')+'"></span><b style="font-size:.88rem">'+jsEsc(it.empresa)+'</b>'+(it.aberto===false?' <span style=\\'color:#e0574f;font-size:.7rem\\'>(fechado)</span>':'')+dupB+'</span><span class="mut" style="font-size:.76rem">'+(it.segmento?(jsEsc(it.segmento)+' · '):'')+(it.telefone?jsEsc(it.telefone):'')+(it.rating?(' · nota '+it.rating):'')+(it.tem_site?'':' · <span style=\\'color:#e0574f\\'>sem site</span>')+loc+'</span></span><span class="tpill" style="background:transparent;border:1px solid '+(TP[it.temperatura]||'#7bb8e6')+';color:'+(TP[it.temperatura]||'#7bb8e6')+'">'+it.temperatura+'</span></label>';});
     h+='</div><div style="margin-top:.8rem"><button type="button" class="pbtn" onclick="capImport()">Adicionar selecionados</button></div>';box.innerHTML=h;
   }).catch(function(){if(btn){btn.disabled=false;btn.textContent='Buscar';}capToast('Falha de rede');});return false;}
 function capAll(el){document.querySelectorAll('#cap-list input[name=itens]').forEach(function(c){c.checked=el.checked;});}
@@ -4990,7 +5028,7 @@ _CAPTAR_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <label class="rrow" style="cursor:pointer">
             <input type="checkbox" name="itens" value="{{ it.pack }}">
             <span style="flex:1">
-              <span style="display:flex;align-items:center;gap:.4rem"><span class="tdot" style="background:{{ temp_cor[it.temperatura] }}"></span><b style="font-size:.88rem">{{ it.empresa }}</b></span>
+              <span style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap"><span class="tdot" style="background:{{ temp_cor[it.temperatura] }}"></span><b style="font-size:.88rem">{{ it.empresa }}</b>{% if it.dup_campanha %}<span class="dupb">🚫 já em campanha: {{ it.dup_campanha }}</span>{% elif it.dup %}<span class="dupb">⚠️ já na base</span>{% endif %}</span>
               <span class="mut" style="font-size:.76rem">{% if it.segmento %}{{ it.segmento }} · {% endif %}{% if it.telefone %}{{ it.telefone }}{% endif %}{% if it.rating %} · nota {{ it.rating }}{% endif %}{% if not it.tem_site %} · <span style="color:#e0574f">sem site</span>{% endif %}{% if it.cidade %} · {{ it.cidade }}{% if it.uf %}/{{ it.uf }}{% endif %}{% endif %}</span>
             </span>
             {% set tp = {'quente':'#f0917f','morno':'#e0b25a','frio':'#7bb8e6'} %}

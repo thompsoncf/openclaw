@@ -2496,6 +2496,7 @@ def _modelo_passos(c, conta_id, codigo) -> list | None:
 
 _STATUS_ROT_CP = {"rascunho": "✎ Rascunho", "ativa": "● Ativa",
                   "pausada": "❚❚ Pausada", "concluida": "✓ Concluída"}
+_STATUS_CURTO_CP = {"rascunho": "rascunho", "pausada": "pausada", "concluida": "concluída"}
 _ALVO_ROT = {"fila": "Na fila", "enviado": "Em sequência", "respondeu": "Respondeu ✓",
              "descadastrou": "Descadastrou", "erro": "Erro", "concluido": "Concluído"}
 
@@ -2534,16 +2535,32 @@ def prospeccao_campanhas(request: Request):
                  (select count(*) from campanha_alvos a where a.campanha_id=cp.id and a.status='respondeu'),
                  coalesce(cp.wa_ativo,false),
                  (select count(*) from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
-                    where a.campanha_id=cp.id and p.estagio='lead')
+                    where a.campanha_id=cp.id and p.estagio='lead'),
+                 coalesce(cp.enviados_hoje,0), cp.dia_contagem,
+                 (select count(*) from campanha_alvos a where a.campanha_id=cp.id and a.status='erro')
+                   + (select count(*) from campanha_alvos a where a.campanha_id=cp.id and a.wa_status='erro'),
+                 to_char((select min(a.proximo_envio_em) from campanha_alvos a
+                           where a.campanha_id=cp.id and a.proximo_envio_em is not null)
+                         - interval '3 hours', 'HH24:MI')
                from campanhas cp where cp.conta_id=%s order by cp.criado_em desc""",
             (ctx["conta_id"],)).fetchall()
         eleg = c.execute("""select count(*) from prospeccao where conta_id=%s
                              and (email_ok or coalesce(nullif(trim(whatsapp),''), nullif(trim(telefone),'')) is not null)""",
                          (ctx["conta_id"],)).fetchone()[0]
-    camps = [{"id": r[0], "nome": r[1], "status": r[2], "limite": r[3],
-              "n": r[4], "env": r[5], "resp": r[6], "status_rot": _STATUS_ROT_CP.get(r[2], r[2]),
-              "wa": r[7], "virou": r[8]}
-             for r in rows]
+    from datetime import date as _date
+    _hoje = _date.today()
+    _circ = 131.9  # 2*pi*21 — mesmo raio do círculo do gauge no CSS/SVG
+    camps = []
+    for r in rows:
+        limite = r[3] or 0
+        hoje_n = r[9] if r[10] == _hoje else 0
+        pct = min(100, round(100 * hoje_n / limite)) if limite else 0
+        camps.append({"id": r[0], "nome": r[1], "status": r[2], "limite": r[3],
+                      "n": r[4], "env": r[5], "resp": r[6], "status_rot": _STATUS_ROT_CP.get(r[2], r[2]),
+                      "status_curto": _STATUS_CURTO_CP.get(r[2], r[2]),
+                      "wa": r[7], "virou": r[8], "hoje": hoje_n,
+                      "hoje_offset": round(_circ * (1 - pct / 100), 1),
+                      "erros": r[11], "proximo": r[12] or ""})
     return _render("prospeccao_campanhas", request, titulo="Campanhas", secao_ativa="prospeccao",
                    camps=camps, elegiveis=eleg, gerencia=ctx["gerencia"],
                    aviso=request.session.pop("prosp_aviso", None))
@@ -5950,7 +5967,18 @@ function cxPoll(){cxPollList();cxPollThread();}
 </script>
 {% endblock %}"""
 
-_CPILL_CSS = """<style>.cpill{font-size:.68rem;font-weight:700;padding:.14rem .5rem;border-radius:999px;border:1px solid var(--borda);white-space:nowrap}
+_CPILL_CSS = """<style>
+/* base de botão/campo — as páginas de campanha não herdam _CSS (só o <button>/<input>
+   genérico do template base), então .pbtn/.fld/.lbl precisam existir aqui */
+.pbtn{width:auto;margin:0;padding:.5rem .9rem;border-radius:9px;font-size:.86rem;font-weight:600;
+  background:var(--verde);color:#fff;border:0;cursor:pointer;display:inline-flex;align-items:center;gap:.4rem;text-decoration:none}
+.pbtn:hover{background:var(--verde-hover)}
+.pbtn.ghost{background:transparent;color:var(--txt-mut);border:1px solid var(--borda)}
+.pbtn.ghost:hover{color:var(--txt);border-color:var(--verde)}
+.pbtn[disabled]{opacity:.45;cursor:not-allowed}
+.fld{width:100%;padding:.55rem .7rem;border-radius:8px;border:1px solid #333;background:var(--bg);color:var(--txt);font-family:inherit;font-size:.9rem}
+.lbl{display:block;color:var(--txt-mut);font-size:.72rem;margin-bottom:.15rem}
+.cpill{font-size:.68rem;font-weight:700;padding:.14rem .5rem;border-radius:999px;border:1px solid var(--borda);white-space:nowrap}
 .cpill.ativa{color:#3ddc84;border-color:#1e4a34;background:#10241a}
 .cpill.pausada{color:#e0a33e;border-color:#5a4520;background:#2a2113}
 .cpill.rascunho,.cpill.concluida{color:#8a938a}
@@ -6005,7 +6033,8 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
 .guia .steps .gt{font-size:.83rem;line-height:1.4}
 .guia .steps .gt b{color:var(--txt)}.guia .steps .gt span{color:var(--mut)}
 /* card de campanha */
-.ccard{background:var(--card);border:1px solid var(--borda);border-radius:14px;padding:.9rem 1rem}
+.ccard{background:var(--card);border:1px solid var(--borda);border-radius:14px;padding:.9rem 1rem;display:flex;gap:.9rem;align-items:flex-start}
+.ccard .body{flex:1;min-width:0}
 .ccard .top{display:flex;align-items:center;gap:.5rem;min-width:0}
 .ccard .nome{flex:1;min-width:0;font-weight:700;color:inherit;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ccard .nome:hover{color:var(--verde-claro)}
@@ -6017,12 +6046,46 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
 .ckpis .kv b{color:var(--txt);font-variant-numeric:tabular-nums}
 .ckpis .kv.g b{color:var(--verde-claro)}
 .ckpis .sep{color:#3a3a3c}
+/* motorzinho: gauge circular de "hoje" + pulso de atividade */
+.motor{width:64px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:.3rem;text-align:center}
+.gauge{position:relative;width:52px;height:52px}
+.gauge svg{transform:rotate(-90deg)}
+.gauge circle{fill:none;stroke-width:5}
+.gauge .trilho{stroke:var(--borda)}
+.gauge .prog{stroke:var(--verde-claro);stroke-linecap:round;transition:stroke-dashoffset .4s ease}
+.gauge.pausada .prog{stroke:#5a5c5e}
+.gauge .val{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-size:.72rem;font-weight:750;font-variant-numeric:tabular-nums;color:var(--txt)}
+.motor .pulso{display:inline-flex;align-items:center;gap:.3rem;font-size:.66rem;color:var(--verde-claro);font-weight:600}
+.motor .dot{width:6px;height:6px;border-radius:50%;background:var(--verde-claro);animation:pulso 1.6s ease-in-out infinite}
+@media(prefers-reduced-motion:reduce){.motor .dot{animation:none}}
+@keyframes pulso{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.72)}}
+.motor .parada{font-size:.66rem;color:var(--mut)}
+.motor .erro{font-size:.66rem;color:#e0574f;font-weight:700}
+.motor .quando{font-size:.62rem;color:var(--mut);margin-top:.1rem}
+/* cabeçalho + botão "+ Criar" + modal */
+.pagehead{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+.hdrbtn{width:auto;margin:0;padding:.55rem 1rem;border-radius:9px;font-size:.86rem;font-weight:700;
+  background:var(--verde);color:#fff;border:0;cursor:pointer;display:inline-flex;align-items:center;gap:.4rem;flex-shrink:0}
+.hdrbtn:hover{background:var(--verde-hover)}
+.ovl{position:fixed;inset:0;background:rgba(6,7,7,.6);backdrop-filter:blur(2px);display:none;align-items:center;justify-content:center;z-index:50;padding:1rem}
+.ovl.on{display:flex}
+.mcard{background:var(--card);border:1px solid var(--borda);border-radius:14px;padding:1.2rem 1.3rem;width:100%;max-width:380px;
+  box-shadow:0 20px 50px rgba(0,0,0,.5)}
+.mcard h3{margin:0 0 .2rem;font-size:1.02rem}
+.mcard p{margin:0 0 .9rem;font-size:.8rem;color:var(--mut)}
+.mcard .row{display:flex;gap:.5rem;margin-top:1rem}
+.mcard .row .pbtn.ghost{flex:0 0 auto}
+.mcard .row .pbtn.principal{flex:1;justify-content:center}
 </style>
 <div class="pw">
 """ + _navbar('campanhas') + """
-  <div>
-    <h2 class="tt">📣 Campanhas</h2>
-    <div class="mut" style="font-size:.85rem">Prospecção fria multicanal · <b style="color:var(--verde-claro)">{{ elegiveis }}</b> lead(s) com e-mail ou WhatsApp prontos pra abordar</div>
+  <div class="pagehead">
+    <div>
+      <h2 class="tt">📣 Campanhas</h2>
+      <div class="mut" style="font-size:.85rem">Prospecção fria multicanal · <b style="color:var(--verde-claro)">{{ elegiveis }}</b> lead(s) com e-mail ou WhatsApp prontos pra abordar</div>
+    </div>
+    <button class="hdrbtn" type="button" onclick="document.getElementById('ovlCriar').classList.add('on');document.getElementById('nomeCampanha').focus()">＋ Criar</button>
   </div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
 
@@ -6033,7 +6096,7 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
     <div class="cppstep"><div>🔥</div><h5>Vira lead</h5><p>entra no funil</p></div>
   </div>
 
-  <details class="guia" open>
+  <details class="guia">
     <summary>📖 Como criar e configurar uma campanha <span class="chev">›</span></summary>
     <ol class="steps">
       <li><span class="gn">1</span><span class="gt"><b>Criar</b> <span>— dê um nome (ex.: <code>Dentistas · Teresina</code>) e clique <b>Criar campanha</b>. Nasce como Rascunho.</span></span></li>
@@ -6046,40 +6109,66 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
   </details>
   {% if elegiveis == 0 %}<div class="mut" style="margin-top:.5rem;font-size:.85rem;border:1px solid var(--borda);border-radius:10px;padding:.7rem .9rem">Nenhum lead com e-mail ou WhatsApp ainda. Capte leads (Google Maps traz o telefone) pra começar.</div>{% endif %}
 
-  <div class="card" style="padding:.9rem 1rem;margin:1rem 0">
-    <form method="post" action="/painel/prospeccao/campanhas/nova" style="margin:0">
-      <label class="lbl">Nome da campanha <span style="color:var(--mut);font-weight:400">— opcional, dá pra renomear depois</span></label>
-      <input class="fld" name="nome" placeholder="ex.: Dentistas · Teresina" maxlength="120" style="margin-bottom:.6rem">
-      <button class="pbtn" style="width:100%;justify-content:center">＋ Criar campanha</button>
-    </form>
-  </div>
-
-  <div style="display:flex;flex-direction:column;gap:.6rem">
+  <div style="display:flex;flex-direction:column;gap:.6rem;margin-top:1rem">
     {% for c in camps %}
     <div class="ccard">
-      <div class="top">
-        <a class="nome" href="/painel/prospeccao/campanhas/{{ c.id }}" title="{{ c.nome }}">{{ c.nome }}</a>
-        <span class="badge mail" title="E-mail">✉️</span>
-        {% if c.wa %}<span class="badge wa" title="WhatsApp">💬</span>{% endif %}
-        <span class="cpill {{ c.status }}">{{ c.status_rot }}</span>
-        <form method="post" action="/painel/prospeccao/campanhas/{{ c.id }}/excluir" style="margin:0" onsubmit="return confirm('Excluir “{{ c.nome }}”? Os leads voltam pro funil.')">
-          <button class="cpx" title="Excluir campanha">🗑</button>
-        </form>
-      </div>
-      <a href="/painel/prospeccao/campanhas/{{ c.id }}" style="display:block;text-decoration:none;color:inherit">
-        <div class="ckpis">
-          <span class="kv"><b>{{ c.n }}</b> {{ 'lead' if c.n == 1 else 'leads' }}</span><span class="sep">·</span>
-          <span class="kv"><b>{{ c.env }}</b> enviados</span><span class="sep">·</span>
-          <span class="kv g"><b>{{ c.resp }}</b> respostas</span><span class="sep">·</span>
-          <span class="kv g"><b>{{ c.virou }}</b> viraram lead 🔥</span><span class="sep">·</span>
-          <span class="kv">limite <b>{{ c.limite }}</b>/dia</span>
+      <div class="motor">
+        <div class="gauge{% if c.status != 'ativa' %} pausada{% endif %}">
+          <svg width="52" height="52"><circle class="trilho" cx="26" cy="26" r="21"></circle>
+            <circle class="prog" cx="26" cy="26" r="21" stroke-dasharray="131.9" stroke-dashoffset="{{ c.hoje_offset if c.status == 'ativa' else 131.9 }}"></circle></svg>
+          <div class="val">{{ (c.hoje ~ '/' ~ c.limite) if c.status == 'ativa' else '—' }}</div>
         </div>
-        {% if c.n %}<div class="cpbar"><i class="e" style="width:{{ (100*c.env/c.n)|round|int }}%"></i><i class="r" style="width:{{ (100*c.resp/c.n)|round|int }}%"></i></div>{% endif %}
-      </a>
+        {% if c.status == 'ativa' %}
+          <div class="pulso"><span class="dot"></span>ativa</div>
+          {% if c.erros %}<div class="erro">⚠ {{ c.erros }} erro{{ 's' if c.erros != 1 else '' }}</div>
+          {% elif c.proximo %}<div class="quando">próx. {{ c.proximo }}</div>{% endif %}
+        {% else %}<div class="parada">{{ c.status_curto }}</div>{% endif %}
+      </div>
+      <div class="body">
+        <div class="top">
+          <a class="nome" href="/painel/prospeccao/campanhas/{{ c.id }}" title="{{ c.nome }}">{{ c.nome }}</a>
+          <span class="badge mail" title="E-mail">✉️</span>
+          {% if c.wa %}<span class="badge wa" title="WhatsApp">💬</span>{% endif %}
+          <span class="cpill {{ c.status }}">{{ c.status_rot }}</span>
+          <form method="post" action="/painel/prospeccao/campanhas/{{ c.id }}/excluir" style="margin:0" onsubmit="return confirm('Excluir “{{ c.nome }}”? Os leads voltam pro funil.')">
+            <button class="cpx" title="Excluir campanha">🗑</button>
+          </form>
+        </div>
+        <a href="/painel/prospeccao/campanhas/{{ c.id }}" style="display:block;text-decoration:none;color:inherit">
+          <div class="ckpis">
+            <span class="kv"><b>{{ c.n }}</b> {{ 'lead' if c.n == 1 else 'leads' }}</span><span class="sep">·</span>
+            <span class="kv"><b>{{ c.env }}</b> enviados</span><span class="sep">·</span>
+            <span class="kv g"><b>{{ c.resp }}</b> respostas</span><span class="sep">·</span>
+            <span class="kv g"><b>{{ c.virou }}</b> viraram lead 🔥</span><span class="sep">·</span>
+            <span class="kv">limite <b>{{ c.limite }}</b>/dia</span>
+          </div>
+          {% if c.n %}<div class="cpbar"><i class="e" style="width:{{ (100*c.env/c.n)|round|int }}%"></i><i class="r" style="width:{{ (100*c.resp/c.n)|round|int }}%"></i></div>{% endif %}
+        </a>
+      </div>
     </div>
-    {% else %}<div class="mut" style="text-align:center;padding:2rem">Nenhuma campanha ainda — crie a primeira acima.</div>{% endfor %}
+    {% else %}<div class="mut" style="text-align:center;padding:2rem">Nenhuma campanha ainda — clique em <b>＋ Criar</b> acima.</div>{% endfor %}
   </div>
 </div>
+
+<div class="ovl" id="ovlCriar" onclick="if(event.target===this)this.classList.remove('on')">
+  <div class="mcard">
+    <h3>＋ Nova campanha</h3>
+    <p>Dá pra renomear e configurar tudo depois.</p>
+    <form method="post" action="/painel/prospeccao/campanhas/nova">
+      <label class="lbl" for="nomeCampanha">Nome da campanha</label>
+      <input class="fld" id="nomeCampanha" name="nome" placeholder="ex.: Dentistas · Teresina" maxlength="120">
+      <div class="row">
+        <button class="pbtn ghost" type="button" onclick="document.getElementById('ovlCriar').classList.remove('on')">Cancelar</button>
+        <button class="pbtn principal" type="submit">Criar campanha</button>
+      </div>
+    </form>
+  </div>
+</div>
+<script>
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Escape'){ var o=document.getElementById('ovlCriar'); if(o) o.classList.remove('on'); }
+});
+</script>
 {% endblock %}"""
 
 _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + """

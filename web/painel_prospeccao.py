@@ -1593,7 +1593,10 @@ def comunicacao_detectar_fb(request: Request):
     tok = (row[0] if row else "") or ""
     if not tok:
         return JSONResponse({"ok": False, "erro": "Salve o token do Facebook primeiro."})
-    res = meta_msg.resolver_pagina_fb(tok)
+    # tenta deixar o user token de longa duração (aí o token da Página não expira)
+    longo = meta_msg.trocar_user_token_longo(tok)
+    user_tok = longo["token"] if (longo.get("ok") and longo.get("token")) else tok
+    res = meta_msg.resolver_pagina_fb(user_tok)
     if not res.get("ok"):
         return JSONResponse({"ok": False, "erro": res.get("erro") or "não consegui detectar"})
     page_token = res.get("page_token") or tok    # usa o token DA PÁGINA (não expira se o user token for longo)

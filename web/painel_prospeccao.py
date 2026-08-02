@@ -1537,6 +1537,32 @@ def comunicacao_virar_lead(request: Request, conversa_id: int = Form(...)):
     return JSONResponse({"ok": True, "lead_id": lead_id})
 
 
+@router.post("/painel/prospeccao/comunicacao/detectar-ig")
+def comunicacao_detectar_ig(request: Request):
+    """Descobre o ID da conta do Instagram a partir do token IGAA salvo (o servidor
+    chama a Meta) e preenche o IG Account ID sozinho — evita o Graph API Explorer."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "Só o dono/gestor."}, status_code=403)
+    from finance import meta_msg
+    with get_pool().connection() as c:
+        row = c.execute("select token from canais_config where conta_id=%s and canal='instagram'",
+                        (ctx["conta_id"],)).fetchone()
+    tok = (row[0] if row else "") or ""
+    if not tok.startswith("IGAA"):
+        return JSONResponse({"ok": False, "erro": "Salve o token do Instagram (IGAA...) primeiro."})
+    res = meta_msg.resolver_conta_ig(tok)
+    if not res.get("ok"):
+        return JSONResponse({"ok": False, "erro": res.get("erro") or "não consegui detectar"})
+    with get_pool().connection() as c:
+        c.execute("""update canais_config set identificador=%s, atualizado_em=now()
+                       where conta_id=%s and canal='instagram'""", (res["user_id"], ctx["conta_id"]))
+        c.commit()
+    return JSONResponse({"ok": True, "user_id": res["user_id"], "username": res.get("username", "")})
+
+
 @router.post("/painel/prospeccao/comunicacao/canal-numero")
 def comunicacao_canal_numero(request: Request, canal: str = Form(...), numero: str = Form(""),
                              token: str = Form(""), provedor: str = Form(""),
@@ -5615,7 +5641,16 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <input class="fld" name="numero" placeholder="IG Account ID" value="{{ canais.numeros.get('instagram','') }}" style="margin-bottom:.35rem">
         <input class="fld" name="token" type="password" placeholder="Page Access Token {% if canais.tokens_set.get('instagram') %}(salvo — vazio mantém){% endif %}" autocomplete="new-password" style="margin-bottom:.4rem">
         <button class="pbtn">Salvar</button>
-      </form>{% endif %}
+      </form>
+      <button type="button" class="pbtn ghost" style="margin-top:.5rem;font-size:.82rem" onclick="detectarIG(this)" title="O servidor pergunta pra Meta o ID da conta a partir do token IGAA salvo e preenche o IG Account ID">🔎 Detectar conta (preenche o IG Account ID)</button>
+      <div class="mut" id="detig-msg" style="font-size:.8rem;margin-top:.35rem"></div>
+      <script>
+      function detectarIG(b){var m=document.getElementById('detig-msg');b.disabled=true;var t=b.textContent;b.textContent='Detectando…';m.textContent='';m.style.color='';
+        fetch('/painel/prospeccao/comunicacao/detectar-ig',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){b.disabled=false;b.textContent=t;
+          if(!d.ok){m.style.color='#e0a33e';m.textContent='⚠ '+(d.erro||'Não consegui.');return;}
+          m.style.color='var(--verde-claro)';m.textContent='✓ Conta detectada: @'+(d.username||'?')+' (ID '+d.user_id+') — salvo. Recarregando…';
+          setTimeout(function(){location.reload();},1600);}).catch(function(){b.disabled=false;b.textContent=t;m.style.color='#e0a33e';m.textContent='Falha de rede.';});}
+      </script>{% endif %}
       <div class="mut" style="margin-top:.4rem;font-size:.8rem">Webhook: <code>/webhooks/meta</code> · assine <code>messages</code> no produto Instagram do app.</div>
     </div>
   </div>

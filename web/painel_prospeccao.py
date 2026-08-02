@@ -2170,6 +2170,39 @@ def tenho_interesse(request: Request, t: str = ""):
         "já vamos falar com você. 😊</p>"))
 
 
+@router.get("/privacidade", response_class=HTMLResponse)
+def politica_privacidade(request: Request):
+    """Política de Privacidade pública (para publicar o app na Meta e para os
+    usuários). Página estática, sem login."""
+    corpo = (
+        "<p style='text-align:left'>Esta Política descreve como o aplicativo "
+        "<b>Zaq Lead</b>, operado por <b>Aladdin Consultoria e Tecnologia</b> (\"ZAQ\"), "
+        "trata dados ao integrar canais de mensagem (WhatsApp, Instagram, Messenger e "
+        "e-mail) para atendimento e prospecção B2B.</p>"
+        "<h3 style='text-align:left'>Dados que tratamos</h3>"
+        "<p style='text-align:left'>Dados de contato de empresas e leads (nome, e-mail, "
+        "telefone/WhatsApp, perfil de Instagram) e o conteúdo das mensagens trocadas nos "
+        "canais conectados, para registrar a conversa e responder o interessado.</p>"
+        "<h3 style='text-align:left'>Como usamos</h3>"
+        "<p style='text-align:left'>Exclusivamente para prestar o serviço de atendimento/"
+        "CRM ao cliente titular da conta: receber mensagens, responder (inclusive por "
+        "assistente de IA) e organizar o relacionamento comercial. <b>Não vendemos</b> "
+        "dados pessoais e não os usamos para finalidades alheias ao serviço.</p>"
+        "<h3 style='text-align:left'>Plataformas da Meta</h3>"
+        "<p style='text-align:left'>Ao conectar Instagram/Messenger/WhatsApp, usamos as "
+        "APIs oficiais da Meta apenas para receber e enviar mensagens dentro das regras "
+        "da plataforma (por exemplo, a janela de 24h para respostas).</p>"
+        "<h3 style='text-align:left'>Retenção e exclusão</h3>"
+        "<p style='text-align:left'>Mantemos os dados enquanto durar a relação com o "
+        "cliente titular. Para solicitar acesso, correção ou <b>exclusão</b> dos seus "
+        "dados, escreva para <b>thompsoncf@hotmail.com</b> — atendemos no prazo legal.</p>"
+        "<h3 style='text-align:left'>Contato</h3>"
+        "<p style='text-align:left'>Aladdin Consultoria e Tecnologia — "
+        "thompsoncf@hotmail.com</p>"
+        "<p style='text-align:left;color:#888;font-size:.85rem'>Última atualização: 2026.</p>")
+    return HTMLResponse(_descad_page("Política de Privacidade — ZAQ", corpo))
+
+
 @router.get("/material")
 def abrir_material(t: str = "", canal: str = "email"):
     """Link rastreado do material (PDF/foto/vídeo/link) mandado por e-mail ou

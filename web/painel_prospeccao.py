@@ -16,7 +16,7 @@ import json
 import os
 import re
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 from fastapi import APIRouter, Request, Form, UploadFile, File, BackgroundTasks
@@ -2710,6 +2710,66 @@ def prospeccao_campanha_historico(request: Request, camp_id: int, pid: int):
     return JSONResponse({"ok": True, "email": email, "whatsapp": wpp})
 
 
+@router.get("/painel/prospeccao/campanhas/{camp_id}/exportar-cliques")
+def prospeccao_campanha_exportar_cliques(request: Request, camp_id: int):
+    """CSV com 1 linha por lead da campanha: quando abriu o e-mail, clicou 'Tenho
+    interesse', baixou o material, leu no WhatsApp, clicou 'Agora não' e descadastrou
+    (o que já existe; nada disso é tracking novo — só agrega campanha_eventos por lead)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
+    with get_pool().connection() as c:
+        camp = c.execute("select nome from campanhas where id=%s and conta_id=%s",
+                         (camp_id, ctx["conta_id"])).fetchone()
+        if not camp:
+            return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
+        leads = c.execute(
+            """select a.prospeccao_id, p.empresa,
+                      coalesce(nullif(trim(p.whatsapp),''), nullif(trim(p.telefone),'')),
+                      nullif(trim(p.email),'')
+                 from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
+                where a.campanha_id=%s order by p.empresa""", (camp_id,)).fetchall()
+        eventos = c.execute(
+            """select prospeccao_id, canal, evento, coalesce(detalhe,''), min(quando)
+                 from campanha_eventos where campanha_id=%s
+                group by prospeccao_id, canal, evento, coalesce(detalhe,'')""", (camp_id,)).fetchall()
+        descads = dict(c.execute(
+            """select lower(p.email), d.criado_em
+                 from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
+                 join descadastros d on d.conta_id=%s and lower(d.email)=lower(p.email)
+                where a.campanha_id=%s""", (ctx["conta_id"], camp_id)).fetchall())
+    por_lead = {}
+    for pid, canal, evento, detalhe, quando in eventos:
+        por_lead.setdefault(pid, []).append((canal, evento, detalhe, quando))
+
+    def _fmt(dt):
+        return (dt - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M") if dt else ""
+
+    def _min_quando(evs, pred):
+        achados = [q for (canal, evento, detalhe, q) in evs if pred(canal, evento, detalhe)]
+        return min(achados) if achados else None
+
+    buf = io.StringIO()
+    w = _csv.writer(buf, delimiter=";")
+    w.writerow(["Empresa", "WhatsApp", "E-mail", "Abriu e-mail", "Clicou \"Tenho interesse\"",
+                "Baixou material", "Leu no WhatsApp", "Clicou \"Agora não\"", "Descadastrou"])
+    for pid, empresa, telefone, email in leads:
+        evs = por_lead.get(pid, [])
+        abriu = _min_quando(evs, lambda cn, e, d: cn == "email" and e == "aberto")
+        interesse = _min_quando(evs, lambda cn, e, d: cn == "email" and e == "respondeu" and d == "Tenho interesse")
+        baixou = _min_quando(evs, lambda cn, e, d: e == "baixou")
+        leu_wa = _min_quando(evs, lambda cn, e, d: cn == "whatsapp" and e == "lido")
+        agora_nao = _min_quando(evs, lambda cn, e, d: cn == "whatsapp" and e == "clicou")
+        descad = descads.get((email or "").lower())
+        w.writerow([empresa or "", telefone or "", email or "", _fmt(abriu), _fmt(interesse),
+                    _fmt(baixou), _fmt(leu_wa), _fmt(agora_nao), _fmt(descad)])
+    nome_arq = _slug_modelo(camp[0]) + "-cliques.csv"
+    return Response(content="﻿" + buf.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{nome_arq}"'})
+
+
 @router.post("/painel/prospeccao/campanhas/{camp_id}/publico")
 def prospeccao_campanha_publico(request: Request, camp_id: int, seg: str = Form(""),
                                 cidade: str = Form(""), temp: str = Form("")):
@@ -4052,6 +4112,8 @@ _CSS = """<style>
 .pbtn:hover{background:var(--verde-hover)}
 .pbtn.ghost{background:transparent;color:var(--txt-mut);border:1px solid var(--borda)}
 .pbtn.ghost:hover{color:var(--txt);border-color:var(--verde)}
+.pbtn.novo{background:transparent;color:var(--verde-claro);border:1px solid #1e4a3a}
+.pbtn.novo:hover{background:#132420}
 .pbtn[disabled]{opacity:.45;cursor:not-allowed}
 .tpill{display:inline-flex;align-items:center;padding:.12rem .55rem;border-radius:999px;font-size:.72rem;font-weight:600;line-height:1.4}
 .spill{display:inline-flex;align-items:center;padding:.14rem .6rem;border-radius:999px;font-size:.74rem;
@@ -6369,6 +6431,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-top:.3rem">
           <span id="cl-count" class="mut" style="font-size:.78rem">Marque os leads na tabela pra agir em lote (ex.: base sem riqueza de dados, sem interesse)</span>
           <span style="flex:1"></span>
+          <a class="pbtn novo sm" href="/painel/prospeccao/campanhas/{{ camp.id }}/exportar-cliques" title="Baixa um CSV com 1 linha por lead: abriu e-mail, clicou 'Tenho interesse', baixou material, leu no WhatsApp, clicou 'Agora não' e descadastrou">📥 Exportar cliques (CSV)</a>
           <button type="button" class="pbtn ghost sm" id="cl-rem-btn" onclick="clRemSelecionados({{ camp.id }})" disabled>🗑 Remover selecionados</button>
         </div>
         {% endif %}

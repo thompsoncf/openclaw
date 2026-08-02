@@ -52,12 +52,14 @@ def enviar(c, conta_id, numero, texto) -> dict:
 
 def enviar_template(c, conta_id, numero, content_sid, variaveis) -> dict:
     """Dispara um TEMPLATE aprovado (fora da janela de 24h) pelo número da empresa.
-    O `content_sid` é do Twilio (Content API), então só vale pra provedor 'twilio'.
-    Usa o número Twilio da empresa (`identificador`); se a empresa não tiver número
-    próprio, cai pro número global do Zaq (env TWILIO_WHATSAPP_FROM)."""
+    Twilio: `content_sid` é o Content SID (HX...). Cloud API (número próprio): o mesmo
+    campo carrega o NOME do template aprovado na Meta."""
     import os
     r = _row(c, conta_id)
     prov = r[0] if r else "twilio"
+    if prov == "cloud":
+        # no Cloud API o "content_sid" é o NOME do template aprovado na Meta
+        return _cloud.enviar_template(r[2], r[3], numero, content_sid, variaveis)
     if prov != "twilio":
         return {"ok": False, "erro": "provedor_sem_template"}
     remetente = (r[1] if r and r[1] else "") or (os.environ.get("TWILIO_WHATSAPP_FROM") or "")

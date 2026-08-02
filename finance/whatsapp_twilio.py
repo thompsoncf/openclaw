@@ -17,6 +17,15 @@ from __future__ import annotations
 import os
 
 
+def _erro_provedor(e: Exception) -> dict:
+    """Extrai código/mensagem reais de um erro do SDK Twilio (TwilioRestException
+    tem .code e .msg), pra saber a CAUSA (ex.: 63024 = número não tem WhatsApp) em
+    vez de só um texto genérico truncado."""
+    return {"ok": False, "erro": str(e)[:200],
+            "codigo": getattr(e, "code", None),
+            "msg": (getattr(e, "msg", None) or str(e))[:300]}
+
+
 def _cfg() -> dict | None:
     sid = os.environ.get("TWILIO_ACCOUNT_SID")
     tok = os.environ.get("TWILIO_AUTH_TOKEN")
@@ -87,7 +96,7 @@ def enviar_texto(remetente: str, numero: str, corpo: str) -> dict:
         # SID/token invalido, etc). Best-effort — nao muda o retorno.
         from core.falhas import avaliar_falha_provedor
         avaliar_falha_provedor(e, servico="Twilio (WhatsApp)")
-        return {"ok": False, "erro": str(e)[:200]}
+        return _erro_provedor(e)
 
 
 def enviar_template(remetente: str, numero: str, content_sid: str,
@@ -127,7 +136,7 @@ def enviar_template(remetente: str, numero: str, content_sid: str,
     except Exception as e:  # noqa: BLE001
         from core.falhas import avaliar_falha_provedor
         avaliar_falha_provedor(e, servico="Twilio (WhatsApp template)")
-        return {"ok": False, "erro": str(e)[:200]}
+        return _erro_provedor(e)
 
 
 def validar_assinatura(url: str, params: dict, assinatura: str) -> bool:

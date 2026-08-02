@@ -479,7 +479,11 @@ def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> i
         with pool.connection() as c:
             res = whatsapp_out.enviar_template(c, conta_id, numero, sid, variaveis)
         if not res.get("ok"):
-            _wa_marca(pool, aid, "erro")
+            detalhe = res.get("msg") or res.get("erro") or ""
+            _wa_marca(pool, aid, "erro", erro_codigo=res.get("codigo"), erro_msg=detalhe)
+            with pool.connection() as c:
+                evento(c, camp_id, pid, "whatsapp", "erro", detalhe)
+                c.commit()
             continue
         _wa_marca(pool, aid, "enviado", wa_sid=res.get("sid"))
         with pool.connection() as c:
@@ -682,9 +686,13 @@ def _reengajar_campanha(pool, camp_id, conta_id, dias, wa_ativo, camp_sid, teto)
     return feitos
 
 
-def _wa_marca(pool, aid, status, wa_sid=None):
+def _wa_marca(pool, aid, status, wa_sid=None, erro_codigo=None, erro_msg=None):
     with pool.connection() as c:
-        if wa_sid:
+        if erro_codigo or erro_msg:
+            c.execute("""update campanha_alvos set wa_status=%s, wa_em=now(),
+                           wa_erro_codigo=%s, wa_erro_msg=%s where id=%s""",
+                      (status, str(erro_codigo) if erro_codigo else None, erro_msg, aid))
+        elif wa_sid:
             c.execute("update campanha_alvos set wa_status=%s, wa_em=now(), wa_sid=%s where id=%s",
                       (status, wa_sid, aid))
         else:

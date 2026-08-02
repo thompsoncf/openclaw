@@ -2011,13 +2011,26 @@ async def webhook_twilio_status(request: Request):
         try:
             with get_pool().connection() as c:
                 if novo == "erro":
+                    # Twilio manda a causa real aqui (ex.: 63024/63016 = número sem
+                    # WhatsApp/não opt-in) — antes isso era descartado e só sobrava
+                    # o status genérico "erro".
+                    erro_codigo = params.get("ErrorCode") or ""
+                    erro_msg = (params.get("ErrorMessage") or "")[:300]
                     # erro só marca se ainda não chegou a entregue/lido
-                    c.execute("""update campanha_alvos set wa_status='erro', wa_em=now()
-                                   where wa_sid=%s and coalesce(wa_status,'') not in ('entregue','lido')""",
-                              (msid,))
+                    cur = c.execute("""update campanha_alvos set wa_status='erro', wa_em=now(),
+                                   wa_erro_codigo=%s, wa_erro_msg=%s
+                                   where wa_sid=%s and coalesce(wa_status,'') not in ('entregue','lido')
+                                   returning prospeccao_id, campanha_id""",
+                              (erro_codigo or None, erro_msg or None, msid))
+                    _transicao_erro = cur.fetchone()
                     c.execute("""update mensagens set status='erro'
                                    where provider_sid=%s and coalesce(status,'') not in ('entregue','lido')""",
                               (msid,))
+                    if _transicao_erro:
+                        from finance.campanhas_motor import evento
+                        detalhe = (f"{erro_codigo}: {erro_msg}" if erro_codigo and erro_msg
+                                   else (erro_msg or erro_codigo))
+                        evento(c, _transicao_erro[1], _transicao_erro[0], "whatsapp", "erro", detalhe)
                     c.commit()
                 else:
                     # guarda de rank: nunca rebaixa (enviado<entregue<lido)
@@ -2509,7 +2522,8 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                       coalesce(a.aberturas,0),
                       to_char(a.aberto_em - interval '3 hours','DD/MM HH24:MI'),
                       coalesce(a.wa_status,''),
-                      coalesce(nullif(trim(p.whatsapp),''), nullif(trim(p.telefone),''))
+                      coalesce(nullif(trim(p.whatsapp),''), nullif(trim(p.telefone),'')),
+                      coalesce(a.wa_erro_msg,'')
                  from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
                 where a.campanha_id=%s order by a.ultima_msg_em desc nulls last, a.id desc limit 200""",
             (camp_id,)).fetchall()
@@ -2575,7 +2589,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
     leads_l = [{"empresa": r[0], "email": r[1], "status": r[2], "passo": r[3],
                 "prox": r[4], "ult": r[5], "pid": r[6], "rot": _ALVO_ROT.get(r[2], r[2]),
                 "abriu": r[7], "aberto": r[8], "wa": r[9], "wa_rot": _WA_ROT.get(r[9], ""),
-                "fone": r[10] or ""}
+                "fone": r[10] or "", "wa_erro": r[11] if r[9] == "erro" else ""}
                for r in leads]
     from finance import email_inbound as _ein_mod
     email_principal = _ein_mod.remetente_conta(get_pool(), ctx["conta_id"], "email") or ""
@@ -6263,7 +6277,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
                 <td><b>{{ l.empresa }}</b><div class="mut" style="font-size:.76rem">{% if l.email %}✉️ {{ l.email }}{% endif %}{% if l.email and l.fone %} · {% endif %}{% if l.fone %}💬 {{ l.fone }}{% endif %}{% if not l.email and not l.fone %}—{% endif %}</div></td>
                 <td><span class="apill {{ l.status }}">{{ l.rot }}</span></td>
                 <td class="mut" style="white-space:nowrap">D{{ l.passo }}{% if l.abriu %} · <span style="color:var(--verde-claro)" title="Abriu {{ l.abriu }}x · 1ª em {{ l.aberto }}">👁 {{ l.aberto }}{% if l.abriu > 1 %} ({{ l.abriu }}x){% endif %}</span>{% endif %}</td>
-                <td class="mut" style="white-space:nowrap">{% if l.fone %}{{ l.fone }}{% if l.wa_rot %}<div style="font-size:.76rem">{{ l.wa_rot }}</div>{% endif %}{% else %}{{ l.wa_rot or '—' }}{% endif %}</td>
+                <td class="mut" style="white-space:nowrap">{% if l.fone %}{{ l.fone }}{% if l.wa_rot %}<div style="font-size:.76rem"{% if l.wa_erro %} title="{{ l.wa_erro|e }}"{% endif %}>{{ l.wa_rot }}</div>{% endif %}{% else %}<span{% if l.wa_erro %} title="{{ l.wa_erro|e }}"{% endif %}>{{ l.wa_rot or '—' }}</span>{% endif %}</td>
                 <td class="mut" style="white-space:nowrap">{% if l.status in ('fila','enviado') and l.prox %}⏳ {{ l.prox }}{% elif l.ult %}✓ {{ l.ult }}{% else %}—{% endif %}</td>
                 <td style="text-align:right;white-space:nowrap"><button type="button" class="cpx" onclick="campHist({{ camp.id }},{{ l.pid }},this)" title="Ver histórico (data/hora por canal)">🕘</button> <button type="button" class="cpx" onclick="campRemLead(this,{{ camp.id }},{{ l.pid }})" title="Remover da campanha (o lead volta pra Base)">✕</button></td></tr>
               {% else %}<tr><td colspan="7" class="mut" style="text-align:center;padding:1.6rem">Nenhum lead ainda — mande da <b>Base</b> (marque os leads → “Jogar na campanha”).</td></tr>{% endfor %}

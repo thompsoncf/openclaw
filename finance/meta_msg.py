@@ -92,6 +92,31 @@ def validar_assinatura(body: bytes, header_sig: str) -> bool:
     return False
 
 
+def resolver_conta_ig(token: str) -> dict:
+    """Descobre o ID da conta (user_id) e o @username a partir de um token IGAA,
+    chamando graph.instagram.com/me. Roda no servidor (que tem internet). Devolve
+    {ok, user_id, username} ou {ok:False, erro}."""
+    t = (token or "").strip()
+    if not t:
+        return {"ok": False, "erro": "sem_token"}
+    url = _GRAPH_IG + "/me?fields=user_id,username&access_token=" + urllib.parse.quote(t)
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, method="GET"), timeout=_TIMEOUT) as r:
+            d = json.loads(r.read().decode("utf-8") or "{}")
+        uid = str(d.get("user_id") or d.get("id") or "").strip()
+        if not uid:
+            return {"ok": False, "erro": "a Meta não devolveu user_id"}
+        return {"ok": True, "user_id": uid, "username": d.get("username") or ""}
+    except urllib.error.HTTPError as e:  # noqa: BLE001
+        try:
+            det = e.read().decode("utf-8")[:200]
+        except Exception:  # noqa: BLE001
+            det = str(e)
+        return {"ok": False, "erro": det}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "erro": str(e)[:200]}
+
+
 def enviar(page_token: str, destino_id: str, texto: str, plataforma: str = "messenger") -> dict:
     """Envia texto (dentro da janela de 24h) via Graph API, usando o Page Access
     Token da empresa. `destino_id` = PSID (Messenger) ou IGSID (Instagram)."""

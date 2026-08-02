@@ -21,7 +21,8 @@ import urllib.parse
 import urllib.request
 
 _log = logging.getLogger("openclaw.meta")
-_GRAPH = "https://graph.facebook.com/v19.0"
+_GRAPH = "https://graph.facebook.com/v19.0"          # Messenger + Instagram via login do Facebook (token EAA)
+_GRAPH_IG = "https://graph.instagram.com/v21.0"      # Instagram via login do Instagram (token IGAA)
 _TIMEOUT = 15
 
 
@@ -101,7 +102,9 @@ def enviar(page_token: str, destino_id: str, texto: str, plataforma: str = "mess
     payload = {"recipient": {"id": str(destino_id)},
                "messaging_type": "RESPONSE",
                "message": {"text": (texto or "")[:1900]}}
-    url = _GRAPH + "/me/messages?access_token=" + urllib.parse.quote(page_token)
+    # token IGAA = Instagram Login → graph.instagram.com; senão (EAA) → graph.facebook.com (Página)
+    base = _GRAPH_IG if (page_token or "").startswith("IGAA") else _GRAPH
+    url = base + "/me/messages?access_token=" + urllib.parse.quote(page_token)
     try:
         req = urllib.request.Request(
             url, data=json.dumps(payload).encode("utf-8"),

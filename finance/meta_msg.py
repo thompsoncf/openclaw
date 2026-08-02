@@ -180,6 +180,55 @@ def assinar_conta_ig(token: str) -> dict:
         return {"ok": False, "erro": str(e)[:200]}
 
 
+def resolver_pagina_fb(user_token: str) -> dict:
+    """Descobre a Página do Facebook (id + nome + token DA PÁGINA) a partir de um token
+    de usuário com pages_show_list. graph.facebook.com/me/accounts."""
+    t = (user_token or "").strip()
+    if not t:
+        return {"ok": False, "erro": "sem_token"}
+    url = _GRAPH + "/me/accounts?fields=name,id,access_token&access_token=" + urllib.parse.quote(t)
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, method="GET"), timeout=_TIMEOUT) as r:
+            d = json.loads(r.read().decode("utf-8") or "{}")
+        data = d.get("data") or []
+        if not data:
+            return {"ok": False, "erro": "nenhuma Página encontrada (o token precisa de pages_show_list)"}
+        p = data[0]
+        return {"ok": True, "page_id": str(p.get("id") or ""), "nome": p.get("name") or "",
+                "page_token": p.get("access_token") or "", "varias": len(data) > 1}
+    except urllib.error.HTTPError as e:  # noqa: BLE001
+        try:
+            det = e.read().decode("utf-8")[:200]
+        except Exception:  # noqa: BLE001
+            det = str(e)
+        return {"ok": False, "erro": det}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "erro": str(e)[:200]}
+
+
+def assinar_pagina_fb(page_id: str, page_token: str) -> dict:
+    """Inscreve a Página nos webhooks do app pro campo 'messages'.
+    POST graph.facebook.com/{page-id}/subscribed_apps?subscribed_fields=messages."""
+    pid = str(page_id or "").strip()
+    t = (page_token or "").strip()
+    if not pid or not t:
+        return {"ok": False, "erro": "sem page_id ou token"}
+    url = (_GRAPH + "/" + urllib.parse.quote(pid) + "/subscribed_apps?subscribed_fields=messages"
+           "&access_token=" + urllib.parse.quote(t))
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, data=b"", method="POST"), timeout=_TIMEOUT) as r:
+            d = json.loads(r.read().decode("utf-8") or "{}")
+        return {"ok": bool(d.get("success", True)), "resp": d}
+    except urllib.error.HTTPError as e:  # noqa: BLE001
+        try:
+            det = e.read().decode("utf-8")[:200]
+        except Exception:  # noqa: BLE001
+            det = str(e)
+        return {"ok": False, "erro": det}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "erro": str(e)[:200]}
+
+
 def enviar(page_token: str, destino_id: str, texto: str, plataforma: str = "messenger") -> dict:
     """Envia texto (dentro da janela de 24h) via Graph API, usando o Page Access
     Token da empresa. `destino_id` = PSID (Messenger) ou IGSID (Instagram)."""

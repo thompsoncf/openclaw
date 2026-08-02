@@ -1577,6 +1577,36 @@ def comunicacao_detectar_ig(request: Request):
                          "token_longo": token_longo})
 
 
+@router.post("/painel/prospeccao/comunicacao/detectar-fb")
+def comunicacao_detectar_fb(request: Request):
+    """Descobre a Página do Facebook (id + token da Página) a partir do token salvo,
+    preenche o Page ID e inscreve a Página no webhook 'messages' — pro Messenger."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "Só o dono/gestor."}, status_code=403)
+    from finance import meta_msg
+    with get_pool().connection() as c:
+        row = c.execute("select token from canais_config where conta_id=%s and canal='messenger'",
+                        (ctx["conta_id"],)).fetchone()
+    tok = (row[0] if row else "") or ""
+    if not tok:
+        return JSONResponse({"ok": False, "erro": "Salve o token do Facebook primeiro."})
+    res = meta_msg.resolver_pagina_fb(tok)
+    if not res.get("ok"):
+        return JSONResponse({"ok": False, "erro": res.get("erro") or "não consegui detectar"})
+    page_token = res.get("page_token") or tok    # usa o token DA PÁGINA (não expira se o user token for longo)
+    with get_pool().connection() as c:
+        c.execute("""update canais_config set identificador=%s, token=%s, atualizado_em=now()
+                       where conta_id=%s and canal='messenger'""", (res["page_id"], page_token, ctx["conta_id"]))
+        c.commit()
+    sub = meta_msg.assinar_pagina_fb(res["page_id"], page_token)
+    return JSONResponse({"ok": True, "page_id": res["page_id"], "nome": res.get("nome", ""),
+                         "assinado": bool(sub.get("ok")), "assinar_erro": (sub.get("erro") or ""),
+                         "varias": bool(res.get("varias"))})
+
+
 @router.post("/painel/prospeccao/comunicacao/canal-numero")
 def comunicacao_canal_numero(request: Request, canal: str = Form(...), numero: str = Form(""),
                              token: str = Form(""), provedor: str = Form(""),
@@ -5696,7 +5726,17 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <input class="fld" name="numero" placeholder="Page ID" value="{{ canais.numeros.get('messenger','') }}" style="margin-bottom:.35rem">
         <input class="fld" name="token" type="password" placeholder="Page Access Token {% if canais.tokens_set.get('messenger') %}(salvo — vazio mantém){% endif %}" autocomplete="new-password" style="margin-bottom:.4rem">
         <button class="pbtn">Salvar</button>
-      </form>{% endif %}
+      </form>
+      <button type="button" class="pbtn ghost" style="margin-top:.5rem;font-size:.82rem" onclick="detectarFB(this)" title="O servidor descobre a Página do Facebook (id + token da Página) a partir do token salvo e inscreve ela no webhook 'messages'">🔎 Detectar página e ativar recebimento</button>
+      <div class="mut" id="detfb-msg" style="font-size:.8rem;margin-top:.35rem"></div>
+      <script>
+      function detectarFB(b){var m=document.getElementById('detfb-msg');b.disabled=true;var t=b.textContent;b.textContent='Detectando…';m.textContent='';m.style.color='';
+        fetch('/painel/prospeccao/comunicacao/detectar-fb',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){b.disabled=false;b.textContent=t;
+          if(!d.ok){m.style.color='#e0a33e';m.textContent='⚠ '+(d.erro||'Não consegui.');return;}
+          if(d.assinado){m.style.color='var(--verde-claro)';m.textContent='✓ Página "'+(d.nome||'?')+'" (ID '+d.page_id+') detectada e INSCRITA no webhook.'+(d.varias?' (usei a 1ª — você tem mais de uma Página)':'')+' Recarregando…';}
+          else{m.style.color='#e0a33e';m.textContent='Página "'+(d.nome||'?')+'" (ID '+d.page_id+') salva, mas a inscrição falhou: '+(d.assinar_erro||'?');}
+          setTimeout(function(){location.reload();},2400);}).catch(function(){b.disabled=false;b.textContent=t;m.style.color='#e0a33e';m.textContent='Falha de rede.';});}
+      </script>{% endif %}
       <div class="mut" style="margin-top:.4rem;font-size:.8rem">No app da Meta, aponte o webhook pra <code>/webhooks/meta</code> (verify token = META_VERIFY_TOKEN) e assine <code>messages</code>.</div>
     </div>
     <div class="cx-card">

@@ -2672,7 +2672,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                                  coalesce(wa_enviados_hoje,0), wa_dia_contagem, coalesce(material_tipo,'link'),
                                  coalesce(modelo_codigo,''), coalesce(wa_template_sid,''),
                                  coalesce(reengajar_ativo,false), coalesce(reengajar_dias,3),
-                                 coalesce(remetente_slot,'principal')
+                                 coalesce(remetente_slot,'principal'), coalesce(wa_mmlite,false)
                             from campanhas where id=%s and conta_id=%s""",
                        (camp_id, ctx["conta_id"])).fetchone()
         if not cp:
@@ -2755,7 +2755,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
             "wa_template_sid": cp[13],
             "wa_pronto": _prospec_convite.template_configurado(cp[13]), "material_tipo": cp[11],
             "modelo_codigo": cp[12], "reengajar_ativo": cp[14], "reengajar_dias": cp[15],
-            "remetente_slot": cp[16]}
+            "remetente_slot": cp[16], "wa_mmlite": cp[17]}
     metr = {"total": na_camp, "fila": st.get("fila", 0), "enviados": enviados, "responderam": resp,
             "descadastros": st.get("descadastrou", 0), "erros": st.get("erro", 0),
             "concluidos": st.get("concluido", 0), "hoje": hoje, "abriram": abriram,
@@ -2926,6 +2926,7 @@ async def prospeccao_campanha_config(request: Request, camp_id: int):
     except (ValueError, TypeError):
         lim_wa = 30
     wa_on = str(form.get("wa_ativo") or "").strip().lower() in ("1", "on", "true", "sim")
+    wa_mm = str(form.get("wa_mmlite") or "").strip().lower() in ("1", "on", "true", "sim")
     wa_sid = (form.get("wa_template_sid") or "").strip()[:64]
     reeng_on = str(form.get("reengajar_ativo") or "").strip().lower() in ("1", "on", "true", "sim")
     try:
@@ -2958,18 +2959,19 @@ async def prospeccao_campanha_config(request: Request, camp_id: int):
         if material is None:
             c.execute("""update campanhas set nome=coalesce(nullif(%s,''),nome), limite_dia=%s,
                            material_tipo=%s, wa_ativo=%s, limite_wa_dia=%s, wa_template_sid=%s,
-                           reengajar_ativo=%s, reengajar_dias=%s, remetente_slot=%s, atualizado_em=now()
+                           reengajar_ativo=%s, reengajar_dias=%s, remetente_slot=%s, wa_mmlite=%s,
+                           atualizado_em=now()
                          where id=%s and conta_id=%s""",
                       (nome[:120], lim, tipo, wa_on, lim_wa, (wa_sid or None),
-                       reeng_on, reeng_dias, remet_slot, camp_id, ctx["conta_id"]))
+                       reeng_on, reeng_dias, remet_slot, wa_mm, camp_id, ctx["conta_id"]))
         else:
             c.execute("""update campanhas set nome=coalesce(nullif(%s,''),nome), limite_dia=%s,
                            material=%s, material_tipo=%s, wa_ativo=%s, limite_wa_dia=%s,
                            wa_template_sid=%s, reengajar_ativo=%s, reengajar_dias=%s,
-                           remetente_slot=%s, atualizado_em=now()
+                           remetente_slot=%s, wa_mmlite=%s, atualizado_em=now()
                          where id=%s and conta_id=%s""",
                       (nome[:120], lim, material, tipo, wa_on, lim_wa, (wa_sid or None),
-                       reeng_on, reeng_dias, remet_slot, camp_id, ctx["conta_id"]))
+                       reeng_on, reeng_dias, remet_slot, wa_mm, camp_id, ctx["conta_id"]))
         c.commit()
     request.session["prosp_aviso"] = "Configuração salva ✓"
     return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
@@ -6482,6 +6484,8 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
           <div><label class="lbl">WhatsApp/dia</label><input class="fld" name="limite_wa_dia" value="{{ camp.limite_wa }}" inputmode="numeric" style="width:90px"></div>
         </div>
         <div class="mut" style="font-size:.74rem;margin-top:.3rem">Mira o <b>decisor</b> (Credify pelo CNPJ, ⭐ número dele); sem decisor, usa o melhor número captado. Lead sem número recebe só o e-mail.</div>
+        <label class="chk" style="margin-top:.5rem"><input type="checkbox" name="wa_mmlite" value="1" {% if camp.wa_mmlite %}checked{% endif %}> <span>⚡ Usar <b>MM Lite</b> (entrega otimizada de marketing)</span></label>
+        <div class="mut" style="font-size:.74rem;margin-top:.2rem"><b>Mesmo preço</b> do Cloud API — a MM Lite só melhora entrega/leitura no disparo em massa. Só funciona no <b>número próprio (Cloud API)</b> e com a conta habilitada em MM Lite na Meta; se não estiver, deixe desligado.</div>
 
         <div class="divi"></div>
         <label class="lbl" style="font-size:.82rem">🔁 Follow-up automático (reengajamento)</label>
@@ -6632,6 +6636,16 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
             <div class="cpstat"><div class="n" style="font-size:1.15rem">{{ metr.wa_custo.tarifa_mkt }}</div><div class="l">Marketing/msg</div></div>
           </div>
           <div class="mut" style="font-size:.74rem;margin-top:.5rem">Só template é cobrado. Resposta do agente na janela de 24h e leads que entram por anúncio (FEP) saem grátis.</div>
+          <div class="mut" style="font-size:.72rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;margin-top:.9rem">🧮 Simular um disparo</div>
+          <div style="display:flex;gap:.7rem;align-items:flex-end;flex-wrap:wrap;margin-top:.35rem">
+            <div><label class="lbl">Leads</label><input class="fld" id="sim-leads" value="10000" inputmode="numeric" style="width:120px" oninput="simCusto()"></div>
+            <div><label class="lbl">% via anúncio (grátis)</label><input class="fld" id="sim-fep" value="0" inputmode="numeric" style="width:120px" oninput="simCusto()"></div>
+            <div style="flex:1;min-width:150px">
+              <div class="mut" style="font-size:.72rem">Custo estimado/mês</div>
+              <div id="sim-out" style="font-size:1.35rem;font-weight:700;color:var(--verde-claro)">R$ 3.217,00</div>
+            </div>
+          </div>
+          <div class="mut" id="sim-hint" style="font-size:.72rem;margin-top:.25rem"></div>
         </div>
         {% endif %}
         <div class="kpigrp"><div class="kpihead">📊 Geral</div>
@@ -6676,6 +6690,16 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 <script>
 function secToggle(id){document.getElementById(id).classList.toggle('open');}
 function secOpen(id){var el=document.getElementById(id);el.classList.add('open');el.scrollIntoView({behavior:'smooth',block:'start'});}
+function simCusto(){
+  var R=0.3217, L=document.getElementById('sim-leads'); if(!L)return;
+  var n=parseInt((L.value||'0').replace(/\D/g,''))||0;
+  var fep=Math.max(0,Math.min(100,parseInt(document.getElementById('sim-fep').value||'0')||0));
+  var pagos=Math.round(n*(1-fep/100)), custo=pagos*R;
+  var fmt=function(v){return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});};
+  document.getElementById('sim-out').textContent=fmt(custo);
+  document.getElementById('sim-hint').textContent=pagos.toLocaleString('pt-BR')+' cobrados · '+(n-pagos).toLocaleString('pt-BR')+' grátis (anúncio) · marketing R$0,3217/msg';
+}
+document.addEventListener('DOMContentLoaded',simCusto);
 if(location.hash){var _h=location.hash.slice(1);document.addEventListener('DOMContentLoaded',function(){var el=document.getElementById(_h);if(el&&el.classList.contains('sec')){el.classList.add('open');el.scrollIntoView({block:'start'});}});}
 function mtab(btn,tipo){
   var box=btn.parentNode; var A=box.querySelectorAll('.mtab');

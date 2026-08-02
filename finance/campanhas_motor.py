@@ -323,6 +323,33 @@ def enviar_pendentes(pool) -> int:
     return total
 
 
+def renovar_tokens_ig(pool) -> int:
+    """Renova os tokens de longa duração do Instagram que estão ficando velhos (>45 dias)
+    pra nunca expirarem (validade 60 dias). Best-effort — roda no poller."""
+    from finance import meta_msg
+    try:
+        with pool.connection() as c:
+            rows = c.execute(
+                """select conta_id, token from canais_config
+                    where canal='instagram' and ativo and token like 'IGAA%'
+                      and atualizado_em < now() - interval '45 days'""").fetchall()
+    except Exception:  # noqa: BLE001
+        return 0
+    n = 0
+    for (conta_id, tok) in rows:
+        res = meta_msg.renovar_token_ig(tok)
+        if res.get("ok") and res.get("token"):
+            try:
+                with pool.connection() as c:
+                    c.execute("""update canais_config set token=%s, atualizado_em=now()
+                                   where conta_id=%s and canal='instagram'""", (res["token"], conta_id))
+                    c.commit()
+                n += 1
+            except Exception:  # noqa: BLE001
+                pass
+    return n
+
+
 def _disparar(pool) -> int:
     enviados = 0
     with pool.connection() as lockc:

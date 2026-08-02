@@ -117,6 +117,46 @@ def resolver_conta_ig(token: str) -> dict:
         return {"ok": False, "erro": str(e)[:200]}
 
 
+def _get_token(url: str) -> dict:
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, method="GET"), timeout=_TIMEOUT) as r:
+            d = json.loads(r.read().decode("utf-8") or "{}")
+        tok = d.get("access_token")
+        if not tok:
+            return {"ok": False, "erro": "sem access_token na resposta"}
+        return {"ok": True, "token": tok, "expira_em": d.get("expires_in")}
+    except urllib.error.HTTPError as e:  # noqa: BLE001
+        try:
+            det = e.read().decode("utf-8")[:200]
+        except Exception:  # noqa: BLE001
+            det = str(e)
+        return {"ok": False, "erro": det}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "erro": str(e)[:200]}
+
+
+def trocar_token_longo(short_token: str) -> dict:
+    """Troca um token IGAA de curta duração (~1h) por um de LONGA duração (~60 dias),
+    usando o app secret do Instagram (META_APP_SECRET_IG). graph.instagram.com."""
+    sec = (os.environ.get("META_APP_SECRET_IG") or "").strip()
+    t = (short_token or "").strip()
+    if not sec or not t:
+        return {"ok": False, "erro": "sem secret_ig ou token"}
+    url = ("https://graph.instagram.com/access_token?grant_type=ig_exchange_token"
+           "&client_secret=" + urllib.parse.quote(sec) + "&access_token=" + urllib.parse.quote(t))
+    return _get_token(url)
+
+
+def renovar_token_ig(long_token: str) -> dict:
+    """Renova um token de longa duração do Instagram (+60 dias). Precisa ter >24h de vida."""
+    t = (long_token or "").strip()
+    if not t:
+        return {"ok": False, "erro": "sem token"}
+    url = ("https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token"
+           "&access_token=" + urllib.parse.quote(t))
+    return _get_token(url)
+
+
 def assinar_conta_ig(token: str) -> dict:
     """Inscreve a CONTA do Instagram nos webhooks do app (subscribed_apps) pro campo
     'messages'. Sem isso, assinar o campo no painel NÃO entrega DM real (o botão de

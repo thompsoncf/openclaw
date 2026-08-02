@@ -1563,8 +1563,18 @@ def comunicacao_detectar_ig(request: Request):
         c.commit()
     # inscreve a conta no webhook 'messages' (subscribed_apps) — sem isso a DM real não chega
     sub = meta_msg.assinar_conta_ig(tok)
+    # troca o token curto (~1h) por um de longa duração (~60 dias) — pra não expirar
+    token_longo = False
+    longo = meta_msg.trocar_token_longo(tok)
+    if longo.get("ok") and longo.get("token"):
+        with get_pool().connection() as c:
+            c.execute("""update canais_config set token=%s, atualizado_em=now()
+                           where conta_id=%s and canal='instagram'""", (longo["token"], ctx["conta_id"]))
+            c.commit()
+        token_longo = True
     return JSONResponse({"ok": True, "user_id": res["user_id"], "username": res.get("username", ""),
-                         "assinado": bool(sub.get("ok")), "assinar_erro": (sub.get("erro") or "")})
+                         "assinado": bool(sub.get("ok")), "assinar_erro": (sub.get("erro") or ""),
+                         "token_longo": token_longo})
 
 
 @router.post("/painel/prospeccao/comunicacao/canal-numero")
@@ -5699,7 +5709,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       function detectarIG(b){var m=document.getElementById('detig-msg');b.disabled=true;var t=b.textContent;b.textContent='Detectando…';m.textContent='';m.style.color='';
         fetch('/painel/prospeccao/comunicacao/detectar-ig',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){b.disabled=false;b.textContent=t;
           if(!d.ok){m.style.color='#e0a33e';m.textContent='⚠ '+(d.erro||'Não consegui.');return;}
-          if(d.assinado){m.style.color='var(--verde-claro)';m.textContent='✓ Conta @'+(d.username||'?')+' (ID '+d.user_id+') detectada e INSCRITA no webhook. Recarregando…';}
+          if(d.assinado){m.style.color='var(--verde-claro)';m.textContent='✓ Conta @'+(d.username||'?')+' (ID '+d.user_id+') detectada e INSCRITA no webhook'+(d.token_longo?' · token de 60 dias ✓':'')+'. Recarregando…';}
           else{m.style.color='#e0a33e';m.textContent='Conta @'+(d.username||'?')+' salva, mas a inscrição falhou: '+(d.assinar_erro||'?')+'. (token pode ter expirado)';}
           setTimeout(function(){location.reload();},2200);}).catch(function(){b.disabled=false;b.textContent=t;m.style.color='#e0a33e';m.textContent='Falha de rede.';});}
       </script>{% endif %}

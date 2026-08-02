@@ -2413,6 +2413,16 @@ async def webhook_meta(request: Request, background_tasks: BackgroundTasks):
                 c.execute("update conversas set agente_ativo=true where id=%s and status<>'pendente'",
                           (conv_id,))
                 disparar.append((conta_id, conv_id))
+        # custo real do WhatsApp: o status da Cloud API traz a categoria e se é cobrável
+        # (pricing). Corrige a estimativa gravada no envio — ex.: FEP vem grátis.
+        from finance import wa_precos as _wp
+        for stt in meta_msg.parse_status_whatsapp(payload):
+            cobr = stt["cobravel"]
+            custo = _wp.custo_brl(stt["categoria"], cobr if cobr is not None else True)
+            c.execute("""update campanha_alvos
+                           set wa_categoria=%s, wa_cobravel=%s, wa_custo=%s
+                         where wa_sid=%s""",
+                      (stt["categoria"] or None, cobr, custo, stt["sid"]))
         c.commit()
     from finance import agente as _ag
     for (cid, cvid) in disparar:
@@ -2714,6 +2724,13 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
         wa_counts = dict(c.execute(
             "select wa_status, count(*) from campanha_alvos where campanha_id=%s and wa_status is not null group by wa_status",
             (camp_id,)).fetchall())
+        wa_custo_row = c.execute(
+            """select count(*) filter (where wa_custo is not null),
+                      coalesce(sum(wa_custo),0),
+                      count(*) filter (where coalesce(wa_custo,0) > 0),
+                      count(*) filter (where wa_cobravel is false),
+                      count(*) filter (where wa_cobravel is not null)
+                 from campanha_alvos where campanha_id=%s""", (camp_id,)).fetchone()
         modelos = _modelos_lista(c, ctx["conta_id"])
     # "pulado" (já respondeu) e "sem_numero" não são disparos reais — fora da conta
     wa_enviados = sum(v for k, v in wa_counts.items() if k not in ("pulado", "sem_numero"))
@@ -2722,6 +2739,16 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
     wa_entregues = wa_counts.get("entregue", 0) + wa_counts.get("lido", 0) + wa_counts.get("respondeu", 0)
     wa_lidos = wa_counts.get("lido", 0) + wa_counts.get("respondeu", 0)
     wa_erros = wa_counts.get("erro", 0)
+    # custo do WhatsApp (tarifa BR): total, cobradas, grátis, custo por lead
+    _cn, _ctot, _ccobr, _cfree, _cconf = (wa_custo_row or (0, 0, 0, 0, 0))
+    _ctot = float(_ctot or 0)
+
+    def _brl(v):
+        return "R$ " + f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    wa_custo = {"tem": _cn or 0, "total": _brl(_ctot), "cobradas": _ccobr or 0,
+                "gratis": _cfree or 0, "confirmado": _cconf or 0,
+                "por_lead": _brl(_ctot / _cn if _cn else 0.0),
+                "tarifa_mkt": _brl(0.3217)}
     camp = {"id": cp[0], "nome": cp[1], "status": cp[2], "limite": cp[3],
             "status_rot": _STATUS_ROT_CP.get(cp[2], cp[2]), "material": cp[6],
             "wa_ativo": cp[7], "limite_wa": cp[8], "wa_hoje": wa_hoje, "wa_enviados": wa_enviados,
@@ -2739,7 +2766,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
             "wa_taxa_entrega": (round(100 * wa_entregues / wa_enviados) if wa_enviados else 0),
             "wa_taxa_leitura": (round(100 * wa_lidos / wa_enviados) if wa_enviados else 0),
             "email_detectados": email_detectados, "wa_detectados": wa_detectados,
-            "erros_total": st.get("erro", 0) + wa_erros}
+            "erros_total": st.get("erro", 0) + wa_erros, "wa_custo": wa_custo}
     passos_l = [{"dias": p[1], "assunto": p[2], "corpo": p[3], "ia": p[4]} for p in passos]
     from finance.campanhas_motor import _fmt as _cfmt
     cadencia = " · ".join("D" + str(p["dias"]) for p in passos_l) or "—"
@@ -6567,6 +6594,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
           <span class="chip {% if metr.responderam %}on{% endif %}">{{ metr.responderam }} responderam</span>
           <span class="chip">{{ metr.taxa }}% taxa</span>
           <span class="chip">{{ metr.fila }} na fila</span>
+          {% if metr.wa_custo.tem %}<span class="chip">💰 {{ metr.wa_custo.total }}</span>{% endif %}
         </span>
         <span class="caret">▾</span>
       </button>
@@ -6593,6 +6621,19 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
             <div class="cpstat{% if metr.wa_erros %} r{% endif %}"><div class="n">{{ metr.wa_erros }}</div><div class="l">Erros</div></div>
           </div>
         </div>
+        {% if metr.wa_custo.tem %}
+        <div class="kpigrp"><div class="kpihead">💰 Custos — WhatsApp
+          <span class="mut" style="font-size:.72rem;font-weight:400">· {% if metr.wa_custo.confirmado %}✓ confirmado pela Meta{% else %}estimado (tarifa BR){% endif %}</span></div>
+          <div class="cpstats5">
+            <div class="cpstat"><div class="n">{{ metr.wa_custo.cobradas }}</div><div class="l">Cobradas</div></div>
+            <div class="cpstat g"><div class="n">{{ metr.wa_custo.gratis }}</div><div class="l">Grátis</div></div>
+            <div class="cpstat"><div class="n" style="font-size:1.15rem">{{ metr.wa_custo.total }}</div><div class="l">Custo total</div></div>
+            <div class="cpstat"><div class="n" style="font-size:1.15rem">{{ metr.wa_custo.por_lead }}</div><div class="l">Por lead</div></div>
+            <div class="cpstat"><div class="n" style="font-size:1.15rem">{{ metr.wa_custo.tarifa_mkt }}</div><div class="l">Marketing/msg</div></div>
+          </div>
+          <div class="mut" style="font-size:.74rem;margin-top:.5rem">Só template é cobrado. Resposta do agente na janela de 24h e leads que entram por anúncio (FEP) saem grátis.</div>
+        </div>
+        {% endif %}
         <div class="kpigrp"><div class="kpihead">📊 Geral</div>
           <div class="cpstats5">
             <div class="cpstat g"><div class="n">{{ metr.taxa }}%</div><div class="l">Taxa resposta</div></div>

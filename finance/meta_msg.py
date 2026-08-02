@@ -51,10 +51,16 @@ def validar_assinatura(body: bytes, header_sig: str) -> bool:
     """Valida o X-Hub-Signature-256 (HMAC-SHA256 do corpo com o app secret)."""
     sec = app_secret()
     if not sec or not header_sig:
+        _log.info("meta.assinatura: sem %s", "secret (META_APP_SECRET)" if not sec else "header X-Hub-Signature-256")
         return False
     try:
         esperado = "sha256=" + hmac.new(sec.encode(), body, hashlib.sha256).hexdigest()
-        return hmac.compare_digest(esperado, header_sig)
+        ok = hmac.compare_digest(esperado, header_sig)
+        if not ok:
+            # diagnóstico (não vaza o secret): tamanho do secret + prefixos das assinaturas
+            _log.info("meta.assinatura FALHOU: sec_len=%d body_len=%d recv=%s calc=%s",
+                      len(sec), len(body), (header_sig or "")[:20], esperado[:20])
+        return ok
     except Exception:  # noqa: BLE001
         return False
 

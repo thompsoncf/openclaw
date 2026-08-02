@@ -6287,9 +6287,12 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 .caret{flex-shrink:0;width:30px;height:30px;border-radius:8px;border:1px solid var(--borda);display:grid;place-items:center;color:var(--mut);transition:transform .18s ease,background .15s ease}
 .sumrow:hover .caret{border-color:var(--verde);color:var(--txt)}
 .sec.open .caret{transform:rotate(180deg);background:var(--card-2)}
-.secbody{max-height:0;overflow:hidden;transition:max-height .25s ease}
-.sec.open .secbody{max-height:3600px}
-.bodyin{padding:0 1.05rem 1.1rem;border-top:1px solid var(--borda)}
+/* grid-template-rows 0fr→1fr anima até a altura real do conteúdo, sem teto —
+   max-height fixo (jeito antigo) cortava campanhas com muitos leads/histórico
+   aberto e não dava pra rolar até o fim */
+.secbody{display:grid;grid-template-rows:0fr;transition:grid-template-rows .25s ease}
+.sec.open .secbody{grid-template-rows:1fr}
+.bodyin{min-height:0;overflow:hidden;padding:0 1.05rem 1.1rem;border-top:1px solid var(--borda)}
 .sec .desc{font-size:.8rem;color:var(--mut);margin:.8rem 0 .8rem}
 .row{display:flex;gap:.6rem;flex-wrap:wrap;align-items:flex-end}
 .divi{border-top:1px solid var(--borda);margin:.85rem 0 .8rem}

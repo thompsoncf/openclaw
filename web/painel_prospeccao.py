@@ -357,8 +357,11 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
     where = ["p.conta_id=%s", "p.estagio='base'"]
     params: list = [conta_id]
     # por padrão a lista "enxuga": quem já está numa campanha some (evita reenviar/
-    # duplicar). O toggle ?ver_camp=1 mostra todos de novo.
-    if ver_camp != "1":
+    # duplicar). O toggle ?ver_camp=1 INVERTE — mostra só quem está em campanha (a
+    # mesma condição do contador "📣 N já em campanha", só negada, pra nunca destoar).
+    if ver_camp == "1":
+        where.append("exists (select 1 from campanha_alvos a where a.prospeccao_id=p.id)")
+    else:
         where.append("not exists (select 1 from campanha_alvos a where a.prospeccao_id=p.id)")
     if not ctx["gerencia"]:
         where.append("p.vendedor_id=%s"); params.append(ctx["membro_id"])
@@ -495,6 +498,31 @@ def prospeccao_base_add_campanha(request: Request, ids: list[str] = Form([]),
                                           "ajuste a abordagem e ative quando quiser.")
         return RedirectResponse(f"/painel/prospeccao/campanhas/{cid}", status_code=303)
     request.session["prosp_aviso"] = f"{n} contato(s) adicionados à campanha '{nome}' ✓"
+    return RedirectResponse("/painel/prospeccao/base", status_code=303)
+
+
+@router.post("/painel/prospeccao/base/tirar-campanha")
+def prospeccao_base_tirar_campanha(request: Request, ids: list[str] = Form([])):
+    """Da lista '📣 já em campanha' (Base com ?ver_camp=1): tira os contatos MARCADOS
+    de toda e qualquer campanha da conta — apaga o vínculo em campanha_alvos. Eles
+    voltam a aparecer na lista normal da Base, livres pra enriquecer/reenviar do zero."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "Só o dono/gestor gerencia campanhas."
+        return RedirectResponse("/painel/prospeccao/base?ver_camp=1", status_code=303)
+    pids = [int(i) for i in ids if str(i).isdigit()]
+    if not pids:
+        request.session["prosp_aviso"] = "Marque ao menos um contato pra tirar da campanha."
+        return RedirectResponse("/painel/prospeccao/base?ver_camp=1", status_code=303)
+    with get_pool().connection() as c:
+        n = c.execute(
+            """delete from campanha_alvos where prospeccao_id = any(%s)
+                 and campanha_id in (select id from campanhas where conta_id=%s)""",
+            (pids, ctx["conta_id"])).rowcount
+        c.commit()
+    request.session["prosp_aviso"] = f"{n} contato(s) tirados da campanha ✓ — já podem ser enriquecidos e reenviados."
     return RedirectResponse("/painel/prospeccao/base", status_code=303)
 
 
@@ -4477,6 +4505,9 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseExplorium()" title="Teste de conexão com a Explorium (Vibe) no lead marcado">🔮 Explorium (teste)</button>{% endif %}
         <span style="width:1px;height:24px;background:var(--borda);margin:0 .15rem"></span>
         {% if gerencia %}
+        {% if ver_camp %}
+        <button class="pbtn ghost" formaction="/painel/prospeccao/base/tirar-campanha" onclick="return baseTirarCheck()" style="color:#e0a33e;border-color:#5a4520" title="Tira os marcados de qualquer campanha — voltam livres pra Base">🔓 Tirar da campanha</button>
+        {% else %}
         <select name="campanha_id" class="fld" style="max-width:220px;width:auto" onchange="baseCampSel(this)">
           <option value="">📣 Jogar na campanha…</option>
           {% for c in campanhas %}<option value="{{ c.id }}">{{ c.nome }} · {{ c.status_rot }}</option>{% endfor %}
@@ -4484,6 +4515,7 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         </select>
         <input name="novo_nome" id="base-novo-nome" class="fld" placeholder="Nome da nova campanha" maxlength="120" style="display:none;max-width:200px;width:auto">
         <button class="pbtn" formaction="/painel/prospeccao/base/add-campanha" onclick="return baseJogarCheck()" title="Joga os marcados na campanha escolhida">Jogar →</button>
+        {% endif %}
         {% endif %}
         <button class="pbtn ghost" name="only" value="">⬆︎ Promover a lead</button>
       </div>
@@ -4511,7 +4543,7 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <tbody>
         {% for l in leads %}
           <tr>
-            <td><input class="bt-ck" type="checkbox" name="ids" value="{{ l.id }}"{% if l.campanha %} disabled title="Já está na campanha {{ l.campanha }}"{% endif %}></td>
+            <td><input class="bt-ck" type="checkbox" name="ids" value="{{ l.id }}"{% if l.campanha and not ver_camp %} disabled title="Já está na campanha {{ l.campanha }}"{% endif %}></td>
             <td><b>{{ l.empresa }}</b>{% if l.dup %} <span class="bt-dup" title="Empresa aparece mais de uma vez na base">⚠️ dup</span>{% endif %}<div class="mut" style="font-size:.76rem">{{ l.segmento or '—' }}{% if l.cidade %} · {{ l.cidade }}{% if l.uf %}/{{ l.uf }}{% endif %}{% endif %}</div></td>
             <td style="font-size:.76rem;line-height:1.5;min-width:190px">
               {% if l.whats %}<div>💬 {{ l.whats }}</div>{% endif %}
@@ -4604,6 +4636,11 @@ function baseJogarCheck(){
   if(!s.value){alert('Escolha uma campanha (ou crie uma nova) no seletor.');s.focus();return false;}
   if(s.value==='__nova__'){var i=document.getElementById('base-novo-nome');if(i&&!i.value.trim()){alert('Dê um nome pra nova campanha.');i.focus();return false;}}
   return true;
+}
+function baseTirarCheck(){
+  var n=baseMarcados();
+  if(n===0){alert('Marque ao menos um contato na lista pra tirar da campanha.');return false;}
+  return confirm('Tirar '+n+' contato(s) da campanha? Eles voltam livres pra Base, prontos pra enriquecer e reenviar.');
 }
 </script>
 {% endblock %}"""

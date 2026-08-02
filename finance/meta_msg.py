@@ -26,11 +26,13 @@ _TIMEOUT = 15
 
 
 def app_secret() -> str | None:
-    return os.environ.get("META_APP_SECRET")
+    # .strip(): tolera espaço/quebra de linha coladas por acidente no env (causa
+    # clássica de assinatura do webhook falhar mesmo com o secret "certo").
+    return (os.environ.get("META_APP_SECRET") or "").strip() or None
 
 
 def verify_token() -> str | None:
-    return os.environ.get("META_VERIFY_TOKEN")
+    return (os.environ.get("META_VERIFY_TOKEN") or "").strip() or None
 
 
 def configurado() -> bool:

@@ -155,7 +155,7 @@ def _n2(v) -> str:
 # ---------- paginas (templates embutidos: 1 arquivo so') ----------
 
 _BASE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{{ titulo }} - Zaq</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>
@@ -308,10 +308,13 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   .side-logo{font-weight:600;color:var(--txt);font-size:1.1rem;padding:.2rem .6rem 1rem;display:flex;align-items:center;gap:.5rem}
 }
 @media(max-width:767px){
-  body{padding-bottom:66px}
+  /* env(safe-area-inset-*) — só existe com viewport-fit=cover; some com fallback 0px
+     nos outros navegadores. Evita o topo colidir com a status bar (modo tela de
+     início do iOS, sem a barra do Safari) e o rodapé com o home indicator. */
+  body{padding-bottom:calc(66px + env(safe-area-inset-bottom, 0px));padding-top:env(safe-area-inset-top, 0px)}
   .topo-mob{display:flex}
   .wa-suporte{bottom:80px !important}
-  .btmnav{display:flex;position:fixed;left:0;right:0;bottom:0;height:60px;background:var(--card);border-top:1px solid var(--borda);z-index:60}
+  .btmnav{display:flex;position:fixed;left:0;right:0;bottom:0;height:60px;padding-bottom:env(safe-area-inset-bottom, 0px);box-sizing:content-box;background:var(--card);border-top:1px solid var(--borda);z-index:60}
   .btmnav a,.btmnav button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:var(--txt-mut);text-decoration:none;background:none;border:0;font-size:.6rem;cursor:pointer;margin:0;padding:0;width:auto}
   .btmnav .on{color:var(--verde-claro)}
   .btmnav .nav-ic{width:22px;height:22px}

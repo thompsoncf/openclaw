@@ -4190,7 +4190,7 @@ def _data_para_ts(v: str):
 
 # ================================================================ CSS + TEMPLATES
 _CSS = """<style>
-.pw{max-width:1240px;margin:0 auto;padding:1.2rem 1rem 2.5rem}
+.pw{width:100%;max-width:1240px;margin:0 auto;padding:1.2rem 1rem 2.5rem;box-sizing:border-box}
 .pw h2.tt{margin:0;font-size:1.35rem}
 .pbtn{width:auto;margin:0;padding:.5rem .9rem;border-radius:9px;font-size:.86rem;font-weight:600;
   background:var(--verde);color:#fff;border:0;cursor:pointer;display:inline-flex;align-items:center;gap:.4rem;text-decoration:none}
@@ -6050,7 +6050,8 @@ function cxPoll(){cxPollList();cxPollThread();}
 
 _CPILL_CSS = """<style>
 /* base de botão/campo — as páginas de campanha não herdam _CSS (só o <button>/<input>
-   genérico do template base), então .pbtn/.fld/.lbl precisam existir aqui */
+   genérico do template base), então .pbtn/.fld/.lbl/.pw precisam existir aqui */
+.pw{width:100%;max-width:1240px;margin:0 auto;padding:1.2rem 1rem 2.5rem;box-sizing:border-box}
 .pbtn{width:auto;margin:0;padding:.5rem .9rem;border-radius:9px;font-size:.86rem;font-weight:600;
   background:var(--verde);color:#fff;border:0;cursor:pointer;display:inline-flex;align-items:center;gap:.4rem;text-decoration:none}
 .pbtn:hover{background:var(--verde-hover)}
@@ -6254,7 +6255,7 @@ document.addEventListener('keydown', function(e){
 
 _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + """
 <style>
-.cdwrap{max-width:1120px;margin:0 auto}
+.cdwrap{width:100%;max-width:1120px;margin:0 auto;box-sizing:border-box}
 .head{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap}
 .head h1{margin:0;font-size:1.4rem;display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;min-width:0}
 .head h1 .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}

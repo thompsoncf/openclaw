@@ -482,6 +482,9 @@ def _disparar_wa(pool) -> int:
 def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> int:
     with pool.connection() as c:
         idn = _conta_identidade(c, conta_id)
+        _mm = c.execute("select coalesce(wa_mmlite,false) from campanhas where id=%s",
+                        (camp_id,)).fetchone()
+        mmlite = bool(_mm and _mm[0])
         alvos = c.execute(
             """select a.id, p.id, p.empresa, p.cnpj, p.whatsapp, p.telefone, p.decisor_telefones
                  from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
@@ -504,7 +507,7 @@ def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> i
                      "3": (idn.get("empresa") or "nós"),
                      "4": (empresa or "sua empresa")}
         with pool.connection() as c:
-            res = whatsapp_out.enviar_template(c, conta_id, numero, sid, variaveis)
+            res = whatsapp_out.enviar_template(c, conta_id, numero, sid, variaveis, mmlite=mmlite)
         if not res.get("ok"):
             detalhe = res.get("msg") or res.get("erro") or ""
             _wa_marca(pool, aid, "erro", erro_codigo=res.get("codigo"), erro_msg=detalhe)

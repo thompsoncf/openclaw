@@ -50,16 +50,18 @@ def enviar(c, conta_id, numero, texto) -> dict:
     return _twilio.enviar_texto(r[1], numero, texto)
 
 
-def enviar_template(c, conta_id, numero, content_sid, variaveis) -> dict:
+def enviar_template(c, conta_id, numero, content_sid, variaveis, mmlite=False) -> dict:
     """Dispara um TEMPLATE aprovado (fora da janela de 24h) pelo número da empresa.
     Twilio: `content_sid` é o Content SID (HX...). Cloud API (número próprio): o mesmo
-    campo carrega o NOME do template aprovado na Meta."""
+    campo carrega o NOME do template aprovado na Meta. `mmlite=True` (só no provedor
+    cloud) roteia pela Marketing Messages Lite API — mesmo preço, entrega otimizada."""
     import os
     r = _row(c, conta_id)
     prov = r[0] if r else "twilio"
     if prov == "cloud":
         # no Cloud API o "content_sid" é o NOME do template aprovado na Meta
-        return _cloud.enviar_template(r[2], r[3], numero, content_sid, variaveis)
+        return _cloud.enviar_template(r[2], r[3], numero, content_sid, variaveis,
+                                      mmlite=mmlite)
     if prov != "twilio":
         return {"ok": False, "erro": "provedor_sem_template"}
     remetente = (r[1] if r and r[1] else "") or (os.environ.get("TWILIO_WHATSAPP_FROM") or "")

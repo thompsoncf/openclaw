@@ -39,8 +39,8 @@ def configurado(wa_phone_id: str, token: str) -> bool:
     return bool(wa_phone_id and token)
 
 
-def _post(wa_phone_id: str, token: str, payload: dict) -> dict:
-    url = f"{_GRAPH}/{urllib.parse.quote(str(wa_phone_id))}/messages"
+def _post(wa_phone_id: str, token: str, payload: dict, endpoint: str = "messages") -> dict:
+    url = f"{_GRAPH}/{urllib.parse.quote(str(wa_phone_id))}/{endpoint}"
     try:
         req = urllib.request.Request(
             url, data=json.dumps(payload).encode("utf-8"),
@@ -79,10 +79,13 @@ def enviar_texto(wa_phone_id: str, token: str, numero: str, corpo: str) -> dict:
 
 
 def enviar_template(wa_phone_id: str, token: str, numero: str, nome_template: str,
-                    variaveis: dict | None = None, lang: str = "pt_BR") -> dict:
+                    variaveis: dict | None = None, lang: str = "pt_BR",
+                    mmlite: bool = False) -> dict:
     """Dispara um TEMPLATE aprovado (fora da janela de 24h) via Cloud API.
     `nome_template` = nome do template aprovado na Meta (não é o Content SID do Twilio).
-    `variaveis` = {"1": ..., "2": ...} viram os parâmetros do corpo, em ordem."""
+    `variaveis` = {"1": ..., "2": ...} viram os parâmetros do corpo, em ordem.
+    `mmlite=True` roteia pela Marketing Messages Lite API (endpoint /marketing_messages):
+    mesmo payload e mesmo preço, só otimiza entrega — exige a WABA habilitada em MM Lite."""
     if not wa_phone_id or not token:
         return {"ok": False, "erro": "nao_configurado"}
     if not nome_template:
@@ -100,4 +103,6 @@ def enviar_template(wa_phone_id: str, token: str, numero: str, nome_template: st
     payload = {"messaging_product": "whatsapp", "to": to, "type": "template",
                "template": {"name": nome_template, "language": {"code": lang},
                             "components": componentes}}
-    return _post(wa_phone_id, token, payload)
+    # MM Lite = mesmo payload, só muda o endpoint (/marketing_messages)
+    return _post(wa_phone_id, token, payload,
+                 endpoint="marketing_messages" if mmlite else "messages")

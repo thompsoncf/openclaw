@@ -274,9 +274,15 @@ def test_whatsapp_out_template_usa_numero_da_empresa(monkeypatch):
     from finance import whatsapp_cloud as wcloud
     captc = {}
     monkeypatch.setattr(wcloud, "enviar_template",
-                        lambda pid, tok, num, nome, v: captc.update(pid=pid, nome=nome) or {"ok": True})
+                        lambda pid, tok, num, nome, v, mmlite=False:
+                        captc.update(pid=pid, nome=nome, mm=mmlite) or {"ok": True})
     r2 = wout.enviar_template(_FakeCur(("cloud", None, "PID", "tok")), 1, "86999", "meu_template", {})
     assert r2["ok"] and captc["pid"] == "PID" and captc["nome"] == "meu_template"
+    assert captc["mm"] is False   # sem flag = Cloud API comum
+    # com mmlite=True o flag chega no adaptador cloud (roteia pra MM Lite)
+    wout.enviar_template(_FakeCur(("cloud", None, "PID", "tok")), 1, "86999", "meu_template", {},
+                         mmlite=True)
+    assert captc["mm"] is True
 
 
 def test_grupo_resumo_e_fechamento(pool, conta_id):

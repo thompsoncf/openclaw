@@ -2552,6 +2552,12 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                              (camp_id,)).fetchone()[0]
         abriram = c.execute("select count(*) from campanha_alvos where campanha_id=%s and aberto_em is not null",
                             (camp_id,)).fetchone()[0]
+        email_detectados, wa_detectados = c.execute(
+            """select count(*) filter (where nullif(trim(p.email),'') is not null),
+                      count(*) filter (where coalesce(nullif(trim(p.whatsapp),''),
+                                                       nullif(trim(p.telefone),'')) is not null)
+                 from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
+                where a.campanha_id=%s""", (camp_id,)).fetchone()
         leads = c.execute(
             """select p.empresa, p.email, a.status, a.passo_atual,
                       to_char(a.proximo_envio_em - interval '3 hours','DD/MM HH24:MI'),
@@ -2606,7 +2612,9 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
             "wa_enviados": wa_enviados, "wa_entregues": wa_entregues, "wa_lidos": wa_lidos,
             "wa_erros": wa_erros,
             "wa_taxa_entrega": (round(100 * wa_entregues / wa_enviados) if wa_enviados else 0),
-            "wa_taxa_leitura": (round(100 * wa_lidos / wa_enviados) if wa_enviados else 0)}
+            "wa_taxa_leitura": (round(100 * wa_lidos / wa_enviados) if wa_enviados else 0),
+            "email_detectados": email_detectados, "wa_detectados": wa_detectados,
+            "erros_total": st.get("erro", 0) + wa_erros}
     passos_l = [{"dias": p[1], "assunto": p[2], "corpo": p[3], "ia": p[4]} for p in passos]
     from finance.campanhas_motor import _fmt as _cfmt
     cadencia = " · ".join("D" + str(p["dias"]) for p in passos_l) or "—"
@@ -6037,7 +6045,10 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 .kpigrp:first-child{margin-top:.8rem}
 .kpihead{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);font-weight:700;margin:0 0 .35rem}
 .cpstats4{display:grid;grid-template-columns:repeat(4,1fr);gap:.6rem}
-@media(max-width:560px){.cpstats4{grid-template-columns:repeat(2,1fr)}}
+.cpstats5{display:grid;grid-template-columns:repeat(5,1fr);gap:.6rem}
+.cpstats6{display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem}
+@media(max-width:680px){.cpstats5{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:560px){.cpstats4{grid-template-columns:repeat(2,1fr)}.cpstats5,.cpstats6{grid-template-columns:repeat(2,1fr)}}
 .histrow>td{background:var(--bg)}
 .histbox{display:grid;grid-template-columns:1fr 1fr;gap:1.2rem;padding:.7rem .4rem}
 @media(max-width:600px){.histbox{grid-template-columns:1fr}}
@@ -6048,6 +6059,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 .cpstat .n{font-size:1.4rem;font-weight:750;letter-spacing:-.02em;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cpstat .l{font-size:.7rem;color:var(--mut);margin-top:.1rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cpstat.g .n{color:#3ddc84}.cpstat.r .n{color:#e0574f}
+.cpstat.novo{border-color:#1e4a3a}.cpstat.novo .l{color:var(--verde-claro)}
 .tbl-wrap{overflow-x:auto;border-radius:12px;border:1px solid var(--borda);margin-top:.8rem}
 .tbl-wrap table{width:100%;border-collapse:collapse;font-size:.84rem;min-width:460px}
 .tbl-wrap thead th{text-align:left;color:var(--mut);font-weight:500;padding:.55rem .9rem;background:var(--card-2)}
@@ -6273,30 +6285,34 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         {% if camp.status=='ativa' %}<div class="mut" style="font-size:.8rem;margin-top:.8rem">✅ <b style="color:var(--verde-claro)">Ativa</b> — dispara sozinho (até {{ camp.limite }}/dia) e para em quem responde ou descadastra.</div>{% else %}<div class="mut" style="font-size:.8rem;margin-top:.8rem">Clique <b>▶ Ativar</b> (no topo) pra o motor começar a disparar.</div>{% endif %}
 
         <div class="kpigrp"><div class="kpihead">📧 E-mail</div>
-          <div class="cpstats4">
+          <div class="cpstats6">
+            <div class="cpstat novo"><div class="n">{{ metr.email_detectados }}</div><div class="l">Detectados</div></div>
             <div class="cpstat"><div class="n">{{ metr.enviados }}</div><div class="l">Enviados</div></div>
             <div class="cpstat"><div class="n">{{ metr.abriram }}</div><div class="l">Abriram 👁</div></div>
             <div class="cpstat"><div class="n">{{ metr.taxa_abertura }}%</div><div class="l">Taxa abertura</div></div>
             <div class="cpstat g"><div class="n">{{ metr.responderam }}</div><div class="l">Responderam</div></div>
+            <div class="cpstat{% if metr.erros %} r{% endif %}"><div class="n">{{ metr.erros }}</div><div class="l">Erros</div></div>
           </div>
         </div>
         <div class="kpigrp"><div class="kpihead">💬 WhatsApp</div>
-          <div class="cpstats4">
+          <div class="cpstats6">
+            <div class="cpstat novo"><div class="n">{{ metr.wa_detectados }}</div><div class="l">Detectados</div></div>
             <div class="cpstat"><div class="n">{{ metr.wa_enviados }}</div><div class="l">Enviados</div></div>
             <div class="cpstat"><div class="n">{{ metr.wa_entregues }}</div><div class="l">Entregues ✓✓</div></div>
             <div class="cpstat"><div class="n">{{ metr.wa_lidos }}</div><div class="l">Lidos 👀</div></div>
             <div class="cpstat"><div class="n">{{ metr.wa_taxa_leitura }}%</div><div class="l">Taxa leitura</div></div>
+            <div class="cpstat{% if metr.wa_erros %} r{% endif %}"><div class="n">{{ metr.wa_erros }}</div><div class="l">Erros</div></div>
           </div>
         </div>
         <div class="kpigrp"><div class="kpihead">📊 Geral</div>
-          <div class="cpstats4">
+          <div class="cpstats5">
             <div class="cpstat g"><div class="n">{{ metr.taxa }}%</div><div class="l">Taxa resposta</div></div>
             <div class="cpstat"><div class="n">{{ metr.fila }}</div><div class="l">Na fila</div></div>
             <div class="cpstat r"><div class="n">{{ metr.descadastros }}</div><div class="l">Descadastros</div></div>
+            <div class="cpstat{% if metr.erros_total %} r{% endif %}"><div class="n">{{ metr.erros_total }}</div><div class="l">Erros totais</div></div>
             <div class="cpstat"><div class="n">{{ metr.hoje }}<span style="font-size:.9rem;color:var(--mut)">/{{ camp.limite }}</span></div><div class="l">Hoje</div></div>
           </div>
         </div>
-        {% if metr.erros or metr.wa_erros %}<div class="mut" style="font-size:.78rem;margin-top:.5rem"><span style="color:#e0574f">{% if metr.erros %}{{ metr.erros }} erro(s) de e-mail{% endif %}{% if metr.erros and metr.wa_erros %} · {% endif %}{% if metr.wa_erros %}{{ metr.wa_erros }} erro(s) de WhatsApp{% endif %}</span></div>{% endif %}
 
         <div class="kpihead" style="margin-top:1.1rem">Contatos &amp; histórico</div>
         {% if leads %}

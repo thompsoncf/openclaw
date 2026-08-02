@@ -28,7 +28,29 @@ _TIMEOUT = 15
 def app_secret() -> str | None:
     # .strip(): tolera espaço/quebra de linha coladas por acidente no env (causa
     # clássica de assinatura do webhook falhar mesmo com o secret "certo").
-    return (os.environ.get("META_APP_SECRET") or "").strip() or None
+    secs = app_secrets()
+    return secs[0] if secs else None
+
+
+def app_secrets() -> list[str]:
+    """Um ou MAIS app secrets. A Meta assina cada webhook com o secret do app que
+    gerou o evento — e o Instagram (login do Instagram) tem um secret PRÓPRIO,
+    diferente do secret do Facebook. Então aceitamos vários: META_APP_SECRET pode
+    trazer uma lista separada por vírgula, e META_APP_SECRET_2/META_APP_SECRET_IG
+    entram como extras. Valida se bater com QUALQUER um."""
+    brutos = [
+        os.environ.get("META_APP_SECRET") or "",
+        os.environ.get("META_APP_SECRET_2") or "",
+        os.environ.get("META_APP_SECRET_IG") or "",
+    ]
+    out, vistos = [], set()
+    for b in brutos:
+        for parte in b.split(","):
+            s = parte.strip()
+            if s and s not in vistos:
+                vistos.add(s)
+                out.append(s)
+    return out
 
 
 def verify_token() -> str | None:
@@ -48,21 +70,25 @@ def verificar_challenge(mode: str, token: str, challenge: str):
 
 
 def validar_assinatura(body: bytes, header_sig: str) -> bool:
-    """Valida o X-Hub-Signature-256 (HMAC-SHA256 do corpo com o app secret)."""
-    sec = app_secret()
-    if not sec or not header_sig:
-        _log.info("meta.assinatura: sem %s", "secret (META_APP_SECRET)" if not sec else "header X-Hub-Signature-256")
+    """Valida o X-Hub-Signature-256 (HMAC-SHA256 do corpo). Tenta TODOS os app
+    secrets (Facebook + Instagram, se houver) — basta um bater."""
+    secs = app_secrets()
+    if not secs or not header_sig:
+        _log.info("meta.assinatura: sem %s", "secret (META_APP_SECRET)" if not secs else "header X-Hub-Signature-256")
         return False
-    try:
-        esperado = "sha256=" + hmac.new(sec.encode(), body, hashlib.sha256).hexdigest()
-        ok = hmac.compare_digest(esperado, header_sig)
-        if not ok:
-            # diagnóstico (não vaza o secret): tamanho do secret + prefixos das assinaturas
-            _log.info("meta.assinatura FALHOU: sec_len=%d body_len=%d recv=%s calc=%s",
-                      len(sec), len(body), (header_sig or "")[:20], esperado[:20])
-        return ok
-    except Exception:  # noqa: BLE001
-        return False
+    calcs = []
+    for sec in secs:
+        try:
+            esperado = "sha256=" + hmac.new(sec.encode(), body, hashlib.sha256).hexdigest()
+        except Exception:  # noqa: BLE001
+            continue
+        if hmac.compare_digest(esperado, header_sig):
+            return True
+        calcs.append(esperado[:20])
+    # diagnóstico (não vaza o secret): quantos secrets tentados + prefixos calculados
+    _log.info("meta.assinatura FALHOU: n_secrets=%d body_len=%d recv=%s calcs=%s",
+              len(secs), len(body), (header_sig or "")[:20], calcs)
+    return False
 
 
 def enviar(page_token: str, destino_id: str, texto: str, plataforma: str = "messenger") -> dict:

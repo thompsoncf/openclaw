@@ -270,9 +270,13 @@ def test_whatsapp_out_template_usa_numero_da_empresa(monkeypatch):
     capt.clear()
     wout.enviar_template(_FakeCur(None), 1, "86999", "HXx", {"1": "a", "2": "b"})
     assert capt["rem"] == "whatsapp:+5586990000000"
-    # provedor cloud -> template do Twilio não se aplica
-    assert wout.enviar_template(_FakeCur(("cloud", None, "PID", "tok")),
-                                1, "86999", "HXx", {})["erro"] == "provedor_sem_template"
+    # provedor cloud -> roteia pro Cloud API (o campo do template vira o NOME do template)
+    from finance import whatsapp_cloud as wcloud
+    captc = {}
+    monkeypatch.setattr(wcloud, "enviar_template",
+                        lambda pid, tok, num, nome, v: captc.update(pid=pid, nome=nome) or {"ok": True})
+    r2 = wout.enviar_template(_FakeCur(("cloud", None, "PID", "tok")), 1, "86999", "meu_template", {})
+    assert r2["ok"] and captc["pid"] == "PID" and captc["nome"] == "meu_template"
 
 
 def test_grupo_resumo_e_fechamento(pool, conta_id):

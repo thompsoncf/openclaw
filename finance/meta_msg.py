@@ -117,6 +117,29 @@ def resolver_conta_ig(token: str) -> dict:
         return {"ok": False, "erro": str(e)[:200]}
 
 
+def assinar_conta_ig(token: str) -> dict:
+    """Inscreve a CONTA do Instagram nos webhooks do app (subscribed_apps) pro campo
+    'messages'. Sem isso, assinar o campo no painel NÃO entrega DM real (o botão de
+    Teste funciona, mas mensagem de verdade não chega). Roda no servidor.
+    POST graph.instagram.com/me/subscribed_apps?subscribed_fields=messages."""
+    t = (token or "").strip()
+    if not t:
+        return {"ok": False, "erro": "sem_token"}
+    url = _GRAPH_IG + "/me/subscribed_apps?subscribed_fields=messages&access_token=" + urllib.parse.quote(t)
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, data=b"", method="POST"), timeout=_TIMEOUT) as r:
+            d = json.loads(r.read().decode("utf-8") or "{}")
+        return {"ok": bool(d.get("success", True)), "resp": d}
+    except urllib.error.HTTPError as e:  # noqa: BLE001
+        try:
+            det = e.read().decode("utf-8")[:200]
+        except Exception:  # noqa: BLE001
+            det = str(e)
+        return {"ok": False, "erro": det}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "erro": str(e)[:200]}
+
+
 def enviar(page_token: str, destino_id: str, texto: str, plataforma: str = "messenger") -> dict:
     """Envia texto (dentro da janela de 24h) via Graph API, usando o Page Access
     Token da empresa. `destino_id` = PSID (Messenger) ou IGSID (Instagram)."""

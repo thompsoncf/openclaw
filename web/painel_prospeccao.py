@@ -1560,7 +1560,10 @@ def comunicacao_detectar_ig(request: Request):
         c.execute("""update canais_config set identificador=%s, atualizado_em=now()
                        where conta_id=%s and canal='instagram'""", (res["user_id"], ctx["conta_id"]))
         c.commit()
-    return JSONResponse({"ok": True, "user_id": res["user_id"], "username": res.get("username", "")})
+    # inscreve a conta no webhook 'messages' (subscribed_apps) — sem isso a DM real não chega
+    sub = meta_msg.assinar_conta_ig(tok)
+    return JSONResponse({"ok": True, "user_id": res["user_id"], "username": res.get("username", ""),
+                         "assinado": bool(sub.get("ok")), "assinar_erro": (sub.get("erro") or "")})
 
 
 @router.post("/painel/prospeccao/comunicacao/canal-numero")
@@ -5642,14 +5645,15 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <input class="fld" name="token" type="password" placeholder="Page Access Token {% if canais.tokens_set.get('instagram') %}(salvo — vazio mantém){% endif %}" autocomplete="new-password" style="margin-bottom:.4rem">
         <button class="pbtn">Salvar</button>
       </form>
-      <button type="button" class="pbtn ghost" style="margin-top:.5rem;font-size:.82rem" onclick="detectarIG(this)" title="O servidor pergunta pra Meta o ID da conta a partir do token IGAA salvo e preenche o IG Account ID">🔎 Detectar conta (preenche o IG Account ID)</button>
+      <button type="button" class="pbtn ghost" style="margin-top:.5rem;font-size:.82rem" onclick="detectarIG(this)" title="O servidor descobre o ID da conta e inscreve ela no webhook 'messages' (subscribed_apps) — necessário pra DM real chegar">🔎 Detectar conta e ativar recebimento</button>
       <div class="mut" id="detig-msg" style="font-size:.8rem;margin-top:.35rem"></div>
       <script>
       function detectarIG(b){var m=document.getElementById('detig-msg');b.disabled=true;var t=b.textContent;b.textContent='Detectando…';m.textContent='';m.style.color='';
         fetch('/painel/prospeccao/comunicacao/detectar-ig',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){b.disabled=false;b.textContent=t;
           if(!d.ok){m.style.color='#e0a33e';m.textContent='⚠ '+(d.erro||'Não consegui.');return;}
-          m.style.color='var(--verde-claro)';m.textContent='✓ Conta detectada: @'+(d.username||'?')+' (ID '+d.user_id+') — salvo. Recarregando…';
-          setTimeout(function(){location.reload();},1600);}).catch(function(){b.disabled=false;b.textContent=t;m.style.color='#e0a33e';m.textContent='Falha de rede.';});}
+          if(d.assinado){m.style.color='var(--verde-claro)';m.textContent='✓ Conta @'+(d.username||'?')+' (ID '+d.user_id+') detectada e INSCRITA no webhook. Recarregando…';}
+          else{m.style.color='#e0a33e';m.textContent='Conta @'+(d.username||'?')+' salva, mas a inscrição falhou: '+(d.assinar_erro||'?')+'. (token pode ter expirado)';}
+          setTimeout(function(){location.reload();},2200);}).catch(function(){b.disabled=false;b.textContent=t;m.style.color='#e0a33e';m.textContent='Falha de rede.';});}
       </script>{% endif %}
       <div class="mut" style="margin-top:.4rem;font-size:.8rem">Webhook: <code>/webhooks/meta</code> · assine <code>messages</code> no produto Instagram do app.</div>
     </div>

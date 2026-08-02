@@ -131,6 +131,10 @@ def _iniciar_poller_email() -> None:
                 except Exception:  # noqa: BLE001
                     pass
                 try:
+                    _cm.renovar_tokens_ig(pool)      # renova token do Instagram (60 dias)
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
                     from finance import lembretes as _lb
                     _lb.rodar(pool)                  # resumo do dia + aviso antes (agenda)
                 except Exception:  # noqa: BLE001

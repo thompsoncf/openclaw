@@ -39,16 +39,7 @@ def configurado(wa_phone_id: str, token: str) -> bool:
     return bool(wa_phone_id and token)
 
 
-def enviar_texto(wa_phone_id: str, token: str, numero: str, corpo: str) -> dict:
-    """Envia texto livre (janela de 24h) pelo número do cliente via Cloud API.
-    `wa_phone_id` = phone_number_id na Meta; `token` = access token da conta."""
-    if not wa_phone_id or not token:
-        return {"ok": False, "erro": "nao_configurado"}
-    to = _msisdn(numero)
-    if not to:
-        return {"ok": False, "erro": "numero_invalido"}
-    payload = {"messaging_product": "whatsapp", "to": to,
-               "type": "text", "text": {"body": (corpo or "")[:4000]}}
+def _post(wa_phone_id: str, token: str, payload: dict) -> dict:
     url = f"{_GRAPH}/{urllib.parse.quote(str(wa_phone_id))}/messages"
     try:
         req = urllib.request.Request(
@@ -68,7 +59,45 @@ def enviar_texto(wa_phone_id: str, token: str, numero: str, corpo: str) -> dict:
             det = e.read().decode("utf-8")[:200]
         except Exception:  # noqa: BLE001
             det = str(e)
-        _log.info("wacloud.enviar HTTP %s: %s", e.code, det)
+        _log.info("wacloud HTTP %s: %s", e.code, det)
         return {"ok": False, "erro": det}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "erro": str(e)[:200]}
+
+
+def enviar_texto(wa_phone_id: str, token: str, numero: str, corpo: str) -> dict:
+    """Envia texto livre (janela de 24h) pelo número do cliente via Cloud API.
+    `wa_phone_id` = phone_number_id na Meta; `token` = access token da conta."""
+    if not wa_phone_id or not token:
+        return {"ok": False, "erro": "nao_configurado"}
+    to = _msisdn(numero)
+    if not to:
+        return {"ok": False, "erro": "numero_invalido"}
+    payload = {"messaging_product": "whatsapp", "to": to,
+               "type": "text", "text": {"body": (corpo or "")[:4000]}}
+    return _post(wa_phone_id, token, payload)
+
+
+def enviar_template(wa_phone_id: str, token: str, numero: str, nome_template: str,
+                    variaveis: dict | None = None, lang: str = "pt_BR") -> dict:
+    """Dispara um TEMPLATE aprovado (fora da janela de 24h) via Cloud API.
+    `nome_template` = nome do template aprovado na Meta (não é o Content SID do Twilio).
+    `variaveis` = {"1": ..., "2": ...} viram os parâmetros do corpo, em ordem."""
+    if not wa_phone_id or not token:
+        return {"ok": False, "erro": "nao_configurado"}
+    if not nome_template:
+        return {"ok": False, "erro": "sem_template"}
+    to = _msisdn(numero)
+    if not to:
+        return {"ok": False, "erro": "numero_invalido"}
+    params = []
+    for i in range(1, 20):
+        v = (variaveis or {}).get(str(i))
+        if v is None:
+            break
+        params.append({"type": "text", "text": str(v)})
+    componentes = [{"type": "body", "parameters": params}] if params else []
+    payload = {"messaging_product": "whatsapp", "to": to, "type": "template",
+               "template": {"name": nome_template, "language": {"code": lang},
+                            "components": componentes}}
+    return _post(wa_phone_id, token, payload)

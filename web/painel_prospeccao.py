@@ -980,10 +980,11 @@ def _conta_por_ident(c, canal, ident_digitos):
 
 
 def _meta_token_valido(tok) -> bool:
-    """Um Page Access Token de verdade da Meta começa com 'EAA' e é longo (~200).
-    Serve pra não mostrar 'Conectado' com um token de teste/placeholder."""
+    """Token real da Meta: 'EAA...' (Page token, login do Facebook) ou 'IGAA/IGQ...'
+    (token do Instagram, login do Instagram). Serve pra não mostrar 'Conectado' com
+    um valor de teste/placeholder."""
     t = (tok or "").strip()
-    return t.startswith("EAA") and len(t) >= 50
+    return t.startswith(("EAA", "IGAA", "IGQ")) and len(t) >= 50
 
 
 def _canais_status(pool, conta_id: int) -> dict:

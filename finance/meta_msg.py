@@ -180,6 +180,22 @@ def assinar_conta_ig(token: str) -> dict:
         return {"ok": False, "erro": str(e)[:200]}
 
 
+def trocar_user_token_longo(short_token: str) -> dict:
+    """Troca um token de usuário do Facebook de curta duração por um de LONGA duração
+    (~60 dias). Precisa de META_APP_ID + META_APP_SECRET. Um Page token derivado de um
+    user token de longa duração NÃO expira. graph.facebook.com/oauth/access_token."""
+    app_id = (os.environ.get("META_APP_ID") or "").strip()
+    sec = app_secret()          # 1º secret = META_APP_SECRET (o do Facebook)
+    t = (short_token or "").strip()
+    if not app_id or not sec or not t:
+        return {"ok": False, "erro": "sem META_APP_ID/secret ou token"}
+    url = (_GRAPH + "/oauth/access_token?grant_type=fb_exchange_token"
+           "&client_id=" + urllib.parse.quote(app_id)
+           + "&client_secret=" + urllib.parse.quote(sec)
+           + "&fb_exchange_token=" + urllib.parse.quote(t))
+    return _get_token(url)
+
+
 def resolver_pagina_fb(user_token: str) -> dict:
     """Descobre a Página do Facebook (id + nome + token DA PÁGINA) a partir de um token
     de usuário com pages_show_list. graph.facebook.com/me/accounts."""

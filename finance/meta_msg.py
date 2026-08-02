@@ -301,6 +301,34 @@ def parse_eventos(payload: dict) -> list[dict]:
     return saida
 
 
+def parse_status_whatsapp(payload: dict) -> list[dict]:
+    """Extrai os STATUS de entrega que trazem preço (objeto `pricing`) do webhook do
+    WhatsApp Cloud API: entry[].changes[].value.statuses[]. Devolve
+    [{sid, status, categoria, cobravel}] — só as entradas com pricing (as outras não
+    dizem nada sobre custo). `sid` é o wamid, que casa com campanha_alvos.wa_sid.
+
+    A Meta manda a CATEGORIA e se é COBRÁVEL, mas NÃO o valor — quem calcula o R$ é
+    finance/wa_precos.py. Ex.: FEP (janela grátis) vem com billable=false → custo 0."""
+    if payload.get("object") != "whatsapp_business_account":
+        return []
+    saida = []
+    for entry in payload.get("entry", []) or []:
+        for ch in (entry.get("changes") or []):
+            val = ch.get("value") or {}
+            for st in (val.get("statuses") or []):
+                pr = st.get("pricing") or {}
+                if not pr:
+                    continue                   # status sem preço (não diz custo)
+                sid = str(st.get("id") or "") or None
+                if not sid:
+                    continue
+                saida.append({"sid": sid,
+                              "status": str(st.get("status") or ""),
+                              "categoria": str(pr.get("category") or ""),
+                              "cobravel": pr.get("billable")})
+    return saida
+
+
 def _parse_whatsapp(payload: dict) -> list[dict]:
     """WhatsApp Cloud API: entry[].changes[].value.messages[]. Roteia pelo
     phone_number_id (metadata) e ignora status (delivered/read) e não-texto."""

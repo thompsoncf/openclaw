@@ -512,7 +512,12 @@ def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> i
                 evento(c, camp_id, pid, "whatsapp", "erro", detalhe)
                 c.commit()
             continue
-        _wa_marca(pool, aid, "enviado", wa_sid=res.get("sid"))
+        # prospecção fria = template de MARKETING. Grava o custo estimado (tarifa BR);
+        # o webhook de status da Cloud API corrige com o pricing real quando chega.
+        from finance import wa_precos
+        _cat = "marketing"
+        _wa_marca(pool, aid, "enviado", wa_sid=res.get("sid"),
+                  categoria=_cat, custo=wa_precos.custo_brl(_cat, True))
         with pool.connection() as c:
             c.execute("update campanhas set wa_enviados_hoje=coalesce(wa_enviados_hoje,0)+1 where id=%s",
                       (camp_id,))
@@ -713,15 +718,20 @@ def _reengajar_campanha(pool, camp_id, conta_id, dias, wa_ativo, camp_sid, teto)
     return feitos
 
 
-def _wa_marca(pool, aid, status, wa_sid=None, erro_codigo=None, erro_msg=None):
+def _wa_marca(pool, aid, status, wa_sid=None, erro_codigo=None, erro_msg=None,
+              categoria=None, custo=None):
     with pool.connection() as c:
         if erro_codigo or erro_msg:
             c.execute("""update campanha_alvos set wa_status=%s, wa_em=now(),
                            wa_erro_codigo=%s, wa_erro_msg=%s where id=%s""",
                       (status, str(erro_codigo) if erro_codigo else None, erro_msg, aid))
         elif wa_sid:
-            c.execute("update campanha_alvos set wa_status=%s, wa_em=now(), wa_sid=%s where id=%s",
-                      (status, wa_sid, aid))
+            # estimativa de custo no envio (categoria/custo). coalesce: se o webhook de
+            # status da Meta já tiver corrigido com o valor real, não sobrescreve.
+            c.execute("""update campanha_alvos set wa_status=%s, wa_em=now(), wa_sid=%s,
+                           wa_categoria=coalesce(wa_categoria,%s),
+                           wa_custo=coalesce(wa_custo,%s) where id=%s""",
+                      (status, wa_sid, categoria, custo, aid))
         else:
             c.execute("update campanha_alvos set wa_status=%s, wa_em=now() where id=%s", (status, aid))
         c.commit()

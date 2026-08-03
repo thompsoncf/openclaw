@@ -1120,6 +1120,7 @@ def _canais_status(pool, conta_id: int) -> dict:
         "whatsapp": whatsapp_ok,
         "wa_provedor": wa_prov,
         "wa_phone_set": bool(wa_phone.get("whatsapp")),
+        "wa_phone_id": wa_phone.get("whatsapp") or "",
         "messenger": messenger_ok,
         "instagram": instagram_ok,
         "msg_tok_ruim": msg_tok_ruim, "ig_tok_ruim": ig_tok_ruim,
@@ -1696,35 +1697,45 @@ def comunicacao_canal_numero(request: Request, canal: str = Form(...), numero: s
     pool = get_pool()
     try:
         with pool.connection() as c:
-            if canal == "whatsapp" and provedor == "cloud":
-                # WhatsApp Cloud API (número próprio na Meta): precisa do Phone Number ID.
-                if not wa_phone_id:
-                    request.session["prosp_aviso"] = "Informe o Phone Number ID da Cloud API."
-                    return RedirectResponse(destino, status_code=303)
-                ident = wa.normalizar_from(numero) or ("wa:" + wa_phone_id)
+            if canal == "whatsapp":
+                # NÃO-DESTRUTIVO: guarda os dados de TODOS os provedores; troca só o
+                # provedor ativo e sobrescreve APENAS os campos que vierem preenchidos
+                # (campo vazio mantém o que já estava salvo; nada é apagado sozinho).
+                prov = provedor if provedor in ("twilio", "cloud", "qr") else "twilio"
+                novo_num = wa.normalizar_from(numero) if (numero or "").strip() else None
                 c.execute(
-                    """insert into canais_config (conta_id, canal, identificador, provedor, wa_phone_id, ativo)
-                       values (%s,'whatsapp',%s,'cloud',%s,true)
+                    """insert into canais_config (conta_id, canal, provedor, ativo)
+                       values (%s,'whatsapp',%s,true)
                        on conflict (conta_id, canal)
-                       do update set identificador=excluded.identificador, provedor='cloud',
-                                     wa_phone_id=excluded.wa_phone_id, ativo=true, atualizado_em=now()""",
-                    (ctx["conta_id"], ident, wa_phone_id))
+                       do update set provedor=excluded.provedor, ativo=true, atualizado_em=now()""",
+                    (ctx["conta_id"], prov))
+                if novo_num:
+                    c.execute("update canais_config set identificador=%s where conta_id=%s and canal='whatsapp'",
+                              (novo_num, ctx["conta_id"]))
+                if prov == "cloud" and wa_phone_id:
+                    c.execute("update canais_config set wa_phone_id=%s where conta_id=%s and canal='whatsapp'",
+                              (wa_phone_id, ctx["conta_id"]))
                 if token:      # access token — vazio mantém o atual
                     c.execute("update canais_config set token=%s where conta_id=%s and canal='whatsapp'",
                               (token, ctx["conta_id"]))
-                msg = "WhatsApp (Cloud API) conectado ✓ — aponte o webhook do número pra /webhooks/meta."
+                falta = None
+                if prov == "cloud":
+                    r = c.execute("select wa_phone_id from canais_config where conta_id=%s and canal='whatsapp'",
+                                  (ctx["conta_id"],)).fetchone()
+                    if not (r and r[0]):
+                        falta = "Salvo — mas falta o Phone Number ID pra Cloud API enviar."
                 c.commit()
-                request.session["prosp_aviso"] = msg
+                request.session["prosp_aviso"] = falta or "WhatsApp salvo ✓ (nada é apagado — só sobrescreve o que você preencher)."
                 return RedirectResponse(destino, status_code=303)
-            ident = wa.normalizar_from(numero) if canal == "whatsapp" else (numero or "").strip()
+            # messenger / instagram
+            ident = (numero or "").strip()
             if ident:
-                extra = ", provedor='twilio', wa_phone_id=null" if canal == "whatsapp" else ""
                 c.execute(
-                    f"""insert into canais_config (conta_id, canal, identificador, provedor, ativo)
+                    """insert into canais_config (conta_id, canal, identificador, provedor, ativo)
                        values (%s,%s,%s,'twilio',true)
                        on conflict (conta_id, canal)
                        do update set identificador=excluded.identificador, ativo=true,
-                                     atualizado_em=now(){extra}""",
+                                     atualizado_em=now()""",
                     (ctx["conta_id"], canal, ident))
                 if token:      # Page Access Token (Meta) — vazio mantém o atual
                     c.execute("update canais_config set token=%s where conta_id=%s and canal=%s",
@@ -5916,7 +5927,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <label class="lbl">Número (opcional, só p/ exibir)</label>
           <input class="fld" name="numero" inputmode="tel" placeholder="+5586999999999" value="{{ canais.numeros.get('whatsapp','') if canais.wa_provedor=='cloud' else '' }}" style="margin-bottom:.35rem">
           <label class="lbl">Phone Number ID (Cloud API)</label>
-          <input class="fld" name="wa_phone_id" placeholder="ex.: 123456789012345" style="margin-bottom:.35rem">
+          <input class="fld" name="wa_phone_id" placeholder="ex.: 123456789012345" value="{{ canais.wa_phone_id if canais.wa_provedor=='cloud' else '' }}" style="margin-bottom:.35rem">
           <label class="lbl">Access Token</label>
           <input class="fld" name="token" type="password" placeholder="token da Cloud API {% if canais.tokens_set.get('whatsapp') and canais.wa_provedor=='cloud' %}(salvo — vazio mantém){% endif %}" autocomplete="new-password" style="margin-bottom:.45rem">
           <button class="pbtn">Conectar número próprio</button>

@@ -2594,7 +2594,6 @@ def _campanha_publico_where(conta_id, camp_id, seg, cidade, temp):
     return " and ".join(where), params
 
 
-@router.get("/painel/prospeccao/campanhas", response_class=HTMLResponse)
 def _reais(v) -> str:
     return "R$ " + f"{float(v or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
@@ -2681,6 +2680,7 @@ def _campanhas_dados(c, conta_id):
     return camps, totais
 
 
+@router.get("/painel/prospeccao/campanhas", response_class=HTMLResponse)
 def prospeccao_campanhas(request: Request):
     ctx, redir = _acesso(request)
     if redir is not None:

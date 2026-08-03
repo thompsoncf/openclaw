@@ -93,6 +93,21 @@ def test_alerta_amarelo_e_coral_por_teto(pool):
     assert totais["perto"] == 2
 
 
+def test_rota_campanhas_sem_query_obrigatorio():
+    """Regressão: o decorator @router.get('/campanhas') precisa estar no handler
+    prospeccao_campanhas (não numa helper) — senão a página vira 422 pedindo 'v'."""
+    achou = {}
+    for r in pp.router.routes:
+        p = getattr(r, "path", "")
+        if p in ("/painel/prospeccao/campanhas", "/painel/prospeccao/campanhas/metricas") \
+                and "GET" in getattr(r, "methods", []):
+            dep = getattr(r, "dependant", None)
+            achou[p] = (r.endpoint.__name__, [q.name for q in dep.query_params] if dep else [])
+    assert achou["/painel/prospeccao/campanhas"][0] == "prospeccao_campanhas"
+    assert achou["/painel/prospeccao/campanhas"][1] == []   # nenhum query param obrigatório
+    assert achou["/painel/prospeccao/campanhas/metricas"][0] == "prospeccao_campanhas_metricas"
+
+
 def test_sem_teto_mostra_previsto(pool):
     with pool.connection() as c:
         conta = c.execute("insert into contas (tipo, nome) values ('pj','Custo C') returning id").fetchone()[0]

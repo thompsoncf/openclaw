@@ -1530,12 +1530,13 @@ def comunicacao_whatsapp_qr_iniciar(request: Request):
     if not wq.configurado():
         return JSONResponse({"ok": False, "msg": "O serviço de QR ainda não está ligado (falta WA_QR_SERVICE_URL no ambiente)."})
     with get_pool().connection() as c:
+        # vira o provedor pra 'qr', mas PRESERVA o identificador de um provedor anterior
+        # (ex.: número do Twilio) — só usa o placeholder 'qr:<id>' quando é a 1ª config.
         c.execute(
             """insert into canais_config (conta_id, canal, identificador, provedor, ativo)
                values (%s,'whatsapp',%s,'qr',true)
                on conflict (conta_id, canal)
-               do update set provedor='qr', identificador=excluded.identificador,
-                             ativo=true, atualizado_em=now()""",
+               do update set provedor='qr', ativo=true, atualizado_em=now()""",
             (ctx["conta_id"], "qr:" + str(ctx["conta_id"])))
         c.commit()
     r = wq.iniciar(ctx["conta_id"])
@@ -1558,7 +1559,9 @@ def comunicacao_whatsapp_qr_status(request: Request):
 
 @router.post("/painel/prospeccao/comunicacao/whatsapp-qr-sair")
 def comunicacao_whatsapp_qr_sair(request: Request):
-    """Desconecta a sessão QR e volta a empresa pro Twilio (padrão)."""
+    """Encerra a sessão QR no serviço Node. NÃO apaga a config do WhatsApp da empresa —
+    pra não derrubar o canal sem querer (ela continua no provedor 'qr', desconectada;
+    pra trocar de provedor é só usar o seletor de Canais)."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
@@ -1566,10 +1569,6 @@ def comunicacao_whatsapp_qr_sair(request: Request):
         return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
     from finance import whatsapp_qr as wq
     wq.sair(ctx["conta_id"])
-    with get_pool().connection() as c:
-        c.execute("delete from canais_config where conta_id=%s and canal='whatsapp' and coalesce(provedor,'twilio')='qr'",
-                  (ctx["conta_id"],))
-        c.commit()
     return JSONResponse({"ok": True})
 
 

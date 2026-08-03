@@ -482,9 +482,13 @@ def _disparar_wa(pool) -> int:
 def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> int:
     with pool.connection() as c:
         idn = _conta_identidade(c, conta_id)
-        _mm = c.execute("select coalesce(wa_mmlite,false) from campanhas where id=%s",
-                        (camp_id,)).fetchone()
-        mmlite = bool(_mm and _mm[0])
+        _cfg = c.execute(
+            """select coalesce(wa_mmlite,false), teto_wa,
+                      coalesce((select sum(wa_custo) from campanha_alvos where campanha_id=%s),0)
+                 from campanhas where id=%s""", (camp_id, camp_id)).fetchone()
+        mmlite = bool(_cfg and _cfg[0])
+        teto_wa = float(_cfg[1]) if _cfg and _cfg[1] is not None else None
+        gasto_atual = float(_cfg[2]) if _cfg else 0.0
         alvos = c.execute(
             """select a.id, p.id, p.empresa, p.cnpj, p.whatsapp, p.telefone, p.decisor_telefones
                  from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
@@ -519,14 +523,23 @@ def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> i
         # o webhook de status da Cloud API corrige com o pricing real quando chega.
         from finance import wa_precos
         _cat = "marketing"
-        _wa_marca(pool, aid, "enviado", wa_sid=res.get("sid"),
-                  categoria=_cat, custo=wa_precos.custo_brl(_cat, True))
+        _custo = wa_precos.custo_brl(_cat, True)
+        _wa_marca(pool, aid, "enviado", wa_sid=res.get("sid"), categoria=_cat, custo=_custo)
         with pool.connection() as c:
             c.execute("update campanhas set wa_enviados_hoje=coalesce(wa_enviados_hoje,0)+1 where id=%s",
                       (camp_id,))
             evento(c, camp_id, pid, "whatsapp", "enviado")
             c.commit()
         feitos += 1
+        # teto de gasto: ao alcançar, pausa a campanha sozinho (usa o custo estimado do
+        # envio; conservador — pausa cedo em vez de estourar). O webhook corrige depois.
+        gasto_atual += _custo
+        if teto_wa and gasto_atual >= teto_wa:
+            with pool.connection() as c:
+                c.execute("update campanhas set status='pausada' where id=%s and status='ativa'",
+                          (camp_id,))
+                c.commit()
+            break
     return feitos
 
 

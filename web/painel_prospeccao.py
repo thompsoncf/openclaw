@@ -2595,6 +2595,92 @@ def _campanha_publico_where(conta_id, camp_id, seg, cidade, temp):
 
 
 @router.get("/painel/prospeccao/campanhas", response_class=HTMLResponse)
+def _reais(v) -> str:
+    return "R$ " + f"{float(v or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _campanhas_dados(c, conta_id):
+    """Métricas por canal de TODAS as campanhas da conta (lista + polling). Uma
+    consulta LATERAL agrega tudo por campanha. Devolve (camps, totais)."""
+    from datetime import date as _date
+    from finance import wa_precos
+    _RATE = wa_precos.TARIFA_BRL["marketing"]
+    _CIRC = 131.9  # 2*pi*21 — raio do gauge no CSS/SVG
+    _hoje = _date.today()
+    rows = c.execute(
+        """select cp.id, cp.nome, cp.status, cp.limite_dia, coalesce(cp.wa_ativo,false),
+                  cp.teto_wa, coalesce(cp.enviados_hoje,0), cp.dia_contagem,
+                  coalesce(cp.wa_template_sid,''),
+                  ag.n, ag.email_env, ag.email_resp, ag.email_abriu, ag.email_err, ag.virou,
+                  ag.wa_env, ag.wa_resp, ag.wa_err, ag.wa_gasto, coalesce(ev.bounces,0),
+                  to_char((select min(a.proximo_envio_em) from campanha_alvos a
+                            where a.campanha_id=cp.id and a.proximo_envio_em is not null)
+                          - interval '3 hours', 'HH24:MI')
+             from campanhas cp
+             left join lateral (
+               select count(*) n,
+                 count(*) filter (where a.status='enviado') email_env,
+                 count(*) filter (where a.status='respondeu') email_resp,
+                 count(*) filter (where coalesce(a.aberturas,0) > 0) email_abriu,
+                 count(*) filter (where a.status='erro') email_err,
+                 count(*) filter (where p.estagio='lead') virou,
+                 count(*) filter (where a.wa_status in ('enviado','entregue','lido','respondeu')) wa_env,
+                 count(*) filter (where a.wa_status='respondeu') wa_resp,
+                 count(*) filter (where a.wa_status='erro') wa_err,
+                 coalesce(sum(a.wa_custo),0) wa_gasto
+               from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
+               where a.campanha_id=cp.id) ag on true
+             left join lateral (
+               select count(*) bounces from campanha_eventos e
+               where e.campanha_id=cp.id and e.evento='bounce') ev on true
+            where cp.conta_id=%s order by cp.criado_em desc""",
+        (conta_id,)).fetchall()
+    camps = []
+    tot_gasto = tot_msgs = tot_email = tot_teto = perto = 0
+    for r in rows:
+        (cid, nome, status, limite, wa_ativo, teto, env_hoje, dia_cont, wa_sid,
+         n, e_env, e_resp, e_abriu, e_err, virou, w_env, w_resp, w_err, w_gasto, e_volta,
+         proximo) = r
+        limite = limite or 0
+        n = n or 0
+        hoje_n = env_hoje if dia_cont == _hoje else 0
+        pct_dia = min(100, round(100 * hoje_n / limite)) if limite else 0
+        gasto = float(w_gasto or 0)
+        teto_f = float(teto) if teto is not None else None
+        if teto_f and teto_f > 0:
+            pct = min(100, round(100 * gasto / teto_f))
+            alerta = "coral" if gasto >= teto_f else ("amar" if pct >= 80 else "ok")
+            tot_teto += teto_f
+            if alerta in ("amar", "coral"):
+                perto += 1
+        else:
+            pct, alerta = None, None
+        tot_gasto += gasto
+        tot_msgs += (w_env or 0)
+        tot_email += (e_env or 0)
+        camps.append({
+            "id": cid, "nome": nome, "status": status,
+            "status_rot": _STATUS_ROT_CP.get(status, status),
+            "status_curto": _STATUS_CURTO_CP.get(status, status),
+            "limite": limite, "n": n, "virou": virou or 0, "wa": wa_ativo,
+            "wa_pronto": _prospec_convite.template_configurado(wa_sid),
+            "hoje": hoje_n, "hoje_offset": round(_CIRC * (1 - pct_dia / 100), 1),
+            "erros": (e_err or 0) + (w_err or 0), "proximo": proximo or "",
+            "email": {"env": e_env or 0, "resp": e_resp or 0, "abriu": e_abriu or 0,
+                      "volta": e_volta or 0, "err": e_err or 0,
+                      "pct": min(100, round(100 * (e_env or 0) / n)) if n else 0,
+                      "pct_resp": min(100, round(100 * (e_resp or 0) / n)) if n else 0},
+            "wa_env": w_env or 0, "wa_resp": w_resp or 0, "wa_err": w_err or 0,
+            "gasto": gasto, "gasto_fmt": _reais(gasto),
+            "teto": teto_f, "teto_fmt": (_reais(teto_f) if teto_f else ""),
+            "pct": pct, "alerta": alerta, "previsto_fmt": _reais(n * _RATE),
+        })
+    totais = {"gasto_fmt": _reais(tot_gasto), "msgs": tot_msgs, "emails": tot_email,
+              "teto_fmt": _reais(tot_teto), "perto": perto,
+              "custo_lead_fmt": _reais(tot_gasto / tot_msgs if tot_msgs else 0)}
+    return camps, totais
+
+
 def prospeccao_campanhas(request: Request):
     ctx, redir = _acesso(request)
     if redir is not None:
@@ -2603,42 +2689,26 @@ def prospeccao_campanhas(request: Request):
         request.session["prosp_aviso"] = "Só o dono/gestor gerencia campanhas."
         return RedirectResponse("/painel/prospeccao", status_code=303)
     with get_pool().connection() as c:
-        rows = c.execute(
-            """select cp.id, cp.nome, cp.status, cp.limite_dia,
-                 (select count(*) from campanha_alvos a where a.campanha_id=cp.id),
-                 (select count(*) from campanha_alvos a where a.campanha_id=cp.id and a.status='enviado'),
-                 (select count(*) from campanha_alvos a where a.campanha_id=cp.id and a.status='respondeu'),
-                 coalesce(cp.wa_ativo,false),
-                 (select count(*) from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
-                    where a.campanha_id=cp.id and p.estagio='lead'),
-                 coalesce(cp.enviados_hoje,0), cp.dia_contagem,
-                 (select count(*) from campanha_alvos a where a.campanha_id=cp.id and a.status='erro')
-                   + (select count(*) from campanha_alvos a where a.campanha_id=cp.id and a.wa_status='erro'),
-                 to_char((select min(a.proximo_envio_em) from campanha_alvos a
-                           where a.campanha_id=cp.id and a.proximo_envio_em is not null)
-                         - interval '3 hours', 'HH24:MI')
-               from campanhas cp where cp.conta_id=%s order by cp.criado_em desc""",
-            (ctx["conta_id"],)).fetchall()
+        camps, totais = _campanhas_dados(c, ctx["conta_id"])
         eleg = c.execute("""select count(*) from prospeccao where conta_id=%s
                              and (email_ok or coalesce(nullif(trim(whatsapp),''), nullif(trim(telefone),'')) is not null)""",
                          (ctx["conta_id"],)).fetchone()[0]
-    from datetime import date as _date
-    _hoje = _date.today()
-    _circ = 131.9  # 2*pi*21 — mesmo raio do círculo do gauge no CSS/SVG
-    camps = []
-    for r in rows:
-        limite = r[3] or 0
-        hoje_n = r[9] if r[10] == _hoje else 0
-        pct = min(100, round(100 * hoje_n / limite)) if limite else 0
-        camps.append({"id": r[0], "nome": r[1], "status": r[2], "limite": r[3],
-                      "n": r[4], "env": r[5], "resp": r[6], "status_rot": _STATUS_ROT_CP.get(r[2], r[2]),
-                      "status_curto": _STATUS_CURTO_CP.get(r[2], r[2]),
-                      "wa": r[7], "virou": r[8], "hoje": hoje_n,
-                      "hoje_offset": round(_circ * (1 - pct / 100), 1),
-                      "erros": r[11], "proximo": r[12] or ""})
     return _render("prospeccao_campanhas", request, titulo="Campanhas", secao_ativa="prospeccao",
-                   camps=camps, elegiveis=eleg, gerencia=ctx["gerencia"],
+                   camps=camps, totais=totais, elegiveis=eleg, gerencia=ctx["gerencia"],
                    aviso=request.session.pop("prosp_aviso", None))
+
+
+@router.get("/painel/prospeccao/campanhas/metricas")
+def prospeccao_campanhas_metricas(request: Request):
+    """JSON leve pro polling da lista de campanhas — mesmos números, sem HTML."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False}, status_code=403)
+    with get_pool().connection() as c:
+        camps, totais = _campanhas_dados(c, ctx["conta_id"])
+    return JSONResponse({"ok": True, "camps": camps, "totais": totais})
 
 
 @router.post("/painel/prospeccao/campanhas/nova")
@@ -2672,7 +2742,8 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                                  coalesce(wa_enviados_hoje,0), wa_dia_contagem, coalesce(material_tipo,'link'),
                                  coalesce(modelo_codigo,''), coalesce(wa_template_sid,''),
                                  coalesce(reengajar_ativo,false), coalesce(reengajar_dias,3),
-                                 coalesce(remetente_slot,'principal'), coalesce(wa_mmlite,false)
+                                 coalesce(remetente_slot,'principal'), coalesce(wa_mmlite,false),
+                                 teto_wa
                             from campanhas where id=%s and conta_id=%s""",
                        (camp_id, ctx["conta_id"])).fetchone()
         if not cp:
@@ -2755,7 +2826,8 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
             "wa_template_sid": cp[13],
             "wa_pronto": _prospec_convite.template_configurado(cp[13]), "material_tipo": cp[11],
             "modelo_codigo": cp[12], "reengajar_ativo": cp[14], "reengajar_dias": cp[15],
-            "remetente_slot": cp[16], "wa_mmlite": cp[17]}
+            "remetente_slot": cp[16], "wa_mmlite": cp[17],
+            "teto_wa": (f"{float(cp[18]):.2f}" if cp[18] is not None else "")}
     metr = {"total": na_camp, "fila": st.get("fila", 0), "enviados": enviados, "responderam": resp,
             "descadastros": st.get("descadastrou", 0), "erros": st.get("erro", 0),
             "concluidos": st.get("concluido", 0), "hoje": hoje, "abriram": abriram,
@@ -2927,6 +2999,17 @@ async def prospeccao_campanha_config(request: Request, camp_id: int):
         lim_wa = 30
     wa_on = str(form.get("wa_ativo") or "").strip().lower() in ("1", "on", "true", "sim")
     wa_mm = str(form.get("wa_mmlite") or "").strip().lower() in ("1", "on", "true", "sim")
+    # teto de gasto do WhatsApp (R$). Aceita "50", "50,00", "1.200,50" ou vazio (sem teto).
+    _traw = (form.get("teto_wa") or "").replace("R$", "").strip()
+    if "," in _traw and "." in _traw:
+        _traw = _traw.replace(".", "")
+    _traw = _traw.replace(",", ".")
+    try:
+        teto_wa = round(float(_traw), 2) if _traw else None
+    except (ValueError, TypeError):
+        teto_wa = None
+    if teto_wa is not None and teto_wa <= 0:
+        teto_wa = None
     wa_sid = (form.get("wa_template_sid") or "").strip()[:64]
     reeng_on = str(form.get("reengajar_ativo") or "").strip().lower() in ("1", "on", "true", "sim")
     try:
@@ -2960,18 +3043,18 @@ async def prospeccao_campanha_config(request: Request, camp_id: int):
             c.execute("""update campanhas set nome=coalesce(nullif(%s,''),nome), limite_dia=%s,
                            material_tipo=%s, wa_ativo=%s, limite_wa_dia=%s, wa_template_sid=%s,
                            reengajar_ativo=%s, reengajar_dias=%s, remetente_slot=%s, wa_mmlite=%s,
-                           atualizado_em=now()
+                           teto_wa=%s, atualizado_em=now()
                          where id=%s and conta_id=%s""",
                       (nome[:120], lim, tipo, wa_on, lim_wa, (wa_sid or None),
-                       reeng_on, reeng_dias, remet_slot, wa_mm, camp_id, ctx["conta_id"]))
+                       reeng_on, reeng_dias, remet_slot, wa_mm, teto_wa, camp_id, ctx["conta_id"]))
         else:
             c.execute("""update campanhas set nome=coalesce(nullif(%s,''),nome), limite_dia=%s,
                            material=%s, material_tipo=%s, wa_ativo=%s, limite_wa_dia=%s,
                            wa_template_sid=%s, reengajar_ativo=%s, reengajar_dias=%s,
-                           remetente_slot=%s, wa_mmlite=%s, atualizado_em=now()
+                           remetente_slot=%s, wa_mmlite=%s, teto_wa=%s, atualizado_em=now()
                          where id=%s and conta_id=%s""",
                       (nome[:120], lim, material, tipo, wa_on, lim_wa, (wa_sid or None),
-                       reeng_on, reeng_dias, remet_slot, wa_mm, camp_id, ctx["conta_id"]))
+                       reeng_on, reeng_dias, remet_slot, wa_mm, teto_wa, camp_id, ctx["conta_id"]))
         c.commit()
     request.session["prosp_aviso"] = "Configuração salva ✓"
     return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
@@ -6188,6 +6271,38 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
 .mcard .row{display:flex;gap:.5rem;margin-top:1rem}
 .mcard .row .pbtn.ghost{flex:0 0 auto}
 .mcard .row .pbtn.principal{flex:1;justify-content:center}
+/* faixa de gastos + custo por canal */
+.gastos{border:1px solid var(--borda);border-radius:12px;background:var(--card);padding:.7rem .9rem;margin:1rem 0}
+.gastos .gh{display:flex;align-items:center;gap:.5rem;font-size:.72rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--mut);margin-bottom:.55rem}
+.gastos .gg{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.6rem}
+.gastos .gi{background:#0e0e0f;border:1px solid var(--borda);border-radius:10px;padding:.5rem .65rem}
+.gastos .gi .k{font-size:.68rem;color:var(--mut)}
+.gastos .gi .v{font-size:1.2rem;font-weight:800;letter-spacing:-.02em;margin-top:.1rem;font-variant-numeric:tabular-nums}
+.gastos .gi .v.free{color:var(--verde-claro)} .gastos .gi .v.warn{color:#e0a33e}
+.gastos .gi .f{font-size:.64rem;color:var(--mut);margin-top:.05rem}
+.subline{margin-top:.4rem;font-size:.78rem;color:var(--mut)}
+.subline b{color:var(--txt);font-variant-numeric:tabular-nums} .subline .g{color:var(--verde-claro)}
+.chan{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .5rem;margin-top:.42rem;font-size:.79rem;color:var(--mut)}
+.chan .cl{font-size:.72rem;font-weight:700;color:var(--txt);min-width:86px;display:inline-flex;align-items:center;gap:.3rem}
+.chan .kv{display:inline-flex;align-items:baseline;gap:.26rem;white-space:nowrap}
+.chan .kv b{color:var(--txt);font-variant-numeric:tabular-nums}
+.chan .kv.g b{color:var(--verde-claro)} .chan .kv.err b{color:#e0574f}
+.chan .sep{color:#3a3a3c}
+.pbar{position:relative;height:6px;border-radius:999px;background:#0e0e0f;border:1px solid var(--borda);overflow:hidden;margin-top:.3rem}
+.pbar i{position:absolute;left:0;top:0;height:100%;border-radius:999px;transition:width .5s ease}
+.pbar.mail .e{background:#3f6f9e}
+.pbar .r{background:var(--verde-claro)}
+.tbar{display:flex;align-items:center;gap:.5rem;margin-top:.32rem}
+.tbar .bar{flex:1;height:7px;border-radius:999px;background:#0e0e0f;border:1px solid var(--borda);overflow:hidden}
+.tbar .bar i{display:block;height:100%;border-radius:999px;transition:width .5s ease}
+.tbar .lbl{font-size:.7rem;color:var(--mut);white-space:nowrap;font-variant-numeric:tabular-nums}
+.tbar .lbl b{color:var(--txt)}
+.fok{background:var(--verde)} .famar{background:#e0a33e} .fcoral{background:#e0574f}
+.calert{margin-left:auto;font-size:.66rem;font-weight:700;padding:.08rem .45rem;border-radius:999px}
+.calert.amar{color:#e0a33e;border:1px solid #5a4520;background:#2a2113}
+.calert.coral{color:#e0574f;border:1px solid #5c2a27;background:#2a1513}
+.semteto{margin-top:.34rem;font-size:.73rem;color:var(--mut)}
+.semteto b{color:var(--txt)} .semteto a{color:var(--verde-claro);text-decoration:none}
 </style>
 <div class="pw">
 """ + _navbar('campanhas') + """
@@ -6218,11 +6333,25 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
       <li><span class="gn">6</span><span class="gt"><b>Ativar</b> <span>— dispara sozinho, <b>para</b> em quem responde e quem topa vira lead 🔥 no funil.</span></span></li>
     </ol>
   </details>
+
+  {% if camps %}
+  <div class="gastos" id="gastos">
+    <div class="gh">💰 Gastos das campanhas</div>
+    <div class="gg">
+      <div class="gi"><div class="k">💬 Gasto WhatsApp</div><div class="v" data-t="tot_gasto">{{ totais.gasto_fmt }}</div><div class="f">só marketing é cobrado</div></div>
+      <div class="gi"><div class="k">💬 Mensagens WhatsApp</div><div class="v" data-t="tot_msgs">{{ totais.msgs }}</div><div class="f">enviadas</div></div>
+      <div class="gi"><div class="k">✉️ E-mails</div><div class="v free" data-t="tot_emails">{{ totais.emails }}</div><div class="f">grátis · não custa</div></div>
+      <div class="gi"><div class="k">Teto total</div><div class="v" data-t="tot_teto">{{ totais.teto_fmt }}</div></div>
+      <div class="gi"><div class="k">Perto do limite</div><div class="v warn" data-t="tot_perto">{{ totais.perto }}</div></div>
+      <div class="gi"><div class="k">Custo médio/lead</div><div class="v" data-t="tot_cpl">{{ totais.custo_lead_fmt }}</div></div>
+    </div>
+  </div>
+  {% endif %}
   {% if elegiveis == 0 %}<div class="mut" style="margin-top:.5rem;font-size:.85rem;border:1px solid var(--borda);border-radius:10px;padding:.7rem .9rem">Nenhum lead com e-mail ou WhatsApp ainda. Capte leads (Google Maps traz o telefone) pra começar.</div>{% endif %}
 
   <div style="display:flex;flex-direction:column;gap:.6rem;margin-top:1rem">
     {% for c in camps %}
-    <div class="ccard">
+    <div class="ccard" data-camp="{{ c.id }}">
       <div class="motor">
         <div class="gauge{% if c.status != 'ativa' %} pausada{% endif %}">
           <svg width="52" height="52"><circle class="trilho" cx="26" cy="26" r="21"></circle>
@@ -6241,20 +6370,34 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
           <span class="badge mail" title="E-mail">✉️</span>
           {% if c.wa %}<span class="badge wa" title="WhatsApp">💬</span>{% endif %}
           <span class="cpill {{ c.status }}">{{ c.status_rot }}</span>
+          {% if c.alerta == 'coral' %}<span class="calert coral" data-t="alerta">⛔ teto atingido</span>{% elif c.alerta == 'amar' %}<span class="calert amar" data-t="alerta">⚠ {{ c.pct }}% do teto</span>{% else %}<span class="calert amar" data-t="alerta" style="display:none"></span>{% endif %}
           <form method="post" action="/painel/prospeccao/campanhas/{{ c.id }}/excluir" style="margin:0" onsubmit="return confirm('Excluir “{{ c.nome }}”? Os leads voltam pro funil.')">
             <button class="cpx" title="Excluir campanha">🗑</button>
           </form>
         </div>
-        <a href="/painel/prospeccao/campanhas/{{ c.id }}" style="display:block;text-decoration:none;color:inherit">
-          <div class="ckpis">
-            <span class="kv"><b>{{ c.n }}</b> {{ 'lead' if c.n == 1 else 'leads' }}</span><span class="sep">·</span>
-            <span class="kv"><b>{{ c.env }}</b> enviados</span><span class="sep">·</span>
-            <span class="kv g"><b>{{ c.resp }}</b> respostas</span><span class="sep">·</span>
-            <span class="kv g"><b>{{ c.virou }}</b> viraram lead 🔥</span><span class="sep">·</span>
-            <span class="kv">limite <b>{{ c.limite }}</b>/dia</span>
-          </div>
-          {% if c.n %}<div class="cpbar"><i class="e" style="width:{{ (100*c.env/c.n)|round|int }}%"></i><i class="r" style="width:{{ (100*c.resp/c.n)|round|int }}%"></i></div>{% endif %}
-        </a>
+        <div class="subline"><b>{{ c.n }}</b> {{ 'lead' if c.n == 1 else 'leads' }} · <b class="g" data-t="virou">{{ c.virou }}</b> virou lead 🔥 · limite <b>{{ c.limite }}</b>/dia</div>
+        <div class="chan">
+          <span class="cl">💬 WhatsApp</span>
+          <span class="kv"><b data-t="wa_env">{{ c.wa_env }}</b> enviadas</span><span class="sep">·</span>
+          <span class="kv g"><b data-t="wa_resp">{{ c.wa_resp }}</b> respostas</span><span class="sep">·</span>
+          {% if c.wa_err %}<span class="kv err"><b data-t="wa_err">{{ c.wa_err }}</b> não chegou ⚠</span>{% else %}<span class="kv"><b data-t="wa_err">0</b> falhas</span>{% endif %}<span class="sep">·</span>
+          <span class="kv"><b data-t="gasto">{{ c.gasto_fmt }}</b> 💰</span>
+        </div>
+        {% if c.teto %}
+        <div class="tbar"><div class="bar"><i class="{{ 'fcoral' if c.alerta=='coral' else 'famar' if c.alerta=='amar' else 'fok' }}" data-w="teto" style="width:{{ c.pct }}%"></i></div>
+          <div class="lbl"><b data-t="gasto2">{{ c.gasto_fmt }}</b> / {{ c.teto_fmt }} · <span data-t="pct">{{ c.pct }}</span>%</div></div>
+        {% else %}
+        <div class="semteto">Sem teto · <b>custo previsto</b>: <b>{{ c.previsto_fmt }}</b> · <a href="/painel/prospeccao/campanhas/{{ c.id }}">definir teto ›</a></div>
+        {% endif %}
+        <div class="chan">
+          <span class="cl">✉️ E-mail</span>
+          <span class="kv"><b data-t="email_env">{{ c.email.env }}</b> enviados</span><span class="sep">·</span>
+          <span class="kv"><b data-t="email_abriu">{{ c.email.abriu }}</b> abriram</span><span class="sep">·</span>
+          <span class="kv g"><b data-t="email_resp">{{ c.email.resp }}</b> respostas</span><span class="sep">·</span>
+          {% if c.email.volta %}<span class="kv err"><b data-t="email_volta">{{ c.email.volta }}</b> voltaram ↩</span>{% else %}<span class="kv"><b data-t="email_volta">0</b> voltaram ↩</span>{% endif %}<span class="sep">·</span>
+          <span class="kv" style="color:var(--verde-claro)">grátis</span>
+        </div>
+        <div class="pbar mail"><i class="e" data-w="email_fill" style="width:{{ c.email.pct }}%"></i><i class="r" data-w="email_resp_fill" style="width:{{ c.email.pct_resp }}%"></i></div>
       </div>
     </div>
     {% else %}<div class="mut" style="text-align:center;padding:2rem">Nenhuma campanha ainda — clique em <b>＋ Criar</b> acima.</div>{% endfor %}
@@ -6279,6 +6422,44 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
 document.addEventListener('keydown', function(e){
   if(e.key === 'Escape'){ var o=document.getElementById('ovlCriar'); if(o) o.classList.remove('on'); }
 });
+/* tempo real: pergunta as métricas a cada 10s e repinta números/barras sem refresh.
+   pausa sozinho quando a aba está oculta (Page Visibility) e retoma ao voltar. */
+(function(){
+  function paint(c){
+    var el=document.querySelector('.ccard[data-camp="'+c.id+'"]'); if(!el)return;
+    var T=function(f,v){var n=el.querySelector('[data-t="'+f+'"]'); if(n&&v!=null)n.textContent=v;};
+    var W=function(f,v){var n=el.querySelector('[data-w="'+f+'"]'); if(n&&v!=null)n.style.width=v+'%';};
+    T('virou',c.virou);
+    T('wa_env',c.wa_env); T('wa_resp',c.wa_resp); T('wa_err',c.wa_err); T('gasto',c.gasto_fmt); T('gasto2',c.gasto_fmt);
+    T('email_env',c.email.env); T('email_abriu',c.email.abriu); T('email_resp',c.email.resp); T('email_volta',c.email.volta);
+    W('email_fill',c.email.pct); W('email_resp_fill',c.email.pct_resp);
+    if(c.teto){ W('teto',c.pct); T('pct',c.pct); }
+    var al=el.querySelector('[data-t="alerta"]');
+    if(al){
+      if(c.alerta==='coral'){al.style.display='';al.className='calert coral';al.textContent='⛔ teto atingido';}
+      else if(c.alerta==='amar'){al.style.display='';al.className='calert amar';al.textContent='⚠ '+c.pct+'% do teto';}
+      else{al.style.display='none';}
+    }
+  }
+  function paintTot(t){
+    var s=function(f,v){var n=document.querySelector('.gastos [data-t="'+f+'"]'); if(n&&v!=null)n.textContent=v;};
+    s('tot_gasto',t.gasto_fmt); s('tot_msgs',t.msgs); s('tot_emails',t.emails);
+    s('tot_teto',t.teto_fmt); s('tot_perto',t.perto); s('tot_cpl',t.custo_lead_fmt);
+  }
+  var timer=null;
+  function tick(){
+    if(document.hidden)return;
+    fetch('/painel/prospeccao/campanhas/metricas',{headers:{'Accept':'application/json'}})
+      .then(function(r){return r.ok?r.json():null;})
+      .then(function(d){ if(d&&d.ok){ (d.camps||[]).forEach(paint); if(d.totais)paintTot(d.totais); } })
+      .catch(function(){});
+  }
+  function start(){ if(timer)return; timer=setInterval(tick,10000); }
+  document.addEventListener('visibilitychange',function(){
+    if(document.hidden){ if(timer){clearInterval(timer);timer=null;} } else { tick(); start(); }
+  });
+  start();
+})();
 </script>
 {% endblock %}"""
 
@@ -6486,6 +6667,10 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         <div class="mut" style="font-size:.74rem;margin-top:.3rem">Mira o <b>decisor</b> (Credify pelo CNPJ, ⭐ número dele); sem decisor, usa o melhor número captado. Lead sem número recebe só o e-mail.</div>
         <label class="chk" style="margin-top:.5rem"><input type="checkbox" name="wa_mmlite" value="1" {% if camp.wa_mmlite %}checked{% endif %}> <span>⚡ Usar <b>MM Lite</b> (entrega otimizada de marketing)</span></label>
         <div class="mut" style="font-size:.74rem;margin-top:.2rem"><b>Mesmo preço</b> do Cloud API — a MM Lite só melhora entrega/leitura no disparo em massa. Só funciona no <b>número próprio (Cloud API)</b> e com a conta habilitada em MM Lite na Meta; se não estiver, deixe desligado.</div>
+        <div style="display:flex;gap:.8rem;align-items:flex-end;flex-wrap:wrap;margin-top:.6rem">
+          <div><label class="lbl">💰 Teto de gasto WhatsApp (R$)</label><input class="fld" name="teto_wa" value="{{ camp.teto_wa }}" placeholder="ex.: 100,00" inputmode="decimal" style="width:160px"></div>
+        </div>
+        <div class="mut" style="font-size:.74rem;margin-top:.2rem">Limite de gasto do WhatsApp desta campanha. Ao alcançar, o motor <b>pausa a campanha sozinho</b> e o card acende o alerta. Vazio = sem teto (mostra só o custo previsto).</div>
 
         <div class="divi"></div>
         <label class="lbl" style="font-size:.82rem">🔁 Follow-up automático (reengajamento)</label>

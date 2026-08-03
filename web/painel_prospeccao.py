@@ -6360,8 +6360,7 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
         </div>
         {% if c.status == 'ativa' %}
           <div class="pulso"><span class="dot"></span>ativa</div>
-          {% if c.erros %}<div class="erro">⚠ {{ c.erros }} erro{{ 's' if c.erros != 1 else '' }}</div>
-          {% elif c.proximo %}<div class="quando">próx. {{ c.proximo }}</div>{% endif %}
+          {% if c.proximo %}<div class="quando" title="Horário do próximo disparo agendado">⏰ {{ c.proximo }}</div>{% endif %}
         {% else %}<div class="parada">{{ c.status_curto }}</div>{% endif %}
       </div>
       <div class="body">

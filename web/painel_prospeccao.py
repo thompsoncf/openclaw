@@ -424,12 +424,28 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
                      "whatsapp": bool(t.get("whatsapp")),
                      "tipo_rot": _TIPO_TEL.get((t.get("tipo") or "").upper(), (t.get("tipo") or "").title())}
                     for t in tels_raw if t.get("formatado")]
+        # o "melhor" é quem a campanha usaria sozinha (mesma regra do
+        # _melhor_de_lista): o ⭐ provável; sem provável, o 1º da lista. É esse
+        # que já vem marcado no checkbox de "jogar pra campanha".
+        _melhor_i = next((i for i, t in enumerate(dec_tels) if t["provavel"]), 0 if dec_tels else None)
+        for i, t in enumerate(dec_tels):
+            t["melhor"] = (i == _melhor_i)
+        # a lista de decisor pode vir grande (Credify traz até 5-6 números por
+        # empresa); por padrão só mostra os que são WhatsApp confirmado — o
+        # resto fica atrás de um "+N números ›" pra não inchar a linha. Sem
+        # nenhum WhatsApp confirmado, mostra só o melhor palpite (não esconde
+        # o único jeito de contatar o decisor).
+        dec_tels_visiveis = [t for t in dec_tels if t["whatsapp"]] \
+            or ([dec_tels[_melhor_i]] if dec_tels else [])
+        _vis_ids = {id(t) for t in dec_tels_visiveis}
+        dec_tels_ocultos = [t for t in dec_tels if id(t) not in _vis_ids]
         leads.append({"id": r[0], "empresa": r[1], "segmento": r[2], "cidade": r[3], "uf": r[4],
                       "tem_wpp": bool(r[5] or r[7]), "tem_mail": bool(r[6]), "campanha": r[8],
                       "toque_wa": 1 if r[9] == "enviado" else 0, "toque_mail": int(r[10] or 0),
                       "ult": r[11], "tem_decisor": bool(r[13]), "verificado": bool(r[14]),
                       "whats": (r[5] or r[7] or ""), "email_v": (r[6] or ""), "insta": (r[15] or ""),
                       "dec_nome": (r[16] or ""), "dec_tel": (r[17] or ""), "dec_tels": dec_tels,
+                      "dec_tels_visiveis": dec_tels_visiveis, "dec_tels_ocultos": dec_tels_ocultos,
                       "dup": ((r[1] or "").strip().lower() in dup_set),
                       "cnpj": (_fmt_cnpj(r[19]) if r[19] else "")})
     metr = {"na_base": na_base, "com_wpp": com_wpp, "com_mail": com_mail, "em_camp": em_camp,
@@ -465,21 +481,32 @@ def prospeccao_base_promover(request: Request, ids: list[str] = Form([]), only: 
 
 
 @router.post("/painel/prospeccao/base/add-campanha")
-def prospeccao_base_add_campanha(request: Request, ids: list[str] = Form([]),
-                                 campanha_id: str = Form(""), novo_nome: str = Form("")):
+async def prospeccao_base_add_campanha(request: Request):
     """Da Base: joga os contatos MARCADOS numa campanha específica — existente ou uma
     NOVA (nasce em rascunho, com a sequência padrão, pra você definir a abordagem antes
-    de ativar). Cada campanha = uma abordagem; nada entra no lugar errado."""
+    de ativar). Cada campanha = uma abordagem; nada entra no lugar errado.
+    Cada lead pode vir com um número escolhido no checkbox (tel_<id>, o ⭐ mais
+    provável já vem marcado) — trava esse número pra campanha (ver
+    finance/campanhas_motor._numero_alvo_wa); sem escolha, o motor decide sozinho
+    em tempo de envio, como sempre foi."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
     if not ctx["gerencia"]:
         request.session["prosp_aviso"] = "Só o dono/gestor gerencia campanhas."
         return RedirectResponse("/painel/prospeccao/base", status_code=303)
+    form = await request.form()
+    ids = form.getlist("ids")
+    campanha_id = form.get("campanha_id", "")
+    novo_nome = form.get("novo_nome", "")
     pids = [int(i) for i in ids if str(i).isdigit()]
     if not pids:
         request.session["prosp_aviso"] = "Marque ao menos um contato pra jogar na campanha."
         return RedirectResponse("/painel/prospeccao/base", status_code=303)
+    # 1º checkbox marcado de cada lead (a ordem no form segue a ordem da tela,
+    # decisor primeiro) — os demais marcados ficam só de reserva visual por
+    # ora, não geram mais de 1 alvo por lead.
+    telefones = {pid: ((form.getlist(f"tel_{pid}") or [None])[0] or "").strip() or None for pid in pids}
     nova = (campanha_id == "__nova__") or (not campanha_id and (novo_nome or "").strip())
     with get_pool().connection() as c:
         if nova:
@@ -501,11 +528,13 @@ def prospeccao_base_add_campanha(request: Request, ids: list[str] = Form([]),
                 request.session["prosp_aviso"] = "Campanha não encontrada."
                 return RedirectResponse("/painel/prospeccao/base", status_code=303)
             nome = row[0]
-        n = c.execute(
-            """insert into campanha_alvos (campanha_id, prospeccao_id)
-                 select %s, p.id from prospeccao p
-                  where p.conta_id=%s and p.id = any(%s) on conflict do nothing""",
-            (cid, ctx["conta_id"], pids)).rowcount
+        n = 0
+        for pid in pids:
+            n += c.execute(
+                """insert into campanha_alvos (campanha_id, prospeccao_id, alvo_telefone)
+                     select %s, p.id, %s from prospeccao p
+                      where p.conta_id=%s and p.id=%s on conflict do nothing""",
+                (cid, telefones.get(pid), ctx["conta_id"], pid)).rowcount
         c.commit()
     # nova campanha → vai pra tela dela (define abordagem + ativar); existente → volta pra Base
     if nova:
@@ -4822,7 +4851,17 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
               {% if l.insta %}<div class="mut">📷 {{ l.insta }}</div>{% endif %}
               {% if l.tem_decisor %}<div style="color:var(--verde-claro)">🎯 {{ l.dec_nome or 'Decisor' }}
                 {% if l.dec_tels %}
-                  {% for t in l.dec_tels %}<div style="margin-top:.1rem">{{ t.formatado }}{% if t.provavel %} ⭐{% endif %}{% if t.whatsapp %} 💬{% endif %}{% if t.tipo_rot %} <span class="mut">· {{ t.tipo_rot }}</span>{% endif %}</div>{% endfor %}
+                  {% for t in l.dec_tels_visiveis %}<label style="display:flex;align-items:center;gap:.3rem;margin-top:.1rem;cursor:pointer" title="Marcado = esse número vai quando jogar pra campanha">
+                    <input type="checkbox" name="tel_{{ l.id }}" value="{{ t.formatado }}"{% if t.melhor %} checked{% endif %} style="width:auto;margin:0;accent-color:var(--verde)">
+                    {{ t.formatado }}{% if t.provavel %} ⭐{% endif %}{% if t.whatsapp %} 💬{% endif %}{% if t.tipo_rot %} <span class="mut">· {{ t.tipo_rot }}</span>{% endif %}</label>{% endfor %}
+                  {% if l.dec_tels_ocultos %}
+                  <div class="mut" style="font-size:.72rem;margin-top:.15rem;cursor:pointer;text-decoration:underline" onclick="this.nextElementSibling.style.display='block';this.style.display='none'">+{{ l.dec_tels_ocultos|length }} número(s) sem WhatsApp confirmado ›</div>
+                  <div style="display:none">
+                    {% for t in l.dec_tels_ocultos %}<label style="display:flex;align-items:center;gap:.3rem;margin-top:.1rem;cursor:pointer">
+                      <input type="checkbox" name="tel_{{ l.id }}" value="{{ t.formatado }}"{% if t.melhor %} checked{% endif %} style="width:auto;margin:0;accent-color:var(--verde)">
+                      {{ t.formatado }}{% if t.provavel %} ⭐{% endif %}{% if t.tipo_rot %} <span class="mut">· {{ t.tipo_rot }}</span>{% endif %}</label>{% endfor %}
+                  </div>
+                  {% endif %}
                 {% elif l.dec_tel %} · {{ l.dec_tel }}
                 {% else %} · <span class="mut">(sem telefone na Credify)</span>{% endif %}
               </div>{% endif %}

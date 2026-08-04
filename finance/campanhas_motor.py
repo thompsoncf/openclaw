@@ -403,12 +403,16 @@ def _melhor_de_lista(decisor_telefones) -> str | None:
     return provavel or primeiro
 
 
-def _numero_alvo_wa(c, conta_id, pros) -> tuple[str | None, str]:
-    """Escolhe o número do WhatsApp do lead priorizando o DECISOR (opção A):
+def _numero_alvo_wa(c, conta_id, pros, alvo_telefone=None) -> tuple[str | None, str]:
+    """Escolhe o número do WhatsApp do lead. Se a pessoa travou um número na hora
+    de jogar pra campanha (checkbox na Base, campanha_alvos.alvo_telefone), usa
+    esse — sem adivinhar. Senão, prioriza o DECISOR (opção A):
     1) se já tem os telefones do decisor salvos → usa o ⭐ dele;
     2) senão, se tem CNPJ → busca o decisor na Credify AGORA, salva e usa o ⭐;
     3) senão → cai pro WhatsApp/telefone geral já captado.
     Devolve (numero|None, origem)."""
+    if (alvo_telefone or "").strip():
+        return alvo_telefone.strip(), "escolhido"
     pid, empresa, cnpj, whatsapp, telefone, dec_tels = pros
     n = _melhor_de_lista(dec_tels)
     if n:
@@ -490,19 +494,20 @@ def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> i
         teto_wa = float(_cfg[1]) if _cfg and _cfg[1] is not None else None
         gasto_atual = float(_cfg[2]) if _cfg else 0.0
         alvos = c.execute(
-            """select a.id, p.id, p.empresa, p.cnpj, p.whatsapp, p.telefone, p.decisor_telefones
+            """select a.id, p.id, p.empresa, p.cnpj, p.whatsapp, p.telefone, p.decisor_telefones,
+                      a.alvo_telefone
                  from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
                 where a.campanha_id=%s and a.wa_status is null
                   and a.status in ('fila','enviado') limit %s""", (camp_id, teto)).fetchall()
     feitos = 0
-    for (aid, pid, empresa, cnpj, whatsapp, telefone, dec_tels) in alvos:
+    for (aid, pid, empresa, cnpj, whatsapp, telefone, dec_tels, alvo_tel) in alvos:
         # já respondeu por qualquer canal? então não incomoda no WhatsApp
         if _respondeu(pool, conta_id, pid):
             _wa_marca(pool, aid, "pulado")  # já respondeu → não envia (trava reenvio, não é "enviado")
             continue
         with pool.connection() as c:
             numero, _origem = _numero_alvo_wa(c, conta_id,
-                                              (pid, empresa, cnpj, whatsapp, telefone, dec_tels))
+                                              (pid, empresa, cnpj, whatsapp, telefone, dec_tels), alvo_tel)
         if not numero:
             _wa_marca(pool, aid, "sem_numero")
             continue
@@ -659,7 +664,7 @@ def _reengajar_campanha(pool, camp_id, conta_id, dias, wa_ativo, camp_sid, teto)
         alvos = c.execute(
             """select a.id, p.id, coalesce(p.empresa,''), coalesce(p.email,''),
                       coalesce(p.whatsapp,''), coalesce(p.telefone,''), p.decisor_telefones,
-                      coalesce(a.wa_status,'')
+                      coalesce(a.wa_status,''), a.alvo_telefone
                  from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
                 where a.campanha_id=%s and a.reengajado_em is null
                   and a.status in ('enviado','concluido')
@@ -670,11 +675,13 @@ def _reengajar_campanha(pool, camp_id, conta_id, dias, wa_ativo, camp_sid, teto)
             (camp_id, str(int(dias)), teto)).fetchall()
     conta_nome = idn.get("empresa") or ""
     feitos = 0
-    for (aid, pid, empresa, email, whatsapp, telefone, dec_tels, wa_status) in alvos:
+    for (aid, pid, empresa, email, whatsapp, telefone, dec_tels, wa_status, alvo_tel) in alvos:
         if _respondeu(pool, conta_id, pid):        # respondeu por qualquer canal → não insiste
             _reeng_marca(pool, aid)
             continue
-        numero = _melhor_de_lista(dec_tels) or (whatsapp or telefone or "").strip()
+        # número travado na hora de jogar pra campanha (checkbox na Base) tem
+        # prioridade — mesma regra do envio inicial (_numero_alvo_wa).
+        numero = (alvo_tel or "").strip() or _melhor_de_lista(dec_tels) or (whatsapp or telefone or "").strip()
         usou_wa = False
         # 1) prioriza WhatsApp (canal novo, se ativo/pronto/número e ainda não mandado)
         if wa_ativo and sid and numero and not wa_status:

@@ -426,7 +426,7 @@ _CSS = """<style>
 .cal-hd,.cal-wk{display:grid;grid-template-columns:repeat(7,1fr)}
 .cal-hd{background:var(--card-2);border-bottom:1px solid var(--borda)}
 .cal-hd span{padding:9px 0;text-align:center;font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-mut);font-weight:700}
-.cal-cell{height:78px;border-right:1px solid var(--borda);border-bottom:1px solid var(--borda);padding:6px 7px;display:flex;flex-direction:column;gap:5px}
+.cal-cell{height:84px;border-right:1px solid var(--borda);border-bottom:1px solid var(--borda);padding:6px 7px;display:flex;flex-direction:column;gap:3px}
 .cal-cell:nth-child(7n){border-right:0}
 .cal-wk:last-child .cal-cell{border-bottom:0}
 .cal-cell.fora{background:rgba(255,255,255,.012)}
@@ -438,9 +438,12 @@ _CSS = """<style>
 .cal-cell.tem-evento{cursor:pointer}
 .cal-cell.tem-evento:hover{background:var(--card-2)}
 .cal-cell.tem-evento:focus-visible{outline:2px solid var(--verde);outline-offset:-2px}
-.dots{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:auto}
-.dot{width:7px;height:7px;border-radius:50%;flex:0 0 7px}
-.dots .mais{font-size:.6rem;color:var(--txt-mut);margin-left:1px}
+.evs{display:flex;flex-direction:column;gap:2px;min-width:0}
+.ev-line{display:flex;align-items:center;gap:4px;min-width:0}
+.ev-line .dot{width:6px;height:6px;border-radius:50%;flex:0 0 6px}
+.ev-line .h{font-size:.6rem;font-weight:700;color:var(--txt-mut);flex:0 0 auto;font-variant-numeric:tabular-nums}
+.ev-line .n{font-size:.62rem;color:var(--txt);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ev-more{font-size:.58rem;color:var(--txt-mut);padding-left:10px}
 /* próximos */
 .px{display:flex;flex-direction:column;gap:2px}
 .px-row{display:flex;align-items:flex-start;gap:11px;padding:9px 4px;border-bottom:1px solid var(--borda)}
@@ -616,13 +619,15 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
                {% if c.eventos %}data-iso="{{ c.iso }}" tabindex="0" role="button" aria-label="Ver os {{ c.eventos|length }} compromisso{{ 's' if c.eventos|length != 1 }} do dia {{ c.dia }}"{% endif %}>
             <div class="cal-head">
               <span class="cal-num">{{ c.dia }}</span>
-              {% if c.eventos|length > 1 %}<span class="cal-count">{{ c.eventos|length }}</span>{% endif %}
+              {% if c.eventos|length > 2 %}<span class="cal-count">{{ c.eventos|length }}</span>{% endif %}
             </div>
             {% if c.eventos %}
-            <div class="dots">
-              {% for e in c.eventos[:4] %}<span class="dot d-{{ e.tipo }}" data-ev="{{ e.id }}"></span>{% endfor %}
-              {% if c.eventos|length > 4 %}<span class="mais">+{{ c.eventos|length - 4 }}</span>{% endif %}
+            <div class="evs">
+              {% for e in c.eventos[:2] %}
+              <div class="ev-line" data-ev="{{ e.id }}"><span class="dot d-{{ e.tipo }}"></span><span class="h">{{ e.hora }}</span><span class="n">{{ e.titulo }}</span></div>
+              {% endfor %}
             </div>
+            {% if c.eventos|length > 2 %}<div class="ev-more">+{{ c.eventos|length - 2 }} mais</div>{% endif %}
             {% endif %}
           </div>
           {% endfor %}
@@ -785,27 +790,38 @@ function abrirDia(iso){
   document.getElementById('dayOverlay').classList.add('show');
 }
 function fecharDia(){ document.getElementById('dayOverlay').classList.remove('show'); }
-// Tira o evento cancelado do calendário (ponto na célula + caixa do dia se estiver
+// Reconstrói o conteúdo de UMA célula (linhas de compromisso + "+N mais") a partir
+// de EVENTOS_DIA — mesma fonte de dados da caixa do dia, pra nunca desalinhar.
+function renderizarCelula(iso){
+  var cel = document.querySelector('.cal-cell[data-iso="'+iso+'"]');
+  if(!cel) return;
+  var evs = (EVENTOS_DIA[iso] || {}).eventos || [];
+  var num = cel.querySelector('.cal-num');
+  var numHtml = num ? num.outerHTML : '';
+  if(!evs.length){
+    cel.classList.remove('tem-evento');
+    cel.removeAttribute('tabindex'); cel.removeAttribute('role'); cel.removeAttribute('data-iso');
+    cel.innerHTML = '<div class="cal-head">'+numHtml+'</div>';
+    return;
+  }
+  var count = evs.length > 2 ? '<span class="cal-count">'+evs.length+'</span>' : '';
+  var linhas = evs.slice(0, 2).map(function(e){
+    return '<div class="ev-line" data-ev="'+e.id+'"><span class="dot d-'+e.tipo+'"></span><span class="h">'+e.hora+'</span><span class="n">'+e.titulo+'</span></div>';
+  }).join('');
+  var mais = evs.length > 2 ? '<div class="ev-more">+'+(evs.length - 2)+' mais</div>' : '';
+  cel.innerHTML = '<div class="cal-head">'+numHtml+count+'</div><div class="evs">'+linhas+'</div>'+mais;
+}
+// Tira o evento cancelado do calendário (linha na célula + caixa do dia se estiver
 // aberta) e do EVENTOS_DIA em memória, sem precisar recarregar a página.
 function removerEventoDoCalendario(id){
-  document.querySelectorAll('.dot[data-ev="'+id+'"]').forEach(function(dot){
-    var cel = dot.closest('.cal-cell');
-    dot.remove();
-    if(!cel) return;
-    var rest = cel.querySelectorAll('.dot').length;
-    var count = cel.querySelector('.cal-count');
-    if(rest === 0){
-      cel.classList.remove('tem-evento');
-      cel.removeAttribute('tabindex'); cel.removeAttribute('role'); cel.removeAttribute('data-iso');
-      var dots = cel.querySelector('.dots'); if(dots) dots.remove();
-      if(count) count.remove();
-    } else if(count){
-      if(rest > 1) count.textContent = rest; else count.remove();
-    }
-  });
+  var isoAlvo = null;
   for(var iso in EVENTOS_DIA){
-    EVENTOS_DIA[iso].eventos = EVENTOS_DIA[iso].eventos.filter(function(e){ return String(e.id) !== String(id); });
-    if(!EVENTOS_DIA[iso].eventos.length) delete EVENTOS_DIA[iso];
+    if(EVENTOS_DIA[iso].eventos.some(function(e){ return String(e.id) === String(id); })){ isoAlvo = iso; break; }
+  }
+  if(isoAlvo){
+    EVENTOS_DIA[isoAlvo].eventos = EVENTOS_DIA[isoAlvo].eventos.filter(function(e){ return String(e.id) !== String(id); });
+    if(!EVENTOS_DIA[isoAlvo].eventos.length) delete EVENTOS_DIA[isoAlvo];
+    renderizarCelula(isoAlvo);
   }
   var devRow = document.querySelector('#daybox .dev[data-ev="'+id+'"]');
   if(devRow){
@@ -822,9 +838,16 @@ function agNovoNoDia(iso){
   var i = document.querySelector('#novo input[name=data]');
   if(i) i.value = iso;
 }
-document.querySelectorAll('.cal-cell.tem-evento').forEach(function(cel){
-  cel.addEventListener('click', function(){ abrirDia(cel.getAttribute('data-iso')); });
-  cel.addEventListener('keydown', function(ev){ if(ev.key==='Enter'||ev.key===' '){ ev.preventDefault(); abrirDia(cel.getAttribute('data-iso')); } });
+// Delegado no calendário (não em cada célula): células podem ser recriadas por
+// renderizarCelula() depois de um cancelamento, então o listener direto se perderia.
+document.querySelector('.cal').addEventListener('click', function(ev){
+  var cel = ev.target.closest('.cal-cell.tem-evento');
+  if(cel) abrirDia(cel.getAttribute('data-iso'));
+});
+document.querySelector('.cal').addEventListener('keydown', function(ev){
+  if(ev.key!=='Enter' && ev.key!==' ') return;
+  var cel = ev.target.closest('.cal-cell.tem-evento');
+  if(cel){ ev.preventDefault(); abrirDia(cel.getAttribute('data-iso')); }
 });
 document.getElementById('dayOverlay').addEventListener('click', function(ev){ if(ev.target.id==='dayOverlay') fecharDia(); });
 document.addEventListener('keydown', function(ev){ if(ev.key==='Escape') fecharDia(); });

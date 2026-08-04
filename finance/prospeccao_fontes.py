@@ -140,7 +140,7 @@ def buscar_places(termo: str, cidade: str, api_key: str | None = None,
                 continue
             if pid:
                 vistos.add(pid)
-            tem_site = "websiteUri" in p
+            tem_site = bool(p.get("websiteUri"))
             cid, uf = _endereco_partes(p.get("addressComponents"))
             seg = (p.get("primaryTypeDisplayName") or {}).get("text") or ""
             status = p.get("businessStatus") or ""

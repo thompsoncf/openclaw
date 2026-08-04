@@ -22,8 +22,9 @@ _CNPJ_LABEL_RE = re.compile(r"cnpj[:\s]*([\d./\-]{14,20})", re.I)     # "CNPJ: 1
 _IG_RE = re.compile(r"instagram\.com/([A-Za-z0-9_.]+)", re.I)
 _IG_EXT = re.compile(r"\.(php|js|css|html?|ico|png|jpe?g|gif|svg|json|xml|txt)$", re.I)
 _WA_RE = re.compile(r"(?:wa\.me/|api\.whatsapp\.com/send\?phone=)\+?(\d{8,15})", re.I)
-_UA = {"User-Agent": "Mozilla/5.0 (compatible; ZaqBot/1.0; +https://app.zaq-ia.com)"}
-_TIMEOUT = 9
+_UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"}
+_TIMEOUT = 6
 _LIXO = ("sentry.", "example.com", "wixpress", "godaddy", "sentry-next",
          "@sentry", ".png", ".jpg", ".gif", ".webp", "domain.com", "email.com",
          "your@", "seuemail", "nome@", "u003e")
@@ -107,7 +108,9 @@ def enriquecer(site: str = "", telefone: str = "", email_atual: str = "") -> dic
     html = ""
     if base:
         vistos = 0
-        for p in ("", "/contato", "/contact", "/fale-conosco", "/contatos"):
+        # ordem prioriza os caminhos mais comuns em site brasileiro pequeno — só 3
+        # tentativas (orçamento de tempo), então "/contact" (inglês) fica por último
+        for p in ("", "/contato", "/fale-conosco", "/contatos", "/contact"):
             html += "\n" + _baixar(urljoin(base, p) if p else base)
             vistos += 1
             if len(html) > 350000 or vistos >= 3:

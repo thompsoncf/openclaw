@@ -253,11 +253,28 @@ def template_configurado() -> bool:
     return bool(os.environ.get("TWILIO_TMPL_CONVITE_SID") and wa.configurado())
 
 
+def _titulo_com_extras(pool, c: dict) -> str:
+    """'{título} — {empresa} (com Fulano e Beltrano)' — empresa e envolvidos
+    encaixados no PRÓPRIO texto do assunto, já que o template aprovado no
+    Twilio só tem {{1}} título e {{2}} data/hora (sem linha própria pra isso;
+    uma linha rotulada exigiria um template novo aprovado)."""
+    ev = c["evento"]
+    partes = [ev["titulo"]]
+    if c.get("empresa"):
+        partes.append(f"— {c['empresa']}")
+    outros = por_evento(pool, c["conta_id"], [ev["id"]]).get(ev["id"], [])
+    nomes = [g["nome"] for g in outros if (g.get("nome") or "").strip()]
+    if len(nomes) > 1:
+        partes.append(f"(com {ag.frase_nomes(nomes)})")
+    return " ".join(partes)
+
+
 def enviar_convite_whatsapp(pool, token: str) -> dict:
     """Dispara o template de convite pro número do convidado, PELO NÚMERO DA
     EMPRESA (canais_config, provedor Twilio). Funciona 'frio' (fora da janela de
     24h). As variáveis batem com o corpo aprovado no Twilio, NA ORDEM:
-    {{1}} assunto/título · {{2}} data e horário. Retorno tolerante — nunca
+    {{1}} assunto/título (com empresa e envolvidos embutidos — veja
+    _titulo_com_extras) · {{2}} data e horário. Retorno tolerante — nunca
     levanta; devolve {'ok': bool, ...}."""
     from . import whatsapp_out as wout
     c = por_token(pool, token)
@@ -269,7 +286,7 @@ def enviar_convite_whatsapp(pool, token: str) -> dict:
     if not sid:
         return {"ok": False, "erro": "sem_template"}
     ev = c["evento"]
-    variaveis = {"1": ev["titulo"], "2": ag.fmt_hora(ev)}
+    variaveis = {"1": _titulo_com_extras(pool, c), "2": ag.fmt_hora(ev)}
     with pool.connection() as conn:
         return wout.enviar_template(conn, c["conta_id"], c["contato"], sid, variaveis)
 

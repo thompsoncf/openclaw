@@ -4889,12 +4889,13 @@ function baseEnriquecer(tipo){
       msg='🔎 '+d.n+' site(s) verificado(s) · '+d.com_email+' com e-mail · '+d.com_wa+' com WhatsApp · '+d.com_cnpj+' com CNPJ'+(d.sem?(' · '+d.sem+' sem nada'):'')+'\\n(CNPJ achado destrava o 🎯 Buscar decisor)';
     }
     if(d.resto)msg+='\\n(processei os primeiros '+(d.n)+'; marque menos ou repita pros demais)';
+    alert(msg);
+    // sempre recarrega — os que deram "achou" já foram gravados e só aparecem
+    // na lista depois do reload; os ambíguos (se tiver) reabrem o painel sozinhos.
     if(tipo==='cnpj' && d.ambiguos && d.ambiguos.length){
-      alert(msg);
-      cnpjResolverAbrir(d.ambiguos);
-    }else{
-      alert(msg);location.reload();
+      try{sessionStorage.setItem('cnpjAmbiguosPendentes',JSON.stringify(d.ambiguos));}catch(e){}
     }
+    location.reload();
   }).catch(function(){capToast('Falha de rede — tente de novo.');});
 }
 function cnpjResolverAbrir(leads){
@@ -4931,6 +4932,18 @@ function cnpjResolverUsar(id,cnpj,btn){
     if(box && !box.querySelector('.rlist'))setTimeout(function(){location.reload();},900);
   }).catch(function(){alert('Falha de rede — tente de novo.');btn.disabled=false;btn.textContent='usar';});
 }
+(function(){
+  // depois do reload que mostra os "achou", reabre o painel sozinho pros que
+  // ainda ficaram pendentes de escolha (guardados antes de recarregar).
+  try{
+    var pend=sessionStorage.getItem('cnpjAmbiguosPendentes');
+    if(pend){
+      sessionStorage.removeItem('cnpjAmbiguosPendentes');
+      var leads=JSON.parse(pend);
+      if(leads&&leads.length)cnpjResolverAbrir(leads);
+    }
+  }catch(e){}
+})();
 function baseMarcados(){return document.querySelectorAll('.bt-ck:checked').length;}
 function baseUpd(){var n=document.getElementById('base-sel-n');if(n)n.textContent=baseMarcados();}
 document.addEventListener('change',function(e){if(e.target&&e.target.classList&&e.target.classList.contains('bt-ck'))baseUpd();});

@@ -197,9 +197,29 @@ def test_enviar_convite_monta_variaveis(pool, conta_id, monkeypatch):
     assert r["ok"] and capt["sid"] == "HXtest"
     assert capt["conta_id"] == conta_id                # roteia pela conta (nº da empresa)
     assert capt["numero"] == "86 98888-7777"           # nº do convidado
-    assert capt["vars"]["1"] == "Reunião X"            # {{1}} assunto/título
+    assert capt["vars"]["1"] == "Reunião X — Padaria Central"  # {{1}}: título + empresa
     assert capt["vars"]["2"]                            # {{2}} data e horário
     assert "3" not in capt["vars"]                      # só 2 variáveis (bate com o template)
+
+
+def test_enviar_convite_cita_outros_convidados_no_titulo(pool, conta_id, monkeypatch):
+    """Com 2+ convidados no mesmo evento, {{1}} também cita quem mais vem —
+    mesmo texto pra todo mundo, incluindo o próprio destinatário (é assim que
+    já funciona na mensagem manual de compartilhar)."""
+    ev = _evento(pool, conta_id, titulo="Reunião X")
+    cv.criar_convidado(pool, conta_id, ev["id"], "Ana", "86 99111-2233")
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Carlos", "86 99222-3344")
+    capt = {}
+    from finance import whatsapp_out as wout
+
+    def fake(c, cid, numero, content_sid, variaveis):
+        capt.update(vars=variaveis)
+        return {"ok": True, "sid": "SM1"}
+
+    monkeypatch.setattr(wout, "enviar_template", fake)
+    monkeypatch.setenv("TWILIO_TMPL_CONVITE_SID", "HXtest")
+    cv.enviar_convite_whatsapp(pool, conv["token"])
+    assert capt["vars"]["1"] == "Reunião X — Padaria Central (com Ana e Carlos)"
 
 
 def test_enviar_convite_sem_numero_ou_sem_template(pool, conta_id, monkeypatch):

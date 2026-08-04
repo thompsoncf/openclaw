@@ -342,7 +342,8 @@ def agenda_convite_enviar(request: Request, token: str = Form(...),
 @router.post("/painel/agenda/lembrete")
 def agenda_lembrete(request: Request, resumo_dia: str = Form(""),
                     hora_resumo: str = Form("7"), aviso: str = Form(""),
-                    aviso_antes_min: str = Form("30"), m: str = Form("")):
+                    aviso_antes_min: str = Form("30"), avisar_convidados: str = Form(""),
+                    m: str = Form("")):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -359,7 +360,8 @@ def agenda_lembrete(request: Request, resumo_dia: str = Form(""),
     ag.salvar_config(get_pool(), ctx["conta_id"],
                      resumo_ativo=resumo_on,
                      hora_resumo=hora,
-                     aviso_antes_min=antes)
+                     aviso_antes_min=antes,
+                     avisar_convidados=(avisar_convidados == "1"))
     if resumo_on or aviso_on:
         request.session["agenda_aviso"] = "Lembrete ligado. 🔔"
     else:
@@ -819,12 +821,18 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           </div>
           <div class="tg">
             <div><div class="tg-t">Aviso antes do compromisso</div><div class="tg-s">Um toque minutos antes de cada um</div></div>
-            <label class="sw"><input type="checkbox" name="aviso" value="1" {% if cfg.aviso_antes_min %}checked{% endif %} onchange="document.getElementById('subAviso').style.display=this.checked?'flex':'none'"><span class="track"></span><span class="knob"></span></label>
+            <label class="sw"><input type="checkbox" name="aviso" value="1" {% if cfg.aviso_antes_min %}checked{% endif %} onchange="document.getElementById('subAviso').style.display=this.checked?'block':'none'"><span class="track"></span><span class="knob"></span></label>
           </div>
-          <div class="sub-opt" id="subAviso"{% if not cfg.aviso_antes_min %} style="display:none"{% endif %}>
-            <select name="aviso_antes_min">
-              {% for mn in [10,15,30,60,120] %}<option value="{{ mn }}" {% if cfg.aviso_antes_min==mn %}selected{% endif %}>{{ mn }} min antes</option>{% endfor %}
-            </select>
+          <div id="subAviso"{% if not cfg.aviso_antes_min %} style="display:none"{% endif %}>
+            <div class="sub-opt">
+              <select name="aviso_antes_min">
+                {% for mn in [10,15,30,60,120] %}<option value="{{ mn }}" {% if cfg.aviso_antes_min==mn %}selected{% endif %}>{{ mn }} min antes</option>{% endfor %}
+              </select>
+            </div>
+            <div class="tg">
+              <div><div class="tg-t">Avisar os convidados</div><div class="tg-s">Quem confirmou presença recebe o mesmo aviso, pelo WhatsApp</div></div>
+              <label class="sw"><input type="checkbox" name="avisar_convidados" value="1" {% if cfg.avisar_convidados %}checked{% endif %}><span class="track"></span><span class="knob"></span></label>
+            </div>
           </div>
           <div class="canal-tag">📲 Vai chegar no seu WhatsApp/Telegram, onde você fala com o Zaq.</div>
           <button class="ok" type="submit" data-busy="⏳ Salvando…">Salvar lembrete</button>

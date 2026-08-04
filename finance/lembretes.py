@@ -40,14 +40,15 @@ def _rodar(pool, agora) -> dict:
         try:
             with pool.connection() as c:
                 cfgs = c.execute(
-                    "select conta_id, resumo_ativo, hora_resumo, aviso_antes_min "
+                    "select conta_id, resumo_ativo, hora_resumo, aviso_antes_min, avisar_convidados "
                     "from agenda_config "
                     "where resumo_ativo or aviso_antes_min is not null").fetchall()
-            for (conta_id, resumo_ativo, hora_resumo, aviso_antes_min) in cfgs:
+            for (conta_id, resumo_ativo, hora_resumo, aviso_antes_min, avisar_convidados) in cfgs:
                 if resumo_ativo and hora_resumo is not None and agora.hour == hora_resumo:
                     n_res += _resumo_do_dia(pool, conta_id, agora)
                 if aviso_antes_min:
-                    n_avi += _avisos_proximos(pool, conta_id, int(aviso_antes_min), agora)
+                    n_avi += _avisos_proximos(pool, conta_id, int(aviso_antes_min), agora,
+                                              bool(avisar_convidados))
         finally:
             lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
             lockc.commit()
@@ -80,12 +81,14 @@ def _resumo_do_dia(pool, conta_id: int, agora) -> int:
     return 1 if notificar.enviar_para_dono(pool, conta_id, "\n".join(linhas)) else 0
 
 
-def _avisos_proximos(pool, conta_id: int, antes_min: int, agora) -> int:
+def _avisos_proximos(pool, conta_id: int, antes_min: int, agora,
+                     avisar_convidados: bool = True) -> int:
     """Avisa dos eventos que começam de agora até daqui a `antes_min` minutos —
-    pro dono (Telegram, sempre) e pros convidados CONFIRMADOS (WhatsApp — veja
-    convites.avisar_convidado_confirmado: livre dentro da janela de 24h desde a
-    confirmação dele, template aprovado fora dela; sem nenhum dos dois, só não
-    manda pra esse convidado)."""
+    pro dono (Telegram, sempre) e, se `avisar_convidados` estiver ligado (switch
+    "Avisar os convidados" no painel), pros convidados CONFIRMADOS (WhatsApp —
+    veja convites.avisar_convidado_confirmado: livre dentro da janela de 24h
+    desde a confirmação dele, template aprovado fora dela; sem nenhum dos dois,
+    só não manda pra esse convidado)."""
     eventos = ag.listar_eventos(pool, conta_id, agora, agora + timedelta(minutes=antes_min))
     n = 0
     for ev in eventos:
@@ -96,7 +99,8 @@ def _avisos_proximos(pool, conta_id: int, antes_min: int, agora) -> int:
             txt = f"⏰ *Daqui a pouco* (em ~{faltam} min): *{ev['titulo']}* às {h}.{loc}"
             if notificar.enviar_para_dono(pool, conta_id, txt):
                 n += 1
-        n += _avisar_convidados_confirmados(pool, conta_id, ev, h, faltam, agora)
+        if avisar_convidados:
+            n += _avisar_convidados_confirmados(pool, conta_id, ev, h, faltam, agora)
     return n
 
 

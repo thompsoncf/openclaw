@@ -3506,14 +3506,18 @@ def prospeccao_buscar_cnpj(request: Request, alvo_id: int):
 def prospeccao_aplicar_cnpj(request: Request, alvo_id: int, cnpj: str = Form(...)):
     """Grava o CNPJ escolhido e já enriquece (colunas + jsonb receita)."""
     ctx, redir = _acesso(request)
+    ajax = request.headers.get("X-Requested-With") == "fetch"
     if redir is not None:
-        return redir
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401) if ajax else redir
     pool = get_pool()
     alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
     if not alvo or not _pode_ver(alvo, ctx):
-        return RedirectResponse("/painel/prospeccao", status_code=303)
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403) if ajax \
+            else RedirectResponse("/painel/prospeccao", status_code=303)
     limpo = "".join(ch for ch in (cnpj or "") if ch.isdigit())
     if len(limpo) != 14:
+        if ajax:
+            return JSONResponse({"ok": False, "erro": "CNPJ inválido."})
         request.session["prosp_aviso"] = "CNPJ inválido."
         return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
     res = fontes.enriquecer_cnpj(limpo)
@@ -3533,12 +3537,15 @@ def prospeccao_aplicar_cnpj(request: Request, alvo_id: int, cnpj: str = Form(...
                 (cnpj.strip(), d.get("socio"), d.get("regime_tributario"), d.get("porte"),
                  d.get("segmento"), d.get("telefone"), d.get("email"), d.get("cidade"),
                  d.get("uf"), json.dumps(_receita_extras(d)), alvo_id, ctx["conta_id"]))
-            request.session["prosp_aviso"] = "CNPJ vinculado e dados da Receita preenchidos ✓"
+            msg = "CNPJ vinculado e dados da Receita preenchidos ✓"
         else:
             c.execute("update prospeccao set cnpj=%s, atualizado_em=now() where id=%s and conta_id=%s",
                       (cnpj.strip(), alvo_id, ctx["conta_id"]))
-            request.session["prosp_aviso"] = "CNPJ salvo (não consegui enriquecer agora — use ↻)."
+            msg = "CNPJ salvo (não consegui enriquecer agora — use ↻)."
         c.commit()
+    if ajax:
+        return JSONResponse({"ok": True, "msg": msg})
+    request.session["prosp_aviso"] = msg
     return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
 
 
@@ -3928,14 +3935,15 @@ def _enriquecer_decisor_um(pool, conta_id, aid) -> bool:
     return True
 
 
-def _buscar_aplicar_cnpj_um(pool, conta_id, alvo_id, nome, cidade, uf) -> str:
+def _buscar_aplicar_cnpj_um(pool, conta_id, alvo_id, nome, cidade, uf):
     """Acha o CNPJ do lead por nome+cidade (CNPJá) e aplica DE UMA VEZ só quando o
     resultado é inequívoco (1 candidato só — já vem filtrado por UF/cidade). Devolve
-    'achou' | 'ambiguo' (2+ candidatos, precisa escolher na Ficha) | 'sem' (nenhum)."""
+    (status, itens): status 'achou' | 'ambiguo' (2+ candidatos, itens tem os candidatos
+    pra escolher) | 'sem' (nenhum, itens vazio)."""
     res = fontes.buscar_cnpj_por_nome(nome or "", cidade or "", uf or "")
     itens = res.get("itens") or []
     if len(itens) != 1:
-        return "ambiguo" if len(itens) > 1 else "sem"
+        return ("ambiguo", itens[:5]) if len(itens) > 1 else ("sem", [])
     cnpj = itens[0]["cnpj"]
     enr = fontes.enriquecer_cnpj(cnpj)
     with pool.connection() as c:
@@ -3953,7 +3961,7 @@ def _buscar_aplicar_cnpj_um(pool, conta_id, alvo_id, nome, cidade, uf) -> str:
             c.execute("update prospeccao set cnpj=%s, atualizado_em=now() where id=%s and conta_id=%s",
                       (cnpj, alvo_id, conta_id))
         c.commit()
-    return "achou"
+    return ("achou", [])
 
 
 @router.post("/painel/prospeccao/base/qualificar")
@@ -3992,23 +4000,25 @@ async def prospeccao_base_enriquecer(request: Request):
         _INICIO = time.monotonic()
         achou, ambiguo, sem = 0, 0, 0
         processados = 0
+        ambiguos = []
         for pid, nome, cidade_l, uf_l in sel:
             if time.monotonic() - _INICIO > 45:
                 break
             processados += 1
             try:
-                r = _buscar_aplicar_cnpj_um(pool, conta_id, pid, nome, cidade_l, uf_l)
+                r, itens = _buscar_aplicar_cnpj_um(pool, conta_id, pid, nome, cidade_l, uf_l)
             except Exception:  # noqa: BLE001
-                r = "sem"
+                r, itens = "sem", []
             if r == "achou":
                 achou += 1
             elif r == "ambiguo":
                 ambiguo += 1
+                ambiguos.append({"id": pid, "empresa": nome, "itens": itens})
             else:
                 sem += 1
         resto += len(sel) - processados
         return JSONResponse({"ok": True, "tipo": "cnpj", "n": processados, "achou": achou,
-                             "ambiguo": ambiguo, "sem": sem, "resto": resto})
+                             "ambiguo": ambiguo, "sem": sem, "resto": resto, "ambiguos": ambiguos})
 
     if tipo == "decisor":
         if not ctx["gerencia"]:
@@ -4736,12 +4746,14 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <button class="pbtn ghost">Filtrar</button>
   </form>
 
+  <div id="cnpj-resolver" style="display:none;margin-bottom:.8rem"></div>
+
   <form method="post" action="/painel/prospeccao/base/promover">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem;gap:.5rem;flex-wrap:wrap">
       <div class="mut" style="font-size:.8rem"><b style="color:var(--txt)" id="base-sel-n">0</b> marcado(s) · {{ leads|length }} na página{% if leads|length>=300 %} (máx 300){% endif %}</div>
       <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
         <button type="button" class="pbtn ghost" onclick="baseEnriquecer('canais')" title="Raspa o site dos marcados e acha e-mail / Instagram / WhatsApp (grátis)">🔎 Enriquecer canais</button>
-        {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseEnriquecer('cnpj')" title="Acha o CNPJ dos marcados sem CNPJ ainda, por nome + cidade (CNPJá) — consulta paga. Só aplica quando o resultado é inequívoco; achou mais de um, fica pra você escolher na Ficha">🏢 Buscar CNPJ</button>{% endif %}
+        {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseEnriquecer('cnpj')" title="Acha o CNPJ dos marcados sem CNPJ ainda, por nome + cidade (CNPJá) — consulta paga. Achando mais de um candidato, mostra pra você escolher aqui mesmo">🏢 Buscar CNPJ</button>{% endif %}
         {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseEnriquecer('decisor')" title="Acha o dono dos marcados na Credify: por CNPJ (sócio) ou pelo telefone do Google (titular/dono) — consulta paga">🎯 Buscar decisor</button>{% endif %}
         {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseExplorium()" title="Teste de conexão com a Explorium (Vibe) no lead marcado">🔮 Explorium (teste)</button>{% endif %}
         <span style="width:1px;height:24px;background:var(--borda);margin:0 .15rem"></span>
@@ -4868,14 +4880,50 @@ function baseEnriquecer(tipo){
       msg='🎯 '+d.n+' consultado(s) · '+d.achou+' decisor(es) encontrado(s)'+(d.sem?(' · '+d.sem+' sem quadro/telefone na Credify'):'');
     }else if(tipo==='cnpj'){
       if(!d.n){alert('Nenhum lead marcado precisa de CNPJ (já têm ou estão sem nome).');return;}
-      msg='🏢 '+d.n+' consultado(s) · '+d.achou+' CNPJ encontrado(s) e aplicado(s)'+(d.ambiguo?(' · '+d.ambiguo+' com mais de 1 candidato (escolha na Ficha)'):'')+(d.sem?(' · '+d.sem+' não achou'):'')+'\\n(CNPJ achado destrava o 🎯 Buscar decisor)';
+      msg='🏢 '+d.n+' consultado(s) · '+d.achou+' CNPJ encontrado(s) e aplicado(s)'+(d.ambiguo?(' · '+d.ambiguo+' com mais de 1 candidato — escolha abaixo'):'')+(d.sem?(' · '+d.sem+' não achou'):'')+'\\n(CNPJ achado destrava o 🎯 Buscar decisor)';
     }else{
       if(!d.n){alert('Nenhum lead marcado tem site pra raspar'+(d.sem_site?(' ('+d.sem_site+' sem site)'):'')+'.');return;}
       msg='🔎 '+d.n+' site(s) verificado(s) · '+d.com_email+' com e-mail · '+d.com_wa+' com WhatsApp · '+d.com_cnpj+' com CNPJ'+(d.sem?(' · '+d.sem+' sem nada'):'')+'\\n(CNPJ achado destrava o 🎯 Buscar decisor)';
     }
     if(d.resto)msg+='\\n(processei os primeiros '+(d.n)+'; marque menos ou repita pros demais)';
-    alert(msg);location.reload();
+    if(tipo==='cnpj' && d.ambiguos && d.ambiguos.length){
+      alert(msg);
+      cnpjResolverAbrir(d.ambiguos);
+    }else{
+      alert(msg);location.reload();
+    }
   }).catch(function(){capToast('Falha de rede — tente de novo.');});
+}
+function cnpjResolverAbrir(leads){
+  var box=document.getElementById('cnpj-resolver');
+  var h='<div class="fsec" style="padding:.9rem"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">'
+    +'<b style="font-size:.9rem">🏢 Escolha o CNPJ certo (encontrou mais de 1 candidato)</b>'
+    +'<button type="button" class="pbtn ghost" style="padding:.25rem .6rem;font-size:.75rem;margin:0" onclick="document.getElementById(\\'cnpj-resolver\\').style.display=\\'none\\'">fechar</button></div>';
+  leads.forEach(function(lead){
+    h+='<div id="cnpj-res-lead-'+lead.id+'" style="margin-top:.6rem;padding-top:.6rem;border-top:1px solid var(--borda)">'
+      +'<div class="mut" style="font-size:.8rem;margin-bottom:.2rem">📇 <b style="color:var(--txt)">'+jsEsc(lead.empresa||('lead #'+lead.id))+'</b> — qual é o CNPJ certo?</div>'
+      +'<div class="rlist">';
+    lead.itens.forEach(function(it){
+      var loc=(it.cidade?(jsEsc(it.cidade)+(it.uf?('/'+it.uf):'')):'');
+      h+='<div class="rrow" style="gap:.5rem"><span style="flex:1"><b style="font-size:.85rem">'+jsEsc(it.razao_social||it.nome_fantasia||it.cnpj)+'</b>'
+        +'<span class="mut" style="font-size:.74rem"> · '+it.cnpj+(it.situacao?(' · '+jsEsc(it.situacao)):'')+(loc?(' · 📍 '+loc):'')+'</span></span>'
+        +'<button type="button" class="pbtn" style="padding:.3rem .7rem;font-size:.78rem;margin:0" onclick="cnpjResolverUsar('+lead.id+',\\''+it.cnpj+'\\',this)">usar</button></div>';
+    });
+    h+='</div><div class="mut" style="font-size:.76rem;margin-top:.3rem">Nenhum bate? Abra a ficha do lead e use "🔎 achar CNPJ" lá pra ver mais opções ou colar direto.</div></div>';
+  });
+  h+='</div>';
+  box.innerHTML=h;box.style.display='block';box.scrollIntoView({behavior:'smooth',block:'start'});
+}
+function cnpjResolverUsar(id,cnpj,btn){
+  btn.disabled=true;btn.textContent='...';
+  var body=new URLSearchParams();body.append('cnpj',cnpj);
+  fetch('/painel/prospeccao/'+id+'/aplicar-cnpj',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body}).then(function(r){return r.json();}).then(function(d){
+    if(!d.ok){alert('⚠️ '+(d.erro||'Não consegui aplicar.'));btn.disabled=false;btn.textContent='usar';return;}
+    var card=document.getElementById('cnpj-res-lead-'+id);
+    if(card)card.outerHTML='<div class="ok" style="margin-top:.6rem">✓ '+jsEsc(d.msg||'CNPJ aplicado')+'</div>';
+    var box=document.getElementById('cnpj-resolver');
+    if(box && !box.querySelector('.rlist'))setTimeout(function(){location.reload();},900);
+  }).catch(function(){alert('Falha de rede — tente de novo.');btn.disabled=false;btn.textContent='usar';});
 }
 function baseMarcados(){return document.querySelectorAll('.bt-ck:checked').length;}
 function baseUpd(){var n=document.getElementById('base-sel-n');if(n)n.textContent=baseMarcados();}

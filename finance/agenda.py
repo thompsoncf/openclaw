@@ -18,6 +18,16 @@ from datetime import datetime, timedelta, timezone
 BRT = timezone(timedelta(hours=-3))
 
 
+def frase_nomes(nomes: list[str]) -> str:
+    """Junta nomes em português: 'Ana', 'Ana e Carlos', 'Ana, Carlos e Bia'."""
+    nomes = [n for n in nomes if n]
+    if not nomes:
+        return ""
+    if len(nomes) == 1:
+        return nomes[0]
+    return ", ".join(nomes[:-1]) + " e " + nomes[-1]
+
+
 def agora_brt() -> datetime:
     return datetime.now(BRT)
 

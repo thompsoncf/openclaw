@@ -52,6 +52,13 @@ def test_link_google_converte_pra_utc():
     assert "text=Reuni" in url
 
 
+def test_frase_nomes():
+    assert ag.frase_nomes([]) == ""
+    assert ag.frase_nomes(["Ana"]) == "Ana"
+    assert ag.frase_nomes(["Ana", "Carlos"]) == "Ana e Carlos"
+    assert ag.frase_nomes(["Ana", "Carlos", "Bia"]) == "Ana, Carlos e Bia"
+
+
 def test_link_maps_usa_o_local():
     url = ag.link_maps("Rua das Flores, 123 - Centro")
     assert url.startswith("https://www.google.com/maps/search/?api=1&query=")

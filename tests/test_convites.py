@@ -239,6 +239,42 @@ def test_marcar_evento_com_varios_convidados(pool, conta_id, monkeypatch):
                        {"nome": "Ana", "contato": "86 97777-6666"}]})
     assert "Paulo" in r and "Ana" in r
     assert len(enviados) == 2                                # disparou pros dois
+    assert "👥 Com: Paulo e Ana" in r                          # resumo dos envolvidos pro dono
+
+
+def test_marcar_evento_com_um_convidado_nao_mostra_resumo(pool, conta_id, monkeypatch):
+    """Com só 1 convidado, a linha "Com: ..." não faz sentido (já tem no "Convites")."""
+    from finance.agenda_tools import construir_ferramentas_agenda
+    monkeypatch.setattr(cv, "enviar_convite_whatsapp", lambda p, t: {"ok": True})
+    ferrs = {f.nome: f for f in construir_ferramentas_agenda(pool, conta_id)}
+    r = ferrs["marcar_evento"].executar({
+        "titulo": "Café", "inicio": "28/07/2099 09:00",
+        "convidados": [{"nome": "Paulo", "contato": "86 98888-7777"}]})
+    assert "👥 Com:" not in r
+
+
+def test_marcar_evento_com_local_traz_link_do_mapa(pool, conta_id):
+    from finance.agenda_tools import construir_ferramentas_agenda
+    ferrs = {f.nome: f for f in construir_ferramentas_agenda(pool, conta_id)}
+    r = ferrs["marcar_evento"].executar(
+        {"titulo": "Reunião", "inicio": "28/07/2099 10:00", "local": "Escritório"})
+    assert "📍 Ver o local no mapa:" in r and "maps" in r.lower()
+
+
+def test_marcar_evento_sem_local_nao_traz_mapa(pool, conta_id):
+    from finance.agenda_tools import construir_ferramentas_agenda
+    ferrs = {f.nome: f for f in construir_ferramentas_agenda(pool, conta_id)}
+    r = ferrs["marcar_evento"].executar({"titulo": "Ligação", "inicio": "28/07/2099 10:00"})
+    assert "mapa" not in r.lower()
+
+
+def test_remarcar_evento_com_local_traz_link_do_mapa(pool, conta_id):
+    from finance.agenda_tools import construir_ferramentas_agenda
+    ferrs = {f.nome: f for f in construir_ferramentas_agenda(pool, conta_id)}
+    ferrs["marcar_evento"].executar(
+        {"titulo": "Consulta", "inicio": "28/07/2099 10:00", "local": "Clínica Central"})
+    r = ferrs["remarcar_evento"].executar({"titulo": "Consulta", "novo_inicio": "29/07/2099 11:00"})
+    assert "📍 Ver o local no mapa:" in r
 
 
 def test_convidar_reuniao_em_evento_existente(pool, conta_id, monkeypatch):

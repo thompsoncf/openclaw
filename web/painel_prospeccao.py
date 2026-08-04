@@ -3928,10 +3928,40 @@ def _enriquecer_decisor_um(pool, conta_id, aid) -> bool:
     return True
 
 
+def _buscar_aplicar_cnpj_um(pool, conta_id, alvo_id, nome, cidade, uf) -> str:
+    """Acha o CNPJ do lead por nome+cidade (CNPJá) e aplica DE UMA VEZ só quando o
+    resultado é inequívoco (1 candidato só — já vem filtrado por UF/cidade). Devolve
+    'achou' | 'ambiguo' (2+ candidatos, precisa escolher na Ficha) | 'sem' (nenhum)."""
+    res = fontes.buscar_cnpj_por_nome(nome or "", cidade or "", uf or "")
+    itens = res.get("itens") or []
+    if len(itens) != 1:
+        return "ambiguo" if len(itens) > 1 else "sem"
+    cnpj = itens[0]["cnpj"]
+    enr = fontes.enriquecer_cnpj(cnpj)
+    with pool.connection() as c:
+        if enr.get("ok"):
+            d = enr["dados"]
+            c.execute(
+                """update prospeccao set cnpj=%s, socio=%s, regime_tributario=%s, porte=%s, segmento=%s,
+                     telefone=coalesce(telefone,%s), email=coalesce(email,%s),
+                     cidade=coalesce(cidade,%s), uf=coalesce(uf,%s), receita=%s::jsonb, atualizado_em=now()
+                   where id=%s and conta_id=%s""",
+                (cnpj, d.get("socio"), d.get("regime_tributario"), d.get("porte"), d.get("segmento"),
+                 d.get("telefone"), d.get("email"), d.get("cidade"), d.get("uf"),
+                 json.dumps(_receita_extras(d)), alvo_id, conta_id))
+        else:
+            c.execute("update prospeccao set cnpj=%s, atualizado_em=now() where id=%s and conta_id=%s",
+                      (cnpj, alvo_id, conta_id))
+        c.commit()
+    return "achou"
+
+
 @router.post("/painel/prospeccao/base/qualificar")
 async def prospeccao_base_enriquecer(request: Request):
     """Qualifica os leads MARCADOS na Base, SÍNCRONO e com resumo do que achou:
     - tipo='canais': raspa o site → e-mail/Instagram/WhatsApp (grátis).
+    - tipo='cnpj': acha o CNPJ por nome+cidade na CNPJá (paga, só gestão) — só aplica
+      quando o candidato é único; achando mais de um, fica pra escolher na Ficha.
     - tipo='decisor': acha o dono via Credify pelo CNPJ (paga, só gestão, pula quem já tem).
     Lê o form manual (fetch/urlencoded com 'ids' repetido)."""
     ctx, redir = _acesso(request)
@@ -3947,6 +3977,38 @@ async def prospeccao_base_enriquecer(request: Request):
     CAP = 20                               # teto por rodada (não travar o request)
     resto = max(0, len(pids) - CAP)
     pids = pids[:CAP]
+
+    if tipo == "cnpj":
+        if not ctx["gerencia"]:
+            return JSONResponse({"ok": False, "erro": "Só o dono/gestor busca CNPJ (consulta paga)."})
+        if not fontes.tem_chave_cnpja():
+            return JSONResponse({"ok": False, "erro": "Busca por nome precisa da CNPJá (CNPJA_TOKEN no "
+                                 "Render). Sem ela só dá pra colar o CNPJ direto na Ficha do lead."})
+        with pool.connection() as c:
+            sel = c.execute(
+                "select id, empresa, cidade, uf from prospeccao where conta_id=%s and id = any(%s)"
+                " and coalesce(nullif(trim(empresa),''),'') <> '' and coalesce(cnpj,'')=''",
+                (conta_id, pids)).fetchall()
+        _INICIO = time.monotonic()
+        achou, ambiguo, sem = 0, 0, 0
+        processados = 0
+        for pid, nome, cidade_l, uf_l in sel:
+            if time.monotonic() - _INICIO > 45:
+                break
+            processados += 1
+            try:
+                r = _buscar_aplicar_cnpj_um(pool, conta_id, pid, nome, cidade_l, uf_l)
+            except Exception:  # noqa: BLE001
+                r = "sem"
+            if r == "achou":
+                achou += 1
+            elif r == "ambiguo":
+                ambiguo += 1
+            else:
+                sem += 1
+        resto += len(sel) - processados
+        return JSONResponse({"ok": True, "tipo": "cnpj", "n": processados, "achou": achou,
+                             "ambiguo": ambiguo, "sem": sem, "resto": resto})
 
     if tipo == "decisor":
         if not ctx["gerencia"]:
@@ -4679,6 +4741,7 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="mut" style="font-size:.8rem"><b style="color:var(--txt)" id="base-sel-n">0</b> marcado(s) · {{ leads|length }} na página{% if leads|length>=300 %} (máx 300){% endif %}</div>
       <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
         <button type="button" class="pbtn ghost" onclick="baseEnriquecer('canais')" title="Raspa o site dos marcados e acha e-mail / Instagram / WhatsApp (grátis)">🔎 Enriquecer canais</button>
+        {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseEnriquecer('cnpj')" title="Acha o CNPJ dos marcados sem CNPJ ainda, por nome + cidade (CNPJá) — consulta paga. Só aplica quando o resultado é inequívoco; achou mais de um, fica pra você escolher na Ficha">🏢 Buscar CNPJ</button>{% endif %}
         {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseEnriquecer('decisor')" title="Acha o dono dos marcados na Credify: por CNPJ (sócio) ou pelo telefone do Google (titular/dono) — consulta paga">🎯 Buscar decisor</button>{% endif %}
         {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseExplorium()" title="Teste de conexão com a Explorium (Vibe) no lead marcado">🔮 Explorium (teste)</button>{% endif %}
         <span style="width:1px;height:24px;background:var(--borda);margin:0 .15rem"></span>
@@ -4794,14 +4857,18 @@ function baseEnriquecer(tipo){
   var ids=baseChecked();
   if(!ids.length){alert('Marque ao menos um contato pra enriquecer.');return;}
   if(tipo==='decisor' && !confirm('Buscar o decisor de '+ids.length+' lead(s) na Credify?\\nÉ consulta paga — usa o CNPJ (sócio) OU o telefone (titular/dono) e pula quem já tem decisor.'))return;
+  if(tipo==='cnpj' && !confirm('Buscar o CNPJ de '+ids.length+' lead(s) sem CNPJ ainda, por nome + cidade (CNPJá)?\\nÉ consulta paga — só aplica quando acha exatamente 1 candidato; achando mais de um, fica pra você escolher na Ficha.'))return;
   var body=new URLSearchParams();ids.forEach(function(i){body.append('ids',i);});body.append('tipo',tipo);
-  capToast(tipo==='decisor'?'Buscando decisores… (alguns segundos)':'Verificando os sites… (alguns segundos)');
+  capToast(tipo==='decisor'?'Buscando decisores… (alguns segundos)':tipo==='cnpj'?'Buscando CNPJ… (alguns segundos)':'Verificando os sites… (alguns segundos)');
   fetch('/painel/prospeccao/base/qualificar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body}).then(function(r){return r.json();}).then(function(d){
     if(!d.ok){alert('⚠️ '+(d.erro||'Não consegui rodar.'));return;}
     var msg;
     if(tipo==='decisor'){
       if(!d.n){alert('Nenhum lead marcado é elegível pra decisor.'+(d.sem_cnpj?('\\n'+d.sem_cnpj+' sem CNPJ nem telefone.'):'')+'\\n(Também pula quem já tem decisor.)');return;}
       msg='🎯 '+d.n+' consultado(s) · '+d.achou+' decisor(es) encontrado(s)'+(d.sem?(' · '+d.sem+' sem quadro/telefone na Credify'):'');
+    }else if(tipo==='cnpj'){
+      if(!d.n){alert('Nenhum lead marcado precisa de CNPJ (já têm ou estão sem nome).');return;}
+      msg='🏢 '+d.n+' consultado(s) · '+d.achou+' CNPJ encontrado(s) e aplicado(s)'+(d.ambiguo?(' · '+d.ambiguo+' com mais de 1 candidato (escolha na Ficha)'):'')+(d.sem?(' · '+d.sem+' não achou'):'')+'\\n(CNPJ achado destrava o 🎯 Buscar decisor)';
     }else{
       if(!d.n){alert('Nenhum lead marcado tem site pra raspar'+(d.sem_site?(' ('+d.sem_site+' sem site)'):'')+'.');return;}
       msg='🔎 '+d.n+' site(s) verificado(s) · '+d.com_email+' com e-mail · '+d.com_wa+' com WhatsApp · '+d.com_cnpj+' com CNPJ'+(d.sem?(' · '+d.sem+' sem nada'):'')+'\\n(CNPJ achado destrava o 🎯 Buscar decisor)';

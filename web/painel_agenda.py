@@ -871,7 +871,7 @@ function abrirDia(iso){
       + (e.descricao?'<div class="dev-desc">'+e.descricao+'</div>':'')
       + '</div></div>';
   });
-  html += '<button class="daybox-cta" type="button" onclick="agNovoNoDia(\''+iso+'\')">＋ Marcar novo compromisso nesse dia</button>';
+  html += '<button class="daybox-cta" type="button" onclick="agNovoNoDia(\\''+iso+'\\')">＋ Marcar novo compromisso nesse dia</button>';
   box.innerHTML = html;
   document.getElementById('dayOverlay').classList.add('show');
 }
@@ -1044,7 +1044,7 @@ function rmGuest(b){var box=document.getElementById('guests');var row=b.closest(
       var data = document.getElementById('fData').value, hora = document.getElementById('fHora').value;
       var quando = (data ? data.split('-').reverse().join('/') : '') + (hora ? ' ' + hora : '');
       var frase = fraseEnvolvidos();
-      var msgTxt = titulo + '\n' + quando + ' — ' + p.nome + '\n📍 ' + mapa + (frase ? '\n👥 Com: ' + frase : '');
+      var msgTxt = titulo + '\\n' + quando + ' — ' + p.nome + '\\n📍 ' + mapa + (frase ? '\\n👥 Com: ' + frase : '');
       pop.innerHTML = '';
       var h4 = document.createElement('h4'); h4.textContent = '📍 Enviar pro cliente';
       var box = document.createElement('div'); box.className = 'pop-msg'; box.textContent = msgTxt;

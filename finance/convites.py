@@ -271,3 +271,31 @@ def enviar_convite_whatsapp(pool, token: str) -> dict:
     variaveis = {"1": ev["titulo"], "2": ag.fmt_hora(ev)}
     with pool.connection() as conn:
         return wout.enviar_template(conn, c["conta_id"], c["contato"], sid, variaveis)
+
+
+# ---- Aviso "seu compromisso começa em breve" pros CONFIRMADOS (opt-in) --------
+
+def template_lembrete_configurado() -> bool:
+    """True quando dá pra o Zaq avisar o convidado CONFIRMADO antes do compromisso
+    (mesma mecânica do convite, template SEPARADO — o texto é diferente, precisa
+    da própria aprovação no Twilio/Meta). Enquanto for False, o lembrete some
+    silenciosamente pro convidado (o dono continua recebendo pelo Telegram)."""
+    from . import whatsapp_twilio as wa
+    return bool(os.environ.get("TWILIO_TMPL_LEMBRETE_SID") and wa.configurado())
+
+
+def enviar_lembrete_whatsapp(pool, conta_id: int, contato: str, titulo: str,
+                             hora: str, faltam_min: int) -> dict:
+    """Dispara o template de 'aviso antes' pro convidado CONFIRMADO, mesmo padrão
+    do convite (fora da janela de 24h, pelo número da empresa). Variáveis, NA
+    ORDEM combinada com o template aprovado: {{1}} título · {{2}} horário ·
+    {{3}} minutos que faltam. Tolerante — nunca levanta."""
+    from . import whatsapp_out as wout
+    if not (contato or "").strip():
+        return {"ok": False, "erro": "sem_numero"}
+    sid = os.environ.get("TWILIO_TMPL_LEMBRETE_SID")
+    if not sid:
+        return {"ok": False, "erro": "sem_template"}
+    variaveis = {"1": titulo, "2": hora, "3": str(faltam_min)}
+    with pool.connection() as conn:
+        return wout.enviar_template(conn, conta_id, contato, sid, variaveis)

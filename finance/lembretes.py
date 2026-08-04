@@ -16,6 +16,7 @@ import logging
 from datetime import timedelta
 
 from . import agenda as ag
+from . import convites as cv
 from . import notificar
 
 _log = logging.getLogger("openclaw.lembretes")
@@ -80,16 +81,38 @@ def _resumo_do_dia(pool, conta_id: int, agora) -> int:
 
 
 def _avisos_proximos(pool, conta_id: int, antes_min: int, agora) -> int:
-    """Avisa dos eventos que começam de agora até daqui a `antes_min` minutos."""
+    """Avisa dos eventos que começam de agora até daqui a `antes_min` minutos —
+    pro dono (Telegram, sempre) e pros convidados CONFIRMADOS (WhatsApp, só se a
+    conta tiver o template de lembrete aprovado — ver convites.template_lembrete_
+    configurado; enquanto não tiver, essa parte só não faz nada)."""
     eventos = ag.listar_eventos(pool, conta_id, agora, agora + timedelta(minutes=antes_min))
     n = 0
+    tem_template = cv.template_lembrete_configurado()
     for ev in eventos:
-        if not _primeira_vez(pool, conta_id, "aviso", f"evt:{ev['id']}"):
-            continue
         h = ev["inicio"].astimezone(ag.BRT).strftime("%H:%M")
         faltam = max(0, int((ev["inicio"] - agora).total_seconds() // 60))
-        loc = f"\n📍 {ev['local']}" if ev.get("local") else ""
-        txt = f"⏰ *Daqui a pouco* (em ~{faltam} min): *{ev['titulo']}* às {h}.{loc}"
-        if notificar.enviar_para_dono(pool, conta_id, txt):
+        if _primeira_vez(pool, conta_id, "aviso", f"evt:{ev['id']}"):
+            loc = f"\n📍 {ev['local']}" if ev.get("local") else ""
+            txt = f"⏰ *Daqui a pouco* (em ~{faltam} min): *{ev['titulo']}* às {h}.{loc}"
+            if notificar.enviar_para_dono(pool, conta_id, txt):
+                n += 1
+        if tem_template:
+            n += _avisar_convidados_confirmados(pool, conta_id, ev, h, faltam)
+    return n
+
+
+def _avisar_convidados_confirmados(pool, conta_id: int, ev: dict, hora: str,
+                                   faltam: int) -> int:
+    """Manda o mesmo 'tá chegando a hora' pra quem CONFIRMOU presença nesse evento
+    — dedup por convidado (não pelo evento, já consumido pelo aviso do dono)."""
+    n = 0
+    convidados = cv.por_evento(pool, conta_id, [ev["id"]]).get(ev["id"], [])
+    for g in convidados:
+        if g["status"] != "confirmado" or not (g.get("contato") or "").strip():
+            continue
+        if not _primeira_vez(pool, conta_id, "aviso_convidado", f"evt:{ev['id']}:conv:{g['id']}"):
+            continue
+        r = cv.enviar_lembrete_whatsapp(pool, conta_id, g["contato"], ev["titulo"], hora, faltam)
+        if r.get("ok"):
             n += 1
     return n

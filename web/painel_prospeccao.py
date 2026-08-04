@@ -380,8 +380,7 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
                    ca.cnome, ca.wa_status, ca.passo_atual, ca.ult_txt, ca.ult_raw,
                    (case when coalesce(p.decisor_nome,'')<>'' then 1 else 0 end),
                    (case when p.enriquecido_em is not null then 1 else 0 end),
-                   p.instagram, p.decisor_nome, p.decisor_telefone,
-                   (case when jsonb_typeof(p.decisor_telefones)='array' then jsonb_array_length(p.decisor_telefones) else 0 end)
+                   p.instagram, p.decisor_nome, p.decisor_telefone, p.decisor_telefones
               from prospeccao p
               left join lateral (
                  select cp.nome as cnome, a.wa_status, a.passo_atual, a.ultima_msg_em as ult_raw,
@@ -408,14 +407,20 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
                               (conta_id,)).fetchall() if ctx["gerencia"] else []
     dup_set = {r[0] for r in dup_rows}
     campanhas = [{"id": r[0], "nome": r[1], "status_rot": _STATUS_ROT_CP.get(r[2], r[2])} for r in camp_rows]
+    _TIPO_TEL = {"COMERCIAL": "Comercial", "RESIDENCIAL": "Residencial", "RECADO": "Recado", "CELULAR": "Celular"}
     leads = []
     for r in rows:
+        tels_raw = r[18] if isinstance(r[18], list) else []
+        dec_tels = [{"formatado": t.get("formatado") or "", "provavel": bool(t.get("provavel")),
+                     "whatsapp": bool(t.get("whatsapp")),
+                     "tipo_rot": _TIPO_TEL.get((t.get("tipo") or "").upper(), (t.get("tipo") or "").title())}
+                    for t in tels_raw if t.get("formatado")]
         leads.append({"id": r[0], "empresa": r[1], "segmento": r[2], "cidade": r[3], "uf": r[4],
                       "tem_wpp": bool(r[5] or r[7]), "tem_mail": bool(r[6]), "campanha": r[8],
                       "toque_wa": 1 if r[9] == "enviado" else 0, "toque_mail": int(r[10] or 0),
                       "ult": r[11], "tem_decisor": bool(r[13]), "verificado": bool(r[14]),
                       "whats": (r[5] or r[7] or ""), "email_v": (r[6] or ""), "insta": (r[15] or ""),
-                      "dec_nome": (r[16] or ""), "dec_tel": (r[17] or ""), "dec_ntel": int(r[18] or 0),
+                      "dec_nome": (r[16] or ""), "dec_tel": (r[17] or ""), "dec_tels": dec_tels,
                       "dup": ((r[1] or "").strip().lower() in dup_set)})
     metr = {"na_base": na_base, "com_wpp": com_wpp, "com_mail": com_mail, "em_camp": em_camp,
             "virou": virou, "n_dup": len(dup_set)}
@@ -4709,7 +4714,12 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
               {% if l.whats %}<div>💬 {{ l.whats }}</div>{% endif %}
               {% if l.email_v %}<div>✉️ {{ l.email_v }}</div>{% endif %}
               {% if l.insta %}<div class="mut">📷 {{ l.insta }}</div>{% endif %}
-              {% if l.tem_decisor %}<div style="color:var(--verde-claro)">🎯 {{ l.dec_nome or 'Decisor' }}{% if l.dec_tel %} · {{ l.dec_tel }}{% if l.dec_ntel > 1 %} <span class="mut">(+{{ l.dec_ntel - 1 }} nº)</span>{% endif %}{% else %} · <span class="mut">(sem telefone na Credify)</span>{% endif %}</div>{% endif %}
+              {% if l.tem_decisor %}<div style="color:var(--verde-claro)">🎯 {{ l.dec_nome or 'Decisor' }}
+                {% if l.dec_tels %}
+                  {% for t in l.dec_tels %}<div style="margin-top:.1rem">{{ t.formatado }}{% if t.provavel %} ⭐{% endif %}{% if t.whatsapp %} 💬{% endif %}{% if t.tipo_rot %} <span class="mut">· {{ t.tipo_rot }}</span>{% endif %}</div>{% endfor %}
+                {% elif l.dec_tel %} · {{ l.dec_tel }}
+                {% else %} · <span class="mut">(sem telefone na Credify)</span>{% endif %}
+              </div>{% endif %}
               {% if not l.whats and not l.email_v and not l.insta %}<span class="mut">{% if l.verificado %}✓ verificado · sem dados no site{% else %}—{% endif %}</span>{% endif %}
             </td>
             <td>{% if l.campanha %}<span class="bt-chip">{{ l.campanha }}</span>{% else %}<span class="mut">—</span>{% endif %}</td>

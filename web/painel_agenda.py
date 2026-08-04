@@ -248,11 +248,15 @@ def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
 
 # ================================================================ BUSCAR LOCAL
 @router.get("/painel/agenda/buscar-local")
-def agenda_buscar_local(request: Request, q: str = ""):
+def agenda_buscar_local(request: Request, q: str = "", lat: str = "", lng: str = ""):
     """Sugestões de endereço/lugar pro campo Local (autocomplete no form de novo
     compromisso). Reusa a mesma Google Places API já usada na prospecção — aqui
     sem cidade/segmento, é busca livre. Devolve endereço FORMATADO pelo Google
-    (o que faz o link do mapa depois ser exato, não uma busca por texto solto)."""
+    (o que faz o link do mapa depois ser exato, não uma busca por texto solto).
+
+    `lat`/`lng` (opcionais): posição do navegador, quando o usuário permite —
+    enviesa o ranking pro entorno, não restringe (long-distance ainda aparece
+    se o texto bater)."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "auth", "itens": []}, status_code=401)
@@ -262,7 +266,13 @@ def agenda_buscar_local(request: Request, q: str = ""):
     termo = (q or "").strip()
     if len(termo) < 2:
         return JSONResponse({"ok": True, "itens": []})
-    r = pf.buscar_places(termo, cidade="", max_resultados=6)
+    lat_f = lng_f = None
+    try:
+        if lat and lng:
+            lat_f, lng_f = float(lat), float(lng)
+    except ValueError:
+        pass
+    r = pf.buscar_places(termo, cidade="", max_resultados=6, lat=lat_f, lng=lng_f)
     if not r.get("ok"):
         return JSONResponse({"ok": False, "erro": r.get("erro"), "itens": []})
     itens = [{"nome": i["empresa"], "endereco": i["endereco"]}
@@ -973,6 +983,18 @@ function rmGuest(b){var box=document.getElementById('guests');var row=b.closest(
     return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(endereco);
   }
 
+  // Geolocalização: só pede no primeiro foco no campo (não no load da página,
+  // pra não estourar o popup de permissão sem contexto). Se negar/não suportar,
+  // segue sem — a busca continua igual a antes, só sem o bias de proximidade.
+  var geoCoords = null, geoPedido = false;
+  addrInput.addEventListener('focus', function(){
+    if(geoPedido || !navigator.geolocation) return;
+    geoPedido = true;
+    navigator.geolocation.getCurrentPosition(function(pos){
+      geoCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    }, function(){ /* negado ou indisponível: segue sem bias */ }, { timeout: 6000 });
+  });
+
   var timer = null;
   addrInput.addEventListener('input', function(){
     localHidden.value = addrInput.value;    // digitou solto -> já vale como local, igual antes
@@ -984,7 +1006,9 @@ function rmGuest(b){var box=document.getElementById('guests');var row=b.closest(
   });
 
   function buscar(termo){
-    fetch('/painel/agenda/buscar-local?q=' + encodeURIComponent(termo))
+    var url = '/painel/agenda/buscar-local?q=' + encodeURIComponent(termo);
+    if(geoCoords) url += '&lat=' + geoCoords.lat + '&lng=' + geoCoords.lng;
+    fetch(url)
       .then(function(r){ return r.json(); })
       .then(function(d){
         if(addrInput.value.trim() !== termo) return;   // resposta atrasada de uma busca antiga

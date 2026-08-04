@@ -59,11 +59,16 @@ def tem_chave_places() -> bool:
 
 
 def buscar_places(termo: str, cidade: str, api_key: str | None = None,
-                  max_resultados: int = 60, bairro: str = "", rua: str = "") -> dict:
+                  max_resultados: int = 60, bairro: str = "", rua: str = "",
+                  lat: float | None = None, lng: float | None = None) -> dict:
     """Text Search (Places API New). Devolve {"ok", "itens": [...], "erro"}.
 
     `bairro` e `rua` são opcionais: refinam a busca por região (entram na frase da
     consulta, do mais específico pro mais geral: rua, bairro, cidade).
+
+    `lat`/`lng` (opcionais) enviesam o ranking pro entorno do ponto — é um "bias"
+    do Google, não uma restrição: um lugar fora do raio ainda pode aparecer se o
+    texto bater melhor, só perde prioridade pros mais pertinho.
 
     Paginação: o Text Search devolve no máximo 20 por página, mas manda um
     `nextPageToken` quando há mais. A gente segue as páginas (passando o token no
@@ -106,6 +111,9 @@ def buscar_places(termo: str, cidade: str, api_key: str | None = None,
     local = ", ".join(p for p in (rua, bairro, cidade) if p)
     consulta = f"{termo} em {local}" if local else termo
     base_body = {"textQuery": consulta, "languageCode": "pt-BR", "regionCode": "BR"}
+    if lat is not None and lng is not None:
+        base_body["locationBias"] = {"circle": {
+            "center": {"latitude": lat, "longitude": lng}, "radius": 15000.0}}
 
     itens: list[dict] = []
     vistos: set[str] = set()

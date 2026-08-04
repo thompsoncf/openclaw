@@ -24,6 +24,7 @@ router = APIRouter()
 MESES = ["", "janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho",
          "agosto", "setembro", "outubro", "novembro", "dezembro"]
 DIAS_SEM = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
+DIAS_SEM_EXT = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"]
 TIPO_ROT = {"pessoal": "Pessoal", "empresa": "Empresa", "fornecedor": "Fornecedor"}
 
 
@@ -77,6 +78,29 @@ def _monta_semanas(ano: int, mes: int, eventos: list[dict], hoje: date) -> list[
             })
         semanas.append(linha)
     return semanas
+
+
+def _titulo_dia(d: date) -> str:
+    """'Terça, 4 de agosto' — pro cabeçalho da caixa do dia."""
+    idx = (d.weekday() + 1) % 7   # Calendar usa firstweekday=6 (domingo) -> 0=Dom
+    return f"{DIAS_SEM_EXT[idx]}, {d.day} de {MESES[d.month]}"
+
+
+def _eventos_por_dia(eventos: list[dict]) -> dict[str, dict]:
+    """{iso_do_dia: {titulo, eventos:[...]}} com os detalhes completos (local,
+    descrição) — alimenta a caixa do dia no JS sem precisar de outra requisição
+    (os eventos do mês já vieram pro calendário)."""
+    out: dict[str, dict] = {}
+    for e in sorted(eventos, key=lambda ev: ev["inicio"]):
+        d = e["inicio"].astimezone(ag.BRT).date()
+        iso = d.isoformat()
+        bucket = out.setdefault(iso, {"titulo": _titulo_dia(d), "eventos": []})
+        bucket["eventos"].append({
+            "id": e["id"], "hora": e["inicio"].astimezone(ag.BRT).strftime("%H:%M"),
+            "titulo": e["titulo"], "tipo": e["tipo"], "tipo_rot": TIPO_ROT.get(e["tipo"], "Pessoal"),
+            "local": e.get("local") or "", "descricao": e.get("descricao") or "",
+        })
+    return out
 
 
 def _feed_url(request: Request, token: str) -> str:
@@ -149,6 +173,7 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
     hoje = ag.agora_brt().date()
     eventos = ag.eventos_mes(pool, conta_id, ano, mes)
     semanas = _monta_semanas(ano, mes, eventos, hoje)
+    eventos_dia = _eventos_por_dia(eventos)
     proximos = ag.proximos(pool, conta_id, limite=8)
     convidados = cv.por_evento(pool, conta_id, [e["id"] for e in proximos])
     for ev in proximos:
@@ -165,7 +190,7 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
     return _render("agenda", request, titulo="Agenda", secao_ativa="agenda",
                    ano=ano, mes=mes, mes_nome=MESES[mes], dias_sem=DIAS_SEM,
                    semanas=semanas, proximos=proximos, tipo_rot=TIPO_ROT,
-                   status_rot=cv.STATUS_ROT,
+                   eventos_dia=eventos_dia, status_rot=cv.STATUS_ROT,
                    mes_prev=_vizinho(ano, mes, -1), mes_next=_vizinho(ano, mes, +1),
                    mes_hoje=f"{hoje.year:04d}-{hoje.month:02d}",
                    hoje_iso=hoje.isoformat(), abrir_novo=(novo == "1"),
@@ -401,22 +426,21 @@ _CSS = """<style>
 .cal-hd,.cal-wk{display:grid;grid-template-columns:repeat(7,1fr)}
 .cal-hd{background:var(--card-2);border-bottom:1px solid var(--borda)}
 .cal-hd span{padding:9px 0;text-align:center;font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-mut);font-weight:700}
-.cal-cell{min-height:92px;border-right:1px solid var(--borda);border-bottom:1px solid var(--borda);padding:6px 6px 5px;display:flex;flex-direction:column;gap:3px}
+.cal-cell{height:78px;border-right:1px solid var(--borda);border-bottom:1px solid var(--borda);padding:6px 7px;display:flex;flex-direction:column;gap:5px}
 .cal-cell:nth-child(7n){border-right:0}
 .cal-wk:last-child .cal-cell{border-bottom:0}
 .cal-cell.fora{background:rgba(255,255,255,.012)}
 .cal-cell.fora .cal-num{color:#4a4a4c}
-.cal-num{font-size:.8rem;color:var(--txt-mut);font-variant-numeric:tabular-nums;align-self:flex-end;line-height:1}
-.cal-cell.hoje .cal-num{background:var(--verde);color:#04160e;font-weight:800;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center}
-.chip{font-size:.68rem;line-height:1.25;padding:2px 6px;border-radius:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-left:3px solid;background:var(--card-2)}
-.chip b{font-variant-numeric:tabular-nums;font-weight:700;opacity:.85;margin-right:3px}
-.t-pessoal{border-color:var(--verde-claro);color:#bfeeda}
-.t-empresa{border-color:#3987e5;color:#bcd8f6}
-.t-fornecedor{border-color:#e0a33e;color:#f0d9a6}
-.chip.t-pessoal{background:rgba(29,158,117,.12)}
-.chip.t-empresa{background:rgba(57,135,229,.12)}
-.chip.t-fornecedor{background:rgba(224,163,62,.12)}
-.cal-mais{font-size:.65rem;color:var(--txt-mut);padding-left:3px}
+.cal-head{display:flex;align-items:center;justify-content:space-between}
+.cal-num{font-size:.8rem;color:var(--txt-mut);font-variant-numeric:tabular-nums;line-height:1}
+.cal-cell.hoje .cal-num{background:var(--verde);color:#04160e;font-weight:800;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center}
+.cal-count{font-size:.62rem;font-weight:700;color:var(--txt-mut);background:var(--card-2);border:1px solid var(--borda);border-radius:20px;padding:0 6px;line-height:1.4}
+.cal-cell.tem-evento{cursor:pointer}
+.cal-cell.tem-evento:hover{background:var(--card-2)}
+.cal-cell.tem-evento:focus-visible{outline:2px solid var(--verde);outline-offset:-2px}
+.dots{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:auto}
+.dot{width:7px;height:7px;border-radius:50%;flex:0 0 7px}
+.dots .mais{font-size:.6rem;color:var(--txt-mut);margin-left:1px}
 /* próximos */
 .px{display:flex;flex-direction:column;gap:2px}
 .px-row{display:flex;align-items:flex-start;gap:11px;padding:9px 4px;border-bottom:1px solid var(--borda)}
@@ -512,6 +536,30 @@ _CSS = """<style>
 .cp-confirmado{background:rgba(29,158,117,.16);color:var(--verde-claro);border:1px solid var(--verde)}
 .cp-remarcar{background:rgba(57,135,229,.14);color:#bcd8f6;border:1px solid rgba(57,135,229,.4)}
 .cp-recusado{background:rgba(224,87,79,.14);color:#f0917f;border:1px solid rgba(224,87,79,.4)}
+/* caixa do dia (clique numa célula do calendário) */
+.day-overlay{position:fixed;inset:0;background:rgba(4,6,5,.6);display:flex;align-items:center;justify-content:center;padding:24px;z-index:60;opacity:0;pointer-events:none;transition:opacity .16s}
+.day-overlay.show{opacity:1;pointer-events:auto}
+.daybox{width:100%;max-width:420px;max-height:82vh;overflow-y:auto;background:var(--card);border:1px solid var(--borda);border-radius:16px;padding:20px;transform:translateY(8px);transition:transform .16s;box-shadow:0 24px 60px rgba(0,0,0,.5)}
+.day-overlay.show .daybox{transform:translateY(0)}
+.daybox-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:4px}
+.daybox-hd h3{font-size:1.02rem;margin:0;letter-spacing:-.005em;text-transform:capitalize;font-weight:700}
+.daybox-hd .x{background:transparent;border:1px solid var(--borda);color:var(--txt-mut);width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:.92rem;flex:0 0 28px}
+.daybox-hd .x:hover{border-color:var(--verde);color:var(--txt)}
+.daybox-sub{font-size:.78rem;color:var(--txt-mut);margin:0 0 14px}
+.dev{display:flex;gap:11px;padding:10px 0;border-bottom:1px solid var(--borda)}
+.dev:last-of-type{border-bottom:0;padding-bottom:2px}
+.dev-dot{width:8px;height:8px;border-radius:50%;margin-top:6px;flex:0 0 8px}
+.dev-body{flex:1;min-width:0}
+.dev-hora{font-size:.72rem;color:var(--txt-mut);font-variant-numeric:tabular-nums;font-weight:700}
+.dev-tt{font-size:.92rem;font-weight:600;margin-top:1px}
+.dev-meta{display:flex;flex-wrap:wrap;gap:8px;font-size:.76rem;color:var(--txt-mut);margin-top:4px}
+.dev-desc{font-size:.8rem;color:var(--txt-mut);margin-top:6px;line-height:1.45;background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:7px 9px}
+.tpill{font-size:.64rem;font-weight:700;padding:1px 7px;border-radius:20px;text-transform:uppercase;letter-spacing:.03em}
+.tp-pessoal{background:rgba(29,158,117,.16);color:var(--verde-claro)}
+.tp-empresa{background:rgba(57,135,229,.16);color:#bcd8f6}
+.tp-fornecedor{background:rgba(224,163,62,.16);color:#f0d9a6}
+.daybox-cta{display:block;width:100%;text-align:center;margin-top:14px;background:transparent;border:1px dashed var(--borda);color:var(--verde-claro);border-radius:9px;padding:.6rem;font-size:.82rem;font-weight:600;cursor:pointer}
+.daybox-cta:hover{border-color:var(--verde)}
 </style>"""
 
 _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
@@ -564,12 +612,18 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         {% for semana in semanas %}
         <div class="cal-wk">
           {% for c in semana %}
-          <div class="cal-cell{% if c.fora %} fora{% endif %}{% if c.hoje %} hoje{% endif %}">
-            <span class="cal-num">{{ c.dia }}</span>
-            {% for e in c.eventos[:3] %}
-            <span class="chip t-{{ e.tipo }}" data-ev="{{ e.id }}" title="{{ e.hora }} {{ e.titulo }}"><b>{{ e.hora }}</b>{{ e.titulo }}</span>
-            {% endfor %}
-            {% if c.eventos|length > 3 %}<span class="cal-mais">+{{ c.eventos|length - 3 }} mais</span>{% endif %}
+          <div class="cal-cell{% if c.fora %} fora{% endif %}{% if c.hoje %} hoje{% endif %}{% if c.eventos %} tem-evento{% endif %}"
+               {% if c.eventos %}data-iso="{{ c.iso }}" tabindex="0" role="button" aria-label="Ver os {{ c.eventos|length }} compromisso{{ 's' if c.eventos|length != 1 }} do dia {{ c.dia }}"{% endif %}>
+            <div class="cal-head">
+              <span class="cal-num">{{ c.dia }}</span>
+              {% if c.eventos|length > 1 %}<span class="cal-count">{{ c.eventos|length }}</span>{% endif %}
+            </div>
+            {% if c.eventos %}
+            <div class="dots">
+              {% for e in c.eventos[:4] %}<span class="dot d-{{ e.tipo }}" data-ev="{{ e.id }}"></span>{% endfor %}
+              {% if c.eventos|length > 4 %}<span class="mais">+{{ c.eventos|length - 4 }}</span>{% endif %}
+            </div>
+            {% endif %}
           </div>
           {% endfor %}
         </div>
@@ -700,8 +754,81 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       </div>
     </div>
   </div>
+
+  <!-- caixa do dia (abre ao clicar numa célula com compromisso) -->
+  <div class="day-overlay" id="dayOverlay">
+    <div class="daybox" id="daybox"></div>
+  </div>
 </div>
 <script>
+var EVENTOS_DIA = {{ eventos_dia|tojson }};
+var TPILL = {pessoal:'Pessoal', empresa:'Empresa', fornecedor:'Fornecedor'};
+
+function abrirDia(iso){
+  var d = EVENTOS_DIA[iso];
+  if(!d) return;
+  var box = document.getElementById('daybox');
+  var html = '<div class="daybox-hd"><h3>'+d.titulo+'</h3>'
+    + '<button class="x" type="button" onclick="fecharDia()" aria-label="Fechar">✕</button></div>'
+    + '<p class="daybox-sub">'+d.eventos.length+(d.eventos.length===1?' compromisso':' compromissos')+'</p>';
+  d.eventos.forEach(function(e){
+    html += '<div class="dev" data-ev="'+e.id+'"><div class="dev-dot d-'+e.tipo+'"></div><div class="dev-body">'
+      + '<div class="dev-hora">'+e.hora+'</div>'
+      + '<div class="dev-tt">'+e.titulo+'</div>'
+      + '<div class="dev-meta"><span class="tpill tp-'+e.tipo+'">'+(TPILL[e.tipo]||e.tipo_rot)+'</span>'
+      + (e.local?'<span>📍 '+e.local+'</span>':'')+'</div>'
+      + (e.descricao?'<div class="dev-desc">'+e.descricao+'</div>':'')
+      + '</div></div>';
+  });
+  html += '<button class="daybox-cta" type="button" onclick="agNovoNoDia(\''+iso+'\')">＋ Marcar novo compromisso nesse dia</button>';
+  box.innerHTML = html;
+  document.getElementById('dayOverlay').classList.add('show');
+}
+function fecharDia(){ document.getElementById('dayOverlay').classList.remove('show'); }
+// Tira o evento cancelado do calendário (ponto na célula + caixa do dia se estiver
+// aberta) e do EVENTOS_DIA em memória, sem precisar recarregar a página.
+function removerEventoDoCalendario(id){
+  document.querySelectorAll('.dot[data-ev="'+id+'"]').forEach(function(dot){
+    var cel = dot.closest('.cal-cell');
+    dot.remove();
+    if(!cel) return;
+    var rest = cel.querySelectorAll('.dot').length;
+    var count = cel.querySelector('.cal-count');
+    if(rest === 0){
+      cel.classList.remove('tem-evento');
+      cel.removeAttribute('tabindex'); cel.removeAttribute('role'); cel.removeAttribute('data-iso');
+      var dots = cel.querySelector('.dots'); if(dots) dots.remove();
+      if(count) count.remove();
+    } else if(count){
+      if(rest > 1) count.textContent = rest; else count.remove();
+    }
+  });
+  for(var iso in EVENTOS_DIA){
+    EVENTOS_DIA[iso].eventos = EVENTOS_DIA[iso].eventos.filter(function(e){ return String(e.id) !== String(id); });
+    if(!EVENTOS_DIA[iso].eventos.length) delete EVENTOS_DIA[iso];
+  }
+  var devRow = document.querySelector('#daybox .dev[data-ev="'+id+'"]');
+  if(devRow){
+    devRow.remove();
+    var restBox = document.querySelectorAll('#daybox .dev').length;
+    if(!restBox){ fecharDia(); return; }
+    var sub = document.querySelector('#daybox .daybox-sub');
+    if(sub) sub.textContent = restBox + (restBox===1?' compromisso':' compromissos');
+  }
+}
+function agNovoNoDia(iso){
+  fecharDia();
+  agNovo(true);
+  var i = document.querySelector('#novo input[name=data]');
+  if(i) i.value = iso;
+}
+document.querySelectorAll('.cal-cell.tem-evento').forEach(function(cel){
+  cel.addEventListener('click', function(){ abrirDia(cel.getAttribute('data-iso')); });
+  cel.addEventListener('keydown', function(ev){ if(ev.key==='Enter'||ev.key===' '){ ev.preventDefault(); abrirDia(cel.getAttribute('data-iso')); } });
+});
+document.getElementById('dayOverlay').addEventListener('click', function(ev){ if(ev.target.id==='dayOverlay') fecharDia(); });
+document.addEventListener('keydown', function(ev){ if(ev.key==='Escape') fecharDia(); });
+
 function agNovo(v){var n=document.getElementById('novo');if(n){n.style.display='';n.scrollIntoView({behavior:'smooth',block:'center'});var i=n.querySelector('input[name=titulo]');if(i)setTimeout(function(){i.focus()},300);}return false;}
 function agCopiar(){var i=document.getElementById('feedUrl');if(!i)return;i.select();try{document.execCommand('copy');}catch(e){}if(navigator.clipboard)navigator.clipboard.writeText(i.value);var b=event.target;var t=b.textContent;b.textContent='Copiado ✓';setTimeout(function(){b.textContent=t},1600);}
 function cpRow(b){var row=b.closest('.share-row');if(!row)return;var txt=row.getAttribute('data-link')||'';if(navigator.clipboard)navigator.clipboard.writeText(txt);var t=b.textContent;b.textContent='✓';setTimeout(function(){b.textContent=t},1400);}
@@ -756,7 +883,7 @@ document.addEventListener('submit', function(ev){
         if(d && d.ok){
           var id=(f.querySelector('[name=evento_id]')||{}).value;
           var row=f.closest('.px-row'); if(row){ row.classList.add('saindo'); setTimeout(function(){ row.remove(); zaqVazioProximos(); },200); }
-          if(id){ document.querySelectorAll('.chip[data-ev="'+id+'"]').forEach(function(x){ x.remove(); }); }
+          if(id) removerEventoDoCalendario(id);
           zaqToast('Compromisso cancelado.');
         } else { restore(); zaqToast('Não consegui cancelar.', false); }
       } else {   // enviar convite

@@ -157,7 +157,7 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
                       p.ultimo_contato_em, p.proximo_contato_em, p.vendedor_id,
                       m.nome, p.orcamento_id, p.tem_site, p.maps_url, p.receita,
                       p.site_url, p.decisor_nome, p.decisor_cargo, p.decisor_telefone,
-                      p.decisor_whatsapp, p.decisor_em, p.decisor_telefones
+                      p.decisor_whatsapp, p.decisor_em, p.decisor_telefones, p.decisor_email
                  from prospeccao p
                  left join membros m on m.id = p.vendedor_id
                 where p.id=%s and p.conta_id=%s""", (alvo_id, conta_id)).fetchone()
@@ -169,7 +169,7 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
             "ultimo_contato_em", "proximo_contato_em", "vendedor_id", "vendedor_nome",
             "orcamento_id", "tem_site", "maps_url", "receita", "site_url",
             "decisor_nome", "decisor_cargo", "decisor_telefone", "decisor_whatsapp", "decisor_em",
-            "decisor_telefones"]
+            "decisor_telefones", "decisor_email"]
     d = dict(zip(cols, r))
     d["zap_link"] = _zap_link(d["whatsapp"] or d["telefone"])
     d["insta_url"] = _prospec_inbound.normalizar_instagram(d.get("instagram") or "")
@@ -389,7 +389,8 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
                    ca.cnome, ca.wa_status, ca.passo_atual, ca.ult_txt, ca.ult_raw,
                    (case when coalesce(p.decisor_nome,'')<>'' then 1 else 0 end),
                    (case when p.enriquecido_em is not null then 1 else 0 end),
-                   p.instagram, p.decisor_nome, p.decisor_telefone, p.decisor_telefones, p.cnpj
+                   p.instagram, p.decisor_nome, p.decisor_telefone, p.decisor_telefones, p.cnpj,
+                   p.decisor_email
               from prospeccao p
               left join lateral (
                  select cp.nome as cnome, a.wa_status, a.passo_atual, a.ultima_msg_em as ult_raw,
@@ -446,6 +447,7 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
                       "whats": (r[5] or r[7] or ""), "email_v": (r[6] or ""), "insta": (r[15] or ""),
                       "dec_nome": (r[16] or ""), "dec_tel": (r[17] or ""), "dec_tels": dec_tels,
                       "dec_tels_visiveis": dec_tels_visiveis, "dec_tels_ocultos": dec_tels_ocultos,
+                      "dec_email": (r[20] or ""),
                       "dup": ((r[1] or "").strip().lower() in dup_set),
                       "cnpj": (_fmt_cnpj(r[19]) if r[19] else "")})
     metr = {"na_base": na_base, "com_wpp": com_wpp, "com_mail": com_mail, "em_camp": em_camp,
@@ -3965,10 +3967,11 @@ def _enriquecer_decisor_um(pool, conta_id, aid) -> bool:
     with pool.connection() as c:
         c.execute(
             """update prospeccao set decisor_nome=%s, decisor_cargo=%s, decisor_telefone=%s,
-                 decisor_whatsapp=%s, decisor_telefones=%s::jsonb, decisor_em=now(), atualizado_em=now()
+                 decisor_whatsapp=%s, decisor_telefones=%s::jsonb, decisor_email=coalesce(%s,decisor_email),
+                 decisor_em=now(), atualizado_em=now()
                where id=%s and conta_id=%s""",
             (nome, r.get("decisor_qualificacao"), r.get("decisor_telefone"),
-             bool(r.get("decisor_whatsapp")), json.dumps(tels), aid, conta_id))
+             bool(r.get("decisor_whatsapp")), json.dumps(tels), r.get("decisor_email"), aid, conta_id))
         c.commit()
     return True
 
@@ -4178,14 +4181,17 @@ def prospeccao_decisor_credify(request: Request, alvo_id: int):
     with pool.connection() as c:
         c.execute(
             """update prospeccao set decisor_nome=%s, decisor_cargo=%s, decisor_telefone=%s,
-                 decisor_whatsapp=%s, decisor_telefones=%s::jsonb, decisor_em=now(), atualizado_em=now()
+                 decisor_whatsapp=%s, decisor_telefones=%s::jsonb, decisor_email=coalesce(%s,decisor_email),
+                 decisor_em=now(), atualizado_em=now()
                where id=%s and conta_id=%s""",
             (nome, r.get("decisor_qualificacao"), r.get("decisor_telefone"),
-             bool(r.get("decisor_whatsapp")), json.dumps(tels), alvo_id, ctx["conta_id"]))
+             bool(r.get("decisor_whatsapp")), json.dumps(tels), r.get("decisor_email"),
+             alvo_id, ctx["conta_id"]))
         c.commit()
     return JSONResponse({"ok": True, "nome": nome, "cargo": r.get("decisor_qualificacao"),
                          "telefone": r.get("decisor_telefone"), "origem": r.get("origem", "cnpj"),
                          "whatsapp": bool(r.get("decisor_whatsapp")),
+                         "email": r.get("decisor_email"),
                          "n_telefones": len(tels),
                          "sem_telefone": not tels})
 
@@ -4864,6 +4870,7 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
                   {% endif %}
                 {% elif l.dec_tel %} · {{ l.dec_tel }}
                 {% else %} · <span class="mut">(sem telefone na Credify)</span>{% endif %}
+                {% if l.dec_email %}<div class="mut" style="margin-top:.1rem">📧 {{ l.dec_email }} <span class="mut">· pessoal</span></div>{% endif %}
               </div>{% endif %}
               {% if not l.whats and not l.email_v and not l.insta %}<span class="mut">{% if l.verificado %}✓ verificado · sem dados no site{% else %}—{% endif %}</span>{% endif %}
             </td>
@@ -5486,6 +5493,7 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         if(!d.ok){if(m){m.textContent=d.erro||'Não consegui.';m.style.color='#e0a33e';}return;}
         var msg='Decisor: '+d.nome+(d.cargo?(' ('+d.cargo+')'):'');
         msg+=d.n_telefones?(' · '+d.n_telefones+' telefone(s)'):' · telefone não liberado na sua conta Credify';
+        msg+=d.email?(' · 📧 '+d.email):'';
         if(m){m.textContent=msg+' — recarregando…';m.style.color='var(--verde-claro)';}
         setTimeout(function(){location.reload();},1200);}).catch(function(){if(b){b.disabled=false;b.textContent=t;}if(m){m.textContent='Falha de rede.';m.style.color='#e0a33e';}});}
     function enrqLead(id){var b=document.getElementById('enrqf-btn'),m=document.getElementById('enrqf-msg');if(b){b.disabled=true;b.textContent='Verificando…';}if(m)m.textContent='Raspando o site…';
@@ -5553,6 +5561,7 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
               {% if a.decisor_tel_link %} · <a href="{{ a.decisor_tel_link }}" style="color:var(--verde-claro)">ligar</a>{% endif %}
               {% if a.decisor_zap %} · <a href="{{ a.decisor_zap }}" target="_blank" rel="noopener" style="color:#3ddc84">WhatsApp</a>{% endif %}
             {% else %}<br><span class="mut" style="font-size:.78rem">telefone indisponível (consulta de telefone não liberada na Credify)</span>{% endif %}
+            {% if a.decisor_email %}<div style="margin-top:.3rem">📧 <a href="mailto:{{ a.decisor_email }}" style="color:var(--verde-claro)">{{ a.decisor_email }}</a> <span class="mut" style="font-size:.74rem">· e-mail pessoal</span></div>{% endif %}
           </span>
         </div>
         {% endif %}

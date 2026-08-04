@@ -17,6 +17,8 @@ Config (env, no Render):
   CREDIFY_CLIENT_SECRET      (a "Senha")
   CREDIFY_ID_QS              (IdConsulta do "Quadro Societário"; default 567)
   CREDIFY_ID_TEL             (IdConsulta do "Telefone por CPF"; default 576)
+  CREDIFY_ID_EMAIL           (IdConsulta do "Pesquisa Email PF"; default 359 — achado
+                               no catálogo da conta, R$0,36/consulta)
   CREDIFY_BASE_URL           (opcional; default https://api.credify.com.br)
 
 Contrato (confirmado na referência): o corpo dos endpoints de DADOS é aninhado —
@@ -98,6 +100,16 @@ def _id_telrev() -> str:
 
 def _id_tel() -> str:
     return (os.environ.get("CREDIFY_ID_TEL") or _ID_TEL_PADRAO).strip()
+
+
+_ID_EMAIL_PADRAO = "359"  # 'Pesquisa Email PF' — achado no catálogo da conta (R$0,36)
+
+
+def _id_email() -> str:
+    # NÃO confirmado num teste real ainda (diferente de QS/TEL/TELREV acima) — só
+    # temos o IdConsulta do catálogo. O caminho HTTP (/pfemailcpf) segue o mesmo
+    # padrão de /pftelefonecpf; se a Credify usar outro, ajusta aqui.
+    return (os.environ.get("CREDIFY_ID_EMAIL") or _ID_EMAIL_PADRAO).strip()
 
 
 def _corpo_consulta(id_consulta: str, documento: str, tipo_pessoa: str | None = None) -> dict:
@@ -349,6 +361,39 @@ def telefones_por_cpf(cpf: str) -> list[dict]:
     return out
 
 
+_EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
+
+
+def emails_por_cpf(cpf: str) -> list[dict]:
+    """CPF -> lista de e-mails PESSOAIS [{email, tipo}]. [] em falha.
+
+    Envelope: POST /pfemailcpf {"Consulta":{IdConsulta, CpfCnpj, TipoPessoa:"F"}}.
+    IdConsulta = CREDIFY_ID_EMAIL (default 359, 'Pesquisa Email PF' no catálogo).
+
+    AINDA NÃO TESTADO contra a API de verdade (caminho/nomes de campo seguem o
+    mesmo padrão de telefones_por_cpf, mas a Credify pode divergir aqui) — se
+    voltar sempre [] mesmo em CPF que deveria ter e-mail, é o 1º lugar pra
+    conferir (o caminho HTTP ou os nomes tentados em _pega abaixo)."""
+    d = _so_digitos(cpf)
+    if len(d) != 11:
+        return []
+    try:
+        j = _post("/pfemailcpf", _corpo_consulta(_id_email(), d, "F"))
+    except CredifyErro:
+        return []
+    if not _codigo_ok(j):
+        return []
+    bloco = _pega(_resposta(j), "EMAILS", "emails", "EMAIL", default=None)
+    out, vistos = [], set()
+    for e in _registros(bloco):
+        email = str(_pega(e, "EMAIL", "email", "endereco", default="") or "").strip().lower()
+        if not _EMAIL_RE.match(email) or email in vistos:
+            continue
+        vistos.add(email)
+        out.append({"email": email, "tipo": _pega(e, "TIPO_EMAIL", "tipo", "type", default=None)})
+    return out
+
+
 # ---------- telefone REVERSO: número -> titular ----------
 
 def _titulares(bloco) -> list[dict]:
@@ -430,10 +475,10 @@ def _escolher_decisor(socios: list[dict]) -> dict | None:
 
 def decisor_com_telefone(cnpj: str) -> dict:
     """CNPJ -> {ok, decisor_nome, decisor_qualificacao, decisor_telefone,
-    decisor_whatsapp, telefones}. Best-effort: em falha, {"ok": False, "erro"}.
+    decisor_whatsapp, decisor_email, telefones}. Best-effort: em falha, {"ok": False, "erro"}.
 
-    NÃO persiste o CPF (dado sensível): ele é usado só pra buscar o telefone e
-    descartado. Guarde no lead apenas nome + telefone.
+    NÃO persiste o CPF (dado sensível): ele é usado só pra buscar telefone e
+    e-mail e descartado. Guarde no lead apenas nome + telefone + e-mail.
     """
     if not tem_credenciais():
         return {"ok": False, "erro": "sem_credenciais"}
@@ -444,22 +489,25 @@ def decisor_com_telefone(cnpj: str) -> dict:
                 "motivo": qs.get("mensagem"), "permissao": qs.get("permissao", False)}
     dec = _escolher_decisor(socios)
     if not dec or not dec.get("cpf"):
-        # tem nome mas não veio CPF completo -> não dá pra achar o telefone
+        # tem nome mas não veio CPF completo -> não dá pra achar telefone/e-mail
         return {"ok": False, "erro": "sem_cpf_do_decisor",
                 "decisor_nome": (dec or {}).get("nome")}
     tels = _ranquear_telefones(telefones_por_cpf(dec["cpf"]))
     principal = tels[0] if tels else None
+    emails = emails_por_cpf(dec["cpf"])
+    email_principal = emails[0]["email"] if emails else None
     return {
-        "ok": bool(principal),
+        "ok": bool(principal or email_principal),
         "decisor_nome": dec.get("nome"),
         "decisor_qualificacao": dec.get("qualificacao"),
         "decisor_telefone": principal.get("formatado") if principal else None,
         "decisor_whatsapp": bool(principal.get("whatsapp")) if principal else False,
+        "decisor_email": email_principal,
         # lista RICA (ordenada por probabilidade; o 1º vem marcado provavel=True)
         "telefones": [{"formatado": t.get("formatado"), "tipo": t.get("tipo"),
                        "whatsapp": bool(t.get("whatsapp")), "provavel": t.get("provavel", False)}
                       for t in tels if t.get("formatado")],
-        "erro": None if principal else "sem_telefone",
+        "erro": None if (principal or email_principal) else "sem_telefone_e_sem_email",
     }
 
 
@@ -494,11 +542,13 @@ def decisor_por_lead(cnpj: str = "", telefones: list | None = None) -> dict:
         if not tels:                        # sem CPF/telefones extras: fica com o número achado
             tels = [{"formatado": tel, "whatsapp": False, "provavel": True, "tipo": ""}]
         principal = tels[0]
+        emails = emails_por_cpf(tit["cpf"]) if tit.get("cpf") else []
         return {
             "ok": True, "origem": "telefone",
             "decisor_nome": nome, "decisor_qualificacao": "Titular do telefone (provável dono)",
             "decisor_telefone": principal.get("formatado"),
             "decisor_whatsapp": bool(principal.get("whatsapp")),
+            "decisor_email": emails[0]["email"] if emails else None,
             "telefones": [{"formatado": t.get("formatado"), "tipo": t.get("tipo", ""),
                            "whatsapp": bool(t.get("whatsapp")), "provavel": t.get("provavel", False)}
                           for t in tels if t.get("formatado")],

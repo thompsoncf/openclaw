@@ -430,11 +430,12 @@ def _numero_alvo_wa(c, conta_id, pros, alvo_telefone=None) -> tuple[str | None, 
             c.execute(
                 """update prospeccao set decisor_nome=coalesce(decisor_nome,%s),
                        decisor_cargo=coalesce(decisor_cargo,%s), decisor_telefone=%s,
-                       decisor_whatsapp=%s, decisor_telefones=%s::jsonb, decisor_em=now(),
+                       decisor_whatsapp=%s, decisor_telefones=%s::jsonb,
+                       decisor_email=coalesce(%s,decisor_email), decisor_em=now(),
                        atualizado_em=now() where id=%s and conta_id=%s""",
                 (r.get("decisor_nome"), r.get("decisor_qualificacao"),
                  r.get("decisor_telefone"), bool(r.get("decisor_whatsapp")),
-                 json.dumps(tels), pid, conta_id))
+                 json.dumps(tels), r.get("decisor_email"), pid, conta_id))
             c.commit()
             n = _melhor_de_lista(tels) or (r.get("decisor_telefone") or None)
             if n:

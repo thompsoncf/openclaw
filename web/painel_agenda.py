@@ -24,6 +24,7 @@ router = APIRouter()
 MESES = ["", "janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho",
          "agosto", "setembro", "outubro", "novembro", "dezembro"]
 DIAS_SEM = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
+DIAS_SEM_EXT = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"]
 TIPO_ROT = {"pessoal": "Pessoal", "empresa": "Empresa", "fornecedor": "Fornecedor"}
 
 
@@ -79,6 +80,29 @@ def _monta_semanas(ano: int, mes: int, eventos: list[dict], hoje: date) -> list[
     return semanas
 
 
+def _titulo_dia(d: date) -> str:
+    """'Terça, 4 de agosto' — pro cabeçalho da caixa do dia."""
+    idx = (d.weekday() + 1) % 7   # Calendar usa firstweekday=6 (domingo) -> 0=Dom
+    return f"{DIAS_SEM_EXT[idx]}, {d.day} de {MESES[d.month]}"
+
+
+def _eventos_por_dia(eventos: list[dict]) -> dict[str, dict]:
+    """{iso_do_dia: {titulo, eventos:[...]}} com os detalhes completos (local,
+    descrição) — alimenta a caixa do dia no JS sem precisar de outra requisição
+    (os eventos do mês já vieram pro calendário)."""
+    out: dict[str, dict] = {}
+    for e in sorted(eventos, key=lambda ev: ev["inicio"]):
+        d = e["inicio"].astimezone(ag.BRT).date()
+        iso = d.isoformat()
+        bucket = out.setdefault(iso, {"titulo": _titulo_dia(d), "eventos": []})
+        bucket["eventos"].append({
+            "id": e["id"], "hora": e["inicio"].astimezone(ag.BRT).strftime("%H:%M"),
+            "titulo": e["titulo"], "tipo": e["tipo"], "tipo_rot": TIPO_ROT.get(e["tipo"], "Pessoal"),
+            "local": e.get("local") or "", "descricao": e.get("descricao") or "",
+        })
+    return out
+
+
 def _feed_url(request: Request, token: str) -> str:
     base = str(request.base_url).rstrip("/")
     return f"{base}/agenda/{token}.ics"
@@ -122,11 +146,13 @@ def _montar_share(request: Request, pool, conta_id: int, convite_ev: str, convit
         return None
     quando = ag.fmt_hora(ev)
     local = ev.get("local")
+    nomes = [g["nome"] for g in guests if (g.get("nome") or "").strip()]
+    com = f" Com: {ag.frase_nomes(nomes)}." if len(nomes) > 1 else ""
     lista = []
     for g in guests:
         url = _convite_url(request, g["token"])
         msg = (f"Oi{(' ' + g['nome']) if g['nome'] else ''}! Quero marcar uma reunião: "
-               f"{ev['titulo']} — {quando}{(' (' + local + ')') if local else ''}. "
+               f"{ev['titulo']} — {quando}{(' (' + local + ')') if local else ''}.{com} "
                f"Confirma pra mim aqui: {url}")
         lista.append({"nome": g["nome"], "contato": g["contato"], "url": url,
                       "wa": _wa_share(g["contato"] or "", msg), "token": g["token"],
@@ -149,6 +175,7 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
     hoje = ag.agora_brt().date()
     eventos = ag.eventos_mes(pool, conta_id, ano, mes)
     semanas = _monta_semanas(ano, mes, eventos, hoje)
+    eventos_dia = _eventos_por_dia(eventos)
     proximos = ag.proximos(pool, conta_id, limite=8)
     convidados = cv.por_evento(pool, conta_id, [e["id"] for e in proximos])
     for ev in proximos:
@@ -165,7 +192,7 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
     return _render("agenda", request, titulo="Agenda", secao_ativa="agenda",
                    ano=ano, mes=mes, mes_nome=MESES[mes], dias_sem=DIAS_SEM,
                    semanas=semanas, proximos=proximos, tipo_rot=TIPO_ROT,
-                   status_rot=cv.STATUS_ROT,
+                   eventos_dia=eventos_dia, status_rot=cv.STATUS_ROT,
                    mes_prev=_vizinho(ano, mes, -1), mes_next=_vizinho(ano, mes, +1),
                    mes_hoje=f"{hoje.year:04d}-{hoje.month:02d}",
                    hoje_iso=hoje.isoformat(), abrir_novo=(novo == "1"),
@@ -176,7 +203,8 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
 # ================================================================ NOVO
 @router.post("/painel/agenda/novo")
 def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
-                hora: str = Form(""), local: str = Form(""), tipo: str = Form("pessoal"),
+                hora: str = Form(""), local: str = Form(""), descricao: str = Form(""),
+                tipo: str = Form("pessoal"),
                 convidado_nome: list[str] = Form(default=[]),
                 convidado_contato: list[str] = Form(default=[]),
                 m: str = Form("")):
@@ -197,6 +225,7 @@ def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
     ev = ag.criar_evento(pool=pool, conta_id=ctx["conta_id"], titulo=titulo,
                          inicio=inicio, membro_id=ctx["membro_id"],
                          local=(local or "").strip() or None,
+                         descricao=(descricao or "").strip() or None,
                          tipo=tipo if tipo in ag.TIPOS else "pessoal")
     destino = f"/painel/agenda?m={inicio.year:04d}-{inicio.month:02d}"
     # Convidados (um ou vários): cria um convite por linha preenchida.
@@ -215,6 +244,30 @@ def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
         return RedirectResponse(destino + f"&convite_ev={ev['id']}", status_code=303)
     request.session["agenda_aviso"] = f"“{titulo}” marcado pra {inicio.strftime('%d/%m às %H:%M')}."
     return RedirectResponse(destino, status_code=303)
+
+
+# ================================================================ BUSCAR LOCAL
+@router.get("/painel/agenda/buscar-local")
+def agenda_buscar_local(request: Request, q: str = ""):
+    """Sugestões de endereço/lugar pro campo Local (autocomplete no form de novo
+    compromisso). Reusa a mesma Google Places API já usada na prospecção — aqui
+    sem cidade/segmento, é busca livre. Devolve endereço FORMATADO pelo Google
+    (o que faz o link do mapa depois ser exato, não uma busca por texto solto)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "auth", "itens": []}, status_code=401)
+    from finance import prospeccao_fontes as pf
+    if not pf.tem_chave_places():
+        return JSONResponse({"ok": False, "erro": "sem_chave", "itens": []})
+    termo = (q or "").strip()
+    if len(termo) < 2:
+        return JSONResponse({"ok": True, "itens": []})
+    r = pf.buscar_places(termo, cidade="", max_resultados=6)
+    if not r.get("ok"):
+        return JSONResponse({"ok": False, "erro": r.get("erro"), "itens": []})
+    itens = [{"nome": i["empresa"], "endereco": i["endereco"]}
+             for i in r["itens"] if i.get("endereco")]
+    return JSONResponse({"ok": True, "itens": itens})
 
 
 # ================================================================ CANCELAR
@@ -345,6 +398,7 @@ def _render_convite(c: dict, resultado: str | None) -> HTMLResponse:
         "local": ev.get("local") or "", "token": c["token"],
         "estado": estado, "resposta": c.get("resposta") or "",
         "cal_link": cv.link_calendario(ev) if estado == "confirmado" else "",
+        "mapa_link": (cv.link_mapa(ev) if estado == "confirmado" else "") or "",
     }
     return HTMLResponse(_env.get_template("convite").render(**ctx))
 
@@ -400,22 +454,24 @@ _CSS = """<style>
 .cal-hd,.cal-wk{display:grid;grid-template-columns:repeat(7,1fr)}
 .cal-hd{background:var(--card-2);border-bottom:1px solid var(--borda)}
 .cal-hd span{padding:9px 0;text-align:center;font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-mut);font-weight:700}
-.cal-cell{min-height:92px;border-right:1px solid var(--borda);border-bottom:1px solid var(--borda);padding:6px 6px 5px;display:flex;flex-direction:column;gap:3px}
+.cal-cell{height:84px;min-width:0;overflow:hidden;border-right:1px solid var(--borda);border-bottom:1px solid var(--borda);padding:6px 7px;display:flex;flex-direction:column;gap:3px}
 .cal-cell:nth-child(7n){border-right:0}
 .cal-wk:last-child .cal-cell{border-bottom:0}
 .cal-cell.fora{background:rgba(255,255,255,.012)}
 .cal-cell.fora .cal-num{color:#4a4a4c}
-.cal-num{font-size:.8rem;color:var(--txt-mut);font-variant-numeric:tabular-nums;align-self:flex-end;line-height:1}
-.cal-cell.hoje .cal-num{background:var(--verde);color:#04160e;font-weight:800;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center}
-.chip{font-size:.68rem;line-height:1.25;padding:2px 6px;border-radius:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-left:3px solid;background:var(--card-2)}
-.chip b{font-variant-numeric:tabular-nums;font-weight:700;opacity:.85;margin-right:3px}
-.t-pessoal{border-color:var(--verde-claro);color:#bfeeda}
-.t-empresa{border-color:#3987e5;color:#bcd8f6}
-.t-fornecedor{border-color:#e0a33e;color:#f0d9a6}
-.chip.t-pessoal{background:rgba(29,158,117,.12)}
-.chip.t-empresa{background:rgba(57,135,229,.12)}
-.chip.t-fornecedor{background:rgba(224,163,62,.12)}
-.cal-mais{font-size:.65rem;color:var(--txt-mut);padding-left:3px}
+.cal-head{display:flex;align-items:center;justify-content:space-between}
+.cal-num{font-size:.8rem;color:var(--txt-mut);font-variant-numeric:tabular-nums;line-height:1}
+.cal-cell.hoje .cal-num{background:var(--verde);color:#04160e;font-weight:800;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center}
+.cal-count{font-size:.62rem;font-weight:700;color:var(--txt-mut);background:var(--card-2);border:1px solid var(--borda);border-radius:20px;padding:0 6px;line-height:1.4}
+.cal-cell.tem-evento{cursor:pointer}
+.cal-cell.tem-evento:hover{background:var(--card-2)}
+.cal-cell.tem-evento:focus-visible{outline:2px solid var(--verde);outline-offset:-2px}
+.evs{display:flex;flex-direction:column;gap:2px;min-width:0}
+.ev-line{display:flex;align-items:center;gap:4px;min-width:0}
+.ev-line .dot{width:6px;height:6px;border-radius:50%;flex:0 0 6px}
+.ev-line .h{font-size:.6rem;font-weight:700;color:var(--txt-mut);flex:0 0 auto;font-variant-numeric:tabular-nums}
+.ev-line .n{font-size:.62rem;color:var(--txt);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ev-more{font-size:.58rem;color:var(--txt-mut);padding-left:10px}
 /* próximos */
 .px{display:flex;flex-direction:column;gap:2px}
 .px-row{display:flex;align-items:flex-start;gap:11px;padding:9px 4px;border-bottom:1px solid var(--borda)}
@@ -434,8 +490,49 @@ _CSS = """<style>
 /* formulários / cards laterais */
 .side-cards{display:flex;flex-direction:column;gap:18px}
 .frm label{display:block;font-size:.74rem;color:var(--txt-mut);margin:10px 0 4px;font-weight:600}
-.frm input,.frm select{width:100%;background:var(--card-2);border:1px solid var(--borda);border-radius:9px;color:var(--txt);padding:.55rem .6rem;font-size:.92rem;font-family:inherit}
-.frm input:focus,.frm select:focus{outline:0;border-color:var(--verde)}
+.frm input,.frm select,.frm textarea{width:100%;background:var(--card-2);border:1px solid var(--borda);border-radius:9px;color:var(--txt);padding:.55rem .6rem;font-size:.92rem;font-family:inherit}
+.frm textarea{resize:vertical;min-height:58px;line-height:1.4}
+.frm input:focus,.frm select:focus,.frm textarea:focus{outline:0;border-color:var(--verde)}
+/* busca de endereço (campo Local) */
+.addr-wrap{position:relative}
+.addr-input-row{position:relative}
+.addr-input-row input{padding-right:34px}
+.addr-ic{position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:.9rem;color:var(--txt-mut);pointer-events:none}
+.addr-drop{position:absolute;left:0;right:0;top:calc(100% + 4px);background:var(--card);border:1px solid var(--borda);border-radius:10px;box-shadow:0 16px 40px rgba(0,0,0,.5);z-index:12;overflow:hidden;display:none}
+.addr-drop.show{display:block}
+.addr-opt{display:flex;gap:10px;align-items:flex-start;padding:9px 11px;cursor:pointer;border-bottom:1px solid var(--borda)}
+.addr-opt:last-child{border-bottom:0}
+.addr-opt:hover{background:var(--card-2)}
+.addr-opt .pin{flex:0 0 auto;font-size:.85rem;margin-top:1px;color:var(--verde-claro)}
+.addr-opt .tt{font-size:.85rem;font-weight:600}
+.addr-opt .ad{font-size:.72rem;color:var(--txt-mut);margin-top:1px}
+.addr-empty{padding:10px 11px;font-size:.78rem;color:var(--txt-mut)}
+.addr-picked{display:flex;align-items:flex-start;gap:9px;background:rgba(29,158,117,.1);border:1px solid var(--verde);border-radius:9px;padding:9px 10px;margin-top:6px;flex-wrap:wrap}
+.addr-picked .chk{flex:0 0 auto;color:var(--verde-claro);font-size:.95rem;margin-top:1px}
+.addr-picked .body{flex:1;min-width:160px}
+.addr-picked .nm{font-size:.86rem;font-weight:700}
+.addr-picked .ed{font-size:.74rem;color:var(--txt-mut);margin-top:1px}
+.addr-picked .x{flex:0 0 auto;background:transparent;border:0;color:var(--txt-mut);cursor:pointer;font-size:.9rem;padding:2px}
+.addr-picked .x:hover{color:#f0917f}
+.addr-actions{width:100%;display:flex;justify-content:flex-end;margin-top:2px;position:relative}
+.send-btn{display:inline-flex;align-items:center;gap:6px;background:#25d366;color:#04160e;border:0;border-radius:8px;padding:.36rem .65rem;font-size:.76rem;font-weight:700;cursor:pointer}
+.send-btn:hover{background:#2ee578}
+.hint-line{font-size:.7rem;color:var(--txt-mut);margin-top:6px;min-height:1em}
+.manual-toggle{display:inline-flex;align-items:center;gap:5px;background:transparent;border:0;color:var(--txt-mut);cursor:pointer;font-size:.74rem;padding:5px 0;margin-top:2px;text-decoration:underline;text-decoration-color:var(--borda);text-underline-offset:3px}
+.manual-toggle:hover{color:var(--verde-claro);text-decoration-color:var(--verde-claro)}
+.manual-box{display:none;margin-top:6px;padding-top:10px;border-top:1px dashed var(--borda)}
+.manual-box.show{display:block}
+.manual-box .mlabel{font-size:.72rem;color:var(--txt-mut);margin-bottom:5px}
+.manual-cancel{display:inline-flex;align-items:center;gap:4px;background:transparent;border:0;color:var(--txt-mut);cursor:pointer;font-size:.72rem;padding:6px 0 0;text-decoration:underline;text-decoration-color:var(--borda);text-underline-offset:3px}
+.manual-cancel:hover{color:var(--verde-claro);text-decoration-color:var(--verde-claro)}
+.pop{position:absolute;top:calc(100% + 8px);right:0;width:270px;background:var(--card);border:1px solid var(--verde);border-radius:12px;padding:13px;box-shadow:0 20px 50px rgba(0,0,0,.5);z-index:20;display:none}
+.pop.show{display:block}
+.pop:before{content:"";position:absolute;top:-6px;right:16px;width:11px;height:11px;background:var(--card);border-left:1px solid var(--verde);border-top:1px solid var(--verde);transform:rotate(45deg)}
+.pop h4{margin:0 0 8px;font-size:.8rem;color:var(--verde-claro)}
+.pop-msg{background:var(--card-2);border:1px solid var(--borda);border-radius:9px;padding:8px 9px;font-size:.73rem;color:var(--txt-mut);line-height:1.55;margin-bottom:10px;white-space:pre-wrap}
+.pop-msg b{color:var(--txt)}
+.pop-go{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;background:#25d366;color:#04160e;border:0;border-radius:9px;padding:.5rem;font-weight:700;font-size:.8rem;cursor:pointer;text-decoration:none}
+.pop-go:hover{background:#2ee578}
 .frm .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .frm .segs{display:flex;gap:6px;margin-top:4px}
 .frm .segs label{flex:1;margin:0}
@@ -511,6 +608,30 @@ _CSS = """<style>
 .cp-confirmado{background:rgba(29,158,117,.16);color:var(--verde-claro);border:1px solid var(--verde)}
 .cp-remarcar{background:rgba(57,135,229,.14);color:#bcd8f6;border:1px solid rgba(57,135,229,.4)}
 .cp-recusado{background:rgba(224,87,79,.14);color:#f0917f;border:1px solid rgba(224,87,79,.4)}
+/* caixa do dia (clique numa célula do calendário) */
+.day-overlay{position:fixed;inset:0;background:rgba(4,6,5,.6);display:flex;align-items:center;justify-content:center;padding:24px;z-index:60;opacity:0;pointer-events:none;transition:opacity .16s}
+.day-overlay.show{opacity:1;pointer-events:auto}
+.daybox{width:100%;max-width:420px;max-height:82vh;overflow-y:auto;background:var(--card);border:1px solid var(--borda);border-radius:16px;padding:20px;transform:translateY(8px);transition:transform .16s;box-shadow:0 24px 60px rgba(0,0,0,.5)}
+.day-overlay.show .daybox{transform:translateY(0)}
+.daybox-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:4px}
+.daybox-hd h3{font-size:1.02rem;margin:0;letter-spacing:-.005em;text-transform:capitalize;font-weight:700}
+.daybox-hd .x{background:transparent;border:1px solid var(--borda);color:var(--txt-mut);width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:.92rem;flex:0 0 28px}
+.daybox-hd .x:hover{border-color:var(--verde);color:var(--txt)}
+.daybox-sub{font-size:.78rem;color:var(--txt-mut);margin:0 0 14px}
+.dev{display:flex;gap:11px;padding:10px 0;border-bottom:1px solid var(--borda)}
+.dev:last-of-type{border-bottom:0;padding-bottom:2px}
+.dev-dot{width:8px;height:8px;border-radius:50%;margin-top:6px;flex:0 0 8px}
+.dev-body{flex:1;min-width:0}
+.dev-hora{font-size:.72rem;color:var(--txt-mut);font-variant-numeric:tabular-nums;font-weight:700}
+.dev-tt{font-size:.92rem;font-weight:600;margin-top:1px}
+.dev-meta{display:flex;flex-wrap:wrap;gap:8px;font-size:.76rem;color:var(--txt-mut);margin-top:4px}
+.dev-desc{font-size:.8rem;color:var(--txt-mut);margin-top:6px;line-height:1.45;background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:7px 9px}
+.tpill{font-size:.64rem;font-weight:700;padding:1px 7px;border-radius:20px;text-transform:uppercase;letter-spacing:.03em}
+.tp-pessoal{background:rgba(29,158,117,.16);color:var(--verde-claro)}
+.tp-empresa{background:rgba(57,135,229,.16);color:#bcd8f6}
+.tp-fornecedor{background:rgba(224,163,62,.16);color:#f0d9a6}
+.daybox-cta{display:block;width:100%;text-align:center;margin-top:14px;background:transparent;border:1px dashed var(--borda);color:var(--verde-claro);border-radius:9px;padding:.6rem;font-size:.82rem;font-weight:600;cursor:pointer}
+.daybox-cta:hover{border-color:var(--verde)}
 </style>"""
 
 _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
@@ -563,12 +684,20 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         {% for semana in semanas %}
         <div class="cal-wk">
           {% for c in semana %}
-          <div class="cal-cell{% if c.fora %} fora{% endif %}{% if c.hoje %} hoje{% endif %}">
-            <span class="cal-num">{{ c.dia }}</span>
-            {% for e in c.eventos[:3] %}
-            <span class="chip t-{{ e.tipo }}" data-ev="{{ e.id }}" title="{{ e.hora }} {{ e.titulo }}"><b>{{ e.hora }}</b>{{ e.titulo }}</span>
-            {% endfor %}
-            {% if c.eventos|length > 3 %}<span class="cal-mais">+{{ c.eventos|length - 3 }} mais</span>{% endif %}
+          <div class="cal-cell{% if c.fora %} fora{% endif %}{% if c.hoje %} hoje{% endif %}{% if c.eventos %} tem-evento{% endif %}"
+               {% if c.eventos %}data-iso="{{ c.iso }}" tabindex="0" role="button" aria-label="Ver os {{ c.eventos|length }} compromisso{{ 's' if c.eventos|length != 1 }} do dia {{ c.dia }}"{% endif %}>
+            <div class="cal-head">
+              <span class="cal-num">{{ c.dia }}</span>
+              {% if c.eventos|length > 2 %}<span class="cal-count">{{ c.eventos|length }}</span>{% endif %}
+            </div>
+            {% if c.eventos %}
+            <div class="evs">
+              {% for e in c.eventos[:2] %}
+              <div class="ev-line" data-ev="{{ e.id }}"><span class="dot d-{{ e.tipo }}"></span><span class="h">{{ e.hora }}</span><span class="n">{{ e.titulo }}</span></div>
+              {% endfor %}
+            </div>
+            {% if c.eventos|length > 2 %}<div class="ev-more">+{{ c.eventos|length - 2 }} mais</div>{% endif %}
+            {% endif %}
           </div>
           {% endfor %}
         </div>
@@ -617,13 +746,30 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <form class="frm" method="post" action="/painel/agenda/novo">
           <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
           <label>O que é</label>
-          <input name="titulo" placeholder="Ex: reunião com o contador" required autocomplete="off">
+          <input name="titulo" id="fTitulo" placeholder="Ex: reunião com o contador" required autocomplete="off">
           <div class="row2">
-            <div><label>Data</label><input name="data" type="date" value="{{ hoje_iso }}" required></div>
-            <div><label>Hora</label><input name="hora" type="time" value="09:00"></div>
+            <div><label>Data</label><input name="data" id="fData" type="date" value="{{ hoje_iso }}" required></div>
+            <div><label>Hora</label><input name="hora" id="fHora" type="time" value="09:00"></div>
           </div>
+          <label>Descrição <span style="font-weight:400">(opcional)</span></label>
+          <textarea name="descricao" placeholder="Detalhes do compromisso…"></textarea>
           <label>Local <span style="font-weight:400">(opcional)</span></label>
-          <input name="local" placeholder="Ex: escritório, online…" autocomplete="off">
+          <input type="hidden" name="local" id="localHidden">
+          <div class="addr-wrap" id="addrWrap">
+            <div class="addr-input-row">
+              <input type="text" id="addrInput" placeholder="Buscar endereço ou nome do lugar…" autocomplete="off">
+              <span class="addr-ic">🔍</span>
+            </div>
+            <div class="addr-drop" id="addrDrop"></div>
+            <div id="addrPicked"></div>
+          </div>
+          <div class="hint-line" id="hintLine">Digite pra buscar — ex: nome do lugar ou endereço.</div>
+          <button type="button" class="manual-toggle" id="manualToggle">✍️ Não achei o lugar — digitar manualmente</button>
+          <div class="manual-box" id="manualBox">
+            <div class="mlabel">Local (texto livre, sem link de mapa)</div>
+            <input type="text" id="manualInput" placeholder="Ex: online, na casa da Ana…" autocomplete="off">
+            <button type="button" class="manual-cancel" id="manualCancel">← voltar pra busca de endereço</button>
+          </div>
           <label>Tipo</label>
           <div class="segs">
             <label class="s-pessoal"><input type="radio" name="tipo" value="pessoal" checked><span>Pessoal</span></label>
@@ -631,16 +777,16 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <label class="s-fornecedor"><input type="radio" name="tipo" value="fornecedor"><span>Fornecedor</span></label>
           </div>
           <div class="gconv">
-            <div class="gt">👥 Convidar (opcional)</div>
-            <div class="gd">Um ou vários. Cada convidado recebe o próprio link e confirma o seu — você vê "quantos de quantos".</div>
+            <div class="gt">👥 Envolvidos (opcional)</div>
+            <div class="gd">Um ou vários. Cada um recebe o próprio link — e a mensagem já cita quem mais vem.</div>
             <div id="guests">
               <div class="guest-row">
-                <div><input name="convidado_nome" placeholder="Nome" autocomplete="off"></div>
+                <div><input class="gnome" name="convidado_nome" placeholder="Nome" autocomplete="off"></div>
                 <div><input name="convidado_contato" placeholder="(86) 90000-0000" autocomplete="off"></div>
                 <button type="button" class="g-rm" onclick="rmGuest(this)" title="Remover" aria-label="Remover">✕</button>
               </div>
             </div>
-            <button type="button" class="g-add" onclick="addGuest()">+ adicionar convidado</button>
+            <button type="button" class="g-add" onclick="addGuest()">+ adicionar envolvido</button>
           </div>
           <button class="ok" type="submit" data-busy="⏳ Marcando…">Marcar</button>
         </form>
@@ -699,13 +845,245 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       </div>
     </div>
   </div>
+
+  <!-- caixa do dia (abre ao clicar numa célula com compromisso) -->
+  <div class="day-overlay" id="dayOverlay">
+    <div class="daybox" id="daybox"></div>
+  </div>
 </div>
 <script>
+var EVENTOS_DIA = {{ eventos_dia|tojson }};
+var TPILL = {pessoal:'Pessoal', empresa:'Empresa', fornecedor:'Fornecedor'};
+
+function abrirDia(iso){
+  var d = EVENTOS_DIA[iso];
+  if(!d) return;
+  var box = document.getElementById('daybox');
+  var html = '<div class="daybox-hd"><h3>'+d.titulo+'</h3>'
+    + '<button class="x" type="button" onclick="fecharDia()" aria-label="Fechar">✕</button></div>'
+    + '<p class="daybox-sub">'+d.eventos.length+(d.eventos.length===1?' compromisso':' compromissos')+'</p>';
+  d.eventos.forEach(function(e){
+    html += '<div class="dev" data-ev="'+e.id+'"><div class="dev-dot d-'+e.tipo+'"></div><div class="dev-body">'
+      + '<div class="dev-hora">'+e.hora+'</div>'
+      + '<div class="dev-tt">'+e.titulo+'</div>'
+      + '<div class="dev-meta"><span class="tpill tp-'+e.tipo+'">'+(TPILL[e.tipo]||e.tipo_rot)+'</span>'
+      + (e.local?'<span>📍 '+e.local+'</span>':'')+'</div>'
+      + (e.descricao?'<div class="dev-desc">'+e.descricao+'</div>':'')
+      + '</div></div>';
+  });
+  html += '<button class="daybox-cta" type="button" onclick="agNovoNoDia(\''+iso+'\')">＋ Marcar novo compromisso nesse dia</button>';
+  box.innerHTML = html;
+  document.getElementById('dayOverlay').classList.add('show');
+}
+function fecharDia(){ document.getElementById('dayOverlay').classList.remove('show'); }
+// Reconstrói o conteúdo de UMA célula (linhas de compromisso + "+N mais") a partir
+// de EVENTOS_DIA — mesma fonte de dados da caixa do dia, pra nunca desalinhar.
+function renderizarCelula(iso){
+  var cel = document.querySelector('.cal-cell[data-iso="'+iso+'"]');
+  if(!cel) return;
+  var evs = (EVENTOS_DIA[iso] || {}).eventos || [];
+  var num = cel.querySelector('.cal-num');
+  var numHtml = num ? num.outerHTML : '';
+  if(!evs.length){
+    cel.classList.remove('tem-evento');
+    cel.removeAttribute('tabindex'); cel.removeAttribute('role'); cel.removeAttribute('data-iso');
+    cel.innerHTML = '<div class="cal-head">'+numHtml+'</div>';
+    return;
+  }
+  var count = evs.length > 2 ? '<span class="cal-count">'+evs.length+'</span>' : '';
+  var linhas = evs.slice(0, 2).map(function(e){
+    return '<div class="ev-line" data-ev="'+e.id+'"><span class="dot d-'+e.tipo+'"></span><span class="h">'+e.hora+'</span><span class="n">'+e.titulo+'</span></div>';
+  }).join('');
+  var mais = evs.length > 2 ? '<div class="ev-more">+'+(evs.length - 2)+' mais</div>' : '';
+  cel.innerHTML = '<div class="cal-head">'+numHtml+count+'</div><div class="evs">'+linhas+'</div>'+mais;
+}
+// Tira o evento cancelado do calendário (linha na célula + caixa do dia se estiver
+// aberta) e do EVENTOS_DIA em memória, sem precisar recarregar a página.
+function removerEventoDoCalendario(id){
+  var isoAlvo = null;
+  for(var iso in EVENTOS_DIA){
+    if(EVENTOS_DIA[iso].eventos.some(function(e){ return String(e.id) === String(id); })){ isoAlvo = iso; break; }
+  }
+  if(isoAlvo){
+    EVENTOS_DIA[isoAlvo].eventos = EVENTOS_DIA[isoAlvo].eventos.filter(function(e){ return String(e.id) !== String(id); });
+    if(!EVENTOS_DIA[isoAlvo].eventos.length) delete EVENTOS_DIA[isoAlvo];
+    renderizarCelula(isoAlvo);
+  }
+  var devRow = document.querySelector('#daybox .dev[data-ev="'+id+'"]');
+  if(devRow){
+    devRow.remove();
+    var restBox = document.querySelectorAll('#daybox .dev').length;
+    if(!restBox){ fecharDia(); return; }
+    var sub = document.querySelector('#daybox .daybox-sub');
+    if(sub) sub.textContent = restBox + (restBox===1?' compromisso':' compromissos');
+  }
+}
+function agNovoNoDia(iso){
+  fecharDia();
+  agNovo(true);
+  var i = document.querySelector('#novo input[name=data]');
+  if(i) i.value = iso;
+}
+// Delegado no calendário (não em cada célula): células podem ser recriadas por
+// renderizarCelula() depois de um cancelamento, então o listener direto se perderia.
+document.querySelector('.cal').addEventListener('click', function(ev){
+  var cel = ev.target.closest('.cal-cell.tem-evento');
+  if(cel) abrirDia(cel.getAttribute('data-iso'));
+});
+document.querySelector('.cal').addEventListener('keydown', function(ev){
+  if(ev.key!=='Enter' && ev.key!==' ') return;
+  var cel = ev.target.closest('.cal-cell.tem-evento');
+  if(cel){ ev.preventDefault(); abrirDia(cel.getAttribute('data-iso')); }
+});
+document.getElementById('dayOverlay').addEventListener('click', function(ev){ if(ev.target.id==='dayOverlay') fecharDia(); });
+document.addEventListener('keydown', function(ev){ if(ev.key==='Escape') fecharDia(); });
+
 function agNovo(v){var n=document.getElementById('novo');if(n){n.style.display='';n.scrollIntoView({behavior:'smooth',block:'center'});var i=n.querySelector('input[name=titulo]');if(i)setTimeout(function(){i.focus()},300);}return false;}
 function agCopiar(){var i=document.getElementById('feedUrl');if(!i)return;i.select();try{document.execCommand('copy');}catch(e){}if(navigator.clipboard)navigator.clipboard.writeText(i.value);var b=event.target;var t=b.textContent;b.textContent='Copiado ✓';setTimeout(function(){b.textContent=t},1600);}
 function cpRow(b){var row=b.closest('.share-row');if(!row)return;var txt=row.getAttribute('data-link')||'';if(navigator.clipboard)navigator.clipboard.writeText(txt);var t=b.textContent;b.textContent='✓';setTimeout(function(){b.textContent=t},1400);}
-function addGuest(){var box=document.getElementById('guests');var d=document.createElement('div');d.className='guest-row';d.innerHTML='<div><input name="convidado_nome" placeholder="Nome" autocomplete="off"></div><div><input name="convidado_contato" placeholder="(86) 90000-0000" autocomplete="off"></div><button type="button" class="g-rm" onclick="rmGuest(this)" title="Remover" aria-label="Remover">✕</button>';box.appendChild(d);var i=d.querySelector('input');if(i)i.focus();}
+function addGuest(){var box=document.getElementById('guests');var d=document.createElement('div');d.className='guest-row';d.innerHTML='<div><input class="gnome" name="convidado_nome" placeholder="Nome" autocomplete="off"></div><div><input name="convidado_contato" placeholder="(86) 90000-0000" autocomplete="off"></div><button type="button" class="g-rm" onclick="rmGuest(this)" title="Remover" aria-label="Remover">✕</button>';box.appendChild(d);var i=d.querySelector('input');if(i)i.focus();}
 function rmGuest(b){var box=document.getElementById('guests');var row=b.closest('.guest-row');if(box&&box.children.length>1){row.remove();}else{row.querySelectorAll('input').forEach(function(x){x.value='';});}}
+
+// ---------------- Local: busca de endereço (Google Places) + manual + enviar ----------------
+(function(){
+  var addrInput = document.getElementById('addrInput');
+  var addrDrop = document.getElementById('addrDrop');
+  var addrPicked = document.getElementById('addrPicked');
+  var localHidden = document.getElementById('localHidden');
+  var hintLine = document.getElementById('hintLine');
+  var addrWrap = document.getElementById('addrWrap');
+  var searchRow = document.querySelector('.addr-input-row');
+  var manualToggle = document.getElementById('manualToggle');
+  var manualBox = document.getElementById('manualBox');
+  var manualInput = document.getElementById('manualInput');
+  var manualCancel = document.getElementById('manualCancel');
+  if(!addrInput) return;
+
+  function nomesEnvolvidos(){
+    var nomes = [];
+    document.querySelectorAll('.gnome').forEach(function(i){ if(i.value.trim()) nomes.push(i.value.trim()); });
+    return nomes;
+  }
+  function fraseEnvolvidos(){
+    var n = nomesEnvolvidos();
+    if(n.length < 2) return '';
+    return n.slice(0, -1).join(', ') + ' e ' + n[n.length - 1];
+  }
+  function linkMapa(endereco){
+    return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(endereco);
+  }
+
+  var timer = null;
+  addrInput.addEventListener('input', function(){
+    localHidden.value = addrInput.value;    // digitou solto -> já vale como local, igual antes
+    addrPicked.innerHTML = '';
+    var termo = addrInput.value.trim();
+    clearTimeout(timer);
+    if(termo.length < 2){ addrDrop.classList.remove('show'); return; }
+    timer = setTimeout(function(){ buscar(termo); }, 320);
+  });
+
+  function buscar(termo){
+    fetch('/painel/agenda/buscar-local?q=' + encodeURIComponent(termo))
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(addrInput.value.trim() !== termo) return;   // resposta atrasada de uma busca antiga
+        if(!d.ok && d.erro === 'sem_chave'){
+          addrDrop.classList.remove('show');
+          hintLine.textContent = 'Busca de endereço desligada nesta conta — digite manualmente.';
+          return;
+        }
+        var itens = (d.itens || []);
+        if(!itens.length){
+          addrDrop.innerHTML = '<div class="addr-empty">Nenhum lugar encontrado pra "'+termo+'". Usa o link "digitar manualmente" abaixo.</div>';
+        } else {
+          addrDrop.innerHTML = itens.map(function(p, idx){
+            return '<div class="addr-opt" data-idx="'+idx+'"><span class="pin">📍</span>'
+              + '<div><div class="tt"></div><div class="ad"></div></div></div>';
+          }).join('');
+          // texto via textContent (não via template) pra não abrir brecha de HTML no nome/endereço do lugar
+          Array.prototype.forEach.call(addrDrop.querySelectorAll('.addr-opt'), function(row, idx){
+            row.querySelector('.tt').textContent = itens[idx].nome;
+            row.querySelector('.ad').textContent = itens[idx].endereco;
+            row.addEventListener('click', function(){ escolherLocal(itens[idx]); });
+          });
+        }
+        addrDrop.classList.add('show');
+      })
+      .catch(function(){ addrDrop.classList.remove('show'); });
+  }
+
+  function escolherLocal(p){
+    addrInput.value = p.nome;
+    localHidden.value = p.nome;
+    addrDrop.classList.remove('show');
+    hintLine.textContent = 'Endereço confirmado pelo Google — o link do mapa vai junto nas mensagens.';
+    var mapa = linkMapa(p.endereco);
+    var card = document.createElement('div');
+    card.className = 'addr-picked';
+    var chk = document.createElement('span'); chk.className = 'chk'; chk.textContent = '✅';
+    var body = document.createElement('div'); body.className = 'body';
+    var nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = p.nome;
+    var ed = document.createElement('div'); ed.className = 'ed'; ed.textContent = p.endereco;
+    var lnk = document.createElement('a'); lnk.className = 'lnk'; lnk.href = mapa; lnk.target = '_blank';
+    lnk.rel = 'noopener'; lnk.textContent = '🔗 Ver no Google Maps';
+    body.appendChild(nm); body.appendChild(ed); body.appendChild(lnk);
+    var x = document.createElement('button'); x.type = 'button'; x.className = 'x';
+    x.setAttribute('aria-label', 'Trocar endereço'); x.textContent = '✕';
+    x.addEventListener('click', function(){
+      addrInput.value = ''; localHidden.value = ''; addrPicked.innerHTML = '';
+      hintLine.textContent = 'Digite pra buscar — ex: nome do lugar ou endereço.';
+      addrInput.focus();
+    });
+    var actions = document.createElement('div'); actions.className = 'addr-actions';
+    var send = document.createElement('button'); send.type = 'button'; send.className = 'send-btn';
+    send.textContent = '💬 Enviar pro cliente';
+    var pop = document.createElement('div'); pop.className = 'pop';
+    send.addEventListener('click', function(){
+      var titulo = (document.getElementById('fTitulo').value || 'Compromisso').trim();
+      var data = document.getElementById('fData').value, hora = document.getElementById('fHora').value;
+      var quando = (data ? data.split('-').reverse().join('/') : '') + (hora ? ' ' + hora : '');
+      var frase = fraseEnvolvidos();
+      var msgTxt = titulo + '\n' + quando + ' — ' + p.nome + '\n📍 ' + mapa + (frase ? '\n👥 Com: ' + frase : '');
+      pop.innerHTML = '';
+      var h4 = document.createElement('h4'); h4.textContent = '📍 Enviar pro cliente';
+      var box = document.createElement('div'); box.className = 'pop-msg'; box.textContent = msgTxt;
+      var go = document.createElement('a'); go.className = 'pop-go'; go.target = '_blank'; go.rel = 'noopener';
+      go.href = 'https://wa.me/?text=' + encodeURIComponent(msgTxt); go.textContent = '💬 Abrir WhatsApp';
+      pop.appendChild(h4); pop.appendChild(box); pop.appendChild(go);
+      pop.classList.toggle('show');
+    });
+    actions.appendChild(send); actions.appendChild(pop);
+    card.appendChild(chk); card.appendChild(body); card.appendChild(x); card.appendChild(actions);
+    addrPicked.innerHTML = '';
+    addrPicked.appendChild(card);
+  }
+
+  manualToggle.addEventListener('click', function(){
+    searchRow.style.display = 'none';
+    addrDrop.classList.remove('show');
+    addrPicked.innerHTML = '';
+    hintLine.style.display = 'none';
+    manualToggle.style.display = 'none';
+    manualBox.classList.add('show');
+    addrInput.value = ''; localHidden.value = '';
+    manualInput.focus();
+  });
+  manualInput.addEventListener('input', function(){ localHidden.value = manualInput.value; });
+  manualCancel.addEventListener('click', function(){
+    manualBox.classList.remove('show');
+    manualInput.value = ''; localHidden.value = '';
+    searchRow.style.display = ''; hintLine.style.display = ''; manualToggle.style.display = '';
+    addrInput.focus();
+  });
+
+  document.addEventListener('click', function(ev){
+    if(!addrWrap.contains(ev.target)) addrDrop.classList.remove('show');
+    if(!ev.target.closest('.addr-actions')){
+      document.querySelectorAll('.pop.show').forEach(function(p){ p.classList.remove('show'); });
+    }
+  });
+})();
 // Feedback instantâneo: ao enviar QUALQUER form, o botão reage na hora (apaga +
 // "⏳ …"), enquanto o back processa — pro clique nunca parecer travado. Como a
 // maioria recarrega, isso só precisa durar até a navegação; o timeout destrava
@@ -755,7 +1133,7 @@ document.addEventListener('submit', function(ev){
         if(d && d.ok){
           var id=(f.querySelector('[name=evento_id]')||{}).value;
           var row=f.closest('.px-row'); if(row){ row.classList.add('saindo'); setTimeout(function(){ row.remove(); zaqVazioProximos(); },200); }
-          if(id){ document.querySelectorAll('.chip[data-ev="'+id+'"]').forEach(function(x){ x.remove(); }); }
+          if(id) removerEventoDoCalendario(id);
           zaqToast('Compromisso cancelado.');
         } else { restore(); zaqToast('Não consegui cancelar.', false); }
       } else {   // enviar convite
@@ -857,7 +1235,10 @@ _CONVITE_TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
         <div class="ic">✅</div><h2>Presença confirmada!</h2>
         <p>Você confirmou <b style="color:var(--txt)">{{ titulo }}</b> — {{ quando }}.</p>
         <p>A {{ empresa }} já foi avisada. Até lá! 👋</p>
-        {% if cal_link %}<a class="cal" href="{{ cal_link }}" target="_blank" rel="noopener">📆 Adicionar ao meu calendário</a>{% endif %}
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:16px">
+          {% if cal_link %}<a class="cal" href="{{ cal_link }}" style="margin-top:0" target="_blank" rel="noopener">📆 Adicionar ao meu calendário</a>{% endif %}
+          {% if mapa_link %}<a class="cal" href="{{ mapa_link }}" style="margin-top:0" target="_blank" rel="noopener">📍 Ver local no mapa{% if local %} — {{ local }}{% endif %}</a>{% endif %}
+        </div>
       {% elif estado == 'remarcar' %}
         <div class="ic">🔁</div><h2>Pedido enviado</h2>
         <p>Avisamos a {{ empresa }} que você prefere outro horário pra <b style="color:var(--txt)">{{ titulo }}</b>.</p>

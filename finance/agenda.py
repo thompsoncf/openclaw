@@ -18,6 +18,16 @@ from datetime import datetime, timedelta, timezone
 BRT = timezone(timedelta(hours=-3))
 
 
+def frase_nomes(nomes: list[str]) -> str:
+    """Junta nomes em português: 'Ana', 'Ana e Carlos', 'Ana, Carlos e Bia'."""
+    nomes = [n for n in nomes if n]
+    if not nomes:
+        return ""
+    if len(nomes) == 1:
+        return nomes[0]
+    return ", ".join(nomes[:-1]) + " e " + nomes[-1]
+
+
 def agora_brt() -> datetime:
     return datetime.now(BRT)
 
@@ -233,6 +243,17 @@ def link_google(ev: dict) -> str:
     if ev.get("descricao"):
         p += f"&details={quote(ev['descricao'])}"
     return "https://calendar.google.com/calendar/render?" + p
+
+
+def link_maps(local: str | None) -> str | None:
+    """URL do Google Maps pro local do evento (texto livre — endereço, nome do
+    lugar etc.). None se não tiver local, pra quem for montar mensagem pular a
+    linha inteira em vez de mandar um link vazio."""
+    local = (local or "").strip()
+    if not local:
+        return None
+    from urllib.parse import quote
+    return "https://www.google.com/maps/search/?api=1&query=" + quote(local)
 
 
 def _ics_escape(t: str) -> str:

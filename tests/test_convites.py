@@ -156,14 +156,29 @@ def test_pendentes_ignora_evento_passado(pool, conta_id):
 
 
 def test_confirmacao_texto_por_status(pool, conta_id):
-    ev = _evento(pool, conta_id, titulo="Café")
+    ev = _evento(pool, conta_id, titulo="Café")   # _evento() marca local="Online"
     conv = cv.criar_convidado(pool, conta_id, ev["id"], "Carla Silva", "86988887777")
     c = cv.responder(pool, conv["token"], "confirmado")
     txt = cv.confirmacao_texto(c)
     assert "Carla" in txt and "Café" in txt and "confirmada" in txt.lower()
     assert "calend" in txt.lower()                       # traz o link do calendário
+    assert "maps" in txt.lower() and "mapa" in txt.lower()   # e o link do local
     c2 = cv.responder(pool, conv["token"], "recusado")
     assert "não vai poder" in cv.confirmacao_texto(c2).lower()
+
+
+def test_confirmacao_texto_sem_local_nao_traz_mapa(pool, conta_id):
+    ev = ag.criar_evento(pool, conta_id, "Ligação", ag.agora_brt() + timedelta(days=1))
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Léo", "")
+    c = cv.responder(pool, conv["token"], "confirmado")
+    assert "mapa" not in cv.confirmacao_texto(c).lower()
+
+
+def test_link_mapa(pool, conta_id):
+    com_local = _evento(pool, conta_id)                  # local="Online"
+    assert cv.link_mapa(com_local) is not None
+    sem_local = ag.criar_evento(pool, conta_id, "Sem local", ag.agora_brt() + timedelta(days=1))
+    assert cv.link_mapa(sem_local) is None
 
 
 def test_enviar_convite_monta_variaveis(pool, conta_id, monkeypatch):
@@ -224,6 +239,42 @@ def test_marcar_evento_com_varios_convidados(pool, conta_id, monkeypatch):
                        {"nome": "Ana", "contato": "86 97777-6666"}]})
     assert "Paulo" in r and "Ana" in r
     assert len(enviados) == 2                                # disparou pros dois
+    assert "👥 Com: Paulo e Ana" in r                          # resumo dos envolvidos pro dono
+
+
+def test_marcar_evento_com_um_convidado_nao_mostra_resumo(pool, conta_id, monkeypatch):
+    """Com só 1 convidado, a linha "Com: ..." não faz sentido (já tem no "Convites")."""
+    from finance.agenda_tools import construir_ferramentas_agenda
+    monkeypatch.setattr(cv, "enviar_convite_whatsapp", lambda p, t: {"ok": True})
+    ferrs = {f.nome: f for f in construir_ferramentas_agenda(pool, conta_id)}
+    r = ferrs["marcar_evento"].executar({
+        "titulo": "Café", "inicio": "28/07/2099 09:00",
+        "convidados": [{"nome": "Paulo", "contato": "86 98888-7777"}]})
+    assert "👥 Com:" not in r
+
+
+def test_marcar_evento_com_local_traz_link_do_mapa(pool, conta_id):
+    from finance.agenda_tools import construir_ferramentas_agenda
+    ferrs = {f.nome: f for f in construir_ferramentas_agenda(pool, conta_id)}
+    r = ferrs["marcar_evento"].executar(
+        {"titulo": "Reunião", "inicio": "28/07/2099 10:00", "local": "Escritório"})
+    assert "📍 Ver o local no mapa:" in r and "maps" in r.lower()
+
+
+def test_marcar_evento_sem_local_nao_traz_mapa(pool, conta_id):
+    from finance.agenda_tools import construir_ferramentas_agenda
+    ferrs = {f.nome: f for f in construir_ferramentas_agenda(pool, conta_id)}
+    r = ferrs["marcar_evento"].executar({"titulo": "Ligação", "inicio": "28/07/2099 10:00"})
+    assert "mapa" not in r.lower()
+
+
+def test_remarcar_evento_com_local_traz_link_do_mapa(pool, conta_id):
+    from finance.agenda_tools import construir_ferramentas_agenda
+    ferrs = {f.nome: f for f in construir_ferramentas_agenda(pool, conta_id)}
+    ferrs["marcar_evento"].executar(
+        {"titulo": "Consulta", "inicio": "28/07/2099 10:00", "local": "Clínica Central"})
+    r = ferrs["remarcar_evento"].executar({"titulo": "Consulta", "novo_inicio": "29/07/2099 11:00"})
+    assert "📍 Ver o local no mapa:" in r
 
 
 def test_convidar_reuniao_em_evento_existente(pool, conta_id, monkeypatch):

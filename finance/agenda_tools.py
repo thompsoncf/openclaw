@@ -67,7 +67,15 @@ def construir_ferramentas_agenda(pool, conta_id: int,
         aviso_passado = " (repara que essa data já passou, hein!)" if inicio < ag.agora_brt() else ""
         resp = (f"📅 Marquei: {titulo} — {ag.fmt_hora(ev)}.{aviso_passado}\n"
                 f"Adicionar ao seu calendário (Google/Apple/Outlook): {ag.link_google(ev)}")
-        linhas = _convidar_e_enviar(ev, e.get("convidados") or [])
+        mapa = ag.link_maps(ev.get("local"))
+        if mapa:
+            resp += f"\n📍 Ver o local no mapa: {mapa}"
+        convidados = e.get("convidados") or []
+        nomes = [(g.get("nome") or "").strip() for g in convidados
+                if isinstance(g, dict) and (g.get("nome") or "").strip()]
+        if len(nomes) > 1:
+            resp += f"\n\n👥 Com: {ag.frase_nomes(nomes)}"
+        linhas = _convidar_e_enviar(ev, convidados)
         if linhas:
             resp += "\n\n👥 Convites:\n" + "\n".join(linhas)
         return resp
@@ -145,8 +153,12 @@ def construir_ferramentas_agenda(pool, conta_id: int,
         novo_fim = ag.parse_datahora(e.get("novo_fim")) if e.get("novo_fim") else None
         if ag.remarcar_evento(pool, conta_id, ev["id"], novo, novo_fim):
             ev2 = {**ev, "inicio": novo, "fim": novo_fim}
-            return (f"✅ Remarquei '{ev['titulo']}' pra {ag.fmt_hora(ev2)}.\n"
+            resp = (f"✅ Remarquei '{ev['titulo']}' pra {ag.fmt_hora(ev2)}.\n"
                     f"Atualizar no seu calendário: {ag.link_google(ev2)}")
+            mapa = ag.link_maps(ev2.get("local"))
+            if mapa:
+                resp += f"\n📍 Ver o local no mapa: {mapa}"
+            return resp
         return "Não consegui remarcar esse compromisso."
 
     def cancelar_evento(e: dict) -> str:

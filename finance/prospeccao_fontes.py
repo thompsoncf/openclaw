@@ -295,7 +295,8 @@ def buscar_cnpj_por_nome(nome: str, cidade: str = "", uf: str = "",
     """Acha CNPJs por NOME (CNPJá comercial: GET /office?names.in=...), FILTRADO
     pela UF do lead (address.state.in) e ranqueado pela cidade captada — pra os
     candidatos baterem o endereço, não trazer empresa de outro estado.
-    Devolve {"ok", "itens": [{cnpj, razao_social, nome_fantasia, cidade, uf, situacao}]}."""
+    Devolve {"ok", "itens": [{cnpj, razao_social, nome_fantasia, cidade, uf, endereco,
+    socio, situacao}]} — endereco/socio ajudam a bater com o endereço/dono achado no Maps."""
     key = token or os.environ.get("CNPJA_TOKEN")
     if not key:
         return {"ok": False, "erro": "sem_chave", "itens": []}
@@ -354,6 +355,8 @@ def buscar_cnpj_por_nome(nome: str, cidade: str = "", uf: str = "",
             pe.append(str(addr["street"]) + (", " + str(addr["number"]) if addr.get("number") else ""))
         if addr.get("district"):
             pe.append(str(addr["district"]))
+        membros = comp.get("members") or []
+        socio = (((membros[0].get("person") or {}).get("name")) or membros[0].get("name")) if membros else None
         itens.append({
             "cnpj": cnpj,
             "razao_social": comp.get("name") or o.get("name") or "",
@@ -361,6 +364,7 @@ def buscar_cnpj_por_nome(nome: str, cidade: str = "", uf: str = "",
             "cidade": (addr.get("city") or "").title(),
             "uf": it_uf,
             "endereco": " · ".join(pe),
+            "socio": socio,
             "situacao": (o.get("status") or {}).get("text") or "",
         })
     return {"ok": True, "itens": itens, "erro": None}

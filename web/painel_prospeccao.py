@@ -3994,14 +3994,14 @@ async def prospeccao_base_enriquecer(request: Request):
                                  "Render). Sem ela só dá pra colar o CNPJ direto na Ficha do lead."})
         with pool.connection() as c:
             sel = c.execute(
-                "select id, empresa, cidade, uf from prospeccao where conta_id=%s and id = any(%s)"
+                "select id, empresa, cidade, uf, obs from prospeccao where conta_id=%s and id = any(%s)"
                 " and coalesce(nullif(trim(empresa),''),'') <> '' and coalesce(cnpj,'')=''",
                 (conta_id, pids)).fetchall()
         _INICIO = time.monotonic()
         achou, ambiguo, sem = 0, 0, 0
         processados = 0
         ambiguos = []
-        for pid, nome, cidade_l, uf_l in sel:
+        for pid, nome, cidade_l, uf_l, obs_l in sel:
             if time.monotonic() - _INICIO > 45:
                 break
             processados += 1
@@ -4013,7 +4013,10 @@ async def prospeccao_base_enriquecer(request: Request):
                 achou += 1
             elif r == "ambiguo":
                 ambiguo += 1
-                ambiguos.append({"id": pid, "empresa": nome, "itens": itens})
+                # endereço do Maps (obs) é o que dá pra bater com o endereço de cada
+                # candidato; sem obs, cai pra cidade/uf mesmo (igual a Ficha faz).
+                endereco_lead = obs_l or " / ".join(x for x in (cidade_l, uf_l) if x)
+                ambiguos.append({"id": pid, "empresa": nome, "endereco": endereco_lead, "itens": itens})
             else:
                 sem += 1
         resto += len(sel) - processados
@@ -4902,12 +4905,15 @@ function cnpjResolverAbrir(leads){
   leads.forEach(function(lead){
     h+='<div id="cnpj-res-lead-'+lead.id+'" style="margin-top:.6rem;padding-top:.6rem;border-top:1px solid var(--borda)">'
       +'<div class="mut" style="font-size:.8rem;margin-bottom:.2rem">📇 <b style="color:var(--txt)">'+jsEsc(lead.empresa||('lead #'+lead.id))+'</b> — qual é o CNPJ certo?</div>'
+      +(lead.endereco?('<div class="mut" style="font-size:.76rem;margin-bottom:.3rem">📍 Endereço do Maps: <b>'+jsEsc(lead.endereco)+'</b> — confira qual candidato bate:</div>'):'')
       +'<div class="rlist">';
     lead.itens.forEach(function(it){
       var loc=(it.cidade?(jsEsc(it.cidade)+(it.uf?('/'+it.uf):'')):'');
-      h+='<div class="rrow" style="gap:.5rem"><span style="flex:1"><b style="font-size:.85rem">'+jsEsc(it.razao_social||it.nome_fantasia||it.cnpj)+'</b>'
-        +'<span class="mut" style="font-size:.74rem"> · '+it.cnpj+(it.situacao?(' · '+jsEsc(it.situacao)):'')+(loc?(' · 📍 '+loc):'')+'</span></span>'
-        +'<button type="button" class="pbtn" style="padding:.3rem .7rem;font-size:.78rem;margin:0" onclick="cnpjResolverUsar('+lead.id+',\\''+it.cnpj+'\\',this)">usar</button></div>';
+      h+='<div class="rrow" style="gap:.5rem;align-items:flex-start"><span style="flex:1"><b style="font-size:.85rem">'+jsEsc(it.razao_social||it.nome_fantasia||it.cnpj)+'</b>'
+        +'<span class="mut" style="font-size:.74rem"> · '+it.cnpj+(it.situacao?(' · '+jsEsc(it.situacao)):'')+'</span>'
+        +(it.endereco?('<span class="mut" style="display:block;font-size:.74rem">📍 '+jsEsc(it.endereco)+(loc?(' · '+loc):'')+'</span>'):(loc?('<span class="mut" style="display:block;font-size:.74rem">📍 '+loc+'</span>'):''))
+        +(it.socio?('<span class="mut" style="display:block;font-size:.74rem">🧑‍💼 '+jsEsc(it.socio)+'</span>'):'')
+        +'</span><button type="button" class="pbtn" style="padding:.3rem .7rem;font-size:.78rem;margin:0;flex-shrink:0" onclick="cnpjResolverUsar('+lead.id+',\\''+it.cnpj+'\\',this)">usar</button></div>';
     });
     h+='</div><div class="mut" style="font-size:.76rem;margin-top:.3rem">Nenhum bate? Abra a ficha do lead e use "🔎 achar CNPJ" lá pra ver mais opções ou colar direto.</div></div>';
   });
@@ -5597,6 +5603,7 @@ function acharCnpj(id,btn){var box=document.getElementById('cnpj-cands');var end
         +'<span style="flex:1"><b style="font-size:.85rem">'+jsEsc(it.razao_social||it.nome_fantasia||it.cnpj)+'</b>'
         +'<span class="mut" style="font-size:.74rem"> · '+it.cnpj+(it.situacao?(' · '+jsEsc(it.situacao)):'')+'</span>'
         +(it.endereco?('<span class="mut" style="display:block;font-size:.74rem">📍 '+jsEsc(it.endereco)+(loc?(' · '+loc):'')+'</span>'):(loc?('<span class="mut" style="display:block;font-size:.74rem">📍 '+loc+'</span>'):''))
+        +(it.socio?('<span class="mut" style="display:block;font-size:.74rem">🧑‍💼 '+jsEsc(it.socio)+'</span>'):'')
         +'</span><button class="pbtn" style="padding:.3rem .7rem;font-size:.78rem;margin:0">usar</button></form>';
     });
     h+='</div>';

@@ -16,6 +16,7 @@ import json
 import os
 import re
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
@@ -3977,19 +3978,31 @@ async def prospeccao_base_enriquecer(request: Request):
         params.append(ctx["membro_id"])
     with pool.connection() as c:
         sel = [r[0] for r in c.execute(q, tuple(params)).fetchall()]
+    # orçamento de tempo: cada lead pode levar até ~18s (3 páginas × 6s de timeout) —
+    # num lote de 20 isso passaria fácil de 5min e derrubaria o request no meio (é o
+    # jeito mais provável de "quase nada voltou" num lote grande). Corta em ~45s e
+    # devolve parcial honesto — sem isso, um site lento no meio do lote apagava o
+    # resultado de todo mundo depois dele.
+    _INICIO = time.monotonic()
+    _ORCAMENTO_S = 45
     com_email, com_wa, com_cnpj, sem = 0, 0, 0, 0
+    processados = 0
     for pid in sel:
+        if time.monotonic() - _INICIO > _ORCAMENTO_S:
+            break
         try:
             r = _enriquecer_lead(pool, conta_id, pid)
         except Exception:  # noqa: BLE001
             r = {}
+        processados += 1
         e = bool(r.get("email") and r.get("email_ok"))
         w = bool(r.get("whatsapp"))
         com_email += 1 if e else 0
         com_wa += 1 if w else 0
         com_cnpj += 1 if r.get("cnpj") else 0
         sem += 0 if (e or w or r.get("cnpj")) else 1
-    return JSONResponse({"ok": True, "tipo": "canais", "n": len(sel), "com_email": com_email,
+    resto += len(sel) - processados
+    return JSONResponse({"ok": True, "tipo": "canais", "n": processados, "com_email": com_email,
                          "com_wa": com_wa, "com_cnpj": com_cnpj, "sem": sem,
                          "sem_site": len(pids) - len(sel), "resto": resto})
 

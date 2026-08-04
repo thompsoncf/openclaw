@@ -302,34 +302,40 @@ def get_config(pool, conta_id: int) -> dict:
     """Config do lembrete da conta (cria defaults na memória se ainda não salvou)."""
     with pool.connection() as c:
         r = c.execute(
-            "select lembrete_ativo, hora_resumo, aviso_antes_min, feed_token, resumo_ativo "
-            "from agenda_config where conta_id=%s", (conta_id,)).fetchone()
+            "select lembrete_ativo, hora_resumo, aviso_antes_min, feed_token, resumo_ativo, "
+            "avisar_convidados from agenda_config where conta_id=%s", (conta_id,)).fetchone()
     if not r:
         return {"lembrete_ativo": False, "resumo_ativo": False, "hora_resumo": 7,
-                "aviso_antes_min": None, "feed_token": None}
+                "aviso_antes_min": None, "feed_token": None, "avisar_convidados": True}
     return {"lembrete_ativo": bool(r[0]), "hora_resumo": r[1],
-            "aviso_antes_min": r[2], "feed_token": r[3], "resumo_ativo": bool(r[4])}
+            "aviso_antes_min": r[2], "feed_token": r[3], "resumo_ativo": bool(r[4]),
+            "avisar_convidados": bool(r[5])}
 
 
 def salvar_config(pool, conta_id: int, *, resumo_ativo: bool, hora_resumo: int,
-                  aviso_antes_min: int | None) -> None:
+                  aviso_antes_min: int | None, avisar_convidados: bool = True) -> None:
     """Grava (upsert) a config do lembrete. resumo_ativo liga o "resumo do dia";
-    aviso_antes_min (None = desligado) liga o "aviso antes". lembrete_ativo é o
-    opt-in geral, derivado (ligado se qualquer um dos dois estiver)."""
+    aviso_antes_min (None = desligado) liga o "aviso antes"; avisar_convidados
+    estende o "aviso antes" pra quem confirmou presença (só importa quando
+    aviso_antes_min também está ligado). lembrete_ativo é o opt-in geral,
+    derivado (ligado se qualquer um dos dois primeiros estiver)."""
     hora = hora_resumo if 0 <= (hora_resumo or 0) <= 23 else 7
     lembrete_ativo = bool(resumo_ativo) or (aviso_antes_min is not None)
     with pool.connection() as c:
         c.execute(
             """insert into agenda_config
-                 (conta_id, lembrete_ativo, resumo_ativo, hora_resumo, aviso_antes_min, atualizado_em)
-               values (%s,%s,%s,%s,%s, now())
+                 (conta_id, lembrete_ativo, resumo_ativo, hora_resumo, aviso_antes_min,
+                  avisar_convidados, atualizado_em)
+               values (%s,%s,%s,%s,%s,%s, now())
                on conflict (conta_id) do update set
-                 lembrete_ativo = excluded.lembrete_ativo,
-                 resumo_ativo   = excluded.resumo_ativo,
-                 hora_resumo    = excluded.hora_resumo,
-                 aviso_antes_min= excluded.aviso_antes_min,
-                 atualizado_em  = now()""",
-            (conta_id, lembrete_ativo, bool(resumo_ativo), hora, aviso_antes_min))
+                 lembrete_ativo    = excluded.lembrete_ativo,
+                 resumo_ativo      = excluded.resumo_ativo,
+                 hora_resumo       = excluded.hora_resumo,
+                 aviso_antes_min   = excluded.aviso_antes_min,
+                 avisar_convidados = excluded.avisar_convidados,
+                 atualizado_em     = now()""",
+            (conta_id, lembrete_ativo, bool(resumo_ativo), hora, aviso_antes_min,
+             bool(avisar_convidados)))
         c.commit()
 
 

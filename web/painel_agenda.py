@@ -454,7 +454,7 @@ _CSS = """<style>
 .cal-hd,.cal-wk{display:grid;grid-template-columns:repeat(7,1fr)}
 .cal-hd{background:var(--card-2);border-bottom:1px solid var(--borda)}
 .cal-hd span{padding:9px 0;text-align:center;font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-mut);font-weight:700}
-.cal-cell{height:84px;border-right:1px solid var(--borda);border-bottom:1px solid var(--borda);padding:6px 7px;display:flex;flex-direction:column;gap:3px}
+.cal-cell{height:84px;min-width:0;overflow:hidden;border-right:1px solid var(--borda);border-bottom:1px solid var(--borda);padding:6px 7px;display:flex;flex-direction:column;gap:3px}
 .cal-cell:nth-child(7n){border-right:0}
 .cal-wk:last-child .cal-cell{border-bottom:0}
 .cal-cell.fora{background:rgba(255,255,255,.012)}

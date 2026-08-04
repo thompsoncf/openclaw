@@ -82,12 +82,12 @@ def _resumo_do_dia(pool, conta_id: int, agora) -> int:
 
 def _avisos_proximos(pool, conta_id: int, antes_min: int, agora) -> int:
     """Avisa dos eventos que começam de agora até daqui a `antes_min` minutos —
-    pro dono (Telegram, sempre) e pros convidados CONFIRMADOS (WhatsApp, só se a
-    conta tiver o template de lembrete aprovado — ver convites.template_lembrete_
-    configurado; enquanto não tiver, essa parte só não faz nada)."""
+    pro dono (Telegram, sempre) e pros convidados CONFIRMADOS (WhatsApp — veja
+    convites.avisar_convidado_confirmado: livre dentro da janela de 24h desde a
+    confirmação dele, template aprovado fora dela; sem nenhum dos dois, só não
+    manda pra esse convidado)."""
     eventos = ag.listar_eventos(pool, conta_id, agora, agora + timedelta(minutes=antes_min))
     n = 0
-    tem_template = cv.template_lembrete_configurado()
     for ev in eventos:
         h = ev["inicio"].astimezone(ag.BRT).strftime("%H:%M")
         faltam = max(0, int((ev["inicio"] - agora).total_seconds() // 60))
@@ -96,13 +96,12 @@ def _avisos_proximos(pool, conta_id: int, antes_min: int, agora) -> int:
             txt = f"⏰ *Daqui a pouco* (em ~{faltam} min): *{ev['titulo']}* às {h}.{loc}"
             if notificar.enviar_para_dono(pool, conta_id, txt):
                 n += 1
-        if tem_template:
-            n += _avisar_convidados_confirmados(pool, conta_id, ev, h, faltam)
+        n += _avisar_convidados_confirmados(pool, conta_id, ev, h, faltam, agora)
     return n
 
 
 def _avisar_convidados_confirmados(pool, conta_id: int, ev: dict, hora: str,
-                                   faltam: int) -> int:
+                                   faltam: int, agora) -> int:
     """Manda o mesmo 'tá chegando a hora' pra quem CONFIRMOU presença nesse evento
     — dedup por convidado (não pelo evento, já consumido pelo aviso do dono)."""
     n = 0
@@ -112,7 +111,9 @@ def _avisar_convidados_confirmados(pool, conta_id: int, ev: dict, hora: str,
             continue
         if not _primeira_vez(pool, conta_id, "aviso_convidado", f"evt:{ev['id']}:conv:{g['id']}"):
             continue
-        r = cv.enviar_lembrete_whatsapp(pool, conta_id, g["contato"], ev["titulo"], hora, faltam)
+        r = cv.avisar_convidado_confirmado(pool, conta_id, g["contato"], g.get("nome"),
+                                           ev["titulo"], hora, faltam,
+                                           g.get("respondido_em"), agora)
         if r.get("ok"):
             n += 1
     return n

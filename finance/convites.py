@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import secrets
+from datetime import timedelta
 
 from . import agenda as ag
 
@@ -92,15 +93,15 @@ def por_evento(pool, conta_id: int, evento_ids: list[int]) -> dict[int, list[dic
         return {}
     with pool.connection() as c:
         rows = c.execute(
-            "select evento_id, id, nome, contato, status, token from evento_convidados "
-            "where conta_id=%s and evento_id = any(%s) order by id",
+            "select evento_id, id, nome, contato, status, token, respondido_em "
+            "from evento_convidados where conta_id=%s and evento_id = any(%s) order by id",
             (conta_id, list(evento_ids))).fetchall()
     out: dict[int, list[dict]] = {}
     for r in rows:
         out.setdefault(r[0], []).append(
             {"evento_id": r[0], "id": r[1], "nome": r[2], "contato": r[3],
              "status": r[4], "status_rot": STATUS_ROT.get(r[4], "Aguardando"),
-             "token": r[5]})
+             "token": r[5], "respondido_em": r[6]})
     return out
 
 
@@ -274,28 +275,53 @@ def enviar_convite_whatsapp(pool, token: str) -> dict:
 
 
 # ---- Aviso "seu compromisso começa em breve" pros CONFIRMADOS (opt-in) --------
+#
+# O convidado que confirmou NÃO é lead frio: a própria confirmação foi uma
+# mensagem dele, o que abre a janela de 24h do WhatsApp (Twilio/Cloud API) pra
+# responder de graça, sem template — só precisa do template aprovado quando o
+# lembrete cai FORA dessa janela (reunião marcada bem depois da confirmação).
+
+JANELA_SESSAO = timedelta(hours=24)
+
+
+def _dentro_da_janela(respondido_em, agora) -> bool:
+    return bool(respondido_em) and (agora - respondido_em) < JANELA_SESSAO
+
+
+def texto_lembrete_convidado(nome: str, titulo: str, hora: str, faltam_min: int) -> str:
+    """Mesmo tom do aviso que já mandamos pro dono, adaptado pro convidado."""
+    primeiro = (nome or "").split()[0] if nome else ""
+    oi = f"{primeiro}, s" if primeiro else "S"
+    return f"⏰ {oi}eu compromisso *{titulo}* começa em ~{faltam_min} min, às {hora}."
+
 
 def template_lembrete_configurado() -> bool:
-    """True quando dá pra o Zaq avisar o convidado CONFIRMADO antes do compromisso
-    (mesma mecânica do convite, template SEPARADO — o texto é diferente, precisa
-    da própria aprovação no Twilio/Meta). Enquanto for False, o lembrete some
-    silenciosamente pro convidado (o dono continua recebendo pelo Telegram)."""
+    """True quando dá pra o Zaq avisar o convidado FORA da janela de 24h (template
+    aprovado no Twilio/Meta). Não bloqueia o aviso DENTRO da janela — esse sai
+    livre, sem template, sem essa configuração."""
     from . import whatsapp_twilio as wa
     return bool(os.environ.get("TWILIO_TMPL_LEMBRETE_SID") and wa.configurado())
 
 
-def enviar_lembrete_whatsapp(pool, conta_id: int, contato: str, titulo: str,
-                             hora: str, faltam_min: int) -> dict:
-    """Dispara o template de 'aviso antes' pro convidado CONFIRMADO, mesmo padrão
-    do convite (fora da janela de 24h, pelo número da empresa). Variáveis, NA
-    ORDEM combinada com o template aprovado: {{1}} título · {{2}} horário ·
-    {{3}} minutos que faltam. Tolerante — nunca levanta."""
+def avisar_convidado_confirmado(pool, conta_id: int, contato: str, nome: str,
+                                titulo: str, hora: str, faltam_min: int,
+                                respondido_em, agora) -> dict:
+    """Avisa o convidado CONFIRMADO que o compromisso tá chegando.
+
+    Dentro da janela de 24h desde a confirmação dele: manda texto LIVRE (sem
+    template, sem custo extra — é só uma resposta dentro da conversa já aberta).
+    Fora da janela: precisa do template aprovado (TWILIO_TMPL_LEMBRETE_SID); sem
+    ele, não manda (erro tolerante, nunca levanta)."""
     from . import whatsapp_out as wout
     if not (contato or "").strip():
         return {"ok": False, "erro": "sem_numero"}
+    if _dentro_da_janela(respondido_em, agora):
+        texto = texto_lembrete_convidado(nome, titulo, hora, faltam_min)
+        with pool.connection() as conn:
+            return wout.enviar(conn, conta_id, contato, texto)
     sid = os.environ.get("TWILIO_TMPL_LEMBRETE_SID")
     if not sid:
-        return {"ok": False, "erro": "sem_template"}
+        return {"ok": False, "erro": "fora_da_janela_sem_template"}
     variaveis = {"1": titulo, "2": hora, "3": str(faltam_min)}
     with pool.connection() as conn:
         return wout.enviar_template(conn, conta_id, contato, sid, variaveis)

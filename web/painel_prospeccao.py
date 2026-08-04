@@ -239,6 +239,14 @@ def _lead_card(id_, empresa, segmento, cidade, uf, temperatura, valor, vendedor)
             "uf": uf or "", "temperatura": temperatura, "valor": int(valor or 0), "vendedor": vendedor}
 
 
+def _fmt_cnpj(cnpj: str | None) -> str:
+    """00000000000000 -> 00.000.000/0000-00. Sobra como veio se não tiver 14 dígitos."""
+    d = "".join(ch for ch in (cnpj or "") if ch.isdigit())
+    if len(d) != 14:
+        return cnpj or ""
+    return f"{d[:2]}.{d[2:5]}.{d[5:8]}/{d[8:12]}-{d[12:]}"
+
+
 def _lead_duplicado_info(pool, conta_id: int, cnpj: str, empresa_tentativa: str) -> dict:
     """Depois de um UniqueViolation em (conta_id, cnpj): acha o lead que já existe e
     onde ele está (Base, funil ou campanha) — quem tentou cadastrar de novo geralmente
@@ -381,7 +389,7 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
                    ca.cnome, ca.wa_status, ca.passo_atual, ca.ult_txt, ca.ult_raw,
                    (case when coalesce(p.decisor_nome,'')<>'' then 1 else 0 end),
                    (case when p.enriquecido_em is not null then 1 else 0 end),
-                   p.instagram, p.decisor_nome, p.decisor_telefone, p.decisor_telefones
+                   p.instagram, p.decisor_nome, p.decisor_telefone, p.decisor_telefones, p.cnpj
               from prospeccao p
               left join lateral (
                  select cp.nome as cnome, a.wa_status, a.passo_atual, a.ultima_msg_em as ult_raw,
@@ -422,7 +430,8 @@ def prospeccao_base(request: Request, q: str = "", segmento: str = "", cidade: s
                       "ult": r[11], "tem_decisor": bool(r[13]), "verificado": bool(r[14]),
                       "whats": (r[5] or r[7] or ""), "email_v": (r[6] or ""), "insta": (r[15] or ""),
                       "dec_nome": (r[16] or ""), "dec_tel": (r[17] or ""), "dec_tels": dec_tels,
-                      "dup": ((r[1] or "").strip().lower() in dup_set)})
+                      "dup": ((r[1] or "").strip().lower() in dup_set),
+                      "cnpj": (_fmt_cnpj(r[19]) if r[19] else "")})
     metr = {"na_base": na_base, "com_wpp": com_wpp, "com_mail": com_mail, "em_camp": em_camp,
             "virou": virou, "n_dup": len(dup_set)}
     vends = _vendedores(get_pool(), conta_id) if ctx["gerencia"] else []
@@ -3969,7 +3978,8 @@ async def prospeccao_base_enriquecer(request: Request):
     """Qualifica os leads MARCADOS na Base, SÍNCRONO e com resumo do que achou:
     - tipo='canais': raspa o site → e-mail/Instagram/WhatsApp (grátis).
     - tipo='cnpj': acha o CNPJ por nome+cidade na CNPJá (paga, só gestão) — só aplica
-      quando o candidato é único; achando mais de um, fica pra escolher na Ficha.
+      quando o candidato é único; achando mais de um ou nenhum, devolve os dados
+      (candidatos / link de busca na web) pro painel da Base resolver.
     - tipo='decisor': acha o dono via Credify pelo CNPJ (paga, só gestão, pula quem já tem).
     Lê o form manual (fetch/urlencoded com 'ids' repetido)."""
     ctx, redir = _acesso(request)
@@ -4001,10 +4011,14 @@ async def prospeccao_base_enriquecer(request: Request):
         achou, ambiguo, sem = 0, 0, 0
         processados = 0
         ambiguos = []
+        sem_leads = []
         for pid, nome, cidade_l, uf_l, obs_l in sel:
             if time.monotonic() - _INICIO > 45:
                 break
             processados += 1
+            # endereço do Maps (obs) é o que dá pra bater com o endereço de cada
+            # candidato; sem obs, cai pra cidade/uf mesmo (igual a Ficha faz).
+            endereco_lead = obs_l or " / ".join(x for x in (cidade_l, uf_l) if x)
             try:
                 r, itens = _buscar_aplicar_cnpj_um(pool, conta_id, pid, nome, cidade_l, uf_l)
             except Exception:  # noqa: BLE001
@@ -4013,15 +4027,16 @@ async def prospeccao_base_enriquecer(request: Request):
                 achou += 1
             elif r == "ambiguo":
                 ambiguo += 1
-                # endereço do Maps (obs) é o que dá pra bater com o endereço de cada
-                # candidato; sem obs, cai pra cidade/uf mesmo (igual a Ficha faz).
-                endereco_lead = obs_l or " / ".join(x for x in (cidade_l, uf_l) if x)
                 ambiguos.append({"id": pid, "empresa": nome, "endereco": endereco_lead, "itens": itens})
             else:
                 sem += 1
+                termo = " ".join(x for x in (nome, cidade_l, "cnpj") if x)
+                sem_leads.append({"id": pid, "empresa": nome, "endereco": endereco_lead,
+                                  "web": "https://www.google.com/search?q=" + quote(termo)})
         resto += len(sel) - processados
         return JSONResponse({"ok": True, "tipo": "cnpj", "n": processados, "achou": achou,
-                             "ambiguo": ambiguo, "sem": sem, "resto": resto, "ambiguos": ambiguos})
+                             "ambiguo": ambiguo, "sem": sem, "resto": resto, "ambiguos": ambiguos,
+                             "sem_leads": sem_leads})
 
     if tipo == "decisor":
         if not ctx["gerencia"]:
@@ -4800,7 +4815,7 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         {% for l in leads %}
           <tr>
             <td><input class="bt-ck" type="checkbox" name="ids" value="{{ l.id }}"{% if l.campanha and not ver_camp %} disabled title="Já está na campanha {{ l.campanha }}"{% endif %}></td>
-            <td><b>{{ l.empresa }}</b>{% if l.dup %} <span class="bt-dup" title="Empresa aparece mais de uma vez na base">⚠️ dup</span>{% endif %}<div class="mut" style="font-size:.76rem">{{ l.segmento or '—' }}{% if l.cidade %} · {{ l.cidade }}{% if l.uf %}/{{ l.uf }}{% endif %}{% endif %}</div></td>
+            <td><b>{{ l.empresa }}</b>{% if l.dup %} <span class="bt-dup" title="Empresa aparece mais de uma vez na base">⚠️ dup</span>{% endif %}<div class="mut" style="font-size:.76rem">{{ l.segmento or '—' }}{% if l.cidade %} · {{ l.cidade }}{% if l.uf %}/{{ l.uf }}{% endif %}{% endif %}</div>{% if l.cnpj %}<div class="mut" style="font-size:.72rem">🏢 {{ l.cnpj }}</div>{% endif %}</td>
             <td style="font-size:.76rem;line-height:1.5;min-width:190px">
               {% if l.whats %}<div>💬 {{ l.whats }}</div>{% endif %}
               {% if l.email_v %}<div>✉️ {{ l.email_v }}</div>{% endif %}
@@ -4872,7 +4887,7 @@ function baseEnriquecer(tipo){
   var ids=baseChecked();
   if(!ids.length){alert('Marque ao menos um contato pra enriquecer.');return;}
   if(tipo==='decisor' && !confirm('Buscar o decisor de '+ids.length+' lead(s) na Credify?\\nÉ consulta paga — usa o CNPJ (sócio) OU o telefone (titular/dono) e pula quem já tem decisor.'))return;
-  if(tipo==='cnpj' && !confirm('Buscar o CNPJ de '+ids.length+' lead(s) sem CNPJ ainda, por nome + cidade (CNPJá)?\\nÉ consulta paga — só aplica quando acha exatamente 1 candidato; achando mais de um, fica pra você escolher na Ficha.'))return;
+  if(tipo==='cnpj' && !confirm('Buscar o CNPJ de '+ids.length+' lead(s) sem CNPJ ainda, por nome + cidade (CNPJá)?\\nÉ consulta paga — aplica sozinho quando acha 1 candidato só; achando mais de um ou nenhum, mostra aqui mesmo pra você resolver.'))return;
   var body=new URLSearchParams();ids.forEach(function(i){body.append('ids',i);});body.append('tipo',tipo);
   capToast(tipo==='decisor'?'Buscando decisores… (alguns segundos)':tipo==='cnpj'?'Buscando CNPJ… (alguns segundos)':'Verificando os sites… (alguns segundos)');
   fetch('/painel/prospeccao/base/qualificar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body}).then(function(r){return r.json();}).then(function(d){
@@ -4891,23 +4906,27 @@ function baseEnriquecer(tipo){
     if(d.resto)msg+='\\n(processei os primeiros '+(d.n)+'; marque menos ou repita pros demais)';
     alert(msg);
     // sempre recarrega — os que deram "achou" já foram gravados e só aparecem
-    // na lista depois do reload; os ambíguos (se tiver) reabrem o painel sozinhos.
-    if(tipo==='cnpj' && d.ambiguos && d.ambiguos.length){
-      try{sessionStorage.setItem('cnpjAmbiguosPendentes',JSON.stringify(d.ambiguos));}catch(e){}
+    // na lista depois do reload; os ambíguos/não-achados (se tiver) reabrem o
+    // painel sozinhos, restaurados do sessionStorage.
+    if(tipo==='cnpj' && ((d.ambiguos && d.ambiguos.length) || (d.sem_leads && d.sem_leads.length))){
+      try{sessionStorage.setItem('cnpjPendentes',JSON.stringify({ambiguos:d.ambiguos||[],sem_leads:d.sem_leads||[]}));}catch(e){}
     }
     location.reload();
   }).catch(function(){capToast('Falha de rede — tente de novo.');});
 }
-function cnpjResolverAbrir(leads){
+function cnpjResolverAbrir(leads,semLeads){
   var box=document.getElementById('cnpj-resolver');
-  var h='<div class="fsec" style="padding:.9rem"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">'
-    +'<b style="font-size:.9rem">🏢 Escolha o CNPJ certo (encontrou mais de 1 candidato)</b>'
-    +'<button type="button" class="pbtn ghost" style="padding:.25rem .6rem;font-size:.75rem;margin:0" onclick="document.getElementById(\\'cnpj-resolver\\').style.display=\\'none\\'">fechar</button></div>';
-  leads.forEach(function(lead){
-    h+='<div id="cnpj-res-lead-'+lead.id+'" style="margin-top:.6rem;padding-top:.6rem;border-top:1px solid var(--borda)">'
-      +'<div class="mut" style="font-size:.8rem;margin-bottom:.2rem">📇 <b style="color:var(--txt)">'+jsEsc(lead.empresa||('lead #'+lead.id))+'</b> — qual é o CNPJ certo?</div>'
-      +(lead.endereco?('<div class="mut" style="font-size:.76rem;margin-bottom:.3rem">📍 Endereço do Maps: <b>'+jsEsc(lead.endereco)+'</b> — confira qual candidato bate:</div>'):'')
-      +'<div class="rlist">';
+  leads=leads||[];semLeads=semLeads||[];
+  var h='';
+  if(leads.length){
+    h+='<div class="fsec" style="padding:.9rem"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">'
+      +'<b style="font-size:.9rem">🏢 Escolha o CNPJ certo (encontrou mais de 1 candidato)</b>'
+      +'<button type="button" class="pbtn ghost" style="padding:.25rem .6rem;font-size:.75rem;margin:0" onclick="this.closest(\\'.fsec\\').style.display=\\'none\\'">fechar</button></div>';
+    leads.forEach(function(lead){
+      h+='<div id="cnpj-res-lead-'+lead.id+'" style="margin-top:.6rem;padding-top:.6rem;border-top:1px solid var(--borda)">'
+        +'<div class="mut" style="font-size:.8rem;margin-bottom:.2rem">📇 <b style="color:var(--txt)">'+jsEsc(lead.empresa||('lead #'+lead.id))+'</b> — qual é o CNPJ certo?</div>'
+        +(lead.endereco?('<div class="mut" style="font-size:.76rem;margin-bottom:.3rem">📍 Endereço do Maps: <b>'+jsEsc(lead.endereco)+'</b> — confira qual candidato bate:</div>'):'')
+        +'<div class="rlist">';
     lead.itens.forEach(function(it){
       var loc=(it.cidade?(jsEsc(it.cidade)+(it.uf?('/'+it.uf):'')):'');
       h+='<div class="rrow" style="gap:.5rem;align-items:flex-start"><span style="flex:1"><b style="font-size:.85rem">'+jsEsc(it.razao_social||it.nome_fantasia||it.cnpj)+'</b>'
@@ -4917,9 +4936,28 @@ function cnpjResolverAbrir(leads){
         +'</span><button type="button" class="pbtn" style="padding:.3rem .7rem;font-size:.78rem;margin:0;flex-shrink:0" onclick="cnpjResolverUsar('+lead.id+',\\''+it.cnpj+'\\',this)">usar</button></div>';
     });
     h+='</div><div class="mut" style="font-size:.76rem;margin-top:.3rem">Nenhum bate? Abra a ficha do lead e use "🔎 achar CNPJ" lá pra ver mais opções ou colar direto.</div></div>';
-  });
-  h+='</div>';
-  box.innerHTML=h;box.style.display='block';box.scrollIntoView({behavior:'smooth',block:'start'});
+    });
+    h+='</div>';
+  }
+  if(semLeads.length){
+    h+='<div class="fsec" style="padding:.9rem'+(leads.length?';margin-top:1rem':'')+'">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.4rem">'
+      +'<b style="font-size:.9rem">🔍 Não encontrado ('+semLeads.length+')</b>'
+      +'<button type="button" class="pbtn ghost" style="padding:.25rem .6rem;font-size:.75rem;margin:0" onclick="this.closest(\\'.fsec\\').style.display=\\'none\\'">fechar</button></div>'
+      +'<div class="mut" style="font-size:.78rem;margin-bottom:.7rem">A CNPJá não achou nenhum candidato pra esses — geralmente uma busca no Google resolve (o CNPJ costuma aparecer direto no resultado ou na ficha do Google Meu Negócio).</div>'
+      +'<div style="display:flex;flex-direction:column;gap:.6rem">';
+    semLeads.forEach(function(lead){
+      h+='<div id="cnpj-sem-lead-'+lead.id+'" style="border:1px dashed var(--borda);border-radius:12px;padding:.7rem .8rem;display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap">'
+        +'<div style="min-width:0"><div style="font-size:.85rem;font-weight:600">'+jsEsc(lead.empresa||('lead #'+lead.id))+'</div>'
+        +(lead.endereco?('<div class="mut" style="font-size:.76rem;margin-top:.2rem">📍 Endereço do Maps: '+jsEsc(lead.endereco)+'</div>'):'')+'</div>'
+        +(lead.web?('<a href="'+lead.web+'" target="_blank" rel="noopener" style="font-size:.8rem;font-weight:600;color:var(--verde-claro);text-decoration:none;display:inline-flex;align-items:center;gap:.3rem;white-space:nowrap;flex-shrink:0;padding:.4rem .7rem;border:1px solid #1e4a3a;border-radius:8px">🔎 buscar na web ›</a>'):'')
+        +'</div>';
+    });
+    h+='</div></div>';
+  }
+  box.innerHTML=h;
+  box.style.display=h?'block':'none';
+  if(h)box.scrollIntoView({behavior:'smooth',block:'start'});
 }
 function cnpjResolverUsar(id,cnpj,btn){
   btn.disabled=true;btn.textContent='...';
@@ -4929,18 +4967,24 @@ function cnpjResolverUsar(id,cnpj,btn){
     var card=document.getElementById('cnpj-res-lead-'+id);
     if(card)card.outerHTML='<div class="ok" style="margin-top:.6rem">✓ '+jsEsc(d.msg||'CNPJ aplicado')+'</div>';
     var box=document.getElementById('cnpj-resolver');
-    if(box && !box.querySelector('.rlist'))setTimeout(function(){location.reload();},900);
+    // só recarrega quando não sobrar NENHUM ambíguo pendente e não tiver bloco de
+    // "não encontrado" (esse fica exposto até o usuário sair da página — reload
+    // apagaria os links de busca, e ele não é recarregado do banco).
+    if(box && !box.querySelector('[id^="cnpj-res-lead-"]') && !box.querySelector('[id^="cnpj-sem-lead-"]')){
+      setTimeout(function(){location.reload();},900);
+    }
   }).catch(function(){alert('Falha de rede — tente de novo.');btn.disabled=false;btn.textContent='usar';});
 }
 (function(){
   // depois do reload que mostra os "achou", reabre o painel sozinho pros que
-  // ainda ficaram pendentes de escolha (guardados antes de recarregar).
+  // ainda ficaram pendentes (ambíguos pra escolher / não achados pra buscar na
+  // web), guardados antes de recarregar.
   try{
-    var pend=sessionStorage.getItem('cnpjAmbiguosPendentes');
+    var pend=sessionStorage.getItem('cnpjPendentes');
     if(pend){
-      sessionStorage.removeItem('cnpjAmbiguosPendentes');
-      var leads=JSON.parse(pend);
-      if(leads&&leads.length)cnpjResolverAbrir(leads);
+      sessionStorage.removeItem('cnpjPendentes');
+      var d=JSON.parse(pend);
+      if(d&&((d.ambiguos&&d.ambiguos.length)||(d.sem_leads&&d.sem_leads.length)))cnpjResolverAbrir(d.ambiguos,d.sem_leads);
     }
   }catch(e){}
 })();

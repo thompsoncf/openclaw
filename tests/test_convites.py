@@ -156,14 +156,29 @@ def test_pendentes_ignora_evento_passado(pool, conta_id):
 
 
 def test_confirmacao_texto_por_status(pool, conta_id):
-    ev = _evento(pool, conta_id, titulo="Café")
+    ev = _evento(pool, conta_id, titulo="Café")   # _evento() marca local="Online"
     conv = cv.criar_convidado(pool, conta_id, ev["id"], "Carla Silva", "86988887777")
     c = cv.responder(pool, conv["token"], "confirmado")
     txt = cv.confirmacao_texto(c)
     assert "Carla" in txt and "Café" in txt and "confirmada" in txt.lower()
     assert "calend" in txt.lower()                       # traz o link do calendário
+    assert "maps" in txt.lower() and "mapa" in txt.lower()   # e o link do local
     c2 = cv.responder(pool, conv["token"], "recusado")
     assert "não vai poder" in cv.confirmacao_texto(c2).lower()
+
+
+def test_confirmacao_texto_sem_local_nao_traz_mapa(pool, conta_id):
+    ev = ag.criar_evento(pool, conta_id, "Ligação", ag.agora_brt() + timedelta(days=1))
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Léo", "")
+    c = cv.responder(pool, conv["token"], "confirmado")
+    assert "mapa" not in cv.confirmacao_texto(c).lower()
+
+
+def test_link_mapa(pool, conta_id):
+    com_local = _evento(pool, conta_id)                  # local="Online"
+    assert cv.link_mapa(com_local) is not None
+    sem_local = ag.criar_evento(pool, conta_id, "Sem local", ag.agora_brt() + timedelta(days=1))
+    assert cv.link_mapa(sem_local) is None
 
 
 def test_enviar_convite_monta_variaveis(pool, conta_id, monkeypatch):

@@ -235,6 +235,17 @@ def link_google(ev: dict) -> str:
     return "https://calendar.google.com/calendar/render?" + p
 
 
+def link_maps(local: str | None) -> str | None:
+    """URL do Google Maps pro local do evento (texto livre — endereço, nome do
+    lugar etc.). None se não tiver local, pra quem for montar mensagem pular a
+    linha inteira em vez de mandar um link vazio."""
+    local = (local or "").strip()
+    if not local:
+        return None
+    from urllib.parse import quote
+    return "https://www.google.com/maps/search/?api=1&query=" + quote(local)
+
+
 def _ics_escape(t: str) -> str:
     return (str(t or "").replace("\\", "\\\\").replace(";", "\\;")
             .replace(",", "\\,").replace("\n", "\\n"))

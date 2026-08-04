@@ -345,6 +345,7 @@ def _render_convite(c: dict, resultado: str | None) -> HTMLResponse:
         "local": ev.get("local") or "", "token": c["token"],
         "estado": estado, "resposta": c.get("resposta") or "",
         "cal_link": cv.link_calendario(ev) if estado == "confirmado" else "",
+        "mapa_link": (cv.link_mapa(ev) if estado == "confirmado" else "") or "",
     }
     return HTMLResponse(_env.get_template("convite").render(**ctx))
 
@@ -857,7 +858,10 @@ _CONVITE_TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
         <div class="ic">✅</div><h2>Presença confirmada!</h2>
         <p>Você confirmou <b style="color:var(--txt)">{{ titulo }}</b> — {{ quando }}.</p>
         <p>A {{ empresa }} já foi avisada. Até lá! 👋</p>
-        {% if cal_link %}<a class="cal" href="{{ cal_link }}" target="_blank" rel="noopener">📆 Adicionar ao meu calendário</a>{% endif %}
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:16px">
+          {% if cal_link %}<a class="cal" href="{{ cal_link }}" style="margin-top:0" target="_blank" rel="noopener">📆 Adicionar ao meu calendário</a>{% endif %}
+          {% if mapa_link %}<a class="cal" href="{{ mapa_link }}" style="margin-top:0" target="_blank" rel="noopener">📍 Ver local no mapa{% if local %} — {{ local }}{% endif %}</a>{% endif %}
+        </div>
       {% elif estado == 'remarcar' %}
         <div class="ic">🔁</div><h2>Pedido enviado</h2>
         <p>Avisamos a {{ empresa }} que você prefere outro horário pra <b style="color:var(--txt)">{{ titulo }}</b>.</p>

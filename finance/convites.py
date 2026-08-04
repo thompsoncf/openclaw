@@ -120,6 +120,12 @@ def link_calendario(ev: dict) -> str:
     return ag.link_google(ev)
 
 
+def link_mapa(ev: dict) -> str | None:
+    """Link do Google Maps pro local do evento — None se o evento não tem local
+    (reunião online, por exemplo)."""
+    return ag.link_maps(ev.get("local"))
+
+
 def url_convite(token: str) -> str:
     """Link público /convite/<token> a partir do APP_URL (pro agente, que não tem
     request). Sem APP_URL, devolve o caminho relativo."""
@@ -221,8 +227,12 @@ def confirmacao_texto(c: dict) -> str:
     oi = f"{primeiro}, " if primeiro else ""
     st = c["status"]
     if st == "confirmado":
-        return (f"✅ {oi}presença confirmada em *{ev['titulo']}* — {quando}! "
-                f"Obrigado 🙌\n\n📆 Adicionar ao seu calendário: {link_calendario(ev)}")
+        txt = (f"✅ {oi}presença confirmada em *{ev['titulo']}* — {quando}! "
+               f"Obrigado 🙌\n\n📆 Adicionar ao seu calendário: {link_calendario(ev)}")
+        mapa = link_mapa(ev)
+        if mapa:
+            txt += f"\n📍 Ver o local no mapa: {mapa}"
+        return txt
     if st == "remarcar":
         return (f"🔁 Anotado{(' ' + primeiro) if primeiro else ''}! Vou avisar o "
                 f"organizador que você precisa remarcar *{ev['titulo']}* ({quando}) "

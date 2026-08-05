@@ -2704,13 +2704,26 @@ def _campanhas_dados(c, conta_id):
                where e.campanha_id=cp.id and e.evento='bounce') ev on true
             where cp.conta_id=%s order by cp.criado_em desc""",
         (conta_id,)).fetchall()
-    # leads únicos que clicaram "Agora não" (qualquer campanha da conta) — sinal
-    # explícito de "não quero contato agora", diferente de quem só não respondeu.
+    # leads únicos que clicaram cada botão do template de WhatsApp (qualquer
+    # campanha da conta) — os 3 saem juntos no mesmo clique do lead, então dá
+    # pra somar sem contar 2x: "Agora não" grava evento='clicou', os outros
+    # dois ("Quero te conhecer" / "Quero o material") gravam evento='respondeu'
+    # (ver _rot_btn na rota que processa o clique do botão).
     sem_interesse = c.execute(
         """select count(distinct e.prospeccao_id) from campanha_eventos e
              join campanhas cp on cp.id=e.campanha_id
             where cp.conta_id=%s and e.canal='whatsapp' and e.evento='clicou'
               and e.detalhe='Agora não'""", (conta_id,)).fetchone()[0]
+    quer_conhecer = c.execute(
+        """select count(distinct e.prospeccao_id) from campanha_eventos e
+             join campanhas cp on cp.id=e.campanha_id
+            where cp.conta_id=%s and e.canal='whatsapp' and e.evento='respondeu'
+              and e.detalhe='Quero te conhecer'""", (conta_id,)).fetchone()[0]
+    quer_material = c.execute(
+        """select count(distinct e.prospeccao_id) from campanha_eventos e
+             join campanhas cp on cp.id=e.campanha_id
+            where cp.conta_id=%s and e.canal='whatsapp' and e.evento='respondeu'
+              and e.detalhe='Quero o material'""", (conta_id,)).fetchone()[0]
     camps = []
     tot_gasto = tot_msgs = tot_email = tot_teto = perto = 0
     for r in rows:
@@ -2753,6 +2766,7 @@ def _campanhas_dados(c, conta_id):
         })
     totais = {"gasto_fmt": _reais(tot_gasto), "msgs": tot_msgs, "emails": tot_email,
               "teto_fmt": _reais(tot_teto), "perto": perto, "sem_interesse": sem_interesse,
+              "quer_conhecer": quer_conhecer, "quer_material": quer_material,
               "custo_lead_fmt": _reais(tot_gasto / tot_msgs if tot_msgs else 0)}
     return camps, totais
 
@@ -6810,6 +6824,8 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
       <div class="gi"><div class="k">Perto do limite</div><div class="v warn" data-t="tot_perto">{{ totais.perto }}</div></div>
       <div class="gi"><div class="k">Custo médio/lead</div><div class="v" data-t="tot_cpl">{{ totais.custo_lead_fmt }}</div></div>
       <div class="gi"><div class="k">🙅 Sem interesse agora</div><div class="v warn" data-t="tot_sem_interesse">{{ totais.sem_interesse }}</div><div class="f">clicaram "Agora não" no WhatsApp</div></div>
+      <div class="gi"><div class="k">👋 Quero te conhecer</div><div class="v free" data-t="tot_quer_conhecer">{{ totais.quer_conhecer }}</div><div class="f">clicaram no WhatsApp</div></div>
+      <div class="gi"><div class="k">📎 Quero o material</div><div class="v free" data-t="tot_quer_material">{{ totais.quer_material }}</div><div class="f">clicaram no WhatsApp</div></div>
     </div>
   </div>
   {% endif %}
@@ -6911,6 +6927,7 @@ document.addEventListener('keydown', function(e){
     s('tot_gasto',t.gasto_fmt); s('tot_msgs',t.msgs); s('tot_emails',t.emails);
     s('tot_teto',t.teto_fmt); s('tot_perto',t.perto); s('tot_cpl',t.custo_lead_fmt);
     s('tot_sem_interesse',t.sem_interesse);
+    s('tot_quer_conhecer',t.quer_conhecer); s('tot_quer_material',t.quer_material);
   }
   var timer=null;
   function tick(){

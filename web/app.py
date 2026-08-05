@@ -110,39 +110,52 @@ app.include_router(proposta_router)
 
 @app.on_event("startup")
 def _iniciar_poller_email() -> None:
-    """Poller de e-mail recebido (IMAP): a cada ~2min puxa o que chegou na caixa
-    pro inbox. Só liga se houver credencial (SMTP/IMAP); com 2 workers, o advisory
-    lock garante que só um sincroniza por vez. Best-effort — nunca quebra o app."""
-    try:
-        from finance import email_inbound as _ein
+    """Poller de e-mail recebido (IMAP) + motor de campanhas: a cada ~2min puxa o
+    que chegou na caixa e dispara o que tá pendente. Só o poller de e-mail
+    depende de credencial (SMTP/IMAP); campanhas rodam mesmo sem. Com 2 workers,
+    o advisory lock de cada canal (_LOCK/_LOCK_WA/_LOCK_REENG) garante que só um
+    processa por vez.
+
+    AUTORRECUPERÁVEL: o setup (pool/import) fica DENTRO do loop, então um
+    soluço passageiro no boot (ex.: Postgres ainda não aceita conexão logo
+    depois de um restart do Render) não mata a thread pra sempre — antes disso
+    acontecia, e o motor de campanhas ficava mudo até o PRÓXIMO restart manual,
+    mesmo com tudo saudável de novo minutos depois."""
+    def _loop():
         import time as _time
-
-        def _loop():
-            pool = _setup()
-            from finance import campanhas_motor as _cm
-            while True:
+        pool = None
+        _ein = _cm = None
+        while True:
+            try:
                 _time.sleep(120)          # sleep-first: não roda em app efêmero (testes)
-                try:
-                    _ein.poll_uma_vez(pool)          # recebe e-mail
-                except Exception:  # noqa: BLE001
-                    pass
-                try:
-                    _cm.enviar_pendentes(pool)       # dispara campanhas ativas
-                except Exception:  # noqa: BLE001
-                    pass
-                try:
-                    _cm.renovar_tokens_ig(pool)      # renova token do Instagram (60 dias)
-                except Exception:  # noqa: BLE001
-                    pass
-                try:
-                    from finance import lembretes as _lb
-                    _lb.rodar(pool)                  # resumo do dia + aviso antes (agenda)
-                except Exception:  # noqa: BLE001
-                    pass
+                if pool is None:
+                    pool = _setup()
+                if _ein is None:
+                    from finance import email_inbound as _ein
+                if _cm is None:
+                    from finance import campanhas_motor as _cm
+            except Exception as e:  # noqa: BLE001 — setup falhou: loga e tenta de novo no próximo ciclo
+                log.warning("poller: setup falhou (%s: %s) — tenta de novo em 2min", type(e).__name__, e)
+                continue
+            try:
+                _ein.poll_uma_vez(pool)          # recebe e-mail
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: e-mail falhou: %s: %s", type(e).__name__, e)
+            try:
+                _cm.enviar_pendentes(pool)       # dispara campanhas ativas
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: campanhas falhou: %s: %s", type(e).__name__, e)
+            try:
+                _cm.renovar_tokens_ig(pool)      # renova token do Instagram (60 dias)
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: renovar_tokens_ig falhou: %s: %s", type(e).__name__, e)
+            try:
+                from finance import lembretes as _lb
+                _lb.rodar(pool)                  # resumo do dia + aviso antes (agenda)
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: lembretes falhou: %s: %s", type(e).__name__, e)
 
-        threading.Thread(target=_loop, daemon=True, name="email-poller").start()
-    except Exception:  # noqa: BLE001
-        pass
+    threading.Thread(target=_loop, daemon=True, name="email-poller").start()
 
 
 # ---------------------------------------------------------------------------

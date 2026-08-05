@@ -120,14 +120,26 @@ def _iniciar_poller_email() -> None:
     soluço passageiro no boot (ex.: Postgres ainda não aceita conexão logo
     depois de um restart do Render) não mata a thread pra sempre — antes disso
     acontecia, e o motor de campanhas ficava mudo até o PRÓXIMO restart manual,
-    mesmo com tudo saudável de novo minutos depois."""
+    mesmo com tudo saudável de novo minutos depois.
+
+    LOG DE DIAGNÓSTICO (pra descobrir se/onde trava num restart): loga quando o
+    evento de startup dispara, quando a thread é criada, quando ela de fato
+    começa a rodar (prova que o SO rodou o código, não só que .start() não
+    lançou exceção) e, a cada ciclo, quantos itens enviar_pendentes() processou
+    — 0 repetido com leads elegíveis é pista de outro bug; nenhuma linha de
+    ciclo nenhuma é pista de que a thread não chegou a rodar."""
+    log.info("startup: registrando thread do poller (e-mail + motor de campanhas)")
+
     def _loop():
         import time as _time
+        log.info("poller: thread iniciada — 1º ciclo em ~2min")
         pool = None
         _ein = _cm = None
+        ciclo = 0
         while True:
             try:
                 _time.sleep(120)          # sleep-first: não roda em app efêmero (testes)
+                ciclo += 1
                 if pool is None:
                     pool = _setup()
                 if _ein is None:
@@ -135,27 +147,34 @@ def _iniciar_poller_email() -> None:
                 if _cm is None:
                     from finance import campanhas_motor as _cm
             except Exception as e:  # noqa: BLE001 — setup falhou: loga e tenta de novo no próximo ciclo
-                log.warning("poller: setup falhou (%s: %s) — tenta de novo em 2min", type(e).__name__, e)
+                log.warning("poller: ciclo #%d — setup falhou (%s: %s) — tenta de novo em 2min",
+                           ciclo, type(e).__name__, e)
                 continue
+            log.info("poller: ciclo #%d iniciado", ciclo)
             try:
                 _ein.poll_uma_vez(pool)          # recebe e-mail
             except Exception as e:  # noqa: BLE001
-                log.info("poller: e-mail falhou: %s: %s", type(e).__name__, e)
+                log.info("poller: ciclo #%d — e-mail falhou: %s: %s", ciclo, type(e).__name__, e)
             try:
-                _cm.enviar_pendentes(pool)       # dispara campanhas ativas
+                n = _cm.enviar_pendentes(pool)   # dispara campanhas ativas
+                log.info("poller: ciclo #%d — campanhas: %d processado(s)", ciclo, n)
             except Exception as e:  # noqa: BLE001
-                log.info("poller: campanhas falhou: %s: %s", type(e).__name__, e)
+                log.info("poller: ciclo #%d — campanhas falhou: %s: %s", ciclo, type(e).__name__, e)
             try:
                 _cm.renovar_tokens_ig(pool)      # renova token do Instagram (60 dias)
             except Exception as e:  # noqa: BLE001
-                log.info("poller: renovar_tokens_ig falhou: %s: %s", type(e).__name__, e)
+                log.info("poller: ciclo #%d — renovar_tokens_ig falhou: %s: %s", ciclo, type(e).__name__, e)
             try:
                 from finance import lembretes as _lb
                 _lb.rodar(pool)                  # resumo do dia + aviso antes (agenda)
             except Exception as e:  # noqa: BLE001
-                log.info("poller: lembretes falhou: %s: %s", type(e).__name__, e)
+                log.info("poller: ciclo #%d — lembretes falhou: %s: %s", ciclo, type(e).__name__, e)
 
-    threading.Thread(target=_loop, daemon=True, name="email-poller").start()
+    try:
+        threading.Thread(target=_loop, daemon=True, name="email-poller").start()
+        log.info("startup: thread do poller criada")
+    except Exception as e:  # noqa: BLE001 — não deveria falhar, mas se falhar loga em vez de sumir
+        log.error("startup: falha ao criar a thread do poller: %s: %s", type(e).__name__, e)
 
 
 # ---------------------------------------------------------------------------

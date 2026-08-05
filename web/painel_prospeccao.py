@@ -2668,6 +2668,38 @@ def _reais(v) -> str:
     return "R$ " + f"{float(v or 0):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _motor_status(c) -> dict:
+    """Sinal de vida do motor de campanhas (thread de fundo em web/app.py, grava
+    em app_config.prospec_motor_ultimo_ciclo a cada ~2min). Compara com agora e
+    devolve {"estado": ok|lento|parado|nunca, "ic", "texto"} pra Campanhas
+    mostrar se o motor tá rodando de verdade sem precisar checar log/banco na
+    mão — mesmo texto/estado servem pro render inicial e pro polling ao vivo."""
+    row = c.execute(
+        "select valor, atualizado_em, now() from app_config where chave='prospec_motor_ultimo_ciclo'"
+    ).fetchone()
+    if not row:
+        return {"estado": "nunca", "ic": "⚪",
+                "texto": "Motor iniciando · ainda sem nenhum ciclo registrado nesse processo"}
+    valor, atualizado_em, agora = row
+    delta_seg = (agora - atualizado_em).total_seconds()
+    n = int(valor) if (valor or "").isdigit() else 0
+    if delta_seg < 60:
+        quando = "agora mesmo"
+    elif delta_seg < 3600:
+        quando = f"há {int(delta_seg // 60)} min"
+    else:
+        h, m = int(delta_seg // 3600), int((delta_seg % 3600) // 60)
+        quando = f"há {h}h{m:02d}"
+    if delta_seg <= 180:
+        return {"estado": "ok", "ic": "🟢",
+                "texto": f"Motor ativo · último ciclo {quando} · processou {n}"}
+    if delta_seg <= 480:
+        return {"estado": "lento", "ic": "🟡",
+                "texto": f"Motor meio devagar · último ciclo {quando} (o normal é a cada 2 min)"}
+    return {"estado": "parado", "ic": "🔴",
+            "texto": f"Motor parado · nenhum ciclo {quando} · normalmente roda a cada 2 min"}
+
+
 def _campanhas_dados(c, conta_id):
     """Métricas por canal de TODAS as campanhas da conta (lista + polling). Uma
     consulta LATERAL agrega tudo por campanha. Devolve (camps, totais)."""
@@ -2767,7 +2799,8 @@ def _campanhas_dados(c, conta_id):
     totais = {"gasto_fmt": _reais(tot_gasto), "msgs": tot_msgs, "emails": tot_email,
               "teto_fmt": _reais(tot_teto), "perto": perto, "sem_interesse": sem_interesse,
               "quer_conhecer": quer_conhecer, "quer_material": quer_material,
-              "custo_lead_fmt": _reais(tot_gasto / tot_msgs if tot_msgs else 0)}
+              "custo_lead_fmt": _reais(tot_gasto / tot_msgs if tot_msgs else 0),
+              "motor": _motor_status(c)}
     return camps, totais
 
 
@@ -6785,6 +6818,14 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
 .tbar .bar i{display:block;height:100%;border-radius:999px;transition:width .5s ease}
 .tbar .lbl{font-size:.7rem;color:var(--mut);white-space:nowrap;font-variant-numeric:tabular-nums}
 .tbar .lbl b{color:var(--txt)}
+/* sinal de vida do motor (thread de fundo) — mesma escala do resto do cartão */
+.motorstat{margin-top:.42rem;font-size:.73rem;display:flex;align-items:center;gap:.35rem;color:var(--mut)}
+.motorstat .ic{font-size:.68rem;line-height:1}
+.motorstat.ok{color:var(--verde-claro)}
+.motorstat.lento{color:#e0a33e}
+.motorstat.parado{color:#e0574f;font-weight:600}
+.motorstat a{color:inherit;text-decoration:underline;text-decoration-color:currentColor;opacity:.85}
+.motorstat a:hover{opacity:1}
 .fok{background:var(--verde)} .famar{background:#e0a33e} .fcoral{background:#e0574f}
 .calert{margin-left:auto;font-size:.66rem;font-weight:700;padding:.08rem .45rem;border-radius:999px}
 .calert.amar{color:#e0a33e;border:1px solid #5a4520;background:#2a2113}
@@ -6888,6 +6929,7 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
           <span class="kv" style="color:var(--verde-claro)">grátis</span>
         </div>
         <div class="pbar mail"><i class="e" data-w="email_fill" style="width:{{ c.email.pct }}%"></i><i class="r" data-w="email_resp_fill" style="width:{{ c.email.pct_resp }}%"></i></div>
+        <div class="motorstat {{ totais.motor.estado }}" data-t="motor" title="{% if totais.motor.estado == 'parado' %}Reinicie o serviço openclaw-web no Render{% endif %}"><span class="ic">{{ totais.motor.ic }}</span> {{ totais.motor.texto }}</div>
       </div>
     </div>
     {% else %}<div class="mut" style="text-align:center;padding:2rem">Nenhuma campanha ainda — clique em <b>＋ Criar</b> acima.</div>{% endfor %}
@@ -6937,6 +6979,13 @@ document.addEventListener('keydown', function(e){
     s('tot_teto',t.teto_fmt); s('tot_perto',t.perto); s('tot_cpl',t.custo_lead_fmt);
     s('tot_sem_interesse',t.sem_interesse);
     s('tot_quer_conhecer',t.quer_conhecer); s('tot_quer_material',t.quer_material);
+    if(t.motor){
+      document.querySelectorAll('.motorstat').forEach(function(el){
+        el.className='motorstat '+t.motor.estado;
+        el.title=(t.motor.estado==='parado')?'Reinicie o serviço openclaw-web no Render':'';
+        el.textContent=t.motor.ic+' '+t.motor.texto;
+      });
+    }
   }
   var timer=null;
   function tick(){

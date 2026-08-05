@@ -4131,16 +4131,17 @@ async def prospeccao_base_enriquecer(request: Request):
                 r, itens = _buscar_aplicar_cnpj_um(pool, conta_id, pid, nome, cidade_l, uf_l)
             except Exception:  # noqa: BLE001
                 r, itens = "sem", []
+            termo = " ".join(x for x in (nome, cidade_l, "cnpj") if x)
+            web = "https://www.google.com/search?q=" + quote(termo)
             if r == "achou":
                 achou += 1
             elif r == "ambiguo":
                 ambiguo += 1
-                ambiguos.append({"id": pid, "empresa": nome, "endereco": endereco_lead, "itens": itens})
+                ambiguos.append({"id": pid, "empresa": nome, "endereco": endereco_lead, "itens": itens,
+                                 "web": web})
             else:
                 sem += 1
-                termo = " ".join(x for x in (nome, cidade_l, "cnpj") if x)
-                sem_leads.append({"id": pid, "empresa": nome, "endereco": endereco_lead,
-                                  "web": "https://www.google.com/search?q=" + quote(termo)})
+                sem_leads.append({"id": pid, "empresa": nome, "endereco": endereco_lead, "web": web})
         resto += len(sel) - processados
         return JSONResponse({"ok": True, "tipo": "cnpj", "n": processados, "achou": achou,
                              "ambiguo": ambiguo, "sem": sem, "resto": resto, "ambiguos": ambiguos,
@@ -5161,7 +5162,7 @@ function cnpjResolverAbrir(leads,semLeads){
         +(it.socio?('<span class="mut" style="display:block;font-size:.74rem">🧑‍💼 '+jsEsc(it.socio)+'</span>'):'')
         +'</span><button type="button" class="pbtn" style="padding:.3rem .7rem;font-size:.78rem;margin:0;flex-shrink:0" onclick="cnpjResolverUsar('+lead.id+',\\''+it.cnpj+'\\',this)">usar</button></div>';
     });
-    h+='</div><div class="mut" style="font-size:.76rem;margin-top:.3rem">Nenhum bate? Abra a ficha do lead e use "🔎 achar CNPJ" lá pra ver mais opções ou colar direto.</div></div>';
+    h+='</div>'+(lead.web?('<div style="margin-top:.4rem"><a class="mut" style="font-size:.76rem" target="_blank" rel="noopener" href="'+lead.web+'">nenhuma bate? buscar na web →</a></div>'):'')+'</div>';
     });
     h+='</div>';
   }

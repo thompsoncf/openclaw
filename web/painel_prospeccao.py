@@ -5031,9 +5031,9 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         </tr></thead>
         <tbody>
         {% for l in leads %}
-          <tr>
+          <tr id="bt-row-{{ l.id }}">
             <td><input class="bt-ck" type="checkbox" name="ids" value="{{ l.id }}"{% if not l.cnpj %} data-sem-cnpj="1"{% endif %}{% if l.campanha and not ver_camp %} disabled title="Já está na campanha {{ l.campanha }}"{% endif %}></td>
-            <td><b>{{ l.empresa }}</b>{% if l.dup %} <span class="bt-dup" title="Empresa aparece mais de uma vez na base">⚠️ dup</span>{% endif %}<div class="mut" style="font-size:.76rem">{{ l.segmento or '—' }}{% if l.cidade %} · {{ l.cidade }}{% if l.uf %}/{{ l.uf }}{% endif %}{% endif %}</div>{% if l.cnpj %}<div class="mut" style="font-size:.72rem">🏢 {{ l.cnpj }}</div>{% endif %}</td>
+            <td id="bt-empresa-{{ l.id }}"><b>{{ l.empresa }}</b>{% if l.dup %} <span class="bt-dup" title="Empresa aparece mais de uma vez na base">⚠️ dup</span>{% endif %}<div class="mut" style="font-size:.76rem">{{ l.segmento or '—' }}{% if l.cidade %} · {{ l.cidade }}{% if l.uf %}/{{ l.uf }}{% endif %}{% endif %}</div>{% if l.cnpj %}<div class="mut bt-cnpj-tag" style="font-size:.72rem">🏢 {{ l.cnpj }}</div>{% endif %}</td>
             <td style="font-size:.76rem;line-height:1.5;min-width:190px">
               {% if l.whats %}<div>💬 {{ l.whats }}</div>{% endif %}
               {% if l.email_v %}<div>✉️ {{ l.email_v }}</div>{% endif %}
@@ -5205,6 +5205,22 @@ function cnpjResolverUsar(id,cnpj,btn){
     if(!d.ok){alert('⚠️ '+(d.erro||'Não consegui aplicar.'));btn.disabled=false;btn.textContent='usar';return;}
     var card=document.getElementById('cnpj-res-lead-'+id)||document.getElementById('cnpj-sem-lead-'+id);
     if(card)card.outerHTML='<div class="ok" style="margin-top:.6rem">✓ '+jsEsc(d.msg||'CNPJ aplicado')+'</div>';
+    // atualiza a linha na tabela agora — sem isso o CNPJ já tá salvo no banco mas
+    // some da vista até dar reload (que só acontece quando zera o painel inteiro).
+    var row=document.getElementById('bt-row-'+id);
+    if(row){
+      var cel=document.getElementById('bt-empresa-'+id);
+      if(cel && !cel.querySelector('.bt-cnpj-tag')){
+        var tag=document.createElement('div');
+        tag.className='mut bt-cnpj-tag';tag.style.fontSize='.72rem';
+        tag.textContent='🏢 '+cnpj.replace(/\D/g,'');
+        cel.appendChild(tag);
+      }
+      var ck=row.querySelector('.bt-ck');
+      if(ck)ck.removeAttribute('data-sem-cnpj');
+      row.style.transition='background .6s';row.style.background='rgba(93,202,165,.14)';
+      setTimeout(function(){row.style.background='';},1400);
+    }
     var box=document.getElementById('cnpj-resolver');
     // só recarrega quando não sobrar NENHUM ambíguo pendente e não tiver bloco de
     // "não encontrado" (esse fica exposto até o usuário sair da página — reload

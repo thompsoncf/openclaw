@@ -4988,6 +4988,7 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="mut" style="font-size:.8rem"><b style="color:var(--txt)" id="base-sel-n">0</b> marcado(s) · {{ leads|length }} na página{% if leads|length>=300 %} (máx 300){% endif %}</div>
       <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
         <button type="button" class="pbtn ghost" onclick="baseEnriquecer('canais')" title="Raspa o site dos marcados e acha e-mail / Instagram / WhatsApp (grátis)">🔎 Enriquecer canais</button>
+        {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseMarcarSemCnpj()" title="Marca só os leads desta página que ainda não têm CNPJ — pra rodar o Buscar CNPJ só neles">🔎 Marcar sem CNPJ</button>{% endif %}
         {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseEnriquecer('cnpj')" title="Acha o CNPJ dos marcados sem CNPJ ainda, por nome + cidade (CNPJá) — consulta paga. Achando mais de um candidato, mostra pra você escolher aqui mesmo">🏢 Buscar CNPJ</button>{% endif %}
         {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseEnriquecer('decisor')" title="Acha o dono dos marcados na Credify: por CNPJ (sócio) ou pelo telefone do Google (titular/dono) — consulta paga">🎯 Buscar decisor</button>{% endif %}
         {% if gerencia %}<button type="button" class="pbtn ghost" onclick="baseExplorium()" title="Teste de conexão com a Explorium (Vibe) no lead marcado">🔮 Explorium (teste)</button>{% endif %}
@@ -5031,7 +5032,7 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <tbody>
         {% for l in leads %}
           <tr>
-            <td><input class="bt-ck" type="checkbox" name="ids" value="{{ l.id }}"{% if l.campanha and not ver_camp %} disabled title="Já está na campanha {{ l.campanha }}"{% endif %}></td>
+            <td><input class="bt-ck" type="checkbox" name="ids" value="{{ l.id }}"{% if not l.cnpj %} data-sem-cnpj="1"{% endif %}{% if l.campanha and not ver_camp %} disabled title="Já está na campanha {{ l.campanha }}"{% endif %}></td>
             <td><b>{{ l.empresa }}</b>{% if l.dup %} <span class="bt-dup" title="Empresa aparece mais de uma vez na base">⚠️ dup</span>{% endif %}<div class="mut" style="font-size:.76rem">{{ l.segmento or '—' }}{% if l.cidade %} · {{ l.cidade }}{% if l.uf %}/{{ l.uf }}{% endif %}{% endif %}</div>{% if l.cnpj %}<div class="mut" style="font-size:.72rem">🏢 {{ l.cnpj }}</div>{% endif %}</td>
             <td style="font-size:.76rem;line-height:1.5;min-width:190px">
               {% if l.whats %}<div>💬 {{ l.whats }}</div>{% endif %}
@@ -5162,7 +5163,12 @@ function cnpjResolverAbrir(leads,semLeads){
         +(it.socio?('<span class="mut" style="display:block;font-size:.74rem">🧑‍💼 '+jsEsc(it.socio)+'</span>'):'')
         +'</span><button type="button" class="pbtn" style="padding:.3rem .7rem;font-size:.78rem;margin:0;flex-shrink:0" onclick="cnpjResolverUsar('+lead.id+',\\''+it.cnpj+'\\',this)">usar</button></div>';
     });
-    h+='</div>'+(lead.web?('<div style="margin-top:.4rem"><a class="mut" style="font-size:.76rem" target="_blank" rel="noopener" href="'+lead.web+'">nenhuma bate? buscar na web →</a></div>'):'')+'</div>';
+    h+='</div>'+(lead.web?('<div style="margin-top:.4rem"><a class="mut" style="font-size:.76rem" target="_blank" rel="noopener" href="'+lead.web+'">nenhuma bate? buscar na web →</a></div>'):'')
+      +'<div style="display:flex;gap:.4rem;align-items:center;margin-top:.5rem;padding-top:.5rem;border-top:1px dashed var(--borda)">'
+      +'<span class="mut" style="font-size:.76rem;white-space:nowrap">Já tem o CNPJ?</span>'
+      +'<input class="fld" id="cnpj-manual-'+lead.id+'" placeholder="cole aqui" style="flex:1;padding:.4rem .55rem">'
+      +'<button type="button" class="pbtn" style="padding:.35rem .8rem;font-size:.78rem;margin:0" onclick="cnpjResolverColar('+lead.id+',\\'cnpj-manual-'+lead.id+'\\',this)">usar</button></div>'
+      +'</div>';
     });
     h+='</div>';
   }
@@ -5174,10 +5180,16 @@ function cnpjResolverAbrir(leads,semLeads){
       +'<div class="mut" style="font-size:.78rem;margin-bottom:.7rem">A CNPJá não achou nenhum candidato pra esses — geralmente uma busca no Google resolve (o CNPJ costuma aparecer direto no resultado ou na ficha do Google Meu Negócio).</div>'
       +'<div style="display:flex;flex-direction:column;gap:.6rem">';
     semLeads.forEach(function(lead){
-      h+='<div id="cnpj-sem-lead-'+lead.id+'" style="border:1px dashed var(--borda);border-radius:12px;padding:.7rem .8rem;display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap">'
+      h+='<div id="cnpj-sem-lead-'+lead.id+'" style="border:1px dashed var(--borda);border-radius:12px;padding:.7rem .8rem">'
+        +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap">'
         +'<div style="min-width:0"><div style="font-size:.85rem;font-weight:600">'+jsEsc(lead.empresa||('lead #'+lead.id))+'</div>'
         +(lead.endereco?('<div class="mut" style="font-size:.76rem;margin-top:.2rem">📍 Endereço do Maps: '+jsEsc(lead.endereco)+'</div>'):'')+'</div>'
         +(lead.web?('<a href="'+lead.web+'" target="_blank" rel="noopener" style="font-size:.8rem;font-weight:600;color:var(--verde-claro);text-decoration:none;display:inline-flex;align-items:center;gap:.3rem;white-space:nowrap;flex-shrink:0;padding:.4rem .7rem;border:1px solid #1e4a3a;border-radius:8px">🔎 buscar na web ›</a>'):'')
+        +'</div>'
+        +'<div style="display:flex;gap:.4rem;align-items:center;margin-top:.5rem;padding-top:.5rem;border-top:1px dashed var(--borda)">'
+        +'<span class="mut" style="font-size:.76rem;white-space:nowrap">Já tem o CNPJ?</span>'
+        +'<input class="fld" id="cnpj-manual-'+lead.id+'" placeholder="cole aqui" style="flex:1;padding:.4rem .55rem">'
+        +'<button type="button" class="pbtn" style="padding:.35rem .8rem;font-size:.78rem;margin:0" onclick="cnpjResolverColar('+lead.id+',\\'cnpj-manual-'+lead.id+'\\',this)">usar</button></div>'
         +'</div>';
     });
     h+='</div></div>';
@@ -5191,7 +5203,7 @@ function cnpjResolverUsar(id,cnpj,btn){
   var body=new URLSearchParams();body.append('cnpj',cnpj);
   fetch('/painel/prospeccao/'+id+'/aplicar-cnpj',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body}).then(function(r){return r.json();}).then(function(d){
     if(!d.ok){alert('⚠️ '+(d.erro||'Não consegui aplicar.'));btn.disabled=false;btn.textContent='usar';return;}
-    var card=document.getElementById('cnpj-res-lead-'+id);
+    var card=document.getElementById('cnpj-res-lead-'+id)||document.getElementById('cnpj-sem-lead-'+id);
     if(card)card.outerHTML='<div class="ok" style="margin-top:.6rem">✓ '+jsEsc(d.msg||'CNPJ aplicado')+'</div>';
     var box=document.getElementById('cnpj-resolver');
     // só recarrega quando não sobrar NENHUM ambíguo pendente e não tiver bloco de
@@ -5201,6 +5213,11 @@ function cnpjResolverUsar(id,cnpj,btn){
       setTimeout(function(){location.reload();},900);
     }
   }).catch(function(){alert('Falha de rede — tente de novo.');btn.disabled=false;btn.textContent='usar';});
+}
+function cnpjResolverColar(id,inputId,btn){
+  var v=(document.getElementById(inputId).value||'').replace(/\D/g,'');
+  if(v.length!==14){alert('CNPJ precisa ter 14 dígitos.');return;}
+  cnpjResolverUsar(id,v,btn);
 }
 (function(){
   // depois do reload que mostra os "achou", reabre o painel sozinho pros que
@@ -5217,6 +5234,16 @@ function cnpjResolverUsar(id,cnpj,btn){
 })();
 function baseMarcados(){return document.querySelectorAll('.bt-ck:checked').length;}
 function baseUpd(){var n=document.getElementById('base-sel-n');if(n)n.textContent=baseMarcados();}
+function baseMarcarSemCnpj(){
+  var n=0;
+  document.querySelectorAll('.bt-ck').forEach(function(c){
+    var semCnpj=c.hasAttribute('data-sem-cnpj')&&!c.disabled;
+    c.checked=semCnpj;
+    if(semCnpj)n++;
+  });
+  baseUpd();
+  if(!n)alert('Nenhum lead sem CNPJ nesta página (ou já tá tudo em campanha).');
+}
 document.addEventListener('change',function(e){if(e.target&&e.target.classList&&e.target.classList.contains('bt-ck'))baseUpd();});
 function baseJogarCheck(){
   if(baseMarcados()===0){alert('Marque ao menos um contato na lista pra jogar na campanha.');return false;}

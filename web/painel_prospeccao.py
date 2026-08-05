@@ -6749,10 +6749,14 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 .sec.open .caret{transform:rotate(180deg);background:var(--card-2)}
 /* grid-template-rows 0fr→1fr anima até a altura real do conteúdo, sem teto —
    max-height fixo (jeito antigo) cortava campanhas com muitos leads/histórico
-   aberto e não dava pra rolar até o fim */
+   aberto e não dava pra rolar até o fim. IMPORTANTE: o padding/borda tem que
+   ficar no .bodypad DE DENTRO, não no .bodyin que encolhe — padding não
+   encolhe com min-height:0 (é sempre somado à caixa), então ficava um
+   resto de ~18px (1.1rem) vazando com o texto por trás mesmo fechado. */
 .secbody{display:grid;grid-template-rows:0fr;transition:grid-template-rows .25s ease}
 .sec.open .secbody{grid-template-rows:1fr}
-.bodyin{min-height:0;overflow:hidden;padding:0 1.05rem 1.1rem;border-top:1px solid var(--borda)}
+.bodyin{min-height:0;overflow:hidden}
+.bodypad{padding:0 1.05rem 1.1rem;border-top:1px solid var(--borda)}
 .sec .desc{font-size:.8rem;color:var(--mut);margin:.8rem 0 .8rem}
 .row{display:flex;gap:.6rem;flex-wrap:wrap;align-items:flex-end}
 .divi{border-top:1px solid var(--borda);margin:.85rem 0 .8rem}
@@ -6857,7 +6861,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         </span>
         <span class="caret">▾</span>
       </button>
-      <div class="secbody"><div class="bodyin">
+      <div class="secbody"><div class="bodyin"><div class="bodypad">
       <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/config" enctype="multipart/form-data">
         <p class="desc">O básico: nome, ritmo de envio e o material que o lead recebe.</p>
         <div class="row">
@@ -6937,7 +6941,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
           <button class="pbtn sm">Salvar configuração</button>
         </div>
       </form>
-      </div></div>
+      </div></div></div>
     </div>
 
     <!-- 2 · SEQUÊNCIA -->
@@ -6951,7 +6955,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         </span>
         <span class="caret">▾</span>
       </button>
-      <div class="secbody"><div class="bodyin">
+      <div class="secbody"><div class="bodyin"><div class="bodypad">
       <form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/sequencia">
         <p class="desc">Os e-mails da campanha (isto <b>não</b> é o template de WhatsApp da etapa 1). <b>D+</b> = dias após o 1º e-mail (0 = primeiro). <b>🤖 IA</b> escreve único por lead; <b>Template</b> usa o texto (<code>{empresa}</code>, <code>{cidade}</code>, <code>{segmento}</code>).</p>
         <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.8rem;padding:.5rem .6rem;border:1px solid var(--borda);border-radius:10px;background:var(--bg)">
@@ -6983,7 +6987,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
           <button class="pbtn sm">Salvar sequência</button>
         </div>
       </form>
-      </div></div>
+      </div></div></div>
     </div>
 
     <!-- 3 · PRÉVIA -->
@@ -6997,7 +7001,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         </span>
         <span class="caret">▾</span>
       </button>
-      <div class="secbody"><div class="bodyin">
+      <div class="secbody"><div class="bodyin"><div class="bodypad">
         {% if previa %}
         <p class="desc" style="margin-bottom:.4rem">1º passo · exemplo com <b>{{ previa.empresa }}</b></p>
         <div class="mailp">
@@ -7021,7 +7025,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
           <button type="button" class="pbtn ghost sm" onclick="secToggle('s3')">Fechar</button>
           {% if previa and previa.ia %}<button type="button" class="pbtn ghost sm" id="pia-btn" onclick="previaIA({{ camp.id }})">🤖 Gerar outro exemplo</button>{% endif %}
         </div>
-      </div></div>
+      </div></div></div>
     </div>
 
     <!-- 4 · DESEMPENHO + LEADS -->
@@ -7037,7 +7041,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         </span>
         <span class="caret">▾</span>
       </button>
-      <div class="secbody"><div class="bodyin">
+      <div class="secbody"><div class="bodyin"><div class="bodypad">
         {% if camp.status=='ativa' %}<div class="mut" style="font-size:.8rem;margin-top:.8rem">✅ <b style="color:var(--verde-claro)">Ativa</b> — dispara sozinho (até {{ camp.limite }}/dia) e para em quem responde ou descadastra.</div>{% else %}<div class="mut" style="font-size:.8rem;margin-top:.8rem">Clique <b>▶ Ativar</b> (no topo) pra o motor começar a disparar.</div>{% endif %}
 
         <div class="kpigrp"><div class="kpihead">📧 E-mail</div>
@@ -7118,7 +7122,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
             </tbody>
           </table>
         </div>
-      </div></div>
+      </div></div></div>
     </div>
   </div>
 </div>

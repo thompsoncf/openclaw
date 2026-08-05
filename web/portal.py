@@ -5223,6 +5223,8 @@ def _triagem_whatsapp_cadastro(rows):
 
 @router.get("/cadastro", response_class=HTMLResponse)
 def cadastro_form(request: Request):
+    if request.session.get("conta_id"):   # mesmo motivo do /login — ver comentário lá
+        return RedirectResponse("/painel", status_code=303)
     q = request.query_params
     return _render("cadastro", request, planos=_planos(), erro=None,
                    pre_nome=q.get("nome", ""), pre_email=q.get("email", ""),
@@ -5379,6 +5381,13 @@ def cadastro_envia(request: Request, background: BackgroundTasks,
 
 @router.get("/login", response_class=HTMLResponse)
 def login_form(request: Request):
+    # Sessão já autenticada visitando /login: _render() inclui a barra lateral
+    # e o banner de plano de qualquer jeito (olham só a sessão, não a página),
+    # então mostrar o formulário aqui rendia os dois juntos — parece bypass de
+    # login (clicar na lateral "funciona" porque a sessão já era válida, não
+    # porque o login foi pulado), mas é só má UX. Redireciona pra já.
+    if request.session.get("conta_id"):
+        return RedirectResponse("/painel", status_code=303)
     nxt = request.query_params.get("next")
     if nxt and nxt.startswith("/"):
         request.session["next"] = nxt

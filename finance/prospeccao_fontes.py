@@ -58,9 +58,21 @@ def tem_chave_places() -> bool:
     return bool(os.environ.get("GOOGLE_PLACES_API_KEY"))
 
 
+def tem_chave_maps_js() -> bool:
+    """Chave SEPARADA da Places (essa roda no navegador, pro mapa da 'cercar
+    área' em Captar leads — precisa estar restrita por domínio no Google Cloud,
+    já que fica visível no código-fonte da página)."""
+    return bool(os.environ.get("GOOGLE_MAPS_JS_API_KEY"))
+
+
+def chave_maps_js() -> str:
+    return os.environ.get("GOOGLE_MAPS_JS_API_KEY") or ""
+
+
 def buscar_places(termo: str, cidade: str, api_key: str | None = None,
                   max_resultados: int = 60, bairro: str = "", rua: str = "",
-                  lat: float | None = None, lng: float | None = None) -> dict:
+                  lat: float | None = None, lng: float | None = None,
+                  raio_km: float | None = None) -> dict:
     """Text Search (Places API New). Devolve {"ok", "itens": [...], "erro"}.
 
     `bairro` e `rua` são opcionais: refinam a busca por região (entram na frase da
@@ -69,6 +81,10 @@ def buscar_places(termo: str, cidade: str, api_key: str | None = None,
     `lat`/`lng` (opcionais) enviesam o ranking pro entorno do ponto — é um "bias"
     do Google, não uma restrição: um lugar fora do raio ainda pode aparecer se o
     texto bater melhor, só perde prioridade pros mais pertinho.
+
+    `raio_km` (opcional, só faz efeito junto com lat/lng): troca o bias por uma
+    RESTRIÇÃO — só volta lugar de fato dentro do círculo. É o modo "cercar no
+    mapa" (captar leads); sem ele, lat/lng continuam sendo só um empurrãozinho.
 
     Paginação: o Text Search devolve no máximo 20 por página, mas manda um
     `nextPageToken` quando há mais. A gente segue as páginas (passando o token no
@@ -112,8 +128,12 @@ def buscar_places(termo: str, cidade: str, api_key: str | None = None,
     consulta = f"{termo} em {local}" if local else termo
     base_body = {"textQuery": consulta, "languageCode": "pt-BR", "regionCode": "BR"}
     if lat is not None and lng is not None:
-        base_body["locationBias"] = {"circle": {
-            "center": {"latitude": lat, "longitude": lng}, "radius": 15000.0}}
+        circulo = {"center": {"latitude": lat, "longitude": lng},
+                  "radius": max(100.0, min(50000.0, raio_km * 1000)) if raio_km else 15000.0}
+        if raio_km:
+            base_body["locationRestriction"] = {"circle": circulo}
+        else:
+            base_body["locationBias"] = {"circle": circulo}
 
     itens: list[dict] = []
     vistos: set[str] = set()

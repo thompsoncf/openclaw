@@ -21,7 +21,7 @@ create table campanhas (id bigserial primary key, conta_id bigint, nome text, st
 create table campanha_alvos (id bigserial primary key, campanha_id bigint, prospeccao_id bigint,
   status text, aberturas int, wa_status text, wa_custo numeric(10,4), proximo_envio_em timestamptz);
 create table campanha_eventos (id bigserial primary key, campanha_id bigint, prospeccao_id bigint,
-  canal text, evento text, quando timestamptz default now());
+  canal text, evento text, detalhe text, quando timestamptz default now());
 """
 
 
@@ -59,6 +59,11 @@ def test_dados_por_canal_e_custo(pool):
         c.execute("insert into campanha_alvos (campanha_id, prospeccao_id, status, wa_status, wa_custo) values (%s,%s,'respondeu','enviado',0.3217)", (camp, p1))
         c.execute("insert into campanha_alvos (campanha_id, prospeccao_id, status, wa_status, wa_custo) values (%s,%s,'enviado','erro',null)", (camp, p2))
         c.execute("insert into campanha_eventos (campanha_id, prospeccao_id, canal, evento) values (%s,%s,'email','bounce')", (camp, p0))
+        # p1 clicou "Agora não" duas vezes (não deve contar 2x) + p2 clicou um botão
+        # diferente (não deve contar) — só distintos com detalhe='Agora não' entram.
+        c.execute("insert into campanha_eventos (campanha_id, prospeccao_id, canal, evento, detalhe) values (%s,%s,'whatsapp','clicou','Agora não')", (camp, p1))
+        c.execute("insert into campanha_eventos (campanha_id, prospeccao_id, canal, evento, detalhe) values (%s,%s,'whatsapp','clicou','Agora não')", (camp, p1))
+        c.execute("insert into campanha_eventos (campanha_id, prospeccao_id, canal, evento, detalhe) values (%s,%s,'whatsapp','respondeu','Quero te conhecer')", (camp, p2))
         c.commit()
         camps, totais = pp._campanhas_dados(c, conta)
     cp = next(x for x in camps if x["id"] == camp)
@@ -73,6 +78,7 @@ def test_dados_por_canal_e_custo(pool):
     assert cp["teto"] == 3.0
     assert cp["virou"] == 3
     assert totais["msgs"] == 2
+    assert totais["sem_interesse"] == 1  # p1 uma vez só (distinct), p2 não conta
 
 
 def test_alerta_amarelo_e_coral_por_teto(pool):

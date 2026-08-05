@@ -18,7 +18,7 @@ import os
 from datetime import date, datetime, timedelta, timezone
 
 from finance import servicos_catalogo as scat
-from finance.email_sender import _app_url, enviar_email, remetente_configurado
+from finance.email_sender import _app_url, enviar_email
 
 _log = logging.getLogger("openclaw.campanhas")
 _LOCK = 771144  # advisory lock (só um worker dispara por vez)
@@ -307,11 +307,10 @@ def enviar_pendentes(pool) -> int:
     """Uma passada do motor. Best-effort. E-mail e WhatsApp são canais paralelos e
     independentes — um roda mesmo que o outro não esteja configurado."""
     total = 0
-    if remetente_configurado():
-        try:
-            total += _disparar(pool)
-        except Exception as e:  # noqa: BLE001
-            _log.info("campanhas.enviar_pendentes(email) falhou: %s: %s", type(e).__name__, e)
+    try:
+        total += _disparar(pool)
+    except Exception as e:  # noqa: BLE001
+        _log.info("campanhas.enviar_pendentes(email) falhou: %s: %s", type(e).__name__, e)
     try:
         total += _disparar_wa(pool)
     except Exception as e:  # noqa: BLE001

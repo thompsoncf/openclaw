@@ -11,6 +11,7 @@ rede devolve {"ok": False, "erro": ...} em vez de estourar exceção.
 """
 from __future__ import annotations
 
+import math
 import os
 import unicodedata
 
@@ -58,6 +59,27 @@ def tem_chave_places() -> bool:
     return bool(os.environ.get("GOOGLE_PLACES_API_KEY"))
 
 
+def _distancia_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Haversine — distância em linha reta (km) entre dois pontos."""
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lng2 - lng1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def _retangulo_ao_redor(lat: float, lng: float, raio_km: float) -> dict:
+    """Bounding box (lat/lng) que cobre um círculo de `raio_km` em volta do ponto.
+    Text Search só aceita RETÂNGULO em locationRestriction (não círculo — a API
+    devolve 400 'Unknown name circle' se tentar); o círculo de verdade é aplicado
+    depois, filtrando por distância real nos resultados que vierem do retângulo."""
+    dlat = raio_km / 111.32
+    dlng = raio_km / (111.32 * max(0.01, math.cos(math.radians(lat))))
+    return {"low": {"latitude": lat - dlat, "longitude": lng - dlng},
+            "high": {"latitude": lat + dlat, "longitude": lng + dlng}}
+
+
 def tem_chave_maps_js() -> bool:
     """Chave SEPARADA da Places (essa roda no navegador, pro mapa da 'cercar
     área' em Captar leads — precisa estar restrita por domínio no Google Cloud,
@@ -85,6 +107,9 @@ def buscar_places(termo: str, cidade: str, api_key: str | None = None,
     `raio_km` (opcional, só faz efeito junto com lat/lng): troca o bias por uma
     RESTRIÇÃO — só volta lugar de fato dentro do círculo. É o modo "cercar no
     mapa" (captar leads); sem ele, lat/lng continuam sendo só um empurrãozinho.
+    Por baixo: o Text Search só aceita RETÂNGULO em locationRestriction (não
+    círculo — a API rejeita com 400), então a gente manda o retângulo que cobre
+    o círculo e filtra os resultados por distância real depois (_distancia_km).
 
     Paginação: o Text Search devolve no máximo 20 por página, mas manda um
     `nextPageToken` quando há mais. A gente segue as páginas (passando o token no
@@ -115,7 +140,7 @@ def buscar_places(termo: str, cidade: str, api_key: str | None = None,
         "X-Goog-Api-Key": key,
         "X-Goog-FieldMask": (
             "nextPageToken,"
-            "places.id,places.displayName,places.formattedAddress,"
+            "places.id,places.displayName,places.formattedAddress,places.location,"
             "places.addressComponents,places.nationalPhoneNumber,"
             "places.internationalPhoneNumber,places.websiteUri,places.rating,"
             "places.userRatingCount,places.primaryTypeDisplayName,"
@@ -127,13 +152,15 @@ def buscar_places(termo: str, cidade: str, api_key: str | None = None,
     local = ", ".join(p for p in (rua, bairro, cidade) if p)
     consulta = f"{termo} em {local}" if local else termo
     base_body = {"textQuery": consulta, "languageCode": "pt-BR", "regionCode": "BR"}
+    raio_km_efetivo = max(0.1, min(50.0, raio_km)) if raio_km else None
     if lat is not None and lng is not None:
-        circulo = {"center": {"latitude": lat, "longitude": lng},
-                  "radius": max(100.0, min(50000.0, raio_km * 1000)) if raio_km else 15000.0}
-        if raio_km:
-            base_body["locationRestriction"] = {"circle": circulo}
+        if raio_km_efetivo:
+            # locationRestriction só aceita retângulo — o círculo de verdade é
+            # aplicado depois (_distancia_km), filtrando quem caiu nos "cantos".
+            base_body["locationRestriction"] = {"rectangle": _retangulo_ao_redor(lat, lng, raio_km_efetivo)}
         else:
-            base_body["locationBias"] = {"circle": circulo}
+            base_body["locationBias"] = {"circle": {
+                "center": {"latitude": lat, "longitude": lng}, "radius": 15000.0}}
 
     itens: list[dict] = []
     vistos: set[str] = set()
@@ -168,6 +195,11 @@ def buscar_places(termo: str, cidade: str, api_key: str | None = None,
                 continue
             if pid:
                 vistos.add(pid)
+            if raio_km_efetivo:
+                loc = p.get("location") or {}
+                plat, plng = loc.get("latitude"), loc.get("longitude")
+                if plat is None or plng is None or _distancia_km(lat, lng, plat, plng) > raio_km_efetivo:
+                    continue   # veio só por causa do retângulo — fora do círculo de verdade
             tem_site = bool(p.get("websiteUri"))
             cid, uf = _endereco_partes(p.get("addressComponents"))
             seg = (p.get("primaryTypeDisplayName") or {}).get("text") or ""

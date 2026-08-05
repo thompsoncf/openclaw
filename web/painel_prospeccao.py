@@ -3596,28 +3596,37 @@ def prospeccao_aplicar_cnpj(request: Request, alvo_id: int, cnpj: str = Form(...
         request.session["prosp_aviso"] = "CNPJ inválido."
         return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
     res = fontes.enriquecer_cnpj(limpo)
-    with pool.connection() as c:
-        if res.get("ok"):
-            d = res["dados"]
-            # identidade (sócio/regime/porte/segmento) + receita: SOBRESCREVE — assim
-            # "trocar CNPJ" corrige de fato. Contato/local: coalesce (Google costuma
-            # ser o certo do lead).
-            c.execute(
-                """update prospeccao set cnpj=%s,
-                       socio=%s, regime_tributario=%s, porte=%s, segmento=%s,
-                       telefone=coalesce(telefone,%s), email=coalesce(email,%s),
-                       cidade=coalesce(cidade,%s), uf=coalesce(uf,%s),
-                       receita=%s::jsonb, atualizado_em=now()
-                     where id=%s and conta_id=%s""",
-                (cnpj.strip(), d.get("socio"), d.get("regime_tributario"), d.get("porte"),
-                 d.get("segmento"), d.get("telefone"), d.get("email"), d.get("cidade"),
-                 d.get("uf"), json.dumps(_receita_extras(d)), alvo_id, ctx["conta_id"]))
-            msg = "CNPJ vinculado e dados da Receita preenchidos ✓"
-        else:
-            c.execute("update prospeccao set cnpj=%s, atualizado_em=now() where id=%s and conta_id=%s",
-                      (cnpj.strip(), alvo_id, ctx["conta_id"]))
-            msg = "CNPJ salvo (não consegui enriquecer agora — use ↻)."
-        c.commit()
+    try:
+        with pool.connection() as c:
+            if res.get("ok"):
+                d = res["dados"]
+                # identidade (sócio/regime/porte/segmento) + receita: SOBRESCREVE — assim
+                # "trocar CNPJ" corrige de fato. Contato/local: coalesce (Google costuma
+                # ser o certo do lead).
+                c.execute(
+                    """update prospeccao set cnpj=%s,
+                           socio=%s, regime_tributario=%s, porte=%s, segmento=%s,
+                           telefone=coalesce(telefone,%s), email=coalesce(email,%s),
+                           cidade=coalesce(cidade,%s), uf=coalesce(uf,%s),
+                           receita=%s::jsonb, atualizado_em=now()
+                         where id=%s and conta_id=%s""",
+                    (limpo, d.get("socio"), d.get("regime_tributario"), d.get("porte"),
+                     d.get("segmento"), d.get("telefone"), d.get("email"), d.get("cidade"),
+                     d.get("uf"), json.dumps(_receita_extras(d)), alvo_id, ctx["conta_id"]))
+                msg = "CNPJ vinculado e dados da Receita preenchidos ✓"
+            else:
+                c.execute("update prospeccao set cnpj=%s, atualizado_em=now() where id=%s and conta_id=%s",
+                          (limpo, alvo_id, ctx["conta_id"]))
+                msg = "CNPJ salvo (não consegui enriquecer agora — use ↻)."
+            c.commit()
+    except UniqueViolation:
+        # Outro alvo da mesma conta já tem esse CNPJ (constraint uq_prospeccao_conta_cnpj).
+        info = _lead_duplicado_info(pool, ctx["conta_id"], limpo, alvo["empresa"])
+        msg = "Esse CNPJ já está em outro alvo: " + info["msg"]
+        if ajax:
+            return JSONResponse({"ok": False, "erro": msg})
+        request.session["prosp_aviso"] = msg
+        return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
     if ajax:
         return JSONResponse({"ok": True, "msg": msg})
     request.session["prosp_aviso"] = msg

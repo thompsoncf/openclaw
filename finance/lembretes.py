@@ -113,11 +113,17 @@ def _avisar_convidados_confirmados(pool, conta_id: int, ev: dict, hora: str,
     for g in convidados:
         if g["status"] != "confirmado" or not (g.get("contato") or "").strip():
             continue
-        if not _primeira_vez(pool, conta_id, "aviso_convidado", f"evt:{ev['id']}:conv:{g['id']}"):
-            continue
-        r = cv.avisar_convidado_confirmado(pool, conta_id, g["contato"], g.get("nome"),
-                                           ev["titulo"], hora, faltam,
-                                           g.get("respondido_em"), agora)
-        if r.get("ok"):
-            n += 1
+        try:
+            if not _primeira_vez(pool, conta_id, "aviso_convidado", f"evt:{ev['id']}:conv:{g['id']}"):
+                continue
+            r = cv.avisar_convidado_confirmado(pool, conta_id, g["contato"], g.get("nome"),
+                                               ev["titulo"], hora, faltam,
+                                               g.get("respondido_em"), agora)
+            if r.get("ok"):
+                n += 1
+        except Exception:  # noqa: BLE001
+            # um convidado com problema (ex.: dedup falhando por algum motivo
+            # inesperado) NÃO pode derrubar o ciclo de lembretes das outras
+            # contas — _rodar() varre todas numa passada só, sem isolamento.
+            _log.warning("aviso ao convidado %s (evt %s) falhou", g.get("id"), ev["id"], exc_info=True)
     return n

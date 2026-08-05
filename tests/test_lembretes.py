@@ -12,6 +12,7 @@ from psycopg_pool import ConnectionPool
 
 from db.conexao import init_schema
 from finance import agenda as ag
+from finance import convites as cv
 from finance import lembretes as lb
 from finance import notificar
 
@@ -24,7 +25,8 @@ def pool():
     migr = Path(__file__).resolve().parent.parent / "db" / "migracoes"
     with p.connection() as c:
         for nome in ("098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql",
-                    "101_agenda_lembretes.sql", "126_agenda_avisar_convidados.sql"):
+                    "101_agenda_lembretes.sql", "126_agenda_avisar_convidados.sql",
+                    "128_lembretes_aviso_convidado.sql"):
             c.execute((migr / nome).read_text(encoding="utf-8"))
         c.commit()
     yield p
@@ -100,6 +102,29 @@ def test_aviso_nao_dispara_fora_da_janela(pool, conta_id, enviados):
     ag.criar_evento(pool, conta_id, "Longe", agora + timedelta(minutes=90))
     ag.salvar_config(pool, conta_id, resumo_ativo=False, hora_resumo=7, aviso_antes_min=30)
     assert lb.rodar(pool, agora=agora)["aviso"] == 0 and enviados == []
+
+
+def test_convidado_confirmado_recebe_aviso_dentro_da_janela(pool, conta_id, enviados, monkeypatch):
+    """Reproduz o bug de produção: tipo='aviso_convidado' violava o check de
+    lembretes_enviados (nunca tinha sido adicionado), e a exceção subia até
+    rodar() — não só o convidado ficava sem aviso, o ciclo inteiro abortava."""
+    from finance import whatsapp_out as wout
+    livres = []
+    monkeypatch.setattr(wout, "enviar",
+                        lambda c, cid, numero, texto: (livres.append((numero, texto)) or {"ok": True}))
+    agora = ag.agora_brt().replace(hour=14, minute=0, second=0, microsecond=0)
+    ev = ag.criar_evento(pool, conta_id, "Reunião com Ana", agora + timedelta(minutes=20))
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Ana", "86999990000")
+    cv.responder(pool, conv["token"], "confirmado")   # seta respondido_em=now() -> dentro da janela de 24h
+    ag.salvar_config(pool, conta_id, resumo_ativo=False, hora_resumo=7, aviso_antes_min=30,
+                     avisar_convidados=True)
+    r = lb.rodar(pool, agora=agora)                   # não pode levantar CheckViolation
+    assert r["aviso"] == 2                             # 1 pro dono + 1 pro convidado
+    assert len(enviados) == 1 and len(livres) == 1
+    assert livres[0][0] == "86999990000"
+    with pool.connection() as c:
+        row = c.execute("select 1 from lembretes_enviados where tipo='aviso_convidado'").fetchone()
+    assert row is not None
 
 
 def test_so_aviso_ligado_nao_manda_resumo(pool, conta_id, enviados):

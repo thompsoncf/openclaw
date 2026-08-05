@@ -155,11 +155,22 @@ def _iniciar_poller_email() -> None:
                 _ein.poll_uma_vez(pool)          # recebe e-mail
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — e-mail falhou: %s: %s", ciclo, type(e).__name__, e)
+            n_camp = 0
             try:
-                n = _cm.enviar_pendentes(pool)   # dispara campanhas ativas
-                log.info("poller: ciclo #%d — campanhas: %d processado(s)", ciclo, n)
+                n_camp = _cm.enviar_pendentes(pool)   # dispara campanhas ativas
+                log.info("poller: ciclo #%d — campanhas: %d processado(s)", ciclo, n_camp)
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — campanhas falhou: %s: %s", ciclo, type(e).__name__, e)
+            try:
+                # sinal de vida do motor pra Campanhas mostrar "ativo/parado" na
+                # tela (config_app.atualizado_em vira o "último ciclo há Xmin") —
+                # grava mesmo se enviar_pendentes falhou (n_camp fica 0): o que
+                # importa aqui é que o CICLO rodou, não que tenha achado o que
+                # mandar.
+                from finance import config_app as _cfgapp
+                _cfgapp.set_config(pool, "prospec_motor_ultimo_ciclo", str(n_camp))
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — sinal de vida falhou: %s: %s", ciclo, type(e).__name__, e)
             try:
                 _cm.renovar_tokens_ig(pool)      # renova token do Instagram (60 dias)
             except Exception as e:  # noqa: BLE001

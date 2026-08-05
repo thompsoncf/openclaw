@@ -35,6 +35,10 @@ create table canais_config (id bigserial primary key, conta_id bigint, canal tex
   identificador text, ativo boolean default true, token text);
 -- prospeccao vem da 075 (marcada como aplicada); a 102 adiciona colunas de decisor.
 create table prospeccao (id bigserial primary key, conta_id bigint);
+-- prospeccao_atividades vem da 075 também (marcada como aplicada); a 127 recria
+-- o check de tipo pra incluir 'bounce'.
+create table prospeccao_atividades (id bigserial primary key, prospeccao_id bigint,
+  tipo text not null check (tipo in ('ligacao','whatsapp','email','reuniao','visita','nota')));
 -- campanhas vem da 086 (marcada como aplicada); a 104/105 adicionam colunas.
 create table campanhas (id bigserial primary key, conta_id bigint);
 -- campanha_alvos vem da 086 (com status); a 105 adiciona wa_status/wa_em e a 107 indexa.

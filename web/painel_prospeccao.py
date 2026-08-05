@@ -352,6 +352,7 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
                    temperaturas_all=TEMPERATURAS, gerencia=ctx["gerencia"], pode_atribuir=ctx["pode_atribuir"],
                    vendedores=vends, filtro_vend=filtro_vend, total_valor=total_valor,
                    total_alvos=len(rows), tem_places=fontes.tem_chave_places(),
+                   tem_maps_js=fontes.tem_chave_maps_js(), maps_js_key=fontes.chave_maps_js(),
                    aviso=request.session.pop("prosp_aviso", None))
 
 
@@ -934,11 +935,24 @@ async def captar_csv(request: Request, arquivo: UploadFile = File(...),
 @router.post("/painel/prospeccao/captar/buscar", response_class=HTMLResponse)
 def captar_buscar(request: Request, segmento: str = Form(...), cidade: str = Form(""),
                   bairro: str = Form(""), rua: str = Form(""),
-                  esconder_redes: str = Form("")):
+                  esconder_redes: str = Form(""), lat: str = Form(""), lng: str = Form(""),
+                  raio_km: str = Form("")):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
-    res = fontes.buscar_places(segmento, cidade, bairro=bairro, rua=rua)
+    # cercar no mapa (lat/lng/raio) SUBSTITUI cidade/bairro/rua — a área desenhada
+    # já é a restrição geográfica, não faz sentido combinar com texto de região.
+    lat_f = lng_f = raio_f = None
+    try:
+        if lat and lng:
+            lat_f, lng_f = float(lat), float(lng)
+            raio_f = float(raio_km) if raio_km else 3.0
+    except ValueError:
+        lat_f = lng_f = raio_f = None
+    if lat_f is not None:
+        cidade = bairro = rua = ""
+    res = fontes.buscar_places(segmento, cidade, bairro=bairro, rua=rua,
+                               lat=lat_f, lng=lng_f, raio_km=raio_f)
     itens = res.get("itens", [])
     esconder = esconder_redes == "1"
     if esconder:
@@ -954,7 +968,8 @@ def captar_buscar(request: Request, segmento: str = Form(...), cidade: str = For
     _marcar_duplicados(itens, ctx["conta_id"])
     n_redes = sum(1 for x in res.get("itens", []) if x["rede"]) if esconder else 0
     busca = {"segmento": segmento, "cidade": cidade, "bairro": bairro, "rua": rua,
-             "esconder": esconder, "ok": res.get("ok"), "erro": res.get("erro"), "n_redes": n_redes}
+             "esconder": esconder, "ok": res.get("ok"), "erro": res.get("erro"), "n_redes": n_redes,
+             "lat": lat_f, "lng": lng_f, "raio_km": raio_f}
     if _eh_ajax(request):
         enxuto = [{"empresa": i["empresa"], "telefone": i["telefone"], "rating": i.get("rating"),
                    "tem_site": i["tem_site"], "endereco": i["endereco"],
@@ -4547,6 +4562,27 @@ _NAV_ASSETS = """<style>
 .pnav.on{color:#fff;background:var(--verde);border-color:var(--verde)}
 #pnavprog{position:fixed;top:0;left:0;height:3px;width:0;background:var(--verde);box-shadow:0 0 8px var(--verde);z-index:99999;transition:width .3s ease;opacity:0}
 #pnavprog.go{opacity:1}
+/* cercar área no mapa (Captar leads → Google Maps) — acordeão retraído por padrão */
+.mapacc{border:1px solid var(--borda);border-radius:10px;margin:.6rem 0;overflow:hidden;background:var(--bg)}
+.mapacc-hd{display:flex;align-items:center;gap:.55rem;padding:.6rem .75rem;cursor:pointer;user-select:none}
+.mapacc-hd:hover{background:rgba(255,255,255,.02)}
+.mapacc-ic{font-size:1rem;flex:0 0 auto}
+.mapacc-tt{font-size:.86rem;font-weight:600;flex:1}
+.mapacc-sub{font-size:.72rem;color:var(--txt-mut);font-weight:400;display:block;margin-top:1px}
+.mapacc-caret{color:var(--txt-mut);transition:transform .18s;flex:0 0 auto}
+.mapacc.open .mapacc-caret{transform:rotate(180deg)}
+.mapacc-body{max-height:0;overflow:hidden;transition:max-height .22s ease}
+.mapacc.open .mapacc-body{max-height:420px}
+.mapacc-in{padding:0 .75rem .8rem}
+.mapcard{position:relative;height:260px;border-radius:9px;overflow:hidden;border:1px solid var(--borda);background:#1a1a1c}
+.mapcard-busca{position:absolute;top:8px;left:8px;right:8px;z-index:5;background:#161617;border:1px solid var(--borda);
+  border-radius:8px;color:var(--txt);padding:.42rem .6rem;font-size:.82rem;font-family:inherit;width:calc(100% - 16px)}
+.mapcard-busca:focus{outline:0;border-color:var(--verde)}
+.radiusbar{display:flex;align-items:center;gap:.6rem;margin-top:.6rem;font-size:.8rem;color:var(--txt-mut)}
+.radiusbar input[type=range]{flex:1;accent-color:var(--verde)}
+.radiusbar b{color:var(--txt);font-variant-numeric:tabular-nums;min-width:48px;text-align:right}
+.mapa-usando{display:none;margin-top:.5rem;font-size:.74rem;color:var(--verde-claro);align-items:center;gap:5px}
+.mapa-usando.on{display:flex}
 </style><script>(function(){
  if(window.__pnav)return; window.__pnav=1;
  var bar=document.createElement('div'); bar.id='pnavprog';
@@ -5129,12 +5165,43 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <form id="cap-google" action="/painel/prospeccao/captar/buscar" method="post" onsubmit="return capBuscar(event)">
         <div class="egrid">
           <div><label class="lbl">Segmento</label><input class="fld" name="segmento" required placeholder="Ex: pet shop"></div>
-          <div><label class="lbl">Cidade</label><input class="fld" name="cidade" placeholder="Ex: Teresina - PI"></div>
+          <div><label class="lbl">Cidade</label><input class="fld" name="cidade" id="cap-g-cidade" placeholder="Ex: Teresina - PI"></div>
         </div>
-        <div class="lbl" style="margin-top:.7rem;color:var(--txt-mut)">📍 Refinar por região <span style="font-weight:400">— opcional, pra buscar numa área específica</span></div>
+
+        <div class="mapacc" id="mapacc">
+          <div class="mapacc-hd" onclick="mapaToggle()">
+            <span class="mapacc-ic">🗺️</span>
+            <span class="mapacc-tt">Cercar uma área no mapa
+              <span class="mapacc-sub">Opcional — desenhe a região em vez de digitar bairro/rua</span>
+            </span>
+            <span class="mapacc-caret">▾</span>
+          </div>
+          <div class="mapacc-body">
+            <div class="mapacc-in">
+              {% if not tem_maps_js %}
+              <div class="mut" style="font-size:.8rem;line-height:1.6">🗺️ Pra desenhar a área falta uma chave (separada da de busca). No Render, adicione <code style="background:var(--bg);padding:.1rem .35rem;border-radius:5px;border:1px solid var(--borda)">GOOGLE_MAPS_JS_API_KEY</code> — Maps JavaScript API, com a chave <b>restrita por domínio</b> no Google Cloud (ela roda no navegador).</div>
+              {% else %}
+              <div class="mapcard">
+                <input type="text" class="mapcard-busca" id="cercaBusca" placeholder="🔍 Endereço ou bairro pra centralizar…">
+                <div id="cercaMap" style="position:absolute;inset:0"></div>
+              </div>
+              <div class="radiusbar">
+                <span>Raio</span>
+                <input type="range" id="cercaRaio" min="0.5" max="15" step="0.5" value="3">
+                <b id="cercaRaioLabel">3.0 km</b>
+              </div>
+              <input type="hidden" name="lat" id="cercaLat"><input type="hidden" name="lng" id="cercaLng">
+              <input type="hidden" name="raio_km" id="cercaRaioKm" value="3">
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="mapa-usando" id="mapaUsando">🗺️ <span>Usando a área desenhada acima — bairro/rua ficam de lado enquanto isso</span></div>
+
+        <div class="lbl" style="margin-top:.4rem;color:var(--txt-mut)">📍 Refinar por região <span style="font-weight:400">— opcional, pra buscar numa área específica</span></div>
         <div class="egrid" style="margin-top:.25rem">
-          <div><label class="lbl">Bairro</label><input class="fld" name="bairro" placeholder="Ex: Jardim Renascença"></div>
-          <div><label class="lbl">Rua</label><input class="fld" name="rua" placeholder="Ex: Av. Nossa Sra. de Fátima"></div>
+          <div><label class="lbl">Bairro</label><input class="fld" name="bairro" id="cap-g-bairro" placeholder="Ex: Jardim Renascença"></div>
+          <div><label class="lbl">Rua</label><input class="fld" name="rua" id="cap-g-rua" placeholder="Ex: Av. Nossa Sra. de Fátima"></div>
         </div>
         <div class="mut" style="font-size:.76rem;margin-top:.3rem">Bairro filtra a vizinhança toda. Rua afunila bastante (poucos resultados) — use pra mira fina.</div>
         <label class="rrow" style="border:1px solid var(--borda);border-radius:10px;margin-top:.6rem;cursor:pointer">
@@ -5290,6 +5357,58 @@ function capBuscar(ev){ev.preventDefault();var f=ev.target;var btn=document.getE
     d.itens.forEach(function(it){var loc=(it.cidade?(' · '+jsEsc(it.cidade)+(it.uf?('/'+jsEsc(it.uf)):'')):'');var dupB=it.dup_campanha?(' <span class="dupb">🚫 já em campanha: '+jsEsc(it.dup_campanha)+'</span>'):(it.dup?' <span class="dupb">⚠️ já na base</span>':'');h+='<label class="rrow" style="cursor:pointer"><input type="checkbox" name="itens" value="'+it.pack+'"><span style="flex:1"><span style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap"><span class="tdot" style="background:'+(TEMPCOR[it.temperatura]||'#5b9bd5')+'"></span><b style="font-size:.88rem">'+jsEsc(it.empresa)+'</b>'+(it.aberto===false?' <span style=\\'color:#e0574f;font-size:.7rem\\'>(fechado)</span>':'')+dupB+'</span><span class="mut" style="font-size:.76rem">'+(it.segmento?(jsEsc(it.segmento)+' · '):'')+(it.telefone?jsEsc(it.telefone):'')+(it.rating?(' · nota '+it.rating):'')+(it.tem_site?'':' · <span style=\\'color:#e0574f\\'>sem site</span>')+loc+'</span></span><span class="tpill" style="background:transparent;border:1px solid '+(TP[it.temperatura]||'#7bb8e6')+';color:'+(TP[it.temperatura]||'#7bb8e6')+'">'+it.temperatura+'</span></label>';});
     h+='</div><div style="margin-top:.8rem"><button type="button" class="pbtn" onclick="capImport()">Adicionar selecionados</button></div>';box.innerHTML=h;
   }).catch(function(){if(btn){btn.disabled=false;btn.textContent='Buscar';}capToast('Falha de rede');});return false;}
+/* ---------------- cercar área no mapa (Google Maps JS API, lazy-carregada) ---------------- */
+var GOOGLE_MAPS_JS_KEY = {{ maps_js_key|tojson }};
+var _cercaCarregado = false, _cercaMap = null, _cercaCircle = null, _cercaMarker = null;
+function mapaToggle(){
+  var acc = document.getElementById('mapacc'); if(!acc) return;
+  var abrindo = !acc.classList.contains('open');
+  acc.classList.toggle('open');
+  var bairro = document.getElementById('cap-g-bairro'), rua = document.getElementById('cap-g-rua');
+  if(bairro) bairro.disabled = abrindo; if(rua) rua.disabled = abrindo;
+  var nota = document.getElementById('mapaUsando'); if(nota) nota.classList.toggle('on', abrindo);
+  if(abrindo && !_cercaCarregado && GOOGLE_MAPS_JS_KEY){
+    _cercaCarregado = true;
+    var s = document.createElement('script');
+    s.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(GOOGLE_MAPS_JS_KEY) + '&libraries=places&callback=cercaMapaInit';
+    document.head.appendChild(s);
+  }
+}
+function cercaSync(){
+  var c = _cercaCircle.getCenter(), r = _cercaCircle.getRadius(), km = r/1000;
+  document.getElementById('cercaLat').value = c.lat();
+  document.getElementById('cercaLng').value = c.lng();
+  document.getElementById('cercaRaioKm').value = km.toFixed(2);
+  document.getElementById('cercaRaio').value = km;
+  document.getElementById('cercaRaioLabel').textContent = km.toFixed(1) + ' km';
+}
+function cercaMapaInit(){
+  var partida = {lat: -5.0892, lng: -42.8019};   // Teresina - PI, só ponto de partida
+  _cercaMap = new google.maps.Map(document.getElementById('cercaMap'), {
+    center: partida, zoom: 13, disableDefaultUI: true, zoomControl: true, fullscreenControl: false});
+  _cercaMarker = new google.maps.Marker({position: partida, map: _cercaMap, draggable: true});
+  _cercaCircle = new google.maps.Circle({
+    map: _cercaMap, center: partida, radius: 3000, editable: true, draggable: false,
+    fillColor: '#1d9e75', fillOpacity: .14, strokeColor: '#1d9e75', strokeWeight: 2});
+  _cercaCircle.bindTo('center', _cercaMarker, 'position');
+  _cercaMarker.addListener('drag', cercaSync);
+  google.maps.event.addListener(_cercaCircle, 'radius_changed', cercaSync);
+  google.maps.event.addListener(_cercaCircle, 'center_changed', cercaSync);
+  document.getElementById('cercaRaio').addEventListener('input', function(){
+    _cercaCircle.setRadius(parseFloat(this.value) * 1000);
+  });
+  var buscaInput = document.getElementById('cercaBusca');
+  var autocomplete = new google.maps.places.Autocomplete(buscaInput, {fields: ['geometry']});
+  autocomplete.addListener('place_changed', function(){
+    var place = autocomplete.getPlace();
+    if(!place.geometry || !place.geometry.location) return;
+    _cercaMap.panTo(place.geometry.location);
+    _cercaMap.setZoom(14);
+    _cercaMarker.setPosition(place.geometry.location);
+    cercaSync();
+  });
+  cercaSync();
+}
 function capAll(el){document.querySelectorAll('#cap-list input[name=itens]').forEach(function(c){c.checked=el.checked;});}
 function capImport(){var packs=[];document.querySelectorAll('#cap-list input[name=itens]:checked').forEach(function(c){packs.push(c.value);});if(!packs.length){capToast('Marque ao menos um');return;}
   var fd=new FormData();packs.forEach(function(p){fd.append('itens',p);});var vs=document.getElementById('cap-g-vend');if(vs)fd.append('vendedor_id',vs.value);

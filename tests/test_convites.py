@@ -39,7 +39,7 @@ def conta_id(pool):
 def _evento(pool, conta_id, titulo="Reunião de fechamento"):
     return ag.criar_evento(pool, conta_id, titulo,
                            ag.agora_brt() + timedelta(days=1), tipo="empresa",
-                           local="Online")
+                           local="Escritório Central")
 
 
 def test_criar_e_resolver_por_token(pool, conta_id):
@@ -156,7 +156,7 @@ def test_pendentes_ignora_evento_passado(pool, conta_id):
 
 
 def test_confirmacao_texto_por_status(pool, conta_id):
-    ev = _evento(pool, conta_id, titulo="Café")   # _evento() marca local="Online"
+    ev = _evento(pool, conta_id, titulo="Café")   # _evento() marca um local físico
     conv = cv.criar_convidado(pool, conta_id, ev["id"], "Carla Silva", "86988887777")
     c = cv.responder(pool, conv["token"], "confirmado")
     txt = cv.confirmacao_texto(c)
@@ -175,10 +175,27 @@ def test_confirmacao_texto_sem_local_nao_traz_mapa(pool, conta_id):
 
 
 def test_link_mapa(pool, conta_id):
-    com_local = _evento(pool, conta_id)                  # local="Online"
+    com_local = _evento(pool, conta_id)                  # local físico de verdade
     assert cv.link_mapa(com_local) is not None
     sem_local = ag.criar_evento(pool, conta_id, "Sem local", ag.agora_brt() + timedelta(days=1))
     assert cv.link_mapa(sem_local) is None
+
+
+def test_link_mapa_reuniao_online_nao_traz_mapa():
+    """Botão "reunião online" do form marca local="Online" — não é endereço
+    nenhum, então nunca deve virar link de mapa (nem no convite, nem quando o
+    convidado confirma presença)."""
+    ev = {"local": "Online"}
+    assert cv.link_mapa(ev) is None
+
+
+def test_confirmacao_texto_reuniao_online_nao_traz_mapa(pool, conta_id):
+    ev = ag.criar_evento(pool, conta_id, "Daily", ag.agora_brt() + timedelta(days=1), local="Online")
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Léo", "86988887777")
+    c = cv.responder(pool, conv["token"], "confirmado")
+    txt = cv.confirmacao_texto(c)
+    assert "confirmada" in txt.lower()
+    assert "mapa" not in txt.lower() and "maps" not in txt.lower()
 
 
 def test_enviar_convite_monta_variaveis(pool, conta_id, monkeypatch):

@@ -546,6 +546,12 @@ _CSS = """<style>
 .manual-box .mlabel{font-size:.72rem;color:var(--txt-mut);margin-bottom:5px}
 .manual-cancel{display:inline-flex;align-items:center;gap:4px;background:transparent;border:0;color:var(--txt-mut);cursor:pointer;font-size:.72rem;padding:6px 0 0;text-decoration:underline;text-decoration-color:var(--borda);text-underline-offset:3px}
 .manual-cancel:hover{color:var(--verde-claro);text-decoration-color:var(--verde-claro)}
+.local-alt-row{display:flex;flex-wrap:wrap;gap:2px 16px}
+.online-toggle{display:inline-flex;align-items:center;gap:5px;background:transparent;border:0;color:var(--txt-mut);cursor:pointer;font-size:.74rem;padding:5px 0;margin-top:2px;text-decoration:underline;text-decoration-color:var(--borda);text-underline-offset:3px}
+.online-toggle:hover{color:var(--verde-claro);text-decoration-color:var(--verde-claro)}
+.online-box{display:none;margin-top:6px;padding-top:10px;border-top:1px dashed var(--borda)}
+.online-box.show{display:block}
+.online-box .omsg{font-size:.78rem;color:var(--verde-claro);background:rgba(29,158,117,.1);border:1px solid rgba(29,158,117,.3);border-radius:8px;padding:8px 10px}
 .pop{position:absolute;top:calc(100% + 8px);right:0;width:270px;background:var(--card);border:1px solid var(--verde);border-radius:12px;padding:13px;box-shadow:0 20px 50px rgba(0,0,0,.5);z-index:20;display:none}
 .pop.show{display:block}
 .pop:before{content:"";position:absolute;top:-6px;right:16px;width:11px;height:11px;background:var(--card);border-left:1px solid var(--verde);border-top:1px solid var(--verde);transform:rotate(45deg)}
@@ -793,11 +799,18 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <div id="addrPicked"></div>
           </div>
           <div class="hint-line" id="hintLine">Digite pra buscar — ex: nome do lugar ou endereço.</div>
-          <button type="button" class="manual-toggle" id="manualToggle">✍️ Não achei o lugar — digitar manualmente</button>
+          <div class="local-alt-row">
+            <button type="button" class="manual-toggle" id="manualToggle">✍️ Não achei o lugar — digitar manualmente</button>
+            <button type="button" class="online-toggle" id="onlineToggle">🌐 É uma reunião online</button>
+          </div>
           <div class="manual-box" id="manualBox">
             <div class="mlabel">Local (texto livre, sem link de mapa)</div>
-            <input type="text" id="manualInput" placeholder="Ex: online, na casa da Ana…" autocomplete="off">
+            <input type="text" id="manualInput" placeholder="Ex: na casa da Ana, no clube…" autocomplete="off">
             <button type="button" class="manual-cancel" id="manualCancel">← voltar pra busca de endereço</button>
+          </div>
+          <div class="online-box" id="onlineBox">
+            <div class="omsg">🌐 Reunião online — nenhum endereço vai ser enviado aos convidados.</div>
+            <button type="button" class="manual-cancel" id="onlineCancel">← voltar a informar um local</button>
           </div>
           <label>Tipo</label>
           <div class="segs">
@@ -1000,10 +1013,14 @@ function rmGuest(b){var box=document.getElementById('guests');var row=b.closest(
   var hintLine = document.getElementById('hintLine');
   var addrWrap = document.getElementById('addrWrap');
   var searchRow = document.querySelector('.addr-input-row');
+  var altRow = document.querySelector('.local-alt-row');
   var manualToggle = document.getElementById('manualToggle');
   var manualBox = document.getElementById('manualBox');
   var manualInput = document.getElementById('manualInput');
   var manualCancel = document.getElementById('manualCancel');
+  var onlineToggle = document.getElementById('onlineToggle');
+  var onlineBox = document.getElementById('onlineBox');
+  var onlineCancel = document.getElementById('onlineCancel');
   if(!addrInput) return;
 
   function nomesEnvolvidos(){
@@ -1120,12 +1137,17 @@ function rmGuest(b){var box=document.getElementById('guests');var row=b.closest(
     addrPicked.appendChild(card);
   }
 
+  function voltarBusca(){
+    searchRow.style.display = ''; hintLine.style.display = ''; altRow.style.display = '';
+    addrInput.value = ''; localHidden.value = '';
+  }
+
   manualToggle.addEventListener('click', function(){
     searchRow.style.display = 'none';
     addrDrop.classList.remove('show');
     addrPicked.innerHTML = '';
     hintLine.style.display = 'none';
-    manualToggle.style.display = 'none';
+    altRow.style.display = 'none';
     manualBox.classList.add('show');
     addrInput.value = ''; localHidden.value = '';
     manualInput.focus();
@@ -1133,8 +1155,25 @@ function rmGuest(b){var box=document.getElementById('guests');var row=b.closest(
   manualInput.addEventListener('input', function(){ localHidden.value = manualInput.value; });
   manualCancel.addEventListener('click', function(){
     manualBox.classList.remove('show');
-    manualInput.value = ''; localHidden.value = '';
-    searchRow.style.display = ''; hintLine.style.display = ''; manualToggle.style.display = '';
+    manualInput.value = '';
+    voltarBusca();
+    addrInput.focus();
+  });
+
+  // Reunião online: sem endereço nenhum — fecha a busca e nunca manda link de
+  // mapa (nem no convite, nem quando o convidado confirma presença).
+  onlineToggle.addEventListener('click', function(){
+    searchRow.style.display = 'none';
+    addrDrop.classList.remove('show');
+    addrPicked.innerHTML = '';
+    hintLine.style.display = 'none';
+    altRow.style.display = 'none';
+    onlineBox.classList.add('show');
+    addrInput.value = ''; localHidden.value = 'Online';
+  });
+  onlineCancel.addEventListener('click', function(){
+    onlineBox.classList.remove('show');
+    voltarBusca();
     addrInput.focus();
   });
 

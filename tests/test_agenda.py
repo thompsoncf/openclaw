@@ -101,6 +101,22 @@ def test_link_maps_sem_local_volta_none():
     assert ag.link_maps("   ") is None
 
 
+def test_link_maps_reuniao_online_volta_none():
+    """local="Online" (botão dedicado no form) não é endereço nenhum — nunca
+    deve virar link de mapa, senão manda um link sem sentido pro convidado."""
+    assert ag.link_maps("Online") is None
+    assert ag.link_maps("online") is None
+    assert ag.link_maps("  ONLINE  ") is None
+
+
+def test_eh_online():
+    assert ag.eh_online("Online") is True
+    assert ag.eh_online("online") is True
+    assert ag.eh_online("Rua das Flores, 123") is False
+    assert ag.eh_online("") is False
+    assert ag.eh_online(None) is False
+
+
 def test_ics_valido_e_escapa():
     ics = ag.feed_ics([_ev(titulo="Almoço; com, cliente", local="Café")])
     assert ics.startswith("BEGIN:VCALENDAR")

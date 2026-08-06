@@ -4726,6 +4726,7 @@ def _navbar(active):
     tabs = [("captar", "🎯 Captar Lead", "/painel/prospeccao?captar=1", False),
             ("base", "📇 Base", "/painel/prospeccao/base", False),
             ("campanhas", "📣 Campanhas", "/painel/prospeccao/campanhas", True),
+            ("ia-insta", "✨ IA Insta", "/painel/prospeccao/ia-insta", False),
             ("comunicacao", "💬 Comunicação", "/painel/prospeccao/comunicacao", False),
             ("funil", "🔥 Funil", "/painel/prospeccao", False),
             ("canais", "⚙️ Canais", "/painel/prospeccao/comunicacao?aba=canais", False)]
@@ -5340,6 +5341,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <button type="button" class="pnav" onclick="capToggle()">🎯 Captar Lead</button>
     <a class="pnav" href="/painel/prospeccao/base">📇 Base</a>
     {% if gerencia or caps.vendas %}<a class="pnav" href="/painel/prospeccao/campanhas">📣 Campanhas</a>{% endif %}
+    <a class="pnav" href="/painel/prospeccao/ia-insta">✨ IA Insta</a>
     <a class="pnav" href="/painel/prospeccao/comunicacao">💬 Comunicação</a>
     <a class="pnav on" href="/painel/prospeccao">🔥 Funil</a>
     <a class="pnav cfg" href="/painel/prospeccao/comunicacao?aba=canais">⚙️ Canais</a>

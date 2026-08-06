@@ -57,15 +57,12 @@ def configurado_conta(pool, conta_id: int, canal: str = "email") -> bool:
 
 
 def remetente_conta(pool, conta_id: int, canal: str = "email") -> str | None:
-    """O e-mail que a EMPRESA usa pra ENVIAR pela caixa `canal`: a caixa própria (se
-    configurada), senão o SMTP global do ambiente. É o From que aparece no painel."""
+    """O e-mail que a EMPRESA usa pra ENVIAR pela caixa `canal` — só a caixa PRÓPRIA
+    dela (canais_config). Nunca cai no SMTP global do ambiente: esse é o e-mail de
+    sistema do Zaq (boas-vindas, convites), não pode aparecer como se fosse desta
+    conta nem misturar com o de outra empresa. Sem caixa própria = None."""
     cfg = _conta_cfg(pool, conta_id, canal)
-    if cfg:
-        return cfg["user"]
-    if canal != "email":
-        return None
-    from finance.email_sender import remetente_configurado
-    return remetente_configurado()
+    return cfg["user"] if cfg else None
 
 
 def _smtp_host(imap_host: str) -> str:
@@ -77,17 +74,15 @@ def enviar_conta(pool, conta_id: int, destino: str, assunto: str, html: str,
                  texto_alt: str | None = None, from_nome: str | None = None,
                  reply_to: str | None = None, list_unsub: str = "", canal: str = "email") -> bool:
     """Envia PELA caixa `canal` da empresa (mesma senha de app do IMAP serve pro SMTP).
-    Se a caixa não existe, cai no SMTP global (só pra a principal)."""
+    Se a caixa não existe, NÃO envia — nunca usa o SMTP global no lugar da empresa,
+    senão o e-mail sai (e a resposta do lead cai) na caixa de outra conta."""
     from finance import email_sender as es
     cfg = _conta_cfg(pool, conta_id, canal)
-    if cfg:
-        return es.enviar_com_creds(cfg["user"], cfg["senha"], _smtp_host(cfg["host"]), 587,
-                                   destino, assunto, html, texto_alt, from_nome, reply_to,
-                                   list_unsub=list_unsub)
-    if canal != "email":            # caixa secundária sem config → não envia (evita usar o From errado)
+    if not cfg:
         return False
-    return es.enviar_email(destino, assunto, html, texto_alt, reply_to, from_nome,
-                           list_unsub=list_unsub)
+    return es.enviar_com_creds(cfg["user"], cfg["senha"], _smtp_host(cfg["host"]), 587,
+                               destino, assunto, html, texto_alt, from_nome, reply_to,
+                               list_unsub=list_unsub)
 
 
 def salvar_config(pool, conta_id: int, endereco: str, senha: str, host: str = "",

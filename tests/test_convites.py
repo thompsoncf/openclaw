@@ -336,11 +336,13 @@ def test_whatsapp_out_template_usa_numero_da_empresa(monkeypatch):
     r = wout.enviar_template(_FakeCur(("twilio", "whatsapp:+5586990007678", None, None)),
                              1, "86 98888-7777", "HXx", {"1": "a", "2": "b"})
     assert r["ok"] and capt["rem"] == "whatsapp:+5586990007678"
-    # sem canal configurado -> cai pro número global do Zaq
+    # sem canal configurado -> NÃO envia (nunca pelo número global do Zaq, que
+    # misturaria a campanha de uma conta com a identidade de outra empresa)
     monkeypatch.setenv("TWILIO_WHATSAPP_FROM", "whatsapp:+5586990000000")
     capt.clear()
-    wout.enviar_template(_FakeCur(None), 1, "86999", "HXx", {"1": "a", "2": "b"})
-    assert capt["rem"] == "whatsapp:+5586990000000"
+    r_sem = wout.enviar_template(_FakeCur(None), 1, "86999", "HXx", {"1": "a", "2": "b"})
+    assert r_sem == {"ok": False, "erro": "sem_numero_empresa"}
+    assert capt == {}   # nunca chamou o adaptador Twilio
     # provedor cloud -> roteia pro Cloud API (o campo do template vira o NOME do template)
     from finance import whatsapp_cloud as wcloud
     captc = {}

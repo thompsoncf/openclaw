@@ -55,7 +55,6 @@ def enviar_template(c, conta_id, numero, content_sid, variaveis, mmlite=False) -
     Twilio: `content_sid` é o Content SID (HX...). Cloud API (número próprio): o mesmo
     campo carrega o NOME do template aprovado na Meta. `mmlite=True` (só no provedor
     cloud) roteia pela Marketing Messages Lite API — mesmo preço, entrega otimizada."""
-    import os
     r = _row(c, conta_id)
     prov = r[0] if r else "twilio"
     if prov == "cloud":
@@ -64,7 +63,9 @@ def enviar_template(c, conta_id, numero, content_sid, variaveis, mmlite=False) -
                                       mmlite=mmlite)
     if prov != "twilio":
         return {"ok": False, "erro": "provedor_sem_template"}
-    remetente = (r[1] if r and r[1] else "") or (os.environ.get("TWILIO_WHATSAPP_FROM") or "")
+    # nunca cai no número global do env: senão a campanha de uma conta sem WhatsApp
+    # próprio sairia pelo número (e identidade) de outra empresa conectada via Twilio.
+    remetente = r[1] if r and r[1] else ""
     if not remetente:
         return {"ok": False, "erro": "sem_numero_empresa"}
     return _twilio.enviar_template(_twilio.normalizar_from(remetente), numero,

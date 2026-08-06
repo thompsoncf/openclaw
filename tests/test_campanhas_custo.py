@@ -13,11 +13,12 @@ from web import painel_prospeccao as pp
 
 _BASE_SQL = """
 create table contas (id bigserial primary key, tipo text, nome text);
+create table membros (id bigserial primary key, conta_id bigint, nome text, email text);
 create table prospeccao (id bigserial primary key, conta_id bigint, estagio text);
 create table campanhas (id bigserial primary key, conta_id bigint, nome text, status text,
   limite_dia int default 40, wa_ativo boolean default false, wa_template_sid text,
   enviados_hoje int default 0, dia_contagem date, teto_wa numeric(10,2),
-  criado_em timestamptz default now());
+  responsavel_id bigint, criado_em timestamptz default now());
 create table campanha_alvos (id bigserial primary key, campanha_id bigint, prospeccao_id bigint,
   status text, aberturas int, wa_status text, wa_custo numeric(10,4), proximo_envio_em timestamptz);
 create table campanha_eventos (id bigserial primary key, campanha_id bigint, prospeccao_id bigint,

@@ -30,7 +30,7 @@ from finance import prospec_convite as _prospec_convite
 from finance import prospec_inbound as _prospec_inbound
 from finance import prospeccao_fontes as fontes
 from finance import servicos_catalogo as scat
-from finance.email_sender import enviar_email, remetente_configurado
+from finance.email_sender import remetente_configurado
 from web.portal import _render, _env, conta_logada
 
 router = APIRouter()
@@ -1374,7 +1374,7 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
             pode_wa = whatsapp_out.configurado_conta(_c, ctx["conta_id"])
     elif cv[0] == "email":
         _dest_mail = (cv[9] or cv[13] or "")            # e-mail do lead OU do contato órfão
-        pode_wa = bool(remetente_configurado()) and ("@" in _dest_mail)
+        pode_wa = bool(_ein_remetente(pool, ctx["conta_id"])) and ("@" in _dest_mail)
     elif cv[0] in ("messenger", "instagram"):
         with pool.connection() as _c:
             _t = _c.execute("select token from canais_config where conta_id=%s and canal=%s and ativo",
@@ -2989,7 +2989,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
     email_secundario = _ein_mod.remetente_conta(get_pool(), ctx["conta_id"], "email2") or ""
     return _render("prospeccao_campanha", request, titulo=camp["nome"], secao_ativa="prospeccao",
                    camp=camp, passos=passos_l, elegiveis=eleg, na_camp=na_camp, st=st, metr=metr,
-                   leads=leads_l, previa=previa, cadencia=cadencia, remetente=remetente_configurado(),
+                   leads=leads_l, previa=previa, cadencia=cadencia, remetente=email_principal,
                    modelos=modelos, seg=seg, cidade=cidade, temp=temp,
                    email_principal=email_principal, email_secundario=email_secundario,
                    aviso=request.session.pop("prosp_aviso", None))
@@ -3122,6 +3122,13 @@ async def prospeccao_campanha_config(request: Request, camp_id: int):
     except (ValueError, TypeError):
         lim_wa = 30
     wa_on = str(form.get("wa_ativo") or "").strip().lower() in ("1", "on", "true", "sim")
+    wa_aviso = None
+    if wa_on:
+        from finance import whatsapp_out as _wa_out
+        with get_pool().connection() as _c:
+            if not _wa_out.configurado_conta(_c, ctx["conta_id"]):
+                wa_on = False
+                wa_aviso = "Conecte o WhatsApp da empresa na aba Canais antes de ativar nas campanhas."
     wa_mm = str(form.get("wa_mmlite") or "").strip().lower() in ("1", "on", "true", "sim")
     # teto de gasto do WhatsApp (R$). Aceita "50", "50,00", "1.200,50" ou vazio (sem teto).
     _traw = (form.get("teto_wa") or "").replace("R$", "").strip()
@@ -3180,7 +3187,7 @@ async def prospeccao_campanha_config(request: Request, camp_id: int):
                       (nome[:120], lim, material, tipo, wa_on, lim_wa, (wa_sid or None),
                        reeng_on, reeng_dias, remet_slot, wa_mm, teto_wa, camp_id, ctx["conta_id"]))
         c.commit()
-    request.session["prosp_aviso"] = "Configuração salva ✓"
+    request.session["prosp_aviso"] = wa_aviso or "Configuração salva ✓"
     return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
 
 
@@ -3956,15 +3963,18 @@ def prospeccao_enviar_email(request: Request, alvo_id: int, assunto: str = Form(
     corpo = (corpo or "").strip()
     if not corpo:
         return JSONResponse({"ok": False, "erro": "sem_corpo"})
+    from finance import email_inbound as _ein
+    remetente = _ein.remetente_conta(pool, ctx["conta_id"])
+    if not remetente:
+        return JSONResponse({"ok": False, "erro": "E-mail não configurado (configure a caixa da empresa na aba Canais)."})
     nome_rem, email_rem = _membro_contato(pool, ctx["conta_id"], ctx["membro_id"])
     html = "<div style=\"font-family:system-ui,Arial,sans-serif;font-size:15px;line-height:1.6;color:#222\">" \
            + "".join(f"<p style=\"margin:0 0 12px\">{_html_escape(par)}</p>"
                      for par in corpo.split("\n\n")) + "</div>"
-    ok = enviar_email(destino, assunto, html, texto_alt=corpo,
-                      reply_to=email_rem or None, from_nome=(ctx["conta"][2] or None))
+    ok = _ein.enviar_conta(pool, ctx["conta_id"], destino, assunto, html, texto_alt=corpo,
+                           reply_to=email_rem or None, from_nome=(ctx["conta"][2] or None))
     if not ok:
         return JSONResponse({"ok": False, "erro": "envio_falhou"})
-    remetente = remetente_configurado() or ""
     with pool.connection() as c:
         _reg_atividade(c, alvo_id, ctx["conta_id"], ctx["membro_id"], "email",
                        f"De {remetente} · Para {destino} · {assunto}\n\n{corpo}", alvo["status"])

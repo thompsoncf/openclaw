@@ -86,19 +86,27 @@ def _titulo_dia(d: date) -> str:
     return f"{DIAS_SEM_EXT[idx]}, {d.day} de {MESES[d.month]}"
 
 
-def _eventos_por_dia(eventos: list[dict]) -> dict[str, dict]:
+def _eventos_por_dia(eventos: list[dict], convidados: dict[int, list[dict]] | None = None) -> dict[str, dict]:
     """{iso_do_dia: {titulo, eventos:[...]}} com os detalhes completos (local,
-    descrição) — alimenta a caixa do dia no JS sem precisar de outra requisição
-    (os eventos do mês já vieram pro calendário)."""
+    descrição, convidados) — alimenta a caixa do dia no JS sem precisar de outra
+    requisição (os eventos do mês já vieram pro calendário)."""
+    convidados = convidados or {}
     out: dict[str, dict] = {}
     for e in sorted(eventos, key=lambda ev: ev["inicio"]):
         d = e["inicio"].astimezone(ag.BRT).date()
         iso = d.isoformat()
         bucket = out.setdefault(iso, {"titulo": _titulo_dia(d), "eventos": []})
+        conv_lista = []
+        for g in convidados.get(e["id"], []):
+            texto = f"Oi{(' ' + g['nome']) if g.get('nome') else ''}! Sobre o compromisso \"{e['titulo']}\"…"
+            conv_lista.append({"nome": g.get("nome") or "", "contato": g.get("contato") or "",
+                               "status": g["status"], "status_rot": g["status_rot"],
+                               "wa": _wa_share(g["contato"], texto) if g.get("contato") else ""})
         bucket["eventos"].append({
             "id": e["id"], "hora": e["inicio"].astimezone(ag.BRT).strftime("%H:%M"),
             "titulo": e["titulo"], "tipo": e["tipo"], "tipo_rot": TIPO_ROT.get(e["tipo"], "Pessoal"),
             "local": e.get("local") or "", "descricao": e.get("descricao") or "",
+            "convidados": conv_lista,
         })
     return out
 
@@ -175,9 +183,10 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
     hoje = ag.agora_brt().date()
     eventos = ag.eventos_mes(pool, conta_id, ano, mes)
     semanas = _monta_semanas(ano, mes, eventos, hoje)
-    eventos_dia = _eventos_por_dia(eventos)
     proximos = ag.proximos(pool, conta_id, limite=8)
-    convidados = cv.por_evento(pool, conta_id, [e["id"] for e in proximos])
+    ids_com_convidados = {e["id"] for e in eventos} | {e["id"] for e in proximos}
+    convidados = cv.por_evento(pool, conta_id, list(ids_com_convidados))
+    eventos_dia = _eventos_por_dia(eventos, convidados)
     for ev in proximos:
         ev["dia_rot"] = ev["inicio"].astimezone(ag.BRT).strftime("%d/%m")
         ev["hora_rot"] = ev["inicio"].astimezone(ag.BRT).strftime("%H:%M")
@@ -638,6 +647,14 @@ _CSS = """<style>
 .dev-tt{font-size:.92rem;font-weight:600;margin-top:1px}
 .dev-meta{display:flex;flex-wrap:wrap;gap:8px;font-size:.76rem;color:var(--txt-mut);margin-top:4px}
 .dev-desc{font-size:.8rem;color:var(--txt-mut);margin-top:6px;line-height:1.45;background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:7px 9px}
+.dev-conv{margin-top:9px;padding-top:9px;border-top:1px dashed var(--borda)}
+.dev-conv-lbl{font-size:.66rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--txt-mut);margin-bottom:6px}
+.guest{display:flex;align-items:center;gap:8px;padding:5px 0}
+.guest-info{flex:1;min-width:0}
+.guest-nome{font-size:.85rem;font-weight:600;color:var(--txt);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.guest-fone{font-size:.74rem;color:var(--txt-mut);font-variant-numeric:tabular-nums;margin-top:1px}
+.guest-wa{flex:0 0 auto;width:30px;height:30px;border-radius:8px;background:#25d366;color:#04160e;border:0;display:flex;align-items:center;justify-content:center;font-size:.92rem;text-decoration:none;cursor:pointer}
+.guest-wa:hover{background:#2ee578}
 .tpill{font-size:.64rem;font-weight:700;padding:1px 7px;border-radius:20px;text-transform:uppercase;letter-spacing:.03em}
 .tp-pessoal{background:rgba(29,158,117,.16);color:var(--verde-claro)}
 .tp-empresa{background:rgba(57,135,229,.16);color:#bcd8f6}
@@ -873,6 +890,8 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 var EVENTOS_DIA = {{ eventos_dia|tojson }};
 var TPILL = {pessoal:'Pessoal', empresa:'Empresa', fornecedor:'Fornecedor'};
 
+function _esc(s){ return (s||'').replace(/[&<>"']/g, function(ch){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]; }); }
 function abrirDia(iso){
   var d = EVENTOS_DIA[iso];
   if(!d) return;
@@ -881,12 +900,22 @@ function abrirDia(iso){
     + '<button class="x" type="button" onclick="fecharDia()" aria-label="Fechar">✕</button></div>'
     + '<p class="daybox-sub">'+d.eventos.length+(d.eventos.length===1?' compromisso':' compromissos')+'</p>';
   d.eventos.forEach(function(e){
+    var conv = '';
+    (e.convidados||[]).forEach(function(g){
+      conv += '<div class="guest"><div class="guest-info">'
+        + '<div class="guest-nome">'+_esc(g.nome||'Convidado')+' <span class="cpill cp-'+g.status+'">'+_esc(g.status_rot)+'</span></div>'
+        + '<div class="guest-fone">'+(g.contato?_esc(g.contato):'<i>sem número</i>')+'</div></div>'
+        + (g.wa?'<a class="guest-wa" href="'+g.wa+'" target="_blank" rel="noopener" title="Chamar '+_esc(g.nome||'convidado')+' no WhatsApp">💬</a>':'')
+        + '</div>';
+    });
+    if(conv) conv = '<div class="dev-conv"><div class="dev-conv-lbl">👤 Convidados</div>'+conv+'</div>';
     html += '<div class="dev" data-ev="'+e.id+'"><div class="dev-dot d-'+e.tipo+'"></div><div class="dev-body">'
       + '<div class="dev-hora">'+e.hora+'</div>'
       + '<div class="dev-tt">'+e.titulo+'</div>'
       + '<div class="dev-meta"><span class="tpill tp-'+e.tipo+'">'+(TPILL[e.tipo]||e.tipo_rot)+'</span>'
       + (e.local?'<span>📍 '+e.local+'</span>':'')+'</div>'
       + (e.descricao?'<div class="dev-desc">'+e.descricao+'</div>':'')
+      + conv
       + '</div></div>';
   });
   html += '<button class="daybox-cta" type="button" onclick="agNovoNoDia(\\''+iso+'\\')">＋ Marcar novo compromisso nesse dia</button>';

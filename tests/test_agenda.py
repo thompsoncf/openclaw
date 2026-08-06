@@ -65,6 +65,36 @@ def test_link_maps_usa_o_local():
     assert "Rua" in url
 
 
+# ---------- caixa do dia: convidados embutidos (puro) ----------
+
+def test_eventos_por_dia_embute_convidados_com_link_de_whatsapp():
+    from web import painel_agenda as pa
+    eventos = [_ev(id=1, titulo="Reunião com Rosana", tipo="empresa")]
+    convidados = {1: [
+        {"nome": "Rosana", "contato": "86 99123-4567", "status": "confirmado", "status_rot": "Confirmado"},
+    ]}
+    dia = pa._eventos_por_dia(eventos, convidados)
+    g = dia["2026-07-28"]["eventos"][0]["convidados"][0]
+    assert g["nome"] == "Rosana" and g["status"] == "confirmado"
+    assert g["wa"].startswith("https://wa.me/5586991234567?text=")
+    assert "Rosana" in g["wa"]
+
+
+def test_eventos_por_dia_convidado_sem_contato_nao_gera_link():
+    from web import painel_agenda as pa
+    eventos = [_ev(id=1, tipo="empresa")]
+    convidados = {1: [{"nome": "SemZap", "contato": "", "status": "pendente", "status_rot": "Pendente"}]}
+    dia = pa._eventos_por_dia(eventos, convidados)
+    g = dia["2026-07-28"]["eventos"][0]["convidados"][0]
+    assert g["wa"] == ""
+
+
+def test_eventos_por_dia_sem_convidados_e_lista_vazia():
+    from web import painel_agenda as pa
+    dia = pa._eventos_por_dia([_ev(id=1, tipo="empresa")])
+    assert dia["2026-07-28"]["eventos"][0]["convidados"] == []
+
+
 def test_link_maps_sem_local_volta_none():
     assert ag.link_maps("") is None
     assert ag.link_maps(None) is None

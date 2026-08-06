@@ -23,6 +23,7 @@ create table campanhas (id bigserial primary key, conta_id bigint, nome text, st
   limite_dia int default 40, limite_wa_dia int default 30, wa_ativo boolean default false,
   wa_mmlite boolean default false, wa_template_sid text, reengajar_ativo boolean default false,
   reengajar_dias int default 3, remetente_slot text default 'principal', teto_wa numeric(10,2),
+  responsavel_id bigint,
   material text, material_tipo text default 'link', atualizado_em timestamptz default now());
 create table canais_config (
   id bigserial primary key, conta_id bigint, canal text, identificador text,

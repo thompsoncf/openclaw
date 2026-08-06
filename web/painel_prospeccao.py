@@ -206,6 +206,21 @@ def _pode_ver(alvo: dict, ctx: dict) -> bool:
     return alvo["vendedor_id"] is not None and alvo["vendedor_id"] == ctx["membro_id"]
 
 
+def _pode_campanha(ctx: dict, camp_id: int, c=None) -> bool:
+    """Quem pode ver/gerenciar uma campanha: dono/gestor (tudo) OU o membro
+    vinculado como responsável dela (espelha o vendedor_id do lead). Confirma que a
+    campanha é da conta antes — evita vazar campanha de outra empresa. Sem `c`, abre
+    uma conexão própria (pra usar como guarda no topo das rotas)."""
+    if c is None:
+        with get_pool().connection() as _c:
+            return _pode_campanha(ctx, camp_id, _c)
+    r = c.execute("select responsavel_id from campanhas where id=%s and conta_id=%s",
+                  (camp_id, ctx["conta_id"])).fetchone()
+    if not r:
+        return False
+    return ctx["gerencia"] or (r[0] is not None and r[0] == ctx["membro_id"])
+
+
 def _vendedor_destino(ctx: dict, vendedor_id: str, pool, conta_id: int):
     """Pra quem vai o alvo captado: só o dono escolhe (validando a conta);
     vendedor/gestor sempre pra si mesmo."""
@@ -2700,9 +2715,12 @@ def _motor_status(c) -> dict:
             "texto": f"Motor parado · nenhum ciclo {quando} · normalmente roda a cada 2 min"}
 
 
-def _campanhas_dados(c, conta_id):
-    """Métricas por canal de TODAS as campanhas da conta (lista + polling). Uma
-    consulta LATERAL agrega tudo por campanha. Devolve (camps, totais)."""
+def _campanhas_dados(c, conta_id, membro_id=None):
+    """Métricas por canal das campanhas da conta (lista + polling). Uma consulta
+    LATERAL agrega tudo por campanha. Devolve (camps, totais).
+
+    membro_id != None restringe às campanhas em que ESSE membro é o responsável
+    (visão do vendedor); None = todas as da conta (visão do dono/gestor)."""
     from datetime import date as _date
     from finance import wa_precos
     _RATE = wa_precos.TARIFA_BRL["marketing"]
@@ -2716,7 +2734,9 @@ def _campanhas_dados(c, conta_id):
                   ag.wa_env, ag.wa_resp, ag.wa_err, ag.wa_gasto, coalesce(ev.bounces,0),
                   to_char((select min(a.proximo_envio_em) from campanha_alvos a
                             where a.campanha_id=cp.id and a.proximo_envio_em is not null)
-                          - interval '3 hours', 'HH24:MI')
+                          - interval '3 hours', 'HH24:MI'),
+                  (select coalesce(nullif(m.nome,''), m.email) from membros m
+                    where m.id=cp.responsavel_id)
              from campanhas cp
              left join lateral (
                select count(*) n,
@@ -2734,34 +2754,37 @@ def _campanhas_dados(c, conta_id):
              left join lateral (
                select count(*) bounces from campanha_eventos e
                where e.campanha_id=cp.id and e.evento='bounce') ev on true
-            where cp.conta_id=%s order by cp.criado_em desc""",
-        (conta_id,)).fetchall()
+            where cp.conta_id=%s
+              and (%s::bigint is null or cp.responsavel_id=%s)
+            order by cp.criado_em desc""",
+        (conta_id, membro_id, membro_id)).fetchall()
     # leads únicos que clicaram cada botão do template de WhatsApp (qualquer
     # campanha da conta) — os 3 saem juntos no mesmo clique do lead, então dá
     # pra somar sem contar 2x: "Agora não" grava evento='clicou', os outros
     # dois ("Quero te conhecer" / "Quero o material") gravam evento='respondeu'
     # (ver _rot_btn na rota que processa o clique do botão).
+    _esc = " and (%s::bigint is null or cp.responsavel_id=%s)"
     sem_interesse = c.execute(
         """select count(distinct e.prospeccao_id) from campanha_eventos e
              join campanhas cp on cp.id=e.campanha_id
             where cp.conta_id=%s and e.canal='whatsapp' and e.evento='clicou'
-              and e.detalhe='Agora não'""", (conta_id,)).fetchone()[0]
+              and e.detalhe='Agora não'""" + _esc, (conta_id, membro_id, membro_id)).fetchone()[0]
     quer_conhecer = c.execute(
         """select count(distinct e.prospeccao_id) from campanha_eventos e
              join campanhas cp on cp.id=e.campanha_id
             where cp.conta_id=%s and e.canal='whatsapp' and e.evento='respondeu'
-              and e.detalhe='Quero te conhecer'""", (conta_id,)).fetchone()[0]
+              and e.detalhe='Quero te conhecer'""" + _esc, (conta_id, membro_id, membro_id)).fetchone()[0]
     quer_material = c.execute(
         """select count(distinct e.prospeccao_id) from campanha_eventos e
              join campanhas cp on cp.id=e.campanha_id
             where cp.conta_id=%s and e.canal='whatsapp' and e.evento='respondeu'
-              and e.detalhe='Quero o material'""", (conta_id,)).fetchone()[0]
+              and e.detalhe='Quero o material'""" + _esc, (conta_id, membro_id, membro_id)).fetchone()[0]
     camps = []
     tot_gasto = tot_msgs = tot_email = tot_teto = perto = 0
     for r in rows:
         (cid, nome, status, limite, wa_ativo, teto, env_hoje, dia_cont, wa_sid,
          n, e_env, e_resp, e_abriu, e_err, virou, w_env, w_resp, w_err, w_gasto, e_volta,
-         proximo) = r
+         proximo, resp_nome) = r
         limite = limite or 0
         n = n or 0
         hoje_n = env_hoje if dia_cont == _hoje else 0
@@ -2795,6 +2818,7 @@ def _campanhas_dados(c, conta_id):
             "gasto": gasto, "gasto_fmt": _reais(gasto),
             "teto": teto_f, "teto_fmt": (_reais(teto_f) if teto_f else ""),
             "pct": pct, "alerta": alerta, "previsto_fmt": _reais(n * _RATE),
+            "responsavel": resp_nome or "",
         })
     totais = {"gasto_fmt": _reais(tot_gasto), "msgs": tot_msgs, "emails": tot_email,
               "teto_fmt": _reais(tot_teto), "perto": perto, "sem_interesse": sem_interesse,
@@ -2809,11 +2833,10 @@ def prospeccao_campanhas(request: Request):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
-    if not ctx["gerencia"]:
-        request.session["prosp_aviso"] = "Só o dono/gestor gerencia campanhas."
-        return RedirectResponse("/painel/prospeccao", status_code=303)
+    # dono/gestor vê todas; vendedor vê só as campanhas em que é o responsável.
+    escopo_membro = None if ctx["gerencia"] else ctx["membro_id"]
     with get_pool().connection() as c:
-        camps, totais = _campanhas_dados(c, ctx["conta_id"])
+        camps, totais = _campanhas_dados(c, ctx["conta_id"], escopo_membro)
         eleg = c.execute("""select count(*) from prospeccao where conta_id=%s
                              and (email_ok or coalesce(nullif(trim(whatsapp),''), nullif(trim(telefone),'')) is not null)""",
                          (ctx["conta_id"],)).fetchone()[0]
@@ -2828,10 +2851,9 @@ def prospeccao_campanhas_metricas(request: Request):
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False}, status_code=401)
-    if not ctx["gerencia"]:
-        return JSONResponse({"ok": False}, status_code=403)
+    escopo_membro = None if ctx["gerencia"] else ctx["membro_id"]
     with get_pool().connection() as c:
-        camps, totais = _campanhas_dados(c, ctx["conta_id"])
+        camps, totais = _campanhas_dados(c, ctx["conta_id"], escopo_membro)
     return JSONResponse({"ok": True, "camps": camps, "totais": totais})
 
 
@@ -2858,7 +2880,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
-    if not ctx["gerencia"]:
+    if not _pode_campanha(ctx, camp_id):
         return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
     with get_pool().connection() as c:
         cp = c.execute("""select id, nome, status, limite_dia, coalesce(enviados_hoje,0), dia_contagem,
@@ -2867,7 +2889,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                                  coalesce(modelo_codigo,''), coalesce(wa_template_sid,''),
                                  coalesce(reengajar_ativo,false), coalesce(reengajar_dias,3),
                                  coalesce(remetente_slot,'principal'), coalesce(wa_mmlite,false),
-                                 teto_wa
+                                 teto_wa, responsavel_id
                             from campanhas where id=%s and conta_id=%s""",
                        (camp_id, ctx["conta_id"])).fetchone()
         if not cp:
@@ -2951,7 +2973,8 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
             "wa_pronto": _prospec_convite.template_configurado(cp[13]), "material_tipo": cp[11],
             "modelo_codigo": cp[12], "reengajar_ativo": cp[14], "reengajar_dias": cp[15],
             "remetente_slot": cp[16], "wa_mmlite": cp[17],
-            "teto_wa": (f"{float(cp[18]):.2f}" if cp[18] is not None else "")}
+            "teto_wa": (f"{float(cp[18]):.2f}" if cp[18] is not None else ""),
+            "responsavel_id": cp[19]}
     metr = {"total": na_camp, "fila": st.get("fila", 0), "enviados": enviados, "responderam": resp,
             "descadastros": st.get("descadastrou", 0), "erros": st.get("erro", 0),
             "concluidos": st.get("concluido", 0), "hoje": hoje, "abriram": abriram,
@@ -2987,11 +3010,16 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
     from finance import email_inbound as _ein_mod
     email_principal = _ein_mod.remetente_conta(get_pool(), ctx["conta_id"], "email") or ""
     email_secundario = _ein_mod.remetente_conta(get_pool(), ctx["conta_id"], "email2") or ""
+    # responsável: só o dono atribui (mesma regra do lead). O nome mostra pra todos.
+    vendedores = _vendedores(get_pool(), ctx["conta_id"]) if ctx["pode_atribuir"] else []
+    responsavel_nome = _nome_vendedor(get_pool(), ctx["conta_id"], camp.get("responsavel_id"))
     return _render("prospeccao_campanha", request, titulo=camp["nome"], secao_ativa="prospeccao",
                    camp=camp, passos=passos_l, elegiveis=eleg, na_camp=na_camp, st=st, metr=metr,
                    leads=leads_l, previa=previa, cadencia=cadencia, remetente=email_principal,
                    modelos=modelos, seg=seg, cidade=cidade, temp=temp,
                    email_principal=email_principal, email_secundario=email_secundario,
+                   vendedores=vendedores, responsavel_nome=responsavel_nome,
+                   pode_atribuir=ctx["pode_atribuir"], gerencia=ctx["gerencia"],
                    aviso=request.session.pop("prosp_aviso", None))
 
 
@@ -3002,8 +3030,7 @@ def prospeccao_campanha_historico(request: Request, camp_id: int, pid: int):
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
     with get_pool().connection() as c:
-        if not c.execute("select 1 from campanhas where id=%s and conta_id=%s",
-                         (camp_id, ctx["conta_id"])).fetchone():
+        if not _pode_campanha(ctx, camp_id, c):
             return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
         rows = c.execute(
             """select canal, evento, coalesce(detalhe,''),
@@ -3026,7 +3053,7 @@ def prospeccao_campanha_exportar_cliques(request: Request, camp_id: int):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
-    if not ctx["gerencia"]:
+    if not _pode_campanha(ctx, camp_id):
         return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
     with get_pool().connection() as c:
         camp = c.execute("select nome from campanhas where id=%s and conta_id=%s",
@@ -3084,7 +3111,7 @@ def prospeccao_campanha_publico(request: Request, camp_id: int, seg: str = Form(
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
-    if not ctx["gerencia"]:
+    if not _pode_campanha(ctx, camp_id):
         return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
     with get_pool().connection() as c:
         if not c.execute("select 1 from campanhas where id=%s and conta_id=%s",
@@ -3109,7 +3136,7 @@ async def prospeccao_campanha_config(request: Request, camp_id: int):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
-    if not ctx["gerencia"]:
+    if not _pode_campanha(ctx, camp_id):
         return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
     form = await request.form()
     nome = (form.get("nome") or "").strip()
@@ -3198,7 +3225,7 @@ def prospeccao_campanha_remover_lead(request: Request, camp_id: int, prospeccao_
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    if not ctx["gerencia"]:
+    if not _pode_campanha(ctx, camp_id):
         return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
     try:
         pid = int(prospeccao_id)
@@ -3221,7 +3248,7 @@ def prospeccao_campanha_remover_leads(request: Request, camp_id: int, ids: list[
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    if not ctx["gerencia"]:
+    if not _pode_campanha(ctx, camp_id):
         return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
     pids = []
     for v in ids:
@@ -3246,7 +3273,7 @@ def prospeccao_campanha_usar_modelo(request: Request, camp_id: int, codigo: str 
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    if not ctx["gerencia"]:
+    if not _pode_campanha(ctx, camp_id):
         return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
     codigo = (codigo or "").strip()
     with get_pool().connection() as c:
@@ -3274,7 +3301,7 @@ def prospeccao_campanha_salvar_modelo(request: Request, camp_id: int, nome: str 
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    if not ctx["gerencia"]:
+    if not _pode_campanha(ctx, camp_id):
         return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
     nome = (nome or "").strip()[:80]
     if not nome:
@@ -3305,7 +3332,7 @@ def prospeccao_campanha_status(request: Request, camp_id: int, status: str = For
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
-    if not ctx["gerencia"] or status not in ("rascunho", "ativa", "pausada", "concluida"):
+    if status not in ("rascunho", "ativa", "pausada", "concluida") or not _pode_campanha(ctx, camp_id):
         return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
     with get_pool().connection() as c:
         c.execute("update campanhas set status=%s, atualizado_em=now() where id=%s and conta_id=%s",
@@ -3317,6 +3344,26 @@ def prospeccao_campanha_status(request: Request, camp_id: int, status: str = For
     return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
 
 
+@router.post("/painel/prospeccao/campanhas/{camp_id}/responsavel")
+def prospeccao_campanha_responsavel(request: Request, camp_id: int, vendedor_id: str = Form("")):
+    """Vincula (ou desvincula) o responsável da campanha — o membro que passa a vê-la e
+    gerenciá-la (espelha a atribuição de lead ao vendedor). Só o dono atribui; '— livre —'
+    (vazio) tira o responsável, e aí só dono/gestor veem a campanha."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["pode_atribuir"]:
+        return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
+    vend = _vendedor_destino(ctx, vendedor_id, get_pool(), ctx["conta_id"])
+    with get_pool().connection() as c:
+        c.execute("update campanhas set responsavel_id=%s, atualizado_em=now() where id=%s and conta_id=%s",
+                  (vend, camp_id, ctx["conta_id"]))
+        c.commit()
+    request.session["prosp_aviso"] = ("Responsável vinculado ✓ — ele já vê e gerencia essa campanha."
+                                      if vend else "Campanha sem responsável (só dono/gestor veem).")
+    return RedirectResponse(f"/painel/prospeccao/campanhas/{camp_id}", status_code=303)
+
+
 @router.post("/painel/prospeccao/campanhas/{camp_id}/sequencia")
 def prospeccao_campanha_sequencia(request: Request, camp_id: int,
                                   dias: list[str] = Form([]), assunto: list[str] = Form([]),
@@ -3324,7 +3371,7 @@ def prospeccao_campanha_sequencia(request: Request, camp_id: int,
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
-    if not ctx["gerencia"]:
+    if not _pode_campanha(ctx, camp_id):
         return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
     with get_pool().connection() as c:
         if not _campanha_dona(c, ctx["conta_id"], camp_id):
@@ -3375,7 +3422,7 @@ def prospeccao_campanha_reiniciar(request: Request, camp_id: int):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
-    if not ctx["gerencia"]:
+    if not _pode_campanha(ctx, camp_id):
         return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
     with get_pool().connection() as c:
         if not c.execute("select 1 from campanhas where id=%s and conta_id=%s",
@@ -3403,7 +3450,7 @@ def prospeccao_campanha_previa_ia(request: Request, camp_id: int):
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    if not ctx["gerencia"]:
+    if not _pode_campanha(ctx, camp_id):
         return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
     pool = get_pool()
     with pool.connection() as c:
@@ -4689,8 +4736,8 @@ def _navbar(active):
         # `active` (ex.: na Comunicação, Canais fica ativo quando aba=canais).
         cond = "{% if (nav_ativo|default('" + active + "')) == '" + key + "' %} on{% endif %}"
         a = '<a class="pnav' + cond + extra + '" href="' + href + '">' + label + '</a>'
-        if gated:  # Campanhas só pra gestão
-            a = "{% if gerencia %}" + a + "{% endif %}"
+        if gated:  # Campanhas: gestão vê tudo; vendedor vê as em que é responsável
+            a = "{% if gerencia or caps.vendas %}" + a + "{% endif %}"
         out.append(a)
     out.append("</nav>")
     return "\n".join(out)
@@ -5292,7 +5339,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   <nav class="pnavbar" aria-label="Prospecção">
     <button type="button" class="pnav" onclick="capToggle()">🎯 Captar Lead</button>
     <a class="pnav" href="/painel/prospeccao/base">📇 Base</a>
-    {% if gerencia %}<a class="pnav" href="/painel/prospeccao/campanhas">📣 Campanhas</a>{% endif %}
+    {% if gerencia or caps.vendas %}<a class="pnav" href="/painel/prospeccao/campanhas">📣 Campanhas</a>{% endif %}
     <a class="pnav" href="/painel/prospeccao/comunicacao">💬 Comunicação</a>
     <a class="pnav on" href="/painel/prospeccao">🔥 Funil</a>
     <a class="pnav cfg" href="/painel/prospeccao/comunicacao?aba=canais">⚙️ Canais</a>
@@ -6894,7 +6941,7 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
       <h2 class="tt">📣 Campanhas</h2>
       <div class="mut" style="font-size:.85rem">Prospecção fria multicanal · <b style="color:var(--verde-claro)">{{ elegiveis }}</b> lead(s) com e-mail ou WhatsApp prontos pra abordar</div>
     </div>
-    <button class="hdrbtn" type="button" onclick="document.getElementById('ovlCriar').classList.add('on');document.getElementById('nomeCampanha').focus()">＋ Criar</button>
+    {% if gerencia %}<button class="hdrbtn" type="button" onclick="document.getElementById('ovlCriar').classList.add('on');document.getElementById('nomeCampanha').focus()">＋ Criar</button>{% endif %}
   </div>
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
 
@@ -6956,11 +7003,11 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
           {% if c.wa %}<span class="badge wa" title="WhatsApp">💬</span>{% endif %}
           <span class="cpill {{ c.status }}">{{ c.status_rot }}</span>
           {% if c.alerta == 'coral' %}<span class="calert coral" data-t="alerta">⛔ teto atingido</span>{% elif c.alerta == 'amar' %}<span class="calert amar" data-t="alerta">⚠ {{ c.pct }}% do teto</span>{% else %}<span class="calert amar" data-t="alerta" style="display:none"></span>{% endif %}
-          <form method="post" action="/painel/prospeccao/campanhas/{{ c.id }}/excluir" style="margin:0" onsubmit="return confirm('Excluir “{{ c.nome }}”? Os leads voltam pro funil.')">
+          {% if gerencia %}<form method="post" action="/painel/prospeccao/campanhas/{{ c.id }}/excluir" style="margin:0" onsubmit="return confirm('Excluir “{{ c.nome }}”? Os leads voltam pro funil.')">
             <button class="cpx" title="Excluir campanha">🗑</button>
-          </form>
+          </form>{% endif %}
         </div>
-        <div class="subline"><b>{{ c.n }}</b> {{ 'lead' if c.n == 1 else 'leads' }} · <b class="g" data-t="virou">{{ c.virou }}</b> virou lead 🔥 · limite <b>{{ c.limite }}</b>/dia</div>
+        <div class="subline"><b>{{ c.n }}</b> {{ 'lead' if c.n == 1 else 'leads' }} · <b class="g" data-t="virou">{{ c.virou }}</b> virou lead 🔥 · limite <b>{{ c.limite }}</b>/dia{% if gerencia and c.responsavel %} · 👤 {{ c.responsavel }}{% endif %}</div>
         <div class="chan">
           <span class="cl">💬 WhatsApp</span>
           <span class="kv"><b data-t="wa_env">{{ c.wa_env }}</b> enviadas</span><span class="sep">·</span>
@@ -7177,9 +7224,16 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
     <div style="min-width:0">
       <a class="voltar" href="/painel/prospeccao/campanhas">‹ Voltar para Campanhas</a>
       <h1><span class="nm">{{ camp.nome }}</span> <span class="cpill {{ camp.status }}">{{ camp.status_rot }}</span></h1>
-      <div class="sub"><b style="color:var(--txt)">{{ na_camp }}</b> lead(s) na campanha · limite <b style="color:var(--txt)">{{ camp.limite }}</b>/dia · ✉️ e-mail{% if camp.wa_ativo %} + 💬 WhatsApp{% endif %}</div>
+      <div class="sub"><b style="color:var(--txt)">{{ na_camp }}</b> lead(s) na campanha · limite <b style="color:var(--txt)">{{ camp.limite }}</b>/dia · ✉️ e-mail{% if camp.wa_ativo %} + 💬 WhatsApp{% endif %}{% if responsavel_nome %} · 👤 <b style="color:var(--txt)">{{ responsavel_nome }}</b>{% endif %}</div>
     </div>
     <div class="acts">
+      {% if pode_atribuir %}<form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/responsavel" style="margin:0;display:flex;align-items:center;gap:.35rem">
+        <label class="lbl" style="margin:0">👤 Responsável</label>
+        <select class="fld" name="vendedor_id" onchange="this.form.submit()" style="width:auto;padding:.36rem .5rem;font-size:.82rem">
+          <option value="">— livre —</option>
+          {% for v in vendedores %}<option value="{{ v.id }}" {% if camp.responsavel_id==v.id %}selected{% endif %}>{{ v.nome }}</option>{% endfor %}
+        </select>
+      </form>{% endif %}
       {% if camp.status != 'ativa' %}<form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/status" style="margin:0"><input type="hidden" name="status" value="ativa"><button class="pbtn" {% if not na_camp %}disabled title="Adicione leads antes de ativar"{% endif %}>▶ Ativar</button></form>
       {% else %}<form method="post" action="/painel/prospeccao/campanhas/{{ camp.id }}/status" style="margin:0"><input type="hidden" name="status" value="pausada"><button class="pbtn ghost">❚❚ Pausar</button></form>{% endif %}
     </div>

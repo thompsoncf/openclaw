@@ -809,7 +809,7 @@ def ia_insta(request: Request):
                    agendados=agendados, proximo_agendado=agendados[0] if agendados else None,
                    publicados=[p for p in posts if p["status"] == "publicado"][:10],
                    ideias=ideias_semana(), handle=handle,
-                   nome=(pessoa or "").split(" ")[0] if pessoa else "",
+                   pessoa_nome=(pessoa or "").split(" ")[0] if pessoa else "",
                    tot_pub=tot[0], tot_cliques=tot[1], tot_leads=tot[2],
                    gerencia=ctx["gerencia"], aviso=request.session.pop("insta_aviso", None))
 
@@ -1125,7 +1125,7 @@ _LISTA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + _EXTRA_CSS 
   <div class="ia-eyebrow"><span class="mut" style="font-size:.68rem;letter-spacing:.09em;text-transform:uppercase">IA Insta</span>
     <span class="mut" style="font-size:.82rem" id="diag">verificando conexão…</span>
   </div>
-  <h1 class="ia-greet">Olá{% if nome %}, {{ nome }}{% endif %} — o que vamos publicar no <span class="ac">@{{ handle }}</span> hoje?</h1>
+  <h1 class="ia-greet">Olá{% if pessoa_nome %}, {{ pessoa_nome }}{% endif %} — o que vamos publicar no <span class="ac">@{{ handle }}</span> hoje?</h1>
 
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
 

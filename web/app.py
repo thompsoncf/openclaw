@@ -83,6 +83,7 @@ from web.admin_precos import router as precos_router
 from web.painel_servicos import router as servicos_router
 from web.painel_equipe import router as equipe_router
 from web.painel_prospeccao import router as prospeccao_router
+from web.painel_conteudo import router as conteudo_router
 from web.painel_agenda import router as agenda_router
 from web.proposta import router as proposta_router
 app.add_middleware(
@@ -103,6 +104,10 @@ app.include_router(admin_router)
 app.include_router(precos_router)
 app.include_router(servicos_router)
 app.include_router(equipe_router)
+app.include_router(conteudo_router)  # antes do prospeccao_router: aquele tem um
+                                      # catch-all GET /painel/prospeccao/{alvo_id}
+                                      # (ficha do lead) que engoliria /ia-insta*
+                                      # se viesse primeiro (mesmo formato de 1 segmento).
 app.include_router(prospeccao_router)
 app.include_router(agenda_router)
 app.include_router(proposta_router)
@@ -175,6 +180,13 @@ def _iniciar_poller_email() -> None:
                 _cm.renovar_tokens_ig(pool)      # renova token do Instagram (60 dias)
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — renovar_tokens_ig falhou: %s: %s", ciclo, type(e).__name__, e)
+            try:
+                from web.painel_conteudo import publicar_pendentes as _ia_insta
+                n_post = _ia_insta(pool)         # IA Insta: publica agendados vencidos
+                if n_post:
+                    log.info("poller: ciclo #%d — IA Insta: %d post(s) publicado(s)", ciclo, n_post)
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — IA Insta falhou: %s: %s", ciclo, type(e).__name__, e)
             try:
                 from finance import lembretes as _lb
                 _lb.rodar(pool)                  # resumo do dia + aviso antes (agenda)

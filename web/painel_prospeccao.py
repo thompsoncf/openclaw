@@ -5400,7 +5400,7 @@ function cnpjResolverUsar(id,cnpj,btn){
       if(cel && !cel.querySelector('.bt-cnpj-tag')){
         var tag=document.createElement('div');
         tag.className='mut bt-cnpj-tag';tag.style.fontSize='.72rem';
-        tag.textContent='🏢 '+cnpj.replace(/\D/g,'');
+        tag.textContent='🏢 '+cnpj.replace(/\\D/g,'');
         cel.appendChild(tag);
       }
       var ck=row.querySelector('.bt-ck');
@@ -5418,7 +5418,7 @@ function cnpjResolverUsar(id,cnpj,btn){
   }).catch(function(){alert('Falha de rede — tente de novo.');btn.disabled=false;btn.textContent='usar';});
 }
 function cnpjResolverColar(id,inputId,btn){
-  var v=(document.getElementById(inputId).value||'').replace(/\D/g,'');
+  var v=(document.getElementById(inputId).value||'').replace(/\\D/g,'');
   if(v.length!==14){alert('CNPJ precisa ter 14 dígitos.');return;}
   cnpjResolverUsar(id,v,btn);
 }
@@ -7716,7 +7716,7 @@ function secToggle(id){document.getElementById(id).classList.toggle('open');}
 function secOpen(id){var el=document.getElementById(id);el.classList.add('open');el.scrollIntoView({behavior:'smooth',block:'start'});}
 function simCusto(){
   var R=0.3217, L=document.getElementById('sim-leads'); if(!L)return;
-  var n=parseInt((L.value||'0').replace(/\D/g,''))||0;
+  var n=parseInt((L.value||'0').replace(/\\D/g,''))||0;
   var fep=Math.max(0,Math.min(100,parseInt(document.getElementById('sim-fep').value||'0')||0));
   var pagos=Math.round(n*(1-fep/100)), custo=pagos*R;
   var fmt=function(v){return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});};

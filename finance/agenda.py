@@ -245,12 +245,23 @@ def link_google(ev: dict) -> str:
     return "https://calendar.google.com/calendar/render?" + p
 
 
+LOCAL_ONLINE = "Online"
+
+
+def eh_online(local: str | None) -> bool:
+    """True quando o local marcado foi o botão "reunião online" do formulário
+    (ou alguém digitou exatamente isso à mão) — não tem endereço de verdade, então
+    ninguém deve receber link de mapa pra ele."""
+    return (local or "").strip().lower() == LOCAL_ONLINE.lower()
+
+
 def link_maps(local: str | None) -> str | None:
     """URL do Google Maps pro local do evento (texto livre — endereço, nome do
-    lugar etc.). None se não tiver local, pra quem for montar mensagem pular a
-    linha inteira em vez de mandar um link vazio."""
+    lugar etc.). None se não tiver local — ou se for reunião online, que não tem
+    endereço nenhum pra mostrar no mapa — pra quem for montar mensagem pular a
+    linha inteira em vez de mandar um link vazio ou sem sentido."""
     local = (local or "").strip()
-    if not local:
+    if not local or eh_online(local):
         return None
     from urllib.parse import quote
     return "https://www.google.com/maps/search/?api=1&query=" + quote(local)

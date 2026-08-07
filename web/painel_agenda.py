@@ -190,6 +190,7 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
     for ev in proximos:
         ev["dia_rot"] = ev["inicio"].astimezone(ag.BRT).strftime("%d/%m")
         ev["hora_rot"] = ev["inicio"].astimezone(ag.BRT).strftime("%H:%M")
+        ev["data_iso"] = ev["inicio"].astimezone(ag.BRT).date().isoformat()
         ev["tipo_rot"] = TIPO_ROT.get(ev["tipo"], "Pessoal")
         ev["convidados"] = convidados.get(ev["id"], [])
         ev["conv_resumo"] = cv.resumo(ev["convidados"]) if ev["convidados"] else None
@@ -303,6 +304,32 @@ def agenda_cancelar(request: Request, evento_id: int = Form(...), m: str = Form(
         request.session["agenda_aviso"] = "Compromisso cancelado."
     voltar = f"/painel/agenda?m={m}" if m else "/painel/agenda"
     return RedirectResponse(voltar, status_code=303)
+
+
+# ================================================================ REMARCAR
+@router.post("/painel/agenda/remarcar")
+def agenda_remarcar(request: Request, evento_id: int = Form(...), data: str = Form(""),
+                    hora: str = Form(""), avisar: str = Form(""), m: str = Form("")):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    voltar = f"/painel/agenda?m={m}" if m else "/painel/agenda"
+    novo_inicio = ag.parse_datahora(f"{(data or '').strip()} {(hora or '').strip()}".strip())
+    if not novo_inicio:
+        request.session["agenda_aviso"] = "Não entendi a nova data/hora. Confere aí."
+        return RedirectResponse(voltar, status_code=303)
+    r = cv.remarcar_e_avisar(get_pool(), ctx["conta_id"], evento_id, novo_inicio, None,
+                             avisar=(avisar == "1"), agora=ag.agora_brt())
+    if not r.get("ok"):
+        request.session["agenda_aviso"] = "Não consegui remarcar esse compromisso."
+    else:
+        msg = f"Remarcado para {ag.fmt_hora({'inicio': novo_inicio, 'fim': None})}."
+        if r.get("total_convidados"):
+            msg += (f" {r['avisados']} de {r['total_convidados']} convidados avisados."
+                    if avisar == "1" else f" {r['total_convidados']} convidados voltaram a aguardar confirmação.")
+        request.session["agenda_aviso"] = msg
+    destino = f"/painel/agenda?m={novo_inicio.year:04d}-{novo_inicio.month:02d}"
+    return RedirectResponse(destino, status_code=303)
 
 
 _ERRO_ENVIO = {
@@ -507,6 +534,20 @@ _CSS = """<style>
 .d-pessoal{background:var(--verde-claro)}.d-empresa{background:#3987e5}.d-fornecedor{background:#e0a33e}
 .px-x{width:auto;margin:0;background:none;border:0;color:var(--txt-mut);cursor:pointer;font-size:1rem;line-height:1;padding:2px 4px;border-radius:6px}
 .px-x:hover{color:#f0917f;background:rgba(224,87,79,.12)}
+.px-actions{display:flex;gap:2px;flex:0 0 auto}
+.px-rm{width:auto;margin:0;background:none;border:0;color:var(--txt-mut);cursor:pointer;font-size:1rem;line-height:1;padding:2px 4px;border-radius:6px}
+.px-rm:hover{color:var(--verde-claro);background:rgba(29,158,117,.12)}
+.remarcar-box{display:none;margin-top:8px;padding:10px 11px;background:var(--card-2);border:1px solid var(--borda);border-radius:10px}
+.remarcar-box.show{display:block}
+.remarcar-box .rlbl{font-size:.7rem;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--txt-mut);margin-bottom:7px}
+.remarcar-row2{display:flex;gap:8px}
+.remarcar-row2 input{flex:1;margin:0}
+.remarcar-box .tg{padding:9px 0 0;margin-top:9px;border-top:1px dashed var(--borda);border-bottom:0}
+.remarcar-actions{display:flex;gap:8px;margin-top:10px}
+.rbtn{border:0;border-radius:8px;padding:.5rem .8rem;font-size:.8rem;font-weight:700;cursor:pointer}
+.rbtn.ok{background:var(--verde);color:#04160e}
+.rbtn.ok:hover{background:var(--verde-hover)}
+.rbtn.cc{background:transparent;border:1px solid var(--borda);color:var(--txt-mut)}
 .px-vazio{color:var(--txt-mut);font-size:.86rem;padding:8px 2px}
 /* formulários / cards laterais */
 .side-cards{display:flex;flex-direction:column;gap:18px}
@@ -546,6 +587,12 @@ _CSS = """<style>
 .manual-box .mlabel{font-size:.72rem;color:var(--txt-mut);margin-bottom:5px}
 .manual-cancel{display:inline-flex;align-items:center;gap:4px;background:transparent;border:0;color:var(--txt-mut);cursor:pointer;font-size:.72rem;padding:6px 0 0;text-decoration:underline;text-decoration-color:var(--borda);text-underline-offset:3px}
 .manual-cancel:hover{color:var(--verde-claro);text-decoration-color:var(--verde-claro)}
+.local-alt-row{display:flex;flex-wrap:wrap;gap:2px 16px}
+.online-toggle{display:inline-flex;align-items:center;gap:5px;background:transparent;border:0;color:var(--txt-mut);cursor:pointer;font-size:.74rem;padding:5px 0;margin-top:2px;text-decoration:underline;text-decoration-color:var(--borda);text-underline-offset:3px}
+.online-toggle:hover{color:var(--verde-claro);text-decoration-color:var(--verde-claro)}
+.online-box{display:none;margin-top:6px;padding-top:10px;border-top:1px dashed var(--borda)}
+.online-box.show{display:block}
+.online-box .omsg{font-size:.78rem;color:var(--verde-claro);background:rgba(29,158,117,.1);border:1px solid rgba(29,158,117,.3);border-radius:8px;padding:8px 10px}
 .pop{position:absolute;top:calc(100% + 8px);right:0;width:270px;background:var(--card);border:1px solid var(--verde);border-radius:12px;padding:13px;box-shadow:0 20px 50px rgba(0,0,0,.5);z-index:20;display:none}
 .pop.show{display:block}
 .pop:before{content:"";position:absolute;top:-6px;right:16px;width:11px;height:11px;background:var(--card);border-left:1px solid var(--verde);border-top:1px solid var(--verde);transform:rotate(45deg)}
@@ -756,12 +803,34 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
                 {% endif %}
               </div>
               {% endif %}
+              <div class="remarcar-box" id="remBox-{{ e.id }}">
+                <form method="post" action="/painel/agenda/remarcar">
+                  <div class="rlbl">🔁 Nova data</div>
+                  <input type="hidden" name="evento_id" value="{{ e.id }}">
+                  <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+                  <div class="remarcar-row2">
+                    <input type="date" name="data" value="{{ e.data_iso }}" required>
+                    <input type="time" name="hora" value="{{ e.hora_rot }}" required>
+                  </div>
+                  <div class="tg">
+                    <div><div class="tg-t">Avisar os convidados</div><div class="tg-s">Manda a nova data pro mesmo link que já têm</div></div>
+                    <label class="sw"><input type="checkbox" name="avisar" value="1" checked><span class="track"></span><span class="knob"></span></label>
+                  </div>
+                  <div class="remarcar-actions">
+                    <button class="rbtn ok" type="submit" data-busy="⏳ Salvando…">Salvar nova data</button>
+                    <button class="rbtn cc" type="button" onclick="remToggle({{ e.id }})">Cancelar</button>
+                  </div>
+                </form>
+              </div>
             </div>
-            <form method="post" action="/painel/agenda/cancelar" data-ajax="cancelar" onsubmit="return confirm('Cancelar “{{ e.titulo }}”?')">
-              <input type="hidden" name="evento_id" value="{{ e.id }}">
-              <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
-              <button class="px-x" type="submit" title="Cancelar">✕</button>
-            </form>
+            <div class="px-actions">
+              <button class="px-rm" type="button" title="Remarcar" onclick="remToggle({{ e.id }})">🔁</button>
+              <form method="post" action="/painel/agenda/cancelar" data-ajax="cancelar" onsubmit="return confirm('Cancelar “{{ e.titulo }}”?')">
+                <input type="hidden" name="evento_id" value="{{ e.id }}">
+                <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+                <button class="px-x" type="submit" title="Cancelar">✕</button>
+              </form>
+            </div>
           </div>
           {% else %}
           <div class="px-vazio">Nada por vir. Marque um compromisso ali em cima. 🎉</div>
@@ -793,11 +862,18 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <div id="addrPicked"></div>
           </div>
           <div class="hint-line" id="hintLine">Digite pra buscar — ex: nome do lugar ou endereço.</div>
-          <button type="button" class="manual-toggle" id="manualToggle">✍️ Não achei o lugar — digitar manualmente</button>
+          <div class="local-alt-row">
+            <button type="button" class="manual-toggle" id="manualToggle">✍️ Não achei o lugar — digitar manualmente</button>
+            <button type="button" class="online-toggle" id="onlineToggle">🌐 É uma reunião online</button>
+          </div>
           <div class="manual-box" id="manualBox">
             <div class="mlabel">Local (texto livre, sem link de mapa)</div>
-            <input type="text" id="manualInput" placeholder="Ex: online, na casa da Ana…" autocomplete="off">
+            <input type="text" id="manualInput" placeholder="Ex: na casa da Ana, no clube…" autocomplete="off">
             <button type="button" class="manual-cancel" id="manualCancel">← voltar pra busca de endereço</button>
+          </div>
+          <div class="online-box" id="onlineBox">
+            <div class="omsg">🌐 Reunião online — nenhum endereço vai ser enviado aos convidados.</div>
+            <button type="button" class="manual-cancel" id="onlineCancel">← voltar a informar um local</button>
           </div>
           <label>Tipo</label>
           <div class="segs">
@@ -990,6 +1066,7 @@ function agCopiar(){var i=document.getElementById('feedUrl');if(!i)return;i.sele
 function cpRow(b){var row=b.closest('.share-row');if(!row)return;var txt=row.getAttribute('data-link')||'';if(navigator.clipboard)navigator.clipboard.writeText(txt);var t=b.textContent;b.textContent='✓';setTimeout(function(){b.textContent=t},1400);}
 function addGuest(){var box=document.getElementById('guests');var d=document.createElement('div');d.className='guest-row';d.innerHTML='<div><input class="gnome" name="convidado_nome" placeholder="Nome" autocomplete="off"></div><div><input name="convidado_contato" placeholder="(86) 90000-0000" autocomplete="off"></div><button type="button" class="g-rm" onclick="rmGuest(this)" title="Remover" aria-label="Remover">✕</button>';box.appendChild(d);var i=d.querySelector('input');if(i)i.focus();}
 function rmGuest(b){var box=document.getElementById('guests');var row=b.closest('.guest-row');if(box&&box.children.length>1){row.remove();}else{row.querySelectorAll('input').forEach(function(x){x.value='';});}}
+function remToggle(id){var box=document.getElementById('remBox-'+id);if(box)box.classList.toggle('show');}
 
 // ---------------- Local: busca de endereço (Google Places) + manual + enviar ----------------
 (function(){
@@ -1000,10 +1077,14 @@ function rmGuest(b){var box=document.getElementById('guests');var row=b.closest(
   var hintLine = document.getElementById('hintLine');
   var addrWrap = document.getElementById('addrWrap');
   var searchRow = document.querySelector('.addr-input-row');
+  var altRow = document.querySelector('.local-alt-row');
   var manualToggle = document.getElementById('manualToggle');
   var manualBox = document.getElementById('manualBox');
   var manualInput = document.getElementById('manualInput');
   var manualCancel = document.getElementById('manualCancel');
+  var onlineToggle = document.getElementById('onlineToggle');
+  var onlineBox = document.getElementById('onlineBox');
+  var onlineCancel = document.getElementById('onlineCancel');
   if(!addrInput) return;
 
   function nomesEnvolvidos(){
@@ -1120,12 +1201,17 @@ function rmGuest(b){var box=document.getElementById('guests');var row=b.closest(
     addrPicked.appendChild(card);
   }
 
+  function voltarBusca(){
+    searchRow.style.display = ''; hintLine.style.display = ''; altRow.style.display = '';
+    addrInput.value = ''; localHidden.value = '';
+  }
+
   manualToggle.addEventListener('click', function(){
     searchRow.style.display = 'none';
     addrDrop.classList.remove('show');
     addrPicked.innerHTML = '';
     hintLine.style.display = 'none';
-    manualToggle.style.display = 'none';
+    altRow.style.display = 'none';
     manualBox.classList.add('show');
     addrInput.value = ''; localHidden.value = '';
     manualInput.focus();
@@ -1133,8 +1219,25 @@ function rmGuest(b){var box=document.getElementById('guests');var row=b.closest(
   manualInput.addEventListener('input', function(){ localHidden.value = manualInput.value; });
   manualCancel.addEventListener('click', function(){
     manualBox.classList.remove('show');
-    manualInput.value = ''; localHidden.value = '';
-    searchRow.style.display = ''; hintLine.style.display = ''; manualToggle.style.display = '';
+    manualInput.value = '';
+    voltarBusca();
+    addrInput.focus();
+  });
+
+  // Reunião online: sem endereço nenhum — fecha a busca e nunca manda link de
+  // mapa (nem no convite, nem quando o convidado confirma presença).
+  onlineToggle.addEventListener('click', function(){
+    searchRow.style.display = 'none';
+    addrDrop.classList.remove('show');
+    addrPicked.innerHTML = '';
+    hintLine.style.display = 'none';
+    altRow.style.display = 'none';
+    onlineBox.classList.add('show');
+    addrInput.value = ''; localHidden.value = 'Online';
+  });
+  onlineCancel.addEventListener('click', function(){
+    onlineBox.classList.remove('show');
+    voltarBusca();
     addrInput.focus();
   });
 

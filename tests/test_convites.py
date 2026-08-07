@@ -39,7 +39,7 @@ def conta_id(pool):
 def _evento(pool, conta_id, titulo="Reunião de fechamento"):
     return ag.criar_evento(pool, conta_id, titulo,
                            ag.agora_brt() + timedelta(days=1), tipo="empresa",
-                           local="Online")
+                           local="Escritório Central")
 
 
 def test_criar_e_resolver_por_token(pool, conta_id):
@@ -156,7 +156,7 @@ def test_pendentes_ignora_evento_passado(pool, conta_id):
 
 
 def test_confirmacao_texto_por_status(pool, conta_id):
-    ev = _evento(pool, conta_id, titulo="Café")   # _evento() marca local="Online"
+    ev = _evento(pool, conta_id, titulo="Café")   # _evento() marca um local físico
     conv = cv.criar_convidado(pool, conta_id, ev["id"], "Carla Silva", "86988887777")
     c = cv.responder(pool, conv["token"], "confirmado")
     txt = cv.confirmacao_texto(c)
@@ -175,10 +175,27 @@ def test_confirmacao_texto_sem_local_nao_traz_mapa(pool, conta_id):
 
 
 def test_link_mapa(pool, conta_id):
-    com_local = _evento(pool, conta_id)                  # local="Online"
+    com_local = _evento(pool, conta_id)                  # local físico de verdade
     assert cv.link_mapa(com_local) is not None
     sem_local = ag.criar_evento(pool, conta_id, "Sem local", ag.agora_brt() + timedelta(days=1))
     assert cv.link_mapa(sem_local) is None
+
+
+def test_link_mapa_reuniao_online_nao_traz_mapa():
+    """Botão "reunião online" do form marca local="Online" — não é endereço
+    nenhum, então nunca deve virar link de mapa (nem no convite, nem quando o
+    convidado confirma presença)."""
+    ev = {"local": "Online"}
+    assert cv.link_mapa(ev) is None
+
+
+def test_confirmacao_texto_reuniao_online_nao_traz_mapa(pool, conta_id):
+    ev = ag.criar_evento(pool, conta_id, "Daily", ag.agora_brt() + timedelta(days=1), local="Online")
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Léo", "86988887777")
+    c = cv.responder(pool, conv["token"], "confirmado")
+    txt = cv.confirmacao_texto(c)
+    assert "confirmada" in txt.lower()
+    assert "mapa" not in txt.lower() and "maps" not in txt.lower()
 
 
 def test_enviar_convite_monta_variaveis(pool, conta_id, monkeypatch):
@@ -384,3 +401,59 @@ def test_vocabulario_stt_traz_titulos_e_convidados(pool, conta_id):
     cv.criar_convidado(pool, conta_id, ev["id"], "Mailson Souza", "86 98888-7777")
     voc = ag.vocabulario_stt(pool, conta_id)
     assert "Reunião com Mailson" in voc and "Mailson Souza" in voc
+
+
+# ---- remarcar: muda data mantendo convidados/link -----------------------------
+
+def test_remarcar_e_avisar_muda_data_e_reseta_status(pool, conta_id):
+    ev = _evento(pool, conta_id, titulo="Reunião de fechamento")
+    ca = cv.criar_convidado(pool, conta_id, ev["id"], "Ana", "86988880001")
+    cv.responder(pool, ca["token"], "confirmado")
+    novo = ag.agora_brt() + timedelta(days=5)
+    r = cv.remarcar_e_avisar(pool, conta_id, ev["id"], novo, None, avisar=False, agora=ag.agora_brt())
+    assert r["ok"] is True and r["avisados"] == 0 and r["total_convidados"] == 1
+    ev2 = ag.evento_por_id(pool, conta_id, ev["id"])
+    assert ev2["inicio"] == novo
+    g = cv.por_evento(pool, conta_id, [ev["id"]])[ev["id"]][0]
+    assert g["status"] == "pendente"                     # confirmação antiga não vale mais
+
+
+def test_remarcar_e_avisar_notifica_dentro_da_janela_com_texto_livre(pool, conta_id, monkeypatch):
+    ev = _evento(pool, conta_id, titulo="Alinhamento")
+    ca = cv.criar_convidado(pool, conta_id, ev["id"], "Bia", "86988880002")
+    cv.responder(pool, ca["token"], "confirmado")          # respondido_em = agora (dentro da janela)
+    from finance import whatsapp_out as wout
+    capt = {}
+    monkeypatch.setattr(wout, "enviar", lambda c, cid, numero, texto: capt.update(
+        conta_id=cid, numero=numero, texto=texto) or {"ok": True})
+    novo = ag.agora_brt() + timedelta(days=3)
+    r = cv.remarcar_e_avisar(pool, conta_id, ev["id"], novo, None, avisar=True, agora=ag.agora_brt())
+    assert r["ok"] is True and r["avisados"] == 1
+    assert capt["numero"] == "86988880002"
+    assert "mudou de horário" in capt["texto"].lower()
+    assert "/convite/" in capt["texto"]                   # mesmo link, não convite novo
+
+
+def test_remarcar_e_avisar_fora_da_janela_usa_template_de_convite(pool, conta_id, monkeypatch):
+    ev = _evento(pool, conta_id, titulo="Kickoff")
+    cv.criar_convidado(pool, conta_id, ev["id"], "Léo", "86988880003")  # nunca respondeu -> sem janela
+    from finance import whatsapp_out as wout
+    capt = {}
+    monkeypatch.setattr(wout, "enviar_template", lambda c, cid, numero, sid, variaveis: capt.update(
+        sid=sid, numero=numero, vars=variaveis) or {"ok": True, "sid": "SM9"})
+    monkeypatch.setenv("TWILIO_TMPL_CONVITE_SID", "HXtest")
+    novo = ag.agora_brt() + timedelta(days=2)
+    r = cv.remarcar_e_avisar(pool, conta_id, ev["id"], novo, None, avisar=True, agora=ag.agora_brt())
+    assert r["ok"] is True and r["avisados"] == 1
+    assert capt["sid"] == "HXtest" and capt["numero"] == "86988880003"
+
+
+def test_remarcar_e_avisar_evento_inexistente_ou_de_outra_conta(pool, conta_id):
+    assert cv.remarcar_e_avisar(pool, conta_id, 999999, ag.agora_brt(), None,
+                                avisar=False, agora=ag.agora_brt())["ok"] is False
+    with pool.connection() as c:
+        outra = c.execute("insert into contas (tipo, nome) values ('pj','Outra') returning id").fetchone()[0]
+        c.commit()
+    ev = _evento(pool, conta_id)
+    assert cv.remarcar_e_avisar(pool, outra, ev["id"], ag.agora_brt(), None,
+                                avisar=False, agora=ag.agora_brt())["ok"] is False

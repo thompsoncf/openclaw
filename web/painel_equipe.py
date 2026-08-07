@@ -153,8 +153,8 @@ def trocar_aplica(request: Request, i: int = Form(...)):
 def convite_form(request: Request, token: str):
     info = eq.info_convite(get_pool(), token)
     if not info:
-        return _render("convite", request, info=None, token=token, erro=None)
-    return _render("convite", request, info=info, token=token, erro=None)
+        return _render("convite_equipe", request, info=None, token=token, erro=None)
+    return _render("convite_equipe", request, info=info, token=token, erro=None)
 
 
 @router.post("/equipe/convite/{token}", response_class=HTMLResponse)
@@ -163,13 +163,13 @@ def convite_envia(request: Request, token: str, senha: str = Form(...),
     pool = get_pool()
     info = eq.info_convite(pool, token)
     if not info:
-        return _render("convite", request, info=None, token=token, erro=None)
+        return _render("convite_equipe", request, info=None, token=token, erro=None)
     if senha != confirma:
-        return _render("convite", request, info=info, token=token,
+        return _render("convite_equipe", request, info=info, token=token,
                        erro="As senhas não conferem.")
     r = eq.aceitar_convite(pool, token, senha)
     if not r.get("ok"):
-        return _render("convite", request, info=info, token=token, erro=r.get("erro"))
+        return _render("convite_equipe", request, info=info, token=token, erro=r.get("erro"))
     # loga o membro direto
     request.session["conta_id"] = r["conta_id"]
     request.session["membro_id"] = r["membro_id"]
@@ -274,5 +274,5 @@ _TROCAR_TPL = """{% extends "base" %}{% block conteudo %}
 {% endblock %}"""
 
 _env.loader.mapping["equipe"] = _EQUIPE_TPL
-_env.loader.mapping["convite"] = _CONVITE_TPL
+_env.loader.mapping["convite_equipe"] = _CONVITE_TPL
 _env.loader.mapping["trocar"] = _TROCAR_TPL

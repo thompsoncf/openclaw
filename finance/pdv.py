@@ -67,6 +67,7 @@ def registrar_venda_balcao(
     cliente_nome: str | None = None,
     cliente_telefone: str | None = None,
     cliente_cpf: str | None = None,
+    cliente_cnpj: str | None = None,
     pagamento: str = "dinheiro",
     vencimento: str | None = None,
     desconto_centavos: int = 0,
@@ -139,11 +140,13 @@ def registrar_venda_balcao(
     nome_lbl = (cliente_nome or "").strip()
     if cliente_id is None:
         cpf_lbl = (cliente_cpf or "").strip() or None
-        if nome_lbl or cpf_lbl:
+        cnpj_lbl = (cliente_cnpj or "").strip() or None
+        if nome_lbl or cpf_lbl or cnpj_lbl:
             cliente_id = _cli.achar_ou_criar(
                 pool, dono_id, nome_lbl or "cliente",
                 telefone=(cliente_telefone or "").strip() or None,
                 cpf=cpf_lbl,
+                cnpj=cnpj_lbl,
             )
 
     # ---- 3) baixa de estoque por item (saida) ----

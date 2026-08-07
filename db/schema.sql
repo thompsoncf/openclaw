@@ -71,6 +71,8 @@ create table if not exists lancamentos (
     forma_pagamento text not null default '',
     origem         text not null default 'manual',
     comprovante    text not null default '',
+    plano_conta_id  bigint,   -- classificação contábil opcional (FK real na migração 132)
+    centro_custo_id bigint,   -- centro de custo opcional      (FK real na migração 132)
     criado_em      timestamptz not null default now()
 );
 create index if not exists idx_lanc_conta on lancamentos (conta_id);

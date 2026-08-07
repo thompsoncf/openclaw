@@ -265,12 +265,12 @@ class LivroCaixa:
         _sql = """insert into lancamentos
                    (conta_id, membro_id, tipo, valor_centavos, categoria, descricao,
                     data, pagamento, forma_pagamento, origem, comprovante, chave,
-                    natureza)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id"""
+                    natureza, plano_conta_id, centro_custo_id)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id"""
         _args = (self.conta_id, self.membro_id, lanc.tipo.value, lanc.valor_centavos,
                  lanc.categoria, lanc.descricao, lanc.data, lanc.pagamento,
                  lanc.forma_pagamento, lanc.origem, lanc.comprovante, chave_final,
-                 lanc.natureza)
+                 lanc.natureza, lanc.plano_conta_id, lanc.centro_custo_id)
 
         # conn EXTERNO: o chamador controla a transação (NÃO commita aqui). Serve pra
         # operações que precisam ser atômicas com outros inserts (ex.: pagar_folha,

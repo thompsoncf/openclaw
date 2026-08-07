@@ -342,3 +342,66 @@ def avisar_convidado_confirmado(pool, conta_id: int, contato: str, nome: str,
     variaveis = {"1": titulo, "2": hora, "3": str(faltam_min)}
     with pool.connection() as conn:
         return wout.enviar_template(conn, conta_id, contato, sid, variaveis)
+
+
+# ---- Remarcar: muda a data mantendo os mesmos convidados/link -----------------
+
+def texto_remarcado(nome: str, titulo: str, hora_antiga: str, hora_nova: str, url: str) -> str:
+    primeiro = (nome or "").split()[0] if nome else ""
+    oi = f"{primeiro}, o" if primeiro else "O"
+    return (f"🔁 {oi} compromisso *{titulo}* mudou de horário: agora é {hora_nova} "
+            f"(antes era {hora_antiga}).\n\nSeu link de confirmação continua o mesmo — "
+            f"só confirma de novo quando puder: {url}")
+
+
+def avisar_convidado_remarcado(pool, conta_id: int, g: dict, ev: dict,
+                               hora_antiga: str, agora) -> dict:
+    """Avisa 1 convidado que o compromisso mudou de data. Dentro da janela de 24h
+    desde a última resposta dele: texto livre, reaproveitando o mesmo link.
+    Fora da janela (ou quem nunca respondeu): reusa o template de convite já
+    aprovado — mesmo caminho 'frio' do primeiro convite, só que a essa altura o
+    evento já está com a data nova, então quem clicar vê o horário certo."""
+    contato = (g.get("contato") or "").strip()
+    if not contato:
+        return {"ok": False, "erro": "sem_numero"}
+    if _dentro_da_janela(g.get("respondido_em"), agora):
+        from . import whatsapp_out as wout
+        url = url_convite(g["token"])
+        texto = texto_remarcado(g.get("nome"), ev["titulo"], hora_antiga, ag.fmt_hora(ev), url)
+        with pool.connection() as conn:
+            return wout.enviar(conn, conta_id, contato, texto)
+    return enviar_convite_whatsapp(pool, g["token"])
+
+
+def remarcar_e_avisar(pool, conta_id: int, evento_id: int, novo_inicio, novo_fim,
+                      avisar: bool, agora) -> dict:
+    """Muda a data do evento (finance.agenda.remarcar_evento) e, se `avisar`,
+    notifica cada convidado com contato salvo pelo WhatsApp. A confirmação/recusa
+    antiga valia pra outro horário, então o status de TODOS os convidados volta
+    pra 'pendente' (independe de `avisar` — é sobre o evento ter mudado, não
+    sobre ter avisado). Tolerante: nunca levanta, um convidado sem número ou fora
+    da janela sem template só não é avisado, os outros seguem normalmente."""
+    ev_antigo = ag.evento_por_id(pool, conta_id, evento_id)
+    if not ev_antigo:
+        return {"ok": False}
+    hora_antiga = ag.fmt_hora(ev_antigo)
+    if not ag.remarcar_evento(pool, conta_id, evento_id, novo_inicio, novo_fim):
+        return {"ok": False}
+    guests = por_evento(pool, conta_id, [evento_id]).get(evento_id, [])
+    if guests:
+        with pool.connection() as c:
+            c.execute("update evento_convidados set status='pendente', resposta=null "
+                      "where evento_id=%s and conta_id=%s", (evento_id, conta_id))
+            c.commit()
+    avisados = 0
+    if avisar and guests:
+        ev_novo = ag.evento_por_id(pool, conta_id, evento_id)
+        for g in guests:
+            try:
+                if avisar_convidado_remarcado(pool, conta_id, g, ev_novo, hora_antiga, agora).get("ok"):
+                    avisados += 1
+            except Exception:  # noqa: BLE001
+                import logging
+                logging.getLogger(__name__).warning(
+                    "aviso de remarcação ao convidado %s falhou", g.get("id"), exc_info=True)
+    return {"ok": True, "avisados": avisados, "total_convidados": len(guests)}

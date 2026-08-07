@@ -23,7 +23,7 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
   responsavel_membro_id bigint);
 create table distribuicao (conta_id bigint primary key, ativo boolean not null default false,
   ponteiro int not null default 0, avisar boolean not null default true,
-  atualizado_em timestamptz not null default now());
+  aviso_template_sid text, atualizado_em timestamptz not null default now());
 create table distribuicao_fila (conta_id bigint, membro_id bigint, ordem int not null default 0,
   primary key (conta_id, membro_id));
 """
@@ -116,6 +116,49 @@ def test_nao_rouba_lead_com_dono(pool):
     assert mid is None
     with pool.connection() as c:
         assert c.execute("select vendedor_id from prospeccao where id=%s", (pid,)).fetchone()[0] == ids[1]
+
+
+def test_salvar_guarda_template_sid(pool):
+    with pool.connection() as c:
+        conta, ids = _setup(c, "Tpl", 2)
+        dist.salvar(c, conta, True, True, ids, aviso_template_sid="HXabc123")
+        c.commit()
+        assert dist.config(c, conta)["aviso_template_sid"] == "HXabc123"
+        # None mantém o atual; string vazia limpa
+        dist.salvar(c, conta, True, True, ids)  # aviso_template_sid=None
+        c.commit()
+        assert dist.config(c, conta)["aviso_template_sid"] == "HXabc123"
+        dist.salvar(c, conta, True, True, ids, aviso_template_sid="")
+        c.commit()
+        assert dist.config(c, conta)["aviso_template_sid"] == ""
+
+
+def test_avisar_usa_template_quando_sid(pool, monkeypatch):
+    """Com SID → enviar_template ({{1}}=empresa); sem SID → texto livre."""
+    from finance import distribuicao as d
+    from finance import whatsapp_out as wo
+    from finance import email_sender as es
+    monkeypatch.setattr(es, "enviar_aviso", lambda *a, **k: True)
+    chamado = {}
+    monkeypatch.setattr(wo, "enviar_template",
+                        lambda c, cid, num, sid, var, **k: chamado.update(tipo="template", sid=sid, var=var) or {"ok": True})
+    monkeypatch.setattr(wo, "enviar",
+                        lambda c, cid, num, txt: chamado.update(tipo="texto") or {"ok": True})
+    with pool.connection() as c:
+        conta, ids = _setup(c, "Av", 1)
+        c.execute("update membros set whatsapp='5586999' where id=%s", (ids[0],))
+        dist.salvar(c, conta, True, True, ids, aviso_template_sid="HXzap")
+        c.commit()
+    d.avisar_vendedor(pool, conta, ids[0], "Padaria Estrela")
+    assert chamado.get("tipo") == "template"
+    assert chamado.get("sid") == "HXzap" and chamado.get("var") == {"1": "Padaria Estrela"}
+    # agora sem template → texto livre
+    with pool.connection() as c:
+        dist.salvar(c, conta, True, True, ids, aviso_template_sid="")
+        c.commit()
+    chamado.clear()
+    d.avisar_vendedor(pool, conta, ids[0], "Padaria Estrela")
+    assert chamado.get("tipo") == "texto"
 
 
 def test_membros_fila_ui_ordem(pool):

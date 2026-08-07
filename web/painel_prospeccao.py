@@ -1919,13 +1919,14 @@ async def comunicacao_distribuicao(request: Request):
     f = await request.form()
     ativo = str(f.get("ativo") or "").lower() in ("1", "on", "true", "sim")
     avisar = str(f.get("avisar") or "").lower() in ("1", "on", "true", "sim")
+    template_sid = (f.get("aviso_template_sid") or "").strip()
     ids = [int(x) for x in f.getlist("vend") if str(x).isdigit()]
     from finance import distribuicao as _dist
     with get_pool().connection() as c:
         validos = {r[0] for r in c.execute(
             "select id from membros where conta_id=%s and ativo", (ctx["conta_id"],)).fetchall()}
         ids = [i for i in ids if i in validos]
-        _dist.salvar(c, ctx["conta_id"], ativo, avisar, ids)
+        _dist.salvar(c, ctx["conta_id"], ativo, avisar, ids, aviso_template_sid=template_sid)
         c.commit()
     request.session["prosp_aviso"] = "Distribuição de leads salva ✓"
     return RedirectResponse(_AG_DESTINO, status_code=303)
@@ -6616,6 +6617,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         resposta de campanha e contato orgânico.</div>
       <div class="agrow"><div class="lab"><b>Avisar o vendedor</b><div>E-mail sempre; WhatsApp quando tiver número + template aprovado</div></div>
         <label class="sw"><input type="checkbox" name="avisar" {% if not dist_cfg or dist_cfg.avisar %}checked{% endif %}><span></span></label></div>
+      <div class="agfield" style="margin-top:.6rem">
+        <label>Template do aviso no WhatsApp <span style="font-weight:400;color:var(--txt-mut)">(opcional — Content SID do Twilio “HX…” ou o nome do template aprovado na Meta)</span></label>
+        <input class="fld" name="aviso_template_sid" value="{{ dist_cfg.aviso_template_sid if dist_cfg else '' }}" placeholder="HX… ou nome_do_template">
+        <small class="mut" style="font-size:.72rem">Vazio = avisa só por e-mail. Com o template, o WhatsApp do vendedor sai mesmo fora da janela de 24h (variável {{ '{{1}}' }} = a empresa do lead).</small>
+      </div>
       <div class="agfield" style="margin-top:.7rem"><label>Vendedores na fila — marque quem participa e arraste ⠿ pra ordenar</label></div>
       <div id="distfila" style="display:flex;flex-direction:column;gap:.4rem;margin-top:.3rem">
         {% for m in dist_membros %}

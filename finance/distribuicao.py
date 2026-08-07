@@ -23,9 +23,10 @@ def _garantir(c, conta_id: int) -> None:
 
 def config(c, conta_id: int) -> dict:
     _garantir(c, conta_id)
-    r = c.execute("select ativo, ponteiro, avisar from distribuicao where conta_id=%s",
-                  (conta_id,)).fetchone()
-    return {"ativo": bool(r[0]), "ponteiro": int(r[1] or 0), "avisar": bool(r[2])}
+    r = c.execute("select ativo, ponteiro, avisar, coalesce(aviso_template_sid,'') "
+                  "from distribuicao where conta_id=%s", (conta_id,)).fetchone()
+    return {"ativo": bool(r[0]), "ponteiro": int(r[1] or 0), "avisar": bool(r[2]),
+            "aviso_template_sid": r[3]}
 
 
 def fila_ids(c, conta_id: int) -> list[int]:
@@ -51,11 +52,16 @@ def membros_fila_ui(c, conta_id: int) -> list[dict]:
     return [{"id": r[0], "nome": r[1], "whatsapp": r[2], "na_fila": r[3] is not None} for r in rows]
 
 
-def salvar(c, conta_id: int, ativo: bool, avisar: bool, membro_ids: list[int]) -> None:
-    """Grava a config + a fila (ordem = posição na lista). Zera o ponteiro."""
+def salvar(c, conta_id: int, ativo: bool, avisar: bool, membro_ids: list[int],
+           aviso_template_sid: str | None = None) -> None:
+    """Grava a config + a fila (ordem = posição na lista). Zera o ponteiro.
+    aviso_template_sid=None mantém o atual; string (mesmo vazia) sobrescreve."""
     _garantir(c, conta_id)
     c.execute("update distribuicao set ativo=%s, avisar=%s, ponteiro=0, atualizado_em=now() where conta_id=%s",
               (bool(ativo), bool(avisar), conta_id))
+    if aviso_template_sid is not None:
+        c.execute("update distribuicao set aviso_template_sid=%s where conta_id=%s",
+                  ((aviso_template_sid or "").strip()[:120] or None, conta_id))
     c.execute("delete from distribuicao_fila where conta_id=%s", (conta_id,))
     for i, mid in enumerate(membro_ids):
         c.execute("""insert into distribuicao_fila (conta_id, membro_id, ordem) values (%s,%s,%s)
@@ -107,7 +113,8 @@ def avisar_vendedor(pool, conta_id: int, membro_id: int, empresa: str) -> None:
     pensado pra rodar numa thread solta, sem travar o webhook."""
     try:
         with pool.connection() as c:
-            if not config(c, conta_id)["avisar"]:
+            cfg = config(c, conta_id)
+            if not cfg["avisar"]:
                 return
             m = c.execute("select coalesce(nullif(nome,''), email), email, coalesce(whatsapp,'') "
                           "from membros where id=%s and conta_id=%s", (membro_id, conta_id)).fetchone()
@@ -125,12 +132,21 @@ def avisar_vendedor(pool, conta_id: int, membro_id: int, empresa: str) -> None:
             except Exception:  # noqa: BLE001
                 pass
         if wa:
-            try:
-                from db.conexao import get_pool
-                from finance import whatsapp_out as wo
-                with get_pool().connection() as c2:
-                    wo.enviar(c2, conta_id, wa, f"{titulo}\n{corpo}")
-            except Exception:  # noqa: BLE001
-                pass  # fora da janela 24h o Cloud pede template — segue só o e-mail
+            _avisar_whatsapp(pool, conta_id, wa, cfg.get("aviso_template_sid") or "", emp, f"{titulo}\n{corpo}")
     except Exception as e:  # noqa: BLE001
         _log.info("distribuicao: aviso best-effort falhou (ok): %s", e)
+
+
+def _avisar_whatsapp(pool, conta_id: int, numero: str, template_sid: str, empresa: str, texto: str) -> None:
+    """WhatsApp do vendedor: se houver TEMPLATE configurado, dispara o template (funciona
+    fora da janela de 24h) — a variável {{1}} é a empresa do lead. Sem template, tenta
+    texto livre (só sai se o vendedor já falou com o número nas últimas 24h). Silencioso."""
+    try:
+        from finance import whatsapp_out as wo
+        with pool.connection() as c2:
+            if template_sid:
+                wo.enviar_template(c2, conta_id, numero, template_sid, {"1": empresa})
+            else:
+                wo.enviar(c2, conta_id, numero, texto)
+    except Exception:  # noqa: BLE001
+        pass  # fora da janela 24h e sem template → a Meta bloqueia; segue só o e-mail

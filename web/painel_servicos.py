@@ -467,7 +467,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   <h1 style="margin:.2rem 0">Vendas de Serviços</h1>
   <span class="mut" style="font-size:.85rem">{{ empresa_nome }}</span>
 </div>
-<p class="mut" style="margin-top:0">Monte a proposta, salve no funil e feche o contrato — ao fechar, vira título a receber (setup + mensalidade) no módulo Empresa.</p>
+<p class="mut" style="margin-top:0">{{ 'Monte a proposta, salve no funil e feche o contrato — ao fechar, vira título a receber no módulo Empresa.' if servico_avulso else 'Monte a proposta, salve no funil e feche o contrato — ao fechar, vira título a receber (setup + mensalidade) no módulo Empresa.' }}</p>
 <div id="oc-editando" style="display:none;align-items:center;justify-content:space-between;gap:.6rem;background:#10241d;border:1px solid #1c3a30;border-radius:10px;padding:.5rem .8rem;margin-bottom:.8rem">
   <span class="t" style="font-size:.85rem;color:var(--verde-claro)"></span>
   <button id="oc-novo" type="button" class="oc-pill">Nova proposta</button>
@@ -496,7 +496,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-inp:focus{border-color:var(--verde); outline:none}
 .oc-mod{display:grid; grid-template-columns:auto 1fr 84px 84px 84px auto; gap:.55rem; align-items:center; padding:.6rem 0; border-bottom:1px solid var(--borda)}
 .oc-mod.off{opacity:.5}
-.oc-mod .oc-nome{cursor:default}
+.oc-mod .oc-nome{cursor:default; min-width:0}
+.oc-desc-preview{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%}
 .oc-rowacts{display:flex; gap:.1rem; white-space:nowrap}
 .oc-ic{background:none; border:0; color:var(--txt-mut); cursor:pointer; font-size:.95rem; padding:.1rem .25rem; border-radius:6px}
 .oc-ic:hover{color:var(--txt); background:var(--bg)}
@@ -632,6 +633,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       </div>
     </div>
 
+    {% if not servico_avulso %}
     <div class="card">
       <h2 style="margin-top:0">Parâmetros</h2>
       <div class="oc-field"><label>Infraestrutura</label>
@@ -668,6 +670,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         </div>
       </div>
     </div>
+    {% endif %}
   </div>
 
   <div class="oc-ledger">
@@ -719,7 +722,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     setup+=integ*250; mensal+=integ*120;
     var canais=document.querySelectorAll('.oc-canal[data-on="1"]').length;
     setup+=canais*400;
-    if(document.getElementById('oc-sup').getAttribute('data-on')==='1') mensal+=1500;
+    var ocSup=document.getElementById('oc-sup');
+    if(ocSup&&ocSup.getAttribute('data-on')==='1') mensal+=1500;
     var anual=document.getElementById('oc-anual').getAttribute('data-on')==='1';
     var mensalEf=anual?mensal*0.85:mensal;
     var ano1=setup+mensalEf*12;
@@ -794,7 +798,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       r.setAttribute('data-id',s.slug); r.setAttribute('data-on',on);
       r.setAttribute('data-nome',s.nome); r.setAttribute('data-desc',s.descricao||''); r.setAttribute('data-cid',s.id);
       r.innerHTML='<button class="oc-tog'+(on==='1'?' on':'')+'" type="button" title="Entra nesta proposta"></button>'
-        +'<div class="oc-nome"><b>'+ec(s.nome)+'</b><div class="mut" style="font-size:.78rem">'+ec(s.descricao||'')+'</div></div>'
+        +'<div class="oc-nome"><b>'+ec(s.nome)+'</b><div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div>'
         +'<div class="oc-num"><span>R$</span><input class="oc-setup" inputmode="numeric" value="'+s.setup+'"></div>'
         +'<div class="oc-num"'+(SERVICO_AVULSO?' style="visibility:hidden"':'')+'><span>R$</span><input class="oc-mensal" inputmode="numeric" value="'+s.mensal+'"></div>'
         +'<div class="oc-num oc-custo-col"><span>R$</span><input class="oc-custo" inputmode="numeric" value="'+s.custo+'"></div>'
@@ -960,7 +964,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   }
   document.getElementById('oc-novo').addEventListener('click',novo);
   function fechar(id,btn){
-    if(!confirm('Fechar este contrato? Vai gerar título a receber (setup + mensalidade) no módulo Empresa.')){return;}
+    if(!confirm(SERVICO_AVULSO?'Fechar este contrato? Vai gerar título a receber no módulo Empresa.':'Fechar este contrato? Vai gerar título a receber (setup + mensalidade) no módulo Empresa.')){return;}
     btn.disabled=true; btn.textContent='Fechando...';
     fetch('/painel/servicos/fechar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})
       .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})

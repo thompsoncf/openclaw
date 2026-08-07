@@ -192,7 +192,7 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
     reaproveitar = [{
         "id": e["id"], "titulo": e["titulo"], "hora_rot": ag.fmt_hora(e),
         "hora": e["inicio"].astimezone(ag.BRT).strftime("%H:%M"),
-        "cancelado": e["status"] == "cancelado", "n_convidados": e["n_convidados"],
+        "n_convidados": e["n_convidados"],
     } for e in ag.eventos_para_reaproveitar(pool, conta_id, agora)]
     for ev in proximos:
         ev["dia_rot"] = ev["inicio"].astimezone(ag.BRT).strftime("%d/%m")
@@ -742,8 +742,7 @@ _CSS = """<style>
 .reuse-info{flex:1;min-width:0}
 .reuse-tt{font-size:.85rem;font-weight:600}
 .reuse-mt{font-size:.72rem;color:var(--txt-mut);margin-top:1px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.reuse-cancel-tag{font-size:.62rem;font-weight:700;padding:1px 7px;border-radius:20px;background:rgba(224,87,79,.14);color:#f0917f;border:1px solid rgba(224,87,79,.35)}
-.reuse-nr-tag{background:rgba(217,154,58,.16);color:var(--ambar);border-color:rgba(217,154,58,.4)}
+.reuse-nr-tag{font-size:.62rem;font-weight:700;padding:1px 7px;border-radius:20px;background:rgba(217,154,58,.16);color:var(--ambar);border:1px solid rgba(217,154,58,.4)}
 .reuse-btn{flex:0 0 auto;background:rgba(29,158,117,.14);border:1px solid rgba(29,158,117,.4);color:var(--verde-claro);border-radius:8px;padding:.42rem .65rem;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap}
 .reuse-btn:hover{background:rgba(29,158,117,.24)}
 .daybox-cta{display:block;width:100%;text-align:center;margin-top:14px;background:transparent;border:1px dashed var(--borda);color:var(--verde-claro);border-radius:9px;padding:.6rem;font-size:.82rem;font-weight:600;cursor:pointer}
@@ -1059,7 +1058,7 @@ function _reaproveitarHtml(iso){
   var cards = REAPROVEITAR.map(function(r){
     return '<div class="reuse-card"><div class="reuse-info">'
       + '<div class="reuse-tt">'+_esc(r.titulo)+'</div>'
-      + '<div class="reuse-mt">'+(r.cancelado?'<span class="reuse-cancel-tag">Cancelado</span>':'<span class="reuse-cancel-tag reuse-nr-tag">Não rolou</span>')
+      + '<div class="reuse-mt"><span class="reuse-nr-tag">Não rolou</span>'
       + ' era '+r.hora_rot+(r.n_convidados?' · 👤 '+r.n_convidados+(r.n_convidados===1?' convidado':' convidados'):'')+'</div></div>'
       + '<form method="post" action="/painel/agenda/remarcar">'
       + '<input type="hidden" name="evento_id" value="'+r.id+'">'

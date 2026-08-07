@@ -276,23 +276,24 @@ def marcar_desfecho(pool, conta_id: int, evento_id: int, desfecho: str, agora: d
 
 
 def eventos_para_reaproveitar(pool, conta_id: int, agora: datetime, limite: int = 6) -> list[dict]:
-    """Compromissos recentes (últimos 90 dias) que não aconteceram — cancelados
-    ou marcados como 'não realizado' — candidatos a reaproveitar em vez de
-    recriar do zero. Mais recentes primeiro."""
+    """Compromissos recentes (últimos 90 dias) marcados como NÃO REALIZADOS —
+    candidatos a reaproveitar em vez de recriar do zero. Cancelado fica de fora
+    de propósito: quem cancela já decidiu que não tem previsão de acontecer, e
+    listar todo cancelado lotaria a lista de sugestão à toa — só "não rolou"
+    (ficou sem confirmação de que não vai mais acontecer) é sugestão útil aqui.
+    Mais recentes primeiro."""
     with pool.connection() as c:
         rows = c.execute(
-            "select " + _COLS + ", status, (select count(*) from evento_convidados ec "
+            "select " + _COLS + ", (select count(*) from evento_convidados ec "
             "where ec.evento_id = eventos_agenda.id) as n_convidados "
             "from eventos_agenda "
-            "where conta_id=%s and inicio >= %s and inicio <= %s "
-            "and (status='cancelado' or desfecho='nao_realizado') "
+            "where conta_id=%s and inicio >= %s and inicio <= %s and desfecho='nao_realizado' "
             "order by inicio desc limit %s",
             (conta_id, agora - timedelta(days=90), agora, limite),
         ).fetchall()
     out = []
     for r in rows:
-        ev = _fmt_evento(r[:-2])
-        ev["status"] = r[-2]
+        ev = _fmt_evento(r[:-1])
         ev["n_convidados"] = r[-1]
         out.append(ev)
     return out

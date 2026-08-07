@@ -170,7 +170,7 @@ def test_isolamento_por_conta(pool, conta_id):
     assert ag.proximos(pool, outra) == []          # a outra conta não vê
 
 
-# ---------- desfecho (aconteceu/não aconteceu) + reaproveitar cancelados ----------
+# ---------- desfecho (aconteceu/não aconteceu) + reaproveitar não realizados ----------
 
 def test_remarcar_limpa_desfecho_marcado(pool, conta_id):
     ev = ag.criar_evento(pool, conta_id, "Follow-up", ag.agora_brt() - timedelta(days=2))
@@ -200,7 +200,9 @@ def test_marcar_desfecho_so_pro_passado(pool, conta_id):
     assert ag.marcar_desfecho(pool, conta_id, passado["id"], "valor_invalido", agora) is False
 
 
-def test_eventos_para_reaproveitar_traz_cancelado_e_nao_realizado(pool, conta_id):
+def test_eventos_para_reaproveitar_so_traz_nao_realizado(pool, conta_id):
+    """Cancelado fica de FORA de propósito — quem cancela já sabe que não tem
+    previsão, então listar cancelado só lotaria a lista de sugestão à toa."""
     agora = ag.agora_brt()
     cancelado = ag.criar_evento(pool, conta_id, "Cancelado recente", agora - timedelta(days=3))
     ag.cancelar_evento(pool, conta_id, cancelado["id"])
@@ -212,17 +214,13 @@ def test_eventos_para_reaproveitar_traz_cancelado_e_nao_realizado(pool, conta_id
 
     r = ag.eventos_para_reaproveitar(pool, conta_id, agora)
     ids = {e["id"] for e in r}
-    assert cancelado["id"] in ids and nao_realizado["id"] in ids
-    assert realizado["id"] not in ids                              # aconteceu -> não é sugestão
-    by_id = {e["id"]: e for e in r}
-    assert by_id[cancelado["id"]]["status"] == "cancelado"
-    assert by_id[nao_realizado["id"]]["status"] == "ativo"
+    assert ids == {nao_realizado["id"]}                             # só o não realizado
 
 
 def test_eventos_para_reaproveitar_ignora_antigos_demais(pool, conta_id):
     agora = ag.agora_brt()
     velho = ag.criar_evento(pool, conta_id, "Muito antigo", agora - timedelta(days=200))
-    ag.cancelar_evento(pool, conta_id, velho["id"])
+    ag.marcar_desfecho(pool, conta_id, velho["id"], "nao_realizado", agora)
     r = ag.eventos_para_reaproveitar(pool, conta_id, agora)
     assert velho["id"] not in {e["id"] for e in r}
 

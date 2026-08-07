@@ -19,7 +19,8 @@ _MIGRACOES = ("018_chave_nfce_lancamentos.sql",
               "057_natureza_lancamento.sql",
               "064_clientes_lojista.sql",
               "066_pessoas_identidade.sql",
-              "067_titulos_cliente.sql")
+              "067_titulos_cliente.sql",
+              "131_pessoa_cnpj.sql")
 
 
 @pytest.fixture(scope="module")

@@ -3027,15 +3027,140 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
 
 {% include "dash_bloco" %}
 
-<div class="card larga">
-  <div style="display:flex;justify-content:space-between"><strong>DRE do mês (simplificado)</strong>
+<style>
+  .sec-pc>summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;font-weight:620;font-size:1rem;gap:.5rem}
+  .sec-pc>summary::-webkit-details-marker{display:none}
+  .sec-pc>summary .chev{color:var(--txt-mut);transition:transform .2s}
+  .sec-pc[open]>summary .chev{transform:rotate(180deg)}
+  .sec-body{margin-top:.9rem}
+  .pc-grp{display:flex;align-items:center;gap:.6rem;padding:.5rem .2rem;margin-top:.5rem;border-bottom:1px solid #232325}
+  .pc-gcode{font-family:ui-monospace,monospace;font-size:.72rem;color:var(--txt-mut);min-width:1.2rem}
+  .pc-gname{font-weight:700;font-size:.78rem;flex:1;text-transform:uppercase;letter-spacing:.03em}
+  .pc-gmeta{font-size:.7rem;color:var(--txt-mut);white-space:nowrap}
+  .pc-acc{display:flex;align-items:center;gap:.6rem;padding:.5rem .2rem .5rem 1.4rem;border-bottom:1px solid #1c1c1e}
+  .pc-code{font-family:ui-monospace,monospace;font-size:.72rem;color:var(--txt-mut);min-width:2.8rem}
+  .pc-name{flex:1;font-size:.85rem}
+  .pc-acc.off .pc-name,.pc-acc.off .pc-code{opacity:.45}
+  .pc-tag{font-size:.6rem;font-weight:700;padding:.1rem .5rem;border-radius:10px;white-space:nowrap}
+  .pc-tag.receita{background:#12291f;color:var(--verde-claro)}
+  .pc-tag.despesa{background:#2c1a1a;color:#c98080}
+  .pc-sw{width:38px;height:22px;border-radius:20px;border:0;background:#33332f;position:relative;cursor:pointer;padding:0;flex:none}
+  .pc-sw.on{background:var(--verde)}
+  .pc-sw .knob{position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#ddd;transition:.15s}
+  .pc-sw.on .knob{transform:translateX(16px);background:#fff}
+  .cc-form{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.9rem}
+  .cc-form input{flex:1 1 160px;min-width:0}
+  .cc-form button{background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.5rem .9rem;font-weight:600;cursor:pointer;width:auto}
+  .cc-item{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;padding:.6rem 0;border-top:1px solid #232325}
+  .cc-info{flex:1 1 200px;font-size:.88rem}
+  .cc-item.off .cc-info{opacity:.55}
+  .cc-acoes{display:flex;gap:.4rem}
+  .cc-btn{background:none;border:1px solid #2f2f31;border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;width:auto;color:var(--txt)}
+  .cc-edit{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.3rem}
+  .cc-edit input{flex:1 1 140px;font-size:.8rem;padding:.35rem .5rem;border-radius:7px;border:1px solid #333;background:var(--bg);color:var(--txt)}
+  .cc-edit button{border:1px solid #2f2f31;border-radius:7px;padding:.32rem .7rem;font-size:.78rem;cursor:pointer;width:auto;background:none;color:var(--txt)}
+  .dre-tbl td{padding:.32rem .2rem}
+  .dre-grp td:first-child{padding-left:.2rem}
+  .dre-subtotal td{border-top:1px solid var(--borda);font-weight:600}
+  .dre-total td{border-top:2px solid var(--borda);font-weight:700}
+  .dre-centro{margin-top:.9rem}
+  .dre-centro>summary{cursor:pointer;color:var(--verde-claro);font-size:.8rem}
+  .dre-centro table{width:100%;margin-top:.5rem;font-size:.78rem;border-collapse:collapse;white-space:nowrap}
+  .dre-centro th,.dre-centro td{padding:.3rem .45rem}
+  .dre-centro th{color:var(--txt-mut);font-size:.68rem;text-align:right;border-bottom:1px solid var(--borda)}
+  .dre-centro th:first-child,.dre-centro td:first-child{text-align:left}
+</style>
+
+<details class="card larga sec-pc" id="plano-contas">
+  <summary><span>📋 Plano de Contas <span class="mut" style="font-weight:400;font-size:.76rem">· padrão do sistema — você liga/desliga o que usa</span></span><span class="chev">▾</span></summary>
+  <div class="sec-body">
+    {% for g in plano_arvore %}
+    <div class="pc-grp"><span class="pc-gcode">{{ g.grupo }}</span><span class="pc-gname">{{ g.nome }}</span><span class="pc-gmeta">{{ g.n_ativas }}/{{ g.n_total }} ativas</span></div>
+    {% for c in g.contas %}
+    <div class="pc-acc{% if not c.habilitada %} off{% endif %}">
+      <span class="pc-code">{{ c.codigo }}</span>
+      <span class="pc-name">{{ c.nome }}</span>
+      <span class="pc-tag {{ c.natureza }}">{{ 'Receita' if c.natureza=='receita' else 'Despesa' }}</span>
+      <form method="post" action="/painel/empresa/plano-contas/habilitar" style="margin:0">
+        <input type="hidden" name="plano_conta_id" value="{{ c.id }}">
+        <input type="hidden" name="ativa" value="{{ '0' if c.habilitada else '1' }}">
+        <button type="submit" class="pc-sw{% if c.habilitada %} on{% endif %}" title="{{ 'desligar' if c.habilitada else 'ligar' }}"><span class="knob"></span></button>
+      </form>
+    </div>
+    {% endfor %}
+    {% endfor %}
+    <div class="mut" style="font-size:.72rem;margin-top:.7rem">A árvore é do sistema (a mesma pra todas as contas). No lançamento só aparecem as contas ligadas.</div>
+  </div>
+</details>
+
+<details class="card larga sec-pc" id="centros-custo">
+  <summary><span>🎯 Centros de Custo <span class="mut" style="font-weight:400;font-size:.76rem">· seus (unidade, filial, projeto) — opcional no lançamento</span></span><span class="chev">▾</span></summary>
+  <div class="sec-body">
+    <form method="post" action="/painel/empresa/centro-custo" class="cc-form">
+      <input name="nome" required placeholder="Nome (ex: Unidade Centro)">
+      <input name="descricao" placeholder="Descrição (opcional)">
+      <button type="submit">+ Novo centro</button>
+    </form>
+    {% if centros %}
+    {% for c in centros %}
+    <div class="cc-item{% if not c.ativo %} off{% endif %}">
+      <div class="cc-info"><b>{{ c.nome }}</b>{% if c.descricao %} <span class="mut">· {{ c.descricao }}</span>{% endif %}{% if not c.ativo %} <span class="mut">(inativo)</span>{% endif %}</div>
+      <div class="cc-acoes">
+        <button type="button" onclick="ccEditToggle(this)" class="cc-btn" style="color:#8a938a">editar ✎</button>
+        {% if c.ativo %}<form method="post" action="/painel/empresa/centro-custo/{{ c.id }}/desativar" style="margin:0"><input type="hidden" name="ativo" value="0"><button class="cc-btn" style="color:#c98080">desativar</button></form>
+        {% else %}<form method="post" action="/painel/empresa/centro-custo/{{ c.id }}/desativar" style="margin:0"><input type="hidden" name="ativo" value="1"><button class="cc-btn" style="color:var(--verde-claro)">reativar</button></form>{% endif %}
+      </div>
+      <form method="post" action="/painel/empresa/centro-custo" class="cc-edit" style="display:none">
+        <input type="hidden" name="centro_id" value="{{ c.id }}">
+        <input name="nome" value="{{ c.nome }}" required placeholder="nome">
+        <input name="descricao" value="{{ c.descricao }}" placeholder="descrição">
+        <button type="submit" style="background:var(--verde);color:#fff;border:0">salvar</button>
+        <button type="button" onclick="ccEditToggle(this)" style="color:#8a938a">cancelar</button>
+      </form>
+    </div>
+    {% endfor %}
+    {% else %}<div class="mut" style="font-size:.85rem">Nenhum centro ainda. Crie acima (unidade, filial, projeto, evento…).</div>{% endif %}
+  </div>
+  <script>
+  function ccEditToggle(btn){var it=btn.closest('.cc-item');var ed=it.querySelector('.cc-edit');ed.style.display=(ed.style.display==='none'||!ed.style.display)?'flex':'none';}
+  </script>
+</details>
+
+<div class="card larga" id="dre">
+  <div style="display:flex;justify-content:space-between"><strong>DRE do mês</strong>
     <span class="mut" style="font-size:.72rem">{{ '%02d'|format(dre.mes) }}/{{ dre.ano }}</span></div>
+  {% if dre.estrutura and dre.estrutura.linhas %}
+  <table class="dre-tbl" style="width:100%;margin-top:.6rem;font-size:.86rem">
+    {% for l in dre.estrutura.linhas %}
+    <tr class="dre-{{ l.tipo }}">
+      <td class="{% if l.tipo=='grupo' %}mut{% endif %}">{{ l.nome }}{% if l.n %} <span class="mut" style="font-size:.7rem">({{ l.n }} lanç.)</span>{% endif %}</td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums;{% if l.valor_centavos < 0 %}color:#e07a5f{% elif l.tipo in ('subtotal','total') %}color:var(--verde-claro){% endif %}">{{ l.valor_centavos|brl }}{% if l.margem_pct is defined %} · {{ l.margem_pct }}%{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
   <table style="width:100%;margin-top:.6rem;font-size:.9rem">
     <tr><td class="mut">Receitas</td><td style="text-align:right;color:var(--verde-claro)">{{ dre.receitas_centavos|brl }}</td></tr>
     <tr><td class="mut">(−) Despesas</td><td style="text-align:right">{{ dre.despesas_centavos|brl }}</td></tr>
     <tr style="border-top:1px solid var(--borda)"><td style="font-weight:600">Resultado</td>
       <td style="text-align:right;font-weight:600;color:{{ 'var(--verde-claro)' if dre.resultado_centavos>=0 else '#e07a5f' }}">{{ dre.resultado_centavos|brl }} · {{ dre.margem_pct }}%</td></tr>
   </table>
+  {% endif %}
+
+  {% if dre_centro and dre_centro.centros %}
+  <details class="dre-centro">
+    <summary>Ver por centro de custo</summary>
+    <div style="overflow-x:auto">
+    <table>
+      <tr><th>Conta</th>{% for col in dre_centro.centros %}<th>{{ col.nome }}</th>{% endfor %}<th>Total</th></tr>
+      {% for l in dre_centro.linhas %}
+      <tr class="dre-{{ l.tipo }}"><td>{{ l.nome }}</td>
+        {% for col in dre_centro.centros %}<td style="text-align:right">{{ l.por_centro[col.key]|brl }}</td>{% endfor %}
+        <td style="text-align:right;font-weight:600">{{ l.total_centavos|brl }}</td></tr>
+      {% endfor %}
+    </table></div>
+  </details>
+  {% endif %}
 
   {% if dre.a_definir_n %}
   <div style="background:#2b2416;border:1px solid #f0c05a44;border-radius:8px;padding:.55rem .9rem;margin-top:.7rem;color:#f0c05a;font-size:.78rem;line-height:1.35">
@@ -8029,6 +8154,15 @@ def painel_empresa(request: Request):
     # Reaproveita res/fluxo/dre já calculados dentro dele (uma computação só).
     dash = _painel_dashboard(pool, conta, vende_servico=bool(conta[14]))
     res, fluxo, dre = dash["res"], dash["fluxo"], dash["dre"]
+    # Plano de contas (árvore + liga/desliga), centros de custo e DRE por centro.
+    # Tolerante: se a migração 132 ainda não rodou, as seções ficam vazias.
+    from finance import plano_contas as _pc
+    try:
+        plano_arvore = _pc.arvore_habilitada(pool, conta[0])
+        centros = _pc.listar_centros(pool, conta[0], incluir_inativos=True)
+        dre_centro = emp.dre_por_centro(pool, conta[0], hoje.year, hoje.month)
+    except Exception:
+        plano_arvore, centros, dre_centro = [], [], {"centros": [], "linhas": []}
     doc = ""
     with pool.connection() as c:
         r = c.execute("select coalesce(documento,'') from contas where id=%s",
@@ -8050,7 +8184,8 @@ def painel_empresa(request: Request):
     return _render("empresa", request, empresa_nome=conta[2], empresa_doc=doc,
                    dash=dash, res=res, fluxo=fluxo, dre=dre, titulos=titulos,
                    folha=folha, clientes_lista=clientes_lista, carteira=carteira,
-                   rotulo_receber=rotulo_receber, tem_pj=True)
+                   rotulo_receber=rotulo_receber, tem_pj=True,
+                   plano_arvore=plano_arvore, centros=centros, dre_centro=dre_centro)
 
 
 @router.get("/painel/produtos")
@@ -8472,6 +8607,57 @@ def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
         except Exception:
             pass
     return RedirectResponse("/painel/empresa", status_code=303)
+
+
+@router.post("/painel/empresa/plano-contas/habilitar")
+def empresa_plano_habilitar(request: Request, plano_conta_id: str = Form(""),
+                            ativa: str = Form("")):
+    """Liga/desliga uma conta do plano de contas PRA ESTA conta (toggle)."""
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    from finance import plano_contas as pc
+    try:
+        pc.habilitar(pool, conta[0], int(plano_conta_id),
+                     ativa in ("1", "on", "true", "True"))
+    except (TypeError, ValueError):
+        pass
+    return RedirectResponse("/painel/empresa#plano-contas", status_code=303)
+
+
+@router.post("/painel/empresa/centro-custo")
+def empresa_centro_salvar(request: Request, centro_id: str = Form(""),
+                          nome: str = Form(""), descricao: str = Form(""),
+                          cor: str = Form("")):
+    """Cria um centro de custo — ou edita, se centro_id vier no form."""
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    from finance import plano_contas as pc
+    if nome.strip():
+        try:
+            if centro_id.strip():
+                pc.editar_centro(pool, conta[0], int(centro_id), nome, descricao, cor)
+            else:
+                pc.criar_centro(pool, conta[0], nome, descricao, cor)
+        except (TypeError, ValueError):
+            pass
+    return RedirectResponse("/painel/empresa#centros-custo", status_code=303)
+
+
+@router.post("/painel/empresa/centro-custo/{centro_id}/desativar")
+def empresa_centro_desativar(request: Request, centro_id: int, ativo: str = Form("")):
+    """Desativa (ou reativa, se ativo=1) um centro de custo. Nunca apaga — o
+    histórico dos lançamentos que apontam pra ele fica preservado."""
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    from finance import plano_contas as pc
+    pc.desativar_centro(pool, conta[0], centro_id, ativo=(ativo in ("1", "on", "true", "True")))
+    return RedirectResponse("/painel/empresa#centros-custo", status_code=303)
 
 
 @router.post("/painel/empresa/titulo/{titulo_id}/baixa")

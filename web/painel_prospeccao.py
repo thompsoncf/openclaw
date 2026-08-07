@@ -42,6 +42,30 @@ STATUS = [
 ]
 STATUS_OK = {s for s, _ in STATUS}
 STATUS_ROT = dict(STATUS)
+# Etapas do funil personalizáveis por conta (migração 130). As três "fixas" podem ser
+# renomeadas mas não removidas/reordenadas: 'novo' é a entrada (o lead nasce nela) e
+# 'ganho'/'perdido' são resultado (relatórios dependem delas). O miolo é livre.
+_ETAPAS_PADRAO = [
+    ("novo", "Novo", 0, True), ("contatado", "Contatado", 10, False),
+    ("qualificado", "Qualificado", 20, False), ("proposta", "Proposta", 30, False),
+    ("ganho", "Ganho", 900, True), ("perdido", "Perdido", 910, True),
+]
+_ORDEM_GANHO = 900  # etapas novas entram antes disso (miolo fica < 900)
+
+
+def _etapas(c, conta_id: int) -> list[dict]:
+    """Etapas do funil da conta, ordenadas. Semeia o padrão na 1ª vez (conta sem
+    etapas ainda). Retorna [{id, chave, rotulo, ordem, fixa}]."""
+    sql = "select id, chave, rotulo, ordem, fixa from funil_etapas where conta_id=%s order by ordem, id"
+    rows = c.execute(sql, (conta_id,)).fetchall()
+    if not rows:
+        for chave, rotulo, ordem, fixa in _ETAPAS_PADRAO:
+            c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fixa)
+                         values (%s,%s,%s,%s,%s) on conflict (conta_id, chave) do nothing""",
+                      (conta_id, chave, rotulo, ordem, fixa))
+        c.commit()
+        rows = c.execute(sql, (conta_id,)).fetchall()
+    return [{"id": r[0], "chave": r[1], "rotulo": r[2], "ordem": r[3], "fixa": r[4]} for r in rows]
 TEMPERATURAS = [("frio", "Frio"), ("morno", "Morno"), ("quente", "Quente")]
 TEMP_OK = {t for t, _ in TEMPERATURAS}
 TEMP_COR = {"frio": "#5b9bd5", "morno": "#e0a33e", "quente": "#e0574f"}
@@ -339,6 +363,7 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
             params.append(int(filtro_vend))
     where.append("p.estagio = 'lead'")   # funil = só quem engajou; o resto fica na aba Base
     with pool.connection() as c:
+        etapas = _etapas(c, conta_id)
         rows = c.execute(
             f"""select p.id, p.empresa, p.segmento, p.cidade, p.uf, p.status,
                        p.temperatura, p.valor_estimado_centavos, p.proximo_contato_em,
@@ -349,7 +374,8 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
                  where {' and '.join(where)}
                  order by p.proximo_contato_em asc nulls last, p.atualizado_em desc""",
             tuple(params)).fetchall()
-    colunas = {s: [] for s, _ in STATUS}
+    colunas = {e["chave"]: [] for e in etapas}
+    primeira = etapas[0]["chave"] if etapas else "novo"
     total_valor = 0
     for r in rows:
         card = {"id": r[0], "empresa": r[1], "segmento": r[2], "cidade": r[3],
@@ -358,12 +384,15 @@ def prospeccao_kanban(request: Request, vendedor: str = ""):
                 "vendedor_id": r[11], "vendedor": r[12],
                 "tem_email": bool(r[13]), "tem_whatsapp": bool(r[10]),
                 "tem_instagram": bool(r[14]), "enriquecido": bool(r[15])}
-        colunas.get(r[5], colunas["novo"]).append(card)
+        colunas.get(r[5], colunas[primeira]).append(card)
         if r[5] != "perdido":
             total_valor += int(r[7] or 0)
+    # rótulos (chave, rotulo) pro template + etapas ricas (com nº de leads) pro editor
+    status_tpl = [(e["chave"], e["rotulo"]) for e in etapas]
+    etapas_edit = [{**e, "n": len(colunas.get(e["chave"], []))} for e in etapas]
     vends = _vendedores(pool, conta_id) if ctx["gerencia"] else []
     return _render("prospeccao", request, titulo="Prospecção", secao_ativa="prospeccao",
-                   status=STATUS, colunas=colunas, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
+                   status=status_tpl, etapas=etapas_edit, colunas=colunas, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
                    temperaturas_all=TEMPERATURAS, gerencia=ctx["gerencia"], pode_atribuir=ctx["pode_atribuir"],
                    vendedores=vends, filtro_vend=filtro_vend, total_valor=total_valor,
                    total_alvos=len(rows), tem_places=fontes.tem_chave_places(),
@@ -3556,9 +3585,11 @@ def prospeccao_ficha(request: Request, alvo_id: int):
     # quem o lead usou pra falar (respondeu) primeiro; depois os só-enviados
     canais_contato.sort(key=lambda x: (not x["respondeu"], x["primeiro_in"] or x["ultimo"]))
     vends = _vendedores(pool, ctx["conta_id"]) if ctx["gerencia"] else []
+    with pool.connection() as c:
+        status_ficha = [(e["chave"], e["rotulo"]) for e in _etapas(c, ctx["conta_id"])]
     return _render("prospeccao_ficha", request, titulo=alvo["empresa"], secao_ativa="prospeccao",
                    canais_contato=canais_contato, origem_ch=origem_ch,
-                   a=alvo, timeline=timeline, status=STATUS, temperaturas=TEMPERATURAS,
+                   a=alvo, timeline=timeline, status=status_ficha, temperaturas=TEMPERATURAS,
                    tipos=TIPOS, resultados=RESULTADOS, temp_cor=TEMP_COR, temp_pill=TEMP_PILL,
                    gerencia=ctx["gerencia"], pode_atribuir=ctx["pode_atribuir"], vendedores=vends,
                    tem_cnpja=fontes.tem_chave_cnpja(), tem_ia=_tem_ia(),
@@ -3852,9 +3883,11 @@ async def prospeccao_status(request: Request, alvo_id: int):
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
     form = await request.form()
     status = (form.get("status") or request.query_params.get("status") or "").strip()
-    if status not in STATUS_OK:
-        return JSONResponse({"ok": False, "erro": "status"}, status_code=400)
     pool = get_pool()
+    with pool.connection() as c:
+        chaves = {e["chave"] for e in _etapas(c, ctx["conta_id"])}
+    if status not in chaves:
+        return JSONResponse({"ok": False, "erro": "status"}, status_code=400)
     alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
     if not alvo or not _pode_ver(alvo, ctx):
         return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
@@ -3867,6 +3900,102 @@ async def prospeccao_status(request: Request, alvo_id: int):
                   (status, alvo_id, ctx["conta_id"]))
         c.commit()
     return JSONResponse({"ok": True, "status": status, "estagio": "lead"})
+
+
+# ---------------------------------------------------------------- etapas do funil (editar)
+# Só o dono/gestor edita a estrutura do funil (é uma configuração da empresa). O vendedor
+# usa o funil normalmente. 'novo'/'ganho'/'perdido' (fixa=true) só renomeiam.
+@router.post("/painel/prospeccao/etapas/nova")
+def prospeccao_etapa_nova(request: Request, rotulo: str = Form("")):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "Só o dono/gestor edita as etapas do funil."
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    rot = (rotulo or "").strip()[:40] or "Nova etapa"
+    with get_pool().connection() as c:
+        _etapas(c, ctx["conta_id"])  # garante o seed antes de mexer
+        existentes = {r[0] for r in c.execute(
+            "select chave from funil_etapas where conta_id=%s", (ctx["conta_id"],)).fetchall()}
+        base = _slug_modelo(rot).replace("-", "_") or "etapa"
+        chave, i = base, 2
+        while chave in existentes:
+            chave, i = f"{base}_{i}", i + 1
+        mx = c.execute("select coalesce(max(ordem),0) from funil_etapas where conta_id=%s and ordem<%s",
+                       (ctx["conta_id"], _ORDEM_GANHO)).fetchone()[0]
+        ordem = min(mx + 10, _ORDEM_GANHO - 1)
+        c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fixa)
+                     values (%s,%s,%s,%s,false)""", (ctx["conta_id"], chave, rot, ordem))
+        c.commit()
+    request.session["prosp_aviso"] = f"Etapa “{rot}” adicionada ✓"
+    return RedirectResponse("/painel/prospeccao", status_code=303)
+
+
+@router.post("/painel/prospeccao/etapas/{eid}/renomear")
+def prospeccao_etapa_renomear(request: Request, eid: int, rotulo: str = Form("")):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    rot = (rotulo or "").strip()[:40]
+    if rot:
+        with get_pool().connection() as c:
+            c.execute("update funil_etapas set rotulo=%s where id=%s and conta_id=%s",
+                      (rot, eid, ctx["conta_id"]))
+            c.commit()
+        request.session["prosp_aviso"] = "Etapa renomeada ✓"
+    return RedirectResponse("/painel/prospeccao", status_code=303)
+
+
+@router.post("/painel/prospeccao/etapas/{eid}/remover")
+def prospeccao_etapa_remover(request: Request, eid: int):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    with get_pool().connection() as c:
+        r = c.execute("select chave, fixa from funil_etapas where id=%s and conta_id=%s",
+                      (eid, ctx["conta_id"])).fetchone()
+        if not r:
+            request.session["prosp_aviso"] = "Etapa não encontrada."
+        elif r[1]:
+            request.session["prosp_aviso"] = "Essa etapa é fixa (entrada/resultado) — não dá pra remover."
+        else:
+            n = c.execute("select count(*) from prospeccao where conta_id=%s and status=%s",
+                          (ctx["conta_id"], r[0])).fetchone()[0]
+            if n:
+                request.session["prosp_aviso"] = f"Tem {n} lead(s) nessa etapa — mova-os antes de remover."
+            else:
+                c.execute("delete from funil_etapas where id=%s and conta_id=%s", (eid, ctx["conta_id"]))
+                c.commit()
+                request.session["prosp_aviso"] = "Etapa removida ✓"
+    return RedirectResponse("/painel/prospeccao", status_code=303)
+
+
+@router.post("/painel/prospeccao/etapas/{eid}/mover")
+def prospeccao_etapa_mover(request: Request, eid: int, dir: str = Form("")):
+    """Troca a ordem com a etapa vizinha do miolo (◀/▶). Fixas não reordenam."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"] or dir not in ("esq", "dir"):
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    with get_pool().connection() as c:
+        meio = [e for e in _etapas(c, ctx["conta_id"]) if not e["fixa"]]
+        idx = next((i for i, e in enumerate(meio) if e["id"] == eid), None)
+        if idx is not None:
+            j = idx - 1 if dir == "esq" else idx + 1
+            if 0 <= j < len(meio):
+                a, b = meio[idx], meio[j]
+                c.execute("update funil_etapas set ordem=%s where id=%s and conta_id=%s",
+                          (b["ordem"], a["id"], ctx["conta_id"]))
+                c.execute("update funil_etapas set ordem=%s where id=%s and conta_id=%s",
+                          (a["ordem"], b["id"], ctx["conta_id"]))
+                c.commit()
+    return RedirectResponse("/painel/prospeccao", status_code=303)
 
 
 # ================================================================ 1º CONTATO (IA)
@@ -5470,6 +5599,61 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% for v in vendedores %}<option value="{{ v.id }}" {% if filtro_vend==(v.id|string) %}selected{% endif %}>{{ v.nome }}</option>{% endfor %}
     </select>
   </form>
+  {% endif %}
+
+  {% if gerencia %}
+  <style>
+  .etcfg{border:1px solid var(--borda);border-radius:12px;background:var(--card);margin:.2rem 0 1rem}
+  .etcfg>summary{cursor:pointer;padding:.7rem .9rem;font-weight:600;font-size:.9rem;list-style:none;
+    display:flex;align-items:center;gap:.5rem;user-select:none}
+  .etcfg>summary::-webkit-details-marker{display:none}
+  .etcfg>summary::after{content:'▾';margin-left:auto;color:var(--txt-mut);transition:transform .18s}
+  .etcfg[open]>summary::after{transform:rotate(180deg)}
+  .etbody{padding:0 .9rem .9rem;border-top:1px solid var(--borda)}
+  .ethint{color:var(--txt-mut);font-size:.8rem;margin:.7rem 0 .8rem}
+  .etlist{display:flex;flex-direction:column;gap:.4rem}
+  .etrow{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap}
+  .etrow .lock,.etrow .grip{width:1.1rem;text-align:center;color:var(--txt-mut);flex-shrink:0}
+  .etin{flex:1;min-width:130px;padding:.4rem .55rem;border-radius:8px;border:1px solid #333;
+    background:var(--bg);color:var(--txt);font-family:inherit;font-size:.86rem}
+  .etin:focus{outline:none;border-color:var(--verde)}
+  .etn{font-size:.72rem;color:var(--txt-mut);white-space:nowrap;font-variant-numeric:tabular-nums;min-width:52px}
+  .etb{border:1px solid var(--borda);background:var(--card-2);color:var(--txt);border-radius:7px;
+    width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;
+    font-size:.85rem;line-height:1;flex-shrink:0}
+  .etb:hover:not(:disabled){border-color:var(--verde)}
+  .etb.del:hover:not(:disabled){border-color:#e0574f;color:#e0574f}
+  .etb:disabled{opacity:.32;cursor:not-allowed}
+  .etadd{display:flex;gap:.4rem;margin-top:.8rem;flex-wrap:wrap}
+  .etadd .etin{min-width:160px}
+  </style>
+  <details class="etcfg">
+    <summary>⚙️ Editar etapas do funil</summary>
+    <div class="etbody">
+      <p class="ethint">Renomeie no campo e clique ✓. Reordene com ◀ ▶. O ✕ remove — só quando a etapa
+        estiver <b>sem leads</b>. 🔒 = etapa fixa (entrada/resultado): pode renomear, mas não remover.</p>
+      <div class="etlist">
+        {% for e in etapas %}
+        <form method="post" class="etrow">
+          {% if e.fixa %}<span class="lock" title="Etapa fixa (entrada/resultado)">🔒</span>{% else %}<span class="grip">⠿</span>{% endif %}
+          <input class="etin" name="rotulo" value="{{ e.rotulo }}" maxlength="40" aria-label="Nome da etapa">
+          <span class="etn">{{ e.n }} lead{{ '' if e.n == 1 else 's' }}</span>
+          <button class="etb" formaction="/painel/prospeccao/etapas/{{ e.id }}/renomear" title="Salvar nome">✓</button>
+          <button class="etb" formaction="/painel/prospeccao/etapas/{{ e.id }}/mover" name="dir" value="esq" {% if e.fixa %}disabled{% endif %} title="Mover pra esquerda">◀</button>
+          <button class="etb" formaction="/painel/prospeccao/etapas/{{ e.id }}/mover" name="dir" value="dir" {% if e.fixa %}disabled{% endif %} title="Mover pra direita">▶</button>
+          <button class="etb del" formaction="/painel/prospeccao/etapas/{{ e.id }}/remover"
+                  {% if e.fixa or e.n > 0 %}disabled{% endif %}
+                  title="{% if e.fixa %}Etapa fixa — não remove{% elif e.n > 0 %}Mova os leads primeiro{% else %}Remover etapa{% endif %}"
+                  onclick="return confirm('Remover a etapa “{{ e.rotulo }}”?')">✕</button>
+        </form>
+        {% endfor %}
+      </div>
+      <form method="post" action="/painel/prospeccao/etapas/nova" class="etadd">
+        <input class="etin" name="rotulo" placeholder="Nova etapa (ex.: Reunião marcada)" maxlength="40">
+        <button class="pbtn">＋ Adicionar etapa</button>
+      </form>
+    </div>
+  </details>
   {% endif %}
 
   <!-- abas de status (só mobile) -->

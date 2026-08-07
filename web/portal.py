@@ -899,6 +899,18 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 </select>
 <button type="button" class="cat-ok" onclick="salvarCat(this)" style="display:none;padding:.24rem .65rem;width:auto;font-size:.72rem;font-weight:600;background:var(--verde);color:#fff;border:0;border-radius:6px;cursor:pointer;line-height:1.1">OK</button>
 </span>
+{% if eh_pj and l.natureza=='empresa' and plano_opcoes %}
+<div style="display:flex;gap:.35rem;margin-top:.3rem;flex-wrap:wrap">
+<select class="pc-edit" data-id="{{ l.id }}" onchange="planoMudou(this)" title="conta contábil (DRE)" style="background:var(--bg);border:1px solid #2a3a33;border-radius:6px;color:var(--txt);font-size:.72rem;padding:.18rem .4rem;max-width:160px">
+<option value="">— conta contábil —</option>
+{% for g in plano_opcoes %}<optgroup label="{{ g.grupo }} · {{ g.nome }}">{% for c in g.contas %}<option value="{{ c.id }}" {% if l.plano_conta_id==c.id %}selected{% endif %}>{{ c.codigo }} {{ c.nome }}</option>{% endfor %}</optgroup>{% endfor %}
+</select>
+{% if centros_custo %}<select class="cc-edit" data-id="{{ l.id }}" onchange="centroMudou(this)" title="centro de custo (opcional)" style="background:var(--bg);border:1px solid #2a3a33;border-radius:6px;color:var(--txt);font-size:.72rem;padding:.18rem .4rem;max-width:130px">
+<option value="">— centro —</option>
+{% for c in centros_custo %}<option value="{{ c.id }}" {% if l.centro_custo_id==c.id %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}
+</select>{% endif %}
+</div>
+{% endif %}
 </td>
 {% if pessoas|length > 1 %}<td class="mut">{{ l.quem }}</td>{% endif %}
 <td style="text-align:right; font-weight:500; color:{{ 'var(--verde-claro)' if l.tipo=='receita' else '#f0b8b8' }}">
@@ -1053,6 +1065,18 @@ function salvarClassificacao(){
 function marcarNat(id, nat, btn){
   fetch('/painel/lancamento/natureza', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&natureza='+nat})
     .then(r=>r.json()).then(d=>{ if(d.ok){ location.reload(); } });
+}
+function planoMudou(sel){
+  var id = sel.getAttribute('data-id');
+  sel.disabled = true;
+  fetch('/painel/lancamento/plano-conta', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&plano_conta_id='+encodeURIComponent(sel.value)})
+    .then(r=>r.json()).then(function(d){ sel.disabled=false; if(d.ok){ sel.style.borderColor='var(--verde-claro)'; } });
+}
+function centroMudou(sel){
+  var id = sel.getAttribute('data-id');
+  sel.disabled = true;
+  fetch('/painel/lancamento/centro-custo', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&centro_custo_id='+encodeURIComponent(sel.value)})
+    .then(r=>r.json()).then(function(d){ sel.disabled=false; if(d.ok){ sel.style.borderColor='var(--verde-claro)'; } });
 }
 function salvarCat(btn){
   var sel = btn.parentElement.querySelector('.cat-edit');
@@ -8986,6 +9010,17 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
     from finance.models import CATEGORIAS_DESPESA, CATEGORIAS_RECEITA
     categorias_lista = CATEGORIAS_DESPESA + [c for c in CATEGORIAS_RECEITA if c not in CATEGORIAS_DESPESA]
 
+    # Conta contábil (habilitadas, agrupadas) + centros de custo — só PJ usa, e só
+    # pra classificar lançamentos de empresa. Tolerante à ausência da migração 132.
+    plano_opcoes, centros_custo = [], []
+    if eh_pj:
+        from finance import plano_contas as _pc
+        try:
+            plano_opcoes = _pc.opcoes_lancamento(pool, conta[0])
+            centros_custo = _pc.listar_centros(pool, conta[0])
+        except Exception:
+            plano_opcoes, centros_custo = [], []
+
     meses = []
     y, m = hoje.year, hoje.month
     nomes = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"]
@@ -9005,7 +9040,8 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
                    n_a_definir=n_a_definir,
                    quebra=quebra,
                    prev_cartao=prev_cartao,
-                   eh_pj=eh_pj)
+                   eh_pj=eh_pj,
+                   plano_opcoes=plano_opcoes, centros_custo=centros_custo)
 
 
 # ---------- lista de compras ----------
@@ -9300,6 +9336,40 @@ def marcar_natureza_lancamento(request: Request,
     livro = LivroCaixa(get_pool(), conta[0])
     nat = natureza if natureza in ("pessoal", "empresa") else None
     ok = livro.marcar_natureza(lancamento_id, nat)
+    return JSONResponse({"ok": bool(ok)})
+
+
+@router.post("/painel/lancamento/plano-conta")
+def definir_plano_conta_lancamento(request: Request,
+                                   lancamento_id: int = Form(...),
+                                   plano_conta_id: str = Form("")):
+    """Define a conta contábil de um lançamento (vazio = limpa). Valida que a
+    conta do plano existe e está habilitada pra esta conta antes de gravar."""
+    conta = conta_logada(request)
+    if not conta:
+        return JSONResponse({"ok": False}, status_code=401)
+    from finance.livro_caixa import LivroCaixa
+    from finance import plano_contas as pc
+    pool = get_pool()
+    pid = pc.plano_conta_valido(pool, conta[0], plano_conta_id)
+    ok = LivroCaixa(pool, conta[0]).definir_plano_conta(lancamento_id, pid)
+    return JSONResponse({"ok": bool(ok)})
+
+
+@router.post("/painel/lancamento/centro-custo")
+def definir_centro_custo_lancamento(request: Request,
+                                    lancamento_id: int = Form(...),
+                                    centro_custo_id: str = Form("")):
+    """Define o centro de custo de um lançamento (vazio = limpa). Valida que o
+    centro é desta conta e está ativo antes de gravar."""
+    conta = conta_logada(request)
+    if not conta:
+        return JSONResponse({"ok": False}, status_code=401)
+    from finance.livro_caixa import LivroCaixa
+    from finance import plano_contas as pc
+    pool = get_pool()
+    cid = pc.centro_custo_valido(pool, conta[0], centro_custo_id)
+    ok = LivroCaixa(pool, conta[0]).definir_centro_custo(lancamento_id, cid)
     return JSONResponse({"ok": bool(ok)})
 
 

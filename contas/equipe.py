@@ -250,7 +250,9 @@ def regerar_convite(pool, conta_id: int, membro_id: int) -> dict:
     with pool.connection() as c:
         r = c.execute(
             """update membros set convite_token=%s, convite_expira=%s, senha_hash=null, ativo=false
-                where id=%s and conta_id=%s and papel<>'dono' returning id""",
+                where id=%s and conta_id=%s and papel<>'dono' returning id, email, nome, papel""",
             (token, _agora() + timedelta(days=7), membro_id, conta_id)).fetchone()
         c.commit()
-    return {"ok": True, "token": token} if r else {"ok": False}
+    if not r:
+        return {"ok": False}
+    return {"ok": True, "token": token, "email": r[1], "nome": r[2], "papel": r[3]}

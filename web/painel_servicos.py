@@ -495,12 +495,14 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-inp{padding:.55rem .7rem; border-radius:8px; background:var(--bg); color:var(--txt); border:1px solid var(--borda); font-size:.95rem; width:100%; box-sizing:border-box}
 .oc-inp:focus{border-color:var(--verde); outline:none}
 .oc-mod{display:grid; grid-template-columns:auto 1fr 84px 84px 84px auto; gap:.55rem; align-items:center; padding:.6rem 0; border-bottom:1px solid var(--borda)}
+.oc-mod.avulso,.oc-head.avulso{grid-template-columns:auto 1fr 90px 90px auto}
 .oc-mod.off{opacity:.5}
 .oc-mod .oc-nome{cursor:default; min-width:0}
 .oc-desc-preview{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%}
-.oc-rowacts{display:flex; gap:.1rem; white-space:nowrap}
-.oc-ic{background:none; border:0; color:var(--txt-mut); cursor:pointer; font-size:.95rem; padding:.1rem .25rem; border-radius:6px}
-.oc-ic:hover{color:var(--txt); background:var(--bg)}
+.oc-rowacts{display:flex; gap:.35rem; white-space:nowrap}
+.oc-ic{background:var(--bg); border:1px solid var(--borda); color:var(--txt-mut); cursor:pointer; font-size:.85rem; width:30px; height:30px; padding:0; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; transition:border-color .15s,color .15s,background .15s}
+.oc-ic:hover{color:var(--txt); border-color:var(--verde); background:var(--card)}
+.oc-del:hover{color:#e0857a; border-color:#5c2a27}
 .oc-svcform{background:var(--bg); border:1px solid var(--borda); border-radius:10px; padding:.8rem; margin-top:.7rem}
 .oc-empty{border:1px dashed var(--borda); border-radius:12px; padding:1.4rem; text-align:center; margin-top:.6rem}
 .oc-tog{width:42px; height:24px; border-radius:99px; border:none; cursor:pointer; position:relative; background:#2a3550; flex:none}
@@ -508,7 +510,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-tog::after{content:""; position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:#fff; transition:left .15s}
 .oc-tog.on::after{left:21px}
 .oc-num{display:flex; align-items:center; gap:3px; border:1px solid var(--borda); border-radius:7px; padding:.35rem .5rem; background:var(--bg)}
-.oc-num span{font-size:.72rem; color:var(--txt-mut)}
+.oc-num span{font-size:.62rem; color:var(--txt-mut); text-transform:uppercase; letter-spacing:.03em; white-space:nowrap}
 .oc-num input{width:100%; border:none; background:transparent; color:var(--txt); text-align:right; font-size:.86rem; font-variant-numeric:tabular-nums}
 .oc-num input:focus{outline:none}
 .oc-custo-col{display:none}
@@ -615,8 +617,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         <div id="svc-msg" class="mut" style="font-size:.8rem; margin-top:.4rem"></div>
       </div>
 
-      <div class="oc-head" id="oc-head" style="margin-top:.8rem; display:none">
-        <span></span><span>Serviço</span><span style="text-align:right">{{ 'Valor' if servico_avulso else 'Setup' }}</span><span style="text-align:right{% if servico_avulso %};visibility:hidden{% endif %}">Mensal</span><span style="text-align:right">Custo/Margem</span><span></span>
+      <div class="oc-head{% if servico_avulso %} avulso{% endif %}" id="oc-head" style="margin-top:.8rem; display:none">
+        <span></span><span>Serviço</span><span style="text-align:right">{{ 'Valor' if servico_avulso else 'Setup' }}</span>{% if not servico_avulso %}<span style="text-align:right">Mensal</span>{% endif %}<span style="text-align:right">{{ 'Custo' if servico_avulso else 'Custo/Margem' }}</span><span></span>
       </div>
       <div id="oc-mods"></div>
       <div id="oc-mods-empty" class="oc-empty" style="display:none">
@@ -794,14 +796,15 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       // orçamento começa LIMPO: nenhum serviço marcado. O vendedor marca (ou a IA
       // sugere). Ao re-renderizar (add/editar), preserva o que já estava marcado.
       var on = preserva ? (onset[s.slug]!==undefined?onset[s.slug]:'0') : '0';
-      var r=document.createElement('div'); r.className='oc-mod'+(on==='1'?'':' off');
+      var r=document.createElement('div'); r.className='oc-mod'+(SERVICO_AVULSO?' avulso':'')+(on==='1'?'':' off');
       r.setAttribute('data-id',s.slug); r.setAttribute('data-on',on);
       r.setAttribute('data-nome',s.nome); r.setAttribute('data-desc',s.descricao||''); r.setAttribute('data-cid',s.id);
+      var lblValor=SERVICO_AVULSO?'Valor':'Setup';
       r.innerHTML='<button class="oc-tog'+(on==='1'?' on':'')+'" type="button" title="Entra nesta proposta"></button>'
         +'<div class="oc-nome"><b>'+ec(s.nome)+'</b><div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div>'
-        +'<div class="oc-num"><span>R$</span><input class="oc-setup" inputmode="numeric" value="'+s.setup+'"></div>'
-        +'<div class="oc-num"'+(SERVICO_AVULSO?' style="visibility:hidden"':'')+'><span>R$</span><input class="oc-mensal" inputmode="numeric" value="'+s.mensal+'"></div>'
-        +'<div class="oc-num oc-custo-col"><span>R$</span><input class="oc-custo" inputmode="numeric" value="'+s.custo+'"></div>'
+        +'<div class="oc-num"><span>'+lblValor+'</span><input class="oc-setup" inputmode="numeric" value="'+s.setup+'"></div>'
+        +(SERVICO_AVULSO?'':'<div class="oc-num"><span>Mensal</span><input class="oc-mensal" inputmode="numeric" value="'+s.mensal+'"></div>')
+        +'<div class="oc-num'+(SERVICO_AVULSO?'':' oc-custo-col')+'"><span>Custo</span><input class="oc-custo" inputmode="numeric" value="'+s.custo+'"></div>'
         +'<div class="oc-rowacts"><button class="oc-ic oc-edit" type="button" title="Editar serviço">✎</button><button class="oc-ic oc-del" type="button" title="Excluir serviço">🗑</button></div>';
       box.appendChild(r);
     });

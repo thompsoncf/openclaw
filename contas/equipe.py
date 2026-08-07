@@ -244,6 +244,35 @@ def definir_ativo(pool, conta_id: int, membro_id: int, ativo: bool) -> dict:
     return {"ok": bool(r)}
 
 
+def renomear_membro(pool, conta_id: int, membro_id: int, nome: str) -> dict:
+    """Corrige o nome de um membro (dados digitados errado). Nunca mexe no dono."""
+    nome = (nome or "").strip()[:80]
+    if not nome:
+        return {"ok": False, "erro": "Informe um nome."}
+    with pool.connection() as c:
+        r = c.execute(
+            "update membros set nome=%s where id=%s and conta_id=%s and papel<>'dono' returning id",
+            (nome, membro_id, conta_id)).fetchone()
+        c.commit()
+    return {"ok": bool(r)}
+
+
+def remover_membro(pool, conta_id: int, membro_id: int) -> dict:
+    """Exclui o vínculo de um membro com ESTA empresa (não apaga a pessoa do Zaq).
+    Nunca remove o dono. Se o membro tiver leads/registros vinculados (FK), não
+    exclui — devolve {erro:'vinculado'} pra orientar a desativar/reatribuir antes."""
+    from psycopg.errors import ForeignKeyViolation
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                "delete from membros where id=%s and conta_id=%s and papel<>'dono' returning id",
+                (membro_id, conta_id)).fetchone()
+            c.commit()
+        return {"ok": bool(r)}
+    except ForeignKeyViolation:
+        return {"ok": False, "erro": "vinculado"}
+
+
 def regerar_convite(pool, conta_id: int, membro_id: int) -> dict:
     """Novo link de convite (membro esqueceu a senha ou o convite venceu)."""
     token = secrets.token_urlsafe(24)

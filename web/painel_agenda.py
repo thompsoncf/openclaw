@@ -1560,5 +1560,9 @@ _CONVITE_404_TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf
 <p>Esse link de convite não existe mais ou foi digitado errado. Peça um novo pra quem te convidou.</p></div>
 </body></html>"""
 
+# ⚠️ "convite" aqui é o convite de REUNIÃO (agenda). O _env.loader.mapping é
+# COMPARTILHADO — a equipe usa "convite_equipe" pro convite de acesso. NÃO registre
+# um template de outro assunto sob "convite" nem renomeie o da equipe pra "convite",
+# senão um sobrescreve o outro (ver test_convite_template_colisao).
 _env.loader.mapping["convite"] = _CONVITE_TPL
 _env.loader.mapping["convite_404"] = _CONVITE_404_TPL

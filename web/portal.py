@@ -2766,46 +2766,187 @@ function abastHide(id){ document.getElementById(id).style.display='none'; }
 {% endblock %}"""
 
 _CLIENTES = """{% extends "base" %}{% block conteudo %}
+<style>
+  .cli-item{background:#1c1c1f;border:1px solid var(--borda);border-radius:8px;overflow:hidden}
+  .cli-head{display:flex;align-items:center;gap:.6rem;padding:.7rem .9rem;cursor:pointer}
+  .cli-head:hover{background:#212125}
+  .cli-head .chev{color:#8a8a82;font-size:1.1rem;line-height:1;transition:transform .18s;flex:none}
+  .cli-head[aria-expanded="true"] .chev{transform:rotate(180deg);color:var(--verde-claro)}
+  .tbadge{font-size:.62rem;font-weight:700;letter-spacing:.03em;padding:.08rem .4rem;border-radius:5px;vertical-align:1px;margin-left:.3rem}
+  .tbadge.pf{background:#22303f;color:#7fb2e6}.tbadge.pj{background:#1f3a2b;color:#69cf9a}
+  .wa{position:relative;flex:none;font-size:.76rem;font-weight:600;cursor:pointer;color:#128c4b;
+      background:rgba(37,211,102,.16);border:1px solid rgba(37,211,102,.34);padding:.35rem .7rem;border-radius:999px;white-space:nowrap}
+  .wa:hover{background:rgba(37,211,102,.28)}
+  .wa-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:20;background:#232327;border:1px solid var(--borda);
+      border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.5);padding:.3rem;min-width:200px;display:none}
+  .wa-menu.on{display:block}
+  .wa-menu button{display:block;width:100%;text-align:left;background:none;border:0;color:var(--txt);
+      font-size:.8rem;padding:.5rem .6rem;border-radius:7px;cursor:pointer;width:100%}
+  .wa-menu button:hover{background:#2c2c31}
+  .cli-panel{display:none;padding:.2rem .9rem 1rem;border-top:1px solid #242426}
+  .cli-panel.on{display:block}
+  .ptabs{display:flex;gap:.3rem;margin:.7rem 0}
+  .ptab{border:1px solid var(--borda);background:#232327;color:var(--mut);font-size:.76rem;font-weight:600;
+      padding:.35rem .8rem;border-radius:999px;cursor:pointer}
+  .ptab.on{background:#1f3a2b;color:#69cf9a;border-color:transparent}
+  .pane{display:none}.pane.on{display:block}
+  .mini-grid{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+  .mini-grid .col-2{grid-column:1/-1}
+  .mini-grid label{font-size:.68rem;color:var(--mut)}.mini-grid input{width:100%}
+  .pfoot{display:flex;gap:.5rem;margin-top:.6rem;align-items:center;flex-wrap:wrap}
+  .btn-primary{background:var(--verde);color:#fff;padding:.45rem 1rem;border:0;border-radius:6px;cursor:pointer;font-weight:600;width:auto}
+  .btn-danger{background:transparent;border:1px solid #7a3b3b;color:#d98a8a;padding:.45rem 1rem;border-radius:6px;cursor:pointer;width:auto}
+  .hi-row{display:flex;justify-content:space-between;align-items:center;gap:.6rem;padding:.5rem 0;border-top:1px solid #242426}
+  .hi-row:first-child{border-top:0}.hi-t{color:var(--txt);font-size:.85rem}
+  .hi-v{font-family:ui-monospace,monospace;color:var(--verde-claro);font-weight:600;font-size:.82rem;white-space:nowrap}
+  .doc-badge{font-size:.7rem;font-weight:600;padding:.15rem .5rem;border-radius:6px;margin-left:.4rem;color:#8a8a82}
+  .doc-badge.ok{color:#69cf9a}.doc-badge.err{color:#d98a8a}
+  #zaq-toast{position:fixed;left:50%;bottom:1.4rem;transform:translateX(-50%);background:#111;color:#fff;
+      font-size:.82rem;font-weight:600;padding:.7rem 1.1rem;border-radius:10px;box-shadow:0 12px 30px rgba(0,0,0,.5);
+      z-index:60;opacity:0;pointer-events:none;transition:opacity .2s}
+  #zaq-toast.on{opacity:1}
+</style>
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
     <h2 style="margin:0">👥 Clientes <span style="color:#6a6a66;font-size:.7rem;font-weight:400">· {{ total }} na base</span></h2>
-    <button type="button" onclick="document.getElementById('cli-novo').style.display='block'" style="background:var(--verde);color:#fff;padding:.5rem 1rem;border:0;border-radius:8px;cursor:pointer;font-weight:600;width:auto">+ novo cliente</button>
+    <button type="button" onclick="var e=document.getElementById('cli-novo');e.style.display=e.style.display==='block'?'none':'block'" style="background:var(--verde);color:#fff;padding:.5rem 1rem;border:0;border-radius:8px;cursor:pointer;font-weight:600;width:auto">+ novo cliente</button>
   </div>
   {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
   {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
   <form method="get" action="/painel/clientes" style="margin:1rem 0">
-    <input name="busca" value="{{ busca }}" placeholder="🔍 buscar por nome, telefone ou CPF..." style="width:100%">
+    <input name="busca" value="{{ busca }}" placeholder="🔍 buscar por nome, telefone, CPF ou CNPJ..." style="width:100%">
   </form>
+
   <div id="cli-novo" style="display:none;background:var(--card);border:1px solid var(--borda);border-radius:8px;padding:1rem;margin-bottom:1rem">
     <h4 style="margin-top:0">Novo cliente</h4>
     <form method="post" action="/painel/clientes/novo">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
-        <div><label>Nome *</label><input name="nome" required style="width:100%"></div>
-        <div><label>Telefone / celular</label><input name="telefone" style="width:100%"></div>
-        <div><label>CPF</label><input name="cpf" style="width:100%"></div>
-        <div><label>E-mail</label><input name="email" style="width:100%"></div>
-        <div><label>Aniversário</label><input type="date" name="aniversario" style="width:100%"></div>
-        <div><label>Obs</label><input name="obs" style="width:100%"></div>
+      <div class="mini-grid">
+        <div class="col-2">
+          <label>CPF ou CNPJ</label>
+          <div style="display:flex;gap:.4rem;align-items:center">
+            <input id="nc-doc" name="documento" inputmode="numeric" placeholder="CPF (11) ou CNPJ (14) dígitos" oninput="ncDoc()" style="flex:1">
+            <button type="button" id="nc-buscar" onclick="ncBuscar()" style="display:none;background:rgba(37,211,102,.16);color:#128c4b;border:1px solid rgba(37,211,102,.34);border-radius:6px;padding:.5rem .8rem;cursor:pointer;font-weight:600;width:auto;white-space:nowrap">🔎 Buscar CNPJ</button>
+          </div>
+          <span id="nc-badge" class="doc-badge"></span>
+        </div>
+        <div class="col-2"><label>Nome / Razão social *</label><input id="nc-nome" name="nome" required></div>
+        <div><label>Telefone / celular</label><input id="nc-tel" name="telefone"></div>
+        <div><label>E-mail</label><input id="nc-email" name="email" type="email"></div>
+        <div><label>Aniversário</label><input type="date" name="aniversario"></div>
+        <div><label>Obs</label><input name="obs"></div>
       </div>
-      <div style="display:flex;gap:.5rem;margin-top:.7rem">
-        <button style="background:var(--verde);color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;font-weight:500;width:auto">Salvar</button>
-        <button type="button" onclick="document.getElementById('cli-novo').style.display='none'" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:6px;padding:.5rem 1rem;cursor:pointer;width:auto">Cancelar</button>
+      <div class="pfoot" style="margin-top:.8rem">
+        <button class="btn-primary" type="submit">Salvar</button>
+        <button type="button" onclick="document.getElementById('cli-novo').style.display='none'" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:6px;padding:.45rem 1rem;cursor:pointer;width:auto">Cancelar</button>
       </div>
     </form>
   </div>
+
   <div style="display:flex;flex-direction:column;gap:.5rem">
     {% if clientes %}
       {% for c in clientes %}
-      <a href="/painel/clientes/{{ c.id }}" style="display:flex;justify-content:space-between;align-items:center;background:#1c1c1f;border:1px solid var(--borda);border-radius:8px;padding:.7rem .9rem;text-decoration:none">
-        <div><div style="color:var(--txt)">{{ c.nome }}</div><div class="mut" style="font-size:.8rem">{% if c.telefone %}📱 {{ c.telefone }}{% endif %}{% if c.cpf %} · CPF {{ c.cpf }}{% endif %}{% if c.obs %} · {{ c.obs }}{% endif %}</div></div>
-        <span style="color:var(--verde-claro);font-size:.85rem">ver →</span>
-      </a>
+      <div class="cli-item">
+        <div class="cli-head" role="button" tabindex="0" aria-expanded="false" onclick="toggleCli(this)">
+          <div style="flex:1;min-width:0">
+            <div style="color:var(--txt);font-weight:600">{{ c.nome }}<span class="tbadge {{ 'pj' if c.tipo=='pj' else 'pf' }}">{{ 'PJ' if c.tipo=='pj' else 'PF' }}</span></div>
+            <div class="mut" style="font-size:.8rem">{% if c.telefone %}📱 {{ c.telefone }}{% endif %}{% if c.documento_fmt %} · {{ 'CNPJ' if c.tipo=='pj' else 'CPF' }} {{ c.documento_fmt }}{% endif %}</div>
+          </div>
+          {% if c.telefone %}
+          <div class="wa" data-fone="{{ c.telefone }}" data-id="{{ c.id }}" onclick="waMenu(event,this)">🟢 WhatsApp
+            <div class="wa-menu">
+              <button type="button" onclick="waSistema(event,this)">Enviar pelo sistema</button>
+              <button type="button" onclick="waAbrir(event,this)">Abrir no WhatsApp ↗</button>
+            </div>
+          </div>
+          {% endif %}
+          <span class="chev">⌄</span>
+        </div>
+        <div class="cli-panel">
+          <div class="ptabs">
+            <button type="button" class="ptab on" onclick="ptab(this,'ed-{{ c.id }}')">Editar</button>
+            <button type="button" class="ptab" data-load="{{ c.id }}" onclick="ptab(this,'hi-{{ c.id }}')">Histórico</button>
+          </div>
+          <div class="pane on" id="ed-{{ c.id }}">
+            <form method="post" action="/painel/clientes/{{ c.id }}/editar">
+              <div class="mini-grid">
+                <div class="col-2"><label>Nome / Razão social</label><input name="nome" value="{{ c.nome or '' }}"></div>
+                <div><label>Telefone</label><input name="telefone" value="{{ c.telefone or '' }}"></div>
+                <div><label>{{ 'CNPJ' if c.tipo=='pj' else 'CPF' }}</label><input name="documento" value="{{ c.documento_fmt or '' }}"></div>
+                <div><label>E-mail</label><input name="email" value="{{ c.email or '' }}"></div>
+                <div><label>Aniversário</label><input type="date" name="aniversario" value="{{ c.aniversario or '' }}"></div>
+                <div class="col-2"><label>Obs</label><input name="obs" value="{{ c.obs or '' }}"></div>
+              </div>
+              <div class="pfoot">
+                <button class="btn-primary" type="submit">Salvar alterações</button>
+                <span onclick="event.stopPropagation()">
+                  <button type="button" class="btn-danger" onclick="if(confirm('Arquivar este cliente?')){this.closest('.pane').querySelector('.arq').submit()}">Arquivar</button>
+                </span>
+              </div>
+            </form>
+            <form class="arq" method="post" action="/painel/clientes/{{ c.id }}/arquivar" style="display:none"></form>
+          </div>
+          <div class="pane" id="hi-{{ c.id }}"><div class="mut" style="padding:.6rem 0">carregando…</div></div>
+        </div>
+      </div>
       {% endfor %}
     {% else %}
     <p class="mut">{% if busca %}Nenhum cliente pra "{{ busca }}".{% else %}Nenhum cliente ainda. As vendas de balcão vão populando aqui, ou cadastre no botão acima.{% endif %}</p>
     {% endif %}
   </div>
 </div>
+
+<div id="zaq-toast"></div>
+<script>
+function _dig(s){return (s||'').replace(/\\D/g,'');}
+function _vCPF(d){if(d.length!==11||/^(\\d)\\1{10}$/.test(d))return false;var s=0,i,r;for(i=0;i<9;i++)s+=+d[i]*(10-i);r=(s*10)%11;if(r===10)r=0;if(r!==+d[9])return false;s=0;for(i=0;i<10;i++)s+=+d[i]*(11-i);r=(s*10)%11;if(r===10)r=0;return r===+d[10];}
+function _vCNPJ(d){if(d.length!==14||/^(\\d)\\1{13}$/.test(d))return false;function cc(b){var p=b.length===12?[5,4,3,2,9,8,7,6,5,4,3,2]:[6,5,4,3,2,9,8,7,6,5,4,3,2],s=0,i;for(i=0;i<b.length;i++)s+=+b[i]*p[i];var r=s%11;return r<2?0:11-r;}if(cc(d.slice(0,12))!==+d[12])return false;return cc(d.slice(0,13))===+d[13];}
+function _fmtDoc(d){if(d.length===11)return d.replace(/(\\d{3})(\\d{3})(\\d{3})(\\d{2})/,'$1.$2.$3-$4');if(d.length===14)return d.replace(/(\\d{2})(\\d{3})(\\d{3})(\\d{4})(\\d{2})/,'$1.$2.$3/$4-$5');return d;}
+
+function ncDoc(){
+  var inp=document.getElementById('nc-doc'),b=document.getElementById('nc-badge'),btn=document.getElementById('nc-buscar');
+  var d=_dig(inp.value);
+  var isPJ=d.length>11;
+  var valid=isPJ?_vCNPJ(d):_vCPF(d);
+  var need=isPJ?14:11;
+  if(d.length===11||d.length===14)inp.value=_fmtDoc(d);
+  if(d.length<need){b.className='doc-badge';b.textContent=d.length?(isPJ?'CNPJ':'CPF'):'';}
+  else if(valid){b.className='doc-badge ok';b.textContent='✓ '+(isPJ?'CNPJ':'CPF')+' válido';}
+  else{b.className='doc-badge err';b.textContent='✗ dígito inválido';}
+  btn.style.display=(isPJ&&valid)?'inline-block':'none';
+}
+function ncBuscar(){
+  var d=_dig(document.getElementById('nc-doc').value),btn=document.getElementById('nc-buscar');
+  btn.disabled=true;btn.textContent='consultando…';
+  fetch('/painel/clientes/consulta-cnpj?doc='+d).then(function(r){return r.json();}).then(function(j){
+    btn.disabled=false;btn.textContent='🔎 Buscar CNPJ';
+    if(!j.ok){toast(j.erro||'CNPJ não encontrado');return;}
+    if(j.nome)document.getElementById('nc-nome').value=j.nome;
+    if(j.telefone)document.getElementById('nc-tel').value=j.telefone;
+    if(j.email)document.getElementById('nc-email').value=j.email;
+    toast('Dados do CNPJ preenchidos.');
+  }).catch(function(){btn.disabled=false;btn.textContent='🔎 Buscar CNPJ';toast('Erro na consulta.');});
+}
+
+function toggleCli(el){var o=el.getAttribute('aria-expanded')==='true';el.setAttribute('aria-expanded',!o);el.parentElement.querySelector('.cli-panel').classList.toggle('on',!o);}
+function ptab(btn,id){var t=btn.parentElement;t.querySelectorAll('.ptab').forEach(function(x){x.classList.toggle('on',x===btn);});var p=t.parentElement;p.querySelectorAll('.pane').forEach(function(x){x.classList.toggle('on',x.id===id);});if(btn.dataset.load){loadHist(btn.dataset.load);btn.removeAttribute('data-load');}}
+function loadHist(id){var box=document.getElementById('hi-'+id);
+  fetch('/painel/clientes/'+id+'/historico').then(function(r){return r.json();}).then(function(j){
+    var it=j.itens||[];if(!it.length){box.innerHTML='<div class="mut" style="padding:.6rem 0">Sem vendas ou serviços ainda.</div>';return;}
+    var h='';it.forEach(function(x){h+='<div class="hi-row"><div><div class="hi-t">'+(x.descricao||'Venda')+'</div><div class="mut" style="font-size:.72rem">'+(x.data||'')+(x.pagamento?(' · '+x.pagamento):'')+'</div></div><div class="hi-v">R$ '+x.valor+'</div></div>';});
+    box.innerHTML=h;
+  }).catch(function(){box.innerHTML='<div class="mut">Erro ao carregar.</div>';});
+}
+
+function closeWa(){document.querySelectorAll('.wa-menu.on').forEach(function(m){m.classList.remove('on');});}
+function waMenu(e,el){e.stopPropagation();var m=el.querySelector('.wa-menu');var o=m.classList.contains('on');closeWa();if(!o)m.classList.add('on');}
+function _wa(el){var w=el.closest('.wa');return {fone:_dig(w.dataset.fone),id:w.dataset.id};}
+function waAbrir(e,el){e.stopPropagation();closeWa();var d=_wa(el);var n=d.fone;if(n&&n.length<=11&&n.slice(0,2)!=='55')n='55'+n;window.open('https://wa.me/'+n,'_blank');}
+function waSistema(e,el){e.stopPropagation();closeWa();var d=_wa(el);
+  fetch('/painel/clientes/'+d.id+'/whatsapp',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).then(function(r){return r.json();}).then(function(j){toast(j.ok?'Mensagem enviada pelo WhatsApp do sistema.':(j.erro||'Não foi possível enviar.'));}).catch(function(){toast('Erro ao enviar.');});
+}
+document.addEventListener('click',closeWa);
+var _tt;function toast(m){var t=document.getElementById('zaq-toast');t.textContent=m;t.classList.add('on');clearTimeout(_tt);_tt=setTimeout(function(){t.classList.remove('on');},2600);}
+</script>
 {% endblock %}"""
 
 
@@ -7499,20 +7640,30 @@ def painel_clientes(request: Request, busca: str = ""):
 
 @router.post("/painel/clientes/novo")
 def painel_clientes_novo(request: Request, nome: str = Form(...),
-                         telefone: str = Form(""), cpf: str = Form(""),
+                         telefone: str = Form(""), documento: str = Form(""),
+                         cpf: str = Form(""),
                          email: str = Form(""), aniversario: str = Form(""),
                          obs: str = Form("")):
-    from finance import empresa as emp, clientes as cli
+    from finance import empresa as emp, clientes as cli, validadoc
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
     pool = get_pool()
     if not emp.acesso_pj(pool, conta[0]):
         return RedirectResponse("/painel", status_code=303)
+    tipo, d = validadoc.classificar(documento or cpf)
+    kw = {}
+    if tipo == "pf":
+        kw["cpf"] = d
+    elif tipo == "pj":
+        kw["cnpj"] = d
+    elif d:
+        request.session["erro"] = "Documento deve ter 11 (CPF) ou 14 (CNPJ) digitos."
+        return RedirectResponse("/painel/clientes", status_code=303)
     try:
         cli.criar_cliente(pool, conta[0], nome, telefone=(telefone or None),
-                          cpf=(cpf or None), email=(email or None),
-                          aniversario=(aniversario or None), obs=(obs or None))
+                          email=(email or None), aniversario=(aniversario or None),
+                          obs=(obs or None), **kw)
         request.session["aviso"] = "Cliente cadastrado."
     except ValueError as e:
         request.session["erro"] = str(e)
@@ -7532,9 +7683,33 @@ def painel_clientes_buscar(request: Request, q: str = ""):
     if len(q) < 2:
         return JSONResponse({"clientes": []})
     lista = cli.listar_clientes(pool, conta[0], busca=q, limite=8)
-    out = [{"id": c["id"], "nome": c["nome"], "telefone": c["telefone"], "cpf": c["cpf"]}
+    out = [{"id": c["id"], "nome": c["nome"], "telefone": c["telefone"],
+            "cpf": c["cpf"], "cnpj": c.get("cnpj"), "tipo": c.get("tipo"),
+            "documento": c.get("documento_fmt")}
            for c in lista]
     return JSONResponse({"clientes": out})
+
+
+@router.get("/painel/clientes/consulta-cnpj")
+def painel_clientes_consulta_cnpj(request: Request, doc: str = ""):
+    """Consulta um CNPJ na Receita (BrasilAPI) pra preencher o cadastro."""
+    from finance import empresa as emp, validadoc, cnpj_info
+    conta = conta_logada(request)
+    if conta is None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    pool = get_pool()
+    if not emp.acesso_pj(pool, conta[0]):
+        return JSONResponse({"ok": False, "erro": "sem acesso"}, status_code=403)
+    ok, tipo, d = validadoc.valida(doc)
+    if tipo != "pj" or not ok:
+        return JSONResponse({"ok": False, "erro": "CNPJ invalido"})
+    info = cnpj_info.consultar_cnpj(d)
+    if not info:
+        return JSONResponse({"ok": False, "erro": "CNPJ nao encontrado na Receita"})
+    return JSONResponse({"ok": True, "nome": info.get("nome"),
+                         "telefone": info.get("telefone"), "email": info.get("email"),
+                         "cidade": info.get("cidade"), "uf": info.get("uf"),
+                         "cnae": info.get("cnae")})
 
 
 @router.get("/painel/clientes/{cliente_id}", response_class=HTMLResponse)
@@ -7595,20 +7770,94 @@ def painel_cliente_detalhe(request: Request, cliente_id: int):
 
 @router.post("/painel/clientes/{cliente_id}/editar")
 def painel_cliente_editar(request: Request, cliente_id: int, nome: str = Form(""),
-                          telefone: str = Form(""), cpf: str = Form(""),
+                          telefone: str = Form(""), documento: str = Form(""),
+                          cpf: str = Form(""),
                           email: str = Form(""), aniversario: str = Form(""),
                           obs: str = Form("")):
-    from finance import empresa as emp, clientes as cli
+    from finance import empresa as emp, clientes as cli, validadoc
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
     pool = get_pool()
     if not emp.acesso_pj(pool, conta[0]):
         return RedirectResponse("/painel", status_code=303)
-    cli.atualizar_cliente(pool, conta[0], cliente_id, nome=nome, telefone=telefone,
-                          cpf=cpf, email=email, aniversario=aniversario, obs=obs)
-    request.session["aviso"] = "Cliente atualizado."
-    return RedirectResponse(f"/painel/clientes/{cliente_id}", status_code=303)
+    campos = {"telefone": telefone, "email": email,
+              "aniversario": aniversario, "obs": obs}
+    if (nome or "").strip():
+        campos["nome"] = nome
+    tipo, d = validadoc.classificar(documento or cpf)
+    if tipo == "pf":
+        campos["cpf"] = d
+    elif tipo == "pj":
+        campos["cnpj"] = d
+    try:
+        cli.atualizar_cliente(pool, conta[0], cliente_id, **campos)
+        request.session["aviso"] = "Cliente atualizado."
+    except ValueError as e:
+        request.session["erro"] = str(e)
+    return RedirectResponse("/painel/clientes", status_code=303)
+
+
+@router.get("/painel/clientes/{cliente_id}/historico")
+def painel_cliente_historico(request: Request, cliente_id: int):
+    """Vendas e servicos do cliente (JSON) — carregado ao expandir a linha."""
+    from finance import empresa as emp, clientes as cli
+    conta = conta_logada(request)
+    if conta is None:
+        return JSONResponse({"itens": []}, status_code=401)
+    pool = get_pool()
+    if not emp.acesso_pj(pool, conta[0]):
+        return JSONResponse({"itens": []}, status_code=403)
+    hist = cli.historico_cliente(pool, conta[0], cliente_id)
+    itens = [{"descricao": h["descricao"] or "Venda",
+              "data": str(h["data"]) if h["data"] else "",
+              "pagamento": h["pagamento"],
+              "valor": ("%.2f" % ((h["valor_centavos"] or 0) / 100)).replace(".", ",")}
+             for h in hist]
+    return JSONResponse({"itens": itens})
+
+
+@router.post("/painel/clientes/{cliente_id}/whatsapp")
+async def painel_cliente_whatsapp(request: Request, cliente_id: int):
+    """Envia uma saudacao pelo WhatsApp do sistema (canais_config, provedor cloud).
+    Se nao houver WhatsApp conectado, orienta usar o 'Abrir no WhatsApp'."""
+    from finance import empresa as emp, clientes as cli, whatsapp_cloud as wac
+    conta = conta_logada(request)
+    if conta is None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    pool = get_pool()
+    if not emp.acesso_pj(pool, conta[0]):
+        return JSONResponse({"ok": False, "erro": "sem acesso"}, status_code=403)
+    cl = cli.obter_cliente(pool, conta[0], cliente_id)
+    if not cl or not cl.get("telefone"):
+        return JSONResponse({"ok": False, "erro": "cliente sem telefone"})
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    msg = (body.get("mensagem") or "").strip() or \
+        f"Olá, {cl['nome'] or ''}! Aqui é da nossa equipe. 😊"
+    try:
+        with pool.connection() as conn:
+            row = conn.execute(
+                "select wa_phone_id, token from canais_config "
+                "where conta_id=%s and canal='whatsapp' "
+                "and coalesce(provedor,'')='cloud' limit 1",
+                (conta[0],),
+            ).fetchone()
+    except Exception:
+        row = None
+    if not row or not row[0] or not row[1]:
+        return JSONResponse({"ok": False,
+                             "erro": "WhatsApp do sistema nao conectado. Use 'Abrir no WhatsApp'."})
+    numero = "".join(ch for ch in (cl["telefone"] or "") if ch.isdigit())
+    if numero and len(numero) <= 11 and not numero.startswith("55"):
+        numero = "55" + numero
+    try:
+        wac.enviar_texto(row[0], row[1], numero, msg)
+        return JSONResponse({"ok": True})
+    except Exception:
+        return JSONResponse({"ok": False, "erro": "falha ao enviar pelo WhatsApp"})
 
 
 @router.post("/painel/clientes/{cliente_id}/arquivar")

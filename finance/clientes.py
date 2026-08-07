@@ -42,28 +42,42 @@ def _parse_data(s):
 # ---------------------------------------------------------------------------
 # IDENTIDADE (pessoas)
 # ---------------------------------------------------------------------------
-def resolver_pessoa(pool, *, cpf: str | None = None, celular: str | None = None,
-                    nome: str | None = None, email: str | None = None,
-                    conta_zaq_id: int | None = None) -> int:
+def resolver_pessoa(pool, *, cpf: str | None = None, cnpj: str | None = None,
+                    celular: str | None = None, nome: str | None = None,
+                    email: str | None = None, conta_zaq_id: int | None = None,
+                    tipo: str | None = None) -> int:
     """Acha/cria a IDENTIDADE e retorna pessoa_id.
 
-    Regra de dedup: CPF FUNDE (se ja existe pessoa com esse cpf, reusa). Celular NAO
-    funde sozinho (so' sugere — ver sugerir_pessoas_por_celular). Se nao achou por
-    cpf, cria uma pessoa nova (nome obrigatorio).
+    Regra de dedup: CPF e CNPJ FUNDEM (se ja existe pessoa com esse documento,
+    reusa). O documento e' VALIDADO (digito verificador) — invalido levanta
+    ValueError. Celular NAO funde sozinho (so' sugere). Se nao achou por documento,
+    cria uma pessoa nova (nome obrigatorio). `tipo` (pf/pj) e' derivado do documento
+    quando nao informado.
     """
-    cpf_d = _so_digitos(cpf)
+    from finance import validadoc
+    cpf_d = validadoc.so_digitos(cpf) or None
+    cnpj_d = validadoc.so_digitos(cnpj) or None
+    if cpf_d and not validadoc.valida_cpf(cpf_d):
+        raise ValueError("CPF invalido")
+    if cnpj_d and not validadoc.valida_cnpj(cnpj_d):
+        raise ValueError("CNPJ invalido")
+    tp = tipo or ("pj" if cnpj_d else "pf")
     with pool.connection() as c:
         if cpf_d:
             r = c.execute("select id from pessoas where cpf=%s", (cpf_d,)).fetchone()
+            if r:
+                return int(r[0])
+        if cnpj_d:
+            r = c.execute("select id from pessoas where cnpj=%s", (cnpj_d,)).fetchone()
             if r:
                 return int(r[0])
         nome_l = (nome or "").strip()
         if not nome_l:
             raise ValueError("nome e' obrigatorio pra criar a pessoa")
         row = c.execute(
-            """insert into pessoas (cpf, celular, nome, email, conta_zaq_id)
-               values (%s, %s, %s, %s, %s) returning id""",
-            (cpf_d, _so_digitos(celular), nome_l,
+            """insert into pessoas (cpf, cnpj, tipo, celular, nome, email, conta_zaq_id)
+               values (%s, %s, %s, %s, %s, %s, %s) returning id""",
+            (cpf_d, cnpj_d, tp, validadoc.so_digitos(celular) or None, nome_l,
              (email or "").strip().lower() or None, conta_zaq_id),
         ).fetchone()
         c.commit()
@@ -88,16 +102,18 @@ def sugerir_pessoas_por_celular(pool, celular: str | None) -> list[dict]:
 # RELACAO (clientes)
 # ---------------------------------------------------------------------------
 def puxar_ou_criar_cliente(pool, dono_id: int, *, cpf: str | None = None,
+                           cnpj: str | None = None,
                            celular: str | None = None, nome: str | None = None,
                            email: str | None = None, pessoa_id: int | None = None,
                            aniversario=None, obs: str | None = None) -> int:
-    """Fluxo de cadastro/venda: resolve a PESSOA (por cpf, ou pessoa_id dado) e
+    """Fluxo de cadastro/venda: resolve a PESSOA (por cpf/cnpj, ou pessoa_id dado) e
     garante a RELACAO (clientes) deste lojista com ela. Retorna cliente_id.
 
     Se o lojista ja tem uma relacao ativa com essa pessoa, reusa (nao duplica).
     """
     if pessoa_id is None:
-        pessoa_id = resolver_pessoa(pool, cpf=cpf, celular=celular, nome=nome, email=email)
+        pessoa_id = resolver_pessoa(pool, cpf=cpf, cnpj=cnpj, celular=celular,
+                                    nome=nome, email=email)
     with pool.connection() as c:
         r = c.execute(
             "select id from clientes where dono_id=%s and pessoa_id=%s and ativo limit 1",
@@ -125,14 +141,14 @@ def puxar_ou_criar_cliente(pool, dono_id: int, *, cpf: str | None = None,
 def criar_cliente(pool, dono_id: int, nome: str, *, telefone: str | None = None,
                   email: str | None = None, aniversario=None,
                   conta_zaq_id: int | None = None, obs: str | None = None,
-                  cpf: str | None = None) -> int:
+                  cpf: str | None = None, cnpj: str | None = None) -> int:
     """Cadastra um cliente (identidade + relacao). Retorna o cliente_id. nome
-    obrigatorio. Compat: mesma assinatura de antes, agora com `cpf` opcional; o
-    telefone entra como `celular` da pessoa."""
+    obrigatorio. Compat: mesma assinatura de antes, agora com `cpf`/`cnpj`
+    opcionais; o telefone entra como `celular` da pessoa."""
     nome = (nome or "").strip()
     if not nome:
         raise ValueError("nome do cliente e' obrigatorio")
-    pessoa_id = resolver_pessoa(pool, cpf=cpf, celular=telefone, nome=nome,
+    pessoa_id = resolver_pessoa(pool, cpf=cpf, cnpj=cnpj, celular=telefone, nome=nome,
                                 email=email, conta_zaq_id=conta_zaq_id)
     return puxar_ou_criar_cliente(pool, dono_id, pessoa_id=pessoa_id, nome=nome,
                                   email=email, aniversario=aniversario, obs=obs)
@@ -146,7 +162,9 @@ _SEL = """select c.id,
                  p.conta_zaq_id,
                  c.obs,
                  p.cpf,
-                 c.pessoa_id
+                 c.pessoa_id,
+                 p.cnpj,
+                 p.tipo
             from clientes c
             left join pessoas p on p.id = c.pessoa_id"""
 
@@ -162,8 +180,9 @@ def listar_clientes(pool, dono_id: int, busca: str | None = None,
         termo_dig = f"%{dig}%"
         sql += (" and (coalesce(p.nome,c.nome) ilike %s"
                 " or coalesce(p.celular,c.telefone,'') like %s"
-                " or coalesce(p.cpf,'') like %s)")
-        params += [termo, termo_dig, termo_dig]
+                " or coalesce(p.cpf,'') like %s"
+                " or coalesce(p.cnpj,'') like %s)")
+        params += [termo, termo_dig, termo_dig, termo_dig]
     sql += " order by coalesce(p.nome, c.nome) limit %s"
     params.append(limite)
     with pool.connection() as c:
@@ -224,7 +243,7 @@ def atualizar_cliente(pool, dono_id: int, cliente_id: int, **campos) -> bool:
     vai pra `pessoas`; relacao (aniversario/obs) vai pra `clientes`. So altera se o
     cliente for do lojista. Retorna True se algo mudou."""
     id_map = {"nome": "nome", "telefone": "celular", "email": "email",
-              "cpf": "cpf", "conta_zaq_id": "conta_zaq_id"}
+              "cpf": "cpf", "cnpj": "cnpj", "conta_zaq_id": "conta_zaq_id"}
     rel_permit = {"aniversario", "obs"}
     mudou = False
     with pool.connection() as c:
@@ -236,19 +255,32 @@ def atualizar_cliente(pool, dono_id: int, cliente_id: int, **campos) -> bool:
             return False
         pessoa_id = row[0]
 
+        from finance import validadoc
         isets, ivals = [], []
         for k, col in id_map.items():
             if k not in campos:
                 continue
             v = campos[k]
-            if k in ("telefone", "cpf"):
-                v = _so_digitos(v)
+            if k in ("telefone", "cpf", "cnpj"):
+                v = validadoc.so_digitos(v) or None
+                if k == "cpf" and v and not validadoc.valida_cpf(v):
+                    raise ValueError("CPF invalido")
+                if k == "cnpj" and v and not validadoc.valida_cnpj(v):
+                    raise ValueError("CNPJ invalido")
             elif k == "email":
                 v = (v or "").strip().lower() or None
             elif k == "nome":
                 v = (v or "").strip() or None
             isets.append(f"{col}=%s")
             ivals.append(v)
+        # o tipo (pf/pj) acompanha o documento editado
+        if "cnpj" in campos or "cpf" in campos:
+            _cnpj = validadoc.so_digitos(campos.get("cnpj")) if "cnpj" in campos else ""
+            _cpf = validadoc.so_digitos(campos.get("cpf")) if "cpf" in campos else ""
+            _tp = "pj" if _cnpj else ("pf" if _cpf else None)
+            if _tp:
+                isets.append("tipo=%s")
+                ivals.append(_tp)
         if isets and pessoa_id is not None:
             isets.append("atualizado_em=now()")
             ivals.append(pessoa_id)
@@ -311,12 +343,14 @@ def arquivar_cliente(pool, dono_id: int, cliente_id: int) -> bool:
 
 
 def achar_ou_criar(pool, dono_id: int, nome: str,
-                   telefone: str | None = None, cpf: str | None = None) -> int:
-    """Fluxo do PDV: na venda, o lojista informa nome (+ telefone e/ou cpf). Reusa
-    se ja existe (por cpf na identidade, ou por telefone na propria loja); senao
-    cria. Retorna o cliente_id."""
-    if cpf and _so_digitos(cpf):
-        return puxar_ou_criar_cliente(pool, dono_id, cpf=cpf, celular=telefone, nome=nome)
+                   telefone: str | None = None, cpf: str | None = None,
+                   cnpj: str | None = None) -> int:
+    """Fluxo do PDV: na venda, o lojista informa nome (+ telefone e/ou cpf/cnpj).
+    Reusa se ja existe (por documento na identidade, ou por telefone na propria
+    loja); senao cria. Retorna o cliente_id."""
+    if (cpf and _so_digitos(cpf)) or (cnpj and _so_digitos(cnpj)):
+        return puxar_ou_criar_cliente(pool, dono_id, cpf=cpf, cnpj=cnpj,
+                                      celular=telefone, nome=nome)
     if telefone:
         existente = buscar_por_telefone(pool, dono_id, telefone)
         if existente:
@@ -334,7 +368,33 @@ def contar_clientes(pool, dono_id: int) -> int:
     return int(r[0]) if r else 0
 
 
+def historico_cliente(pool, dono_id: int, cliente_id: int,
+                      limite: int = 50) -> list[dict]:
+    """Historico de VENDAS e SERVICOS do cliente (lancamentos de receita ligados
+    a ele, via cliente_id). Isolado por dono_id. Devolve os mais recentes primeiro."""
+    with pool.connection() as c:
+        ok = c.execute(
+            "select 1 from clientes where id=%s and dono_id=%s and ativo",
+            (cliente_id, dono_id),
+        ).fetchone()
+        if not ok:
+            return []
+        rows = c.execute(
+            """select data, valor_centavos, coalesce(pagamento,''), coalesce(descricao,'')
+                 from lancamentos
+                where cliente_id=%s and conta_id=%s and tipo='receita'
+                order by data desc, id desc limit %s""",
+            (cliente_id, dono_id, limite),
+        ).fetchall()
+    return [{"data": r[0], "valor_centavos": r[1], "pagamento": r[2],
+             "descricao": r[3]} for r in rows]
+
+
 def _row_para_dict(r) -> dict:
+    from finance import validadoc
+    cpf, cnpj = r[7], r[9]
+    tipo = r[10] or ("pj" if cnpj else "pf")
+    doc = cnpj or cpf
     return {
         "id": r[0],
         "nome": r[1],
@@ -343,6 +403,10 @@ def _row_para_dict(r) -> dict:
         "aniversario": r[4],
         "conta_zaq_id": r[5],
         "obs": r[6],
-        "cpf": r[7],
+        "cpf": cpf,
         "pessoa_id": r[8],
+        "cnpj": cnpj,
+        "tipo": tipo,
+        "documento": doc,
+        "documento_fmt": validadoc.formatar(doc) if doc else None,
     }

@@ -168,7 +168,7 @@ def buscar_novos(cfg: dict, desde_uid: int | None = None, limite: int = 40):
     try:
         M = imaplib.IMAP4_SSL(cfg["host"], cfg["port"], timeout=_TIMEOUT)
     except Exception as e:  # noqa: BLE001
-        _log.info("email_in: conexão IMAP falhou: %s", e)
+        _log.info("email_in: conexão IMAP falhou (%s): %s", cfg.get("user"), e)
         return [], desde_uid
     try:
         M.login(cfg["user"], cfg["senha"])
@@ -206,7 +206,7 @@ def buscar_novos(cfg: dict, desde_uid: int | None = None, limite: int = 40):
                 _log.info("email_in: falha lendo uid %s: %s", uid, e)
                 continue
     except Exception as e:  # noqa: BLE001
-        _log.info("email_in: erro no IMAP: %s: %s", type(e).__name__, e)
+        _log.info("email_in: erro no IMAP (%s): %s: %s", cfg.get("user"), type(e).__name__, e)
         return out, (maior or desde_uid)
     finally:
         try:

@@ -211,6 +211,40 @@ def painel_servicos_cnpj(request: Request, cnpj: str = ""):
     })
 
 
+@router.get("/painel/servicos/leads/buscar")
+def painel_servicos_leads_buscar(request: Request, q: str = ""):
+    """Busca clientes já cadastrados na Base (prospeccao) por nome/empresa/e-mail,
+    pra preencher o card Cliente sem digitar tudo de novo. tipo é inferido (tem
+    CNPJ -> pj, senão pf), igual o backfill que a 131_pessoa_cnpj.sql já fez pra
+    pessoas. Vendedor só busca os próprios leads; dono/gestor busca todos."""
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    q = (q or "").strip()
+    if len(q) < 2:
+        return JSONResponse({"itens": []})
+    membro_id, papel = _ator(request)
+    termo = f"%{q}%"
+    query = """select id, empresa, contato, cargo, cnpj, telefone, whatsapp, email,
+                      cidade, uf, socio, segmento, site_url
+                 from prospeccao
+                where conta_id=%s and (empresa ilike %s or contato ilike %s or email ilike %s)"""
+    params = [conta[0], termo, termo, termo]
+    if papel == "vendedor" and membro_id:
+        query += " and vendedor_id=%s"
+        params.append(membro_id)
+    query += " order by atualizado_em desc nulls last limit 8"
+    with get_pool().connection() as c:
+        rows = c.execute(query, tuple(params)).fetchall()
+    itens = [{
+        "id": r[0], "empresa": r[1] or "", "contato": r[2] or "", "cargo": r[3] or "",
+        "cnpj": r[4] or "", "telefone": r[5] or "", "whatsapp": r[6] or "", "email": r[7] or "",
+        "cidade": r[8] or "", "uf": r[9] or "", "socio": r[10] or "", "segmento": r[11] or "",
+        "site": r[12] or "", "tipo": "pj" if (r[4] or "").strip() else "pf",
+    } for r in rows]
+    return JSONResponse({"itens": itens})
+
+
 class SugerirIn(BaseModel):
     descricao: str = ""
 
@@ -518,6 +552,15 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-head{display:grid; grid-template-columns:auto 1fr 84px 84px 84px auto; gap:.55rem; font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:var(--txt-mut); padding-bottom:.4rem; border-bottom:1px solid var(--borda)}
 .oc-pill{padding:.4rem .8rem; border-radius:99px; border:1px solid var(--borda); background:var(--bg); color:var(--txt); cursor:pointer; font-size:.85rem}
 .oc-pill.on{border-color:var(--verde-claro); background:#10241d; color:var(--verde-claro)}
+.tipo-badge{font-size:.62rem; font-weight:700; letter-spacing:.02em; border-radius:5px; padding:.05rem .35rem; flex-shrink:0}
+.tipo-badge.pj{color:#6fb0e6; border:1px solid #2f4a63; background:#11212e}
+.tipo-badge.pf{color:var(--amber, #e0a33e); border:1px solid #5a4520; background:#2a2113}
+.cli-drop-item{padding:.55rem .8rem; cursor:pointer; border-bottom:1px solid var(--borda)}
+.cli-drop-item:last-child{border-bottom:0}
+.cli-drop-item:hover{background:var(--bg)}
+.cli-drop-item .top{display:flex; align-items:center; gap:.4rem}
+.cli-drop-item .nome{font-size:.86rem; font-weight:600}
+.cli-drop-item .sub{font-size:.76rem; color:var(--txt-mut); margin-top:.15rem}
 .oc-seg button{padding:.45rem .7rem; border:1px solid var(--borda); background:var(--bg); color:var(--txt); cursor:pointer; font-size:.85rem; border-radius:7px}
 .oc-seg button.on{border-color:var(--verde-claro); background:#10241d; color:var(--verde-claro)}
 .oc-step{display:inline-flex; align-items:center; gap:0}
@@ -551,7 +594,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 }
 </style>{% endraw %}
 
-<div class="card">
+<div class="card"{% if servico_avulso %} style="display:none"{% endif %}>
   <h2 style="margin-top:0">Escopo automático · IA</h2>
   <p class="mut" style="margin-top:0">Cole o site ou a descrição do cliente. A IA escolhe os módulos e escreve o escopo da proposta.</p>
   <textarea id="oc-desc" class="oc-inp" rows="3" placeholder="Ex.: clínica com 3 unidades, muito WhatsApp, quer reduzir faltas e organizar leads..."></textarea>
@@ -564,26 +607,48 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 
 <div class="card">
   <h2 style="margin-top:0">Cliente</h2>
-  <div class="oc-field" style="margin-bottom:.7rem">
-    <label>CNPJ <span style="color:var(--txt-mut);font-size:.78rem">— preenche empresa, segmento e contato automaticamente</span></label>
-    <div style="display:flex; gap:.5rem; align-items:center">
-      <input id="oc-cnpj" class="oc-inp" placeholder="00.000.000/0000-00" inputmode="numeric" style="flex:1">
-      <button id="oc-cnpj-btn" type="button" style="background:var(--verde);color:#04140d;border:0;border-radius:8px;padding:.55rem 1.1rem;font-weight:600;cursor:pointer;white-space:nowrap">Buscar</button>
-    </div>
-    <span id="oc-cnpj-msg" style="font-size:.8rem;color:var(--txt-mut);display:block;margin-top:.25rem"></span>
+
+  {% if servico_avulso %}
+  <div style="position:relative">
+    <input id="cli-busca" class="oc-inp" placeholder="🔍 Buscar cliente já cadastrado na Base… (nome, empresa)" autocomplete="off">
+    <div id="cli-drop" style="display:none; position:absolute; left:0; right:0; top:calc(100% + 6px); background:var(--card-2); border:1px solid var(--borda); border-radius:10px; max-height:280px; overflow-y:auto; z-index:5; box-shadow:0 12px 30px rgba(0,0,0,.4)"></div>
   </div>
-  <div style="display:grid; grid-template-columns:1fr 1fr; gap:.8rem">
-    <div class="oc-field"><label>Empresa</label><input id="oc-empresa" class="oc-inp" placeholder="Nome da empresa"></div>
-    <div class="oc-field"><label>Contato</label><input id="oc-contato" class="oc-inp" placeholder="Responsável"></div>
-    <div class="oc-field"><label>Cargo</label><input id="oc-cargo" class="oc-inp" placeholder="Cargo do contato"></div>
-    <div class="oc-field"><label>Sócio</label><input id="oc-socio" class="oc-inp" placeholder="Sócio / dono"></div>
-    <div class="oc-field"><label>WhatsApp</label><input id="oc-whats" class="oc-inp" placeholder="(86) 9 9999-9999"></div>
-    <div class="oc-field"><label>Telefone</label><input id="oc-tel" class="oc-inp" placeholder="(86) 3333-0000"></div>
-    <div class="oc-field"><label>E-mail</label><input id="oc-email" class="oc-inp" placeholder="contato@empresa.com.br"></div>
-    <div class="oc-field"><label>Site</label><input id="oc-site" class="oc-inp" inputmode="url" placeholder="site.com.br"></div>
-    <div class="oc-field"><label>Cidade</label><input id="oc-cidade" class="oc-inp" placeholder="Teresina"></div>
-    <div class="oc-field"><label>UF</label><input id="oc-uf" class="oc-inp" maxlength="2" placeholder="PI"></div>
-    <div class="oc-field"><label>Segmento</label><input id="oc-segmento" class="oc-inp" placeholder="Saúde, Varejo, Logística..."></div>
+  <a id="cli-novo-link" href="#" style="font-size:.78rem; color:var(--verde-claro); text-decoration:none; display:inline-block; margin-top:.5rem">✏️ ou cadastrar um cliente novo, sem vínculo com lead</a>
+
+  <div id="cli-chip" style="display:none; align-items:center; gap:.8rem; padding:.7rem .9rem; border:1px solid var(--borda); border-radius:12px; background:var(--card-2); margin-top:.8rem">
+    <div id="cli-chip-av" style="width:38px; height:38px; border-radius:10px; background:#10241d; border:1px solid #1c3a30; color:var(--verde-claro); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:1rem; flex-shrink:0">?</div>
+    <div style="flex:1; min-width:0">
+      <b id="cli-chip-nome"></b>
+      <div class="mut" id="cli-chip-sub" style="font-size:.78rem; margin-top:.1rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis"></div>
+    </div>
+    <span id="cli-chip-tipo" class="tipo-badge"></span>
+    <button type="button" class="oc-pill" id="cli-ver-dados" style="padding:.3rem .6rem; font-size:.78rem">Ver dados</button>
+    <button type="button" class="oc-pill" id="cli-trocar" style="padding:.3rem .6rem; font-size:.78rem">Trocar</button>
+  </div>
+  {% endif %}
+
+  <div id="cli-form-full"{% if servico_avulso %} style="display:none; margin-top:.8rem; border-top:1px dashed var(--borda); padding-top:.8rem"{% endif %}>
+    <div class="oc-field" style="margin-bottom:.7rem">
+      <label id="oc-cnpj-label">{{ 'CNPJ / CPF' if servico_avulso else 'CNPJ' }} <span style="color:var(--txt-mut);font-size:.78rem">— preenche empresa, segmento e contato automaticamente</span></label>
+      <div style="display:flex; gap:.5rem; align-items:center">
+        <input id="oc-cnpj" class="oc-inp" placeholder="00.000.000/0000-00" inputmode="numeric" style="flex:1">
+        <button id="oc-cnpj-btn" type="button" style="background:var(--verde);color:#04140d;border:0;border-radius:8px;padding:.55rem 1.1rem;font-weight:600;cursor:pointer;white-space:nowrap">Buscar</button>
+      </div>
+      <span id="oc-cnpj-msg" style="font-size:.8rem;color:var(--txt-mut);display:block;margin-top:.25rem"></span>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:.8rem">
+      <div class="oc-field"><label>Empresa</label><input id="oc-empresa" class="oc-inp" placeholder="Nome da empresa"></div>
+      <div class="oc-field"><label>Contato</label><input id="oc-contato" class="oc-inp" placeholder="Responsável"></div>
+      <div class="oc-field"><label>Cargo</label><input id="oc-cargo" class="oc-inp" placeholder="Cargo do contato"></div>
+      <div class="oc-field"><label>Sócio</label><input id="oc-socio" class="oc-inp" placeholder="Sócio / dono"></div>
+      <div class="oc-field"><label>WhatsApp</label><input id="oc-whats" class="oc-inp" placeholder="(86) 9 9999-9999"></div>
+      <div class="oc-field"><label>Telefone</label><input id="oc-tel" class="oc-inp" placeholder="(86) 3333-0000"></div>
+      <div class="oc-field"><label>E-mail</label><input id="oc-email" class="oc-inp" placeholder="contato@empresa.com.br"></div>
+      <div class="oc-field"><label>Site</label><input id="oc-site" class="oc-inp" inputmode="url" placeholder="site.com.br"></div>
+      <div class="oc-field"><label>Cidade</label><input id="oc-cidade" class="oc-inp" placeholder="Teresina"></div>
+      <div class="oc-field"><label>UF</label><input id="oc-uf" class="oc-inp" maxlength="2" placeholder="PI"></div>
+      <div class="oc-field"><label>Segmento</label><input id="oc-segmento" class="oc-inp" placeholder="Saúde, Varejo, Logística..."></div>
+    </div>
   </div>
 </div>
 
@@ -914,9 +979,93 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         set('oc-cidade',d.cidade); set('oc-uf',d.uf);
         var loc=[d.cidade,d.uf].filter(Boolean).join('/');
         msg.textContent='Preenchido pela Receita'+(loc?' — '+loc:'')+'. Confira e ajuste se precisar.';
+        if(SERVICO_AVULSO)atualizarChip();
       })
       .catch(function(){msg.textContent='Erro de conexão ao consultar.';})
       .finally(function(){btn.disabled=false; btn.textContent=t0;});
+  });
+
+  // ---- Cliente: buscar da Base (só nicho eventos — servico_avulso) ----
+  function atualizarChip(){
+    var chip=document.getElementById('cli-chip');
+    if(!chip)return;   // não é eventos, essa UI nem existe
+    var nome=(document.getElementById('oc-empresa').value||'').trim();
+    var busca=document.getElementById('cli-busca');
+    if(!nome){
+      chip.style.display='none';
+      if(busca)busca.style.display='';
+      var linkN=document.getElementById('cli-novo-link'); if(linkN)linkN.style.display='';
+      return;
+    }
+    var cnpjDig=(document.getElementById('oc-cnpj').value||'').replace(/\D/g,'');
+    var tipo=cnpjDig.length===14?'pj':'pf';
+    document.getElementById('cli-chip-av').textContent=nome.charAt(0).toUpperCase();
+    document.getElementById('cli-chip-nome').textContent=nome;
+    var partes=[document.getElementById('oc-whats').value,document.getElementById('oc-email').value,document.getElementById('oc-cidade').value].filter(Boolean);
+    document.getElementById('cli-chip-sub').textContent=partes.join(' · ');
+    var tb=document.getElementById('cli-chip-tipo'); tb.textContent=tipo.toUpperCase(); tb.className='tipo-badge '+tipo;
+    chip.style.display='flex';
+    document.getElementById('cli-form-full').style.display='none';
+    if(busca)busca.style.display='none';
+    var linkN2=document.getElementById('cli-novo-link'); if(linkN2)linkN2.style.display='none';
+  }
+  var cliBusca=document.getElementById('cli-busca'), cliDrop=document.getElementById('cli-drop');
+  if(cliBusca){
+    var cliTimer=null;
+    function cliBadge(tipo){return '<span class="tipo-badge '+tipo+'">'+tipo.toUpperCase()+'</span>';}
+    function cliRenderDrop(itens){
+      if(!itens.length){cliDrop.innerHTML='<div class="cli-drop-item" style="cursor:default;color:var(--txt-mut);font-size:.82rem;text-align:center">Nenhum cliente com esse nome na Base.</div>';cliDrop.style.display='block';return;}
+      cliDrop.innerHTML=itens.map(function(l,i){
+        var sub=[l.email,l.cidade].filter(Boolean).join(' · ');
+        return '<div class="cli-drop-item" data-i="'+i+'"><span class="top">'+cliBadge(l.tipo)+'<span class="nome">'+ec(l.empresa)+'</span></span><span class="sub">'+ec(sub)+'</span></div>';
+      }).join('');
+      cliDrop.style.display='block';
+      cliDrop._itens=itens;
+    }
+    cliBusca.addEventListener('input',function(){
+      var q=cliBusca.value.trim();
+      clearTimeout(cliTimer);
+      if(q.length<2){cliDrop.style.display='none'; cliDrop.innerHTML=''; return;}
+      cliTimer=setTimeout(function(){
+        fetch('/painel/servicos/leads/buscar?q='+encodeURIComponent(q))
+          .then(function(r){return r.json();})
+          .then(function(d){cliRenderDrop(d.itens||[]);})
+          .catch(function(){});
+      },250);
+    });
+    document.addEventListener('click',function(e){
+      if(!e.target.closest('#cli-busca')&&!e.target.closest('#cli-drop'))cliDrop.style.display='none';
+    });
+    cliDrop.addEventListener('click',function(e){
+      var it=e.target.closest('.cli-drop-item'); if(!it||!cliDrop._itens)return;
+      var l=cliDrop._itens[parseInt(it.getAttribute('data-i'),10)]; if(!l)return;
+      setv('oc-cnpj',l.cnpj); setv('oc-empresa',l.empresa); setv('oc-contato',l.contato);
+      setv('oc-cargo',l.cargo); setv('oc-socio',l.socio); setv('oc-whats',l.whatsapp);
+      setv('oc-tel',l.telefone); setv('oc-email',l.email); setv('oc-site',l.site);
+      setv('oc-cidade',l.cidade); setv('oc-uf',l.uf); setv('oc-segmento',l.segmento);
+      cliBusca.value=''; cliDrop.style.display='none'; cliDrop.innerHTML='';
+      atualizarChip();
+    });
+  }
+  var cliVerDados=document.getElementById('cli-ver-dados');
+  if(cliVerDados)cliVerDados.addEventListener('click',function(){
+    var f=document.getElementById('cli-form-full');
+    f.style.display=(f.style.display==='none')?'block':'none';
+  });
+  var cliTrocar=document.getElementById('cli-trocar');
+  if(cliTrocar)cliTrocar.addEventListener('click',function(){
+    document.getElementById('cli-chip').style.display='none';
+    document.getElementById('cli-form-full').style.display='none';
+    if(cliBusca){cliBusca.style.display=''; cliBusca.focus();}
+    var linkN=document.getElementById('cli-novo-link'); if(linkN)linkN.style.display='';
+  });
+  var cliNovoLink=document.getElementById('cli-novo-link');
+  if(cliNovoLink)cliNovoLink.addEventListener('click',function(e){
+    e.preventDefault();
+    document.getElementById('cli-form-full').style.display='block';
+    document.getElementById('cli-chip').style.display='none';
+    if(cliBusca)cliBusca.style.display='none';
+    this.style.display='none';
   });
 
   function coletarBody(){
@@ -952,6 +1101,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     var out=document.getElementById('oc-escopo-out'); out.style.display='none'; out.removeAttribute('data-escopo'); out.textContent='';
     document.getElementById('oc-editando').style.display='none';
     marcaMods([]);   // proposta nova começa sem nenhum serviço marcado
+    if(SERVICO_AVULSO)atualizarChip();
     pinta();
   }
   function abrir(id){
@@ -977,6 +1127,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       bn.style.display='flex';
       var aviso=(d.status==='aprovada')?' · ⚠ editar vai pedir nova aprovação do cliente':'';
       bn.querySelector('.t').textContent='Editando proposta #'+d.id+' · '+d.status+aviso+' — salve pra atualizar o link do cliente.';
+      if(SERVICO_AVULSO)atualizarChip();
       pinta();
       window.scrollTo({top:0,behavior:'smooth'});
     }).catch(function(){alert('Erro de conexão.');});

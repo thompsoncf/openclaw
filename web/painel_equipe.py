@@ -232,6 +232,18 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
 .mtag.pend{color:#e0b25a;border-color:#5a4520;background:#241c0f}
 .mtag.off{color:#e07a5f;border-color:#5a2b2b;background:#241313}
 @media (max-width:640px){.macts{width:100%}}
+/* legenda: o que cada papel acessa */
+.papeis{margin-top:1rem;border:1px solid var(--borda);border-radius:12px;background:var(--card-2);padding:.85rem 1rem}
+.papeis .ph-tt{font-size:.86rem;font-weight:600;margin-bottom:.6rem}
+.ph-row{display:flex;gap:.7rem;align-items:baseline;padding:.4rem 0;border-top:1px solid var(--borda);flex-wrap:wrap}
+.ph-row:first-of-type{border-top:0}
+.ph-nome{flex-shrink:0;min-width:88px;font-size:.78rem;font-weight:700;padding:.16rem .55rem;border-radius:999px;
+  border:1px solid var(--borda);text-align:center}
+.ph-nome.vend{color:#7bb8e6;border-color:#1e3a52;background:#0f1d2b}
+.ph-nome.gest{color:var(--verde-claro);border-color:#1e4a3a;background:#10241a}
+.ph-nome.fin{color:#e0b25a;border-color:#5a4520;background:#241c0f}
+.ph-desc{flex:1;min-width:200px;font-size:.82rem;color:var(--txt-mut);line-height:1.5}
+.ph-desc b{color:var(--txt);font-weight:600}
 </style>
 <div class="card larga">
   <h2 style="margin:0">Equipe</h2>
@@ -258,6 +270,23 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
       <select name="papel" style="width:100%">{% for v,l in papeis %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
     <button style="white-space:nowrap;margin:0">Convidar</button>
   </form>
+
+  <div class="papeis">
+    <div class="ph-tt">O que cada papel acessa <span class="mut" style="font-weight:400">— escolha sabendo o que está liberando</span></div>
+    <div class="ph-row">
+      <span class="ph-nome vend">Vendedor</span>
+      <span class="ph-desc">Prospecção e vendas: trabalha <b>os leads dele</b> (funil e campanhas atribuídas). <b>Não</b> vê o financeiro nem gerencia a equipe.</span>
+    </div>
+    <div class="ph-row">
+      <span class="ph-nome gest">Gestor</span>
+      <span class="ph-desc">Vendas + financeiro: enxerga a <b>prospecção inteira</b> da empresa e o <b>financeiro</b>. <b>Não</b> convida/remove membros — isso fica só com você (dono).</span>
+    </div>
+    <div class="ph-row">
+      <span class="ph-nome fin">Financeiro</span>
+      <span class="ph-desc">Só o <b>financeiro</b> (contas, pagamentos, cobranças). <b>Não</b> entra na prospecção/vendas.</span>
+    </div>
+    <div class="mut" style="font-size:.74rem;margin-top:.5rem">🔒 Só você (dono) convida, muda papel, desativa ou exclui membros.</div>
+  </div>
 
   <div style="margin-top:1.2rem">
     {% if not membros %}<p class="mut">Ninguém na equipe ainda. Convide a primeira pessoa acima.</p>{% endif %}

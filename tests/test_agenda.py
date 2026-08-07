@@ -134,8 +134,9 @@ def pool():
     init_schema(p)
     migr = Path(__file__).resolve().parent.parent / "db" / "migracoes"
     with p.connection() as c:
-        for nome in ("098_agenda.sql", "099_agenda_tipo.sql", "101_agenda_lembretes.sql",
-                    "126_agenda_avisar_convidados.sql"):
+        for nome in ("098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql",
+                    "101_agenda_lembretes.sql", "126_agenda_avisar_convidados.sql",
+                    "130_evento_desfecho.sql"):
             c.execute((migr / nome).read_text(encoding="utf-8"))
         c.commit()
     yield p
@@ -169,6 +170,71 @@ def test_isolamento_por_conta(pool, conta_id):
     assert ag.proximos(pool, outra) == []          # a outra conta não vê
 
 
+# ---------- desfecho (aconteceu/não aconteceu) + reaproveitar cancelados ----------
+
+def test_remarcar_limpa_desfecho_marcado(pool, conta_id):
+    ev = ag.criar_evento(pool, conta_id, "Follow-up", ag.agora_brt() - timedelta(days=2))
+    assert ag.marcar_desfecho(pool, conta_id, ev["id"], "nao_realizado", ag.agora_brt())
+    novo = ag.agora_brt() + timedelta(days=3)
+    assert ag.remarcar_evento(pool, conta_id, ev["id"], novo) is True
+    ev2 = ag.evento_por_id(pool, conta_id, ev["id"])
+    assert ev2["inicio"] == novo and ev2["desfecho"] is None       # desfecho antigo não vale mais
+
+
+def test_remarcar_reativa_evento_cancelado(pool, conta_id):
+    ev = ag.criar_evento(pool, conta_id, "Reunião cancelada", ag.agora_brt() + timedelta(days=1))
+    assert ag.cancelar_evento(pool, conta_id, ev["id"]) is True
+    assert ag.evento_por_id(pool, conta_id, ev["id"]) is None      # some do "ativo"
+    novo = ag.agora_brt() + timedelta(days=5)
+    assert ag.remarcar_evento(pool, conta_id, ev["id"], novo) is True
+    ev2 = ag.evento_por_id(pool, conta_id, ev["id"])
+    assert ev2 is not None and ev2["inicio"] == novo               # ativo de novo
+
+
+def test_marcar_desfecho_so_pro_passado(pool, conta_id):
+    passado = ag.criar_evento(pool, conta_id, "Ontem", ag.agora_brt() - timedelta(days=1))
+    futuro = ag.criar_evento(pool, conta_id, "Amanhã", ag.agora_brt() + timedelta(days=1))
+    agora = ag.agora_brt()
+    assert ag.marcar_desfecho(pool, conta_id, passado["id"], "realizado", agora) is True
+    assert ag.marcar_desfecho(pool, conta_id, futuro["id"], "realizado", agora) is False   # ainda não aconteceu
+    assert ag.marcar_desfecho(pool, conta_id, passado["id"], "valor_invalido", agora) is False
+
+
+def test_eventos_para_reaproveitar_traz_cancelado_e_nao_realizado(pool, conta_id):
+    agora = ag.agora_brt()
+    cancelado = ag.criar_evento(pool, conta_id, "Cancelado recente", agora - timedelta(days=3))
+    ag.cancelar_evento(pool, conta_id, cancelado["id"])
+    nao_realizado = ag.criar_evento(pool, conta_id, "Não rolou", agora - timedelta(days=1))
+    ag.marcar_desfecho(pool, conta_id, nao_realizado["id"], "nao_realizado", agora)
+    realizado = ag.criar_evento(pool, conta_id, "Aconteceu normal", agora - timedelta(days=1))
+    ag.marcar_desfecho(pool, conta_id, realizado["id"], "realizado", agora)
+    ag.criar_evento(pool, conta_id, "Futuro qualquer", agora + timedelta(days=1))
+
+    r = ag.eventos_para_reaproveitar(pool, conta_id, agora)
+    ids = {e["id"] for e in r}
+    assert cancelado["id"] in ids and nao_realizado["id"] in ids
+    assert realizado["id"] not in ids                              # aconteceu -> não é sugestão
+    by_id = {e["id"]: e for e in r}
+    assert by_id[cancelado["id"]]["status"] == "cancelado"
+    assert by_id[nao_realizado["id"]]["status"] == "ativo"
+
+
+def test_eventos_para_reaproveitar_ignora_antigos_demais(pool, conta_id):
+    agora = ag.agora_brt()
+    velho = ag.criar_evento(pool, conta_id, "Muito antigo", agora - timedelta(days=200))
+    ag.cancelar_evento(pool, conta_id, velho["id"])
+    r = ag.eventos_para_reaproveitar(pool, conta_id, agora)
+    assert velho["id"] not in {e["id"] for e in r}
+
+
+def test_achar_por_titulo_passado(pool, conta_id):
+    agora = ag.agora_brt()
+    ev = ag.criar_evento(pool, conta_id, "Reunião com Paulo", agora - timedelta(days=2))
+    ag.criar_evento(pool, conta_id, "Reunião com Paulo futura", agora + timedelta(days=2))
+    cand = ag.achar_por_titulo_passado(pool, conta_id, "paulo", agora)
+    assert [c["id"] for c in cand] == [ev["id"]]                   # só o passado, não o futuro
+
+
 def test_ferramentas_marcar_ver_cancelar(pool, conta_id):
     ferrs = {f.nome: f for f in construir_ferramentas_agenda(pool, conta_id, membro_id=None)}
     r = ferrs["marcar_evento"].executar({"titulo": "Reunião contador", "inicio": "28/07/2099 15:00"})
@@ -183,6 +249,27 @@ def test_ferramenta_marcar_pede_data_quando_nao_entende(pool, conta_id):
     ferrs = {f.nome: f for f in construir_ferramentas_agenda(pool, conta_id)}
     r = ferrs["marcar_evento"].executar({"titulo": "X", "inicio": "sei la quando"})
     assert "data" in r.lower() or "quando" in r.lower()      # pede a data, não quebra
+
+
+def test_ferramenta_marcar_desfecho_por_titulo(pool, conta_id):
+    ev = ag.criar_evento(pool, conta_id, "Reunião com o Paulo", ag.agora_brt() - timedelta(days=1))
+    ferrs = {f.nome: f for f in construir_ferramentas_agenda(pool, conta_id)}
+    r = ferrs["marcar_desfecho_evento"].executar({"titulo": "Paulo", "aconteceu": "nao"})
+    assert "não aconteceu" in r.lower()
+    assert ag.evento_por_id(pool, conta_id, ev["id"])["desfecho"] == "nao_realizado"
+
+
+def test_ferramenta_marcar_desfecho_recusa_evento_futuro(pool, conta_id):
+    ag.criar_evento(pool, conta_id, "Reunião de amanhã com a Bia", ag.agora_brt() + timedelta(days=1))
+    ferrs = {f.nome: f for f in construir_ferramentas_agenda(pool, conta_id)}
+    r = ferrs["marcar_desfecho_evento"].executar({"titulo": "Bia", "aconteceu": "sim"})
+    assert "não achei" in r.lower()   # achar_por_titulo_passado não encontra evento futuro
+
+
+def test_ferramenta_marcar_desfecho_pede_esclarecimento(pool, conta_id):
+    ferrs = {f.nome: f for f in construir_ferramentas_agenda(pool, conta_id)}
+    r = ferrs["marcar_desfecho_evento"].executar({"titulo": "qualquer", "aconteceu": "talvez"})
+    assert "aconteceu ou não aconteceu" in r.lower()
 
 
 # ---------- portal: tipo, mês, config do lembrete e feed .ics (banco) ----------

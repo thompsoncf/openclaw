@@ -70,10 +70,11 @@ def _fmt_evento(row) -> dict:
     return {"id": row[0], "titulo": row[1], "inicio": row[2], "fim": row[3],
             "local": row[4], "descricao": row[5], "lembrete_min": row[6],
             "criado_em": row[7] if len(row) > 7 else None,
-            "tipo": (row[8] if len(row) > 8 else None) or "pessoal"}
+            "tipo": (row[8] if len(row) > 8 else None) or "pessoal",
+            "desfecho": row[9] if len(row) > 9 else None}
 
 
-_COLS = "id, titulo, inicio, fim, local, descricao, lembrete_min, criado_em, tipo"
+_COLS = "id, titulo, inicio, fim, local, descricao, lembrete_min, criado_em, tipo, desfecho"
 
 
 def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
@@ -100,6 +101,16 @@ def evento_por_id(pool, conta_id: int, evento_id: int) -> dict | None:
         r = c.execute(
             "select " + _COLS + " from eventos_agenda "
             "where id=%s and conta_id=%s and status='ativo'",
+            (evento_id, conta_id)).fetchone()
+    return _fmt_evento(r) if r else None
+
+
+def evento_por_id_qualquer_status(pool, conta_id: int, evento_id: int) -> dict | None:
+    """Igual evento_por_id, mas também acha CANCELADO — pra reaproveitar
+    (remarcar) um compromisso que não aconteceu."""
+    with pool.connection() as c:
+        r = c.execute(
+            "select " + _COLS + " from eventos_agenda where id=%s and conta_id=%s",
             (evento_id, conta_id)).fetchone()
     return _fmt_evento(r) if r else None
 
@@ -137,6 +148,24 @@ def achar_por_titulo(pool, conta_id: int, termo: str) -> list[dict]:
             "where conta_id=%s and status='ativo' and inicio >= %s and titulo ilike %s "
             "order by inicio",
             (conta_id, agora_brt() - timedelta(hours=2), f"%{termo}%"),
+        ).fetchall()
+    return [_fmt_evento(r) for r in rows]
+
+
+def achar_por_titulo_passado(pool, conta_id: int, termo: str, agora: datetime,
+                             dias: int = 30) -> list[dict]:
+    """Eventos ATIVOS e JÁ PASSADOS (últimos `dias`) cujo título casa com o termo
+    — pra marcar desfecho (aconteceu/não aconteceu) por nome, já que o compromisso
+    some de achar_por_titulo (só olha o futuro) assim que a data passa."""
+    termo = (termo or "").strip()
+    if not termo:
+        return []
+    with pool.connection() as c:
+        rows = c.execute(
+            "select " + _COLS + " from eventos_agenda "
+            "where conta_id=%s and status='ativo' and inicio < %s and inicio >= %s and titulo ilike %s "
+            "order by inicio desc",
+            (conta_id, agora, agora - timedelta(days=dias), f"%{termo}%"),
         ).fetchall()
     return [_fmt_evento(r) for r in rows]
 
@@ -202,10 +231,14 @@ def sugerir_por_titulo(pool, conta_id: int, termo: str, limite: int = 4) -> list
 
 def remarcar_evento(pool, conta_id: int, evento_id: int, inicio: datetime,
                     fim: datetime | None = None) -> bool:
+    """Muda a data — e SEMPRE deixa o evento ativo de novo (reativa se estava
+    cancelado/marcado como não realizado) e limpa o desfecho: remarcar significa
+    'isso vai acontecer nessa data', não importa o que era antes. É o mesmo
+    caminho tanto pra remarcar um ativo quanto pra reaproveitar um cancelado."""
     with pool.connection() as c:
         cur = c.execute(
-            "update eventos_agenda set inicio=%s, fim=%s "
-            "where id=%s and conta_id=%s and status='ativo'",
+            "update eventos_agenda set inicio=%s, fim=%s, status='ativo', desfecho=null "
+            "where id=%s and conta_id=%s",
             (inicio, fim, evento_id, conta_id),
         )
         c.commit()
@@ -221,6 +254,48 @@ def cancelar_evento(pool, conta_id: int, evento_id: int) -> bool:
         )
         c.commit()
         return cur.rowcount > 0
+
+
+_DESFECHOS = ("realizado", "nao_realizado")
+
+
+def marcar_desfecho(pool, conta_id: int, evento_id: int, desfecho: str, agora: datetime) -> bool:
+    """Marca se um compromisso já passado aconteceu ou não — só pra eventos
+    ATIVOS cuja data já chegou (não faz sentido marcar o futuro nem um
+    cancelado, que já é sabidamente 'não aconteceu')."""
+    if desfecho not in _DESFECHOS:
+        return False
+    with pool.connection() as c:
+        cur = c.execute(
+            "update eventos_agenda set desfecho=%s "
+            "where id=%s and conta_id=%s and status='ativo' and inicio <= %s",
+            (desfecho, evento_id, conta_id, agora),
+        )
+        c.commit()
+        return cur.rowcount > 0
+
+
+def eventos_para_reaproveitar(pool, conta_id: int, agora: datetime, limite: int = 6) -> list[dict]:
+    """Compromissos recentes (últimos 90 dias) que não aconteceram — cancelados
+    ou marcados como 'não realizado' — candidatos a reaproveitar em vez de
+    recriar do zero. Mais recentes primeiro."""
+    with pool.connection() as c:
+        rows = c.execute(
+            "select " + _COLS + ", status, (select count(*) from evento_convidados ec "
+            "where ec.evento_id = eventos_agenda.id) as n_convidados "
+            "from eventos_agenda "
+            "where conta_id=%s and inicio >= %s and inicio <= %s "
+            "and (status='cancelado' or desfecho='nao_realizado') "
+            "order by inicio desc limit %s",
+            (conta_id, agora - timedelta(days=90), agora, limite),
+        ).fetchall()
+    out = []
+    for r in rows:
+        ev = _fmt_evento(r[:-2])
+        ev["status"] = r[-2]
+        ev["n_convidados"] = r[-1]
+        out.append(ev)
+    return out
 
 
 # ---------- "adicionar ao calendário": Google (link) e .ics (universal) ----------

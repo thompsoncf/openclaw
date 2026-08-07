@@ -106,7 +106,8 @@ def _eventos_por_dia(eventos: list[dict], convidados: dict[int, list[dict]] | No
             "id": e["id"], "hora": e["inicio"].astimezone(ag.BRT).strftime("%H:%M"),
             "titulo": e["titulo"], "tipo": e["tipo"], "tipo_rot": TIPO_ROT.get(e["tipo"], "Pessoal"),
             "local": e.get("local") or "", "descricao": e.get("descricao") or "",
-            "convidados": conv_lista,
+            "convidados": conv_lista, "inicio_iso": e["inicio"].isoformat(),
+            "data_iso": iso, "desfecho": e.get("desfecho"),
         })
     return out
 
@@ -180,13 +181,19 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
     pool = get_pool()
     conta_id = ctx["conta_id"]
     ano, mes = _mes_ref(m)
-    hoje = ag.agora_brt().date()
+    agora = ag.agora_brt()
+    hoje = agora.date()
     eventos = ag.eventos_mes(pool, conta_id, ano, mes)
     semanas = _monta_semanas(ano, mes, eventos, hoje)
     proximos = ag.proximos(pool, conta_id, limite=8)
     ids_com_convidados = {e["id"] for e in eventos} | {e["id"] for e in proximos}
     convidados = cv.por_evento(pool, conta_id, list(ids_com_convidados))
     eventos_dia = _eventos_por_dia(eventos, convidados)
+    reaproveitar = [{
+        "id": e["id"], "titulo": e["titulo"], "hora_rot": ag.fmt_hora(e),
+        "hora": e["inicio"].astimezone(ag.BRT).strftime("%H:%M"),
+        "cancelado": e["status"] == "cancelado", "n_convidados": e["n_convidados"],
+    } for e in ag.eventos_para_reaproveitar(pool, conta_id, agora)]
     for ev in proximos:
         ev["dia_rot"] = ev["inicio"].astimezone(ag.BRT).strftime("%d/%m")
         ev["hora_rot"] = ev["inicio"].astimezone(ag.BRT).strftime("%H:%M")
@@ -203,6 +210,8 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
                    ano=ano, mes=mes, mes_nome=MESES[mes], dias_sem=DIAS_SEM,
                    semanas=semanas, proximos=proximos, tipo_rot=TIPO_ROT,
                    eventos_dia=eventos_dia, status_rot=cv.STATUS_ROT,
+                   reaproveitar=reaproveitar, meses_js=MESES, dias_sem_ext_js=DIAS_SEM_EXT,
+                   agora_iso=agora.isoformat(),
                    mes_prev=_vizinho(ano, mes, -1), mes_next=_vizinho(ano, mes, +1),
                    mes_hoje=f"{hoje.year:04d}-{hoje.month:02d}",
                    hoje_iso=hoje.isoformat(), abrir_novo=(novo == "1"),
@@ -330,6 +339,17 @@ def agenda_remarcar(request: Request, evento_id: int = Form(...), data: str = Fo
         request.session["agenda_aviso"] = msg
     destino = f"/painel/agenda?m={novo_inicio.year:04d}-{novo_inicio.month:02d}"
     return RedirectResponse(destino, status_code=303)
+
+
+# ================================================================ DESFECHO
+@router.post("/painel/agenda/desfecho")
+def agenda_desfecho(request: Request, evento_id: int = Form(...), desfecho: str = Form(...),
+                    m: str = Form("")):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "auth"}, status_code=401)
+    ok = ag.marcar_desfecho(get_pool(), ctx["conta_id"], evento_id, desfecho, ag.agora_brt())
+    return JSONResponse({"ok": ok})
 
 
 _ERRO_ENVIO = {
@@ -511,9 +531,9 @@ _CSS = """<style>
 .cal-num{font-size:.8rem;color:var(--txt-mut);font-variant-numeric:tabular-nums;line-height:1}
 .cal-cell.hoje .cal-num{background:var(--verde);color:#04160e;font-weight:800;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center}
 .cal-count{font-size:.62rem;font-weight:700;color:var(--txt-mut);background:var(--card-2);border:1px solid var(--borda);border-radius:20px;padding:0 6px;line-height:1.4}
-.cal-cell.tem-evento{cursor:pointer}
-.cal-cell.tem-evento:hover{background:var(--card-2)}
-.cal-cell.tem-evento:focus-visible{outline:2px solid var(--verde);outline-offset:-2px}
+.cal-cell.tem-evento,.cal-cell.clicavel{cursor:pointer}
+.cal-cell.tem-evento:hover,.cal-cell.clicavel:hover{background:var(--card-2)}
+.cal-cell.tem-evento:focus-visible,.cal-cell.clicavel:focus-visible{outline:2px solid var(--verde);outline-offset:-2px}
 .evs{display:flex;flex-direction:column;gap:2px;min-width:0}
 .ev-line{display:flex;align-items:center;gap:4px;min-width:0}
 .ev-line .dot{width:6px;height:6px;border-radius:50%;flex:0 0 6px}
@@ -706,6 +726,26 @@ _CSS = """<style>
 .tp-pessoal{background:rgba(29,158,117,.16);color:var(--verde-claro)}
 .tp-empresa{background:rgba(57,135,229,.16);color:#bcd8f6}
 .tp-fornecedor{background:rgba(224,163,62,.16);color:#f0d9a6}
+.dev-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.dev-desf{margin-top:9px;padding-top:9px;border-top:1px dashed var(--borda)}
+.desf-ask{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.78rem;color:var(--txt-mut)}
+.desf-btn{border:1px solid var(--borda);background:var(--card-2);color:var(--txt);border-radius:7px;padding:.32rem .6rem;font-size:.76rem;font-weight:600;cursor:pointer}
+.desf-btn.ok:hover{border-color:var(--verde);color:var(--verde-claro)}
+.desf-btn.nao:hover{border-color:#e0574f;color:#f0917f}
+.desf-badge{font-size:.76rem;font-weight:700;padding:3px 9px;border-radius:20px;display:inline-block}
+.desf-ok{background:rgba(29,158,117,.16);color:var(--verde-claro)}
+.desf-nao{background:rgba(224,87,79,.14);color:#f0917f}
+.reuse-sec{margin-top:14px;padding-top:14px;border-top:1px dashed var(--borda)}
+.reuse-lbl{font-size:.7rem;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--txt-mut);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.reuse-card{display:flex;align-items:center;gap:10px;background:var(--card-2);border:1px solid var(--borda);border-radius:10px;padding:9px 11px;margin-bottom:7px}
+.reuse-card form{margin:0;flex:0 0 auto}
+.reuse-info{flex:1;min-width:0}
+.reuse-tt{font-size:.85rem;font-weight:600}
+.reuse-mt{font-size:.72rem;color:var(--txt-mut);margin-top:1px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.reuse-cancel-tag{font-size:.62rem;font-weight:700;padding:1px 7px;border-radius:20px;background:rgba(224,87,79,.14);color:#f0917f;border:1px solid rgba(224,87,79,.35)}
+.reuse-nr-tag{background:rgba(217,154,58,.16);color:var(--ambar);border-color:rgba(217,154,58,.4)}
+.reuse-btn{flex:0 0 auto;background:rgba(29,158,117,.14);border:1px solid rgba(29,158,117,.4);color:var(--verde-claro);border-radius:8px;padding:.42rem .65rem;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap}
+.reuse-btn:hover{background:rgba(29,158,117,.24)}
 .daybox-cta{display:block;width:100%;text-align:center;margin-top:14px;background:transparent;border:1px dashed var(--borda);color:var(--verde-claro);border-radius:9px;padding:.6rem;font-size:.82rem;font-weight:600;cursor:pointer}
 .daybox-cta:hover{border-color:var(--verde)}
 </style>"""
@@ -760,8 +800,8 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         {% for semana in semanas %}
         <div class="cal-wk">
           {% for c in semana %}
-          <div class="cal-cell{% if c.fora %} fora{% endif %}{% if c.hoje %} hoje{% endif %}{% if c.eventos %} tem-evento{% endif %}"
-               {% if c.eventos %}data-iso="{{ c.iso }}" tabindex="0" role="button" aria-label="Ver os {{ c.eventos|length }} compromisso{{ 's' if c.eventos|length != 1 }} do dia {{ c.dia }}"{% endif %}>
+          <div class="cal-cell{% if c.fora %} fora{% endif %}{% if c.hoje %} hoje{% endif %}{% if c.eventos %} tem-evento{% endif %}{% if not c.eventos and reaproveitar %} clicavel{% endif %}"
+               {% if c.eventos or reaproveitar %}data-iso="{{ c.iso }}" tabindex="0" role="button" aria-label="{% if c.eventos %}Ver os {{ c.eventos|length }} compromisso{{ 's' if c.eventos|length != 1 }} do dia {{ c.dia }}{% else %}Ver sugestões pro dia {{ c.dia }}{% endif %}"{% endif %}>
             <div class="cal-head">
               <span class="cal-num">{{ c.dia }}</span>
               {% if c.eventos|length > 2 %}<span class="cal-count">{{ c.eventos|length }}</span>{% endif %}
@@ -964,18 +1004,82 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 </div>
 <script>
 var EVENTOS_DIA = {{ eventos_dia|tojson }};
+var REAPROVEITAR = {{ reaproveitar|tojson }};
+var MESES_JS = {{ meses_js|tojson }};
+var DIAS_EXT_JS = {{ dias_sem_ext_js|tojson }};
+var AGORA_ISO = {{ agora_iso|tojson }};
+var CUR_MES = {{ ('%04d-%02d'|format(ano, mes))|tojson }};
 var TPILL = {pessoal:'Pessoal', empresa:'Empresa', fornecedor:'Fornecedor'};
 
 function _esc(s){ return (s||'').replace(/[&<>"']/g, function(ch){
   return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]; }); }
+function isoTitulo(iso){
+  var p = iso.split('-');
+  var d = new Date(Number(p[0]), Number(p[1])-1, Number(p[2]));
+  return DIAS_EXT_JS[d.getDay()] + ', ' + d.getDate() + ' de ' + MESES_JS[d.getMonth()+1];
+}
+function remToggleDia(id){ var box=document.getElementById('remBoxDia-'+id); if(box) box.classList.toggle('show'); }
+function _remarcarBoxHtml(e){
+  return '<div class="remarcar-box" id="remBoxDia-'+e.id+'">'
+    + '<form method="post" action="/painel/agenda/remarcar">'
+    + '<input type="hidden" name="evento_id" value="'+e.id+'">'
+    + '<input type="hidden" name="m" value="'+CUR_MES+'">'
+    + '<div class="rlbl">🔁 Nova data</div>'
+    + '<div class="remarcar-row2"><input type="date" name="data" value="'+e.data_iso+'" required><input type="time" name="hora" value="'+e.hora+'" required></div>'
+    + '<div class="tg"><div><div class="tg-t">Avisar os convidados</div><div class="tg-s">Manda a nova data pro mesmo link que já têm</div></div>'
+    + '<label class="sw"><input type="checkbox" name="avisar" value="1" checked><span class="track"></span><span class="knob"></span></label></div>'
+    + '<div class="remarcar-actions"><button class="rbtn ok" type="submit">Salvar nova data</button>'
+    + '<button class="rbtn cc" type="button" onclick="remToggleDia('+e.id+')">Cancelar</button></div>'
+    + '</form></div>';
+}
+function _desfechoHtml(e){
+  if(e.desfecho === 'realizado') return '<span class="desf-badge desf-ok">✅ Aconteceu</span>';
+  if(e.desfecho === 'nao_realizado') return '<span class="desf-badge desf-nao">❌ Não rolou</span>';
+  return '<div class="desf-ask" id="desfAsk-'+e.id+'"><span>Como foi?</span>'
+    + '<button type="button" class="desf-btn ok" onclick="marcarDesfecho('+e.id+',\\'realizado\\')">✅ Aconteceu</button>'
+    + '<button type="button" class="desf-btn nao" onclick="marcarDesfecho('+e.id+',\\'nao_realizado\\')">❌ Não rolou</button></div>';
+}
+function marcarDesfecho(id, valor){
+  fetch('/painel/agenda/desfecho', {
+    method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'},
+    body: 'evento_id='+id+'&desfecho='+valor
+  }).then(function(r){ return r.json(); }).then(function(d){
+    if(!d.ok) return;
+    var ask = document.getElementById('desfAsk-'+id);
+    if(ask) ask.outerHTML = valor==='realizado'
+      ? '<span class="desf-badge desf-ok">✅ Aconteceu</span>'
+      : '<span class="desf-badge desf-nao">❌ Não rolou</span>';
+    for(var iso in EVENTOS_DIA){
+      EVENTOS_DIA[iso].eventos.forEach(function(e){ if(String(e.id)===String(id)) e.desfecho = valor; });
+    }
+  });
+}
+function _reaproveitarHtml(iso){
+  if(!REAPROVEITAR.length) return '';
+  var cards = REAPROVEITAR.map(function(r){
+    return '<div class="reuse-card"><div class="reuse-info">'
+      + '<div class="reuse-tt">'+_esc(r.titulo)+'</div>'
+      + '<div class="reuse-mt">'+(r.cancelado?'<span class="reuse-cancel-tag">Cancelado</span>':'<span class="reuse-cancel-tag reuse-nr-tag">Não rolou</span>')
+      + ' era '+r.hora_rot+(r.n_convidados?' · 👤 '+r.n_convidados+(r.n_convidados===1?' convidado':' convidados'):'')+'</div></div>'
+      + '<form method="post" action="/painel/agenda/remarcar">'
+      + '<input type="hidden" name="evento_id" value="'+r.id+'">'
+      + '<input type="hidden" name="data" value="'+iso+'">'
+      + '<input type="hidden" name="hora" value="'+r.hora+'">'
+      + '<input type="hidden" name="avisar" value="1">'
+      + '<input type="hidden" name="m" value="'+CUR_MES+'">'
+      + '<button class="reuse-btn" type="submit">Usar nesse dia</button></form></div>';
+  }).join('');
+  return '<div class="reuse-sec"><div class="reuse-lbl">♻️ Reaproveitar um compromisso que não aconteceu</div>'+cards+'</div>';
+}
 function abrirDia(iso){
   var d = EVENTOS_DIA[iso];
-  if(!d) return;
+  var evs = d ? d.eventos : [];
   var box = document.getElementById('daybox');
-  var html = '<div class="daybox-hd"><h3>'+d.titulo+'</h3>'
+  var html = '<div class="daybox-hd"><h3>'+(d?d.titulo:isoTitulo(iso))+'</h3>'
     + '<button class="x" type="button" onclick="fecharDia()" aria-label="Fechar">✕</button></div>'
-    + '<p class="daybox-sub">'+d.eventos.length+(d.eventos.length===1?' compromisso':' compromissos')+'</p>';
-  d.eventos.forEach(function(e){
+    + '<p class="daybox-sub">'+(evs.length?evs.length+(evs.length===1?' compromisso':' compromissos'):'Nada marcado ainda')+'</p>';
+  var agora = new Date(AGORA_ISO);
+  evs.forEach(function(e){
     var conv = '';
     (e.convidados||[]).forEach(function(g){
       conv += '<div class="guest"><div class="guest-info">'
@@ -985,15 +1089,21 @@ function abrirDia(iso){
         + '</div>';
     });
     if(conv) conv = '<div class="dev-conv"><div class="dev-conv-lbl">👤 Convidados</div>'+conv+'</div>';
+    var passado = new Date(e.inicio_iso) <= agora;
+    var acaoTopo = passado ? '' : '<button class="px-rm" type="button" title="Remarcar" onclick="remToggleDia('+e.id+')">🔁</button>';
     html += '<div class="dev" data-ev="'+e.id+'"><div class="dev-dot d-'+e.tipo+'"></div><div class="dev-body">'
+      + '<div class="dev-top"><div>'
       + '<div class="dev-hora">'+e.hora+'</div>'
       + '<div class="dev-tt">'+e.titulo+'</div>'
       + '<div class="dev-meta"><span class="tpill tp-'+e.tipo+'">'+(TPILL[e.tipo]||e.tipo_rot)+'</span>'
       + (e.local?'<span>📍 '+e.local+'</span>':'')+'</div>'
+      + '</div>'+acaoTopo+'</div>'
       + (e.descricao?'<div class="dev-desc">'+e.descricao+'</div>':'')
       + conv
+      + (passado ? '<div class="dev-desf">'+_desfechoHtml(e)+'</div>' : _remarcarBoxHtml(e))
       + '</div></div>';
   });
+  html += _reaproveitarHtml(iso);
   html += '<button class="daybox-cta" type="button" onclick="agNovoNoDia(\\''+iso+'\\')">＋ Marcar novo compromisso nesse dia</button>';
   box.innerHTML = html;
   document.getElementById('dayOverlay').classList.add('show');
@@ -1009,7 +1119,8 @@ function renderizarCelula(iso){
   var numHtml = num ? num.outerHTML : '';
   if(!evs.length){
     cel.classList.remove('tem-evento');
-    cel.removeAttribute('tabindex'); cel.removeAttribute('role'); cel.removeAttribute('data-iso');
+    if(REAPROVEITAR.length){ cel.classList.add('clicavel'); }
+    else { cel.removeAttribute('tabindex'); cel.removeAttribute('role'); cel.removeAttribute('data-iso'); }
     cel.innerHTML = '<div class="cal-head">'+numHtml+'</div>';
     return;
   }
@@ -1032,13 +1143,10 @@ function removerEventoDoCalendario(id){
     if(!EVENTOS_DIA[isoAlvo].eventos.length) delete EVENTOS_DIA[isoAlvo];
     renderizarCelula(isoAlvo);
   }
+  var overlayAberto = document.getElementById('dayOverlay').classList.contains('show');
   var devRow = document.querySelector('#daybox .dev[data-ev="'+id+'"]');
-  if(devRow){
-    devRow.remove();
-    var restBox = document.querySelectorAll('#daybox .dev').length;
-    if(!restBox){ fecharDia(); return; }
-    var sub = document.querySelector('#daybox .daybox-sub');
-    if(sub) sub.textContent = restBox + (restBox===1?' compromisso':' compromissos');
+  if(overlayAberto && devRow && isoAlvo){
+    abrirDia(isoAlvo);   // reconstrói (mostra "nada marcado" + reaproveitar se for o caso)
   }
 }
 function agNovoNoDia(iso){
@@ -1050,12 +1158,12 @@ function agNovoNoDia(iso){
 // Delegado no calendário (não em cada célula): células podem ser recriadas por
 // renderizarCelula() depois de um cancelamento, então o listener direto se perderia.
 document.querySelector('.cal').addEventListener('click', function(ev){
-  var cel = ev.target.closest('.cal-cell.tem-evento');
+  var cel = ev.target.closest('.cal-cell[data-iso]');
   if(cel) abrirDia(cel.getAttribute('data-iso'));
 });
 document.querySelector('.cal').addEventListener('keydown', function(ev){
   if(ev.key!=='Enter' && ev.key!==' ') return;
-  var cel = ev.target.closest('.cal-cell.tem-evento');
+  var cel = ev.target.closest('.cal-cell[data-iso]');
   if(cel){ ev.preventDefault(); abrirDia(cel.getAttribute('data-iso')); }
 });
 document.getElementById('dayOverlay').addEventListener('click', function(ev){ if(ev.target.id==='dayOverlay') fecharDia(); });

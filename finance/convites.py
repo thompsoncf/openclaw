@@ -381,7 +381,7 @@ def remarcar_e_avisar(pool, conta_id: int, evento_id: int, novo_inicio, novo_fim
     pra 'pendente' (independe de `avisar` — é sobre o evento ter mudado, não
     sobre ter avisado). Tolerante: nunca levanta, um convidado sem número ou fora
     da janela sem template só não é avisado, os outros seguem normalmente."""
-    ev_antigo = ag.evento_por_id(pool, conta_id, evento_id)
+    ev_antigo = ag.evento_por_id_qualquer_status(pool, conta_id, evento_id)
     if not ev_antigo:
         return {"ok": False}
     hora_antiga = ag.fmt_hora(ev_antigo)

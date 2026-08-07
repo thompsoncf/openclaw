@@ -21,7 +21,8 @@ def pool():
     init_schema(p)
     migr = Path(__file__).resolve().parent.parent / "db" / "migracoes"
     with p.connection() as c:
-        for nome in ("098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql"):
+        for nome in ("098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql",
+                    "130_evento_desfecho.sql"):
             c.execute((migr / nome).read_text(encoding="utf-8"))
         c.commit()
     yield p
@@ -446,6 +447,19 @@ def test_remarcar_e_avisar_fora_da_janela_usa_template_de_convite(pool, conta_id
     r = cv.remarcar_e_avisar(pool, conta_id, ev["id"], novo, None, avisar=True, agora=ag.agora_brt())
     assert r["ok"] is True and r["avisados"] == 1
     assert capt["sid"] == "HXtest" and capt["numero"] == "86988880003"
+
+
+def test_remarcar_e_avisar_reaproveita_evento_cancelado(pool, conta_id):
+    """'reaproveitar' na caixa do dia é o MESMO fluxo do remarcar normal, só que
+    o evento alvo já está cancelado — remarcar reativa."""
+    ev = _evento(pool, conta_id, titulo="Reunião cancelada")
+    assert ag.cancelar_evento(pool, conta_id, ev["id"]) is True
+    assert ag.evento_por_id(pool, conta_id, ev["id"]) is None
+    novo = ag.agora_brt() + timedelta(days=4)
+    r = cv.remarcar_e_avisar(pool, conta_id, ev["id"], novo, None, avisar=False, agora=ag.agora_brt())
+    assert r["ok"] is True
+    ev2 = ag.evento_por_id(pool, conta_id, ev["id"])
+    assert ev2 is not None and ev2["inicio"] == novo   # ativo de novo, na nova data
 
 
 def test_remarcar_e_avisar_evento_inexistente_ou_de_outra_conta(pool, conta_id):

@@ -108,6 +108,7 @@ def _eventos_por_dia(eventos: list[dict], convidados: dict[int, list[dict]] | No
             "local": e.get("local") or "", "descricao": e.get("descricao") or "",
             "convidados": conv_lista, "inicio_iso": e["inicio"].isoformat(),
             "data_iso": iso, "desfecho": e.get("desfecho"),
+            "link_online": e.get("link_online") or "",
         })
     return out
 
@@ -158,11 +159,14 @@ def _montar_share(request: Request, pool, conta_id: int, convite_ev: str, convit
     nomes = [g["nome"] for g in guests if (g.get("nome") or "").strip()]
     com = f" Com: {ag.frase_nomes(nomes)}." if len(nomes) > 1 else ""
     lista = []
+    link_online = ev.get("link_online")
     for g in guests:
         url = _convite_url(request, g["token"])
         msg = (f"Oi{(' ' + g['nome']) if g['nome'] else ''}! Quero marcar uma reunião: "
                f"{ev['titulo']} — {quando}{(' (' + local + ')') if local else ''}.{com} "
                f"Confirma pra mim aqui: {url}")
+        if link_online:
+            msg += f"\n🎥 Chamada: {link_online}"
         lista.append({"nome": g["nome"], "contato": g["contato"], "url": url,
                       "wa": _wa_share(g["contato"] or "", msg), "token": g["token"],
                       "status": g["status"], "status_rot": g["status_rot"]})
@@ -223,7 +227,7 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
 @router.post("/painel/agenda/novo")
 def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
                 hora: str = Form(""), local: str = Form(""), descricao: str = Form(""),
-                tipo: str = Form("pessoal"),
+                tipo: str = Form("pessoal"), link_online: str = Form(""),
                 convidado_nome: list[str] = Form(default=[]),
                 convidado_contato: list[str] = Form(default=[]),
                 m: str = Form("")):
@@ -241,11 +245,13 @@ def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
         request.session["agenda_aviso"] = "Não entendi a data/hora. Confere aí."
         return RedirectResponse(voltar + ("&" if "?" in voltar else "?") + "novo=1", status_code=303)
     pool = get_pool()
+    local = (local or "").strip() or None
     ev = ag.criar_evento(pool=pool, conta_id=ctx["conta_id"], titulo=titulo,
                          inicio=inicio, membro_id=ctx["membro_id"],
-                         local=(local or "").strip() or None,
+                         local=local,
                          descricao=(descricao or "").strip() or None,
-                         tipo=tipo if tipo in ag.TIPOS else "pessoal")
+                         tipo=tipo if tipo in ag.TIPOS else "pessoal",
+                         link_online=(link_online or "").strip() or None if ag.eh_online(local) else None)
     destino = f"/painel/agenda?m={inicio.year:04d}-{inicio.month:02d}"
     # Convidados (um ou vários): cria um convite por linha preenchida.
     pares = []
@@ -467,6 +473,7 @@ def _render_convite(c: dict, resultado: str | None) -> HTMLResponse:
         "estado": estado, "resposta": c.get("resposta") or "",
         "cal_link": cv.link_calendario(ev) if estado == "confirmado" else "",
         "mapa_link": (cv.link_mapa(ev) if estado == "confirmado" else "") or "",
+        "link_online": (ev.get("link_online") if estado == "confirmado" else "") or "",
     }
     return HTMLResponse(_env.get_template("convite").render(**ctx))
 
@@ -613,6 +620,9 @@ _CSS = """<style>
 .online-box{display:none;margin-top:6px;padding-top:10px;border-top:1px dashed var(--borda)}
 .online-box.show{display:block}
 .online-box .omsg{font-size:.78rem;color:var(--verde-claro);background:rgba(29,158,117,.1);border:1px solid rgba(29,158,117,.3);border-radius:8px;padding:8px 10px}
+.online-box .link-lbl{font-size:.72rem;color:var(--txt-mut);margin:10px 0 5px;font-weight:600}
+.online-box .link-input{width:100%;margin:0}
+.online-box .link-hint{font-size:.7rem;color:var(--txt-mut);margin-top:5px;line-height:1.5}
 .pop{position:absolute;top:calc(100% + 8px);right:0;width:270px;background:var(--card);border:1px solid var(--verde);border-radius:12px;padding:13px;box-shadow:0 20px 50px rgba(0,0,0,.5);z-index:20;display:none}
 .pop.show{display:block}
 .pop:before{content:"";position:absolute;top:-6px;right:16px;width:11px;height:11px;background:var(--card);border-left:1px solid var(--verde);border-top:1px solid var(--verde);transform:rotate(45deg)}
@@ -745,6 +755,8 @@ _CSS = """<style>
 .reuse-nr-tag{font-size:.62rem;font-weight:700;padding:1px 7px;border-radius:20px;background:rgba(217,154,58,.16);color:var(--ambar);border:1px solid rgba(217,154,58,.4)}
 .reuse-btn{flex:0 0 auto;background:rgba(29,158,117,.14);border:1px solid rgba(29,158,117,.4);color:var(--verde-claro);border-radius:8px;padding:.42rem .65rem;font-size:.76rem;font-weight:700;cursor:pointer;white-space:nowrap}
 .reuse-btn:hover{background:rgba(29,158,117,.24)}
+.meet-btn{display:inline-flex;align-items:center;gap:6px;margin-top:9px;background:rgba(29,158,117,.14);border:1px solid rgba(29,158,117,.4);color:var(--verde-claro);border-radius:8px;padding:.4rem .7rem;font-size:.78rem;font-weight:700;text-decoration:none}
+.meet-btn:hover{background:rgba(29,158,117,.24)}
 .daybox-cta{display:block;width:100%;text-align:center;margin-top:14px;background:transparent;border:1px dashed var(--borda);color:var(--verde-claro);border-radius:9px;padding:.6rem;font-size:.82rem;font-weight:600;cursor:pointer}
 .daybox-cta:hover{border-color:var(--verde)}
 </style>"""
@@ -912,6 +924,9 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           </div>
           <div class="online-box" id="onlineBox">
             <div class="omsg">🌐 Reunião online — nenhum endereço vai ser enviado aos convidados.</div>
+            <div class="link-lbl">🎥 Link da chamada <span style="font-weight:400">(opcional)</span></div>
+            <input type="url" name="link_online" id="linkOnline" class="link-input" placeholder="Cole aqui o link do Meet, Zoom, Teams…" autocomplete="off">
+            <div class="link-hint">Se preencher, vai junto nas mensagens de convite/confirmação e aparece na caixa do dia com um botão de entrar direto.</div>
             <button type="button" class="manual-cancel" id="onlineCancel">← voltar a informar um local</button>
           </div>
           <label>Tipo</label>
@@ -1096,6 +1111,7 @@ function abrirDia(iso){
       + '<div class="dev-tt">'+e.titulo+'</div>'
       + '<div class="dev-meta"><span class="tpill tp-'+e.tipo+'">'+(TPILL[e.tipo]||e.tipo_rot)+'</span>'
       + (e.local?'<span>📍 '+e.local+'</span>':'')+'</div>'
+      + (e.link_online?'<a class="meet-btn" href="'+_esc(e.link_online)+'" target="_blank" rel="noopener">🎥 Entrar na reunião</a>':'')
       + '</div>'+acaoTopo+'</div>'
       + (e.descricao?'<div class="dev-desc">'+e.descricao+'</div>':'')
       + conv
@@ -1192,6 +1208,7 @@ function remToggle(id){var box=document.getElementById('remBox-'+id);if(box)box.
   var onlineToggle = document.getElementById('onlineToggle');
   var onlineBox = document.getElementById('onlineBox');
   var onlineCancel = document.getElementById('onlineCancel');
+  var linkOnline = document.getElementById('linkOnline');
   if(!addrInput) return;
 
   function nomesEnvolvidos(){
@@ -1310,7 +1327,7 @@ function remToggle(id){var box=document.getElementById('remBox-'+id);if(box)box.
 
   function voltarBusca(){
     searchRow.style.display = ''; hintLine.style.display = ''; altRow.style.display = '';
-    addrInput.value = ''; localHidden.value = '';
+    addrInput.value = ''; localHidden.value = ''; linkOnline.value = '';
   }
 
   manualToggle.addEventListener('click', function(){
@@ -1320,7 +1337,7 @@ function remToggle(id){var box=document.getElementById('remBox-'+id);if(box)box.
     hintLine.style.display = 'none';
     altRow.style.display = 'none';
     manualBox.classList.add('show');
-    addrInput.value = ''; localHidden.value = '';
+    addrInput.value = ''; localHidden.value = ''; linkOnline.value = '';
     manualInput.focus();
   });
   manualInput.addEventListener('input', function(){ localHidden.value = manualInput.value; });
@@ -1509,6 +1526,7 @@ _CONVITE_TPL = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:16px">
           {% if cal_link %}<a class="cal" href="{{ cal_link }}" style="margin-top:0" target="_blank" rel="noopener">📆 Adicionar ao meu calendário</a>{% endif %}
           {% if mapa_link %}<a class="cal" href="{{ mapa_link }}" style="margin-top:0" target="_blank" rel="noopener">📍 Ver local no mapa{% if local %} — {{ local }}{% endif %}</a>{% endif %}
+          {% if link_online %}<a class="cal" href="{{ link_online }}" style="margin-top:0" target="_blank" rel="noopener">🎥 Entrar na chamada</a>{% endif %}
         </div>
       {% elif estado == 'remarcar' %}
         <div class="ic">🔁</div><h2>Pedido enviado</h2>

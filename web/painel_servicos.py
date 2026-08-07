@@ -114,8 +114,14 @@ def painel_servicos(request: Request):
     with pool.connection() as c:
         _garantir_tabela(c)
     scat.garantir_tabela(pool)
+    nicho = emp.obter_dados_empresa(pool, conta[0]).get("nicho") or ""
+    # eventos vende PACOTE/preço de evento avulso — sem setup+mensalidade estilo
+    # SaaS. A tela some com "Setup" e chama o preço único de "Valor" (fica
+    # gravado em setup_centavos por baixo, pra "Fechar contrato" não virar
+    # cobrança recorrente errada de um evento pontual).
+    servico_avulso = nicho == "eventos"
     return _render("servicos", request, empresa_nome=conta[2],
-                   tem_pj=True, vende_servico=True)
+                   tem_pj=True, vende_servico=True, servico_avulso=servico_avulso)
 
 
 # ---------------------------------------------------------------- catálogo (por conta)
@@ -597,8 +603,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
           <div class="oc-field" style="margin-bottom:.4rem"><label>Descrição</label><input id="svc-desc" class="oc-inp" placeholder="O que está incluso"></div>
         </div>
         <div style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end">
-          <div class="oc-field" style="margin-bottom:0"><label>Setup (R$)</label><input id="svc-setup" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
-          <div class="oc-field" style="margin-bottom:0"><label>Mensal (R$)</label><input id="svc-mensal" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
+          <div class="oc-field" style="margin-bottom:0"><label>{{ 'Valor (R$)' if servico_avulso else 'Setup (R$)' }}</label><input id="svc-setup" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
+          <div class="oc-field" style="margin-bottom:0{% if servico_avulso %};display:none{% endif %}"><label>Mensal (R$)</label><input id="svc-mensal" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
           <div class="oc-field" style="margin-bottom:0"><label>Custo (R$)</label><input id="svc-custo" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
           <div style="flex:1; display:flex; gap:.4rem; justify-content:flex-end">
             <button id="svc-salvar" class="oc-btn-g" type="button" style="border:0; border-radius:8px; padding:.5rem 1rem; font-weight:600; cursor:pointer">Salvar</button>
@@ -609,15 +615,15 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       </div>
 
       <div class="oc-head" id="oc-head" style="margin-top:.8rem; display:none">
-        <span></span><span>Serviço</span><span style="text-align:right">Setup</span><span style="text-align:right">Mensal</span><span style="text-align:right">Custo/Margem</span><span></span>
+        <span></span><span>Serviço</span><span style="text-align:right">{{ 'Valor' if servico_avulso else 'Setup' }}</span><span style="text-align:right{% if servico_avulso %};visibility:hidden{% endif %}">Mensal</span><span style="text-align:right">Custo/Margem</span><span></span>
       </div>
       <div id="oc-mods"></div>
       <div id="oc-mods-empty" class="oc-empty" style="display:none">
         <b>Você ainda não cadastrou seus serviços</b>
-        <p class="mut" style="margin:.3rem 0 0">Adicione o que a sua empresa vende — nome, setup e mensalidade. Isso vira o seu catálogo pra montar orçamentos.</p>
+        <p class="mut" style="margin:.3rem 0 0">{{ 'Adicione o que a sua empresa vende — nome e valor. Isso vira o seu catálogo pra montar orçamentos.' if servico_avulso else 'Adicione o que a sua empresa vende — nome, setup e mensalidade. Isso vira o seu catálogo pra montar orçamentos.' }}</p>
         <div style="display:flex; gap:.5rem; justify-content:center; margin-top:.8rem; flex-wrap:wrap">
           <button id="oc-add2" class="oc-btn-g" type="button" style="border:0; border-radius:8px; padding:.5rem 1rem; font-weight:600; cursor:pointer">+ Adicionar serviço</button>
-          <button id="oc-import" class="oc-pill" type="button">Usar modelo de tecnologia</button>
+          {% if not servico_avulso %}<button id="oc-import" class="oc-pill" type="button">Usar modelo de tecnologia</button>{% endif %}
         </div>
       </div>
       <div style="display:flex; justify-content:space-between; margin-top:.6rem">
@@ -684,8 +690,10 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 </div>
 </div>
 
+<script>window.SERVICO_AVULSO = {{ 'true' if servico_avulso else 'false' }};</script>
 {% raw %}<script>
 (function(){
+  var SERVICO_AVULSO = window.SERVICO_AVULSO;
   var INFRA={compartilhada:{s:0,m:0},dedicada:{s:1500,m:800},onpremise:{s:6000,m:1500}};
   function fmt(n){return 'R$ '+Math.round(n||0).toLocaleString('pt-BR');}
   function rows(){return [].slice.call(document.querySelectorAll('.oc-mod'));}
@@ -788,7 +796,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       r.innerHTML='<button class="oc-tog'+(on==='1'?' on':'')+'" type="button" title="Entra nesta proposta"></button>'
         +'<div class="oc-nome"><b>'+ec(s.nome)+'</b><div class="mut" style="font-size:.78rem">'+ec(s.descricao||'')+'</div></div>'
         +'<div class="oc-num"><span>R$</span><input class="oc-setup" inputmode="numeric" value="'+s.setup+'"></div>'
-        +'<div class="oc-num"><span>R$</span><input class="oc-mensal" inputmode="numeric" value="'+s.mensal+'"></div>'
+        +'<div class="oc-num"'+(SERVICO_AVULSO?' style="visibility:hidden"':'')+'><span>R$</span><input class="oc-mensal" inputmode="numeric" value="'+s.mensal+'"></div>'
         +'<div class="oc-num oc-custo-col"><span>R$</span><input class="oc-custo" inputmode="numeric" value="'+s.custo+'"></div>'
         +'<div class="oc-rowacts"><button class="oc-ic oc-edit" type="button" title="Editar serviço">✎</button><button class="oc-ic oc-del" type="button" title="Excluir serviço">🗑</button></div>';
       box.appendChild(r);
@@ -839,7 +847,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       .then(function(res){b.disabled=false; if(!res.ok){document.getElementById('svc-msg').textContent=(res.d&&res.d.erro)||'Não consegui salvar.';return;} fecharForm(); carregarCatalogo(true);})
       .catch(function(){b.disabled=false; document.getElementById('svc-msg').textContent='Erro de conexão.';});
   });
-  document.getElementById('oc-import').addEventListener('click',function(){
+  var ocImport=document.getElementById('oc-import');
+  if(ocImport)ocImport.addEventListener('click',function(){
     var b=this; b.disabled=true; b.textContent='Importando...';
     fetch('/painel/servicos/catalogo/importar-modelo',{method:'POST'}).then(function(){return carregarCatalogo(false);}).finally(function(){b.disabled=false; b.textContent='Usar modelo de tecnologia';});
   });

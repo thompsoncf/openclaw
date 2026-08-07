@@ -49,7 +49,7 @@ def test_convidar_dispara_email_e_link(monkeypatch):
     _mock_dono(monkeypatch)
     monkeypatch.setenv("APP_URL", "https://z.app")
     monkeypatch.setattr(pe.eq, "convidar",
-                        lambda pool, cid, nome, email, papel: {"ok": True, "token": "TOK", "ja_tem_login": False})
+                        lambda *a, **k: {"ok": True, "token": "TOK", "ja_tem_login": False})
     sent = {}
     monkeypatch.setattr(pe, "_enviar_email_convite",
                         lambda conta, nome, email, papel, link: sent.update(email=email, link=link) or True)

@@ -69,11 +69,12 @@ def painel_equipe(request: Request):
 
 @router.post("/painel/equipe/convidar")
 def painel_equipe_convidar(request: Request, nome: str = Form(""),
-                           email: str = Form(...), papel: str = Form("vendedor")):
+                           email: str = Form(...), papel: str = Form("vendedor"),
+                           whatsapp: str = Form("")):
     conta, redir = _dono(request)
     if redir is not None:
         return redir
-    r = eq.convidar(get_pool(), conta[0], nome, email, papel)
+    r = eq.convidar(get_pool(), conta[0], nome, email, papel, whatsapp)
     if r.get("ok") and r.get("ja_tem_login"):
         request.session["equipe_aviso"] = ("Essa pessoa já tem login no Zaq — foi adicionada "
                                             "à equipe. Ela acessa esta empresa com a senha que "
@@ -112,11 +113,12 @@ def painel_equipe_ativo(request: Request, membro_id: int = Form(...), ativo: str
 
 
 @router.post("/painel/equipe/renomear")
-def painel_equipe_renomear(request: Request, membro_id: int = Form(...), nome: str = Form("")):
+def painel_equipe_renomear(request: Request, membro_id: int = Form(...), nome: str = Form(""),
+                           whatsapp: str = Form("")):
     conta, redir = _dono(request)
     if redir is not None:
         return redir
-    r = eq.renomear_membro(get_pool(), conta[0], membro_id, nome)
+    r = eq.renomear_membro(get_pool(), conta[0], membro_id, nome, whatsapp)
     if r.get("ok"):
         request.session["equipe_aviso"] = "Nome atualizado ✓"
     else:
@@ -216,6 +218,7 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
 .mname input{flex:1;min-width:120px;max-width:240px;background:var(--bg);border:1px solid var(--borda);
   border-radius:8px;color:var(--txt);padding:.42rem .55rem;font-weight:600;font-size:.9rem;margin:0}
 .mname input:focus{outline:none;border-color:var(--verde)}
+.mname input.wa{max-width:150px;font-weight:400;font-size:.84rem;color:var(--txt-mut)}
 .mmeta{font-size:.76rem;color:var(--txt-mut);display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
 .macts{display:flex;gap:.45rem;align-items:center;flex-wrap:wrap}
 .macts select{background:var(--bg);border:1px solid var(--borda);border-radius:8px;color:var(--txt);
@@ -263,9 +266,10 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
   {% if aviso %}<div style="margin-top:.8rem;padding:.7rem .8rem;border:1px solid var(--verde);border-radius:10px;background:#10241d;font-size:.85rem;color:var(--verde-claro)">{{ aviso }}</div>{% endif %}
   {% if erro %}<div class="mut" style="margin-top:.8rem;color:#e07a5f">{{ erro }}</div>{% endif %}
 
-  <form method="post" action="/painel/equipe/convidar" style="margin-top:1rem;display:grid;grid-template-columns:1.4fr 1.6fr 1fr auto;gap:.5rem;align-items:end">
+  <form method="post" action="/painel/equipe/convidar" style="margin-top:1rem;display:grid;grid-template-columns:1.2fr 1.5fr 1.1fr .95fr auto;gap:.5rem;align-items:end">
     <div><label class="mut" style="font-size:.72rem">Nome</label><input name="nome" placeholder="Nome" style="width:100%"></div>
     <div><label class="mut" style="font-size:.72rem">E-mail</label><input name="email" type="email" required placeholder="pessoa@empresa.com" style="width:100%"></div>
+    <div><label class="mut" style="font-size:.72rem">WhatsApp <span style="font-weight:400">(aviso)</span></label><input name="whatsapp" inputmode="tel" placeholder="55 86 9…" style="width:100%"></div>
     <div><label class="mut" style="font-size:.72rem">Papel</label>
       <select name="papel" style="width:100%">{% for v,l in papeis %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
     <button style="white-space:nowrap;margin:0">Convidar</button>
@@ -297,7 +301,9 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
         <form method="post" action="/painel/equipe/renomear" class="mname">
           <input type="hidden" name="membro_id" value="{{ m.id }}">
           <input name="nome" value="{{ m.nome }}" maxlength="80" title="Corrigir o nome" aria-label="Nome">
-          <button class="ebtn" title="Salvar nome">✓ Salvar</button>
+          <input class="wa" name="whatsapp" value="{{ m.whatsapp }}" inputmode="tel" maxlength="20"
+                 placeholder="📱 WhatsApp" title="WhatsApp do vendedor (aviso de rodízio)" aria-label="WhatsApp">
+          <button class="ebtn" title="Salvar nome e WhatsApp">✓ Salvar</button>
         </form>
         <div class="mmeta">
           {% if m.pendente %}<span class="mtag pend">convite pendente</span>

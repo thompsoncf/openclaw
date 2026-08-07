@@ -59,6 +59,7 @@ def garantir_tabela(pool):
         c.execute("alter table membros add column if not exists senha_hash     text")
         c.execute("alter table membros add column if not exists convite_token  text")
         c.execute("alter table membros add column if not exists convite_expira timestamptz")
+        c.execute("alter table membros add column if not exists whatsapp       text")
         c.execute("alter table membros drop constraint if exists membros_papel_check")
         # e-mail é único POR CONTA (não global): a mesma pessoa pode ser membro de
         # várias empresas com o mesmo e-mail. Troca o índice global antigo, se houver.
@@ -80,13 +81,21 @@ def _tem_login(c, email: str) -> bool:
                      (email,)).fetchone() is not None
 
 
-def convidar(pool, conta_id: int, nome: str, email: str, papel: str) -> dict:
+def _so_fone(s) -> str | None:
+    """Normaliza um número: só dígitos (aceita + no começo). Vazio → None."""
+    s = (s or "").strip()
+    dig = "".join(ch for ch in s if ch.isdigit())
+    return ("+" + dig if s.startswith("+") else dig)[:20] or None
+
+
+def convidar(pool, conta_id: int, nome: str, email: str, papel: str, whatsapp: str = "") -> dict:
     """Convida um membro pra ESTA conta.
 
     - E-mail é único POR conta (a pessoa pode ser membro de várias empresas).
     - Se a pessoa já tem login Zaq (conta própria ou membro de outra empresa),
       já entra ativa e usa a senha que tem — devolve {ja_tem_login: True}, sem link.
     - Senão, cria inativa com token e devolve o link pra ela criar a senha.
+    - whatsapp: número pro aviso de rodízio (opcional).
     """
     papel = (papel or "vendedor").strip()
     if papel not in PAPEIS_PJ:
@@ -95,23 +104,24 @@ def convidar(pool, conta_id: int, nome: str, email: str, papel: str) -> dict:
     if "@" not in email or "." not in email:
         return {"ok": False, "erro": "E-mail inválido."}
     nome = (nome or "").strip() or email.split("@")[0]
+    wa = _so_fone(whatsapp)
     with pool.connection() as c:
         if c.execute("select 1 from membros where conta_id=%s and lower(email)=%s",
                      (conta_id, email)).fetchone():
             return {"ok": False, "erro": "Essa pessoa já está na equipe."}
         if _tem_login(c, email):
             row = c.execute(
-                """insert into membros (conta_id, nome, papel, email, ativo)
-                   values (%s,%s,%s,%s,true) returning id""",
-                (conta_id, nome, papel, email)).fetchone()
+                """insert into membros (conta_id, nome, papel, email, ativo, whatsapp)
+                   values (%s,%s,%s,%s,true,%s) returning id""",
+                (conta_id, nome, papel, email, wa)).fetchone()
             c.commit()
             return {"ok": True, "membro_id": row[0], "ja_tem_login": True}
         token = secrets.token_urlsafe(24)
         row = c.execute(
             """insert into membros (conta_id, nome, papel, email, ativo,
-                                    convite_token, convite_expira)
-               values (%s,%s,%s,%s,false,%s,%s) returning id""",
-            (conta_id, nome, papel, email, token, _agora() + timedelta(days=7)),
+                                    convite_token, convite_expira, whatsapp)
+               values (%s,%s,%s,%s,false,%s,%s,%s) returning id""",
+            (conta_id, nome, papel, email, token, _agora() + timedelta(days=7), wa),
         ).fetchone()
         c.commit()
     return {"ok": True, "membro_id": row[0], "token": token, "ja_tem_login": False}
@@ -215,13 +225,14 @@ def listar_equipe(pool, conta_id: int) -> list[dict]:
     """Membros com login web (os que têm e-mail). Não inclui o dono (login por conta)."""
     with pool.connection() as c:
         rows = c.execute(
-            """select id, nome, email, papel, ativo, (convite_token is not null)
+            """select id, nome, email, papel, ativo, (convite_token is not null),
+                      coalesce(whatsapp,'')
                  from membros where conta_id=%s and email is not null
                 order by id""", (conta_id,)).fetchall()
     # 'pendente' = convite por LINK ainda não aceito (inativo + com token). Quem já
     # tinha login Zaq entra ativo sem senha/token — NÃO é pendente.
     return [{"id": r[0], "nome": r[1], "email": r[2], "papel": r[3], "ativo": r[4],
-             "pendente": (not r[4]) and r[5], "rotulo": rotulo(r[3])} for r in rows]
+             "pendente": (not r[4]) and r[5], "rotulo": rotulo(r[3]), "whatsapp": r[6]} for r in rows]
 
 
 def atualizar_papel(pool, conta_id: int, membro_id: int, papel: str) -> dict:
@@ -244,15 +255,21 @@ def definir_ativo(pool, conta_id: int, membro_id: int, ativo: bool) -> dict:
     return {"ok": bool(r)}
 
 
-def renomear_membro(pool, conta_id: int, membro_id: int, nome: str) -> dict:
-    """Corrige o nome de um membro (dados digitados errado). Nunca mexe no dono."""
+def renomear_membro(pool, conta_id: int, membro_id: int, nome: str, whatsapp=None) -> dict:
+    """Corrige nome (e o WhatsApp, se vier) de um membro. Nunca mexe no dono.
+    whatsapp=None mantém o atual; string (mesmo vazia) sobrescreve."""
     nome = (nome or "").strip()[:80]
     if not nome:
         return {"ok": False, "erro": "Informe um nome."}
     with pool.connection() as c:
-        r = c.execute(
-            "update membros set nome=%s where id=%s and conta_id=%s and papel<>'dono' returning id",
-            (nome, membro_id, conta_id)).fetchone()
+        if whatsapp is None:
+            r = c.execute(
+                "update membros set nome=%s where id=%s and conta_id=%s and papel<>'dono' returning id",
+                (nome, membro_id, conta_id)).fetchone()
+        else:
+            r = c.execute(
+                "update membros set nome=%s, whatsapp=%s where id=%s and conta_id=%s and papel<>'dono' returning id",
+                (nome, _so_fone(whatsapp), membro_id, conta_id)).fetchone()
         c.commit()
     return {"ok": bool(r)}
 

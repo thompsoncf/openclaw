@@ -1343,10 +1343,15 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
         convs = _conversas_list(c, ctx["conta_id"], ctx["gerencia"], ctx["membro_id"],
                                 canal=canal, vend=filtro_vend, escopo=escopo)
         ag_cfg, ag_conhec = None, None
+        dist_cfg, dist_membros = None, []
         perfil = {"instagram": "", "cargo": "", "material": "", "material_tipo": "link"}
         if aba == "agente":
             ag_cfg = _agente_config(c, ctx["conta_id"])
             ag_conhec = _agente_conhecimento(c, ctx["conta_id"])
+            from finance import distribuicao as _dist
+            dist_cfg = _dist.config(c, ctx["conta_id"])
+            dist_membros = _dist.membros_fila_ui(c, ctx["conta_id"])
+            c.commit()   # o config() semeia a linha de distribuicao na 1ª vez
             prow = c.execute(
                 "select coalesce(prospec_instagram,''), coalesce(prospec_cargo,''), "
                 "coalesce(prospec_material,''), coalesce(nullif(prospec_material_tipo,''),'link') "
@@ -1361,6 +1366,7 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
                    gerencia=ctx["gerencia"], vendedores=vends, filtro_vend=filtro_vend,
                    remetente=_ein_remetente(pool, ctx["conta_id"]), tem_ia=_tem_ia(),
                    ag_cfg=ag_cfg, ag_conhec=ag_conhec, perfil=perfil,
+                   dist_cfg=dist_cfg, dist_membros=dist_membros,
                    aviso=request.session.pop("prosp_aviso", None))
 
 
@@ -1900,6 +1906,31 @@ async def comunicacao_agente_config(request: Request):
     return RedirectResponse(_AG_DESTINO, status_code=303)
 
 
+@router.post("/painel/prospeccao/comunicacao/distribuicao")
+async def comunicacao_distribuicao(request: Request):
+    """Salva o rodízio de distribuição de leads (nível empresa). Só dono/gestor.
+    A ordem dos checkboxes 'vend' marcados = a ordem da fila (o drag reordena no DOM)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "Só o dono/gestor configura a distribuição."
+        return RedirectResponse(_AG_DESTINO, status_code=303)
+    f = await request.form()
+    ativo = str(f.get("ativo") or "").lower() in ("1", "on", "true", "sim")
+    avisar = str(f.get("avisar") or "").lower() in ("1", "on", "true", "sim")
+    ids = [int(x) for x in f.getlist("vend") if str(x).isdigit()]
+    from finance import distribuicao as _dist
+    with get_pool().connection() as c:
+        validos = {r[0] for r in c.execute(
+            "select id from membros where conta_id=%s and ativo", (ctx["conta_id"],)).fetchall()}
+        ids = [i for i in ids if i in validos]
+        _dist.salvar(c, ctx["conta_id"], ativo, avisar, ids)
+        c.commit()
+    request.session["prosp_aviso"] = "Distribuição de leads salva ✓"
+    return RedirectResponse(_AG_DESTINO, status_code=303)
+
+
 @router.post("/painel/prospeccao/comunicacao/agente-instrucoes")
 def comunicacao_agente_instrucoes(request: Request, texto: str = Form("")):
     """Salva as instruções gerais do agente (uma linha tipo='instrucoes' por conta)."""
@@ -2041,6 +2072,20 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
              status = case when status='pendente' then 'pendente' else 'aberta' end,
              agente_ativo = case when status='pendente' then agente_ativo else %s end
            where id=%s""", (agente_on, conv_id))
+    # rodízio: se o lead ainda não tem dono, distribui pro próximo vendedor da fila.
+    # Cobre contato NOVO e resposta de campanha (ambos passam por aqui). Best-effort —
+    # nunca deixa a entrada da mensagem quebrar; o aviso vai numa thread solta.
+    try:
+        from finance import distribuicao as _dist
+        _mid = _dist.atribuir_se_sem_dono(c, conta_id, lead_id)
+        if _mid:
+            _emp = (c.execute("select coalesce(empresa,'') from prospeccao where id=%s",
+                              (lead_id,)).fetchone() or [""])[0]
+            import threading
+            threading.Thread(target=_dist.avisar_vendedor,
+                             args=(get_pool(), conta_id, _mid, _emp), daemon=True).start()
+    except Exception:  # noqa: BLE001
+        pass
     return conv_id
 
 
@@ -6549,6 +6594,57 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       </div>
     </div>
   </form>
+
+  <style>
+  .distrow{display:flex;align-items:center;gap:.55rem;padding:.5rem .6rem;border:1px solid var(--borda);border-radius:9px;background:var(--bg);cursor:default}
+  .distrow .grip{color:var(--txt-mut);cursor:grab;font-size:.9rem}
+  .distrow input[type=checkbox]{width:18px;height:18px;accent-color:var(--verde);flex-shrink:0}
+  .distrow .dnm{flex:1;font-size:.88rem}
+  .distnote{font-size:.82rem;color:var(--txt-mut);background:#1a1226;border:1px solid #3a2b52;border-radius:10px;padding:.6rem .75rem;margin:.7rem 0;line-height:1.6}
+  .distnote b{color:#c9a3e0}
+  </style>
+  <div class="cx-card">
+    <form method="post" action="/painel/prospeccao/comunicacao/distribuicao">
+      <div style="display:flex;align-items:center;gap:.7rem">
+        <div style="font-size:1.6rem">🎯</div>
+        <div style="flex:1"><b style="font-size:1rem">Distribuição de leads<span class="tag-new">novo</span></b>
+          <div class="mut" style="font-size:.8rem">Reparte os leads novos entre a equipe, por ordem de fila (rodízio).</div></div>
+        <label class="sw"><input type="checkbox" name="ativo" {% if dist_cfg and dist_cfg.ativo %}checked{% endif %}><span></span></label>
+      </div>
+      <div class="distnote">🤖 O agente dá o 1º toque e qualifica. O <b>vendedor da vez</b> é avisado, observa e
+        <b>assume quando quiser</b>. Vale pra toda entrada nova que cai no chip da empresa — anúncio (tráfego pago),
+        resposta de campanha e contato orgânico.</div>
+      <div class="agrow"><div class="lab"><b>Avisar o vendedor</b><div>E-mail sempre; WhatsApp quando tiver número + template aprovado</div></div>
+        <label class="sw"><input type="checkbox" name="avisar" {% if not dist_cfg or dist_cfg.avisar %}checked{% endif %}><span></span></label></div>
+      <div class="agfield" style="margin-top:.7rem"><label>Vendedores na fila — marque quem participa e arraste ⠿ pra ordenar</label></div>
+      <div id="distfila" style="display:flex;flex-direction:column;gap:.4rem;margin-top:.3rem">
+        {% for m in dist_membros %}
+        <div class="distrow" draggable="true">
+          <span class="grip" title="Arraste pra reordenar">⠿</span>
+          <label style="display:flex;align-items:center;gap:.55rem;flex:1;cursor:pointer">
+            <input type="checkbox" name="vend" value="{{ m.id }}" {% if m.na_fila %}checked{% endif %}>
+            <span class="dnm">{{ m.nome }}{% if not m.whatsapp %} <span class="mut" style="font-size:.72rem">· sem WhatsApp (só e-mail)</span>{% endif %}</span>
+          </label>
+        </div>
+        {% else %}
+        <p class="mut" style="font-size:.82rem;margin:.2rem 0">Convide vendedores na aba <b>Equipe</b> pra montar a fila.</p>
+        {% endfor %}
+      </div>
+      <div style="display:flex;justify-content:flex-end;margin-top:.8rem"><button class="pbtn">Salvar distribuição</button></div>
+    </form>
+  </div>
+  <script>
+  (function(){
+    var box=document.getElementById('distfila'); if(!box) return; var drag=null;
+    box.querySelectorAll('.distrow').forEach(function(row){
+      row.addEventListener('dragstart',function(){drag=row;row.style.opacity=.4;});
+      row.addEventListener('dragend',function(){row.style.opacity=1;drag=null;});
+      row.addEventListener('dragover',function(e){e.preventDefault();
+        if(!drag||drag===row)return; var r=row.getBoundingClientRect();
+        box.insertBefore(drag,(e.clientY-r.top)/r.height<.5?row:row.nextSibling);});
+    });
+  })();
+  </script>
 
   <div class="cx-card">
     <h3>🧠 Treinar o agente</h3>

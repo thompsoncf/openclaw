@@ -169,6 +169,46 @@ def construir_ferramentas_agenda(pool, conta_id: int,
             return f"🗑️ Cancelei: {ev['titulo']} ({ag.fmt_hora(ev)})."
         return "Não consegui cancelar esse compromisso."
 
+    def _resolver_passado(e: dict) -> tuple[dict | None, str | None]:
+        """Igual _resolver, mas pra compromissos que JÁ PASSARAM (marcar desfecho
+        só faz sentido pro passado — achar_por_titulo normal só olha o futuro)."""
+        eid = e.get("evento_id")
+        if eid:
+            try:
+                alvo = int(eid)
+            except (TypeError, ValueError):
+                alvo = None
+            if alvo:
+                ev = ag.evento_por_id(pool, conta_id, alvo)
+                if ev:
+                    return ev, None
+        termo = e.get("titulo") or ""
+        cand = ag.achar_por_titulo_passado(pool, conta_id, termo, ag.agora_brt())
+        if len(cand) == 1:
+            return cand[0], None
+        if len(cand) > 1:
+            return None, ("Tem mais de um compromisso parecido nos últimos 30 dias: "
+                          + "; ".join(f"{ag.fmt_hora(c)} {c['titulo']}" for c in cand[:5])
+                          + ". Qual deles?")
+        return None, "Não achei esse compromisso nos últimos 30 dias. Confere o nome?"
+
+    def marcar_desfecho_evento(e: dict) -> str:
+        aconteceu = (e.get("aconteceu") or "").strip().lower()
+        if aconteceu in ("sim", "true", "1", "realizado", "aconteceu"):
+            desfecho = "realizado"
+        elif aconteceu in ("nao", "não", "false", "0", "nao_realizado", "nao aconteceu", "não aconteceu"):
+            desfecho = "nao_realizado"
+        else:
+            return "Aconteceu ou não aconteceu? Me diz um dos dois."
+        ev, erro = _resolver_passado(e)
+        if erro:
+            return erro
+        if ag.marcar_desfecho(pool, conta_id, ev["id"], desfecho, ag.agora_brt()):
+            if desfecho == "realizado":
+                return f"✅ Anotado: '{ev['titulo']}' aconteceu."
+            return f"❌ Anotado: '{ev['titulo']}' não aconteceu. Se quiser remarcar, é só falar."
+        return "Não consegui marcar esse compromisso (só dá pra marcar um que já passou)."
+
     _quando = {"type": "string", "description": "data/hora, ex: 'amanhã 15h', '28/07 14:30', 'sexta 10h'"}
     _convidados = {
         "type": "array",
@@ -258,5 +298,21 @@ def construir_ferramentas_agenda(pool, conta_id: int,
                 },
             },
             executar=cancelar_evento,
+        ),
+        Ferramenta(
+            nome="marcar_desfecho_evento",
+            descricao=("Marca se um compromisso JÁ PASSADO aconteceu ou não. Use quando a "
+                      "pessoa disser algo como 'a reunião com o Paulo aconteceu' ou 'não "
+                      "rolou o compromisso de ontem'. Identifique por titulo (ou evento_id)."),
+            parametros={
+                "type": "object",
+                "properties": {
+                    "titulo": {"type": "string", "description": "título do compromisso já passado"},
+                    "evento_id": {"type": "integer", "description": "opcional; id do evento"},
+                    "aconteceu": {"type": "string", "description": "'sim' se aconteceu, 'nao' se não aconteceu"},
+                },
+                "required": ["aconteceu"],
+            },
+            executar=marcar_desfecho_evento,
         ),
     ]

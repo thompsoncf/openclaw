@@ -208,6 +208,31 @@ def convite_envia(request: Request, token: str, senha: str = Form(...),
 
 # ---------------------------------------------------------------- templates
 _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
+<style>
+/* linha de cada membro — reseta o button{width:100%} global e alinha tudo */
+.mrow{display:flex;align-items:center;gap:.85rem;padding:.9rem 0;border-top:1px solid var(--borda);flex-wrap:wrap}
+.mrow .minfo{flex:1;min-width:210px;display:flex;flex-direction:column;gap:.4rem}
+.mname{display:flex;gap:.4rem;align-items:center}
+.mname input{flex:1;min-width:120px;max-width:240px;background:var(--bg);border:1px solid var(--borda);
+  border-radius:8px;color:var(--txt);padding:.42rem .55rem;font-weight:600;font-size:.9rem;margin:0}
+.mname input:focus{outline:none;border-color:var(--verde)}
+.mmeta{font-size:.76rem;color:var(--txt-mut);display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
+.macts{display:flex;gap:.45rem;align-items:center;flex-wrap:wrap}
+.macts select{background:var(--bg);border:1px solid var(--borda);border-radius:8px;color:var(--txt);
+  padding:.44rem .5rem;font-size:.82rem}
+/* todos os botões da linha: tamanho natural (o global força width:100%) */
+.mrow button{width:auto;margin:0;padding:.44rem .7rem;font-size:.8rem;border-radius:8px;cursor:pointer;
+  background:var(--card-2);border:1px solid var(--borda);color:var(--txt);white-space:nowrap;
+  display:inline-flex;align-items:center;gap:.35rem}
+.mrow button:hover{border-color:var(--verde)}
+.mrow .ebtn{padding:.44rem .6rem}                 /* botão-ícone do nome (✓) */
+.mrow .danger:hover{border-color:#e0574f;color:#f0917f;background:#2a1414}
+.mtag{padding:.1rem .5rem;border-radius:999px;font-size:.72rem;border:1px solid var(--borda);color:var(--txt-mut)}
+.mtag.on{color:var(--verde-claro);border-color:#1e4a3a;background:#10241a}
+.mtag.pend{color:#e0b25a;border-color:#5a4520;background:#241c0f}
+.mtag.off{color:#e07a5f;border-color:#5a2b2b;background:#241313}
+@media (max-width:640px){.macts{width:100%}}
+</style>
 <div class="card larga">
   <h2 style="margin:0">Equipe</h2>
   <div class="mut" style="font-size:.82rem">Convide sua equipe por link. Cada pessoa entra com o próprio login, com o acesso do papel.</div>
@@ -237,36 +262,39 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
   <div style="margin-top:1.2rem">
     {% if not membros %}<p class="mut">Ninguém na equipe ainda. Convide a primeira pessoa acima.</p>{% endif %}
     {% for m in membros %}
-    <div style="display:flex;align-items:center;gap:.6rem;padding:.7rem 0;border-top:1px solid var(--borda);flex-wrap:wrap">
+    <div class="mrow">
       <div class="avatar">{{ (m.nome or m.email or '?')[:1]|upper }}</div>
-      <div style="flex:1;min-width:180px">
-        <form method="post" action="/painel/equipe/renomear" style="display:flex;gap:.35rem;align-items:center;margin:0;flex-wrap:wrap">
+      <div class="minfo">
+        <form method="post" action="/painel/equipe/renomear" class="mname">
           <input type="hidden" name="membro_id" value="{{ m.id }}">
-          <input name="nome" value="{{ m.nome }}" maxlength="80" title="Corrigir o nome"
-                 style="font-weight:600;padding:.28rem .45rem;max-width:200px;font-size:.9rem">
-          <button class="btn-conv" style="margin:0;padding:.28rem .5rem" title="Salvar nome">✎ Salvar</button>
-          {% if m.pendente %}<span class="tag" style="background:#2a2212;color:#e0b25a">convite pendente</span>
-          {% elif not m.ativo %}<span class="tag" style="background:#3a1a1a;color:#e07a5f">desativado</span>
-          {% else %}<span class="tag">ativo</span>{% endif %}
+          <input name="nome" value="{{ m.nome }}" maxlength="80" title="Corrigir o nome" aria-label="Nome">
+          <button class="ebtn" title="Salvar nome">✓ Salvar</button>
         </form>
-        <div class="mut" style="font-size:.78rem">{{ m.email }} · {{ m.rotulo }}</div>
+        <div class="mmeta">
+          {% if m.pendente %}<span class="mtag pend">convite pendente</span>
+          {% elif not m.ativo %}<span class="mtag off">desativado</span>
+          {% else %}<span class="mtag on">ativo</span>{% endif %}
+          <span>{{ m.email }} · {{ m.rotulo }}</span>
+        </div>
       </div>
-      <form method="post" action="/painel/equipe/papel" style="display:flex;gap:.3rem;align-items:center;margin:0">
-        <input type="hidden" name="membro_id" value="{{ m.id }}">
-        <select name="papel" onchange="this.form.submit()" style="font-size:.82rem;padding:.3rem">
-          {% for v,l in papeis %}<option value="{{ v }}" {% if v==m.papel %}selected{% endif %}>{{ l }}</option>{% endfor %}
-        </select>
-      </form>
-      <form method="post" action="/painel/equipe/reconvite" style="margin:0"><input type="hidden" name="membro_id" value="{{ m.id }}">
-        <button class="btn-conv" style="margin:0">↻ Novo link</button></form>
-      <form method="post" action="/painel/equipe/ativo" style="margin:0">
-        <input type="hidden" name="membro_id" value="{{ m.id }}">
-        <input type="hidden" name="ativo" value="{{ '0' if m.ativo else '1' }}">
-        <button class="{{ 'btn-off' if m.ativo else 'btn-on' }}" style="margin:0">{{ 'desativar' if m.ativo else 'reativar' }}</button></form>
-      <form method="post" action="/painel/equipe/excluir" style="margin:0"
-            onsubmit="return confirm('Excluir “{{ m.nome or m.email }}” da equipe? Ele perde o acesso a esta empresa.')">
-        <input type="hidden" name="membro_id" value="{{ m.id }}">
-        <button class="btn-off" style="margin:0" title="Excluir da equipe">✕ Excluir</button></form>
+      <div class="macts">
+        <form method="post" action="/painel/equipe/papel" style="margin:0">
+          <input type="hidden" name="membro_id" value="{{ m.id }}">
+          <select name="papel" onchange="this.form.submit()" title="Papel / acesso">
+            {% for v,l in papeis %}<option value="{{ v }}" {% if v==m.papel %}selected{% endif %}>{{ l }}</option>{% endfor %}
+          </select>
+        </form>
+        <form method="post" action="/painel/equipe/reconvite" style="margin:0"><input type="hidden" name="membro_id" value="{{ m.id }}">
+          <button title="Gerar e reenviar o link de convite">↻ Novo link</button></form>
+        <form method="post" action="/painel/equipe/ativo" style="margin:0">
+          <input type="hidden" name="membro_id" value="{{ m.id }}">
+          <input type="hidden" name="ativo" value="{{ '0' if m.ativo else '1' }}">
+          <button title="{{ 'Suspender o acesso' if m.ativo else 'Reativar o acesso' }}">{{ '⏸ Desativar' if m.ativo else '▶ Reativar' }}</button></form>
+        <form method="post" action="/painel/equipe/excluir" style="margin:0"
+              onsubmit="return confirm('Excluir “{{ m.nome or m.email }}” da equipe? Ele perde o acesso a esta empresa.')">
+          <input type="hidden" name="membro_id" value="{{ m.id }}">
+          <button class="danger" title="Excluir da equipe">✕ Excluir</button></form>
+      </div>
     </div>
     {% endfor %}
   </div>

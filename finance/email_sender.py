@@ -230,6 +230,34 @@ def enviar_convite_zaq(destino: str, nome: str | None, link: str,
                         reply_to=reply_to, from_nome=from_nome)
 
 
+def enviar_convite_equipe(destino: str, nome: str | None, empresa: str,
+                          papel: str, link: str) -> bool:
+    """Convida alguém pra ENTRAR NA EQUIPE de uma empresa (cria a senha pelo link
+    com token, vale 7 dias). Diferente do enviar_convite_zaq, que é pra virar cliente."""
+    import html as _h
+    saud = f"Olá, {_h.escape(nome)}!" if nome else "Olá!"
+    emp = _h.escape(empresa or "uma empresa")
+    pap = _h.escape(papel or "membro")
+    corpo = f"""
+      <p>{saud}</p>
+      <p>Você foi convidado(a) para a equipe da <b>{emp}</b> no <b>Zaq</b>, como
+         <b>{pap}</b>. É só criar sua senha pra entrar — leva menos de um minuto.</p>
+      <p style="text-align:center;margin:24px 0;">
+        <a href="{link}" style="background:#0f766e;color:#fff;text-decoration:none;
+           padding:12px 28px;border-radius:8px;font-weight:bold;display:inline-block;">
+           Criar minha senha e entrar</a>
+      </p>
+      <p style="font-size:13px;color:#666;">Ou copie e cole no navegador:<br>
+         <a href="{link}" style="color:#0f766e;">{link}</a></p>
+      <p style="font-size:13px;color:#666;">O link vale 7 dias. Se você não esperava
+         este convite, pode ignorar este e-mail.</p>
+    """
+    texto = (f"{saud}\n\nVocê foi convidado(a) para a equipe da {empresa} no Zaq "
+             f"como {papel}.\nCrie sua senha e entre: {link}\n\nO link vale 7 dias.")
+    return enviar_email(destino, f"Convite para a equipe da {empresa} no Zaq",
+                        _layout("Entre para a equipe", corpo), texto)
+
+
 def enviar_recuperacao_senha(destino: str, link_reset: str,
                              nome: str | None = None) -> bool:
     """Email de recuperacao de senha (link com token)."""

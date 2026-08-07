@@ -25,8 +25,23 @@ def _dono(request: Request):
     return conta, None
 
 
-def _link(request: Request, token: str) -> str:
-    return f"{str(request.base_url)}equipe/convite/{token}"
+def _link(token: str) -> str:
+    """Link público do convite. Usa APP_URL (mesma fonte dos outros e-mails) em vez de
+    request.base_url — atrás do proxy do Render o base_url sai errado (host/esquema
+    internos), gerando link que não abre. O APP_URL é a URL pública de verdade."""
+    from finance.email_sender import _app_url
+    return f"{_app_url()}/equipe/convite/{token}"
+
+
+def _enviar_email_convite(conta, nome: str, email: str, papel: str, link: str) -> bool:
+    """Dispara o e-mail de convite pro convidado (com o link). Tolerante: se o SMTP
+    não estiver configurado ou falhar, devolve False e o link segue na tela como plano B."""
+    try:
+        from finance.email_sender import enviar_convite_equipe
+        return bool(enviar_convite_equipe(email, nome or None, conta[2] or "sua empresa",
+                                          eq.rotulo(papel), link))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 @router.get("/painel/equipe", response_class=HTMLResponse)
@@ -56,7 +71,15 @@ def painel_equipe_convidar(request: Request, nome: str = Form(""),
                                             "à equipe. Ela acessa esta empresa com a senha que "
                                             "já usa, pelo menu “Trocar empresa”.")
     elif r.get("ok"):
-        request.session["equipe_link"] = _link(request, r["token"])
+        link = _link(r["token"])
+        request.session["equipe_link"] = link
+        enviado = _enviar_email_convite(conta, nome, email, papel, link)
+        request.session["equipe_aviso"] = (
+            f"Convite enviado por e-mail para {email} ✓ — o link também está aqui embaixo, "
+            "caso queira mandar por WhatsApp."
+            if enviado else
+            "Gerei o link abaixo (copie e mande pra pessoa). Não consegui enviar o e-mail "
+            "automático agora — confira o SMTP nas configurações.")
     else:
         request.session["equipe_erro"] = r.get("erro", "Não consegui convidar.")
     return RedirectResponse("/painel/equipe", status_code=303)
@@ -87,7 +110,14 @@ def painel_equipe_reconvite(request: Request, membro_id: int = Form(...)):
         return redir
     r = eq.regerar_convite(get_pool(), conta[0], membro_id)
     if r.get("ok"):
-        request.session["equipe_link"] = _link(request, r["token"])
+        link = _link(r["token"])
+        request.session["equipe_link"] = link
+        enviado = _enviar_email_convite(conta, r.get("nome") or "", r.get("email") or "",
+                                        r.get("papel") or "vendedor", link)
+        request.session["equipe_aviso"] = (
+            f"Novo link gerado e reenviado por e-mail para {r.get('email')} ✓."
+            if enviado else
+            "Novo link gerado abaixo — copie e mande pra pessoa (não consegui reenviar por e-mail agora).")
     return RedirectResponse("/painel/equipe", status_code=303)
 
 

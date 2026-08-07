@@ -48,6 +48,9 @@ create table campanha_alvos (id bigserial primary key, campanha_id bigint, prosp
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
   direcao text, autor text, texto text, provider_sid text, membro_id bigint,
   criado_em timestamptz default now());
+-- pessoas vem da 066 (marcada como aplicada); a 131 adiciona cnpj/tipo.
+create table pessoas (id bigserial primary key, cpf text, celular text,
+  nome text not null default '', email text);
 create table schema_migrations (id serial primary key, nome text unique not null,
   executada_em timestamptz default now());
 """

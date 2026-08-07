@@ -71,25 +71,28 @@ def _fmt_evento(row) -> dict:
             "local": row[4], "descricao": row[5], "lembrete_min": row[6],
             "criado_em": row[7] if len(row) > 7 else None,
             "tipo": (row[8] if len(row) > 8 else None) or "pessoal",
-            "desfecho": row[9] if len(row) > 9 else None}
+            "desfecho": row[9] if len(row) > 9 else None,
+            "link_online": row[10] if len(row) > 10 else None}
 
 
-_COLS = "id, titulo, inicio, fim, local, descricao, lembrete_min, criado_em, tipo, desfecho"
+_COLS = ("id, titulo, inicio, fim, local, descricao, lembrete_min, criado_em, tipo, "
+        "desfecho, link_online")
 
 
 def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
                  membro_id: int | None = None, fim: datetime | None = None,
                  local: str | None = None, descricao: str | None = None,
-                 lembrete_min: int | None = None, tipo: str = "pessoal") -> dict:
+                 lembrete_min: int | None = None, tipo: str = "pessoal",
+                 link_online: str | None = None) -> dict:
     tipo = tipo if tipo in TIPOS else "pessoal"
     with pool.connection() as c:
         row = c.execute(
             """insert into eventos_agenda
-               (conta_id, membro_id, titulo, inicio, fim, local, descricao, lembrete_min, tipo)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               (conta_id, membro_id, titulo, inicio, fim, local, descricao, lembrete_min, tipo, link_online)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                returning """ + _COLS,
             (conta_id, membro_id, titulo.strip(), inicio, fim, local, descricao,
-             lembrete_min, tipo),
+             lembrete_min, tipo, link_online),
         ).fetchone()
         c.commit()
     return _fmt_evento(row)

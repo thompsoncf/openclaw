@@ -22,7 +22,7 @@ def pool():
     migr = Path(__file__).resolve().parent.parent / "db" / "migracoes"
     with p.connection() as c:
         for nome in ("098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql",
-                    "130_evento_desfecho.sql"):
+                    "130_evento_desfecho.sql", "131_evento_link_online.sql"):
             c.execute((migr / nome).read_text(encoding="utf-8"))
         c.commit()
     yield p
@@ -197,6 +197,32 @@ def test_confirmacao_texto_reuniao_online_nao_traz_mapa(pool, conta_id):
     txt = cv.confirmacao_texto(c)
     assert "confirmada" in txt.lower()
     assert "mapa" not in txt.lower() and "maps" not in txt.lower()
+
+
+def test_confirmacao_texto_traz_link_da_chamada(pool, conta_id):
+    ev = ag.criar_evento(pool, conta_id, "Daily", ag.agora_brt() + timedelta(days=1),
+                         local="Online", link_online="https://meet.google.com/abc-defg-hij")
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Léo", "86988887777")
+    c = cv.responder(pool, conv["token"], "confirmado")
+    txt = cv.confirmacao_texto(c)
+    assert "meet.google.com/abc-defg-hij" in txt
+    assert "entrar na chamada" in txt.lower()
+
+
+def test_confirmacao_texto_sem_link_online_nao_traz_linha(pool, conta_id):
+    ev = _evento(pool, conta_id, titulo="Reunião presencial")
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Léo", "86988887777")
+    c = cv.responder(pool, conv["token"], "confirmado")
+    txt = cv.confirmacao_texto(c)
+    assert "chamada" not in txt.lower()
+
+
+def test_por_token_traz_link_online(pool, conta_id):
+    ev = ag.criar_evento(pool, conta_id, "Daily", ag.agora_brt() + timedelta(days=1),
+                         local="Online", link_online="https://meet.google.com/abc-defg-hij")
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Léo", "")
+    c = cv.por_token(pool, conv["token"])
+    assert c["evento"]["link_online"] == "https://meet.google.com/abc-defg-hij"
 
 
 def test_enviar_convite_monta_variaveis(pool, conta_id, monkeypatch):
@@ -433,6 +459,19 @@ def test_remarcar_e_avisar_notifica_dentro_da_janela_com_texto_livre(pool, conta
     assert capt["numero"] == "86988880002"
     assert "mudou de horário" in capt["texto"].lower()
     assert "/convite/" in capt["texto"]                   # mesmo link, não convite novo
+
+
+def test_remarcar_e_avisar_notifica_com_link_da_chamada(pool, conta_id, monkeypatch):
+    ev = ag.criar_evento(pool, conta_id, "Daily remarcada", ag.agora_brt() + timedelta(days=1),
+                         local="Online", link_online="https://meet.google.com/abc-defg-hij")
+    ca = cv.criar_convidado(pool, conta_id, ev["id"], "Bia", "86988880002")
+    cv.responder(pool, ca["token"], "confirmado")
+    from finance import whatsapp_out as wout
+    capt = {}
+    monkeypatch.setattr(wout, "enviar", lambda c, cid, numero, texto: capt.update(texto=texto) or {"ok": True})
+    novo = ag.agora_brt() + timedelta(days=3)
+    cv.remarcar_e_avisar(pool, conta_id, ev["id"], novo, None, avisar=True, agora=ag.agora_brt())
+    assert "meet.google.com/abc-defg-hij" in capt["texto"]
 
 
 def test_remarcar_e_avisar_fora_da_janela_usa_template_de_convite(pool, conta_id, monkeypatch):

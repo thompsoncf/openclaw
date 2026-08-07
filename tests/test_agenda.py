@@ -136,7 +136,7 @@ def pool():
     with p.connection() as c:
         for nome in ("098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql",
                     "101_agenda_lembretes.sql", "126_agenda_avisar_convidados.sql",
-                    "130_evento_desfecho.sql"):
+                    "130_evento_desfecho.sql", "131_evento_link_online.sql"):
             c.execute((migr / nome).read_text(encoding="utf-8"))
         c.commit()
     yield p
@@ -159,6 +159,18 @@ def test_criar_listar_cancelar(pool, conta_id):
     assert any(e["id"] == ev["id"] for e in prox)
     assert ag.cancelar_evento(pool, conta_id, ev["id"]) is True
     assert all(e["id"] != ev["id"] for e in ag.proximos(pool, conta_id))   # sumiu
+
+
+def test_criar_evento_com_link_online(pool, conta_id):
+    ev = ag.criar_evento(pool, conta_id, "Daily", ag.agora_brt() + timedelta(days=1),
+                         local="Online", link_online="https://meet.google.com/abc-defg-hij")
+    assert ev["link_online"] == "https://meet.google.com/abc-defg-hij"
+    assert ag.evento_por_id(pool, conta_id, ev["id"])["link_online"] == "https://meet.google.com/abc-defg-hij"
+
+
+def test_criar_evento_sem_link_online_fica_none(pool, conta_id):
+    ev = ag.criar_evento(pool, conta_id, "Reunião física", ag.agora_brt() + timedelta(days=1), local="Escritório")
+    assert ev["link_online"] is None
 
 
 def test_isolamento_por_conta(pool, conta_id):

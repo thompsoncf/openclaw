@@ -31,7 +31,7 @@ def pool():
     migr = Path(__file__).resolve().parent.parent / "db" / "migracoes"
     with p.connection() as c:
         for nome in ("098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql",
-                    "130_evento_desfecho.sql"):
+                    "130_evento_desfecho.sql", "131_evento_link_online.sql"):
             c.execute((migr / nome).read_text(encoding="utf-8"))
         c.commit()
     yield p
@@ -101,3 +101,38 @@ def test_rota_remarcar_reaproveita_cancelado(pool, conta_id, monkeypatch):
     assert resp.status_code == 303
     ev2 = ag.evento_por_id(pool, conta_id, ev["id"])
     assert ev2 is not None and ev2["inicio"] == novo
+
+
+def test_rota_novo_salva_link_online_quando_marcado_online(pool, conta_id, monkeypatch):
+    from web import painel_agenda as pa
+    monkeypatch.setattr(pa, "get_pool", lambda: pool)
+    monkeypatch.setattr(pa, "_acesso", lambda req: (
+        {"conta_id": conta_id, "gerencia": True, "membro_id": None}, None))
+    amanha = ag.agora_brt() + timedelta(days=1)
+    resp = pa.agenda_novo(_FakeSessionRequest(conta_id), titulo="Daily",
+                          data=amanha.strftime("%Y-%m-%d"), hora="09:00", descricao="",
+                          tipo="pessoal", local="Online",
+                          link_online="https://meet.google.com/abc-defg-hij",
+                          convidado_nome=[], convidado_contato=[], m="")
+    assert resp.status_code == 303
+    evs = [e for e in ag.proximos(pool, conta_id) if e["titulo"] == "Daily"]
+    assert evs and evs[0]["link_online"] == "https://meet.google.com/abc-defg-hij"
+
+
+def test_rota_novo_ignora_link_online_se_nao_marcou_online(pool, conta_id, monkeypatch):
+    """Defesa no servidor: mesmo que o cliente mande link_online preenchido (o JS
+    já limpa ao trocar de modo, mas não confia cegamente no que vem do form),
+    só grava se local for realmente 'Online'."""
+    from web import painel_agenda as pa
+    monkeypatch.setattr(pa, "get_pool", lambda: pool)
+    monkeypatch.setattr(pa, "_acesso", lambda req: (
+        {"conta_id": conta_id, "gerencia": True, "membro_id": None}, None))
+    amanha = ag.agora_brt() + timedelta(days=1)
+    resp = pa.agenda_novo(_FakeSessionRequest(conta_id), titulo="Presencial",
+                          data=amanha.strftime("%Y-%m-%d"), hora="09:00", descricao="",
+                          tipo="pessoal", local="Escritório",
+                          link_online="https://meet.google.com/deveria-sumir",
+                          convidado_nome=[], convidado_contato=[], m="")
+    assert resp.status_code == 303
+    evs = [e for e in ag.proximos(pool, conta_id) if e["titulo"] == "Presencial"]
+    assert evs and evs[0]["link_online"] is None

@@ -47,7 +47,7 @@ def por_token(pool, token: str) -> dict | None:
         r = c.execute(
             """select cv.id, cv.nome, cv.contato, cv.status, cv.resposta, cv.token,
                       cv.conta_id, e.id, e.titulo, e.inicio, e.fim, e.local, e.tipo,
-                      co.nome
+                      co.nome, e.link_online
                  from evento_convidados cv
                  join eventos_agenda e on e.id = cv.evento_id
                  join contas co on co.id = cv.conta_id
@@ -55,7 +55,7 @@ def por_token(pool, token: str) -> dict | None:
     if not r:
         return None
     ev = {"id": r[7], "titulo": r[8], "inicio": r[9], "fim": r[10],
-          "local": r[11], "tipo": r[12] or "pessoal"}
+          "local": r[11], "tipo": r[12] or "pessoal", "link_online": r[14]}
     return {"id": r[0], "nome": r[1], "contato": r[2], "status": r[3],
             "resposta": r[4], "token": r[5], "conta_id": r[6],
             "evento": ev, "empresa": r[13]}
@@ -233,6 +233,8 @@ def confirmacao_texto(c: dict) -> str:
         mapa = link_mapa(ev)
         if mapa:
             txt += f"\n📍 Ver o local no mapa: {mapa}"
+        if ev.get("link_online"):
+            txt += f"\n🎥 Entrar na chamada: {ev['link_online']}"
         return txt
     if st == "remarcar":
         return (f"🔁 Anotado{(' ' + primeiro) if primeiro else ''}! Vou avisar o "
@@ -346,12 +348,16 @@ def avisar_convidado_confirmado(pool, conta_id: int, contato: str, nome: str,
 
 # ---- Remarcar: muda a data mantendo os mesmos convidados/link -----------------
 
-def texto_remarcado(nome: str, titulo: str, hora_antiga: str, hora_nova: str, url: str) -> str:
+def texto_remarcado(nome: str, titulo: str, hora_antiga: str, hora_nova: str, url: str,
+                    link_online: str | None = None) -> str:
     primeiro = (nome or "").split()[0] if nome else ""
     oi = f"{primeiro}, o" if primeiro else "O"
-    return (f"🔁 {oi} compromisso *{titulo}* mudou de horário: agora é {hora_nova} "
-            f"(antes era {hora_antiga}).\n\nSeu link de confirmação continua o mesmo — "
-            f"só confirma de novo quando puder: {url}")
+    txt = (f"🔁 {oi} compromisso *{titulo}* mudou de horário: agora é {hora_nova} "
+           f"(antes era {hora_antiga}).\n\nSeu link de confirmação continua o mesmo — "
+           f"só confirma de novo quando puder: {url}")
+    if link_online:
+        txt += f"\n🎥 Entrar na chamada: {link_online}"
+    return txt
 
 
 def avisar_convidado_remarcado(pool, conta_id: int, g: dict, ev: dict,
@@ -367,7 +373,8 @@ def avisar_convidado_remarcado(pool, conta_id: int, g: dict, ev: dict,
     if _dentro_da_janela(g.get("respondido_em"), agora):
         from . import whatsapp_out as wout
         url = url_convite(g["token"])
-        texto = texto_remarcado(g.get("nome"), ev["titulo"], hora_antiga, ag.fmt_hora(ev), url)
+        texto = texto_remarcado(g.get("nome"), ev["titulo"], hora_antiga, ag.fmt_hora(ev), url,
+                                ev.get("link_online"))
         with pool.connection() as conn:
             return wout.enviar(conn, conta_id, contato, texto)
     return enviar_convite_whatsapp(pool, g["token"])

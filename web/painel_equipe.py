@@ -111,6 +111,35 @@ def painel_equipe_ativo(request: Request, membro_id: int = Form(...), ativo: str
     return RedirectResponse("/painel/equipe", status_code=303)
 
 
+@router.post("/painel/equipe/renomear")
+def painel_equipe_renomear(request: Request, membro_id: int = Form(...), nome: str = Form("")):
+    conta, redir = _dono(request)
+    if redir is not None:
+        return redir
+    r = eq.renomear_membro(get_pool(), conta[0], membro_id, nome)
+    if r.get("ok"):
+        request.session["equipe_aviso"] = "Nome atualizado ✓"
+    else:
+        request.session["equipe_erro"] = r.get("erro") or "Não consegui renomear (o dono não muda por aqui)."
+    return RedirectResponse("/painel/equipe", status_code=303)
+
+
+@router.post("/painel/equipe/excluir")
+def painel_equipe_excluir(request: Request, membro_id: int = Form(...)):
+    conta, redir = _dono(request)
+    if redir is not None:
+        return redir
+    r = eq.remover_membro(get_pool(), conta[0], membro_id)
+    if r.get("ok"):
+        request.session["equipe_aviso"] = "Colaborador removido da equipe."
+    elif r.get("erro") == "vinculado":
+        request.session["equipe_erro"] = ("Esse colaborador tem leads ou registros vinculados — "
+                                          "desative-o (botão “desativar”) ou reatribua os leads antes de excluir.")
+    else:
+        request.session["equipe_erro"] = "Não consegui excluir (o dono não pode ser removido)."
+    return RedirectResponse("/painel/equipe", status_code=303)
+
+
 @router.post("/painel/equipe/reconvite")
 def painel_equipe_reconvite(request: Request, membro_id: int = Form(...)):
     conta, redir = _dono(request)
@@ -210,11 +239,16 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
     {% for m in membros %}
     <div style="display:flex;align-items:center;gap:.6rem;padding:.7rem 0;border-top:1px solid var(--borda);flex-wrap:wrap">
       <div class="avatar">{{ (m.nome or m.email or '?')[:1]|upper }}</div>
-      <div style="flex:1;min-width:160px">
-        <b>{{ m.nome }}</b>
-        {% if m.pendente %}<span class="tag" style="background:#2a2212;color:#e0b25a">convite pendente</span>
-        {% elif not m.ativo %}<span class="tag" style="background:#3a1a1a;color:#e07a5f">desativado</span>
-        {% else %}<span class="tag">ativo</span>{% endif %}
+      <div style="flex:1;min-width:180px">
+        <form method="post" action="/painel/equipe/renomear" style="display:flex;gap:.35rem;align-items:center;margin:0;flex-wrap:wrap">
+          <input type="hidden" name="membro_id" value="{{ m.id }}">
+          <input name="nome" value="{{ m.nome }}" maxlength="80" title="Corrigir o nome"
+                 style="font-weight:600;padding:.28rem .45rem;max-width:200px;font-size:.9rem">
+          <button class="btn-conv" style="margin:0;padding:.28rem .5rem" title="Salvar nome">✎ Salvar</button>
+          {% if m.pendente %}<span class="tag" style="background:#2a2212;color:#e0b25a">convite pendente</span>
+          {% elif not m.ativo %}<span class="tag" style="background:#3a1a1a;color:#e07a5f">desativado</span>
+          {% else %}<span class="tag">ativo</span>{% endif %}
+        </form>
         <div class="mut" style="font-size:.78rem">{{ m.email }} · {{ m.rotulo }}</div>
       </div>
       <form method="post" action="/painel/equipe/papel" style="display:flex;gap:.3rem;align-items:center;margin:0">
@@ -229,6 +263,10 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
         <input type="hidden" name="membro_id" value="{{ m.id }}">
         <input type="hidden" name="ativo" value="{{ '0' if m.ativo else '1' }}">
         <button class="{{ 'btn-off' if m.ativo else 'btn-on' }}" style="margin:0">{{ 'desativar' if m.ativo else 'reativar' }}</button></form>
+      <form method="post" action="/painel/equipe/excluir" style="margin:0"
+            onsubmit="return confirm('Excluir “{{ m.nome or m.email }}” da equipe? Ele perde o acesso a esta empresa.')">
+        <input type="hidden" name="membro_id" value="{{ m.id }}">
+        <button class="btn-off" style="margin:0" title="Excluir da equipe">✕ Excluir</button></form>
     </div>
     {% endfor %}
   </div>
@@ -274,5 +312,9 @@ _TROCAR_TPL = """{% extends "base" %}{% block conteudo %}
 {% endblock %}"""
 
 _env.loader.mapping["equipe"] = _EQUIPE_TPL
+# ⚠️ NÃO renomeie esta chave pra "convite": o _env.loader.mapping é COMPARTILHADO com
+# painel_agenda, que já usa "convite" pro convite de reunião. Como a agenda é importada
+# depois, o nome genérico "convite" seria sobrescrito e o link /equipe/convite/{token}
+# abriria a tela de AGENDA. Mantenha "convite_equipe" único. (ver test_convite_template_colisao)
 _env.loader.mapping["convite_equipe"] = _CONVITE_TPL
 _env.loader.mapping["trocar"] = _TROCAR_TPL

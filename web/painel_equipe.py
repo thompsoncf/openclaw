@@ -34,12 +34,20 @@ def _link(token: str) -> str:
 
 
 def _enviar_email_convite(conta, nome: str, email: str, papel: str, link: str) -> bool:
-    """Dispara o e-mail de convite pro convidado (com o link). Tolerante: se o SMTP
-    não estiver configurado ou falhar, devolve False e o link segue na tela como plano B."""
+    """Dispara o e-mail de convite pro convidado (com o link). Manda PELA caixa que a
+    empresa configurou em Canais (o cliente bota o e-mail lá); se ela não tiver caixa
+    própria, cai no SMTP de sistema do Zaq. Tolerante: se nada enviar, devolve False e
+    o link segue na tela como plano B."""
     try:
-        from finance.email_sender import enviar_convite_equipe
-        return bool(enviar_convite_equipe(email, nome or None, conta[2] or "sua empresa",
-                                          eq.rotulo(papel), link))
+        from finance import email_sender as es
+        from finance import email_inbound as ein
+        empresa = conta[2] or "sua empresa"
+        assunto, html, texto = es.conteudo_convite_equipe(nome or None, empresa,
+                                                          eq.rotulo(papel), link)
+        # 1) caixa da própria empresa (Canais); 2) fallback no SMTP do Zaq
+        if ein.enviar_conta(get_pool(), conta[0], email, assunto, html, texto, from_nome=empresa):
+            return True
+        return bool(es.enviar_email(email, assunto, html, texto))
     except Exception:  # noqa: BLE001
         return False
 

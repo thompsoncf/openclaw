@@ -230,10 +230,10 @@ def enviar_convite_zaq(destino: str, nome: str | None, link: str,
                         reply_to=reply_to, from_nome=from_nome)
 
 
-def enviar_convite_equipe(destino: str, nome: str | None, empresa: str,
-                          papel: str, link: str) -> bool:
-    """Convida alguém pra ENTRAR NA EQUIPE de uma empresa (cria a senha pelo link
-    com token, vale 7 dias). Diferente do enviar_convite_zaq, que é pra virar cliente."""
+def conteudo_convite_equipe(nome: str | None, empresa: str, papel: str,
+                            link: str) -> tuple[str, str, str]:
+    """Monta (assunto, html, texto) do convite de equipe — separado do envio pra
+    poder mandar tanto pela caixa da própria empresa (Canais) quanto pelo SMTP do Zaq."""
     import html as _h
     saud = f"Olá, {_h.escape(nome)}!" if nome else "Olá!"
     emp = _h.escape(empresa or "uma empresa")
@@ -254,8 +254,16 @@ def enviar_convite_equipe(destino: str, nome: str | None, empresa: str,
     """
     texto = (f"{saud}\n\nVocê foi convidado(a) para a equipe da {empresa} no Zaq "
              f"como {papel}.\nCrie sua senha e entre: {link}\n\nO link vale 7 dias.")
-    return enviar_email(destino, f"Convite para a equipe da {empresa} no Zaq",
-                        _layout("Entre para a equipe", corpo), texto)
+    return (f"Convite para a equipe da {empresa} no Zaq",
+            _layout("Entre para a equipe", corpo), texto)
+
+
+def enviar_convite_equipe(destino: str, nome: str | None, empresa: str,
+                          papel: str, link: str) -> bool:
+    """Convida alguém pra ENTRAR NA EQUIPE de uma empresa pelo SMTP de sistema do Zaq
+    (fallback quando a empresa não tem caixa própria configurada em Canais)."""
+    assunto, html_, texto = conteudo_convite_equipe(nome, empresa, papel, link)
+    return enviar_email(destino, assunto, html_, texto)
 
 
 def enviar_recuperacao_senha(destino: str, link_reset: str,

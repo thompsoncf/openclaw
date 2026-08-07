@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 from contas import equipe as eq  # noqa: F401  (garante import do módulo p/ monkeypatch)
 from finance import email_sender
+from finance import email_inbound as ein
 import web.painel_equipe as pe
 
 
@@ -74,6 +75,34 @@ def test_convidar_sem_smtp_mostra_link(monkeypatch):
 
     assert req.session["equipe_link"] == "https://z.app/equipe/convite/T2"
     assert "smtp" in req.session["equipe_aviso"].lower()
+
+
+def test_convite_usa_caixa_da_empresa_primeiro(monkeypatch):
+    """Manda pela caixa que a empresa configurou em Canais; não cai no SMTP global."""
+    monkeypatch.setattr(pe, "get_pool", lambda: object())
+    cont = {"conta": 0, "geral": 0}
+    monkeypatch.setattr(ein, "enviar_conta",
+                        lambda *a, **k: cont.__setitem__("conta", cont["conta"] + 1) or True)
+    monkeypatch.setattr(email_sender, "enviar_email",
+                        lambda *a, **k: cont.__setitem__("geral", cont["geral"] + 1) or True)
+
+    ok = pe._enviar_email_convite((7, "pj", "Zaq Prospecção"), "Pedro", "pedro@x.com",
+                                  "gestor", "https://z/equipe/convite/T")
+    assert ok is True
+    assert cont["conta"] == 1 and cont["geral"] == 0    # usou a caixa da empresa, não o global
+
+
+def test_convite_cai_no_smtp_zaq_sem_canais(monkeypatch):
+    """Empresa sem caixa própria (Canais) → cai no SMTP de sistema do Zaq."""
+    monkeypatch.setattr(pe, "get_pool", lambda: object())
+    monkeypatch.setattr(ein, "enviar_conta", lambda *a, **k: False)   # sem caixa configurada
+    cont = {"geral": 0}
+    monkeypatch.setattr(email_sender, "enviar_email",
+                        lambda *a, **k: cont.__setitem__("geral", cont["geral"] + 1) or True)
+
+    ok = pe._enviar_email_convite((7, "pj", "Zaq"), "", "x@y.com", "vendedor",
+                                  "https://z/equipe/convite/T2")
+    assert ok is True and cont["geral"] == 1
 
 
 def test_ja_tem_login_nao_manda_link_nem_email(monkeypatch):

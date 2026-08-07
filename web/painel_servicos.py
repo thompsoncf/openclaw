@@ -628,6 +628,12 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   {% endif %}
 
   <div id="cli-form-full"{% if servico_avulso %} style="display:none; margin-top:.8rem; border-top:1px dashed var(--borda); padding-top:.8rem"{% endif %}>
+    {% if servico_avulso %}
+    <div style="display:flex; gap:.4rem; margin-bottom:.8rem">
+      <button type="button" class="oc-pill" id="btn-tipo-pj" data-tipo="pj">🏢 Pessoa Jurídica</button>
+      <button type="button" class="oc-pill" id="btn-tipo-pf" data-tipo="pf">🧑 Pessoa Física</button>
+    </div>
+    {% endif %}
     <div class="oc-field" style="margin-bottom:.7rem">
       <label id="oc-cnpj-label">{{ 'CNPJ / CPF' if servico_avulso else 'CNPJ' }} <span style="color:var(--txt-mut);font-size:.78rem">— preenche empresa, segmento e contato automaticamente</span></label>
       <div style="display:flex; gap:.5rem; align-items:center">
@@ -637,10 +643,10 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       <span id="oc-cnpj-msg" style="font-size:.8rem;color:var(--txt-mut);display:block;margin-top:.25rem"></span>
     </div>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:.8rem">
-      <div class="oc-field"><label>Empresa</label><input id="oc-empresa" class="oc-inp" placeholder="Nome da empresa"></div>
+      <div class="oc-field"><label id="oc-empresa-label">Empresa</label><input id="oc-empresa" class="oc-inp" placeholder="Nome da empresa"></div>
       <div class="oc-field"><label>Contato</label><input id="oc-contato" class="oc-inp" placeholder="Responsável"></div>
-      <div class="oc-field"><label>Cargo</label><input id="oc-cargo" class="oc-inp" placeholder="Cargo do contato"></div>
-      <div class="oc-field"><label>Sócio</label><input id="oc-socio" class="oc-inp" placeholder="Sócio / dono"></div>
+      <div class="oc-field" id="campo-oc-cargo"><label>Cargo</label><input id="oc-cargo" class="oc-inp" placeholder="Cargo do contato"></div>
+      <div class="oc-field" id="campo-oc-socio"><label>Sócio</label><input id="oc-socio" class="oc-inp" placeholder="Sócio / dono"></div>
       <div class="oc-field"><label>WhatsApp</label><input id="oc-whats" class="oc-inp" placeholder="(86) 9 9999-9999"></div>
       <div class="oc-field"><label>Telefone</label><input id="oc-tel" class="oc-inp" placeholder="(86) 3333-0000"></div>
       <div class="oc-field"><label>E-mail</label><input id="oc-email" class="oc-inp" placeholder="contato@empresa.com.br"></div>
@@ -986,6 +992,22 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   });
 
   // ---- Cliente: buscar da Base (só nicho eventos — servico_avulso) ----
+  function aplicaTipoCliente(tipo){
+    var btnPj=document.getElementById('btn-tipo-pj'), btnPf=document.getElementById('btn-tipo-pf');
+    if(!btnPj||!btnPf)return;   // não é eventos, esse toggle nem existe
+    var pj=tipo!=='pf';
+    btnPj.classList.toggle('on',pj); btnPf.classList.toggle('on',!pj);
+    document.getElementById('oc-cnpj').placeholder=pj?'00.000.000/0000-00':'000.000.000-00';
+    document.getElementById('oc-cnpj-btn').style.display=pj?'inline-block':'none';
+    document.getElementById('oc-empresa-label').textContent=pj?'Empresa':'Nome completo';
+    document.getElementById('oc-empresa').placeholder=pj?'Nome da empresa':'Nome completo';
+    document.getElementById('campo-oc-cargo').style.display=pj?'flex':'none';
+    document.getElementById('campo-oc-socio').style.display=pj?'flex':'none';
+  }
+  var btnTipoPj=document.getElementById('btn-tipo-pj'), btnTipoPf=document.getElementById('btn-tipo-pf');
+  if(btnTipoPj)btnTipoPj.addEventListener('click',function(){aplicaTipoCliente('pj');});
+  if(btnTipoPf)btnTipoPf.addEventListener('click',function(){aplicaTipoCliente('pf');});
+
   function atualizarChip(){
     var chip=document.getElementById('cli-chip');
     if(!chip)return;   // não é eventos, essa UI nem existe
@@ -999,6 +1021,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     }
     var cnpjDig=(document.getElementById('oc-cnpj').value||'').replace(/\D/g,'');
     var tipo=cnpjDig.length===14?'pj':'pf';
+    aplicaTipoCliente(tipo);
     document.getElementById('cli-chip-av').textContent=nome.charAt(0).toUpperCase();
     document.getElementById('cli-chip-nome').textContent=nome;
     var partes=[document.getElementById('oc-whats').value,document.getElementById('oc-email').value,document.getElementById('oc-cidade').value].filter(Boolean);
@@ -1062,6 +1085,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   var cliNovoLink=document.getElementById('cli-novo-link');
   if(cliNovoLink)cliNovoLink.addEventListener('click',function(e){
     e.preventDefault();
+    ['oc-empresa','oc-contato','oc-cnpj','oc-segmento','oc-whats','oc-email','oc-tel','oc-cidade','oc-uf','oc-site','oc-cargo','oc-socio'].forEach(function(id){setv(id,'');});
+    aplicaTipoCliente('pj');
     document.getElementById('cli-form-full').style.display='block';
     document.getElementById('cli-chip').style.display='none';
     if(cliBusca)cliBusca.style.display='none';

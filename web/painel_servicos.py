@@ -679,10 +679,14 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     <div class="card" style="margin:0">
       <div class="mut" style="font-size:.78rem; letter-spacing:.1em; text-transform:uppercase; color:var(--verde-claro)">Resumo · ao vivo</div>
       <div class="oc-ll"><span class="mut">Investimento inicial</span><b id="oc-r-setup">R$ 0</b></div>
-      <div class="oc-ll"><span class="mut">Mensalidade</span><b id="oc-r-mensal" style="color:var(--verde-claro)">R$ 0</b></div>
-      <div class="oc-ll" id="oc-r-margem-l" style="display:none"><span class="mut">Margem/mês</span><b id="oc-r-margem" style="color:var(--verde-claro); font-size:.95rem">-</b></div>
-      <div class="oc-total"><div class="mut" style="font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; color:var(--verde-claro)">Total 1º ano</div><div class="v" id="oc-r-ano">R$ 0</div><div class="mut" id="oc-r-eco" style="display:none; font-size:.8rem; color:var(--verde-claro); margin-top:.3rem"></div></div>
+      {% if not servico_avulso %}<div class="oc-ll"><span class="mut">Mensalidade</span><b id="oc-r-mensal" style="color:var(--verde-claro)">R$ 0</b></div>{% endif %}
+      <div class="oc-ll" id="oc-r-margem-l" style="display:none"><span class="mut">{{ 'Margem' if servico_avulso else 'Margem/mês' }}</span><b id="oc-r-margem" style="color:var(--verde-claro); font-size:.95rem">-</b></div>
+      <div class="oc-total"><div class="mut" style="font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; color:var(--verde-claro)">{{ 'Total' if servico_avulso else 'Total 1º ano' }}</div><div class="v" id="oc-r-ano">R$ 0</div><div class="mut" id="oc-r-eco" style="display:none; font-size:.8rem; color:var(--verde-claro); margin-top:.3rem"></div></div>
+      {% if servico_avulso %}
+      <div class="oc-field" style="margin-top:.7rem; margin-bottom:0"><label class="mut" style="font-size:.76rem">Desconto (%)</label><input id="oc-desconto" class="oc-inp" inputmode="numeric" value="0" style="text-align:right"></div>
+      {% else %}
       <button id="oc-anual" class="oc-pill" data-on="0" type="button" style="width:100%; margin-top:.7rem; text-align:left; display:flex; justify-content:space-between; align-items:center">Pagamento anual (-15%) <span id="oc-anual-mk">↻</span></button>
+      {% endif %}
       <button id="oc-gerar" class="oc-btn oc-btn-g">Gerar proposta</button>
       <button id="oc-salvar" class="oc-btn oc-btn-o">Salvar no funil</button>
     </div>
@@ -726,6 +730,12 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     setup+=canais*400;
     var ocSup=document.getElementById('oc-sup');
     if(ocSup&&ocSup.getAttribute('data-on')==='1') mensal+=1500;
+    if(SERVICO_AVULSO){
+      var desconto=Math.max(0,Math.min(100,num(document.getElementById('oc-desconto'))));
+      var total=setup*(1-desconto/100);
+      var margemAv=setup-custo, margemAvPct=setup>0?Math.round(margemAv/setup*100):0;
+      return {setup:setup,mensal:0,mensalCheio:0,ano1:total,margem:margemAv,margemPct:margemAvPct,mods:mods,desconto:desconto,economia:setup-total};
+    }
     var anual=document.getElementById('oc-anual').getAttribute('data-on')==='1';
     var mensalEf=anual?mensal*0.85:mensal;
     var ano1=setup+mensalEf*12;
@@ -736,11 +746,15 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   function pinta(){
     var c=calc();
     document.getElementById('oc-r-setup').textContent=fmt(c.setup);
-    document.getElementById('oc-r-mensal').textContent=fmt(c.mensal);
+    var elMensal=document.getElementById('oc-r-mensal');
+    if(elMensal)elMensal.textContent=fmt(c.mensal);
     document.getElementById('oc-r-ano').textContent=fmt(c.ano1);
     document.getElementById('oc-r-margem').textContent=fmt(c.margem)+' · '+c.margemPct+'%';
     var eco=document.getElementById('oc-r-eco');
-    if(c.anual){eco.style.display='block'; eco.textContent='Economia de '+fmt(c.mensalCheio*12*0.15)+' no ano';}
+    if(SERVICO_AVULSO){
+      if(c.desconto>0){eco.style.display='block'; eco.textContent='Economia de '+fmt(c.economia);}
+      else eco.style.display='none';
+    }else if(c.anual){eco.style.display='block'; eco.textContent='Economia de '+fmt(c.mensalCheio*12*0.15)+' no ano';}
     else eco.style.display='none';
   }
 
@@ -784,6 +798,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       pinta();
     });
   });
+  var ocDesconto=document.getElementById('oc-desconto');
+  if(ocDesconto)ocDesconto.addEventListener('input',pinta);
 
   // ---- catálogo de serviços por conta (Meus serviços) ----
   var CATALOGO=[];

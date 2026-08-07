@@ -219,12 +219,17 @@ class Lancamento:
     origem: str = "manual"
     comprovante: str = ""
     natureza: str | None = None  # 'pessoal' | 'empresa' | None (a definir)
+    # Classificação contábil OPCIONAL (Fase 2). plano_conta_id → conta do plano
+    # GLOBAL habilitada; centro_custo_id → centro de custo da própria conta.
+    # Ambos podem ser None (retrocompatível com a categoria livre).
+    plano_conta_id: int | None = None
+    centro_custo_id: int | None = None
     id: int | None = None
 
     @classmethod
     def criar(cls, tipo, valor_reais, categoria, descricao="", data=None,
               pagamento="", forma_pagamento="", origem="manual", comprovante="",
-              natureza=None):
+              natureza=None, plano_conta_id=None, centro_custo_id=None):
         tipo = Tipo(tipo)
         return cls(
             tipo=tipo,
@@ -237,4 +242,6 @@ class Lancamento:
             origem=origem,
             comprovante=comprovante,
             natureza=natureza,
+            plano_conta_id=plano_conta_id,
+            centro_custo_id=centro_custo_id,
         )

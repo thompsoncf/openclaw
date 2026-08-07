@@ -265,12 +265,12 @@ class LivroCaixa:
         _sql = """insert into lancamentos
                    (conta_id, membro_id, tipo, valor_centavos, categoria, descricao,
                     data, pagamento, forma_pagamento, origem, comprovante, chave,
-                    natureza)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id"""
+                    natureza, plano_conta_id, centro_custo_id)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id"""
         _args = (self.conta_id, self.membro_id, lanc.tipo.value, lanc.valor_centavos,
                  lanc.categoria, lanc.descricao, lanc.data, lanc.pagamento,
                  lanc.forma_pagamento, lanc.origem, lanc.comprovante, chave_final,
-                 lanc.natureza)
+                 lanc.natureza, lanc.plano_conta_id, lanc.centro_custo_id)
 
         # conn EXTERNO: o chamador controla a transação (NÃO commita aqui). Serve pra
         # operações que precisam ser atômicas com outros inserts (ex.: pagar_folha,
@@ -613,6 +613,29 @@ class LivroCaixa:
             conn.commit()
             return cur.rowcount > 0
 
+    def definir_plano_conta(self, lancamento_id: int,
+                            plano_conta_id: int | None) -> bool:
+        """Define (ou limpa, com None) a conta contábil de UM lançamento. Multi-
+        tenant: só mexe em lançamento DESTA conta. A validação de que a conta do
+        plano existe/está habilitada é de quem chama (o endpoint)."""
+        with self.pool.connection() as conn:
+            cur = conn.execute(
+                "update lancamentos set plano_conta_id = %s where id = %s and conta_id = %s",
+                (plano_conta_id, lancamento_id, self.conta_id))
+            conn.commit()
+            return cur.rowcount > 0
+
+    def definir_centro_custo(self, lancamento_id: int,
+                             centro_custo_id: int | None) -> bool:
+        """Define (ou limpa, com None) o centro de custo de UM lançamento.
+        Multi-tenant: só mexe em lançamento DESTA conta."""
+        with self.pool.connection() as conn:
+            cur = conn.execute(
+                "update lancamentos set centro_custo_id = %s where id = %s and conta_id = %s",
+                (centro_custo_id, lancamento_id, self.conta_id))
+            conn.commit()
+            return cur.rowcount > 0
+
     def ids_por_natureza(self, ano: int, mes: int, membro_id: int | None = None,
                          natureza: str | None = None) -> list[int]:
         """Ids dos lançamentos do mês que batem com o filtro de natureza.
@@ -730,13 +753,14 @@ class LivroCaixa:
             rows = conn.execute(
                 f"""select l.id, l.data, l.descricao, l.categoria, l.tipo, l.valor_centavos,
                           l.origem, coalesce(m.nome, '-') as quem, l.natureza,
-                          l.forma_pagamento
+                          l.forma_pagamento, l.plano_conta_id, l.centro_custo_id
                     from lancamentos l left join membros m on m.id = l.membro_id
                     where {cond} order by l.data desc, l.id desc limit %s""",
                 params + [limite]).fetchall()
         return [{"id": r[0], "data": r[1], "descricao": r[2], "categoria": r[3], "tipo": r[4],
                  "valor": int(r[5]), "origem": r[6], "quem": r[7], "natureza": r[8],
-                 "forma_pagamento": r[9]} for r in rows]
+                 "forma_pagamento": r[9], "plano_conta_id": r[10], "centro_custo_id": r[11]}
+                for r in rows]
 
     def raiox_por_departamento(self, ano: int | None = None, mes: int | None = None,
                                membro_id: int | None = None,
@@ -1079,7 +1103,7 @@ class LivroCaixa:
             rows = conn.execute(
                 """select l.id, l.data, l.descricao, l.categoria, l.tipo, l.valor_centavos,
                           l.origem, coalesce(m.nome, '-') as quem, l.natureza,
-                          l.forma_pagamento
+                          l.forma_pagamento, l.plano_conta_id, l.centro_custo_id
                     from lancamentos l left join membros m on m.id = l.membro_id
                     where l.conta_id = %s and l.descricao ilike %s
                     order by l.data desc, l.id desc limit %s""",
@@ -1087,7 +1111,8 @@ class LivroCaixa:
             ).fetchall()
         return [{"id": r[0], "data": r[1], "descricao": r[2], "categoria": r[3], "tipo": r[4],
                  "valor": int(r[5]), "origem": r[6], "quem": r[7], "natureza": r[8],
-                 "forma_pagamento": r[9]} for r in rows]
+                 "forma_pagamento": r[9], "plano_conta_id": r[10], "centro_custo_id": r[11]}
+                for r in rows]
 
     def buscar_itens(self, termo: str, dias: int = 60) -> tuple[list[dict], int]:
         """Busca itens cuja descricao casa com 'termo' (nos ultimos N dias).

@@ -961,12 +961,162 @@ def dre_mes(pool, conta_id: int, ano: int, mes: int, top: int = 5) -> dict:
     tot_d = sum(v for _, v in despesas)
     resultado = tot_r - tot_d
     margem = round(100.0 * resultado / tot_r, 1) if tot_r else 0.0
+    # NOVO: DRE estruturada pelo plano de contas (grupos 1..7 + subtotais). Não
+    # muda os totais acima — só organiza a origem. Tolerante a banco sem a
+    # migração 132 (devolve estrutura vazia).
+    estrutura = _dre_estrutura(pool, conta_id, ini, fim, tot_r, resultado)
     return {"ano": ano, "mes": mes,
             "receitas_centavos": tot_r, "despesas_centavos": tot_d,
             "resultado_centavos": resultado, "margem_pct": margem,
             "top_receitas": receitas[:top], "top_despesas": despesas[:top],
             "a_definir_n": int(adef[0] or 0),
-            "a_definir_centavos": int(adef[1] or 0)}
+            "a_definir_centavos": int(adef[1] or 0),
+            "estrutura": estrutura}
+
+
+def _dre_estrutura(pool, conta_id: int, ini, fim, tot_receita: int,
+                   resultado_legado: int) -> dict:
+    """Monta a DRE estruturada pelo plano de contas: uma linha por grupo (1..7)
+    com as contas analíticas por baixo, mais os subtotais Receita Líquida, Lucro
+    Bruto e Resultado. Sinal por grupo: receita soma (+), o resto subtrai (–).
+
+    Reconciliação garantida: o Resultado é sempre o resultado_legado (receita –
+    despesa do mês); o que não casou com o plano de contas cai na linha
+    'A classificar', pra nenhum centavo sumir da tela.
+
+    Tolerante: se plano_contas ainda não existe (deploy/teste antes da migração
+    132), devolve estrutura vazia — os totais legados seguem válidos."""
+    from .plano_contas import GRUPOS_DRE
+    g = {gr: 0 for gr in GRUPOS_DRE}
+    contas = {gr: [] for gr in GRUPOS_DRE}
+    sem_conta_n = 0
+    try:
+        with pool.connection() as c:
+            rows = c.execute(
+                """select p.grupo, p.codigo, p.nome, sum(l.valor_centavos)
+                     from lancamentos l
+                     join plano_contas p on p.id = l.plano_conta_id
+                    where l.conta_id=%s and l.data >= %s and l.data < %s
+                      and l.natureza='empresa'
+                    group by p.grupo, p.codigo, p.nome
+                    order by p.grupo, p.codigo""",
+                (conta_id, ini, fim)).fetchall()
+            sc = c.execute(
+                """select count(*) from lancamentos
+                    where conta_id=%s and data >= %s and data < %s
+                      and natureza='empresa' and plano_conta_id is null""",
+                (conta_id, ini, fim)).fetchone()
+    except Exception:
+        return {"linhas": [], "resultado_centavos": resultado_legado,
+                "sem_conta_centavos": 0, "sem_conta_n": 0, "disponivel": False}
+    sem_conta_n = int(sc[0] or 0) if sc else 0
+    for grupo, codigo, nome, val in rows:
+        val = int(val or 0)
+        sinal = 1 if GRUPOS_DRE[grupo]["papel"] == "receita" else -1
+        g[grupo] += sinal * val
+        contas[grupo].append({"codigo": codigo, "nome": nome,
+                              "valor_centavos": sinal * val})
+    classificado = sum(g.values())
+    # tudo que não casou com o plano (sem conta ou classificação inconsistente)
+    a_classificar = resultado_legado - classificado
+
+    def _margem(v):
+        return round(100.0 * v / tot_receita, 1) if tot_receita else 0.0
+
+    def _grupo(gr):
+        meta = GRUPOS_DRE[gr]
+        nome = meta["nome"] if meta["papel"] == "receita" else "(–) " + meta["nome"]
+        return {"tipo": "grupo", "grupo": gr, "chave": "grupo_%d" % gr,
+                "nome": nome, "valor_centavos": g[gr], "contas": contas[gr]}
+
+    receita_liquida = g[1] + g[2]
+    lucro_bruto = receita_liquida + g[3]
+    linhas = [
+        _grupo(1), _grupo(2),
+        {"tipo": "subtotal", "chave": "receita_liquida",
+         "nome": "= Receita Líquida", "valor_centavos": receita_liquida},
+        _grupo(3),
+        {"tipo": "subtotal", "chave": "lucro_bruto", "nome": "= Lucro Bruto",
+         "valor_centavos": lucro_bruto, "margem_pct": _margem(lucro_bruto)},
+        _grupo(4), _grupo(5), _grupo(6), _grupo(7),
+    ]
+    if sem_conta_n or a_classificar:
+        linhas.append({"tipo": "grupo", "chave": "a_classificar",
+                       "nome": "A classificar (sem conta contábil)",
+                       "valor_centavos": a_classificar, "n": sem_conta_n,
+                       "contas": []})
+    linhas.append({"tipo": "total", "chave": "resultado",
+                   "nome": "= Resultado do Mês", "valor_centavos": resultado_legado,
+                   "margem_pct": _margem(resultado_legado)})
+    return {"linhas": linhas, "resultado_centavos": resultado_legado,
+            "receita_liquida_centavos": receita_liquida,
+            "lucro_bruto_centavos": lucro_bruto,
+            "sem_conta_centavos": a_classificar, "sem_conta_n": sem_conta_n,
+            "disponivel": True}
+
+
+def dre_por_centro(pool, conta_id: int, ano: int, mes: int) -> dict:
+    """DRE estruturada com uma COLUNA por centro de custo (o corte 'por centro'
+    do painel). Só entra o que está classificado no plano de contas E tem centro
+    (lançamentos sem centro caem na coluna 'Sem centro'). Cada linha traz o valor
+    em cada centro + o total. Tolerante a banco sem a migração 132."""
+    from .plano_contas import GRUPOS_DRE, listar_centros
+    ini = date(ano, mes, 1)
+    fim = _mes_seguinte(ini)
+    try:
+        with pool.connection() as c:
+            rows = c.execute(
+                """select p.grupo, l.centro_custo_id, sum(l.valor_centavos)
+                     from lancamentos l
+                     join plano_contas p on p.id = l.plano_conta_id
+                    where l.conta_id=%s and l.data >= %s and l.data < %s
+                      and l.natureza='empresa'
+                    group by p.grupo, l.centro_custo_id""",
+                (conta_id, ini, fim)).fetchall()
+    except Exception:
+        return {"ano": ano, "mes": mes, "centros": [], "linhas": [],
+                "disponivel": False}
+    # ordem das colunas segue a tela de Centros (ordem, nome)
+    centros_ord = listar_centros(pool, conta_id, incluir_inativos=True)
+    nomes = {ct["id"]: ct["nome"] for ct in centros_ord}
+    idx = {ct["id"]: i for i, ct in enumerate(centros_ord)}
+    # acumula por (grupo, coluna); coluna = id do centro ou 'sem'
+    g = {gr: {} for gr in GRUPOS_DRE}
+    presentes, tem_sem = [], False
+    for grupo, centro_id, val in rows:
+        val = int(val or 0)
+        sinal = 1 if GRUPOS_DRE[grupo]["papel"] == "receita" else -1
+        col = centro_id if centro_id is not None else "sem"
+        g[grupo][col] = g[grupo].get(col, 0) + sinal * val
+        if centro_id is None:
+            tem_sem = True
+        elif centro_id not in presentes:
+            presentes.append(centro_id)
+    presentes.sort(key=lambda cid: (idx.get(cid, 1 << 30), nomes.get(cid, "")))
+    colunas = [{"key": cid, "nome": nomes.get(cid, "#%d" % cid)} for cid in presentes]
+    if tem_sem:
+        colunas.append({"key": "sem", "nome": "Sem centro"})
+    keys = [col["key"] for col in colunas]
+
+    def _linha(nome, grupos, tipo="grupo"):
+        por = {k: sum(g[gr].get(k, 0) for gr in grupos) for k in keys}
+        return {"tipo": tipo, "nome": nome, "por_centro": por,
+                "total_centavos": sum(por.values())}
+
+    linhas = [
+        _linha(GRUPOS_DRE[1]["nome"], [1]),
+        _linha("(–) " + GRUPOS_DRE[2]["nome"], [2]),
+        _linha("= Receita Líquida", [1, 2], tipo="subtotal"),
+        _linha("(–) " + GRUPOS_DRE[3]["nome"], [3]),
+        _linha("= Lucro Bruto", [1, 2, 3], tipo="subtotal"),
+        _linha("(–) " + GRUPOS_DRE[4]["nome"], [4]),
+        _linha("(–) " + GRUPOS_DRE[5]["nome"], [5]),
+        _linha("(–) " + GRUPOS_DRE[6]["nome"], [6]),
+        _linha("(–) " + GRUPOS_DRE[7]["nome"], [7]),
+        _linha("= Resultado do Mês", [1, 2, 3, 4, 5, 6, 7], tipo="total"),
+    ]
+    return {"ano": ano, "mes": mes, "centros": colunas, "linhas": linhas,
+            "disponivel": True}
 
 
 def csv_contador(pool, conta_id: int, ano: int, mes: int) -> str:

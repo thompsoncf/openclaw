@@ -519,60 +519,6 @@ _BEMVINDO = """{% extends "base" %}{% block conteudo %}
 
 _PAINEL = """{% extends "base" %}{% block conteudo %}
 <style>
-.dash-eyebrow{font-size:.72rem;text-transform:uppercase;letter-spacing:.09em;color:var(--txt-mut);font-weight:650;margin:0 0 12px}
-.dash-div{height:1px;background:var(--borda);margin:18px 0}
-.dash-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
-.kpi{background:var(--bg);border:1px solid var(--borda);border-radius:12px;padding:13px 14px;display:flex;flex-direction:column;gap:5px;min-width:0}
-.kpi .rot{font-size:.73rem;color:var(--txt-mut);font-weight:600;overflow-wrap:anywhere}
-.kpi .val{font-size:clamp(.95rem,2.6vw,1.22rem);font-weight:680;font-variant-numeric:tabular-nums;letter-spacing:-.01em;overflow-wrap:anywhere;min-width:0}
-.kpi .val.pos{color:var(--verde-claro)}
-.kpi .val.neg{color:#e07a6b}
-.kpi .peq{font-size:.72rem;color:var(--txt-mut)}
-.kpi .chip{display:inline-flex;align-items:center;gap:4px;font-size:.7rem;font-weight:650;background:#3a2a12;color:#fab219;border-radius:999px;padding:.12rem .5rem;width:fit-content}
-.dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:26px}
-.dash-grid.solo{grid-template-columns:1fr}
-.dash-grid>div{min-width:0}
-.sub-h{font-size:.82rem;font-weight:650;margin:0 0 14px;color:var(--txt)}
-.sub-h span{color:var(--txt-mut);font-weight:500}
-.rd-row{display:flex;flex-direction:column;gap:5px;margin-bottom:13px}
-.rd-top{display:flex;justify-content:space-between;align-items:baseline;font-size:.85rem}
-.rd-top .rd-nome{color:var(--txt-mut)}
-.rd-top .rd-val{font-weight:680;font-variant-numeric:tabular-nums}
-.rd-bar{height:9px;border-radius:5px;background:var(--bg);overflow:hidden}
-.rd-bar>span{display:block;height:100%;border-radius:5px}
-.rd-res{display:flex;justify-content:space-between;align-items:baseline;padding-top:11px;border-top:1px solid var(--borda);margin-top:2px}
-.rd-res .rl{font-size:.78rem;color:var(--txt-mut)}
-.rd-res .rv{font-size:1.1rem;font-weight:700;font-variant-numeric:tabular-nums}
-.rd-res .rv.pos{color:var(--verde-claro)}
-.rd-res .rv.neg{color:#e07a6b}
-.cats{margin-top:15px;display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.cats h4{margin:0 0 7px;font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:var(--txt-mut)}
-.cats .ci{display:flex;justify-content:space-between;gap:8px;font-size:.81rem;padding:3px 0}
-.cats .ci .cn{color:var(--txt);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cats .ci .cv{color:var(--txt-mut);font-variant-numeric:tabular-nums;flex:none}
-.swatch{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;vertical-align:middle}
-.funil{display:flex;gap:20px;align-items:center}
-.donut{width:150px;height:150px;flex:none;border-radius:50%;position:relative}
-.donut::after{content:"";position:absolute;inset:26px;border-radius:50%;background:var(--card);display:block}
-.donut .mid{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
-.donut .mid .n{font-size:1.45rem;font-weight:720;line-height:1}
-.donut .mid .l{font-size:.62rem;color:var(--txt-mut);text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
-.legenda{display:flex;flex-direction:column;gap:7px;flex:1;min-width:0}
-.leg-row{display:flex;align-items:center;gap:9px;font-size:.83rem}
-.leg-row .dot{width:10px;height:10px;border-radius:3px;flex:none}
-.leg-row .leg-nome{flex:1;min-width:0;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.leg-row .leg-n{font-variant-numeric:tabular-nums;color:var(--txt-mut);font-weight:600}
-.resumo{display:flex;gap:20px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid var(--borda)}
-.resumo .r{display:flex;flex-direction:column;gap:2px}
-.resumo .r .rv{font-size:1.02rem;font-weight:680;font-variant-numeric:tabular-nums}
-.resumo .r .rv.win{color:var(--verde-claro)}
-.resumo .r .rl{font-size:.72rem;color:var(--txt-mut)}
-.funil-vazio{display:flex;flex-direction:column;gap:8px;align-items:flex-start;color:var(--txt-mut);font-size:.88rem}
-.fluxo-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
-.fluxo-head .fv{font-size:.8rem;color:var(--txt-mut)}
-.fluxo-head .fv b{color:var(--verde-claro);font-variant-numeric:tabular-nums}
-.fluxo-svg{width:100%;height:118px;display:block}
-.xlabels{display:flex;justify-content:space-between;font-size:.7rem;color:var(--txt-mut);margin-top:4px}
 .acc{padding:0;overflow:hidden}
 .acc>summary{padding:16px 20px;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;font-size:1.02rem;font-weight:620;color:var(--txt)}
 .acc>summary::-webkit-details-marker{display:none}
@@ -581,11 +527,6 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
 .acc[open]>summary .chev{transform:rotate(180deg)}
 .acc-body{padding:0 20px 18px}
 .acc-body .card{border:0;background:transparent;padding:0;margin:0 0 1.2rem;max-width:none}
-@media(max-width:700px){
-.dash-kpis{grid-template-columns:repeat(2,1fr)}
-.dash-grid{grid-template-columns:1fr;gap:22px}
-.cats{grid-template-columns:1fr}
-}
 </style>
 <div class="card larga">
   <h1 style="margin:0">Olá, {{ conta[2] }}! <span class="tag">{{ conta[5] }}</span></h1>
@@ -593,92 +534,7 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
   {% if conta[5] == 'trial' %}<form method="post" action="/assinar" style="margin:0"><button style="width:auto;margin:.6rem 0 0;padding:.55rem 1.1rem">💳 Assinar plano</button></form>{% endif %}
 </div>
 
-{% if dash %}
-<div class="card larga">
-  <p class="dash-eyebrow">Visão do negócio · {{ dash.dre.mes }}/{{ dash.dre.ano }}</p>
-  <div class="dash-kpis">
-    <div class="kpi"><span class="rot">A receber · 30d</span><span class="val pos">{{ dash.res.a_receber_centavos|brl }}</span><span class="peq">{{ dash.res.n_receber }} título(s) aberto(s)</span></div>
-    <div class="kpi"><span class="rot">A pagar · 30d</span><span class="val">{{ dash.res.a_pagar_centavos|brl }}</span>{% if dash.res.atrasados_pagar_centavos %}<span class="chip">⚠ {{ dash.res.atrasados_pagar_centavos|brl }} atrasado</span>{% else %}<span class="peq">{{ dash.res.n_pagar }} título(s)</span>{% endif %}</div>
-    <div class="kpi"><span class="rot">Saldo projetado</span><span class="val">{{ dash.fluxo.saldo_projetado_centavos|brl }}</span><span class="peq">em 4 semanas</span></div>
-    <div class="kpi"><span class="rot">MRR</span><span class="val pos">{{ dash.mrr_centavos|brl }}</span><span class="peq">recorrente / mês</span></div>
-    <div class="kpi"><span class="rot">Resultado do mês</span><span class="val {{ 'pos' if dash.dre.resultado_centavos >= 0 else 'neg' }}">{{ dash.dre.resultado_centavos|brl }}</span><span class="peq">margem {{ dash.dre.margem_pct }}%</span></div>
-  </div>
-
-  <div class="dash-div"></div>
-
-  <div class="dash-grid{% if not dash.tem_funil %} solo{% endif %}">
-    <div>
-      <h3 class="sub-h">Entradas × saídas <span>· mês atual</span></h3>
-      {% set maxrd = [dash.dre.receitas_centavos, dash.dre.despesas_centavos, 1]|max %}
-      <div class="rd-row">
-        <div class="rd-top"><span class="rd-nome"><span class="swatch" style="background:var(--verde-claro)"></span>Receitas</span><span class="rd-val" style="color:var(--verde-claro)">{{ dash.dre.receitas_centavos|brl }}</span></div>
-        <div class="rd-bar"><span style="width:{{ (100*dash.dre.receitas_centavos/maxrd)|round(1) }}%;background:var(--verde-claro)"></span></div>
-      </div>
-      <div class="rd-row">
-        <div class="rd-top"><span class="rd-nome"><span class="swatch" style="background:#e07a6b"></span>Despesas</span><span class="rd-val" style="color:#e07a6b">{{ dash.dre.despesas_centavos|brl }}</span></div>
-        <div class="rd-bar"><span style="width:{{ (100*dash.dre.despesas_centavos/maxrd)|round(1) }}%;background:#e07a6b"></span></div>
-      </div>
-      <div class="rd-res"><span class="rl">Resultado do mês</span><span class="rv {{ 'pos' if dash.dre.resultado_centavos >= 0 else 'neg' }}">{{ dash.dre.resultado_centavos|brl }}</span></div>
-      {% if dash.dre.top_receitas or dash.dre.top_despesas %}
-      <div class="cats">
-        <div><h4>Top receitas</h4>
-          {% for cat, v in dash.dre.top_receitas[:3] %}<div class="ci"><span class="cn">{{ cat or 'Outros' }}</span><span class="cv">{{ v|brl }}</span></div>{% else %}<div class="ci mut">—</div>{% endfor %}
-        </div>
-        <div><h4>Top despesas</h4>
-          {% for cat, v in dash.dre.top_despesas[:3] %}<div class="ci"><span class="cn">{{ cat or 'Outros' }}</span><span class="cv">{{ v|brl }}</span></div>{% else %}<div class="ci mut">—</div>{% endfor %}
-        </div>
-      </div>
-      {% endif %}
-      {% if dash.dre.a_definir_n %}<p class="mut" style="font-size:.76rem;margin:.7rem 0 0">{{ dash.dre.a_definir_n }} lançamento(s) a classificar ({{ dash.dre.a_definir_centavos|brl }}) fora do resultado.</p>{% endif %}
-    </div>
-
-    {% if dash.tem_funil %}
-    <div>
-      <h3 class="sub-h">Funil de vendas <span>· propostas por status</span></h3>
-      {% if dash.funil_total %}
-      <div class="funil">
-        <div class="donut" role="img" aria-label="{{ dash.funil_total }} propostas por status" style="background:{{ dash.funil_gradiente }}">
-          <div class="mid"><span class="n">{{ dash.funil_total }}</span><span class="l">propostas</span></div>
-        </div>
-        <div class="legenda">
-          {% for f in dash.funil_legenda %}<div class="leg-row"><span class="dot" style="background:{{ f.cor }}"></span><span class="leg-nome{% if f.mut %} mut{% endif %}">{{ f.rotulo }}</span><span class="leg-n">{{ f.n }}</span></div>{% endfor %}
-        </div>
-      </div>
-      <div class="resumo">
-        <div class="r"><span class="rv win">{{ dash.funil_conversao }}%</span><span class="rl">conversão</span></div>
-        <div class="r"><span class="rv">{{ dash.funil_previsto|brl }}</span><span class="rl">valor previsto</span></div>
-        <div class="r"><span class="rv">{{ dash.funil_recorrente|brl }}</span><span class="rl">novo recorrente/mês</span></div>
-      </div>
-      {% else %}
-      <div class="funil-vazio">
-        <div>Nenhuma proposta ainda.</div>
-        <a href="/painel/servicos" style="color:var(--verde-claro);text-decoration:none;font-weight:600">Criar minha primeira proposta →</a>
-      </div>
-      {% endif %}
-    </div>
-    {% endif %}
-  </div>
-
-  <div class="dash-div"></div>
-
-  <div>
-    <div class="fluxo-head">
-      <h3 class="sub-h" style="margin:0">Fluxo projetado <span>· próximas 4 semanas</span></h3>
-      <span class="fv">saldo hoje {{ dash.fluxo.saldo_atual_centavos|brl }} → <b>{{ dash.fluxo.saldo_projetado_centavos|brl }}</b></span>
-    </div>
-    <svg class="fluxo-svg" viewBox="0 0 600 120" preserveAspectRatio="none" role="img" aria-label="Saldo projetado nas próximas 4 semanas">
-      <defs><linearGradient id="fluxoGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3987e5" stop-opacity="0.28"/><stop offset="1" stop-color="#3987e5" stop-opacity="0"/></linearGradient></defs>
-      <line x1="0" y1="30" x2="600" y2="30" stroke="var(--borda)" stroke-width="1"/>
-      <line x1="0" y1="65" x2="600" y2="65" stroke="var(--borda)" stroke-width="1"/>
-      <line x1="0" y1="100" x2="600" y2="100" stroke="var(--borda)" stroke-width="1"/>
-      <path d="{{ dash.fluxo_area }}" fill="url(#fluxoGrad)"/>
-      <polyline points="{{ dash.fluxo_poly }}" fill="none" stroke="#3987e5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-      <circle cx="{{ dash.fluxo_end_x|round(1) }}" cy="{{ dash.fluxo_end_y|round(1) }}" r="4.5" fill="#3987e5" stroke="var(--card)" stroke-width="2"/>
-    </svg>
-    <div class="xlabels"><span>hoje</span><span>sem 1</span><span>sem 2</span><span>sem 3</span><span>sem 4</span></div>
-  </div>
-</div>
-{% endif %}
+{% include "dash_bloco" %}
 
 <details class="card larga acc">
   <summary>Meus dados e endereço <span class="chev">▾</span></summary>
@@ -1043,6 +899,18 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 </select>
 <button type="button" class="cat-ok" onclick="salvarCat(this)" style="display:none;padding:.24rem .65rem;width:auto;font-size:.72rem;font-weight:600;background:var(--verde);color:#fff;border:0;border-radius:6px;cursor:pointer;line-height:1.1">OK</button>
 </span>
+{% if eh_pj and l.natureza=='empresa' and plano_opcoes %}
+<div style="display:flex;gap:.35rem;margin-top:.3rem;flex-wrap:wrap">
+<select class="pc-edit" data-id="{{ l.id }}" onchange="planoMudou(this)" title="conta contábil (DRE)" style="background:var(--bg);border:1px solid #2a3a33;border-radius:6px;color:var(--txt);font-size:.72rem;padding:.18rem .4rem;max-width:160px">
+<option value="">— conta contábil —</option>
+{% for g in plano_opcoes %}<optgroup label="{{ g.grupo }} · {{ g.nome }}">{% for c in g.contas %}<option value="{{ c.id }}" {% if l.plano_conta_id==c.id %}selected{% endif %}>{{ c.codigo }} {{ c.nome }}</option>{% endfor %}</optgroup>{% endfor %}
+</select>
+{% if centros_custo %}<select class="cc-edit" data-id="{{ l.id }}" onchange="centroMudou(this)" title="centro de custo (opcional)" style="background:var(--bg);border:1px solid #2a3a33;border-radius:6px;color:var(--txt);font-size:.72rem;padding:.18rem .4rem;max-width:130px">
+<option value="">— centro —</option>
+{% for c in centros_custo %}<option value="{{ c.id }}" {% if l.centro_custo_id==c.id %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}
+</select>{% endif %}
+</div>
+{% endif %}
 </td>
 {% if pessoas|length > 1 %}<td class="mut">{{ l.quem }}</td>{% endif %}
 <td style="text-align:right; font-weight:500; color:{{ 'var(--verde-claro)' if l.tipo=='receita' else '#f0b8b8' }}">
@@ -1197,6 +1065,18 @@ function salvarClassificacao(){
 function marcarNat(id, nat, btn){
   fetch('/painel/lancamento/natureza', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&natureza='+nat})
     .then(r=>r.json()).then(d=>{ if(d.ok){ location.reload(); } });
+}
+function planoMudou(sel){
+  var id = sel.getAttribute('data-id');
+  sel.disabled = true;
+  fetch('/painel/lancamento/plano-conta', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&plano_conta_id='+encodeURIComponent(sel.value)})
+    .then(r=>r.json()).then(function(d){ sel.disabled=false; if(d.ok){ sel.style.borderColor='var(--verde-claro)'; } });
+}
+function centroMudou(sel){
+  var id = sel.getAttribute('data-id');
+  sel.disabled = true;
+  fetch('/painel/lancamento/centro-custo', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&centro_custo_id='+encodeURIComponent(sel.value)})
+    .then(r=>r.json()).then(function(d){ sel.disabled=false; if(d.ok){ sel.style.borderColor='var(--verde-claro)'; } });
 }
 function salvarCat(btn){
   var sel = btn.parentElement.querySelector('.cat-edit');
@@ -3167,43 +3047,144 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
       .emp-form>button[type=submit]{grid-column:1 / -1}
     }
   </style>
-  <div class="emp-kpis">
-    <div class="card"><div class="mut rot">A pagar ({{ res.dias }} dias)</div>
-      <div class="val" style="color:#e07a5f">{{ res.a_pagar_centavos|brl }}</div>
-      <div class="mut" style="font-size:.68rem">{{ res.n_pagar }} título(s)</div></div>
-    <div class="card"><div class="mut rot">A receber ({{ res.dias }} dias)</div>
-      <div class="val" style="color:var(--verde-claro)">{{ res.a_receber_centavos|brl }}</div>
-      <div class="mut" style="font-size:.68rem">{{ res.n_receber }} título(s)</div></div>
-    <div class="card"><div class="mut rot">Atrasados</div>
-      <div class="val" style="color:#f0c05a">{{ res.n_atrasados }}</div>
-      <div class="mut" style="font-size:.68rem">{{ res.atrasados_centavos|brl }}</div></div>
-    <div class="card" style="border-color:var(--verde)33"><div class="mut rot">Saldo projetado (30d)</div>
-      <div class="val" style="color:var(--verde-claro)">{{ fluxo.saldo_projetado_centavos|brl }}</div>
-      <div class="mut" style="font-size:.68rem">caixa + previsto</div></div>
+</div>
+
+{% include "dash_bloco" %}
+
+<style>
+  .sec-pc>summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;font-weight:620;font-size:1rem;gap:.5rem}
+  .sec-pc>summary::-webkit-details-marker{display:none}
+  .sec-pc>summary .chev{color:var(--txt-mut);transition:transform .2s}
+  .sec-pc[open]>summary .chev{transform:rotate(180deg)}
+  .sec-body{margin-top:.9rem}
+  .pc-grp{display:flex;align-items:center;gap:.6rem;padding:.5rem .2rem;margin-top:.5rem;border-bottom:1px solid #232325}
+  .pc-gcode{font-family:ui-monospace,monospace;font-size:.72rem;color:var(--txt-mut);min-width:1.2rem}
+  .pc-gname{font-weight:700;font-size:.78rem;flex:1;text-transform:uppercase;letter-spacing:.03em}
+  .pc-gmeta{font-size:.7rem;color:var(--txt-mut);white-space:nowrap}
+  .pc-acc{display:flex;align-items:center;gap:.6rem;padding:.5rem .2rem .5rem 1.4rem;border-bottom:1px solid #1c1c1e}
+  .pc-code{font-family:ui-monospace,monospace;font-size:.72rem;color:var(--txt-mut);min-width:2.8rem}
+  .pc-name{flex:1;font-size:.85rem}
+  .pc-acc.off .pc-name,.pc-acc.off .pc-code{opacity:.45}
+  .pc-tag{font-size:.6rem;font-weight:700;padding:.1rem .5rem;border-radius:10px;white-space:nowrap}
+  .pc-tag.receita{background:#12291f;color:var(--verde-claro)}
+  .pc-tag.despesa{background:#2c1a1a;color:#c98080}
+  .pc-sw{width:38px;height:22px;border-radius:20px;border:0;background:#33332f;position:relative;cursor:pointer;padding:0;flex:none}
+  .pc-sw.on{background:var(--verde)}
+  .pc-sw .knob{position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#ddd;transition:.15s}
+  .pc-sw.on .knob{transform:translateX(16px);background:#fff}
+  .cc-form{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.9rem}
+  .cc-form input{flex:1 1 160px;min-width:0}
+  .cc-form button{background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.5rem .9rem;font-weight:600;cursor:pointer;width:auto}
+  .cc-item{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;padding:.6rem 0;border-top:1px solid #232325}
+  .cc-info{flex:1 1 200px;font-size:.88rem}
+  .cc-item.off .cc-info{opacity:.55}
+  .cc-acoes{display:flex;gap:.4rem}
+  .cc-btn{background:none;border:1px solid #2f2f31;border-radius:7px;padding:.28rem .6rem;font-size:.75rem;cursor:pointer;width:auto;color:var(--txt)}
+  .cc-edit{flex:1 1 100%;display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.3rem}
+  .cc-edit input{flex:1 1 140px;font-size:.8rem;padding:.35rem .5rem;border-radius:7px;border:1px solid #333;background:var(--bg);color:var(--txt)}
+  .cc-edit button{border:1px solid #2f2f31;border-radius:7px;padding:.32rem .7rem;font-size:.78rem;cursor:pointer;width:auto;background:none;color:var(--txt)}
+  .dre-tbl td{padding:.32rem .2rem}
+  .dre-grp td:first-child{padding-left:.2rem}
+  .dre-subtotal td{border-top:1px solid var(--borda);font-weight:600}
+  .dre-total td{border-top:2px solid var(--borda);font-weight:700}
+  .dre-centro{margin-top:.9rem}
+  .dre-centro>summary{cursor:pointer;color:var(--verde-claro);font-size:.8rem}
+  .dre-centro table{width:100%;margin-top:.5rem;font-size:.78rem;border-collapse:collapse;white-space:nowrap}
+  .dre-centro th,.dre-centro td{padding:.3rem .45rem}
+  .dre-centro th{color:var(--txt-mut);font-size:.68rem;text-align:right;border-bottom:1px solid var(--borda)}
+  .dre-centro th:first-child,.dre-centro td:first-child{text-align:left}
+</style>
+
+<details class="card larga sec-pc" id="plano-contas">
+  <summary><span>📋 Plano de Contas <span class="mut" style="font-weight:400;font-size:.76rem">· padrão do sistema — você liga/desliga o que usa</span></span><span class="chev">▾</span></summary>
+  <div class="sec-body">
+    {% for g in plano_arvore %}
+    <div class="pc-grp"><span class="pc-gcode">{{ g.grupo }}</span><span class="pc-gname">{{ g.nome }}</span><span class="pc-gmeta">{{ g.n_ativas }}/{{ g.n_total }} ativas</span></div>
+    {% for c in g.contas %}
+    <div class="pc-acc{% if not c.habilitada %} off{% endif %}">
+      <span class="pc-code">{{ c.codigo }}</span>
+      <span class="pc-name">{{ c.nome }}</span>
+      <span class="pc-tag {{ c.natureza }}">{{ 'Receita' if c.natureza=='receita' else 'Despesa' }}</span>
+      <form method="post" action="/painel/empresa/plano-contas/habilitar" style="margin:0">
+        <input type="hidden" name="plano_conta_id" value="{{ c.id }}">
+        <input type="hidden" name="ativa" value="{{ '0' if c.habilitada else '1' }}">
+        <button type="submit" class="pc-sw{% if c.habilitada %} on{% endif %}" title="{{ 'desligar' if c.habilitada else 'ligar' }}"><span class="knob"></span></button>
+      </form>
+    </div>
+    {% endfor %}
+    {% endfor %}
+    <div class="mut" style="font-size:.72rem;margin-top:.7rem">A árvore é do sistema (a mesma pra todas as contas). No lançamento só aparecem as contas ligadas.</div>
   </div>
-</div>
+</details>
 
-<div class="card larga">
-  <div style="display:flex;justify-content:space-between"><strong>Fluxo de caixa projetado</strong>
-    <span class="mut" style="font-size:.72rem">saldo hoje {{ fluxo.saldo_atual_centavos|brl }}</span></div>
-  <table style="width:100%;margin-top:.6rem;font-size:.85rem">
-    <tr class="mut" style="font-size:.72rem"><td>Semana</td><td style="text-align:right">Entra</td><td style="text-align:right">Sai</td><td style="text-align:right">Saldo previsto</td></tr>
-    {% for p in fluxo.pontos %}<tr><td>até {{ p.ate.strftime('%d/%m') }}</td>
-      <td style="text-align:right;color:var(--verde-claro)">{{ p.receber_centavos|brl }}</td>
-      <td style="text-align:right;color:#e07a5f">{{ p.pagar_centavos|brl }}</td>
-      <td style="text-align:right;font-weight:600">{{ p.saldo_centavos|brl }}</td></tr>{% endfor %}
-  </table>
-</div>
+<details class="card larga sec-pc" id="centros-custo">
+  <summary><span>🎯 Centros de Custo <span class="mut" style="font-weight:400;font-size:.76rem">· seus (unidade, filial, projeto) — opcional no lançamento</span></span><span class="chev">▾</span></summary>
+  <div class="sec-body">
+    <form method="post" action="/painel/empresa/centro-custo" class="cc-form">
+      <input name="nome" required placeholder="Nome (ex: Unidade Centro)">
+      <input name="descricao" placeholder="Descrição (opcional)">
+      <button type="submit">+ Novo centro</button>
+    </form>
+    {% if centros %}
+    {% for c in centros %}
+    <div class="cc-item{% if not c.ativo %} off{% endif %}">
+      <div class="cc-info"><b>{{ c.nome }}</b>{% if c.descricao %} <span class="mut">· {{ c.descricao }}</span>{% endif %}{% if not c.ativo %} <span class="mut">(inativo)</span>{% endif %}</div>
+      <div class="cc-acoes">
+        <button type="button" onclick="ccEditToggle(this)" class="cc-btn" style="color:#8a938a">editar ✎</button>
+        {% if c.ativo %}<form method="post" action="/painel/empresa/centro-custo/{{ c.id }}/desativar" style="margin:0"><input type="hidden" name="ativo" value="0"><button class="cc-btn" style="color:#c98080">desativar</button></form>
+        {% else %}<form method="post" action="/painel/empresa/centro-custo/{{ c.id }}/desativar" style="margin:0"><input type="hidden" name="ativo" value="1"><button class="cc-btn" style="color:var(--verde-claro)">reativar</button></form>{% endif %}
+      </div>
+      <form method="post" action="/painel/empresa/centro-custo" class="cc-edit" style="display:none">
+        <input type="hidden" name="centro_id" value="{{ c.id }}">
+        <input name="nome" value="{{ c.nome }}" required placeholder="nome">
+        <input name="descricao" value="{{ c.descricao }}" placeholder="descrição">
+        <button type="submit" style="background:var(--verde);color:#fff;border:0">salvar</button>
+        <button type="button" onclick="ccEditToggle(this)" style="color:#8a938a">cancelar</button>
+      </form>
+    </div>
+    {% endfor %}
+    {% else %}<div class="mut" style="font-size:.85rem">Nenhum centro ainda. Crie acima (unidade, filial, projeto, evento…).</div>{% endif %}
+  </div>
+  <script>
+  function ccEditToggle(btn){var it=btn.closest('.cc-item');var ed=it.querySelector('.cc-edit');ed.style.display=(ed.style.display==='none'||!ed.style.display)?'flex':'none';}
+  </script>
+</details>
 
-<div class="card larga">
-  <div style="display:flex;justify-content:space-between"><strong>DRE do mês (simplificado)</strong>
+<div class="card larga" id="dre">
+  <div style="display:flex;justify-content:space-between"><strong>DRE do mês</strong>
     <span class="mut" style="font-size:.72rem">{{ '%02d'|format(dre.mes) }}/{{ dre.ano }}</span></div>
+  {% if dre.estrutura and dre.estrutura.linhas %}
+  <table class="dre-tbl" style="width:100%;margin-top:.6rem;font-size:.86rem">
+    {% for l in dre.estrutura.linhas %}
+    <tr class="dre-{{ l.tipo }}">
+      <td class="{% if l.tipo=='grupo' %}mut{% endif %}">{{ l.nome }}{% if l.n %} <span class="mut" style="font-size:.7rem">({{ l.n }} lanç.)</span>{% endif %}</td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums;{% if l.valor_centavos < 0 %}color:#e07a5f{% elif l.tipo in ('subtotal','total') %}color:var(--verde-claro){% endif %}">{{ l.valor_centavos|brl }}{% if l.margem_pct is defined %} · {{ l.margem_pct }}%{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
   <table style="width:100%;margin-top:.6rem;font-size:.9rem">
     <tr><td class="mut">Receitas</td><td style="text-align:right;color:var(--verde-claro)">{{ dre.receitas_centavos|brl }}</td></tr>
     <tr><td class="mut">(−) Despesas</td><td style="text-align:right">{{ dre.despesas_centavos|brl }}</td></tr>
     <tr style="border-top:1px solid var(--borda)"><td style="font-weight:600">Resultado</td>
       <td style="text-align:right;font-weight:600;color:{{ 'var(--verde-claro)' if dre.resultado_centavos>=0 else '#e07a5f' }}">{{ dre.resultado_centavos|brl }} · {{ dre.margem_pct }}%</td></tr>
   </table>
+  {% endif %}
+
+  {% if dre_centro and dre_centro.centros %}
+  <details class="dre-centro">
+    <summary>Ver por centro de custo</summary>
+    <div style="overflow-x:auto">
+    <table>
+      <tr><th>Conta</th>{% for col in dre_centro.centros %}<th>{{ col.nome }}</th>{% endfor %}<th>Total</th></tr>
+      {% for l in dre_centro.linhas %}
+      <tr class="dre-{{ l.tipo }}"><td>{{ l.nome }}</td>
+        {% for col in dre_centro.centros %}<td style="text-align:right">{{ l.por_centro[col.key]|brl }}</td>{% endfor %}
+        <td style="text-align:right;font-weight:600">{{ l.total_centavos|brl }}</td></tr>
+      {% endfor %}
+    </table></div>
+  </details>
+  {% endif %}
 
   {% if dre.a_definir_n %}
   <div style="background:#2b2416;border:1px solid #f0c05a44;border-radius:8px;padding:.55rem .9rem;margin-top:.7rem;color:#f0c05a;font-size:.78rem;line-height:1.35">
@@ -5145,9 +5126,161 @@ _HOLERITE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 </body></html>"""
 
 
+# Bloco "Visão do negócio" (KPIs + entradas×saídas + funil + fluxo projetado).
+# Partial compartilhado entre /painel e /painel/empresa — a fonte única do dash.
+# Só renderiza se `dash` vier no contexto (senão fica vazio).
+_DASH_BLOCO = """<style>
+.dash-eyebrow{font-size:.72rem;text-transform:uppercase;letter-spacing:.09em;color:var(--txt-mut);font-weight:650;margin:0 0 12px}
+.dash-div{height:1px;background:var(--borda);margin:18px 0}
+.dash-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.kpi{background:var(--bg);border:1px solid var(--borda);border-radius:12px;padding:13px 14px;display:flex;flex-direction:column;gap:5px;min-width:0}
+.kpi .rot{font-size:.73rem;color:var(--txt-mut);font-weight:600;overflow-wrap:anywhere}
+.kpi .val{font-size:clamp(.95rem,2.6vw,1.22rem);font-weight:680;font-variant-numeric:tabular-nums;letter-spacing:-.01em;overflow-wrap:anywhere;min-width:0}
+.kpi .val.pos{color:var(--verde-claro)}
+.kpi .val.neg{color:#e07a6b}
+.kpi .peq{font-size:.72rem;color:var(--txt-mut)}
+.kpi .chip{display:inline-flex;align-items:center;gap:4px;font-size:.7rem;font-weight:650;background:#3a2a12;color:#fab219;border-radius:999px;padding:.12rem .5rem;width:fit-content}
+.dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:26px}
+.dash-grid.solo{grid-template-columns:1fr}
+.dash-grid>div{min-width:0}
+.sub-h{font-size:.82rem;font-weight:650;margin:0 0 14px;color:var(--txt)}
+.sub-h span{color:var(--txt-mut);font-weight:500}
+.rd-row{display:flex;flex-direction:column;gap:5px;margin-bottom:13px}
+.rd-top{display:flex;justify-content:space-between;align-items:baseline;font-size:.85rem}
+.rd-top .rd-nome{color:var(--txt-mut)}
+.rd-top .rd-val{font-weight:680;font-variant-numeric:tabular-nums}
+.rd-bar{height:9px;border-radius:5px;background:var(--bg);overflow:hidden}
+.rd-bar>span{display:block;height:100%;border-radius:5px}
+.rd-res{display:flex;justify-content:space-between;align-items:baseline;padding-top:11px;border-top:1px solid var(--borda);margin-top:2px}
+.rd-res .rl{font-size:.78rem;color:var(--txt-mut)}
+.rd-res .rv{font-size:1.1rem;font-weight:700;font-variant-numeric:tabular-nums}
+.rd-res .rv.pos{color:var(--verde-claro)}
+.rd-res .rv.neg{color:#e07a6b}
+.cats{margin-top:15px;display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.cats h4{margin:0 0 7px;font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:var(--txt-mut)}
+.cats .ci{display:flex;justify-content:space-between;gap:8px;font-size:.81rem;padding:3px 0}
+.cats .ci .cn{color:var(--txt);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cats .ci .cv{color:var(--txt-mut);font-variant-numeric:tabular-nums;flex:none}
+.swatch{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;vertical-align:middle}
+.funil{display:flex;gap:20px;align-items:center}
+.donut{width:150px;height:150px;flex:none;border-radius:50%;position:relative}
+.donut::after{content:"";position:absolute;inset:26px;border-radius:50%;background:var(--card);display:block}
+.donut .mid{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.donut .mid .n{font-size:1.45rem;font-weight:720;line-height:1}
+.donut .mid .l{font-size:.62rem;color:var(--txt-mut);text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
+.legenda{display:flex;flex-direction:column;gap:7px;flex:1;min-width:0}
+.leg-row{display:flex;align-items:center;gap:9px;font-size:.83rem}
+.leg-row .dot{width:10px;height:10px;border-radius:3px;flex:none}
+.leg-row .leg-nome{flex:1;min-width:0;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.leg-row .leg-n{font-variant-numeric:tabular-nums;color:var(--txt-mut);font-weight:600}
+.resumo{display:flex;gap:20px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid var(--borda)}
+.resumo .r{display:flex;flex-direction:column;gap:2px}
+.resumo .r .rv{font-size:1.02rem;font-weight:680;font-variant-numeric:tabular-nums}
+.resumo .r .rv.win{color:var(--verde-claro)}
+.resumo .r .rl{font-size:.72rem;color:var(--txt-mut)}
+.funil-vazio{display:flex;flex-direction:column;gap:8px;align-items:flex-start;color:var(--txt-mut);font-size:.88rem}
+.fluxo-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.fluxo-head .fv{font-size:.8rem;color:var(--txt-mut)}
+.fluxo-head .fv b{color:var(--verde-claro);font-variant-numeric:tabular-nums}
+.fluxo-svg{width:100%;height:118px;display:block}
+.xlabels{display:flex;justify-content:space-between;font-size:.7rem;color:var(--txt-mut);margin-top:4px}
+@media(max-width:700px){
+.dash-kpis{grid-template-columns:repeat(2,1fr)}
+.dash-grid{grid-template-columns:1fr;gap:22px}
+.cats{grid-template-columns:1fr}
+}
+</style>
+{% if dash %}
+<div class="card larga">
+  <p class="dash-eyebrow">Visão do negócio · {{ dash.dre.mes }}/{{ dash.dre.ano }}</p>
+  <div class="dash-kpis">
+    <div class="kpi"><span class="rot">A receber · 30d</span><span class="val pos">{{ dash.res.a_receber_centavos|brl }}</span><span class="peq">{{ dash.res.n_receber }} título(s) aberto(s)</span></div>
+    <div class="kpi"><span class="rot">A pagar · 30d</span><span class="val">{{ dash.res.a_pagar_centavos|brl }}</span>{% if dash.res.atrasados_pagar_centavos %}<span class="chip">⚠ {{ dash.res.atrasados_pagar_centavos|brl }} atrasado</span>{% else %}<span class="peq">{{ dash.res.n_pagar }} título(s)</span>{% endif %}</div>
+    <div class="kpi"><span class="rot">Saldo projetado</span><span class="val">{{ dash.fluxo.saldo_projetado_centavos|brl }}</span><span class="peq">em 4 semanas</span></div>
+    <div class="kpi"><span class="rot">MRR</span><span class="val pos">{{ dash.mrr_centavos|brl }}</span><span class="peq">recorrente / mês</span></div>
+    <div class="kpi"><span class="rot">Resultado do mês</span><span class="val {{ 'pos' if dash.dre.resultado_centavos >= 0 else 'neg' }}">{{ dash.dre.resultado_centavos|brl }}</span><span class="peq">margem {{ dash.dre.margem_pct }}%</span></div>
+  </div>
+
+  <div class="dash-div"></div>
+
+  <div class="dash-grid{% if not dash.tem_funil %} solo{% endif %}">
+    <div>
+      <h3 class="sub-h">Entradas × saídas <span>· mês atual</span></h3>
+      {% set maxrd = [dash.dre.receitas_centavos, dash.dre.despesas_centavos, 1]|max %}
+      <div class="rd-row">
+        <div class="rd-top"><span class="rd-nome"><span class="swatch" style="background:var(--verde-claro)"></span>Receitas</span><span class="rd-val" style="color:var(--verde-claro)">{{ dash.dre.receitas_centavos|brl }}</span></div>
+        <div class="rd-bar"><span style="width:{{ (100*dash.dre.receitas_centavos/maxrd)|round(1) }}%;background:var(--verde-claro)"></span></div>
+      </div>
+      <div class="rd-row">
+        <div class="rd-top"><span class="rd-nome"><span class="swatch" style="background:#e07a6b"></span>Despesas</span><span class="rd-val" style="color:#e07a6b">{{ dash.dre.despesas_centavos|brl }}</span></div>
+        <div class="rd-bar"><span style="width:{{ (100*dash.dre.despesas_centavos/maxrd)|round(1) }}%;background:#e07a6b"></span></div>
+      </div>
+      <div class="rd-res"><span class="rl">Resultado do mês</span><span class="rv {{ 'pos' if dash.dre.resultado_centavos >= 0 else 'neg' }}">{{ dash.dre.resultado_centavos|brl }}</span></div>
+      {% if dash.dre.top_receitas or dash.dre.top_despesas %}
+      <div class="cats">
+        <div><h4>Top receitas</h4>
+          {% for cat, v in dash.dre.top_receitas[:3] %}<div class="ci"><span class="cn">{{ cat or 'Outros' }}</span><span class="cv">{{ v|brl }}</span></div>{% else %}<div class="ci mut">—</div>{% endfor %}
+        </div>
+        <div><h4>Top despesas</h4>
+          {% for cat, v in dash.dre.top_despesas[:3] %}<div class="ci"><span class="cn">{{ cat or 'Outros' }}</span><span class="cv">{{ v|brl }}</span></div>{% else %}<div class="ci mut">—</div>{% endfor %}
+        </div>
+      </div>
+      {% endif %}
+      {% if dash.dre.a_definir_n %}<p class="mut" style="font-size:.76rem;margin:.7rem 0 0">{{ dash.dre.a_definir_n }} lançamento(s) a classificar ({{ dash.dre.a_definir_centavos|brl }}) fora do resultado.</p>{% endif %}
+    </div>
+
+    {% if dash.tem_funil %}
+    <div>
+      <h3 class="sub-h">Funil de vendas <span>· propostas por status</span></h3>
+      {% if dash.funil_total %}
+      <div class="funil">
+        <div class="donut" role="img" aria-label="{{ dash.funil_total }} propostas por status" style="background:{{ dash.funil_gradiente }}">
+          <div class="mid"><span class="n">{{ dash.funil_total }}</span><span class="l">propostas</span></div>
+        </div>
+        <div class="legenda">
+          {% for f in dash.funil_legenda %}<div class="leg-row"><span class="dot" style="background:{{ f.cor }}"></span><span class="leg-nome{% if f.mut %} mut{% endif %}">{{ f.rotulo }}</span><span class="leg-n">{{ f.n }}</span></div>{% endfor %}
+        </div>
+      </div>
+      <div class="resumo">
+        <div class="r"><span class="rv win">{{ dash.funil_conversao }}%</span><span class="rl">conversão</span></div>
+        <div class="r"><span class="rv">{{ dash.funil_previsto|brl }}</span><span class="rl">valor previsto</span></div>
+        <div class="r"><span class="rv">{{ dash.funil_recorrente|brl }}</span><span class="rl">novo recorrente/mês</span></div>
+      </div>
+      {% else %}
+      <div class="funil-vazio">
+        <div>Nenhuma proposta ainda.</div>
+        <a href="/painel/servicos" style="color:var(--verde-claro);text-decoration:none;font-weight:600">Criar minha primeira proposta →</a>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="dash-div"></div>
+
+  <div>
+    <div class="fluxo-head">
+      <h3 class="sub-h" style="margin:0">Fluxo projetado <span>· próximas 4 semanas</span></h3>
+      <span class="fv">saldo hoje {{ dash.fluxo.saldo_atual_centavos|brl }} → <b>{{ dash.fluxo.saldo_projetado_centavos|brl }}</b></span>
+    </div>
+    <svg class="fluxo-svg" viewBox="0 0 600 120" preserveAspectRatio="none" role="img" aria-label="Saldo projetado nas próximas 4 semanas">
+      <defs><linearGradient id="fluxoGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3987e5" stop-opacity="0.28"/><stop offset="1" stop-color="#3987e5" stop-opacity="0"/></linearGradient></defs>
+      <line x1="0" y1="30" x2="600" y2="30" stroke="var(--borda)" stroke-width="1"/>
+      <line x1="0" y1="65" x2="600" y2="65" stroke="var(--borda)" stroke-width="1"/>
+      <line x1="0" y1="100" x2="600" y2="100" stroke="var(--borda)" stroke-width="1"/>
+      <path d="{{ dash.fluxo_area }}" fill="url(#fluxoGrad)"/>
+      <polyline points="{{ dash.fluxo_poly }}" fill="none" stroke="#3987e5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="{{ dash.fluxo_end_x|round(1) }}" cy="{{ dash.fluxo_end_y|round(1) }}" r="4.5" fill="#3987e5" stroke="var(--card)" stroke-width="2"/>
+    </svg>
+    <div class="xlabels"><span>hoje</span><span>sem 1</span><span>sem 2</span><span>sem 3</span><span>sem 4</span></div>
+  </div>
+</div>
+{% endif %}"""
+
+
 _env = Environment(loader=DictLoader({
     "holerite": _HOLERITE,
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "pagar_aviso": _PAGAR_AVISO, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS, "produtos": _PRODUTOS, "abastecimento": _ABASTECIMENTO, "clientes": _CLIENTES, "cliente_detalhe": _CLIENTE_DETALHE, "pdv": _PDV, "venda_detalhe": _VENDA_DETALHE,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "dash_bloco": _DASH_BLOCO, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "pagar_aviso": _PAGAR_AVISO, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS, "produtos": _PRODUTOS, "abastecimento": _ABASTECIMENTO, "clientes": _CLIENTES, "cliente_detalhe": _CLIENTE_DETALHE, "pdv": _PDV, "venda_detalhe": _VENDA_DETALHE,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 _env.filters["brl"] = brl
@@ -8041,9 +8174,19 @@ def painel_empresa(request: Request):
         return _render("empresa_dados", request, dados=d, tem_pj=True, erro="",
                        nichos_lista=_nichos.lista_nichos())
     hoje = _date.today()
-    res = emp.resumo_titulos(pool, conta[0])
-    fluxo = emp.fluxo_projetado(pool, conta[0])
-    dre = emp.dre_mes(pool, conta[0], hoje.year, hoje.month)
+    # Dashboard "Visão do negócio" (o mesmo do /painel) agora no topo da Empresa.
+    # Reaproveita res/fluxo/dre já calculados dentro dele (uma computação só).
+    dash = _painel_dashboard(pool, conta, vende_servico=bool(conta[14]))
+    res, fluxo, dre = dash["res"], dash["fluxo"], dash["dre"]
+    # Plano de contas (árvore + liga/desliga), centros de custo e DRE por centro.
+    # Tolerante: se a migração 132 ainda não rodou, as seções ficam vazias.
+    from finance import plano_contas as _pc
+    try:
+        plano_arvore = _pc.arvore_habilitada(pool, conta[0])
+        centros = _pc.listar_centros(pool, conta[0], incluir_inativos=True)
+        dre_centro = emp.dre_por_centro(pool, conta[0], hoje.year, hoje.month)
+    except Exception:
+        plano_arvore, centros, dre_centro = [], [], {"centros": [], "linhas": []}
     doc = ""
     with pool.connection() as c:
         r = c.execute("select coalesce(documento,'') from contas where id=%s",
@@ -8063,9 +8206,10 @@ def painel_empresa(request: Request):
                        "on n.id=ct.nicho_id where ct.id=%s", (conta[0],)).fetchone()
     rotulo_receber = _nichos.rotulo_receber(_r[0] if _r else "")
     return _render("empresa", request, empresa_nome=conta[2], empresa_doc=doc,
-                   res=res, fluxo=fluxo, dre=dre, titulos=titulos, folha=folha,
-                   clientes_lista=clientes_lista, carteira=carteira,
-                   rotulo_receber=rotulo_receber, tem_pj=True)
+                   dash=dash, res=res, fluxo=fluxo, dre=dre, titulos=titulos,
+                   folha=folha, clientes_lista=clientes_lista, carteira=carteira,
+                   rotulo_receber=rotulo_receber, tem_pj=True,
+                   plano_arvore=plano_arvore, centros=centros, dre_centro=dre_centro)
 
 
 @router.get("/painel/produtos")
@@ -8489,6 +8633,57 @@ def empresa_titulo_criar(request: Request, tipo: str = Form("pagar"),
     return RedirectResponse("/painel/empresa", status_code=303)
 
 
+@router.post("/painel/empresa/plano-contas/habilitar")
+def empresa_plano_habilitar(request: Request, plano_conta_id: str = Form(""),
+                            ativa: str = Form("")):
+    """Liga/desliga uma conta do plano de contas PRA ESTA conta (toggle)."""
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    from finance import plano_contas as pc
+    try:
+        pc.habilitar(pool, conta[0], int(plano_conta_id),
+                     ativa in ("1", "on", "true", "True"))
+    except (TypeError, ValueError):
+        pass
+    return RedirectResponse("/painel/empresa#plano-contas", status_code=303)
+
+
+@router.post("/painel/empresa/centro-custo")
+def empresa_centro_salvar(request: Request, centro_id: str = Form(""),
+                          nome: str = Form(""), descricao: str = Form(""),
+                          cor: str = Form("")):
+    """Cria um centro de custo — ou edita, se centro_id vier no form."""
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    from finance import plano_contas as pc
+    if nome.strip():
+        try:
+            if centro_id.strip():
+                pc.editar_centro(pool, conta[0], int(centro_id), nome, descricao, cor)
+            else:
+                pc.criar_centro(pool, conta[0], nome, descricao, cor)
+        except (TypeError, ValueError):
+            pass
+    return RedirectResponse("/painel/empresa#centros-custo", status_code=303)
+
+
+@router.post("/painel/empresa/centro-custo/{centro_id}/desativar")
+def empresa_centro_desativar(request: Request, centro_id: int, ativo: str = Form("")):
+    """Desativa (ou reativa, se ativo=1) um centro de custo. Nunca apaga — o
+    histórico dos lançamentos que apontam pra ele fica preservado."""
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    from finance import plano_contas as pc
+    pc.desativar_centro(pool, conta[0], centro_id, ativo=(ativo in ("1", "on", "true", "True")))
+    return RedirectResponse("/painel/empresa#centros-custo", status_code=303)
+
+
 @router.post("/painel/empresa/titulo/{titulo_id}/baixa")
 def empresa_titulo_baixa(request: Request, titulo_id: int):
     from finance import empresa as emp
@@ -8815,6 +9010,17 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
     from finance.models import CATEGORIAS_DESPESA, CATEGORIAS_RECEITA
     categorias_lista = CATEGORIAS_DESPESA + [c for c in CATEGORIAS_RECEITA if c not in CATEGORIAS_DESPESA]
 
+    # Conta contábil (habilitadas, agrupadas) + centros de custo — só PJ usa, e só
+    # pra classificar lançamentos de empresa. Tolerante à ausência da migração 132.
+    plano_opcoes, centros_custo = [], []
+    if eh_pj:
+        from finance import plano_contas as _pc
+        try:
+            plano_opcoes = _pc.opcoes_lancamento(pool, conta[0])
+            centros_custo = _pc.listar_centros(pool, conta[0])
+        except Exception:
+            plano_opcoes, centros_custo = [], []
+
     meses = []
     y, m = hoje.year, hoje.month
     nomes = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"]
@@ -8834,7 +9040,8 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
                    n_a_definir=n_a_definir,
                    quebra=quebra,
                    prev_cartao=prev_cartao,
-                   eh_pj=eh_pj)
+                   eh_pj=eh_pj,
+                   plano_opcoes=plano_opcoes, centros_custo=centros_custo)
 
 
 # ---------- lista de compras ----------
@@ -9129,6 +9336,40 @@ def marcar_natureza_lancamento(request: Request,
     livro = LivroCaixa(get_pool(), conta[0])
     nat = natureza if natureza in ("pessoal", "empresa") else None
     ok = livro.marcar_natureza(lancamento_id, nat)
+    return JSONResponse({"ok": bool(ok)})
+
+
+@router.post("/painel/lancamento/plano-conta")
+def definir_plano_conta_lancamento(request: Request,
+                                   lancamento_id: int = Form(...),
+                                   plano_conta_id: str = Form("")):
+    """Define a conta contábil de um lançamento (vazio = limpa). Valida que a
+    conta do plano existe e está habilitada pra esta conta antes de gravar."""
+    conta = conta_logada(request)
+    if not conta:
+        return JSONResponse({"ok": False}, status_code=401)
+    from finance.livro_caixa import LivroCaixa
+    from finance import plano_contas as pc
+    pool = get_pool()
+    pid = pc.plano_conta_valido(pool, conta[0], plano_conta_id)
+    ok = LivroCaixa(pool, conta[0]).definir_plano_conta(lancamento_id, pid)
+    return JSONResponse({"ok": bool(ok)})
+
+
+@router.post("/painel/lancamento/centro-custo")
+def definir_centro_custo_lancamento(request: Request,
+                                    lancamento_id: int = Form(...),
+                                    centro_custo_id: str = Form("")):
+    """Define o centro de custo de um lançamento (vazio = limpa). Valida que o
+    centro é desta conta e está ativo antes de gravar."""
+    conta = conta_logada(request)
+    if not conta:
+        return JSONResponse({"ok": False}, status_code=401)
+    from finance.livro_caixa import LivroCaixa
+    from finance import plano_contas as pc
+    pool = get_pool()
+    cid = pc.centro_custo_valido(pool, conta[0], centro_custo_id)
+    ok = LivroCaixa(pool, conta[0]).definir_centro_custo(lancamento_id, cid)
     return JSONResponse({"ok": bool(ok)})
 
 

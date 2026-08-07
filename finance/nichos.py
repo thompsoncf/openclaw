@@ -157,6 +157,13 @@ NICHOS: dict[str, dict] = {
         "unidades": ["peca", "unidade", "servico", "hora", "orcamento"],
         "categorias": ["peca", "acessorio", "conserto", "diagnostico", "outro"],
     },
+    "eventos": {
+        "label": "Eventos / Festas",
+        "vende_produto": True, "vende_servico": True,
+        "unidades": ["pacote", "diaria", "hora", "unidade", "convidado"],
+        "categorias": ["decoracao", "buffet", "estrutura", "som_iluminacao",
+                       "cerimonial", "aluguel", "outro"],
+    },
 }
 
 # União de TODAS as unidades de todos os nichos. Serve pra validação frouxa no
@@ -277,7 +284,7 @@ _UNIDADE_LABEL = {
     "honorario": "honorário", "avulso": "avulso",
     "processo": "processo", "diagnostico": "diagnóstico", "sprint": "sprint",
     "licenca": "licença", "etapa": "etapa", "medicao": "medição", "m2": "m²",
-    "campanha": "campanha",
+    "campanha": "campanha", "convidado": "convidado",
 }
 
 

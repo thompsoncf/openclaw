@@ -9,6 +9,7 @@ uvicorn[standard]>=0.29
 openai>=1.40
 twilio>=9.0
 httpx>=0.27
+cryptography>=41                          # Web Push do Cockpit (RFC 8291/8292), sem pywebpush
 python-multipart>=0.0.9
 jinja2>=3.1
 itsdangerous>=2.1

@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import html as _html
 
-from fastapi import APIRouter, Request, Form
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi import APIRouter, Request, Form, Body
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
 
 from db.conexao import get_pool
 from finance import cockpit as ck
@@ -126,10 +126,132 @@ padding:.6rem .8rem;font-size:.9rem;font-family:inherit;width:100%}
 .frow span{color:var(--mut)}.frow b{text-align:right}
 .tel{display:flex;align-items:center;gap:.5rem;padding:.45rem 0;font-size:.92rem;border-top:1px solid #202021}.tel:first-of-type{border-top:0}
 .tel .z{margin-left:auto;font-size:.72rem;color:var(--zap);border:1px solid #16391f;background:#0c1c10;border-radius:999px;padding:.06rem .5rem}
+/* swipe: card desliza pra revelar ações atrás */
+.swipe{position:relative;overflow:hidden;background:var(--bg)}
+.swipe .actions{position:absolute;top:0;right:0;height:100%;display:flex}
+.swipe .act{width:82px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.15rem;color:#fff;font-size:.72rem;font-weight:600;border:0;cursor:pointer}
+.swipe .act .em{font-size:1.1rem}
+.act.assumir{background:linear-gradient(180deg,#7b4fb0,#5f3a90)}
+.act.devolver{background:linear-gradient(180deg,#3a2b52,#2a2140);color:var(--roxo)}
+.act.ganho{background:linear-gradient(180deg,#1d9e75,#158a63)}
+.front{position:relative;z-index:2;background:var(--bg);transition:transform .22s cubic-bezier(.2,.8,.3,1);will-change:transform;touch-action:pan-y}
+.front.drag{transition:none}
+.grab{margin-left:.3rem;color:#4a4a4c;font-size:.95rem;flex-shrink:0}
+.pushcard{margin:.7rem 1rem;border:1px solid #3a2b52;background:#160f22;border-radius:13px;padding:.8rem;display:none}
+.pushcard.show{display:block}
+.pushcard b{display:block;font-size:.92rem;margin-bottom:.15rem}
+.pushcard p{margin:.1rem 0 .6rem;color:var(--mut);font-size:.8rem}
+.pushcard .go{background:var(--roxo);color:#1a0f2a;border:0;border-radius:9px;padding:.55rem .8rem;font-weight:700;font-size:.84rem;width:100%;cursor:pointer}
+.ck-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);opacity:0;background:#222226;border:1px solid #3a3a3c;color:var(--txt);padding:.5rem .85rem;border-radius:10px;font-size:.83rem;transition:.25s;z-index:99;pointer-events:none;max-width:90vw;text-align:center}
+.ck-toast.show{transform:translateX(-50%) translateY(0);opacity:1}
 </style>"""
 
 _SW_REG = ("<script>if('serviceWorker' in navigator){"
            "navigator.serviceWorker.register('/cockpit/sw.js').catch(function(){});}</script>")
+
+# JS da caixa de leads: swipe pra ações + ativar push. Plain string (tem chaves de JS).
+_INBOX_JS = r"""
+<div class="ck-toast" id="cktoast"></div>
+<script>
+(function(){
+  function toast(m){var t=document.getElementById('cktoast');if(!t)return;t.textContent=m;t.classList.add('show');
+    clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove('show');},2000);}
+  function actionsHTML(ia){
+    var main = ia
+      ? '<button class="act assumir" data-a="assumir"><span class="em">🙋</span>Assumir</button>'
+      : '<button class="act devolver" data-a="devolver"><span class="em">🤖</span>Devolver</button>';
+    return '<div class="actions">'+main+'<button class="act ganho" data-a="ganho"><span class="em">✓</span>Ganho</button></div>';
+  }
+  var openFront=null;
+  function closeF(f){ if(!f)return; f.classList.remove('open'); f.style.transform='translateX(0)'; if(openFront===f)openFront=null; }
+  function actW(row){ var a=row.querySelector('.actions'); return a?a.offsetWidth:164; }
+
+  function wire(row){
+    var front=row.querySelector('.front');
+    var id=front.getAttribute('data-id');
+    var sx=0,sy=0,base=0,dragging=false,decided=false,horiz=false,moved=false;
+    front.addEventListener('pointerdown',function(e){
+      if(openFront&&openFront!==front)closeF(openFront);
+      dragging=true;decided=false;horiz=false;moved=false;sx=e.clientX;sy=e.clientY;
+      base=front.classList.contains('open')?-actW(row):0;
+      front.classList.add('drag');try{front.setPointerCapture(e.pointerId);}catch(_){}
+    });
+    front.addEventListener('pointermove',function(e){
+      if(!dragging)return;var mx=e.clientX-sx,my=e.clientY-sy;
+      if(!decided){if(Math.abs(mx)>6||Math.abs(my)>6){decided=true;horiz=Math.abs(mx)>Math.abs(my);}}
+      if(!horiz)return; e.preventDefault(); moved=true;
+      var w=actW(row); var x=Math.max(-w-20,Math.min(0,base+mx)); front.style.transform='translateX('+x+'px)';
+    });
+    function end(){ if(!dragging)return;dragging=false;front.classList.remove('drag');
+      var m=front.style.transform.match(/-?\d+\.?\d*/); var cur=m?parseFloat(m[0]):0; var w=actW(row);
+      if(cur<-w/2){front.classList.add('open');front.style.transform='translateX('+(-w)+'px)';openFront=front;}
+      else{closeF(front);}
+    }
+    front.addEventListener('pointerup',end); front.addEventListener('pointercancel',end);
+    front.addEventListener('click',function(){
+      if(front.classList.contains('open')){closeF(front);return;}
+      if(!moved){ location.href='/cockpit/lead/'+id; }
+    });
+    row.querySelectorAll('.act').forEach(function(b){
+      b.addEventListener('click',function(ev){ ev.stopPropagation(); doAct(row,front,id,b.getAttribute('data-a')); });
+    });
+  }
+  function doAct(row,front,id,a){
+    var url = a==='ganho' ? '/cockpit/lead/'+id+'/fechar'
+            : a==='devolver' ? '/cockpit/lead/'+id+'/devolver'
+            : '/cockpit/lead/'+id+'/assumir';
+    var opt={method:'POST',headers:{'x-cockpit':'1'}};
+    if(a==='ganho'){opt.headers['Content-Type']='application/x-www-form-urlencoded';opt.body='tipo=ganho';}
+    fetch(url,opt).then(function(r){return r.json();}).then(function(j){
+      if(!j||!j.ok){toast((j&&j.erro)||'Não deu certo');closeF(front);return;}
+      if(a==='ganho'){ row.style.height=row.offsetHeight+'px';row.style.transition='.25s';
+        requestAnimationFrame(function(){row.style.height='0';row.style.opacity='0';});
+        setTimeout(function(){row.remove();},260); toast('🎉 Marcado como Ganho'); return; }
+      var ia = (a!=='assumir'); // assumir→sem IA; devolver→com IA
+      var tmp=document.createElement('div'); tmp.innerHTML=actionsHTML(ia);
+      row.querySelector('.actions').replaceWith(tmp.firstChild);   // troca as ações (assumir↔devolver)
+      var chip=front.querySelector('.cchip');
+      if(chip){ chip.className='cchip '+(ia?'ia':'voce'); chip.textContent=ia?'🤖 IA':'🙋 sua vez'; }
+      front.setAttribute('data-ia', ia?'1':'0');
+      row.querySelectorAll('.act').forEach(function(b){
+        b.addEventListener('click',function(ev){ev.stopPropagation();doAct(row,front,id,b.getAttribute('data-a'));});
+      });
+      closeF(front);
+      toast(a==='assumir'?'🙋 Agente desativado — é a sua vez':'🤖 Devolvido pro agente');
+    }).catch(function(){toast('Falha de conexão');closeF(front);});
+  }
+  document.querySelectorAll('.swipe').forEach(wire);
+
+  // ---- push ----
+  function urlB64(s){var p='='.repeat((4-s.length%4)%4);var b=atob((s+p).replace(/-/g,'+').replace(/_/g,'/'));
+    var a=new Uint8Array(b.length);for(var i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return a;}
+  function subscribe(){
+    if(!('serviceWorker'in navigator)||!('PushManager'in window)||!window.CKVAPID)return Promise.resolve(false);
+    return navigator.serviceWorker.ready.then(function(reg){
+      return reg.pushManager.getSubscription().then(function(s){
+        if(s)return s;
+        return reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlB64(window.CKVAPID)});
+      });
+    }).then(function(sub){
+      return fetch('/cockpit/push/assinar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(sub)});
+    }).then(function(){return true;}).catch(function(){return false;});
+  }
+  var card=document.getElementById('pushcard');
+  if(card && ('Notification'in window) && window.CKVAPID){
+    if(Notification.permission==='granted'){ subscribe(); }
+    else if(Notification.permission!=='denied'){
+      card.classList.add('show');
+      document.getElementById('pushbtn').addEventListener('click',function(){
+        Notification.requestPermission().then(function(p){
+          if(p==='granted'){ subscribe().then(function(){toast('🔔 Notificações ligadas');}); }
+          else { toast('Você pode ligar depois no navegador'); }
+          card.classList.remove('show');
+        });
+      });
+    }
+  }
+})();
+</script>"""
 
 
 def _page(title: str, body: str) -> HTMLResponse:
@@ -244,28 +366,48 @@ def cockpit_inbox(request: Request):
     leads = ck.leads_do_vendedor(pool, conta_id, membro_id)
     p = ck.perfil(pool, conta_id, membro_id)
     vez = sum(1 for l in leads if not l["ia"])
+
+    def _acts(ia: bool) -> str:
+        main = ("<button class='act assumir' data-a=assumir><span class=em>🙋</span>Assumir</button>" if ia
+                else "<button class='act devolver' data-a=devolver><span class=em>🤖</span>Devolver</button>")
+        return f"<div class=actions>{main}<button class='act ganho' data-a=ganho><span class=em>✓</span>Ganho</button></div>"
+
     cards = []
     for l in leads:
         chip = ("<span class='cchip ia'>🤖 IA</span>" if l["ia"]
                 else "<span class='cchip voce'>🙋 sua vez</span>")
         cards.append(
-            f"<a class=lead href='/cockpit/lead/{l['id']}'>"
+            "<div class=swipe>" + _acts(l["ia"]) +
+            f"<div class='lead front' data-id='{l['id']}' data-ia='{1 if l['ia'] else 0}'>"
             f"<span class=dot style='background:{esc(l['temp_cor'])}'></span>"
             f"<span class=av>{esc(_ini(l['empresa']))}</span>"
             f"<span class=mid><span class=top><span class=emp>{esc(l['empresa'])}</span>{chip}</span>"
-            f"<span class=snip>{esc(l['snip'])}</span></span></a>")
+            f"<span class=snip>{esc(l['snip'])}</span></span>"
+            "<span class=grab>⋮⋮</span></div></div>")
     if leads:
         lista = "".join(cards)
     else:
         lista = ("<div class=vazio><div class=big>🎯</div><b>Fila zerada!</b>"
                  "Nenhum lead aberto agora. Quando cair um novo no rodízio, você é avisado.</div>")
+
+    from finance import webpush
+    vapid = webpush.chave_publica()
+    pushcard = ""
+    if vapid:                        # só oferece push se as chaves VAPID estão no ambiente
+        pushcard = ("<div class=pushcard id=pushcard><b>🔔 Ative as notificações</b>"
+                    "<p>Receba um aviso no celular assim que um lead cair pra você — mesmo com o app fechado.</p>"
+                    "<button class=go id=pushbtn type=button>Ativar notificações</button></div>")
+    import json as _json
+    inject = f"<script>window.CKVAPID={_json.dumps(vapid)};</script>" if vapid else ""
+
     body = (
         "<div class=hdr>"
         f"<a class=ib href='/cockpit/perfil' title='Meu perfil'>{esc(_ini(p['nome']))}</a>"
         f"<div class=tt><b>Meus leads</b><small>{len(leads)} abertos · {vez} sua vez</small></div></div>"
         "<div class=scroll>"
-        "<div class=instpill>📲 <b>Instalar o app</b> — no menu do navegador, “Adicionar à tela inicial”.</div>"
-        f"{lista}</div>")
+        + pushcard +
+        "<div class=instpill>📲 <b>Instalar o app</b> — no menu do navegador, “Adicionar à tela inicial”. Deslize um card ← pra ações rápidas.</div>"
+        f"{lista}</div>" + inject + _INBOX_JS)
     return _page("Cockpit — meus leads", body)
 
 
@@ -391,12 +533,17 @@ def cockpit_ficha(request: Request, lead_id: int):
 
 
 # ------------------------------------------------------------------ ações (POST)
-def _acao(request: Request, lead_id: int, fn) -> RedirectResponse:
+def _acao(request: Request, lead_id: int, fn):
     sess = _sessao(request)
     if not sess:
+        if request.headers.get("x-cockpit") == "1":
+            return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
         return RedirectResponse("/cockpit/login", status_code=303)
     conta_id, membro_id = sess
     r = fn(get_pool(), conta_id, membro_id, lead_id)
+    # do swipe (fetch): responde JSON e fica na lista; senão redireciona pro lead
+    if request.headers.get("x-cockpit") == "1":
+        return JSONResponse(r)
     if r.get("ok"):
         request.session["ck_ok"] = r.get("msg", "Feito ✓")
     else:
@@ -422,18 +569,52 @@ def cockpit_assumir(request: Request, lead_id: int):
                                                        "msg": "Você assumiu a conversa ✓"})
 
 
+@router.post("/cockpit/lead/{lead_id}/devolver")
+def cockpit_devolver(request: Request, lead_id: int):
+    return _acao(request, lead_id, lambda p, c, m, l: {**ck.devolver_ia(p, c, m, l),
+                                                       "msg": "Devolvido pro agente ✓"})
+
+
 @router.post("/cockpit/lead/{lead_id}/fechar")
 def cockpit_fechar(request: Request, lead_id: int, tipo: str = Form(...), motivo: str = Form("")):
     sess = _sessao(request)
     if not sess:
+        if request.headers.get("x-cockpit") == "1":
+            return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
         return RedirectResponse("/cockpit/login", status_code=303)
     conta_id, membro_id = sess
     r = ck.fechar(get_pool(), conta_id, membro_id, lead_id, tipo, motivo)
+    if request.headers.get("x-cockpit") == "1":     # swipe (fetch): fica na lista
+        return JSONResponse(r)
     if r.get("ok"):
         request.session["ck_ok"] = "🎉 Marcado como Ganho!" if tipo == "ganho" else "Marcado como Perdido."
         return RedirectResponse("/cockpit", status_code=303)     # saiu da fila
     request.session["ck_err"] = r.get("erro", "Não deu certo.")
     return RedirectResponse(f"/cockpit/lead/{lead_id}", status_code=303)
+
+
+# ------------------------------------------------------------------ push (assinar)
+@router.get("/cockpit/push/chave")
+def cockpit_push_chave(request: Request):
+    from finance import webpush
+    return JSONResponse({"chave": webpush.chave_publica()})
+
+
+@router.post("/cockpit/push/assinar")
+async def cockpit_push_assinar(request: Request, sub: dict = Body(...)):
+    sess = _sessao(request)
+    if not sess:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    ok = ck.salvar_assinatura(get_pool(), sess[0], sess[1], sub)
+    return JSONResponse({"ok": bool(ok)})
+
+
+@router.post("/cockpit/push/remover")
+async def cockpit_push_remover(request: Request, sub: dict = Body(...)):
+    if not _sessao(request):
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    ck.remover_assinatura(get_pool(), (sub or {}).get("endpoint", ""))
+    return JSONResponse({"ok": True})
 
 
 # ------------------------------------------------------------------ perfil

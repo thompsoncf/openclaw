@@ -43,6 +43,8 @@ create table prospeccao_atividades (id bigserial primary key, prospeccao_id bigi
   tipo text, resultado text, descricao text, criado_em timestamptz default now());
 create table cockpit_acesso (token text primary key, conta_id bigint, membro_id bigint,
   expira_em timestamptz not null, usado_em timestamptz, criado_em timestamptz default now());
+create table push_assinaturas (id bigserial primary key, conta_id bigint, membro_id bigint,
+  endpoint text unique, p256dh text, auth text, criado_em timestamptz default now());
 """
 
 
@@ -213,3 +215,53 @@ def test_pausar_rodizio_reflete_no_perfil(pool):
     assert p0["pausado"] is False
     ck.set_pausado(pool, conta, vend, True)
     assert ck.perfil(pool, conta, vend)["pausado"] is True
+
+
+def test_devolver_ia(pool):
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="dv@x.com")
+        lead = _lead(c, conta, vend)
+        c.execute("insert into conversas (conta_id, prospeccao_id, canal, agente_ativo) values (%s,%s,'whatsapp',false)",
+                  (conta, lead))
+        c.commit()
+    assert ck.devolver_ia(pool, conta, vend, lead)["ok"] is True
+    with pool.connection() as c:
+        assert c.execute("select agente_ativo from conversas where prospeccao_id=%s", (lead,)).fetchone()[0] is True
+
+
+def test_assinatura_push_salva_e_remove(pool):
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="ps@x.com"); c.commit()
+    sub = {"endpoint": "https://push/abc", "keys": {"p256dh": "PPP", "auth": "AAA"}}
+    assert ck.salvar_assinatura(pool, conta, vend, sub) is True
+    assert ck.salvar_assinatura(pool, conta, vend, {"endpoint": "x"}) is False   # sem chaves
+    with pool.connection() as c:
+        assert c.execute("select count(*) from push_assinaturas where membro_id=%s", (vend,)).fetchone()[0] == 1
+    ck.remover_assinatura(pool, "https://push/abc")
+    with pool.connection() as c:
+        assert c.execute("select count(*) from push_assinaturas where membro_id=%s", (vend,)).fetchone()[0] == 0
+
+
+def test_enviar_push_respeita_toggle_e_limpa_morto(pool, monkeypatch):
+    from finance import webpush
+    monkeypatch.setattr(webpush, "configurado", lambda: True)
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="ep@x.com")
+        for ep in ("https://push/1", "https://push/2"):
+            c.execute("insert into push_assinaturas (conta_id, membro_id, endpoint, p256dh, auth) values (%s,%s,%s,'p','a')",
+                      (conta, vend, ep))
+        c.commit()
+    # 1ª assinatura ok, 2ª expirada → deve ser removida
+    def fake_enviar(sub, dados, ttl=3600):
+        if sub["endpoint"].endswith("/2"):
+            raise webpush.PushExpirado(sub["endpoint"])
+        return True
+    monkeypatch.setattr(webpush, "enviar", fake_enviar)
+    n = ck.enviar_push(pool, conta, vend, "t", "c")
+    assert n == 1
+    with pool.connection() as c:
+        eps = [r[0] for r in c.execute("select endpoint from push_assinaturas where membro_id=%s", (vend,)).fetchall()]
+    assert eps == ["https://push/1"]           # a morta saiu
+    # com push desligado no membro, não envia
+    ck.set_push(pool, conta, vend, False)
+    assert ck.enviar_push(pool, conta, vend, "t", "c") == 0

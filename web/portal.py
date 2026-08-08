@@ -3150,6 +3150,68 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   </script>
 </details>
 
+{% if a_classificar %}
+<style>
+  .ac-card{border-color:#f0c05a44}
+  .ac-item{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;padding:.7rem 0;border-top:1px solid #232325}
+  .ac-item:first-of-type{border-top:none}
+  .ac-info{flex:1 1 190px;min-width:0}
+  .ac-info .d{font-size:.9rem}
+  .ac-info .m{font-size:.7rem;color:var(--txt-mut);margin-top:2px}
+  .ac-sel{background:var(--bg);border:1px solid #2a3a33;border-radius:7px;color:var(--txt);font-size:.75rem;padding:.28rem .5rem;font-family:inherit;outline:none;max-width:180px}
+  .ac-sel:focus{border-color:var(--verde)}
+  .ac-sel.miss{border-color:#f0c05a66}
+  .ac-sel.done{border-color:var(--verde-claro)}
+  .ac-ok{color:var(--verde-claro);font-weight:600;font-size:.75rem;white-space:nowrap}
+</style>
+<div class="card larga ac-card" id="a-classificar">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.4rem">
+    <strong style="color:#f0c05a">⚠️ Lançamentos a classificar <span id="ac-count">({{ a_classificar|length }})</span></strong>
+    <span class="mut" style="font-size:.72rem">de empresa, sem conta contábil — ficam de fora da DRE por conta</span>
+  </div>
+  <p class="mut" style="font-size:.75rem;margin:.3rem 0 .6rem">Escolha a conta contábil (e o centro, se quiser) — some daqui e entra na DRE na hora.</p>
+  <div id="ac-list">
+    {% for l in a_classificar %}
+    <div class="ac-item" id="ac-row-{{ l.id }}">
+      <div class="ac-info"><div class="d">{{ l.descricao or l.categoria }}</div>
+        <div class="m">{{ l.data.strftime('%d/%m') }} · {{ l.categoria }} · {{ '−' if l.tipo=='despesa' else '+' }} {{ brl(l.valor) }}</div></div>
+      <select class="ac-sel miss" onchange="acPlano(this, {{ l.id }})" title="conta contábil">
+        <option value="">— conta contábil —</option>
+        {% for g in plano_opcoes %}<optgroup label="{{ g.grupo }} · {{ g.nome }}">{% for c in g.contas %}<option value="{{ c.id }}">{{ c.codigo }} {{ c.nome }}</option>{% endfor %}</optgroup>{% endfor %}
+      </select>
+      {% if centros_ativos %}<select class="ac-sel" onchange="acCentro(this, {{ l.id }})" title="centro de custo (opcional)">
+        <option value="">— centro —</option>
+        {% for c in centros_ativos %}<option value="{{ c.id }}" {% if l.centro_custo_id==c.id %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}
+      </select>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  <div id="ac-done" style="display:none;color:var(--verde-claro);font-weight:600;padding:.5rem 0">✓ Tudo classificado — a DRE está completa!</div>
+  <script>
+  function acPlano(sel, id){
+    fetch('/painel/lancamento/plano-conta', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&plano_conta_id='+encodeURIComponent(sel.value)})
+      .then(r=>r.json()).then(function(d){
+        if(d.ok && sel.value){
+          var row=document.getElementById('ac-row-'+id);
+          if(row && !row.dataset.done){ row.dataset.done='1';
+            row.style.transition='opacity .3s'; row.style.opacity='.45';
+            var b=document.createElement('span'); b.className='ac-ok'; b.textContent='✓ classificado'; row.appendChild(b);
+            var cnt=document.getElementById('ac-count');
+            var n=Math.max(0,(parseInt(cnt.textContent.replace(/\\D/g,''))||1)-1);
+            cnt.textContent='('+n+')';
+            if(n===0){ document.getElementById('ac-list').style.display='none'; document.getElementById('ac-done').style.display='block'; }
+          }
+        }
+      });
+  }
+  function acCentro(sel, id){
+    fetch('/painel/lancamento/centro-custo', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&centro_custo_id='+encodeURIComponent(sel.value)})
+      .then(r=>r.json()).then(function(d){ if(d.ok){ sel.classList.remove('miss'); sel.classList.add('done'); } });
+  }
+  </script>
+</div>
+{% endif %}
+
 <div class="card larga" id="dre">
   <div style="display:flex;justify-content:space-between"><strong>DRE do mês</strong>
     <span class="mut" style="font-size:.72rem">{{ '%02d'|format(dre.mes) }}/{{ dre.ano }}</span></div>
@@ -8185,8 +8247,15 @@ def painel_empresa(request: Request):
         plano_arvore = _pc.arvore_habilitada(pool, conta[0])
         centros = _pc.listar_centros(pool, conta[0], incluir_inativos=True)
         dre_centro = emp.dre_por_centro(pool, conta[0], hoje.year, hoje.month)
+        # Painel "A classificar": lançamentos de empresa do mês sem conta contábil,
+        # com as opções (contas habilitadas + centros ativos) pra resolver ali.
+        a_classificar = LivroCaixa(pool, conta[0]).lancamentos_a_classificar(
+            hoje.year, hoje.month)
+        plano_opcoes = _pc.opcoes_lancamento(pool, conta[0])
+        centros_ativos = _pc.listar_centros(pool, conta[0])
     except Exception:
         plano_arvore, centros, dre_centro = [], [], {"centros": [], "linhas": []}
+        a_classificar, plano_opcoes, centros_ativos = [], [], []
     doc = ""
     with pool.connection() as c:
         r = c.execute("select coalesce(documento,'') from contas where id=%s",
@@ -8209,7 +8278,9 @@ def painel_empresa(request: Request):
                    dash=dash, res=res, fluxo=fluxo, dre=dre, titulos=titulos,
                    folha=folha, clientes_lista=clientes_lista, carteira=carteira,
                    rotulo_receber=rotulo_receber, tem_pj=True,
-                   plano_arvore=plano_arvore, centros=centros, dre_centro=dre_centro)
+                   plano_arvore=plano_arvore, centros=centros, dre_centro=dre_centro,
+                   a_classificar=a_classificar, plano_opcoes=plano_opcoes,
+                   centros_ativos=centros_ativos)
 
 
 @router.get("/painel/produtos")

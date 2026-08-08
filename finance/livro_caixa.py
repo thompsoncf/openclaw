@@ -688,6 +688,30 @@ class LivroCaixa:
                  "tipo": r[4], "valor": int(r[5]), "centro_custo_id": r[6]}
                 for r in rows]
 
+    def classificar_por_categoria_do(self, lancamento_ref_id: int,
+                                     plano_conta_id: int) -> int:
+        """Atalho 'aplicar a todos iguais': pega a categoria e o mês do lançamento
+        de referência e põe a MESMA conta contábil em todos os de EMPRESA daquele
+        mês+categoria que ainda estão SEM conta. Não toca nos já classificados
+        (então o próprio referência, se já tiver conta, fica de fora). Multi-tenant.
+        Retorna quantos foram atualizados."""
+        with self.pool.connection() as conn:
+            r = conn.execute(
+                "select categoria, data from lancamentos where id=%s and conta_id=%s",
+                (lancamento_ref_id, self.conta_id)).fetchone()
+            if not r:
+                return 0
+            categoria, data = r[0], r[1]
+            ini, prox = _intervalo_mes(data.year, data.month)
+            cur = conn.execute(
+                """update lancamentos set plano_conta_id = %s
+                    where conta_id=%s and data >= %s and data < %s
+                      and natureza='empresa' and categoria=%s
+                      and plano_conta_id is null""",
+                (plano_conta_id, self.conta_id, ini, prox, categoria))
+            conn.commit()
+            return cur.rowcount
+
     def marcar_natureza_mapa(self, mapa: dict) -> int:
         """Marca vários lançamentos, cada um com sua natureza. `mapa` é
         {id: 'pessoal'|'empresa'}. Ignora valores inválidos. Multi-tenant.

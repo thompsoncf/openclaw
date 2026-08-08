@@ -275,3 +275,29 @@ def test_lancamentos_a_classificar(pool, conta_id):
     assert lst[0]["descricao"] == "Anúncios"
     assert lst[0]["valor"] == 20000
     assert lst[0]["centro_custo_id"] is None
+
+
+def test_classificar_por_categoria_do(pool, conta_id):
+    """'Aplicar a todos iguais': põe a conta nos de empresa do mesmo mês+categoria
+    sem conta — sem tocar no já classificado, em outra categoria ou no pessoal."""
+    livro = LivroCaixa(pool, conta_id)
+    pid = {c["codigo"]: c["id"] for c in pc.listar_plano(pool)}["5.1.03"]
+
+    def add(cat, nat="empresa"):
+        return livro.adicionar(Lancamento.criar(Tipo.DESPESA, 10, cat, natureza=nat),
+                               forcar=True).id
+    ref = add("Servicos")
+    s1, s2 = add("Servicos"), add("Servicos")
+    outra = add("Mercado")               # categoria diferente
+    pes = add("Servicos", nat="pessoal")  # pessoal
+
+    livro.definir_plano_conta(ref, pid)   # ref classificado primeiro (como na UI)
+    n = livro.classificar_por_categoria_do(ref, pid)
+    assert n == 2                         # só s1 e s2
+
+    def conta_de(i):
+        with pool.connection() as c:
+            return c.execute("select plano_conta_id from lancamentos where id=%s",
+                             (i,)).fetchone()[0]
+    assert conta_de(s1) == pid and conta_de(s2) == pid
+    assert conta_de(outra) is None and conta_de(pes) is None

@@ -767,6 +767,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=pessoal" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if natureza_sel=='pessoal' %}background:#f0c05a;color:#1a1409;font-weight:600{% else %}color:#b4b2a9{% endif %}">👤 Pessoal</a>
 <a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=empresa" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if natureza_sel=='empresa' %}background:var(--verde);color:#fff;font-weight:600{% else %}color:#b4b2a9{% endif %}">🏢 Empresa</a>
 <a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=a_definir" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;display:inline-flex;align-items:center;gap:.35rem;{% if natureza_sel=='a_definir' %}background:#3a2c1d;color:#f0c05a;font-weight:600{% else %}color:#f0c05a{% endif %}">⏳ A definir{% if n_a_definir %} <span style="background:#3a2c1d;color:#f0c05a;font-size:.62rem;padding:1px 6px;border-radius:8px">{{ n_a_definir }}</span>{% endif %}</a>
+{% if eh_pj and (n_sem_conta or sem_conta_sel) %}<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&sem_conta=1" title="lançamentos de empresa sem conta contábil (fora da DRE por conta)" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;display:inline-flex;align-items:center;gap:.35rem;{% if sem_conta_sel %}background:#3a2c1d;color:#f0c05a;font-weight:600{% else %}color:#f0c05a{% endif %}">⚠ sem conta{% if n_sem_conta %} <span style="background:#3a2c1d;color:#f0c05a;font-size:.62rem;padding:1px 6px;border-radius:8px">{{ n_sem_conta }}</span>{% endif %}</a>{% endif %}
 </div>
 </div>
 {% endif %}
@@ -914,6 +915,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <option value="">— centro —</option>
 {% for c in centros_custo %}<option value="{{ c.id }}" {% if l.centro_custo_id==c.id %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}
 </select>{% endif %}
+<span class="apply-cat" data-id="{{ l.id }}" onclick="aplicarLote(this)" title="usar essa conta em todos os lançamentos de empresa deste mês com a mesma categoria" style="font-size:.66rem;color:var(--verde-claro);cursor:pointer;text-decoration:underline;text-underline-offset:2px;align-self:center">aplicar a todos iguais</span>
 </div>
 {% endif %}
 </td>
@@ -1100,6 +1102,19 @@ function centroMudou(sel){
   sel.disabled = true;
   fetch('/painel/lancamento/centro-custo', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&centro_custo_id='+encodeURIComponent(sel.value)})
     .then(r=>r.json()).then(function(d){ sel.disabled=false; if(d.ok){ sel.style.borderColor='var(--verde-claro)'; } });
+}
+function aplicarLote(el){
+  var id = el.getAttribute('data-id');
+  var box = document.getElementById('pcbox-'+id);
+  var pc = box && box.querySelector('.pc-edit');
+  if(!pc || !pc.value){ if(pc){ pc.focus(); } var o=el.textContent; el.textContent='↑ escolha a conta antes';
+    setTimeout(function(){ el.textContent=o; }, 1600); return; }
+  el.textContent='aplicando…';
+  fetch('/painel/lancamento/plano-conta-lote', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&plano_conta_id='+encodeURIComponent(pc.value)})
+    .then(r=>r.json()).then(function(d){
+      if(d.ok && d.n>0){ location.reload(); }
+      else { el.textContent = (d.n===0 ? '✓ nenhum outro igual' : 'não deu'); }
+    });
 }
 function salvarCat(btn){
   var sel = btn.parentElement.querySelector('.cat-edit');
@@ -9004,7 +9019,7 @@ def empresa_contador_csv(request: Request, ano: int = 0, mes: int = 0):
 
 
 @router.get("/painel/financeiro", response_class=HTMLResponse)
-def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: str = "", q: str = "", natureza: str = ""):
+def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: str = "", q: str = "", natureza: str = "", sem_conta: str = ""):
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
@@ -9042,6 +9057,11 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
     except Exception:
         prev_cartao = {"total_centavos": 0, "pontos": [], "meses": 6}
 
+    # Filtro "sem conta contábil": só PJ, fora da busca. Mostra os lançamentos de
+    # empresa do mês que ainda não têm conta contábil (os que caem em "A classificar").
+    _sem_conta = bool(sem_conta) and eh_pj and not q
+    n_sem_conta = 0
+
     # Se há busca, usa buscar_lancamentos; senão fluxo normal
     if q:
         lancamentos = livro.buscar_lancamentos(q, limite=100)
@@ -9060,6 +9080,8 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
     else:
         # natureza (pessoal/empresa/a_definir) só filtra em conta PJ; PF ignora
         nat = natureza if (eh_pj and natureza in ("pessoal", "empresa", "a_definir")) else None
+        if _sem_conta:
+            nat = "empresa"  # base empresa; filtramos os sem conta logo abaixo
         # quebra por natureza (só PJ): 1 query com group by no lugar de 4x resumo_mes (perf)
         quebra = None
         if eh_pj:
@@ -9078,6 +9100,9 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
         lancamentos = livro.lancamentos_recentes(ano_sel, mes_num, membro_sel,
                                                  tipo if tipo in ("despesa", "receita") else None,
                                                  limite=1000, natureza=nat)
+        if _sem_conta:
+            lancamentos = [l for l in lancamentos if not l.get("plano_conta_id")]
+        n_sem_conta = len(livro.lancamentos_a_classificar(ano_sel, mes_num, membro_sel)) if eh_pj else 0
         # agrupa por DIA (pro accordion): cada dia com seu saldo e seus lancamentos
         from collections import OrderedDict
         por_dia = OrderedDict()
@@ -9131,6 +9156,7 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
                    receitas_cat=receitas_cat, maior_rec=maior_rec, categorias_lista=categorias_lista,
                    q_search=q, n_resultados=len(lancamentos) if q else 0,
                    natureza_sel=(natureza if eh_pj else ""),
+                   sem_conta_sel=_sem_conta, n_sem_conta=n_sem_conta,
                    n_a_definir=n_a_definir,
                    quebra=quebra,
                    prev_cartao=prev_cartao,
@@ -9465,6 +9491,25 @@ def definir_centro_custo_lancamento(request: Request,
     cid = pc.centro_custo_valido(pool, conta[0], centro_custo_id)
     ok = LivroCaixa(pool, conta[0]).definir_centro_custo(lancamento_id, cid)
     return JSONResponse({"ok": bool(ok)})
+
+
+@router.post("/painel/lancamento/plano-conta-lote")
+def plano_conta_lote(request: Request, lancamento_id: int = Form(...),
+                     plano_conta_id: str = Form("")):
+    """Atalho 'aplicar a todos iguais': põe a conta contábil em todos os
+    lançamentos de empresa do mesmo mês+categoria (do lançamento de referência)
+    que ainda estão sem conta. Valida a conta antes."""
+    conta = conta_logada(request)
+    if not conta:
+        return JSONResponse({"ok": False}, status_code=401)
+    from finance.livro_caixa import LivroCaixa
+    from finance import plano_contas as pc
+    pool = get_pool()
+    pid = pc.plano_conta_valido(pool, conta[0], plano_conta_id)
+    if not pid:
+        return JSONResponse({"ok": False, "n": 0})
+    n = LivroCaixa(pool, conta[0]).classificar_por_categoria_do(lancamento_id, pid)
+    return JSONResponse({"ok": True, "n": n})
 
 
 @router.get("/painel/lancamentos-a-definir")

@@ -235,3 +235,69 @@ def test_lancamento_sem_classificacao_ainda_conta(pool, conta_id):
     L = {l["chave"]: l for l in dre["estrutura"]["linhas"]}
     assert L["a_classificar"]["valor_centavos"] == 40000
     assert L["resultado"]["valor_centavos"] == 40000
+
+
+def test_id_por_codigo_e_centro_por_nome(pool, conta_id):
+    """Resolvedores usados pelo bot: código -> id (habilitado) e nome -> centro."""
+    ids = {c["codigo"]: c["id"] for c in pc.listar_plano(pool)}
+    assert pc.id_por_codigo(pool, conta_id, "5.1.03") == ids["5.1.03"]
+    # nome colado no código (como o bot pode mandar) -> pega o código
+    assert pc.id_por_codigo(pool, conta_id, "5.1.03 Marketing e Publicidade") == ids["5.1.03"]
+    assert pc.id_por_codigo(pool, conta_id, "9.9.99") is None      # inexistente
+    assert pc.id_por_codigo(pool, conta_id, "") is None            # vazio
+    pc.habilitar(pool, conta_id, ids["5.1.03"], False)
+    assert pc.id_por_codigo(pool, conta_id, "5.1.03") is None      # desabilitada
+    a = pc.criar_centro(pool, conta_id, "Unidade Centro")["id"]
+    assert pc.centro_por_nome(pool, conta_id, "unidade centro") == a   # sem caixa
+    assert pc.centro_por_nome(pool, conta_id, "  Unidade Centro  ") == a
+    assert pc.centro_por_nome(pool, conta_id, "não existe") is None
+
+
+def test_lancamentos_a_classificar(pool, conta_id):
+    """Lista só os lançamentos de EMPRESA sem conta contábil (o que alimenta o
+    painel 'A classificar' da aba Empresa)."""
+    hoje = date.today()
+    livro = LivroCaixa(pool, conta_id)
+    ids = {c["codigo"]: c["id"] for c in pc.listar_plano(pool)}
+    # empresa COM conta contábil -> NÃO aparece
+    livro.adicionar(Lancamento.criar(Tipo.DESPESA, 100, "x", natureza="empresa",
+                                     plano_conta_id=ids["5.1.03"]), forcar=True)
+    # empresa SEM conta contábil -> aparece
+    s = livro.adicionar(Lancamento.criar(Tipo.DESPESA, 200, "Servicos",
+                                         descricao="Anúncios", natureza="empresa"),
+                        forcar=True)
+    # pessoal e "a definir" -> NÃO aparecem
+    livro.adicionar(Lancamento.criar(Tipo.DESPESA, 50, "x", natureza="pessoal"), forcar=True)
+    livro.adicionar(Lancamento.criar(Tipo.DESPESA, 30, "x"), forcar=True)
+
+    lst = livro.lancamentos_a_classificar(hoje.year, hoje.month)
+    assert [l["id"] for l in lst] == [s.id]
+    assert lst[0]["descricao"] == "Anúncios"
+    assert lst[0]["valor"] == 20000
+    assert lst[0]["centro_custo_id"] is None
+
+
+def test_classificar_por_categoria_do(pool, conta_id):
+    """'Aplicar a todos iguais': põe a conta nos de empresa do mesmo mês+categoria
+    sem conta — sem tocar no já classificado, em outra categoria ou no pessoal."""
+    livro = LivroCaixa(pool, conta_id)
+    pid = {c["codigo"]: c["id"] for c in pc.listar_plano(pool)}["5.1.03"]
+
+    def add(cat, nat="empresa"):
+        return livro.adicionar(Lancamento.criar(Tipo.DESPESA, 10, cat, natureza=nat),
+                               forcar=True).id
+    ref = add("Servicos")
+    s1, s2 = add("Servicos"), add("Servicos")
+    outra = add("Mercado")               # categoria diferente
+    pes = add("Servicos", nat="pessoal")  # pessoal
+
+    livro.definir_plano_conta(ref, pid)   # ref classificado primeiro (como na UI)
+    n = livro.classificar_por_categoria_do(ref, pid)
+    assert n == 2                         # só s1 e s2
+
+    def conta_de(i):
+        with pool.connection() as c:
+            return c.execute("select plano_conta_id from lancamentos where id=%s",
+                             (i,)).fetchone()[0]
+    assert conta_de(s1) == pid and conta_de(s2) == pid
+    assert conta_de(outra) is None and conta_de(pes) is None

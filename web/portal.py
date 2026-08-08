@@ -742,6 +742,11 @@ _SENHA = """{% extends "base" %}{% block conteudo %}
 </div>{% endblock %}"""
 
 _DASH = """{% extends "base" %}{% block conteudo %}
+<style>
+  .miss-dot{width:8px;height:8px;border-radius:50%;background:#f0c05a;display:inline-block;vertical-align:middle;margin-right:.25rem;box-shadow:0 0 0 3px #f0c05a22;flex:none}
+  .pc-edit.miss{border-color:#f0c05a66 !important}
+  .pc-edit.done{border-color:var(--verde-claro) !important}
+</style>
 <div class="card larga">
 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.5rem">
 <h1 style="margin:0">Financeiro</h1>
@@ -762,6 +767,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=pessoal" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if natureza_sel=='pessoal' %}background:#f0c05a;color:#1a1409;font-weight:600{% else %}color:#b4b2a9{% endif %}">👤 Pessoal</a>
 <a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=empresa" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if natureza_sel=='empresa' %}background:var(--verde);color:#fff;font-weight:600{% else %}color:#b4b2a9{% endif %}">🏢 Empresa</a>
 <a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=a_definir" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;display:inline-flex;align-items:center;gap:.35rem;{% if natureza_sel=='a_definir' %}background:#3a2c1d;color:#f0c05a;font-weight:600{% else %}color:#f0c05a{% endif %}">⏳ A definir{% if n_a_definir %} <span style="background:#3a2c1d;color:#f0c05a;font-size:.62rem;padding:1px 6px;border-radius:8px">{{ n_a_definir }}</span>{% endif %}</a>
+{% if eh_pj and (n_sem_conta or sem_conta_sel) %}<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&sem_conta=1" title="lançamentos de empresa sem conta contábil (fora da DRE por conta)" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;display:inline-flex;align-items:center;gap:.35rem;{% if sem_conta_sel %}background:#3a2c1d;color:#f0c05a;font-weight:600{% else %}color:#f0c05a{% endif %}">⚠ sem conta{% if n_sem_conta %} <span style="background:#3a2c1d;color:#f0c05a;font-size:.62rem;padding:1px 6px;border-radius:8px">{{ n_sem_conta }}</span>{% endif %}</a>{% endif %}
 </div>
 </div>
 {% endif %}
@@ -888,7 +894,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <div class="dep-corpo" style="flex-direction:column; gap:0">
 <table style="margin:0">
 {% for l in dia.itens %}<tr data-tipo="{{ l.tipo }}" data-cat="{{ canon(l.categoria, l.tipo) }}" data-desc="{{ l.descricao }}" data-valor="{{ brl(l.valor) }}">
-<td>{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}
+<td>{% if eh_pj and l.natureza=='empresa' and not l.plano_conta_id %}<span class="miss-dot" title="sem conta contábil — classifique abaixo"></span>{% endif %}{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}
 {% if l.forma_pagamento %}<span class="fpag-tag" style="font-size:.62rem;background:#242426;color:#9aa39a;padding:1px 7px;border-radius:8px;margin-left:.3rem;white-space:nowrap">💳 {{ forma_pag_label(l.forma_pagamento) }}</span>{% endif %}
 {% if eh_pj %}{% if l.natureza=='empresa' %}<span class="nat-tag" style="font-size:.62rem;background:#1d3a2e;color:var(--verde-claro);padding:1px 7px;border-radius:8px;margin-left:.3rem">🏢 empresa</span>{% elif l.natureza=='pessoal' %}<span class="nat-tag" style="font-size:.62rem;background:#3a2c1d;color:#f0c05a;padding:1px 7px;border-radius:8px;margin-left:.3rem">👤 pessoal</span>{% else %}<span style="display:inline-flex;gap:.25rem;margin-left:.3rem"><button type="button" onclick="marcarNat({{ l.id }},'pessoal',this)" style="font-size:.6rem;padding:1px 6px;background:#3a2c1d;color:#f0c05a;border:0;border-radius:7px;cursor:pointer">pessoal?</button><button type="button" onclick="marcarNat({{ l.id }},'empresa',this)" style="font-size:.6rem;padding:1px 6px;background:#1d3a2e;color:var(--verde-claro);border:0;border-radius:7px;cursor:pointer">empresa?</button></span>{% endif %}{% endif %}</td>
 <td class="nowrap">
@@ -899,9 +905,9 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 </select>
 <button type="button" class="cat-ok" onclick="salvarCat(this)" style="display:none;padding:.24rem .65rem;width:auto;font-size:.72rem;font-weight:600;background:var(--verde);color:#fff;border:0;border-radius:6px;cursor:pointer;line-height:1.1">OK</button>
 </span>
-{% if eh_pj and l.natureza=='empresa' and plano_opcoes %}
-<div style="display:flex;gap:.35rem;margin-top:.3rem;flex-wrap:wrap">
-<select class="pc-edit" data-id="{{ l.id }}" onchange="planoMudou(this)" title="conta contábil (DRE)" style="background:var(--bg);border:1px solid #2a3a33;border-radius:6px;color:var(--txt);font-size:.72rem;padding:.18rem .4rem;max-width:160px">
+{% if eh_pj and l.natureza != 'pessoal' and plano_opcoes %}
+<div id="pcbox-{{ l.id }}" style="display:{{ 'flex' if l.natureza=='empresa' else 'none' }};gap:.35rem;margin-top:.3rem;flex-wrap:wrap">
+<select class="pc-edit{% if l.natureza=='empresa' and not l.plano_conta_id %} miss{% endif %}" data-id="{{ l.id }}" onchange="planoMudou(this)" title="conta contábil (DRE)" style="background:var(--bg);border:1px solid #2a3a33;border-radius:6px;color:var(--txt);font-size:.72rem;padding:.18rem .4rem;max-width:160px">
 <option value="">— conta contábil —</option>
 {% for g in plano_opcoes %}<optgroup label="{{ g.grupo }} · {{ g.nome }}">{% for c in g.contas %}<option value="{{ c.id }}" {% if l.plano_conta_id==c.id %}selected{% endif %}>{{ c.codigo }} {{ c.nome }}</option>{% endfor %}</optgroup>{% endfor %}
 </select>
@@ -909,6 +915,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <option value="">— centro —</option>
 {% for c in centros_custo %}<option value="{{ c.id }}" {% if l.centro_custo_id==c.id %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}
 </select>{% endif %}
+<span class="apply-cat" data-id="{{ l.id }}" onclick="aplicarLote(this)" title="usar essa conta em todos os lançamentos de empresa deste mês com a mesma categoria" style="font-size:.66rem;color:var(--verde-claro);cursor:pointer;text-decoration:underline;text-underline-offset:2px;align-self:center">aplicar a todos iguais</span>
 </div>
 {% endif %}
 </td>
@@ -1064,19 +1071,50 @@ function salvarClassificacao(){
 }
 function marcarNat(id, nat, btn){
   fetch('/painel/lancamento/natureza', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&natureza='+nat})
-    .then(r=>r.json()).then(d=>{ if(d.ok){ location.reload(); } });
+    .then(r=>r.json()).then(function(d){
+      if(!d.ok) return;
+      if(nat==='empresa'){
+        // sem recarregar: troca os botões pela tag e revela os pickers na hora
+        var wrap = btn.parentElement;
+        if(wrap){ wrap.outerHTML = '<span class="nat-tag" style="font-size:.62rem;background:#1d3a2e;color:var(--verde-claro);padding:1px 7px;border-radius:8px;margin-left:.3rem">🏢 empresa</span>'; }
+        var box = document.getElementById('pcbox-'+id);
+        if(box){ box.style.display='flex';
+          var pc = box.querySelector('.pc-edit'); if(pc){ pc.classList.add('miss'); pc.focus(); } }
+      } else {
+        location.reload();  // pessoal: sai da visão de empresa, recarrega
+      }
+    });
 }
 function planoMudou(sel){
   var id = sel.getAttribute('data-id');
   sel.disabled = true;
   fetch('/painel/lancamento/plano-conta', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&plano_conta_id='+encodeURIComponent(sel.value)})
-    .then(r=>r.json()).then(function(d){ sel.disabled=false; if(d.ok){ sel.style.borderColor='var(--verde-claro)'; } });
+    .then(r=>r.json()).then(function(d){ sel.disabled=false;
+      if(d.ok){ sel.classList.remove('miss'); if(sel.value){ sel.classList.add('done'); } else { sel.classList.remove('done'); }
+        // tira/poe o ponto âmbar na descrição da linha
+        var tr = sel.closest('tr'); var dot = tr && tr.querySelector('.miss-dot');
+        if(sel.value && dot){ dot.remove(); }
+      }
+    });
 }
 function centroMudou(sel){
   var id = sel.getAttribute('data-id');
   sel.disabled = true;
   fetch('/painel/lancamento/centro-custo', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&centro_custo_id='+encodeURIComponent(sel.value)})
     .then(r=>r.json()).then(function(d){ sel.disabled=false; if(d.ok){ sel.style.borderColor='var(--verde-claro)'; } });
+}
+function aplicarLote(el){
+  var id = el.getAttribute('data-id');
+  var box = document.getElementById('pcbox-'+id);
+  var pc = box && box.querySelector('.pc-edit');
+  if(!pc || !pc.value){ if(pc){ pc.focus(); } var o=el.textContent; el.textContent='↑ escolha a conta antes';
+    setTimeout(function(){ el.textContent=o; }, 1600); return; }
+  el.textContent='aplicando…';
+  fetch('/painel/lancamento/plano-conta-lote', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&plano_conta_id='+encodeURIComponent(pc.value)})
+    .then(r=>r.json()).then(function(d){
+      if(d.ok && d.n>0){ location.reload(); }
+      else { el.textContent = (d.n===0 ? '✓ nenhum outro igual' : 'não deu'); }
+    });
 }
 function salvarCat(btn){
   var sel = btn.parentElement.querySelector('.cat-edit');
@@ -3149,6 +3187,68 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   function ccEditToggle(btn){var it=btn.closest('.cc-item');var ed=it.querySelector('.cc-edit');ed.style.display=(ed.style.display==='none'||!ed.style.display)?'flex':'none';}
   </script>
 </details>
+
+{% if a_classificar %}
+<style>
+  .ac-card{border-color:#f0c05a44}
+  .ac-item{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;padding:.7rem 0;border-top:1px solid #232325}
+  .ac-item:first-of-type{border-top:none}
+  .ac-info{flex:1 1 190px;min-width:0}
+  .ac-info .d{font-size:.9rem}
+  .ac-info .m{font-size:.7rem;color:var(--txt-mut);margin-top:2px}
+  .ac-sel{background:var(--bg);border:1px solid #2a3a33;border-radius:7px;color:var(--txt);font-size:.75rem;padding:.28rem .5rem;font-family:inherit;outline:none;max-width:180px}
+  .ac-sel:focus{border-color:var(--verde)}
+  .ac-sel.miss{border-color:#f0c05a66}
+  .ac-sel.done{border-color:var(--verde-claro)}
+  .ac-ok{color:var(--verde-claro);font-weight:600;font-size:.75rem;white-space:nowrap}
+</style>
+<div class="card larga ac-card" id="a-classificar">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.4rem">
+    <strong style="color:#f0c05a">⚠️ Lançamentos a classificar <span id="ac-count">({{ a_classificar|length }})</span></strong>
+    <span class="mut" style="font-size:.72rem">de empresa, sem conta contábil — ficam de fora da DRE por conta</span>
+  </div>
+  <p class="mut" style="font-size:.75rem;margin:.3rem 0 .6rem">Escolha a conta contábil (e o centro, se quiser) — some daqui e entra na DRE na hora.</p>
+  <div id="ac-list">
+    {% for l in a_classificar %}
+    <div class="ac-item" id="ac-row-{{ l.id }}">
+      <div class="ac-info"><div class="d">{{ l.descricao or l.categoria }}</div>
+        <div class="m">{{ l.data.strftime('%d/%m') }} · {{ l.categoria }} · {{ '−' if l.tipo=='despesa' else '+' }} {{ brl(l.valor) }}</div></div>
+      <select class="ac-sel miss" onchange="acPlano(this, {{ l.id }})" title="conta contábil">
+        <option value="">— conta contábil —</option>
+        {% for g in plano_opcoes %}<optgroup label="{{ g.grupo }} · {{ g.nome }}">{% for c in g.contas %}<option value="{{ c.id }}">{{ c.codigo }} {{ c.nome }}</option>{% endfor %}</optgroup>{% endfor %}
+      </select>
+      {% if centros_ativos %}<select class="ac-sel" onchange="acCentro(this, {{ l.id }})" title="centro de custo (opcional)">
+        <option value="">— centro —</option>
+        {% for c in centros_ativos %}<option value="{{ c.id }}" {% if l.centro_custo_id==c.id %}selected{% endif %}>{{ c.nome }}</option>{% endfor %}
+      </select>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  <div id="ac-done" style="display:none;color:var(--verde-claro);font-weight:600;padding:.5rem 0">✓ Tudo classificado — a DRE está completa!</div>
+  <script>
+  function acPlano(sel, id){
+    fetch('/painel/lancamento/plano-conta', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&plano_conta_id='+encodeURIComponent(sel.value)})
+      .then(r=>r.json()).then(function(d){
+        if(d.ok && sel.value){
+          var row=document.getElementById('ac-row-'+id);
+          if(row && !row.dataset.done){ row.dataset.done='1';
+            row.style.transition='opacity .3s'; row.style.opacity='.45';
+            var b=document.createElement('span'); b.className='ac-ok'; b.textContent='✓ classificado'; row.appendChild(b);
+            var cnt=document.getElementById('ac-count');
+            var n=Math.max(0,(parseInt(cnt.textContent.replace(/\\D/g,''))||1)-1);
+            cnt.textContent='('+n+')';
+            if(n===0){ document.getElementById('ac-list').style.display='none'; document.getElementById('ac-done').style.display='block'; }
+          }
+        }
+      });
+  }
+  function acCentro(sel, id){
+    fetch('/painel/lancamento/centro-custo', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&centro_custo_id='+encodeURIComponent(sel.value)})
+      .then(r=>r.json()).then(function(d){ if(d.ok){ sel.classList.remove('miss'); sel.classList.add('done'); } });
+  }
+  </script>
+</div>
+{% endif %}
 
 <div class="card larga" id="dre">
   <div style="display:flex;justify-content:space-between"><strong>DRE do mês</strong>
@@ -8185,8 +8285,15 @@ def painel_empresa(request: Request):
         plano_arvore = _pc.arvore_habilitada(pool, conta[0])
         centros = _pc.listar_centros(pool, conta[0], incluir_inativos=True)
         dre_centro = emp.dre_por_centro(pool, conta[0], hoje.year, hoje.month)
+        # Painel "A classificar": lançamentos de empresa do mês sem conta contábil,
+        # com as opções (contas habilitadas + centros ativos) pra resolver ali.
+        a_classificar = LivroCaixa(pool, conta[0]).lancamentos_a_classificar(
+            hoje.year, hoje.month)
+        plano_opcoes = _pc.opcoes_lancamento(pool, conta[0])
+        centros_ativos = _pc.listar_centros(pool, conta[0])
     except Exception:
         plano_arvore, centros, dre_centro = [], [], {"centros": [], "linhas": []}
+        a_classificar, plano_opcoes, centros_ativos = [], [], []
     doc = ""
     with pool.connection() as c:
         r = c.execute("select coalesce(documento,'') from contas where id=%s",
@@ -8209,7 +8316,9 @@ def painel_empresa(request: Request):
                    dash=dash, res=res, fluxo=fluxo, dre=dre, titulos=titulos,
                    folha=folha, clientes_lista=clientes_lista, carteira=carteira,
                    rotulo_receber=rotulo_receber, tem_pj=True,
-                   plano_arvore=plano_arvore, centros=centros, dre_centro=dre_centro)
+                   plano_arvore=plano_arvore, centros=centros, dre_centro=dre_centro,
+                   a_classificar=a_classificar, plano_opcoes=plano_opcoes,
+                   centros_ativos=centros_ativos)
 
 
 @router.get("/painel/produtos")
@@ -8910,7 +9019,7 @@ def empresa_contador_csv(request: Request, ano: int = 0, mes: int = 0):
 
 
 @router.get("/painel/financeiro", response_class=HTMLResponse)
-def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: str = "", q: str = "", natureza: str = ""):
+def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: str = "", q: str = "", natureza: str = "", sem_conta: str = ""):
     conta = conta_logada(request)
     if conta is None:
         return RedirectResponse("/login", status_code=303)
@@ -8948,6 +9057,11 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
     except Exception:
         prev_cartao = {"total_centavos": 0, "pontos": [], "meses": 6}
 
+    # Filtro "sem conta contábil": só PJ, fora da busca. Mostra os lançamentos de
+    # empresa do mês que ainda não têm conta contábil (os que caem em "A classificar").
+    _sem_conta = bool(sem_conta) and eh_pj and not q
+    n_sem_conta = 0
+
     # Se há busca, usa buscar_lancamentos; senão fluxo normal
     if q:
         lancamentos = livro.buscar_lancamentos(q, limite=100)
@@ -8966,6 +9080,8 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
     else:
         # natureza (pessoal/empresa/a_definir) só filtra em conta PJ; PF ignora
         nat = natureza if (eh_pj and natureza in ("pessoal", "empresa", "a_definir")) else None
+        if _sem_conta:
+            nat = "empresa"  # base empresa; filtramos os sem conta logo abaixo
         # quebra por natureza (só PJ): 1 query com group by no lugar de 4x resumo_mes (perf)
         quebra = None
         if eh_pj:
@@ -8984,6 +9100,9 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
         lancamentos = livro.lancamentos_recentes(ano_sel, mes_num, membro_sel,
                                                  tipo if tipo in ("despesa", "receita") else None,
                                                  limite=1000, natureza=nat)
+        if _sem_conta:
+            lancamentos = [l for l in lancamentos if not l.get("plano_conta_id")]
+        n_sem_conta = len(livro.lancamentos_a_classificar(ano_sel, mes_num, membro_sel)) if eh_pj else 0
         # agrupa por DIA (pro accordion): cada dia com seu saldo e seus lancamentos
         from collections import OrderedDict
         por_dia = OrderedDict()
@@ -9037,6 +9156,7 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
                    receitas_cat=receitas_cat, maior_rec=maior_rec, categorias_lista=categorias_lista,
                    q_search=q, n_resultados=len(lancamentos) if q else 0,
                    natureza_sel=(natureza if eh_pj else ""),
+                   sem_conta_sel=_sem_conta, n_sem_conta=n_sem_conta,
                    n_a_definir=n_a_definir,
                    quebra=quebra,
                    prev_cartao=prev_cartao,
@@ -9371,6 +9491,25 @@ def definir_centro_custo_lancamento(request: Request,
     cid = pc.centro_custo_valido(pool, conta[0], centro_custo_id)
     ok = LivroCaixa(pool, conta[0]).definir_centro_custo(lancamento_id, cid)
     return JSONResponse({"ok": bool(ok)})
+
+
+@router.post("/painel/lancamento/plano-conta-lote")
+def plano_conta_lote(request: Request, lancamento_id: int = Form(...),
+                     plano_conta_id: str = Form("")):
+    """Atalho 'aplicar a todos iguais': põe a conta contábil em todos os
+    lançamentos de empresa do mesmo mês+categoria (do lançamento de referência)
+    que ainda estão sem conta. Valida a conta antes."""
+    conta = conta_logada(request)
+    if not conta:
+        return JSONResponse({"ok": False}, status_code=401)
+    from finance.livro_caixa import LivroCaixa
+    from finance import plano_contas as pc
+    pool = get_pool()
+    pid = pc.plano_conta_valido(pool, conta[0], plano_conta_id)
+    if not pid:
+        return JSONResponse({"ok": False, "n": 0})
+    n = LivroCaixa(pool, conta[0]).classificar_por_categoria_do(lancamento_id, pid)
+    return JSONResponse({"ok": True, "n": n})
 
 
 @router.get("/painel/lancamentos-a-definir")

@@ -667,6 +667,51 @@ class LivroCaixa:
         return [{"id": r[0], "data": r[1], "categoria": r[2], "valor": int(r[3]),
                  "tipo": r[4], "descricao": r[5]} for r in rows]
 
+    def lancamentos_a_classificar(self, ano: int, mes: int,
+                                  membro_id: int | None = None) -> list[dict]:
+        """Lançamentos de EMPRESA do mês que ainda estão SEM conta contábil
+        (plano_conta_id null) — é o que cai na linha 'A classificar' da DRE e o
+        que o painel da aba Empresa lista pra resolver. Multi-tenant."""
+        ini, prox = _intervalo_mes(ano, mes)
+        cond = ("conta_id = %s and data >= %s and data < %s "
+                "and natureza = 'empresa' and plano_conta_id is null")
+        params: list = [self.conta_id, ini, prox]
+        if membro_id is not None:
+            cond += " and membro_id = %s"; params.append(membro_id)
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                f"""select id, data, descricao, categoria, tipo, valor_centavos,
+                          centro_custo_id
+                     from lancamentos where {cond}
+                    order by data desc, id desc""", params).fetchall()
+        return [{"id": r[0], "data": r[1], "descricao": r[2], "categoria": r[3],
+                 "tipo": r[4], "valor": int(r[5]), "centro_custo_id": r[6]}
+                for r in rows]
+
+    def classificar_por_categoria_do(self, lancamento_ref_id: int,
+                                     plano_conta_id: int) -> int:
+        """Atalho 'aplicar a todos iguais': pega a categoria e o mês do lançamento
+        de referência e põe a MESMA conta contábil em todos os de EMPRESA daquele
+        mês+categoria que ainda estão SEM conta. Não toca nos já classificados
+        (então o próprio referência, se já tiver conta, fica de fora). Multi-tenant.
+        Retorna quantos foram atualizados."""
+        with self.pool.connection() as conn:
+            r = conn.execute(
+                "select categoria, data from lancamentos where id=%s and conta_id=%s",
+                (lancamento_ref_id, self.conta_id)).fetchone()
+            if not r:
+                return 0
+            categoria, data = r[0], r[1]
+            ini, prox = _intervalo_mes(data.year, data.month)
+            cur = conn.execute(
+                """update lancamentos set plano_conta_id = %s
+                    where conta_id=%s and data >= %s and data < %s
+                      and natureza='empresa' and categoria=%s
+                      and plano_conta_id is null""",
+                (plano_conta_id, self.conta_id, ini, prox, categoria))
+            conn.commit()
+            return cur.rowcount
+
     def marcar_natureza_mapa(self, mapa: dict) -> int:
         """Marca vários lançamentos, cada um com sua natureza. `mapa` é
         {id: 'pessoal'|'empresa'}. Ignora valores inválidos. Multi-tenant.

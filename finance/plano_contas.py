@@ -116,6 +116,20 @@ def plano_conta_valido(pool, conta_id: int, plano_conta_id) -> int | None:
     return pid if (r and bool(r[0])) else None
 
 
+def id_por_codigo(pool, conta_id: int, codigo) -> int | None:
+    """Código do plano ('5.1.03') -> id, se existir E estiver habilitado pra esta
+    conta. Serve pro bot classificar pelo código que ele escolheu. Tolera espaços
+    e um nome colado ('5.1.03 Marketing' → pega o '5.1.03')."""
+    if not codigo:
+        return None
+    cod = str(codigo).strip().split()[0] if str(codigo).strip() else ""
+    if not cod:
+        return None
+    with pool.connection() as c:
+        r = c.execute("select id from plano_contas where codigo=%s", (cod,)).fetchone()
+    return plano_conta_valido(pool, conta_id, r[0]) if r else None
+
+
 # ── Centros de custo (por conta) ──────────────────────────────────────────────
 def listar_centros(pool, conta_id: int, incluir_inativos: bool = False) -> list[dict]:
     """Centros da conta. Por padrão só os ativos (os inativos ficam fora do
@@ -129,6 +143,20 @@ def listar_centros(pool, conta_id: int, incluir_inativos: bool = False) -> list[
         rows = c.execute(sql, (conta_id,)).fetchall()
     return [{"id": r[0], "nome": r[1], "descricao": r[2], "cor": r[3],
              "ativo": bool(r[4]), "ordem": int(r[5])} for r in rows]
+
+
+def centro_por_nome(pool, conta_id: int, nome) -> int | None:
+    """Nome do centro -> id (ativo, desta conta), casando sem caixa/espaços.
+    Serve pro bot pegar o centro pelo nome que a pessoa falou."""
+    if not nome:
+        return None
+    alvo = str(nome).strip().lower()
+    if not alvo:
+        return None
+    for c in listar_centros(pool, conta_id):
+        if c["nome"].strip().lower() == alvo:
+            return c["id"]
+    return None
 
 
 def criar_centro(pool, conta_id: int, nome: str, descricao: str = "",

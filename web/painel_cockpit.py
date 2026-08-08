@@ -571,6 +571,7 @@ def painel_equipe_cockpit_link(request: Request, membro_id: int = Form(...)):
     token = ck.gerar_token(pool, conta[0], membro_id)
     link = ck.link_acesso(token)
     request.session["equipe_link"] = link
+    request.session["equipe_link_cap"] = "🔗 Link do Cockpit gerado — mande pra pessoa (vale 15 min):"
     enviado = False
     if m[1] and "@" in (m[1] or ""):
         enviado = _enviar_link_email(pool, conta[0], m[1], link)

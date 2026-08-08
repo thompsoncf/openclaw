@@ -63,6 +63,7 @@ def painel_equipe(request: Request):
                    membros=eq.listar_equipe(pool, conta[0]),
                    papeis=[(p, eq.rotulo(p)) for p in eq.PAPEIS_PJ],
                    novo_link=request.session.pop("equipe_link", None),
+                   novo_link_cap=request.session.pop("equipe_link_cap", None),
                    aviso=request.session.pop("equipe_aviso", None),
                    erro=request.session.pop("equipe_erro", None))
 
@@ -254,7 +255,7 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
 
   {% if novo_link %}
   <div style="margin-top:1rem;padding:.8rem;border:1px solid var(--verde);border-radius:10px;background:#10241d">
-    <div class="mut" style="font-size:.8rem">Link de convite gerado — mande pra pessoa (vale 7 dias):</div>
+    <div class="mut" style="font-size:.8rem">{{ novo_link_cap or "Link de convite gerado — mande pra pessoa (vale 7 dias):" }}</div>
     <div style="display:flex;gap:.5rem;margin-top:.4rem">
       <input id="lk" value="{{ novo_link }}" readonly onclick="this.select()"
              style="flex:1;background:var(--bg);border:1px solid var(--borda);border-radius:8px;color:var(--txt);padding:.5rem .6rem;font-size:.82rem">

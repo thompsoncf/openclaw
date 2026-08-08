@@ -18,7 +18,9 @@ from psycopg_pool import ConnectionPool
 from finance import cockpit as ck
 
 _BASE_SQL = """
-create table contas (id bigserial primary key, nome text);
+create table contas (id bigserial primary key, nome text, documento text, razao_social text,
+  nome_fantasia text, endereco text, bairro text, cep text, cidade text, uf text,
+  email_empresa text, telefone text, nicho text, cnae text);
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text default 'vendedor', ativo boolean default true, whatsapp text,
   cockpit_push_ativo boolean default true, cockpit_pausado boolean default false);
@@ -48,6 +50,10 @@ create table push_assinaturas (id bigserial primary key, conta_id bigint, membro
 create table servicos_catalogo (id bigserial primary key, conta_id bigint, slug text, nome text,
   descricao text, setup_centavos bigint default 0, mensal_centavos bigint default 0,
   custo_centavos bigint default 0, ordem int default 0, ativo boolean default true);
+create table eventos_agenda (id bigserial primary key, conta_id bigint, membro_id bigint,
+  titulo text, inicio timestamptz, fim timestamptz, local text, descricao text,
+  lembrete_min int, tipo text default 'pessoal', link_online text, desfecho text,
+  status text default 'ativo', criado_em timestamptz default now(), prospeccao_id bigint, ics_token text);
 """
 
 
@@ -305,3 +311,45 @@ def test_criar_orcamento_gera_proposta(pool, monkeypatch):
                         (r["id"],)).fetchone()
         assert row[0] == conta and row[1] == "Salão Alfa" and row[3] == 800000 and row[5] == "cockpit"
         assert c.execute("select orcamento_id from prospeccao where id=%s", (meu,)).fetchone()[0] == r["id"]
+
+
+def test_endereco_empresa_do_cadastro(pool):
+    with pool.connection() as c:
+        conta = c.execute("insert into contas (nome, nome_fantasia, endereco, bairro, cidade, uf) "
+                          "values ('C','Prime Eventus','Av. Fátima, 1200','Jóquei','Teresina','PI') returning id").fetchone()[0]
+        c.commit()
+    e = ck.endereco_empresa(pool, conta)
+    assert e["nome"] == "Prime Eventus"
+    assert e["endereco"] == "Av. Fátima, 1200 — Jóquei — Teresina PI"
+    assert "google.com/maps" in e["maps"]
+
+
+def test_agendar_visita(pool):
+    with pool.connection() as c:
+        conta = c.execute("insert into contas (nome, nome_fantasia, endereco, cidade, uf) "
+                          "values ('C','Prime Eventus','Av. Fátima, 1200','Teresina','PI') returning id").fetchone()[0]
+        v1 = _membro(c, conta, email="vi1@x.com")
+        v2 = _membro(c, conta, nome="V2", email="vi2@x.com")
+        meu = _lead(c, conta, v1, "Ana & Léo")
+        c.execute("update prospeccao set contato='Ana' where id=%s", (meu,))
+        alheio = _lead(c, conta, v2, "Outro")
+        c.commit()
+    # posse + data inválida
+    assert ck.agendar_visita(pool, conta, v1, alheio, data="2026-09-01", hora="10:00")["ok"] is False
+    assert ck.agendar_visita(pool, conta, v1, meu, data="xx", hora="10:00")["ok"] is False
+    r = ck.agendar_visita(pool, conta, v1, meu, data="2026-09-01", hora="10:00", dur_min=60,
+                          lembrete_min=60, avisar_cliente=False)
+    assert r["ok"] and "01/09 às 10:00" in r["quando"] and r["empresa"] == "Prime Eventus"
+    assert r["ics_url"].endswith(".ics")
+    with pool.connection() as c:
+        ev = c.execute("select titulo, local, prospeccao_id, ics_token, tipo from eventos_agenda where id=%s",
+                       (r["evento_id"],)).fetchone()
+        assert ev[0] == "Visita — Ana" and ev[2] == meu and ev[3] and ev[4] == "empresa"
+        assert "Av. Fátima" in (ev[1] or "")
+        # lead avançou pra qualificado + atividade na timeline
+        assert c.execute("select status from prospeccao where id=%s", (meu,)).fetchone()[0] == "qualificado"
+        assert c.execute("select count(*) from prospeccao_atividades where prospeccao_id=%s and tipo='visita'",
+                         (meu,)).fetchone()[0] == 1
+    # .ics público com VALARM (lembrete do cliente)
+    ics = ck.visita_ics(pool, r["ics_url"].rsplit("/", 1)[1].replace(".ics", ""))
+    assert ics and "BEGIN:VEVENT" in ics and "BEGIN:VALARM" in ics and "Visita — Ana" in ics

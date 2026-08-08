@@ -258,9 +258,9 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
     <div class="mut" style="font-size:.8rem">{{ novo_link_cap or "Link de convite gerado — mande pra pessoa (vale 7 dias):" }}</div>
     <div style="display:flex;gap:.5rem;margin-top:.4rem">
       <input id="lk" value="{{ novo_link }}" readonly onclick="this.select()"
-             style="flex:1;background:var(--bg);border:1px solid var(--borda);border-radius:8px;color:var(--txt);padding:.5rem .6rem;font-size:.82rem">
+             style="flex:1;min-width:0;background:var(--bg);border:1px solid var(--borda);border-radius:8px;color:var(--txt);padding:.5rem .6rem;font-size:.82rem">
       <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('lk').value);this.textContent='Copiado!'"
-              style="background:var(--verde);color:#04140d;border:0;border-radius:8px;padding:.5rem .9rem;font-weight:600;cursor:pointer">Copiar</button>
+              style="width:auto;flex:none;margin:0;background:var(--verde);color:#04140d;border:0;border-radius:8px;padding:.5rem .9rem;font-weight:600;cursor:pointer;white-space:nowrap">Copiar</button>
     </div>
   </div>
   {% endif %}

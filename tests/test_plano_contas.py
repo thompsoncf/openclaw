@@ -237,6 +237,22 @@ def test_lancamento_sem_classificacao_ainda_conta(pool, conta_id):
     assert L["resultado"]["valor_centavos"] == 40000
 
 
+def test_id_por_codigo_e_centro_por_nome(pool, conta_id):
+    """Resolvedores usados pelo bot: código -> id (habilitado) e nome -> centro."""
+    ids = {c["codigo"]: c["id"] for c in pc.listar_plano(pool)}
+    assert pc.id_por_codigo(pool, conta_id, "5.1.03") == ids["5.1.03"]
+    # nome colado no código (como o bot pode mandar) -> pega o código
+    assert pc.id_por_codigo(pool, conta_id, "5.1.03 Marketing e Publicidade") == ids["5.1.03"]
+    assert pc.id_por_codigo(pool, conta_id, "9.9.99") is None      # inexistente
+    assert pc.id_por_codigo(pool, conta_id, "") is None            # vazio
+    pc.habilitar(pool, conta_id, ids["5.1.03"], False)
+    assert pc.id_por_codigo(pool, conta_id, "5.1.03") is None      # desabilitada
+    a = pc.criar_centro(pool, conta_id, "Unidade Centro")["id"]
+    assert pc.centro_por_nome(pool, conta_id, "unidade centro") == a   # sem caixa
+    assert pc.centro_por_nome(pool, conta_id, "  Unidade Centro  ") == a
+    assert pc.centro_por_nome(pool, conta_id, "não existe") is None
+
+
 def test_lancamentos_a_classificar(pool, conta_id):
     """Lista só os lançamentos de EMPRESA sem conta contábil (o que alimenta o
     painel 'A classificar' da aba Empresa)."""

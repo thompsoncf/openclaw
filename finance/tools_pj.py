@@ -80,6 +80,12 @@ PESSOAL x EMPRESA (esta conta mistura os dois — ajude a separar):
   lancar_despesa/lancar_receita (num passo só). Se ela NÃO disse, pergunte de forma
   leve "esse foi pessoal ou da empresa?" e, quando responder, use marcar_natureza com
   o id. Se ela não responder ou mudar de assunto, tudo bem — fica "a definir" (NÃO insista).
+- CONTA CONTÁBIL (DRE): quando o gasto/receita for de EMPRESA, escolha também a
+  conta contábil do plano e passe o código em plano_conta (ex: "5.1.03") no MESMO
+  lancar — sugira pela categoria/descrição. Se não souber os códigos habilitados,
+  chame plano_de_contas antes. Se a pessoa disser a unidade/projeto, passe
+  centro_custo (nome). É opcional: na dúvida deixe vazio (classifica depois no
+  painel). Aceite tanto o código quanto o nome que a pessoa escrever.
 - "marca aquele gasto como empresa", "o do posto foi pessoal" -> marcar_natureza.
 - "como foi o mês da empresa?", "relatório da empresa", "quanto gastei de
   pessoal?", "me separa pessoal e empresa" -> relatorio_separado.
@@ -292,8 +298,31 @@ def construir_ferramentas_pj(pool, conta_id: int,
         return (f"Cliente '{nome}' cadastrado. ✅ Já pode lançar o honorário/título "
                 "a receber dele que fica ligado à ficha.")
 
+    def plano_de_contas(_entrada: dict) -> str:
+        from . import plano_contas as _pc
+        grupos = _pc.opcoes_lancamento(pool, conta_id)
+        if not grupos:
+            return ("Esta conta ainda não tem contas contábeis habilitadas. "
+                    "O dono habilita no painel, em Empresa › Plano de Contas.")
+        linhas = [f"{c['codigo']} {c['nome']}"
+                  for g in grupos for c in g["contas"]]
+        centros = [c["nome"] for c in _pc.listar_centros(pool, conta_id)]
+        return ("Contas contábeis habilitadas (use o código no lancar):\n"
+                + "\n".join(linhas)
+                + "\n\nCentros de custo: "
+                + (", ".join(centros) if centros else "nenhum cadastrado"))
+
     valor_s = {"type": "number", "description": "valor em reais, ex 1500.50"}
     return [
+        Ferramenta(
+            nome="plano_de_contas",
+            descricao=("Lista as CONTAS CONTÁBEIS habilitadas e os CENTROS DE CUSTO "
+                       "desta empresa. Use antes de registrar um gasto/receita de "
+                       "empresa quando precisar do código da conta contábil (param "
+                       "plano_conta do lancar), ou se a pessoa perguntar quais existem."),
+            parametros={"type": "object", "properties": {}},
+            executar=plano_de_contas,
+        ),
         Ferramenta(
             nome="cadastrar_cliente",
             descricao=("Cadastra um CLIENTE na base (pra ligar honorário/venda a "

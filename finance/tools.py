@@ -60,6 +60,17 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                     f"no credito, {r['categoria']}.{cauda} A 1a parcela ja' entrou "
                     f"nas despesas; as {n_parc-1} restantes viram previsao da fatura.")
 
+        # Conta contábil (plano) e centro de custo: SÓ empresa. Resolve o código/
+        # nome que o agente escolheu; se não bater ou não estiver habilitado, fica
+        # None (o gasto entra igual, só sem classificar — nada quebra).
+        plano_conta_id = centro_custo_id = None
+        if _nat == "empresa":
+            from . import plano_contas as _pc
+            plano_conta_id = _pc.id_por_codigo(livro.pool, livro.conta_id,
+                                               entrada.get("plano_conta"))
+            centro_custo_id = _pc.centro_por_nome(livro.pool, livro.conta_id,
+                                                  entrada.get("centro_custo"))
+
         lanc = Lancamento.criar(
             tipo=tipo,
             valor_reais=entrada["valor"],
@@ -70,12 +81,20 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
             forma_pagamento=forma,
             origem=entrada.get("origem", "manual"),
             natureza=_nat,
+            plano_conta_id=plano_conta_id,
+            centro_custo_id=centro_custo_id,
         )
         salvo = livro.adicionar(lanc)
         rotulo = "Despesa" if tipo == Tipo.DESPESA else "Receita"
         forma_txt = f", {forma}" if forma else ""
+        cc_txt = ""
+        if plano_conta_id:
+            cc_txt = f" · conta contábil {str(entrada.get('plano_conta')).strip().split()[0]}"
+            if centro_custo_id:
+                cc_txt += f", centro {entrada.get('centro_custo')}"
         return (f"{rotulo} registrada: {formatar_brl(salvo.valor_centavos)} em "
-                f"{salvo.categoria}{forma_txt} ({salvo.data.strftime('%d/%m/%Y')}). id={salvo.id}")
+                f"{salvo.categoria}{forma_txt}{cc_txt} "
+                f"({salvo.data.strftime('%d/%m/%Y')}). id={salvo.id}")
 
     def lancar_despesa(entrada: dict) -> str:
         return lancar(Tipo.DESPESA, entrada)
@@ -393,6 +412,8 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                     "pagamento": {"type": "string", "description": "observacao livre opcional (ex: bandeira do cartao, 'pix do fulano'). NAO use pra forma - pra isso e' o forma_pagamento."},
                     "origem": {"type": "string", "enum": ["manual", "foto"]},
                     "natureza": {"type": "string", "enum": ["pessoal", "empresa"], "description": "só para conta PJ que mistura pessoal e empresa: se a pessoa já disse que foi pessoal ou da empresa, passe aqui na hora do registro (evita 2º passo)"},
+                    "plano_conta": {"type": "string", "description": "SÓ quando natureza=empresa: código da conta contábil do plano (ex: '5.1.03'). Escolha a mais adequada à categoria/descrição pra já entrar na DRE certa. Se não souber os códigos habilitados desta conta, chame a ferramenta plano_de_contas. Se não tiver certeza, deixe vazio (a pessoa classifica depois)."},
+                    "centro_custo": {"type": "string", "description": "SÓ quando natureza=empresa: nome do centro de custo (ex: 'Unidade Centro'), se a pessoa disser de qual unidade/projeto foi. Opcional."},
                 },
                 "required": ["valor", "categoria"],
             },
@@ -411,6 +432,8 @@ def construir_ferramentas(livro: LivroCaixa, lista=None, papel: str = "dono",
                     "forma_pagamento": {"type": "string", "enum": ["pix", "debito", "credito", "especie", "boleto", "transferencia", "outro"], "description": "como o dinheiro entrou (pix, especie=dinheiro, transferencia...). Deduza do texto quando der; opcional."},
                     "origem": {"type": "string", "enum": ["manual", "foto"]},
                     "natureza": {"type": "string", "enum": ["pessoal", "empresa"], "description": "só para conta PJ que mistura pessoal e empresa: se a pessoa já disse que foi pessoal ou da empresa, passe aqui na hora do registro (evita 2º passo)"},
+                    "plano_conta": {"type": "string", "description": "SÓ quando natureza=empresa: código da conta contábil do plano (ex: '5.1.03'). Escolha a mais adequada à categoria/descrição pra já entrar na DRE certa. Se não souber os códigos habilitados desta conta, chame a ferramenta plano_de_contas. Se não tiver certeza, deixe vazio (a pessoa classifica depois)."},
+                    "centro_custo": {"type": "string", "description": "SÓ quando natureza=empresa: nome do centro de custo (ex: 'Unidade Centro'), se a pessoa disser de qual unidade/projeto foi. Opcional."},
                 },
                 "required": ["valor", "categoria"],
             },

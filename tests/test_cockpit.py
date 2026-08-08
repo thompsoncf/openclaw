@@ -45,6 +45,9 @@ create table cockpit_acesso (token text primary key, conta_id bigint, membro_id 
   expira_em timestamptz not null, usado_em timestamptz, criado_em timestamptz default now());
 create table push_assinaturas (id bigserial primary key, conta_id bigint, membro_id bigint,
   endpoint text unique, p256dh text, auth text, criado_em timestamptz default now());
+create table servicos_catalogo (id bigserial primary key, conta_id bigint, slug text, nome text,
+  descricao text, setup_centavos bigint default 0, mensal_centavos bigint default 0,
+  custo_centavos bigint default 0, ordem int default 0, ativo boolean default true);
 """
 
 
@@ -265,3 +268,40 @@ def test_enviar_push_respeita_toggle_e_limpa_morto(pool, monkeypatch):
     # com push desligado no membro, não envia
     ck.set_push(pool, conta, vend, False)
     assert ck.enviar_push(pool, conta, vend, "t", "c") == 0
+
+
+def test_catalogo_servicos_em_reais(pool):
+    with pool.connection() as c:
+        conta = _conta(c)
+        c.execute("insert into servicos_catalogo (conta_id, slug, nome, setup_centavos, mensal_centavos) "
+                  "values (%s,'a','Consultoria',0,49000)", (conta,))
+        c.execute("insert into servicos_catalogo (conta_id, slug, nome, setup_centavos, mensal_centavos, ativo) "
+                  "values (%s,'b','Inativo',10000,0,false)", (conta,))
+        c.commit()
+    cat = ck.catalogo_servicos(pool, conta)
+    assert [s["nome"] for s in cat] == ["Consultoria"]           # só ativo
+    assert cat[0]["mensal"] == 490 and cat[0]["setup"] == 0      # centavos → reais
+
+
+def test_criar_orcamento_gera_proposta(pool, monkeypatch):
+    monkeypatch.setenv("APP_URL", "https://app.zaq-ia.com")
+    with pool.connection() as c:
+        conta = _conta(c)
+        v1 = _membro(c, conta, email="o1@x.com")
+        v2 = _membro(c, conta, nome="V2", email="o2@x.com")
+        meu = _lead(c, conta, v1, "Salão Alfa", wa="5586991112222")
+        alheio = _lead(c, conta, v2, "Outro")
+        c.commit()
+    itens = [{"nome": "Locação do espaço", "setup": 3000, "mensal": 0},
+             {"nome": "Buffet", "setup": 5000, "mensal": 0}]
+    assert ck.criar_orcamento(pool, conta, v1, alheio, itens)["ok"] is False   # não é dele
+    assert ck.criar_orcamento(pool, conta, v1, meu, [])["ok"] is False          # sem itens
+    r = ck.criar_orcamento(pool, conta, v1, meu, itens)
+    assert r["ok"] and r["setup_centavos"] == 800000 and r["token"]
+    assert r["link"] == f"https://app.zaq-ia.com/proposta/{r['token']}"
+    assert "wa.me" in r["zap"]                                                  # link pronto pro WhatsApp
+    with pool.connection() as c:
+        row = c.execute("select conta_id, empresa, token, setup_centavos, status, canal from orcamentos where id=%s",
+                        (r["id"],)).fetchone()
+        assert row[0] == conta and row[1] == "Salão Alfa" and row[3] == 800000 and row[5] == "cockpit"
+        assert c.execute("select orcamento_id from prospeccao where id=%s", (meu,)).fetchone()[0] == r["id"]

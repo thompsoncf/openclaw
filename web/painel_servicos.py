@@ -642,18 +642,18 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       </div>
       <span id="oc-cnpj-msg" style="font-size:.8rem;color:var(--txt-mut);display:block;margin-top:.25rem"></span>
     </div>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:.8rem">
+    <div style="display:grid; grid-template-columns:{{ '1fr 1fr 1fr' if servico_avulso else '1fr 1fr' }}; gap:.8rem">
       <div class="oc-field"><label id="oc-empresa-label">Empresa</label><input id="oc-empresa" class="oc-inp" placeholder="Nome da empresa"></div>
       <div class="oc-field"><label>Contato</label><input id="oc-contato" class="oc-inp" placeholder="Responsável"></div>
-      <div class="oc-field" id="campo-oc-cargo"><label>Cargo</label><input id="oc-cargo" class="oc-inp" placeholder="Cargo do contato"></div>
-      <div class="oc-field" id="campo-oc-socio"><label>Sócio</label><input id="oc-socio" class="oc-inp" placeholder="Sócio / dono"></div>
+      <div class="oc-field" id="campo-oc-cargo"{% if servico_avulso %} style="display:none"{% endif %}><label>Cargo</label><input id="oc-cargo" class="oc-inp" placeholder="Cargo do contato"></div>
+      <div class="oc-field" id="campo-oc-socio"{% if servico_avulso %} style="display:none"{% endif %}><label>Sócio</label><input id="oc-socio" class="oc-inp" placeholder="Sócio / dono"></div>
       <div class="oc-field"><label>WhatsApp</label><input id="oc-whats" class="oc-inp" placeholder="(86) 9 9999-9999"></div>
-      <div class="oc-field"><label>Telefone</label><input id="oc-tel" class="oc-inp" placeholder="(86) 3333-0000"></div>
+      <div class="oc-field"{% if servico_avulso %} style="display:none"{% endif %}><label>Telefone</label><input id="oc-tel" class="oc-inp" placeholder="(86) 3333-0000"></div>
       <div class="oc-field"><label>E-mail</label><input id="oc-email" class="oc-inp" placeholder="contato@empresa.com.br"></div>
-      <div class="oc-field"><label>Site</label><input id="oc-site" class="oc-inp" inputmode="url" placeholder="site.com.br"></div>
+      <div class="oc-field"{% if servico_avulso %} style="display:none"{% endif %}><label>Site</label><input id="oc-site" class="oc-inp" inputmode="url" placeholder="site.com.br"></div>
       <div class="oc-field"><label>Cidade</label><input id="oc-cidade" class="oc-inp" placeholder="Teresina"></div>
       <div class="oc-field"><label>UF</label><input id="oc-uf" class="oc-inp" maxlength="2" placeholder="PI"></div>
-      <div class="oc-field"><label>Segmento</label><input id="oc-segmento" class="oc-inp" placeholder="Saúde, Varejo, Logística..."></div>
+      <div class="oc-field"{% if servico_avulso %} style="display:none"{% endif %}><label>Segmento</label><input id="oc-segmento" class="oc-inp" placeholder="Saúde, Varejo, Logística..."></div>
     </div>
   </div>
 </div>
@@ -1001,8 +1001,9 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     document.getElementById('oc-cnpj-btn').style.display=pj?'inline-block':'none';
     document.getElementById('oc-empresa-label').textContent=pj?'Empresa':'Nome completo';
     document.getElementById('oc-empresa').placeholder=pj?'Nome da empresa':'Nome completo';
-    document.getElementById('campo-oc-cargo').style.display=pj?'flex':'none';
-    document.getElementById('campo-oc-socio').style.display=pj?'flex':'none';
+    // Cargo/Sócio/Telefone/Site/Segmento ficam ocultos sempre pra eventos (não é
+    // sobre PJ×PF — esse segmento não precisa desses campos, ponto), então esse
+    // toggle não mexe mais na visibilidade deles.
   }
   var btnTipoPj=document.getElementById('btn-tipo-pj'), btnTipoPf=document.getElementById('btn-tipo-pf');
   if(btnTipoPj)btnTipoPj.addEventListener('click',function(){aplicaTipoCliente('pj');});

@@ -75,6 +75,30 @@ display:flex;align-items:center;gap:.5rem;font-size:.8rem;color:var(--verde-clar
 .ficha{display:flex;gap:.4rem;padding:.6rem 1rem;flex-wrap:wrap;border-bottom:1px solid var(--borda)}
 .fbtn{flex:1;min-width:76px;text-align:center;background:var(--card2);border:1px solid var(--borda);border-radius:9px;padding:.5rem .3rem;font-size:.78rem;color:var(--txt)}
 .fbtn:active{background:#20232a}
+.fbtn.orc{border-color:#1e4a3a;color:var(--verde-claro);background:#10241a;font-weight:700}
+.orc-srv{display:flex;align-items:center;gap:.6rem;padding:.6rem 1rem;border-bottom:1px solid var(--borda);cursor:pointer}
+.orc-srv .ck{width:22px;height:22px;border-radius:6px;border:1.5px solid var(--borda);flex-shrink:0;display:grid;place-items:center;font-size:.8rem;color:#04140d}
+.orc-srv.on .ck{background:var(--verde);border-color:var(--verde)}
+.orc-srv .m{flex:1;min-width:0}.orc-srv .m b{font-size:.9rem;display:block}.orc-srv .m small{color:var(--mut);font-size:.76rem}
+.orc-srv .pr{font-size:.8rem;color:var(--verde-claro);text-align:right;flex-shrink:0}
+.orc-q{display:flex;align-items:center;gap:.4rem;margin-top:.3rem}
+.orc-q button{width:22px;height:22px;border-radius:6px;border:1px solid var(--borda);background:var(--card2);color:var(--txt);font-size:.9rem;cursor:pointer}
+.orc-q span{font-size:.82rem;min-width:14px;text-align:center}
+.orc-add{margin:.7rem 1rem;display:flex;gap:.4rem}
+.orc-add input{background:var(--card2);border:1px solid var(--borda);border-radius:8px;color:var(--txt);padding:.5rem .6rem;font-size:.82rem;min-width:0;font-family:inherit}
+.orc-add input.n{flex:1}.orc-add input.v{width:82px}
+.orc-add button{background:var(--card2);border:1px solid var(--borda);border-radius:8px;color:var(--verde-claro);padding:0 .8rem;font-weight:700;cursor:pointer}
+.orc-foot{border-top:1px solid var(--borda);padding:.7rem 1rem;background:var(--bg);flex-shrink:0}
+.orc-tot{display:flex;justify-content:space-between;font-size:.92rem;margin-bottom:.5rem}.orc-tot b{color:var(--verde-claro)}
+.orc-gen{width:100%;background:var(--verde);color:#04140d;border:0;border-radius:10px;padding:.72rem;font-weight:700;font-size:.92rem;cursor:pointer}
+.orc-gen:disabled{opacity:.4}
+.orc-done{padding:1.5rem 1.1rem;text-align:center}.orc-done .big{font-size:2.2rem}.orc-done h3{margin:.4rem 0 .2rem}.orc-done p{color:var(--mut);font-size:.85rem}
+.orc-link{display:flex;gap:.4rem;margin:1rem 0 .6rem}
+.orc-link input{flex:1;min-width:0;background:var(--card2);border:1px solid var(--borda);border-radius:8px;color:var(--verde-claro);padding:.55rem .6rem;font-size:.74rem}
+.orc-link button{background:var(--card2);border:1px solid var(--borda);border-radius:8px;color:var(--txt);padding:0 .8rem;font-weight:700;cursor:pointer}
+.wpp{width:100%;background:var(--zap);color:#052b12;border:0;border-radius:10px;padding:.72rem;font-weight:700;font-size:.92rem;cursor:pointer;margin-top:.3rem;display:block;text-align:center;text-decoration:none}
+.orc-ghost{width:100%;background:none;border:1px solid var(--borda);color:var(--mut);border-radius:10px;padding:.6rem;font-weight:600;cursor:pointer;margin-top:.5rem}
+.orc-empty{padding:2rem 1.4rem;text-align:center;color:var(--mut);font-size:.86rem}
 .funil{padding:.6rem 1rem;border-bottom:1px solid var(--borda)}
 .lbl{font-size:.68rem;color:var(--mut);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.45rem}
 .stchips{display:flex;gap:.35rem;flex-wrap:wrap}
@@ -250,6 +274,80 @@ _INBOX_JS = r"""
       });
     }
   }
+})();
+</script>"""
+
+# JS do montador de orçamento (plain string — chaves de JS).
+_ORC_JS = r"""
+<script>
+(function(){
+  var O=window.ORC||{cat:[],leadId:0};
+  var sel={}, custom=[];
+  function $(id){return document.getElementById(id);}
+  function brl(v){return "R$ "+Number(v||0).toLocaleString("pt-BR");}
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m];});}
+  function toast(m){var t=$("cktoast");if(!t)return;t.textContent=m;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove("show");},2000);}
+  function pr(s){var a=[];if(s.setup)a.push(brl(s.setup));if(s.mensal)a.push(brl(s.mensal)+"/mês");return a.join(" + ")||"grátis";}
+
+  function renderCat(){
+    var box=$("orclist");if(!box)return;box.innerHTML="";
+    if(!O.cat.length){box.innerHTML='<div class=orc-empty>Nenhum serviço no catálogo ainda. Você pode adicionar itens avulsos abaixo, ou pedir pro gestor cadastrar o catálogo no painel.</div>';return;}
+    O.cat.forEach(function(s,i){
+      var on=sel[i]!==undefined;
+      var q=on?'<div class=orc-q><button data-q="-" data-i="'+i+'">−</button><span>'+sel[i]+'</span><button data-q="+" data-i="'+i+'">+</button></div>':'';
+      var d=document.createElement("div");d.className="orc-srv"+(on?" on":"");d.setAttribute("data-i",i);
+      d.innerHTML='<div class=ck>'+(on?'✓':'')+'</div><div class=m><b>'+esc(s.nome)+'</b>'+(s.desc?'<small>'+esc(s.desc)+'</small>':'')+q+'</div><div class=pr>'+pr(s)+'</div>';
+      box.appendChild(d);
+    });
+  }
+  function build(){
+    var out=[];
+    Object.keys(sel).forEach(function(i){var s=O.cat[i];var q=sel[i];
+      out.push({nome:s.nome+(q>1?" (× "+q+")":""),setup:(s.setup||0)*q,mensal:(s.mensal||0)*q});});
+    custom.forEach(function(c){out.push(c);});
+    return out;
+  }
+  function total(){
+    var its=build();var setup=0,mensal=0;its.forEach(function(x){setup+=x.setup;mensal+=x.mensal;});
+    var t=[];if(setup)t.push(brl(setup));if(mensal)t.push(brl(mensal)+"/mês");
+    $("orctotal").innerHTML=its.length?'<b>'+(t.join(" + ")||"grátis")+'</b>':"—";
+    $("orcgen").disabled=its.length===0;
+  }
+  document.addEventListener("click",function(e){
+    var qb=e.target.closest("[data-q]");
+    if(qb){e.stopPropagation();var i=qb.getAttribute("data-i");sel[i]=Math.max(1,(sel[i]||1)+(qb.getAttribute("data-q")==="+"?1:-1));renderCat();total();return;}
+    var row=e.target.closest(".orc-srv");
+    if(row){var i=row.getAttribute("data-i");if(sel[i]!==undefined)delete sel[i];else sel[i]=1;renderCat();total();}
+  });
+  var addb=$("orcaddbtn");
+  if(addb)addb.onclick=function(){var n=$("orccnome").value.trim();var v=parseInt(($("orccval").value||"").replace(/\D/g,''),10);
+    if(!n||!v){toast("Preencha nome e valor");return;}custom.push({nome:n,setup:v,mensal:0});$("orccnome").value="";$("orccval").value="";total();toast("Item adicionado ✓");};
+  var gen=$("orcgen");
+  if(gen)gen.onclick=function(){
+    gen.disabled=true;gen.textContent="Gerando…";
+    fetch("/cockpit/lead/"+O.leadId+"/orcamento",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({itens:build()})})
+      .then(function(r){return r.json();}).then(function(j){
+        if(!j||!j.ok){toast((j&&j.erro)||"Não deu certo");gen.disabled=false;gen.textContent="Gerar proposta e link";return;}
+        done(j);
+      }).catch(function(){toast("Falha de conexão");gen.disabled=false;gen.textContent="Gerar proposta e link";});
+  };
+  function done(j){
+    $("orcbuild").style.display="none";$("orcfoot").style.display="none";
+    var wa=j.zap?'<a class=wpp href="'+j.zap+'" target=_blank rel=noopener>💬 Enviar no WhatsApp do cliente</a>':'';
+    $("orcdone").innerHTML='<div class=orc-done><div class=big>🧾✅</div><h3>Proposta pronta!</h3>'
+      +'<p>Mande o link pro cliente — ele abre, vê com a marca da empresa e aprova.</p>'
+      +'<div class=orc-link><input value="'+esc(j.link)+'" readonly onclick="this.select()"><button id=orccopy>Copiar</button></div>'
+      +wa
+      +'<button class=orc-ghost id=orcsend>💬 Enviar na conversa (pelo Zaq)</button>'
+      +'<a class=orc-ghost href="/cockpit/lead/'+O.leadId+'" style="display:block;border:0;color:var(--verde-claro);text-decoration:none">✓ Voltar pro lead</a></div>';
+    $("orcdone").style.display="block";
+    $("orccopy").onclick=function(){navigator.clipboard.writeText(j.link).then(function(){toast("Link copiado ✓");},function(){toast("Selecione e copie");});};
+    $("orcsend").onclick=function(){var b=$("orcsend");b.disabled=true;b.textContent="Enviando…";
+      fetch("/cockpit/lead/"+O.leadId+"/orcamento/enviar",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({link:j.link})})
+        .then(function(r){return r.json();}).then(function(x){toast(x&&x.ok?"Enviado na conversa ✓":(x&&x.erro)||"Não consegui enviar agora");b.disabled=false;b.textContent="💬 Enviar na conversa (pelo Zaq)";})
+        .catch(function(){toast("Falha de conexão");b.disabled=false;b.textContent="💬 Enviar na conversa (pelo Zaq)";});};
+  }
+  renderCat();total();
 })();
 </script>"""
 
@@ -438,7 +536,8 @@ def cockpit_lead(request: Request, lead_id: int):
         (f"<a class=fbtn href='{esc(tel)}'>📞 Ligar</a>" if tel else "<span class=fbtn style='opacity:.4'>📞 Ligar</span>")
         + (f"<a class=fbtn href='{esc(zap)}' target=_blank rel=noopener>💬 WhatsApp</a>" if zap
            else "<span class=fbtn style='opacity:.4'>💬 WhatsApp</span>")
-        + f"<a class=fbtn href='/cockpit/lead/{lead_id}/ficha'>👤 Ficha</a>")
+        + f"<a class=fbtn href='/cockpit/lead/{lead_id}/ficha'>👤 Ficha</a>"
+        + f"<a class='fbtn orc' href='/cockpit/lead/{lead_id}/orcamento' style='flex-basis:100%'>🧾 Gerar orçamento</a>")
     # funil (chips = forms)
     chips = []
     for e in d["etapas"]:
@@ -615,6 +714,62 @@ async def cockpit_push_remover(request: Request, sub: dict = Body(...)):
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
     ck.remover_assinatura(get_pool(), (sub or {}).get("endpoint", ""))
     return JSONResponse({"ok": True})
+
+
+# ------------------------------------------------------------------ orçamento / proposta
+@router.get("/cockpit/lead/{lead_id}/orcamento", response_class=HTMLResponse)
+def cockpit_orcamento(request: Request, lead_id: int):
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess
+    pool = get_pool()
+    d = ck.lead_do_vendedor(pool, conta_id, membro_id, lead_id)
+    if not d:
+        return RedirectResponse("/cockpit", status_code=303)
+    cat = ck.catalogo_servicos(pool, conta_id)
+    import json as _json
+    cat_json = _json.dumps(cat, ensure_ascii=False).replace("</", "<\\/")   # acentos limpos; </script> seguro
+    inject = f"<script>window.ORC={{cat:{cat_json},leadId:{lead_id}}};</script>"
+    body = (
+        "<div class=hdr>"
+        f"<a class=bk href='/cockpit/lead/{lead_id}'>‹</a>"
+        f"<div class=tt><b>Orçamento</b><small>{esc(d['empresa'])}</small></div></div>"
+        "<div class='ck-toast' id=cktoast></div>"
+        "<div class=scroll id=orcbuild>"
+        "<div class=lbl style='padding:.7rem 1rem 0'>Serviços do catálogo</div>"
+        "<div id=orclist></div>"
+        "<div class=lbl style='padding:.9rem 1rem 0'>Adicionar item avulso</div>"
+        "<div class=orc-add><input class=n id=orccnome placeholder='Ex.: Visita técnica' autocomplete=off>"
+        "<input class=v id=orccval inputmode=numeric placeholder='R$' autocomplete=off>"
+        "<button id=orcaddbtn type=button>+</button></div></div>"
+        "<div class=orc-foot id=orcfoot>"
+        "<div class=orc-tot><span>Total</span><span id=orctotal>—</span></div>"
+        "<button class=orc-gen id=orcgen type=button disabled>Gerar proposta e link</button></div>"
+        "<div id=orcdone style='display:none'></div>"
+        + inject + _ORC_JS)
+    return _page(f"Cockpit — orçamento {d['empresa']}", body)
+
+
+@router.post("/cockpit/lead/{lead_id}/orcamento")
+async def cockpit_orcamento_criar(request: Request, lead_id: int, payload: dict = Body(...)):
+    sess = _sessao(request)
+    if not sess:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    r = ck.criar_orcamento(get_pool(), sess[0], sess[1], lead_id, (payload or {}).get("itens"))
+    return JSONResponse(r)
+
+
+@router.post("/cockpit/lead/{lead_id}/orcamento/enviar")
+async def cockpit_orcamento_enviar(request: Request, lead_id: int, payload: dict = Body(...)):
+    sess = _sessao(request)
+    if not sess:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    link = (payload or {}).get("link", "")
+    if not link:
+        return JSONResponse({"ok": False, "erro": "sem link"})
+    r = ck.enviar_proposta_conversa(get_pool(), sess[0], sess[1], lead_id, link)
+    return JSONResponse(r)
 
 
 # ------------------------------------------------------------------ perfil

@@ -370,3 +370,81 @@ def set_pausado(pool, conta_id: int, membro_id: int, on: bool) -> None:
         c.execute("update membros set cockpit_pausado=%s where id=%s and conta_id=%s",
                   (bool(on), membro_id, conta_id))
         c.commit()
+
+
+# ----------------------------------------------------------------- orçamento / proposta
+
+def catalogo_servicos(pool, conta_id: int) -> list[dict]:
+    """Serviços do catálogo da empresa pro vendedor montar o orçamento. Preços em
+    REAIS (inteiros) — o snapshot de itens da proposta é em reais (ver web/proposta)."""
+    from finance import servicos_catalogo as scat
+    out = []
+    for s in scat.listar(pool, conta_id):
+        out.append({"id": s["id"], "nome": s["nome"], "desc": s.get("descricao", ""),
+                    "setup": round((s.get("setup_centavos") or 0) / 100),
+                    "mensal": round((s.get("mensal_centavos") or 0) / 100)})
+    return out
+
+
+def _sanear_itens(itens) -> list[dict]:
+    """Snapshot seguro das linhas: nome + setup/mensal em REAIS (inteiros, ≥0)."""
+    out = []
+    for it in (itens or [])[:50]:
+        nome = (str(it.get("nome") or "")).strip()[:120]
+        if not nome:
+            continue
+        out.append({"nome": nome, "desc": (str(it.get("desc") or "")).strip()[:200],
+                    "setup": max(0, int(it.get("setup") or 0)),
+                    "mensal": max(0, int(it.get("mensal") or 0))})
+    return out
+
+
+def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens) -> dict:
+    """Cria a proposta do lead (mesma tabela/token do painel) e devolve o link público
+    /proposta/<token> pro vendedor mandar. Revalida a posse do lead. Reusa a página de
+    proposta que já existe (o cliente vê com a marca da empresa e aprova online)."""
+    import secrets as _secrets
+    from web.painel_prospeccao import _zap_link_texto
+    from finance.email_sender import _app_url
+    linhas = _sanear_itens(itens)
+    if not linhas:
+        return {"ok": False, "erro": "Adicione ao menos um item ao orçamento."}
+    import json as _json
+    setup_c = sum(x["setup"] for x in linhas) * 100
+    mensal_c = sum(x["mensal"] for x in linhas) * 100
+    with pool.connection() as c:
+        if not _posse(c, conta_id, membro_id, lead_id):
+            return {"ok": False, "erro": "escopo"}
+        lead = c.execute(
+            """select empresa, coalesce(nullif(contato,''), decisor_nome, socio), cnpj,
+                      segmento, whatsapp, telefone, email, cidade, uf
+                 from prospeccao where id=%s and conta_id=%s""", (lead_id, conta_id)).fetchone()
+        try:
+            from web.painel_servicos import _garantir_tabela
+            _garantir_tabela(c)
+        except Exception:  # noqa: BLE001 — colunas já existem em produção
+            pass
+        token = _secrets.token_urlsafe(16)
+        oid = c.execute(
+            """insert into orcamentos
+                 (conta_id, cliente, empresa, cnpj, segmento, whatsapp, telefone, email,
+                  cidade, uf, itens, setup_centavos, mensal_centavos, status, criado_por, canal, token)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,'enviado',%s,'cockpit',%s)
+               returning id""",
+            (conta_id, (lead[1] or None), (lead[0] or None), lead[2], lead[3], lead[4],
+             lead[5], lead[6], lead[7], (lead[8] or "")[:2] or None,
+             _json.dumps(linhas), setup_c, mensal_c, str(membro_id), token)).fetchone()[0]
+        c.execute("update prospeccao set orcamento_id=%s, atualizado_em=now() where id=%s and conta_id=%s",
+                  (oid, lead_id, conta_id))
+        c.commit()
+    link = f"{_app_url()}/proposta/{token}"
+    numero = (lead[4] or lead[5] or "")
+    msg = f"Olá! Segue sua proposta 👋\n{link}"
+    return {"ok": True, "id": oid, "token": token, "link": link,
+            "zap": _zap_link_texto(numero, msg) if numero else "",
+            "setup_centavos": setup_c, "mensal_centavos": mensal_c}
+
+
+def enviar_proposta_conversa(pool, conta_id: int, membro_id: int, lead_id: int, link: str) -> dict:
+    """Manda o link da proposta na conversa do lead (WhatsApp da empresa)."""
+    return enviar_mensagem(pool, conta_id, membro_id, lead_id, f"Olá! Segue sua proposta 👋\n{link}")

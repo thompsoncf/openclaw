@@ -561,6 +561,21 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .cli-drop-item .top{display:flex; align-items:center; gap:.4rem}
 .cli-drop-item .nome{font-size:.86rem; font-weight:600}
 .cli-drop-item .sub{font-size:.76rem; color:var(--txt-mut); margin-top:.15rem}
+.oc-contador{display:inline-flex; align-items:center; gap:.3rem; font-size:.74rem; color:var(--txt-mut); background:var(--bg); border:1px solid var(--borda); border-radius:999px; padding:.15rem .6rem}
+.oc-contador b{color:var(--txt)}
+.oc-buscaic{position:absolute; left:.8rem; top:50%; transform:translateY(-50%); color:var(--txt-mut); font-size:.85rem; pointer-events:none}
+.oc-drop-item{display:flex; align-items:center; justify-content:space-between; gap:.6rem; padding:.55rem .8rem; cursor:pointer; font-size:.85rem; border-bottom:1px solid var(--borda)}
+.oc-drop-item:last-child{border-bottom:0}
+.oc-drop-item:hover{background:var(--bg)}
+.oc-drop-item .nome{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0}
+.oc-drop-item .preco{flex-shrink:0; color:var(--verde-claro); font-variant-numeric:tabular-nums; font-size:.8rem}
+.oc-drop-empty{padding:.9rem .8rem; font-size:.82rem; color:var(--txt-mut); text-align:center}
+.oc-vertodos-link{font-size:.8rem; color:var(--verde-claro); cursor:pointer; text-decoration:none; display:inline-block; margin-top:.7rem}
+.oc-vertodos-link:hover{text-decoration:underline}
+.oc-catalogo-completo{display:none; margin-top:.6rem; border-top:1px dashed var(--borda); padding-top:.7rem}
+.oc-catalogo-completo.open{display:block}
+.oc-browse-row{display:grid; grid-template-columns:auto 1fr 90px auto; gap:.55rem; align-items:center; padding:.5rem 0; border-bottom:1px solid var(--borda)}
+.oc-browse-row:last-child{border-bottom:0}
 .oc-seg button{padding:.45rem .7rem; border:1px solid var(--borda); background:var(--bg); color:var(--txt); cursor:pointer; font-size:.85rem; border-radius:7px}
 .oc-seg button.on{border-color:var(--verde-claro); background:#10241d; color:var(--verde-claro)}
 .oc-step{display:inline-flex; align-items:center; gap:0}
@@ -663,7 +678,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.4rem">
         <h2 style="margin:0">Meus serviços</h2>
-        <div style="display:flex; gap:.4rem; flex-wrap:wrap">
+        <div style="display:flex; gap:.5rem; flex-wrap:wrap; align-items:center">
+          {% if servico_avulso %}<span class="oc-contador"><b id="oc-contador-n">0</b> de <span id="oc-contador-total">0</span> na proposta</span>{% endif %}
           <button id="oc-add" class="oc-pill" type="button">+ Adicionar serviço</button>
           <button id="oc-margin" class="oc-pill" type="button">Modo margem</button>
         </div>
@@ -688,10 +704,25 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         <div id="svc-msg" class="mut" style="font-size:.8rem; margin-top:.4rem"></div>
       </div>
 
+      {% if servico_avulso %}
+      <div class="oc-buscabox" id="oc-buscabox" style="position:relative; margin-top:.8rem; display:none">
+        <span class="oc-buscaic">🔍</span>
+        <input id="oc-busca" class="oc-inp" placeholder="Buscar serviço pra adicionar… (ex.: drinks, dj, buffet)" autocomplete="off" style="padding-left:2.2rem">
+        <div id="oc-drop" style="display:none; position:absolute; left:0; right:0; top:calc(100% + 6px); background:var(--card-2); border:1px solid var(--borda); border-radius:10px; max-height:280px; overflow-y:auto; z-index:5; box-shadow:0 12px 30px rgba(0,0,0,.4)"></div>
+      </div>
+      <div id="oc-sel-empty" class="oc-empty" style="display:none">
+        <b>Nenhum serviço nesta proposta ainda</b>
+        <p class="mut" style="margin:.3rem 0 0; font-size:.85rem">Busque acima e clique pra adicionar — só o que você escolher aparece aqui embaixo.</p>
+      </div>
+      {% endif %}
       <div class="oc-head{% if servico_avulso %} avulso{% endif %}" id="oc-head" style="margin-top:.8rem; display:none">
         <span></span><span>Serviço</span><span style="text-align:right">{{ 'Valor' if servico_avulso else 'Setup' }}</span>{% if not servico_avulso %}<span style="text-align:right">Mensal</span>{% endif %}<span style="text-align:right">{{ 'Custo' if servico_avulso else 'Custo/Margem' }}</span><span></span>
       </div>
-      <div id="oc-mods"></div>
+      <div id="oc-mods"{% if servico_avulso %} style="display:none"{% endif %}></div>
+      {% if servico_avulso %}
+      <a id="oc-vertodos" href="#" class="oc-vertodos-link" style="display:none">📋 ver os <span id="oc-vertodos-n">0</span> serviços em ordem alfabética ›</a>
+      <div id="oc-catalogo-completo" class="oc-catalogo-completo"></div>
+      {% endif %}
       <div id="oc-mods-empty" class="oc-empty" style="display:none">
         <b>Você ainda não cadastrou seus serviços</b>
         <p class="mut" style="margin:.3rem 0 0">{{ 'Adicione o que a sua empresa vende — nome e valor. Isso vira o seu catálogo pra montar orçamentos.' if servico_avulso else 'Adicione o que a sua empresa vende — nome, setup e mensalidade. Isso vira o seu catálogo pra montar orçamentos.' }}</p>
@@ -832,6 +863,14 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   // linhas de serviço são dinâmicas (catálogo por conta) — delegação:
   var MODS=document.getElementById('oc-mods');
   MODS.addEventListener('click',function(e){
+    if(SERVICO_AVULSO){
+      var rm=e.target.closest('.oc-tog')||e.target.closest('.oc-rm');
+      if(!rm) return;
+      var row=rm.closest('.oc-mod'); if(!row) return;
+      delete SELECIONADOS[row.getAttribute('data-id')];
+      renderCatalogoAvulso();
+      return;
+    }
     var tog=e.target.closest('.oc-tog'); if(!tog) return;
     var r=tog.closest('.oc-mod'); var on=r.getAttribute('data-on')==='1';
     r.setAttribute('data-on',on?'0':'1'); r.classList.toggle('off',on); tog.classList.toggle('on',!on); pinta();
@@ -874,7 +913,64 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 
   // ---- catálogo de serviços por conta (Meus serviços) ----
   var CATALOGO=[];
+  var SELECIONADOS={};   // eventos (servico_avulso): slugs marcados nesta proposta
+  var VERTODOS_OPEN=false;
   function ec(s){var d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
+
+  // eventos: catálogo ordenado A-Z + "busca pra adicionar" — a lista só mostra
+  // o que já foi escolhido pra esta proposta; o resto fica atrás da busca ou
+  // do link "ver todos", pra não repetir o card gigante de antes com 26 linhas
+  // sempre visíveis.
+  function buildRowAvulso(s){
+    return '<button class="oc-tog on" type="button" title="Remover da proposta"></button>'
+      +'<div class="oc-nome"><b>'+ec(s.nome)+'</b><div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div>'
+      +'<div class="oc-num"><span>Valor</span><input class="oc-setup" inputmode="numeric" value="'+s.setup+'"></div>'
+      +'<div class="oc-num"><span>Custo</span><input class="oc-custo" inputmode="numeric" value="'+s.custo+'"></div>'
+      +'<div class="oc-rowacts"><button class="oc-ic oc-rm" type="button" title="Remover da proposta">🗑</button></div>';
+  }
+  function renderCatalogoAvulso(){
+    var box=document.getElementById('oc-mods');
+    var valores={};
+    rows().forEach(function(r){valores[r.getAttribute('data-id')]={setup:r.querySelector('.oc-setup').value,custo:r.querySelector('.oc-custo').value};});
+    box.innerHTML='';
+    var itens=CATALOGO.filter(function(s){return SELECIONADOS[s.slug];});
+    itens.forEach(function(s){
+      var r=document.createElement('div'); r.className='oc-mod avulso';
+      r.setAttribute('data-id',s.slug); r.setAttribute('data-on','1');
+      r.setAttribute('data-nome',s.nome); r.setAttribute('data-desc',s.descricao||''); r.setAttribute('data-cid',s.id);
+      r.innerHTML=buildRowAvulso(s);
+      box.appendChild(r);
+      var v=valores[s.slug];
+      if(v){ r.querySelector('.oc-setup').value=v.setup; r.querySelector('.oc-custo').value=v.custo; }
+    });
+    var vazioTotal=CATALOGO.length===0;
+    box.style.display=itens.length?'block':'none';
+    document.getElementById('oc-sel-empty').style.display=(itens.length||vazioTotal)?'none':'block';
+    document.getElementById('oc-mods-empty').style.display=vazioTotal?'block':'none';
+    var busca=document.getElementById('oc-buscabox'); if(busca)busca.style.display=vazioTotal?'none':'block';
+    var vt=document.getElementById('oc-vertodos');
+    if(vt){
+      vt.style.display=vazioTotal?'none':'inline-block';
+      vt.innerHTML='📋 '+(VERTODOS_OPEN?'esconder a lista completa ‹':('ver os <span id="oc-vertodos-n">'+CATALOGO.length+'</span> serviços em ordem alfabética ›'));
+    }
+    document.getElementById('oc-contador-n').textContent=itens.length;
+    document.getElementById('oc-contador-total').textContent=CATALOGO.length;
+    renderCatalogoCompleto();
+    pinta();
+  }
+  function renderCatalogoCompleto(){
+    var box=document.getElementById('oc-catalogo-completo');
+    box.classList.toggle('open',VERTODOS_OPEN);
+    if(!VERTODOS_OPEN){box.innerHTML=''; return;}
+    box.innerHTML=CATALOGO.map(function(s){
+      var on=!!SELECIONADOS[s.slug];
+      return '<div class="oc-browse-row" data-id="'+ec(s.slug)+'"><button class="oc-tog'+(on?' on':'')+'" type="button" title="'+(on?'Remover da proposta':'Adicionar à proposta')+'"></button>'
+        +'<div class="oc-nome"><b>'+ec(s.nome)+'</b><div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div>'
+        +'<div class="oc-num"><span>Valor</span><input value="'+s.setup+'" readonly></div>'
+        +'<div class="oc-rowacts"><button class="oc-ic oc-edit" type="button" title="Editar serviço">✎</button><button class="oc-ic oc-del" type="button" title="Excluir serviço">🗑</button></div></div>';
+    }).join('');
+  }
+
   function renderCatalogo(preserva){
     var box=document.getElementById('oc-mods'), onset={};
     if(preserva){rows().forEach(function(r){onset[r.getAttribute('data-id')]=r.getAttribute('data-on');});}
@@ -904,8 +1000,54 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   }
   function carregarCatalogo(preserva){
     return fetch('/painel/servicos/catalogo').then(function(r){return r.json();}).then(function(d){
-      CATALOGO=d.itens||[]; renderCatalogo(preserva);
+      CATALOGO=d.itens||[];
+      if(SERVICO_AVULSO){
+        CATALOGO.sort(function(a,b){return (a.nome||'').localeCompare(b.nome||'','pt-BR');});
+        Object.keys(SELECIONADOS).forEach(function(id){if(!CATALOGO.some(function(s){return s.slug===id;}))delete SELECIONADOS[id];});
+        renderCatalogoAvulso();
+      } else {
+        renderCatalogo(preserva);
+      }
     }).catch(function(){});
+  }
+  if(SERVICO_AVULSO){
+    var ocBusca=document.getElementById('oc-busca'), ocDrop=document.getElementById('oc-drop');
+    var renderDropBusca=function(){
+      var q=(ocBusca.value||'').trim().toLowerCase();
+      if(!q){ocDrop.style.display='none'; ocDrop.innerHTML=''; return;}
+      var m=CATALOGO.filter(function(s){return !SELECIONADOS[s.slug] && (s.nome||'').toLowerCase().indexOf(q)>=0;});
+      ocDrop.innerHTML = m.length
+        ? m.slice(0,8).map(function(s){return '<div class="oc-drop-item" data-id="'+ec(s.slug)+'"><span class="nome">'+ec(s.nome)+'</span><span class="preco">'+fmt(s.setup)+'</span></div>';}).join('')
+        : '<div class="oc-drop-empty">Nenhum serviço com esse nome.</div>';
+      ocDrop.style.display='block';
+    }
+    ocBusca.addEventListener('input',renderDropBusca);
+    ocBusca.addEventListener('focus',function(){if(ocBusca.value.trim())renderDropBusca();});
+    document.addEventListener('click',function(e){if(!e.target.closest('#oc-buscabox'))ocDrop.style.display='none';});
+    ocDrop.addEventListener('click',function(e){
+      var it=e.target.closest('.oc-drop-item'); if(!it)return;
+      SELECIONADOS[it.getAttribute('data-id')]=true;
+      ocBusca.value=''; ocDrop.style.display='none'; ocDrop.innerHTML='';
+      renderCatalogoAvulso();
+    });
+
+    document.getElementById('oc-vertodos').addEventListener('click',function(e){
+      e.preventDefault();
+      VERTODOS_OPEN=!VERTODOS_OPEN;
+      renderCatalogoAvulso();
+    });
+    document.getElementById('oc-catalogo-completo').addEventListener('click',function(e){
+      var tog=e.target.closest('.oc-tog');
+      if(tog){
+        var row=tog.closest('.oc-browse-row'); var id=row.getAttribute('data-id');
+        if(SELECIONADOS[id])delete SELECIONADOS[id]; else SELECIONADOS[id]=true;
+        renderCatalogoAvulso();
+        return;
+      }
+      var ed=e.target.closest('.oc-edit'), dl=e.target.closest('.oc-del');
+      if(ed){var row2=ed.closest('.oc-browse-row'); var s=CATALOGO.filter(function(x){return x.slug===row2.getAttribute('data-id');})[0]; if(s)abrirForm({id:s.id,nome:s.nome,descricao:s.descricao,setup:s.setup,mensal:s.mensal,custo:s.custo});}
+      else if(dl){var row3=dl.closest('.oc-browse-row'); var s2=CATALOGO.filter(function(x){return x.slug===row3.getAttribute('data-id');})[0]; if(s2&&confirm('Excluir "'+s2.nome+'" do seu catálogo?')){fetch('/painel/servicos/catalogo/excluir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:s2.id})}).then(function(){carregarCatalogo(true);});}}
+    });
   }
   // editar / excluir (delegação)
   document.getElementById('oc-mods').addEventListener('click',function(e){
@@ -1114,6 +1256,12 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   function esc(s){var d=document.createElement('div'); d.textContent=s==null?'':s; return d.innerHTML;}
   function setv(id,v){var e=document.getElementById(id); if(e){e.value=v||'';}}
   function marcaMods(ids){
+    if(SERVICO_AVULSO){
+      SELECIONADOS={};
+      (ids||[]).forEach(function(id){SELECIONADOS[id]=true;});
+      renderCatalogoAvulso();
+      return;
+    }
     rows().forEach(function(r){
       var on=(ids||[]).indexOf(r.getAttribute('data-id'))>=0;
       r.setAttribute('data-on',on?'1':'0'); r.classList.toggle('off',!on);

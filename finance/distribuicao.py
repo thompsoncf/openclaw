@@ -30,11 +30,14 @@ def config(c, conta_id: int) -> dict:
 
 
 def fila_ids(c, conta_id: int) -> list[int]:
-    """membro_ids elegíveis (estão na fila E estão ativos), na ordem definida."""
+    """membro_ids elegíveis (na fila, ativos E não pausados), na ordem definida.
+    `cockpit_pausado` deixa o vendedor pausar o rodízio pelo app sem sair da fila
+    que o gestor montou — some da distribuição enquanto estiver pausado e volta
+    na mesma posição quando despausa."""
     rows = c.execute(
         """select f.membro_id from distribuicao_fila f
              join membros m on m.id=f.membro_id and m.conta_id=f.conta_id
-            where f.conta_id=%s and m.ativo
+            where f.conta_id=%s and m.ativo and not coalesce(m.cockpit_pausado, false)
             order by f.ordem, f.membro_id""", (conta_id,)).fetchall()
     return [r[0] for r in rows]
 
@@ -123,8 +126,14 @@ def avisar_vendedor(pool, conta_id: int, membro_id: int, empresa: str) -> None:
         nome, email, wa = m
         emp = (empresa or "").strip() or "Um lead"
         titulo = f"🔥 Novo lead pra você: {emp}"
-        corpo = (f"{emp} caiu pra você no rodízio de leads. Abra o Zaq pra acompanhar — "
-                 "o agente já iniciou o atendimento e você assume quando quiser.")
+        try:
+            from finance.email_sender import _app_url
+            _cockpit = f"{_app_url()}/cockpit/login"
+        except Exception:  # noqa: BLE001
+            _cockpit = ""
+        corpo = (f"{emp} caiu pra você no rodízio de leads. O agente já iniciou o "
+                 "atendimento e você assume quando quiser."
+                 + (f" Atenda pelo app: {_cockpit}" if _cockpit else " Abra o Zaq pra acompanhar."))
         if email and "@" in email:
             try:
                 from finance import email_sender as es

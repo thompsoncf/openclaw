@@ -321,6 +321,10 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
         </form>
         <form method="post" action="/painel/equipe/reconvite" style="margin:0"><input type="hidden" name="membro_id" value="{{ m.id }}">
           <button title="Gerar e reenviar o link de convite">↻ Novo link</button></form>
+        {% if m.papel in ('vendedor','gestor','dono') and not m.pendente %}
+        <form method="post" action="/painel/equipe/cockpit-link" style="margin:0"><input type="hidden" name="membro_id" value="{{ m.id }}">
+          <button title="Gerar o link do app do vendedor (Cockpit) e mandar por e-mail">📱 Cockpit</button></form>
+        {% endif %}
         <form method="post" action="/painel/equipe/ativo" style="margin:0">
           <input type="hidden" name="membro_id" value="{{ m.id }}">
           <input type="hidden" name="ativo" value="{{ '0' if m.ativo else '1' }}">

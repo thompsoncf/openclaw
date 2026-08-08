@@ -16,7 +16,7 @@ from finance import distribuicao as dist
 _BASE_SQL = """
 create table contas (id bigserial primary key, nome text);
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
-  ativo boolean default true, whatsapp text);
+  ativo boolean default true, whatsapp text, cockpit_pausado boolean default false);
 create table prospeccao (id bigserial primary key, conta_id bigint, empresa text,
   vendedor_id bigint, atualizado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,

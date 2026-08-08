@@ -215,7 +215,7 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
 /* linha de cada membro — reseta o button{width:100%} global e alinha tudo */
 .mrow{display:flex;align-items:center;gap:.85rem;padding:.9rem 0;border-top:1px solid var(--borda);flex-wrap:wrap}
 .mrow .minfo{flex:1;min-width:210px;display:flex;flex-direction:column;gap:.4rem}
-.mname{display:flex;gap:.4rem;align-items:center}
+.mname{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap}
 .mname input{flex:1;min-width:120px;max-width:240px;background:var(--bg);border:1px solid var(--borda);
   border-radius:8px;color:var(--txt);padding:.42rem .55rem;font-weight:600;font-size:.9rem;margin:0}
 .mname input:focus{outline:none;border-color:var(--verde)}

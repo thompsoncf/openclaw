@@ -235,3 +235,27 @@ def test_lancamento_sem_classificacao_ainda_conta(pool, conta_id):
     L = {l["chave"]: l for l in dre["estrutura"]["linhas"]}
     assert L["a_classificar"]["valor_centavos"] == 40000
     assert L["resultado"]["valor_centavos"] == 40000
+
+
+def test_lancamentos_a_classificar(pool, conta_id):
+    """Lista só os lançamentos de EMPRESA sem conta contábil (o que alimenta o
+    painel 'A classificar' da aba Empresa)."""
+    hoje = date.today()
+    livro = LivroCaixa(pool, conta_id)
+    ids = {c["codigo"]: c["id"] for c in pc.listar_plano(pool)}
+    # empresa COM conta contábil -> NÃO aparece
+    livro.adicionar(Lancamento.criar(Tipo.DESPESA, 100, "x", natureza="empresa",
+                                     plano_conta_id=ids["5.1.03"]), forcar=True)
+    # empresa SEM conta contábil -> aparece
+    s = livro.adicionar(Lancamento.criar(Tipo.DESPESA, 200, "Servicos",
+                                         descricao="Anúncios", natureza="empresa"),
+                        forcar=True)
+    # pessoal e "a definir" -> NÃO aparecem
+    livro.adicionar(Lancamento.criar(Tipo.DESPESA, 50, "x", natureza="pessoal"), forcar=True)
+    livro.adicionar(Lancamento.criar(Tipo.DESPESA, 30, "x"), forcar=True)
+
+    lst = livro.lancamentos_a_classificar(hoje.year, hoje.month)
+    assert [l["id"] for l in lst] == [s.id]
+    assert lst[0]["descricao"] == "Anúncios"
+    assert lst[0]["valor"] == 20000
+    assert lst[0]["centro_custo_id"] is None

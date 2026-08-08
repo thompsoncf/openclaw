@@ -448,3 +448,117 @@ def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens) ->
 def enviar_proposta_conversa(pool, conta_id: int, membro_id: int, lead_id: int, link: str) -> dict:
     """Manda o link da proposta na conversa do lead (WhatsApp da empresa)."""
     return enviar_mensagem(pool, conta_id, membro_id, lead_id, f"Olá! Segue sua proposta 👋\n{link}")
+
+
+# ----------------------------------------------------------------- agendar visita
+
+def _maps_link(local: str) -> str:
+    from urllib.parse import quote
+    return "https://www.google.com/maps/search/?api=1&query=" + quote(local or "") if local else ""
+
+
+def endereco_empresa(pool, conta_id: int) -> dict:
+    """Endereço do SALÃO (a empresa/conta) pro local da visita — vem do cadastro da
+    empresa (Empresa → endereço). Lê direto de `contas` (sem depender de nicho).
+    {nome, endereco, maps}."""
+    with pool.connection() as c:
+        r = c.execute(
+            "select coalesce(nome_fantasia,''), coalesce(razao_social,''), coalesce(nome,''), "
+            "coalesce(endereco,''), coalesce(bairro,''), coalesce(cidade,''), coalesce(uf,'') "
+            "from contas where id=%s", (conta_id,)).fetchone()
+    if not r:
+        return {"nome": "Nosso espaço", "endereco": "", "maps": ""}
+    nome = (r[0] or r[1] or r[2] or "Nosso espaço").strip()
+    cid_uf = " ".join(x for x in [r[5].strip(), r[6].strip()] if x)
+    endereco = " — ".join(p for p in [r[3].strip(), r[4].strip(), cid_uf] if p)
+    return {"nome": nome, "endereco": endereco, "maps": _maps_link(endereco or nome)}
+
+
+def agendar_visita(pool, conta_id: int, membro_id: int, lead_id: int, *, data: str, hora: str,
+                   dur_min: int = 60, local: str = "", lembrete_min: int | None = 60,
+                   avisar_cliente: bool = True) -> dict:
+    """Marca a visita do lead ao espaço: cria o evento na agenda, liga no lead, move o
+    lead pra 'qualificado' e (opcional) manda a confirmação com o endereço + o convite
+    .ics pro cliente. Revalida a posse do lead."""
+    import secrets as _secrets
+    from datetime import datetime, timedelta
+    from finance import agenda as ag
+    from finance.email_sender import _app_url
+    try:
+        ini = datetime.fromisoformat(f"{data}T{hora}").replace(tzinfo=ag.BRT)
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "erro": "Data ou hora inválida."}
+    dur = max(15, int(dur_min or 60))
+    fim = ini + timedelta(minutes=dur)
+    esp = endereco_empresa(pool, conta_id)
+    local = (local or "").strip() or esp["endereco"] or esp["nome"]
+    with pool.connection() as c:
+        if not _posse(c, conta_id, membro_id, lead_id):
+            return {"ok": False, "erro": "escopo"}
+        lead = c.execute("select coalesce(nullif(contato,''), nullif(empresa,''), 'Cliente'), "
+                         "coalesce(whatsapp, telefone, '') from prospeccao where id=%s and conta_id=%s",
+                         (lead_id, conta_id)).fetchone()
+    quem, numero = (lead[0], lead[1]) if lead else ("Cliente", "")
+    descricao = (f"Visita de {quem} ao {esp['nome']}.\nLocal: {local}"
+                 + (f"\nMapa: {esp['maps']}" if esp["maps"] else ""))
+    lembrete = int(lembrete_min) if lembrete_min else None
+    ev = ag.criar_evento(pool, conta_id, f"Visita — {quem}", ini, membro_id=membro_id, fim=fim,
+                         local=local, descricao=descricao, lembrete_min=lembrete, tipo="empresa")
+    token = _secrets.token_urlsafe(12)
+    quando = ini.astimezone(ag.BRT).strftime("%d/%m às %H:%M")
+    with pool.connection() as c:
+        c.execute("update eventos_agenda set prospeccao_id=%s, ics_token=%s where id=%s and conta_id=%s",
+                  (lead_id, token, ev["id"], conta_id))
+        try:
+            c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id, tipo, resultado, descricao)
+                         values (%s,%s,'visita','agendado',%s)""",
+                      (lead_id, membro_id, f"Visita agendada: {quando} — {local}"[:400]))
+        except Exception:  # noqa: BLE001
+            pass
+        # ao agendar a visita, o lead avança pra 'qualificado' (nunca mexe em ganho/perdido)
+        c.execute("update prospeccao set status='qualificado', ultimo_contato_em=now(), atualizado_em=now() "
+                  "where id=%s and conta_id=%s and status not in ('ganho','perdido')", (lead_id, conta_id))
+        c.commit()
+    ics_url = f"{_app_url()}/visita/{token}.ics"
+    msg = (f"Olá! 👋 Sua visita ao {esp['nome']} está marcada:\n📅 {quando}\n📍 {local}"
+           + (f"\n🗺️ {esp['maps']}" if esp["maps"] else "")
+           + f"\n📎 Adicione ao seu calendário: {ics_url}\nAté lá! 😊")
+    avisado = False
+    if avisar_cliente and numero:
+        try:
+            from finance import whatsapp_out as wo
+            from web.painel_prospeccao import _registrar_msg
+            with pool.connection() as c:
+                res = wo.enviar(c, conta_id, numero, msg)
+                if res.get("ok"):
+                    _registrar_msg(c, conta_id, lead_id, "whatsapp", "out", "humano", msg, membro_id, res.get("sid"))
+                    c.commit()
+                    avisado = True
+        except Exception:  # noqa: BLE001
+            avisado = False
+    from web.painel_prospeccao import _zap_link_texto
+    return {"ok": True, "evento_id": ev["id"], "ics_url": ics_url, "quando": quando,
+            "local": local, "empresa": esp["nome"], "avisado": avisado,
+            "zap": _zap_link_texto(numero, msg) if numero else ""}
+
+
+def visita_ics(pool, token: str) -> str | None:
+    """.ics público da visita (o cliente abre o link e salva no calendário DELE). Inclui
+    VALARM (1 dia e 2h antes) — é o lembrete do cliente. None se o token não existe."""
+    token = (token or "").strip()
+    if not token:
+        return None
+    from finance import agenda as ag
+    with pool.connection() as c:
+        r = c.execute("select id, titulo, inicio, fim, local, descricao, criado_em "
+                      "from eventos_agenda where ics_token=%s and status='ativo'", (token,)).fetchone()
+    if not r:
+        return None
+    ev = {"id": r[0], "titulo": r[1], "inicio": r[2], "fim": r[3], "local": r[4],
+          "descricao": r[5], "criado_em": r[6]}
+    vevent = ag.evento_para_ics(ev)
+    alarmes = ("BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Lembrete da visita\r\nTRIGGER:-P1D\r\nEND:VALARM\r\n"
+               "BEGIN:VALARM\r\nACTION:DISPLAY\r\nDESCRIPTION:Lembrete da visita\r\nTRIGGER:-PT2H\r\nEND:VALARM")
+    vevent = vevent.replace("END:VEVENT", alarmes + "\r\nEND:VEVENT")
+    cab = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Zaq//Visita//PT", "CALSCALE:GREGORIAN", "METHOD:PUBLISH"]
+    return "\r\n".join(cab + [vevent, "END:VCALENDAR"]) + "\r\n"

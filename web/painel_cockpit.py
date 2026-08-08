@@ -99,6 +99,20 @@ display:flex;align-items:center;gap:.5rem;font-size:.8rem;color:var(--verde-clar
 .wpp{width:100%;background:var(--zap);color:#052b12;border:0;border-radius:10px;padding:.72rem;font-weight:700;font-size:.92rem;cursor:pointer;margin-top:.3rem;display:block;text-align:center;text-decoration:none}
 .orc-ghost{width:100%;background:none;border:1px solid var(--borda);color:var(--mut);border-radius:10px;padding:.6rem;font-weight:600;cursor:pointer;margin-top:.5rem}
 .orc-empty{padding:2rem 1.4rem;text-align:center;color:var(--mut);font-size:.86rem}
+.fbtn.vis{border-color:#1e3a52;color:#7bb8e6;background:#0f1d2b;font-weight:700}
+.vsec{padding:.8rem 1rem;border-bottom:1px solid var(--borda)}
+.vchips{display:flex;gap:.4rem;flex-wrap:wrap}
+.vtimes{display:grid;grid-template-columns:repeat(4,1fr);gap:.4rem}
+.vchip{font-size:.82rem;padding:.42rem .7rem;border-radius:999px;border:1px solid var(--borda);background:var(--card2);color:var(--mut);cursor:pointer;text-align:center}
+.vchip.on{border-color:var(--verde);background:#10241a;color:var(--verde-claro);font-weight:700}
+.vlocal{background:var(--card2);border:1px solid var(--borda);border-radius:10px;padding:.6rem .7rem}
+.vlocal .nome{font-weight:700;font-size:.88rem}.vlocal .end{color:var(--mut);font-size:.8rem;margin-top:.15rem}
+.vlocal a{color:#7bb8e6;font-size:.78rem;font-weight:600}
+.vlocal input{width:100%;margin-top:.4rem;background:var(--bg);border:1px solid var(--borda);border-radius:8px;color:var(--txt);padding:.5rem .6rem;font-size:.84rem;font-family:inherit}
+.vvisit{background:#0f1d2b;border:1px solid #1e3a52;border-radius:10px;padding:.6rem .7rem;font-size:.84rem}
+.vvisit b{color:#cfe6dd}.vvisit small{color:var(--mut);display:block;font-size:.74rem;margin-top:.15rem}
+.vrow{display:flex;align-items:center;justify-content:space-between;gap:1rem}.vrow .sub{color:var(--mut);font-size:.76rem}
+.vmsg{margin-top:.6rem;background:#0c1c10;border:1px solid #16391f;border-radius:10px;padding:.6rem .7rem;font-size:.8rem;color:#cfe6dd;white-space:pre-line}
 .funil{padding:.6rem 1rem;border-bottom:1px solid var(--borda)}
 .lbl{font-size:.68rem;color:var(--mut);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.45rem}
 .stchips{display:flex;gap:.35rem;flex-wrap:wrap}
@@ -351,6 +365,73 @@ _ORC_JS = r"""
 })();
 </script>"""
 
+# JS do agendar visita (plain string).
+_VISITA_JS = r"""
+<script>
+(function(){
+  var V=window.VISITA||{leadId:0,dias:[],horas:[],end:""};
+  var st={dia:(V.dias[0]||{}).iso,hora:"10:00",dur:60,lembr:60,avisar:true};
+  function $(id){return document.getElementById(id);}
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m];});}
+  function toast(m){var t=$("cktoast");if(!t)return;t.textContent=m;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove("show");},2000);}
+  var DURS=[["30 min",30],["1 h",60],["1h30",90],["2 h",120]];
+  var LEMBR=[["Sem lembrete",0],["1h antes",60],["1 dia antes",1440]];
+
+  function chip(lab,on){return '<div class="vchip'+(on?' on':'')+'">'+lab+'</div>';}
+  function render(){
+    $("vdays").innerHTML=V.dias.map(function(d){return '<div class="vchip'+(d.iso===st.dia?' on':'')+'" data-d="'+d.iso+'">'+d.lab+'</div>';}).join("");
+    $("vtimes").innerHTML=V.horas.map(function(h){return '<div class="vchip'+(h===st.hora?' on':'')+'" data-h="'+h+'">'+h+'</div>';}).join("");
+    $("vdurs").innerHTML=DURS.map(function(o){return '<div class="vchip'+(o[1]===st.dur?' on':'')+'" data-dur="'+o[1]+'">'+o[0]+'</div>';}).join("");
+    $("vlembr").innerHTML=LEMBR.map(function(o){return '<div class="vchip'+(o[1]===st.lembr?' on':'')+'" data-lb="'+o[1]+'">'+o[0]+'</div>';}).join("");
+    prev();
+  }
+  function diaLab(){var d=V.dias.filter(function(x){return x.iso===st.dia;})[0];return d?d.lab.toLowerCase():st.dia;}
+  function prev(){
+    var on=!$("vavisar").classList.contains("off");
+    $("vmsg").style.display=on?"block":"none";
+    $("vmsg").textContent="Olá! 👋 Sua visita ao "+V.nome+" está marcada:\n📅 "+diaLab()+" às "+st.hora+"\n📍 "+$("vlocalinp").value+"\nAté lá! 😊";
+    $("vresumo").innerHTML='Visita <b>'+diaLab()+' às '+st.hora+'</b> · '+V.quem+' vem ao <b>'+esc(V.nome)+'</b>';
+  }
+  document.addEventListener("click",function(e){
+    var t=e.target.closest(".vchip");if(!t)return;
+    if(t.dataset.d!=null)st.dia=t.dataset.d;
+    else if(t.dataset.h!=null)st.hora=t.dataset.h;
+    else if(t.dataset.dur!=null)st.dur=parseInt(t.dataset.dur,10);
+    else if(t.dataset.lb!=null)st.lembr=parseInt(t.dataset.lb,10);
+    else return;
+    render();
+  });
+  $("vavisar").onclick=function(){var off=this.classList.toggle("off");this.classList.toggle("on",!off);this.textContent=off?"Desligado":"Ligado";prev();};
+  $("vlocalinp").oninput=prev;
+  $("vgo").onclick=function(){
+    var b=$("vgo");b.disabled=true;b.textContent="Agendando…";
+    fetch("/cockpit/lead/"+V.leadId+"/visita",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({data:st.dia,hora:st.hora,dur:st.dur,lembrete:st.lembr,local:$("vlocalinp").value,avisar:!$("vavisar").classList.contains("off")})})
+      .then(function(r){return r.json();}).then(function(j){
+        if(!j||!j.ok){toast((j&&j.erro)||"Não deu certo");b.disabled=false;b.textContent="📅 Agendar visita";return;}
+        done(j);
+      }).catch(function(){toast("Falha de conexão");b.disabled=false;b.textContent="📅 Agendar visita";});
+  };
+  function done(j){
+    $("vbuild").style.display="none";$("vfoot").style.display="none";
+    var aviso=j.avisado?'<div class=okline>✓ Confirmação + convite (.ics) enviados pro cliente</div>':'';
+    var wa=j.zap?'<a class=wpp href="'+j.zap+'" target=_blank rel=noopener>💬 Enviar/reenviar pro cliente no WhatsApp</a>':'';
+    $("vdone").innerHTML='<div class=orc-done><div class=big>📅✅</div><h3>Visita agendada!</h3>'
+      +'<div class=evcard style="margin:1rem 0;border:1px solid #1e4a3a;background:#10241a;border-radius:13px;padding:1rem;text-align:left">'
+      +'<div style="font-size:1.05rem;font-weight:700">📅 '+esc(j.quando)+'</div>'
+      +'<div style="color:var(--verde-claro);font-size:.86rem;margin-top:.3rem">🏢 '+esc(j.empresa)+'</div>'
+      +'<div style="color:var(--verde-claro);font-size:.86rem">📍 '+esc(j.local)+'</div>'
+      +'<div style="color:var(--mut);font-size:.78rem;margin-top:.5rem">👥 Visitante: '+V.quem+' · 🎯 lead movido pra Qualificado</div></div>'
+      +'<div class=okline>✓ Adicionado à agenda no Zaq</div>'+aviso
+      +'<a class=ics href="'+esc(j.ics_url)+'" style="display:block;text-decoration:none;text-align:center" target=_blank rel=noopener>📎 Baixar convite .ics (calendário)</a>'
+      +wa
+      +'<a class=orc-ghost href="/cockpit/lead/'+V.leadId+'" style="display:block;border:0;color:var(--verde-claro);text-decoration:none">✓ Voltar pro lead</a>';
+    $("vdone").style.display="block";
+  }
+  render();
+})();
+</script>"""
+
 
 def _page(title: str, body: str) -> HTMLResponse:
     doc = ("<!doctype html><html lang=pt-br><head><meta charset=utf-8>"
@@ -537,7 +618,8 @@ def cockpit_lead(request: Request, lead_id: int):
         + (f"<a class=fbtn href='{esc(zap)}' target=_blank rel=noopener>💬 WhatsApp</a>" if zap
            else "<span class=fbtn style='opacity:.4'>💬 WhatsApp</span>")
         + f"<a class=fbtn href='/cockpit/lead/{lead_id}/ficha'>👤 Ficha</a>"
-        + f"<a class='fbtn orc' href='/cockpit/lead/{lead_id}/orcamento' style='flex-basis:100%'>🧾 Gerar orçamento</a>")
+        + f"<a class='fbtn orc' href='/cockpit/lead/{lead_id}/orcamento' style='flex-basis:48%'>🧾 Orçamento</a>"
+        + f"<a class='fbtn vis' href='/cockpit/lead/{lead_id}/visita' style='flex-basis:48%'>📅 Agendar visita</a>")
     # funil (chips = forms)
     chips = []
     for e in d["etapas"]:
@@ -770,6 +852,89 @@ async def cockpit_orcamento_enviar(request: Request, lead_id: int, payload: dict
         return JSONResponse({"ok": False, "erro": "sem link"})
     r = ck.enviar_proposta_conversa(get_pool(), sess[0], sess[1], lead_id, link)
     return JSONResponse(r)
+
+
+# ------------------------------------------------------------------ agendar visita
+_DIA_SEM = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+_HORAS = ["08:00", "09:00", "10:00", "11:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00"]
+
+
+@router.get("/cockpit/lead/{lead_id}/visita", response_class=HTMLResponse)
+def cockpit_visita(request: Request, lead_id: int):
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess
+    pool = get_pool()
+    d = ck.lead_do_vendedor(pool, conta_id, membro_id, lead_id)
+    if not d:
+        return RedirectResponse("/cockpit", status_code=303)
+    esp = ck.endereco_empresa(pool, conta_id)
+    from datetime import datetime, timedelta
+    from finance import agenda as ag
+    hoje = datetime.now(ag.BRT).date()
+    dias = []
+    for i in range(0, 14):
+        dt = hoje + timedelta(days=i)
+        lab = "Hoje" if i == 0 else "Amanhã" if i == 1 else f"{_DIA_SEM[dt.weekday()]} {dt.day}"
+        dias.append({"iso": dt.isoformat(), "lab": lab})
+    quem = esc(d.get("contato") or d.get("empresa") or "o cliente")
+    numero = d.get("whatsapp") or d.get("telefone") or ""
+    import json as _json
+    vis = {"leadId": lead_id, "dias": dias, "horas": _HORAS,
+           "nome": esp["nome"], "quem": quem}
+    inject = f"<script>window.VISITA={_json.dumps(vis, ensure_ascii=False)};</script>"
+    maps_a = (f"<a href='{esc(esp['maps'])}' target=_blank rel=noopener>📍 Abrir no Google Maps</a>"
+              if esp["maps"] else "")
+    end_txt = esc(esp["endereco"] or "— sem endereço no cadastro da empresa —")
+    body = (
+        "<div class=hdr>"
+        f"<a class=bk href='/cockpit/lead/{lead_id}'>‹</a>"
+        f"<div class=tt><b>Agendar visita</b><small>{esc(d['empresa'])}</small></div></div>"
+        "<div class='ck-toast' id=cktoast></div>"
+        "<div class=scroll id=vbuild>"
+        "<div class=vsec><div class=lbl>Quem vem visitar</div>"
+        f"<div class=vvisit>👥 <b>{quem}</b>" + (f" <small>{esc(numero)}</small>" if numero else "") + "</div></div>"
+        "<div class=vsec><div class=lbl>Dia</div><div class=vchips id=vdays></div></div>"
+        "<div class=vsec><div class=lbl>Horário</div><div class='vchips vtimes' id=vtimes></div></div>"
+        "<div class=vsec><div class=lbl>Duração</div><div class=vchips id=vdurs></div></div>"
+        "<div class=vsec><div class=lbl>Local — o seu espaço</div>"
+        f"<div class=vlocal><div class=nome>🏢 {esc(esp['nome'])}</div><div class=end>📍 {end_txt}</div>{maps_a}"
+        f"<input id=vlocalinp value='{esc(esp['endereco'] or esp['nome'])}' aria-label='Endereço da visita'></div>"
+        "<div style='color:var(--mut);font-size:.74rem;margin-top:.4rem'>vem do cadastro da empresa — edite se a visita for em outra unidade</div></div>"
+        "<div class=vsec><div class=lbl>Lembrete (pra você)</div><div class=vchips id=vlembr></div></div>"
+        "<div class=vsec><div class=vrow><div>Avisar o cliente no WhatsApp<div class=sub>confirmação + convite .ics (o calendário dele lembra)</div></div>"
+        "<div class='tgl on' id=vavisar style='cursor:pointer'>Ligado</div></div><div class=vmsg id=vmsg></div></div>"
+        "</div>"
+        "<div class=orc-foot id=vfoot><div class=orc-tot><span id=vresumo>—</span></div>"
+        "<button class=orc-gen id=vgo type=button>📅 Agendar visita</button></div>"
+        "<div id=vdone style='display:none'></div>"
+        + inject + _VISITA_JS)
+    return _page(f"Cockpit — visita {d['empresa']}", body)
+
+
+@router.post("/cockpit/lead/{lead_id}/visita")
+async def cockpit_visita_criar(request: Request, lead_id: int, payload: dict = Body(...)):
+    sess = _sessao(request)
+    if not sess:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    p = payload or {}
+    r = ck.agendar_visita(get_pool(), sess[0], sess[1], lead_id,
+                          data=str(p.get("data") or ""), hora=str(p.get("hora") or ""),
+                          dur_min=int(p.get("dur") or 60),
+                          local=str(p.get("local") or ""),
+                          lembrete_min=(int(p["lembrete"]) if p.get("lembrete") else None),
+                          avisar_cliente=bool(p.get("avisar", True)))
+    return JSONResponse(r)
+
+
+@router.get("/visita/{token}.ics", include_in_schema=False)
+def visita_ics_publico(request: Request, token: str):
+    ics = ck.visita_ics(get_pool(), token)
+    if not ics:
+        return Response("visita não encontrada", status_code=404)
+    return Response(ics, media_type="text/calendar; charset=utf-8",
+                   headers={"Content-Disposition": 'attachment; filename="visita.ics"'})
 
 
 # ------------------------------------------------------------------ perfil

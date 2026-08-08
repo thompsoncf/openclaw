@@ -284,11 +284,85 @@ def fechar(pool, conta_id: int, membro_id: int, lead_id: int, tipo: str, motivo:
     return {"ok": True}
 
 
+def devolver_ia(pool, conta_id: int, membro_id: int, lead_id: int) -> dict:
+    """Volta a conversa pro automático (reativa o agente). Revalida posse."""
+    from web.painel_prospeccao import _conversa_id
+    with pool.connection() as c:
+        if not _posse(c, conta_id, membro_id, lead_id):
+            return {"ok": False, "erro": "escopo"}
+        conv = _conversa_id(c, conta_id, lead_id, "whatsapp")
+        c.execute("update conversas set agente_ativo=true, status='aberta' where id=%s", (conv,))
+        c.commit()
+    return {"ok": True}
+
+
 def set_push(pool, conta_id: int, membro_id: int, on: bool) -> None:
     with pool.connection() as c:
         c.execute("update membros set cockpit_push_ativo=%s where id=%s and conta_id=%s",
                   (bool(on), membro_id, conta_id))
         c.commit()
+
+
+# ----------------------------------------------------------------- web push (assinaturas)
+
+def salvar_assinatura(pool, conta_id: int, membro_id: int, sub: dict) -> bool:
+    """Guarda (ou atualiza) a assinatura de push do navegador do vendedor."""
+    endpoint = (sub or {}).get("endpoint")
+    keys = (sub or {}).get("keys") or {}
+    p256dh, auth = keys.get("p256dh"), keys.get("auth")
+    if not (endpoint and p256dh and auth):
+        return False
+    with pool.connection() as c:
+        c.execute(
+            """insert into push_assinaturas (conta_id, membro_id, endpoint, p256dh, auth)
+               values (%s,%s,%s,%s,%s)
+               on conflict (endpoint) do update
+                 set conta_id=excluded.conta_id, membro_id=excluded.membro_id,
+                     p256dh=excluded.p256dh, auth=excluded.auth""",
+            (conta_id, membro_id, endpoint, p256dh, auth))
+        c.commit()
+    return True
+
+
+def remover_assinatura(pool, endpoint: str) -> None:
+    if not endpoint:
+        return
+    with pool.connection() as c:
+        c.execute("delete from push_assinaturas where endpoint=%s", (endpoint,))
+        c.commit()
+
+
+def enviar_push(pool, conta_id: int, membro_id: int, titulo: str, corpo: str, url: str = "/cockpit") -> int:
+    """Dispara push pra TODAS as assinaturas ativas do vendedor (se ele deixou o push
+    ligado). Best-effort: nunca levanta; apaga assinatura morta (404/410). Devolve
+    quantas foram entregues. Sem chaves VAPID no ambiente, não faz nada."""
+    try:
+        from finance import webpush
+        if not webpush.configurado():
+            return 0
+        with pool.connection() as c:
+            push_on = c.execute("select coalesce(cockpit_push_ativo,true) from membros "
+                                "where id=%s and conta_id=%s", (membro_id, conta_id)).fetchone()
+            if not push_on or not push_on[0]:
+                return 0
+            subs = c.execute("select endpoint, p256dh, auth from push_assinaturas "
+                             "where membro_id=%s and conta_id=%s", (membro_id, conta_id)).fetchall()
+    except Exception as e:  # noqa: BLE001
+        _log.info("push: leitura falhou (ok): %s", e)
+        return 0
+    enviados = 0
+    dados = {"title": titulo, "body": corpo, "url": url}
+    for endpoint, p256dh, auth in subs:
+        sub = {"endpoint": endpoint, "keys": {"p256dh": p256dh, "auth": auth}}
+        try:
+            from finance import webpush
+            if webpush.enviar(sub, dados):
+                enviados += 1
+        except webpush.PushExpirado:
+            remover_assinatura(pool, endpoint)
+        except Exception as e:  # noqa: BLE001
+            _log.info("push: envio falhou (ok): %s", e)
+    return enviados
 
 
 def set_pausado(pool, conta_id: int, membro_id: int, on: bool) -> None:

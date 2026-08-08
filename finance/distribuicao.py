@@ -134,6 +134,14 @@ def avisar_vendedor(pool, conta_id: int, membro_id: int, empresa: str) -> None:
         corpo = (f"{emp} caiu pra você no rodízio de leads. O agente já iniciou o "
                  "atendimento e você assume quando quiser."
                  + (f" Atenda pelo app: {_cockpit}" if _cockpit else " Abra o Zaq pra acompanhar."))
+        # PUSH no app do vendedor (Cockpit/PWA) — chega na hora, mesmo com o app
+        # fechado. Best-effort; respeita o toggle de push do próprio vendedor.
+        try:
+            from finance import cockpit as _ck
+            _ck.enviar_push(pool, conta_id, membro_id,
+                            f"🔥 Novo lead: {emp}", "Caiu no rodízio · toque pra atender", "/cockpit")
+        except Exception:  # noqa: BLE001
+            pass
         if email and "@" in email:
             try:
                 from finance import email_sender as es

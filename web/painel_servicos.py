@@ -531,7 +531,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-mod{display:grid; grid-template-columns:auto 1fr 84px 84px 84px auto; gap:.55rem; align-items:center; padding:.6rem 0; border-bottom:1px solid var(--borda)}
 .oc-mod.avulso,.oc-head.avulso{grid-template-columns:auto 1fr 90px 90px auto}
 .oc-mod.off{opacity:.5}
-.oc-mod .oc-nome{cursor:default; min-width:0}
+.oc-mod .oc-nome,.oc-browse-row .oc-nome{cursor:default; min-width:0}
 .oc-desc-preview{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%}
 .oc-rowacts{display:flex; gap:.35rem; white-space:nowrap}
 .oc-ic{background:var(--bg); border:1px solid var(--borda); color:var(--txt-mut); cursor:pointer; font-size:.85rem; width:30px; height:30px; padding:0; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; transition:border-color .15s,color .15s,background .15s}
@@ -606,6 +606,12 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   .sv-wrap .oc-mod .oc-rowacts{order:3; margin-left:auto}
   .sv-wrap .oc-mod .oc-num{order:4; flex:1 1 40%}
   .sv-wrap .oc-mod .oc-num input{text-align:left}
+  .sv-wrap .oc-browse-row{display:flex; flex-wrap:wrap; align-items:center; gap:.4rem .5rem; padding:.7rem 0}
+  .sv-wrap .oc-browse-row .oc-tog{order:1}
+  .sv-wrap .oc-browse-row .oc-nome{order:2; flex:1 1 60%; min-width:0}
+  .sv-wrap .oc-browse-row .oc-rowacts{order:3; margin-left:auto}
+  .sv-wrap .oc-browse-row .oc-num{order:4; flex:1 1 40%}
+  .sv-wrap .oc-browse-row .oc-num input{text-align:left}
 }
 </style>{% endraw %}
 

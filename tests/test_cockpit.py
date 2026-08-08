@@ -81,13 +81,16 @@ def _lead(c, conta, vend, empresa="Padaria", status="novo", estagio="lead", wa="
 
 
 # ------------------------------------------------------------------ token mágico
-def test_token_gera_valida_uma_vez(pool):
+def test_token_valida_e_reusa_na_janela(pool):
     with pool.connection() as c:
         conta = _conta(c); vend = _membro(c, conta); c.commit()
     tok = ck.gerar_token(pool, conta, vend)
     d = ck.validar_token(pool, tok)
     assert d and d["conta_id"] == conta and d["membro_id"] == vend and d["papel"] == "vendedor"
-    assert ck.validar_token(pool, tok) is None        # 1 uso: 2ª vez já era
+    # reusável dentro dos 15 min (scanner de e-mail não queima o link do vendedor)
+    assert ck.validar_token(pool, tok) is not None
+    with pool.connection() as c:
+        assert c.execute("select usado_em from cockpit_acesso where token=%s", (tok,)).fetchone()[0] is not None
 
 
 def test_token_expirado_nao_valida(pool):

@@ -49,16 +49,18 @@ def link_acesso(token: str) -> str:
 
 
 def validar_token(pool, token: str) -> dict | None:
-    """Consome o token: se válido (existe, não expirou, não usado), marca como usado
-    e devolve {conta_id, membro_id, nome}. Senão, None. 1 uso — a sessão (cookie) é
-    quem mantém o vendedor logado depois."""
+    """Valida o token (existe e não expirou) e devolve {conta_id, membro_id, nome}.
+    REUSÁVEL dentro da janela de 15 min: scanner/antivírus de e-mail costuma abrir o
+    link antes do vendedor — se fosse 1 uso, queimaria e ele veria "expirado". Aqui o
+    que protege é o prazo curto (15 min); `usado_em` guarda só o 1º toque (auditoria).
+    Depois de expirar, não valida mais. A sessão (cookie) mantém ele logado."""
     token = (token or "").strip()
     if not token:
         return None
     with pool.connection() as c:
         r = c.execute(
-            """update cockpit_acesso set usado_em=now()
-                where token=%s and usado_em is null and expira_em > now()
+            """update cockpit_acesso set usado_em=coalesce(usado_em, now())
+                where token=%s and expira_em > now()
             returning conta_id, membro_id""", (token,)).fetchone()
         if not r:
             return None

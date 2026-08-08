@@ -43,7 +43,9 @@ def _config() -> dict | None:
 
 
 def _app_url() -> str:
-    return os.environ.get("APP_URL", "https://openclaw-web-bcu3.onrender.com").rstrip("/")
+    # default no domínio público oficial (mesmo que o portal usa em reset/confirmar
+    # e-mail) — não no URL cru do Render, que aparecia feio nos links dos e-mails.
+    return os.environ.get("APP_URL", "https://app.zaq-ia.com").rstrip("/")
 
 
 def remetente_configurado() -> str | None:

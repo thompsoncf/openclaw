@@ -742,6 +742,11 @@ _SENHA = """{% extends "base" %}{% block conteudo %}
 </div>{% endblock %}"""
 
 _DASH = """{% extends "base" %}{% block conteudo %}
+<style>
+  .miss-dot{width:8px;height:8px;border-radius:50%;background:#f0c05a;display:inline-block;vertical-align:middle;margin-right:.25rem;box-shadow:0 0 0 3px #f0c05a22;flex:none}
+  .pc-edit.miss{border-color:#f0c05a66 !important}
+  .pc-edit.done{border-color:var(--verde-claro) !important}
+</style>
 <div class="card larga">
 <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.5rem">
 <h1 style="margin:0">Financeiro</h1>
@@ -888,7 +893,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <div class="dep-corpo" style="flex-direction:column; gap:0">
 <table style="margin:0">
 {% for l in dia.itens %}<tr data-tipo="{{ l.tipo }}" data-cat="{{ canon(l.categoria, l.tipo) }}" data-desc="{{ l.descricao }}" data-valor="{{ brl(l.valor) }}">
-<td>{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}
+<td>{% if eh_pj and l.natureza=='empresa' and not l.plano_conta_id %}<span class="miss-dot" title="sem conta contábil — classifique abaixo"></span>{% endif %}{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}
 {% if l.forma_pagamento %}<span class="fpag-tag" style="font-size:.62rem;background:#242426;color:#9aa39a;padding:1px 7px;border-radius:8px;margin-left:.3rem;white-space:nowrap">💳 {{ forma_pag_label(l.forma_pagamento) }}</span>{% endif %}
 {% if eh_pj %}{% if l.natureza=='empresa' %}<span class="nat-tag" style="font-size:.62rem;background:#1d3a2e;color:var(--verde-claro);padding:1px 7px;border-radius:8px;margin-left:.3rem">🏢 empresa</span>{% elif l.natureza=='pessoal' %}<span class="nat-tag" style="font-size:.62rem;background:#3a2c1d;color:#f0c05a;padding:1px 7px;border-radius:8px;margin-left:.3rem">👤 pessoal</span>{% else %}<span style="display:inline-flex;gap:.25rem;margin-left:.3rem"><button type="button" onclick="marcarNat({{ l.id }},'pessoal',this)" style="font-size:.6rem;padding:1px 6px;background:#3a2c1d;color:#f0c05a;border:0;border-radius:7px;cursor:pointer">pessoal?</button><button type="button" onclick="marcarNat({{ l.id }},'empresa',this)" style="font-size:.6rem;padding:1px 6px;background:#1d3a2e;color:var(--verde-claro);border:0;border-radius:7px;cursor:pointer">empresa?</button></span>{% endif %}{% endif %}</td>
 <td class="nowrap">
@@ -899,9 +904,9 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 </select>
 <button type="button" class="cat-ok" onclick="salvarCat(this)" style="display:none;padding:.24rem .65rem;width:auto;font-size:.72rem;font-weight:600;background:var(--verde);color:#fff;border:0;border-radius:6px;cursor:pointer;line-height:1.1">OK</button>
 </span>
-{% if eh_pj and l.natureza=='empresa' and plano_opcoes %}
-<div style="display:flex;gap:.35rem;margin-top:.3rem;flex-wrap:wrap">
-<select class="pc-edit" data-id="{{ l.id }}" onchange="planoMudou(this)" title="conta contábil (DRE)" style="background:var(--bg);border:1px solid #2a3a33;border-radius:6px;color:var(--txt);font-size:.72rem;padding:.18rem .4rem;max-width:160px">
+{% if eh_pj and l.natureza != 'pessoal' and plano_opcoes %}
+<div id="pcbox-{{ l.id }}" style="display:{{ 'flex' if l.natureza=='empresa' else 'none' }};gap:.35rem;margin-top:.3rem;flex-wrap:wrap">
+<select class="pc-edit{% if l.natureza=='empresa' and not l.plano_conta_id %} miss{% endif %}" data-id="{{ l.id }}" onchange="planoMudou(this)" title="conta contábil (DRE)" style="background:var(--bg);border:1px solid #2a3a33;border-radius:6px;color:var(--txt);font-size:.72rem;padding:.18rem .4rem;max-width:160px">
 <option value="">— conta contábil —</option>
 {% for g in plano_opcoes %}<optgroup label="{{ g.grupo }} · {{ g.nome }}">{% for c in g.contas %}<option value="{{ c.id }}" {% if l.plano_conta_id==c.id %}selected{% endif %}>{{ c.codigo }} {{ c.nome }}</option>{% endfor %}</optgroup>{% endfor %}
 </select>
@@ -1064,13 +1069,31 @@ function salvarClassificacao(){
 }
 function marcarNat(id, nat, btn){
   fetch('/painel/lancamento/natureza', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&natureza='+nat})
-    .then(r=>r.json()).then(d=>{ if(d.ok){ location.reload(); } });
+    .then(r=>r.json()).then(function(d){
+      if(!d.ok) return;
+      if(nat==='empresa'){
+        // sem recarregar: troca os botões pela tag e revela os pickers na hora
+        var wrap = btn.parentElement;
+        if(wrap){ wrap.outerHTML = '<span class="nat-tag" style="font-size:.62rem;background:#1d3a2e;color:var(--verde-claro);padding:1px 7px;border-radius:8px;margin-left:.3rem">🏢 empresa</span>'; }
+        var box = document.getElementById('pcbox-'+id);
+        if(box){ box.style.display='flex';
+          var pc = box.querySelector('.pc-edit'); if(pc){ pc.classList.add('miss'); pc.focus(); } }
+      } else {
+        location.reload();  // pessoal: sai da visão de empresa, recarrega
+      }
+    });
 }
 function planoMudou(sel){
   var id = sel.getAttribute('data-id');
   sel.disabled = true;
   fetch('/painel/lancamento/plano-conta', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'lancamento_id='+id+'&plano_conta_id='+encodeURIComponent(sel.value)})
-    .then(r=>r.json()).then(function(d){ sel.disabled=false; if(d.ok){ sel.style.borderColor='var(--verde-claro)'; } });
+    .then(r=>r.json()).then(function(d){ sel.disabled=false;
+      if(d.ok){ sel.classList.remove('miss'); if(sel.value){ sel.classList.add('done'); } else { sel.classList.remove('done'); }
+        // tira/poe o ponto âmbar na descrição da linha
+        var tr = sel.closest('tr'); var dot = tr && tr.querySelector('.miss-dot');
+        if(sel.value && dot){ dot.remove(); }
+      }
+    });
 }
 function centroMudou(sel){
   var id = sel.getAttribute('data-id');

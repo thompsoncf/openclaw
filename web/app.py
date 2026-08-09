@@ -96,7 +96,7 @@ app.add_middleware(
 )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://zaq-landing.onrender.com"],
+    allow_origins=["https://zaq-landing.onrender.com", "https://zaq-ia.com"],
     allow_methods=["POST", "GET"],
     allow_headers=["Content-Type"],
 )

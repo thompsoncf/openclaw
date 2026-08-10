@@ -2244,28 +2244,41 @@ _EMPRESA_DADOS = """{% extends "base" %}{% block conteudo %}
     <button type="submit" style="background:var(--verde);color:#fff;border:0;border-radius:8px;padding:.7rem 1.4rem;font-weight:600;cursor:pointer;margin-top:1rem">Salvar e continuar →</button>
   </form>
 </div>
-{% if eh_fornecedor %}
 <div class="card larga">
-  <h3 style="margin-top:0">🖼️ Identidade da loja</h3>
-  <div class="mut" style="font-size:.82rem;margin-bottom:.8rem">A logo e a capa aparecem no topo da sua loja pública.</div>
+  <h3 style="margin-top:0">🖼️ Identidade &amp; Marca</h3>
+  <div class="mut" style="font-size:.82rem;margin-bottom:.8rem">Sua logo e a cor da marca aparecem no topo das propostas, do painel e das mensagens. Preencha uma vez — vale pra tudo.</div>
   <div style="display:flex;gap:1.2rem;flex-wrap:wrap;align-items:flex-end">
     <div>
       <div class="mut" style="font-size:.8rem;margin-bottom:.4rem">Logomarca</div>
-      <div id="forn-logo-prev" style="width:78px;height:78px;border-radius:16px;background:var(--card){% if identidade.logo_url %} url('{{ identidade.logo_url }}') center/cover{% endif %};border:1px solid var(--borda)"></div>
+      <div id="emp-logo-prev" style="width:78px;height:78px;border-radius:16px;background:var(--card){% if identidade.logo_url %} url('{{ identidade.logo_url }}') center/cover{% endif %};border:1px solid var(--borda)"></div>
       <label style="display:inline-block;margin-top:.5rem;font-size:.82rem;color:var(--verde);cursor:pointer">enviar logo
-        <input type="file" accept="image/*" onchange="fornLogoUpload(this)" style="display:none">
+        <input type="file" accept="image/*" onchange="empLogoUpload(this)" style="display:none">
       </label>
     </div>
     <div style="flex:1;min-width:200px">
       <div class="mut" style="font-size:.8rem;margin-bottom:.4rem">Capa (banner)</div>
-      <div id="forn-banner-prev" style="height:78px;border-radius:12px;background:var(--card){% if identidade.banner_url %} url('{{ identidade.banner_url }}') center/cover{% endif %};border:1px solid var(--borda)"></div>
+      <div id="emp-banner-prev" style="height:78px;border-radius:12px;background:var(--card){% if identidade.banner_url %} url('{{ identidade.banner_url }}') center/cover{% endif %};border:1px solid var(--borda)"></div>
       <label style="display:inline-block;margin-top:.5rem;font-size:.82rem;color:var(--verde);cursor:pointer">enviar capa
-        <input type="file" accept="image/*" onchange="fornBannerUpload(this)" style="display:none">
+        <input type="file" accept="image/*" onchange="empBannerUpload(this)" style="display:none">
       </label>
     </div>
   </div>
-  <div id="forn-id-status" style="font-size:.78rem;color:#888780;margin-top:.5rem"></div>
+  <div id="emp-id-status" style="font-size:.78rem;color:#888780;margin-top:.5rem"></div>
+  <form method="post" action="/painel/empresa/identidade" style="margin-top:1rem">
+    <label>Frase da marca (1 linha)</label>
+    <input name="bio" value="{{ identidade.bio }}" maxlength="120" placeholder="Ex: Hortifrúti — do produtor à sua mesa.">
+    <label>Sobre a empresa</label>
+    <textarea name="sobre" rows="3" placeholder="Um parágrafo curto sobre o negócio (entra na proposta e na loja).">{{ identidade.sobre }}</textarea>
+    <div style="display:grid;grid-template-columns:1fr auto;gap:.7rem;align-items:end;margin-top:.2rem">
+      <div><label>WhatsApp público</label>
+        <input name="whatsapp_loja" value="{{ identidade.whatsapp_loja }}" placeholder="(00) 00000-0000"></div>
+      <div><label>Cor da marca</label>
+        <input name="banner_cor" type="color" value="{{ identidade.banner_cor or '#2f7d32' }}" style="width:56px;height:42px;padding:2px;cursor:pointer"></div>
+    </div>
+    <button type="submit" style="background:var(--verde);color:#fff;border:0;border-radius:8px;padding:.6rem 1.2rem;font-weight:600;cursor:pointer;margin-top:1rem">Salvar identidade</button>
+  </form>
 </div>
+{% if eh_fornecedor %}
 <div class="card larga">
   <h3 style="margin-top:0">⚙️ Margem alvo</h3>
   <div class="mut" style="font-size:.82rem;margin-bottom:.8rem">Folga de custo pra cobrir perda, comissão e lucro. A cesta sempre respeita esse limite.</div>
@@ -2280,9 +2293,9 @@ _EMPRESA_DADOS = """{% extends "base" %}{% block conteudo %}
 </div>
 {% endif %}
 <script>
-function _fornImgUpload(inp, url, prevId){
+function _empImgUpload(inp, url, prevId){
   var f=inp.files&&inp.files[0]; if(!f) return;
-  var st=document.getElementById('forn-id-status'); st.textContent='enviando...';
+  var st=document.getElementById('emp-id-status'); st.textContent='enviando...';
   var fd=new FormData(); fd.append('arquivo', f);
   fetch(url,{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){
     if(d.logo_url||d.banner_url){
@@ -2291,8 +2304,8 @@ function _fornImgUpload(inp, url, prevId){
     } else { st.textContent=d.erro||'falhou'; }
   }).catch(function(){st.textContent='erro de conexão';});
 }
-function fornLogoUpload(i){_fornImgUpload(i,'/painel/fornecedor/logo','forn-logo-prev');}
-function fornBannerUpload(i){_fornImgUpload(i,'/painel/fornecedor/banner','forn-banner-prev');}
+function empLogoUpload(i){_empImgUpload(i,'/painel/empresa/logo','emp-logo-prev');}
+function empBannerUpload(i){_empImgUpload(i,'/painel/empresa/banner','emp-banner-prev');}
 async function buscarCnpj(){
   var el=document.getElementById('cnpj');
   var msg=document.getElementById('cnpj-msg');
@@ -7574,11 +7587,14 @@ def montar_cesta_teste(request: Request, assinatura_id: int = Form(...)):
     return RedirectResponse("/painel/fornecedor", status_code=303)
 
 
+@router.post("/painel/empresa/logo")
 @router.post("/painel/fornecedor/logo")
 async def salvar_logo_fornecedor(request: Request, arquivo: UploadFile = File(...)):
-    from finance import upload_foto
+    from finance import upload_foto, empresa as emp
     conta = conta_logada(request)
-    if conta is None or not conta[8]:
+    if conta is None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=401)
+    if not emp.modulo_pj_ativo(get_pool(), conta[0]):
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
     try:
         conteudo = await arquivo.read()
@@ -7595,11 +7611,14 @@ async def salvar_logo_fornecedor(request: Request, arquivo: UploadFile = File(..
     return JSONResponse({"ok": True, "logo_url": url})
 
 
+@router.post("/painel/empresa/banner")
 @router.post("/painel/fornecedor/banner")
 async def salvar_banner_fornecedor(request: Request, arquivo: UploadFile = File(...)):
-    from finance import upload_foto
+    from finance import upload_foto, empresa as emp
     conta = conta_logada(request)
-    if conta is None or not conta[8]:
+    if conta is None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=401)
+    if not emp.modulo_pj_ativo(get_pool(), conta[0]):
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
     try:
         conteudo = await arquivo.read()
@@ -8272,7 +8291,8 @@ def painel_empresa(request: Request):
     if not emp.dados_empresa_completos(pool, conta[0]):
         d = emp.obter_dados_empresa(pool, conta[0])
         return _render("empresa_dados", request, dados=d, tem_pj=True, erro="",
-                       nichos_lista=_nichos.lista_nichos())
+                       nichos_lista=_nichos.lista_nichos(), eh_fornecedor=bool(conta[8]),
+                       identidade=emp.obter_identidade(pool, conta[0]), margem_alvo=60.0)
     hoje = _date.today()
     # Dashboard "Visão do negócio" (o mesmo do /painel) agora no topo da Empresa.
     # Reaproveita res/fluxo/dre já calculados dentro dele (uma computação só).
@@ -8610,13 +8630,13 @@ def painel_empresa_dados_form(request: Request):
         return RedirectResponse("/painel", status_code=303)
     d = emp.obter_dados_empresa(pool, conta[0])
     eh_forn = bool(conta[8])
-    identidade, margem_alvo = {}, 60.0
+    identidade = emp.obter_identidade(pool, conta[0])
+    margem_alvo = 60.0
     if eh_forn:
         with pool.connection() as c:
-            row = c.execute("select margem_alvo_pct, logo_url, banner_url from contas where id=%s", (conta[0],)).fetchone()
-        if row:
-            margem_alvo = float(row[0]) if row[0] else 60.0
-            identidade = {"logo_url": row[1], "banner_url": row[2]}
+            row = c.execute("select margem_alvo_pct from contas where id=%s", (conta[0],)).fetchone()
+        if row and row[0]:
+            margem_alvo = float(row[0])
     return _render("empresa_dados", request, dados=d, tem_pj=True, erro="",
                    nichos_lista=_nichos.lista_nichos(),
                    eh_fornecedor=eh_forn, identidade=identidade, margem_alvo=margem_alvo)
@@ -8652,8 +8672,27 @@ def painel_empresa_dados_salvar(
                   "bairro": bairro, "cep": cep, "cidade": cidade, "uf": uf,
                   "email_empresa": email_empresa, "telefone": telefone})
         return _render("empresa_dados", request, dados=d, tem_pj=True, erro=msg,
-                       nichos_lista=_nichos.lista_nichos())
+                       nichos_lista=_nichos.lista_nichos(), eh_fornecedor=bool(conta[8]),
+                       identidade=emp.obter_identidade(pool, conta[0]), margem_alvo=60.0)
     return RedirectResponse("/painel/empresa", status_code=303)
+
+
+@router.post("/painel/empresa/identidade")
+def painel_empresa_identidade_salvar(
+    request: Request, bio: str = Form(""), sobre: str = Form(""),
+    whatsapp_loja: str = Form(""), banner_cor: str = Form(""),
+):
+    """Salva os textos/cor da identidade da marca (logo e capa vão por upload)."""
+    from finance import empresa as emp
+    conta = conta_logada(request)
+    if conta is None:
+        return RedirectResponse("/login", status_code=303)
+    pool = get_pool()
+    if not emp.modulo_pj_ativo(pool, conta[0]):
+        return RedirectResponse("/painel", status_code=303)
+    emp.salvar_identidade(pool, conta[0], bio=bio, sobre=sobre,
+                          whatsapp_loja=whatsapp_loja, banner_cor=banner_cor)
+    return RedirectResponse("/painel/empresa/dados", status_code=303)
 
 
 @router.get("/painel/empresa/buscar-cnpj")

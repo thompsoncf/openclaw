@@ -9723,6 +9723,93 @@ def apagar_lancamento_endpoint(request: Request, lancamento_id: int = Form(...))
     return JSONResponse({"ok": bool(ok)})
 
 
+def _duplicata_json(d: dict) -> dict:
+    return {"id": d["id"], "descricao": d["descricao"],
+            "data": d["data"].strftime("%d/%m/%Y") if hasattr(d["data"], "strftime") else str(d["data"]),
+            "valor_centavos": d["valor_centavos"]}
+
+
+def _item_previa_json(it: dict) -> dict:
+    return {**it,
+            "data": it["data"].isoformat(),
+            "data_fmt": it["data"].strftime("%d/%m"),
+            "duplicatas_provaveis": [_duplicata_json(d) for d in it["duplicatas_provaveis"]]}
+
+
+@router.post("/painel/lancamentos/ler-ofx")
+async def painel_lancamentos_ler_ofx(request: Request, arquivo: UploadFile = File(...),
+                                     natureza_padrao: str = Form("")):
+    """Passo 1 do import de extrato: lê e parseia o .ofx, cruza com o que a
+    conta já tem (chave/duplicata/aprendizado por contraparte) e devolve a
+    prévia — NÃO grava nada ainda (grava só em /importar-ofx, quando o
+    cliente confirma o que revisou na tela)."""
+    conta = conta_logada(request)
+    if not conta:
+        return JSONResponse({"ok": False, "erro": "não autenticado"}, status_code=401)
+    from finance import ofx_import as ofx
+    from finance.livro_caixa import LivroCaixa
+    try:
+        bruto = await arquivo.read()
+        extrato = ofx.parsear_ofx(ofx.decodificar(bruto))
+    except ofx.OfxInvalido as e:
+        return JSONResponse({"ok": False, "erro": str(e)}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"ok": False, "erro": f"não consegui ler o arquivo: {e}"}, status_code=400)
+
+    natureza = natureza_padrao if natureza_padrao in ("empresa", "pessoal") else None
+    livro = LivroCaixa(get_pool(), conta[0])
+    itens = livro.pre_visualizar_importacao_ofx(extrato, natureza_padrao=natureza)
+    return JSONResponse({
+        "ok": True,
+        "conta": {
+            "banco_id": extrato.banco_id, "agencia": extrato.agencia, "conta": extrato.conta,
+            "chave_conta": extrato.chave_conta(),
+            "periodo_ini": extrato.periodo_ini.isoformat() if extrato.periodo_ini else None,
+            "periodo_fim": extrato.periodo_fim.isoformat() if extrato.periodo_fim else None,
+            "saldo_final_centavos": extrato.saldo_final_centavos,
+        },
+        "itens": [_item_previa_json(it) for it in itens],
+    })
+
+
+@router.post("/painel/lancamentos/importar-ofx")
+async def painel_lancamentos_importar_ofx(request: Request):
+    """Passo 2: grava só os itens que o cliente selecionou/ajustou na revisão.
+    Corpo: {"chave_conta": "756:4436-9:39449-1", "itens": [{fitid, tipo,
+    valor_centavos, data (ISO), descricao, categoria, natureza,
+    plano_conta_id, centro_custo_id}, ...]}"""
+    conta = conta_logada(request)
+    if not conta:
+        return JSONResponse({"ok": False, "erro": "não autenticado"}, status_code=401)
+    from datetime import date as _date
+    from finance.livro_caixa import LivroCaixa
+    body = await request.json()
+    chave_conta = (body.get("chave_conta") or "").strip()
+    brutos = body.get("itens") or []
+    if not chave_conta or not brutos:
+        return JSONResponse({"ok": False, "erro": "nada pra importar"}, status_code=400)
+
+    itens = []
+    for it in brutos:
+        try:
+            itens.append({
+                "fitid": it["fitid"], "tipo": it["tipo"],
+                "valor_centavos": int(it["valor_centavos"]),
+                "data": _date.fromisoformat(it["data"]),
+                "descricao": it.get("descricao") or "",
+                "categoria": it.get("categoria") or "Outros",
+                "natureza": it.get("natureza") if it.get("natureza") in ("pessoal", "empresa") else None,
+                "plano_conta_id": it.get("plano_conta_id"),
+                "centro_custo_id": it.get("centro_custo_id"),
+            })
+        except (KeyError, ValueError, TypeError):
+            continue  # item malformado: pula em vez de derrubar o lote inteiro
+
+    livro = LivroCaixa(get_pool(), conta[0])
+    r = livro.confirmar_importacao_ofx(chave_conta, itens)
+    return JSONResponse({"ok": True, **r})
+
+
 @router.post("/membros/adicionar")
 def membros_adicionar(request: Request, nome: str = Form(...), whatsapp: str = Form(""),
                       papel: str = Form("membro")):

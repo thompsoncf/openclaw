@@ -254,10 +254,50 @@ padding:.6rem .8rem;font-size:.9rem;font-family:inherit;width:100%}
 .pushcard .go{background:var(--roxo);color:#1a0f2a;border:0;border-radius:9px;padding:.55rem .8rem;font-weight:700;font-size:.84rem;width:100%;cursor:pointer}
 .ck-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);opacity:0;background:#222226;border:1px solid #3a3a3c;color:var(--txt);padding:.5rem .85rem;border-radius:10px;font-size:.83rem;transition:.25s;z-index:99;pointer-events:none;max-width:90vw;text-align:center}
 .ck-toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+/* desempenho percebido: barra de carregamento no topo + toque responsivo */
+#nprg{position:fixed;top:0;left:0;height:3px;width:0;z-index:9999;opacity:0;
+  background:linear-gradient(90deg,var(--verde),var(--verde-claro));box-shadow:0 0 8px var(--verde);
+  transition:width .18s ease, opacity .2s}
+#nprg.go{opacity:1}
+a:active,button:active{filter:brightness(1.12)}
+.lead:active,.dvend:active,.dllead:active,.dnav a:active,.dfilt a:active,.st:active,.vchip:active,.dseg a:active,.fbtn:active,.act:active{transform:scale(.985)}
 </style>"""
 
 _SW_REG = ("<script>if('serviceWorker' in navigator){"
            "navigator.serviceWorker.register('/cockpit/sw.js').catch(function(){});}</script>")
+
+# Desempenho PERCEBIDO: como cada tela é um carregamento de página, o toque parecia
+# travar. Aqui: (1) barra de progresso no topo aparece NA HORA que toca num link/envia
+# form (feedback imediato); (2) prefetch especulativo — ao TOCAR num link interno, já
+# começa a baixar o destino, então a navegação chega mais rápida. Só front, sem backend.
+_PERF_JS = r"""
+<div id=nprg></div>
+<script>
+(function(){
+  var bar=document.getElementById('nprg'), t, w=0;
+  function start(){ if(!bar)return; bar.classList.add('go'); w=12; bar.style.width='12%';
+    clearInterval(t); t=setInterval(function(){ w+=Math.max(.4,(92-w)*0.06); if(w>92)w=92; bar.style.width=w+'%'; },180); }
+  function stop(){ if(!bar)return; clearInterval(t); bar.classList.remove('go'); bar.style.width='0'; }
+  function interno(a){
+    if(!a) return false;
+    var href=a.getAttribute('href')||'';
+    if(!href||a.target==='_blank'||a.hasAttribute('download')||href.charAt(0)==='#') return false;
+    if(/^(mailto:|tel:)/.test(href)) return false;
+    if(/^https?:\/\//.test(href) && a.host!==location.host) return false;   // externo
+    return true;
+  }
+  document.addEventListener('click',function(e){ if(e.metaKey||e.ctrlKey)return; if(interno(e.target.closest('a'))) start(); },true);
+  document.addEventListener('submit',function(){ start(); },true);
+  window.addEventListener('pageshow',stop);      // reset (inclusive ao voltar via bfcache)
+  window.addEventListener('pagehide',stop);
+  // prefetch: ao tocar/pressionar um link interno, já começa a carregar o destino
+  var got={};
+  document.addEventListener('pointerdown',function(e){
+    var a=e.target.closest('a'); if(!interno(a))return; var h=a.href; if(got[h])return; got[h]=1;
+    var l=document.createElement('link'); l.rel='prefetch'; l.href=h; document.head.appendChild(l);
+  },true);
+})();
+</script>"""
 
 # JS da caixa de leads: swipe pra ações + ativar push. Plain string (tem chaves de JS).
 _INBOX_JS = r"""
@@ -514,7 +554,7 @@ def _page(title: str, body: str) -> HTMLResponse:
            "<meta name=apple-mobile-web-app-capable content=yes>"
            "<meta name=mobile-web-app-capable content=yes>"
            "<meta name=apple-mobile-web-app-title content=Cockpit>"
-           f"<title>{esc(title)}</title>{_CSS}</head><body><div class=wrap>"
+           f"<title>{esc(title)}</title>{_CSS}</head><body>{_PERF_JS}<div class=wrap>"
            f"{body}</div>{_SW_REG}</body></html>")
     return HTMLResponse(doc)
 

@@ -249,6 +249,54 @@ def pausar(pool, conta_id: int, membro_id: int, on: bool) -> dict:
     return {"ok": True, "pausado": bool(on)}
 
 
+def leads(pool, conta_id: int, vend: int | None = None, etapa: str = "", temp: str = "") -> list[dict]:
+    """TODOS os leads abertos da equipe (fora de ganho/perdido), com o vendedor dono e
+    se está com IA ou com o vendedor. Filtra por vendedor / etapa / temperatura."""
+    from web.painel_prospeccao import TEMP_COR
+    where = ["p.conta_id=%s", "coalesce(p.estagio,'lead')='lead'", "p.status not in ('ganho','perdido')"]
+    args = [conta_id]
+    if vend:
+        where.append("p.vendedor_id=%s")
+        args.append(vend)
+    if etapa:
+        where.append("p.status=%s")
+        args.append(etapa)
+    if temp:
+        where.append("p.temperatura=%s")
+        args.append(temp)
+    sql = ("select p.id, p.empresa, p.status, coalesce(p.temperatura,'frio'), "
+           "coalesce(nullif(m.nome,''), m.email, 'Sem dono'), coalesce(cv.agente_ativo, true) "
+           "from prospeccao p left join membros m on m.id=p.vendedor_id "
+           "left join conversas cv on cv.prospeccao_id=p.id and cv.conta_id=p.conta_id "
+           "where " + " and ".join(where) + " order by p.atualizado_em desc limit 200")
+    with pool.connection() as c:
+        rows = c.execute(sql, tuple(args)).fetchall()
+    return [{"id": r[0], "empresa": r[1] or "Lead", "status": r[2] or "novo",
+             "temp_cor": TEMP_COR.get(r[3], "#5b9bd5"), "vendedor": r[4], "ia": bool(r[5])} for r in rows]
+
+
+def filtros_leads(pool, conta_id: int) -> dict:
+    """Opções pros filtros da aba Leads: vendedores (com lead) + etapas do funil."""
+    with pool.connection() as c:
+        vends = c.execute(
+            "select distinct m.id, coalesce(nullif(m.nome,''), m.email) from prospeccao p "
+            "join membros m on m.id=p.vendedor_id where p.conta_id=%s and coalesce(p.estagio,'lead')='lead' "
+            "and p.status not in ('ganho','perdido') order by 2", (conta_id,)).fetchall()
+        etapas = [e for e in _etapas_conta(c, conta_id) if e not in ("ganho", "perdido")]
+    return {"vendedores": [{"id": r[0], "nome": r[1]} for r in vends], "etapas": etapas}
+
+
+def _etapas_conta(c, conta_id: int) -> list[str]:
+    try:
+        rows = c.execute("select chave from funil_etapas where conta_id=%s order by ordem, id",
+                         (conta_id,)).fetchall()
+        if rows:
+            return [r[0] for r in rows]
+    except Exception:  # noqa: BLE001
+        pass
+    return ["novo", "contatado", "qualificado", "proposta"]
+
+
 def vendedores_para_reatribuir(pool, conta_id: int, exceto_id: int) -> list[dict]:
     with pool.connection() as c:
         rows = c.execute(

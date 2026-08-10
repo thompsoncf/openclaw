@@ -110,6 +110,24 @@ def test_atividade_feed(pool):
     assert any("Carlos ganhou — Festa Corp" in e["txt"] for e in feed)
 
 
+def test_leads_todos_e_filtros(pool):
+    with pool.connection() as c:
+        conta, dono, v1, v2, ab, an = _seed(c, "Leads")
+    todos = cd.leads(pool, conta)
+    emps = sorted(l["empresa"] for l in todos)
+    assert emps == ["Aniversário", "Bodas"]                  # abertos (ganho fora)
+    # por vendedor
+    assert [l["empresa"] for l in cd.leads(pool, conta, vend=v2)] == ["Aniversário"]
+    # por etapa
+    assert [l["empresa"] for l in cd.leads(pool, conta, etapa="novo")] == ["Aniversário"]
+    # por temperatura
+    assert [l["empresa"] for l in cd.leads(pool, conta, temp="morno")] == ["Bodas"]
+    # opções de filtro
+    f = cd.filtros_leads(pool, conta)
+    assert {x["nome"] for x in f["vendedores"]} == {"Carlos", "Ana"}
+    assert "novo" in f["etapas"] and "ganho" not in f["etapas"]
+
+
 def test_reatribuir_e_pausar(pool):
     with pool.connection() as c:
         conta, dono, v1, v2, ab, an = _seed(c, "Acao")

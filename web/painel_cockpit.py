@@ -175,6 +175,16 @@ display:flex;align-items:center;gap:.5rem;font-size:.8rem;color:var(--verde-clar
 .dnav{display:flex;border-top:1px solid var(--borda);flex-shrink:0;background:var(--bg)}
 .dnav a{flex:1;color:var(--mut);font-size:.66rem;padding:.5rem 0;text-decoration:none;display:flex;flex-direction:column;align-items:center;gap:.15rem}
 .dnav a .i{font-size:1.15rem}.dnav a.on{color:var(--verde-claro)}
+.dfilt{display:flex;gap:.3rem;padding:.4rem 1rem;overflow-x:auto;border-bottom:1px solid var(--borda);white-space:nowrap;-webkit-overflow-scrolling:touch}
+.dfilt .flbl{font-size:.6rem;color:var(--mut);align-self:center;padding-right:.15rem;flex-shrink:0;text-transform:uppercase;letter-spacing:.04em}
+.dfilt a{font-size:.72rem;padding:.22rem .55rem;border-radius:999px;border:1px solid var(--borda);color:var(--mut);text-decoration:none;flex-shrink:0}
+.dfilt a.on{border-color:var(--verde);background:#10241a;color:var(--verde-claro);font-weight:700}
+.dllead{display:flex;align-items:center;gap:.6rem;padding:.6rem 1rem;border-bottom:1px solid var(--borda);color:var(--txt);text-decoration:none}
+.dllead:active{background:var(--card2)}
+.dllead .dot2{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.dllead .m{flex:1;min-width:0}.dllead .m b{font-size:.88rem;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dllead .m small{color:var(--mut);font-size:.72rem}
+.dcount{padding:.5rem 1rem;color:var(--mut);font-size:.74rem}
 .funil{padding:.6rem 1rem;border-bottom:1px solid var(--borda)}
 .lbl{font-size:.68rem;color:var(--mut);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.45rem}
 .stchips{display:flex;gap:.35rem;flex-wrap:wrap}
@@ -1009,6 +1019,7 @@ def _nav_dono(active: str) -> str:
         return f"<a class='{'on' if active == key else ''}' href='{href}'><span class=i>{ic}</span>{lab}</a>"
     return ("<div class=dnav>" + a("visao", "📊", "Visão", "/cockpit")
             + a("placar", "🏆", "Placar", "/cockpit/equipe/placar")
+            + a("leads", "📋", "Leads", "/cockpit/equipe/leads")
             + a("ativ", "⚡", "Atividade", "/cockpit/equipe/atividade") + "</div>")
 
 
@@ -1093,6 +1104,55 @@ def cockpit_dono_atividade(request: Request):
     body = (_dono_hdr(g[0], "atividade do time")
             + f"<div class=scroll>{linhas}</div>" + _nav_dono("ativ"))
     return _page("Cockpit do Dono — atividade", body)
+
+
+_ETAPA_ROT = {"novo": "Novo", "contatado": "Contatado", "qualificado": "Qualificado",
+              "proposta": "Proposta"}
+_TEMP_ROT = [("quente", "🔴 Quente"), ("morno", "🟡 Morno"), ("frio", "🔵 Frio")]
+
+
+@router.get("/cockpit/equipe/leads", response_class=HTMLResponse)
+def cockpit_dono_leads(request: Request, vend: str = "", etapa: str = "", temp: str = ""):
+    g = _gerencia(request)
+    if not g:
+        return RedirectResponse("/cockpit", status_code=303)
+    from finance import cockpit_dono as cd
+    pool = get_pool()
+    vend_i = int(vend) if vend.isdigit() else None
+    lista = cd.leads(pool, g[0], vend_i, etapa, temp)
+    filt = cd.filtros_leads(pool, g[0])
+
+    def url(**over):
+        p = {"vend": vend, "etapa": etapa, "temp": temp}
+        p.update(over)
+        q = "&".join(f"{k}={v}" for k, v in p.items() if v)
+        return "/cockpit/equipe/leads" + (("?" + q) if q else "")
+
+    def chip(active, label, href):
+        return f"<a class='{'on' if active else ''}' href='{esc(href)}'>{esc(label)}</a>"
+    vend_chips = ("<div class=dfilt><span class=flbl>Vendedor</span>"
+                  + chip(not vend, "Todos", url(vend=""))
+                  + "".join(chip(vend == str(v["id"]), v["nome"], url(vend=str(v["id"]))) for v in filt["vendedores"])
+                  + "</div>")
+    etapa_chips = ("<div class=dfilt><span class=flbl>Etapa</span>"
+                   + chip(not etapa, "Todas", url(etapa=""))
+                   + "".join(chip(etapa == e, _ETAPA_ROT.get(e, e.title()), url(etapa=e)) for e in filt["etapas"])
+                   + "</div>")
+    temp_chips = ("<div class=dfilt><span class=flbl>Temp.</span>"
+                  + chip(not temp, "Todas", url(temp=""))
+                  + "".join(chip(temp == t, lab, url(temp=t)) for t, lab in _TEMP_ROT) + "</div>")
+    rows = "".join(
+        f"<a class=dllead href='/painel/prospeccao/{l['id']}'>"
+        f"<span class=dot2 style='background:{esc(l['temp_cor'])}'></span>"
+        f"<div class=m><b>{esc(l['empresa'])}</b><small>{esc(l['vendedor'])}</small></div>"
+        f"<span class='cchip {'ia' if l['ia'] else 'voce'}'>{'🤖 IA' if l['ia'] else '🙋 vend.'}</span></a>"
+        for l in lista)
+    corpo = f"<div class=dcount>{len(lista)} leads</div>" + rows if lista else \
+        "<div class=dvline style='padding:2rem'>Nenhum lead com esses filtros.</div>"
+    body = (_dono_hdr(g[0], "todos os leads da equipe")
+            + vend_chips + etapa_chips + temp_chips
+            + f"<div class=scroll>{corpo}</div>" + _nav_dono("leads"))
+    return _page("Cockpit do Dono — leads", body)
 
 
 @router.get("/cockpit/equipe/vendedor/{membro_id}", response_class=HTMLResponse)

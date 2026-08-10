@@ -42,11 +42,15 @@ def _sessao(request: Request):
 
 
 def _gerencia(request: Request):
-    """(conta_id, membro_id) se dono/gestor (Cockpit do Dono), senão None."""
-    s = _sessao(request)
-    if not s:
+    """(conta_id, membro_id) se dono/gestor — pro Cockpit do Dono. NÃO exige membro_id:
+    o dono logado no painel tem conta_id+papel mas não tem membro_id (é o titular), e
+    a visão de equipe é toda por conta_id. Assim ele entra pela sessão do painel, sem
+    precisar do login por link mágico. membro_id vem None pro dono, id pro gestor."""
+    cid = request.session.get("conta_id")
+    papel = request.session.get("papel", "dono")
+    if not cid or papel not in ("dono", "gestor"):
         return None
-    return s if request.session.get("papel", "dono") in ("dono", "gestor") else None
+    return cid, request.session.get("membro_id")
 
 
 # ------------------------------------------------------------------ shell/estilo
@@ -595,12 +599,14 @@ def _enviar_link_email(pool, conta_id: int, email: str, link: str) -> bool:
 # ------------------------------------------------------------------ inbox
 @router.get("/cockpit", response_class=HTMLResponse)
 def cockpit_inbox(request: Request):
+    # dono/gestor (inclusive logado no painel, sem membro_id) → Cockpit do Dono
+    g = _gerencia(request)
+    if g:
+        return _dono_visao(request, g[0], g[1])
     sess = _sessao(request)
     if not sess:
         return RedirectResponse("/cockpit/login", status_code=303)
     conta_id, membro_id = sess
-    if request.session.get("papel", "dono") in ("dono", "gestor"):
-        return _dono_visao(request, conta_id, membro_id)   # dono/gestor → Cockpit do Dono
     pool = get_pool()
     leads = ck.leads_do_vendedor(pool, conta_id, membro_id)
     p = ck.perfil(pool, conta_id, membro_id)

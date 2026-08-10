@@ -59,10 +59,10 @@ _CSS = """<style>
 --verde:#1d9e75;--verde-claro:#5dcaa5;--azul:#5b9bd5;--amar:#e0a33e;--coral:#e0574f;--roxo:#c9a3e0;--zap:#25d366;
 --fonte:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
 *{box-sizing:border-box}html,body{margin:0}
-body{background:var(--bg);color:var(--txt);font-family:var(--fonte);line-height:1.5;-webkit-font-smoothing:antialiased;
-padding-bottom:env(safe-area-inset-bottom)}
+body{background:var(--bg);color:var(--txt);font-family:var(--fonte);line-height:1.5;-webkit-font-smoothing:antialiased;overflow:hidden}
 a{color:inherit;text-decoration:none}
-.wrap{max-width:520px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column}
+/* app shell: a página não rola; só o miolo (.scroll) rola. Header e menu ficam fixos. */
+.wrap{max-width:520px;margin:0 auto;height:100vh;height:100dvh;overflow:hidden;display:flex;flex-direction:column}
 .hdr{display:flex;align-items:center;gap:.6rem;padding:.8rem 1rem;border-bottom:1px solid var(--borda);position:sticky;top:0;background:var(--bg);z-index:5}
 .hdr .bk{color:var(--txt);font-size:1.4rem;padding:.1rem .3rem;margin-left:-.3rem}
 .hdr .tt{flex:1;min-width:0}.hdr .tt b{font-size:1rem;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -126,7 +126,7 @@ display:flex;align-items:center;gap:.5rem;font-size:.8rem;color:var(--verde-clar
 .vrow{display:flex;align-items:center;justify-content:space-between;gap:1rem}.vrow .sub{color:var(--mut);font-size:.76rem}
 .vmsg{margin-top:.6rem;background:#0c1c10;border:1px solid #16391f;border-radius:10px;padding:.6rem .7rem;font-size:.8rem;color:#cfe6dd;white-space:pre-line}
 /* ---- Cockpit do Dono (prefixo d) ---- */
-.dseg{display:flex;gap:.3rem;padding:.5rem 1rem;border-bottom:1px solid var(--borda)}
+.dseg{display:flex;gap:.3rem;padding:.5rem 1rem;border-bottom:1px solid var(--borda);flex-shrink:0}
 .dseg a{font-size:.72rem;padding:.25rem .6rem;border-radius:999px;border:1px solid var(--borda);color:var(--mut);text-decoration:none}
 .dseg a.on{border-color:var(--verde);background:#10241a;color:var(--verde-claro);font-weight:700}
 .dkpis{display:grid;grid-template-columns:1fr 1fr;gap:.5rem;padding:.8rem}
@@ -172,10 +172,10 @@ display:flex;align-items:center;gap:.5rem;font-size:.8rem;color:var(--verde-clar
 .dlead form{display:flex;gap:.3rem;align-items:center}
 .dlead select{background:var(--card2);border:1px solid var(--borda);border-radius:7px;color:var(--txt);font-size:.72rem;padding:.25rem}
 .dlead button{background:var(--card2);border:1px solid var(--borda);border-radius:7px;color:var(--verde-claro);font-size:.72rem;padding:.25rem .5rem;font-weight:700;cursor:pointer}
-.dnav{display:flex;border-top:1px solid var(--borda);flex-shrink:0;background:var(--bg)}
+.dnav{display:flex;border-top:1px solid var(--borda);flex-shrink:0;background:var(--bg);padding-bottom:env(safe-area-inset-bottom)}
 .dnav a{flex:1;color:var(--mut);font-size:.66rem;padding:.5rem 0;text-decoration:none;display:flex;flex-direction:column;align-items:center;gap:.15rem}
 .dnav a .i{font-size:1.15rem}.dnav a.on{color:var(--verde-claro)}
-.dfilt{display:flex;gap:.3rem;padding:.4rem 1rem;overflow-x:auto;border-bottom:1px solid var(--borda);white-space:nowrap;-webkit-overflow-scrolling:touch}
+.dfilt{display:flex;gap:.3rem;padding:.4rem 1rem;overflow-x:auto;border-bottom:1px solid var(--borda);white-space:nowrap;-webkit-overflow-scrolling:touch;flex-shrink:0}
 .dfilt .flbl{font-size:.6rem;color:var(--mut);align-self:center;padding-right:.15rem;flex-shrink:0;text-transform:uppercase;letter-spacing:.04em}
 .dfilt a{font-size:.72rem;padding:.22rem .55rem;border-radius:999px;border:1px solid var(--borda);color:var(--mut);text-decoration:none;flex-shrink:0}
 .dfilt a.on{border-color:var(--verde);background:#10241a;color:var(--verde-claro);font-weight:700}

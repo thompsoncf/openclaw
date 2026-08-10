@@ -65,6 +65,7 @@ async def _gate_permissoes(request: Request, call_next):
             permitido.append("/painel/prospeccao")
         if caps["financeiro"]:
             permitido.append("/painel/empresa")   # financeiro da EMPRESA (não o pessoal do dono)
+            permitido.append("/painel/relatorios")
         if caps["gerir"]:
             permitido += ["/painel/equipe", "/membros"]
         # só barra rotas do painel/membros; público, loja e webhooks passam livres.
@@ -86,6 +87,7 @@ from web.painel_prospeccao import router as prospeccao_router
 from web.painel_conteudo import router as conteudo_router
 from web.painel_agenda import router as agenda_router
 from web.painel_cockpit import router as cockpit_router
+from web.painel_relatorios import router as relatorios_router
 from web.proposta import router as proposta_router
 app.add_middleware(
     SessionMiddleware,
@@ -112,6 +114,7 @@ app.include_router(conteudo_router)  # antes do prospeccao_router: aquele tem um
 app.include_router(prospeccao_router)
 app.include_router(agenda_router)
 app.include_router(cockpit_router)
+app.include_router(relatorios_router)
 app.include_router(proposta_router)
 
 

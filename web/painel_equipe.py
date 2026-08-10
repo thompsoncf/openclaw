@@ -250,8 +250,12 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
 .ph-desc b{color:var(--txt);font-weight:600}
 </style>
 <div class="card larga">
-  <h2 style="margin:0">Equipe</h2>
-  <div class="mut" style="font-size:.82rem">Convide sua equipe por link. Cada pessoa entra com o próprio login, com o acesso do papel.</div>
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:.8rem;flex-wrap:wrap">
+    <h2 style="margin:0">Equipe</h2>
+    <a href="/cockpit" target="_blank" rel="noopener"
+       style="display:inline-flex;align-items:center;gap:.4rem;background:#10241a;border:1px solid #1e4a3a;color:var(--verde-claro);border-radius:10px;padding:.5rem .9rem;font-weight:700;text-decoration:none;white-space:nowrap">📊 Abrir o Cockpit da equipe</a>
+  </div>
+  <div class="mut" style="font-size:.82rem">Convide sua equipe por link. Cada pessoa entra com o próprio login, com o acesso do papel. Você acompanha o time no <b>Cockpit</b> — sem precisar de outro cadastro.</div>
 
   {% if novo_link %}
   <div style="margin-top:1rem;padding:.8rem;border:1px solid var(--verde);border-radius:10px;background:#10241d">

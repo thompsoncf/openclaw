@@ -5401,8 +5401,10 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
   <h1 style="margin:0">📊 Relatórios <span class="mut" style="font-weight:400;font-size:.85rem">· {{ dados.label }}</span></h1>
   {% if dados.mock %}
-  <div class="rel-aviso">🧪 <b>Dados de exemplo</b> — este relatório ainda não está ligado à base (falta decidir a
-   regra de comissão por vendedor). Os demais relatórios já mostram os dados reais da sua conta.</div>
+  <div class="rel-aviso">🧪 <b>Dados de exemplo</b> — este relatório ainda não está ligado à base. Os demais
+   relatórios já mostram os dados reais da sua conta.</div>
+  {% elif dados.aviso_config %}
+  <div class="rel-aviso">⚠️ {{ dados.aviso_config }}</div>
   {% endif %}
 
   <div class="abas">

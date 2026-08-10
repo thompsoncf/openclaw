@@ -9,11 +9,10 @@ Dados reais, reaproveitando o que já existe:
   - Contas a receber -> titulos (tipo='receber', status='aberto')  [finance.empresa]
   - Contas pagas     -> titulos (tipo='pagar',   status='pago', filtrado por pago_em)
   - Contas recebidas -> titulos (tipo='receber', status='pago', filtrado por pago_em)
-
-Comissão segue com dado de EXEMPLO: não existe hoje uma % de comissão por
-vendedor cadastrada em lugar nenhum do sistema (só existe comissao_pct de
-FORNECEDOR do marketplace, um conceito diferente) — falta decidir a regra
-antes de ligar de verdade.
+  - Comissão         -> lancamentos de vendas agrupados por membro_id, aplicando o
+                        membros.comissao_pct de cada um (migração 137). Vendedor sem
+                        % configurada aparece com comissão R$ 0,00 e um aviso na tela
+                        apontando pra Equipe.
 """
 from datetime import date, timedelta
 
@@ -168,24 +167,48 @@ def _dados_titulos_pagos(pool, conta_id, tipo, periodo):
 
 
 def _dados_comissao(pool, conta_id, periodo):
-    # Ainda EXEMPLO: falta decidir a regra (% por vendedor não existe no cadastro
-    # hoje — só existe comissao_pct de FORNECEDOR do marketplace, outro conceito).
-    linhas = [
-        {"vendedor": "Ana Souza", "vendas_centavos": 1284500, "percentual": "5%", "comissao_centavos": 64225},
-        {"vendedor": "Carlos Lima", "vendas_centavos": 985000, "percentual": "4%", "comissao_centavos": 39400},
-        {"vendedor": "Bruna Ferreira", "vendas_centavos": 621000, "percentual": "5%", "comissao_centavos": 31050},
-    ]
+    """Vendas do período por vendedor (membro_id de lancamentos), com a comissão
+    calculada pela % que o dono configurou em Equipe (membros.comissao_pct)."""
+    ini, fim = _intervalo(periodo)
+    with pool.connection() as c:
+        rows = c.execute(
+            """select coalesce(m.nome, 'Sem vendedor'), m.comissao_pct, sum(l.valor_centavos)
+                 from lancamentos l left join membros m on m.id = l.membro_id
+                where l.conta_id=%s and l.tipo='receita' and l.natureza='empresa'
+                  and l.data >= %s and l.data <= %s
+                group by l.membro_id, m.nome, m.comissao_pct
+                order by sum(l.valor_centavos) desc""",
+            (conta_id, ini, fim),
+        ).fetchall()
+    linhas = []
+    sem_config = 0
+    for nome, pct_raw, vendas in rows:
+        pct = float(pct_raw) if pct_raw is not None else 0.0
+        vendas = int(vendas or 0)
+        if pct <= 0:
+            sem_config += 1
+        linhas.append({
+            "vendedor": nome, "vendas_centavos": vendas,
+            "percentual": f"{pct:g}%" if pct > 0 else "— não configurada",
+            "comissao_centavos": round(vendas * pct / 100),
+        })
     total = _soma(linhas, "comissao_centavos")
-    destaque = max(linhas, key=lambda r: r["comissao_centavos"])
     vendas_totais = _soma(linhas, "vendas_centavos")
-    return {
-        "label": "Comissão", "mock": True,
+    destaque = max(linhas, key=lambda r: r["comissao_centavos"])["vendedor"] if linhas else "—"
+    dados = {
+        "label": "Comissão", "mock": False,
         "colunas": [_col("vendedor", "Vendedor"), _col("vendas_centavos", "Vendas no período", num=True, brl=True),
                     _col("percentual", "% comissão", num=True), _col("comissao_centavos", "Comissão a pagar", num=True, brl=True)],
         "linhas": linhas, "col_total": "comissao_centavos", "total_centavos": total,
-        "metricas": [("Total de comissões", _brl(total)), ("Vendedor destaque", destaque["vendedor"]),
+        "metricas": [("Total de comissões", _brl(total)), ("Vendedor destaque", destaque),
                      ("Vendas da equipe", _brl(vendas_totais))],
     }
+    if sem_config:
+        plural = "es" if sem_config != 1 else ""
+        dados["aviso_config"] = (
+            f"{sem_config} vendedor{plural} sem % de comissão configurada (mostrando R$ 0,00 pra eles) — "
+            "configure em Equipe, no botão “% comis.” de cada um.")
+    return dados
 
 
 TIPOS = {

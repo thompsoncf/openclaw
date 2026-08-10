@@ -22,7 +22,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from contas import equipe as eq
 from db.conexao import get_pool
 from finance import empresa as emp
-from web.portal import _render, _env, conta_logada, brl as _brl
+from web.portal import _render, _env, conta_logada, brl as _brl, _mascara_cnpj
 
 router = APIRouter()
 
@@ -63,6 +63,23 @@ def _intervalo(periodo: str) -> tuple[date, date]:
 
 def _fmt(d) -> str:
     return d.strftime("%d/%m/%Y") if d else "—"
+
+
+def _letterhead(pool, conta) -> dict:
+    """Marca (logo/cor) + dados cadastrais da empresa pro timbre do PDF — mesmo
+    kit que holerite e recibo do PDV já usam (finance.marca/empresa.marca_empresa)."""
+    d = emp.obter_dados_empresa(pool, conta[0])
+    endereco = ", ".join(p for p in (
+        d["endereco"], d["bairro"],
+        f"{d['cidade']}/{d['uf']}" if d["cidade"] else d["uf"],
+        f"CEP {d['cep']}" if d["cep"] else "",
+    ) if p)
+    return {
+        "marca": emp.marca_empresa(pool, conta[0]),
+        "empresa_nome": d["razao_social"] or d["nome_fantasia"] or conta[2] or "",
+        "cnpj_fmt": _mascara_cnpj(d["documento"]),
+        "endereco_fmt": endereco,
+    }
 
 
 def _soma(linhas, chave):
@@ -243,9 +260,11 @@ def painel_relatorios_pdf(request: Request, tipo: str = "vendas", periodo: str =
     conta, redir = _pode_ver(request)
     if redir is not None:
         return redir
+    pool = get_pool()
     tipo, periodo, dados = _contexto(conta[0], tipo, periodo)
     from datetime import datetime
     return HTMLResponse(_env.get_template("relatorio_pdf").render(
         dados=dados, tipo=tipo, periodo=periodo, periodo_rotulo=_PERIODO_ROTULO[periodo],
-        conta_nome=conta[2] or "", gerado_em=datetime.now().strftime("%d/%m/%Y %H:%M"),
+        gerado_em=datetime.now().strftime("%d/%m/%Y %H:%M"),
+        **_letterhead(pool, conta),
     ))

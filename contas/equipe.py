@@ -60,6 +60,7 @@ def garantir_tabela(pool):
         c.execute("alter table membros add column if not exists convite_token  text")
         c.execute("alter table membros add column if not exists convite_expira timestamptz")
         c.execute("alter table membros add column if not exists whatsapp       text")
+        c.execute("alter table membros add column if not exists comissao_pct   numeric(5,2)")
         c.execute("alter table membros drop constraint if exists membros_papel_check")
         # e-mail é único POR CONTA (não global): a mesma pessoa pode ser membro de
         # várias empresas com o mesmo e-mail. Troca o índice global antigo, se houver.

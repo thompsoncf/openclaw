@@ -5491,7 +5491,12 @@ _RELATORIO_PDF = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8
 </div>
 <div class="folha">
   <div class="cab">
-    <div><div class="t1">{{ dados.label }}</div><div class="t2">{{ conta_nome }} · período: {{ periodo_rotulo }}</div></div>
+    <div>{% if marca.logo_url %}<span style="float:left;margin:-2px 12px 0 0">{{ marca_avatar(marca, px=40, raio=6, so_logo=True, ajuste="contain")|safe }}</span>{% endif %}
+      <div class="t1">{{ dados.label }}</div>
+      <div class="t2">{{ empresa_nome }}{% if cnpj_fmt %} · CNPJ {{ cnpj_fmt }}{% endif %}</div>
+      {% if endereco_fmt %}<div class="t2">{{ endereco_fmt }}</div>{% endif %}
+      <div class="t2">período: {{ periodo_rotulo }}</div>
+    </div>
     <div class="dir">Gerado em {{ gerado_em }}<br>Zaq · Relatórios</div>
   </div>
   <table>

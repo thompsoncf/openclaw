@@ -185,7 +185,7 @@ td{padding:11px 13px;border-bottom:1px solid #F0EBE0;font-size:13.5px}td small{d
 
   <div class="pg">
     <div class="hd">
-      <div style="display:flex;align-items:center;gap:12px">{% if prop.logo_url %}<img src="{{ prop.logo_url }}" alt="" style="width:46px;height:46px;border-radius:10px;object-fit:cover;background:#fff;flex-shrink:0">{% endif %}<div><div class="lg">{{ prop.vendedor }} <span>·</span></div><div class="sub">Proposta comercial</div></div></div>
+      <div style="display:flex;align-items:center;gap:12px">{% if prop.logo_url %}{{ marca_avatar({'logo_url': prop.logo_url}, px=46, raio=10, so_logo=True)|safe }}{% endif %}<div><div class="lg">{{ prop.vendedor }} <span>·</span></div><div class="sub">Proposta comercial</div></div></div>
       <div class="mt"><b>Proposta comercial</b>{{ prop.doc_num }}<br>{{ prop.data_str }}</div>
     </div>
     <div class="bd">

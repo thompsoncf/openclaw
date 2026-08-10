@@ -6,6 +6,7 @@ Todo metodo e' escopado por conta_id: a conta so' enxerga e mexe no que e' dela
 import logging
 from datetime import date, timedelta
 
+from . import ofx_import as _ofx
 from .models import (
     Lancamento, Tipo, centavos_para_reais, formatar_brl, normalizar_categoria,
 )
@@ -862,6 +863,127 @@ class LivroCaixa:
             ).fetchall()
         return [{"id": r[0], "descricao": r[1], "data": r[2], "criado_em": r[3],
                  "valor_centavos": r[4], "qtd_itens": r[5]} for r in rows]
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Import de extrato bancario (OFX): parsear_ofx()/sugerir_classificacao()
+    # em finance/ofx_import.py nao sabem nada de banco — aqui e' onde cruzamos
+    # com o que a conta ja tem (contraparte aprendida, duplicata, idempotencia
+    # por chave) e devolvemos a previa pro cliente confirmar.
+    # ─────────────────────────────────────────────────────────────────────
+    def sugestao_por_contraparte(self, descricao: str) -> dict | None:
+        """Pergunta 'da ultima vez que apareceu um lancamento com essa MESMA
+        descricao (mesmo Pix recorrente, mesmo fornecedor), como o cliente
+        classificou?'. So' conta lancamento que ja' tem categoria+conta contabil
+        definidas (senao' estaria propagando um 'a classificar' pra outro 'a
+        classificar', o que nao ajuda ninguem). Empata por mais recente.
+        Retorna None se a descricao for vazia ou nao achar nada."""
+        alvo = _ofx.chave_contraparte(descricao)
+        if not alvo:
+            return None
+        # Comparação sem acento/caixa/prefixo de banco é feita em PYTHON
+        # (chave_contraparte), não em SQL — o projeto não tem a extensão
+        # `unaccent` habilitada, e é o mesmo espírito já usado pra casar
+        # produto de cupom (finance/models.py:normalizar_descricao). O limit é
+        # só uma rédea de performance pra conta muito antiga/grande.
+        with self.pool.connection() as conn:
+            rows = conn.execute(
+                """select descricao, categoria, plano_conta_id, data
+                     from lancamentos
+                    where conta_id = %s and plano_conta_id is not null
+                    order by data desc
+                    limit 2000""",
+                (self.conta_id,),
+            ).fetchall()
+        contagem: dict[tuple, int] = {}
+        mais_recente: dict[tuple, date] = {}
+        for desc, categoria, plano_conta_id, data in rows:
+            if _ofx.chave_contraparte(desc) != alvo:
+                continue
+            par = (categoria, plano_conta_id)
+            contagem[par] = contagem.get(par, 0) + 1
+            if par not in mais_recente or data > mais_recente[par]:
+                mais_recente[par] = data
+        if not contagem:
+            return None
+        melhor = max(contagem, key=lambda par: (contagem[par], mais_recente[par]))
+        return {"categoria": melhor[0], "plano_conta_id": melhor[1],
+                "ocorrencias": contagem[melhor]}
+
+    def pre_visualizar_importacao_ofx(self, extrato, natureza_padrao: str | None = None) -> list[dict]:
+        """Monta a previa de importacao: cada transacao do OFX vira um dict com
+        a classificacao sugerida (heuristica de texto -> aprendizado por
+        contraparte -> nada) e os sinais de duplicata. NAO grava nada — quem
+        decide e confirma e' confirmar_importacao_ofx(), com o que o cliente
+        revisou na tela. `extrato` e' o OfxExtrato de finance/ofx_import.py."""
+        from . import plano_contas as pc
+
+        chave_conta = extrato.chave_conta()
+        mapa_plano = {c["codigo"]: c["id"] for c in pc.listar_plano(self.pool)}
+        itens = []
+        for txn in extrato.transacoes:
+            chave = f"ofx:{chave_conta}:{txn.fitid}"
+            ja_importado = self.lancamento_por_chave(chave) is not None
+
+            sugestao = _ofx.sugerir_classificacao(txn)
+            contraparte = None
+            if not sugestao.categoria and not ja_importado:
+                contraparte = self.sugestao_por_contraparte(txn.descricao)
+
+            categoria = sugestao.categoria or (contraparte["categoria"] if contraparte else None)
+            confianca = sugestao.confianca or ("alta" if contraparte else None)
+            plano_conta_id = mapa_plano.get(sugestao.plano_conta_codigo) if sugestao.plano_conta_codigo else None
+            if plano_conta_id is None and contraparte:
+                plano_conta_id = contraparte["plano_conta_id"]
+            motivo = sugestao.motivo
+            if contraparte:
+                motivo = f"aprendido de {contraparte['ocorrencias']} lançamento(s) anterior(es) igual(is)"
+
+            duplicatas = [] if ja_importado else self.buscar_duplicata(txn.valor_centavos, txn.data)
+
+            itens.append({
+                "fitid": txn.fitid,
+                "chave": chave,
+                "data": txn.data,
+                "descricao": txn.descricao,
+                "tipo": txn.tipo,
+                "valor_centavos": txn.valor_centavos,
+                "trntype": txn.trntype,
+                "categoria": categoria,
+                "confianca": confianca,
+                "plano_conta_id": plano_conta_id,
+                "natureza": natureza_padrao,
+                "motivo": motivo,
+                "ja_importado": ja_importado,
+                "duplicatas_provaveis": duplicatas,
+                "selecionado_padrao": not ja_importado and not duplicatas,
+            })
+        return itens
+
+    def confirmar_importacao_ofx(self, chave_conta: str, itens: list[dict]) -> dict:
+        """Grava os itens que o cliente confirmou na revisao. `itens` e' uma
+        lista de dicts já com a escolha final do cliente: fitid, tipo,
+        valor_centavos, data, descricao, categoria, natureza, plano_conta_id,
+        centro_custo_id. Idempotente por FITID: se a chave ja' existir (extrato
+        reimportado), pula sem gravar de novo e conta em `ja_existiam`."""
+        from . import plano_contas as pc
+        importados, ja_existiam = 0, 0
+        for it in itens:
+            chave = f"ofx:{chave_conta}:{it['fitid']}"
+            if self.lancamento_por_chave(chave) is not None:
+                ja_existiam += 1
+                continue
+            plano_conta_id = pc.plano_conta_valido(self.pool, self.conta_id, it.get("plano_conta_id"))
+            centro_custo_id = pc.centro_custo_valido(self.pool, self.conta_id, it.get("centro_custo_id"))
+            lanc = Lancamento.criar(
+                tipo=it["tipo"], valor_reais=centavos_para_reais(it["valor_centavos"]),
+                categoria=it.get("categoria") or "Outros", descricao=it["descricao"],
+                data=it["data"], origem="extrato",
+                natureza=it.get("natureza"),
+                plano_conta_id=plano_conta_id, centro_custo_id=centro_custo_id,
+            )
+            self.adicionar(lanc, chave=chave, forcar=True)
+            importados += 1
+        return {"importados": importados, "ja_existiam": ja_existiam}
 
     def ultimo_lancamento_id(self) -> int | None:
         """Id do lancamento mais recente do usuario (pra anexar itens 'desse cupom')."""

@@ -793,6 +793,62 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 </div>
 </div></div>{% endif %}
 
+<div id="modal-ofx" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;align-items:center;justify-content:center;padding:1rem">
+<div style="background:var(--bg);border:1px solid var(--borda);border-radius:12px;max-width:720px;width:100%;max-height:88vh;display:flex;flex-direction:column;padding:1.1rem 1.2rem">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.2rem">
+    <div style="font-size:1rem;font-weight:600;color:#f4f4f4">Importar extrato bancário</div>
+    <button type="button" onclick="fecharImportOfx()" style="width:auto;margin:0;background:transparent;border:0;color:#888780;font-size:1.2rem;cursor:pointer;line-height:1">×</button>
+  </div>
+
+  <div id="ofx-step-upload">
+    <div style="font-size:.75rem;color:#888780;margin:.2rem 0 .8rem">Exporte o extrato do seu banco em OFX (a maioria oferece isso em "Extrato → Exportar") e a gente lança tudo — já sugerindo categoria{% if eh_pj %}, conta contábil e centro de custo{% endif %}, e comparando com o que você já lançou pra não duplicar.</div>
+    <div style="border:1.5px dashed #3a3a3d;border-radius:10px;padding:1.6rem 1rem;text-align:center;background:#131316">
+      <input type="file" id="ofx-arquivo" accept=".ofx" onchange="ofxArquivoEscolhido(this)" style="display:none">
+      <div id="ofx-dropzone-texto">
+        <div style="font-size:1.4rem;margin-bottom:.4rem">📤</div>
+        <button type="button" onclick="document.getElementById('ofx-arquivo').click()" style="width:auto;margin:0;background:var(--verde);color:#fff;border:0;border-radius:7px;padding:.5rem 1rem;font-size:.85rem;font-weight:600;cursor:pointer">Escolher arquivo .ofx</button>
+      </div>
+      <div id="ofx-arquivo-nome" style="display:none;font-size:.85rem;color:var(--txt)"></div>
+    </div>
+    {% if eh_pj %}<label style="display:flex;align-items:center;gap:.5rem;font-size:.8rem;color:#b4b2a9;margin-top:.9rem;cursor:pointer">
+      <input type="checkbox" id="ofx-natureza-empresa" checked style="width:16px;height:16px;flex:none;accent-color:var(--verde)">
+      Esta conta é 100% da empresa (sugere conta contábil e centro de custo direto)
+    </label>{% endif %}
+    <div id="ofx-erro" style="display:none;color:#f0b8b8;font-size:.82rem;margin-top:.6rem"></div>
+    <div style="display:flex;justify-content:flex-end;gap:.5rem;margin-top:1.1rem">
+      <button type="button" onclick="fecharImportOfx()" style="width:auto;margin:0;border:1px solid #444;background:transparent;color:#b4b2a9;font-size:.8rem;padding:.4rem .9rem;border-radius:6px;cursor:pointer">Cancelar</button>
+      <button type="button" id="ofx-btn-analisar" onclick="ofxAnalisar()" disabled style="width:auto;margin:0;background:var(--verde);color:#fff;font-size:.8rem;font-weight:600;padding:.4rem 1rem;border:0;border-radius:6px;cursor:pointer;opacity:.5">Analisar extrato</button>
+    </div>
+  </div>
+
+  <div id="ofx-step-revisao" style="display:none;flex-direction:column;min-height:0;flex:1">
+    <div id="ofx-resumo" style="font-size:.78rem;color:#888780;margin-bottom:.6rem"></div>
+    {% if eh_pj and centros_custo %}<div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;background:#131316;border:1px solid var(--borda);border-radius:8px;padding:.5rem .7rem;margin-bottom:.6rem">
+      <label style="font-size:.76rem;color:#b4b2a9">Centro de custo desta importação</label>
+      <select id="ofx-centro-padrao" onchange="ofxAplicarCentroPadrao(this.value)" style="width:auto;background:var(--bg);border:1px solid #2a3a33;border-radius:6px;color:var(--txt);font-size:.76rem;padding:.25rem .5rem">
+        <option value="">— sem centro —</option>
+        {% for c in centros_custo %}<option value="{{ c.id }}">{{ c.nome }}</option>{% endfor %}
+      </select>
+      <span style="font-size:.68rem;color:#6a7178">o extrato não diz de qual unidade veio cada pagamento — aplica aqui em tudo, troca linha a linha onde precisar</span>
+    </div>{% endif %}
+    <div id="ofx-lista" style="overflow-y:auto;flex:1;min-height:0"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;margin-top:.8rem;padding-top:.7rem;border-top:1px solid #1e1e20">
+      <span id="ofx-contador" style="color:#888780;font-size:.75rem"></span>
+      <span style="display:flex;gap:.5rem">
+        <button type="button" onclick="ofxVoltar()" style="width:auto;margin:0;border:1px solid #444;background:transparent;color:#b4b2a9;font-size:.8rem;padding:.4rem .9rem;border-radius:6px;cursor:pointer">← Voltar</button>
+        <button type="button" id="ofx-btn-importar" onclick="ofxConfirmar()" style="width:auto;margin:0;background:var(--verde);color:#fff;font-size:.8rem;font-weight:600;padding:.4rem 1rem;border:0;border-radius:6px;cursor:pointer">Importar</button>
+      </span>
+    </div>
+  </div>
+
+  <div id="ofx-step-sucesso" style="display:none;text-align:center;padding:1rem 0">
+    <div style="font-size:2rem;margin-bottom:.5rem">✓</div>
+    <div id="ofx-sucesso-texto" style="font-size:.9rem;color:var(--txt);margin-bottom:1rem"></div>
+    <button type="button" onclick="location.reload()" style="width:auto;margin:0;background:var(--verde);color:#fff;font-size:.8rem;font-weight:600;padding:.5rem 1.1rem;border:0;border-radius:6px;cursor:pointer">Ver lançamentos</button>
+  </div>
+</div>
+</div>
+
 <div class="fin-cards">
 <div class="metric" style="display:flex;flex-direction:column;justify-content:space-between"><div><span>Saldo anterior</span><b style="white-space:nowrap;color:{% if resumo.anterior < 0 %}#e07a5f{% else %}var(--verde-claro){% endif %}">{{ brl(resumo.anterior) }}</b>{% if eh_pj and natureza_sel in ['empresa','pessoal','a_definir'] and resumo.anterior == 0 %}<small style="display:block;color:#6a7178;font-size:.62rem;margin-top:.3rem;line-height:1.3">sem histórico de {{ {'empresa':'empresa','pessoal':'pessoal','a_definir':'lançamentos a definir'}[natureza_sel] }} antes deste mês</small>{% endif %}</div>
 <div style="margin-top:1rem;padding-top:.9rem;border-top:1px solid #1e1e20"><span>= {% if eh_pj and natureza_sel %}Resultado{% else %}Saldo{% endif %} {% if q_search %}da busca{% else %}do mês{% endif %}</span><b style="white-space:nowrap;color:var(--verde-claro)">{{ brl(resumo.saldo) }}</b></div></div>
@@ -845,7 +901,10 @@ _DASH = """{% extends "base" %}{% block conteudo %}
   </table>
 </div>
 {% endif %}
-<h1 style="font-size:1.05rem; margin-top:1.6rem">Lançamentos</h1>
+<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem;margin-top:1.6rem">
+<h1 style="font-size:1.05rem;margin:0">Lançamentos</h1>
+<button type="button" onclick="abrirImportOfx()" style="width:auto;margin:0;font-size:.78rem;color:var(--verde-claro);background:#1d3a2e;border:0;padding:.4rem .8rem;border-radius:7px;cursor:pointer;white-space:nowrap">📄 Importar extrato (OFX)</button>
+</div>
 <form method="get" action="/painel/financeiro" style="margin:.5rem 0 1rem">
 <input type="search" name="q" value="{{ q_search or '' }}" placeholder="🔎 Buscar lançamento..."
        style="width:100%;padding:.6rem .8rem;border:1px solid #2a3a33;border-radius:8px;background:var(--card);color:var(--txt);font-size:.95rem">
@@ -957,6 +1016,190 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 </div>
 
 <script>
+var OFX_PLANO = {{ plano_opcoes|tojson }};
+var OFX_CENTROS = {{ centros_custo|tojson }};
+var OFX_CAT_DESPESA = {{ categorias_despesa|tojson }};
+var OFX_CAT_RECEITA = {{ categorias_receita|tojson }};
+var OFX_EH_PJ = {{ 'true' if eh_pj else 'false' }};
+var ofxItens = {};       // fitid -> item cru devolvido pelo servidor (ler-ofx)
+var ofxContaChave = '';  // chave_conta do extrato que acabou de ser analisado
+
+function abrirImportOfx(){
+  document.getElementById('ofx-arquivo').value = '';
+  document.getElementById('ofx-arquivo-nome').style.display = 'none';
+  document.getElementById('ofx-dropzone-texto').style.display = 'block';
+  document.getElementById('ofx-erro').style.display = 'none';
+  document.getElementById('ofx-btn-analisar').disabled = true;
+  document.getElementById('ofx-btn-analisar').style.opacity = '.5';
+  document.getElementById('ofx-step-upload').style.display = 'block';
+  document.getElementById('ofx-step-revisao').style.display = 'none';
+  document.getElementById('ofx-step-sucesso').style.display = 'none';
+  document.getElementById('modal-ofx').style.display = 'flex';
+}
+function fecharImportOfx(){ document.getElementById('modal-ofx').style.display = 'none'; }
+
+function ofxArquivoEscolhido(input){
+  var btn = document.getElementById('ofx-btn-analisar');
+  if(!input.files || !input.files[0]){ btn.disabled = true; btn.style.opacity = '.5'; return; }
+  document.getElementById('ofx-dropzone-texto').style.display = 'none';
+  var nomeBox = document.getElementById('ofx-arquivo-nome');
+  nomeBox.style.display = 'block';
+  nomeBox.textContent = '📄 ' + input.files[0].name;
+  btn.disabled = false; btn.style.opacity = '1';
+}
+
+function ofxAnalisar(){
+  var input = document.getElementById('ofx-arquivo');
+  if(!input.files || !input.files[0]) return;
+  var erroBox = document.getElementById('ofx-erro');
+  erroBox.style.display = 'none';
+  var btn = document.getElementById('ofx-btn-analisar');
+  btn.disabled = true; btn.textContent = 'Analisando...';
+  var fd = new FormData();
+  fd.append('arquivo', input.files[0]);
+  var natChk = document.getElementById('ofx-natureza-empresa');
+  fd.append('natureza_padrao', (natChk && natChk.checked) ? 'empresa' : '');
+  fetch('/painel/lancamentos/ler-ofx', {method:'POST', body: fd})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      btn.disabled = false; btn.textContent = 'Analisar extrato';
+      if(!d.ok){ erroBox.textContent = d.erro || 'não consegui ler esse arquivo.'; erroBox.style.display = 'block'; return; }
+      if(!d.itens.length){ erroBox.textContent = 'esse extrato não tem nenhuma movimentação.'; erroBox.style.display = 'block'; return; }
+      ofxContaChave = d.conta.chave_conta;
+      ofxItens = {};
+      d.itens.forEach(function(it){ ofxItens[it.fitid] = it; });
+      ofxMontarRevisao(d);
+      document.getElementById('ofx-step-upload').style.display = 'none';
+      document.getElementById('ofx-step-revisao').style.display = 'flex';
+    })
+    .catch(function(){
+      btn.disabled = false; btn.textContent = 'Analisar extrato';
+      erroBox.textContent = 'erro ao enviar o arquivo — tenta de novo.'; erroBox.style.display = 'block';
+    });
+}
+
+function ofxMontarRevisao(d){
+  var novos = d.itens.filter(function(it){ return !it.ja_importado; }).length;
+  var jaImportados = d.itens.length - novos;
+  document.getElementById('ofx-resumo').textContent =
+    d.itens.length + ' lançamento(s) encontrado(s)' + (jaImportados ? ' · ' + jaImportados + ' já importado(s) antes (ignorados)' : '') +
+    (d.conta.periodo_ini ? ' · período ' + d.conta.periodo_ini.split('-').reverse().join('/') + ' a ' + d.conta.periodo_fim.split('-').reverse().join('/') : '');
+  var lista = document.getElementById('ofx-lista');
+  lista.innerHTML = d.itens.map(ofxLinhaHtml).join('');
+  ofxAtualizarContador();
+}
+
+function ofxLinhaHtml(it){
+  var cats = it.tipo === 'receita' ? OFX_CAT_RECEITA : OFX_CAT_DESPESA;
+  var val = (it.valor_centavos/100).toLocaleString('pt-BR', {minimumFractionDigits:2});
+  var sinal = it.tipo === 'receita' ? '+' : '−';
+  var cor = it.tipo === 'receita' ? 'var(--verde-claro)' : '#f0b8b8';
+  var marcado = it.selecionado_padrao;
+  var desabilitado = it.ja_importado;
+
+  var catOpts = '<option value="">— a classificar —</option>' + cats.map(function(c){
+    return '<option value="'+c+'"'+(c===it.categoria?' selected':'')+'>'+c+'</option>';
+  }).join('');
+  var catSelect = '<select class="ofx-cat" style="width:auto;background:var(--bg);border:1px solid #2a3a33;border-radius:6px;color:var(--txt);font-size:.72rem;padding:.2rem .4rem">'+catOpts+'</select>';
+
+  var planoSelect = '';
+  if(OFX_EH_PJ && OFX_PLANO.length){
+    var planoOpts = '<option value="">— conta contábil —</option>' + OFX_PLANO.map(function(g){
+      var opts = g.contas.map(function(c){
+        return '<option value="'+c.id+'"'+(c.id===it.plano_conta_id?' selected':'')+'>'+c.codigo+' '+c.nome+'</option>';
+      }).join('');
+      return '<optgroup label="'+g.grupo+' · '+g.nome+'">'+opts+'</optgroup>';
+    }).join('');
+    planoSelect = '<select class="ofx-plano" style="width:auto;max-width:220px;background:var(--bg);border:1px solid #2a3a33;border-radius:6px;color:var(--txt);font-size:.72rem;padding:.2rem .4rem">'+planoOpts+'</select>';
+  }
+  var centroSelect = '';
+  if(OFX_EH_PJ && OFX_CENTROS.length){
+    var centroOpts = '<option value="">— sem centro —</option>' + OFX_CENTROS.map(function(c){
+      return '<option value="'+c.id+'">'+c.nome+'</option>';
+    }).join('');
+    centroSelect = '<select class="ofx-centro" style="width:auto;background:var(--bg);border:1px solid #2a3a33;border-radius:6px;color:var(--txt);font-size:.72rem;padding:.2rem .4rem">'+centroOpts+'</select>';
+  }
+
+  var nota = '';
+  if(desabilitado){
+    nota = '<div style="font-size:.7rem;color:#6a7178;margin-top:.25rem;padding-left:1.8rem">já importado deste extrato antes — ignorado</div>';
+  } else if(it.duplicatas_provaveis && it.duplicatas_provaveis.length){
+    var dp = it.duplicatas_provaveis[0];
+    nota = '<div style="font-size:.7rem;color:#f0c05a;margin-top:.25rem;padding-left:1.8rem">🔁 parece repetido: já existe "'+dp.descricao+'" em '+dp.data+' com valor parecido — desmarcado por sugestão, mas você decide</div>';
+  } else if(it.motivo){
+    nota = '<div style="font-size:.7rem;color:#888780;margin-top:.25rem;padding-left:1.8rem">'+it.motivo+'</div>';
+  }
+
+  return '<div class="ofx-linha" data-fitid="'+it.fitid+'" style="padding:.55rem .6rem;margin-bottom:.35rem;border-radius:8px;background:#131316;'+(desabilitado?'opacity:.5;':'')+'">'+
+    '<div style="display:flex;align-items:center;gap:.6rem">'+
+      '<input type="checkbox" class="ofx-check" onchange="ofxAtualizarContador()" '+(marcado?'checked':'')+' '+(desabilitado?'disabled':'')+' style="width:16px;height:16px;flex:none;accent-color:var(--verde)">'+
+      '<span style="font-size:.75rem;color:#888780;white-space:nowrap">'+it.data_fmt+'</span>'+
+      '<span style="flex:1;font-size:.85rem;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+it.descricao+'</span>'+
+      '<b style="color:'+cor+';font-size:.85rem;white-space:nowrap">'+sinal+' '+val+'</b>'+
+    '</div>'+
+    '<div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.35rem;padding-left:1.8rem">'+catSelect+planoSelect+centroSelect+'</div>'+
+    nota+
+  '</div>';
+}
+
+function ofxAplicarCentroPadrao(valor){
+  document.querySelectorAll('.ofx-centro').forEach(function(sel){ sel.value = valor; });
+}
+
+function ofxAtualizarContador(){
+  var checks = document.querySelectorAll('.ofx-check:checked');
+  document.getElementById('ofx-contador').textContent = checks.length + ' selecionado(s) pra importar';
+  var btn = document.getElementById('ofx-btn-importar');
+  btn.disabled = checks.length === 0;
+  btn.style.opacity = checks.length === 0 ? '.5' : '1';
+}
+
+function ofxVoltar(){
+  document.getElementById('ofx-step-revisao').style.display = 'none';
+  document.getElementById('ofx-step-upload').style.display = 'block';
+}
+
+function ofxConfirmar(){
+  var itens = [];
+  document.querySelectorAll('.ofx-linha').forEach(function(div){
+    var check = div.querySelector('.ofx-check');
+    if(!check || !check.checked) return;
+    var fitid = div.getAttribute('data-fitid');
+    var base = ofxItens[fitid];
+    if(!base) return;
+    var catSel = div.querySelector('.ofx-cat');
+    var planoSel = div.querySelector('.ofx-plano');
+    var centroSel = div.querySelector('.ofx-centro');
+    itens.push({
+      fitid: fitid, tipo: base.tipo, valor_centavos: base.valor_centavos,
+      data: base.data, descricao: base.descricao,
+      categoria: catSel ? catSel.value : base.categoria,
+      natureza: base.natureza,
+      plano_conta_id: (planoSel && planoSel.value) ? parseInt(planoSel.value, 10) : null,
+      centro_custo_id: (centroSel && centroSel.value) ? parseInt(centroSel.value, 10) : null
+    });
+  });
+  if(!itens.length) return;
+  var btn = document.getElementById('ofx-btn-importar');
+  btn.disabled = true; btn.textContent = 'Importando...';
+  fetch('/painel/lancamentos/importar-ofx', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({chave_conta: ofxContaChave, itens: itens})})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      btn.disabled = false; btn.textContent = 'Importar';
+      if(!d.ok){ alert(d.erro || 'não consegui importar.'); return; }
+      document.getElementById('ofx-step-revisao').style.display = 'none';
+      document.getElementById('ofx-step-sucesso').style.display = 'block';
+      var texto = d.importados + ' lançamento(s) importado(s)';
+      if(d.ja_existiam) texto += ' · ' + d.ja_existiam + ' já existia(m) e foram ignorados';
+      document.getElementById('ofx-sucesso-texto').textContent = texto;
+    })
+    .catch(function(){
+      btn.disabled = false; btn.textContent = 'Importar';
+      alert('erro ao importar — tenta de novo.');
+    });
+}
+
 function filtrarTipo(btn){
   document.querySelectorAll('.aba').forEach(function(a){a.classList.remove('ativa')});
   btn.classList.add('ativa');
@@ -9332,7 +9575,8 @@ def painel_financeiro(request: Request, mes: str = "", membro: str = "", tipo: s
                    quebra=quebra,
                    prev_cartao=prev_cartao,
                    eh_pj=eh_pj,
-                   plano_opcoes=plano_opcoes, centros_custo=centros_custo)
+                   plano_opcoes=plano_opcoes, centros_custo=centros_custo,
+                   categorias_despesa=CATEGORIAS_DESPESA, categorias_receita=CATEGORIAS_RECEITA)
 
 
 # ---------- lista de compras ----------
@@ -9726,6 +9970,93 @@ def apagar_lancamento_endpoint(request: Request, lancamento_id: int = Form(...))
     livro = LivroCaixa(get_pool(), conta[0])
     ok = livro.apagar_lancamento(lancamento_id)
     return JSONResponse({"ok": bool(ok)})
+
+
+def _duplicata_json(d: dict) -> dict:
+    return {"id": d["id"], "descricao": d["descricao"],
+            "data": d["data"].strftime("%d/%m/%Y") if hasattr(d["data"], "strftime") else str(d["data"]),
+            "valor_centavos": d["valor_centavos"]}
+
+
+def _item_previa_json(it: dict) -> dict:
+    return {**it,
+            "data": it["data"].isoformat(),
+            "data_fmt": it["data"].strftime("%d/%m"),
+            "duplicatas_provaveis": [_duplicata_json(d) for d in it["duplicatas_provaveis"]]}
+
+
+@router.post("/painel/lancamentos/ler-ofx")
+async def painel_lancamentos_ler_ofx(request: Request, arquivo: UploadFile = File(...),
+                                     natureza_padrao: str = Form("")):
+    """Passo 1 do import de extrato: lê e parseia o .ofx, cruza com o que a
+    conta já tem (chave/duplicata/aprendizado por contraparte) e devolve a
+    prévia — NÃO grava nada ainda (grava só em /importar-ofx, quando o
+    cliente confirma o que revisou na tela)."""
+    conta = conta_logada(request)
+    if not conta:
+        return JSONResponse({"ok": False, "erro": "não autenticado"}, status_code=401)
+    from finance import ofx_import as ofx
+    from finance.livro_caixa import LivroCaixa
+    try:
+        bruto = await arquivo.read()
+        extrato = ofx.parsear_ofx(ofx.decodificar(bruto))
+    except ofx.OfxInvalido as e:
+        return JSONResponse({"ok": False, "erro": str(e)}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"ok": False, "erro": f"não consegui ler o arquivo: {e}"}, status_code=400)
+
+    natureza = natureza_padrao if natureza_padrao in ("empresa", "pessoal") else None
+    livro = LivroCaixa(get_pool(), conta[0])
+    itens = livro.pre_visualizar_importacao_ofx(extrato, natureza_padrao=natureza)
+    return JSONResponse({
+        "ok": True,
+        "conta": {
+            "banco_id": extrato.banco_id, "agencia": extrato.agencia, "conta": extrato.conta,
+            "chave_conta": extrato.chave_conta(),
+            "periodo_ini": extrato.periodo_ini.isoformat() if extrato.periodo_ini else None,
+            "periodo_fim": extrato.periodo_fim.isoformat() if extrato.periodo_fim else None,
+            "saldo_final_centavos": extrato.saldo_final_centavos,
+        },
+        "itens": [_item_previa_json(it) for it in itens],
+    })
+
+
+@router.post("/painel/lancamentos/importar-ofx")
+async def painel_lancamentos_importar_ofx(request: Request):
+    """Passo 2: grava só os itens que o cliente selecionou/ajustou na revisão.
+    Corpo: {"chave_conta": "756:4436-9:39449-1", "itens": [{fitid, tipo,
+    valor_centavos, data (ISO), descricao, categoria, natureza,
+    plano_conta_id, centro_custo_id}, ...]}"""
+    conta = conta_logada(request)
+    if not conta:
+        return JSONResponse({"ok": False, "erro": "não autenticado"}, status_code=401)
+    from datetime import date as _date
+    from finance.livro_caixa import LivroCaixa
+    body = await request.json()
+    chave_conta = (body.get("chave_conta") or "").strip()
+    brutos = body.get("itens") or []
+    if not chave_conta or not brutos:
+        return JSONResponse({"ok": False, "erro": "nada pra importar"}, status_code=400)
+
+    itens = []
+    for it in brutos:
+        try:
+            itens.append({
+                "fitid": it["fitid"], "tipo": it["tipo"],
+                "valor_centavos": int(it["valor_centavos"]),
+                "data": _date.fromisoformat(it["data"]),
+                "descricao": it.get("descricao") or "",
+                "categoria": it.get("categoria") or "Outros",
+                "natureza": it.get("natureza") if it.get("natureza") in ("pessoal", "empresa") else None,
+                "plano_conta_id": it.get("plano_conta_id"),
+                "centro_custo_id": it.get("centro_custo_id"),
+            })
+        except (KeyError, ValueError, TypeError):
+            continue  # item malformado: pula em vez de derrubar o lote inteiro
+
+    livro = LivroCaixa(get_pool(), conta[0])
+    r = livro.confirmar_importacao_ofx(chave_conta, itens)
+    return JSONResponse({"ok": True, **r})
 
 
 @router.post("/membros/adicionar")

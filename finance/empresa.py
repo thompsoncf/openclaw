@@ -1320,3 +1320,63 @@ def salvar_dados_empresa(pool, conta_id: int, *, documento: str = "",
             )
         c.commit()
     return True, "Dados da empresa salvos."
+
+
+def _cor_valida(cor: str) -> str | None:
+    """Aceita só cor hex (#rgb ou #rrggbb); qualquer outra coisa vira None."""
+    c = (cor or "").strip().lower()
+    if not c:
+        return None
+    if c[0] != "#":
+        c = "#" + c
+    corpo = c[1:]
+    if len(corpo) in (3, 6) and all(ch in "0123456789abcdef" for ch in corpo):
+        return c
+    return None
+
+
+def obter_identidade(pool, conta_id: int) -> dict:
+    """Identidade visual/marca da conta (compartilhada por toda empresa PJ, não só
+    fornecedor): logo, capa, cor da marca, frase, sobre e WhatsApp público."""
+    with pool.connection() as c:
+        r = c.execute(
+            """select logo_url, banner_url, coalesce(banner_cor,''),
+                      coalesce(bio,''), coalesce(sobre,''), coalesce(whatsapp_loja,'')
+                 from contas where id=%s""",
+            (conta_id,)).fetchone()
+    if not r:
+        return {"logo_url": None, "banner_url": None, "banner_cor": "",
+                "bio": "", "sobre": "", "whatsapp_loja": ""}
+    return {"logo_url": r[0], "banner_url": r[1], "banner_cor": r[2],
+            "bio": r[3], "sobre": r[4], "whatsapp_loja": r[5]}
+
+
+def salvar_identidade(pool, conta_id: int, *, bio: str = "", sobre: str = "",
+                      whatsapp_loja: str = "", banner_cor: str = "") -> None:
+    """Grava os campos de texto/cor da identidade (a logo e a capa entram por upload
+    à parte). Vazio limpa o campo. Cor inválida é ignorada (fica None). Multi-tenant."""
+    with pool.connection() as c:
+        c.execute(
+            """update contas set bio=%s, sobre=%s, whatsapp_loja=%s, banner_cor=%s
+                where id=%s""",
+            ((bio or "").strip()[:160] or None,
+             (sobre or "").strip()[:600] or None,
+             (whatsapp_loja or "").strip()[:40] or None,
+             _cor_valida(banner_cor), conta_id))
+        c.commit()
+
+
+def marca_empresa(pool, conta_id: int) -> dict:
+    """Kit de marca pros cabeçalhos (proposta, painel, holerite…): sempre devolve
+    algo usável — a logo quando existe, senão iniciais sobre a cor da marca."""
+    with pool.connection() as c:
+        r = c.execute(
+            """select coalesce(nullif(nome_fantasia,''), nullif(razao_social,''), nome),
+                      logo_url, coalesce(banner_cor,'')
+                 from contas where id=%s""",
+            (conta_id,)).fetchone()
+    nome = (r[0] if r else "") or ""
+    partes = [p for p in nome.replace("-", " ").split() if p]
+    iniciais = "".join(p[0] for p in partes[:2]).upper() or (nome[:1].upper() or "?")
+    return {"nome": nome, "logo_url": (r[1] if r else None),
+            "cor": (r[2] if r else "") or "#2f7d32", "iniciais": iniciais}

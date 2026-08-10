@@ -66,7 +66,7 @@ def _carregar(token: str, pool=None):
             """select o.id, o.empresa, o.cliente, o.whatsapp, o.segmento, o.escopo,
                       o.itens, o.setup_centavos, o.mensal_centavos, o.primeiro_ano_centavos,
                       o.status, o.criado_em, o.aprovada_por, o.aprovada_em, c.nome,
-                      o.conta_id, o.criado_por
+                      o.conta_id, o.criado_por, c.logo_url
                  from orcamentos o join contas c on c.id = o.conta_id
                 where o.token=%s""", (token,)).fetchone()
     if not r:
@@ -89,7 +89,7 @@ def _carregar(token: str, pool=None):
         "criado": criado, "validade": criado + timedelta(days=15),
         "aprovada_por": r[12] or "", "aprovada_em": r[13],
         "vendedor": r[14] or "Proposta",
-        "conta_id": r[15], "criado_por": r[16],
+        "conta_id": r[15], "criado_por": r[16], "logo_url": r[17],
         "doc_num": "PR-%s-%03d" % (criado.strftime("%Y%m"), (r[0] or 0) % 1000),
     }
 
@@ -185,7 +185,7 @@ td{padding:11px 13px;border-bottom:1px solid #F0EBE0;font-size:13.5px}td small{d
 
   <div class="pg">
     <div class="hd">
-      <div><div class="lg">{{ prop.vendedor }} <span>·</span></div><div class="sub">Proposta comercial</div></div>
+      <div style="display:flex;align-items:center;gap:12px">{% if prop.logo_url %}<img src="{{ prop.logo_url }}" alt="" style="width:46px;height:46px;border-radius:10px;object-fit:cover;background:#fff;flex-shrink:0">{% endif %}<div><div class="lg">{{ prop.vendedor }} <span>·</span></div><div class="sub">Proposta comercial</div></div></div>
       <div class="mt"><b>Proposta comercial</b>{{ prop.doc_num }}<br>{{ prop.data_str }}</div>
     </div>
     <div class="bd">

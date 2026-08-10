@@ -60,6 +60,7 @@ def garantir_tabela(pool):
         c.execute("alter table membros add column if not exists convite_token  text")
         c.execute("alter table membros add column if not exists convite_expira timestamptz")
         c.execute("alter table membros add column if not exists whatsapp       text")
+        c.execute("alter table membros add column if not exists comissao_pct   numeric(5,2)")
         c.execute("alter table membros drop constraint if exists membros_papel_check")
         # e-mail é único POR CONTA (não global): a mesma pessoa pode ser membro de
         # várias empresas com o mesmo e-mail. Troca o índice global antigo, se houver.
@@ -226,13 +227,27 @@ def listar_equipe(pool, conta_id: int) -> list[dict]:
     with pool.connection() as c:
         rows = c.execute(
             """select id, nome, email, papel, ativo, (convite_token is not null),
-                      coalesce(whatsapp,'')
+                      coalesce(whatsapp,''), comissao_pct
                  from membros where conta_id=%s and email is not null
                 order by id""", (conta_id,)).fetchall()
     # 'pendente' = convite por LINK ainda não aceito (inativo + com token). Quem já
     # tinha login Zaq entra ativo sem senha/token — NÃO é pendente.
     return [{"id": r[0], "nome": r[1], "email": r[2], "papel": r[3], "ativo": r[4],
-             "pendente": (not r[4]) and r[5], "rotulo": rotulo(r[3]), "whatsapp": r[6]} for r in rows]
+             "pendente": (not r[4]) and r[5], "rotulo": rotulo(r[3]), "whatsapp": r[6],
+             "comissao_pct": float(r[7]) if r[7] is not None else None} for r in rows]
+
+
+def definir_comissao(pool, conta_id: int, membro_id: int, comissao_pct: float | None) -> dict:
+    """% de comissão do membro sobre as vendas que ele lançou (relatório de
+    Comissão). None/negativo limpa a configuração; acima de 100 é rejeitado."""
+    if comissao_pct is not None and (comissao_pct < 0 or comissao_pct > 100):
+        return {"ok": False, "erro": "Comissão deve estar entre 0 e 100%."}
+    with pool.connection() as c:
+        r = c.execute(
+            "update membros set comissao_pct=%s where id=%s and conta_id=%s and papel<>'dono' returning id",
+            (comissao_pct, membro_id, conta_id)).fetchone()
+        c.commit()
+    return {"ok": bool(r)}
 
 
 def atualizar_papel(pool, conta_id: int, membro_id: int, papel: str) -> dict:

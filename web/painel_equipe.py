@@ -127,6 +127,25 @@ def painel_equipe_renomear(request: Request, membro_id: int = Form(...), nome: s
     return RedirectResponse("/painel/equipe", status_code=303)
 
 
+@router.post("/painel/equipe/comissao")
+def painel_equipe_comissao(request: Request, membro_id: int = Form(...),
+                           comissao_pct: str = Form("")):
+    conta, redir = _dono(request)
+    if redir is not None:
+        return redir
+    txt = (comissao_pct or "").strip().replace(",", ".")
+    try:
+        pct = float(txt) if txt else None
+    except ValueError:
+        pct = -1  # força o erro "entre 0 e 100%" abaixo, em vez de 500
+    r = eq.definir_comissao(get_pool(), conta[0], membro_id, pct)
+    if r.get("ok"):
+        request.session["equipe_aviso"] = "Comissão atualizada ✓"
+    else:
+        request.session["equipe_erro"] = r.get("erro") or "Não consegui salvar a comissão."
+    return RedirectResponse("/painel/equipe", status_code=303)
+
+
 @router.post("/painel/equipe/excluir")
 def painel_equipe_excluir(request: Request, membro_id: int = Form(...)):
     conta, redir = _dono(request)
@@ -324,6 +343,16 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
             {% for v,l in papeis %}<option value="{{ v }}" {% if v==m.papel %}selected{% endif %}>{{ l }}</option>{% endfor %}
           </select>
         </form>
+        {% if m.papel in ('vendedor', 'gestor') %}
+        <form method="post" action="/painel/equipe/comissao" style="margin:0;display:flex;align-items:center;gap:.3rem">
+          <input type="hidden" name="membro_id" value="{{ m.id }}">
+          <input name="comissao_pct" type="number" step="0.1" min="0" max="100"
+                 value="{{ m.comissao_pct if m.comissao_pct is not none else '' }}" placeholder="%"
+                 title="% de comissão sobre as vendas dele (relatório de Comissão)" aria-label="% comissão"
+                 style="width:58px;background:var(--bg);border:1px solid var(--borda);border-radius:8px;color:var(--txt);padding:.42rem .4rem;font-size:.82rem;margin:0">
+          <button title="Salvar % de comissão">% comis.</button>
+        </form>
+        {% endif %}
         <form method="post" action="/painel/equipe/reconvite" style="margin:0"><input type="hidden" name="membro_id" value="{{ m.id }}">
           <button title="Gerar e reenviar o link de convite">↻ Novo link</button></form>
         {% if m.papel in ('vendedor','gestor','dono') and not m.pendente %}

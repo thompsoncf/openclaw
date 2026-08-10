@@ -325,7 +325,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   .mais-grab{width:34px;height:4px;background:var(--borda);border-radius:2px;margin:.4rem auto .5rem}
 }
 </style>{% if embed %}<style>body{padding-left:0 !important;padding-bottom:0 !important}.side,.topo-mob,.wa-suporte,.btmnav,.mais-sheet,.mais-bg{display:none !important}</style>{% endif %}</head><body>
-<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="ic-caixa" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></symbol><symbol id="ic-produtos" viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></symbol><symbol id="ic-clientes" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><path d="M16 6a3 3 0 010 6"/></symbol><symbol id="ic-financeiro" viewBox="0 0 24 24"><path d="M4 4v16h16"/><path d="M8 15l3-4 3 2 4-6"/></symbol><symbol id="ic-mais" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol><symbol id="ic-abastecimento" viewBox="0 0 24 24"><path d="M3 6h11v9H3zM14 9h4l3 3v3h-7z"/><circle cx="7" cy="18" r="1.6"/><circle cx="17" cy="18" r="1.6"/></symbol><symbol id="ic-empresa" viewBox="0 0 24 24"><path d="M4 9l1.2-4h13.6L20 9M5 9v10h14V9M4 9h16M10 19v-5h4v5"/></symbol><symbol id="ic-fornecedor" viewBox="0 0 24 24"><path d="M12 21v-8M12 13c0-3 2-5.5 5.5-5.5C17.5 11 15.5 13 12 13zM12 15c0-2.5-1.6-4.5-4.5-4.5C7.5 13 9 15 12 15z"/></symbol><symbol id="ic-compras" viewBox="0 0 24 24"><circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/><path d="M2 4h2.2l2.3 11h11l1.8-8H6"/></symbol><symbol id="ic-cesta" viewBox="0 0 24 24"><path d="M5 9h14l-1.4 10H6.4zM9 9l1.2-5M15 9l-1.2-5"/></symbol><symbol id="ic-painel" viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v4h-7zM13 11h7v9h-7zM4 14h7v6H4z"/></symbol><symbol id="ic-sair" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></symbol><symbol id="ic-prospeccao" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol><symbol id="ic-agenda" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/><path d="M7.5 13h2M11 13h2M14.5 13h2M7.5 16.5h2M11 16.5h2"/></symbol></defs></svg>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="ic-caixa" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></symbol><symbol id="ic-produtos" viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></symbol><symbol id="ic-clientes" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><path d="M16 6a3 3 0 010 6"/></symbol><symbol id="ic-financeiro" viewBox="0 0 24 24"><path d="M4 4v16h16"/><path d="M8 15l3-4 3 2 4-6"/></symbol><symbol id="ic-mais" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol><symbol id="ic-abastecimento" viewBox="0 0 24 24"><path d="M3 6h11v9H3zM14 9h4l3 3v3h-7z"/><circle cx="7" cy="18" r="1.6"/><circle cx="17" cy="18" r="1.6"/></symbol><symbol id="ic-empresa" viewBox="0 0 24 24"><path d="M4 9l1.2-4h13.6L20 9M5 9v10h14V9M4 9h16M10 19v-5h4v5"/></symbol><symbol id="ic-fornecedor" viewBox="0 0 24 24"><path d="M12 21v-8M12 13c0-3 2-5.5 5.5-5.5C17.5 11 15.5 13 12 13zM12 15c0-2.5-1.6-4.5-4.5-4.5C7.5 13 9 15 12 15z"/></symbol><symbol id="ic-compras" viewBox="0 0 24 24"><circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/><path d="M2 4h2.2l2.3 11h11l1.8-8H6"/></symbol><symbol id="ic-cesta" viewBox="0 0 24 24"><path d="M5 9h14l-1.4 10H6.4zM9 9l1.2-5M15 9l-1.2-5"/></symbol><symbol id="ic-painel" viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v4h-7zM13 11h7v9h-7zM4 14h7v6H4z"/></symbol><symbol id="ic-sair" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></symbol><symbol id="ic-prospeccao" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol><symbol id="ic-agenda" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/><path d="M7.5 13h2M11 13h2M14.5 13h2M7.5 16.5h2M11 16.5h2"/></symbol><symbol id="ic-relatorios" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M8 17v-5M12.5 17V7M17 17v-8"/></symbol></defs></svg>
 <div id="navprog"></div>
 {% macro navi(sec, href, ic, label) -%}
 <a href="{{ href }}" class="nav-i{% if secao_ativa==sec and sec %} on{% endif %}" onclick="navTap(this)"><svg class="nav-ic"><use href="#ic-{{ ic }}"/></svg><span>{{ label }}</span></a>
@@ -348,7 +348,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if _dono and vende_produto %}{{ navi('abastecimento','/painel/produtos/abastecimento','abastecimento','Abastecimento') }}{% endif %}
   {% if vende_servico and caps.vendas %}{{ navi('servicos','/painel/servicos','financeiro','Serviços') }}{% endif %}
   {% if tem_pj and caps.vendas %}{{ navi('prospeccao','/painel/prospeccao','prospeccao','Prospecção') }}{% endif %}
-  {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{% endif %}
+  {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{{ navi('relatorios','/painel/relatorios','relatorios','Relatórios') }}{% endif %}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
   {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes') }}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
@@ -376,7 +376,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if _dono and vende_produto %}{{ navi('abastecimento','/painel/produtos/abastecimento','abastecimento','Abastecimento') }}{% endif %}
   {% if vende_servico and caps.vendas %}{{ navi('servicos','/painel/servicos','financeiro','Serviços') }}{% endif %}
   {% if tem_pj and caps.vendas %}{{ navi('prospeccao','/painel/prospeccao','prospeccao','Prospecção') }}{% endif %}
-  {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{% endif %}
+  {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{{ navi('relatorios','/painel/relatorios','relatorios','Relatórios') }}{% endif %}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
   {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes') }}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
@@ -5392,9 +5392,130 @@ _DASH_BLOCO = """<style>
 {% endif %}"""
 
 
+_RELATORIOS = """{% extends "base" %}{% block conteudo %}
+<style>
+  .rel-aviso{background:#1a2233;border:1px solid #29354d;color:#9db3d6;border-radius:8px;
+   padding:.6rem .85rem;font-size:.82rem;margin:.9rem 0 1rem;line-height:1.5}
+  .rel-filtros{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:.9rem 0 1.1rem}
+  .rel-filtros select{width:auto;margin:0}
+  .rel-filtros .mut{font-size:.8rem}
+  .rel-pdf{width:auto;margin:0;display:inline-flex;align-items:center;gap:.4rem;padding:.6rem 1rem;
+   background:#1d6e9e;color:#fff;text-decoration:none;border-radius:8px;font-size:.9rem;font-weight:600}
+  .rel-pdf:hover{background:#2480b5}
+  .rel-tag{display:inline-block;padding:.15rem .6rem;border-radius:999px;font-size:.74rem;font-weight:600;white-space:nowrap}
+  .rel-tag.ok{background:#15301f;color:#9fe8c9;border:1px solid var(--verde)}
+  .rel-tag.aviso{background:#332a12;color:#f0dca6;border:1px solid #6e5a22}
+  .rel-tag.erro{background:#3a1d1d;color:#f0b8b8;border:1px solid #6e2b2b}
+  .rel-tbl-wrap{overflow-x:auto}
+  .rel-tbl-wrap table{min-width:640px}
+  .rel-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .rel-tot td{border-top:2px solid var(--borda);font-weight:700}
+  @media (max-width:600px){.rel-filtros{align-items:stretch}.rel-filtros select{flex:1 1 auto}}
+</style>
+<div class="card larga">
+  <h1 style="margin:0">📊 Relatórios <span class="mut" style="font-weight:400;font-size:.85rem">· {{ dados.label }}</span></h1>
+  {% if dados.mock %}
+  <div class="rel-aviso">🧪 <b>Dados de exemplo</b> — este relatório ainda não está ligado à base. Os demais
+   relatórios já mostram os dados reais da sua conta.</div>
+  {% elif dados.aviso_config %}
+  <div class="rel-aviso">⚠️ {{ dados.aviso_config }}</div>
+  {% endif %}
+
+  <div class="abas">
+    {% for k, r in tipos.items() %}<a class="aba{% if k==tipo %} ativa{% endif %}"
+     href="/painel/relatorios?tipo={{ k }}&periodo={{ periodo }}" style="text-decoration:none">{{ r.label }}</a>{% endfor %}
+  </div>
+
+  <form method="get" action="/painel/relatorios" class="rel-filtros">
+    <input type="hidden" name="tipo" value="{{ tipo }}">
+    <select name="periodo" onchange="this.form.submit()">
+      {% for v, rot in periodos %}<option value="{{ v }}" {% if v==periodo %}selected{% endif %}>{{ rot }}</option>{% endfor %}
+    </select>
+    {% if dados.sem_periodo %}<span class="mut">mostra tudo que está em aberto — o período aqui não filtra</span>
+    {% else %}<span class="mut">período: {{ periodo_rotulo }}</span>{% endif %}
+    <span style="flex:1"></span>
+    <a class="rel-pdf" href="/painel/relatorios/pdf?tipo={{ tipo }}&periodo={{ periodo }}" target="_blank" rel="noopener">🖨️ Exportar PDF</a>
+  </form>
+
+  <div class="fin-cards" style="grid-template-columns:repeat({{ dados.metricas|length }},1fr)">
+    {% for label, valor in dados.metricas %}<div class="metric"><span>{{ label }}</span><b class="nowrap">{{ valor }}</b></div>{% endfor %}
+  </div>
+
+  <div class="rel-tbl-wrap">
+  <table>
+    <tr>{% for col in dados.colunas %}<th{% if col.num %} class="rel-num"{% endif %}>{{ col.rotulo }}</th>{% endfor %}</tr>
+    {% for row in dados.linhas %}
+    <tr>{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% endif %}>{% if col.tag %}<span
+      class="rel-tag {{ row[col.chave ~ '_cor'] }}">{{ row[col.chave] }}</span>{% elif col.brl %}{{ row[col.chave]|brl
+      }}{% else %}{{ row[col.chave] }}{% endif %}</td>{% endfor %}</tr>
+    {% else %}
+    <tr><td colspan="{{ dados.colunas|length }}" class="mut" style="text-align:center;padding:1.4rem 0">Nenhum registro encontrado{% if not dados.sem_periodo %} em {{ periodo_rotulo|lower }}{% endif %}.</td></tr>
+    {% endfor %}
+    <tr class="rel-tot">{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% endif %}>{% if loop.first
+      %}Total{% elif col.chave == dados.col_total %}{{ dados.total_centavos|brl }}{% endif %}</td>{% endfor %}</tr>
+  </table>
+  </div>
+  <p class="mut" style="margin-top:.6rem">{{ dados.linhas|length }} registro(s){% if not dados.mock %} · {{ periodo_rotulo }}{% endif %}</p>
+</div>
+{% endblock %}"""
+
+_RELATORIO_PDF = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ dados.label }} · {{ periodo_rotulo }} - Zaq</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;background:#e9e9ec;color:#111;font-family:Arial,Helvetica,sans-serif;font-size:12.5px}
+  .barra{max-width:920px;margin:14px auto 0;display:flex;gap:.5rem;justify-content:flex-end;align-items:center;padding:0 10px}
+  .barra a,.barra button{font:inherit;font-size:.82rem;padding:.42rem .7rem;border-radius:7px;border:1px solid #bcbcc2;
+   background:#fff;color:#111;cursor:pointer;text-decoration:none}
+  .barra .pr{background:#127a45;border-color:#127a45;color:#fff;font-weight:600}
+  .folha{max-width:920px;margin:12px auto 10px;background:#fff;border:1px solid #000;padding:22px 26px}
+  .cab{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #000;
+   padding-bottom:10px;margin-bottom:14px}
+  .cab .t1{font-size:19px;font-weight:700}
+  .cab .t2{font-size:11px;color:#333;margin-top:3px}
+  .cab .dir{text-align:right;font-size:10.5px;color:#333;white-space:nowrap}
+  table{width:100%;border-collapse:collapse}
+  th{border-bottom:1px solid #000;padding:5px 7px;font-size:10px;text-transform:uppercase;text-align:left;background:#f2f2f2}
+  td{padding:5px 7px;border-bottom:1px solid #ddd;vertical-align:top}
+  .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  tfoot td{border-top:2px solid #000;border-bottom:0;font-weight:700}
+  .aviso{max-width:920px;margin:0 auto 30px;padding:0 10px;color:#666;font-size:10.5px;line-height:1.6}
+  @media print{ body{background:#fff} .barra,.aviso{display:none} .folha{margin:0;max-width:100%;border:0}
+   @page{size:A4 landscape;margin:12mm} }
+</style></head><body>
+<div class="barra">
+  <a href="/painel/relatorios?tipo={{ tipo }}&periodo={{ periodo }}">← Voltar</a>
+  <button class="pr" onclick="window.print()">🖨️ Imprimir / salvar PDF</button>
+</div>
+<div class="folha">
+  <div class="cab">
+    <div><div class="t1">{{ dados.label }}</div><div class="t2">{{ conta_nome }} · período: {{ periodo_rotulo }}</div></div>
+    <div class="dir">Gerado em {{ gerado_em }}<br>Zaq · Relatórios</div>
+  </div>
+  <table>
+    <thead><tr>{% for col in dados.colunas %}<th{% if col.num %} class="num"{% endif %}>{{ col.rotulo }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for row in dados.linhas %}
+    <tr>{% for col in dados.colunas %}<td{% if col.num %} class="num"{% endif %}>{% if col.brl %}{{ row[col.chave]|brl
+      }}{% else %}{{ row[col.chave] }}{% endif %}</td>{% endfor %}</tr>
+    {% else %}
+    <tr><td colspan="{{ dados.colunas|length }}" style="text-align:center;color:#777">Nenhum registro encontrado.</td></tr>
+    {% endfor %}
+    </tbody>
+    <tfoot><tr>{% for col in dados.colunas %}<td{% if col.num %} class="num"{% endif %}>{% if loop.first %}Total{%
+      elif col.chave == dados.col_total %}{{ dados.total_centavos|brl }}{% endif %}</td>{% endfor %}</tr></tfoot>
+  </table>
+</div>
+<p class="aviso">{% if dados.mock %}🧪 Dados de exemplo — este relatório ainda não está ligado à base real.
+  {% else %}Documento gerencial gerado pelo Zaq a partir dos lançamentos da conta.{% endif %} {{ dados.linhas|length }} registro(s).</p>
+</body></html>"""
+
+
 _env = Environment(loader=DictLoader({
     "holerite": _HOLERITE,
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "dash_bloco": _DASH_BLOCO, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "pagar_aviso": _PAGAR_AVISO, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS, "produtos": _PRODUTOS, "abastecimento": _ABASTECIMENTO, "clientes": _CLIENTES, "cliente_detalhe": _CLIENTE_DETALHE, "pdv": _PDV, "venda_detalhe": _VENDA_DETALHE,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "dash_bloco": _DASH_BLOCO, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "pagar_aviso": _PAGAR_AVISO, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS, "produtos": _PRODUTOS, "abastecimento": _ABASTECIMENTO, "clientes": _CLIENTES, "cliente_detalhe": _CLIENTE_DETALHE, "pdv": _PDV, "venda_detalhe": _VENDA_DETALHE, "relatorios": _RELATORIOS, "relatorio_pdf": _RELATORIO_PDF,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 _env.filters["brl"] = brl
@@ -5515,6 +5636,7 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
                  ("servicos", "/painel/servicos"), ("prospeccao", "/painel/prospeccao"),
                  ("agenda", "/painel/agenda"), ("equipe", "/painel/equipe"),
                  ("financeiro", "/painel/financeiro"), ("empresa", "/painel/empresa"),
+                 ("relatorios", "/painel/relatorios"),
                  ("fornecedor", "/painel/fornecedor"), ("assinaturas", "/painel/assinaturas"),
                  ("pedidos", "/painel/meus-pedidos"), ("compras", "/painel/compras"),
                  ("painel", "/painel")]

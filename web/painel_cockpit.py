@@ -41,6 +41,14 @@ def _sessao(request: Request):
     return cid, mid
 
 
+def _gerencia(request: Request):
+    """(conta_id, membro_id) se dono/gestor (Cockpit do Dono), senão None."""
+    s = _sessao(request)
+    if not s:
+        return None
+    return s if request.session.get("papel", "dono") in ("dono", "gestor") else None
+
+
 # ------------------------------------------------------------------ shell/estilo
 _CSS = """<style>
 :root{--bg:#0e0e0f;--card:#161617;--card2:#1a1a1c;--borda:#2a2a2b;--txt:#ececec;--mut:#a8a8a3;
@@ -113,6 +121,56 @@ display:flex;align-items:center;gap:.5rem;font-size:.8rem;color:var(--verde-clar
 .vvisit b{color:#cfe6dd}.vvisit small{color:var(--mut);display:block;font-size:.74rem;margin-top:.15rem}
 .vrow{display:flex;align-items:center;justify-content:space-between;gap:1rem}.vrow .sub{color:var(--mut);font-size:.76rem}
 .vmsg{margin-top:.6rem;background:#0c1c10;border:1px solid #16391f;border-radius:10px;padding:.6rem .7rem;font-size:.8rem;color:#cfe6dd;white-space:pre-line}
+/* ---- Cockpit do Dono (prefixo d) ---- */
+.dseg{display:flex;gap:.3rem;padding:.5rem 1rem;border-bottom:1px solid var(--borda)}
+.dseg a{font-size:.72rem;padding:.25rem .6rem;border-radius:999px;border:1px solid var(--borda);color:var(--mut);text-decoration:none}
+.dseg a.on{border-color:var(--verde);background:#10241a;color:var(--verde-claro);font-weight:700}
+.dkpis{display:grid;grid-template-columns:1fr 1fr;gap:.5rem;padding:.8rem}
+.dkpi{background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:.7rem .8rem}
+.dkpi.hl{background:#10241a;border-color:#1e4a3a}
+.dkpi .v{font-size:1.3rem;font-weight:800}.dkpi .l{color:var(--mut);font-size:.72rem}.dkpi .d{font-size:.68rem;color:var(--mut);margin-top:.15rem}
+.dsect{padding:.5rem 1rem .2rem;font-size:.82rem;font-weight:700;display:flex;justify-content:space-between;align-items:center}
+.dsect span{color:var(--mut);font-weight:400;font-size:.72rem}
+.dfunil{padding:.3rem 1rem .8rem;display:flex;flex-direction:column;gap:.45rem}
+.dfr{display:flex;align-items:center;gap:.6rem;font-size:.8rem}
+.dfr .nm{width:76px;color:var(--mut);flex-shrink:0}
+.dfr .bar{flex:1;height:15px;background:var(--card2);border-radius:6px;overflow:hidden;border:1px solid var(--borda)}
+.dfr .bar i{display:block;height:100%;background:linear-gradient(90deg,#1d9e75,#5dcaa5)}
+.dfr .qt{width:82px;text-align:right;flex-shrink:0}.dfr .qt b{color:var(--txt)}.dfr .qt small{color:var(--mut)}
+.daten{padding:.2rem 1rem 1rem;display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+.dat{border:1px solid var(--borda);background:var(--card2);border-radius:11px;padding:.6rem .7rem}
+.dat .n{font-size:1.3rem;font-weight:800}.dat .t{font-size:.72rem;color:var(--mut);line-height:1.3}
+.dat.warn{border-color:#5a4520;background:#241c0f}.dat.warn .n{color:var(--amar)}
+.dat.hot{border-color:#5a2b2b;background:#241313}.dat.hot .n{color:#f0917f}
+.dat.info{border-color:#1e3a52;background:#0f1d2b}.dat.info .n{color:#7bb8e6}
+.dvend{display:flex;align-items:center;gap:.7rem;padding:.7rem 1rem;border-bottom:1px solid var(--borda);color:var(--txt);text-decoration:none}
+.dvend .rk{width:22px;text-align:center;font-weight:800;color:var(--mut);flex-shrink:0}
+.dvend .av{width:38px;height:38px;border-radius:50%;background:#22252a;color:#cfe6dd;display:grid;place-items:center;font-weight:700;flex-shrink:0}
+.dvend .mid{flex:1;min-width:0}.dvend .mid b{font-size:.9rem}
+.dvend .mid .sub{color:var(--mut);font-size:.73rem;display:flex;gap:.55rem;flex-wrap:wrap}
+.dvend .rt{text-align:right;flex-shrink:0}.dvend .rt .g{font-weight:800;color:var(--verde-claro)}.dvend .rt small{color:var(--mut);font-size:.68rem;display:block}
+.dpaus{font-size:.62rem;color:var(--amar);border:1px solid #5a4520;background:#241c0f;border-radius:999px;padding:.02rem .35rem}
+.dev{display:flex;gap:.6rem;padding:.6rem 1rem;border-bottom:1px solid var(--borda)}
+.dev .ic{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;flex-shrink:0;font-size:.9rem;background:var(--card2);border:1px solid var(--borda)}
+.dev.ganho .ic{background:#10241a;border-color:#1e4a3a}.dev.visita .ic{background:#0f1d2b;border-color:#1e3a52}
+.dev.prop .ic{background:#1a1226;border-color:#3a2b52}.dev.perdido .ic{background:#241313;border-color:#5a2b2b}
+.dev .tx{flex:1;font-size:.84rem}
+.dvstat{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.5rem;padding:.8rem}
+.dvstat .s{background:var(--card2);border:1px solid var(--borda);border-radius:11px;padding:.6rem;text-align:center}
+.dvstat .s b{font-size:1.1rem;display:block}.dvstat .s small{color:var(--mut);font-size:.66rem}
+.dvline{display:flex;justify-content:space-around;padding:0 1rem .6rem;font-size:.82rem;color:var(--mut)}.dvline b{color:var(--txt)}
+.dvact{padding:0 1rem .6rem}
+.dvact form{display:inline}
+.dvact .pausebtn{width:100%;font:inherit;font-size:.82rem;font-weight:600;border-radius:9px;padding:.55rem;cursor:pointer;border:1px solid var(--borda);background:var(--card2);color:var(--txt)}
+.dlead{display:flex;align-items:center;gap:.6rem;padding:.55rem 1rem;border-bottom:1px solid var(--borda)}
+.dlead .dot2{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.dlead .m{flex:1;min-width:0}.dlead .m b{font-size:.84rem}
+.dlead form{display:flex;gap:.3rem;align-items:center}
+.dlead select{background:var(--card2);border:1px solid var(--borda);border-radius:7px;color:var(--txt);font-size:.72rem;padding:.25rem}
+.dlead button{background:var(--card2);border:1px solid var(--borda);border-radius:7px;color:var(--verde-claro);font-size:.72rem;padding:.25rem .5rem;font-weight:700;cursor:pointer}
+.dnav{display:flex;border-top:1px solid var(--borda);flex-shrink:0;background:var(--bg)}
+.dnav a{flex:1;color:var(--mut);font-size:.66rem;padding:.5rem 0;text-decoration:none;display:flex;flex-direction:column;align-items:center;gap:.15rem}
+.dnav a .i{font-size:1.15rem}.dnav a.on{color:var(--verde-claro)}
 .funil{padding:.6rem 1rem;border-bottom:1px solid var(--borda)}
 .lbl{font-size:.68rem;color:var(--mut);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.45rem}
 .stchips{display:flex;gap:.35rem;flex-wrap:wrap}
@@ -541,6 +599,8 @@ def cockpit_inbox(request: Request):
     if not sess:
         return RedirectResponse("/cockpit/login", status_code=303)
     conta_id, membro_id = sess
+    if request.session.get("papel", "dono") in ("dono", "gestor"):
+        return _dono_visao(request, conta_id, membro_id)   # dono/gestor → Cockpit do Dono
     pool = get_pool()
     leads = ck.leads_do_vendedor(pool, conta_id, membro_id)
     p = ck.perfil(pool, conta_id, membro_id)
@@ -935,6 +995,170 @@ def visita_ics_publico(request: Request, token: str):
         return Response("visita não encontrada", status_code=404)
     return Response(ics, media_type="text/calendar; charset=utf-8",
                    headers={"Content-Disposition": 'attachment; filename="visita.ics"'})
+
+
+# ================================================================== COCKPIT DO DONO
+def _nav_dono(active: str) -> str:
+    def a(key, ic, lab, href):
+        return f"<a class='{'on' if active == key else ''}' href='{href}'><span class=i>{ic}</span>{lab}</a>"
+    return ("<div class=dnav>" + a("visao", "📊", "Visão", "/cockpit")
+            + a("placar", "🏆", "Placar", "/cockpit/equipe/placar")
+            + a("ativ", "⚡", "Atividade", "/cockpit/equipe/atividade") + "</div>")
+
+
+def _dono_hdr(conta_id: int, sub: str) -> str:
+    nome = ck.endereco_empresa(get_pool(), conta_id)["nome"]
+    return ("<div class=hdr><div class=ib>" + esc((nome or 'E')[:1].upper()) + "</div>"
+            f"<div class=tt><b>Equipe · {esc(nome)}</b><small>{esc(sub)}</small></div></div>")
+
+
+def _dono_visao(request: Request, conta_id: int, membro_id: int) -> HTMLResponse:
+    from finance import cockpit_dono as cd
+    periodo = request.query_params.get("p", "semana")
+    if periodo not in ("hoje", "semana", "mes"):
+        periodo = "semana"
+    v = cd.visao(get_pool(), conta_id, periodo)
+    k = v["kpis"]
+    conv = f"{k['conversao']}%" if k["conversao"] is not None else "—"
+
+    def seg(key, lab):
+        return f"<a class='{'on' if periodo == key else ''}' href='/cockpit?p={key}'>{lab}</a>"
+    kpis = (
+        "<div class=dkpis>"
+        f"<div class='dkpi hl'><div class=v>{k['novos']}</div><div class=l>Leads novos</div><div class=d>no período</div></div>"
+        f"<div class=dkpi><div class=v>{k['com_ia'] + k['com_vend']}</div><div class=l>Em atendimento</div><div class=d>{k['com_ia']} c/ IA · {k['com_vend']} c/ vendedor</div></div>"
+        f"<div class=dkpi><div class=v>{esc(k['ganhos_rs'])}</div><div class=l>Ganhos</div><div class=d>{k['ganhos']} fechado(s)</div></div>"
+        f"<div class=dkpi><div class=v>{conv}</div><div class=l>Conversão</div><div class=d>ganhos vs. perdidos</div></div></div>")
+    funil = "".join(
+        f"<div class=dfr><span class=nm>{esc(f['rotulo'])}</span><span class=bar><i style='width:{f['pct']}%'></i></span>"
+        f"<span class=qt><b>{f['n']}</b> <small>{esc(f['valor'])}</small></span></div>" for f in v["funil"])
+    a = v["atencao"]
+    aten = (
+        "<div class=daten>"
+        f"<div class='dat hot'><div class=n>{a['parados']}</div><div class=t>leads parados +3 dias</div></div>"
+        f"<div class='dat warn'><div class=n>{a['quentes']}</div><div class=t>quentes sem contato hoje</div></div>"
+        f"<div class='dat info'><div class=n>{a['propostas']}</div><div class=t>propostas aguardando</div></div>"
+        f"<div class='dat info'><div class=n>{a['visitas']}</div><div class=t>visitas hoje</div></div></div>")
+    body = (
+        _dono_hdr(conta_id, "acompanhe o time")
+        + f"<div class=dseg>{seg('hoje','Hoje')}{seg('semana','Semana')}{seg('mes','Mês')}</div>"
+        + "<div class=scroll>" + kpis
+        + "<div class=dsect>Funil do time <span>leads · valor</span></div>" + f"<div class=dfunil>{funil}</div>"
+        + "<div class=dsect>Precisa de atenção</div>" + aten + "</div>"
+        + _nav_dono("visao"))
+    return _page("Cockpit do Dono", body)
+
+
+@router.get("/cockpit/equipe/placar", response_class=HTMLResponse)
+def cockpit_dono_placar(request: Request):
+    g = _gerencia(request)
+    if not g:
+        return RedirectResponse("/cockpit", status_code=303)
+    from finance import cockpit_dono as cd
+    lista = cd.placar(get_pool(), g[0])
+    medalhas = ["🥇", "🥈", "🥉"]
+    linhas = []
+    for i, v in enumerate(lista):
+        rk = medalhas[i] if i < 3 else str(i + 1)
+        paus = " <span class=dpaus>pausado</span>" if v["pausado"] else ""
+        linhas.append(
+            f"<a class=dvend href='/cockpit/equipe/vendedor/{v['id']}'>"
+            f"<span class=rk>{rk}</span><span class=av>{esc(v['nome'][:1].upper())}</span>"
+            f"<div class=mid><b>{esc(v['nome'])}</b><div class=sub><span>📥 {v['fila']} fila</span>"
+            f"<span>💬 {v['atendendo']} atend.</span><span>⚡ {esc(v['resp'])}</span>{paus}</div></div>"
+            f"<div class=rt><span class=g>{esc(v['rs'])}</span><small>{v['ganhos']} ganhos · {esc(v['conversao'])}</small></div></a>")
+    corpo = "".join(linhas) or "<div class=dvline style='padding:2rem'>Nenhum vendedor na equipe ainda.</div>"
+    body = (_dono_hdr(g[0], "placar · este mês, por R$ fechado")
+            + f"<div class=scroll>{corpo}</div>" + _nav_dono("placar"))
+    return _page("Cockpit do Dono — placar", body)
+
+
+@router.get("/cockpit/equipe/atividade", response_class=HTMLResponse)
+def cockpit_dono_atividade(request: Request):
+    g = _gerencia(request)
+    if not g:
+        return RedirectResponse("/cockpit", status_code=303)
+    from finance import cockpit_dono as cd
+    feed = cd.atividade(get_pool(), g[0])
+    ic = {"ganho": "🎉", "perdido": "✕", "visita": "📅", "prop": "🧾"}
+    linhas = "".join(
+        f"<div class='dev {e['tipo']}'><span class=ic>{ic.get(e['tipo'], '•')}</span><div class=tx>{esc(e['txt'])}</div></div>"
+        for e in feed) or "<div class=dvline style='padding:2rem'>Sem atividade recente.</div>"
+    body = (_dono_hdr(g[0], "atividade do time")
+            + f"<div class=scroll>{linhas}</div>" + _nav_dono("ativ"))
+    return _page("Cockpit do Dono — atividade", body)
+
+
+@router.get("/cockpit/equipe/vendedor/{membro_id}", response_class=HTMLResponse)
+def cockpit_dono_vendedor(request: Request, membro_id: int):
+    g = _gerencia(request)
+    if not g:
+        return RedirectResponse("/cockpit", status_code=303)
+    from finance import cockpit_dono as cd
+    v = cd.vendedor(get_pool(), g[0], membro_id)
+    if not v:
+        return RedirectResponse("/cockpit/equipe/placar", status_code=303)
+    outros = cd.vendedores_para_reatribuir(get_pool(), g[0], membro_id)
+    opts = "".join(f"<option value='{o['id']}'>{esc(o['nome'])}</option>" for o in outros)
+    leads = ""
+    for l in v["leads"]:
+        chip = "🤖 IA" if l["ia"] else "🙋 vend."
+        reat = ("" if not outros else
+                f"<form method=post action='/cockpit/equipe/reatribuir'>"
+                f"<input type=hidden name=lead_id value='{l['id']}'>"
+                f"<select name=para><option value=''>mover p/…</option>{opts}</select>"
+                f"<button type=submit>↦</button></form>")
+        leads += (f"<div class=dlead><span class=dot2 style='background:{esc(l['temp_cor'])}'></span>"
+                  f"<div class=m><b>{esc(l['empresa'])}</b></div><span class='cchip {'ia' if l['ia'] else 'voce'}'>{chip}</span>{reat}</div>")
+    if not v["leads"]:
+        leads = "<div class=dvline style='padding:1.5rem'>Sem leads abertos." + (" Está pausado." if v["pausado"] else "") + "</div>"
+    pause_lbl = "▶ Reativar no rodízio" if v["pausado"] else "⏸ Pausar no rodízio"
+    body = (
+        "<div class=hdr><a class=bk href='/cockpit/equipe/placar'>‹</a>"
+        f"<div class=tt><b>{esc(v['nome'])}</b><small>vendedor · {'pausado no rodízio' if v['pausado'] else 'no rodízio'}</small></div></div>"
+        + _flash(request)
+        + "<div class=scroll>"
+        + "<div class=dvstat>"
+        + f"<div class=s><b>{v['fila']}</b><small>na fila</small></div>"
+        + f"<div class=s><b>{v['ganhos']}</b><small>ganhos/mês</small></div>"
+        + f"<div class=s><b>{esc(v['conversao'])}</b><small>conversão</small></div></div>"
+        + f"<div class=dvline><span>💰 <b>{esc(v['rs'])}</b> fechado</span><span>⏱️ <b>{esc(v['resp'])}</b> resposta</span></div>"
+        + "<div class=dvact><form method=post action='/cockpit/equipe/pausar'>"
+        + f"<input type=hidden name=membro_id value='{membro_id}'><input type=hidden name=on value='{0 if v['pausado'] else 1}'>"
+        + f"<button class=pausebtn type=submit>{pause_lbl}</button></form></div>"
+        + f"<div class=dsect>Leads dele <span>{len(v['leads'])} abertos</span></div>{leads}</div>"
+        + _nav_dono("placar"))
+    return _page(f"Cockpit do Dono — {v['nome']}", body)
+
+
+@router.post("/cockpit/equipe/reatribuir")
+def cockpit_dono_reatribuir(request: Request, lead_id: int = Form(...), para: str = Form("")):
+    g = _gerencia(request)
+    if not g:
+        return RedirectResponse("/cockpit", status_code=303)
+    origem = "/cockpit/equipe/placar"
+    if para.strip().isdigit():
+        r = cd_reatribuir(g[0], lead_id, int(para))
+        request.session["ck_ok" if r.get("ok") else "ck_err"] = (
+            "Lead reatribuído ✓" if r.get("ok") else "Não consegui reatribuir.")
+        origem = f"/cockpit/equipe/vendedor/{int(para)}"
+    return RedirectResponse(origem, status_code=303)
+
+
+@router.post("/cockpit/equipe/pausar")
+def cockpit_dono_pausar(request: Request, membro_id: int = Form(...), on: str = Form("1")):
+    g = _gerencia(request)
+    if not g:
+        return RedirectResponse("/cockpit", status_code=303)
+    from finance import cockpit_dono as cd
+    cd.pausar(get_pool(), g[0], membro_id, on == "1")
+    request.session["ck_ok"] = "Rodízio pausado ✓" if on == "1" else "Vendedor reativado ✓"
+    return RedirectResponse(f"/cockpit/equipe/vendedor/{membro_id}", status_code=303)
+
+
+def cd_reatribuir(conta_id, lead_id, para):
+    from finance import cockpit_dono as cd
+    return cd.reatribuir(get_pool(), conta_id, lead_id, para)
 
 
 # ------------------------------------------------------------------ perfil

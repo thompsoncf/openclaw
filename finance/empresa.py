@@ -1375,8 +1375,7 @@ def marca_empresa(pool, conta_id: int) -> dict:
                       logo_url, coalesce(banner_cor,'')
                  from contas where id=%s""",
             (conta_id,)).fetchone()
+    from .marca import iniciais as _iniciais
     nome = (r[0] if r else "") or ""
-    partes = [p for p in nome.replace("-", " ").split() if p]
-    iniciais = "".join(p[0] for p in partes[:2]).upper() or (nome[:1].upper() or "?")
     return {"nome": nome, "logo_url": (r[1] if r else None),
-            "cor": (r[2] if r else "") or "#2f7d32", "iniciais": iniciais}
+            "cor": (r[2] if r else "") or "#2f7d32", "iniciais": _iniciais(nome)}

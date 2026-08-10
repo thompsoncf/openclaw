@@ -622,12 +622,9 @@ def cockpit_inbox(request: Request):
     p = ck.perfil(pool, conta_id, membro_id)
     vez = sum(1 for l in leads if not l["ia"])
     from finance import empresa as emp
+    from finance.marca import cabecalho_html
     marca = emp.marca_empresa(pool, conta_id)
-    _blogo = (f"<img src='{esc(marca['logo_url'])}' alt='' style='width:26px;height:26px;border-radius:7px;object-fit:cover;background:#fff'>"
-              if marca["logo_url"] else
-              f"<span style='width:26px;height:26px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:.66rem;color:#fff;background:{esc(marca['cor'])}'>{esc(marca['iniciais'])}</span>")
-    brand = (f"<div style='display:flex;align-items:center;gap:.4rem;margin-left:auto'>{_blogo}"
-             f"<span style='font-weight:600;font-size:.82rem;color:var(--txt)'>{esc(marca['nome'])}</span></div>")
+    brand = cabecalho_html(marca, px=26, raio=7, alinhar="right", cor_nome="var(--txt)")
 
     def _acts(ia: bool) -> str:
         main = ("<button class='act assumir' data-a=assumir><span class=em>🙋</span>Assumir</button>" if ia

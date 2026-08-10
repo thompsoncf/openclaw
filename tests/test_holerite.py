@@ -240,6 +240,22 @@ def test_lotacao_default_geral_no_holerite(pool, empresa_id):
     assert h["func"]["lotacao"] == "GERAL"
 
 
+def test_holerite_mostra_logo_da_marca(pool, empresa_id):
+    """A logo da empresa entra no cabeçalho do recibo quando existe; sem logo, some."""
+    from web import portal
+    f = emp.criar_funcionario(pool, empresa_id, "Hilda", salario_centavos=200000)
+    hoje = date.today()
+    h = emp.holerite_funcionario(pool, empresa_id, f["id"], hoje.year, hoje.month)
+
+    def render(logo):
+        return portal._env.get_template("holerite").render(
+            h=h, cnpj_fmt="56.048.627/0001-77", empresa_nome="RSAL",
+            marca={"logo_url": logo, "nome": "RSAL", "cor": "#2f7d32", "iniciais": "R"})
+
+    assert 'src="https://x/logo.jpg"' in render("https://x/logo.jpg")
+    assert "<img" not in render(None)
+
+
 def test_cpf_aparece_formatado_no_holerite(pool, empresa_id):
     f = emp.criar_funcionario(pool, empresa_id, "Gilda", salario_centavos=200000,
                               cpf="03592657313")

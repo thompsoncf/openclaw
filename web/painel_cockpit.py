@@ -611,6 +611,13 @@ def cockpit_inbox(request: Request):
     leads = ck.leads_do_vendedor(pool, conta_id, membro_id)
     p = ck.perfil(pool, conta_id, membro_id)
     vez = sum(1 for l in leads if not l["ia"])
+    from finance import empresa as emp
+    marca = emp.marca_empresa(pool, conta_id)
+    _blogo = (f"<img src='{esc(marca['logo_url'])}' alt='' style='width:26px;height:26px;border-radius:7px;object-fit:cover;background:#fff'>"
+              if marca["logo_url"] else
+              f"<span style='width:26px;height:26px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:.66rem;color:#fff;background:{esc(marca['cor'])}'>{esc(marca['iniciais'])}</span>")
+    brand = (f"<div style='display:flex;align-items:center;gap:.4rem;margin-left:auto'>{_blogo}"
+             f"<span style='font-weight:600;font-size:.82rem;color:var(--txt)'>{esc(marca['nome'])}</span></div>")
 
     def _acts(ia: bool) -> str:
         main = ("<button class='act assumir' data-a=assumir><span class=em>🙋</span>Assumir</button>" if ia
@@ -648,7 +655,8 @@ def cockpit_inbox(request: Request):
     body = (
         "<div class=hdr>"
         f"<a class=ib href='/cockpit/perfil' title='Meu perfil'>{esc(_ini(p['nome']))}</a>"
-        f"<div class=tt><b>Meus leads</b><small>{len(leads)} abertos · {vez} sua vez</small></div></div>"
+        f"<div class=tt><b>Meus leads</b><small>{len(leads)} abertos · {vez} sua vez</small></div>"
+        f"{brand}</div>"
         "<div class=scroll>"
         + pushcard +
         "<div class=instpill>📲 <b>Instalar o app</b> — no menu do navegador, “Adicionar à tela inicial”. Deslize um card ← pra ações rápidas.</div>"

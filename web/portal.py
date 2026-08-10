@@ -3036,6 +3036,7 @@ _PDV = """{% extends "base" %}{% block conteudo %}
 </div>
 <script>
 window.PDV_PROD = {{ produtos_json|tojson }};
+window.PDV_MARCA = {{ marca|tojson }};
 window.PDV_ADD = {{ add }};
 var PDV_CART=[], PDV_CLI=null, PDV_CLI_RES=[], PDV_CLI_T=null, PDV_PAG='dinheiro';
 function pdvFmt(n){ return 'R$ '+(Math.round(n*100)/100).toFixed(2).replace('.',','); }
@@ -3051,7 +3052,7 @@ function pdvCliNovo(){ document.getElementById('pdv-cli-sug').style.display='non
 function pdvCliLimpar(){ PDV_CLI=null; document.getElementById('pdv-cli-sel').style.display='none'; document.getElementById('pdv-cli-busca').value=''; document.getElementById('pdv-cli-novo').style.display='none'; document.getElementById('pdv-novo-nome').value=''; document.getElementById('pdv-novo-cpf').value=''; }
 function pdvClienteInfo(){ if(PDV_CLI&&PDV_CLI.id) return {cliente_id:PDV_CLI.id, cliente_nome:PDV_CLI.nome}; var nn=(document.getElementById('pdv-novo-nome').value||'').trim(); var nc=(document.getElementById('pdv-novo-cpf').value||'').trim(); var o={}; if(nn) o.cliente_nome=nn; if(nc){ if(nc.replace(/[^0-9]/g,'').length===14){ o.cliente_cnpj=nc; } else { o.cliente_cpf=nc; } } return o; }
 function pdvFinalizar(){ if(!PDV_CART.length){ return; } var e=document.getElementById('pdv-erro'); var ci=pdvClienteInfo(); if(PDV_PAG==='fiado' && !ci.cliente_id && !ci.cliente_nome){ e.textContent='Fiado exige um cliente identificado.'; e.style.display='block'; return; } var btn=document.getElementById('pdv-finalizar'); btn.disabled=true; btn.textContent='Registrando...'; var desc=parseFloat(String(document.getElementById('pdv-desc').value).replace(',','.'))||0; var payload={ itens:PDV_CART.map(function(it){ return {produto_id:it.id, quantidade:it.qtd, preco_unit_centavos:Math.round(it.preco*100)}; }), pagamento:PDV_PAG, desconto_centavos:Math.round(desc*100) }; for(var k in ci){ payload[k]=ci[k]; } if(PDV_PAG==='fiado'){ payload.vencimento=document.getElementById('pdv-venc').value||''; } fetch('/painel/produtos/vender',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(d){ if(d.ok){ pdvRecibo(d,ci); } else { e.textContent=d.erro||'erro'; e.style.display='block'; btn.disabled=false; btn.textContent='Finalizar venda'; } }).catch(function(){ e.textContent='erro de conexão'; e.style.display='block'; btn.disabled=false; btn.textContent='Finalizar venda'; }); }
-function pdvRecibo(d,ci){ var linhas=PDV_CART.map(function(it){ return '<div style="display:flex;justify-content:space-between;font-size:.8rem;color:#cfcfcf"><span>'+it.qtd+' '+it.unidade+' '+it.nome+'</span><span>'+pdvFmt(it.preco*it.qtd)+'</span></div>'; }).join(''); var extra=''; if(d.fiado){ extra='<div style="color:#e0b878;font-size:.82rem;margin-top:.3rem">Fiado · vence '+(d.vencimento||'')+'</div>'; } var box=document.getElementById('pdv-recibo'); box.innerHTML='<div style="text-align:center;color:var(--verde-claro);font-weight:700;margin-bottom:.5rem">✓ Venda registrada</div>'+linhas+'<div style="display:flex;justify-content:space-between;border-top:1px solid var(--borda);margin-top:.5rem;padding-top:.5rem;color:var(--txt);font-weight:600"><span>Total</span><span>'+pdvFmt((d.total_centavos||0)/100)+'</span></div>'+(ci.cliente_nome?('<div style="color:#888;font-size:.78rem;margin-top:.3rem">Cliente: '+ci.cliente_nome+'</div>'):'')+extra+'<div style="display:flex;gap:.5rem;margin-top:.8rem"><button type="button" onclick="window.print()" style="flex:1;background:transparent;border:1px solid #3a3a3d;color:#b4b2a9;border-radius:7px;padding:.5rem;cursor:pointer">Imprimir</button><button type="button" onclick="location.href=\\'/painel/pdv\\'" style="flex:1;background:var(--verde);color:#fff;border:0;border-radius:7px;padding:.5rem;cursor:pointer;font-weight:600">Nova venda</button></div>'; box.style.display='block'; box.scrollIntoView({behavior:'smooth'}); }
+function pdvRecibo(d,ci){ var linhas=PDV_CART.map(function(it){ return '<div style="display:flex;justify-content:space-between;font-size:.8rem;color:#cfcfcf"><span>'+it.qtd+' '+it.unidade+' '+it.nome+'</span><span>'+pdvFmt(it.preco*it.qtd)+'</span></div>'; }).join(''); var extra=''; if(d.fiado){ extra='<div style="color:#e0b878;font-size:.82rem;margin-top:.3rem">Fiado · vence '+(d.vencimento||'')+'</div>'; } var m=window.PDV_MARCA||{}; var _bh=(m.logo_url?('<img src="'+m.logo_url+'" alt="" style="width:38px;height:38px;border-radius:8px;object-fit:cover;background:#fff">'):('<span style="width:38px;height:38px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:.8rem;color:#fff;background:'+(m.cor||'#2f7d32')+'">'+(m.iniciais||'')+'</span>')); var _brand='<div style="display:flex;align-items:center;gap:.5rem;justify-content:center;margin-bottom:.6rem;padding-bottom:.5rem;border-bottom:1px solid var(--borda)">'+_bh+'<b style="color:var(--txt)">'+(m.nome||'')+'</b></div>'; var box=document.getElementById('pdv-recibo'); box.innerHTML=_brand+'<div style="text-align:center;color:var(--verde-claro);font-weight:700;margin-bottom:.5rem">✓ Venda registrada</div>'+linhas+'<div style="display:flex;justify-content:space-between;border-top:1px solid var(--borda);margin-top:.5rem;padding-top:.5rem;color:var(--txt);font-weight:600"><span>Total</span><span>'+pdvFmt((d.total_centavos||0)/100)+'</span></div>'+(ci.cliente_nome?('<div style="color:#888;font-size:.78rem;margin-top:.3rem">Cliente: '+ci.cliente_nome+'</div>'):'')+extra+'<div style="display:flex;gap:.5rem;margin-top:.8rem"><button type="button" onclick="window.print()" style="flex:1;background:transparent;border:1px solid #3a3a3d;color:#b4b2a9;border-radius:7px;padding:.5rem;cursor:pointer">Imprimir</button><button type="button" onclick="location.href=\\'/painel/pdv\\'" style="flex:1;background:var(--verde);color:#fff;border:0;border-radius:7px;padding:.5rem;cursor:pointer;font-weight:600">Nova venda</button></div>'; box.style.display='block'; box.scrollIntoView({behavior:'smooth'}); }
 document.addEventListener('DOMContentLoaded', function(){ pdvRender(); if(window.PDV_ADD){ pdvAdd(window.PDV_ADD); } });
 </script>
 {% endblock %}"""
@@ -5189,7 +5190,7 @@ _HOLERITE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 </div>
 <div class="folha">
   <div class="lin topo">
-    <div class="cel tit"><div class="t1">Recibo de Pagamento</div><div class="t2">( Folha de Pagamento )</div></div>
+    <div class="cel tit">{% if marca.logo_url %}<img src="{{ marca.logo_url }}" alt="" style="height:40px;width:40px;object-fit:contain;float:left;margin:-2px 12px 0 0">{% endif %}<div class="t1">Recibo de Pagamento</div><div class="t2">( Folha de Pagamento )</div></div>
     <div class="cel comp"><span class="rot">Competência</span><span class="val">{{ h.competencia_extenso }}</span></div>
   </div>
   <div class="lin">
@@ -8186,6 +8187,7 @@ def painel_pdv(request: Request, add: int = 0):
     return _render("pdv", request, conta=conta, produtos_json=prod_js, add=add or 0,
                    vendas=vendas, totais=totais_lst, recebido_centavos=recebido,
                    fiado_total=fiado_total, fiado_n=fiado_n,
+                   marca=emp.marca_empresa(pool, conta[0]),
                    erro=request.session.pop("erro", None))
 
 
@@ -9038,7 +9040,8 @@ def empresa_holerite(request: Request, funcionario_id: int, ano: int = 0, mes: i
         return RedirectResponse("/painel/empresa", status_code=303)
     cnpj_fmt = _mascara_cnpj(h["empresa"].get("documento", ""))
     return HTMLResponse(_env.get_template("holerite").render(
-        h=h, cnpj_fmt=cnpj_fmt, empresa_nome=conta[2]))
+        h=h, cnpj_fmt=cnpj_fmt, empresa_nome=conta[2],
+        marca=emp.marca_empresa(pool, conta[0])))
 
 
 @router.get("/painel/empresa/contador.csv")

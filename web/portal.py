@@ -5400,8 +5400,10 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
 </style>
 <div class="card larga">
   <h1 style="margin:0">📊 Relatórios <span class="mut" style="font-weight:400;font-size:.85rem">· {{ dados.label }}</span></h1>
-  <div class="rel-aviso">🧪 <b>Mockup</b> — layout em avaliação, com dados de exemplo. A ligação com os dados reais
-   (e o PDF definitivo) entra na próxima etapa, depois de fechado o layout com você.</div>
+  {% if dados.mock %}
+  <div class="rel-aviso">🧪 <b>Dados de exemplo</b> — este relatório ainda não está ligado à base (falta decidir a
+   regra de comissão por vendedor). Os demais relatórios já mostram os dados reais da sua conta.</div>
+  {% endif %}
 
   <div class="abas">
     {% for k, r in tipos.items() %}<a class="aba{% if k==tipo %} ativa{% endif %}"
@@ -5413,7 +5415,8 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     <select name="periodo" onchange="this.form.submit()">
       {% for v, rot in periodos %}<option value="{{ v }}" {% if v==periodo %}selected{% endif %}>{{ rot }}</option>{% endfor %}
     </select>
-    <span class="mut">período de exemplo: {{ periodo_rotulo }}</span>
+    {% if dados.sem_periodo %}<span class="mut">mostra tudo que está em aberto — o período aqui não filtra</span>
+    {% else %}<span class="mut">período: {{ periodo_rotulo }}</span>{% endif %}
     <span style="flex:1"></span>
     <a class="rel-pdf" href="/painel/relatorios/pdf?tipo={{ tipo }}&periodo={{ periodo }}" target="_blank" rel="noopener">🖨️ Exportar PDF</a>
   </form>
@@ -5429,12 +5432,14 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     <tr>{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% endif %}>{% if col.tag %}<span
       class="rel-tag {{ row[col.chave ~ '_cor'] }}">{{ row[col.chave] }}</span>{% elif col.brl %}{{ row[col.chave]|brl
       }}{% else %}{{ row[col.chave] }}{% endif %}</td>{% endfor %}</tr>
+    {% else %}
+    <tr><td colspan="{{ dados.colunas|length }}" class="mut" style="text-align:center;padding:1.4rem 0">Nenhum registro encontrado{% if not dados.sem_periodo %} em {{ periodo_rotulo|lower }}{% endif %}.</td></tr>
     {% endfor %}
     <tr class="rel-tot">{% for col in dados.colunas %}<td{% if col.num %} class="rel-num"{% endif %}>{% if loop.first
       %}Total{% elif col.chave == dados.col_total %}{{ dados.total_centavos|brl }}{% endif %}</td>{% endfor %}</tr>
   </table>
   </div>
-  <p class="mut" style="margin-top:.6rem">{{ dados.linhas|length }} registro(s) de exemplo · {{ periodo_rotulo }}</p>
+  <p class="mut" style="margin-top:.6rem">{{ dados.linhas|length }} registro(s){% if not dados.mock %} · {{ periodo_rotulo }}{% endif %}</p>
 </div>
 {% endblock %}"""
 
@@ -5479,13 +5484,16 @@ _RELATORIO_PDF = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8
     {% for row in dados.linhas %}
     <tr>{% for col in dados.colunas %}<td{% if col.num %} class="num"{% endif %}>{% if col.brl %}{{ row[col.chave]|brl
       }}{% else %}{{ row[col.chave] }}{% endif %}</td>{% endfor %}</tr>
+    {% else %}
+    <tr><td colspan="{{ dados.colunas|length }}" style="text-align:center;color:#777">Nenhum registro encontrado.</td></tr>
     {% endfor %}
     </tbody>
     <tfoot><tr>{% for col in dados.colunas %}<td{% if col.num %} class="num"{% endif %}>{% if loop.first %}Total{%
       elif col.chave == dados.col_total %}{{ dados.total_centavos|brl }}{% endif %}</td>{% endfor %}</tr></tfoot>
   </table>
 </div>
-<p class="aviso">🧪 Mockup — dados de exemplo para validação do layout, ainda não ligados à base real. {{ dados.linhas|length }} registro(s).</p>
+<p class="aviso">{% if dados.mock %}🧪 Dados de exemplo — este relatório ainda não está ligado à base real.
+  {% else %}Documento gerencial gerado pelo Zaq a partir dos lançamentos da conta.{% endif %} {{ dados.linhas|length }} registro(s).</p>
 </body></html>"""
 
 

@@ -1655,6 +1655,7 @@ def comunicacao_whatsapp_qr_iniciar(request: Request):
     r = wq.iniciar(ctx["conta_id"])
     return JSONResponse({"ok": bool(r.get("ok", True) and not r.get("erro")),
                          "status": r.get("status"), "qr": r.get("qr"),
+                         "sincronizando": bool(r.get("sincronizando")), "sync_progress": r.get("syncProgress") or 0,
                          "msg": _QR_ROT.get(r.get("status"), "") if r.get("status") else (r.get("erro") or "")})
 
 
@@ -1667,7 +1668,9 @@ def comunicacao_whatsapp_qr_status(request: Request):
     from finance import whatsapp_qr as wq
     r = wq.status(ctx["conta_id"])
     st = r.get("status") or "desconectado"
-    return JSONResponse({"ok": True, "status": st, "qr": r.get("qr"), "msg": _QR_ROT.get(st, "")})
+    return JSONResponse({"ok": True, "status": st, "qr": r.get("qr"),
+                         "sincronizando": bool(r.get("sincronizando")), "sync_progress": r.get("syncProgress") or 0,
+                         "msg": _QR_ROT.get(st, "")})
 
 
 @router.post("/painel/prospeccao/comunicacao/whatsapp-qr-sair")
@@ -7104,18 +7107,32 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <div id="qr-box" style="margin-top:.6rem;text-align:center;display:none">
           <img id="qr-img" alt="QR do WhatsApp" style="width:220px;max-width:100%;border-radius:10px;background:#fff;padding:.4rem">
         </div>
+        <div id="qr-sync" style="margin-top:.6rem;display:none">
+          <div style="font-size:.78rem;margin-bottom:.3rem">📥 Sincronizando conversas dos últimos 30 dias… <b id="qr-sync-pct">0%</b></div>
+          <div style="height:8px;border-radius:5px;background:var(--bg);overflow:hidden;border:1px solid var(--borda)">
+            <div id="qr-sync-bar" style="height:100%;width:0%;background:var(--verde);transition:width .4s"></div>
+          </div>
+        </div>
         <div class="mut" id="qr-msg" style="font-size:.78rem;margin-top:.45rem"></div>
         <script>
         var _qrTimer=null;
         function qrShow(d){var box=document.getElementById('qr-box'),img=document.getElementById('qr-img'),
-            msg=document.getElementById('qr-msg'),sair=document.getElementById('qr-sair'),btn=document.getElementById('qr-btn');
-          if(d.qr){img.src=d.qr;box.style.display='block';}else{box.style.display='none';}
-          if(msg)msg.textContent=d.msg||'';
+            msg=document.getElementById('qr-msg'),sair=document.getElementById('qr-sair'),btn=document.getElementById('qr-btn'),
+            sync=document.getElementById('qr-sync'),syncBar=document.getElementById('qr-sync-bar'),syncPct=document.getElementById('qr-sync-pct');
           var conectado=d.status==='conectado';
+          // conectado tira o QR da tela na hora — nada de deixar a imagem velha
+          // parada aí sem dizer nada (era exatamente essa a queixa).
+          if(d.qr&&!conectado){img.src=d.qr;box.style.display='block';}else{box.style.display='none';}
+          if(sync)sync.style.display=(conectado&&d.sincronizando)?'block':'none';
+          if(syncBar)syncBar.style.width=(d.sync_progress||0)+'%';
+          if(syncPct)syncPct.textContent=(d.sync_progress||0)+'%';
+          if(msg)msg.textContent=(conectado&&d.sincronizando)?'':(d.msg||'');
           if(sair)sair.style.display=(d.status&&d.status!=='desconectado')?'inline-flex':'none';
           if(btn)btn.textContent=conectado?'Reconectar':'📱 Gerar QR';
           if(msg)msg.style.color=conectado?'var(--verde-claro)':'';
-          if(d.status==='conectado'||d.status==='desconectado'){if(_qrTimer){clearInterval(_qrTimer);_qrTimer=null;}}}
+          // só para de perguntar quando realmente não tem mais nada mudando:
+          // desconectado, ou conectado E já terminou de sincronizar o histórico.
+          if(d.status==='desconectado'||(conectado&&!d.sincronizando)){if(_qrTimer){clearInterval(_qrTimer);_qrTimer=null;}}}
         function qrPoll(){fetch('/painel/prospeccao/comunicacao/whatsapp-qr-status').then(function(r){return r.json();}).then(qrShow).catch(function(){});}
         function qrIniciar(){var btn=document.getElementById('qr-btn'),msg=document.getElementById('qr-msg');
           btn.disabled=true;var t=btn.textContent;btn.textContent='Gerando…';if(msg)msg.textContent='';
@@ -7127,7 +7144,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         function qrSair(){if(!confirm('Desconectar o WhatsApp por QR desta empresa?'))return;
           fetch('/painel/prospeccao/comunicacao/whatsapp-qr-sair',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(){
             if(_qrTimer){clearInterval(_qrTimer);_qrTimer=null;}qrShow({status:'desconectado',msg:'Desconectado.'});}).catch(function(){});}
-        {% if canais.wa_provedor=='qr' %}qrPoll();{% endif %}
+        {% if canais.wa_provedor=='qr' %}qrPoll();_qrTimer=setInterval(qrPoll,3000);{% endif %}
         </script>
       </div>
       <script>

@@ -226,6 +226,14 @@ async function iniciarSessao (contaId) {
     }
     if (connection === 'open') {
       s.status = 'conectado'; s.qr = null
+      // Sincronizando o histórico dos últimos 30 dias (syncFullHistory) — some
+      // sozinho quando parar de chegar evento novo por 5s, ou no máximo em 25s
+      // (nem todo pareamento dispara messaging-history.set; sem isso a barra
+      // ficava carregando pra sempre quando não tinha histórico pra sincronizar).
+      s.sincronizando = true
+      s.syncProgress = 0
+      clearTimeout(s._syncTimeout)
+      s._syncTimeout = setTimeout(() => { s.sincronizando = false }, 25000)
       log.info({ contaId }, 'WhatsApp conectado')
     }
     if (connection === 'close') {
@@ -256,11 +264,16 @@ async function iniciarSessao (contaId) {
     }
   })
 
-  // Histórico (só dispara logo após conectar/parear, isLatest marca o último lote).
-  // Mensagens de ANTES de conectar viram conversa ÓRFÃ (nunca lead sozinho) — importa
-  // só os últimos 30 dias, ver HISTORICO_JANELA_SEGUNDOS.
-  sock.ev.on('messaging-history.set', async ({ messages, isLatest }) => {
-    log.info({ contaId, n: messages.length, isLatest }, 'messaging-history.set recebido')
+  // Histórico (só dispara logo após conectar/parear). Mensagens de ANTES de
+  // conectar viram conversa ÓRFÃ (nunca lead sozinho) — importa só os últimos
+  // 30 dias, ver HISTORICO_JANELA_SEGUNDOS. `progress` (0-100) vem do próprio
+  // Baileys por bloco sincronizado — usa pra alimentar a barra de carregamento
+  // do painel; sem evento novo por 5s, dá como concluído (ver timeout acima).
+  sock.ev.on('messaging-history.set', async ({ messages, isLatest, progress, syncType }) => {
+    log.info({ contaId, n: messages.length, isLatest, progress, syncType }, 'messaging-history.set recebido')
+    if (typeof progress === 'number') s.syncProgress = progress
+    clearTimeout(s._syncTimeout)
+    s._syncTimeout = setTimeout(() => { s.sincronizando = false }, 5000)
     for (const m of messages) { await repassarHistorico(contaId, m) }
   })
 
@@ -301,22 +314,32 @@ const servidor = http.createServer(async (req, res) => {
 
       if (req.method === 'POST' && acao === 'iniciar') {
         const s = await iniciarSessao(contaId)
-        return json(res, 200, { ok: true, status: s.status, qr: s.qr })
+        return json(res, 200, { ok: true, status: s.status, qr: s.qr,
+          sincronizando: !!s.sincronizando, syncProgress: s.syncProgress || 0 })
       }
       if (req.method === 'GET' && acao === 'status') {
         const s = sessoes.get(contaId) || { status: 'desconectado', qr: null }
-        return json(res, 200, { ok: true, status: s.status, qr: s.qr || null })
+        return json(res, 200, { ok: true, status: s.status, qr: s.qr || null,
+          sincronizando: !!s.sincronizando, syncProgress: s.syncProgress || 0 })
       }
       if (req.method === 'POST' && acao === 'enviar') {
         const body = await lerBody(req)
         const jid = jidDe(body.numero)
         const s = sessoes.get(contaId)
+        // log sempre, mesmo quando falha — sem isso não dava pra saber SE o
+        // status realmente não era 'conectado' na hora do envio ou se o
+        // sendMessage em si que deu erro (dois motivos bem diferentes).
+        log.info({ contaId, status: s && s.status, temSock: !!(s && s.sock) }, 'enviar: tentativa')
         if (!s || s.status !== 'conectado' || !s.sock) return json(res, 200, { ok: false, erro: 'desconectado' })
         if (!jid) return json(res, 200, { ok: false, erro: 'numero_invalido' })
         try {
           const r = await s.sock.sendMessage(jid, { text: String(body.texto || '').slice(0, 4000) })
+          log.info({ contaId, id: r && r.key && r.key.id }, 'enviar: sucesso ✓')
           return json(res, 200, { ok: true, id: (r && r.key && r.key.id) || '' })
-        } catch (e) { return json(res, 200, { ok: false, erro: String(e).slice(0, 180) }) }
+        } catch (e) {
+          log.warn({ contaId, e: String(e) }, 'enviar: sendMessage falhou')
+          return json(res, 200, { ok: false, erro: String(e).slice(0, 180) })
+        }
       }
       if (req.method === 'POST' && acao === 'sair') {
         const s = sessoes.get(contaId)

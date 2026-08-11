@@ -344,7 +344,12 @@ async function iniciarSessao (contaId) {
     // log sempre que o evento disparar, mesmo filtrado — sem isso não dava pra saber
     // se o socket estava recebendo mensagem nenhuma ou só descartando pelo filtro.
     log.info({ contaId, type, n: messages.length }, 'messages.upsert recebido')
-    if (type !== 'notify') return
+    // MessageUpsertType só tem 'notify' (ao vivo) e 'append' (mensagem legítima que
+    // chegou enquanto a conexão teve uma variação breve — "estava offline, aqui está
+    // o que você perdeu", node.attrs.offline no Baileys). NÃO é o histórico em massa
+    // (isso é o messaging-history.set, evento separado) — descartar 'append' jogava
+    // fora mensagem de verdade da conversa, tanto entrada quanto o eco de mensagem
+    // que o vendedor manda direto pelo celular (fromMe).
     for (const m of messages) {
       if (m.key && m.key.fromMe) { await repassarSaida(contaId, m); continue }
       await repassarEntrada(contaId, m)

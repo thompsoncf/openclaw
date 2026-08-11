@@ -5650,11 +5650,15 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
   .rel-tag.ok{background:#15301f;color:#9fe8c9;border:1px solid var(--verde)}
   .rel-tag.aviso{background:#332a12;color:#f0dca6;border:1px solid #6e5a22}
   .rel-tag.erro{background:#3a1d1d;color:#f0b8b8;border:1px solid #6e2b2b}
-  .rel-tbl-wrap{overflow-x:auto}
+  .rel-tbl-wrap{overflow-x:auto;max-width:100%}
   .rel-tbl-wrap table{min-width:640px}
   .rel-num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
   .rel-tot td{border-top:2px solid var(--borda);font-weight:700}
-  @media (max-width:600px){.rel-filtros{align-items:stretch}.rel-filtros select{flex:1 1 auto}}
+  .rel-metricas{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:1.2rem 0}
+  .rel-scroll-dica{display:none}
+  @media (max-width:600px){.rel-filtros{align-items:stretch}.rel-filtros select{flex:1 1 auto}
+   .rel-metricas{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:700px){.rel-scroll-dica{display:block}}
 </style>
 <div class="card larga">
   <h1 style="margin:0">📊 Relatórios <span class="mut" style="font-weight:400;font-size:.85rem">· {{ dados.label }}</span></h1>
@@ -5681,10 +5685,11 @@ _RELATORIOS = """{% extends "base" %}{% block conteudo %}
     <a class="rel-pdf" href="/painel/relatorios/pdf?tipo={{ tipo }}&periodo={{ periodo }}" target="_blank" rel="noopener">🖨️ Exportar PDF</a>
   </form>
 
-  <div class="fin-cards" style="grid-template-columns:repeat({{ dados.metricas|length }},1fr)">
+  <div class="rel-metricas">
     {% for label, valor in dados.metricas %}<div class="metric"><span>{{ label }}</span><b class="nowrap">{{ valor }}</b></div>{% endfor %}
   </div>
 
+  <p class="dica-toque rel-scroll-dica">👉 arraste a tabela pros lados pra ver todas as colunas</p>
   <div class="rel-tbl-wrap">
   <table>
     <tr>{% for col in dados.colunas %}<th{% if col.num %} class="rel-num"{% endif %}>{{ col.rotulo }}</th>{% endfor %}</tr>

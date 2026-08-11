@@ -2034,6 +2034,8 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
              where conta_id=%s and right(regexp_replace(coalesce(whatsapp, telefone, ''), '\D', '', 'g'), 8) = %s
              order by atualizado_em desc limit 1""", (conta_id, alvo8)).fetchone()
     lead_id = lead[0] if lead else None
+    lead_novo = False
+    nome_lead_novo = None
     if not lead_id:
         # Já existe uma conversa ÓRFÃ desse número (ex.: importada do histórico do
         # WhatsApp por QR, de ANTES de conectar — ver _wa_historico_conversa)? É um
@@ -2052,12 +2054,16 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
             c.execute("update conversas set ultima_msg_em=now() where id=%s", (conv_id,))
             return conv_id
         # contato NOVO de verdade (landing/WhatsApp) → vira lead QUENTE, não atribuído (o dono distribui).
+        # Nome vem do perfil do WhatsApp (pushName) quando o contato deixa público;
+        # sem isso, o WhatsApp simplesmente não manda outro nome pra gente pegar.
         nome = (nome_perfil or "").strip() or "Contato WhatsApp"
         lead_id = c.execute(
             """insert into prospeccao (conta_id, vendedor_id, empresa, whatsapp,
                  origem, temperatura, status, estagio)
                values (%s, null, %s, %s, 'whatsapp_inbound', 'quente', 'novo', 'lead') returning id""",
             (conta_id, nome[:250], "+" + remetente)).fetchone()[0]
+        lead_novo = True
+        nome_lead_novo = nome
     else:
         # lead da BASE respondeu/topou no WhatsApp → promove pro funil (Novo + Quente)
         _promover_para_lead(c, conta_id, lead_id)
@@ -2092,6 +2098,7 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     # rodízio: se o lead ainda não tem dono, distribui pro próximo vendedor da fila.
     # Cobre contato NOVO e resposta de campanha (ambos passam por aqui). Best-effort —
     # nunca deixa a entrada da mensagem quebrar; o aviso vai numa thread solta.
+    _mid = None
     try:
         from finance import distribuicao as _dist
         _mid = _dist.atribuir_se_sem_dono(c, conta_id, lead_id)
@@ -2103,6 +2110,22 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
                              args=(get_pool(), conta_id, _mid, _emp), daemon=True).start()
     except Exception:  # noqa: BLE001
         pass
+    # Lead novo de verdade (não resposta de alguém que já tinha entrada na base) já
+    # sai da caixa com um retorno agendado — assim ninguém esquece de responder.
+    # Best-effort: nunca deixa a entrada da mensagem quebrar por isso.
+    if lead_novo:
+        try:
+            from finance import agenda as _agenda
+            _agenda.criar_evento(
+                get_pool(), conta_id,
+                f"Retornar contato: {nome_lead_novo}",
+                _agenda.agora_brt() + timedelta(hours=2),
+                membro_id=_mid, tipo="empresa",
+                descricao="Lead novo pelo WhatsApp — retornar contato o quanto antes.",
+                prospeccao_id=lead_id,
+            )
+        except Exception:  # noqa: BLE001
+            pass
     return conv_id
 
 

@@ -61,9 +61,15 @@ def por_token(pool, token: str) -> dict | None:
             "evento": ev, "empresa": r[13]}
 
 
-def responder(pool, token: str, status: str, resposta: str | None = None) -> dict | None:
+def responder(pool, token: str, status: str, resposta: str | None = None,
+              canal: str = "web") -> dict | None:
     """Registra a resposta do convidado (confirmado/remarcar/recusado). Devolve o
     convidado atualizado (com evento + empresa) pra avisar o dono, ou None.
+
+    `canal` ('web' ou 'whatsapp') importa pro "aviso antes da reunião" mais tarde:
+    só uma resposta que veio de verdade pelo WhatsApp abre a janela de 24h de
+    texto livre — confirmar pela página pública (sem login) não abre sessão
+    nenhuma, mesmo que pareça "recente" (ver _dentro_da_janela).
 
     Traz `mudou`: True só quando o status REALMENTE mudou de valor. Assim, re-tocar
     o botão / reabrir o link com a MESMA resposta não avisa o dono de novo (evita a
@@ -78,8 +84,9 @@ def responder(pool, token: str, status: str, resposta: str | None = None) -> dic
             return None
         anterior = atual[0]
         c.execute(
-            "update evento_convidados set status=%s, resposta=%s, respondido_em=now() "
-            "where token=%s", (status, (resposta or "").strip() or None, tok))
+            "update evento_convidados set status=%s, resposta=%s, respondido_em=now(), "
+            "respondido_canal=%s where token=%s",
+            (status, (resposta or "").strip() or None, canal, tok))
         c.commit()
     conv = por_token(pool, tok)
     if conv is not None:
@@ -93,7 +100,7 @@ def por_evento(pool, conta_id: int, evento_ids: list[int]) -> dict[int, list[dic
         return {}
     with pool.connection() as c:
         rows = c.execute(
-            "select evento_id, id, nome, contato, status, token, respondido_em "
+            "select evento_id, id, nome, contato, status, token, respondido_em, respondido_canal "
             "from evento_convidados where conta_id=%s and evento_id = any(%s) order by id",
             (conta_id, list(evento_ids))).fetchall()
     out: dict[int, list[dict]] = {}
@@ -101,7 +108,7 @@ def por_evento(pool, conta_id: int, evento_ids: list[int]) -> dict[int, list[dic
         out.setdefault(r[0], []).append(
             {"evento_id": r[0], "id": r[1], "nome": r[2], "contato": r[3],
              "status": r[4], "status_rot": STATUS_ROT.get(r[4], "Aguardando"),
-             "token": r[5], "respondido_em": r[6]})
+             "token": r[5], "respondido_em": r[6], "respondido_canal": r[7]})
     return out
 
 
@@ -295,16 +302,19 @@ def enviar_convite_whatsapp(pool, token: str) -> dict:
 
 # ---- Aviso "seu compromisso começa em breve" pros CONFIRMADOS (opt-in) --------
 #
-# O convidado que confirmou NÃO é lead frio: a própria confirmação foi uma
-# mensagem dele, o que abre a janela de 24h do WhatsApp (Twilio/Cloud API) pra
-# responder de graça, sem template — só precisa do template aprovado quando o
-# lembrete cai FORA dessa janela (reunião marcada bem depois da confirmação).
+# O convidado que confirmou NÃO é lead frio: SE a própria confirmação foi uma
+# MENSAGEM DE WHATSAPP dele, isso abre a janela de 24h pra responder de graça,
+# sem template. Mas confirmar pela página pública (/convite/<token>, sem login)
+# NÃO é mensagem nenhuma — não abre sessão de WhatsApp nenhuma, mesmo que
+# pareça "recente". Por isso o canal importa, não só o horário: só respondido
+# de verdade PELO WHATSAPP conta como "dentro da janela".
 
 JANELA_SESSAO = timedelta(hours=24)
 
 
-def _dentro_da_janela(respondido_em, agora) -> bool:
-    return bool(respondido_em) and (agora - respondido_em) < JANELA_SESSAO
+def _dentro_da_janela(respondido_em, respondido_canal, agora) -> bool:
+    return (respondido_canal == "whatsapp" and bool(respondido_em)
+           and (agora - respondido_em) < JANELA_SESSAO)
 
 
 def texto_lembrete_convidado(nome: str, titulo: str, hora: str, faltam_min: int) -> str:
@@ -324,17 +334,19 @@ def template_lembrete_configurado() -> bool:
 
 def avisar_convidado_confirmado(pool, conta_id: int, contato: str, nome: str,
                                 titulo: str, hora: str, faltam_min: int,
-                                respondido_em, agora) -> dict:
+                                respondido_em, respondido_canal, agora) -> dict:
     """Avisa o convidado CONFIRMADO que o compromisso tá chegando.
 
-    Dentro da janela de 24h desde a confirmação dele: manda texto LIVRE (sem
-    template, sem custo extra — é só uma resposta dentro da conversa já aberta).
-    Fora da janela: precisa do template aprovado (TWILIO_TMPL_LEMBRETE_SID); sem
-    ele, não manda (erro tolerante, nunca levanta)."""
+    Dentro da janela de 24h desde uma confirmação DE VERDADE pelo WhatsApp:
+    manda texto LIVRE (sem template, sem custo extra — é só uma resposta dentro
+    da conversa já aberta). Fora dela (inclui QUALQUER confirmação pela página
+    pública, que nunca abre sessão): precisa do template aprovado
+    (TWILIO_TMPL_LEMBRETE_SID); sem ele, não manda (erro tolerante, nunca
+    levanta)."""
     from . import whatsapp_out as wout
     if not (contato or "").strip():
         return {"ok": False, "erro": "sem_numero"}
-    if _dentro_da_janela(respondido_em, agora):
+    if _dentro_da_janela(respondido_em, respondido_canal, agora):
         texto = texto_lembrete_convidado(nome, titulo, hora, faltam_min)
         with pool.connection() as conn:
             return wout.enviar(conn, conta_id, contato, texto)
@@ -370,7 +382,7 @@ def avisar_convidado_remarcado(pool, conta_id: int, g: dict, ev: dict,
     contato = (g.get("contato") or "").strip()
     if not contato:
         return {"ok": False, "erro": "sem_numero"}
-    if _dentro_da_janela(g.get("respondido_em"), agora):
+    if _dentro_da_janela(g.get("respondido_em"), g.get("respondido_canal"), agora):
         from . import whatsapp_out as wout
         url = url_convite(g["token"])
         texto = texto_remarcado(g.get("nome"), ev["titulo"], hora_antiga, ag.fmt_hora(ev), url,

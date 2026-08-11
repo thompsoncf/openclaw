@@ -104,22 +104,39 @@ def _avisos_proximos(pool, conta_id: int, antes_min: int, agora,
     return n
 
 
+def _ja_avisado(pool, conta_id: int, chave: str) -> bool:
+    with pool.connection() as c:
+        r = c.execute(
+            "select 1 from lembretes_enviados where conta_id=%s and tipo=%s and chave=%s",
+            (conta_id, "aviso_convidado", chave)).fetchone()
+        return r is not None
+
+
 def _avisar_convidados_confirmados(pool, conta_id: int, ev: dict, hora: str,
                                    faltam: int, agora) -> int:
     """Manda o mesmo 'tá chegando a hora' pra quem CONFIRMOU presença nesse evento
-    — dedup por convidado (não pelo evento, já consumido pelo aviso do dono)."""
+    — dedup por convidado (não pelo evento, já consumido pelo aviso do dono).
+
+    Só marca como enviado DEPOIS de confirmar que enviou — uma falha (Twilio
+    fora do ar, sem template pra fora da janela etc.) não pode "queimar" a
+    tentativa pra sempre; o próximo ciclo (a cada ~2min, até o evento começar)
+    tenta de novo. rodar() já serializa por advisory lock, então não corre risco
+    de mandar em dobro entre checar e marcar."""
     n = 0
     convidados = cv.por_evento(pool, conta_id, [ev["id"]]).get(ev["id"], [])
     for g in convidados:
         if g["status"] != "confirmado" or not (g.get("contato") or "").strip():
             continue
+        chave = f"evt:{ev['id']}:conv:{g['id']}"
         try:
-            if not _primeira_vez(pool, conta_id, "aviso_convidado", f"evt:{ev['id']}:conv:{g['id']}"):
+            if _ja_avisado(pool, conta_id, chave):
                 continue
             r = cv.avisar_convidado_confirmado(pool, conta_id, g["contato"], g.get("nome"),
                                                ev["titulo"], hora, faltam,
-                                               g.get("respondido_em"), agora)
+                                               g.get("respondido_em"), g.get("respondido_canal"),
+                                               agora)
             if r.get("ok"):
+                _primeira_vez(pool, conta_id, "aviso_convidado", chave)
                 n += 1
         except Exception:  # noqa: BLE001
             # um convidado com problema (ex.: dedup falhando por algum motivo

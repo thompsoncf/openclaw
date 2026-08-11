@@ -22,7 +22,7 @@ def pool():
     migr = Path(__file__).resolve().parent.parent / "db" / "migracoes"
     with p.connection() as c:
         for nome in ("098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql",
-                    "130_evento_desfecho.sql", "131_evento_link_online.sql"):
+                    "130_evento_desfecho.sql", "131_evento_link_online.sql", "132_convidado_canal_resposta.sql"):
             c.execute((migr / nome).read_text(encoding="utf-8"))
         c.commit()
     yield p
@@ -448,7 +448,8 @@ def test_remarcar_e_avisar_muda_data_e_reseta_status(pool, conta_id):
 def test_remarcar_e_avisar_notifica_dentro_da_janela_com_texto_livre(pool, conta_id, monkeypatch):
     ev = _evento(pool, conta_id, titulo="Alinhamento")
     ca = cv.criar_convidado(pool, conta_id, ev["id"], "Bia", "86988880002")
-    cv.responder(pool, ca["token"], "confirmado")          # respondido_em = agora (dentro da janela)
+    # canal="whatsapp": só uma confirmação de verdade pelo WhatsApp abre a janela de 24h.
+    cv.responder(pool, ca["token"], "confirmado", canal="whatsapp")   # respondido_em = agora (dentro da janela)
     from finance import whatsapp_out as wout
     capt = {}
     monkeypatch.setattr(wout, "enviar", lambda c, cid, numero, texto: capt.update(
@@ -465,7 +466,7 @@ def test_remarcar_e_avisar_notifica_com_link_da_chamada(pool, conta_id, monkeypa
     ev = ag.criar_evento(pool, conta_id, "Daily remarcada", ag.agora_brt() + timedelta(days=1),
                          local="Online", link_online="https://meet.google.com/abc-defg-hij")
     ca = cv.criar_convidado(pool, conta_id, ev["id"], "Bia", "86988880002")
-    cv.responder(pool, ca["token"], "confirmado")
+    cv.responder(pool, ca["token"], "confirmado", canal="whatsapp")
     from finance import whatsapp_out as wout
     capt = {}
     monkeypatch.setattr(wout, "enviar", lambda c, cid, numero, texto: capt.update(texto=texto) or {"ok": True})

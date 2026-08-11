@@ -2220,7 +2220,7 @@ async def webhook_twilio(request: Request, background_tasks: BackgroundTasks):
         if _st:
             _pend = _cv.pendentes_por_numero(pool, remetente)
             if _pend:
-                _conv = _cv.responder(pool, _pend[0]["token"], _st)
+                _conv = _cv.responder(pool, _pend[0]["token"], _st, canal="whatsapp")
                 if _conv:
                     if _conv.get("mudou"):                             # só avisa se mudou
                         _cv.pos_resposta(pool, _conv)

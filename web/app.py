@@ -511,7 +511,7 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
             if _st:
                 _pend = _cv.pendentes_por_numero(pool, numero)
                 if _pend:
-                    _c = _cv.responder(pool, _pend[0]["token"], _st)
+                    _c = _cv.responder(pool, _pend[0]["token"], _st, canal="whatsapp")
                     if _c:
                         if _c.get("mudou"):                 # só avisa se mudou (não repete)
                             _cv.pos_resposta(pool, _c)

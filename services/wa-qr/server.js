@@ -222,7 +222,11 @@ async function repassarHistorico (contaId, m) {
 
 async function iniciarSessao (contaId) {
   let s = sessoes.get(contaId)
-  if (s && (s.status === 'conectado' || s.iniciando)) return s
+  // Já tem sessão viva? Devolve a que existe em vez de abrir outra. 'aguardando_qr'
+  // entra na lista porque a página chama /iniciar sozinha ao carregar: sem isso,
+  // recarregar a página (ou abrir numa segunda aba) no meio de um pareamento
+  // derrubava o socket do QR que a pessoa estava escaneando e gerava outro QR.
+  if (s && (s.iniciando || ((s.status === 'conectado' || s.status === 'aguardando_qr') && s.sock))) return s
   // Reconexão automática (setTimeout logo após o close handler) x início a frio
   // (primeiro "Gerar QR" depois do processo subir, sem sessão em memória): só o
   // início a frio pode estar herdando credenciais de um processo anterior que
@@ -279,6 +283,21 @@ async function iniciarSessao (contaId) {
     }
     log.info({ contaId, version }, 'iniciarSessao: versão resolvida, abrindo socket')
 
+    // Fecha o socket ANTERIOR antes de abrir outro. Sem isso só a referência
+    // (s.sock) era sobrescrita — o socket velho continuava vivo, conectado e com
+    // os listeners escutando. Dois sockets com a MESMA credencial ao mesmo tempo
+    // fazem o WhatsApp derrubar um deles (401/440), e o handler do socket velho
+    // tratava isso como "deslogou de vez": apagava a credencial inteira da conta
+    // (wa_qr_auth zerada) E mandava apagar todo o histórico de conversa — matando
+    // junto a sessão nova, que estava perfeitamente válida.
+    if (s.sock) {
+      try {
+        s.sock._descartado = true
+        s.sock.end(undefined)
+        log.info({ contaId }, 'socket anterior fechado antes de abrir um novo')
+      } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao fechar socket anterior') }
+    }
+
     const sock = makeWASocket({
       version,
       auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, log) },
@@ -301,6 +320,11 @@ async function iniciarSessao (contaId) {
     sock.ev.on('creds.update', saveCreds)
 
   sock.ev.on('connection.update', async (u) => {
+    // Socket já descartado (substituído por um novo): o end() dele ainda emite um
+    // último 'close'. Sem ignorar isso, esse evento tardio mexia no estado da
+    // sessão NOVA — marcava desconectado, agendava reconexão e, no pior caso,
+    // disparava a limpeza de credencial/histórico da sessão que estava ok.
+    if (sock._descartado) return
     const { connection, lastDisconnect, qr } = u
     if (qr) {
       try { s.qr = await QRCode.toDataURL(qr) } catch (_) { s.qr = null }
@@ -323,15 +347,33 @@ async function iniciarSessao (contaId) {
     if (connection === 'close') {
       const code = (lastDisconnect && lastDisconnect.error &&
         lastDisconnect.error.output && lastDisconnect.error.output.statusCode) || 0
+      // 440 = connectionReplaced: OUTRA sessão assumiu esta credencial (outro
+      // aparelho, outra instância do serviço). Não é logout do usuário, então não
+      // pode apagar nada — e reconectar aqui vira uma guerra de sessões, cada uma
+      // derrubando a outra em loop até o WhatsApp bloquear a conta.
+      if (code === DisconnectReason.connectionReplaced) {
+        s.status = 'desconectado'
+        s.qr = null
+        log.warn({ contaId }, 'conexão substituída por outra sessão — parando sem apagar nada')
+        return
+      }
       const deslogado = code === DisconnectReason.loggedOut
       s.status = deslogado ? 'desconectado' : 'reconectando'
       s.qr = null
       log.warn({ contaId, code, deslogado }, 'conexão fechou')
       if (deslogado) {
+        // Só conta como logout DE VERDADE (o que autoriza apagar o histórico de
+        // conversa) se a sessão chegou a ficar registrada. Um 401 no meio de um
+        // pareamento que nunca completou não é "o usuário desconectou" — apagar o
+        // histórico aí destrói conversa à toa, sem nada em troca.
+        const eraRegistrada = !!(state.creds && state.creds.registered)
         try { await limparTudo() } catch (e) { log.warn({ contaId, e: String(e) }, 'limparTudo falhou') }
         sessoes.delete(contaId)
         lidMaps.delete(contaId)
-        avisarDeslogado(contaId).catch((e) => log.warn({ contaId, e: String(e) }, 'avisarDeslogado falhou'))
+        log.warn({ contaId, eraRegistrada }, 'deslogado — credenciais limpas')
+        if (eraRegistrada) {
+          avisarDeslogado(contaId).catch((e) => log.warn({ contaId, e: String(e) }, 'avisarDeslogado falhou'))
+        }
       } else {
         setTimeout(() => {
           iniciarSessao(contaId).catch((e) => log.error({ contaId, e: String(e) }, 'reconexão automática falhou'))

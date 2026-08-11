@@ -6931,7 +6931,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% else %}<div class="mut" style="margin-top:.4rem;font-size:.8rem">SMTP (Google Workspace). Prospecção fria ✓</div>{% endif %}
     </div>
     <div class="cx-card">
-      <h3>💬 WhatsApp <span class="cx-stat {{ 'st-on' if canais.whatsapp else 'st-off' }}">● {{ 'Conectado' if canais.whatsapp else 'A configurar' }}</span></h3>
+      <h3>💬 WhatsApp <span class="cx-stat {{ 'st-on' if canais.whatsapp else 'st-off' }}">● {{ ('Serviço de QR ligado — veja o status da sessão abaixo' if canais.wa_provedor == 'qr' else 'Conectado') if canais.whatsapp else 'A configurar' }}</span></h3>
       <div class="mut" style="font-size:.8rem;margin-bottom:.2rem">📥 Última recebida: {% if canais.ult_in.get('whatsapp') %}<b style="color:var(--verde-claro)">{{ canais.ult_in['whatsapp'] }}</b>{% else %}<span style="color:var(--mut)">nenhuma ainda</span>{% endif %}</div>
       {% if gerencia %}
       <div class="mut" style="font-size:.8rem;margin-bottom:.1rem">Como este cliente conecta o WhatsApp:</div>

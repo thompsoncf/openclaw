@@ -2035,7 +2035,23 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
              order by atualizado_em desc limit 1""", (conta_id, alvo8)).fetchone()
     lead_id = lead[0] if lead else None
     if not lead_id:
-        # contato NOVO (landing/WhatsApp) → vira lead QUENTE, não atribuído (o dono distribui).
+        # Já existe uma conversa ÓRFÃ desse número (ex.: importada do histórico do
+        # WhatsApp por QR, de ANTES de conectar — ver _wa_historico_conversa)? É um
+        # contato ANTIGO: não vira lead sozinho, só anexa na conversa órfã. O vendedor
+        # decide se vale virar lead (botão "virar lead" no inbox de Comunicação).
+        orfa = c.execute(
+            """select id from conversas where conta_id=%s and canal='whatsapp'
+                and prospeccao_id is null and contato_ref=%s""",
+            (conta_id, remetente)).fetchone()
+        if orfa:
+            conv_id = orfa[0]
+            c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
+                         values (%s,'whatsapp','in','lead',%s,%s)
+                         on conflict (provider_sid) where provider_sid is not null do nothing""",
+                      (conv_id, (corpo or "")[:8000], sid))
+            c.execute("update conversas set ultima_msg_em=now() where id=%s", (conv_id,))
+            return conv_id
+        # contato NOVO de verdade (landing/WhatsApp) → vira lead QUENTE, não atribuído (o dono distribui).
         nome = (nome_perfil or "").strip() or "Contato WhatsApp"
         lead_id = c.execute(
             """insert into prospeccao (conta_id, vendedor_id, empresa, whatsapp,
@@ -2645,6 +2661,83 @@ async def webhook_wa_qr(request: Request, background_tasks: BackgroundTasks):
     if agente_on:
         from finance import agente as _ag
         background_tasks.add_task(_ag.atender, get_pool(), conta_id, conv_id)
+    return Response("ok", media_type="text/plain")
+
+
+def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando) -> int:
+    """WhatsApp IMPORTADO do histórico (mensagem de ANTES de conectar por QR, ver
+    /webhooks/wa-qr/historico): grava a conversa como ÓRFÃ (sem lead), preservando
+    a data original da mensagem. NUNCA cria ou promove prospecção sozinho — ao
+    contrário de _wa_inbound_conversa (mensagem NOVA, em tempo real). O vendedor
+    decide se vale virar lead (botão "virar lead" no inbox de Comunicação)."""
+    remetente = _so_digitos(remetente)
+    conv = c.execute(
+        """select id from conversas where conta_id=%s and canal='whatsapp'
+            and prospeccao_id is null and contato_ref=%s""",
+        (conta_id, remetente)).fetchone()
+    if conv:
+        conv_id = conv[0]
+    else:
+        conv_id = c.execute(
+            """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status,
+                 agente_ativo, ultima_msg_em)
+               values (%s,null,'whatsapp',%s,'aberta',false,coalesce(%s,now())) returning id""",
+            (conta_id, remetente, quando)).fetchone()[0]
+    c.execute(
+        """insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid, criado_em)
+             values (%s,'whatsapp','in','lead',%s,%s,coalesce(%s,now()))
+             on conflict (provider_sid) where provider_sid is not null do nothing""",
+        (conv_id, (corpo or "")[:8000], sid, quando))
+    c.execute("update conversas set ultima_msg_em=greatest(ultima_msg_em, coalesce(%s,now())) where id=%s",
+              (quando, conv_id))
+    return conv_id
+
+
+@router.post("/webhooks/wa-qr/historico")
+async def webhook_wa_qr_historico(request: Request):
+    """Entrada do HISTÓRICO de WhatsApp por QR (serviço Node services/wa-qr, evento
+    messaging-history.set do Baileys — só dispara logo depois de conectar/parear,
+    limitado aos últimos 30 dias no lado do Node). Mensagens antigas viram conversa
+    ÓRFÃ (sem lead automático) — ver _wa_historico_conversa. Só o vendedor decide
+    se vale virar lead pra um número antigo."""
+    import logging
+    log = logging.getLogger("prospeccao.wa_qr")
+    segredo = os.environ.get("WA_QR_SHARED_SECRET") or ""
+    if not segredo or request.headers.get("x-wa-secret") != segredo:
+        log.warning("webhook_wa_qr_historico: segredo ausente ou não confere")
+        return Response(status_code=403)
+    try:
+        payload = json.loads((await request.body()).decode("utf-8") or "{}")
+    except Exception:  # noqa: BLE001
+        log.warning("webhook_wa_qr_historico: corpo não é JSON válido")
+        return Response("ok", media_type="text/plain")
+    try:
+        conta_id = int(payload.get("conta_id") or 0)
+    except (TypeError, ValueError):
+        conta_id = 0
+    sender = str(payload.get("sender") or "").strip()
+    texto = (payload.get("texto") or "").strip()
+    quando = None
+    ts = payload.get("quando")
+    if ts:
+        try:
+            quando = datetime.fromtimestamp(int(ts), tz=timezone.utc)
+        except (TypeError, ValueError, OSError):
+            quando = None
+    if not conta_id or not sender or not texto:
+        return Response("ok", media_type="text/plain")
+    pool = get_pool()
+    with pool.connection() as c:
+        dono = c.execute("""select 1 from canais_config
+                              where conta_id=%s and canal='whatsapp' and ativo and coalesce(provedor,'twilio')='qr'""",
+                         (conta_id,)).fetchone()
+        if not dono:
+            log.warning("webhook_wa_qr_historico: conta_id=%s sem canal whatsapp/qr ativo — descartado",
+                        conta_id)
+            return Response("ok", media_type="text/plain")
+        conv_id = _wa_historico_conversa(c, conta_id, sender, texto, payload.get("id") or None, quando)
+        c.commit()
+    log.info("webhook_wa_qr_historico: conta_id=%s conv_id=%s importado ✓", conta_id, conv_id)
     return Response("ok", media_type="text/plain")
 
 

@@ -15,6 +15,11 @@
  * Ao chegar mensagem de texto, faz POST em ${APP_URL}/webhooks/wa-qr com o mesmo
  * segredo e {conta_id, sender, texto, nome, id}.
  *
+ * Histórico: logo após conectar/parear, o Baileys manda o histórico de conversas
+ * (messaging-history.set). Mensagens de ANTES de conectar (últimos 30 dias só) vão
+ * pra ${APP_URL}/webhooks/wa-qr/historico — viram conversa órfã no Zaq, sem gerar
+ * lead sozinho (o vendedor decide se vale virar lead pra um número antigo).
+ *
  * Env: DATABASE_URL, WA_QR_SHARED_SECRET, APP_URL, PORT (default 3000).
  */
 const http = require('node:http')
@@ -82,6 +87,34 @@ async function repassarEntrada (contaId, m) {
   } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao repassar entrada') }
 }
 
+const HISTORICO_JANELA_SEGUNDOS = 30 * 24 * 3600 // só os últimos 30 dias — ver README (risco QR)
+
+// Histórico importado (evento messaging-history.set, só dispara logo após conectar/parear).
+// Vira conversa ÓRFÃ do lado Python (nunca gera lead sozinho) — ver /webhooks/wa-qr/historico.
+async function repassarHistorico (contaId, m) {
+  if (!APP_URL) return
+  const texto = textoDaMsg(m)
+  const jid = (m.key && m.key.remoteJid) || ''
+  if (!texto || !jid || jid.endsWith('@g.us') || jid === 'status@broadcast') return
+  if (m.key && m.key.fromMe) return
+  const ts = Number(m.messageTimestamp) || 0
+  const corteSegundos = Math.floor(Date.now() / 1000) - HISTORICO_JANELA_SEGUNDOS
+  if (!ts || ts < corteSegundos) return
+  const sender = jid.split('@')[0]
+  const corpo = JSON.stringify({
+    conta_id: contaId, sender, texto, quando: ts,
+    id: (m.key && m.key.id) || ''
+  })
+  try {
+    const r = await fetch(APP_URL + '/webhooks/wa-qr/historico', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-wa-secret': SEGREDO },
+      body: corpo
+    })
+    if (!r.ok) log.warn({ contaId, status: r.status }, 'webhook wa-qr/historico respondeu não-ok')
+  } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao repassar histórico') }
+}
+
 async function iniciarSessao (contaId) {
   let s = sessoes.get(contaId)
   if (s && (s.status === 'conectado' || s.iniciando)) return s
@@ -100,7 +133,9 @@ async function iniciarSessao (contaId) {
     printQRInTerminal: false,
     browser: ['ZAQ', 'Chrome', '1.0.0'],
     logger: log,
-    syncFullHistory: false,
+    // liga a sincronização de histórico (só chega logo após conectar/parear); o
+    // filtro de janela fica em repassarHistorico — só os últimos 30 dias sobem pro Zaq.
+    syncFullHistory: true,
     markOnlineOnConnect: false
   })
   s.sock = sock
@@ -144,6 +179,14 @@ async function iniciarSessao (contaId) {
       if (m.key && m.key.fromMe) { log.info({ contaId }, 'ignorada: fromMe'); continue }
       await repassarEntrada(contaId, m)
     }
+  })
+
+  // Histórico (só dispara logo após conectar/parear, isLatest marca o último lote).
+  // Mensagens de ANTES de conectar viram conversa ÓRFÃ (nunca lead sozinho) — importa
+  // só os últimos 30 dias, ver HISTORICO_JANELA_SEGUNDOS.
+  sock.ev.on('messaging-history.set', async ({ messages, isLatest }) => {
+    log.info({ contaId, n: messages.length, isLatest }, 'messaging-history.set recebido')
+    for (const m of messages) { await repassarHistorico(contaId, m) }
   })
 
   return s

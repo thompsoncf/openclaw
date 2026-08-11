@@ -187,6 +187,15 @@ async function repassarHistorico (contaId, m) {
 async function iniciarSessao (contaId) {
   let s = sessoes.get(contaId)
   if (s && (s.status === 'conectado' || s.iniciando)) return s
+  // Reconexão automática (setTimeout logo após o close handler) x início a frio
+  // (primeiro "Gerar QR" depois do processo subir, sem sessão em memória): só o
+  // início a frio pode estar herdando credenciais de um processo anterior que
+  // caiu no meio do pareamento. Uma reconexão automática dentro do MESMO processo
+  // é exatamente o passo normal do Baileys logo após "pairing configured
+  // successfully" (ele sempre fecha com stream:error 515 e reconecta sozinho pra
+  // terminar o registro) — tratar isso como "travado" apaga o pareamento que
+  // acabou de dar certo, e é por isso que nenhum QR terminava de conectar.
+  const reconexaoAutomatica = !!(s && s.status === 'reconectando')
   s = s || { status: 'desconectado', qr: null }
   s.iniciando = true
   sessoes.set(contaId, s)
@@ -212,8 +221,9 @@ async function iniciarSessao (contaId) {
     // chaves meio-consumidas faz TODO QR novo falhar com "não foi possível
     // conectar o dispositivo" — já aconteceu mais de uma vez, sempre coincidindo
     // com um deploy no meio de um pareamento em andamento. Detecta e reseta
-    // sozinho pra um pareamento limpo, sem precisar mexer no banco na mão.
-    if (state.creds && state.creds.registered === false && state.creds.account) {
+    // sozinho pra um pareamento limpo, sem precisar mexer no banco na mão. NUNCA
+    // roda numa reconexão automática (ver comentário acima) — só num início a frio.
+    if (!reconexaoAutomatica && state.creds && state.creds.registered === false && state.creds.account) {
       log.warn({ contaId }, 'pareamento travado pela metade detectado — limpando pra recomeçar do zero')
       await limparTudo()
       ;({ state, saveCreds, limparTudo } = await useDbAuthState(pool, contaId))

@@ -46,6 +46,13 @@ const log = pino({ level: process.env.LOG_LEVEL || 'info' })
 if (!process.env.DATABASE_URL) { log.error('Falta DATABASE_URL'); process.exit(1) }
 if (!SEGREDO) { log.error('Falta WA_QR_SHARED_SECRET'); process.exit(1) }
 
+// Sem isso, um erro assíncrono que escapa de um try/catch (ex.: dentro de um
+// listener de evento do Baileys) só aparecia no Render como um stack trace cru
+// do Node, sem contexto nenhum — ou o processo caía silencioso e reiniciava sem
+// deixar rastro de PORQUE. Loga estruturado antes de qualquer coisa.
+process.on('unhandledRejection', (err) => log.error({ err: String(err && err.stack || err) }, 'unhandledRejection'))
+process.on('uncaughtException', (err) => log.error({ err: String(err && err.stack || err) }, 'uncaughtException'))
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: /localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL) ? false : { rejectUnauthorized: false },
@@ -183,39 +190,64 @@ async function iniciarSessao (contaId) {
   s = s || { status: 'desconectado', qr: null }
   s.iniciando = true
   sessoes.set(contaId, s)
+  log.info({ contaId }, 'iniciarSessao: começando')
 
-  let { state, saveCreds, limparTudo } = await useDbAuthState(pool, contaId)
-  // Pareamento travado pela metade: o celular escaneou e o WhatsApp já assinou a
-  // conta (creds.account preenchido), mas o processo caiu/reiniciou antes de
-  // terminar o handshake (registered nunca virou true). Reaproveitar essas
-  // chaves meio-consumidas faz TODO QR novo falhar com "não foi possível
-  // conectar o dispositivo" — já aconteceu mais de uma vez, sempre coincidindo
-  // com um deploy no meio de um pareamento em andamento. Detecta e reseta
-  // sozinho pra um pareamento limpo, sem precisar mexer no banco na mão.
-  if (state.creds && state.creds.registered === false && state.creds.account) {
-    log.warn({ contaId }, 'pareamento travado pela metade detectado — limpando pra recomeçar do zero')
-    await limparTudo()
-    ;({ state, saveCreds, limparTudo } = await useDbAuthState(pool, contaId))
-  }
-  s._limparTudo = limparTudo
-  let version
-  try { ({ version } = await fetchLatestBaileysVersion()) } catch (_) { /* usa o default */ }
+  // Trava de segurança: se por qualquer motivo isso nunca terminar (nem sucesso
+  // nem erro — ex.: uma chamada de rede que trava sem nunca rejeitar), sem isso
+  // `iniciando` ficava travado em true PRA SEMPRE, e todo clique em "Gerar QR"
+  // dali em diante virava um no-op silencioso, sem log nenhum explicando por quê.
+  const destravar = setTimeout(() => {
+    if (s.iniciando) {
+      log.error({ contaId }, 'iniciarSessao: travou mais de 30s sem terminar — destravando')
+      s.iniciando = false
+    }
+  }, 30000)
 
-  const sock = makeWASocket({
-    version,
-    auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, log) },
-    printQRInTerminal: false,
-    browser: ['ZAQ', 'Chrome', '1.0.0'],
-    logger: log,
-    // liga a sincronização de histórico (só chega logo após conectar/parear); o
-    // filtro de janela fica em repassarHistorico — só os últimos 30 dias sobem pro Zaq.
-    syncFullHistory: true,
-    markOnlineOnConnect: false
-  })
-  s.sock = sock
-  s.iniciando = false
+  try {
+    let { state, saveCreds, limparTudo } = await useDbAuthState(pool, contaId)
+    log.info({ contaId }, 'iniciarSessao: creds carregadas do banco')
+    // Pareamento travado pela metade: o celular escaneou e o WhatsApp já assinou a
+    // conta (creds.account preenchido), mas o processo caiu/reiniciou antes de
+    // terminar o handshake (registered nunca virou true). Reaproveitar essas
+    // chaves meio-consumidas faz TODO QR novo falhar com "não foi possível
+    // conectar o dispositivo" — já aconteceu mais de uma vez, sempre coincidindo
+    // com um deploy no meio de um pareamento em andamento. Detecta e reseta
+    // sozinho pra um pareamento limpo, sem precisar mexer no banco na mão.
+    if (state.creds && state.creds.registered === false && state.creds.account) {
+      log.warn({ contaId }, 'pareamento travado pela metade detectado — limpando pra recomeçar do zero')
+      await limparTudo()
+      ;({ state, saveCreds, limparTudo } = await useDbAuthState(pool, contaId))
+    }
+    s._limparTudo = limparTudo
+    let version
+    try {
+      // fetchLatestBaileysVersion não tem timeout próprio — se a rede travar (não
+      // dar erro, só nunca responder), o await ficava pendurado pra sempre e nada
+      // disso aqui embaixo rodava. 8s é de sobra pra um GET numa API pública.
+      version = (await Promise.race([
+        fetchLatestBaileysVersion(),
+        new Promise((_r, rej) => setTimeout(() => rej(new Error('timeout ao buscar versão')), 8000))
+      ])).version
+    } catch (e) {
+      log.warn({ contaId, e: String(e) }, 'fetchLatestBaileysVersion falhou/travou — usando versão default')
+    }
+    log.info({ contaId, version }, 'iniciarSessao: versão resolvida, abrindo socket')
 
-  sock.ev.on('creds.update', saveCreds)
+    const sock = makeWASocket({
+      version,
+      auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, log) },
+      printQRInTerminal: false,
+      browser: ['ZAQ', 'Chrome', '1.0.0'],
+      logger: log,
+      // liga a sincronização de histórico (só chega logo após conectar/parear); o
+      // filtro de janela fica em repassarHistorico — só os últimos 30 dias sobem pro Zaq.
+      syncFullHistory: true,
+      markOnlineOnConnect: false
+    })
+    s.sock = sock
+    log.info({ contaId }, 'iniciarSessao: socket criado, registrando listeners')
+
+    sock.ev.on('creds.update', saveCreds)
 
   sock.ev.on('connection.update', async (u) => {
     const { connection, lastDisconnect, qr } = u
@@ -244,11 +276,13 @@ async function iniciarSessao (contaId) {
       s.qr = null
       log.warn({ contaId, code, deslogado }, 'conexão fechou')
       if (deslogado) {
-        try { await limparTudo() } catch (_) {}
+        try { await limparTudo() } catch (e) { log.warn({ contaId, e: String(e) }, 'limparTudo falhou') }
         sessoes.delete(contaId)
-        avisarDeslogado(contaId).catch(() => {})
+        avisarDeslogado(contaId).catch((e) => log.warn({ contaId, e: String(e) }, 'avisarDeslogado falhou'))
       } else {
-        setTimeout(() => { iniciarSessao(contaId).catch(() => {}) }, 2500)
+        setTimeout(() => {
+          iniciarSessao(contaId).catch((e) => log.error({ contaId, e: String(e) }, 'reconexão automática falhou'))
+        }, 2500)
       }
     }
   })
@@ -276,6 +310,13 @@ async function iniciarSessao (contaId) {
     s._syncTimeout = setTimeout(() => { s.sincronizando = false }, 5000)
     for (const m of messages) { await repassarHistorico(contaId, m) }
   })
+  } catch (e) {
+    log.error({ contaId, e: String(e && e.stack || e) }, 'iniciarSessao: falhou')
+    s.status = 'desconectado'
+  } finally {
+    clearTimeout(destravar)
+    s.iniciando = false
+  }
 
   return s
 }

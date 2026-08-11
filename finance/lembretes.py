@@ -88,27 +88,34 @@ def _avisos_proximos(pool, conta_id: int, antes_min: int, agora,
     "Avisar os convidados" no painel), pros convidados CONFIRMADOS (WhatsApp —
     veja convites.avisar_convidado_confirmado: livre dentro da janela de 24h
     desde a confirmação dele, template aprovado fora dela; sem nenhum dos dois,
-    só não manda pra esse convidado)."""
+    só não manda pra esse convidado).
+
+    Só marca como enviado pro dono DEPOIS de confirmar que enviou (mesmo motivo
+    do aviso ao convidado, ver _avisar_convidados_confirmados): uma falha do
+    Telegram (rede, fora do ar) não pode queimar a tentativa pra sempre — o
+    próximo ciclo (a cada ~2min, até o evento começar) tenta de novo."""
     eventos = ag.listar_eventos(pool, conta_id, agora, agora + timedelta(minutes=antes_min))
     n = 0
     for ev in eventos:
         h = ev["inicio"].astimezone(ag.BRT).strftime("%H:%M")
         faltam = max(0, int((ev["inicio"] - agora).total_seconds() // 60))
-        if _primeira_vez(pool, conta_id, "aviso", f"evt:{ev['id']}"):
+        chave = f"evt:{ev['id']}"
+        if not _ja_avisado(pool, conta_id, "aviso", chave):
             loc = f"\n📍 {ev['local']}" if ev.get("local") else ""
             txt = f"⏰ *Daqui a pouco* (em ~{faltam} min): *{ev['titulo']}* às {h}.{loc}"
             if notificar.enviar_para_dono(pool, conta_id, txt):
+                _primeira_vez(pool, conta_id, "aviso", chave)
                 n += 1
         if avisar_convidados:
             n += _avisar_convidados_confirmados(pool, conta_id, ev, h, faltam, agora)
     return n
 
 
-def _ja_avisado(pool, conta_id: int, chave: str) -> bool:
+def _ja_avisado(pool, conta_id: int, tipo: str, chave: str) -> bool:
     with pool.connection() as c:
         r = c.execute(
             "select 1 from lembretes_enviados where conta_id=%s and tipo=%s and chave=%s",
-            (conta_id, "aviso_convidado", chave)).fetchone()
+            (conta_id, tipo, chave)).fetchone()
         return r is not None
 
 
@@ -129,7 +136,7 @@ def _avisar_convidados_confirmados(pool, conta_id: int, ev: dict, hora: str,
             continue
         chave = f"evt:{ev['id']}:conv:{g['id']}"
         try:
-            if _ja_avisado(pool, conta_id, chave):
+            if _ja_avisado(pool, conta_id, "aviso_convidado", chave):
                 continue
             r = cv.avisar_convidado_confirmado(pool, conta_id, g["contato"], g.get("nome"),
                                                ev["titulo"], hora, faltam,

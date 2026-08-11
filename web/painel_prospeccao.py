@@ -7144,7 +7144,19 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         function qrSair(){if(!confirm('Desconectar o WhatsApp por QR desta empresa?'))return;
           fetch('/painel/prospeccao/comunicacao/whatsapp-qr-sair',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(){
             if(_qrTimer){clearInterval(_qrTimer);_qrTimer=null;}qrShow({status:'desconectado',msg:'Desconectado.'});}).catch(function(){});}
-        {% if canais.wa_provedor=='qr' %}qrPoll();_qrTimer=setInterval(qrPoll,3000);{% endif %}
+        // Ao abrir a página, tenta reconectar sozinho em vez de só checar o status —
+        // o serviço Node reinicia a cada deploy (perde a sessão da memória, mas as
+        // credenciais continuam salvas), e sem isso o usuário via "Desconectado" e
+        // achava que precisava escanear um QR novo, quando na real bastava reconectar
+        // com o que já tinha salvo. iniciarSessao só gera QR de verdade quando não
+        // existe credencial válida — reconectar não tem custo/risco de rodar à toa.
+        function qrAutoReconectar(){
+          fetch('/painel/prospeccao/comunicacao/whatsapp-qr-iniciar',{method:'POST',headers:{'X-Requested-With':'fetch'}})
+            .then(function(r){return r.json();}).then(function(d){qrShow(d);})
+            .catch(function(){qrPoll();})
+            .then(function(){if(_qrTimer)clearInterval(_qrTimer);_qrTimer=setInterval(qrPoll,3000);});
+        }
+        {% if canais.wa_provedor=='qr' %}qrAutoReconectar();{% endif %}
         </script>
       </div>
       <script>

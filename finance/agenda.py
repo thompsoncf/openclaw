@@ -83,16 +83,25 @@ def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
                  membro_id: int | None = None, fim: datetime | None = None,
                  local: str | None = None, descricao: str | None = None,
                  lembrete_min: int | None = None, tipo: str = "pessoal",
-                 link_online: str | None = None) -> dict:
+                 link_online: str | None = None,
+                 prospeccao_id: int | None = None) -> dict:
+    """prospeccao_id liga o evento a um lead (ex.: retorno de contato) — some da
+    Agenda pro cliente, mas fica clicável a partir da ficha do lead (migração 136)."""
     tipo = tipo if tipo in TIPOS else "pessoal"
+    # prospeccao_id só entra no INSERT quando informado — mantém compatível com
+    # bancos/testes que ainda não rodaram a migração 136 (que criou a coluna).
+    colunas = "conta_id, membro_id, titulo, inicio, fim, local, descricao, lembrete_min, tipo, link_online"
+    valores = [conta_id, membro_id, titulo.strip(), inicio, fim, local, descricao,
+               lembrete_min, tipo, link_online]
+    if prospeccao_id is not None:
+        colunas += ", prospeccao_id"
+        valores.append(prospeccao_id)
     with pool.connection() as c:
         row = c.execute(
-            """insert into eventos_agenda
-               (conta_id, membro_id, titulo, inicio, fim, local, descricao, lembrete_min, tipo, link_online)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            f"""insert into eventos_agenda ({colunas})
+               values ({','.join(['%s'] * len(valores))})
                returning """ + _COLS,
-            (conta_id, membro_id, titulo.strip(), inicio, fim, local, descricao,
-             lembrete_min, tipo, link_online),
+            valores,
         ).fetchone()
         c.commit()
     return _fmt_evento(row)

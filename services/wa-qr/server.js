@@ -62,6 +62,19 @@ const pool = new Pool({
 // contaId -> { sock, status, qr, iniciando }
 const sessoes = new Map()
 
+// contaId -> Map(jid @lid -> jid real @s.whatsapp.net). Só existe pra reconstruir o
+// número real de mensagens de HISTÓRICO (ver comentário em numeroReal mais abaixo).
+const lidMaps = new Map()
+
+function atualizarLidMap (contaId, contacts) {
+  if (!Array.isArray(contacts) || !contacts.length) return
+  let mapa = lidMaps.get(contaId)
+  if (!mapa) { mapa = new Map(); lidMaps.set(contaId, mapa) }
+  for (const ct of contacts) {
+    if (ct && ct.lid && ct.jid) mapa.set(ct.lid, ct.jid)
+  }
+}
+
 function jidDe (numero) {
   const d = String(numero || '').replace(/\D/g, '')
   if (!d) return null
@@ -78,11 +91,20 @@ function textoDaMsg (m) {
 }
 
 // O WhatsApp esconde o número de telefone real de alguns contatos atrás de um ID
-// interno opaco (@lid, "linked ID" — privacidade). Quando isso acontece, o Baileys
-// ainda manda o número real em m.key.senderPn (formato <numero>@s.whatsapp.net);
-// sem isso, sender = jid.split('@')[0] vira um ID sem sentido, não um telefone.
-function numeroReal (m) {
-  return (m.key && (m.key.senderPn || m.key.remoteJid)) || ''
+// interno opaco (@lid, "linked ID" — privacidade). Em mensagem AO VIVO o Baileys
+// manda o número real em m.key.senderPn (formato <numero>@s.whatsapp.net); sem
+// isso, sender = jid.split('@')[0] vira um ID sem sentido, não um telefone.
+// Mensagem de HISTÓRICO (messaging-history.set) não tem senderPn — esse campo só
+// existe no decode de mensagem ao vivo — então cai pro mapa lid->jid construído a
+// partir da lista de contatos que vem junto no próprio histórico (atualizarLidMap).
+function numeroReal (m, contaId) {
+  if (m.key && m.key.senderPn) return m.key.senderPn
+  const remoteJid = (m.key && m.key.remoteJid) || ''
+  if (remoteJid.endsWith('@lid')) {
+    const real = lidMaps.get(contaId) && lidMaps.get(contaId).get(remoteJid)
+    if (real) return real
+  }
+  return remoteJid
 }
 
 // Canais/newsletters do WhatsApp usam o MESMO formato numérico de ID que grupos
@@ -100,7 +122,7 @@ async function repassarEntrada (contaId, m) {
     log.info({ contaId, temTexto: !!texto, jid }, 'entrada ignorada (sem texto, grupo, canal ou status)')
     return
   }
-  const sender = numeroReal(m).split('@')[0]
+  const sender = numeroReal(m, contaId).split('@')[0]
   const corpo = JSON.stringify({
     conta_id: contaId, sender, texto,
     nome: m.pushName || '', id: (m.key && m.key.id) || ''
@@ -127,7 +149,7 @@ async function repassarSaida (contaId, m) {
   const texto = textoDaMsg(m)
   const jid = (m.key && m.key.remoteJid) || ''
   if (!texto || !ehConversaValida(jid)) return
-  const destinatario = numeroReal(m).split('@')[0]
+  const destinatario = numeroReal(m, contaId).split('@')[0]
   const corpo = JSON.stringify({
     conta_id: contaId, sender: destinatario, texto,
     id: (m.key && m.key.id) || ''
@@ -169,7 +191,7 @@ async function repassarHistorico (contaId, m) {
   const ts = Number(m.messageTimestamp) || 0
   const corteSegundos = Math.floor(Date.now() / 1000) - HISTORICO_JANELA_SEGUNDOS
   if (!ts || ts < corteSegundos) return
-  const sender = numeroReal(m).split('@')[0]
+  const sender = numeroReal(m, contaId).split('@')[0]
   const corpo = JSON.stringify({
     conta_id: contaId, sender, texto, quando: ts,
     id: (m.key && m.key.id) || ''
@@ -288,6 +310,7 @@ async function iniciarSessao (contaId) {
       if (deslogado) {
         try { await limparTudo() } catch (e) { log.warn({ contaId, e: String(e) }, 'limparTudo falhou') }
         sessoes.delete(contaId)
+        lidMaps.delete(contaId)
         avisarDeslogado(contaId).catch((e) => log.warn({ contaId, e: String(e) }, 'avisarDeslogado falhou'))
       } else {
         setTimeout(() => {
@@ -313,8 +336,13 @@ async function iniciarSessao (contaId) {
   // 30 dias, ver HISTORICO_JANELA_SEGUNDOS. `progress` (0-100) vem do próprio
   // Baileys por bloco sincronizado — usa pra alimentar a barra de carregamento
   // do painel; sem evento novo por 5s, dá como concluído (ver timeout acima).
-  sock.ev.on('messaging-history.set', async ({ messages, isLatest, progress, syncType }) => {
+  sock.ev.on('messaging-history.set', async ({ messages, contacts, isLatest, progress, syncType }) => {
     log.info({ contaId, n: messages.length, isLatest, progress, syncType }, 'messaging-history.set recebido')
+    // Cada onda de histórico traz também os contatos daquele bloco — usa pra
+    // resolver @lid -> número real (ver comentário em numeroReal). Faz isso ANTES
+    // de repassar as mensagens da mesma onda, senão o mapa fica sempre um bloco
+    // atrasado.
+    atualizarLidMap(contaId, contacts)
     // O histórico chega em ondas (ex.: recentes primeiro, depois o histórico
     // completo) e cada onda reinicia o progress do zero — sem o Math.max a barra
     // sobe até 100%, "volta" pra perto de 0% quando a próxima onda começa, e
@@ -412,6 +440,7 @@ const servidor = http.createServer(async (req, res) => {
           }
         } catch (_) {}
         sessoes.delete(contaId)
+        lidMaps.delete(contaId)
         return json(res, 200, { ok: true })
       }
     }

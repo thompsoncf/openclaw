@@ -7209,7 +7209,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   {% endif %}
 </div>
 <script>
-var _cxConv=null,_cxSig='',_cxAg=null,_cxTimer=null,_cxSeen={},_cxList={};
+var _cxConv=null,_cxSig='',_cxAg=null,_cxTimer=null,_cxSeen={},_cxList={},_cxListHtml=null;
 var _cxEscopo='{{ escopo }}';   // 'email' (aba E-mails) ou 'msg' (aba Conversas)
 function cxEsc(s){var d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
 function cxMsgsHtml(d){
@@ -7290,9 +7290,17 @@ function cxListItem(c){
 function cxPollList(){
   var box=document.getElementById('cx-list');if(!box)return;
   fetch('/painel/prospeccao/comunicacao/lista?'+cxParams()).then(function(r){return r.json();}).then(function(d){
-    if(!d.ok)return;var h='';_cxList={};
-    d.convs.forEach(function(c){_cxList[c.id]=c;h+=cxListItem(c);});
-    box.innerHTML=h||'<div class="cx-empty">Nenhuma conversa ainda.</div>';
+    if(!d.ok)return;var h='';var novo={};
+    d.convs.forEach(function(c){novo[c.id]=c;h+=cxListItem(c);});
+    h=h||'<div class="cx-empty">Nenhuma conversa ainda.</div>';
+    // sem isso, todo poll (4s) trocava o innerHTML inteiro mesmo sem nada mudar,
+    // e sempre zerava o scroll pro topo — na sincronização de histórico (lista
+    // reordenando toda hora) isso parecia a tela "subindo e descendo" sozinha.
+    if(h===_cxListHtml)return;
+    _cxListHtml=h;_cxList=novo;
+    var perto=box.scrollTop<40;var st=box.scrollTop;
+    box.innerHTML=h;
+    box.scrollTop=perto?0:st;
   }).catch(function(){});
 }
 function cxAgente(convId,on){

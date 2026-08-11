@@ -27,7 +27,8 @@ def pool():
         for nome in ("098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql",
                     "101_agenda_lembretes.sql", "126_agenda_avisar_convidados.sql",
                     "128_lembretes_aviso_convidado.sql", "130_evento_desfecho.sql",
-                    "131_evento_link_online.sql"):
+                    "131_evento_link_online.sql",
+                    "132_convidado_canal_resposta.sql"):
             c.execute((migr / nome).read_text(encoding="utf-8"))
         c.commit()
     yield p
@@ -116,7 +117,9 @@ def test_convidado_confirmado_recebe_aviso_dentro_da_janela(pool, conta_id, envi
     agora = ag.agora_brt().replace(hour=14, minute=0, second=0, microsecond=0)
     ev = ag.criar_evento(pool, conta_id, "Reunião com Ana", agora + timedelta(minutes=20))
     conv = cv.criar_convidado(pool, conta_id, ev["id"], "Ana", "86999990000")
-    cv.responder(pool, conv["token"], "confirmado")   # seta respondido_em=now() -> dentro da janela de 24h
+    # canal="whatsapp": só uma confirmação de VERDADE pelo WhatsApp abre a janela de
+    # 24h — confirmar pela página pública (canal padrão "web") não abre sessão nenhuma.
+    cv.responder(pool, conv["token"], "confirmado", canal="whatsapp")
     ag.salvar_config(pool, conta_id, resumo_ativo=False, hora_resumo=7, aviso_antes_min=30,
                      avisar_convidados=True)
     r = lb.rodar(pool, agora=agora)                   # não pode levantar CheckViolation
@@ -126,6 +129,57 @@ def test_convidado_confirmado_recebe_aviso_dentro_da_janela(pool, conta_id, envi
     with pool.connection() as c:
         row = c.execute("select 1 from lembretes_enviados where tipo='aviso_convidado'").fetchone()
     assert row is not None
+
+
+def test_convidado_confirmado_pela_web_usa_template_nao_texto_livre(pool, conta_id, monkeypatch):
+    """Bug relatado em produção: convidado confirmava pela página pública
+    (/convite/<token>, sem login) e nunca recebia o aviso antes da reunião,
+    mesmo com o template do lembrete aprovado e funcionando. Causa: respondido_em
+    ficava "recente" mesmo sem NENHUMA sessão de WhatsApp aberta (confirmar pela
+    web não é mensagem nenhuma), então o sistema tentava texto livre — que o
+    WhatsApp recusa fora de sessão de verdade — em vez do template que funcionaria."""
+    from finance import whatsapp_out as wout
+    livres, templates = [], []
+    monkeypatch.setattr(wout, "enviar",
+                        lambda c, cid, numero, texto: (livres.append(numero) or {"ok": True}))
+    monkeypatch.setattr(wout, "enviar_template",
+                        lambda c, cid, numero, sid, variaveis: (templates.append((numero, sid)) or {"ok": True}))
+    monkeypatch.setenv("TWILIO_TMPL_LEMBRETE_SID", "HXlembretetest")
+    agora = ag.agora_brt().replace(hour=14, minute=0, second=0, microsecond=0)
+    ev = ag.criar_evento(pool, conta_id, "Reunião com Ana", agora + timedelta(minutes=20))
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Ana", "86999990000")
+    cv.responder(pool, conv["token"], "confirmado")   # canal padrão "web" — confirmação AGORA MESMO
+    ag.salvar_config(pool, conta_id, resumo_ativo=False, hora_resumo=7, aviso_antes_min=30,
+                     avisar_convidados=True)
+    lb.rodar(pool, agora=agora)
+    assert livres == []                                # NÃO tentou texto livre (não tinha sessão de verdade)
+    assert templates == [("86999990000", "HXlembretetest")]   # foi pelo template, que funciona
+
+
+def test_convidado_confirmado_pela_web_sem_template_nao_manda_mas_pode_reter(pool, conta_id, monkeypatch):
+    """Sem template configurado, uma confirmação pela web não pode mandar nada
+    (não tem canal livre nem template) — mas a falha NÃO pode "queimar" a
+    tentativa: se o template for configurado depois, o próximo ciclo (~2min)
+    ainda dentro da janela do evento consegue mandar."""
+    from finance import whatsapp_out as wout
+    monkeypatch.delenv("TWILIO_TMPL_LEMBRETE_SID", raising=False)
+    agora = ag.agora_brt().replace(hour=14, minute=0, second=0, microsecond=0)
+    ev = ag.criar_evento(pool, conta_id, "Reunião com Ana", agora + timedelta(minutes=20))
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Ana", "86999990000")
+    cv.responder(pool, conv["token"], "confirmado")
+    ag.salvar_config(pool, conta_id, resumo_ativo=False, hora_resumo=7, aviso_antes_min=30,
+                     avisar_convidados=True)
+    lb.rodar(pool, agora=agora)
+    with pool.connection() as c:
+        assert c.execute("select 1 from lembretes_enviados where tipo='aviso_convidado'").fetchone() is None
+
+    # "configura" o template e roda o próximo ciclo (2min depois, evento ainda na janela)
+    templates = []
+    monkeypatch.setattr(wout, "enviar_template",
+                        lambda c, cid, numero, sid, variaveis: (templates.append(numero) or {"ok": True}))
+    monkeypatch.setenv("TWILIO_TMPL_LEMBRETE_SID", "HXlembretetest")
+    lb.rodar(pool, agora=agora.replace(minute=2))
+    assert templates == ["86999990000"]                # tentou de novo e dessa vez foi
 
 
 def test_so_aviso_ligado_nao_manda_resumo(pool, conta_id, enviados):

@@ -20,6 +20,13 @@
  * pra ${APP_URL}/webhooks/wa-qr/historico — viram conversa órfã no Zaq, sem gerar
  * lead sozinho (o vendedor decide se vale virar lead pra um número antigo).
  *
+ * Saída direto do celular: mensagem que o vendedor manda fora do Zaq (Baileys ecoa
+ * como fromMe) vai pra ${APP_URL}/webhooks/wa-qr/saida — só registra em conversa
+ * que já existe, nunca cria lead novo.
+ *
+ * Deslogar de vez (não queda temporária) avisa ${APP_URL}/webhooks/wa-qr/deslogado
+ * — apaga o histórico de conversa daquele canal (não apaga o lead em si).
+ *
  * Env: DATABASE_URL, WA_QR_SHARED_SECRET, APP_URL, PORT (default 3000).
  */
 const http = require('node:http')
@@ -102,6 +109,46 @@ async function repassarEntrada (contaId, m) {
   } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao repassar entrada') }
 }
 
+// Mensagem que o VENDEDOR mandou direto pelo WhatsApp do celular (fora do Zaq) —
+// o Baileys ecoa de volta como fromMe (todo aparelho ligado à mesma conta vê a
+// saída dos outros). Sem repassar isso, a conversa no Zaq ficava capenga: só
+// aparecia o que o lead mandou, nunca a resposta se o vendedor respondeu pelo
+// próprio celular. Dedup por provider_sid do lado Python evita duplicar quando
+// a mensagem já saiu PELO Zaq (que já grava na hora do envio).
+async function repassarSaida (contaId, m) {
+  if (!APP_URL) return
+  const texto = textoDaMsg(m)
+  const jid = (m.key && m.key.remoteJid) || ''
+  if (!texto || !ehConversaValida(jid)) return
+  const destinatario = numeroReal(m).split('@')[0]
+  const corpo = JSON.stringify({
+    conta_id: contaId, sender: destinatario, texto,
+    id: (m.key && m.key.id) || ''
+  })
+  try {
+    const r = await fetch(APP_URL + '/webhooks/wa-qr/saida', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-wa-secret': SEGREDO },
+      body: corpo
+    })
+    if (!r.ok) log.warn({ contaId, status: r.status }, 'webhook wa-qr/saida respondeu não-ok')
+  } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao repassar saída') }
+}
+
+// Deslogou de vez (não é queda temporária) — avisa o Python pra limpar o
+// histórico de conversa daquele canal. Best-effort: se falhar, o histórico
+// só fica desatualizado, não trava o logout.
+async function avisarDeslogado (contaId) {
+  if (!APP_URL) return
+  try {
+    await fetch(APP_URL + '/webhooks/wa-qr/deslogado', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-wa-secret': SEGREDO },
+      body: JSON.stringify({ conta_id: contaId })
+    })
+  } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao avisar deslogado') }
+}
+
 const HISTORICO_JANELA_SEGUNDOS = 30 * 24 * 3600 // só os últimos 30 dias — ver README (risco QR)
 
 // Histórico importado (evento messaging-history.set, só dispara logo após conectar/parear).
@@ -179,6 +226,7 @@ async function iniciarSessao (contaId) {
       if (deslogado) {
         try { await limparTudo() } catch (_) {}
         sessoes.delete(contaId)
+        avisarDeslogado(contaId).catch(() => {})
       } else {
         setTimeout(() => { iniciarSessao(contaId).catch(() => {}) }, 2500)
       }
@@ -191,7 +239,7 @@ async function iniciarSessao (contaId) {
     log.info({ contaId, type, n: messages.length }, 'messages.upsert recebido')
     if (type !== 'notify') return
     for (const m of messages) {
-      if (m.key && m.key.fromMe) { log.info({ contaId }, 'ignorada: fromMe'); continue }
+      if (m.key && m.key.fromMe) { await repassarSaida(contaId, m); continue }
       await repassarEntrada(contaId, m)
     }
   })

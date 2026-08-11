@@ -2766,6 +2766,108 @@ async def webhook_wa_qr_historico(request: Request):
     return Response("ok", media_type="text/plain")
 
 
+def _wa_saida_conversa(c, conta_id, destinatario, corpo, sid):
+    """Mensagem que o VENDEDOR mandou DIRETO pelo WhatsApp do celular (fora do
+    Zaq) — o Baileys ecoa de volta como fromMe. Só registra numa conversa que
+    JÁ EXISTE (nunca cria lead/conversa nova — sem contexto pra isso). Dedup
+    por provider_sid: se a mensagem já saiu PELO Zaq (que grava na hora do
+    envio em comunicacao_responder), a inserção aqui vira no-op."""
+    destinatario = _so_digitos(destinatario)
+    alvo8 = destinatario[-8:] if len(destinatario) >= 8 else destinatario
+    lead = c.execute(
+        r"""select id from prospeccao
+             where conta_id=%s and right(regexp_replace(coalesce(whatsapp, telefone, ''), '\D', '', 'g'), 8) = %s
+             order by atualizado_em desc limit 1""", (conta_id, alvo8)).fetchone()
+    lead_id = lead[0] if lead else None
+    conv = c.execute(
+        """select id from conversas where conta_id=%s and canal='whatsapp'
+            and (prospeccao_id=%s or (prospeccao_id is null and contato_ref=%s))
+            order by ultima_msg_em desc limit 1""",
+        (conta_id, lead_id, destinatario)).fetchone()
+    if not conv:
+        return None
+    conv_id = conv[0]
+    c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
+                 values (%s,'whatsapp','out','humano',%s,%s)
+                 on conflict (provider_sid) where provider_sid is not null do nothing""",
+              (conv_id, (corpo or "")[:8000], sid))
+    c.execute("update conversas set ultima_msg_em=greatest(ultima_msg_em, now()) where id=%s", (conv_id,))
+    return conv_id
+
+
+@router.post("/webhooks/wa-qr/saida")
+async def webhook_wa_qr_saida(request: Request):
+    """Eco de mensagem que o vendedor mandou DIRETO pelo WhatsApp do celular
+    (sem passar pelo Zaq) — grava na conversa já existente pra não ficar cego
+    do que já foi respondido. Nunca cria lead ou conversa nova."""
+    import logging
+    log = logging.getLogger("prospeccao.wa_qr")
+    segredo = os.environ.get("WA_QR_SHARED_SECRET") or ""
+    if not segredo or request.headers.get("x-wa-secret") != segredo:
+        return Response(status_code=403)
+    try:
+        payload = json.loads((await request.body()).decode("utf-8") or "{}")
+    except Exception:  # noqa: BLE001
+        return Response("ok", media_type="text/plain")
+    try:
+        conta_id = int(payload.get("conta_id") or 0)
+    except (TypeError, ValueError):
+        conta_id = 0
+    destinatario = str(payload.get("sender") or "").strip()
+    texto = (payload.get("texto") or "").strip()
+    if not conta_id or not destinatario or not texto:
+        return Response("ok", media_type="text/plain")
+    pool = get_pool()
+    with pool.connection() as c:
+        dono = c.execute("""select 1 from canais_config
+                              where conta_id=%s and canal='whatsapp' and ativo and coalesce(provedor,'twilio')='qr'""",
+                         (conta_id,)).fetchone()
+        if not dono:
+            return Response("ok", media_type="text/plain")
+        conv_id = _wa_saida_conversa(c, conta_id, destinatario, texto, payload.get("id") or None)
+        c.commit()
+    if conv_id:
+        log.info("webhook_wa_qr_saida: conta_id=%s conv_id=%s registrado ✓", conta_id, conv_id)
+    return Response("ok", media_type="text/plain")
+
+
+@router.post("/webhooks/wa-qr/deslogado")
+async def webhook_wa_qr_deslogado(request: Request):
+    """WhatsApp por QR deslogou DE VEZ (não é queda temporária — só dispara
+    quando o Baileys recebe DisconnectReason.loggedOut). Apaga o HISTÓRICO de
+    conversa (mensagens + conversas) daquele canal WhatsApp, pra não acumular
+    lixo de uma sessão que não existe mais. NÃO apaga o lead/prospecção em si
+    — só o chat; o registro comercial (funil, orçamento vinculado) continua."""
+    import logging
+    log = logging.getLogger("prospeccao.wa_qr")
+    segredo = os.environ.get("WA_QR_SHARED_SECRET") or ""
+    if not segredo or request.headers.get("x-wa-secret") != segredo:
+        return Response(status_code=403)
+    try:
+        payload = json.loads((await request.body()).decode("utf-8") or "{}")
+    except Exception:  # noqa: BLE001
+        return Response("ok", media_type="text/plain")
+    try:
+        conta_id = int(payload.get("conta_id") or 0)
+    except (TypeError, ValueError):
+        conta_id = 0
+    if not conta_id:
+        return Response("ok", media_type="text/plain")
+    pool = get_pool()
+    with pool.connection() as c:
+        n_msg = c.execute(
+            """delete from mensagens where conversa_id in
+                 (select id from conversas where conta_id=%s and canal='whatsapp')""",
+            (conta_id,)).rowcount
+        n_conv = c.execute(
+            "delete from conversas where conta_id=%s and canal='whatsapp'",
+            (conta_id,)).rowcount
+        c.commit()
+    log.warning("webhook_wa_qr_deslogado: conta_id=%s deslogou — apagadas %s mensagens e %s conversas "
+                "(lead/prospecção preservados)", conta_id, n_msg, n_conv)
+    return Response("ok", media_type="text/plain")
+
+
 # ================================================================ CAMPANHAS (Fase 2)
 # (definido ANTES de /{alvo_id} pra "campanhas" não cair na rota da ficha)
 _PASSOS_PADRAO = [

@@ -358,6 +358,31 @@ def agenda_desfecho(request: Request, evento_id: int = Form(...), desfecho: str 
     return JSONResponse({"ok": ok})
 
 
+# ================================================================ CONVIDADO (adicionar depois)
+@router.post("/painel/agenda/convidado/adicionar")
+def agenda_convidado_adicionar(request: Request, evento_id: int = Form(...),
+                               nome: str = Form(""), contato: str = Form(""),
+                               m: str = Form("")):
+    """Inclui mais um convidado num compromisso já marcado (antes só dava na
+    criação). Só em compromisso ativo — evento_por_id já filtra cancelado."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    voltar = f"/painel/agenda?m={m}" if m else "/painel/agenda"
+    ev = ag.evento_por_id(get_pool(), ctx["conta_id"], evento_id)
+    nome = (nome or "").strip()
+    contato = (contato or "").strip()
+    if not ev:
+        request.session["agenda_aviso"] = "Não achei esse compromisso."
+    elif not nome and not contato:
+        request.session["agenda_aviso"] = "Preencha nome ou contato do convidado."
+    else:
+        cv.criar_convidado(get_pool(), ctx["conta_id"], evento_id, nome, contato)
+        request.session["agenda_aviso"] = f"{nome or 'Convidado'} adicionado. Agora é só mandar o convite pra ele."
+        voltar += ("&" if "?" in voltar else "?") + f"convite_ev={evento_id}"
+    return RedirectResponse(voltar, status_code=303)
+
+
 _ERRO_ENVIO = {
     "sem_numero": "esse convidado não tem número de WhatsApp",
     "sem_template": "o template ainda não está configurado (falta a aprovação / o SID)",
@@ -575,6 +600,14 @@ _CSS = """<style>
 .rbtn.ok{background:var(--verde);color:#04160e}
 .rbtn.ok:hover{background:var(--verde-hover)}
 .rbtn.cc{background:transparent;border:1px solid var(--borda);color:var(--txt-mut)}
+.px-add{width:auto;margin:0;background:none;border:0;color:var(--txt-mut);cursor:pointer;font-size:1rem;line-height:1;padding:2px 4px;border-radius:6px}
+.px-add:hover{color:var(--verde-claro);background:rgba(29,158,117,.12)}
+.add-conv-box{display:none;margin-top:8px;padding:10px 11px;background:var(--card-2);border:1px solid var(--borda);border-radius:10px}
+.add-conv-box.show{display:block}
+.add-conv-box .rlbl{font-size:.7rem;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--txt-mut);margin-bottom:7px}
+.add-conv-row{display:flex;gap:8px}
+.add-conv-row input{flex:1;min-width:0;margin:0}
+.add-conv-actions{display:flex;gap:8px;margin-top:10px}
 .px-vazio{color:var(--txt-mut);font-size:.86rem;padding:8px 2px}
 /* formulários / cards laterais */
 .side-cards{display:flex;flex-direction:column;gap:18px}
@@ -726,7 +759,9 @@ _CSS = """<style>
 .dev-meta{display:flex;flex-wrap:wrap;gap:8px;font-size:.76rem;color:var(--txt-mut);margin-top:4px}
 .dev-desc{font-size:.8rem;color:var(--txt-mut);margin-top:6px;line-height:1.45;background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:7px 9px}
 .dev-conv{margin-top:9px;padding-top:9px;border-top:1px dashed var(--borda)}
-.dev-conv-lbl{font-size:.66rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--txt-mut);margin-bottom:6px}
+.dev-conv-lbl{font-size:.66rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--txt-mut);margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.dev-conv-add{font-size:.66rem;font-weight:700;letter-spacing:0;text-transform:none;color:var(--verde-claro);background:none;border:0;cursor:pointer;padding:0}
+.dev-conv-add:hover{text-decoration:underline}
 .guest{display:flex;align-items:center;gap:8px;padding:5px 0}
 .guest-info{flex:1;min-width:0}
 .guest-nome{font-size:.85rem;font-weight:600;color:var(--txt);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
@@ -874,8 +909,24 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
                   </div>
                 </form>
               </div>
+              <div class="add-conv-box" id="addConvBox-{{ e.id }}">
+                <form method="post" action="/painel/agenda/convidado/adicionar">
+                  <div class="rlbl">＋ Adicionar convidado</div>
+                  <input type="hidden" name="evento_id" value="{{ e.id }}">
+                  <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+                  <div class="add-conv-row">
+                    <input name="nome" placeholder="Nome" autocomplete="off">
+                    <input name="contato" placeholder="(86) 90000-0000" autocomplete="off">
+                  </div>
+                  <div class="add-conv-actions">
+                    <button class="rbtn ok" type="submit" data-busy="⏳ Adicionando…">Adicionar</button>
+                    <button class="rbtn cc" type="button" onclick="addConvToggle({{ e.id }})">Cancelar</button>
+                  </div>
+                </form>
+              </div>
             </div>
             <div class="px-actions">
+              <button class="px-add" type="button" title="Adicionar convidado" onclick="addConvToggle({{ e.id }})">＋👤</button>
               <button class="px-rm" type="button" title="Remarcar" onclick="remToggle({{ e.id }})">🔁</button>
               <form method="post" action="/painel/agenda/cancelar" data-ajax="cancelar" onsubmit="return confirm('Cancelar “{{ e.titulo }}”?')">
                 <input type="hidden" name="evento_id" value="{{ e.id }}">
@@ -1034,6 +1085,18 @@ function isoTitulo(iso){
   return DIAS_EXT_JS[d.getDay()] + ', ' + d.getDate() + ' de ' + MESES_JS[d.getMonth()+1];
 }
 function remToggleDia(id){ var box=document.getElementById('remBoxDia-'+id); if(box) box.classList.toggle('show'); }
+function addConvToggleDia(id){ var box=document.getElementById('addConvBoxDia-'+id); if(box) box.classList.toggle('show'); }
+function _addConvBoxHtml(e){
+  return '<div class="add-conv-box" id="addConvBoxDia-'+e.id+'">'
+    + '<form method="post" action="/painel/agenda/convidado/adicionar">'
+    + '<input type="hidden" name="evento_id" value="'+e.id+'">'
+    + '<input type="hidden" name="m" value="'+CUR_MES+'">'
+    + '<div class="rlbl">＋ Adicionar convidado</div>'
+    + '<div class="add-conv-row"><input name="nome" placeholder="Nome" autocomplete="off"><input name="contato" placeholder="(86) 90000-0000" autocomplete="off"></div>'
+    + '<div class="add-conv-actions"><button class="rbtn ok" type="submit">Adicionar</button>'
+    + '<button class="rbtn cc" type="button" onclick="addConvToggleDia('+e.id+')">Cancelar</button></div>'
+    + '</form></div>';
+}
 function _remarcarBoxHtml(e){
   return '<div class="remarcar-box" id="remBoxDia-'+e.id+'">'
     + '<form method="post" action="/painel/agenda/remarcar">'
@@ -1103,7 +1166,9 @@ function abrirDia(iso){
         + (g.wa?'<a class="guest-wa" href="'+g.wa+'" target="_blank" rel="noopener" title="Chamar '+_esc(g.nome||'convidado')+' no WhatsApp">💬</a>':'')
         + '</div>';
     });
-    if(conv) conv = '<div class="dev-conv"><div class="dev-conv-lbl">👤 Convidados</div>'+conv+'</div>';
+    conv = '<div class="dev-conv"><div class="dev-conv-lbl"><span>👤 Convidados</span>'
+      + '<button class="dev-conv-add" type="button" onclick="addConvToggleDia('+e.id+')">＋ adicionar</button></div>'
+      + conv + _addConvBoxHtml(e) + '</div>';
     var passado = new Date(e.inicio_iso) <= agora;
     var acaoTopo = passado ? '' : '<button class="px-rm" type="button" title="Remarcar" onclick="remToggleDia('+e.id+')">🔁</button>';
     html += '<div class="dev" data-ev="'+e.id+'"><div class="dev-dot d-'+e.tipo+'"></div><div class="dev-body">'
@@ -1191,6 +1256,7 @@ function cpRow(b){var row=b.closest('.share-row');if(!row)return;var txt=row.get
 function addGuest(){var box=document.getElementById('guests');var d=document.createElement('div');d.className='guest-row';d.innerHTML='<div><input class="gnome" name="convidado_nome" placeholder="Nome" autocomplete="off"></div><div><input name="convidado_contato" placeholder="(86) 90000-0000" autocomplete="off"></div><button type="button" class="g-rm" onclick="rmGuest(this)" title="Remover" aria-label="Remover">✕</button>';box.appendChild(d);var i=d.querySelector('input');if(i)i.focus();}
 function rmGuest(b){var box=document.getElementById('guests');var row=b.closest('.guest-row');if(box&&box.children.length>1){row.remove();}else{row.querySelectorAll('input').forEach(function(x){x.value='';});}}
 function remToggle(id){var box=document.getElementById('remBox-'+id);if(box)box.classList.toggle('show');}
+function addConvToggle(id){var box=document.getElementById('addConvBox-'+id);if(box)box.classList.toggle('show');}
 
 // ---------------- Local: busca de endereço (Google Places) + manual + enviar ----------------
 (function(){

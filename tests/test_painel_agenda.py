@@ -119,6 +119,51 @@ def test_rota_novo_salva_link_online_quando_marcado_online(pool, conta_id, monke
     assert evs and evs[0]["link_online"] == "https://meet.google.com/abc-defg-hij"
 
 
+def test_rota_convidado_adicionar_inclui_em_evento_ja_marcado(pool, conta_id, monkeypatch):
+    """Antes só dava pra adicionar convidado na hora de criar o compromisso — essa
+    rota permite incluir mais gente depois. Redireciona com convite_ev= pra já
+    abrir o card de compartilhar (mesmo comportamento de quando cria com convidados)."""
+    from web import painel_agenda as pa
+    monkeypatch.setattr(pa, "get_pool", lambda: pool)
+    monkeypatch.setattr(pa, "_acesso", lambda req: (
+        {"conta_id": conta_id, "gerencia": True, "membro_id": None}, None))
+    ev = ag.criar_evento(pool, conta_id, "Reunião de fechamento", ag.agora_brt() + timedelta(days=1))
+    resp = pa.agenda_convidado_adicionar(_FakeSessionRequest(conta_id), evento_id=ev["id"],
+                                         nome="Carlos", contato="86988887777", m="2026-08")
+    assert resp.status_code == 303
+    assert f"convite_ev={ev['id']}" in resp.headers["location"]
+    convidados = cv.por_evento(pool, conta_id, [ev["id"]]).get(ev["id"], [])
+    assert len(convidados) == 1
+    assert convidados[0]["nome"] == "Carlos" and convidados[0]["contato"] == "86988887777"
+    assert convidados[0]["status"] == "pendente"
+
+
+def test_rota_convidado_adicionar_exige_nome_ou_contato(pool, conta_id, monkeypatch):
+    from web import painel_agenda as pa
+    monkeypatch.setattr(pa, "get_pool", lambda: pool)
+    monkeypatch.setattr(pa, "_acesso", lambda req: (
+        {"conta_id": conta_id, "gerencia": True, "membro_id": None}, None))
+    ev = ag.criar_evento(pool, conta_id, "Sem convidado nenhum", ag.agora_brt() + timedelta(days=1))
+    resp = pa.agenda_convidado_adicionar(_FakeSessionRequest(conta_id), evento_id=ev["id"],
+                                         nome="", contato="", m="")
+    assert resp.status_code == 303
+    assert "convite_ev" not in resp.headers["location"]
+    assert cv.por_evento(pool, conta_id, [ev["id"]]).get(ev["id"], []) == []
+
+
+def test_rota_convidado_adicionar_recusa_evento_cancelado(pool, conta_id, monkeypatch):
+    from web import painel_agenda as pa
+    monkeypatch.setattr(pa, "get_pool", lambda: pool)
+    monkeypatch.setattr(pa, "_acesso", lambda req: (
+        {"conta_id": conta_id, "gerencia": True, "membro_id": None}, None))
+    ev = ag.criar_evento(pool, conta_id, "Vou cancelar", ag.agora_brt() + timedelta(days=1))
+    ag.cancelar_evento(pool, conta_id, ev["id"])
+    resp = pa.agenda_convidado_adicionar(_FakeSessionRequest(conta_id), evento_id=ev["id"],
+                                         nome="Carlos", contato="", m="")
+    assert resp.status_code == 303
+    assert cv.por_evento(pool, conta_id, [ev["id"]]).get(ev["id"], []) == []
+
+
 def test_rota_novo_ignora_link_online_se_nao_marcou_online(pool, conta_id, monkeypatch):
     """Defesa no servidor: mesmo que o cliente mande link_online preenchido (o JS
     já limpa ao trocar de modo, mas não confia cegamente no que vem do form),

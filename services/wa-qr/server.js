@@ -184,7 +184,19 @@ async function iniciarSessao (contaId) {
   s.iniciando = true
   sessoes.set(contaId, s)
 
-  const { state, saveCreds, limparTudo } = await useDbAuthState(pool, contaId)
+  let { state, saveCreds, limparTudo } = await useDbAuthState(pool, contaId)
+  // Pareamento travado pela metade: o celular escaneou e o WhatsApp já assinou a
+  // conta (creds.account preenchido), mas o processo caiu/reiniciou antes de
+  // terminar o handshake (registered nunca virou true). Reaproveitar essas
+  // chaves meio-consumidas faz TODO QR novo falhar com "não foi possível
+  // conectar o dispositivo" — já aconteceu mais de uma vez, sempre coincidindo
+  // com um deploy no meio de um pareamento em andamento. Detecta e reseta
+  // sozinho pra um pareamento limpo, sem precisar mexer no banco na mão.
+  if (state.creds && state.creds.registered === false && state.creds.account) {
+    log.warn({ contaId }, 'pareamento travado pela metade detectado — limpando pra recomeçar do zero')
+    await limparTudo()
+    ;({ state, saveCreds, limparTudo } = await useDbAuthState(pool, contaId))
+  }
   s._limparTudo = limparTudo
   let version
   try { ({ version } = await fetchLatestBaileysVersion()) } catch (_) { /* usa o default */ }

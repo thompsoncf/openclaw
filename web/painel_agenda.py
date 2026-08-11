@@ -568,7 +568,7 @@ _CSS = """<style>
 .remarcar-box.show{display:block}
 .remarcar-box .rlbl{font-size:.7rem;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--txt-mut);margin-bottom:7px}
 .remarcar-row2{display:flex;gap:8px}
-.remarcar-row2 input{flex:1;margin:0}
+.remarcar-row2 input{flex:1;min-width:0;margin:0}
 .remarcar-box .tg{padding:9px 0 0;margin-top:9px;border-top:1px dashed var(--borda);border-bottom:0}
 .remarcar-actions{display:flex;gap:8px;margin-top:10px}
 .rbtn{border:0;border-radius:8px;padding:.5rem .8rem;font-size:.8rem;font-weight:700;cursor:pointer}
@@ -632,6 +632,7 @@ _CSS = """<style>
 .pop-go{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;background:#25d366;color:#04160e;border:0;border-radius:9px;padding:.5rem;font-weight:700;font-size:.8rem;cursor:pointer;text-decoration:none}
 .pop-go:hover{background:#2ee578}
 .frm .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.frm .row2>div{min-width:0}
 .frm .segs{display:flex;gap:6px;margin-top:4px}
 .frm .segs label{flex:1;margin:0}
 .frm .segs input{position:absolute;opacity:0;pointer-events:none}

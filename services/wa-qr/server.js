@@ -59,10 +59,13 @@ function textoDaMsg (m) {
 }
 
 async function repassarEntrada (contaId, m) {
-  if (!APP_URL) { log.warn('APP_URL vazio — não repassa entrada'); return }
+  if (!APP_URL) { log.warn({ contaId }, 'APP_URL vazio — não repassa entrada'); return }
   const texto = textoDaMsg(m)
   const jid = (m.key && m.key.remoteJid) || ''
-  if (!texto || !jid || jid.endsWith('@g.us') || jid === 'status@broadcast') return
+  if (!texto || !jid || jid.endsWith('@g.us') || jid === 'status@broadcast') {
+    log.info({ contaId, temTexto: !!texto, jid }, 'entrada ignorada (sem texto, grupo ou status)')
+    return
+  }
   const sender = jid.split('@')[0]
   const corpo = JSON.stringify({
     conta_id: contaId, sender, texto,
@@ -74,8 +77,9 @@ async function repassarEntrada (contaId, m) {
       headers: { 'content-type': 'application/json', 'x-wa-secret': SEGREDO },
       body: corpo
     })
-    if (!r.ok) log.warn({ status: r.status }, 'webhook wa-qr respondeu não-ok')
-  } catch (e) { log.warn({ e: String(e) }, 'falha ao repassar entrada') }
+    if (!r.ok) log.warn({ contaId, status: r.status }, 'webhook wa-qr respondeu não-ok')
+    else log.info({ contaId, sender: sender.slice(0, 6) + '…' }, 'entrada repassada ao webhook ✓')
+  } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao repassar entrada') }
 }
 
 async function iniciarSessao (contaId) {
@@ -132,9 +136,12 @@ async function iniciarSessao (contaId) {
   })
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    // log sempre que o evento disparar, mesmo filtrado — sem isso não dava pra saber
+    // se o socket estava recebendo mensagem nenhuma ou só descartando pelo filtro.
+    log.info({ contaId, type, n: messages.length }, 'messages.upsert recebido')
     if (type !== 'notify') return
     for (const m of messages) {
-      if (m.key && m.key.fromMe) continue
+      if (m.key && m.key.fromMe) { log.info({ contaId }, 'ignorada: fromMe'); continue }
       await repassarEntrada(contaId, m)
     }
   })

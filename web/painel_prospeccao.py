@@ -2594,13 +2594,23 @@ async def webhook_meta(request: Request, background_tasks: BackgroundTasks):
 async def webhook_wa_qr(request: Request, background_tasks: BackgroundTasks):
     """Entrada do WhatsApp por QR (serviço Node services/wa-qr). Autentica pelo
     segredo compartilhado, roteia pela conta_id que o serviço já resolveu e trata
-    igual aos outros canais (lead + agente)."""
+    igual aos outros canais (lead + agente).
+
+    Logado em cada ponto de saída silenciosa (webhook_wa_qr:...) — o serviço Node
+    só responde "ok" mesmo quando descarta, então sem log aqui não dava pra saber
+    ONDE uma mensagem se perdia (segredo errado, payload incompleto, canal não
+    configurado como 'qr', etc.)."""
+    import logging
+    log = logging.getLogger("prospeccao.wa_qr")
     segredo = os.environ.get("WA_QR_SHARED_SECRET") or ""
     if not segredo or request.headers.get("x-wa-secret") != segredo:
+        log.warning("webhook_wa_qr: segredo ausente ou não confere (WA_QR_SHARED_SECRET "
+                    "configurado=%s)", bool(segredo))
         return Response(status_code=403)
     try:
         payload = json.loads((await request.body()).decode("utf-8") or "{}")
     except Exception:  # noqa: BLE001
+        log.warning("webhook_wa_qr: corpo não é JSON válido")
         return Response("ok", media_type="text/plain")
     try:
         conta_id = int(payload.get("conta_id") or 0)
@@ -2608,7 +2618,11 @@ async def webhook_wa_qr(request: Request, background_tasks: BackgroundTasks):
         conta_id = 0
     sender = str(payload.get("sender") or "").strip()
     texto = (payload.get("texto") or "").strip()
+    log.info("webhook_wa_qr: recebido conta_id=%s sender=%s%s texto_len=%d",
+             conta_id, sender[:4], "…" if sender else "", len(texto))
     if not conta_id or not sender or not texto:
+        log.warning("webhook_wa_qr: payload incompleto (conta_id=%s sender=%s texto=%s) — descartado",
+                    bool(conta_id), bool(sender), bool(texto))
         return Response("ok", media_type="text/plain")
     pool = get_pool()
     with pool.connection() as c:
@@ -2617,6 +2631,8 @@ async def webhook_wa_qr(request: Request, background_tasks: BackgroundTasks):
                               where conta_id=%s and canal='whatsapp' and ativo and coalesce(provedor,'twilio')='qr'""",
                          (conta_id,)).fetchone()
         if not dono:
+            log.warning("webhook_wa_qr: conta_id=%s sem canal whatsapp/qr ativo em canais_config — descartado",
+                        conta_id)
             return Response("ok", media_type="text/plain")
         m = c.execute("select coalesce(ativo,false) from agente_config where conta_id=%s",
                       (conta_id,)).fetchone()
@@ -2624,6 +2640,8 @@ async def webhook_wa_qr(request: Request, background_tasks: BackgroundTasks):
         conv_id = _wa_inbound_conversa(c, conta_id, sender, texto,
                                        payload.get("id") or None, payload.get("nome"), agente_on)
         c.commit()
+    log.info("webhook_wa_qr: conta_id=%s conv_id=%s gravado ✓ (agente_ativo=%s)",
+             conta_id, conv_id, agente_on)
     if agente_on:
         from finance import agente as _ag
         background_tasks.add_task(_ag.atender, get_pool(), conta_id, conv_id)

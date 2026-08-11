@@ -315,7 +315,11 @@ async function iniciarSessao (contaId) {
   // do painel; sem evento novo por 5s, dá como concluído (ver timeout acima).
   sock.ev.on('messaging-history.set', async ({ messages, isLatest, progress, syncType }) => {
     log.info({ contaId, n: messages.length, isLatest, progress, syncType }, 'messaging-history.set recebido')
-    if (typeof progress === 'number') s.syncProgress = progress
+    // O histórico chega em ondas (ex.: recentes primeiro, depois o histórico
+    // completo) e cada onda reinicia o progress do zero — sem o Math.max a barra
+    // sobe até 100%, "volta" pra perto de 0% quando a próxima onda começa, e
+    // parece quebrada na tela mesmo sem ter dado erro nenhum.
+    if (typeof progress === 'number') s.syncProgress = Math.max(s.syncProgress || 0, progress)
     clearTimeout(s._syncTimeout)
     s._syncTimeout = setTimeout(() => { s.sincronizando = false }, 5000)
     for (const m of messages) { await repassarHistorico(contaId, m) }

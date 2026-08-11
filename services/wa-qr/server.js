@@ -75,6 +75,20 @@ function atualizarLidMap (contaId, contacts) {
   }
 }
 
+// Roda fn(item) pra cada item com no máximo `limite` em paralelo — usado pra não
+// processar histórico um por um (um POST HTTP síncrono de cada vez pra 5000
+// mensagens represa mensagem AO VIVO atrás dessa fila enorme).
+async function comLimiteDeConcorrencia (itens, limite, fn) {
+  let i = 0
+  async function trabalhador () {
+    while (i < itens.length) {
+      const item = itens[i++]
+      await fn(item)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limite, itens.length) }, trabalhador))
+}
+
 function jidDe (numero) {
   const d = String(numero || '').replace(/\D/g, '')
   if (!d) return null
@@ -271,9 +285,14 @@ async function iniciarSessao (contaId) {
       printQRInTerminal: false,
       browser: ['ZAQ', 'Chrome', '1.0.0'],
       logger: log,
-      // liga a sincronização de histórico (só chega logo após conectar/parear); o
-      // filtro de janela fica em repassarHistorico — só os últimos 30 dias sobem pro Zaq.
-      syncFullHistory: true,
+      // syncFullHistory:true pede pro WhatsApp o histórico INTEIRO da conta (meses/
+      // anos, não só os últimos 30 dias que a gente já filtra em repassarHistorico)
+      // — numa conta movimentada isso é uma fila de dezenas de milhares de
+      // mensagens, cada uma com um POST síncrono pro webhook; enquanto essa fila não
+      // esvazia, mensagem NOVA (ao vivo) fica represada atrás dela e parece que
+      // "parou de funcionar do nada". false é o default do Baileys: sincroniza só o
+      // recente, que já cobre bem os últimos 30 dias numa conta ativa.
+      syncFullHistory: false,
       markOnlineOnConnect: false
     })
     s.sock = sock
@@ -290,8 +309,9 @@ async function iniciarSessao (contaId) {
     }
     if (connection === 'open') {
       s.status = 'conectado'; s.qr = null
-      // Sincronizando o histórico dos últimos 30 dias (syncFullHistory) — some
-      // sozinho quando parar de chegar evento novo por 5s, ou no máximo em 25s
+      // Sincronizando o histórico recente que o WhatsApp manda sozinho ao parear
+      // (filtrado aos últimos 30 dias em repassarHistorico) — some sozinho quando
+      // parar de chegar evento novo por 5s, ou no máximo em 25s
       // (nem todo pareamento dispara messaging-history.set; sem isso a barra
       // ficava carregando pra sempre quando não tinha histórico pra sincronizar).
       s.sincronizando = true
@@ -350,7 +370,7 @@ async function iniciarSessao (contaId) {
     if (typeof progress === 'number') s.syncProgress = Math.max(s.syncProgress || 0, progress)
     clearTimeout(s._syncTimeout)
     s._syncTimeout = setTimeout(() => { s.sincronizando = false }, 5000)
-    for (const m of messages) { await repassarHistorico(contaId, m) }
+    await comLimiteDeConcorrencia(messages, 8, (m) => repassarHistorico(contaId, m))
   })
   } catch (e) {
     log.error({ contaId, e: String(e && e.stack || e) }, 'iniciarSessao: falhou')

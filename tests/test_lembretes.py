@@ -99,6 +99,31 @@ def test_aviso_antes_dispara_na_janela_uma_vez(pool, conta_id, enviados):
     assert len(enviados) == 1
 
 
+def test_aviso_dono_falha_na_primeira_tentativa_tenta_de_novo(pool, conta_id, monkeypatch):
+    """Bug relatado em produção: se o Telegram falhar (rede, fora do ar) na
+    primeira vez que o evento entra na janela, o aviso pro DONO não pode ficar
+    queimado pra sempre — o próximo ciclo (~2min depois, evento ainda na janela)
+    tem que tentar de novo. Mesmo bug de dedup-on-attempt já corrigido pro
+    aviso ao convidado, mas aqui no aviso que vai pro dono via Telegram."""
+    tentativas = []
+    monkeypatch.setattr(notificar, "enviar_para_dono",
+                        lambda pool, conta_id, texto: (tentativas.append(texto), False)[1])
+    agora = ag.agora_brt().replace(hour=14, minute=0, second=0, microsecond=0)
+    ag.criar_evento(pool, conta_id, "Reunião com Paulo", agora + timedelta(minutes=20), local="Sala 2")
+    ag.salvar_config(pool, conta_id, resumo_ativo=False, hora_resumo=7, aviso_antes_min=30)
+    r = lb.rodar(pool, agora=agora)                          # Telegram falha -> não marca como enviado
+    assert r["aviso"] == 0 and len(tentativas) == 1
+    with pool.connection() as c:
+        assert c.execute("select 1 from lembretes_enviados where tipo='aviso'").fetchone() is None
+
+    # "Telegram volta" e o próximo ciclo (2min depois, evento ainda na janela) tenta de novo
+    monkeypatch.setattr(notificar, "enviar_para_dono",
+                        lambda pool, conta_id, texto: (tentativas.append(texto), True)[1])
+    r2 = lb.rodar(pool, agora=agora.replace(minute=2))
+    assert r2["aviso"] == 1 and len(tentativas) == 2
+    assert "Paulo" in tentativas[1]
+
+
 def test_aviso_nao_dispara_fora_da_janela(pool, conta_id, enviados):
     agora = ag.agora_brt().replace(hour=14, minute=0, second=0, microsecond=0)
     ag.criar_evento(pool, conta_id, "Longe", agora + timedelta(minutes=90))

@@ -246,7 +246,18 @@ const servidor = http.createServer(async (req, res) => {
       if (req.method === 'POST' && acao === 'sair') {
         const s = sessoes.get(contaId)
         try { if (s && s.sock) await s.sock.logout() } catch (_) {}
-        try { if (s && s._limparTudo) await s._limparTudo() } catch (_) {}
+        // Se o serviço reiniciou desde a última vez que essa conta ficou conectada em
+        // memória (deploy, crash, etc.), `s` não existe mais aqui — mas as credenciais
+        // continuam salvas no Postgres. Sem isso, "Desconectar" virava um no-op: as
+        // creds antigas ficavam presas no banco e o próximo QR tentava retomar uma
+        // sessão inválida em vez de parear do zero, causando "Não foi possível
+        // conectar o dispositivo" repetido no celular.
+        try {
+          if (s && s._limparTudo) { await s._limparTudo() } else {
+            const { limparTudo } = await useDbAuthState(pool, contaId)
+            await limparTudo()
+          }
+        } catch (_) {}
         sessoes.delete(contaId)
         return json(res, 200, { ok: true })
       }

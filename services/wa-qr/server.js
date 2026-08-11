@@ -63,15 +63,30 @@ function textoDaMsg (m) {
           (msg.videoMessage && msg.videoMessage.caption) || '').trim()
 }
 
+// O WhatsApp esconde o número de telefone real de alguns contatos atrás de um ID
+// interno opaco (@lid, "linked ID" — privacidade). Quando isso acontece, o Baileys
+// ainda manda o número real em m.key.senderPn (formato <numero>@s.whatsapp.net);
+// sem isso, sender = jid.split('@')[0] vira um ID sem sentido, não um telefone.
+function numeroReal (m) {
+  return (m.key && (m.key.senderPn || m.key.remoteJid)) || ''
+}
+
+// Canais/newsletters do WhatsApp usam o MESMO formato numérico de ID que grupos
+// (ex.: 120363...), só que com sufixo @newsletter em vez de @g.us — sem filtrar
+// isso, conteúdo de canal (notícia, propaganda) vira "mensagem de lead".
+function ehConversaValida (jid) {
+  return !!jid && !jid.endsWith('@g.us') && !jid.endsWith('@newsletter') && jid !== 'status@broadcast'
+}
+
 async function repassarEntrada (contaId, m) {
   if (!APP_URL) { log.warn({ contaId }, 'APP_URL vazio — não repassa entrada'); return }
   const texto = textoDaMsg(m)
   const jid = (m.key && m.key.remoteJid) || ''
-  if (!texto || !jid || jid.endsWith('@g.us') || jid === 'status@broadcast') {
-    log.info({ contaId, temTexto: !!texto, jid }, 'entrada ignorada (sem texto, grupo ou status)')
+  if (!texto || !ehConversaValida(jid)) {
+    log.info({ contaId, temTexto: !!texto, jid }, 'entrada ignorada (sem texto, grupo, canal ou status)')
     return
   }
-  const sender = jid.split('@')[0]
+  const sender = numeroReal(m).split('@')[0]
   const corpo = JSON.stringify({
     conta_id: contaId, sender, texto,
     nome: m.pushName || '', id: (m.key && m.key.id) || ''
@@ -95,12 +110,12 @@ async function repassarHistorico (contaId, m) {
   if (!APP_URL) return
   const texto = textoDaMsg(m)
   const jid = (m.key && m.key.remoteJid) || ''
-  if (!texto || !jid || jid.endsWith('@g.us') || jid === 'status@broadcast') return
+  if (!texto || !ehConversaValida(jid)) return
   if (m.key && m.key.fromMe) return
   const ts = Number(m.messageTimestamp) || 0
   const corteSegundos = Math.floor(Date.now() / 1000) - HISTORICO_JANELA_SEGUNDOS
   if (!ts || ts < corteSegundos) return
-  const sender = jid.split('@')[0]
+  const sender = numeroReal(m).split('@')[0]
   const corpo = JSON.stringify({
     conta_id: contaId, sender, texto, quando: ts,
     id: (m.key && m.key.id) || ''

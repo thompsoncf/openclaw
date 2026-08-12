@@ -445,7 +445,20 @@ async function iniciarSessao (contaId) {
     if (typeof progress === 'number') s.syncProgress = Math.max(s.syncProgress || 0, progress)
     clearTimeout(s._syncTimeout)
     s._syncTimeout = setTimeout(() => { s.sincronizando = false }, 5000)
-    await comLimiteDeConcorrencia(messages, 8, (m) => repassarHistorico(contaId, m))
+    // Paraleliza entre CHATS diferentes, mas mensagem do MESMO chat vai em ordem,
+    // uma de cada vez. Dois motivos, os dois vistos em produção no primeiro sync:
+    // (1) dois POSTs simultâneos do mesmo contato novo criavam DUAS conversas —
+    //     o lado Python faz select-then-insert sem lock, e a corrida venceu;
+    // (2) preserva a ordem das mensagens dentro da conversa.
+    const porChat = new Map()
+    for (const m of messages) {
+      const jid = (m.key && m.key.remoteJid) || ''
+      if (!porChat.has(jid)) porChat.set(jid, [])
+      porChat.get(jid).push(m)
+    }
+    await comLimiteDeConcorrencia([...porChat.values()], 8, async (grupo) => {
+      for (const m of grupo) { await repassarHistorico(contaId, m) }
+    })
   })
   } catch (e) {
     log.error({ contaId, e: String(e && e.stack || e) }, 'iniciarSessao: falhou')

@@ -333,13 +333,25 @@ async function repassarContatos (contaId, contatos, daAgenda) {
 // pedido mais tarde, com as chaves já no banco. Duas tentativas: 30s e 2min
 // depois de conectar (a segunda cobre o pareamento novo, onde as chaves demoram
 // mais). É idempotente: se a agenda já veio, o WhatsApp devolve nada novo.
+//
+// ATENÇÃO ao `return_snapshot: (!state.version).toString()`: quem manda é a
+// VERSÃO GUARDADA, não o parâmetro isInitialSync. Com versão > 0 o WhatsApp
+// devolve só os patches DEPOIS daquela versão — e num pareamento em que a
+// sincronização inicial funcionou pela metade (medido: versão 31 com apenas 93
+// dos ~2870 contatos) o resto da agenda não vinha nunca, porque a versão parada
+// no meio calava o pedido de snapshot. Por isso a 2ª tentativa APAGA a versão
+// antes, forçando o snapshot inteiro. Roda só uma vez por credencial (marca
+// 'agenda-completa' na própria wa_qr_auth): baixar a agenda toda a cada deploy
+// seria desperdício, e a marca some junto com as credenciais no Desconectar.
 function agendarResyncAgenda (contaId, s) {
   clearTimeout(s._agendaT1); clearTimeout(s._agendaT2)
-  s._agendaT1 = setTimeout(() => resyncAgenda(contaId, 1), 30000)
-  s._agendaT2 = setTimeout(() => resyncAgenda(contaId, 2), 120000)
+  s._agendaT1 = setTimeout(() => resyncAgenda(contaId, 1, false), 30000)
+  s._agendaT2 = setTimeout(() => resyncAgenda(contaId, 2, true), 120000)
 }
 
-async function resyncAgenda (contaId, tentativa) {
+const VERSAO_AGENDA = 'app-state-sync-version-critical_unblock_low'
+
+async function resyncAgenda (contaId, tentativa, completa) {
   const s = sessoes.get(contaId)
   if (!s || !s.sock || s.status !== 'conectado') return
   try {
@@ -350,7 +362,23 @@ async function resyncAgenda (contaId, tentativa) {
       log.info({ contaId, tentativa }, 'resyncAgenda: sem chaves de app-state ainda — pula')
       return
     }
-    log.info({ contaId, tentativa, chaves: chaves.rows[0].n }, 'resyncAgenda: pedindo a agenda de novo')
+    if (completa) {
+      // a marca é só um controle nosso; o insert devolve 0 linhas se já existir
+      const marca = await pool.query(
+        `insert into wa_qr_auth (conta_id, arquivo, conteudo, atualizado)
+              values ($1, 'agenda-completa', '1', now())
+         on conflict (conta_id, arquivo) do nothing
+           returning 1`, [contaId])
+      if (!marca.rowCount) {
+        log.info({ contaId, tentativa }, 'resyncAgenda: agenda completa já foi baixada — só patches')
+        completa = false
+      } else {
+        await pool.query('delete from wa_qr_auth where conta_id=$1 and arquivo=$2',
+          [contaId, VERSAO_AGENDA])
+      }
+    }
+    log.info({ contaId, tentativa, completa: !!completa, chaves: chaves.rows[0].n },
+      'resyncAgenda: pedindo a agenda de novo')
     await s.sock.resyncAppState(['critical_unblock_low'], true)
     log.info({ contaId, tentativa }, 'resyncAgenda: pedido concluído')
   } catch (e) {
@@ -789,7 +817,11 @@ const servidor = http.createServer(async (req, res) => {
         if (!s || s.status !== 'conectado' || !s.sock) {
           return json(res, 200, { ok: false, erro: 'desconectado' })
         }
-        await resyncAgenda(contaId, 0)
+        // na mão é sempre a agenda INTEIRA: quem chama aqui está justamente
+        // dizendo que o que veio sozinho não bastou, então a marca sai da frente
+        await pool.query(`delete from wa_qr_auth where conta_id=$1 and arquivo='agenda-completa'`,
+          [contaId])
+        await resyncAgenda(contaId, 0, true)
         return json(res, 200, { ok: true })
       }
       if (req.method === 'POST' && acao === 'enviar') {

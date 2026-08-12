@@ -31,7 +31,8 @@ def configurado() -> bool:
     return bool(_base() and _segredo())
 
 
-def _req(metodo: str, caminho: str, corpo: dict | None = None) -> dict:
+def _req(metodo: str, caminho: str, corpo: dict | None = None,
+         timeout: int | None = None) -> dict:
     if not configurado():
         return {"ok": False, "erro": "qr_indisponivel"}
     url = _base() + caminho
@@ -41,7 +42,7 @@ def _req(metodo: str, caminho: str, corpo: dict | None = None) -> dict:
         headers["content-type"] = "application/json"
     try:
         req = urllib.request.Request(url, data=data, headers=headers, method=metodo)
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as r:
+        with urllib.request.urlopen(req, timeout=timeout or _TIMEOUT) as r:
             return json.loads(r.read().decode("utf-8") or "{}")
     except urllib.error.HTTPError as e:  # noqa: BLE001
         try:
@@ -73,5 +74,10 @@ def enviar_texto(conta_id: int, numero: str, texto: str) -> dict:
 
 
 def sair(conta_id: int) -> dict:
-    """Desconecta e apaga a sessão daquela empresa."""
-    return _req("POST", f"/session/{conta_id}/sair")
+    """Desconecta e apaga a sessão daquela empresa.
+
+    Prazo maior que o padrão: o serviço só responde depois de avisar o celular,
+    apagar a credencial (que são milhares de linhas em wa_qr_auth) e limpar o
+    histórico de conversa. Com os 20s padrão isso estourava em conta grande, e o
+    painel dizia "Desconectado" com a sessão inteira ainda de pé."""
+    return _req("POST", f"/session/{conta_id}/sair", timeout=60)

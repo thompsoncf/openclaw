@@ -280,17 +280,21 @@ async function repassarSaida (contaId, m) {
 // Deslogou de vez (não é queda temporária) — avisa o Python pra limpar o
 // histórico de conversa daquele canal. Best-effort: se falhar, o histórico
 // só fica desatualizado, não trava o logout.
-// Nomes de contato. Duas origens, com pesos diferentes:
-//  - contacts.upsert  -> `name` é o fullName da AGENDA DO CELULAR (o nome que o
-//    vendedor salvou), que chega pela sincronização de app-state. É o melhor nome
-//    possível e sobrescreve o que estiver lá.
-//  - contacts.update  -> `notify` é o pushName (o nome que a PRÓPRIA pessoa pôs
-//    no perfil dela). Serve de reserva, só preenche quando ainda não há nome.
-// Esses eventos já chegavam há tempos e eram simplesmente ignorados — era por
-// isso que as conversas ficavam com o número cru mesmo estando salvas na agenda.
+// Nomes de contato. O WhatsApp manda o nome em DOIS campos diferentes, e o peso
+// de cada um é diferente — quem decide não é o evento, é o CAMPO que veio:
+//  - `name`   -> nome da AGENDA DO CELULAR (o que o vendedor salvou). Vem do
+//    contacts.upsert (fullName do app-state) e do bloco de conversas do histórico
+//    (Utils/history.js: `name: chat.name`). É o melhor nome que existe.
+//  - `notify` -> pushName (o nome que a PRÓPRIA pessoa pôs no perfil dela). Vem do
+//    contacts.update e da onda PUSH_NAME do histórico. Serve de reserva.
+// Antes isto era decidido pelo evento (`daAgenda` valia pro lote inteiro): quando
+// vinha marcado como agenda, só `name` era lido — e a onda PUSH_NAME, que tem
+// SOMENTE `notify`, era descartada inteira. Era a maior fonte de nomes do
+// WhatsApp indo pro lixo. Agora cada contato é classificado pelo campo que trouxe.
 async function repassarContatos (contaId, contatos, daAgenda) {
   if (!APP_URL || !Array.isArray(contatos) || !contatos.length) return
-  const lista = []
+  const agenda = []
+  const reserva = []
   for (const ct of contatos) {
     if (!ct) continue
     // bônus: o contactAction traz lidJid junto do jid — mais um par pro mapa
@@ -302,10 +306,17 @@ async function repassarContatos (contaId, contatos, daAgenda) {
       const real = lidMaps.get(contaId) && lidMaps.get(contaId).get(jid)
       if (real) jid = real
     }
-    const nome = String((daAgenda ? ct.name : (ct.notify || ct.name)) || '').trim()
-    if (!jid.endsWith('@s.whatsapp.net') || !nome) continue
-    lista.push({ numero: jid.split('@')[0], nome: nome.slice(0, 120) })
+    if (!jid.endsWith('@s.whatsapp.net')) continue
+    const nomeAgenda = daAgenda ? String(ct.name || '').trim() : ''
+    const nome = (nomeAgenda || String(ct.notify || ct.name || '').trim()).slice(0, 120)
+    if (!nome) continue
+    ;(nomeAgenda ? agenda : reserva).push({ numero: jid.split('@')[0], nome })
   }
+  await enviarContatos(contaId, agenda, true)
+  await enviarContatos(contaId, reserva, false)
+}
+
+async function enviarContatos (contaId, lista, daAgenda) {
   if (!lista.length) return
   // a sincronização inicial pode despejar milhares de contatos de uma vez
   for (let i = 0; i < lista.length; i += 200) {
@@ -456,9 +467,15 @@ async function iniciarSessao (contaId) {
       // inteira, o mesmo que travou as mensagens ao vivo antes.
       // O corte de 30 dias continua em repassarHistorico, ANTES do POST — mensagem
       // antiga é descartada sem custo de rede.
+      // PUSH_NAME entra junto: é a onda que traz SÓ os nomes (Utils/history.js:
+      // `contacts.push({ id, notify: c.pushname })`, nenhuma mensagem), e é de longe
+      // a fonte mais completa de nome que o WhatsApp manda. Estava sendo barrada
+      // aqui — por isso as conversas importadas ficavam com o número cru mesmo com
+      // o contato salvo na agenda. É barata: não tem mensagem pra processar.
       shouldSyncHistoryMessage: (msg) => {
         const t = msg && msg.syncType
-        return t === TIPO_HIST.RECENT || t === TIPO_HIST.INITIAL_BOOTSTRAP
+        return t === TIPO_HIST.RECENT || t === TIPO_HIST.INITIAL_BOOTSTRAP ||
+               t === TIPO_HIST.PUSH_NAME
       },
       markOnlineOnConnect: false,
       // ver comentário do cache `enviadas`: é isto que permite reenviar quando o
@@ -599,13 +616,15 @@ async function iniciarSessao (contaId) {
   })
 
   sock.ev.on('messaging-history.set', async ({ messages, contacts, isLatest, progress, syncType }) => {
-    log.info({ contaId, n: messages.length, isLatest, progress, syncType }, 'messaging-history.set recebido')
+    log.info({ contaId, n: messages.length, contatos: (contacts || []).length,
+      isLatest, progress, syncType }, 'messaging-history.set recebido')
     // Cada onda de histórico traz também os contatos daquele bloco — usa pra
     // resolver @lid -> número real (ver comentário em numeroReal). Faz isso ANTES
     // de repassar as mensagens da mesma onda, senão o mapa fica sempre um bloco
     // atrasado.
     atualizarLidMap(contaId, contacts)
-    // o histórico também traz nome de contato — aproveita (fullName quando vier)
+    // O histórico também traz nome de contato: `name` no bloco de conversas (agenda)
+    // e `notify` na onda PUSH_NAME (perfil). repassarContatos separa os dois.
     repassarContatos(contaId, contacts, true).catch(() => {})
     // O histórico chega em ondas (ex.: recentes primeiro, depois o histórico
     // completo) e cada onda reinicia o progress do zero — sem o Math.max a barra

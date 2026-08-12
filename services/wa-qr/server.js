@@ -295,6 +295,9 @@ async function repassarContatos (contaId, contatos, daAgenda) {
   if (!APP_URL || !Array.isArray(contatos) || !contatos.length) return
   const agenda = []
   const reserva = []
+  // por que cada contato foi descartado — sem isso não dá pra distinguir "o
+  // WhatsApp mandou pouco" de "mandou muito e a gente jogou fora no filtro"
+  let semNome = 0; let lidSemMapa = 0; let outroJid = 0
   for (const ct of contatos) {
     if (!ct) continue
     // bônus: o contactAction traz lidJid junto do jid — mais um par pro mapa
@@ -305,12 +308,18 @@ async function repassarContatos (contaId, contatos, daAgenda) {
     if (jid.endsWith('@lid')) {
       const real = lidMaps.get(contaId) && lidMaps.get(contaId).get(jid)
       if (real) jid = real
+      else { lidSemMapa++; continue }
     }
-    if (!jid.endsWith('@s.whatsapp.net')) continue
+    if (!jid.endsWith('@s.whatsapp.net')) { outroJid++; continue }
     const nomeAgenda = daAgenda ? String(ct.name || '').trim() : ''
     const nome = (nomeAgenda || String(ct.notify || ct.name || '').trim()).slice(0, 120)
-    if (!nome) continue
+    if (!nome) { semNome++; continue }
     ;(nomeAgenda ? agenda : reserva).push({ numero: jid.split('@')[0], nome })
+  }
+  if (contatos.length > 20 || lidSemMapa || outroJid) {
+    log.info({ contaId, recebidos: contatos.length, agenda: agenda.length,
+      reserva: reserva.length, semNome, lidSemMapa, outroJid },
+    'repassarContatos: peneira')
   }
   await enviarContatos(contaId, agenda, true)
   await enviarContatos(contaId, reserva, false)
@@ -349,12 +358,20 @@ function agendarResyncAgenda (contaId, s) {
   s._agendaT2 = setTimeout(() => resyncAgenda(contaId, 2, true), 120000)
 }
 
-// Todas as coleções de app state (Types/Chat.js: ALL_WA_PATCH_NAMES). O nome do
-// contato não mora só numa: pedir apenas critical_unblock_low trouxe 88 contatos
-// nesta conta, e regular_low/regular nunca chegaram a sincronizar (não existia
-// linha de versão pra elas). O próprio Baileys sincroniza todas de uma vez no
-// doAppStateSync — a gente estava sendo mais restrito que ele sem motivo.
-const COLECOES = ['critical_block', 'critical_unblock_low', 'regular_high', 'regular_low', 'regular']
+// Só a coleção da AGENDA. Pedir as outras a partir do zero não traz contato
+// nenhum e ainda estoura — medido em produção:
+//
+//   name: "regular_low"
+//   error: "Error: tried remove, but no previous op" (Utils/chat-utils.js:55)
+//   msg: "failed to sync state from version"
+//
+// Versão 0 PEDE o snapshot, mas o WhatsApp responde o que ele quiser — e pra
+// regular_low ele mandou só patches. Os patches vêm com operações REMOVE, e sem
+// snapshot a gente não tem o estado base de onde remover: o mix() acha
+// prevOp indefinido e joga a exceção. Não é erro nosso nem dele, é pedir
+// "apague o item X" pra quem nunca teve o item X. O catch do Baileys é por
+// coleção, então isso nunca atrapalhou a agenda — só sujava o log.
+const COLECOES = ['critical_unblock_low']
 const VERSAO_AGENDA = 'app-state-sync-version-critical_unblock_low'
 
 async function resyncAgenda (contaId, tentativa, completa) {
@@ -388,9 +405,8 @@ async function resyncAgenda (contaId, tentativa, completa) {
         const zeradas = {}
         for (const c of COLECOES) zeradas[c] = null
         await s.sock.authState.keys.set({ 'app-state-sync-version': zeradas })
-        await pool.query(
-          `delete from wa_qr_auth where conta_id=$1 and arquivo like 'app-state-sync-version-%'`,
-          [contaId])
+        await pool.query('delete from wa_qr_auth where conta_id=$1 and arquivo=$2',
+          [contaId, VERSAO_AGENDA])
       }
     }
     log.info({ contaId, tentativa, completa: !!completa, chaves: chaves.rows[0].n },

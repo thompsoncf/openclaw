@@ -52,6 +52,53 @@ const log = pino({ level: process.env.LOG_LEVEL || 'info' })
 if (!process.env.DATABASE_URL) { log.error('Falta DATABASE_URL'); process.exit(1) }
 if (!SEGREDO) { log.error('Falta WA_QR_SHARED_SECRET'); process.exit(1) }
 
+// Dois erros do Baileys apareciam em VERMELHO sem representar perda nenhuma, e
+// vermelho que não pede ação treina a gente a ignorar o log inteiro — foi assim
+// que erro de verdade passou batido nesta sessão. Estes dois são rebaixados pra
+// debug: não somem (voltam com LOG_LEVEL=debug), só saem do vermelho.
+function ehRuidoConhecido (msg, obj) {
+  const err = obj && obj.err
+  if (!err) return false
+  // 'init queries' pede as propriedades da conta assim que a conexão abre e leva
+  // 408 quando a sessão ainda não está pronta (ou nem pareada — acontece em todo
+  // ciclo de QR). Não afeta enviar nem receber.
+  if (msg === "unexpected error in 'init queries'" &&
+      err.output && err.output.statusCode === 408) return true
+  // Mensagem NOSSA reentregue depois de um restart: o contador do Signal recusa a
+  // repetição ("Key used already"). O conteúdo já está no banco, perder a 2ª cópia
+  // é o comportamento certo. Só vale pra fromMe — falha ao decifrar mensagem
+  // RECEBIDA é perda de verdade e continua vermelha.
+  if (msg === 'failed to decrypt message' && err.name === 'MessageCounterError' &&
+      obj.key && obj.key.fromMe) return true
+  return false
+}
+
+function comFiltroDeRuido (base) {
+  const nivel = (n) => (a, b) => {
+    const obj = (a && typeof a === 'object') ? a : null
+    const msg = typeof a === 'string' ? a : b
+    if (obj && typeof msg === 'string' && ehRuidoConhecido(msg, obj)) return base.debug(a, b)
+    return base[n](a, b)
+  }
+  const filtrado = {
+    fatal: nivel('fatal'),
+    error: nivel('error'),
+    warn: nivel('warn'),
+    info: nivel('info'),
+    debug: nivel('debug'),
+    trace: nivel('trace'),
+    // o Baileys chama child({class:'ns'}) e lê .level (Socket/socket.js)
+    child: (bindings) => comFiltroDeRuido(base.child(bindings || {}))
+  }
+  Object.defineProperty(filtrado, 'level', {
+    get: () => base.level,
+    set: (v) => { base.level = v }
+  })
+  return filtrado
+}
+
+const logBaileys = comFiltroDeRuido(log)
+
 // Sem isso, um erro assíncrono que escapa de um try/catch (ex.: dentro de um
 // listener de evento do Baileys) só aparecia no Render como um stack trace cru
 // do Node, sem contexto nenhum — ou o processo caía silencioso e reiniciava sem
@@ -574,7 +621,7 @@ async function iniciarSessao (contaId) {
       auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, log) },
       printQRInTerminal: false,
       browser: ['ZAQ', 'Chrome', '1.0.0'],
-      logger: log,
+      logger: logBaileys,
       // syncFullHistory:true PEDE pro WhatsApp o histórico INTEIRO da conta (meses/
       // anos) — numa conta movimentada são dezenas de milhares de mensagens que
       // represam o tempo real e fazem parecer que "parou de funcionar do nada".

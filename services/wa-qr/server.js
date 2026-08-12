@@ -316,6 +316,48 @@ async function repassarContatos (contaId, contatos, daAgenda) {
   await enviarContatos(contaId, reserva, false)
 }
 
+// A AGENDA do celular chega pela sincronização de "app state" (coleção
+// critical_unblock_low -> contactAction.fullName -> evento contacts.upsert). Só
+// que o Baileys dispara essa sincronização na PRIMEIRA notificação de histórico
+// (Socket/chats.js: `if (shouldProcessHistoryMsg) await doAppStateSync()`), que
+// costuma chegar ANTES das chaves de decodificação (appStateSyncKeyShare). Sem a
+// chave, decodePatches estoura, o catch faz
+// `keys.set({'app-state-sync-version': {[name]: null}})` — apaga a versão — e o
+// estado vira Online. A partir daí a chave até chega, mas o retry embutido só
+// roda `if (syncState === SyncState.Syncing)`: nunca mais. Resultado medido na
+// conta 23: 31 chaves app-state-sync-key guardadas, ZERO app-state-sync-version,
+// zero contato de agenda.
+//
+// Como a versão foi apagada, ela volta como 0 — e o resync com versão 0 pede
+// `return_snapshot`, ou seja, a coleção INTEIRA de uma vez. Então basta refazer o
+// pedido mais tarde, com as chaves já no banco. Duas tentativas: 30s e 2min
+// depois de conectar (a segunda cobre o pareamento novo, onde as chaves demoram
+// mais). É idempotente: se a agenda já veio, o WhatsApp devolve nada novo.
+function agendarResyncAgenda (contaId, s) {
+  clearTimeout(s._agendaT1); clearTimeout(s._agendaT2)
+  s._agendaT1 = setTimeout(() => resyncAgenda(contaId, 1), 30000)
+  s._agendaT2 = setTimeout(() => resyncAgenda(contaId, 2), 120000)
+}
+
+async function resyncAgenda (contaId, tentativa) {
+  const s = sessoes.get(contaId)
+  if (!s || !s.sock || s.status !== 'conectado') return
+  try {
+    const chaves = await pool.query(
+      `select count(*)::int as n from wa_qr_auth
+        where conta_id=$1 and arquivo like 'app-state-sync-key-%'`, [contaId])
+    if (!chaves.rows[0] || !chaves.rows[0].n) {
+      log.info({ contaId, tentativa }, 'resyncAgenda: sem chaves de app-state ainda — pula')
+      return
+    }
+    log.info({ contaId, tentativa, chaves: chaves.rows[0].n }, 'resyncAgenda: pedindo a agenda de novo')
+    await s.sock.resyncAppState(['critical_unblock_low'], true)
+    log.info({ contaId, tentativa }, 'resyncAgenda: pedido concluído')
+  } catch (e) {
+    log.warn({ contaId, tentativa, e: String(e) }, 'resyncAgenda falhou')
+  }
+}
+
 async function enviarContatos (contaId, lista, daAgenda) {
   if (!lista.length) return
   // a sincronização inicial pode despejar milhares de contatos de uma vez
@@ -541,6 +583,7 @@ async function iniciarSessao (contaId) {
       clearTimeout(s._syncTimeout)
       s._syncTimeout = setTimeout(() => { s.sincronizando = false }, 25000)
       log.info({ contaId }, 'WhatsApp conectado')
+      agendarResyncAgenda(contaId, s)
     }
     if (connection === 'close') {
       const code = (lastDisconnect && lastDisconnect.error &&
@@ -738,6 +781,16 @@ const servidor = http.createServer(async (req, res) => {
         const s = sessoes.get(contaId) || { status: 'desconectado', qr: null }
         return json(res, 200, { ok: true, status: s.status, qr: s.qr || null,
           sincronizando: !!s.sincronizando, syncProgress: s.syncProgress || 0 })
+      }
+      // Refaz o pedido da AGENDA sem precisar de novo QR (ver agendarResyncAgenda).
+      // Serve pra consertar uma sessão que já está de pé com os nomes faltando.
+      if (req.method === 'POST' && acao === 'agenda') {
+        const s = sessoes.get(contaId)
+        if (!s || s.status !== 'conectado' || !s.sock) {
+          return json(res, 200, { ok: false, erro: 'desconectado' })
+        }
+        await resyncAgenda(contaId, 0)
+        return json(res, 200, { ok: true })
       }
       if (req.method === 'POST' && acao === 'enviar') {
         const body = await lerBody(req)

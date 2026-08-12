@@ -68,17 +68,50 @@ const pool = new Pool({
 // contaId -> { sock, status, qr, iniciando }
 const sessoes = new Map()
 
-// contaId -> Map(jid @lid -> jid real @s.whatsapp.net). Só existe pra reconstruir o
-// número real de mensagens de HISTÓRICO (ver comentário em numeroReal mais abaixo).
+// contaId -> Map(jid @lid -> jid real @s.whatsapp.net). Usado pra traduzir o ID
+// interno de privacidade do WhatsApp pro telefone de verdade, nos três fluxos
+// (entrada, saída e histórico). Alimentado por DUAS fontes: a lista de contatos
+// que vem no histórico E cada mensagem ao vivo recebida (que traz lid + senderPn
+// juntos). Persistido no Postgres (arquivo 'lidmap-...' na wa_qr_auth) porque a
+// memória zera a cada deploy — e era justamente após deploy que o eco de mensagem
+// mandada pelo celular pra um chat @lid se perdia por falta do mapa.
 const lidMaps = new Map()
+
+function aprenderLid (contaId, lidJid, pnJid) {
+  if (!lidJid || !pnJid || !lidJid.endsWith('@lid') || !pnJid.endsWith('@s.whatsapp.net')) return
+  let mapa = lidMaps.get(contaId)
+  if (!mapa) { mapa = new Map(); lidMaps.set(contaId, mapa) }
+  if (mapa.get(lidJid) === pnJid) return
+  mapa.set(lidJid, pnJid)
+  pool.query(
+    `insert into wa_qr_auth (conta_id, arquivo, conteudo, atualizado)
+     values ($1,$2,$3, now())
+     on conflict (conta_id, arquivo)
+     do update set conteudo=excluded.conteudo, atualizado=now()`,
+    [contaId, 'lidmap-' + lidJid, JSON.stringify(pnJid)]
+  ).catch((e) => log.warn({ contaId, e: String(e) }, 'aprenderLid: falha ao persistir'))
+}
 
 function atualizarLidMap (contaId, contacts) {
   if (!Array.isArray(contacts) || !contacts.length) return
-  let mapa = lidMaps.get(contaId)
-  if (!mapa) { mapa = new Map(); lidMaps.set(contaId, mapa) }
   for (const ct of contacts) {
-    if (ct && ct.lid && ct.jid) mapa.set(ct.lid, ct.jid)
+    if (ct && ct.lid && ct.jid) aprenderLid(contaId, ct.lid, ct.jid)
   }
+}
+
+async function carregarLidMap (contaId) {
+  try {
+    const r = await pool.query(
+      `select arquivo, conteudo from wa_qr_auth where conta_id=$1 and arquivo like 'lidmap-%'`,
+      [contaId])
+    if (!r.rows.length) return
+    let mapa = lidMaps.get(contaId)
+    if (!mapa) { mapa = new Map(); lidMaps.set(contaId, mapa) }
+    for (const l of r.rows) {
+      try { mapa.set(l.arquivo.slice('lidmap-'.length), JSON.parse(l.conteudo)) } catch (_) {}
+    }
+    log.info({ contaId, n: r.rows.length }, 'mapa lid->numero carregado do banco')
+  } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao carregar mapa lid') }
 }
 
 // Roda fn(item) pra cada item com no máximo `limite` em paralelo — usado pra não
@@ -118,8 +151,14 @@ function textoDaMsg (m) {
 // existe no decode de mensagem ao vivo — então cai pro mapa lid->jid construído a
 // partir da lista de contatos que vem junto no próprio histórico (atualizarLidMap).
 function numeroReal (m, contaId) {
-  if (m.key && m.key.senderPn) return m.key.senderPn
   const remoteJid = (m.key && m.key.remoteJid) || ''
+  if (m.key && m.key.senderPn) {
+    // chat @lid + senderPn na mesma mensagem = par código->número de graça.
+    // Aprende aqui pra que o ECO de uma resposta mandada pelo celular pra esse
+    // mesmo chat (que só traz o @lid) consiga ser resolvido depois.
+    aprenderLid(contaId, remoteJid, m.key.senderPn)
+    return m.key.senderPn
+  }
   if (remoteJid.endsWith('@lid')) {
     const real = lidMaps.get(contaId) && lidMaps.get(contaId).get(remoteJid)
     if (real) return real
@@ -242,15 +281,18 @@ async function repassarHistorico (contaId, m) {
   const texto = textoDaMsg(m)
   const jid = (m.key && m.key.remoteJid) || ''
   if (!texto || !ehConversaValida(jid)) return
-  if (m.key && m.key.fromMe) return
   const ts = Number(m.messageTimestamp) || 0
   const corteSegundos = Math.floor(Date.now() / 1000) - HISTORICO_JANELA_SEGUNDOS
   if (!ts || ts < corteSegundos) return
-  const resolvido = numeroReal(m, contaId)
+  // Mensagem ENVIADA (fromMe) entra também — antes era pulada e o histórico
+  // importado ficava só com o lado do cliente, conversa pela metade. Nos dois
+  // casos quem identifica a conversa é o CHAT (o outro lado), nunca o autor.
+  const deMim = !!(m.key && m.key.fromMe)
+  const resolvido = numeroDoChat(m, contaId)
   if (semNumeroReal(resolvido, contaId, 'historico')) return
   const sender = resolvido.split('@')[0]
   const corpo = JSON.stringify({
-    conta_id: contaId, sender, texto, quando: ts,
+    conta_id: contaId, sender, texto, quando: ts, de_mim: deMim,
     id: (m.key && m.key.id) || ''
   })
   try {
@@ -290,6 +332,9 @@ async function iniciarSessao (contaId) {
     const { state, saveCreds, limparTudo } = await useDbAuthState(pool, contaId)
     log.info({ contaId, pareada: !!(state.creds && state.creds.me) },
       'iniciarSessao: creds carregadas do banco')
+    // o mapa código->número vive em memória e zera a cada deploy; recarrega do
+    // banco pra o eco de mensagem do celular em chat @lid não se perder.
+    await carregarLidMap(contaId)
     // NUNCA limpar credencial preventivamente aqui. Já existiu uma "detecção de
     // pareamento travado" que apagava as creds quando registered=false + account
     // preenchido — só que, CONFERIDO NA FONTE do Baileys (messages-recv.js), o

@@ -619,7 +619,14 @@ def convite_responder(request: Request, token: str, acao: str = Form(...),
 
 # ================================================================ TEMPLATE
 _CSS = """<style>
-.ag-wrap{max-width:1080px;margin:0 auto}
+/* width:100% porque .ag-wrap é item flex do body (junto do menu lateral): sem
+   largura definida ele adota a do conteúdo, e uma tabela larga empurrava a
+   página inteira pra fora da tela em vez de rolar dentro do próprio card. */
+.ag-wrap{max-width:1080px;width:100%;margin:0 auto;min-width:0}
+/* itens de grid/flex não encolhem abaixo do conteúdo por padrão (min-width:auto):
+   sem isto o calendário de 7 colunas força a página inteira a passar da largura
+   da tela no celular, e tudo (inclusive os cards) sai rolando pro lado. */
+.ag-grid>*,.side-cards,.side-cards>.ag-card{min-width:0}
 .ag-top{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin:.2rem 0 1rem}
 .ag-mes{display:flex;align-items:center;gap:12px}
 .ag-mes h1{font-size:1.32rem;margin:0;text-transform:capitalize;letter-spacing:-.01em}
@@ -640,14 +647,19 @@ _CSS = """<style>
 @media(max-width:860px){.ag-grid{grid-template-columns:1fr}}
 /* histórico de envios */
 .hist-card{background:var(--card);border:1px solid var(--borda);border-radius:14px;padding:16px;margin-top:18px}
-.hist-hd{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.hist-hd{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
 .hist-hd h2{font-size:.95rem;margin:0;font-weight:700}
 .hist-hd .sub{font-size:.74rem;color:var(--txt-mut);margin-top:2px}
-.hist-filtros{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
-.hf-btn{background:var(--card-2);border:1px solid var(--borda);color:var(--txt-mut);border-radius:20px;padding:.3rem .75rem;font-size:.72rem;font-weight:600;cursor:pointer}
+.hist-filtros{display:flex;gap:6px;flex-wrap:wrap;align-items:center;flex:0 1 auto}
+/* o portal define button{width:100%;margin-top:1.4rem} — sem este reset os
+   filtros/abas empilham um por linha e abrem um buraco no meio do card */
+.hist-filtros .hf-btn,.hist-tabs .hist-tab{width:auto;margin:0}
+.hf-btn{background:var(--card-2);border:1px solid var(--borda);color:var(--txt-mut);border-radius:20px;padding:.3rem .75rem;font-size:.72rem;font-weight:600;cursor:pointer;white-space:nowrap}
+.hf-btn:hover{border-color:var(--verde);color:var(--verde-claro)}
 .hf-btn.on{background:rgba(29,158,117,.16);border-color:var(--verde);color:var(--verde-claro)}
-.hf-search{background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:.32rem .65rem;font-size:.76rem;color:var(--txt);width:160px}
+.hf-search{background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:.32rem .65rem;font-size:.76rem;color:var(--txt);width:170px;max-width:100%}
 .hf-search::placeholder{color:var(--txt-mut)}
+.hf-search:focus{outline:0;border-color:var(--verde)}
 .hist-resumo{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;padding:9px 11px;background:var(--card-2);border:1px solid var(--borda);border-radius:10px;font-size:.76rem;color:var(--txt-mut)}
 .hist-resumo b{font-variant-numeric:tabular-nums;color:var(--txt)}
 .hist-resumo .hr-ok b{color:var(--verde-claro)}
@@ -674,8 +686,9 @@ _CSS = """<style>
 .hist-vazio{color:var(--txt-mut);font-size:.84rem;padding:18px 4px;text-align:center}
 .hist-foot{display:flex;justify-content:center;margin-top:12px}
 .hist-mais{background:transparent;border:1px dashed var(--borda);color:var(--verde-claro);border-radius:9px;padding:.45rem 1rem;font-size:.78rem;font-weight:600;cursor:pointer}
-.hist-tabs{display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--borda)}
-.hist-tab{background:none;border:0;color:var(--txt-mut);padding:.5rem .3rem;font-size:.82rem;font-weight:700;cursor:pointer;position:relative;top:1px;border-bottom:2px solid transparent;display:flex;align-items:center;gap:6px}
+.hist-tabs{display:flex;gap:18px;margin-bottom:14px;border-bottom:1px solid var(--borda)}
+.hist-tab{background:none;border:0;color:var(--txt-mut);padding:.45rem .1rem;font-size:.82rem;font-weight:700;cursor:pointer;position:relative;top:1px;border-bottom:2px solid transparent;display:inline-flex;align-items:center;gap:6px;flex:0 0 auto}
+.hist-tab:hover{color:var(--txt)}
 .hist-tab.on{color:var(--txt);border-bottom-color:var(--verde)}
 .hist-tab .cnt{background:var(--card-2);border:1px solid var(--borda);border-radius:20px;padding:0 7px;font-size:.68rem;color:var(--txt-mut);font-variant-numeric:tabular-nums}
 .hist-tab.on .cnt{background:rgba(29,158,117,.16);border-color:var(--verde);color:var(--verde-claro)}
@@ -684,6 +697,27 @@ _CSS = """<style>
 .eta{font-size:.68rem;color:var(--txt-mut)}
 .eta b{color:var(--txt);font-variant-numeric:tabular-nums}
 .hist-resumo .hr-wait b{color:var(--ambar)}
+/* Mobile: tabela de 6-7 colunas não cabe — vira cartão empilhado, cada célula
+   com seu rótulo (data-rot) na frente, sem scroll lateral. */
+@media(max-width:720px){
+  .hist-hd{gap:10px}
+  .hist-filtros{width:100%}
+  .hf-search{flex:1 1 100%;width:auto}
+  .hist-tbl thead{display:none}
+  .hist-tbl,.hist-tbl tbody,.hist-tbl tr,.hist-tbl td{display:block;width:100%;box-sizing:border-box}
+  .hist-tbl tr{background:var(--card-2);border:1px solid var(--borda);border-radius:10px;padding:10px 12px;margin-bottom:8px}
+  .hist-tbl td{border:0;padding:2px 0;display:flex;flex-wrap:wrap;gap:2px 8px;align-items:baseline;min-width:0}
+  .hist-tbl td:empty{display:none}
+  .hist-tbl td:before{content:attr(data-rot);flex:0 0 84px;font-size:.66rem;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--txt-mut)}
+  .hist-tbl td>*{min-width:0}
+  .hist-tbl .hist-compr{font-size:.9rem;margin-bottom:2px}
+  .hist-tbl .hist-compr .loc{flex:1 1 100%;margin-left:92px}
+  /* só o botão vai pra direita — a última coluna da fila é o Status, que
+     precisa seguir alinhado com os outros rótulos */
+  .hist-retry{width:auto;margin:6px 0 0 auto}
+  .hs-motivo{max-width:none}
+  .hist-resumo{gap:10px 14px}
+}
 .ag-card{background:var(--card);border:1px solid var(--borda);border-radius:14px;padding:16px}
 .ag-card h2{font-size:.76rem;letter-spacing:.09em;text-transform:uppercase;color:var(--txt-mut);margin:0 0 12px;font-weight:700}
 /* calendário */
@@ -872,7 +906,7 @@ _CSS = """<style>
 .px-conv{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}
 .cgrp{font-size:.7rem;font-weight:700;padding:2px 9px;border-radius:20px;white-space:nowrap;background:rgba(57,135,229,.14);color:#bcd8f6;border:1px solid rgba(57,135,229,.4)}
 .cgrp-ok{background:rgba(29,158,117,.16);color:var(--verde-claro);border-color:var(--verde)}
-.cpill{font-size:.68rem;font-weight:700;padding:2px 8px;border-radius:20px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
+.cpill{font-size:.68rem;font-weight:700;padding:2px 8px;border-radius:20px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 .cp-pendente{background:rgba(224,163,62,.14);color:var(--ambar);border:1px solid rgba(224,163,62,.4)}
 .cp-confirmado{background:rgba(29,158,117,.16);color:var(--verde-claro);border:1px solid var(--verde)}
 .cp-remarcar{background:rgba(57,135,229,.14);color:#bcd8f6;border:1px solid rgba(57,135,229,.4)}
@@ -1231,12 +1265,12 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <tbody id="histTbody">
             {% for it in historico %}
             <tr>
-              <td class="hist-qd">{{ it.quando_rot }}</td>
-              <td class="hist-compr">{{ it.evento_titulo or "—" }}{% if it.evento_local %}<div class="loc">{{ it.evento_local }}</div>{% endif %}</td>
-              <td>{{ it.convidado_rot }}</td>
-              <td><span class="hist-tipo ht-{{ it.tipo }}">{{ it.tipo_rot }}</span></td>
-              <td class="hist-canal">{{ it.canal_rot }}</td>
-              <td>
+              <td class="hist-qd" data-rot="Quando">{{ it.quando_rot }}</td>
+              <td class="hist-compr" data-rot="Compromisso">{{ it.evento_titulo or "—" }}{% if it.evento_local %}<div class="loc">{{ it.evento_local }}</div>{% endif %}</td>
+              <td data-rot="Convidado">{{ it.convidado_rot }}</td>
+              <td data-rot="Tipo"><span class="hist-tipo ht-{{ it.tipo }}">{{ it.tipo_rot }}</span></td>
+              <td class="hist-canal" data-rot="Canal">{{ it.canal_rot }}</td>
+              <td data-rot="Status">
                 {% if it.ok %}<span class="hist-status hs-ok">✅ Enviado</span>
                 {% else %}<span class="hist-status hs-fail">❌ Falhou{% if it.motivo_rot %}<span class="hs-motivo">{{ it.motivo_rot }}</span>{% endif %}</span>{% endif %}
               </td>
@@ -1265,11 +1299,11 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <tbody>
             {% for it in fila %}
             <tr>
-              <td class="hist-qd"><span class="eta">{{ it.eta_rel }}<br><b>{{ it.eta_hora }}</b></span></td>
-              <td class="hist-compr">{{ it.evento_titulo }}{% if it.evento_local %}<div class="loc">{{ it.evento_local }}</div>{% endif %}</td>
-              <td>{{ it.convidado_rot }}</td>
-              <td><span class="hist-tipo ht-{{ it.tipo }}">{{ it.tipo_rot }}</span></td>
-              <td><span class="hist-status hs-wait">{{ it.status_rot }}</span></td>
+              <td class="hist-qd" data-rot="Sai em"><span class="eta">{{ it.eta_rel }} · <b>{{ it.eta_hora }}</b></span></td>
+              <td class="hist-compr" data-rot="Compromisso">{{ it.evento_titulo }}{% if it.evento_local %}<div class="loc">{{ it.evento_local }}</div>{% endif %}</td>
+              <td data-rot="Convidado">{{ it.convidado_rot }}</td>
+              <td data-rot="Tipo"><span class="hist-tipo ht-{{ it.tipo }}">{{ it.tipo_rot }}</span></td>
+              <td data-rot="Status"><span class="hist-status hs-wait">{{ it.status_rot }}</span></td>
             </tr>
             {% endfor %}
           </tbody>
@@ -1485,12 +1519,12 @@ function _histRowHtml(it){
     : '<span class="hist-status hs-fail">❌ Falhou'+motivo+'</span>';
   var retry = it.pode_reenviar ? '<button class="hist-retry" type="button" onclick="histReenviar('+it.id+',this)">🔁 Reenviar</button>' : '';
   var loc = it.evento_local ? '<div class="loc">'+_esc(it.evento_local)+'</div>' : '';
-  return '<tr><td class="hist-qd">'+_esc(it.quando_rot)+'</td>'
-    + '<td class="hist-compr">'+_esc(it.evento_titulo||'—')+loc+'</td>'
-    + '<td>'+_esc(it.convidado_rot)+'</td>'
-    + '<td><span class="hist-tipo ht-'+it.tipo+'">'+_esc(it.tipo_rot)+'</span></td>'
-    + '<td class="hist-canal">'+_esc(it.canal_rot)+'</td>'
-    + '<td>'+status+'</td><td>'+retry+'</td></tr>';
+  return '<tr><td class="hist-qd" data-rot="Quando">'+_esc(it.quando_rot)+'</td>'
+    + '<td class="hist-compr" data-rot="Compromisso">'+_esc(it.evento_titulo||'—')+loc+'</td>'
+    + '<td data-rot="Convidado">'+_esc(it.convidado_rot)+'</td>'
+    + '<td data-rot="Tipo"><span class="hist-tipo ht-'+it.tipo+'">'+_esc(it.tipo_rot)+'</span></td>'
+    + '<td class="hist-canal" data-rot="Canal">'+_esc(it.canal_rot)+'</td>'
+    + '<td data-rot="Status">'+status+'</td><td>'+retry+'</td></tr>';
 }
 function _histRenderBody(){
   var box = document.getElementById('histBody');

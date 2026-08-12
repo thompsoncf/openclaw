@@ -295,7 +295,13 @@ async function repassarContatos (contaId, contatos, daAgenda) {
     if (!ct) continue
     // bônus: o contactAction traz lidJid junto do jid — mais um par pro mapa
     aprenderLid(contaId, ct.lid, ct.jid || ct.id)
-    const jid = String(ct.jid || ct.id || '')
+    let jid = String(ct.jid || ct.id || '')
+    // contato que só vem como @lid (privacidade) tem número real no mapa — sem
+    // isso o nome da agenda desses contatos era descartado aqui mesmo
+    if (jid.endsWith('@lid')) {
+      const real = lidMaps.get(contaId) && lidMaps.get(contaId).get(jid)
+      if (real) jid = real
+    }
     const nome = String((daAgenda ? ct.name : (ct.notify || ct.name)) || '').trim()
     if (!jid.endsWith('@s.whatsapp.net') || !nome) continue
     lista.push({ numero: jid.split('@')[0], nome: nome.slice(0, 120) })

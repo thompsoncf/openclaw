@@ -2070,6 +2070,19 @@ async def comunicacao_prospec_perfil(request: Request):
     return RedirectResponse(_AG_DESTINO, status_code=303)
 
 
+def _nome_da_agenda(c, conta_id, numero: str) -> str:
+    """Nome que o vendedor tem salvo na AGENDA do celular pra esse número (tabela
+    wa_contatos, alimentada pelo /webhooks/wa-qr/contatos). '' quando não tem.
+    Casa pelos últimos 8 dígitos, igual ao resto do módulo."""
+    n = _so_digitos(numero)
+    if not n:
+        return ""
+    alvo8 = n[-8:] if len(n) >= 8 else n
+    r = c.execute("select nome from wa_contatos where conta_id=%s and numero8=%s",
+                  (conta_id, alvo8)).fetchone()
+    return ((r[0] if r else "") or "").strip()[:120]
+
+
 def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente_on):
     """WhatsApp de ENTRADA (Twilio OU Cloud API): resolve lead+conversa pelo telefone,
     grava a mensagem (dedup por provider_sid) e reabre a janela/reativa o agente.
@@ -2100,13 +2113,15 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
                       (conv_id, (corpo or "")[:8000], sid))
             # guarda/atualiza o nome do perfil pra conversa não ficar só com o número
             c.execute("""update conversas set ultima_msg_em=now(),
-                           contato_nome=coalesce(nullif(%s,''), contato_nome) where id=%s""",
+                           contato_nome=coalesce(nullif(contato_nome,''), nullif(%s,'')) where id=%s""",
                       ((nome_perfil or "").strip()[:120], conv_id))
             return conv_id
         # contato NOVO de verdade (landing/WhatsApp) → vira lead QUENTE, não atribuído (o dono distribui).
-        # Nome vem do perfil do WhatsApp (pushName) quando o contato deixa público;
-        # sem isso, o WhatsApp simplesmente não manda outro nome pra gente pegar.
-        nome = (nome_perfil or "").strip() or "Contato WhatsApp"
+        # Nome: primeiro o da AGENDA do vendedor (o melhor que existe), depois o do
+        # perfil do WhatsApp (pushName) quando o contato deixa público; sem nenhum
+        # dos dois, o WhatsApp não manda outro nome pra gente pegar.
+        nome = _nome_da_agenda(c, conta_id, remetente) or (nome_perfil or "").strip() \
+            or "Contato WhatsApp"
         lead_id = c.execute(
             """insert into prospeccao (conta_id, vendedor_id, empresa, whatsapp,
                  origem, temperatura, status, estagio)
@@ -2130,9 +2145,12 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
             c.execute("update conversas set prospeccao_id=%s where id=%s", (lead_id, conv_id))
     else:
         conv_id = c.execute(
-            """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status, agente_ativo)
-               values (%s,%s,'whatsapp',%s,'aberta',%s) returning id""",
-            (conta_id, lead_id, remetente, agente_on)).fetchone()[0]
+            """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status,
+                 agente_ativo, contato_nome)
+               values (%s,%s,'whatsapp',%s,'aberta',%s,
+                       (select nome from wa_contatos where conta_id=%s and numero8=%s))
+               returning id""",
+            (conta_id, lead_id, remetente, agente_on, conta_id, alvo8)).fetchone()[0]
     c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
                  values (%s,'whatsapp','in','lead',%s,%s)
                  on conflict (provider_sid) where provider_sid is not null do nothing""",
@@ -2142,7 +2160,8 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     c.execute(
         """update conversas set ultima_msg_em=now(),
              janela_expira_em=now()+interval '24 hours',
-             contato_nome=coalesce(nullif(%s,''), contato_nome),
+             -- pushName é só reserva: não derruba o nome da AGENDA que já estiver lá
+             contato_nome=coalesce(nullif(contato_nome,''), nullif(%s,'')),
              status = case when status='pendente' then 'pendente' else 'aberta' end,
              agente_ativo = case when status='pendente' then agente_ativo else %s end
            where id=%s""", ((nome_perfil or "").strip()[:120], agente_on, conv_id))
@@ -2750,6 +2769,7 @@ def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando, de_mim=Fa
     ligada a lead — preferindo a ligada), senão um re-pareamento duplicava a aba
     de quem já tinha virado lead."""
     remetente = _so_digitos(remetente)
+    alvo8 = remetente[-8:] if len(remetente) >= 8 else remetente
     conv = c.execute(
         """select id from conversas where conta_id=%s and canal='whatsapp' and contato_ref=%s
             order by (prospeccao_id is not null) desc, ultima_msg_em desc limit 1""",
@@ -2757,11 +2777,15 @@ def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando, de_mim=Fa
     if conv:
         conv_id = conv[0]
     else:
+        # já nasce com o nome da agenda: na importação inicial a agenda chega ANTES
+        # das mensagens, então renomear depois não alcançaria estas conversas
         conv_id = c.execute(
             """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status,
-                 agente_ativo, ultima_msg_em)
-               values (%s,null,'whatsapp',%s,'aberta',false,coalesce(%s,now())) returning id""",
-            (conta_id, remetente, quando)).fetchone()[0]
+                 agente_ativo, ultima_msg_em, contato_nome)
+               values (%s,null,'whatsapp',%s,'aberta',false,coalesce(%s,now()),
+                       (select nome from wa_contatos where conta_id=%s and numero8=%s))
+               returning id""",
+            (conta_id, remetente, quando, conta_id, alvo8)).fetchone()[0]
     c.execute(
         """insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid, criado_em)
              values (%s,'whatsapp',%s,%s,%s,%s,coalesce(%s,now()))
@@ -2769,7 +2793,7 @@ def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando, de_mim=Fa
         (conv_id, "out" if de_mim else "in", "humano" if de_mim else "lead",
          (corpo or "")[:8000], sid, quando))
     c.execute("""update conversas set ultima_msg_em=greatest(ultima_msg_em, coalesce(%s,now())),
-                   contato_nome=coalesce(nullif(%s,''), contato_nome) where id=%s""",
+                   contato_nome=coalesce(nullif(contato_nome,''), nullif(%s,'')) where id=%s""",
               (quando, (nome_perfil or "").strip()[:120], conv_id))
     return conv_id
 
@@ -2903,8 +2927,12 @@ async def webhook_wa_qr_contatos(request: Request):
     `da_agenda=False` = pushName (nome que a própria pessoa pôs no perfil), que
     é só reserva: preenche apenas quando a conversa ainda não tem nome.
 
-    Só ATUALIZA conversa existente — nunca cria conversa nem lead a partir de um
-    contato da agenda (senão a agenda inteira do vendedor viraria conversa)."""
+    GUARDA o nome em wa_contatos e ATUALIZA a conversa existente. Guardar é o que
+    faz a importação inicial funcionar: o WhatsApp manda a agenda ANTES/no meio da
+    enxurrada de mensagens, então quase toda conversa ainda não existe quando o
+    nome chega — antes disso o nome era descartado e a conversa nascia com o número
+    cru. Nunca cria conversa nem lead a partir de um contato da agenda (senão a
+    agenda inteira do vendedor viraria conversa)."""
     import logging
     log = logging.getLogger("prospeccao.wa_qr")
     segredo = os.environ.get("WA_QR_SHARED_SECRET") or ""
@@ -2936,6 +2964,15 @@ async def webhook_wa_qr_contatos(request: Request):
             if not numero or not nome:
                 continue
             alvo8 = numero[-8:] if len(numero) >= 8 else numero
+            # guarda na agenda (vale pra conversa que ainda NEM EXISTE). Nome da
+            # agenda sobrescreve; pushName não derruba um nome que veio da agenda.
+            c.execute("""insert into wa_contatos (conta_id, numero8, nome, da_agenda, atualizado)
+                              values (%s,%s,%s,%s, now())
+                         on conflict (conta_id, numero8) do update
+                            set nome=excluded.nome, da_agenda=excluded.da_agenda,
+                                atualizado=now()
+                          where excluded.da_agenda or not wa_contatos.da_agenda""",
+                      (conta_id, alvo8, nome, da_agenda))
             # nome da agenda manda; pushName só entra se ainda não houver nome
             cond = "" if da_agenda else " and coalesce(contato_nome,'')=''"
             r = c.execute(
@@ -2982,6 +3019,9 @@ async def webhook_wa_qr_deslogado(request: Request):
         n_conv = c.execute(
             "delete from conversas where conta_id=%s and canal='whatsapp'",
             (conta_id,)).rowcount
+        # a agenda é do celular que acabou de sair — vai junto (o próximo pareamento
+        # traz a agenda do aparelho novo, que pode nem ser o mesmo)
+        c.execute("delete from wa_contatos where conta_id=%s", (conta_id,))
         c.commit()
     log.warning("webhook_wa_qr_deslogado: conta_id=%s deslogou — apagadas %s mensagens e %s conversas "
                 "(lead/prospecção preservados)", conta_id, n_msg, n_conv)

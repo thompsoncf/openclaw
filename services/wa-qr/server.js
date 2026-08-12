@@ -27,6 +27,10 @@
  * Deslogar de vez (não queda temporária) avisa ${APP_URL}/webhooks/wa-qr/deslogado
  * — apaga o histórico de conversa daquele canal (não apaga o lead em si).
  *
+ * Ao subir (deploy/restart/crash) o serviço religa sozinho todas as contas que já
+ * estavam pareadas, lendo as credenciais do Postgres — ver restaurarSessoes().
+ * Ninguém precisa abrir tela nem escanear QR de novo por causa de um deploy.
+ *
  * Env: DATABASE_URL, WA_QR_SHARED_SECRET, APP_URL, PORT (default 3000).
  */
 const http = require('node:http')
@@ -451,6 +455,39 @@ async function iniciarSessao (contaId) {
   return s
 }
 
+// Toda vez que o serviço sobe (deploy, restart, crash) a memória vem vazia: as
+// credenciais continuam salvas no Postgres, mas nenhum socket existe até alguém
+// mandar abrir. Na prática o vendedor via "o WhatsApp caiu, reconecte" no meio do
+// trabalho e não conseguia enviar nada. Aqui a gente religa sozinho todas as
+// contas que já estavam pareadas — sem QR novo, sem ninguém precisar abrir tela
+// nenhuma. Best-effort: se falhar, o fluxo manual pela aba Canais continua igual.
+async function restaurarSessoes () {
+  try {
+    const r = await pool.query(
+      `select conta_id from wa_qr_auth
+        where arquivo = 'creds' and conteudo::json->>'registered' = 'true'
+        order by conta_id`)
+    const contas = r.rows.map((l) => l.conta_id)
+    if (!contas.length) {
+      log.info('restaurarSessoes: nenhuma conta pareada pra religar')
+      return
+    }
+    log.info({ n: contas.length, contas }, 'restaurarSessoes: religando contas já pareadas')
+    for (const contaId of contas) {
+      try {
+        await iniciarSessao(contaId)
+      } catch (e) {
+        log.error({ contaId, e: String(e && e.stack || e) }, 'restaurarSessoes: falhou nessa conta')
+      }
+      // espaça as reconexões: várias contas abrindo socket no mesmo instante é
+      // um bom jeito de o WhatsApp achar que é abuso e derrubar/bloquear todas.
+      await new Promise((r2) => setTimeout(r2, 1500))
+    }
+  } catch (e) {
+    log.error({ e: String(e && e.stack || e) }, 'restaurarSessoes: falhou')
+  }
+}
+
 // --------------------------------------------------------------- HTTP
 
 function json (res, code, obj) {
@@ -496,11 +533,21 @@ const servidor = http.createServer(async (req, res) => {
       if (req.method === 'POST' && acao === 'enviar') {
         const body = await lerBody(req)
         const jid = jidDe(body.numero)
-        const s = sessoes.get(contaId)
+        let s = sessoes.get(contaId)
         // log sempre, mesmo quando falha — sem isso não dava pra saber SE o
         // status realmente não era 'conectado' na hora do envio ou se o
         // sendMessage em si que deu erro (dois motivos bem diferentes).
         log.info({ contaId, status: s && s.status, temSock: !!(s && s.sock) }, 'enviar: tentativa')
+        // Sem sessão viva (serviço acabou de subir e ainda não religou essa conta,
+        // ou ela caiu agora): tenta religar na hora com a credencial salva em vez
+        // de já responder "desconectado" — que era o que o vendedor via bem no meio
+        // de uma conversa. Se mesmo assim não subir, aí sim devolve o erro.
+        if (!s || s.status !== 'conectado' || !s.sock) {
+          log.info({ contaId }, 'enviar: sem sessão viva — tentando religar antes de desistir')
+          try { s = await iniciarSessao(contaId) } catch (e) {
+            log.warn({ contaId, e: String(e) }, 'enviar: religar falhou')
+          }
+        }
         if (!s || s.status !== 'conectado' || !s.sock) return json(res, 200, { ok: false, erro: 'desconectado' })
         if (!jid) return json(res, 200, { ok: false, erro: 'numero_invalido' })
         try {
@@ -539,4 +586,9 @@ const servidor = http.createServer(async (req, res) => {
   }
 })
 
-servidor.listen(PORT, () => log.info({ PORT }, 'wa-qr no ar'))
+servidor.listen(PORT, () => {
+  log.info({ PORT }, 'wa-qr no ar')
+  // não dá await: o healthcheck do Render precisa da porta respondendo já, e
+  // religar as contas pode levar alguns segundos por conta.
+  restaurarSessoes().catch((e) => log.error({ e: String(e) }, 'restaurarSessoes: erro solto'))
+})

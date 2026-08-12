@@ -24,8 +24,9 @@
  * como fromMe) vai pra ${APP_URL}/webhooks/wa-qr/saida — só registra em conversa
  * que já existe, nunca cria lead novo.
  *
- * Deslogar de vez (não queda temporária) avisa ${APP_URL}/webhooks/wa-qr/deslogado
- * — apaga o histórico de conversa daquele canal (não apaga o lead em si).
+ * Deslogar avisa ${APP_URL}/webhooks/wa-qr/deslogado — apaga o histórico de conversa
+ * daquele canal (não apaga o lead em si). Vale tanto pro botão "Desconectar" quanto
+ * pro logout feito pelo celular; queda temporária de conexão NUNCA apaga nada.
  *
  * Ao subir (deploy/restart/crash) o serviço religa sozinho todas as contas que já
  * estavam pareadas, lendo as credenciais do Postgres — ver restaurarSessoes().
@@ -38,8 +39,9 @@ const { Pool } = require('pg')
 const pino = require('pino')
 const QRCode = require('qrcode')
 const makeWASocket = require('@whiskeysockets/baileys').default
-const { DisconnectReason, makeCacheableSignalKeyStore, fetchLatestBaileysVersion } =
+const { DisconnectReason, makeCacheableSignalKeyStore, fetchLatestBaileysVersion, proto } =
   require('@whiskeysockets/baileys')
+const TIPO_HIST = proto.Message.HistorySyncNotification.HistorySyncType
 const { useDbAuthState } = require('./auth-db')
 
 const PORT = parseInt(process.env.PORT || '3000', 10)
@@ -329,14 +331,22 @@ async function iniciarSessao (contaId) {
       printQRInTerminal: false,
       browser: ['ZAQ', 'Chrome', '1.0.0'],
       logger: log,
-      // syncFullHistory:true pede pro WhatsApp o histórico INTEIRO da conta (meses/
-      // anos, não só os últimos 30 dias que a gente já filtra em repassarHistorico)
-      // — numa conta movimentada isso é uma fila de dezenas de milhares de
-      // mensagens, cada uma com um POST síncrono pro webhook; enquanto essa fila não
-      // esvazia, mensagem NOVA (ao vivo) fica represada atrás dela e parece que
-      // "parou de funcionar do nada". false é o default do Baileys: sincroniza só o
-      // recente, que já cobre bem os últimos 30 dias numa conta ativa.
+      // syncFullHistory:true PEDE pro WhatsApp o histórico INTEIRO da conta (meses/
+      // anos) — numa conta movimentada são dezenas de milhares de mensagens que
+      // represam o tempo real e fazem parecer que "parou de funcionar do nada".
+      // Deixando false, o WhatsApp manda sozinho só a janela RECENTE ao parear,
+      // que é justamente o que a gente quer importar.
       syncFullHistory: false,
+      // ...e aqui a gente processa essa janela recente (por padrão o Baileys
+      // descartaria tudo junto com o FULL, já que o gate default é só o
+      // syncFullHistory). FULL fica de fora de propósito: é o backfill da conta
+      // inteira, o mesmo que travou as mensagens ao vivo antes.
+      // O corte de 30 dias continua em repassarHistorico, ANTES do POST — mensagem
+      // antiga é descartada sem custo de rede.
+      shouldSyncHistoryMessage: (msg) => {
+        const t = msg && msg.syncType
+        return t === TIPO_HIST.RECENT || t === TIPO_HIST.INITIAL_BOOTSTRAP
+      },
       markOnlineOnConnect: false
     })
     s.sock = sock
@@ -561,6 +571,11 @@ const servidor = http.createServer(async (req, res) => {
       }
       if (req.method === 'POST' && acao === 'sair') {
         const s = sessoes.get(contaId)
+        // marca como descartado ANTES do logout: o 'close' que o logout provoca
+        // cairia no branch de deslogado e refaria essa mesma limpeza por outro
+        // caminho. Aqui embaixo ela é feita explicitamente, igual nos dois casos
+        // (com ou sem sessão viva) — que era exatamente o que faltava.
+        if (s && s.sock) s.sock._descartado = true
         try { if (s && s.sock) await s.sock.logout() } catch (_) {}
         // Se o serviço reiniciou desde a última vez que essa conta ficou conectada em
         // memória (deploy, crash, etc.), `s` não existe mais aqui — mas as credenciais
@@ -576,6 +591,13 @@ const servidor = http.createServer(async (req, res) => {
         } catch (_) {}
         sessoes.delete(contaId)
         lidMaps.delete(contaId)
+        // Desconectar apaga o histórico de chat desse canal SEMPRE. Antes isso só
+        // acontecia quando havia socket vivo na memória (o logout gerava um 401 que
+        // disparava a limpeza por tabela); depois de um restart do serviço o MESMO
+        // botão não apagava nada — o resultado dependia de o serviço ter reiniciado
+        // ou não. O LEAD em si continua existindo: só some a aba de conversa.
+        await avisarDeslogado(contaId)
+        log.info({ contaId }, 'sair: sessão encerrada e histórico de conversa limpo')
         return json(res, 200, { ok: true })
       }
     }

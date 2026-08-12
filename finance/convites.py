@@ -37,6 +37,105 @@ def criar_convidado(pool, conta_id: int, evento_id: int, nome: str | None,
             "status": row[4], "evento_id": evento_id, "conta_id": conta_id}
 
 
+def registrar_mensagem(pool, conta_id: int, evento_id: int | None, convidado_id: int | None,
+                       tipo: str, canal: str, ok: bool, motivo: str | None = None) -> None:
+    """Loga uma tentativa de envio (convite/lembrete/remarcado) pro histórico do
+    painel ("Histórico de envios") — só um LOG, nunca decide comportamento de
+    envio (isso continua em lembretes_enviados / status do convidado). Best-
+    effort: nunca levanta, pra um problema no log não derrubar o envio de
+    verdade."""
+    try:
+        with pool.connection() as c:
+            c.execute(
+                "insert into agenda_mensagens_log "
+                "(conta_id, evento_id, convidado_id, tipo, canal, ok, motivo) "
+                "values (%s,%s,%s,%s,%s,%s,%s)",
+                (conta_id, evento_id, convidado_id, tipo, canal, ok, motivo))
+            c.commit()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def listar_historico(pool, conta_id: int, dias: int = 7, somente_falhas: bool = False,
+                     busca: str = "", limite: int = 20, offset: int = 0) -> dict:
+    """Histórico de envios (convite/lembrete/remarcado) pro painel — junta com o
+    evento e o convidado só pra exibição. Mais recentes primeiro."""
+    desde = ag.agora_brt() - timedelta(days=dias)
+    where = ["l.conta_id=%s", "l.criado_em >= %s"]
+    params: list = [conta_id, desde]
+    if somente_falhas:
+        where.append("l.ok = false")
+    busca = (busca or "").strip()
+    if busca:
+        where.append("(e.titulo ilike %s or g.nome ilike %s)")
+        params += [f"%{busca}%", f"%{busca}%"]
+    sql_where = " and ".join(where)
+    with pool.connection() as c:
+        total = c.execute(
+            f"select count(*) from agenda_mensagens_log l "
+            f"left join eventos_agenda e on e.id = l.evento_id "
+            f"left join evento_convidados g on g.id = l.convidado_id "
+            f"where {sql_where}", params).fetchone()[0]
+        rows = c.execute(
+            f"select l.id, l.criado_em, l.tipo, l.canal, l.ok, l.motivo, "
+            f"       e.titulo, e.local, g.nome "
+            f"  from agenda_mensagens_log l "
+            f"  left join eventos_agenda e on e.id = l.evento_id "
+            f"  left join evento_convidados g on g.id = l.convidado_id "
+            f" where {sql_where} order by l.criado_em desc limit %s offset %s",
+            params + [limite, offset]).fetchall()
+    itens = [{"id": r[0], "quando": r[1], "tipo": r[2], "canal": r[3], "ok": r[4],
+             "motivo": r[5], "evento_titulo": r[6], "evento_local": r[7],
+             "convidado_nome": r[8]} for r in rows]
+    return {"itens": itens, "total": total}
+
+
+def reenviar_historico(pool, conta_id: int, log_id: int) -> dict:
+    """Reenvia manualmente uma tentativa que falhou no Histórico de envios — não
+    espera o próximo ciclo do motor (~2min) nem a janela do evento. Só 'convite'
+    e 'lembrete' têm reenvio manual aqui; 'remarcado' já tem seu próprio botão
+    de Remarcar no compromisso."""
+    with pool.connection() as c:
+        row = c.execute(
+            "select tipo, evento_id, convidado_id from agenda_mensagens_log "
+            "where id=%s and conta_id=%s", (log_id, conta_id)).fetchone()
+    if not row:
+        return {"ok": False, "erro": "nao_encontrado"}
+    tipo, evento_id, convidado_id = row
+    if tipo not in ("convite", "lembrete"):
+        return {"ok": False, "erro": "tipo_nao_suportado"}
+    if tipo == "convite":
+        if not convidado_id:
+            return {"ok": False, "erro": "nao_encontrado"}
+        with pool.connection() as c:
+            tok = c.execute("select token from evento_convidados where id=%s and conta_id=%s",
+                            (convidado_id, conta_id)).fetchone()
+        if not tok:
+            return {"ok": False, "erro": "nao_encontrado"}
+        return enviar_convite_whatsapp(pool, tok[0])
+    ev = ag.evento_por_id(pool, conta_id, evento_id)
+    if not ev:
+        return {"ok": False, "erro": "nao_encontrado"}
+    agora = ag.agora_brt()
+    hora = ag.fmt_hora(ev)
+    faltam = max(0, int((ev["inicio"] - agora).total_seconds() // 60))
+    if convidado_id is None:
+        loc = f"\n📍 {ev['local']}" if ev.get("local") else ""
+        txt = f"⏰ *Daqui a pouco* (em ~{faltam} min): *{ev['titulo']}* às {hora}.{loc}"
+        from . import notificar
+        ok = notificar.enviar_para_dono(pool, conta_id, txt)
+        registrar_mensagem(pool, conta_id, evento_id, None, "lembrete", "telegram",
+                           ok, None if ok else "falha_envio")
+        return {"ok": ok}
+    g = next((x for x in por_evento(pool, conta_id, [evento_id]).get(evento_id, [])
+              if x["id"] == convidado_id), None)
+    if not g:
+        return {"ok": False, "erro": "nao_encontrado"}
+    return avisar_convidado_confirmado(pool, conta_id, evento_id, convidado_id,
+                                       g.get("contato"), g.get("nome"), ev["titulo"], hora, faltam,
+                                       g.get("respondido_em"), g.get("respondido_canal"), agora)
+
+
 def por_token(pool, token: str) -> dict | None:
     """Tudo que a página pública de confirmação precisa: convidado + evento + a
     empresa (nome). None se o token não existe."""
@@ -289,15 +388,23 @@ def enviar_convite_whatsapp(pool, token: str) -> dict:
     c = por_token(pool, token)
     if not c:
         return {"ok": False, "erro": "convite_nao_encontrado"}
+    ev_id, conv_id, conta_id = c["evento"]["id"], c["id"], c["conta_id"]
     if not (c.get("contato") or "").strip():
+        registrar_mensagem(pool, conta_id, ev_id, conv_id, "convite", "whatsapp_template",
+                           False, "sem_numero")
         return {"ok": False, "erro": "sem_numero"}
     sid = os.environ.get("TWILIO_TMPL_CONVITE_SID")
     if not sid:
+        registrar_mensagem(pool, conta_id, ev_id, conv_id, "convite", "whatsapp_template",
+                           False, "sem_template")
         return {"ok": False, "erro": "sem_template"}
     ev = c["evento"]
     variaveis = {"1": _titulo_com_extras(pool, c), "2": ag.fmt_hora(ev)}
     with pool.connection() as conn:
-        return wout.enviar_template(conn, c["conta_id"], c["contato"], sid, variaveis)
+        r = wout.enviar_template(conn, conta_id, c["contato"], sid, variaveis)
+    registrar_mensagem(pool, conta_id, ev_id, conv_id, "convite", "whatsapp_template",
+                       bool(r.get("ok")), None if r.get("ok") else r.get("erro"))
+    return r
 
 
 # ---- Aviso "seu compromisso começa em breve" pros CONFIRMADOS (opt-in) --------
@@ -332,8 +439,8 @@ def template_lembrete_configurado() -> bool:
     return bool(os.environ.get("TWILIO_TMPL_LEMBRETE_SID") and wa.configurado())
 
 
-def avisar_convidado_confirmado(pool, conta_id: int, contato: str, nome: str,
-                                titulo: str, hora: str, faltam_min: int,
+def avisar_convidado_confirmado(pool, conta_id: int, evento_id: int, convidado_id: int,
+                                contato: str, nome: str, titulo: str, hora: str, faltam_min: int,
                                 respondido_em, respondido_canal, agora) -> dict:
     """Avisa o convidado CONFIRMADO que o compromisso tá chegando.
 
@@ -345,17 +452,27 @@ def avisar_convidado_confirmado(pool, conta_id: int, contato: str, nome: str,
     levanta)."""
     from . import whatsapp_out as wout
     if not (contato or "").strip():
+        registrar_mensagem(pool, conta_id, evento_id, convidado_id, "lembrete", "whatsapp_livre",
+                           False, "sem_numero")
         return {"ok": False, "erro": "sem_numero"}
     if _dentro_da_janela(respondido_em, respondido_canal, agora):
         texto = texto_lembrete_convidado(nome, titulo, hora, faltam_min)
         with pool.connection() as conn:
-            return wout.enviar(conn, conta_id, contato, texto)
+            r = wout.enviar(conn, conta_id, contato, texto)
+        registrar_mensagem(pool, conta_id, evento_id, convidado_id, "lembrete", "whatsapp_livre",
+                           bool(r.get("ok")), None if r.get("ok") else r.get("erro"))
+        return r
     sid = os.environ.get("TWILIO_TMPL_LEMBRETE_SID")
     if not sid:
+        registrar_mensagem(pool, conta_id, evento_id, convidado_id, "lembrete", "whatsapp_template",
+                           False, "fora_da_janela_sem_template")
         return {"ok": False, "erro": "fora_da_janela_sem_template"}
     variaveis = {"1": titulo, "2": hora, "3": str(faltam_min)}
     with pool.connection() as conn:
-        return wout.enviar_template(conn, conta_id, contato, sid, variaveis)
+        r = wout.enviar_template(conn, conta_id, contato, sid, variaveis)
+    registrar_mensagem(pool, conta_id, evento_id, convidado_id, "lembrete", "whatsapp_template",
+                       bool(r.get("ok")), None if r.get("ok") else r.get("erro"))
+    return r
 
 
 # ---- Remarcar: muda a data mantendo os mesmos convidados/link -----------------
@@ -381,6 +498,8 @@ def avisar_convidado_remarcado(pool, conta_id: int, g: dict, ev: dict,
     evento já está com a data nova, então quem clicar vê o horário certo."""
     contato = (g.get("contato") or "").strip()
     if not contato:
+        registrar_mensagem(pool, conta_id, ev["id"], g["id"], "remarcado", "whatsapp_livre",
+                           False, "sem_numero")
         return {"ok": False, "erro": "sem_numero"}
     if _dentro_da_janela(g.get("respondido_em"), g.get("respondido_canal"), agora):
         from . import whatsapp_out as wout
@@ -388,8 +507,11 @@ def avisar_convidado_remarcado(pool, conta_id: int, g: dict, ev: dict,
         texto = texto_remarcado(g.get("nome"), ev["titulo"], hora_antiga, ag.fmt_hora(ev), url,
                                 ev.get("link_online"))
         with pool.connection() as conn:
-            return wout.enviar(conn, conta_id, contato, texto)
-    return enviar_convite_whatsapp(pool, g["token"])
+            r = wout.enviar(conn, conta_id, contato, texto)
+        registrar_mensagem(pool, conta_id, ev["id"], g["id"], "remarcado", "whatsapp_livre",
+                           bool(r.get("ok")), None if r.get("ok") else r.get("erro"))
+        return r
+    return enviar_convite_whatsapp(pool, g["token"])   # fora da janela: cai no template de convite (já loga tipo='convite')
 
 
 def remarcar_e_avisar(pool, conta_id: int, evento_id: int, novo_inicio, novo_fim,

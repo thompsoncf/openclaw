@@ -31,7 +31,8 @@ def pool():
     migr = Path(__file__).resolve().parent.parent / "db" / "migracoes"
     with p.connection() as c:
         for nome in ("098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql",
-                    "130_evento_desfecho.sql", "131_evento_link_online.sql", "132_convidado_canal_resposta.sql"):
+                    "130_evento_desfecho.sql", "131_evento_link_online.sql", "132_convidado_canal_resposta.sql",
+                    "139_agenda_mensagens_log.sql"):
             c.execute((migr / nome).read_text(encoding="utf-8"))
         c.commit()
     yield p
@@ -162,6 +163,46 @@ def test_rota_convidado_adicionar_recusa_evento_cancelado(pool, conta_id, monkey
                                          nome="Carlos", contato="", m="")
     assert resp.status_code == 303
     assert cv.por_evento(pool, conta_id, [ev["id"]]).get(ev["id"], []) == []
+
+
+def test_rota_historico_lista_e_filtra(pool, conta_id, monkeypatch):
+    from web import painel_agenda as pa
+    monkeypatch.setattr(pa, "get_pool", lambda: pool)
+    monkeypatch.setattr(pa, "_acesso", lambda req: (
+        {"conta_id": conta_id, "gerencia": True, "membro_id": None}, None))
+    ev = ag.criar_evento(pool, conta_id, "Reunião com Paulo", ag.agora_brt() + timedelta(days=1))
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Paulo", "86999382687")
+    cv.registrar_mensagem(pool, conta_id, ev["id"], conv["id"], "lembrete", "whatsapp_template",
+                          False, "sem_template")
+    resp = pa.agenda_historico(_FakeSessionRequest(conta_id))
+    import json
+    body = json.loads(resp.body)
+    assert body["ok"] is True and body["total"] == 1
+    item = body["itens"][0]
+    assert item["convidado_rot"] == "Paulo" and item["motivo_rot"] == "sem template configurado"
+    assert item["pode_reenviar"] is True
+
+    resp2 = pa.agenda_historico(_FakeSessionRequest(conta_id), falhas="0", q="não existe")
+    assert json.loads(resp2.body)["total"] == 0
+
+
+def test_rota_historico_reenviar_dispara_de_novo(pool, conta_id, monkeypatch):
+    from web import painel_agenda as pa
+    monkeypatch.setattr(pa, "get_pool", lambda: pool)
+    monkeypatch.setattr(pa, "_acesso", lambda req: (
+        {"conta_id": conta_id, "gerencia": True, "membro_id": None}, None))
+    ev = ag.criar_evento(pool, conta_id, "Reunião Z", ag.agora_brt() + timedelta(days=1))
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Léo", "86988883333")
+    monkeypatch.delenv("TWILIO_TMPL_CONVITE_SID", raising=False)
+    cv.enviar_convite_whatsapp(pool, conv["token"])
+    log_id = cv.listar_historico(pool, conta_id)["itens"][0]["id"]
+
+    from finance import whatsapp_out as wout
+    monkeypatch.setattr(wout, "enviar_template", lambda c, cid, n, sid, v: {"ok": True, "sid": "SM3"})
+    monkeypatch.setenv("TWILIO_TMPL_CONVITE_SID", "HXtest")
+    import json
+    resp = pa.agenda_historico_reenviar(_FakeSessionRequest(conta_id), log_id=log_id)
+    assert json.loads(resp.body)["ok"] is True
 
 
 def test_rota_novo_ignora_link_online_se_nao_marcou_online(pool, conta_id, monkeypatch):

@@ -22,7 +22,8 @@ def pool():
     migr = Path(__file__).resolve().parent.parent / "db" / "migracoes"
     with p.connection() as c:
         for nome in ("098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql",
-                    "130_evento_desfecho.sql", "131_evento_link_online.sql", "132_convidado_canal_resposta.sql"):
+                    "130_evento_desfecho.sql", "131_evento_link_online.sql", "132_convidado_canal_resposta.sql",
+                    "139_agenda_mensagens_log.sql"):
             c.execute((migr / nome).read_text(encoding="utf-8"))
         c.commit()
     yield p
@@ -273,6 +274,93 @@ def test_enviar_convite_sem_numero_ou_sem_template(pool, conta_id, monkeypatch):
     com_num = cv.criar_convidado(pool, conta_id, ev["id"], "ComZap", "86 98888-7777")
     monkeypatch.delenv("TWILIO_TMPL_CONVITE_SID", raising=False)
     assert cv.enviar_convite_whatsapp(pool, com_num["token"])["erro"] == "sem_template"
+
+
+def test_enviar_convite_loga_sucesso_e_falha_no_historico(pool, conta_id, monkeypatch):
+    """Toda tentativa de envio (sucesso ou falha) fica registrada no Histórico de
+    envios — era exatamente essa visibilidade que faltava pra investigar o caso
+    do aviso que não chegou pro convidado sem precisar ir direto no banco."""
+    ev = _evento(pool, conta_id, titulo="Reunião X")
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Rui", "86 98888-7777")
+    from finance import whatsapp_out as wout
+    monkeypatch.setattr(wout, "enviar_template", lambda c, cid, n, sid, v: {"ok": True, "sid": "SM1"})
+    monkeypatch.setenv("TWILIO_TMPL_CONVITE_SID", "HXtest")
+    cv.enviar_convite_whatsapp(pool, conv["token"])
+    hist = cv.listar_historico(pool, conta_id)
+    assert hist["total"] == 1
+    it = hist["itens"][0]
+    assert it["tipo"] == "convite" and it["ok"] is True and it["motivo"] is None
+    assert it["convidado_nome"] == "Rui" and it["evento_titulo"] == "Reunião X"
+
+    monkeypatch.delenv("TWILIO_TMPL_CONVITE_SID", raising=False)
+    cv.enviar_convite_whatsapp(pool, conv["token"])
+    hist2 = cv.listar_historico(pool, conta_id)
+    assert hist2["total"] == 2
+    falha = hist2["itens"][0]                    # mais recente primeiro
+    assert falha["ok"] is False and falha["motivo"] == "sem_template"
+
+
+def test_listar_historico_filtra_por_falhas_periodo_e_busca(pool, conta_id, monkeypatch):
+    ev = _evento(pool, conta_id, titulo="Reunião com Paulo")
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Paulo", "86988887777")
+    monkeypatch.delenv("TWILIO_TMPL_CONVITE_SID", raising=False)
+    cv.enviar_convite_whatsapp(pool, conv["token"])       # falha: sem_template
+    from finance import whatsapp_out as wout
+    monkeypatch.setattr(wout, "enviar_template", lambda c, cid, n, sid, v: {"ok": True, "sid": "SM1"})
+    monkeypatch.setenv("TWILIO_TMPL_CONVITE_SID", "HXtest")
+    cv.enviar_convite_whatsapp(pool, conv["token"])       # sucesso
+
+    assert cv.listar_historico(pool, conta_id)["total"] == 2
+    assert cv.listar_historico(pool, conta_id, somente_falhas=True)["total"] == 1
+    assert cv.listar_historico(pool, conta_id, dias=0)["total"] == 0     # fora do período
+    assert cv.listar_historico(pool, conta_id, busca="paulo")["total"] == 2
+    assert cv.listar_historico(pool, conta_id, busca="não existe")["total"] == 0
+
+
+def test_reenviar_historico_convite_tenta_de_novo_agora(pool, conta_id, monkeypatch):
+    ev = _evento(pool, conta_id, titulo="Reunião Y")
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Bia", "86988880000")
+    monkeypatch.delenv("TWILIO_TMPL_CONVITE_SID", raising=False)
+    cv.enviar_convite_whatsapp(pool, conv["token"])       # falha
+    log_id = cv.listar_historico(pool, conta_id)["itens"][0]["id"]
+
+    from finance import whatsapp_out as wout
+    monkeypatch.setattr(wout, "enviar_template", lambda c, cid, n, sid, v: {"ok": True, "sid": "SM2"})
+    monkeypatch.setenv("TWILIO_TMPL_CONVITE_SID", "HXtest")
+    r = cv.reenviar_historico(pool, conta_id, log_id)
+    assert r["ok"] is True
+    assert cv.listar_historico(pool, conta_id)["total"] == 2   # nova tentativa logada, não sobrescreve
+
+
+def test_reenviar_historico_lembrete_dono_e_convidado(pool, conta_id, monkeypatch):
+    ev = _evento(pool, conta_id, titulo="Daily")
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Ana", "86988881111")
+    cv.responder(pool, conv["token"], "confirmado", canal="whatsapp")
+    cv.registrar_mensagem(pool, conta_id, ev["id"], conv["id"], "lembrete", "whatsapp_livre",
+                          False, "falha_envio")
+    cv.registrar_mensagem(pool, conta_id, ev["id"], None, "lembrete", "telegram",
+                          False, "falha_envio")
+    itens = cv.listar_historico(pool, conta_id)["itens"]
+    log_convidado = next(i for i in itens if i["convidado_nome"] == "Ana")
+    log_dono = next(i for i in itens if i["convidado_nome"] is None)
+
+    from finance import whatsapp_out as wout
+    monkeypatch.setattr(wout, "enviar", lambda c, cid, n, t: {"ok": True})
+    assert cv.reenviar_historico(pool, conta_id, log_convidado["id"])["ok"] is True
+
+    from finance import notificar
+    monkeypatch.setattr(notificar, "enviar_para_dono", lambda pool, cid, txt: True)
+    assert cv.reenviar_historico(pool, conta_id, log_dono["id"])["ok"] is True
+
+
+def test_reenviar_historico_tipo_remarcado_nao_suportado(pool, conta_id):
+    ev = _evento(pool, conta_id)
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Zé", "86988882222")
+    cv.registrar_mensagem(pool, conta_id, ev["id"], conv["id"], "remarcado", "whatsapp_livre",
+                          False, "falha_envio")
+    log_id = cv.listar_historico(pool, conta_id)["itens"][0]["id"]
+    r = cv.reenviar_historico(pool, conta_id, log_id)
+    assert r["ok"] is False and r["erro"] == "tipo_nao_suportado"
 
 
 def test_marcar_evento_com_convidados_dispara(pool, conta_id, monkeypatch):

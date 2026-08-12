@@ -373,6 +373,17 @@ async function resyncAgenda (contaId, tentativa, completa) {
         log.info({ contaId, tentativa }, 'resyncAgenda: agenda completa já foi baixada — só patches')
         completa = false
       } else {
+        // Zerar a versão pelo KEY STORE, não por SQL. O Baileys lê a versão através
+        // do makeCacheableSignalKeyStore, que guarda o valor em memória por 5min
+        // (Utils/auth-utils.js) — apagar a linha no Postgres era invisível pra ele.
+        // Medido no log: 'resyncAgenda: pedindo a agenda de novo (completa: true)'
+        // seguido de 'resyncing critical_unblock_low from v31', com a linha já
+        // apagada do banco. Pelo store o set(null) grava null no cache E chama o
+        // nosso apagar(); aí o resyncAppState acha state falsy, cai em
+        // newLTHashState() (versão 0) e finalmente pede o snapshot inteiro.
+        await s.sock.authState.keys.set({
+          'app-state-sync-version': { critical_unblock_low: null }
+        })
         await pool.query('delete from wa_qr_auth where conta_id=$1 and arquivo=$2',
           [contaId, VERSAO_AGENDA])
       }

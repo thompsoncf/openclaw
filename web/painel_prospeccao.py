@@ -1504,8 +1504,9 @@ def comunicacao_responder(request: Request, conversa_id: int = Form(...), texto:
                      "sem_numero_empresa": "Configure o WhatsApp desta empresa na aba Canais.",
                      "numero_invalido": "Número do lead inválido.",
                      "qr_indisponivel": "A conexão por QR ainda não está ligada — use Twilio ou Cloud API.",
-                     "desconectado": "O WhatsApp conectado por QR caiu — abra a aba Canais e reconecte "
-                                     "(não precisa escanear de novo, geralmente volta sozinho em segundos)."}
+                     "desconectado": "O WhatsApp está reconectando (normal por ~1 minuto após uma "
+                                     "atualização do sistema). Espere alguns segundos e envie de novo — "
+                                     "NÃO clique em Desconectar nem escaneie QR."}
             return JSONResponse({"ok": False, "erro": erros.get(res.get("erro"), "Não consegui enviar (janela de 24h fechada? use template).")})
         _add_msg(c, conversa_id, "whatsapp", "out", "humano",
                  texto, ctx["membro_id"], res.get("sid"))
@@ -4911,8 +4912,9 @@ def prospeccao_enviar_whatsapp(request: Request, alvo_id: int, texto: str = Form
                 "sem_numero_empresa": "Configure o WhatsApp desta empresa na aba Canais.",
                 "numero_invalido": "Número do lead inválido.",
                 "qr_indisponivel": "A conexão por QR ainda não está ligada.",
-                "desconectado": "O WhatsApp conectado por QR caiu — abra a aba Canais e reconecte "
-                                "(não precisa escanear de novo, geralmente volta sozinho em segundos).",
+                "desconectado": "O WhatsApp está reconectando (normal por ~1 minuto após uma "
+                                "atualização do sistema). Espere alguns segundos e envie de novo — "
+                                "NÃO clique em Desconectar nem escaneie QR.",
             }
             return JSONResponse({"ok": False, "erro": res.get("erro"),
                                  "msg": erros.get(res.get("erro"),

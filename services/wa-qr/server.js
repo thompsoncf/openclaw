@@ -349,6 +349,12 @@ function agendarResyncAgenda (contaId, s) {
   s._agendaT2 = setTimeout(() => resyncAgenda(contaId, 2, true), 120000)
 }
 
+// Todas as coleções de app state (Types/Chat.js: ALL_WA_PATCH_NAMES). O nome do
+// contato não mora só numa: pedir apenas critical_unblock_low trouxe 88 contatos
+// nesta conta, e regular_low/regular nunca chegaram a sincronizar (não existia
+// linha de versão pra elas). O próprio Baileys sincroniza todas de uma vez no
+// doAppStateSync — a gente estava sendo mais restrito que ele sem motivo.
+const COLECOES = ['critical_block', 'critical_unblock_low', 'regular_high', 'regular_low', 'regular']
 const VERSAO_AGENDA = 'app-state-sync-version-critical_unblock_low'
 
 async function resyncAgenda (contaId, tentativa, completa) {
@@ -363,13 +369,11 @@ async function resyncAgenda (contaId, tentativa, completa) {
       return
     }
     if (completa) {
-      // a marca é só um controle nosso; o insert devolve 0 linhas se já existir
+      // a marca é só um controle nosso; existe = a agenda inteira já veio uma vez
       const marca = await pool.query(
-        `insert into wa_qr_auth (conta_id, arquivo, conteudo, atualizado)
-              values ($1, 'agenda-completa', '1', now())
-         on conflict (conta_id, arquivo) do nothing
-           returning 1`, [contaId])
-      if (!marca.rowCount) {
+        `select 1 from wa_qr_auth where conta_id=$1 and arquivo='agenda-completa'`,
+        [contaId])
+      if (marca.rowCount) {
         log.info({ contaId, tentativa }, 'resyncAgenda: agenda completa já foi baixada — só patches')
         completa = false
       } else {
@@ -381,16 +385,35 @@ async function resyncAgenda (contaId, tentativa, completa) {
         // apagada do banco. Pelo store o set(null) grava null no cache E chama o
         // nosso apagar(); aí o resyncAppState acha state falsy, cai em
         // newLTHashState() (versão 0) e finalmente pede o snapshot inteiro.
-        await s.sock.authState.keys.set({
-          'app-state-sync-version': { critical_unblock_low: null }
-        })
-        await pool.query('delete from wa_qr_auth where conta_id=$1 and arquivo=$2',
-          [contaId, VERSAO_AGENDA])
+        const zeradas = {}
+        for (const c of COLECOES) zeradas[c] = null
+        await s.sock.authState.keys.set({ 'app-state-sync-version': zeradas })
+        await pool.query(
+          `delete from wa_qr_auth where conta_id=$1 and arquivo like 'app-state-sync-version-%'`,
+          [contaId])
       }
     }
     log.info({ contaId, tentativa, completa: !!completa, chaves: chaves.rows[0].n },
       'resyncAgenda: pedindo a agenda de novo')
-    await s.sock.resyncAppState(['critical_unblock_low'], true)
+    await s.sock.resyncAppState(COLECOES, true)
+    if (completa) {
+      // Só marca DEPOIS de dar certo, e o critério é a versão ter voltado: o
+      // Baileys grava a versão nova quando o snapshot decodifica, e o catch dele
+      // APAGA a versão quando falha (Socket/chats.js). Marcar antes de tentar
+      // queimava a única chance — foi o que aconteceu no pedido que saiu com a
+      // versão errada: falhou, mas a marca ficou lá dizendo que a agenda já viera.
+      const v = await pool.query(
+        'select 1 from wa_qr_auth where conta_id=$1 and arquivo=$2', [contaId, VERSAO_AGENDA])
+      if (v.rowCount) {
+        await pool.query(
+          `insert into wa_qr_auth (conta_id, arquivo, conteudo, atualizado)
+                values ($1, 'agenda-completa', '1', now())
+           on conflict (conta_id, arquivo) do nothing`, [contaId])
+      } else {
+        log.warn({ contaId, tentativa },
+          'resyncAgenda: snapshot não gravou versão — falhou, deixando pra tentar de novo')
+      }
+    }
     log.info({ contaId, tentativa }, 'resyncAgenda: pedido concluído')
   } catch (e) {
     log.warn({ contaId, tentativa, e: String(e) }, 'resyncAgenda falhou')

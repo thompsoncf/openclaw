@@ -432,6 +432,28 @@ async function iniciarSessao (contaId) {
 
     sock.ev.on('creds.update', saveCreds)
 
+    // O par código->telefone vem no NÓ CRU de toda mensagem, mas o Baileys não
+    // repassa esses campos no evento já decodificado (decode-wa-message.js monta
+    // a key só com senderPn/senderLid/participant*). Resultado: mensagem que o
+    // vendedor mandava do celular pra um chat @lid chegava sem número nenhum e
+    // era descartada — e o aprendizado por senderPn só cobria o caso do contato
+    // ter escrito primeiro. Aqui a gente lê o nó cru e aprende nos dois sentidos:
+    //   recebida : from=<lid>      + sender_pn=<telefone>
+    //   enviada  : recipient=<lid> + peer_recipient_pn=<telefone>
+    // Roda antes do messages.upsert (o CB é emitido de forma síncrona assim que o
+    // frame chega, a decodificação é que é assíncrona), então o mapa já está
+    // pronto quando o eco da mensagem for repassado.
+    try {
+      sock.ws.on('CB:message', (node) => {
+        try {
+          const a = (node && node.attrs) || {}
+          aprenderLid(contaId, a.from, a.sender_pn)
+          aprenderLid(contaId, a.recipient, a.peer_recipient_pn)
+          aprenderLid(contaId, a.participant, a.participant_pn)
+        } catch (_) {}
+      })
+    } catch (e) { log.warn({ contaId, e: String(e) }, 'não deu pra escutar o nó cru das mensagens') }
+
   sock.ev.on('connection.update', async (u) => {
     // Socket já descartado (substituído por um novo): o end() dele ainda emite um
     // último 'close'. Sem ignorar isso, esse evento tardio mexia no estado da

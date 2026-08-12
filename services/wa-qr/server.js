@@ -254,15 +254,6 @@ async function iniciarSessao (contaId) {
   // recarregar a página (ou abrir numa segunda aba) no meio de um pareamento
   // derrubava o socket do QR que a pessoa estava escaneando e gerava outro QR.
   if (s && (s.iniciando || ((s.status === 'conectado' || s.status === 'aguardando_qr') && s.sock))) return s
-  // Reconexão automática (setTimeout logo após o close handler) x início a frio
-  // (primeiro "Gerar QR" depois do processo subir, sem sessão em memória): só o
-  // início a frio pode estar herdando credenciais de um processo anterior que
-  // caiu no meio do pareamento. Uma reconexão automática dentro do MESMO processo
-  // é exatamente o passo normal do Baileys logo após "pairing configured
-  // successfully" (ele sempre fecha com stream:error 515 e reconecta sozinho pra
-  // terminar o registro) — tratar isso como "travado" apaga o pareamento que
-  // acabou de dar certo, e é por isso que nenhum QR terminava de conectar.
-  const reconexaoAutomatica = !!(s && s.status === 'reconectando')
   s = s || { status: 'desconectado', qr: null }
   s.iniciando = true
   sessoes.set(contaId, s)
@@ -280,21 +271,18 @@ async function iniciarSessao (contaId) {
   }, 30000)
 
   try {
-    let { state, saveCreds, limparTudo } = await useDbAuthState(pool, contaId)
-    log.info({ contaId }, 'iniciarSessao: creds carregadas do banco')
-    // Pareamento travado pela metade: o celular escaneou e o WhatsApp já assinou a
-    // conta (creds.account preenchido), mas o processo caiu/reiniciou antes de
-    // terminar o handshake (registered nunca virou true). Reaproveitar essas
-    // chaves meio-consumidas faz TODO QR novo falhar com "não foi possível
-    // conectar o dispositivo" — já aconteceu mais de uma vez, sempre coincidindo
-    // com um deploy no meio de um pareamento em andamento. Detecta e reseta
-    // sozinho pra um pareamento limpo, sem precisar mexer no banco na mão. NUNCA
-    // roda numa reconexão automática (ver comentário acima) — só num início a frio.
-    if (!reconexaoAutomatica && state.creds && state.creds.registered === false && state.creds.account) {
-      log.warn({ contaId }, 'pareamento travado pela metade detectado — limpando pra recomeçar do zero')
-      await limparTudo()
-      ;({ state, saveCreds, limparTudo } = await useDbAuthState(pool, contaId))
-    }
+    const { state, saveCreds, limparTudo } = await useDbAuthState(pool, contaId)
+    log.info({ contaId, pareada: !!(state.creds && state.creds.me) },
+      'iniciarSessao: creds carregadas do banco')
+    // NUNCA limpar credencial preventivamente aqui. Já existiu uma "detecção de
+    // pareamento travado" que apagava as creds quando registered=false + account
+    // preenchido — só que, CONFERIDO NA FONTE do Baileys (messages-recv.js), o
+    // registered=true só existe no fluxo de pareamento por CÓDIGO; no fluxo por QR
+    // ele fica false pra sempre, mesmo com a sessão perfeitamente válida. Ou seja:
+    // aquela "detecção" batia em TODA credencial boa a cada início a frio, apagava
+    // tudo e forçava QR novo depois de cada deploy — era ESSE o bug recorrente.
+    // Credencial realmente podre se resolve sozinha: o login falha com 401, o
+    // handler de close limpa e o próximo /iniciar pareia do zero com QR.
     s._limparTudo = limparTudo
     let version
     try {
@@ -368,6 +356,10 @@ async function iniciarSessao (contaId) {
     }
     if (connection === 'open') {
       s.status = 'conectado'; s.qr = null
+      // marca que ESTA sessão chegou a abrir de verdade — é isso (e não o
+      // creds.registered, que nunca vira true no fluxo QR) que separa um logout
+      // real de uma credencial podre rejeitada logo na primeira tentativa.
+      s.jaConectou = true
       // Sincronizando o histórico recente que o WhatsApp manda sozinho ao parear
       // (filtrado aos últimos 30 dias em repassarHistorico) — some sozinho quando
       // parar de chegar evento novo por 5s, ou no máximo em 25s
@@ -398,15 +390,16 @@ async function iniciarSessao (contaId) {
       log.warn({ contaId, code, deslogado }, 'conexão fechou')
       if (deslogado) {
         // Só conta como logout DE VERDADE (o que autoriza apagar o histórico de
-        // conversa) se a sessão chegou a ficar registrada. Um 401 no meio de um
-        // pareamento que nunca completou não é "o usuário desconectou" — apagar o
-        // histórico aí destrói conversa à toa, sem nada em troca.
-        const eraRegistrada = !!(state.creds && state.creds.registered)
+        // conversa) se esta sessão chegou a ABRIR neste processo. Um 401 logo na
+        // tentativa de login é credencial velha/podre sendo rejeitada — limpa a
+        // credencial (pro próximo /iniciar parear do zero) mas PRESERVA o chat.
+        // Não dá pra usar creds.registered aqui: no fluxo QR ele nunca vira true.
+        const foiLogoutReal = !!s.jaConectou
         try { await limparTudo() } catch (e) { log.warn({ contaId, e: String(e) }, 'limparTudo falhou') }
         sessoes.delete(contaId)
         lidMaps.delete(contaId)
-        log.warn({ contaId, eraRegistrada }, 'deslogado — credenciais limpas')
-        if (eraRegistrada) {
+        log.warn({ contaId, foiLogoutReal }, 'deslogado — credenciais limpas')
+        if (foiLogoutReal) {
           avisarDeslogado(contaId).catch((e) => log.warn({ contaId, e: String(e) }, 'avisarDeslogado falhou'))
         }
       } else {
@@ -473,9 +466,14 @@ async function iniciarSessao (contaId) {
 // nenhuma. Best-effort: se falhar, o fluxo manual pela aba Canais continua igual.
 async function restaurarSessoes () {
   try {
+    // Pareada = creds.me preenchido — é ISSO que o Baileys usa pra decidir entre
+    // "logging in..." (retoma a sessão) e "attempting registration..." (QR novo).
+    // O registered NÃO serve de filtro: no fluxo QR ele fica false pra sempre (só
+    // o pareamento por código seta true), então filtrar por ele fazia esta função
+    // nunca achar conta nenhuma — e todo deploy "derrubava" o WhatsApp.
     const r = await pool.query(
       `select conta_id from wa_qr_auth
-        where arquivo = 'creds' and conteudo::json->>'registered' = 'true'
+        where arquivo = 'creds' and conteudo::json->'me'->>'id' is not null
         order by conta_id`)
     const contas = r.rows.map((l) => l.conta_id)
     if (!contas.length) {

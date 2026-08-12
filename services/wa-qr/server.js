@@ -844,7 +844,18 @@ const servidor = http.createServer(async (req, res) => {
         // caminho. Aqui embaixo ela é feita explicitamente, igual nos dois casos
         // (com ou sem sessão viva) — que era exatamente o que faltava.
         if (s && s.sock) s.sock._descartado = true
-        try { if (s && s.sock) await s.sock.logout() } catch (_) {}
+        // logout() com PRAZO: ele escreve um stanza no socket e espera
+        // (Socket/socket.js: `await sendNode({... remove-companion-device ...})`).
+        // Se o socket estiver num estado ruim isso pendura, e TODA a limpeza abaixo
+        // — apagar credencial, apagar histórico — ficava esperando junto: o
+        // "Desconectar" não desconectava nada e o painel dizia que sim. Avisar o
+        // celular é o passo mais dispensável dos três; se não sair em 5s, segue.
+        if (s && s.sock) {
+          await Promise.race([
+            s.sock.logout().catch(() => {}),
+            new Promise((r2) => setTimeout(r2, 5000))
+          ])
+        }
         // Se o serviço reiniciou desde a última vez que essa conta ficou conectada em
         // memória (deploy, crash, etc.), `s` não existe mais aqui — mas as credenciais
         // continuam salvas no Postgres. Sem isso, "Desconectar" virava um no-op: as

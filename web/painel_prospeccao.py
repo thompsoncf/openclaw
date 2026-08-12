@@ -1726,7 +1726,16 @@ def comunicacao_whatsapp_qr_sair(request: Request):
     if not ctx["gerencia"]:
         return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
     from finance import whatsapp_qr as wq
-    wq.sair(ctx["conta_id"])
+    # devolve o resultado DE VERDADE. Antes respondia {"ok": True} sempre, mesmo
+    # quando o serviço não respondia — e o painel dizia "Desconectado." com a
+    # sessão inteira ainda de pé, credencial e histórico intactos. O usuário ia
+    # escanear um QR novo achando que tinha desconectado.
+    r = wq.sair(ctx["conta_id"])
+    if not r.get("ok"):
+        import logging
+        logging.getLogger("prospeccao.wa_qr").warning(
+            "whatsapp_qr_sair: conta_id=%s falhou — %s", ctx["conta_id"], r.get("erro"))
+        return JSONResponse({"ok": False, "erro": r.get("erro") or "falha"}, status_code=502)
     return JSONResponse({"ok": True})
 
 
@@ -7316,8 +7325,15 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             if(_qrTimer)clearInterval(_qrTimer);_qrTimer=setInterval(qrPoll,3000);
           }).catch(function(){btn.disabled=false;btn.textContent=t;if(msg){msg.textContent='Falha de rede.';msg.style.color='#e0a33e';}});}
         function qrSair(){if(!confirm('Desconectar o WhatsApp por QR desta empresa?'))return;
-          fetch('/painel/prospeccao/comunicacao/whatsapp-qr-sair',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(){
-            if(_qrTimer){clearInterval(_qrTimer);_qrTimer=null;}qrShow({status:'desconectado',msg:'Desconectado.'});}).catch(function(){});}
+          fetch('/painel/prospeccao/comunicacao/whatsapp-qr-sair',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
+            // só declara desconectado se REALMENTE desconectou — senão o usuário ia
+            // escanear um QR novo achando que a sessão antiga tinha caído
+            if(d&&d.ok===false){var m=document.getElementById('qr-msg');
+              if(m){m.textContent='Não deu pra desconectar ('+(d.erro||'falha')+'). Tente de novo.';m.style.color='#e0a33e';}
+              return;}
+            if(_qrTimer){clearInterval(_qrTimer);_qrTimer=null;}qrShow({status:'desconectado',msg:'Desconectado.'});})
+            .catch(function(){var m=document.getElementById('qr-msg');
+              if(m){m.textContent='Falha de rede ao desconectar. Tente de novo.';m.style.color='#e0a33e';}});}
         // Ao abrir a página, tenta reconectar sozinho em vez de só checar o status —
         // o serviço Node reinicia a cada deploy (perde a sessão da memória, mas as
         // credenciais continuam salvas), e sem isso o usuário via "Desconectado" e

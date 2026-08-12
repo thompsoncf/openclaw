@@ -1286,7 +1286,10 @@ def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=
         where.append("cv.canal <> 'email'")
     rows = c.execute(f"""
         select cv.id, cv.canal, cv.status, cv.ultima_msg_em, cv.prospeccao_id,
-               coalesce(p.empresa, cv.contato_ref, '—'), p.cidade, p.uf,
+               -- sem lead vinculado, mostra o nome do perfil do WhatsApp em vez do
+               -- número cru; o número continua visível no cabeçalho da conversa.
+               coalesce(p.empresa, nullif(cv.contato_nome,''), cv.contato_ref, '—'),
+               p.cidade, p.uf,
                lm.texto, lm.autor, lm.membro_id, mm.nome, cnt.n, lm.id
           from conversas cv
           left join prospeccao p on p.id = cv.prospeccao_id
@@ -1379,7 +1382,8 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
     pool = get_pool()
     with pool.connection() as c:
         cv = c.execute(
-            """select cv.canal, cv.status, cv.prospeccao_id, p.empresa, p.segmento,
+            """select cv.canal, cv.status, cv.prospeccao_id,
+                      coalesce(p.empresa, nullif(cv.contato_nome,'')), p.segmento,
                       p.cidade, p.uf, p.whatsapp, p.telefone, p.email, p.status, m.nome,
                       p.vendedor_id, cv.contato_ref, cv.agente_ativo
                  from conversas cv
@@ -2064,7 +2068,10 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
                          values (%s,'whatsapp','in','lead',%s,%s)
                          on conflict (provider_sid) where provider_sid is not null do nothing""",
                       (conv_id, (corpo or "")[:8000], sid))
-            c.execute("update conversas set ultima_msg_em=now() where id=%s", (conv_id,))
+            # guarda/atualiza o nome do perfil pra conversa não ficar só com o número
+            c.execute("""update conversas set ultima_msg_em=now(),
+                           contato_nome=coalesce(nullif(%s,''), contato_nome) where id=%s""",
+                      ((nome_perfil or "").strip()[:120], conv_id))
             return conv_id
         # contato NOVO de verdade (landing/WhatsApp) → vira lead QUENTE, não atribuído (o dono distribui).
         # Nome vem do perfil do WhatsApp (pushName) quando o contato deixa público;
@@ -2105,9 +2112,10 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     c.execute(
         """update conversas set ultima_msg_em=now(),
              janela_expira_em=now()+interval '24 hours',
+             contato_nome=coalesce(nullif(%s,''), contato_nome),
              status = case when status='pendente' then 'pendente' else 'aberta' end,
              agente_ativo = case when status='pendente' then agente_ativo else %s end
-           where id=%s""", (agente_on, conv_id))
+           where id=%s""", ((nome_perfil or "").strip()[:120], agente_on, conv_id))
     # rodízio: se o lead ainda não tem dono, distribui pro próximo vendedor da fila.
     # Cobre contato NOVO e resposta de campanha (ambos passam por aqui). Best-effort —
     # nunca deixa a entrada da mensagem quebrar; o aviso vai numa thread solta.
@@ -2700,7 +2708,8 @@ async def webhook_wa_qr(request: Request, background_tasks: BackgroundTasks):
     return Response("ok", media_type="text/plain")
 
 
-def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando, de_mim=False) -> int:
+def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando, de_mim=False,
+                           nome_perfil="") -> int:
     """WhatsApp IMPORTADO do histórico (mensagem de ANTES de conectar por QR, ver
     /webhooks/wa-qr/historico): grava a conversa preservando a data original da
     mensagem. `de_mim=True` = mensagem que o VENDEDOR enviou (o histórico traz os
@@ -2729,8 +2738,9 @@ def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando, de_mim=Fa
              on conflict (provider_sid) where provider_sid is not null do nothing""",
         (conv_id, "out" if de_mim else "in", "humano" if de_mim else "lead",
          (corpo or "")[:8000], sid, quando))
-    c.execute("update conversas set ultima_msg_em=greatest(ultima_msg_em, coalesce(%s,now())) where id=%s",
-              (quando, conv_id))
+    c.execute("""update conversas set ultima_msg_em=greatest(ultima_msg_em, coalesce(%s,now())),
+                   contato_nome=coalesce(nullif(%s,''), contato_nome) where id=%s""",
+              (quando, (nome_perfil or "").strip()[:120], conv_id))
     return conv_id
 
 
@@ -2777,7 +2787,8 @@ async def webhook_wa_qr_historico(request: Request):
                         conta_id)
             return Response("ok", media_type="text/plain")
         conv_id = _wa_historico_conversa(c, conta_id, sender, texto, payload.get("id") or None,
-                                         quando, de_mim=bool(payload.get("de_mim")))
+                                         quando, de_mim=bool(payload.get("de_mim")),
+                                         nome_perfil=str(payload.get("nome") or ""))
         c.commit()
     log.info("webhook_wa_qr_historico: conta_id=%s conv_id=%s importado ✓", conta_id, conv_id)
     return Response("ok", media_type="text/plain")
@@ -6661,6 +6672,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .cx-thread,.cx-ctx{border:1px solid var(--borda);border-radius:12px;background:var(--card);min-height:40vh}
 .cx-thread{display:flex;flex-direction:column;max-height:72vh}
 .cx-empty{padding:2.4rem 1rem;text-align:center;color:var(--txt-mut);font-size:.9rem}
+.cx-trunc{padding:.35rem 0;text-align:center;color:var(--txt-mut);font-size:.72rem}
 .cx-th{display:flex;align-items:center;gap:.6rem;padding:.7rem .85rem;border-bottom:1px solid var(--borda)}
 .cx-th b{font-size:.92rem}
 .cx-th small{display:block;color:var(--txt-mut);font-size:.75rem}
@@ -7247,7 +7259,10 @@ var _cxEscopo='{{ escopo }}';   // 'email' (aba E-mails) ou 'msg' (aba Conversas
 function cxEsc(s){var d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
 function cxMsgsHtml(d){
   if(!d.msgs.length)return '<div class="cx-empty">Sem mensagens.</div>';
-  var h=d.truncado?'<div class="cx-empty" style="font-size:.72rem;padding:.35rem 0">Mostrando as últimas 100 mensagens</div>':'';
+  // classe PRÓPRIA, nunca cx-empty: cxResponder limpa o thread inteiro quando
+  // acha um .cx-empty (o placeholder "Sem mensagens"), então usar essa classe
+  // aqui fazia o thread sumir e "voltar com o histórico" a cada envio.
+  var h=d.truncado?'<div class="cx-trunc">Mostrando as últimas 100 mensagens</div>':'';
   d.msgs.forEach(function(m){
     var cls=(m.direcao==='in')?'cx-m cin':((m.autor==='bot')?'cx-m cbot':'cx-m');
     var cab=m.cabecalho?('<div class="cab">'+cxEsc(m.cabecalho)+'</div>'):'';
@@ -7356,7 +7371,10 @@ function cxVirarLead(convId){var fd=new FormData();fd.append('conversa_id',convI
 function cxResponder(convId){
   var ta=document.getElementById('cx-reply');if(!ta)return;var t=ta.value.trim();if(!t)return;
   var b=document.getElementById('cx-msgs');
-  if(b){if(b.querySelector('.cx-empty'))b.innerHTML='';b.insertAdjacentHTML('beforeend','<div class="cx-m" style="opacity:.6"><span class="who">Você</span>'+cxEsc(t).replace(/\\n/g,'<br>')+'<span class="meta">enviando…</span></div>');cxScroll(true);}
+  // remove só o placeholder "Sem mensagens", em vez de zerar o thread inteiro
+  // ao encontrar qualquer .cx-empty — assim nenhum aviso novo dentro do thread
+  // volta a apagar a conversa na hora do envio.
+  if(b){var vazio=b.querySelector('.cx-empty');if(vazio)vazio.remove();b.insertAdjacentHTML('beforeend','<div class="cx-m" style="opacity:.6"><span class="who">Você</span>'+cxEsc(t).replace(/\\n/g,'<br>')+'<span class="meta">enviando…</span></div>');cxScroll(true);}
   ta.value='';var sd=document.getElementById('cx-send');if(sd){sd.disabled=true;sd.textContent='…';}
   var fd=new FormData();fd.append('conversa_id',convId);fd.append('texto',t);
   fetch('/painel/prospeccao/comunicacao/responder',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})

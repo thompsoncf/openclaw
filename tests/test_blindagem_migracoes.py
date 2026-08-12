@@ -48,6 +48,12 @@ create table campanha_alvos (id bigserial primary key, campanha_id bigint, prosp
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
   direcao text, autor text, texto text, provider_sid text, membro_id bigint,
   criado_em timestamptz default now());
+-- conversas vem da 080 também (marcada como aplicada); a 140 adiciona contato_nome.
+create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
+  canal text, contato_ref text, status text default 'aberta',
+  agente_ativo boolean default false, responsavel_membro_id bigint,
+  janela_expira_em timestamptz, ultima_msg_em timestamptz default now(),
+  criado_em timestamptz default now());
 -- pessoas vem da 066 (marcada como aplicada); a 131 adiciona cnpj/tipo.
 create table pessoas (id bigserial primary key, cpf text, celular text,
   nome text not null default '', email text);

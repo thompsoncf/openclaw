@@ -128,6 +128,25 @@ async function comLimiteDeConcorrencia (itens, limite, fn) {
   await Promise.all(Array.from({ length: Math.min(limite, itens.length) }, trabalhador))
 }
 
+// Cache das mensagens que ENVIAMOS. Quando um aparelho não consegue decifrar uma
+// mensagem nossa, ele pede reenvio (retry receipt) e o Baileys chama getMessage
+// pra pegar o conteúdo original e re-encriptar. O default do Baileys devolve
+// undefined (Defaults/index.js: `getMessage: async () => undefined`), e aí ele
+// desiste com "recv retry request, but message not available" — a mensagem fica
+// eternamente como "Aguardando mensagem" no celular, mesmo tendo saído do Zaq.
+// O próprio Baileys deixa esse cache a cargo da aplicação (tem um TODO no fonte).
+const MAX_ENVIADAS = 400
+const enviadas = new Map()
+
+function guardarEnviada (contaId, m) {
+  if (!m || !m.key || !m.key.id || !m.message) return
+  const k = contaId + ':' + m.key.id
+  if (enviadas.has(k)) enviadas.delete(k)
+  enviadas.set(k, m.message)
+  // Map preserva ordem de inserção: o primeiro é sempre o mais antigo.
+  while (enviadas.size > MAX_ENVIADAS) enviadas.delete(enviadas.keys().next().value)
+}
+
 function jidDe (numero) {
   const d = String(numero || '').replace(/\D/g, '')
   if (!d) return null
@@ -293,6 +312,9 @@ async function repassarHistorico (contaId, m) {
   const sender = resolvido.split('@')[0]
   const corpo = JSON.stringify({
     conta_id: contaId, sender, texto, quando: ts, de_mim: deMim,
+    // pushName só existe nas RECEBIDAS (numa fromMe o nome seria o do próprio
+    // vendedor) — o Python só sobrescreve quando vem preenchido.
+    nome: (!deMim && m.pushName) || '',
     id: (m.key && m.key.id) || ''
   })
   try {
@@ -396,7 +418,14 @@ async function iniciarSessao (contaId) {
         const t = msg && msg.syncType
         return t === TIPO_HIST.RECENT || t === TIPO_HIST.INITIAL_BOOTSTRAP
       },
-      markOnlineOnConnect: false
+      markOnlineOnConnect: false,
+      // ver comentário do cache `enviadas`: é isto que permite reenviar quando o
+      // aparelho do vendedor (ou do cliente) não consegue decifrar e pede retry.
+      getMessage: async (key) => {
+        const m = enviadas.get(contaId + ':' + (key && key.id))
+        log.info({ contaId, id: key && key.id, achou: !!m }, 'retry: pediram reenvio de mensagem nossa')
+        return m
+      }
     })
     s.sock = sock
     log.info({ contaId }, 'iniciarSessao: socket criado, registrando listeners')
@@ -482,7 +511,7 @@ async function iniciarSessao (contaId) {
     // fora mensagem de verdade da conversa, tanto entrada quanto o eco de mensagem
     // que o vendedor manda direto pelo celular (fromMe).
     for (const m of messages) {
-      if (m.key && m.key.fromMe) { await repassarSaida(contaId, m); continue }
+      if (m.key && m.key.fromMe) { guardarEnviada(contaId, m); await repassarSaida(contaId, m); continue }
       await repassarEntrada(contaId, m)
     }
   })
@@ -649,6 +678,7 @@ const servidor = http.createServer(async (req, res) => {
         if (!jid) return json(res, 200, { ok: false, erro: 'numero_invalido' })
         try {
           const r = await s.sock.sendMessage(jid, { text: String(body.texto || '').slice(0, 4000) })
+          guardarEnviada(contaId, r)
           log.info({ contaId, id: r && r.key && r.key.id }, 'enviar: sucesso ✓')
           return json(res, 200, { ok: true, id: (r && r.key && r.key.id) || '' })
         } catch (e) {

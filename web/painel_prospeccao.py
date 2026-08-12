@@ -1286,7 +1286,10 @@ def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=
         where.append("cv.canal <> 'email'")
     rows = c.execute(f"""
         select cv.id, cv.canal, cv.status, cv.ultima_msg_em, cv.prospeccao_id,
-               coalesce(p.empresa, cv.contato_ref, '—'), p.cidade, p.uf,
+               -- sem lead vinculado, mostra o nome do perfil do WhatsApp em vez do
+               -- número cru; o número continua visível no cabeçalho da conversa.
+               coalesce(p.empresa, nullif(cv.contato_nome,''), cv.contato_ref, '—'),
+               p.cidade, p.uf,
                lm.texto, lm.autor, lm.membro_id, mm.nome, cnt.n, lm.id
           from conversas cv
           left join prospeccao p on p.id = cv.prospeccao_id
@@ -1379,7 +1382,8 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
     pool = get_pool()
     with pool.connection() as c:
         cv = c.execute(
-            """select cv.canal, cv.status, cv.prospeccao_id, p.empresa, p.segmento,
+            """select cv.canal, cv.status, cv.prospeccao_id,
+                      coalesce(p.empresa, nullif(cv.contato_nome,'')), p.segmento,
                       p.cidade, p.uf, p.whatsapp, p.telefone, p.email, p.status, m.nome,
                       p.vendedor_id, cv.contato_ref, cv.agente_ativo
                  from conversas cv
@@ -2064,7 +2068,10 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
                          values (%s,'whatsapp','in','lead',%s,%s)
                          on conflict (provider_sid) where provider_sid is not null do nothing""",
                       (conv_id, (corpo or "")[:8000], sid))
-            c.execute("update conversas set ultima_msg_em=now() where id=%s", (conv_id,))
+            # guarda/atualiza o nome do perfil pra conversa não ficar só com o número
+            c.execute("""update conversas set ultima_msg_em=now(),
+                           contato_nome=coalesce(nullif(%s,''), contato_nome) where id=%s""",
+                      ((nome_perfil or "").strip()[:120], conv_id))
             return conv_id
         # contato NOVO de verdade (landing/WhatsApp) → vira lead QUENTE, não atribuído (o dono distribui).
         # Nome vem do perfil do WhatsApp (pushName) quando o contato deixa público;
@@ -2105,9 +2112,10 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     c.execute(
         """update conversas set ultima_msg_em=now(),
              janela_expira_em=now()+interval '24 hours',
+             contato_nome=coalesce(nullif(%s,''), contato_nome),
              status = case when status='pendente' then 'pendente' else 'aberta' end,
              agente_ativo = case when status='pendente' then agente_ativo else %s end
-           where id=%s""", (agente_on, conv_id))
+           where id=%s""", ((nome_perfil or "").strip()[:120], agente_on, conv_id))
     # rodízio: se o lead ainda não tem dono, distribui pro próximo vendedor da fila.
     # Cobre contato NOVO e resposta de campanha (ambos passam por aqui). Best-effort —
     # nunca deixa a entrada da mensagem quebrar; o aviso vai numa thread solta.
@@ -2700,7 +2708,8 @@ async def webhook_wa_qr(request: Request, background_tasks: BackgroundTasks):
     return Response("ok", media_type="text/plain")
 
 
-def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando, de_mim=False) -> int:
+def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando, de_mim=False,
+                           nome_perfil="") -> int:
     """WhatsApp IMPORTADO do histórico (mensagem de ANTES de conectar por QR, ver
     /webhooks/wa-qr/historico): grava a conversa preservando a data original da
     mensagem. `de_mim=True` = mensagem que o VENDEDOR enviou (o histórico traz os
@@ -2729,8 +2738,9 @@ def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando, de_mim=Fa
              on conflict (provider_sid) where provider_sid is not null do nothing""",
         (conv_id, "out" if de_mim else "in", "humano" if de_mim else "lead",
          (corpo or "")[:8000], sid, quando))
-    c.execute("update conversas set ultima_msg_em=greatest(ultima_msg_em, coalesce(%s,now())) where id=%s",
-              (quando, conv_id))
+    c.execute("""update conversas set ultima_msg_em=greatest(ultima_msg_em, coalesce(%s,now())),
+                   contato_nome=coalesce(nullif(%s,''), contato_nome) where id=%s""",
+              (quando, (nome_perfil or "").strip()[:120], conv_id))
     return conv_id
 
 
@@ -2777,7 +2787,8 @@ async def webhook_wa_qr_historico(request: Request):
                         conta_id)
             return Response("ok", media_type="text/plain")
         conv_id = _wa_historico_conversa(c, conta_id, sender, texto, payload.get("id") or None,
-                                         quando, de_mim=bool(payload.get("de_mim")))
+                                         quando, de_mim=bool(payload.get("de_mim")),
+                                         nome_perfil=str(payload.get("nome") or ""))
         c.commit()
     log.info("webhook_wa_qr_historico: conta_id=%s conv_id=%s importado ✓", conta_id, conv_id)
     return Response("ok", media_type="text/plain")

@@ -312,6 +312,9 @@ async function repassarHistorico (contaId, m) {
   const sender = resolvido.split('@')[0]
   const corpo = JSON.stringify({
     conta_id: contaId, sender, texto, quando: ts, de_mim: deMim,
+    // pushName só existe nas RECEBIDAS (numa fromMe o nome seria o do próprio
+    // vendedor) — o Python só sobrescreve quando vem preenchido.
+    nome: (!deMim && m.pushName) || '',
     id: (m.key && m.key.id) || ''
   })
   try {

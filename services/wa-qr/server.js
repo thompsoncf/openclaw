@@ -280,6 +280,42 @@ async function repassarSaida (contaId, m) {
 // Deslogou de vez (não é queda temporária) — avisa o Python pra limpar o
 // histórico de conversa daquele canal. Best-effort: se falhar, o histórico
 // só fica desatualizado, não trava o logout.
+// Nomes de contato. Duas origens, com pesos diferentes:
+//  - contacts.upsert  -> `name` é o fullName da AGENDA DO CELULAR (o nome que o
+//    vendedor salvou), que chega pela sincronização de app-state. É o melhor nome
+//    possível e sobrescreve o que estiver lá.
+//  - contacts.update  -> `notify` é o pushName (o nome que a PRÓPRIA pessoa pôs
+//    no perfil dela). Serve de reserva, só preenche quando ainda não há nome.
+// Esses eventos já chegavam há tempos e eram simplesmente ignorados — era por
+// isso que as conversas ficavam com o número cru mesmo estando salvas na agenda.
+async function repassarContatos (contaId, contatos, daAgenda) {
+  if (!APP_URL || !Array.isArray(contatos) || !contatos.length) return
+  const lista = []
+  for (const ct of contatos) {
+    if (!ct) continue
+    // bônus: o contactAction traz lidJid junto do jid — mais um par pro mapa
+    aprenderLid(contaId, ct.lid, ct.jid || ct.id)
+    const jid = String(ct.jid || ct.id || '')
+    const nome = String((daAgenda ? ct.name : (ct.notify || ct.name)) || '').trim()
+    if (!jid.endsWith('@s.whatsapp.net') || !nome) continue
+    lista.push({ numero: jid.split('@')[0], nome: nome.slice(0, 120) })
+  }
+  if (!lista.length) return
+  // a sincronização inicial pode despejar milhares de contatos de uma vez
+  for (let i = 0; i < lista.length; i += 200) {
+    const lote = lista.slice(i, i + 200)
+    try {
+      const r = await fetch(APP_URL + '/webhooks/wa-qr/contatos', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-wa-secret': SEGREDO },
+        body: JSON.stringify({ conta_id: contaId, da_agenda: !!daAgenda, contatos: lote })
+      })
+      if (!r.ok) log.warn({ contaId, status: r.status }, 'webhook wa-qr/contatos respondeu não-ok')
+      else log.info({ contaId, n: lote.length, daAgenda: !!daAgenda }, 'contatos repassados ✓')
+    } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao repassar contatos') }
+  }
+}
+
 async function avisarDeslogado (contaId) {
   if (!APP_URL) return
   try {
@@ -543,6 +579,19 @@ async function iniciarSessao (contaId) {
   // 30 dias, ver HISTORICO_JANELA_SEGUNDOS. `progress` (0-100) vem do próprio
   // Baileys por bloco sincronizado — usa pra alimentar a barra de carregamento
   // do painel; sem evento novo por 5s, dá como concluído (ver timeout acima).
+  // Nome da AGENDA do celular: chega aqui, via sincronização de app-state
+  // (chat-utils.js -> contactAction.fullName). É o nome que o vendedor salvou.
+  sock.ev.on('contacts.upsert', (contatos) => {
+    log.info({ contaId, n: (contatos || []).length }, 'contacts.upsert recebido')
+    repassarContatos(contaId, contatos, true).catch((e) =>
+      log.warn({ contaId, e: String(e) }, 'repassarContatos falhou'))
+  })
+  // Nome do PERFIL (pushName) — reserva, só preenche quando não há nome ainda.
+  sock.ev.on('contacts.update', (contatos) => {
+    repassarContatos(contaId, contatos, false).catch((e) =>
+      log.warn({ contaId, e: String(e) }, 'repassarContatos (update) falhou'))
+  })
+
   sock.ev.on('messaging-history.set', async ({ messages, contacts, isLatest, progress, syncType }) => {
     log.info({ contaId, n: messages.length, isLatest, progress, syncType }, 'messaging-history.set recebido')
     // Cada onda de histórico traz também os contatos daquele bloco — usa pra
@@ -550,6 +599,8 @@ async function iniciarSessao (contaId) {
     // de repassar as mensagens da mesma onda, senão o mapa fica sempre um bloco
     // atrasado.
     atualizarLidMap(contaId, contacts)
+    // o histórico também traz nome de contato — aproveita (fullName quando vier)
+    repassarContatos(contaId, contacts, true).catch(() => {})
     // O histórico chega em ondas (ex.: recentes primeiro, depois o histórico
     // completo) e cada onda reinicia o progress do zero — sem o Math.max a barra
     // sobe até 100%, "volta" pra perto de 0% quando a próxima onda começa, e

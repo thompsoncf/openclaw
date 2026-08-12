@@ -2865,6 +2865,62 @@ async def webhook_wa_qr_saida(request: Request):
     return Response("ok", media_type="text/plain")
 
 
+@router.post("/webhooks/wa-qr/contatos")
+async def webhook_wa_qr_contatos(request: Request):
+    """Nomes de contato vindos do WhatsApp por QR. `da_agenda=True` = fullName da
+    AGENDA do celular (o nome que o vendedor salvou, via sincronização de
+    app-state) — é o melhor nome que existe e SOBRESCREVE o que estiver lá.
+    `da_agenda=False` = pushName (nome que a própria pessoa pôs no perfil), que
+    é só reserva: preenche apenas quando a conversa ainda não tem nome.
+
+    Só ATUALIZA conversa existente — nunca cria conversa nem lead a partir de um
+    contato da agenda (senão a agenda inteira do vendedor viraria conversa)."""
+    import logging
+    log = logging.getLogger("prospeccao.wa_qr")
+    segredo = os.environ.get("WA_QR_SHARED_SECRET") or ""
+    if not segredo or request.headers.get("x-wa-secret") != segredo:
+        return Response(status_code=403)
+    try:
+        payload = json.loads((await request.body()).decode("utf-8") or "{}")
+    except Exception:  # noqa: BLE001
+        return Response("ok", media_type="text/plain")
+    try:
+        conta_id = int(payload.get("conta_id") or 0)
+    except (TypeError, ValueError):
+        conta_id = 0
+    contatos = payload.get("contatos") or []
+    if not conta_id or not isinstance(contatos, list) or not contatos:
+        return Response("ok", media_type="text/plain")
+    da_agenda = bool(payload.get("da_agenda"))
+    n = 0
+    with get_pool().connection() as c:
+        dono = c.execute("""select 1 from canais_config
+                              where conta_id=%s and canal='whatsapp' and ativo
+                                and coalesce(provedor,'twilio')='qr'""",
+                         (conta_id,)).fetchone()
+        if not dono:
+            return Response("ok", media_type="text/plain")
+        for ct in contatos[:500]:
+            numero = _so_digitos(str((ct or {}).get("numero") or ""))
+            nome = str((ct or {}).get("nome") or "").strip()[:120]
+            if not numero or not nome:
+                continue
+            alvo8 = numero[-8:] if len(numero) >= 8 else numero
+            # nome da agenda manda; pushName só entra se ainda não houver nome
+            cond = "" if da_agenda else " and coalesce(contato_nome,'')=''"
+            r = c.execute(
+                r"""update conversas set contato_nome=%s
+                     where conta_id=%s and canal='whatsapp'
+                       and right(regexp_replace(contato_ref, '\D', '', 'g'), 8) = %s"""
+                + cond, (nome, conta_id, alvo8))
+            n += r.rowcount or 0
+        c.commit()
+    if n:
+        log.info("webhook_wa_qr_contatos: conta_id=%s %s conversas renomeadas (agenda=%s)",
+                 conta_id, n, da_agenda)
+    return Response("ok", media_type="text/plain")
+
+
 @router.post("/webhooks/wa-qr/deslogado")
 async def webhook_wa_qr_deslogado(request: Request):
     """WhatsApp por QR deslogou DE VEZ (não é queda temporária — só dispara

@@ -140,6 +140,16 @@ function numeroDoChat (m, contaId) {
   return remoteJid
 }
 
+// @lid que o mapa não resolveu NÃO pode virar conversa: o ID interno não é
+// telefone — a conversa nasce com um "código" no lugar do número e nem responder
+// dá (o envio montaria um jid inválido). Melhor pular e logar; quando o contato
+// mandar mensagem ao vivo, o senderPn traz o número real e a conversa nasce certa.
+function semNumeroReal (resolvido, contaId, origem) {
+  if (!resolvido.endsWith('@lid')) return false
+  log.info({ contaId, jid: resolvido, origem }, 'ignorado: @lid sem número real no mapa')
+  return true
+}
+
 // Canais/newsletters do WhatsApp usam o MESMO formato numérico de ID que grupos
 // (ex.: 120363...), só que com sufixo @newsletter em vez de @g.us — sem filtrar
 // isso, conteúdo de canal (notícia, propaganda) vira "mensagem de lead".
@@ -155,7 +165,9 @@ async function repassarEntrada (contaId, m) {
     log.info({ contaId, temTexto: !!texto, jid }, 'entrada ignorada (sem texto, grupo, canal ou status)')
     return
   }
-  const sender = numeroReal(m, contaId).split('@')[0]
+  const resolvido = numeroReal(m, contaId)
+  if (semNumeroReal(resolvido, contaId, 'entrada')) return
+  const sender = resolvido.split('@')[0]
   const corpo = JSON.stringify({
     conta_id: contaId, sender, texto,
     nome: m.pushName || '', id: (m.key && m.key.id) || ''
@@ -189,7 +201,9 @@ async function repassarSaida (contaId, m) {
   // seria o número dele mesmo — o Python procuraria a conversa pelo número
   // errado, não acharia nenhuma e descartaria a mensagem em silêncio (era
   // exatamente por isso que mensagem mandada pelo celular não aparecia no Zaq).
-  const destinatario = numeroDoChat(m, contaId).split('@')[0]
+  const chatResolvido = numeroDoChat(m, contaId)
+  if (semNumeroReal(chatResolvido, contaId, 'saida')) return
+  const destinatario = chatResolvido.split('@')[0]
   const corpo = JSON.stringify({
     conta_id: contaId, sender: destinatario, texto,
     id: (m.key && m.key.id) || ''
@@ -232,7 +246,9 @@ async function repassarHistorico (contaId, m) {
   const ts = Number(m.messageTimestamp) || 0
   const corteSegundos = Math.floor(Date.now() / 1000) - HISTORICO_JANELA_SEGUNDOS
   if (!ts || ts < corteSegundos) return
-  const sender = numeroReal(m, contaId).split('@')[0]
+  const resolvido = numeroReal(m, contaId)
+  if (semNumeroReal(resolvido, contaId, 'historico')) return
+  const sender = resolvido.split('@')[0]
   const corpo = JSON.stringify({
     conta_id: contaId, sender, texto, quando: ts,
     id: (m.key && m.key.id) || ''
@@ -564,10 +580,25 @@ const servidor = http.createServer(async (req, res) => {
         // de já responder "desconectado" — que era o que o vendedor via bem no meio
         // de uma conversa. Se mesmo assim não subir, aí sim devolve o erro.
         if (!s || s.status !== 'conectado' || !s.sock) {
-          log.info({ contaId }, 'enviar: sem sessão viva — tentando religar antes de desistir')
-          try { s = await iniciarSessao(contaId) } catch (e) {
+          log.info({ contaId }, 'enviar: sem sessão viva — religando e AGUARDANDO conectar')
+          try { await iniciarSessao(contaId) } catch (e) {
             log.warn({ contaId, e: String(e) }, 'enviar: religar falhou')
           }
+          // iniciarSessao retorna assim que o socket é criado, ANTES de a conexão
+          // abrir (leva ~2–5s). Sem esta espera, um envio feito logo depois de um
+          // deploy respondia "desconectado" com a reconexão em pleno andamento —
+          // e o vendedor levava o alerta de queda na cara à toa. O lado Python
+          // espera até 20s (finance/whatsapp_qr.py: _TIMEOUT), então 12s cabem.
+          const limite = Date.now() + 12000
+          while (Date.now() < limite) {
+            s = sessoes.get(contaId)
+            if (s && s.status === 'conectado' && s.sock) break
+            // pedindo QR = não tem credencial salva; esperar não vai conectar nada
+            if (s && s.status === 'aguardando_qr') break
+            await new Promise((r2) => setTimeout(r2, 400))
+          }
+          s = sessoes.get(contaId)
+          log.info({ contaId, status: s && s.status }, 'enviar: situação após aguardar reconexão')
         }
         if (!s || s.status !== 'conectado' || !s.sock) return json(res, 200, { ok: false, erro: 'desconectado' })
         if (!jid) return json(res, 200, { ok: false, erro: 'numero_invalido' })

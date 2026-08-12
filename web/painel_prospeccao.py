@@ -1394,11 +1394,17 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
             return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
         if not ctx["gerencia"] and cv[2] is None:
             return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+        # Só as ÚLTIMAS 100 mensagens: com o histórico importado, uma conversa ativa
+        # passa fácil de 500 msgs — carregar tudo (e re-carregar a cada poll de 4s)
+        # deixava o painel segundos no "Carregando…" e pesava a renderização.
         rows = c.execute(
-            """select msg.canal, msg.direcao, msg.autor, msg.criado_em, msg.texto, msg.membro_id, mm.nome,
-                      msg.status
-                 from mensagens msg left join membros mm on mm.id = msg.membro_id
-                where msg.conversa_id=%s order by msg.criado_em asc""", (conversa_id,)).fetchall()
+            """select canal, direcao, autor, criado_em, texto, membro_id, nome, status
+                 from (select msg.canal, msg.direcao, msg.autor, msg.criado_em, msg.texto,
+                              msg.membro_id, mm.nome as nome, msg.status, msg.id as mid
+                         from mensagens msg left join membros mm on mm.id = msg.membro_id
+                        where msg.conversa_id=%s
+                        order by msg.criado_em desc, msg.id desc limit 100) ult
+                order by criado_em asc, mid asc""", (conversa_id,)).fetchall()
     msgs = []
     for (cn, direcao, autor, quando, texto, mid, nome, mstatus) in rows:
         # só e-mail separa assunto (cabeçalho) do corpo; os outros canais são texto puro
@@ -1436,7 +1442,8 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
             "status_rot": STATUS_ROT.get(cv[10], cv[10] or "")}
     return JSONResponse({"ok": True, "lead": lead, "msgs": msgs,
                          "conversa_id": conversa_id, "pode_responder": pode_wa,
-                         "agente_ativo": bool(cv[14])})
+                         "agente_ativo": bool(cv[14]),
+                         "truncado": len(msgs) >= 100})
 
 
 @router.post("/painel/prospeccao/comunicacao/responder")
@@ -7235,12 +7242,12 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   {% endif %}
 </div>
 <script>
-var _cxConv=null,_cxSig='',_cxAg=null,_cxTimer=null,_cxSeen={},_cxList={},_cxListHtml=null;
+var _cxConv=null,_cxSig='',_cxAg=null,_cxPr=null,_cxTimer=null,_cxSeen={},_cxList={},_cxListHtml=null;
 var _cxEscopo='{{ escopo }}';   // 'email' (aba E-mails) ou 'msg' (aba Conversas)
 function cxEsc(s){var d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
 function cxMsgsHtml(d){
   if(!d.msgs.length)return '<div class="cx-empty">Sem mensagens.</div>';
-  var h='';
+  var h=d.truncado?'<div class="cx-empty" style="font-size:.72rem;padding:.35rem 0">Mostrando as últimas 100 mensagens</div>':'';
   d.msgs.forEach(function(m){
     var cls=(m.direcao==='in')?'cx-m cin':((m.autor==='bot')?'cx-m cbot':'cx-m');
     var cab=m.cabecalho?('<div class="cab">'+cxEsc(m.cabecalho)+'</div>'):'';
@@ -7255,7 +7262,12 @@ function cxTick(m){
   var s={enviado:' · ✓',entregue:' · ✓✓',lido:' · <span style="color:#4aa3ff">👀 lido</span>',erro:' · <span style="color:#e0574f">⚠ falhou</span>'}[m.status];
   return s||'';
 }
-function cxSig(d){return d.msgs.length+'|'+(d.msgs.length?(d.msgs[d.msgs.length-1].corpo||''):'')+'|'+(d.msgs.length?(d.msgs[d.msgs.length-1].status||''):'')+'|'+(d.agente_ativo?1:0)+'|'+(d.pode_responder?1:0);}
+// JSON.stringify em vez de join('|'): o corpo da última mensagem entra na
+// assinatura, e um '|' digitado pelo cliente quebrava o split lá no poll —
+// o painel entrava em loop de recarga total (com "Carregando…" e o scroll
+// pulando) a cada 4 segundos.
+function cxSig(d){var u=d.msgs.length?d.msgs[d.msgs.length-1]:null;
+  return JSON.stringify([d.msgs.length,u&&u.corpo,u&&u.status,d.agente_ativo?1:0,d.pode_responder?1:0]);}
 function cxScroll(force){var b=document.getElementById('cx-msgs');if(!b)return;
   if(force||b.scrollHeight-b.scrollTop-b.clientHeight<80)b.scrollTop=b.scrollHeight;}
 function cxOpen(el,id){
@@ -7268,7 +7280,7 @@ function cxOpen(el,id){
   fetch('/painel/prospeccao/comunicacao/thread/'+id).then(function(r){return r.json();}).then(function(d){
     if(_cxConv!==id)return;
     if(!d.ok){th.innerHTML='<div class="cx-empty">Não consegui abrir.</div>';return;}
-    var L=d.lead;_cxSig=cxSig(d);_cxAg=d.agente_ativo?1:0;
+    var L=d.lead;_cxSig=cxSig(d);_cxAg=d.agente_ativo?1:0;_cxPr=d.pode_responder?1:0;
     var rodape=d.pode_responder
       ?'<div class="cx-comp"><textarea id="cx-reply" rows="2" placeholder="Escreva uma resposta…" onkeydown="if(event.key===\\'Enter\\'&&!event.shiftKey){event.preventDefault();cxResponder('+d.conversa_id+');}"></textarea><button class="pbtn" id="cx-send" onclick="cxResponder('+d.conversa_id+')">Enviar</button></div>'
       :'<div class="cx-stub">Responder por aqui<span class="lbl2">em breve</span> — disponível quando o canal estiver conectado (aba <b>Canais</b>).</div>';
@@ -7290,7 +7302,10 @@ function cxPollThread(){
   if(!_cxConv)return;var id=_cxConv;
   fetch('/painel/prospeccao/comunicacao/thread/'+id).then(function(r){return r.json();}).then(function(d){
     if(!d.ok||_cxConv!==id)return;
-    if((d.agente_ativo?1:0)!==_cxAg||cxSig(d).split('|')[3]!==_cxSig.split('|')[3]){cxOpen(document.getElementById('cxc-'+id),id);return;}
+    // recarga TOTAL do painel só quando muda algo estrutural (agente ligado/
+    // desligado ou o canal parou/voltou a poder responder) — nunca por causa do
+    // conteúdo das mensagens; isso era o que fazia o chat "pular" o tempo todo.
+    if((d.agente_ativo?1:0)!==_cxAg||(d.pode_responder?1:0)!==_cxPr){cxOpen(document.getElementById('cxc-'+id),id);return;}
     var sig=cxSig(d);if(sig===_cxSig)return;_cxSig=sig;
     var b=document.getElementById('cx-msgs');
     if(b){

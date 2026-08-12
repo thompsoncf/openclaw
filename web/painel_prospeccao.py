@@ -2693,16 +2693,20 @@ async def webhook_wa_qr(request: Request, background_tasks: BackgroundTasks):
     return Response("ok", media_type="text/plain")
 
 
-def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando) -> int:
+def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando, de_mim=False) -> int:
     """WhatsApp IMPORTADO do histórico (mensagem de ANTES de conectar por QR, ver
-    /webhooks/wa-qr/historico): grava a conversa como ÓRFÃ (sem lead), preservando
-    a data original da mensagem. NUNCA cria ou promove prospecção sozinho — ao
-    contrário de _wa_inbound_conversa (mensagem NOVA, em tempo real). O vendedor
-    decide se vale virar lead (botão "virar lead" no inbox de Comunicação)."""
+    /webhooks/wa-qr/historico): grava a conversa preservando a data original da
+    mensagem. `de_mim=True` = mensagem que o VENDEDOR enviou (o histórico traz os
+    dois lados; sem isso a conversa importada ficava pela metade). NUNCA cria ou
+    promove prospecção sozinho — ao contrário de _wa_inbound_conversa (mensagem
+    NOVA, em tempo real). O vendedor decide se vale virar lead (botão "virar
+    lead" no inbox de Comunicação). Reusa QUALQUER conversa do número (órfã ou já
+    ligada a lead — preferindo a ligada), senão um re-pareamento duplicava a aba
+    de quem já tinha virado lead."""
     remetente = _so_digitos(remetente)
     conv = c.execute(
-        """select id from conversas where conta_id=%s and canal='whatsapp'
-            and prospeccao_id is null and contato_ref=%s""",
+        """select id from conversas where conta_id=%s and canal='whatsapp' and contato_ref=%s
+            order by (prospeccao_id is not null) desc, ultima_msg_em desc limit 1""",
         (conta_id, remetente)).fetchone()
     if conv:
         conv_id = conv[0]
@@ -2714,9 +2718,10 @@ def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando) -> int:
             (conta_id, remetente, quando)).fetchone()[0]
     c.execute(
         """insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid, criado_em)
-             values (%s,'whatsapp','in','lead',%s,%s,coalesce(%s,now()))
+             values (%s,'whatsapp',%s,%s,%s,%s,coalesce(%s,now()))
              on conflict (provider_sid) where provider_sid is not null do nothing""",
-        (conv_id, (corpo or "")[:8000], sid, quando))
+        (conv_id, "out" if de_mim else "in", "humano" if de_mim else "lead",
+         (corpo or "")[:8000], sid, quando))
     c.execute("update conversas set ultima_msg_em=greatest(ultima_msg_em, coalesce(%s,now())) where id=%s",
               (quando, conv_id))
     return conv_id
@@ -2764,7 +2769,8 @@ async def webhook_wa_qr_historico(request: Request):
             log.warning("webhook_wa_qr_historico: conta_id=%s sem canal whatsapp/qr ativo — descartado",
                         conta_id)
             return Response("ok", media_type="text/plain")
-        conv_id = _wa_historico_conversa(c, conta_id, sender, texto, payload.get("id") or None, quando)
+        conv_id = _wa_historico_conversa(c, conta_id, sender, texto, payload.get("id") or None,
+                                         quando, de_mim=bool(payload.get("de_mim")))
         c.commit()
     log.info("webhook_wa_qr_historico: conta_id=%s conv_id=%s importado ✓", conta_id, conv_id)
     return Response("ok", media_type="text/plain")

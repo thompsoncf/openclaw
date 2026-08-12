@@ -161,6 +161,30 @@ def _preparar_historico(itens: list[dict], hoje: date) -> list[dict]:
     return itens
 
 
+def _fmt_eta(dt, agora) -> dict:
+    """'~1h10' / '~40min' / 'agora' + a hora prevista — pra fila do Histórico."""
+    mins = int((dt - agora).total_seconds() // 60)
+    if mins <= 0:
+        rel = "agora"
+    elif mins < 60:
+        rel = f"~{mins}min"
+    else:
+        h, m = divmod(mins, 60)
+        rel = f"~{h}h{m:02d}" if m else f"~{h}h"
+    return {"rel": rel, "hora": dt.astimezone(ag.BRT).strftime("%H:%M"), "passou": mins <= 0}
+
+
+def _preparar_fila(itens: list[dict], agora) -> list[dict]:
+    for it in itens:
+        eta = _fmt_eta(it["sai_em"], agora)
+        it["eta_rel"] = eta["rel"]
+        it["eta_hora"] = eta["hora"]
+        it["tipo_rot"] = _TIPO_HIST_ROT.get(it["tipo"], it["tipo"])
+        it["convidado_rot"] = it.get("convidado_nome") or "— (você)"
+        it["status_rot"] = "⏳ Tentando agora" if eta["passou"] else "🕓 Aguardando janela"
+    return itens
+
+
 def _montar_share(request: Request, pool, conta_id: int, convite_ev: str, convite: str):
     """Card de compartilhar os convites de UM evento (todos os convidados dele)."""
     ev_id = None
@@ -236,8 +260,9 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
     share = _montar_share(request, pool, conta_id, convite_ev, convite)
     hist = cv.listar_historico(pool, conta_id, dias=7)
     historico = _preparar_historico(hist["itens"], hoje)
+    fila = _preparar_fila(cv.listar_fila(pool, conta_id, agora), agora)
     return _render("agenda", request, titulo="Agenda", secao_ativa="agenda",
-                   historico=historico, historico_total=hist["total"],
+                   historico=historico, historico_total=hist["total"], fila=fila,
                    ano=ano, mes=mes, mes_nome=MESES[mes], dias_sem=DIAS_SEM,
                    semanas=semanas, proximos=proximos, tipo_rot=TIPO_ROT,
                    eventos_dia=eventos_dia, status_rot=cv.STATUS_ROT,
@@ -649,6 +674,16 @@ _CSS = """<style>
 .hist-vazio{color:var(--txt-mut);font-size:.84rem;padding:18px 4px;text-align:center}
 .hist-foot{display:flex;justify-content:center;margin-top:12px}
 .hist-mais{background:transparent;border:1px dashed var(--borda);color:var(--verde-claro);border-radius:9px;padding:.45rem 1rem;font-size:.78rem;font-weight:600;cursor:pointer}
+.hist-tabs{display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--borda)}
+.hist-tab{background:none;border:0;color:var(--txt-mut);padding:.5rem .3rem;font-size:.82rem;font-weight:700;cursor:pointer;position:relative;top:1px;border-bottom:2px solid transparent;display:flex;align-items:center;gap:6px}
+.hist-tab.on{color:var(--txt);border-bottom-color:var(--verde)}
+.hist-tab .cnt{background:var(--card-2);border:1px solid var(--borda);border-radius:20px;padding:0 7px;font-size:.68rem;color:var(--txt-mut);font-variant-numeric:tabular-nums}
+.hist-tab.on .cnt{background:rgba(29,158,117,.16);border-color:var(--verde);color:var(--verde-claro)}
+.hist-tab .cnt.warn{background:rgba(224,163,62,.16);border-color:var(--ambar);color:var(--ambar)}
+.hs-wait{color:var(--ambar)}
+.eta{font-size:.68rem;color:var(--txt-mut)}
+.eta b{color:var(--txt);font-variant-numeric:tabular-nums}
+.hist-resumo .hr-wait b{color:var(--ambar)}
 .ag-card{background:var(--card);border:1px solid var(--borda);border-radius:14px;padding:16px}
 .ag-card h2{font-size:.76rem;letter-spacing:.09em;text-transform:uppercase;color:var(--txt-mut);margin:0 0 12px;font-weight:700}
 /* calendário */
@@ -1179,6 +1214,10 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <button class="hf-btn" id="histFalhasBtn" type="button" onclick="histToggleFalhas()">Só falhas</button>
       </div>
     </div>
+    <div class="hist-tabs">
+      <button class="hist-tab on" id="histTabFeito" type="button" onclick="histTab('feito')">✅ Feito <span class="cnt">{{ historico_total }}</span></button>
+      <button class="hist-tab" id="histTabFila" type="button" onclick="histTab('fila')">🕓 Por fazer <span class="cnt{% if fila %} warn{% endif %}">{{ fila|length }}</span></button>
+    </div>
     <div id="histBody">
       {% if historico %}
       <div class="hist-resumo" id="histResumo">
@@ -1212,6 +1251,32 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       {% endif %}
       {% else %}
       <div class="hist-vazio" id="histVazio">Nada enviado nos últimos 7 dias. 🤷</div>
+      {% endif %}
+    </div>
+    <div id="filaBody" style="display:none">
+      {% if fila %}
+      <div class="hist-resumo">
+        <span class="hr-wait">🕓 <b>{{ fila|length }}</b> na fila</span>
+        <span>Próximo em <b>{{ fila[0].eta_rel }}</b> · {{ fila[0].evento_titulo }}</span>
+      </div>
+      <div class="hist-tbl-wrap">
+        <table class="hist-tbl">
+          <thead><tr><th>Sai em</th><th>Compromisso</th><th>Convidado</th><th>Tipo</th><th></th></tr></thead>
+          <tbody>
+            {% for it in fila %}
+            <tr>
+              <td class="hist-qd"><span class="eta">{{ it.eta_rel }}<br><b>{{ it.eta_hora }}</b></span></td>
+              <td class="hist-compr">{{ it.evento_titulo }}{% if it.evento_local %}<div class="loc">{{ it.evento_local }}</div>{% endif %}</td>
+              <td>{{ it.convidado_rot }}</td>
+              <td><span class="hist-tipo ht-{{ it.tipo }}">{{ it.tipo_rot }}</span></td>
+              <td><span class="hist-status hs-wait">{{ it.status_rot }}</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="hist-vazio">Nada na fila — sem compromisso esperando aviso nos próximos 7 dias. 🎉</div>
       {% endif %}
     </div>
   </div>
@@ -1465,6 +1530,15 @@ function histFiltro(btn){
   btn.classList.add('on');
   HIST_STATE.dias = Number(btn.getAttribute('data-dias'));
   _histFetch(true);
+}
+function histTab(nome){
+  var feito = nome === 'feito';
+  document.getElementById('histTabFeito').classList.toggle('on', feito);
+  document.getElementById('histTabFila').classList.toggle('on', !feito);
+  document.getElementById('histBody').style.display = feito ? '' : 'none';
+  document.getElementById('filaBody').style.display = feito ? 'none' : '';
+  var filtros = document.querySelector('.hist-filtros');
+  if(filtros) filtros.style.display = feito ? '' : 'none';
 }
 function histToggleFalhas(){
   HIST_STATE.falhas = !HIST_STATE.falhas;

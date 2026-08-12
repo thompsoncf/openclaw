@@ -363,6 +363,46 @@ def test_reenviar_historico_tipo_remarcado_nao_suportado(pool, conta_id):
     assert r["ok"] is False and r["erro"] == "tipo_nao_suportado"
 
 
+def test_listar_fila_mostra_dono_e_convidados_pendentes(pool, conta_id):
+    ag.salvar_config(pool, conta_id, resumo_ativo=False, hora_resumo=7, aviso_antes_min=30,
+                     avisar_convidados=True)
+    agora = ag.agora_brt()
+    ev = ag.criar_evento(pool, conta_id, "Consultoria", agora + timedelta(hours=2))
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Hilderlan", "86994283853")
+    cv.responder(pool, conv["token"], "confirmado")
+    fila = cv.listar_fila(pool, conta_id, agora)
+    assert len(fila) == 2                                     # dono + Hilderlan
+    assert {f["convidado_nome"] for f in fila} == {None, "Hilderlan"}
+    assert all(f["evento_titulo"] == "Consultoria" for f in fila)
+    assert fila[0]["sai_em"] == ev["inicio"] - timedelta(minutes=30)
+
+
+def test_listar_fila_exclui_quem_ja_foi_avisado(pool, conta_id):
+    ag.salvar_config(pool, conta_id, resumo_ativo=False, hora_resumo=7, aviso_antes_min=30)
+    agora = ag.agora_brt()
+    ev = ag.criar_evento(pool, conta_id, "Já avisado", agora + timedelta(minutes=20))
+    with pool.connection() as c:
+        c.execute("insert into lembretes_enviados (conta_id, tipo, chave) values (%s,'aviso',%s)",
+                  (conta_id, f"evt:{ev['id']}"))
+        c.commit()
+    assert cv.listar_fila(pool, conta_id, agora) == []
+
+
+def test_listar_fila_vazia_sem_aviso_configurado(pool, conta_id):
+    ag.salvar_config(pool, conta_id, resumo_ativo=False, hora_resumo=7, aviso_antes_min=None)
+    ag.criar_evento(pool, conta_id, "Sem aviso", ag.agora_brt() + timedelta(hours=1))
+    assert cv.listar_fila(pool, conta_id, ag.agora_brt()) == []
+
+
+def test_listar_fila_ignora_convidado_nao_confirmado(pool, conta_id):
+    ag.salvar_config(pool, conta_id, resumo_ativo=False, hora_resumo=7, aviso_antes_min=30)
+    agora = ag.agora_brt()
+    ev = ag.criar_evento(pool, conta_id, "Pendente ainda", agora + timedelta(hours=1))
+    cv.criar_convidado(pool, conta_id, ev["id"], "Zé", "86988889999")   # nunca confirmou
+    fila = cv.listar_fila(pool, conta_id, agora)
+    assert len(fila) == 1 and fila[0]["convidado_nome"] is None         # só o dono
+
+
 def test_marcar_evento_com_convidados_dispara(pool, conta_id, monkeypatch):
     """Pulo do gato: marcar reunião + convidar + disparar, tudo pelo chat."""
     from finance.agenda_tools import construir_ferramentas_agenda

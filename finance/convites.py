@@ -90,6 +90,44 @@ def listar_historico(pool, conta_id: int, dias: int = 7, somente_falhas: bool = 
     return {"itens": itens, "total": total}
 
 
+def listar_fila(pool, conta_id: int, agora, horizonte_dias: int = 7) -> list[dict]:
+    """Fila do que ainda vai sair — dono e convidados confirmados de eventos
+    futuros que ainda não têm o aviso registrado em lembretes_enviados (mesma
+    fonte que o motor usa pra dedup, então nunca desalinha do que ele realmente
+    vai fazer). `sai_em` é a hora em que a janela abre (evento.inicio menos
+    aviso_antes_min) — pode já ter passado (evento na janela, ainda tentando a
+    cada ciclo, sem sucesso ainda) sem sumir da fila."""
+    cfg = ag.get_config(pool, conta_id)
+    antes_min = cfg.get("aviso_antes_min")
+    if not antes_min:
+        return []
+    eventos = ag.listar_eventos(pool, conta_id, agora, agora + timedelta(days=horizonte_dias))
+    if not eventos:
+        return []
+    ids = [e["id"] for e in eventos]
+    with pool.connection() as c:
+        avisados = {(t, k) for (t, k) in c.execute(
+            "select tipo, chave from lembretes_enviados "
+            "where conta_id=%s and tipo in ('aviso','aviso_convidado')", (conta_id,)).fetchall()}
+    convidados = por_evento(pool, conta_id, ids) if cfg.get("avisar_convidados") else {}
+    fila = []
+    for ev in eventos:
+        sai_em = ev["inicio"] - timedelta(minutes=antes_min)
+        if ("aviso", f"evt:{ev['id']}") not in avisados:
+            fila.append({"evento_id": ev["id"], "evento_titulo": ev["titulo"],
+                        "evento_local": ev.get("local"), "convidado_nome": None,
+                        "tipo": "lembrete", "sai_em": sai_em})
+        for g in convidados.get(ev["id"], []):
+            if g["status"] != "confirmado" or not (g.get("contato") or "").strip():
+                continue
+            if ("aviso_convidado", f"evt:{ev['id']}:conv:{g['id']}") not in avisados:
+                fila.append({"evento_id": ev["id"], "evento_titulo": ev["titulo"],
+                            "evento_local": ev.get("local"), "convidado_nome": g.get("nome"),
+                            "tipo": "lembrete", "sai_em": sai_em})
+    fila.sort(key=lambda x: x["sai_em"])
+    return fila
+
+
 def reenviar_historico(pool, conta_id: int, log_id: int) -> dict:
     """Reenvia manualmente uma tentativa que falhou no Histórico de envios — não
     espera o próximo ciclo do motor (~2min) nem a janela do evento. Só 'convite'

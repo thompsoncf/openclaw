@@ -6661,6 +6661,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .cx-thread,.cx-ctx{border:1px solid var(--borda);border-radius:12px;background:var(--card);min-height:40vh}
 .cx-thread{display:flex;flex-direction:column;max-height:72vh}
 .cx-empty{padding:2.4rem 1rem;text-align:center;color:var(--txt-mut);font-size:.9rem}
+.cx-trunc{padding:.35rem 0;text-align:center;color:var(--txt-mut);font-size:.72rem}
 .cx-th{display:flex;align-items:center;gap:.6rem;padding:.7rem .85rem;border-bottom:1px solid var(--borda)}
 .cx-th b{font-size:.92rem}
 .cx-th small{display:block;color:var(--txt-mut);font-size:.75rem}
@@ -7247,7 +7248,10 @@ var _cxEscopo='{{ escopo }}';   // 'email' (aba E-mails) ou 'msg' (aba Conversas
 function cxEsc(s){var d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
 function cxMsgsHtml(d){
   if(!d.msgs.length)return '<div class="cx-empty">Sem mensagens.</div>';
-  var h=d.truncado?'<div class="cx-empty" style="font-size:.72rem;padding:.35rem 0">Mostrando as últimas 100 mensagens</div>':'';
+  // classe PRÓPRIA, nunca cx-empty: cxResponder limpa o thread inteiro quando
+  // acha um .cx-empty (o placeholder "Sem mensagens"), então usar essa classe
+  // aqui fazia o thread sumir e "voltar com o histórico" a cada envio.
+  var h=d.truncado?'<div class="cx-trunc">Mostrando as últimas 100 mensagens</div>':'';
   d.msgs.forEach(function(m){
     var cls=(m.direcao==='in')?'cx-m cin':((m.autor==='bot')?'cx-m cbot':'cx-m');
     var cab=m.cabecalho?('<div class="cab">'+cxEsc(m.cabecalho)+'</div>'):'';
@@ -7356,7 +7360,10 @@ function cxVirarLead(convId){var fd=new FormData();fd.append('conversa_id',convI
 function cxResponder(convId){
   var ta=document.getElementById('cx-reply');if(!ta)return;var t=ta.value.trim();if(!t)return;
   var b=document.getElementById('cx-msgs');
-  if(b){if(b.querySelector('.cx-empty'))b.innerHTML='';b.insertAdjacentHTML('beforeend','<div class="cx-m" style="opacity:.6"><span class="who">Você</span>'+cxEsc(t).replace(/\\n/g,'<br>')+'<span class="meta">enviando…</span></div>');cxScroll(true);}
+  // remove só o placeholder "Sem mensagens", em vez de zerar o thread inteiro
+  // ao encontrar qualquer .cx-empty — assim nenhum aviso novo dentro do thread
+  // volta a apagar a conversa na hora do envio.
+  if(b){var vazio=b.querySelector('.cx-empty');if(vazio)vazio.remove();b.insertAdjacentHTML('beforeend','<div class="cx-m" style="opacity:.6"><span class="who">Você</span>'+cxEsc(t).replace(/\\n/g,'<br>')+'<span class="meta">enviando…</span></div>');cxScroll(true);}
   ta.value='';var sd=document.getElementById('cx-send');if(sd){sd.disabled=true;sd.textContent='…';}
   var fd=new FormData();fd.append('conversa_id',convId);fd.append('texto',t);
   fetch('/painel/prospeccao/comunicacao/responder',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})

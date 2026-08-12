@@ -137,6 +137,30 @@ def _wa_share(contato: str, texto: str) -> str:
     return f"https://wa.me/{alvo}?text={quote(texto)}"
 
 
+def _fmt_quando_hist(dt, hoje: date) -> str:
+    """'Hoje 12:01' / 'Ontem 09:15' / '07/08 08:50' — pro Histórico de envios."""
+    local = dt.astimezone(ag.BRT)
+    hhmm = local.strftime("%H:%M")
+    d = local.date()
+    if d == hoje:
+        return f"Hoje {hhmm}"
+    if d == hoje - timedelta(days=1):
+        return f"Ontem {hhmm}"
+    return local.strftime("%d/%m") + f" {hhmm}"
+
+
+def _preparar_historico(itens: list[dict], hoje: date) -> list[dict]:
+    for it in itens:
+        it["quando_rot"] = _fmt_quando_hist(it["quando"], hoje)
+        it["tipo_rot"] = _TIPO_HIST_ROT.get(it["tipo"], it["tipo"])
+        it["canal_rot"] = _CANAL_HIST_ROT.get(it["canal"], it["canal"])
+        it["motivo_rot"] = _MOTIVO_HIST.get(it["motivo"], it["motivo"]) if it.get("motivo") else None
+        it["convidado_rot"] = it.get("convidado_nome") or "— (você)"
+        it["pode_reenviar"] = (not it["ok"]) and it["tipo"] in ("convite", "lembrete")
+        it["quando"] = it["quando"].isoformat()
+    return itens
+
+
 def _montar_share(request: Request, pool, conta_id: int, convite_ev: str, convite: str):
     """Card de compartilhar os convites de UM evento (todos os convidados dele)."""
     ev_id = None
@@ -210,7 +234,10 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
     # Card de compartilhar os convites de um evento (?convite_ev=<id>; aceita também
     # ?convite=<token> por retrocompat, resolvendo pro evento dele).
     share = _montar_share(request, pool, conta_id, convite_ev, convite)
+    hist = cv.listar_historico(pool, conta_id, dias=7)
+    historico = _preparar_historico(hist["itens"], hoje)
     return _render("agenda", request, titulo="Agenda", secao_ativa="agenda",
+                   historico=historico, historico_total=hist["total"],
                    ano=ano, mes=mes, mes_nome=MESES[mes], dias_sem=DIAS_SEM,
                    semanas=semanas, proximos=proximos, tipo_rot=TIPO_ROT,
                    eventos_dia=eventos_dia, status_rot=cv.STATUS_ROT,
@@ -221,6 +248,30 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
                    hoje_iso=hoje.isoformat(), abrir_novo=(novo == "1"),
                    cfg=cfg, feed_url=feed_url, share=share,
                    aviso=request.session.pop("agenda_aviso", None))
+
+
+# ================================================================ HISTÓRICO DE ENVIOS
+@router.get("/painel/agenda/historico")
+def agenda_historico(request: Request, dias: int = 7, falhas: str = "", q: str = "",
+                     offset: int = 0):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "auth"}, status_code=401)
+    pool = get_pool()
+    hoje = ag.agora_brt().date()
+    hist = cv.listar_historico(pool, ctx["conta_id"], dias=dias, somente_falhas=(falhas == "1"),
+                               busca=q, offset=offset)
+    itens = _preparar_historico(hist["itens"], hoje)
+    return JSONResponse({"ok": True, "itens": itens, "total": hist["total"]})
+
+
+@router.post("/painel/agenda/historico/reenviar")
+def agenda_historico_reenviar(request: Request, log_id: int = Form(...)):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "auth"}, status_code=401)
+    r = cv.reenviar_historico(get_pool(), ctx["conta_id"], log_id)
+    return JSONResponse(r)
 
 
 # ================================================================ NOVO
@@ -393,6 +444,21 @@ _ERRO_ENVIO = {
     "convite_nao_encontrado": "convite não encontrado",
 }
 
+# Rótulos curtos pro Histórico de envios (tabela) — mesmos códigos de erro que
+# _ERRO_ENVIO já mapeia (em frase), só que aqui em rótulo curto pra caber na linha.
+_MOTIVO_HIST = {
+    "sem_numero": "sem número",
+    "sem_template": "sem template configurado",
+    "fora_da_janela_sem_template": "fora da janela de 24h, sem template",
+    "nao_configurado": "WhatsApp não configurado",
+    "sem_numero_empresa": "empresa sem número de WhatsApp",
+    "provedor_sem_template": "número não é Twilio",
+    "numero_invalido": "número inválido",
+    "falha_envio": "falha no envio (rede/API)",
+}
+_TIPO_HIST_ROT = {"convite": "✉️ Convite", "lembrete": "⏰ Lembrete", "remarcado": "🔁 Remarcado"}
+_CANAL_HIST_ROT = {"whatsapp_livre": "💬 Livre", "whatsapp_template": "📩 Template", "telegram": "Telegram"}
+
 
 @router.post("/painel/agenda/convite/enviar")
 def agenda_convite_enviar(request: Request, token: str = Form(...),
@@ -547,6 +613,42 @@ _CSS = """<style>
 .ag-btn:hover{background:var(--verde-hover)}
 .ag-grid{display:grid;grid-template-columns:1.7fr .95fr;gap:18px;align-items:start}
 @media(max-width:860px){.ag-grid{grid-template-columns:1fr}}
+/* histórico de envios */
+.hist-card{background:var(--card);border:1px solid var(--borda);border-radius:14px;padding:16px;margin-top:18px}
+.hist-hd{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.hist-hd h2{font-size:.95rem;margin:0;font-weight:700}
+.hist-hd .sub{font-size:.74rem;color:var(--txt-mut);margin-top:2px}
+.hist-filtros{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.hf-btn{background:var(--card-2);border:1px solid var(--borda);color:var(--txt-mut);border-radius:20px;padding:.3rem .75rem;font-size:.72rem;font-weight:600;cursor:pointer}
+.hf-btn.on{background:rgba(29,158,117,.16);border-color:var(--verde);color:var(--verde-claro)}
+.hf-search{background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:.32rem .65rem;font-size:.76rem;color:var(--txt);width:160px}
+.hf-search::placeholder{color:var(--txt-mut)}
+.hist-resumo{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px;padding:9px 11px;background:var(--card-2);border:1px solid var(--borda);border-radius:10px;font-size:.76rem;color:var(--txt-mut)}
+.hist-resumo b{font-variant-numeric:tabular-nums;color:var(--txt)}
+.hist-resumo .hr-ok b{color:var(--verde-claro)}
+.hist-resumo .hr-fail b{color:#e0574f}
+.hist-tbl-wrap{overflow-x:auto}
+.hist-tbl{width:100%;border-collapse:collapse;font-size:.8rem}
+.hist-tbl th{text-align:left;font-size:.66rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--txt-mut);padding:0 9px 7px;border-bottom:1px solid var(--borda);white-space:nowrap}
+.hist-tbl td{padding:8px 9px;border-bottom:1px solid var(--borda);vertical-align:top}
+.hist-tbl tr:last-child td{border-bottom:0}
+.hist-qd{color:var(--txt-mut);white-space:nowrap;font-variant-numeric:tabular-nums;font-size:.76rem}
+.hist-compr{font-weight:600}
+.hist-compr .loc{font-size:.7rem;color:var(--txt-mut);font-weight:400;margin-top:1px}
+.hist-tipo{font-size:.66rem;font-weight:700;padding:2px 8px;border-radius:20px;white-space:nowrap;display:inline-flex}
+.ht-convite{background:rgba(57,135,229,.14);color:#bcd8f6;border:1px solid rgba(57,135,229,.4)}
+.ht-lembrete{background:rgba(224,163,62,.14);color:var(--ambar);border:1px solid rgba(224,163,62,.4)}
+.ht-remarcado{background:rgba(93,202,165,.12);color:var(--verde-claro);border:1px solid var(--verde)}
+.hist-canal{font-size:.74rem;color:var(--txt-mut);white-space:nowrap}
+.hist-status{display:inline-flex;flex-direction:column;gap:1px;font-size:.76rem;font-weight:700;white-space:nowrap}
+.hs-ok{color:var(--verde-claro)}
+.hs-fail{color:#e0574f}
+.hs-motivo{font-size:.68rem;font-weight:400;color:var(--txt-mut);white-space:normal;max-width:220px}
+.hist-retry{background:transparent;border:1px solid var(--borda);color:var(--txt-mut);border-radius:7px;padding:.26rem .55rem;font-size:.68rem;font-weight:600;cursor:pointer;white-space:nowrap}
+.hist-retry:hover{border-color:var(--verde);color:var(--verde-claro)}
+.hist-vazio{color:var(--txt-mut);font-size:.84rem;padding:18px 4px;text-align:center}
+.hist-foot{display:flex;justify-content:center;margin-top:12px}
+.hist-mais{background:transparent;border:1px dashed var(--borda);color:var(--verde-claro);border-radius:9px;padding:.45rem 1rem;font-size:.78rem;font-weight:600;cursor:pointer}
 .ag-card{background:var(--card);border:1px solid var(--borda);border-radius:14px;padding:16px}
 .ag-card h2{font-size:.76rem;letter-spacing:.09em;text-transform:uppercase;color:var(--txt-mut);margin:0 0 12px;font-weight:700}
 /* calendário */
@@ -1063,6 +1165,57 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </div>
   </div>
 
+  <!-- histórico de envios: convites/lembretes/remarcados mandados, com status -->
+  <div class="hist-card">
+    <div class="hist-hd">
+      <div>
+        <h2>📨 Histórico de envios</h2>
+        <div class="sub">Convites, avisos e lembretes mandados pros seus convidados — e pra você</div>
+      </div>
+      <div class="hist-filtros">
+        <input class="hf-search" id="histQ" placeholder="Buscar convidado ou compromisso…">
+        <button class="hf-btn on" type="button" data-dias="7" onclick="histFiltro(this)">7 dias</button>
+        <button class="hf-btn" type="button" data-dias="30" onclick="histFiltro(this)">30 dias</button>
+        <button class="hf-btn" id="histFalhasBtn" type="button" onclick="histToggleFalhas()">Só falhas</button>
+      </div>
+    </div>
+    <div id="histBody">
+      {% if historico %}
+      <div class="hist-resumo" id="histResumo">
+        <span class="hr-ok">✅ <b>{{ historico|selectattr("ok")|list|length }}</b> enviados</span>
+        <span class="hr-fail">❌ <b>{{ historico|rejectattr("ok")|list|length }}</b> falharam</span>
+        <span>📨 <b>{{ historico_total }}</b> no total · últimos 7 dias</span>
+      </div>
+      <div class="hist-tbl-wrap">
+        <table class="hist-tbl">
+          <thead><tr><th>Quando</th><th>Compromisso</th><th>Convidado</th><th>Tipo</th><th>Canal</th><th>Status</th><th></th></tr></thead>
+          <tbody id="histTbody">
+            {% for it in historico %}
+            <tr>
+              <td class="hist-qd">{{ it.quando_rot }}</td>
+              <td class="hist-compr">{{ it.evento_titulo or "—" }}{% if it.evento_local %}<div class="loc">{{ it.evento_local }}</div>{% endif %}</td>
+              <td>{{ it.convidado_rot }}</td>
+              <td><span class="hist-tipo ht-{{ it.tipo }}">{{ it.tipo_rot }}</span></td>
+              <td class="hist-canal">{{ it.canal_rot }}</td>
+              <td>
+                {% if it.ok %}<span class="hist-status hs-ok">✅ Enviado</span>
+                {% else %}<span class="hist-status hs-fail">❌ Falhou{% if it.motivo_rot %}<span class="hs-motivo">{{ it.motivo_rot }}</span>{% endif %}</span>{% endif %}
+              </td>
+              <td>{% if it.pode_reenviar %}<button class="hist-retry" type="button" onclick="histReenviar({{ it.id }}, this)">🔁 Reenviar</button>{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if historico_total > historico|length %}
+      <div class="hist-foot"><button class="hist-mais" type="button" onclick="histMais()">Ver mais</button></div>
+      {% endif %}
+      {% else %}
+      <div class="hist-vazio" id="histVazio">Nada enviado nos últimos 7 dias. 🤷</div>
+      {% endif %}
+    </div>
+  </div>
+
   <!-- caixa do dia (abre ao clicar numa célula com compromisso) -->
   <div class="day-overlay" id="dayOverlay">
     <div class="daybox" id="daybox"></div>
@@ -1076,6 +1229,8 @@ var DIAS_EXT_JS = {{ dias_sem_ext_js|tojson }};
 var AGORA_ISO = {{ agora_iso|tojson }};
 var CUR_MES = {{ ('%04d-%02d'|format(ano, mes))|tojson }};
 var TPILL = {pessoal:'Pessoal', empresa:'Empresa', fornecedor:'Fornecedor'};
+var HIST_STATE = {dias: 7, falhas: false, q: '', itens: {{ historico|tojson }},
+                  total: {{ historico_total }}};
 
 function _esc(s){ return (s||'').replace(/[&<>"']/g, function(ch){
   return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]; }); }
@@ -1257,6 +1412,84 @@ function addGuest(){var box=document.getElementById('guests');var d=document.cre
 function rmGuest(b){var box=document.getElementById('guests');var row=b.closest('.guest-row');if(box&&box.children.length>1){row.remove();}else{row.querySelectorAll('input').forEach(function(x){x.value='';});}}
 function remToggle(id){var box=document.getElementById('remBox-'+id);if(box)box.classList.toggle('show');}
 function addConvToggle(id){var box=document.getElementById('addConvBox-'+id);if(box)box.classList.toggle('show');}
+
+// ---------------- Histórico de envios ----------------
+function _histRowHtml(it){
+  var motivo = it.motivo_rot ? '<span class="hs-motivo">'+_esc(it.motivo_rot)+'</span>' : '';
+  var status = it.ok ? '<span class="hist-status hs-ok">✅ Enviado</span>'
+    : '<span class="hist-status hs-fail">❌ Falhou'+motivo+'</span>';
+  var retry = it.pode_reenviar ? '<button class="hist-retry" type="button" onclick="histReenviar('+it.id+',this)">🔁 Reenviar</button>' : '';
+  var loc = it.evento_local ? '<div class="loc">'+_esc(it.evento_local)+'</div>' : '';
+  return '<tr><td class="hist-qd">'+_esc(it.quando_rot)+'</td>'
+    + '<td class="hist-compr">'+_esc(it.evento_titulo||'—')+loc+'</td>'
+    + '<td>'+_esc(it.convidado_rot)+'</td>'
+    + '<td><span class="hist-tipo ht-'+it.tipo+'">'+_esc(it.tipo_rot)+'</span></td>'
+    + '<td class="hist-canal">'+_esc(it.canal_rot)+'</td>'
+    + '<td>'+status+'</td><td>'+retry+'</td></tr>';
+}
+function _histRenderBody(){
+  var box = document.getElementById('histBody');
+  if(!box) return;
+  if(!HIST_STATE.itens.length){
+    box.innerHTML = '<div class="hist-vazio" id="histVazio">Nada enviado nos últimos '+HIST_STATE.dias+' dias. 🤷</div>';
+    return;
+  }
+  var ok = HIST_STATE.itens.filter(function(i){return i.ok;}).length;
+  var fail = HIST_STATE.itens.length - ok;
+  var rows = HIST_STATE.itens.map(_histRowHtml).join('');
+  var mais = HIST_STATE.total > HIST_STATE.itens.length
+    ? '<div class="hist-foot"><button class="hist-mais" type="button" onclick="histMais()">Ver mais</button></div>' : '';
+  box.innerHTML = '<div class="hist-resumo" id="histResumo">'
+    + '<span class="hr-ok">✅ <b>'+ok+'</b> enviados</span>'
+    + '<span class="hr-fail">❌ <b>'+fail+'</b> falharam</span>'
+    + '<span>📨 <b>'+HIST_STATE.total+'</b> no total · últimos '+HIST_STATE.dias+' dias</span></div>'
+    + '<div class="hist-tbl-wrap"><table class="hist-tbl"><thead><tr><th>Quando</th><th>Compromisso</th>'
+    + '<th>Convidado</th><th>Tipo</th><th>Canal</th><th>Status</th><th></th></tr></thead>'
+    + '<tbody id="histTbody">'+rows+'</tbody></table></div>' + mais;
+}
+function _histQS(offset){
+  return 'dias='+HIST_STATE.dias+'&falhas='+(HIST_STATE.falhas?'1':'0')
+    +'&q='+encodeURIComponent(HIST_STATE.q)+'&offset='+offset;
+}
+function _histFetch(reset){
+  var offset = reset ? 0 : HIST_STATE.itens.length;
+  fetch('/painel/agenda/historico?'+_histQS(offset)).then(function(r){return r.json();}).then(function(d){
+    if(!d.ok) return;
+    HIST_STATE.itens = reset ? d.itens : HIST_STATE.itens.concat(d.itens);
+    HIST_STATE.total = d.total;
+    _histRenderBody();
+  });
+}
+function histFiltro(btn){
+  document.querySelectorAll('.hist-filtros .hf-btn[data-dias]').forEach(function(b){b.classList.remove('on');});
+  btn.classList.add('on');
+  HIST_STATE.dias = Number(btn.getAttribute('data-dias'));
+  _histFetch(true);
+}
+function histToggleFalhas(){
+  HIST_STATE.falhas = !HIST_STATE.falhas;
+  var b = document.getElementById('histFalhasBtn'); if(b) b.classList.toggle('on', HIST_STATE.falhas);
+  _histFetch(true);
+}
+function histMais(){ _histFetch(false); }
+function histReenviar(id, btn){
+  btn.disabled = true; var orig = btn.textContent; btn.textContent = '⏳';
+  fetch('/painel/agenda/historico/reenviar', {method:'POST',
+    headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'log_id='+id})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d.ok){ _histFetch(true); }
+      else { btn.disabled = false; btn.textContent = orig; zaqToast('Não consegui reenviar agora.', false); }
+    }).catch(function(){ btn.disabled = false; btn.textContent = orig; });
+}
+(function(){
+  var q = document.getElementById('histQ');
+  if(!q) return;
+  var t;
+  q.addEventListener('input', function(){
+    clearTimeout(t);
+    t = setTimeout(function(){ HIST_STATE.q = q.value; _histFetch(true); }, 350);
+  });
+})();
 
 // ---------------- Local: busca de endereço (Google Places) + manual + enviar ----------------
 (function(){

@@ -103,7 +103,10 @@ def _avisos_proximos(pool, conta_id: int, antes_min: int, agora,
         if not _ja_avisado(pool, conta_id, "aviso", chave):
             loc = f"\n📍 {ev['local']}" if ev.get("local") else ""
             txt = f"⏰ *Daqui a pouco* (em ~{faltam} min): *{ev['titulo']}* às {h}.{loc}"
-            if notificar.enviar_para_dono(pool, conta_id, txt):
+            ok = notificar.enviar_para_dono(pool, conta_id, txt)
+            cv.registrar_mensagem(pool, conta_id, ev["id"], None, "lembrete", "telegram",
+                                  ok, None if ok else "falha_envio")
+            if ok:
                 _primeira_vez(pool, conta_id, "aviso", chave)
                 n += 1
         if avisar_convidados:
@@ -138,7 +141,8 @@ def _avisar_convidados_confirmados(pool, conta_id: int, ev: dict, hora: str,
         try:
             if _ja_avisado(pool, conta_id, "aviso_convidado", chave):
                 continue
-            r = cv.avisar_convidado_confirmado(pool, conta_id, g["contato"], g.get("nome"),
+            r = cv.avisar_convidado_confirmado(pool, conta_id, ev["id"], g["id"],
+                                               g["contato"], g.get("nome"),
                                                ev["titulo"], hora, faltam,
                                                g.get("respondido_em"), g.get("respondido_canal"),
                                                agora)

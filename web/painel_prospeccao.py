@@ -1316,6 +1316,35 @@ def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=
     return out
 
 
+_WA_SYNC_CACHE: dict = {}   # conta_id -> (quando, {"sincronizando": bool})
+
+
+def _wa_qr_sincronizando(conta_id) -> bool:
+    """A sessão de WhatsApp por QR ainda está importando histórico? Só faz sentido
+    pro provedor 'qr'. Com cache de 3s: a lista é consultada a cada 4s por CADA aba
+    aberta, e sem isso cada poll viraria uma chamada HTTP ao serviço Node."""
+    import time
+    agora = time.time()
+    hit = _WA_SYNC_CACHE.get(conta_id)
+    if hit and (agora - hit[0]) < 3:
+        return hit[1]
+    sincronizando = False
+    try:
+        with get_pool().connection() as c:
+            qr = c.execute("""select 1 from canais_config
+                                where conta_id=%s and canal='whatsapp' and ativo
+                                  and coalesce(provedor,'twilio')='qr'""",
+                           (conta_id,)).fetchone()
+        if qr:
+            from finance import whatsapp_qr as _qr
+            if _qr.configurado():
+                sincronizando = bool(_qr.status(conta_id).get("sincronizando"))
+    except Exception:  # noqa: BLE001
+        sincronizando = False        # aviso some na dúvida; nunca quebra a lista
+    _WA_SYNC_CACHE[conta_id] = (agora, sincronizando)
+    return sincronizando
+
+
 @router.get("/painel/prospeccao/comunicacao/lista")
 def prospeccao_comunicacao_lista(request: Request, canal: str = "", vendedor: str = "", escopo: str = ""):
     """Lista de conversas em JSON (pro polling em tempo real)."""
@@ -1328,7 +1357,8 @@ def prospeccao_comunicacao_lista(request: Request, canal: str = "", vendedor: st
                                 canal=canal, vend=vendedor, escopo=escopo)
     for cv in convs:
         cv["quando"] = cv["quando"].strftime("%d/%m %H:%M") if cv["quando"] else ""
-    return JSONResponse({"ok": True, "convs": convs})
+    return JSONResponse({"ok": True, "convs": convs,
+                         "sincronizando": _wa_qr_sincronizando(ctx["conta_id"])})
 
 
 @router.get("/painel/prospeccao/comunicacao", response_class=HTMLResponse)
@@ -6827,6 +6857,21 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <span class="mut" style="align-self:center;font-size:.8rem">{{ convs|length }} conversa(s)</span>
   </form>
 
+  <!-- Importação em andamento. Sem isso o vendedor abria o painel no meio do sync,
+       via 2 conversas e concluía que "só veio isso" — foi exatamente o que
+       aconteceu. Barra indeterminada de propósito: a % que o WhatsApp manda
+       reinicia a cada bloco, então mostrar número seria mentira; o que é honesto
+       (e útil) é o total de conversas já importadas, que sobe na frente dele. -->
+  <div id="cx-sync-aviso" style="display:none;margin:.2rem 0 .6rem;padding:.5rem .7rem;
+       border:1px solid #1e4a34;background:#10241a;border-radius:9px;font-size:.82rem">
+    <span id="cx-sync-txt">📥 Importando conversas do WhatsApp…</span>
+    <div style="height:5px;border-radius:4px;background:var(--bg);overflow:hidden;margin-top:.4rem">
+      <div id="cx-sync-bar" style="height:100%;width:25%;background:var(--verde);
+           animation:cxsync 1.1s ease-in-out infinite alternate"></div>
+    </div>
+  </div>
+  <style>@keyframes cxsync{from{margin-left:0}to{margin-left:75%}}</style>
+
   <div class="cx-grid" id="cx-grid">
     <div class="cx-list" id="cx-list">
       {% for c in convs %}
@@ -7402,7 +7447,14 @@ function cxListItem(c){
 function cxPollList(){
   var box=document.getElementById('cx-list');if(!box)return;
   fetch('/painel/prospeccao/comunicacao/lista?'+cxParams()).then(function(r){return r.json();}).then(function(d){
-    if(!d.ok)return;var h='';var novo={};
+    if(!d.ok)return;
+    // aviso de importação: mostra o total já importado subindo, que é o que
+    // realmente responde "ainda está vindo mais?"
+    var av=document.getElementById('cx-sync-aviso'),tx=document.getElementById('cx-sync-txt');
+    if(av){av.style.display=d.sincronizando?'block':'none';
+      if(d.sincronizando&&tx)tx.textContent='📥 Importando conversas do WhatsApp… '
+        +d.convs.length+' até agora. Pode ir usando, elas vão aparecendo sozinhas.';}
+    var h='';var novo={};
     d.convs.forEach(function(c){novo[c.id]=c;h+=cxListItem(c);});
     h=h||'<div class="cx-empty">Nenhuma conversa ainda.</div>';
     // sem isso, todo poll (4s) trocava o innerHTML inteiro mesmo sem nada mudar,
@@ -7442,6 +7494,9 @@ function cxResponder(convId){
 }
 function cxPoll(){cxPollList();cxPollThread();}
 (function(){var box=document.getElementById('cx-list');if(box){document.querySelectorAll('#cx-list .cx-conv').forEach(function(b){var id=parseInt(b.id.replace('cxc-',''));_cxList[id]={id:id,ult_msg_id:0};});
+  // roda já na abertura: esperar 4s pro primeiro poll significa abrir a página no
+  // meio de uma importação e não ver aviso nenhum logo de cara.
+  cxPollList();
   _cxTimer=setInterval(cxPoll,4000);
   // o navegador congela o timer quando a aba fica em segundo plano — ao voltar o
   // foco/visibilidade, atualiza na hora pra conversa subir e mostrar as msgs novas.

@@ -121,6 +121,19 @@ function numeroReal (m, contaId) {
   return remoteJid
 }
 
+// Número do CHAT (o outro lado da conversa), resolvendo @lid pelo mapa. Numa
+// mensagem de SAÍDA (fromMe) o "sender" somos NÓS — m.key.senderPn traz o número
+// do próprio vendedor, não o do destinatário — então quem identifica a conversa
+// aqui é sempre o remoteJid, nunca o senderPn (ver repassarSaida).
+function numeroDoChat (m, contaId) {
+  const remoteJid = (m.key && m.key.remoteJid) || ''
+  if (remoteJid.endsWith('@lid')) {
+    const real = lidMaps.get(contaId) && lidMaps.get(contaId).get(remoteJid)
+    if (real) return real
+  }
+  return remoteJid
+}
+
 // Canais/newsletters do WhatsApp usam o MESMO formato numérico de ID que grupos
 // (ex.: 120363...), só que com sufixo @newsletter em vez de @g.us — sem filtrar
 // isso, conteúdo de canal (notícia, propaganda) vira "mensagem de lead".
@@ -162,8 +175,15 @@ async function repassarSaida (contaId, m) {
   if (!APP_URL) return
   const texto = textoDaMsg(m)
   const jid = (m.key && m.key.remoteJid) || ''
-  if (!texto || !ehConversaValida(jid)) return
-  const destinatario = numeroReal(m, contaId).split('@')[0]
+  if (!texto || !ehConversaValida(jid)) {
+    log.info({ contaId, temTexto: !!texto, jid }, 'saída ignorada (sem texto, grupo, canal ou status)')
+    return
+  }
+  // numeroDoChat, NÃO numeroReal: aqui quem manda é o vendedor, então senderPn
+  // seria o número dele mesmo — o Python procuraria a conversa pelo número
+  // errado, não acharia nenhuma e descartaria a mensagem em silêncio (era
+  // exatamente por isso que mensagem mandada pelo celular não aparecia no Zaq).
+  const destinatario = numeroDoChat(m, contaId).split('@')[0]
   const corpo = JSON.stringify({
     conta_id: contaId, sender: destinatario, texto,
     id: (m.key && m.key.id) || ''
@@ -175,6 +195,7 @@ async function repassarSaida (contaId, m) {
       body: corpo
     })
     if (!r.ok) log.warn({ contaId, status: r.status }, 'webhook wa-qr/saida respondeu não-ok')
+    else log.info({ contaId, destinatario: destinatario.slice(0, 6) + '…' }, 'saída repassada ao webhook ✓')
   } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao repassar saída') }
 }
 

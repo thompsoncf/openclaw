@@ -2831,6 +2831,12 @@ async def webhook_wa_qr_saida(request: Request):
         c.commit()
     if conv_id:
         log.info("webhook_wa_qr_saida: conta_id=%s conv_id=%s registrado ✓", conta_id, conv_id)
+    else:
+        # sem conversa existente pra esse número — descarta de propósito (não cria
+        # lead sozinho), mas registra: sem isso não dava pra distinguir "não tinha
+        # conversa mesmo" de "chegou com o número errado e nunca casou com nada".
+        log.info("webhook_wa_qr_saida: conta_id=%s sem conversa pro número %s… — descartado",
+                 conta_id, destinatario[:6])
     return Response("ok", media_type="text/plain")
 
 

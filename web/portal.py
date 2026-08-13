@@ -6228,7 +6228,16 @@ def esqueci_senha_envia(request: Request, background: BackgroundTasks,
                         email: str = Form(...)):
     import secrets
     from datetime import datetime, timedelta, timezone
-    from finance.email_sender import enviar_recuperacao_senha
+    from finance.email_sender import enviar_recuperacao_senha, remetente_configurado
+    # Se o envio de e-mail nem está configurado, NÃO diga "enviamos" — o cliente
+    # fica esperando um link que nunca sai (foi o que aconteceu em produção).
+    # Isto é um fato do SISTEMA, não da conta: contar não revela se o e-mail
+    # existe, então a proteção contra enumeração de contas continua de pé.
+    if not remetente_configurado():
+        log.error("esqueci-senha: SMTP nao configurado - link NAO enviado para %s", email)
+        return _render("esqueci_senha", request, enviado=False,
+                       erro="No momento não conseguimos enviar o e-mail de recuperação. "
+                            "Fale com o suporte pelo WhatsApp que a gente libera seu acesso.")
     pool = get_pool()
     email = email.strip().lower()
     with pool.connection() as c:

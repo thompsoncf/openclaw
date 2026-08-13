@@ -1685,6 +1685,56 @@ def comunicacao_email_testar(request: Request, slot: str = Form("principal")):
     return JSONResponse({"ok": bool(diag.get("ok")), "msg": diag.get("msg") or ""})
 
 
+# Campos de segredo que o olhinho pode revelar: slug -> (canal, coluna). É uma
+# WHITELIST de propósito — o nome da coluna nunca vem do request (senão viraria
+# uma porta pra ler qualquer coluna da tabela).
+_SEGREDOS_REVELAVEIS = {
+    "email":     ("email",     "imap_senha"),
+    "email2":    ("email2",    "imap_senha"),
+    "whatsapp":  ("whatsapp",  "token"),
+    "messenger": ("messenger", "token"),
+    "instagram": ("instagram", "token"),
+}
+
+
+@router.post("/painel/prospeccao/comunicacao/revelar-segredo")
+def comunicacao_revelar_segredo(request: Request, campo: str = Form(...)):
+    """Devolve a senha/token JÁ SALVO de um canal, pro botão do olhinho — o dono
+    precisa conseguir reler o que ele mesmo cadastrou (ex.: reaproveitar a senha
+    de app do Gmail no SMTP) sem ter que gerar tudo de novo.
+
+    O valor NÃO vai no HTML da página: a tela renderiza o campo vazio e só busca
+    aqui quando o usuário clica no olho. Assim o segredo não fica em toda
+    renderização, no cache do navegador nem num print da tela.
+
+    Trancado em três camadas: só dono/gestor (mesmo gate de quem configura o
+    canal), sempre escopado no conta_id da sessão (multi-tenant) e restrito à
+    whitelist de campos acima. Cada revelação vai pro log — é acesso a
+    credencial, tem que deixar rastro."""
+    import logging
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "Só o dono/gestor vê as senhas."},
+                            status_code=403)
+    alvo = _SEGREDOS_REVELAVEIS.get((campo or "").strip().lower())
+    if not alvo:
+        return JSONResponse({"ok": False, "erro": "Campo desconhecido."}, status_code=400)
+    canal, coluna = alvo
+    with get_pool().connection() as c:
+        r = c.execute(
+            f"select {coluna} from canais_config where conta_id=%s and canal=%s",  # noqa: S608
+            (ctx["conta_id"], canal)).fetchone()
+    valor = (r[0] if r else None) or ""
+    logging.getLogger("prospeccao.canais").info(
+        "revelar-segredo: conta_id=%s papel=%s campo=%s achou=%s",
+        ctx["conta_id"], ctx["papel"], campo, bool(valor))
+    if not valor:
+        return JSONResponse({"ok": False, "erro": "Nada salvo nesse campo ainda."})
+    return JSONResponse({"ok": True, "valor": valor})
+
+
 @router.post("/painel/prospeccao/comunicacao/whatsapp-testar")
 def comunicacao_whatsapp_testar(request: Request, numero: str = Form("")):
     """Manda um WhatsApp de teste pelo Cloud API da conta (confirma phone_id+token)."""
@@ -5281,6 +5331,11 @@ _CSS = """<style>
 .tdot{width:11px;height:11px;border-radius:50%;flex-shrink:0;display:inline-block}
 .fld{width:100%;padding:.55rem .7rem;border-radius:8px;border:1px solid #333;background:var(--bg);color:var(--txt);font-family:inherit;font-size:.9rem}
 .lbl{display:block;color:var(--txt-mut);font-size:.72rem;margin-bottom:.15rem}
+/* olhinho de "ver senha salva" — width/margin explícitos porque o CSS global do
+   painel manda button{width:100%;margin-top:...} e ele esticaria a linha toda */
+.olho{width:auto;margin:0;flex:none;padding:.5rem .6rem;border-radius:8px;cursor:pointer;
+  background:var(--card-2);border:1px solid var(--borda);color:var(--txt);font-size:.95rem;line-height:1}
+.olho:hover{border-color:var(--verde-claro)}
 .egrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.55rem}
 .egrid .full{grid-column:1/-1}
 /* ---- kanban: mobile-first (abas), vira grid no desktop ---- */
@@ -7275,7 +7330,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <input type="hidden" name="slot" value="principal">
         <label class="lbl">Caixa PRINCIPAL <span style="color:var(--mut);font-weight:400">— recomendo o e-mail do domínio</span></label>
         <input class="fld" name="endereco" type="email" placeholder="voce@seudominio.com" value="{{ canais.email_ident }}" style="margin-bottom:.35rem">
-        <input class="fld" name="senha" type="password" placeholder="senha de app (deixe vazio p/ manter)" autocomplete="new-password" style="margin-bottom:.35rem">
+        <div style="display:flex;gap:.3rem;align-items:center;margin-bottom:.35rem">
+          <input class="fld" name="senha" type="password" placeholder="senha de app (deixe vazio p/ manter)" autocomplete="new-password" style="margin:0">
+          <button type="button" class="olho" title="ver o que está salvo" onclick="olhoSegredo(this,'email')">👁</button>
+        </div>
+        <div class="olho-msg mut" style="font-size:.74rem;margin-bottom:.35rem"></div>
         <input class="fld" name="host" placeholder="imap.gmail.com (padrão)" style="margin-bottom:.4rem">
         <div style="display:flex;gap:.4rem">
           <button class="pbtn">Salvar</button>
@@ -7293,7 +7352,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <input type="hidden" name="slot" value="secundario">
           <label class="lbl">Caixa SECUNDÁRIA <span style="color:var(--mut);font-weight:400">— ex.: seu Gmail</span></label>
           <input class="fld" name="endereco" type="email" placeholder="voce@gmail.com" value="{{ canais.email2_ident }}" style="margin-bottom:.35rem">
-          <input class="fld" name="senha" type="password" placeholder="senha de app (deixe vazio p/ manter)" autocomplete="new-password" style="margin-bottom:.35rem">
+          <div style="display:flex;gap:.3rem;align-items:center;margin-bottom:.35rem">
+            <input class="fld" name="senha" type="password" placeholder="senha de app (deixe vazio p/ manter)" autocomplete="new-password" style="margin:0">
+            <button type="button" class="olho" title="ver o que está salvo" onclick="olhoSegredo(this,'email2')">👁</button>
+          </div>
+          <div class="olho-msg mut" style="font-size:.74rem;margin-bottom:.35rem"></div>
           <input class="fld" name="host" placeholder="imap.gmail.com (padrão)" style="margin-bottom:.4rem">
           <div style="display:flex;gap:.4rem">
             <button class="pbtn">Salvar</button>
@@ -7309,6 +7372,46 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         var body=new URLSearchParams();body.append('slot',slot);
         fetch('/painel/prospeccao/comunicacao/email-testar',{method:'POST',headers:{'X-Requested-With':'fetch','Content-Type':'application/x-www-form-urlencoded'},body:body}).then(function(r){return r.json();}).then(function(d){b.disabled=false;b.textContent=t;
           m.textContent=d.msg||d.erro||'—';m.style.color=d.ok?'var(--verde-claro)':'#e0a33e';}).catch(function(){b.disabled=false;b.textContent=t;m.textContent='Falha de rede.';m.style.color='#e0a33e';});}
+      </script>
+      <script>
+      // Olhinho dos campos de senha/token. O valor salvo NÃO vem no HTML — só é
+      // buscado no clique, e some do campo quando esconde de novo (nada de
+      // segredo pendurado no DOM depois de fechar).
+      function olhoSegredo(btn, campo){
+        var wrap = btn.parentElement;
+        var inp = wrap.querySelector('input');
+        if(!inp) return;
+        // o aviso é o irmão logo depois do par input+botão (não busca no form
+        // inteiro: com 2 caixas de e-mail acharia sempre o da primeira)
+        var prox = wrap.nextElementSibling;
+        var aviso = (prox && prox.classList.contains('olho-msg')) ? prox : null;
+        if(inp.type === 'text'){                       // já revelado -> esconde e limpa
+          inp.type = 'password'; inp.value = ''; btn.textContent = '👁';
+          btn.title = 'ver o que está salvo';
+          if(aviso) aviso.textContent = '';
+          return;
+        }
+        var original = btn.textContent; btn.textContent = '…'; btn.disabled = true;
+        var body = new URLSearchParams(); body.append('campo', campo);
+        fetch('/painel/prospeccao/comunicacao/revelar-segredo',
+              {method:'POST', headers:{'X-Requested-With':'fetch',
+               'Content-Type':'application/x-www-form-urlencoded'}, body:body})
+          .then(function(r){ return r.json(); })
+          .then(function(d){
+            btn.disabled = false;
+            if(!d.ok){ btn.textContent = original;
+              if(aviso){ aviso.textContent = d.erro || 'Não consegui mostrar.';
+                         aviso.style.color = '#e0a33e'; }
+              return; }
+            inp.type = 'text'; inp.value = d.valor; btn.textContent = '🙈';
+            btn.title = 'esconder';
+            inp.focus(); inp.select();                 // pronto pra copiar
+            if(aviso){ aviso.textContent = 'Cuidado: senha à mostra. Clique no 🙈 pra esconder.';
+                       aviso.style.color = 'var(--mut)'; }
+          })
+          .catch(function(){ btn.disabled = false; btn.textContent = original;
+            if(aviso){ aviso.textContent = 'Falha de rede.'; aviso.style.color = '#e0a33e'; } });
+      }
       </script>
       {% else %}<div class="mut" style="margin-top:.4rem;font-size:.8rem">SMTP (Google Workspace). Prospecção fria ✓</div>{% endif %}
     </div>
@@ -7349,7 +7452,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <label class="lbl">Phone Number ID (Cloud API)</label>
           <input class="fld" name="wa_phone_id" placeholder="ex.: 123456789012345" value="{{ canais.wa_phone_id if canais.wa_provedor=='cloud' else '' }}" style="margin-bottom:.35rem">
           <label class="lbl">Access Token</label>
-          <input class="fld" name="token" type="password" placeholder="token da Cloud API {% if canais.tokens_set.get('whatsapp') and canais.wa_provedor=='cloud' %}(salvo — vazio mantém){% endif %}" autocomplete="new-password" style="margin-bottom:.45rem">
+          <div style="display:flex;gap:.3rem;align-items:center;margin-bottom:.4rem">
+            <input class="fld" name="token" type="password" placeholder="token da Cloud API {% if canais.tokens_set.get('whatsapp') and canais.wa_provedor=='cloud' %}(salvo — vazio mantém){% endif %}" autocomplete="new-password" style="margin:0">
+            <button type="button" class="olho" title="ver o que está salvo" onclick="olhoSegredo(this,'whatsapp')">👁</button>
+          </div>
+          <div class="olho-msg mut" style="font-size:.74rem;margin-bottom:.4rem"></div>
           <button class="pbtn">Conectar número próprio</button>
         </form>
         {% if canais.wa_provedor=='cloud' and canais.wa_phone_set %}
@@ -7462,7 +7569,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <input type="hidden" name="canal" value="messenger">
         <label class="lbl">Page ID (Facebook) + Page Access Token</label>
         <input class="fld" name="numero" placeholder="Page ID" value="{{ canais.numeros.get('messenger','') }}" style="margin-bottom:.35rem">
-        <input class="fld" name="token" type="password" placeholder="Page Access Token {% if canais.tokens_set.get('messenger') %}(salvo — vazio mantém){% endif %}" autocomplete="new-password" style="margin-bottom:.4rem">
+        <div style="display:flex;gap:.3rem;align-items:center;margin-bottom:.4rem">
+          <input class="fld" name="token" type="password" placeholder="Page Access Token {% if canais.tokens_set.get('messenger') %}(salvo — vazio mantém){% endif %}" autocomplete="new-password" style="margin:0">
+          <button type="button" class="olho" title="ver o que está salvo" onclick="olhoSegredo(this,'messenger')">👁</button>
+        </div>
+        <div class="olho-msg mut" style="font-size:.74rem;margin-bottom:.4rem"></div>
         <button class="pbtn">Salvar</button>
       </form>
       <button type="button" class="pbtn ghost" style="margin-top:.5rem;font-size:.82rem" onclick="detectarFB(this)" title="O servidor descobre a Página do Facebook (id + token da Página) a partir do token salvo e inscreve ela no webhook 'messages'">🔎 Detectar página e ativar recebimento</button>
@@ -7486,7 +7597,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <input type="hidden" name="canal" value="instagram">
         <label class="lbl">IG Account ID + Page Access Token</label>
         <input class="fld" name="numero" placeholder="IG Account ID" value="{{ canais.numeros.get('instagram','') }}" style="margin-bottom:.35rem">
-        <input class="fld" name="token" type="password" placeholder="Page Access Token {% if canais.tokens_set.get('instagram') %}(salvo — vazio mantém){% endif %}" autocomplete="new-password" style="margin-bottom:.4rem">
+        <div style="display:flex;gap:.3rem;align-items:center;margin-bottom:.4rem">
+          <input class="fld" name="token" type="password" placeholder="Page Access Token {% if canais.tokens_set.get('instagram') %}(salvo — vazio mantém){% endif %}" autocomplete="new-password" style="margin:0">
+          <button type="button" class="olho" title="ver o que está salvo" onclick="olhoSegredo(this,'instagram')">👁</button>
+        </div>
+        <div class="olho-msg mut" style="font-size:.74rem;margin-bottom:.4rem"></div>
         <button class="pbtn">Salvar</button>
       </form>
       <button type="button" class="pbtn ghost" style="margin-top:.5rem;font-size:.82rem" onclick="detectarIG(this)" title="O servidor descobre o ID da conta e inscreve ela no webhook 'messages' (subscribed_apps) — necessário pra DM real chegar">🔎 Detectar conta e ativar recebimento</button>

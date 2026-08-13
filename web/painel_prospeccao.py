@@ -7621,10 +7621,31 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 </div>
 <script>
 var _cxConv=null,_cxSig='',_cxAg=null,_cxPr=null,_cxTimer=null,_cxSeen={},_cxList={},_cxListHtml=null;
+// Mensagens ESCRITAS mas ainda não confirmadas pelo servidor. Ficam à parte das
+// mensagens reais porque o thread é redesenhado do zero a cada poll (4s) — sem
+// esta lista, o balão recém-escrito sumia no primeiro redesenho e só voltava
+// quando o envio terminasse, que é justamente o que fazia o chat "travar".
+var _cxPend=[],_cxPendSeq=0;
 var _cxEscopo='{{ escopo }}';   // 'email' (aba E-mails) ou 'msg' (aba Conversas)
 function cxEsc(s){var d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
+// Balões do que ainda está saindo. Redesenhados junto com o thread, então
+// sobrevivem ao poll — e o usuário nunca vê a própria mensagem piscar.
+function cxPendHtml(){
+  var h='';
+  _cxPend.forEach(function(p){
+    // pendente de OUTRA conversa não aparece aqui (continua na fila, e volta a
+    // aparecer se o usuário reabrir aquela conversa)
+    if(p.conv!==_cxConv)return;
+    var meta=p.erro
+      ? '<span style="color:#e0574f">✕ não saiu</span> · <a href="#" data-pid="'+p.id+'" onclick="cxReenviar(this.dataset.pid);return false;">tentar de novo</a>'
+      : 'enviando…';
+    h+='<div class="cx-m cx-pend" id="'+p.id+'" style="opacity:'+(p.erro?'1':'.55')+'">'
+      +cxEsc(p.texto).replace(/\\n/g,'<br>')+'<span class="meta">'+meta+'</span></div>';
+  });
+  return h;
+}
 function cxMsgsHtml(d){
-  if(!d.msgs.length)return '<div class="cx-empty">Sem mensagens.</div>';
+  if(!d.msgs.length)return '<div class="cx-empty">Sem mensagens.</div>'+cxPendHtml();
   // classe PRÓPRIA, nunca cx-empty: cxResponder limpa o thread inteiro quando
   // acha um .cx-empty (o placeholder "Sem mensagens"), então usar essa classe
   // aqui fazia o thread sumir e "voltar com o histórico" a cada envio.
@@ -7635,7 +7656,7 @@ function cxMsgsHtml(d){
     var corpo=cxEsc(m.corpo||m.cabecalho).replace(/\\n/g,'<br>');
     h+='<div class="'+cls+'">'+cab+corpo+'<span class="meta">'+cxEsc(m.quem)+' · '+cxEsc(m.quando)+cxTick(m)+'</span></div>';
   });
-  return h;
+  return h+cxPendHtml();
 }
 // selo de entrega só nas mensagens que SAÍRAM (WhatsApp): ✓ enviado · ✓✓ entregue · 👀 lido · ⚠ erro
 function cxTick(m){
@@ -7741,21 +7762,50 @@ function cxVirarLead(convId){var fd=new FormData();fd.append('conversa_id',convI
   fetch('/painel/prospeccao/comunicacao/virar-lead',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
     .then(function(r){return r.json();}).then(function(d){if(!d.ok){alert(d.erro||'Não consegui.');return;}
       location.href='/painel/prospeccao/'+d.lead_id;}).catch(function(){alert('Falha de rede.');});}
+// Envio NÃO BLOQUEIA. A mensagem aparece na hora, o campo fica livre pra
+// escrever a próxima e o envio corre por trás. Antes o botão ficava desabilitado
+// até a resposta voltar — e /enviar leva até 12s quando precisa religar a
+// sessão, então o chat parecia travado bem no meio da conversa. Falha também não
+// interrompe mais: em vez de um alert() por cima da tela, o próprio balão fica
+// marcado com "não saiu" e um link pra tentar de novo, sem perder o texto.
 function cxResponder(convId){
   var ta=document.getElementById('cx-reply');if(!ta)return;var t=ta.value.trim();if(!t)return;
-  var b=document.getElementById('cx-msgs');
-  // remove só o placeholder "Sem mensagens", em vez de zerar o thread inteiro
-  // ao encontrar qualquer .cx-empty — assim nenhum aviso novo dentro do thread
-  // volta a apagar a conversa na hora do envio.
-  if(b){var vazio=b.querySelector('.cx-empty');if(vazio)vazio.remove();b.insertAdjacentHTML('beforeend','<div class="cx-m" style="opacity:.6"><span class="who">Você</span>'+cxEsc(t).replace(/\\n/g,'<br>')+'<span class="meta">enviando…</span></div>');cxScroll(true);}
-  ta.value='';var sd=document.getElementById('cx-send');if(sd){sd.disabled=true;sd.textContent='…';}
-  var fd=new FormData();fd.append('conversa_id',convId);fd.append('texto',t);
+  ta.value='';ta.focus();
+  var pid='cxp'+(++_cxPendSeq);
+  _cxPend.push({id:pid,texto:t,conv:convId,erro:false});
+  cxRenderPend();
+  cxEnviarPend(pid);
+}
+function cxReenviar(pid){
+  var p=null;_cxPend.forEach(function(x){if(x.id===pid)p=x;});
+  if(!p)return;p.erro=false;cxRenderPend();cxEnviarPend(pid);
+}
+function cxEnviarPend(pid){
+  var p=null;_cxPend.forEach(function(x){if(x.id===pid)p=x;});
+  if(!p)return;
+  var fd=new FormData();fd.append('conversa_id',p.conv);fd.append('texto',p.texto);
   fetch('/painel/prospeccao/comunicacao/responder',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
     .then(function(r){return r.json();}).then(function(d){
-      if(sd){sd.disabled=false;sd.textContent='Enviar';}
-      if(!d.ok){alert(d.erro||'Não consegui enviar.');ta.value=t;}
-      _cxSig='';cxPollThread();cxPollList();
-    }).catch(function(){if(sd){sd.disabled=false;sd.textContent='Enviar';}alert('Falha de rede.');ta.value=t;});
+      if(d&&d.ok){
+        // some da lista de pendentes; o balão de verdade vem no próximo desenho
+        _cxPend=_cxPend.filter(function(x){return x.id!==pid;});
+        _cxSig='';cxPollThread();cxPollList();
+      }else{cxPendFalhou(pid,d&&d.erro);}
+    }).catch(function(){cxPendFalhou(pid,'falha de rede');});
+}
+function cxPendFalhou(pid,motivo){
+  _cxPend.forEach(function(x){if(x.id===pid){x.erro=true;x.motivo=motivo||'';}});
+  cxRenderPend();
+}
+// Redesenha só os pendentes, sem tocar nas mensagens já confirmadas.
+function cxRenderPend(){
+  var b=document.getElementById('cx-msgs');if(!b)return;
+  var velhos=b.querySelectorAll('.cx-pend');
+  for(var i=0;i<velhos.length;i++)velhos[i].remove();
+  // o placeholder "Sem mensagens" sai só quando há o que mostrar no lugar
+  if(_cxPend.length){var vazio=b.querySelector('.cx-empty');if(vazio)vazio.remove();}
+  b.insertAdjacentHTML('beforeend',cxPendHtml());
+  cxScroll(true);
 }
 function cxPoll(){cxPollList();cxPollThread();}
 (function(){var box=document.getElementById('cx-list');if(box){document.querySelectorAll('#cx-list .cx-conv').forEach(function(b){var id=parseInt(b.id.replace('cxc-',''));_cxList[id]={id:id,ult_msg_id:0};});

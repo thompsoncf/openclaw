@@ -458,8 +458,10 @@ async function repassarContatos (contaId, contatos, daAgenda) {
 // antes, forçando o snapshot inteiro. Roda só uma vez por credencial (marca
 // 'agenda-completa' na própria wa_qr_auth): baixar a agenda toda a cada deploy
 // seria desperdício, e a marca some junto com as credenciais no Desconectar.
+const INTERVALO_AGENDA_MS = 20 * 60 * 1000
+
 function agendarResyncAgenda (contaId, s) {
-  clearTimeout(s._agendaT1); clearTimeout(s._agendaT2)
+  clearTimeout(s._agendaT1); clearTimeout(s._agendaT2); clearInterval(s._agendaT3)
   s._agendaT1 = setTimeout(() => resyncAgenda(contaId, 1, false), 30000)
   // a passada COMPLETA só depois que a sincronização inicial acalmar — ver
   // esperarAcalmarEResync
@@ -467,6 +469,32 @@ function agendarResyncAgenda (contaId, s) {
     esperarAcalmarEResync(contaId).catch((e) =>
       log.warn({ contaId, e: String(e) }, 'esperarAcalmarEResync falhou'))
   }, 120000)
+  // TEIMOSIA. As chaves de app-state podem simplesmente não chegar no primeiro
+  // fôlego — medido num pareamento: 26 pre-keys e 8 sessões Signal gravadas, e
+  // ZERO chave de app-state depois de 10 minutos. Sem essa repetição, a agenda
+  // só teria outra chance no próximo religamento do serviço, e o vendedor ficava
+  // com nome novo só de quem mandasse mensagem. Agora insiste a cada 20min
+  // enquanto a conta estiver conectada e a agenda não tiver vindo; assim que
+  // vier (marca 'agenda-completa'), para sozinho.
+  s._agendaT3 = setInterval(() => {
+    insistirNaAgenda(contaId).catch((e) =>
+      log.warn({ contaId, e: String(e) }, 'insistirNaAgenda falhou'))
+  }, INTERVALO_AGENDA_MS)
+}
+
+async function insistirNaAgenda (contaId) {
+  const s = sessoes.get(contaId)
+  if (!s || s.status !== 'conectado') return           // sem sessão: nada a fazer
+  const marca = await pool.query(
+    `select 1 from wa_qr_auth where conta_id=$1 and arquivo='agenda-completa'`, [contaId])
+  if (marca.rowCount) {
+    log.info({ contaId }, 'agenda: já veio inteira, parando de insistir')
+    clearInterval(s._agendaT3)
+    s._agendaT3 = null
+    return
+  }
+  log.info({ contaId }, 'agenda: ainda não veio, tentando de novo')
+  await esperarAcalmarEResync(contaId)
 }
 
 // Pedir a agenda inteira NO MEIO da sincronização inicial corrompe as duas.
@@ -1141,6 +1169,9 @@ const servidor = http.createServer(async (req, res) => {
         // caminho. Aqui embaixo ela é feita explicitamente, igual nos dois casos
         // (com ou sem sessão viva) — que era exatamente o que faltava.
         if (s && s.sock) s.sock._descartado = true
+        // sem isso a teimosia da agenda continuaria batendo no banco a cada 20min
+        // pra uma conta que acabou de ser desconectada
+        if (s) { clearTimeout(s._agendaT1); clearTimeout(s._agendaT2); clearInterval(s._agendaT3) }
         // logout() com PRAZO: ele escreve um stanza no socket e espera
         // (Socket/socket.js: `await sendNode({... remove-companion-device ...})`).
         // Se o socket estiver num estado ruim isso pendura, e TODA a limpeza abaixo

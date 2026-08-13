@@ -123,3 +123,64 @@ def test_avisar_admin_manda_pro_destino_do_painel(monkeypatch):
     monkeypatch.setattr(notificar, "notificar_admin", lambda texto: False)
     assert notificar.avisar_admin("assunto", "corpo") is True
     assert enviados == ["painel@exemplo.com"]
+
+
+# --- alerta de teste do /admin: canal a canal ------------------------------
+# O valor deste botao esta' em NAO agregar: avisar_admin devolve um bool so'
+# (e-mail OU telegram), entao um canal quebrado se esconde atras do outro.
+
+def test_alerta_teste_relata_email_e_telegram_separados(monkeypatch):
+    monkeypatch.delenv("ADMIN_EMAIL", raising=False)
+    monkeypatch.delenv("ADMIN_TELEGRAM_ID", raising=False)
+    _fixar_pool(monkeypatch, _PoolFalso({cfg.ADMIN_EMAIL: "painel@exemplo.com",
+                                         cfg.ADMIN_TELEGRAM_ID: "999"}))
+    import finance.email_sender as es
+    monkeypatch.setattr(es, "enviar_aviso", lambda *a, **k: True)
+    monkeypatch.setattr(notificar, "_enviar_telegram", lambda chat, txt: False)
+    r = notificar.enviar_alerta_teste()
+    assert r["email_ok"] is True and r["email_destino"] == "painel@exemplo.com"
+    # o telegram falhou e isso NAO pode sumir por causa do e-mail que deu certo
+    assert r["telegram_ok"] is False
+    assert r["telegram_destino"] == 999
+    assert "TELEGRAM_TOKEN" in r["telegram_erro"]
+
+
+def test_alerta_teste_sem_destino_nenhum_explica_o_motivo(monkeypatch):
+    monkeypatch.delenv("ADMIN_EMAIL", raising=False)
+    monkeypatch.delenv("ADMIN_TELEGRAM_ID", raising=False)
+    monkeypatch.delenv("SMTP_USER", raising=False)
+    _fixar_pool(monkeypatch, _PoolFalso())
+    r = notificar.enviar_alerta_teste()
+    assert r["email_ok"] is False and r["email_destino"] is None
+    assert "sem destino" in r["email_erro"]
+    assert r["telegram_erro"] == "nao configurado (opcional)"
+
+
+def test_alerta_teste_email_recusado_vira_erro_legivel(monkeypatch):
+    """SMTP recusando (o 535 que derrubou o envio em producao): destino existe,
+    envio falha — o relato tem que apontar pra credencial, nao pro destino."""
+    monkeypatch.setenv("ADMIN_EMAIL", "eu@exemplo.com")
+    monkeypatch.delenv("ADMIN_TELEGRAM_ID", raising=False)
+    _fixar_pool(monkeypatch, _PoolFalso())
+    import finance.email_sender as es
+    monkeypatch.setattr(es, "enviar_aviso", lambda *a, **k: False)
+    r = notificar.enviar_alerta_teste()
+    assert r["email_destino"] == "eu@exemplo.com"
+    assert r["email_ok"] is False
+    assert "SMTP_USER/SMTP_SENHA" in r["email_erro"]
+
+
+def test_alerta_teste_nunca_levanta_excecao(monkeypatch):
+    """Botao de teste nao pode derrubar a pagina do /admin com 500."""
+    monkeypatch.setenv("ADMIN_EMAIL", "eu@exemplo.com")
+    monkeypatch.delenv("ADMIN_TELEGRAM_ID", raising=False)
+    _fixar_pool(monkeypatch, _PoolFalso())
+
+    def _explode(*a, **k):
+        raise RuntimeError("smtp caiu")
+
+    import finance.email_sender as es
+    monkeypatch.setattr(es, "enviar_aviso", _explode)
+    r = notificar.enviar_alerta_teste()
+    assert r["email_ok"] is False
+    assert "RuntimeError: smtp caiu" in r["email_erro"]

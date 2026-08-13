@@ -39,8 +39,8 @@ const { Pool } = require('pg')
 const pino = require('pino')
 const QRCode = require('qrcode')
 const makeWASocket = require('@whiskeysockets/baileys').default
-const { DisconnectReason, makeCacheableSignalKeyStore, fetchLatestBaileysVersion, proto, BufferJSON } =
-  require('@whiskeysockets/baileys')
+const { DisconnectReason, makeCacheableSignalKeyStore, fetchLatestBaileysVersion, proto, BufferJSON,
+  normalizeMessageContent } = require('@whiskeysockets/baileys')
 const TIPO_HIST = proto.Message.HistorySyncNotification.HistorySyncType
 const { useDbAuthState } = require('./auth-db')
 
@@ -260,12 +260,30 @@ function jidDe (numero) {
   return comDDI + '@s.whatsapp.net'
 }
 
+function duracao (segundos) {
+  const s = Math.max(0, Math.round(Number(segundos) || 0))
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0')
+}
+
+// Áudio não tem texto NENHUM, então caía no filtro de "sem texto" e a mensagem
+// sumia do painel: o vendedor via a conversa com um buraco no meio, sem saber
+// que tinha chegado alguma coisa. Vira uma marca legível com a duração. O áudio
+// em si continua só no celular — aqui é pra ninguém perder o fio da conversa.
+// normalizeMessageContent desembrulha efêmera/viewOnce, senão o áudio mandado
+// em conversa com mensagens temporárias continuaria invisível.
 function textoDaMsg (m) {
-  const msg = m.message || {}
-  return (msg.conversation ||
+  const msg = normalizeMessageContent(m.message) || {}
+  const texto = (msg.conversation ||
           (msg.extendedTextMessage && msg.extendedTextMessage.text) ||
           (msg.imageMessage && msg.imageMessage.caption) ||
           (msg.videoMessage && msg.videoMessage.caption) || '').trim()
+  if (texto) return texto
+  const audio = msg.audioMessage
+  if (audio) {
+    // ptt = gravado na hora (o "áudio do WhatsApp"); sem ptt é arquivo de música
+    return (audio.ptt ? '🎤 Áudio' : '🎵 Áudio') + ' (' + duracao(audio.seconds) + ')'
+  }
+  return ''
 }
 
 // O WhatsApp esconde o número de telefone real de alguns contatos atrás de um ID

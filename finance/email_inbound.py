@@ -308,13 +308,22 @@ def sincronizar(pool, conta_id: int, canal: str = "email") -> int:
                         (conta_id, lead_id)).fetchone()[0]
                 else:
                     # remetente NOVO → NÃO cria lead; conversa órfã (você decide depois se vira lead)
+                    # O nome do cabeçalho From ("Joana Ribeiro" <joana@…>) vai junto: é o
+                    # que o inbox mostra no lugar do endereço cru, e o que o "Levar para o
+                    # lead" usa pra pré-preencher. Sem isso ele chegava e era descartado.
+                    nome_de = (m.get("from_nome") or "").strip()[:120]
                     conv = c.execute(
                         """select id from conversas where conta_id=%s and canal='email'
                             and prospeccao_id is null and contato_ref=%s""", (conta_id, addr)).fetchone()
                     conv_id = conv[0] if conv else c.execute(
-                        """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status, ultima_msg_em)
-                           values (%s,null,'email',%s,'aberta',now()) returning id""",
-                        (conta_id, addr)).fetchone()[0]
+                        """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status,
+                             ultima_msg_em, contato_nome)
+                           values (%s,null,'email',%s,'aberta',now(),nullif(%s,'')) returning id""",
+                        (conta_id, addr, nome_de)).fetchone()[0]
+                    if conv and nome_de:
+                        c.execute("""update conversas set contato_nome=%s
+                                       where id=%s and coalesce(contato_nome,'')=''""",
+                                  (nome_de, conv_id))
                 texto = ((m["assunto"] or "(sem assunto)") + "\n\n" + (m["corpo"] or "")).strip()
                 c.execute(
                     """insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid, criado_em)

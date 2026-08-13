@@ -30,6 +30,7 @@ from finance import prospec_convite as _prospec_convite
 from finance import prospec_inbound as _prospec_inbound
 from finance import prospeccao_fontes as fontes
 from finance import servicos_catalogo as scat
+from finance import validadoc as _validadoc
 from finance.email_sender import remetente_configurado
 from web.portal import _render, _env, conta_logada
 
@@ -189,7 +190,8 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
                       p.ultimo_contato_em, p.proximo_contato_em, p.vendedor_id,
                       m.nome, p.orcamento_id, p.tem_site, p.maps_url, p.receita,
                       p.site_url, p.decisor_nome, p.decisor_cargo, p.decisor_telefone,
-                      p.decisor_whatsapp, p.decisor_em, p.decisor_telefones
+                      p.decisor_whatsapp, p.decisor_em, p.decisor_telefones,
+                      p.tipo, p.cpf
                  from prospeccao p
                  left join membros m on m.id = p.vendedor_id
                 where p.id=%s and p.conta_id=%s""", (alvo_id, conta_id)).fetchone()
@@ -201,8 +203,14 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
             "ultimo_contato_em", "proximo_contato_em", "vendedor_id", "vendedor_nome",
             "orcamento_id", "tem_site", "maps_url", "receita", "site_url",
             "decisor_nome", "decisor_cargo", "decisor_telefone", "decisor_whatsapp", "decisor_em",
-            "decisor_telefones"]
+            "decisor_telefones", "tipo", "cpf"]
     d = dict(zip(cols, r))
+    # PF x PJ: o que a ficha precisa saber pra trocar rótulo, documento e esconder o
+    # que só existe em empresa (sócio, regime, porte, Receita, decisor).
+    d["eh_pf"] = (d.get("tipo") == "pf")
+    d["doc"] = d["cpf"] if d["eh_pf"] else d["cnpj"]
+    d["doc_fmt"] = _fmt_doc(d["doc"])
+    d["doc_rot"] = "CPF" if d["eh_pf"] else "CNPJ"
     d["zap_link"] = _zap_link(d["whatsapp"] or d["telefone"])
     d["insta_url"] = _prospec_inbound.normalizar_instagram(d.get("instagram") or "")
     d["tel_link"] = "tel:" + _so_digitos(d["telefone"]) if d["telefone"] else ""
@@ -294,12 +302,50 @@ def _fmt_cnpj(cnpj: str | None) -> str:
     return f"{d[:2]}.{d[2:5]}.{d[5:8]}/{d[8:12]}-{d[12:]}"
 
 
-def _lead_duplicado_info(pool, conta_id: int, cnpj: str, empresa_tentativa: str) -> dict:
-    """Depois de um UniqueViolation em (conta_id, cnpj): acha o lead que já existe e
-    onde ele está (Base, funil ou campanha) — quem tentou cadastrar de novo geralmente
-    quer ir direto ver/ajustar aquele lead, não só saber que ele já existe."""
+def _fmt_doc(doc: str | None) -> str:
+    """CPF ou CNPJ mascarado pra exibição (11 ou 14 dígitos). Sobra como veio se não
+    for nem um nem outro — documento meia-boca do passado continua legível."""
+    return _validadoc.formatar(doc) or (doc or "")
+
+
+def _doc_lead(tipo: str, cnpj: str, cpf: str, documento: str = "") -> tuple[str, str | None, str | None, str]:
+    """Resolve o documento de um lead pros campos certos. Devolve
+    (tipo, cnpj, cpf, erro) — cnpj/cpf já só em dígitos, prontos pro banco.
+
+    Quem manda na COLUNA é o tamanho do documento (11 = CPF, 14 = CNPJ), não o botão
+    que o usuário deixou marcado: colar um CPF com "Pessoa Jurídica" ligado gravaria
+    o CPF na coluna cnpj e furaria a deduplicação das duas. O `tipo` do formulário só
+    decide o rótulo quando não há documento nenhum — que é o caso comum, já que o
+    documento é opcional dos dois lados.
+
+    O CPF é validado de verdade (dígito verificador, finance/validadoc) antes de
+    entrar: coluna nova, sem histórico pra respeitar. O CNPJ segue como sempre foi —
+    aceito como veio, porque a base já tem CNPJ vindo de Google/CSV/Receita e
+    reprovar agora quebraria cadastro que hoje funciona."""
+    tipo = tipo if tipo in ("pf", "pj") else ""
+    bruto = (documento or "").strip() or (cpf or "").strip() or (cnpj or "").strip()
+    achado, digitos = _validadoc.classificar(bruto)
+    if not digitos:
+        return (tipo or "pj", None, None, "")
+    if achado is None:
+        return (tipo or "pj", None, None,
+                "Documento inválido: informe um CPF (11 dígitos) ou um CNPJ (14).")
+    if achado == "pf":
+        if not _validadoc.valida_cpf(digitos):
+            return ("pf", None, None, f"CPF {_fmt_doc(digitos)} não existe — confira os números.")
+        return ("pf", None, digitos, "")
+    return ("pj", digitos, None, "")
+
+
+def _lead_duplicado_info(pool, conta_id: int, cnpj: str, empresa_tentativa: str,
+                         campo: str = "cnpj") -> dict:
+    """Depois de um UniqueViolation em (conta_id, cnpj) ou (conta_id, cpf): acha o lead
+    que já existe e onde ele está (Base, funil ou campanha) — quem tentou cadastrar de
+    novo geralmente quer ir direto ver/ajustar aquele lead, não só saber que ele já
+    existe."""
+    campo = campo if campo in ("cnpj", "cpf") else "cnpj"
     with pool.connection() as c:
-        ex = c.execute("select id, empresa, estagio from prospeccao where conta_id=%s and cnpj=%s",
+        ex = c.execute(f"select id, empresa, estagio from prospeccao where conta_id=%s and {campo}=%s",
                         (conta_id, cnpj)).fetchone()
         if not ex:
             return {"msg": f"“{empresa_tentativa}” já está cadastrado — não dá pra duplicar.",
@@ -320,7 +366,8 @@ def _lead_duplicado_info(pool, conta_id: int, cnpj: str, empresa_tentativa: str)
         onde, link_url, link_label = "já virou lead e está no funil", ficha_url, "Ver lead ›"
     else:
         onde, link_url, link_label = "está na Base, ainda sem campanha", ficha_url, "Ver lead ›"
-    return {"msg": f"“{ex_nome}” já está cadastrado (CNPJ {cnpj}) — {onde}.",
+    rot = "CPF" if campo == "cpf" else "CNPJ"
+    return {"msg": f"“{ex_nome}” já está cadastrado ({rot} {_fmt_doc(cnpj)}) — {onde}.",
             "link_url": link_url, "link_label": link_label}
 
 
@@ -828,7 +875,8 @@ async def prospeccao_explorium_importar(request: Request):
 def prospeccao_novo(request: Request, empresa: str = Form(...), segmento: str = Form(""),
                     cidade: str = Form(""), uf: str = Form(""), contato: str = Form(""),
                     telefone: str = Form(""), whatsapp: str = Form(""), email: str = Form(""),
-                    cnpj: str = Form(""), temperatura: str = Form("frio"),
+                    cnpj: str = Form(""), cpf: str = Form(""), documento: str = Form(""),
+                    tipo: str = Form(""), temperatura: str = Form("frio"),
                     valor: str = Form(""), origem: str = Form("manual"),
                     vendedor_id: str = Form(""), obs: str = Form(""),
                     socio: str = Form(""), regime_tributario: str = Form(""),
@@ -840,11 +888,21 @@ def prospeccao_novo(request: Request, empresa: str = Form(...), segmento: str = 
     ajax = _eh_ajax(request)
     empresa = (empresa or "").strip()
     destino = voltar if voltar in ("/painel/prospeccao", "/painel/prospeccao/captar") else "/painel/prospeccao"
+    tipo_lead, cnpj_limpo, cpf_limpo, erro_doc = _doc_lead(tipo, cnpj, cpf, documento)
     if not empresa:
+        falta = "o nome da pessoa" if tipo_lead == "pf" else "o nome da empresa"
         if ajax:
-            return JSONResponse({"ok": False, "erro": "Informe ao menos o nome da empresa."}, status_code=400)
-        request.session["prosp_aviso"] = "Informe ao menos o nome da empresa."
+            return JSONResponse({"ok": False, "erro": f"Informe ao menos {falta}."}, status_code=400)
+        request.session["prosp_aviso"] = f"Informe ao menos {falta}."
         return RedirectResponse(destino, status_code=303)
+    if erro_doc:
+        if ajax:
+            return JSONResponse({"ok": False, "erro": erro_doc}, status_code=400)
+        request.session["prosp_aviso"] = erro_doc
+        return RedirectResponse(destino, status_code=303)
+    if tipo_lead == "pf":
+        # sócio/regime/porte são do quadro societário — pessoa física não tem
+        socio = regime_tributario = porte = ""
     temperatura = temperatura if temperatura in TEMP_OK else "frio"
     site_link = (site_url or "").strip()
     if site_link and "://" not in site_link:
@@ -859,15 +917,14 @@ def prospeccao_novo(request: Request, empresa: str = Form(...), segmento: str = 
             receita_json = None
     pool = get_pool()
     vend = _vendedor_destino(ctx, vendedor_id, pool, ctx["conta_id"])
-    cnpj_limpo = cnpj.strip() or None
     try:
         with pool.connection() as c:
             row = c.execute(
                 """insert into prospeccao (conta_id, vendedor_id, empresa, segmento, cidade,
                      uf, contato, cargo, telefone, whatsapp, email, cnpj, temperatura,
                      valor_estimado_centavos, origem, obs, socio, regime_tributario, porte,
-                     instagram, site_url, tem_site, receita, criado_por)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s) returning id""",
+                     instagram, site_url, tem_site, receita, criado_por, tipo, cpf)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s) returning id""",
                 (ctx["conta_id"], vend, empresa, segmento.strip() or None, cidade.strip() or None,
                  (uf or "").strip()[:2].upper() or None, contato.strip() or None, cargo.strip() or None,
                  telefone.strip() or None, whatsapp.strip() or None, email.strip().lower() or None,
@@ -875,10 +932,11 @@ def prospeccao_novo(request: Request, empresa: str = Form(...), segmento: str = 
                  (origem or "manual").strip() or None, obs.strip() or None,
                  socio.strip() or None, regime_tributario.strip() or None, porte.strip() or None,
                  instagram.strip() or None, site_link or None, tem_site, receita_json,
-                 ctx["membro_id"])).fetchone()
+                 ctx["membro_id"], tipo_lead, cpf_limpo)).fetchone()
             c.commit()
     except UniqueViolation:
-        info = (_lead_duplicado_info(pool, ctx["conta_id"], cnpj_limpo, empresa) if cnpj_limpo
+        doc, campo = (cpf_limpo, "cpf") if cpf_limpo else (cnpj_limpo, "cnpj")
+        info = (_lead_duplicado_info(pool, ctx["conta_id"], doc, empresa, campo) if doc
                 else {"msg": f"“{empresa}” já está cadastrado — não dá pra duplicar.",
                       "link_url": None, "link_label": None})
         if ajax:
@@ -950,8 +1008,9 @@ async def captar_csv(request: Request, arquivo: UploadFile = File(...),
             "telefone": ["telefone", "fone", "tel"], "whatsapp": ["whatsapp", "zap", "celular"],
             "cidade": ["cidade", "municipio", "município"], "uf": ["uf", "estado"],
             "segmento": ["segmento", "ramo", "categoria"], "contato": ["contato", "responsavel", "responsável"],
-            "email": ["email", "e-mail"], "cnpj": ["cnpj"]}
-    inseridos, pulados = 0, 0
+            "email": ["email", "e-mail"], "cnpj": ["cnpj"],
+            "cpf": ["cpf", "documento", "doc"]}
+    inseridos, pulados, repetidos = 0, 0, 0
     with pool.connection() as c:
         for linha in leitor:
             norm = {(k or "").strip().lower(): (v or "").strip() for k, v in linha.items() if k}
@@ -967,20 +1026,37 @@ async def captar_csv(request: Request, arquivo: UploadFile = File(...),
             if not empresa:
                 pulados += 1
                 continue
-            c.execute(
-                """insert into prospeccao (conta_id, vendedor_id, empresa, segmento,
-                     cidade, uf, contato, telefone, whatsapp, email, cnpj, temperatura,
-                     origem, criado_por)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'frio','csv',%s)""",
-                (ctx["conta_id"], vend, empresa[:250], pega("segmento") or None,
-                 pega("cidade") or None, pega("uf")[:2].upper() or None,
-                 pega("contato") or None, pega("telefone") or None, pega("whatsapp") or None,
-                 (pega("email").lower() or None), pega("cnpj") or None, ctx["membro_id"]))
+            # a planilha pode trazer CPF, CNPJ ou uma coluna "documento" solta — o
+            # tamanho decide a coluna. Documento inválido não derruba a linha: entra
+            # sem documento, que é melhor que perder o lead inteiro na importação.
+            _tp, _cnpj, _cpf, _erro = _doc_lead("", pega("cnpj"), pega("cpf"))
+            if _erro:
+                _tp, _cnpj, _cpf = "pj", None, None
+            # cada linha num savepoint: documento repetido (o índice único de CNPJ, e
+            # agora o de CPF) derrubava a transação inteira e a importação voltava
+            # ZERO leads por causa de uma linha. Agora só aquela linha cai.
+            try:
+                with c.transaction():
+                    c.execute(
+                        """insert into prospeccao (conta_id, vendedor_id, empresa, segmento,
+                             cidade, uf, contato, telefone, whatsapp, email, cnpj, temperatura,
+                             origem, criado_por, tipo, cpf)
+                           values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'frio','csv',%s,%s,%s)""",
+                        (ctx["conta_id"], vend, empresa[:250], pega("segmento") or None,
+                         pega("cidade") or None, pega("uf")[:2].upper() or None,
+                         pega("contato") or None, pega("telefone") or None, pega("whatsapp") or None,
+                         (pega("email").lower() or None), _cnpj, ctx["membro_id"], _tp, _cpf))
+            except UniqueViolation:
+                repetidos += 1
+                continue
             inseridos += 1
         c.commit()
-    msg = f"{inseridos} lead(s) importado(s) do CSV." + (f" {pulados} linha(s) sem nome ignorada(s)." if pulados else "")
+    msg = (f"{inseridos} lead(s) importado(s) do CSV."
+           + (f" {pulados} linha(s) sem nome ignorada(s)." if pulados else "")
+           + (f" {repetidos} com documento já cadastrado." if repetidos else ""))
     if _eh_ajax(request):
-        return JSONResponse({"ok": True, "inseridos": inseridos, "pulados": pulados, "msg": msg})
+        return JSONResponse({"ok": True, "inseridos": inseridos, "pulados": pulados,
+                             "repetidos": repetidos, "msg": msg})
     request.session["prosp_aviso"] = msg
     return RedirectResponse("/painel/prospeccao", status_code=303)
 
@@ -1833,31 +1909,133 @@ def comunicacao_whatsapp_qr_sair(request: Request):
     return JSONResponse({"ok": True})
 
 
-@router.post("/painel/prospeccao/comunicacao/virar-lead")
-def comunicacao_virar_lead(request: Request, conversa_id: int = Form(...)):
-    """Promove uma conversa órfã (e-mail/WhatsApp de remetente novo, sem lead) a um
-    lead da prospecção — só quando VOCÊ decide que vale."""
+def _tel_fmt_br(numero: str) -> str:
+    """55869948673 88 -> +55 86 99486-7388, pra o vendedor CONFERIR o número antes de
+    virar lead (número cru de 13 dígitos ninguém lê). Fora do formato brasileiro,
+    devolve com o + na frente e pronto — não inventa máscara de país que não conhece."""
+    d = _so_digitos(numero)
+    if not d:
+        return ""
+    if d.startswith("55") and len(d) in (12, 13):
+        ddd, resto = d[2:4], d[4:]
+        return f"+55 {ddd} {resto[:-4]}-{resto[-4:]}"
+    return "+" + d
+
+
+def _contato_sugerido(c, conta_id: int, canal: str, ref: str, contato_nome: str) -> tuple[str, str]:
+    """(nome, fonte) pra pré-preencher o "Levar para o lead". A escada é a mesma do
+    caminho automático (_wa_inbound_conversa): agenda do celular primeiro — foi o
+    vendedor que salvou aquele nome —, depois o nome que já ficou guardado na conversa
+    (pushName do WhatsApp ou o remetente do e-mail). Sem nenhum dos dois, devolve vazio
+    de propósito: o modal abre pedindo o nome em vez de gravar "5586…" como empresa."""
+    if canal == "whatsapp":
+        nome = _nome_da_agenda(c, conta_id, ref)
+        if nome:
+            return (nome, "agenda")
+    nome = (contato_nome or "").strip()
+    if nome:
+        return (nome, "email" if canal == "email" else "perfil")
+    return ("", "")
+
+
+def _lead_por_telefone(c, conta_id: int, numero: str):
+    """Lead que já usa esse telefone, casando pelos últimos 8 dígitos (mesma chave do
+    resto do módulo: ignora o 9 extra e variações de DDI). (id, empresa) ou None."""
+    d = _so_digitos(numero)
+    if len(d) < 8:
+        return None
+    return c.execute(
+        r"""select id, empresa from prospeccao
+             where conta_id=%s and right(regexp_replace(coalesce(whatsapp, telefone, ''), '\D', '', 'g'), 8) = %s
+             order by atualizado_em desc limit 1""", (conta_id, d[-8:])).fetchone()
+
+
+@router.get("/painel/prospeccao/comunicacao/virar-lead/{conversa_id}")
+def comunicacao_virar_lead_dados(request: Request, conversa_id: int):
+    """O que o modal "Levar para o lead" mostra já preenchido: nome (agenda/perfil),
+    telefone formatado, e-mail, e o aviso de que já existe lead com aquele número."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    with get_pool().connection() as c:
+    pool = get_pool()
+    with pool.connection() as c:
         cv = c.execute(
-            "select canal, prospeccao_id, contato_ref from conversas where id=%s and conta_id=%s",
+            "select canal, prospeccao_id, contato_ref, contato_nome from conversas where id=%s and conta_id=%s",
+            (conversa_id, ctx["conta_id"])).fetchone()
+        if not cv:
+            return JSONResponse({"ok": False, "erro": "escopo"}, status_code=404)
+        canal, ja_lead, ref, contato_nome = cv[0], cv[1], (cv[2] or "").strip(), cv[3]
+        if ja_lead:
+            return JSONResponse({"ok": True, "ja_lead": True, "lead_id": ja_lead})
+        nome, fonte = _contato_sugerido(c, ctx["conta_id"], canal, ref, contato_nome)
+        eh_email = canal == "email" or "@" in ref
+        dup = None if eh_email else _lead_por_telefone(c, ctx["conta_id"], ref)
+    vends = _vendedores(pool, ctx["conta_id"]) if ctx["pode_atribuir"] else []
+    return JSONResponse({
+        "ok": True, "ja_lead": False, "canal": canal,
+        # quem manda mensagem de WhatsApp/DM é uma pessoa; e-mail de contato@ costuma
+        # ser empresa. É só o palpite inicial — a pílula do modal troca em um clique.
+        "tipo": "pj" if eh_email else "pf",
+        "nome": nome, "nome_fonte": fonte,
+        "email": ref if eh_email else "",
+        "telefone": "" if eh_email else _tel_fmt_br(ref),
+        "pode_atribuir": bool(ctx["pode_atribuir"]),
+        "vendedores": [{"id": v["id"], "nome": v["nome"]} for v in vends],
+        "duplicado": ({"id": dup[0], "empresa": dup[1]} if dup else None),
+    })
+
+
+@router.post("/painel/prospeccao/comunicacao/virar-lead")
+def comunicacao_virar_lead(request: Request, conversa_id: int = Form(...),
+                           nome: str = Form(""), empresa: str = Form(""),
+                           telefone: str = Form(""), email: str = Form(""),
+                           tipo: str = Form(""), vendedor_id: str = Form(""),
+                           temperatura: str = Form("morno")):
+    """Promove uma conversa órfã (e-mail/WhatsApp de remetente novo, sem lead) a um
+    lead da prospecção — só quando VOCÊ decide que vale.
+
+    O nome e o telefone vêm do modal, já conferidos. Sem eles (chamada antiga, sem
+    corpo), cai na mesma escada de nomes do caminho automático em vez de gravar o
+    número cru como empresa — que era o que acontecia e enchia o funil de "5586…"."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    pool = get_pool()
+    with pool.connection() as c:
+        cv = c.execute(
+            "select canal, prospeccao_id, contato_ref, contato_nome from conversas where id=%s and conta_id=%s",
             (conversa_id, ctx["conta_id"])).fetchone()
         if not cv:
             return JSONResponse({"ok": False, "erro": "escopo"}, status_code=404)
         if cv[1]:
             return JSONResponse({"ok": True, "lead_id": cv[1]})     # já é lead
-        ref = (cv[2] or "").strip()
-        eh_email = "@" in ref
-        vend = None if ctx["gerencia"] else ctx["membro_id"]
+        canal, ref = cv[0], (cv[2] or "").strip()
+        eh_email = canal == "email" or "@" in ref
+        tipo_lead = tipo if tipo in ("pf", "pj") else ("pj" if eh_email else "pf")
+        nome = (nome or "").strip()
+        if not nome:
+            nome, _fonte = _contato_sugerido(c, ctx["conta_id"], canal, ref, cv[3])
+        # em PJ o nome do funil é o da empresa (o contato é a pessoa que fala por ela);
+        # em PF os dois são a mesma pessoa
+        empresa_final = ((empresa or "").strip() if tipo_lead == "pj" else "") or nome
+        if not empresa_final:
+            # nem agenda, nem perfil, nem digitado: ainda assim o lead precisa de um
+            # nome — o número formatado é bem mais legível que os 13 dígitos crus.
+            empresa_final = (ref if eh_email else _tel_fmt_br(ref)) or "Contato"
+        tel = (telefone or "").strip() or ("" if eh_email else _tel_fmt_br(ref))
+        mail = ((email or "").strip() or (ref if eh_email else "")).lower() or None
+        temp = temperatura if temperatura in TEMP_OK else "morno"
+        # só o dono escolhe o responsável; pro resto continua como sempre foi —
+        # gerência deixa livre, vendedor fica com o próprio lead
+        vend = (_vendedor_destino(ctx, vendedor_id, pool, ctx["conta_id"])
+                if ctx["pode_atribuir"] else (None if ctx["gerencia"] else ctx["membro_id"]))
         lead_id = c.execute(
-            """insert into prospeccao (conta_id, vendedor_id, empresa, email, whatsapp,
-                 origem, temperatura, status, estagio)
-               values (%s,%s,%s,%s,%s,%s,'morno','novo','lead') returning id""",
-            (ctx["conta_id"], vend, ref or "Contato",
-             ref if eh_email else None, None if eh_email else ("+" + ref if ref else None),
-             "email_inbound" if eh_email else "whatsapp_inbound")).fetchone()[0]
+            """insert into prospeccao (conta_id, vendedor_id, empresa, contato, email,
+                 whatsapp, telefone, tipo, origem, temperatura, status, estagio)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'novo','lead') returning id""",
+            (ctx["conta_id"], vend, empresa_final[:250], nome[:250] or None, mail,
+             ("+" + _so_digitos(ref)) if (ref and not eh_email) else None, tel or None,
+             tipo_lead, "email_inbound" if eh_email else "whatsapp_inbound", temp)).fetchone()[0]
         c.execute("update conversas set prospeccao_id=%s where id=%s", (lead_id, conversa_id))
         c.commit()
     return JSONResponse({"ok": True, "lead_id": lead_id})
@@ -2225,11 +2403,14 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
         # dos dois, o WhatsApp não manda outro nome pra gente pegar.
         nome = _nome_da_agenda(c, conta_id, remetente) or (nome_perfil or "").strip() \
             or "Contato WhatsApp"
+        # tipo 'pf': quem manda mensagem é uma pessoa. Mesmo palpite do botão "Levar
+        # para o lead" — os dois caminhos nascendo diferentes era o que confundia. Um
+        # clique na ficha troca pra empresa quando o número for de um comércio.
         lead_id = c.execute(
-            """insert into prospeccao (conta_id, vendedor_id, empresa, whatsapp,
-                 origem, temperatura, status, estagio)
-               values (%s, null, %s, %s, 'whatsapp_inbound', 'quente', 'novo', 'lead') returning id""",
-            (conta_id, nome[:250], "+" + remetente)).fetchone()[0]
+            """insert into prospeccao (conta_id, vendedor_id, empresa, contato, whatsapp,
+                 tipo, origem, temperatura, status, estagio)
+               values (%s, null, %s, %s, %s, 'pf', 'whatsapp_inbound', 'quente', 'novo', 'lead') returning id""",
+            (conta_id, nome[:250], nome[:250], "+" + remetente)).fetchone()[0]
         lead_novo = True
         nome_lead_novo = nome
     else:
@@ -4268,10 +4449,12 @@ def prospeccao_ficha(request: Request, alvo_id: int):
 @router.post("/painel/prospeccao/{alvo_id}/editar")
 def prospeccao_editar(request: Request, alvo_id: int, contato: str = Form(""),
                       cargo: str = Form(""), telefone: str = Form(""), whatsapp: str = Form(""),
-                      email: str = Form(""), cnpj: str = Form(""), segmento: str = Form(""),
+                      email: str = Form(""), cnpj: str = Form(""), cpf: str = Form(""),
+                      documento: str = Form(""), tipo: str = Form(""), segmento: str = Form(""),
                       cidade: str = Form(""), uf: str = Form(""), valor: str = Form(""),
                       socio: str = Form(""), regime_tributario: str = Form(""),
                       porte: str = Form(""), instagram: str = Form(""),
+                      empresa: str = Form(""),
                       tem_site: str = Form(""), site_url: str = Form(""), obs: str = Form("")):
     ctx, redir = _acesso(request)
     if redir is not None:
@@ -4280,26 +4463,42 @@ def prospeccao_editar(request: Request, alvo_id: int, contato: str = Form(""),
     alvo = _carrega_alvo(pool, ctx["conta_id"], alvo_id)
     if not alvo or not _pode_ver(alvo, ctx):
         return RedirectResponse("/painel/prospeccao", status_code=303)
+    tipo_lead, cnpj_limpo, cpf_limpo, erro_doc = _doc_lead(tipo, cnpj, cpf, documento)
+    if erro_doc:
+        request.session["prosp_aviso"] = erro_doc
+        return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
+    if tipo_lead == "pf":
+        socio = regime_tributario = porte = ""     # não existe quadro societário de pessoa
+    # o nome é editável aqui porque em PF ele É o lead (não dá pra corrigir "Joana
+    # Ribeito" só pela captação); vazio mantém o que está lá — nunca apaga.
+    nome_novo = (empresa or "").strip() or alvo["empresa"]
     site_link = (site_url or "").strip()
     if site_link and "://" not in site_link:
         site_link = "https://" + site_link
     site_link = site_link or None
     # se preencheu o link, o lead tem site (mesmo que não tenha marcado o rádio)
     site = True if (tem_site == "1" or site_link) else False if tem_site == "0" else None
-    with pool.connection() as c:
-        c.execute(
-            """update prospeccao set contato=%s, cargo=%s, telefone=%s, whatsapp=%s,
-                   email=%s, cnpj=%s, segmento=%s, cidade=%s, uf=%s,
-                   valor_estimado_centavos=%s, socio=%s, regime_tributario=%s, porte=%s,
-                   instagram=%s, tem_site=%s, site_url=%s, obs=%s, atualizado_em=now()
-                 where id=%s and conta_id=%s""",
-            (contato.strip() or None, cargo.strip() or None, telefone.strip() or None,
-             whatsapp.strip() or None, email.strip().lower() or None, cnpj.strip() or None,
-             segmento.strip() or None, cidade.strip() or None, (uf or "").strip()[:2].upper() or None,
-             _reais_para_centavos(valor), socio.strip() or None, regime_tributario.strip() or None,
-             porte.strip() or None, instagram.strip() or None, site, site_link, obs.strip() or None,
-             alvo_id, ctx["conta_id"]))
-        c.commit()
+    try:
+        with pool.connection() as c:
+            c.execute(
+                """update prospeccao set contato=%s, cargo=%s, telefone=%s, whatsapp=%s,
+                       email=%s, cnpj=%s, cpf=%s, tipo=%s, empresa=%s, segmento=%s, cidade=%s, uf=%s,
+                       valor_estimado_centavos=%s, socio=%s, regime_tributario=%s, porte=%s,
+                       instagram=%s, tem_site=%s, site_url=%s, obs=%s, atualizado_em=now()
+                     where id=%s and conta_id=%s""",
+                (contato.strip() or None, cargo.strip() or None, telefone.strip() or None,
+                 whatsapp.strip() or None, email.strip().lower() or None, cnpj_limpo, cpf_limpo,
+                 tipo_lead, nome_novo, segmento.strip() or None, cidade.strip() or None,
+                 (uf or "").strip()[:2].upper() or None,
+                 _reais_para_centavos(valor), socio.strip() or None, regime_tributario.strip() or None,
+                 porte.strip() or None, instagram.strip() or None, site, site_link, obs.strip() or None,
+                 alvo_id, ctx["conta_id"]))
+            c.commit()
+    except UniqueViolation:
+        doc, campo = (cpf_limpo, "cpf") if cpf_limpo else (cnpj_limpo, "cnpj")
+        info = _lead_duplicado_info(pool, ctx["conta_id"], doc, nome_novo, campo)
+        request.session["prosp_aviso"] = info["msg"]
+        return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
     request.session["prosp_aviso"] = "Dados atualizados."
     return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
 
@@ -5519,7 +5718,29 @@ _NAV_ASSETS = """<style>
    if(a && a.getAttribute('href') && !e.metaKey && !e.ctrlKey && !e.shiftKey && a.target!=='_blank'){ bar.className='go'; bar.style.width='82%'; }},true);
  window.addEventListener('pageshow',function(){ bar.className=''; bar.style.width='0'; });
 })();</script>"""
-_CSS = _CSS + _NAV_ASSETS
+# PF x PJ do lead, compartilhado pelos três formulários que criam/editam lead (Base,
+# funil e Ficha). As pílulas trocam rótulo e documento e escondem o que só existe em
+# empresa (contato/cargo/sócio/regime/porte e o botão da Receita). Quem manda de fato
+# é o TAMANHO do documento — 11 dígitos vira pessoa física sozinho, mesma regra que o
+# servidor aplica em _doc_lead (finance/validadoc), pra tela e banco nunca discordarem.
+_TIPO_JS = """<script>
+function leadTipo(tipo,el){
+  var f=(el&&el.closest)?el.closest('[data-tipo-form]'):null; if(!f)return;
+  var pj=tipo!=='pf';
+  var h=f.querySelector('input[name=tipo]'); if(h)h.value=pj?'pj':'pf';
+  f.querySelectorAll('[data-tipo-pill]').forEach(function(b){
+    b.classList.toggle('on',b.getAttribute('data-tipo-pill')===(pj?'pj':'pf'));});
+  f.querySelectorAll('[data-pj],[data-pf]').forEach(function(n){
+    var t=n.getAttribute(pj?'data-pj':'data-pf'); if(t===null)return;
+    if(n.tagName==='INPUT'){n.placeholder=t;}else{n.textContent=t;}});
+  f.querySelectorAll('[data-so-pj]').forEach(function(n){n.style.display=pj?'':'none';});
+}
+function leadDoc(el){
+  var n=(el.value||'').replace(/\\D/g,'').length;
+  if(n===11)leadTipo('pf',el); else if(n===14)leadTipo('pj',el);
+}
+</script>"""
+_CSS = _CSS + _NAV_ASSETS + _TIPO_JS
 
 
 def _navbar(active):
@@ -5615,17 +5836,22 @@ _CAPTURA_PANEL_HTML = """
 </div>
 
 <div class="captab" data-tab="manual"@@CNPJ_HIDE@@>
-  <form id="cap-manual" action="/painel/prospeccao/novo" method="post" onsubmit="return capManual(event)">
+  <form id="cap-manual" data-tipo-form action="/painel/prospeccao/novo" method="post" onsubmit="return capManual(event)">
     <input type="hidden" name="voltar" value="@@VOLTAR@@">
     <input type="hidden" name="receita">
+    <input type="hidden" name="tipo" value="pj">
+    <div class="rcpills">
+      <button type="button" class="rcpill on" data-tipo-pill="pj" onclick="leadTipo('pj',this)">🏢 Pessoa Jurídica</button>
+      <button type="button" class="rcpill" data-tipo-pill="pf" onclick="leadTipo('pf',this)">🧑 Pessoa Física</button>
+    </div>
     <div style="display:flex;gap:.5rem;align-items:end;background:var(--bg);border:1px solid var(--borda);border-radius:10px;padding:.7rem;margin-bottom:.8rem;flex-wrap:wrap">
-      <div style="flex:1;min-width:200px"><label class="lbl">🔎 CNPJ — puxa tudo da Receita</label><input class="fld" name="cnpj" inputmode="numeric" placeholder="digite o CNPJ (só números) e clique buscar"></div>
-      <button type="button" class="pbtn" onclick="capCnpj()" style="white-space:nowrap">↓ Buscar Receita</button>
+      <div style="flex:1;min-width:200px"><label class="lbl" data-pj="🔎 CNPJ — puxa tudo da Receita" data-pf="🪪 CPF (opcional)">🔎 CNPJ — puxa tudo da Receita</label><input class="fld" name="documento" inputmode="numeric" data-pj="digite o CNPJ (só números) e clique buscar" data-pf="000.000.000-00" placeholder="digite o CNPJ (só números) e clique buscar" oninput="leadDoc(this)"></div>
+      <button type="button" class="pbtn" data-so-pj onclick="capCnpj()" style="white-space:nowrap">↓ Buscar Receita</button>
     </div>
     <div class="egrid">
-      <div class="full"><label class="lbl">Empresa *</label><input class="fld" name="empresa" required placeholder="Nome da empresa"></div>
-      <div><label class="lbl">Contato</label><input class="fld" name="contato"></div>
-      <div><label class="lbl">Cargo</label><input class="fld" name="cargo" placeholder="Cargo do contato"></div>
+      <div class="full"><label class="lbl" data-pj="Empresa *" data-pf="Nome completo *">Empresa *</label><input class="fld" name="empresa" required data-pj="Nome da empresa" data-pf="Nome completo" placeholder="Nome da empresa"></div>
+      <div data-so-pj><label class="lbl">Contato</label><input class="fld" name="contato"></div>
+      <div data-so-pj><label class="lbl">Cargo</label><input class="fld" name="cargo" placeholder="Cargo do contato"></div>
       <div><label class="lbl">Telefone</label><input class="fld" name="telefone"></div>
       <div><label class="lbl">WhatsApp</label><input class="fld" name="whatsapp"></div>
       <div><label class="lbl">E-mail</label><input class="fld" name="email" inputmode="email"></div>
@@ -5694,7 +5920,7 @@ function capTab(t){document.querySelectorAll('.caba').forEach(function(b){b.clas
 function capFetch(url,fd){return fetch(url,{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();});}
 function _capReload(msg){capToast(msg||'Adicionado à base ✓');setTimeout(function(){location.reload();},700);}
 function capManual(ev){ev.preventDefault();var f=ev.target;capFetch('/painel/prospeccao/novo',new FormData(f)).then(function(d){if(!d.ok){capToast(d.erro||'Erro',d.link_url?{url:d.link_url,label:d.link_label}:null);return;}f.reset();_capReload('Lead adicionado à base ✓');}).catch(function(){capToast('Falha de rede');});return false;}
-function capCnpj(){var f=document.getElementById('cap-manual');var cnpj=f.querySelector('[name=cnpj]').value.replace(/\\D/g,'');if(cnpj.length!==14){capToast('CNPJ precisa ter 14 dígitos');return;}
+function capCnpj(){var f=document.getElementById('cap-manual');var cnpj=f.querySelector('[name=documento]').value.replace(/\\D/g,'');if(cnpj.length!==14){capToast('Pra puxar da Receita, o CNPJ precisa ter 14 dígitos');return;}
   capToast('Consultando Receita…');
   fetch('/painel/prospeccao/cnpj?cnpj='+cnpj,{headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
     if(!d.ok){capToast('CNPJ não encontrado ('+(d.erro||'')+')');return;}var x=d.dados;
@@ -6166,26 +6392,31 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </div>
 
     <div class="captab" data-tab="manual">
-      <form id="cap-manual" action="/painel/prospeccao/novo" method="post" onsubmit="return capManual(event)">
+      <form id="cap-manual" data-tipo-form action="/painel/prospeccao/novo" method="post" onsubmit="return capManual(event)">
         <input type="hidden" name="voltar" value="/painel/prospeccao">
         <input type="hidden" name="receita">
+        <input type="hidden" name="tipo" value="pj">
+        <div class="rcpills">
+          <button type="button" class="rcpill on" data-tipo-pill="pj" onclick="leadTipo('pj',this)">🏢 Pessoa Jurídica</button>
+          <button type="button" class="rcpill" data-tipo-pill="pf" onclick="leadTipo('pf',this)">🧑 Pessoa Física</button>
+        </div>
         <div style="display:flex;gap:.5rem;align-items:end;background:var(--bg);border:1px solid var(--borda);border-radius:10px;padding:.7rem;margin-bottom:.8rem;flex-wrap:wrap">
-          <div style="flex:1;min-width:200px"><label class="lbl">🔎 CNPJ — puxa tudo da Receita</label><input class="fld" name="cnpj" inputmode="numeric" placeholder="digite o CNPJ (só números) e clique buscar"></div>
-          <button type="button" class="pbtn" onclick="capCnpj()" style="white-space:nowrap">↓ Buscar Receita</button>
+          <div style="flex:1;min-width:200px"><label class="lbl" data-pj="🔎 CNPJ — puxa tudo da Receita" data-pf="🪪 CPF (opcional)">🔎 CNPJ — puxa tudo da Receita</label><input class="fld" name="documento" inputmode="numeric" data-pj="digite o CNPJ (só números) e clique buscar" data-pf="000.000.000-00" placeholder="digite o CNPJ (só números) e clique buscar" oninput="leadDoc(this)"></div>
+          <button type="button" class="pbtn" data-so-pj onclick="capCnpj()" style="white-space:nowrap">↓ Buscar Receita</button>
         </div>
         <div class="egrid">
-          <div class="full"><label class="lbl">Empresa *</label><input class="fld" name="empresa" required placeholder="Nome da empresa"></div>
-          <div><label class="lbl">Contato</label><input class="fld" name="contato"></div>
-          <div><label class="lbl">Cargo</label><input class="fld" name="cargo" placeholder="Cargo do contato"></div>
+          <div class="full"><label class="lbl" data-pj="Empresa *" data-pf="Nome completo *">Empresa *</label><input class="fld" name="empresa" required data-pj="Nome da empresa" data-pf="Nome completo" placeholder="Nome da empresa"></div>
+          <div data-so-pj><label class="lbl">Contato</label><input class="fld" name="contato"></div>
+          <div data-so-pj><label class="lbl">Cargo</label><input class="fld" name="cargo" placeholder="Cargo do contato"></div>
           <div><label class="lbl">Telefone</label><input class="fld" name="telefone"></div>
           <div><label class="lbl">WhatsApp</label><input class="fld" name="whatsapp"></div>
           <div><label class="lbl">E-mail</label><input class="fld" name="email" inputmode="email"></div>
           <div><label class="lbl">Segmento</label><input class="fld" name="segmento" placeholder="Ex: pet shop"></div>
           <div><label class="lbl">Cidade</label><input class="fld" name="cidade"></div>
           <div><label class="lbl">UF</label><input class="fld" name="uf" maxlength="2" style="text-transform:uppercase"></div>
-          <div><label class="lbl">Sócio</label><input class="fld" name="socio"></div>
-          <div><label class="lbl">Regime</label><input class="fld" name="regime_tributario"></div>
-          <div><label class="lbl">Porte</label><input class="fld" name="porte"></div>
+          <div data-so-pj><label class="lbl">Sócio</label><input class="fld" name="socio"></div>
+          <div data-so-pj><label class="lbl">Regime</label><input class="fld" name="regime_tributario"></div>
+          <div data-so-pj><label class="lbl">Porte</label><input class="fld" name="porte"></div>
           <div><label class="lbl">Instagram</label><input class="fld" name="instagram" placeholder="@perfil"></div>
           <div><label class="lbl">Site (link)</label><input class="fld" name="site_url" inputmode="url" placeholder="https://…"></div>
           <div><label class="lbl">Valor (R$)</label><input class="fld" name="valor" inputmode="decimal" placeholder="0,00"></div>
@@ -6441,7 +6672,7 @@ function capToggle(){var e=document.getElementById('captar');var vis=e.style.dis
 function capTab(t){document.querySelectorAll('#captar .caba').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===t);});document.querySelectorAll('#captar .captab').forEach(function(d){d.style.display=(d.getAttribute('data-tab')===t)?'block':'none';});}
 function capFetch(url,fd){return fetch(url,{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();});}
 function capManual(ev){ev.preventDefault();var f=ev.target;capFetch('/painel/prospeccao/novo',new FormData(f)).then(function(d){if(!d.ok){capToast(d.erro||'Erro',d.link_url?{url:d.link_url,label:d.link_label}:null);return;}addCard(d.lead);f.reset();capToast('Lead adicionado');}).catch(function(){capToast('Falha de rede');});return false;}
-function capCnpj(){var f=document.getElementById('cap-manual');var cnpj=f.querySelector('[name=cnpj]').value.replace(/\\D/g,'');if(cnpj.length!==14){capToast('CNPJ precisa ter 14 dígitos');return;}
+function capCnpj(){var f=document.getElementById('cap-manual');var cnpj=f.querySelector('[name=documento]').value.replace(/\\D/g,'');if(cnpj.length!==14){capToast('Pra puxar da Receita, o CNPJ precisa ter 14 dígitos');return;}
   capToast('Consultando Receita…');
   fetch('/painel/prospeccao/cnpj?cnpj='+cnpj,{headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
     if(!d.ok){capToast('CNPJ não encontrado ('+(d.erro||'')+')');return;}var x=d.dados;
@@ -6546,16 +6777,21 @@ _CAPTAR_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 
   {% if aba=='manual' %}
   <div class="fsec">
-    <form method="post" action="/painel/prospeccao/novo" class="egrid">
+    <form method="post" action="/painel/prospeccao/novo" class="egrid" data-tipo-form>
       <input type="hidden" name="voltar" value="/painel/prospeccao/captar">
-      <div class="full"><label class="lbl">Empresa *</label><input class="fld" name="empresa" required placeholder="Nome da empresa"></div>
+      <input type="hidden" name="tipo" value="pj">
+      <div class="full rcpills" style="margin:0 0 .2rem">
+        <button type="button" class="rcpill on" data-tipo-pill="pj" onclick="leadTipo('pj',this)">🏢 Pessoa Jurídica</button>
+        <button type="button" class="rcpill" data-tipo-pill="pf" onclick="leadTipo('pf',this)">🧑 Pessoa Física</button>
+      </div>
+      <div class="full"><label class="lbl" data-pj="Empresa *" data-pf="Nome completo *">Empresa *</label><input class="fld" name="empresa" required data-pj="Nome da empresa" data-pf="Nome completo" placeholder="Nome da empresa"></div>
       <div><label class="lbl">Segmento</label><input class="fld" name="segmento" placeholder="Ex: pet shop"></div>
       <div><label class="lbl">Cidade</label><input class="fld" name="cidade"></div>
       <div><label class="lbl">UF</label><input class="fld" name="uf" maxlength="2" style="text-transform:uppercase"></div>
-      <div><label class="lbl">Contato</label><input class="fld" name="contato"></div>
+      <div data-so-pj><label class="lbl">Contato</label><input class="fld" name="contato"></div>
       <div><label class="lbl">Telefone</label><input class="fld" name="telefone"></div>
       <div><label class="lbl">WhatsApp</label><input class="fld" name="whatsapp"></div>
-      <div><label class="lbl">CNPJ</label><input class="fld" name="cnpj"></div>
+      <div><label class="lbl" data-pj="CNPJ" data-pf="CPF">CNPJ</label><input class="fld" name="documento" inputmode="numeric" data-pj="00.000.000/0000-00" data-pf="000.000.000-00" placeholder="00.000.000/0000-00" oninput="leadDoc(this)"></div>
       <div><label class="lbl">Temperatura</label><select class="fld" name="temperatura">{% for v,l in temperaturas_all %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
       {{ vendsel() }}
       <div class="full"><button class="pbtn" style="margin:.3rem 0 0">Adicionar lead</button></div>
@@ -6655,6 +6891,7 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <span class="tdot" style="width:13px;height:13px;background:{{ temp_cor[a.temperatura] }}"></span>
           <h2 class="tt">{{ a.empresa }}</h2>
           {% set tp = temp_pill[a.temperatura] %}<span class="tpill" style="background:{{ tp[0] }};color:{{ tp[1] }}">{{ a.temperatura }}</span>
+          {% if a.eh_pf %}<span class="tpill" style="background:#20172a;color:#c9a3e0" title="Pessoa física">PF</span>{% endif %}
         </div>
         <div class="mut" style="font-size:.82rem;margin-top:.25rem">{% if a.segmento %}{{ a.segmento }}{% endif %}{% if a.cidade %}{% if a.segmento %} · {% endif %}{{ a.cidade }}{% if a.uf %}/{{ a.uf }}{% endif %}{% endif %}{% if a.vendedor_nome %} · 👤 {{ a.vendedor_nome }}{% endif %}</div>
         {% if canais_contato %}<div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.5rem">
@@ -6753,12 +6990,16 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <div class="sh"><b>Dados</b>
           <div style="display:flex;gap:.4rem">
             {% set _end_lead = (a.receita.endereco if a.receita else None) or a.obs or ((a.cidade or '') ~ ('/' ~ a.uf if a.uf else '')) %}
+            {# Receita, CNPJá e decisor (quadro societário) só existem pra empresa — em
+               pessoa física esses botões não teriam o que consultar. #}
+            {% if not a.eh_pf %}
             {% if a.cnpj %}<form method="post" action="/painel/prospeccao/{{ a.id }}/enriquecer" style="margin:0"><button class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" title="Puxar dados da Receita (CNPJá/BrasilAPI)">↻ atualizar</button></form>
               {% if tem_cnpja %}<button type="button" class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" data-endereco="{{ _end_lead }}" onclick="acharCnpj({{ a.id }},this)" title="Buscar outro CNPJ (trocar)">🔎 trocar</button>{% endif %}
               <form method="post" action="/painel/prospeccao/{{ a.id }}/limpar-cnpj" style="margin:0" onsubmit="return confirm('Remover o CNPJ e os dados da Receita deste lead?')"><button class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" title="Remover o CNPJ (escolhido errado)">🗑 limpar</button></form>
             {% elif tem_cnpja %}<button type="button" class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" data-endereco="{{ _end_lead }}" onclick="acharCnpj({{ a.id }},this)" title="Achar o CNPJ por nome+cidade (CNPJá)">🔎 achar CNPJ</button>
             {% else %}<a class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" target="_blank" rel="noopener" title="Achar o CNPJ na web (nome + cidade)" href="https://www.google.com/search?q={{ (a.empresa ~ ' ' ~ (a.cidade or '') ~ ' cnpj')|urlencode }}">🔎 achar CNPJ</a>{% endif %}
             {% if a.cnpj and tem_credify %}<button type="button" class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" id="dec-btn" onclick="buscarDecisor({{ a.id }})" title="Descobre o sócio-administrador (decisor) pelo CNPJ via Credify — consulta paga">🕵️ {% if a.decisor_nome %}Atualizar decisor{% else %}Buscar decisor{% endif %}</button>{% endif %}
+            {% endif %}
             <button type="button" class="pbtn ghost" style="padding:.3rem .7rem;font-size:.78rem" onclick="prospToggle('edit-dados')">editar</button>
           </div>
         </div>
@@ -6799,7 +7040,7 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         </div>
         {% endif %}
         {% if a.contato %}<div class="drow"><span class="ic">👤</span><span class="lb">Contato</span><span>{{ a.contato }}{% if a.cargo %} · {{ a.cargo }}{% endif %}</span></div>{% endif %}
-        {% if a.cnpj %}<div class="drow"><span class="ic">🏢</span><span class="lb">CNPJ</span><span>{{ a.cnpj }}</span></div>{% endif %}
+        {% if a.doc %}<div class="drow"><span class="ic">{{ '🪪' if a.eh_pf else '🏢' }}</span><span class="lb">{{ a.doc_rot }}</span><span>{{ a.doc_fmt }}</span></div>{% endif %}
         {% if a.socio %}<div class="drow"><span class="ic">🧑‍💼</span><span class="lb">Sócio</span><span>{{ a.socio }}</span></div>{% endif %}
         {% if a.regime_tributario or a.porte %}<div class="drow"><span class="ic">📑</span><span class="lb">Regime</span><span>{{ a.regime_tributario or '—' }}{% if a.porte %} · porte {{ a.porte }}{% endif %}</span></div>{% endif %}
         {% if a.telefone %}<div class="drow"><span class="ic">📞</span><span class="lb">Telefone</span><span>{{ a.telefone }}</span></div>{% endif %}
@@ -6823,23 +7064,29 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           {% if a.receita.atividades_secundarias %}<div class="drow"><span class="ic">🔧</span><span class="lb">Outras ativ.</span><span>{{ a.receita.atividades_secundarias|join(' · ') }}</span></div>{% endif %}
         </div>
         {% endif %}
-        {% if not (a.contato or a.cnpj or a.socio or a.telefone or a.whatsapp or a.email or a.instagram or a.valor) %}
-          <div class="mut" style="font-size:.82rem">Sem dados ainda. Clique em <b>editar</b> pra preencher — ou preencha o CNPJ e use <b>↻ atualizar</b> pra puxar da Receita.</div>{% endif %}
+        {% if not (a.contato or a.doc or a.socio or a.telefone or a.whatsapp or a.email or a.instagram or a.valor) %}
+          <div class="mut" style="font-size:.82rem">Sem dados ainda. Clique em <b>editar</b> pra preencher{% if not a.eh_pf %} — ou preencha o CNPJ e use <b>↻ atualizar</b> pra puxar da Receita{% endif %}.</div>{% endif %}
 
-        <form id="edit-dados" method="post" action="/painel/prospeccao/{{ a.id }}/editar" style="display:none;margin-top:.8rem;border-top:1px solid var(--borda);padding-top:.8rem">
+        <form id="edit-dados" data-tipo-form method="post" action="/painel/prospeccao/{{ a.id }}/editar" style="display:none;margin-top:.8rem;border-top:1px solid var(--borda);padding-top:.8rem">
+          <input type="hidden" name="tipo" value="{{ a.tipo or 'pj' }}">
+          <div class="rcpills">
+            <button type="button" class="rcpill {% if not a.eh_pf %}on{% endif %}" data-tipo-pill="pj" onclick="leadTipo('pj',this)">🏢 Pessoa Jurídica</button>
+            <button type="button" class="rcpill {% if a.eh_pf %}on{% endif %}" data-tipo-pill="pf" onclick="leadTipo('pf',this)">🧑 Pessoa Física</button>
+          </div>
           <div class="egrid">
-            <div class="full"><label class="lbl">CNPJ <span class="mut" style="font-weight:400">— cole aqui e puxe tudo da Receita</span></label><div style="display:flex;gap:.3rem"><input class="fld" name="cnpj" inputmode="numeric" placeholder="00.000.000/0000-00" value="{{ a.cnpj or '' }}"><button type="button" class="pbtn ghost" style="padding:.5rem .6rem;white-space:nowrap" onclick="fichaCnpj()" title="Preencher tudo pela Receita">↓ Receita</button></div></div>
-            <div><label class="lbl">Contato</label><input class="fld" name="contato" value="{{ a.contato or '' }}"></div>
-            <div><label class="lbl">Cargo</label><input class="fld" name="cargo" value="{{ a.cargo or '' }}"></div>
+            <div class="full"><label class="lbl" data-pj="Empresa" data-pf="Nome completo">{{ 'Nome completo' if a.eh_pf else 'Empresa' }}</label><input class="fld" name="empresa" value="{{ a.empresa or '' }}"></div>
+            <div class="full"><label class="lbl" data-pj="CNPJ — cole aqui e puxe tudo da Receita" data-pf="CPF">{{ 'CPF' if a.eh_pf else 'CNPJ — cole aqui e puxe tudo da Receita' }}</label><div style="display:flex;gap:.3rem"><input class="fld" name="documento" inputmode="numeric" data-pj="00.000.000/0000-00" data-pf="000.000.000-00" placeholder="{{ '000.000.000-00' if a.eh_pf else '00.000.000/0000-00' }}" value="{{ a.doc_fmt }}" oninput="leadDoc(this)"><button type="button" class="pbtn ghost" data-so-pj style="padding:.5rem .6rem;white-space:nowrap{% if a.eh_pf %};display:none{% endif %}" onclick="fichaCnpj()" title="Preencher tudo pela Receita">↓ Receita</button></div></div>
+            <div data-so-pj{% if a.eh_pf %} style="display:none"{% endif %}><label class="lbl">Contato</label><input class="fld" name="contato" value="{{ a.contato or '' }}"></div>
+            <div data-so-pj{% if a.eh_pf %} style="display:none"{% endif %}><label class="lbl">Cargo</label><input class="fld" name="cargo" value="{{ a.cargo or '' }}"></div>
             <div><label class="lbl">Telefone</label><input class="fld" name="telefone" value="{{ a.telefone or '' }}"></div>
             <div><label class="lbl">WhatsApp</label><input class="fld" name="whatsapp" value="{{ a.whatsapp or '' }}"></div>
             <div><label class="lbl">E-mail</label><input class="fld" name="email" value="{{ a.email or '' }}"></div>
             <div><label class="lbl">Segmento</label><input class="fld" name="segmento" value="{{ a.segmento or '' }}"></div>
             <div><label class="lbl">Cidade</label><input class="fld" name="cidade" value="{{ a.cidade or '' }}"></div>
             <div><label class="lbl">UF</label><input class="fld" name="uf" maxlength="2" value="{{ a.uf or '' }}"></div>
-            <div><label class="lbl">Sócio</label><input class="fld" name="socio" value="{{ a.socio or '' }}"></div>
-            <div><label class="lbl">Regime</label><input class="fld" name="regime_tributario" value="{{ a.regime_tributario or '' }}"></div>
-            <div><label class="lbl">Porte</label><input class="fld" name="porte" value="{{ a.porte or '' }}"></div>
+            <div data-so-pj{% if a.eh_pf %} style="display:none"{% endif %}><label class="lbl">Sócio</label><input class="fld" name="socio" value="{{ a.socio or '' }}"></div>
+            <div data-so-pj{% if a.eh_pf %} style="display:none"{% endif %}><label class="lbl">Regime</label><input class="fld" name="regime_tributario" value="{{ a.regime_tributario or '' }}"></div>
+            <div data-so-pj{% if a.eh_pf %} style="display:none"{% endif %}><label class="lbl">Porte</label><input class="fld" name="porte" value="{{ a.porte or '' }}"></div>
             <div><label class="lbl">Instagram</label><input class="fld" name="instagram" value="{{ a.instagram or '' }}"></div>
             <div><label class="lbl">Valor est. (R$)</label><input class="fld" name="valor" inputmode="decimal" value="{{ (a.valor/100)|n2 if a.valor else '' }}"></div>
             <div><label class="lbl">Tem site?</label><select class="fld" name="tem_site">
@@ -6938,12 +7185,14 @@ function acharCnpj(id,btn){var box=document.getElementById('cnpj-cands');var end
     box.innerHTML=h;
   }).catch(function(){box.innerHTML='<div class="mut" style="font-size:.8rem;color:#e0a33e">Falha de rede.</div>'+cnpjManualBox(id);});}
 function jsEsc(s){return (s||'').replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];});}
-function fichaCnpj(){var f=document.getElementById('edit-dados');var cnpj=f.querySelector('[name=cnpj]').value.replace(/\\D/g,'');if(cnpj.length!==14){fToast('CNPJ precisa ter 14 dígitos');return;}
+function fichaCnpj(){var f=document.getElementById('edit-dados');var cnpj=f.querySelector('[name=documento]').value.replace(/\\D/g,'');if(cnpj.length!==14){fToast('Pra puxar da Receita, o CNPJ precisa ter 14 dígitos');return;}
   fToast('Consultando Receita…');
   fetch('/painel/prospeccao/cnpj?cnpj='+cnpj,{headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
     if(!d.ok){fToast('CNPJ não encontrado ('+(d.erro||'')+')');return;}var x=d.dados;
     function put(n,v){var el=f.querySelector('[name='+n+']');if(el&&v)el.value=v;}
+    // o nome só entra se estiver vazio — quem já batizou o lead não perde o nome dele
     var e=f.querySelector('[name=empresa]');
+    if(e&&!e.value&&(x.nome_fantasia||x.razao_social))e.value=x.nome_fantasia||x.razao_social;
     put('segmento',x.segmento);put('cidade',x.cidade);put('uf',x.uf);put('telefone',x.telefone);
     put('email',x.email);put('socio',x.socio);put('regime_tributario',x.regime_tributario);put('porte',x.porte);
     fToast('Preenchido pela Receita ✓ confira e salve');
@@ -7042,6 +7291,23 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .cx-sec h4{margin:0 0 .4rem;font-size:.74rem;text-transform:uppercase;letter-spacing:.04em;color:var(--txt-mut)}
 .cx-kv{display:flex;justify-content:space-between;gap:.5rem;font-size:.82rem;padding:.18rem 0}
 .cx-kv span{color:var(--txt-mut)}
+/* confirmação do "Levar para o lead" */
+.vl-fundo{position:fixed;inset:0;z-index:60;background:rgba(8,8,9,.72);display:flex;align-items:center;
+  justify-content:center;padding:1rem;overflow:auto}
+.vl-cx{width:100%;max-width:420px;background:var(--card);border:1px solid var(--borda);border-radius:14px;
+  box-shadow:0 18px 50px rgba(0,0,0,.55)}
+.vl-cab{padding:.9rem 1rem .2rem;display:flex;flex-direction:column;gap:.2rem}
+.vl-cab b{font-size:1rem}
+.vl-cab .mut{font-size:.78rem;color:var(--txt-mut)}
+.vl-corpo{padding:.9rem 1rem;display:flex;flex-direction:column;gap:.75rem}
+.vl-2{display:grid;gap:.75rem;grid-template-columns:1fr}
+@media(min-width:460px){.vl-2{grid-template-columns:1fr 1fr}}
+.vl-fonte{margin-top:.3rem;font-size:.7rem;color:var(--verde-claro)}
+.vl-dup{margin:0 1rem;padding:.55rem .7rem;border-radius:9px;font-size:.76rem;color:#e0a33e;
+  border:1px solid #5a4520;background:#2a2113}
+.vl-dup a{color:#e0a33e}
+.vl-pe{display:flex;gap:.5rem;justify-content:flex-end;padding:.8rem 1rem;border-top:1px solid var(--borda);
+  background:var(--card-2);border-radius:0 0 13px 13px;margin-top:.9rem}
 .cn-msg{color:#4a9cff;border-color:#274a73;background:#0f1e30}
 .cn-ig{color:#f083b0;border-color:#5c2946;background:#2a1420}
 .cx-tabs{display:flex;gap:.2rem;border-bottom:1px solid var(--borda);margin:.7rem 0 0;overflow-x:auto}
@@ -7826,10 +8092,84 @@ function cxAgente(convId,on){
   fetch('/painel/prospeccao/comunicacao/agente-conversa',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
     .then(function(r){return r.json();}).then(function(d){if(!d.ok){alert(d.erro||'Não consegui.');return;}cxOpen(document.getElementById('cxc-'+convId),convId);}).catch(function(){alert('Falha de rede.');});
 }
-function cxVirarLead(convId){var fd=new FormData();fd.append('conversa_id',convId);
+// "Levar para o lead" agora CONFIRMA antes de criar. Sem isso o clique gravava na
+// hora com o número cru no lugar do nome — e o funil enchia de lead chamado "5586…"
+// mesmo com o nome do contato guardado no banco (agenda do celular / perfil do
+// WhatsApp / remetente do e-mail). O modal abre com tudo preenchido: só conferir.
+var _cxVlTemp='morno',_cxVlTipo='pf';
+function cxVlFechar(){var m=document.getElementById('cx-vl');if(m)m.parentNode.removeChild(m);
+  document.removeEventListener('keydown',cxVlEsc);}
+function cxVirarLead(convId){
+  fetch('/painel/prospeccao/comunicacao/virar-lead/'+convId,{headers:{'X-Requested-With':'fetch'}})
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){alert(d.erro||'Não consegui.');return;}
+      if(d.ja_lead){location.href='/painel/prospeccao/'+d.lead_id;return;}
+      cxVlAbrir(convId,d);
+    }).catch(function(){alert('Falha de rede.');});
+}
+function cxVlAbrir(convId,d){
+  cxVlFechar();
+  _cxVlTemp='morno';_cxVlTipo=(d.tipo==='pj')?'pj':'pf';
+  var FONTES={agenda:'📇 veio da agenda do seu celular',perfil:'💬 nome do perfil no WhatsApp',
+              email:'✉️ nome do remetente do e-mail'};
+  var fonte=d.nome?(FONTES[d.nome_fonte]||''):'Não achei o nome em lugar nenhum — escreva como ele deve aparecer no funil.';
+  var vend='';
+  if(d.pode_atribuir){
+    var ops='<option value="">— livre —</option>';
+    d.vendedores.forEach(function(v){ops+='<option value="'+v.id+'">'+cxEsc(v.nome)+'</option>';});
+    vend='<div><label class="lbl" for="vl-vend">Responsável</label><select class="fld" id="vl-vend">'+ops+'</select></div>';
+  }
+  var dup=d.duplicado?('<div class="vl-dup">⚠️ Já existe um lead com esse telefone: <b>'+cxEsc(d.duplicado.empresa)
+        +'</b>. <a href="/painel/prospeccao/'+d.duplicado.id+'">Abrir o lead existente</a> em vez de criar outro?</div>'):'';
+  var temps=['frio','morno','quente'].map(function(t){
+    return '<button type="button" class="rcpill'+(t==='morno'?' on':'')+'" data-vlt="'+t+'" onclick="cxVlTemp(this)">'+t+'</button>';}).join('');
+  var m=document.createElement('div');
+  m.id='cx-vl';m.className='vl-fundo';m.setAttribute('role','dialog');m.setAttribute('aria-modal','true');
+  m.onclick=function(e){if(e.target===m)cxVlFechar();};
+  m.innerHTML='<div class="vl-cx">'
+    +'<div class="vl-cab"><b>Levar para o lead</b><span class="mut">Confira o nome e o telefone. É assim que ele vai aparecer no funil.</span></div>'
+    +'<div class="vl-corpo">'
+    +'<div><span class="lbl">Tipo</span><div class="rcpills" style="margin:0">'
+      +'<button type="button" class="rcpill'+(_cxVlTipo==='pj'?' on':'')+'" data-vltp="pj" onclick="cxVlTipo(this)">🏢 Empresa</button>'
+      +'<button type="button" class="rcpill'+(_cxVlTipo==='pf'?' on':'')+'" data-vltp="pf" onclick="cxVlTipo(this)">🧑 Pessoa física</button></div></div>'
+    +'<div><label class="lbl" for="vl-nome">Nome do contato</label><input class="fld" id="vl-nome" value="'+cxEsc(d.nome||'')+'" placeholder="Como ele aparece no funil">'
+      +(fonte?('<div class="vl-fonte">'+cxEsc(fonte)+'</div>'):'')+'</div>'
+    +'<div id="vl-emp-box"'+(_cxVlTipo==='pf'?' style="display:none"':'')+'><label class="lbl" for="vl-emp">Empresa <span class="mut">(opcional)</span></label>'
+      +'<input class="fld" id="vl-emp" placeholder="Mesmo nome do contato"></div>'
+    +'<div class="vl-2"><div><label class="lbl" for="vl-tel">WhatsApp</label><input class="fld" id="vl-tel" value="'+cxEsc(d.telefone||'')+'"></div>'
+      +'<div><label class="lbl" for="vl-mail">E-mail</label><input class="fld" id="vl-mail" value="'+cxEsc(d.email||'')+'" inputmode="email"></div></div>'
+    +vend
+    +'<div><span class="lbl">Temperatura</span><div class="rcpills" style="margin:0">'+temps+'</div></div>'
+    +'</div>'+dup
+    +'<div class="vl-pe"><button type="button" class="pbtn ghost" onclick="cxVlFechar()">Cancelar</button>'
+    +'<button type="button" class="pbtn" id="vl-ok" onclick="cxVlCriar('+convId+')">Criar lead</button></div></div>';
+  document.body.appendChild(m);
+  var n=document.getElementById('vl-nome');if(n){n.focus();if(d.nome)n.select();}
+  document.addEventListener('keydown',cxVlEsc);
+}
+function cxVlEsc(e){if(e.key==='Escape')cxVlFechar();}
+function cxVlTemp(b){_cxVlTemp=b.getAttribute('data-vlt');
+  b.parentNode.querySelectorAll('.rcpill').forEach(function(x){x.classList.remove('on');});b.classList.add('on');}
+function cxVlTipo(b){_cxVlTipo=b.getAttribute('data-vltp');
+  b.parentNode.querySelectorAll('.rcpill').forEach(function(x){x.classList.remove('on');});b.classList.add('on');
+  var e=document.getElementById('vl-emp-box');if(e)e.style.display=(_cxVlTipo==='pj')?'':'none';}
+function cxVlCriar(convId){
+  var nome=(document.getElementById('vl-nome').value||'').trim();
+  if(!nome){alert('Escreva o nome — é ele que vai aparecer no funil.');document.getElementById('vl-nome').focus();return;}
+  var b=document.getElementById('vl-ok');b.disabled=true;b.textContent='Criando…';
+  var vd=document.getElementById('vl-vend');
+  var fd=new FormData();
+  fd.append('conversa_id',convId);fd.append('nome',nome);fd.append('tipo',_cxVlTipo);
+  fd.append('empresa',(document.getElementById('vl-emp').value||'').trim());
+  fd.append('telefone',(document.getElementById('vl-tel').value||'').trim());
+  fd.append('email',(document.getElementById('vl-mail').value||'').trim());
+  fd.append('temperatura',_cxVlTemp);fd.append('vendedor_id',vd?vd.value:'');
   fetch('/painel/prospeccao/comunicacao/virar-lead',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
-    .then(function(r){return r.json();}).then(function(d){if(!d.ok){alert(d.erro||'Não consegui.');return;}
-      location.href='/painel/prospeccao/'+d.lead_id;}).catch(function(){alert('Falha de rede.');});}
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){b.disabled=false;b.textContent='Criar lead';alert(d.erro||'Não consegui.');return;}
+      location.href='/painel/prospeccao/'+d.lead_id;})
+    .catch(function(){b.disabled=false;b.textContent='Criar lead';alert('Falha de rede.');});
+}
 // Envio NÃO BLOQUEIA. A mensagem aparece na hora, o campo fica livre pra
 // escrever a próxima e o envio corre por trás. Antes o botão ficava desabilitado
 // até a resposta voltar — e /enviar leva até 12s quando precisa religar a

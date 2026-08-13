@@ -461,7 +461,35 @@ async function repassarContatos (contaId, contatos, daAgenda) {
 function agendarResyncAgenda (contaId, s) {
   clearTimeout(s._agendaT1); clearTimeout(s._agendaT2)
   s._agendaT1 = setTimeout(() => resyncAgenda(contaId, 1, false), 30000)
-  s._agendaT2 = setTimeout(() => resyncAgenda(contaId, 2, true), 120000)
+  // a passada COMPLETA só depois que a sincronização inicial acalmar — ver
+  // esperarAcalmarEResync
+  s._agendaT2 = setTimeout(() => {
+    esperarAcalmarEResync(contaId).catch((e) =>
+      log.warn({ contaId, e: String(e) }, 'esperarAcalmarEResync falhou'))
+  }, 120000)
+}
+
+// Pedir a agenda inteira NO MEIO da sincronização inicial corrompe as duas.
+// O motivo está no addTransactionCapability do Baileys (Utils/auth-utils.js):
+// transactionCache e mutations são compartilhados por TODAS as transações em
+// aberto, com um contador simples — não é um isolamento de verdade. Quando a
+// nossa passada completa zera a versão da coleção, esse null cai no mesmo cache
+// que a sincronização em andamento está lendo, e ela passa a calcular o estado
+// a partir do zero com patches já aplicados. Resultado medido num pareamento
+// novo: a agenda parou em exatos 1000 contatos (5 lotes) e nunca mais voltou,
+// enquanto o mesmo código numa sessão ociosa trouxe 4264.
+//
+// Então espera o histórico parar de chegar (s.sincronizando cai sozinho 5s
+// depois da última onda) antes de pedir. Teto de 15min pra nunca ficar preso.
+async function esperarAcalmarEResync (contaId) {
+  const limite = Date.now() + 15 * 60 * 1000
+  while (Date.now() < limite) {
+    const s = sessoes.get(contaId)
+    if (!s || s.status !== 'conectado') return          // caiu: nada a fazer
+    if (!s.sincronizando) break                          // acalmou: pode pedir
+    await new Promise((r2) => setTimeout(r2, 5000))
+  }
+  await resyncAgenda(contaId, 2, true)
 }
 
 // Só a coleção da AGENDA. Pedir as outras a partir do zero não traz contato

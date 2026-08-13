@@ -24,11 +24,13 @@ from finance.livro_caixa import LivroCaixa
 from finance.models import Lancamento, Tipo
 
 # 018 (chave) + 057 (natureza) fazem o insert do livro-caixa rodar; 132 traz o
-# plano/centros e as colunas de classificação.
+# plano/centros e as colunas de classificação; 143 amplia o plano (locação/
+# buffet/serviços) e separa limpeza de manutenção.
 _MIGRACOES = ("018_chave_nfce_lancamentos.sql",
               "053_modulo_pj.sql",
               "057_natureza_lancamento.sql",
-              "132_plano_contas_centros_custo.sql")
+              "132_plano_contas_centros_custo.sql",
+              "143_plano_contas_locacao_buffet_servicos.sql")
 
 
 @pytest.fixture(scope="module")
@@ -66,19 +68,65 @@ def _reais(pool, conta_id, tipo, valor, cod=None, centro=None, natureza="empresa
 
 
 # ── Plano de contas (global + liga/desliga por conta) ─────────────────────────
-def test_seed_global_31_contas_em_7_grupos(pool):
+def test_seed_global_37_contas_em_7_grupos(pool):
     plano = pc.listar_plano(pool)
-    assert len(plano) == 31
+    assert len(plano) == 37
     grupos = {}
     for c in plano:
         grupos[c["grupo"]] = grupos.get(c["grupo"], 0) + 1
-    assert grupos == {1: 6, 2: 3, 3: 3, 4: 5, 5: 8, 6: 3, 7: 3}
+    assert grupos == {1: 9, 2: 3, 3: 3, 4: 5, 5: 11, 6: 3, 7: 3}
+
+
+def test_143_contas_novas_e_limpeza_separada_da_manutencao(pool):
+    """Migração 143: as 6 contas de locação/buffet/serviços entram, e a 5.1.05
+    passa a ser só material (a manutenção virou a 5.1.11)."""
+    por_cod = {c["codigo"]: c for c in pc.listar_plano(pool)}
+
+    # 5.1.05 não acumula mais manutenção
+    assert por_cod["5.1.05"]["nome"] == "Material de Limpeza"
+    assert por_cod["5.1.11"]["nome"] == "Manutenção e Conservação"
+
+    novas_receita = ("1.2.04", "1.2.05", "1.2.06")
+    novas_despesa = ("5.1.09", "5.1.10", "5.1.11")
+    for cod in novas_receita:
+        assert por_cod[cod]["grupo"] == 1 and por_cod[cod]["natureza"] == "receita"
+    for cod in novas_despesa:
+        assert por_cod[cod]["grupo"] == 5 and por_cod[cod]["natureza"] == "despesa"
+    assert por_cod["1.2.05"]["nome"] == "Receita de Buffet"
+    assert por_cod["5.1.09"]["nome"] == "Diaristas"
+    assert por_cod["5.1.10"]["nome"] == "Serviços Terceirizados"
+
+
+def test_143_ordem_segue_a_sequencia_do_codigo(pool):
+    """A ordem é recalculada pelo código: as novas caem no fim do PRÓPRIO grupo,
+    não no fim da lista (é o que a tela mostra)."""
+    plano = pc.listar_plano(pool)                    # vem ordenado por ordem
+    assert [c["codigo"] for c in plano] == sorted(c["codigo"] for c in plano)
+    assert [c["ordem"] for c in plano] == list(range(1, len(plano) + 1))
+
+    g1 = [c["codigo"] for c in plano if c["grupo"] == 1]
+    assert g1[-3:] == ["1.2.04", "1.2.05", "1.2.06"]
+    g5 = [c["codigo"] for c in plano if c["grupo"] == 5]
+    assert g5[-3:] == ["5.1.09", "5.1.10", "5.1.11"]
+
+
+def test_143_e_idempotente(pool):
+    """Rerodar a migração não duplica conta nem desfaz o rename."""
+    base = Path(__file__).resolve().parent.parent / "db" / "migracoes"
+    sql = (base / "143_plano_contas_locacao_buffet_servicos.sql").read_text(encoding="utf-8")
+    with pool.connection() as c:
+        c.execute(sql)
+        c.commit()
+    plano = pc.listar_plano(pool)
+    assert len(plano) == 37
+    assert {c["codigo"] for c in plano}.__len__() == 37          # sem duplicata
+    assert next(c for c in plano if c["codigo"] == "5.1.05")["nome"] == "Material de Limpeza"
 
 
 def test_default_on_tudo_habilitado(pool, conta_id):
     arv = pc.arvore_habilitada(pool, conta_id)
     assert len(arv) == 7
-    assert sum(g["n_total"] for g in arv) == 31
+    assert sum(g["n_total"] for g in arv) == 37
     # sem nenhuma linha em plano_conta_habilitada, TUDO vem habilitado
     assert all(g["n_ativas"] == g["n_total"] for g in arv)
     assert all(c["habilitada"] for c in pc.habilitadas(pool, conta_id))

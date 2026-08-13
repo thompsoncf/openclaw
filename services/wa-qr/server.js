@@ -39,7 +39,7 @@ const { Pool } = require('pg')
 const pino = require('pino')
 const QRCode = require('qrcode')
 const makeWASocket = require('@whiskeysockets/baileys').default
-const { DisconnectReason, makeCacheableSignalKeyStore, fetchLatestBaileysVersion, proto } =
+const { DisconnectReason, makeCacheableSignalKeyStore, fetchLatestBaileysVersion, proto, BufferJSON } =
   require('@whiskeysockets/baileys')
 const TIPO_HIST = proto.Message.HistorySyncNotification.HistorySyncType
 const { useDbAuthState } = require('./auth-db')
@@ -182,6 +182,13 @@ async function comLimiteDeConcorrencia (itens, limite, fn) {
 // desiste com "recv retry request, but message not available" — a mensagem fica
 // eternamente como "Aguardando mensagem" no celular, mesmo tendo saído do Zaq.
 // O próprio Baileys deixa esse cache a cargo da aplicação (tem um TODO no fonte).
+// ...e o cache PRECISA sobreviver a restart. Memória sozinha não bastava: numa
+// mensagem enviada 07:48, com deploy do serviço logo em seguida, o pedido de
+// reenvio chegou no processo novo com o cache vazio — o Baileys não teve o
+// conteúdo pra re-encriptar e a mensagem ficou eternamente "Aguardando
+// mensagem" no celular do cliente (no banco: status 'enviado' que nunca virou
+// 'entregue'). Memória continua como caminho rápido; o Postgres é a rede de
+// segurança, igual ao que já se faz com o mapa de @lid.
 const MAX_ENVIADAS = 400
 const enviadas = new Map()
 
@@ -192,6 +199,37 @@ function guardarEnviada (contaId, m) {
   enviadas.set(k, m.message)
   // Map preserva ordem de inserção: o primeiro é sempre o mais antigo.
   while (enviadas.size > MAX_ENVIADAS) enviadas.delete(enviadas.keys().next().value)
+  // não dá await: guardar é best-effort e não pode atrasar o envio
+  pool.query(
+    `insert into wa_qr_enviadas (conta_id, msg_id, conteudo, criado_em)
+     values ($1,$2,$3, now())
+     on conflict (conta_id, msg_id) do nothing`,
+    [contaId, m.key.id, JSON.stringify(m.message, BufferJSON.replacer)]
+  ).catch((e) => log.warn({ contaId, e: String(e) }, 'guardarEnviada: falha ao persistir'))
+}
+
+async function buscarEnviada (contaId, id) {
+  const emMemoria = enviadas.get(contaId + ':' + id)
+  if (emMemoria) return emMemoria
+  try {
+    const r = await pool.query(
+      'select conteudo from wa_qr_enviadas where conta_id=$1 and msg_id=$2', [contaId, id])
+    if (!r.rows[0]) return undefined
+    return JSON.parse(r.rows[0].conteudo, BufferJSON.reviver)
+  } catch (e) {
+    log.warn({ contaId, id, e: String(e) }, 'buscarEnviada: falha ao ler do banco')
+    return undefined
+  }
+}
+
+// Pedido de reenvio chega em minutos/horas, não em semanas — guardar mais que
+// isso só engorda a tabela. Roda uma vez por restauração de sessão.
+async function limparEnviadasAntigas () {
+  try {
+    const r = await pool.query(
+      "delete from wa_qr_enviadas where criado_em < now() - interval '3 days'")
+    if (r.rowCount) log.info({ n: r.rowCount }, 'cache de enviadas: linhas antigas apagadas')
+  } catch (e) { log.warn({ e: String(e) }, 'limparEnviadasAntigas falhou') }
 }
 
 function jidDe (numero) {
@@ -667,8 +705,10 @@ async function iniciarSessao (contaId) {
       // ver comentário do cache `enviadas`: é isto que permite reenviar quando o
       // aparelho do vendedor (ou do cliente) não consegue decifrar e pede retry.
       getMessage: async (key) => {
-        const m = enviadas.get(contaId + ':' + (key && key.id))
-        log.info({ contaId, id: key && key.id, achou: !!m }, 'retry: pediram reenvio de mensagem nossa')
+        const id = key && key.id
+        const m = id ? await buscarEnviada(contaId, id) : undefined
+        log.info({ contaId, id, achou: !!m, memoria: !!enviadas.get(contaId + ':' + id) },
+          'retry: pediram reenvio de mensagem nossa')
         return m
       }
     })
@@ -872,6 +912,7 @@ async function iniciarSessao (contaId) {
 // contas que já estavam pareadas — sem QR novo, sem ninguém precisar abrir tela
 // nenhuma. Best-effort: se falhar, o fluxo manual pela aba Canais continua igual.
 async function restaurarSessoes () {
+  limparEnviadasAntigas().catch(() => {})
   try {
     // Pareada = creds.me preenchido — é ISSO que o Baileys usa pra decidir entre
     // "logging in..." (retoma a sessão) e "attempting registration..." (QR novo).

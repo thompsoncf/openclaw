@@ -1586,6 +1586,8 @@ def comunicacao_responder(request: Request, conversa_id: int = Form(...), texto:
             erros = {"nao_configurado": "WhatsApp não conectado (falta credencial Twilio no Render).",
                      "sem_numero_empresa": "Configure o WhatsApp desta empresa na aba Canais.",
                      "numero_invalido": "Número do lead inválido.",
+                     "sem_whatsapp": "Esse número não tem WhatsApp. Confira o número na "
+                                     "ficha do lead — costuma faltar o 9 do celular.",
                      "qr_indisponivel": "A conexão por QR ainda não está ligada — use Twilio ou Cloud API.",
                      "desconectado": "O WhatsApp está reconectando (normal por ~1 minuto após uma "
                                      "atualização do sistema). Espere alguns segundos e envie de novo — "

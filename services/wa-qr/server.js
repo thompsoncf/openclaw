@@ -260,6 +260,51 @@ function jidDe (numero) {
   return comDDI + '@s.whatsapp.net'
 }
 
+// Número do jeito que está guardado NEM SEMPRE é o JID de verdade da pessoa, e o
+// WhatsApp não reclama: ele aceita a mensagem (vira ✓, SERVER_ACK) e nunca
+// entrega. Fica o traço único pra sempre, sem erro nenhum em lugar nenhum.
+// Visto em produção: contato salvo como 558694867388 (12 dígitos, sem o 9 do
+// celular) — tudo que saía pelo Zaq parava no ✓, enquanto o que o vendedor
+// mandava pelo celular chegava e era lido, porque o aparelho usa o JID certo da
+// conversa.
+//
+// onWhatsApp() pergunta ao próprio WhatsApp qual é o JID canônico daquele
+// telefone e ainda diz se a conta existe. Resolve de vez o 9º dígito brasileiro
+// e transforma "sumiu sem avisar" em erro claro na tela.
+const jidsResolvidos = new Map()
+
+async function jidRealDe (sock, contaId, numero) {
+  const base = jidDe(numero)
+  if (!base) return { jid: null, erro: 'numero_invalido' }
+  const chave = contaId + ':' + base
+  if (jidsResolvidos.has(chave)) {
+    const guardado = jidsResolvidos.get(chave)
+    return guardado ? { jid: guardado } : { jid: null, erro: 'sem_whatsapp' }
+  }
+  try {
+    const r = await sock.onWhatsApp(base.split('@')[0])
+    const achado = Array.isArray(r) ? r[0] : null
+    if (achado && achado.exists && achado.jid) {
+      jidsResolvidos.set(chave, achado.jid)
+      if (achado.jid !== base) {
+        log.info({ contaId, pedido: base, real: achado.jid },
+          'número corrigido pelo WhatsApp antes de enviar')
+      }
+      return { jid: achado.jid }
+    }
+    if (achado && !achado.exists) {
+      jidsResolvidos.set(chave, null)
+      log.warn({ contaId, numero: base }, 'esse número não tem WhatsApp')
+      return { jid: null, erro: 'sem_whatsapp' }
+    }
+  } catch (e) {
+    log.warn({ contaId, e: String(e) }, 'onWhatsApp falhou — manda pro número como veio')
+  }
+  // consulta indisponível: segue com o número original (comportamento antigo),
+  // melhor tentar entregar do que travar o envio por causa da checagem
+  return { jid: base }
+}
+
 function duracao (segundos) {
   const s = Math.max(0, Math.round(Number(segundos) || 0))
   return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0')
@@ -1206,8 +1251,11 @@ const servidor = http.createServer(async (req, res) => {
         }
         if (!s || s.status !== 'conectado' || !s.sock) return json(res, 200, { ok: false, erro: 'desconectado' })
         if (!jid) return json(res, 200, { ok: false, erro: 'numero_invalido' })
+        // pergunta ao WhatsApp o JID de verdade antes de mandar — ver jidRealDe
+        const alvo = await jidRealDe(s.sock, contaId, body.numero)
+        if (!alvo.jid) return json(res, 200, { ok: false, erro: alvo.erro || 'numero_invalido' })
         try {
-          const r = await s.sock.sendMessage(jid, { text: String(body.texto || '').slice(0, 4000) })
+          const r = await s.sock.sendMessage(alvo.jid, { text: String(body.texto || '').slice(0, 4000) })
           guardarEnviada(contaId, r)
           log.info({ contaId, id: r && r.key && r.key.id }, 'enviar: sucesso ✓')
           return json(res, 200, { ok: true, id: (r && r.key && r.key.id) || '' })

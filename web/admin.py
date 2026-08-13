@@ -445,6 +445,23 @@ _ADMIN_COMUNICACAO = """{% extends "abase" %}{% block conteudo %}
 <h1>Comunicacao</h1>
 {% if aviso %}<div class="card" style="border-color:var(--verde)">{{ aviso }}</div>{% endif %}
 
+<div class="card"><h2>Alertas do sistema — pra onde vao</h2>
+<p class="mut">Avisos de provedor pago quebrado (Anthropic, Twilio, Asaas...) e do monitor diario de saldo. O cliente nunca ve isso: ele so' recebe "instabilidade tecnica". O que valer aqui vale pra <b>todos</b> os servicos (web, cron e worker), sem redeploy.</p>
+<form method="post" action="/admin/alertas" style="display:grid;gap:.7rem;margin-top:1rem">
+  <label style="display:grid;gap:.25rem"><span class="mut">E-mail do admin</span>
+    <input type="email" name="email" value="{{ alertas.email_banco }}" placeholder="{{ alertas.email_env or 'seu@email.com' }}" style="max-width:340px"></label>
+  <label style="display:grid;gap:.25rem"><span class="mut">Telegram do admin (chat id numerico)</span>
+    <input name="telegram_id" value="{{ alertas.telegram_banco }}" placeholder="{{ alertas.telegram_env or '(opcional)' }}" style="max-width:340px"></label>
+  <div><button>Salvar destino dos alertas</button></div>
+</form>
+<table style="margin-top:1rem">
+<tr><td>E-mail em uso agora</td><td>{% if alertas.email_efetivo %}<b>{{ alertas.email_efetivo }}</b> <span class="mut">({{ alertas.email_origem }})</span>{% else %}<span class="tag suspensa">nenhum</span> <span class="mut">nenhum alerta por e-mail sai daqui</span>{% endif %}</td></tr>
+<tr><td>Telegram em uso agora</td><td>{% if alertas.telegram_efetivo %}<b>{{ alertas.telegram_efetivo }}</b> <span class="mut">({{ alertas.telegram_origem }})</span>{% else %}<span class="mut">nao configurado (opcional)</span>{% endif %}</td></tr>
+<tr><td>Remetente SMTP</td><td>{% if alertas.remetente %}{{ alertas.remetente }}{% else %}<span class="tag suspensa">SMTP nao configurado</span> <span class="mut">sem SMTP_USER/SMTP_SENHA nao sai e-mail nenhum</span>{% endif %}</td></tr>
+</table>
+<p class="mut">Campo vazio = vale a variavel de ambiente do Render (ADMIN_EMAIL / ADMIN_TELEGRAM_ID), mostrada como placeholder.</p>
+</div>
+
 <h2>O que chega: cupom x comprovante (ultimos {{ split.dias }} dias)</h2>
 <div class="cards">
 <div class="metric"><span>Imagens recebidas</span><b>{{ split.total_imagens }}</b></div>
@@ -903,6 +920,40 @@ def admin_custos(request: Request, desde: str = "", ate: str = ""):
         k=k, desde=desde, ate=ate, aviso=request.session.pop("admin_aviso", None)))
 
 
+def _estado_alertas(pool) -> dict:
+    """Pra onde vao os alertas do admin HOJE, e de onde esse valor veio (banco
+    ou variavel de ambiente). Serve pro admin conferir sem abrir o Render."""
+    import os
+    from finance import config_app as cfg
+    email_banco = (cfg.get_config(pool, cfg.ADMIN_EMAIL) or "").strip()
+    tg_banco = (cfg.get_config(pool, cfg.ADMIN_TELEGRAM_ID) or "").strip()
+    email_env = (os.environ.get("ADMIN_EMAIL") or "").strip()
+    tg_env = (os.environ.get("ADMIN_TELEGRAM_ID") or "").strip()
+    try:
+        from finance.email_sender import remetente_configurado
+        remetente = remetente_configurado()
+    except Exception:  # noqa: BLE001
+        remetente = None
+    email_efetivo = email_banco or email_env or remetente
+    if email_banco:
+        email_origem = "definido aqui no /admin"
+    elif email_env:
+        email_origem = "variavel ADMIN_EMAIL do Render"
+    elif remetente:
+        email_origem = "fallback: o proprio remetente SMTP"
+    else:
+        email_origem = ""
+    return {
+        "email_banco": email_banco, "email_env": email_env,
+        "telegram_banco": tg_banco, "telegram_env": tg_env,
+        "email_efetivo": email_efetivo, "email_origem": email_origem,
+        "telegram_efetivo": tg_banco or tg_env,
+        "telegram_origem": ("definido aqui no /admin" if tg_banco
+                            else "variavel ADMIN_TELEGRAM_ID do Render"),
+        "remetente": remetente,
+    }
+
+
 @router.get("/admin/comunicacao", response_class=HTMLResponse)
 def admin_comunicacao(request: Request):
     if _admin(request) is None:
@@ -916,4 +967,31 @@ def admin_comunicacao(request: Request):
         uso=resumo_uso(pool, 7),
         atrito=dificuldades(pool, 30),
         split=split_midia(pool, 30),
+        alertas=_estado_alertas(pool),
         aviso=request.session.pop("admin_aviso", None)))
+
+
+@router.post("/admin/alertas")
+def admin_alertas_salvar(request: Request, email: str = Form(""),
+                         telegram_id: str = Form("")):
+    """Salva pra onde vao os alertas do sistema. Campo vazio = limpa o valor do
+    banco e volta a valer a variavel de ambiente."""
+    if _admin(request) is None:
+        return _NEGADO
+    email = (email or "").strip()
+    telegram_id = (telegram_id or "").strip()
+    if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        request.session["admin_aviso"] = f"E-mail invalido: {email} — nada foi salvo."
+        return RedirectResponse("/admin/comunicacao", status_code=303)
+    if telegram_id and not re.fullmatch(r"-?\d+", telegram_id):
+        request.session["admin_aviso"] = (
+            "Telegram id tem que ser numerico (ex: 123456789) — nada foi salvo.")
+        return RedirectResponse("/admin/comunicacao", status_code=303)
+    pool = get_pool()
+    from finance import config_app as cfg
+    cfg.set_admin_email(pool, email)
+    cfg.set_admin_telegram_id(pool, telegram_id)
+    request.session["admin_aviso"] = (
+        f"Alertas do sistema vao pra {email}." if email
+        else "E-mail limpo — volta a valer a variavel ADMIN_EMAIL do Render.")
+    return RedirectResponse("/admin/comunicacao", status_code=303)

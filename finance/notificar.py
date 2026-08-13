@@ -167,33 +167,63 @@ def avisar_dono_grupo_fechado(pool, conta_id: int, titulo: str, quando: str,
     return _enviar_telegram(chat, txt)
 
 
-def notificar_admin(texto: str) -> bool:
-    """Manda uma mensagem pro Telegram do ADMIN do SaaS (env ADMIN_TELEGRAM_ID).
-    Tolerante a falha: sem env ou sem rede, loga e devolve False."""
-    chat = os.environ.get("ADMIN_TELEGRAM_ID")
+# ── Pra onde vao os alertas do ADMIN do SaaS ────────────────────────────────
+# Precedencia: /admin (tabela app_config) → variavel de ambiente → fallback.
+# O banco vem primeiro pra dar pra trocar o destino sem redeploy; o env continua
+# valendo em processo sem banco (ou antes de alguem setar no painel).
+
+def destino_email_admin() -> str | None:
+    """E-mail que recebe os alertas: /admin → env ADMIN_EMAIL → remetente SMTP.
+    Best-effort: se o banco nao responder, cai direto no env."""
+    alvo = None
     try:
-        chat = int(chat) if chat else None
+        from db.conexao import get_pool
+        from finance.config_app import admin_email
+        alvo = admin_email(get_pool())
+    except Exception:  # noqa: BLE001 - sem banco: vale o env
+        alvo = (os.environ.get("ADMIN_EMAIL") or "").strip() or None
+    if alvo:
+        return alvo
+    try:  # ultimo recurso: manda pro proprio remetente SMTP
+        from finance.email_sender import remetente_configurado
+        return remetente_configurado()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def destino_telegram_admin() -> int | None:
+    """Chat do Telegram que recebe os alertas: /admin → env ADMIN_TELEGRAM_ID."""
+    chat = None
+    try:
+        from db.conexao import get_pool
+        from finance.config_app import admin_telegram_id
+        chat = admin_telegram_id(get_pool())
+    except Exception:  # noqa: BLE001 - sem banco: vale o env
+        chat = os.environ.get("ADMIN_TELEGRAM_ID")
+    try:
+        return int(chat) if chat else None
     except (TypeError, ValueError):
-        chat = None
+        return None
+
+
+def notificar_admin(texto: str) -> bool:
+    """Manda uma mensagem pro Telegram do ADMIN do SaaS (configurado em /admin,
+    fallback env ADMIN_TELEGRAM_ID). Tolerante a falha: sem destino ou sem rede,
+    loga e devolve False."""
+    chat = destino_telegram_admin()
     if not chat:
-        _log.info("notificar_admin: ADMIN_TELEGRAM_ID nao configurado")
+        _log.info("notificar_admin: Telegram do admin nao configurado")
         return False
     return _enviar_telegram(chat, texto)
 
 
 def avisar_admin(assunto: str, mensagem: str) -> bool:
-    """Alerta GENERICO pro ADMIN do SaaS por E-MAIL (ADMIN_EMAIL, fallback pro
-    remetente SMTP) + Telegram (ADMIN_TELEGRAM_ID). Usado pelos monitores
+    """Alerta GENERICO pro ADMIN do SaaS por E-MAIL (destino de /admin, fallback
+    env ADMIN_EMAIL e depois o remetente SMTP) + Telegram. Usado pelos monitores
     proativos (saldo Twilio/Asaas, gasto da IA). Tolerante a falha: nunca
     levanta excecao."""
     ok = False
-    destino = os.environ.get("ADMIN_EMAIL")
-    if not destino:
-        try:
-            from finance.email_sender import remetente_configurado
-            destino = remetente_configurado()
-        except Exception:  # noqa: BLE001
-            destino = None
+    destino = destino_email_admin()
     if destino:
         try:
             from finance.email_sender import enviar_aviso
@@ -233,8 +263,8 @@ def avisar_admin_falha_provedor(servico: str, categoria: str = "credito",
     """Avisa o ADMIN do SaaS que um PROVEDOR EXTERNO pago falhou de forma
     ACIONAVEL (sem credito / chave invalida / quota estourada). O cliente ja'
     recebeu uma mensagem de instabilidade e NAO viu o erro tecnico. Manda por
-    E-MAIL (env ADMIN_EMAIL, fallback pro remetente SMTP) + Telegram
-    (ADMIN_TELEGRAM_ID). Tolerante a falha: nunca levanta excecao.
+    E-MAIL (destino de /admin, fallback env ADMIN_EMAIL e depois o remetente
+    SMTP) + Telegram. Tolerante a falha: nunca levanta excecao.
 
     `servico`: nome do provedor (ex "Anthropic (IA)", "Asaas", "Twilio").
     `categoria`: 'credito' | 'auth' | 'quota' (default 'credito').
@@ -254,13 +284,7 @@ def avisar_admin_falha_provedor(servico: str, categoria: str = "credito",
     ok = False
 
     # 1) E-mail pro admin
-    destino = os.environ.get("ADMIN_EMAIL")
-    if not destino:
-        try:
-            from finance.email_sender import remetente_configurado
-            destino = remetente_configurado()  # fallback: o proprio remetente SMTP
-        except Exception:  # noqa: BLE001
-            destino = None
+    destino = destino_email_admin()
     if destino:
         try:
             from finance.email_sender import enviar_aviso
@@ -268,7 +292,7 @@ def avisar_admin_falha_provedor(servico: str, categoria: str = "credito",
         except Exception as e:  # noqa: BLE001
             _log.warning("avisar_admin_falha_provedor: falha no e-mail: %s", e)
     else:
-        _log.info("avisar_admin_falha_provedor: sem ADMIN_EMAIL nem remetente SMTP")
+        _log.info("avisar_admin_falha_provedor: sem e-mail do admin nem remetente SMTP")
 
     # 2) Telegram pro admin (reaproveita notificar_admin)
     try:

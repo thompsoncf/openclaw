@@ -272,6 +272,7 @@ function jidDe (numero) {
 // telefone e ainda diz se a conta existe. Resolve de vez o 9º dígito brasileiro
 // e transforma "sumiu sem avisar" em erro claro na tela.
 const jidsResolvidos = new Map()
+const PRAZO_ONWHATSAPP_MS = 4000
 
 async function jidRealDe (sock, contaId, numero) {
   const base = jidDe(numero)
@@ -282,7 +283,22 @@ async function jidRealDe (sock, contaId, numero) {
     return guardado ? { jid: guardado } : { jid: null, erro: 'sem_whatsapp' }
   }
   try {
-    const r = await sock.onWhatsApp(base.split('@')[0])
+    // PRAZO CURTO. O onWhatsApp cai no query() do Baileys, que usa o
+    // defaultQueryTimeoutMs: 60 SEGUNDOS. Sem esse limite, uma consulta que o
+    // WhatsApp demora a responder segurava o envio por até um minuto — e o lado
+    // Python desiste em 20s (whatsapp_qr._TIMEOUT), então o vendedor levava erro
+    // na tela com a mensagem ainda a caminho. Conferir o número é um conforto;
+    // entregar a mensagem é a obrigação. Se não responder rápido, manda como veio.
+    const consulta = sock.onWhatsApp(base.split('@')[0])
+    consulta.catch(() => {})   // se estourar DEPOIS do prazo, ninguém está ouvindo
+    const r = await Promise.race([
+      consulta,
+      new Promise((r2) => setTimeout(() => r2(null), PRAZO_ONWHATSAPP_MS))
+    ])
+    if (!r) {
+      log.warn({ contaId, numero: base }, 'onWhatsApp demorou — manda pro número como veio')
+      return { jid: base }
+    }
     const achado = Array.isArray(r) ? r[0] : null
     if (achado && achado.exists && achado.jid) {
       jidsResolvidos.set(chave, achado.jid)

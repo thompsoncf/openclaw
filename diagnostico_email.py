@@ -20,11 +20,15 @@ print(f"SMTP_HOST: {host}")
 print(f"SMTP_PORT: {port}")
 print(f"SMTP_USER: {user or '*** AUSENTE ***'}")
 if senha:
-    tem_espaco = " " in senha
-    print(f"SMTP_SENHA: presente, {len(senha)} caracteres"
-          f"{' ⚠️ TEM ESPAÇO (remova!)' if tem_espaco else ''}")
-    if len(senha) != 16:
-        print(f"  ⚠️ senha de app do Google tem 16 caracteres; a sua tem {len(senha)}."
+    # O Google entrega a senha de app em 4 blocos de 4 ("abcd efgh ijkl mnop") e
+    # ACEITA os espaços no login — confirmado em produção. Por isso o tamanho se
+    # confere SEM eles: antes isso acusava "remova!" num caso que funcionava, e
+    # mandava procurar problema no lugar errado.
+    limpa = "".join(senha.split())
+    espacos = " (com espaços, que o Google aceita)" if len(limpa) != len(senha) else ""
+    print(f"SMTP_SENHA: presente, {len(limpa)} caracteres{espacos}")
+    if len(limpa) != 16:
+        print(f"  ⚠️ senha de app do Google tem 16 caracteres; a sua tem {len(limpa)}."
               f" Confira se é a senha de APP (não a senha normal).")
 else:
     print("SMTP_SENHA: *** AUSENTE ***")

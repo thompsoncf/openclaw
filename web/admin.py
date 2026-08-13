@@ -454,6 +454,10 @@ _ADMIN_COMUNICACAO = """{% extends "abase" %}{% block conteudo %}
     <input name="telegram_id" value="{{ alertas.telegram_banco }}" placeholder="{{ alertas.telegram_env or '(opcional)' }}" style="max-width:340px"></label>
   <div><button>Salvar destino dos alertas</button></div>
 </form>
+<form method="post" action="/admin/alertas/teste" style="margin-top:.6rem">
+  <button style="background:#2a2a2b;border:1px solid var(--borda)">Enviar alerta de teste</button>
+  <span class="mut" style="margin-left:.5rem">dispara pelo caminho real e diz, canal a canal, se saiu</span>
+</form>
 <table style="margin-top:1rem">
 <tr><td>E-mail em uso agora</td><td>{% if alertas.email_efetivo %}<b>{{ alertas.email_efetivo }}</b> <span class="mut">({{ alertas.email_origem }})</span>{% else %}<span class="tag suspensa">nenhum</span> <span class="mut">nenhum alerta por e-mail sai daqui</span>{% endif %}</td></tr>
 <tr><td>Telegram em uso agora</td><td>{% if alertas.telegram_efetivo %}<b>{{ alertas.telegram_efetivo }}</b> <span class="mut">({{ alertas.telegram_origem }})</span>{% else %}<span class="mut">nao configurado (opcional)</span>{% endif %}</td></tr>
@@ -994,4 +998,31 @@ def admin_alertas_salvar(request: Request, email: str = Form(""),
     request.session["admin_aviso"] = (
         f"Alertas do sistema vao pra {email}." if email
         else "E-mail limpo — volta a valer a variavel ADMIN_EMAIL do Render.")
+    return RedirectResponse("/admin/comunicacao", status_code=303)
+
+
+@router.post("/admin/alertas/teste")
+def admin_alertas_teste(request: Request):
+    """Dispara um alerta de TESTE pelo caminho real e relata canal a canal.
+
+    O relato e' separado de proposito: e-mail e Telegram falham por motivos
+    diferentes (credencial SMTP x token/chat id), e um 'deu certo' agregado
+    esconderia justamente o canal quebrado."""
+    if _admin(request) is None:
+        return _NEGADO
+    from finance.notificar import enviar_alerta_teste
+    r = enviar_alerta_teste()
+    partes = []
+    if r["email_ok"]:
+        partes.append(f"E-mail ENVIADO pra {r['email_destino']} (veja tambem o spam).")
+    else:
+        alvo = f" ({r['email_destino']})" if r["email_destino"] else ""
+        partes.append(f"E-mail NAO saiu{alvo}: {r['email_erro']}.")
+    if r["telegram_ok"]:
+        partes.append(f"Telegram ENVIADO pro chat {r['telegram_destino']}.")
+    elif r["telegram_destino"]:
+        partes.append(f"Telegram NAO saiu: {r['telegram_erro']}.")
+    else:
+        partes.append("Telegram nao configurado (opcional).")
+    request.session["admin_aviso"] = " ".join(partes)
     return RedirectResponse("/admin/comunicacao", status_code=303)

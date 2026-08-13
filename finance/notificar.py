@@ -217,6 +217,55 @@ def notificar_admin(texto: str) -> bool:
     return _enviar_telegram(chat, texto)
 
 
+_ASSUNTO_TESTE = "Teste de alerta do Zaq"
+_CORPO_TESTE = (
+    "Alerta de TESTE disparado pelo /admin. Se voce recebeu isto, os avisos do "
+    "sistema (provedor pago quebrado, monitor de saldo) chegam ate' voce."
+)
+
+
+def enviar_alerta_teste() -> dict:
+    """Dispara um alerta de TESTE pelo MESMO caminho dos alertas reais e devolve
+    o resultado de cada canal SEPARADO.
+
+    Por que nao reusar `avisar_admin`: ele devolve um bool so' (e-mail OU
+    telegram), entao um canal quebrado fica escondido atras do outro que
+    funcionou — exatamente o que um teste precisa revelar. Tolerante a falha:
+    nunca levanta excecao, o erro vira texto no dict."""
+    r = {
+        "email_destino": destino_email_admin(), "email_ok": False, "email_erro": "",
+        "telegram_destino": destino_telegram_admin(), "telegram_ok": False,
+        "telegram_erro": "",
+    }
+
+    if r["email_destino"]:
+        try:
+            from finance.email_sender import enviar_aviso
+            r["email_ok"] = bool(enviar_aviso(r["email_destino"], _ASSUNTO_TESTE,
+                                              _CORPO_TESTE))
+            if not r["email_ok"]:
+                r["email_erro"] = "o envio falhou — confira SMTP_USER/SMTP_SENHA"
+        except Exception as e:  # noqa: BLE001
+            r["email_erro"] = f"{type(e).__name__}: {e}"
+    else:
+        r["email_erro"] = ("sem destino — nada salvo aqui, nem ADMIN_EMAIL, "
+                           "nem remetente SMTP")
+
+    if r["telegram_destino"]:
+        try:
+            r["telegram_ok"] = bool(_enviar_telegram(
+                r["telegram_destino"], f"*{_ASSUNTO_TESTE}*\n{_CORPO_TESTE}"))
+            if not r["telegram_ok"]:
+                r["telegram_erro"] = ("o envio falhou — confira TELEGRAM_TOKEN e "
+                                      "se o chat id esta' certo")
+        except Exception as e:  # noqa: BLE001
+            r["telegram_erro"] = f"{type(e).__name__}: {e}"
+    else:
+        r["telegram_erro"] = "nao configurado (opcional)"
+
+    return r
+
+
 def avisar_admin(assunto: str, mensagem: str) -> bool:
     """Alerta GENERICO pro ADMIN do SaaS por E-MAIL (destino de /admin, fallback
     env ADMIN_EMAIL e depois o remetente SMTP) + Telegram. Usado pelos monitores

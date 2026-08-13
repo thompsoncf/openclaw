@@ -32,6 +32,7 @@ create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id 
   orcamento_id bigint, tem_site boolean, maps_url text, receita text, site_url text,
   decisor_nome text, decisor_cargo text, decisor_telefone text, decisor_whatsapp boolean,
   decisor_em timestamptz, decisor_telefones jsonb, estagio text default 'lead',
+  tipo text default 'pj', cpf text,
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   canal text, status text default 'aberta', agente_ativo boolean default true,

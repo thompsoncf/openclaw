@@ -247,6 +247,12 @@ _REGRAS_DESPESA = [
     (("diarista", "faxineira", "faxina"),   "Servicos",    "5.1.09", "alta"),
     (("material de limpeza", "materiais de limpeza", "produtos de limpeza"),
                                              "Compras",     "5.1.05", "alta"),
+    # "escritorio" SOZINHO não entra: roubaria "escritorio contabil" da 5.1.07 e
+    # "escritorio de advocacia". Impressora não entra porque comprar aparelho é
+    # imobilizado (7.1.01) — aqui é só o consumível.
+    (("papelaria", "material de escritorio", "materiais de escritorio",
+      "kalunga", "cartucho", "toner", "resma", "papel a4"),
+                                             "Compras",     "5.1.04", "alta"),
     (("terceiriz",),                        "Servicos",    "5.1.10", "media"),
     (("manutencao", "conserto", "eletricista", "encanador", "pintura",
       "dedetiza", "jardinagem", "jardineiro"),

@@ -844,7 +844,7 @@ async function iniciarSessao (contaId) {
   }, 30000)
 
   try {
-    const { state, saveCreds, limparTudo } = await useDbAuthState(pool, contaId)
+    const { state, saveCreds, limparTudo } = await useDbAuthState(pool, contaId, log)
     log.info({ contaId, pareada: !!(state.creds && state.creds.me) },
       'iniciarSessao: creds carregadas do banco')
     // o mapa código->número vive em memória e zera a cada deploy; recarrega do
@@ -1310,7 +1310,7 @@ const servidor = http.createServer(async (req, res) => {
         // conectar o dispositivo" repetido no celular.
         try {
           if (s && s._limparTudo) { await s._limparTudo() } else {
-            const { limparTudo } = await useDbAuthState(pool, contaId)
+            const { limparTudo } = await useDbAuthState(pool, contaId, log)
             await limparTudo()
           }
         } catch (_) {}

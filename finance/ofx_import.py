@@ -231,9 +231,26 @@ def parsear_ofx(conteudo: str) -> OfxExtrato:
 # classificar". Ordem importa: a primeira regra que bater vence.
 _REGRAS_DESPESA = [
     (("aluguel",),                          "Moradia",     "5.1.01", "alta"),
-    (("pacote servico", "pacote de servico", "tarifa banc", "manutencao de conta"),
+    # "manutencao ... conta" é tarifa de banco — NADA a ver com 5.1.11
+    # (Manutenção e Conservação). Tem que vir ANTES da regra de manutenção, e as
+    # variantes sem "de" estão aqui de propósito: sem elas, "TAR MANUTENCAO CONTA"
+    # escaparia pra 5.1.11.
+    (("pacote servico", "pacote de servico", "tarifa banc",
+      "manutencao de conta", "manutencao conta", "manutencao cta"),
                                              "Servicos",    "6.1.02", "alta"),
     (("taxa de cartao", "maquininha"),      "Servicos",    "6.1.03", "alta"),
+    # Serviços de empresa (plano 5.1.x). Ficam antes das heurísticas de consumo
+    # abaixo pra não perder pra elas ("manutencao cafeteira" cairia em cafe →
+    # Restaurante). Termos curtos demais foram evitados de propósito: "reparo"
+    # está DENTRO de "preparo" (buffet), "jardin" dentro do bairro "Jardins" e
+    # "diaria" pega diária de hotel — ver os testes de falso positivo.
+    (("diarista", "faxineira", "faxina"),   "Servicos",    "5.1.09", "alta"),
+    (("material de limpeza", "materiais de limpeza", "produtos de limpeza"),
+                                             "Compras",     "5.1.05", "alta"),
+    (("terceiriz",),                        "Servicos",    "5.1.10", "media"),
+    (("manutencao", "conserto", "eletricista", "encanador", "pintura",
+      "dedetiza", "jardinagem", "jardineiro"),
+                                             "Servicos",    "5.1.11", "media"),
     (("mercado", "supermercado", "hortifruti", "acougue"),
                                              "Mercado",     "3.1.03", "media"),
     (("posto", "combustivel", "auto posto"),"Transporte",  "5.1.08", "media"),

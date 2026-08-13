@@ -842,6 +842,19 @@ async function iniciarSessao (contaId) {
         // credencial (pro próximo /iniciar parear do zero) mas PRESERVA o chat.
         // Não dá pra usar creds.registered aqui: no fluxo QR ele nunca vira true.
         const foiLogoutReal = !!s.jaConectou
+        // Fecha o socket ANTES de limpar. Sem isso ele seguia vivo com os
+        // listeners escutando: o serviço já tinha apagado a credencial e tirado
+        // a sessão do mapa, mas o socket zumbi continuava despejando contatos e
+        // histórico no webhook com este contaId. Visto em produção — wa_qr_auth
+        // ZERADA e wa_contatos crescendo centenas por minuto ao mesmo tempo, e
+        // nenhuma conversa entrando. Marca _descartado primeiro pro 'close' que
+        // o próprio end() emite não reentrar neste handler (mesmo padrão de
+        // quando trocamos de socket em iniciarSessao).
+        try {
+          sock._descartado = true
+          sock.end(undefined)
+          log.info({ contaId }, 'socket fechado no logout')
+        } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao fechar socket deslogado') }
         try { await limparTudo() } catch (e) { log.warn({ contaId, e: String(e) }, 'limparTudo falhou') }
         sessoes.delete(contaId)
         lidMaps.delete(contaId)

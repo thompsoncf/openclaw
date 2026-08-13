@@ -483,6 +483,25 @@ async function resyncAgenda (contaId, tentativa, completa) {
   }
 }
 
+// Recibo de entrega/leitura. O Baileys emite messages.update com o status novo
+// (proto.WebMessageInfo.Status: 0 ERROR, 1 PENDING, 2 SERVER_ACK, 3 DELIVERY_ACK,
+// 4 READ, 5 PLAYED). PENDING fica de fora: é "ainda nem saiu", não diz nada pra
+// quem está olhando o chat.
+const STATUS_RECIBO = { 0: 'erro', 2: 'enviado', 3: 'entregue', 4: 'lido', 5: 'lido' }
+
+async function repassarStatus (contaId, itens) {
+  if (!APP_URL || !itens.length) return
+  try {
+    const r = await fetch(APP_URL + '/webhooks/wa-qr/status', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-wa-secret': SEGREDO },
+      body: JSON.stringify({ conta_id: contaId, itens })
+    })
+    if (!r.ok) log.warn({ contaId, status: r.status }, 'webhook wa-qr/status respondeu não-ok')
+    else log.info({ contaId, n: itens.length }, 'recibos repassados ✓')
+  } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao repassar recibos') }
+}
+
 async function enviarContatos (contaId, lista, daAgenda) {
   if (!lista.length) return
   // a sincronização inicial pode despejar milhares de contatos de uma vez
@@ -777,6 +796,25 @@ async function iniciarSessao (contaId) {
     repassarContatos(contaId, contatos, true).catch((e) =>
       log.warn({ contaId, e: String(e) }, 'repassarContatos falhou'))
   })
+  // ✓ enviado · ✓✓ entregue · 👀 lido. Só das mensagens que saíram daqui
+  // (fromMe); recibo de mensagem recebida é o NOSSO aparelho confirmando, não
+  // interessa pro chat. O lado Python casa pelo id e nunca deixa o status
+  // regredir, porque esses eventos chegam fora de ordem com frequência.
+  sock.ev.on('messages.update', (atualizacoes) => {
+    const itens = []
+    for (const u of atualizacoes || []) {
+      const k = u && u.key
+      const st = u && u.update && u.update.status
+      if (!k || !k.fromMe || !k.id) continue
+      const nome = STATUS_RECIBO[st]
+      if (nome) itens.push({ id: k.id, status: nome })
+    }
+    if (itens.length) {
+      repassarStatus(contaId, itens).catch((e) =>
+        log.warn({ contaId, e: String(e) }, 'repassarStatus falhou'))
+    }
+  })
+
   // Nome do PERFIL (pushName) — reserva, só preenche quando não há nome ainda.
   sock.ev.on('contacts.update', (contatos) => {
     repassarContatos(contaId, contatos, false).catch((e) =>

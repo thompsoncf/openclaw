@@ -88,6 +88,14 @@ def _agora():
     return datetime.now(timezone.utc)
 
 
+def _hora_br(dt, fmt: str = "%d/%m %H:%M") -> str:
+    """Data/hora em horário de Brasília (UTC-3). O banco guarda tudo em UTC, e o
+    inbox mostrava a hora crua — 3 horas adiantada pra quem está no Brasil. Fixo
+    em -3 de propósito: o país não tem horário de verão desde 2019, e é a mesma
+    conta que o resto do painel já fazia (ex.: histórico de envios)."""
+    return (dt - timedelta(hours=3)).strftime(fmt) if dt else ""
+
+
 def _so_digitos(s: str) -> str:
     return "".join(ch for ch in (s or "") if ch.isdigit())
 
@@ -1316,6 +1324,31 @@ def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=
     return out
 
 
+_WA_NOME_CACHE: dict = {}
+
+
+def _wa_nome_conectado(conta_id: int) -> str:
+    """Nome do perfil do WhatsApp conectado por QR (o `me.name` que o Baileys
+    guarda na credencial). É quem está do outro lado quando a mensagem sai pelo
+    celular. Cache de 60s: a thread é consultada a cada 4s por aba aberta e esse
+    nome só muda quando o vendedor troca o perfil dele. Tolerante: qualquer erro
+    (tabela ausente, credencial sem nome) devolve '' e o inbox cai no genérico."""
+    agora = _agora()
+    em_cache = _WA_NOME_CACHE.get(conta_id)
+    if em_cache and (agora - em_cache[0]).total_seconds() < 60:
+        return em_cache[1]
+    nome = ""
+    try:
+        with get_pool().connection() as c:
+            r = c.execute("""select conteudo::json->'me'->>'name' from wa_qr_auth
+                              where conta_id=%s and arquivo='creds'""", (conta_id,)).fetchone()
+        nome = ((r[0] if r else "") or "").strip()[:60]
+    except Exception:  # noqa: BLE001
+        nome = ""
+    _WA_NOME_CACHE[conta_id] = (agora, nome)
+    return nome
+
+
 _WA_SYNC_CACHE: dict = {}   # conta_id -> (quando, {"sincronizando": bool})
 
 
@@ -1356,7 +1389,7 @@ def prospeccao_comunicacao_lista(request: Request, canal: str = "", vendedor: st
         convs = _conversas_list(c, ctx["conta_id"], ctx["gerencia"], ctx["membro_id"],
                                 canal=canal, vend=vendedor, escopo=escopo)
     for cv in convs:
-        cv["quando"] = cv["quando"].strftime("%d/%m %H:%M") if cv["quando"] else ""
+        cv["quando"] = _hora_br(cv["quando"])
     return JSONResponse({"ok": True, "convs": convs,
                          "sincronizando": _wa_qr_sincronizando(ctx["conta_id"])})
 
@@ -1439,6 +1472,11 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
                         where msg.conversa_id=%s
                         order by msg.criado_em desc, msg.id desc limit 100) ult
                 order by criado_em asc, mid asc""", (conversa_id,)).fetchall()
+    # Quem mandou, quando saiu do celular e não do Zaq: a mensagem chega pelo eco
+    # do Baileys (ou vem do histórico importado) e não tem membro_id — o inbox
+    # mostrava só "—". O nome do perfil do WhatsApp conectado é exatamente quem
+    # apertou enviar, então é ele que entra nesse lugar.
+    nome_celular = _wa_nome_conectado(ctx["conta_id"]) if cv[0] == "whatsapp" else ""
     msgs = []
     for (cn, direcao, autor, quando, texto, mid, nome, mstatus) in rows:
         # só e-mail separa assunto (cabeçalho) do corpo; os outros canais são texto puro
@@ -1450,10 +1488,14 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
             quem = "🤖 Agente"
         elif autor == "lead":
             quem = cv[3] or "Lead"
+        elif mid:
+            quem = "Você" if mid == ctx["membro_id"] else (nome or "—")
         else:
-            quem = "Você" if mid and mid == ctx["membro_id"] else (nome or "—")
+            # saiu pelo celular (ou veio do histórico): sem membro, mas dá pra
+            # dizer quem foi — é o dono do WhatsApp conectado
+            quem = ("📱 " + nome_celular) if nome_celular else "📱 Pelo celular"
         msgs.append({"canal": cn, "direcao": direcao, "autor": autor,
-                     "quando": quando.strftime("%d/%m %H:%M") if quando else "",
+                     "quando": _hora_br(quando),
                      "quem": quem, "cabecalho": cab.strip(), "corpo": corpo.strip(),
                      "status": mstatus or ""})
     destino = cv[7] or cv[8] or cv[13]     # telefone do lead OU contato_ref (conversa sem lead)
@@ -2994,6 +3036,58 @@ async def webhook_wa_qr_contatos(request: Request):
     if n:
         log.info("webhook_wa_qr_contatos: conta_id=%s %s conversas renomeadas (agenda=%s)",
                  conta_id, n, da_agenda)
+    return Response("ok", media_type="text/plain")
+
+
+@router.post("/webhooks/wa-qr/status")
+async def webhook_wa_qr_status(request: Request):
+    """Recibo de entrega/leitura do WhatsApp por QR: vira ✓ / ✓✓ / 👀 no inbox
+    (mesma coluna `status` que o Twilio já preenchia pelo StatusCallback). Casa
+    pelo provider_sid, que é o id da mensagem no Baileys — gravado tanto no envio
+    pelo Zaq quanto no eco do que saiu pelo celular.
+
+    Nunca REGRIDE: os recibos chegam fora de ordem com frequência, e sem essa
+    trava uma mensagem já lida voltava pra "entregue" na tela. 'erro' passa por
+    cima de qualquer um — se falhou, é isso que o vendedor precisa ver."""
+    import logging
+    log = logging.getLogger("prospeccao.wa_qr")
+    segredo = os.environ.get("WA_QR_SHARED_SECRET") or ""
+    if not segredo or request.headers.get("x-wa-secret") != segredo:
+        return Response(status_code=403)
+    try:
+        payload = json.loads((await request.body()).decode("utf-8") or "{}")
+    except Exception:  # noqa: BLE001
+        return Response("ok", media_type="text/plain")
+    try:
+        conta_id = int(payload.get("conta_id") or 0)
+    except (TypeError, ValueError):
+        conta_id = 0
+    itens = payload.get("itens") or []
+    if not conta_id or not isinstance(itens, list) or not itens:
+        return Response("ok", media_type="text/plain")
+    validos = {"enviado", "entregue", "lido", "erro"}
+    n = 0
+    with get_pool().connection() as c:
+        for it in itens[:500]:
+            sid = str((it or {}).get("id") or "").strip()
+            novo = str((it or {}).get("status") or "").strip()
+            if not sid or novo not in validos:
+                continue
+            r = c.execute(
+                """update mensagens m set status=%s
+                     from conversas cv
+                    where cv.id = m.conversa_id and cv.conta_id=%s
+                      and m.provider_sid=%s and m.canal='whatsapp'
+                      and (%s = 'erro' or
+                           (case coalesce(m.status,'') when 'enviado' then 1 when 'entregue' then 2
+                                                       when 'lido' then 3 else 0 end)
+                           < (case %s when 'enviado' then 1 when 'entregue' then 2
+                                      when 'lido' then 3 else 0 end))""",
+                (novo, conta_id, sid, novo, novo))
+            n += r.rowcount or 0
+        c.commit()
+    if n:
+        log.info("webhook_wa_qr_status: conta_id=%s %s mensagens atualizadas", conta_id, n)
     return Response("ok", media_type="text/plain")
 
 

@@ -48,6 +48,10 @@ const PORT = parseInt(process.env.PORT || '3000', 10)
 const SEGREDO = process.env.WA_QR_SHARED_SECRET || ''
 const APP_URL = (process.env.APP_URL || '').replace(/\/+$/, '')
 const log = pino({ level: process.env.LOG_LEVEL || 'info' })
+// Quanto o processo fica ocioso depois de abrir a porta, antes de religar as
+// sessões — ver o comentário no servidor.listen. Regulável por env caso o
+// arranque fique mais pesado (mais contas pareadas no mesmo serviço).
+const ESPERA_RESTAURAR_MS = parseInt(process.env.WA_QR_ESPERA_RESTAURAR_MS || '10000', 10)
 
 if (!process.env.DATABASE_URL) { log.error('Falta DATABASE_URL'); process.exit(1) }
 if (!SEGREDO) { log.error('Falta WA_QR_SHARED_SECRET'); process.exit(1) }
@@ -105,6 +109,23 @@ const logBaileys = comFiltroDeRuido(log)
 // deixar rastro de PORQUE. Loga estruturado antes de qualquer coisa.
 process.on('unhandledRejection', (err) => log.error({ err: String(err && err.stack || err) }, 'unhandledRejection'))
 process.on('uncaughtException', (err) => log.error({ err: String(err && err.stack || err) }, 'uncaughtException'))
+
+// Detector de travamento do event loop. O "HTTP health check failed (timed out
+// after 5 seconds)" do Render não diz NADA sobre a causa: /saude responde na
+// hora e nem toca no banco, então falha ali significa que o processo estava
+// preso numa operação síncrona longa e a rota nem chegou a ser chamada. Este
+// tique mede o atraso e denuncia o momento exato — sem ele, a única pista era o
+// aviso do Render, que não dá pra correlacionar com nada.
+let _ultimoTique = Date.now()
+setInterval(() => {
+  const agora = Date.now()
+  const atraso = agora - _ultimoTique - 1000
+  _ultimoTique = agora
+  if (atraso > 1000) {
+    log.warn({ atrasoMs: atraso },
+      'event loop travou — nesse intervalo /saude não respondia (risco de health check falhar)')
+  }
+}, 1000).unref()
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -935,9 +956,12 @@ async function restaurarSessoes () {
       } catch (e) {
         log.error({ contaId, e: String(e && e.stack || e) }, 'restaurarSessoes: falhou nessa conta')
       }
-      // espaça as reconexões: várias contas abrindo socket no mesmo instante é
-      // um bom jeito de o WhatsApp achar que é abuso e derrubar/bloquear todas.
-      await new Promise((r2) => setTimeout(r2, 1500))
+      // Espaça as reconexões por dois motivos: várias contas abrindo socket no
+      // mesmo instante é um bom jeito de o WhatsApp achar que é abuso e
+      // derrubar/bloquear todas; e o intervalo devolve o event loop pro
+      // servidor HTTP entre uma conta e outra, pro /saude continuar respondendo
+      // durante o arranque.
+      await new Promise((r2) => setTimeout(r2, 3000))
     }
   } catch (e) {
     log.error({ e: String(e && e.stack || e) }, 'restaurarSessoes: falhou')
@@ -1096,8 +1120,18 @@ const servidor = http.createServer(async (req, res) => {
 })
 
 servidor.listen(PORT, () => {
-  log.info({ PORT }, 'wa-qr no ar')
-  // não dá await: o healthcheck do Render precisa da porta respondendo já, e
-  // religar as contas pode levar alguns segundos por conta.
-  restaurarSessoes().catch((e) => log.error({ e: String(e) }, 'restaurarSessoes: erro solto'))
+  log.info({ PORT, esperaRestaurarMs: ESPERA_RESTAURAR_MS }, 'wa-qr no ar')
+  // Abrir a porta não basta: o health check do Render bate em /saude e desiste
+  // em 5s, e /saude só responde se o event loop estiver livre. Religar sessão é
+  // a parte mais pesada do arranque (handshake e criptografia do Signal, que têm
+  // trechos SÍNCRONOS), então começar isso no mesmo instante em que a porta abre
+  // fazia o primeiro health check cair no meio do bloqueio — deploy marcado como
+  // falho com o serviço na verdade são. Agora o processo fica ocioso alguns
+  // segundos primeiro: o health check passa, e só então as sessões voltam.
+  //
+  // O custo é atrasar em alguns segundos a volta das mensagens de ENTRADA depois
+  // de um deploy. Envio não espera: /enviar religa a sessão sob demanda.
+  setTimeout(() => {
+    restaurarSessoes().catch((e) => log.error({ e: String(e) }, 'restaurarSessoes: erro solto'))
+  }, ESPERA_RESTAURAR_MS)
 })

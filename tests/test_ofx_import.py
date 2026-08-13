@@ -221,6 +221,22 @@ def test_sgml_sem_fechamento_de_tag_tambem_parseia():
     ("MANUTENCAO DE CONTA", "", "despesa", "Servicos", "alta", "6.1.02"),
     ("TAR MANUTENCAO CONTA CORRENTE", "", "despesa", "Servicos", "alta", "6.1.02"),
     ("DEB MANUTENCAO CTA", "", "despesa", "Servicos", "alta", "6.1.02"),
+    # concessionárias e telecom (5.1.02)
+    ("DEB AUT EQUATORIAL PIAUI", "", "despesa", "Contas de casa", "alta", "5.1.02"),
+    ("AGESPISA SANEAMENTO", "", "despesa", "Contas de casa", "alta", "5.1.02"),
+    ("PAGTO CONTA DE LUZ", "", "despesa", "Contas de casa", "alta", "5.1.02"),
+    ("BRISANET BANDA LARGA", "", "despesa", "Contas de casa", "alta", "5.1.02"),
+    # software e assinaturas (5.1.06)
+    ("MICROSOFT 365", "", "despesa", "Assinaturas", "media", "5.1.06"),
+    ("COMPRA CANVA PRO", "", "despesa", "Assinaturas", "media", "5.1.06"),
+    ("GOOGLE WORKSPACE", "", "despesa", "Assinaturas", "media", "5.1.06"),
+    # contabilidade e consultorias (5.1.07)
+    ("PIX ESCRITORIO CONTABIL SILVA", "", "despesa", "Servicos", "media", "5.1.07"),
+    ("HONORARIOS CONTADOR", "", "despesa", "Servicos", "media", "5.1.07"),
+    ("CONSULTORIA TRIBUTARIA", "", "despesa", "Servicos", "media", "5.1.07"),
+    # não-regressão: anúncio é MARKETING, não software — tem que ganhar de "google"
+    ("GOOGLE ADS", "", "despesa", "Servicos", "alta", "5.1.03"),
+    ("FACEBK ADS META", "", "despesa", "Servicos", "alta", "5.1.03"),
 ])
 def test_sugerir_classificacao_regras_de_texto(memo, name, tipo, categoria, confianca, plano):
     txn = OfxTransacao(fitid="x", data=date(2026, 1, 1), valor_centavos=100,
@@ -243,20 +259,28 @@ def test_sugerir_classificacao_fatura_de_cartao_nao_arrisca_categoria():
     assert "fatura consolidada" in s.motivo
 
 
-@pytest.mark.parametrize("memo", [
-    "PREPARO DE BUFFET",          # contém "reparo" — por isso "reparo" não é termo
-    "DIARIA HOTEL SAO LUIS",      # contém "diaria" — não é diarista
-    "MERCADINHO JARDINS",         # contém "jardin" — é bairro, não jardinagem
+@pytest.mark.parametrize("memo,proibido", [
+    # serviços (5.1.09 / 5.1.11)
+    ("PREPARO DE BUFFET",        "5.1.11"),  # "preparo" contém "reparo"
+    ("DIARIA HOTEL SAO LUIS",    "5.1.09"),  # "diaria" não é diarista
+    ("MERCADINHO JARDINS",       "5.1.11"),  # "Jardins" é bairro, não jardinagem
+    # concessionárias (5.1.02): as palavras comuns do setor são armadilha
+    ("PIX MARIA LUZIA",          "5.1.02"),  # "Luzia" contém "luz"
+    ("ACOUGUE BOI GORDO",        "5.1.02"),  # "boi" contém "oi"
+    ("PIX JOSE NETO",            "5.1.02"),  # "Neto" contém "net"
+    ("SOM AO VIVO EVENTO",       "5.1.02"),  # "ao vivo" contém "vivo"
+    ("SUPERMERCADO RIO CLARO",   "5.1.02"),  # "Rio Claro" contém "claro"
+    ("COMPRA DESODORANTE",       "5.1.02"),  # "desodorante" contém "deso"
 ])
-def test_sugerir_classificacao_nao_cai_em_falso_positivo_de_substring(memo):
-    """O match é substring cru, então termo curto demais vira armadilha. Estes
-    memos NÃO podem virar 5.1.11/5.1.09 — se alguém encurtar um termo da regra,
-    este teste quebra."""
+def test_sugerir_classificacao_nao_cai_em_falso_positivo_de_substring(memo, proibido):
+    """O match é substring cru, então termo curto demais vira armadilha. Cada
+    memo aqui contém um pedaço de uma palavra que a gente NÃO usou como termo —
+    se alguém encurtar um termo da regra, este teste quebra."""
     txn = OfxTransacao(fitid="x", data=date(2026, 1, 1), valor_centavos=100,
                        tipo="despesa", trntype="DEBIT", memo=memo, name="",
                        checknum="", refnum="")
     s = sugerir_classificacao(txn)
-    assert s.plano_conta_codigo not in ("5.1.09", "5.1.11")
+    assert s.plano_conta_codigo != proibido
 
 
 def test_sugerir_classificacao_pix_recebido_sem_padrao_fica_sem_categoria():

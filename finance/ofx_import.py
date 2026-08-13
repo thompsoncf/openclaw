@@ -251,6 +251,26 @@ _REGRAS_DESPESA = [
     (("manutencao", "conserto", "eletricista", "encanador", "pintura",
       "dedetiza", "jardinagem", "jardineiro"),
                                              "Servicos",    "5.1.11", "media"),
+    # Anúncio é MARKETING (5.1.03), não software. Precisa vir antes da regra de
+    # assinaturas, senão "GOOGLE ADS" cai em "google" e vira 5.1.06.
+    (("google ads", "meta ads", "facebook ads", "facebk", "instagram ads",
+      "impulsionamento"),                    "Servicos",    "5.1.03", "alta"),
+    # Software e assinaturas: só marca de fornecedor. "apple.com" (e não "apple")
+    # porque a compra de aparelho na Apple é imobilizado, não assinatura.
+    (("microsoft", "adobe", "canva", "zoom", "dropbox", "spotify", "netflix",
+      "openai", "chatgpt", "anthropic", "amazon web", "apple.com", "google"),
+                                             "Assinaturas", "5.1.06", "media"),
+    (("contabil", "contador", "consultoria", "assessoria"),
+                                             "Servicos",    "5.1.07", "media"),
+    # Concessionárias e telecom: SÓ nome próprio de empresa. As palavras comuns
+    # do setor são armadilha de substring e ficaram de fora de propósito —
+    # "luz" está em "Maria Luzia", "oi" em "boi", "net" em "Neto", "vivo" em
+    # "som ao vivo", "claro" em "Rio Claro" e "deso" em "desodorante".
+    (("energisa", "equatorial", "agespisa", "cagece", "cemig", "copel", "cpfl",
+      "enel", "celpe", "coelba", "sabesp", "sanepar", "embasa", "cedae",
+      "telefonica", "brisanet", "starlink", "tim celular", "claro s.a",
+      "claro sa", "vivo s.a", "vivo sa", "energia eletrica", "conta de luz",
+      "conta de agua", "banda larga"),       "Contas de casa", "5.1.02", "alta"),
     (("mercado", "supermercado", "hortifruti", "acougue"),
                                              "Mercado",     "3.1.03", "media"),
     (("posto", "combustivel", "auto posto"),"Transporte",  "5.1.08", "media"),

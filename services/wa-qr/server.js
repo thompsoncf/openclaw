@@ -481,13 +481,37 @@ function agendarResyncAgenda (contaId, s) {
 //
 // Então espera o histórico parar de chegar (s.sincronizando cai sozinho 5s
 // depois da última onda) antes de pedir. Teto de 15min pra nunca ficar preso.
+// Espera DUAS condições, não uma:
+//  1. o histórico parar de chegar (senão as transações se atropelam — ver acima);
+//  2. as chaves de app-state existirem. Sem elas não há como decifrar a agenda, e
+//     o resyncAgenda desiste na hora. Elas chegam DEPOIS do pareamento, num
+//     appStateSyncKeyShare do celular — medido num pareamento novo: 26 pre-keys e
+//     8 sessões Signal gravadas, e ZERO chave de app-state quase 6 minutos
+//     depois. Antes disso a tentativa era uma só: se as chaves demorassem mais
+//     que ela, a agenda ficava vazia até o próximo religamento do serviço.
 async function esperarAcalmarEResync (contaId) {
   const limite = Date.now() + 15 * 60 * 1000
+  let acalmou = false
+  let temChaves = false
   while (Date.now() < limite) {
     const s = sessoes.get(contaId)
     if (!s || s.status !== 'conectado') return          // caiu: nada a fazer
-    if (!s.sincronizando) break                          // acalmou: pode pedir
+    if (!acalmou && !s.sincronizando) acalmou = true
+    if (!temChaves) {
+      try {
+        const r = await pool.query(
+          `select 1 from wa_qr_auth where conta_id=$1 and arquivo like 'app-state-sync-key-%' limit 1`,
+          [contaId])
+        temChaves = !!r.rowCount
+      } catch (e) { log.warn({ contaId, e: String(e) }, 'esperarAcalmarEResync: falha ao checar chaves') }
+    }
+    if (acalmou && temChaves) break
     await new Promise((r2) => setTimeout(r2, 5000))
+  }
+  if (!temChaves) {
+    log.warn({ contaId, acalmou },
+      'agenda: as chaves de app-state não chegaram no prazo — sem elas o WhatsApp não entrega a agenda')
+    return
   }
   await resyncAgenda(contaId, 2, true)
 }

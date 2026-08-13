@@ -10,6 +10,7 @@ se a tabela ainda não existe (migração não rodou), degradam sem quebrar.
 from __future__ import annotations
 
 import logging
+import os
 
 _log = logging.getLogger("openclaw.config")
 
@@ -56,3 +57,37 @@ def beta_gratis_ativo(pool) -> bool:
 def set_beta_gratis(pool, ligado: bool) -> None:
     """Liga/desliga o modo beta grátis."""
     set_config(pool, BETA_GRATIS, "on" if ligado else "off")
+
+
+# ── Alertas do admin (pra ONDE vao os avisos do sistema) ──────────────────
+# Antes isso vivia SO' em variavel de ambiente (ADMIN_EMAIL / ADMIN_TELEGRAM_ID)
+# — e a env so' estava setada no cron de saldos, entao os alertas disparados
+# pelo web (core.falhas: chave do Asaas expirou, Twilio sem saldo...) caiam no
+# fallback silencioso do remetente SMTP. Agora o valor mora no banco e da' pra
+# conferir/trocar em /admin/comunicacao, sem redeploy.
+#
+# Precedencia (o que ganha): banco (setado no /admin) → env → fallback.
+ADMIN_EMAIL = "admin_email"
+ADMIN_TELEGRAM_ID = "admin_telegram_id"
+
+
+def admin_email(pool) -> str | None:
+    """E-mail do admin do SaaS: /admin (banco) → env ADMIN_EMAIL → None."""
+    v = (get_config(pool, ADMIN_EMAIL) or "").strip()
+    return v or (os.environ.get("ADMIN_EMAIL") or "").strip() or None
+
+
+def set_admin_email(pool, email: str) -> None:
+    """Grava o e-mail do admin. String vazia = volta a valer o env."""
+    set_config(pool, ADMIN_EMAIL, (email or "").strip())
+
+
+def admin_telegram_id(pool) -> str | None:
+    """Chat do Telegram do admin: /admin (banco) → env ADMIN_TELEGRAM_ID."""
+    v = (get_config(pool, ADMIN_TELEGRAM_ID) or "").strip()
+    return v or (os.environ.get("ADMIN_TELEGRAM_ID") or "").strip() or None
+
+
+def set_admin_telegram_id(pool, chat_id: str) -> None:
+    """Grava o chat do admin no Telegram. Vazio = volta a valer o env."""
+    set_config(pool, ADMIN_TELEGRAM_ID, (chat_id or "").strip())

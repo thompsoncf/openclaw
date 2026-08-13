@@ -47,6 +47,26 @@ services:
         sync: false
       - key: STT_MODEL
         sync: false
+      # --- Alertas do admin (provedor pago quebrado) ---
+      # O web tambem avisa o admin: core.falhas chama avisar_admin_falha_provedor
+      # quando um provedor pago falha de forma acionavel (chave do Asaas expirou,
+      # Twilio sem saldo, quota da IA estourada). Sem SMTP_* aqui NAO sai e-mail
+      # nenhum desses avisos.
+      # ADMIN_EMAIL/ADMIN_TELEGRAM_ID viraram FALLBACK: o destino oficial agora se
+      # configura em /admin/comunicacao (tabela app_config), que ganha do env e
+      # vale pros tres servicos de uma vez, sem redeploy.
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_TELEGRAM_ID
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_SENHA
+        sync: false
       # --- Telegram por webhook (unifica os servidores; aposenta o worker) ---
       # TELEGRAM_TOKEN: o MESMO token do bot. Com ele setado aqui, o web ja'
       #   consegue processar updates do Telegram na rota /webhook/telegram.
@@ -98,7 +118,9 @@ services:
   #   ANTHROPIC_GASTO_DIA_MAX_USD  -> alerta de gasto diario anomalo da IA
   #   TWILIO_SALDO_MIN_USD         -> alerta de saldo baixo do WhatsApp
   #   ASAAS_SALDO_MIN              -> alerta de saldo baixo do Asaas
-  # Precisa de ADMIN_EMAIL + SMTP_* (e-mail) e/ou ADMIN_TELEGRAM_ID (Telegram).
+  # Precisa de SMTP_* (e-mail) e do destino do alerta, que sai de
+  # /admin/comunicacao (banco) ou, como fallback, das envs ADMIN_EMAIL /
+  # ADMIN_TELEGRAM_ID daqui.
   - type: cron
     # No Render, este cron e' o "openclaw-monitor-saldos-bcu3" (gerenciado manual).
     name: openclaw-monitor-saldos

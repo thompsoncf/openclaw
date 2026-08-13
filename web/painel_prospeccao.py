@@ -3089,6 +3089,72 @@ async def webhook_wa_qr_contatos(request: Request):
     return Response("ok", media_type="text/plain")
 
 
+@router.post("/webhooks/wa-qr/audio")
+async def webhook_wa_qr_audio(request: Request):
+    """Áudio recebido no WhatsApp vira TEXTO, pro vendedor responder digitando.
+
+    A mensagem já entrou antes com a marca "🎤 Áudio (0:18)" (ver textoDaMsg no
+    serviço Node); aqui a transcrição é acrescentada por cima. Reusa o mesmo
+    Transcritor do bot do Telegram — Whisper, com a dica de vocabulário que
+    acerta 'Zaq', 'Pix', 'boleto'.
+
+    Degrada com elegância: sem STT_API_KEY, ou se o provedor falhar, a mensagem
+    fica só com a marca de áudio. Nunca quebra a conversa por causa disso."""
+    import logging
+    log = logging.getLogger("prospeccao.wa_qr")
+    segredo = os.environ.get("WA_QR_SHARED_SECRET") or ""
+    if not segredo or request.headers.get("x-wa-secret") != segredo:
+        return Response(status_code=403)
+    try:
+        payload = json.loads((await request.body()).decode("utf-8") or "{}")
+    except Exception:  # noqa: BLE001
+        return Response("ok", media_type="text/plain")
+    try:
+        conta_id = int(payload.get("conta_id") or 0)
+    except (TypeError, ValueError):
+        conta_id = 0
+    sid = str(payload.get("id") or "").strip()
+    b64 = payload.get("audio_b64") or ""
+    if not conta_id or not sid or not b64:
+        return Response("ok", media_type="text/plain")
+    from core.transcribe import transcritor_se_configurado
+    tr = transcritor_se_configurado()
+    if tr is None:
+        log.info("webhook_wa_qr_audio: STT não configurado — áudio fica só com a marca")
+        return Response("ok", media_type="text/plain")
+    try:
+        import base64
+        from starlette.concurrency import run_in_threadpool
+        dados = base64.b64decode(b64)
+        # .ogg porque é o que o WhatsApp usa (opus); a API olha a extensão.
+        # Em thread separada: transcrever é bloqueante e seguraria o event loop
+        # do servidor inteiro por alguns segundos a cada áudio.
+        texto = await run_in_threadpool(tr.transcrever, dados, "audio.ogg")
+    except Exception:  # noqa: BLE001 - transcrição é um extra, nunca derruba a conversa
+        log.exception("webhook_wa_qr_audio: falha ao transcrever conta_id=%s", conta_id)
+        return Response("ok", media_type="text/plain")
+    texto = (texto or "").strip()[:4000]
+    if not texto:
+        return Response("ok", media_type="text/plain")
+    with get_pool().connection() as c:
+        # Acrescenta embaixo da marca, preservando a duração. O regex casa SÓ a
+        # marca crua e inteira: garante que a transcrição não entra duas vezes
+        # (depois da 1ª o texto deixa de casar) e que nunca encosta numa mensagem
+        # de texto de verdade, mesmo que alguém escreva "🎤 Áudio (0:18)" no meio
+        # de uma frase.
+        r = c.execute(
+            r"""update mensagens m set texto = m.texto || %s
+                  from conversas cv
+                 where cv.id = m.conversa_id and cv.conta_id=%s
+                   and m.provider_sid=%s and m.canal='whatsapp'
+                   and m.texto ~ '^(🎤|🎵) Áudio \(\d+:\d{2}\)$'""",
+            ("\n" + texto, conta_id, sid))
+        c.commit()
+    log.info("webhook_wa_qr_audio: conta_id=%s transcrito (%s linhas, %s chars)",
+             conta_id, r.rowcount, len(texto))
+    return Response("ok", media_type="text/plain")
+
+
 @router.post("/webhooks/wa-qr/status")
 async def webhook_wa_qr_status(request: Request):
     """Recibo de entrega/leitura do WhatsApp por QR: vira ✓ / ✓✓ / 👀 no inbox

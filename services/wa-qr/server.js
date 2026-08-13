@@ -40,7 +40,7 @@ const pino = require('pino')
 const QRCode = require('qrcode')
 const makeWASocket = require('@whiskeysockets/baileys').default
 const { DisconnectReason, makeCacheableSignalKeyStore, fetchLatestBaileysVersion, proto, BufferJSON,
-  normalizeMessageContent } = require('@whiskeysockets/baileys')
+  normalizeMessageContent, downloadMediaMessage } = require('@whiskeysockets/baileys')
 const TIPO_HIST = proto.Message.HistorySyncNotification.HistorySyncType
 const { useDbAuthState } = require('./auth-db')
 
@@ -339,6 +339,37 @@ function ehConversaValida (jid) {
   return !!jid && !jid.endsWith('@g.us') && !jid.endsWith('@newsletter') && jid !== 'status@broadcast'
 }
 
+// Áudio RECEBIDO vira texto, pro vendedor responder digitando sem precisar ouvir.
+// Só entrada ao vivo: histórico não passa por aqui de propósito — um pareamento
+// novo despejaria centenas de áudios de uma vez e viraria uma conta inesperada.
+const LIMITE_AUDIO_SEG = 120
+
+async function transcreverAudio (contaId, m, sender) {
+  const msg = normalizeMessageContent(m.message) || {}
+  const audio = msg.audioMessage
+  if (!audio || !APP_URL) return
+  const seg = Math.round(Number(audio.seconds) || 0)
+  if (seg > LIMITE_AUDIO_SEG) {
+    log.info({ contaId, seg }, 'áudio longo demais — não transcreve')
+    return
+  }
+  try {
+    const bytes = await downloadMediaMessage(m, 'buffer', {})
+    if (!bytes || !bytes.length) return
+    const r = await fetch(APP_URL + '/webhooks/wa-qr/audio', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-wa-secret': SEGREDO },
+      body: JSON.stringify({
+        conta_id: contaId, sender, segundos: seg,
+        id: (m.key && m.key.id) || '',
+        audio_b64: bytes.toString('base64')
+      })
+    })
+    if (!r.ok) log.warn({ contaId, status: r.status }, 'webhook wa-qr/audio respondeu não-ok')
+    else log.info({ contaId, seg, kb: Math.round(bytes.length / 1024) }, 'áudio mandado pra transcrição ✓')
+  } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao transcrever áudio') }
+}
+
 async function repassarEntrada (contaId, m) {
   if (!APP_URL) { log.warn({ contaId }, 'APP_URL vazio — não repassa entrada'); return }
   const texto = textoDaMsg(m)
@@ -363,6 +394,11 @@ async function repassarEntrada (contaId, m) {
     if (!r.ok) log.warn({ contaId, status: r.status }, 'webhook wa-qr respondeu não-ok')
     else log.info({ contaId, sender: sender.slice(0, 6) + '…' }, 'entrada repassada ao webhook ✓')
   } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao repassar entrada') }
+  // depois de a mensagem já estar no painel: assim ela aparece na hora com a
+  // marca "🎤 Áudio (0:18)" e o texto entra por cima quando ficar pronto, em vez
+  // de o vendedor esperar a transcrição pra ver que chegou alguma coisa
+  transcreverAudio(contaId, m, sender).catch((e) =>
+    log.warn({ contaId, e: String(e) }, 'transcreverAudio falhou'))
 }
 
 // Mensagem que o VENDEDOR mandou direto pelo WhatsApp do celular (fora do Zaq) —

@@ -234,9 +234,15 @@ def test_sgml_sem_fechamento_de_tag_tambem_parseia():
     ("PIX ESCRITORIO CONTABIL SILVA", "", "despesa", "Servicos", "media", "5.1.07"),
     ("HONORARIOS CONTADOR", "", "despesa", "Servicos", "media", "5.1.07"),
     ("CONSULTORIA TRIBUTARIA", "", "despesa", "Servicos", "media", "5.1.07"),
+    # materiais de escritório (5.1.04)
+    ("PAPELARIA CENTRAL", "", "despesa", "Compras", "alta", "5.1.04"),
+    ("COMPRA MATERIAL DE ESCRITORIO", "", "despesa", "Compras", "alta", "5.1.04"),
+    ("CARTUCHO TONER HP", "", "despesa", "Compras", "alta", "5.1.04"),
     # não-regressão: anúncio é MARKETING, não software — tem que ganhar de "google"
     ("GOOGLE ADS", "", "despesa", "Servicos", "alta", "5.1.03"),
     ("FACEBK ADS META", "", "despesa", "Servicos", "alta", "5.1.03"),
+    # não-regressão: escritório CONTÁBIL é 5.1.07, não material de escritório
+    ("PIX ESCRITORIO CONTABIL", "", "despesa", "Servicos", "media", "5.1.07"),
 ])
 def test_sugerir_classificacao_regras_de_texto(memo, name, tipo, categoria, confianca, plano):
     txn = OfxTransacao(fitid="x", data=date(2026, 1, 1), valor_centavos=100,
@@ -271,6 +277,9 @@ def test_sugerir_classificacao_fatura_de_cartao_nao_arrisca_categoria():
     ("SOM AO VIVO EVENTO",       "5.1.02"),  # "ao vivo" contém "vivo"
     ("SUPERMERCADO RIO CLARO",   "5.1.02"),  # "Rio Claro" contém "claro"
     ("COMPRA DESODORANTE",       "5.1.02"),  # "desodorante" contém "deso"
+    # material de escritório (5.1.04): "escritorio" sozinho roubaria estes
+    ("ESCRITORIO CONTABIL SILVA", "5.1.04"),  # é contabilidade (5.1.07)
+    ("ESCRITORIO DE ADVOCACIA",   "5.1.04"),
 ])
 def test_sugerir_classificacao_nao_cai_em_falso_positivo_de_substring(memo, proibido):
     """O match é substring cru, então termo curto demais vira armadilha. Cada

@@ -207,6 +207,20 @@ def test_sgml_sem_fechamento_de_tag_tambem_parseia():
     ("COMPRA VISA ELECTRON", "LEO MERCADO TERESINA BR", "despesa", "Mercado", "media", "3.1.03"),
     ("COMPRA VISA ELECTRON", "PostoTexas TERESINA BR", "despesa", "Transporte", "media", "5.1.08"),
     ("DEBITO PACOTE SERVICOS", "", "despesa", "Servicos", "alta", "6.1.02"),
+    # serviços de empresa (contas do grupo 5 criadas na migração 143)
+    ("PIX ENVIADO", "DIARISTA MARIA", "despesa", "Servicos", "alta", "5.1.09"),
+    ("PAGTO FAXINA DA SEMANA", "", "despesa", "Servicos", "alta", "5.1.09"),
+    ("MANUTENCAO AR CONDICIONADO", "", "despesa", "Servicos", "media", "5.1.11"),
+    ("PIX CONSERTO DA CAMARA FRIA", "", "despesa", "Servicos", "media", "5.1.11"),
+    ("PAGAMENTO ELETRICISTA", "", "despesa", "Servicos", "media", "5.1.11"),
+    ("COMPRA MATERIAL DE LIMPEZA", "", "despesa", "Compras", "alta", "5.1.05"),
+    ("NF SERVICO TERCEIRIZADO", "", "despesa", "Servicos", "media", "5.1.10"),
+    # não-regressão: "manutenção de conta" é TARIFA DE BANCO, não conservação.
+    # As duas últimas variantes (sem "de") só passam por causa da guarda nova —
+    # sem ela cairiam na regra de manutenção e virariam 5.1.11.
+    ("MANUTENCAO DE CONTA", "", "despesa", "Servicos", "alta", "6.1.02"),
+    ("TAR MANUTENCAO CONTA CORRENTE", "", "despesa", "Servicos", "alta", "6.1.02"),
+    ("DEB MANUTENCAO CTA", "", "despesa", "Servicos", "alta", "6.1.02"),
 ])
 def test_sugerir_classificacao_regras_de_texto(memo, name, tipo, categoria, confianca, plano):
     txn = OfxTransacao(fitid="x", data=date(2026, 1, 1), valor_centavos=100,
@@ -229,6 +243,22 @@ def test_sugerir_classificacao_fatura_de_cartao_nao_arrisca_categoria():
     assert "fatura consolidada" in s.motivo
 
 
+@pytest.mark.parametrize("memo", [
+    "PREPARO DE BUFFET",          # contém "reparo" — por isso "reparo" não é termo
+    "DIARIA HOTEL SAO LUIS",      # contém "diaria" — não é diarista
+    "MERCADINHO JARDINS",         # contém "jardin" — é bairro, não jardinagem
+])
+def test_sugerir_classificacao_nao_cai_em_falso_positivo_de_substring(memo):
+    """O match é substring cru, então termo curto demais vira armadilha. Estes
+    memos NÃO podem virar 5.1.11/5.1.09 — se alguém encurtar um termo da regra,
+    este teste quebra."""
+    txn = OfxTransacao(fitid="x", data=date(2026, 1, 1), valor_centavos=100,
+                       tipo="despesa", trntype="DEBIT", memo=memo, name="",
+                       checknum="", refnum="")
+    s = sugerir_classificacao(txn)
+    assert s.plano_conta_codigo not in ("5.1.09", "5.1.11")
+
+
 def test_sugerir_classificacao_pix_recebido_sem_padrao_fica_sem_categoria():
     """Receita por Pix/transferência sem heurística de texto forte: melhor não
     chutar 'Vendas' de qualquer entrada — isso é trabalho do aprendizado por
@@ -246,7 +276,10 @@ def test_sugerir_classificacao_pix_recebido_sem_padrao_fica_sem_categoria():
 # ─────────────────────────────────────────────────────────────────────────
 
 _MIGRACOES = ("018_chave_nfce_lancamentos.sql", "057_natureza_lancamento.sql",
-              "132_plano_contas_centros_custo.sql", "138_chave_ofx_lancamentos.sql")
+              "132_plano_contas_centros_custo.sql", "138_chave_ofx_lancamentos.sql",
+              # 143 traz as contas que as regras novas citam (5.1.09/5.1.11) —
+              # sem ela o código não resolve e o plano_conta_id vira None calado.
+              "143_plano_contas_locacao_buffet_servicos.sql")
 
 
 @pytest.fixture(scope="module")
@@ -305,6 +338,26 @@ def test_pre_visualizar_sugere_por_heuristica_de_texto(livro):
     assert item["ja_importado"] is False
     assert item["duplicatas_provaveis"] == []
     assert item["selecionado_padrao"] is True
+
+
+def test_pre_visualizar_resolve_conta_das_regras_novas(livro, pool):
+    """As regras citam códigos por TEXTO ('5.1.09'); quem resolve pra id é o
+    mapa do plano. Se a conta não existir no banco, livro_caixa devolve
+    plano_conta_id=None SEM erro nenhum — o cliente veria categoria sugerida e
+    conta contábil vazia. Este teste fecha essa porta."""
+    txns = [
+        OfxTransacao(fitid="d1", data=date(2026, 7, 10), valor_centavos=15000,
+                     tipo="despesa", trntype="DEBIT", memo="PIX ENVIADO",
+                     name="DIARISTA MARIA", checknum="", refnum=""),
+        OfxTransacao(fitid="d2", data=date(2026, 7, 11), valor_centavos=48000,
+                     tipo="despesa", trntype="DEBIT",
+                     memo="MANUTENCAO AR CONDICIONADO", name="", checknum="", refnum=""),
+    ]
+    itens = livro.pre_visualizar_importacao_ofx(_extrato(txns), natureza_padrao="empresa")
+    por_fitid = {i["fitid"]: i for i in itens}
+    assert por_fitid["d1"]["plano_conta_id"] == _plano_id(pool, "5.1.09")
+    assert por_fitid["d2"]["plano_conta_id"] == _plano_id(pool, "5.1.11")
+    assert por_fitid["d1"]["categoria"] == "Servicos"
 
 
 def test_confirmar_importacao_grava_com_origem_extrato_e_chave(livro, pool, conta_id):

@@ -387,14 +387,47 @@ def confirmacao_texto(c: dict) -> str:
 
 
 # ---- Disparo do convite pelo WhatsApp (outbound, via template aprovado) -------
+#
+# Precedência do template: COLUNA da empresa > env global. O template é aprovado
+# dentro da conta vinculada ao NÚMERO, e cada empresa tem o seu — um SID aprovado
+# no número A não vale no número B. A env global fica como fallback pra não
+# quebrar quem já usa. Mesmo desenho de prospec_convite.sid_efetivo.
 
-def template_configurado() -> bool:
+
+def _sid_do_canal(pool, conta_id: int, coluna: str) -> str:
+    """SID salvo pra ESTA empresa em canais_config. '' se não tem (ou se a coluna
+    ainda não existe — degrada em vez de quebrar, igual config_app.get_config)."""
+    if not pool or not conta_id:
+        return ""
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                f"select {coluna} from canais_config "          # noqa: S608 - coluna é literal do módulo
+                "where conta_id=%s and canal='whatsapp' and ativo", (conta_id,)).fetchone()
+        return (r[0] or "").strip() if r else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def sid_convite(pool, conta_id: int) -> str:
+    """Template do CONVITE de reunião que vale pra essa empresa."""
+    return (_sid_do_canal(pool, conta_id, "tmpl_convite_sid")
+            or (os.environ.get("TWILIO_TMPL_CONVITE_SID") or "").strip())
+
+
+def sid_lembrete(pool, conta_id: int) -> str:
+    """Template do AVISO ANTES da reunião que vale pra essa empresa."""
+    return (_sid_do_canal(pool, conta_id, "tmpl_lembrete_sid")
+            or (os.environ.get("TWILIO_TMPL_LEMBRETE_SID") or "").strip())
+
+
+def template_configurado(pool=None, conta_id: int | None = None) -> bool:
     """True quando dá pra o Zaq disparar o convite sozinho: template aprovado
-    (SID na env) + credenciais Twilio presentes. O número usado é o DA EMPRESA
-    (canais_config), resolvido no envio. Enquanto for False, a UI mostra só o
-    envio manual (link)."""
+    (da empresa ou da env) + credenciais Twilio presentes. O número usado é o DA
+    EMPRESA (canais_config), resolvido no envio. Enquanto for False, a UI mostra
+    só o envio manual (link)."""
     from . import whatsapp_twilio as wa
-    return bool(os.environ.get("TWILIO_TMPL_CONVITE_SID") and wa.configurado())
+    return bool(sid_convite(pool, conta_id) and wa.configurado())
 
 
 def _titulo_com_extras(pool, c: dict) -> str:
@@ -429,7 +462,7 @@ def enviar_convite_whatsapp(pool, token: str) -> dict:
         registrar_mensagem(pool, conta_id, ev_id, conv_id, "convite", "whatsapp_template",
                            False, "sem_numero")
         return {"ok": False, "erro": "sem_numero"}
-    sid = os.environ.get("TWILIO_TMPL_CONVITE_SID")
+    sid = sid_convite(pool, conta_id)
     if not sid:
         registrar_mensagem(pool, conta_id, ev_id, conv_id, "convite", "whatsapp_template",
                            False, "sem_template")
@@ -494,12 +527,12 @@ def texto_lembrete_convidado(nome: str, ev: dict, hora: str, faltam_min: int) ->
     return txt
 
 
-def template_lembrete_configurado() -> bool:
+def template_lembrete_configurado(pool=None, conta_id: int | None = None) -> bool:
     """True quando dá pra o Zaq avisar o convidado FORA da janela de 24h (template
-    aprovado no Twilio/Meta). Não bloqueia o aviso DENTRO da janela — esse sai
-    livre, sem template, sem essa configuração."""
+    aprovado no Twilio/Meta, da empresa ou da env). Não bloqueia o aviso DENTRO da
+    janela — esse sai livre, sem template, sem essa configuração."""
     from . import whatsapp_twilio as wa
-    return bool(os.environ.get("TWILIO_TMPL_LEMBRETE_SID") and wa.configurado())
+    return bool(sid_lembrete(pool, conta_id) and wa.configurado())
 
 
 def local_rotulo(ev: dict) -> str:
@@ -540,7 +573,7 @@ def avisar_convidado_confirmado(pool, conta_id: int, ev: dict, g: dict,
         registrar_mensagem(pool, conta_id, evento_id, convidado_id, "lembrete", "whatsapp_livre",
                            bool(r.get("ok")), None if r.get("ok") else r.get("erro"))
         return r
-    sid = os.environ.get("TWILIO_TMPL_LEMBRETE_SID")
+    sid = sid_lembrete(pool, conta_id)
     if not sid:
         registrar_mensagem(pool, conta_id, evento_id, convidado_id, "lembrete", "whatsapp_template",
                            False, "fora_da_janela_sem_template")

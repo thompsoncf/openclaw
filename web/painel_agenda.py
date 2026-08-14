@@ -220,7 +220,7 @@ def _montar_share(request: Request, pool, conta_id: int, convite_ev: str, convit
                       "status": g["status"], "status_rot": g["status_rot"]})
     return {"titulo": ev["titulo"], "quando": quando, "guests": lista, "ev_id": ev_id,
             "total": len(lista), "resumo": cv.resumo(guests),
-            "auto_on": cv.template_configurado()}
+            "auto_on": cv.template_configurado(pool, conta_id)}
 
 
 # ================================================================ CALENDÁRIO

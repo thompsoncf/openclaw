@@ -245,9 +245,9 @@ _LOCK = 771146          # advisory lock próprio (não briga com e-mail/WhatsApp
 _MAX_PASS = 3           # posts publicados por passada do poller
 _MAX_TENTATIVAS = 3     # depois disso o post fica em 'erro' e espera o humano
 
-VERDE = (29, 158, 117)          # #1d9e75 — verde da marca (var(--verde) do portal)
-FUNDO = (14, 14, 15)             # #0e0e0f — var(--bg) do portal
-BRANCO = (236, 236, 236)         # #ececec — var(--txt) do portal
+VERDE = (29, 158, 117)          # var(--verde) — verde da marca (var(--verde) do portal)
+FUNDO = (14, 14, 15)             # var(--bg) — var(--bg) do portal
+BRANCO = (236, 236, 236)         # var(--txt) — var(--txt) do portal
 LADO = 1080                     # 1:1 — aspecto mais seguro pro carrossel
 
 OBJETIVOS = {

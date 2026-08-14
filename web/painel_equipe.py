@@ -251,11 +251,11 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
   display:inline-flex;align-items:center;gap:.35rem}
 .mrow button:hover{border-color:var(--verde)}
 .mrow .ebtn{padding:.44rem .6rem}                 /* botão-ícone do nome (✓) */
-.mrow .danger:hover{border-color:#e0574f;color:#f0917f;background:#2a1414}
+.mrow .danger:hover{border-color:var(--coral);color:#f0917f;background:#2a1414}
 .mtag{padding:.1rem .5rem;border-radius:999px;font-size:.72rem;border:1px solid var(--borda);color:var(--txt-mut)}
-.mtag.on{color:var(--verde-claro);border-color:#1e4a3a;background:#10241a}
-.mtag.pend{color:#e0b25a;border-color:#5a4520;background:#241c0f}
-.mtag.off{color:#e07a5f;border-color:#5a2b2b;background:#241313}
+.mtag.on{color:var(--verde-claro);border-color:var(--neon-borda);background:var(--neon-fundo)}
+.mtag.pend{color:#e0b25a;border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.mtag.off{color:#e07a5f;border-color:var(--coral-borda);background:var(--coral-fundo)}
 @media (max-width:640px){.macts{width:100%}}
 /* legenda: o que cada papel acessa */
 .papeis{margin-top:1rem;border:1px solid var(--borda);border-radius:12px;background:var(--card-2);padding:.85rem 1rem}
@@ -265,8 +265,8 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
 .ph-nome{flex-shrink:0;min-width:88px;font-size:.78rem;font-weight:700;padding:.16rem .55rem;border-radius:999px;
   border:1px solid var(--borda);text-align:center}
 .ph-nome.vend{color:#7bb8e6;border-color:#1e3a52;background:#0f1d2b}
-.ph-nome.gest{color:var(--verde-claro);border-color:#1e4a3a;background:#10241a}
-.ph-nome.fin{color:#e0b25a;border-color:#5a4520;background:#241c0f}
+.ph-nome.gest{color:var(--verde-claro);border-color:var(--neon-borda);background:var(--neon-fundo)}
+.ph-nome.fin{color:#e0b25a;border-color:var(--ambar-borda);background:var(--ambar-fundo)}
 .ph-desc{flex:1;min-width:200px;font-size:.82rem;color:var(--txt-mut);line-height:1.5}
 .ph-desc b{color:var(--txt);font-weight:600}
 </style>
@@ -275,9 +275,9 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
     <h2 style="margin:0">Equipe</h2>
     <div style="display:flex;gap:.5rem;flex-wrap:wrap">
       <a href="/cockpit/novo" target="_blank" rel="noopener"
-         style="display:inline-flex;align-items:center;gap:.4rem;background:#25d366;border:1px solid #25d366;color:#04150c;border-radius:10px;padding:.5rem .9rem;font-weight:700;text-decoration:none;white-space:nowrap">✨ Ver o app novo (prévia)</a>
+         style="display:inline-flex;align-items:center;gap:.4rem;background:var(--verde);border:1px solid var(--verde);color:#04150c;border-radius:10px;padding:.5rem .9rem;font-weight:700;text-decoration:none;white-space:nowrap">✨ Ver o app novo (prévia)</a>
       <a href="/cockpit" target="_blank" rel="noopener"
-         style="display:inline-flex;align-items:center;gap:.4rem;background:#10241a;border:1px solid #1e4a3a;color:var(--verde-claro);border-radius:10px;padding:.5rem .9rem;font-weight:700;text-decoration:none;white-space:nowrap">📊 Abrir o Cockpit da equipe</a>
+         style="display:inline-flex;align-items:center;gap:.4rem;background:var(--neon-fundo);border:1px solid var(--neon-borda);color:var(--verde-claro);border-radius:10px;padding:.5rem .9rem;font-weight:700;text-decoration:none;white-space:nowrap">📊 Abrir o Cockpit da equipe</a>
     </div>
   </div>
   <div class="mut" style="font-size:.82rem">Convide sua equipe por link. Cada pessoa entra com o próprio login, com o acesso do papel. Você acompanha o time no <b>Cockpit</b> — sem precisar de outro cadastro.</div>
@@ -289,7 +289,7 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
       <input id="lk" value="{{ novo_link }}" readonly onclick="this.select()"
              style="flex:1;min-width:0;background:var(--bg);border:1px solid var(--borda);border-radius:8px;color:var(--txt);padding:.5rem .6rem;font-size:.82rem">
       <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('lk').value);this.textContent='Copiado!'"
-              style="width:auto;flex:none;margin:0;background:var(--verde);color:#04140d;border:0;border-radius:8px;padding:.5rem .9rem;font-weight:600;cursor:pointer;white-space:nowrap">Copiar</button>
+              style="width:auto;flex:none;margin:0;background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;padding:.5rem .9rem;font-weight:600;cursor:pointer;white-space:nowrap">Copiar</button>
     </div>
   </div>
   {% endif %}

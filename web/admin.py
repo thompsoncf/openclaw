@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, DictLoader, select_autoescape
 
 from db.conexao import get_pool
+from web import tema as _tema
 from contas import contas as ct
 from finance.estatisticas import estatisticas_funil, estatisticas_custo
 from web.portal import brl
@@ -58,22 +59,17 @@ _NEGADO = HTMLResponse("<h1>404</h1>", status_code=404)
 _ADMIN_BASE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Admin - Zaq</title>
-<style>
-:root {
-  color-scheme: dark;
-  --bg:#0e0e0f; --card:#161617; --card-2:#1a1a1c; --borda:#2a2a2b;
-  --txt:#ececec; --txt-mut:#a8a8a3;
-  --verde:#1d9e75; --verde-hover:#22b485; --verde-claro:#5dcaa5;
-}
-body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:var(--bg);
+""" + _tema.FONTES + """<style>
+""" + _tema.variaveis() + """
+body{margin:0;font-family:var(--body);background:var(--bg);
  color:var(--txt);display:flex;flex-direction:column;align-items:center}
 .topo{width:100%;max-width:1000px;display:flex;flex-wrap:wrap;gap:.6rem;justify-content:space-between;
  align-items:center;padding:1.2rem 1rem;box-sizing:border-box}
 .adm-nav{display:inline-flex;flex-wrap:wrap;gap:.25rem;background:var(--card-2);padding:.25rem;border-radius:14px;border:1px solid var(--borda)}
 .adm-nav a{color:var(--txt-mut);text-decoration:none;margin:0;padding:.35rem .7rem;border-radius:10px;font-size:.85rem;transition:background .18s,color .18s}
 .adm-nav a:hover{color:var(--txt)}
-.adm-nav a.on{background:var(--verde);color:#fff;font-weight:500}
-.logo{font-weight:600}.logo span{color:#e0a83d}
+.adm-nav a.on{background:var(--verde);color:var(--sobre-verde);font-weight:500}
+.logo{font-weight:600}.logo span{color:var(--ambar)}
 .wrap{width:100%;max-width:1000px;padding:0 1rem 3rem;box-sizing:border-box}
 .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:1rem 0}
 .metric{background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:1rem}
@@ -84,7 +80,7 @@ h1{font-size:1.3rem;font-weight:500}h2{font-size:1.05rem;font-weight:500;margin:
 table{width:100%;border-collapse:collapse;font-size:.9rem}
 td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left}
 input,select{padding:.5rem .6rem;border-radius:7px;border:1px solid #333;background:var(--bg);color:var(--txt);font-size:.9rem}
-button{padding:.45rem .8rem;border:0;border-radius:7px;background:var(--verde);color:#fff;cursor:pointer;font-size:.85rem}
+button{padding:.45rem .8rem;border:0;border-radius:7px;background:var(--verde);color:var(--sobre-verde);cursor:pointer;font-size:.85rem}
 button:hover{background:var(--verde-hover)}
 button.warn{background:#8a5a1c}button.warn:hover{background:#a86c22}
 button.danger{background:#6e2b2b}button.danger:hover{background:#8a3636}
@@ -122,7 +118,7 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
   <tr class="mut" style="font-size:.74rem;text-align:left"><td style="padding:.3rem 0">Plano</td><td>Tipo</td><td style="text-align:right">Preço/mês</td><td style="text-align:center">Ativo</td><td></td></tr>
   {% for p in planos_admin %}
   <form method="post" action="/admin/plano/{{ p.codigo }}">
-  <tr style="border-top:1px solid #232325">
+  <tr style="border-top:1px solid var(--card-2)">
     <td style="padding:.5rem 0;color:var(--txt)">{{ p.nome }}</td>
     <td class="mut">{{ p.tipo_conta }}</td>
     <td style="text-align:right">
@@ -135,7 +131,7 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
     <td style="text-align:center">
       {% if p.codigo != 'zaq_cesta' %}<input type="checkbox" name="ativo" value="1" {% if p.ativo %}checked{% endif %}>{% else %}<span style="color:var(--verde-claro)">●</span>{% endif %}
     </td>
-    <td style="text-align:right">{% if p.codigo != 'zaq_cesta' %}<button style="padding:.25rem .7rem;background:var(--verde);border:0;color:#fff;border-radius:5px;font-size:.76rem;cursor:pointer">salvar</button>{% else %}<span class="mut">—</span>{% endif %}</td>
+    <td style="text-align:right">{% if p.codigo != 'zaq_cesta' %}<button style="padding:.25rem .7rem;background:var(--verde);border:0;color:var(--sobre-verde);border-radius:5px;font-size:.76rem;cursor:pointer">salvar</button>{% else %}<span class="mut">—</span>{% endif %}</td>
   </tr>
   </form>
   {% endfor %}
@@ -146,13 +142,13 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
   <tr class="mut" style="font-size:.74rem;text-align:left"><td style="padding:.3rem 0">Módulo</td><td style="text-align:right">Mensalidade</td><td style="text-align:center">Ativo</td><td></td></tr>
   {% for m in modulos_admin %}
   <form method="post" action="/admin/modulo/{{ m.codigo }}">
-  <tr style="border-top:1px solid #232325">
+  <tr style="border-top:1px solid var(--card-2)">
     <td style="padding:.5rem 0;color:var(--txt)">{{ m.nome }}{% if m.codigo == 'fornecedor' %} <span class="mut" style="font-size:.72rem">+ comissão % das vendas</span>{% endif %}</td>
     <td style="text-align:right"><span style="display:inline-flex;align-items:center;gap:3px;justify-content:flex-end">
       <span class="mut" style="font-size:.75rem">R$</span>
       <input name="preco" value="{{ (m.preco_centavos/100)|n2 }}" style="width:64px;text-align:right;padding:.25rem .4rem;background:var(--bg);border:1px solid var(--borda);color:#f4f4f4;border-radius:5px"></span></td>
     <td style="text-align:center"><input type="checkbox" name="ativo" value="1" {% if m.ativo %}checked{% endif %}></td>
-    <td style="text-align:right"><button style="padding:.25rem .7rem;background:var(--verde);border:0;color:#fff;border-radius:5px;font-size:.76rem;cursor:pointer">salvar</button></td>
+    <td style="text-align:right"><button style="padding:.25rem .7rem;background:var(--verde);border:0;color:var(--sobre-verde);border-radius:5px;font-size:.76rem;cursor:pointer">salvar</button></td>
   </tr>
   </form>
   {% endfor %}
@@ -289,16 +285,16 @@ _ADMIN_CATEGORIAS = """{% extends "abase" %}{% block conteudo %}
 <div class="cards">
 <div class="metric"><span>Lançamentos de despesa</span><b>{{ d.total_despesa }}</b></div>
 <div class="metric" style="{% if d.pct_outros_despesa >= 15 %}border-color:#8a5a1c{% endif %}">
-  <span>% em "Outros" (despesa)</span><b style="{% if d.pct_outros_despesa >= 15 %}color:#e0a83d{% endif %}">{{ d.pct_outros_despesa }}%</b></div>
+  <span>% em "Outros" (despesa)</span><b style="{% if d.pct_outros_despesa >= 15 %}color:var(--ambar){% endif %}">{{ d.pct_outros_despesa }}%</b></div>
 <div class="metric"><span>Lançamentos de receita</span><b>{{ d.total_receita }}</b></div>
 <div class="metric" style="{% if d.pct_outros_receita >= 15 %}border-color:#8a5a1c{% endif %}">
-  <span>% em "Outros" (receita)</span><b style="{% if d.pct_outros_receita >= 15 %}color:#e0a83d{% endif %}">{{ d.pct_outros_receita }}%</b></div>
+  <span>% em "Outros" (receita)</span><b style="{% if d.pct_outros_receita >= 15 %}color:var(--ambar){% endif %}">{{ d.pct_outros_receita }}%</b></div>
 </div>
 
 <div class="card"><h2>Despesa</h2>
 <table><tr><th>Categoria</th><th>Lançamentos</th><th>%</th><th>Total</th></tr>
 {% for l in d.despesa %}<tr>
-<td>{{ l.categoria }}{% if l.qtd == 0 %} <span class="tag suspensa">sem uso</span>{% elif l.categoria == 'Outros' and l.pct >= 15 %} <span class="tag" style="border-color:#8a5a1c;color:#e0a83d">revisar</span>{% endif %}</td>
+<td>{{ l.categoria }}{% if l.qtd == 0 %} <span class="tag suspensa">sem uso</span>{% elif l.categoria == 'Outros' and l.pct >= 15 %} <span class="tag" style="border-color:#8a5a1c;color:var(--ambar)">revisar</span>{% endif %}</td>
 <td>{{ l.qtd }}</td><td class="mut">{{ l.pct }}%</td><td>{{ brl(l.total) }}</td>
 </tr>{% endfor %}
 </table></div>
@@ -306,7 +302,7 @@ _ADMIN_CATEGORIAS = """{% extends "abase" %}{% block conteudo %}
 <div class="card"><h2>Receita</h2>
 <table><tr><th>Categoria</th><th>Lançamentos</th><th>%</th><th>Total</th></tr>
 {% for l in d.receita %}<tr>
-<td>{{ l.categoria }}{% if l.qtd == 0 %} <span class="tag suspensa">sem uso</span>{% elif l.categoria == 'Outros' and l.pct >= 15 %} <span class="tag" style="border-color:#8a5a1c;color:#e0a83d">revisar</span>{% endif %}</td>
+<td>{{ l.categoria }}{% if l.qtd == 0 %} <span class="tag suspensa">sem uso</span>{% elif l.categoria == 'Outros' and l.pct >= 15 %} <span class="tag" style="border-color:#8a5a1c;color:var(--ambar)">revisar</span>{% endif %}</td>
 <td>{{ l.qtd }}</td><td class="mut">{{ l.pct }}%</td><td>{{ brl(l.total) }}</td>
 </tr>{% endfor %}
 </table></div>
@@ -359,14 +355,14 @@ vira várias linhas pro cliente — aqui aparece agregado, com <b>"visto N vezes
 _ADMIN_FUNIL = """{% extends "abase" %}{% block conteudo %}
 <h2>Funil de aquisição</h2>
 {% if not f.tem_tabela_leads %}
-<div class="metric" style="border-color:#e0a83d">A tabela de leads ainda não existe (migração 023 não aplicada).
+<div class="metric" style="border-color:var(--ambar)">A tabela de leads ainda não existe (migração 023 não aplicada).
 Os números do funil aparecem assim que o fluxo de cliente novo entrar no ar. Abaixo, a saúde das contas já funciona.</div>
 {% else %}
 <div class="cards">
   <div class="metric"><span>Visitantes</span><b style="color:var(--verde-claro)">{{ f.geral.visitantes }}</b></div>
   <div class="metric"><span>Testaram</span><b style="color:#7ab0e8">{{ f.geral.testaram }} ({{ f.geral.pct_testou }}%)</b></div>
   <div class="metric"><span>Cadastraram</span><b style="color:#a8d96f">{{ f.geral.cadastraram }} ({{ f.geral.pct_cadastrou }}%)</b></div>
-  <div class="metric"><span>Pagaram</span><b style="color:#e0a83d">{{ f.geral.pagaram }} ({{ f.geral.pct_pagou }}%)</b></div>
+  <div class="metric"><span>Pagaram</span><b style="color:var(--ambar)">{{ f.geral.pagaram }} ({{ f.geral.pct_pagou }}%)</b></div>
 </div>
 
 <div class="card"><h2>Por canal</h2>
@@ -391,18 +387,18 @@ Os números do funil aparecem assim que o fluxo de cliente novo entrar no ar. Ab
 _ADMIN_CUSTOS = """{% extends "abase" %}{% block conteudo %}
 <h2>Custos de API</h2>
 {% if not k.tem_tabela %}
-<div class="metric" style="border-color:#e0a83d">A tabela uso_api ainda não existe (migração 024 não aplicada).</div>
+<div class="metric" style="border-color:var(--ambar)">A tabela uso_api ainda não existe (migração 024 não aplicada).</div>
 {% endif %}
 
 <form method="get" action="/admin/custos" style="margin:1rem 0;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
 <label>De <input type="date" name="desde" value="{{ desde or '' }}" style="padding:.4rem .5rem;border-radius:6px;border:1px solid #333;background:var(--bg);color:var(--txt)"></label>
 <label>Até <input type="date" name="ate" value="{{ ate or '' }}" style="padding:.4rem .5rem;border-radius:6px;border:1px solid #333;background:var(--bg);color:var(--txt)"></label>
-<button style="padding:.45rem .8rem;border:0;border-radius:7px;background:var(--verde);color:#fff;cursor:pointer">Filtrar</button>
+<button style="padding:.45rem .8rem;border:0;border-radius:7px;background:var(--verde);color:var(--sobre-verde);cursor:pointer">Filtrar</button>
 <span class="mut">(vazio = mês corrente)</span>
 </form>
 
 <div class="cards">
-<div class="metric"><span>Custo total</span><b style="color:#e0a83d">R$ {{ k.geral.custo_total_reais }}</b></div>
+<div class="metric"><span>Custo total</span><b style="color:var(--ambar)">R$ {{ k.geral.custo_total_reais }}</b></div>
 <div class="metric"><span>Contas ativas</span><b style="color:#7ab0e8">{{ k.geral.contas_ativas }}</b></div>
 <div class="metric"><span>Custo médio/cliente</span><b style="color:#a8d96f">R$ {{ k.geral.custo_medio_por_conta_reais }}</b></div>
 <div class="metric"><span>Chamadas</span><b style="color:var(--verde-claro)">{{ k.geral.chamadas }}</b></div>
@@ -455,7 +451,7 @@ _ADMIN_COMUNICACAO = """{% extends "abase" %}{% block conteudo %}
   <div><button>Salvar destino dos alertas</button></div>
 </form>
 <form method="post" action="/admin/alertas/teste" style="margin-top:.6rem">
-  <button style="background:#2a2a2b;border:1px solid var(--borda)">Enviar alerta de teste</button>
+  <button style="background:var(--borda);border:1px solid var(--borda)">Enviar alerta de teste</button>
   <span class="mut" style="margin-left:.5rem">dispara pelo caminho real e diz, canal a canal, se saiu</span>
 </form>
 <table style="margin-top:1rem">

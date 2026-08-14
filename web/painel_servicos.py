@@ -576,7 +576,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-pill.on{border-color:var(--verde-claro); background:#10241d; color:var(--verde-claro)}
 .tipo-badge{font-size:.62rem; font-weight:700; letter-spacing:.02em; border-radius:5px; padding:.05rem .35rem; flex-shrink:0}
 .tipo-badge.pj{color:#6fb0e6; border:1px solid #2f4a63; background:#11212e}
-.tipo-badge.pf{color:var(--amber, #e0a33e); border:1px solid #5a4520; background:#2a2113}
+.tipo-badge.pf{color:var(--amber, var(--ambar)); border:1px solid var(--ambar-borda); background:#2a2113}
 .cli-drop-item{padding:.55rem .8rem; cursor:pointer; border-bottom:1px solid var(--borda)}
 .cli-drop-item:last-child{border-bottom:0}
 .cli-drop-item:hover{background:var(--bg)}
@@ -609,14 +609,14 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-total{margin-top:.8rem; padding:1rem; border-radius:12px; background:#10241d; border:1px solid #1c3a30}
 .oc-total .v{font-size:1.7rem; font-weight:700; color:var(--verde-claro); font-variant-numeric:tabular-nums}
 .oc-btn{display:block; width:100%; padding:.75rem; border-radius:10px; border:none; cursor:pointer; font-weight:600; font-size:.95rem; margin-top:.6rem}
-.oc-btn-g{background:var(--verde); color:#04140d}
+.oc-btn-g{background:var(--verde); color:var(--sobre-verde)}
 .oc-btn-o{background:transparent; border:1px solid var(--borda); color:var(--txt)}
 .oc-hist{display:flex; align-items:center; justify-content:space-between; gap:.6rem; padding:.7rem .8rem; border:1px solid var(--borda); border-radius:10px; margin-bottom:.5rem; flex-wrap:wrap}
 .oc-av{width:32px; height:32px; border-radius:8px; background:#13251d; color:var(--verde-claro); display:flex; align-items:center; justify-content:center; font-weight:700; flex:none; margin-right:.7rem}
 .oc-badge{font-size:.66rem; font-weight:700; padding:.12rem .5rem; border-radius:6px; letter-spacing:.03em; text-transform:uppercase}
 .oc-badge.fechado{background:#10241d; color:var(--verde-claro)}
 .oc-badge.aberto{background:#2a2212; color:#e0b25a}
-.oc-fechar{background:var(--verde); color:#04140d; border:0; border-radius:8px; padding:.4rem .8rem; font-weight:600; cursor:pointer; font-size:.8rem}
+.oc-fechar{background:var(--verde); color:var(--sobre-verde); border:0; border-radius:8px; padding:.4rem .8rem; font-weight:600; cursor:pointer; font-size:.8rem}
 /* mobile: cada serviço vira 2 linhas (toggle+nome+ações em cima, valores embaixo).
    Fica no FIM do bloco pra vencer a cascata das regras base acima. */
 @media(max-width:600px){
@@ -681,7 +681,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       <label id="oc-cnpj-label">{{ 'CNPJ / CPF' if servico_avulso else 'CNPJ' }} <span style="color:var(--txt-mut);font-size:.78rem">— preenche empresa, segmento e contato automaticamente</span></label>
       <div style="display:flex; gap:.5rem; align-items:center">
         <input id="oc-cnpj" class="oc-inp" placeholder="00.000.000/0000-00" inputmode="numeric" style="flex:1">
-        <button id="oc-cnpj-btn" type="button" style="background:var(--verde);color:#04140d;border:0;border-radius:8px;padding:.55rem 1.1rem;font-weight:600;cursor:pointer;white-space:nowrap">Buscar</button>
+        <button id="oc-cnpj-btn" type="button" style="background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;padding:.55rem 1.1rem;font-weight:600;cursor:pointer;white-space:nowrap">Buscar</button>
       </div>
       <span id="oc-cnpj-msg" style="font-size:.8rem;color:var(--txt-mut);display:block;margin-top:.25rem"></span>
     </div>

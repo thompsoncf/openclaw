@@ -24,7 +24,7 @@ def pool():
     init_schema(p)
     migr = Path(__file__).resolve().parent.parent / "db" / "migracoes"
     with p.connection() as c:
-        for nome in ("081_canais_config.sql", "084_canal_token.sql", "096_whatsapp_cloud.sql",
+        for nome in ("081_canais_config.sql", "084_canal_token.sql", "096_whatsapp_cloud.sql", "145_canal_templates_agenda.sql",
                     "098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql",
                     "101_agenda_lembretes.sql", "126_agenda_avisar_convidados.sql",
                     "128_lembretes_aviso_convidado.sql", "130_evento_desfecho.sql",

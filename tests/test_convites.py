@@ -21,7 +21,7 @@ def pool():
     init_schema(p)
     migr = Path(__file__).resolve().parent.parent / "db" / "migracoes"
     with p.connection() as c:
-        for nome in ("081_canais_config.sql", "084_canal_token.sql", "096_whatsapp_cloud.sql",
+        for nome in ("081_canais_config.sql", "084_canal_token.sql", "096_whatsapp_cloud.sql", "145_canal_templates_agenda.sql",
                     "098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql",
                     "130_evento_desfecho.sql", "131_evento_link_online.sql", "132_convidado_canal_resposta.sql",
                     "139_agenda_mensagens_log.sql"):
@@ -275,6 +275,114 @@ def test_enviar_convite_sem_numero_ou_sem_template(pool, conta_id, monkeypatch):
     com_num = cv.criar_convidado(pool, conta_id, ev["id"], "ComZap", "86 98888-7777")
     monkeypatch.delenv("TWILIO_TMPL_CONVITE_SID", raising=False)
     assert cv.enviar_convite_whatsapp(pool, com_num["token"])["erro"] == "sem_template"
+
+
+def _salvar_tmpl(pool, conta_id, convite=None, lembrete=None):
+    """Mesmo upsert da rota /comunicacao/canal-templates."""
+    with pool.connection() as c:
+        c.execute("""insert into canais_config (conta_id, canal, identificador, provedor, ativo,
+                                                tmpl_convite_sid, tmpl_lembrete_sid)
+                     values (%s,'whatsapp',%s,'twilio',true,%s,%s)
+                     on conflict (conta_id, canal) do update set
+                       tmpl_convite_sid=excluded.tmpl_convite_sid,
+                       tmpl_lembrete_sid=excluded.tmpl_lembrete_sid""",
+                  (conta_id, f"whatsapp:+5586{conta_id:07d}", convite, lembrete))
+        c.commit()
+
+
+def test_sid_da_empresa_vence_a_env(pool, conta_id, monkeypatch):
+    """O template é aprovado dentro da conta do NÚMERO — o SID da empresa tem que
+    ganhar da env global, senão uma conta mandaria com o template de outra."""
+    monkeypatch.setenv("TWILIO_TMPL_CONVITE_SID", "HXdaEnv")
+    monkeypatch.setenv("TWILIO_TMPL_LEMBRETE_SID", "HXlembreteEnv")
+    _salvar_tmpl(pool, conta_id, convite="HXdaEmpresa", lembrete="HXlembreteEmpresa")
+    assert cv.sid_convite(pool, conta_id) == "HXdaEmpresa"
+    assert cv.sid_lembrete(pool, conta_id) == "HXlembreteEmpresa"
+
+
+def test_sem_sid_da_empresa_cai_na_env(pool, conta_id, monkeypatch):
+    """Fallback: quem já rodava só com a env continua funcionando igual."""
+    monkeypatch.setenv("TWILIO_TMPL_CONVITE_SID", "HXdaEnv")
+    monkeypatch.setenv("TWILIO_TMPL_LEMBRETE_SID", "HXlembreteEnv")
+    _salvar_tmpl(pool, conta_id, convite=None, lembrete=None)
+    assert cv.sid_convite(pool, conta_id) == "HXdaEnv"
+    assert cv.sid_lembrete(pool, conta_id) == "HXlembreteEnv"
+
+
+def test_sid_nao_vaza_entre_empresas(pool, conta_id, monkeypatch):
+    monkeypatch.delenv("TWILIO_TMPL_CONVITE_SID", raising=False)
+    _salvar_tmpl(pool, conta_id, convite="HXsoDaPrimeira")
+    with pool.connection() as c:
+        outra = c.execute("insert into contas (tipo,nome) values ('pj','Outra') returning id").fetchone()[0]
+        c.commit()
+    assert cv.sid_convite(pool, conta_id) == "HXsoDaPrimeira"
+    assert cv.sid_convite(pool, outra) == ""          # sem coluna e sem env
+
+
+def test_enviar_convite_usa_o_sid_da_empresa(pool, conta_id, monkeypatch):
+    monkeypatch.delenv("TWILIO_TMPL_CONVITE_SID", raising=False)
+    _salvar_tmpl(pool, conta_id, convite="HXdaEmpresa")
+    ev = _evento(pool, conta_id)
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Rui", "86988887777")
+    from finance import whatsapp_out as wout
+    capt = {}
+    monkeypatch.setattr(wout, "enviar_template",
+                        lambda c, i, n, sid, v, mmlite=False: capt.update(sid=sid) or {"ok": True})
+    assert cv.enviar_convite_whatsapp(pool, conv["token"])["ok"] is True
+    assert capt["sid"] == "HXdaEmpresa"               # não a env (que nem existe aqui)
+
+
+class _FakeReq:
+    def __init__(self):
+        self.session = {}
+
+
+def test_rota_canal_templates_salva_e_limpa(pool, conta_id, monkeypatch):
+    """Diferente da rota do número (onde vazio MANTÉM o que estava, pra proteger
+    token), aqui vazio LIMPA — o SID aparece no campo, então precisa haver como
+    remover um errado."""
+    from web import painel_prospeccao as pp
+    monkeypatch.setattr(pp, "get_pool", lambda: pool)
+    monkeypatch.setattr(pp, "_acesso", lambda req: (
+        {"conta_id": conta_id, "gerencia": True, "membro_id": None}, None))
+    monkeypatch.delenv("TWILIO_TMPL_CONVITE_SID", raising=False)
+    monkeypatch.delenv("TWILIO_TMPL_LEMBRETE_SID", raising=False)
+    _salvar_tmpl(pool, conta_id)                          # canal já configurado
+
+    r = pp.comunicacao_canal_templates(_FakeReq(), tmpl_convite_sid="  HXconv  ",
+                                       tmpl_lembrete_sid="HXlemb")
+    assert r.status_code == 303
+    assert cv.sid_convite(pool, conta_id) == "HXconv"     # com strip
+    assert cv.sid_lembrete(pool, conta_id) == "HXlemb"
+
+    pp.comunicacao_canal_templates(_FakeReq(), tmpl_convite_sid="", tmpl_lembrete_sid="")
+    assert cv.sid_convite(pool, conta_id) == ""           # vazio limpou
+    assert cv.sid_lembrete(pool, conta_id) == ""
+
+
+def test_rota_canal_templates_so_gerencia(pool, conta_id, monkeypatch):
+    from web import painel_prospeccao as pp
+    monkeypatch.setattr(pp, "get_pool", lambda: pool)
+    monkeypatch.setattr(pp, "_acesso", lambda req: (
+        {"conta_id": conta_id, "gerencia": False, "membro_id": 9}, None))
+    monkeypatch.delenv("TWILIO_TMPL_CONVITE_SID", raising=False)
+    _salvar_tmpl(pool, conta_id)
+    pp.comunicacao_canal_templates(_FakeReq(), tmpl_convite_sid="HXnaoDeviaSalvar",
+                                   tmpl_lembrete_sid="")
+    assert cv.sid_convite(pool, conta_id) == ""
+
+
+def test_rota_canal_templates_sem_canal_configurado_avisa(pool, conta_id, monkeypatch):
+    """Sem WhatsApp configurado não dá pra criar a linha aqui (identificador é
+    NOT NULL e entra no índice único) — avisa em vez de estourar."""
+    from web import painel_prospeccao as pp
+    monkeypatch.setattr(pp, "get_pool", lambda: pool)
+    monkeypatch.setattr(pp, "_acesso", lambda req: (
+        {"conta_id": conta_id, "gerencia": True, "membro_id": None}, None))
+    req = _FakeReq()
+    r = pp.comunicacao_canal_templates(req, tmpl_convite_sid="HXalgo", tmpl_lembrete_sid="")
+    assert r.status_code == 303
+    assert "Configure o WhatsApp" in req.session["prosp_aviso"]
 
 
 def test_enviar_convite_loga_sucesso_e_falha_no_historico(pool, conta_id, monkeypatch):

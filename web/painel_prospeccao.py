@@ -1249,15 +1249,19 @@ def _canais_status(pool, conta_id: int) -> dict:
     tokens = {}
     provs = {}
     wa_phone = {}
+    tmpls = {"convite": "", "lembrete": ""}
     with pool.connection() as c:
-        for (canal, ident, tok, prov, waid) in c.execute(
-                """select canal, identificador, token, coalesce(provedor,'twilio'), wa_phone_id
+        for (canal, ident, tok, prov, waid, t_conv, t_lemb) in c.execute(
+                """select canal, identificador, token, coalesce(provedor,'twilio'), wa_phone_id,
+                          tmpl_convite_sid, tmpl_lembrete_sid
                      from canais_config where conta_id=%s and ativo""",
                 (conta_id,)).fetchall():
             nums[canal] = ident
             tokens[canal] = tok
             provs[canal] = prov
             wa_phone[canal] = waid
+            if canal == "whatsapp":
+                tmpls = {"convite": t_conv or "", "lembrete": t_lemb or ""}
         er = c.execute(
             "select imap_senha from canais_config where conta_id=%s and canal='email'",
             (conta_id,)).fetchone()
@@ -1309,6 +1313,7 @@ def _canais_status(pool, conta_id: int) -> dict:
         "wa_provedor": wa_prov,
         "wa_phone_set": bool(wa_phone.get("whatsapp")),
         "wa_phone_id": wa_phone.get("whatsapp") or "",
+        "tmpl_convite": tmpls["convite"], "tmpl_lembrete": tmpls["lembrete"],
         "messenger": messenger_ok,
         "instagram": instagram_ok,
         "msg_tok_ruim": msg_tok_ruim, "ig_tok_ruim": ig_tok_ruim,
@@ -2186,6 +2191,46 @@ def comunicacao_canal_numero(request: Request, canal: str = Form(...), numero: s
     except Exception:  # noqa: BLE001 — provável colisão do índice (canal, identificador)
         msg = "Esse número já está vinculado a outra empresa."
     request.session["prosp_aviso"] = msg
+    return RedirectResponse(destino, status_code=303)
+
+
+@router.post("/painel/prospeccao/comunicacao/canal-templates")
+def comunicacao_canal_templates(request: Request, tmpl_convite_sid: str = Form(""),
+                                tmpl_lembrete_sid: str = Form("")):
+    """Templates da AGENDA desta empresa (convite de reunião e aviso antes).
+
+    Ao contrário de canal-numero, aqui campo vazio LIMPA: o SID aparece no campo
+    (não é segredo mascarado como o token), então precisa haver como remover um
+    SID errado. Mesmo contrato de distribuicao.salvar.
+
+    Sem validar o formato 'HX…' de propósito: no provedor cloud o campo carrega o
+    NOME do template aprovado na Meta, e validação estrita quebraria esse caso."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    destino = "/painel/prospeccao/comunicacao?aba=canais"
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "Só o dono/gestor configura os canais."
+        return RedirectResponse(destino, status_code=303)
+    convite = (tmpl_convite_sid or "").strip()[:64] or None
+    lembrete = (tmpl_lembrete_sid or "").strip()[:64] or None
+    with get_pool().connection() as c:
+        # UPDATE, nunca INSERT: `identificador` é NOT NULL e entra no índice único
+        # (canal, identificador) — criar a linha aqui com um placeholder vazio
+        # colidiria entre contas. Template sem número configurado não serviria
+        # pra nada mesmo, então avisa em vez de gravar solto.
+        n = c.execute(
+            """update canais_config set tmpl_convite_sid=%s, tmpl_lembrete_sid=%s,
+                      atualizado_em=now()
+                where conta_id=%s and canal='whatsapp'""",
+            (convite, lembrete, ctx["conta_id"])).rowcount
+        c.commit()
+    if not n:
+        request.session["prosp_aviso"] = "Configure o WhatsApp da empresa aqui em cima antes de salvar os templates."
+    else:
+        request.session["prosp_aviso"] = (
+            "Templates da agenda salvos ✓" if (convite or lembrete)
+            else "Templates da agenda limpos — o convite volta a sair só pelo link manual.")
     return RedirectResponse(destino, status_code=303)
 
 
@@ -7884,9 +7929,26 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         {% if canais.wa_provedor=='qr' %}qrAutoReconectar();{% endif %}
         </script>
       </div>
+      <!-- templates da agenda: só valem na API oficial (no QR não existe template) -->
+      <div id="wa-tmpl-agenda" style="margin-top:.9rem;padding-top:.8rem;border-top:1px dashed var(--borda)">
+        <div style="font-weight:600;font-size:.85rem">📅 Templates da Agenda <span class="mut" style="font-weight:400">(opcional)</span></div>
+        <div class="mut" style="font-size:.76rem;margin-top:.15rem">Para o convite e o aviso da reunião saírem <b>sozinhos</b> fora da janela de 24h. Sem eles, o convite continua indo pelo link manual.</div>
+        <form method="post" action="/painel/prospeccao/comunicacao/canal-templates" style="margin-top:.5rem">
+          <label class="lbl">Convite de reunião</label>
+          <input class="fld" name="tmpl_convite_sid" value="{{ canais.tmpl_convite }}" placeholder="HX… ou nome_do_template" spellcheck="false" style="font-family:ui-monospace,monospace">
+          <div class="mut" style="font-size:.74rem;margin-top:.2rem">{% if canais.tmpl_convite %}<span style="color:var(--verde-claro)">● pronto pra disparo</span>{% else %}<span style="color:#e0a33e">● defina o SID pra ligar o disparo automático</span>{% endif %}</div>
+          <label class="lbl" style="margin-top:.5rem">Aviso antes da reunião</label>
+          <input class="fld" name="tmpl_lembrete_sid" value="{{ canais.tmpl_lembrete }}" placeholder="HX… ou nome_do_template" spellcheck="false" style="font-family:ui-monospace,monospace">
+          <div class="mut" style="font-size:.74rem;margin-top:.2rem">{% if canais.tmpl_lembrete %}<span style="color:var(--verde-claro)">● pronto pra disparo</span>{% else %}<span style="color:#e0a33e">● sem ele, só avisa quem respondeu no WhatsApp nas últimas 24h</span>{% endif %}</div>
+          <div class="mut" style="font-size:.72rem;margin-top:.45rem">Gere com <code>scripts/criar_template_lembrete.py</code> e cole o código aqui. Deixe vazio pra limpar.</div>
+          <button class="pbtn" type="submit" style="margin-top:.5rem">Salvar templates</button>
+        </form>
+      </div>
       <script>
       function waProv(v){['twilio','cloud','qr'].forEach(function(k){var e=document.getElementById('wa-'+k);if(e)e.style.display=(k===v)?'block':'none';});
-        document.querySelectorAll('.waseg label').forEach(function(l){var r=l.querySelector('input');l.classList.toggle('on',!!r&&r.value===v);});}
+        document.querySelectorAll('.waseg label').forEach(function(l){var r=l.querySelector('input');l.classList.toggle('on',!!r&&r.value===v);});
+        // no QR não existe template aprovado — esconde pra não prometer o que não funciona
+        var t=document.getElementById('wa-tmpl-agenda');if(t)t.style.display=(v==='qr')?'none':'block';}
       waProv('{{ canais.wa_provedor if canais.wa_provedor in ['twilio','cloud','qr'] else 'twilio' }}');
       </script>
       {% else %}

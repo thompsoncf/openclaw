@@ -19,11 +19,19 @@ template, o convidado não recebe nada. Quem confirma pela página pública
 caminho. (No provedor 'qr' isso não se aplica: lá não existe janela nem
 template, o aviso sai livre sempre.)
 
-Corpo aprovado (variáveis, NA ORDEM — batem com finance/convites.py:
-`variaveis = {"1": titulo, "2": hora, "3": str(faltam_min)}`):
+Corpo aprovado (variáveis, NA ORDEM — batem com finance/convites.py,
+`avisar_convidado_confirmado`):
     {{1}} = título do compromisso   (ex.: "Reunião Consultoria Dadan")
     {{2}} = horário HH:MM           (ex.: "09:30")
     {{3}} = minutos que faltam      (ex.: "30")
+    {{4}} = local                   (ex.: "Edifício Dom João" / "Reunião online")
+    {{5}} = token do convite        (sufixo do botão → /convite/<token>)
+
+O BOTÃO leva pra página do convite, que já mostra mapa, link da chamada e
+"adicionar ao calendário". Por que assim, e não um botão de mapa direto: um
+evento online não tem endereço e um presencial não tem link de chamada — uma das
+variáveis ficaria VAZIA, e a Meta recusa variável em branco. Apontando pro
+convite, um template só atende os dois casos e entrega os três links.
 """
 import os
 import sys
@@ -33,20 +41,34 @@ import httpx
 FRIENDLY = "lembrete_compromisso_ptbr"
 LANG = "pt_BR"
 
+# URL base do botão. Precisa ser o MESMO APP_URL que o serviço web usa (é o que
+# convites.url_convite monta), senão o botão aponta pro lugar errado.
+APP_URL = (os.environ.get("APP_URL") or "https://app.zaq-ia.com").rstrip("/")
+
 # Corpo do lembrete. Transacional puro: fala de um compromisso que a própria
-# pessoa confirmou, sem oferta e sem link — é o que caracteriza UTILITY pra Meta
-# (aprova mais fácil e custa ~9x menos que marketing: R$ 0,035 vs R$ 0,3217, ver
+# pessoa confirmou, sem oferta — é o que caracteriza UTILITY pra Meta (aprova
+# mais fácil e custa ~9x menos que marketing: R$ 0,035 vs R$ 0,3217, ver
 # finance/wa_precos.py). Espelha o texto livre de convites.texto_lembrete_convidado
 # pra quem recebe pelos dois caminhos ver a mesma coisa. A saída ("é só responder
 # aqui") reforça o caráter transacional e abre a janela de 24h se a pessoa
 # responder — aí a conversa segue de graça.
 BODY = ("⏰ Lembrete: seu compromisso *{{1}}* começa às {{2}} — daqui a ~{{3}} "
-        "minutos. Se precisar remarcar, é só responder aqui.")
+        "minutos.\n📍 {{4}}\n\nSe precisar remarcar, é só responder aqui.")
+
+BOTAO_URL = APP_URL + "/convite/{{5}}"
 
 TYPES = {
-    # texto puro: lembrete não precisa de botão (quem quiser responder, responde
-    # livre — e a resposta abre a janela de 24h).
-    "twilio/text": {"body": BODY},
+    # call-to-action: botão de URL com prefixo FIXO + sufixo variável — o único
+    # formato de URL dinâmica que a Meta aceita em template.
+    "twilio/call-to-action": {
+        "body": BODY,
+        "actions": [
+            # título ≤ 20 chars (limite do WhatsApp)
+            {"type": "URL", "title": "Local e detalhes", "url": BOTAO_URL},
+        ],
+    },
+    # fallback de texto puro (outros canais não têm botão)
+    "twilio/text": {"body": BODY + f"\n\nDetalhes: {BOTAO_URL}"},
 }
 
 
@@ -64,7 +86,8 @@ def criar_conteudo(auth) -> str:
         "friendly_name": FRIENDLY,
         "language": LANG,
         # valores só de amostra pra Meta validar o formato do corpo
-        "variables": {"1": "Reunião de alinhamento", "2": "09:30", "3": "30"},
+        "variables": {"1": "Reunião de alinhamento", "2": "09:30", "3": "30",
+                      "4": "Edifício Dom João", "5": "abc123token"},
         "types": TYPES,
     }
     r = httpx.post("https://content.twilio.com/v1/Content",

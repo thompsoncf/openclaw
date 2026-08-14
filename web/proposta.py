@@ -317,7 +317,9 @@ p.es{font-size:13.5px;line-height:1.7;color:#3A4254}
 table{width:100%;border-collapse:collapse;margin-top:4px}
 th{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#9FA8BC;background:#14213D;padding:9px 13px;text-align:left}
 th.r,td.r{text-align:right;font-family:var(--mono);white-space:nowrap}
-td{padding:11px 13px;border-bottom:1px solid #F0EBE0;font-size:13.5px}td small{display:block;color:#A8A192;font-size:11.5px;margin-top:2px}
+td.q{padding-left:6px}
+td{padding:11px 13px;border-bottom:1px solid #F0EBE0;font-size:13.5px}
+td small{display:block;color:#8A8475;font-size:11.5px;margin-top:4px;line-height:1.65;max-width:52ch}
 .tot{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:22px}
 .bx{border:1px solid #ECE7DC;border-radius:12px;padding:16px}.bx .l{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:600}.bx .v{font-family:var(--mono);font-size:21px;font-weight:600;margin-top:6px}
 .fin{margin-top:12px;background:#14213D;border-radius:12px;padding:18px 20px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}.fin .l{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#E0B458;font-weight:600}.fin .v{font-family:var(--mono);font-size:26px;font-weight:600;color:#FBFAF7}
@@ -347,7 +349,11 @@ td{padding:11px 13px;border-bottom:1px solid #F0EBE0;font-size:13.5px}td small{d
 .pill.on2{background:rgba(29,158,117,.12);border-color:rgba(29,158,117,.45);color:#0b7a56}
 .local{font-size:12px;color:#5A6678;margin-top:9px}
 td.n{width:26px;color:#A8A192;vertical-align:top}
-.item-l{display:flex;gap:10px}
+/* a coluna do item manda na largura: as colunas de número são fixas e o que
+   sobra é da descrição, senão ela vira uma tira estreita e alta. */
+table.itens{table-layout:fixed}
+.item-l{display:flex;gap:12px;align-items:flex-start}
+.item-l>div{min-width:0}
 .foto{width:46px;height:46px;border-radius:7px;flex:0 0 46px;border:1px solid #ECE7DC;
   background:#FBFAF7 center/cover no-repeat}
 .cat{font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
@@ -436,8 +442,8 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
           {{- [prop.whats, prop.cliente.telefone, prop.cliente.email]|select|join(' · ') }}{% endif %}</div>
       {% if linhas %}
       <div class="eb">Itens do orçamento</div>
-      <table><tr><th style="width:26px">#</th><th>Item</th><th class="r" style="width:44px">Qtd</th>
-                 <th class="r" style="width:86px">Vr. unit.</th><th class="r" style="width:92px">Subtotal</th></tr>
+      <table class="itens"><tr><th style="width:24px">#</th><th>Item</th><th class="r" style="width:40px">Qtd</th>
+                 <th class="r" style="width:100px">Vr. unit.</th><th class="r" style="width:108px">Subtotal</th></tr>
         {% for l in linhas %}<tr><td class="n">{{ l.n }}</td>
           <td><div class="item-l">
             {%- if l.foto %}<div class="foto" style="background-image:url('{{ l.foto }}')"></div>{% endif %}
@@ -495,17 +501,28 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
   <form class="sign" method="post" action="/proposta/{{ token }}/assinar">
     <h3>✍️ Aprovar e assinar</h3>
     {% if evento %}
-    <p>Ao aprovar, você aceita os valores e as condições acima. Fica registrado com seu nome, data/hora e IP{% if prop.ev.data %} — e a data de <b>{{ prop.ev.data.split(' ·')[0] }}</b> fica reservada na agenda da {{ prop.vendedor }}{% endif %}.</p>
+    <p>Ao aprovar, você aceita os valores e as condições acima. Fica registrado com nome, CPF, data/hora e IP{% if prop.ev.data %} — e a data de <b>{{ prop.ev.data.split(' ·')[0] }}</b> é reservada na agenda da {{ prop.vendedor }}{% endif %}.</p>
+    {% if erro %}<div class="err">{{ erro }}</div>{% endif %}
+    <div class="row">
+      <input type="text" name="nome" placeholder="Seu nome completo" required>
+      <input type="text" name="doc" placeholder="CPF">
+    </div>
+    {# O aceite é o próprio ato de apertar o botão: a frase acima diz o que ele
+       está aceitando e o botão diz o que vai acontecer. Sem caixinha extra —
+       é assim no modelo aprovado. O que fica registrado não muda: nome, CPF,
+       data/hora e IP. #}
+    <input type="hidden" name="aceite" value="on">
+    <button class="go" type="submit">✓ Aprovar e reservar a data</button>
     {% else %}
     <p>Ao aprovar, você aceita esta proposta e autoriza o início. Fica registrado com seu nome, data/hora e IP.</p>
-    {% endif %}
     {% if erro %}<div class="err">{{ erro }}</div>{% endif %}
     <div class="row">
       <input type="text" name="nome" placeholder="Seu nome completo" required>
       <input type="text" name="doc" placeholder="CPF (opcional)">
     </div>
-    <label class="ck"><input type="checkbox" name="aceite"> Li e concordo com os termos e valores {{ 'deste orçamento' if evento else 'desta proposta' }}.</label>
-    <button class="go" type="submit">{{ '✓ Aprovar e reservar a data' if evento else '✓ Aprovar e assinar proposta' }}</button>
+    <label class="ck"><input type="checkbox" name="aceite"> Li e concordo com os termos e valores desta proposta.</label>
+    <button class="go" type="submit">✓ Aprovar e assinar proposta</button>
+    {% endif %}
   </form>
   {% endif %}
 

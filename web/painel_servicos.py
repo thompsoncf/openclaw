@@ -664,7 +664,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-inp{padding:.55rem .7rem; border-radius:8px; background:var(--bg); color:var(--txt); border:1px solid var(--borda); font-size:.95rem; width:100%; box-sizing:border-box}
 .oc-inp:focus{border-color:var(--verde); outline:none}
 .oc-mod{display:grid; grid-template-columns:auto 1fr 84px 84px 84px auto; gap:.55rem; align-items:center; padding:.6rem 0; border-bottom:1px solid var(--borda)}
-.oc-mod.avulso,.oc-head.avulso{grid-template-columns:auto 1fr 58px 90px 90px auto}
+.oc-mod.avulso,.oc-head.avulso{grid-template-columns:auto minmax(0,1fr) 64px 108px auto}
+.sv-wrap.oc-margin .oc-mod.avulso,.sv-wrap.oc-margin .oc-head.avulso{grid-template-columns:auto minmax(0,1fr) 64px 108px 92px auto}
 .pg-row{display:grid; grid-template-columns:140px 110px minmax(0,1fr) minmax(0,1fr) auto; gap:.5rem; align-items:center; padding:.45rem 0; border-bottom:1px solid var(--borda)}
 .pg-row:last-child{border-bottom:0}
 .pg-row input{padding:.4rem .5rem; font-size:.88rem}
@@ -676,7 +677,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .svc-thumb.tem span{display:none}
 .oc-mod .svc-thumb{width:34px;height:34px;flex:0 0 34px;border-radius:7px;font-size:.8rem}
 .oc-nome-linha{display:flex;gap:.5rem;align-items:center;min-width:0}
-.oc-cat{font-size:.66rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--verde-claro)}
+.oc-cat{font-size:.66rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--verde-claro);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .oc-mod.off{opacity:.5}
 .oc-mod .oc-nome,.oc-browse-row .oc-nome{cursor:default; min-width:0}
 .oc-desc-preview{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%}
@@ -1301,11 +1303,15 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   // do link "ver todos", pra não repetir o card gigante de antes com 26 linhas
   // sempre visíveis.
   function buildRowAvulso(s){
+    var thumb='<div class="svc-thumb'+(s.foto_url?' tem':'')+'"'
+      +(s.foto_url?' style="background-image:url(\''+ec(s.foto_url)+'\')"':'')+'><span>📷</span></div>';
     return '<button class="oc-tog on" type="button" title="Remover da proposta"></button>'
-      +'<div class="oc-nome"><b>'+ec(s.nome)+'</b><div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div>'
+      +'<div class="oc-nome oc-nome-linha">'+thumb+'<div style="min-width:0">'
+      +(s.categoria?'<div class="oc-cat">'+ec(s.categoria)+'</div>':'')
+      +'<b>'+ec(s.nome)+'</b><div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div></div>'
       +'<div class="oc-num"><span>Qtd</span><input class="oc-qtd" inputmode="numeric" value="1"></div>'
       +'<div class="oc-num"><span>Vr. unit.</span><input class="oc-setup" inputmode="numeric" value="'+s.setup+'"></div>'
-      +'<div class="oc-num"><span>Custo</span><input class="oc-custo" inputmode="numeric" value="'+s.custo+'"></div>'
+      +'<div class="oc-num oc-custo-col"><span>Custo</span><input class="oc-custo" inputmode="numeric" value="'+s.custo+'"></div>'
       +'<div class="oc-rowacts"><button class="oc-ic oc-rm" type="button" title="Remover da proposta">🗑</button></div>';
   }
   function renderCatalogoAvulso(){

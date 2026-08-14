@@ -22,6 +22,20 @@ from . import notificar
 _log = logging.getLogger("openclaw.lembretes")
 _LOCK = 553311   # advisory lock (só um worker dispara por vez)
 
+# Falhas que NÃO mudam sozinhas dentro da janela do evento (~30 min): faltou
+# configuração (template, número, canal). Retentar a cada 2 min só repete o mesmo
+# erro e enche o histórico de linhas idênticas — então marcamos como resolvido e
+# paramos, guardando o motivo. O botão "Reenviar" do Histórico de envios continua
+# lá pra tentar de novo depois de arrumar a configuração.
+# Qualquer outro erro (timeout, http_5xx, exceção de rede) é tratado como
+# TRANSITÓRIO e continua retentando — foi pra isso que o dedup deixou de ser
+# gravado antes do envio.
+_FALHA_PERMANENTE = {
+    "sem_numero", "sem_template", "fora_da_janela_sem_template",
+    "provedor_sem_template", "numero_invalido", "nao_configurado",
+    "sem_numero_empresa", "convite_nao_encontrado", "sem_telegram",
+}
+
 
 def rodar(pool, agora=None) -> dict:
     """Ponto de entrada do ticker. Nunca levanta — só registra e segue."""
@@ -104,11 +118,17 @@ def _avisos_proximos(pool, conta_id: int, antes_min: int, agora,
             loc = f"\n📍 {ev['local']}" if ev.get("local") else ""
             txt = f"⏰ *Daqui a pouco* (em ~{faltam} min): *{ev['titulo']}* às {h}.{loc}"
             ok = notificar.enviar_para_dono(pool, conta_id, txt)
+            # sem Telegram vinculado nunca vai dar certo; falha de rede pode dar
+            # no próximo ciclo (só consulta o vínculo quando falha, não sempre).
+            motivo = None if ok else ("falha_envio" if notificar.dono_tem_telegram(pool, conta_id)
+                                      else "sem_telegram")
             cv.registrar_mensagem(pool, conta_id, ev["id"], None, "lembrete", "telegram",
-                                  ok, None if ok else "falha_envio")
+                                  ok, motivo)
             if ok:
                 _primeira_vez(pool, conta_id, "aviso", chave)
                 n += 1
+            elif motivo in _FALHA_PERMANENTE:
+                _primeira_vez(pool, conta_id, "aviso", chave)
         if avisar_convidados:
             n += _avisar_convidados_confirmados(pool, conta_id, ev, h, faltam, agora)
     return n
@@ -127,11 +147,13 @@ def _avisar_convidados_confirmados(pool, conta_id: int, ev: dict, hora: str,
     """Manda o mesmo 'tá chegando a hora' pra quem CONFIRMOU presença nesse evento
     — dedup por convidado (não pelo evento, já consumido pelo aviso do dono).
 
-    Só marca como enviado DEPOIS de confirmar que enviou — uma falha (Twilio
-    fora do ar, sem template pra fora da janela etc.) não pode "queimar" a
-    tentativa pra sempre; o próximo ciclo (a cada ~2min, até o evento começar)
-    tenta de novo. rodar() já serializa por advisory lock, então não corre risco
-    de mandar em dobro entre checar e marcar."""
+    Só marca como enviado DEPOIS de confirmar que enviou — uma falha TRANSITÓRIA
+    (Twilio fora do ar, timeout) não pode "queimar" a tentativa pra sempre; o
+    próximo ciclo (a cada ~2min, até o evento começar) tenta de novo. Já uma
+    falha PERMANENTE (ver _FALHA_PERMANENTE: faltou template/número/canal) marca
+    e para — retentar não muda nada e só duplica linha no histórico.
+    rodar() já serializa por advisory lock, então não corre risco de mandar em
+    dobro entre checar e marcar."""
     n = 0
     convidados = cv.por_evento(pool, conta_id, [ev["id"]]).get(ev["id"], [])
     for g in convidados:
@@ -149,6 +171,8 @@ def _avisar_convidados_confirmados(pool, conta_id: int, ev: dict, hora: str,
             if r.get("ok"):
                 _primeira_vez(pool, conta_id, "aviso_convidado", chave)
                 n += 1
+            elif r.get("erro") in _FALHA_PERMANENTE:
+                _primeira_vez(pool, conta_id, "aviso_convidado", chave)
         except Exception:  # noqa: BLE001
             # um convidado com problema (ex.: dedup falhando por algum motivo
             # inesperado) NÃO pode derrubar o ciclo de lembretes das outras

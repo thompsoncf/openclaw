@@ -399,6 +399,148 @@ def _sanear_itens(itens) -> list[dict]:
     return out
 
 
+# ------------------------------------------------------------------ carteira de propostas
+STATUS_ORC = ("rascunho", "enviado", "negociando", "aprovada", "fechado", "perdido")
+_ROT_ORC = {"rascunho": "Rascunho", "enviado": "Enviada", "negociando": "Negociando",
+            "aprovada": "Aprovada", "fechado": "Fechada", "perdido": "Perdida"}
+
+
+def _link_proposta(token: str) -> str:
+    from finance.email_sender import _app_url
+    return f"{_app_url()}/proposta/{token}" if token else ""
+
+
+def _curar_tokens(c, conta_id: int) -> None:
+    """Proposta sem token não tem link pro cliente — as antigas foram salvas antes do
+    token existir. Mesma auto-cura que painel_servicos.lista já faz."""
+    c.execute("""update orcamentos set token = substr(md5(random()::text || id::text
+                   || clock_timestamp()::text), 1, 22)
+                 where conta_id=%s and token is null""", (conta_id,))
+
+
+def orcamentos(pool, conta_id: int, *, membro_id: int | None = None,
+               status: str = "", vendedor_id: int | None = None) -> list[dict]:
+    """As propostas da conta, com o link público pronto pra mandar.
+
+    `membro_id` setado = carteira DELE (o vendedor só enxerga o que criou); None =
+    carteira toda (dono/gestor). É a mesma regra de escopo que painel_servicos.lista
+    já usa — `orcamentos.criado_por` guarda o membro_id como TEXTO.
+
+    Traz também o lead de origem quando existe (prospeccao.orcamento_id aponta pra
+    cá), que é o que permite mandar a proposta na conversa em vez de só por link.
+    """
+    where = ["o.conta_id=%s"]
+    args: list = [conta_id]
+    if membro_id:
+        where.append("o.criado_por=%s")
+        args.append(str(membro_id))
+    elif vendedor_id:
+        where.append("o.criado_por=%s")
+        args.append(str(vendedor_id))
+    if status in STATUS_ORC:
+        where.append("coalesce(o.status,'rascunho')=%s")
+        args.append(status)
+    with pool.connection() as c:
+        _curar_tokens(c, conta_id)
+        c.commit()
+        rows = c.execute(
+            """select o.id, o.cliente, o.empresa, o.setup_centavos, o.mensal_centavos,
+                      coalesce(o.status,'rascunho'), o.token, o.criado_em, o.criado_por,
+                      coalesce(o.whatsapp, o.telefone, ''), o.aprovada_por, o.aprovada_em,
+                      p.id, coalesce(nullif(m.nome,''), m.email, '—')
+                 from orcamentos o
+                 left join prospeccao p on p.orcamento_id = o.id and p.conta_id = o.conta_id
+                 left join membros m on m.id::text = o.criado_por and m.conta_id = o.conta_id
+                where """ + " and ".join(where) + """
+                order by o.criado_em desc limit 100""", tuple(args)).fetchall()
+    from web.painel_prospeccao import _zap_link_texto
+    out = []
+    for r in rows:
+        link = _link_proposta(r[6])
+        out.append({
+            "id": r[0], "cliente": r[1] or "", "empresa": r[2] or "",
+            "titulo": (r[2] or r[1] or "Proposta"),   # a empresa na frente: é por ela que se procura
+            "setup_centavos": int(r[3] or 0), "mensal_centavos": int(r[4] or 0),
+            "status": r[5], "status_rot": _ROT_ORC.get(r[5], r[5].title()),
+            "token": r[6] or "", "link": link,
+            "criado_em": r[7], "vendedor": r[13],
+            "zap": _zap_link_texto(r[9], f"Olá! Segue sua proposta 👋\n{link}") if (r[9] and link) else "",
+            "aprovada_por": r[10] or "",
+            "aprovada_em": r[11],
+            "lead_id": r[12],
+        })
+    return out
+
+
+def orcamento(pool, conta_id: int, orc_id: int, *, membro_id: int | None = None) -> dict | None:
+    """Uma proposta (com os itens), no mesmo escopo de `orcamentos`."""
+    import json as _json
+    args: list = [orc_id, conta_id]
+    dono = ""
+    if membro_id:
+        dono = " and o.criado_por=%s"
+        args.append(str(membro_id))
+    with pool.connection() as c:
+        _curar_tokens(c, conta_id)
+        c.commit()
+        r = c.execute(
+            """select o.id, o.cliente, o.empresa, o.cnpj, o.segmento,
+                      coalesce(o.whatsapp, o.telefone, ''), o.email, o.itens,
+                      o.setup_centavos, o.mensal_centavos, coalesce(o.status,'rascunho'),
+                      o.token, o.criado_em, o.aprovada_por, o.aprovada_em, o.aprovada_doc,
+                      p.id, coalesce(nullif(m.nome,''), m.email, '—'), o.cidade, o.uf
+                 from orcamentos o
+                 left join prospeccao p on p.orcamento_id = o.id and p.conta_id = o.conta_id
+                 left join membros m on m.id::text = o.criado_por and m.conta_id = o.conta_id
+                where o.id=%s and o.conta_id=%s""" + dono, tuple(args)).fetchone()
+    if not r:
+        return None
+    itens = r[7]
+    if isinstance(itens, str):
+        try:
+            itens = _json.loads(itens)
+        except ValueError:
+            itens = []
+    link = _link_proposta(r[11])
+    from web.painel_prospeccao import _zap_link_texto
+    return {
+        "id": r[0], "cliente": r[1] or "", "empresa": r[2] or "",
+        "titulo": (r[2] or r[1] or "Proposta"),
+        "cnpj": r[3] or "", "segmento": r[4] or "", "whatsapp": r[5] or "", "email": r[6] or "",
+        "itens": itens or [], "setup_centavos": int(r[8] or 0), "mensal_centavos": int(r[9] or 0),
+        "status": r[10], "status_rot": _ROT_ORC.get(r[10], r[10].title()),
+        "token": r[11] or "", "link": link, "criado_em": r[12],
+        "aprovada_por": r[13] or "", "aprovada_em": r[14], "aprovada_doc": r[15] or "",
+        "lead_id": r[16], "vendedor": r[17], "cidade": r[18] or "", "uf": r[19] or "",
+        "zap": _zap_link_texto(r[5], f"Olá! Segue sua proposta 👋\n{link}") if (r[5] and link) else "",
+    }
+
+
+def mudar_status_orcamento(pool, conta_id: int, orc_id: int, novo: str,
+                           *, membro_id: int | None = None) -> dict:
+    """Move a proposta no funil. `membro_id` setado limita ao que a pessoa criou —
+    é o que impede um vendedor de mexer na proposta de outro pela URL.
+
+    NÃO faz o fechamento contábil: 'fechado' aqui é só o estado da proposta. Virar
+    contrato (gerar os títulos a receber) continua em vendas.fechar_orcamento, pelo
+    painel — é dinheiro, e não é decisão de tela de celular.
+    """
+    if novo not in STATUS_ORC:
+        return {"ok": False, "erro": "Status inválido."}
+    args: list = [novo, orc_id, conta_id]
+    dono = ""
+    if membro_id:
+        dono = " and criado_por=%s"
+        args.append(str(membro_id))
+    with pool.connection() as c:
+        n = c.execute("update orcamentos set status=%s, atualizado_em=now() "
+                      "where id=%s and conta_id=%s" + dono, tuple(args)).rowcount
+        c.commit()
+    if not n:
+        return {"ok": False, "erro": "Proposta não encontrada (ou não é sua)."}
+    return {"ok": True, "status": novo, "msg": f"Proposta marcada como {_ROT_ORC.get(novo, novo)} ✓"}
+
+
 def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens) -> dict:
     """Cria a proposta do lead (mesma tabela/token do painel) e devolve o link público
     /proposta/<token> pro vendedor mandar. Revalida a posse do lead. Reusa a página de

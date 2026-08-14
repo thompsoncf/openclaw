@@ -142,6 +142,14 @@ b,strong{font-weight:600}
 .chip.ia{color:var(--roxo);border-color:#3a2b52;background:#1a1226}
 .chip.voce{color:var(--ambar);border-color:#5a4520;background:#241c0f}
 .chip.neon{color:var(--neon);border-color:#1e4a3a;background:rgba(37,211,102,.10)}
+.chip.err{color:var(--coral);border-color:#5a2b2b;background:#241313}
+
+/* ---------- link da proposta pra copiar ---------- */
+.copiar{display:flex;gap:.4rem;margin-top:.5rem}
+.copiar input{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);
+  border-radius:10px;color:var(--neon);padding:.55rem .7rem;font-family:var(--mono);font-size:.72rem}
+.copiar button{flex-shrink:0;background:var(--surface);border:1px solid var(--line);
+  border-radius:10px;color:var(--text);padding:0 .9rem;font:inherit;font-weight:600;cursor:pointer}
 
 /* ---------- funil ---------- */
 .fr{display:flex;align-items:center;gap:.6rem;padding:.42rem 0}
@@ -436,16 +444,27 @@ def _abas(itens, ativo: str) -> str:
 def _abas_vend(ativo: str) -> str:
     return _abas([("fila", "fila", "Fila", _BASE),
                   ("agenda", "agenda", "Agenda", f"{_BASE}/agenda"),
+                  ("orcamentos", "orc", "Propostas", f"{_BASE}/orcamentos"),
                   ("resultado", "resultado", "Resultado", f"{_BASE}/resultado"),
                   ("perfil", "perfil", "Perfil", f"{_BASE}/perfil")], ativo)
 
 
 def _abas_dono(ativo: str) -> str:
+    # Perfil sai da barra e vira o avatar do topo (igual no app do vendedor): com
+    # seis abas os rótulos não cabem numa tela de 390px.
     return _abas([("visao", "visao", "Visão", _BASE),
                   ("placar", "placar", "Placar", f"{_BASE}/equipe/placar"),
                   ("leads", "leads", "Leads", f"{_BASE}/equipe/leads"),
-                  ("ativ", "ativ", "Atividade", f"{_BASE}/equipe/atividade"),
-                  ("perfil", "perfil", "Perfil", f"{_BASE}/perfil")], ativo)
+                  ("orcamentos", "orc", "Propostas", f"{_BASE}/orcamentos"),
+                  ("ativ", "ativ", "Atividade", f"{_BASE}/equipe/atividade")], ativo)
+
+
+def _hdr_dono(conta_id: int, titulo: str, sub: str = "", voltar: str = "") -> str:
+    """Topo das telas de gestão: o selo da empresa à esquerda abre o perfil (é por
+    onde ele sai do app — o Cockpit atual não tem nem tela de perfil pro dono)."""
+    marca = _marca_conta(conta_id)
+    return _hdr(titulo, sub, voltar=voltar, inicial=marca["iniciais"],
+                href_inicial=f"{_BASE}/perfil")
 
 
 def _marca_conta(conta_id: int):
@@ -605,6 +624,208 @@ def novo_resultado(request: Request):
                "divergir.</div>"
              + "</div>" + _abas_vend("resultado"))
     return _page("Meu resultado", corpo)
+
+
+# ------------------------------------------------------------------ propostas
+_STATUS_SEG = [("", "Todas"), ("enviado", "Enviadas"), ("negociando", "Negociando"),
+               ("aprovada", "Aprovadas"), ("fechado", "Fechadas"), ("perdido", "Perdidas")]
+_STATUS_CLS = {"aprovada": "neon", "fechado": "neon", "perdido": "err",
+               "negociando": "voce", "enviado": "", "rascunho": ""}
+
+
+@router.get("/cockpit/novo/orcamentos", response_class=HTMLResponse)
+def novo_orcamentos(request: Request, s: str = "", v: str = ""):
+    """Mesma aba, dois alcances: o vendedor vê as propostas DELE (é o escopo que
+    painel_servicos já aplica por `criado_por`); dono/gestor veem a carteira toda,
+    com filtro por vendedor."""
+    g = _gerencia(request)
+    sess = _sessao(request)
+    if not g and not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    pool = get_pool()
+    gestao = bool(g)
+    conta_id = g[0] if gestao else sess[0]
+    vend_i = int(v) if v.isdigit() else None
+    lista = ck.orcamentos(pool, conta_id,
+                          membro_id=None if gestao else sess[1],
+                          status=s, vendedor_id=vend_i if gestao else None)
+
+    def url(**over):
+        p = {"s": s, "v": v}
+        p.update(over)
+        q = "&".join(f"{k}={val}" for k, val in p.items() if val)
+        return f"{_BASE}/orcamentos" + (("?" + q) if q else "")
+
+    def chip(on, label, href):
+        return f"<a class='{'on' if on else ''}' href='{esc(href)}'>{esc(label)}</a>"
+
+    filtros = ("<div class=filt><span class=lbl>Status</span>"
+               + "".join(chip(s == k, lab, url(s=k)) for k, lab in _STATUS_SEG) + "</div>")
+    if gestao:
+        vends = cd.placar(pool, conta_id)
+        filtros += ("<div class=filt><span class=lbl>Quem fez</span>"
+                    + chip(not v, "Todos", url(v=""))
+                    + "".join(chip(v == str(x["id"]), x["nome"].split(" ")[0], url(v=str(x["id"])))
+                              for x in vends) + "</div>")
+
+    linhas = []
+    for o in lista:
+        val = _brl(o["setup_centavos"] + o["mensal_centavos"])
+        sub = o["vendedor"] if gestao else _data(o["criado_em"])
+        linhas.append(
+            f"<a class=lead href='{_BASE}/orcamentos/{o['id']}'>"
+            f"<span class=mid><span class=top><span class=emp>{esc(o['titulo'])}</span>"
+            f"<span class='chip {_STATUS_CLS.get(o['status'], '')}'>{esc(o['status_rot'])}</span></span>"
+            f"<span class=snip>{esc(val)} · {esc(sub)}</span></span></a>")
+    if lista:
+        total = sum(o["setup_centavos"] + o["mensal_centavos"] for o in lista)
+        miolo = (f"<div class=fonte style='margin-top:.7rem'>{len(lista)} proposta(s) · "
+                 f"{esc(_brl(total))} em jogo</div>" + "".join(linhas))
+    else:
+        miolo = ("<div class=vazio><div class=big>◻</div><b>Nenhuma proposta aqui</b>"
+                 + ("Ninguém do time montou proposta com esse filtro." if gestao
+                    else "Abra um lead e toque em <b>Orçamento</b> — ela aparece aqui pra você mandar.")
+                 + "</div>")
+
+    if gestao:
+        corpo = (_previa("/painel/servicos")
+                 + _hdr_dono(conta_id, "Propostas", "a carteira do time")
+                 + _flash(request) + filtros
+                 + f"<div class=scroll>{miolo}</div>" + _abas_dono("orcamentos"))
+    else:
+        p = ck.perfil(pool, conta_id, sess[1])
+        corpo = (_previa()
+                 + _hdr("Minhas propostas", "manda pro cliente por aqui",
+                        inicial=_ini(p["nome"]))
+                 + _flash(request) + filtros
+                 + f"<div class=scroll>{miolo}</div>" + _abas_vend("orcamentos"))
+    return _page("Propostas", corpo)
+
+
+@router.get("/cockpit/novo/orcamentos/{orc_id}", response_class=HTMLResponse)
+def novo_orcamento(request: Request, orc_id: int):
+    g = _gerencia(request)
+    sess = _sessao(request)
+    if not g and not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    gestao = bool(g)
+    conta_id = g[0] if gestao else sess[0]
+    o = ck.orcamento(get_pool(), conta_id, orc_id, membro_id=None if gestao else sess[1])
+    if not o:
+        return RedirectResponse(f"{_BASE}/orcamentos", status_code=303)
+
+    def _linha_item(it):
+        setup, mensal = int(it.get("setup") or 0), int(it.get("mensal") or 0)
+        partes = []
+        if setup:
+            partes.append(_brl(setup * 100))
+        if mensal:
+            partes.append(_brl(mensal * 100) + "/mês")
+        return ("<div class=ficha-l><span>" + esc(it.get("nome", "")) + "</span><b>"
+                + esc(" + ".join(partes) or "—") + "</b></div>")
+
+    itens = "".join(_linha_item(it) for it in o["itens"])
+
+    # É isto que o vendedor precisa: mandar a proposta pro cliente em um toque.
+    # O link é o /proposta/<token> que o sistema já usa — o cliente abre, vê com a
+    # marca da empresa e aprova online.
+    envio = []
+    if o["zap"]:
+        envio.append(f"<a class=btn href='{esc(o['zap'])}' target=_blank rel=noopener>"
+                     f"{_ic('zap', 'ic p')} Mandar no WhatsApp</a>")
+    if o["lead_id"] and not gestao:
+        envio.append(f"<form method=post action='{_BASE}/orcamentos/{orc_id}/enviar'>"
+                     "<button class='btn ghost' style='margin-top:.5rem' type=submit>"
+                     "Enviar na conversa do lead</button></form>")
+    if o["link"]:
+        envio.append(f"<a class='btn ghost' style='margin-top:.5rem' href='{esc(o['link'])}' "
+                     f"target=_blank rel=noopener>Abrir a proposta como o cliente vê</a>")
+        envio.append("<div class=copiar><input value='" + esc(o["link"]) + "' readonly "
+                     "onclick='this.select()'><button type=button onclick=\"navigator.clipboard"
+                     ".writeText(this.previousElementSibling.value);this.textContent='Copiado'\">"
+                     "Copiar</button></div>")
+
+    def opt(k, lab):
+        return f"<option value='{k}'{' selected' if o['status'] == k else ''}>{esc(lab)}</option>"
+    mover = ("<div class=eyebrow>Mover no funil</div><div class=bloco>"
+             f"<form method=post action='{_BASE}/orcamentos/{orc_id}/status' class=linhaform>"
+             "<select name=status>"
+             + "".join(opt(k, ck._ROT_ORC.get(k, k.title())) for k in ck.STATUS_ORC)
+             + "</select><button class=btn style='width:auto;padding:.55rem 1rem' type=submit>"
+             "Salvar</button></form></div>")
+
+    # "editar ou qualquer coisa": o editor completo já existe no painel e aceita
+    # deep link (?abrir=<id>) — não faz sentido reconstruir o formulário no celular.
+    editar = (f"<div class=bloco><a class='btn ghost' href='/painel/servicos?abrir={orc_id}' "
+              "target=_blank rel=noopener>Editar no painel (itens, valores, escopo)</a></div>"
+              if gestao else "")
+
+    aprovada = ""
+    if o["aprovada_em"]:
+        aprovada = ("<div class=bloco><div class='card' style='border-color:#1e4a3a;"
+                    "background:rgba(37,211,102,.08)'><b style='color:var(--neon)'>Cliente aprovou</b>"
+                    f"<div class=mut style='font-size:.8rem'>{esc(o['aprovada_por'])}"
+                    f" · {esc(_data(o['aprovada_em']))}</div></div></div>")
+
+    ficha = [("Cliente", o["cliente"]), ("Empresa", o["empresa"]), ("CNPJ", o["cnpj"]),
+             ("WhatsApp", o["whatsapp"]), ("E-mail", o["email"]),
+             ("Quem fez", o["vendedor"] if gestao else ""), ("Criada em", _data(o["criado_em"]))]
+    ficha_html = "".join(f"<div class=ficha-l><span>{esc(k)}</span><b>{esc(v)}</b></div>"
+                         for k, v in ficha if v)
+
+    total = _brl(o["setup_centavos"] + o["mensal_centavos"])
+    corpo = (_previa("/painel/servicos" if gestao else "/cockpit")
+             + _hdr(o["titulo"], o["status_rot"], voltar=f"{_BASE}/orcamentos")
+             + _flash(request)
+             + "<div class=scroll>"
+             + "<div class=kpis style='margin-top:.9rem'>"
+             + f"<div class='kpi hero'><div class=v>{esc(total)}</div><div class=l>Valor da proposta</div>"
+             + (f"<div class=d>{esc(_brl(o['setup_centavos']))} entrada + "
+                f"{esc(_brl(o['mensal_centavos']))}/mês</div>" if o["mensal_centavos"] else "")
+             + "</div></div>"
+             + aprovada
+             + (f"<div class=eyebrow>Mandar pro cliente</div><div class=bloco>{''.join(envio)}</div>"
+                if envio else "")
+             + mover + editar
+             + (f"<div class=eyebrow>O que entra</div><div class=bloco><div class=card>{itens}</div></div>"
+                if itens else "")
+             + (f"<div class=eyebrow>Cliente</div><div class=bloco><div class=card>{ficha_html}</div></div>"
+                if ficha_html else "")
+             + "</div>"
+             + (_abas_dono("orcamentos") if gestao else _abas_vend("orcamentos")))
+    return _page(o["titulo"], corpo)
+
+
+@router.post("/cockpit/novo/orcamentos/{orc_id}/status")
+def novo_orcamento_status(request: Request, orc_id: int, status: str = Form(...)):
+    g = _gerencia(request)
+    sess = _sessao(request)
+    if not g and not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id = g[0] if g else sess[0]
+    r = ck.mudar_status_orcamento(get_pool(), conta_id, orc_id, status,
+                                  membro_id=None if g else sess[1])
+    request.session["ck_ok" if r.get("ok") else "ck_err"] = (
+        r.get("msg", "Feito ✓") if r.get("ok") else r.get("erro", "Não deu certo."))
+    return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
+
+
+@router.post("/cockpit/novo/orcamentos/{orc_id}/enviar")
+def novo_orcamento_enviar(request: Request, orc_id: int):
+    """Manda o link da proposta na conversa do lead, pelo WhatsApp da empresa —
+    mesmo caminho que o botão de proposta na tela do lead já usa."""
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess
+    o = ck.orcamento(get_pool(), conta_id, orc_id, membro_id=membro_id)
+    if not o or not o["lead_id"] or not o["link"]:
+        request.session["ck_err"] = "Essa proposta não está ligada a um lead com conversa."
+        return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
+    r = ck.enviar_proposta_conversa(get_pool(), conta_id, membro_id, o["lead_id"], o["link"])
+    request.session["ck_ok" if r.get("ok") else "ck_err"] = (
+        "Proposta enviada na conversa ✓" if r.get("ok") else r.get("erro", "Não consegui enviar."))
+    return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
 
 
 @router.get("/cockpit/novo/perfil", response_class=HTMLResponse)
@@ -842,7 +1063,7 @@ def _dono_visao(request: Request, conta_id: int) -> HTMLResponse:
         for f in v["funil"])
     a = v["atencao"]
     corpo = (_previa()
-             + _hdr("Equipe", "acompanhe o time", inicial="", direita=_selo(conta_id))
+             + _hdr_dono(conta_id, "Equipe", "acompanhe o time")
              + f"<div class=scroll><div class=seg>{seg('hoje','Hoje')}{seg('semana','Semana')}{seg('mes','Mês')}</div>"
              + "<div class=kpis>"
              + f"<div class='kpi hero'><div class=v>{esc(k['ganhos_rs'])}</div><div class=l>Fechado no período</div>"
@@ -907,7 +1128,7 @@ def novo_placar(request: Request):
         miolo = podio + linhas
 
     corpo = (_previa("/cockpit/equipe/placar")
-             + _hdr("Placar", "este mês, por R$ fechado", direita=_selo(g[0]))
+             + _hdr_dono(g[0], "Placar", "este mês, por R$ fechado")
              + f"<div class=scroll>{miolo}</div>" + _abas_dono("placar"))
     return _page("Placar", corpo)
 
@@ -926,7 +1147,7 @@ def novo_atividade(request: Request):
         linhas = ("<div class=vazio><div class=big>◌</div><b>Sem atividade recente</b>"
                   "Ganhos, perdas, visitas e propostas do time aparecem aqui.</div>")
     corpo = (_previa("/cockpit/equipe/atividade")
-             + _hdr("Atividade", "o que o time fez", direita=_selo(g[0]))
+             + _hdr_dono(g[0], "Atividade", "o que o time fez")
              + f"<div class=scroll>{linhas}</div>" + _abas_dono("ativ"))
     return _page("Atividade", corpo)
 
@@ -978,7 +1199,7 @@ def novo_leads(request: Request, vend: str = "", etapa: str = "", temp: str = ""
          "Tente afrouxar a busca.</div>")
 
     corpo = (_previa("/cockpit/equipe/leads")
-             + _hdr("Leads da equipe", "todos os leads abertos", direita=_selo(g[0]))
+             + _hdr_dono(g[0], "Leads da equipe", "todos os leads abertos")
              + filtros + f"<div class=scroll>{miolo}</div>" + _abas_dono("leads"))
     return _page("Leads da equipe", corpo)
 

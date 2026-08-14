@@ -83,6 +83,28 @@ def _garantir_tabela(c):
     c.commit()
 
 
+def _saida(request: Request, conta) -> str:
+    """Pra onde mandar quem chegou aqui mas a conta não vende serviço.
+
+    Tem que ser um lugar que o PAPEL abre E que a CONTA tem. O dono passa em
+    tudo; membro de equipe, não — e mandar um VENDEDOR pra /painel/empresa
+    (que exige caps.financeiro) fazia o gate de web/app.py devolver ele pra
+    /painel/servicos, que devolvia pra /painel/empresa: laço infinito, e o
+    vendedor de empresa que só vende produto simplesmente não entrava no
+    sistema. /trocar é a saída terminal — o gate libera pra todo mundo.
+    """
+    papel = request.session.get("papel", "dono")
+    if papel == "dono":
+        return "/painel/empresa" if conta[12] else "/painel"
+    from contas import equipe as _equipe
+    caps = _equipe.caps_do_papel(papel)
+    if caps["vendas"] and conta[11]:        # [11] = tem_pj — o funil não pede serviço
+        return "/painel/prospeccao"
+    if caps["financeiro"] and conta[12]:    # [12] = acesso_pj
+        return "/painel/empresa"
+    return "/trocar"
+
+
 def _conta_servico(request: Request):
     """Gate da aba: conta logada + acesso PJ + vende serviço. Devolve (conta, None)
     ou (None, redirect)."""
@@ -90,9 +112,9 @@ def _conta_servico(request: Request):
     if conta is None:
         return None, RedirectResponse("/login", status_code=303)
     if not conta[12]:                       # [12] = acesso_pj
-        return None, RedirectResponse("/painel", status_code=303)
+        return None, RedirectResponse(_saida(request, conta), status_code=303)
     if not conta[14]:                       # [14] = vende_servico
-        return None, RedirectResponse("/painel/empresa", status_code=303)
+        return None, RedirectResponse(_saida(request, conta), status_code=303)
     from contas import equipe as _equipe
     if not _equipe.caps_do_papel(request.session.get("papel", "dono"))["vendas"]:
         return None, RedirectResponse("/painel", status_code=303)

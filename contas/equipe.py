@@ -42,6 +42,26 @@ def caps_do_papel(papel: str | None) -> dict:
     return dict(CAPS.get(papel or "", _SEM_ACESSO))
 
 
+def rotas_do_papel(papel: str | None) -> list[str]:
+    """As rotas do painel que um MEMBRO de equipe pode abrir (o gate de web/app.py
+    é whitelist; o dono passa em tudo e não usa isto).
+
+    Vive aqui, junto do CAPS, pra ser a mesma fonte da verdade que o gate usa e
+    que os testes conferem: quando uma tela precisa desviar um membro, o destino
+    tem que estar nesta lista — senão o gate devolve, a tela desvia de novo e o
+    membro fica preso num laço de redirect sem conseguir entrar.
+    """
+    caps = caps_do_papel(papel)
+    permitido = ["/trocar", "/sair"]
+    if caps["vendas"]:
+        permitido += ["/painel/servicos", "/painel/prospeccao"]
+    if caps["financeiro"]:
+        permitido += ["/painel/empresa", "/painel/relatorios"]
+    if caps["gerir"]:
+        permitido += ["/painel/equipe", "/membros"]
+    return permitido
+
+
 def rotulo(papel: str | None) -> str:
     return _ROTULOS.get(papel or "", papel or "")
 

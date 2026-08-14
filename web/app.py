@@ -514,8 +514,11 @@ def processar_whatsapp(numero: str, nome: str | None, body: str,
                     _c = _cv.responder(pool, _pend[0]["token"], _st, canal="whatsapp")
                     if _c:
                         if _c.get("mudou"):                 # só avisa se mudou (não repete)
-                            _cv.pos_resposta(pool, _c)
-                        _responder_whatsapp(to, _cv.confirmacao_texto(_c))
+                            _cv.pos_resposta(pool, _c)      # aviso ao DONO: sempre
+                        # a resposta ao CONVIDADO é opt-out por conta (Agenda › Lembrete)
+                        from finance import agenda as _ag
+                        if _ag.get_config(pool, _c["conta_id"]).get("enviar_confirmacao", True):
+                            _responder_whatsapp(to, _cv.confirmacao_texto(_c))
                         return
 
         achado = ct.membro_por_whatsapp(pool, numero)

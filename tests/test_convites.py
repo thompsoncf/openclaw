@@ -24,7 +24,7 @@ def pool():
         for nome in ("081_canais_config.sql", "084_canal_token.sql", "096_whatsapp_cloud.sql", "145_canal_templates_agenda.sql",
                     "098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql",
                     "130_evento_desfecho.sql", "131_evento_link_online.sql", "132_convidado_canal_resposta.sql",
-                    "139_agenda_mensagens_log.sql"):
+                    "139_agenda_mensagens_log.sql", "146_agenda_enviar_confirmacao.sql"):
             c.execute((migr / nome).read_text(encoding="utf-8"))
         c.commit()
     yield p
@@ -540,6 +540,44 @@ def _usar_qr(pool, conta_id):
                      on conflict (conta_id, canal) do update set provedor='qr', ativo=true""",
                   (conta_id, f"qr:{conta_id}"))
         c.commit()
+
+
+def test_convite_no_qr_sai_como_texto_livre_sem_template(pool, conta_id, monkeypatch):
+    """No QR não existe template — antes o convite morria em 'sem_template' e quem
+    usa QR nunca disparava convite automático, só o link manual."""
+    _usar_qr(pool, conta_id)
+    monkeypatch.delenv("TWILIO_TMPL_CONVITE_SID", raising=False)
+    ev = _evento(pool, conta_id, titulo="Reunião de fechamento")
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Bia", "86988880002")
+    from finance import whatsapp_out as wout
+    capt = {}
+    monkeypatch.setattr(wout, "enviar", lambda c, i, n, t: capt.update(numero=n, texto=t) or {"ok": True})
+    monkeypatch.setattr(wout, "enviar_template", lambda *a, **k: capt.update(template=True) or {"ok": True})
+    r = cv.enviar_convite_whatsapp(pool, conv["token"])
+    assert r["ok"] is True
+    assert capt.get("template") is None                # não tentou template
+    assert capt["numero"] == "86988880002"
+    assert "Reunião de fechamento" in capt["texto"] and "/convite/" in capt["texto"]
+    # e o histórico registra como texto livre, não template
+    it = cv.listar_historico(pool, conta_id)["itens"][0]
+    assert it["tipo"] == "convite" and it["canal"] == "whatsapp_livre" and it["ok"] is True
+
+
+def test_botao_de_disparo_aparece_no_qr_sem_template(pool, conta_id, monkeypatch):
+    """auto_on (que mostra o botão 📲 Zaq) não pode exigir template de quem usa QR."""
+    monkeypatch.delenv("TWILIO_TMPL_CONVITE_SID", raising=False)
+    assert cv.template_configurado(pool, conta_id) is False   # twilio sem SID: escondido
+    _usar_qr(pool, conta_id)
+    assert cv.template_configurado(pool, conta_id) is True     # QR: pode disparar
+
+
+def test_convite_no_twilio_continua_exigindo_template(pool, conta_id, monkeypatch):
+    """Não regride: fora do QR, sem SID, continua sendo 'sem_template'."""
+    monkeypatch.delenv("TWILIO_TMPL_CONVITE_SID", raising=False)
+    _salvar_tmpl(pool, conta_id, convite=None)                # provedor twilio, sem SID
+    ev = _evento(pool, conta_id)
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Léo", "86988883333")
+    assert cv.enviar_convite_whatsapp(pool, conv["token"])["erro"] == "sem_template"
 
 
 def test_remarcado_no_qr_manda_livre_mesmo_fora_da_janela(pool, conta_id, monkeypatch):

@@ -422,10 +422,12 @@ def sid_lembrete(pool, conta_id: int) -> str:
 
 
 def template_configurado(pool=None, conta_id: int | None = None) -> bool:
-    """True quando dá pra o Zaq disparar o convite sozinho: template aprovado
-    (da empresa ou da env) + credenciais Twilio presentes. O número usado é o DA
-    EMPRESA (canais_config), resolvido no envio. Enquanto for False, a UI mostra
-    só o envio manual (link)."""
+    """True quando dá pra o Zaq disparar o convite sozinho. No provedor QR isso
+    independe de template (o convite vai como texto livre); nos outros, precisa do
+    template aprovado (da empresa ou da env) + credenciais Twilio. Enquanto for
+    False, a UI mostra só o envio manual (link)."""
+    if _texto_livre_sempre(pool, conta_id):
+        return True
     from . import whatsapp_twilio as wa
     return bool(sid_convite(pool, conta_id) and wa.configurado())
 
@@ -446,10 +448,34 @@ def _titulo_com_extras(pool, c: dict) -> str:
     return " ".join(partes)
 
 
+def texto_convite(pool, c: dict) -> str:
+    """Convite em texto livre — pro provedor QR, que não tem template.
+
+    Espelha a mensagem que o botão de compartilhar já monta em
+    painel_agenda._montar_share, pra quem recebe ver a mesma coisa pelos dois
+    caminhos (manual e automático)."""
+    ev = c["evento"]
+    nome = (c.get("nome") or "").strip()
+    quando = ag.fmt_hora(ev)
+    local = (ev.get("local") or "").strip()
+    outros = por_evento(pool, c["conta_id"], [ev["id"]]).get(ev["id"], [])
+    nomes = [g["nome"] for g in outros if (g.get("nome") or "").strip()]
+    com = f" Com: {ag.frase_nomes(nomes)}." if len(nomes) > 1 else ""
+    onde = f" ({local})" if local and not ag.eh_online(local) else ""
+    txt = (f"Oi{(' ' + nome) if nome else ''}! Quero marcar uma reunião: "
+           f"{ev['titulo']} — {quando}{onde}.{com} "
+           f"Confirma pra mim aqui: {url_convite(c['token'])}")
+    if ev.get("link_online"):
+        txt += f"\n🎥 Chamada: {ev['link_online']}"
+    return txt
+
+
 def enviar_convite_whatsapp(pool, token: str) -> dict:
-    """Dispara o template de convite pro número do convidado, PELO NÚMERO DA
-    EMPRESA (canais_config, provedor Twilio). Funciona 'frio' (fora da janela de
-    24h). As variáveis batem com o corpo aprovado no Twilio, NA ORDEM:
+    """Dispara o convite pro número do convidado, PELO NÚMERO DA EMPRESA
+    (canais_config). No provedor QR vai como texto livre (lá não existe template
+    nem janela de 24h); nos outros, pelo template aprovado, que funciona 'frio'.
+
+    As variáveis do template batem com o corpo aprovado no Twilio, NA ORDEM:
     {{1}} assunto/título (com empresa e envolvidos embutidos — veja
     _titulo_com_extras) · {{2}} data e horário. Retorno tolerante — nunca
     levanta; devolve {'ok': bool, ...}."""
@@ -462,6 +488,12 @@ def enviar_convite_whatsapp(pool, token: str) -> dict:
         registrar_mensagem(pool, conta_id, ev_id, conv_id, "convite", "whatsapp_template",
                            False, "sem_numero")
         return {"ok": False, "erro": "sem_numero"}
+    if _texto_livre_sempre(pool, conta_id):        # QR: sem template, texto livre
+        with pool.connection() as conn:
+            r = wout.enviar(conn, conta_id, c["contato"], texto_convite(pool, c))
+        registrar_mensagem(pool, conta_id, ev_id, conv_id, "convite", "whatsapp_livre",
+                           bool(r.get("ok")), None if r.get("ok") else r.get("erro"))
+        return r
     sid = sid_convite(pool, conta_id)
     if not sid:
         registrar_mensagem(pool, conta_id, ev_id, conv_id, "convite", "whatsapp_template",
@@ -499,11 +531,17 @@ def _dentro_da_janela(respondido_em, respondido_canal, agora) -> bool:
            and (agora - respondido_em) < JANELA_SESSAO)
 
 
-def _texto_livre_sempre(pool, conta_id: int) -> bool:
-    """True quando o provedor da conta não tem janela de 24h nem template (QR)."""
+def _texto_livre_sempre(pool, conta_id: int | None) -> bool:
+    """True quando o provedor da conta não tem janela de 24h nem template (QR).
+    Tolera pool/conta ausentes (template_configurado pode ser chamada sem eles)."""
+    if not pool or not conta_id:
+        return False
     from . import whatsapp_out as wout
-    with pool.connection() as c:
-        return wout.provedor_da_conta(c, conta_id) == "qr"
+    try:
+        with pool.connection() as c:
+            return wout.provedor_da_conta(c, conta_id) == "qr"
+    except Exception:  # noqa: BLE001 — canal ausente/erro de leitura: degrada
+        return False
 
 
 def texto_lembrete_convidado(nome: str, ev: dict, hora: str, faltam_min: int) -> str:

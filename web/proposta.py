@@ -82,10 +82,16 @@ def _reais(v) -> str:
     return "R$ " + format(int(v or 0), ",").replace(",", ".")
 
 
-def _brl(centavos) -> str:
-    """R$ com centavos — orçamento de evento mostra 7.200,00, não 7.200."""
+def _num(centavos) -> str:
+    """7.200,00 — número com centavos, sem cifrão. É como as linhas de item são
+    escritas num orçamento (o R$ aparece nos totais e nas parcelas)."""
     v = int(centavos or 0) / 100
-    return "R$ " + f"{v:,.2f}".replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+    return f"{v:,.2f}".replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+
+
+def _brl(centavos) -> str:
+    """R$ com centavos — total, subtotal por categoria e parcelas."""
+    return "R$ " + _num(centavos)
 
 
 def _lista(v) -> list:
@@ -216,7 +222,7 @@ def _linhas_evento(d: dict) -> list[dict]:
         total = int(it.get("setup") or 0)
         unit = int(it.get("unitario") or 0) or (total // qtd if qtd else total)
         linhas.append({"n": i, "nome": it.get("nome") or "", "desc": it.get("desc") or "",
-                       "qtd": qtd, "unit": _brl(unit * 100), "subtotal": _brl(total * 100),
+                       "qtd": qtd, "unit": _num(unit * 100), "subtotal": _num(total * 100),
                        "categoria": it.get("categoria") or "", "foto": it.get("foto_url") or ""})
     return linhas
 
@@ -352,11 +358,15 @@ td.n{width:26px;color:#A8A192;vertical-align:top}
 /* a coluna do item manda na largura: as colunas de número são fixas e o que
    sobra é da descrição, senão ela vira uma tira estreita e alta. */
 table.itens{table-layout:fixed}
-.item-l{display:flex;gap:12px;align-items:flex-start}
+table.itens th{font-size:8.5px}
+table.itens td{font-size:11.5px;padding:9px 10px}
+table.itens td small{font-size:10px;line-height:1.6;max-width:none}
+table.itens td.n{color:#14213D}
+.item-l{display:flex;gap:10px;align-items:flex-start}
 .item-l>div{min-width:0}
 .foto{width:46px;height:46px;border-radius:7px;flex:0 0 46px;border:1px solid #ECE7DC;
   background:#FBFAF7 center/cover no-repeat}
-.cat{font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+.cat{font-size:8px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
   color:#B8862E;display:block;margin-bottom:2px}
 .subs{margin-top:10px;border:1px solid #ECE7DC;border-radius:9px;overflow:hidden}
 .sub-cat{display:flex;justify-content:space-between;gap:10px;font-size:11.5px;color:#5A6678;
@@ -443,7 +453,7 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
       {% if linhas %}
       <div class="eb">Itens do orçamento</div>
       <table class="itens"><tr><th style="width:24px">#</th><th>Item</th><th class="r" style="width:40px">Qtd</th>
-                 <th class="r" style="width:100px">Vr. unit.</th><th class="r" style="width:108px">Subtotal</th></tr>
+                 <th class="r" style="width:76px">Vr. unit.</th><th class="r" style="width:84px">Subtotal</th></tr>
         {% for l in linhas %}<tr><td class="n">{{ l.n }}</td>
           <td><div class="item-l">
             {%- if l.foto %}<div class="foto" style="background-image:url('{{ l.foto }}')"></div>{% endif %}

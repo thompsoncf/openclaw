@@ -192,7 +192,8 @@ def test_pagina_do_evento_mostra_qtd_valor_unitario_e_parcelas(pool, conta_id, m
     assert "Orçamento de evento" in html and "Nº 60" in html
     assert "50" in html and "19:00" in html and "24:00" in html      # bloco do evento
     assert "Aniversário" in html and "Locação de espaço" in html
-    assert "R$ 25,00" in html and "R$ 250,00" in html                # 10 × 25 = 250
+    # linha de item: número puro (o R$ fica nos totais e nas parcelas)
+    assert ">25,00<" in html and ">250,00<" in html                  # 10 × 25 = 250
     assert "https://ex.com/espaco.jpg" in html                       # foto do item
     assert html.count("Locação de espaço") >= 2   # categoria do item + subtotal por categoria
     assert "Casamento" in html and "Corporativo" in html   # as opções todas, como no papel

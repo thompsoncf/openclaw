@@ -562,3 +562,70 @@ def visita_ics(pool, token: str) -> str | None:
     vevent = vevent.replace("END:VEVENT", alarmes + "\r\nEND:VEVENT")
     cab = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Zaq//Visita//PT", "CALSCALE:GREGORIAN", "METHOD:PUBLISH"]
     return "\r\n".join(cab + [vevent, "END:VCALENDAR"]) + "\r\n"
+
+
+# ------------------------------------------------------------------ agenda do vendedor
+def visitas_do_vendedor(pool, conta_id: int, membro_id: int, dias: int = 14) -> list[dict]:
+    """As visitas QUE ELE marcou, de hoje pra frente (a agenda do dia dele).
+
+    `agendar_visita` grava o evento com `membro_id` (via `agenda.criar_evento`) e
+    liga no lead pelo `prospeccao_id`; aqui a gente lê o mesmo dado pelo dono do
+    evento. `agenda.listar_eventos` não serve porque é por CONTA — o vendedor
+    veria a agenda do time inteiro.
+    """
+    from finance import agenda as ag
+    from web.painel_prospeccao import _zap_link
+    hoje = datetime.now(ag.BRT).replace(hour=0, minute=0, second=0, microsecond=0)
+    with pool.connection() as c:
+        rows = c.execute(
+            """select e.id, e.titulo, e.inicio, e.local, e.ics_token,
+                      e.prospeccao_id, p.empresa, coalesce(p.whatsapp, p.telefone, '')
+                 from eventos_agenda e
+                 left join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
+                where e.conta_id=%s and e.membro_id=%s and e.status='ativo'
+                  and e.inicio >= %s and e.inicio < %s
+                order by e.inicio""",
+            (conta_id, membro_id, hoje, hoje + timedelta(days=max(1, int(dias or 14))))).fetchall()
+    out = []
+    for r in rows:
+        ini = r[2].astimezone(ag.BRT) if r[2] else None
+        out.append({
+            "id": r[0], "titulo": r[1] or "Visita", "inicio": ini,
+            "dia": ini.strftime("%d/%m") if ini else "", "hora": ini.strftime("%H:%M") if ini else "",
+            "hoje": bool(ini and ini.date() == hoje.date()),
+            "local": r[3] or "", "maps": _maps_link(r[3] or ""),
+            "ics_url": f"/visita/{r[4]}.ics" if r[4] else "",
+            "lead_id": r[5], "empresa": r[6] or "", "zap": _zap_link(r[7]) if r[7] else "",
+        })
+    return out
+
+
+# ------------------------------------------------------------------ o resultado DELE
+def remuneracao(pool, conta_id: int, membro_id: int, periodo: str = "mes") -> dict:
+    """O que o vendedor fechou no período e quanto disso é comissão dele.
+
+    ATENÇÃO à fonte: o número sai de `prospeccao.valor_estimado_centavos` dos leads
+    que ELE marcou como ganho — a mesma base do Placar do dono. NÃO é a mesma base do
+    relatório de comissão do painel, que soma `lancamentos.membro_id`. Enquanto as
+    duas não forem unificadas, a tela precisa dizer de onde veio o número (quem chama
+    isso mostra o rótulo), em vez de exibir um valor que não bate com o do dono.
+    """
+    from finance import cockpit_dono as cd
+    ordem = cd.placar(pool, conta_id, periodo)          # já vem ordenado por R$ fechado
+    linha = next((p for p in ordem if p["id"] == membro_id), None)
+    with pool.connection() as c:
+        r = c.execute("select comissao_pct from membros where id=%s and conta_id=%s",
+                      (membro_id, conta_id)).fetchone()
+    pct = float(r[0]) if (r and r[0] is not None) else None
+    fechado = int((linha or {}).get("rs_centavos") or 0)
+    posicao = next((i + 1 for i, p in enumerate(ordem) if p["id"] == membro_id), None)
+    return {
+        "fechado_centavos": fechado,
+        "ganhos": int((linha or {}).get("ganhos") or 0),
+        "conversao": (linha or {}).get("conversao") or "—",
+        "resp": (linha or {}).get("resp") or "—",
+        "fila": int((linha or {}).get("fila") or 0),
+        "comissao_pct": pct,
+        "comissao_centavos": (round(fechado * pct / 100) if pct else None),
+        "posicao": posicao, "total_equipe": len(ordem),
+    }

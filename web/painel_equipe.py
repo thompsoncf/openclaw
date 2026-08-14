@@ -195,7 +195,9 @@ def trocar_aplica(request: Request, i: int = Form(...)):
     ctxs = request.session.get("contextos") or []
     if 0 <= i < len(ctxs):
         eq.aplicar_contexto(request.session, ctxs[i])
-        return RedirectResponse("/painel", status_code=303)
+        # cada empresa pode ter um papel diferente: manda pra casa DAQUELE papel
+        return RedirectResponse(
+            eq.home_do_papel(ctxs[i]["papel"], ctxs[i].get("membro_id")), status_code=303)
     return RedirectResponse("/trocar", status_code=303)
 
 
@@ -271,8 +273,12 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:.8rem;flex-wrap:wrap">
     <h2 style="margin:0">Equipe</h2>
-    <a href="/cockpit" target="_blank" rel="noopener"
-       style="display:inline-flex;align-items:center;gap:.4rem;background:#10241a;border:1px solid #1e4a3a;color:var(--verde-claro);border-radius:10px;padding:.5rem .9rem;font-weight:700;text-decoration:none;white-space:nowrap">📊 Abrir o Cockpit da equipe</a>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+      <a href="/cockpit/novo" target="_blank" rel="noopener"
+         style="display:inline-flex;align-items:center;gap:.4rem;background:#25d366;border:1px solid #25d366;color:#04150c;border-radius:10px;padding:.5rem .9rem;font-weight:700;text-decoration:none;white-space:nowrap">✨ Ver o app novo (prévia)</a>
+      <a href="/cockpit" target="_blank" rel="noopener"
+         style="display:inline-flex;align-items:center;gap:.4rem;background:#10241a;border:1px solid #1e4a3a;color:var(--verde-claro);border-radius:10px;padding:.5rem .9rem;font-weight:700;text-decoration:none;white-space:nowrap">📊 Abrir o Cockpit da equipe</a>
+    </div>
   </div>
   <div class="mut" style="font-size:.82rem">Convide sua equipe por link. Cada pessoa entra com o próprio login, com o acesso do papel. Você acompanha o time no <b>Cockpit</b> — sem precisar de outro cadastro.</div>
 

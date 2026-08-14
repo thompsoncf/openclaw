@@ -399,6 +399,193 @@ def _sanear_itens(itens) -> list[dict]:
     return out
 
 
+# ------------------------------------------------------------------ carteira de propostas
+STATUS_ORC = ("rascunho", "enviado", "negociando", "aprovada", "fechado", "perdido")
+_ROT_ORC = {"rascunho": "Rascunho", "enviado": "Enviada", "negociando": "Negociando",
+            "aprovada": "Aprovada", "fechado": "Fechada", "perdido": "Perdida"}
+
+
+def _link_proposta(token: str) -> str:
+    from finance.email_sender import _app_url
+    return f"{_app_url()}/proposta/{token}" if token else ""
+
+
+def _curar_tokens(c, conta_id: int) -> None:
+    """Proposta sem token não tem link pro cliente — as antigas foram salvas antes do
+    token existir. Mesma auto-cura que painel_servicos.lista já faz."""
+    c.execute("""update orcamentos set token = substr(md5(random()::text || id::text
+                   || clock_timestamp()::text), 1, 22)
+                 where conta_id=%s and token is null""", (conta_id,))
+
+
+def orcamentos(pool, conta_id: int, *, membro_id: int | None = None,
+               status: str = "", vendedor_id: int | None = None) -> list[dict]:
+    """As propostas da conta, com o link público pronto pra mandar.
+
+    `membro_id` setado = carteira DELE (o vendedor só enxerga o que criou); None =
+    carteira toda (dono/gestor). É a mesma regra de escopo que painel_servicos.lista
+    já usa — `orcamentos.criado_por` guarda o membro_id como TEXTO.
+
+    Traz também o lead de origem quando existe (prospeccao.orcamento_id aponta pra
+    cá), que é o que permite mandar a proposta na conversa em vez de só por link.
+    """
+    where = ["o.conta_id=%s"]
+    args: list = [conta_id]
+    if membro_id:
+        where.append("o.criado_por=%s")
+        args.append(str(membro_id))
+    elif vendedor_id:
+        where.append("o.criado_por=%s")
+        args.append(str(vendedor_id))
+    if status in STATUS_ORC:
+        where.append("coalesce(o.status,'rascunho')=%s")
+        args.append(status)
+    with pool.connection() as c:
+        _curar_tokens(c, conta_id)
+        c.commit()
+        rows = c.execute(
+            """select o.id, o.cliente, o.empresa, o.setup_centavos, o.mensal_centavos,
+                      coalesce(o.status,'rascunho'), o.token, o.criado_em, o.criado_por,
+                      coalesce(o.whatsapp, o.telefone, ''), o.aprovada_por, o.aprovada_em,
+                      p.id, coalesce(nullif(m.nome,''), m.email, '—')
+                 from orcamentos o
+                 left join prospeccao p on p.orcamento_id = o.id and p.conta_id = o.conta_id
+                 left join membros m on m.id::text = o.criado_por and m.conta_id = o.conta_id
+                where """ + " and ".join(where) + """
+                order by o.criado_em desc limit 100""", tuple(args)).fetchall()
+    from web.painel_prospeccao import _zap_link_texto
+    out = []
+    for r in rows:
+        link = _link_proposta(r[6])
+        out.append({
+            "id": r[0], "cliente": r[1] or "", "empresa": r[2] or "",
+            "titulo": (r[2] or r[1] or "Proposta"),   # a empresa na frente: é por ela que se procura
+            "setup_centavos": int(r[3] or 0), "mensal_centavos": int(r[4] or 0),
+            "status": r[5], "status_rot": _ROT_ORC.get(r[5], r[5].title()),
+            "token": r[6] or "", "link": link,
+            "criado_em": r[7], "vendedor": r[13],
+            "zap": _zap_link_texto(r[9], f"Olá! Segue sua proposta 👋\n{link}") if (r[9] and link) else "",
+            "aprovada_por": r[10] or "",
+            "aprovada_em": r[11],
+            "lead_id": r[12],
+        })
+    return out
+
+
+def orcamento(pool, conta_id: int, orc_id: int, *, membro_id: int | None = None) -> dict | None:
+    """Uma proposta (com os itens), no mesmo escopo de `orcamentos`."""
+    import json as _json
+    args: list = [orc_id, conta_id]
+    dono = ""
+    if membro_id:
+        dono = " and o.criado_por=%s"
+        args.append(str(membro_id))
+    with pool.connection() as c:
+        _curar_tokens(c, conta_id)
+        c.commit()
+        r = c.execute(
+            """select o.id, o.cliente, o.empresa, o.cnpj, o.segmento,
+                      coalesce(o.whatsapp, o.telefone, ''), o.email, o.itens,
+                      o.setup_centavos, o.mensal_centavos, coalesce(o.status,'rascunho'),
+                      o.token, o.criado_em, o.aprovada_por, o.aprovada_em, o.aprovada_doc,
+                      p.id, coalesce(nullif(m.nome,''), m.email, '—'), o.cidade, o.uf
+                 from orcamentos o
+                 left join prospeccao p on p.orcamento_id = o.id and p.conta_id = o.conta_id
+                 left join membros m on m.id::text = o.criado_por and m.conta_id = o.conta_id
+                where o.id=%s and o.conta_id=%s""" + dono, tuple(args)).fetchone()
+    if not r:
+        return None
+    itens = r[7]
+    if isinstance(itens, str):
+        try:
+            itens = _json.loads(itens)
+        except ValueError:
+            itens = []
+    link = _link_proposta(r[11])
+    from web.painel_prospeccao import _zap_link_texto
+    return {
+        "id": r[0], "cliente": r[1] or "", "empresa": r[2] or "",
+        "titulo": (r[2] or r[1] or "Proposta"),
+        "cnpj": r[3] or "", "segmento": r[4] or "", "whatsapp": r[5] or "", "email": r[6] or "",
+        "itens": itens or [], "setup_centavos": int(r[8] or 0), "mensal_centavos": int(r[9] or 0),
+        "status": r[10], "status_rot": _ROT_ORC.get(r[10], r[10].title()),
+        "token": r[11] or "", "link": link, "criado_em": r[12],
+        "aprovada_por": r[13] or "", "aprovada_em": r[14], "aprovada_doc": r[15] or "",
+        "lead_id": r[16], "vendedor": r[17], "cidade": r[18] or "", "uf": r[19] or "",
+        "zap": _zap_link_texto(r[5], f"Olá! Segue sua proposta 👋\n{link}") if (r[5] and link) else "",
+    }
+
+
+# estados que o funil move na mão. 'fechado' fica de fora de propósito: fechar é
+# `fechar_contrato`, que gera os títulos a receber — deixar 'fechado' no seletor
+# marcaria a proposta como fechada SEM gerar o contrato, e ninguém perceberia.
+STATUS_MANUAIS = ("rascunho", "enviado", "negociando", "aprovada", "perdido")
+
+
+def mudar_status_orcamento(pool, conta_id: int, orc_id: int, novo: str,
+                           *, membro_id: int | None = None) -> dict:
+    """Move a proposta no funil. `membro_id` setado limita ao que a pessoa criou —
+    é o que impede um vendedor de mexer na proposta de outro pela URL.
+
+    Proposta FECHADA não volta atrás por aqui: os títulos a receber já existem, e
+    reabrir pra fechar de novo geraria o contrato em dobro. É a mesma regra do
+    painel, que também recusa editar orçamento com status 'fechado'.
+    """
+    if novo not in STATUS_MANUAIS:
+        return {"ok": False, "erro": "Status inválido."}
+    args: list = [novo, orc_id, conta_id]
+    dono = ""
+    if membro_id:
+        dono = " and criado_por=%s"
+        args.append(str(membro_id))
+    with pool.connection() as c:
+        n = c.execute("update orcamentos set status=%s, atualizado_em=now() "
+                      "where id=%s and conta_id=%s and coalesce(status,'rascunho') <> 'fechado'"
+                      + dono, tuple(args)).rowcount
+        c.commit()
+        if not n:
+            atual = c.execute("select coalesce(status,'rascunho') from orcamentos "
+                              "where id=%s and conta_id=%s", (orc_id, conta_id)).fetchone()
+    if not n:
+        if atual and atual[0] == "fechado":
+            return {"ok": False, "erro": "Essa proposta já virou contrato — não dá pra reabrir."}
+        return {"ok": False, "erro": "Proposta não encontrada (ou não é sua)."}
+    return {"ok": True, "status": novo, "msg": f"Proposta marcada como {_ROT_ORC.get(novo, novo)} ✓"}
+
+
+def fechar_contrato(pool, conta_id: int, orc_id: int, *, membro_id: int | None = None) -> dict:
+    """Fecha a proposta como CONTRATO: gera os títulos a receber (entrada + a
+    mensalidade recorrente) no módulo Empresa.
+
+    Aqui só mora o escopo — quem gera é `vendas.fechar_orcamento`, o mesmo motor do
+    botão do painel, que é atômico (o duplo-clique não gera título em dobro) e
+    escopado por conta. O que ele NÃO faz é olhar quem criou a proposta: sem a
+    checagem abaixo, um vendedor fecharia contrato da proposta de outro pela URL.
+    """
+    with pool.connection() as c:
+        dono = c.execute("select criado_por from orcamentos where id=%s and conta_id=%s",
+                         (orc_id, conta_id)).fetchone()
+    if not dono:
+        return {"ok": False, "erro": "Proposta não encontrada."}
+    if membro_id and (dono[0] or "") != str(membro_id):
+        return {"ok": False, "erro": "Proposta não encontrada (ou não é sua)."}
+    # De quem é a venda: de quem FEZ a proposta, não de quem apertou o botão. Um
+    # gestor pode fechar o contrato de um vendedor, e a comissão é do vendedor —
+    # é este `criado_por` que vai parar no título e, na baixa, no lançamento.
+    try:
+        autor = int(str(dono[0]).strip()) if dono[0] else None
+    except (TypeError, ValueError):
+        autor = None
+    from finance import vendas
+    r = vendas.fechar_orcamento(pool, conta_id, orc_id, criado_por=autor)
+    if not r.get("ok"):
+        return r
+    quantos = sum(1 for k in ("setup_titulo_id", "mensal_titulo_id") if r.get(k))
+    return {**r, "status": "fechado",
+            "msg": (f"Contrato fechado ✓ {quantos} título(s) a receber gerado(s)"
+                    if quantos else "Contrato fechado ✓")}
+
+
 def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens) -> dict:
     """Cria a proposta do lead (mesma tabela/token do painel) e devolve o link público
     /proposta/<token> pro vendedor mandar. Revalida a posse do lead. Reusa a página de
@@ -562,3 +749,79 @@ def visita_ics(pool, token: str) -> str | None:
     vevent = vevent.replace("END:VEVENT", alarmes + "\r\nEND:VEVENT")
     cab = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Zaq//Visita//PT", "CALSCALE:GREGORIAN", "METHOD:PUBLISH"]
     return "\r\n".join(cab + [vevent, "END:VCALENDAR"]) + "\r\n"
+
+
+# ------------------------------------------------------------------ agenda do vendedor
+def visitas_do_vendedor(pool, conta_id: int, membro_id: int, dias: int = 14) -> list[dict]:
+    """As visitas QUE ELE marcou, de hoje pra frente (a agenda do dia dele).
+
+    `agendar_visita` grava o evento com `membro_id` (via `agenda.criar_evento`) e
+    liga no lead pelo `prospeccao_id`; aqui a gente lê o mesmo dado pelo dono do
+    evento. `agenda.listar_eventos` não serve porque é por CONTA — o vendedor
+    veria a agenda do time inteiro.
+    """
+    from finance import agenda as ag
+    from web.painel_prospeccao import _zap_link
+    hoje = datetime.now(ag.BRT).replace(hour=0, minute=0, second=0, microsecond=0)
+    with pool.connection() as c:
+        rows = c.execute(
+            """select e.id, e.titulo, e.inicio, e.local, e.ics_token,
+                      e.prospeccao_id, p.empresa, coalesce(p.whatsapp, p.telefone, '')
+                 from eventos_agenda e
+                 left join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
+                where e.conta_id=%s and e.membro_id=%s and e.status='ativo'
+                  and e.inicio >= %s and e.inicio < %s
+                order by e.inicio""",
+            (conta_id, membro_id, hoje, hoje + timedelta(days=max(1, int(dias or 14))))).fetchall()
+    out = []
+    for r in rows:
+        ini = r[2].astimezone(ag.BRT) if r[2] else None
+        out.append({
+            "id": r[0], "titulo": r[1] or "Visita", "inicio": ini,
+            "dia": ini.strftime("%d/%m") if ini else "", "hora": ini.strftime("%H:%M") if ini else "",
+            "hoje": bool(ini and ini.date() == hoje.date()),
+            "local": r[3] or "", "maps": _maps_link(r[3] or ""),
+            "ics_url": f"/visita/{r[4]}.ics" if r[4] else "",
+            "lead_id": r[5], "empresa": r[6] or "", "zap": _zap_link(r[7]) if r[7] else "",
+        })
+    return out
+
+
+# ------------------------------------------------------------------ o resultado DELE
+def remuneracao(pool, conta_id: int, membro_id: int, periodo: str = "mes") -> dict:
+    """O resultado do vendedor no período: o que ENTROU, o que está no funil e a
+    comissão dele.
+
+    Dois números, e a diferença importa:
+
+    * `recebido_centavos` / `comissao_centavos` vêm de `finance.comissao` — a MESMA
+      conta que o relatório do dono faz. É dinheiro que entrou, e é sobre isso que
+      a comissão é paga.
+    * `fechado_centavos` continua vindo do funil (`prospeccao.valor_estimado_centavos`
+      dos leads ganhos). É previsão do vendedor, não confirmação de ninguém — serve
+      pra ele acompanhar o próprio pipeline, e por isso NÃO entra na comissão.
+
+    Antes esses dois eram um só, e o vendedor via uma comissão calculada sobre o
+    palpite dele — um número que o dono não reconhecia no relatório.
+    """
+    from finance import cockpit_dono as cd
+    from finance import comissao as com
+    ini, fim = cd._range(periodo)
+    c_ = com.de_um(pool, conta_id, membro_id, ini.date(), fim.date())
+    ordem = cd.placar(pool, conta_id, periodo)          # funil: ranking por R$ fechado
+    linha = next((p for p in ordem if p["id"] == membro_id), None)
+    posicao = next((i + 1 for i, p in enumerate(ordem) if p["id"] == membro_id), None)
+    return {
+        # dinheiro que entrou (base da comissão)
+        "recebido_centavos": c_["recebido_centavos"],
+        "n_vendas": c_["n_vendas"],
+        "comissao_pct": c_["comissao_pct"],
+        "comissao_centavos": c_["comissao_centavos"] if c_["configurada"] else None,
+        # funil (previsão, não conta comissão)
+        "fechado_centavos": int((linha or {}).get("rs_centavos") or 0),
+        "ganhos": int((linha or {}).get("ganhos") or 0),
+        "conversao": (linha or {}).get("conversao") or "—",
+        "resp": (linha or {}).get("resp") or "—",
+        "fila": int((linha or {}).get("fila") or 0),
+        "posicao": posicao, "total_equipe": len(ordem),
+    }

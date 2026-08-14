@@ -331,7 +331,7 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
             """update titulos set status='pago', pago_em=%s
                 where id=%s and conta_id=%s and status='aberto'
              returning tipo, descricao, contraparte, valor_centavos, categoria,
-                       recorrente, vencimento""",
+                       recorrente, vencimento, criado_por""",
             (data_pagto, titulo_id, conta_id),
         ).fetchone()
         if not t:
@@ -351,8 +351,14 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
                                              else CAT_VENDAS),
                           descricao=f"{t[1]}{quem}", data=data_pagto,
                           origem="titulo", natureza="empresa")
+        # A quem o lançamento pertence: a QUEM ORIGINOU o título (titulos.criado_por),
+        # não a quem clicou em "pago". Antes ia o `membro_id` da baixa — então a
+        # comissão da venda ia parar em quem deu baixa (quase sempre o dono, ou
+        # ninguém), e o vendedor que fechou nunca aparecia no relatório.
+        # Sem origem registrada, fica sem dono: chutar em quem clicou é o bug.
+        vendedor_id = t[7] if t[7] is not None else None
         # mesma conexão c: o lançamento é atômico com a baixa do título
-        salvo = LivroCaixa(pool, conta_id, membro_id).adicionar(
+        salvo = LivroCaixa(pool, conta_id, vendedor_id).adicionar(
             lanc, forcar=True, conn=c)
 
         c.execute(
@@ -363,11 +369,14 @@ def dar_baixa_titulo(pool, conta_id: int, titulo_id: int,
         if t[5]:  # recorrente mensal: cria o próximo
             prox = _mes_seguinte(t[6])
             r = c.execute(
+                # criado_por vai junto: a mensalidade do mês que vem é da MESMA
+                # venda. Sem carregar isso, o vendedor recebia comissão no primeiro
+                # mês e o resto da recorrência virava "Sem vendedor".
                 """insert into titulos
                      (conta_id, tipo, descricao, contraparte, valor_centavos,
-                      vencimento, categoria, recorrente)
-                   values (%s,%s,%s,%s,%s,%s,%s,true) returning id""",
-                (conta_id, t[0], t[1], t[2], int(t[3]), prox, t[4]),
+                      vencimento, categoria, recorrente, criado_por)
+                   values (%s,%s,%s,%s,%s,%s,%s,true,%s) returning id""",
+                (conta_id, t[0], t[1], t[2], int(t[3]), prox, t[4], t[7]),
             ).fetchone()
             proximo_id = r[0]
         c.commit()

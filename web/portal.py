@@ -6153,7 +6153,10 @@ def login_form(request: Request):
     # login (clicar na lateral "funciona" porque a sessão já era válida, não
     # porque o login foi pulado), mas é só má UX. Redireciona pra já.
     if request.session.get("conta_id"):
-        return RedirectResponse("/painel", status_code=303)
+        from contas import equipe as _equipe
+        return RedirectResponse(
+            _equipe.home_do_papel(request.session.get("papel"),
+                                  request.session.get("membro_id")), status_code=303)
     nxt = request.query_params.get("next")
     if nxt and nxt.startswith("/"):
         request.session["next"] = nxt
@@ -6179,7 +6182,9 @@ def login_envia(request: Request, email: str = Form(...), senha: str = Form(...)
     # daqui pra baixo: contexto único aplicado. Fluxo de carrinho/next só faz
     # sentido pra quem entrou na PRÓPRIA conta (cliente/dono).
     if not (ctxs[0]["papel"] == "dono" and ctxs[0]["membro_id"] is None):
-        return RedirectResponse("/painel", status_code=303)
+        # membro de equipe: cada papel tem a casa dele (o vendedor vai pro Cockpit)
+        return RedirectResponse(
+            _equipe.home_do_papel(ctxs[0]["papel"], ctxs[0]["membro_id"]), status_code=303)
     row = (request.session["conta_id"],)   # compat com o bloco de carrinho abaixo
     # Aplicar carrinho_intencao se houver (cliente tentou adicionar item deslogado)
     intencao = request.session.pop("carrinho_intencao", None)
@@ -8254,6 +8259,11 @@ async def painel_produtos_vender(request: Request):
             pagamento=body.get("pagamento") or "dinheiro",
             vencimento=body.get("vencimento"),
             desconto_centavos=int(body.get("desconto_centavos") or 0),
+            # quem está no caixa é quem vendeu. Sem isto o lançamento nascia sem
+            # membro_id e TODA venda de balcão caía em "Sem vendedor" no relatório
+            # de comissão — o parâmetro existia em pdv.registrar_venda_balcao e
+            # ninguém passava.
+            membro_id=request.session.get("membro_id"),
         )
         return JSONResponse({"ok": True, **r})
     except ValueError as e:

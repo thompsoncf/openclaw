@@ -20,6 +20,7 @@ from datetime import date
 log = logging.getLogger("zaq.portal")
 
 from db.conexao import get_pool
+from web import tema as _tema
 from contas import contas as ct
 from contas.permissoes import pode_financas
 from finance.livro_caixa import LivroCaixa
@@ -158,14 +159,9 @@ _BASE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{{ titulo }} - Zaq</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<style>
-:root {
-  color-scheme: dark;
-  --bg:#0e0e0f; --card:#161617; --card-2:#1a1a1c; --borda:#2a2a2b;
-  --txt:#ececec; --txt-mut:#a8a8a3;
-  --verde:#1d9e75; --verde-hover:#22b485; --verde-claro:#5dcaa5;
-}
-body{margin:0;min-height:100vh;font-family:system-ui,-apple-system,sans-serif;
+""" + _tema.FONTES + """<style>
+""" + _tema.variaveis() + """
+body{margin:0;min-height:100vh;font-family:var(--body);
  background:var(--bg);color:var(--txt);display:flex;flex-direction:column;align-items:center}
 .topo{width:100%;max-width:960px;display:flex;justify-content:space-between;
  align-items:center;padding:1.2rem 1rem;box-sizing:border-box}
@@ -192,7 +188,7 @@ label{display:block;font-size:.85rem;color:var(--txt-mut);margin:.9rem 0 .3rem}
 input,select{width:100%;padding:.65rem .8rem;border-radius:8px;border:1px solid #333;
  background:var(--bg);color:var(--txt);box-sizing:border-box;font-size:.95rem}
 button{width:100%;margin-top:1.4rem;padding:.75rem;border:0;border-radius:8px;
- background:var(--verde);color:#fff;font-size:1rem;cursor:pointer}
+ background:var(--verde);color:var(--sobre-verde);font-size:1rem;cursor:pointer}
 button:hover{background:var(--verde-hover)}
 .erro{background:#3a1d1d;border:1px solid #6e2b2b;color:#f0b8b8;border-radius:8px;
  padding:.6rem .8rem;font-size:.88rem;margin-bottom:.6rem}
@@ -205,7 +201,7 @@ button:hover{background:var(--verde-hover)}
  border-radius:12px;padding:.8rem 1rem;font-size:.9rem;line-height:1.4}
 .plano-banner .pb-txt{flex:1 1 260px;min-width:0}
 .plano-banner .pb-btn{flex:0 0 auto;width:auto;margin:0;padding:.55rem 1.1rem;border-radius:8px;
- font-size:.9rem;font-weight:600;text-decoration:none;white-space:nowrap;color:#fff;background:var(--verde)}
+ font-size:.9rem;font-weight:600;text-decoration:none;white-space:nowrap;color:var(--sobre-verde);background:var(--verde)}
 .plano-banner .pb-btn:hover{background:var(--verde-hover)}
 .pb-vencido{background:#3a1d1d;border:1px solid #6e2b2b;color:#f0c2c2}
 .pb-avencer{background:#332a12;border:1px solid #6e5a22;color:#f0dca6}
@@ -260,7 +256,7 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
 .abas{display:inline-flex;align-items:center;flex-wrap:wrap;gap:2px;background:var(--card);padding:3px;border-radius:9px;border:1px solid var(--borda);margin:.6rem 0 .9rem}
 .aba{width:auto;margin:0;display:inline-flex;align-items:center;line-height:1;background:transparent;color:#b4b2a9;border:none;padding:.35rem .8rem;border-radius:6px;font-size:.8rem;cursor:pointer;transition:background .18s,color .18s}
 .aba:hover{color:var(--txt)}
-.aba.on,.aba.ativa{background:var(--verde);color:#fff;font-weight:600}
+.aba.on,.aba.ativa{background:var(--verde);color:var(--sobre-verde);font-weight:600}
 .dica-toque{font-size:.78rem;color:#7a7a78;margin:0 0 .6rem}
 .dephead{font-size:.72rem;font-weight:600;color:#cfcfca;margin:.6rem 0 .3rem .2rem}
 .litem{display:flex;align-items:center;gap:.6rem;padding:.7rem .5rem .7rem .6rem;margin-bottom:.4rem;background:var(--card-2);border-radius:10px;transition:transform .15s,background .2s,opacity .35s,max-height .35s;position:relative;overflow:hidden}
@@ -278,14 +274,14 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
 @keyframes cfade{to{opacity:0}}
 .litem.saindo{opacity:0;transform:translateX(40px);max-height:0;padding-top:0;padding-bottom:0;margin-bottom:0}
 .cart-head{margin:1rem 0 .3rem;font-size:.88rem;color:var(--verde-claro);cursor:pointer;user-select:none;font-weight:500}
-.btn-finalizar{width:100%;margin-top:.8rem;background:var(--verde);color:#fff;border:none;padding:.7rem;border-radius:10px;font-size:15px;font-weight:500;cursor:pointer;transition:background .2s}
+.btn-finalizar{width:100%;margin-top:.8rem;background:var(--verde);color:var(--sobre-verde);border:none;padding:.7rem;border-radius:10px;font-size:15px;font-weight:500;cursor:pointer;transition:background .2s}
 .btn-finalizar:hover{background:var(--verde-hover)}
 .btn-finalizar:active{transform:scale(.99)}
 .hist-dia{border-bottom:1px solid var(--borda)}
 .hist-head{display:flex;align-items:center;justify-content:space-between;padding:.6rem .2rem;cursor:pointer;color:var(--txt);font-size:14px;user-select:none}
 .hist-head:hover{background:var(--card-2);border-radius:8px}
 .hist-itens{padding:.2rem .2rem .6rem 1rem;font-size:13px;color:var(--txt-mut);line-height:1.7}
-.wa-suporte{position:fixed;bottom:20px;right:20px;width:56px;height:56px;background:#25d366;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,.35);z-index:9999;transition:transform .2s,box-shadow .2s;text-decoration:none}
+.wa-suporte{position:fixed;bottom:20px;right:20px;width:56px;height:56px;background:var(--verde);border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(0,0,0,.35);z-index:9999;transition:transform .2s,box-shadow .2s;text-decoration:none}
 .wa-suporte:hover{transform:scale(1.08);box-shadow:0 6px 18px rgba(37,211,102,.45)}
 .wa-suporte:active{transform:scale(.96)}
 .wa-tooltip{position:absolute;right:68px;background:var(--card-2);color:var(--txt);padding:.45rem .8rem;border-radius:6px;font-size:.85rem;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .2s;border:1px solid var(--borda)}
@@ -429,7 +425,7 @@ _CADASTRO = """{% extends "base" %}{% block conteudo %}
 <label style="margin-bottom:.3rem;display:block">Escolha seu plano</label>
 <div class="mut" style="font-size:.8rem;margin-bottom:.6rem">Tudo grátis durante o beta — experimente sem compromisso.</div>
 <style>
-  .plano-opt{display:block;background:var(--card);border:1px solid #232325;border-radius:10px;padding:.7rem .9rem;cursor:pointer;transition:border-color .12s,background .12s}
+  .plano-opt{display:block;background:var(--card);border:1px solid var(--card-2);border-radius:10px;padding:.7rem .9rem;cursor:pointer;transition:border-color .12s,background .12s}
   .plano-opt.sel{background:#14251c;border:2px solid var(--verde);padding:calc(.7rem - 1px) calc(.9rem - 1px)}
 </style>
 <div style="display:grid;gap:.5rem;margin-bottom:1rem">
@@ -455,7 +451,7 @@ _CADASTRO = """{% extends "base" %}{% block conteudo %}
   (function(){ var m=document.querySelector('input[name="plano"]:checked'); if(m) planoPick(m); })();
 </script>
 
-<div style="background:var(--card);border:1px dashed #3a3a3d;border-radius:10px;padding:.7rem .9rem;margin-bottom:1rem">
+<div style="background:var(--card);border:1px dashed var(--borda);border-radius:10px;padding:.7rem .9rem;margin-bottom:1rem">
   <div style="color:#b4b2a9;font-size:.82rem;font-weight:600;margin-bottom:.4rem">Quer vender também? (nossa equipe ativa e te ajuda)</div>
   <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer">
     <input type="checkbox" name="interesse" value="fornecedor" style="width:auto">
@@ -585,7 +581,7 @@ _PAINEL = """{% extends "base" %}{% block conteudo %}
   </div>
   {% endfor %}
   </div>
-  <div style="margin-top:1rem"><button type="button" onclick="addPessoaToggle()" id="add-btn" style="width:auto;margin:0;background:var(--verde);color:#fff;border:0;border-radius:999px;padding:.42rem 1rem;font-size:.82rem;cursor:pointer">＋ Adicionar pessoa</button></div>
+  <div style="margin-top:1rem"><button type="button" onclick="addPessoaToggle()" id="add-btn" style="width:auto;margin:0;background:var(--verde);color:var(--sobre-verde);border:0;border-radius:999px;padding:.42rem 1rem;font-size:.82rem;cursor:pointer">＋ Adicionar pessoa</button></div>
   <div id="add-pessoa-body"{% if not aviso %} style="display:none"{% endif %}>
     <div style="border-top:1px solid #212122;margin-top:1rem;padding-top:1rem">
     {% if pode_adicionar %}
@@ -647,7 +643,7 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
   <!-- lista dos tamanhos -->
   {% if tamanhos %}
   {% for t in tamanhos %}
-  <div style="background:#1c1c1f;border:1px solid var(--borda);border-radius:8px;padding:1rem;margin-bottom:.6rem">
+  <div style="background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:1rem;margin-bottom:.6rem">
     <strong>{{ t.nome }}</strong> · <strong>R$ {{ (t.preco_centavos/100)|n2 }}</strong>
     <div class="mut" style="font-size:.85rem;margin-top:.3rem">
       {{ t.qtd_frutas }} frutas · {{ t.qtd_legumes }} legumes · {{ t.qtd_verduras }} verduras · {{ t.qtd_temperos }} temperos ({{ t.total_porcoes }} porções)
@@ -677,7 +673,7 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
       <input name="qtd_temperos" type="number" value="0" style="width:100%">
       <label>Descrição (opcional)</label>
       <input name="descricao" placeholder="ideal pra 2 pessoas por semana" style="width:100%">
-      <button style="background:var(--verde);color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.8rem;width:100%;font-weight:500">Criar tamanho</button>
+      <button style="background:var(--verde);color:var(--sobre-verde);padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.8rem;width:100%;font-weight:500">Criar tamanho</button>
     </form>
   </div>
 </div>
@@ -697,7 +693,7 @@ _FORNECEDOR = """{% extends "base" %}{% block conteudo %}
 <style>
 .forn-cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:.7rem; margin-top:1rem}
 .forn-card{display:flex; flex-direction:row; align-items:flex-start; gap:.75rem; text-align:left;
-  background:#1c1c1f; border:1px solid var(--borda); border-radius:12px; padding:1rem; cursor:pointer; transition:border-color .15s; color:inherit; font:inherit}
+  background:var(--card-2); border:1px solid var(--borda); border-radius:12px; padding:1rem; cursor:pointer; transition:border-color .15s; color:inherit; font:inherit}
 .forn-card:hover{border-color:var(--verde)}
 .fc-ic{font-size:24px; margin-bottom:.4rem; line-height:1}
 .fc-tit{font-size:.95rem; font-weight:500; color:#f0f0ee; margin-bottom:.2rem}
@@ -763,9 +759,9 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <div style="margin:.8rem 0 .2rem">
 <div style="color:#888780;font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.35rem">Ver lançamentos de</div>
 <div style="display:inline-flex;background:var(--card);border:1px solid var(--borda);border-radius:9px;padding:3px;gap:2px;flex-wrap:wrap">
-<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if not natureza_sel and not sem_conta_sel %}background:var(--verde);color:#fff;font-weight:600{% else %}color:#b4b2a9{% endif %}">Todos</a>
+<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if not natureza_sel and not sem_conta_sel %}background:var(--verde);color:var(--sobre-verde);font-weight:600{% else %}color:#b4b2a9{% endif %}">Todos</a>
 <a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=pessoal" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if natureza_sel=='pessoal' %}background:#f0c05a;color:#1a1409;font-weight:600{% else %}color:#b4b2a9{% endif %}">👤 Pessoal</a>
-<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=empresa" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if natureza_sel=='empresa' %}background:var(--verde);color:#fff;font-weight:600{% else %}color:#b4b2a9{% endif %}">🏢 Empresa</a>
+<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=empresa" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;{% if natureza_sel=='empresa' %}background:var(--verde);color:var(--sobre-verde);font-weight:600{% else %}color:#b4b2a9{% endif %}">🏢 Empresa</a>
 <a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&natureza=a_definir" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;display:inline-flex;align-items:center;gap:.35rem;{% if natureza_sel=='a_definir' %}background:#3a2c1d;color:#f0c05a;font-weight:600{% else %}color:#f0c05a{% endif %}">⏳ A definir{% if n_a_definir %} <span style="background:#3a2c1d;color:#f0c05a;font-size:.62rem;padding:1px 6px;border-radius:8px">{{ n_a_definir }}</span>{% endif %}</a>
 {% if eh_pj and (n_sem_conta or sem_conta_sel) %}<a href="/painel/financeiro?mes={{ mes_sel }}{% if membro_sel %}&membro={{ membro_sel }}{% endif %}&sem_conta=1" title="lançamentos de empresa sem conta contábil (fora da DRE por conta)" style="text-decoration:none;font-size:.8rem;padding:.35rem .8rem;border-radius:6px;display:inline-flex;align-items:center;gap:.35rem;{% if sem_conta_sel %}background:#3a2c1d;color:#f0c05a;font-weight:600{% else %}color:#f0c05a{% endif %}">⚠ sem conta{% if n_sem_conta %} <span style="background:#3a2c1d;color:#f0c05a;font-size:.62rem;padding:1px 6px;border-radius:8px">{{ n_sem_conta }}</span>{% endif %}</a>{% endif %}
 </div>
@@ -789,7 +785,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <span id="classif-contador" style="color:#888780;font-size:.75rem"></span>
 <span style="display:flex;gap:.5rem">
 <button type="button" onclick="fecharClassificador()" style="border:1px solid #444;background:transparent;color:#b4b2a9;font-size:.8rem;padding:.4rem .9rem;border-radius:6px;cursor:pointer">Cancelar</button>
-<button type="button" id="classif-salvar" onclick="salvarClassificacao()" style="background:var(--verde);color:#fff;font-size:.8rem;font-weight:600;padding:.4rem 1rem;border:0;border-radius:6px;cursor:pointer">Salvar</button>
+<button type="button" id="classif-salvar" onclick="salvarClassificacao()" style="background:var(--verde);color:var(--sobre-verde);font-size:.8rem;font-weight:600;padding:.4rem 1rem;border:0;border-radius:6px;cursor:pointer">Salvar</button>
 </span>
 </div>
 </div></div>{% endif %}
@@ -803,11 +799,11 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 
   <div id="ofx-step-upload">
     <div style="font-size:.75rem;color:#888780;margin:.2rem 0 .8rem">Exporte o extrato do seu banco em OFX (a maioria oferece isso em "Extrato → Exportar") e a gente lança tudo — já sugerindo categoria{% if eh_pj %}, conta contábil e centro de custo{% endif %}, e comparando com o que você já lançou pra não duplicar.</div>
-    <div style="border:1.5px dashed #3a3a3d;border-radius:10px;padding:1.6rem 1rem;text-align:center;background:#131316">
+    <div style="border:1.5px dashed var(--borda);border-radius:10px;padding:1.6rem 1rem;text-align:center;background:#131316">
       <input type="file" id="ofx-arquivo" accept=".ofx" onchange="ofxArquivoEscolhido(this)" style="display:none">
       <div id="ofx-dropzone-texto">
         <div style="font-size:1.4rem;margin-bottom:.4rem">📤</div>
-        <button type="button" onclick="document.getElementById('ofx-arquivo').click()" style="width:auto;margin:0;background:var(--verde);color:#fff;border:0;border-radius:7px;padding:.5rem 1rem;font-size:.85rem;font-weight:600;cursor:pointer">Escolher arquivo .ofx</button>
+        <button type="button" onclick="document.getElementById('ofx-arquivo').click()" style="width:auto;margin:0;background:var(--verde);color:var(--sobre-verde);border:0;border-radius:7px;padding:.5rem 1rem;font-size:.85rem;font-weight:600;cursor:pointer">Escolher arquivo .ofx</button>
       </div>
       <div id="ofx-arquivo-nome" style="display:none;font-size:.85rem;color:var(--txt)"></div>
     </div>
@@ -818,7 +814,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
     <div id="ofx-erro" style="display:none;color:#f0b8b8;font-size:.82rem;margin-top:.6rem"></div>
     <div style="display:flex;justify-content:flex-end;gap:.5rem;margin-top:1.1rem">
       <button type="button" onclick="fecharImportOfx()" style="width:auto;margin:0;border:1px solid #444;background:transparent;color:#b4b2a9;font-size:.8rem;padding:.4rem .9rem;border-radius:6px;cursor:pointer">Cancelar</button>
-      <button type="button" id="ofx-btn-analisar" onclick="ofxAnalisar()" disabled style="width:auto;margin:0;background:var(--verde);color:#fff;font-size:.8rem;font-weight:600;padding:.4rem 1rem;border:0;border-radius:6px;cursor:pointer;opacity:.5">Analisar extrato</button>
+      <button type="button" id="ofx-btn-analisar" onclick="ofxAnalisar()" disabled style="width:auto;margin:0;background:var(--verde);color:var(--sobre-verde);font-size:.8rem;font-weight:600;padding:.4rem 1rem;border:0;border-radius:6px;cursor:pointer;opacity:.5">Analisar extrato</button>
     </div>
   </div>
 
@@ -837,7 +833,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
       <span id="ofx-contador" style="color:#888780;font-size:.75rem"></span>
       <span style="display:flex;gap:.5rem">
         <button type="button" onclick="ofxVoltar()" style="width:auto;margin:0;border:1px solid #444;background:transparent;color:#b4b2a9;font-size:.8rem;padding:.4rem .9rem;border-radius:6px;cursor:pointer">← Voltar</button>
-        <button type="button" id="ofx-btn-importar" onclick="ofxConfirmar()" style="width:auto;margin:0;background:var(--verde);color:#fff;font-size:.8rem;font-weight:600;padding:.4rem 1rem;border:0;border-radius:6px;cursor:pointer">Importar</button>
+        <button type="button" id="ofx-btn-importar" onclick="ofxConfirmar()" style="width:auto;margin:0;background:var(--verde);color:var(--sobre-verde);font-size:.8rem;font-weight:600;padding:.4rem 1rem;border:0;border-radius:6px;cursor:pointer">Importar</button>
       </span>
     </div>
   </div>
@@ -845,7 +841,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
   <div id="ofx-step-sucesso" style="display:none;text-align:center;padding:1rem 0">
     <div style="font-size:2rem;margin-bottom:.5rem">✓</div>
     <div id="ofx-sucesso-texto" style="font-size:.9rem;color:var(--txt);margin-bottom:1rem"></div>
-    <button type="button" onclick="location.reload()" style="width:auto;margin:0;background:var(--verde);color:#fff;font-size:.8rem;font-weight:600;padding:.5rem 1.1rem;border:0;border-radius:6px;cursor:pointer">Ver lançamentos</button>
+    <button type="button" onclick="location.reload()" style="width:auto;margin:0;background:var(--verde);color:var(--sobre-verde);font-size:.8rem;font-weight:600;padding:.5rem 1.1rem;border:0;border-radius:6px;cursor:pointer">Ver lançamentos</button>
   </div>
 </div>
 </div>
@@ -895,7 +891,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
   </div>
   <div class="mut" style="font-size:.72rem;margin:.15rem 0 .6rem">parcelas que ainda vão cair nos próximos meses</div>
   <table style="width:100%;font-size:.85rem">
-    {% for p in prev_cartao.pontos %}<tr style="border-top:1px solid #232325">
+    {% for p in prev_cartao.pontos %}<tr style="border-top:1px solid var(--card-2)">
       <td style="padding:.3rem 0">{{ ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][p.competencia.month-1] }}/{{ p.competencia.year }}
         <span class="mut" style="font-size:.72rem">· {{ p.parcelas }} parcela{{ 's' if p.parcelas != 1 else '' }}</span></td>
       <td style="text-align:right;font-weight:600;color:#f0b8b8">{{ p.total_centavos|brl }}</td></tr>{% endfor %}
@@ -930,7 +926,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 {% for l in lancamentos %}
 <tr data-tipo="{{ l.tipo }}" style="border-bottom:1px solid var(--borda)">
 <td style="padding:.7rem .8rem;font-size:.9rem;white-space:nowrap">{{ l.data.strftime('%d/%m/%Y') }}</td>
-<td style="padding:.7rem .8rem">{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}{% if l.forma_pagamento %}<span style="font-size:.62rem;background:#242426;color:#9aa39a;padding:1px 7px;border-radius:8px;margin-left:.3rem;white-space:nowrap">💳 {{ forma_pag_label(l.forma_pagamento) }}</span>{% endif %}</td>
+<td style="padding:.7rem .8rem">{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}{% if l.forma_pagamento %}<span style="font-size:.62rem;background:var(--card-2);color:#9aa39a;padding:1px 7px;border-radius:8px;margin-left:.3rem;white-space:nowrap">💳 {{ forma_pag_label(l.forma_pagamento) }}</span>{% endif %}</td>
 <td style="padding:.7rem .8rem;font-size:.85rem;color:var(--txt-mut)">{{ l.categoria }}</td>
 <td style="padding:.7rem .8rem;text-align:right;font-weight:500;color:{{ 'var(--verde-claro)' if l.tipo=='receita' else '#f0b8b8' }}">
 {{ '+' if l.tipo=='receita' else '−' }} {{ brl(l.valor).replace('R$ ','') }}</td>
@@ -955,7 +951,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 <table style="margin:0">
 {% for l in dia.itens %}<tr data-tipo="{{ l.tipo }}" data-cat="{{ canon(l.categoria, l.tipo) }}" data-desc="{{ l.descricao }}" data-valor="{{ brl(l.valor) }}">
 <td>{% if eh_pj and l.natureza=='empresa' and not l.plano_conta_id %}<span class="miss-dot" title="sem conta contábil — classifique abaixo"></span>{% endif %}{{ l.descricao }}{% if l.origem=='foto' %} 📷{% endif %}
-{% if l.forma_pagamento %}<span class="fpag-tag" style="font-size:.62rem;background:#242426;color:#9aa39a;padding:1px 7px;border-radius:8px;margin-left:.3rem;white-space:nowrap">💳 {{ forma_pag_label(l.forma_pagamento) }}</span>{% endif %}
+{% if l.forma_pagamento %}<span class="fpag-tag" style="font-size:.62rem;background:var(--card-2);color:#9aa39a;padding:1px 7px;border-radius:8px;margin-left:.3rem;white-space:nowrap">💳 {{ forma_pag_label(l.forma_pagamento) }}</span>{% endif %}
 {% if eh_pj %}{% if l.natureza=='empresa' %}<span class="nat-tag" style="font-size:.62rem;background:#1d3a2e;color:var(--verde-claro);padding:1px 7px;border-radius:8px;margin-left:.3rem">🏢 empresa</span>{% elif l.natureza=='pessoal' %}<span class="nat-tag" style="font-size:.62rem;background:#3a2c1d;color:#f0c05a;padding:1px 7px;border-radius:8px;margin-left:.3rem">👤 pessoal</span>{% else %}<span style="display:inline-flex;gap:.25rem;margin-left:.3rem"><button type="button" onclick="marcarNat({{ l.id }},'pessoal',this)" style="font-size:.6rem;padding:1px 6px;background:#3a2c1d;color:#f0c05a;border:0;border-radius:7px;cursor:pointer">pessoal?</button><button type="button" onclick="marcarNat({{ l.id }},'empresa',this)" style="font-size:.6rem;padding:1px 6px;background:#1d3a2e;color:var(--verde-claro);border:0;border-radius:7px;cursor:pointer">empresa?</button></span>{% endif %}{% endif %}</td>
 <td class="nowrap">
 <span style="display:inline-flex;align-items:center;gap:.4rem">
@@ -963,7 +959,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
    style="background:var(--bg);border:1px solid #2a3a33;border-radius:6px;color:var(--txt);font-size:.78rem;padding:.2rem .45rem;max-width:130px">
 {% for c in categorias_de(l.tipo) %}<option value="{{ c }}" style="background:var(--card);color:var(--txt)" {% if canon(l.categoria, l.tipo)==c %}selected{% endif %}>{{ c }}</option>{% endfor %}
 </select>
-<button type="button" class="cat-ok" onclick="salvarCat(this)" style="display:none;padding:.24rem .65rem;width:auto;font-size:.72rem;font-weight:600;background:var(--verde);color:#fff;border:0;border-radius:6px;cursor:pointer;line-height:1.1">OK</button>
+<button type="button" class="cat-ok" onclick="salvarCat(this)" style="display:none;padding:.24rem .65rem;width:auto;font-size:.72rem;font-weight:600;background:var(--verde);color:var(--sobre-verde);border:0;border-radius:6px;cursor:pointer;line-height:1.1">OK</button>
 </span>
 {% if eh_pj and l.natureza != 'pessoal' and plano_opcoes %}
 <div id="pcbox-{{ l.id }}" style="display:{{ 'flex' if l.natureza=='empresa' else 'none' }};gap:.35rem;margin-top:.3rem;flex-wrap:wrap">
@@ -1439,7 +1435,7 @@ _COMPRAS = """{% extends "base" %}{% block conteudo %}
 
 <div id="toggle-visao" style="display:none; gap:.5rem; margin:.5rem 0">
   <button id="bt-geral" onclick="setVisao('geral')"
-    style="margin:0;padding:.4rem .9rem;border-radius:8px;border:0;cursor:pointer;background:var(--verde);color:#fff">Geral</button>
+    style="margin:0;padding:.4rem .9rem;border-radius:8px;border:0;cursor:pointer;background:var(--verde);color:var(--sobre-verde)">Geral</button>
   <button id="bt-pessoa" onclick="setVisao('pessoa')"
     style="margin:0;padding:.4rem .9rem;border-radius:8px;border:1px solid var(--borda);cursor:pointer;background:#1a2233;color:#e7ecf3">Por pessoa</button>
 </div>
@@ -1895,7 +1891,7 @@ _COMPRA_REVISAR = """{% extends "base" %}{% block conteudo %}
 {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
 {% if compra.status == 'rascunho' %}
-<div style="background:#1c1c1f;border:1px solid var(--borda);border-radius:8px;padding:1.2rem;margin:1.5rem 0">
+<div style="background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:1.2rem;margin:1.5rem 0">
 <h4 style="margin-top:0">Adicionar item</h4>
 {% if produtos %}
 <form method="post" action="/painel/produtos/abastecimento/{{ compra.id }}/item" style="display:grid;gap:1rem">
@@ -1906,7 +1902,7 @@ _COMPRA_REVISAR = """{% extends "base" %}{% block conteudo %}
 <div><label>Quantidade</label><input name="quantidade" type="number" step="0.001" required placeholder="50"></div>
 </div>
 <div><label>Custo unitário (R$)</label><input name="custo_unit" placeholder="4,00" required></div>
-<button style="background:var(--verde);color:#fff;padding:.6rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:500">Adicionar item</button>
+<button style="background:var(--verde);color:var(--sobre-verde);padding:.6rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:500">Adicionar item</button>
 </form>
 {% else %}
 <p class="mut">Você ainda não tem produtos no catálogo. <a href="/painel/produtos/abastecimento" style="color:var(--verde-claro)">Crie um produto</a> primeiro.</p>
@@ -1924,7 +1920,7 @@ _COMPRA_REVISAR = """{% extends "base" %}{% block conteudo %}
 </table>
 {% if compra.status == 'rascunho' %}
 <form method="post" action="/painel/produtos/abastecimento/{{ compra.id }}/confirmar">
-<button style="background:var(--verde);color:#fff;padding:.7rem 1rem;border:0;border-radius:8px;cursor:pointer;width:100%;font-weight:600;font-size:1rem;margin-bottom:1rem">✓ Confirmar compra (dar entrada no estoque)</button>
+<button style="background:var(--verde);color:var(--sobre-verde);padding:.7rem 1rem;border:0;border-radius:8px;cursor:pointer;width:100%;font-weight:600;font-size:1rem;margin-bottom:1rem">✓ Confirmar compra (dar entrada no estoque)</button>
 </form>
 <p class="mut" style="font-size:.85rem;margin:0">Ao confirmar, os itens dão entrada no estoque e o custo médio é recalculado. Não dá pra editar depois.</p>
 {% else %}
@@ -2384,7 +2380,7 @@ _LOJA_CONFIRMAR_NOVO = """{% extends "base" %}{% block conteudo %}
     <label>Endereço</label>
     <input name="endereco" required placeholder="Rua X, nº 123, bairro" style="width:100%;margin-bottom:1rem">
     {% endif %}
-    <button style="background:var(--verde);color:#fff;padding:.7rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:600;font-size:.95rem">
+    <button style="background:var(--verde);color:var(--sobre-verde);padding:.7rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:600;font-size:.95rem">
       {{ btn_text }}
     </button>
   </form>
@@ -2416,7 +2412,7 @@ _MEUS_PEDIDOS = """{% extends "base" %}{% block conteudo %}
       <div style="margin-bottom:2rem">
         <h3 style="font-size:14px;color:var(--verde-claro);font-weight:600;margin-bottom:.8rem">{{ rótulos }}</h3>
         {% for p in grupos_reais[grupo_nome] %}
-        <div style="background:var(--card);border:1px solid #232325;border-radius:12px;padding:1.1rem;margin-bottom:.7rem">
+        <div style="background:var(--card);border:1px solid var(--card-2);border-radius:12px;padding:1.1rem;margin-bottom:.7rem">
           <div style="display:flex;justify-content:space-between;align-items:start">
             <div style="flex:1">
               <div style="font-size:15px;color:#f4f4f4;font-weight:600">{{ p.fornecedor_nome }}</div>
@@ -2485,7 +2481,7 @@ _EMPRESA_DADOS = """{% extends "base" %}{% block conteudo %}
     </select>
     <div class="mut" style="font-size:.72rem;margin-top:.2rem">Detectamos pelo CNPJ — confira e ajuste se preciso. Define as unidades/categorias dos seus produtos e como o assistente conversa com você.</div>
     <input type="hidden" id="cnae" name="cnae" value="{{ dados.cnae or '' }}">
-    <button type="submit" style="background:var(--verde);color:#fff;border:0;border-radius:8px;padding:.7rem 1.4rem;font-weight:600;cursor:pointer;margin-top:1rem">Salvar e continuar →</button>
+    <button type="submit" style="background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;padding:.7rem 1.4rem;font-weight:600;cursor:pointer;margin-top:1rem">Salvar e continuar →</button>
   </form>
 </div>
 <div class="card larga">
@@ -2519,7 +2515,7 @@ _EMPRESA_DADOS = """{% extends "base" %}{% block conteudo %}
       <div><label>Cor da marca</label>
         <input name="banner_cor" type="color" value="{{ identidade.banner_cor or '#2f7d32' }}" style="width:56px;height:42px;padding:2px;cursor:pointer"></div>
     </div>
-    <button type="submit" style="background:var(--verde);color:#fff;border:0;border-radius:8px;padding:.6rem 1.2rem;font-weight:600;cursor:pointer;margin-top:1rem">Salvar identidade</button>
+    <button type="submit" style="background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;padding:.6rem 1.2rem;font-weight:600;cursor:pointer;margin-top:1rem">Salvar identidade</button>
   </form>
 </div>
 {% if eh_fornecedor %}
@@ -2532,7 +2528,7 @@ _EMPRESA_DADOS = """{% extends "base" %}{% block conteudo %}
       <input name="margem_alvo" type="number" min="0" max="100" value="{{ margem_alvo }}" placeholder="60" style="width:100%">
       <small class="mut" style="display:block;margin-top:.3rem">Até {{ margem_alvo }}% do preço da cesta pode ser custo. Ex: 60% = você garante 40% de folga.</small>
     </div>
-    <button style="background:var(--verde);color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;font-weight:500">Salvar</button>
+    <button style="background:var(--verde);color:var(--sobre-verde);padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;font-weight:500">Salvar</button>
   </form>
 </div>
 {% endif %}
@@ -2582,7 +2578,7 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
     <h2 style="margin:0">📦 Produtos{% if nicho_label %} <span style="color:#6a6a66;font-size:.7rem;font-weight:400">· {{ nicho_label }}</span>{% endif %}</h2>
     <div style="display:flex;gap:.5rem">
-      <button type="button" onclick="prodNovo()" style="background:var(--verde);color:#fff;padding:.5rem 1rem;border:0;border-radius:8px;cursor:pointer;font-weight:600;font-size:.9rem">+ Novo produto</button>
+      <button type="button" onclick="prodNovo()" style="background:var(--verde);color:var(--sobre-verde);padding:.5rem 1rem;border:0;border-radius:8px;cursor:pointer;font-weight:600;font-size:.9rem">+ Novo produto</button>
       <button type="button" onclick="prodImportar()" style="padding:.5rem 1rem;background:transparent;border:1px solid var(--verde);color:var(--verde);border-radius:8px;cursor:pointer;font-weight:500;font-size:.9rem">📊 planilha</button>
     </div>
   </div>
@@ -2603,7 +2599,7 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
   <div style="display:flex;flex-direction:column;gap:.5rem">
     {% if produtos %}
       {% for p in produtos %}
-      <div class="prod-card" data-nome="{{ p.nome|lower }}" style="background:#1c1c1f;border:1px solid var(--borda);border-radius:10px;padding:.7rem .85rem">
+      <div class="prod-card" data-nome="{{ p.nome|lower }}" style="background:var(--card-2);border:1px solid var(--borda);border-radius:10px;padding:.7rem .85rem">
         <div style="display:flex;align-items:center;gap:11px">
           <div class="prod-foto" style="width:44px;height:44px;border-radius:8px;flex-shrink:0;{% if p.foto_url %}background:url('{{ p.foto_url }}') center/cover{% else %}background:#1a2a1f;display:flex;align-items:center;justify-content:center{% endif %}">{% if not p.foto_url %}<span style="font-size:20px;color:#3a5a48">📦</span>{% endif %}</div>
           <div style="flex:1;min-width:0">
@@ -2615,13 +2611,13 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
             <div style="color:#6a8a7a;font-size:.66rem">{% if p.margem_pct is not none %}margem {{ p.margem_pct|round|int }}%{% endif %}</div>
           </div>
         </div>
-        <div class="prod-acoes" style="display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.7rem;padding-top:.65rem;border-top:1px solid #242426">
-          <button type="button" onclick="prodVender({{ p.id }})" style="background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.32rem .8rem;cursor:pointer;font-size:.76rem;font-weight:600">vender</button>
+        <div class="prod-acoes" style="display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.7rem;padding-top:.65rem;border-top:1px solid var(--card-2)">
+          <button type="button" onclick="prodVender({{ p.id }})" style="background:var(--verde);color:var(--sobre-verde);border:0;border-radius:6px;padding:.32rem .8rem;cursor:pointer;font-size:.76rem;font-weight:600">vender</button>
           <button type="button" onclick="prodEntrada({{ p.id }})" style="background:#173d2e;color:var(--verde-claro);border:0;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem;font-weight:500">+ entrada</button>
-          <button type="button" onclick="prodPerda({{ p.id }})" style="background:transparent;border:1px solid #3a3a3d;color:#b4b2a9;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem">perda</button>
-          <button type="button" onclick="prodEditar({{ p.id }})" style="background:transparent;border:1px solid #3a3a3d;color:#b4b2a9;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem">editar</button>
-          <button type="button" onclick="prodFoto({{ p.id }})" style="background:transparent;border:1px solid #3a3a3d;color:#a89ce8;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem">📷</button>
-          <button type="button" onclick="prodPromo({{ p.id }})" style="background:transparent;border:1px solid #3a3a3d;color:#d89ad0;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem">🔖</button>
+          <button type="button" onclick="prodPerda({{ p.id }})" style="background:transparent;border:1px solid var(--borda);color:#b4b2a9;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem">perda</button>
+          <button type="button" onclick="prodEditar({{ p.id }})" style="background:transparent;border:1px solid var(--borda);color:#b4b2a9;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem">editar</button>
+          <button type="button" onclick="prodFoto({{ p.id }})" style="background:transparent;border:1px solid var(--borda);color:#a89ce8;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem">📷</button>
+          <button type="button" onclick="prodPromo({{ p.id }})" style="background:transparent;border:1px solid var(--borda);color:#d89ad0;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem">🔖</button>
           <button type="button" onclick="prodApagar({{ p.id }})" style="background:transparent;border:1px solid #3a2a2a;color:#d98a8a;border-radius:6px;padding:.32rem .7rem;cursor:pointer;font-size:.76rem">🗑</button>
         </div>
       </div>
@@ -2651,7 +2647,7 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
       <label style="font-size:.85rem">Nome</label>
       <input name="nome" id="prod-f-nome" required placeholder="ex: Alface crespa" oninput="prodSugereCategoria(this.value);prodNovoBuscarSugestoes()" class="prod-inp">
 
-      <div style="background:var(--card);border:1px solid #242426;border-radius:9px;padding:.7rem;margin:.2rem 0 .7rem">
+      <div style="background:var(--card);border:1px solid var(--card-2);border-radius:9px;padding:.7rem;margin:.2rem 0 .7rem">
         <div style="font-size:.78rem;color:var(--verde-claro);font-weight:600;margin-bottom:.5rem">📷 Foto do produto <span style="color:#6a6a6a;font-weight:400">(opcional)</span></div>
         <div style="display:flex;gap:11px;align-items:flex-start;margin-bottom:.6rem">
           <div id="prod-novo-previa" style="width:64px;height:64px;border-radius:9px;background:#1a2a1f;border:2px solid var(--verde);flex-shrink:0;display:flex;align-items:center;justify-content:center;background-size:cover;background-position:center">
@@ -2691,7 +2687,7 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
         </div>
       </div>
       <div style="display:flex;gap:8px;margin-top:.9rem">
-        <button style="flex:1;background:var(--verde);color:#fff;padding:.6rem;border:0;border-radius:8px;cursor:pointer;font-weight:600">Salvar</button>
+        <button style="flex:1;background:var(--verde);color:var(--sobre-verde);padding:.6rem;border:0;border-radius:8px;cursor:pointer;font-weight:600">Salvar</button>
         <button type="button" onclick="prodFecha('prod-modal-form')" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.6rem 1rem;cursor:pointer">Cancelar</button>
       </div>
     </form>
@@ -2717,7 +2713,7 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
         <input name="motivo" class="prod-inp">
       </div>
       <div style="display:flex;gap:8px;margin-top:.6rem">
-        <button style="flex:1;background:var(--verde);color:#fff;padding:.6rem;border:0;border-radius:8px;cursor:pointer;font-weight:600">Confirmar</button>
+        <button style="flex:1;background:var(--verde);color:var(--sobre-verde);padding:.6rem;border:0;border-radius:8px;cursor:pointer;font-weight:600">Confirmar</button>
         <button type="button" onclick="prodFecha('prod-modal-mov')" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.6rem 1rem;cursor:pointer">Cancelar</button>
       </div>
     </form>
@@ -2729,7 +2725,7 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
   <div class="prod-modal-box">
     <h4 style="margin-top:0">Foto de <span id="prod-foto-nome" style="color:var(--verde-claro)"></span></h4>
     <input type="hidden" id="prod-foto-pid">
-    <label style="display:flex;align-items:center;gap:10px;background:var(--verde);color:#fff;border-radius:9px;padding:.7rem .9rem;font-size:12.5px;font-weight:600;cursor:pointer;margin-bottom:.8rem">
+    <label style="display:flex;align-items:center;gap:10px;background:var(--verde);color:var(--sobre-verde);border-radius:9px;padding:.7rem .9rem;font-size:12.5px;font-weight:600;cursor:pointer;margin-bottom:.8rem">
       <span style="font-size:20px">📷</span><div>Tirar foto / enviar do aparelho<div style="font-size:10px;font-weight:400;opacity:.85">a foto real do seu produto</div></div>
       <input type="file" accept="image/*" capture="environment" onchange="prodFotoUpload(this)" style="display:none">
     </label>
@@ -2742,7 +2738,7 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
     <label style="font-size:.8rem;color:#b4b2a9">Ou cole o link da sua foto:</label>
     <input id="prod-foto-link" placeholder="https://..." oninput="prodFotoPreview(this.value)" class="prod-inp">
     <div style="display:flex;gap:8px">
-      <button type="button" onclick="prodFotoSalvar()" style="flex:1;background:var(--verde);color:#fff;border:0;border-radius:8px;padding:.65rem;font-weight:600;cursor:pointer">Salvar</button>
+      <button type="button" onclick="prodFotoSalvar()" style="flex:1;background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;padding:.65rem;font-weight:600;cursor:pointer">Salvar</button>
       <button type="button" onclick="prodFotoRemover()" style="background:transparent;border:1px solid #8a3636;color:#c97;border-radius:8px;padding:.65rem .9rem;cursor:pointer">Remover</button>
       <button type="button" onclick="prodFecha('prod-modal-foto')" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:8px;padding:.65rem .9rem;cursor:pointer">Cancelar</button>
     </div>
@@ -2788,7 +2784,7 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
     <div id="pdv-itens" style="margin-bottom:.6rem"></div>
     <div style="position:relative;margin-bottom:.5rem">
       <input id="pdv-cli-busca" placeholder="Cliente — CPF, telefone ou nome" autocomplete="off" oninput="pdvCliBusca(this.value)" class="prod-inp" style="margin:0">
-      <div id="pdv-cli-sug" style="display:none;position:absolute;left:0;right:0;top:100%;background:#1c1c1f;border:1px solid var(--borda);border-top:0;border-radius:0 0 7px 7px;z-index:20;max-height:170px;overflow:auto"></div>
+      <div id="pdv-cli-sug" style="display:none;position:absolute;left:0;right:0;top:100%;background:var(--card-2);border:1px solid var(--borda);border-top:0;border-radius:0 0 7px 7px;z-index:20;max-height:170px;overflow:auto"></div>
       <div id="pdv-cli-sel" style="display:none;margin-top:.4rem;font-size:.82rem;color:var(--verde-claro)"></div>
       <div id="pdv-cli-novo" style="display:none;margin-top:.4rem;gap:.4rem;grid-template-columns:1fr 1fr">
         <input id="pdv-novo-nome" placeholder="Nome do novo cliente" class="prod-inp" style="margin:0">
@@ -2809,14 +2805,14 @@ _PRODUTOS = """{% extends "base" %}{% block conteudo %}
     <div style="display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid var(--borda);padding-top:.6rem">
       <span style="color:#888">Total</span><span id="pdv-total" style="color:var(--verde-claro);font-size:1.3rem;font-weight:700">R$ 0,00</span>
     </div>
-    <button type="button" onclick="pdvFinalizar()" id="pdv-finalizar" style="width:100%;background:var(--verde);color:#fff;padding:.65rem;border:0;border-radius:8px;cursor:pointer;font-weight:700;margin-top:.7rem">Finalizar venda</button>
+    <button type="button" onclick="pdvFinalizar()" id="pdv-finalizar" style="width:100%;background:var(--verde);color:var(--sobre-verde);padding:.65rem;border:0;border-radius:8px;cursor:pointer;font-weight:700;margin-top:.7rem">Finalizar venda</button>
   </div>
 </div>
 
 <style>
 .prod-acoes button{width:auto;margin-top:0}
 .prod-modal{position:fixed;inset:0;z-index:1000;background:#000000aa;display:flex;align-items:center;justify-content:center;padding:1rem}
-.prod-modal-box{background:#1c1c1f;border:1px solid var(--borda);border-radius:12px;padding:1.3rem;max-width:440px;width:100%;max-height:88vh;overflow-y:auto}
+.prod-modal-box{background:var(--card-2);border:1px solid var(--borda);border-radius:12px;padding:1.3rem;max-width:440px;width:100%;max-height:88vh;overflow-y:auto}
 .prod-inp{width:100%;box-sizing:border-box;padding:.5rem;background:var(--bg);border:1px solid var(--borda);color:#f4f4f4;border-radius:6px;margin:.25rem 0 .6rem}
 .pdv-pag-chip{font-size:.78rem;color:#b4b2a9;background:var(--card);border:1.5px solid var(--borda);border-radius:16px;padding:.3rem .8rem;cursor:pointer}
 .pdv-pag-chip.pdv-pag-sel{border-color:var(--verde);color:var(--verde-claro)}
@@ -2838,9 +2834,9 @@ function pdvQtd(id,d){ var e=PDV_CART.find(function(x){return x.id==id;}); if(!e
 function pdvPreco(id,v){ var e=PDV_CART.find(function(x){return x.id==id;}); if(e){ e.preco=parseFloat(String(v).replace(',','.'))||0; } pdvRender(); }
 function pdvPag(el){ document.querySelectorAll('#pdv-pag .pdv-pag-chip').forEach(function(x){x.classList.remove('pdv-pag-sel');}); el.classList.add('pdv-pag-sel'); }
 function pdvFmt(n){ return 'R$ '+n.toFixed(2).replace('.',','); }
-function pdvRender(){ var box=document.getElementById('pdv-itens'); if(!PDV_CART.length){ box.innerHTML='<div style="color:#888;text-align:center;padding:1rem;font-size:.85rem">Carrinho vazio.</div>'; document.getElementById('pdv-total').textContent='R$ 0,00'; return; } var sub=0,h=''; PDV_CART.forEach(function(it){ var lt=it.preco*it.qtd; sub+=lt; h+='<div style="display:flex;align-items:center;gap:.5rem;padding:.4rem 0;border-bottom:1px solid #242426">'+'<div style="flex:1;min-width:0"><div style="color:var(--txt);font-size:.85rem">'+it.nome+'</div><input type="number" step="0.01" value="'+it.preco.toFixed(2)+'" onchange="pdvPreco('+it.id+',this.value)" style="width:80px;background:var(--bg);border:1px solid var(--borda);color:#cfcfcf;border-radius:5px;padding:.2rem .3rem;font-size:.72rem;margin-top:.2rem"> <span style="color:#6a8a7a;font-size:.68rem">/'+it.unidade+'</span></div>'+'<div style="display:flex;align-items:center;gap:.3rem"><span onclick="pdvQtd('+it.id+',-1)" style="width:22px;height:22px;border-radius:5px;background:#1c1c1f;border:1px solid #3a3a3d;color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">-</span><span style="color:var(--txt);font-size:.8rem;min-width:44px;text-align:center">'+it.qtd+' '+it.unidade+'</span><span onclick="pdvQtd('+it.id+',1)" style="width:22px;height:22px;border-radius:5px;background:#1c1c1f;border:1px solid #3a3a3d;color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">+</span></div>'+'<div style="color:#cfcfcf;font-size:.8rem;min-width:64px;text-align:right">'+pdvFmt(lt)+'</div>'+'</div>'; }); box.innerHTML=h; var desc=parseFloat(String(document.getElementById('pdv-desc').value).replace(',','.'))||0; var tot=sub-desc; if(tot<0)tot=0; document.getElementById('pdv-total').textContent=pdvFmt(tot); }
+function pdvRender(){ var box=document.getElementById('pdv-itens'); if(!PDV_CART.length){ box.innerHTML='<div style="color:#888;text-align:center;padding:1rem;font-size:.85rem">Carrinho vazio.</div>'; document.getElementById('pdv-total').textContent='R$ 0,00'; return; } var sub=0,h=''; PDV_CART.forEach(function(it){ var lt=it.preco*it.qtd; sub+=lt; h+='<div style="display:flex;align-items:center;gap:.5rem;padding:.4rem 0;border-bottom:1px solid var(--card-2)">'+'<div style="flex:1;min-width:0"><div style="color:var(--txt);font-size:.85rem">'+it.nome+'</div><input type="number" step="0.01" value="'+it.preco.toFixed(2)+'" onchange="pdvPreco('+it.id+',this.value)" style="width:80px;background:var(--bg);border:1px solid var(--borda);color:#cfcfcf;border-radius:5px;padding:.2rem .3rem;font-size:.72rem;margin-top:.2rem"> <span style="color:#6a8a7a;font-size:.68rem">/'+it.unidade+'</span></div>'+'<div style="display:flex;align-items:center;gap:.3rem"><span onclick="pdvQtd('+it.id+',-1)" style="width:22px;height:22px;border-radius:5px;background:var(--card-2);border:1px solid var(--borda);color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">-</span><span style="color:var(--txt);font-size:.8rem;min-width:44px;text-align:center">'+it.qtd+' '+it.unidade+'</span><span onclick="pdvQtd('+it.id+',1)" style="width:22px;height:22px;border-radius:5px;background:var(--card-2);border:1px solid var(--borda);color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">+</span></div>'+'<div style="color:#cfcfcf;font-size:.8rem;min-width:64px;text-align:right">'+pdvFmt(lt)+'</div>'+'</div>'; }); box.innerHTML=h; var desc=parseFloat(String(document.getElementById('pdv-desc').value).replace(',','.'))||0; var tot=sub-desc; if(tot<0)tot=0; document.getElementById('pdv-total').textContent=pdvFmt(tot); }
 var PDV_CLI=null, PDV_CLI_RES=[], PDV_CLI_T=null;
-function pdvCliBusca(q){ q=(q||'').trim(); PDV_CLI=null; document.getElementById('pdv-cli-sel').style.display='none'; if(PDV_CLI_T) clearTimeout(PDV_CLI_T); var sug=document.getElementById('pdv-cli-sug'); if(q.length<2){ sug.style.display='none'; return; } PDV_CLI_T=setTimeout(function(){ fetch('/painel/clientes/buscar?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(d){ PDV_CLI_RES=d.clientes||[]; var h=''; PDV_CLI_RES.forEach(function(c,i){ h+='<div onclick="pdvCliPick('+i+')" style="padding:.45rem .6rem;border-bottom:1px solid #242426;cursor:pointer;font-size:.82rem;color:var(--txt)">'+c.nome+'<span style="color:#6a8a7a;font-size:.72rem">'+(c.telefone?(' · '+c.telefone):'')+(c.cpf?(' · CPF '+c.cpf):'')+'</span></div>'; }); h+='<div onclick="pdvCliNovo()" style="padding:.45rem .6rem;cursor:pointer;font-size:.82rem;color:var(--verde-claro)">+ cadastrar novo cliente</div>'; sug.innerHTML=h; sug.style.display='block'; }).catch(function(){}); }, 250); }
+function pdvCliBusca(q){ q=(q||'').trim(); PDV_CLI=null; document.getElementById('pdv-cli-sel').style.display='none'; if(PDV_CLI_T) clearTimeout(PDV_CLI_T); var sug=document.getElementById('pdv-cli-sug'); if(q.length<2){ sug.style.display='none'; return; } PDV_CLI_T=setTimeout(function(){ fetch('/painel/clientes/buscar?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(d){ PDV_CLI_RES=d.clientes||[]; var h=''; PDV_CLI_RES.forEach(function(c,i){ h+='<div onclick="pdvCliPick('+i+')" style="padding:.45rem .6rem;border-bottom:1px solid var(--card-2);cursor:pointer;font-size:.82rem;color:var(--txt)">'+c.nome+'<span style="color:#6a8a7a;font-size:.72rem">'+(c.telefone?(' · '+c.telefone):'')+(c.cpf?(' · CPF '+c.cpf):'')+'</span></div>'; }); h+='<div onclick="pdvCliNovo()" style="padding:.45rem .6rem;cursor:pointer;font-size:.82rem;color:var(--verde-claro)">+ cadastrar novo cliente</div>'; sug.innerHTML=h; sug.style.display='block'; }).catch(function(){}); }, 250); }
 function pdvCliPick(i){ var c=PDV_CLI_RES[i]; if(!c) return; PDV_CLI={id:c.id,nome:c.nome,telefone:c.telefone,cpf:c.cpf}; document.getElementById('pdv-cli-busca').value=c.nome; document.getElementById('pdv-cli-sug').style.display='none'; document.getElementById('pdv-cli-novo').style.display='none'; var sel=document.getElementById('pdv-cli-sel'); sel.innerHTML='✓ '+c.nome+' <a onclick="pdvCliLimpar()" style="color:#d98a8a;cursor:pointer;margin-left:.4rem">(trocar)</a>'; sel.style.display='block'; }
 function pdvCliNovo(){ document.getElementById('pdv-cli-sug').style.display='none'; var q=document.getElementById('pdv-cli-busca').value||''; var novo=document.getElementById('pdv-cli-novo'); novo.style.display='grid'; var digs=q.replace(/[^0-9]/g,""); if(digs.length>=11){ document.getElementById('pdv-novo-cpf').value=q; document.getElementById('pdv-novo-nome').value=''; } else { document.getElementById('pdv-novo-nome').value=q; } PDV_CLI=null; }
 function pdvCliLimpar(){ PDV_CLI=null; document.getElementById('pdv-cli-sel').style.display='none'; document.getElementById('pdv-cli-busca').value=''; document.getElementById('pdv-cli-novo').style.display='none'; document.getElementById('pdv-novo-nome').value=''; document.getElementById('pdv-novo-cpf').value=''; }
@@ -2867,7 +2863,7 @@ function prodFotoUpload(input){ var file=input.files[0]; if(!file){ return; } va
 function prodPromo(id){ var p=window.PRODUTOS[id]; document.getElementById('prod-promo-pid').value=id; document.getElementById('prod-promo-nome').textContent=p.nome; document.getElementById('prod-promo-ativo').checked=p.em_promo; document.getElementById('prod-promo-preco').value=p.em_promo?p.preco_promo:''; document.getElementById('prod-promo-preco-wrap').style.display=p.em_promo?'block':'none'; document.getElementById('prod-modal-promo').style.display='flex'; }
 function prodPromoToggle(){ document.getElementById('prod-promo-preco-wrap').style.display=document.getElementById('prod-promo-ativo').checked?'block':'none'; }
 function prodPromoSalvar(){ var pid=document.getElementById('prod-promo-pid').value; var ativo=document.getElementById('prod-promo-ativo').checked; var preco=parseFloat(document.getElementById('prod-promo-preco').value||0); fetch('/painel/produtos/promo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({produto_id:parseInt(pid),em_promo:ativo,preco_promo:preco})}).then(function(r){ return r.json(); }).then(function(){ location.reload(); }).catch(function(){ alert('Não foi possível salvar a promoção.'); }); }
-function prodLerPlanilha(input){ var file=input.files[0]; if(!file){ return; } var fd=new FormData(); fd.append('arquivo',file); var prev=document.getElementById('prod-planilha-previa'); prev.innerHTML='<span class="mut">lendo...</span>'; fetch('/painel/produtos/ler-planilha',{method:'POST',body:fd}).then(function(r){ return r.json(); }).then(function(d){ if(!d.ok){ prev.innerHTML='<span style="color:#ff6b6b">'+(d.erro||'erro')+'</span>'; return; } prodItensPlanilha=d.itens||[]; if(!prodItensPlanilha.length){ prev.innerHTML='<span class="mut">Nenhum item válido.</span>'; return; } prev.innerHTML='<div style="font-size:.85rem;margin-bottom:.5rem">'+prodItensPlanilha.length+' itens lidos.</div><button type="button" id="prod-planilha-btn" style="width:100%;background:var(--verde);color:#fff;border:0;border-radius:8px;padding:.6rem;font-weight:600;cursor:pointer">Importar '+prodItensPlanilha.length+' produtos</button>'; document.getElementById('prod-planilha-btn').onclick=prodImportarConfirma; }).catch(function(){ prev.innerHTML='<span style="color:#ff6b6b">Erro ao ler.</span>'; }); }
+function prodLerPlanilha(input){ var file=input.files[0]; if(!file){ return; } var fd=new FormData(); fd.append('arquivo',file); var prev=document.getElementById('prod-planilha-previa'); prev.innerHTML='<span class="mut">lendo...</span>'; fetch('/painel/produtos/ler-planilha',{method:'POST',body:fd}).then(function(r){ return r.json(); }).then(function(d){ if(!d.ok){ prev.innerHTML='<span style="color:#ff6b6b">'+(d.erro||'erro')+'</span>'; return; } prodItensPlanilha=d.itens||[]; if(!prodItensPlanilha.length){ prev.innerHTML='<span class="mut">Nenhum item válido.</span>'; return; } prev.innerHTML='<div style="font-size:.85rem;margin-bottom:.5rem">'+prodItensPlanilha.length+' itens lidos.</div><button type="button" id="prod-planilha-btn" style="width:100%;background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;padding:.6rem;font-weight:600;cursor:pointer">Importar '+prodItensPlanilha.length+' produtos</button>'; document.getElementById('prod-planilha-btn').onclick=prodImportarConfirma; }).catch(function(){ prev.innerHTML='<span style="color:#ff6b6b">Erro ao ler.</span>'; }); }
 function prodImportarConfirma(){ fetch('/painel/produtos/importar-planilha',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({itens:prodItensPlanilha})}).then(function(r){ return r.json(); }).then(function(d){ if(d.ok){ location.reload(); } else { alert(d.erro||'Erro ao importar'); } }).catch(function(){ alert('Erro ao importar'); }); }
 </script>
 {% endblock %}"""
@@ -2877,8 +2873,8 @@ _ABASTECIMENTO = """{% extends "base" %}{% block conteudo %}
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
     <h2 style="margin:0">🛒 Abastecimento <span style="color:#6a6a66;font-size:.7rem;font-weight:400">· entradas que repõem o estoque</span></h2>
     <div style="display:flex;gap:.5rem">
-      <a href="/painel/produtos" style="padding:.5rem 1rem;background:transparent;border:1px solid #3a3a3d;color:#b4b2a9;border-radius:8px;text-decoration:none;font-size:.9rem">← Produtos</a>
-      <button type="button" onclick="abastShowNova()" style="padding:.5rem 1rem;background:var(--verde);color:#fff;border:0;border-radius:8px;cursor:pointer;font-weight:600;font-size:.9rem">+ nova compra</button>
+      <a href="/painel/produtos" style="padding:.5rem 1rem;background:transparent;border:1px solid var(--borda);color:#b4b2a9;border-radius:8px;text-decoration:none;font-size:.9rem">← Produtos</a>
+      <button type="button" onclick="abastShowNova()" style="padding:.5rem 1rem;background:var(--verde);color:var(--sobre-verde);border:0;border-radius:8px;cursor:pointer;font-weight:600;font-size:.9rem">+ nova compra</button>
     </div>
   </div>
   {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
@@ -2886,7 +2882,7 @@ _ABASTECIMENTO = """{% extends "base" %}{% block conteudo %}
   <div style="display:flex;flex-direction:column;gap:.8rem;margin-top:1rem">
     {% if compras %}
       {% for c in compras %}
-      <div style="background:#1c1c1f;border:1px solid var(--borda);border-radius:8px;padding:1rem">
+      <div style="background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:1rem">
         <div style="display:flex;justify-content:space-between;align-items:start">
           <div>
             <strong>#{{ c.id }}</strong> · <span class="mut">{{ c.data_compra }}</span> · <span style="{% if c.status == 'confirmada' %}color:var(--verde){% else %}color:#ffa500{% endif %}">{{ c.status }}</span>
@@ -2900,10 +2896,10 @@ _ABASTECIMENTO = """{% extends "base" %}{% block conteudo %}
     <p class="mut">Nenhuma compra ainda. Clique em "+ nova compra" pra começar.</p>
     {% endif %}
   </div>
-  <div id="abast-nova" style="display:none;margin-top:1.5rem;padding:1.2rem;background:#1c1c1f;border:1px solid var(--borda);border-radius:8px">
+  <div id="abast-nova" style="display:none;margin-top:1.5rem;padding:1.2rem;background:var(--card-2);border:1px solid var(--borda);border-radius:8px">
     <h4 style="margin-top:0">Nova compra</h4>
     <div style="display:flex;gap:.6rem;margin-bottom:1rem">
-      <button type="button" onclick="abastShowManual()" style="flex:1;background:var(--verde);color:#fff;padding:.5rem;border:0;border-radius:6px;cursor:pointer;font-weight:500">Manual (digitar itens)</button>
+      <button type="button" onclick="abastShowManual()" style="flex:1;background:var(--verde);color:var(--sobre-verde);padding:.5rem;border:0;border-radius:6px;cursor:pointer;font-weight:500">Manual (digitar itens)</button>
       <button type="button" onclick="alert('Leitura de nota chega em breve.')" style="flex:1;background:transparent;border:1px solid var(--verde-claro);color:var(--verde-claro);padding:.5rem;border-radius:6px;cursor:pointer;font-weight:500">Com nota (em breve)</button>
     </div>
     <button type="button" onclick="abastHide('abast-nova')" style="background:transparent;border:none;color:var(--verde-claro);cursor:pointer;font-size:.85rem">Cancelar</button>
@@ -2918,16 +2914,16 @@ _ABASTECIMENTO = """{% extends "base" %}{% block conteudo %}
         {% for o in origens %}<option value="{{ o.id }}">{{ o.nome }}</option>{% endfor %}
       </select>
       <button type="button" onclick="abastShowOrigem()" style="background:transparent;border:1px solid var(--verde-claro);color:var(--verde-claro);padding:.3rem .6rem;cursor:pointer;font-size:.85rem;margin-top:.3rem">+ Nova origem</button>
-      <button style="background:var(--verde);color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.8rem;width:100%;font-weight:500">Criar compra</button>
+      <button style="background:var(--verde);color:var(--sobre-verde);padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.8rem;width:100%;font-weight:500">Criar compra</button>
     </form>
     <button type="button" onclick="abastHide('abast-manual')" style="background:transparent;border:none;color:var(--verde-claro);cursor:pointer;margin-top:.5rem;font-size:.85rem">Cancelar</button>
   </div>
-  <div id="abast-origem" style="display:none;margin-top:1rem;padding:1rem;background:#1c1c1f;border:1px solid var(--borda);border-radius:6px">
+  <div id="abast-origem" style="display:none;margin-top:1rem;padding:1rem;background:var(--card-2);border:1px solid var(--borda);border-radius:6px">
     <h4 style="margin-top:0;margin-bottom:.6rem">Nova origem</h4>
     <form method="post" action="/painel/produtos/abastecimento/origem">
       <label>Nome</label><input name="nome" required placeholder="ex: CEASA, Sítio do João" style="width:100%">
       <label>Contato (opcional)</label><input name="contato" placeholder="tel, email, whatsapp" style="width:100%">
-      <button style="background:var(--verde);color:#fff;padding:.4rem .8rem;border:0;border-radius:4px;cursor:pointer;margin-top:.5rem;font-weight:500">Criar origem</button>
+      <button style="background:var(--verde);color:var(--sobre-verde);padding:.4rem .8rem;border:0;border-radius:4px;cursor:pointer;margin-top:.5rem;font-weight:500">Criar origem</button>
     </form>
     <button type="button" onclick="abastHide('abast-origem')" style="background:transparent;border:none;color:var(--verde-claro);cursor:pointer;font-size:.85rem;margin-top:.5rem">Cancelar</button>
   </div>
@@ -2942,7 +2938,7 @@ function abastHide(id){ document.getElementById(id).style.display='none'; }
 
 _CLIENTES = """{% extends "base" %}{% block conteudo %}
 <style>
-  .cli-item{background:#1c1c1f;border:1px solid var(--borda);border-radius:8px;overflow:hidden}
+  .cli-item{background:var(--card-2);border:1px solid var(--borda);border-radius:8px;overflow:hidden}
   .cli-head{display:flex;align-items:center;gap:.6rem;padding:.7rem .9rem;cursor:pointer}
   .cli-head:hover{background:#212125}
   .cli-head .chev{color:#8a8a82;font-size:1.1rem;line-height:1;transition:transform .18s;flex:none}
@@ -2958,7 +2954,7 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
   .wa-menu button{display:block;width:100%;text-align:left;background:none;border:0;color:var(--txt);
       font-size:.8rem;padding:.5rem .6rem;border-radius:7px;cursor:pointer;width:100%}
   .wa-menu button:hover{background:#2c2c31}
-  .cli-panel{display:none;padding:.2rem .9rem 1rem;border-top:1px solid #242426}
+  .cli-panel{display:none;padding:.2rem .9rem 1rem;border-top:1px solid var(--card-2)}
   .cli-panel.on{display:block}
   .ptabs{display:flex;gap:.3rem;margin:.7rem 0}
   .ptab{border:1px solid var(--borda);background:#232327;color:var(--mut);font-size:.76rem;font-weight:600;
@@ -2969,11 +2965,11 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
   .mini-grid .col-2{grid-column:1/-1}
   .mini-grid label{font-size:.68rem;color:var(--mut)}.mini-grid input{width:100%}
   .pfoot{display:flex;gap:.5rem;margin-top:.6rem;align-items:center;flex-wrap:wrap}
-  .btn-primary{background:var(--verde);color:#fff;padding:.45rem 1rem;border:0;border-radius:6px;cursor:pointer;font-weight:600;width:auto}
+  .btn-primary{background:var(--verde);color:var(--sobre-verde);padding:.45rem 1rem;border:0;border-radius:6px;cursor:pointer;font-weight:600;width:auto}
   .btn-danger{background:transparent;border:1px solid #7a3b3b;color:#d98a8a;padding:.45rem 1rem;border-radius:6px;cursor:pointer;width:auto}
-  .hi-row{display:flex;justify-content:space-between;align-items:center;gap:.6rem;padding:.5rem 0;border-top:1px solid #242426}
+  .hi-row{display:flex;justify-content:space-between;align-items:center;gap:.6rem;padding:.5rem 0;border-top:1px solid var(--card-2)}
   .hi-row:first-child{border-top:0}.hi-t{color:var(--txt);font-size:.85rem}
-  .hi-v{font-family:ui-monospace,monospace;color:var(--verde-claro);font-weight:600;font-size:.82rem;white-space:nowrap}
+  .hi-v{font-family:var(--mono);color:var(--verde-claro);font-weight:600;font-size:.82rem;white-space:nowrap}
   .doc-badge{font-size:.7rem;font-weight:600;padding:.15rem .5rem;border-radius:6px;margin-left:.4rem;color:#8a8a82}
   .doc-badge.ok{color:#69cf9a}.doc-badge.err{color:#d98a8a}
   #zaq-toast{position:fixed;left:50%;bottom:1.4rem;transform:translateX(-50%);background:#111;color:#fff;
@@ -2984,7 +2980,7 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
     <h2 style="margin:0">👥 Clientes <span style="color:#6a6a66;font-size:.7rem;font-weight:400">· {{ total }} na base</span></h2>
-    <button type="button" onclick="var e=document.getElementById('cli-novo');e.style.display=e.style.display==='block'?'none':'block'" style="background:var(--verde);color:#fff;padding:.5rem 1rem;border:0;border-radius:8px;cursor:pointer;font-weight:600;width:auto">+ novo cliente</button>
+    <button type="button" onclick="var e=document.getElementById('cli-novo');e.style.display=e.style.display==='block'?'none':'block'" style="background:var(--verde);color:var(--sobre-verde);padding:.5rem 1rem;border:0;border-radius:8px;cursor:pointer;font-weight:600;width:auto">+ novo cliente</button>
   </div>
   {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
   {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
@@ -3147,7 +3143,7 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
         <div><label>Aniversário</label><input type="date" name="aniversario" value="{{ cliente.aniversario or '' }}" style="width:100%"></div>
         <div><label>Obs</label><input name="obs" value="{{ cliente.obs or '' }}" style="width:100%"></div>
       </div>
-      <button style="background:var(--verde);color:#fff;padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.7rem;width:auto">Salvar</button>
+      <button style="background:var(--verde);color:var(--sobre-verde);padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.7rem;width:auto">Salvar</button>
     </form>
   </details>
   {% if fiados %}
@@ -3157,7 +3153,7 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
       <span style="color:#e0b878;font-weight:700">R$ {{ "%.2f"|format(fiado_total/100) }}</span>
     </div>
     {% for f in fiados %}
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:.45rem 0;border-top:1px solid #242426">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:.45rem 0;border-top:1px solid var(--card-2)">
       <div style="font-size:.82rem;color:#cfcfcf">{{ rotulo_receber or 'A receber' }} #{{ f.id }} <span style="color:#888;font-size:.74rem">· vence {{ f.vencimento }}</span><br><span style="color:var(--txt)">R$ {{ "%.2f"|format(f.valor_centavos/100) }}</span></div>
       <div style="display:flex;gap:.4rem;align-items:center">
         {% if f.link %}<a href="{{ f.link }}" target="_blank" style="color:#c99536;font-size:.76rem">link Pix ↗</a>{% else %}<form method="post" action="/painel/clientes/{{ cliente.id }}/fiado/{{ f.id }}/cobrar" style="display:inline"><button style="background:none;border:1px solid #c99536;color:#c99536;border-radius:5px;padding:.25rem .55rem;cursor:pointer;font-size:.74rem;width:auto">cobrar Pix</button></form>{% endif %}
@@ -3171,7 +3167,7 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
   {% if compras %}
   <div style="display:flex;flex-direction:column;gap:.4rem">
     {% for v in compras %}
-    <div style="display:flex;justify-content:space-between;background:#1c1c1f;border:1px solid var(--borda);border-radius:6px;padding:.5rem .8rem">
+    <div style="display:flex;justify-content:space-between;background:var(--card-2);border:1px solid var(--borda);border-radius:6px;padding:.5rem .8rem">
       <div><span class="mut" style="font-size:.8rem">{{ v.data }}</span>{% if v.pagamento %}<span class="mut" style="font-size:.72rem"> · {{ v.pagamento }}</span>{% endif %}</div>
       <div style="color:#cfcfcf">R$ {{ "%.2f"|format(v.valor_centavos/100) }}</div>
     </div>
@@ -3200,7 +3196,7 @@ _PDV = """{% extends "base" %}{% block conteudo %}
 
   <div style="position:relative;margin-bottom:.6rem">
     <input id="pdv-prod-busca" placeholder="\U0001F50D buscar produto pra adicionar" autocomplete="off" oninput="pdvProdBusca(this.value)" class="prod-inp" style="margin:0">
-    <div id="pdv-prod-sug" style="display:none;position:absolute;left:0;right:0;top:100%;background:#1c1c1f;border:1px solid var(--borda);border-top:0;border-radius:0 0 7px 7px;z-index:20;max-height:190px;overflow:auto"></div>
+    <div id="pdv-prod-sug" style="display:none;position:absolute;left:0;right:0;top:100%;background:var(--card-2);border:1px solid var(--borda);border-top:0;border-radius:0 0 7px 7px;z-index:20;max-height:190px;overflow:auto"></div>
   </div>
 
   <div style="color:#888;font-size:.72rem;margin:.6rem 0 .3rem">Venda</div>
@@ -3208,7 +3204,7 @@ _PDV = """{% extends "base" %}{% block conteudo %}
 
   <div style="position:relative;margin-bottom:.5rem">
     <input id="pdv-cli-busca" placeholder="Cliente — CPF, telefone ou nome" autocomplete="off" oninput="pdvCliBusca(this.value)" class="prod-inp" style="margin:0">
-    <div id="pdv-cli-sug" style="display:none;position:absolute;left:0;right:0;top:100%;background:#1c1c1f;border:1px solid var(--borda);border-top:0;border-radius:0 0 7px 7px;z-index:20;max-height:170px;overflow:auto"></div>
+    <div id="pdv-cli-sug" style="display:none;position:absolute;left:0;right:0;top:100%;background:var(--card-2);border:1px solid var(--borda);border-top:0;border-radius:0 0 7px 7px;z-index:20;max-height:170px;overflow:auto"></div>
     <div id="pdv-cli-sel" style="display:none;margin-top:.4rem;font-size:.82rem;color:var(--verde-claro)"></div>
     <div id="pdv-cli-novo" style="display:none;margin-top:.4rem;gap:.4rem;grid-template-columns:1fr 1fr">
       <input id="pdv-novo-nome" placeholder="Nome do novo cliente" class="prod-inp" style="margin:0">
@@ -3239,7 +3235,7 @@ _PDV = """{% extends "base" %}{% block conteudo %}
   <div style="display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid var(--borda);padding-top:.7rem">
     <span style="color:#888">Total</span><span id="pdv-total" style="color:var(--verde-claro);font-size:1.5rem;font-weight:700">R$ 0,00</span>
   </div>
-  <button type="button" onclick="pdvFinalizar()" id="pdv-finalizar" style="width:100%;background:var(--verde);color:#fff;padding:.75rem;border:0;border-radius:9px;cursor:pointer;font-weight:700;margin-top:.8rem;font-size:1rem">Finalizar venda</button>
+  <button type="button" onclick="pdvFinalizar()" id="pdv-finalizar" style="width:100%;background:var(--verde);color:var(--sobre-verde);padding:.75rem;border:0;border-radius:9px;cursor:pointer;font-weight:700;margin-top:.8rem;font-size:1rem">Finalizar venda</button>
 
   <div id="pdv-recibo" style="display:none;margin-top:1rem;background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:1rem"></div>
 </div>
@@ -3269,7 +3265,7 @@ _PDV = """{% extends "base" %}{% block conteudo %}
   </div>
   <div class="mut" style="font-size:.72rem;margin-bottom:.3rem">Últimas vendas</div>
   {% for v in vendas %}
-  <a href="{% if v.tipo=='paga' %}/painel/pdv/venda/{{ v.id }}{% else %}/painel/clientes/{{ v.cliente_id }}{% endif %}" style="display:flex;justify-content:space-between;align-items:center;padding:.5rem 0;border-bottom:1px solid #242426;text-decoration:none">
+  <a href="{% if v.tipo=='paga' %}/painel/pdv/venda/{{ v.id }}{% else %}/painel/clientes/{{ v.cliente_id }}{% endif %}" style="display:flex;justify-content:space-between;align-items:center;padding:.5rem 0;border-bottom:1px solid var(--card-2);text-decoration:none">
     <div><div style="color:var(--txt);font-size:.85rem">{{ v.cliente or 'sem cliente' }}</div><div class="mut" style="font-size:.72rem">{{ v.hora.strftime('%H:%M') if v.hora else '' }} · {{ v.pagamento }}{% if v.tipo=='fiado' %} · ver ficha{% endif %}</div></div>
     <div style="{% if v.tipo=='fiado' %}color:#e0b878{% else %}color:#cfcfcf{% endif %};font-size:.9rem">R$ {{ "%.2f"|format(v.valor_centavos/100) }}</div>
   </a>
@@ -3284,19 +3280,19 @@ window.PDV_MARCA_HTML = {{ marca_cabecalho(marca, px=38, raio=8, alinhar="center
 window.PDV_ADD = {{ add }};
 var PDV_CART=[], PDV_CLI=null, PDV_CLI_RES=[], PDV_CLI_T=null, PDV_PAG='dinheiro';
 function pdvFmt(n){ return 'R$ '+(Math.round(n*100)/100).toFixed(2).replace('.',','); }
-function pdvProdBusca(q){ q=(q||'').trim().toLowerCase(); var sug=document.getElementById('pdv-prod-sug'); if(q.length<1){ sug.style.display='none'; return; } var res=window.PDV_PROD.filter(function(p){return (p.nome||'').toLowerCase().indexOf(q)>=0;}).slice(0,12); var h=''; res.forEach(function(p){ h+='<div onclick="pdvAdd('+p.id+')" style="padding:.45rem .6rem;border-bottom:1px solid #242426;cursor:pointer;font-size:.82rem;color:var(--txt);display:flex;justify-content:space-between"><span>'+p.nome+'</span><span style="color:#6a8a7a;font-size:.72rem">'+pdvFmt(p.preco)+'/'+p.unidade+' · '+p.saldo+'</span></div>'; }); if(!res.length) h='<div style="padding:.5rem .6rem;color:#888;font-size:.8rem">nada encontrado</div>'; sug.innerHTML=h; sug.style.display='block'; }
+function pdvProdBusca(q){ q=(q||'').trim().toLowerCase(); var sug=document.getElementById('pdv-prod-sug'); if(q.length<1){ sug.style.display='none'; return; } var res=window.PDV_PROD.filter(function(p){return (p.nome||'').toLowerCase().indexOf(q)>=0;}).slice(0,12); var h=''; res.forEach(function(p){ h+='<div onclick="pdvAdd('+p.id+')" style="padding:.45rem .6rem;border-bottom:1px solid var(--card-2);cursor:pointer;font-size:.82rem;color:var(--txt);display:flex;justify-content:space-between"><span>'+p.nome+'</span><span style="color:#6a8a7a;font-size:.72rem">'+pdvFmt(p.preco)+'/'+p.unidade+' · '+p.saldo+'</span></div>'; }); if(!res.length) h='<div style="padding:.5rem .6rem;color:#888;font-size:.8rem">nada encontrado</div>'; sug.innerHTML=h; sug.style.display='block'; }
 function pdvAdd(id){ var p=window.PDV_PROD.find(function(x){return x.id==id;}); if(!p) return; var e=PDV_CART.find(function(x){return x.id==id;}); if(e){ e.qtd++; } else { PDV_CART.push({id:p.id,nome:p.nome,unidade:p.unidade,preco:(typeof p.preco==='number'?p.preco:0),qtd:1}); } document.getElementById('pdv-prod-sug').style.display='none'; document.getElementById('pdv-prod-busca').value=''; document.getElementById('pdv-erro').style.display='none'; pdvRender(); }
 function pdvQtd(id,d){ var e=PDV_CART.find(function(x){return x.id==id;}); if(!e) return; e.qtd=Math.round((e.qtd+d)*1000)/1000; if(e.qtd<=0){ PDV_CART=PDV_CART.filter(function(x){return x.id!=id;}); } pdvRender(); }
 function pdvPreco(id,v){ var e=PDV_CART.find(function(x){return x.id==id;}); if(e){ e.preco=parseFloat(String(v).replace(',','.'))||0; } pdvRender(); }
-function pdvRender(){ var box=document.getElementById('pdv-itens'); var sub=0,h=''; if(!PDV_CART.length){ box.innerHTML='<div style="color:#888;text-align:center;padding:.8rem;font-size:.85rem">Carrinho vazio — busque um produto acima.</div>'; } else { PDV_CART.forEach(function(it){ var lt=it.preco*it.qtd; sub+=lt; h+='<div style="display:flex;align-items:center;gap:.5rem;padding:.4rem 0;border-bottom:1px solid #242426">'+'<div style="flex:1;min-width:0"><div style="color:var(--txt);font-size:.85rem">'+it.nome+'</div><input type="number" step="0.01" value="'+it.preco.toFixed(2)+'" onchange="pdvPreco('+it.id+',this.value)" style="width:78px;background:var(--bg);border:1px solid var(--borda);color:#cfcfcf;border-radius:5px;padding:.2rem .3rem;font-size:.72rem;margin-top:.2rem"> <span style="color:#6a8a7a;font-size:.68rem">/'+it.unidade+'</span></div>'+'<div style="display:flex;align-items:center;gap:.3rem"><span onclick="pdvQtd('+it.id+',-1)" style="width:22px;height:22px;border-radius:5px;background:#1c1c1f;border:1px solid #3a3a3d;color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">-</span><span style="color:var(--txt);font-size:.8rem;min-width:44px;text-align:center">'+it.qtd+' '+it.unidade+'</span><span onclick="pdvQtd('+it.id+',1)" style="width:22px;height:22px;border-radius:5px;background:#1c1c1f;border:1px solid #3a3a3d;color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">+</span></div>'+'<div style="color:#cfcfcf;font-size:.8rem;min-width:64px;text-align:right">'+pdvFmt(lt)+'</div>'+'</div>'; }); box.innerHTML=h; } var desc=parseFloat(String(document.getElementById('pdv-desc').value).replace(',','.'))||0; var tot=sub-desc; if(tot<0)tot=0; document.getElementById('pdv-total').textContent=pdvFmt(tot); var rec=parseFloat(String(document.getElementById('pdv-recebido').value).replace(',','.'))||0; var troco=rec-tot; document.getElementById('pdv-troco-v').textContent=pdvFmt(troco>0?troco:0); }
+function pdvRender(){ var box=document.getElementById('pdv-itens'); var sub=0,h=''; if(!PDV_CART.length){ box.innerHTML='<div style="color:#888;text-align:center;padding:.8rem;font-size:.85rem">Carrinho vazio — busque um produto acima.</div>'; } else { PDV_CART.forEach(function(it){ var lt=it.preco*it.qtd; sub+=lt; h+='<div style="display:flex;align-items:center;gap:.5rem;padding:.4rem 0;border-bottom:1px solid var(--card-2)">'+'<div style="flex:1;min-width:0"><div style="color:var(--txt);font-size:.85rem">'+it.nome+'</div><input type="number" step="0.01" value="'+it.preco.toFixed(2)+'" onchange="pdvPreco('+it.id+',this.value)" style="width:78px;background:var(--bg);border:1px solid var(--borda);color:#cfcfcf;border-radius:5px;padding:.2rem .3rem;font-size:.72rem;margin-top:.2rem"> <span style="color:#6a8a7a;font-size:.68rem">/'+it.unidade+'</span></div>'+'<div style="display:flex;align-items:center;gap:.3rem"><span onclick="pdvQtd('+it.id+',-1)" style="width:22px;height:22px;border-radius:5px;background:var(--card-2);border:1px solid var(--borda);color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">-</span><span style="color:var(--txt);font-size:.8rem;min-width:44px;text-align:center">'+it.qtd+' '+it.unidade+'</span><span onclick="pdvQtd('+it.id+',1)" style="width:22px;height:22px;border-radius:5px;background:var(--card-2);border:1px solid var(--borda);color:#b4b2a9;display:flex;align-items:center;justify-content:center;cursor:pointer">+</span></div>'+'<div style="color:#cfcfcf;font-size:.8rem;min-width:64px;text-align:right">'+pdvFmt(lt)+'</div>'+'</div>'; }); box.innerHTML=h; } var desc=parseFloat(String(document.getElementById('pdv-desc').value).replace(',','.'))||0; var tot=sub-desc; if(tot<0)tot=0; document.getElementById('pdv-total').textContent=pdvFmt(tot); var rec=parseFloat(String(document.getElementById('pdv-recebido').value).replace(',','.'))||0; var troco=rec-tot; document.getElementById('pdv-troco-v').textContent=pdvFmt(troco>0?troco:0); }
 function pdvPag(el){ document.querySelectorAll('#pdv-pag .aba').forEach(function(x){x.classList.remove('on');}); el.classList.add('on'); PDV_PAG=el.getAttribute('data-pag'); var fiado=PDV_PAG==='fiado'; var din=PDV_PAG==='dinheiro'; document.getElementById('pdv-fiado-box').style.display=fiado?'block':'none'; document.getElementById('pdv-din').style.display=fiado?'none':'flex'; document.getElementById('pdv-troco').style.display=din?'flex':'none'; }
-function pdvCliBusca(q){ q=(q||'').trim(); PDV_CLI=null; document.getElementById('pdv-cli-sel').style.display='none'; if(PDV_CLI_T) clearTimeout(PDV_CLI_T); var sug=document.getElementById('pdv-cli-sug'); if(q.length<2){ sug.style.display='none'; return; } PDV_CLI_T=setTimeout(function(){ fetch('/painel/clientes/buscar?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(d){ PDV_CLI_RES=d.clientes||[]; var h=''; PDV_CLI_RES.forEach(function(c,i){ h+='<div onclick="pdvCliPick('+i+')" style="padding:.45rem .6rem;border-bottom:1px solid #242426;cursor:pointer;font-size:.82rem;color:var(--txt)">'+c.nome+'<span style="color:#6a8a7a;font-size:.72rem">'+(c.telefone?(' · '+c.telefone):'')+(c.cpf?(' · CPF '+c.cpf):'')+'</span></div>'; }); h+='<div onclick="pdvCliNovo()" style="padding:.45rem .6rem;cursor:pointer;font-size:.82rem;color:var(--verde-claro)">+ cadastrar novo cliente</div>'; sug.innerHTML=h; sug.style.display='block'; }).catch(function(){}); }, 250); }
+function pdvCliBusca(q){ q=(q||'').trim(); PDV_CLI=null; document.getElementById('pdv-cli-sel').style.display='none'; if(PDV_CLI_T) clearTimeout(PDV_CLI_T); var sug=document.getElementById('pdv-cli-sug'); if(q.length<2){ sug.style.display='none'; return; } PDV_CLI_T=setTimeout(function(){ fetch('/painel/clientes/buscar?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(d){ PDV_CLI_RES=d.clientes||[]; var h=''; PDV_CLI_RES.forEach(function(c,i){ h+='<div onclick="pdvCliPick('+i+')" style="padding:.45rem .6rem;border-bottom:1px solid var(--card-2);cursor:pointer;font-size:.82rem;color:var(--txt)">'+c.nome+'<span style="color:#6a8a7a;font-size:.72rem">'+(c.telefone?(' · '+c.telefone):'')+(c.cpf?(' · CPF '+c.cpf):'')+'</span></div>'; }); h+='<div onclick="pdvCliNovo()" style="padding:.45rem .6rem;cursor:pointer;font-size:.82rem;color:var(--verde-claro)">+ cadastrar novo cliente</div>'; sug.innerHTML=h; sug.style.display='block'; }).catch(function(){}); }, 250); }
 function pdvCliPick(i){ var c=PDV_CLI_RES[i]; if(!c) return; PDV_CLI={id:c.id,nome:c.nome,telefone:c.telefone,cpf:c.cpf}; document.getElementById('pdv-cli-busca').value=c.nome; document.getElementById('pdv-cli-sug').style.display='none'; document.getElementById('pdv-cli-novo').style.display='none'; var sel=document.getElementById('pdv-cli-sel'); sel.innerHTML='✓ '+c.nome+' <a onclick="pdvCliLimpar()" style="color:#d98a8a;cursor:pointer;margin-left:.4rem">(trocar)</a>'; sel.style.display='block'; }
 function pdvCliNovo(){ document.getElementById('pdv-cli-sug').style.display='none'; var q=document.getElementById('pdv-cli-busca').value||''; document.getElementById('pdv-cli-novo').style.display='grid'; var digs=q.replace(/[^0-9]/g,''); if(digs.length>=11){ document.getElementById('pdv-novo-cpf').value=q; document.getElementById('pdv-novo-nome').value=''; } else { document.getElementById('pdv-novo-nome').value=q; } PDV_CLI=null; }
 function pdvCliLimpar(){ PDV_CLI=null; document.getElementById('pdv-cli-sel').style.display='none'; document.getElementById('pdv-cli-busca').value=''; document.getElementById('pdv-cli-novo').style.display='none'; document.getElementById('pdv-novo-nome').value=''; document.getElementById('pdv-novo-cpf').value=''; }
 function pdvClienteInfo(){ if(PDV_CLI&&PDV_CLI.id) return {cliente_id:PDV_CLI.id, cliente_nome:PDV_CLI.nome}; var nn=(document.getElementById('pdv-novo-nome').value||'').trim(); var nc=(document.getElementById('pdv-novo-cpf').value||'').trim(); var o={}; if(nn) o.cliente_nome=nn; if(nc){ if(nc.replace(/[^0-9]/g,'').length===14){ o.cliente_cnpj=nc; } else { o.cliente_cpf=nc; } } return o; }
 function pdvFinalizar(){ if(!PDV_CART.length){ return; } var e=document.getElementById('pdv-erro'); var ci=pdvClienteInfo(); if(PDV_PAG==='fiado' && !ci.cliente_id && !ci.cliente_nome){ e.textContent='Fiado exige um cliente identificado.'; e.style.display='block'; return; } var btn=document.getElementById('pdv-finalizar'); btn.disabled=true; btn.textContent='Registrando...'; var desc=parseFloat(String(document.getElementById('pdv-desc').value).replace(',','.'))||0; var payload={ itens:PDV_CART.map(function(it){ return {produto_id:it.id, quantidade:it.qtd, preco_unit_centavos:Math.round(it.preco*100)}; }), pagamento:PDV_PAG, desconto_centavos:Math.round(desc*100) }; for(var k in ci){ payload[k]=ci[k]; } if(PDV_PAG==='fiado'){ payload.vencimento=document.getElementById('pdv-venc').value||''; } fetch('/painel/produtos/vender',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(d){ if(d.ok){ pdvRecibo(d,ci); } else { e.textContent=d.erro||'erro'; e.style.display='block'; btn.disabled=false; btn.textContent='Finalizar venda'; } }).catch(function(){ e.textContent='erro de conexão'; e.style.display='block'; btn.disabled=false; btn.textContent='Finalizar venda'; }); }
-function pdvRecibo(d,ci){ var linhas=PDV_CART.map(function(it){ return '<div style="display:flex;justify-content:space-between;font-size:.8rem;color:#cfcfcf"><span>'+it.qtd+' '+it.unidade+' '+it.nome+'</span><span>'+pdvFmt(it.preco*it.qtd)+'</span></div>'; }).join(''); var extra=''; if(d.fiado){ extra='<div style="color:#e0b878;font-size:.82rem;margin-top:.3rem">Fiado · vence '+(d.vencimento||'')+'</div>'; } var _brand=(window.PDV_MARCA_HTML?('<div style="margin-bottom:.6rem;padding-bottom:.5rem;border-bottom:1px solid var(--borda)">'+window.PDV_MARCA_HTML+'</div>'):''); var box=document.getElementById('pdv-recibo'); box.innerHTML=_brand+'<div style="text-align:center;color:var(--verde-claro);font-weight:700;margin-bottom:.5rem">✓ Venda registrada</div>'+linhas+'<div style="display:flex;justify-content:space-between;border-top:1px solid var(--borda);margin-top:.5rem;padding-top:.5rem;color:var(--txt);font-weight:600"><span>Total</span><span>'+pdvFmt((d.total_centavos||0)/100)+'</span></div>'+(ci.cliente_nome?('<div style="color:#888;font-size:.78rem;margin-top:.3rem">Cliente: '+ci.cliente_nome+'</div>'):'')+extra+'<div style="display:flex;gap:.5rem;margin-top:.8rem"><button type="button" onclick="window.print()" style="flex:1;background:transparent;border:1px solid #3a3a3d;color:#b4b2a9;border-radius:7px;padding:.5rem;cursor:pointer">Imprimir</button><button type="button" onclick="location.href=\\'/painel/pdv\\'" style="flex:1;background:var(--verde);color:#fff;border:0;border-radius:7px;padding:.5rem;cursor:pointer;font-weight:600">Nova venda</button></div>'; box.style.display='block'; box.scrollIntoView({behavior:'smooth'}); }
+function pdvRecibo(d,ci){ var linhas=PDV_CART.map(function(it){ return '<div style="display:flex;justify-content:space-between;font-size:.8rem;color:#cfcfcf"><span>'+it.qtd+' '+it.unidade+' '+it.nome+'</span><span>'+pdvFmt(it.preco*it.qtd)+'</span></div>'; }).join(''); var extra=''; if(d.fiado){ extra='<div style="color:#e0b878;font-size:.82rem;margin-top:.3rem">Fiado · vence '+(d.vencimento||'')+'</div>'; } var _brand=(window.PDV_MARCA_HTML?('<div style="margin-bottom:.6rem;padding-bottom:.5rem;border-bottom:1px solid var(--borda)">'+window.PDV_MARCA_HTML+'</div>'):''); var box=document.getElementById('pdv-recibo'); box.innerHTML=_brand+'<div style="text-align:center;color:var(--verde-claro);font-weight:700;margin-bottom:.5rem">✓ Venda registrada</div>'+linhas+'<div style="display:flex;justify-content:space-between;border-top:1px solid var(--borda);margin-top:.5rem;padding-top:.5rem;color:var(--txt);font-weight:600"><span>Total</span><span>'+pdvFmt((d.total_centavos||0)/100)+'</span></div>'+(ci.cliente_nome?('<div style="color:#888;font-size:.78rem;margin-top:.3rem">Cliente: '+ci.cliente_nome+'</div>'):'')+extra+'<div style="display:flex;gap:.5rem;margin-top:.8rem"><button type="button" onclick="window.print()" style="flex:1;background:transparent;border:1px solid var(--borda);color:#b4b2a9;border-radius:7px;padding:.5rem;cursor:pointer">Imprimir</button><button type="button" onclick="location.href=\\'/painel/pdv\\'" style="flex:1;background:var(--verde);color:var(--sobre-verde);border:0;border-radius:7px;padding:.5rem;cursor:pointer;font-weight:600">Nova venda</button></div>'; box.style.display='block'; box.scrollIntoView({behavior:'smooth'}); }
 document.addEventListener('DOMContentLoaded', function(){ pdvRender(); if(window.PDV_ADD){ pdvAdd(window.PDV_ADD); } });
 </script>
 {% endblock %}"""
@@ -3311,7 +3307,7 @@ _VENDA_DETALHE = """{% extends "base" %}{% block conteudo %}
   </div>
   <div class="mut" style="font-size:.72rem;margin-bottom:.3rem">{{ itens|length }} item(ns)</div>
   {% for it in itens %}
-  <div style="display:flex;justify-content:space-between;padding:.45rem 0;border-bottom:1px solid #242426">
+  <div style="display:flex;justify-content:space-between;padding:.45rem 0;border-bottom:1px solid var(--card-2)">
     <div style="font-size:.88rem;color:var(--txt)">{{ it.descricao }} <span class="mut" style="font-size:.72rem">· {{ it.quantidade }} {{ it.unidade }} × R$ {{ "%.2f"|format(it.vu/100) }}</span></div>
     <div style="font-size:.88rem">R$ {{ "%.2f"|format(it.vt/100) }}</div>
   </div>
@@ -3353,12 +3349,12 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   .sec-pc>summary .chev{color:var(--txt-mut);transition:transform .2s}
   .sec-pc[open]>summary .chev{transform:rotate(180deg)}
   .sec-body{margin-top:.9rem}
-  .pc-grp{display:flex;align-items:center;gap:.6rem;padding:.5rem .2rem;margin-top:.5rem;border-bottom:1px solid #232325}
-  .pc-gcode{font-family:ui-monospace,monospace;font-size:.72rem;color:var(--txt-mut);min-width:1.2rem}
+  .pc-grp{display:flex;align-items:center;gap:.6rem;padding:.5rem .2rem;margin-top:.5rem;border-bottom:1px solid var(--card-2)}
+  .pc-gcode{font-family:var(--mono);font-size:.72rem;color:var(--txt-mut);min-width:1.2rem}
   .pc-gname{font-weight:700;font-size:.78rem;flex:1;text-transform:uppercase;letter-spacing:.03em}
   .pc-gmeta{font-size:.7rem;color:var(--txt-mut);white-space:nowrap}
   .pc-acc{display:flex;align-items:center;gap:.6rem;padding:.5rem .2rem .5rem 1.4rem;border-bottom:1px solid #1c1c1e}
-  .pc-code{font-family:ui-monospace,monospace;font-size:.72rem;color:var(--txt-mut);min-width:2.8rem}
+  .pc-code{font-family:var(--mono);font-size:.72rem;color:var(--txt-mut);min-width:2.8rem}
   .pc-name{flex:1;font-size:.85rem}
   .pc-acc.off .pc-name,.pc-acc.off .pc-code{opacity:.45}
   .pc-tag{font-size:.6rem;font-weight:700;padding:.1rem .5rem;border-radius:10px;white-space:nowrap}
@@ -3370,8 +3366,8 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   .pc-sw.on .knob{transform:translateX(16px);background:#fff}
   .cc-form{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.9rem}
   .cc-form input{flex:1 1 160px;min-width:0}
-  .cc-form button{background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.5rem .9rem;font-weight:600;cursor:pointer;width:auto}
-  .cc-item{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;padding:.6rem 0;border-top:1px solid #232325}
+  .cc-form button{background:var(--verde);color:var(--sobre-verde);border:0;border-radius:6px;padding:.5rem .9rem;font-weight:600;cursor:pointer;width:auto}
+  .cc-item{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;padding:.6rem 0;border-top:1px solid var(--card-2)}
   .cc-info{flex:1 1 200px;font-size:.88rem}
   .cc-item.off .cc-info{opacity:.55}
   .cc-acoes{display:flex;gap:.4rem}
@@ -3434,7 +3430,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
         <input type="hidden" name="centro_id" value="{{ c.id }}">
         <input name="nome" value="{{ c.nome }}" required placeholder="nome">
         <input name="descricao" value="{{ c.descricao }}" placeholder="descrição">
-        <button type="submit" style="background:var(--verde);color:#fff;border:0">salvar</button>
+        <button type="submit" style="background:var(--verde);color:var(--sobre-verde);border:0">salvar</button>
         <button type="button" onclick="ccEditToggle(this)" style="color:#8a938a">cancelar</button>
       </form>
     </div>
@@ -3449,7 +3445,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
 {% if a_classificar %}
 <style>
   .ac-card{border-color:#f0c05a44}
-  .ac-item{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;padding:.7rem 0;border-top:1px solid #232325}
+  .ac-item{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;padding:.7rem 0;border-top:1px solid var(--card-2)}
   .ac-item:first-of-type{border-top:none}
   .ac-info{flex:1 1 190px;min-width:0}
   .ac-info .d{font-size:.9rem}
@@ -3563,13 +3559,13 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     <label style="font-size:.72rem;color:#8a938a">Valor R$<input name="valor" required inputmode="decimal" placeholder="0,00" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Vencimento<input name="vencimento" type="date" required style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a" title="opcional — liga o título à ficha do cliente (honorário/venda a prazo)">Cliente<input name="cliente" list="tit-cli-dl" placeholder="opcional" style="width:100%"></label>
-    <button type="submit" style="background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.55rem .8rem;font-weight:600;cursor:pointer">+ Add</button>
+    <button type="submit" style="background:var(--verde);color:var(--sobre-verde);border:0;border-radius:6px;padding:.55rem .8rem;font-weight:600;cursor:pointer">+ Add</button>
   </form>
   <datalist id="tit-cli-dl">{% for c in clientes_lista or [] %}<option value="{{ c.nome }}">{% endfor %}</datalist>
   <label style="font-size:.72rem;color:#8a938a;display:flex;gap:.4rem;align-items:center;margin-bottom:.6rem"><input type="checkbox" form="_nada" disabled style="width:auto"> <span class="mut">Vincule um cliente pra o título aparecer na ficha dele (carteira). Contraparte/recorrência aparecem ao detalhar.</span></label>
   {% if titulos %}
   <style>
-    .tit-lin{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35rem .9rem;padding:.7rem 0;border-top:1px solid #232325}
+    .tit-lin{display:flex;flex-wrap:wrap;align-items:baseline;gap:.35rem .9rem;padding:.7rem 0;border-top:1px solid var(--card-2)}
     .tit-id{flex:1 1 200px;min-width:0}
     .tit-desc{font-size:.9rem}
     .tit-meta{font-size:.7rem;margin-top:3px;color:var(--txt-mut)}
@@ -3581,7 +3577,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     .tit-edit input{font-size:.8rem;padding:.35rem .5rem;border-radius:7px;border:1px solid #333;background:var(--bg);color:var(--txt)}
     .tit-edit button{border:1px solid #2f2f31;border-radius:7px;padding:.32rem .7rem;font-size:.78rem;cursor:pointer;width:auto;background:none;color:var(--txt)}
   </style>
-  <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--txt-mut);padding:.6rem 0 .2rem;border-bottom:1px solid #232325"><span>Título</span><span>Valor</span></div>
+  <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--txt-mut);padding:.6rem 0 .2rem;border-bottom:1px solid var(--card-2)"><span>Título</span><span>Valor</span></div>
   {% for t in titulos %}<div class="tit-lin">
     <div class="tit-id">
       <div class="tit-desc">{{ t.descricao }}{% if t.contraparte %} <span class="mut">· {{ t.contraparte }}</span>{% endif %}</div>
@@ -3598,7 +3594,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     <form method="post" action="/painel/empresa/titulo/{{ t.id }}/descricao" class="tit-edit" style="display:none">
       <input name="descricao" value="{{ t.descricao }}" placeholder="descrição" style="flex:2 1 150px;min-width:0">
       <input name="valor" value="{{ (t.valor_centavos/100)|n2 }}" inputmode="decimal" placeholder="valor R$" style="flex:1 1 90px;min-width:0">
-      <button style="background:var(--verde);color:#fff;border:0">salvar</button>
+      <button style="background:var(--verde);color:var(--sobre-verde);border:0">salvar</button>
       <button type="button" onclick="titEditToggle(this)" style="color:#8a938a">cancelar</button>
     </form>
   </div>{% endfor %}
@@ -3622,7 +3618,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     <span class="mut" style="font-size:.72rem">{{ (rotulo_receber or 'A receber') }} em aberto: <b style="color:var(--verde-claro)">{{ carteira.total_centavos|brl }}</b>{% if carteira.atrasado_centavos %} · <b style="color:#f0c05a">{{ carteira.atrasado_centavos|brl }} atrasado</b>{% endif %}</span>
   </div>
   <style>
-    .cart-lin{display:flex;flex-wrap:wrap;align-items:baseline;gap:.3rem .8rem;padding:.6rem 0;border-top:1px solid #232325}
+    .cart-lin{display:flex;flex-wrap:wrap;align-items:baseline;gap:.3rem .8rem;padding:.6rem 0;border-top:1px solid var(--card-2)}
     .cart-nome{flex:1 1 160px;min-width:0;font-size:.9rem}
     .cart-val{margin-left:auto;text-align:right;white-space:nowrap;font-weight:600;font-variant-numeric:tabular-nums}
   </style>
@@ -3647,12 +3643,12 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     <label style="font-size:.72rem;color:#8a938a">Salário R$<input name="salario" required inputmode="decimal" placeholder="0,00" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Dia pgto<input name="dia" type="number" min="1" max="28" value="5" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a;text-align:center" title="Descontar 6% de vale-transporte (opcional — a cargo do empregador). Dá pra mudar depois.">Desc. VT<br><input type="checkbox" name="vale_transporte" value="1" style="width:auto"></label>
-    <button type="submit" style="background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.55rem .8rem;font-weight:600;cursor:pointer">+ Add</button>
+    <button type="submit" style="background:var(--verde);color:var(--sobre-verde);border:0;border-radius:6px;padding:.55rem .8rem;font-weight:600;cursor:pointer">+ Add</button>
   </form>
   {% if folha.itens %}
   <style>
     /* cada funcionário é um card colapsável (minimiza; expande no clique) */
-    details.folha-lin{border-top:1px solid #232325}
+    details.folha-lin{border-top:1px solid var(--card-2)}
     details.folha-lin > summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:.9rem;padding:.8rem .25rem}
     details.folha-lin > summary::-webkit-details-marker{display:none}
     details.folha-lin > summary:hover{background:#141416}
@@ -3672,7 +3668,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
        label{display:block;margin:.9rem 0 .3rem} e input{width:100%} — aqui a
        gente zera isso pra os campos ficarem "no esquadro". */
     .fa{margin-top:.7rem;display:flex;flex-direction:column;gap:.5rem}
-    .fa-grp{background:#141416;border:1px solid #232325;border-radius:9px;padding:.6rem .75rem}
+    .fa-grp{background:#141416;border:1px solid var(--card-2);border-radius:9px;padding:.6rem .75rem}
     .fa-tit{font-size:.64rem;text-transform:uppercase;letter-spacing:.05em;color:var(--txt-mut);margin-bottom:.6rem}
     .fa form{margin:0}
     .fa label{display:inline;margin:0;font-size:.74rem;color:var(--txt-mut)}
@@ -3686,7 +3682,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     .fa button{background:none;border:1px solid #2f2f31;border-radius:7px;padding:.36rem .75rem;font-size:.78rem;cursor:pointer;color:var(--txt);width:auto;margin:0}
     .fa button.add{border-color:#2f5a41;color:var(--verde-claro)}
     .fa button.amb{border-color:#5a4a1e;color:#f0c05a}
-    .fa button.pay{background:var(--verde);border-color:var(--verde);color:#fff;font-weight:600}
+    .fa button.pay{background:var(--verde);border-color:var(--verde);color:var(--sobre-verde);font-weight:600}
     /* pílula VT */
     .vt-pill{display:inline-flex;align-items:center;gap:.5rem;border:1px solid #2f2f31;background:none;border-radius:999px;padding:.28rem .55rem .28rem .7rem;cursor:pointer;color:var(--txt);font-size:.76rem;width:auto}
     .vt-sw{width:34px;height:19px;border-radius:999px;position:relative;flex:none;transition:background .15s}
@@ -3697,16 +3693,16 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     .fa-tool{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
     .fa-ln{border:1px solid #2f2f31;border-radius:7px;padding:.32rem .7rem;font-size:.76rem;text-decoration:none;color:var(--txt);display:inline-flex;gap:.3rem}
     /* histórico "corrigir" */
-    .fa-hist{border:1px solid #232325;border-radius:9px;overflow:hidden}
+    .fa-hist{border:1px solid var(--card-2);border-radius:9px;overflow:hidden}
     .fa-hist summary{list-style:none;cursor:pointer;padding:.5rem .7rem;font-size:.76rem;color:var(--verde-claro)}
     .fa-hist summary::-webkit-details-marker{display:none}
-    .fa-ev{display:flex;justify-content:space-between;align-items:center;gap:.6rem;padding:.45rem .7rem;border-top:1px solid #232325;font-size:.78rem}
+    .fa-ev{display:flex;justify-content:space-between;align-items:center;gap:.6rem;padding:.45rem .7rem;border-top:1px solid var(--card-2);font-size:.78rem}
     .ev-tag{font-size:.6rem;padding:.08rem .4rem;border-radius:5px;margin-right:.4rem}
     .ev-tag.ev-vale{background:#3a2f14;color:#f0c05a}.ev-tag.ev-beneficio{background:#14301f;color:var(--verde-claro)}
     .ev-tag.ev-extra{background:#153025;color:#7fb48f}.ev-tag.ev-desconto{background:#332314;color:#e0b878}
     .ev-rm{border:1px solid #5a2e2e !important;color:#e08a8a !important;padding:.24rem .55rem !important}
   </style>
-  <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--txt-mut);padding:.6rem 0 .2rem;border-bottom:1px solid #232325"><span>Funcionário</span><span>A pagar (líquido)</span></div>
+  <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--txt-mut);padding:.6rem 0 .2rem;border-bottom:1px solid var(--card-2)"><span>Funcionário</span><span>A pagar (líquido)</span></div>
   {% for f in folha.itens %}<details class="folha-lin">
     <summary class="folha-head">
       <div class="folha-sum-id">
@@ -3780,7 +3776,7 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     </div>
     </div>
   </details>{% endfor %}
-  <form method="post" action="/painel/empresa/folha/pagar" style="margin-top:.8rem"><button style="background:var(--verde);color:#fff;border:0;border-radius:6px;padding:.5rem 1rem;font-weight:600;cursor:pointer">Pagar folha inteira ✓</button></form>
+  <form method="post" action="/painel/empresa/folha/pagar" style="margin-top:.8rem"><button style="background:var(--verde);color:var(--sobre-verde);border:0;border-radius:6px;padding:.5rem 1rem;font-weight:600;cursor:pointer">Pagar folha inteira ✓</button></form>
   {% else %}<div class="mut" style="font-size:.85rem">Nenhum funcionário cadastrado. Adicione acima.</div>{% endif %}
   <div class="mut" style="font-size:.72rem;margin-top:.7rem">ℹ️ Controle gerencial de pessoal — a folha oficial (eSocial, guias, holerite) segue com seu contador, que recebe tudo no relatório mensal.</div>
 </div>
@@ -3791,7 +3787,7 @@ _PROMOCOES_EM_BREVE = """{% extends "base" %}{% block conteudo %}
   <div style="font-size:42px;margin-bottom:.5rem">🏷️</div>
   <h2>Promoções em breve!</h2>
   <p class="mut">O {{ fornecedor.nome }} ainda não tem ofertas ativas. Volte logo — ou aproveite a loja!</p>
-  <a href="/f/{{ fornecedor.slug }}" style="display:inline-block;margin-top:1rem;background:var(--verde);color:#fff;padding:.7rem 1.4rem;border-radius:9px;text-decoration:none;font-weight:600">Ver produtos</a>
+  <a href="/f/{{ fornecedor.slug }}" style="display:inline-block;margin-top:1rem;background:var(--verde);color:var(--sobre-verde);padding:.7rem 1.4rem;border-radius:9px;text-decoration:none;font-weight:600">Ver produtos</a>
 </div>
 {% endblock %}"""
 
@@ -3835,7 +3831,7 @@ Suas compras avulsas nas lojas ficam em <a href="/painel/meus-pedidos" style="co
 {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
 {% if assinaturas %}
 {% for a in assinaturas %}
-<div style="background:#1c1c1f;border:1px solid var(--borda);border-radius:8px;padding:1rem;margin-bottom:.6rem">
+<div style="background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:1rem;margin-bottom:.6rem">
   <div style="display:flex;justify-content:space-between;align-items:start">
     <div style="flex:1">
       <strong>{{ a.tamanho_nome }}</strong> — <strong>R$ {{ (a.preco_centavos/100)|n2 }}</strong>
@@ -3892,12 +3888,12 @@ _MEU_PLANO = """{% extends "base" %}{% block conteudo %}
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
 {% if assinaturas %}
 {% for a in assinaturas %}
-<div style="background:#1c1c1f;border:1px solid var(--borda);border-radius:8px;padding:1rem;margin-bottom:.8rem">
+<div style="background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:1rem;margin-bottom:.8rem">
   <strong>{{ a.tamanho_nome }}</strong> — R$ {{ (a.preco_centavos/100)|n2 }}
   <div class="mut" style="font-size:.85rem">De: {{ a.fornecedor_nome }} · {{ a.frequencia }} · {{ a.status }}</div>
   {% if a.status == 'aguardando_pagamento' %}
-  <div style="border-left:3px solid #e0a83d;background:#1a1712;border-radius:6px;padding:.7rem .9rem;margin-top:.7rem">
-    <div style="font-size:.9rem;color:#e0a83d;margin-bottom:.45rem">⏳ Aguardando pagamento</div>
+  <div style="border-left:3px solid var(--ambar);background:#1a1712;border-radius:6px;padding:.7rem .9rem;margin-top:.7rem">
+    <div style="font-size:.9rem;color:var(--ambar);margin-bottom:.45rem">⏳ Aguardando pagamento</div>
     <a href="/painel/assinaturas/{{ a.id }}/pagar" style="display:inline-block;background:var(--verde-claro);color:#0a0a0a;padding:.45rem .9rem;border-radius:6px;text-decoration:none;font-weight:600;font-size:.85rem">Pagar agora →</a>
   </div>
   {% endif %}
@@ -3913,7 +3909,7 @@ _MEU_PLANO = """{% extends "base" %}{% block conteudo %}
         {% endif %}
       {% endfor %}
     </select>
-    <button type="submit" style="background:var(--verde);color:#fff;padding:.4rem .8rem;border:0;border-radius:6px;cursor:pointer;font-size:.85rem;margin-top:.3rem">Trocar tamanho</button>
+    <button type="submit" style="background:var(--verde);color:var(--sobre-verde);padding:.4rem .8rem;border:0;border-radius:6px;cursor:pointer;font-size:.85rem;margin-top:.3rem">Trocar tamanho</button>
   </form>
 </div>
 {% endfor %}
@@ -3944,7 +3940,7 @@ _CESTA_AJUSTE = """{% extends "base" %}{% block conteudo %}
 {% if erro %}<div class="erro">{{ erro }}</div>{% endif %}
 {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
 
-<div style="background:#1c1c1f;border:1px solid var(--borda);border-radius:8px;padding:1.2rem;margin-bottom:1.5rem">
+<div style="background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:1.2rem;margin-bottom:1.5rem">
   <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:1rem">
     <div>
       <h3 style="margin:0;margin-bottom:.5rem">{{ cesta.fornecedor_nome }}</h3>
@@ -3990,7 +3986,7 @@ _CESTA_AJUSTE = """{% extends "base" %}{% block conteudo %}
 
 {% if cesta.status != 'confirmada' %}
 <form method="post" action="/cesta/{{ cesta.id }}/confirmar" style="margin-top:1.5rem">
-  <button style="background:var(--verde);color:#fff;padding:.7rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:600;font-size:1rem">✓ Confirmar cesta</button>
+  <button style="background:var(--verde);color:var(--sobre-verde);padding:.7rem 1rem;border:0;border-radius:6px;cursor:pointer;width:100%;font-weight:600;font-size:1rem">✓ Confirmar cesta</button>
   <p class="mut" style="font-size:.85rem;text-align:center;margin-top:.5rem">Ou deixe como está — vai automático. 👍</p>
 </form>
 {% else %}
@@ -4046,7 +4042,7 @@ _PEDIDOS_FORN = """{% extends "base" %}{% block conteudo %}
 
   <div class="ped-resumo">
     {{ pedidos|length }} pedido{% if pedidos|length != 1 %}s{% endif %}
-    {% if contagens.em_aberto %} · <strong style="color:#e0a83d">{{ contagens.em_aberto }}</strong> em aberto{% endif %}
+    {% if contagens.em_aberto %} · <strong style="color:var(--ambar)">{{ contagens.em_aberto }}</strong> em aberto{% endif %}
     {% if contagens.entregue %} · <strong style="color:var(--verde)">{{ contagens.entregue }}</strong> já entregue{% if contagens.entregue != 1 %}s{% endif %}{% endif %}
   </div>
 
@@ -4112,15 +4108,15 @@ _PEDIDOS_FORN = """{% extends "base" %}{% block conteudo %}
 .ped-card-meta{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;font-size:.78rem}
 .ped-st,.ped-pg{display:inline-block;padding:.2rem .55rem;border-radius:10px}
 .ped-st-sugerida{background:var(--borda);color:#c9c9c9}
-.ped-st-em_ajuste{background:#3a2d12;color:#e0a83d}
+.ped-st-em_ajuste{background:#3a2d12;color:var(--ambar)}
 .ped-st-confirmada{background:#15241d;color:var(--verde-claro)}
 .ped-st-cobrada{background:#15241d;color:var(--verde-claro)}
 .ped-st-entregue{background:#0e2a1e;color:var(--verde)}
 .ped-st-cancelada{background:#2a1414;color:#c66}
 .ped-pg-pago{background:#0e2a1e;color:var(--verde)}
-.ped-pg-aguardando{background:#3a2d12;color:#e0a83d}
+.ped-pg-aguardando{background:#3a2d12;color:var(--ambar)}
 .ped-pg-atrasado{background:#2a1414;color:#c66}
-.ped-pg-cancelado{background:#1c1c1f;color:#7a7a7a}
+.ped-pg-cancelado{background:var(--card-2);color:#7a7a7a}
 .ped-meta-sep{color:#7a7a7a;margin-left:auto}
 .ped-meta-data{color:var(--txt-mut)}
 .ped-vazio{text-align:center;padding:3rem 1rem;color:var(--txt-mut)}
@@ -4190,15 +4186,15 @@ _PEDIDO_DETALHE_FORN = """{% extends "base" %}{% block conteudo %}
 .ped-det-val{color:var(--txt);font-size:1.05rem;font-weight:600}
 .ped-st,.ped-pg{display:inline-block;padding:.2rem .55rem;border-radius:10px;font-size:.78rem;margin-right:.3rem}
 .ped-st-sugerida{background:var(--borda);color:#c9c9c9}
-.ped-st-em_ajuste{background:#3a2d12;color:#e0a83d}
+.ped-st-em_ajuste{background:#3a2d12;color:var(--ambar)}
 .ped-st-confirmada{background:#15241d;color:var(--verde-claro)}
 .ped-st-cobrada{background:#15241d;color:var(--verde-claro)}
 .ped-st-entregue{background:#0e2a1e;color:var(--verde)}
 .ped-st-cancelada{background:#2a1414;color:#c66}
 .ped-pg-pago{background:#0e2a1e;color:var(--verde)}
-.ped-pg-aguardando{background:#3a2d12;color:#e0a83d}
+.ped-pg-aguardando{background:#3a2d12;color:var(--ambar)}
 .ped-pg-atrasado{background:#2a1414;color:#c66}
-.ped-pg-cancelado{background:#1c1c1f;color:#7a7a7a}
+.ped-pg-cancelado{background:var(--card-2);color:#7a7a7a}
 .ped-itens{display:flex;flex-direction:column;gap:.4rem}
 .ped-item{display:flex;justify-content:space-between;align-items:center;padding:.7rem 1rem;background:var(--card-2);border:1px solid var(--borda);border-radius:6px;gap:1rem}
 .ped-item-info{flex:1;min-width:0}
@@ -4335,8 +4331,8 @@ _SEPARACAO_FORN = """{% extends "base" %}{% block conteudo %}
 .sep-card{background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:1rem;text-align:center}
 .sep-card-num{color:var(--verde-claro);font-size:1.6rem;font-weight:700;line-height:1.1}
 .sep-card-rot{color:var(--txt-mut);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin-top:.3rem}
-.sep-alerta{background:#3a2d12;border:1px solid #6b5320;border-radius:8px;padding:.8rem 1rem;margin-bottom:1rem;color:#e0a83d;font-size:.9rem}
-.sep-alerta-link{color:#e0a83d;text-decoration:underline;margin-left:.4rem;white-space:nowrap}
+.sep-alerta{background:#3a2d12;border:1px solid #6b5320;border-radius:8px;padding:.8rem 1rem;margin-bottom:1rem;color:var(--ambar);font-size:.9rem}
+.sep-alerta-link{color:var(--ambar);text-decoration:underline;margin-left:.4rem;white-space:nowrap}
 .sep-acoes{margin-bottom:1rem}
 .sep-btn{background:#15241d;color:var(--verde-claro);border:1px solid var(--verde-claro);border-radius:6px;padding:.5rem .9rem;cursor:pointer;font-size:.9rem}
 .sep-btn:hover{background:#1d2e25}
@@ -4410,7 +4406,7 @@ _EMBALAGEM_FORN = """{% extends "base" %}{% block conteudo %}
       <div class="sep-card-rot">já embaladas</div>
     </div>
     <div class="sep-card">
-      <div class="sep-card-num" style="color:#e0a83d">{{ dados.qtd_falta_embalar }}</div>
+      <div class="sep-card-num" style="color:var(--ambar)">{{ dados.qtd_falta_embalar }}</div>
       <div class="sep-card-rot">faltam</div>
     </div>
   </div>
@@ -4507,7 +4503,7 @@ _ETIQUETA_FORN = """<!doctype html>
 <meta charset="utf-8">
 <title>Etiqueta — {{ 'Avulso' if e.tipo == 'avulso' else 'Cesta' }} #{{ e.id }}</title>
 <style>
-body{font-family:system-ui,-apple-system,sans-serif;background:#fff;color:#000;margin:0;padding:1rem}
+body{font-family:var(--body);background:#fff;color:#000;margin:0;padding:1rem}
 .etiqueta{width:100mm;max-width:100%;border:2px solid #000;border-radius:6px;padding:1rem 1.2rem;page-break-after:always}
 .etq-topo{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid #000;padding-bottom:.4rem;margin-bottom:.6rem}
 .etq-marca{font-size:1.1rem;font-weight:700;letter-spacing:-.02em}
@@ -4587,7 +4583,7 @@ _ROTAS_FORN = """{% extends "base" %}{% block conteudo %}
       <div class="sep-card-rot">cesta{% if dados.qtd_total != 1 %}s{% endif %}</div>
     </div>
     <div class="sep-card">
-      <div class="sep-card-num" style="color:#e0a83d">{{ dados.qtd_pendentes }}</div>
+      <div class="sep-card-num" style="color:var(--ambar)">{{ dados.qtd_pendentes }}</div>
       <div class="sep-card-rot">pendentes</div>
     </div>
     <div class="sep-card">
@@ -4608,7 +4604,7 @@ _ROTAS_FORN = """{% extends "base" %}{% block conteudo %}
   <div class="rot-grupo">
     <h3 class="rot-grupo-tit">
       📍 {{ g.bairro }}
-      <span class="rot-grupo-meta">{{ g.qtd }} cesta{% if g.qtd != 1 %}s{% endif %}{% if g.qtd_pendentes %} · <span style="color:#e0a83d">{{ g.qtd_pendentes }} pendente{% if g.qtd_pendentes != 1 %}s{% endif %}</span>{% endif %}</span>
+      <span class="rot-grupo-meta">{{ g.qtd }} cesta{% if g.qtd != 1 %}s{% endif %}{% if g.qtd_pendentes %} · <span style="color:var(--ambar)">{{ g.qtd_pendentes }} pendente{% if g.qtd_pendentes != 1 %}s{% endif %}</span>{% endif %}</span>
     </h3>
     <div class="rot-cestas">
       {% for c in g.cestas %}
@@ -4669,18 +4665,18 @@ _ROTAS_FORN = """{% extends "base" %}{% block conteudo %}
 .sep-card{background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:.9rem;text-align:center}
 .sep-card-num{color:var(--verde-claro);font-size:1.5rem;font-weight:700;line-height:1.1}
 .sep-card-rot{color:var(--txt-mut);font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;margin-top:.3rem}
-.sep-alerta{background:#3a2d12;border:1px solid #6b5320;border-radius:8px;padding:.8rem 1rem;margin-bottom:1rem;color:#e0a83d;font-size:.9rem}
-.sep-alerta-link{color:#e0a83d;text-decoration:underline;margin-left:.4rem;white-space:nowrap}
+.sep-alerta{background:#3a2d12;border:1px solid #6b5320;border-radius:8px;padding:.8rem 1rem;margin-bottom:1rem;color:var(--ambar);font-size:.9rem}
+.sep-alerta-link{color:var(--ambar);text-decoration:underline;margin-left:.4rem;white-space:nowrap}
 .rot-grupo{margin-bottom:1.5rem}
 .rot-grupo-tit{color:var(--verde-claro);font-size:1rem;margin:0 0 .6rem;padding-bottom:.4rem;border-bottom:1px solid var(--borda);display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.5rem}
 .rot-grupo-meta{color:var(--txt-mut);font-size:.82rem;font-weight:400}
 .rot-cestas{display:flex;flex-direction:column;gap:.5rem}
 .rot-cesta{display:flex;justify-content:space-between;gap:1rem;background:var(--card-2);border:1px solid var(--borda);border-radius:6px;padding:.9rem 1rem;align-items:flex-start;flex-wrap:wrap}
 .rot-c-entregue{border-left:3px solid var(--verde);opacity:.65}
-.rot-c-nemb{border-left:3px solid #e0a83d}
+.rot-c-nemb{border-left:3px solid var(--ambar)}
 .rot-c-info{flex:1;min-width:200px}
 .rot-c-nome{color:var(--txt);font-weight:600;font-size:.95rem}
-.rot-tag-nemb{display:inline-block;color:#e0a83d;background:#3a2d12;font-size:.7rem;font-weight:500;padding:.15rem .4rem;border-radius:4px;margin-left:.4rem;vertical-align:middle}
+.rot-tag-nemb{display:inline-block;color:var(--ambar);background:#3a2d12;font-size:.7rem;font-weight:500;padding:.15rem .4rem;border-radius:4px;margin-left:.4rem;vertical-align:middle}
 .rot-c-end{color:var(--txt-mut);font-size:.85rem;margin-top:.25rem}
 .rot-c-meta{color:#7a7a7a;font-size:.78rem;margin-top:.2rem}
 .rot-c-acoes{display:flex;gap:.4rem;align-items:flex-start}
@@ -4762,10 +4758,10 @@ _PEDIDO_ENVIADO = """{% extends "base" %}{% block conteudo %}
   <p class="mut" style="font-size:.85rem">O fornecedor vai confirmar seu pedido e avisar você pelo WhatsApp.</p>
 
   <div style="text-align:left;margin:1.2rem 0">
-    <div style="display:flex;align-items:center;gap:11px;margin:.4rem 0"><div style="width:28px;height:28px;border-radius:50%;background:var(--verde);display:flex;align-items:center;justify-content:center;color:#fff">✓</div><span style="font-size:.82rem;color:var(--txt)">Pedido recebido</span></div>
-    <div style="display:flex;align-items:center;gap:11px;margin:.4rem 0"><div style="width:28px;height:28px;border-radius:50%;background:#1c1c1f;border:1px solid #888780;display:flex;align-items:center;justify-content:center;color:#888780">⏳</div><span style="font-size:.82rem;color:#888780">Aguardando confirmação</span></div>
-    <div style="display:flex;align-items:center;gap:11px;margin:.4rem 0"><div style="width:28px;height:28px;border-radius:50%;background:#1c1c1f;border:1px solid var(--borda);display:flex;align-items:center;justify-content:center;color:#5f5e5a">💳</div><span style="font-size:.82rem;color:#5f5e5a">Pagamento (após confirmar)</span></div>
-    <div style="display:flex;align-items:center;gap:11px;margin:.4rem 0"><div style="width:28px;height:28px;border-radius:50%;background:#1c1c1f;border:1px solid var(--borda);display:flex;align-items:center;justify-content:center;color:#5f5e5a">🚚</div><span style="font-size:.82rem;color:#5f5e5a">A caminho</span></div>
+    <div style="display:flex;align-items:center;gap:11px;margin:.4rem 0"><div style="width:28px;height:28px;border-radius:50%;background:var(--verde);display:flex;align-items:center;justify-content:center;color:var(--sobre-verde)">✓</div><span style="font-size:.82rem;color:var(--txt)">Pedido recebido</span></div>
+    <div style="display:flex;align-items:center;gap:11px;margin:.4rem 0"><div style="width:28px;height:28px;border-radius:50%;background:var(--card-2);border:1px solid #888780;display:flex;align-items:center;justify-content:center;color:#888780">⏳</div><span style="font-size:.82rem;color:#888780">Aguardando confirmação</span></div>
+    <div style="display:flex;align-items:center;gap:11px;margin:.4rem 0"><div style="width:28px;height:28px;border-radius:50%;background:var(--card-2);border:1px solid var(--borda);display:flex;align-items:center;justify-content:center;color:#5f5e5a">💳</div><span style="font-size:.82rem;color:#5f5e5a">Pagamento (após confirmar)</span></div>
+    <div style="display:flex;align-items:center;gap:11px;margin:.4rem 0"><div style="width:28px;height:28px;border-radius:50%;background:var(--card-2);border:1px solid var(--borda);display:flex;align-items:center;justify-content:center;color:#5f5e5a">🚚</div><span style="font-size:.82rem;color:#5f5e5a">A caminho</span></div>
   </div>
 
   {% if carrinho %}
@@ -4792,7 +4788,7 @@ _PEDIDO_ENVIADO = """{% extends "base" %}{% block conteudo %}
   </div>
   {% endif %}
 
-  <a href="/painel" style="display:block;background:#1c1c1f;color:var(--txt);border:1px solid var(--borda);border-radius:10px;padding:.7rem;text-decoration:none;font-size:.85rem;margin-bottom:.5rem">Ver meus pedidos</a>
+  <a href="/painel" style="display:block;background:var(--card-2);color:var(--txt);border:1px solid var(--borda);border-radius:10px;padding:.7rem;text-decoration:none;font-size:.85rem;margin-bottom:.5rem">Ver meus pedidos</a>
   <a href="/f/{{ fornecedor_slug or '' }}" style="color:var(--verde-claro);font-size:.8rem;text-decoration:none">Voltar à loja</a>
 </div>
 {% endblock %}"""
@@ -4944,7 +4940,7 @@ _BLOCO_CONTA = """
       <div><div style="font-size:.98rem;color:var(--txt)">{{ md_nome or '-' }}</div><div class="mut" style="font-size:.78rem;margin-top:2px">titular{% if conta and conta[4] %} · {{ conta[4] }}{% endif %}</div></div>
     </div>
     <div style="margin-top:.7rem;border-top:1px solid var(--borda)">
-      <div style="display:flex;align-items:center;gap:11px;padding:.6rem 0;border-bottom:1px solid #212122"><span style="color:var(--verde-claro)">✉️</span><span class="mut" style="flex:1;font-size:.82rem">E-mail</span><span style="font-size:.86rem;color:var(--txt)">{{ md_email or '-' }}{% if md_email_pendente %}<div style="font-size:.72rem;color:#e0a83d">a confirmar: {{ md_email_pendente }}</div>{% endif %}</span></div>
+      <div style="display:flex;align-items:center;gap:11px;padding:.6rem 0;border-bottom:1px solid #212122"><span style="color:var(--verde-claro)">✉️</span><span class="mut" style="flex:1;font-size:.82rem">E-mail</span><span style="font-size:.86rem;color:var(--txt)">{{ md_email or '-' }}{% if md_email_pendente %}<div style="font-size:.72rem;color:var(--ambar)">a confirmar: {{ md_email_pendente }}</div>{% endif %}</span></div>
       <div style="display:flex;align-items:center;gap:11px;padding:.6rem 0;border-bottom:1px solid #212122"><span style="color:var(--verde-claro)">📱</span><span class="mut" style="flex:1;font-size:.82rem">WhatsApp</span><span style="font-size:.86rem;color:var(--txt)">{{ md_whatsapp or '-' }}</span></div>
       <div style="display:flex;align-items:center;gap:11px;padding:.6rem 0"><span style="color:var(--verde-claro)">🔒</span><span class="mut" style="flex:1;font-size:.82rem">Senha</span><a href="/senha" style="font-size:.86rem;color:var(--verde-claro);text-decoration:none">alterar</a></div>
     </div>
@@ -5031,15 +5027,15 @@ _AVULSOS_FORN = """{% extends "base" %}{% block conteudo %}
   <p class="mut" style="margin:.3rem 0 1rem">Pedidos feitos direto na sua loja (fora das assinaturas de cesta).</p>
   {% set fstatus = status or '' %}
   <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1rem">
-    <a href="/painel/fornecedor/avulsos" class="tag" style="text-decoration:none{% if not fstatus %};background:var(--verde);color:#fff;border-color:var(--verde){% endif %}">Todos</a>
-    <a href="/painel/fornecedor/avulsos?status=aguardando" class="tag" style="text-decoration:none{% if fstatus=='aguardando' %};background:var(--verde);color:#fff;border-color:var(--verde){% endif %}">Aguardando</a>
-    <a href="/painel/fornecedor/avulsos?status=confirmado" class="tag" style="text-decoration:none{% if fstatus=='confirmado' %};background:var(--verde);color:#fff;border-color:var(--verde){% endif %}">Confirmado</a>
-    <a href="/painel/fornecedor/avulsos?status=em_entrega" class="tag" style="text-decoration:none{% if fstatus=='em_entrega' %};background:var(--verde);color:#fff;border-color:var(--verde){% endif %}">Em entrega</a>
-    <a href="/painel/fornecedor/avulsos?status=entregue" class="tag" style="text-decoration:none{% if fstatus=='entregue' %};background:var(--verde);color:#fff;border-color:var(--verde){% endif %}">Entregues</a>
+    <a href="/painel/fornecedor/avulsos" class="tag" style="text-decoration:none{% if not fstatus %};background:var(--verde);color:var(--sobre-verde);border-color:var(--verde){% endif %}">Todos</a>
+    <a href="/painel/fornecedor/avulsos?status=aguardando" class="tag" style="text-decoration:none{% if fstatus=='aguardando' %};background:var(--verde);color:var(--sobre-verde);border-color:var(--verde){% endif %}">Aguardando</a>
+    <a href="/painel/fornecedor/avulsos?status=confirmado" class="tag" style="text-decoration:none{% if fstatus=='confirmado' %};background:var(--verde);color:var(--sobre-verde);border-color:var(--verde){% endif %}">Confirmado</a>
+    <a href="/painel/fornecedor/avulsos?status=em_entrega" class="tag" style="text-decoration:none{% if fstatus=='em_entrega' %};background:var(--verde);color:var(--sobre-verde);border-color:var(--verde){% endif %}">Em entrega</a>
+    <a href="/painel/fornecedor/avulsos?status=entregue" class="tag" style="text-decoration:none{% if fstatus=='entregue' %};background:var(--verde);color:var(--sobre-verde);border-color:var(--verde){% endif %}">Entregues</a>
   </div>
   {% if aviso %}<div class="ok">{{ aviso }}</div>{% endif %}
   {% if not pedidos %}<p class="mut" style="text-align:center;padding:2rem 0">Nenhum pedido avulso{% if fstatus %} nesse status{% endif %} por aqui ainda.</p>{% endif %}
-  {% set cor = {'aguardando':'#e0a83d','confirmado':'#3a78c2','em_entrega':'#5b8def','entregue':'var(--verde)','cancelado':'#8a3636'} %}
+  {% set cor = {'aguardando':'var(--ambar)','confirmado':'#3a78c2','em_entrega':'#5b8def','entregue':'var(--verde)','cancelado':'#8a3636'} %}
   {% for p in pedidos %}
   <div style="background:var(--bg);border:1px solid var(--borda);border-left:3px solid {{ cor.get(p.status,'var(--borda)') }};border-radius:12px;padding:.9rem 1rem;margin-bottom:.8rem{% if p.status in ['entregue','cancelado'] %};opacity:.7{% endif %}">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem">
@@ -5108,7 +5104,7 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
 
   {% if fase in ['embalagem','rotas','entregues'] %}
   <div style="display:flex;gap:.4rem;margin:1rem 0 .4rem">
-    <button type="button" class="tp-btn" data-tp="todos" onclick="filtTipo(this)" style="font-size:12px;padding:5px 13px;border-radius:999px;cursor:pointer;border:1px solid var(--verde);background:var(--verde);color:#fff">Todos</button>
+    <button type="button" class="tp-btn" data-tp="todos" onclick="filtTipo(this)" style="font-size:12px;padding:5px 13px;border-radius:999px;cursor:pointer;border:1px solid var(--verde);background:var(--verde);color:var(--sobre-verde)">Todos</button>
     <button type="button" class="tp-btn" data-tp="cesta" onclick="filtTipo(this)" style="font-size:12px;padding:5px 13px;border-radius:999px;cursor:pointer;border:1px solid var(--borda);background:transparent;color:var(--txt-mut)">🧺 Cestas</button>
     <button type="button" class="tp-btn" data-tp="avulso" onclick="filtTipo(this)" style="font-size:12px;padding:5px 13px;border-radius:999px;cursor:pointer;border:1px solid var(--borda);background:transparent;color:var(--txt-mut)">📦 Avulsos</button>
   </div>
@@ -5146,7 +5142,7 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
     </div>
     {% if sep.qtd_cestas_em_ajuste %}<div style="background:#2a2417;border:1px solid #6b5a2a;border-radius:10px;padding:.6rem .9rem;font-size:.82rem;color:#e0c07a;margin-bottom:.6rem">⚠️ {{ sep.qtd_cestas_em_ajuste }} cesta(s) ainda em ajuste pelos clientes — a lista pode mudar.</div>{% endif %}
     <div style="display:flex;gap:.5rem;margin:.2rem 0 .8rem">
-      <button type="button" class="sep-tg" data-v="cliente" onclick="sepView(this)" style="font-size:12px;padding:6px 14px;border-radius:999px;cursor:pointer;border:1px solid var(--verde);background:var(--verde);color:#fff">Por cliente (separar)</button>
+      <button type="button" class="sep-tg" data-v="cliente" onclick="sepView(this)" style="font-size:12px;padding:6px 14px;border-radius:999px;cursor:pointer;border:1px solid var(--verde);background:var(--verde);color:var(--sobre-verde)">Por cliente (separar)</button>
       <button type="button" class="sep-tg" data-v="total" onclick="sepView(this)" style="font-size:12px;padding:6px 14px;border-radius:999px;cursor:pointer;border:1px solid var(--borda);background:transparent;color:var(--txt-mut)">Total a comprar</button>
     </div>
     <div id="sep-cliente">
@@ -5158,7 +5154,7 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
           <span style="font-size:.8rem;color:{{ 'var(--verde-claro)' if p.separada else 'var(--txt-mut)' }}">{% if p.separada %}☑ separado{% else %}☐ a separar{% endif %}</span>
           <div style="display:flex;gap:.7rem;align-items:center">
             <a href="/painel/fornecedor/embalagem/{% if p.tipo=='avulso' %}avulso/{% endif %}{{ p.id }}/etiqueta" target="_blank" style="color:var(--verde-claro);font-size:.78rem;text-decoration:none">🏷️ etiqueta</a>
-            <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/{{ 'desseparar' if p.separada else 'separar' }}" style="margin:0"><input type="hidden" name="fase" value="separacao"><button style="width:auto;margin:0;padding:.35rem .8rem;font-size:.78rem;{% if p.separada %}background:transparent;border:1px solid #333;color:var(--txt-mut){% else %}background:var(--verde);border:0;color:#fff{% endif %}">{% if p.separada %}desfazer{% else %}marcar separado{% endif %}</button></form>
+            <form method="post" action="/painel/fornecedor/pedidos/{{ p.tipo }}/{{ p.id }}/{{ 'desseparar' if p.separada else 'separar' }}" style="margin:0"><input type="hidden" name="fase" value="separacao"><button style="width:auto;margin:0;padding:.35rem .8rem;font-size:.78rem;{% if p.separada %}background:transparent;border:1px solid #333;color:var(--txt-mut){% else %}background:var(--verde);border:0;color:var(--sobre-verde){% endif %}">{% if p.separada %}desfazer{% else %}marcar separado{% endif %}</button></form>
           </div>
         </div>
       {% endcall %}
@@ -5172,7 +5168,7 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
         {% for it in g.itens %}
         <div style="display:flex;justify-content:space-between;align-items:center;padding:.5rem .2rem;border-bottom:1px solid #1c1c1d">
           <span>{{ it.produto_nome }}</span>
-          <span style="white-space:nowrap"><b>{{ "%g"|format(it.quantidade) }}</b> <span class="mut">{{ it.unidade }}</span>{% if it.get('suficiente') is not none %} <span style="font-size:.7rem;color:{{ 'var(--verde-claro)' if it.suficiente else '#e0a83d' }}">{{ '✓' if it.suficiente else 'falta ' ~ ("%g"|format(it.falta)) }}</span>{% endif %}</span>
+          <span style="white-space:nowrap"><b>{{ "%g"|format(it.quantidade) }}</b> <span class="mut">{{ it.unidade }}</span>{% if it.get('suficiente') is not none %} <span style="font-size:.7rem;color:{{ 'var(--verde-claro)' if it.suficiente else 'var(--ambar)' }}">{{ '✓' if it.suficiente else 'falta ' ~ ("%g"|format(it.falta)) }}</span>{% endif %}</span>
         </div>
         {% endfor %}
       </div>
@@ -5222,7 +5218,7 @@ _PEDIDOS_UNI = """{% extends "base" %}{% block conteudo %}
       </div>
       {% if not p.pago %}
       <details style="margin-top:.5rem">
-        <summary style="list-style:none;cursor:pointer;background:var(--verde);color:#fff;border-radius:8px;padding:.42rem .9rem;font-size:.8rem;font-weight:500;display:inline-block">Entregue — como recebeu?</summary>
+        <summary style="list-style:none;cursor:pointer;background:var(--verde);color:var(--sobre-verde);border-radius:8px;padding:.42rem .9rem;font-size:.8rem;font-weight:500;display:inline-block">Entregue — como recebeu?</summary>
         <div style="margin-top:.5rem;background:#101011;border:1px dashed #3a5c4e;border-radius:9px;padding:.7rem">
           <div class="mut" style="font-size:.8rem;margin-bottom:.5rem">Como o cliente pagou{% if p.tipo=='avulso' %} R$ {{ (p.total_centavos/100)|n2 }}{% endif %}?</div>
           <div style="display:flex;gap:.4rem;flex-wrap:wrap">
@@ -6311,7 +6307,7 @@ def bem_vindo(request: Request):
                    whatsapp_bot_num=whatsapp_bot_num)
 
 
-# Rampa ordinal azul (validada p/ superfície escura #161617) + cinza p/ "perdido".
+# Rampa ordinal azul (validada p/ superfície escura var(--card)) + cinza p/ "perdido".
 _FUNIL_ORDEM = ["rascunho", "enviado", "negociando", "aprovada", "fechado", "perdido"]
 _FUNIL_ROTULO = {"rascunho": "Rascunho", "enviado": "Enviado",
                  "negociando": "Negociando", "aprovada": "Aprovada",
@@ -6380,7 +6376,7 @@ def _painel_dashboard(pool, conta, vende_servico=False):
         corte = max(a, b - gap) if k > 1 else b
         partes.append(f"{_FUNIL_COR[s]} {a:.2f}deg {corte:.2f}deg")
         if k > 1:
-            partes.append(f"#161617 {corte:.2f}deg {b:.2f}deg")
+            partes.append(f"var(--card) {corte:.2f}deg {b:.2f}deg")
         acc = b
     gradiente = "conic-gradient(" + ", ".join(partes) + ")" if partes else ""
 

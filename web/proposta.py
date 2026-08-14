@@ -153,11 +153,11 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
 p.es{font-size:13.5px;line-height:1.7;color:#3A4254}
 table{width:100%;border-collapse:collapse;margin-top:4px}
 th{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#9FA8BC;background:#14213D;padding:9px 13px;text-align:left}
-th.r,td.r{text-align:right;font-family:ui-monospace,Menlo,monospace;white-space:nowrap}
+th.r,td.r{text-align:right;font-family:var(--mono);white-space:nowrap}
 td{padding:11px 13px;border-bottom:1px solid #F0EBE0;font-size:13.5px}td small{display:block;color:#A8A192;font-size:11.5px;margin-top:2px}
 .tot{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:22px}
-.bx{border:1px solid #ECE7DC;border-radius:12px;padding:16px}.bx .l{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:600}.bx .v{font-family:ui-monospace,Menlo,monospace;font-size:21px;font-weight:600;margin-top:6px}
-.fin{margin-top:12px;background:#14213D;border-radius:12px;padding:18px 20px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}.fin .l{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#E0B458;font-weight:600}.fin .v{font-family:ui-monospace,Menlo,monospace;font-size:26px;font-weight:600;color:#FBFAF7}
+.bx{border:1px solid #ECE7DC;border-radius:12px;padding:16px}.bx .l{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:600}.bx .v{font-family:var(--mono);font-size:21px;font-weight:600;margin-top:6px}
+.fin{margin-top:12px;background:#14213D;border-radius:12px;padding:18px 20px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}.fin .l{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#E0B458;font-weight:600}.fin .v{font-family:var(--mono);font-size:26px;font-weight:600;color:#FBFAF7}
 .sign{margin-top:16px;background:#0e2a1f;border:1px solid #1c5c40;border-radius:12px;padding:20px 22px;color:#eafff5}
 .sign h3{font-size:15px;margin-bottom:4px;color:#7EE7B8}
 .sign p{font-size:12.5px;color:#a9d9c4;margin-bottom:14px;line-height:1.5}

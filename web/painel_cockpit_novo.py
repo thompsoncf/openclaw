@@ -36,6 +36,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from db.conexao import get_pool
+from web import tema as _tema
 from finance import cockpit as ck
 from finance import cockpit_dono as cd
 from web.painel_cockpit import esc, _sessao, _gerencia, _ini
@@ -46,26 +47,10 @@ _BASE = "/cockpit/novo"
 
 
 # ================================================================== marca
-# Tokens copiados de zaq-landing/index.html:17-24 (a marca do site). Os semânticos
-# (--ambar/--coral/--azul/--roxo) o site não define — o app precisa deles pra
-# temperatura de lead e estados de atenção, então ficam no vocabulário do app.
-_CSS = """
-<link rel=preconnect href="https://fonts.googleapis.com">
-<link rel=preconnect href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap" rel=stylesheet>
-<style>
-:root{
-  color-scheme:dark;
-  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
-  --neon:#25D366; --neon-bright:#46F58A; --neon-deep:#0FA85A;
-  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
-  --ink:#04150C;                 /* texto sobre o verde — o site diverge (#04150C x
-                                    #07110B); aqui fica um só, e este é o canônico */
-  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9; --roxo:#C9A3E0;
-  --display:"Bricolage Grotesque",system-ui,sans-serif;
-  --body:"Inter",system-ui,sans-serif;
-  --mono:"JetBrains Mono",ui-monospace,monospace;
-}
+# Os tokens vêm de web/tema.py, que é a fonte única do painel inteiro — o mesmo
+# bloco que o portal, o admin e a agenda usam. Aqui embaixo fica só o CSS de
+# layout deste app (app shell, abas, folha de ações), que não existe em outro lugar.
+_CSS = _tema.FONTES + """<style>""" + _tema.variaveis(com_base=False) + """
 *{box-sizing:border-box}html,body{margin:0}
 body{background:var(--bg);color:var(--text);font-family:var(--body);line-height:1.5;
   -webkit-font-smoothing:antialiased;overflow:hidden}

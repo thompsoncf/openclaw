@@ -69,7 +69,7 @@ def _etapas(c, conta_id: int) -> list[dict]:
     return [{"id": r[0], "chave": r[1], "rotulo": r[2], "ordem": r[3], "fixa": r[4]} for r in rows]
 TEMPERATURAS = [("frio", "Frio"), ("morno", "Morno"), ("quente", "Quente")]
 TEMP_OK = {t for t, _ in TEMPERATURAS}
-TEMP_COR = {"frio": "#5b9bd5", "morno": "#e0a33e", "quente": "#e0574f"}
+TEMP_COR = {"frio": "#5b9bd5", "morno": "var(--ambar)", "quente": "var(--coral)"}
 TEMP_PILL = {"frio": ("#14273a", "#7bb8e6"), "morno": ("#2e2713", "#e0b25a"),
              "quente": ("#3a1a1a", "#f0917f")}
 TIPOS = [("ligacao", "Ligação"), ("whatsapp", "WhatsApp"), ("email", "E-mail"),
@@ -1636,7 +1636,7 @@ def comunicacao_responder(request: Request, conversa_id: int = Form(...), texto:
             base = re.sub(r"(?i)^\s*(re|fwd?):\s*", "", base).strip()
             assunto = ("Re: " + base) if base else (f"Contato · {ctx['conta'][2] or ''}").strip()
             _nome_rem, email_rem = _membro_contato(pool, ctx["conta_id"], ctx["membro_id"])
-            html = ("<div style=\"font-family:system-ui,Arial,sans-serif;font-size:15px;"
+            html = ("<div style=\"font-family:var(--body);font-size:15px;"
                     "line-height:1.6;color:#222\">"
                     + "".join(f"<p style=\"margin:0 0 12px\">{_html_escape(par)}</p>"
                               for par in texto.split("\n\n")) + "</div>")
@@ -2776,7 +2776,7 @@ def _descad_page(titulo: str, corpo: str) -> str:
         "<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1'>"
         f"<title>{titulo}</title><style>body{{margin:0;background:#0b0b0c;color:#e9eae6;"
-        "font-family:system-ui,Arial,sans-serif;display:grid;place-items:center;min-height:100vh}"
+        "font-family:var(--body);display:grid;place-items:center;min-height:100vh}"
         ".c{max-width:440px;background:#141416;border:1px solid #26262b;border-radius:14px;padding:1.6rem;margin:1rem}"
         "h1{font-size:1.2rem;margin:0 0 .6rem}p{color:#b9beb6;line-height:1.5}"
         ".b{background:#e0574f;border:0;color:#fff;border-radius:9px;padding:.6rem 1rem;font-size:.95rem;cursor:pointer;font-family:inherit}"
@@ -4451,7 +4451,7 @@ def prospeccao_ficha(request: Request, alvo_id: int):
                 where a.prospeccao_id=%s order by a.criado_em desc""", (alvo_id,)).fetchall()
     timeline = []
     for (t, rr, d, ag, cr, nome) in ativs:
-        cor = "#3ee0a6" if rr in _RES_VERDE else "#e0a33e" if rr in _RES_AMBAR else "#7a7a7a"
+        cor = "#3ee0a6" if rr in _RES_VERDE else "var(--ambar)" if rr in _RES_AMBAR else "#7a7a7a"
         timeline.append({"tipo_rot": TIPO_ROT.get(t, t), "resultado_rot": RESULTADO_ROT.get(rr or "", ""),
                          "descricao": d, "agendado_para": ag, "criado_em": cr, "quem": nome, "cor": cor})
     # canais por onde o lead se comunicou (das conversas/mensagens) — pra mostrar
@@ -5056,7 +5056,7 @@ def prospeccao_enviar_email(request: Request, alvo_id: int, assunto: str = Form(
     if not remetente:
         return JSONResponse({"ok": False, "erro": "E-mail não configurado (configure a caixa da empresa na aba Canais)."})
     nome_rem, email_rem = _membro_contato(pool, ctx["conta_id"], ctx["membro_id"])
-    html = "<div style=\"font-family:system-ui,Arial,sans-serif;font-size:15px;line-height:1.6;color:#222\">" \
+    html = "<div style=\"font-family:var(--body);font-size:15px;line-height:1.6;color:#222\">" \
            + "".join(f"<p style=\"margin:0 0 12px\">{_html_escape(par)}</p>"
                      for par in corpo.split("\n\n")) + "</div>"
     ok = _ein.enviar_conta(pool, ctx["conta_id"], destino, assunto, html, texto_alt=corpo,
@@ -5633,11 +5633,11 @@ _CSS = """<style>
 .pw{width:100%;max-width:1240px;margin:0 auto;padding:1.2rem 1rem 2.5rem;box-sizing:border-box}
 .pw h2.tt{margin:0;font-size:1.35rem}
 .pbtn{width:auto;margin:0;padding:.5rem .9rem;border-radius:9px;font-size:.86rem;font-weight:600;
-  background:var(--verde);color:#fff;border:0;cursor:pointer;display:inline-flex;align-items:center;gap:.4rem;text-decoration:none}
+  background:var(--verde);color:var(--sobre-verde);border:0;cursor:pointer;display:inline-flex;align-items:center;gap:.4rem;text-decoration:none}
 .pbtn:hover{background:var(--verde-hover)}
 .pbtn.ghost{background:transparent;color:var(--txt-mut);border:1px solid var(--borda)}
 .pbtn.ghost:hover{color:var(--txt);border-color:var(--verde)}
-.pbtn.novo{background:transparent;color:var(--verde-claro);border:1px solid #1e4a3a}
+.pbtn.novo{background:transparent;color:var(--verde-claro);border:1px solid var(--neon-borda)}
 .pbtn.novo:hover{background:#132420}
 .pbtn[disabled]{opacity:.45;cursor:not-allowed}
 .tpill{display:inline-flex;align-items:center;padding:.12rem .55rem;border-radius:999px;font-size:.72rem;font-weight:600;line-height:1.4}
@@ -5657,7 +5657,7 @@ _CSS = """<style>
 .kbtabs{display:flex;gap:.3rem;overflow-x:auto;margin-top:.9rem;padding-bottom:.35rem;-webkit-overflow-scrolling:touch}
 .kbtab{width:auto;margin:0;white-space:nowrap;padding:.4rem .7rem;border-radius:999px;font-size:.8rem;cursor:pointer;
   background:transparent;border:1px solid var(--borda);color:var(--txt-mut);display:inline-flex;align-items:center;gap:.35rem}
-.kbtab.on{background:var(--verde);border-color:var(--verde);color:#fff;font-weight:600}
+.kbtab.on{background:var(--verde);border-color:var(--verde);color:var(--sobre-verde);font-weight:600}
 .kbtab .c{background:rgba(0,0,0,.25);border-radius:999px;padding:0 .4rem;font-size:.72rem}
 .kbrow{display:block;margin-top:.5rem}
 .kbcol{display:none;flex-direction:column;background:var(--bg);border:1px solid var(--borda);border-radius:14px;padding:.7rem;min-height:220px}
@@ -5696,17 +5696,17 @@ _CSS = """<style>
 .tl .dt{position:absolute;left:-7px;top:.28rem;width:12px;height:12px;border-radius:50%;border:2px solid var(--card)}
 .rcpills{display:flex;flex-wrap:wrap;gap:.4rem;margin:.2rem 0 .6rem}
 .rcpill{width:auto;margin:0;padding:.35rem .75rem;border-radius:999px;font-size:.8rem;cursor:pointer;background:transparent;border:1px solid var(--borda);color:var(--txt-mut)}
-.rcpill.on{background:var(--verde);border-color:var(--verde);color:#fff;font-weight:600}
+.rcpill.on{background:var(--verde);border-color:var(--verde);color:var(--sobre-verde);font-weight:600}
 .chipin{display:inline-flex;align-items:center;gap:.4rem;border:1px solid var(--borda);border-radius:999px;padding:.3rem .7rem;color:var(--txt-mut);font-size:.8rem;background:var(--bg)}
 .chipin input{border:0;background:transparent;color:var(--txt);padding:0;width:auto;font-size:.82rem}
 /* ---- captação ---- */
 .cabas{display:flex;gap:.3rem;background:var(--bg);border:1px solid var(--borda);border-radius:11px;padding:4px;margin:.2rem 0 1rem}
 .caba{width:auto;margin:0;flex:1;text-align:center;padding:.5rem .6rem;border-radius:8px;font-size:.85rem;cursor:pointer;background:transparent;border:0;color:var(--txt-mut);text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:.35rem}
-.caba.on{background:var(--verde);color:#fff;font-weight:600}
+.caba.on{background:var(--verde);color:var(--sobre-verde);font-weight:600}
 .rlist{border:1px solid var(--borda);border-radius:12px;overflow:hidden;margin-top:.5rem}
 .rrow{display:flex;align-items:center;gap:.7rem;padding:.6rem .8rem;border-top:1px solid var(--borda)}
 .rrow:first-child{border-top:0}
-.dupb{font-size:.68rem;font-weight:700;padding:.05rem .45rem;border-radius:999px;color:#e0a33e;border:1px solid #5a4520;background:#2a2113;white-space:nowrap}
+.dupb{font-size:.68rem;font-weight:700;padding:.05rem .45rem;border-radius:999px;color:var(--ambar);border:1px solid var(--ambar-borda);background:#2a2113;white-space:nowrap}
 .rrow input[type=checkbox]{width:auto;margin:0;flex-shrink:0;width:18px;height:18px;accent-color:var(--verde)}
 .toggle{position:relative;width:44px;height:24px;flex-shrink:0}
 .toggle input{opacity:0;width:0;height:0;position:absolute}
@@ -5723,7 +5723,7 @@ _NAV_ASSETS = """<style>
 .pnavbar{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin:.2rem 0 1.1rem}
 .pnav{display:inline-flex;align-items:center;gap:.35rem;font:inherit;font-size:.84rem;font-weight:600;padding:.45rem .8rem;border-radius:9px;border:1px solid var(--borda);color:var(--txt);background:transparent;text-decoration:none;white-space:nowrap;cursor:pointer;line-height:1;box-sizing:border-box;width:auto;margin:0;-webkit-appearance:none;appearance:none;vertical-align:middle;height:auto}
 .pnav:hover{border-color:var(--verde);color:#fff}
-.pnav.on{color:#fff;background:var(--verde);border-color:var(--verde)}
+.pnav.on{color:var(--sobre-verde);background:var(--verde);border-color:var(--verde)}
 #pnavprog{position:fixed;top:0;left:0;height:3px;width:0;background:var(--verde);box-shadow:0 0 8px var(--verde);z-index:99999;transition:width .3s ease;opacity:0}
 #pnavprog.go{opacity:1}
 /* cercar área no mapa (Captar leads → Google Maps) — acordeão retraído por padrão */
@@ -5738,8 +5738,8 @@ _NAV_ASSETS = """<style>
 .mapacc-body{max-height:0;overflow:hidden;transition:max-height .22s ease}
 .mapacc.open .mapacc-body{max-height:480px}
 .mapacc-in{padding:0 .75rem .8rem}
-.mapcard{position:relative;height:340px;border-radius:9px;overflow:hidden;border:1px solid var(--borda);background:#1a1a1c}
-.mapcard-busca{position:absolute;top:8px;left:8px;right:8px;z-index:5;background:#161617;border:1px solid var(--borda);
+.mapcard{position:relative;height:340px;border-radius:9px;overflow:hidden;border:1px solid var(--borda);background:var(--card-2)}
+.mapcard-busca{position:absolute;top:8px;left:8px;right:8px;z-index:5;background:var(--card);border:1px solid var(--borda);
   border-radius:8px;color:var(--txt);padding:.42rem .6rem;font-size:.82rem;font-family:inherit;width:calc(100% - 16px)}
 .mapcard-busca:focus{outline:0;border-color:var(--verde)}
 .radiusbar{display:flex;align-items:center;gap:.6rem;margin-top:.6rem;font-size:.8rem;color:var(--txt-mut)}
@@ -5981,7 +5981,7 @@ function capCnpj(){var f=document.getElementById('cap-manual');var cnpj=f.queryS
 function capCsv(ev){ev.preventDefault();capFetch('/painel/prospeccao/captar/csv',new FormData(ev.target)).then(function(d){if(!d.ok){capToast('Erro no CSV');return;}_capReload(d.msg||'Importado ✓');}).catch(function(){capToast('Falha de rede');});return false;}
 function capBuscar(ev){ev.preventDefault();var f=ev.target;var btn=document.getElementById('cap-g-btn');if(btn){btn.disabled=true;btn.textContent='Buscando…';}
   capFetch('/painel/prospeccao/captar/buscar',new FormData(f)).then(function(d){if(btn){btn.disabled=false;btn.textContent='🔍 Buscar';}var box=document.getElementById('cap-res');
-    if(!d.ok){box.innerHTML='<div class="mut" style="color:#e0a33e">Não consegui buscar ('+(d.erro||'?')+'). Confira a chave/billing e tente de novo.</div>';return;}
+    if(!d.ok){box.innerHTML='<div class="mut" style="color:var(--ambar)">Não consegui buscar ('+(d.erro||'?')+'). Confira a chave/billing e tente de novo.</div>';return;}
     if(!d.itens.length){box.innerHTML='<div class="mut">Nada encontrado'+(d.n_redes?(' ('+d.n_redes+' rede(s) oculta(s))'):'')+'. Tente outro termo/cidade.</div>';return;}
     var TP={quente:'#f0917f',morno:'#e0b25a',frio:'#7bb8e6'};
     var h='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem"><div class="mut" style="font-size:.82rem">'+d.itens.length+' encontrado(s)'+(d.n_redes?(' · '+d.n_redes+' oculta(s)'):'')+'</div><label class="mut" style="font-size:.8rem;cursor:pointer"><input type="checkbox" onclick="capAll(this)" style="width:auto;vertical-align:middle;accent-color:var(--verde)"> marcar todos</label></div><div class="rlist" id="cap-list">';
@@ -6020,7 +6020,7 @@ function cercaMapaInit(){
   _cercaMarker = new google.maps.Marker({position: partida, map: _cercaMap, draggable: true});
   _cercaCircle = new google.maps.Circle({
     map: _cercaMap, center: partida, radius: 3000, editable: true, draggable: false,
-    fillColor: '#1d9e75', fillOpacity: .14, strokeColor: '#1d9e75', strokeWeight: 2});
+    fillColor: 'var(--verde)', fillOpacity: .14, strokeColor: 'var(--verde)', strokeWeight: 2});
   _cercaCircle.bindTo('center', _cercaMarker, 'position');
   _cercaMarker.addListener('drag', cercaSync);
   google.maps.event.addListener(_cercaCircle, 'radius_changed', cercaSync);
@@ -6068,8 +6068,8 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
  .bt-tbl td{padding:.55rem .7rem;border-bottom:1px solid var(--borda);vertical-align:middle}
  .bt-tbl tr:last-child td{border-bottom:0}
  .bt-chip{font-size:.68rem;padding:.1rem .45rem;border-radius:999px;border:1px solid var(--borda);color:var(--mut);white-space:nowrap}
- .bt-dup{font-size:.62rem;font-weight:700;padding:.05rem .4rem;border-radius:999px;color:#e0a33e;border:1px solid #5a4520;background:#2a2113;white-space:nowrap}
- .hist-warn{border:1px solid #5a4520;background:#2a2113;color:#e0a33e;border-radius:10px;padding:.55rem .8rem;font-size:.84rem;margin:.2rem 0 .7rem}
+ .bt-dup{font-size:.62rem;font-weight:700;padding:.05rem .4rem;border-radius:999px;color:var(--ambar);border:1px solid var(--ambar-borda);background:#2a2113;white-space:nowrap}
+ .hist-warn{border:1px solid var(--ambar-borda);background:#2a2113;color:var(--ambar);border-radius:10px;padding:.55rem .8rem;font-size:.84rem;margin:.2rem 0 .7rem}
  .hist{border:1px solid var(--borda);border-radius:12px;background:var(--card);padding:.6rem .8rem}
  .hist details{border-top:1px solid var(--borda)}.hist details:first-child{border-top:0}
  .hist summary{list-style:none;cursor:pointer;padding:.5rem .1rem;display:flex;align-items:center;gap:.5rem;font-size:.86rem}
@@ -6129,7 +6129,7 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <span style="width:1px;height:24px;background:var(--borda);margin:0 .15rem"></span>
         {% if gerencia %}
         {% if ver_camp %}
-        <button class="pbtn ghost" formaction="/painel/prospeccao/base/tirar-campanha" onclick="return baseTirarCheck()" style="color:#e0a33e;border-color:#5a4520" title="Tira os marcados de qualquer campanha — voltam livres pra Base">🔓 Tirar da campanha</button>
+        <button class="pbtn ghost" formaction="/painel/prospeccao/base/tirar-campanha" onclick="return baseTirarCheck()" style="color:var(--ambar);border-color:var(--ambar-borda)" title="Tira os marcados de qualquer campanha — voltam livres pra Base">🔓 Tirar da campanha</button>
         {% else %}
         <select name="campanha_id" class="fld" style="max-width:220px;width:auto" onchange="baseCampSel(this)">
           <option value="">📣 Jogar na campanha…</option>
@@ -6194,7 +6194,7 @@ _BASE_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <td class="mut" style="font-variant-numeric:tabular-nums;white-space:nowrap">💬 {{ l.toque_wa }} · ✉️ {{ l.toque_mail }}</td>
             <td class="mut" style="font-size:.78rem;white-space:nowrap">{{ l.ult or '—' }}</td>
             <td style="white-space:nowrap"><button class="pbtn ghost" name="only" value="{{ l.id }}" style="padding:.2rem .5rem;font-size:.76rem" title="Promover a lead">⬆︎</button>
-              <button type="button" class="pbtn ghost" onclick="baseExcluir({{ l.id }},this)" style="padding:.2rem .5rem;font-size:.76rem;color:#e0574f;border-color:#5c2a27" title="Excluir lead da base">🗑</button></td>
+              <button type="button" class="pbtn ghost" onclick="baseExcluir({{ l.id }},this)" style="padding:.2rem .5rem;font-size:.76rem;color:var(--coral);border-color:#5c2a27" title="Excluir lead da base">🗑</button></td>
           </tr>
         {% else %}
           <tr><td colspan="7" class="mut" style="text-align:center;padding:1.5rem">Nada na base ainda. Use o <b style="color:var(--verde-claro)">➕ Adicionar leads à base</b> acima ↑ pra começar.</td></tr>
@@ -6318,7 +6318,7 @@ function cnpjResolverAbrir(leads,semLeads){
         +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap">'
         +'<div style="min-width:0"><div style="font-size:.85rem;font-weight:600">'+jsEsc(lead.empresa||('lead #'+lead.id))+'</div>'
         +(lead.endereco?('<div class="mut" style="font-size:.76rem;margin-top:.2rem">📍 Endereço do Maps: '+jsEsc(lead.endereco)+'</div>'):'')+'</div>'
-        +(lead.web?('<a href="'+lead.web+'" target="_blank" rel="noopener" style="font-size:.8rem;font-weight:600;color:var(--verde-claro);text-decoration:none;display:inline-flex;align-items:center;gap:.3rem;white-space:nowrap;flex-shrink:0;padding:.4rem .7rem;border:1px solid #1e4a3a;border-radius:8px">🔎 buscar na web ›</a>'):'')
+        +(lead.web?('<a href="'+lead.web+'" target="_blank" rel="noopener" style="font-size:.8rem;font-weight:600;color:var(--verde-claro);text-decoration:none;display:inline-flex;align-items:center;gap:.3rem;white-space:nowrap;flex-shrink:0;padding:.4rem .7rem;border:1px solid var(--neon-borda);border-radius:8px">🔎 buscar na web ›</a>'):'')
         +'</div>'
         +'<div style="display:flex;gap:.4rem;align-items:center;margin-top:.5rem;padding-top:.5rem;border-top:1px dashed var(--borda)">'
         +'<span class="mut" style="font-size:.76rem;white-space:nowrap">Já tem o CNPJ?</span>'
@@ -6576,7 +6576,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;
     font-size:.85rem;line-height:1;flex-shrink:0}
   .etb:hover:not(:disabled){border-color:var(--verde)}
-  .etb.del:hover:not(:disabled){border-color:#e0574f;color:#e0574f}
+  .etb.del:hover:not(:disabled){border-color:var(--coral);color:var(--coral)}
   .etb:disabled{opacity:.32;cursor:not-allowed}
   .etadd{display:flex;gap:.4rem;margin-top:.8rem;flex-wrap:wrap}
   .etadd .etin{min-width:160px}
@@ -6640,7 +6640,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .kbch{display:flex;gap:.35rem;margin-top:.3rem;font-size:.82rem;align-items:center}
 .kbch .mut{font-size:.7rem}
 .kbx{background:none;border:0;color:#6b6b6b;cursor:pointer;font-size:.82rem;line-height:1;padding:.1rem .25rem;border-radius:6px;opacity:.55}
-.kbx:hover{opacity:1;color:#e0574f;background:rgba(224,87,79,.12)}
+.kbx:hover{opacity:1;color:var(--coral);background:rgba(224,87,79,.12)}
 #kb-drawer{position:fixed;inset:0;z-index:80;display:none}
 #kb-drawer.on{display:block}
 #kb-drawer .bd{position:absolute;inset:0;background:rgba(0,0,0,.55)}
@@ -6694,7 +6694,7 @@ function kbDrop(ev,status){ev.preventDefault();ev.currentTarget.classList.remove
     }).catch(function(){location.reload();});}
 
 // ---- captação inline (sem reload) ----
-var TEMPCOR={frio:'#5b9bd5',morno:'#e0a33e',quente:'#e0574f'};
+var TEMPCOR={frio:'#5b9bd5',morno:'var(--ambar)',quente:'var(--coral)'};
 function jsEsc(s){return (s||'').replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];});}
 function jsBrl(c){c=c||0;var s=(c/100).toFixed(2).split('.');var i=s[0].replace(/\\B(?=(\\d{3})+(?!\\d))/g,'.');return 'R$ '+i+','+s[1];}
 function cardGo(id){if(!window._kbMoved)kbAbrir(id);}
@@ -6733,11 +6733,11 @@ function capCnpj(){var f=document.getElementById('cap-manual');var cnpj=f.queryS
 function capCsv(ev){ev.preventDefault();capFetch('/painel/prospeccao/captar/csv',new FormData(ev.target)).then(function(d){if(!d.ok){capToast('Erro no CSV');return;}capToast(d.msg||'Importado');setTimeout(function(){location.reload();},800);}).catch(function(){capToast('Falha de rede');});return false;}
 function capBuscar(ev){ev.preventDefault();var f=ev.target;var btn=document.getElementById('cap-g-btn');if(btn){btn.disabled=true;btn.textContent='Buscando…';}
   capFetch('/painel/prospeccao/captar/buscar',new FormData(f)).then(function(d){if(btn){btn.disabled=false;btn.textContent='Buscar';}var box=document.getElementById('cap-res');
-    if(!d.ok){box.innerHTML='<div class="mut" style="color:#e0a33e">Não consegui buscar ('+(d.erro||'?')+'). Confira a chave/billing e tente de novo.</div>';return;}
+    if(!d.ok){box.innerHTML='<div class="mut" style="color:var(--ambar)">Não consegui buscar ('+(d.erro||'?')+'). Confira a chave/billing e tente de novo.</div>';return;}
     if(!d.itens.length){box.innerHTML='<div class="mut">Nada encontrado'+(d.n_redes?(' ('+d.n_redes+' rede(s) oculta(s))'):'')+'. Tente outro termo/cidade.</div>';return;}
     var TP={quente:'#f0917f',morno:'#e0b25a',frio:'#7bb8e6'};
     var h='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem"><div class="mut" style="font-size:.82rem">'+d.itens.length+' encontrado(s)'+(d.n_redes?(' · '+d.n_redes+' oculta(s)'):'')+'</div><label class="mut" style="font-size:.8rem;cursor:pointer"><input type="checkbox" onclick="capAll(this)" style="width:auto;vertical-align:middle;accent-color:var(--verde)"> marcar todos</label></div><div class="rlist" id="cap-list">';
-    d.itens.forEach(function(it){var loc=(it.cidade?(' · '+jsEsc(it.cidade)+(it.uf?('/'+jsEsc(it.uf)):'')):'');var dupB=it.dup_campanha?(' <span class="dupb">🚫 já em campanha: '+jsEsc(it.dup_campanha)+'</span>'):(it.dup?' <span class="dupb">⚠️ já na base</span>':'');h+='<label class="rrow" style="cursor:pointer"><input type="checkbox" name="itens" value="'+it.pack+'"><span style="flex:1"><span style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap"><span class="tdot" style="background:'+(TEMPCOR[it.temperatura]||'#5b9bd5')+'"></span><b style="font-size:.88rem">'+jsEsc(it.empresa)+'</b>'+(it.aberto===false?' <span style=\\'color:#e0574f;font-size:.7rem\\'>(fechado)</span>':'')+dupB+'</span><span class="mut" style="font-size:.76rem">'+(it.segmento?(jsEsc(it.segmento)+' · '):'')+(it.telefone?jsEsc(it.telefone):'')+(it.rating?(' · nota '+it.rating):'')+(it.tem_site?'':' · <span style=\\'color:#e0574f\\'>sem site</span>')+loc+'</span></span><span class="tpill" style="background:transparent;border:1px solid '+(TP[it.temperatura]||'#7bb8e6')+';color:'+(TP[it.temperatura]||'#7bb8e6')+'">'+it.temperatura+'</span></label>';});
+    d.itens.forEach(function(it){var loc=(it.cidade?(' · '+jsEsc(it.cidade)+(it.uf?('/'+jsEsc(it.uf)):'')):'');var dupB=it.dup_campanha?(' <span class="dupb">🚫 já em campanha: '+jsEsc(it.dup_campanha)+'</span>'):(it.dup?' <span class="dupb">⚠️ já na base</span>':'');h+='<label class="rrow" style="cursor:pointer"><input type="checkbox" name="itens" value="'+it.pack+'"><span style="flex:1"><span style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap"><span class="tdot" style="background:'+(TEMPCOR[it.temperatura]||'#5b9bd5')+'"></span><b style="font-size:.88rem">'+jsEsc(it.empresa)+'</b>'+(it.aberto===false?' <span style=\\'color:var(--coral);font-size:.7rem\\'>(fechado)</span>':'')+dupB+'</span><span class="mut" style="font-size:.76rem">'+(it.segmento?(jsEsc(it.segmento)+' · '):'')+(it.telefone?jsEsc(it.telefone):'')+(it.rating?(' · nota '+it.rating):'')+(it.tem_site?'':' · <span style=\\'color:var(--coral)\\'>sem site</span>')+loc+'</span></span><span class="tpill" style="background:transparent;border:1px solid '+(TP[it.temperatura]||'#7bb8e6')+';color:'+(TP[it.temperatura]||'#7bb8e6')+'">'+it.temperatura+'</span></label>';});
     h+='</div><div style="margin-top:.8rem"><button type="button" class="pbtn" onclick="capImport()">Adicionar selecionados</button></div>';box.innerHTML=h;
   }).catch(function(){if(btn){btn.disabled=false;btn.textContent='Buscar';}capToast('Falha de rede');});return false;}
 /* ---------------- cercar área no mapa (Google Maps JS API, lazy-carregada) ---------------- */
@@ -6772,7 +6772,7 @@ function cercaMapaInit(){
   _cercaMarker = new google.maps.Marker({position: partida, map: _cercaMap, draggable: true});
   _cercaCircle = new google.maps.Circle({
     map: _cercaMap, center: partida, radius: 3000, editable: true, draggable: false,
-    fillColor: '#1d9e75', fillOpacity: .14, strokeColor: '#1d9e75', strokeWeight: 2});
+    fillColor: 'var(--verde)', fillOpacity: .14, strokeColor: 'var(--verde)', strokeWeight: 2});
   _cercaCircle.bindTo('center', _cercaMarker, 'position');
   _cercaMarker.addListener('drag', cercaSync);
   google.maps.event.addListener(_cercaCircle, 'radius_changed', cercaSync);
@@ -6890,7 +6890,7 @@ _CAPTAR_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 
     {% if resultados is not none %}
       {% if not busca.ok %}
-        <div class="mut" style="margin-top:.9rem;color:#e0a33e">Não consegui buscar agora ({{ busca.erro }}). Confira a chave/billing e tente de novo.</div>
+        <div class="mut" style="margin-top:.9rem;color:var(--ambar)">Não consegui buscar agora ({{ busca.erro }}). Confira a chave/billing e tente de novo.</div>
       {% elif not resultados %}
         <div class="mut" style="margin-top:.9rem">Nada encontrado{% if busca.esconder and busca.n_redes %} (escondi {{ busca.n_redes }} rede(s) grande(s)){% endif %}. Tente outro termo/cidade.</div>
       {% else %}
@@ -6905,7 +6905,7 @@ _CAPTAR_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <input type="checkbox" name="itens" value="{{ it.pack }}">
             <span style="flex:1">
               <span style="display:flex;align-items:center;gap:.4rem;flex-wrap:wrap"><span class="tdot" style="background:{{ temp_cor[it.temperatura] }}"></span><b style="font-size:.88rem">{{ it.empresa }}</b>{% if it.dup_campanha %}<span class="dupb">🚫 já em campanha: {{ it.dup_campanha }}</span>{% elif it.dup %}<span class="dupb">⚠️ já na base</span>{% endif %}</span>
-              <span class="mut" style="font-size:.76rem">{% if it.segmento %}{{ it.segmento }} · {% endif %}{% if it.telefone %}{{ it.telefone }}{% endif %}{% if it.rating %} · nota {{ it.rating }}{% endif %}{% if not it.tem_site %} · <span style="color:#e0574f">sem site</span>{% endif %}{% if it.cidade %} · {{ it.cidade }}{% if it.uf %}/{{ it.uf }}{% endif %}{% endif %}</span>
+              <span class="mut" style="font-size:.76rem">{% if it.segmento %}{{ it.segmento }} · {% endif %}{% if it.telefone %}{{ it.telefone }}{% endif %}{% if it.rating %} · nota {{ it.rating }}{% endif %}{% if not it.tem_site %} · <span style="color:var(--coral)">sem site</span>{% endif %}{% if it.cidade %} · {{ it.cidade }}{% if it.uf %}/{{ it.uf }}{% endif %}{% endif %}</span>
             </span>
             {% set tp = {'quente':'#f0917f','morno':'#e0b25a','frio':'#7bb8e6'} %}
             <span class="tpill" style="background:transparent;border:1px solid {{ tp[it.temperatura] }};color:{{ tp[it.temperatura] }}">{{ it.temperatura }}</span>
@@ -6980,13 +6980,13 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         if(!d.ok){if(b){b.disabled=false;b.textContent='🎟️ Convidar pro Zaq';}alert(d.erro||'Não consegui enviar.');return;}
         if(b){b.textContent='✓ Convite enviado';}}).catch(function(){if(b){b.disabled=false;b.textContent='🎟️ Convidar pro Zaq';}alert('Falha de rede.');});}
     function identificarNumero(){var b=document.getElementById('idn-btn'),m=document.getElementById('idn-msg'),n=document.getElementById('idn-num');
-      var num=(n&&n.value||'').trim();if(!num){if(m){m.textContent='Digite o número com DDD.';m.style.color='#e0a33e';}return;}
+      var num=(n&&n.value||'').trim();if(!num){if(m){m.textContent='Digite o número com DDD.';m.style.color='var(--ambar)';}return;}
       if(b){b.disabled=true;var t=b.textContent;b.textContent='Consultando…';}if(m){m.textContent='Consultando o titular na Credify…';m.style.color='';}
       var fd=new FormData();fd.append('numero',num);
       fetch('/painel/prospeccao/identificar-numero',{method:'POST',body:fd,headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
         if(b){b.disabled=false;b.textContent=t;}
-        if(!d.ok){if(m){m.textContent=d.erro||'Não consegui.';m.style.color='#e0a33e';}return;}
-        if(!d.titulares||!d.titulares.length){if(m){m.textContent='Nenhum titular encontrado.';m.style.color='#e0a33e';}return;}
+        if(!d.ok){if(m){m.textContent=d.erro||'Não consegui.';m.style.color='var(--ambar)';}return;}
+        if(!d.titulares||!d.titulares.length){if(m){m.textContent='Nenhum titular encontrado.';m.style.color='var(--ambar)';}return;}
         function esc(s){var e=document.createElement('div');e.textContent=s==null?'':s;return e.innerHTML;}
         function ln(rot,val){return val?('<div style=\\'display:flex;gap:.5rem;font-size:.8rem;padding:.1rem 0\\'><span style=\\'color:var(--mut);min-width:74px\\'>'+rot+'</span><b>'+esc(val)+'</b></div>'):'';}
         var h=d.titulares.map(function(t){
@@ -6995,14 +6995,14 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             +'<div style=\\'font-weight:700;color:var(--verde-claro);margin-bottom:.15rem\\'>'+esc(t.nome||'—')+'</div>'
             +ln('CPF',t.cpf_mask)+ln('Endereço',t.endereco)+ln('Bairro',t.bairro)
             +ln('Cidade/UF',loc)+ln('CEP',t.cep)+'</div>';}).join('');
-        if(m){m.innerHTML=h;m.style.color='';}}).catch(function(){if(b){b.disabled=false;b.textContent=t;}if(m){m.textContent='Falha de rede.';m.style.color='#e0a33e';}});}
+        if(m){m.innerHTML=h;m.style.color='';}}).catch(function(){if(b){b.disabled=false;b.textContent=t;}if(m){m.textContent='Falha de rede.';m.style.color='var(--ambar)';}});}
     function buscarDecisor(id){var b=document.getElementById('dec-btn'),m=document.getElementById('dec-msg');if(b){b.disabled=true;var t=b.textContent;b.textContent='Consultando…';}if(m){m.textContent='Consultando o quadro societário na Credify…';m.style.color='';}
       fetch('/painel/prospeccao/'+id+'/decisor-credify',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){if(b){b.disabled=false;b.textContent=t;}
-        if(!d.ok){if(m){m.textContent=d.erro||'Não consegui.';m.style.color='#e0a33e';}return;}
+        if(!d.ok){if(m){m.textContent=d.erro||'Não consegui.';m.style.color='var(--ambar)';}return;}
         var msg='Decisor: '+d.nome+(d.cargo?(' ('+d.cargo+')'):'');
         msg+=d.n_telefones?(' · '+d.n_telefones+' telefone(s)'):' · telefone não liberado na sua conta Credify';
         if(m){m.textContent=msg+' — recarregando…';m.style.color='var(--verde-claro)';}
-        setTimeout(function(){location.reload();},1200);}).catch(function(){if(b){b.disabled=false;b.textContent=t;}if(m){m.textContent='Falha de rede.';m.style.color='#e0a33e';}});}
+        setTimeout(function(){location.reload();},1200);}).catch(function(){if(b){b.disabled=false;b.textContent=t;}if(m){m.textContent='Falha de rede.';m.style.color='var(--ambar)';}});}
     function enrqLead(id){var b=document.getElementById('enrqf-btn'),m=document.getElementById('enrqf-msg');if(b){b.disabled=true;b.textContent='Verificando…';}if(m)m.textContent='Raspando o site…';
       fetch('/painel/prospeccao/'+id+'/enriquecer-canais',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){if(b){b.disabled=false;b.textContent='🔎 Verificar canais';}
         if(!d.ok){if(m)m.textContent=d.erro||'Não consegui.';return;}
@@ -7063,14 +7063,14 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
                 <span style="color:var(--verde-claro){% if t.provavel %};font-weight:700{% endif %}">{{ t.formatado }}</span>
                 {% if t.provavel %}<span class="badge" style="background:#2a2410;border-color:#5a4a1e;color:#e0b25a" title="Número que a Credify indica como o mais provável do decisor">⭐ mais provável</span>{% endif %}
                 {% if t.tipo_rot %}<span class="mut" style="font-size:.74rem">{{ t.tipo_rot }}</span>{% endif %}
-                {% if t.whatsapp %}<span class="badge" style="background:#10241a;border-color:#1e4a34;color:#3ddc84">WhatsApp</span>{% endif %}
+                {% if t.whatsapp %}<span class="badge" style="background:var(--neon-fundo);border-color:var(--neon-borda);color:var(--verde)">WhatsApp</span>{% endif %}
                 {% if t.tel_link %}<a href="{{ t.tel_link }}" style="color:var(--txt-mut);font-size:.78rem">ligar</a>{% endif %}
-                {% if t.zap_link %}<a href="{{ t.zap_link }}" target="_blank" rel="noopener" style="color:#3ddc84;font-size:.78rem">abrir WhatsApp</a>{% endif %}
+                {% if t.zap_link %}<a href="{{ t.zap_link }}" target="_blank" rel="noopener" style="color:var(--verde);font-size:.78rem">abrir WhatsApp</a>{% endif %}
               </div>
               {% endfor %}
             {% elif a.decisor_telefone %}<br><span style="color:var(--verde-claro)">{{ a.decisor_telefone }}</span>
               {% if a.decisor_tel_link %} · <a href="{{ a.decisor_tel_link }}" style="color:var(--verde-claro)">ligar</a>{% endif %}
-              {% if a.decisor_zap %} · <a href="{{ a.decisor_zap }}" target="_blank" rel="noopener" style="color:#3ddc84">WhatsApp</a>{% endif %}
+              {% if a.decisor_zap %} · <a href="{{ a.decisor_zap }}" target="_blank" rel="noopener" style="color:var(--verde)">WhatsApp</a>{% endif %}
             {% else %}<br><span class="mut" style="font-size:.78rem">telefone indisponível (consulta de telefone não liberada na Credify)</span>{% endif %}
           </span>
         </div>
@@ -7095,7 +7095,7 @@ _FICHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         {% if a.whatsapp %}<div class="drow"><span class="ic">💬</span><span class="lb">WhatsApp</span><span>{{ a.whatsapp }}<span class="badge">Business?</span></span></div>{% endif %}
         {% if a.email %}<div class="drow"><span class="ic">✉️</span><span class="lb">E-mail</span><span>{{ a.email }}</span></div>{% endif %}
         {% if a.instagram %}<div class="drow"><span class="ic">📷</span><span class="lb">Instagram</span><span>{{ a.instagram }}</span></div>{% endif %}
-        {% if a.site_url %}<div class="drow"><span class="ic">🌐</span><span class="lb">Site</span><span><a href="{{ a.site_url }}" target="_blank" rel="noopener" style="color:var(--verde-claro)">{{ a.site_dominio or a.site_url }}</a> · <span class="mut" style="font-size:.78rem">ver página</span></span></div>{% elif a.tem_site is not none %}<div class="drow"><span class="ic">🌐</span><span class="lb">Site</span><span>{% if a.tem_site %}tem site{% else %}<span style="color:#e0574f">não tem</span>{% endif %}</span></div>{% endif %}
+        {% if a.site_url %}<div class="drow"><span class="ic">🌐</span><span class="lb">Site</span><span><a href="{{ a.site_url }}" target="_blank" rel="noopener" style="color:var(--verde-claro)">{{ a.site_dominio or a.site_url }}</a> · <span class="mut" style="font-size:.78rem">ver página</span></span></div>{% elif a.tem_site is not none %}<div class="drow"><span class="ic">🌐</span><span class="lb">Site</span><span>{% if a.tem_site %}tem site{% else %}<span style="color:var(--coral)">não tem</span>{% endif %}</span></div>{% endif %}
         {% if a.valor %}<div class="drow"><span class="ic">💰</span><span class="lb">Valor est.</span><span style="color:var(--verde-claro)">{{ brl(a.valor) }}</span></div>{% endif %}
         {% if a.proximo_contato_em %}<div class="drow"><span class="ic">📅</span><span class="lb">Próximo</span><span style="color:var(--verde-claro)">{{ a.proximo_contato_em.strftime('%d/%m/%Y') }}</span></div>{% endif %}
         {% if a.obs %}<div class="drow"><span class="ic">📝</span><span class="lb">Obs</span><span>{{ a.obs }}</span></div>{% endif %}
@@ -7212,7 +7212,7 @@ function acharCnpj(id,btn){var box=document.getElementById('cnpj-cands');var end
   fetch('/painel/prospeccao/'+id+'/buscar-cnpj',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
     var webBtn=d.web?('<a class="pbtn" style="padding:.35rem .8rem;font-size:.8rem;margin-top:.4rem;display:inline-flex" target="_blank" rel="noopener" href="'+d.web+'">🔎 buscar na web</a>'):'';
     var manual=cnpjManualBox(id);
-    if(!d.ok){box.innerHTML='<div class="mut" style="font-size:.8rem;color:#e0a33e">Não achei ('+(d.erro||'?')+').</div>'+webBtn+manual;return;}
+    if(!d.ok){box.innerHTML='<div class="mut" style="font-size:.8rem;color:var(--ambar)">Não achei ('+(d.erro||'?')+').</div>'+webBtn+manual;return;}
     if(!d.itens||!d.itens.length){box.innerHTML='<div class="mut" style="font-size:.8rem">Nenhum CNPJ nessa cidade pra esse nome.</div>'+webBtn+manual;return;}
     var h='';
     if(endLead){h+='<div class="mut" style="font-size:.76rem;margin:.1rem 0 .3rem">📍 Endereço do lead: <b>'+jsEsc(endLead)+'</b> — escolha o que bate:</div>';}
@@ -7231,7 +7231,7 @@ function acharCnpj(id,btn){var box=document.getElementById('cnpj-cands');var end
     if(d.web){h+='<div style="margin-top:.4rem"><a class="mut" style="font-size:.76rem" target="_blank" rel="noopener" href="'+d.web+'">nenhuma bate? buscar na web →</a></div>';}
     h+=manual;
     box.innerHTML=h;
-  }).catch(function(){box.innerHTML='<div class="mut" style="font-size:.8rem;color:#e0a33e">Falha de rede.</div>'+cnpjManualBox(id);});}
+  }).catch(function(){box.innerHTML='<div class="mut" style="font-size:.8rem;color:var(--ambar)">Falha de rede.</div>'+cnpjManualBox(id);});}
 function jsEsc(s){return (s||'').replace(/[&<>"]/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c];});}
 function fichaCnpj(){var f=document.getElementById('edit-dados');var cnpj=f.querySelector('[name=documento]').value.replace(/\\D/g,'');if(cnpj.length!==14){fToast('Pra puxar da Receita, o CNPJ precisa ter 14 dígitos');return;}
   fToast('Consultando Receita…');
@@ -7250,7 +7250,7 @@ function iaMsg(canal){var box=document.getElementById('ia-box');var eb=document.
   var fd=new FormData();fd.append('canal',canal);
   fetch('/painel/prospeccao/{{ a.id }}/mensagem-ia',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();}).then(function(d){
     if(eb)eb.disabled=false;if(wb)wb.disabled=false;
-    if(!d.ok){box.innerHTML='<div class="mut" style="color:#e0a33e;font-size:.82rem">'+(d.erro==='sem_ia'?'IA não configurada (falta a chave da IA).':'Não consegui gerar ('+(d.erro||'?')+').')+'</div>';return;}
+    if(!d.ok){box.innerHTML='<div class="mut" style="color:var(--ambar);font-size:.82rem">'+(d.erro==='sem_ia'?'IA não configurada (falta a chave da IA).':'Não consegui gerar ('+(d.erro||'?')+').')+'</div>';return;}
     if(d.canal==='whatsapp'){
       box.innerHTML='<label class="lbl">Mensagem de WhatsApp</label><textarea class="fld" id="ia-texto" rows="5"></textarea>'
         +'<div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap"><button type="button" class="pbtn" id="ia-wa-btn" onclick="iaWhats()">💬 Enviar pelo sistema</button>'
@@ -7265,7 +7265,7 @@ function iaMsg(canal){var box=document.getElementById('ia-box');var eb=document.
         +'<div class="mut" style="font-size:.74rem;margin-top:.35rem">Envia pra {{ a.email }} · resposta volta pro seu e-mail · registra no histórico.</div>';
       document.getElementById('ia-assunto').value=d.assunto||'';document.getElementById('ia-corpo').value=d.corpo||'';
     }
-  }).catch(function(){if(eb)eb.disabled=false;if(wb)wb.disabled=false;box.innerHTML='<div class="mut" style="color:#e0a33e">Falha de rede.</div>';});}
+  }).catch(function(){if(eb)eb.disabled=false;if(wb)wb.disabled=false;box.innerHTML='<div class="mut" style="color:var(--ambar)">Falha de rede.</div>';});}
 function iaSendEmail(){var a=document.getElementById('ia-assunto').value,c=document.getElementById('ia-corpo').value;if(!c.trim()){fToast('Escreva a mensagem');return;}
   fToast('Enviando…');var fd=new FormData();fd.append('assunto',a);fd.append('corpo',c);
   fetch('/painel/prospeccao/{{ a.id }}/enviar-email',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();}).then(function(d){
@@ -7317,7 +7317,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .cx-conv .pre{color:var(--txt-mut);font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:.15rem}
 .cx-cn{font-size:.66rem;padding:.05rem .4rem;border-radius:999px;border:1px solid;margin-top:.25rem;display:inline-block}
 .cn-mail{color:var(--azul,#5b9bd5);border-color:#2f4a63;background:#14212e}
-.cn-wpp{color:#3ddc84;border-color:#1e4a34;background:#10241a}
+.cn-wpp{color:var(--verde);border-color:var(--neon-borda);background:var(--neon-fundo)}
 .cx-thread,.cx-ctx{border:1px solid var(--borda);border-radius:12px;background:var(--card);min-height:40vh}
 .cx-thread{display:flex;flex-direction:column;max-height:72vh}
 .cx-empty{padding:2.4rem 1rem;text-align:center;color:var(--txt-mut);font-size:.9rem}
@@ -7351,9 +7351,9 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .vl-2{display:grid;gap:.75rem;grid-template-columns:1fr}
 @media(min-width:460px){.vl-2{grid-template-columns:1fr 1fr}}
 .vl-fonte{margin-top:.3rem;font-size:.7rem;color:var(--verde-claro)}
-.vl-dup{margin:0 1rem;padding:.55rem .7rem;border-radius:9px;font-size:.76rem;color:#e0a33e;
-  border:1px solid #5a4520;background:#2a2113}
-.vl-dup a{color:#e0a33e}
+.vl-dup{margin:0 1rem;padding:.55rem .7rem;border-radius:9px;font-size:.76rem;color:var(--ambar);
+  border:1px solid var(--ambar-borda);background:#2a2113}
+.vl-dup a{color:var(--ambar)}
 .vl-pe{display:flex;gap:.5rem;justify-content:flex-end;padding:.8rem 1rem;border-top:1px solid var(--borda);
   background:var(--card-2);border-radius:0 0 13px 13px;margin-top:.9rem}
 .cn-msg{color:#4a9cff;border-color:#274a73;background:#0f1e30}
@@ -7378,13 +7378,13 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .cx-card h3{margin:0 0 .4rem;font-size:.95rem}
 .cx-stat{display:inline-flex;align-items:center;gap:.35rem;font-size:.76rem;padding:.15rem .5rem;border-radius:999px;border:1px solid;margin-left:.4rem}
 .st-on{color:var(--verde-claro);border-color:#1d5741;background:#0f231b}
-.st-off{color:#e0a33e;border-color:#5a4520;background:#241d10}
-.cx-env{font-family:ui-monospace,Menlo,monospace;font-size:.76rem;background:var(--bg);border:1px solid var(--borda);border-radius:8px;padding:.5rem .6rem;color:var(--txt-mut);margin-top:.5rem}
+.st-off{color:var(--ambar);border-color:var(--ambar-borda);background:#241d10}
+.cx-env{font-family:var(--mono);font-size:.76rem;background:var(--bg);border:1px solid var(--borda);border-radius:8px;padding:.5rem .6rem;color:var(--txt-mut);margin-top:.5rem}
 .cx-env b{color:var(--verde-claro)}
 .waseg{display:grid;grid-template-columns:repeat(3,1fr);gap:.25rem;margin:.3rem 0 .75rem;background:var(--bg);border:1px solid var(--borda);border-radius:10px;padding:.25rem}
 .waseg label{font-size:.75rem;border-radius:7px;padding:.42rem .25rem;cursor:pointer;color:var(--txt-mut);text-align:center;line-height:1.15;display:flex;align-items:center;justify-content:center;transition:background .12s,color .12s}
 .waseg label:hover{color:var(--txt)}
-.waseg label.on{color:#fff;background:var(--verde);font-weight:600}
+.waseg label.on{color:var(--sobre-verde);background:var(--verde);font-weight:600}
 .waseg label input{display:none}
 .waprov{display:none}
 .waprov .lbl{margin-top:.5rem}
@@ -7410,7 +7410,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   <div class="cx-head">
     <div>
       <h2 class="tt">📨 Comunicação</h2>
-      <div class="mut" style="font-size:.82rem;margin-top:.15rem">Enviando e-mails como {% if remetente %}<code>{{ remetente }}</code> · respostas voltam pro e-mail de quem enviou{% else %}<span style="color:#e0574f">(e-mail ainda não configurado)</span>{% endif %}</div>
+      <div class="mut" style="font-size:.82rem;margin-top:.15rem">Enviando e-mails como {% if remetente %}<code>{{ remetente }}</code> · respostas voltam pro e-mail de quem enviou{% else %}<span style="color:var(--coral)">(e-mail ainda não configurado)</span>{% endif %}</div>
     </div>
   </div>
 
@@ -7443,7 +7443,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
        reinicia a cada bloco, então mostrar número seria mentira; o que é honesto
        (e útil) é o total de conversas já importadas, que sobe na frente dele. -->
   <div id="cx-sync-aviso" style="display:none;margin:.2rem 0 .6rem;padding:.5rem .7rem;
-       border:1px solid #1e4a34;background:#10241a;border-radius:9px;font-size:.82rem">
+       border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:9px;font-size:.82rem">
     <span id="cx-sync-txt">📥 Importando conversas do WhatsApp…</span>
     <div style="height:5px;border-radius:4px;background:var(--bg);overflow:hidden;margin-top:.4rem">
       <div id="cx-sync-bar" style="height:100%;width:25%;background:var(--verde);
@@ -7514,7 +7514,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   {% if not gerencia %}
   <div class="cx-card" style="margin-top:.8rem"><p class="mut" style="margin:0">Só o dono/gestor configura o Agente.</p></div>
   {% else %}
-  {% if not tem_ia %}<div class="cx-card" style="margin-top:.8rem;border-color:#5a4520"><p class="mut" style="margin:0;color:#e0a33e">⚠️ A IA ainda não está configurada no ambiente (falta a chave). O agente só responde depois disso — mas você já pode deixar tudo configurado aqui.</p></div>{% endif %}
+  {% if not tem_ia %}<div class="cx-card" style="margin-top:.8rem;border-color:var(--ambar-borda)"><p class="mut" style="margin:0;color:var(--ambar)">⚠️ A IA ainda não está configurada no ambiente (falta a chave). O agente só responde depois disso — mas você já pode deixar tudo configurado aqui.</p></div>{% endif %}
   <form method="post" action="/painel/prospeccao/comunicacao/agente-config" class="cx-cc" style="align-items:start">
     <div>
       <div class="cx-card">
@@ -7671,11 +7671,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     .pmtabs{display:flex;gap:.4rem;flex-wrap:wrap;margin:.15rem 0 .55rem}
     .pmtab{display:inline-flex;align-items:center;gap:.35rem;padding:.4rem .7rem;border-radius:999px;font-size:.8rem;font-weight:600;background:transparent;border:1px solid var(--borda);color:var(--mut);cursor:pointer}
     .pmtab:hover{color:var(--txt);border-color:var(--verde)}
-    .pmtab.on{background:var(--verde);border-color:var(--verde);color:#fff}
+    .pmtab.on{background:var(--verde);border-color:var(--verde);color:var(--sobre-verde)}
     .pmpane{display:none}.pmpane.on{display:block}
     .pmdrop{display:block;border:1px dashed var(--borda);border-radius:10px;background:var(--bg);padding:1rem;text-align:center;color:var(--mut);font-size:.85rem;cursor:pointer}
     .pmdrop:hover{border-color:var(--verde);color:var(--txt)}.pmdrop b{color:var(--verde-claro)}
-    .pmfile{display:flex;align-items:center;gap:.55rem;border:1px solid #1e4a34;background:#10241a;border-radius:10px;padding:.5rem .7rem;margin-top:.5rem;font-size:.84rem}
+    .pmfile{display:flex;align-items:center;gap:.55rem;border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:10px;padding:.5rem .7rem;margin-top:.5rem;font-size:.84rem}
   </style>
   <script>
     function pmtab(btn,tipo){
@@ -7703,7 +7703,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <div class="cx-kv"><span>Secundária</span><b>{% if canais.email2_ident %}<span style="color:var(--verde-claro)">✓ {{ canais.email2_ident }}</span>{% else %}—{% endif %}</b></div>
       <div class="mut" style="font-size:.72rem">Cada campanha escolhe de qual caixa sai. As respostas de <b>ambas</b> caem no inbox.</div>
       {% if canais.email_ident %}{% if '@gmail.com' in (canais.email_ident|lower) %}
-      <div style="font-size:.75rem;color:#e0a33e;margin-top:.35rem;border:1px solid #5a4520;background:#2a2113;border-radius:8px;padding:.45rem .6rem">⚠️ A principal é <b>Gmail pessoal</b>. Pra prospecção o ideal é o <b>e-mail do domínio</b> (Workspace): entrega melhor e sem o limite baixo do Gmail. Troque a caixa principal pelo domínio.</div>
+      <div style="font-size:.75rem;color:var(--ambar);margin-top:.35rem;border:1px solid var(--ambar-borda);background:#2a2113;border-radius:8px;padding:.45rem .6rem">⚠️ A principal é <b>Gmail pessoal</b>. Pra prospecção o ideal é o <b>e-mail do domínio</b> (Workspace): entrega melhor e sem o limite baixo do Gmail. Troque a caixa principal pelo domínio.</div>
       {% else %}
       <div style="font-size:.75rem;color:var(--verde-claro);margin-top:.35rem">✓ Principal em <b>domínio próprio</b> — ótimo pra entrega (confirme SPF/DKIM/DMARC no DNS).</div>
       {% endif %}{% endif %}
@@ -7753,7 +7753,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       function emailTestar(slot){var b=document.getElementById('etest-'+slot+'-btn'),m=document.getElementById('etest-'+slot+'-msg');if(!b)return;b.disabled=true;var t=b.textContent;b.textContent='Testando…';m.textContent='';m.style.color='';
         var body=new URLSearchParams();body.append('slot',slot);
         fetch('/painel/prospeccao/comunicacao/email-testar',{method:'POST',headers:{'X-Requested-With':'fetch','Content-Type':'application/x-www-form-urlencoded'},body:body}).then(function(r){return r.json();}).then(function(d){b.disabled=false;b.textContent=t;
-          m.textContent=d.msg||d.erro||'—';m.style.color=d.ok?'var(--verde-claro)':'#e0a33e';}).catch(function(){b.disabled=false;b.textContent=t;m.textContent='Falha de rede.';m.style.color='#e0a33e';});}
+          m.textContent=d.msg||d.erro||'—';m.style.color=d.ok?'var(--verde-claro)':'var(--ambar)';}).catch(function(){b.disabled=false;b.textContent=t;m.textContent='Falha de rede.';m.style.color='var(--ambar)';});}
       </script>
       <script>
       // Olhinho dos campos de senha/token. O valor salvo NÃO vem no HTML — só é
@@ -7783,7 +7783,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             btn.disabled = false;
             if(!d.ok){ btn.textContent = original;
               if(aviso){ aviso.textContent = d.erro || 'Não consegui mostrar.';
-                         aviso.style.color = '#e0a33e'; }
+                         aviso.style.color = 'var(--ambar)'; }
               return; }
             inp.type = 'text'; inp.value = d.valor; btn.textContent = '🙈';
             btn.title = 'esconder';
@@ -7792,7 +7792,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
                        aviso.style.color = 'var(--mut)'; }
           })
           .catch(function(){ btn.disabled = false; btn.textContent = original;
-            if(aviso){ aviso.textContent = 'Falha de rede.'; aviso.style.color = '#e0a33e'; } });
+            if(aviso){ aviso.textContent = 'Falha de rede.'; aviso.style.color = 'var(--ambar)'; } });
       }
       </script>
       {% else %}<div class="mut" style="margin-top:.4rem;font-size:.8rem">SMTP (Google Workspace). Prospecção fria ✓</div>{% endif %}
@@ -7855,7 +7855,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           var num=(n&&n.value||'').trim();b.disabled=true;var t=b.textContent;b.textContent='Enviando…';m.textContent='';m.style.color='';
           var fd=new FormData();fd.append('numero',num);
           fetch('/painel/prospeccao/comunicacao/whatsapp-testar',{method:'POST',body:fd,headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
-            b.disabled=false;b.textContent=t;m.textContent=d.msg||d.erro||'—';m.style.color=d.ok?'var(--verde-claro)':'#e0a33e';}).catch(function(){b.disabled=false;b.textContent=t;m.textContent='Falha de rede.';m.style.color='#e0a33e';});}
+            b.disabled=false;b.textContent=t;m.textContent=d.msg||d.erro||'—';m.style.color=d.ok?'var(--verde-claro)':'var(--ambar)';}).catch(function(){b.disabled=false;b.textContent=t;m.textContent='Falha de rede.';m.style.color='var(--ambar)';});}
         </script>
         {% endif %}
         <div class="mut" style="margin-top:.4rem;font-size:.78rem">Pega o <b>Phone Number ID</b> e o <b>token</b> em developers.facebook.com → seu app → WhatsApp → API Setup. Assine <code>messages</code>.</div>
@@ -7863,7 +7863,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 
       <div id="wa-qr" class="waprov">
         <div style="font-weight:600;font-size:.85rem;margin-bottom:.15rem">QR Code (tipo WhatsApp Web)</div>
-        <div style="font-size:.78rem;color:#e0a33e;background:#2a2113;border:1px solid #5a4520;border-radius:8px;padding:.55rem .7rem">
+        <div style="font-size:.78rem;color:var(--ambar);background:#2a2113;border:1px solid var(--ambar-borda);border-radius:8px;padding:.55rem .7rem">
           Usa o número <b>como está</b>, sem migrar nada. Mas: <b>viola os termos</b> do WhatsApp (risco de banimento) e depende de um serviço à parte sempre-ligado.
         </div>
         <div style="display:flex;gap:.4rem;margin-top:.6rem;flex-wrap:wrap">
@@ -7904,19 +7904,19 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           btn.disabled=true;var t=btn.textContent;btn.textContent='Gerando…';if(msg)msg.textContent='';
           fetch('/painel/prospeccao/comunicacao/whatsapp-qr-iniciar',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
             btn.disabled=false;btn.textContent=t;qrShow(d);
-            if(!d.ok&&msg){msg.textContent=d.msg||d.erro||'Falha.';msg.style.color='#e0a33e';return;}
+            if(!d.ok&&msg){msg.textContent=d.msg||d.erro||'Falha.';msg.style.color='var(--ambar)';return;}
             if(_qrTimer)clearInterval(_qrTimer);_qrTimer=setInterval(qrPoll,3000);
-          }).catch(function(){btn.disabled=false;btn.textContent=t;if(msg){msg.textContent='Falha de rede.';msg.style.color='#e0a33e';}});}
+          }).catch(function(){btn.disabled=false;btn.textContent=t;if(msg){msg.textContent='Falha de rede.';msg.style.color='var(--ambar)';}});}
         function qrSair(){if(!confirm('Desconectar o WhatsApp por QR desta empresa?'))return;
           fetch('/painel/prospeccao/comunicacao/whatsapp-qr-sair',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
             // só declara desconectado se REALMENTE desconectou — senão o usuário ia
             // escanear um QR novo achando que a sessão antiga tinha caído
             if(d&&d.ok===false){var m=document.getElementById('qr-msg');
-              if(m){m.textContent='Não deu pra desconectar ('+(d.erro||'falha')+'). Tente de novo.';m.style.color='#e0a33e';}
+              if(m){m.textContent='Não deu pra desconectar ('+(d.erro||'falha')+'). Tente de novo.';m.style.color='var(--ambar)';}
               return;}
             if(_qrTimer){clearInterval(_qrTimer);_qrTimer=null;}qrShow({status:'desconectado',msg:'Desconectado.'});})
             .catch(function(){var m=document.getElementById('qr-msg');
-              if(m){m.textContent='Falha de rede ao desconectar. Tente de novo.';m.style.color='#e0a33e';}});}
+              if(m){m.textContent='Falha de rede ao desconectar. Tente de novo.';m.style.color='var(--ambar)';}});}
         // Ao abrir a página, tenta reconectar sozinho em vez de só checar o status —
         // o serviço Node reinicia a cada deploy (perde a sessão da memória, mas as
         // credenciais continuam salvas), e sem isso o usuário via "Desconectado" e
@@ -7980,10 +7980,10 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <script>
       function detectarFB(b){var m=document.getElementById('detfb-msg');b.disabled=true;var t=b.textContent;b.textContent='Detectando…';m.textContent='';m.style.color='';
         fetch('/painel/prospeccao/comunicacao/detectar-fb',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){b.disabled=false;b.textContent=t;
-          if(!d.ok){m.style.color='#e0a33e';m.textContent='⚠ '+(d.erro||'Não consegui.');return;}
+          if(!d.ok){m.style.color='var(--ambar)';m.textContent='⚠ '+(d.erro||'Não consegui.');return;}
           if(d.assinado){m.style.color='var(--verde-claro)';m.textContent='✓ Página "'+(d.nome||'?')+'" (ID '+d.page_id+') detectada e INSCRITA no webhook.'+(d.varias?' (usei a 1ª — você tem mais de uma Página)':'')+' Recarregando…';}
-          else{m.style.color='#e0a33e';m.textContent='Página "'+(d.nome||'?')+'" (ID '+d.page_id+') salva, mas a inscrição falhou: '+(d.assinar_erro||'?');}
-          setTimeout(function(){location.reload();},2400);}).catch(function(){b.disabled=false;b.textContent=t;m.style.color='#e0a33e';m.textContent='Falha de rede.';});}
+          else{m.style.color='var(--ambar)';m.textContent='Página "'+(d.nome||'?')+'" (ID '+d.page_id+') salva, mas a inscrição falhou: '+(d.assinar_erro||'?');}
+          setTimeout(function(){location.reload();},2400);}).catch(function(){b.disabled=false;b.textContent=t;m.style.color='var(--ambar)';m.textContent='Falha de rede.';});}
       </script>{% endif %}
       <div class="mut" style="margin-top:.4rem;font-size:.8rem">No app da Meta, aponte o webhook pra <code>/webhooks/meta</code> (verify token = META_VERIFY_TOKEN) e assine <code>messages</code>.</div>
     </div>
@@ -8008,10 +8008,10 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <script>
       function detectarIG(b){var m=document.getElementById('detig-msg');b.disabled=true;var t=b.textContent;b.textContent='Detectando…';m.textContent='';m.style.color='';
         fetch('/painel/prospeccao/comunicacao/detectar-ig',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){b.disabled=false;b.textContent=t;
-          if(!d.ok){m.style.color='#e0a33e';m.textContent='⚠ '+(d.erro||'Não consegui.');return;}
+          if(!d.ok){m.style.color='var(--ambar)';m.textContent='⚠ '+(d.erro||'Não consegui.');return;}
           if(d.assinado){m.style.color='var(--verde-claro)';m.textContent='✓ Conta @'+(d.username||'?')+' (ID '+d.user_id+') detectada e INSCRITA no webhook'+(d.token_longo?' · token de 60 dias ✓':'')+'. Recarregando…';}
-          else{m.style.color='#e0a33e';m.textContent='Conta @'+(d.username||'?')+' salva, mas a inscrição falhou: '+(d.assinar_erro||'?')+'. (token pode ter expirado)';}
-          setTimeout(function(){location.reload();},2200);}).catch(function(){b.disabled=false;b.textContent=t;m.style.color='#e0a33e';m.textContent='Falha de rede.';});}
+          else{m.style.color='var(--ambar)';m.textContent='Conta @'+(d.username||'?')+' salva, mas a inscrição falhou: '+(d.assinar_erro||'?')+'. (token pode ter expirado)';}
+          setTimeout(function(){location.reload();},2200);}).catch(function(){b.disabled=false;b.textContent=t;m.style.color='var(--ambar)';m.textContent='Falha de rede.';});}
       </script>{% endif %}
       <div class="mut" style="margin-top:.4rem;font-size:.8rem">Webhook: <code>/webhooks/meta</code> · assine <code>messages</code> no produto Instagram do app.</div>
     </div>
@@ -8036,7 +8036,7 @@ function cxPendHtml(){
     // aparecer se o usuário reabrir aquela conversa)
     if(p.conv!==_cxConv)return;
     var meta=p.erro
-      ? '<span style="color:#e0574f">✕ não saiu</span> · <a href="#" data-pid="'+p.id+'" onclick="cxReenviar(this.dataset.pid);return false;">tentar de novo</a>'
+      ? '<span style="color:var(--coral)">✕ não saiu</span> · <a href="#" data-pid="'+p.id+'" onclick="cxReenviar(this.dataset.pid);return false;">tentar de novo</a>'
       : 'enviando…';
     h+='<div class="cx-m cx-pend" id="'+p.id+'" style="opacity:'+(p.erro?'1':'.55')+'">'
       +cxEsc(p.texto).replace(/\\n/g,'<br>')+'<span class="meta">'+meta+'</span></div>';
@@ -8060,7 +8060,7 @@ function cxMsgsHtml(d){
 // selo de entrega só nas mensagens que SAÍRAM (WhatsApp): ✓ enviado · ✓✓ entregue · 👀 lido · ⚠ erro
 function cxTick(m){
   if(m.direcao!=='out'||m.canal!=='whatsapp')return '';
-  var s={enviado:' · ✓',entregue:' · ✓✓',lido:' · <span style="color:#4aa3ff">👀 lido</span>',erro:' · <span style="color:#e0574f">⚠ falhou</span>'}[m.status];
+  var s={enviado:' · ✓',entregue:' · ✓✓',lido:' · <span style="color:#4aa3ff">👀 lido</span>',erro:' · <span style="color:var(--coral)">⚠ falhou</span>'}[m.status];
   return s||'';
 }
 // JSON.stringify em vez de join('|'): o corpo da última mensagem entra na
@@ -8298,7 +8298,7 @@ _CPILL_CSS = """<style>
    genérico do template base), então .pbtn/.fld/.lbl/.pw precisam existir aqui */
 .pw{width:100%;max-width:1240px;margin:0 auto;padding:1.2rem 1rem 2.5rem;box-sizing:border-box}
 .pbtn{width:auto;margin:0;padding:.5rem .9rem;border-radius:9px;font-size:.86rem;font-weight:600;
-  background:var(--verde);color:#fff;border:0;cursor:pointer;display:inline-flex;align-items:center;gap:.4rem;text-decoration:none}
+  background:var(--verde);color:var(--sobre-verde);border:0;cursor:pointer;display:inline-flex;align-items:center;gap:.4rem;text-decoration:none}
 .pbtn:hover{background:var(--verde-hover)}
 .pbtn.ghost{background:transparent;color:var(--txt-mut);border:1px solid var(--borda)}
 .pbtn.ghost:hover{color:var(--txt);border-color:var(--verde)}
@@ -8306,8 +8306,8 @@ _CPILL_CSS = """<style>
 .fld{width:100%;padding:.55rem .7rem;border-radius:8px;border:1px solid #333;background:var(--bg);color:var(--txt);font-family:inherit;font-size:.9rem}
 .lbl{display:block;color:var(--txt-mut);font-size:.72rem;margin-bottom:.15rem}
 .cpill{font-size:.68rem;font-weight:700;padding:.14rem .5rem;border-radius:999px;border:1px solid var(--borda);white-space:nowrap}
-.cpill.ativa{color:#3ddc84;border-color:#1e4a34;background:#10241a}
-.cpill.pausada{color:#e0a33e;border-color:#5a4520;background:#2a2113}
+.cpill.ativa{color:var(--verde);border-color:var(--neon-borda);background:var(--neon-fundo)}
+.cpill.pausada{color:var(--ambar);border-color:var(--ambar-borda);background:#2a2113}
 .cpill.rascunho,.cpill.concluida{color:#8a938a}
 .cpill.ia{color:#c9a3e0;border-color:#4a3163;background:#1c1327}
 .cpstep{display:flex;gap:.7rem;align-items:center;padding:.55rem 0;border-top:1px solid var(--borda)}
@@ -8317,14 +8317,14 @@ _CPILL_CSS = """<style>
 .cppipe{display:flex;gap:.5rem;background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:.6rem;margin:1rem 0;overflow-x:auto}
 .cppstep{flex:1;min-width:140px;border:1px solid var(--borda);border-radius:9px;padding:.55rem .65rem;position:relative;background:var(--bg)}
 .cppstep h5{margin:.2rem 0 .05rem;font-size:.82rem}.cppstep p{margin:0;font-size:.72rem;color:var(--mut)}
-.cppstep.on{border-color:#1e4a34;background:#10241a}
+.cppstep.on{border-color:var(--neon-borda);background:var(--neon-fundo)}
 .cppstep .arw{position:absolute;right:-.6rem;top:50%;transform:translateY(-50%);color:var(--mut);z-index:2}
 /* barra de progresso do card */
 .cpbar{height:6px;border-radius:999px;background:#1e1f22;margin-top:.5rem;overflow:hidden;display:flex}
-.cpbar i{display:block;height:100%}.cpbar .e{background:#5b9bd5}.cpbar .r{background:#3ddc84}
+.cpbar i{display:block;height:100%}.cpbar .e{background:#5b9bd5}.cpbar .r{background:var(--verde)}
 /* botão excluir no card da lista */
 .cpx{width:32px;height:32px;padding:0;border-radius:8px;background:transparent;border:1px solid var(--borda);color:var(--mut);cursor:pointer;font-size:.9rem;flex-shrink:0;line-height:1}
-.cpx:hover{color:#e0574f;border-color:#5c2a27;background:#231414}
+.cpx:hover{color:var(--coral);border-color:#5c2a27;background:#231414}
 /* explicação do fluxo */
 .cphelp{border:1px solid var(--borda);border-radius:11px;background:var(--card);padding:.8rem .95rem;margin-top:.5rem}
 .cphelp ol{margin:.4rem 0 0;padding-left:1.15rem;font-size:.82rem;color:var(--mut);line-height:1.7}
@@ -8341,14 +8341,14 @@ _CPILL_CSS = """<style>
 .mailp .h{padding:.6rem .85rem;border-bottom:1px solid var(--borda);font-size:.78rem;color:var(--mut)}
 .mailp .h b{color:var(--txt)}
 .mailp .b{padding:.9rem 1rem;font-size:.9rem;line-height:1.6;white-space:pre-wrap}
-.mailp .wa{display:inline-block;margin-top:.5rem;color:#3ddc84;border:1px solid #1e4a34;background:#10241a;border-radius:8px;padding:.3rem .65rem;font-size:.82rem;text-decoration:none}
+.mailp .wa{display:inline-block;margin-top:.5rem;color:var(--verde);border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:8px;padding:.3rem .65rem;font-size:.82rem;text-decoration:none}
 .mailp .f{padding:.55rem .85rem;border-top:1px solid var(--borda);font-size:.68rem;color:var(--mut)}</style>""" + _NAV_ASSETS
 
 _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + """
 <style>
 .cwrap{max-width:1000px;margin:0 auto}
 /* guia "como criar e configurar" */
-.guia{border:1px solid #1e4a34;border-radius:12px;background:linear-gradient(180deg,#10241a,transparent 60%);padding:.9rem 1rem;margin:1rem 0}
+.guia{border:1px solid var(--neon-borda);border-radius:12px;background:linear-gradient(180deg,var(--neon-fundo),transparent 60%);padding:.9rem 1rem;margin:1rem 0}
 .guia>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:.5rem;font-weight:700;font-size:.92rem}
 .guia>summary::-webkit-details-marker{display:none}
 .guia>summary .chev{margin-left:auto;color:var(--mut);transition:transform .2s}
@@ -8356,7 +8356,7 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
 .guia .steps{list-style:none;margin:.8rem 0 0;padding:0;display:grid;gap:.5rem}
 @media(min-width:760px){.guia .steps{grid-template-columns:1fr 1fr}}
 .guia .steps li{display:flex;gap:.6rem;align-items:flex-start;background:var(--card);border:1px solid var(--borda);border-radius:10px;padding:.55rem .65rem}
-.guia .steps .gn{width:22px;height:22px;flex-shrink:0;border-radius:50%;display:grid;place-items:center;font-size:.74rem;font-weight:700;background:#10241a;border:1px solid #1e4a34;color:#3ddc84}
+.guia .steps .gn{width:22px;height:22px;flex-shrink:0;border-radius:50%;display:grid;place-items:center;font-size:.74rem;font-weight:700;background:var(--neon-fundo);border:1px solid var(--neon-borda);color:var(--verde)}
 .guia .steps .gt{font-size:.83rem;line-height:1.4}
 .guia .steps .gt b{color:var(--txt)}.guia .steps .gt span{color:var(--mut)}
 /* card de campanha */
@@ -8367,7 +8367,7 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
 .ccard .nome:hover{color:var(--verde-claro)}
 .ccard .badge{flex-shrink:0;font-size:.64rem;font-weight:700;border-radius:999px;padding:.05rem .4rem}
 .ccard .badge.mail{color:#6fb0e6;border:1px solid #2f4a63;background:#11212e}
-.ccard .badge.wa{color:#3ddc84;border:1px solid #1e5c39;background:#0e2418}
+.ccard .badge.wa{color:var(--verde);border:1px solid #1e5c39;background:#0e2418}
 .ckpis{display:flex;flex-wrap:wrap;gap:.35rem .55rem;margin-top:.5rem;font-size:.8rem;color:var(--mut)}
 .ckpis .kv{display:inline-flex;align-items:baseline;gap:.28rem;white-space:nowrap}
 .ckpis .kv b{color:var(--txt);font-variant-numeric:tabular-nums}
@@ -8388,12 +8388,12 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
 @media(prefers-reduced-motion:reduce){.motor .dot{animation:none}}
 @keyframes pulso{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.72)}}
 .motor .parada{font-size:.66rem;color:var(--mut)}
-.motor .erro{font-size:.66rem;color:#e0574f;font-weight:700}
+.motor .erro{font-size:.66rem;color:var(--coral);font-weight:700}
 .motor .quando{font-size:.62rem;color:var(--mut);margin-top:.1rem}
 /* cabeçalho + botão "+ Criar" + modal */
 .pagehead{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap}
 .hdrbtn{width:auto;margin:0;padding:.55rem 1rem;border-radius:9px;font-size:.86rem;font-weight:700;
-  background:var(--verde);color:#fff;border:0;cursor:pointer;display:inline-flex;align-items:center;gap:.4rem;flex-shrink:0}
+  background:var(--verde);color:var(--sobre-verde);border:0;cursor:pointer;display:inline-flex;align-items:center;gap:.4rem;flex-shrink:0}
 .hdrbtn:hover{background:var(--verde-hover)}
 .ovl{position:fixed;inset:0;background:rgba(6,7,7,.6);backdrop-filter:blur(2px);display:none;align-items:center;justify-content:center;z-index:50;padding:1rem}
 .ovl.on{display:flex}
@@ -8408,10 +8408,10 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
 .gastos{border:1px solid var(--borda);border-radius:12px;background:var(--card);padding:.7rem .9rem;margin:1rem 0}
 .gastos .gh{display:flex;align-items:center;gap:.5rem;font-size:.72rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--mut);margin-bottom:.55rem}
 .gastos .gg{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.6rem}
-.gastos .gi{background:#0e0e0f;border:1px solid var(--borda);border-radius:10px;padding:.5rem .65rem}
+.gastos .gi{background:var(--bg);border:1px solid var(--borda);border-radius:10px;padding:.5rem .65rem}
 .gastos .gi .k{font-size:.68rem;color:var(--mut)}
 .gastos .gi .v{font-size:1.2rem;font-weight:800;letter-spacing:-.02em;margin-top:.1rem;font-variant-numeric:tabular-nums}
-.gastos .gi .v.free{color:var(--verde-claro)} .gastos .gi .v.warn{color:#e0a33e}
+.gastos .gi .v.free{color:var(--verde-claro)} .gastos .gi .v.warn{color:var(--ambar)}
 .gastos .gi .f{font-size:.64rem;color:var(--mut);margin-top:.05rem}
 .subline{margin-top:.4rem;font-size:.78rem;color:var(--mut)}
 .subline b{color:var(--txt);font-variant-numeric:tabular-nums} .subline .g{color:var(--verde-claro)}
@@ -8419,14 +8419,14 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
 .chan .cl{font-size:.72rem;font-weight:700;color:var(--txt);min-width:86px;display:inline-flex;align-items:center;gap:.3rem}
 .chan .kv{display:inline-flex;align-items:baseline;gap:.26rem;white-space:nowrap}
 .chan .kv b{color:var(--txt);font-variant-numeric:tabular-nums}
-.chan .kv.g b{color:var(--verde-claro)} .chan .kv.err b{color:#e0574f}
+.chan .kv.g b{color:var(--verde-claro)} .chan .kv.err b{color:var(--coral)}
 .chan .sep{color:#3a3a3c}
-.pbar{position:relative;height:6px;border-radius:999px;background:#0e0e0f;border:1px solid var(--borda);overflow:hidden;margin-top:.3rem}
+.pbar{position:relative;height:6px;border-radius:999px;background:var(--bg);border:1px solid var(--borda);overflow:hidden;margin-top:.3rem}
 .pbar i{position:absolute;left:0;top:0;height:100%;border-radius:999px;transition:width .5s ease}
 .pbar.mail .e{background:#3f6f9e}
 .pbar .r{background:var(--verde-claro)}
 .tbar{display:flex;align-items:center;gap:.5rem;margin-top:.32rem}
-.tbar .bar{flex:1;height:7px;border-radius:999px;background:#0e0e0f;border:1px solid var(--borda);overflow:hidden}
+.tbar .bar{flex:1;height:7px;border-radius:999px;background:var(--bg);border:1px solid var(--borda);overflow:hidden}
 .tbar .bar i{display:block;height:100%;border-radius:999px;transition:width .5s ease}
 .tbar .lbl{font-size:.7rem;color:var(--mut);white-space:nowrap;font-variant-numeric:tabular-nums}
 .tbar .lbl b{color:var(--txt)}
@@ -8434,14 +8434,14 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
 .motorstat{margin-top:.42rem;font-size:.73rem;display:flex;align-items:center;gap:.35rem;color:var(--mut)}
 .motorstat .ic{font-size:.68rem;line-height:1}
 .motorstat.ok{color:var(--verde-claro)}
-.motorstat.lento{color:#e0a33e}
-.motorstat.parado{color:#e0574f;font-weight:600}
+.motorstat.lento{color:var(--ambar)}
+.motorstat.parado{color:var(--coral);font-weight:600}
 .motorstat a{color:inherit;text-decoration:underline;text-decoration-color:currentColor;opacity:.85}
 .motorstat a:hover{opacity:1}
-.fok{background:var(--verde)} .famar{background:#e0a33e} .fcoral{background:#e0574f}
+.fok{background:var(--verde)} .famar{background:var(--ambar)} .fcoral{background:var(--coral)}
 .calert{margin-left:auto;font-size:.66rem;font-weight:700;padding:.08rem .45rem;border-radius:999px}
-.calert.amar{color:#e0a33e;border:1px solid #5a4520;background:#2a2113}
-.calert.coral{color:#e0574f;border:1px solid #5c2a27;background:#2a1513}
+.calert.amar{color:var(--ambar);border:1px solid var(--ambar-borda);background:#2a2113}
+.calert.coral{color:var(--coral);border:1px solid #5c2a27;background:#2a1513}
 .semteto{margin-top:.34rem;font-size:.73rem;color:var(--mut)}
 .semteto b{color:var(--txt)} .semteto a{color:var(--verde-claro);text-decoration:none}
 </style>
@@ -8632,21 +8632,21 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 .step>.lbl2{display:flex;flex-direction:column;min-width:0}
 .step .tt2{display:block;font-size:.82rem;font-weight:600;line-height:1.2}
 .step .st{display:block;font-size:.68rem;color:var(--mut);margin-top:.05rem}
-.step.done .n{background:#10241a;border-color:#1e4a34;color:#3ddc84}
-.step.todo .st{color:#e0a33e}
+.step.done .n{background:var(--neon-fundo);border-color:var(--neon-borda);color:var(--verde)}
+.step.todo .st{color:var(--ambar)}
 /* ===== seção colapsável ===== */
 .secs{display:flex;flex-direction:column;gap:.85rem}
 .sec{background:var(--card);border:1px solid var(--borda);border-radius:13px;overflow:hidden}
 .sumrow{display:flex;align-items:center;gap:.8rem;padding:.85rem 1.05rem;cursor:pointer;user-select:none;background:none;border:0;width:100%;text-align:left;font:inherit;color:inherit}
 .sumrow:hover{background:var(--card-2)}
 .sumrow .idx{width:26px;height:26px;flex-shrink:0;border-radius:8px;display:grid;place-items:center;font-size:.82rem;font-weight:750;background:var(--card-2);border:1px solid var(--borda);color:var(--verde-claro)}
-.sec.done .sumrow .idx{background:#10241a;border-color:#1e4a34;color:#3ddc84}
+.sec.done .sumrow .idx{background:var(--neon-fundo);border-color:var(--neon-borda);color:var(--verde)}
 .sumrow h3{margin:0;font-size:.95rem;flex-shrink:0;font-weight:700}
 .chips{display:flex;gap:.4rem;flex-wrap:wrap;flex:1;min-width:0;align-items:center}
 .chip{font-size:.76rem;color:var(--mut);white-space:nowrap;padding:.18rem .55rem;border-radius:999px;border:1px solid var(--borda);background:var(--bg);display:inline-flex;align-items:center;gap:.3rem}
 .chip b{color:var(--txt);font-weight:600;font-variant-numeric:tabular-nums}
-.chip.warn{color:#e0a33e;border-color:#5a4520;background:#2a2113}
-.chip.on{color:var(--verde-claro);border-color:#1e4a34;background:#10241a}
+.chip.warn{color:var(--ambar);border-color:var(--ambar-borda);background:#2a2113}
+.chip.on{color:var(--verde-claro);border-color:var(--neon-borda);background:var(--neon-fundo)}
 .caret{flex-shrink:0;width:30px;height:30px;border-radius:8px;border:1px solid var(--borda);display:grid;place-items:center;color:var(--mut);transition:transform .18s ease,background .15s ease}
 .sumrow:hover .caret{border-color:var(--verde);color:var(--txt)}
 .sec.open .caret{transform:rotate(180deg);background:var(--card-2)}
@@ -8670,11 +8670,11 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 .mtabs{display:flex;gap:.4rem;flex-wrap:wrap;margin:.8rem 0 .6rem}
 .mtab{display:inline-flex;align-items:center;gap:.35rem;padding:.4rem .7rem;border-radius:999px;font-size:.8rem;font-weight:600;background:transparent;border:1px solid var(--borda);color:var(--mut);cursor:pointer;flex:0 0 auto}
 .mtab:hover{color:var(--txt);border-color:var(--verde)}
-.mtab.on{background:var(--verde);border-color:var(--verde);color:#fff}
+.mtab.on{background:var(--verde);border-color:var(--verde);color:var(--sobre-verde)}
 .mpane{display:none}.mpane.on{display:block}
 .drop{display:block;border:1px dashed var(--borda);border-radius:10px;background:var(--bg);padding:1rem;text-align:center;color:var(--mut);font-size:.85rem;cursor:pointer}
 .drop:hover{border-color:var(--verde);color:var(--txt)}.drop b{color:var(--verde-claro)}
-.mfile{display:flex;align-items:center;gap:.55rem;border:1px solid #1e4a34;background:#10241a;border-radius:10px;padding:.5rem .7rem;margin-top:.5rem;font-size:.84rem}
+.mfile{display:flex;align-items:center;gap:.55rem;border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:10px;padding:.5rem .7rem;margin-top:.5rem;font-size:.84rem}
 .mhint{font-size:.74rem;color:var(--mut);margin-top:.5rem}
 /* prévia + checklist */
 .mailp{background:#0e0f11;border:1px solid var(--borda);border-radius:11px;overflow:hidden;margin-top:.8rem}
@@ -8684,8 +8684,8 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 .mailp .f{padding:.5rem .8rem;border-top:1px solid var(--borda);font-size:.68rem;color:var(--mut)}
 .ck{display:flex;align-items:center;gap:.5rem;font-size:.83rem;padding:.22rem 0}
 .ck .dot{width:16px;height:16px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;font-size:.68rem}
-.ck.good .dot{background:#10241a;border:1px solid #1e4a34;color:#3ddc84}
-.ck.miss{color:var(--mut)}.ck.miss .dot{background:#2a2113;border:1px solid #5a4520;color:#e0a33e}
+.ck.good .dot{background:var(--neon-fundo);border:1px solid var(--neon-borda);color:var(--verde)}
+.ck.miss{color:var(--mut)}.ck.miss .dot{background:#2a2113;border:1px solid var(--ambar-borda);color:var(--ambar)}
 /* passo */
 .passo{border:1px solid var(--borda);border-radius:10px;padding:.6rem .7rem;background:var(--bg)}
 .passo+.passo{margin-top:.55rem}
@@ -8714,16 +8714,16 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 .cpstat{background:var(--bg);border:1px solid var(--borda);border-radius:11px;padding:.7rem .8rem;min-width:0}
 .cpstat .n{font-size:1.4rem;font-weight:750;letter-spacing:-.02em;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cpstat .l{font-size:.7rem;color:var(--mut);margin-top:.1rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cpstat.g .n{color:#3ddc84}.cpstat.r .n{color:#e0574f}
-.cpstat.novo{border-color:#1e4a3a}.cpstat.novo .l{color:var(--verde-claro)}
+.cpstat.g .n{color:var(--verde)}.cpstat.r .n{color:var(--coral)}
+.cpstat.novo{border-color:var(--neon-borda)}.cpstat.novo .l{color:var(--verde-claro)}
 .tbl-wrap{overflow-x:auto;border-radius:12px;border:1px solid var(--borda);margin-top:.8rem}
 .tbl-wrap table{width:100%;border-collapse:collapse;font-size:.84rem;min-width:460px}
 .tbl-wrap thead th{text-align:left;color:var(--mut);font-weight:500;padding:.55rem .9rem;background:var(--card-2)}
 .tbl-wrap tbody td{padding:.55rem .9rem;border-top:1px solid var(--borda)}
 .apill{font-size:.68rem;font-weight:600;padding:.1rem .45rem;border-radius:999px;border:1px solid var(--borda);white-space:nowrap}
-.apill.respondeu,.apill.concluido{color:#3ddc84;border-color:#1e4a34;background:#10241a}
+.apill.respondeu,.apill.concluido{color:var(--verde);border-color:var(--neon-borda);background:var(--neon-fundo)}
 .apill.enviado{color:#5b9bd5;border-color:#2f4a63;background:#14212e}
-.apill.descadastrou,.apill.erro{color:#e0a33e;border-color:#5a4520;background:#2a2113}
+.apill.descadastrou,.apill.erro{color:var(--ambar);border-color:var(--ambar-borda);background:#2a2113}
 .apill.fila{color:#8a938a}
 </style>
 {% set mt = camp.material_tipo or 'link' %}
@@ -8821,8 +8821,8 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         <div class="mut" style="font-size:.74rem;margin-top:.15rem">A mensagem aprovada que fura a janela de 24h (o convite com os botões). <b>É diferente do modelo de e‑mail</b> da etapa 2 — aqui você cola o código do template do WhatsApp.</div>
         <div style="margin-top:.4rem">
           <label class="lbl">Content SID do template de WhatsApp (Twilio)</label>
-          <input class="fld" name="wa_template_sid" value="{{ camp.wa_template_sid }}" placeholder="HX..." spellcheck="false" style="font-family:ui-monospace,monospace">
-          <div class="mut" style="font-size:.74rem;margin-top:.2rem">Cole o SID do template aprovado <b>desta campanha</b> (começa com <code>HX</code>). Cada campanha pode ter o seu — não precisa mexer no Render. {% if camp.wa_pronto %}<span style="color:var(--verde-claro)">● pronto pra disparo frio</span>{% else %}<span style="color:#e0a33e">● defina o SID pra liberar o disparo</span>{% endif %}</div>
+          <input class="fld" name="wa_template_sid" value="{{ camp.wa_template_sid }}" placeholder="HX..." spellcheck="false" style="font-family:var(--mono)">
+          <div class="mut" style="font-size:.74rem;margin-top:.2rem">Cole o SID do template aprovado <b>desta campanha</b> (começa com <code>HX</code>). Cada campanha pode ter o seu — não precisa mexer no Render. {% if camp.wa_pronto %}<span style="color:var(--verde-claro)">● pronto pra disparo frio</span>{% else %}<span style="color:var(--ambar)">● defina o SID pra liberar o disparo</span>{% endif %}</div>
         </div>
         <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-top:.5rem">
           <label class="chk"><input type="checkbox" name="wa_ativo" value="1" {% if camp.wa_ativo %}checked{% endif %}> <span>Disparar o convite por WhatsApp junto com o e-mail</span></label>
@@ -8847,7 +8847,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         <div class="foot">
           <button type="button" class="pbtn ghost sm" onclick="secToggle('s1')">Fechar</button>
           <button class="pbtn ghost sm" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/reiniciar" formmethod="post" formnovalidate style="color:#d98a2b;border-color:#5c4a27" onclick="return confirm('Reiniciar a campanha do zero?\n\nTodos os leads voltam pra fila no passo 0 e o acompanhamento (aberturas, status, histórico de Desempenho) é zerado. As conversas do inbox são preservadas.\n\nA campanha fica pausada até você clicar em Ativar — aí o motor recomeça do 1º e-mail.')">🔄 Reiniciar</button>
-          <button class="pbtn ghost sm" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/excluir" formmethod="post" formnovalidate style="color:#e0574f;border-color:#5c2a27" onclick="return confirm('Excluir a campanha? Os leads voltam pro funil.')">🗑 Excluir</button>
+          <button class="pbtn ghost sm" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/excluir" formmethod="post" formnovalidate style="color:var(--coral);border-color:#5c2a27" onclick="return confirm('Excluir a campanha? Os leads voltam pro funil.')">🗑 Excluir</button>
           <button class="pbtn sm">Salvar configuração</button>
         </div>
       </form>

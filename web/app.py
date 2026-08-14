@@ -19,6 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from db.conexao import get_pool, init_schema
+from web import tema as _tema
 from contas import contas as ct
 from contas.contas import URL_CADASTRO
 from core.brain import Brain
@@ -1002,23 +1003,23 @@ _PAGINA = """<!doctype html>
   :root { color-scheme: light dark; }
   body { margin:0; min-height:100vh; display:flex; align-items:center;
     justify-content:center; font-family: system-ui, -apple-system, sans-serif;
-    background:#0e0e0f; color:#ececec; }
+    background:var(--bg); color:var(--txt); }
   .card { max-width:440px; padding:2.5rem 2rem; text-align:center; }
   h1 { font-size:1.6rem; font-weight:500; margin:0 0 .5rem; }
-  p { color:#a8a8a3; line-height:1.6; margin:.4rem 0; }
+  p { color:var(--txt-mut); line-height:1.6; margin:.4rem 0; }
   .dot { display:inline-block; width:9px; height:9px; border-radius:50%;
-    background:#1d9e75; margin-right:7px; vertical-align:middle; }
-  .status { font-size:.95rem; color:#5dcaa5; margin-top:1rem; }
+    background:var(--verde); margin-right:7px; vertical-align:middle; }
+  .status { font-size:.95rem; color:var(--verde); margin-top:1rem; }
   .soon { margin-top:1.8rem; font-size:.85rem; color:#737370;
-    border-top:1px solid #2a2a2b; padding-top:1.2rem; }
+    border-top:1px solid var(--borda); padding-top:1.2rem; }
 </style></head>
 <body><div class="card">
   <h1>Zaq</h1>
   <p>Seu assistente financeiro pessoal.</p>
   <p class="status"><span class="dot"></span>no ar</p>
   <p class="soon">Fale com o assistente no Telegram ou no WhatsApp.<br><br>
-  <a href="/cadastro" style="color:#5dcaa5">Criar conta</a> &nbsp;·&nbsp;
-  <a href="/login" style="color:#5dcaa5">Entrar</a></p>
+  <a href="/cadastro" style="color:var(--verde)">Criar conta</a> &nbsp;·&nbsp;
+  <a href="/login" style="color:var(--verde)">Entrar</a></p>
 </div></body></html>"""
 
 
@@ -1028,10 +1029,10 @@ _HTML_PESQUISA = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Zaq — Como funciona sua distribuidora</title>
-<style>
-  :root{ --verde:#1d9e75; --verde2:#5dcaa5; --bg:#0f0f10; --card:#161617; --bord:#2a2a2b; --txt:#ececec; --mut:#a8a8a3; }
+""" + _tema.FONTES + """<style>
+  """ + _tema.variaveis() + """
   *{ box-sizing:border-box; }
-  body{ margin:0; background:var(--bg); color:var(--txt); font-family:-apple-system,Segoe UI,Roboto,sans-serif; line-height:1.5; }
+  body{ margin:0; background:var(--bg); color:var(--txt); font-family:var(--body); line-height:1.5; }
   .wrap{ max-width:640px; margin:0 auto; padding:1.5rem 1.1rem 4rem; }
   .logo{ font-size:1.6rem; font-weight:700; color:var(--verde2); letter-spacing:-.5px; }
   .sub{ color:var(--mut); font-size:.95rem; margin:.3rem 0 1.6rem; }
@@ -1043,8 +1044,8 @@ _HTML_PESQUISA = """<!doctype html>
   .opt input{ width:18px; height:18px; accent-color:var(--verde); flex-shrink:0; }
   .opt.sel{ border-color:var(--verde); background:rgba(29,158,117,.08); }
   .opt span{ font-size:.92rem; }
-  textarea{ width:100%; background:#0f0f10; border:1px solid var(--bord); border-radius:10px; color:var(--txt); padding:.7rem; font-size:.92rem; font-family:inherit; resize:vertical; min-height:70px; }
-  .btn{ width:100%; background:var(--verde); color:#fff; border:none; padding:.95rem; border-radius:12px; font-size:1.05rem; font-weight:600; cursor:pointer; margin-top:1rem; }
+  textarea{ width:100%; background:var(--bg); border:1px solid var(--bord); border-radius:10px; color:var(--txt); padding:.7rem; font-size:.92rem; font-family:inherit; resize:vertical; min-height:70px; }
+  .btn{ width:100%; background:var(--verde); color:var(--sobre-verde); border:none; padding:.95rem; border-radius:12px; font-size:1.05rem; font-weight:600; cursor:pointer; margin-top:1rem; }
   .btn:active{ transform:scale(.99); }
   .btn:disabled{ opacity:.5; }
   .ok{ text-align:center; padding:3rem 1rem; }

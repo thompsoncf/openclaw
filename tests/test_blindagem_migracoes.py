@@ -54,6 +54,9 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
   agente_ativo boolean default false, responsavel_membro_id bigint,
   janela_expira_em timestamptz, ultima_msg_em timestamptz default now(),
   criado_em timestamptz default now());
+-- orcamentos vem da 045 (marcada como aplicada); a 147 dá a ela o modo evento
+-- (colunas do evento/parcelas, numeração por conta e o backfill do número).
+create table orcamentos (id bigserial primary key, conta_id bigint references contas(id));
 -- pessoas vem da 066 (marcada como aplicada); a 131 adiciona cnpj/tipo.
 create table pessoas (id bigserial primary key, cpf text, celular text,
   nome text not null default '', email text);

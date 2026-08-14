@@ -49,8 +49,15 @@ def _req(metodo: str, caminho: str, corpo: dict | None = None,
             det = e.read().decode("utf-8")[:180]
         except Exception:  # noqa: BLE001
             det = str(e)
+        # sessão caída, serviço fora do ar, número banido: o QR carrega 98% do
+        # volume e até agora nenhuma dessas falhas chegava ao admin.
+        from core.falhas import avaliar_falha_provedor
+        avaliar_falha_provedor(f"http_{e.code}: {det}", servico="WhatsApp (QR)",
+                               canal="whatsapp")
         return {"ok": False, "erro": f"http_{e.code}", "det": det}
     except Exception as e:  # noqa: BLE001
+        from core.falhas import avaliar_falha_provedor
+        avaliar_falha_provedor(e, servico="WhatsApp (QR)", canal="whatsapp")
         return {"ok": False, "erro": str(e)[:180]}
 
 

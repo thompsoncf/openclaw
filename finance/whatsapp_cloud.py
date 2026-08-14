@@ -60,8 +60,15 @@ def _post(wa_phone_id: str, token: str, payload: dict, endpoint: str = "messages
         except Exception:  # noqa: BLE001
             det = str(e)
         _log.info("wacloud HTTP %s: %s", e.code, det)
+        # token expirado, número banido, limite da Meta estourado: sem isso o canal
+        # que carrega a conta inteira morre em silêncio (só o Twilio avisava).
+        from core.falhas import avaliar_falha_provedor
+        avaliar_falha_provedor(f"http_{e.code}: {det}", servico="WhatsApp Cloud API",
+                               canal="whatsapp")
         return {"ok": False, "erro": det}
     except Exception as e:  # noqa: BLE001
+        from core.falhas import avaliar_falha_provedor
+        avaliar_falha_provedor(e, servico="WhatsApp Cloud API", canal="whatsapp")
         return {"ok": False, "erro": str(e)[:200]}
 
 

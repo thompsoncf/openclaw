@@ -23,6 +23,10 @@ create table campanha_alvos (id bigserial primary key, campanha_id bigint, prosp
   status text, aberturas int, wa_status text, wa_custo numeric(10,4), proximo_envio_em timestamptz);
 create table campanha_eventos (id bigserial primary key, campanha_id bigint, prospeccao_id bigint,
   canal text, evento text, detalhe text, quando timestamptz default now());
+create table canais_config (
+  id bigserial primary key, conta_id bigint, canal text, identificador text,
+  ativo boolean not null default true, token text, provedor text not null default 'twilio',
+  wa_phone_id text);
 create table app_config (chave text primary key, valor text not null,
   atualizado_em timestamptz not null default now());
 """

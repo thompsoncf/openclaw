@@ -8259,6 +8259,11 @@ async def painel_produtos_vender(request: Request):
             pagamento=body.get("pagamento") or "dinheiro",
             vencimento=body.get("vencimento"),
             desconto_centavos=int(body.get("desconto_centavos") or 0),
+            # quem está no caixa é quem vendeu. Sem isto o lançamento nascia sem
+            # membro_id e TODA venda de balcão caía em "Sem vendedor" no relatório
+            # de comissão — o parâmetro existia em pdv.registrar_venda_balcao e
+            # ninguém passava.
+            membro_id=request.session.get("membro_id"),
         )
         return JSONResponse({"ok": True, **r})
     except ValueError as e:

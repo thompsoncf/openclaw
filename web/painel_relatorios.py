@@ -184,47 +184,52 @@ def _dados_titulos_pagos(pool, conta_id, tipo, periodo):
 
 
 def _dados_comissao(pool, conta_id, periodo):
-    """Vendas do período por vendedor (membro_id de lancamentos), com a comissão
-    calculada pela % que o dono configurou em Equipe (membros.comissao_pct)."""
+    """Comissão do período por vendedor.
+
+    A conta vive em finance/comissao.py — o MESMO lugar que o Cockpit consulta.
+    Antes cada tela fazia a sua e os números não batiam: aqui somava
+    `lancamentos`, lá somava o valor estimado do lead."""
+    from finance import comissao as com
     ini, fim = _intervalo(periodo)
-    with pool.connection() as c:
-        rows = c.execute(
-            """select coalesce(m.nome, 'Sem vendedor'), m.comissao_pct, sum(l.valor_centavos)
-                 from lancamentos l left join membros m on m.id = l.membro_id
-                where l.conta_id=%s and l.tipo='receita' and l.natureza='empresa'
-                  and l.data >= %s and l.data <= %s
-                group by l.membro_id, m.nome, m.comissao_pct
-                order by sum(l.valor_centavos) desc""",
-            (conta_id, ini, fim),
-        ).fetchall()
     linhas = []
     sem_config = 0
-    for nome, pct_raw, vendas in rows:
-        pct = float(pct_raw) if pct_raw is not None else 0.0
-        vendas = int(vendas or 0)
-        if pct <= 0:
+    sem_vendedor = 0
+    for r in com.por_vendedor(pool, conta_id, ini, fim):
+        if r["sem_vendedor"]:
+            sem_vendedor += 1
+        elif not r["configurada"]:
             sem_config += 1
         linhas.append({
-            "vendedor": nome, "vendas_centavos": vendas,
-            "percentual": f"{pct:g}%" if pct > 0 else "— não configurada",
-            "comissao_centavos": round(vendas * pct / 100),
+            "vendedor": r["vendedor"], "vendas_centavos": r["recebido_centavos"],
+            "percentual": (f"{r['comissao_pct']:g}%" if r["configurada"]
+                           else ("— sem vendedor" if r["sem_vendedor"] else "— não configurada")),
+            "comissao_centavos": r["comissao_centavos"],
         })
     total = _soma(linhas, "comissao_centavos")
     vendas_totais = _soma(linhas, "vendas_centavos")
     destaque = max(linhas, key=lambda r: r["comissao_centavos"])["vendedor"] if linhas else "—"
     dados = {
         "label": "Comissão", "mock": False,
-        "colunas": [_col("vendedor", "Vendedor"), _col("vendas_centavos", "Vendas no período", num=True, brl=True),
+        "colunas": [_col("vendedor", "Vendedor"), _col("vendas_centavos", "Recebido no período", num=True, brl=True),
                     _col("percentual", "% comissão", num=True), _col("comissao_centavos", "Comissão a pagar", num=True, brl=True)],
         "linhas": linhas, "col_total": "comissao_centavos", "total_centavos": total,
         "metricas": [("Total de comissões", _brl(total)), ("Vendedor destaque", destaque),
-                     ("Vendas da equipe", _brl(vendas_totais))],
+                     ("Recebido pela equipe", _brl(vendas_totais))],
     }
+    avisos = []
     if sem_config:
         plural = "es" if sem_config != 1 else ""
-        dados["aviso_config"] = (
+        avisos.append(
             f"{sem_config} vendedor{plural} sem % de comissão configurada (mostrando R$ 0,00 pra eles) — "
             "configure em Equipe, no botão “% comis.” de cada um.")
+    if sem_vendedor:
+        # não é frescura: é venda entrando sem dono, e comissão que ninguém recebe
+        avisos.append(
+            "Há recebimento sem vendedor atribuído. Isso acontece quando a venda "
+            "entrou por fora do PDV e do funil — o valor conta no caixa, mas não "
+            "gera comissão pra ninguém.")
+    if avisos:
+        dados["aviso_config"] = " ".join(avisos)
     return dados
 
 

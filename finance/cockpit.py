@@ -562,14 +562,22 @@ def fechar_contrato(pool, conta_id: int, orc_id: int, *, membro_id: int | None =
     escopado por conta. O que ele NÃO faz é olhar quem criou a proposta: sem a
     checagem abaixo, um vendedor fecharia contrato da proposta de outro pela URL.
     """
-    if membro_id:
-        with pool.connection() as c:
-            dele = c.execute("select 1 from orcamentos where id=%s and conta_id=%s and criado_por=%s",
-                             (orc_id, conta_id, str(membro_id))).fetchone()
-        if not dele:
-            return {"ok": False, "erro": "Proposta não encontrada (ou não é sua)."}
+    with pool.connection() as c:
+        dono = c.execute("select criado_por from orcamentos where id=%s and conta_id=%s",
+                         (orc_id, conta_id)).fetchone()
+    if not dono:
+        return {"ok": False, "erro": "Proposta não encontrada."}
+    if membro_id and (dono[0] or "") != str(membro_id):
+        return {"ok": False, "erro": "Proposta não encontrada (ou não é sua)."}
+    # De quem é a venda: de quem FEZ a proposta, não de quem apertou o botão. Um
+    # gestor pode fechar o contrato de um vendedor, e a comissão é do vendedor —
+    # é este `criado_por` que vai parar no título e, na baixa, no lançamento.
+    try:
+        autor = int(str(dono[0]).strip()) if dono[0] else None
+    except (TypeError, ValueError):
+        autor = None
     from finance import vendas
-    r = vendas.fechar_orcamento(pool, conta_id, orc_id, criado_por=membro_id)
+    r = vendas.fechar_orcamento(pool, conta_id, orc_id, criado_por=autor)
     if not r.get("ok"):
         return r
     quantos = sum(1 for k in ("setup_titulo_id", "mensal_titulo_id") if r.get(k))
@@ -781,30 +789,39 @@ def visitas_do_vendedor(pool, conta_id: int, membro_id: int, dias: int = 14) -> 
 
 # ------------------------------------------------------------------ o resultado DELE
 def remuneracao(pool, conta_id: int, membro_id: int, periodo: str = "mes") -> dict:
-    """O que o vendedor fechou no período e quanto disso é comissão dele.
+    """O resultado do vendedor no período: o que ENTROU, o que está no funil e a
+    comissão dele.
 
-    ATENÇÃO à fonte: o número sai de `prospeccao.valor_estimado_centavos` dos leads
-    que ELE marcou como ganho — a mesma base do Placar do dono. NÃO é a mesma base do
-    relatório de comissão do painel, que soma `lancamentos.membro_id`. Enquanto as
-    duas não forem unificadas, a tela precisa dizer de onde veio o número (quem chama
-    isso mostra o rótulo), em vez de exibir um valor que não bate com o do dono.
+    Dois números, e a diferença importa:
+
+    * `recebido_centavos` / `comissao_centavos` vêm de `finance.comissao` — a MESMA
+      conta que o relatório do dono faz. É dinheiro que entrou, e é sobre isso que
+      a comissão é paga.
+    * `fechado_centavos` continua vindo do funil (`prospeccao.valor_estimado_centavos`
+      dos leads ganhos). É previsão do vendedor, não confirmação de ninguém — serve
+      pra ele acompanhar o próprio pipeline, e por isso NÃO entra na comissão.
+
+    Antes esses dois eram um só, e o vendedor via uma comissão calculada sobre o
+    palpite dele — um número que o dono não reconhecia no relatório.
     """
     from finance import cockpit_dono as cd
-    ordem = cd.placar(pool, conta_id, periodo)          # já vem ordenado por R$ fechado
+    from finance import comissao as com
+    ini, fim = cd._range(periodo)
+    c_ = com.de_um(pool, conta_id, membro_id, ini.date(), fim.date())
+    ordem = cd.placar(pool, conta_id, periodo)          # funil: ranking por R$ fechado
     linha = next((p for p in ordem if p["id"] == membro_id), None)
-    with pool.connection() as c:
-        r = c.execute("select comissao_pct from membros where id=%s and conta_id=%s",
-                      (membro_id, conta_id)).fetchone()
-    pct = float(r[0]) if (r and r[0] is not None) else None
-    fechado = int((linha or {}).get("rs_centavos") or 0)
     posicao = next((i + 1 for i, p in enumerate(ordem) if p["id"] == membro_id), None)
     return {
-        "fechado_centavos": fechado,
+        # dinheiro que entrou (base da comissão)
+        "recebido_centavos": c_["recebido_centavos"],
+        "n_vendas": c_["n_vendas"],
+        "comissao_pct": c_["comissao_pct"],
+        "comissao_centavos": c_["comissao_centavos"] if c_["configurada"] else None,
+        # funil (previsão, não conta comissão)
+        "fechado_centavos": int((linha or {}).get("rs_centavos") or 0),
         "ganhos": int((linha or {}).get("ganhos") or 0),
         "conversao": (linha or {}).get("conversao") or "—",
         "resp": (linha or {}).get("resp") or "—",
         "fila": int((linha or {}).get("fila") or 0),
-        "comissao_pct": pct,
-        "comissao_centavos": (round(fechado * pct / 100) if pct else None),
         "posicao": posicao, "total_equipe": len(ordem),
     }

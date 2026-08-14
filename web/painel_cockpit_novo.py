@@ -602,11 +602,13 @@ def novo_resultado(request: Request):
     def seg(k, lab):
         return f"<a class='{'on' if periodo == k else ''}' href='{_BASE}/resultado?p={k}'>{lab}</a>"
 
-    comissao = ""
+    # A comissão é sobre o que o cliente PAGOU — mesma conta do relatório do dono
+    # (finance/comissao.py). O funil fica separado, embaixo, como previsão.
     if r["comissao_centavos"] is not None:
         pct = f"{r['comissao_pct']:g}".replace(".", ",")
         comissao = (f"<div class='kpi hero'><div class=v>{esc(_brl(r['comissao_centavos'], centavos_visiveis=True))}</div>"
-                    f"<div class=l>Sua comissão</div><div class=d>{pct}% do que você fechou</div></div>")
+                    f"<div class=l>Sua comissão</div><div class=d>{pct}% de "
+                    f"{esc(_brl(r['recebido_centavos']))} que entraram</div></div>")
     else:
         comissao = ("<div class=bloco><div class=card style='font-size:.82rem;color:var(--text-dim)'>"
                     "Sua <b>% de comissão</b> ainda não foi configurada. Quem define é o dono, "
@@ -616,12 +618,22 @@ def novo_resultado(request: Request):
            f"<div class=d>entre {r['total_equipe']} da equipe</div></div>") if r["posicao"] else ""
 
     corpo = (_previa()
-             + _hdr("Meu resultado", "o que você fechou")
+             + _hdr("Meu resultado", "o que entrou e o que está por vir")
              + f"<div class=scroll><div class=seg>{seg('hoje','Hoje')}{seg('semana','Semana')}{seg('mes','Mês')}</div>"
              + comissao
              + "<div class=kpis>"
+             + f"<div class=kpi><div class=v>{esc(_brl(r['recebido_centavos']))}</div>"
+               f"<div class=l>Recebido</div><div class=d>{r['n_vendas']} pagamento(s) no período</div></div>"
              + f"<div class=kpi><div class=v>{esc(_brl(r['fechado_centavos']))}</div>"
-               f"<div class=l>Fechado</div><div class=d>{r['ganhos']} negócio(s)</div></div>"
+               f"<div class=l>No funil</div><div class=d>{r['ganhos']} ganho(s) · previsão</div></div>"
+             + "</div>"
+             + "<div class=fonte><b>Comissão sai do recebido</b> — quando o cliente paga, seja "
+               "no caixa ou na baixa do título. É a mesma conta do relatório do dono, então os "
+               "dois números batem.<br>O <b>funil</b> é o valor que você estimou nos leads que "
+               "marcou como ganho: serve pra você acompanhar o que vem, e não entra na comissão "
+               "enquanto o contrato não for fechado e pago.</div>"
+             + "<div class=eyebrow>Seu ritmo</div>"
+             + "<div class=kpis>"
              + f"<div class=kpi><div class=v>{esc(r['conversao'])}</div><div class=l>Conversão</div>"
                "<div class=d>ganhos vs. perdidos</div></div>"
              + f"<div class=kpi><div class=v>{r['fila']}</div><div class=l>Na fila</div>"
@@ -629,10 +641,6 @@ def novo_resultado(request: Request):
              + f"<div class=kpi><div class=v>{esc(r['resp'])}</div><div class=l>Resposta</div>"
                "<div class=d>média de 30 dias</div></div>"
              + pos + "</div>"
-             + "<div class=fonte>De onde vem: soma do <b>valor estimado</b> dos leads que você "
-               "marcou como ganho no Cockpit — a mesma base do placar do dono. O relatório de "
-               "comissão do painel usa outra base (lançamentos), então os dois ainda podem "
-               "divergir.</div>"
              + "</div>" + _abas_vend("resultado"))
     return _page("Meu resultado", corpo)
 

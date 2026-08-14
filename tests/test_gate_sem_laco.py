@@ -13,7 +13,7 @@ Funções puras: sem banco.
 """
 import pytest
 
-from contas.equipe import caps_do_papel, rotas_do_papel
+from contas.equipe import caps_do_papel, home_do_papel, rotas_do_papel
 from web.painel_servicos import _saida
 
 
@@ -90,3 +90,44 @@ def test_painel_do_dono_nunca_entra_na_whitelist_de_membro():
     # /painel é a área pessoal do titular (plano, pessoas da conta)
     for papel in MEMBROS:
         assert "/painel" not in rotas_do_papel(papel)
+
+
+# ------------------------------------------------------------------ casa de cada papel
+def test_vendedor_entra_no_cockpit():
+    """O app do vendedor é o Cockpit. Antes ele caía em /painel — que o gate barra —
+    e o Cockpit só abria por link mágico: quem entrava por e-mail e senha nunca via."""
+    assert home_do_papel("vendedor", membro_id=7) == "/cockpit"
+
+
+def test_titular_continua_no_painel():
+    assert home_do_papel("dono", membro_id=None) == "/painel"
+
+
+@pytest.mark.parametrize("papel", ["gestor", "financeiro", "membro", "restrito"])
+def test_os_outros_papeis_nao_mudaram(papel):
+    assert home_do_papel(papel, membro_id=7) == "/painel"
+
+
+def test_membro_com_papel_dono_nao_e_o_titular():
+    """Membro de equipe pode ter papel 'dono'; o titular é quem NÃO tem membro_id."""
+    assert home_do_papel("dono", membro_id=7) == "/painel"
+
+
+def test_a_casa_do_vendedor_nao_depende_do_gate():
+    """/cockpit fica fora de /painel*, então o gate (que só filtra /painel* e
+    /membros*) não tem como devolver o vendedor — nada de laço aqui."""
+    destino = home_do_papel("vendedor", membro_id=7)
+    assert not destino.startswith("/painel")
+
+
+@pytest.mark.parametrize("papel", MEMBROS)
+def test_casa_de_membro_termina_em_algum_lugar(papel):
+    """A casa de um membro ou já é liberada, ou é /painel — e /painel o gate
+    resolve sozinho, mandando pra home do papel (que os testes acima provam ser
+    terminal). O que não pode é apontar pra uma rota de painel FORA da whitelist,
+    que o gate devolveria em looping."""
+    destino = home_do_papel(papel, membro_id=7)
+    guardado = destino == "/painel" or destino.startswith("/painel/") or destino.startswith("/membros")
+    assert (not guardado                    # /cockpit: o gate nem olha
+            or destino == "/painel"         # o gate resolve pra home do papel
+            or _permitido(papel, destino)), destino

@@ -927,7 +927,12 @@ def _perfil_vendedor(request: Request, conta_id: int, membro_id: int) -> HTMLRes
              + tgl("Notificações push", "avisar quando cair um lead", p["push_ativo"], f"{_BASE}/perfil/push")
              + tgl("Receber no rodízio", "desligue pra pausar leads novos", not p["pausado"], f"{_BASE}/perfil/rodizio")
              + "</div>"
-             + f"<div class=bloco><a class='btn ghost' href='/cockpit/sair'>{_ic('sair', 'ic p')} Sair</a></div>"
+             # o login do vendedor agora cai no Cockpit; sem esta porta ele não
+             # chegaria no painel a não ser digitando a URL. /painel resolve
+             # sozinho — o gate afunila pra área do papel e da conta.
+             + "<div class=bloco><a class='btn ghost' style='margin-bottom:.5rem' "
+               "href='/painel'>Abrir o painel completo</a>"
+             + f"<a class='btn ghost' href='/cockpit/sair'>{_ic('sair', 'ic p')} Sair</a></div>"
              + "</div>" + _abas_vend("perfil"))
     return _page("Meu perfil", corpo)
 

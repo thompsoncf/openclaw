@@ -231,6 +231,7 @@ padding:.6rem .8rem;font-size:.9rem;font-family:inherit;width:100%}
 .tgl{border:1px solid var(--borda);background:var(--card2);color:var(--mut);border-radius:999px;padding:.35rem .7rem;font-size:.8rem;font-weight:600;white-space:nowrap}
 .tgl.on{border-color:var(--verde);background:#10241a;color:var(--verde-claro)}
 .sair{margin:1.2rem 1rem;width:calc(100% - 2rem);padding:.65rem;border-radius:10px;border:1px solid #5a2b2b;background:#1a1010;color:#f0917f;font-weight:600}
+.painel{margin:1.2rem 1rem .6rem;width:calc(100% - 2rem);padding:.65rem;border-radius:10px;border:1px solid var(--borda);background:var(--card2);color:var(--txt);font-weight:600}
 .fsec{padding:.85rem 1rem;border-bottom:1px solid var(--borda)}
 .frow{display:flex;justify-content:space-between;gap:.8rem;padding:.28rem 0;font-size:.9rem}
 .frow span{color:var(--mut)}.frow b{text-align:right}
@@ -1299,6 +1300,12 @@ def cockpit_perfil(request: Request):
         f"<div class=kpi><b>{p['atendidos']}</b><small>atendidos</small></div></div>"
         + tgl("Notificações push", "avisar quando cair um lead", p["push_ativo"], "/cockpit/perfil/push")
         + tgl("Receber no rodízio", "desligue pra pausar leads novos", not p["pausado"], "/cockpit/perfil/rodizio")
+        # porta de volta: o login do vendedor passou a cair aqui (contas.equipe.
+        # home_do_papel), e sem isto o Cockpit vira sala sem saída — o painel só
+        # existiria pra quem soubesse digitar a URL. /painel resolve sozinho: o
+        # gate afunila pra área que o papel e a conta permitem.
+        + "<a class=painel href='/painel' style='display:block;text-align:center'>"
+          "Abrir o painel completo</a>"
         + "<a class=sair href='/cockpit/sair' style='display:block;text-align:center'>Sair</a>"
         + "</div>")
     return _page("Cockpit — perfil", body)

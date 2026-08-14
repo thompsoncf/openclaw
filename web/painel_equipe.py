@@ -195,7 +195,9 @@ def trocar_aplica(request: Request, i: int = Form(...)):
     ctxs = request.session.get("contextos") or []
     if 0 <= i < len(ctxs):
         eq.aplicar_contexto(request.session, ctxs[i])
-        return RedirectResponse("/painel", status_code=303)
+        # cada empresa pode ter um papel diferente: manda pra casa DAQUELE papel
+        return RedirectResponse(
+            eq.home_do_papel(ctxs[i]["papel"], ctxs[i].get("membro_id")), status_code=303)
     return RedirectResponse("/trocar", status_code=303)
 
 

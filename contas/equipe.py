@@ -42,6 +42,24 @@ def caps_do_papel(papel: str | None) -> dict:
     return dict(CAPS.get(papel or "", _SEM_ACESSO))
 
 
+def home_do_papel(papel: str | None, membro_id=None) -> str:
+    """Pra onde a pessoa cai depois de entrar (login, troca de empresa, /login já logado).
+
+    O vendedor vai pro **Cockpit**, que é o app dele: fila, conversa, funil e
+    fechamento, feito pra celular. Antes todo membro caía em /painel — que o gate
+    barra pra quem não é dono — e o Cockpit só abria por link mágico, então quem
+    entrava por e-mail e senha nunca chegava lá.
+
+    Os demais papéis continuam indo pro painel; é o gate (web/app.py) que afunila
+    cada um pra área do papel dele.
+    """
+    if papel == "dono" and membro_id is None:      # titular da conta
+        return "/painel"
+    if papel == "vendedor":
+        return "/cockpit"
+    return "/painel"
+
+
 def rotas_do_papel(papel: str | None) -> list[str]:
     """As rotas do painel que um MEMBRO de equipe pode abrir (o gate de web/app.py
     é whitelist; o dono passa em tudo e não usa isto).

@@ -631,7 +631,7 @@ def painel_servicos_fechar(request: Request, dados: FecharIn):
 
 # ---------------------------------------------------------------- template
 _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
-<div class="sv-wrap">
+<div class="sv-wrap{% if servico_avulso %} evento{% endif %}">
 <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.4rem">
   <h1 style="margin:.2rem 0">Vendas de Serviços</h1>
   <span class="mut" style="font-size:.85rem">{{ empresa_nome }}</span>
@@ -644,6 +644,9 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 
 {% raw %}<style>
 .sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizing:border-box}
+/* orçamento de evento tem uma coluna a mais na linha (qtd, valor e subtotal):
+   a tela abre um pouco pra o nome do serviço não virar uma coluna de 3 letras. */
+.sv-wrap.evento{max-width:1120px}
 .sv-wrap .card{max-width:none;margin:0 0 1rem}
 /* o base do painel força button{width:100%;margin-top:1.4rem} — reseta aqui e
    reaplica largura cheia só onde faz sentido (os CTAs do resumo). */
@@ -664,8 +667,27 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-inp{padding:.55rem .7rem; border-radius:8px; background:var(--bg); color:var(--txt); border:1px solid var(--borda); font-size:.95rem; width:100%; box-sizing:border-box}
 .oc-inp:focus{border-color:var(--verde); outline:none}
 .oc-mod{display:grid; grid-template-columns:auto 1fr 84px 84px 84px auto; gap:.55rem; align-items:center; padding:.6rem 0; border-bottom:1px solid var(--borda)}
-.oc-mod.avulso,.oc-head.avulso{grid-template-columns:auto minmax(0,1fr) 64px 108px auto}
-.sv-wrap.oc-margin .oc-mod.avulso,.sv-wrap.oc-margin .oc-head.avulso{grid-template-columns:auto minmax(0,1fr) 64px 108px 92px auto}
+.oc-mod.avulso,.oc-head.avulso{grid-template-columns:auto minmax(0,1fr) 56px 96px 92px auto}
+.sv-wrap.oc-margin .oc-mod.avulso,.sv-wrap.oc-margin .oc-head.avulso{grid-template-columns:auto minmax(0,1fr) 56px 96px 88px 92px auto}
+/* no orçamento de evento o rótulo vai EM CIMA do campo: "7200" e "10" precisam
+   da largura inteira da caixinha, senão o número sai cortado. */
+.oc-mod.avulso .oc-num{flex-direction:column; align-items:stretch; gap:1px; padding:.25rem .45rem}
+.oc-mod.avulso .oc-num span{font-size:.58rem; text-align:right}
+/* celular: a linha do serviço vira duas — nome em cima (com a foto e o
+   toggle), números embaixo. Em grade de 6 colunas num telefone os campos caem
+   em qualquer lugar. */
+@media(max-width:700px){
+  .oc-mod.avulso{display:flex; flex-wrap:wrap; align-items:flex-start; gap:.5rem .55rem}
+  .oc-mod.avulso .oc-tog{order:1; flex:0 0 auto}
+  .oc-mod.avulso .oc-nome{order:2; flex:1 1 140px; min-width:0}
+  .oc-mod.avulso .oc-rowacts{order:3; flex:0 0 auto}
+  .oc-mod.avulso .oc-num{order:4; flex:1 1 86px}
+  .oc-mod.avulso .oc-sub{order:5; flex:1 1 86px; justify-content:flex-end}
+}
+/* subtotal da linha: valor calculado, não campo — o vendedor lê enquanto monta */
+.oc-sub{display:flex;flex-direction:column;gap:.15rem;text-align:right}
+.oc-sub span{font-size:.62rem;letter-spacing:.04em;text-transform:uppercase;color:var(--txt-mut)}
+.oc-sub b{font-size:.9rem;color:var(--verde-claro);white-space:nowrap}
 .pg-row{display:grid; grid-template-columns:140px 110px minmax(0,1fr) minmax(0,1fr) auto; gap:.5rem; align-items:center; padding:.45rem 0; border-bottom:1px solid var(--borda)}
 .pg-row:last-child{border-bottom:0}
 .pg-row input{padding:.4rem .5rem; font-size:.88rem}
@@ -1080,6 +1102,11 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 
   function pinta(){
     var c=calc();
+    // subtotal de cada linha (qtd × valor unitário), ao vivo
+    rows().forEach(function(r){
+      var el=r.querySelector('.oc-sub-v');
+      if(el) el.textContent=fmt(num(r.querySelector('.oc-setup'))*qtd(r));
+    });
     document.getElementById('oc-r-setup').textContent=fmt(c.setup);
     var elMensal=document.getElementById('oc-r-mensal');
     if(elMensal)elMensal.textContent=fmt(c.mensal);
@@ -1312,6 +1339,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       +'<div class="oc-num"><span>Qtd</span><input class="oc-qtd" inputmode="numeric" value="1"></div>'
       +'<div class="oc-num"><span>Vr. unit.</span><input class="oc-setup" inputmode="numeric" value="'+s.setup+'"></div>'
       +'<div class="oc-num oc-custo-col"><span>Custo</span><input class="oc-custo" inputmode="numeric" value="'+s.custo+'"></div>'
+      +'<div class="oc-sub"><span>Subtotal</span><b class="oc-sub-v">'+fmt(s.setup)+'</b></div>'
       +'<div class="oc-rowacts"><button class="oc-ic oc-rm" type="button" title="Remover da proposta">🗑</button></div>';
   }
   function renderCatalogoAvulso(){

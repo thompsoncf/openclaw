@@ -1314,6 +1314,14 @@ def _canais_status(pool, conta_id: int) -> dict:
         "msg_tok_ruim": msg_tok_ruim, "ig_tok_ruim": ig_tok_ruim,
         "twilio": twilio, "meta": meta_app, "numeros": nums,
         "tokens_set": {k: bool(v) for k, v in tokens.items()},
+        # Templates da AGENDA (convite e lembrete de reunião). Saem da env GLOBAL —
+        # valem pra todas as contas, não são por empresa — e por isso não apareciam
+        # em lugar nenhum do painel: pra saber se existiam era preciso abrir o
+        # Render. Aqui é SÓ exibição; quem manda no envio continua sendo a env
+        # (finance/convites.py). O Content SID é identificador, não credencial, então
+        # vai inteiro — é justamente o que se quer conferir.
+        "tmpl_convite": (os.environ.get("TWILIO_TMPL_CONVITE_SID") or "").strip(),
+        "tmpl_lembrete": (os.environ.get("TWILIO_TMPL_LEMBRETE_SID") or "").strip(),
     }
 
 
@@ -7764,6 +7772,15 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <div style="font-weight:600;font-size:.85rem;margin-bottom:.15rem">Via Twilio (BSP)</div>
         <div class="mut" style="font-size:.78rem">Credenciais globais no Render:</div>
         <div class="cx-env"><b>TWILIO_ACCOUNT_SID</b>=•••••<br><b>TWILIO_AUTH_TOKEN</b>=•••••</div>
+        <div class="mut" style="font-size:.78rem;margin-top:.5rem">Templates aprovados da <b>agenda</b> (valem pra todas as contas):</div>
+        <div class="cx-env">
+          <b>Convite de reunião</b>
+          {% if canais.tmpl_convite %}= {{ canais.tmpl_convite }} <span style="color:var(--verde-claro)">✓ configurado</span>
+          {% else %}= <span style="color:#e0a33e">não configurado</span> — sem ele o convite só sai pelo link manual{% endif %}
+          <br><b>Lembrete de reunião</b>
+          {% if canais.tmpl_lembrete %}= {{ canais.tmpl_lembrete }} <span style="color:var(--verde-claro)">✓ configurado</span>
+          {% else %}= <span style="color:#e0a33e">não configurado</span>{% endif %}
+        </div>
         <form method="post" action="/painel/prospeccao/comunicacao/canal-numero" style="margin-top:.5rem">
           <input type="hidden" name="canal" value="whatsapp"><input type="hidden" name="provedor" value="twilio">
           <label class="lbl">Número desta empresa</label>

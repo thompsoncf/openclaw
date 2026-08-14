@@ -36,6 +36,12 @@ create table orcamentos (id bigserial primary key, conta_id bigint, cliente text
   status text default 'rascunho', canal text, criado_por text,
   aprovada_em timestamptz, aprovada_por text, aprovada_doc text,
   criado_em timestamptz default now(), atualizado_em timestamptz default now());
+create table titulos (id bigserial primary key, conta_id bigint not null,
+  tipo text not null check (tipo in ('pagar','receber')), descricao text not null,
+  contraparte text not null default '', valor_centavos int not null check (valor_centavos > 0),
+  vencimento date not null, status text not null default 'aberto',
+  recorrente boolean not null default false, categoria text not null default '',
+  criado_por bigint, criado_em timestamptz not null default now());
 """
 
 
@@ -61,7 +67,7 @@ def pool():
 def cenario(pool):
     """Uma conta, dois vendedores, uma proposta de cada. Limpa antes de cada teste."""
     with pool.connection() as c:
-        c.execute("truncate orcamentos, prospeccao, membros, contas restart identity")
+        c.execute("truncate orcamentos, prospeccao, membros, contas, titulos restart identity")
         conta = c.execute("insert into contas (nome) values ('Studio Vega') returning id").fetchone()[0]
         ana = c.execute("insert into membros (conta_id, nome, email, papel) "
                         "values (%s,'Ana','ana@x.com','vendedor') returning id", (conta,)).fetchone()[0]
@@ -178,15 +184,91 @@ def test_vendedor_nao_move_a_de_outro(pool, cenario):
 
 
 def test_gestao_move_a_de_qualquer_um(pool, cenario):
-    r = ck.mudar_status_orcamento(pool, cenario["conta"], cenario["do_bruno"], "fechado")
+    r = ck.mudar_status_orcamento(pool, cenario["conta"], cenario["do_bruno"], "aprovada")
     assert r["ok"]
-    assert ck.orcamento(pool, cenario["conta"], cenario["do_bruno"])["status"] == "fechado"
+    assert ck.orcamento(pool, cenario["conta"], cenario["do_bruno"])["status"] == "aprovada"
 
 
 def test_status_invalido_e_recusado(pool, cenario):
     r = ck.mudar_status_orcamento(pool, cenario["conta"], cenario["da_ana"], "arquivado")
     assert not r["ok"] and "inválido" in r["erro"].lower()
     assert ck.orcamento(pool, cenario["conta"], cenario["da_ana"])["status"] == "enviado"
+
+
+def test_seletor_nao_fecha_contrato_pela_porta_dos_fundos(pool, cenario):
+    """'fechado' não é status manual: marcar por aqui deixaria a proposta fechada
+    SEM gerar os títulos a receber, e ninguém perceberia."""
+    r = ck.mudar_status_orcamento(pool, cenario["conta"], cenario["da_ana"], "fechado")
+    assert not r["ok"]
+    assert ck.orcamento(pool, cenario["conta"], cenario["da_ana"])["status"] == "enviado"
+    assert "fechado" not in ck.STATUS_MANUAIS
+
+
+# ------------------------------------------------------------------ fechar contrato
+def _titulos(pool, conta):
+    with pool.connection() as c:
+        return c.execute("select descricao, valor_centavos, recorrente, tipo from titulos "
+                         "where conta_id=%s order by id", (conta,)).fetchall()
+
+
+def test_fechar_gera_entrada_e_mensalidade(pool, cenario):
+    r = ck.fechar_contrato(pool, cenario["conta"], cenario["da_ana"], membro_id=cenario["ana"])
+    assert r["ok"], r
+    assert ck.orcamento(pool, cenario["conta"], cenario["da_ana"])["status"] == "fechado"
+    tit = _titulos(pool, cenario["conta"])
+    assert len(tit) == 2
+    entrada, mensal = tit
+    assert entrada[1] == 180000 and entrada[2] is False and entrada[3] == "receber"
+    assert mensal[1] == 39000 and mensal[2] is True          # mensalidade é recorrente
+    assert "Pet Shop" in entrada[0] and "Pet Shop" in mensal[0]
+
+
+def test_duplo_clique_nao_gera_titulo_em_dobro(pool, cenario):
+    ck.fechar_contrato(pool, cenario["conta"], cenario["da_ana"], membro_id=cenario["ana"])
+    r2 = ck.fechar_contrato(pool, cenario["conta"], cenario["da_ana"], membro_id=cenario["ana"])
+    assert not r2["ok"]
+    assert len(_titulos(pool, cenario["conta"])) == 2
+
+
+def test_vendedor_nao_fecha_contrato_de_outro(pool, cenario):
+    """vendas.fechar_orcamento só escopa por conta — sem a checagem de dono, a
+    Ana fecharia o contrato do Bruno (e geraria os títulos) pela URL."""
+    r = ck.fechar_contrato(pool, cenario["conta"], cenario["do_bruno"], membro_id=cenario["ana"])
+    assert not r["ok"]
+    assert ck.orcamento(pool, cenario["conta"], cenario["do_bruno"])["status"] == "negociando"
+    assert _titulos(pool, cenario["conta"]) == []
+
+
+def test_gestao_fecha_de_qualquer_um(pool, cenario):
+    r = ck.fechar_contrato(pool, cenario["conta"], cenario["do_bruno"])
+    assert r["ok"] and len(_titulos(pool, cenario["conta"])) == 2
+
+
+def test_fechada_nao_volta_atras(pool, cenario):
+    """Reabrir e fechar de novo geraria o contrato em dobro."""
+    ck.fechar_contrato(pool, cenario["conta"], cenario["da_ana"])
+    r = ck.mudar_status_orcamento(pool, cenario["conta"], cenario["da_ana"], "negociando")
+    assert not r["ok"] and "contrato" in r["erro"].lower()
+    assert ck.orcamento(pool, cenario["conta"], cenario["da_ana"])["status"] == "fechado"
+    assert len(_titulos(pool, cenario["conta"])) == 2
+
+
+def test_nao_fecha_de_outra_conta(pool, cenario):
+    with pool.connection() as c:
+        outra = c.execute("insert into contas (nome) values ('Rival') returning id").fetchone()[0]
+        c.commit()
+    assert not ck.fechar_contrato(pool, outra, cenario["da_ana"])["ok"]
+    assert ck.orcamento(pool, cenario["conta"], cenario["da_ana"])["status"] == "enviado"
+    assert _titulos(pool, outra) == []
+
+
+def test_proposta_so_com_entrada_gera_um_titulo(pool, cenario):
+    with pool.connection() as c:
+        c.execute("update orcamentos set mensal_centavos=0 where id=%s", (cenario["da_ana"],))
+        c.commit()
+    r = ck.fechar_contrato(pool, cenario["conta"], cenario["da_ana"])
+    assert r["ok"] and "1 título" in r["msg"]
+    assert len(_titulos(pool, cenario["conta"])) == 1
 
 
 def test_nao_move_proposta_de_outra_conta(pool, cenario):

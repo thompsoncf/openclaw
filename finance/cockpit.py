@@ -516,16 +516,22 @@ def orcamento(pool, conta_id: int, orc_id: int, *, membro_id: int | None = None)
     }
 
 
+# estados que o funil move na mão. 'fechado' fica de fora de propósito: fechar é
+# `fechar_contrato`, que gera os títulos a receber — deixar 'fechado' no seletor
+# marcaria a proposta como fechada SEM gerar o contrato, e ninguém perceberia.
+STATUS_MANUAIS = ("rascunho", "enviado", "negociando", "aprovada", "perdido")
+
+
 def mudar_status_orcamento(pool, conta_id: int, orc_id: int, novo: str,
                            *, membro_id: int | None = None) -> dict:
     """Move a proposta no funil. `membro_id` setado limita ao que a pessoa criou —
     é o que impede um vendedor de mexer na proposta de outro pela URL.
 
-    NÃO faz o fechamento contábil: 'fechado' aqui é só o estado da proposta. Virar
-    contrato (gerar os títulos a receber) continua em vendas.fechar_orcamento, pelo
-    painel — é dinheiro, e não é decisão de tela de celular.
+    Proposta FECHADA não volta atrás por aqui: os títulos a receber já existem, e
+    reabrir pra fechar de novo geraria o contrato em dobro. É a mesma regra do
+    painel, que também recusa editar orçamento com status 'fechado'.
     """
-    if novo not in STATUS_ORC:
+    if novo not in STATUS_MANUAIS:
         return {"ok": False, "erro": "Status inválido."}
     args: list = [novo, orc_id, conta_id]
     dono = ""
@@ -534,11 +540,42 @@ def mudar_status_orcamento(pool, conta_id: int, orc_id: int, novo: str,
         args.append(str(membro_id))
     with pool.connection() as c:
         n = c.execute("update orcamentos set status=%s, atualizado_em=now() "
-                      "where id=%s and conta_id=%s" + dono, tuple(args)).rowcount
+                      "where id=%s and conta_id=%s and coalesce(status,'rascunho') <> 'fechado'"
+                      + dono, tuple(args)).rowcount
         c.commit()
+        if not n:
+            atual = c.execute("select coalesce(status,'rascunho') from orcamentos "
+                              "where id=%s and conta_id=%s", (orc_id, conta_id)).fetchone()
     if not n:
+        if atual and atual[0] == "fechado":
+            return {"ok": False, "erro": "Essa proposta já virou contrato — não dá pra reabrir."}
         return {"ok": False, "erro": "Proposta não encontrada (ou não é sua)."}
     return {"ok": True, "status": novo, "msg": f"Proposta marcada como {_ROT_ORC.get(novo, novo)} ✓"}
+
+
+def fechar_contrato(pool, conta_id: int, orc_id: int, *, membro_id: int | None = None) -> dict:
+    """Fecha a proposta como CONTRATO: gera os títulos a receber (entrada + a
+    mensalidade recorrente) no módulo Empresa.
+
+    Aqui só mora o escopo — quem gera é `vendas.fechar_orcamento`, o mesmo motor do
+    botão do painel, que é atômico (o duplo-clique não gera título em dobro) e
+    escopado por conta. O que ele NÃO faz é olhar quem criou a proposta: sem a
+    checagem abaixo, um vendedor fecharia contrato da proposta de outro pela URL.
+    """
+    if membro_id:
+        with pool.connection() as c:
+            dele = c.execute("select 1 from orcamentos where id=%s and conta_id=%s and criado_por=%s",
+                             (orc_id, conta_id, str(membro_id))).fetchone()
+        if not dele:
+            return {"ok": False, "erro": "Proposta não encontrada (ou não é sua)."}
+    from finance import vendas
+    r = vendas.fechar_orcamento(pool, conta_id, orc_id, criado_por=membro_id)
+    if not r.get("ok"):
+        return r
+    quantos = sum(1 for k in ("setup_titulo_id", "mensal_titulo_id") if r.get(k))
+    return {**r, "status": "fechado",
+            "msg": (f"Contrato fechado ✓ {quantos} título(s) a receber gerado(s)"
+                    if quantos else "Contrato fechado ✓")}
 
 
 def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens) -> dict:

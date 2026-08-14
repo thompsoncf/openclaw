@@ -144,6 +144,17 @@ b,strong{font-weight:600}
 .chip.neon{color:var(--neon);border-color:#1e4a3a;background:rgba(37,211,102,.10)}
 .chip.err{color:var(--coral);border-color:#5a2b2b;background:#241313}
 
+/* ---------- fechar contrato (dois toques, porque mexe em dinheiro) ---------- */
+.fechar{border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:.2rem .9rem}
+.fechar summary{list-style:none;cursor:pointer;padding:.65rem 0;font-family:var(--display);
+  font-weight:700;font-size:.95rem;color:var(--neon);text-align:center}
+.fechar summary::-webkit-details-marker{display:none}
+.fechar[open]{border-color:#1e4a3a;background:rgba(37,211,102,.06)}
+.fechar[open] summary{border-bottom:1px solid var(--line);margin-bottom:.7rem}
+.fechar p{font-size:.82rem;color:var(--text-dim);margin:0 0 .6rem;line-height:1.5}
+.fechar p b{color:var(--text)}
+.fechar .aviso-p{color:var(--ambar);font-size:.78rem}
+
 /* ---------- link da proposta pra copiar ---------- */
 .copiar{display:flex;gap:.4rem;margin-top:.5rem}
 .copiar input{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);
@@ -745,14 +756,42 @@ def novo_orcamento(request: Request, orc_id: int):
                      ".writeText(this.previousElementSibling.value);this.textContent='Copiado'\">"
                      "Copiar</button></div>")
 
+    fechada = o["status"] == "fechado"
+
     def opt(k, lab):
         return f"<option value='{k}'{' selected' if o['status'] == k else ''}>{esc(lab)}</option>"
-    mover = ("<div class=eyebrow>Mover no funil</div><div class=bloco>"
-             f"<form method=post action='{_BASE}/orcamentos/{orc_id}/status' class=linhaform>"
-             "<select name=status>"
-             + "".join(opt(k, ck._ROT_ORC.get(k, k.title())) for k in ck.STATUS_ORC)
-             + "</select><button class=btn style='width:auto;padding:.55rem 1rem' type=submit>"
-             "Salvar</button></form></div>")
+    if fechada:
+        # já virou contrato: os títulos existem, reabrir geraria o contrato em dobro
+        mover = ("<div class=eyebrow>Funil</div><div class=bloco><div class=card "
+                 "style='font-size:.84rem;color:var(--text-dim)'>Esta proposta já virou "
+                 "<b style='color:var(--neon)'>contrato</b> — os títulos a receber estão no "
+                 "módulo Empresa. Pra mexer no valor agora, é por lá.</div></div>")
+    else:
+        mover = ("<div class=eyebrow>Mover no funil</div><div class=bloco>"
+                 f"<form method=post action='{_BASE}/orcamentos/{orc_id}/status' class=linhaform>"
+                 "<select name=status>"
+                 + "".join(opt(k, ck._ROT_ORC.get(k, k.title())) for k in ck.STATUS_MANUAIS)
+                 + "</select><button class=btn style='width:auto;padding:.55rem 1rem' type=submit>"
+                 "Salvar</button></form></div>")
+
+    # Fechar contrato é a única ação daqui que mexe em dinheiro: gera os títulos a
+    # receber. Por isso vive atrás de dois toques e diz o que vai acontecer ANTES —
+    # não é um botão que se aperta sem querer rolando a tela.
+    if fechada:
+        fechar = ""
+    else:
+        recorrente = (f" e <b>{esc(_brl(o['mensal_centavos']))}/mês</b> recorrente"
+                      if o["mensal_centavos"] else "")
+        entrada = (f"<b>{esc(_brl(o['setup_centavos']))}</b> de entrada (vence em 7 dias)"
+                   if o["setup_centavos"] else "o valor da proposta")
+        fechar = ("<div class=eyebrow>Fechar</div><div class=bloco>"
+                  "<details class=fechar><summary>Fechar contrato</summary>"
+                  f"<p>Vira contrato e cria os títulos a receber: {entrada}{recorrente}. "
+                  "Eles aparecem em <b>Empresa → a receber</b>.</p>"
+                  "<p class=aviso-p>Depois de fechar, a proposta não volta atrás por aqui.</p>"
+                  f"<form method=post action='{_BASE}/orcamentos/{orc_id}/fechar'>"
+                  "<button class=btn type=submit>Confirmar e gerar os títulos</button></form>"
+                  "</details></div>")
 
     # "editar ou qualquer coisa": o editor completo já existe no painel e aceita
     # deep link (?abrir=<id>) — não faz sentido reconstruir o formulário no celular.
@@ -786,7 +825,7 @@ def novo_orcamento(request: Request, orc_id: int):
              + aprovada
              + (f"<div class=eyebrow>Mandar pro cliente</div><div class=bloco>{''.join(envio)}</div>"
                 if envio else "")
-             + mover + editar
+             + mover + fechar + editar
              + (f"<div class=eyebrow>O que entra</div><div class=bloco><div class=card>{itens}</div></div>"
                 if itens else "")
              + (f"<div class=eyebrow>Cliente</div><div class=bloco><div class=card>{ficha_html}</div></div>"
@@ -807,6 +846,23 @@ def novo_orcamento_status(request: Request, orc_id: int, status: str = Form(...)
                                   membro_id=None if g else sess[1])
     request.session["ck_ok" if r.get("ok") else "ck_err"] = (
         r.get("msg", "Feito ✓") if r.get("ok") else r.get("erro", "Não deu certo."))
+    return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
+
+
+@router.post("/cockpit/novo/orcamentos/{orc_id}/fechar")
+def novo_orcamento_fechar(request: Request, orc_id: int):
+    """Fecha a proposta como contrato. Mesmo motor do botão do painel
+    (vendas.fechar_orcamento, via ck.fechar_contrato) — inclusive a trava de
+    idempotência, que impede o duplo-clique gerar título em dobro."""
+    g = _gerencia(request)
+    sess = _sessao(request)
+    if not g and not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id = g[0] if g else sess[0]
+    r = ck.fechar_contrato(get_pool(), conta_id, orc_id,
+                           membro_id=None if g else sess[1])
+    request.session["ck_ok" if r.get("ok") else "ck_err"] = (
+        r.get("msg", "Contrato fechado ✓") if r.get("ok") else r.get("erro", "Não deu certo."))
     return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
 
 

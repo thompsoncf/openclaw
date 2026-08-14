@@ -99,7 +99,13 @@ a{color:inherit;text-decoration:none}
 b,strong{font-weight:600}
 /* app shell: a página não rola; só o miolo (.scroll) rola, então header e abas
    ficam parados como em app nativo. */
+/* padding-top: o _page pede viewport-fit=cover + status-bar-style black-translucent,
+   que mandam desenhar POR BAIXO da barra de status de propósito (senão sobra tarja
+   preta no app instalado). Quem faz isso tem que devolver o espaço, ou o título
+   nasce embaixo do relógio. Fica aqui, e não no .hdr, porque cinco telas não têm
+   cabeçalho — o login é uma delas, e é a primeira que o vendedor vê. */
 .wrap{max-width:520px;margin:0 auto;height:100vh;height:100dvh;overflow:hidden;
+  padding-top:env(safe-area-inset-top,0px);
   display:flex;flex-direction:column;position:relative}
 /* o glow é a assinatura visual do site — aqui entra atrás do topo, discreto */
 .glow{position:absolute;top:-160px;left:50%;transform:translateX(-50%);width:150%;height:320px;
@@ -278,8 +284,12 @@ b,strong{font-weight:600}
 .ev .tx{flex:1;font-size:.85rem;padding-top:.15rem}
 
 /* ---------- filtros ---------- */
+/* a fileira rola, mas sem barra de rolagem o chip cortado na borda parece defeito;
+   o fade diz que tem mais coisa pro lado. */
 .filt{display:flex;gap:.35rem;align-items:center;overflow-x:auto;padding:.45rem 1.1rem;
-  scrollbar-width:none}
+  scrollbar-width:none;
+  -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 18px),transparent);
+  mask-image:linear-gradient(to right,#000 calc(100% - 18px),transparent)}
 .filt::-webkit-scrollbar{height:0}
 .filt .lbl{font-family:var(--mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;
   color:var(--text-faint);flex-shrink:0;margin-right:.15rem}
@@ -1331,13 +1341,22 @@ def cockpit_orcamentos(request: Request, s: str = "", v: str = ""):
 
     linhas = []
     for o in lista:
-        val = _brl(o["setup_centavos"] + o["mensal_centavos"])
+        # A linha só diz o que ela sabe. Rascunho sem item montado vale zero de
+        # verdade, mas escrever "R$ 0" anuncia um preço que ninguém fez; e o "—"
+        # do autor é o coalesce de cockpit.orcamentos pra proposta cujo criado_por
+        # não casa com membro nenhum — resposta certa da consulta, travessão solto
+        # na tela. Sem os dois, a carteira para de parecer uma lista de zeros.
+        cents = o["setup_centavos"] + o["mensal_centavos"]
+        val = _brl(cents) if cents else "sem valor ainda"
         sub = o["vendedor"] if gestao else _data(o["criado_em"])
+        if sub == "—":
+            sub = ""
         linhas.append(
             f"<a class=lead href='{_BASE}/orcamentos/{o['id']}'>"
             f"<span class=mid><span class=top><span class=emp>{esc(o['titulo'])}</span>"
             f"<span class='chip {_STATUS_CLS.get(o['status'], '')}'>{esc(o['status_rot'])}</span></span>"
-            f"<span class=snip>{esc(val)} · {esc(sub)}</span></span></a>")
+            f"<span class=snip>{esc(val)}" + (f" · {esc(sub)}" if sub else "")
+            + "</span></span></a>")
     if lista:
         total = sum(o["setup_centavos"] + o["mensal_centavos"] for o in lista)
         miolo = (f"<div class=fonte style='margin-top:.7rem'>{len(lista)} proposta(s) · "

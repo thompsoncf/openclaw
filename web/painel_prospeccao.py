@@ -2661,8 +2661,11 @@ async def webhook_twilio(request: Request, background_tasks: BackgroundTasks):
                 _conv = _cv.responder(pool, _pend[0]["token"], _st, canal="whatsapp")
                 if _conv:
                     if _conv.get("mudou"):                             # só avisa se mudou
-                        _cv.pos_resposta(pool, _conv)
-                    _wout.enviar(c, conta_id, remetente, _cv.confirmacao_texto(_conv))
+                        _cv.pos_resposta(pool, _conv)                  # aviso ao DONO: sempre
+                    # a resposta ao CONVIDADO é opt-out por conta (Agenda › Lembrete)
+                    from finance import agenda as _ag
+                    if _ag.get_config(pool, _conv["conta_id"]).get("enviar_confirmacao", True):
+                        _wout.enviar(c, conta_id, remetente, _cv.confirmacao_texto(_conv))
                     c.commit()
                     return Response("<Response></Response>", media_type="application/xml")
         # --- Botões do template de 1º contato da prospecção (quick reply) ---

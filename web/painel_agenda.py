@@ -521,7 +521,7 @@ def agenda_convite_enviar(request: Request, token: str = Form(...),
 def agenda_lembrete(request: Request, resumo_dia: str = Form(""),
                     hora_resumo: str = Form("7"), aviso: str = Form(""),
                     aviso_antes_min: str = Form("30"), avisar_convidados: str = Form(""),
-                    m: str = Form("")):
+                    enviar_confirmacao: str = Form(""), m: str = Form("")):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -539,7 +539,8 @@ def agenda_lembrete(request: Request, resumo_dia: str = Form(""),
                      resumo_ativo=resumo_on,
                      hora_resumo=hora,
                      aviso_antes_min=antes,
-                     avisar_convidados=(avisar_convidados == "1"))
+                     avisar_convidados=(avisar_convidados == "1"),
+                     enviar_confirmacao=(enviar_confirmacao == "1"))
     if resumo_on or aviso_on:
         request.session["agenda_aviso"] = "Lembrete ligado. 🔔"
     else:
@@ -1203,6 +1204,11 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
               <div><div class="tg-t">Avisar os convidados</div><div class="tg-s">Quem confirmou presença recebe o mesmo aviso, pelo WhatsApp</div></div>
               <label class="sw"><input type="checkbox" name="avisar_convidados" value="1" {% if cfg.avisar_convidados %}checked{% endif %}><span class="track"></span><span class="knob"></span></label>
             </div>
+          </div>
+          <!-- fora do subAviso: independe do "aviso antes" estar ligado -->
+          <div class="tg">
+            <div><div class="tg-t">Confirmar de volta pro convidado</div><div class="tg-s">Quando ele responde, o Zaq manda o comprovante com calendário e mapa</div></div>
+            <label class="sw"><input type="checkbox" name="enviar_confirmacao" value="1" {% if cfg.enviar_confirmacao %}checked{% endif %}><span class="track"></span><span class="knob"></span></label>
           </div>
           <div class="canal-tag">📲 Vai chegar no seu WhatsApp/Telegram, onde você fala com o Zaq.</div>
           <button class="ok" type="submit" data-busy="⏳ Salvando…">Salvar lembrete</button>

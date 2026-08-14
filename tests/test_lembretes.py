@@ -30,7 +30,7 @@ def pool():
                     "128_lembretes_aviso_convidado.sql", "130_evento_desfecho.sql",
                     "131_evento_link_online.sql",
                     "132_convidado_canal_resposta.sql",
-                    "139_agenda_mensagens_log.sql"):
+                    "139_agenda_mensagens_log.sql", "146_agenda_enviar_confirmacao.sql"):
             c.execute((migr / nome).read_text(encoding="utf-8"))
         c.commit()
     yield p
@@ -280,6 +280,23 @@ def test_dono_sem_telegram_registra_uma_vez_so(pool, conta_id, monkeypatch):
     hist = cv.listar_historico(pool, conta_id)
     assert len(hist["itens"]) == 1
     assert hist["itens"][0]["motivo"] == "sem_telegram" and hist["itens"][0]["ok"] is False
+
+
+def test_enviar_confirmacao_default_ligado(pool, conta_id):
+    """Quem nunca salvou config, e quem salva sem mexer, continua com a resposta
+    automática ligada — o comportamento de sempre."""
+    assert ag.get_config(pool, conta_id)["enviar_confirmacao"] is True
+    ag.salvar_config(pool, conta_id, resumo_ativo=False, hora_resumo=7, aviso_antes_min=30)
+    assert ag.get_config(pool, conta_id)["enviar_confirmacao"] is True
+
+
+def test_enviar_confirmacao_pode_desligar_sem_afetar_o_resto(pool, conta_id):
+    ag.salvar_config(pool, conta_id, resumo_ativo=True, hora_resumo=8, aviso_antes_min=30,
+                     avisar_convidados=True, enviar_confirmacao=False)
+    cfg = ag.get_config(pool, conta_id)
+    assert cfg["enviar_confirmacao"] is False
+    assert cfg["avisar_convidados"] is True and cfg["resumo_ativo"] is True
+    assert cfg["hora_resumo"] == 8 and cfg["aviso_antes_min"] == 30
 
 
 def test_so_aviso_ligado_nao_manda_resumo(pool, conta_id, enviados):

@@ -169,9 +169,7 @@ def reenviar_historico(pool, conta_id: int, log_id: int) -> dict:
               if x["id"] == convidado_id), None)
     if not g:
         return {"ok": False, "erro": "nao_encontrado"}
-    return avisar_convidado_confirmado(pool, conta_id, evento_id, convidado_id,
-                                       g.get("contato"), g.get("nome"), ev["titulo"], hora, faltam,
-                                       g.get("respondido_em"), g.get("respondido_canal"), agora)
+    return avisar_convidado_confirmado(pool, conta_id, ev, g, hora, faltam, agora)
 
 
 def por_token(pool, token: str) -> dict | None:
@@ -475,11 +473,25 @@ def _texto_livre_sempre(pool, conta_id: int) -> bool:
         return wout.provedor_da_conta(c, conta_id) == "qr"
 
 
-def texto_lembrete_convidado(nome: str, titulo: str, hora: str, faltam_min: int) -> str:
-    """Mesmo tom do aviso que já mandamos pro dono, adaptado pro convidado."""
+def texto_lembrete_convidado(nome: str, ev: dict, hora: str, faltam_min: int) -> str:
+    """Mesmo tom do aviso que já mandamos pro dono, adaptado pro convidado.
+
+    Leva o que a pessoa precisa NA HORA de sair/entrar: o mapa (presencial) ou o
+    link da chamada (online) — nunca os dois, porque são excludentes — e o
+    calendário. É a mesma trinca que a confirmação já mandava, mas o lembrete
+    ficava só com título e horário, justamente no momento em que esses links
+    mais servem."""
     primeiro = (nome or "").split()[0] if nome else ""
     oi = f"{primeiro}, s" if primeiro else "S"
-    return f"⏰ {oi}eu compromisso *{titulo}* começa em ~{faltam_min} min, às {hora}."
+    txt = f"⏰ {oi}eu compromisso *{ev['titulo']}* começa em ~{faltam_min} min, às {hora}."
+    if ev.get("link_online"):
+        txt += f"\n🎥 Entrar na chamada: {ev['link_online']}"
+    else:
+        mapa = link_mapa(ev)
+        if mapa:
+            txt += f"\n📍 {ev['local']}\n🗺️ Ver no mapa: {mapa}"
+    txt += f"\n📆 Adicionar ao calendário: {link_calendario(ev)}"
+    return txt
 
 
 def template_lembrete_configurado() -> bool:
@@ -490,9 +502,17 @@ def template_lembrete_configurado() -> bool:
     return bool(os.environ.get("TWILIO_TMPL_LEMBRETE_SID") and wa.configurado())
 
 
-def avisar_convidado_confirmado(pool, conta_id: int, evento_id: int, convidado_id: int,
-                                contato: str, nome: str, titulo: str, hora: str, faltam_min: int,
-                                respondido_em, respondido_canal, agora) -> dict:
+def local_rotulo(ev: dict) -> str:
+    """Local em uma linha pro corpo do template — nunca vazio, porque a Meta
+    recusa variável em branco (e o Twilio manda '-' no lugar)."""
+    if ev.get("link_online"):
+        return "Reunião online"
+    local = (ev.get("local") or "").strip()
+    return local or "Sem local definido"
+
+
+def avisar_convidado_confirmado(pool, conta_id: int, ev: dict, g: dict,
+                                hora: str, faltam_min: int, agora) -> dict:
     """Avisa o convidado CONFIRMADO que o compromisso tá chegando.
 
     No provedor QR (WhatsApp Web): texto livre sempre — lá não existe janela nem
@@ -501,14 +521,20 @@ def avisar_convidado_confirmado(pool, conta_id: int, evento_id: int, convidado_i
     só uma resposta dentro da conversa já aberta). Fora dela (inclui QUALQUER
     confirmação pela página pública, que nunca abre sessão): precisa do template
     aprovado (TWILIO_TMPL_LEMBRETE_SID); sem ele, não manda (erro tolerante,
-    nunca levanta)."""
+    nunca levanta).
+
+    Recebe o evento e o convidado inteiros porque o texto agora leva mapa /
+    chamada / calendário — que dependem de local e link_online."""
     from . import whatsapp_out as wout
-    if not (contato or "").strip():
+    evento_id, convidado_id = ev["id"], g["id"]
+    contato = (g.get("contato") or "").strip()
+    if not contato:
         registrar_mensagem(pool, conta_id, evento_id, convidado_id, "lembrete", "whatsapp_livre",
                            False, "sem_numero")
         return {"ok": False, "erro": "sem_numero"}
-    if _texto_livre_sempre(pool, conta_id) or _dentro_da_janela(respondido_em, respondido_canal, agora):
-        texto = texto_lembrete_convidado(nome, titulo, hora, faltam_min)
+    if _texto_livre_sempre(pool, conta_id) or _dentro_da_janela(g.get("respondido_em"),
+                                                               g.get("respondido_canal"), agora):
+        texto = texto_lembrete_convidado(g.get("nome"), ev, hora, faltam_min)
         with pool.connection() as conn:
             r = wout.enviar(conn, conta_id, contato, texto)
         registrar_mensagem(pool, conta_id, evento_id, convidado_id, "lembrete", "whatsapp_livre",
@@ -519,7 +545,12 @@ def avisar_convidado_confirmado(pool, conta_id: int, evento_id: int, convidado_i
         registrar_mensagem(pool, conta_id, evento_id, convidado_id, "lembrete", "whatsapp_template",
                            False, "fora_da_janela_sem_template")
         return {"ok": False, "erro": "fora_da_janela_sem_template"}
-    variaveis = {"1": titulo, "2": hora, "3": str(faltam_min)}
+    # {{4}} local (sempre preenchido) e {{5}} token do convite — o botão do
+    # template aponta pra /convite/<token>, que já mostra mapa, chamada e
+    # calendário. Um template só atende presencial e online: fosse o mapa direto
+    # no botão, evento online deixaria a variável vazia (a Meta recusa).
+    variaveis = {"1": ev["titulo"], "2": hora, "3": str(faltam_min),
+                 "4": local_rotulo(ev), "5": g["token"]}
     with pool.connection() as conn:
         r = wout.enviar_template(conn, conta_id, contato, sid, variaveis)
     registrar_mensagem(pool, conta_id, evento_id, convidado_id, "lembrete", "whatsapp_template",

@@ -163,11 +163,7 @@ def _avisar_convidados_confirmados(pool, conta_id: int, ev: dict, hora: str,
         try:
             if _ja_avisado(pool, conta_id, "aviso_convidado", chave):
                 continue
-            r = cv.avisar_convidado_confirmado(pool, conta_id, ev["id"], g["id"],
-                                               g["contato"], g.get("nome"),
-                                               ev["titulo"], hora, faltam,
-                                               g.get("respondido_em"), g.get("respondido_canal"),
-                                               agora)
+            r = cv.avisar_convidado_confirmado(pool, conta_id, ev, g, hora, faltam, agora)
             if r.get("ok"):
                 _primeira_vez(pool, conta_id, "aviso_convidado", chave)
                 n += 1

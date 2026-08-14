@@ -364,6 +364,67 @@ def test_reenviar_historico_tipo_remarcado_nao_suportado(pool, conta_id):
     assert r["ok"] is False and r["erro"] == "tipo_nao_suportado"
 
 
+def test_lembrete_presencial_leva_mapa_e_calendario(pool, conta_id, monkeypatch):
+    """O lembrete é o momento em que a pessoa está saindo de casa — é aí que o
+    mapa serve. Antes ele levava só título e horário; mapa/chamada/calendário só
+    iam na confirmação, dias antes."""
+    _usar_qr(pool, conta_id)                          # QR: texto livre sempre
+    from finance import whatsapp_out as wout
+    capt = {}
+    monkeypatch.setattr(wout, "enviar", lambda c, i, n, t: capt.update(texto=t) or {"ok": True})
+    agora = ag.agora_brt()
+    ev = ag.criar_evento(pool, conta_id, "Reunião", agora + timedelta(minutes=30),
+                         local="Edifício Dom João")
+    cv.criar_convidado(pool, conta_id, ev["id"], "Hilderlan", "86994283853")
+    g = cv.por_evento(pool, conta_id, [ev["id"]])[ev["id"]][0]
+    cv.avisar_convidado_confirmado(pool, conta_id, ev, g, "09:30", 30, agora)
+    txt = capt["texto"]
+    assert "maps.google.com" in txt or "google.com/maps" in txt
+    assert "Edifício Dom João" in txt
+    assert "calendar.google.com" in txt
+    assert "meet.google.com" not in txt                # presencial não tem chamada
+
+
+def test_lembrete_online_leva_chamada_e_nao_mapa(pool, conta_id, monkeypatch):
+    _usar_qr(pool, conta_id)
+    from finance import whatsapp_out as wout
+    capt = {}
+    monkeypatch.setattr(wout, "enviar", lambda c, i, n, t: capt.update(texto=t) or {"ok": True})
+    agora = ag.agora_brt()
+    ev = ag.criar_evento(pool, conta_id, "Daily", agora + timedelta(minutes=30),
+                         local="Online", link_online="https://meet.google.com/abc-defg-hij")
+    cv.criar_convidado(pool, conta_id, ev["id"], "Ana", "86999990000")
+    g = cv.por_evento(pool, conta_id, [ev["id"]])[ev["id"]][0]
+    cv.avisar_convidado_confirmado(pool, conta_id, ev, g, "09:30", 30, agora)
+    txt = capt["texto"]
+    assert "meet.google.com/abc-defg-hij" in txt
+    assert "google.com/maps" not in txt                # online não tem endereço
+    assert "calendar.google.com" in txt
+
+
+def test_lembrete_template_nunca_manda_variavel_vazia(pool, conta_id, monkeypatch):
+    """A Meta recusa template com variável em branco. Como um evento online não
+    tem endereço e um presencial não tem link de chamada, o template usa o local
+    rotulado ({{4}}) e o token do convite ({{5}}) — nunca vazios nos dois casos."""
+    from finance import whatsapp_out as wout
+    capt = {}
+    monkeypatch.setattr(wout, "enviar_template",
+                        lambda c, i, n, sid, v, mmlite=False: capt.update(vars=v) or {"ok": True})
+    monkeypatch.setenv("TWILIO_TMPL_LEMBRETE_SID", "HXtest")
+    agora = ag.agora_brt()
+    for kw in ({"local": "Edifício Dom João"},
+               {"local": "Online", "link_online": "https://meet.google.com/x"},
+               {}):                                    # sem local nenhum
+        ev = ag.criar_evento(pool, conta_id, "Reunião", agora + timedelta(minutes=30), **kw)
+        cv.criar_convidado(pool, conta_id, ev["id"], "Zé", "86988887777")
+        g = cv.por_evento(pool, conta_id, [ev["id"]])[ev["id"]][0]
+        g = dict(g, respondido_em=agora - timedelta(days=3), respondido_canal="web")
+        cv.avisar_convidado_confirmado(pool, conta_id, ev, g, "09:30", 30, agora)
+        assert set(capt["vars"]) == {"1", "2", "3", "4", "5"}
+        assert all(str(v).strip() for v in capt["vars"].values()), capt["vars"]
+        assert capt["vars"]["5"] == g["token"]         # botão aponta pro convite certo
+
+
 def _usar_qr(pool, conta_id):
     with pool.connection() as c:
         c.execute("""insert into canais_config (conta_id, canal, identificador, provedor, ativo)

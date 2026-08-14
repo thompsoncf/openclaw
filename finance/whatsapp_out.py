@@ -22,6 +22,17 @@ def _row(c, conta_id):
         (conta_id,)).fetchone()
 
 
+def provedor_da_conta(c, conta_id) -> str:
+    """'twilio' | 'cloud' | 'qr' — ou '' se a empresa não tem canal ativo.
+
+    Quem chama precisa disso pra saber se as regras da API OFICIAL do WhatsApp
+    (janela de 24h + template aprovado) valem: elas são da Business API
+    (twilio/cloud). No 'qr' é uma sessão tipo WhatsApp Web — texto livre pra
+    qualquer número, sempre, sem template."""
+    r = _row(c, conta_id)
+    return r[0] if r else ""
+
+
 def configurado_conta(c, conta_id) -> bool:
     """A empresa consegue ENVIAR WhatsApp agora? (provedor + credenciais prontos)."""
     r = _row(c, conta_id)

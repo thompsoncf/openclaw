@@ -453,6 +453,12 @@ def enviar_convite_whatsapp(pool, token: str) -> dict:
 # NÃO é mensagem nenhuma — não abre sessão de WhatsApp nenhuma, mesmo que
 # pareça "recente". Por isso o canal importa, não só o horário: só respondido
 # de verdade PELO WHATSAPP conta como "dentro da janela".
+#
+# Tudo isso, porém, é regra da API OFICIAL (Business API — twilio/cloud). No
+# provedor 'qr' (sessão tipo WhatsApp Web) não existe janela de 24h nem
+# template: manda texto livre pra qualquer número, sempre. Por isso o provedor
+# é checado ANTES da janela — exigir template de quem usa QR reprovaria um envio
+# que ia funcionar.
 
 JANELA_SESSAO = timedelta(hours=24)
 
@@ -460,6 +466,13 @@ JANELA_SESSAO = timedelta(hours=24)
 def _dentro_da_janela(respondido_em, respondido_canal, agora) -> bool:
     return (respondido_canal == "whatsapp" and bool(respondido_em)
            and (agora - respondido_em) < JANELA_SESSAO)
+
+
+def _texto_livre_sempre(pool, conta_id: int) -> bool:
+    """True quando o provedor da conta não tem janela de 24h nem template (QR)."""
+    from . import whatsapp_out as wout
+    with pool.connection() as c:
+        return wout.provedor_da_conta(c, conta_id) == "qr"
 
 
 def texto_lembrete_convidado(nome: str, titulo: str, hora: str, faltam_min: int) -> str:
@@ -482,18 +495,19 @@ def avisar_convidado_confirmado(pool, conta_id: int, evento_id: int, convidado_i
                                 respondido_em, respondido_canal, agora) -> dict:
     """Avisa o convidado CONFIRMADO que o compromisso tá chegando.
 
-    Dentro da janela de 24h desde uma confirmação DE VERDADE pelo WhatsApp:
-    manda texto LIVRE (sem template, sem custo extra — é só uma resposta dentro
-    da conversa já aberta). Fora dela (inclui QUALQUER confirmação pela página
-    pública, que nunca abre sessão): precisa do template aprovado
-    (TWILIO_TMPL_LEMBRETE_SID); sem ele, não manda (erro tolerante, nunca
-    levanta)."""
+    No provedor QR (WhatsApp Web): texto livre sempre — lá não existe janela nem
+    template. Na API oficial, dentro da janela de 24h desde uma confirmação DE
+    VERDADE pelo WhatsApp: manda texto LIVRE (sem template, sem custo extra — é
+    só uma resposta dentro da conversa já aberta). Fora dela (inclui QUALQUER
+    confirmação pela página pública, que nunca abre sessão): precisa do template
+    aprovado (TWILIO_TMPL_LEMBRETE_SID); sem ele, não manda (erro tolerante,
+    nunca levanta)."""
     from . import whatsapp_out as wout
     if not (contato or "").strip():
         registrar_mensagem(pool, conta_id, evento_id, convidado_id, "lembrete", "whatsapp_livre",
                            False, "sem_numero")
         return {"ok": False, "erro": "sem_numero"}
-    if _dentro_da_janela(respondido_em, respondido_canal, agora):
+    if _texto_livre_sempre(pool, conta_id) or _dentro_da_janela(respondido_em, respondido_canal, agora):
         texto = texto_lembrete_convidado(nome, titulo, hora, faltam_min)
         with pool.connection() as conn:
             r = wout.enviar(conn, conta_id, contato, texto)
@@ -529,17 +543,19 @@ def texto_remarcado(nome: str, titulo: str, hora_antiga: str, hora_nova: str, ur
 
 def avisar_convidado_remarcado(pool, conta_id: int, g: dict, ev: dict,
                                hora_antiga: str, agora) -> dict:
-    """Avisa 1 convidado que o compromisso mudou de data. Dentro da janela de 24h
-    desde a última resposta dele: texto livre, reaproveitando o mesmo link.
-    Fora da janela (ou quem nunca respondeu): reusa o template de convite já
-    aprovado — mesmo caminho 'frio' do primeiro convite, só que a essa altura o
-    evento já está com a data nova, então quem clicar vê o horário certo."""
+    """Avisa 1 convidado que o compromisso mudou de data. No provedor QR, ou
+    dentro da janela de 24h desde a última resposta dele: texto livre,
+    reaproveitando o mesmo link. Fora da janela (ou quem nunca respondeu): reusa
+    o template de convite já aprovado — mesmo caminho 'frio' do primeiro convite,
+    só que a essa altura o evento já está com a data nova, então quem clicar vê o
+    horário certo."""
     contato = (g.get("contato") or "").strip()
     if not contato:
         registrar_mensagem(pool, conta_id, ev["id"], g["id"], "remarcado", "whatsapp_livre",
                            False, "sem_numero")
         return {"ok": False, "erro": "sem_numero"}
-    if _dentro_da_janela(g.get("respondido_em"), g.get("respondido_canal"), agora):
+    if _texto_livre_sempre(pool, conta_id) or _dentro_da_janela(g.get("respondido_em"),
+                                                                g.get("respondido_canal"), agora):
         from . import whatsapp_out as wout
         url = url_convite(g["token"])
         texto = texto_remarcado(g.get("nome"), ev["titulo"], hora_antiga, ag.fmt_hora(ev), url,

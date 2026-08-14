@@ -21,7 +21,8 @@ def pool():
     init_schema(p)
     migr = Path(__file__).resolve().parent.parent / "db" / "migracoes"
     with p.connection() as c:
-        for nome in ("098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql",
+        for nome in ("081_canais_config.sql", "084_canal_token.sql", "096_whatsapp_cloud.sql",
+                    "098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql",
                     "130_evento_desfecho.sql", "131_evento_link_online.sql", "132_convidado_canal_resposta.sql",
                     "139_agenda_mensagens_log.sql"):
             c.execute((migr / nome).read_text(encoding="utf-8"))
@@ -361,6 +362,34 @@ def test_reenviar_historico_tipo_remarcado_nao_suportado(pool, conta_id):
     log_id = cv.listar_historico(pool, conta_id)["itens"][0]["id"]
     r = cv.reenviar_historico(pool, conta_id, log_id)
     assert r["ok"] is False and r["erro"] == "tipo_nao_suportado"
+
+
+def _usar_qr(pool, conta_id):
+    with pool.connection() as c:
+        c.execute("""insert into canais_config (conta_id, canal, identificador, provedor, ativo)
+                     values (%s,'whatsapp',%s,'qr',true)
+                     on conflict (conta_id, canal) do update set provedor='qr', ativo=true""",
+                  (conta_id, f"qr:{conta_id}"))
+        c.commit()
+
+
+def test_remarcado_no_qr_manda_livre_mesmo_fora_da_janela(pool, conta_id, monkeypatch):
+    """No QR não existe janela de 24h nem template: mesmo quem nunca respondeu
+    (ou respondeu pela web) recebe o aviso de remarcação como texto livre, em vez
+    de cair no template de convite que o QR nem consegue disparar."""
+    _usar_qr(pool, conta_id)
+    ev = _evento(pool, conta_id, titulo="Alinhamento")
+    ca = cv.criar_convidado(pool, conta_id, ev["id"], "Bia", "86988880002")   # nunca respondeu
+    from finance import whatsapp_out as wout
+    capt = {}
+    monkeypatch.setattr(wout, "enviar", lambda c, cid, numero, texto: capt.update(
+        numero=numero, texto=texto) or {"ok": True})
+    monkeypatch.setattr(wout, "enviar_template", lambda *a, **k: capt.update(template=True) or {"ok": True})
+    novo = ag.agora_brt() + timedelta(days=3)
+    r = cv.remarcar_e_avisar(pool, conta_id, ev["id"], novo, None, avisar=True, agora=ag.agora_brt())
+    assert r["ok"] is True and r["avisados"] == 1
+    assert capt.get("template") is None                  # não tentou template
+    assert capt["numero"] == "86988880002" and "mudou de horário" in capt["texto"].lower()
 
 
 def test_listar_fila_mostra_dono_e_convidados_pendentes(pool, conta_id):

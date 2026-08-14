@@ -51,6 +51,13 @@ def _telegram_id_do_dono(pool, conta_id: int) -> int | None:
     return row[0] if row else None
 
 
+def dono_tem_telegram(pool, conta_id: int) -> bool:
+    """O dono tem Telegram vinculado? Serve pra quem chama distinguir uma falha
+    que ADIANTA retentar (rede, Telegram fora do ar) de uma que não adianta —
+    sem vínculo, tentar de novo a cada 2 min só repete o mesmo nada."""
+    return _telegram_id_do_dono(pool, conta_id) is not None
+
+
 def avisar_dono_lista_fechada(pool, conta_id: int, quem_nome: str,
                               n_itens: int = 0) -> bool:
     """Avisa o dono (via Telegram) que alguem fechou/terminou a lista de compras.

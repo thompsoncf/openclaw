@@ -24,7 +24,8 @@ def pool():
     init_schema(p)
     migr = Path(__file__).resolve().parent.parent / "db" / "migracoes"
     with p.connection() as c:
-        for nome in ("098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql",
+        for nome in ("081_canais_config.sql", "084_canal_token.sql", "096_whatsapp_cloud.sql",
+                    "098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql",
                     "101_agenda_lembretes.sql", "126_agenda_avisar_convidados.sql",
                     "128_lembretes_aviso_convidado.sql", "130_evento_desfecho.sql",
                     "131_evento_link_online.sql",
@@ -109,6 +110,9 @@ def test_aviso_dono_falha_na_primeira_tentativa_tenta_de_novo(pool, conta_id, mo
     tentativas = []
     monkeypatch.setattr(notificar, "enviar_para_dono",
                         lambda pool, conta_id, texto: (tentativas.append(texto), False)[1])
+    # tem vínculo, quem falhou foi a rede/Telegram -> transitório, retenta
+    # (sem vínculo é outro caso: permanente, ver test_dono_sem_telegram_...)
+    monkeypatch.setattr(notificar, "dono_tem_telegram", lambda pool, cid: True)
     agora = ag.agora_brt().replace(hour=14, minute=0, second=0, microsecond=0)
     ag.criar_evento(pool, conta_id, "Reunião com Paulo", agora + timedelta(minutes=20), local="Sala 2")
     ag.salvar_config(pool, conta_id, resumo_ativo=False, hora_resumo=7, aviso_antes_min=30)
@@ -182,13 +186,46 @@ def test_convidado_confirmado_pela_web_usa_template_nao_texto_livre(pool, conta_
     assert templates == [("86999990000", "HXlembretetest")]   # foi pelo template, que funciona
 
 
-def test_convidado_confirmado_pela_web_sem_template_nao_manda_mas_pode_reter(pool, conta_id, monkeypatch):
-    """Sem template configurado, uma confirmação pela web não pode mandar nada
-    (não tem canal livre nem template) — mas a falha NÃO pode "queimar" a
-    tentativa: se o template for configurado depois, o próximo ciclo (~2min)
-    ainda dentro da janela do evento consegue mandar."""
-    from finance import whatsapp_out as wout
+def test_falta_de_template_tenta_uma_vez_so_e_para(pool, conta_id, monkeypatch):
+    """Visto em produção: o motor roda a cada ~2min durante os 30min da janela, e
+    como a falha nunca era marcada como resolvida, "faltou template" era retentado
+    24x — 24 linhas idênticas no Histórico de envios por convidado. Falta de
+    CONFIGURAÇÃO não muda sozinha em 30min: registra o motivo uma vez e para (o
+    botão Reenviar continua lá pra depois de configurar)."""
     monkeypatch.delenv("TWILIO_TMPL_LEMBRETE_SID", raising=False)
+    agora = ag.agora_brt().replace(hour=14, minute=0, second=0, microsecond=0)
+    ev = ag.criar_evento(pool, conta_id, "Reunião com Ana", agora + timedelta(minutes=20))
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Ana", "86999990000")
+    cv.responder(pool, conv["token"], "confirmado")   # pela web -> fora da janela
+    ag.salvar_config(pool, conta_id, resumo_ativo=False, hora_resumo=7, aviso_antes_min=30,
+                     avisar_convidados=True)
+    for minuto in (0, 2, 4):                          # 3 ciclos do motor, evento ainda na janela
+        lb.rodar(pool, agora=agora.replace(minute=minuto))
+    hist = cv.listar_historico(pool, conta_id)
+    lembretes_conv = [i for i in hist["itens"] if i["convidado_nome"] == "Ana"]
+    assert len(lembretes_conv) == 1                    # 1 linha, não 3
+    assert lembretes_conv[0]["motivo"] == "fora_da_janela_sem_template"
+
+    # e o reenvio manual (botão do histórico) funciona depois de configurar
+    from finance import whatsapp_out as wout
+    templates = []
+    monkeypatch.setattr(wout, "enviar_template",
+                        lambda c, cid, numero, sid, variaveis: (templates.append(numero) or {"ok": True}))
+    monkeypatch.setenv("TWILIO_TMPL_LEMBRETE_SID", "HXlembretetest")
+    assert cv.reenviar_historico(pool, conta_id, lembretes_conv[0]["id"])["ok"] is True
+    assert templates == ["86999990000"]
+
+
+def test_falha_transitoria_continua_retentando(pool, conta_id, monkeypatch):
+    """Contrapeso do teste acima: erro de rede/API NÃO é permanente — o próximo
+    ciclo tem que tentar de novo (é o fix que fez o aviso parar de sumir quando o
+    Twilio dava um piscada)."""
+    from finance import whatsapp_out as wout
+    tentativas = []
+    monkeypatch.setenv("TWILIO_TMPL_LEMBRETE_SID", "HXlembretetest")
+    monkeypatch.setattr(wout, "enviar_template",
+                        lambda c, cid, numero, sid, v: (tentativas.append(numero)
+                                                        or {"ok": False, "erro": "http_503"}))
     agora = ag.agora_brt().replace(hour=14, minute=0, second=0, microsecond=0)
     ev = ag.criar_evento(pool, conta_id, "Reunião com Ana", agora + timedelta(minutes=20))
     conv = cv.criar_convidado(pool, conta_id, ev["id"], "Ana", "86999990000")
@@ -196,16 +233,53 @@ def test_convidado_confirmado_pela_web_sem_template_nao_manda_mas_pode_reter(poo
     ag.salvar_config(pool, conta_id, resumo_ativo=False, hora_resumo=7, aviso_antes_min=30,
                      avisar_convidados=True)
     lb.rodar(pool, agora=agora)
-    with pool.connection() as c:
-        assert c.execute("select 1 from lembretes_enviados where tipo='aviso_convidado'").fetchone() is None
+    assert len(tentativas) == 1
+    lb.rodar(pool, agora=agora.replace(minute=2))     # provedor voltou? tenta de novo
+    assert len(tentativas) == 2
 
-    # "configura" o template e roda o próximo ciclo (2min depois, evento ainda na janela)
-    templates = []
+
+def test_conta_com_whatsapp_qr_manda_livre_sem_precisar_de_template(pool, conta_id, monkeypatch):
+    """No provedor 'qr' (sessão tipo WhatsApp Web) não existe janela de 24h nem
+    template — dá pra mandar texto livre pra qualquer número, sempre. Antes o
+    código aplicava a regra da API oficial em qualquer provedor, então quem usa
+    QR ficava sem aviso à toa, esperando um template que nem faz sentido lá."""
+    with pool.connection() as c:
+        c.execute("""insert into canais_config (conta_id, canal, identificador, provedor, ativo)
+                     values (%s,'whatsapp',%s,'qr',true)
+                     on conflict (conta_id, canal) do update set provedor='qr', ativo=true""",
+                  (conta_id, f"qr:{conta_id}"))
+        c.commit()
+    from finance import whatsapp_out as wout
+    livres, templates = [], []
+    monkeypatch.setattr(wout, "enviar",
+                        lambda c, cid, numero, texto: (livres.append(numero) or {"ok": True}))
     monkeypatch.setattr(wout, "enviar_template",
-                        lambda c, cid, numero, sid, variaveis: (templates.append(numero) or {"ok": True}))
-    monkeypatch.setenv("TWILIO_TMPL_LEMBRETE_SID", "HXlembretetest")
-    lb.rodar(pool, agora=agora.replace(minute=2))
-    assert templates == ["86999990000"]                # tentou de novo e dessa vez foi
+                        lambda c, cid, numero, sid, v: (templates.append(numero) or {"ok": True}))
+    monkeypatch.delenv("TWILIO_TMPL_LEMBRETE_SID", raising=False)   # sem template nenhum
+    agora = ag.agora_brt().replace(hour=14, minute=0, second=0, microsecond=0)
+    ev = ag.criar_evento(pool, conta_id, "Reunião com Ana", agora + timedelta(minutes=20))
+    conv = cv.criar_convidado(pool, conta_id, ev["id"], "Ana", "86999990000")
+    cv.responder(pool, conv["token"], "confirmado")   # pela web: fora da janela de 24h
+    ag.salvar_config(pool, conta_id, resumo_ativo=False, hora_resumo=7, aviso_antes_min=30,
+                     avisar_convidados=True)
+    lb.rodar(pool, agora=agora)
+    assert livres == ["86999990000"]                  # saiu como texto livre
+    assert templates == []                            # sem tentar template nenhum
+
+
+def test_dono_sem_telegram_registra_uma_vez_so(pool, conta_id, monkeypatch):
+    """Conta sem Telegram vinculado: tentar de novo a cada 2min repete o mesmo
+    nada. Uma linha com o motivo, e para."""
+    monkeypatch.setattr(notificar, "enviar_para_dono", lambda pool, cid, texto: False)
+    monkeypatch.setattr(notificar, "dono_tem_telegram", lambda pool, cid: False)
+    agora = ag.agora_brt().replace(hour=14, minute=0, second=0, microsecond=0)
+    ag.criar_evento(pool, conta_id, "Sem telegram", agora + timedelta(minutes=20))
+    ag.salvar_config(pool, conta_id, resumo_ativo=False, hora_resumo=7, aviso_antes_min=30)
+    for minuto in (0, 2, 4):
+        lb.rodar(pool, agora=agora.replace(minute=minuto))
+    hist = cv.listar_historico(pool, conta_id)
+    assert len(hist["itens"]) == 1
+    assert hist["itens"][0]["motivo"] == "sem_telegram" and hist["itens"][0]["ok"] is False
 
 
 def test_so_aviso_ligado_nao_manda_resumo(pool, conta_id, enviados):

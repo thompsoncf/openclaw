@@ -15,7 +15,7 @@ from fastapi import APIRouter, BackgroundTasks, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from db.conexao import get_pool
-from finance import agenda as ag
+from finance import agenda as ag, servicos_catalogo as scat
 from web.portal import _env
 
 router = APIRouter()
@@ -143,7 +143,10 @@ def _carregar(token: str, pool=None):
                       o.endereco, o.cep, o.cidade, o.uf, o.cnpj, o.email, o.telefone,
                       o.evento_agenda_id,
                       c.razao_social, c.documento, c.endereco, c.cep, c.bairro,
-                      c.cidade, c.uf, c.telefone, c.email_empresa
+                      c.cidade, c.uf, c.telefone, c.email_empresa,
+                      (select m.nome from membros m
+                        where m.id = case when o.criado_por ~ '^[0-9]+$'
+                                          then o.criado_por::bigint end)
                  from orcamentos o join contas c on c.id = o.conta_id
                 where o.token=%s""", (token,)).fetchone()
     if not r:
@@ -152,7 +155,8 @@ def _carregar(token: str, pool=None):
      status, criado_em, aprov_por, aprov_em, conta_nome, conta_id, criado_por, logo_url,
      modo, evento, parcelas, numero, cli_end, cli_cep, cli_cidade, cli_uf, cli_doc,
      cli_email, cli_tel, agenda_id,
-     em_razao, em_doc, em_end, em_cep, em_bairro, em_cidade, em_uf, em_tel, em_email) = r
+     em_razao, em_doc, em_end, em_cep, em_bairro, em_cidade, em_uf, em_tel, em_email,
+     vendedor_nome) = r
     itens = _lista(itens)
     evento = _dic(evento)
     criado = criado_em.date() if criado_em else date.today()
@@ -179,6 +183,7 @@ def _carregar(token: str, pool=None):
         "cliente": {"doc": cli_doc or "", "endereco": cli_end or "", "cep": cli_cep or "",
                     "cidade": cli_cidade or "", "uf": cli_uf or "",
                     "email": cli_email or "", "telefone": cli_tel or ""},
+        "vendedor_nome": vendedor_nome or "",
         "emitente": {"razao": em_razao or "", "doc": em_doc or "", "endereco": em_end or "",
                      "cep": em_cep or "", "bairro": em_bairro or "", "cidade": em_cidade or "",
                      "uf": em_uf or "", "telefone": em_tel or "", "email": em_email or ""},
@@ -188,6 +193,12 @@ def _carregar(token: str, pool=None):
 
 
 _DIA_SEM = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"]
+
+# O vocabulário (tipos de evento e de contrato) mora no catálogo de serviços —
+# a folha imprime a lista toda com a escolhida em destaque, como no formulário
+# de papel que a empresa usa hoje.
+TIPOS_EVENTO = scat.TIPOS_EVENTO
+TIPOS_CONTRATO = scat.TIPOS_CONTRATO
 
 
 def _data_br(v) -> str:
@@ -205,8 +216,24 @@ def _linhas_evento(d: dict) -> list[dict]:
         total = int(it.get("setup") or 0)
         unit = int(it.get("unitario") or 0) or (total // qtd if qtd else total)
         linhas.append({"n": i, "nome": it.get("nome") or "", "desc": it.get("desc") or "",
-                       "qtd": qtd, "unit": _brl(unit * 100), "subtotal": _brl(total * 100)})
+                       "qtd": qtd, "unit": _brl(unit * 100), "subtotal": _brl(total * 100),
+                       "categoria": it.get("categoria") or "", "foto": it.get("foto_url") or ""})
     return linhas
+
+
+def _subtotais(itens: list[dict]) -> list[dict]:
+    """Soma por categoria (Locação de espaço, Buffet, …), na ordem em que os
+    itens aparecem. Só faz sentido com mais de uma categoria — com uma só, a
+    linha repetiria o total; nesse caso volta vazio e a folha não mostra o bloco."""
+    soma: dict[str, int] = {}
+    for it in itens:
+        cat = (it.get("categoria") or "").strip()
+        if not cat:
+            return []          # item sem categoria: o agrupamento mentiria no total
+        soma[cat] = soma.get(cat, 0) + int(it.get("setup") or 0)
+    if len(soma) < 2:
+        return []
+    return [{"nome": k, "valor": _brl(v * 100)} for k, v in soma.items()]
 
 
 @router.get("/proposta/{token}", response_class=HTMLResponse)
@@ -216,6 +243,7 @@ def proposta_publica(request: Request, token: str, erro: str = ""):
         return HTMLResponse(_env.get_template("proposta").render(prop=None), status_code=404)
     if d["modo"] == "evento":
         linhas = _linhas_evento(d)
+        d["subtotais"] = _subtotais(d["itens"])
         ev = d["evento"]
         dia = d["dia_evento"]
         d["ev"] = {
@@ -225,6 +253,10 @@ def proposta_publica(request: Request, token: str, erro: str = ""):
             "tipo": ev.get("tipo") or "", "local": ev.get("local") or "",
             "contratos": [str(x) for x in (ev.get("contratos") or [])],
         }
+        # as listas inteiras, com a escolhida em destaque — é assim que o papel
+        # que ele usa hoje mostra (todas as opções, a marcada com o X).
+        d["tipos_evento"] = TIPOS_EVENTO
+        d["contratos_todos"] = TIPOS_CONTRATO
         d["parcelas_fmt"] = [
             {"venc": _data_br(p.get("venc")), "valor": _brl(p.get("valor_centavos")),
              "forma": p.get("forma") or "", "obs": p.get("obs") or ""}
@@ -312,8 +344,20 @@ td{padding:11px 13px;border-bottom:1px solid #F0EBE0;font-size:13.5px}td small{d
 .pills{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
 .pill{font-size:10.5px;font-weight:600;padding:3px 10px;border-radius:20px;border:1px solid #ECE7DC;background:#fff;color:#5A6678}
 .pill.on{background:#14213D;border-color:#14213D;color:#E0B458}
+.pill.on2{background:rgba(29,158,117,.12);border-color:rgba(29,158,117,.45);color:#0b7a56}
 .local{font-size:12px;color:#5A6678;margin-top:9px}
 td.n{width:26px;color:#A8A192;vertical-align:top}
+.item-l{display:flex;gap:10px}
+.foto{width:46px;height:46px;border-radius:7px;flex:0 0 46px;border:1px solid #ECE7DC;
+  background:#FBFAF7 center/cover no-repeat}
+.cat{font-size:8.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:#B8862E;display:block;margin-bottom:2px}
+.subs{margin-top:10px;border:1px solid #ECE7DC;border-radius:9px;overflow:hidden}
+.sub-cat{display:flex;justify-content:space-between;gap:10px;font-size:11.5px;color:#5A6678;
+  padding:6px 12px;border-bottom:1px solid #F5F1E8}
+.sub-cat:last-child{border-bottom:0}
+.sub-cat b{font-family:var(--mono);color:#14213D}
+table.pag th{background:#FBFAF7;color:#8A8475;border-bottom:1px solid #ECE7DC}
 td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:top}
 .cond{background:#FBFAF7;border:1px solid #ECE7DC;border-radius:9px;padding:12px 14px;font-size:12px;color:#5A6678;line-height:1.7;white-space:pre-line}
 .assp{display:none}
@@ -323,6 +367,14 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
   .pg{box-shadow:none;border-radius:0}
   .assp{display:block!important;margin:26px 40px 0;text-align:center;font-size:10.5px;color:#555}
   .assp .ln{border-top:1px solid #333;width:65%;margin:0 auto 4px}
+  /* aperta o respiro da tela pra caber mais folha por página… */
+  .hd{padding:20px 26px}
+  .bd{padding:18px 26px 20px}
+  .eb{margin:13px 0 6px}
+  td{padding:7px 10px}
+  /* …e o que quebrar, quebra ENTRE blocos: item cortado no meio da página é o
+     que faz um orçamento parecer amador. */
+  tr,.evg,.evb,.subs,.cond,.cli{break-inside:avoid}
   @page{size:A4;margin:12mm}
 }
 </style>{% endraw %}
@@ -347,6 +399,7 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
             {%- if prop.emitente.cep %} · CEP {{ prop.emitente.cep }}{% endif %}{% endif %}
           {%- if prop.emitente.telefone or prop.emitente.email %}<br>
             {{- prop.emitente.telefone }}{% if prop.emitente.telefone and prop.emitente.email %} · {% endif %}{{ prop.emitente.email }}{% endif %}
+          {%- if prop.vendedor_nome %}<br>Vendedor: {{ prop.vendedor_nome }}{% endif %}
         </div>{% endif %}
       </div></div>
       <div class="mt"><b>{{ 'Orçamento' if evento else 'Proposta comercial' }}</b>{{ prop.doc_num }}<br>
@@ -362,10 +415,13 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
         <div class="evb"><div class="l">Início</div><div class="v">{{ prop.ev.inicio or '—' }}</div></div>
         <div class="evb"><div class="l">Encerramento</div><div class="v">{{ prop.ev.fim or '—' }}</div></div>
       </div>
-      {% if prop.ev.tipo or prop.ev.contratos %}
+      {% if prop.ev.tipo %}
       <div class="pills">
-        {% if prop.ev.tipo %}<span class="pill on">{{ prop.ev.tipo }}</span>{% endif %}
-        {% for ct in prop.ev.contratos %}<span class="pill">{{ ct }}</span>{% endfor %}
+        {% for t in prop.tipos_evento %}<span class="pill{% if t == prop.ev.tipo %} on{% endif %}">{{ t }}</span>{% endfor %}
+      </div>{% endif %}
+      {% if prop.ev.contratos %}
+      <div class="pills">
+        {% for ct in prop.contratos_todos %}<span class="pill{% if ct in prop.ev.contratos %} on2{% endif %}">{{ ct }}</span>{% endfor %}
       </div>{% endif %}
       {% if prop.ev.local %}<div class="local">📍 {{ prop.ev.local }}</div>{% endif %}
       {% endif %}
@@ -383,14 +439,24 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
       <table><tr><th style="width:26px">#</th><th>Item</th><th class="r" style="width:44px">Qtd</th>
                  <th class="r" style="width:86px">Vr. unit.</th><th class="r" style="width:92px">Subtotal</th></tr>
         {% for l in linhas %}<tr><td class="n">{{ l.n }}</td>
-          <td><b>{{ l.nome }}</b>{% if l.desc %}<small>{{ l.desc }}</small>{% endif %}</td>
+          <td><div class="item-l">
+            {%- if l.foto %}<div class="foto" style="background-image:url('{{ l.foto }}')"></div>{% endif %}
+            <div style="min-width:0">
+              {%- if l.categoria %}<span class="cat">{{ l.categoria }}</span>{% endif %}
+              <b>{{ l.nome }}</b>{% if l.desc %}<small>{{ l.desc }}</small>{% endif %}
+            </div>
+          </div></td>
           <td class="q">{{ l.qtd }}</td><td class="q">{{ l.unit }}</td><td class="q">{{ l.subtotal }}</td></tr>{% endfor %}
       </table>
       {% endif %}
+      {% if prop.subtotais %}
+      <div class="subs">
+        {% for st in prop.subtotais %}<div class="sub-cat"><span>{{ st.nome }}</span><b>{{ st.valor }}</b></div>{% endfor %}
+      </div>{% endif %}
       <div class="fin"><div class="l">Total do evento</div><div class="v">{{ prop.total }}</div></div>
       {% if prop.parcelas_fmt %}
       <div class="eb">Plano de pagamento</div>
-      <table><tr><th>Vencimento</th><th class="r">Valor</th><th>Forma</th><th>Observação</th></tr>
+      <table class="pag"><tr><th>Vencimento</th><th class="r">Valor</th><th>Forma</th><th>Observação</th></tr>
         {% for p in prop.parcelas_fmt %}<tr><td>{{ p.venc or '—' }}</td><td class="q">{{ p.valor }}</td>
           <td>{{ p.forma }}</td><td>{{ p.obs }}</td></tr>{% endfor %}
       </table>

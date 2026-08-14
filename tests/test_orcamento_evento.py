@@ -80,6 +80,8 @@ def conta_id(pool):
                        '64050-050','Teresina','PI','(86) 99409-5516',
                        'primeeventosthe@gmail.com')
                returning id""").fetchone()[0]
+        c.execute("insert into membros (conta_id, nome, papel) values (%s,%s,'dono')",
+                  (cid, "Manoel Soares de Sousa Junior"))
         c.commit()
     return cid
 
@@ -88,9 +90,11 @@ EVENTO = {"data": "2025-11-18", "convidados": 50, "inicio": "19:00", "fim": "24:
           "tipo": "Aniversário", "contratos": ["Locação de espaço"],
           "local": "Espaço 01"}
 ITENS = [{"nome": "Espaço 01 — completo", "desc": "O espaço inclui: mesas, 60 cadeiras…",
-          "setup": 7200, "mensal": 0, "qtd": 1, "unitario": 7200},
+          "setup": 7200, "mensal": 0, "qtd": 1, "unitario": 7200,
+          "categoria": "Locação de espaço", "foto_url": "https://ex.com/espaco.jpg"},
          {"nome": "Cadeira Modway Entreat", "desc": "Além das 60 inclusas.",
-          "setup": 250, "mensal": 0, "qtd": 10, "unitario": 25}]
+          "setup": 250, "mensal": 0, "qtd": 10, "unitario": 25,
+          "categoria": "Locação de móveis e utensílios", "foto_url": ""}]
 PARCELAS = [{"venc": "2025-11-13", "valor_centavos": 181000, "forma": "Pix",
              "obs": "Sinal — confirma a reserva da data"},
             {"venc": "2025-12-13", "valor_centavos": 600000, "forma": "Cartão de crédito",
@@ -107,15 +111,16 @@ def _semear(pool, conta_id, *, status="enviado", evento=EVENTO, parcelas=PARCELA
             """insert into orcamentos (conta_id, empresa, cliente, escopo, itens,
                    setup_centavos, primeiro_ano_centavos, status, token, modo,
                    evento, parcelas, numero, endereco, cep, cidade, uf, cnpj,
-                   email, telefone)
+                   email, telefone, criado_por)
                values (%s,'Maria Teste','Maria Teste','Reserva com o sinal.',%s::jsonb,
                        %s,%s,%s,%s,'evento',%s::jsonb,%s::jsonb,%s,
                        'Rua das Flores, 120','64049-000','Teresina','PI',
-                       '000.000.000-00','maria@teste.com','(86) 99999-0000')
+                       '000.000.000-00','maria@teste.com','(86) 99999-0000',
+                       (select min(id)::text from membros where conta_id=%s))
                returning id""",
             (conta_id, json.dumps(ITENS), total_centavos, total_centavos, status, token,
              json.dumps(evento) if evento is not None else None,
-             json.dumps(parcelas), numero)).fetchone()[0]
+             json.dumps(parcelas), numero, conta_id)).fetchone()[0]
         c.commit()
     return oid, token
 
@@ -188,10 +193,24 @@ def test_pagina_do_evento_mostra_qtd_valor_unitario_e_parcelas(pool, conta_id, m
     assert "50" in html and "19:00" in html and "24:00" in html      # bloco do evento
     assert "Aniversário" in html and "Locação de espaço" in html
     assert "R$ 25,00" in html and "R$ 250,00" in html                # 10 × 25 = 250
+    assert "https://ex.com/espaco.jpg" in html                       # foto do item
+    assert html.count("Locação de espaço") >= 2   # categoria do item + subtotal por categoria
+    assert "Casamento" in html and "Corporativo" in html   # as opções todas, como no papel
+    assert "Vendedor: Manoel" in html
     assert "R$ 7.450,00" in html                                     # total do evento
     assert "Plano de pagamento" in html and "R$ 1.810,00" in html
     assert "52.752.898/0001-58" in html                              # emitente no cabeçalho
     assert "Mensalidade" not in html and "1º ano" not in html
+
+
+def test_subtotal_por_categoria(pool, conta_id):
+    from web.proposta import _subtotais
+    assert _subtotais(ITENS) == [{"nome": "Locação de espaço", "valor": "R$ 7.200,00"},
+                                 {"nome": "Locação de móveis e utensílios", "valor": "R$ 250,00"}]
+    # uma categoria só repetiria o total, e item sem categoria mentiria a soma:
+    # nos dois casos o bloco não aparece.
+    assert _subtotais([ITENS[0]]) == []
+    assert _subtotais([ITENS[0], {"setup": 100}]) == []
 
 
 # --------------------------------------------------------------- reserva na agenda

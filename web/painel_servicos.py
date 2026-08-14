@@ -19,7 +19,7 @@ import json
 import re
 import secrets
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, File, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from psycopg.errors import UniqueViolation
 from pydantic import BaseModel
@@ -164,7 +164,8 @@ def painel_servicos(request: Request):
     # cobrança recorrente errada de um evento pontual).
     servico_avulso = nicho == "eventos"
     return _render("servicos", request, empresa_nome=conta[2],
-                   tem_pj=True, vende_servico=True, servico_avulso=servico_avulso)
+                   tem_pj=True, vende_servico=True, servico_avulso=servico_avulso,
+                   tipos_evento=scat.TIPOS_EVENTO, tipos_contrato=scat.TIPOS_CONTRATO)
 
 
 # ---------------------------------------------------------------- catálogo (por conta)
@@ -181,8 +182,9 @@ def painel_servicos_catalogo(request: Request):
         "setup": round(s["setup_centavos"] / 100),
         "mensal": round(s["mensal_centavos"] / 100),
         "custo": round(s["custo_centavos"] / 100),
+        "categoria": s["categoria"], "foto_url": s["foto_url"],
     } for s in scat.listar(pool, conta[0])]
-    return JSONResponse({"itens": itens})
+    return JSONResponse({"itens": itens, "categorias": scat.CATEGORIAS_EVENTOS})
 
 
 class ServicoIn(BaseModel):
@@ -192,6 +194,8 @@ class ServicoIn(BaseModel):
     setup: int = 0     # REAIS
     mensal: int = 0    # REAIS
     custo: int = 0     # REAIS
+    categoria: str = ""    # agrupa no orçamento de evento (subtotal por categoria)
+    foto_url: str = ""     # o cliente vê o que está contratando
 
 
 @router.post("/painel/servicos/catalogo/salvar")
@@ -203,7 +207,8 @@ def painel_servicos_catalogo_salvar(request: Request, dados: ServicoIn):
                     descricao=dados.descricao,
                     setup_centavos=int(dados.setup or 0) * 100,
                     mensal_centavos=int(dados.mensal or 0) * 100,
-                    custo_centavos=int(dados.custo or 0) * 100)
+                    custo_centavos=int(dados.custo or 0) * 100,
+                    categoria=dados.categoria, foto_url=dados.foto_url)
     if not r.get("ok"):
         return JSONResponse({"erro": r.get("erro", "falha ao salvar")}, status_code=400)
     return JSONResponse(r)
@@ -211,6 +216,26 @@ def painel_servicos_catalogo_salvar(request: Request, dados: ServicoIn):
 
 class ServicoDelIn(BaseModel):
     id: int
+
+
+@router.post("/painel/servicos/catalogo/foto")
+async def painel_servicos_catalogo_foto(request: Request, arquivo: UploadFile = File(...)):
+    """Sobe a foto do serviço e devolve a URL pública. Mesmo motor da foto de
+    produto (finance.upload_foto): redimensiona e joga no bucket. Quem grava a
+    URL no serviço é o /catalogo/salvar — aqui só sobe o arquivo."""
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    from finance import upload_foto
+    try:
+        conteudo = await arquivo.read()
+        url = upload_foto.subir_foto(conteudo, arquivo.filename or "",
+                                     arquivo.content_type or "image/jpeg")
+    except ValueError as e:
+        return JSONResponse({"erro": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"erro": f"Não consegui subir a foto: {e}"}, status_code=500)
+    return JSONResponse({"ok": True, "foto_url": url})
 
 
 @router.post("/painel/servicos/catalogo/excluir")
@@ -347,6 +372,8 @@ class ItemIn(BaseModel):
     mensal: int = 0
     qtd: int = 1              # evento: quantidade contratada
     unitario: int = 0         # evento: valor unitário em REAIS
+    categoria: str = ""       # evento: agrupa e soma por categoria na folha
+    foto_url: str = ""        # evento: o cliente vê o que está contratando
 
 
 class EventoIn(BaseModel):
@@ -409,7 +436,8 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
     # orçamento de evento ela tem parágrafos inteiros, então o corte é largo.
     itens = [{"nome": (it.nome or "")[:120], "desc": (it.desc or "")[:2000],
               "setup": int(it.setup or 0), "mensal": int(it.mensal or 0),
-              "qtd": max(1, int(it.qtd or 1)), "unitario": int(it.unitario or 0)}
+              "qtd": max(1, int(it.qtd or 1)), "unitario": int(it.unitario or 0),
+              "categoria": (it.categoria or "")[:60], "foto_url": (it.foto_url or "")[:500]}
              for it in (dados.itens or [])[:50]]
     itens_json = json.dumps(itens)
     # o MODO vem do nicho da conta, não do navegador: quem vende evento emite
@@ -643,6 +671,12 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .pg-row .oc-valor{text-align:right}
 @media(max-width:640px){.pg-row{grid-template-columns:1fr 1fr; gap:.4rem}.pg-row .pg-obs{grid-column:1/-1}}
 .pg-aviso{color:#e6b877}
+.svc-thumb{width:46px;height:46px;border-radius:8px;flex:0 0 46px;border:1px solid var(--borda);
+  background:var(--bg) center/cover no-repeat;display:flex;align-items:center;justify-content:center;color:var(--txt-mut)}
+.svc-thumb.tem span{display:none}
+.oc-mod .svc-thumb{width:34px;height:34px;flex:0 0 34px;border-radius:7px;font-size:.8rem}
+.oc-nome-linha{display:flex;gap:.5rem;align-items:center;min-width:0}
+.oc-cat{font-size:.66rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--verde-claro)}
 .oc-mod.off{opacity:.5}
 .oc-mod .oc-nome,.oc-browse-row .oc-nome{cursor:default; min-width:0}
 .oc-desc-preview{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%}
@@ -750,19 +784,12 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   </div>
   <div class="oc-field"><label>Tipo de evento</label>
     <div style="display:flex; gap:.4rem; flex-wrap:wrap" id="ev-tipos">
-      <button type="button" class="oc-pill ev-tipo">Aniversário</button>
-      <button type="button" class="oc-pill ev-tipo">Casamento</button>
-      <button type="button" class="oc-pill ev-tipo">Confraternização</button>
-      <button type="button" class="oc-pill ev-tipo">Corporativo</button>
-      <button type="button" class="oc-pill ev-tipo">Infantil</button>
-      <button type="button" class="oc-pill ev-tipo">Suítes</button>
+      {% for t in tipos_evento %}<button type="button" class="oc-pill ev-tipo">{{ t }}</button>{% endfor %}
     </div>
   </div>
   <div class="oc-field"><label>Tipo de contrato</label>
     <div style="display:flex; gap:.4rem; flex-wrap:wrap" id="ev-contratos">
-      <button type="button" class="oc-pill ev-ct" data-on="0">Locação de espaço</button>
-      <button type="button" class="oc-pill ev-ct" data-on="0">Locação de móveis e utensílios</button>
-      <button type="button" class="oc-pill ev-ct" data-on="0">Serviços terceirizados</button>
+      {% for ct in tipos_contrato %}<button type="button" class="oc-pill ev-ct" data-on="0">{{ ct }}</button>{% endfor %}
     </div>
   </div>
   <div class="oc-field" style="margin-bottom:.3rem"><label>Local</label><input id="ev-local" class="oc-inp" placeholder="Espaço 01 — Rua Deoclécio Brito, 3399"></div>
@@ -842,8 +869,25 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         <input type="hidden" id="svc-id">
         <div style="display:grid; grid-template-columns:2fr 3fr; gap:.6rem">
           <div class="oc-field" style="margin-bottom:.4rem"><label>Nome do serviço</label><input id="svc-nome" class="oc-inp" placeholder="Ex.: Consultoria de SEO"></div>
-          <div class="oc-field" style="margin-bottom:.4rem"><label>Descrição</label><input id="svc-desc" class="oc-inp" placeholder="O que está incluso"></div>
+          <div class="oc-field" style="margin-bottom:.4rem"><label>Descrição</label><textarea id="svc-desc" class="oc-inp" rows="2" placeholder="O que está incluso — pode escrever a lista inteira, sai igual no orçamento"></textarea></div>
         </div>
+        {% if servico_avulso %}
+        <div style="display:grid; grid-template-columns:1fr auto; gap:.6rem; align-items:end; margin-bottom:.4rem">
+          <div class="oc-field" style="margin-bottom:0"><label>Categoria <span style="color:var(--txt-mut);font-size:.78rem">— agrupa e soma por categoria no orçamento</span></label>
+            <select id="svc-cat" class="oc-inp"><option value="">Sem categoria</option></select>
+          </div>
+          <div class="oc-field" style="margin-bottom:0"><label>Foto</label>
+            <div style="display:flex; gap:.5rem; align-items:center">
+              <div id="svc-foto-thumb" class="svc-thumb"><span>📷</span></div>
+              <div style="display:flex; flex-direction:column; gap:.35rem">
+                <label class="oc-pill" style="cursor:pointer; text-align:center">📷 Subir foto
+                  <input id="svc-foto-file" type="file" accept="image/*" style="display:none"></label>
+                <input id="svc-foto" class="oc-inp" placeholder="ou cole o link https://…" style="font-size:.8rem; padding:.35rem .5rem">
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endif %}
         <div style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end">
           <div class="oc-field" style="margin-bottom:0"><label>{{ 'Valor (R$)' if servico_avulso else 'Setup (R$)' }}</label><input id="svc-setup" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
           <div class="oc-field" style="margin-bottom:0{% if servico_avulso %};display:none{% endif %}"><label>Mensal (R$)</label><input id="svc-mensal" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
@@ -1338,6 +1382,12 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   function carregarCatalogo(preserva){
     return fetch('/painel/servicos/catalogo').then(function(r){return r.json();}).then(function(d){
       CATALOGO=d.itens||[];
+      var selCat=document.getElementById('svc-cat');
+      if(selCat&&selCat.options.length<2){
+        (d.categorias||[]).forEach(function(nome){
+          var o=document.createElement('option'); o.value=nome; o.textContent=nome; selCat.appendChild(o);
+        });
+      }
       if(SERVICO_AVULSO){
         CATALOGO.sort(function(a,b){return (a.nome||'').localeCompare(b.nome||'','pt-BR');});
         Object.keys(SELECIONADOS).forEach(function(id){if(!CATALOGO.some(function(s){return s.slug===id;}))delete SELECIONADOS[id];});
@@ -1382,20 +1432,46 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         return;
       }
       var ed=e.target.closest('.oc-edit'), dl=e.target.closest('.oc-del');
-      if(ed){var row2=ed.closest('.oc-browse-row'); var s=CATALOGO.filter(function(x){return x.slug===row2.getAttribute('data-id');})[0]; if(s)abrirForm({id:s.id,nome:s.nome,descricao:s.descricao,setup:s.setup,mensal:s.mensal,custo:s.custo});}
+      if(ed){var row2=ed.closest('.oc-browse-row'); var s=CATALOGO.filter(function(x){return x.slug===row2.getAttribute('data-id');})[0]; if(s)abrirForm({id:s.id,nome:s.nome,descricao:s.descricao,setup:s.setup,mensal:s.mensal,custo:s.custo,categoria:s.categoria,foto_url:s.foto_url});}
       else if(dl){var row3=dl.closest('.oc-browse-row'); var s2=CATALOGO.filter(function(x){return x.slug===row3.getAttribute('data-id');})[0]; if(s2&&confirm('Excluir "'+s2.nome+'" do seu catálogo?')){fetch('/painel/servicos/catalogo/excluir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:s2.id})}).then(function(){carregarCatalogo(true);});}}
     });
   }
   // editar / excluir (delegação)
   document.getElementById('oc-mods').addEventListener('click',function(e){
     var ed=e.target.closest('.oc-edit'), dl=e.target.closest('.oc-del');
-    if(ed){var r=ed.closest('.oc-mod'); abrirForm({id:r.getAttribute('data-cid'),nome:r.getAttribute('data-nome'),descricao:r.getAttribute('data-desc'),setup:num(r.querySelector('.oc-setup')),mensal:num(r.querySelector('.oc-mensal')),custo:num(r.querySelector('.oc-custo'))});}
+    if(ed){var r=ed.closest('.oc-mod'); var sc=CATALOGO.filter(function(x){return x.slug===r.getAttribute('data-id');})[0]||{}; abrirForm({id:r.getAttribute('data-cid'),nome:r.getAttribute('data-nome'),descricao:r.getAttribute('data-desc'),setup:num(r.querySelector('.oc-setup')),mensal:num(r.querySelector('.oc-mensal')),custo:num(r.querySelector('.oc-custo')),categoria:sc.categoria,foto_url:sc.foto_url});}
     else if(dl){var r2=dl.closest('.oc-mod'); if(confirm('Excluir "'+r2.getAttribute('data-nome')+'" do seu catálogo?')){fetch('/painel/servicos/catalogo/excluir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:parseInt(r2.getAttribute('data-cid'),10)})}).then(function(){carregarCatalogo(true);});}}
   });
   // form de add/editar serviço do catálogo
+  function svcFotoPreview(url){
+    var t=document.getElementById('svc-foto-thumb'); if(!t)return;
+    if(url){t.style.backgroundImage="url('"+url+"')"; t.classList.add('tem');}
+    else{t.style.backgroundImage=''; t.classList.remove('tem');}
+  }
+  var svcFile=document.getElementById('svc-foto-file');
+  if(svcFile)svcFile.addEventListener('change',function(){
+    var f=this.files&&this.files[0]; if(!f)return;
+    var msg=document.getElementById('svc-msg'); msg.textContent='Subindo a foto…';
+    var fd=new FormData(); fd.append('arquivo',f);
+    fetch('/painel/servicos/catalogo/foto',{method:'POST',body:fd})
+      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+      .then(function(res){
+        if(!res.ok){msg.textContent=(res.d&&res.d.erro)||'Não consegui subir a foto.'; return;}
+        document.getElementById('svc-foto').value=res.d.foto_url;
+        svcFotoPreview(res.d.foto_url); msg.textContent='Foto pronta.';
+      })
+      .catch(function(){msg.textContent='Erro de conexão ao subir a foto.';});
+  });
+  var svcFotoLink=document.getElementById('svc-foto');
+  if(svcFotoLink)svcFotoLink.addEventListener('input',function(){svcFotoPreview(this.value.trim());});
+
   function abrirForm(s){
     s=s||{};
     document.getElementById('svc-id').value=s.id||'';
+    var cat=document.getElementById('svc-cat');
+    if(cat)cat.value=s.categoria||'';
+    var fot=document.getElementById('svc-foto');
+    if(fot){fot.value=s.foto_url||''; svcFotoPreview(s.foto_url||'');}
     document.getElementById('svc-nome').value=s.nome||'';
     document.getElementById('svc-desc').value=s.descricao||'';
     document.getElementById('svc-setup').value=s.setup||0;
@@ -1413,7 +1489,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     var nome=document.getElementById('svc-nome').value.trim();
     if(!nome){document.getElementById('svc-msg').textContent='Informe o nome do serviço.';return;}
     var idv=document.getElementById('svc-id').value;
-    var body={id:idv?parseInt(idv,10):null,nome:nome,descricao:document.getElementById('svc-desc').value||'',setup:num(document.getElementById('svc-setup')),mensal:num(document.getElementById('svc-mensal')),custo:num(document.getElementById('svc-custo'))};
+    var body={id:idv?parseInt(idv,10):null,nome:nome,descricao:document.getElementById('svc-desc').value||'',setup:num(document.getElementById('svc-setup')),mensal:num(document.getElementById('svc-mensal')),custo:num(document.getElementById('svc-custo')),categoria:((document.getElementById('svc-cat')||{}).value)||'',foto_url:((document.getElementById('svc-foto')||{}).value||'').trim()};
     var b=this; b.disabled=true;
     fetch('/painel/servicos/catalogo/salvar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
       .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
@@ -1580,8 +1656,10 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     // unitário viajam junto pra o orçamento poder mostrar "10 × R$ 25,00".
     var itens=sel.map(function(r){
       var q=qtd(r), u=num(r.querySelector('.oc-setup'));
+      var cat=CATALOGO.filter(function(x){return x.slug===r.getAttribute('data-id');})[0]||{};
       return {nome:r.getAttribute('data-nome'),desc:r.getAttribute('data-desc')||'',
-              setup:u*q,mensal:num(r.querySelector('.oc-mensal')),qtd:q,unitario:u};
+              setup:u*q,mensal:num(r.querySelector('.oc-mensal')),qtd:q,unitario:u,
+              categoria:cat.categoria||'',foto_url:cat.foto_url||''};
     });
     var escEl=document.getElementById('oc-escopo-out');
     return {id:EDIT_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',telefone:document.getElementById('oc-tel').value||'',cidade:document.getElementById('oc-cidade').value||'',uf:document.getElementById('oc-uf').value||'',site:document.getElementById('oc-site').value||'',cargo:document.getElementById('oc-cargo').value||'',socio:document.getElementById('oc-socio').value||'',endereco:(document.getElementById('oc-endereco')||{}).value||'',cep:(document.getElementById('oc-cep')||{}).value||'',modulos:sel.map(function(r){return r.getAttribute('data-id');}),itens:itens,evento:coletarEvento(),parcelas:(SERVICO_AVULSO?coletarParcelas():[]),escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setup),mensal:Math.round(c.mensal),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods};

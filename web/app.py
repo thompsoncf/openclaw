@@ -83,7 +83,6 @@ from web.painel_prospeccao import router as prospeccao_router
 from web.painel_conteudo import router as conteudo_router
 from web.painel_agenda import router as agenda_router
 from web.painel_cockpit import router as cockpit_router
-from web.painel_cockpit_novo import router as cockpit_novo_router
 from web.painel_relatorios import router as relatorios_router
 from web.proposta import router as proposta_router
 app.add_middleware(
@@ -111,8 +110,6 @@ app.include_router(conteudo_router)  # antes do prospeccao_router: aquele tem um
 app.include_router(prospeccao_router)
 app.include_router(agenda_router)
 app.include_router(cockpit_router)
-app.include_router(cockpit_novo_router)  # protótipo do app novo, em /cockpit/novo:
-                                          # aditivo, não substitui o /cockpit acima.
 app.include_router(relatorios_router)
 app.include_router(proposta_router)
 

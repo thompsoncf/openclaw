@@ -273,12 +273,8 @@ _EQUIPE_TPL = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:.8rem;flex-wrap:wrap">
     <h2 style="margin:0">Equipe</h2>
-    <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-      <a href="/cockpit/novo" target="_blank" rel="noopener"
-         style="display:inline-flex;align-items:center;gap:.4rem;background:var(--verde);border:1px solid var(--verde);color:#04150c;border-radius:10px;padding:.5rem .9rem;font-weight:700;text-decoration:none;white-space:nowrap">✨ Ver o app novo (prévia)</a>
-      <a href="/cockpit" target="_blank" rel="noopener"
-         style="display:inline-flex;align-items:center;gap:.4rem;background:var(--neon-fundo);border:1px solid var(--neon-borda);color:var(--verde-claro);border-radius:10px;padding:.5rem .9rem;font-weight:700;text-decoration:none;white-space:nowrap">📊 Abrir o Cockpit da equipe</a>
-    </div>
+    <a href="/cockpit" target="_blank" rel="noopener"
+       style="display:inline-flex;align-items:center;gap:.4rem;background:var(--neon-fundo);border:1px solid var(--neon-borda);color:var(--verde-claro);border-radius:10px;padding:.5rem .9rem;font-weight:700;text-decoration:none;white-space:nowrap">📊 Abrir o app da equipe</a>
   </div>
   <div class="mut" style="font-size:.82rem">Convide sua equipe por link. Cada pessoa entra com o próprio login, com o acesso do papel. Você acompanha o time no <b>Cockpit</b> — sem precisar de outro cadastro.</div>
 

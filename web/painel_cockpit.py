@@ -1,33 +1,67 @@
-"""Cockpit do Vendedor — app mobile (PWA) do vendedor, servido fora do painel.
+"""Cockpit — o app mobile (PWA) do vendedor e do gestor, servido fora do painel.
 
-Espaço enxuto e mobile SÓ pro vendedor: recebe o lead, conversa (pelo chip da
-empresa), mexe no funil, vê a ficha e fecha (ganho/perdido). Entra por LINK MÁGICO
-(sem senha) — o gestor gera o link (botão 📱 Cockpit na Equipe) ou o vendedor pede
-pelo próprio e-mail em /cockpit/login. A sessão (cookie assinado do portal) mantém
-ele logado depois.
+Espaço enxuto e mobile pra quem vende: recebe o lead, conversa (pelo chip da
+empresa), mexe no funil, monta orçamento, agenda visita e fecha. Entra por LINK
+MÁGICO (sem senha) — o gestor gera na Equipe ou a pessoa pede pelo próprio e-mail
+em /cockpit/login. Depois disso a sessão (cookie assinado do portal) segura.
 
-Páginas 100% server-rendered (HTML próprio, sem o layout do painel) + PWA
-(manifest + service worker) pra instalar como app e, na PRÓXIMA fase, receber push.
-Toda ação vai por form POST e redireciona — robusto, funciona sem JS. O motor (posse,
-envio, funil) fica em finance/cockpit.py; aqui só HTTP + HTML.
+Esta versão substituiu a anterior (o "Cockpit do Vendedor" de uma tela só). O que
+mudou, e por quê:
+
+  * **Marca.** A versão anterior rodava a paleta legada (#0e0e0f / #1d9e75, fonte
+    de sistema) enquanto o site já usava outra. Quem saía de zaq-ia.com e entrava
+    no app achava que tinha trocado de produto. Os tokens vêm de web/tema.py — o
+    mesmo bloco do painel inteiro. Ícones viram SVG (antes eram emoji, que mudam
+    de desenho conforme o aparelho).
+  * **O vendedor ganha um app, não uma tela.** Antes era só a fila, sem menu:
+    perfil, visitas e resultado ficavam escondidos atrás do avatar. Agora são
+    cinco abas — Fila, Agenda, Propostas, Resultado, Perfil.
+  * **O vendedor vê dinheiro.** `membros.comissao_pct` existe desde a migração 137
+    mas só aparecia pro dono, no relatório do painel. A aba Resultado mostra o que
+    ELE fechou e quanto disso é comissão dele — pela mesma conta de
+    finance/comissao.py que o relatório usa, pra não haver dois números.
+  * **O gestor não é mais expulso.** Antes, tocar num lead da equipe levava pra
+    /painel/prospeccao/{id} — o painel desktop, no meio do celular. Aqui o lead
+    abre dentro do próprio app, e ele ainda vê a carteira de propostas do time.
+
+Fronteira: aqui só HTTP + HTML. O motor (posse, escopo, escrita) fica em
+finance/cockpit.py e finance/cockpit_dono.py, que é o mesmo motor que o painel
+usa — o app é uma porta mobile pro mesmo dado, não um silo à parte.
+
+Guards: `_sessao` (vendedor) e `_gerencia` (dono/gestor) são checados aqui, em toda
+rota. Isso importa porque o middleware central (web/app.py) só filtra /painel* e
+/membros* — /cockpit* passa livre e a checagem é toda daqui.
+
+Páginas server-rendered, toda ação por form POST + redirect: funciona sem JS. As
+duas exceções são os montadores (orçamento e visita), que são interativos por
+natureza, e o deslizar do card na fila — e mesmo lá o card continua sendo um link
+comum se o JS não carregar.
 """
 from __future__ import annotations
 
 import html as _html
 
-from fastapi import APIRouter, Request, Form, Body
-from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
+from fastapi import APIRouter, Body, Form, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from db.conexao import get_pool
+from web import tema as _tema
 from finance import cockpit as ck
+from finance import cockpit_dono as cd
 
 router = APIRouter()
 
+_BASE = "/cockpit"
 _PAPEIS_OK = ("vendedor", "gestor", "dono")
 
 
 def esc(s) -> str:
     return _html.escape(str(s if s is not None else ""))
+
+
+def _ini(s: str) -> str:
+    s = (s or "?").strip()
+    return (s[0].upper() if s else "?")
 
 
 # ------------------------------------------------------------------ sessão
@@ -42,7 +76,7 @@ def _sessao(request: Request):
 
 
 def _gerencia(request: Request):
-    """(conta_id, membro_id) se dono/gestor — pro Cockpit do Dono. NÃO exige membro_id:
+    """(conta_id, membro_id) se dono/gestor — pra visão de equipe. NÃO exige membro_id:
     o dono logado no painel tem conta_id+papel mas não tem membro_id (é o titular), e
     a visão de equipe é toda por conta_id. Assim ele entra pela sessão do painel, sem
     precisar do login por link mágico. membro_id vem None pro dono, id pro gestor."""
@@ -53,350 +87,708 @@ def _gerencia(request: Request):
     return cid, request.session.get("membro_id")
 
 
-# ------------------------------------------------------------------ shell/estilo
-_CSS = """<style>
-:root{--bg:var(--bg);--card:var(--card);--card2:var(--card-2);--borda:var(--borda);--txt:var(--txt);--mut:var(--txt-mut);
---verde:var(--verde);--verde-claro:var(--verde);--azul:#5b9bd5;--amar:var(--ambar);--coral:var(--coral);--roxo:#c9a3e0;--zap:var(--verde);
---fonte:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+# ================================================================== marca
+# Os tokens vêm de web/tema.py, que é a fonte única do painel inteiro — o mesmo
+# bloco que o portal, o admin e a agenda usam. Aqui embaixo fica só o CSS de
+# layout deste app (app shell, abas, folha de ações), que não existe em outro lugar.
+_CSS = _tema.FONTES + """<style>""" + _tema.variaveis(com_base=False) + """
 *{box-sizing:border-box}html,body{margin:0}
-body{background:var(--bg);color:var(--txt);font-family:var(--fonte);line-height:1.5;-webkit-font-smoothing:antialiased;overflow:hidden}
+body{background:var(--bg);color:var(--text);font-family:var(--body);line-height:1.5;
+  -webkit-font-smoothing:antialiased;overflow:hidden}
 a{color:inherit;text-decoration:none}
-/* app shell: a página não rola; só o miolo (.scroll) rola. Header e menu ficam fixos. */
-.wrap{max-width:520px;margin:0 auto;height:100vh;height:100dvh;overflow:hidden;display:flex;flex-direction:column}
-.hdr{display:flex;align-items:center;gap:.6rem;padding:.8rem 1rem;border-bottom:1px solid var(--borda);position:sticky;top:0;background:var(--bg);z-index:5}
-.hdr .bk{color:var(--txt);font-size:1.4rem;padding:.1rem .3rem;margin-left:-.3rem}
-.hdr .tt{flex:1;min-width:0}.hdr .tt b{font-size:1rem;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.hdr .tt small{color:var(--mut);font-size:.75rem}
-.ib{width:36px;height:36px;border-radius:50%;background:#1d3a30;color:var(--verde-claro);display:grid;place-items:center;font-weight:700;flex-shrink:0}
-.scroll{flex:1;overflow-y:auto}
-.instpill{margin:.7rem 1rem;padding:.55rem .7rem;border:1px dashed #2f4a3f;border-radius:11px;background:rgba(29,158,117,.05);
-display:flex;align-items:center;gap:.5rem;font-size:.8rem;color:var(--verde-claro)}
-.instpill b{color:var(--txt)}
-.lead{display:flex;gap:.65rem;align-items:center;padding:.75rem 1rem;border-bottom:1px solid var(--borda)}
-.lead:active{background:var(--card2)}
-.lead .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
-.lead .av{width:42px;height:42px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;font-weight:700;background:#22252a;color:#cfe6dd}
+b,strong{font-weight:600}
+/* app shell: a página não rola; só o miolo (.scroll) rola, então header e abas
+   ficam parados como em app nativo. */
+.wrap{max-width:520px;margin:0 auto;height:100vh;height:100dvh;overflow:hidden;
+  display:flex;flex-direction:column;position:relative}
+/* o glow é a assinatura visual do site — aqui entra atrás do topo, discreto */
+.glow{position:absolute;top:-160px;left:50%;transform:translateX(-50%);width:150%;height:320px;
+  pointer-events:none;z-index:0;background:radial-gradient(ellipse at center,rgba(37,211,102,.16),transparent 60%);
+  filter:blur(20px)}
+.scroll{flex:1;overflow-y:auto;position:relative;z-index:1;padding-bottom:1.2rem}
+.scroll::-webkit-scrollbar{width:0}
+
+/* ---------- header ---------- */
+.hdr{display:flex;align-items:center;gap:.7rem;padding:.85rem 1.1rem;flex-shrink:0;
+  border-bottom:1px solid var(--line);background:rgba(10,15,12,.72);backdrop-filter:blur(12px);
+  position:relative;z-index:2}
+.hdr .tt{flex:1;min-width:0}
+.hdr .tt b{font-family:var(--display);font-weight:700;font-size:1.05rem;letter-spacing:-.02em;
+  display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hdr .tt small{color:var(--text-dim);font-size:.76rem;display:block}
+.hdr .bk{display:grid;place-items:center;width:34px;height:34px;margin-left:-.5rem;flex-shrink:0;
+  border-radius:10px;color:var(--text)}
+.hdr .bk:active{background:var(--surface)}
+.av{width:36px;height:36px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;
+  font-family:var(--display);font-weight:800;font-size:.9rem;
+  background:linear-gradient(145deg,var(--neon),var(--neon-deep));color:var(--ink);
+  box-shadow:0 0 16px rgba(37,211,102,.35)}
+.av.mudo{background:var(--surface);color:var(--text-dim);border:1px solid var(--line);box-shadow:none}
+
+/* ---------- tipografia de apoio ---------- */
+.eyebrow{font-family:var(--mono);font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--neon);display:inline-flex;align-items:center;gap:.5rem;margin:1.1rem 1.1rem .5rem}
+.eyebrow::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--neon);
+  box-shadow:0 0 9px var(--neon);animation:pul 2s infinite}
+@keyframes pul{0%,100%{opacity:1}50%{opacity:.3}}
+.num{font-family:var(--mono);font-weight:700;letter-spacing:-.02em}
+.mut{color:var(--text-dim)}
+.vazio{text-align:center;color:var(--text-dim);padding:3rem 1.6rem;font-size:.9rem}
+.vazio .big{font-size:2.4rem;margin-bottom:.5rem;opacity:.5}
+.vazio b{display:block;color:var(--text);font-family:var(--display);font-size:1.1rem;margin-bottom:.3rem}
+
+/* ---------- blocos ---------- */
+.bloco{margin:0 1.1rem .8rem}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:.9rem 1rem}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin:0 1.1rem .9rem}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:.85rem .9rem}
+.kpi .v{font-family:var(--mono);font-weight:700;font-size:1.5rem;letter-spacing:-.03em;line-height:1.1}
+.kpi .l{font-size:.8rem;margin-top:.15rem}
+.kpi .d{font-size:.7rem;color:var(--text-faint);margin-top:.1rem}
+.kpi.hero{grid-column:1/-1;background:linear-gradient(150deg,#0E2018,#0b1612);border-color:#20342a}
+.kpi.hero .v{font-size:2.1rem;color:var(--neon)}
+
+/* ---------- seg (Hoje/Semana/Mês) ---------- */
+.seg{display:flex;gap:3px;margin:.9rem 1.1rem;padding:3px;background:var(--surface);
+  border:1px solid var(--line);border-radius:999px}
+.seg a{flex:1;text-align:center;padding:.42rem;border-radius:999px;font-size:.82rem;color:var(--text-dim)}
+.seg a.on{background:var(--neon);color:var(--ink);font-weight:600}
+
+/* ---------- lista de leads ---------- */
+.lead{display:flex;align-items:center;gap:.75rem;padding:.8rem 1.1rem;border-bottom:1px solid var(--line)}
+.lead:active{background:var(--bg-2)}
+.lead .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .lead .mid{flex:1;min-width:0}
-.lead .top{display:flex;justify-content:space-between;gap:.4rem}
-.lead .emp{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.lead .snip{color:var(--mut);font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:.1rem}
-.cchip{font-size:.68rem;padding:.08rem .45rem;border-radius:999px;border:1px solid;font-weight:600;flex-shrink:0;white-space:nowrap}
-.cchip.ia{color:var(--roxo);border-color:#3a2b52;background:#1a1226}
-.cchip.voce{color:var(--amar);border-color:var(--ambar-borda);background:var(--ambar-fundo)}
-.vazio{padding:3rem 1.5rem;text-align:center;color:var(--mut)}.vazio .big{font-size:2.6rem}.vazio b{color:var(--txt);display:block;margin-top:.6rem}
-.ficha{display:flex;gap:.4rem;padding:.6rem 1rem;flex-wrap:wrap;border-bottom:1px solid var(--borda)}
-.fbtn{flex:1;min-width:76px;text-align:center;background:var(--card2);border:1px solid var(--borda);border-radius:9px;padding:.5rem .3rem;font-size:.78rem;color:var(--txt)}
-.fbtn:active{background:#20232a}
-.fbtn.orc{border-color:var(--neon-borda);color:var(--verde-claro);background:var(--neon-fundo);font-weight:700}
-.orc-srv{display:flex;align-items:center;gap:.6rem;padding:.6rem 1rem;border-bottom:1px solid var(--borda);cursor:pointer}
-.orc-srv .ck{width:22px;height:22px;border-radius:6px;border:1.5px solid var(--borda);flex-shrink:0;display:grid;place-items:center;font-size:.8rem;color:#04140d}
-.orc-srv.on .ck{background:var(--verde);border-color:var(--verde)}
-.orc-srv .m{flex:1;min-width:0}.orc-srv .m b{font-size:.9rem;display:block}.orc-srv .m small{color:var(--mut);font-size:.76rem}
-.orc-srv .pr{font-size:.8rem;color:var(--verde-claro);text-align:right;flex-shrink:0}
-.orc-q{display:flex;align-items:center;gap:.4rem;margin-top:.3rem}
-.orc-q button{width:22px;height:22px;border-radius:6px;border:1px solid var(--borda);background:var(--card2);color:var(--txt);font-size:.9rem;cursor:pointer}
-.orc-q span{font-size:.82rem;min-width:14px;text-align:center}
-.orc-add{margin:.7rem 1rem;display:flex;gap:.4rem}
-.orc-add input{background:var(--card2);border:1px solid var(--borda);border-radius:8px;color:var(--txt);padding:.5rem .6rem;font-size:.82rem;min-width:0;font-family:inherit}
-.orc-add input.n{flex:1}.orc-add input.v{width:82px}
-.orc-add button{background:var(--card2);border:1px solid var(--borda);border-radius:8px;color:var(--verde-claro);padding:0 .8rem;font-weight:700;cursor:pointer}
-.orc-foot{border-top:1px solid var(--borda);padding:.7rem 1rem;background:var(--bg);flex-shrink:0}
-.orc-tot{display:flex;justify-content:space-between;font-size:.92rem;margin-bottom:.5rem}.orc-tot b{color:var(--verde-claro)}
-.orc-gen{width:100%;background:var(--verde);color:var(--sobre-verde);border:0;border-radius:10px;padding:.72rem;font-weight:700;font-size:.92rem;cursor:pointer}
-.orc-gen:disabled{opacity:.4}
-.orc-done{padding:1.5rem 1.1rem;text-align:center}.orc-done .big{font-size:2.2rem}.orc-done h3{margin:.4rem 0 .2rem}.orc-done p{color:var(--mut);font-size:.85rem}
-.orc-link{display:flex;gap:.4rem;margin:1rem 0 .6rem}
-.orc-link input{flex:1;min-width:0;background:var(--card2);border:1px solid var(--borda);border-radius:8px;color:var(--verde-claro);padding:.55rem .6rem;font-size:.74rem}
-.orc-link button{background:var(--card2);border:1px solid var(--borda);border-radius:8px;color:var(--txt);padding:0 .8rem;font-weight:700;cursor:pointer}
-.wpp{width:100%;background:var(--zap);color:#052b12;border:0;border-radius:10px;padding:.72rem;font-weight:700;font-size:.92rem;cursor:pointer;margin-top:.3rem;display:block;text-align:center;text-decoration:none}
-.orc-ghost{width:100%;background:none;border:1px solid var(--borda);color:var(--mut);border-radius:10px;padding:.6rem;font-weight:600;cursor:pointer;margin-top:.5rem}
-.orc-empty{padding:2rem 1.4rem;text-align:center;color:var(--mut);font-size:.86rem}
-.fbtn.vis{border-color:#1e3a52;color:#7bb8e6;background:#0f1d2b;font-weight:700}
-.vsec{padding:.8rem 1rem;border-bottom:1px solid var(--borda)}
-.vchips{display:flex;gap:.4rem;flex-wrap:wrap}
-.vtimes{display:grid;grid-template-columns:repeat(4,1fr);gap:.4rem}
-.vchip{font-size:.82rem;padding:.42rem .7rem;border-radius:999px;border:1px solid var(--borda);background:var(--card2);color:var(--mut);cursor:pointer;text-align:center}
-.vchip.on{border-color:var(--verde);background:var(--neon-fundo);color:var(--verde-claro);font-weight:700}
-.vlocal{background:var(--card2);border:1px solid var(--borda);border-radius:10px;padding:.6rem .7rem}
-.vlocal .nome{font-weight:700;font-size:.88rem}.vlocal .end{color:var(--mut);font-size:.8rem;margin-top:.15rem}
-.vlocal a{color:#7bb8e6;font-size:.78rem;font-weight:600}
-.vlocal input{width:100%;margin-top:.4rem;background:var(--bg);border:1px solid var(--borda);border-radius:8px;color:var(--txt);padding:.5rem .6rem;font-size:.84rem;font-family:inherit}
-.vvisit{background:#0f1d2b;border:1px solid #1e3a52;border-radius:10px;padding:.6rem .7rem;font-size:.84rem}
-.vvisit b{color:#cfe6dd}.vvisit small{color:var(--mut);display:block;font-size:.74rem;margin-top:.15rem}
-.vrow{display:flex;align-items:center;justify-content:space-between;gap:1rem}.vrow .sub{color:var(--mut);font-size:.76rem}
-.vmsg{margin-top:.6rem;background:#0c1c10;border:1px solid #16391f;border-radius:10px;padding:.6rem .7rem;font-size:.8rem;color:#cfe6dd;white-space:pre-line}
-/* ---- Cockpit do Dono (prefixo d) ---- */
-.dseg{display:flex;gap:.3rem;padding:.5rem 1rem;border-bottom:1px solid var(--borda);flex-shrink:0}
-.dseg a{font-size:.72rem;padding:.25rem .6rem;border-radius:999px;border:1px solid var(--borda);color:var(--mut);text-decoration:none}
-.dseg a.on{border-color:var(--verde);background:var(--neon-fundo);color:var(--verde-claro);font-weight:700}
-.dkpis{display:grid;grid-template-columns:1fr 1fr;gap:.5rem;padding:.8rem}
-.dkpi{background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:.7rem .8rem}
-.dkpi.hl{background:var(--neon-fundo);border-color:var(--neon-borda)}
-.dkpi .v{font-size:1.3rem;font-weight:800}.dkpi .l{color:var(--mut);font-size:.72rem}.dkpi .d{font-size:.68rem;color:var(--mut);margin-top:.15rem}
-.dsect{padding:.5rem 1rem .2rem;font-size:.82rem;font-weight:700;display:flex;justify-content:space-between;align-items:center}
-.dsect span{color:var(--mut);font-weight:400;font-size:.72rem}
-.dfunil{padding:.3rem 1rem .8rem;display:flex;flex-direction:column;gap:.45rem}
-.dfr{display:flex;align-items:center;gap:.6rem;font-size:.8rem}
-.dfr .nm{width:76px;color:var(--mut);flex-shrink:0}
-.dfr .bar{flex:1;height:15px;background:var(--card2);border-radius:6px;overflow:hidden;border:1px solid var(--borda)}
-.dfr .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--verde),var(--verde))}
-.dfr .qt{width:82px;text-align:right;flex-shrink:0}.dfr .qt b{color:var(--txt)}.dfr .qt small{color:var(--mut)}
-.daten{padding:.2rem 1rem 1rem;display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
-.dat{border:1px solid var(--borda);background:var(--card2);border-radius:11px;padding:.6rem .7rem}
-.dat .n{font-size:1.3rem;font-weight:800}.dat .t{font-size:.72rem;color:var(--mut);line-height:1.3}
-.dat.warn{border-color:var(--ambar-borda);background:var(--ambar-fundo)}.dat.warn .n{color:var(--amar)}
-.dat.hot{border-color:var(--coral-borda);background:var(--coral-fundo)}.dat.hot .n{color:#f0917f}
-.dat.info{border-color:#1e3a52;background:#0f1d2b}.dat.info .n{color:#7bb8e6}
-.dvend{display:flex;align-items:center;gap:.7rem;padding:.7rem 1rem;border-bottom:1px solid var(--borda);color:var(--txt);text-decoration:none}
-.dvend .rk{width:22px;text-align:center;font-weight:800;color:var(--mut);flex-shrink:0}
-.dvend .av{width:38px;height:38px;border-radius:50%;background:#22252a;color:#cfe6dd;display:grid;place-items:center;font-weight:700;flex-shrink:0}
-.dvend .mid{flex:1;min-width:0}.dvend .mid b{font-size:.9rem}
-.dvend .mid .sub{color:var(--mut);font-size:.73rem;display:flex;gap:.55rem;flex-wrap:wrap}
-.dvend .rt{text-align:right;flex-shrink:0}.dvend .rt .g{font-weight:800;color:var(--verde-claro)}.dvend .rt small{color:var(--mut);font-size:.68rem;display:block}
-.dpaus{font-size:.62rem;color:var(--amar);border:1px solid var(--ambar-borda);background:var(--ambar-fundo);border-radius:999px;padding:.02rem .35rem}
-.dev{display:flex;gap:.6rem;padding:.6rem 1rem;border-bottom:1px solid var(--borda)}
-.dev .ic{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;flex-shrink:0;font-size:.9rem;background:var(--card2);border:1px solid var(--borda)}
-.dev.ganho .ic{background:var(--neon-fundo);border-color:var(--neon-borda)}.dev.visita .ic{background:#0f1d2b;border-color:#1e3a52}
-.dev.prop .ic{background:#1a1226;border-color:#3a2b52}.dev.perdido .ic{background:var(--coral-fundo);border-color:var(--coral-borda)}
-.dev .tx{flex:1;font-size:.84rem}
-.dvstat{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.5rem;padding:.8rem}
-.dvstat .s{background:var(--card2);border:1px solid var(--borda);border-radius:11px;padding:.6rem;text-align:center}
-.dvstat .s b{font-size:1.1rem;display:block}.dvstat .s small{color:var(--mut);font-size:.66rem}
-.dvline{display:flex;justify-content:space-around;padding:0 1rem .6rem;font-size:.82rem;color:var(--mut)}.dvline b{color:var(--txt)}
-.dvact{padding:0 1rem .6rem}
-.dvact form{display:inline}
-.dvact .pausebtn{width:100%;font:inherit;font-size:.82rem;font-weight:600;border-radius:9px;padding:.55rem;cursor:pointer;border:1px solid var(--borda);background:var(--card2);color:var(--txt)}
-.dlead{display:flex;align-items:center;gap:.6rem;padding:.55rem 1rem;border-bottom:1px solid var(--borda)}
-.dlead .dot2{width:9px;height:9px;border-radius:50%;flex-shrink:0}
-.dlead .m{flex:1;min-width:0}.dlead .m b{font-size:.84rem}
-.dlead form{display:flex;gap:.3rem;align-items:center}
-.dlead select{background:var(--card2);border:1px solid var(--borda);border-radius:7px;color:var(--txt);font-size:.72rem;padding:.25rem}
-.dlead button{background:var(--card2);border:1px solid var(--borda);border-radius:7px;color:var(--verde-claro);font-size:.72rem;padding:.25rem .5rem;font-weight:700;cursor:pointer}
-.dnav{display:flex;border-top:1px solid var(--borda);flex-shrink:0;background:var(--bg);padding-bottom:env(safe-area-inset-bottom)}
-.dnav a{flex:1;color:var(--mut);font-size:.66rem;padding:.5rem 0;text-decoration:none;display:flex;flex-direction:column;align-items:center;gap:.15rem}
-.dnav a .i{font-size:1.15rem}.dnav a.on{color:var(--verde-claro)}
-.dfilt{display:flex;gap:.3rem;padding:.4rem 1rem;overflow-x:auto;border-bottom:1px solid var(--borda);white-space:nowrap;-webkit-overflow-scrolling:touch;flex-shrink:0}
-.dfilt .flbl{font-size:.6rem;color:var(--mut);align-self:center;padding-right:.15rem;flex-shrink:0;text-transform:uppercase;letter-spacing:.04em}
-.dfilt a{font-size:.72rem;padding:.22rem .55rem;border-radius:999px;border:1px solid var(--borda);color:var(--mut);text-decoration:none;flex-shrink:0}
-.dfilt a.on{border-color:var(--verde);background:var(--neon-fundo);color:var(--verde-claro);font-weight:700}
-.dllead{display:flex;align-items:center;gap:.6rem;padding:.6rem 1rem;border-bottom:1px solid var(--borda);color:var(--txt);text-decoration:none}
-.dllead:active{background:var(--card2)}
-.dllead .dot2{width:9px;height:9px;border-radius:50%;flex-shrink:0}
-.dllead .m{flex:1;min-width:0}.dllead .m b{font-size:.88rem;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dllead .m small{color:var(--mut);font-size:.72rem}
-.dcount{padding:.5rem 1rem;color:var(--mut);font-size:.74rem}
-.funil{padding:.6rem 1rem;border-bottom:1px solid var(--borda)}
-.lbl{font-size:.68rem;color:var(--mut);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.45rem}
-.stchips{display:flex;gap:.35rem;flex-wrap:wrap}
-.stf{display:inline}
-.st{font-size:.78rem;padding:.32rem .62rem;border-radius:999px;border:1px solid var(--borda);background:var(--card2);color:var(--mut)}
-.st.on{border-color:var(--verde);background:var(--neon-fundo);color:var(--verde-claro);font-weight:600}
-.wl{display:flex;gap:.4rem;margin-top:.55rem}
-.wl .stf{flex:1}.wl button{width:100%}
-.wl button,.perda button,.composer button,.gobtn{font:inherit;cursor:pointer}
-.wl .win{border:1px solid var(--neon-borda);color:var(--verde-claro);background:var(--card2);border-radius:9px;padding:.5rem;font-weight:600}
-.wl .lose{border:1px solid var(--coral-borda);color:#f0917f;background:var(--card2);border-radius:9px;padding:.5rem;font-weight:600;width:100%}
-.perda{border-top:1px solid var(--borda)}
-.perda summary{list-style:none;padding:.55rem 1rem;color:#f0917f;font-size:.82rem;font-weight:600}
-.perda summary::-webkit-details-marker{display:none}
-.perda form{padding:0 1rem 1rem;display:flex;flex-direction:column;gap:.5rem}
-.perda select,.composer input,.login input{background:var(--card2);border:1px solid var(--borda);border-radius:10px;color:var(--txt);
-padding:.6rem .8rem;font-size:.9rem;font-family:inherit;width:100%}
-.perda .conf{background:var(--coral-borda);color:#ffdad4;border:0;border-radius:10px;padding:.6rem;font-weight:700}
-.chat{padding:.8rem 1rem;display:flex;flex-direction:column;gap:.5rem;background:#0c0c0d}
-.iabar{font-size:.76rem;color:var(--roxo);background:#1a1226;border:1px solid #3a2b52;border-radius:9px;padding:.5rem .7rem;text-align:center}
-.bub{max-width:80%;padding:.5rem .72rem;border-radius:13px;font-size:.9rem;line-height:1.4;word-wrap:break-word}
-.bub.in{align-self:flex-start;background:var(--card2);border:1px solid var(--borda);border-bottom-left-radius:4px}
-.bub.out{align-self:flex-end;background:#10362a;border:1px solid var(--neon-borda);border-bottom-right-radius:4px}
-.bub.ia{align-self:flex-end;background:#1a1226;border:1px solid #3a2b52;border-bottom-right-radius:4px}
-.bub .who{font-size:.66rem;color:var(--mut);margin-bottom:.15rem}.bub.ia .who{color:var(--roxo)}
-.assumir{margin:.7rem 1rem;padding:.6rem;border-radius:10px;border:1px solid var(--verde);background:var(--neon-fundo);color:var(--verde-claro);font-weight:600;width:calc(100% - 2rem)}
-.composer{display:flex;gap:.5rem;padding:.6rem;border-top:1px solid var(--borda);position:sticky;bottom:0;background:var(--bg)}
-.composer input{border-radius:20px}
-.composer button{width:44px;height:44px;border-radius:50%;background:var(--verde);color:var(--sobre-verde);border:0;font-size:1.15rem;flex-shrink:0}
-.msg{margin:.7rem 1rem;padding:.6rem .8rem;border-radius:10px;font-size:.85rem}
-.msg.ok{border:1px solid var(--neon-borda);background:var(--neon-fundo);color:var(--verde-claro)}
-.msg.err{border:1px solid var(--coral-borda);background:var(--coral-fundo);color:#f0917f}
-.login{flex:1;display:flex;flex-direction:column;justify-content:center;padding:2.4rem 1.6rem;gap:.5rem;text-align:center}
-.login .logo{font-size:2.8rem}.login h2{margin:.2rem 0 0;font-size:1.35rem}.login p{color:var(--mut);margin:.2rem 0 1rem}
-.login .go{background:var(--verde);color:var(--sobre-verde);border:0;border-radius:11px;padding:.8rem;font-weight:700;font-size:.95rem;margin-top:.7rem}
-.login small{color:var(--mut);font-size:.76rem;margin-top:.7rem}
-.pcard{padding:1.1rem 1rem;border-bottom:1px solid var(--borda);display:flex;align-items:center;gap:.85rem}
-.pcard .av{width:54px;height:54px;border-radius:50%;background:#1d3a30;color:var(--verde-claro);display:grid;place-items:center;font-weight:700;font-size:1.35rem}
-.pcard b{font-size:1.08rem}.pcard small{color:var(--mut);display:block}
-.kpis{display:flex;gap:.6rem;padding:1rem}.kpi{flex:1;background:var(--card2);border:1px solid var(--borda);border-radius:12px;padding:.75rem;text-align:center}
-.kpi b{font-size:1.5rem;display:block}.kpi small{color:var(--mut);font-size:.72rem}
-.prow{display:flex;align-items:center;justify-content:space-between;padding:.9rem 1rem;border-bottom:1px solid var(--borda);gap:1rem}
-.prow .sub{color:var(--mut);font-size:.77rem}
-.tgl{border:1px solid var(--borda);background:var(--card2);color:var(--mut);border-radius:999px;padding:.35rem .7rem;font-size:.8rem;font-weight:600;white-space:nowrap}
-.tgl.on{border-color:var(--verde);background:var(--neon-fundo);color:var(--verde-claro)}
-.sair{margin:1.2rem 1rem;width:calc(100% - 2rem);padding:.65rem;border-radius:10px;border:1px solid var(--coral-borda);background:#1a1010;color:#f0917f;font-weight:600}
-.painel{margin:1.2rem 1rem .6rem;width:calc(100% - 2rem);padding:.65rem;border-radius:10px;border:1px solid var(--borda);background:var(--card2);color:var(--txt);font-weight:600}
-.fsec{padding:.85rem 1rem;border-bottom:1px solid var(--borda)}
-.frow{display:flex;justify-content:space-between;gap:.8rem;padding:.28rem 0;font-size:.9rem}
-.frow span{color:var(--mut)}.frow b{text-align:right}
-.tel{display:flex;align-items:center;gap:.5rem;padding:.45rem 0;font-size:.92rem;border-top:1px solid #202021}.tel:first-of-type{border-top:0}
-.tel .z{margin-left:auto;font-size:.72rem;color:var(--zap);border:1px solid #16391f;background:#0c1c10;border-radius:999px;padding:.06rem .5rem}
-/* swipe: card desliza pra revelar ações atrás */
-.swipe{position:relative;overflow:hidden;background:var(--bg)}
-.swipe .actions{position:absolute;top:0;right:0;height:100%;display:flex}
-.swipe .act{width:82px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.15rem;color:#fff;font-size:.72rem;font-weight:600;border:0;cursor:pointer}
-.swipe .act .em{font-size:1.1rem}
-.act.assumir{background:linear-gradient(180deg,#7b4fb0,#5f3a90)}
-.act.devolver{background:linear-gradient(180deg,#3a2b52,#2a2140);color:var(--roxo)}
-.act.ganho{background:linear-gradient(180deg,var(--verde),#158a63)}
-.front{position:relative;z-index:2;background:var(--bg);transition:transform .22s cubic-bezier(.2,.8,.3,1);will-change:transform;touch-action:pan-y}
-.front.drag{transition:none}
-.grab{margin-left:.3rem;color:#4a4a4c;font-size:.95rem;flex-shrink:0}
-.pushcard{margin:.7rem 1rem;border:1px solid #3a2b52;background:#160f22;border-radius:13px;padding:.8rem;display:none}
+.lead .top{display:flex;align-items:center;gap:.45rem}
+.lead .emp{font-weight:600;font-size:.94rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lead .snip{display:block;color:var(--text-dim);font-size:.78rem;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;margin-top:.05rem}
+.chip{font-size:.66rem;padding:.14rem .5rem;border-radius:999px;border:1px solid var(--line);
+  color:var(--text-dim);flex-shrink:0;white-space:nowrap}
+.chip.ia{color:var(--roxo);border-color:#3a2b52;background:#1a1226}
+.chip.voce{color:var(--ambar);border-color:#5a4520;background:#241c0f}
+.chip.neon{color:var(--neon);border-color:#1e4a3a;background:rgba(37,211,102,.10)}
+.chip.err{color:var(--coral);border-color:#5a2b2b;background:#241313}
+
+/* ---------- deslizar o card pra revelar ação ----------
+   As ações ficam ATRÁS: o card da frente é opaco e escorrega pra esquerda por
+   cima delas. Por isso `.front` precisa de fundo próprio — sem ele, as ações
+   apareceriam por baixo do texto o tempo todo. */
+.swipe{position:relative;overflow:hidden}
+.swipe .actions{position:absolute;inset:0 0 0 auto;display:flex}
+.swipe .act{width:84px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:.2rem;border:0;cursor:pointer;font-family:inherit;font-size:.7rem;font-weight:600}
+.swipe .act .ic{width:19px;height:19px}
+.act.assumir{background:var(--ambar);color:var(--sobre-verde)}
+.act.devolver{background:var(--roxo);color:var(--sobre-verde)}
+.act.ganho{background:var(--neon);color:var(--sobre-verde)}
+/* `user-drag:none` não é firula: o card é um <a>, e arrastar um link dispara o
+   drag-and-drop nativo do navegador, que engole os pointermove seguintes — o
+   gesto morre no meio e o card volta sozinho. `touch-action:pan-y` deixa a
+   rolagem vertical passar, que é o outro gesto que precisa continuar valendo. */
+.swipe .front{position:relative;z-index:1;background:var(--bg);transition:transform .2s ease;
+  touch-action:pan-y;-webkit-user-drag:none;user-select:none;-webkit-user-select:none}
+.swipe .front.drag{transition:none}
+.swipe .front:active{background:var(--bg-2)}
+.dica-swipe{padding:.45rem 1.1rem .6rem;color:var(--text-faint);font-size:.72rem}
+/* convite de notificação: nasce escondido e só aparece se o navegador ainda pode
+   perguntar (nem concedido, nem negado) — quem já decidiu não vê nada */
+.pushcard{display:none;margin:.8rem 1.1rem;border:1px solid #3a2b52;background:#160f22;
+  border-radius:13px;padding:.85rem}
 .pushcard.show{display:block}
-.pushcard b{display:block;font-size:.92rem;margin-bottom:.15rem}
-.pushcard p{margin:.1rem 0 .6rem;color:var(--mut);font-size:.8rem}
-.pushcard .go{background:var(--roxo);color:#1a0f2a;border:0;border-radius:9px;padding:.55rem .8rem;font-weight:700;font-size:.84rem;width:100%;cursor:pointer}
-.ck-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);opacity:0;background:#222226;border:1px solid #3a3a3c;color:var(--txt);padding:.5rem .85rem;border-radius:10px;font-size:.83rem;transition:.25s;z-index:99;pointer-events:none;max-width:90vw;text-align:center}
-.ck-toast.show{transform:translateX(-50%) translateY(0);opacity:1}
-/* desempenho percebido: barra de carregamento no topo + toque responsivo */
-#nprg{position:fixed;top:0;left:0;height:3px;width:0;z-index:9999;opacity:0;
-  background:linear-gradient(90deg,var(--verde),var(--verde-claro));box-shadow:0 0 8px var(--verde);
-  transition:width .18s ease, opacity .2s}
-#nprg.go{opacity:1}
-a:active,button:active{filter:brightness(1.12)}
-.lead:active,.dvend:active,.dllead:active,.dnav a:active,.dfilt a:active,.st:active,.vchip:active,.dseg a:active,.fbtn:active,.act:active{transform:scale(.985)}
+.pushcard b{display:block;font-size:.92rem;margin-bottom:.2rem}
+.pushcard p{margin:.1rem 0 .65rem;color:var(--text-dim);font-size:.8rem;line-height:1.45}
+.pushcard .go{width:100%;background:var(--roxo);color:#1a0f2a;border:0;border-radius:10px;
+  padding:.55rem .8rem;font-family:inherit;font-weight:700;font-size:.84rem;cursor:pointer}
+
+/* ---------- fechar contrato (dois toques, porque mexe em dinheiro) ---------- */
+.fechar{border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:.2rem .9rem}
+.fechar summary{list-style:none;cursor:pointer;padding:.65rem 0;font-family:var(--display);
+  font-weight:700;font-size:.95rem;color:var(--neon);text-align:center}
+.fechar summary::-webkit-details-marker{display:none}
+.fechar[open]{border-color:#1e4a3a;background:rgba(37,211,102,.06)}
+.fechar[open] summary{border-bottom:1px solid var(--line);margin-bottom:.7rem}
+.fechar p{font-size:.82rem;color:var(--text-dim);margin:0 0 .6rem;line-height:1.5}
+.fechar p b{color:var(--text)}
+.fechar .aviso-p{color:var(--ambar);font-size:.78rem}
+
+/* ---------- link da proposta pra copiar ---------- */
+.copiar{display:flex;gap:.4rem;margin-top:.5rem}
+.copiar input{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);
+  border-radius:10px;color:var(--neon);padding:.55rem .7rem;font-family:var(--mono);font-size:.72rem}
+.copiar button{flex-shrink:0;background:var(--surface);border:1px solid var(--line);
+  border-radius:10px;color:var(--text);padding:0 .9rem;font:inherit;font-weight:600;cursor:pointer}
+
+/* ---------- funil ---------- */
+.fr{display:flex;align-items:center;gap:.6rem;padding:.42rem 0}
+.fr .nm{width:88px;flex-shrink:0;font-size:.82rem;color:var(--text-dim)}
+.fr .bar{flex:1;height:14px;border-radius:7px;background:var(--bg-2);border:1px solid var(--line);overflow:hidden}
+.fr .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--neon-deep),var(--neon))}
+.fr .qt{width:74px;text-align:right;flex-shrink:0;font-size:.78rem}
+.fr .qt b{font-family:var(--mono)}
+.fr .qt small{display:block;color:var(--text-faint);font-size:.68rem}
+
+/* ---------- atenção ---------- */
+.aten{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin:0 1.1rem .9rem}
+.at{border:1px solid var(--line);background:var(--surface);border-radius:14px;padding:.7rem .8rem}
+.at .n{font-family:var(--mono);font-weight:700;font-size:1.3rem;line-height:1.1}
+.at .t{font-size:.74rem;color:var(--text-dim);margin-top:.1rem}
+.at.hot{border-color:#5a2b2b;background:#241313}.at.hot .n{color:var(--coral)}
+.at.warn{border-color:#5a4520;background:#241c0f}.at.warn .n{color:var(--ambar)}
+.at.info{border-color:#1b3a4a;background:#0d1b23}.at.info .n{color:var(--azul)}
+
+/* ---------- pódio + placar ---------- */
+/* pódio: os itens ESTICAM na altura da linha e empurram o conteúdo pro fim
+   (justify-content:flex-end), então as bases terminam todas na mesma linha —
+   com align-items:end cada item media a própria altura e elas desalinhavam. */
+.podio{display:grid;grid-template-columns:1fr 1.15fr 1fr;align-items:stretch;gap:.5rem;
+  margin:1.1rem 1.1rem 0;border-bottom:1px solid var(--line)}
+.pod{display:flex;flex-direction:column;justify-content:flex-end;align-items:center;
+  text-align:center;min-width:0;width:100%}
+.pod .av{margin-bottom:.4rem;box-shadow:none}
+.pod .nm{font-size:.78rem;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pod .rs{font-family:var(--mono);font-weight:700;font-size:.82rem;color:var(--neon)}
+.pod .base{width:100%;margin-top:.5rem;border-radius:10px 10px 0 0;background:var(--surface);
+  border:1px solid var(--line);border-bottom:0;display:grid;place-items:center;
+  font-family:var(--display);font-weight:800;font-size:.9rem;color:var(--text-faint)}
+.pod.p1 .base{height:62px;background:linear-gradient(180deg,rgba(37,211,102,.18),transparent);
+  border-color:#1e4a3a;color:var(--neon)}
+.pod.p1 .av{width:46px;height:46px;font-size:1.05rem;box-shadow:0 0 18px rgba(37,211,102,.4)}
+.pod.p2 .base{height:44px}.pod.p3 .base{height:32px}
+.linha{display:flex;align-items:center;gap:.7rem;padding:.75rem 1.1rem;border-bottom:1px solid var(--line)}
+.linha:active{background:var(--bg-2)}
+.linha .rk{width:20px;flex-shrink:0;text-align:center;font-family:var(--mono);color:var(--text-faint);font-size:.8rem}
+.linha .mid{flex:1;min-width:0}
+.linha .mid b{font-size:.9rem}
+.linha .sub{display:flex;gap:.6rem;flex-wrap:wrap;color:var(--text-faint);font-size:.7rem;margin-top:.1rem}
+.linha .rt{text-align:right;flex-shrink:0}
+.linha .rt .g{font-family:var(--mono);font-weight:700;color:var(--neon);font-size:.9rem}
+.linha .rt small{display:block;color:var(--text-faint);font-size:.66rem}
+.pausado{color:var(--ambar);border:1px solid #5a4520;background:#241c0f;border-radius:999px;
+  padding:0 .35rem;font-size:.62rem}
+
+/* ---------- feed ---------- */
+.ev{display:flex;gap:.7rem;align-items:flex-start;padding:.7rem 1.1rem;border-bottom:1px solid var(--line)}
+.ev .ic{width:30px;height:30px;border-radius:9px;flex-shrink:0;display:grid;place-items:center;
+  background:var(--surface);border:1px solid var(--line);color:var(--text-dim)}
+.ev.ganho .ic{background:rgba(37,211,102,.12);border-color:#1e4a3a;color:var(--neon)}
+.ev.perdido .ic{background:#241313;border-color:#5a2b2b;color:var(--coral)}
+.ev.visita .ic{background:#0d1b23;border-color:#1b3a4a;color:var(--azul)}
+.ev.prop .ic{background:#1a1226;border-color:#3a2b52;color:var(--roxo)}
+.ev .tx{flex:1;font-size:.85rem;padding-top:.15rem}
+
+/* ---------- filtros ---------- */
+.filt{display:flex;gap:.35rem;align-items:center;overflow-x:auto;padding:.45rem 1.1rem;
+  scrollbar-width:none}
+.filt::-webkit-scrollbar{height:0}
+.filt .lbl{font-family:var(--mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--text-faint);flex-shrink:0;margin-right:.15rem}
+.filt a{flex-shrink:0;font-size:.76rem;padding:.28rem .65rem;border-radius:999px;
+  border:1px solid var(--line);color:var(--text-dim);background:var(--surface)}
+.filt a.on{border-color:var(--neon);background:rgba(37,211,102,.12);color:var(--neon);font-weight:600}
+
+/* ---------- agenda ---------- */
+.vis{display:flex;gap:.8rem;padding:.85rem 1.1rem;border-bottom:1px solid var(--line);align-items:flex-start}
+.vis .quando{width:56px;flex-shrink:0;text-align:center}
+.vis .quando .h{font-family:var(--mono);font-weight:700;font-size:1rem}
+.vis .quando .d{font-size:.66rem;color:var(--text-faint)}
+.vis.hoje .quando .h{color:var(--neon)}
+.vis .mid{flex:1;min-width:0}
+.vis .mid b{font-size:.9rem;display:block}
+.vis .mid .loc{font-size:.76rem;color:var(--text-dim);margin-top:.1rem}
+.acoes{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.5rem}
+.acoes a{font-size:.74rem;padding:.3rem .65rem;border-radius:9px;border:1px solid var(--line);
+  background:var(--bg-2);color:var(--text-dim)}
+.acoes a:active{border-color:var(--neon)}
+
+/* ---------- botões ---------- */
+.btn{display:flex;align-items:center;justify-content:center;gap:.5rem;width:100%;
+  background:var(--neon);color:var(--ink);font-family:var(--display);font-weight:700;
+  font-size:.95rem;padding:.8rem;border:0;border-radius:13px;cursor:pointer;
+  box-shadow:0 8px 30px rgba(37,211,102,.32)}
+.btn:active{transform:translateY(1px)}
+.btn.ghost{background:transparent;color:var(--text-dim);border:1px solid var(--line);box-shadow:none;font-weight:600}
+.btn.perigo{background:transparent;color:var(--coral);border:1px solid #5a2b2b;box-shadow:none}
+.linhaform{display:flex;gap:.45rem;align-items:center}
+select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;
+  color:var(--text);padding:.55rem .6rem;font-family:inherit;font-size:.85rem}
+
+/* ---------- chat (tela do lead) ---------- */
+.chat{flex:1;overflow-y:auto;padding:.9rem 1.1rem;display:flex;flex-direction:column;gap:.5rem;
+  background:#0B141A;position:relative;z-index:1}
+.bub{max-width:82%;padding:.5rem .75rem;border-radius:13px;font-size:.87rem;white-space:pre-wrap;
+  word-break:break-word}
+.bub.in{align-self:flex-start;background:#1F2C25;border-bottom-left-radius:4px}
+.bub.out{align-self:flex-end;background:#0A5C49;border-bottom-right-radius:4px}
+.bub.ia{align-self:flex-end;background:#1a1226;border:1px solid #3a2b52;border-bottom-right-radius:4px}
+.bub .who{font-size:.64rem;color:var(--text-faint);margin-bottom:.15rem}
+.aviso{margin:.2rem 0;padding:.55rem .7rem;border-radius:11px;font-size:.78rem;text-align:center;
+  background:var(--surface);border:1px solid var(--line);color:var(--text-dim)}
+.rodape{flex-shrink:0;border-top:1px solid var(--line);background:var(--bg);padding:.7rem 1.1rem;
+  padding-bottom:calc(.7rem + env(safe-area-inset-bottom,0px));position:relative;z-index:2}
+.composer{display:flex;gap:.5rem;align-items:center}
+.composer input{flex:1;min-width:0;background:var(--surface);border:1px solid var(--line);
+  border-radius:999px;color:var(--text);padding:.65rem .95rem;font-family:inherit;font-size:.9rem}
+.composer input:focus{outline:none;border-color:var(--neon)}
+.composer button{width:42px;height:42px;flex-shrink:0;border:0;border-radius:50%;cursor:pointer;
+  background:var(--neon);color:var(--ink);font-size:1.1rem;display:grid;place-items:center}
+/* ficha/funil viram uma folha que sobe — antes isso empilhava ACIMA do chat
+   e empurrava a conversa (a superfície de trabalho real) pra fora da tela */
+.folha{position:absolute;left:0;right:0;bottom:0;z-index:20;background:var(--bg-2);
+  border-top:1px solid var(--line);border-radius:18px 18px 0 0;padding:.5rem 1.1rem 1.2rem;
+  padding-bottom:calc(1.2rem + env(safe-area-inset-bottom,0px));
+  max-height:84%;overflow-y:auto;overscroll-behavior:contain;
+  transform:translateY(101%);transition:transform .22s ease}
+.folha:target{transform:translateY(0)}
+.folha .puxa{width:36px;height:4px;border-radius:2px;background:var(--line);margin:.2rem auto .8rem;
+  position:sticky;top:0}
+.folha h3{font-family:var(--display);font-size:.95rem;margin:.6rem 0 .5rem;font-weight:700}
+/* o fundo escuro vem DEPOIS da folha no HTML: `~` só enxerga irmão posterior */
+.fbg{position:absolute;inset:0;z-index:19;background:rgba(0,0,0,.55);display:none}
+.folha:target ~ .fbg{display:block}
+.grade{display:grid;grid-template-columns:1fr 1fr;gap:.45rem}
+.grade a,.grade .off{display:flex;align-items:center;justify-content:center;gap:.4rem;
+  padding:.6rem .4rem;border-radius:11px;border:1px solid var(--line);background:var(--surface);
+  font-size:.82rem;color:var(--text)}
+.grade .off{opacity:.35}
+.grade a.orc{border-color:#1e4a3a;color:var(--neon);background:rgba(37,211,102,.08);font-weight:600}
+.grade a.vis2{border-color:#1b3a4a;color:var(--azul);background:#0d1b23;font-weight:600}
+.etapas{display:flex;gap:.35rem;flex-wrap:wrap}
+.etapas form{margin:0}
+.etapas button{font-family:inherit;font-size:.78rem;padding:.32rem .7rem;border-radius:999px;
+  border:1px solid var(--line);background:var(--surface);color:var(--text-dim);cursor:pointer}
+.etapas button.on{border-color:var(--neon);background:rgba(37,211,102,.12);color:var(--neon);font-weight:600}
+.ficha-l{display:flex;justify-content:space-between;gap:1rem;padding:.4rem 0;
+  border-bottom:1px solid var(--line);font-size:.84rem}
+.ficha-l span{color:var(--text-dim);flex-shrink:0}
+.ficha-l b{text-align:right;font-weight:500;word-break:break-word}
+
+/* ---------- abas de baixo ---------- */
+.tabs{display:flex;flex-shrink:0;border-top:1px solid var(--line);background:rgba(10,15,12,.92);
+  backdrop-filter:blur(12px);padding-bottom:env(safe-area-inset-bottom,0px);position:relative;z-index:2}
+.tabs a{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:.5rem 0 .45rem;
+  color:var(--text-faint);font-size:.62rem}
+.tabs a.on{color:var(--neon)}
+.tabs a.on .ic{filter:drop-shadow(0 0 6px rgba(37,211,102,.5))}
+.ic{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round}
+.ic.p{width:17px;height:17px}
+
+/* ---------- construtores (orçamento e visita) ---------- */
+.toast{position:fixed;left:50%;bottom:88px;transform:translateX(-50%) translateY(12px);z-index:60;
+  background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:.5rem .95rem;
+  font-size:.84rem;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;max-width:86%}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.secao{padding:.9rem 1.1rem 0}
+.secao .rot{font-family:var(--mono);font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--text-faint);margin-bottom:.5rem}
+/* item do catálogo: a linha inteira é o alvo do toque */
+.srv{display:flex;align-items:center;gap:.75rem;padding:.7rem 1.1rem;border-bottom:1px solid var(--line);cursor:pointer}
+.srv:active{background:var(--bg-2)}
+.srv .ck{width:22px;height:22px;flex-shrink:0;border-radius:7px;border:1.5px solid var(--line);
+  display:grid;place-items:center;font-size:.8rem;color:var(--sobre-verde)}
+.srv.on .ck{background:var(--neon);border-color:var(--neon)}
+.srv .m{flex:1;min-width:0}
+.srv .m b{font-size:.92rem;font-weight:600}
+.srv .m small{display:block;color:var(--text-faint);font-size:.76rem}
+.srv .pr{flex-shrink:0;font-family:var(--mono);font-size:.8rem;color:var(--text-dim);text-align:right}
+.srv.on .pr{color:var(--neon)}
+.qtd{display:inline-flex;align-items:center;gap:.45rem;margin-top:.4rem}
+.qtd button{width:24px;height:24px;border-radius:7px;border:1px solid var(--line);background:var(--surface);
+  color:var(--text);font:inherit;font-size:.9rem;cursor:pointer;line-height:1}
+.qtd span{font-family:var(--mono);font-size:.82rem;min-width:14px;text-align:center}
+.avulso{display:flex;gap:.4rem;padding:0 1.1rem}
+.avulso input{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;
+  color:var(--text);padding:.55rem .7rem;font-family:inherit;font-size:.85rem}
+.avulso input.v{flex:0 0 88px;font-family:var(--mono)}
+.avulso button{flex-shrink:0;width:42px;border:1px solid var(--line);border-radius:10px;
+  background:var(--surface);color:var(--neon);font-size:1.1rem;font-weight:700;cursor:pointer}
+.vazio-cat{padding:1rem 1.1rem;color:var(--text-dim);font-size:.86rem;line-height:1.5}
+.avl{display:flex;align-items:center;gap:.7rem;margin:.45rem 1.1rem 0;padding:.5rem .7rem;
+  border:1px solid var(--neon-borda);background:var(--neon-fraco);border-radius:10px}
+.avl b{flex:1;min-width:0;font-size:.86rem;font-weight:500;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.avl span{font-family:var(--mono);font-size:.8rem;color:var(--neon);flex-shrink:0}
+.avl button{flex-shrink:0;width:26px;height:26px;border-radius:8px;border:1px solid var(--line);
+  background:var(--surface);color:var(--text-dim);font:inherit;font-size:1rem;line-height:1;cursor:pointer}
+/* rodapé fixo do construtor: total à esquerda, ação à direita */
+.rodape-b{flex-shrink:0;border-top:1px solid var(--line);background:var(--bg);padding:.8rem 1.1rem;
+  padding-bottom:calc(.8rem + env(safe-area-inset-bottom,0px));position:relative;z-index:2}
+.rodape-b .tot{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;margin-bottom:.6rem;
+  font-size:.85rem;color:var(--text-dim)}
+.rodape-b .tot b{font-family:var(--mono);font-size:1rem;color:var(--neon)}
+.btn[disabled]{opacity:.4;cursor:not-allowed;box-shadow:none}
+/* tela de "pronto" que substitui o construtor depois de gerar */
+.pronto{padding:2rem 1.1rem;text-align:center}
+.pronto .big{font-size:2.4rem;margin-bottom:.6rem}
+.pronto h3{font-family:var(--display);font-size:1.15rem;margin:0 0 .4rem}
+.pronto p{color:var(--text-dim);font-size:.88rem;margin:0 0 1rem}
+.pronto .ok{color:var(--neon);font-size:.84rem;margin:.5rem 0}
+.evcard{border:1px solid var(--neon-borda);background:var(--neon-fraco);border-radius:14px;
+  padding:1rem;text-align:left;margin:1rem 0}
+.evcard .q{font-family:var(--mono);font-size:1rem;font-weight:700}
+.evcard .l{color:var(--neon);font-size:.84rem;margin-top:.3rem}
+.evcard .o{color:var(--text-faint);font-size:.76rem;margin-top:.5rem}
+/* chips de escolha (dia, hora, duração, lembrete) */
+.escolhas{display:flex;gap:.4rem;flex-wrap:wrap}
+.esc{font-size:.82rem;padding:.4rem .75rem;border-radius:999px;border:1px solid var(--line);
+  background:var(--surface);color:var(--text-dim);cursor:pointer;user-select:none}
+.esc.on{border-color:var(--neon);background:var(--neon-fraco);color:var(--neon);font-weight:600}
+.escolhas.horas{overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none;padding-bottom:2px}
+.escolhas.horas::-webkit-scrollbar{height:0}
+.local{background:var(--surface);border:1px solid var(--line);border-radius:13px;padding:.75rem .85rem}
+.local .nome{font-weight:600;font-size:.9rem}
+.local .end{color:var(--text-dim);font-size:.82rem;margin-top:.15rem}
+.local a{display:inline-block;color:var(--neon);font-size:.8rem;margin-top:.4rem}
+.local input{width:100%;margin-top:.55rem;background:var(--bg-2);border:1px solid var(--line);
+  border-radius:9px;color:var(--text);padding:.5rem .65rem;font-family:inherit;font-size:.85rem}
+.linha-tgl{display:flex;align-items:center;gap:1rem;background:var(--surface);border:1px solid var(--line);
+  border-radius:13px;padding:.75rem .85rem}
+.linha-tgl .t{flex:1;font-size:.88rem}
+.linha-tgl .t small{display:block;color:var(--text-faint);font-size:.76rem}
+.tgl{flex-shrink:0;border:1px solid var(--neon-borda);background:var(--neon);color:var(--sobre-verde);
+  border-radius:999px;padding:.35rem .8rem;font-size:.8rem;font-weight:700;cursor:pointer}
+.tgl.off{background:transparent;border-color:var(--line);color:var(--text-dim)}
+.msg-previa{margin-top:.6rem;background:var(--neon-fraco);border:1px solid var(--neon-borda);
+  border-radius:11px;padding:.65rem .75rem;font-size:.8rem;color:var(--text-dim);white-space:pre-line}
+
+/* ---------- recado da última ação ---------- */
+.flash{margin:.7rem 1.1rem 0;padding:.6rem .8rem;border-radius:12px;font-size:.84rem}
+.flash.ok{background:rgba(37,211,102,.12);border:1px solid #1e4a3a;color:var(--neon)}
+.flash.err{background:#241313;border:1px solid #5a2b2b;color:var(--coral)}
+
+/* ---------- entrar (link mágico) ---------- */
+.login{flex:1;display:flex;flex-direction:column;justify-content:center;padding:2.4rem 1.6rem;
+  gap:.4rem;text-align:center}
+.login .marca{font-family:var(--display);font-size:2rem;font-weight:800;letter-spacing:-.03em;
+  color:var(--neon);margin-bottom:.3rem}
+.login h2{font-family:var(--display);font-size:1.3rem;margin:.2rem 0 0;letter-spacing:-.02em}
+.login p{color:var(--text-dim);font-size:.9rem;margin:.35rem 0 1rem;line-height:1.5}
+.login input{background:var(--bg-2);border:1px solid var(--line);border-radius:12px;
+  color:var(--text);padding:.85rem .9rem;font-family:inherit;font-size:.95rem;width:100%}
+.login .go{display:block;width:100%;background:var(--neon);color:var(--sobre-verde);border:0;
+  border-radius:12px;padding:.85rem;font-family:inherit;font-weight:700;font-size:.95rem;
+  margin-top:.7rem;cursor:pointer;text-decoration:none}
+.login small{color:var(--text-faint);font-size:.76rem;margin-top:.9rem;line-height:1.5}
+
+.fonte{margin:.2rem 1.1rem 1rem;font-size:.7rem;color:var(--text-faint);line-height:1.45}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>"""
 
-_SW_REG = ("<script>if('serviceWorker' in navigator){"
-           "navigator.serviceWorker.register('/cockpit/sw.js').catch(function(){});}</script>")
+# Ícones no traço do set que o painel já usa (web/portal.py) — stroke 1.7, viewBox 24.
+# A versão anterior usava emoji no menu (📊 🏆 📋 ⚡), que muda de desenho a cada sistema.
+# NB: todo atributo vai ENTRE ASPAS. Sem aspas, o parser de HTML engole a barra do
+# fecho no valor (r=3.6/> vira r="3.6/") e o desenho some — foi o que aconteceu com
+# o ícone de perfil na primeira tentativa.
+_ICONES = (
+    '<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>'
+    '<symbol id="i-fila" viewBox="0 0 24 24"><path d="M4 5h16l1.5 8v6h-19v-6z"/>'
+    '<path d="M2.5 13H8l1.4 2.6h5.2L16 13h5.5"/></symbol>'
+    '<symbol id="i-agenda" viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="15" rx="2"/>'
+    '<path d="M3.5 10h17M8 3v5M16 3v5"/></symbol>'
+    '<symbol id="i-resultado" viewBox="0 0 24 24"><path d="M3 21h18"/>'
+    '<path d="M6.5 21v-5M11 21V9M15.5 21v-8M20 21V5"/></symbol>'
+    '<symbol id="i-perfil" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.6"/>'
+    '<path d="M4.6 20c0-3.9 3.3-6.2 7.4-6.2s7.4 2.3 7.4 6.2"/></symbol>'
+    '<symbol id="i-visao" viewBox="0 0 24 24">'
+    '<path d="M4 4h7v7H4zM13 4h7v4h-7zM13 11h7v9h-7zM4 14h7v6H4z"/></symbol>'
+    '<symbol id="i-placar" viewBox="0 0 24 24"><path d="M8 3.5h8V9a4 4 0 01-8 0z"/>'
+    '<path d="M8 5H5v1.5A3.5 3.5 0 008.5 10M16 5h3v1.5A3.5 3.5 0 0115.5 10"/>'
+    '<path d="M12 13v3.5M9 20.5h6M10.5 16.5h3"/></symbol>'
+    '<symbol id="i-leads" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/>'
+    '<circle cx="4.5" cy="6" r="1.3"/><circle cx="4.5" cy="12" r="1.3"/>'
+    '<circle cx="4.5" cy="18" r="1.3"/></symbol>'
+    '<symbol id="i-ativ" viewBox="0 0 24 24"><path d="M13 2.5L5.5 13.5H11L10 21.5L18.5 10.5H13z"/></symbol>'
+    '<symbol id="i-volta" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>'
+    '<symbol id="i-ligar" viewBox="0 0 24 24"><path d="M6.5 3.5h3l1.5 4-2 1.5a12 12 0 006 6l1.5-2 4 1.5v3'
+    'a2 2 0 01-2.2 2A17 17 0 014.5 5.7 2 2 0 016.5 3.5z"/></symbol>'
+    '<symbol id="i-zap" viewBox="0 0 24 24">'
+    '<path d="M3.5 20.5l1.3-4.4A8.2 8.2 0 1112 20.3a8.4 8.4 0 01-4.1-1.1z"/></symbol>'
+    '<symbol id="i-ficha" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/>'
+    '<path d="M8 8h8M8 12h8M8 16h5"/></symbol>'
+    '<symbol id="i-orc" viewBox="0 0 24 24"><path d="M6 3h12v18l-2.5-1.6L13 21l-2.5-1.6L8 21l-2-1.6z"/>'
+    '<path d="M9 8h6M9 12h6"/></symbol>'
+    '<symbol id="i-mapa" viewBox="0 0 24 24">'
+    '<path d="M12 21s6.5-6.1 6.5-10.5a6.5 6.5 0 10-13 0C5.5 14.9 12 21 12 21z"/>'
+    '<circle cx="12" cy="10.5" r="2.4"/></symbol>'
+    '<symbol id="i-sair" viewBox="0 0 24 24">'
+    '<path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></symbol>'
+    # os três do deslizar: puxar pra mim, devolver pro agente, marcar ganho
+    '<symbol id="i-assumir" viewBox="0 0 24 24"><path d="M12 3v11M8 10.5l4 4 4-4"/>'
+    '<path d="M4 16v3a2 2 0 002 2h12a2 2 0 002-2v-3"/></symbol>'
+    '<symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="11" rx="3"/>'
+    '<path d="M12 4v4M9 22h6M9 13v1.5M15 13v1.5"/></symbol>'
+    '<symbol id="i-check" viewBox="0 0 24 24"><path d="M4.5 12.5l5 5 10-11"/></symbol>'
+    '</defs></svg>')
 
-# Desempenho PERCEBIDO: como cada tela é um carregamento de página, o toque parecia
-# travar. Aqui: (1) barra de progresso no topo aparece NA HORA que toca num link/envia
-# form (feedback imediato); (2) prefetch especulativo — ao TOCAR num link interno, já
-# começa a baixar o destino, então a navegação chega mais rápida. Só front, sem backend.
-_PERF_JS = r"""
-<div id=nprg></div>
+
+def _ic(nome: str, cls: str = "ic") -> str:
+    return f'<svg class="{cls}"><use href="#i-{nome}"/></svg>'
+
+
+# ================================================================== helpers
+def _page(title: str, corpo: str) -> HTMLResponse:
+    """O documento. Leva manifest + service worker porque este app é pra instalar
+    na tela inicial do celular do vendedor — é o caminho normal de uso dele."""
+    return HTMLResponse(
+        "<!doctype html><html lang=pt-br><head><meta charset=utf-8>"
+        "<meta name=viewport content='width=device-width,initial-scale=1,viewport-fit=cover'>"
+        "<meta name=theme-color content='#0A0F0C'><meta name=robots content=noindex>"
+        "<link rel=manifest href='/cockpit/manifest.webmanifest'>"
+        "<link rel='apple-touch-icon' href='/cockpit/icon.svg'>"
+        "<meta name='apple-mobile-web-app-capable' content=yes>"
+        "<meta name='apple-mobile-web-app-status-bar-style' content='black-translucent'>"
+        f"<title>{esc(title)} · Zaq</title>{_CSS}</head><body>{_ICONES}"
+        f"<div class=wrap><div class=glow></div>{corpo}</div>"
+        "<script>if('serviceWorker' in navigator)"
+        "navigator.serviceWorker.register('/cockpit/sw.js',{scope:'/cockpit'})"
+        ".catch(function(){});</script>"
+        "</body></html>")
+
+
+def _brl(centavos, *, centavos_visiveis: bool = False) -> str:
+    """R$ com separador de milhar. `cockpit_dono._reais` arredonda pra 'R$ 12 mil' —
+    serve pra KPI de time, mas não pra dizer a alguém quanto ele vai receber."""
+    v = int(centavos or 0) / 100
+    s = f"{v:,.2f}" if centavos_visiveis else f"{v:,.0f}"
+    return "R$ " + s.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _data(dt) -> str:
+    """timestamptz → 09/08/2026, em horário de Brasília. Sem isso o datetime cru do
+    banco (com microssegundos e fuso) vaza pra tela."""
+    if not hasattr(dt, "strftime"):
+        return ""
+    from finance import agenda as ag
+    try:
+        return dt.astimezone(ag.BRT).strftime("%d/%m/%Y")
+    except (ValueError, TypeError):
+        return dt.strftime("%d/%m/%Y")
+
+
+_TEMP = {"quente": "var(--coral)", "morno": "var(--ambar)", "frio": "var(--azul)"}
+# cockpit_dono.leads/vendedor devolvem `temp_cor` já resolvido na paleta LEGADA
+# (painel_prospeccao.TEMP_COR). Traduz pro vocabulário novo em vez de deixar dois
+# azuis diferentes convivendo na mesma tela.
+_TEMP_LEGADO = {"#e0574f": "var(--coral)", "#e0a33e": "var(--ambar)", "#5b9bd5": "var(--azul)"}
+
+
+def _cor_temp(hexa: str) -> str:
+    return _TEMP_LEGADO.get((hexa or "").strip().lower(), "var(--azul)")
+
+
+def _flash(request: Request) -> str:
+    """Recado da última ação. Usa as MESMAS chaves de sessão do /cockpit (ck_ok /
+    ck_err), então mensagem posta por qualquer um dos dois apps aparece aqui."""
+    ok = request.session.pop("ck_ok", None)
+    err = request.session.pop("ck_err", None)
+    txt, cls = (ok, "ok") if ok else (err, "err") if err else (None, "")
+    return f"<div class='flash {cls}'>{esc(txt)}</div>" if txt else ""
+
+
+def _hdr(titulo: str, sub: str = "", *, voltar: str = "", direita: str = "",
+         inicial: str = "", href_inicial: str = "") -> str:
+    esq = (f"<a class=bk href='{esc(voltar)}'>{_ic('volta')}</a>" if voltar else "")
+    if not esq and inicial:
+        alvo = href_inicial or f"{_BASE}/perfil"
+        esq = f"<a class=av href='{esc(alvo)}'>{esc(inicial)}</a>"
+    return (f"<div class=hdr>{esq}<div class=tt><b>{esc(titulo)}</b>"
+            + (f"<small>{esc(sub)}</small>" if sub else "") + f"</div>{direita}</div>")
+
+
+def _abas(itens, ativo: str) -> str:
+    """Barra de abas. É o que faltava no app do vendedor — ele tinha uma tela só."""
+    out = []
+    for chave, icone, rotulo, href in itens:
+        on = " class=on" if chave == ativo else ""
+        out.append(f"<a{on} href='{esc(href)}'>{_ic(icone)}<span>{esc(rotulo)}</span></a>")
+    return "<div class=tabs>" + "".join(out) + "</div>"
+
+
+def _abas_vend(ativo: str) -> str:
+    return _abas([("fila", "fila", "Fila", _BASE),
+                  ("agenda", "agenda", "Agenda", f"{_BASE}/agenda"),
+                  ("orcamentos", "orc", "Propostas", f"{_BASE}/orcamentos"),
+                  ("resultado", "resultado", "Resultado", f"{_BASE}/resultado"),
+                  ("perfil", "perfil", "Perfil", f"{_BASE}/perfil")], ativo)
+
+
+def _abas_dono(ativo: str) -> str:
+    # Perfil sai da barra e vira o avatar do topo (igual no app do vendedor): com
+    # seis abas os rótulos não cabem numa tela de 390px.
+    return _abas([("visao", "visao", "Visão", _BASE),
+                  ("placar", "placar", "Placar", f"{_BASE}/equipe/placar"),
+                  ("leads", "leads", "Leads", f"{_BASE}/equipe/leads"),
+                  ("orcamentos", "orc", "Propostas", f"{_BASE}/orcamentos"),
+                  ("ativ", "ativ", "Atividade", f"{_BASE}/equipe/atividade")], ativo)
+
+
+def _hdr_dono(conta_id: int, titulo: str, sub: str = "", voltar: str = "") -> str:
+    """Topo das telas de gestão: o selo da empresa à esquerda abre o perfil (é por
+    onde ele sai do app — o Cockpit atual não tem nem tela de perfil pro dono)."""
+    marca = _marca_conta(conta_id)
+    return _hdr(titulo, sub, voltar=voltar, inicial=marca["iniciais"],
+                href_inicial=f"{_BASE}/perfil")
+
+
+def _marca_conta(conta_id: int):
+    from finance import empresa as emp
+    return emp.marca_empresa(get_pool(), conta_id)
+
+
+def _selo(conta_id: int) -> str:
+    """Selo da empresa no topo. White-label: a cor é do cliente (finance/marca.py) e
+    fica confinada ao selo — o resto do app é a marca do Zaq."""
+    from finance.marca import cabecalho_html
+    return cabecalho_html(_marca_conta(conta_id), px=28, raio=8, alinhar="right",
+                          cor_nome="var(--text)")
+
+
+# ================================================================== VENDEDOR
+@router.get("/cockpit", response_class=HTMLResponse)
+def cockpit_inicio(request: Request, meus: str = ""):
+    """Bifurca como sempre foi: dono/gestor cai na visão de equipe, vendedor na fila.
+
+    `?meus=1` é a saída pro gestor que TAMBÉM vende: na versão anterior ele nunca chegava na
+    própria caixa, porque `_gerencia` é testado antes de `_sessao`.
+    """
+    g = _gerencia(request)
+    if g and not (meus and g[1]):
+        return _dono_visao(request, g[0])
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    return _fila(request, sess[0], sess[1], gestor=bool(g))
+
+
+# Deslizar o card. É a única tela do app com gesto — o resto é form + redirect —
+# e existe porque assumir/devolver na fila é o que o vendedor mais repete no dia.
+# Os POSTs respondem JSON quando vem o header `x-cockpit: 1`, pra ação gravar sem
+# tirar ele da lista; sem JS o card continua sendo um link comum pro lead.
+_FILA_JS = r"""
 <script>
 (function(){
-  var bar=document.getElementById('nprg'), t, w=0;
-  function start(){ if(!bar)return; bar.classList.add('go'); w=12; bar.style.width='12%';
-    clearInterval(t); t=setInterval(function(){ w+=Math.max(.4,(92-w)*0.06); if(w>92)w=92; bar.style.width=w+'%'; },180); }
-  function stop(){ if(!bar)return; clearInterval(t); bar.classList.remove('go'); bar.style.width='0'; }
-  function interno(a){
-    if(!a) return false;
-    var href=a.getAttribute('href')||'';
-    if(!href||a.target==='_blank'||a.hasAttribute('download')||href.charAt(0)==='#') return false;
-    if(/^(mailto:|tel:)/.test(href)) return false;
-    if(/^https?:\/\//.test(href) && a.host!==location.host) return false;   // externo
-    return true;
+  var B=window.CKBASE||"/cockpit";
+  function $(id){return document.getElementById(id);}
+  function toast(m){var t=$("toast");if(!t)return;t.textContent=m;t.classList.add("show");
+    clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove("show");},2200);}
+  var IC={assumir:'<svg class="ic"><use href="#i-assumir"/></svg>',
+          bot:'<svg class="ic"><use href="#i-bot"/></svg>'};
+  function acoesHTML(ia){
+    var p=ia?'<button class="act assumir" data-a="assumir">'+IC.assumir+'Assumir</button>'
+            :'<button class="act devolver" data-a="devolver">'+IC.bot+'Devolver</button>';
+    return '<div class="actions">'+p+'<button class="act ganho" data-a="ganho">'
+      +'<svg class="ic"><use href="#i-check"/></svg>Ganho</button></div>';
   }
-  document.addEventListener('click',function(e){ if(e.metaKey||e.ctrlKey)return; if(interno(e.target.closest('a'))) start(); },true);
-  document.addEventListener('submit',function(){ start(); },true);
-  window.addEventListener('pageshow',stop);      // reset (inclusive ao voltar via bfcache)
-  window.addEventListener('pagehide',stop);
-  // prefetch: ao tocar/pressionar um link interno, já começa a carregar o destino
-  var got={};
-  document.addEventListener('pointerdown',function(e){
-    var a=e.target.closest('a'); if(!interno(a))return; var h=a.href; if(got[h])return; got[h]=1;
-    var l=document.createElement('link'); l.rel='prefetch'; l.href=h; document.head.appendChild(l);
-  },true);
-})();
-</script>"""
+  var aberto=null;
+  function fecha(f){if(!f)return;f.classList.remove("open");f.style.transform="translateX(0)";
+    if(aberto===f)aberto=null;}
+  function larg(row){var a=row.querySelector(".actions");return a?a.offsetWidth:168;}
 
-# JS da caixa de leads: swipe pra ações + ativar push. Plain string (tem chaves de JS).
-_INBOX_JS = r"""
-<div class="ck-toast" id="cktoast"></div>
-<script>
-(function(){
-  function toast(m){var t=document.getElementById('cktoast');if(!t)return;t.textContent=m;t.classList.add('show');
-    clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove('show');},2000);}
-  function actionsHTML(ia){
-    var main = ia
-      ? '<button class="act assumir" data-a="assumir"><span class="em">🙋</span>Assumir</button>'
-      : '<button class="act devolver" data-a="devolver"><span class="em">🤖</span>Devolver</button>';
-    return '<div class="actions">'+main+'<button class="act ganho" data-a="ganho"><span class="em">✓</span>Ganho</button></div>';
-  }
-  var openFront=null;
-  function closeF(f){ if(!f)return; f.classList.remove('open'); f.style.transform='translateX(0)'; if(openFront===f)openFront=null; }
-  function actW(row){ var a=row.querySelector('.actions'); return a?a.offsetWidth:164; }
-
-  function wire(row){
-    var front=row.querySelector('.front');
-    var id=front.getAttribute('data-id');
-    var sx=0,sy=0,base=0,dragging=false,decided=false,horiz=false,moved=false;
-    front.addEventListener('pointerdown',function(e){
-      if(openFront&&openFront!==front)closeF(openFront);
-      dragging=true;decided=false;horiz=false;moved=false;sx=e.clientX;sy=e.clientY;
-      base=front.classList.contains('open')?-actW(row):0;
-      front.classList.add('drag');try{front.setPointerCapture(e.pointerId);}catch(_){}
+  function ligar(row){
+    var front=row.querySelector(".front"), id=row.getAttribute("data-id");
+    var sx=0,sy=0,base=0,arrastando=false,decidiu=false,horiz=false,mexeu=false;
+    front.addEventListener("pointerdown",function(e){
+      if(aberto&&aberto!==front)fecha(aberto);
+      arrastando=true;decidiu=false;horiz=false;mexeu=false;sx=e.clientX;sy=e.clientY;
+      base=front.classList.contains("open")?-larg(row):0;
+      front.classList.add("drag");try{front.setPointerCapture(e.pointerId);}catch(_){}
     });
-    front.addEventListener('pointermove',function(e){
-      if(!dragging)return;var mx=e.clientX-sx,my=e.clientY-sy;
-      if(!decided){if(Math.abs(mx)>6||Math.abs(my)>6){decided=true;horiz=Math.abs(mx)>Math.abs(my);}}
-      if(!horiz)return; e.preventDefault(); moved=true;
-      var w=actW(row); var x=Math.max(-w-20,Math.min(0,base+mx)); front.style.transform='translateX('+x+'px)';
+    front.addEventListener("pointermove",function(e){
+      if(!arrastando)return;
+      var mx=e.clientX-sx,my=e.clientY-sy;
+      // só decide o eixo depois de 6px: senão o gesto rouba a rolagem vertical
+      if(!decidiu&&(Math.abs(mx)>6||Math.abs(my)>6)){decidiu=true;horiz=Math.abs(mx)>Math.abs(my);}
+      if(!horiz)return;
+      e.preventDefault();mexeu=true;
+      var w=larg(row);
+      front.style.transform="translateX("+Math.max(-w-20,Math.min(0,base+mx))+"px)";
     });
-    function end(){ if(!dragging)return;dragging=false;front.classList.remove('drag');
-      var m=front.style.transform.match(/-?\d+\.?\d*/); var cur=m?parseFloat(m[0]):0; var w=actW(row);
-      if(cur<-w/2){front.classList.add('open');front.style.transform='translateX('+(-w)+'px)';openFront=front;}
-      else{closeF(front);}
+    function solta(){
+      if(!arrastando)return;
+      arrastando=false;front.classList.remove("drag");
+      var m=front.style.transform.match(/-?\d+\.?\d*/),cur=m?parseFloat(m[0]):0,w=larg(row);
+      if(cur<-w/2){front.classList.add("open");front.style.transform="translateX("+(-w)+"px)";aberto=front;}
+      else fecha(front);
     }
-    front.addEventListener('pointerup',end); front.addEventListener('pointercancel',end);
-    front.addEventListener('click',function(){
-      if(front.classList.contains('open')){closeF(front);return;}
-      if(!moved){ location.href='/cockpit/lead/'+id; }
+    front.addEventListener("pointerup",solta);
+    front.addEventListener("pointercancel",solta);
+    front.addEventListener("click",function(e){
+      // O arrasto termina em pointerup, e o navegador dispara um CLICK logo
+      // depois. Sem esta primeira linha esse click fecharia na hora o card que o
+      // arrasto acabou de abrir — some antes de dar pra ler as ações.
+      if(mexeu){e.preventDefault();mexeu=false;return;}
+      // toque de verdade num card aberto: fecha em vez de abrir o lead
+      if(front.classList.contains("open")){e.preventDefault();fecha(front);}
     });
-    row.querySelectorAll('.act').forEach(function(b){
-      b.addEventListener('click',function(ev){ ev.stopPropagation(); doAct(row,front,id,b.getAttribute('data-a')); });
+    liga_acoes(row,front,id);
+  }
+  function liga_acoes(row,front,id){
+    row.querySelectorAll(".act").forEach(function(b){
+      b.addEventListener("click",function(ev){
+        ev.stopPropagation();agir(row,front,id,b.getAttribute("data-a"));});
     });
   }
-  function doAct(row,front,id,a){
-    var url = a==='ganho' ? '/cockpit/lead/'+id+'/fechar'
-            : a==='devolver' ? '/cockpit/lead/'+id+'/devolver'
-            : '/cockpit/lead/'+id+'/assumir';
-    var opt={method:'POST',headers:{'x-cockpit':'1'}};
-    if(a==='ganho'){opt.headers['Content-Type']='application/x-www-form-urlencoded';opt.body='tipo=ganho';}
+  function agir(row,front,id,a){
+    var url=B+"/lead/"+id+(a==="ganho"?"/fechar":a==="devolver"?"/devolver":"/assumir");
+    var opt={method:"POST",headers:{"x-cockpit":"1"}};
+    if(a==="ganho"){opt.headers["Content-Type"]="application/x-www-form-urlencoded";
+      opt.body="tipo=ganho";}
     fetch(url,opt).then(function(r){return r.json();}).then(function(j){
-      if(!j||!j.ok){toast((j&&j.erro)||'Não deu certo');closeF(front);return;}
-      if(a==='ganho'){ row.style.height=row.offsetHeight+'px';row.style.transition='.25s';
-        requestAnimationFrame(function(){row.style.height='0';row.style.opacity='0';});
-        setTimeout(function(){row.remove();},260); toast('🎉 Marcado como Ganho'); return; }
-      var ia = (a!=='assumir'); // assumir→sem IA; devolver→com IA
-      var tmp=document.createElement('div'); tmp.innerHTML=actionsHTML(ia);
-      row.querySelector('.actions').replaceWith(tmp.firstChild);   // troca as ações (assumir↔devolver)
-      var chip=front.querySelector('.cchip');
-      if(chip){ chip.className='cchip '+(ia?'ia':'voce'); chip.textContent=ia?'🤖 IA':'🙋 sua vez'; }
-      front.setAttribute('data-ia', ia?'1':'0');
-      row.querySelectorAll('.act').forEach(function(b){
-        b.addEventListener('click',function(ev){ev.stopPropagation();doAct(row,front,id,b.getAttribute('data-a'));});
-      });
-      closeF(front);
-      toast(a==='assumir'?'🙋 Agente desativado — é a sua vez':'🤖 Devolvido pro agente');
-    }).catch(function(){toast('Falha de conexão');closeF(front);});
+      if(!j||!j.ok){toast((j&&j.erro)||"Não deu certo");fecha(front);return;}
+      if(a==="ganho"){
+        row.style.height=row.offsetHeight+"px";row.style.overflow="hidden";
+        row.style.transition="height .25s,opacity .25s";
+        requestAnimationFrame(function(){row.style.height="0";row.style.opacity="0";});
+        setTimeout(function(){row.remove();},260);
+        toast("Marcado como Ganho 🎉");return;
+      }
+      var ia=(a!=="assumir");   // assumir → sai da IA; devolver → volta pra IA
+      var tmp=document.createElement("div");tmp.innerHTML=acoesHTML(ia);
+      row.querySelector(".actions").replaceWith(tmp.firstChild);
+      var chip=front.querySelector(".chip");
+      if(chip){chip.className="chip "+(ia?"ia":"voce");chip.textContent=ia?"IA":"sua vez";}
+      liga_acoes(row,front,id);
+      fecha(front);
+      toast(a==="assumir"?"É a sua vez — agente desligado":"Devolvido pro agente");
+    }).catch(function(){toast("Falha de conexão");fecha(front);});
   }
-  document.querySelectorAll('.swipe').forEach(wire);
+  document.querySelectorAll(".swipe").forEach(ligar);
 
   // ---- push ----
-  function urlB64(s){var p='='.repeat((4-s.length%4)%4);var b=atob((s+p).replace(/-/g,'+').replace(/_/g,'/'));
-    var a=new Uint8Array(b.length);for(var i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return a;}
-  function subscribe(){
-    if(!('serviceWorker'in navigator)||!('PushManager'in window)||!window.CKVAPID)return Promise.resolve(false);
+  // O botão do Perfil só marca a preferência no banco. Quem realmente assina é
+  // o navegador, e só aqui: `Notification.requestPermission()` exige um gesto do
+  // usuário, então precisa de um botão de verdade na tela.
+  function urlB64(s){
+    var p="=".repeat((4-s.length%4)%4);
+    var b=atob((s+p).replace(/-/g,"+").replace(/_/g,"/"));
+    var a=new Uint8Array(b.length);
+    for(var i=0;i<b.length;i++)a[i]=b.charCodeAt(i);
+    return a;
+  }
+  function assinar(){
+    if(!("serviceWorker" in navigator)||!("PushManager" in window)||!window.CKVAPID)
+      return Promise.resolve(false);
     return navigator.serviceWorker.ready.then(function(reg){
       return reg.pushManager.getSubscription().then(function(s){
-        if(s)return s;
-        return reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:urlB64(window.CKVAPID)});
+        return s||reg.pushManager.subscribe(
+          {userVisibleOnly:true,applicationServerKey:urlB64(window.CKVAPID)});
       });
     }).then(function(sub){
-      return fetch('/cockpit/push/assinar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(sub)});
+      return fetch(B+"/push/assinar",{method:"POST",
+        headers:{"Content-Type":"application/json"},body:JSON.stringify(sub)});
     }).then(function(){return true;}).catch(function(){return false;});
   }
-  var card=document.getElementById('pushcard');
-  if(card && ('Notification'in window) && window.CKVAPID){
-    if(Notification.permission==='granted'){ subscribe(); }
-    else if(Notification.permission!=='denied'){
-      card.classList.add('show');
-      document.getElementById('pushbtn').addEventListener('click',function(){
+  var card=$("pushcard");
+  if(card&&("Notification" in window)&&window.CKVAPID){
+    if(Notification.permission==="granted")assinar();
+    else if(Notification.permission!=="denied"){
+      card.classList.add("show");
+      $("pushbtn").addEventListener("click",function(){
         Notification.requestPermission().then(function(p){
-          if(p==='granted'){ subscribe().then(function(){toast('🔔 Notificações ligadas');}); }
-          else { toast('Você pode ligar depois no navegador'); }
-          card.classList.remove('show');
+          if(p==="granted")assinar().then(function(){toast("Notificações ligadas");});
+          else toast("Dá pra ligar depois, no navegador");
+          card.classList.remove("show");
         });
       });
     }
@@ -404,185 +796,1318 @@ _INBOX_JS = r"""
 })();
 </script>"""
 
-# JS do montador de orçamento (plain string — chaves de JS).
+
+def _acoes_card(ia: bool) -> str:
+    """As duas ações que ficam atrás do card. A primeira alterna: quem está com a IA
+    o vendedor ASSUME; quem já é dele ele DEVOLVE."""
+    p = (f"<button class='act assumir' data-a=assumir>{_ic('assumir')}Assumir</button>" if ia
+         else f"<button class='act devolver' data-a=devolver>{_ic('bot')}Devolver</button>")
+    return (f"<div class=actions>{p}"
+            f"<button class='act ganho' data-a=ganho>{_ic('check')}Ganho</button></div>")
+
+
+def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = False) -> HTMLResponse:
+    pool = get_pool()
+    leads = ck.leads_do_vendedor(pool, conta_id, membro_id)
+    p = ck.perfil(pool, conta_id, membro_id)
+    vez = sum(1 for l in leads if not l["ia"])
+
+    cartoes = []
+    for l in leads:
+        chip = ("<span class='chip ia'>IA</span>" if l["ia"]
+                else "<span class='chip voce'>sua vez</span>")
+        # sem JS o card ainda é um link normal pro lead — o deslizar só acrescenta
+        cartoes.append(
+            f"<div class=swipe data-id='{l['id']}'>{_acoes_card(bool(l['ia']))}"
+            f"<a class='lead front' draggable=false href='{_BASE}/lead/{l['id']}'>"
+            f"<span class=dot style='background:{_TEMP.get(l['temperatura'], 'var(--azul)')}'></span>"
+            f"<span class=mid><span class=top><span class=emp>{esc(l['empresa'])}</span>{chip}</span>"
+            f"<span class=snip>{esc(l['snip'])}</span></span></a></div>")
+    lista = "".join(cartoes) or (
+        "<div class=vazio><div class=big>◎</div><b>Fila zerada</b>"
+        "Nenhum lead aberto agora. Quando cair um novo no rodízio, você é avisado.</div>")
+    dica = ("<div class=dica-swipe>Arraste um card pra esquerda pra assumir, devolver "
+            "ou marcar ganho.</div>") if cartoes else ""
+
+    # push só aparece se as chaves VAPID estão no ambiente — sem elas, oferecer
+    # notificação seria prometer o que o servidor não sabe entregar
+    import json as _json
+    from finance import webpush
+    vapid = webpush.chave_publica()
+    pushcard = ("<div class=pushcard id=pushcard><b>Ative as notificações</b>"
+                "<p>Receba o aviso no celular assim que um lead cair pra você — "
+                "mesmo com o app fechado.</p>"
+                "<button class=go id=pushbtn type=button>Ativar notificações</button></div>"
+                ) if vapid else ""
+    vapid_js = f"<script>window.CKVAPID={_json.dumps(vapid)};</script>" if vapid else ""
+
+    volta = ("<div class=bloco style='margin-top:.9rem'>"
+             f"<a class='btn ghost' href='{_BASE}'>Ver a visão da equipe</a></div>") if gestor else ""
+    corpo = (_hdr("Meus leads", f"{len(leads)} abertos · {vez} sua vez",
+                  inicial=_ini(p["nome"]), direita=_selo(conta_id))
+             + _flash(request)
+             + f"<div class=scroll>{pushcard}{lista}{dica}{volta}</div>"
+             + "<div class=toast id=toast></div>"
+             + _abas_vend("fila")
+             + f'<script>window.CKBASE="{_BASE}";</script>' + vapid_js + _FILA_JS)
+    return _page("Meus leads", corpo)
+
+
+@router.get("/cockpit/agenda", response_class=HTMLResponse)
+def cockpit_agenda(request: Request):
+    """A agenda do vendedor. Na versão anterior ele marcava a visita e ela sumia — não existia
+    tela nenhuma que devolva 'o que eu tenho pra hoje'."""
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess
+    visitas = ck.visitas_do_vendedor(get_pool(), conta_id, membro_id)
+    hoje = [v for v in visitas if v["hoje"]]
+
+    def bloco(v):
+        acoes = []
+        if v["lead_id"]:
+            acoes.append(f"<a href='{_BASE}/lead/{v['lead_id']}'>{_ic('ficha', 'ic p')} Lead</a>")
+        if v["maps"]:
+            acoes.append(f"<a href='{esc(v['maps'])}' target=_blank rel=noopener>{_ic('mapa', 'ic p')} Mapa</a>")
+        if v["zap"]:
+            acoes.append(f"<a href='{esc(v['zap'])}' target=_blank rel=noopener>{_ic('zap', 'ic p')} Avisar</a>")
+        if v["ics_url"]:
+            acoes.append(f"<a href='{esc(v['ics_url'])}'>{_ic('agenda', 'ic p')} Calendário</a>")
+        return (f"<div class='vis{' hoje' if v['hoje'] else ''}'>"
+                f"<div class=quando><div class=h>{esc(v['hora'])}</div><div class=d>{esc(v['dia'])}</div></div>"
+                f"<div class=mid><b>{esc(v['titulo'])}</b>"
+                + (f"<div class=loc>{esc(v['local'])}</div>" if v["local"] else "")
+                + (f"<div class=acoes>{''.join(acoes)}</div>" if acoes else "")
+                + "</div></div>")
+
+    if visitas:
+        miolo = ("<div class=eyebrow>Hoje</div>"
+                 + ("".join(bloco(v) for v in hoje) if hoje
+                    else "<div class=fonte>Nada marcado pra hoje.</div>"))
+        depois = [v for v in visitas if not v["hoje"]]
+        if depois:
+            miolo += "<div class=eyebrow>Próximos dias</div>" + "".join(bloco(v) for v in depois)
+    else:
+        miolo = ("<div class=vazio><div class=big>◷</div><b>Nenhuma visita marcada</b>"
+                 "Abra um lead e toque em <b>Agendar visita</b> — ela aparece aqui.</div>")
+
+    corpo = (_hdr("Minha agenda", f"{len(hoje)} hoje · {len(visitas)} nos próximos 14 dias")
+             + f"<div class=scroll>{miolo}</div>" + _abas_vend("agenda"))
+    return _page("Minha agenda", corpo)
+
+
+@router.get("/cockpit/resultado", response_class=HTMLResponse)
+def cockpit_resultado(request: Request):
+    """O que faltava: o vendedor vendo o próprio dinheiro.
+
+    `membros.comissao_pct` existe desde a migração 137, mas só o dono via, no
+    relatório do painel. Sem % configurada a linha de comissão simplesmente não
+    aparece — melhor faltar do que inventar número.
+    """
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess
+    periodo = request.query_params.get("p", "mes")
+    if periodo not in ("hoje", "semana", "mes"):
+        periodo = "mes"
+    r = ck.remuneracao(get_pool(), conta_id, membro_id, periodo)
+
+    def seg(k, lab):
+        return f"<a class='{'on' if periodo == k else ''}' href='{_BASE}/resultado?p={k}'>{lab}</a>"
+
+    # A comissão é sobre o que o cliente PAGOU — mesma conta do relatório do dono
+    # (finance/comissao.py). O funil fica separado, embaixo, como previsão.
+    if r["comissao_centavos"] is not None:
+        pct = f"{r['comissao_pct']:g}".replace(".", ",")
+        comissao = (f"<div class='kpi hero'><div class=v>{esc(_brl(r['comissao_centavos'], centavos_visiveis=True))}</div>"
+                    f"<div class=l>Sua comissão</div><div class=d>{pct}% de "
+                    f"{esc(_brl(r['recebido_centavos']))} que entraram</div></div>")
+    else:
+        comissao = ("<div class=bloco><div class=card style='font-size:.82rem;color:var(--text-dim)'>"
+                    "Sua <b>% de comissão</b> ainda não foi configurada. Quem define é o dono, "
+                    "em Equipe → comissão.</div></div>")
+
+    pos = (f"<div class=kpi><div class=v>{r['posicao']}º</div><div class=l>No placar</div>"
+           f"<div class=d>entre {r['total_equipe']} da equipe</div></div>") if r["posicao"] else ""
+
+    corpo = (
+               _hdr("Meu resultado", "o que entrou e o que está por vir")
+             + f"<div class=scroll><div class=seg>{seg('hoje','Hoje')}{seg('semana','Semana')}{seg('mes','Mês')}</div>"
+             + comissao
+             + "<div class=kpis>"
+             + f"<div class=kpi><div class=v>{esc(_brl(r['recebido_centavos']))}</div>"
+               f"<div class=l>Recebido</div><div class=d>{r['n_vendas']} pagamento(s) no período</div></div>"
+             + f"<div class=kpi><div class=v>{esc(_brl(r['fechado_centavos']))}</div>"
+               f"<div class=l>No funil</div><div class=d>{r['ganhos']} ganho(s) · previsão</div></div>"
+             + "</div>"
+             + "<div class=fonte><b>Comissão sai do recebido</b> — quando o cliente paga, seja "
+               "no caixa ou na baixa do título. É a mesma conta do relatório do dono, então os "
+               "dois números batem.<br>O <b>funil</b> é o valor que você estimou nos leads que "
+               "marcou como ganho: serve pra você acompanhar o que vem, e não entra na comissão "
+               "enquanto o contrato não for fechado e pago.</div>"
+             + "<div class=eyebrow>Seu ritmo</div>"
+             + "<div class=kpis>"
+             + f"<div class=kpi><div class=v>{esc(r['conversao'])}</div><div class=l>Conversão</div>"
+               "<div class=d>ganhos vs. perdidos</div></div>"
+             + f"<div class=kpi><div class=v>{r['fila']}</div><div class=l>Na fila</div>"
+               "<div class=d>leads abertos com você</div></div>"
+             + f"<div class=kpi><div class=v>{esc(r['resp'])}</div><div class=l>Resposta</div>"
+               "<div class=d>média de 30 dias</div></div>"
+             + pos + "</div>"
+             + "</div>" + _abas_vend("resultado"))
+    return _page("Meu resultado", corpo)
+
+
+# ------------------------------------------------------------------ montar orçamento
 _ORC_JS = r"""
 <script>
 (function(){
-  var O=window.ORC||{cat:[],leadId:0};
-  var sel={}, custom=[];
+  var O=window.ORC||{cat:[],leadId:0,base:""};
+  var sel={}, avulsos=[];
   function $(id){return document.getElementById(id);}
   function brl(v){return "R$ "+Number(v||0).toLocaleString("pt-BR");}
-  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m];});}
-  function toast(m){var t=$("cktoast");if(!t)return;t.textContent=m;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove("show");},2000);}
-  function pr(s){var a=[];if(s.setup)a.push(brl(s.setup));if(s.mensal)a.push(brl(s.mensal)+"/mês");return a.join(" + ")||"grátis";}
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(m){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m];});}
+  function toast(m){var t=$("toast");if(!t)return;t.textContent=m;t.classList.add("show");
+    clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove("show");},2200);}
+  function preco(s){var a=[];if(s.setup)a.push(brl(s.setup));if(s.mensal)a.push(brl(s.mensal)+"/mês");
+    return a.join(" + ")||"grátis";}
 
-  function renderCat(){
-    var box=$("orclist");if(!box)return;box.innerHTML="";
-    if(!O.cat.length){box.innerHTML='<div class=orc-empty>Nenhum serviço no catálogo ainda. Você pode adicionar itens avulsos abaixo, ou pedir pro gestor cadastrar o catálogo no painel.</div>';return;}
+  function pintaCatalogo(){
+    var box=$("cat");if(!box)return;box.innerHTML="";
+    if(!O.cat.length){box.innerHTML='<div class=vazio-cat>Nenhum serviço no catálogo ainda. '
+      +'Dá pra montar com itens avulsos aqui embaixo, ou pedir pro gestor cadastrar o catálogo no painel.</div>';return;}
     O.cat.forEach(function(s,i){
       var on=sel[i]!==undefined;
-      var q=on?'<div class=orc-q><button data-q="-" data-i="'+i+'">−</button><span>'+sel[i]+'</span><button data-q="+" data-i="'+i+'">+</button></div>':'';
-      var d=document.createElement("div");d.className="orc-srv"+(on?" on":"");d.setAttribute("data-i",i);
-      d.innerHTML='<div class=ck>'+(on?'✓':'')+'</div><div class=m><b>'+esc(s.nome)+'</b>'+(s.desc?'<small>'+esc(s.desc)+'</small>':'')+q+'</div><div class=pr>'+pr(s)+'</div>';
+      var q=on?'<div class=qtd><button data-q="-" data-i="'+i+'" aria-label="menos">−</button>'
+        +'<span>'+sel[i]+'</span><button data-q="+" data-i="'+i+'" aria-label="mais">+</button></div>':'';
+      var d=document.createElement("div");d.className="srv"+(on?" on":"");d.setAttribute("data-i",i);
+      d.innerHTML='<div class=ck>'+(on?'✓':'')+'</div><div class=m><b>'+esc(s.nome)+'</b>'
+        +(s.desc?'<small>'+esc(s.desc)+'</small>':'')+q+'</div><div class=pr>'+preco(s)+'</div>';
       box.appendChild(d);
     });
   }
-  function build(){
+  function itens(){
     var out=[];
-    Object.keys(sel).forEach(function(i){var s=O.cat[i];var q=sel[i];
+    Object.keys(sel).forEach(function(i){var s=O.cat[i],q=sel[i];
       out.push({nome:s.nome+(q>1?" (× "+q+")":""),setup:(s.setup||0)*q,mensal:(s.mensal||0)*q});});
-    custom.forEach(function(c){out.push(c);});
+    avulsos.forEach(function(c){out.push(c);});
     return out;
   }
-  function total(){
-    var its=build();var setup=0,mensal=0;its.forEach(function(x){setup+=x.setup;mensal+=x.mensal;});
+  function soma(){
+    var its=itens(),setup=0,mensal=0;
+    its.forEach(function(x){setup+=x.setup;mensal+=x.mensal;});
     var t=[];if(setup)t.push(brl(setup));if(mensal)t.push(brl(mensal)+"/mês");
-    $("orctotal").innerHTML=its.length?'<b>'+(t.join(" + ")||"grátis")+'</b>':"—";
-    $("orcgen").disabled=its.length===0;
+    $("total").innerHTML=its.length?(t.join(" + ")||"grátis"):"—";
+    $("gerar").disabled=its.length===0;
   }
   document.addEventListener("click",function(e){
     var qb=e.target.closest("[data-q]");
-    if(qb){e.stopPropagation();var i=qb.getAttribute("data-i");sel[i]=Math.max(1,(sel[i]||1)+(qb.getAttribute("data-q")==="+"?1:-1));renderCat();total();return;}
-    var row=e.target.closest(".orc-srv");
-    if(row){var i=row.getAttribute("data-i");if(sel[i]!==undefined)delete sel[i];else sel[i]=1;renderCat();total();}
+    if(qb){e.stopPropagation();var i=qb.getAttribute("data-i");
+      sel[i]=Math.max(1,(sel[i]||1)+(qb.getAttribute("data-q")==="+"?1:-1));pintaCatalogo();soma();return;}
+    var row=e.target.closest(".srv");
+    if(row){var j=row.getAttribute("data-i");
+      if(sel[j]!==undefined)delete sel[j];else sel[j]=1;pintaCatalogo();soma();}
   });
-  var addb=$("orcaddbtn");
-  if(addb)addb.onclick=function(){var n=$("orccnome").value.trim();var v=parseInt(($("orccval").value||"").replace(/\D/g,''),10);
-    if(!n||!v){toast("Preencha nome e valor");return;}custom.push({nome:n,setup:v,mensal:0});$("orccnome").value="";$("orccval").value="";total();toast("Item adicionado ✓");};
-  var gen=$("orcgen");
-  if(gen)gen.onclick=function(){
-    gen.disabled=true;gen.textContent="Gerando…";
-    fetch("/cockpit/lead/"+O.leadId+"/orcamento",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({itens:build()})})
-      .then(function(r){return r.json();}).then(function(j){
-        if(!j||!j.ok){toast((j&&j.erro)||"Não deu certo");gen.disabled=false;gen.textContent="Gerar proposta e link";return;}
-        done(j);
-      }).catch(function(){toast("Falha de conexão");gen.disabled=false;gen.textContent="Gerar proposta e link";});
-  };
-  function done(j){
-    $("orcbuild").style.display="none";$("orcfoot").style.display="none";
-    var wa=j.zap?'<a class=wpp href="'+j.zap+'" target=_blank rel=noopener>💬 Enviar no WhatsApp do cliente</a>':'';
-    $("orcdone").innerHTML='<div class=orc-done><div class=big>🧾✅</div><h3>Proposta pronta!</h3>'
-      +'<p>Mande o link pro cliente — ele abre, vê com a marca da empresa e aprova.</p>'
-      +'<div class=orc-link><input value="'+esc(j.link)+'" readonly onclick="this.select()"><button id=orccopy>Copiar</button></div>'
-      +wa
-      +'<button class=orc-ghost id=orcsend>💬 Enviar na conversa (pelo Zaq)</button>'
-      +'<a class=orc-ghost href="/cockpit/lead/'+O.leadId+'" style="display:block;border:0;color:var(--verde-claro);text-decoration:none">✓ Voltar pro lead</a></div>';
-    $("orcdone").style.display="block";
-    $("orccopy").onclick=function(){navigator.clipboard.writeText(j.link).then(function(){toast("Link copiado ✓");},function(){toast("Selecione e copie");});};
-    $("orcsend").onclick=function(){var b=$("orcsend");b.disabled=true;b.textContent="Enviando…";
-      fetch("/cockpit/lead/"+O.leadId+"/orcamento/enviar",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({link:j.link})})
-        .then(function(r){return r.json();}).then(function(x){toast(x&&x.ok?"Enviado na conversa ✓":(x&&x.erro)||"Não consegui enviar agora");b.disabled=false;b.textContent="💬 Enviar na conversa (pelo Zaq)";})
-        .catch(function(){toast("Falha de conexão");b.disabled=false;b.textContent="💬 Enviar na conversa (pelo Zaq)";});};
+  // O item avulso precisa APARECER. No app anterior ele entrava só na conta do
+  // total: quem digitava errado não via o erro e não tinha como desfazer.
+  function pintaAvulsos(){
+    var box=$("avulsos");if(!box)return;
+    box.innerHTML=avulsos.map(function(a,i){
+      return '<div class=avl><b>'+esc(a.nome)+'</b><span>'+brl(a.setup)+'</span>'
+        +'<button type=button data-x="'+i+'" aria-label="Remover '+esc(a.nome)+'">×</button></div>';
+    }).join("");
   }
-  renderCat();total();
+  document.addEventListener("click",function(e){
+    var x=e.target.closest("[data-x]");if(!x)return;
+    avulsos.splice(parseInt(x.getAttribute("data-x"),10),1);
+    pintaAvulsos();soma();
+  });
+  var add=$("addbtn");
+  if(add)add.onclick=function(){
+    var n=$("addnome").value.trim();
+    var v=parseInt(($("addval").value||"").replace(/\D/g,''),10);
+    if(!n||!v){toast("Preencha o nome e o valor");return;}
+    avulsos.push({nome:n,setup:v,mensal:0});
+    $("addnome").value="";$("addval").value="";pintaAvulsos();soma();toast("Item adicionado");
+  };
+  var g=$("gerar");
+  if(g)g.onclick=function(){
+    g.disabled=true;g.textContent="Gerando…";
+    fetch(O.base+"/lead/"+O.leadId+"/orcamento",{method:"POST",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify({itens:itens()})})
+      .then(function(r){return r.json();}).then(function(j){
+        if(!j||!j.ok){toast((j&&j.erro)||"Não deu certo");g.disabled=false;
+          g.textContent="Gerar proposta e link";return;}
+        pronto(j);
+      }).catch(function(){toast("Falha de conexão");g.disabled=false;
+        g.textContent="Gerar proposta e link";});
+  };
+  function pronto(j){
+    $("build").style.display="none";$("rodape").style.display="none";
+    var wa=j.zap?'<a class=btn href="'+esc(j.zap)+'" target=_blank rel=noopener>Mandar no WhatsApp</a>':'';
+    $("pronto").innerHTML='<div class=pronto><div class=big>✓</div><h3>Proposta pronta</h3>'
+      +'<p>Mande o link pro cliente — ele abre, vê com a marca da empresa e aprova online.</p>'
+      +wa
+      +'<button class="btn ghost" style="margin-top:.5rem" id=naconversa>Enviar na conversa do lead</button>'
+      +'<div class=copiar><input value="'+esc(j.link)+'" readonly onclick="this.select()">'
+      +'<button type=button id=copiar>Copiar</button></div>'
+      +'<a class="btn ghost" style="margin-top:.9rem" href="'+O.base+'/lead/'+O.leadId+'">Voltar pro lead</a></div>';
+    $("pronto").style.display="block";
+    $("copiar").onclick=function(){navigator.clipboard.writeText(j.link).then(
+      function(){toast("Link copiado");},function(){toast("Selecione e copie");});};
+    $("naconversa").onclick=function(){
+      var b=this;b.disabled=true;b.textContent="Enviando…";
+      fetch(O.base+"/lead/"+O.leadId+"/orcamento/enviar",{method:"POST",
+        headers:{"Content-Type":"application/json"},body:JSON.stringify({link:j.link})})
+        .then(function(r){return r.json();}).then(function(x){
+          toast(x&&x.ok?"Enviado na conversa":(x&&x.erro)||"Não consegui enviar agora");
+          b.disabled=false;b.textContent="Enviar na conversa do lead";})
+        .catch(function(){toast("Falha de conexão");b.disabled=false;
+          b.textContent="Enviar na conversa do lead";});};
+  }
+  pintaCatalogo();soma();
 })();
 </script>"""
 
-# JS do agendar visita (plain string).
+
+@router.get("/cockpit/lead/{lead_id}/orcamento", response_class=HTMLResponse)
+def cockpit_orcamento_montar(request: Request, lead_id: int):
+    """Montador da proposta. O motor é o mesmo de sempre (`cockpit.criar_orcamento`);
+    o que mudou foi a casca. Ela precisava vir junto: montar o orçamento é o meio do
+    caminho de fechar venda, e deixar essa tela pra trás faria o vendedor trocar de
+    visual bem na hora que mais importa."""
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess
+    pool = get_pool()
+    d = ck.lead_do_vendedor(pool, conta_id, membro_id, lead_id)
+    if not d:
+        return RedirectResponse(_BASE, status_code=303)
+    import json as _json
+    cat = ck.catalogo_servicos(pool, conta_id)
+    # `</` escapado: o catálogo é texto do usuário e fecharia o <script> antes da hora
+    dados = _json.dumps({"cat": cat, "leadId": lead_id, "base": _BASE},
+                        ensure_ascii=False).replace("</", "<\\/")
+    corpo = (_hdr("Orçamento", d["empresa"], voltar=f"{_BASE}/lead/{lead_id}")
+             + "<div class=toast id=toast></div>"
+             + "<div class=scroll id=build>"
+             + "<div class=secao><div class=rot>Serviços do catálogo</div></div><div id=cat></div>"
+             + "<div class=secao><div class=rot>Adicionar item avulso</div></div>"
+             + "<div class=avulso><input id=addnome placeholder='Ex.: Visita técnica' autocomplete=off>"
+               "<input class=v id=addval inputmode=numeric placeholder='R$' autocomplete=off>"
+               "<button type=button id=addbtn aria-label='Adicionar item'>+</button></div>"
+             + "<div id=avulsos></div>"
+             + "</div>"
+             + "<div class=rodape-b id=rodape><div class=tot><span>Total</span><b id=total>—</b></div>"
+               "<button class=btn id=gerar type=button disabled>Gerar proposta e link</button></div>"
+             + "<div id=pronto style='display:none'></div>"
+             + f"<script>window.ORC={dados};</script>" + _ORC_JS)
+    return _page(f"Orçamento — {d['empresa']}", corpo)
+
+
+@router.post("/cockpit/lead/{lead_id}/orcamento")
+async def cockpit_orcamento_criar(request: Request, lead_id: int, payload: dict = Body(...)):
+    sess = _sessao(request)
+    if not sess:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    r = ck.criar_orcamento(get_pool(), sess[0], sess[1], lead_id, (payload or {}).get("itens"))
+    return JSONResponse(r)
+
+
+@router.post("/cockpit/lead/{lead_id}/orcamento/enviar")
+async def cockpit_orcamento_enviar_conversa(request: Request, lead_id: int, payload: dict = Body(...)):
+    sess = _sessao(request)
+    if not sess:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    link = (payload or {}).get("link", "")
+    if not link:
+        return JSONResponse({"ok": False, "erro": "sem link"})
+    return JSONResponse(ck.enviar_proposta_conversa(get_pool(), sess[0], sess[1], lead_id, link))
+
+
+# ------------------------------------------------------------------ agendar visita
+_DIA_SEM = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+_HORAS = ["08:00", "09:00", "10:00", "11:00", "13:00", "14:00",
+          "15:00", "16:00", "17:00", "18:00", "19:00"]
+
 _VISITA_JS = r"""
 <script>
 (function(){
-  var V=window.VISITA||{leadId:0,dias:[],horas:[],end:""};
-  var st={dia:(V.dias[0]||{}).iso,hora:"10:00",dur:60,lembr:60,avisar:true};
-  function $(id){return document.getElementById(id);}
-  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m];});}
-  function toast(m){var t=$("cktoast");if(!t)return;t.textContent=m;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove("show");},2000);}
+  var V=window.VISITA||{leadId:0,dias:[],horas:[],base:""};
+  var st={dia:(V.dias[0]||{}).iso,hora:"10:00",dur:60,lembr:60};
   var DURS=[["30 min",30],["1 h",60],["1h30",90],["2 h",120]];
   var LEMBR=[["Sem lembrete",0],["1h antes",60],["1 dia antes",1440]];
+  function $(id){return document.getElementById(id);}
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(m){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m];});}
+  function toast(m){var t=$("toast");if(!t)return;t.textContent=m;t.classList.add("show");
+    clearTimeout(t._t);t._t=setTimeout(function(){t.classList.remove("show");},2200);}
 
-  function chip(lab,on){return '<div class="vchip'+(on?' on':'')+'">'+lab+'</div>';}
-  function render(){
-    $("vdays").innerHTML=V.dias.map(function(d){return '<div class="vchip'+(d.iso===st.dia?' on':'')+'" data-d="'+d.iso+'">'+d.lab+'</div>';}).join("");
-    $("vtimes").innerHTML=V.horas.map(function(h){return '<div class="vchip'+(h===st.hora?' on':'')+'" data-h="'+h+'">'+h+'</div>';}).join("");
-    $("vdurs").innerHTML=DURS.map(function(o){return '<div class="vchip'+(o[1]===st.dur?' on':'')+'" data-dur="'+o[1]+'">'+o[0]+'</div>';}).join("");
-    $("vlembr").innerHTML=LEMBR.map(function(o){return '<div class="vchip'+(o[1]===st.lembr?' on':'')+'" data-lb="'+o[1]+'">'+o[0]+'</div>';}).join("");
-    prev();
+  function pinta(){
+    $("dias").innerHTML=V.dias.map(function(d){
+      return '<div class="esc'+(d.iso===st.dia?' on':'')+'" data-d="'+d.iso+'">'+d.lab+'</div>';}).join("");
+    $("horas").innerHTML=V.horas.map(function(h){
+      return '<div class="esc'+(h===st.hora?' on':'')+'" data-h="'+h+'">'+h+'</div>';}).join("");
+    $("durs").innerHTML=DURS.map(function(o){
+      return '<div class="esc'+(o[1]===st.dur?' on':'')+'" data-dur="'+o[1]+'">'+o[0]+'</div>';}).join("");
+    $("lembr").innerHTML=LEMBR.map(function(o){
+      return '<div class="esc'+(o[1]===st.lembr?' on':'')+'" data-lb="'+o[1]+'">'+o[0]+'</div>';}).join("");
+    resumo();
   }
-  function diaLab(){var d=V.dias.filter(function(x){return x.iso===st.dia;})[0];return d?d.lab.toLowerCase():st.dia;}
-  function prev(){
-    var on=!$("vavisar").classList.contains("off");
-    $("vmsg").style.display=on?"block":"none";
-    $("vmsg").textContent="Olá! 👋 Sua visita ao "+V.nome+" está marcada:\n📅 "+diaLab()+" às "+st.hora+"\n📍 "+$("vlocalinp").value+"\nAté lá! 😊";
-    $("vresumo").innerHTML='Visita <b>'+diaLab()+' às '+st.hora+'</b> · '+V.quem+' vem ao <b>'+esc(V.nome)+'</b>';
+  function diaLab(){
+    var d=V.dias.filter(function(x){return x.iso===st.dia;})[0];
+    return d?d.lab.toLowerCase():st.dia;
+  }
+  function resumo(){
+    var on=!$("avisar").classList.contains("off");
+    $("previa").style.display=on?"block":"none";
+    $("previa").textContent="Olá! 👋 Sua visita ao "+V.nome+" está marcada:\n📅 "+diaLab()
+      +" às "+st.hora+"\n📍 "+$("endereco").value+"\nAté lá!";
+    // esc() em V.quem e V.nome: os dois são texto do cliente (contato do lead e
+    // nome fantasia da conta) e aqui entram por innerHTML.
+    $("resumo").innerHTML='<b>'+diaLab()+' às '+st.hora+'</b> · '+esc(V.quem)+' vem ao '+esc(V.nome);
   }
   document.addEventListener("click",function(e){
-    var t=e.target.closest(".vchip");if(!t)return;
+    var t=e.target.closest(".esc");if(!t)return;
     if(t.dataset.d!=null)st.dia=t.dataset.d;
     else if(t.dataset.h!=null)st.hora=t.dataset.h;
     else if(t.dataset.dur!=null)st.dur=parseInt(t.dataset.dur,10);
     else if(t.dataset.lb!=null)st.lembr=parseInt(t.dataset.lb,10);
     else return;
-    render();
+    pinta();
   });
-  $("vavisar").onclick=function(){var off=this.classList.toggle("off");this.classList.toggle("on",!off);this.textContent=off?"Desligado":"Ligado";prev();};
-  $("vlocalinp").oninput=prev;
-  $("vgo").onclick=function(){
-    var b=$("vgo");b.disabled=true;b.textContent="Agendando…";
-    fetch("/cockpit/lead/"+V.leadId+"/visita",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({data:st.dia,hora:st.hora,dur:st.dur,lembrete:st.lembr,local:$("vlocalinp").value,avisar:!$("vavisar").classList.contains("off")})})
+  $("avisar").onclick=function(){
+    var off=this.classList.toggle("off");this.textContent=off?"Desligado":"Ligado";resumo();};
+  $("endereco").oninput=resumo;
+  $("agendar").onclick=function(){
+    var b=this;b.disabled=true;b.textContent="Agendando…";
+    fetch(V.base+"/lead/"+V.leadId+"/visita",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({data:st.dia,hora:st.hora,dur:st.dur,lembrete:st.lembr,
+        local:$("endereco").value,avisar:!$("avisar").classList.contains("off")})})
       .then(function(r){return r.json();}).then(function(j){
-        if(!j||!j.ok){toast((j&&j.erro)||"Não deu certo");b.disabled=false;b.textContent="📅 Agendar visita";return;}
-        done(j);
-      }).catch(function(){toast("Falha de conexão");b.disabled=false;b.textContent="📅 Agendar visita";});
+        if(!j||!j.ok){toast((j&&j.erro)||"Não deu certo");b.disabled=false;
+          b.textContent="Agendar visita";return;}
+        pronto(j);
+      }).catch(function(){toast("Falha de conexão");b.disabled=false;b.textContent="Agendar visita";});
   };
-  function done(j){
-    $("vbuild").style.display="none";$("vfoot").style.display="none";
-    var aviso=j.avisado?'<div class=okline>✓ Confirmação + convite (.ics) enviados pro cliente</div>':'';
-    var wa=j.zap?'<a class=wpp href="'+j.zap+'" target=_blank rel=noopener>💬 Enviar/reenviar pro cliente no WhatsApp</a>':'';
-    $("vdone").innerHTML='<div class=orc-done><div class=big>📅✅</div><h3>Visita agendada!</h3>'
-      +'<div class=evcard style="margin:1rem 0;border:1px solid var(--neon-borda);background:var(--neon-fundo);border-radius:13px;padding:1rem;text-align:left">'
-      +'<div style="font-size:1.05rem;font-weight:700">📅 '+esc(j.quando)+'</div>'
-      +'<div style="color:var(--verde-claro);font-size:.86rem;margin-top:.3rem">🏢 '+esc(j.empresa)+'</div>'
-      +'<div style="color:var(--verde-claro);font-size:.86rem">📍 '+esc(j.local)+'</div>'
-      +'<div style="color:var(--mut);font-size:.78rem;margin-top:.5rem">👥 Visitante: '+V.quem+' · 🎯 lead movido pra Qualificado</div></div>'
-      +'<div class=okline>✓ Adicionado à agenda no Zaq</div>'+aviso
-      +'<a class=ics href="'+esc(j.ics_url)+'" style="display:block;text-decoration:none;text-align:center" target=_blank rel=noopener>📎 Baixar convite .ics (calendário)</a>'
+  function pronto(j){
+    $("build").style.display="none";$("rodape").style.display="none";
+    var avisado=j.avisado?'<div class=ok>Confirmação e convite enviados pro cliente</div>':'';
+    var wa=j.zap?'<a class="btn ghost" style="margin-top:.5rem" href="'+j.zap
+      +'" target=_blank rel=noopener>Reenviar pro cliente no WhatsApp</a>':'';
+    $("pronto").innerHTML='<div class=pronto><div class=big>✓</div><h3>Visita agendada</h3>'
+      +'<div class=evcard><div class=q>'+esc(j.quando)+'</div>'
+      +'<div class=l>'+esc(j.empresa)+'</div><div class=l>'+esc(j.local)+'</div>'
+      +'<div class=o>Visitante: '+esc(V.quem)+' · o lead foi pra Qualificado</div></div>'
+      +'<div class=ok>Entrou na sua agenda</div>'+avisado
+      +'<a class="btn ghost" href="'+esc(j.ics_url)+'" target=_blank rel=noopener>Baixar o convite (.ics)</a>'
       +wa
-      +'<a class=orc-ghost href="/cockpit/lead/'+V.leadId+'" style="display:block;border:0;color:var(--verde-claro);text-decoration:none">✓ Voltar pro lead</a>';
-    $("vdone").style.display="block";
+      +'<a class="btn ghost" style="margin-top:.9rem" href="'+V.base+'/lead/'+V.leadId+'">Voltar pro lead</a></div>';
+    $("pronto").style.display="block";
   }
-  render();
+  pinta();
 })();
 </script>"""
 
 
-def _page(title: str, body: str) -> HTMLResponse:
-    doc = ("<!doctype html><html lang=pt-br><head><meta charset=utf-8>"
-           "<meta name=viewport content='width=device-width,initial-scale=1,viewport-fit=cover'>"
-           "<meta name=theme-color content='var(--bg)'>"
-           "<link rel=manifest href='/cockpit/manifest.webmanifest'>"
-           "<link rel=apple-touch-icon href='/cockpit/icon.svg'>"
-           "<meta name=apple-mobile-web-app-capable content=yes>"
-           "<meta name=mobile-web-app-capable content=yes>"
-           "<meta name=apple-mobile-web-app-title content=Cockpit>"
-           f"<title>{esc(title)}</title>{_CSS}</head><body>{_PERF_JS}<div class=wrap>"
-           f"{body}</div>{_SW_REG}</body></html>")
-    return HTMLResponse(doc)
+@router.get("/cockpit/lead/{lead_id}/visita", response_class=HTMLResponse)
+def cockpit_visita_marcar(request: Request, lead_id: int):
+    """Agendar a visita do cliente ao espaço da empresa. Motor: `cockpit.agendar_visita`
+    (cria o evento, liga no lead, move pra Qualificado e manda o .ics pro cliente)."""
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess
+    pool = get_pool()
+    d = ck.lead_do_vendedor(pool, conta_id, membro_id, lead_id)
+    if not d:
+        return RedirectResponse(_BASE, status_code=303)
+    from datetime import datetime, timedelta
+    from finance import agenda as ag
+    import json as _json
+    esp = ck.endereco_empresa(pool, conta_id)
+    hoje = datetime.now(ag.BRT).date()
+    dias = []
+    for i in range(14):
+        dt = hoje + timedelta(days=i)
+        lab = "Hoje" if i == 0 else "Amanhã" if i == 1 else f"{_DIA_SEM[dt.weekday()]} {dt.day}"
+        dias.append({"iso": dt.isoformat(), "lab": lab})
+    quem = d.get("contato") or d.get("empresa") or "o cliente"
+    dados = _json.dumps({"leadId": lead_id, "dias": dias, "horas": _HORAS,
+                         "nome": esp["nome"], "quem": quem, "base": _BASE},
+                        ensure_ascii=False).replace("</", "<\\/")
+    endereco = esp["endereco"] or esp["nome"]
+    mapa = (f"<a href='{esc(esp['maps'])}' target=_blank rel=noopener>Abrir no Google Maps</a>"
+            if esp["maps"] else "")
+    corpo = (_hdr("Agendar visita", d["empresa"], voltar=f"{_BASE}/lead/{lead_id}")
+             + "<div class=toast id=toast></div>"
+             + "<div class=scroll id=build>"
+             + f"<div class=secao><div class=rot>Quem vem visitar</div>"
+               f"<div class=local><div class=nome>{esc(quem)}</div></div></div>"
+             + "<div class=secao><div class=rot>Dia</div><div class=escolhas id=dias></div></div>"
+             + "<div class=secao><div class=rot>Horário</div>"
+               "<div class='escolhas horas' id=horas></div></div>"
+             + "<div class=secao><div class=rot>Duração</div><div class=escolhas id=durs></div></div>"
+             + "<div class=secao><div class=rot>Onde — o seu espaço</div><div class=local>"
+               f"<div class=nome>{esc(esp['nome'])}</div>"
+               f"<div class=end>{esc(esp['endereco'] or 'sem endereço no cadastro da empresa')}</div>{mapa}"
+               f"<input id=endereco value='{esc(endereco)}' aria-label='Endereço da visita'></div>"
+               "<div class=fonte>Vem do cadastro da empresa — edite se a visita for em outra unidade.</div></div>"
+             + "<div class=secao><div class=rot>Lembrete pra você</div>"
+               "<div class=escolhas id=lembr></div></div>"
+             + "<div class=secao><div class=linha-tgl><div class=t>Avisar o cliente no WhatsApp"
+               "<small>confirmação e convite pro calendário dele</small></div>"
+               "<div class=tgl id=avisar>Ligado</div></div>"
+               "<div class=msg-previa id=previa></div></div>"
+             + "</div>"
+             + "<div class=rodape-b id=rodape><div class=tot><span id=resumo>—</span></div>"
+               "<button class=btn id=agendar type=button>Agendar visita</button></div>"
+             + "<div id=pronto style='display:none'></div>"
+             + f"<script>window.VISITA={dados};</script>" + _VISITA_JS)
+    return _page(f"Visita — {d['empresa']}", corpo)
 
 
-def _ini(s: str) -> str:
-    s = (s or "?").strip()
-    return (s[0].upper() if s else "?")
+@router.post("/cockpit/lead/{lead_id}/visita")
+async def cockpit_visita_criar(request: Request, lead_id: int, payload: dict = Body(...)):
+    sess = _sessao(request)
+    if not sess:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    p = payload or {}
+    r = ck.agendar_visita(get_pool(), sess[0], sess[1], lead_id,
+                          data=str(p.get("data") or ""), hora=str(p.get("hora") or ""),
+                          dur_min=int(p.get("dur") or 60),
+                          local=str(p.get("local") or ""),
+                          lembrete_min=(int(p["lembrete"]) if p.get("lembrete") else None),
+                          avisar_cliente=bool(p.get("avisar", True)))
+    return JSONResponse(r)
 
+
+# ------------------------------------------------------------------ propostas
+_STATUS_SEG = [("", "Todas"), ("enviado", "Enviadas"), ("negociando", "Negociando"),
+               ("aprovada", "Aprovadas"), ("fechado", "Fechadas"), ("perdido", "Perdidas")]
+_STATUS_CLS = {"aprovada": "neon", "fechado": "neon", "perdido": "err",
+               "negociando": "voce", "enviado": "", "rascunho": ""}
+
+
+@router.get("/cockpit/orcamentos", response_class=HTMLResponse)
+def cockpit_orcamentos(request: Request, s: str = "", v: str = ""):
+    """Mesma aba, dois alcances: o vendedor vê as propostas DELE (é o escopo que
+    painel_servicos já aplica por `criado_por`); dono/gestor veem a carteira toda,
+    com filtro por vendedor."""
+    g = _gerencia(request)
+    sess = _sessao(request)
+    if not g and not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    pool = get_pool()
+    gestao = bool(g)
+    conta_id = g[0] if gestao else sess[0]
+    vend_i = int(v) if v.isdigit() else None
+    lista = ck.orcamentos(pool, conta_id,
+                          membro_id=None if gestao else sess[1],
+                          status=s, vendedor_id=vend_i if gestao else None)
+
+    def url(**over):
+        p = {"s": s, "v": v}
+        p.update(over)
+        q = "&".join(f"{k}={val}" for k, val in p.items() if val)
+        return f"{_BASE}/orcamentos" + (("?" + q) if q else "")
+
+    def chip(on, label, href):
+        return f"<a class='{'on' if on else ''}' href='{esc(href)}'>{esc(label)}</a>"
+
+    filtros = ("<div class=filt><span class=lbl>Status</span>"
+               + "".join(chip(s == k, lab, url(s=k)) for k, lab in _STATUS_SEG) + "</div>")
+    if gestao:
+        vends = cd.placar(pool, conta_id)
+        filtros += ("<div class=filt><span class=lbl>Quem fez</span>"
+                    + chip(not v, "Todos", url(v=""))
+                    + "".join(chip(v == str(x["id"]), x["nome"].split(" ")[0], url(v=str(x["id"])))
+                              for x in vends) + "</div>")
+
+    linhas = []
+    for o in lista:
+        val = _brl(o["setup_centavos"] + o["mensal_centavos"])
+        sub = o["vendedor"] if gestao else _data(o["criado_em"])
+        linhas.append(
+            f"<a class=lead href='{_BASE}/orcamentos/{o['id']}'>"
+            f"<span class=mid><span class=top><span class=emp>{esc(o['titulo'])}</span>"
+            f"<span class='chip {_STATUS_CLS.get(o['status'], '')}'>{esc(o['status_rot'])}</span></span>"
+            f"<span class=snip>{esc(val)} · {esc(sub)}</span></span></a>")
+    if lista:
+        total = sum(o["setup_centavos"] + o["mensal_centavos"] for o in lista)
+        miolo = (f"<div class=fonte style='margin-top:.7rem'>{len(lista)} proposta(s) · "
+                 f"{esc(_brl(total))} em jogo</div>" + "".join(linhas))
+    else:
+        miolo = ("<div class=vazio><div class=big>◻</div><b>Nenhuma proposta aqui</b>"
+                 + ("Ninguém do time montou proposta com esse filtro." if gestao
+                    else "Abra um lead e toque em <b>Orçamento</b> — ela aparece aqui pra você mandar.")
+                 + "</div>")
+
+    if gestao:
+        corpo = (
+                   _hdr_dono(conta_id, "Propostas", "a carteira do time")
+                 + _flash(request) + filtros
+                 + f"<div class=scroll>{miolo}</div>" + _abas_dono("orcamentos"))
+    else:
+        p = ck.perfil(pool, conta_id, sess[1])
+        corpo = (
+                   _hdr("Minhas propostas", "manda pro cliente por aqui",
+                        inicial=_ini(p["nome"]))
+                 + _flash(request) + filtros
+                 + f"<div class=scroll>{miolo}</div>" + _abas_vend("orcamentos"))
+    return _page("Propostas", corpo)
+
+
+@router.get("/cockpit/orcamentos/{orc_id}", response_class=HTMLResponse)
+def cockpit_orcamento(request: Request, orc_id: int):
+    g = _gerencia(request)
+    sess = _sessao(request)
+    if not g and not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    gestao = bool(g)
+    conta_id = g[0] if gestao else sess[0]
+    o = ck.orcamento(get_pool(), conta_id, orc_id, membro_id=None if gestao else sess[1])
+    if not o:
+        return RedirectResponse(f"{_BASE}/orcamentos", status_code=303)
+
+    def _linha_item(it):
+        setup, mensal = int(it.get("setup") or 0), int(it.get("mensal") or 0)
+        partes = []
+        if setup:
+            partes.append(_brl(setup * 100))
+        if mensal:
+            partes.append(_brl(mensal * 100) + "/mês")
+        return ("<div class=ficha-l><span>" + esc(it.get("nome", "")) + "</span><b>"
+                + esc(" + ".join(partes) or "—") + "</b></div>")
+
+    itens = "".join(_linha_item(it) for it in o["itens"])
+
+    # É isto que o vendedor precisa: mandar a proposta pro cliente em um toque.
+    # O link é o /proposta/<token> que o sistema já usa — o cliente abre, vê com a
+    # marca da empresa e aprova online.
+    envio = []
+    if o["zap"]:
+        envio.append(f"<a class=btn href='{esc(o['zap'])}' target=_blank rel=noopener>"
+                     f"{_ic('zap', 'ic p')} Mandar no WhatsApp</a>")
+    if o["lead_id"] and not gestao:
+        envio.append(f"<form method=post action='{_BASE}/orcamentos/{orc_id}/enviar'>"
+                     "<button class='btn ghost' style='margin-top:.5rem' type=submit>"
+                     "Enviar na conversa do lead</button></form>")
+    if o["link"]:
+        envio.append(f"<a class='btn ghost' style='margin-top:.5rem' href='{esc(o['link'])}' "
+                     f"target=_blank rel=noopener>Abrir a proposta como o cliente vê</a>")
+        envio.append("<div class=copiar><input value='" + esc(o["link"]) + "' readonly "
+                     "onclick='this.select()'><button type=button onclick=\"navigator.clipboard"
+                     ".writeText(this.previousElementSibling.value);this.textContent='Copiado'\">"
+                     "Copiar</button></div>")
+
+    fechada = o["status"] == "fechado"
+
+    def opt(k, lab):
+        return f"<option value='{k}'{' selected' if o['status'] == k else ''}>{esc(lab)}</option>"
+    if fechada:
+        # já virou contrato: os títulos existem, reabrir geraria o contrato em dobro
+        mover = ("<div class=eyebrow>Funil</div><div class=bloco><div class=card "
+                 "style='font-size:.84rem;color:var(--text-dim)'>Esta proposta já virou "
+                 "<b style='color:var(--neon)'>contrato</b> — os títulos a receber estão no "
+                 "módulo Empresa. Pra mexer no valor agora, é por lá.</div></div>")
+    else:
+        mover = ("<div class=eyebrow>Mover no funil</div><div class=bloco>"
+                 f"<form method=post action='{_BASE}/orcamentos/{orc_id}/status' class=linhaform>"
+                 "<select name=status>"
+                 + "".join(opt(k, ck._ROT_ORC.get(k, k.title())) for k in ck.STATUS_MANUAIS)
+                 + "</select><button class=btn style='width:auto;padding:.55rem 1rem' type=submit>"
+                 "Salvar</button></form></div>")
+
+    # Fechar contrato é a única ação daqui que mexe em dinheiro: gera os títulos a
+    # receber. Por isso vive atrás de dois toques e diz o que vai acontecer ANTES —
+    # não é um botão que se aperta sem querer rolando a tela.
+    if fechada:
+        fechar = ""
+    else:
+        recorrente = (f" e <b>{esc(_brl(o['mensal_centavos']))}/mês</b> recorrente"
+                      if o["mensal_centavos"] else "")
+        entrada = (f"<b>{esc(_brl(o['setup_centavos']))}</b> de entrada (vence em 7 dias)"
+                   if o["setup_centavos"] else "o valor da proposta")
+        fechar = ("<div class=eyebrow>Fechar</div><div class=bloco>"
+                  "<details class=fechar><summary>Fechar contrato</summary>"
+                  f"<p>Vira contrato e cria os títulos a receber: {entrada}{recorrente}. "
+                  "Eles aparecem em <b>Empresa → a receber</b>.</p>"
+                  "<p class=aviso-p>Depois de fechar, a proposta não volta atrás por aqui.</p>"
+                  f"<form method=post action='{_BASE}/orcamentos/{orc_id}/fechar'>"
+                  "<button class=btn type=submit>Confirmar e gerar os títulos</button></form>"
+                  "</details></div>")
+
+    # "editar ou qualquer coisa": o editor completo já existe no painel e aceita
+    # deep link (?abrir=<id>) — não faz sentido reconstruir o formulário no celular.
+    editar = (f"<div class=bloco><a class='btn ghost' href='/painel/servicos?abrir={orc_id}' "
+              "target=_blank rel=noopener>Editar no painel (itens, valores, escopo)</a></div>"
+              if gestao else "")
+
+    aprovada = ""
+    if o["aprovada_em"]:
+        aprovada = ("<div class=bloco><div class='card' style='border-color:#1e4a3a;"
+                    "background:rgba(37,211,102,.08)'><b style='color:var(--neon)'>Cliente aprovou</b>"
+                    f"<div class=mut style='font-size:.8rem'>{esc(o['aprovada_por'])}"
+                    f" · {esc(_data(o['aprovada_em']))}</div></div></div>")
+
+    ficha = [("Cliente", o["cliente"]), ("Empresa", o["empresa"]), ("CNPJ", o["cnpj"]),
+             ("WhatsApp", o["whatsapp"]), ("E-mail", o["email"]),
+             ("Quem fez", o["vendedor"] if gestao else ""), ("Criada em", _data(o["criado_em"]))]
+    ficha_html = "".join(f"<div class=ficha-l><span>{esc(k)}</span><b>{esc(v)}</b></div>"
+                         for k, v in ficha if v)
+
+    total = _brl(o["setup_centavos"] + o["mensal_centavos"])
+    corpo = (
+               _hdr(o["titulo"], o["status_rot"], voltar=f"{_BASE}/orcamentos")
+             + _flash(request)
+             + "<div class=scroll>"
+             + "<div class=kpis style='margin-top:.9rem'>"
+             + f"<div class='kpi hero'><div class=v>{esc(total)}</div><div class=l>Valor da proposta</div>"
+             + (f"<div class=d>{esc(_brl(o['setup_centavos']))} entrada + "
+                f"{esc(_brl(o['mensal_centavos']))}/mês</div>" if o["mensal_centavos"] else "")
+             + "</div></div>"
+             + aprovada
+             + (f"<div class=eyebrow>Mandar pro cliente</div><div class=bloco>{''.join(envio)}</div>"
+                if envio else "")
+             + mover + fechar + editar
+             + (f"<div class=eyebrow>O que entra</div><div class=bloco><div class=card>{itens}</div></div>"
+                if itens else "")
+             + (f"<div class=eyebrow>Cliente</div><div class=bloco><div class=card>{ficha_html}</div></div>"
+                if ficha_html else "")
+             + "</div>"
+             + (_abas_dono("orcamentos") if gestao else _abas_vend("orcamentos")))
+    return _page(o["titulo"], corpo)
+
+
+@router.post("/cockpit/orcamentos/{orc_id}/status")
+def cockpit_orcamento_status(request: Request, orc_id: int, status: str = Form(...)):
+    g = _gerencia(request)
+    sess = _sessao(request)
+    if not g and not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id = g[0] if g else sess[0]
+    r = ck.mudar_status_orcamento(get_pool(), conta_id, orc_id, status,
+                                  membro_id=None if g else sess[1])
+    request.session["ck_ok" if r.get("ok") else "ck_err"] = (
+        r.get("msg", "Feito ✓") if r.get("ok") else r.get("erro", "Não deu certo."))
+    return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
+
+
+@router.post("/cockpit/orcamentos/{orc_id}/fechar")
+def cockpit_orcamento_fechar(request: Request, orc_id: int):
+    """Fecha a proposta como contrato. Mesmo motor do botão do painel
+    (vendas.fechar_orcamento, via ck.fechar_contrato) — inclusive a trava de
+    idempotência, que impede o duplo-clique gerar título em dobro."""
+    g = _gerencia(request)
+    sess = _sessao(request)
+    if not g and not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id = g[0] if g else sess[0]
+    r = ck.fechar_contrato(get_pool(), conta_id, orc_id,
+                           membro_id=None if g else sess[1])
+    request.session["ck_ok" if r.get("ok") else "ck_err"] = (
+        r.get("msg", "Contrato fechado ✓") if r.get("ok") else r.get("erro", "Não deu certo."))
+    return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
+
+
+@router.post("/cockpit/orcamentos/{orc_id}/enviar")
+def cockpit_orcamento_enviar(request: Request, orc_id: int):
+    """Manda o link da proposta na conversa do lead, pelo WhatsApp da empresa —
+    mesmo caminho que o botão de proposta na tela do lead já usa."""
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess
+    o = ck.orcamento(get_pool(), conta_id, orc_id, membro_id=membro_id)
+    if not o or not o["lead_id"] or not o["link"]:
+        request.session["ck_err"] = "Essa proposta não está ligada a um lead com conversa."
+        return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
+    r = ck.enviar_proposta_conversa(get_pool(), conta_id, membro_id, o["lead_id"], o["link"])
+    request.session["ck_ok" if r.get("ok") else "ck_err"] = (
+        "Proposta enviada na conversa ✓" if r.get("ok") else r.get("erro", "Não consegui enviar."))
+    return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
+
+
+@router.get("/cockpit/perfil", response_class=HTMLResponse)
+def cockpit_perfil(request: Request):
+    """Perfil do vendedor — e, pro dono/gestor, o perfil que a versão anterior não tinha.
+
+    No /cockpit atual `/cockpit/perfil` exige `membro_id`, e o dono titular não tem:
+    ele cai no login. Aqui a tela do dono se apoia em `_gerencia`, que aceita
+    `membro_id` nulo.
+    """
+    sess = _sessao(request)
+    if sess:
+        return _perfil_vendedor(request, sess[0], sess[1])
+    g = _gerencia(request)
+    if g:
+        return _perfil_dono(g[0], g[1])
+    return RedirectResponse("/cockpit/login", status_code=303)
+
+
+def _perfil_vendedor(request: Request, conta_id: int, membro_id: int) -> HTMLResponse:
+    p = ck.perfil(get_pool(), conta_id, membro_id)
+
+    def tgl(rotulo, sub, ligado, acao):
+        # posta no endpoint que já existe no /cockpit e volta pra cá
+        return (f"<form method=post action='{acao}' style='margin:0'>"
+                f"<input type=hidden name=on value='{0 if ligado else 1}'>"
+                "<div class=card style='display:flex;align-items:center;gap:1rem;margin-bottom:.6rem'>"
+                f"<div style='flex:1'><b style='font-size:.9rem'>{esc(rotulo)}</b>"
+                f"<div class=mut style='font-size:.76rem'>{esc(sub)}</div></div>"
+                f"<button type=submit style='width:auto;flex-shrink:0' class='btn {'' if ligado else 'ghost'}'>"
+                f"{'Ligado' if ligado else 'Desligado'}</button></div></form>")
+
+    corpo = (
+               _hdr("Meu perfil", "vendedor")
+             + _flash(request)
+             + "<div class=scroll>"
+             + "<div class=bloco><div class=card style='display:flex;align-items:center;gap:.9rem'>"
+             + f"<span class=av style='width:46px;height:46px;font-size:1.1rem'>{esc(_ini(p['nome']))}</span>"
+             + f"<div style='min-width:0'><b>{esc(p['nome'])}</b>"
+               f"<div class=mut style='font-size:.78rem;word-break:break-word'>{esc(p['email'])}"
+             + (f" · {esc(p['whatsapp'])}" if p["whatsapp"] else "") + "</div></div></div></div>"
+             + "<div class=eyebrow>Preferências</div><div class=bloco>"
+             + tgl("Notificações push", "avisar quando cair um lead", p["push_ativo"], f"{_BASE}/perfil/push")
+             + tgl("Receber no rodízio", "desligue pra pausar leads novos", not p["pausado"], f"{_BASE}/perfil/rodizio")
+             + "</div>"
+             # o login do vendedor agora cai no Cockpit; sem esta porta ele não
+             # chegaria no painel a não ser digitando a URL. /painel resolve
+             # sozinho — o gate afunila pra área do papel e da conta.
+             + "<div class=bloco><a class='btn ghost' style='margin-bottom:.5rem' "
+               "href='/painel'>Abrir o painel completo</a>"
+             + f"<a class='btn ghost' href='/cockpit/sair'>{_ic('sair', 'ic p')} Sair</a></div>"
+             + "</div>" + _abas_vend("perfil"))
+    return _page("Meu perfil", corpo)
+
+
+def _perfil_dono(conta_id: int, membro_id: int | None) -> HTMLResponse:
+    marca = _marca_conta(conta_id)
+    # o dono titular não é membro da equipe, então não tem fila própria — só o
+    # gestor (que também vende) tem caixa pra abrir
+    minha_caixa = (f"<a class='btn ghost' href='{_BASE}?meus=1'>Ver a minha caixa de leads</a>"
+                   if membro_id else "")
+    corpo = (
+               _hdr("Perfil", "dono · gestão da equipe")
+             + "<div class=scroll>"
+             + "<div class=bloco><div class=card style='display:flex;align-items:center;gap:.9rem'>"
+             + f"<span class=av style='width:46px;height:46px;font-size:1.1rem'>{esc(marca['iniciais'])}</span>"
+             + f"<div style='min-width:0'><b>{esc(marca['nome'])}</b>"
+               "<div class=mut style='font-size:.78rem'>você acompanha o time por aqui</div></div></div></div>"
+             + "<div class=eyebrow>Atalhos</div><div class=bloco>"
+             + "<a class='btn ghost' style='margin-bottom:.5rem' href='/painel/equipe'>Gerir a equipe no painel</a>"
+             + "<a class='btn ghost' style='margin-bottom:.5rem' href='/painel/prospeccao'>Abrir o funil completo</a>"
+             + minha_caixa + "</div>"
+             + f"<div class=bloco><a class='btn ghost' href='/cockpit/sair'>{_ic('sair', 'ic p')} Sair</a></div>"
+             + "</div>" + _abas_dono("perfil"))
+    return _page("Perfil", corpo)
+
+
+# ------------------------------------------------------------------ lead
+@router.get("/cockpit/lead/{lead_id}", response_class=HTMLResponse)
+def cockpit_lead(request: Request, lead_id: int):
+    """Uma rota, dois papéis. Se o lead é do vendedor logado, abre a tela de trabalho
+    (chat em primeiro plano). Se não é dele mas quem olha é gestão, abre a visão de
+    gestão — em vez de chutar pro /painel/prospeccao, como a versão anterior fazia."""
+    sess = _sessao(request)
+    if sess:
+        d = ck.lead_do_vendedor(get_pool(), sess[0], sess[1], lead_id)
+        if d:
+            return _lead_vendedor(request, lead_id, d)
+    g = _gerencia(request)
+    if g:
+        return _lead_gestor(request, g[0], lead_id)
+    return RedirectResponse("/cockpit/login", status_code=303)
+
+
+def _lead_vendedor(request: Request, lead_id: int, d: dict) -> HTMLResponse:
+    sub = " · ".join(x for x in [d.get("cidade") or "", d.get("uf") or ""] if x) or (d.get("doc_fmt") or "")
+
+    bolhas = []
+    for m in d["mensagens"]:
+        who = m["who"]
+        rot = ("<div class=who>Agente</div>" if who == "ia"
+               else "<div class=who>Você</div>" if who == "out" else "")
+        bolhas.append(f"<div class='bub {esc(who)}'>{rot}{esc(m['texto'])}</div>")
+    if d["ia"]:
+        bolhas.insert(0, "<div class=aviso>O agente está atendendo. Toque em "
+                         "<b>Assumir</b> pra responder você.</div>")
+    chat = "".join(bolhas) or "<div class=aviso>Sem mensagens ainda.</div>"
+
+    if d["ia"]:
+        acao = (f"<form method=post action='{_BASE}/lead/{lead_id}/assumir'>"
+                "<button class=btn type=submit>Assumir a conversa</button></form>")
+    else:
+        acao = (f"<form class=composer method=post action='{_BASE}/lead/{lead_id}/mensagem'>"
+                "<input name=texto placeholder='Responder…' required autocomplete=off>"
+                "<button type=submit aria-label=Enviar>&#10148;</button></form>")
+
+    tel, zap = d.get("tel_link") or "", d.get("zap_link") or ""
+    atalhos = (
+        (f"<a href='{esc(tel)}'>{_ic('ligar', 'ic p')} Ligar</a>" if tel
+         else f"<span class=off>{_ic('ligar', 'ic p')} Ligar</span>")
+        + (f"<a href='{esc(zap)}' target=_blank rel=noopener>{_ic('zap', 'ic p')} WhatsApp</a>" if zap
+           else f"<span class=off>{_ic('zap', 'ic p')} WhatsApp</span>")
+        + f"<a class=orc href='{_BASE}/lead/{lead_id}/orcamento'>{_ic('orc', 'ic p')} Orçamento</a>"
+        + f"<a class=vis2 href='{_BASE}/lead/{lead_id}/visita'>{_ic('agenda', 'ic p')} Visita</a>")
+
+    etapas = "".join(
+        f"<form method=post action='{_BASE}/lead/{lead_id}/etapa'>"
+        f"<input type=hidden name=etapa value='{esc(e['chave'])}'>"
+        f"<button class='{'on' if d['status'] == e['chave'] else ''}' type=submit>{esc(e['rotulo'])}</button>"
+        "</form>" for e in d["etapas"])
+
+    motivos = "".join(f"<option>{esc(m)}</option>" for m in
+                      ("Preço", "Sem retorno", "Comprou concorrente", "Fora do perfil", "Sem interesse"))
+    ficha = [("Contato", d.get("contato")), ("Cargo", d.get("cargo")),
+             (d.get("doc_rot") or "Doc", d.get("doc_fmt")), ("Segmento", d.get("segmento")),
+             ("Telefone", d.get("telefone")), ("E-mail", d.get("email"))]
+    ficha_html = "".join(f"<div class=ficha-l><span>{esc(k)}</span><b>{esc(v)}</b></div>"
+                         for k, v in ficha if v)
+
+    # A folha só sobe com :target — sem JS, então funciona igual ao resto do app,
+    # que é todo form + redirect.
+    folha = (
+        "<div class=folha id=acoes><div class=puxa></div>"
+        f"<div class=grade>{atalhos}</div>"
+        f"<h3>Etapa no funil</h3><div class=etapas>{etapas}</div>"
+        f"<h3>Fechar</h3>"
+        f"<form method=post action='{_BASE}/lead/{lead_id}/fechar' style='margin-bottom:.5rem'>"
+        "<input type=hidden name=tipo value=ganho><button class=btn type=submit>Marcar como ganho</button></form>"
+        f"<form method=post action='{_BASE}/lead/{lead_id}/fechar' class=linhaform>"
+        "<input type=hidden name=tipo value=perdido>"
+        f"<select name=motivo><option value=''>Motivo (opcional)</option>{motivos}</select>"
+        "<button class='btn perigo' style='width:auto;padding:.55rem .9rem' type=submit>Perdido</button></form>"
+        + (f"<h3>Ficha</h3>{ficha_html}" if ficha_html else "")
+        + "</div><a class=fbg href='#fechar' aria-label='Fechar'></a>")
+
+    chip = ("<span class='chip ia'>IA</span>" if d["ia"] else "<span class='chip voce'>você</span>")
+    corpo = (
+               _hdr(d["empresa"], sub, voltar=_BASE, direita=chip)
+             + _flash(request)
+             + f"<div class=chat>{chat}</div>"
+             + f"<div class=rodape>{acao}"
+             + "<a class='btn ghost' style='margin-top:.5rem' href='#acoes'>Ficha, funil e fechamento</a>"
+             + "</div>" + folha)
+    return _page(d["empresa"], corpo)
+
+
+def _lead_gestor(request: Request, conta_id: int, lead_id: int) -> HTMLResponse:
+    """A tela que não existia. Na versão anterior o gestor tocava num lead da equipe e caía em
+    /painel/prospeccao/{id} — o painel desktop, no meio do celular."""
+    from web.painel_prospeccao import _carrega_alvo
+    pool = get_pool()
+    d = _carrega_alvo(pool, conta_id, lead_id)
+    if not d:
+        return RedirectResponse(f"{_BASE}/equipe/leads", status_code=303)
+    outros = cd.vendedores_para_reatribuir(pool, conta_id, d.get("vendedor_id") or 0)
+
+    sub = " · ".join(x for x in [d.get("cidade") or "", d.get("uf") or ""] if x) or (d.get("doc_fmt") or "")
+    tel, zap = d.get("tel_link") or "", d.get("zap_link") or ""
+    atalhos = (
+        (f"<a href='{esc(tel)}'>{_ic('ligar', 'ic p')} Ligar</a>" if tel
+         else f"<span class=off>{_ic('ligar', 'ic p')} Ligar</span>")
+        + (f"<a href='{esc(zap)}' target=_blank rel=noopener>{_ic('zap', 'ic p')} WhatsApp</a>" if zap
+           else f"<span class=off>{_ic('zap', 'ic p')} WhatsApp</span>")
+        + f"<a href='/painel/prospeccao/{lead_id}'>{_ic('ficha', 'ic p')} Ficha completa</a>"
+        + (f"<a href='{esc(d['maps_url'])}' target=_blank rel=noopener>{_ic('mapa', 'ic p')} Mapa</a>"
+           if d.get("maps_url") else f"<span class=off>{_ic('mapa', 'ic p')} Mapa</span>"))
+
+    linhas = [("Vendedor", d.get("vendedor_nome") or "Sem dono"),
+              ("Etapa", (d.get("status") or "novo").title()),
+              ("Temperatura", (d.get("temperatura") or "frio").title()),
+              ("Valor estimado", _brl(d.get("valor")) if d.get("valor") else ""),
+              ("Contato", d.get("contato")), ("Cargo", d.get("cargo")),
+              (d.get("doc_rot") or "Doc", d.get("doc_fmt")), ("Segmento", d.get("segmento")),
+              ("Origem", d.get("origem")), ("Último contato", _data(d.get("ultimo_contato_em")))]
+    ficha = "".join(f"<div class=ficha-l><span>{esc(k)}</span><b>{esc(v)}</b></div>"
+                    for k, v in linhas if v)
+
+    if outros:
+        opcoes = "".join(f"<option value='{v['id']}'>{esc(v['nome'])}</option>" for v in outros)
+        reatribuir = (
+            "<div class=eyebrow>Passar pra outro</div><div class=bloco>"
+            f"<form method=post action='{_BASE}/equipe/reatribuir' class=linhaform>"
+            f"<input type=hidden name=lead_id value='{lead_id}'>"
+            f"<select name=para>{opcoes}</select>"
+            "<button class=btn style='width:auto;padding:.55rem 1rem' type=submit>Passar</button>"
+            "</form></div>")
+    else:
+        reatribuir = ""
+
+    corpo = (
+               _hdr(d.get("empresa") or "Lead", sub, voltar=f"{_BASE}/equipe/leads")
+             + _flash(request)
+             + "<div class=scroll>"
+             + f"<div class=bloco style='margin-top:.9rem'><div class=grade>{atalhos}</div></div>"
+             + f"<div class=eyebrow>O lead</div><div class=bloco><div class=card>{ficha}</div></div>"
+             + reatribuir
+             + (f"<div class=bloco><div class=card style='font-size:.84rem;color:var(--text-dim)'>"
+                f"<b style='color:var(--text)'>Observações</b><br>{esc(d['obs'])}</div></div>"
+                if d.get("obs") else "")
+             + "</div>" + _abas_dono("leads"))
+    return _page(d.get("empresa") or "Lead", corpo)
+
+
+# ================================================================== GESTOR
+def _dono_visao(request: Request, conta_id: int) -> HTMLResponse:
+    periodo = request.query_params.get("p", "semana")
+    if periodo not in ("hoje", "semana", "mes"):
+        periodo = "semana"
+    v = cd.visao(get_pool(), conta_id, periodo)
+    k = v["kpis"]
+    conv = f"{k['conversao']}%" if k["conversao"] is not None else "—"
+
+    def seg(key, lab):
+        return f"<a class='{'on' if periodo == key else ''}' href='{_BASE}?p={key}'>{lab}</a>"
+
+    funil = "".join(
+        f"<div class=fr><span class=nm>{esc(f['rotulo'])}</span>"
+        f"<span class=bar><i style='width:{f['pct']}%'></i></span>"
+        f"<span class=qt><b>{f['n']}</b><small>{esc(f['valor'])}</small></span></div>"
+        for f in v["funil"])
+    a = v["atencao"]
+    corpo = (
+               _hdr_dono(conta_id, "Equipe", "acompanhe o time")
+             + f"<div class=scroll><div class=seg>{seg('hoje','Hoje')}{seg('semana','Semana')}{seg('mes','Mês')}</div>"
+             + "<div class=kpis>"
+             + f"<div class='kpi hero'><div class=v>{esc(k['ganhos_rs'])}</div><div class=l>Fechado no período</div>"
+               f"<div class=d>{k['ganhos']} negócio(s) · {conv} de conversão</div></div>"
+             + f"<div class=kpi><div class=v>{k['novos']}</div><div class=l>Leads novos</div>"
+               "<div class=d>no período</div></div>"
+             + f"<div class=kpi><div class=v>{k['com_ia'] + k['com_vend']}</div><div class=l>Em atendimento</div>"
+               f"<div class=d>{k['com_ia']} c/ IA · {k['com_vend']} c/ vendedor</div></div></div>"
+             + "<div class=eyebrow>Funil do time</div>"
+             + f"<div class=bloco><div class=card>{funil}</div></div>"
+             + "<div class=eyebrow>Precisa de atenção</div>"
+             + "<div class=aten>"
+             + f"<div class='at hot'><div class=n>{a['parados']}</div><div class=t>parados há +3 dias</div></div>"
+             + f"<div class='at warn'><div class=n>{a['quentes']}</div><div class=t>quentes sem contato hoje</div></div>"
+             + f"<div class='at info'><div class=n>{a['propostas']}</div><div class=t>propostas aguardando</div></div>"
+             + f"<div class='at info'><div class=n>{a['visitas']}</div><div class=t>visitas hoje</div></div></div>"
+             + "</div>" + _abas_dono("visao"))
+    return _page("Equipe", corpo)
+
+
+@router.get("/cockpit/equipe/placar", response_class=HTMLResponse)
+def cockpit_placar(request: Request):
+    g = _gerencia(request)
+    if not g:
+        return RedirectResponse(_BASE, status_code=303)
+    lista = cd.placar(get_pool(), g[0])
+
+    # pódio: 2º no lugar da esquerda, 1º no meio, 3º na direita
+    podio = ""
+    if len(lista) >= 2:
+        ordem = [(1, "p2"), (0, "p1"), (2, "p3")]
+        blocos = []
+        for idx, cls in ordem:
+            if idx >= len(lista):
+                blocos.append("<div class=pod></div>")
+                continue
+            v = lista[idx]
+            blocos.append(
+                f"<a class='pod {cls}' href='{_BASE}/equipe/vendedor/{v['id']}'>"
+                f"<span class=av>{esc(v['nome'][:1].upper())}</span>"
+                f"<div class=nm>{esc(v['nome'].split(' ')[0])}</div>"
+                f"<div class=rs>{esc(v['rs'])}</div>"
+                f"<div class=base>{idx + 1}º</div></a>")
+        podio = "<div class=podio>" + "".join(blocos) + "</div>"
+
+    resto = lista[3:] if podio else lista
+    linhas = "".join(
+        f"<a class=linha href='{_BASE}/equipe/vendedor/{v['id']}'>"
+        f"<span class=rk>{i + (4 if podio else 1)}</span>"
+        f"<span class='av mudo'>{esc(v['nome'][:1].upper())}</span>"
+        f"<div class=mid><b>{esc(v['nome'])}</b><div class=sub>"
+        f"<span>{v['fila']} na fila</span><span>{v['atendendo']} atend.</span><span>{esc(v['resp'])}</span>"
+        + ("<span class=pausado>pausado</span>" if v["pausado"] else "")
+        + f"</div></div><div class=rt><span class=g>{esc(v['rs'])}</span>"
+          f"<small>{v['ganhos']} ganhos · {esc(v['conversao'])}</small></div></a>"
+        for i, v in enumerate(resto))
+
+    if not lista:
+        miolo = ("<div class=vazio><div class=big>◇</div><b>Ninguém na equipe ainda</b>"
+                 "Convide seu time em Equipe, no painel.</div>")
+    else:
+        miolo = podio + linhas
+
+    corpo = (
+               _hdr_dono(g[0], "Placar", "este mês, por R$ fechado")
+             + f"<div class=scroll>{miolo}</div>" + _abas_dono("placar"))
+    return _page("Placar", corpo)
+
+
+@router.get("/cockpit/equipe/atividade", response_class=HTMLResponse)
+def cockpit_atividade(request: Request):
+    g = _gerencia(request)
+    if not g:
+        return RedirectResponse(_BASE, status_code=303)
+    feed = cd.atividade(get_pool(), g[0])
+    ico = {"ganho": "placar", "perdido": "volta", "visita": "agenda", "prop": "orc"}
+    linhas = "".join(
+        f"<div class='ev {esc(e['tipo'])}'><span class=ic>{_ic(ico.get(e['tipo'], 'ativ'), 'ic p')}</span>"
+        f"<div class=tx>{esc(e['txt'])}</div></div>" for e in feed)
+    if not feed:
+        linhas = ("<div class=vazio><div class=big>◌</div><b>Sem atividade recente</b>"
+                  "Ganhos, perdas, visitas e propostas do time aparecem aqui.</div>")
+    corpo = (
+               _hdr_dono(g[0], "Atividade", "o que o time fez")
+             + f"<div class=scroll>{linhas}</div>" + _abas_dono("ativ"))
+    return _page("Atividade", corpo)
+
+
+_ETAPA_ROT = {"novo": "Novo", "contatado": "Contatado", "qualificado": "Qualificado",
+              "proposta": "Proposta"}
+_TEMP_ROT = [("quente", "Quente"), ("morno", "Morno"), ("frio", "Frio")]
+
+
+@router.get("/cockpit/equipe/leads", response_class=HTMLResponse)
+def cockpit_leads(request: Request, vend: str = "", etapa: str = "", temp: str = ""):
+    g = _gerencia(request)
+    if not g:
+        return RedirectResponse(_BASE, status_code=303)
+    pool = get_pool()
+    vend_i = int(vend) if vend.isdigit() else None
+    lista = cd.leads(pool, g[0], vend_i, etapa, temp)
+    filt = cd.filtros_leads(pool, g[0])
+
+    def url(**over):
+        p = {"vend": vend, "etapa": etapa, "temp": temp}
+        p.update(over)
+        q = "&".join(f"{k}={v}" for k, v in p.items() if v)
+        return f"{_BASE}/equipe/leads" + (("?" + q) if q else "")
+
+    def chip(on, label, href):
+        return f"<a class='{'on' if on else ''}' href='{esc(href)}'>{esc(label)}</a>"
+
+    filtros = (
+        "<div class=filt><span class=lbl>Vendedor</span>" + chip(not vend, "Todos", url(vend=""))
+        + "".join(chip(vend == str(v["id"]), v["nome"].split(" ")[0], url(vend=str(v["id"])))
+                  for v in filt["vendedores"]) + "</div>"
+        + "<div class=filt><span class=lbl>Etapa</span>" + chip(not etapa, "Todas", url(etapa=""))
+        + "".join(chip(etapa == e, _ETAPA_ROT.get(e, e.title()), url(etapa=e)) for e in filt["etapas"])
+        + "</div>"
+        + "<div class=filt><span class=lbl>Temp</span>" + chip(not temp, "Todas", url(temp=""))
+        + "".join(chip(temp == t, lab, url(temp=t)) for t, lab in _TEMP_ROT) + "</div>")
+
+    # o link fica DENTRO do app — era isto que jogava o gestor no painel desktop
+    linhas = "".join(
+        f"<a class=lead href='{_BASE}/lead/{l['id']}'>"
+        f"<span class=dot style='background:{_cor_temp(l.get('temp_cor'))}'></span>"
+        f"<span class=mid><span class=top><span class=emp>{esc(l['empresa'])}</span>"
+        + ("<span class='chip ia'>IA</span>" if l["ia"] else "<span class='chip voce'>vend.</span>")
+        + f"</span><span class=snip>{esc(l['vendedor'])} · {esc(_ETAPA_ROT.get(l['status'], l['status'].title()))}"
+          "</span></span></a>" for l in lista)
+    miolo = (f"<div class=fonte style='margin-top:.7rem'>{len(lista)} lead(s)</div>" + linhas) if lista else \
+        ("<div class=vazio><div class=big>◌</div><b>Nenhum lead com esses filtros</b>"
+         "Tente afrouxar a busca.</div>")
+
+    corpo = (
+               _hdr_dono(g[0], "Leads da equipe", "todos os leads abertos")
+             + filtros + f"<div class=scroll>{miolo}</div>" + _abas_dono("leads"))
+    return _page("Leads da equipe", corpo)
+
+
+@router.get("/cockpit/equipe/vendedor/{membro_id}", response_class=HTMLResponse)
+def cockpit_vendedor(request: Request, membro_id: int):
+    g = _gerencia(request)
+    if not g:
+        return RedirectResponse(_BASE, status_code=303)
+    v = cd.vendedor(get_pool(), g[0], membro_id)
+    if not v:
+        return RedirectResponse(f"{_BASE}/equipe/placar", status_code=303)
+
+    leads = "".join(
+        f"<a class=lead href='{_BASE}/lead/{l['id']}'>"
+        f"<span class=dot style='background:{_cor_temp(l.get('temp_cor'))}'></span>"
+        f"<span class=mid><span class=top><span class=emp>{esc(l['empresa'])}</span>"
+        + ("<span class='chip ia'>IA</span>" if l["ia"] else "<span class='chip voce'>vend.</span>")
+        + "</span></span></a>" for l in v["leads"])
+
+    pausar = (f"<form method=post action='{_BASE}/equipe/pausar'>"
+              f"<input type=hidden name=membro_id value='{membro_id}'>"
+              f"<input type=hidden name=on value='{0 if v['pausado'] else 1}'>"
+              f"<button class='btn {'ghost' if not v['pausado'] else ''}' type=submit>"
+              f"{'Reativar no rodízio' if v['pausado'] else 'Pausar no rodízio'}</button></form>")
+
+    corpo = (
+               _hdr(v["nome"], v["papel"], voltar=f"{_BASE}/equipe/placar")
+             + _flash(request)
+             + "<div class=scroll><div class=kpis style='margin-top:.9rem'>"
+             + f"<div class='kpi hero'><div class=v>{esc(v['rs'])}</div><div class=l>Fechado no mês</div>"
+               f"<div class=d>{v['ganhos']} negócio(s)</div></div>"
+             + f"<div class=kpi><div class=v>{esc(v['conversao'])}</div><div class=l>Conversão</div></div>"
+             + f"<div class=kpi><div class=v>{v['fila']}</div><div class=l>Na fila</div></div>"
+             + f"<div class=kpi><div class=v>{esc(v['resp'])}</div><div class=l>Resposta</div>"
+               "<div class=d>média de 30 dias</div></div></div>"
+             + f"<div class=bloco>{pausar}</div>"
+             + "<div class=eyebrow>Leads abertos com ele</div>"
+             + (leads or "<div class=fonte>Nenhum lead aberto.</div>")
+             + "</div>" + _abas_dono("placar"))
+    return _page(v["nome"], corpo)
+
+
+# ================================================================== AÇÕES
+# Nenhuma escrita mora aqui: cada rota chama a função correspondente de
+# finance/cockpit.py ou finance/cockpit_dono.py — e é lá, no motor, que a posse
+# do lead é revalidada no banco a cada ação. Nunca confie no que chegou pela URL.
+#
+# O motor devolve alguns erros como código pra máquina ler ('escopo', 'vazio'),
+# misturados com frases prontas. Sem esta tabela o vendedor lia "escopo" na tela —
+# era o que acontecia antes. Frase que já vem pronta passa direto.
+_RECADO = {
+    "escopo": "Esse lead não é seu.",
+    "vazio": "Escreva alguma coisa antes de enviar.",
+    "tipo": "Não entendi se é ganho ou perdido.",
+    "etapa_invalida": "Essa etapa não existe no funil.",
+    "use_fechar": "Pra encerrar o lead use Ganho ou Perdido.",
+    "login": "Sua sessão expirou — entre de novo.",
+}
+
+
+def _erro(r: dict) -> str:
+    e = r.get("erro") or ""
+    return _RECADO.get(e, e or "Não deu certo.")
+
+
+def _agir(request: Request, lead_id: int, fn, destino: str):
+    """Um caminho, duas respostas. Veio do deslizar (`x-cockpit: 1`)? Devolve JSON e
+    o card se resolve sem sair da lista. Veio de um form? Redireciona com o recado
+    na sessão, que é como o resto do app funciona."""
+    swipe = request.headers.get("x-cockpit") == "1"
+    sess = _sessao(request)
+    if not sess:
+        if swipe:
+            return JSONResponse({"ok": False, "erro": _RECADO["login"]}, status_code=401)
+        return RedirectResponse("/cockpit/login", status_code=303)
+    r = fn(get_pool(), sess[0], sess[1], lead_id)
+    if swipe:
+        return JSONResponse({"ok": bool(r.get("ok")), "erro": "" if r.get("ok") else _erro(r)})
+    request.session["ck_ok" if r.get("ok") else "ck_err"] = (
+        r.get("msg", "Feito ✓") if r.get("ok") else _erro(r))
+    return RedirectResponse(destino, status_code=303)
+
+
+@router.post("/cockpit/lead/{lead_id}/mensagem")
+def cockpit_mensagem(request: Request, lead_id: int, texto: str = Form(...)):
+    return _agir(request, lead_id,
+                 lambda p, c, m, l: {**ck.enviar_mensagem(p, c, m, l, texto), "msg": "Mensagem enviada ✓"},
+                 f"{_BASE}/lead/{lead_id}")
+
+
+@router.post("/cockpit/lead/{lead_id}/etapa")
+def cockpit_etapa(request: Request, lead_id: int, etapa: str = Form(...)):
+    return _agir(request, lead_id,
+                 lambda p, c, m, l: {**ck.mudar_etapa(p, c, m, l, etapa), "msg": "Etapa atualizada ✓"},
+                 f"{_BASE}/lead/{lead_id}")
+
+
+@router.post("/cockpit/lead/{lead_id}/assumir")
+def cockpit_assumir(request: Request, lead_id: int):
+    return _agir(request, lead_id,
+                 lambda p, c, m, l: {**ck.assumir(p, c, m, l), "msg": "Você assumiu a conversa ✓"},
+                 f"{_BASE}/lead/{lead_id}")
+
+
+@router.post("/cockpit/lead/{lead_id}/devolver")
+def cockpit_devolver(request: Request, lead_id: int):
+    return _agir(request, lead_id,
+                 lambda p, c, m, l: {**ck.devolver_ia(p, c, m, l), "msg": "Devolvido pro agente ✓"},
+                 f"{_BASE}/lead/{lead_id}")
+
+
+@router.post("/cockpit/lead/{lead_id}/fechar")
+def cockpit_fechar(request: Request, lead_id: int, tipo: str = Form(...), motivo: str = Form("")):
+    swipe = request.headers.get("x-cockpit") == "1"
+    sess = _sessao(request)
+    if not sess:
+        if swipe:
+            return JSONResponse({"ok": False, "erro": _RECADO["login"]}, status_code=401)
+        return RedirectResponse("/cockpit/login", status_code=303)
+    r = ck.fechar(get_pool(), sess[0], sess[1], lead_id, tipo, motivo)
+    if swipe:                                         # o card some da lista sozinho
+        return JSONResponse({"ok": bool(r.get("ok")), "erro": "" if r.get("ok") else _erro(r)})
+    if r.get("ok"):                                   # fechou: o lead sai da fila
+        request.session["ck_ok"] = "Marcado como Ganho 🎉" if tipo == "ganho" else "Marcado como Perdido."
+        return RedirectResponse(_BASE, status_code=303)
+    request.session["ck_err"] = _erro(r)
+    return RedirectResponse(f"{_BASE}/lead/{lead_id}", status_code=303)
+
+
+@router.post("/cockpit/perfil/push")
+def cockpit_push(request: Request, on: str = Form("1")):
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    ck.set_push(get_pool(), sess[0], sess[1], on == "1")
+    return RedirectResponse(f"{_BASE}/perfil", status_code=303)
+
+
+@router.post("/cockpit/perfil/rodizio")
+def cockpit_rodizio(request: Request, on: str = Form("1")):
+    # o toggle diz "receber no rodízio"; pausado = NÃO receber → inverte
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    ck.set_pausado(get_pool(), sess[0], sess[1], on != "1")
+    return RedirectResponse(f"{_BASE}/perfil", status_code=303)
+
+
+@router.post("/cockpit/equipe/reatribuir")
+def cockpit_reatribuir(request: Request, lead_id: int = Form(...), para: str = Form("")):
+    g = _gerencia(request)
+    if not g:
+        return RedirectResponse(_BASE, status_code=303)
+    destino = f"{_BASE}/lead/{lead_id}"
+    if para.strip().isdigit():
+        r = cd.reatribuir(get_pool(), g[0], lead_id, int(para))
+        request.session["ck_ok" if r.get("ok") else "ck_err"] = (
+            "Lead passado pro time ✓" if r.get("ok") else r.get("erro", "Não consegui reatribuir."))
+    return RedirectResponse(destino, status_code=303)
+
+
+@router.post("/cockpit/equipe/pausar")
+def cockpit_pausar(request: Request, membro_id: int = Form(...), on: str = Form("1")):
+    g = _gerencia(request)
+    if not g:
+        return RedirectResponse(_BASE, status_code=303)
+    cd.pausar(get_pool(), g[0], membro_id, on == "1")
+    request.session["ck_ok"] = "Rodízio pausado ✓" if on == "1" else "Vendedor reativado ✓"
+    return RedirectResponse(f"{_BASE}/equipe/vendedor/{membro_id}", status_code=303)
+
+
+# ================================================================== encanamento
+# Daqui pra baixo é o que faz o app existir e não aparece em tela: entrar, sair,
+# push e o PWA. Veio do app anterior praticamente como estava — é infraestrutura,
+# não visual, e reescrever ia trocar risco por nada.
 
 # ------------------------------------------------------------------ login mágico
 @router.get("/cockpit/login", response_class=HTMLResponse)
 def cockpit_login_form(request: Request, enviado: str = ""):
     if _sessao(request):
-        return RedirectResponse("/cockpit", status_code=303)
+        return RedirectResponse(_BASE, status_code=303)
     if enviado:
-        body = ("<div class=login><div class=logo>📬</div><h2>Confira seu e-mail</h2>"
-                "<p>Se esse e-mail estiver cadastrado, você recebeu um link pra entrar "
-                "no Cockpit. Ele vale por 15 minutos.</p>"
-                "<small>Não chegou? Verifique o spam ou peça o link ao seu gestor.</small></div>")
-        return _page("Cockpit — confira o e-mail", body)
-    body = ("<div class=login><div class=logo>⚡</div><h2>Cockpit do Vendedor</h2>"
-            "<p>Seu espaço pra atender leads. Sem senha — a gente manda um link pro seu e-mail.</p>"
-            "<form method=post action='/cockpit/login'>"
-            "<input name=email type=email required placeholder='seu e-mail' autocomplete=email>"
-            "<button class=go type=submit>Enviar meu link de acesso</button></form>"
-            "<small>🔒 O link vale por 15 min e abre no seu aparelho.</small></div>")
-    return _page("Cockpit — entrar", body)
+        # a mesma resposta pra e-mail que existe e pra e-mail que não existe:
+        # dizer "não achei" contaria quem é do time pra quem só chutou o endereço
+        corpo = ("<div class=login><div class=marca>Zaq</div><h2>Confira seu e-mail</h2>"
+                 "<p>Se esse e-mail estiver cadastrado, você recebeu um link pra entrar. "
+                 "Ele vale por 15 minutos.</p>"
+                 "<small>Não chegou? Veja o spam ou peça o link ao seu gestor.</small></div>")
+        return _page("Zaq — confira o e-mail", corpo)
+    corpo = ("<div class=login><div class=marca>Zaq</div><h2>Seus leads, no bolso</h2>"
+             "<p>Sem senha — a gente manda um link pro seu e-mail.</p>"
+             f"<form method=post action='{_BASE}/login'>"
+             "<input name=email type=email required placeholder='seu e-mail' autocomplete=email>"
+             "<button class=go type=submit>Enviar meu link de acesso</button></form>"
+             "<small>O link vale por 15 min e abre no seu aparelho.</small></div>")
+    return _page("Zaq — entrar", corpo)
 
 
 @router.post("/cockpit/login")
@@ -595,50 +2120,60 @@ def cockpit_login(request: Request, email: str = Form(...)):
             _enviar_link_email(pool, achado["conta_id"], (email or "").strip(), ck.link_acesso(token))
         except Exception:  # noqa: BLE001
             pass
-    return RedirectResponse("/cockpit/login?enviado=1", status_code=303)
+    return RedirectResponse(f"{_BASE}/login?enviado=1", status_code=303)
 
 
 @router.get("/cockpit/entrar/{token}", response_class=HTMLResponse)
 def cockpit_entrar(request: Request, token: str):
     dados = ck.validar_token(get_pool(), token)
     if not dados:
-        body = ("<div class=login><div class=logo>⚠️</div><h2>Link expirado</h2>"
-                "<p>Esse link já foi usado ou passou dos 15 minutos.</p>"
-                "<a class=go href='/cockpit/login' style='display:block;text-decoration:none'>Pedir um novo link</a></div>")
-        return _page("Cockpit — link expirado", body)
+        corpo = ("<div class=login><div class=marca>Zaq</div><h2>Link expirado</h2>"
+                 "<p>Esse link já foi usado ou passou dos 15 minutos.</p>"
+                 f"<a class=go href='{_BASE}/login'>Pedir um novo link</a></div>")
+        return _page("Zaq — link expirado", corpo)
     request.session["conta_id"] = dados["conta_id"]
     request.session["membro_id"] = dados["membro_id"]
     request.session["papel"] = dados["papel"]
     request.session["cockpit"] = True
-    return RedirectResponse("/cockpit", status_code=303)
+    return RedirectResponse(_BASE, status_code=303)
 
 
 @router.get("/cockpit/sair")
 def cockpit_sair(request: Request):
-    for k in ("cockpit", "membro_id", "papel"):
-        request.session.pop(k, None)
-    return RedirectResponse("/cockpit/login", status_code=303)
+    """Limpa a sessão INTEIRA, igual ao /sair do painel.
+
+    Antes esta função tirava só `cockpit`, `membro_id` e `papel` e deixava o
+    `conta_id` pra trás. Só que `_gerencia` lê o papel com `get("papel", "dono")`
+    — sem papel na sessão, o padrão é dono. Resultado: quem apertava Sair caía de
+    volta em /cockpit e via a visão de equipe inteira, com a carteira de propostas
+    do time e o botão de fechar contrato. Sair tem que sair.
+    """
+    request.session.clear()
+    return RedirectResponse(f"{_BASE}/login", status_code=303)
 
 
 def _enviar_link_email(pool, conta_id: int, email: str, link: str) -> bool:
     """Manda o link mágico. Pela caixa da empresa (Canais) se houver; senão SMTP do Zaq."""
-    titulo = "Seu acesso ao Cockpit"
-    corpo = ("Toque no botão pra entrar no Cockpit e atender seus leads. "
+    titulo = "Seu acesso ao Zaq"
+    corpo = ("Toque no botão pra entrar e atender seus leads. "
              "O link vale por 15 minutos e abre no seu aparelho.")
     try:
         from finance import email_sender as es
+        # hex literal, não token: e-mail não tem CSS custom property que resolva
         botao = (f'<div style="text-align:center;margin:24px 0">'
-                 f'<a href="{esc(link)}" style="background:#1d9e75;color:#fff;padding:14px 28px;'
+                 f'<a href="{esc(link)}" style="background:#25D366;color:#04150C;padding:14px 28px;'
                  f'border-radius:10px;font-weight:600;text-decoration:none;display:inline-block">'
-                 f'Entrar no Cockpit →</a></div>'
+                 f'Entrar no Zaq →</a></div>'
                  f'<p style="color:#888;font-size:13px">Ou copie: {esc(link)}</p>')
         html = es._layout(titulo, f"<p>{esc(corpo)}</p>{botao}")
         texto = f"{corpo}\n\n{link}"
         try:
             from finance import email_inbound as ein
             with pool.connection() as c:
-                nome_emp = (c.execute("select nome from contas where id=%s", (conta_id,)).fetchone() or [""])[0]
-            if ein.enviar_conta(pool, conta_id, email, titulo, html, texto, from_nome=nome_emp or None):
+                nome_emp = (c.execute("select nome from contas where id=%s",
+                                      (conta_id,)).fetchone() or [""])[0]
+            if ein.enviar_conta(pool, conta_id, email, titulo, html, texto,
+                                from_nome=nome_emp or None):
                 return True
         except Exception:  # noqa: BLE001
             pass
@@ -647,256 +2182,7 @@ def _enviar_link_email(pool, conta_id: int, email: str, link: str) -> bool:
         return False
 
 
-# ------------------------------------------------------------------ inbox
-@router.get("/cockpit", response_class=HTMLResponse)
-def cockpit_inbox(request: Request):
-    # dono/gestor (inclusive logado no painel, sem membro_id) → Cockpit do Dono
-    g = _gerencia(request)
-    if g:
-        return _dono_visao(request, g[0], g[1])
-    sess = _sessao(request)
-    if not sess:
-        return RedirectResponse("/cockpit/login", status_code=303)
-    conta_id, membro_id = sess
-    pool = get_pool()
-    leads = ck.leads_do_vendedor(pool, conta_id, membro_id)
-    p = ck.perfil(pool, conta_id, membro_id)
-    vez = sum(1 for l in leads if not l["ia"])
-    from finance import empresa as emp
-    from finance.marca import cabecalho_html
-    marca = emp.marca_empresa(pool, conta_id)
-    brand = cabecalho_html(marca, px=26, raio=7, alinhar="right", cor_nome="var(--txt)")
-
-    def _acts(ia: bool) -> str:
-        main = ("<button class='act assumir' data-a=assumir><span class=em>🙋</span>Assumir</button>" if ia
-                else "<button class='act devolver' data-a=devolver><span class=em>🤖</span>Devolver</button>")
-        return f"<div class=actions>{main}<button class='act ganho' data-a=ganho><span class=em>✓</span>Ganho</button></div>"
-
-    cards = []
-    for l in leads:
-        chip = ("<span class='cchip ia'>🤖 IA</span>" if l["ia"]
-                else "<span class='cchip voce'>🙋 sua vez</span>")
-        cards.append(
-            "<div class=swipe>" + _acts(l["ia"]) +
-            f"<div class='lead front' data-id='{l['id']}' data-ia='{1 if l['ia'] else 0}'>"
-            f"<span class=dot style='background:{esc(l['temp_cor'])}'></span>"
-            f"<span class=av>{esc(_ini(l['empresa']))}</span>"
-            f"<span class=mid><span class=top><span class=emp>{esc(l['empresa'])}</span>{chip}</span>"
-            f"<span class=snip>{esc(l['snip'])}</span></span>"
-            "<span class=grab>⋮⋮</span></div></div>")
-    if leads:
-        lista = "".join(cards)
-    else:
-        lista = ("<div class=vazio><div class=big>🎯</div><b>Fila zerada!</b>"
-                 "Nenhum lead aberto agora. Quando cair um novo no rodízio, você é avisado.</div>")
-
-    from finance import webpush
-    vapid = webpush.chave_publica()
-    pushcard = ""
-    if vapid:                        # só oferece push se as chaves VAPID estão no ambiente
-        pushcard = ("<div class=pushcard id=pushcard><b>🔔 Ative as notificações</b>"
-                    "<p>Receba um aviso no celular assim que um lead cair pra você — mesmo com o app fechado.</p>"
-                    "<button class=go id=pushbtn type=button>Ativar notificações</button></div>")
-    import json as _json
-    inject = f"<script>window.CKVAPID={_json.dumps(vapid)};</script>" if vapid else ""
-
-    body = (
-        "<div class=hdr>"
-        f"<a class=ib href='/cockpit/perfil' title='Meu perfil'>{esc(_ini(p['nome']))}</a>"
-        f"<div class=tt><b>Meus leads</b><small>{len(leads)} abertos · {vez} sua vez</small></div>"
-        f"{brand}</div>"
-        "<div class=scroll>"
-        + pushcard +
-        "<div class=instpill>📲 <b>Instalar o app</b> — no menu do navegador, “Adicionar à tela inicial”. Deslize um card ← pra ações rápidas.</div>"
-        f"{lista}</div>" + inject + _INBOX_JS)
-    return _page("Cockpit — meus leads", body)
-
-
-# ------------------------------------------------------------------ detalhe
-def _flash(request: Request) -> str:
-    ok = request.session.pop("ck_ok", None)
-    err = request.session.pop("ck_err", None)
-    if ok:
-        return f"<div class='msg ok'>{esc(ok)}</div>"
-    if err:
-        return f"<div class='msg err'>{esc(err)}</div>"
-    return ""
-
-
-@router.get("/cockpit/lead/{lead_id}", response_class=HTMLResponse)
-def cockpit_lead(request: Request, lead_id: int):
-    sess = _sessao(request)
-    if not sess:
-        return RedirectResponse("/cockpit/login", status_code=303)
-    conta_id, membro_id = sess
-    d = ck.lead_do_vendedor(get_pool(), conta_id, membro_id, lead_id)
-    if not d:
-        return RedirectResponse("/cockpit", status_code=303)
-    sub = " · ".join(x for x in [d.get("cidade") or "", (d.get("uf") or "")] if x) or (d.get("cnpj") or "")
-    tel = d.get("tel_link") or ""
-    zap = d.get("zap_link") or ""
-    ficha_btns = (
-        (f"<a class=fbtn href='{esc(tel)}'>📞 Ligar</a>" if tel else "<span class=fbtn style='opacity:.4'>📞 Ligar</span>")
-        + (f"<a class=fbtn href='{esc(zap)}' target=_blank rel=noopener>💬 WhatsApp</a>" if zap
-           else "<span class=fbtn style='opacity:.4'>💬 WhatsApp</span>")
-        + f"<a class=fbtn href='/cockpit/lead/{lead_id}/ficha'>👤 Ficha</a>"
-        + f"<a class='fbtn orc' href='/cockpit/lead/{lead_id}/orcamento' style='flex-basis:48%'>🧾 Orçamento</a>"
-        + f"<a class='fbtn vis' href='/cockpit/lead/{lead_id}/visita' style='flex-basis:48%'>📅 Agendar visita</a>")
-    # funil (chips = forms)
-    chips = []
-    for e in d["etapas"]:
-        on = " on" if d["status"] == e["chave"] else ""
-        chips.append(
-            f"<form class=stf method=post action='/cockpit/lead/{lead_id}/etapa'>"
-            f"<input type=hidden name=etapa value='{esc(e['chave'])}'>"
-            f"<button class='st{on}' type=submit>{esc(e['rotulo'])}</button></form>")
-    perda_opts = "".join(f"<option>{esc(m)}</option>" for m in
-                         ("Preço", "Sem retorno", "Comprou concorrente", "Fora do perfil", "Sem interesse"))
-    fechar = (
-        "<div class=wl>"
-        f"<form class=stf method=post action='/cockpit/lead/{lead_id}/fechar'>"
-        "<input type=hidden name=tipo value=ganho><button class=win type=submit>✓ Ganho</button></form>"
-        "</div>"
-        "<details class=perda><summary>✕ Marcar como perdido</summary>"
-        f"<form method=post action='/cockpit/lead/{lead_id}/fechar'>"
-        "<input type=hidden name=tipo value=perdido>"
-        f"<select name=motivo><option value=''>Motivo (opcional)</option>{perda_opts}</select>"
-        "<button class=conf type=submit>Confirmar perda</button></form></details>")
-    # chat
-    bolhas = []
-    for m in d["mensagens"]:
-        who = m["who"]
-        rot = ("<div class=who>🤖 Agente</div>" if who == "ia"
-               else "<div class=who>Você</div>" if who == "out" else "")
-        cls = "ia" if who == "ia" else ("out" if who == "out" else "in")
-        bolhas.append(f"<div class='bub {cls}'>{rot}{esc(m['texto'])}</div>")
-    if d["ia"]:
-        bolhas.insert(0, "<div class=iabar>🤖 O agente está atendendo. Toque em <b>Assumir</b> pra responder você.</div>")
-    chat = "".join(bolhas) or "<div class=iabar>Sem mensagens ainda.</div>"
-    if d["ia"]:
-        acao = (f"<form method=post action='/cockpit/lead/{lead_id}/assumir'>"
-                "<button class=assumir type=submit>🙋 Assumir a conversa (tirar do 🤖 automático)</button></form>")
-    else:
-        acao = (f"<form class=composer method=post action='/cockpit/lead/{lead_id}/mensagem'>"
-                "<input name=texto placeholder='Responder…' required autocomplete=off>"
-                "<button type=submit>➤</button></form>")
-    body = (
-        "<div class=hdr><a class=bk href='/cockpit'>‹</a>"
-        f"<div class=tt><b>{esc(d['empresa'])}</b><small>{esc(sub)}</small></div>"
-        + ("<span class='cchip ia'>🤖 IA</span>" if d["ia"] else "<span class='cchip voce'>🙋 você</span>")
-        + "</div>"
-        + _flash(request)
-        + f"<div class=ficha>{ficha_btns}</div>"
-        + f"<div class=funil><div class=lbl>Etapa no funil</div><div class=stchips>{''.join(chips)}</div>{fechar}</div>"
-        + f"<div class=chat>{chat}</div>"
-        + acao)
-    return _page(f"Cockpit — {d['empresa']}", body)
-
-
-@router.get("/cockpit/lead/{lead_id}/ficha", response_class=HTMLResponse)
-def cockpit_ficha(request: Request, lead_id: int):
-    sess = _sessao(request)
-    if not sess:
-        return RedirectResponse("/cockpit/login", status_code=303)
-    conta_id, membro_id = sess
-    d = ck.lead_do_vendedor(get_pool(), conta_id, membro_id, lead_id)
-    if not d:
-        return RedirectResponse("/cockpit", status_code=303)
-
-    def row(lbl, val):
-        return f"<div class=frow><span>{esc(lbl)}</span><b>{esc(val)}</b></div>" if val else ""
-    empresa_sec = "".join([
-        row("Nome", d.get("empresa")), row("CNPJ", d.get("cnpj")),
-        row("Segmento", d.get("segmento")),
-        row("Cidade", " ".join(x for x in [d.get("cidade") or "", (("/" + d.get("uf")) if d.get("uf") else "")] if x)),
-        row("Origem", d.get("origem")),
-    ])
-    decisor = d.get("decisor_nome") or d.get("contato") or d.get("socio")
-    cargo = d.get("decisor_cargo") or d.get("cargo")
-    decisor_sec = row("Nome", decisor) + row("Cargo", cargo)
-    tels = []
-    for numero, wa in [(d.get("whatsapp"), True), (d.get("telefone"), False),
-                       (d.get("decisor_telefone"), d.get("decisor_whatsapp"))]:
-        if numero:
-            selo = "<span class=z>WhatsApp</span>" if wa else ""
-            tels.append(f"<div class=tel>📱 {esc(numero)} {selo}</div>")
-    tels_sec = "".join(dict.fromkeys(tels))    # dedup preservando ordem
-    body = (
-        "<div class=hdr>"
-        f"<a class=bk href='/cockpit/lead/{lead_id}'>‹</a>"
-        f"<div class=tt><b>{esc(d['empresa'])}</b><small>ficha do lead</small></div></div>"
-        "<div class=scroll>"
-        + (f"<div class=fsec><div class=lbl>Empresa</div>{empresa_sec}</div>" if empresa_sec else "")
-        + (f"<div class=fsec><div class=lbl>Decisor</div>{decisor_sec}</div>" if decisor_sec else "")
-        + (f"<div class=fsec><div class=lbl>Telefones</div>{tels_sec}</div>" if tels_sec else "")
-        + f"<div class=fsec><div class=lbl>Funil</div>{row('Etapa atual', d.get('status'))}</div>"
-        + (f"<div class=fsec><div class=lbl>Observações</div><div style='font-size:.88rem;color:var(--mut)'>{esc(d.get('obs'))}</div></div>" if d.get("obs") else "")
-        + "</div>")
-    return _page(f"Cockpit — ficha {d['empresa']}", body)
-
-
-# ------------------------------------------------------------------ ações (POST)
-def _acao(request: Request, lead_id: int, fn):
-    sess = _sessao(request)
-    if not sess:
-        if request.headers.get("x-cockpit") == "1":
-            return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-        return RedirectResponse("/cockpit/login", status_code=303)
-    conta_id, membro_id = sess
-    r = fn(get_pool(), conta_id, membro_id, lead_id)
-    # do swipe (fetch): responde JSON e fica na lista; senão redireciona pro lead
-    if request.headers.get("x-cockpit") == "1":
-        return JSONResponse(r)
-    if r.get("ok"):
-        request.session["ck_ok"] = r.get("msg", "Feito ✓")
-    else:
-        request.session["ck_err"] = r.get("erro", "Não deu certo.")
-    return RedirectResponse(f"/cockpit/lead/{lead_id}", status_code=303)
-
-
-@router.post("/cockpit/lead/{lead_id}/mensagem")
-def cockpit_mensagem(request: Request, lead_id: int, texto: str = Form(...)):
-    return _acao(request, lead_id, lambda p, c, m, l: {**ck.enviar_mensagem(p, c, m, l, texto),
-                                                       "msg": "Mensagem enviada ✓"})
-
-
-@router.post("/cockpit/lead/{lead_id}/etapa")
-def cockpit_etapa(request: Request, lead_id: int, etapa: str = Form(...)):
-    return _acao(request, lead_id, lambda p, c, m, l: {**ck.mudar_etapa(p, c, m, l, etapa),
-                                                       "msg": "Etapa atualizada ✓"})
-
-
-@router.post("/cockpit/lead/{lead_id}/assumir")
-def cockpit_assumir(request: Request, lead_id: int):
-    return _acao(request, lead_id, lambda p, c, m, l: {**ck.assumir(p, c, m, l),
-                                                       "msg": "Você assumiu a conversa ✓"})
-
-
-@router.post("/cockpit/lead/{lead_id}/devolver")
-def cockpit_devolver(request: Request, lead_id: int):
-    return _acao(request, lead_id, lambda p, c, m, l: {**ck.devolver_ia(p, c, m, l),
-                                                       "msg": "Devolvido pro agente ✓"})
-
-
-@router.post("/cockpit/lead/{lead_id}/fechar")
-def cockpit_fechar(request: Request, lead_id: int, tipo: str = Form(...), motivo: str = Form("")):
-    sess = _sessao(request)
-    if not sess:
-        if request.headers.get("x-cockpit") == "1":
-            return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-        return RedirectResponse("/cockpit/login", status_code=303)
-    conta_id, membro_id = sess
-    r = ck.fechar(get_pool(), conta_id, membro_id, lead_id, tipo, motivo)
-    if request.headers.get("x-cockpit") == "1":     # swipe (fetch): fica na lista
-        return JSONResponse(r)
-    if r.get("ok"):
-        request.session["ck_ok"] = "🎉 Marcado como Ganho!" if tipo == "ganho" else "Marcado como Perdido."
-        return RedirectResponse("/cockpit", status_code=303)     # saiu da fila
-    request.session["ck_err"] = r.get("erro", "Não deu certo.")
-    return RedirectResponse(f"/cockpit/lead/{lead_id}", status_code=303)
-
-
-# ------------------------------------------------------------------ push (assinar)
+# ------------------------------------------------------------------ push
 @router.get("/cockpit/push/chave")
 def cockpit_push_chave(request: Request):
     from finance import webpush
@@ -920,451 +2206,61 @@ async def cockpit_push_remover(request: Request, sub: dict = Body(...)):
     return JSONResponse({"ok": True})
 
 
-# ------------------------------------------------------------------ orçamento / proposta
-@router.get("/cockpit/lead/{lead_id}/orcamento", response_class=HTMLResponse)
-def cockpit_orcamento(request: Request, lead_id: int):
-    sess = _sessao(request)
-    if not sess:
-        return RedirectResponse("/cockpit/login", status_code=303)
-    conta_id, membro_id = sess
-    pool = get_pool()
-    d = ck.lead_do_vendedor(pool, conta_id, membro_id, lead_id)
-    if not d:
-        return RedirectResponse("/cockpit", status_code=303)
-    cat = ck.catalogo_servicos(pool, conta_id)
-    import json as _json
-    cat_json = _json.dumps(cat, ensure_ascii=False).replace("</", "<\\/")   # acentos limpos; </script> seguro
-    inject = f"<script>window.ORC={{cat:{cat_json},leadId:{lead_id}}};</script>"
-    body = (
-        "<div class=hdr>"
-        f"<a class=bk href='/cockpit/lead/{lead_id}'>‹</a>"
-        f"<div class=tt><b>Orçamento</b><small>{esc(d['empresa'])}</small></div></div>"
-        "<div class='ck-toast' id=cktoast></div>"
-        "<div class=scroll id=orcbuild>"
-        "<div class=lbl style='padding:.7rem 1rem 0'>Serviços do catálogo</div>"
-        "<div id=orclist></div>"
-        "<div class=lbl style='padding:.9rem 1rem 0'>Adicionar item avulso</div>"
-        "<div class=orc-add><input class=n id=orccnome placeholder='Ex.: Visita técnica' autocomplete=off>"
-        "<input class=v id=orccval inputmode=numeric placeholder='R$' autocomplete=off>"
-        "<button id=orcaddbtn type=button>+</button></div></div>"
-        "<div class=orc-foot id=orcfoot>"
-        "<div class=orc-tot><span>Total</span><span id=orctotal>—</span></div>"
-        "<button class=orc-gen id=orcgen type=button disabled>Gerar proposta e link</button></div>"
-        "<div id=orcdone style='display:none'></div>"
-        + inject + _ORC_JS)
-    return _page(f"Cockpit — orçamento {d['empresa']}", body)
-
-
-@router.post("/cockpit/lead/{lead_id}/orcamento")
-async def cockpit_orcamento_criar(request: Request, lead_id: int, payload: dict = Body(...)):
-    sess = _sessao(request)
-    if not sess:
-        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    r = ck.criar_orcamento(get_pool(), sess[0], sess[1], lead_id, (payload or {}).get("itens"))
-    return JSONResponse(r)
-
-
-@router.post("/cockpit/lead/{lead_id}/orcamento/enviar")
-async def cockpit_orcamento_enviar(request: Request, lead_id: int, payload: dict = Body(...)):
-    sess = _sessao(request)
-    if not sess:
-        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    link = (payload or {}).get("link", "")
-    if not link:
-        return JSONResponse({"ok": False, "erro": "sem link"})
-    r = ck.enviar_proposta_conversa(get_pool(), sess[0], sess[1], lead_id, link)
-    return JSONResponse(r)
-
-
-# ------------------------------------------------------------------ agendar visita
-_DIA_SEM = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
-_HORAS = ["08:00", "09:00", "10:00", "11:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00"]
-
-
-@router.get("/cockpit/lead/{lead_id}/visita", response_class=HTMLResponse)
-def cockpit_visita(request: Request, lead_id: int):
-    sess = _sessao(request)
-    if not sess:
-        return RedirectResponse("/cockpit/login", status_code=303)
-    conta_id, membro_id = sess
-    pool = get_pool()
-    d = ck.lead_do_vendedor(pool, conta_id, membro_id, lead_id)
-    if not d:
-        return RedirectResponse("/cockpit", status_code=303)
-    esp = ck.endereco_empresa(pool, conta_id)
-    from datetime import datetime, timedelta
-    from finance import agenda as ag
-    hoje = datetime.now(ag.BRT).date()
-    dias = []
-    for i in range(0, 14):
-        dt = hoje + timedelta(days=i)
-        lab = "Hoje" if i == 0 else "Amanhã" if i == 1 else f"{_DIA_SEM[dt.weekday()]} {dt.day}"
-        dias.append({"iso": dt.isoformat(), "lab": lab})
-    quem = esc(d.get("contato") or d.get("empresa") or "o cliente")
-    numero = d.get("whatsapp") or d.get("telefone") or ""
-    import json as _json
-    vis = {"leadId": lead_id, "dias": dias, "horas": _HORAS,
-           "nome": esp["nome"], "quem": quem}
-    inject = f"<script>window.VISITA={_json.dumps(vis, ensure_ascii=False)};</script>"
-    maps_a = (f"<a href='{esc(esp['maps'])}' target=_blank rel=noopener>📍 Abrir no Google Maps</a>"
-              if esp["maps"] else "")
-    end_txt = esc(esp["endereco"] or "— sem endereço no cadastro da empresa —")
-    body = (
-        "<div class=hdr>"
-        f"<a class=bk href='/cockpit/lead/{lead_id}'>‹</a>"
-        f"<div class=tt><b>Agendar visita</b><small>{esc(d['empresa'])}</small></div></div>"
-        "<div class='ck-toast' id=cktoast></div>"
-        "<div class=scroll id=vbuild>"
-        "<div class=vsec><div class=lbl>Quem vem visitar</div>"
-        f"<div class=vvisit>👥 <b>{quem}</b>" + (f" <small>{esc(numero)}</small>" if numero else "") + "</div></div>"
-        "<div class=vsec><div class=lbl>Dia</div><div class=vchips id=vdays></div></div>"
-        "<div class=vsec><div class=lbl>Horário</div><div class='vchips vtimes' id=vtimes></div></div>"
-        "<div class=vsec><div class=lbl>Duração</div><div class=vchips id=vdurs></div></div>"
-        "<div class=vsec><div class=lbl>Local — o seu espaço</div>"
-        f"<div class=vlocal><div class=nome>🏢 {esc(esp['nome'])}</div><div class=end>📍 {end_txt}</div>{maps_a}"
-        f"<input id=vlocalinp value='{esc(esp['endereco'] or esp['nome'])}' aria-label='Endereço da visita'></div>"
-        "<div style='color:var(--mut);font-size:.74rem;margin-top:.4rem'>vem do cadastro da empresa — edite se a visita for em outra unidade</div></div>"
-        "<div class=vsec><div class=lbl>Lembrete (pra você)</div><div class=vchips id=vlembr></div></div>"
-        "<div class=vsec><div class=vrow><div>Avisar o cliente no WhatsApp<div class=sub>confirmação + convite .ics (o calendário dele lembra)</div></div>"
-        "<div class='tgl on' id=vavisar style='cursor:pointer'>Ligado</div></div><div class=vmsg id=vmsg></div></div>"
-        "</div>"
-        "<div class=orc-foot id=vfoot><div class=orc-tot><span id=vresumo>—</span></div>"
-        "<button class=orc-gen id=vgo type=button>📅 Agendar visita</button></div>"
-        "<div id=vdone style='display:none'></div>"
-        + inject + _VISITA_JS)
-    return _page(f"Cockpit — visita {d['empresa']}", body)
-
-
-@router.post("/cockpit/lead/{lead_id}/visita")
-async def cockpit_visita_criar(request: Request, lead_id: int, payload: dict = Body(...)):
-    sess = _sessao(request)
-    if not sess:
-        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    p = payload or {}
-    r = ck.agendar_visita(get_pool(), sess[0], sess[1], lead_id,
-                          data=str(p.get("data") or ""), hora=str(p.get("hora") or ""),
-                          dur_min=int(p.get("dur") or 60),
-                          local=str(p.get("local") or ""),
-                          lembrete_min=(int(p["lembrete"]) if p.get("lembrete") else None),
-                          avisar_cliente=bool(p.get("avisar", True)))
-    return JSONResponse(r)
-
-
+# ------------------------------------------------------------------ convite da visita
 @router.get("/visita/{token}.ics", include_in_schema=False)
 def visita_ics_publico(request: Request, token: str):
     ics = ck.visita_ics(get_pool(), token)
     if not ics:
         return Response("visita não encontrada", status_code=404)
     return Response(ics, media_type="text/calendar; charset=utf-8",
-                   headers={"Content-Disposition": 'attachment; filename="visita.ics"'})
+                    headers={"Content-Disposition": 'attachment; filename="visita.ics"'})
 
 
-# ================================================================== COCKPIT DO DONO
-def _nav_dono(active: str) -> str:
-    def a(key, ic, lab, href):
-        return f"<a class='{'on' if active == key else ''}' href='{href}'><span class=i>{ic}</span>{lab}</a>"
-    return ("<div class=dnav>" + a("visao", "📊", "Visão", "/cockpit")
-            + a("placar", "🏆", "Placar", "/cockpit/equipe/placar")
-            + a("leads", "📋", "Leads", "/cockpit/equipe/leads")
-            + a("ativ", "⚡", "Atividade", "/cockpit/equipe/atividade") + "</div>")
-
-
-def _dono_hdr(conta_id: int, sub: str) -> str:
-    nome = ck.endereco_empresa(get_pool(), conta_id)["nome"]
-    return ("<div class=hdr><div class=ib>" + esc((nome or 'E')[:1].upper()) + "</div>"
-            f"<div class=tt><b>Equipe · {esc(nome)}</b><small>{esc(sub)}</small></div></div>")
-
-
-def _dono_visao(request: Request, conta_id: int, membro_id: int) -> HTMLResponse:
-    from finance import cockpit_dono as cd
-    periodo = request.query_params.get("p", "semana")
-    if periodo not in ("hoje", "semana", "mes"):
-        periodo = "semana"
-    v = cd.visao(get_pool(), conta_id, periodo)
-    k = v["kpis"]
-    conv = f"{k['conversao']}%" if k["conversao"] is not None else "—"
-
-    def seg(key, lab):
-        return f"<a class='{'on' if periodo == key else ''}' href='/cockpit?p={key}'>{lab}</a>"
-    kpis = (
-        "<div class=dkpis>"
-        f"<div class='dkpi hl'><div class=v>{k['novos']}</div><div class=l>Leads novos</div><div class=d>no período</div></div>"
-        f"<div class=dkpi><div class=v>{k['com_ia'] + k['com_vend']}</div><div class=l>Em atendimento</div><div class=d>{k['com_ia']} c/ IA · {k['com_vend']} c/ vendedor</div></div>"
-        f"<div class=dkpi><div class=v>{esc(k['ganhos_rs'])}</div><div class=l>Ganhos</div><div class=d>{k['ganhos']} fechado(s)</div></div>"
-        f"<div class=dkpi><div class=v>{conv}</div><div class=l>Conversão</div><div class=d>ganhos vs. perdidos</div></div></div>")
-    funil = "".join(
-        f"<div class=dfr><span class=nm>{esc(f['rotulo'])}</span><span class=bar><i style='width:{f['pct']}%'></i></span>"
-        f"<span class=qt><b>{f['n']}</b> <small>{esc(f['valor'])}</small></span></div>" for f in v["funil"])
-    a = v["atencao"]
-    aten = (
-        "<div class=daten>"
-        f"<div class='dat hot'><div class=n>{a['parados']}</div><div class=t>leads parados +3 dias</div></div>"
-        f"<div class='dat warn'><div class=n>{a['quentes']}</div><div class=t>quentes sem contato hoje</div></div>"
-        f"<div class='dat info'><div class=n>{a['propostas']}</div><div class=t>propostas aguardando</div></div>"
-        f"<div class='dat info'><div class=n>{a['visitas']}</div><div class=t>visitas hoje</div></div></div>")
-    body = (
-        _dono_hdr(conta_id, "acompanhe o time")
-        + f"<div class=dseg>{seg('hoje','Hoje')}{seg('semana','Semana')}{seg('mes','Mês')}</div>"
-        + "<div class=scroll>" + kpis
-        + "<div class=dsect>Funil do time <span>leads · valor</span></div>" + f"<div class=dfunil>{funil}</div>"
-        + "<div class=dsect>Precisa de atenção</div>" + aten + "</div>"
-        + _nav_dono("visao"))
-    return _page("Cockpit do Dono", body)
-
-
-@router.get("/cockpit/equipe/placar", response_class=HTMLResponse)
-def cockpit_dono_placar(request: Request):
-    g = _gerencia(request)
-    if not g:
-        return RedirectResponse("/cockpit", status_code=303)
-    from finance import cockpit_dono as cd
-    lista = cd.placar(get_pool(), g[0])
-    medalhas = ["🥇", "🥈", "🥉"]
-    linhas = []
-    for i, v in enumerate(lista):
-        rk = medalhas[i] if i < 3 else str(i + 1)
-        paus = " <span class=dpaus>pausado</span>" if v["pausado"] else ""
-        linhas.append(
-            f"<a class=dvend href='/cockpit/equipe/vendedor/{v['id']}'>"
-            f"<span class=rk>{rk}</span><span class=av>{esc(v['nome'][:1].upper())}</span>"
-            f"<div class=mid><b>{esc(v['nome'])}</b><div class=sub><span>📥 {v['fila']} fila</span>"
-            f"<span>💬 {v['atendendo']} atend.</span><span>⚡ {esc(v['resp'])}</span>{paus}</div></div>"
-            f"<div class=rt><span class=g>{esc(v['rs'])}</span><small>{v['ganhos']} ganhos · {esc(v['conversao'])}</small></div></a>")
-    corpo = "".join(linhas) or "<div class=dvline style='padding:2rem'>Nenhum vendedor na equipe ainda.</div>"
-    body = (_dono_hdr(g[0], "placar · este mês, por R$ fechado")
-            + f"<div class=scroll>{corpo}</div>" + _nav_dono("placar"))
-    return _page("Cockpit do Dono — placar", body)
-
-
-@router.get("/cockpit/equipe/atividade", response_class=HTMLResponse)
-def cockpit_dono_atividade(request: Request):
-    g = _gerencia(request)
-    if not g:
-        return RedirectResponse("/cockpit", status_code=303)
-    from finance import cockpit_dono as cd
-    feed = cd.atividade(get_pool(), g[0])
-    ic = {"ganho": "🎉", "perdido": "✕", "visita": "📅", "prop": "🧾"}
-    linhas = "".join(
-        f"<div class='dev {e['tipo']}'><span class=ic>{ic.get(e['tipo'], '•')}</span><div class=tx>{esc(e['txt'])}</div></div>"
-        for e in feed) or "<div class=dvline style='padding:2rem'>Sem atividade recente.</div>"
-    body = (_dono_hdr(g[0], "atividade do time")
-            + f"<div class=scroll>{linhas}</div>" + _nav_dono("ativ"))
-    return _page("Cockpit do Dono — atividade", body)
-
-
-_ETAPA_ROT = {"novo": "Novo", "contatado": "Contatado", "qualificado": "Qualificado",
-              "proposta": "Proposta"}
-_TEMP_ROT = [("quente", "🔴 Quente"), ("morno", "🟡 Morno"), ("frio", "🔵 Frio")]
-
-
-@router.get("/cockpit/equipe/leads", response_class=HTMLResponse)
-def cockpit_dono_leads(request: Request, vend: str = "", etapa: str = "", temp: str = ""):
-    g = _gerencia(request)
-    if not g:
-        return RedirectResponse("/cockpit", status_code=303)
-    from finance import cockpit_dono as cd
-    pool = get_pool()
-    vend_i = int(vend) if vend.isdigit() else None
-    lista = cd.leads(pool, g[0], vend_i, etapa, temp)
-    filt = cd.filtros_leads(pool, g[0])
-
-    def url(**over):
-        p = {"vend": vend, "etapa": etapa, "temp": temp}
-        p.update(over)
-        q = "&".join(f"{k}={v}" for k, v in p.items() if v)
-        return "/cockpit/equipe/leads" + (("?" + q) if q else "")
-
-    def chip(active, label, href):
-        return f"<a class='{'on' if active else ''}' href='{esc(href)}'>{esc(label)}</a>"
-    vend_chips = ("<div class=dfilt><span class=flbl>Vendedor</span>"
-                  + chip(not vend, "Todos", url(vend=""))
-                  + "".join(chip(vend == str(v["id"]), v["nome"], url(vend=str(v["id"]))) for v in filt["vendedores"])
-                  + "</div>")
-    etapa_chips = ("<div class=dfilt><span class=flbl>Etapa</span>"
-                   + chip(not etapa, "Todas", url(etapa=""))
-                   + "".join(chip(etapa == e, _ETAPA_ROT.get(e, e.title()), url(etapa=e)) for e in filt["etapas"])
-                   + "</div>")
-    temp_chips = ("<div class=dfilt><span class=flbl>Temp.</span>"
-                  + chip(not temp, "Todas", url(temp=""))
-                  + "".join(chip(temp == t, lab, url(temp=t)) for t, lab in _TEMP_ROT) + "</div>")
-    rows = "".join(
-        f"<a class=dllead href='/painel/prospeccao/{l['id']}'>"
-        f"<span class=dot2 style='background:{esc(l['temp_cor'])}'></span>"
-        f"<div class=m><b>{esc(l['empresa'])}</b><small>{esc(l['vendedor'])}</small></div>"
-        f"<span class='cchip {'ia' if l['ia'] else 'voce'}'>{'🤖 IA' if l['ia'] else '🙋 vend.'}</span></a>"
-        for l in lista)
-    corpo = f"<div class=dcount>{len(lista)} leads</div>" + rows if lista else \
-        "<div class=dvline style='padding:2rem'>Nenhum lead com esses filtros.</div>"
-    body = (_dono_hdr(g[0], "todos os leads da equipe")
-            + vend_chips + etapa_chips + temp_chips
-            + f"<div class=scroll>{corpo}</div>" + _nav_dono("leads"))
-    return _page("Cockpit do Dono — leads", body)
-
-
-@router.get("/cockpit/equipe/vendedor/{membro_id}", response_class=HTMLResponse)
-def cockpit_dono_vendedor(request: Request, membro_id: int):
-    g = _gerencia(request)
-    if not g:
-        return RedirectResponse("/cockpit", status_code=303)
-    from finance import cockpit_dono as cd
-    v = cd.vendedor(get_pool(), g[0], membro_id)
-    if not v:
-        return RedirectResponse("/cockpit/equipe/placar", status_code=303)
-    outros = cd.vendedores_para_reatribuir(get_pool(), g[0], membro_id)
-    opts = "".join(f"<option value='{o['id']}'>{esc(o['nome'])}</option>" for o in outros)
-    leads = ""
-    for l in v["leads"]:
-        chip = "🤖 IA" if l["ia"] else "🙋 vend."
-        reat = ("" if not outros else
-                f"<form method=post action='/cockpit/equipe/reatribuir'>"
-                f"<input type=hidden name=lead_id value='{l['id']}'>"
-                f"<select name=para><option value=''>mover p/…</option>{opts}</select>"
-                f"<button type=submit>↦</button></form>")
-        leads += (f"<div class=dlead><span class=dot2 style='background:{esc(l['temp_cor'])}'></span>"
-                  f"<div class=m><b>{esc(l['empresa'])}</b></div><span class='cchip {'ia' if l['ia'] else 'voce'}'>{chip}</span>{reat}</div>")
-    if not v["leads"]:
-        leads = "<div class=dvline style='padding:1.5rem'>Sem leads abertos." + (" Está pausado." if v["pausado"] else "") + "</div>"
-    pause_lbl = "▶ Reativar no rodízio" if v["pausado"] else "⏸ Pausar no rodízio"
-    body = (
-        "<div class=hdr><a class=bk href='/cockpit/equipe/placar'>‹</a>"
-        f"<div class=tt><b>{esc(v['nome'])}</b><small>vendedor · {'pausado no rodízio' if v['pausado'] else 'no rodízio'}</small></div></div>"
-        + _flash(request)
-        + "<div class=scroll>"
-        + "<div class=dvstat>"
-        + f"<div class=s><b>{v['fila']}</b><small>na fila</small></div>"
-        + f"<div class=s><b>{v['ganhos']}</b><small>ganhos/mês</small></div>"
-        + f"<div class=s><b>{esc(v['conversao'])}</b><small>conversão</small></div></div>"
-        + f"<div class=dvline><span>💰 <b>{esc(v['rs'])}</b> fechado</span><span>⏱️ <b>{esc(v['resp'])}</b> resposta</span></div>"
-        + "<div class=dvact><form method=post action='/cockpit/equipe/pausar'>"
-        + f"<input type=hidden name=membro_id value='{membro_id}'><input type=hidden name=on value='{0 if v['pausado'] else 1}'>"
-        + f"<button class=pausebtn type=submit>{pause_lbl}</button></form></div>"
-        + f"<div class=dsect>Leads dele <span>{len(v['leads'])} abertos</span></div>{leads}</div>"
-        + _nav_dono("placar"))
-    return _page(f"Cockpit do Dono — {v['nome']}", body)
-
-
-@router.post("/cockpit/equipe/reatribuir")
-def cockpit_dono_reatribuir(request: Request, lead_id: int = Form(...), para: str = Form("")):
-    g = _gerencia(request)
-    if not g:
-        return RedirectResponse("/cockpit", status_code=303)
-    origem = "/cockpit/equipe/placar"
-    if para.strip().isdigit():
-        r = cd_reatribuir(g[0], lead_id, int(para))
-        request.session["ck_ok" if r.get("ok") else "ck_err"] = (
-            "Lead reatribuído ✓" if r.get("ok") else "Não consegui reatribuir.")
-        origem = f"/cockpit/equipe/vendedor/{int(para)}"
-    return RedirectResponse(origem, status_code=303)
-
-
-@router.post("/cockpit/equipe/pausar")
-def cockpit_dono_pausar(request: Request, membro_id: int = Form(...), on: str = Form("1")):
-    g = _gerencia(request)
-    if not g:
-        return RedirectResponse("/cockpit", status_code=303)
-    from finance import cockpit_dono as cd
-    cd.pausar(get_pool(), g[0], membro_id, on == "1")
-    request.session["ck_ok"] = "Rodízio pausado ✓" if on == "1" else "Vendedor reativado ✓"
-    return RedirectResponse(f"/cockpit/equipe/vendedor/{membro_id}", status_code=303)
-
-
-def cd_reatribuir(conta_id, lead_id, para):
-    from finance import cockpit_dono as cd
-    return cd.reatribuir(get_pool(), conta_id, lead_id, para)
-
-
-# ------------------------------------------------------------------ perfil
-@router.get("/cockpit/perfil", response_class=HTMLResponse)
-def cockpit_perfil(request: Request):
-    sess = _sessao(request)
-    if not sess:
-        return RedirectResponse("/cockpit/login", status_code=303)
-    conta_id, membro_id = sess
-    p = ck.perfil(get_pool(), conta_id, membro_id)
-
-    def tgl(label, sub, on, action):
-        cls = "tgl on" if on else "tgl"
-        txt = "Ligado" if on else "Desligado"
-        return (f"<div class=prow><div>{esc(label)}<div class=sub>{esc(sub)}</div></div>"
-                f"<form method=post action='{action}'><input type=hidden name=on value='{0 if on else 1}'>"
-                f"<button class='{cls}' type=submit>{txt}</button></form></div>")
-    body = (
-        "<div class=hdr><a class=bk href='/cockpit'>‹</a>"
-        "<div class=tt><b>Meu perfil</b><small>vendedor</small></div></div>"
-        "<div class=scroll>"
-        f"<div class=pcard><div class=av>{esc(_ini(p['nome']))}</div>"
-        f"<div><b>{esc(p['nome'])}</b><small>{esc(p['email'])}{(' · ' + esc(p['whatsapp'])) if p['whatsapp'] else ''}</small></div></div>"
-        "<div class=kpis>"
-        f"<div class=kpi><b>{p['na_fila']}</b><small>na fila</small></div>"
-        f"<div class=kpi><b>{p['ganhos']}</b><small>ganhos no mês</small></div>"
-        f"<div class=kpi><b>{p['atendidos']}</b><small>atendidos</small></div></div>"
-        + tgl("Notificações push", "avisar quando cair um lead", p["push_ativo"], "/cockpit/perfil/push")
-        + tgl("Receber no rodízio", "desligue pra pausar leads novos", not p["pausado"], "/cockpit/perfil/rodizio")
-        # porta de volta: o login do vendedor passou a cair aqui (contas.equipe.
-        # home_do_papel), e sem isto o Cockpit vira sala sem saída — o painel só
-        # existiria pra quem soubesse digitar a URL. /painel resolve sozinho: o
-        # gate afunila pra área que o papel e a conta permitem.
-        + "<a class=painel href='/painel' style='display:block;text-align:center'>"
-          "Abrir o painel completo</a>"
-        + "<a class=sair href='/cockpit/sair' style='display:block;text-align:center'>Sair</a>"
-        + "</div>")
-    return _page("Cockpit — perfil", body)
-
-
-@router.post("/cockpit/perfil/push")
-def cockpit_perfil_push(request: Request, on: str = Form("1")):
-    sess = _sessao(request)
-    if not sess:
-        return RedirectResponse("/cockpit/login", status_code=303)
-    ck.set_push(get_pool(), sess[0], sess[1], on == "1")
-    return RedirectResponse("/cockpit/perfil", status_code=303)
-
-
-@router.post("/cockpit/perfil/rodizio")
-def cockpit_perfil_rodizio(request: Request, on: str = Form("1")):
-    # o toggle mostra "receber no rodízio"; pausado = NÃO receber → inverte
-    sess = _sessao(request)
-    if not sess:
-        return RedirectResponse("/cockpit/login", status_code=303)
-    ck.set_pausado(get_pool(), sess[0], sess[1], on != "1")
-    return RedirectResponse("/cockpit/perfil", status_code=303)
-
-
-# ------------------------------------------------------------------ PWA (manifest, SW, ícone)
-_ICON_SVG = (
-    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'>"
-    "<rect width='512' height='512' rx='96' fill='var(--bg)'/>"
-    "<rect x='40' y='40' width='432' height='432' rx='80' fill='var(--neon-fundo)'/>"
-    "<path d='M170 150 h150 L190 362 h150' stroke='var(--verde)' stroke-width='34' "
-    "fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>")
+# ------------------------------------------------------------------ instalar como app
+# Cores em hex, de propósito. Estes dois arquivos saem SOZINHOS — o SVG é servido
+# como image/svg+xml e o manifest é JSON —, então não existe `:root` nenhum pra
+# `var(--bg)` resolver. Os valores abaixo são os mesmos tokens da marca, escritos
+# à mão: --bg #0A0F0C, --neon-fundo #10241A, --neon #25D366.
+_ICON_SVG = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'>"
+             "<rect width='512' height='512' rx='96' fill='#0A0F0C'/>"
+             "<rect x='40' y='40' width='432' height='432' rx='80' fill='#10241A'/>"
+             "<path d='M170 150 h150 L190 362 h150' stroke='#25D366' stroke-width='34' "
+             "fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>")
 
 
 @router.get("/cockpit/icon.svg", include_in_schema=False)
 def cockpit_icon():
     return Response(_ICON_SVG, media_type="image/svg+xml",
-                   headers={"Cache-Control": "public, max-age=604800"})
+                    headers={"Cache-Control": "public, max-age=604800"})
 
 
 @router.get("/cockpit/manifest.webmanifest", include_in_schema=False)
 def cockpit_manifest():
     import json
     m = {
-        "name": "Cockpit do Vendedor", "short_name": "Cockpit",
-        "start_url": "/cockpit", "scope": "/cockpit", "display": "standalone",
-        "background_color": "var(--bg)", "theme_color": "var(--bg)",
+        "name": "Zaq — meus leads", "short_name": "Zaq",
+        "start_url": _BASE, "scope": _BASE, "display": "standalone",
+        "background_color": "#0A0F0C", "theme_color": "#0A0F0C",
         "description": "Receba e atenda seus leads.",
         "icons": [
-            {"src": "/cockpit/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"},
+            {"src": "/cockpit/icon.svg", "sizes": "any", "type": "image/svg+xml",
+             "purpose": "any maskable"},
         ],
     }
     return Response(json.dumps(m), media_type="application/manifest+json",
-                   headers={"Cache-Control": "public, max-age=86400"})
+                    headers={"Cache-Control": "public, max-age=86400"})
 
 
+# A chave do cache virou v2 na troca de app. A estratégia é rede-primeiro-com-
+# reserva: quem instalou o app antigo tem o shell antigo guardado, e sem trocar a
+# chave ele voltaria do cache na primeira vez que a rede falhasse — o visual velho
+# reaparecendo sozinho. Chave nova, cache velho descartado no activate.
 _SW = """
-const CACHE='cockpit-v1';
+const CACHE='cockpit-v2';
 self.addEventListener('install',e=>{self.skipWaiting();});
-self.addEventListener('activate',e=>{e.waitUntil(self.clients.claim());});
+self.addEventListener('activate',e=>{e.waitUntil(
+  caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k))))
+    .then(()=>self.clients.claim()));});
 self.addEventListener('fetch',e=>{
   const r=e.request; if(r.method!=='GET'){return;}
   e.respondWith(fetch(r).then(res=>{
@@ -1372,7 +2268,6 @@ self.addEventListener('fetch',e=>{
     return res;
   }).catch(()=>caches.match(r)));
 });
-// push chega na PRÓXIMA fase; handlers já prontos pra não quebrar quando ligar.
 self.addEventListener('push',e=>{
   let d={title:'Novo lead',body:'Toque pra atender'};
   try{d=Object.assign(d,e.data.json());}catch(_){}
@@ -1392,7 +2287,7 @@ self.addEventListener('notificationclick',e=>{
 @router.get("/cockpit/sw.js", include_in_schema=False)
 def cockpit_sw():
     return Response(_SW, media_type="application/javascript",
-                   headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/cockpit"})
+                    headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/cockpit"})
 
 
 # ------------------------------------------------------------------ gestor: gerar link
@@ -1409,17 +2304,17 @@ def painel_equipe_cockpit_link(request: Request, membro_id: int = Form(...)):
         m = c.execute("select coalesce(nullif(nome,''), email), email, papel, ativo "
                       "from membros where id=%s and conta_id=%s", (membro_id, conta[0])).fetchone()
     if not m or not m[3] or (m[2] or "") not in _PAPEIS_OK:
-        request.session["equipe_erro"] = "Só dá pra gerar o link do Cockpit pra vendedor/gestor ativo."
+        request.session["equipe_erro"] = "Só dá pra gerar o link do app pra vendedor/gestor ativo."
         return RedirectResponse("/painel/equipe", status_code=303)
     token = ck.gerar_token(pool, conta[0], membro_id)
     link = ck.link_acesso(token)
     request.session["equipe_link"] = link
-    request.session["equipe_link_cap"] = "🔗 Link do Cockpit gerado — mande pra pessoa (vale 15 min):"
+    request.session["equipe_link_cap"] = "🔗 Link do app gerado — mande pra pessoa (vale 15 min):"
     enviado = False
     if m[1] and "@" in (m[1] or ""):
         enviado = _enviar_link_email(pool, conta[0], m[1], link)
     request.session["equipe_aviso"] = (
-        f"Link do Cockpit gerado e enviado por e-mail para {m[1]} ✓ (vale 15 min)."
+        f"Link do app gerado e enviado por e-mail para {m[1]} ✓ (vale 15 min)."
         if enviado else
-        "Link do Cockpit gerado abaixo — mande pra pessoa (vale 15 min).")
+        "Link do app gerado abaixo — mande pra pessoa (vale 15 min).")
     return RedirectResponse("/painel/equipe", status_code=303)

@@ -201,10 +201,11 @@ def test_pagina_do_evento_mostra_qtd_valor_unitario_e_parcelas(pool, conta_id, m
     assert "Plano de pagamento" in html and "R$ 1.810,00" in html
     assert "52.752.898/0001-58" in html                              # emitente no cabeçalho
     assert "Mensalidade" not in html and "1º ano" not in html
-    # bloco de aprovação como no modelo aprovado: sem caixinha de aceite —
-    # apertar o botão É o aceite, e o que fica registrado não muda.
+    # bloco de aprovação: caixinha de aceite marcada pelo cliente + o botão que
+    # diz o que acontece ao aprovar.
     assert "✓ Aprovar e reservar a data" in html
-    assert 'name="aceite"' in html and "type=\"checkbox\"" not in html
+    assert 'type="checkbox" name="aceite"' in html
+    assert "Li e concordo com os termos e valores deste orçamento" in html
     assert "nome, CPF, data/hora e IP" in html
 
 

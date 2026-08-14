@@ -507,11 +507,10 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
       <input type="text" name="nome" placeholder="Seu nome completo" required>
       <input type="text" name="doc" placeholder="CPF">
     </div>
-    {# O aceite é o próprio ato de apertar o botão: a frase acima diz o que ele
-       está aceitando e o botão diz o que vai acontecer. Sem caixinha extra —
-       é assim no modelo aprovado. O que fica registrado não muda: nome, CPF,
-       data/hora e IP. #}
-    <input type="hidden" name="aceite" value="on">
+    {# Caixinha de aceite: o cliente marca antes de aprovar. É a prova de que
+       leu — vale mais do que o clique sozinho se um dia a assinatura for
+       questionada. #}
+    <label class="ck"><input type="checkbox" name="aceite"> Li e concordo com os termos e valores deste orçamento.</label>
     <button class="go" type="submit">✓ Aprovar e reservar a data</button>
     {% else %}
     <p>Ao aprovar, você aceita esta proposta e autoriza o início. Fica registrado com seu nome, data/hora e IP.</p>

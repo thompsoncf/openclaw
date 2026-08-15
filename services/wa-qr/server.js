@@ -200,8 +200,26 @@ function enfileirarLog (nivel, a, b) {
   const obj = (a && typeof a === 'object') ? a : null
   const msg = typeof a === 'string' ? a : (typeof b === 'string' ? b : '')
   if (_logFila.length >= LOG_DB_FILA_MAX) { _logDescartadas++; return }
-  const conta = obj && Number.isFinite(obj.contaId) ? obj.contaId : null
-  _logFila.push([conta, nivel, String(msg).slice(0, 500), _dadosDoLog(obj)])
+  _logFila.push([_contaDoLog(obj), nivel, String(msg).slice(0, 500), _dadosDoLog(obj),
+    // a hora do EVENTO, não a da gravação. O `default now()` da coluna carimbava a
+    // hora do INSERT — e como as linhas vão em lote de 2 em 2s, uma leva inteira
+    // saía com o mesmo instante. Pra ler "o que veio antes do quê" num incidente,
+    // 2s de granularidade é justamente o que se perde.
+    new Date()])
+}
+
+// contaId virando coluna: aceita número OU string de dígitos. O driver do Postgres
+// devolve bigint como STRING (é o padrão do node-postgres pra int8), então o
+// `contaId` que sai de uma consulta — restaurarSessoes, por exemplo — é '35', não 35.
+// Com o Number.isFinite cru, TODA linha dessas nascia sem conta: o log gravava certo
+// e ficava inútil pra exatamente o uso que motivou a tabela, filtrar por conta.
+// Visto no primeiro minuto em produção, com o log novo se denunciando sozinho.
+function _contaDoLog (obj) {
+  if (!obj) return null
+  const bruto = obj.contaId
+  if (bruto === null || bruto === undefined || bruto === '') return null
+  const n = typeof bruto === 'number' ? bruto : Number(bruto)
+  return Number.isFinite(n) ? n : null
 }
 
 async function gravarLogsPendentes () {
@@ -212,14 +230,15 @@ async function gravarLogsPendentes () {
   const partes = []
   const params = []
   lote.forEach((l, i) => {
-    const b = i * 4
-    partes.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4}::jsonb)`)
-    params.push(l[0], l[1], l[2], l[3])
+    const b = i * 5
+    partes.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4}::jsonb,$${b + 5})`)
+    params.push(l[0], l[1], l[2], l[3], l[4])
   })
   try {
     if (partes.length) {
       await pool.query(
-        'insert into wa_qr_log (conta_id, nivel, msg, dados) values ' + partes.join(','), params)
+        'insert into wa_qr_log (conta_id, nivel, msg, dados, criado_em) values ' + partes.join(','),
+        params)
     }
     // a perda tem que aparecer NA PRÓPRIA tabela: um diagnóstico com buraco
     // silencioso é pior que um diagnóstico que avisa onde está o buraco

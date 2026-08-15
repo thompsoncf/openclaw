@@ -38,6 +38,11 @@
  * Socket que morre sem avisar (fica "conectado" e não entrega mais nada) é religado
  * sozinho pelo vigia — ver vigiarSessoes(): silêncio longo + ping sem resposta.
  *
+ * O log vai pro stdout E pro Postgres (wa_qr_log), e o estado de cada sessão é
+ * carimbado em wa_qr_sessao de minuto em minuto — o log do Render não é legível de
+ * fora, e sem isso todo diagnóstico dependia de alguém abrir o dashboard. Ver o
+ * bloco "log no banco". WA_QR_LOG_DB=0 desliga.
+ *
  * Env: DATABASE_URL, WA_QR_SHARED_SECRET, APP_URL, PORT (default 3000).
  */
 const http = require('node:http')
@@ -53,7 +58,7 @@ const { useDbAuthState } = require('./auth-db')
 const PORT = parseInt(process.env.PORT || '3000', 10)
 const SEGREDO = process.env.WA_QR_SHARED_SECRET || ''
 const APP_URL = (process.env.APP_URL || '').replace(/\/+$/, '')
-const log = pino({ level: process.env.LOG_LEVEL || 'info' })
+const logBase = pino({ level: process.env.LOG_LEVEL || 'info' })
 // Quanto o processo fica ocioso depois de abrir a porta, antes de religar as
 // sessões — ver o comentário no servidor.listen. Regulável por env caso o
 // arranque fique mais pesado (mais contas pareadas no mesmo serviço).
@@ -85,8 +90,8 @@ const PING_ESPACO_MS = parseInt(process.env.WA_QR_PING_ESPACO_MS || '300000', 10
 // assim não entrou uma mensagem por horas. Só o religamento completo traz de volta.
 const MUDO_TETO_MS = parseInt(process.env.WA_QR_MUDO_TETO_MS || '2700000', 10)   // 45min
 
-if (!process.env.DATABASE_URL) { log.error('Falta DATABASE_URL'); process.exit(1) }
-if (!SEGREDO) { log.error('Falta WA_QR_SHARED_SECRET'); process.exit(1) }
+if (!process.env.DATABASE_URL) { logBase.error('Falta DATABASE_URL'); process.exit(1) }
+if (!SEGREDO) { logBase.error('Falta WA_QR_SHARED_SECRET'); process.exit(1) }
 
 // Dois erros do Baileys apareciam em VERMELHO sem representar perda nenhuma, e
 // vermelho que não pede ação treina a gente a ignorar o log inteiro — foi assim
@@ -133,7 +138,140 @@ function comFiltroDeRuido (base) {
   return filtrado
 }
 
-const logBaileys = comFiltroDeRuido(log)
+// ---------------------------------------------------------------- log no banco
+//
+// O log do Render não se lê de fora: o dashboard exige sessão de navegador e
+// `api.render.com` cai em 403 na política de egresso do ambiente do agente. Num
+// chamado real isso custou horas — dava pra provar pelo banco QUE a sessão de uma
+// conta tinha emudecido (mensagens, contatos, ecos e mapa de @lid param todos no
+// mesmo minuto, com as contas vizinhas gravando normal), e não dava pra saber POR
+// QUÊ, porque o motivo estava só no log. Cada rodada virava "abra o dashboard,
+// filtre pela conta e me diga o que aparece".
+//
+// Então o log vai também pro Postgres (tabela wa_qr_log, migração 156), que é
+// onde todo mundo já consegue ler. Regras pra isto não virar um problema maior
+// que o que resolve:
+//
+//   - só o log da NOSSA aplicação vai inteiro; do Baileys só error/fatal, senão
+//     o firehose dele entope a tabela (e o que interessa dele é erro mesmo, tipo
+//     'failed to decrypt message');
+//   - debug/trace nunca vão;
+//   - em LOTE, de 2 em 2s, com fila limitada: fila cheia DESCARTA e depois conta
+//     quantas perdeu, porque log atrasando o serviço é pior que log faltando;
+//   - retenção de 48h (isto é ferramenta de diagnóstico, não arquivo);
+//   - falha ao gravar nunca sobe: o serviço não pode cair por causa do log.
+//
+// WA_QR_LOG_DB=0 desliga tudo isso.
+const LOG_DB = (process.env.WA_QR_LOG_DB || '1') !== '0'
+const LOG_DB_FILA_MAX = parseInt(process.env.WA_QR_LOG_FILA_MAX || '500', 10)
+const LOG_DB_LOTE = 200
+const LOG_DB_FLUSH_MS = parseInt(process.env.WA_QR_LOG_FLUSH_MS || '2000', 10)
+const LOG_DB_RETENCAO_H = parseInt(process.env.WA_QR_LOG_RETENCAO_H || '48', 10)
+const _logFila = []
+let _logDescartadas = 0
+let _logAvisouFalha = false
+
+// O objeto logado vira `dados` jsonb, menos o contaId, que vira coluna (é por ele
+// que todo diagnóstico filtra). Cap de tamanho: um payload gigante logado por
+// engano não pode virar uma linha de megabytes.
+function _dadosDoLog (obj) {
+  if (!obj) return null
+  const resto = {}
+  for (const k of Object.keys(obj)) if (k !== 'contaId') resto[k] = obj[k]
+  if (!Object.keys(resto).length) return null
+  let s
+  try {
+    s = JSON.stringify(resto, (_k, v) => (typeof v === 'bigint' ? String(v) : v))
+  } catch (_) {
+    return null                      // ciclo, getter que explode: melhor sem dados
+  }
+  if (!s) return null
+  // truncar JSON deixaria um texto que não é jsonb válido — embrulha o pedaço
+  return s.length > 4000 ? JSON.stringify({ _truncado: s.slice(0, 3900) }) : s
+}
+
+function enfileirarLog (nivel, a, b) {
+  if (!LOG_DB) return
+  // a garantia "debug/trace não vão pro banco" mora AQUI, não só no embrulho do
+  // logger: assim ela vale pra qualquer chamada, inclusive uma futura que esqueça
+  // disso. Com LOG_LEVEL=debug ligado num apuro, o volume é de outra ordem.
+  if (nivel === 'debug' || nivel === 'trace') return
+  const obj = (a && typeof a === 'object') ? a : null
+  const msg = typeof a === 'string' ? a : (typeof b === 'string' ? b : '')
+  if (_logFila.length >= LOG_DB_FILA_MAX) { _logDescartadas++; return }
+  const conta = obj && Number.isFinite(obj.contaId) ? obj.contaId : null
+  _logFila.push([conta, nivel, String(msg).slice(0, 500), _dadosDoLog(obj)])
+}
+
+async function gravarLogsPendentes () {
+  if (!_logFila.length && !_logDescartadas) return
+  const lote = _logFila.splice(0, LOG_DB_LOTE)
+  const perdidas = _logDescartadas
+  _logDescartadas = 0
+  const partes = []
+  const params = []
+  lote.forEach((l, i) => {
+    const b = i * 4
+    partes.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4}::jsonb)`)
+    params.push(l[0], l[1], l[2], l[3])
+  })
+  try {
+    if (partes.length) {
+      await pool.query(
+        'insert into wa_qr_log (conta_id, nivel, msg, dados) values ' + partes.join(','), params)
+    }
+    // a perda tem que aparecer NA PRÓPRIA tabela: um diagnóstico com buraco
+    // silencioso é pior que um diagnóstico que avisa onde está o buraco
+    if (perdidas) {
+      await pool.query(
+        `insert into wa_qr_log (nivel, msg, dados) values
+         ('warn','log: fila cheia, linhas descartadas',$1::jsonb)`,
+        [JSON.stringify({ perdidas })])
+    }
+    _logAvisouFalha = false
+  } catch (e) {
+    // uma vez por episódio, e no stdout (aqui não dá pra logar no banco)
+    if (!_logAvisouFalha) {
+      _logAvisouFalha = true
+      logBase.warn({ e: String(e) }, 'espelho do log no banco falhou — seguindo só no stdout')
+    }
+  }
+}
+
+async function limparLogsAntigos () {
+  try {
+    await pool.query(
+      `delete from wa_qr_log where criado_em < now() - ($1 || ' hours')::interval`,
+      [String(LOG_DB_RETENCAO_H)])
+  } catch (_) {}
+}
+
+function comEspelhoNoBanco (base, opcoes) {
+  const soErro = !!(opcoes && opcoes.soErro)
+  const nivel = (n) => (a, b) => {
+    if (!soErro || n === 'error' || n === 'fatal') enfileirarLog(n, a, b)
+    return base[n](a, b)
+  }
+  const espelhado = {
+    fatal: nivel('fatal'),
+    error: nivel('error'),
+    warn: nivel('warn'),
+    info: nivel('info'),
+    debug: (a, b) => base.debug(a, b),      // debug/trace nunca vão pro banco
+    trace: (a, b) => base.trace(a, b),
+    child: (bindings) => comEspelhoNoBanco(base.child(bindings || {}), opcoes)
+  }
+  Object.defineProperty(espelhado, 'level', {
+    get: () => base.level,
+    set: (v) => { base.level = v }
+  })
+  return espelhado
+}
+
+const log = comEspelhoNoBanco(logBase)
+// Do Baileys, só erro. O filtro de ruído fica POR FORA: o que ele rebaixa pra
+// debug (408 de init queries, retry de mensagem nossa) não chega ao espelho.
+const logBaileys = comFiltroDeRuido(comEspelhoNoBanco(logBase, { soErro: true }))
 
 // Sem isso, um erro assíncrono que escapa de um try/catch (ex.: dentro de um
 // listener de evento do Baileys) só aparecia no Render como um stack trace cru
@@ -285,6 +423,30 @@ async function pingSessao (sock) {
 //                    religa na hora.
 //   45min calada  -> religa mesmo com o ping respondendo; é o caso da Doce Mell.
 //                    O teto dobra a cada religamento que não trouxe nada — ver tetoMudo.
+// O que cada sessão diz de si mesma, gravado onde dá pra ler (wa_qr_sessao).
+// Uma linha por conta, sobrescrita. Foi a pergunta que ficou sem resposta no
+// chamado: "o serviço acha que está conectado?" — o painel mostrava o estado,
+// mas ele mora na memória do processo e some no deploy seguinte, junto com a
+// prova do que aconteceu.
+async function registrarSessoes () {
+  const agora = Date.now()
+  for (const [contaId, s] of sessoes) {
+    const mudoS = s.ultimoEvento ? Math.round((agora - s.ultimoEvento) / 1000) : null
+    try {
+      await pool.query(
+        `insert into wa_qr_sessao (conta_id, status, ultimo_evento, mudo_s, religamentos, detalhe, atualizado)
+         values ($1,$2,$3,$4,$5,$6::jsonb,now())
+         on conflict (conta_id) do update set
+           status=excluded.status, ultimo_evento=excluded.ultimo_evento, mudo_s=excluded.mudo_s,
+           religamentos=excluded.religamentos, detalhe=excluded.detalhe, atualizado=now()`,
+        [contaId, s.status || '', s.ultimoEvento ? new Date(s.ultimoEvento) : null, mudoS,
+          s.reconexoesMudas || 0,
+          JSON.stringify({ temSock: !!s.sock, iniciando: !!s.iniciando,
+            sincronizando: !!s.sincronizando, syncProgress: s.syncProgress || 0 })])
+    } catch (_) {}   // diagnóstico não pode atrapalhar quem está trabalhando
+  }
+}
+
 async function vigiarSessoes () {
   const agora = Date.now()
   for (const [contaId, s] of sessoes) {
@@ -1844,18 +2006,29 @@ servidor.listen(PORT, () => {
   setTimeout(() => {
     restaurarSessoes().catch((e) => log.error({ e: String(e) }, 'restaurarSessoes: erro solto'))
   }, ESPERA_RESTAURAR_MS)
-  // Vigia das sessões mudas. Uma volta de cada vez (o await dentro do laço já
-  // serializa): duas rodadas em paralelo poderiam religar a mesma conta duas vezes.
+  // Vigia das sessões mudas + retrato delas no banco. Uma volta de cada vez (o
+  // await dentro do laço já serializa): duas rodadas em paralelo poderiam religar
+  // a mesma conta duas vezes.
   let vigiando = false
   setInterval(() => {
     if (vigiando) return
     vigiando = true
     vigiarSessoes()
       .catch((e) => log.error({ e: String(e) }, 'vigiarSessoes: erro solto'))
+      .then(registrarSessoes)
+      .catch(() => {})
       .finally(() => { vigiando = false })
   }, VIGIA_INTERVALO_MS).unref()
+  // Espelho do log no Postgres: descarrega o lote e limpa o que passou da idade.
+  if (LOG_DB) {
+    setInterval(() => {
+      gravarLogsPendentes().catch(() => {})
+    }, LOG_DB_FLUSH_MS).unref()
+    limparLogsAntigos().catch(() => {})
+    setInterval(() => { limparLogsAntigos().catch(() => {}) }, 60 * 60 * 1000).unref()
+  }
 })
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, marcarVivo, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, sessoes, pool }
+module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, marcarVivo, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, sessoes, _logFila, pool }

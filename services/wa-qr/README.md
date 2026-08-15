@@ -29,6 +29,30 @@ Todas as rotas (menos `GET /saude`) exigem o header `x-wa-secret` = `WA_QR_SHARE
 | `WA_QR_SHARED_SECRET` | segredo compartilhado com o web (string aleatória) |
 | `APP_URL` | URL pública do web (ex.: `https://openclaw-web-bcu3.onrender.com`) — pra onde as mensagens recebidas são repassadas |
 | `PORT` | porta HTTP (o Render injeta) |
+| `WA_QR_LOG_DB` | `0` desliga o espelho do log no Postgres (padrão ligado) |
+| `WA_QR_MUDO_LIMITE_MS` · `WA_QR_MUDO_TETO_MS` | vigia da sessão muda: quando pingar (10min) e quando religar mesmo com ping voltando (45min) |
+
+## Diagnóstico sem abrir o dashboard
+
+O log do Render **não se lê de fora**: o dashboard exige sessão de navegador e
+`api.render.com` cai em 403 na política de egresso do ambiente do agente. Num
+chamado real isso custou horas — dava pra provar pelo banco QUE uma sessão tinha
+emudecido, e não POR QUÊ. Por isso o serviço escreve também no Postgres:
+
+```sql
+-- o que aconteceu com a conta 35 na última hora
+select criado_em, nivel, msg, dados from wa_qr_log
+ where conta_id = 35 and criado_em > now() - interval '1 hour' order by id;
+
+-- o que cada sessão diz de si mesma AGORA (status vem da memória do processo)
+select conta_id, status, mudo_s, religamentos, atualizado from wa_qr_sessao
+ order by mudo_s desc nulls last;
+```
+
+`mudo_s` alto com `status='conectado'` é o retrato da sessão que emudeceu sem
+cair — o vigia religa sozinho, e `religamentos` conta quantas tentativas não
+trouxeram nada de volta. Retenção do log: 48h (é ferramenta de diagnóstico, não
+arquivo). Do Baileys só `error`/`fatal` são espelhados; `debug`/`trace`, nunca.
 
 No **web** (app Python), configure também:
 

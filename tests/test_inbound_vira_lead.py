@@ -128,17 +128,37 @@ def test_no_qr_a_campanha_segue_como_sempre(pool):
         assert _estado(c, lead) == ("lead", "quente")
 
 
-def test_quem_ja_e_lead_do_funil_esquenta_na_primeira(pool):
-    """A trava é só pra quem está na BASE. Lead do funil que manda mensagem esquenta
-    na hora, como sempre — senão a caixa pararia de reagir a cliente ativo."""
+def test_quem_chegou_sozinho_esquenta_na_primeira(pool):
+    """A trava é pra quem NÓS fomos atrás. Quem procurou a empresa (origem inbound) é
+    cliente falando com a gente: esquenta na hora, senão a caixa pararia de reagir a
+    quem já está sendo atendido."""
     with pool.connection() as c:
         lead = c.execute(
-            """insert into prospeccao (conta_id, empresa, whatsapp, estagio, temperatura)
-               values (%s,'Já no funil',%s,'lead','frio') returning id""",
+            """insert into prospeccao (conta_id, empresa, whatsapp, estagio, temperatura, origem)
+               values (%s,'Chegou sozinho',%s,'lead','frio','whatsapp_inbound') returning id""",
             (CONTA, "+" + NUM)).fetchone()[0]
         _recebe(c, "oi", sid="s1", continuidade=True)
         c.commit()
         assert _estado(c, lead) == ("lead", "quente")
+
+
+def test_alvo_de_campanha_ja_promovido_tambem_pega_a_trava(pool):
+    """O buraco que a primeira versão tinha: a trava olhava `estagio='base'`, mas a base
+    é esvaziada em lote pelo botão "Promover" ANTES da campanha rodar. Quando o bot
+    respondia, o alvo já era 'lead' e a trava não pegava nada — no banco de produção não
+    existia UMA linha 'base'. O que decide é a origem, não o estágio."""
+    with pool.connection() as c:
+        lead = c.execute(
+            """insert into prospeccao (conta_id, empresa, whatsapp, estagio, temperatura, origem)
+               values (%s,'Promovido antes da campanha',%s,'lead','frio','google_places')
+               returning id""",
+            (CONTA, "+" + NUM)).fetchone()[0]
+        _recebe(c, "no momento não estamos disponíveis", sid="s1", continuidade=True)
+        c.commit()
+        assert _estado(c, lead) == ("lead", "frio"), "bot não pode esquentar"
+        _recebe(c, "quanto custa?", sid="s2", continuidade=True)
+        c.commit()
+        assert _estado(c, lead) == ("lead", "quente"), "pessoa continuando, sim"
 
 
 # ------------------------------------------------------ 2. contato do histórico

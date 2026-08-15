@@ -2672,11 +2672,11 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     remetente = _so_digitos(remetente)
     alvo8 = remetente[-8:] if len(remetente) >= 8 else remetente
     lead = c.execute(
-        r"""select id, coalesce(estagio,'') from prospeccao
+        r"""select id, coalesce(origem,'') from prospeccao
              where conta_id=%s and right(regexp_replace(coalesce(whatsapp, telefone, ''), '\D', '', 'g'), 8) = %s
              order by atualizado_em desc limit 1""", (conta_id, alvo8)).fetchone()
     lead_id = lead[0] if lead else None
-    na_base = bool(lead) and lead[1] == "base"
+    de_prospeccao = bool(lead) and lead[1] not in ("whatsapp_inbound", "email_inbound")
     lead_novo = False
     nome_lead_novo = None
     if not lead_id:
@@ -2721,10 +2721,16 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
         # do vendedor. Quem clicou no botão nem chega aqui — `_tratar_botao_prospec`
         # resolve antes, então o aceite continua imediato.
         #
-        # A trava vale SÓ pra quem ainda está na base: quem já é lead do funil é cliente
-        # ativo, e a mensagem dele tem que esquentar o card na hora — senão a caixa
-        # pararia de reagir a quem já está sendo atendido.
-        if not (exigir_continuidade and na_base) or _ja_conversou(c, conta_id, lead_id):
+        # A trava vale pra quem NÓS fomos atrás (Google, Explorium, importação, cadastro
+        # manual) — não pra quem procurou a empresa. Quem chegou pelo WhatsApp/e-mail já
+        # é cliente falando com a gente: a mensagem dele esquenta na hora, sempre.
+        #
+        # Não dá pra usar `estagio='base'` aqui, que era a leitura óbvia. Na prática a
+        # base é esvaziada em lote pelo botão "Promover" ANTES da campanha rodar, então
+        # na hora que o bot responde o alvo já é 'lead' — a trava nunca disparava. Quem
+        # já engajou de verdade continua esquentando por `_ja_conversou`, que é o que
+        # separa cliente ativo de alvo frio, e não depende do estágio.
+        if not (exigir_continuidade and de_prospeccao) or _ja_conversou(c, conta_id, lead_id):
             _promover_para_lead(c, conta_id, lead_id)
     # acha a conversa do lead OU uma órfã por contato_ref (e vincula ela ao lead)
     conv = c.execute(

@@ -90,6 +90,33 @@ tipo faz o blob nunca existir. Hoje aceitamos só:
 nascer vazia, o caminho é devolver o `INITIAL_BOOTSTRAP` **e** subir de plano, nesta ordem —
 nenhum ajuste nosso encolhe o blob, quem baixa e descompacta é o Baileys por dentro.
 
+> **Medido em produção depois do corte:** pico de **189 MB** de RSS (era morte em 512), o
+> gate recusando `INITIAL_BOOTSTRAP`/`INITIAL_STATUS_V3`/`NON_BLOCKING_DATA`, e o `RECENT`
+> chegando e sendo processado — ou seja, **a importação de conversa sobreviveu**. O risco
+> de "nasce vazia" não se confirmou.
+
+### Por que uma onda descarta quase tudo (`histórico peneirado`)
+
+A linha dizia só `descartadas: 5000` — e 5000 pode ser tudo certo ou pode ser conversa
+perdida. Hoje ela abre o número por motivo:
+
+| motivo | descarte legítimo? |
+|---|---|
+| `fora_da_janela` | ✅ mais velha que os 30 dias (`HISTORICO_JANELA_SEGUNDOS`) |
+| `grupo` · `canal` · `status` | ✅ não é conversa de lead |
+| `sem_texto` | ✅ mídia sem legenda, mensagem de protocolo |
+| `sem_data` · `sem_app_url` | ⚠️ não deveria acontecer |
+| `lid_sem_mapa` | ❌ **perda real** — ver abaixo |
+
+`lidsPerdidos` conta **contatos distintos**, não mensagens (1400 mensagens de 8 pessoas é
+um problema; de 300 pessoas é outro), com 5 jids de exemplo pra conferência.
+
+O `lid_sem_mapa` é um buraco anterior a tudo isso: num pareamento novo o mapa lid→telefone
+nasce vazio, e mensagem de **histórico não traz `senderPn`** (só a ao vivo traz), então
+quem só aparece no histórico é descartado mesmo que o número seja aprendido minutos depois.
+O conserto seria guardar o descartado e reprocessar quando o par for aprendido — trabalho
+grande e estado novo, que só vale se o número medido justificar. **Meça antes.**
+
 O `restaurarSessoes` também passou a espaçar as contas em **30s** (`WA_QR_ESPACO_CONTAS_MS`),
 não 3s: cada conta trabalha pesado por minutos depois de conectar, e três delas sincronizando
 juntas era o amplificador do laço de crash.
@@ -109,7 +136,7 @@ createdb wa_qr_test
 WA_AUTH_TEST_URL=postgresql://postgres@localhost:5432/wa_qr_test node teste-auth-db.js
 # caches em memória: lote de gravação do mapa @lid, teto de bytes, limpeza por conta
 WA_QR_TEST_URL=postgresql://postgres@localhost:5432/wa_qr_test node teste-lidmap.js
-# gate do histórico — quais ondas podem ser baixadas (não precisa de banco)
+# histórico: gate das ondas + peneira mensagem a mensagem (não precisa de banco)
 node teste-historico.js
 ```
 

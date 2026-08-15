@@ -1,6 +1,10 @@
 'use strict'
-// Gate do histórico (deveSincronizarHistorico) — o que decide se um BLOB inteiro vai
-// ser baixado da rede e descompactado na memória.
+// Histórico importado, as duas peneiras:
+//
+//   1. deveSincronizarHistorico — decide se um BLOB inteiro vai ser baixado da rede e
+//      descompactado na memória (o que estourou a instância).
+//   2. prepararHistorico — decide, mensagem a mensagem, o que vira conversa no Zaq e,
+//      quando descarta, POR QUÊ (o motivo que alimenta a linha de log da onda).
 //
 // Por que isto merece teste próprio: na fonte do Baileys o gate roda ANTES do download
 // (Socket/chats.js:779 -> Utils/process-message.js:158-167), e o download
@@ -19,8 +23,11 @@
 process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://x@127.0.0.1:5432/x'
 process.env.WA_QR_SHARED_SECRET = process.env.WA_QR_SHARED_SECRET || 'teste'
 process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'silent'
+// prepararHistorico devolve `sem_app_url` sem isto — e aí TODO teste da peneira passaria
+// pelo motivo errado, verde e sem valor nenhum.
+process.env.APP_URL = process.env.APP_URL || 'http://localhost:8000'
 
-const { deveSincronizarHistorico, TIPO_HIST } = require('./server')
+const { deveSincronizarHistorico, prepararHistorico, TIPO_HIST, lidMaps } = require('./server')
 
 let falhas = 0
 function conferir (ok, descricao) {
@@ -58,6 +65,93 @@ const todos = [TIPO_HIST.INITIAL_BOOTSTRAP, TIPO_HIST.FULL, TIPO_HIST.ON_DEMAND,
   TIPO_HIST.RECENT, TIPO_HIST.PUSH_NAME]
 const aceitos = todos.filter(deveSincronizarHistorico)
 conferir(aceitos.length === 2, 'exatamente 2 tipos aceitos (achou ' + aceitos.length + ')')
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Peneira mensagem a mensagem (prepararHistorico)
+//
+// O motivo do descarte não é enfeite de log: num pareamento real a onda descartou 5000
+// de 5000 mensagens, e `descartadas: 5000` não diz se aquilo foi certo (grupo, status,
+// mensagem velha) ou se foi conversa perdida (@lid sem número no mapa). É esse número
+// que decide se vale construir a resolução atrasada de @lid.
+
+const CONTA = 777
+const agora = Math.floor(Date.now() / 1000)
+const DIA = 24 * 3600
+
+function msg (extra) {
+  return Object.assign({
+    key: { remoteJid: '5511999998888@s.whatsapp.net', id: 'ABC', fromMe: false },
+    message: { conversation: 'oi, tudo bem?' },
+    messageTimestamp: agora - DIA
+  }, extra)
+}
+const motivoDe = (m) => prepararHistorico(CONTA, m).motivo
+
+console.log('\nmensagem boa é aceita (e sai pronta pro POST)')
+const boa = prepararHistorico(CONTA, msg())
+conferir(!boa.motivo, 'sem motivo de descarte')
+conferir(boa.chat === '5511999998888@s.whatsapp.net', 'agrupa pelo jid do chat')
+const corpo = JSON.parse(boa.corpo || '{}')
+conferir(corpo.conta_id === CONTA && corpo.sender === '5511999998888' &&
+  corpo.texto === 'oi, tudo bem?' && corpo.de_mim === false,
+'corpo com conta, número, texto e de_mim')
+
+// Regressão conhecida: fromMe já ficou de fora uma vez e o histórico importado nascia
+// só com o lado do cliente, conversa pela metade.
+console.log('\nmensagem que o vendedor mandou (fromMe) entra também')
+const minha = prepararHistorico(CONTA, msg({
+  key: { remoteJid: '5511999998888@s.whatsapp.net', id: 'X', fromMe: true }
+}))
+conferir(!minha.motivo && minha.chat === '5511999998888@s.whatsapp.net',
+  'aceita e agrupa pelo CHAT, não pelo autor')
+conferir(JSON.parse(minha.corpo || '{}').de_mim === true, 'marcada como de_mim')
+
+console.log('\ncada descarte tem nome próprio')
+conferir(motivoDe(msg({ message: {} })) === 'sem_texto',
+  'sem_texto — mídia sem legenda, mensagem de protocolo')
+conferir(motivoDe(msg({ key: { remoteJid: '120363000000000000@g.us', id: 'G' } })) === 'grupo',
+  'grupo')
+conferir(motivoDe(msg({ key: { remoteJid: '120363000000000000@newsletter', id: 'N' } })) === 'canal',
+  'canal — mesmo formato numérico do grupo, sufixo diferente')
+conferir(motivoDe(msg({ key: { remoteJid: 'status@broadcast', id: 'S' } })) === 'status',
+  'status')
+conferir(motivoDe(msg({ key: { remoteJid: '', id: 'V' } })) === 'status',
+  'jid vazio cai no mesmo balde, sem virar conversa')
+conferir(motivoDe(msg({ messageTimestamp: 0 })) === 'sem_data', 'sem_data')
+conferir(motivoDe(msg({ messageTimestamp: agora - 40 * DIA })) === 'fora_da_janela',
+  'fora_da_janela — mais velha que os 30 dias')
+
+console.log('\n@lid: com mapa vira conversa, sem mapa vira contagem')
+const dolid = () => msg({ key: { remoteJid: '4477@lid', id: 'L', fromMe: false } })
+lidMaps.delete(CONTA)
+const perdida = prepararHistorico(CONTA, dolid())
+conferir(perdida.motivo === 'lid_sem_mapa', 'sem o mapa → lid_sem_mapa')
+conferir(perdida.jid === '4477@lid',
+  'devolve o jid — a onda conta CONTATOS distintos, não mensagens')
+
+lidMaps.set(CONTA, new Map([['4477@lid', '5511777776666@s.whatsapp.net']]))
+const achada = prepararHistorico(CONTA, dolid())
+conferir(!achada.motivo && achada.chat === '5511777776666@s.whatsapp.net',
+  'com o mapa → aceita, já com o número real')
+conferir(JSON.parse(achada.corpo || '{}').sender === '5511777776666',
+  'o sender é o telefone, nunca o código @lid')
+lidMaps.delete(CONTA)
+
+// A trava que sobrevive ao tempo: alguém acrescenta um descarte novo e devolve null (o
+// contrato antigo) ou esquece o motivo. Aí a soma não fecha e a linha de log passa a
+// mentir em silêncio — que é exatamente o problema que este trabalho veio consertar.
+console.log('\ntoda mensagem sai aceita OU com motivo — a soma tem que fechar')
+const lote = [msg(), msg({ message: {} }), msg({ key: { remoteJid: 'x@g.us', id: 'g' } }),
+  msg({ messageTimestamp: agora - 90 * DIA }), dolid(), msg({ key: { remoteJid: 'status@broadcast', id: 's' } })]
+let aceitas = 0; let comMotivo = 0
+for (const m of lote) {
+  const r = prepararHistorico(CONTA, m)
+  if (!r) { comMotivo = -999; break }          // devolveu null: contrato quebrado
+  if (r.motivo) comMotivo++; else aceitas++
+}
+conferir(aceitas === 1, 'uma aceita no lote (achou ' + aceitas + ')')
+conferir(aceitas + comMotivo === lote.length,
+  'aceitas + motivos === total (' + aceitas + '+' + comMotivo + ' de ' + lote.length + ')')
 
 console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'tudo passou'))
 process.exit(falhas ? 1 : 0)

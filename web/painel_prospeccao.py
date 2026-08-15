@@ -2056,19 +2056,27 @@ def comunicacao_virar_lead(request: Request, conversa_id: int = Form(...),
         # Sem responsável escolhido, o rodízio decide — mesma regra do lead que entra
         # sozinho pelo WhatsApp. Antes só aquele caminho chamava a distribuição, então
         # "— livre —" aqui queria dizer "de ninguém": o lead nascia órfão mesmo com a
-        # fila montada e ligada. Best-effort, igual lá: promover a conversa a lead não
-        # pode falhar porque o aviso ao vendedor falhou.
+        # fila montada e ligada.
+        #
+        # O `with c.transaction()` é SAVEPOINT, e não enfeite: distribuir é acessório,
+        # criar o lead é o pedido. Sem ele, um erro de SQL aqui dentro aborta a
+        # transação toda — o `except` engole a exceção, o `commit()` de baixo vira
+        # rollback e a rota responde {"ok": true, "lead_id": N} com o lead inexistente.
+        # Com o savepoint, quem cai é só a distribuição: o lead fica, sem dono.
         if vend is None:
             try:
                 from finance import distribuicao as _dist
-                _mid = _dist.atribuir_se_sem_dono(c, ctx["conta_id"], lead_id)
+                with c.transaction():
+                    _mid = _dist.atribuir_se_sem_dono(c, ctx["conta_id"], lead_id)
                 if _mid:
                     import threading
                     threading.Thread(target=_dist.avisar_vendedor,
                                      args=(pool, ctx["conta_id"], _mid, empresa_final[:250]),
                                      daemon=True).start()
             except Exception:  # noqa: BLE001
-                pass
+                logging.getLogger("prospeccao.rodizio").warning(
+                    "não consegui distribuir o lead %s (conta %s) — fica sem dono",
+                    lead_id, ctx["conta_id"], exc_info=True)
         c.commit()
     return JSONResponse({"ok": True, "lead_id": lead_id})
 

@@ -24,7 +24,7 @@ create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id 
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   canal text, contato_ref text, contato_nome text, status text default 'aberta',
-  ultima_msg_em timestamptz default now());
+  responsavel_membro_id bigint, ultima_msg_em timestamptz default now());
 create table wa_contatos (conta_id bigint, numero8 text, nome text,
   da_agenda boolean default false, primary key (conta_id, numero8));
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
@@ -306,6 +306,47 @@ def test_com_o_rodizio_desligado_o_lead_fica_sem_dono(pool, monkeypatch):
     lead_id = _virar(req, conv)
     with pool.connection() as c:
         assert _lead(c, lead_id)[7] is None
+
+
+def test_o_rodizio_tambem_marca_a_conversa(pool, monkeypatch):
+    """Atribuir sem marcar a conversa deixaria a caixa de entrada dizendo 'sem
+    responsável' pro lead que já tem dono."""
+    _sem_avisar(monkeypatch)
+    with pool.connection() as c:
+        _rodizio(c, ativo=True, membro_ids=(9,))
+        conv = _conversa(c, nome="Mercado Avenida")
+        c.commit()
+    req = _logado(monkeypatch, pool)
+    _virar(req, conv)
+    with pool.connection() as c:
+        assert c.execute("select responsavel_membro_id from conversas where id=%s",
+                         (conv,)).fetchone()[0] == 9
+
+
+def test_o_lead_sobrevive_quando_a_distribuicao_explode(pool, monkeypatch):
+    """O defeito que o CI pegou: sem SAVEPOINT, um erro dentro da distribuição abortava
+    a transação inteira. O `except` engolia a exceção, o commit seguinte virava rollback
+    e a rota respondia {"ok": true, "lead_id": N} com o lead que não existia.
+
+    Distribuir é acessório; criar o lead é o que foi pedido. Se o rodízio cair, o lead
+    fica — sem dono, e com o motivo no log."""
+    from finance import distribuicao as dist
+
+    def _explode(*a, **k):
+        raise RuntimeError("banco tossiu no meio da distribuição")
+
+    monkeypatch.setattr(dist, "atribuir_se_sem_dono", _explode)
+    with pool.connection() as c:
+        _rodizio(c, ativo=True, membro_ids=(9,))
+        conv = _conversa(c, nome="Mercado Avenida")
+        c.commit()
+    req = _logado(monkeypatch, pool)
+    lead_id = _virar(req, conv)
+    with pool.connection() as c:
+        lead = _lead(c, lead_id)
+    assert lead is not None, "o lead foi prometido na resposta e precisa existir"
+    assert lead[0] == "Mercado Avenida"
+    assert lead[7] is None                      # sem dono, que é o aceitável aqui
 
 
 def test_o_modal_avisa_quando_o_rodizio_esta_desligado(pool, monkeypatch):

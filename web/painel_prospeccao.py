@@ -2634,45 +2634,75 @@ def _nome_da_agenda(c, conta_id, numero: str) -> str:
     return ((r[0] if r else "") or "").strip()[:120]
 
 
-def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente_on):
+def _ja_conversou(c, conta_id, lead_id) -> bool:
+    """Já houve troca de verdade com esse lead — ou seja, a mensagem que está chegando
+    agora não é a primeira coisa que acontece.
+
+    Conta como troca: uma mensagem recebida anterior (a pessoa insistiu) ou uma
+    enviada DEPOIS de algo recebido (a empresa/agente respondeu e ela voltou). O
+    disparo da campanha em si não conta — senão todo alvo já entraria "com histórico"
+    e a trava não pegaria nada, que é o defeito óbvio dessa checagem.
+    """
+    r = c.execute(
+        """with msg as (
+             select m.direcao, m.criado_em
+               from mensagens m join conversas cv on cv.id=m.conversa_id
+              where cv.conta_id=%s and cv.prospeccao_id=%s)
+           select count(*) filter (where direcao='in'),
+                  count(*) filter (where direcao='out' and criado_em > coalesce(
+                                     (select min(criado_em) from msg where direcao='in'),
+                                     'infinity'::timestamptz))
+             from msg""",
+        (conta_id, lead_id)).fetchone()
+    return bool(r and ((r[0] or 0) >= 1 or (r[1] or 0) >= 1))
+
+
+def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente_on,
+                         *, exigir_continuidade=False):
     """WhatsApp de ENTRADA (Twilio OU Cloud API): resolve lead+conversa pelo telefone,
     grava a mensagem (dedup por provider_sid) e reabre a janela/reativa o agente.
-    Devolve conv_id. Um humano que 'assumiu' (status='pendente') não é reativado."""
+    Devolve conv_id. Um humano que 'assumiu' (status='pendente') não é reativado.
+
+    `exigir_continuidade` liga a trava contra resposta automática: um contato da BASE
+    que responde algo não reconhecível como aceite não vira lead quente na primeira
+    mensagem — vira na segunda, ou depois que a empresa responder. Bot de empresa
+    manda o "não estamos disponíveis" e cala; pessoa continua. Só faz sentido onde há
+    campanha com template (Twilio/Cloud); no QR o disparo é texto solto e a regra
+    segue como sempre foi."""
     remetente = _so_digitos(remetente)
     alvo8 = remetente[-8:] if len(remetente) >= 8 else remetente
     lead = c.execute(
-        r"""select id from prospeccao
+        r"""select id, coalesce(estagio,'') from prospeccao
              where conta_id=%s and right(regexp_replace(coalesce(whatsapp, telefone, ''), '\D', '', 'g'), 8) = %s
              order by atualizado_em desc limit 1""", (conta_id, alvo8)).fetchone()
     lead_id = lead[0] if lead else None
+    na_base = bool(lead) and lead[1] == "base"
     lead_novo = False
     nome_lead_novo = None
     if not lead_id:
-        # Já existe uma conversa ÓRFÃ desse número (ex.: importada do histórico do
-        # WhatsApp por QR, de ANTES de conectar — ver _wa_historico_conversa)? É um
-        # contato ANTIGO: não vira lead sozinho, só anexa na conversa órfã. O vendedor
-        # decide se vale virar lead (botão "virar lead" no inbox de Comunicação).
+        # Conversa ÓRFÃ desse número (importada do histórico do WhatsApp por QR, de
+        # ANTES de conectar — ver _wa_historico_conversa). ANTES isso era um beco sem
+        # saída: a mensagem era anexada e pronto, o contato nunca entrava no funil e
+        # ninguém era avisado. Numa padaria, esse "contato antigo" é o cliente pedindo
+        # bolo — e o pedido ficava sem dono, invisível pra fila.
+        #
+        # Agora a conversa órfã só serve pra herdar o NOME (melhor que o pushName) e
+        # o fluxo segue pra criar o lead. O vínculo da conversa existente com o lead
+        # novo é feito logo abaixo, junto com as mensagens que ela já tinha.
         orfa = c.execute(
-            """select id from conversas where conta_id=%s and canal='whatsapp'
-                and prospeccao_id is null and contato_ref=%s""",
+            """select id, coalesce(nullif(contato_nome,''),'') from conversas
+                where conta_id=%s and canal='whatsapp'
+                  and prospeccao_id is null and contato_ref=%s""",
             (conta_id, remetente)).fetchone()
-        if orfa:
-            conv_id = orfa[0]
-            c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
-                         values (%s,'whatsapp','in','lead',%s,%s)
-                         on conflict (provider_sid) where provider_sid is not null do nothing""",
-                      (conv_id, (corpo or "")[:8000], sid))
-            # guarda/atualiza o nome do perfil pra conversa não ficar só com o número
-            c.execute("""update conversas set ultima_msg_em=now(),
-                           contato_nome=coalesce(nullif(contato_nome,''), nullif(%s,'')) where id=%s""",
-                      ((nome_perfil or "").strip()[:120], conv_id))
-            return conv_id
+        nome_orfa = orfa[1] if orfa else ""
         # contato NOVO de verdade (landing/WhatsApp) → vira lead QUENTE, não atribuído (o dono distribui).
         # Nome: primeiro o da AGENDA do vendedor (o melhor que existe), depois o do
         # perfil do WhatsApp (pushName) quando o contato deixa público; sem nenhum
         # dos dois, o WhatsApp não manda outro nome pra gente pegar.
-        nome = _nome_da_agenda(c, conta_id, remetente) or (nome_perfil or "").strip() \
-            or "Contato WhatsApp"
+        # `nome_orfa` entra logo depois da agenda: numa conversa importada ele é o nome
+        # com que o contato já aparecia no celular, melhor que o pushName do momento.
+        nome = _nome_da_agenda(c, conta_id, remetente) or nome_orfa \
+            or (nome_perfil or "").strip() or "Contato WhatsApp"
         # tipo 'pf': quem manda mensagem é uma pessoa. Mesmo palpite do botão "Levar
         # para o lead" — os dois caminhos nascendo diferentes era o que confundia. Um
         # clique na ficha troca pra empresa quando o número for de um comércio.
@@ -2684,8 +2714,18 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
         lead_novo = True
         nome_lead_novo = nome
     else:
-        # lead da BASE respondeu/topou no WhatsApp → promove pro funil (Novo + Quente)
-        _promover_para_lead(c, conta_id, lead_id)
+        # lead da BASE respondeu/topou no WhatsApp → promove pro funil (Novo + Quente).
+        # Com `exigir_continuidade`, a PRIMEIRA mensagem de quem ainda está na base não
+        # promove: a resposta automática das empresas ("no momento não estamos
+        # disponíveis") entrava aqui e virava lead QUENTE, sujando o funil e o placar
+        # do vendedor. Quem clicou no botão nem chega aqui — `_tratar_botao_prospec`
+        # resolve antes, então o aceite continua imediato.
+        #
+        # A trava vale SÓ pra quem ainda está na base: quem já é lead do funil é cliente
+        # ativo, e a mensagem dele tem que esquentar o card na hora — senão a caixa
+        # pararia de reagir a quem já está sendo atendido.
+        if not (exigir_continuidade and na_base) or _ja_conversou(c, conta_id, lead_id):
+            _promover_para_lead(c, conta_id, lead_id)
     # acha a conversa do lead OU uma órfã por contato_ref (e vincula ela ao lead)
     conv = c.execute(
         """select id, prospeccao_id from conversas
@@ -2722,18 +2762,28 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     # rodízio: se o lead ainda não tem dono, distribui pro próximo vendedor da fila.
     # Cobre contato NOVO e resposta de campanha (ambos passam por aqui). Best-effort —
     # nunca deixa a entrada da mensagem quebrar; o aviso vai numa thread solta.
+    #
+    # O SAVEPOINT não é decoração: sem ele, um erro aqui aborta a transação inteira e o
+    # `commit` lá do webhook vira ROLLBACK calado — a MENSAGEM RECEBIDA se perde e o
+    # WhatsApp leva 200 como se tivesse dado tudo certo. Falhar o rodízio custa um lead
+    # sem dono; perder a mensagem custa o cliente.
     _mid = None
     try:
-        from finance import distribuicao as _dist
-        _mid = _dist.atribuir_se_sem_dono(c, conta_id, lead_id)
-        if _mid:
-            _emp = (c.execute("select coalesce(empresa,'') from prospeccao where id=%s",
-                              (lead_id,)).fetchone() or [""])[0]
-            import threading
-            threading.Thread(target=_dist.avisar_vendedor,
-                             args=(get_pool(), conta_id, _mid, _emp), daemon=True).start()
+        with c.transaction():
+            from finance import distribuicao as _dist
+            _mid = _dist.atribuir_se_sem_dono(c, conta_id, lead_id)
+            if _mid:
+                _emp = (c.execute("select coalesce(empresa,'') from prospeccao where id=%s",
+                                  (lead_id,)).fetchone() or [""])[0]
+                import threading
+                threading.Thread(target=_dist.avisar_vendedor,
+                                 args=(get_pool(), conta_id, _mid, _emp), daemon=True).start()
     except Exception:  # noqa: BLE001
-        pass
+        import logging
+        _mid = None
+        logging.getLogger("prospeccao.rodizio").warning(
+            "rodízio falhou no inbound conta=%s lead=%s — mensagem preservada",
+            conta_id, lead_id, exc_info=True)
     # Lead novo de verdade (não resposta de alguém que já tinha entrada na base) já
     # sai da caixa com um retorno agendado — assim ninguém esquece de responder.
     # Best-effort: nunca deixa a entrada da mensagem quebrar por isso.
@@ -2910,8 +2960,12 @@ async def webhook_twilio(request: Request, background_tasks: BackgroundTasks):
         master = c.execute("select coalesce(ativo,false) from agente_config where conta_id=%s",
                            (conta_id,)).fetchone()
         agente_on = bool(master and master[0])
+        # Twilio: aqui existe campanha com template, então a trava da resposta
+        # automática vale. O clique no botão não passa por aqui — `_tratar_botao_prospec`
+        # já resolveu acima.
         conv_id = _wa_inbound_conversa(c, conta_id, remetente, corpo, sid,
-                                       params.get("ProfileName"), agente_on)
+                                       params.get("ProfileName"), agente_on,
+                                       exigir_continuidade=True)
         c.commit()
     # deixa o agente atender em background (não segura a resposta pro Twilio)
     from finance import agente as _ag
@@ -3249,8 +3303,10 @@ async def webhook_meta(request: Request, background_tasks: BackgroundTasks):
                 m = c.execute("select coalesce(ativo,false) from agente_config where conta_id=%s",
                               (conta_id,)).fetchone()
                 agente_on = bool(m and m[0])
+                # Cloud API: mesma trava do Twilio — é o outro provedor com template.
                 conv_id = _wa_inbound_conversa(c, conta_id, ev["sender"], ev["texto"],
-                                               ev.get("sid"), ev.get("nome"), agente_on)
+                                               ev.get("sid"), ev.get("nome"), agente_on,
+                                               exigir_continuidade=True)
                 if agente_on:
                     disparar.append((conta_id, conv_id))
                 continue

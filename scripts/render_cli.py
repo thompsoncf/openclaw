@@ -25,6 +25,23 @@ USO
 
 O <servico> pode ser o nome (openclaw-bot) OU o id (srv-...). Nome e' resolvido
 automaticamente pela lista de servicos.
+
+SEM ACESSO A' API? USE O HISTORICO
+----------------------------------
+Todo comando acima fala com api.render.com. Onde esse host esta' bloqueado
+(ex: o ambiente do Claude Code na web, que devolve 403 no CONNECT), eles nao
+funcionam - e nao ha' contorno pelo lado do script.
+
+Pra esse caso existe o `historico`, que le os eventos de deploy do NOSSO
+Postgres (tabela render_evento, alimentada pelo webhook do Render). Nao precisa
+de RENDER_API_KEY nem de rede externa - so' de DATABASE_URL:
+
+    python -m scripts.render_cli historico                      # ultimos 20
+    python -m scripts.render_cli historico --servico openclaw-web-bcu3
+    python -m scripts.render_cli historico --falhas --limit 5   # so' o que quebrou
+    python -m scripts.render_cli historico --falhas --log       # com a cauda do log
+
+Como ligar o webhook: docs/RENDER_OBSERVABILIDADE.md
 """
 from __future__ import annotations
 
@@ -180,6 +197,32 @@ def cmd_logs(s, a):
         print(f"{ts}  {msg}")
 
 
+def cmd_historico(_s, a):
+    """Le do Postgres, NAO da API do Render.
+
+    E' o unico comando que funciona com api.render.com bloqueada, porque quem
+    buscou os dados foi o webhook (rodando dentro do Render), nao este script.
+    """
+    from core.render_eventos import historico
+    linhas = historico(servico=a.servico or "", limite=a.limit, so_falhas=a.falhas)
+    if not linhas:
+        print("Nenhum evento gravado ainda.")
+        print("Se o webhook ja' esta' ligado, so' aparece a partir do proximo deploy.")
+        print("Pra ligar: docs/RENDER_OBSERVABILIDADE.md")
+        return
+    for e in linhas:
+        # marcador visual: da' pra bater o olho e achar a falha na lista
+        marca = {True: "ok  ", False: "FALHA"}.get(e["sucesso"], "-   ")
+        quando = e["recebido_em"].strftime("%d/%m %H:%M") if e["recebido_em"] else "?"
+        msg = (e["commit_msg"] or "").splitlines()
+        msg = msg[0][:60] if msg else ""
+        print(f"{quando}  {marca:<6} {(e['servico_nome'] or e['servico_id'] or '?'):<26} "
+              f"{(e['status'] or e['tipo']):<16} {(e['commit_id'] or '')[:8]:<8} {msg}")
+        if a.log and e.get("log_trecho"):
+            print("  " + "\n  ".join(e["log_trecho"].splitlines()))
+            print()
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description="Cliente da API do Render.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -192,8 +235,19 @@ def main(argv=None):
     sp = sub.add_parser("envvars", help="lista chaves de env (valores ocultos)"); sp.add_argument("servico"); sp.set_defaults(fn=cmd_envvars)
     sp = sub.add_parser("logs", help="logs recentes"); sp.add_argument("servico"); sp.add_argument("--limit", type=int, default=100); sp.set_defaults(fn=cmd_logs)
 
+    sp = sub.add_parser("historico", help="historico de deploys (le do banco, sem API)")
+    sp.add_argument("--servico", default="", help="filtra por nome ou id do servico")
+    sp.add_argument("--limit", type=int, default=20)
+    sp.add_argument("--falhas", action="store_true", help="so' os deploys que quebraram")
+    sp.add_argument("--log", action="store_true", help="mostra a cauda do log de cada falha")
+    # api=False: este comando NAO fala com api.render.com, entao nao pode exigir
+    # RENDER_API_KEY - e' justamente o comando pra quando a API esta' fora de alcance.
+    sp.set_defaults(fn=cmd_historico, api=False)
+
     a = p.parse_args(argv)
-    a.fn(_sessao(), a)
+    # So' abre sessao HTTP pra quem realmente vai usar a API.
+    sessao = _sessao() if getattr(a, "api", True) else None
+    a.fn(sessao, a)
 
 
 if __name__ == "__main__":

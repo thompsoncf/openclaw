@@ -952,6 +952,37 @@ async def telegram_webhook(request: Request):
     return {"ok": True}
 
 
+@app.post("/webhook/render")
+async def webhook_render(request: Request, background: BackgroundTasks):
+    """Recebe os eventos de deploy do Render (padrao Standard Webhooks).
+
+    Grava o historico em `render_evento` e avisa o admin quando um deploy
+    quebra, com commit e cauda do log junto. Detalhes do porque em
+    core/render_eventos.py.
+
+    Le o corpo CRU (`await request.body()`) porque a assinatura e' calculada
+    sobre os bytes exatos - reserializar o JSON quebraria a verificacao.
+
+    Responde 200 na hora e processa em background: o enriquecimento chama a API
+    do Render varias vezes, e o Render re-entrega o webhook se demorar.
+    """
+    from core import render_eventos
+
+    if not os.environ.get("RENDER_WEBHOOK_SECRET"):
+        # Sem segredo configurado o receptor fica inerte de proposito (permite
+        # subir o codigo antes de criar o webhook la'). 200 pra nao acumular
+        # falha de entrega no painel do Render.
+        return Response(status_code=200)
+
+    corpo = await request.body()
+    if not render_eventos.verificar_assinatura(corpo, request.headers):
+        # 400 e' o que o exemplo oficial do Render devolve em assinatura ruim.
+        return JSONResponse({"ok": False}, status_code=400)
+
+    background.add_task(render_eventos.processar, corpo, dict(request.headers))
+    return {"ok": True}
+
+
 @app.get("/", response_class=HTMLResponse)
 def home():
     return _PAGINA

@@ -187,6 +187,26 @@ Agora `iniciarSessao` só abre socket com a conta alugada na tabela `wa_qr_sessa
   instância assume em no máximo um TTL. Não existe trava presa pra sempre.
 - **aluguel perdido** (o batimento não conseguiu renovar) → larga o socket na hora, senão
   viram dois de novo.
+- **tabela ainda não existe** (o web não migrou; ver abaixo) → segue SEM trava, mas só
+  por 60s de cada vez: quando a tabela aparece, as contas que estavam rodando sem aluguel
+  são reconciliadas. Se a conta já for de outra instância, a nossa sessão sai.
+
+### A janela entre os dois deploys
+
+O `wa-qr` não roda migração — quem cria a `wa_qr_sessao_lock` é o web. Quando os dois
+deployam juntos, o `wa-qr` costuma ficar de pé ANTES: na estreia disto em produção
+(15/08, 21:50) as três contas religaram e a tabela só nasceu às 21:52.
+
+Nesse intervalo o serviço segue **sem trava**, para não deixar o WhatsApp de todo mundo
+no chão esperando deploy alheio — mas a desistência tem prazo e se corrige sozinha:
+
+```
+trava: tabela wa_qr_sessao_lock ainda não existe — seguindo SEM trava por ora
+trava: tabela apareceu — conta agora está protegida ✓
+```
+
+Se a segunda linha não aparecer em ~1 min depois do deploy do web, a reconciliação não
+rodou e vale investigar.
 
 Quem está com o quê:
 

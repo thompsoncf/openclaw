@@ -68,30 +68,77 @@ function criarTrava (pool, log, opcoes) {
   // mesma linha de log a cada tentativa (ver `pegar`).
   const barradas = new Map()
   let batimento = null
-  // A migração 157 vem pelo serviço web (o wa-qr não roda migração). Nos minutos
-  // entre um deploy e outro a tabela pode não existir ainda; nesse caso a gente
-  // segue SEM trava, que é o comportamento de sempre, em vez de deixar o
-  // WhatsApp de todo mundo no chão esperando um deploy alheio. Fica avisando no
-  // log em toda tentativa pra não virar um degradado silencioso.
-  let semTabela = false
+
+  // A migração 157 vem pelo serviço web (o wa-qr não roda migração). Quando os
+  // dois serviços deployam juntos, o wa-qr costuma ficar de pé ANTES de o web
+  // aplicar a migração — foi o que aconteceu na estreia disto em produção: as
+  // três contas religaram às 21:50 e a tabela só nasceu às 21:52. Nesse caso a
+  // gente segue SEM trava, que é o comportamento de sempre, em vez de deixar o
+  // WhatsApp de todo mundo no chão esperando um deploy alheio.
+  //
+  // Mas desistir PRA SEMPRE seria pior que o problema: a instância rodaria sem
+  // proteção até o próximo deploy, mesmo com a tabela já existindo há horas.
+  // Então a desistência tem prazo — e, quando ele vence, não basta voltar a
+  // responder: as contas que já estão sendo servidas sem aluguel precisam ser
+  // reconciliadas (`degradadas`), senão ninguém chamaria `pegar` por elas de
+  // novo e o serviço seguiria desprotegido do mesmo jeito.
+  const REVALIDA_MS = o.revalidaMs || 60000
+  let semTabelaAte = 0
+  const degradadas = new Set()
+  const semTabela = () => Date.now() < semTabelaAte
+
+  function marcarSemTabela (contaId) {
+    const primeira = !semTabela()
+    semTabelaAte = Date.now() + REVALIDA_MS
+    degradadas.add(contaId)
+    ligarBatimento()
+    // avisa na primeira vez e a cada revalidação frustrada, não a cada chamada
+    if (primeira) {
+      log.warn({ contaId, revalidaEmMs: REVALIDA_MS },
+        'trava: tabela wa_qr_sessao_lock ainda não existe — seguindo SEM trava por ora')
+    }
+  }
+
+  // Quando o prazo da desistência vence, tenta pegar de verdade as contas que
+  // estão rodando sem aluguel. Três desfechos: consegue (vira sessão protegida),
+  // a tabela ainda não existe (adia mais um prazo), ou outra instância está com
+  // a conta — e aí a nossa sessão é a intrusa e tem que sair.
+  async function revalidarDegradadas () {
+    if (!degradadas.size || semTabela()) return
+    for (const contaId of [...degradadas]) {
+      const antes = semTabelaAte
+      const pegou = await pegar(contaId)
+      if (semTabelaAte !== antes) return          // tabela ainda não existe: adiado
+      degradadas.delete(contaId)
+      if (pegou) {
+        log.info({ contaId }, 'trava: tabela apareceu — conta agora está protegida ✓')
+      } else {
+        log.error({ contaId },
+          'trava: rodávamos sem trava e a conta é de OUTRA instância — largando a sessão')
+        try { aoPerder(contaId) } catch (e) { log.warn({ contaId, e: String(e) }, 'trava: aoPerder falhou') }
+      }
+    }
+    desligarBatimentoSeVazio()
+  }
 
   function ligarBatimento () {
-    if (batimento || !seguradas.size) return
+    if (batimento || !(seguradas.size || degradadas.size)) return
     batimento = setInterval(() => {
       renovar().catch((e) => log.warn({ e: String(e) }, 'trava: batimento falhou'))
+      revalidarDegradadas().catch((e) => log.warn({ e: String(e) }, 'trava: revalidação falhou'))
     }, renovaMs)
     // unref pro batimento não segurar o processo vivo sozinho no shutdown
     if (batimento.unref) batimento.unref()
   }
 
   function desligarBatimentoSeVazio () {
-    if (batimento && !seguradas.size) { clearInterval(batimento); batimento = null }
+    if (batimento && !seguradas.size && !degradadas.size) { clearInterval(batimento); batimento = null }
   }
 
   async function pegar (contaIdCru) {
     const contaId = num(contaIdCru)
-    if (semTabela) {
-      log.warn({ contaId }, 'trava: tabela wa_qr_sessao_lock ainda não existe — seguindo SEM trava')
+    if (semTabela()) {
+      degradadas.add(contaId)
       return true
     }
     try {
@@ -131,8 +178,7 @@ function criarTrava (pool, log, opcoes) {
       return true
     } catch (e) {
       if (e && e.code === TABELA_NAO_EXISTE) {
-        semTabela = true
-        log.warn({ contaId }, 'trava: tabela wa_qr_sessao_lock ainda não existe — seguindo SEM trava')
+        marcarSemTabela(contaId)
         return true
       }
       // Banco fora do ar não pode virar "pode abrir socket": é justamente quando
@@ -143,7 +189,7 @@ function criarTrava (pool, log, opcoes) {
   }
 
   async function renovar () {
-    if (semTabela || !seguradas.size) return
+    if (semTabela() || !seguradas.size) return
     const contas = [...seguradas]
     const r = await pool.query(
       `update wa_qr_sessao_lock
@@ -167,8 +213,9 @@ function criarTrava (pool, log, opcoes) {
   async function soltar (contaIdCru) {
     const contaId = num(contaIdCru)
     seguradas.delete(contaId)
+    degradadas.delete(contaId)
     desligarBatimentoSeVazio()
-    if (semTabela) return
+    if (semTabela()) return
     try {
       await pool.query('delete from wa_qr_sessao_lock where conta_id=$1 and dono=$2',
         [contaId, dono])
@@ -184,8 +231,9 @@ function criarTrava (pool, log, opcoes) {
   async function soltarTudo () {
     const contas = [...seguradas]
     seguradas.clear()
+    degradadas.clear()
     desligarBatimentoSeVazio()
-    if (semTabela || !contas.length) return
+    if (semTabela() || !contas.length) return
     try {
       await pool.query('delete from wa_qr_sessao_lock where conta_id = any($1::bigint[]) and dono=$2',
         [contas, dono])
@@ -197,6 +245,8 @@ function criarTrava (pool, log, opcoes) {
 
   return { pegar, soltar, soltarTudo, renovar, dono, ttlMs, renovaMs,
     segura: (contaId) => seguradas.has(num(contaId)),
+    semTrava: (contaId) => degradadas.has(num(contaId)),
+    revalidarDegradadas,
     contas: () => [...seguradas] }
 }
 

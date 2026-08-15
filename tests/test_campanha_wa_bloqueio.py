@@ -168,14 +168,14 @@ def test_bloqueio_grava_e_limpa(pool):
 # ------------------------------------------------------ o motor não queima o alvo
 
 class _FalhaDeConfig:
-    """Provedor que recusa TODO envio por um problema da conta, não do alvo."""
+    """Provedor que recusa TODO envio, sempre com a mesma resposta."""
 
-    def __init__(self, erro="provedor_sem_template"):
-        self.erro, self.tentativas = erro, 0
+    def __init__(self, erro="provedor_sem_template", codigo=None, msg=None):
+        self.erro, self.codigo, self.msg, self.tentativas = erro, codigo, msg, 0
 
     def enviar_template(self, c, conta_id, numero, sid, variaveis, mmlite=False):
         self.tentativas += 1
-        return {"ok": False, "erro": self.erro}
+        return {"ok": False, "erro": self.erro, "codigo": self.codigo, "msg": self.msg}
 
 
 @pytest.fixture
@@ -202,12 +202,35 @@ def test_falha_de_config_nao_queima_alvo_e_para_a_campanha(pool, motor_isolado, 
     assert _bloqueio(pool, camp)[0] == erro
 
 
-def test_falha_do_alvo_continua_marcando(pool, motor_isolado):
-    """Regressão ao contrário: número inválido é problema DAQUELE alvo — segue
-    marcando e passando pro próximo, senão um número torto trava a campanha."""
-    conta = _conta(pool, "Numero torto", provedor="twilio")
+def test_twilio_20003_para_a_campanha_em_vez_de_queimar(pool, motor_isolado):
+    """O caso que ACONTECEU: uma credencial errada no servidor devolveu 20003
+    ("Unable to create record: Authenticate") e o motor marcou erro em 22 alvos
+    de uma campanha, um a um, tirando todos da fila pra sempre."""
+    conta = _conta(pool, "Twilio sem autenticar", provedor="twilio")
     camp = _campanha(pool, conta, sid="HXabc", n_alvos=3)
-    prov = _FalhaDeConfig("numero_invalido")
+    prov = _FalhaDeConfig("Unable to create record: Authenticate", codigo=20003,
+                          msg="Unable to create record: Authenticate")
+    cm._disparar_wa_campanha(pool, camp, conta, "HXabc", 10, prov)
+    assert prov.tentativas == 1
+    assert _alvos(pool, camp) == [("(fila)", 3)]
+    assert _bloqueio(pool, camp)[0] == "twilio_20003"
+    assert "credenciais" in pc.rotulo_bloqueio("twilio_20003")
+
+
+def test_codigo_2xxxx_desconhecido_ainda_tem_frase(pool):
+    """Sem frase própria, o aviso não pode sair vazio na tela."""
+    rot = pc.rotulo_bloqueio("twilio_20429")
+    assert "20429" in rot and "Nenhum alvo foi gasto" in rot
+
+
+@pytest.mark.parametrize("codigo", [63024, 63016, 63049])
+def test_erro_63xxx_e_do_destinatario_e_continua_marcando(pool, motor_isolado, codigo):
+    """Contraprova: 63xxx é do WhatsApp e vale por DESTINATÁRIO (63024 = o número
+    não tem WhatsApp). Esse alvo falhou por mérito próprio — segue marcando e
+    passando pro próximo, senão um número torto trava a campanha inteira."""
+    conta = _conta(pool, f"Numero torto {codigo}", provedor="twilio")
+    camp = _campanha(pool, conta, sid="HXabc", n_alvos=3)
+    prov = _FalhaDeConfig("numero sem whatsapp", codigo=codigo)
     cm._disparar_wa_campanha(pool, camp, conta, "HXabc", 10, prov)
     assert prov.tentativas == 3
     assert _alvos(pool, camp) == [("erro", 3)]

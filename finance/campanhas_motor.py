@@ -495,6 +495,28 @@ _ERRO_CONFIG = {"provedor_sem_template", "sem_numero_empresa", "nao_configurado"
                 "sem_template"}
 
 
+def _erro_da_conta(res: dict) -> str:
+    """'' se a falha é daquele número; senão o código do bloqueio da campanha.
+
+    A divisão que importa é POR QUEM a falha é:
+
+    * **63xxx** são do WhatsApp e valem por DESTINATÁRIO — 63024 "o número não tem
+      WhatsApp", 63016 "fora da janela". O alvo é marcado e a fila anda: é ele que
+      tem problema, não a conta.
+    * **2xxxx** são da API do Twilio e valem pra CONTA inteira — 20003 é a
+      credencial não autenticando. Em produção esse código queimou 22 alvos de uma
+      campanha em agosto/2026, um a um, por uma credencial errada no servidor.
+    * e os erros que o próprio dispatcher devolve antes de chegar no provedor.
+    """
+    if (res.get("erro") or "") in _ERRO_CONFIG:
+        return res["erro"]
+    try:
+        cod = int(res.get("codigo") or 0)
+    except (TypeError, ValueError):
+        return ""
+    return f"twilio_{cod}" if 20000 <= cod < 30000 else ""
+
+
 def _wa_bloqueio(pool, camp_id, motivo: str) -> None:
     """Grava (ou limpa) o porquê de a campanha não estar disparando WhatsApp.
     Só escreve quando MUDA — o agendador passa aqui de minuto em minuto e senão
@@ -554,10 +576,11 @@ def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> i
             res = whatsapp_out.enviar_template(c, conta_id, numero, sid, variaveis, mmlite=mmlite)
         if not res.get("ok"):
             detalhe = res.get("msg") or res.get("erro") or ""
-            if (res.get("erro") or "") in _ERRO_CONFIG:
+            bloqueio = _erro_da_conta(res)
+            if bloqueio:
                 # problema da CONTA, não deste alvo: não queima ninguém (o alvo
                 # ficaria fora da fila pra sempre) e para a campanha com o motivo.
-                _wa_bloqueio(pool, camp_id, res.get("erro"))
+                _wa_bloqueio(pool, camp_id, bloqueio)
                 break
             _wa_marca(pool, aid, "erro", erro_codigo=res.get("codigo"), erro_msg=detalhe)
             with pool.connection() as c:

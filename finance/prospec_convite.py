@@ -49,7 +49,25 @@ BLOQUEIO_ROT = {
     "sem_credenciais": "Faltam as credenciais do Twilio no servidor.",
     "sem_numero_empresa": "O canal de WhatsApp da empresa está sem número.",
     "nao_configurado": "O canal de WhatsApp da empresa está incompleto.",
+    # códigos 2xxxx do Twilio valem pra CONTA inteira (ver campanhas_motor._erro_da_conta)
+    "twilio_20003": "O Twilio recusou a autenticação da conta — confira as "
+                    "credenciais no servidor.",
 }
+
+
+def rotulo_bloqueio(codigo: str | None) -> str:
+    """Frase pro dono. Um código do provedor que ainda não tem texto próprio vira
+    uma frase genérica — melhor que um aviso vazio na tela."""
+    codigo = (codigo or "").strip()
+    if not codigo:
+        return ""
+    rot = BLOQUEIO_ROT.get(codigo)
+    if rot:
+        return rot
+    if codigo.startswith("twilio_"):
+        return (f"O Twilio recusou o envio (código {codigo[7:]}) — é um erro da conta, "
+                "não dos leads. Nenhum alvo foi gasto.")
+    return "O provedor de WhatsApp recusou o envio."
 
 
 def motivo_bloqueio(c, conta_id: int, camp_sid: str | None = None) -> str:

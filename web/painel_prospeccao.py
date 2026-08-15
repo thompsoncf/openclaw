@@ -3678,7 +3678,7 @@ def _campanhas_dados(c, conta_id, membro_id=None):
     rows = c.execute(
         """select cp.id, cp.nome, cp.status, cp.limite_dia, coalesce(cp.wa_ativo,false),
                   cp.teto_wa, coalesce(cp.enviados_hoje,0), cp.dia_contagem,
-                  coalesce(cp.wa_template_sid,''),
+                  coalesce(cp.wa_template_sid,''), coalesce(cp.wa_bloqueio,''),
                   ag.n, ag.email_env, ag.email_resp, ag.email_abriu, ag.email_err, ag.virou,
                   ag.wa_env, ag.wa_resp, ag.wa_err, ag.wa_gasto, coalesce(ev.bounces,0),
                   to_char((select min(a.proximo_envio_em) from campanha_alvos a
@@ -3731,7 +3731,7 @@ def _campanhas_dados(c, conta_id, membro_id=None):
     camps = []
     tot_gasto = tot_msgs = tot_email = tot_teto = perto = 0
     for r in rows:
-        (cid, nome, status, limite, wa_ativo, teto, env_hoje, dia_cont, wa_sid,
+        (cid, nome, status, limite, wa_ativo, teto, env_hoje, dia_cont, wa_sid, wa_bloq,
          n, e_env, e_resp, e_abriu, e_err, virou, w_env, w_resp, w_err, w_gasto, e_volta,
          proximo, resp_nome) = r
         limite = limite or 0
@@ -3756,7 +3756,7 @@ def _campanhas_dados(c, conta_id, membro_id=None):
             "status_rot": _STATUS_ROT_CP.get(status, status),
             "status_curto": _STATUS_CURTO_CP.get(status, status),
             "limite": limite, "n": n, "virou": virou or 0, "wa": wa_ativo,
-            "wa_pronto": not _prospec_convite.motivo_bloqueio(c, conta_id, wa_sid),
+            "wa_pronto": not (_prospec_convite.motivo_bloqueio(c, conta_id, wa_sid) or wa_bloq),
             "hoje": hoje_n, "hoje_offset": round(_CIRC * (1 - pct_dia / 100), 1),
             "erros": (e_err or 0) + (w_err or 0), "proximo": proximo or "",
             "email": {"env": e_env or 0, "resp": e_resp or 0, "abriu": e_abriu or 0,
@@ -3838,7 +3838,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                                  coalesce(modelo_codigo,''), coalesce(wa_template_sid,''),
                                  coalesce(reengajar_ativo,false), coalesce(reengajar_dias,3),
                                  coalesce(remetente_slot,'principal'), coalesce(wa_mmlite,false),
-                                 teto_wa, responsavel_id
+                                 teto_wa, responsavel_id, coalesce(wa_bloqueio,'')
                             from campanhas where id=%s and conta_id=%s""",
                        (camp_id, ctx["conta_id"])).fetchone()
         if not cp:
@@ -3898,7 +3898,10 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                       count(*) filter (where wa_cobravel is not null)
                  from campanha_alvos where campanha_id=%s""", (camp_id,)).fetchone()
         modelos = _modelos_lista(c, ctx["conta_id"])
-        wa_bloqueio = _prospec_convite.motivo_bloqueio(c, ctx["conta_id"], cp[13])
+        # a config de HOJE manda (é o que o dono resolve agora); se estiver tudo
+        # certo por aqui, sobra o que o PROVEDOR recusou no último disparo, que só
+        # o motor viu (ex.: twilio_20003, credencial não autentica).
+        wa_bloqueio = _prospec_convite.motivo_bloqueio(c, ctx["conta_id"], cp[13]) or cp[20]
     # "pulado" (já respondeu) e "sem_numero" não são disparos reais — fora da conta
     wa_enviados = sum(v for k, v in wa_counts.items() if k not in ("pulado", "sem_numero"))
     # "respondeu" implica que já foi entregue e lido — soma nos dois (não é status
@@ -3921,7 +3924,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
             "wa_ativo": cp[7], "limite_wa": cp[8], "wa_hoje": wa_hoje, "wa_enviados": wa_enviados,
             "wa_template_sid": cp[13],
             "wa_pronto": not wa_bloqueio, "material_tipo": cp[11],
-            "wa_bloqueio": _prospec_convite.BLOQUEIO_ROT.get(wa_bloqueio, ""),
+            "wa_bloqueio": _prospec_convite.rotulo_bloqueio(wa_bloqueio),
             "modelo_codigo": cp[12], "reengajar_ativo": cp[14], "reengajar_dias": cp[15],
             "remetente_slot": cp[16], "wa_mmlite": cp[17],
             "teto_wa": (f"{float(cp[18]):.2f}" if cp[18] is not None else ""),

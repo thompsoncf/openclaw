@@ -2779,8 +2779,13 @@ def _ja_conversou(c, conta_id, lead_id) -> bool:
 def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente_on,
                          *, exigir_continuidade=False):
     """WhatsApp de ENTRADA (Twilio OU Cloud API): resolve lead+conversa pelo telefone,
-    grava a mensagem (dedup por provider_sid) e reabre a janela/reativa o agente.
-    Devolve conv_id. Um humano que 'assumiu' (status='pendente') não é reativado.
+    grava a mensagem e reabre a janela/reativa o agente. Devolve conv_id. Um humano
+    que 'assumiu' (status='pendente') não é reativado.
+
+    O dedup é por (conversa_id, provider_sid), e o par importa: o id do WhatsApp é o
+    MESMO nas duas pontas da mensagem, então dedup global fazia a conta que RECEBE
+    perder a mensagem quando a conta que ENVIOU era outra conta do mesmo Zaq — ver
+    migração 159.
 
     `exigir_continuidade` liga a trava contra resposta automática: um contato da BASE
     que responde algo não reconhecível como aceite não vira lead quente na primeira
@@ -2876,7 +2881,7 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
             (conta_id, lead_id, remetente, agente_on, conta_id, alvo8)).fetchone()[0]
     c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
                  values (%s,'whatsapp','in','lead',%s,%s)
-                 on conflict (provider_sid) where provider_sid is not null do nothing""",
+                 on conflict (conversa_id, provider_sid) where provider_sid is not null do nothing""",
               (conv_id, (corpo or "")[:8000], sid))
     # reabre a janela de 24h e REATIVA o agente — a menos que um humano tenha assumido
     # (status='pendente'). O CASE lê o status ANTIGO da linha, então 'pendente' fica preservado.
@@ -2952,7 +2957,7 @@ def _wa_conversa_simples(c, conta_id, lead_id, remetente, corpo, sid) -> int:
             (conta_id, lead_id, remetente)).fetchone()[0]
     c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
                  values (%s,'whatsapp','in','lead',%s,%s)
-                 on conflict (provider_sid) where provider_sid is not null do nothing""",
+                 on conflict (conversa_id, provider_sid) where provider_sid is not null do nothing""",
               (conv_id, (corpo or "")[:8000], sid))
     c.execute("update conversas set ultima_msg_em=now() where id=%s", (conv_id,))
     return conv_id
@@ -3577,7 +3582,7 @@ def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando, de_mim=Fa
     c.execute(
         """insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid, criado_em)
              values (%s,'whatsapp',%s,%s,%s,%s,coalesce(%s,now()))
-             on conflict (provider_sid) where provider_sid is not null do nothing""",
+             on conflict (conversa_id, provider_sid) where provider_sid is not null do nothing""",
         (conv_id, "out" if de_mim else "in", "humano" if de_mim else "lead",
          (corpo or "")[:8000], sid, quando))
     c.execute("""update conversas set ultima_msg_em=greatest(ultima_msg_em, coalesce(%s,now())),
@@ -3637,9 +3642,10 @@ async def webhook_wa_qr_historico(request: Request):
 
 def _wa_saida_conversa(c, conta_id, destinatario, corpo, sid):
     """Mensagem que o VENDEDOR mandou DIRETO pelo WhatsApp do celular (fora do
-    Zaq) — o Baileys ecoa de volta como fromMe. Dedup por provider_sid: se a
-    mensagem já saiu PELO Zaq (que grava na hora do envio em
-    comunicacao_responder), a inserção aqui vira no-op.
+    Zaq) — o Baileys ecoa de volta como fromMe. Dedup por (conversa_id,
+    provider_sid): se a mensagem já saiu PELO Zaq (que grava na hora do envio em
+    comunicacao_responder), a inserção aqui vira no-op. O par com a conversa é o
+    que impede o dedup de atravessar contas — ver migração 159.
 
     NUNCA cria LEAD: quem o vendedor procura pelo celular não vira lead sozinho —
     o funil é dele pra encher, não do WhatsApp. Mas CRIA CONVERSA (órfã, sem
@@ -3678,7 +3684,7 @@ def _wa_saida_conversa(c, conta_id, destinatario, corpo, sid):
             (conta_id, lead_id, destinatario, conta_id, alvo8)).fetchone()[0]
     c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
                  values (%s,'whatsapp','out','humano',%s,%s)
-                 on conflict (provider_sid) where provider_sid is not null do nothing""",
+                 on conflict (conversa_id, provider_sid) where provider_sid is not null do nothing""",
               (conv_id, (corpo or "")[:8000], sid))
     c.execute("update conversas set ultima_msg_em=greatest(ultima_msg_em, now()) where id=%s", (conv_id,))
     return conv_id

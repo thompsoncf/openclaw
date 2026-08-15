@@ -38,12 +38,17 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
   responsavel_membro_id bigint, janela_expira_em timestamptz,
   ultima_msg_em timestamptz default now(), criado_em timestamptz default now());
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
-  direcao text, autor text, texto text, membro_id bigint, provider_sid text unique,
+  direcao text, autor text, texto text, membro_id bigint, provider_sid text,
   status text, criado_em timestamptz default now());
 create table wa_contatos (conta_id bigint, numero8 text, nome text,
   da_agenda boolean default false, primary key (conta_id, numero8));
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text, ativo boolean default true, cockpit_pausado boolean default false);
+
+-- unicidade por CONVERSA, não global: o id do WhatsApp é o mesmo nas duas pontas
+-- da mensagem, e global fazia a conta que recebe perder a dela (migração 159)
+create unique index if not exists idx_mensagens_sid_conversa
+  on mensagens (conversa_id, provider_sid) where provider_sid is not null;
 """
 
 

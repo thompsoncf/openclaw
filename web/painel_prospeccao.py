@@ -3688,6 +3688,9 @@ def _reserva_numeros(c, camp_id):
         leads.append({
             "aid": aid, "pid": pid, "empresa": empresa, "cod": cod,
             "tentativas": tentativas,
+            # já gastou as 3 tentativas: continua na lista (o dono quer ver que
+            # sobrou número), mas não dá pra recolocar — o teto é o teto
+            "no_teto": tentativas >= _cm._WA_TENTATIVAS,
             "tentados": [t for t in (tentados or [])][-1:],   # o último que falhou
             "sobra": len(sobra), "proximos": sobra[:3],
         })
@@ -4258,12 +4261,17 @@ def prospeccao_campanha_remover_leads(request: Request, camp_id: int, ids: list[
 @router.post("/painel/prospeccao/campanhas/{camp_id}/recolocar-na-fila")
 def prospeccao_campanha_recolocar_na_fila(request: Request, camp_id: int,
                                           ids: list[str] = Form([])):
-    """Devolve alvos parados pra fila de disparo do WhatsApp, zerando o contador de
-    tentativas — eles voltam a ter o teto inteiro, agora com os OUTROS números.
+    """Devolve alvos parados pra fila de disparo do WhatsApp, com os OUTROS números.
 
-    `wa_tentados` NÃO é limpo: o número que já falhou não volta nunca. E isto é um
-    botão, não automático, porque cada tentativa é uma mensagem de marketing
-    cobrada — quem decide gastar é o dono.
+    O contador de tentativas é PRESERVADO de propósito. Zerando, um lead que já
+    recebeu uma mensagem ganharia o teto inteiro de novo e poderia levar 4 no
+    total — mais insistente do que o teto de 3 que a regra promete. Preservando,
+    "3 tentativas por lead" vale de verdade, e um alvo que já esgotou o teto não
+    volta pra fila mesmo se for marcado aqui.
+
+    `wa_tentados` também não é limpo: o número que já falhou não volta nunca. E
+    isto é um botão, não automático, porque cada tentativa é uma mensagem de
+    marketing cobrada — quem decide gastar é o dono.
 
     Recebe `campanha_alvos.id` (não prospeccao_id): o painel lista por alvo."""
     ctx, redir = _acesso(request)
@@ -4284,9 +4292,10 @@ def prospeccao_campanha_recolocar_na_fila(request: Request, camp_id: int,
             return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
         n = c.execute(
             """update campanha_alvos
-                 set wa_status=null, wa_tentativas=0, wa_erro_codigo=null, wa_erro_msg=null
-               where campanha_id=%s and id = any(%s) and wa_status='erro'""",
-            (camp_id, aids)).rowcount
+                 set wa_status=null, wa_erro_codigo=null, wa_erro_msg=null
+               where campanha_id=%s and id = any(%s) and wa_status='erro'
+                 and coalesce(wa_tentativas,0) < %s""",
+            (camp_id, aids, _cm._WA_TENTATIVAS)).rowcount
         c.commit()
     return JSONResponse({"ok": True, "recolocados": n})
 
@@ -9133,8 +9142,8 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
           {% for l in reserva.leads %}
           <div class="resv-l" id="rv{{ l.aid }}">
             <div class="resv-h" onclick="rvAb('rv{{ l.aid }}')">
-              <input class="rv-ck" type="checkbox" value="{{ l.aid }}" onclick="event.stopPropagation()" onchange="rvUpd()">
-              <div class="resv-e"><b>{{ l.empresa }}</b><div class="mut" style="font-size:.74rem">{% if l.tentados %}tentou {{ l.tentativas }}{% if l.tentativas == 1 %} número{% else %} números{% endif %}{% if l.cod %} · erro {{ l.cod }}{% endif %}{% else %}sem tentativa registrada{% endif %}</div></div>
+              <input class="rv-ck" type="checkbox" value="{{ l.aid }}" onclick="event.stopPropagation()" onchange="rvUpd()"{% if l.no_teto %} disabled title="Já usou as {{ tentativas_teto }} tentativas"{% endif %}>
+              <div class="resv-e"><b>{{ l.empresa }}</b><div class="mut" style="font-size:.74rem">{% if l.tentados %}tentou {{ l.tentativas }}{% if l.tentativas == 1 %} número{% else %} números{% endif %}{% if l.cod %} · erro {{ l.cod }}{% endif %}{% if l.no_teto %} · <span style="color:var(--ambar)">teto atingido</span>{% endif %}{% else %}sem tentativa registrada{% endif %}</div></div>
               <span class="resv-n">{{ l.sobra }} <span>na reserva</span></span>
             </div>
             <div class="resv-b">

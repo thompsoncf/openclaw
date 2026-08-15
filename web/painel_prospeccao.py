@@ -2697,6 +2697,9 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     segue como sempre foi."""
     remetente = _so_digitos(remetente)
     alvo8 = remetente[-8:] if len(remetente) >= 8 else remetente
+    # as duas grafias do número (com e sem o nono dígito) — o mesmo contato chega das
+    # duas formas, e casar por igualdade crua criava uma conversa nova a cada troca
+    equivalentes = _wa_equivalentes(remetente) or [remetente]
     lead = c.execute(
         r"""select id, coalesce(origem,'') from prospeccao
              where conta_id=%s and right(regexp_replace(coalesce(whatsapp, telefone, ''), '\D', '', 'g'), 8) = %s
@@ -2716,10 +2719,11 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
         # o fluxo segue pra criar o lead. O vínculo da conversa existente com o lead
         # novo é feito logo abaixo, junto com as mensagens que ela já tinha.
         orfa = c.execute(
-            """select id, coalesce(nullif(contato_nome,''),'') from conversas
-                where conta_id=%s and canal='whatsapp'
-                  and prospeccao_id is null and contato_ref=%s""",
-            (conta_id, remetente)).fetchone()
+            r"""select id, coalesce(nullif(contato_nome,''),'') from conversas
+                 where conta_id=%s and canal='whatsapp' and prospeccao_id is null
+                   and regexp_replace(coalesce(contato_ref,''), '\D', '', 'g') = any(%s)
+                 order by ultima_msg_em desc limit 1""",
+            (conta_id, equivalentes)).fetchone()
         nome_orfa = orfa[1] if orfa else ""
         # contato NOVO de verdade (landing/WhatsApp) → vira lead QUENTE, não atribuído (o dono distribui).
         # Nome: primeiro o da AGENDA do vendedor (o melhor que existe), depois o do
@@ -2758,13 +2762,19 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
         # separa cliente ativo de alvo frio, e não depende do estágio.
         if not (exigir_continuidade and de_prospeccao) or _ja_conversou(c, conta_id, lead_id):
             _promover_para_lead(c, conta_id, lead_id)
-    # acha a conversa do lead OU uma órfã por contato_ref (e vincula ela ao lead)
+    # Acha a conversa do lead OU qualquer uma do mesmo número (e vincula ela ao lead,
+    # se estiver órfã). A conversa deste lead vem primeiro; depois as que já têm dono;
+    # por último a mais recente. Exigir `prospeccao_id is null` pra casar por número,
+    # como era antes, deixava de fora a conversa pendurada em OUTRA ficha do mesmo
+    # telefone — e o inbox ganhava uma segunda thread do mesmo cliente.
     conv = c.execute(
-        """select id, prospeccao_id from conversas
-            where conta_id=%s and canal='whatsapp'
-              and (prospeccao_id=%s or (prospeccao_id is null and contato_ref=%s))
-            order by ultima_msg_em desc limit 1""",
-        (conta_id, lead_id, remetente)).fetchone()
+        r"""select id, prospeccao_id from conversas
+             where conta_id=%s and canal='whatsapp'
+               and (prospeccao_id=%s
+                    or regexp_replace(coalesce(contato_ref,''), '\D', '', 'g') = any(%s))
+             order by (prospeccao_id=%s) desc nulls last,
+                      (prospeccao_id is not null) desc, ultima_msg_em desc limit 1""",
+        (conta_id, lead_id, equivalentes, lead_id)).fetchone()
     if conv:
         conv_id = conv[0]
         if conv[1] is None:
@@ -2837,13 +2847,20 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
 
 def _wa_conversa_simples(c, conta_id, lead_id, remetente, corpo, sid) -> int:
     """Acha/cria a conversa de WhatsApp do lead e grava a mensagem de entrada, SEM
-    esquentar/promover (usado no "Agora não": o lead recusou, não vira lead quente)."""
+    esquentar/promover (usado no "Agora não": o lead recusou, não vira lead quente).
+
+    Mesma busca do caminho normal de entrada (_wa_inbound_conversa): as duas grafias
+    do número e sem exigir conversa órfã — senão o "Agora não" abre uma thread
+    paralela justamente de quem já estava conversando."""
     conv = c.execute(
-        """select id, prospeccao_id from conversas
-            where conta_id=%s and canal='whatsapp'
-              and (prospeccao_id=%s or (prospeccao_id is null and contato_ref=%s))
-            order by ultima_msg_em desc limit 1""",
-        (conta_id, lead_id, remetente)).fetchone()
+        r"""select id, prospeccao_id from conversas
+             where conta_id=%s and canal='whatsapp'
+               and (prospeccao_id=%s
+                    or regexp_replace(coalesce(contato_ref,''), '\D', '', 'g') = any(%s))
+             order by (prospeccao_id=%s) desc nulls last,
+                      (prospeccao_id is not null) desc, ultima_msg_em desc limit 1""",
+        (conta_id, lead_id, _wa_equivalentes(remetente) or [_so_digitos(remetente)],
+         lead_id)).fetchone()
     if conv:
         conv_id = conv[0]
         if conv[1] is None:
@@ -3459,13 +3476,16 @@ def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando, de_mim=Fa
     NOVA, em tempo real). O vendedor decide se vale virar lead (botão "virar
     lead" no inbox de Comunicação). Reusa QUALQUER conversa do número (órfã ou já
     ligada a lead — preferindo a ligada), senão um re-pareamento duplicava a aba
-    de quem já tinha virado lead."""
+    de quem já tinha virado lead. "Do número" nas duas grafias, com e sem o nono
+    dígito (ver _wa_equivalentes): o histórico é justamente onde chega o formato
+    antigo, e casando cru ele virava uma segunda conversa do mesmo contato."""
     remetente = _so_digitos(remetente)
     alvo8 = remetente[-8:] if len(remetente) >= 8 else remetente
     conv = c.execute(
-        """select id from conversas where conta_id=%s and canal='whatsapp' and contato_ref=%s
-            order by (prospeccao_id is not null) desc, ultima_msg_em desc limit 1""",
-        (conta_id, remetente)).fetchone()
+        r"""select id from conversas where conta_id=%s and canal='whatsapp'
+             and regexp_replace(coalesce(contato_ref,''), '\D', '', 'g') = any(%s)
+             order by (prospeccao_id is not null) desc, ultima_msg_em desc limit 1""",
+        (conta_id, _wa_equivalentes(remetente) or [remetente])).fetchone()
     if conv:
         conv_id = conv[0]
     else:

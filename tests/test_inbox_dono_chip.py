@@ -12,6 +12,7 @@ Dois buracos que o mesmo chamado expôs:
 Banco descartável com o schema mínimo das duas funções — mesmo padrão dos vizinhos.
 """
 import os
+from types import SimpleNamespace
 
 import pytest
 from psycopg_pool import ConnectionPool
@@ -22,15 +23,22 @@ CONTA = 7
 
 _SQL = """
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
-  empresa text, cidade text, uf text, estagio text default 'lead');
+  empresa text, cidade text, uf text, estagio text default 'lead',
+  atualizado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   canal text default 'whatsapp', contato_ref text, contato_nome text,
-  status text default 'aberta', ultima_msg_em timestamptz default now());
+  status text default 'aberta', responsavel_membro_id bigint,
+  ultima_msg_em timestamptz default now());
+create table distribuicao (conta_id bigint primary key, ativo boolean default false,
+  ponteiro int default 0, avisar boolean default true, aviso_template_sid text,
+  atualizado_em timestamptz default now());
+create table distribuicao_fila (conta_id bigint, membro_id bigint, ordem int,
+  primary key (conta_id, membro_id));
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
   direcao text, autor text, texto text, membro_id bigint,
   criado_em timestamptz default now());
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
-  papel text, ativo boolean default true);
+  papel text, ativo boolean default true, cockpit_pausado boolean default false);
 create table canais_config (conta_id bigint, canal text, provedor text,
   identificador text, ativo boolean default true);
 create table wa_qr_auth (conta_id bigint, arquivo text, conteudo text);
@@ -190,3 +198,145 @@ def test_sem_canal_ativo_o_cabecalho_diz_que_nao_tem_chip(pool, monkeypatch):
     pp._WA_CHIP_CACHE.clear()
     chip = pp._wa_chip(CONTA)
     assert chip["estado"] == "sem_chip" and chip["numero"] == ""
+
+
+# ------------------------------------------------------------------ caçar e resolver
+# "Todo lead tem que ter dono": achar os órfãos de uma vez e dar dono a todos, sem
+# tirar do dono a troca individual — ele pode mudar qualquer um a qualquer momento.
+
+def _req(monkeypatch, pool, *, pode_atribuir=True):
+    monkeypatch.setattr(pp, "get_pool", lambda: pool)
+    monkeypatch.setattr(pp, "_acesso", lambda req: (
+        {"conta_id": CONTA, "membro_id": 1, "gerencia": True,
+         "pode_atribuir": pode_atribuir}, None))
+    return SimpleNamespace(session={}, headers={"x-requested-with": "fetch"})
+
+
+def _dono_de(c, lead_id):
+    return c.execute("select vendedor_id from prospeccao where id=%s", (lead_id,)).fetchone()[0]
+
+
+def test_o_filtro_traz_so_os_leads_sem_dono(pool):
+    """E não as conversas que nem são lead — elas também têm vendedor nulo, e na conta
+    do chamado eram 158 contra 21 que importam."""
+    with pool.connection() as c:
+        ids = _semear(c)
+        c.commit()
+        linhas = pp._conversas_list(c, CONTA, True, None, vend="sem", escopo="msg")
+    assert [l["id"] for l in linhas] == [ids["sem_dono"]]
+
+
+def test_a_contagem_conta_lead_e_nao_conversa(pool):
+    """Um lead com duas conversas é UM lead sem dono."""
+    with pool.connection() as c:
+        ids = _semear(c)
+        lead = c.execute("select prospeccao_id from conversas where id=%s",
+                         (ids["sem_dono"],)).fetchone()[0]
+        c.execute("""insert into conversas (conta_id,prospeccao_id,contato_ref)
+                     values (%s,%s,'558600000000')""", (CONTA, lead))
+        c.commit()
+        assert len(pp._leads_sem_dono(c, CONTA, "msg")) == 1
+
+
+def test_lote_manda_todos_pro_vendedor_escolhido(pool, monkeypatch):
+    import json
+    with pool.connection() as c:
+        ids = _semear(c)
+        lead = c.execute("select prospeccao_id from conversas where id=%s",
+                         (ids["sem_dono"],)).fetchone()[0]
+        c.commit()
+    r = pp.comunicacao_atribuir_lote(_req(monkeypatch, pool),
+                                     vendedor_id=str(ids["outro"]), escopo="msg")
+    d = json.loads(r.body)
+    assert d["ok"] is True and d["n"] == 1
+    with pool.connection() as c:
+        assert _dono_de(c, lead) == ids["outro"]
+        # a conversa acompanha, senão o inbox segue dizendo "sem responsável"
+        assert c.execute("select responsavel_membro_id from conversas where id=%s",
+                         (ids["sem_dono"],)).fetchone()[0] == ids["outro"]
+
+
+def test_lote_pelo_rodizio_reparte_em_volta(pool, monkeypatch):
+    """Com 3 órfãos e 2 na fila, sai 2 pro primeiro e 1 pro segundo — não todos pro
+    mesmo."""
+    with pool.connection() as c:
+        ids = _semear(c)
+        orfaos = [c.execute("select prospeccao_id from conversas where id=%s",
+                            (ids["sem_dono"],)).fetchone()[0]]
+        for i in range(2):                       # mais dois órfãos, dá 3 no total
+            pid = c.execute("insert into prospeccao (conta_id,empresa) values (%s,%s) "
+                            "returning id", (CONTA, f"Órfão {i}")).fetchone()[0]
+            c.execute("""insert into conversas (conta_id,prospeccao_id,contato_ref)
+                         values (%s,%s,%s)""", (CONTA, pid, f"55860000000{i}"))
+            orfaos.append(pid)
+        c.execute("insert into distribuicao (conta_id, ativo) values (%s,true)", (CONTA,))
+        for ordem, mid in enumerate((ids["vend"], ids["outro"])):
+            c.execute("insert into distribuicao_fila (conta_id,membro_id,ordem) "
+                      "values (%s,%s,%s)", (CONTA, mid, ordem))
+        c.commit()
+    pp.comunicacao_atribuir_lote(_req(monkeypatch, pool), rodizio="1", escopo="msg")
+    # só os que ESTAVAM órfãos: o lead que já tinha dono não entra na conta (é o
+    # test_o_lote_nao_rouba_lead_que_ja_tem_dono que cuida dele)
+    with pool.connection() as c:
+        donos = [_dono_de(c, pid) for pid in orfaos]
+    assert sorted(donos) == sorted([ids["vend"], ids["vend"], ids["outro"]])
+    assert len(set(donos)) == 2, "repartiu em volta, não jogou tudo no mesmo"
+
+
+def test_lote_avisa_quando_o_rodizio_automatico_esta_desligado(pool, monkeypatch):
+    """Repartir os de hoje não impede os de amanhã de nascerem órfãos — foi assim que a
+    conta do chamado acumulou 21."""
+    import json
+    with pool.connection() as c:
+        ids = _semear(c)
+        c.execute("insert into distribuicao (conta_id, ativo) values (%s,false)", (CONTA,))
+        c.execute("insert into distribuicao_fila (conta_id,membro_id,ordem) values (%s,%s,0)",
+                  (CONTA, ids["vend"]))
+        c.commit()
+    d = json.loads(pp.comunicacao_atribuir_lote(_req(monkeypatch, pool),
+                                                rodizio="1", escopo="msg").body)
+    assert d["ok"] is True
+    assert "DESLIGADA" in d["aviso"]
+
+
+def test_lote_sem_fila_montada_nao_finge_que_distribuiu(pool, monkeypatch):
+    import json
+    with pool.connection() as c:
+        ids = _semear(c)
+        lead = c.execute("select prospeccao_id from conversas where id=%s",
+                         (ids["sem_dono"],)).fetchone()[0]
+        c.commit()
+    r = pp.comunicacao_atribuir_lote(_req(monkeypatch, pool), rodizio="1", escopo="msg")
+    assert r.status_code == 400
+    assert "fila" in json.loads(r.body)["erro"].lower()
+    with pool.connection() as c:
+        assert _dono_de(c, lead) is None       # nada mudou
+
+
+def test_quem_nao_e_dono_nao_atribui_em_lote(pool, monkeypatch):
+    import json
+    with pool.connection() as c:
+        ids = _semear(c)
+        lead = c.execute("select prospeccao_id from conversas where id=%s",
+                         (ids["sem_dono"],)).fetchone()[0]
+        c.commit()
+    r = pp.comunicacao_atribuir_lote(_req(monkeypatch, pool, pode_atribuir=False),
+                                     vendedor_id=str(ids["vend"]), escopo="msg")
+    assert r.status_code == 403
+    assert json.loads(r.body)["ok"] is False
+    with pool.connection() as c:
+        assert _dono_de(c, lead) is None
+
+
+def test_o_lote_nao_rouba_lead_que_ja_tem_dono(pool, monkeypatch):
+    """Atalho pros órfãos, não redistribuição geral: quem já tem dono fica como está —
+    senão um clique desfaria as escolhas que o dono fez à mão."""
+    with pool.connection() as c:
+        ids = _semear(c)
+        ja = c.execute("select prospeccao_id from conversas where id=%s",
+                       (ids["com_dono"],)).fetchone()[0]
+        c.commit()
+    pp.comunicacao_atribuir_lote(_req(monkeypatch, pool),
+                                 vendedor_id=str(ids["outro"]), escopo="msg")
+    with pool.connection() as c:
+        assert _dono_de(c, ja) == ids["vend"]       # continua com o dono original

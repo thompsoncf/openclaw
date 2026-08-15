@@ -402,44 +402,134 @@ def _melhor_de_lista(decisor_telefones) -> str | None:
     return provavel or primeiro
 
 
-def _numero_alvo_wa(c, conta_id, pros, alvo_telefone=None) -> tuple[str | None, str]:
-    """Escolhe o número do WhatsApp do lead. Se a pessoa travou um número na hora
-    de jogar pra campanha (checkbox na Base, campanha_alvos.alvo_telefone), usa
-    esse — sem adivinhar. Senão, prioriza o DECISOR (opção A):
-    1) se já tem os telefones do decisor salvos → usa o ⭐ dele;
-    2) senão, se tem CNPJ → busca o decisor na Credify AGORA, salva e usa o ⭐;
-    3) senão → cai pro WhatsApp/telefone geral já captado.
-    Devolve (numero|None, origem)."""
-    if (alvo_telefone or "").strip():
-        return alvo_telefone.strip(), "escolhido"
-    pid, empresa, cnpj, whatsapp, telefone, dec_tels = pros
-    n = _melhor_de_lista(dec_tels)
-    if n:
-        return n, "decisor"
+_WA_TENTATIVAS = 3   # teto de números tentados por alvo (cada um é marketing cobrado)
+
+
+def _ddd(numero) -> str:
+    d = _so_dig(numero)
+    if d.startswith("55") and len(d) > 11:
+        d = d[2:]
+    return d[:2] if len(d) >= 10 else ""
+
+
+def fila_numeros(dec_tels, whatsapp=None, telefone=None, ja_tentados=()) -> list[str]:
+    """Os números do lead na ORDEM em que vale tentar, sem os já tentados.
+
+    Antes só o ⭐ (`provavel`) era usado e o lead morria no primeiro erro. A base
+    guarda o resto e ainda marca `whatsapp: true` em cada um — era esse dado que
+    se jogava fora.
+
+    A ordem:
+      1. ⭐ `provavel` — a aposta da Credify continua sendo a primeira;
+      2. `whatsapp: true` + tipo COMERCIAL;
+      3. `whatsapp: true` + o resto (residencial etc.);
+      4. o WhatsApp/telefone geral da empresa, se ainda não apareceu.
+    Número que a própria base diz NÃO ter WhatsApp fica de fora: não se paga
+    marketing por ele.
+
+    Dentro de cada faixa vem primeiro o DDD MAJORITÁRIO do próprio lead. Não uso
+    tabela UF→DDD porque ela erraria em empresa com número de outro estado, e o
+    sinal está nos dados do lead: um caso real tinha 18 números (86) e o ⭐ em
+    (83) — a estrela é que era a forasteira.
+
+    Dedup pelos dígitos, contra `ja_tentados` e dentro da própria lista: a base
+    às vezes guarda o MESMO número duas vezes com `tipo` diferente, e sem isso a
+    fila pagaria de novo pelo número que acabou de falhar.
+    """
+    itens = []
+    for t in (dec_tels or []):
+        if not isinstance(t, dict):
+            continue
+        f = (t.get("formatado") or "").strip()
+        if len(_so_dig(f)) < 10:
+            continue
+        itens.append((f, bool(t.get("provavel")), bool(t.get("whatsapp")),
+                      (t.get("tipo") or "").upper()))
+    # DDD majoritário do lead (desempate estável: o que aparece mais)
+    contagem = {}
+    for f, _p, _w, _t in itens:
+        d = _ddd(f)
+        if d:
+            contagem[d] = contagem.get(d, 0) + 1
+    ddd_casa = max(contagem, key=lambda k: contagem[k]) if contagem else ""
+
+    def faixa(item):
+        _f, prov, wa, tipo = item
+        if prov:
+            return 0
+        if not wa:
+            return 9                      # a base diz que não tem WhatsApp → fora
+        return 1 if tipo.startswith("COMERC") else 2
+
+    ordenados = sorted(
+        (i for i in itens if faixa(i) < 9),
+        key=lambda i: (faixa(i), 0 if _ddd(i[0]) == ddd_casa else 1))
+    fila = [f for (f, _p, _w, _t) in ordenados]
+    fila.append((whatsapp or "").strip())
+    fila.append((telefone or "").strip())
+
+    vistos = {_so_dig(n) for n in (ja_tentados or []) if _so_dig(n)}
+    saida = []
+    for n in fila:
+        d = _so_dig(n)
+        if not n or len(d) < 10 or d in vistos:
+            continue
+        vistos.add(d)
+        saida.append(n)
+    return saida
+
+
+def _buscar_decisor(c, conta_id, pid, cnpj) -> list:
+    """Busca o decisor na Credify AGORA e salva os telefones no lead. Devolve a
+    lista de telefones (vazia se não deu). Best-effort: nunca estoura o disparo."""
     cnpj_d = _so_dig(cnpj)
-    if len(cnpj_d) == 14:
-        try:
-            from finance import credify
-            r = credify.decisor_com_telefone(cnpj_d)
-        except Exception:  # noqa: BLE001
-            r = {"ok": False}
-        if r.get("ok"):
-            import json
-            tels = r.get("telefones") or []
-            c.execute(
-                """update prospeccao set decisor_nome=coalesce(decisor_nome,%s),
-                       decisor_cargo=coalesce(decisor_cargo,%s), decisor_telefone=%s,
-                       decisor_whatsapp=%s, decisor_telefones=%s::jsonb, decisor_em=now(),
-                       atualizado_em=now() where id=%s and conta_id=%s""",
-                (r.get("decisor_nome"), r.get("decisor_qualificacao"),
-                 r.get("decisor_telefone"), bool(r.get("decisor_whatsapp")),
-                 json.dumps(tels), pid, conta_id))
-            c.commit()
-            n = _melhor_de_lista(tels) or (r.get("decisor_telefone") or None)
-            if n:
-                return n, "decisor"
-    geral = (whatsapp or telefone or "").strip()
-    return (geral or None), ("empresa" if geral else "")
+    if len(cnpj_d) != 14:
+        return []
+    try:
+        from finance import credify
+        r = credify.decisor_com_telefone(cnpj_d)
+    except Exception:  # noqa: BLE001
+        return []
+    if not r.get("ok"):
+        return []
+    import json
+    tels = r.get("telefones") or []
+    c.execute(
+        """update prospeccao set decisor_nome=coalesce(decisor_nome,%s),
+               decisor_cargo=coalesce(decisor_cargo,%s), decisor_telefone=%s,
+               decisor_whatsapp=%s, decisor_telefones=%s::jsonb, decisor_em=now(),
+               atualizado_em=now() where id=%s and conta_id=%s""",
+        (r.get("decisor_nome"), r.get("decisor_qualificacao"),
+         r.get("decisor_telefone"), bool(r.get("decisor_whatsapp")),
+         json.dumps(tels), pid, conta_id))
+    c.commit()
+    if not tels and (r.get("decisor_telefone") or "").strip():
+        # veio só o telefone solto, sem a lista: vira um item ⭐ pra fila enxergar
+        return [{"formatado": r["decisor_telefone"], "provavel": True,
+                 "whatsapp": bool(r.get("decisor_whatsapp")), "tipo": ""}]
+    return tels
+
+
+def fila_alvo_wa(c, conta_id, pros, alvo_telefone=None, tentados=()) -> tuple[list[str], str]:
+    """A fila de números do lead, na ordem de tentar, já sem os que falharam.
+
+    Se a pessoa travou um número na hora de jogar pra campanha (checkbox na Base,
+    `campanha_alvos.alvo_telefone`), a fila é só ele — escolha explícita não se
+    adivinha em cima. Senão prioriza o DECISOR:
+    1) telefones do decisor já salvos → a fila deles (ver `fila_numeros`);
+    2) sem nada salvo e com CNPJ → busca na Credify AGORA, salva e usa;
+    3) por fim, o WhatsApp/telefone geral já captado.
+    Devolve (fila, origem)."""
+    if (alvo_telefone or "").strip():
+        fila = fila_numeros([], alvo_telefone, None, tentados)
+        return fila, "escolhido"
+    pid, empresa, cnpj, whatsapp, telefone, dec_tels = pros
+    if not dec_tels:
+        dec_tels = _buscar_decisor(c, conta_id, pid, cnpj)
+    fila = fila_numeros(dec_tels, whatsapp, telefone, tentados)
+    if not fila:
+        return [], ""
+    return fila, ("decisor" if dec_tels else "empresa")
 
 
 def _disparar_wa(pool) -> int:
@@ -552,22 +642,28 @@ def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> i
         gasto_atual = float(_cfg[2]) if _cfg else 0.0
         alvos = c.execute(
             """select a.id, p.id, p.empresa, p.cnpj, p.whatsapp, p.telefone, p.decisor_telefones,
-                      a.alvo_telefone
+                      a.alvo_telefone, coalesce(a.wa_tentados,'[]'::jsonb),
+                      coalesce(a.wa_tentativas,0)
                  from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
                 where a.campanha_id=%s and a.wa_status is null
                   and a.status in ('fila','enviado') limit %s""", (camp_id, teto)).fetchall()
     feitos = 0
-    for (aid, pid, empresa, cnpj, whatsapp, telefone, dec_tels, alvo_tel) in alvos:
+    for (aid, pid, empresa, cnpj, whatsapp, telefone, dec_tels, alvo_tel,
+         tentados, tentativas) in alvos:
         # já respondeu por qualquer canal? então não incomoda no WhatsApp
         if _respondeu(pool, conta_id, pid):
             _wa_marca(pool, aid, "pulado")  # já respondeu → não envia (trava reenvio, não é "enviado")
             continue
         with pool.connection() as c:
-            numero, _origem = _numero_alvo_wa(c, conta_id,
-                                              (pid, empresa, cnpj, whatsapp, telefone, dec_tels), alvo_tel)
-        if not numero:
-            _wa_marca(pool, aid, "sem_numero")
+            fila, _origem = fila_alvo_wa(
+                c, conta_id, (pid, empresa, cnpj, whatsapp, telefone, dec_tels),
+                alvo_tel, tentados)
+        if not fila:
+            # sem número nenhum, ou a fila acabou depois de tentar todos os que
+            # tinham WhatsApp — nos dois casos não há o que fazer com este alvo
+            _wa_marca(pool, aid, "sem_numero" if not tentativas else "erro")
             continue
+        numero = fila[0]
         variaveis = {"1": (idn.get("responsavel") or idn.get("empresa") or "nós"),
                      "2": (idn.get("cargo") or "CEO"),
                      "3": (idn.get("empresa") or "nós"),
@@ -582,9 +678,14 @@ def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> i
                 # ficaria fora da fila pra sempre) e para a campanha com o motivo.
                 _wa_bloqueio(pool, camp_id, bloqueio)
                 break
-            _wa_marca(pool, aid, "erro", erro_codigo=res.get("codigo"), erro_msg=detalhe)
+            # falha DESTE número (63xxx). Enquanto sobrar número e tentativa, o
+            # alvo NÃO é marcado: fica com wa_status null, volta na próxima passada
+            # e o motor pega o próximo da fila.
+            resta = len(fila) > 1 and (tentativas + 1) < _WA_TENTATIVAS
+            _wa_tentativa_falhou(pool, aid, numero, res, detalhe, tentados, ainda_tenta=resta)
             with pool.connection() as c:
-                evento(c, camp_id, pid, "whatsapp", "erro", detalhe)
+                evento(c, camp_id, pid, "whatsapp",
+                       "numero_falhou" if resta else "erro", f"{numero}: {detalhe}"[:200])
                 c.commit()
             continue
         # prospecção fria = template de MARKETING. Grava o custo estimado (tarifa BR);
@@ -743,7 +844,7 @@ def _reengajar_campanha(pool, camp_id, conta_id, dias, wa_ativo, camp_sid, teto)
             _reeng_marca(pool, aid)
             continue
         # número travado na hora de jogar pra campanha (checkbox na Base) tem
-        # prioridade — mesma regra do envio inicial (_numero_alvo_wa).
+        # prioridade — mesma regra do envio inicial (fila_alvo_wa).
         numero = (alvo_tel or "").strip() or _melhor_de_lista(dec_tels) or (whatsapp or telefone or "").strip()
         usou_wa = False
         # 1) prioriza WhatsApp (canal novo, se ativo/pronto/número e ainda não mandado)
@@ -802,6 +903,31 @@ def _reengajar_campanha(pool, camp_id, conta_id, dias, wa_ativo, camp_sid, teto)
             if ok:
                 feitos += 1
     return feitos
+
+
+def _wa_tentativa_falhou(pool, aid, numero, res, detalhe, tentados,
+                         ainda_tenta: bool) -> None:
+    """Gasta uma tentativa deste alvo e guarda o número que falhou.
+
+    `ainda_tenta=True` deixa `wa_status` NULL de propósito: a fila de disparo é
+    `where wa_status is null`, então o alvo volta na próxima passada e o motor
+    pega o próximo número. Só quando acaba a fila (ou bate o teto) é que vira
+    `erro` de verdade — que é o que tira o lead da fila pra sempre."""
+    import json
+    novos = list(tentados or [])
+    d = _so_dig(numero)
+    if d and d not in novos:
+        novos.append(d)
+    with pool.connection() as c:
+        c.execute("""update campanha_alvos
+                       set wa_status=%s, wa_em=now(), wa_tentados=%s::jsonb,
+                           wa_tentativas=coalesce(wa_tentativas,0)+1,
+                           wa_erro_codigo=%s, wa_erro_msg=%s
+                     where id=%s""",
+                  (None if ainda_tenta else "erro", json.dumps(novos),
+                   str(res.get("codigo")) if res.get("codigo") else None,
+                   (detalhe or "")[:300], aid))
+        c.commit()
 
 
 def _wa_marca(pool, aid, status, wa_sid=None, erro_codigo=None, erro_msg=None,

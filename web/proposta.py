@@ -506,11 +506,36 @@ table.itens td.n{color:#14213D}
 .sub-cat{display:flex;justify-content:space-between;gap:10px;font-size:11.5px;color:#5A6678;
   padding:6px 12px;border-bottom:1px solid #F5F1E8}
 .sub-cat:last-child{border-bottom:0}
-.sub-cat b{font-family:var(--mono);color:#14213D}
+.sub-cat b{font-family:var(--mono);color:#14213D;white-space:nowrap}
 .sub-cat.desconto,.sub-cat.desconto b{color:#0b7a56}
 table.pag th{background:#FBFAF7;color:#8A8475;border-bottom:1px solid #ECE7DC}
 td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:top}
 .cond{background:#FBFAF7;border:1px solid #ECE7DC;border-radius:9px;padding:12px 14px;font-size:12px;color:#5A6678;line-height:1.7;white-space:pre-line}
+/* ---- celular: a tabela vira LISTA ----
+   Cinco colunas em 390px sobrava uns 90px pro item: cada palavra caía numa
+   linha e a descrição virava uma coluna de letras. No celular cada item vira um
+   bloco — nome e descrição na largura toda, e os números embaixo com o rótulo
+   junto (o cabeçalho da tabela some, então o número tem que se apresentar).
+   Só na TELA: no papel a folha é A4 e a tabela continua tabela. */
+@media(max-width:560px){
+  table.itens,table.itens tbody,table.itens tr,table.itens td{display:block;width:auto}
+  table.itens tr:first-child{display:none}          /* cabeçalho da tabela */
+  table.itens tr{padding:11px 0;border-bottom:1px solid #F0EBE0}
+  table.itens td{border:0;padding:0}
+  table.itens td.n{display:none}                    /* o número da linha não paga a largura */
+  table.itens td small{max-width:none;font-size:11.5px}
+  table.itens td.q{display:inline-block;margin:7px 14px 0 0;font-size:12.5px;
+    font-weight:600;color:#14213D;text-align:left}
+  table.itens td.q::before{content:attr(data-r) " ";font-weight:400;font-size:10px;
+    letter-spacing:.06em;text-transform:uppercase;color:#8A8475}
+  table.pag,table.pag tbody,table.pag tr,table.pag td{display:block;width:auto}
+  table.pag tr:first-child{display:none}
+  table.pag tr{padding:9px 0;border-bottom:1px solid #F0EBE0}
+  table.pag td{border:0;padding:1px 0;font-size:12.5px;text-align:left}
+  table.pag td:empty{display:none}
+  table.pag td::before{content:attr(data-r) " ";font-size:10px;letter-spacing:.06em;
+    text-transform:uppercase;color:#8A8475}
+}
 .assp{display:none}
 @media print{
   body{background:#fff;padding:0}
@@ -632,7 +657,11 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
               <b>{{ l.nome }}</b>{% if l.desc %}<small>{{ l.desc }}</small>{% endif %}
             </div>
           </div></td>
-          <td class="q">{{ l.qtd }}</td><td class="q">{{ l.unit }}</td><td class="q">{{ l.subtotal }}</td></tr>{% endfor %}
+          {# data-r é o rótulo que o CELULAR mostra: lá a tabela vira lista e a
+             linha de cabeçalho some, então cada número precisa se apresentar. #}
+          <td class="q" data-r="Qtd">{{ l.qtd }}</td>
+          <td class="q" data-r="Vr. unit.">{{ l.unit }}</td>
+          <td class="q" data-r="Subtotal">{{ l.subtotal }}</td></tr>{% endfor %}
       </table>
       {% endif %}
       {% if prop.subtotais or prop.desconto_pct %}
@@ -647,8 +676,9 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
       {% if prop.parcelas_fmt %}
       <div class="eb">Plano de pagamento</div>
       <table class="pag"><tr><th>Vencimento</th><th class="r">Valor</th><th>Forma</th><th>Observação</th></tr>
-        {% for p in prop.parcelas_fmt %}<tr><td>{{ p.venc or '—' }}</td><td class="q">{{ p.valor }}</td>
-          <td>{{ p.forma }}</td><td>{{ p.obs }}</td></tr>{% endfor %}
+        {% for p in prop.parcelas_fmt %}<tr><td data-r="Vencimento">{{ p.venc or '—' }}</td>
+          <td class="q" data-r="Valor">{{ p.valor }}</td>
+          <td data-r="Forma">{{ p.forma }}</td><td data-r="Obs">{{ p.obs }}</td></tr>{% endfor %}
       </table>
       {% endif %}
       {% if prop.escopo %}<div class="eb">Condições</div><div class="cond">{{ prop.escopo }}</div>{% endif %}

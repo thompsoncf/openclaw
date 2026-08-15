@@ -20,8 +20,12 @@ create table lancamentos (id bigserial primary key, conta_id bigint references c
   membro_id bigint, tipo text, valor_centavos bigint, categoria text, descricao text default '',
   data date, pagamento text default '', origem text default 'manual', comprovante text default '',
   chave varchar(44), natureza text, criado_em timestamptz default now());
+-- funcionarios vem da 053 (marcada como aplicada no baseline). admitido_em é dessa
+-- mesma migração e precisa existir aqui: o backfill da 150 lê essa coluna pra datar
+-- a vigência inicial de salário de quem já estava cadastrado.
 create table funcionarios (id bigserial primary key, conta_id bigint references contas(id),
-  nome text, salario_centavos int default 0, pro_labore boolean default false, ativo boolean default true);
+  nome text, salario_centavos int default 0, pro_labore boolean default false,
+  ativo boolean default true, admitido_em date);
 create table folha_eventos (id bigserial primary key, conta_id bigint references contas(id),
   funcionario_id bigint references funcionarios(id),
   tipo text not null check (tipo in ('vale','extra','desconto','pagamento')),

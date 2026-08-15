@@ -31,7 +31,8 @@ _MIGRACOES = ("018_chave_nfce_lancamentos.sql", "038_endereco_conta.sql",
               "088_forma_pagamento_parcelas.sql",
               "089_funcionario_vale_transporte.sql", "092_funcionario_cbo.sql",
               "093_folha_beneficios_e_org.sql", "094_funcionario_demissao.sql",
-              "095_funcionario_cpf.sql")
+              "095_funcionario_cpf.sql",
+              "150_funcionario_salario_vigencia.sql")
 
 # Colunas que obter_dados_empresa lê e que, nas migrações reais, vêm junto de
 # DDL de tabelas do marketplace (carrinhos/nichos). A tabela `nichos` é criada

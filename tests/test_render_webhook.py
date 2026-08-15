@@ -156,6 +156,9 @@ def test_recusa_timestamp_nao_numerico():
     ("build_failed", 4, False),
     ("update_failed", 5, False),
     ("pre_deploy_failed", 6, False),
+    # vocabulario do proprio webhook (data.status), mais grosso que o do deploy
+    ("succeeded", None, True),
+    ("failed", None, False),
     # cancelado por gente nao e' falha: nao pode acordar o dono de madrugada
     ("canceled", 5, None),
     # sem texto (API fora de alcance), cai no numero do evento
@@ -241,6 +244,66 @@ def test_sem_api_key_grava_mas_nao_chuta_status(limpo, monkeypatch):
     assert tipo == "deploy_ended"
     assert sucesso is None          # NULL, nunca False: alerta falso e' pior
     assert tipo_json == "deploy_ended"   # corpo cru preservado pra auditoria
+
+
+# --------------------------------------------- payload real (entrega de prod)
+
+# Copiado LITERALMENTE de uma entrega do painel do Render (whe-da0b02924b3s...).
+# Guardado aqui porque contradiz a definicao de tipos do exemplo oficial: la' o
+# `data` so' tem `id` e `serviceId`, e na vida real vem tambem `serviceName` e
+# `status`. E' o que permite classificar e nomear o servico sem API key.
+_REAL = json.dumps({
+    "type": "deploy_ended",
+    "timestamp": "2026-08-15T18:24:23.351041589Z",
+    "data": {
+        "id": "evt-da0atlvhgfqs738esvsg",
+        "serviceId": "srv-d8m41j0g4nts7382k16g",
+        "serviceName": "openclaw-web-bcu3",
+        "status": "succeeded",
+    },
+}).encode()
+
+
+def test_payload_real_sem_api_key_ja_nomeia_e_classifica(limpo, monkeypatch):
+    """Sem RENDER_API_KEY, o corpo sozinho tem que bastar pro essencial."""
+    monkeypatch.delenv("RENDER_API_KEY", raising=False)
+    assert re_.processar(_REAL, {"webhook-id": "whe-real"}, pool=limpo)["gravado"] is True
+
+    with limpo.connection() as c:
+        nome, status, sucesso, quando = c.execute(
+            "select servico_nome, status, sucesso, ocorrido_em from render_evento"
+        ).fetchone()
+    assert nome == "openclaw-web-bcu3"
+    assert status == "succeeded"
+    assert sucesso is True          # nao mais NULL: o corpo ja' disse
+    # timestamp do Render vem com 9 casas (nanos); o Postgres guarda 6.
+    # Se isso virar erro em vez de truncar, TODO evento deixa de ser gravado.
+    assert quando is not None and quando.microsecond == 351042
+
+
+def test_payload_real_de_falha_alerta_sem_api_key(limpo, monkeypatch):
+    """O alerta nao pode depender da API: falha e' justamente quando ela pode
+    estar indisponivel."""
+    monkeypatch.delenv("RENDER_API_KEY", raising=False)
+    alertas = []
+    monkeypatch.setattr(re_, "_avisar_falha", lambda linha: alertas.append(linha))
+
+    corpo = _REAL.replace(b'"succeeded"', b'"failed"')
+    re_.processar(corpo, {"webhook-id": "whe-real-falha"}, pool=limpo)
+
+    assert len(alertas) == 1
+    assert alertas[0]["servico_nome"] == "openclaw-web-bcu3"
+
+
+def test_api_refina_o_status_grosso_do_webhook(limpo, render_api_falsa):
+    """Com API, "failed" vira "build_failed" — diz em que etapa quebrou."""
+    render_api_falsa.update(status="build_failed", status_num=4)
+    corpo = _REAL.replace(b'"succeeded"', b'"failed"')
+    re_.processar(corpo, {"webhook-id": "whe-refina"}, pool=limpo)
+
+    with limpo.connection() as c:
+        status = c.execute("select status from render_evento").fetchone()[0]
+    assert status == "build_failed"
 
 
 def test_corpo_invalido_nao_estoura(limpo):

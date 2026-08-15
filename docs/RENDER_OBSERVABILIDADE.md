@@ -74,10 +74,25 @@ este. Trate como segredo de produção.
 | Variável | Onde nasce | Obrigatória | Pra quê |
 |---|---|---|---|
 | `RENDER_WEBHOOK_SECRET` | Passo 1 (`whsec_…`) | **sim** | Valida a assinatura. Sem ela o receptor fica **inerte** (responde 200 e ignora). |
-| `RENDER_API_KEY` | Passo 2 (`rnd_…`) | não, mas quase | Enriquece o evento: nome do serviço, status legível, commit e cauda do log. Sem ela grava só o cru. |
+| `RENDER_API_KEY` | Passo 2 (`rnd_…`) | não, mas ajuda | Enriquece: commit, cauda do log e o status fino (em que etapa quebrou). |
 
 São duas coisas diferentes e não se substituem: o **segredo** prova que o
 evento veio do Render; a **API key** busca o resto da história.
+
+**O que já vem de graça no corpo do webhook** (medido numa entrega real, e mais
+do que a documentação de tipos do exemplo oficial sugere):
+
+```json
+{ "type": "deploy_ended",
+  "timestamp": "2026-08-15T18:24:23.351041589Z",
+  "data": { "id": "evt-…", "serviceId": "srv-…",
+            "serviceName": "openclaw-web-bcu3", "status": "succeeded" } }
+```
+
+Ou seja: **nome do serviço e sucesso/falha saem sem chamar a API**. O alerta de
+deploy quebrado funciona mesmo sem `RENDER_API_KEY` — o que a chave acrescenta é
+o *commit*, o *log* e trocar o `failed` grosso pelo `build_failed` fino, que diz
+em que etapa parou.
 
 > A ordem importa pouco, mas subir o código **antes** de criar o webhook é
 > seguro: sem `RENDER_WEBHOOK_SECRET` a rota não aceita nada e não grava nada.
@@ -161,12 +176,29 @@ em sessão web do Claude Code (403 no CONNECT, sem contorno pelo lado do
 script):
 
 ```bash
-python -m scripts.render_cli services
+python -m scripts.render_cli services              # todos os serviços
+python -m scripts.render_cli services --projetos   # + a qual projeto pertencem
+python -m scripts.render_cli projetos              # inventário em árvore
 python -m scripts.render_cli status  openclaw-web-bcu3
 python -m scripts.render_cli deploys openclaw-web-bcu3 --limit 5
 python -m scripts.render_cli logs    openclaw-web-bcu3 --limit 200
 python -m scripts.render_cli deploy  openclaw-web-bcu3
 ```
+
+### Inventário ≠ histórico
+
+Duas perguntas diferentes, e é fácil confundir:
+
+- **`projetos` / `services`** — "o que existe nesta conta agora?" Retrato do
+  estado. Precisa da API alcançável.
+- **`historico`** — "o que aconteceu?" Registro de eventos. Um serviço só
+  aparece depois de deployar, e só a partir da criação do webhook. Funciona com
+  a API bloqueada.
+
+O `projetos` monta a árvore **Projeto → Ambiente → Serviço** — no Render o
+serviço não aponta pro projeto direto, quem faz a ponte é o ambiente. Serviço
+criado fora de projeto (é o caso dos `-bcu3`, feitos na mão) sai listado
+separado, em `(sem projeto)`, pra não sumir do inventário.
 
 ### Como liberar
 

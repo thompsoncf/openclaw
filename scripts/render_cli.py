@@ -16,6 +16,8 @@ PRE-REQUISITOS
 USO
 ---
     python -m scripts.render_cli services
+    python -m scripts.render_cli services --projetos   # com projeto/ambiente
+    python -m scripts.render_cli projetos              # inventario em arvore
     python -m scripts.render_cli status  openclaw-bot
     python -m scripts.render_cli deploys openclaw-bot --limit 5
     python -m scripts.render_cli deploy  openclaw-bot            # dispara deploy
@@ -95,23 +97,63 @@ def _req(s, metodo, caminho, **kw):
     return r
 
 
-def _servicos(s) -> list[dict]:
-    # a API pagina; devolve [{service:{...}, cursor:...}]
+def _listar(s, caminho: str, chave: str, params: dict | None = None) -> list[dict]:
+    """Lista paginada da API do Render.
+
+    Toda lista do Render sai no mesmo formato: envelopes
+    [{"<chave>": {...}, "cursor": "..."}], e o cursor do ULTIMO item e' o ponto
+    de partida da proxima pagina. O `it.get(chave, it)` desembrulha tolerando o
+    caso de a API devolver o objeto cru — se o nome do envelope mudar, a lista
+    ainda vem, so' sem desembrulhar.
+    """
     itens, cursor = [], None
+    base = dict(params or {})
+    base.setdefault("limit", 100)
     while True:
-        params = {"limit": 100}
+        p = dict(base)
         if cursor:
-            params["cursor"] = cursor
-        r = _req(s, "GET", "/services", params=params)
-        lote = r.json()
+            p["cursor"] = cursor
+        lote = _req(s, "GET", caminho, params=p).json()
         if not lote:
             break
         for it in lote:
-            itens.append(it.get("service", it))
-        cursor = lote[-1].get("cursor")
-        if len(lote) < 100:
+            itens.append(it.get(chave, it) if isinstance(it, dict) else it)
+        ultimo = lote[-1]
+        cursor = ultimo.get("cursor") if isinstance(ultimo, dict) else None
+        # para quando a pagina veio incompleta OU quando nao ha' cursor pra
+        # seguir (sem essa segunda guarda, um cursor ausente viraria loop).
+        if len(lote) < base["limit"] or not cursor:
             break
     return itens
+
+
+def _servicos(s) -> list[dict]:
+    return _listar(s, "/services", "service")
+
+
+def _arvore_projetos(s):
+    """Monta a hierarquia Projeto -> Ambiente -> Servico.
+
+    No Render um servico nao aponta pro projeto direto: quem faz a ponte e' o
+    AMBIENTE (/environments?projectId=... e depois /services?environmentId=...).
+    Por isso sao varias chamadas — uma por projeto e uma por ambiente.
+
+    Devolve (arvore, dono):
+        arvore = [(projeto, [(ambiente, [servicos])])]
+        dono   = {service_id: "projeto / ambiente"}
+    """
+    arvore, dono = [], {}
+    for proj in _listar(s, "/projects", "project"):
+        ramos = []
+        for amb in _listar(s, "/environments", "environment",
+                           {"projectId": proj.get("id")}):
+            svcs = _listar(s, "/services", "service",
+                           {"environmentId": amb.get("id")})
+            for sv in svcs:
+                dono[sv.get("id")] = f"{proj.get('name','?')} / {amb.get('name','?')}"
+            ramos.append((amb, svcs))
+        arvore.append((proj, ramos))
+    return arvore, dono
 
 
 def _resolver(s, alvo: str) -> dict:
@@ -129,9 +171,45 @@ def _resolver(s, alvo: str) -> dict:
 
 # ---------- comandos ----------
 
-def cmd_services(s, _a):
+def cmd_services(s, a):
+    # --projetos custa varias chamadas a mais (uma por projeto e por ambiente),
+    # entao fica opcional: o `services` pelado continua sendo 1 request.
+    dono = _arvore_projetos(s)[1] if a.projetos else {}
     for sv in _servicos(s):
-        print(f"{sv.get('id'):<24} {sv.get('type',''):<14} {sv.get('name','')}")
+        linha = f"{sv.get('id'):<24} {sv.get('type',''):<14} {sv.get('name',''):<30}"
+        if a.projetos:
+            linha += dono.get(sv.get("id"), "(sem projeto)")
+        print(linha.rstrip())
+
+
+def cmd_projetos(s, a):
+    """Inventario completo: projeto -> ambiente -> servico.
+
+    Serve pra responder "o que existe nesta conta?", que o `historico` nao
+    responde: aquele e' um registro de acontecimentos (so' aparece quem
+    deployou), este e' o retrato do que esta' la' agora.
+    """
+    arvore, dono = _arvore_projetos(s)
+    for proj, ramos in arvore:
+        print(f"{proj.get('id','')}  {proj.get('name','(sem nome)')}")
+        for amb, svcs in ramos:
+            print(f"    {amb.get('name','?')}  ({len(svcs)})")
+            for sv in svcs:
+                print(f"        {sv.get('type',''):<14} {sv.get('name','')}")
+        if not ramos:
+            print("    (sem ambientes)")
+
+    # Servico solto NAO e' erro: da' pra criar servico fora de projeto, e os
+    # que existiam antes de o Render ter Projetos ficaram assim. Sem listar
+    # aqui, o "inventario completo" mentiria por omissao — e no caso de voces
+    # os -bcu3 sao justamente servicos criados na mao.
+    soltos = [sv for sv in _servicos(s) if sv.get("id") not in dono]
+    if soltos:
+        print("\n(sem projeto)")
+        for sv in soltos:
+            print(f"    {sv.get('type',''):<14} {sv.get('name','')}")
+    if not arvore and not soltos:
+        print("Nenhum projeto e nenhum servico nesta conta.")
 
 
 def cmd_status(s, a):
@@ -227,7 +305,13 @@ def main(argv=None):
     p = argparse.ArgumentParser(description="Cliente da API do Render.")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("services", help="lista os servicos").set_defaults(fn=cmd_services)
+    sp = sub.add_parser("services", help="lista os servicos")
+    sp.add_argument("--projetos", action="store_true",
+                    help="mostra a qual projeto/ambiente cada servico pertence")
+    sp.set_defaults(fn=cmd_services)
+
+    sub.add_parser("projetos", help="inventario: projeto -> ambiente -> servico"
+                   ).set_defaults(fn=cmd_projetos)
 
     sp = sub.add_parser("status", help="status do ultimo deploy"); sp.add_argument("servico"); sp.set_defaults(fn=cmd_status)
     sp = sub.add_parser("deploys", help="historico de deploys"); sp.add_argument("servico"); sp.add_argument("--limit", type=int, default=10); sp.set_defaults(fn=cmd_deploys)

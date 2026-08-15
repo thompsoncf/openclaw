@@ -63,14 +63,28 @@ _LINHAS_LOG_FALHA = 80
 # (render-examples/webhook-github-action) confirma que 2 = sucesso e trata
 # qualquer outro valor como fracasso. Como o resto do enum não está documentado
 # de forma estável, a gente NÃO chuta rótulo: guarda o número cru em
-# `status_num` e prefere o status em TEXTO do próprio deploy (via API), que é
-# autoritativo e já vem legível ("live", "build_failed", "update_failed"...).
+# `status_num` e prefere o status em TEXTO, que já vem legível.
 _STATUS_SUCESSO = 2
 
-# Status textuais do deploy que significam "deu certo".
-_TEXTO_SUCESSO = frozenset({"live", "deactivated"})
+# Existem DOIS vocabulários de status em texto, e eles não são o mesmo:
+#
+#   - o do PRÓPRIO WEBHOOK (`data.status`): grosso — "succeeded" / "failed".
+#     Vem de graça no corpo, sem chamar a API. Observado em entrega real:
+#       {"type":"deploy_ended","data":{...,"serviceName":"openclaw-web-bcu3",
+#        "status":"succeeded"}}
+#     (a definição de tipos do exemplo oficial do Render está desatualizada:
+#      lá o `data` só tem `id` e `serviceId`.)
+#
+#   - o do DEPLOY na API (`/services/{id}/deploys/{id}` → `status`): fino —
+#     "live", "build_failed", "update_failed", "pre_deploy_failed".
+#     Diz TAMBÉM em que etapa quebrou, o que o do webhook não diz.
+#
+# A gente aceita os dois e prefere o fino quando ele existe. Aceitar o grosso é
+# o que faz o alerta continuar funcionando sem RENDER_API_KEY.
+_TEXTO_SUCESSO = frozenset({"live", "deactivated", "succeeded"})
 # Status textuais que significam "quebrou" (merecem alerta).
-_TEXTO_FALHA = frozenset({"build_failed", "update_failed", "pre_deploy_failed"})
+_TEXTO_FALHA = frozenset({"build_failed", "update_failed", "pre_deploy_failed",
+                          "failed"})
 
 
 # --------------------------------------------------------------------------
@@ -320,9 +334,13 @@ def processar(corpo: bytes, headers, pool=None) -> dict:
         "evento_id": evento_id or None,
         "tipo": tipo,
         "servico_id": servico_id or None,
-        "servico_nome": None,
+        # O próprio corpo já traz nome e status; o enriquecimento abaixo só
+        # REFINA. Sem isto, um webhook chegando com RENDER_API_KEY ausente (ou
+        # com a API fora do ar) viraria uma linha anônima e sem veredito, mesmo
+        # o Render tendo mandado as duas coisas de graça.
+        "servico_nome": dados.get("serviceName") or None,
         "deploy_id": None,
-        "status": None,
+        "status": dados.get("status") or None,
         "status_num": None,
         "sucesso": None,
         "commit_id": None,
@@ -344,12 +362,15 @@ def processar(corpo: bytes, headers, pool=None) -> dict:
 
     servico = _servico(servico_id) if servico_id else {}
     if servico:
-        linha["servico_nome"] = servico.get("name")
+        linha["servico_nome"] = servico.get("name") or linha["servico_nome"]
 
     if servico_id and linha["deploy_id"]:
         dep = _deploy(servico_id, linha["deploy_id"])
         if dep:
-            linha["status"] = dep.get("status")
+            # o status do deploy e' mais fino que o do webhook ("build_failed"
+            # em vez de "failed"): diz em que etapa quebrou. So' substitui se
+            # veio mesmo — `or` pra nao apagar o que o corpo ja' informou.
+            linha["status"] = dep.get("status") or linha["status"]
             commit = dep.get("commit") or {}
             linha["commit_id"] = commit.get("id")
             linha["commit_msg"] = commit.get("message")

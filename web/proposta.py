@@ -94,6 +94,50 @@ def _brl(centavos) -> str:
     return "R$ " + _num(centavos)
 
 
+_CONECTIVOS = {"de", "da", "do", "das", "dos", "e"}
+
+
+def _titulo(v: str) -> str:
+    """Endereço/bairro/cidade que vieram GRITANDO do cadastro viram Capitalizado.
+    Só age quando não há uma minúscula sequer — texto misto é do jeito que a
+    empresa escreveu e fica como está."""
+    v = (v or "").strip()
+    if not v or any(c.islower() for c in v):
+        return v
+    palavras = []
+    for i, w in enumerate(v.split(" ")):
+        b = w.lower()
+        palavras.append(w if len(w) <= 1 and not w.isalpha() else
+                        (b if i and b in _CONECTIVOS else b.capitalize()))
+    return " ".join(palavras)
+
+
+def _doc(v: str) -> str:
+    """CNPJ/CPF com máscara. 14 dígitos é CNPJ, 11 é CPF; o resto sai como veio
+    (documento estrangeiro, meio digitado, etc.)."""
+    d = "".join(ch for ch in (v or "") if ch.isdigit())
+    if len(d) == 14:
+        return f"{d[:2]}.{d[2:5]}.{d[5:8]}/{d[8:12]}-{d[12:]}"
+    if len(d) == 11:
+        return f"{d[:3]}.{d[3:6]}.{d[6:9]}-{d[9:]}"
+    return (v or "").strip()
+
+
+def _cep(v: str) -> str:
+    d = "".join(ch for ch in (v or "") if ch.isdigit())
+    return f"{d[:5]}-{d[5:]}" if len(d) == 8 else (v or "").strip()
+
+
+def _fone(v: str) -> str:
+    """(86) 98188-5930 / (86) 3221-1234. Com 55 na frente, tira o país."""
+    d = "".join(ch for ch in (v or "") if ch.isdigit())
+    if len(d) in (12, 13) and d.startswith("55"):
+        d = d[2:]
+    if len(d) in (10, 11):
+        return f"({d[:2]}) {d[2:-4]}-{d[-4:]}"
+    return (v or "").strip()
+
+
 def _lista(v) -> list:
     """jsonb que pode voltar como str (bancos/drivers antigos) ou já como lista."""
     if isinstance(v, str):
@@ -144,6 +188,7 @@ def _carregar(token: str, pool=None):
             """select o.id, o.empresa, o.cliente, o.whatsapp, o.segmento, o.escopo,
                       o.itens, o.setup_centavos, o.mensal_centavos, o.primeiro_ano_centavos,
                       o.status, o.criado_em, o.aprovada_por, o.aprovada_em, c.nome,
+                      c.nome_fantasia,
                       o.conta_id, o.criado_por, c.logo_url,
                       coalesce(o.modo,'recorrente'), o.evento, o.parcelas, o.numero,
                       o.endereco, o.cep, o.cidade, o.uf, o.cnpj, o.email, o.telefone,
@@ -158,7 +203,8 @@ def _carregar(token: str, pool=None):
     if not r:
         return None
     (oid, empresa, contato, whats, segmento, escopo, itens, setup_c, mensal_c, ano1_c,
-     status, criado_em, aprov_por, aprov_em, conta_nome, conta_id, criado_por, logo_url,
+     status, criado_em, aprov_por, aprov_em, conta_nome, conta_fantasia,
+     conta_id, criado_por, logo_url,
      modo, evento, parcelas, numero, cli_end, cli_cep, cli_cidade, cli_uf, cli_doc,
      cli_email, cli_tel, agenda_id,
      em_razao, em_doc, em_end, em_cep, em_bairro, em_cidade, em_uf, em_tel, em_email,
@@ -172,7 +218,7 @@ def _carregar(token: str, pool=None):
     validade = dia_evento if (modo == "evento" and dia_evento) else criado + timedelta(days=15)
     return {
         "id": oid, "empresa": empresa or "Cliente", "contato": contato or "",
-        "whats": whats or "", "segmento": segmento or "",
+        "whats": _fone(whats), "segmento": segmento or "",
         "escopo": escopo or "", "itens": itens,
         "setup": _reais((setup_c or 0) / 100), "mensal": _reais((mensal_c or 0) / 100),
         "ano1": _reais((ano1_c or 0) / 100),
@@ -180,7 +226,12 @@ def _carregar(token: str, pool=None):
         "status": status or "rascunho",
         "criado": criado, "validade": validade,
         "aprovada_por": aprov_por or "", "aprovada_em": aprov_em,
-        "vendedor": conta_nome or "Proposta",
+        # Cabeçalho do orçamento de evento: o nome COMERCIAL. `contas.nome` é o
+        # nome de quem abriu a conta (vira "MANOEL SOARES" no papel do cliente);
+        # o nome fantasia/razão social é o que a empresa vende. Na proposta
+        # recorrente nada muda — segue `contas.nome`, como sempre foi.
+        "vendedor": ((conta_fantasia or em_razao or conta_nome) if modo == "evento"
+                     else conta_nome) or "Proposta",
         "conta_id": conta_id, "criado_por": criado_por, "logo_url": logo_url,
         "modo": modo or "recorrente",
         "evento": evento, "dia_evento": dia_evento,
@@ -306,7 +357,7 @@ _PROPOSTA_TPL = r"""{% if not prop %}
 {% else %}
 <!doctype html><html lang=pt-br><head><meta charset=utf-8>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{ 'Orçamento' if prop.modo == 'evento' else 'Proposta' }} · {{ prop.vendedor }}</title>
+<title>{% if prop.modo == 'evento' %}Orçamento {{ prop.doc_num }} · {{ prop.vendedor }}{% else %}Proposta · {{ prop.vendedor }}{% endif %}</title>
 {% raw %}<style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#14213D;background:#EEE9DD;padding:18px}
@@ -385,6 +436,10 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
   .pg{box-shadow:none;border-radius:0}
   .assp{display:block!important;margin:26px 40px 0;text-align:center;font-size:10.5px;color:#555}
   .assp .ln{border-top:1px solid #333;width:65%;margin:0 auto 4px}
+  /* já assinado: sai o carimbo eletrônico no lugar da linha à caneta, e a
+     caixa verde de "aprovado" não vira uma segunda página em branco. */
+  .assp.carimbo{border-top:1px solid #ECE7DC;padding-top:10px;color:#0b7a56;margin-top:20px}
+  .ok{display:none!important}
   /* aperta o respiro da tela pra caber mais folha por página… */
   .hd{padding:20px 26px}
   .bd{padding:18px 26px 20px}
@@ -409,8 +464,8 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
         <div class="lg">{{ prop.vendedor }} <span>·</span></div>
         <div class="sub">{{ 'Orçamento de evento' if evento else 'Proposta comercial' }}</div>
         {% if evento %}<div class="emit">
-          {%- if prop.emitente.razao %}{{ prop.emitente.razao }}{% endif %}
-          {%- if prop.emitente.doc %} · CNPJ {{ prop.emitente.doc }}{% endif %}
+          {%- if prop.emitente.razao and prop.emitente.razao != prop.vendedor %}{{ prop.emitente.razao }}{% endif %}
+          {%- if prop.emitente.doc %}{% if prop.emitente.razao and prop.emitente.razao != prop.vendedor %} · {% endif %}CNPJ {{ prop.emitente.doc }}{% endif %}
           {%- if prop.emitente.endereco %}<br>{{ prop.emitente.endereco }}
             {%- if prop.emitente.bairro %} · {{ prop.emitente.bairro }}{% endif %}
             {%- if prop.emitente.cidade %} · {{ prop.emitente.cidade }}{% if prop.emitente.uf %}/{{ prop.emitente.uf }}{% endif %}{% endif %}
@@ -496,7 +551,13 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
       <div class="fin"><div class="l">Total estimado · 1º ano</div><div class="v">{{ prop.ano1 }}</div></div>
       {% endif %}
     </div>
-    {% if evento %}<div class="assp"><div class="ln"></div>Assinatura do cliente</div>{% endif %}
+    {% if evento %}
+      {% if prop.assinada and prop.aprovada_por %}
+      <div class="assp carimbo">✓ Aprovado eletronicamente por <b>{{ prop.aprovada_por }}</b>{% if prop.aprovada_str %} em {{ prop.aprovada_str }}{% endif %} · assinatura registrada com nome, data/hora e IP</div>
+      {% else %}
+      <div class="assp"><div class="ln"></div>Assinatura do cliente</div>
+      {% endif %}
+    {% endif %}
   </div>
 
   {% if prop.assinada %}

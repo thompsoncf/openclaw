@@ -7,7 +7,10 @@
  *
  * Rotas (todas exigem o header do segredo):
  *   POST /session/:conta/iniciar   -> garante o socket; {status, qr?} (qr = data URL)
- *   GET  /session/:conta/status    -> {status, qr?}
+ *                                     body {forcar:true} derruba o socket atual antes
+ *                                     (pra ressuscitar sessão "conectada" mas muda)
+ *   GET  /session/:conta/status    -> {status, qr?, mudoMs} (mudoMs = há quanto tempo
+ *                                     aquele socket não entrega evento nenhum)
  *   POST /session/:conta/enviar    -> body {numero, texto} -> {ok, id?} | {ok:false,erro}
  *   POST /session/:conta/sair      -> logout + limpa estado -> {ok}
  *   GET  /saude                    -> {ok:true} (sem segredo; healthcheck do Render)
@@ -31,6 +34,9 @@
  * Ao subir (deploy/restart/crash) o serviço religa sozinho todas as contas que já
  * estavam pareadas, lendo as credenciais do Postgres — ver restaurarSessoes().
  * Ninguém precisa abrir tela nem escanear QR de novo por causa de um deploy.
+ *
+ * Socket que morre sem avisar (fica "conectado" e não entrega mais nada) é religado
+ * sozinho pelo vigia — ver vigiarSessoes(): silêncio longo + ping sem resposta.
  *
  * Env: DATABASE_URL, WA_QR_SHARED_SECRET, APP_URL, PORT (default 3000).
  */
@@ -61,6 +67,15 @@ const ESPERA_RESTAURAR_MS = parseInt(process.env.WA_QR_ESPERA_RESTAURAR_MS || '1
 // O custo de espaçar é a última conta demorar mais pra voltar a RECEBER; o envio não
 // espera, porque /enviar religa a sessão sob demanda.
 const ESPACO_CONTAS_MS = parseInt(process.env.WA_QR_ESPACO_CONTAS_MS || '30000', 10)
+// Vigia de sessão MUDA — ver vigiarSessoes(). Quanto tempo sem UM evento do socket
+// (mensagem, recibo, contato, histórico) até desconfiar, e de quanto em quanto tempo
+// conferir. 10min é folgado de propósito: conta parada de madrugada é normal, e quem
+// decide se a sessão morreu não é o silêncio, é o ping não voltar.
+const MUDO_LIMITE_MS = parseInt(process.env.WA_QR_MUDO_LIMITE_MS || '600000', 10)
+const VIGIA_INTERVALO_MS = parseInt(process.env.WA_QR_VIGIA_MS || '60000', 10)
+// Timeout do ping. O keep-alive do próprio Baileys usa 30s; aqui é menor porque a
+// sessão já está sob suspeita e o vigia roda de novo daqui a um minuto.
+const PING_TIMEOUT_MS = parseInt(process.env.WA_QR_PING_TIMEOUT_MS || '15000', 10)
 
 if (!process.env.DATABASE_URL) { log.error('Falta DATABASE_URL'); process.exit(1) }
 if (!SEGREDO) { log.error('Falta WA_QR_SHARED_SECRET'); process.exit(1) }
@@ -191,6 +206,80 @@ function pararTimersDaAgenda (s) {
   if (!s) return
   clearTimeout(s._agendaT1); clearTimeout(s._agendaT2); clearInterval(s._agendaT3)
   s._agendaT3 = null
+}
+
+// Carimbo de VIDA da sessão: a última vez que este socket entregou alguma coisa
+// (mensagem, recibo, contato, onda de histórico, conexão abrindo). É o único jeito de
+// distinguir "conta parada" de "socket morto que ninguém percebeu" — ver vigiarSessoes.
+function marcarVivo (contaId) {
+  const s = sessoes.get(contaId)
+  if (s) s.ultimoEvento = Date.now()
+}
+
+// A sessão está MUDA a ponto de merecer um ping? Separado numa função pura porque é
+// a regra que decide religar uma sessão de produção — e religar à toa é justamente o
+// que faz o WhatsApp achar que é abuso.
+//
+// Só entra sessão que se DIZ conectada: 'reconectando' já tem quem cuide dela, e
+// 'aguardando_qr' está esperando gente, não rede. Sem `ultimoEvento` (sessão restaurada
+// por um deploy antes deste campo existir) conta como agora — na dúvida, não mexe.
+function sessaoMuda (s, agora, limite) {
+  if (!s || s.iniciando || !s.sock || s.status !== 'conectado') return false
+  return (agora - (s.ultimoEvento || agora)) >= limite
+}
+
+// PING de verdade no socket — o mesmo IQ que o keep-alive do Baileys manda sozinho a
+// cada 30s. Se voltar, a sessão está viva e o silêncio era só falta de assunto.
+async function pingSessao (sock) {
+  if (!sock || typeof sock.query !== 'function') throw new Error('socket sem query')
+  await sock.query({
+    tag: 'iq',
+    attrs: { to: '@s.whatsapp.net', type: 'get', xmlns: 'w:p' },
+    content: [{ tag: 'ping', attrs: {} }]
+  }, PING_TIMEOUT_MS)
+}
+
+// O socket que morre SEM avisar. Aconteceu em produção com a conta 35 (Confeitaria
+// Doce Mell): às 13:28 o serviço parou de receber qualquer evento daquela sessão —
+// nem mensagem, nem eco do celular, nem contato — enquanto as outras contas do mesmo
+// processo seguiam normais. Nada no banco mudou pra ela dali em diante, e o painel
+// continuou mostrando o chip como CONECTADO, porque o status é o que ficou na memória
+// do último 'open'. Três horas depois a cliente ainda via a caixa parada no mesmo
+// minuto, sem uma linha de erro em lugar nenhum.
+//
+// O pior não era a queda: era não ter volta. Com `status === 'conectado'` e um `sock`
+// na mão, o iniciarSessao devolve a sessão existente na primeira linha — então nem o
+// botão de reconectar do painel ressuscitava a conta. Só um deploy resolvia.
+//
+// Daí este vigia: silêncio longo não condena ninguém, mas manda perguntar. O ping é a
+// prova — se ele não volta, o socket está morto de fato e a sessão é religada à força
+// (status/sock zerados antes, senão o iniciarSessao volta a dizer "já está conectada").
+async function vigiarSessoes () {
+  const agora = Date.now()
+  for (const [contaId, s] of sessoes) {
+    if (!sessaoMuda(s, agora, MUDO_LIMITE_MS)) continue
+    const mudoMin = Math.round((agora - (s.ultimoEvento || agora)) / 60000)
+    try {
+      await pingSessao(s.sock)
+      // respondeu: conta parada mesmo. Recarimba pra não pingar de minuto em minuto.
+      s.ultimoEvento = Date.now()
+      log.info({ contaId, mudoMin }, 'vigia: sessão calada mas o ping voltou — está viva')
+      continue
+    } catch (e) {
+      log.warn({ contaId, mudoMin, e: String(e) },
+        'vigia: sessão calada e o ping não voltou — religando à força')
+    }
+    s.status = 'reconectando'
+    s.qr = null
+    descartarSocket(s.sock, contaId, 'vigia_sessao_muda')
+    s.sock = null
+    pararTimersDaAgenda(s)
+    try {
+      await iniciarSessao(contaId)
+    } catch (e) {
+      log.error({ contaId, e: String(e) }, 'vigia: religar falhou — tenta de novo na próxima volta')
+    }
+  }
 }
 
 // contaId -> Map(jid @lid -> jid real @s.whatsapp.net). Usado pra traduzir o ID
@@ -1217,6 +1306,9 @@ async function iniciarSessao (contaId) {
     try {
       sock.ws.on('CB:message', (node) => {
         try {
+          // frame chegando é o sinal de vida mais cru que existe — vale até quando a
+          // mensagem não decodifica e nenhum evento de alto nível é emitido
+          marcarVivo(contaId)
           const a = (node && node.attrs) || {}
           aprenderLid(contaId, a.from, a.sender_pn)
           aprenderLid(contaId, a.recipient, a.peer_recipient_pn)
@@ -1239,6 +1331,7 @@ async function iniciarSessao (contaId) {
     }
     if (connection === 'open') {
       s.status = 'conectado'; s.qr = null
+      s.ultimoEvento = Date.now()   // ponto de partida do vigia — ver vigiarSessoes
       // marca que ESTA sessão chegou a abrir de verdade — é isso (e não o
       // creds.registered, que nunca vira true no fluxo QR) que separa um logout
       // real de uma credencial podre rejeitada logo na primeira tentativa.
@@ -1320,6 +1413,7 @@ async function iniciarSessao (contaId) {
     // log sempre que o evento disparar, mesmo filtrado — sem isso não dava pra saber
     // se o socket estava recebendo mensagem nenhuma ou só descartando pelo filtro.
     log.info({ contaId, type, n: messages.length }, 'messages.upsert recebido')
+    marcarVivo(contaId)
     // MessageUpsertType só tem 'notify' (ao vivo) e 'append' (mensagem legítima que
     // chegou enquanto a conexão teve uma variação breve — "estava offline, aqui está
     // o que você perdeu", node.attrs.offline no Baileys). NÃO é o histórico em massa
@@ -1341,6 +1435,7 @@ async function iniciarSessao (contaId) {
   // (chat-utils.js -> contactAction.fullName). É o nome que o vendedor salvou.
   sock.ev.on('contacts.upsert', (contatos) => {
     log.info({ contaId, n: (contatos || []).length }, 'contacts.upsert recebido')
+    marcarVivo(contaId)
     repassarContatos(contaId, contatos, true).catch((e) =>
       log.warn({ contaId, e: String(e) }, 'repassarContatos falhou'))
   })
@@ -1349,6 +1444,7 @@ async function iniciarSessao (contaId) {
   // interessa pro chat. O lado Python casa pelo id e nunca deixa o status
   // regredir, porque esses eventos chegam fora de ordem com frequência.
   sock.ev.on('messages.update', (atualizacoes) => {
+    marcarVivo(contaId)
     const itens = []
     for (const u of atualizacoes || []) {
       const k = u && u.key
@@ -1365,6 +1461,7 @@ async function iniciarSessao (contaId) {
 
   // Nome do PERFIL (pushName) — reserva, só preenche quando não há nome ainda.
   sock.ev.on('contacts.update', (contatos) => {
+    marcarVivo(contaId)
     repassarContatos(contaId, contatos, false).catch((e) =>
       log.warn({ contaId, e: String(e) }, 'repassarContatos (update) falhou'))
   })
@@ -1374,6 +1471,7 @@ async function iniciarSessao (contaId) {
     // aqui: a tempestade de um pareamento inteiro coube em 28 segundos e passou entre
     // duas medições. `external`/`buffers` são a parte que interessa — é onde o blob de
     // histórico vive (Buffer, fora do heap), e foi o que estourou o RSS da instância.
+    marcarVivo(contaId)
     const _m0 = process.memoryUsage()
     log.info({ contaId, n: messages.length, contatos: (contacts || []).length,
       isLatest, progress, syncType,
@@ -1536,14 +1634,33 @@ const servidor = http.createServer(async (req, res) => {
       if (!contaId) return json(res, 400, { ok: false, erro: 'conta' })
 
       if (req.method === 'POST' && acao === 'iniciar') {
+        // {forcar:true} = derruba o socket atual ANTES de abrir outro. Sem isso o
+        // iniciarSessao devolve a sessão que existe já na primeira linha, e uma sessão
+        // que se diz conectada mas está muda (ver vigiarSessoes) não tinha como ser
+        // ressuscitada por ninguém — nem pelo botão de reconectar do painel.
+        const body = await lerBody(req)
+        if (body && body.forcar) {
+          const atual = sessoes.get(contaId)
+          if (atual) {
+            log.warn({ contaId, status: atual.status }, 'iniciar: reconexão FORÇADA pedida')
+            descartarSocket(atual.sock, contaId, 'reconexao_forcada')
+            pararTimersDaAgenda(atual)
+            atual.sock = null
+            atual.status = 'reconectando'
+            atual.iniciando = false
+          }
+        }
         const s = await iniciarSessao(contaId)
         return json(res, 200, { ok: true, status: s.status, qr: s.qr,
           sincronizando: !!s.sincronizando, syncProgress: s.syncProgress || 0 })
       }
       if (req.method === 'GET' && acao === 'status') {
         const s = sessoes.get(contaId) || { status: 'desconectado', qr: null }
+        // `mudoMs` é o que separa "conectado" de "conectado no papel": quem consome
+        // consegue ver há quanto tempo aquele socket não entrega nada.
         return json(res, 200, { ok: true, status: s.status, qr: s.qr || null,
-          sincronizando: !!s.sincronizando, syncProgress: s.syncProgress || 0 })
+          sincronizando: !!s.sincronizando, syncProgress: s.syncProgress || 0,
+          mudoMs: s.ultimoEvento ? (Date.now() - s.ultimoEvento) : null })
       }
       // Refaz o pedido da AGENDA sem precisar de novo QR (ver agendarResyncAgenda).
       // Serve pra consertar uma sessão que já está de pé com os nomes faltando.
@@ -1684,8 +1801,18 @@ servidor.listen(PORT, () => {
   setTimeout(() => {
     restaurarSessoes().catch((e) => log.error({ e: String(e) }, 'restaurarSessoes: erro solto'))
   }, ESPERA_RESTAURAR_MS)
+  // Vigia das sessões mudas. Uma volta de cada vez (o await dentro do laço já
+  // serializa): duas rodadas em paralelo poderiam religar a mesma conta duas vezes.
+  let vigiando = false
+  setInterval(() => {
+    if (vigiando) return
+    vigiando = true
+    vigiarSessoes()
+      .catch((e) => log.error({ e: String(e) }, 'vigiarSessoes: erro solto'))
+      .finally(() => { vigiando = false })
+  }, VIGIA_INTERVALO_MS).unref()
 })
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool }
+module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, marcarVivo, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, sessoes, pool }

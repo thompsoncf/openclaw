@@ -88,6 +88,24 @@ services:
         sync: false
       - key: WA_QR_SHARED_SECRET
         sync: false
+      # --- Observabilidade de deploy (POST /webhook/render) ---
+      # SO' AQUI. Os crons e o wa-qr nao servem essa rota; por' la' nao fariam
+      # nada alem de espalhar segredo.
+      # O webhook em si NAO e' deste servico: no Render ele e' do WORKSPACE
+      # (dashboard.render.com/webhooks) e so' aponta pra URL daqui —
+      # https://openclaw-web-bcu3.onrender.com/webhook/render
+      # RENDER_WEBHOOK_SECRET: assinatura do webhook (whsec_...). SEM ela a rota
+      #   fica INERTE: responde 200 e ignora, sem gravar nada. E' o que permite
+      #   subir o codigo antes de criar o webhook la'.
+      # RENDER_API_KEY: Account Settings -> API Keys (rnd_...). Enriquece o
+      #   evento com nome do servico, status legivel, commit e cauda do log.
+      #   Sem ela o evento e' gravado cru, e `sucesso` fica NULL em vez de
+      #   false — nao alerta por chute.
+      # Passo-a-passo: docs/RENDER_OBSERVABILIDADE.md
+      - key: RENDER_WEBHOOK_SECRET
+        sync: false
+      - key: RENDER_API_KEY
+        sync: false
 
   # WhatsApp por QR Code (tipo WhatsApp Web / Baileys). Serviço Node SEMPRE
   # ligado, 1 instância (a sessão é stateful em memória — NÃO escale horizontal).

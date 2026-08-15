@@ -111,6 +111,13 @@ services:
   # ligado, 1 instância (a sessão é stateful em memória — NÃO escale horizontal).
   # Estado da sessão fica no Postgres (tabela wa_qr_auth, migração 097). Só suba
   # este serviço quando um cliente exigir o QR e aceitar o risco de ban.
+  #
+  # numInstances:1 não bastava: o deploy sem downtime sobe a instância nova ANTES
+  # de matar a velha, e por alguns segundos existem duas com a mesma credencial —
+  # que é o que o WhatsApp responde com 440 (connectionReplaced), derrubando as
+  # sessões a cada deploy. Quem garante uma só agora é a trava de sessão por
+  # conta (tabela wa_qr_sessao_lock, migração 157, ver services/wa-qr/README.md):
+  # a instância nova espera a velha soltar no SIGTERM em vez de roubar a sessão.
   #   Root Directory: services/wa-qr · Build: npm install · Start: npm start
   #   Health check path: /saude
   - type: web

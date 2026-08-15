@@ -2701,7 +2701,17 @@ async def webhook_twilio(request: Request, background_tasks: BackgroundTasks):
 _WA_STATUS_MAP = {"delivered": "entregue", "read": "lido",
                   "sent": "enviado", "queued": "enviado", "sending": "enviado",
                   "failed": "erro", "undelivered": "erro"}
-_WA_STATUS_RANK = {"enviado": 1, "entregue": 2, "lido": 3, "respondeu": 4}
+
+# 'erro' empata com 'enviado' de propósito. Os callbacks chegam fora de ordem —
+# em produção veio "enviado → erro 63024 → enviado" em 3 segundos — e enquanto o
+# erro valia 0 o "enviado" atrasado passava por cima e ressuscitava a falha como
+# sucesso. Só sobrava o wa_erro_codigo órfão: o alvo saía da fila de reenvio, o
+# KPI de erros contava a menos e o "Números não tentados" nem via o lead.
+# Empatado, o "enviado" tardio não sobrescreve mais; 'entregue'/'lido' ainda sim,
+# porque aí a mensagem chegou de verdade e o sucesso é a informação mais nova.
+_WA_STATUS_RANK = {"erro": 1, "enviado": 1, "entregue": 2, "lido": 3, "respondeu": 4}
+_SQL_RANK = ("case %s when 'enviado' then 1 when 'erro' then 1 "
+             "when 'entregue' then 2 when 'lido' then 3 else 0 end")
 
 
 @router.post("/webhooks/twilio-status")
@@ -2747,18 +2757,18 @@ async def webhook_twilio_status(request: Request):
                         evento(c, _transicao_erro[1], _transicao_erro[0], "whatsapp", "erro", detalhe)
                     c.commit()
                 else:
-                    # guarda de rank: nunca rebaixa (enviado<entregue<lido)
+                    # guarda de rank: nunca rebaixa (erro=enviado < entregue < lido)
                     rank = _WA_STATUS_RANK[novo]
-                    cur = c.execute("""update campanha_alvos set wa_status=%s, wa_em=now()
-                                   where wa_sid=%s and coalesce(case wa_status
-                                     when 'enviado' then 1 when 'entregue' then 2 when 'lido' then 3
-                                     else 0 end, 0) < %s returning prospeccao_id, campanha_id""",
-                                    (novo, msid, rank))
+                    cur = c.execute(
+                        "update campanha_alvos set wa_status=%s, wa_em=now() "
+                        "where wa_sid=%s and coalesce(" + _SQL_RANK.replace("%s", "wa_status") +
+                        ", 0) < %s returning prospeccao_id, campanha_id",
+                        (novo, msid, rank))
                     _transicao = cur.fetchone()
-                    c.execute("""update mensagens set status=%s
-                                   where provider_sid=%s and coalesce(case status
-                                     when 'enviado' then 1 when 'entregue' then 2 when 'lido' then 3
-                                     else 0 end, 0) < %s""", (novo, msid, rank))
+                    c.execute(
+                        "update mensagens set status=%s "
+                        "where provider_sid=%s and coalesce(" + _SQL_RANK.replace("%s", "status") +
+                        ", 0) < %s", (novo, msid, rank))
                     if _transicao:
                         from finance.campanhas_motor import evento
                         evento(c, _transicao[1], _transicao[0], "whatsapp", novo)
@@ -3438,16 +3448,17 @@ async def webhook_wa_qr_status(request: Request):
             novo = str((it or {}).get("status") or "").strip()
             if not sid or novo not in validos:
                 continue
+            # 'erro' que CHEGA continua passando por cima de qualquer status (regra
+            # desta rota: se falhou, é o que o vendedor precisa ver). O que muda é o
+            # outro lado: na escada, 'erro' já registrado empata com 'enviado', pra
+            # um recibo atrasado não apagar a falha — foi o que aconteceu no Twilio.
             r = c.execute(
-                """update mensagens m set status=%s
-                     from conversas cv
-                    where cv.id = m.conversa_id and cv.conta_id=%s
-                      and m.provider_sid=%s and m.canal='whatsapp'
-                      and (%s = 'erro' or
-                           (case coalesce(m.status,'') when 'enviado' then 1 when 'entregue' then 2
-                                                       when 'lido' then 3 else 0 end)
-                           < (case %s when 'enviado' then 1 when 'entregue' then 2
-                                      when 'lido' then 3 else 0 end))""",
+                "update mensagens m set status=%s "
+                "  from conversas cv "
+                " where cv.id = m.conversa_id and cv.conta_id=%s "
+                "   and m.provider_sid=%s and m.canal='whatsapp' "
+                "   and (%s = 'erro' or (" + _SQL_RANK.replace("%s", "coalesce(m.status,'')")
+                + ") < (" + _SQL_RANK + "))",
                 (novo, conta_id, sid, novo, novo))
             n += r.rowcount or 0
         c.commit()

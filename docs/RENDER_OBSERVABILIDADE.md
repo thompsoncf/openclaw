@@ -38,32 +38,51 @@ Render  ──POST assinado──▶  openclaw-web  ──enriquece via API─�
                                                   (com commit e log junto)
 ```
 
-### Passo 1: gerar o segredo
+### Passo 1: gerar o segredo do webhook
 
-Requer plano **Professional ou superior** no Render.
+Requer plano **Professional ou superior**
+(<https://dashboard.render.com/billing/update-plan>).
 
-No dashboard: **Settings → Webhooks → New Webhook**
+> **Webhook no Render é do WORKSPACE, não do serviço.** Não adianta procurar
+> dentro de `openclaw-web-bcu3` — não tem lá. Fica num item de menu próprio, no
+> nível do workspace, e um único webhook cobre **todos** os serviços. É por isso
+> que o receptor grava `servico_id`/`servico_nome` em cada evento e o
+> `historico` tem `--servico`: vai chegar evento de tudo.
+
+Vá direto em **<https://dashboard.render.com/webhooks>** → **New Webhook**
+(ou direto em <https://dashboard.render.com/webhooks/new>):
 
 - **URL**: `https://openclaw-web-bcu3.onrender.com/webhook/render`
 - **Eventos**: marque no mínimo `deploy_ended`. Vale marcar também
   `deploy_started` e `server_failed` — o receptor grava qualquer tipo, e só
   alerta em falha de deploy.
 
-Salve o **signing secret** que ele mostrar (começa com `whsec_`).
+Salve o **signing secret** que ele mostrar (começa com `whsec_`). Ele aparece
+**uma vez só** — se perder, é preciso gerar outro.
 
-### Passo 2: variáveis de ambiente no `openclaw-web`
+### Passo 2: gerar a API key
 
-| Variável | Obrigatória | Pra quê |
-|---|---|---|
-| `RENDER_WEBHOOK_SECRET` | **sim** | Valida a assinatura. Sem ela o receptor fica **inerte** (responde 200 e ignora). |
-| `RENDER_API_KEY` | não, mas quase | Enriquece o evento: nome do serviço, status legível, commit e cauda do log. Sem ela grava só o cru. |
+Em **<https://dashboard.render.com/settings#api-keys>**
+(Account Settings → API Keys) → **Create API Key**. Começa com `rnd_`, e
+também só aparece uma vez.
 
-`RENDER_API_KEY` sai de **Account Settings → API Keys**.
+Cuidado: a API key vale pra **todos os workspaces** do seu usuário, não só
+este. Trate como segredo de produção.
+
+### Passo 3: variáveis de ambiente no `openclaw-web`
+
+| Variável | Onde nasce | Obrigatória | Pra quê |
+|---|---|---|---|
+| `RENDER_WEBHOOK_SECRET` | Passo 1 (`whsec_…`) | **sim** | Valida a assinatura. Sem ela o receptor fica **inerte** (responde 200 e ignora). |
+| `RENDER_API_KEY` | Passo 2 (`rnd_…`) | não, mas quase | Enriquece o evento: nome do serviço, status legível, commit e cauda do log. Sem ela grava só o cru. |
+
+São duas coisas diferentes e não se substituem: o **segredo** prova que o
+evento veio do Render; a **API key** busca o resto da história.
 
 > A ordem importa pouco, mas subir o código **antes** de criar o webhook é
 > seguro: sem `RENDER_WEBHOOK_SECRET` a rota não aceita nada e não grava nada.
 
-### Passo 3: conferir
+### Passo 4: conferir
 
 A migração `154_render_evento.sql` roda sozinha no deploy (o `preDeployCommand`
 já chama `python -m db.aplicar_migracoes`).

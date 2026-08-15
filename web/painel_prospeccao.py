@@ -1331,6 +1331,9 @@ def _canais_status(pool, conta_id: int) -> dict:
                 group by cv.canal""", (conta_id,)).fetchall())
     return {
         "ult_in": ult_in,
+        # o carimbo sozinho não acusa nada: "15/08 13:28" só vira sintoma quando se
+        # sabe que já são três horas atrás. Aqui a conta é feita e fica escrita.
+        "wa_sem_receber": _ha_quanto(_wa_minutos_sem_receber(conta_id)),
         "email": bool(rem_conta),                         # ENVIAR (caixa da empresa/global)
         "email_remetente": rem_conta or "",               # o e-mail que vai no From
         "email_rx": email_rx,                             # RECEBER (caixa da conta)
@@ -1524,6 +1527,36 @@ def _wa_qr_sincronizando(conta_id) -> bool:
 
 _WA_CHIP_CACHE: dict = {}   # conta_id -> (quando, dict)
 
+# A partir de quantos minutos sem receber vale AVISAR na faixa do chip. Uma hora é
+# silêncio comum (almoço, cliente sem assunto); o que a faixa denuncia é o silêncio
+# que já não combina com "conectado" — e, com o vigia do serviço religando sessão
+# muda em até 45min, silêncio longo aqui virou coisa de conta parada mesmo.
+_WA_SILENCIO_MIN = 60
+
+
+def _wa_minutos_sem_receber(conta_id) -> int | None:
+    """Minutos desde a última mensagem RECEBIDA no WhatsApp desta empresa.
+    None = nunca recebeu nada (conta nova), que não é silêncio suspeito."""
+    with get_pool().connection() as c:
+        r = c.execute(
+            """select extract(epoch from now() - max(m.criado_em))/60
+                 from mensagens m join conversas cv on cv.id=m.conversa_id
+                where cv.conta_id=%s and cv.canal='whatsapp' and m.direcao='in'""",
+            (conta_id,)).fetchone()
+    return int(r[0]) if r and r[0] is not None else None
+
+
+def _ha_quanto(minutos) -> str:
+    """'há 40min' · 'há 3h' · 'há 2 dias'. '' quando não há silêncio a relatar —
+    é o que a tela usa pra decidir se mostra alguma coisa."""
+    if minutos is None or minutos < _WA_SILENCIO_MIN:
+        return ""
+    if minutos < 120:
+        return f"há {int(minutos)}min"
+    if minutos < 48 * 60:
+        return f"há {int(minutos // 60)}h"
+    return f"há {int(minutos // 1440)} dias"
+
 
 def _wa_chip(conta_id) -> dict:
     """Qual chip está enviando o WhatsApp desta empresa, e como ele está.
@@ -1576,6 +1609,8 @@ def _wa_chip(conta_id) -> dict:
             # na API oficial não existe "sessão que cai": ou o canal está configurado
             # ou não está. Não invento estado que o provedor não reporta.
             chip["estado"] = "conectado" if chip["numero"] else "sem_chip"
+        if chip["estado"] == "conectado":
+            chip["sem_receber"] = _ha_quanto(_wa_minutos_sem_receber(conta_id))
     except Exception:  # noqa: BLE001
         chip = {"provedor": "", "nome": "", "numero": "", "estado": "sem_chip"}
     _WA_CHIP_CACHE[conta_id] = (agora, chip)
@@ -7991,9 +8026,14 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
          não sabia de onde ia sair. #}
       <div class="cx-chip-faixa">
         {% if chip.estado == 'conectado' %}
-          <span class="pt" style="background:var(--neon)"></span>Enviando WhatsApp pelo chip
+          <span class="pt" style="background:{{ 'var(--ambar)' if chip.sem_receber else 'var(--neon)' }}"></span>Enviando WhatsApp pelo chip
           {% if chip.nome %}<b>{{ chip.nome }}</b> · {% endif %}<code>{{ chip.numero }}</code>
           · <span style="color:var(--neon)">conectado</span>
+          {# "conectado" é o que o serviço acha da SESSÃO; isto aqui é o que a caixa
+             viu de verdade. Os dois discordando é exatamente o sintoma da sessão que
+             emudece sem cair — e era o que ninguém tinha como perceber. #}
+          {% if chip.sem_receber %}· <span style="color:var(--ambar)">sem receber {{ chip.sem_receber }}</span>
+          · <a href="/painel/prospeccao/comunicacao?aba=canais">conferir o chip</a>{% endif %}
         {% elif chip.estado == 'sincronizando' %}
           <span class="pt" style="background:var(--ambar)"></span>Chip
           {% if chip.nome %}<b>{{ chip.nome }}</b> · {% endif %}<code>{{ chip.numero }}</code>
@@ -8415,7 +8455,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </div>
     <div class="cx-card">
       <h3>💬 WhatsApp <span class="cx-stat {{ 'st-on' if canais.whatsapp else 'st-off' }}">● {{ ('Serviço de QR ligado — veja o status da sessão abaixo' if canais.wa_provedor == 'qr' else 'Conectado') if canais.whatsapp else 'A configurar' }}</span></h3>
-      <div class="mut" style="font-size:.8rem;margin-bottom:.2rem">📥 Última recebida: {% if canais.ult_in.get('whatsapp') %}<b style="color:var(--verde-claro)">{{ canais.ult_in['whatsapp'] }}</b>{% else %}<span style="color:var(--mut)">nenhuma ainda</span>{% endif %}</div>
+      <div class="mut" style="font-size:.8rem;margin-bottom:.2rem">📥 Última recebida: {% if canais.ult_in.get('whatsapp') %}<b style="color:var(--verde-claro)">{{ canais.ult_in['whatsapp'] }}</b>{% if canais.wa_sem_receber %} <span style="color:var(--ambar)">({{ canais.wa_sem_receber }} — se o cliente está mandando mensagem, reconecte o chip abaixo)</span>{% endif %}{% else %}<span style="color:var(--mut)">nenhuma ainda</span>{% endif %}</div>
       {% if gerencia %}
       <div class="mut" style="font-size:.8rem;margin-bottom:.1rem">Como este cliente conecta o WhatsApp:</div>
       <div class="waseg">

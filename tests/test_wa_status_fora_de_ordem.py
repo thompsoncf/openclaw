@@ -29,10 +29,13 @@ from web import painel_prospeccao as pp
 
 _BASE_SQL = """
 create table contas (id bigserial primary key, tipo text, nome text);
-create table prospeccao (id bigserial primary key, conta_id bigint, empresa text);
+create table prospeccao (id bigserial primary key, conta_id bigint, empresa text,
+  cnpj text, whatsapp text, telefone text, decisor_telefones jsonb);
 create table campanhas (id bigserial primary key, conta_id bigint, nome text);
 create table campanha_alvos (id bigserial primary key, campanha_id bigint, prospeccao_id bigint,
-  wa_sid text, wa_status text, wa_em timestamptz, wa_erro_codigo text, wa_erro_msg text);
+  wa_sid text, wa_numero text, wa_status text, wa_em timestamptz,
+  wa_erro_codigo text, wa_erro_msg text, alvo_telefone text,
+  wa_tentados jsonb not null default '[]'::jsonb, wa_tentativas int not null default 0);
 create table campanha_eventos (id bigserial primary key, campanha_id bigint, prospeccao_id bigint,
   canal text, evento text, detalhe text, quando timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, canal text);

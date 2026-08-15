@@ -706,7 +706,8 @@ def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> i
         from finance import wa_precos
         _cat = "marketing"
         _custo = wa_precos.custo_brl(_cat, True)
-        _wa_marca(pool, aid, "enviado", wa_sid=res.get("sid"), categoria=_cat, custo=_custo)
+        _wa_marca(pool, aid, "enviado", wa_sid=res.get("sid"), categoria=_cat, custo=_custo,
+                  numero=numero)
         with pool.connection() as c:
             c.execute("update campanhas set wa_enviados_hoje=coalesce(wa_enviados_hoje,0)+1 where id=%s",
                       (camp_id,))
@@ -943,8 +944,56 @@ def _wa_tentativa_falhou(pool, aid, numero, res, detalhe, tentados,
         c.commit()
 
 
+def falha_na_entrega(c, aid, erro_codigo="", erro_msg="") -> bool:
+    """A mensagem SAIU mas não chegou — a falha veio pelo webhook de status, não
+    pela chamada da API. Fecha o ciclo da fila de números aqui também.
+
+    Sem isto a fila só andava quando o Twilio recusava na hora; quando ele aceitava
+    e a entrega falhava depois (63024, "este número não tem WhatsApp" — o caso
+    comum), o webhook marcava `erro` sem riscar o número nem contar a tentativa. O
+    alvo voltava pra fila e o motor mandava pro MESMO número de novo, rodada após
+    rodada, cada uma cobrada.
+
+    Recebe o cursor de quem chama (mesma transação do webhook). Devolve True quando
+    o alvo parou de vez — acabou a fila ou bateu o teto."""
+    r = c.execute(
+        """select a.wa_numero, coalesce(a.wa_tentados,'[]'::jsonb),
+                  coalesce(a.wa_tentativas,0), a.alvo_telefone,
+                  p.id, p.empresa, p.cnpj, p.whatsapp, p.telefone, p.decisor_telefones
+             from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
+            where a.id=%s""", (aid,)).fetchone()
+    if not r:
+        return True
+    numero, tentados, tentativas, alvo_tel, pid, empresa, cnpj, whats, tel, dec_tels = r
+    import json
+    novos = list(tentados or [])
+    d = _chave(numero)
+    if d and d not in novos:
+        novos.append(d)
+    tentativas += 1
+    if (alvo_tel or "").strip():
+        # número travado pelo dono: escolha explícita não se adivinha em cima
+        resta = []
+    else:
+        resta = fila_numeros(dec_tels, whats, tel, novos)
+    parou = not resta or tentativas >= _WA_TENTATIVAS
+    # voltando pra fila, o SID e o número da tentativa ENCERRADA saem junto. Sem
+    # isso, um callback atrasado daquele mesmo SID casaria com o alvo de novo e o
+    # marcaria 'enviado' — tirando da fila quem estava esperando a próxima rodada.
+    c.execute("""update campanha_alvos
+                   set wa_status=%s, wa_em=now(), wa_tentados=%s::jsonb, wa_tentativas=%s,
+                       wa_erro_codigo=%s, wa_erro_msg=%s,
+                       wa_sid=case when %s then wa_sid else null end,
+                       wa_numero=case when %s then wa_numero else null end
+                 where id=%s""",
+              ("erro" if parou else None, json.dumps(novos), tentativas,
+               str(erro_codigo) if erro_codigo else None, (erro_msg or "")[:300] or None,
+               parou, parou, aid))
+    return parou
+
+
 def _wa_marca(pool, aid, status, wa_sid=None, erro_codigo=None, erro_msg=None,
-              categoria=None, custo=None):
+              categoria=None, custo=None, numero=None):
     with pool.connection() as c:
         if erro_codigo or erro_msg:
             c.execute("""update campanha_alvos set wa_status=%s, wa_em=now(),
@@ -953,10 +1002,13 @@ def _wa_marca(pool, aid, status, wa_sid=None, erro_codigo=None, erro_msg=None,
         elif wa_sid:
             # estimativa de custo no envio (categoria/custo). coalesce: se o webhook de
             # status da Meta já tiver corrigido com o valor real, não sobrescreve.
+            # `wa_numero` guarda PRA QUEM este SID foi: sem isso, quando a entrega
+            # falha depois (webhook), não há como saber qual número riscar da fila.
             c.execute("""update campanha_alvos set wa_status=%s, wa_em=now(), wa_sid=%s,
+                           wa_numero=%s,
                            wa_categoria=coalesce(wa_categoria,%s),
                            wa_custo=coalesce(wa_custo,%s) where id=%s""",
-                      (status, wa_sid, categoria, custo, aid))
+                      (status, wa_sid, numero, categoria, custo, aid))
         else:
             c.execute("update campanha_alvos set wa_status=%s, wa_em=now() where id=%s", (status, aid))
         c.commit()

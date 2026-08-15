@@ -3642,6 +3642,10 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
 <div class="card larga">
   <div style="display:flex;justify-content:space-between;align-items:center"><strong>Equipe e folha</strong>
     <span class="mut" style="font-size:.72rem">folha de {{ '%02d'|format(dre.mes) }}/{{ dre.ano }}: <b style="color:#e07a5f">{{ folha.total_a_pagar_centavos|brl }}</b> · FGTS do mês {{ folha.total_fgts_centavos|brl }} · custo real ≈ {{ folha.custo_real_total_centavos|brl }}</span></div>
+  {# recusa do excluir (e qualquer outro aviso da aba) — fora do {% if folha.itens %}
+     de propósito: excluir o último funcionário esvazia a lista, e a mensagem
+     explicando por que a exclusão NÃO aconteceu não pode sumir junto. #}
+  {% if erro %}<div style="background:#241313;border:1px solid #5a2b2b;color:#f0b3ad;font-size:.78rem;line-height:1.6;padding:.6rem .8rem;border-radius:9px;margin:.7rem 0">{{ erro }}</div>{% endif %}
   <form method="post" action="/painel/empresa/funcionario" class="emp-form" style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr .8fr auto auto;gap:.5rem;margin:.7rem 0;align-items:end">
     <label style="font-size:.72rem;color:#8a938a">Nome<input name="nome" required placeholder="Nome do funcionário" style="width:100%"></label>
     <label style="font-size:.72rem;color:#8a938a">Cargo<input name="cargo" placeholder="Ex: Vendedor" style="width:100%"></label>
@@ -3707,6 +3711,17 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     .ev-tag.ev-vale{background:#3a2f14;color:#f0c05a}.ev-tag.ev-beneficio{background:#14301f;color:var(--verde-claro)}
     .ev-tag.ev-extra{background:#153025;color:#7fb48f}.ev-tag.ev-desconto{background:#332314;color:#e0b878}
     .ev-rm{border:1px solid #5a2e2e !important;color:#e08a8a !important;padding:.24rem .55rem !important}
+    /* editar / dar baixa: dobrados por padrão — são ação ocasional, não podem
+       competir com o "pagar" nem esticar o card de quem só quer conferir a folha */
+    .fa-ed{border:1px solid var(--card-2);border-radius:9px}
+    .fa-ed summary{list-style:none;cursor:pointer;padding:.5rem .7rem;font-size:.76rem;color:var(--txt-mut)}
+    .fa-ed summary::-webkit-details-marker{display:none}
+    .fa-ed[open] summary{color:var(--verde-claro);border-bottom:1px solid var(--card-2)}
+    .fa input.wide{width:210px}
+    .fa button.dang{border-color:#5a2e2e;color:#e08a8a}
+    .fa-aviso{font-size:.7rem;color:var(--txt-mut);line-height:1.6;margin-top:.55rem}
+    .sal-hist{list-style:none;margin:.55rem 0 0;font-size:.72rem;color:var(--txt-mut)}
+    .sal-hist li{display:flex;justify-content:space-between;gap:10px;padding:.28rem 0;border-top:1px solid var(--card-2)}
   </style>
   <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--txt-mut);padding:.6rem 0 .2rem;border-bottom:1px solid var(--card-2)"><span>Funcionário</span><span>A pagar (líquido)</span></div>
   {% for f in folha.itens %}<details class="folha-lin">
@@ -3756,17 +3771,80 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
           <form method="post" action="/painel/empresa/funcionario/{{ f.id }}/vt" title="Descontar 6% de vale-transporte é opcional — fica a cargo do empregador."><button type="submit" class="vt-pill"><span class="vt-sw {{ 'on' if f.vale_transporte else 'off' }}"></span><span class="vt-st">{{ 'ligado' if f.vale_transporte else 'desligado' }}</span></button></form>
         </div>
         {% endif %}
-        <form method="post" action="/painel/empresa/funcionario/{{ f.id }}/org" title="Dados do funcionário — admissão/demissão e departamento (aparecem no holerite).">
-          <div class="fa-row"><span class="lbl">Admissão</span><input class="date" type="date" name="admissao" value="{{ f.admitido_em.isoformat() if f.admitido_em else '' }}"></div>
-          <div class="fa-row"><span class="lbl" title="Ao preencher, o funcionário sai da folha a partir do mês seguinte.">Demissão</span><input class="date" type="date" name="demissao" value="{{ f.demitido_em.isoformat() if f.demitido_em else '' }}"></div>
-          <div class="fa-row"><span class="lbl">CPF <span class="mut">(holerite)</span></span><input class="date" name="cpf" value="{{ f.cpf }}" placeholder="000.000.000-00" maxlength="14" inputmode="numeric"></div>
+        {# Identidade e contrato saíram daqui pro "✎ Editar"; demissão virou ação
+           própria. O que sobra aqui é ajuste do dia a dia. #}
+        <form method="post" action="/painel/empresa/funcionario/{{ f.id }}/editar" title="Departamento/seção aparecem no holerite.">
+          <input type="hidden" name="nome" value="{{ f.nome }}"><input type="hidden" name="cargo" value="{{ f.cargo }}">
+          <input type="hidden" name="cbo" value="{{ f.cbo }}"><input type="hidden" name="dia" value="{{ f.dia_pagamento }}">
+          <input type="hidden" name="cpf" value="{{ f.cpf }}">
+          <input type="hidden" name="admissao" value="{{ f.admitido_em.isoformat() if f.admitido_em else '' }}">
           <div class="fa-row"><span class="lbl">Depto / setor / seção</span><input class="org" name="departamento" value="{{ f.departamento }}" placeholder="GERAL"><input class="org" name="setor" value="{{ f.setor }}" placeholder="Setor"><input class="org" name="secao" value="{{ f.secao }}" placeholder="Seção"></div>
-          <div class="fa-row"><span class="lbl"></span><button>salvar dados</button></div>
+          <div class="fa-row"><span class="lbl"></span><button>salvar</button></div>
         </form>
       </div>
+
+      {# ── ✎ EDITAR ─────────────────────────────────────────────────────────
+         Nome, cargo, CBO e dia de pagamento não tinham COMO ser alterados depois
+         do cadastro — errar o nome ou dar aumento virava "cadastra outro". #}
+      <details class="fa-ed">
+        <summary>✎ Editar dados de {{ f.nome }}</summary>
+        <div class="fa-grp" style="border-top-left-radius:0;border-top-right-radius:0">
+          <form method="post" action="/painel/empresa/funcionario/{{ f.id }}/editar">
+            <input type="hidden" name="departamento" value="{{ f.departamento }}">
+            <input type="hidden" name="setor" value="{{ f.setor }}"><input type="hidden" name="secao" value="{{ f.secao }}">
+            <div class="fa-row"><span class="lbl">Nome</span><input class="wide" name="nome" value="{{ f.nome }}" required></div>
+            <div class="fa-row"><span class="lbl">Cargo</span><input class="wide" name="cargo" value="{{ f.cargo }}"></div>
+            <div class="fa-row"><span class="lbl">CBO <span class="mut">(holerite)</span></span><input class="org" name="cbo" value="{{ f.cbo }}"></div>
+            <div class="fa-row"><span class="lbl">Dia de pagamento</span><input class="org" type="number" name="dia" min="1" max="28" value="{{ f.dia_pagamento }}"></div>
+            <div class="fa-row"><span class="lbl">CPF <span class="mut">(holerite)</span></span><input class="date" name="cpf" value="{{ f.cpf }}" placeholder="000.000.000-00" maxlength="14" inputmode="numeric"></div>
+            <div class="fa-row"><span class="lbl">Admissão</span><input class="date" type="date" name="admissao" value="{{ f.admitido_em.isoformat() if f.admitido_em else '' }}"></div>
+            <div class="fa-row"><span class="lbl"></span><button class="add">salvar</button></div>
+          </form>
+
+          {# Salário é à parte porque tem VIGÊNCIA: aumento vale do mês escolhido
+             em diante e o holerite dos meses anteriores continua com o valor
+             antigo. Corrigir digitação é o outro botão — reescreve a vigência
+             atual, sem inventar um aumento que não houve. #}
+          <div class="fa-tit" style="margin-top:.9rem">Salário · hoje {{ f.salario_centavos|brl }}</div>
+          <form method="post" action="/painel/empresa/funcionario/{{ f.id }}/salario">
+            <input type="hidden" name="modo" value="vigencia">
+            <div class="fa-row"><span class="lbl">Novo salário</span><input class="money" name="valor" inputmode="decimal" placeholder="R$ 0,00" required></div>
+            <div class="fa-row"><span class="lbl">A partir de</span><input class="date" type="date" name="vigencia" value="{{ hoje_iso }}" required><button class="add">dar aumento</button></div>
+          </form>
+          <form method="post" action="/painel/empresa/funcionario/{{ f.id }}/salario" title="Reescreve o valor atual sem criar um aumento no histórico.">
+            <input type="hidden" name="modo" value="corrigir">
+            <div class="fa-row"><span class="lbl">Corrigir valor atual</span><input class="money" name="valor" inputmode="decimal" placeholder="R$ 0,00" required><button>corrigir</button></div>
+          </form>
+          {% set hs = hist_salarios.get(f.id) or [] %}
+          {% if hs|length > 1 %}
+          <ul class="sal-hist">
+            {% for h in hs %}<li><span>{% if loop.first %}desde {% endif %}{{ h.vigencia_de.strftime('%m/%Y') }}</span><span>{{ h.salario_centavos|brl }}</span></li>{% endfor %}
+          </ul>
+          {% endif %}
+        </div>
+      </details>
+
+      {# ── ⊗ DAR BAIXA ─────────────────────────────────────────────────────── #}
+      <details class="fa-ed">
+        <summary>⊗ Dar baixa {% if f.demitido_em %}· baixado em {{ f.demitido_em.strftime('%d/%m/%Y') }}{% endif %}</summary>
+        <div class="fa-grp" style="border-top-left-radius:0;border-top-right-radius:0">
+          <form method="post" action="/painel/empresa/funcionario/{{ f.id }}/baixa">
+            <div class="fa-row"><span class="lbl">Data da demissão</span><input class="date" type="date" name="demissao" value="{{ f.demitido_em.isoformat() if f.demitido_em else hoje_iso }}"><button class="amb">confirmar baixa</button></div>
+          </form>
+          <div class="fa-aviso">Ela continua no histórico e nos relatórios, e o holerite dos meses já pagos não muda. No mês da demissão ainda aparece na folha, pra você acertar o último pagamento; some a partir do mês seguinte.{% if f.demitido_em %} <b>Pra desfazer, apague a data e confirme.</b>{% endif %}</div>
+        </div>
+      </details>
+
       <div class="fa-tool">
         {% if not f.quitado %}<form method="post" action="/painel/empresa/folha/pagar"><input type="hidden" name="funcionario_id" value="{{ f.id }}"><button class="pay">pagar ✓</button></form>{% endif %}
         <a href="/painel/empresa/holerite/{{ f.id }}" target="_blank" rel="noopener" class="fa-ln" title="abrir o recibo de pagamento pra imprimir">🖨️ holerite</a>
+        <span style="flex:1"></span>
+        {# Excluir de verdade. A trava real está em excluir_funcionario(); aqui o
+           confirm() só evita o clique sem querer, no mesmo padrão do remover
+           lançamento logo abaixo. #}
+        <form method="post" action="/painel/empresa/funcionario/{{ f.id }}/excluir" onsubmit="return confirm('Excluir {{ f.nome }} de vez? Só funciona se essa pessoa nunca teve lançamento na folha. Não dá pra desfazer.')">
+          <button class="dang" title="Apaga o cadastro. Só vale pra quem nunca movimentou a folha — quem já recebeu é caso de dar baixa.">🗑 excluir</button>
+        </form>
       </div>
       {% if f.eventos %}
       <details class="fa-hist">
@@ -8743,7 +8821,14 @@ def painel_empresa(request: Request):
                    rotulo_receber=rotulo_receber, tem_pj=True,
                    plano_arvore=plano_arvore, centros=centros, dre_centro=dre_centro,
                    a_classificar=a_classificar, plano_opcoes=plano_opcoes,
-                   centros_ativos=centros_ativos)
+                   centros_ativos=centros_ativos,
+                   # linha do tempo de salário por funcionário (uma consulta só)
+                   hist_salarios=emp.historicos_salarios(pool, conta[0]),
+                   hoje_iso=date.today().isoformat(),
+                   # a recusa do excluir precisa chegar na tela: sem isto a rota
+                   # gravava na sessão e ninguém mostrava (o erro vazaria pra
+                   # outra página que faz pop)
+                   erro=request.session.pop("erro", None))
 
 
 @router.get("/painel/produtos")
@@ -9382,22 +9467,102 @@ def _data_iso(s: str):
         return False   # inválida: sentinela pra 'não mexer'
 
 
-@router.post("/painel/empresa/funcionario/{funcionario_id}/org")
-def empresa_funcionario_org(request: Request, funcionario_id: int,
-                            departamento: str = Form(""), setor: str = Form(""),
-                            secao: str = Form(""), admissao: str = Form(""),
-                            demissao: str = Form(""), cpf: str = Form("")):
-    """Dados do funcionário: depto/setor/seção + CPF (holerite) + admissão/demissão.
-    Ao gravar demissão, ele sai da folha a partir do mês seguinte."""
+@router.post("/painel/empresa/funcionario/{funcionario_id}/editar")
+def empresa_funcionario_editar(request: Request, funcionario_id: int,
+                               nome: str = Form(""), cargo: str = Form(""),
+                               cbo: str = Form(""), dia: str = Form(""),
+                               departamento: str = Form(""), setor: str = Form(""),
+                               secao: str = Form(""), admissao: str = Form(""),
+                               cpf: str = Form("")):
+    """Dados do funcionário. Até aqui esta rota se chamava /org e só passava
+    depto/setor/seção + CPF + admissão/demissão — nome, cargo, CBO e dia de
+    pagamento não tinham COMO ser alterados depois do cadastro, apesar de
+    atualizar_funcionario() sempre ter aceitado os quatro. Errar o nome ou dar um
+    aumento virava "cadastra outro funcionário".
+
+    Demissão saiu daqui: virou ação própria (/baixa), porque estava disfarçada de
+    campo de cadastro no meio dos outros. Salário também: tem vigência (/salario)."""
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    try:
+        dia_i = max(1, min(28, int(dia))) if dia.strip() else None
+    except ValueError:
+        dia_i = None
+    emp.atualizar_funcionario(pool, conta[0], funcionario_id,
+                              nome=nome.strip() or None, cargo=cargo,
+                              cbo=cbo, dia_pagamento=dia_i,
+                              departamento=departamento, setor=setor, secao=secao,
+                              cpf=cpf, admitido_em=_data_iso(admissao))
+    return RedirectResponse("/painel/empresa", status_code=303)
+
+
+@router.post("/painel/empresa/funcionario/{funcionario_id}/salario")
+def empresa_funcionario_salario(request: Request, funcionario_id: int,
+                                valor: str = Form(""), vigencia: str = Form(""),
+                                modo: str = Form("vigencia")):
+    """Salário. Dois modos, e a diferença entre eles é o ponto:
+
+    - 'vigencia' (aumento): o valor novo passa a valer a partir da data. Os meses
+      anteriores ficam como estavam — é isso que mantém o holerite antigo correto.
+    - 'corrigir' (digitou errado): reescreve a vigência atual no lugar. Um erro de
+      digitação não é um aumento, e virar linha nova contaria uma história que não
+      houve."""
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    cent = _reais_para_centavos(valor)
+    if cent > 0:
+        if modo == "corrigir":
+            emp.corrigir_salario_atual(pool, conta[0], funcionario_id, cent)
+        else:
+            emp.definir_salario(pool, conta[0], funcionario_id, cent,
+                                _data_iso(vigencia) or date.today().replace(day=1))
+    return RedirectResponse("/painel/empresa", status_code=303)
+
+
+@router.post("/painel/empresa/funcionario/{funcionario_id}/baixa")
+def empresa_funcionario_baixa(request: Request, funcionario_id: int,
+                              demissao: str = Form("")):
+    """Dar baixa: mesma coluna de sempre (demitido_em), agora como ação de verdade
+    em vez de um campo de data perdido no meio do cadastro. Sai da folha a partir
+    do mês SEGUINTE (no mês da demissão ainda aparece, pra acertar).
+
+    Reversível: mandar a data vazia limpa e traz a pessoa de volta."""
     from finance import empresa as emp
     g = _guard_pj(request)
     if not g:
         return RedirectResponse("/painel", status_code=303)
     conta, pool = g
     emp.atualizar_funcionario(pool, conta[0], funcionario_id,
-                              departamento=departamento, setor=setor, secao=secao,
-                              cpf=cpf, admitido_em=_data_iso(admissao),
                               demitido_em=_data_iso(demissao))
+    return RedirectResponse("/painel/empresa", status_code=303)
+
+
+@router.post("/painel/empresa/funcionario/{funcionario_id}/excluir")
+def empresa_funcionario_excluir(request: Request, funcionario_id: int):
+    """Apaga o cadastro de vez — só pra quem NUNCA movimentou a folha (o duplicado,
+    o digitado errado). Quem já tem lançamento deixaria os folha_eventos órfãos e
+    quebraria holerite e relatório do período; pra esse o caminho é dar baixa.
+
+    A trava está dentro de excluir_funcionario(), não aqui — a rota só traduz a
+    recusa em mensagem."""
+    from finance import empresa as emp
+    g = _guard_pj(request)
+    if not g:
+        return RedirectResponse("/painel", status_code=303)
+    conta, pool = g
+    r = emp.excluir_funcionario(pool, conta[0], funcionario_id)
+    if not r["excluido"] and r["existe"]:
+        request.session["erro"] = (
+            f"Não dá pra excluir: {r['lancamentos']} lançamento(s) na folha"
+            + (f" e {r['meses_pagos']} mês(es) já pago(s)" if r["meses_pagos"] else "")
+            + ". Se essa pessoa saiu da empresa, use \"dar baixa\" — o histórico fica de pé."
+        )
     return RedirectResponse("/painel/empresa", status_code=303)
 
 

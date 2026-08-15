@@ -16,7 +16,8 @@ from finance import empresa as emp
 _MIGRACOES = ("053_modulo_pj.sql", "089_funcionario_vale_transporte.sql",
               "092_funcionario_cbo.sql", "093_folha_beneficios_e_org.sql",
               "094_funcionario_demissao.sql",
-              "095_funcionario_cpf.sql")
+              "095_funcionario_cpf.sql",
+              "150_funcionario_salario_vigencia.sql")
 
 
 # ── parte pura: INSS progressivo e VT (sem banco) ────────────────────────────

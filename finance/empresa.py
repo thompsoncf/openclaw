@@ -495,6 +495,20 @@ def criar_funcionario(pool, conta_id: int, nome: str, cargo: str = "",
              (secao or "").strip() or None,
              "".join(ch for ch in (cpf or "") if ch.isdigit()) or None),
         ).fetchone()
+        # A vigência INICIAL nasce junto (migração 150). Sem ela, o primeiro
+        # aumento criaria a única linha da linha do tempo — e aí a folha de um mês
+        # ANTERIOR ao aumento não acharia vigência nenhuma, cairia na reserva
+        # (funcionarios.salario_centavos, já atualizado pro valor novo) e
+        # reimprimiria o holerite antigo com o salário de hoje. Que é exatamente o
+        # erro silencioso que a vigência existe pra impedir.
+        c.execute(
+            """insert into funcionario_salarios
+                 (conta_id, funcionario_id, salario_centavos, vigencia_de)
+               values (%s,%s,%s,%s)
+               on conflict (funcionario_id, vigencia_de) do nothing""",
+            (conta_id, r[0], int(salario_centavos),
+             admitido_em or date(1900, 1, 1)),
+        )
         c.commit()
     return {"id": r[0], "nome": nome, "salario_centavos": int(salario_centavos)}
 
@@ -550,18 +564,191 @@ def atualizar_funcionario(pool, conta_id: int, funcionario_id: int, *,
     return r is not None
 
 
-def desativar_funcionario(pool, conta_id: int, funcionario_id: int) -> bool:
+# ------------------------------------------------------------------ salário
+# O salário tem VIGÊNCIA (migração 150): cada valor vale a partir de uma data, e
+# a folha de cada mês usa o que valia naquela competência. Sem isso, dar um
+# aumento sobrescrevia o número e o holerite de um mês passado, reimpresso, saía
+# com o valor novo — um valor que a pessoa não recebeu, num documento que ela
+# guarda.
+#
+# `funcionarios.salario_centavos` continua sendo o salário CORRENTE (é o que o
+# formulário mostra e o que criar_funcionario grava). Esta tabela é a linha do
+# tempo.
+
+def definir_salario(pool, conta_id: int, funcionario_id: int,
+                    salario_centavos: int, vigencia_de: date) -> bool:
+    """Aumento (ou redução): o novo valor passa a valer A PARTIR de `vigencia_de`.
+    Os meses anteriores continuam com o valor que tinham — é isso que mantém o
+    holerite antigo correto.
+
+    Regravar a MESMA data substitui o valor daquela vigência (dá pra corrigir a
+    data que se acabou de lançar sem sujar o histórico com duas linhas)."""
     with pool.connection() as c:
         r = c.execute(
-            """update funcionarios set ativo=false
-                where id=%s and conta_id=%s returning id""",
+            """insert into funcionario_salarios
+                 (conta_id, funcionario_id, salario_centavos, vigencia_de)
+               values (%s,%s,%s,%s)
+               on conflict (funcionario_id, vigencia_de)
+               do update set salario_centavos=excluded.salario_centavos
+               returning id""",
+            (conta_id, funcionario_id, int(salario_centavos), vigencia_de),
+        ).fetchone()
+        if r is None:
+            c.commit()
+            return False
+        # espelha no campo corrente quando a vigência já começou: é ele que a tela
+        # mostra e que serve de reserva pra quem não tem linha nenhuma.
+        c.execute(
+            """update funcionarios set salario_centavos=%s
+                where id=%s and conta_id=%s and %s <= current_date""",
+            (int(salario_centavos), funcionario_id, conta_id, vigencia_de),
+        )
+        c.commit()
+    return True
+
+
+def corrigir_salario_atual(pool, conta_id: int, funcionario_id: int,
+                           salario_centavos: int) -> bool:
+    """Digitou errado: reescreve a vigência MAIS RECENTE no lugar, em vez de criar
+    uma nova. A diferença importa — corrigir um erro de digitação não é um
+    aumento, e virar linha nova no histórico contaria uma história que não houve.
+
+    Sem nenhuma vigência gravada (funcionário anterior à migração cujo backfill
+    não pegou), cria a primeira."""
+    with pool.connection() as c:
+        alvo = c.execute(
+            """select id from funcionario_salarios
+                where funcionario_id=%s and conta_id=%s
+                order by vigencia_de desc limit 1""",
             (funcionario_id, conta_id),
         ).fetchone()
+        if alvo is None:
+            existe = c.execute(
+                "select admitido_em from funcionarios where id=%s and conta_id=%s",
+                (funcionario_id, conta_id)).fetchone()
+            if existe is None:
+                return False
+            c.execute(
+                """insert into funcionario_salarios
+                     (conta_id, funcionario_id, salario_centavos, vigencia_de)
+                   values (%s,%s,%s,%s)
+                   on conflict (funcionario_id, vigencia_de)
+                   do update set salario_centavos=excluded.salario_centavos""",
+                (conta_id, funcionario_id, int(salario_centavos),
+                 existe[0] or date(1900, 1, 1)),
+            )
+        else:
+            c.execute("update funcionario_salarios set salario_centavos=%s where id=%s",
+                      (int(salario_centavos), alvo[0]))
+        c.execute("update funcionarios set salario_centavos=%s where id=%s and conta_id=%s",
+                  (int(salario_centavos), funcionario_id, conta_id))
         c.commit()
-    return r is not None
+    return True
 
 
-def listar_funcionarios(pool, conta_id: int, so_ativos: bool = True) -> list[dict]:
+def historico_salarios(pool, conta_id: int, funcionario_id: int) -> list[dict]:
+    """A linha do tempo, do mais novo pro mais antigo (é a ordem que a tela usa)."""
+    with pool.connection() as c:
+        rows = c.execute(
+            """select salario_centavos, vigencia_de from funcionario_salarios
+                where funcionario_id=%s and conta_id=%s
+                order by vigencia_de desc""",
+            (funcionario_id, conta_id),
+        ).fetchall()
+    return [{"salario_centavos": int(r[0] or 0), "vigencia_de": r[1]} for r in rows]
+
+
+def historicos_salarios(pool, conta_id: int) -> dict[int, list[dict]]:
+    """O histórico de TODOS os funcionários da conta, numa consulta só — o card da
+    folha mostra a linha do tempo de cada um, e uma consulta por funcionário dentro
+    do laço do template seria N+1 numa tela que já é pesada."""
+    with pool.connection() as c:
+        rows = c.execute(
+            """select funcionario_id, salario_centavos, vigencia_de
+                 from funcionario_salarios where conta_id=%s
+                order by funcionario_id, vigencia_de desc""",
+            (conta_id,),
+        ).fetchall()
+    saida: dict[int, list[dict]] = {}
+    for fid, cent, vig in rows:
+        saida.setdefault(int(fid), []).append(
+            {"salario_centavos": int(cent or 0), "vigencia_de": vig})
+    return saida
+
+
+def _salarios_por_competencia(c, conta_id: int, competencia: date) -> dict[int, int]:
+    """funcionario_id -> salário que valia na competência. Uma consulta só pra
+    conta inteira (distinct on), em vez de uma por funcionário dentro do laço da
+    folha."""
+    rows = c.execute(
+        """select distinct on (funcionario_id) funcionario_id, salario_centavos
+             from funcionario_salarios
+            where conta_id=%s and vigencia_de <= %s
+            order by funcionario_id, vigencia_de desc""",
+        (conta_id, competencia),
+    ).fetchall()
+    return {int(r[0]): int(r[1] or 0) for r in rows}
+
+
+# Aqui existia `desativar_funcionario()` (marcava ativo=false). Foi removida: era
+# código morto desde que nasceu — nenhuma tela, rota ou teste a chamava —, e
+# manter uma função com esse nome ao lado do excluir de verdade é convite a usar a
+# errada. Quem sai da empresa é caso de DAR BAIXA (demitido_em), que preserva o
+# histórico; quem nunca deveria ter existido é caso de excluir_funcionario().
+# A coluna `ativo` continua na tabela e continua sendo respeitada por
+# listar_funcionarios(so_ativos=True) — só ninguém mais a escreve.
+
+
+def pode_excluir_funcionario(pool, conta_id: int, funcionario_id: int) -> dict:
+    """Excluir de verdade só vale pra quem NUNCA movimentou a folha — o cadastro
+    duplicado ou digitado errado. Quem já teve lançamento deixaria os
+    `folha_eventos` órfãos, e o holerite e o relatório daquele período ficariam
+    sem dono. Esse é caso de DAR BAIXA (demitido_em), que preserva tudo.
+
+    Devolve as contagens junto porque a tela mostra o motivo ("17 lançamentos,
+    5 meses pagos") em vez de um "não pode" seco."""
+    with pool.connection() as c:
+        existe = c.execute("select 1 from funcionarios where id=%s and conta_id=%s",
+                           (funcionario_id, conta_id)).fetchone()
+        if existe is None:
+            return {"pode": False, "existe": False, "lancamentos": 0, "meses_pagos": 0}
+        r = c.execute(
+            """select count(*)::int,
+                      count(distinct competencia) filter (where tipo='pagamento')::int
+                 from folha_eventos
+                where conta_id=%s and funcionario_id=%s""",
+            (conta_id, funcionario_id),
+        ).fetchone()
+    lanc, pagos = int(r[0] or 0), int(r[1] or 0)
+    return {"pode": lanc == 0, "existe": True,
+            "lancamentos": lanc, "meses_pagos": pagos}
+
+
+def excluir_funcionario(pool, conta_id: int, funcionario_id: int) -> dict:
+    """Apaga o cadastro DE VERDADE. A trava é conferida aqui dentro, não só na
+    rota: assim o backend continua seguro se alguém chamar isto de outro lugar
+    depois. Devolve o mesmo dicionário do pode_excluir_funcionario, com o
+    resultado — quem chama sabe por que não deu."""
+    situacao = pode_excluir_funcionario(pool, conta_id, funcionario_id)
+    if not situacao["pode"]:
+        return {**situacao, "excluido": False}
+    with pool.connection() as c:
+        # as vigências saem junto pelo `on delete cascade` da migração 150
+        c.execute("delete from funcionarios where id=%s and conta_id=%s",
+                  (funcionario_id, conta_id))
+        c.commit()
+    return {**situacao, "excluido": True}
+
+
+def listar_funcionarios(pool, conta_id: int, so_ativos: bool = True,
+                        competencia: date | None = None) -> list[dict]:
+    """Com `competencia`, o salário de cada um é o que VALIA naquele mês (tabela
+    funcionario_salarios). Sem ela, é o salário corrente do cadastro.
+
+    Quem não tiver nenhuma vigência gravada cai no campo antigo — cinto de
+    segurança caso o backfill da migração 150 não tenha pegado alguém; sem isso o
+    funcionário apareceria com salário zero na folha, que é bem pior do que
+    aparecer com o valor corrente."""
     cond = "conta_id=%s" + (" and ativo" if so_ativos else "")
     with pool.connection() as c:
         rows = c.execute(
@@ -572,15 +759,21 @@ def listar_funcionarios(pool, conta_id: int, so_ativos: bool = True) -> list[dic
                  order by pro_labore, nome""",
             (conta_id,),
         ).fetchall()
-    return [{
-        "id": r[0], "nome": r[1], "cargo": r[2],
-        "salario_centavos": int(r[3] or 0), "dia_pagamento": int(r[4] or 5),
-        "pro_labore": bool(r[5]), "ativo": bool(r[6]), "admitido_em": r[7],
-        "vale_transporte": bool(r[8]), "cbo": r[9] or "",
-        "departamento": r[10] or "", "setor": r[11] or "", "secao": r[12] or "",
-        "demitido_em": r[13], "cpf": r[14] or "",
-        "custo_real_centavos": custo_real_centavos(int(r[3] or 0), bool(r[5])),
-    } for r in rows]
+        vigentes = (_salarios_por_competencia(c, conta_id, competencia)
+                    if competencia else {})
+    saida = []
+    for r in rows:
+        salario = vigentes.get(int(r[0]), int(r[3] or 0)) if competencia else int(r[3] or 0)
+        saida.append({
+            "id": r[0], "nome": r[1], "cargo": r[2],
+            "salario_centavos": salario, "dia_pagamento": int(r[4] or 5),
+            "pro_labore": bool(r[5]), "ativo": bool(r[6]), "admitido_em": r[7],
+            "vale_transporte": bool(r[8]), "cbo": r[9] or "",
+            "departamento": r[10] or "", "setor": r[11] or "", "secao": r[12] or "",
+            "demitido_em": r[13], "cpf": r[14] or "",
+            "custo_real_centavos": custo_real_centavos(salario, bool(r[5])),
+        })
+    return saida
 
 
 def registrar_evento_folha(pool, conta_id: int, funcionario_id: int, tipo: str,
@@ -636,7 +829,12 @@ def folha_do_mes(pool, conta_id: int, ano: int, mes: int) -> dict:
     comp = date(ano, mes, 1)
     # Demitido sai da folha a partir do mês SEGUINTE ao da demissão: aparece no
     # mês da demissão (pra acertar), some depois (fica só no histórico/relatório).
-    funcs = [f for f in listar_funcionarios(pool, conta_id, so_ativos=True)
+    # competencia=comp: o salário de cada um é o que VALIA neste mês, não o
+    # corrente. É o que faz o holerite de um mês passado, reimpresso hoje,
+    # continuar mostrando o valor que a pessoa realmente recebeu — o
+    # holerite_funcionario é montado a partir daqui.
+    funcs = [f for f in listar_funcionarios(pool, conta_id, so_ativos=True,
+                                            competencia=comp)
              if f.get("demitido_em") is None or f["demitido_em"] >= comp]
     with pool.connection() as c:
         rows = c.execute(

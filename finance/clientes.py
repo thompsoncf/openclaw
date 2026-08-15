@@ -27,6 +27,29 @@ def _so_digitos(s: str | None) -> str | None:
     return d or None
 
 
+_COLS_GARANTIDAS = False
+
+
+def _garantir_cols(pool) -> None:
+    """Garante cidade/uf em `clientes` (migracao 149) em runtime.
+
+    O deploy nao roda migracao sozinho e a tela de Clientes LE essas colunas —
+    sem isso a aba inteira quebraria ate a migracao rodar. Uma vez por processo;
+    add-if-not-exists e' idempotente e barato. Mesmo remendo do orcamento
+    (_garantir_tabela do painel de servicos)."""
+    global _COLS_GARANTIDAS
+    if _COLS_GARANTIDAS:
+        return
+    try:
+        with pool.connection() as c:
+            c.execute("alter table clientes add column if not exists cidade text")
+            c.execute("alter table clientes add column if not exists uf varchar(2)")
+            c.commit()
+    except Exception:  # noqa: BLE001 — sem permissao de DDL, segue o jogo
+        pass
+    _COLS_GARANTIDAS = True
+
+
 def _parse_data(s):
     """Aceita 'AAAA-MM-DD' ou date; devolve date ou None."""
     if not s:
@@ -105,7 +128,8 @@ def puxar_ou_criar_cliente(pool, dono_id: int, *, cpf: str | None = None,
                            cnpj: str | None = None,
                            celular: str | None = None, nome: str | None = None,
                            email: str | None = None, pessoa_id: int | None = None,
-                           aniversario=None, obs: str | None = None) -> int:
+                           aniversario=None, obs: str | None = None,
+                           cidade: str | None = None, uf: str | None = None) -> int:
     """Fluxo de cadastro/venda: resolve a PESSOA (por cpf/cnpj, ou pessoa_id dado) e
     garante a RELACAO (clientes) deste lojista com ela. Retorna cliente_id.
 
@@ -114,6 +138,7 @@ def puxar_ou_criar_cliente(pool, dono_id: int, *, cpf: str | None = None,
     if pessoa_id is None:
         pessoa_id = resolver_pessoa(pool, cpf=cpf, cnpj=cnpj, celular=celular,
                                     nome=nome, email=email)
+    _garantir_cols(pool)
     with pool.connection() as c:
         r = c.execute(
             "select id from clientes where dono_id=%s and pessoa_id=%s and ativo limit 1",
@@ -129,10 +154,12 @@ def puxar_ou_criar_cliente(pool, dono_id: int, *, cpf: str | None = None,
         pe = p[2] if p else ((email or "").strip().lower() or None)
         row = c.execute(
             """insert into clientes
-                 (dono_id, pessoa_id, nome, telefone, email, aniversario, obs)
-               values (%s, %s, %s, %s, %s, %s, %s) returning id""",
+                 (dono_id, pessoa_id, nome, telefone, email, aniversario, obs,
+                  cidade, uf)
+               values (%s, %s, %s, %s, %s, %s, %s, %s, %s) returning id""",
             (dono_id, pessoa_id, pn, pc, pe, _parse_data(aniversario),
-             (obs or "").strip() or None),
+             (obs or "").strip() or None, (cidade or "").strip() or None,
+             (uf or "").strip()[:2].upper() or None),
         ).fetchone()
         c.commit()
         return int(row[0])
@@ -141,7 +168,8 @@ def puxar_ou_criar_cliente(pool, dono_id: int, *, cpf: str | None = None,
 def criar_cliente(pool, dono_id: int, nome: str, *, telefone: str | None = None,
                   email: str | None = None, aniversario=None,
                   conta_zaq_id: int | None = None, obs: str | None = None,
-                  cpf: str | None = None, cnpj: str | None = None) -> int:
+                  cpf: str | None = None, cnpj: str | None = None,
+                  cidade: str | None = None, uf: str | None = None) -> int:
     """Cadastra um cliente (identidade + relacao). Retorna o cliente_id. nome
     obrigatorio. Compat: mesma assinatura de antes, agora com `cpf`/`cnpj`
     opcionais; o telefone entra como `celular` da pessoa."""
@@ -151,7 +179,8 @@ def criar_cliente(pool, dono_id: int, nome: str, *, telefone: str | None = None,
     pessoa_id = resolver_pessoa(pool, cpf=cpf, cnpj=cnpj, celular=telefone, nome=nome,
                                 email=email, conta_zaq_id=conta_zaq_id)
     return puxar_ou_criar_cliente(pool, dono_id, pessoa_id=pessoa_id, nome=nome,
-                                  email=email, aniversario=aniversario, obs=obs)
+                                  email=email, aniversario=aniversario, obs=obs,
+                                  cidade=cidade, uf=uf)
 
 
 _SEL = """select c.id,
@@ -164,7 +193,9 @@ _SEL = """select c.id,
                  p.cpf,
                  c.pessoa_id,
                  p.cnpj,
-                 p.tipo
+                 p.tipo,
+                 c.cidade,
+                 c.uf
             from clientes c
             left join pessoas p on p.id = c.pessoa_id"""
 
@@ -172,6 +203,7 @@ _SEL = """select c.id,
 def listar_clientes(pool, dono_id: int, busca: str | None = None,
                     limite: int = 200) -> list[dict]:
     """Lista os clientes do lojista. Se `busca`, filtra por nome, telefone ou cpf."""
+    _garantir_cols(pool)
     sql = _SEL + " where c.dono_id=%s and c.ativo"
     params: list = [dono_id]
     if busca and busca.strip():
@@ -192,6 +224,7 @@ def listar_clientes(pool, dono_id: int, busca: str | None = None,
 
 def obter_cliente(pool, dono_id: int, cliente_id: int) -> dict | None:
     """Um cliente da base do lojista (isolado por dono_id). None se nao for dele."""
+    _garantir_cols(pool)
     with pool.connection() as c:
         r = c.execute(_SEL + " where c.id=%s and c.dono_id=%s and c.ativo",
                       (cliente_id, dono_id)).fetchone()
@@ -229,6 +262,7 @@ def buscar_por_telefone(pool, dono_id: int, telefone: str) -> dict | None:
     tel = _so_digitos(telefone)
     if not tel:
         return None
+    _garantir_cols(pool)
     with pool.connection() as c:
         r = c.execute(
             _SEL + " where c.dono_id=%s and coalesce(p.celular, c.telefone)=%s"
@@ -244,8 +278,9 @@ def atualizar_cliente(pool, dono_id: int, cliente_id: int, **campos) -> bool:
     cliente for do lojista. Retorna True se algo mudou."""
     id_map = {"nome": "nome", "telefone": "celular", "email": "email",
               "cpf": "cpf", "cnpj": "cnpj", "conta_zaq_id": "conta_zaq_id"}
-    rel_permit = {"aniversario", "obs"}
+    rel_permit = {"aniversario", "obs", "cidade", "uf"}
     mudou = False
+    _garantir_cols(pool)
     with pool.connection() as c:
         row = c.execute(
             "select pessoa_id from clientes where id=%s and dono_id=%s and ativo",
@@ -312,7 +347,9 @@ def atualizar_cliente(pool, dono_id: int, cliente_id: int, **campos) -> bool:
             v = campos[k]
             if k == "aniversario":
                 v = _parse_data(v)
-            elif k == "obs":
+            elif k == "uf":
+                v = (v or "").strip()[:2].upper() or None
+            else:                       # obs, cidade
                 v = (v or "").strip() or None
             rsets.append(f"{k}=%s")
             rvals.append(v)
@@ -409,4 +446,6 @@ def _row_para_dict(r) -> dict:
         "tipo": tipo,
         "documento": doc,
         "documento_fmt": validadoc.formatar(doc) if doc else None,
+        "cidade": r[11] if len(r) > 11 else None,
+        "uf": r[12] if len(r) > 12 else None,
     }

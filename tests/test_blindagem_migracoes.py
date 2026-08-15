@@ -64,6 +64,10 @@ create table servicos_catalogo (id bigserial primary key, conta_id bigint refere
 -- pessoas vem da 066 (marcada como aplicada); a 131 adiciona cnpj/tipo.
 create table pessoas (id bigserial primary key, cpf text, celular text,
   nome text not null default '', email text);
+-- clientes (a relação loja↔pessoa) vem da 064; a 149 adiciona cidade/uf.
+create table clientes (id bigserial primary key, dono_id bigint references contas(id),
+  pessoa_id bigint references pessoas(id), nome text, telefone text, email text,
+  obs text, ativo boolean not null default true);
 create table schema_migrations (id serial primary key, nome text unique not null,
   executada_em timestamptz default now());
 """

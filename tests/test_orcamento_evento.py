@@ -65,6 +65,7 @@ def pool():
         c.execute(_sql("064_clientes_lojista.sql"))     # clientes do lojista
         c.execute(_sql("066_pessoas_identidade.sql"))   # identidade (pessoas)
         c.execute(_sql("131_pessoa_cnpj.sql"))          # pessoas.cnpj/tipo
+        c.execute(_sql("149_cliente_cidade_uf.sql"))    # clientes.cidade/uf
         c.execute("""create table if not exists nichos (
             id bigserial primary key, nome text, slug text unique, tipo text,
             ativo boolean not null default true)""")
@@ -333,6 +334,42 @@ def test_cliente_do_orcamento_entra_na_base_de_clientes(pool, conta_id):
     # sem nome não há o que salvar
     assert _espelhar_cliente(pool, conta_id, SimpleNamespace(
         empresa="", cliente="", cnpj="", whatsapp="", telefone="", email="")) is None
+
+
+def test_cidade_e_uf_do_orcamento_ficam_editaveis_na_aba_clientes(pool, conta_id):
+    """Cidade/UF vêm do orçamento pra base de Clientes — e de lá dá pra corrigir.
+
+    Sem isso um "Teresina/OI" digitado errado no orçamento não tinha onde ser
+    consertado: a tela de Clientes não tinha os campos."""
+    from types import SimpleNamespace
+    from finance import clientes as cli
+    from web.painel_servicos import _espelhar_cliente
+
+    cid = _espelhar_cliente(pool, conta_id, SimpleNamespace(
+        empresa="Joana Ribeiro", cliente="", cnpj="529.982.247-25",
+        whatsapp="(86) 98888-1111", telefone="", email="joana@teste.com",
+        cidade="Teresina", uf="pi"))
+    assert cid
+    salvo = cli.obter_cliente(pool, conta_id, cid)
+    assert (salvo["cidade"], salvo["uf"]) == ("Teresina", "PI")   # UF sobe pra caixa alta
+
+    assert cli.atualizar_cliente(pool, conta_id, cid, cidade="Timon", uf="ma")
+    corrigido = cli.obter_cliente(pool, conta_id, cid)
+    assert (corrigido["cidade"], corrigido["uf"]) == ("Timon", "MA")
+
+
+def test_local_do_evento_ja_vem_com_o_endereco_da_empresa():
+    """A festa quase sempre é no salão da própria empresa: o campo Local nasce
+    preenchido com o endereço dela (evento fora, o vendedor troca)."""
+    from web.painel_servicos import _local_padrao
+
+    assert _local_padrao({"endereco": "Rua Deoclécio Brito, 3399", "bairro": "Planalto",
+                          "cidade": "Teresina", "uf": "pi"}) == \
+        "Rua Deoclécio Brito, 3399 · Planalto · Teresina/PI"
+    # empresa que só tem a rua cadastrada não vira endereço com separador solto
+    assert _local_padrao({"endereco": "Rua A, 1"}) == "Rua A, 1"
+    # sem endereço, campo vazio — melhor branco do que "· Teresina/PI"
+    assert _local_padrao({"cidade": "Teresina", "uf": "PI"}) == ""
 
 
 # ------------------------------------------------- o modo vem do nicho, sempre

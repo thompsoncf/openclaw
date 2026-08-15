@@ -158,20 +158,20 @@ def _espelhar_cliente(pool, conta_id: int, dados) -> int | None:
     if not nome:
         return None
     doc = "".join(ch for ch in (dados.cnpj or "") if ch.isdigit())
+    # cidade/uf são recentes no payload: getattr pra um orçamento antigo (ou uma
+    # porta que ainda não manda os campos) não derrubar o espelhamento inteiro.
+    comuns = {"telefone": (dados.whatsapp or dados.telefone or "").strip() or None,
+              "email": (dados.email or "").strip() or None,
+              "cidade": (getattr(dados, "cidade", "") or "").strip() or None,
+              "uf": (getattr(dados, "uf", "") or "").strip() or None}
     try:
-        return cli.criar_cliente(
-            pool, conta_id, nome,
-            telefone=(dados.whatsapp or dados.telefone or "").strip() or None,
-            email=(dados.email or "").strip() or None,
-            cpf=doc if len(doc) == 11 else None,
-            cnpj=doc if len(doc) == 14 else None)
+        return cli.criar_cliente(pool, conta_id, nome, **comuns,
+                                 cpf=doc if len(doc) == 11 else None,
+                                 cnpj=doc if len(doc) == 14 else None)
     except ValueError:
         # documento com dígito verificador inválido: o orçamento vale do mesmo
         # jeito, o cliente entra sem documento.
-        return cli.criar_cliente(
-            pool, conta_id, nome,
-            telefone=(dados.whatsapp or dados.telefone or "").strip() or None,
-            email=(dados.email or "").strip() or None)
+        return cli.criar_cliente(pool, conta_id, nome, **comuns)
 
 
 def _com_retry_numero(c, executar, tentativas: int = 3):
@@ -195,6 +195,26 @@ def _nicho(conta_id: int) -> str:
     return emp.obter_dados_empresa(get_pool(), conta_id).get("nicho") or ""
 
 
+def _local_padrao(dados: dict) -> str:
+    """Endereço do estabelecimento, pronto pro campo "Local" do evento.
+
+    A festa costuma ser no salão da própria empresa — deixar o campo vazio é
+    obrigar o vendedor a digitar o mesmo endereço em todo orçamento. Vem
+    preenchido; evento fora, ele troca."""
+    rua = (dados.get("endereco") or "").strip()
+    bairro = (dados.get("bairro") or "").strip()
+    cidade = (dados.get("cidade") or "").strip()
+    uf = (dados.get("uf") or "").strip().upper()
+    if not rua:
+        return ""
+    partes = [rua]
+    if bairro:
+        partes.append(bairro)
+    if cidade:
+        partes.append(f"{cidade}/{uf}" if uf else cidade)
+    return " · ".join(partes)
+
+
 # ---------------------------------------------------------------- rotas
 @router.get("/painel/servicos", response_class=HTMLResponse)
 def painel_servicos(request: Request):
@@ -205,7 +225,8 @@ def painel_servicos(request: Request):
     with pool.connection() as c:
         _garantir_tabela(c)
     scat.garantir_tabela(pool)
-    nicho = _nicho(conta[0])
+    dados_emp = emp.obter_dados_empresa(pool, conta[0])
+    nicho = dados_emp.get("nicho") or ""
     # eventos vende PACOTE/preço de evento avulso — sem setup+mensalidade estilo
     # SaaS. A tela some com "Setup" e chama o preço único de "Valor" (fica
     # gravado em setup_centavos por baixo, pra "Fechar contrato" não virar
@@ -213,7 +234,8 @@ def painel_servicos(request: Request):
     servico_avulso = nicho == "eventos"
     return _render("servicos", request, empresa_nome=conta[2],
                    tem_pj=True, vende_servico=True, servico_avulso=servico_avulso,
-                   tipos_evento=scat.TIPOS_EVENTO, tipos_contrato=scat.TIPOS_CONTRATO)
+                   tipos_evento=scat.TIPOS_EVENTO, tipos_contrato=scat.TIPOS_CONTRATO,
+                   local_padrao=_local_padrao(dados_emp) if servico_avulso else "")
 
 
 # ---------------------------------------------------------------- catálogo (por conta)
@@ -891,7 +913,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       {% for ct in tipos_contrato %}<button type="button" class="oc-pill ev-ct" data-on="0">{{ ct }}</button>{% endfor %}
     </div>
   </div>
-  <div class="oc-field" style="margin-bottom:.3rem"><label>Local</label><input id="ev-local" class="oc-inp" placeholder="Espaço 01 — Rua Deoclécio Brito, 3399"></div>
+  <div class="oc-field" style="margin-bottom:.3rem"><label>Local</label><input id="ev-local" class="oc-inp" value="{{ local_padrao }}" data-padrao="{{ local_padrao }}" placeholder="Espaço 01 — Rua Deoclécio Brito, 3399"></div>
   <p class="mut" style="font-size:.78rem;margin:0">Festa que encerra às <b>24:00</b> termina 00:00 do dia seguinte — quando o cliente aprovar, o compromisso entra na agenda já com essa virada.</p>
 </div>
 {% endif %}
@@ -1268,7 +1290,11 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     if(!SERVICO_AVULSO)return;
     ev=ev||{};
     setv('ev-data',ev.data); setv('ev-conv',ev.convidados?String(ev.convidados):'');
-    setv('ev-ini',ev.inicio); setv('ev-fim',ev.fim); setv('ev-local',ev.local);
+    setv('ev-ini',ev.inicio); setv('ev-fim',ev.fim);
+    // Local: quase toda festa é no salão da própria empresa, então o endereço
+    // dela já vem escrito. Evento fora ("na casa do cliente") o vendedor troca.
+    var loc=document.getElementById('ev-local');
+    setv('ev-local',ev.local||(loc?loc.getAttribute('data-padrao')||'':''));
     if(ev.desconto!=null) setv('oc-desconto',String(ev.desconto));
     document.querySelectorAll('#ev-tipos .ev-tipo').forEach(function(b){
       b.classList.toggle('on',b.textContent.trim()===(ev.tipo||''));

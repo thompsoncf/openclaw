@@ -7648,9 +7648,10 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   font-size:.72rem;color:var(--txt-mut);margin-top:.15rem;border-radius:6px;
   padding:.05rem .2rem}
 .cx-conv .cx-dono.vazio{color:var(--ambar)}
-.cx-conv .cx-dono.clicavel{cursor:pointer}
-.cx-conv .cx-dono.clicavel:hover{background:var(--card-2);color:var(--txt)}
-.cx-conv .cx-dono .ca{font-size:.6rem;opacity:.7}
+/* tracejado = campo editável. Vale parado, sem depender de :hover — que no celular
+   não existe, e é lá que esta caixa mais é olhada. */
+.cx-conv .cx-dono.clicavel{cursor:pointer;border:1px dashed var(--borda);padding:.05rem .35rem}
+.cx-conv .cx-dono.clicavel:hover{background:var(--card-2);color:var(--txt);border-color:var(--txt-mut)}
 .cx-dmenu{position:fixed;z-index:70;background:var(--card);border:1px solid var(--borda);
   border-radius:10px;padding:.3rem;min-width:190px;box-shadow:0 10px 30px rgba(0,0,0,.6)}
 .cx-dmenu .cab{font-family:var(--mono);font-size:.62rem;color:var(--txt-mut);
@@ -8491,7 +8492,10 @@ function cxOpen(el,id){
           +' data-antes="'+(L.vendedor_id||'')+'"'
           +' onchange="cxAtribuir('+L.id+',this)">'+ops+'</select></div>';
     }else{
-      resp=kv('Responsável',L.vendedor||'— sem responsável —');
+      // "— sem responsável —" só faz sentido onde EXISTE lead pra ter responsável.
+      // Sem o L.id, a linha convivia na mesma tela com "este contato ainda não é um
+      // lead" logo abaixo — e parecia um campo que devia ser editável e não era.
+      resp=L.id?kv('Responsável',L.vendedor||'— sem responsável —'):'';
     }
     cx.innerHTML=''
       +'<div class="cx-sec"><h4>Lead</h4>'+kv('Empresa',L.empresa)+kv('Segmento',L.segmento)+kv('Cidade',(L.cidade||'')+(L.uf?'/'+L.uf:''))+kv('WhatsApp',L.whatsapp)+kv('E-mail',L.email)+resp+kv('Status',L.status_rot)+'</div>'
@@ -8539,7 +8543,10 @@ function cxDonoLinha(c){
   var acao=_cxPodeAtrib
     ?' onclick="cxDonoMenu(event,'+c.lead_id+','+(c.dono_id||0)+',this)" title="Trocar o responsável"'
     :'';
-  return '<span class="'+cls+'"'+acao+'>'+txt+(_cxPodeAtrib?' <span class="ca">▾</span>':'')+'</span>';
+  // sem seta: um ▾ de .6rem vira um pontinho colado no texto na coluna estreita. Quem
+  // pode trocar vê o chip com borda tracejada (cara de campo editável), que funciona
+  // parado — e portanto no celular, onde não existe hover.
+  return '<span class="'+cls+'"'+acao+'>'+txt+'</span>';
 }
 // Popover de trocar o responsável. Um <select> por linha seria mais simples, mas com
 // 100 conversas na tela são 100 selects — e o clique deles roubaria o de abrir a

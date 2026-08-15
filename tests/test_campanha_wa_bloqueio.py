@@ -37,7 +37,8 @@ create table campanhas (id bigserial primary key, conta_id bigint, nome text,
 create table campanha_alvos (id bigserial primary key, campanha_id bigint, prospeccao_id bigint,
   status text default 'fila', wa_status text, wa_em timestamptz, wa_sid text,
   wa_erro_codigo text, wa_erro_msg text, wa_categoria text, wa_custo numeric(10,4),
-  alvo_telefone text);
+  alvo_telefone text, wa_tentados jsonb not null default '[]'::jsonb,
+  wa_tentativas int not null default 0);
 create table campanha_eventos (id bigserial primary key, campanha_id bigint, prospeccao_id bigint,
   canal text, evento text, detalhe text, quando timestamptz default now());
 create table canais_config (
@@ -184,8 +185,9 @@ def motor_isolado(monkeypatch):
     falha, não a escolha do número nem o dedup de quem já respondeu."""
     monkeypatch.setattr(cm, "_respondeu", lambda pool, conta_id, pid: False)
     monkeypatch.setattr(cm, "_conta_identidade", lambda c, conta_id: {"empresa": "Zaq"})
-    monkeypatch.setattr(cm, "_numero_alvo_wa",
-                        lambda c, conta_id, dados, alvo_tel: ("5586990002222", "empresa"))
+    monkeypatch.setattr(cm, "fila_alvo_wa",
+                        lambda c, conta_id, dados, alvo_tel, tentados=(): (
+                            ["5586990002222"], "empresa"))
 
 
 @pytest.mark.parametrize("erro", ["provedor_sem_template", "sem_numero_empresa",

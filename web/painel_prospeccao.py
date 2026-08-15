@@ -26,6 +26,7 @@ from psycopg.errors import UniqueViolation
 
 from db.conexao import get_pool
 from contas import equipe as eq
+from finance import campanhas_motor as _cm
 from finance import prospec_convite as _prospec_convite
 from finance import prospec_inbound as _prospec_inbound
 from finance import prospeccao_fontes as fontes
@@ -588,7 +589,7 @@ async def prospeccao_base_add_campanha(request: Request):
     de ativar). Cada campanha = uma abordagem; nada entra no lugar errado.
     Cada lead pode vir com um número escolhido no checkbox (tel_<id>, o ⭐ mais
     provável já vem marcado) — trava esse número pra campanha (ver
-    finance/campanhas_motor._numero_alvo_wa); sem escolha, o motor decide sozinho
+    finance/campanhas_motor.fila_alvo_wa); sem escolha, o motor decide sozinho
     em tempo de envio, como sempre foi."""
     ctx, redir = _acesso(request)
     if redir is not None:
@@ -3664,6 +3665,36 @@ def _motor_status(c) -> dict:
             "texto": f"Motor parado · nenhum ciclo {quando} · normalmente roda a cada 2 min"}
 
 
+def _reserva_numeros(c, camp_id):
+    """Os números que sobraram nos alvos que já pararam: quantos são, e a lista
+    por lead pro painel "Números não tentados".
+
+    A base guarda dezenas de telefones por lead e marca `whatsapp: true/false` em
+    cada um; o disparo só usava o ⭐. Sem esta conta na tela, uma campanha que mal
+    encostou na base parece esgotada."""
+    rows = c.execute(
+        """select a.id, p.id, p.empresa, coalesce(a.wa_erro_codigo,''),
+                  coalesce(p.decisor_telefones,'[]'::jsonb), coalesce(a.wa_tentados,'[]'::jsonb),
+                  coalesce(a.wa_tentativas,0)
+             from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
+            where a.campanha_id=%s and a.wa_status='erro'
+            order by p.empresa""", (camp_id,)).fetchall()
+    leads, total = [], 0
+    for (aid, pid, empresa, cod, tels, tentados, tentativas) in rows:
+        sobra = _cm.fila_numeros(tels, ja_tentados=tentados)
+        if not sobra:
+            continue
+        total += len(sobra)
+        leads.append({
+            "aid": aid, "pid": pid, "empresa": empresa, "cod": cod,
+            "tentativas": tentativas,
+            "tentados": [t for t in (tentados or [])][-1:],   # o último que falhou
+            "sobra": len(sobra), "proximos": sobra[:3],
+        })
+    leads.sort(key=lambda x: -x["sobra"])
+    return {"total": total, "leads": leads}
+
+
 def _campanhas_dados(c, conta_id, membro_id=None):
     """Métricas por canal das campanhas da conta (lista + polling). Uma consulta
     LATERAL agrega tudo por campanha. Devolve (camps, totais).
@@ -3902,6 +3933,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
         # certo por aqui, sobra o que o PROVEDOR recusou no último disparo, que só
         # o motor viu (ex.: twilio_20003, credencial não autentica).
         wa_bloqueio = _prospec_convite.motivo_bloqueio(c, ctx["conta_id"], cp[13]) or cp[20]
+        reserva = _reserva_numeros(c, camp_id)
     # "pulado" (já respondeu) e "sem_numero" não são disparos reais — fora da conta
     wa_enviados = sum(v for k, v in wa_counts.items() if k not in ("pulado", "sem_numero"))
     # "respondeu" implica que já foi entregue e lido — soma nos dois (não é status
@@ -3939,7 +3971,8 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
             "wa_taxa_entrega": (round(100 * wa_entregues / wa_enviados) if wa_enviados else 0),
             "wa_taxa_leitura": (round(100 * wa_lidos / wa_enviados) if wa_enviados else 0),
             "email_detectados": email_detectados, "wa_detectados": wa_detectados,
-            "erros_total": st.get("erro", 0) + wa_erros, "wa_custo": wa_custo}
+            "erros_total": st.get("erro", 0) + wa_erros, "wa_custo": wa_custo,
+            "wa_reserva": reserva["total"]}
     passos_l = [{"dias": p[1], "assunto": p[2], "corpo": p[3], "ia": p[4]} for p in passos]
     from finance.campanhas_motor import _fmt as _cfmt
     cadencia = " · ".join("D" + str(p["dias"]) for p in passos_l) or "—"
@@ -3972,6 +4005,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                    leads=leads_l, previa=previa, cadencia=cadencia, remetente=email_principal,
                    modelos=modelos, seg=seg, cidade=cidade, temp=temp,
                    email_principal=email_principal, email_secundario=email_secundario,
+                   reserva=reserva, tentativas_teto=_cm._WA_TENTATIVAS,
                    vendedores=vendedores, responsavel_nome=responsavel_nome,
                    pode_atribuir=ctx["pode_atribuir"], gerencia=ctx["gerencia"],
                    aviso=request.session.pop("prosp_aviso", None))
@@ -4219,6 +4253,42 @@ def prospeccao_campanha_remover_leads(request: Request, camp_id: int, ids: list[
                       (camp_id, pids)).rowcount
         c.commit()
     return JSONResponse({"ok": True, "removidos": n})
+
+
+@router.post("/painel/prospeccao/campanhas/{camp_id}/recolocar-na-fila")
+def prospeccao_campanha_recolocar_na_fila(request: Request, camp_id: int,
+                                          ids: list[str] = Form([])):
+    """Devolve alvos parados pra fila de disparo do WhatsApp, zerando o contador de
+    tentativas — eles voltam a ter o teto inteiro, agora com os OUTROS números.
+
+    `wa_tentados` NÃO é limpo: o número que já falhou não volta nunca. E isto é um
+    botão, não automático, porque cada tentativa é uma mensagem de marketing
+    cobrada — quem decide gastar é o dono.
+
+    Recebe `campanha_alvos.id` (não prospeccao_id): o painel lista por alvo."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not _pode_campanha(ctx, camp_id):
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    aids = []
+    for v in ids:
+        try:
+            aids.append(int(v))
+        except (ValueError, TypeError):
+            pass
+    if not aids:
+        return JSONResponse({"ok": False, "erro": "sem_ids"}, status_code=400)
+    with get_pool().connection() as c:
+        if not _campanha_dona(c, ctx["conta_id"], camp_id):
+            return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+        n = c.execute(
+            """update campanha_alvos
+                 set wa_status=null, wa_tentativas=0, wa_erro_codigo=null, wa_erro_msg=null
+               where campanha_id=%s and id = any(%s) and wa_status='erro'""",
+            (camp_id, aids)).rowcount
+        c.commit()
+    return JSONResponse({"ok": True, "recolocados": n})
 
 
 @router.post("/painel/prospeccao/campanhas/{camp_id}/usar-modelo")
@@ -8726,6 +8796,20 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 .passo .dtag{font-size:.72rem;color:var(--mut);display:flex;align-items:center;gap:.3rem}
 .passo .dtag .fld{width:60px;text-align:center;padding:.35rem}
 .passo textarea.fld{resize:vertical}
+/* painel "Números não tentados" — a reserva de telefones que sobrou nos alvos parados */
+.resv{display:flex;flex-direction:column;gap:.35rem}
+.resv-l{border:1px solid var(--borda);border-radius:9px;background:var(--bg);overflow:hidden}
+.resv-h{display:grid;grid-template-columns:20px 1fr auto;gap:.6rem;align-items:center;padding:.5rem .65rem;cursor:pointer}
+.resv-h:hover{background:var(--card-2)}
+.resv-h input{margin:0;accent-color:var(--verde);width:15px;height:15px}
+.resv-e{min-width:0}
+.resv-e b{display:block;font-size:.86rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.resv-n{font-family:var(--mono);font-size:.8rem;font-weight:700;color:var(--azul);white-space:nowrap;font-variant-numeric:tabular-nums}
+.resv-n span{font-family:var(--fonte);font-weight:400;color:var(--mut);font-size:.72rem}
+.resv-b{display:none;padding:0 .65rem .55rem 2.05rem;border-top:1px solid var(--borda)}
+.resv-l.open .resv-b{display:block}
+.resv-f{margin:.45rem 0 .3rem;padding-left:1.1rem;font-family:var(--mono);font-size:.82rem;color:var(--txt);font-variant-numeric:tabular-nums}
+.resv-f li{margin:.1rem 0}
 /* link "voltar" (breadcrumb) acima do título */
 .voltar{display:inline-block;color:var(--txt-mut,#8a938a);text-decoration:none;font-size:.82rem;margin-bottom:.35rem}
 .voltar:hover{color:var(--verde-claro)}
@@ -9006,6 +9090,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
             <div class="cpstat"><div class="n">{{ metr.wa_lidos }}</div><div class="l">Lidos 👀</div></div>
             <div class="cpstat"><div class="n">{{ metr.wa_taxa_leitura }}%</div><div class="l">Taxa leitura</div></div>
             <div class="cpstat{% if metr.wa_erros %} r{% endif %}"><div class="n">{{ metr.wa_erros }}</div><div class="l">Erros</div></div>
+            {% if metr.wa_reserva %}<div class="cpstat novo" title="Números com WhatsApp que a base já tem, em leads que pararam, e que ainda não foram tentados"><div class="n">{{ metr.wa_reserva }}</div><div class="l">Na reserva</div></div>{% endif %}
           </div>
         </div>
         {% if metr.wa_custo.tem %}
@@ -9041,6 +9126,30 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
           </div>
         </div>
 
+        {% if reserva.leads %}
+        <div class="kpihead" style="margin-top:1.1rem">Números não tentados</div>
+        <div class="mut" style="font-size:.79rem;margin:.1rem 0 .5rem;max-width:64ch">Estes leads pararam no número que falhou, mas a base guarda outros com WhatsApp. O disparo tenta até <b>{{ tentativas_teto }}</b> números por lead — quem já passou disso só volta por aqui.</div>
+        <div class="resv">
+          {% for l in reserva.leads %}
+          <div class="resv-l" id="rv{{ l.aid }}">
+            <div class="resv-h" onclick="rvAb('rv{{ l.aid }}')">
+              <input class="rv-ck" type="checkbox" value="{{ l.aid }}" onclick="event.stopPropagation()" onchange="rvUpd()">
+              <div class="resv-e"><b>{{ l.empresa }}</b><div class="mut" style="font-size:.74rem">{% if l.tentados %}tentou {{ l.tentativas }}{% if l.tentativas == 1 %} número{% else %} números{% endif %}{% if l.cod %} · erro {{ l.cod }}{% endif %}{% else %}sem tentativa registrada{% endif %}</div></div>
+              <span class="resv-n">{{ l.sobra }} <span>na reserva</span></span>
+            </div>
+            <div class="resv-b">
+              <ol class="resv-f">{% for n in l.proximos %}<li>{{ n }}</li>{% endfor %}</ol>
+              {% if l.sobra > l.proximos|length %}<div class="mut" style="font-size:.74rem">+ {{ l.sobra - l.proximos|length }} guardados depois destes</div>{% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-top:.6rem">
+          <span id="rv-count" class="mut" style="font-size:.78rem">Marque os leads pra devolver pra fila de disparo</span>
+          <span style="flex:1"></span>
+          <button type="button" class="pbtn sm" id="rv-btn" onclick="rvFila({{ camp.id }})" disabled>↻ Colocar na fila</button>
+        </div>
+        {% endif %}
         <div class="kpihead" style="margin-top:1.1rem">Contatos &amp; histórico</div>
         {% if leads %}
         <div style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-top:.3rem">
@@ -9103,6 +9212,28 @@ function campRemLead(btn,camp,pid){
     }).catch(function(){alert('Falha de rede.');});
 }
 function clChecked(){var a=[];document.querySelectorAll('.cl-ck:checked').forEach(function(c){a.push(c.value);});return a;}
+function rvAb(id){document.getElementById(id).classList.toggle('open');}
+function rvChecked(){return Array.prototype.slice.call(document.querySelectorAll('.rv-ck:checked')).map(function(c){return c.value;});}
+function rvUpd(){
+  var n=rvChecked().length;
+  var btn=document.getElementById('rv-btn');
+  if(btn){btn.disabled=!n;btn.textContent=n?'↻ Colocar na fila ('+n+')':'↻ Colocar na fila';}
+  var cnt=document.getElementById('rv-count');
+  if(cnt)cnt.textContent=n?n+' selecionado(s)':'Marque os leads pra devolver pra fila de disparo';
+}
+function rvFila(camp){
+  var ids=rvChecked();
+  if(!ids.length)return;
+  if(!confirm('Colocar '+ids.length+' lead(s) de volta na fila? Cada tentativa é uma mensagem de marketing cobrada.'))return;
+  var body=new URLSearchParams();ids.forEach(function(id){body.append('ids',id);});
+  var btn=document.getElementById('rv-btn');if(btn)btn.disabled=true;
+  fetch('/painel/prospeccao/campanhas/'+camp+'/recolocar-na-fila',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body})
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){alert('Não consegui recolocar ('+(d.erro||'?')+').');rvUpd();return;}
+      ids.forEach(function(id){var el=document.getElementById('rv'+id);if(el)el.remove();});
+      rvUpd();
+    }).catch(function(){alert('Falha de rede.');rvUpd();});
+}
 function clToggleAll(el){document.querySelectorAll('.cl-ck').forEach(function(c){c.checked=el.checked;});clUpd();}
 function clUpd(){
   var total=document.querySelectorAll('.cl-ck').length;

@@ -66,7 +66,6 @@ def pool():
         c.execute(_sql("066_pessoas_identidade.sql"))   # identidade (pessoas)
         c.execute(_sql("131_pessoa_cnpj.sql"))          # pessoas.cnpj/tipo
         c.execute(_sql("149_cliente_cidade_uf.sql"))    # clientes.cidade/uf
-        c.execute(_sql("152_orcamento_cliente_vinculo.sql"))  # vínculo + endereço/CEP
         c.execute("""create table if not exists nichos (
             id bigserial primary key, nome text, slug text unique, tipo text,
             ativo boolean not null default true)""")
@@ -77,6 +76,9 @@ def pool():
             primeiro_ano_centavos bigint default 0, n_modulos int default 0,
             criado_em timestamptz default now())""")
         _garantir_tabela(c)     # espelha 068/069/070/074/147 (inclusive modo/evento/parcelas)
+        # DEPOIS de orcamentos existir: a 152 altera as DUAS tabelas (o vínculo
+        # em orcamentos, endereço/CEP em clientes).
+        c.execute(_sql("152_orcamento_cliente_vinculo.sql"))
         c.commit()
     yield p
     p.close()

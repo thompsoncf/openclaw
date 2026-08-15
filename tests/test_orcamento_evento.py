@@ -459,6 +459,23 @@ def test_cliente_arquivado_nao_derruba_a_folha(pool, conta_id):
     assert d is not None and d["empresa"] == "Maria Teste"
 
 
+def test_contato_do_cliente_nao_sai_repetido(pool, conta_id):
+    """WhatsApp e telefone são o mesmo número: o cliente lia o próprio número
+    duas vezes na folha. Sai uma vez — e a máscara vence o número cru."""
+    with pool.connection() as c:
+        oid, tok = _semear(pool, conta_id, numero=None)
+        c.execute("update orcamentos set whatsapp='86999990000' where id=%s", (oid,))
+        c.commit()
+    d = prop._carregar(tok, pool=pool)
+    assert d["contatos"] == ["(86) 99999-0000", "maria@teste.com"]
+
+    from web.proposta import _contatos
+    # números diferentes seguem os dois; e-mail não some
+    assert _contatos("(86) 98188-5930", "(86) 3221-1234", "x@y.com") == \
+        ["(86) 98188-5930", "(86) 3221-1234", "x@y.com"]
+    assert _contatos("", "", "") == []
+
+
 def test_local_do_evento_ja_vem_com_o_endereco_da_empresa():
     """A festa quase sempre é no salão da própria empresa: o campo Local nasce
     preenchido com o endereço dela (evento fora, o vendedor troca)."""

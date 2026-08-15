@@ -69,13 +69,21 @@ const ESPERA_RESTAURAR_MS = parseInt(process.env.WA_QR_ESPERA_RESTAURAR_MS || '1
 const ESPACO_CONTAS_MS = parseInt(process.env.WA_QR_ESPACO_CONTAS_MS || '30000', 10)
 // Vigia de sessão MUDA — ver vigiarSessoes(). Quanto tempo sem UM evento do socket
 // (mensagem, recibo, contato, histórico) até desconfiar, e de quanto em quanto tempo
-// conferir. 10min é folgado de propósito: conta parada de madrugada é normal, e quem
-// decide se a sessão morreu não é o silêncio, é o ping não voltar.
+// conferir. 10min é folgado de propósito: conta parada meia hora é rotina.
 const MUDO_LIMITE_MS = parseInt(process.env.WA_QR_MUDO_LIMITE_MS || '600000', 10)
 const VIGIA_INTERVALO_MS = parseInt(process.env.WA_QR_VIGIA_MS || '60000', 10)
 // Timeout do ping. O keep-alive do próprio Baileys usa 30s; aqui é menor porque a
 // sessão já está sob suspeita e o vigia roda de novo daqui a um minuto.
 const PING_TIMEOUT_MS = parseInt(process.env.WA_QR_PING_TIMEOUT_MS || '15000', 10)
+// Espaço entre pings da MESMA sessão: enquanto ela estiver calada o vigia passa de
+// minuto em minuto, e não é pra pingar em toda passada.
+const PING_ESPACO_MS = parseInt(process.env.WA_QR_PING_ESPACO_MS || '300000', 10)
+// TETO do silêncio: aqui religa mesmo com o ping respondendo. O ping prova que o
+// cano está aberto, NÃO que o WhatsApp ainda está entregando — e foi exatamente esse
+// o estado da conta que motivou tudo isto (ver vigiarSessoes): o keep-alive do Baileys
+// ia e voltava de 30 em 30s, por isso ele nunca deu a conexão por perdida, e mesmo
+// assim não entrou uma mensagem por horas. Só o religamento completo traz de volta.
+const MUDO_TETO_MS = parseInt(process.env.WA_QR_MUDO_TETO_MS || '2700000', 10)   // 45min
 
 if (!process.env.DATABASE_URL) { log.error('Falta DATABASE_URL'); process.exit(1) }
 if (!SEGREDO) { log.error('Falta WA_QR_SHARED_SECRET'); process.exit(1) }
@@ -213,7 +221,10 @@ function pararTimersDaAgenda (s) {
 // distinguir "conta parada" de "socket morto que ninguém percebeu" — ver vigiarSessoes.
 function marcarVivo (contaId) {
   const s = sessoes.get(contaId)
-  if (s) s.ultimoEvento = Date.now()
+  if (!s) return
+  s.ultimoEvento = Date.now()
+  // entregou de verdade = a desconfiança do vigia zera junto (ver tetoMudo)
+  s.reconexoesMudas = 0
 }
 
 // A sessão está MUDA a ponto de merecer um ping? Separado numa função pura porque é
@@ -226,6 +237,17 @@ function marcarVivo (contaId) {
 function sessaoMuda (s, agora, limite) {
   if (!s || s.iniciando || !s.sock || s.status !== 'conectado') return false
   return (agora - (s.ultimoEvento || agora)) >= limite
+}
+
+// Teto de silêncio DESTA sessão: a partir daqui religa mesmo com o ping respondendo.
+// Dobra a cada religamento que não trouxe evento nenhum de volta, até 16×. Sem isso
+// uma conta legitimamente parada (loja fechada, fim de semana) seria religada a cada
+// 45min a noite inteira — e reconexão em série é justamente o que faz o WhatsApp achar
+// que é abuso. Com a dobra são 45min, 1h30, 3h, 6h e 12h; o primeiro evento de verdade
+// zera a conta e o teto volta pro começo (marcarVivo).
+function tetoMudo (s, teto) {
+  const n = Math.min((s && s.reconexoesMudas) || 0, 4)
+  return teto * Math.pow(2, n)
 }
 
 // PING de verdade no socket — o mesmo IQ que o keep-alive do Baileys manda sozinho a
@@ -242,36 +264,57 @@ async function pingSessao (sock) {
 // O socket que morre SEM avisar. Aconteceu em produção com a conta 35 (Confeitaria
 // Doce Mell): às 13:28 o serviço parou de receber qualquer evento daquela sessão —
 // nem mensagem, nem eco do celular, nem contato — enquanto as outras contas do mesmo
-// processo seguiam normais. Nada no banco mudou pra ela dali em diante, e o painel
-// continuou mostrando o chip como CONECTADO, porque o status é o que ficou na memória
-// do último 'open'. Três horas depois a cliente ainda via a caixa parada no mesmo
-// minuto, sem uma linha de erro em lugar nenhum.
+// processo seguiam normais. Nada no banco mudou pra ela dali em diante (mensagens,
+// wa_contatos, wa_qr_enviadas e o mapa de @lid param todos no mesmo minuto), e o
+// painel continuou mostrando o chip como CONECTADO, porque o status é o que ficou na
+// memória do último 'open'. Três horas depois a cliente ainda via a caixa parada no
+// mesmo minuto, sem uma linha de erro em lugar nenhum.
 //
-// O pior não era a queda: era não ter volta. Com `status === 'conectado'` e um `sock`
+// O keep-alive do Baileys não pegou: ele derruba a conexão quando o servidor fica >35s
+// sem responder, e o ping continuava indo e voltando. Ou seja, o cano estava aberto e
+// o WhatsApp simplesmente não entregava mais nada naquela sessão. Por isso o vigia não
+// pode decidir SÓ pelo ping — ele é a prova rápida de socket morto, não de sessão viva.
+//
+// E o pior não era a queda: era não ter volta. Com `status === 'conectado'` e um `sock`
 // na mão, o iniciarSessao devolve a sessão existente na primeira linha — então nem o
 // botão de reconectar do painel ressuscitava a conta. Só um deploy resolvia.
 //
-// Daí este vigia: silêncio longo não condena ninguém, mas manda perguntar. O ping é a
-// prova — se ele não volta, o socket está morto de fato e a sessão é religada à força
-// (status/sock zerados antes, senão o iniciarSessao volta a dizer "já está conectada").
+// Regra, então, em dois degraus (status/sock são zerados antes de religar, senão o
+// iniciarSessao volta a dizer "já está conectada"):
+//   10min calada  -> pinga (no máximo de 5 em 5min). Ping sem resposta = socket morto,
+//                    religa na hora.
+//   45min calada  -> religa mesmo com o ping respondendo; é o caso da Doce Mell.
+//                    O teto dobra a cada religamento que não trouxe nada — ver tetoMudo.
 async function vigiarSessoes () {
   const agora = Date.now()
   for (const [contaId, s] of sessoes) {
     if (!sessaoMuda(s, agora, MUDO_LIMITE_MS)) continue
-    const mudoMin = Math.round((agora - (s.ultimoEvento || agora)) / 60000)
-    try {
-      await pingSessao(s.sock)
-      // respondeu: conta parada mesmo. Recarimba pra não pingar de minuto em minuto.
-      s.ultimoEvento = Date.now()
-      log.info({ contaId, mudoMin }, 'vigia: sessão calada mas o ping voltou — está viva')
-      continue
-    } catch (e) {
-      log.warn({ contaId, mudoMin, e: String(e) },
-        'vigia: sessão calada e o ping não voltou — religando à força')
+    const mudoMs = agora - (s.ultimoEvento || agora)
+    const mudoMin = Math.round(mudoMs / 60000)
+    let motivo = ''
+    if (mudoMs >= tetoMudo(s, MUDO_TETO_MS)) {
+      motivo = 'mudo_alem_do_teto'
+      log.warn({ contaId, mudoMin, religamentos: s.reconexoesMudas || 0 },
+        'vigia: sessão sem entregar nada por tempo demais — religando (o ping não basta)')
+    } else if (agora - (s.ultimoPing || 0) >= PING_ESPACO_MS) {
+      s.ultimoPing = agora
+      try {
+        await pingSessao(s.sock)
+        log.info({ contaId, mudoMin }, 'vigia: sessão calada mas o ping voltou — de olho')
+        continue
+      } catch (e) {
+        motivo = 'ping_sem_resposta'
+        log.warn({ contaId, mudoMin, e: String(e) },
+          'vigia: sessão calada e o ping não voltou — socket morto, religando')
+      }
+    } else {
+      continue   // calada, mas o ping desta rodada já foi
     }
+    s.reconexoesMudas = (s.reconexoesMudas || 0) + 1
     s.status = 'reconectando'
     s.qr = null
-    descartarSocket(s.sock, contaId, 'vigia_sessao_muda')
+    s.ultimoPing = 0
+    descartarSocket(s.sock, contaId, 'vigia_' + motivo)
     s.sock = null
     pararTimersDaAgenda(s)
     try {
@@ -1815,4 +1858,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, marcarVivo, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, sessoes, pool }
+module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, marcarVivo, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, sessoes, pool }

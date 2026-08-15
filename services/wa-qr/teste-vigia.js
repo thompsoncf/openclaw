@@ -1,5 +1,5 @@
 'use strict'
-// Vigia da sessão MUDA (sessaoMuda + marcarVivo).
+// Vigia da sessão MUDA (sessaoMuda + tetoMudo + marcarVivo).
 //
 // O caso real: a conta da Confeitaria Doce Mell parou de receber às 13:28 e ficou assim
 // por horas — sem mensagem, sem eco do celular, sem contato — enquanto as outras contas
@@ -10,8 +10,9 @@
 //
 // Por que a regra merece teste próprio: ela decide RELIGAR socket de produção. Religar
 // de menos deixa cliente sem receber sem ninguém saber; religar demais é o jeito rápido
-// de o WhatsApp achar que é abuso e derrubar (ou banir) o número. As duas metades da
-// regra são o silêncio (aqui) e o ping sem resposta (na rede, não testável offline).
+// de o WhatsApp achar que é abuso e derrubar (ou banir) o número. O silêncio é testável
+// aqui; o ping, não (é rede) — e o teto existe justamente porque naquele caso o ping
+// respondia normalmente enquanto nada era entregue.
 //
 // Não entra no pytest: é Node. Manual, e não precisa de banco nem de WhatsApp:
 //
@@ -21,7 +22,7 @@ process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://x@127.0.0.1:5
 process.env.WA_QR_SHARED_SECRET = process.env.WA_QR_SHARED_SECRET || 'teste'
 process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'silent'
 
-const { sessaoMuda, marcarVivo, sessoes } = require('./server')
+const { sessaoMuda, tetoMudo, marcarVivo, sessoes } = require('./server')
 
 let falhas = 0
 function conferir (ok, descricao) {
@@ -65,12 +66,27 @@ conferir(sessaoMuda(viva({ ultimoEvento: AGORA - LIMITE }), AGORA, LIMITE) === t
 conferir(sessaoMuda(viva({ ultimoEvento: AGORA - 3 * 60 * 60 * 1000 }), AGORA, LIMITE) === true,
   'o caso da Doce Mell: 3h "conectada" sem entregar um evento')
 
+console.log('\nteto do silêncio (quando religar mesmo com o ping respondendo)')
+const TETO = 45 * 60 * 1000
+conferir(tetoMudo({}, TETO) === TETO,
+  'sessão que nunca foi religada à toa — teto cheio, sem desconto')
+conferir(tetoMudo({ reconexoesMudas: 1 }, TETO) === 2 * TETO,
+  'religou uma vez e continuou muda — espera o dobro antes de insistir')
+conferir(tetoMudo({ reconexoesMudas: 3 }, TETO) === 8 * TETO,
+  'terceira sem resultado — 6h, não 45min')
+conferir(tetoMudo({ reconexoesMudas: 9 }, TETO) === 16 * TETO,
+  'a dobra tem limite: 16× (12h) e para de crescer')
+conferir(tetoMudo({ reconexoesMudas: 0 }, TETO) === TETO,
+  'contador zerado por um evento de verdade — volta ao teto normal')
+
 console.log('\nmarcarVivo carimba a sessão certa')
-sessoes.set(35, { status: 'conectado', sock: SOCK, ultimoEvento: AGORA - 3 * LIMITE })
-sessoes.set(23, { status: 'conectado', sock: SOCK, ultimoEvento: AGORA - 3 * LIMITE })
+sessoes.set(35, { status: 'conectado', sock: SOCK, ultimoEvento: AGORA - 3 * LIMITE, reconexoesMudas: 3 })
+sessoes.set(23, { status: 'conectado', sock: SOCK, ultimoEvento: AGORA - 3 * LIMITE, reconexoesMudas: 3 })
 marcarVivo(35)
 conferir(sessaoMuda(sessoes.get(35), Date.now(), LIMITE) === false,
   'a conta que recebeu evento sai da mira do vigia')
+conferir(tetoMudo(sessoes.get(35), TETO) === TETO,
+  'e volta pro teto normal — a desconfiança acumulada zera junto')
 conferir(sessaoMuda(sessoes.get(23), Date.now(), LIMITE) === true,
   'a conta vizinha NÃO é carimbada junto')
 let explodiu = false

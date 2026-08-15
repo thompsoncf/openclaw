@@ -3704,23 +3704,29 @@ def _reserva_numeros(c, camp_id):
 
     A base guarda dezenas de telefones por lead e marca `whatsapp: true/false` em
     cada um; o disparo só usava o ⭐. Sem esta conta na tela, uma campanha que mal
-    encostou na base parece esgotada."""
+    encostou na base parece esgotada.
+
+    Lead com número TRAVADO (`alvo_telefone`, escolhido no checkbox da Base) entra
+    na lista marcado: o disparo automático não adivinha em cima da escolha do dono,
+    então a reserva dele só fica alcançável se ele destravar aqui — que é o que o
+    botão "Colocar na fila" faz. Mostrar sem a marca seria prometer números que o
+    disparo sozinho nunca usaria."""
     rows = c.execute(
         """select a.id, p.id, p.empresa, coalesce(a.wa_erro_codigo,''),
                   coalesce(p.decisor_telefones,'[]'::jsonb), coalesce(a.wa_tentados,'[]'::jsonb),
-                  coalesce(a.wa_tentativas,0)
+                  coalesce(a.wa_tentativas,0), coalesce(a.alvo_telefone,'')
              from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
             where a.campanha_id=%s and a.wa_status='erro'
             order by p.empresa""", (camp_id,)).fetchall()
     leads, total = [], 0
-    for (aid, pid, empresa, cod, tels, tentados, tentativas) in rows:
+    for (aid, pid, empresa, cod, tels, tentados, tentativas, travado) in rows:
         sobra = _cm.fila_numeros(tels, ja_tentados=tentados)
         if not sobra:
             continue
         total += len(sobra)
         leads.append({
             "aid": aid, "pid": pid, "empresa": empresa, "cod": cod,
-            "tentativas": tentativas,
+            "tentativas": tentativas, "travado": travado,
             # já gastou as 3 tentativas: continua na lista (o dono quer ver que
             # sobrou número), mas não dá pra recolocar — o teto é o teto
             "no_teto": tentativas >= _cm._WA_TENTATIVAS,
@@ -4306,6 +4312,12 @@ def prospeccao_campanha_recolocar_na_fila(request: Request, camp_id: int,
     isto é um botão, não automático, porque cada tentativa é uma mensagem de
     marketing cobrada — quem decide gastar é o dono.
 
+    DESTRAVA o `alvo_telefone`. Quando o dono escolheu um número no checkbox da
+    Base, o disparo automático não adivinha em cima dessa escolha — mas se aquele
+    número falhou e ele está apertando este botão, é justamente isso que ele está
+    pedindo: tente os outros. Sem destravar aqui, 16 leads em produção ficavam com
+    87 telefones guardados e um botão que não fazia nada.
+
     Recebe `campanha_alvos.id` (não prospeccao_id): o painel lista por alvo."""
     ctx, redir = _acesso(request)
     if redir is not None:
@@ -4325,7 +4337,8 @@ def prospeccao_campanha_recolocar_na_fila(request: Request, camp_id: int,
             return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
         n = c.execute(
             """update campanha_alvos
-                 set wa_status=null, wa_erro_codigo=null, wa_erro_msg=null
+                 set wa_status=null, wa_erro_codigo=null, wa_erro_msg=null,
+                     wa_sid=null, wa_numero=null, alvo_telefone=null
                where campanha_id=%s and id = any(%s) and wa_status='erro'
                  and coalesce(wa_tentativas,0) < %s""",
             (camp_id, aids, _cm._WA_TENTATIVAS)).rowcount
@@ -9175,8 +9188,8 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
           {% for l in reserva.leads %}
           <div class="resv-l" id="rv{{ l.aid }}">
             <div class="resv-h" onclick="rvAb('rv{{ l.aid }}')">
-              <input class="rv-ck" type="checkbox" value="{{ l.aid }}" onclick="event.stopPropagation()" onchange="rvUpd()"{% if l.no_teto %} disabled title="Já usou as {{ tentativas_teto }} tentativas"{% endif %}>
-              <div class="resv-e"><b>{{ l.empresa }}</b><div class="mut" style="font-size:.74rem">{% if l.tentados %}tentou {{ l.tentativas }}{% if l.tentativas == 1 %} número{% else %} números{% endif %}{% if l.cod %} · erro {{ l.cod }}{% endif %}{% if l.no_teto %} · <span style="color:var(--ambar)">teto atingido</span>{% endif %}{% else %}sem tentativa registrada{% endif %}</div></div>
+              <input class="rv-ck" type="checkbox" value="{{ l.aid }}"{% if l.travado %} data-travado="1"{% endif %} onclick="event.stopPropagation()" onchange="rvUpd()"{% if l.no_teto %} disabled title="Já usou as {{ tentativas_teto }} tentativas"{% endif %}>
+              <div class="resv-e"><b>{{ l.empresa }}</b><div class="mut" style="font-size:.74rem">{% if l.tentados %}tentou {{ l.tentativas }}{% if l.tentativas == 1 %} número{% else %} números{% endif %}{% if l.cod %} · erro {{ l.cod }}{% endif %}{% if l.no_teto %} · <span style="color:var(--ambar)">teto atingido</span>{% endif %}{% else %}sem tentativa registrada{% endif %}{% if l.travado and not l.no_teto %} · <span style="color:var(--azul)" title="Você escolheu {{ l.travado }} ao jogar este lead na campanha. O disparo não tenta outros sozinho — colocar na fila libera os demais.">🔒 número travado</span>{% endif %}</div></div>
               <span class="resv-n">{{ l.sobra }} <span>na reserva</span></span>
             </div>
             <div class="resv-b">
@@ -9266,7 +9279,10 @@ function rvUpd(){
 function rvFila(camp){
   var ids=rvChecked();
   if(!ids.length)return;
-  if(!confirm('Colocar '+ids.length+' lead(s) de volta na fila? Cada tentativa é uma mensagem de marketing cobrada.'))return;
+  var trav=document.querySelectorAll('.rv-ck:checked[data-travado="1"]').length;
+  var aviso='Colocar '+ids.length+' lead(s) de volta na fila? Cada tentativa é uma mensagem de marketing cobrada.';
+  if(trav)aviso+='\\n\\n'+trav+' deles tem número travado por você — colocar na fila libera os outros números da base.';
+  if(!confirm(aviso))return;
   var body=new URLSearchParams();ids.forEach(function(id){body.append('ids',id);});
   var btn=document.getElementById('rv-btn');if(btn)btn.disabled=true;
   fetch('/painel/prospeccao/campanhas/'+camp+'/recolocar-na-fila',{method:'POST',headers:{'X-Requested-With':'fetch'},body:body})

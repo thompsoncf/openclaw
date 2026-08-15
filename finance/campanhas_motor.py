@@ -405,10 +405,23 @@ def _melhor_de_lista(decisor_telefones) -> str | None:
 _WA_TENTATIVAS = 3   # teto de números tentados por alvo (cada um é marketing cobrado)
 
 
-def _ddd(numero) -> str:
+def _chave(numero) -> str:
+    """Dígitos COMPARÁVEIS do número: sem o código do país.
+
+    A base grava o mesmo telefone de duas formas — o campo `whatsapp` vem
+    '+5586994549305' e o `telefone` vem '(86) 99454-9305'. Comparando os dígitos
+    crus, o mesmo assinante entra duas vezes na fila: gasta duas das três
+    tentativas com a mesma pessoa e, pior, chega a reenviar pro número que acabou
+    de falhar (visto em produção no alvo 146, cujo tentado foi gravado com o 55).
+    """
     d = _so_dig(numero)
-    if d.startswith("55") and len(d) > 11:
+    if d.startswith("55") and len(d) in (12, 13):   # 55 + DDD + 8 ou 9 dígitos
         d = d[2:]
+    return d
+
+
+def _ddd(numero) -> str:
+    d = _chave(numero)
     return d[:2] if len(d) >= 10 else ""
 
 
@@ -441,7 +454,7 @@ def fila_numeros(dec_tels, whatsapp=None, telefone=None, ja_tentados=()) -> list
         if not isinstance(t, dict):
             continue
         f = (t.get("formatado") or "").strip()
-        if len(_so_dig(f)) < 10:
+        if len(_chave(f)) < 10:
             continue
         itens.append((f, bool(t.get("provavel")), bool(t.get("whatsapp")),
                       (t.get("tipo") or "").upper()))
@@ -468,10 +481,10 @@ def fila_numeros(dec_tels, whatsapp=None, telefone=None, ja_tentados=()) -> list
     fila.append((whatsapp or "").strip())
     fila.append((telefone or "").strip())
 
-    vistos = {_so_dig(n) for n in (ja_tentados or []) if _so_dig(n)}
+    vistos = {_chave(n) for n in (ja_tentados or []) if _chave(n)}
     saida = []
     for n in fila:
-        d = _so_dig(n)
+        d = _chave(n)
         if not n or len(d) < 10 or d in vistos:
             continue
         vistos.add(d)
@@ -915,7 +928,7 @@ def _wa_tentativa_falhou(pool, aid, numero, res, detalhe, tentados,
     `erro` de verdade — que é o que tira o lead da fila pra sempre."""
     import json
     novos = list(tentados or [])
-    d = _so_dig(numero)
+    d = _chave(numero)   # grava sem o código do país, pra comparação futura bater
     if d and d not in novos:
         novos.append(d)
     with pool.connection() as c:

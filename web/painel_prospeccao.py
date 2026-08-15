@@ -1367,6 +1367,12 @@ def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=
     elif (vend or "").isdigit():   # filtro por vendedor (só dono/gestor)
         where.append("p.vendedor_id=%s")
         params.append(int(vend))
+    elif vend == "sem":
+        # os leads órfãos, que é o que a gestão quer caçar. Exige `cv.prospeccao_id
+        # not null` de propósito: conversa que ainda não virou lead também tem
+        # vendedor_id nulo (por não ter lead nenhum) e entupiria o filtro — na conta
+        # do chamado seriam 158 linhas irrelevantes no meio de 21 que importam.
+        where.append("cv.prospeccao_id is not null and p.vendedor_id is null")
     if escopo == "email":
         where.append("cv.canal='email'")
     elif canal in CANAIS_TODOS and canal != "email":
@@ -1415,6 +1421,25 @@ def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=
                     "eh_lead": r[4] is not None, "lead_id": r[4],
                     "dono_id": r[14], "dono": r[15] or ""})
     return out
+
+
+def _leads_sem_dono(c, conta_id, escopo="") -> list[int]:
+    """Os leads da caixa que estão sem responsável — a lista, não só a contagem, pra
+    a atribuição em lote agir exatamente sobre o que a tela mostrou.
+
+    Conta lead, não conversa: um lead com duas conversas é UM lead sem dono. O
+    escopo acompanha a aba (mensageiros × e-mail) pra o número bater com a lista."""
+    onde = ["cv.conta_id=%s", "cv.prospeccao_id is not null", "p.vendedor_id is null"]
+    args: list = [conta_id]
+    if escopo == "email":
+        onde.append("cv.canal='email'")
+    elif escopo == "msg":
+        onde.append("cv.canal <> 'email'")
+    rows = c.execute(
+        "select distinct p.id from conversas cv "
+        "join prospeccao p on p.id = cv.prospeccao_id "
+        "where " + " and ".join(onde), tuple(args)).fetchall()
+    return [r[0] for r in rows]
 
 
 _WA_NOME_CACHE: dict = {}
@@ -1541,9 +1566,13 @@ def prospeccao_comunicacao_lista(request: Request, canal: str = "", vendedor: st
     with get_pool().connection() as c:
         convs = _conversas_list(c, ctx["conta_id"], ctx["gerencia"], ctx["membro_id"],
                                 canal=canal, vend=vendedor, escopo=escopo)
+        # a contagem é da CAIXA, não da página: com o filtro ligado a lista mostra só
+        # os órfãos, e a faixa continuaria dizendo o mesmo número — o que esconderia
+        # que ainda há outros fora do filtro atual.
+        orfaos = len(_leads_sem_dono(c, ctx["conta_id"], escopo)) if ctx["pode_atribuir"] else 0
     for cv in convs:
         cv["quando"] = _hora_br(cv["quando"])
-    return JSONResponse({"ok": True, "convs": convs,
+    return JSONResponse({"ok": True, "convs": convs, "sem_dono": orfaos,
                          "sincronizando": _wa_qr_sincronizando(ctx["conta_id"])})
 
 
@@ -2081,6 +2110,61 @@ def comunicacao_virar_lead_dados(request: Request, conversa_id: int):
         "rodizio": rodizio_on,
         "duplicado": ({"id": dup[0], "empresa": dup[1]} if dup else None),
     })
+
+
+@router.post("/painel/prospeccao/comunicacao/atribuir-lote")
+def comunicacao_atribuir_lote(request: Request, vendedor_id: str = Form(""),
+                              rodizio: str = Form(""), escopo: str = Form("")):
+    """Dá dono a todos os leads órfãos da caixa de uma vez — pro vendedor escolhido,
+    ou repartindo pela fila do rodízio.
+
+    Atalho, não regra nova: faz em lote o que a troca individual já fazia um por um,
+    com o mesmo guard (`pode_atribuir`) e o mesmo escopo de conta. E não trava nada —
+    o dono continua podendo trocar qualquer um deles a qualquer momento, na lista, no
+    chat ou na ficha."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["pode_atribuir"]:
+        return JSONResponse({"ok": False, "erro": "Só o dono atribui."}, status_code=403)
+    pool = get_pool()
+    conta_id = ctx["conta_id"]
+    escopo = escopo if escopo in ("email", "msg") else "msg"
+    with pool.connection() as c:
+        leads = _leads_sem_dono(c, conta_id, escopo)
+        if not leads:
+            return JSONResponse({"ok": True, "n": 0, "aviso": "Nenhum lead sem responsável."})
+        if rodizio == "1":
+            from finance import distribuicao as _dist
+            fila = _dist.fila_ids(c, conta_id)
+            if not fila:
+                return JSONResponse({"ok": False, "erro":
+                                     "Monte a fila do rodízio primeiro (aba Comunicação)."},
+                                    status_code=400)
+            # reparte em volta, na ordem da fila. Não uso `proximo_vendedor` porque ele
+            # desiste quando a distribuição automática está desligada — e aqui quem
+            # mandou distribuir foi o dono, agora, no clique.
+            destinos = [fila[i % len(fila)] for i in range(len(leads))]
+            ativo = bool(_dist.config(c, conta_id)["ativo"])
+        else:
+            alvo = _vendedor_destino(ctx, vendedor_id, pool, conta_id)
+            if not alvo:
+                return JSONResponse({"ok": False, "erro": "Escolha um vendedor."},
+                                    status_code=400)
+            destinos = [alvo] * len(leads)
+            ativo = True          # não é caso de avisar sobre o rodízio
+        for lead_id, dest in zip(leads, destinos):
+            c.execute("update prospeccao set vendedor_id=%s, atualizado_em=now() "
+                      "where id=%s and conta_id=%s", (dest, lead_id, conta_id))
+            c.execute("update conversas set responsavel_membro_id=%s "
+                      "where conta_id=%s and prospeccao_id=%s", (dest, conta_id, lead_id))
+        c.commit()
+    # o alerta que importa: repartir os de hoje não impede os de amanhã de nascerem
+    # órfãos. Foi exatamente assim que a conta do chamado acumulou 21.
+    aviso = ("" if ativo else
+             "Pronto — mas a distribuição automática está DESLIGADA: os próximos leads "
+             "vão continuar entrando sem responsável.")
+    return JSONResponse({"ok": True, "n": len(leads), "aviso": aviso})
 
 
 @router.post("/painel/prospeccao/comunicacao/virar-lead")
@@ -7660,6 +7744,17 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .cx-dmenu .op:hover{background:var(--neon-fundo);color:var(--neon)}
 .cx-dmenu .op.sem{color:var(--txt-mut);border-top:1px solid var(--borda);margin-top:.2rem}
 .cx-dmenu .op.atual{background:var(--neon-fundo);color:var(--neon)}
+/* faixa dos leads sem dono */
+.cx-orf{display:flex;align-items:center;gap:.55rem;background:var(--ambar-fundo);
+  border:1px solid var(--ambar-borda);border-radius:10px;padding:.55rem .75rem;
+  margin:.2rem 0 .6rem;font-size:.84rem;color:var(--txt-mut);flex-wrap:wrap}
+.cx-orf b{color:var(--ambar);font-weight:600}
+.cx-orf .pt{width:8px;height:8px;border-radius:50%;background:var(--ambar);flex-shrink:0}
+.cx-orf .lk{color:var(--verde-claro);margin-left:auto;text-decoration:none}
+.cx-orf .lk:hover{text-decoration:underline}
+.cx-orf .bts{display:flex;gap:.4rem;margin-left:auto;flex-wrap:wrap;align-items:center}
+.cx-orf .fld{width:auto;padding:.3rem .5rem;font-size:.8rem}
+.cx-orf .pbtn{padding:.35rem .7rem;font-size:.8rem}
 .cx-cn{font-size:.66rem;padding:.05rem .4rem;border-radius:999px;border:1px solid;margin-top:.25rem;display:inline-block}
 .cn-mail{color:var(--azul,#5b9bd5);border-color:#2f4a63;background:#14212e}
 .cn-wpp{color:var(--verde);border-color:var(--neon-borda);background:var(--neon-fundo)}
@@ -7800,6 +7895,8 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </select>
     {% if gerencia %}<select class="fld" name="vendedor" style="width:auto" onchange="this.form.submit()">
       <option value="">Todos os vendedores</option>
+      {# o filtro que faltava: ver de uma vez os leads que estão sem dono #}
+      {% if pode_atribuir %}<option value="sem" {% if filtro_vend=='sem' %}selected{% endif %}>— sem responsável —</option>{% endif %}
       {% for v in vendedores %}<option value="{{ v.id }}" {% if filtro_vend==(v.id|string) %}selected{% endif %}>{{ v.nome }}</option>{% endfor %}
     </select>{% endif %}
     <span class="mut" style="align-self:center;font-size:.8rem">{{ convs|length }} conversa(s)</span>
@@ -7819,6 +7916,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </div>
   </div>
   <style>@keyframes cxsync{from{margin-left:0}to{margin-left:75%}}</style>
+
+  {# Leads sem dono: a faixa conta e leva pro filtro; com o filtro ligado, ela vira
+     as ações em lote. Preenchida pelo JS (cxSemDono) porque o número muda a cada
+     poll e a cada atribuição, sem recarregar a página. #}
+  <div id="cx-sem-dono"></div>
 
   <div class="cx-grid" id="cx-grid">
     <div class="cx-list" id="cx-list">
@@ -8583,6 +8685,58 @@ function cxDonoEscolher(leadId,vendId){
       if(_cxConv)cxOpen(document.getElementById('cxc-'+_cxConv),_cxConv);
     }).catch(function(){alert('Falha de rede.');});
 }
+// A faixa dos leads sem dono. Dois estados: fora do filtro ela CONTA e leva pra lá;
+// dentro do filtro ela AGE. Some quando não há órfão — nada de faixa permanente
+// dizendo "0", que vira ruído que ninguém mais lê.
+var _cxSemDonoN=-1;
+function cxSemDono(n){
+  var box=document.getElementById('cx-sem-dono');if(!box)return;
+  var filtrado=(new URLSearchParams(location.search)).get('vendedor')==='sem';
+  if(n===_cxSemDonoN&&box.getAttribute('data-f')===String(filtrado))return;  // não repinta à toa
+  _cxSemDonoN=n;box.setAttribute('data-f',String(filtrado));
+  if(!n||!_cxPodeAtrib){box.innerHTML='';return;}
+  var plural=n>1?'s':'';
+  if(!filtrado){
+    box.innerHTML='<div class="cx-orf"><span class="pt"></span>'
+      +'<b>'+n+' lead'+plural+' sem responsável</b>'
+      +'<a class="lk" href="'+cxUrlSemDono()+'">ver só eles →</a></div>';
+    return;
+  }
+  var ops=_cxVends.map(function(v){
+    return '<option value="'+v.id+'">'+cxEsc(v.nome)+'</option>';}).join('');
+  box.innerHTML='<div class="cx-orf"><span class="pt"></span>'
+    +'<b>'+n+' lead'+plural+' sem responsável</b>'
+    +'<div class="bts">'
+    +'<select class="fld" id="cx-lote-v"><option value="">atribuir todos a…</option>'+ops+'</select>'
+    +'<button class="pbtn ghost" id="cx-lote-um">Atribuir</button>'
+    +'<button class="pbtn" id="cx-lote-rod">⚡ Distribuir pelo rodízio</button>'
+    +'</div></div>';
+  document.getElementById('cx-lote-um').onclick=function(){
+    var v=document.getElementById('cx-lote-v').value;
+    if(!v){alert('Escolha o vendedor.');return;}
+    cxLote({vendedor_id:v},this);
+  };
+  document.getElementById('cx-lote-rod').onclick=function(){cxLote({rodizio:'1'},this);};
+}
+function cxUrlSemDono(){
+  var q=new URLSearchParams(location.search);q.set('vendedor','sem');
+  return '/painel/prospeccao/comunicacao?'+q.toString();
+}
+function cxLote(campos,bt){
+  var rot=bt.textContent;bt.disabled=true;bt.textContent='Atribuindo…';
+  var fd=new FormData();fd.append('escopo',_cxEscopo||'msg');
+  Object.keys(campos).forEach(function(k){fd.append(k,campos[k]);});
+  fetch('/painel/prospeccao/comunicacao/atribuir-lote',
+        {method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
+    .then(function(r){return r.json();}).then(function(d){
+      bt.disabled=false;bt.textContent=rot;
+      if(!d.ok){alert(d.erro||'Não consegui atribuir.');return;}
+      // o aviso do rodízio desligado é o que impede a conta de acumular órfãos de
+      // novo — vale interromper pra ler.
+      if(d.aviso)alert(d.aviso);
+      _cxSemDonoN=-1;cxPollList();
+    }).catch(function(){bt.disabled=false;bt.textContent=rot;alert('Falha de rede.');});
+}
 function cxPollList(){
   var box=document.getElementById('cx-list');if(!box)return;
   fetch('/painel/prospeccao/comunicacao/lista?'+cxParams()).then(function(r){return r.json();}).then(function(d){
@@ -8593,6 +8747,7 @@ function cxPollList(){
     if(av){av.style.display=d.sincronizando?'block':'none';
       if(d.sincronizando&&tx)tx.textContent='📥 Importando conversas do WhatsApp… '
         +d.convs.length+' até agora. Pode ir usando, elas vão aparecendo sozinhas.';}
+    cxSemDono(d.sem_dono||0);
     var h='';var novo={};
     d.convs.forEach(function(c){novo[c.id]=c;h+=cxListItem(c);});
     h=h||'<div class="cx-empty">Nenhuma conversa ainda.</div>';

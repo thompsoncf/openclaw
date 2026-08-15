@@ -102,6 +102,32 @@ def _so_digitos(s: str) -> str:
     return "".join(ch for ch in (s or "") if ch.isdigit())
 
 
+def _wa_equivalentes(numero: str) -> list[str]:
+    """As formas do MESMO celular brasileiro: com e sem o nono dígito.
+
+    O WhatsApp não é coerente: o mesmo contato aparece ora como 55 86 98392961
+    (12 dígitos, formato antigo), ora como 55 86 998392961 (13). Quem casa por
+    igualdade crua de `contato_ref` acha que são duas pessoas — e a mensagem vai
+    parar na conversa errada, ou em nenhuma.
+
+    Por que não os últimos 8 dígitos, que é o atalho usado pra achar LEAD neste
+    módulo: ali um engano dá em não achar o dono do número; aqui daria em gravar
+    a mensagem na conversa de OUTRA pessoa, porque '98392961' pode ser o final de
+    um celular do 86 e de um do 11. As duas grafias do mesmo número resolvem o
+    caso real sem abrir essa porta.
+
+    Fora do Brasil (ou número curto demais pra ter forma dupla) devolve só ele."""
+    d = _so_digitos(numero)
+    if not d:
+        return []
+    formas = [d]
+    if d.startswith("55") and len(d) == 12 and d[4] in "6789":
+        formas.append(d[:4] + "9" + d[4:])       # 55 DDD 8392961 → 55 DDD 9 8392961
+    elif d.startswith("55") and len(d) == 13 and d[4] == "9":
+        formas.append(d[:4] + d[5:])             # o contrário
+    return formas
+
+
 def _zap_link(numero: str) -> str:
     d = _so_digitos(numero)
     if not d:
@@ -3515,10 +3541,25 @@ async def webhook_wa_qr_historico(request: Request):
 
 def _wa_saida_conversa(c, conta_id, destinatario, corpo, sid):
     """Mensagem que o VENDEDOR mandou DIRETO pelo WhatsApp do celular (fora do
-    Zaq) — o Baileys ecoa de volta como fromMe. Só registra numa conversa que
-    JÁ EXISTE (nunca cria lead/conversa nova — sem contexto pra isso). Dedup
-    por provider_sid: se a mensagem já saiu PELO Zaq (que grava na hora do
-    envio em comunicacao_responder), a inserção aqui vira no-op."""
+    Zaq) — o Baileys ecoa de volta como fromMe. Dedup por provider_sid: se a
+    mensagem já saiu PELO Zaq (que grava na hora do envio em
+    comunicacao_responder), a inserção aqui vira no-op.
+
+    NUNCA cria LEAD: quem o vendedor procura pelo celular não vira lead sozinho —
+    o funil é dele pra encher, não do WhatsApp. Mas CRIA CONVERSA (órfã, sem
+    lead), e é aí que estava o buraco: antes, eco sem conversa existente era
+    descartado em silêncio, e quem escreve PRIMEIRO pelo celular é o caso normal
+    do vendedor. Visto em produção: às 15:56 o vendedor mandou um "oi" pra um
+    número novo e sumiu; às 15:57 a pessoa respondeu, a resposta criou o lead e a
+    conversa — e a thread nasceu começando pela RESPOSTA, sem a pergunta. É o
+    mesmo tratamento que o histórico importado já dá (_wa_historico_conversa):
+    a conversa aparece na caixa, e o vendedor decide se vira lead.
+
+    A conversa é procurada pelas duas grafias do número (com e sem o nono
+    dígito — ver _wa_equivalentes), e sem exigir que ela esteja órfã: conversa já
+    ligada a um lead casava só pelo `prospeccao_id`, então bastava o número estar
+    numa ficha DIFERENTE (dois leads com o mesmo telefone) pra ela não ser
+    encontrada e a mensagem sumir."""
     destinatario = _so_digitos(destinatario)
     alvo8 = destinatario[-8:] if len(destinatario) >= 8 else destinatario
     lead = c.execute(
@@ -3527,13 +3568,24 @@ def _wa_saida_conversa(c, conta_id, destinatario, corpo, sid):
              order by atualizado_em desc limit 1""", (conta_id, alvo8)).fetchone()
     lead_id = lead[0] if lead else None
     conv = c.execute(
-        """select id from conversas where conta_id=%s and canal='whatsapp'
-            and (prospeccao_id=%s or (prospeccao_id is null and contato_ref=%s))
-            order by ultima_msg_em desc limit 1""",
-        (conta_id, lead_id, destinatario)).fetchone()
-    if not conv:
-        return None
-    conv_id = conv[0]
+        r"""select id from conversas
+             where conta_id=%s and canal='whatsapp'
+               and (prospeccao_id=%s
+                    or regexp_replace(coalesce(contato_ref,''), '\D', '', 'g') = any(%s))
+             order by (prospeccao_id is not null) desc, ultima_msg_em desc limit 1""",
+        (conta_id, lead_id, _wa_equivalentes(destinatario) or [destinatario])).fetchone()
+    if conv:
+        conv_id = conv[0]
+    else:
+        # nasce já com o nome da agenda do celular, igual aos outros caminhos — sem
+        # isso a conversa que o vendedor abriu aparece na caixa como número cru
+        conv_id = c.execute(
+            """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status,
+                 agente_ativo, ultima_msg_em, contato_nome)
+               values (%s,%s,'whatsapp',%s,'aberta',false,now(),
+                       (select nome from wa_contatos where conta_id=%s and numero8=%s))
+               returning id""",
+            (conta_id, lead_id, destinatario, conta_id, alvo8)).fetchone()[0]
     c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
                  values (%s,'whatsapp','out','humano',%s,%s)
                  on conflict (provider_sid) where provider_sid is not null do nothing""",
@@ -3545,8 +3597,9 @@ def _wa_saida_conversa(c, conta_id, destinatario, corpo, sid):
 @router.post("/webhooks/wa-qr/saida")
 async def webhook_wa_qr_saida(request: Request):
     """Eco de mensagem que o vendedor mandou DIRETO pelo WhatsApp do celular
-    (sem passar pelo Zaq) — grava na conversa já existente pra não ficar cego
-    do que já foi respondido. Nunca cria lead ou conversa nova."""
+    (sem passar pelo Zaq) — pra não ficar cego do que já foi respondido. Abre a
+    conversa quando ela ainda não existe (o vendedor escrevendo primeiro é o caso
+    normal); lead, nunca — ver _wa_saida_conversa."""
     import logging
     log = logging.getLogger("prospeccao.wa_qr")
     if not _qr_segredo_ok(request):
@@ -3575,11 +3628,11 @@ async def webhook_wa_qr_saida(request: Request):
     if conv_id:
         log.info("webhook_wa_qr_saida: conta_id=%s conv_id=%s registrado ✓", conta_id, conv_id)
     else:
-        # sem conversa existente pra esse número — descarta de propósito (não cria
-        # lead sozinho), mas registra: sem isso não dava pra distinguir "não tinha
-        # conversa mesmo" de "chegou com o número errado e nunca casou com nada".
-        log.info("webhook_wa_qr_saida: conta_id=%s sem conversa pro número %s… — descartado",
-                 conta_id, destinatario[:6])
+        # não deve mais acontecer (a conversa é criada quando falta), então isto aqui
+        # é sinal de defeito de verdade — número impossível de normalizar, insert que
+        # não voltou id. Fica gravado pra não sumir em silêncio como sumia antes.
+        log.warning("webhook_wa_qr_saida: conta_id=%s não consegui registrar o eco do número %s…",
+                    conta_id, destinatario[:6])
     return Response("ok", media_type="text/plain")
 
 

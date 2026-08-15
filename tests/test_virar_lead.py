@@ -365,6 +365,96 @@ def test_o_modal_avisa_quando_o_rodizio_esta_desligado(pool, monkeypatch):
     assert json.loads(pp.comunicacao_virar_lead_dados(req, conversa_id=conv).body)["rodizio"] is True
 
 
+# ------------------------------------------------------------------ trocar o dono no chat
+# O dono atendia pelo inbox e não sabia de quem era a conversa: o responsável só
+# aparecia (e só mudava) na ficha do lead. A mesma rota /atribuir agora serve os dois
+# — form + redirect na ficha, JSON quando vem por fetch do chat.
+
+def _req_ajax(monkeypatch, pool, **over):
+    req = _logado(monkeypatch, pool, **over)
+    req.headers = {"x-requested-with": "fetch"}
+    return req
+
+
+def _lead_com_conversa(c, *, vendedor=None):
+    lead = c.execute("insert into prospeccao (conta_id, empresa, vendedor_id) "
+                     "values (%s,'Mercado Avenida',%s) returning id",
+                     (CONTA, vendedor)).fetchone()[0]
+    conv = c.execute("""insert into conversas (conta_id, prospeccao_id, canal, contato_ref,
+                          responsavel_membro_id) values (%s,%s,'whatsapp',%s,%s) returning id""",
+                     (CONTA, lead, NUM, vendedor)).fetchone()[0]
+    c.execute("insert into membros (id, conta_id, nome, papel) values (9,%s,'Rafael','vendedor') "
+              "on conflict do nothing", (CONTA,))
+    return lead, conv
+
+
+def test_dono_troca_o_responsavel_pelo_chat(pool, monkeypatch):
+    import json
+    with pool.connection() as c:
+        lead, _conv = _lead_com_conversa(c)
+        c.commit()
+    req = _req_ajax(monkeypatch, pool)
+    r = pp.prospeccao_atribuir(req, alvo_id=lead, vendedor_id="9")
+    d = json.loads(r.body)
+    assert d["ok"] is True and d["vendedor_id"] == 9
+    assert d["vendedor"] == "Rafael"             # a tela precisa do nome, não do id
+    with pool.connection() as c:
+        assert c.execute("select vendedor_id from prospeccao where id=%s",
+                         (lead,)).fetchone()[0] == 9
+
+
+def test_trocar_o_dono_leva_a_conversa_junto(pool, monkeypatch):
+    """Sem isso o inbox seguiria mostrando o dono ANTIGO — a conversa guarda o próprio
+    responsável, e é ele que a caixa de entrada lê pra filtrar por vendedor."""
+    with pool.connection() as c:
+        lead, conv = _lead_com_conversa(c)
+        c.commit()
+    req = _req_ajax(monkeypatch, pool)
+    pp.prospeccao_atribuir(req, alvo_id=lead, vendedor_id="9")
+    with pool.connection() as c:
+        assert c.execute("select responsavel_membro_id from conversas where id=%s",
+                         (conv,)).fetchone()[0] == 9
+
+
+def test_tirar_o_responsavel_limpa_os_dois(pool, monkeypatch):
+    with pool.connection() as c:
+        lead, conv = _lead_com_conversa(c, vendedor=9)
+        c.commit()
+    req = _req_ajax(monkeypatch, pool)
+    pp.prospeccao_atribuir(req, alvo_id=lead, vendedor_id="")
+    with pool.connection() as c:
+        assert c.execute("select vendedor_id from prospeccao where id=%s",
+                         (lead,)).fetchone()[0] is None
+        assert c.execute("select responsavel_membro_id from conversas where id=%s",
+                         (conv,)).fetchone()[0] is None
+
+
+def test_quem_nao_e_dono_nao_troca_o_responsavel(pool, monkeypatch):
+    """Gestor e vendedor veem o dono, mas não mexem — a regra é a mesma da ficha."""
+    import json
+    with pool.connection() as c:
+        lead, _conv = _lead_com_conversa(c, vendedor=9)
+        c.commit()
+    req = _req_ajax(monkeypatch, pool, pode_atribuir=False, membro=42)
+    r = pp.prospeccao_atribuir(req, alvo_id=lead, vendedor_id="42")
+    assert r.status_code == 403
+    assert json.loads(r.body)["ok"] is False
+    with pool.connection() as c:
+        assert c.execute("select vendedor_id from prospeccao where id=%s",
+                         (lead,)).fetchone()[0] == 9      # intacto
+
+
+def test_a_ficha_continua_redirecionando(pool, monkeypatch):
+    """A rota serve os dois: sem o cabeçalho de fetch, segue o comportamento antigo."""
+    with pool.connection() as c:
+        lead, _conv = _lead_com_conversa(c)
+        c.commit()
+    req = _logado(monkeypatch, pool)          # sem x-requested-with
+    r = pp.prospeccao_atribuir(req, alvo_id=lead, vendedor_id="9")
+    assert r.status_code == 303
+    assert r.headers["location"] == f"/painel/prospeccao/{lead}"
+
+
 # ------------------------------------------------------------------ formatação do número
 
 @pytest.mark.parametrize("cru,esperado", [

@@ -1597,10 +1597,20 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
     lead = {"id": cv[2], "empresa": cv[3] or cv[13] or "—", "canal": cv[0], "canal_rot": CANAL_ROT.get(cv[0], cv[0]),
             "segmento": cv[4], "cidade": cv[5], "uf": cv[6],
             "whatsapp": destino, "email": cv[9], "vendedor": cv[11],
+            # o id vai junto do nome pra caixa poder pré-selecionar quem já é dono
+            "vendedor_id": cv[12],
             "status_rot": STATUS_ROT.get(cv[10], cv[10] or "")}
+    # Trocar o responsável direto do chat: antes só dava na ficha do lead, e o dono
+    # que atende pelo inbox tinha que sair da conversa pra descobrir de quem era.
+    # A lista só vai pra quem pode atribuir, e só quando a conversa já é lead.
+    vends = ([{"id": v["id"], "nome": v["nome"]}
+              for v in _vendedores(pool, ctx["conta_id"])]
+             if (ctx["pode_atribuir"] and cv[2]) else [])
     return JSONResponse({"ok": True, "lead": lead, "msgs": msgs,
                          "conversa_id": conversa_id, "pode_responder": pode_wa,
                          "agente_ativo": bool(cv[14]),
+                         "pode_atribuir": bool(ctx["pode_atribuir"] and cv[2]),
+                         "vendedores": vends,
                          "truncado": len(msgs) >= 100})
 
 
@@ -4933,16 +4943,29 @@ def prospeccao_temperatura(request: Request, alvo_id: int, temperatura: str = Fo
 
 @router.post("/painel/prospeccao/{alvo_id}/atribuir")
 def prospeccao_atribuir(request: Request, alvo_id: int, vendedor_id: str = Form("")):
+    """Atende a ficha (form + redirect) e o chat da Comunicação (fetch + JSON). Uma
+    rota só: o escopo e a regra de quem pode atribuir são os mesmos nos dois."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
+    ajax = _eh_ajax(request)
     if not ctx["pode_atribuir"]:
+        if ajax:
+            return JSONResponse({"ok": False, "erro": "Só o dono atribui."}, status_code=403)
         return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
     vend = _vendedor_destino(ctx, vendedor_id, get_pool(), ctx["conta_id"])
     with get_pool().connection() as c:
         c.execute("update prospeccao set vendedor_id=%s, atualizado_em=now() where id=%s and conta_id=%s",
                   (vend, alvo_id, ctx["conta_id"]))
+        # a conversa acompanha o lead: sem isso o inbox segue dizendo "sem
+        # responsável" (ou o nome antigo) pra quem acabou de ser trocado.
+        c.execute("""update conversas set responsavel_membro_id=%s
+                      where conta_id=%s and prospeccao_id=%s""",
+                  (vend, ctx["conta_id"], alvo_id))
         c.commit()
+    if ajax:
+        return JSONResponse({"ok": True, "vendedor_id": vend,
+                             "vendedor": _nome_vendedor(get_pool(), ctx["conta_id"], vend) or ""})
     request.session["prosp_aviso"] = "Alvo atribuído." if vend else "Alvo sem responsável."
     return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
 
@@ -8300,13 +8323,30 @@ function cxOpen(el,id){
       ?'<button class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem;border-color:#4a3163;color:#c9a3e0" onclick="cxAgente('+d.conversa_id+',0)" title="Assumir você (desliga o agente)">🙋 Assumir</button>'
       :'<button class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem" onclick="cxAgente('+d.conversa_id+',1)" title="Devolver ao agente">🤖 Ativar agente</button>');
     th.innerHTML=''
-      +'<div class="cx-th"><div><b>'+cxEsc(L.empresa)+'</b><small>'+cxEsc(L.canal_rot||'')+(L.cidade?(' · '+cxEsc(L.cidade)+(L.uf?'/'+cxEsc(L.uf):'')):'')+(L.status_rot?(' · '+cxEsc(L.status_rot)):'')+(d.agente_ativo?' · <span style=\\'color:#c9a3e0\\'>🤖 no automático</span>':'')+'</small></div>'
+      // o dono do lead no cabeçalho: quem atende pelo inbox precisa saber de quem é
+      // a conversa sem abrir o painel do lado nem a ficha
+      +'<div class="cx-th"><div><b>'+cxEsc(L.empresa)+'</b><small>'+cxEsc(L.canal_rot||'')+(L.cidade?(' · '+cxEsc(L.cidade)+(L.uf?'/'+cxEsc(L.uf):'')):'')+(L.status_rot?(' · '+cxEsc(L.status_rot)):'')+(L.id?(L.vendedor?(' · 👤 '+cxEsc(L.vendedor)):' · <span style=\\'color:#e0b45f\\'>👤 sem responsável</span>'):'')+(d.agente_ativo?' · <span style=\\'color:#c9a3e0\\'>🤖 no automático</span>':'')+'</small></div>'
       +'<span style="flex:1"></span>'+agBtn+(L.id?(' <a class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem" href="/painel/prospeccao/'+L.id+'">Abrir ficha</a>'):(' <button class="pbtn" style="padding:.35rem .7rem;font-size:.78rem" onclick="cxVirarLead('+d.conversa_id+')" title="Criar um lead a partir deste contato">➕ Levar para o lead</button>'))+'</div>'
       +'<div class="cx-msgs" id="cx-msgs">'+cxMsgsHtml(d)+'</div>'+rodape;
     cxScroll(true);
     var kv=function(k,v){return v?('<div class="cx-kv"><span>'+k+'</span><b>'+cxEsc(v)+'</b></div>'):'';};
+    // Responsável: quem pode atribuir troca aqui mesmo; quem não pode continua só
+    // lendo. Sem dono, mostra "— sem responsável —" em vez de sumir a linha (era o
+    // kv() acima: valor vazio não renderizava, e o lead órfão parecia não ter campo).
+    var resp;
+    if(d.pode_atribuir){
+      var ops='<option value="">— sem responsável —</option>';
+      (d.vendedores||[]).forEach(function(v){
+        ops+='<option value="'+v.id+'"'+(v.id===L.vendedor_id?' selected':'')+'>'+cxEsc(v.nome)+'</option>';});
+      resp='<div class="cx-kv" style="align-items:center"><span>Responsável</span>'
+          +'<select class="fld" id="cx-resp" style="width:auto;padding:.25rem .4rem;font-size:.8rem"'
+          +' data-antes="'+(L.vendedor_id||'')+'"'
+          +' onchange="cxAtribuir('+L.id+',this)">'+ops+'</select></div>';
+    }else{
+      resp=kv('Responsável',L.vendedor||'— sem responsável —');
+    }
     cx.innerHTML=''
-      +'<div class="cx-sec"><h4>Lead</h4>'+kv('Empresa',L.empresa)+kv('Segmento',L.segmento)+kv('Cidade',(L.cidade||'')+(L.uf?'/'+L.uf:''))+kv('WhatsApp',L.whatsapp)+kv('E-mail',L.email)+kv('Responsável',L.vendedor)+kv('Status',L.status_rot)+'</div>'
+      +'<div class="cx-sec"><h4>Lead</h4>'+kv('Empresa',L.empresa)+kv('Segmento',L.segmento)+kv('Cidade',(L.cidade||'')+(L.uf?'/'+L.uf:''))+kv('WhatsApp',L.whatsapp)+kv('E-mail',L.email)+resp+kv('Status',L.status_rot)+'</div>'
       +(L.id?('<div class="cx-sec"><a class="pbtn" style="width:100%;text-align:center" href="/painel/prospeccao/'+L.id+'">Abrir ficha do lead</a></div>'):('<div class="cx-sec"><button class="pbtn" style="width:100%" onclick="cxVirarLead('+d.conversa_id+')">➕ Levar para o lead</button><div class="mut" style="font-size:.74rem;margin-top:.4rem">Este contato ainda não é um lead. Crie o lead quando fizer sentido.</div></div>'));
   }).catch(function(){th.innerHTML='<div class="cx-empty">Falha de rede.</div>';});
 }
@@ -8367,6 +8407,23 @@ function cxAgente(convId,on){
   var fd=new FormData();fd.append('conversa_id',convId);fd.append('ativar',on?'1':'0');
   fetch('/painel/prospeccao/comunicacao/agente-conversa',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
     .then(function(r){return r.json();}).then(function(d){if(!d.ok){alert(d.erro||'Não consegui.');return;}cxOpen(document.getElementById('cxc-'+convId),convId);}).catch(function(){alert('Falha de rede.');});
+}
+// Trocar o responsável sem sair da conversa. Mesma rota da ficha do lead
+// (/atribuir), que responde JSON quando vem por fetch — o guard de quem pode
+// atribuir é o mesmo nos dois lugares.
+function cxAtribuir(leadId,sel){
+  if(!leadId)return;
+  var antes=sel.getAttribute('data-antes')||'';
+  sel.disabled=true;
+  var fd=new FormData();fd.append('vendedor_id',sel.value);
+  fetch('/painel/prospeccao/'+leadId+'/atribuir',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
+    .then(function(r){return r.json();}).then(function(d){
+      sel.disabled=false;
+      if(!d.ok){sel.value=antes;alert(d.erro||'Não consegui trocar o responsável.');return;}
+      sel.setAttribute('data-antes',sel.value);
+      // recarrega a conversa pro cabeçalho e a lista mostrarem o dono novo
+      if(_cxConv)cxOpen(document.getElementById('cxc-'+_cxConv),_cxConv);
+    }).catch(function(){sel.disabled=false;sel.value=antes;alert('Falha de rede.');});
 }
 // "Levar para o lead" agora CONFIRMA antes de criar. Sem isso o clique gravava na
 // hora com o número cru no lugar do nome — e o funil enchia de lead chamado "5586…"

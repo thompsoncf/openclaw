@@ -195,9 +195,13 @@ def _carregar(token: str, pool=None):
                       o.evento_agenda_id,
                       c.razao_social, c.documento, c.endereco, c.cep, c.bairro,
                       c.cidade, c.uf, c.telefone, c.email_empresa,
-                      (select m.nome from membros m
-                        where m.id = case when o.criado_por ~ '^[0-9]+$'
-                                          then o.criado_por::bigint end)
+                      -- vendedor: criado_por guarda o id do membro OU 'dono'
+                      -- (quem abriu a conta). No segundo caso quem assina é a
+                      -- própria conta — era isso que sumia da folha.
+                      coalesce((select m.nome from membros m
+                                 where m.id = case when o.criado_por ~ '^[0-9]+$'
+                                                   then o.criado_por::bigint end),
+                               case when o.criado_por = 'dono' then c.nome end)
                  from orcamentos o join contas c on c.id = o.conta_id
                 where o.token=%s""", (token,)).fetchone()
     if not r:
@@ -222,7 +226,13 @@ def _carregar(token: str, pool=None):
         "escopo": escopo or "", "itens": itens,
         "setup": _reais((setup_c or 0) / 100), "mensal": _reais((mensal_c or 0) / 100),
         "ano1": _reais((ano1_c or 0) / 100),
-        "total": _brl(setup_c or 0),               # evento: o total é o valor único
+        # evento: `setup_centavos` é a soma dos itens e `primeiro_ano_centavos`
+        # é o total COM desconto (é o que a tela calcula e o que as parcelas
+        # somam). A folha mostrava o bruto e o desconto sumia.
+        "subtotal_itens": _brl(setup_c or 0),
+        "total": _brl(ano1_c if (ano1_c or 0) > 0 else (setup_c or 0)),
+        "desconto_pct": int((evento or {}).get("desconto") or 0),
+        "desconto_valor": _brl(max(0, (setup_c or 0) - (ano1_c or 0))),
         "status": status or "rascunho",
         "criado": criado, "validade": validade,
         "aprovada_por": aprov_por or "", "aprovada_em": aprov_em,
@@ -237,13 +247,17 @@ def _carregar(token: str, pool=None):
         "evento": evento, "dia_evento": dia_evento,
         "parcelas": _lista(parcelas), "numero": numero,
         "evento_agenda_id": agenda_id,
-        "cliente": {"doc": cli_doc or "", "endereco": cli_end or "", "cep": cli_cep or "",
-                    "cidade": cli_cidade or "", "uf": cli_uf or "",
-                    "email": cli_email or "", "telefone": cli_tel or ""},
+        # documento, CEP e telefone saem com máscara e o endereço em CAIXA ALTA
+        # é capitalizado: o banco guarda o que a empresa digitou, o cliente lê
+        # formatado.
+        "cliente": {"doc": _doc(cli_doc), "endereco": _titulo(cli_end), "cep": _cep(cli_cep),
+                    "cidade": _titulo(cli_cidade), "uf": (cli_uf or "").upper(),
+                    "email": cli_email or "", "telefone": _fone(cli_tel)},
         "vendedor_nome": vendedor_nome or "",
-        "emitente": {"razao": em_razao or "", "doc": em_doc or "", "endereco": em_end or "",
-                     "cep": em_cep or "", "bairro": em_bairro or "", "cidade": em_cidade or "",
-                     "uf": em_uf or "", "telefone": em_tel or "", "email": em_email or ""},
+        "emitente": {"razao": em_razao or "", "doc": _doc(em_doc), "endereco": _titulo(em_end),
+                     "cep": _cep(em_cep), "bairro": _titulo(em_bairro),
+                     "cidade": _titulo(em_cidade), "uf": (em_uf or "").upper(),
+                     "telefone": _fone(em_tel), "email": em_email or ""},
         "doc_num": ("Nº %d" % numero) if numero else
                    "PR-%s-%03d" % (criado.strftime("%Y%m"), (oid or 0) % 1000),
     }
@@ -357,7 +371,7 @@ _PROPOSTA_TPL = r"""{% if not prop %}
 {% else %}
 <!doctype html><html lang=pt-br><head><meta charset=utf-8>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% if prop.modo == 'evento' %}Orçamento {{ prop.doc_num }} · {{ prop.vendedor }}{% else %}Proposta · {{ prop.vendedor }}{% endif %}</title>
+<title>{% if prop.modo == 'evento' %}Orçamento {{ prop.doc_num }} · {{ prop.vendedor }} · {{ prop.empresa }}{% else %}Proposta · {{ prop.vendedor }}{% endif %}</title>
 {% raw %}<style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#14213D;background:#EEE9DD;padding:18px}
@@ -426,6 +440,7 @@ table.itens td.n{color:#14213D}
   padding:6px 12px;border-bottom:1px solid #F5F1E8}
 .sub-cat:last-child{border-bottom:0}
 .sub-cat b{font-family:var(--mono);color:#14213D}
+.sub-cat.desconto,.sub-cat.desconto b{color:#0b7a56}
 table.pag th{background:#FBFAF7;color:#8A8475;border-bottom:1px solid #ECE7DC}
 td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:top}
 .cond{background:#FBFAF7;border:1px solid #ECE7DC;border-radius:9px;padding:12px 14px;font-size:12px;color:#5A6678;line-height:1.7;white-space:pre-line}
@@ -488,13 +503,11 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
         <div class="evb"><div class="l">Início</div><div class="v">{{ prop.ev.inicio or '—' }}</div></div>
         <div class="evb"><div class="l">Encerramento</div><div class="v">{{ prop.ev.fim or '—' }}</div></div>
       </div>
-      {% if prop.ev.tipo %}
+      {# o cliente lê o que ELE contratou, não o cardápio de opções da empresa #}
+      {% if prop.ev.tipo or prop.ev.contratos %}
       <div class="pills">
-        {% for t in prop.tipos_evento %}<span class="pill{% if t == prop.ev.tipo %} on{% endif %}">{{ t }}</span>{% endfor %}
-      </div>{% endif %}
-      {% if prop.ev.contratos %}
-      <div class="pills">
-        {% for ct in prop.contratos_todos %}<span class="pill{% if ct in prop.ev.contratos %} on2{% endif %}">{{ ct }}</span>{% endfor %}
+        {% if prop.ev.tipo %}<span class="pill on">{{ prop.ev.tipo }}</span>{% endif %}
+        {% for ct in prop.ev.contratos %}<span class="pill on2">{{ ct }}</span>{% endfor %}
       </div>{% endif %}
       {% if prop.ev.local %}<div class="local">📍 {{ prop.ev.local }}</div>{% endif %}
       {% endif %}
@@ -522,9 +535,13 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
           <td class="q">{{ l.qtd }}</td><td class="q">{{ l.unit }}</td><td class="q">{{ l.subtotal }}</td></tr>{% endfor %}
       </table>
       {% endif %}
-      {% if prop.subtotais %}
+      {% if prop.subtotais or prop.desconto_pct %}
       <div class="subs">
         {% for st in prop.subtotais %}<div class="sub-cat"><span>{{ st.nome }}</span><b>{{ st.valor }}</b></div>{% endfor %}
+        {% if prop.desconto_pct %}
+        <div class="sub-cat"><span>Subtotal dos itens</span><b>{{ prop.subtotal_itens }}</b></div>
+        <div class="sub-cat desconto"><span>Desconto ({{ prop.desconto_pct }}%)</span><b>− {{ prop.desconto_valor }}</b></div>
+        {% endif %}
       </div>{% endif %}
       <div class="fin"><div class="l">Total do evento</div><div class="v">{{ prop.total }}</div></div>
       {% if prop.parcelas_fmt %}

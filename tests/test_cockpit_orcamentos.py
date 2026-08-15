@@ -33,6 +33,7 @@ create table orcamentos (id bigserial primary key, conta_id bigint, cliente text
   empresa text, cnpj text, segmento text, whatsapp text, telefone text, email text,
   cidade text, uf text, itens jsonb, token text,
   setup_centavos bigint default 0, mensal_centavos bigint default 0,
+  primeiro_ano_centavos bigint default 0,
   status text default 'rascunho', canal text, criado_por text,
   aprovada_em timestamptz, aprovada_por text, aprovada_doc text,
   modo text default 'recorrente', evento jsonb, parcelas jsonb, numero int,

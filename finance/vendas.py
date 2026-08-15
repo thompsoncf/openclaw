@@ -119,7 +119,7 @@ def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
             """update orcamentos set status='fechado', atualizado_em=now()
                 where id=%s and conta_id=%s and status <> 'fechado'
              returning empresa, cliente, setup_centavos, mensal_centavos,
-                       coalesce(modo,'recorrente'), parcelas""",
+                       coalesce(modo,'recorrente'), parcelas, primeiro_ano_centavos""",
             (orcamento_id, conta_id),
         ).fetchone()
         if not orc:
@@ -131,7 +131,7 @@ def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
                 return {"ok": False, "erro": "Orçamento não encontrado."}
             return {"ok": False, "erro": f"Orçamento já está '{estado[0]}'."}
 
-        empresa, cliente, setup_cent, mensal_cent, modo, parcelas_raw = orc
+        empresa, cliente, setup_cent, mensal_cent, modo, parcelas_raw, total_cent = orc
         contraparte = (empresa or cliente or "").strip()
         setup_cent = int(setup_cent or 0)
         mensal_cent = int(mensal_cent or 0)
@@ -151,11 +151,13 @@ def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
                      p["valor_centavos"], _venc(p["venc"], hoje + timedelta(days=dias_setup)),
                      CAT_SERVICOS, False, criado_por),
                 ).fetchone()[0])
-            if not ids and setup_cent > 0:
-                # sem plano de pagamento: um título só, com o total do evento.
+            # sem plano de pagamento: um título só, com o total do evento — o
+            # COM desconto (primeiro_ano_centavos), não a soma bruta dos itens.
+            total_evento = int(total_cent or 0) or setup_cent
+            if not ids and total_evento > 0:
                 ids.append(c.execute(
                     _SQL_TITULO,
-                    (conta_id, base, contraparte, setup_cent,
+                    (conta_id, base, contraparte, total_evento,
                      hoje + timedelta(days=dias_setup), CAT_SERVICOS, False, criado_por),
                 ).fetchone()[0])
             c.commit()

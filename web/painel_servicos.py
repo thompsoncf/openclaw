@@ -141,6 +141,39 @@ def _ator(request: Request):
     return request.session.get("membro_id"), request.session.get("papel", "dono")
 
 
+def _espelhar_cliente(pool, conta_id: int, dados) -> int | None:
+    """Salva o cliente do orçamento na base de Clientes da empresa.
+
+    O vendedor puxa o lead, gera o orçamento e o cliente fica só dentro do
+    orçamento (texto solto) — pra corrigir um telefone errado não tinha onde ir.
+    Aqui ele passa a existir na aba Clientes desde o momento em que o orçamento
+    é salvo. `clientes.criar_cliente` resolve a identidade (CPF/CNPJ fundem,
+    celular só sugere) e reusa a relação, então salvar o mesmo orçamento dez
+    vezes não cria dez clientes.
+
+    Devolve o cliente_id, ou None quando não deu (sem nome, documento inválido).
+    """
+    from finance import clientes as cli
+    nome = (dados.empresa or dados.cliente or "").strip()
+    if not nome:
+        return None
+    doc = "".join(ch for ch in (dados.cnpj or "") if ch.isdigit())
+    try:
+        return cli.criar_cliente(
+            pool, conta_id, nome,
+            telefone=(dados.whatsapp or dados.telefone or "").strip() or None,
+            email=(dados.email or "").strip() or None,
+            cpf=doc if len(doc) == 11 else None,
+            cnpj=doc if len(doc) == 14 else None)
+    except ValueError:
+        # documento com dígito verificador inválido: o orçamento vale do mesmo
+        # jeito, o cliente entra sem documento.
+        return cli.criar_cliente(
+            pool, conta_id, nome,
+            telefone=(dados.whatsapp or dados.telefone or "").strip() or None,
+            email=(dados.email or "").strip() or None)
+
+
 def _com_retry_numero(c, executar, tentativas: int = 3):
     """Roda um insert/update que calcula `numero = max+1` da conta.
 
@@ -231,6 +264,18 @@ def painel_servicos_catalogo_salvar(request: Request, dados: ServicoIn):
 
 class ServicoDelIn(BaseModel):
     id: int
+
+
+@router.get("/painel/servicos/catalogo/sugerir-fotos")
+def painel_servicos_sugerir_fotos(request: Request, nome: str = ""):
+    """Fotos sugeridas pro serviço, pelo nome (Unsplash — mesma integração da
+    foto de produto). Sem UNSPLASH_ACCESS_KEY volta lista vazia e a tela
+    continua oferecendo upload e link."""
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"opcoes": []}, status_code=403)
+    from finance import galeria_fotos
+    return JSONResponse({"opcoes": galeria_fotos.opcoes_para_servico(nome, n=4)})
 
 
 @router.post("/painel/servicos/catalogo/foto")
@@ -403,6 +448,7 @@ class EventoIn(BaseModel):
     tipo: str = ""
     contratos: list[str] = []
     local: str = ""
+    desconto: int = 0         # % aplicado ao total (o que a tela já calculava)
 
 
 class ParcelaIn(BaseModel):
@@ -530,7 +576,15 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
         c.commit()
     if oid is None:
         return JSONResponse({"erro": "proposta não encontrada ou já fechada"}, status_code=400)
-    return JSONResponse({"ok": True, "id": oid, "token": tok})
+    # o cliente do orçamento entra na base de Clientes. Falhar aqui não pode
+    # derrubar o orçamento, que é o que o vendedor está tentando salvar.
+    cliente_id = None
+    if modo == "evento":
+        try:
+            cliente_id = _espelhar_cliente(get_pool(), conta[0], dados)
+        except Exception:  # noqa: BLE001
+            cliente_id = None
+    return JSONResponse({"ok": True, "id": oid, "token": tok, "cliente_id": cliente_id})
 
 
 @router.get("/painel/servicos/lista")
@@ -710,6 +764,11 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .pg-row .oc-valor{text-align:right}
 @media(max-width:640px){.pg-row{grid-template-columns:1fr 1fr; gap:.4rem}.pg-row .pg-obs{grid-column:1/-1}}
 .pg-aviso{color:#e6b877}
+.svc-sug{display:flex; gap:.35rem; flex-wrap:wrap; min-height:0}
+.svc-sug .op{width:38px;height:38px;border-radius:7px;background-position:center;background-size:cover;
+  cursor:pointer;border:2px solid var(--borda)}
+.svc-sug .op.on{border-color:var(--verde)}
+.svc-sug .msg{font-size:.72rem;color:var(--txt-mut)}
 .svc-thumb{width:46px;height:46px;border-radius:8px;flex:0 0 46px;border:1px solid var(--borda);
   background:var(--bg) center/cover no-repeat;display:flex;align-items:center;justify-content:center;color:var(--txt-mut)}
 .svc-thumb.tem span{display:none}
@@ -923,6 +982,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
                 <label class="oc-pill" style="cursor:pointer; text-align:center">📷 Subir foto
                   <input id="svc-foto-file" type="file" accept="image/*" style="display:none"></label>
                 <input id="svc-foto" class="oc-inp" placeholder="ou cole o link https://…" style="font-size:.8rem; padding:.35rem .5rem">
+                <div id="svc-foto-sug" class="svc-sug"></div>
               </div>
             </div>
           </div>
@@ -1201,13 +1261,15 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
             fim:document.getElementById('ev-fim').value||'',
             tipo:tipo?tipo.textContent.trim():'',
             contratos:cts,
-            local:document.getElementById('ev-local').value||''};
+            local:document.getElementById('ev-local').value||'',
+            desconto:Math.max(0,Math.min(100,num(document.getElementById('oc-desconto'))))};
   }
   function aplicarEvento(ev){
     if(!SERVICO_AVULSO)return;
     ev=ev||{};
     setv('ev-data',ev.data); setv('ev-conv',ev.convidados?String(ev.convidados):'');
     setv('ev-ini',ev.inicio); setv('ev-fim',ev.fim); setv('ev-local',ev.local);
+    if(ev.desconto!=null) setv('oc-desconto',String(ev.desconto));
     document.querySelectorAll('#ev-tipos .ev-tipo').forEach(function(b){
       b.classList.toggle('on',b.textContent.trim()===(ev.tipo||''));
     });
@@ -1515,6 +1577,40 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   var svcFotoLink=document.getElementById('svc-foto');
   if(svcFotoLink)svcFotoLink.addEventListener('input',function(){svcFotoPreview(this.value.trim());});
 
+  // sugestões de foto pelo NOME do serviço (Unsplash, igual ao produto)
+  var svcSugTimer=null;
+  function svcSugerirFotos(nome){
+    var box=document.getElementById('svc-foto-sug'); if(!box)return;
+    nome=(nome||'').trim();
+    if(nome.length<3){box.innerHTML=''; return;}
+    box.innerHTML='<span class="msg">buscando fotos…</span>';
+    fetch('/painel/servicos/catalogo/sugerir-fotos?nome='+encodeURIComponent(nome))
+      .then(function(r){return r.json();})
+      .then(function(d){
+        var ops=(d&&d.opcoes)||[];
+        if(!ops.length){box.innerHTML='<span class="msg">sem sugestões — suba a foto ou cole um link</span>'; return;}
+        box.innerHTML='';
+        ops.forEach(function(url){
+          var t=document.createElement('div');
+          t.className='op'; t.style.backgroundImage="url('"+url+"')"; t.title='Usar esta foto';
+          t.addEventListener('click',function(){
+            document.getElementById('svc-foto').value=url;
+            svcFotoPreview(url);
+            box.querySelectorAll('.op').forEach(function(x){x.classList.remove('on');});
+            t.classList.add('on');
+          });
+          box.appendChild(t);
+        });
+      })
+      .catch(function(){box.innerHTML='<span class="msg">não consegui buscar — suba a foto ou cole um link</span>';});
+  }
+  var svcNome=document.getElementById('svc-nome');
+  if(svcNome)svcNome.addEventListener('input',function(){
+    var v=this.value;
+    clearTimeout(svcSugTimer);
+    svcSugTimer=setTimeout(function(){svcSugerirFotos(v);},450);
+  });
+
   function abrirForm(s){
     s=s||{};
     document.getElementById('svc-id').value=s.id||'';
@@ -1522,6 +1618,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     if(cat)cat.value=s.categoria||'';
     var fot=document.getElementById('svc-foto');
     if(fot){fot.value=s.foto_url||''; svcFotoPreview(s.foto_url||'');}
+    var sug=document.getElementById('svc-foto-sug');
+    if(sug){sug.innerHTML=''; if(s.nome) svcSugerirFotos(s.nome);}
     document.getElementById('svc-nome').value=s.nome||'';
     document.getElementById('svc-desc').value=s.descricao||'';
     document.getElementById('svc-setup').value=s.setup||0;

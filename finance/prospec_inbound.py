@@ -23,19 +23,35 @@ def classificar(texto: str) -> str | None:
     t = (texto or "").strip().lower()
     if not t:
         return None
+    # A RECUSA VEM PRIMEIRO. "não quero" contém "quero", e a ordem antiga (aceite
+    # antes) classificava isso como pedido de material — o Zaq respondia mandando o
+    # material justamente pra quem tinha acabado de recusar, e ainda esquentava o
+    # lead. Vale pra "não quero mais receber", "nao quero nada" e companhia.
+    if _RECUSA.search(t):
+        return "nao"
     # títulos dos botões (match por trecho estável do rótulo)
     if "conhec" in t or "seu perfil" in t or "ver perfil" in t:
         return "conhecer"
     if "material" in t:
         return "material"
-    if t.startswith("agora n") or t in ("não", "nao", "não obrigado", "nao obrigado"):
-        return "nao"
     # termos livres de aceite (digitados)
     if re.search(r"\b(quero|sim|aceito|topo|bora|manda|pode mandar|claro|quero sim)\b", t):
         return "material"
-    if re.search(r"\b(depois|agora nao|agora não|para|parar|sair|remover)\b", t):
-        return "nao"
     return None
+
+
+# Recusa explícita. Duas famílias: a negação diante de um verbo de interesse
+# ("não quero", "não tenho interesse", "sem interesse") e os pedidos de parada
+# ("pare", "sair", "remover", "descadastrar"). Antes o "agora não" era casado por
+# prefixo e o resto ficava de fora; um "não quero mais receber" passava batido.
+_RECUSA = re.compile(
+    r"\b(?:n[ãa]o|nem|sem)\s+(?:quero|queria|tenho|tenh[oa]|desejo|preciso|"
+    r"interesse|obrigad[oa])\b"
+    r"|\bagora\s+n[ãa]o\b"
+    r"|\bsem\s+interesse\b"
+    r"|\b(?:pare|parar|para\s+de|sair|remov\w*|descadastr\w*|cancel\w*)\b"
+    r"|^n[ãa]o(?:\s+obrigad[oa])?$"
+    r"|\bdepois\b")
 
 
 def normalizar_instagram(v: str) -> str:

@@ -34,7 +34,7 @@ No **web** (app Python), configure também:
 
 | Var | Descrição |
 |-----|-----------|
-| `WA_QR_SERVICE_URL` | URL pública deste serviço (ex.: `https://openclaw-waqr.onrender.com`) |
+| `WA_QR_SERVICE_URL` | URL pública deste serviço (ex.: `https://zaq-waqr.onrender.com`) |
 | `WA_QR_SHARED_SECRET` | **o mesmo** segredo daqui |
 
 ## Deploy no Render (serviço novo, manual)

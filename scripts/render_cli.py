@@ -16,6 +16,8 @@ PRE-REQUISITOS
 USO
 ---
     python -m scripts.render_cli services
+    python -m scripts.render_cli services --projetos   # com projeto/ambiente
+    python -m scripts.render_cli projetos              # inventario em arvore
     python -m scripts.render_cli status  openclaw-bot
     python -m scripts.render_cli deploys openclaw-bot --limit 5
     python -m scripts.render_cli deploy  openclaw-bot            # dispara deploy
@@ -25,6 +27,23 @@ USO
 
 O <servico> pode ser o nome (openclaw-bot) OU o id (srv-...). Nome e' resolvido
 automaticamente pela lista de servicos.
+
+SEM ACESSO A' API? USE O HISTORICO
+----------------------------------
+Todo comando acima fala com api.render.com. Onde esse host esta' bloqueado
+(ex: o ambiente do Claude Code na web, que devolve 403 no CONNECT), eles nao
+funcionam - e nao ha' contorno pelo lado do script.
+
+Pra esse caso existe o `historico`, que le os eventos de deploy do NOSSO
+Postgres (tabela render_evento, alimentada pelo webhook do Render). Nao precisa
+de RENDER_API_KEY nem de rede externa - so' de DATABASE_URL:
+
+    python -m scripts.render_cli historico                      # ultimos 20
+    python -m scripts.render_cli historico --servico openclaw-web-bcu3
+    python -m scripts.render_cli historico --falhas --limit 5   # so' o que quebrou
+    python -m scripts.render_cli historico --falhas --log       # com a cauda do log
+
+Como ligar o webhook: docs/RENDER_OBSERVABILIDADE.md
 """
 from __future__ import annotations
 
@@ -78,23 +97,63 @@ def _req(s, metodo, caminho, **kw):
     return r
 
 
-def _servicos(s) -> list[dict]:
-    # a API pagina; devolve [{service:{...}, cursor:...}]
+def _listar(s, caminho: str, chave: str, params: dict | None = None) -> list[dict]:
+    """Lista paginada da API do Render.
+
+    Toda lista do Render sai no mesmo formato: envelopes
+    [{"<chave>": {...}, "cursor": "..."}], e o cursor do ULTIMO item e' o ponto
+    de partida da proxima pagina. O `it.get(chave, it)` desembrulha tolerando o
+    caso de a API devolver o objeto cru — se o nome do envelope mudar, a lista
+    ainda vem, so' sem desembrulhar.
+    """
     itens, cursor = [], None
+    base = dict(params or {})
+    base.setdefault("limit", 100)
     while True:
-        params = {"limit": 100}
+        p = dict(base)
         if cursor:
-            params["cursor"] = cursor
-        r = _req(s, "GET", "/services", params=params)
-        lote = r.json()
+            p["cursor"] = cursor
+        lote = _req(s, "GET", caminho, params=p).json()
         if not lote:
             break
         for it in lote:
-            itens.append(it.get("service", it))
-        cursor = lote[-1].get("cursor")
-        if len(lote) < 100:
+            itens.append(it.get(chave, it) if isinstance(it, dict) else it)
+        ultimo = lote[-1]
+        cursor = ultimo.get("cursor") if isinstance(ultimo, dict) else None
+        # para quando a pagina veio incompleta OU quando nao ha' cursor pra
+        # seguir (sem essa segunda guarda, um cursor ausente viraria loop).
+        if len(lote) < base["limit"] or not cursor:
             break
     return itens
+
+
+def _servicos(s) -> list[dict]:
+    return _listar(s, "/services", "service")
+
+
+def _arvore_projetos(s):
+    """Monta a hierarquia Projeto -> Ambiente -> Servico.
+
+    No Render um servico nao aponta pro projeto direto: quem faz a ponte e' o
+    AMBIENTE (/environments?projectId=... e depois /services?environmentId=...).
+    Por isso sao varias chamadas — uma por projeto e uma por ambiente.
+
+    Devolve (arvore, dono):
+        arvore = [(projeto, [(ambiente, [servicos])])]
+        dono   = {service_id: "projeto / ambiente"}
+    """
+    arvore, dono = [], {}
+    for proj in _listar(s, "/projects", "project"):
+        ramos = []
+        for amb in _listar(s, "/environments", "environment",
+                           {"projectId": proj.get("id")}):
+            svcs = _listar(s, "/services", "service",
+                           {"environmentId": amb.get("id")})
+            for sv in svcs:
+                dono[sv.get("id")] = f"{proj.get('name','?')} / {amb.get('name','?')}"
+            ramos.append((amb, svcs))
+        arvore.append((proj, ramos))
+    return arvore, dono
 
 
 def _resolver(s, alvo: str) -> dict:
@@ -112,9 +171,45 @@ def _resolver(s, alvo: str) -> dict:
 
 # ---------- comandos ----------
 
-def cmd_services(s, _a):
+def cmd_services(s, a):
+    # --projetos custa varias chamadas a mais (uma por projeto e por ambiente),
+    # entao fica opcional: o `services` pelado continua sendo 1 request.
+    dono = _arvore_projetos(s)[1] if a.projetos else {}
     for sv in _servicos(s):
-        print(f"{sv.get('id'):<24} {sv.get('type',''):<14} {sv.get('name','')}")
+        linha = f"{sv.get('id'):<24} {sv.get('type',''):<14} {sv.get('name',''):<30}"
+        if a.projetos:
+            linha += dono.get(sv.get("id"), "(sem projeto)")
+        print(linha.rstrip())
+
+
+def cmd_projetos(s, a):
+    """Inventario completo: projeto -> ambiente -> servico.
+
+    Serve pra responder "o que existe nesta conta?", que o `historico` nao
+    responde: aquele e' um registro de acontecimentos (so' aparece quem
+    deployou), este e' o retrato do que esta' la' agora.
+    """
+    arvore, dono = _arvore_projetos(s)
+    for proj, ramos in arvore:
+        print(f"{proj.get('id','')}  {proj.get('name','(sem nome)')}")
+        for amb, svcs in ramos:
+            print(f"    {amb.get('name','?')}  ({len(svcs)})")
+            for sv in svcs:
+                print(f"        {sv.get('type',''):<14} {sv.get('name','')}")
+        if not ramos:
+            print("    (sem ambientes)")
+
+    # Servico solto NAO e' erro: da' pra criar servico fora de projeto, e os
+    # que existiam antes de o Render ter Projetos ficaram assim. Sem listar
+    # aqui, o "inventario completo" mentiria por omissao — e no caso de voces
+    # os -bcu3 sao justamente servicos criados na mao.
+    soltos = [sv for sv in _servicos(s) if sv.get("id") not in dono]
+    if soltos:
+        print("\n(sem projeto)")
+        for sv in soltos:
+            print(f"    {sv.get('type',''):<14} {sv.get('name','')}")
+    if not arvore and not soltos:
+        print("Nenhum projeto e nenhum servico nesta conta.")
 
 
 def cmd_status(s, a):
@@ -180,11 +275,43 @@ def cmd_logs(s, a):
         print(f"{ts}  {msg}")
 
 
+def cmd_historico(_s, a):
+    """Le do Postgres, NAO da API do Render.
+
+    E' o unico comando que funciona com api.render.com bloqueada, porque quem
+    buscou os dados foi o webhook (rodando dentro do Render), nao este script.
+    """
+    from core.render_eventos import historico
+    linhas = historico(servico=a.servico or "", limite=a.limit, so_falhas=a.falhas)
+    if not linhas:
+        print("Nenhum evento gravado ainda.")
+        print("Se o webhook ja' esta' ligado, so' aparece a partir do proximo deploy.")
+        print("Pra ligar: docs/RENDER_OBSERVABILIDADE.md")
+        return
+    for e in linhas:
+        # marcador visual: da' pra bater o olho e achar a falha na lista
+        marca = {True: "ok  ", False: "FALHA"}.get(e["sucesso"], "-   ")
+        quando = e["recebido_em"].strftime("%d/%m %H:%M") if e["recebido_em"] else "?"
+        msg = (e["commit_msg"] or "").splitlines()
+        msg = msg[0][:60] if msg else ""
+        print(f"{quando}  {marca:<6} {(e['servico_nome'] or e['servico_id'] or '?'):<26} "
+              f"{(e['status'] or e['tipo']):<16} {(e['commit_id'] or '')[:8]:<8} {msg}")
+        if a.log and e.get("log_trecho"):
+            print("  " + "\n  ".join(e["log_trecho"].splitlines()))
+            print()
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description="Cliente da API do Render.")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("services", help="lista os servicos").set_defaults(fn=cmd_services)
+    sp = sub.add_parser("services", help="lista os servicos")
+    sp.add_argument("--projetos", action="store_true",
+                    help="mostra a qual projeto/ambiente cada servico pertence")
+    sp.set_defaults(fn=cmd_services)
+
+    sub.add_parser("projetos", help="inventario: projeto -> ambiente -> servico"
+                   ).set_defaults(fn=cmd_projetos)
 
     sp = sub.add_parser("status", help="status do ultimo deploy"); sp.add_argument("servico"); sp.set_defaults(fn=cmd_status)
     sp = sub.add_parser("deploys", help="historico de deploys"); sp.add_argument("servico"); sp.add_argument("--limit", type=int, default=10); sp.set_defaults(fn=cmd_deploys)
@@ -192,8 +319,19 @@ def main(argv=None):
     sp = sub.add_parser("envvars", help="lista chaves de env (valores ocultos)"); sp.add_argument("servico"); sp.set_defaults(fn=cmd_envvars)
     sp = sub.add_parser("logs", help="logs recentes"); sp.add_argument("servico"); sp.add_argument("--limit", type=int, default=100); sp.set_defaults(fn=cmd_logs)
 
+    sp = sub.add_parser("historico", help="historico de deploys (le do banco, sem API)")
+    sp.add_argument("--servico", default="", help="filtra por nome ou id do servico")
+    sp.add_argument("--limit", type=int, default=20)
+    sp.add_argument("--falhas", action="store_true", help="so' os deploys que quebraram")
+    sp.add_argument("--log", action="store_true", help="mostra a cauda do log de cada falha")
+    # api=False: este comando NAO fala com api.render.com, entao nao pode exigir
+    # RENDER_API_KEY - e' justamente o comando pra quando a API esta' fora de alcance.
+    sp.set_defaults(fn=cmd_historico, api=False)
+
     a = p.parse_args(argv)
-    a.fn(_sessao(), a)
+    # So' abre sessao HTTP pra quem realmente vai usar a API.
+    sessao = _sessao() if getattr(a, "api", True) else None
+    a.fn(sessao, a)
 
 
 if __name__ == "__main__":

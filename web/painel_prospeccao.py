@@ -3596,7 +3596,12 @@ async def webhook_wa_qr_contatos(request: Request):
     enxurrada de mensagens, então quase toda conversa ainda não existe quando o
     nome chega — antes disso o nome era descartado e a conversa nascia com o número
     cru. Nunca cria conversa nem lead a partir de um contato da agenda (senão a
-    agenda inteira do vendedor viraria conversa)."""
+    agenda inteira do vendedor viraria conversa).
+
+    O trabalho no banco é DUAS queries por lote (não duas por contato) e roda em
+    thread separada — ver _gravar_contatos_wa. O caminho de desistência devolve
+    'ok' de propósito: o serviço Node só loga o não-ok e segue, e a agenda volta
+    inteira no próximo resync, então recusar não recuperaria nada."""
     import logging
     log = logging.getLogger("prospeccao.wa_qr")
     if not _qr_segredo_ok(request):
@@ -3613,42 +3618,85 @@ async def webhook_wa_qr_contatos(request: Request):
     if not conta_id or not isinstance(contatos, list) or not contatos:
         return Response("ok", media_type="text/plain")
     da_agenda = bool(payload.get("da_agenda"))
-    n = 0
-    with get_pool().connection() as c:
-        dono = c.execute("""select 1 from canais_config
-                              where conta_id=%s and canal='whatsapp' and ativo
-                                and coalesce(provedor,'twilio')='qr'""",
-                         (conta_id,)).fetchone()
-        if not dono:
-            return Response("ok", media_type="text/plain")
-        for ct in contatos[:500]:
-            numero = _so_digitos(str((ct or {}).get("numero") or ""))
-            nome = str((ct or {}).get("nome") or "").strip()[:120]
-            if not numero or not nome:
-                continue
-            alvo8 = numero[-8:] if len(numero) >= 8 else numero
-            # guarda na agenda (vale pra conversa que ainda NEM EXISTE). Nome da
-            # agenda sobrescreve; pushName não derruba um nome que veio da agenda.
-            c.execute("""insert into wa_contatos (conta_id, numero8, nome, da_agenda, atualizado)
-                              values (%s,%s,%s,%s, now())
-                         on conflict (conta_id, numero8) do update
-                            set nome=excluded.nome, da_agenda=excluded.da_agenda,
-                                atualizado=now()
-                          where excluded.da_agenda or not wa_contatos.da_agenda""",
-                      (conta_id, alvo8, nome, da_agenda))
-            # nome da agenda manda; pushName só entra se ainda não houver nome
-            cond = "" if da_agenda else " and coalesce(contato_nome,'')=''"
-            r = c.execute(
-                r"""update conversas set contato_nome=%s
-                     where conta_id=%s and canal='whatsapp'
-                       and right(regexp_replace(contato_ref, '\D', '', 'g'), 8) = %s"""
-                + cond, (nome, conta_id, alvo8))
-            n += r.rowcount or 0
-        c.commit()
+
+    por_numero = _dedup_contatos_wa(contatos, da_agenda)
+    if not por_numero:
+        return Response("ok", media_type="text/plain")
+
+    from starlette.concurrency import run_in_threadpool
+    # psycopg é síncrono: rodar aqui no event loop travaria o servidor INTEIRO
+    # (painel incluso) enquanto o lote não terminasse. Foi o que fez a
+    # importação inicial de uma agenda virar 502 em série no Render.
+    n = await run_in_threadpool(
+        _gravar_contatos_wa, conta_id, list(por_numero.keys()),
+        list(por_numero.values()), da_agenda)
     if n:
         log.info("webhook_wa_qr_contatos: conta_id=%s %s conversas renomeadas (agenda=%s)",
                  conta_id, n, da_agenda)
     return Response("ok", media_type="text/plain")
+
+
+def _dedup_contatos_wa(contatos: list, da_agenda: bool) -> dict[str, str]:
+    """Peneira o lote cru do WhatsApp em {numero8: nome}, no máximo 500.
+
+    Dedupar é obrigatório, não otimização: a agenda do celular repete contato
+    (mesmo número salvo duas vezes, ou dois números cujos 8 finais coincidem) e
+    `on conflict do update` estoura com "cannot affect row a second time" se a
+    mesma chave aparecer duas vezes no MESMO comando.
+
+    Quem fica é o mesmo que ficava no laço de antes: com a agenda, o ÚLTIMO
+    (cada volta sobrescrevia); com pushName, o PRIMEIRO (depois da primeira
+    volta a conversa já tinha nome, e o resto batia no coalesce e desistia)."""
+    por_numero: dict[str, str] = {}
+    for ct in contatos[:500]:
+        numero = _so_digitos(str((ct or {}).get("numero") or ""))
+        nome = str((ct or {}).get("nome") or "").strip()[:120]
+        if not numero or not nome:
+            continue
+        chave = numero[-8:] if len(numero) >= 8 else numero
+        if da_agenda or chave not in por_numero:
+            por_numero[chave] = nome
+    return por_numero
+
+
+def _gravar_contatos_wa(conta_id: int, numeros8: list[str], nomes: list[str],
+                        da_agenda: bool, pool=None) -> int:
+    """Grava o lote de contatos e renomeia as conversas. SÍNCRONO — quem chama é
+    responsável por tirar do event loop.
+
+    Duas queries pro lote todo, via unnest dos dois arrays em paralelo. Antes era
+    um insert + um update POR CONTATO, e o update varre conversas quando não há
+    índice pra expressão dos 8 dígitos (ver migração 156) — 200 contatos viravam
+    400 idas ao banco e 200 varreduras, tudo travando o event loop.
+
+    `pool` só existe pros testes apontarem pro banco descartável; em produção
+    fica None e vale o pool de sempre.
+
+    Devolve quantas conversas foram renomeadas."""
+    with (pool or get_pool()).connection() as c:
+        if not _conta_em_qr(c, conta_id):
+            return 0
+        # guarda na agenda (vale pra conversa que ainda NEM EXISTE). Nome da
+        # agenda sobrescreve; pushName não derruba um nome que veio da agenda.
+        c.execute("""insert into wa_contatos (conta_id, numero8, nome, da_agenda, atualizado)
+                     select %s, t.n8, t.nome, %s, now()
+                       from unnest(%s::text[], %s::text[]) as t(n8, nome)
+                     on conflict (conta_id, numero8) do update
+                        set nome=excluded.nome, da_agenda=excluded.da_agenda,
+                            atualizado=now()
+                      where excluded.da_agenda or not wa_contatos.da_agenda""",
+                  (conta_id, da_agenda, numeros8, nomes))
+        # nome da agenda manda; pushName só entra se ainda não houver nome
+        cond = "" if da_agenda else " and coalesce(conversas.contato_nome,'')=''"
+        r = c.execute(
+            r"""update conversas set contato_nome = t.nome
+                  from unnest(%s::text[], %s::text[]) as t(n8, nome)
+                 where conversas.conta_id=%s and conversas.canal='whatsapp'
+                   and right(regexp_replace(conversas.contato_ref, '\D', '', 'g'), 8) = t.n8"""
+            + cond, (numeros8, nomes, conta_id))
+        n = r.rowcount or 0
+        c.commit()
+    return n
 
 
 @router.post("/webhooks/wa-qr/audio")

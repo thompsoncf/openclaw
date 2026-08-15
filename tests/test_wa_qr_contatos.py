@@ -78,8 +78,15 @@ def conta_qr(pool):
 
 
 def _nome(pool, conta_id, ref):
+    # `and canal='whatsapp'`: a conta do teste tem DUAS conversas com o mesmo
+    # contato_ref '558698392961' — uma de WhatsApp e uma de e-mail, de propósito,
+    # porque o vazamento entre canais é justamente o que o teste vizinho cobre.
+    # Sem o filtro, qual das duas vinha dependia da ordem física das linhas, e o
+    # teste passava ou falhava conforme o banco. O e-mail continua conferido logo
+    # abaixo, direto, onde é o assunto.
     with pool.connection() as c:
-        return c.execute("select contato_nome from conversas where conta_id=%s and contato_ref=%s",
+        return c.execute("select contato_nome from conversas "
+                         "where conta_id=%s and contato_ref=%s and canal='whatsapp'",
                          (conta_id, ref)).fetchone()[0]
 
 

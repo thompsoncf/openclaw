@@ -102,6 +102,49 @@ def _so_digitos(s: str) -> str:
     return "".join(ch for ch in (s or "") if ch.isdigit())
 
 
+def _wa_equivalentes(numero: str) -> list[str]:
+    """As formas do MESMO celular brasileiro: com e sem o nono dígito.
+
+    O WhatsApp não é coerente: o mesmo contato aparece ora como 55 86 98392961
+    (12 dígitos, formato antigo), ora como 55 86 998392961 (13). Quem casa por
+    igualdade crua de `contato_ref` acha que são duas pessoas — e a mensagem vai
+    parar na conversa errada, ou em nenhuma.
+
+    Por que não os últimos 8 dígitos, que é o atalho usado pra achar LEAD neste
+    módulo: ali um engano dá em não achar o dono do número; aqui daria em gravar
+    a mensagem na conversa de OUTRA pessoa, porque '98392961' pode ser o final de
+    um celular do 86 e de um do 11. As duas grafias do mesmo número resolvem o
+    caso real sem abrir essa porta.
+
+    Fora do Brasil (ou número curto demais pra ter forma dupla) devolve só ele.
+
+    SOBRE A FORMA DA CONSULTA que usa isto. Quem procura conversa por número filtra
+    SEMPRE em duas etapas:
+
+        right(regexp_replace(contato_ref, '\\D', '', 'g'), 8) = <8 finais>   -- índice
+        and regexp_replace(contato_ref, '\\D', '', 'g') = any(<equivalentes>)  -- precisão
+
+    A primeira linha é literalmente a expressão do índice `idx_conversas_num8`
+    (migração 156) — e índice de EXPRESSÃO só é usado quando a consulta repete a
+    expressão idêntica, inclusive o '\\D' e o 'g'. Sem ela, cada mensagem que chega
+    varre a tabela de conversas inteira; foi assim que a agenda de um pareamento
+    derrubou o app em 2.446 respostas 502 no dia 15/08. A segunda linha é o que
+    impede o casamento frouxo: as duas grafias do MESMO número compartilham os 8
+    finais, mas os 8 finais sozinhos também casam com um celular de outro DDD.
+    Índice pra achar rápido, igualdade exata pra não errar de pessoa.
+
+    Se algum dia estas consultas mudarem de forma, o índice muda junto."""
+    d = _so_digitos(numero)
+    if not d:
+        return []
+    formas = [d]
+    if d.startswith("55") and len(d) == 12 and d[4] in "6789":
+        formas.append(d[:4] + "9" + d[4:])       # 55 DDD 8392961 → 55 DDD 9 8392961
+    elif d.startswith("55") and len(d) == 13 and d[4] == "9":
+        formas.append(d[:4] + d[5:])             # o contrário
+    return formas
+
+
 def _zap_link(numero: str) -> str:
     d = _so_digitos(numero)
     if not d:
@@ -1305,6 +1348,9 @@ def _canais_status(pool, conta_id: int) -> dict:
                 group by cv.canal""", (conta_id,)).fetchall())
     return {
         "ult_in": ult_in,
+        # o carimbo sozinho não acusa nada: "15/08 13:28" só vira sintoma quando se
+        # sabe que já são três horas atrás. Aqui a conta é feita e fica escrita.
+        "wa_sem_receber": _ha_quanto(_wa_minutos_sem_receber(conta_id)),
         "email": bool(rem_conta),                         # ENVIAR (caixa da empresa/global)
         "email_remetente": rem_conta or "",               # o e-mail que vai no From
         "email_rx": email_rx,                             # RECEBER (caixa da conta)
@@ -1498,6 +1544,36 @@ def _wa_qr_sincronizando(conta_id) -> bool:
 
 _WA_CHIP_CACHE: dict = {}   # conta_id -> (quando, dict)
 
+# A partir de quantos minutos sem receber vale AVISAR na faixa do chip. Uma hora é
+# silêncio comum (almoço, cliente sem assunto); o que a faixa denuncia é o silêncio
+# que já não combina com "conectado" — e, com o vigia do serviço religando sessão
+# muda em até 45min, silêncio longo aqui virou coisa de conta parada mesmo.
+_WA_SILENCIO_MIN = 60
+
+
+def _wa_minutos_sem_receber(conta_id) -> int | None:
+    """Minutos desde a última mensagem RECEBIDA no WhatsApp desta empresa.
+    None = nunca recebeu nada (conta nova), que não é silêncio suspeito."""
+    with get_pool().connection() as c:
+        r = c.execute(
+            """select extract(epoch from now() - max(m.criado_em))/60
+                 from mensagens m join conversas cv on cv.id=m.conversa_id
+                where cv.conta_id=%s and cv.canal='whatsapp' and m.direcao='in'""",
+            (conta_id,)).fetchone()
+    return int(r[0]) if r and r[0] is not None else None
+
+
+def _ha_quanto(minutos) -> str:
+    """'há 40min' · 'há 3h' · 'há 2 dias'. '' quando não há silêncio a relatar —
+    é o que a tela usa pra decidir se mostra alguma coisa."""
+    if minutos is None or minutos < _WA_SILENCIO_MIN:
+        return ""
+    if minutos < 120:
+        return f"há {int(minutos)}min"
+    if minutos < 48 * 60:
+        return f"há {int(minutos // 60)}h"
+    return f"há {int(minutos // 1440)} dias"
+
 
 def _wa_chip(conta_id) -> dict:
     """Qual chip está enviando o WhatsApp desta empresa, e como ele está.
@@ -1550,6 +1626,8 @@ def _wa_chip(conta_id) -> dict:
             # na API oficial não existe "sessão que cai": ou o canal está configurado
             # ou não está. Não invento estado que o provedor não reporta.
             chip["estado"] = "conectado" if chip["numero"] else "sem_chip"
+        if chip["estado"] == "conectado":
+            chip["sem_receber"] = _ha_quanto(_wa_minutos_sem_receber(conta_id))
     except Exception:  # noqa: BLE001
         chip = {"provedor": "", "nome": "", "numero": "", "estado": "sem_chip"}
     _WA_CHIP_CACHE[conta_id] = (agora, chip)
@@ -2634,6 +2712,47 @@ def _nome_da_agenda(c, conta_id, numero: str) -> str:
     return ((r[0] if r else "") or "").strip()[:120]
 
 
+def _conversa_wa_do_contato(c, conta_id, lead_id, numero):
+    """A conversa de WhatsApp deste contato: a do LEAD, se ele já tiver uma; senão a
+    do NÚMERO, nas duas grafias (ver _wa_equivalentes). Devolve (id, prospeccao_id)
+    ou None. Usada pelos três caminhos que gravam conversa — entrada, eco de saída e
+    o botão "Agora não" — que antes repetiam a mesma busca com diferenças sutis.
+
+    DUAS CONSULTAS, e não uma com OR, porque o OR custa a tabela inteira. Medido
+    com 60 mil conversas: a versão com `prospeccao_id=%s or right(...)=%s` fazia
+    Seq Scan e removia 60.000 linhas pelo filtro (34ms por mensagem recebida);
+    separadas, cada metade cai num índice que já existe —
+
+        idx_conversas_lead_canal   (conta_id, prospeccao_id, canal), UNIQUE
+        idx_conversas_num8         (conta_id, canal, right(regexp_replace(...), 8))
+
+    O planner não combina os dois num BitmapOr aqui porque o segundo lado é uma
+    expressão. E varredura de conversas por mensagem é exatamente o que derrubou o
+    app em 15/08 (2.446 respostas 502 durante a importação de uma agenda) — a
+    migração 156 nasceu disso; não faz sentido reintroduzir o problema ao lado.
+
+    A busca por número tem SEMPRE os dois filtros: `right(...)=<8 finais>` é o que o
+    índice enxerga, e a igualdade exata é o que impede confundir com um celular de
+    outro DDD que termine igual."""
+    d = _so_digitos(numero)
+    alvo8 = d[-8:] if len(d) >= 8 else d
+    if lead_id:
+        # UNIQUE (conta_id, prospeccao_id, canal): é uma linha ou nenhuma
+        r = c.execute(
+            """select id, prospeccao_id from conversas
+                where conta_id=%s and canal='whatsapp' and prospeccao_id=%s""",
+            (conta_id, lead_id)).fetchone()
+        if r:
+            return r
+    return c.execute(
+        r"""select id, prospeccao_id from conversas
+             where conta_id=%s and canal='whatsapp'
+               and right(regexp_replace(contato_ref, '\D', '', 'g'), 8) = %s
+               and regexp_replace(contato_ref, '\D', '', 'g') = any(%s)
+             order by (prospeccao_id is not null) desc, ultima_msg_em desc limit 1""",
+        (conta_id, alvo8, _wa_equivalentes(d) or [d])).fetchone()
+
+
 def _ja_conversou(c, conta_id, lead_id) -> bool:
     """Já houve troca de verdade com esse lead — ou seja, a mensagem que está chegando
     agora não é a primeira coisa que acontece.
@@ -2671,6 +2790,9 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     segue como sempre foi."""
     remetente = _so_digitos(remetente)
     alvo8 = remetente[-8:] if len(remetente) >= 8 else remetente
+    # as duas grafias do número (com e sem o nono dígito) — o mesmo contato chega das
+    # duas formas, e casar por igualdade crua criava uma conversa nova a cada troca
+    equivalentes = _wa_equivalentes(remetente) or [remetente]
     lead = c.execute(
         r"""select id, coalesce(origem,'') from prospeccao
              where conta_id=%s and right(regexp_replace(coalesce(whatsapp, telefone, ''), '\D', '', 'g'), 8) = %s
@@ -2690,10 +2812,12 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
         # o fluxo segue pra criar o lead. O vínculo da conversa existente com o lead
         # novo é feito logo abaixo, junto com as mensagens que ela já tinha.
         orfa = c.execute(
-            """select id, coalesce(nullif(contato_nome,''),'') from conversas
-                where conta_id=%s and canal='whatsapp'
-                  and prospeccao_id is null and contato_ref=%s""",
-            (conta_id, remetente)).fetchone()
+            r"""select id, coalesce(nullif(contato_nome,''),'') from conversas
+                 where conta_id=%s and canal='whatsapp' and prospeccao_id is null
+                   and right(regexp_replace(contato_ref, '\D', '', 'g'), 8) = %s
+                   and regexp_replace(contato_ref, '\D', '', 'g') = any(%s)
+                 order by ultima_msg_em desc limit 1""",
+            (conta_id, alvo8, equivalentes)).fetchone()
         nome_orfa = orfa[1] if orfa else ""
         # contato NOVO de verdade (landing/WhatsApp) → vira lead QUENTE, não atribuído (o dono distribui).
         # Nome: primeiro o da AGENDA do vendedor (o melhor que existe), depois o do
@@ -2732,13 +2856,12 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
         # separa cliente ativo de alvo frio, e não depende do estágio.
         if not (exigir_continuidade and de_prospeccao) or _ja_conversou(c, conta_id, lead_id):
             _promover_para_lead(c, conta_id, lead_id)
-    # acha a conversa do lead OU uma órfã por contato_ref (e vincula ela ao lead)
-    conv = c.execute(
-        """select id, prospeccao_id from conversas
-            where conta_id=%s and canal='whatsapp'
-              and (prospeccao_id=%s or (prospeccao_id is null and contato_ref=%s))
-            order by ultima_msg_em desc limit 1""",
-        (conta_id, lead_id, remetente)).fetchone()
+    # Acha a conversa do lead OU qualquer uma do mesmo número (e vincula ela ao lead,
+    # se estiver órfã). A conversa deste lead vem primeiro; depois as que já têm dono;
+    # por último a mais recente. Exigir `prospeccao_id is null` pra casar por número,
+    # como era antes, deixava de fora a conversa pendurada em OUTRA ficha do mesmo
+    # telefone — e o inbox ganhava uma segunda thread do mesmo cliente.
+    conv = _conversa_wa_do_contato(c, conta_id, lead_id, remetente)
     if conv:
         conv_id = conv[0]
         if conv[1] is None:
@@ -2811,13 +2934,13 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
 
 def _wa_conversa_simples(c, conta_id, lead_id, remetente, corpo, sid) -> int:
     """Acha/cria a conversa de WhatsApp do lead e grava a mensagem de entrada, SEM
-    esquentar/promover (usado no "Agora não": o lead recusou, não vira lead quente)."""
-    conv = c.execute(
-        """select id, prospeccao_id from conversas
-            where conta_id=%s and canal='whatsapp'
-              and (prospeccao_id=%s or (prospeccao_id is null and contato_ref=%s))
-            order by ultima_msg_em desc limit 1""",
-        (conta_id, lead_id, remetente)).fetchone()
+    esquentar/promover (usado no "Agora não": o lead recusou, não vira lead quente).
+
+    Mesma busca do caminho normal de entrada (_wa_inbound_conversa): as duas grafias
+    do número e sem exigir conversa órfã — senão o "Agora não" abre uma thread
+    paralela justamente de quem já estava conversando."""
+    remetente = _so_digitos(remetente)
+    conv = _conversa_wa_do_contato(c, conta_id, lead_id, remetente)
     if conv:
         conv_id = conv[0]
         if conv[1] is None:
@@ -3433,13 +3556,12 @@ def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando, de_mim=Fa
     NOVA, em tempo real). O vendedor decide se vale virar lead (botão "virar
     lead" no inbox de Comunicação). Reusa QUALQUER conversa do número (órfã ou já
     ligada a lead — preferindo a ligada), senão um re-pareamento duplicava a aba
-    de quem já tinha virado lead."""
+    de quem já tinha virado lead. "Do número" nas duas grafias, com e sem o nono
+    dígito (ver _wa_equivalentes): o histórico é justamente onde chega o formato
+    antigo, e casando cru ele virava uma segunda conversa do mesmo contato."""
     remetente = _so_digitos(remetente)
     alvo8 = remetente[-8:] if len(remetente) >= 8 else remetente
-    conv = c.execute(
-        """select id from conversas where conta_id=%s and canal='whatsapp' and contato_ref=%s
-            order by (prospeccao_id is not null) desc, ultima_msg_em desc limit 1""",
-        (conta_id, remetente)).fetchone()
+    conv = _conversa_wa_do_contato(c, conta_id, None, remetente)
     if conv:
         conv_id = conv[0]
     else:
@@ -3515,10 +3637,25 @@ async def webhook_wa_qr_historico(request: Request):
 
 def _wa_saida_conversa(c, conta_id, destinatario, corpo, sid):
     """Mensagem que o VENDEDOR mandou DIRETO pelo WhatsApp do celular (fora do
-    Zaq) — o Baileys ecoa de volta como fromMe. Só registra numa conversa que
-    JÁ EXISTE (nunca cria lead/conversa nova — sem contexto pra isso). Dedup
-    por provider_sid: se a mensagem já saiu PELO Zaq (que grava na hora do
-    envio em comunicacao_responder), a inserção aqui vira no-op."""
+    Zaq) — o Baileys ecoa de volta como fromMe. Dedup por provider_sid: se a
+    mensagem já saiu PELO Zaq (que grava na hora do envio em
+    comunicacao_responder), a inserção aqui vira no-op.
+
+    NUNCA cria LEAD: quem o vendedor procura pelo celular não vira lead sozinho —
+    o funil é dele pra encher, não do WhatsApp. Mas CRIA CONVERSA (órfã, sem
+    lead), e é aí que estava o buraco: antes, eco sem conversa existente era
+    descartado em silêncio, e quem escreve PRIMEIRO pelo celular é o caso normal
+    do vendedor. Visto em produção: às 15:56 o vendedor mandou um "oi" pra um
+    número novo e sumiu; às 15:57 a pessoa respondeu, a resposta criou o lead e a
+    conversa — e a thread nasceu começando pela RESPOSTA, sem a pergunta. É o
+    mesmo tratamento que o histórico importado já dá (_wa_historico_conversa):
+    a conversa aparece na caixa, e o vendedor decide se vira lead.
+
+    A conversa é procurada pelas duas grafias do número (com e sem o nono
+    dígito — ver _wa_equivalentes), e sem exigir que ela esteja órfã: conversa já
+    ligada a um lead casava só pelo `prospeccao_id`, então bastava o número estar
+    numa ficha DIFERENTE (dois leads com o mesmo telefone) pra ela não ser
+    encontrada e a mensagem sumir."""
     destinatario = _so_digitos(destinatario)
     alvo8 = destinatario[-8:] if len(destinatario) >= 8 else destinatario
     lead = c.execute(
@@ -3526,14 +3663,19 @@ def _wa_saida_conversa(c, conta_id, destinatario, corpo, sid):
              where conta_id=%s and right(regexp_replace(coalesce(whatsapp, telefone, ''), '\D', '', 'g'), 8) = %s
              order by atualizado_em desc limit 1""", (conta_id, alvo8)).fetchone()
     lead_id = lead[0] if lead else None
-    conv = c.execute(
-        """select id from conversas where conta_id=%s and canal='whatsapp'
-            and (prospeccao_id=%s or (prospeccao_id is null and contato_ref=%s))
-            order by ultima_msg_em desc limit 1""",
-        (conta_id, lead_id, destinatario)).fetchone()
-    if not conv:
-        return None
-    conv_id = conv[0]
+    conv = _conversa_wa_do_contato(c, conta_id, lead_id, destinatario)
+    if conv:
+        conv_id = conv[0]
+    else:
+        # nasce já com o nome da agenda do celular, igual aos outros caminhos — sem
+        # isso a conversa que o vendedor abriu aparece na caixa como número cru
+        conv_id = c.execute(
+            """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status,
+                 agente_ativo, ultima_msg_em, contato_nome)
+               values (%s,%s,'whatsapp',%s,'aberta',false,now(),
+                       (select nome from wa_contatos where conta_id=%s and numero8=%s))
+               returning id""",
+            (conta_id, lead_id, destinatario, conta_id, alvo8)).fetchone()[0]
     c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
                  values (%s,'whatsapp','out','humano',%s,%s)
                  on conflict (provider_sid) where provider_sid is not null do nothing""",
@@ -3545,8 +3687,9 @@ def _wa_saida_conversa(c, conta_id, destinatario, corpo, sid):
 @router.post("/webhooks/wa-qr/saida")
 async def webhook_wa_qr_saida(request: Request):
     """Eco de mensagem que o vendedor mandou DIRETO pelo WhatsApp do celular
-    (sem passar pelo Zaq) — grava na conversa já existente pra não ficar cego
-    do que já foi respondido. Nunca cria lead ou conversa nova."""
+    (sem passar pelo Zaq) — pra não ficar cego do que já foi respondido. Abre a
+    conversa quando ela ainda não existe (o vendedor escrevendo primeiro é o caso
+    normal); lead, nunca — ver _wa_saida_conversa."""
     import logging
     log = logging.getLogger("prospeccao.wa_qr")
     if not _qr_segredo_ok(request):
@@ -3575,11 +3718,11 @@ async def webhook_wa_qr_saida(request: Request):
     if conv_id:
         log.info("webhook_wa_qr_saida: conta_id=%s conv_id=%s registrado ✓", conta_id, conv_id)
     else:
-        # sem conversa existente pra esse número — descarta de propósito (não cria
-        # lead sozinho), mas registra: sem isso não dava pra distinguir "não tinha
-        # conversa mesmo" de "chegou com o número errado e nunca casou com nada".
-        log.info("webhook_wa_qr_saida: conta_id=%s sem conversa pro número %s… — descartado",
-                 conta_id, destinatario[:6])
+        # não deve mais acontecer (a conversa é criada quando falta), então isto aqui
+        # é sinal de defeito de verdade — número impossível de normalizar, insert que
+        # não voltou id. Fica gravado pra não sumir em silêncio como sumia antes.
+        log.warning("webhook_wa_qr_saida: conta_id=%s não consegui registrar o eco do número %s…",
+                    conta_id, destinatario[:6])
     return Response("ok", media_type="text/plain")
 
 
@@ -7966,9 +8109,14 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
          não sabia de onde ia sair. #}
       <div class="cx-chip-faixa">
         {% if chip.estado == 'conectado' %}
-          <span class="pt" style="background:var(--neon)"></span>Enviando WhatsApp pelo chip
+          <span class="pt" style="background:{{ 'var(--ambar)' if chip.sem_receber else 'var(--neon)' }}"></span>Enviando WhatsApp pelo chip
           {% if chip.nome %}<b>{{ chip.nome }}</b> · {% endif %}<code>{{ chip.numero }}</code>
           · <span style="color:var(--neon)">conectado</span>
+          {# "conectado" é o que o serviço acha da SESSÃO; isto aqui é o que a caixa
+             viu de verdade. Os dois discordando é exatamente o sintoma da sessão que
+             emudece sem cair — e era o que ninguém tinha como perceber. #}
+          {% if chip.sem_receber %}· <span style="color:var(--ambar)">sem receber {{ chip.sem_receber }}</span>
+          · <a href="/painel/prospeccao/comunicacao?aba=canais">conferir o chip</a>{% endif %}
         {% elif chip.estado == 'sincronizando' %}
           <span class="pt" style="background:var(--ambar)"></span>Chip
           {% if chip.nome %}<b>{{ chip.nome }}</b> · {% endif %}<code>{{ chip.numero }}</code>
@@ -8390,7 +8538,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </div>
     <div class="cx-card">
       <h3>💬 WhatsApp <span class="cx-stat {{ 'st-on' if canais.whatsapp else 'st-off' }}">● {{ ('Serviço de QR ligado — veja o status da sessão abaixo' if canais.wa_provedor == 'qr' else 'Conectado') if canais.whatsapp else 'A configurar' }}</span></h3>
-      <div class="mut" style="font-size:.8rem;margin-bottom:.2rem">📥 Última recebida: {% if canais.ult_in.get('whatsapp') %}<b style="color:var(--verde-claro)">{{ canais.ult_in['whatsapp'] }}</b>{% else %}<span style="color:var(--mut)">nenhuma ainda</span>{% endif %}</div>
+      <div class="mut" style="font-size:.8rem;margin-bottom:.2rem">📥 Última recebida: {% if canais.ult_in.get('whatsapp') %}<b style="color:var(--verde-claro)">{{ canais.ult_in['whatsapp'] }}</b>{% if canais.wa_sem_receber %} <span style="color:var(--ambar)">({{ canais.wa_sem_receber }} — se o cliente está mandando mensagem, reconecte o chip abaixo)</span>{% endif %}{% else %}<span style="color:var(--mut)">nenhuma ainda</span>{% endif %}</div>
       {% if gerencia %}
       <div class="mut" style="font-size:.8rem;margin-bottom:.1rem">Como este cliente conecta o WhatsApp:</div>
       <div class="waseg">

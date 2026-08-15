@@ -7,7 +7,10 @@
  *
  * Rotas (todas exigem o header do segredo):
  *   POST /session/:conta/iniciar   -> garante o socket; {status, qr?} (qr = data URL)
- *   GET  /session/:conta/status    -> {status, qr?}
+ *                                     body {forcar:true} derruba o socket atual antes
+ *                                     (pra ressuscitar sessão "conectada" mas muda)
+ *   GET  /session/:conta/status    -> {status, qr?, mudoMs} (mudoMs = há quanto tempo
+ *                                     aquele socket não entrega evento nenhum)
  *   POST /session/:conta/enviar    -> body {numero, texto} -> {ok, id?} | {ok:false,erro}
  *   POST /session/:conta/sair      -> logout + limpa estado -> {ok}
  *   GET  /saude                    -> {ok:true} (sem segredo; healthcheck do Render)
@@ -32,6 +35,14 @@
  * estavam pareadas, lendo as credenciais do Postgres — ver restaurarSessoes().
  * Ninguém precisa abrir tela nem escanear QR de novo por causa de um deploy.
  *
+ * Socket que morre sem avisar (fica "conectado" e não entrega mais nada) é religado
+ * sozinho pelo vigia — ver vigiarSessoes(): silêncio longo + ping sem resposta.
+ *
+ * O log vai pro stdout E pro Postgres (wa_qr_log), e o estado de cada sessão é
+ * carimbado em wa_qr_sessao_estado de minuto em minuto — o log do Render não é legível de
+ * fora, e sem isso todo diagnóstico dependia de alguém abrir o dashboard. Ver o
+ * bloco "log no banco". WA_QR_LOG_DB=0 desliga.
+ *
  * Env: DATABASE_URL, WA_QR_SHARED_SECRET, APP_URL, PORT (default 3000).
  */
 const http = require('node:http')
@@ -48,7 +59,7 @@ const { criarTrava } = require('./sessao-lock')
 const PORT = parseInt(process.env.PORT || '3000', 10)
 const SEGREDO = process.env.WA_QR_SHARED_SECRET || ''
 const APP_URL = (process.env.APP_URL || '').replace(/\/+$/, '')
-const log = pino({ level: process.env.LOG_LEVEL || 'info' })
+const logBase = pino({ level: process.env.LOG_LEVEL || 'info' })
 // Quanto o processo fica ocioso depois de abrir a porta, antes de religar as
 // sessões — ver o comentário no servidor.listen. Regulável por env caso o
 // arranque fique mais pesado (mais contas pareadas no mesmo serviço).
@@ -62,9 +73,26 @@ const ESPERA_RESTAURAR_MS = parseInt(process.env.WA_QR_ESPERA_RESTAURAR_MS || '1
 // O custo de espaçar é a última conta demorar mais pra voltar a RECEBER; o envio não
 // espera, porque /enviar religa a sessão sob demanda.
 const ESPACO_CONTAS_MS = parseInt(process.env.WA_QR_ESPACO_CONTAS_MS || '30000', 10)
+// Vigia de sessão MUDA — ver vigiarSessoes(). Quanto tempo sem UM evento do socket
+// (mensagem, recibo, contato, histórico) até desconfiar, e de quanto em quanto tempo
+// conferir. 10min é folgado de propósito: conta parada meia hora é rotina.
+const MUDO_LIMITE_MS = parseInt(process.env.WA_QR_MUDO_LIMITE_MS || '600000', 10)
+const VIGIA_INTERVALO_MS = parseInt(process.env.WA_QR_VIGIA_MS || '60000', 10)
+// Timeout do ping. O keep-alive do próprio Baileys usa 30s; aqui é menor porque a
+// sessão já está sob suspeita e o vigia roda de novo daqui a um minuto.
+const PING_TIMEOUT_MS = parseInt(process.env.WA_QR_PING_TIMEOUT_MS || '15000', 10)
+// Espaço entre pings da MESMA sessão: enquanto ela estiver calada o vigia passa de
+// minuto em minuto, e não é pra pingar em toda passada.
+const PING_ESPACO_MS = parseInt(process.env.WA_QR_PING_ESPACO_MS || '300000', 10)
+// TETO do silêncio: aqui religa mesmo com o ping respondendo. O ping prova que o
+// cano está aberto, NÃO que o WhatsApp ainda está entregando — e foi exatamente esse
+// o estado da conta que motivou tudo isto (ver vigiarSessoes): o keep-alive do Baileys
+// ia e voltava de 30 em 30s, por isso ele nunca deu a conexão por perdida, e mesmo
+// assim não entrou uma mensagem por horas. Só o religamento completo traz de volta.
+const MUDO_TETO_MS = parseInt(process.env.WA_QR_MUDO_TETO_MS || '2700000', 10)   // 45min
 
-if (!process.env.DATABASE_URL) { log.error('Falta DATABASE_URL'); process.exit(1) }
-if (!SEGREDO) { log.error('Falta WA_QR_SHARED_SECRET'); process.exit(1) }
+if (!process.env.DATABASE_URL) { logBase.error('Falta DATABASE_URL'); process.exit(1) }
+if (!SEGREDO) { logBase.error('Falta WA_QR_SHARED_SECRET'); process.exit(1) }
 
 // Dois erros do Baileys apareciam em VERMELHO sem representar perda nenhuma, e
 // vermelho que não pede ação treina a gente a ignorar o log inteiro — foi assim
@@ -111,7 +139,140 @@ function comFiltroDeRuido (base) {
   return filtrado
 }
 
-const logBaileys = comFiltroDeRuido(log)
+// ---------------------------------------------------------------- log no banco
+//
+// O log do Render não se lê de fora: o dashboard exige sessão de navegador e
+// `api.render.com` cai em 403 na política de egresso do ambiente do agente. Num
+// chamado real isso custou horas — dava pra provar pelo banco QUE a sessão de uma
+// conta tinha emudecido (mensagens, contatos, ecos e mapa de @lid param todos no
+// mesmo minuto, com as contas vizinhas gravando normal), e não dava pra saber POR
+// QUÊ, porque o motivo estava só no log. Cada rodada virava "abra o dashboard,
+// filtre pela conta e me diga o que aparece".
+//
+// Então o log vai também pro Postgres (tabela wa_qr_log, migração 158), que é
+// onde todo mundo já consegue ler. Regras pra isto não virar um problema maior
+// que o que resolve:
+//
+//   - só o log da NOSSA aplicação vai inteiro; do Baileys só error/fatal, senão
+//     o firehose dele entope a tabela (e o que interessa dele é erro mesmo, tipo
+//     'failed to decrypt message');
+//   - debug/trace nunca vão;
+//   - em LOTE, de 2 em 2s, com fila limitada: fila cheia DESCARTA e depois conta
+//     quantas perdeu, porque log atrasando o serviço é pior que log faltando;
+//   - retenção de 48h (isto é ferramenta de diagnóstico, não arquivo);
+//   - falha ao gravar nunca sobe: o serviço não pode cair por causa do log.
+//
+// WA_QR_LOG_DB=0 desliga tudo isso.
+const LOG_DB = (process.env.WA_QR_LOG_DB || '1') !== '0'
+const LOG_DB_FILA_MAX = parseInt(process.env.WA_QR_LOG_FILA_MAX || '500', 10)
+const LOG_DB_LOTE = 200
+const LOG_DB_FLUSH_MS = parseInt(process.env.WA_QR_LOG_FLUSH_MS || '2000', 10)
+const LOG_DB_RETENCAO_H = parseInt(process.env.WA_QR_LOG_RETENCAO_H || '48', 10)
+const _logFila = []
+let _logDescartadas = 0
+let _logAvisouFalha = false
+
+// O objeto logado vira `dados` jsonb, menos o contaId, que vira coluna (é por ele
+// que todo diagnóstico filtra). Cap de tamanho: um payload gigante logado por
+// engano não pode virar uma linha de megabytes.
+function _dadosDoLog (obj) {
+  if (!obj) return null
+  const resto = {}
+  for (const k of Object.keys(obj)) if (k !== 'contaId') resto[k] = obj[k]
+  if (!Object.keys(resto).length) return null
+  let s
+  try {
+    s = JSON.stringify(resto, (_k, v) => (typeof v === 'bigint' ? String(v) : v))
+  } catch (_) {
+    return null                      // ciclo, getter que explode: melhor sem dados
+  }
+  if (!s) return null
+  // truncar JSON deixaria um texto que não é jsonb válido — embrulha o pedaço
+  return s.length > 4000 ? JSON.stringify({ _truncado: s.slice(0, 3900) }) : s
+}
+
+function enfileirarLog (nivel, a, b) {
+  if (!LOG_DB) return
+  // a garantia "debug/trace não vão pro banco" mora AQUI, não só no embrulho do
+  // logger: assim ela vale pra qualquer chamada, inclusive uma futura que esqueça
+  // disso. Com LOG_LEVEL=debug ligado num apuro, o volume é de outra ordem.
+  if (nivel === 'debug' || nivel === 'trace') return
+  const obj = (a && typeof a === 'object') ? a : null
+  const msg = typeof a === 'string' ? a : (typeof b === 'string' ? b : '')
+  if (_logFila.length >= LOG_DB_FILA_MAX) { _logDescartadas++; return }
+  const conta = obj && Number.isFinite(obj.contaId) ? obj.contaId : null
+  _logFila.push([conta, nivel, String(msg).slice(0, 500), _dadosDoLog(obj)])
+}
+
+async function gravarLogsPendentes () {
+  if (!_logFila.length && !_logDescartadas) return
+  const lote = _logFila.splice(0, LOG_DB_LOTE)
+  const perdidas = _logDescartadas
+  _logDescartadas = 0
+  const partes = []
+  const params = []
+  lote.forEach((l, i) => {
+    const b = i * 4
+    partes.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4}::jsonb)`)
+    params.push(l[0], l[1], l[2], l[3])
+  })
+  try {
+    if (partes.length) {
+      await pool.query(
+        'insert into wa_qr_log (conta_id, nivel, msg, dados) values ' + partes.join(','), params)
+    }
+    // a perda tem que aparecer NA PRÓPRIA tabela: um diagnóstico com buraco
+    // silencioso é pior que um diagnóstico que avisa onde está o buraco
+    if (perdidas) {
+      await pool.query(
+        `insert into wa_qr_log (nivel, msg, dados) values
+         ('warn','log: fila cheia, linhas descartadas',$1::jsonb)`,
+        [JSON.stringify({ perdidas })])
+    }
+    _logAvisouFalha = false
+  } catch (e) {
+    // uma vez por episódio, e no stdout (aqui não dá pra logar no banco)
+    if (!_logAvisouFalha) {
+      _logAvisouFalha = true
+      logBase.warn({ e: String(e) }, 'espelho do log no banco falhou — seguindo só no stdout')
+    }
+  }
+}
+
+async function limparLogsAntigos () {
+  try {
+    await pool.query(
+      `delete from wa_qr_log where criado_em < now() - ($1 || ' hours')::interval`,
+      [String(LOG_DB_RETENCAO_H)])
+  } catch (_) {}
+}
+
+function comEspelhoNoBanco (base, opcoes) {
+  const soErro = !!(opcoes && opcoes.soErro)
+  const nivel = (n) => (a, b) => {
+    if (!soErro || n === 'error' || n === 'fatal') enfileirarLog(n, a, b)
+    return base[n](a, b)
+  }
+  const espelhado = {
+    fatal: nivel('fatal'),
+    error: nivel('error'),
+    warn: nivel('warn'),
+    info: nivel('info'),
+    debug: (a, b) => base.debug(a, b),      // debug/trace nunca vão pro banco
+    trace: (a, b) => base.trace(a, b),
+    child: (bindings) => comEspelhoNoBanco(base.child(bindings || {}), opcoes)
+  }
+  Object.defineProperty(espelhado, 'level', {
+    get: () => base.level,
+    set: (v) => { base.level = v }
+  })
+  return espelhado
+}
+
+const log = comEspelhoNoBanco(logBase)
+// Do Baileys, só erro. O filtro de ruído fica POR FORA: o que ele rebaixa pra
+// debug (408 de init queries, retry de mensagem nossa) não chega ao espelho.
+const logBaileys = comFiltroDeRuido(comEspelhoNoBanco(logBase, { soErro: true }))
 
 // Sem isso, um erro assíncrono que escapa de um try/catch (ex.: dentro de um
 // listener de evento do Baileys) só aparecia no Render como um stack trace cru
@@ -234,6 +395,151 @@ function pararTimersDaAgenda (s) {
   if (!s) return
   clearTimeout(s._agendaT1); clearTimeout(s._agendaT2); clearInterval(s._agendaT3)
   s._agendaT3 = null
+}
+
+// Carimbo de VIDA da sessão: a última vez que este socket entregou alguma coisa
+// (mensagem, recibo, contato, onda de histórico, conexão abrindo). É o único jeito de
+// distinguir "conta parada" de "socket morto que ninguém percebeu" — ver vigiarSessoes.
+function marcarVivo (contaId) {
+  const s = sessoes.get(contaId)
+  if (!s) return
+  s.ultimoEvento = Date.now()
+  // entregou de verdade = a desconfiança do vigia zera junto (ver tetoMudo)
+  s.reconexoesMudas = 0
+}
+
+// A sessão está MUDA a ponto de merecer um ping? Separado numa função pura porque é
+// a regra que decide religar uma sessão de produção — e religar à toa é justamente o
+// que faz o WhatsApp achar que é abuso.
+//
+// Só entra sessão que se DIZ conectada: 'reconectando' já tem quem cuide dela, e
+// 'aguardando_qr' está esperando gente, não rede. Sem `ultimoEvento` (sessão restaurada
+// por um deploy antes deste campo existir) conta como agora — na dúvida, não mexe.
+function sessaoMuda (s, agora, limite) {
+  if (!s || s.iniciando || !s.sock || s.status !== 'conectado') return false
+  return (agora - (s.ultimoEvento || agora)) >= limite
+}
+
+// Teto de silêncio DESTA sessão: a partir daqui religa mesmo com o ping respondendo.
+// Dobra a cada religamento que não trouxe evento nenhum de volta, até 16×. Sem isso
+// uma conta legitimamente parada (loja fechada, fim de semana) seria religada a cada
+// 45min a noite inteira — e reconexão em série é justamente o que faz o WhatsApp achar
+// que é abuso. Com a dobra são 45min, 1h30, 3h, 6h e 12h; o primeiro evento de verdade
+// zera a conta e o teto volta pro começo (marcarVivo).
+function tetoMudo (s, teto) {
+  const n = Math.min((s && s.reconexoesMudas) || 0, 4)
+  return teto * Math.pow(2, n)
+}
+
+// PING de verdade no socket — o mesmo IQ que o keep-alive do Baileys manda sozinho a
+// cada 30s. Se voltar, a sessão está viva e o silêncio era só falta de assunto.
+async function pingSessao (sock) {
+  if (!sock || typeof sock.query !== 'function') throw new Error('socket sem query')
+  await sock.query({
+    tag: 'iq',
+    attrs: { to: '@s.whatsapp.net', type: 'get', xmlns: 'w:p' },
+    content: [{ tag: 'ping', attrs: {} }]
+  }, PING_TIMEOUT_MS)
+}
+
+// O socket que morre SEM avisar. Aconteceu em produção com a conta 35 (Confeitaria
+// Doce Mell): às 13:28 o serviço parou de receber qualquer evento daquela sessão —
+// nem mensagem, nem eco do celular, nem contato — enquanto as outras contas do mesmo
+// processo seguiam normais. Nada no banco mudou pra ela dali em diante (mensagens,
+// wa_contatos, wa_qr_enviadas e o mapa de @lid param todos no mesmo minuto), e o
+// painel continuou mostrando o chip como CONECTADO, porque o status é o que ficou na
+// memória do último 'open'. Três horas depois a cliente ainda via a caixa parada no
+// mesmo minuto, sem uma linha de erro em lugar nenhum.
+//
+// O keep-alive do Baileys não pegou: ele derruba a conexão quando o servidor fica >35s
+// sem responder, e o ping continuava indo e voltando. Ou seja, o cano estava aberto e
+// o WhatsApp simplesmente não entregava mais nada naquela sessão. Por isso o vigia não
+// pode decidir SÓ pelo ping — ele é a prova rápida de socket morto, não de sessão viva.
+//
+// E o pior não era a queda: era não ter volta. Com `status === 'conectado'` e um `sock`
+// na mão, o iniciarSessao devolve a sessão existente na primeira linha — então nem o
+// botão de reconectar do painel ressuscitava a conta. Só um deploy resolvia.
+//
+// Regra, então, em dois degraus (status/sock são zerados antes de religar, senão o
+// iniciarSessao volta a dizer "já está conectada"):
+//   10min calada  -> pinga (no máximo de 5 em 5min). Ping sem resposta = socket morto,
+//                    religa na hora.
+//   45min calada  -> religa mesmo com o ping respondendo; é o caso da Doce Mell.
+//                    O teto dobra a cada religamento que não trouxe nada — ver tetoMudo.
+// O que cada sessão diz de si mesma, gravado onde dá pra ler (wa_qr_sessao_estado).
+// Uma linha por conta, sobrescrita. Foi a pergunta que ficou sem resposta no
+// chamado: "o serviço acha que está conectado?" — o painel mostrava o estado,
+// mas ele mora na memória do processo e some no deploy seguinte, junto com a
+// prova do que aconteceu.
+async function registrarSessoes () {
+  const agora = Date.now()
+  for (const [contaId, s] of sessoes) {
+    const mudoS = s.ultimoEvento ? Math.round((agora - s.ultimoEvento) / 1000) : null
+    try {
+      await pool.query(
+        `insert into wa_qr_sessao_estado (conta_id, status, ultimo_evento, mudo_s, religamentos, detalhe, atualizado)
+         values ($1,$2,$3,$4,$5,$6::jsonb,now())
+         on conflict (conta_id) do update set
+           status=excluded.status, ultimo_evento=excluded.ultimo_evento, mudo_s=excluded.mudo_s,
+           religamentos=excluded.religamentos, detalhe=excluded.detalhe, atualizado=now()`,
+        [contaId, s.status || '', s.ultimoEvento ? new Date(s.ultimoEvento) : null, mudoS,
+          s.reconexoesMudas || 0,
+          JSON.stringify({ temSock: !!s.sock, iniciando: !!s.iniciando,
+            sincronizando: !!s.sincronizando, syncProgress: s.syncProgress || 0,
+            // quem está com a conta: sem isso, "calada" numa instância que nem
+            // segura a trava se lê como defeito, quando é a outra trabalhando
+            trava: trava.segura(contaId) })])
+    } catch (_) {}   // diagnóstico não pode atrapalhar quem está trabalhando
+  }
+}
+
+async function vigiarSessoes () {
+  const agora = Date.now()
+  for (const [contaId, s] of sessoes) {
+    if (!sessaoMuda(s, agora, MUDO_LIMITE_MS)) continue
+    // Sessão que não é NOSSA não se religa. Com a trava por conta (sessao-lock.js),
+    // silêncio aqui pode ser simplesmente outra instância trabalhando com aquela
+    // credencial — e insistir seria recriar a guerra de sessões que a trava veio
+    // acabar. Sem a trava, o iniciarSessao recusaria de qualquer jeito; parar antes
+    // evita derrubar um socket bom por nada.
+    if (!trava.segura(contaId)) {
+      log.info({ contaId }, 'vigia: conta calada, mas a trava é de outra instância — não mexo')
+      continue
+    }
+    const mudoMs = agora - (s.ultimoEvento || agora)
+    const mudoMin = Math.round(mudoMs / 60000)
+    let motivo = ''
+    if (mudoMs >= tetoMudo(s, MUDO_TETO_MS)) {
+      motivo = 'mudo_alem_do_teto'
+      log.warn({ contaId, mudoMin, religamentos: s.reconexoesMudas || 0 },
+        'vigia: sessão sem entregar nada por tempo demais — religando (o ping não basta)')
+    } else if (agora - (s.ultimoPing || 0) >= PING_ESPACO_MS) {
+      s.ultimoPing = agora
+      try {
+        await pingSessao(s.sock)
+        log.info({ contaId, mudoMin }, 'vigia: sessão calada mas o ping voltou — de olho')
+        continue
+      } catch (e) {
+        motivo = 'ping_sem_resposta'
+        log.warn({ contaId, mudoMin, e: String(e) },
+          'vigia: sessão calada e o ping não voltou — socket morto, religando')
+      }
+    } else {
+      continue   // calada, mas o ping desta rodada já foi
+    }
+    s.reconexoesMudas = (s.reconexoesMudas || 0) + 1
+    s.status = 'reconectando'
+    s.qr = null
+    s.ultimoPing = 0
+    descartarSocket(s.sock, contaId, 'vigia_' + motivo)
+    s.sock = null
+    pararTimersDaAgenda(s)
+    try {
+      await iniciarSessao(contaId)
+    } catch (e) {
+      log.error({ contaId, e: String(e) }, 'vigia: religar falhou — tenta de novo na próxima volta')
+    }
+  }
 }
 
 // contaId -> Map(jid @lid -> jid real @s.whatsapp.net). Usado pra traduzir o ID
@@ -1273,6 +1579,9 @@ async function iniciarSessao (contaId) {
     try {
       sock.ws.on('CB:message', (node) => {
         try {
+          // frame chegando é o sinal de vida mais cru que existe — vale até quando a
+          // mensagem não decodifica e nenhum evento de alto nível é emitido
+          marcarVivo(contaId)
           const a = (node && node.attrs) || {}
           aprenderLid(contaId, a.from, a.sender_pn)
           aprenderLid(contaId, a.recipient, a.peer_recipient_pn)
@@ -1295,6 +1604,7 @@ async function iniciarSessao (contaId) {
     }
     if (connection === 'open') {
       s.status = 'conectado'; s.qr = null
+      s.ultimoEvento = Date.now()   // ponto de partida do vigia — ver vigiarSessoes
       // marca que ESTA sessão chegou a abrir de verdade — é isso (e não o
       // creds.registered, que nunca vira true no fluxo QR) que separa um logout
       // real de uma credencial podre rejeitada logo na primeira tentativa.
@@ -1390,6 +1700,7 @@ async function iniciarSessao (contaId) {
     // log sempre que o evento disparar, mesmo filtrado — sem isso não dava pra saber
     // se o socket estava recebendo mensagem nenhuma ou só descartando pelo filtro.
     log.info({ contaId, type, n: messages.length }, 'messages.upsert recebido')
+    marcarVivo(contaId)
     // MessageUpsertType só tem 'notify' (ao vivo) e 'append' (mensagem legítima que
     // chegou enquanto a conexão teve uma variação breve — "estava offline, aqui está
     // o que você perdeu", node.attrs.offline no Baileys). NÃO é o histórico em massa
@@ -1411,6 +1722,7 @@ async function iniciarSessao (contaId) {
   // (chat-utils.js -> contactAction.fullName). É o nome que o vendedor salvou.
   sock.ev.on('contacts.upsert', (contatos) => {
     log.info({ contaId, n: (contatos || []).length }, 'contacts.upsert recebido')
+    marcarVivo(contaId)
     repassarContatos(contaId, contatos, true).catch((e) =>
       log.warn({ contaId, e: String(e) }, 'repassarContatos falhou'))
   })
@@ -1419,6 +1731,7 @@ async function iniciarSessao (contaId) {
   // interessa pro chat. O lado Python casa pelo id e nunca deixa o status
   // regredir, porque esses eventos chegam fora de ordem com frequência.
   sock.ev.on('messages.update', (atualizacoes) => {
+    marcarVivo(contaId)
     const itens = []
     for (const u of atualizacoes || []) {
       const k = u && u.key
@@ -1435,6 +1748,7 @@ async function iniciarSessao (contaId) {
 
   // Nome do PERFIL (pushName) — reserva, só preenche quando não há nome ainda.
   sock.ev.on('contacts.update', (contatos) => {
+    marcarVivo(contaId)
     repassarContatos(contaId, contatos, false).catch((e) =>
       log.warn({ contaId, e: String(e) }, 'repassarContatos (update) falhou'))
   })
@@ -1444,6 +1758,7 @@ async function iniciarSessao (contaId) {
     // aqui: a tempestade de um pareamento inteiro coube em 28 segundos e passou entre
     // duas medições. `external`/`buffers` são a parte que interessa — é onde o blob de
     // histórico vive (Buffer, fora do heap), e foi o que estourou o RSS da instância.
+    marcarVivo(contaId)
     const _m0 = process.memoryUsage()
     log.info({ contaId, n: messages.length, contatos: (contacts || []).length,
       isLatest, progress, syncType,
@@ -1606,14 +1921,33 @@ const servidor = http.createServer(async (req, res) => {
       if (!contaId) return json(res, 400, { ok: false, erro: 'conta' })
 
       if (req.method === 'POST' && acao === 'iniciar') {
+        // {forcar:true} = derruba o socket atual ANTES de abrir outro. Sem isso o
+        // iniciarSessao devolve a sessão que existe já na primeira linha, e uma sessão
+        // que se diz conectada mas está muda (ver vigiarSessoes) não tinha como ser
+        // ressuscitada por ninguém — nem pelo botão de reconectar do painel.
+        const body = await lerBody(req)
+        if (body && body.forcar) {
+          const atual = sessoes.get(contaId)
+          if (atual) {
+            log.warn({ contaId, status: atual.status }, 'iniciar: reconexão FORÇADA pedida')
+            descartarSocket(atual.sock, contaId, 'reconexao_forcada')
+            pararTimersDaAgenda(atual)
+            atual.sock = null
+            atual.status = 'reconectando'
+            atual.iniciando = false
+          }
+        }
         const s = await iniciarSessao(contaId)
         return json(res, 200, { ok: true, status: s.status, qr: s.qr,
           sincronizando: !!s.sincronizando, syncProgress: s.syncProgress || 0 })
       }
       if (req.method === 'GET' && acao === 'status') {
         const s = sessoes.get(contaId) || { status: 'desconectado', qr: null }
+        // `mudoMs` é o que separa "conectado" de "conectado no papel": quem consome
+        // consegue ver há quanto tempo aquele socket não entrega nada.
         return json(res, 200, { ok: true, status: s.status, qr: s.qr || null,
-          sincronizando: !!s.sincronizando, syncProgress: s.syncProgress || 0 })
+          sincronizando: !!s.sincronizando, syncProgress: s.syncProgress || 0,
+          mudoMs: s.ultimoEvento ? (Date.now() - s.ultimoEvento) : null })
       }
       // Refaz o pedido da AGENDA sem precisar de novo QR (ver agendarResyncAgenda).
       // Serve pra consertar uma sessão que já está de pé com os nomes faltando.
@@ -1793,8 +2127,29 @@ servidor.listen(PORT, () => {
   setTimeout(() => {
     restaurarSessoes().catch((e) => log.error({ e: String(e) }, 'restaurarSessoes: erro solto'))
   }, ESPERA_RESTAURAR_MS)
+  // Vigia das sessões mudas + retrato delas no banco. Uma volta de cada vez (o
+  // await dentro do laço já serializa): duas rodadas em paralelo poderiam religar
+  // a mesma conta duas vezes.
+  let vigiando = false
+  setInterval(() => {
+    if (vigiando) return
+    vigiando = true
+    vigiarSessoes()
+      .catch((e) => log.error({ e: String(e) }, 'vigiarSessoes: erro solto'))
+      .then(registrarSessoes)
+      .catch(() => {})
+      .finally(() => { vigiando = false })
+  }, VIGIA_INTERVALO_MS).unref()
+  // Espelho do log no Postgres: descarrega o lote e limpa o que passou da idade.
+  if (LOG_DB) {
+    setInterval(() => {
+      gravarLogsPendentes().catch(() => {})
+    }, LOG_DB_FLUSH_MS).unref()
+    limparLogsAntigos().catch(() => {})
+    setInterval(() => { limparLogsAntigos().catch(() => {}) }, 60 * 60 * 1000).unref()
+  }
 })
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar }
+module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, marcarVivo, vigiarSessoes, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

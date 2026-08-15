@@ -1380,12 +1380,17 @@ def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=
                -- número cru; o número continua visível no cabeçalho da conversa.
                coalesce(p.empresa, nullif(cv.contato_nome,''), cv.contato_ref, '—'),
                p.cidade, p.uf,
-               lm.texto, lm.autor, lm.membro_id, mm.nome, cnt.n, lm.id
+               lm.texto, lm.autor, lm.membro_id, mm.nome, cnt.n, lm.id,
+               -- o DONO do lead (vm), que não é quem falou por último (mm): a lista
+               -- mostrava só o segundo, e os dois se confundem quando o vendedor
+               -- responde por último.
+               p.vendedor_id, vm.nome
           from conversas cv
           left join prospeccao p on p.id = cv.prospeccao_id
           left join lateral (select id, texto, autor, membro_id from mensagens
                               where conversa_id=cv.id order by criado_em desc limit 1) lm on true
           left join membros mm on mm.id = lm.membro_id
+          left join membros vm on vm.id = p.vendedor_id
           join lateral (select count(*) n from mensagens where conversa_id=cv.id) cnt on true
          where {' and '.join(where)}
          order by cv.ultima_msg_em desc limit 100""", tuple(params)).fetchall()
@@ -1402,7 +1407,13 @@ def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=
         out.append({"id": r[0], "canal": r[1], "canal_rot": CANAL_ROT.get(r[1], r[1]),
                     "status": r[2], "quando": r[3], "empresa": r[5], "cidade": r[6],
                     "uf": r[7], "preview": _preview(r[8]), "quem": quem, "n": r[12],
-                    "ult_autor": r[9], "ult_msg_id": r[13] or 0})
+                    "ult_autor": r[9], "ult_msg_id": r[13] or 0,
+                    # `eh_lead` decide se a linha ganha marcador de dono. Conversa que
+                    # ainda não virou lead não tem responsável nem o que atribuir — e
+                    # é a MAIORIA da caixa; marcá-las de "sem responsável" seria
+                    # alarme falso em quase toda linha.
+                    "eh_lead": r[4] is not None, "lead_id": r[4],
+                    "dono_id": r[14], "dono": r[15] or ""})
     return out
 
 
@@ -1460,6 +1471,66 @@ def _wa_qr_sincronizando(conta_id) -> bool:
     return sincronizando
 
 
+_WA_CHIP_CACHE: dict = {}   # conta_id -> (quando, dict)
+
+
+def _wa_chip(conta_id) -> dict:
+    """Qual chip está enviando o WhatsApp desta empresa, e como ele está.
+
+    O número existia no banco e não aparecia em tela nenhuma: quem manda pelo QR é o
+    aparelho da credencial (`wa_qr_auth.creds` → `me.id`), e o `canais_config.
+    identificador` guarda só um rótulo interno ('qr:35'). Sem isso, quem dispara
+    campanha não sabia de qual número ia sair.
+
+    Devolve {provedor, nome, numero, estado}. `estado`: conectado | sincronizando |
+    caido | sem_chip. Cache de 15s — o estado vem de um HTTP ao serviço Node, e o
+    cabeçalho é renderizado em toda navegação do painel.
+    """
+    import time
+    agora = time.time()
+    hit = _WA_CHIP_CACHE.get(conta_id)
+    if hit and (agora - hit[0]) < 15:
+        return hit[1]
+    chip = {"provedor": "", "nome": "", "numero": "", "estado": "sem_chip"}
+    try:
+        with get_pool().connection() as c:
+            r = c.execute("""select coalesce(provedor,'twilio'), coalesce(identificador,'')
+                               from canais_config
+                              where conta_id=%s and canal='whatsapp' and ativo""",
+                          (conta_id,)).fetchone()
+            if r:
+                chip["provedor"] = r[0]
+                if r[0] == "qr":
+                    cred = c.execute(
+                        """select conteudo::json->'me'->>'name',
+                                  conteudo::json->'me'->>'id'
+                             from wa_qr_auth where conta_id=%s and arquivo='creds'""",
+                        (conta_id,)).fetchone()
+                    if cred:
+                        chip["nome"] = (cred[0] or "").strip()[:60]
+                        # "558698392961:14@s.whatsapp.net" → só os dígitos do número
+                        chip["numero"] = _tel_fmt_br((cred[1] or "").split(":")[0].split("@")[0])
+                else:
+                    # twilio/cloud: o identificador É o número da empresa
+                    chip["numero"] = _tel_fmt_br(r[1])
+        if chip["provedor"] == "qr":
+            from finance import whatsapp_qr as _qr
+            if _qr.configurado():
+                st = (_qr.status(conta_id) or {}).get("status") or ""
+                chip["estado"] = ("sincronizando" if _wa_qr_sincronizando(conta_id)
+                                  else "conectado" if st == "conectado" else "caido")
+            else:
+                chip["estado"] = "caido"
+        elif chip["provedor"]:
+            # na API oficial não existe "sessão que cai": ou o canal está configurado
+            # ou não está. Não invento estado que o provedor não reporta.
+            chip["estado"] = "conectado" if chip["numero"] else "sem_chip"
+    except Exception:  # noqa: BLE001
+        chip = {"provedor": "", "nome": "", "numero": "", "estado": "sem_chip"}
+    _WA_CHIP_CACHE[conta_id] = (agora, chip)
+    return chip
+
+
 @router.get("/painel/prospeccao/comunicacao/lista")
 def prospeccao_comunicacao_lista(request: Request, canal: str = "", vendedor: str = "", escopo: str = ""):
     """Lista de conversas em JSON (pro polling em tempo real)."""
@@ -1512,6 +1583,7 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
                    secao_ativa="prospeccao", aba=aba, convs=convs, escopo=escopo, canal=canal,
                    canais=_canais_status(pool, ctx["conta_id"]), canal_rot=CANAL_ROT,
                    gerencia=ctx["gerencia"], vendedores=vends, filtro_vend=filtro_vend,
+                   pode_atribuir=ctx["pode_atribuir"], chip=_wa_chip(ctx["conta_id"]),
                    remetente=_ein_remetente(pool, ctx["conta_id"]), tem_ia=_tem_ia(),
                    ag_cfg=ag_cfg, ag_conhec=ag_conhec, perfil=perfil,
                    dist_cfg=dist_cfg, dist_membros=dist_membros,
@@ -7544,6 +7616,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .cx-wrap{max-width:1180px;margin:0 auto;padding:0 .3rem}
 .cx-head{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap}
 .cx-head code{background:var(--card);border:1px solid var(--borda);border-radius:6px;padding:.12rem .45rem;color:var(--verde-claro);font-size:.82rem}
+.cx-chip-faixa{font-size:.82rem;color:var(--txt-mut);margin-top:.25rem;display:flex;
+  align-items:center;gap:.4rem;flex-wrap:wrap}
+.cx-chip-faixa b{color:var(--txt);font-weight:600}
+.cx-chip-faixa a{color:var(--verde-claro)}
+.cx-chip-faixa .pt{width:7px;height:7px;border-radius:50%;flex-shrink:0}
 .cx-filtros{display:flex;gap:.5rem;flex-wrap:wrap;margin:.8rem 0}
 /* 2 colunas (lista + conversa) enquanto nada está aberto; vira 3 (com contexto)
    só ao abrir uma conversa — evita os 2 quadros vazios e dá mais respiro. */
@@ -7561,6 +7638,27 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .cx-conv .nm b{font-size:.85rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cx-conv .nm .t{color:var(--txt-mut);font-size:.7rem;white-space:nowrap}
 .cx-conv .pre{color:var(--txt-mut);font-size:.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:.15rem}
+/* o dono do lead em linha própria: das três posições testadas, foi a única que não
+   trunca o nome nem desalinha quando a coluna fica estreita. */
+/* `flex` (nível de bloco), e não `inline-flex`: os filhos do .mid são spans inline,
+   então em inline-flex o dono grudava no fim da prévia e a quebra virava sorteio do
+   tamanho do texto — exatamente o defeito da opção A que a gente descartou. Bloco
+   força a linha própria; o width:fit-content mantém o hover do tamanho do texto. */
+.cx-conv .cx-dono{display:flex;width:fit-content;align-items:center;gap:.2rem;
+  font-size:.72rem;color:var(--txt-mut);margin-top:.15rem;border-radius:6px;
+  padding:.05rem .2rem}
+.cx-conv .cx-dono.vazio{color:var(--ambar)}
+.cx-conv .cx-dono.clicavel{cursor:pointer}
+.cx-conv .cx-dono.clicavel:hover{background:var(--card-2);color:var(--txt)}
+.cx-conv .cx-dono .ca{font-size:.6rem;opacity:.7}
+.cx-dmenu{position:fixed;z-index:70;background:var(--card);border:1px solid var(--borda);
+  border-radius:10px;padding:.3rem;min-width:190px;box-shadow:0 10px 30px rgba(0,0,0,.6)}
+.cx-dmenu .cab{font-family:var(--mono);font-size:.62rem;color:var(--txt-mut);
+  text-transform:uppercase;letter-spacing:.08em;padding:.3rem .5rem}
+.cx-dmenu .op{padding:.35rem .5rem;border-radius:7px;font-size:.82rem;cursor:pointer}
+.cx-dmenu .op:hover{background:var(--neon-fundo);color:var(--neon)}
+.cx-dmenu .op.sem{color:var(--txt-mut);border-top:1px solid var(--borda);margin-top:.2rem}
+.cx-dmenu .op.atual{background:var(--neon-fundo);color:var(--neon)}
 .cx-cn{font-size:.66rem;padding:.05rem .4rem;border-radius:999px;border:1px solid;margin-top:.25rem;display:inline-block}
 .cn-mail{color:var(--azul,#5b9bd5);border-color:#2f4a63;background:#14212e}
 .cn-wpp{color:var(--verde);border-color:var(--neon-borda);background:var(--neon-fundo)}
@@ -7657,6 +7755,29 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <div>
       <h2 class="tt">📨 Comunicação</h2>
       <div class="mut" style="font-size:.82rem;margin-top:.15rem">Enviando e-mails como {% if remetente %}<code>{{ remetente }}</code> · respostas voltam pro e-mail de quem enviou{% else %}<span style="color:var(--coral)">(e-mail ainda não configurado)</span>{% endif %}</div>
+      {# de qual número sai o WhatsApp. O dado já existia (a credencial do QR guarda
+         o aparelho conectado) e não aparecia em tela nenhuma — quem dispara campanha
+         não sabia de onde ia sair. #}
+      <div class="cx-chip-faixa">
+        {% if chip.estado == 'conectado' %}
+          <span class="pt" style="background:var(--neon)"></span>Enviando WhatsApp pelo chip
+          {% if chip.nome %}<b>{{ chip.nome }}</b> · {% endif %}<code>{{ chip.numero }}</code>
+          · <span style="color:var(--neon)">conectado</span>
+        {% elif chip.estado == 'sincronizando' %}
+          <span class="pt" style="background:var(--ambar)"></span>Chip
+          {% if chip.nome %}<b>{{ chip.nome }}</b> · {% endif %}<code>{{ chip.numero }}</code>
+          · <span style="color:var(--ambar)">importando as conversas…</span>
+        {% elif chip.estado == 'caido' %}
+          <span class="pt" style="background:var(--coral)"></span>Chip
+          {% if chip.nome %}<b>{{ chip.nome }}</b> · {% endif %}<code>{{ chip.numero }}</code>
+          · <span style="color:var(--coral)">desconectado</span> —
+          <a href="/painel/prospeccao/comunicacao?aba=canais">reconectar</a>
+        {% else %}
+          <span class="pt" style="background:var(--coral)"></span>
+          <span style="color:var(--coral)">Nenhum chip de WhatsApp conectado</span> —
+          <a href="/painel/prospeccao/comunicacao?aba=canais">conectar</a>
+        {% endif %}
+      </div>
     </div>
   </div>
 
@@ -8283,6 +8404,10 @@ var _cxConv=null,_cxSig='',_cxAg=null,_cxPr=null,_cxTimer=null,_cxSeen={},_cxLis
 // quando o envio terminasse, que é justamente o que fazia o chat "travar".
 var _cxPend=[],_cxPendSeq=0;
 var _cxEscopo='{{ escopo }}';   // 'email' (aba E-mails) ou 'msg' (aba Conversas)
+// quem pode trocar o responsável direto na lista, e por quem trocar. Mesma regra da
+// ficha do lead — a lista não pode ser mais permissiva que ela.
+var _cxPodeAtrib={{ 'true' if pode_atribuir else 'false' }};
+var _cxVends=[{% for v in vendedores %}{id:{{ v.id }},nome:{{ v.nome|tojson }}}{% if not loop.last %},{% endif %}{% endfor %}];
 function cxEsc(s){var d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
 // Balões do que ainda está saindo. Redesenhados junto com o thread, então
 // sobrevivem ao poll — e o usuário nunca vê a própria mensagem piscar.
@@ -8401,7 +8526,55 @@ function cxListItem(c){
     +'<span class="av">'+cxEsc(av)+'</span><span class="mid">'
     +'<span class="nm"><b>'+cxEsc(c.empresa)+'</b><span class="t">'+cxEsc(c.quando||'')+(unread?' <span class="cx-undot"></span>':'')+'</span></span>'
     +'<span class="pre">'+cxEsc(c.quem)+': '+cxEsc(c.preview)+'</span>'
+    +cxDonoLinha(c)
     +'<span class="cx-cn '+cnc+'">'+cxEsc(c.canal_rot)+(c.n>1?(' · '+c.n):'')+'</span></span></button>';
+}
+// O dono do lead, em linha própria. Só pra conversa que JÁ é lead: a maior parte da
+// caixa é contato que ainda não virou lead, e marcar todas de "sem responsável" seria
+// alarme falso na maioria das linhas.
+function cxDonoLinha(c){
+  if(!c.eh_lead)return '';
+  var txt=c.dono?('👤 '+cxEsc(c.dono)):'👤 sem responsável';
+  var cls='cx-dono'+(c.dono?'':' vazio')+(_cxPodeAtrib?' clicavel':'');
+  var acao=_cxPodeAtrib
+    ?' onclick="cxDonoMenu(event,'+c.lead_id+','+(c.dono_id||0)+',this)" title="Trocar o responsável"'
+    :'';
+  return '<span class="'+cls+'"'+acao+'>'+txt+(_cxPodeAtrib?' <span class="ca">▾</span>':'')+'</span>';
+}
+// Popover de trocar o responsável. Um <select> por linha seria mais simples, mas com
+// 100 conversas na tela são 100 selects — e o clique deles roubaria o de abrir a
+// conversa. Aqui só existe um menu por vez, criado no clique.
+function cxDonoFechar(){var m=document.getElementById('cx-dmenu');if(m)m.parentNode.removeChild(m);
+  document.removeEventListener('click',cxDonoFora,true);}
+function cxDonoFora(e){var m=document.getElementById('cx-dmenu');if(m&&!m.contains(e.target))cxDonoFechar();}
+function cxDonoMenu(ev,leadId,donoId,el){
+  ev.stopPropagation();ev.preventDefault();   // não abrir a conversa junto
+  cxDonoFechar();
+  var r=el.getBoundingClientRect();
+  var m=document.createElement('div');
+  m.id='cx-dmenu';m.className='cx-dmenu';
+  m.style.left=Math.round(r.left)+'px';
+  m.style.top=Math.round(r.bottom+6)+'px';
+  var h='<div class="cab">Responsável</div>';
+  _cxVends.forEach(function(v){
+    var atual=(v.id===donoId);
+    h+='<div class="op'+(atual?' atual':'')+'" onclick="cxDonoEscolher('+leadId+','+v.id+')">'
+      +cxEsc(v.nome)+(atual?' ✓':'')+'</div>';});
+  h+='<div class="op sem'+(donoId?'':' atual')+'" onclick="cxDonoEscolher('+leadId+',0)">'
+    +'— sem responsável —'+(donoId?'':' ✓')+'</div>';
+  m.innerHTML=h;
+  document.body.appendChild(m);
+  setTimeout(function(){document.addEventListener('click',cxDonoFora,true);},0);
+}
+function cxDonoEscolher(leadId,vendId){
+  cxDonoFechar();
+  var fd=new FormData();fd.append('vendedor_id',vendId?String(vendId):'');
+  fetch('/painel/prospeccao/'+leadId+'/atribuir',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
+    .then(function(r){return r.json();}).then(function(d){
+      if(!d.ok){alert(d.erro||'Não consegui trocar o responsável.');return;}
+      cxPollList();                       // a lista se redesenha com o dono novo
+      if(_cxConv)cxOpen(document.getElementById('cxc-'+_cxConv),_cxConv);
+    }).catch(function(){alert('Falha de rede.');});
 }
 function cxPollList(){
   var box=document.getElementById('cx-list');if(!box)return;

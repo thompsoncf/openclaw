@@ -290,12 +290,24 @@ def _avisar_falha(linha: dict) -> None:
 # 5. Orquestração
 # --------------------------------------------------------------------------
 
-def _classificar(status_txt: str, status_num) -> bool | None:
+def _classificar(status_txt: str, status_num, tipo: str = "deploy_ended") -> bool | None:
     """True = deu certo, False = quebrou, None = não dá pra afirmar.
 
-    Prefere o status em TEXTO (autoritativo e legível, vem do deploy na API) e
-    só cai no número quando a API não respondeu. Devolver None em vez de chutar
-    False evita alerta falso quando o enriquecimento não rolou.
+    Prefere o status em TEXTO (autoritativo e legível) e só cai no número
+    quando não veio texto. Devolver None em vez de chutar False evita alerta
+    falso — e alerta falso mata a confiança no alerta inteiro.
+
+    O `tipo` importa por causa de um falso positivo real, visto em produção:
+
+        18:42  FALHA  openclaw-web-bcu3  pre_deploy_ended
+
+    O pre-deploy tinha ido bem (o deploy ficou `live` um minuto depois), mas o
+    `details.status` numérico do evento não era 2 e a regra "2 = sucesso"
+    marcou como falha — disparando alerta à toa. Aquele 2 vem do exemplo
+    oficial do Render e vale para `deploy_ended`; cada tipo de evento tem o
+    seu enum, e os outros não estão documentados. Então o número só é lido
+    onde a gente sabe o que ele significa. Nos demais tipos o veredito sai do
+    TEXTO (que o corpo do webhook costuma trazer) ou fica None.
     """
     t = (status_txt or "").strip().lower()
     if t in _TEXTO_SUCESSO:
@@ -304,7 +316,7 @@ def _classificar(status_txt: str, status_num) -> bool | None:
         return False
     if t in ("canceled", "cancelled"):
         return None            # cancelado por gente: não é falha, não alerta
-    if isinstance(status_num, int):
+    if tipo == "deploy_ended" and isinstance(status_num, int):
         return status_num == _STATUS_SUCESSO
     return None
 
@@ -367,15 +379,22 @@ def processar(corpo: bytes, headers, pool=None) -> dict:
     if servico_id and linha["deploy_id"]:
         dep = _deploy(servico_id, linha["deploy_id"])
         if dep:
-            # o status do deploy e' mais fino que o do webhook ("build_failed"
-            # em vez de "failed"): diz em que etapa quebrou. So' substitui se
-            # veio mesmo — `or` pra nao apagar o que o corpo ja' informou.
-            linha["status"] = dep.get("status") or linha["status"]
+            # O commit vale pra QUALQUER tipo: saber de qual codigo o evento
+            # fala ajuda sempre.
             commit = dep.get("commit") or {}
             linha["commit_id"] = commit.get("id")
             linha["commit_msg"] = commit.get("message")
+            # O STATUS do deploy, nao. Ele descreve o deploy inteiro, entao
+            # copia-lo pra um evento de etapa mente: com todos os 64 eventos
+            # assinados, `build_started` e companhia apareciam no historico
+            # como "live" — o desfecho final carimbado num evento que so'
+            # marcava o comeco. Mais fino que o do webhook ("build_failed" em
+            # vez de "failed"), e' o melhor status QUANDO o evento e' o do
+            # desfecho. `or` pra nao apagar o que o corpo ja' informou.
+            if tipo == "deploy_ended":
+                linha["status"] = dep.get("status") or linha["status"]
 
-    linha["sucesso"] = _classificar(linha["status"], linha["status_num"])
+    linha["sucesso"] = _classificar(linha["status"], linha["status_num"], tipo)
 
     # Log só na falha: em deploy que deu certo seria só peso no banco.
     if linha["sucesso"] is False and servico_id:

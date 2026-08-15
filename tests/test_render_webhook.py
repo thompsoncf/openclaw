@@ -171,6 +171,29 @@ def test_classificacao_de_status(texto, num, esperado):
     assert re_._classificar(texto, num) is esperado
 
 
+@pytest.mark.parametrize("tipo,num,esperado", [
+    # o "2 = sucesso" so' vale onde a gente sabe que vale
+    ("deploy_ended", 2, True),
+    ("deploy_ended", 5, False),
+    # REGRESSAO (visto em producao): pre_deploy_ended com numero != 2 virava
+    # FALHA e disparava alerta, mesmo o pre-deploy tendo ido bem — o deploy
+    # ficou `live` um minuto depois. Cada tipo tem seu enum; sem texto, cala.
+    ("pre_deploy_ended", 1, None),
+    ("pre_deploy_ended", 5, None),
+    ("build_started", 0, None),
+    ("cron_job_run_ended", 3, None),
+])
+def test_numero_so_vale_em_deploy_ended(tipo, num, esperado):
+    assert re_._classificar("", num, tipo) is esperado
+
+
+def test_texto_vale_em_qualquer_tipo():
+    """O texto vem do proprio evento, entao nao depende de enum nosso: um cron
+    que falhou tem que continuar alertando."""
+    assert re_._classificar("succeeded", None, "cron_job_run_ended") is True
+    assert re_._classificar("failed", None, "cron_job_run_ended") is False
+
+
 # ------------------------------------------------------------------- fluxo
 
 @pytest.fixture()
@@ -306,6 +329,58 @@ def test_api_refina_o_status_grosso_do_webhook(limpo, render_api_falsa):
     assert status == "build_failed"
 
 
+def test_pre_deploy_ended_nao_vira_falha_nem_alerta(limpo, render_api_falsa):
+    """REGRESSAO do falso positivo de producao.
+
+    Com os 64 eventos assinados, chega `pre_deploy_ended` junto. O
+    `details.status` dele nao e' 2, e a regra do deploy marcava FALHA e
+    mandava Telegram — num pre-deploy que tinha ido bem.
+    """
+    render_api_falsa.update(status="live", status_num=1)
+    corpo = json.dumps({
+        "type": "pre_deploy_ended", "timestamp": "2026-08-15T18:42:00Z",
+        "data": {"id": "evt-pre", "serviceId": "srv-xyz",
+                 "serviceName": "openclaw-web-bcu3"},
+    }).encode()
+
+    re_.processar(corpo, {"webhook-id": "msg_pre"}, pool=limpo)
+
+    assert render_api_falsa["alertas"] == []          # o que mais importa
+    with limpo.connection() as c:
+        sucesso = c.execute("select sucesso from render_evento").fetchone()[0]
+    assert sucesso is None
+
+
+def test_evento_de_etapa_nao_herda_o_status_do_deploy(limpo, render_api_falsa):
+    """`build_started` aparecia no historico como "live": o desfecho final
+    carimbado num evento que so' marcava o comeco."""
+    render_api_falsa.update(status="live", status_num=2)
+    corpo = json.dumps({
+        "type": "build_started", "timestamp": "2026-08-15T18:41:00Z",
+        "data": {"id": "evt-bs", "serviceId": "srv-xyz"},
+    }).encode()
+
+    re_.processar(corpo, {"webhook-id": "msg_bs"}, pool=limpo)
+
+    with limpo.connection() as c:
+        status, commit = c.execute(
+            "select status, commit_id from render_evento").fetchone()
+    assert status is None                    # nao mente dizendo "live"
+    assert commit == "abc123def456"          # mas o commit continua util
+
+
+def test_deploy_ended_continua_recebendo_o_status_fino(limpo, render_api_falsa):
+    """A correcao acima nao pode ter tirado o status do evento que importa."""
+    render_api_falsa.update(status="build_failed", status_num=4)
+    re_.processar(_corpo(), {"webhook-id": "msg_de"}, pool=limpo)
+
+    with limpo.connection() as c:
+        status, sucesso = c.execute(
+            "select status, sucesso from render_evento").fetchone()
+    assert (status, sucesso) == ("build_failed", False)
+    assert len(render_api_falsa["alertas"]) == 1
+
+
 def test_corpo_invalido_nao_estoura(limpo):
     """Webhook que estoura viraria reentrega em loop no Render."""
     r = re_.processar(b"nao sou json", {"webhook-id": "msg_lixo"}, pool=limpo)
@@ -398,6 +473,59 @@ def test_rota_nao_duplica_reentrega(cliente, limpo):
     cliente.post("/webhook/render", content=corpo, headers=h)
     cliente.post("/webhook/render", content=corpo, headers=h)
     assert _linhas(limpo) == 1
+
+
+# ------------------------------------------------- migracao 155 (corrige dado)
+
+def test_migracao_155_limpa_o_veredito_falso_e_poupa_o_legitimo(limpo):
+    """Semeia exatamente o que a producao gravou antes da correcao.
+
+    O ponto delicado e' o que NAO pode ser mexido: o cron que reporta
+    `data.status` no proprio corpo decidiu pelo TEXTO, nao pelo enum do
+    deploy — esse veredito esta' certo.
+    """
+    linhas = [
+        # (webhook_id, tipo, status, sucesso, data.status no payload)
+        ("m1", "pre_deploy_ended", None, False, None),   # falso FALHA
+        ("m2", "deploy_started", "live", True, None),    # "live" emprestado
+        ("m3", "deploy_ended", "live", True, None),      # desfecho: preserva
+        ("m4", "cron_job_run_ended", "succeeded", True, "succeeded"),  # preserva
+        ("m5", "cron_job_run_ended", "failed", False, "failed"),       # preserva
+    ]
+    with limpo.connection() as c:
+        for wid, tipo, status, sucesso, dstatus in linhas:
+            data = {"id": f"evt-{wid}", "serviceId": "srv-x"}
+            if dstatus:
+                data["status"] = dstatus
+            c.execute(
+                "insert into render_evento (webhook_id, tipo, status, sucesso, payload)"
+                " values (%s,%s,%s,%s,%s::jsonb)",
+                (wid, tipo, status, sucesso, json.dumps({"data": data})))
+        c.commit()
+
+    base = Path(__file__).resolve().parent.parent / "db" / "migracoes"
+    sql = (base / "155_render_evento_corrige_veredito.sql").read_text(encoding="utf-8")
+    with limpo.connection() as c:
+        c.execute(sql)
+        c.commit()
+
+    with limpo.connection() as c:
+        got = dict((w, (s, su)) for w, s, su in c.execute(
+            "select webhook_id, status, sucesso from render_evento").fetchall())
+
+    assert got["m1"] == (None, None)          # falso FALHA some
+    assert got["m2"] == (None, None)          # "live" emprestado some
+    assert got["m3"] == ("live", True)        # desfecho intacto
+    assert got["m4"] == ("succeeded", True)   # cron decidido por texto: intacto
+    assert got["m5"] == ("failed", False)     # cron que falhou segue falha
+
+    # idempotente: rodar de novo nao muda mais nada
+    with limpo.connection() as c:
+        c.execute(sql)
+        c.commit()
+        again = dict((w, (s, su)) for w, s, su in c.execute(
+            "select webhook_id, status, sucesso from render_evento").fetchall())
+    assert again == got
 
 
 def test_rota_inerte_sem_segredo(limpo, monkeypatch):

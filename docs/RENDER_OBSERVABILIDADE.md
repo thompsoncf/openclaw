@@ -145,6 +145,11 @@ select servico_nome,
  group by servico_nome;
 ```
 
+Essa conta só fecha porque `sucesso` é `NULL` em quem não dá veredito. Todo
+deploy que deu certo vira `deactivated` quando o próximo sobe — se isso
+contasse como acerto, cada deploy entraria duas vezes no `ok` e a taxa sairia
+inflada. Vale o mesmo pra `canceled`. Ambos ficam de fora dos dois lados.
+
 O corpo cru do webhook fica em `payload` (jsonb) e a resposta da API em
 `detalhes` — o Render adiciona campos sem avisar, e assim nada se perde mesmo
 sem coluna mapeada.

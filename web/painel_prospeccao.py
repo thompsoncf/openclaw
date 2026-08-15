@@ -116,7 +116,24 @@ def _wa_equivalentes(numero: str) -> list[str]:
     um celular do 86 e de um do 11. As duas grafias do mesmo número resolvem o
     caso real sem abrir essa porta.
 
-    Fora do Brasil (ou número curto demais pra ter forma dupla) devolve só ele."""
+    Fora do Brasil (ou número curto demais pra ter forma dupla) devolve só ele.
+
+    SOBRE A FORMA DA CONSULTA que usa isto. Quem procura conversa por número filtra
+    SEMPRE em duas etapas:
+
+        right(regexp_replace(contato_ref, '\\D', '', 'g'), 8) = <8 finais>   -- índice
+        and regexp_replace(contato_ref, '\\D', '', 'g') = any(<equivalentes>)  -- precisão
+
+    A primeira linha é literalmente a expressão do índice `idx_conversas_num8`
+    (migração 156) — e índice de EXPRESSÃO só é usado quando a consulta repete a
+    expressão idêntica, inclusive o '\\D' e o 'g'. Sem ela, cada mensagem que chega
+    varre a tabela de conversas inteira; foi assim que a agenda de um pareamento
+    derrubou o app em 2.446 respostas 502 no dia 15/08. A segunda linha é o que
+    impede o casamento frouxo: as duas grafias do MESMO número compartilham os 8
+    finais, mas os 8 finais sozinhos também casam com um celular de outro DDD.
+    Índice pra achar rápido, igualdade exata pra não errar de pessoa.
+
+    Se algum dia estas consultas mudarem de forma, o índice muda junto."""
     d = _so_digitos(numero)
     if not d:
         return []
@@ -2695,6 +2712,47 @@ def _nome_da_agenda(c, conta_id, numero: str) -> str:
     return ((r[0] if r else "") or "").strip()[:120]
 
 
+def _conversa_wa_do_contato(c, conta_id, lead_id, numero):
+    """A conversa de WhatsApp deste contato: a do LEAD, se ele já tiver uma; senão a
+    do NÚMERO, nas duas grafias (ver _wa_equivalentes). Devolve (id, prospeccao_id)
+    ou None. Usada pelos três caminhos que gravam conversa — entrada, eco de saída e
+    o botão "Agora não" — que antes repetiam a mesma busca com diferenças sutis.
+
+    DUAS CONSULTAS, e não uma com OR, porque o OR custa a tabela inteira. Medido
+    com 60 mil conversas: a versão com `prospeccao_id=%s or right(...)=%s` fazia
+    Seq Scan e removia 60.000 linhas pelo filtro (34ms por mensagem recebida);
+    separadas, cada metade cai num índice que já existe —
+
+        idx_conversas_lead_canal   (conta_id, prospeccao_id, canal), UNIQUE
+        idx_conversas_num8         (conta_id, canal, right(regexp_replace(...), 8))
+
+    O planner não combina os dois num BitmapOr aqui porque o segundo lado é uma
+    expressão. E varredura de conversas por mensagem é exatamente o que derrubou o
+    app em 15/08 (2.446 respostas 502 durante a importação de uma agenda) — a
+    migração 156 nasceu disso; não faz sentido reintroduzir o problema ao lado.
+
+    A busca por número tem SEMPRE os dois filtros: `right(...)=<8 finais>` é o que o
+    índice enxerga, e a igualdade exata é o que impede confundir com um celular de
+    outro DDD que termine igual."""
+    d = _so_digitos(numero)
+    alvo8 = d[-8:] if len(d) >= 8 else d
+    if lead_id:
+        # UNIQUE (conta_id, prospeccao_id, canal): é uma linha ou nenhuma
+        r = c.execute(
+            """select id, prospeccao_id from conversas
+                where conta_id=%s and canal='whatsapp' and prospeccao_id=%s""",
+            (conta_id, lead_id)).fetchone()
+        if r:
+            return r
+    return c.execute(
+        r"""select id, prospeccao_id from conversas
+             where conta_id=%s and canal='whatsapp'
+               and right(regexp_replace(contato_ref, '\D', '', 'g'), 8) = %s
+               and regexp_replace(contato_ref, '\D', '', 'g') = any(%s)
+             order by (prospeccao_id is not null) desc, ultima_msg_em desc limit 1""",
+        (conta_id, alvo8, _wa_equivalentes(d) or [d])).fetchone()
+
+
 def _ja_conversou(c, conta_id, lead_id) -> bool:
     """Já houve troca de verdade com esse lead — ou seja, a mensagem que está chegando
     agora não é a primeira coisa que acontece.
@@ -2756,9 +2814,10 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
         orfa = c.execute(
             r"""select id, coalesce(nullif(contato_nome,''),'') from conversas
                  where conta_id=%s and canal='whatsapp' and prospeccao_id is null
-                   and regexp_replace(coalesce(contato_ref,''), '\D', '', 'g') = any(%s)
+                   and right(regexp_replace(contato_ref, '\D', '', 'g'), 8) = %s
+                   and regexp_replace(contato_ref, '\D', '', 'g') = any(%s)
                  order by ultima_msg_em desc limit 1""",
-            (conta_id, equivalentes)).fetchone()
+            (conta_id, alvo8, equivalentes)).fetchone()
         nome_orfa = orfa[1] if orfa else ""
         # contato NOVO de verdade (landing/WhatsApp) → vira lead QUENTE, não atribuído (o dono distribui).
         # Nome: primeiro o da AGENDA do vendedor (o melhor que existe), depois o do
@@ -2802,14 +2861,7 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
     # por último a mais recente. Exigir `prospeccao_id is null` pra casar por número,
     # como era antes, deixava de fora a conversa pendurada em OUTRA ficha do mesmo
     # telefone — e o inbox ganhava uma segunda thread do mesmo cliente.
-    conv = c.execute(
-        r"""select id, prospeccao_id from conversas
-             where conta_id=%s and canal='whatsapp'
-               and (prospeccao_id=%s
-                    or regexp_replace(coalesce(contato_ref,''), '\D', '', 'g') = any(%s))
-             order by (prospeccao_id=%s) desc nulls last,
-                      (prospeccao_id is not null) desc, ultima_msg_em desc limit 1""",
-        (conta_id, lead_id, equivalentes, lead_id)).fetchone()
+    conv = _conversa_wa_do_contato(c, conta_id, lead_id, remetente)
     if conv:
         conv_id = conv[0]
         if conv[1] is None:
@@ -2887,15 +2939,8 @@ def _wa_conversa_simples(c, conta_id, lead_id, remetente, corpo, sid) -> int:
     Mesma busca do caminho normal de entrada (_wa_inbound_conversa): as duas grafias
     do número e sem exigir conversa órfã — senão o "Agora não" abre uma thread
     paralela justamente de quem já estava conversando."""
-    conv = c.execute(
-        r"""select id, prospeccao_id from conversas
-             where conta_id=%s and canal='whatsapp'
-               and (prospeccao_id=%s
-                    or regexp_replace(coalesce(contato_ref,''), '\D', '', 'g') = any(%s))
-             order by (prospeccao_id=%s) desc nulls last,
-                      (prospeccao_id is not null) desc, ultima_msg_em desc limit 1""",
-        (conta_id, lead_id, _wa_equivalentes(remetente) or [_so_digitos(remetente)],
-         lead_id)).fetchone()
+    remetente = _so_digitos(remetente)
+    conv = _conversa_wa_do_contato(c, conta_id, lead_id, remetente)
     if conv:
         conv_id = conv[0]
         if conv[1] is None:
@@ -3516,11 +3561,7 @@ def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando, de_mim=Fa
     antigo, e casando cru ele virava uma segunda conversa do mesmo contato."""
     remetente = _so_digitos(remetente)
     alvo8 = remetente[-8:] if len(remetente) >= 8 else remetente
-    conv = c.execute(
-        r"""select id from conversas where conta_id=%s and canal='whatsapp'
-             and regexp_replace(coalesce(contato_ref,''), '\D', '', 'g') = any(%s)
-             order by (prospeccao_id is not null) desc, ultima_msg_em desc limit 1""",
-        (conta_id, _wa_equivalentes(remetente) or [remetente])).fetchone()
+    conv = _conversa_wa_do_contato(c, conta_id, None, remetente)
     if conv:
         conv_id = conv[0]
     else:
@@ -3622,13 +3663,7 @@ def _wa_saida_conversa(c, conta_id, destinatario, corpo, sid):
              where conta_id=%s and right(regexp_replace(coalesce(whatsapp, telefone, ''), '\D', '', 'g'), 8) = %s
              order by atualizado_em desc limit 1""", (conta_id, alvo8)).fetchone()
     lead_id = lead[0] if lead else None
-    conv = c.execute(
-        r"""select id from conversas
-             where conta_id=%s and canal='whatsapp'
-               and (prospeccao_id=%s
-                    or regexp_replace(coalesce(contato_ref,''), '\D', '', 'g') = any(%s))
-             order by (prospeccao_id is not null) desc, ultima_msg_em desc limit 1""",
-        (conta_id, lead_id, _wa_equivalentes(destinatario) or [destinatario])).fetchone()
+    conv = _conversa_wa_do_contato(c, conta_id, lead_id, destinatario)
     if conv:
         conv_id = conv[0]
     else:
@@ -3704,7 +3739,12 @@ async def webhook_wa_qr_contatos(request: Request):
     enxurrada de mensagens, então quase toda conversa ainda não existe quando o
     nome chega — antes disso o nome era descartado e a conversa nascia com o número
     cru. Nunca cria conversa nem lead a partir de um contato da agenda (senão a
-    agenda inteira do vendedor viraria conversa)."""
+    agenda inteira do vendedor viraria conversa).
+
+    O trabalho no banco é DUAS queries por lote (não duas por contato) e roda em
+    thread separada — ver _gravar_contatos_wa. O caminho de desistência devolve
+    'ok' de propósito: o serviço Node só loga o não-ok e segue, e a agenda volta
+    inteira no próximo resync, então recusar não recuperaria nada."""
     import logging
     log = logging.getLogger("prospeccao.wa_qr")
     if not _qr_segredo_ok(request):
@@ -3721,42 +3761,85 @@ async def webhook_wa_qr_contatos(request: Request):
     if not conta_id or not isinstance(contatos, list) or not contatos:
         return Response("ok", media_type="text/plain")
     da_agenda = bool(payload.get("da_agenda"))
-    n = 0
-    with get_pool().connection() as c:
-        dono = c.execute("""select 1 from canais_config
-                              where conta_id=%s and canal='whatsapp' and ativo
-                                and coalesce(provedor,'twilio')='qr'""",
-                         (conta_id,)).fetchone()
-        if not dono:
-            return Response("ok", media_type="text/plain")
-        for ct in contatos[:500]:
-            numero = _so_digitos(str((ct or {}).get("numero") or ""))
-            nome = str((ct or {}).get("nome") or "").strip()[:120]
-            if not numero or not nome:
-                continue
-            alvo8 = numero[-8:] if len(numero) >= 8 else numero
-            # guarda na agenda (vale pra conversa que ainda NEM EXISTE). Nome da
-            # agenda sobrescreve; pushName não derruba um nome que veio da agenda.
-            c.execute("""insert into wa_contatos (conta_id, numero8, nome, da_agenda, atualizado)
-                              values (%s,%s,%s,%s, now())
-                         on conflict (conta_id, numero8) do update
-                            set nome=excluded.nome, da_agenda=excluded.da_agenda,
-                                atualizado=now()
-                          where excluded.da_agenda or not wa_contatos.da_agenda""",
-                      (conta_id, alvo8, nome, da_agenda))
-            # nome da agenda manda; pushName só entra se ainda não houver nome
-            cond = "" if da_agenda else " and coalesce(contato_nome,'')=''"
-            r = c.execute(
-                r"""update conversas set contato_nome=%s
-                     where conta_id=%s and canal='whatsapp'
-                       and right(regexp_replace(contato_ref, '\D', '', 'g'), 8) = %s"""
-                + cond, (nome, conta_id, alvo8))
-            n += r.rowcount or 0
-        c.commit()
+
+    por_numero = _dedup_contatos_wa(contatos, da_agenda)
+    if not por_numero:
+        return Response("ok", media_type="text/plain")
+
+    from starlette.concurrency import run_in_threadpool
+    # psycopg é síncrono: rodar aqui no event loop travaria o servidor INTEIRO
+    # (painel incluso) enquanto o lote não terminasse. Foi o que fez a
+    # importação inicial de uma agenda virar 502 em série no Render.
+    n = await run_in_threadpool(
+        _gravar_contatos_wa, conta_id, list(por_numero.keys()),
+        list(por_numero.values()), da_agenda)
     if n:
         log.info("webhook_wa_qr_contatos: conta_id=%s %s conversas renomeadas (agenda=%s)",
                  conta_id, n, da_agenda)
     return Response("ok", media_type="text/plain")
+
+
+def _dedup_contatos_wa(contatos: list, da_agenda: bool) -> dict[str, str]:
+    """Peneira o lote cru do WhatsApp em {numero8: nome}, no máximo 500.
+
+    Dedupar é obrigatório, não otimização: a agenda do celular repete contato
+    (mesmo número salvo duas vezes, ou dois números cujos 8 finais coincidem) e
+    `on conflict do update` estoura com "cannot affect row a second time" se a
+    mesma chave aparecer duas vezes no MESMO comando.
+
+    Quem fica é o mesmo que ficava no laço de antes: com a agenda, o ÚLTIMO
+    (cada volta sobrescrevia); com pushName, o PRIMEIRO (depois da primeira
+    volta a conversa já tinha nome, e o resto batia no coalesce e desistia)."""
+    por_numero: dict[str, str] = {}
+    for ct in contatos[:500]:
+        numero = _so_digitos(str((ct or {}).get("numero") or ""))
+        nome = str((ct or {}).get("nome") or "").strip()[:120]
+        if not numero or not nome:
+            continue
+        chave = numero[-8:] if len(numero) >= 8 else numero
+        if da_agenda or chave not in por_numero:
+            por_numero[chave] = nome
+    return por_numero
+
+
+def _gravar_contatos_wa(conta_id: int, numeros8: list[str], nomes: list[str],
+                        da_agenda: bool, pool=None) -> int:
+    """Grava o lote de contatos e renomeia as conversas. SÍNCRONO — quem chama é
+    responsável por tirar do event loop.
+
+    Duas queries pro lote todo, via unnest dos dois arrays em paralelo. Antes era
+    um insert + um update POR CONTATO, e o update varre conversas quando não há
+    índice pra expressão dos 8 dígitos (ver migração 156) — 200 contatos viravam
+    400 idas ao banco e 200 varreduras, tudo travando o event loop.
+
+    `pool` só existe pros testes apontarem pro banco descartável; em produção
+    fica None e vale o pool de sempre.
+
+    Devolve quantas conversas foram renomeadas."""
+    with (pool or get_pool()).connection() as c:
+        if not _conta_em_qr(c, conta_id):
+            return 0
+        # guarda na agenda (vale pra conversa que ainda NEM EXISTE). Nome da
+        # agenda sobrescreve; pushName não derruba um nome que veio da agenda.
+        c.execute("""insert into wa_contatos (conta_id, numero8, nome, da_agenda, atualizado)
+                     select %s, t.n8, t.nome, %s, now()
+                       from unnest(%s::text[], %s::text[]) as t(n8, nome)
+                     on conflict (conta_id, numero8) do update
+                        set nome=excluded.nome, da_agenda=excluded.da_agenda,
+                            atualizado=now()
+                      where excluded.da_agenda or not wa_contatos.da_agenda""",
+                  (conta_id, da_agenda, numeros8, nomes))
+        # nome da agenda manda; pushName só entra se ainda não houver nome
+        cond = "" if da_agenda else " and coalesce(conversas.contato_nome,'')=''"
+        r = c.execute(
+            r"""update conversas set contato_nome = t.nome
+                  from unnest(%s::text[], %s::text[]) as t(n8, nome)
+                 where conversas.conta_id=%s and conversas.canal='whatsapp'
+                   and right(regexp_replace(conversas.contato_ref, '\D', '', 'g'), 8) = t.n8"""
+            + cond, (numeros8, nomes, conta_id))
+        n = r.rowcount or 0
+        c.commit()
+    return n
 
 
 @router.post("/webhooks/wa-qr/audio")

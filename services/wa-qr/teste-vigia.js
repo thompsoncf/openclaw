@@ -22,7 +22,8 @@ process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgres://x@127.0.0.1:5
 process.env.WA_QR_SHARED_SECRET = process.env.WA_QR_SHARED_SECRET || 'teste'
 process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'silent'
 
-const { sessaoMuda, tetoMudo, marcarVivo, sessoes } = require('./server')
+const s = require('./server')
+const { sessaoMuda, tetoMudo, marcarVivo, sessoes } = s
 
 let falhas = 0
 function conferir (ok, descricao) {
@@ -94,5 +95,28 @@ try { marcarVivo(999) } catch (_) { explodiu = true }
 conferir(!explodiu, 'conta sem sessão em memória — no-op, sem exceção')
 sessoes.delete(35); sessoes.delete(23)
 
-console.log(falhas ? '\n' + falhas + ' FALHA(S)\n' : '\ntudo certo\n')
-process.exit(falhas ? 1 : 0)
+// A regra que compõe o vigia com a trava de sessão (sessao-lock.js). As duas nasceram
+// do MESMO incidente por caminhos diferentes: a trava impede que duas instâncias
+// disputem a credencial no deploy; o vigia religa socket que morreu calado. Juntas
+// sem cuidado, elas se desfazem — o vigia de uma instância que NÃO segura a conta
+// religaria por cima da instância que está trabalhando, que é exatamente a guerra de
+// sessões (440 em revezamento) que a trava veio acabar. Por isso: sessão que não é
+// nossa, não se toca. Sem rede e sem banco — o guard corta antes de qualquer um dos dois.
+;(async () => {
+  console.log('\nvigia × trava: sessão de outra instância não se religa')
+  const seguraDeVerdade = s.trava.segura
+  s.trava.segura = () => false
+  sessoes.clear()
+  const sock = { fake: true }
+  sessoes.set(35, { status: 'conectado', sock, ultimoEvento: AGORA - 5 * 60 * 60 * 1000 })
+  await s.vigiarSessoes()
+  const depois = sessoes.get(35)
+  conferir(depois.sock === sock && depois.status === 'conectado',
+    'muda há 5h, mas a trava é da outra instância — socket e status intactos')
+  conferir(!depois.reconexoesMudas, 'e nem contou tentativa de religamento')
+  s.trava.segura = seguraDeVerdade
+  sessoes.clear()
+
+  console.log(falhas ? '\n' + falhas + ' FALHA(S)\n' : '\ntudo certo\n')
+  process.exit(falhas ? 1 : 0)
+})()

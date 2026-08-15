@@ -1,4 +1,4 @@
--- 156_wa_qr_log.sql
+-- 158_wa_qr_log.sql
 -- O log do serviço de WhatsApp (services/wa-qr) no NOSSO banco, e o estado vivo
 -- de cada sessão.
 --
@@ -22,7 +22,7 @@
 -- da nossa aplicação, que já é curado. Retenção curta (o serviço apaga o que
 -- passa de 48h): isto é ferramenta de diagnóstico, não arquivo histórico.
 --
--- wa_qr_sessao — UMA linha por conta, sobrescrita: o que a sessão diz de si
+-- wa_qr_sessao_estado — UMA linha por conta, sobrescrita: o que a sessão diz de si
 -- mesma agora (status, quando entregou evento pela última vez, há quanto tempo
 -- está calada). É o que responde "o serviço acha que está conectado?" sem
 -- depender de log nenhum — exatamente a pergunta que ficou sem resposta.
@@ -46,7 +46,7 @@ create index if not exists idx_wa_qr_log_conta on public.wa_qr_log (conta_id, id
 -- ...e a limpeza por idade precisa varrer por tempo
 create index if not exists idx_wa_qr_log_criado on public.wa_qr_log (criado_em);
 
-create table if not exists public.wa_qr_sessao (
+create table if not exists public.wa_qr_sessao_estado (
     conta_id       bigint primary key,
     -- conectado | aguardando_qr | reconectando | desconectado
     status         text not null default '',

@@ -1,5 +1,5 @@
 'use strict'
-// O espelho do log no Postgres (wa_qr_log) e o retrato das sessões (wa_qr_sessao).
+// O espelho do log no Postgres (wa_qr_log) e o retrato das sessões (wa_qr_sessao_estado).
 //
 // POR QUE ISTO EXISTE, e por que tem teste próprio.
 //
@@ -28,7 +28,7 @@
 // Precisa de Postgres (grava de verdade). Manual:
 //
 //     cd services/wa-qr && npm install
-//     createdb wa_qr_test && psql wa_qr_test -f ../../db/migracoes/156_wa_qr_log.sql
+//     createdb wa_qr_test && psql wa_qr_test -f ../../db/migracoes/158_wa_qr_log.sql
 //     WA_QR_TEST_URL=postgresql://postgres@localhost:5432/wa_qr_test node teste-log-banco.js
 
 const URL = process.env.WA_QR_TEST_URL
@@ -53,7 +53,7 @@ const CONTA = 35
 async function limpar () {
   s._logFila.length = 0
   await s.pool.query('delete from wa_qr_log')
-  await s.pool.query('delete from wa_qr_sessao')
+  await s.pool.query('delete from wa_qr_sessao_estado')
   s.sessoes.clear()
 }
 
@@ -138,7 +138,7 @@ async function testeSessoes () {
     reconexoesMudas: 2 })
   s.sessoes.set(23, { status: 'conectado', sock: {}, ultimoEvento: agora - 5000 })
   await s.registrarSessoes()
-  const r = await s.pool.query('select * from wa_qr_sessao order by conta_id')
+  const r = await s.pool.query('select * from wa_qr_sessao_estado order by conta_id')
   conferir(r.rows.length === 2, 'uma linha por sessão viva', 'linhas=' + r.rows.length)
   const muda = r.rows.find((l) => Number(l.conta_id) === CONTA)
   conferir(muda.status === 'conectado' && Number(muda.mudo_s) >= 10700,
@@ -149,7 +149,7 @@ async function testeSessoes () {
   // segunda rodada não pode empilhar linha
   s.sessoes.get(CONTA).status = 'reconectando'
   await s.registrarSessoes()
-  const r2 = await s.pool.query('select status from wa_qr_sessao where conta_id=$1', [CONTA])
+  const r2 = await s.pool.query('select status from wa_qr_sessao_estado where conta_id=$1', [CONTA])
   conferir(r2.rows.length === 1 && r2.rows[0].status === 'reconectando',
     'a linha é sobrescrita, não duplicada')
 }
@@ -164,10 +164,10 @@ async function testeFalhaNaoSobe () {
   await s.pool.query('alter table wa_qr_log_escondida rename to wa_qr_log')
   conferir(!explodiu, 'tabela sumida: a gravação falha calada, o serviço segue')
   s.sessoes.set(CONTA, { status: 'conectado', ultimoEvento: Date.now() })
-  await s.pool.query('alter table wa_qr_sessao rename to wa_qr_sessao_escondida')
+  await s.pool.query('alter table wa_qr_sessao_estado rename to wa_qr_sessao_escondida')
   explodiu = false
   try { await s.registrarSessoes() } catch (_) { explodiu = true }
-  await s.pool.query('alter table wa_qr_sessao_escondida rename to wa_qr_sessao')
+  await s.pool.query('alter table wa_qr_sessao_escondida rename to wa_qr_sessao_estado')
   conferir(!explodiu, 'o mesmo vale pro retrato das sessões')
 }
 

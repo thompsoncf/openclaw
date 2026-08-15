@@ -39,7 +39,7 @@
  * sozinho pelo vigia — ver vigiarSessoes(): silêncio longo + ping sem resposta.
  *
  * O log vai pro stdout E pro Postgres (wa_qr_log), e o estado de cada sessão é
- * carimbado em wa_qr_sessao de minuto em minuto — o log do Render não é legível de
+ * carimbado em wa_qr_sessao_estado de minuto em minuto — o log do Render não é legível de
  * fora, e sem isso todo diagnóstico dependia de alguém abrir o dashboard. Ver o
  * bloco "log no banco". WA_QR_LOG_DB=0 desliga.
  *
@@ -54,6 +54,7 @@ const { DisconnectReason, makeCacheableSignalKeyStore, fetchLatestBaileysVersion
   normalizeMessageContent, downloadMediaMessage } = require('@whiskeysockets/baileys')
 const TIPO_HIST = proto.Message.HistorySyncNotification.HistorySyncType
 const { useDbAuthState } = require('./auth-db')
+const { criarTrava } = require('./sessao-lock')
 
 const PORT = parseInt(process.env.PORT || '3000', 10)
 const SEGREDO = process.env.WA_QR_SHARED_SECRET || ''
@@ -148,7 +149,7 @@ function comFiltroDeRuido (base) {
 // QUÊ, porque o motivo estava só no log. Cada rodada virava "abra o dashboard,
 // filtre pela conta e me diga o que aparece".
 //
-// Então o log vai também pro Postgres (tabela wa_qr_log, migração 156), que é
+// Então o log vai também pro Postgres (tabela wa_qr_log, migração 158), que é
 // onde todo mundo já consegue ler. Regras pra isto não virar um problema maior
 // que o que resolve:
 //
@@ -326,6 +327,48 @@ const pool = new Pool({
 // contaId -> { sock, status, qr, iniciando }
 const sessoes = new Map()
 
+// Quanto esperar antes de tentar pegar a trava de novo. Precisa ser MENOR que o
+// TTL do aluguel: assim, quando a instância dona sai, esta assume no próximo
+// ciclo em vez de esperar o prazo inteiro vencer.
+const RETENTAR_TRAVA_MS = parseInt(process.env.WA_QR_RETENTAR_TRAVA_MS || '15000', 10)
+const tentativasDeTrava = new Map()   // contaId -> timer
+
+// Reagenda UMA tentativa por conta (o timer anterior é cancelado). Sem isso, cada
+// caminho que falha em pegar a trava — /iniciar, /enviar, restaurarSessoes, o
+// aoPerder — armava o seu, e uma conta disputada acumulava um timer por chamada.
+function agendarTentativaDeTrava (contaId) {
+  clearTimeout(tentativasDeTrava.get(contaId))
+  const t = setTimeout(() => {
+    tentativasDeTrava.delete(contaId)
+    iniciarSessao(contaId).catch((e) =>
+      log.error({ contaId, e: String(e) }, 'nova tentativa de pegar a trava falhou'))
+  }, RETENTAR_TRAVA_MS)
+  if (t.unref) t.unref()
+  tentativasDeTrava.set(contaId, t)
+}
+
+// Trava de sessão única por conta (ver sessao-lock.js). Sem ela, a instância nova
+// do deploy abre socket com a mesma credencial da velha e o WhatsApp derruba uma
+// das duas com 440 — em loop, a cada deploy.
+//
+// aoPerder é o lado que quase ninguém lembra de escrever: se o aluguel não
+// renovar, não somos mais donos, e continuar com o socket aberto recria
+// exatamente a disputa que a trava veio impedir. Então larga tudo e tenta pegar
+// de novo mais tarde — se a outra instância ainda estiver lá, a tentativa falha
+// de novo, sem barulho.
+const trava = criarTrava(pool, log, {
+  aoPerder: (contaId) => {
+    const s = sessoes.get(contaId)
+    if (!s) return
+    descartarSocket(s.sock, contaId, 'trava_perdida')
+    pararTimersDaAgenda(s)
+    s.sock = null
+    s.qr = null
+    s.status = 'reconectando'
+    agendarTentativaDeTrava(contaId)
+  }
+})
+
 // Encerra um socket PRA VALER: marca `_descartado` (pro 'close' que o próprio end()
 // emite não reentrar nos nossos handlers) e fecha. O que importa pra memória é ser
 // chamado NA HORA — é o end() que derruba o WebSocket e mata o keep-alive do Baileys,
@@ -423,7 +466,7 @@ async function pingSessao (sock) {
 //                    religa na hora.
 //   45min calada  -> religa mesmo com o ping respondendo; é o caso da Doce Mell.
 //                    O teto dobra a cada religamento que não trouxe nada — ver tetoMudo.
-// O que cada sessão diz de si mesma, gravado onde dá pra ler (wa_qr_sessao).
+// O que cada sessão diz de si mesma, gravado onde dá pra ler (wa_qr_sessao_estado).
 // Uma linha por conta, sobrescrita. Foi a pergunta que ficou sem resposta no
 // chamado: "o serviço acha que está conectado?" — o painel mostrava o estado,
 // mas ele mora na memória do processo e some no deploy seguinte, junto com a
@@ -434,7 +477,7 @@ async function registrarSessoes () {
     const mudoS = s.ultimoEvento ? Math.round((agora - s.ultimoEvento) / 1000) : null
     try {
       await pool.query(
-        `insert into wa_qr_sessao (conta_id, status, ultimo_evento, mudo_s, religamentos, detalhe, atualizado)
+        `insert into wa_qr_sessao_estado (conta_id, status, ultimo_evento, mudo_s, religamentos, detalhe, atualizado)
          values ($1,$2,$3,$4,$5,$6::jsonb,now())
          on conflict (conta_id) do update set
            status=excluded.status, ultimo_evento=excluded.ultimo_evento, mudo_s=excluded.mudo_s,
@@ -442,7 +485,10 @@ async function registrarSessoes () {
         [contaId, s.status || '', s.ultimoEvento ? new Date(s.ultimoEvento) : null, mudoS,
           s.reconexoesMudas || 0,
           JSON.stringify({ temSock: !!s.sock, iniciando: !!s.iniciando,
-            sincronizando: !!s.sincronizando, syncProgress: s.syncProgress || 0 })])
+            sincronizando: !!s.sincronizando, syncProgress: s.syncProgress || 0,
+            // quem está com a conta: sem isso, "calada" numa instância que nem
+            // segura a trava se lê como defeito, quando é a outra trabalhando
+            trava: trava.segura(contaId) })])
     } catch (_) {}   // diagnóstico não pode atrapalhar quem está trabalhando
   }
 }
@@ -451,6 +497,15 @@ async function vigiarSessoes () {
   const agora = Date.now()
   for (const [contaId, s] of sessoes) {
     if (!sessaoMuda(s, agora, MUDO_LIMITE_MS)) continue
+    // Sessão que não é NOSSA não se religa. Com a trava por conta (sessao-lock.js),
+    // silêncio aqui pode ser simplesmente outra instância trabalhando com aquela
+    // credencial — e insistir seria recriar a guerra de sessões que a trava veio
+    // acabar. Sem a trava, o iniciarSessao recusaria de qualquer jeito; parar antes
+    // evita derrubar um socket bom por nada.
+    if (!trava.segura(contaId)) {
+      log.info({ contaId }, 'vigia: conta calada, mas a trava é de outra instância — não mexo')
+      continue
+    }
     const mudoMs = agora - (s.ultimoEvento || agora)
     const mudoMin = Math.round(mudoMs / 60000)
     let motivo = ''
@@ -1420,6 +1475,19 @@ async function iniciarSessao (contaId) {
   }, 30000)
 
   try {
+    // TRAVA ANTES DE QUALQUER COISA. Abrir socket com uma credencial que outra
+    // instância já está usando é o que o WhatsApp responde com 440, derrubando
+    // as duas em revezamento. Enquanto a outra não sair, esta conta fica
+    // 'reconectando' — que é a verdade, e o painel já sabe mostrar isso — e a
+    // gente volta a tentar sozinho. Nada é apagado: a credencial continua no
+    // banco, quem está com ela segue trabalhando.
+    if (!(await trava.pegar(contaId))) {
+      s.status = 'reconectando'
+      s.qr = null
+      agendarTentativaDeTrava(contaId)
+      return s
+    }
+
     const { state, saveCreds, limparTudo } = await useDbAuthState(pool, contaId, log)
     log.info({ contaId, pareada: !!(state.creds && state.creds.me) },
       'iniciarSessao: creds carregadas do banco')
@@ -1568,7 +1636,17 @@ async function iniciarSessao (contaId) {
         // agenda continuavam batendo no Postgres de 20 em 20min por uma sessão morta.
         descartarSocket(sock, contaId, 'substituida_por_outra_sessao')
         pararTimersDaAgenda(s)
-        log.warn({ contaId }, 'conexão substituída por outra sessão — parando sem apagar nada')
+        s.sock = null
+        // Levar 440 SEGURANDO a trava significa que quem assumiu não é outra
+        // instância nossa — é o celular do vendedor abrindo o WhatsApp Web em
+        // outro lugar, ou uma instância rodando sem a tabela da trava. A
+        // distinção importa: a primeira é comportamento normal do usuário, a
+        // segunda é a trava não estar valendo e merece investigação.
+        log.warn({ contaId, seguravaATrava: trava.segura(contaId) },
+          'conexão substituída por outra sessão — parando sem apagar nada')
+        // Solta: esta sessão não volta (reconectar aqui vira guerra de sessões),
+        // e segurar o aluguel sem usar só impediria outra instância de assumir.
+        await trava.soltar(contaId)
         return
       }
       const deslogado = code === DisconnectReason.loggedOut
@@ -1595,6 +1673,10 @@ async function iniciarSessao (contaId) {
         try { await limparTudo() } catch (e) { log.warn({ contaId, e: String(e) }, 'limparTudo falhou') }
         sessoes.delete(contaId)
         esquecerConta(contaId)
+        // Sem credencial não há sessão pra proteger; segurar o aluguel só
+        // atrasaria o próximo pareamento (que pode cair noutra instância).
+        clearTimeout(tentativasDeTrava.get(contaId)); tentativasDeTrava.delete(contaId)
+        await trava.soltar(contaId)
         log.warn({ contaId, foiLogoutReal }, 'deslogado — credenciais limpas')
         if (foiLogoutReal) {
           avisarDeslogado(contaId).catch((e) => log.warn({ contaId, e: String(e) }, 'avisarDeslogado falhou'))
@@ -1969,6 +2051,11 @@ const servidor = http.createServer(async (req, res) => {
         } catch (_) {}
         sessoes.delete(contaId)
         esquecerConta(contaId)
+        // Desconectou de propósito: solta o aluguel e cancela a tentativa de
+        // retomada, senão o timer religaria a conta que o vendedor acabou de
+        // mandar desligar.
+        clearTimeout(tentativasDeTrava.get(contaId)); tentativasDeTrava.delete(contaId)
+        await trava.soltar(contaId)
         // Desconectar apaga o histórico de chat desse canal SEMPRE. Antes isso só
         // acontecia quando havia socket vivo na memória (o logout gerava um 401 que
         // disparava a limpeza por tabela); depois de um restart do serviço o MESMO
@@ -1990,7 +2077,41 @@ const servidor = http.createServer(async (req, res) => {
 // require()-ado — o teste-lidmap.js faz isso pra exercitar o lote de gravação contra um
 // Postgres de verdade — não abre porta nem religa sessão nenhuma. Idioma padrão do Node;
 // em produção `node server.js` cai no ramo de sempre.
+// Saída limpa. Sem isto, o deploy do Render era assim: a instância nova subia,
+// religava as sessões e roubava a credencial da velha (440 em todo mundo),
+// enquanto a velha seguia de pé até levar SIGKILL. Agora o SIGTERM fecha os
+// sockets PRIMEIRO — a ordem importa, um socket vivo com a trava já solta é
+// exatamente a disputa que a trava veio impedir — e só depois solta os aluguéis,
+// pra instância nova assumir em segundos em vez de esperar o prazo vencer.
+let saindo = false
+async function encerrar (sinal) {
+  if (saindo) return
+  saindo = true
+  log.info({ sinal, contas: trava.contas() }, 'encerrando: fechando sockets e soltando travas')
+  // Rede lenta na saída não pode virar processo pendurado: o Render manda
+  // SIGKILL depois de alguns segundos de qualquer jeito, e sair sem soltar é
+  // recuperável (o aluguel vence sozinho) — ficar preso não é.
+  const forca = setTimeout(() => {
+    log.warn({ sinal }, 'encerrando: demorou demais — saindo à força')
+    process.exit(0)
+  }, 5000)
+  if (forca.unref) forca.unref()
+  for (const [contaId, s] of sessoes) {
+    try { descartarSocket(s.sock, contaId, 'encerrando'); pararTimersDaAgenda(s) } catch (_) {}
+  }
+  for (const t of tentativasDeTrava.values()) clearTimeout(t)
+  tentativasDeTrava.clear()
+  try { await trava.soltarTudo() } catch (e) { log.warn({ e: String(e) }, 'encerrando: soltarTudo falhou') }
+  try { servidor.close() } catch (_) {}
+  try { await pool.end() } catch (_) {}
+  clearTimeout(forca)
+  log.info({ sinal }, 'encerrando: pronto')
+  process.exit(0)
+}
+
 if (require.main === module) {
+process.on('SIGTERM', () => { encerrar('SIGTERM').catch(() => process.exit(0)) })
+process.on('SIGINT', () => { encerrar('SIGINT').catch(() => process.exit(0)) })
 servidor.listen(PORT, () => {
   log.info({ PORT, esperaRestaurarMs: ESPERA_RESTAURAR_MS }, 'wa-qr no ar')
   // Abrir a porta não basta: o health check do Render bate em /saude e desiste
@@ -2031,4 +2152,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, marcarVivo, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, sessoes, _logFila, pool }
+module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, marcarVivo, vigiarSessoes, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

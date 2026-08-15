@@ -45,7 +45,7 @@ select criado_em, nivel, msg, dados from wa_qr_log
  where conta_id = 35 and criado_em > now() - interval '1 hour' order by id;
 
 -- o que cada sessão diz de si mesma AGORA (status vem da memória do processo)
-select conta_id, status, mudo_s, religamentos, atualizado from wa_qr_sessao
+select conta_id, status, mudo_s, religamentos, atualizado from wa_qr_sessao_estado
  order by mudo_s desc nulls last;
 ```
 
@@ -58,7 +58,7 @@ No **web** (app Python), configure também:
 
 | Var | Descrição |
 |-----|-----------|
-| `WA_QR_SERVICE_URL` | URL pública deste serviço (ex.: `https://openclaw-waqr.onrender.com`) |
+| `WA_QR_SERVICE_URL` | URL pública deste serviço (ex.: `https://zaq-waqr.onrender.com`) |
 | `WA_QR_SHARED_SECRET` | **o mesmo** segredo daqui |
 
 ## Deploy no Render (serviço novo, manual)
@@ -162,7 +162,41 @@ WA_AUTH_TEST_URL=postgresql://postgres@localhost:5432/wa_qr_test node teste-auth
 WA_QR_TEST_URL=postgresql://postgres@localhost:5432/wa_qr_test node teste-lidmap.js
 # histórico: gate das ondas + peneira mensagem a mensagem (não precisa de banco)
 node teste-historico.js
+# trava de sessão única por conta: disputa, prazo vencendo, batimento, SIGTERM
+createdb wa_lock_test
+WA_LOCK_TEST_URL=postgresql://postgres@localhost:5432/wa_lock_test node teste-sessao-lock.js
+WA_LOCK_TEST_URL=postgresql://postgres@localhost:5432/wa_lock_test node teste-trava-integrada.js
 ```
+
+## Trava de sessão única por conta
+
+Duas instâncias com a MESMA credencial fazem o WhatsApp derrubar uma delas com 440
+(`connectionReplaced`). Isso acontecia **em todo deploy**: o Render sobe a instância nova
+antes de matar a velha, e as duas rodavam `restaurarSessoes()`. Em 15/08/2026 a conta 35
+abriu 7 sessões entre 13:53 e 20:00 e todas morreram assim — e cada morte reinicia o
+ciclo (reconecta, rebaixa a agenda inteira, redespeja no webhook).
+
+Agora `iniciarSessao` só abre socket com a conta alugada na tabela `wa_qr_sessao_lock`
+(migração 157, aplicada pelo web). O aluguel vale 60s e é renovado a cada 20s:
+
+- **conta ocupada** → não abre socket, status fica `reconectando` e tenta de novo a cada
+  15s (`WA_QR_RETENTAR_TRAVA_MS`). Nada é apagado.
+- **SIGTERM** → fecha os sockets, solta os aluguéis e sai. É o que faz o deploy trocar
+  de dono em segundos em vez de esperar o prazo vencer.
+- **processo morto sem aviso** (SIGKILL/OOM) → ninguém renova, o prazo vence e a próxima
+  instância assume em no máximo um TTL. Não existe trava presa pra sempre.
+- **aluguel perdido** (o batimento não conseguiu renovar) → larga o socket na hora, senão
+  viram dois de novo.
+
+Quem está com o quê:
+
+```sql
+select conta_id, dono, expira_em from wa_qr_sessao_lock order by conta_id;
+```
+
+`expira_em` no passado significa que ninguém está segurando. Levar 440 **segurando** a
+trava quer dizer que quem assumiu não é outra instância nossa — é o celular do vendedor
+abrindo o WhatsApp Web noutro lugar; o log diz isso em `seguravaATrava`.
 
 ## Local (dev)
 

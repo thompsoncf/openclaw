@@ -35,6 +35,7 @@ create table orcamentos (id bigserial primary key, conta_id bigint, cliente text
   setup_centavos bigint default 0, mensal_centavos bigint default 0,
   status text default 'rascunho', canal text, criado_por text,
   aprovada_em timestamptz, aprovada_por text, aprovada_doc text,
+  modo text default 'recorrente', evento jsonb, parcelas jsonb, numero int,
   criado_em timestamptz default now(), atualizado_em timestamptz default now());
 create table titulos (id bigserial primary key, conta_id bigint not null,
   tipo text not null check (tipo in ('pagar','receber')), descricao text not null,

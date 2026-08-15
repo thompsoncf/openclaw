@@ -23,6 +23,19 @@ def pool():
     base = os.path.join(os.path.dirname(__file__), "..", "db", "migracoes")
     with p.connection() as c:
         c.execute(open(os.path.join(base, "053_modulo_pj.sql"), encoding="utf-8").read())
+        # dados da empresa que o cabeçalho da proposta usa (logo e, no modo
+        # evento, razão social/CNPJ/endereço). Vêm de migrações que arrastam
+        # loja e catálogo junto — aqui bastam as colunas.
+        c.execute("""
+            alter table contas add column if not exists endereco      text;
+            alter table contas add column if not exists cep           text;
+            alter table contas add column if not exists bairro        text;
+            alter table contas add column if not exists cidade        text;
+            alter table contas add column if not exists uf            varchar(2);
+            alter table contas add column if not exists telefone      text;
+            alter table contas add column if not exists email_empresa text;
+            alter table contas add column if not exists logo_url      text;
+        """)
         c.execute("""create table if not exists orcamentos (
             id bigserial primary key, cliente text, empresa text, segmento text,
             setup_centavos bigint default 0, mensal_centavos bigint default 0,

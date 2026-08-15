@@ -33,6 +33,7 @@ def pool():
         c.execute((base / "068_orcamento_pipeline.sql").read_text(encoding="utf-8"))
         c.execute((base / "069_orcamento_cnpj.sql").read_text(encoding="utf-8"))
         c.execute((base / "070_orcamento_conta.sql").read_text(encoding="utf-8"))
+        c.execute((base / "147_orcamento_evento.sql").read_text(encoding="utf-8"))
         c.commit()
     yield p
     p.close()

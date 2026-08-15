@@ -19,8 +19,9 @@ import json
 import re
 import secrets
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, File, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from psycopg.errors import UniqueViolation
 from pydantic import BaseModel
 
 from core.brain import Brain
@@ -72,10 +73,24 @@ def _garantir_tabela(c):
         alter table orcamentos add column if not exists site          text;
         alter table orcamentos add column if not exists cargo         text;
         alter table orcamentos add column if not exists socio         text;
+        alter table orcamentos add column if not exists modo          text not null default 'recorrente';
+        alter table orcamentos add column if not exists evento        jsonb;
+        alter table orcamentos add column if not exists parcelas      jsonb;
+        alter table orcamentos add column if not exists numero        int;
+        alter table orcamentos add column if not exists endereco      text;
+        alter table orcamentos add column if not exists cep           text;
+        alter table orcamentos add column if not exists evento_agenda_id bigint;
         create index if not exists idx_orcamentos_status on orcamentos (status, criado_em desc);
         create index if not exists idx_orcamentos_conta on orcamentos (conta_id, status, criado_em desc);
         create unique index if not exists idx_orcamentos_token on orcamentos (token) where token is not null;
+        create unique index if not exists uq_orcamentos_conta_numero
+            on orcamentos (conta_id, numero) where numero is not null;
     """)
+    # modo do orçamento: 'recorrente' (setup+mensal) ou 'evento' (data, qtd ×
+    # valor unitário, parcelas). Espelha a migração 147.
+    c.execute("alter table orcamentos drop constraint if exists orcamentos_modo_check")
+    c.execute("""alter table orcamentos add constraint orcamentos_modo_check
+        check (modo in ('recorrente','evento'))""")
     # novo estado 'aprovada' — relaxa o check de status (068 só tinha 5 estados).
     c.execute("alter table orcamentos drop constraint if exists orcamentos_status_check")
     c.execute("""alter table orcamentos add constraint orcamentos_status_check
@@ -126,6 +141,27 @@ def _ator(request: Request):
     return request.session.get("membro_id"), request.session.get("papel", "dono")
 
 
+def _com_retry_numero(c, executar, tentativas: int = 3):
+    """Roda um insert/update que calcula `numero = max+1` da conta.
+
+    O índice único (conta_id, numero) é quem garante a série: se dois salvarem
+    ao mesmo tempo, o perdedor leva UniqueViolation, a transação volta e ele
+    tenta de novo — na segunda vez o max já é o do vencedor.
+    """
+    for _ in range(tentativas):
+        try:
+            return executar()
+        except UniqueViolation:
+            c.rollback()
+    return None
+
+
+def _nicho(conta_id: int) -> str:
+    """Slug do nicho da conta. É ele que decide o MODO do orçamento (evento ×
+    recorrente) e o vocabulário da tela — nunca o que o navegador manda."""
+    return emp.obter_dados_empresa(get_pool(), conta_id).get("nicho") or ""
+
+
 # ---------------------------------------------------------------- rotas
 @router.get("/painel/servicos", response_class=HTMLResponse)
 def painel_servicos(request: Request):
@@ -136,14 +172,15 @@ def painel_servicos(request: Request):
     with pool.connection() as c:
         _garantir_tabela(c)
     scat.garantir_tabela(pool)
-    nicho = emp.obter_dados_empresa(pool, conta[0]).get("nicho") or ""
+    nicho = _nicho(conta[0])
     # eventos vende PACOTE/preço de evento avulso — sem setup+mensalidade estilo
     # SaaS. A tela some com "Setup" e chama o preço único de "Valor" (fica
     # gravado em setup_centavos por baixo, pra "Fechar contrato" não virar
     # cobrança recorrente errada de um evento pontual).
     servico_avulso = nicho == "eventos"
     return _render("servicos", request, empresa_nome=conta[2],
-                   tem_pj=True, vende_servico=True, servico_avulso=servico_avulso)
+                   tem_pj=True, vende_servico=True, servico_avulso=servico_avulso,
+                   tipos_evento=scat.TIPOS_EVENTO, tipos_contrato=scat.TIPOS_CONTRATO)
 
 
 # ---------------------------------------------------------------- catálogo (por conta)
@@ -160,8 +197,9 @@ def painel_servicos_catalogo(request: Request):
         "setup": round(s["setup_centavos"] / 100),
         "mensal": round(s["mensal_centavos"] / 100),
         "custo": round(s["custo_centavos"] / 100),
+        "categoria": s["categoria"], "foto_url": s["foto_url"],
     } for s in scat.listar(pool, conta[0])]
-    return JSONResponse({"itens": itens})
+    return JSONResponse({"itens": itens, "categorias": scat.CATEGORIAS_EVENTOS})
 
 
 class ServicoIn(BaseModel):
@@ -171,6 +209,8 @@ class ServicoIn(BaseModel):
     setup: int = 0     # REAIS
     mensal: int = 0    # REAIS
     custo: int = 0     # REAIS
+    categoria: str = ""    # agrupa no orçamento de evento (subtotal por categoria)
+    foto_url: str = ""     # o cliente vê o que está contratando
 
 
 @router.post("/painel/servicos/catalogo/salvar")
@@ -182,7 +222,8 @@ def painel_servicos_catalogo_salvar(request: Request, dados: ServicoIn):
                     descricao=dados.descricao,
                     setup_centavos=int(dados.setup or 0) * 100,
                     mensal_centavos=int(dados.mensal or 0) * 100,
-                    custo_centavos=int(dados.custo or 0) * 100)
+                    custo_centavos=int(dados.custo or 0) * 100,
+                    categoria=dados.categoria, foto_url=dados.foto_url)
     if not r.get("ok"):
         return JSONResponse({"erro": r.get("erro", "falha ao salvar")}, status_code=400)
     return JSONResponse(r)
@@ -190,6 +231,26 @@ def painel_servicos_catalogo_salvar(request: Request, dados: ServicoIn):
 
 class ServicoDelIn(BaseModel):
     id: int
+
+
+@router.post("/painel/servicos/catalogo/foto")
+async def painel_servicos_catalogo_foto(request: Request, arquivo: UploadFile = File(...)):
+    """Sobe a foto do serviço e devolve a URL pública. Mesmo motor da foto de
+    produto (finance.upload_foto): redimensiona e joga no bucket. Quem grava a
+    URL no serviço é o /catalogo/salvar — aqui só sobe o arquivo."""
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    from finance import upload_foto
+    try:
+        conteudo = await arquivo.read()
+        url = upload_foto.subir_foto(conteudo, arquivo.filename or "",
+                                     arquivo.content_type or "image/jpeg")
+    except ValueError as e:
+        return JSONResponse({"erro": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"erro": f"Não consegui subir a foto: {e}"}, status_code=500)
+    return JSONResponse({"ok": True, "foto_url": url})
 
 
 @router.post("/painel/servicos/catalogo/excluir")
@@ -322,8 +383,33 @@ def painel_servicos_sugerir(request: Request, dados: SugerirIn):
 class ItemIn(BaseModel):
     nome: str = ""
     desc: str = ""
-    setup: int = 0
+    setup: int = 0            # total da linha em REAIS (qtd × unitário)
     mensal: int = 0
+    qtd: int = 1              # evento: quantidade contratada
+    unitario: int = 0         # evento: valor unitário em REAIS
+    categoria: str = ""       # evento: agrupa e soma por categoria na folha
+    foto_url: str = ""        # evento: o cliente vê o que está contratando
+
+
+class EventoIn(BaseModel):
+    """O bloco 'O evento' do orçamento (modo evento). Datas e horas ficam como
+    texto do jeito que a empresa escreve ('2025-11-18', '19:00', '24:00') — quem
+    transforma em compromisso é agenda.janela_evento, que sabe a regra da
+    virada da meia-noite."""
+    data: str = ""
+    convidados: int | None = None
+    inicio: str = ""
+    fim: str = ""
+    tipo: str = ""
+    contratos: list[str] = []
+    local: str = ""
+
+
+class ParcelaIn(BaseModel):
+    venc: str = ""
+    valor_centavos: int = 0
+    forma: str = ""
+    obs: str = ""
 
 
 class SalvarIn(BaseModel):
@@ -340,8 +426,12 @@ class SalvarIn(BaseModel):
     site: str = ""
     cargo: str = ""
     socio: str = ""
+    endereco: str = ""
+    cep: str = ""
     modulos: list[str] = []   # ids dos modulos escolhidos
     itens: list[ItemIn] = []  # snapshot das linhas (nome/setup/mensal) pra a proposta
+    evento: EventoIn | None = None      # modo evento: data, convidados, horário...
+    parcelas: list[ParcelaIn] = []      # modo evento: plano de pagamento
     escopo: str = ""
     canal: str = ""
     setup: int = 0            # em REAIS
@@ -357,18 +447,30 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
     validos = scat.slugs_validos(get_pool(), conta[0])
     modulos = [i for i in (dados.modulos or []) if i in validos]
-    itens = [{"nome": (it.nome or "")[:120], "desc": (it.desc or "")[:200],
-              "setup": int(it.setup or 0), "mensal": int(it.mensal or 0)}
+    # a descrição do item é o que o cliente lê ("o espaço inclui: ..."): num
+    # orçamento de evento ela tem parágrafos inteiros, então o corte é largo.
+    itens = [{"nome": (it.nome or "")[:120], "desc": (it.desc or "")[:2000],
+              "setup": int(it.setup or 0), "mensal": int(it.mensal or 0),
+              "qtd": max(1, int(it.qtd or 1)), "unitario": int(it.unitario or 0),
+              "categoria": (it.categoria or "")[:60], "foto_url": (it.foto_url or "")[:500]}
              for it in (dados.itens or [])[:50]]
     itens_json = json.dumps(itens)
+    # o MODO vem do nicho da conta, não do navegador: quem vende evento emite
+    # orçamento de evento, e só. (mesma regra do servico_avulso da tela)
+    modo = vendas.modo_do_orcamento(get_pool(), conta[0])
+    evento_json = json.dumps(dados.evento.model_dump()) if (modo == "evento" and dados.evento) else None
+    parcelas_json = json.dumps(
+        [p.model_dump() for p in (dados.parcelas or [])[:60] if int(p.valor_centavos or 0) > 0]
+    ) if modo == "evento" else None
     vals = (dados.cliente or None, dados.empresa or None,
             (dados.cnpj or "").strip() or None, dados.segmento or None,
             (dados.whatsapp or "").strip() or None, (dados.email or "").strip() or None,
             (dados.telefone or "").strip() or None, (dados.cidade or "").strip() or None,
             (dados.uf or "").strip()[:2].upper() or None, (dados.site or "").strip() or None,
             (dados.cargo or "").strip() or None, (dados.socio or "").strip() or None,
+            (dados.endereco or "").strip() or None, (dados.cep or "").strip() or None,
             json.dumps(modulos), itens_json, (dados.escopo or "").strip() or None,
-            (dados.canal or "").strip() or None,
+            (dados.canal or "").strip() or None, modo, evento_json, parcelas_json,
             int(dados.setup) * 100, int(dados.mensal) * 100,
             int(dados.primeiro_ano) * 100, int(dados.n_modulos))
     with get_pool().connection() as c:
@@ -376,13 +478,20 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
         oid = tok = None
         if dados.id:
             # atualiza a proposta reaberta (nunca mexe em uma já 'fechado')
-            r = c.execute(
+            r = _com_retry_numero(c, lambda: c.execute(
                 """update orcamentos set cliente=%s, empresa=%s, cnpj=%s, segmento=%s,
                        whatsapp=%s, email=%s, telefone=%s, cidade=%s, uf=%s, site=%s,
-                       cargo=%s, socio=%s, modulos=%s::jsonb, itens=%s::jsonb, escopo=%s, canal=%s,
+                       cargo=%s, socio=%s, endereco=%s, cep=%s,
+                       modulos=%s::jsonb, itens=%s::jsonb, escopo=%s, canal=%s,
+                       modo=%s, evento=%s::jsonb, parcelas=%s::jsonb,
                        setup_centavos=%s, mensal_centavos=%s, primeiro_ano_centavos=%s,
                        n_modulos=%s, atualizado_em=now(),
                        token=coalesce(token, %s),
+                       -- proposta criada fora do painel (cockpit, prospecção,
+                       -- agente) entra sem número: ganha o dela agora.
+                       numero=coalesce(numero,
+                           (select coalesce(max(numero),0)+1 from orcamentos o2
+                             where o2.conta_id=%s)),
                        -- editar uma proposta JÁ assinada a reabre: volta pra 'enviado'
                        -- e limpa a assinatura (os termos mudaram → precisa re-aprovar).
                        status=case when status='aprovada' then 'enviado' else status end,
@@ -392,21 +501,31 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
                        aprovada_ip=case when status='aprovada' then null else aprovada_ip end
                      where id=%s and conta_id=%s and status <> 'fechado'
                    returning id, token""",
-                vals + (secrets.token_urlsafe(16), dados.id, conta[0])).fetchone()
+                vals + (secrets.token_urlsafe(16), conta[0], dados.id, conta[0])).fetchone())
             if r:
                 oid, tok = r
         if oid is None and not dados.id:
             membro_id, _papel = _ator(request)
             criador = str(membro_id) if membro_id else "dono"
-            r = c.execute(
-                """insert into orcamentos
+            # numero: sequencial POR CONTA, calculado no próprio INSERT. O índice
+            # único (conta_id, numero) é quem garante a série — se dois salvarem
+            # ao mesmo tempo, o perdedor tenta de novo e pega o próximo.
+            sql_ins = """insert into orcamentos
                    (conta_id, cliente, empresa, cnpj, segmento, whatsapp, email,
-                    telefone, cidade, uf, site, cargo, socio,
-                    modulos, itens, escopo, canal, setup_centavos, mensal_centavos,
-                    primeiro_ano_centavos, n_modulos, criado_por, token)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,%s,%s,%s,%s)
-                   returning id, token""",
-                (conta[0],) + vals + (criador, secrets.token_urlsafe(16))).fetchone()
+                    telefone, cidade, uf, site, cargo, socio, endereco, cep,
+                    modulos, itens, escopo, canal, modo, evento, parcelas,
+                    setup_centavos, mensal_centavos,
+                    primeiro_ano_centavos, n_modulos, criado_por, token, numero)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                           %s::jsonb,%s::jsonb,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,%s,%s,
+                           (select coalesce(max(numero),0)+1 from orcamentos where conta_id=%s))
+                   returning id, token"""
+            r = _com_retry_numero(c, lambda: c.execute(
+                sql_ins,
+                (conta[0],) + vals + (criador, secrets.token_urlsafe(16), conta[0])).fetchone())
+            if r is None:
+                return JSONResponse({"erro": "não consegui numerar o orçamento; tente de novo"},
+                                    status_code=409)
             oid, tok = r
         c.commit()
     if oid is None:
@@ -432,7 +551,8 @@ def painel_servicos_lista(request: Request):
         # vendedor vê só as propostas dele; dono/gestor veem o funil inteiro.
         _cols = """select id, cliente, empresa, setup_centavos, mensal_centavos,
                           primeiro_ano_centavos, n_modulos, criado_em, status,
-                          token, aprovada_por, aprovada_em"""
+                          token, aprovada_por, aprovada_em, numero,
+                          coalesce(modo,'recorrente')"""
         if papel == "vendedor" and membro_id:
             rows = c.execute(
                 _cols + """ from orcamentos where conta_id=%s and criado_por=%s
@@ -455,6 +575,7 @@ def painel_servicos_lista(request: Request):
         "token": r[9] or "",
         "aprovada_por": r[10] or "",
         "aprovada_em": r[11].strftime("%d/%m/%Y") if r[11] else "",
+        "numero": r[12], "modo": r[13] or "recorrente",
         "inicial": (r[1] or r[2] or "?").strip()[:1].upper(),
     } for r in rows]
     return JSONResponse({"itens": itens})
@@ -475,18 +596,22 @@ def painel_servicos_item(request: Request, orc_id: int):
             """select id, cliente, empresa, cnpj, segmento, whatsapp, email,
                       modulos, escopo, status, setup_centavos, mensal_centavos,
                       primeiro_ano_centavos, n_modulos, itens,
-                      telefone, cidade, uf, site, cargo, socio
+                      telefone, cidade, uf, site, cargo, socio,
+                      endereco, cep, evento, parcelas, numero,
+                      coalesce(modo,'recorrente')
                  from orcamentos where id=%s and conta_id=%s""" + dono_filtro,
             args).fetchone()
     if not r:
         return JSONResponse({"erro": "não encontrado"}, status_code=404)
-    def _jsonb(v):
+    def _jsonb(v, vazio=None):
         if isinstance(v, str):
             try:
                 return json.loads(v)
             except Exception:
-                return []
-        return v or []
+                return vazio if vazio is not None else []
+        if v is None:
+            return vazio if vazio is not None else []
+        return v
     return JSONResponse({
         "id": r[0], "cliente": r[1] or "", "empresa": r[2] or "",
         "cnpj": r[3] or "", "segmento": r[4] or "", "whatsapp": r[5] or "",
@@ -496,6 +621,9 @@ def painel_servicos_item(request: Request, orc_id: int):
         "n_modulos": r[13] or 0, "itens": _jsonb(r[14]),
         "telefone": r[15] or "", "cidade": r[16] or "", "uf": r[17] or "",
         "site": r[18] or "", "cargo": r[19] or "", "socio": r[20] or "",
+        "endereco": r[21] or "", "cep": r[22] or "",
+        "evento": _jsonb(r[23], {}), "parcelas": _jsonb(r[24]),
+        "numero": r[25], "modo": r[26] or "recorrente",
     })
 
 
@@ -505,8 +633,9 @@ class FecharIn(BaseModel):
 
 @router.post("/painel/servicos/fechar")
 def painel_servicos_fechar(request: Request, dados: FecharIn):
-    """Fecha o orçamento: vira contrato e gera os títulos a receber (setup +
-    mensalidade recorrente) no módulo Empresa. Idempotente e escopado por conta."""
+    """Fecha o orçamento: vira contrato e gera os títulos a receber no módulo
+    Empresa — setup + mensalidade recorrente no modo recorrente, um título por
+    parcela no modo evento. Idempotente e escopado por conta."""
     conta, redir = _conta_servico(request)
     if redir is not None:
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
@@ -518,7 +647,7 @@ def painel_servicos_fechar(request: Request, dados: FecharIn):
 
 # ---------------------------------------------------------------- template
 _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
-<div class="sv-wrap">
+<div class="sv-wrap{% if servico_avulso %} evento{% endif %}">
 <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:.4rem">
   <h1 style="margin:.2rem 0">Vendas de Serviços</h1>
   <span class="mut" style="font-size:.85rem">{{ empresa_nome }}</span>
@@ -531,6 +660,9 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 
 {% raw %}<style>
 .sv-wrap{width:100%;max-width:960px;padding:0 1rem 2rem;box-sizing:border-box}
+/* orçamento de evento tem uma coluna a mais na linha (qtd, valor e subtotal):
+   a tela abre um pouco pra o nome do serviço não virar uma coluna de 3 letras. */
+.sv-wrap.evento{max-width:1120px}
 .sv-wrap .card{max-width:none;margin:0 0 1rem}
 /* o base do painel força button{width:100%;margin-top:1.4rem} — reseta aqui e
    reaplica largura cheia só onde faz sentido (os CTAs do resumo). */
@@ -551,7 +683,40 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-inp{padding:.55rem .7rem; border-radius:8px; background:var(--bg); color:var(--txt); border:1px solid var(--borda); font-size:.95rem; width:100%; box-sizing:border-box}
 .oc-inp:focus{border-color:var(--verde); outline:none}
 .oc-mod{display:grid; grid-template-columns:auto 1fr 84px 84px 84px auto; gap:.55rem; align-items:center; padding:.6rem 0; border-bottom:1px solid var(--borda)}
-.oc-mod.avulso,.oc-head.avulso{grid-template-columns:auto 1fr 90px 90px auto}
+.oc-mod.avulso,.oc-head.avulso{grid-template-columns:auto minmax(0,1fr) 56px 96px 92px auto}
+.sv-wrap.oc-margin .oc-mod.avulso,.sv-wrap.oc-margin .oc-head.avulso{grid-template-columns:auto minmax(0,1fr) 56px 96px 88px 92px auto}
+/* no orçamento de evento o rótulo vai EM CIMA do campo: "7200" e "10" precisam
+   da largura inteira da caixinha, senão o número sai cortado. */
+.oc-mod.avulso .oc-num{flex-direction:column; align-items:stretch; gap:1px; padding:.25rem .45rem}
+.oc-mod.avulso .oc-num span{font-size:.58rem; text-align:right}
+/* celular: a linha do serviço vira duas — nome em cima (com a foto e o
+   toggle), números embaixo. Em grade de 6 colunas num telefone os campos caem
+   em qualquer lugar. */
+@media(max-width:700px){
+  .oc-mod.avulso{display:flex; flex-wrap:wrap; align-items:flex-start; gap:.5rem .55rem}
+  .oc-mod.avulso .oc-tog{order:1; flex:0 0 auto}
+  .oc-mod.avulso .oc-nome{order:2; flex:1 1 140px; min-width:0}
+  .oc-mod.avulso .oc-rowacts{order:3; flex:0 0 auto}
+  .oc-mod.avulso .oc-num{order:4; flex:1 1 86px}
+  .oc-mod.avulso .oc-sub{order:5; flex:1 1 86px; justify-content:flex-end}
+}
+/* subtotal da linha: valor calculado, não campo — o vendedor lê enquanto monta */
+.oc-sub{display:flex;flex-direction:column;gap:.15rem;text-align:right}
+.oc-sub span{font-size:.62rem;letter-spacing:.04em;text-transform:uppercase;color:var(--txt-mut)}
+.oc-sub b{font-size:.9rem;color:var(--verde-claro);white-space:nowrap}
+.pg-row{display:grid; grid-template-columns:140px 110px minmax(0,1fr) minmax(0,1fr) auto; gap:.5rem; align-items:center; padding:.45rem 0; border-bottom:1px solid var(--borda)}
+.pg-row:last-child{border-bottom:0}
+.pg-row input{padding:.4rem .5rem; font-size:.88rem}
+.pg-row .oc-valor{text-align:right}
+@media(max-width:640px){.pg-row{grid-template-columns:1fr 1fr; gap:.4rem}.pg-row .pg-obs{grid-column:1/-1}}
+.pg-aviso{color:#e6b877}
+.svc-thumb{width:46px;height:46px;border-radius:8px;flex:0 0 46px;border:1px solid var(--borda);
+  background:var(--bg) center/cover no-repeat;display:flex;align-items:center;justify-content:center;color:var(--txt-mut)}
+.svc-thumb.tem span{display:none}
+.oc-mod .svc-thumb{width:34px;height:34px;flex:0 0 34px;border-radius:7px;font-size:.8rem}
+.oc-nome-linha{display:flex;gap:.5rem;align-items:center;min-width:0}
+.oc-cat{font-size:.66rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--verde-claro);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .oc-mod.off{opacity:.5}
 .oc-mod .oc-nome,.oc-browse-row .oc-nome{cursor:default; min-width:0}
 .oc-desc-preview{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%}
@@ -648,6 +813,30 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   <div id="oc-escopo-out" class="mut" style="display:none; margin-top:.8rem; padding:.8rem; background:var(--bg); border:1px solid var(--borda); border-radius:8px; line-height:1.6"></div>
 </div>
 
+{% if servico_avulso %}
+<div class="card">
+  <h2 style="margin-top:0">O evento</h2>
+  <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:.8rem">
+    <div class="oc-field"><label>Data</label><input id="ev-data" class="oc-inp" type="date"></div>
+    <div class="oc-field"><label>Convidados</label><input id="ev-conv" class="oc-inp" inputmode="numeric" placeholder="50"></div>
+    <div class="oc-field"><label>Início</label><input id="ev-ini" class="oc-inp" placeholder="19:00"></div>
+    <div class="oc-field"><label>Encerramento</label><input id="ev-fim" class="oc-inp" placeholder="24:00"></div>
+  </div>
+  <div class="oc-field"><label>Tipo de evento</label>
+    <div style="display:flex; gap:.4rem; flex-wrap:wrap" id="ev-tipos">
+      {% for t in tipos_evento %}<button type="button" class="oc-pill ev-tipo">{{ t }}</button>{% endfor %}
+    </div>
+  </div>
+  <div class="oc-field"><label>Tipo de contrato</label>
+    <div style="display:flex; gap:.4rem; flex-wrap:wrap" id="ev-contratos">
+      {% for ct in tipos_contrato %}<button type="button" class="oc-pill ev-ct" data-on="0">{{ ct }}</button>{% endfor %}
+    </div>
+  </div>
+  <div class="oc-field" style="margin-bottom:.3rem"><label>Local</label><input id="ev-local" class="oc-inp" placeholder="Espaço 01 — Rua Deoclécio Brito, 3399"></div>
+  <p class="mut" style="font-size:.78rem;margin:0">Festa que encerra às <b>24:00</b> termina 00:00 do dia seguinte — quando o cliente aprovar, o compromisso entra na agenda já com essa virada.</p>
+</div>
+{% endif %}
+
 <div class="card">
   <h2 style="margin-top:0">Cliente</h2>
 
@@ -694,6 +883,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       <div class="oc-field"{% if servico_avulso %} style="display:none"{% endif %}><label>Telefone</label><input id="oc-tel" class="oc-inp" placeholder="(86) 3333-0000"></div>
       <div class="oc-field"><label>E-mail</label><input id="oc-email" class="oc-inp" placeholder="contato@empresa.com.br"></div>
       <div class="oc-field"{% if servico_avulso %} style="display:none"{% endif %}><label>Site</label><input id="oc-site" class="oc-inp" inputmode="url" placeholder="site.com.br"></div>
+      <div class="oc-field"{% if not servico_avulso %} style="display:none"{% endif %}><label>Endereço</label><input id="oc-endereco" class="oc-inp" placeholder="Rua, nº, bairro"></div>
+      <div class="oc-field"{% if not servico_avulso %} style="display:none"{% endif %}><label>CEP</label><input id="oc-cep" class="oc-inp" inputmode="numeric" placeholder="64000-000"></div>
       <div class="oc-field"><label>Cidade</label><input id="oc-cidade" class="oc-inp" placeholder="Teresina"></div>
       <div class="oc-field"><label>UF</label><input id="oc-uf" class="oc-inp" maxlength="2" placeholder="PI"></div>
       <div class="oc-field"{% if servico_avulso %} style="display:none"{% endif %}><label>Segmento</label><input id="oc-segmento" class="oc-inp" placeholder="Saúde, Varejo, Logística..."></div>
@@ -718,8 +909,25 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         <input type="hidden" id="svc-id">
         <div style="display:grid; grid-template-columns:2fr 3fr; gap:.6rem">
           <div class="oc-field" style="margin-bottom:.4rem"><label>Nome do serviço</label><input id="svc-nome" class="oc-inp" placeholder="Ex.: Consultoria de SEO"></div>
-          <div class="oc-field" style="margin-bottom:.4rem"><label>Descrição</label><input id="svc-desc" class="oc-inp" placeholder="O que está incluso"></div>
+          <div class="oc-field" style="margin-bottom:.4rem"><label>Descrição</label><textarea id="svc-desc" class="oc-inp" rows="2" placeholder="O que está incluso — pode escrever a lista inteira, sai igual no orçamento"></textarea></div>
         </div>
+        {% if servico_avulso %}
+        <div style="display:grid; grid-template-columns:1fr auto; gap:.6rem; align-items:end; margin-bottom:.4rem">
+          <div class="oc-field" style="margin-bottom:0"><label>Categoria <span style="color:var(--txt-mut);font-size:.78rem">— agrupa e soma por categoria no orçamento</span></label>
+            <select id="svc-cat" class="oc-inp"><option value="">Sem categoria</option></select>
+          </div>
+          <div class="oc-field" style="margin-bottom:0"><label>Foto</label>
+            <div style="display:flex; gap:.5rem; align-items:center">
+              <div id="svc-foto-thumb" class="svc-thumb"><span>📷</span></div>
+              <div style="display:flex; flex-direction:column; gap:.35rem">
+                <label class="oc-pill" style="cursor:pointer; text-align:center">📷 Subir foto
+                  <input id="svc-foto-file" type="file" accept="image/*" style="display:none"></label>
+                <input id="svc-foto" class="oc-inp" placeholder="ou cole o link https://…" style="font-size:.8rem; padding:.35rem .5rem">
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endif %}
         <div style="display:flex; gap:.6rem; flex-wrap:wrap; align-items:flex-end">
           <div class="oc-field" style="margin-bottom:0"><label>{{ 'Valor (R$)' if servico_avulso else 'Setup (R$)' }}</label><input id="svc-setup" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
           <div class="oc-field" style="margin-bottom:0{% if servico_avulso %};display:none{% endif %}"><label>Mensal (R$)</label><input id="svc-mensal" class="oc-inp" inputmode="numeric" value="0" style="text-align:right; max-width:120px"></div>
@@ -764,6 +972,37 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         <button id="oc-limpar" class="oc-pill" type="button" style="display:none">Limpar seleção</button>
       </div>
     </div>
+
+    {% if servico_avulso %}
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:.4rem">
+        <h2 style="margin:0">Plano de pagamento</h2>
+        <div style="display:flex; gap:.5rem; flex-wrap:wrap">
+          <button id="pg-gerar" class="oc-pill" type="button">Sinal + parcelas…</button>
+          <button id="pg-add" class="oc-pill" type="button">+ Parcela</button>
+        </div>
+      </div>
+      <p class="mut" style="margin:.3rem 0 .6rem; font-size:.85rem">Cada linha vira um título a receber, no vencimento, quando você fechar o contrato.</p>
+
+      <div id="pg-gerador" style="display:none; background:var(--bg); border:1px solid var(--borda); border-radius:10px; padding:.7rem .8rem; margin-bottom:.7rem">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:.6rem">
+          <div class="oc-field" style="margin-bottom:0"><label>Sinal (R$)</label><input id="pg-entrada" class="oc-inp" placeholder="0,00"></div>
+          <div class="oc-field" style="margin-bottom:0"><label>Nº de parcelas</label><input id="pg-n" class="oc-inp" inputmode="numeric" value="12"></div>
+          <div class="oc-field" style="margin-bottom:0"><label>1º vencimento</label><input id="pg-venc" class="oc-inp" type="date"></div>
+          <div class="oc-field" style="margin-bottom:0"><label>Forma</label><input id="pg-forma" class="oc-inp" placeholder="Cartão de crédito"></div>
+        </div>
+        <div style="display:flex; gap:.5rem; margin-top:.6rem">
+          <button id="pg-gerar-ok" class="oc-btn-g" type="button" style="border:0;border-radius:8px;padding:.5rem 1rem;font-weight:600;cursor:pointer">Gerar</button>
+          <button id="pg-gerar-cc" class="oc-pill" type="button">Cancelar</button>
+        </div>
+      </div>
+
+      <div id="pg-linhas"></div>
+      <div id="pg-vazio" class="oc-empty"><b>Sem parcelas ainda</b>
+        <p class="mut" style="margin:.3rem 0 0; font-size:.85rem">Sem plano de pagamento, fechar o contrato gera um título só, com o total.</p></div>
+      <div class="mut" id="pg-resumo" style="font-size:.82rem; margin-top:.6rem"></div>
+    </div>
+    {% endif %}
 
     {% if not servico_avulso %}
     <div class="card">
@@ -840,15 +1079,19 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   function seg(g){var b=document.querySelector('[data-grupo="'+g+'"].on'); return b?b.getAttribute('data-val'):'';}
   var WRAP=document.querySelector('.sv-wrap');
 
+  // quantidade da linha (só existe no modo evento; sem o campo, é sempre 1)
+  function qtd(r){return Math.max(1,num(r.querySelector('.oc-qtd')));}
+
   function calc(){
     var setup=0,mensal=0,modMensal=0,custo=0,mods=0;
     rows().forEach(function(r){
       if(r.getAttribute('data-on')==='1'){
         mods++;
-        setup+=num(r.querySelector('.oc-setup'));
+        var q=qtd(r);
+        setup+=num(r.querySelector('.oc-setup'))*q;
         var mm=num(r.querySelector('.oc-mensal'));
         mensal+=mm; modMensal+=mm;
-        custo+=num(r.querySelector('.oc-custo'));
+        custo+=num(r.querySelector('.oc-custo'))*q;
       }
     });
     var inf=INFRA[seg('infra')]||INFRA.compartilhada;
@@ -875,6 +1118,11 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 
   function pinta(){
     var c=calc();
+    // subtotal de cada linha (qtd × valor unitário), ao vivo
+    rows().forEach(function(r){
+      var el=r.querySelector('.oc-sub-v');
+      if(el) el.textContent=fmt(num(r.querySelector('.oc-setup'))*qtd(r));
+    });
     document.getElementById('oc-r-setup').textContent=fmt(c.setup);
     var elMensal=document.getElementById('oc-r-mensal');
     if(elMensal)elMensal.textContent=fmt(c.mensal);
@@ -884,6 +1132,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     if(SERVICO_AVULSO){
       if(c.desconto>0){eco.style.display='block'; eco.textContent='Economia de '+fmt(c.economia);}
       else eco.style.display='none';
+      pintaParcelas();   // mudou item/desconto -> o plano de pagamento pode ter deixado de fechar
     }else if(c.anual){eco.style.display='block'; eco.textContent='Economia de '+fmt(c.mensalCheio*12*0.15)+' no ano';}
     else eco.style.display='none';
   }
@@ -904,7 +1153,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     r.setAttribute('data-on',on?'0':'1'); r.classList.toggle('off',on); tog.classList.toggle('on',!on); pinta();
   });
   MODS.addEventListener('input',function(e){
-    if(e.target.classList.contains('oc-setup')||e.target.classList.contains('oc-mensal')||e.target.classList.contains('oc-custo')) pinta();
+    if(e.target.classList.contains('oc-setup')||e.target.classList.contains('oc-mensal')
+       ||e.target.classList.contains('oc-custo')||e.target.classList.contains('oc-qtd')) pinta();
   });
 
   document.getElementById('oc-margin').addEventListener('click',function(){
@@ -939,6 +1189,152 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   var ocDesconto=document.getElementById('oc-desconto');
   if(ocDesconto)ocDesconto.addEventListener('input',pinta);
 
+  // ---- O evento (modo evento) ----
+  function coletarEvento(){
+    if(!SERVICO_AVULSO)return null;
+    var tipo=document.querySelector('#ev-tipos .ev-tipo.on');
+    var cts=[].slice.call(document.querySelectorAll('#ev-contratos .ev-ct[data-on="1"]'))
+             .map(function(b){return b.textContent.trim();});
+    return {data:document.getElementById('ev-data').value||'',
+            convidados:num(document.getElementById('ev-conv'))||null,
+            inicio:document.getElementById('ev-ini').value||'',
+            fim:document.getElementById('ev-fim').value||'',
+            tipo:tipo?tipo.textContent.trim():'',
+            contratos:cts,
+            local:document.getElementById('ev-local').value||''};
+  }
+  function aplicarEvento(ev){
+    if(!SERVICO_AVULSO)return;
+    ev=ev||{};
+    setv('ev-data',ev.data); setv('ev-conv',ev.convidados?String(ev.convidados):'');
+    setv('ev-ini',ev.inicio); setv('ev-fim',ev.fim); setv('ev-local',ev.local);
+    document.querySelectorAll('#ev-tipos .ev-tipo').forEach(function(b){
+      b.classList.toggle('on',b.textContent.trim()===(ev.tipo||''));
+    });
+    var cts=ev.contratos||[];
+    document.querySelectorAll('#ev-contratos .ev-ct').forEach(function(b){
+      var on=cts.indexOf(b.textContent.trim())>=0;
+      b.setAttribute('data-on',on?'1':'0'); b.classList.toggle('on',on);
+    });
+  }
+  document.querySelectorAll('#ev-tipos .ev-tipo').forEach(function(b){
+    b.addEventListener('click',function(){       // tipo de evento: escolhe um
+      var on=b.classList.contains('on');
+      document.querySelectorAll('#ev-tipos .ev-tipo').forEach(function(x){x.classList.remove('on');});
+      if(!on)b.classList.add('on');
+    });
+  });
+  document.querySelectorAll('#ev-contratos .ev-ct').forEach(function(b){
+    b.addEventListener('click',function(){       // tipo de contrato: quantos quiser
+      var on=b.getAttribute('data-on')==='1';
+      b.setAttribute('data-on',on?'0':'1'); b.classList.toggle('on',!on);
+    });
+  });
+
+  // ---- Plano de pagamento (modo evento) ----
+  // Aqui o dinheiro tem CENTAVOS (7.810,00 dividido em 12 não fecha em reais
+  // redondos), então parcela é guardada em centavos — o resto da tela continua
+  // em reais inteiros.
+  function centavos(s){
+    s=String(s==null?'':s).replace(/[^\d,.-]/g,'');
+    if(!s)return 0;
+    if(s.indexOf(',')>=0) s=s.replace(/\./g,'').replace(',','.');
+    var v=parseFloat(s);
+    return isNaN(v)?0:Math.round(v*100);
+  }
+  function fmtc(c){return (Math.round(c||0)/100).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});}
+  function pgRows(){return [].slice.call(document.querySelectorAll('.pg-row'));}
+  function pgInp(cls,ph,val,tipo){
+    var i=document.createElement('input');
+    i.className='oc-inp '+cls; if(tipo)i.type=tipo;
+    if(ph)i.placeholder=ph;
+    i.value=(val==null?'':val);
+    return i;
+  }
+  function addParcela(p){
+    var box=document.getElementById('pg-linhas'); if(!box)return;
+    p=p||{};
+    var d=document.createElement('div'); d.className='pg-row';
+    d.appendChild(pgInp('pg-venc','',p.venc||'','date'));
+    d.appendChild(pgInp('pg-valor oc-valor','0,00',p.valor_centavos?fmtc(p.valor_centavos):''));
+    d.appendChild(pgInp('pg-forma','Pix, cartão…',p.forma||''));
+    d.appendChild(pgInp('pg-obs','Observação (ex.: sinal)',p.obs||''));
+    var b=document.createElement('button');
+    b.className='oc-ic pg-rm'; b.type='button'; b.title='Remover parcela'; b.textContent='🗑';
+    d.appendChild(b);
+    box.appendChild(d);
+    pintaParcelas();
+  }
+  function coletarParcelas(){
+    return pgRows().map(function(r){
+      return {venc:r.querySelector('.pg-venc').value||'',
+              valor_centavos:centavos(r.querySelector('.pg-valor').value),
+              forma:r.querySelector('.pg-forma').value||'',
+              obs:r.querySelector('.pg-obs').value||''};
+    }).filter(function(p){return p.valor_centavos>0;});
+  }
+  function pintaParcelas(){
+    var el=document.getElementById('pg-resumo'); if(!el)return;
+    var linhas=pgRows();
+    document.getElementById('pg-vazio').style.display=linhas.length?'none':'block';
+    if(!linhas.length){el.textContent=''; el.className='mut'; return;}
+    var soma=coletarParcelas().reduce(function(a,p){return a+p.valor_centavos;},0);
+    var total=Math.round(calc().ano1*100), dif=total-soma;
+    el.className='mut'+(dif!==0?' pg-aviso':'');
+    el.textContent = dif===0
+      ? ('As parcelas somam R$ '+fmtc(soma)+' — bate com o total do orçamento.')
+      : (dif>0 ? ('Faltam R$ '+fmtc(dif)+' pra fechar o total de R$ '+fmtc(total)+'.')
+               : ('As parcelas passam R$ '+fmtc(-dif)+' do total de R$ '+fmtc(total)+'.'));
+  }
+  function mesMais(iso,n){
+    var p=(iso||'').split('-'); if(p.length!==3)return iso||'';
+    var ano=parseInt(p[0],10), mes=parseInt(p[1],10)-1+n, dia=parseInt(p[2],10);
+    var d=new Date(ano,mes,1);
+    d.setDate(Math.min(dia,new Date(d.getFullYear(),d.getMonth()+1,0).getDate()));
+    return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);
+  }
+  function gerarParcelas(){
+    var total=Math.round(calc().ano1*100);
+    if(total<=0){alert('Monte os itens primeiro — o total está zerado.');return;}
+    var entrada=centavos(document.getElementById('pg-entrada').value);
+    var n=Math.max(1,Math.min(60,num(document.getElementById('pg-n'))));
+    var venc=document.getElementById('pg-venc').value;
+    var forma=document.getElementById('pg-forma').value||'';
+    if(!venc){alert('Escolha o 1º vencimento.');return;}
+    if(entrada>total){alert('O sinal é maior que o total do orçamento.');return;}
+    document.getElementById('pg-linhas').innerHTML='';
+    if(entrada>0)addParcela({venc:venc,valor_centavos:entrada,forma:'Pix',
+                             obs:'Sinal — confirma a reserva da data'});
+    var resto=total-entrada;
+    if(resto>0){
+      // a sobra da divisão vai na ÚLTIMA parcela: a soma sempre fecha com o total.
+      var base=Math.floor(resto/n), sobra=resto-base*n;
+      for(var i=0;i<n;i++){
+        addParcela({venc:mesMais(venc,entrada>0?i+1:i),
+                    valor_centavos:base+(i===n-1?sobra:0),
+                    forma:forma, obs:(n>1?('Parcela '+(i+1)+'/'+n):'')});
+      }
+    }
+    document.getElementById('pg-gerador').style.display='none';
+    pintaParcelas();
+  }
+  var pgBox=document.getElementById('pg-linhas');
+  if(pgBox){
+    pgBox.addEventListener('input',pintaParcelas);
+    pgBox.addEventListener('click',function(e){
+      var rm=e.target.closest('.pg-rm'); if(!rm)return;
+      var row=rm.closest('.pg-row'); if(row)row.remove();
+      pintaParcelas();
+    });
+    document.getElementById('pg-add').addEventListener('click',function(){addParcela();});
+    var pgGer=document.getElementById('pg-gerador');
+    document.getElementById('pg-gerar').addEventListener('click',function(){
+      pgGer.style.display=(pgGer.style.display==='none'?'block':'none');
+    });
+    document.getElementById('pg-gerar-cc').addEventListener('click',function(){pgGer.style.display='none';});
+    document.getElementById('pg-gerar-ok').addEventListener('click',gerarParcelas);
+  }
+
   // ---- catálogo de serviços por conta (Meus serviços) ----
   var CATALOGO=[];
   var SELECIONADOS={};   // eventos (servico_avulso): slugs marcados nesta proposta
@@ -950,16 +1346,22 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   // do link "ver todos", pra não repetir o card gigante de antes com 26 linhas
   // sempre visíveis.
   function buildRowAvulso(s){
+    var thumb='<div class="svc-thumb'+(s.foto_url?' tem':'')+'"'
+      +(s.foto_url?' style="background-image:url(\''+ec(s.foto_url)+'\')"':'')+'><span>📷</span></div>';
     return '<button class="oc-tog on" type="button" title="Remover da proposta"></button>'
-      +'<div class="oc-nome"><b>'+ec(s.nome)+'</b><div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div>'
-      +'<div class="oc-num"><span>Valor</span><input class="oc-setup" inputmode="numeric" value="'+s.setup+'"></div>'
-      +'<div class="oc-num"><span>Custo</span><input class="oc-custo" inputmode="numeric" value="'+s.custo+'"></div>'
+      +'<div class="oc-nome oc-nome-linha">'+thumb+'<div style="min-width:0">'
+      +(s.categoria?'<div class="oc-cat">'+ec(s.categoria)+'</div>':'')
+      +'<b>'+ec(s.nome)+'</b><div class="mut oc-desc-preview" style="font-size:.78rem" title="'+ec(s.descricao||'')+'">'+ec(s.descricao||'')+'</div></div></div>'
+      +'<div class="oc-num"><span>Qtd</span><input class="oc-qtd" inputmode="numeric" value="1"></div>'
+      +'<div class="oc-num"><span>Vr. unit.</span><input class="oc-setup" inputmode="numeric" value="'+s.setup+'"></div>'
+      +'<div class="oc-num oc-custo-col"><span>Custo</span><input class="oc-custo" inputmode="numeric" value="'+s.custo+'"></div>'
+      +'<div class="oc-sub"><span>Subtotal</span><b class="oc-sub-v">'+fmt(s.setup)+'</b></div>'
       +'<div class="oc-rowacts"><button class="oc-ic oc-rm" type="button" title="Remover da proposta">🗑</button></div>';
   }
   function renderCatalogoAvulso(){
     var box=document.getElementById('oc-mods');
     var valores={};
-    rows().forEach(function(r){valores[r.getAttribute('data-id')]={setup:r.querySelector('.oc-setup').value,custo:r.querySelector('.oc-custo').value};});
+    rows().forEach(function(r){valores[r.getAttribute('data-id')]={setup:r.querySelector('.oc-setup').value,custo:r.querySelector('.oc-custo').value,qtd:r.querySelector('.oc-qtd').value};});
     box.innerHTML='';
     var itens=CATALOGO.filter(function(s){return SELECIONADOS[s.slug];});
     itens.forEach(function(s){
@@ -969,7 +1371,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       r.innerHTML=buildRowAvulso(s);
       box.appendChild(r);
       var v=valores[s.slug];
-      if(v){ r.querySelector('.oc-setup').value=v.setup; r.querySelector('.oc-custo').value=v.custo; }
+      if(v){ r.querySelector('.oc-setup').value=v.setup; r.querySelector('.oc-custo').value=v.custo;
+             if(v.qtd) r.querySelector('.oc-qtd').value=v.qtd; }
     });
     var vazioTotal=CATALOGO.length===0;
     box.style.display=itens.length?'block':'none';
@@ -1029,6 +1432,12 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   function carregarCatalogo(preserva){
     return fetch('/painel/servicos/catalogo').then(function(r){return r.json();}).then(function(d){
       CATALOGO=d.itens||[];
+      var selCat=document.getElementById('svc-cat');
+      if(selCat&&selCat.options.length<2){
+        (d.categorias||[]).forEach(function(nome){
+          var o=document.createElement('option'); o.value=nome; o.textContent=nome; selCat.appendChild(o);
+        });
+      }
       if(SERVICO_AVULSO){
         CATALOGO.sort(function(a,b){return (a.nome||'').localeCompare(b.nome||'','pt-BR');});
         Object.keys(SELECIONADOS).forEach(function(id){if(!CATALOGO.some(function(s){return s.slug===id;}))delete SELECIONADOS[id];});
@@ -1073,20 +1482,46 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         return;
       }
       var ed=e.target.closest('.oc-edit'), dl=e.target.closest('.oc-del');
-      if(ed){var row2=ed.closest('.oc-browse-row'); var s=CATALOGO.filter(function(x){return x.slug===row2.getAttribute('data-id');})[0]; if(s)abrirForm({id:s.id,nome:s.nome,descricao:s.descricao,setup:s.setup,mensal:s.mensal,custo:s.custo});}
+      if(ed){var row2=ed.closest('.oc-browse-row'); var s=CATALOGO.filter(function(x){return x.slug===row2.getAttribute('data-id');})[0]; if(s)abrirForm({id:s.id,nome:s.nome,descricao:s.descricao,setup:s.setup,mensal:s.mensal,custo:s.custo,categoria:s.categoria,foto_url:s.foto_url});}
       else if(dl){var row3=dl.closest('.oc-browse-row'); var s2=CATALOGO.filter(function(x){return x.slug===row3.getAttribute('data-id');})[0]; if(s2&&confirm('Excluir "'+s2.nome+'" do seu catálogo?')){fetch('/painel/servicos/catalogo/excluir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:s2.id})}).then(function(){carregarCatalogo(true);});}}
     });
   }
   // editar / excluir (delegação)
   document.getElementById('oc-mods').addEventListener('click',function(e){
     var ed=e.target.closest('.oc-edit'), dl=e.target.closest('.oc-del');
-    if(ed){var r=ed.closest('.oc-mod'); abrirForm({id:r.getAttribute('data-cid'),nome:r.getAttribute('data-nome'),descricao:r.getAttribute('data-desc'),setup:num(r.querySelector('.oc-setup')),mensal:num(r.querySelector('.oc-mensal')),custo:num(r.querySelector('.oc-custo'))});}
+    if(ed){var r=ed.closest('.oc-mod'); var sc=CATALOGO.filter(function(x){return x.slug===r.getAttribute('data-id');})[0]||{}; abrirForm({id:r.getAttribute('data-cid'),nome:r.getAttribute('data-nome'),descricao:r.getAttribute('data-desc'),setup:num(r.querySelector('.oc-setup')),mensal:num(r.querySelector('.oc-mensal')),custo:num(r.querySelector('.oc-custo')),categoria:sc.categoria,foto_url:sc.foto_url});}
     else if(dl){var r2=dl.closest('.oc-mod'); if(confirm('Excluir "'+r2.getAttribute('data-nome')+'" do seu catálogo?')){fetch('/painel/servicos/catalogo/excluir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:parseInt(r2.getAttribute('data-cid'),10)})}).then(function(){carregarCatalogo(true);});}}
   });
   // form de add/editar serviço do catálogo
+  function svcFotoPreview(url){
+    var t=document.getElementById('svc-foto-thumb'); if(!t)return;
+    if(url){t.style.backgroundImage="url('"+url+"')"; t.classList.add('tem');}
+    else{t.style.backgroundImage=''; t.classList.remove('tem');}
+  }
+  var svcFile=document.getElementById('svc-foto-file');
+  if(svcFile)svcFile.addEventListener('change',function(){
+    var f=this.files&&this.files[0]; if(!f)return;
+    var msg=document.getElementById('svc-msg'); msg.textContent='Subindo a foto…';
+    var fd=new FormData(); fd.append('arquivo',f);
+    fetch('/painel/servicos/catalogo/foto',{method:'POST',body:fd})
+      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+      .then(function(res){
+        if(!res.ok){msg.textContent=(res.d&&res.d.erro)||'Não consegui subir a foto.'; return;}
+        document.getElementById('svc-foto').value=res.d.foto_url;
+        svcFotoPreview(res.d.foto_url); msg.textContent='Foto pronta.';
+      })
+      .catch(function(){msg.textContent='Erro de conexão ao subir a foto.';});
+  });
+  var svcFotoLink=document.getElementById('svc-foto');
+  if(svcFotoLink)svcFotoLink.addEventListener('input',function(){svcFotoPreview(this.value.trim());});
+
   function abrirForm(s){
     s=s||{};
     document.getElementById('svc-id').value=s.id||'';
+    var cat=document.getElementById('svc-cat');
+    if(cat)cat.value=s.categoria||'';
+    var fot=document.getElementById('svc-foto');
+    if(fot){fot.value=s.foto_url||''; svcFotoPreview(s.foto_url||'');}
     document.getElementById('svc-nome').value=s.nome||'';
     document.getElementById('svc-desc').value=s.descricao||'';
     document.getElementById('svc-setup').value=s.setup||0;
@@ -1104,7 +1539,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     var nome=document.getElementById('svc-nome').value.trim();
     if(!nome){document.getElementById('svc-msg').textContent='Informe o nome do serviço.';return;}
     var idv=document.getElementById('svc-id').value;
-    var body={id:idv?parseInt(idv,10):null,nome:nome,descricao:document.getElementById('svc-desc').value||'',setup:num(document.getElementById('svc-setup')),mensal:num(document.getElementById('svc-mensal')),custo:num(document.getElementById('svc-custo'))};
+    var body={id:idv?parseInt(idv,10):null,nome:nome,descricao:document.getElementById('svc-desc').value||'',setup:num(document.getElementById('svc-setup')),mensal:num(document.getElementById('svc-mensal')),custo:num(document.getElementById('svc-custo')),categoria:((document.getElementById('svc-cat')||{}).value)||'',foto_url:((document.getElementById('svc-foto')||{}).value||'').trim()};
     var b=this; b.disabled=true;
     fetch('/painel/servicos/catalogo/salvar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
       .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
@@ -1267,9 +1702,17 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   function coletarBody(){
     var c=calc();
     var sel=rows().filter(function(r){return r.getAttribute('data-on')==='1';});
-    var itens=sel.map(function(r){return {nome:r.getAttribute('data-nome'),desc:r.getAttribute('data-desc')||'',setup:num(r.querySelector('.oc-setup')),mensal:num(r.querySelector('.oc-mensal'))};});
+    // setup da linha = total (qtd × unitário) — é o que o funil soma; qtd e
+    // unitário viajam junto pra o orçamento poder mostrar "10 × R$ 25,00".
+    var itens=sel.map(function(r){
+      var q=qtd(r), u=num(r.querySelector('.oc-setup'));
+      var cat=CATALOGO.filter(function(x){return x.slug===r.getAttribute('data-id');})[0]||{};
+      return {nome:r.getAttribute('data-nome'),desc:r.getAttribute('data-desc')||'',
+              setup:u*q,mensal:num(r.querySelector('.oc-mensal')),qtd:q,unitario:u,
+              categoria:cat.categoria||'',foto_url:cat.foto_url||''};
+    });
     var escEl=document.getElementById('oc-escopo-out');
-    return {id:EDIT_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',telefone:document.getElementById('oc-tel').value||'',cidade:document.getElementById('oc-cidade').value||'',uf:document.getElementById('oc-uf').value||'',site:document.getElementById('oc-site').value||'',cargo:document.getElementById('oc-cargo').value||'',socio:document.getElementById('oc-socio').value||'',modulos:sel.map(function(r){return r.getAttribute('data-id');}),itens:itens,escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setup),mensal:Math.round(c.mensal),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods};
+    return {id:EDIT_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',telefone:document.getElementById('oc-tel').value||'',cidade:document.getElementById('oc-cidade').value||'',uf:document.getElementById('oc-uf').value||'',site:document.getElementById('oc-site').value||'',cargo:document.getElementById('oc-cargo').value||'',socio:document.getElementById('oc-socio').value||'',endereco:(document.getElementById('oc-endereco')||{}).value||'',cep:(document.getElementById('oc-cep')||{}).value||'',modulos:sel.map(function(r){return r.getAttribute('data-id');}),itens:itens,evento:coletarEvento(),parcelas:(SERVICO_AVULSO?coletarParcelas():[]),escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setup),mensal:Math.round(c.mensal),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods};
   }
   function salvarProposta(cb){
     fetch('/painel/servicos/salvar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(coletarBody())})
@@ -1299,7 +1742,10 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   var EDIT_ID=null;
   function novo(){
     EDIT_ID=null;
-    ['oc-empresa','oc-contato','oc-cnpj','oc-segmento','oc-whats','oc-email','oc-tel','oc-cidade','oc-uf','oc-site','oc-cargo','oc-socio','oc-desc'].forEach(function(id){setv(id,'');});
+    ['oc-empresa','oc-contato','oc-cnpj','oc-segmento','oc-whats','oc-email','oc-tel','oc-cidade','oc-uf','oc-site','oc-cargo','oc-socio','oc-desc','oc-endereco','oc-cep'].forEach(function(id){setv(id,'');});
+    aplicarEvento({});
+    var pgb=document.getElementById('pg-linhas');
+    if(pgb){pgb.innerHTML=''; pintaParcelas();}
     var out=document.getElementById('oc-escopo-out'); out.style.display='none'; out.removeAttribute('data-escopo'); out.textContent='';
     document.getElementById('oc-editando').style.display='none';
     marcaMods([]);   // proposta nova começa sem nenhum serviço marcado
@@ -1314,12 +1760,21 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       setv('oc-segmento',d.segmento); setv('oc-whats',d.whatsapp); setv('oc-email',d.email);
       setv('oc-tel',d.telefone); setv('oc-cidade',d.cidade); setv('oc-uf',d.uf);
       setv('oc-site',d.site); setv('oc-cargo',d.cargo); setv('oc-socio',d.socio);
+      setv('oc-endereco',d.endereco); setv('oc-cep',d.cep);
+      aplicarEvento(d.evento);
+      if(SERVICO_AVULSO){
+        var pgb=document.getElementById('pg-linhas');
+        if(pgb){pgb.innerHTML=''; (d.parcelas||[]).forEach(addParcela); pintaParcelas();}
+      }
       marcaMods(d.modulos);
       // restaura os valores EXATOS que estavam salvos (não recalcula pelo catálogo)
       (d.itens||[]).forEach(function(it){
         var r=rows().filter(function(x){return x.getAttribute('data-nome')===it.nome;})[0];
-        if(r){ var s=r.querySelector('.oc-setup'), m=r.querySelector('.oc-mensal');
-          if(s&&it.setup!=null) s.value=it.setup;
+        if(r){ var s=r.querySelector('.oc-setup'), m=r.querySelector('.oc-mensal'), q=r.querySelector('.oc-qtd');
+          // proposta antiga não tem qtd/unitário: o setup salvo era o próprio unitário.
+          var unit=(it.unitario!=null&&it.unitario>0)?it.unitario:it.setup;
+          if(s&&unit!=null) s.value=unit;
+          if(q&&it.qtd) q.value=it.qtd;
           if(m&&it.mensal!=null) m.value=it.mensal; }
       });
       var out=document.getElementById('oc-escopo-out');
@@ -1336,7 +1791,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   }
   document.getElementById('oc-novo').addEventListener('click',novo);
   function fechar(id,btn){
-    if(!confirm(SERVICO_AVULSO?'Fechar este contrato? Vai gerar título a receber no módulo Empresa.':'Fechar este contrato? Vai gerar título a receber (setup + mensalidade) no módulo Empresa.')){return;}
+    if(!confirm(SERVICO_AVULSO?'Fechar este contrato? Cada parcela do plano de pagamento vira um título a receber no módulo Empresa (sem plano, gera um título com o total).':'Fechar este contrato? Vai gerar título a receber (setup + mensalidade) no módulo Empresa.')){return;}
     btn.disabled=true; btn.textContent='Fechando...';
     fetch('/painel/servicos/fechar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})
       .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
@@ -1357,9 +1812,13 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         var left=document.createElement('div'); left.className='oc-hist-open';
         left.style.cssText='display:flex;align-items:center;min-width:0;flex:1;cursor:pointer';
         left.title='Abrir proposta';
+        var evento=it.modo==='evento';
+        var sub=[(it.numero?('nº '+it.numero):''),esc(it.data),
+                 it.mods+(evento?' itens':' módulos'),esc(evento?it.setup:it.total)]
+                .filter(Boolean).join(' · ');
         left.innerHTML='<div class="oc-av">'+esc(it.inicial)+'</div>'
           +'<div><b>'+esc(it.cliente)+(it.empresa?' <span class="mut">· '+esc(it.empresa)+'</span>':'')+'</b>'
-          +'<div class="mut" style="font-size:.78rem">'+esc(it.data)+' · '+it.mods+' módulos · '+esc(it.total)+'</div></div>';
+          +'<div class="mut" style="font-size:.78rem">'+sub+'</div></div>';
         left.addEventListener('click',function(){abrir(it.id);});
         el.appendChild(left);
         var right=document.createElement('div'); right.style.display='flex'; right.style.alignItems='center'; right.style.gap='.5rem'; right.style.flexWrap='wrap';

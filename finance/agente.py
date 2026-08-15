@@ -186,12 +186,17 @@ def _orcamento(c, conta_id, conversa_id, conv, catalogo, d, canal, destino, resp
     itens = [{"nome": s["nome"], "setup": s["setup_centavos"], "mensal": s["mensal_centavos"]} for s in escolhidos]
     empresa = conv[3] or conv[2] or "Cliente"
     token = secrets.token_urlsafe(16)
+    from finance import vendas as _vendas
+    _n = c.execute("""select coalesce(n.slug,'') from contas ct
+                        left join nichos n on n.id = ct.nicho_id
+                       where ct.id=%s""", (conta_id,)).fetchone()
     c.execute(
         """insert into orcamentos (conta_id, cliente, empresa, modulos, itens, escopo,
-             setup_centavos, mensal_centavos, n_modulos, criado_por, token, status)
-           values (%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,'agente',%s,'rascunho')""",
+             setup_centavos, mensal_centavos, n_modulos, criado_por, token, status, modo)
+           values (%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,'agente',%s,'rascunho',%s)""",
         (conta_id, empresa, empresa, json.dumps([s["slug"] for s in escolhidos]),
-         json.dumps(itens), (resposta or "")[:2000], setup, mensal, len(escolhidos), token))
+         json.dumps(itens), (resposta or "")[:2000], setup, mensal, len(escolhidos), token,
+         _vendas.modo_por_nicho(_n[0] if _n else "")))
     from finance.email_sender import _app_url
     link = _app_url() + "/proposta/" + token
     linhas = "\n".join(f"• {s['nome']}: R$ {s['mensal_centavos']//100}/mês" for s in escolhidos)

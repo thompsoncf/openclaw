@@ -12,7 +12,7 @@ Tudo escopado por conta_id (multi-tenant sagrado).
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 # Brasília: UTC-3 fixo (o Brasil não usa mais horário de verão).
 BRT = timezone(timedelta(hours=-3))
@@ -60,6 +60,64 @@ def parse_datahora(s: str | None) -> datetime | None:
             dt = dt.replace(year=hoje.year + 1)
         return dt
     return None
+
+
+def parse_data(data) -> date | None:
+    """Data (sem hora): aceita date/datetime, ISO ('2025-11-18') ou 'dd/mm/aaaa'.
+    Irmã tolerante da parse_datahora, pra quando só a data importa."""
+    if isinstance(data, datetime):
+        return data.date()
+    if isinstance(data, date):
+        return data
+    s = str(data or "").strip()
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d/%m/%y"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _minutos(hora: str | None) -> int | None:
+    """Hora escrita como o cliente fala -> minutos desde a meia-noite.
+    Aceita '19', '19:00', '19h', '19h30', '00:30'. 24:00 vale 1440 (meia-noite
+    do dia seguinte) — é assim que orçamento de festa escreve 'encerramento 24'."""
+    s = str(hora or "").strip().lower().replace("h", ":").rstrip(":")
+    if not s:
+        return None
+    partes = s.split(":")
+    try:
+        h = int(partes[0])
+        m = int(partes[1]) if len(partes) > 1 and partes[1] else 0
+    except ValueError:
+        return None
+    if not (0 <= h <= 24 and 0 <= m < 60):
+        return None
+    return h * 60 + m
+
+
+def janela_evento(data, inicio: str | None,
+                  fim: str | None) -> tuple[datetime | None, datetime | None]:
+    """(início, fim) AWARE de uma festa, a partir da data e dos horários do orçamento.
+
+    A festa que "encerra às 24" acaba 00:00 DO DIA SEGUINTE — e virar a noite é a
+    regra do ramo, não a exceção (19h→02h). Por isso, fim <= início rola pro dia
+    seguinte: sem isso a agenda ganharia um compromisso terminando antes de
+    começar. Sem data ou sem hora de início devolve (None, None) — quem chama
+    trata como "não dá pra marcar ainda" e segue sem compromisso.
+    """
+    dia = parse_data(data)
+    mi = _minutos(inicio)
+    if dia is None or mi is None:
+        return None, None
+    ini = datetime(dia.year, dia.month, dia.day, tzinfo=BRT) + timedelta(minutes=mi)
+    mf = _minutos(fim)
+    if mf is None:
+        return ini, None
+    f = datetime(dia.year, dia.month, dia.day, tzinfo=BRT) + timedelta(minutes=mf)
+    if f <= ini:
+        f += timedelta(days=1)
+    return ini, f
 
 
 # Categorias do compromisso (pro portal colorir e separar pessoal/empresa).

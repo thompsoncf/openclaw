@@ -17,6 +17,26 @@ from __future__ import annotations
 
 import re
 
+# Categorias do serviço no nicho EVENTOS. Servem pra agrupar os itens e mostrar
+# o SUBTOTAL POR CATEGORIA na folha do orçamento — e são o mesmo vocabulário das
+# receitas que a migração 143 criou no plano de contas, pra o que o cliente lê no
+# papel bater com o que a empresa vê na DRE. A primeira é o padrão.
+# Vocabulário do orçamento de EVENTO: o que a tela oferece e o que a folha
+# imprime (a lista inteira, com a escolhida em destaque, como no formulário de
+# papel). Um lugar só, pra tela e folha nunca divergirem.
+TIPOS_EVENTO = ["Aniversário", "Casamento", "Confraternização", "Corporativo",
+                "Infantil", "Suítes"]
+TIPOS_CONTRATO = ["Locação de espaço", "Locação de móveis e utensílios",
+                  "Serviços terceirizados"]
+
+CATEGORIAS_EVENTOS = [
+    "Locação de espaço",
+    "Buffet",
+    "Locação de móveis e utensílios",
+    "Serviços terceirizados",
+    "Outros",
+]
+
 # Modelo pronto (nicho tecnologia) — o mesmo catálogo que era chumbado. Serve de
 # atalho pra quem não quer começar do zero. slug preservado pra casar com
 # orçamentos já salvos que usavam esses ids.
@@ -51,6 +71,11 @@ def garantir_tabela(pool):
                 criado_em       timestamptz not null default now(),
                 unique (conta_id, slug)
             )""")
+        # espelha a migração 148 (categoria/foto do item no orçamento de evento)
+        c.execute("""
+            alter table servicos_catalogo add column if not exists categoria text;
+            alter table servicos_catalogo add column if not exists foto_url  text;
+        """)
         c.execute("create index if not exists idx_servicos_catalogo_conta "
                   "on servicos_catalogo (conta_id, ativo, ordem)")
         c.commit()
@@ -70,13 +95,14 @@ def listar(pool, conta_id: int) -> list[dict]:
     with pool.connection() as c:
         rows = c.execute(
             """select id, slug, nome, descricao, setup_centavos, mensal_centavos,
-                      custo_centavos, ordem
+                      custo_centavos, ordem, categoria, foto_url
                  from servicos_catalogo
                 where conta_id=%s and ativo
                 order by ordem, id""", (conta_id,)).fetchall()
     return [{"id": r[0], "slug": r[1], "nome": r[2], "descricao": r[3] or "",
              "setup_centavos": int(r[4] or 0), "mensal_centavos": int(r[5] or 0),
-             "custo_centavos": int(r[6] or 0), "ordem": r[7] or 0} for r in rows]
+             "custo_centavos": int(r[6] or 0), "ordem": r[7] or 0,
+             "categoria": r[8] or "", "foto_url": r[9] or ""} for r in rows]
 
 
 def slugs_validos(pool, conta_id: int) -> set[str]:
@@ -86,7 +112,8 @@ def slugs_validos(pool, conta_id: int) -> set[str]:
 
 def salvar(pool, conta_id: int, *, id: int | None = None, nome: str,
            descricao: str = "", setup_centavos: int = 0,
-           mensal_centavos: int = 0, custo_centavos: int = 0) -> dict:
+           mensal_centavos: int = 0, custo_centavos: int = 0,
+           categoria: str = "", foto_url: str = "") -> dict:
     """Cria (id vazio) ou edita (id preenchido) um serviço do catálogo da conta."""
     nome = (nome or "").strip()
     if not nome:
@@ -99,11 +126,13 @@ def salvar(pool, conta_id: int, *, id: int | None = None, nome: str,
             r = c.execute(
                 """update servicos_catalogo
                       set nome=%s, descricao=%s, setup_centavos=%s,
-                          mensal_centavos=%s, custo_centavos=%s
+                          mensal_centavos=%s, custo_centavos=%s,
+                          categoria=%s, foto_url=%s
                     where id=%s and conta_id=%s and ativo
                   returning id, slug""",
                 (nome, descricao or "", setup_centavos, mensal_centavos,
-                 custo_centavos, id, conta_id)).fetchone()
+                 custo_centavos, (categoria or "").strip() or None,
+                 (foto_url or "").strip() or None, id, conta_id)).fetchone()
             c.commit()
             if not r:
                 return {"ok": False, "erro": "Serviço não encontrado."}
@@ -117,10 +146,12 @@ def salvar(pool, conta_id: int, *, id: int | None = None, nome: str,
         nid = c.execute(
             """insert into servicos_catalogo
                    (conta_id, slug, nome, descricao, setup_centavos,
-                    mensal_centavos, custo_centavos, ordem)
-               values (%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
+                    mensal_centavos, custo_centavos, ordem, categoria, foto_url)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) returning id""",
             (conta_id, slug, nome, descricao or "", setup_centavos,
-             mensal_centavos, custo_centavos, ordem)).fetchone()[0]
+             mensal_centavos, custo_centavos, ordem,
+             (categoria or "").strip() or None,
+             (foto_url or "").strip() or None)).fetchone()[0]
         c.commit()
         return {"ok": True, "id": nid, "slug": slug}
 

@@ -597,6 +597,7 @@ def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens) ->
     if not linhas:
         return {"ok": False, "erro": "Adicione ao menos um item ao orçamento."}
     import json as _json
+    from finance import vendas as _vendas
     setup_c = sum(x["setup"] for x in linhas) * 100
     mensal_c = sum(x["mensal"] for x in linhas) * 100
     with pool.connection() as c:
@@ -615,12 +616,14 @@ def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens) ->
         oid = c.execute(
             """insert into orcamentos
                  (conta_id, cliente, empresa, cnpj, segmento, whatsapp, telefone, email,
-                  cidade, uf, itens, setup_centavos, mensal_centavos, status, criado_por, canal, token)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,'enviado',%s,'cockpit',%s)
+                  cidade, uf, itens, setup_centavos, mensal_centavos, status, criado_por,
+                  canal, token, modo)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,'enviado',%s,'cockpit',%s,%s)
                returning id""",
             (conta_id, (lead[1] or None), (lead[0] or None), lead[2], lead[3], lead[4],
              lead[5], lead[6], lead[7], (lead[8] or "")[:2] or None,
-             _json.dumps(linhas), setup_c, mensal_c, str(membro_id), token)).fetchone()[0]
+             _json.dumps(linhas), setup_c, mensal_c, str(membro_id), token,
+             _vendas.modo_do_orcamento(pool, conta_id))).fetchone()[0]
         c.execute("update prospeccao set orcamento_id=%s, atualizado_em=now() where id=%s and conta_id=%s",
                   (oid, lead_id, conta_id))
         c.commit()

@@ -62,6 +62,9 @@ def pool():
             alter table contas add column if not exists nome_fantasia text;
             alter table contas add column if not exists cnae          text;
         """)
+        c.execute(_sql("064_clientes_lojista.sql"))     # clientes do lojista
+        c.execute(_sql("066_pessoas_identidade.sql"))   # identidade (pessoas)
+        c.execute(_sql("131_pessoa_cnpj.sql"))          # pessoas.cnpj/tipo
         c.execute("""create table if not exists nichos (
             id bigserial primary key, nome text, slug text unique, tipo text,
             ativo boolean not null default true)""")
@@ -122,7 +125,7 @@ PARCELAS = [{"venc": "2025-11-13", "valor_centavos": 181000, "forma": "Pix",
 
 
 def _semear(pool, conta_id, *, status="enviado", evento=EVENTO, parcelas=PARCELAS,
-            numero=60, total_centavos=745000):
+            numero=60, total_centavos=745000, com_desconto=None, criado_por=None):
     """Cria um orçamento de evento e devolve (id, token). O token é sorteado: o
     banco de teste é compartilhado entre módulos e não é truncado entre runs."""
     token = "EV" + secrets.token_hex(6)
@@ -136,11 +139,12 @@ def _semear(pool, conta_id, *, status="enviado", evento=EVENTO, parcelas=PARCELA
                        %s,%s,%s,%s,'evento',%s::jsonb,%s::jsonb,%s,
                        'Rua das Flores, 120','64049-000','Teresina','PI',
                        '000.000.000-00','maria@teste.com','(86) 99999-0000',
-                       (select min(id)::text from membros where conta_id=%s))
+                       coalesce(%s, (select min(id)::text from membros where conta_id=%s)))
                returning id""",
-            (conta_id, json.dumps(ITENS), total_centavos, total_centavos, status, token,
+            (conta_id, json.dumps(ITENS), total_centavos,
+             (com_desconto if com_desconto is not None else total_centavos), status, token,
              json.dumps(evento) if evento is not None else None,
-             json.dumps(parcelas), numero, conta_id)).fetchone()[0]
+             json.dumps(parcelas), numero, criado_por, conta_id)).fetchone()[0]
         c.commit()
     return oid, token
 
@@ -216,7 +220,9 @@ def test_pagina_do_evento_mostra_qtd_valor_unitario_e_parcelas(pool, conta_id, m
     assert ">25,00<" in html and ">250,00<" in html                  # 10 × 25 = 250
     assert "https://ex.com/espaco.jpg" in html                       # foto do item
     assert html.count("Locação de espaço") >= 2   # categoria do item + subtotal por categoria
-    assert "Casamento" in html and "Corporativo" in html   # as opções todas, como no papel
+    assert "Aniversário" in html                       # o tipo escolhido
+    assert "Casamento" not in html and "Corporativo" not in html   # o cardápio de opções, não
+    assert "Locação de espaço" in html                 # o contrato marcado
     assert "Vendedor: Manoel" in html
     assert "R$ 7.450,00" in html                                     # total do evento
     assert "Plano de pagamento" in html and "R$ 1.810,00" in html
@@ -238,6 +244,95 @@ def test_subtotal_por_categoria(pool, conta_id):
     # nos dois casos o bloco não aparece.
     assert _subtotais([ITENS[0]]) == []
     assert _subtotais([ITENS[0], {"setup": 100}]) == []
+
+
+def test_documento_cep_e_telefone_saem_com_mascara(pool, conta_id):
+    """O cadastro guarda o que a empresa digitou (52752898000158); a folha
+    mostra 52.752.898/0001-58. Idem CPF, CEP e telefone — e endereço gritando
+    em caixa alta é capitalizado."""
+    with pool.connection() as c:
+        c.execute("""update contas set documento='52752898000158', cep='64050050',
+                            telefone='86994171008', endereco='DEOCLECIO BRITO, 3399',
+                            bairro='PLANALTO'
+                      where id=%s""", (conta_id,))
+        c.commit()
+    _, tok = _semear(pool, conta_id)
+    d = prop._carregar(tok, pool=pool)
+    assert d["emitente"]["doc"] == "52.752.898/0001-58"
+    assert d["emitente"]["cep"] == "64050-050"
+    assert d["emitente"]["telefone"] == "(86) 99417-1008"
+    assert d["emitente"]["endereco"] == "Deoclecio Brito, 3399"
+    assert d["emitente"]["bairro"] == "Planalto"
+    assert d["cliente"]["doc"] == "000.000.000-00"      # já veio mascarado, fica igual
+    assert d["cliente"]["telefone"] == "(86) 99999-0000"
+
+
+def test_vendedor_sai_na_folha_mesmo_quando_quem_vendeu_e_o_dono(pool, conta_id):
+    """criado_por guarda o id do membro OU a palavra 'dono'. No segundo caso o
+    nome sumia da folha — e quem vende, no cliente pequeno, é justamente o dono."""
+    _, tok = _semear(pool, conta_id, criado_por="dono")
+    d = prop._carregar(tok, pool=pool)
+    assert d["vendedor_nome"] == "Prime Eventos"          # o nome da conta
+    _, tok2 = _semear(pool, conta_id, numero=61)          # criado por um membro
+    assert prop._carregar(tok2, pool=pool)["vendedor_nome"] == "Manoel Soares de Sousa Junior"
+
+
+def test_desconto_aparece_e_manda_no_total(pool, conta_id, monkeypatch):
+    """O desconto era aplicado na tela, gravado em primeiro_ano_centavos e
+    ignorado pela folha, que mostrava a soma bruta dos itens."""
+    ev = dict(EVENTO, desconto=10)
+    _, tok = _semear(pool, conta_id, evento=ev, total_centavos=745000,
+                     com_desconto=670500, parcelas=[])
+    d = prop._carregar(tok, pool=pool)
+    assert d["subtotal_itens"] == "R$ 7.450,00"
+    assert d["desconto_pct"] == 10 and d["desconto_valor"] == "R$ 745,00"
+    assert d["total"] == "R$ 6.705,00"                    # é o total COM desconto
+
+    carregar, pool_teste = prop._carregar, pool
+    monkeypatch.setattr(prop, "_carregar", lambda t, pool=None: carregar(t, pool=pool_teste))
+    html = prop.proposta_publica(None, tok).body.decode()
+    assert "Desconto (10%)" in html and "− R$ 745,00" in html
+    assert "R$ 6.705,00" in html
+
+
+def test_fechar_evento_sem_parcelas_usa_o_total_com_desconto(pool, conta_id):
+    oid, _ = _semear(pool, conta_id, parcelas=[], total_centavos=745000, com_desconto=670500)
+    r = vendas.fechar_orcamento(pool, conta_id, oid)
+    with pool.connection() as c:
+        valor = c.execute("select valor_centavos from titulos where id=%s",
+                          (r["titulos"][0],)).fetchone()[0]
+    assert valor == 670500      # o que o cliente vai pagar, não a soma dos itens
+
+
+def test_cliente_do_orcamento_entra_na_base_de_clientes(pool, conta_id):
+    """O vendedor puxa o lead, gera o orçamento — e o cliente passa a existir na
+    aba Clientes, pra dar pra corrigir um telefone errado. Salvar de novo não
+    duplica: a identidade funde pelo documento."""
+    from types import SimpleNamespace
+    from finance import clientes as cli
+    from web.painel_servicos import _espelhar_cliente
+
+    dados = SimpleNamespace(empresa="Maria Teste da Silva", cliente="Maria",
+                            cnpj="529.982.247-25", whatsapp="(86) 99999-0000",
+                            telefone="", email="maria@teste.com")
+    cid1 = _espelhar_cliente(pool, conta_id, dados)
+    cid2 = _espelhar_cliente(pool, conta_id, dados)      # salvou o orçamento de novo
+    assert cid1 and cid1 == cid2
+
+    achados = cli.listar_clientes(pool, conta_id, busca="Maria")
+    assert len(achados) == 1
+    assert achados[0]["nome"] == "Maria Teste da Silva"
+    assert achados[0]["email"] == "maria@teste.com"
+
+    # documento inválido não impede: o cliente entra sem documento
+    outro = _espelhar_cliente(pool, conta_id, SimpleNamespace(
+        empresa="Cliente Sem Doc", cliente="", cnpj="111.111.111-11",
+        whatsapp="86988887777", telefone="", email=""))
+    assert outro
+
+    # sem nome não há o que salvar
+    assert _espelhar_cliente(pool, conta_id, SimpleNamespace(
+        empresa="", cliente="", cnpj="", whatsapp="", telefone="", email="")) is None
 
 
 # ------------------------------------------------- o modo vem do nicho, sempre

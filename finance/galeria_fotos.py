@@ -47,34 +47,61 @@ _TRADUCAO: dict[str, str] = {
 }
 
 
-def _termo_busca(nome_produto: str) -> str | None:
-    """Acha o termo de busca (em inglês) a partir do nome do produto."""
+# Vocabulário do nicho de EVENTOS: o serviço "Locação cozinha" ou "Pacote
+# essencial" não é um hortifrúti, mas a empresa quer a foto do que está
+# vendendo. Mesmo motor, outro dicionário e outro complemento de busca.
+_TRADUCAO_EVENTOS: dict[str, str] = {
+    "espaco": "event venue", "salao": "event hall", "casa": "event venue",
+    "buffet": "buffet table", "jantar": "dinner table setting",
+    "almoco": "lunch table setting", "coquetel": "cocktail party",
+    "mesa": "table setting", "toalha": "table linen", "cadeira": "event chairs",
+    "movel": "event furniture", "louca": "tableware", "taca": "wine glasses",
+    "talher": "cutlery table", "palco": "event stage", "lounge": "lounge furniture",
+    "cerimonia": "wedding ceremony", "casamento": "wedding reception",
+    "aniversario": "birthday party", "infantil": "kids birthday party",
+    "formatura": "graduation party", "corporativo": "corporate event",
+    "confraternizacao": "company party", "decoracao": "event decoration",
+    "flores": "flower arrangement", "bolo": "cake table", "doce": "dessert table",
+    "entrada": "appetizers platter", "garcom": "waiter serving",
+    "equipe": "event staff", "seguranca": "event security",
+    "recepcionista": "event hostess", "dj": "dj party", "som": "sound system",
+    "iluminacao": "event lighting", "pista": "dance floor", "tenda": "event tent",
+    "piscina": "pool party", "churrasco": "barbecue", "bar": "cocktail bar",
+    "drink": "cocktails", "chopp": "draft beer", "bebida": "party drinks",
+    "cozinha": "commercial kitchen", "fotografia": "event photographer",
+    "video": "event videographer", "brinquedo": "kids party games",
+}
+
+
+def _termo_busca(nome_produto: str, mapa: dict[str, str] | None = None) -> str | None:
+    """Acha o termo de busca (em inglês) a partir do nome do produto/serviço."""
+    mapa = mapa if mapa is not None else _TRADUCAO
     n = _norm(nome_produto)
     if not n:
         return None
     palavras = set(n.replace("-", " ").split())
     # Compostas primeiro (couve-flor)
-    for chave, en in _TRADUCAO.items():
+    for chave, en in mapa.items():
         if "-" in chave and set(chave.replace("-", " ").split()).issubset(palavras):
             return en
     # Palavra inteira
-    for chave, en in _TRADUCAO.items():
+    for chave, en in mapa.items():
         if "-" not in chave and chave in palavras:
             return en
     # Substring (plural)
-    for chave, en in _TRADUCAO.items():
+    for chave, en in mapa.items():
         if "-" not in chave and chave in n:
             return en
     return None
 
 
-def _buscar_unsplash(termo: str, n: int = 4) -> list[str]:
+def _buscar_unsplash(termo: str, n: int = 4, complemento: str = "food fresh") -> list[str]:
     """Busca no Unsplash e retorna até n URLs de foto. [] se sem chave ou erro."""
     chave = os.environ.get("UNSPLASH_ACCESS_KEY")
     if not chave:
         return []
     try:
-        q = urllib.parse.quote(termo + " food fresh")
+        q = urllib.parse.quote((termo + " " + complemento).strip())
         url = (f"https://api.unsplash.com/search/photos?query={q}"
                f"&per_page={n}&orientation=squarish&content_filter=high")
         req = urllib.request.Request(url, headers={
@@ -96,6 +123,21 @@ def opcoes_de_foto(nome_produto: str, n: int = 4) -> list[str]:
     if not termo:
         return []
     return _buscar_unsplash(termo, n)
+
+
+def opcoes_para_servico(nome_servico: str, n: int = 4) -> list[str]:
+    """Até n fotos pro serviço de EVENTO (espaço, buffet, palco, garçom...).
+
+    Sem palavra conhecida no nome, cai na busca pelo nome cru + "event" — é
+    melhor mostrar quatro fotos mais ou menos do que nenhuma, já que quem
+    escolhe é a empresa (e ela pode sempre subir a foto real dela).
+    """
+    termo = _termo_busca(nome_servico, _TRADUCAO_EVENTOS)
+    if not termo:
+        termo = _norm(nome_servico)[:60]
+    if not termo:
+        return []
+    return _buscar_unsplash(termo, n, complemento="event party")
 
 
 def sugerir_foto(nome_produto: str) -> str | None:

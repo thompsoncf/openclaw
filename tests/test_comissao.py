@@ -39,7 +39,8 @@ create table titulos (id bigserial primary key, conta_id bigint, tipo text not n
   criado_em timestamptz default now());
 create table orcamentos (id bigserial primary key, conta_id bigint, cliente text,
   empresa text, itens jsonb, token text, setup_centavos bigint default 0,
-  mensal_centavos bigint default 0, status text default 'rascunho', canal text,
+  mensal_centavos bigint default 0, primeiro_ano_centavos bigint default 0,
+  status text default 'rascunho', canal text,
   modo text default 'recorrente', evento jsonb, parcelas jsonb,
   criado_por text, atualizado_em timestamptz default now(),
   criado_em timestamptz default now());

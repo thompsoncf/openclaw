@@ -3007,8 +3007,10 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
         <div><label>Telefone / celular</label><input id="nc-tel" name="telefone"></div>
         <div><label>E-mail</label><input id="nc-email" name="email" type="email"></div>
         <div><label>Aniversário</label><input type="date" name="aniversario"></div>
+        <div class="col-2"><label>Endereço</label><input name="endereco" placeholder="Rua das Flores, 120 · Bairro Jóquei"></div>
         <div><label>Cidade</label><input name="cidade" placeholder="Teresina"></div>
         <div><label>UF</label><input name="uf" maxlength="2" placeholder="PI" style="text-transform:uppercase"></div>
+        <div><label>CEP</label><input name="cep" inputmode="numeric" placeholder="64049-000"></div>
         <div><label>Obs</label><input name="obs"></div>
       </div>
       <div class="pfoot" style="margin-top:.8rem">
@@ -3050,8 +3052,10 @@ _CLIENTES = """{% extends "base" %}{% block conteudo %}
                 <div><label>{{ 'CNPJ' if c.tipo=='pj' else 'CPF' }}</label><input name="documento" value="{{ c.documento_fmt or '' }}"></div>
                 <div><label>E-mail</label><input name="email" value="{{ c.email or '' }}"></div>
                 <div><label>Aniversário</label><input type="date" name="aniversario" value="{{ c.aniversario or '' }}"></div>
+                <div class="col-2"><label>Endereço</label><input name="endereco" value="{{ c.endereco or '' }}" placeholder="Rua das Flores, 120 · Bairro Jóquei"></div>
                 <div><label>Cidade</label><input name="cidade" value="{{ c.cidade or '' }}" placeholder="Teresina"></div>
                 <div><label>UF</label><input name="uf" value="{{ c.uf or '' }}" maxlength="2" placeholder="PI" style="text-transform:uppercase"></div>
+                <div><label>CEP</label><input name="cep" value="{{ c.cep or '' }}" inputmode="numeric" placeholder="64049-000"></div>
                 <div class="col-2"><label>Obs</label><input name="obs" value="{{ c.obs or '' }}"></div>
               </div>
               <div class="pfoot">
@@ -3148,8 +3152,10 @@ _CLIENTE_DETALHE = """{% extends "base" %}{% block conteudo %}
         <div><label>CPF</label><input name="cpf" value="{{ cliente.cpf or '' }}" style="width:100%"></div>
         <div><label>E-mail</label><input name="email" value="{{ cliente.email or '' }}" style="width:100%"></div>
         <div><label>Aniversário</label><input type="date" name="aniversario" value="{{ cliente.aniversario or '' }}" style="width:100%"></div>
+        <div><label>Endereço</label><input name="endereco" value="{{ cliente.endereco or '' }}" style="width:100%"></div>
         <div><label>Cidade</label><input name="cidade" value="{{ cliente.cidade or '' }}" style="width:100%"></div>
         <div><label>UF</label><input name="uf" value="{{ cliente.uf or '' }}" maxlength="2" style="width:100%;text-transform:uppercase"></div>
+        <div><label>CEP</label><input name="cep" value="{{ cliente.cep or '' }}" style="width:100%"></div>
         <div><label>Obs</label><input name="obs" value="{{ cliente.obs or '' }}" style="width:100%"></div>
       </div>
       <button style="background:var(--verde);color:var(--sobre-verde);padding:.5rem 1rem;border:0;border-radius:6px;cursor:pointer;margin-top:.7rem;width:auto">Salvar</button>
@@ -8381,7 +8387,8 @@ def painel_clientes_novo(request: Request, nome: str = Form(...),
                          cpf: str = Form(""),
                          email: str = Form(""), aniversario: str = Form(""),
                          obs: str = Form(""), cidade: str = Form(""),
-                         uf: str = Form("")):
+                         uf: str = Form(""), endereco: str = Form(""),
+                         cep: str = Form("")):
     from finance import empresa as emp, clientes as cli, validadoc
     conta = conta_logada(request)
     if conta is None:
@@ -8402,7 +8409,8 @@ def painel_clientes_novo(request: Request, nome: str = Form(...),
         cli.criar_cliente(pool, conta[0], nome, telefone=(telefone or None),
                           email=(email or None), aniversario=(aniversario or None),
                           obs=(obs or None), cidade=(cidade or None),
-                          uf=(uf or None), **kw)
+                          uf=(uf or None), endereco=(endereco or None),
+                          cep=(cep or None), **kw)
         request.session["aviso"] = "Cliente cadastrado."
     except ValueError as e:
         request.session["erro"] = str(e)
@@ -8513,7 +8521,8 @@ def painel_cliente_editar(request: Request, cliente_id: int, nome: str = Form(""
                           cpf: str = Form(""),
                           email: str = Form(""), aniversario: str = Form(""),
                           obs: str = Form(""), cidade: str = Form(""),
-                          uf: str = Form("")):
+                          uf: str = Form(""), endereco: str = Form(""),
+                          cep: str = Form("")):
     from finance import empresa as emp, clientes as cli, validadoc
     conta = conta_logada(request)
     if conta is None:
@@ -8523,7 +8532,7 @@ def painel_cliente_editar(request: Request, cliente_id: int, nome: str = Form(""
         return RedirectResponse("/painel", status_code=303)
     campos = {"telefone": telefone, "email": email,
               "aniversario": aniversario, "obs": obs,
-              "cidade": cidade, "uf": uf}
+              "cidade": cidade, "uf": uf, "endereco": endereco, "cep": cep}
     if (nome or "").strip():
         campos["nome"] = nome
     tipo, d = validadoc.classificar(documento or cpf)

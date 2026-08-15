@@ -76,6 +76,9 @@ def pool():
             primeiro_ano_centavos bigint default 0, n_modulos int default 0,
             criado_em timestamptz default now())""")
         _garantir_tabela(c)     # espelha 068/069/070/074/147 (inclusive modo/evento/parcelas)
+        # DEPOIS de orcamentos existir: a 152 altera as DUAS tabelas (o vínculo
+        # em orcamentos, endereço/CEP em clientes).
+        c.execute(_sql("152_orcamento_cliente_vinculo.sql"))
         c.commit()
     yield p
     p.close()
@@ -219,7 +222,7 @@ def test_pagina_do_evento_mostra_qtd_valor_unitario_e_parcelas(pool, conta_id, m
     assert "Aniversário" in html and "Locação de espaço" in html
     # linha de item: número puro (o R$ fica nos totais e nas parcelas)
     assert ">25,00<" in html and ">250,00<" in html                  # 10 × 25 = 250
-    assert "https://ex.com/espaco.jpg" in html                       # foto do item
+    assert html.count("<svg") >= len(ITENS)          # cada item leva seu ícone
     assert html.count("Locação de espaço") >= 2   # categoria do item + subtotal por categoria
     assert "Aniversário" in html                       # o tipo escolhido
     assert "Casamento" not in html and "Corporativo" not in html   # o cardápio de opções, não
@@ -356,6 +359,104 @@ def test_cidade_e_uf_do_orcamento_ficam_editaveis_na_aba_clientes(pool, conta_id
     assert cli.atualizar_cliente(pool, conta_id, cid, cidade="Timon", uf="ma")
     corrigido = cli.obter_cliente(pool, conta_id, cid)
     assert (corrigido["cidade"], corrigido["uf"]) == ("Timon", "MA")
+
+
+def _cpf_novo() -> str:
+    """Um CPF válido e inédito a cada chamada.
+
+    O CPF FUNDE a identidade, e o banco de teste é compartilhado entre módulos e
+    não é truncado entre runs: CPF fixo faria um teste enxergar o cliente (já
+    renomeado) que outro deixou pra trás."""
+    base = "".join(secrets.choice("0123456789") for _ in range(9))
+
+    def dv(parcial: str) -> str:
+        soma = sum(int(d) * (len(parcial) + 1 - i) for i, d in enumerate(parcial))
+        resto = (soma * 10) % 11
+        return "0" if resto == 10 else str(resto)
+
+    d1 = dv(base)
+    return base + d1 + dv(base + d1)
+
+
+def _vincular(pool, oid: int, cliente_id: int) -> None:
+    with pool.connection() as c:
+        c.execute("update orcamentos set cliente_id=%s where id=%s", (cliente_id, oid))
+        c.commit()
+
+
+def test_folha_rele_o_cadastro_enquanto_o_orcamento_nao_foi_assinado(pool, conta_id):
+    """Corrigiu na aba Clientes, reimprimiu, saiu certo — sem refazer a proposta.
+
+    O orçamento guardou 'Maria Teste' e 'Teresina/OI' (errado). O lojista arruma
+    o cadastro; a folha, que agora tem o VÍNCULO, lê de lá."""
+    from finance import clientes as cli
+
+    oid, tok = _semear(pool, conta_id)
+    cid = cli.criar_cliente(pool, conta_id, "Joana Ribeiro",
+                            cpf=_cpf_novo(), telefone="86988881111")
+    _vincular(pool, oid, cid)
+
+    cli.atualizar_cliente(pool, conta_id, cid, nome="Joana Ribeiro de Sousa",
+                          cidade="Teresina", uf="PI",
+                          endereco="Rua das Flores, 120 · Bairro Jóquei",
+                          cep="64049-000")
+    d = prop._carregar(tok, pool=pool)
+    assert d["empresa"] == "Joana Ribeiro de Sousa"
+    assert d["cliente"]["cidade"] == "Teresina" and d["cliente"]["uf"] == "PI"
+    assert "Rua das Flores" in d["cliente"]["endereco"]
+    assert d["cliente"]["cep"] == "64049-000"       # máscara vem da folha
+
+
+def test_orcamento_assinado_congela_o_que_o_cliente_aprovou(pool, conta_id):
+    """Assinou, congelou. Corrigir o cadastro depois NÃO mexe no documento
+    aprovado — o que o cliente assinou é o que fica no papel; erro em documento
+    assinado se conserta emitindo outro."""
+    from finance import clientes as cli
+
+    for status in ("aprovada", "fechado"):
+        oid, tok = _semear(pool, conta_id, status=status, numero=None)
+        cid = cli.criar_cliente(pool, conta_id, f"Carlos Assinado {status}",
+                                cpf=_cpf_novo(), telefone="86977772222")
+        _vincular(pool, oid, cid)
+        cli.atualizar_cliente(pool, conta_id, cid, nome="Nome Trocado Depois")
+        d = prop._carregar(tok, pool=pool)
+        assert d["empresa"] == "Maria Teste", status
+
+
+def test_sem_vinculo_a_folha_segue_o_texto_congelado(pool, conta_id):
+    """Orçamento antigo (anterior ao vínculo) não pode quebrar nem mudar."""
+    _, tok = _semear(pool, conta_id, numero=None)
+    d = prop._carregar(tok, pool=pool)
+    assert d["empresa"] == "Maria Teste"
+    assert d["cliente"]["cidade"] == "Teresina"
+
+
+def test_campo_vazio_no_cadastro_nao_apaga_o_do_orcamento(pool, conta_id):
+    """O lojista pode não ter preenchido tudo na aba Clientes: cada campo cai no
+    valor congelado em vez de sair em branco na folha."""
+    from finance import clientes as cli
+
+    oid, tok = _semear(pool, conta_id, numero=None)
+    cid = cli.criar_cliente(pool, conta_id, "Bruno Meio Cadastro",
+                            cpf=_cpf_novo())   # sem endereço, sem cidade
+    _vincular(pool, oid, cid)
+    d = prop._carregar(tok, pool=pool)
+    assert d["empresa"] == "Bruno Meio Cadastro"      # veio do cadastro
+    assert d["cliente"]["cidade"] == "Teresina"       # seguiu o do orçamento
+    assert "Rua das Flores" in d["cliente"]["endereco"]
+
+
+def test_cliente_arquivado_nao_derruba_a_folha(pool, conta_id):
+    """O link está com o CLIENTE: a folha tem que abrir de qualquer jeito."""
+    from finance import clientes as cli
+
+    oid, tok = _semear(pool, conta_id, numero=None)
+    cid = cli.criar_cliente(pool, conta_id, "Ana Arquivada",
+                            cpf=_cpf_novo())
+    _vincular(pool, oid, cid)
+    assert cli.arquivar_cliente(pool, conta_id, cid)
+    d = prop._carregar(tok, pool=pool)
+    assert d is not None and d["empresa"] == "Maria Teste"
 
 
 def test_local_do_evento_ja_vem_com_o_endereco_da_empresa():

@@ -90,6 +90,9 @@ const PING_ESPACO_MS = parseInt(process.env.WA_QR_PING_ESPACO_MS || '300000', 10
 // ia e voltava de 30 em 30s, por isso ele nunca deu a conexão por perdida, e mesmo
 // assim não entrou uma mensagem por horas. Só o religamento completo traz de volta.
 const MUDO_TETO_MS = parseInt(process.env.WA_QR_MUDO_TETO_MS || '2700000', 10)   // 45min
+// Espera antes de tentar retomar uma conta que levou 440 e ficou sem dono. Dobra a
+// cada tentativa (5min, 10, 20, 40, 80) — ver esperaPos440.
+const ESPERA_POS_440_MS = parseInt(process.env.WA_QR_ESPERA_POS_440_MS || '300000', 10)
 
 if (!process.env.DATABASE_URL) { logBase.error('Falta DATABASE_URL'); process.exit(1) }
 if (!SEGREDO) { logBase.error('Falta WA_QR_SHARED_SECRET'); process.exit(1) }
@@ -425,6 +428,40 @@ function marcarVivo (contaId) {
   s.ultimoEvento = Date.now()
   // entregou de verdade = a desconfiança do vigia zera junto (ver tetoMudo)
   s.reconexoesMudas = 0
+  // ...e a conta deixa de ser órfã de 440: quem entrega está vivo e é nosso
+  s.substituidaEm = null
+  s.tentativasPos440 = 0
+}
+
+// Quanto esperar antes de tentar retomar uma conta que levou 440, dobrando a cada
+// tentativa até 16× (5min, 10, 20, 40, 80). A espera existe porque quem substituiu
+// pode ser uma sessão LEGÍTIMA de fora — o WhatsApp Web que a cliente abriu no
+// computador dela. Retomar na hora contra uma dessas é a guerra de sessões que
+// derruba as duas em revezamento; esperar e ir espaçando deixa a conta voltar quando
+// a outra sair, sem brigar enquanto ela está lá.
+function esperaPos440 (s, base) {
+  const n = Math.min((s && s.tentativasPos440) || 0, 4)
+  return base * Math.pow(2, n)
+}
+
+// A conta ficou ÓRFÃ depois de um 440?
+//
+// O caminho do 440 solta a trava e retorna — e estava certo em não reconectar na
+// hora. O que faltava era o depois: ninguém reagendava nada, então a conta ficava
+// sem sessão em lugar nenhum até o próximo deploy. Aconteceu com a conta 35 em
+// 15/08: levou 440 às 22:46:07, soltou a trava, e às 22:58 a caixa da cliente ainda
+// estava morta — com o serviço saudável, atendendo as vizinhas normalmente.
+//
+// E o vigia, que era quem podia resgatar, se recusava: `!trava.segura(contaId)` foi
+// escrito presumindo "não é minha = tem outra instância cuidando". Só que "não é
+// minha" também cobre "não é de NINGUÉM", que é exatamente este caso.
+//
+// Quem decide se pode assumir não é esta função — é o `trava.pegar` lá dentro do
+// iniciarSessao, que é atômico. Se outra instância estiver com a conta, ele recusa e
+// agenda a tentativa dele; aqui a gente só resolve QUANDO vale tentar.
+function sessaoOrfa (s, agora, base) {
+  if (!s || s.sock || s.iniciando || !s.substituidaEm) return false
+  return (agora - s.substituidaEm) >= esperaPos440(s, base)
 }
 
 // A sessão está MUDA a ponto de merecer um ping? Separado numa função pura porque é
@@ -512,9 +549,33 @@ async function registrarSessoes () {
   }
 }
 
+// Costura só pro teste: o resgate da órfã chama iniciarSessao, que abre socket de
+// verdade e fala com o WhatsApp — coisa que teste nenhum pode fazer. Passando por
+// aqui, o teste troca a função e confere QUANDO o vigia decide retomar, que é a
+// regra que interessa. Em produção é o iniciarSessao de sempre.
+const _ganchos = { iniciarSessao }
+
 async function vigiarSessoes () {
   const agora = Date.now()
   for (const [contaId, s] of sessoes) {
+    // ÓRFÃ DE 440 primeiro: ela não tem socket, então nem chegaria no teste de
+    // silêncio abaixo (que exige um). É a conta que soltou a trava depois de ser
+    // substituída e ficou sem ninguém — ver sessaoOrfa.
+    if (sessaoOrfa(s, agora, ESPERA_POS_440_MS)) {
+      s.tentativasPos440 = (s.tentativasPos440 || 0) + 1
+      s.substituidaEm = agora        // reinicia a espera, tenha dado certo ou não
+      log.warn({ contaId, tentativa: s.tentativasPos440,
+        proximaEsperaMin: Math.round(esperaPos440(s, ESPERA_POS_440_MS) / 60000) },
+      'vigia: conta órfã desde a substituição — tentando retomar')
+      try {
+        // o trava.pegar lá dentro é quem decide: se outra instância estiver com a
+        // conta, ele recusa e agenda a tentativa dela, sem socket nenhum aqui
+        await _ganchos.iniciarSessao(contaId)
+      } catch (e) {
+        log.error({ contaId, e: String(e) }, 'vigia: retomar a órfã falhou — tenta na próxima')
+      }
+      continue
+    }
     if (!sessaoMuda(s, agora, MUDO_LIMITE_MS)) continue
     // Sessão que não é NOSSA não se religa. Com a trava por conta (sessao-lock.js),
     // silêncio aqui pode ser simplesmente outra instância trabalhando com aquela
@@ -1663,7 +1724,11 @@ async function iniciarSessao (contaId) {
         // segunda é a trava não estar valendo e merece investigação.
         log.warn({ contaId, seguravaATrava: trava.segura(contaId) },
           'conexão substituída por outra sessão — parando sem apagar nada')
-        // Solta: esta sessão não volta (reconectar aqui vira guerra de sessões),
+        // Marca a hora pro vigia poder retomar depois (ver sessaoOrfa). Sem isto a
+        // conta ficava sem sessão em lugar nenhum até o próximo deploy: soltava o
+        // aluguel, retornava, e ninguém reagendava coisa alguma.
+        s.substituidaEm = Date.now()
+        // Solta: esta sessão não volta AGORA (reconectar aqui vira guerra de sessões),
         // e segurar o aluguel sem usar só impediria outra instância de assumir.
         await trava.soltar(contaId)
         return
@@ -2171,4 +2236,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, marcarVivo, vigiarSessoes, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, marcarVivo, vigiarSessoes, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

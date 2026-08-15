@@ -2714,6 +2714,61 @@ _SQL_RANK = ("case %s when 'enviado' then 1 when 'erro' then 1 "
              "when 'entregue' then 2 when 'lido' then 3 else 0 end")
 
 
+def aplicar_status_wa(c, sid: str, novo: str, erro_codigo: str = "", erro_msg: str = "") -> None:
+    """Aplica um status de entrega ao alvo da campanha e à mensagem do inbox.
+
+    Ponto ÚNICO da regra, de propósito. São três provedores com payloads bem
+    diferentes — Twilio (form do StatusCallback), Cloud API (statuses[] do webhook
+    da Meta) e QR (itens do serviço Node) — e cada um tinha, ou ia ter, a sua
+    própria cópia da lógica. Foi assim que o Cloud API ficou meses sem NUNCA marcar
+    entregue/lido/erro no alvo: ele só lia o `pricing` pra corrigir custo.
+
+    Cada webhook agora só traduz o payload dele em (sid, novo, erro) e chama aqui.
+    `novo` já vem normalizado: 'enviado' | 'entregue' | 'lido' | 'erro'.
+    Não faz commit — quem chama é dono da transação."""
+    if novo == "erro":
+        # erro não rebaixa quem já chegou a entregue/lido: aí a mensagem foi
+        # entregue de verdade e o relato de falha é a informação velha.
+        alvo = c.execute(
+            """select id, prospeccao_id, campanha_id from campanha_alvos
+                where wa_sid=%s and coalesce(wa_status,'') not in ('entregue','lido')""",
+            (sid,)).fetchone()
+        if alvo:
+            # a mensagem saiu e não chegou: risca o número, conta a tentativa e
+            # devolve o alvo pra fila enquanto sobrar número. Este é o caminho da
+            # MAIORIA das falhas (63024 e afins) — o da API é a minoria.
+            from finance.campanhas_motor import falha_na_entrega
+            parou = falha_na_entrega(c, alvo[0], erro_codigo, erro_msg)
+        c.execute("""update mensagens set status='erro'
+                       where provider_sid=%s and coalesce(status,'') not in ('entregue','lido')""",
+                  (sid,))
+        if alvo:
+            from finance.campanhas_motor import evento
+            detalhe = (f"{erro_codigo}: {erro_msg}" if erro_codigo and erro_msg
+                       else (erro_msg or erro_codigo))
+            evento(c, alvo[2], alvo[1], "whatsapp",
+                   "erro" if parou else "numero_falhou", detalhe)
+        return
+    # guarda de rank: nunca rebaixa (erro=enviado < entregue < lido)
+    rank = _WA_STATUS_RANK[novo]
+    cur = c.execute(
+        "update campanha_alvos set wa_status=%s, wa_em=now() "
+        "where wa_sid=%s and coalesce(" + _SQL_RANK.replace("%s", "wa_status") +
+        ", 0) < %s returning prospeccao_id, campanha_id", (novo, sid, rank))
+    transicao = cur.fetchone()
+    c.execute(
+        "update mensagens set status=%s "
+        "where provider_sid=%s and coalesce(" + _SQL_RANK.replace("%s", "status") +
+        ", 0) < %s", (novo, sid, rank))
+    if transicao:
+        from finance.campanhas_motor import evento
+        evento(c, transicao[1], transicao[0], "whatsapp", novo)
+        # leu no WhatsApp (sinal confiável) → esquenta o lead + avisa o vendedor
+        if novo == "lido":
+            from finance.campanhas_motor import engajou_lead
+            engajou_lead(get_pool(), transicao[0], "leu seu WhatsApp", alerta=True)
+
+
 @router.post("/webhooks/twilio-status")
 async def webhook_twilio_status(request: Request):
     """StatusCallback do Twilio (entregue/lido/falhou) por mensagem de WhatsApp."""
@@ -2734,55 +2789,10 @@ async def webhook_twilio_status(request: Request):
     if msid and novo:
         try:
             with get_pool().connection() as c:
-                if novo == "erro":
-                    # Twilio manda a causa real aqui (ex.: 63024/63016 = número sem
-                    # WhatsApp/não opt-in) — antes isso era descartado e só sobrava
-                    # o status genérico "erro".
-                    erro_codigo = params.get("ErrorCode") or ""
-                    erro_msg = (params.get("ErrorMessage") or "")[:300]
-                    # erro só marca se ainda não chegou a entregue/lido
-                    cur = c.execute(
-                        """select id, prospeccao_id, campanha_id from campanha_alvos
-                            where wa_sid=%s and coalesce(wa_status,'') not in ('entregue','lido')""",
-                        (msid,))
-                    _alvo_erro = cur.fetchone()
-                    if _alvo_erro:
-                        # a mensagem saiu e não chegou: risca o número, conta a tentativa
-                        # e devolve o alvo pra fila enquanto sobrar número — este é o
-                        # caminho da MAIORIA das falhas (63024 e afins), não o da API.
-                        from finance.campanhas_motor import falha_na_entrega
-                        parou = falha_na_entrega(c, _alvo_erro[0], erro_codigo, erro_msg)
-                    c.execute("""update mensagens set status='erro'
-                                   where provider_sid=%s and coalesce(status,'') not in ('entregue','lido')""",
-                              (msid,))
-                    if _alvo_erro:
-                        from finance.campanhas_motor import evento
-                        detalhe = (f"{erro_codigo}: {erro_msg}" if erro_codigo and erro_msg
-                                   else (erro_msg or erro_codigo))
-                        evento(c, _alvo_erro[2], _alvo_erro[1], "whatsapp",
-                               "erro" if parou else "numero_falhou", detalhe)
-                    c.commit()
-                else:
-                    # guarda de rank: nunca rebaixa (erro=enviado < entregue < lido)
-                    rank = _WA_STATUS_RANK[novo]
-                    cur = c.execute(
-                        "update campanha_alvos set wa_status=%s, wa_em=now() "
-                        "where wa_sid=%s and coalesce(" + _SQL_RANK.replace("%s", "wa_status") +
-                        ", 0) < %s returning prospeccao_id, campanha_id",
-                        (novo, msid, rank))
-                    _transicao = cur.fetchone()
-                    c.execute(
-                        "update mensagens set status=%s "
-                        "where provider_sid=%s and coalesce(" + _SQL_RANK.replace("%s", "status") +
-                        ", 0) < %s", (novo, msid, rank))
-                    if _transicao:
-                        from finance.campanhas_motor import evento
-                        evento(c, _transicao[1], _transicao[0], "whatsapp", novo)
-                    c.commit()
-                    # leu no WhatsApp (sinal confiável) → esquenta + avisa o vendedor
-                    if novo == "lido" and _transicao:
-                        from finance.campanhas_motor import engajou_lead
-                        engajou_lead(get_pool(), _transicao[0], "leu seu WhatsApp", alerta=True)
+                aplicar_status_wa(c, msid, novo,
+                                  params.get("ErrorCode") or "",
+                                  (params.get("ErrorMessage") or "")[:300])
+                c.commit()
         except Exception:  # noqa: BLE001
             pass
     return Response("", media_type="text/plain")
@@ -3041,6 +3051,12 @@ async def webhook_meta(request: Request, background_tasks: BackgroundTasks):
                            set wa_categoria=%s, wa_cobravel=%s, wa_custo=%s
                          where wa_sid=%s""",
                       (stt["categoria"] or None, cobr, custo, stt["sid"]))
+        # ENTREGA: mesma regra do Twilio, num ponto só (aplicar_status_wa). Isto
+        # faltava — o Cloud API lia só o `pricing` e nunca marcava entregue/lido/erro
+        # no alvo, então os KPIs ficavam zerados e a fila de números não andava.
+        for ent in meta_msg.parse_entrega_whatsapp(payload):
+            aplicar_status_wa(c, ent["sid"], ent["status"],
+                              ent["erro_codigo"], ent["erro_msg"])
         c.commit()
     from finance import agente as _ag
     for (cid, cvid) in disparar:

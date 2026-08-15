@@ -329,6 +329,37 @@ def parse_status_whatsapp(payload: dict) -> list[dict]:
     return saida
 
 
+def parse_entrega_whatsapp(payload: dict) -> list[dict]:
+    """Extrai TODOS os status de entrega do webhook do WhatsApp Cloud API, com ou
+    sem `pricing`: [{sid, status, erro_codigo, erro_msg}].
+
+    Diferente de `parse_status_whatsapp`, que existe só pro custo e por isso ignora
+    quem não traz preço — e é justamente o status `failed` que não traz. Sem isto o
+    Cloud API nunca marcava entregue/lido/erro no alvo da campanha: os KPIs ficavam
+    zerados e a fila de números não andava por falha de entrega.
+
+    `status` já vem no vocabulário do app ('enviado'|'entregue'|'lido'|'erro'), o
+    mesmo que o Twilio produz — quem aplica é web.painel_prospeccao.aplicar_status_wa."""
+    _MAPA = {"sent": "enviado", "delivered": "entregue", "read": "lido", "failed": "erro"}
+    if payload.get("object") != "whatsapp_business_account":
+        return []
+    saida = []
+    for entry in payload.get("entry", []) or []:
+        for ch in (entry.get("changes") or []):
+            for st in ((ch.get("value") or {}).get("statuses") or []):
+                sid = str(st.get("id") or "")
+                novo = _MAPA.get(str(st.get("status") or "").lower())
+                if not sid or not novo:
+                    continue
+                err = (st.get("errors") or [{}])[0]
+                saida.append({
+                    "sid": sid, "status": novo,
+                    "erro_codigo": str(err.get("code") or ""),
+                    "erro_msg": str(err.get("title") or err.get("message") or "")[:300],
+                })
+    return saida
+
+
 def _parse_whatsapp(payload: dict) -> list[dict]:
     """WhatsApp Cloud API: entry[].changes[].value.messages[]. Roteia pelo
     phone_number_id (metadata) e ignora status (delivered/read) e não-texto."""

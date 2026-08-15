@@ -1,0 +1,542 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup — Editar, dar baixa e excluir funcionário</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================================
+   TOKENS — cópia fiel de web/tema.py (_TOKENS). A fonte da verdade é o tema.py;
+   isto aqui é cópia porque mockup é HTML solto e não importa Python.
+   ATENÇÃO: o mockup antigo (orcamento_eventos.html) ainda usa a paleta ANTERIOR
+   ao PR #400 (#0e0e0f / #1d9e75). Não copie dele — nasce com a cara errada.
+   ============================================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-deep:#0FA85A;
+  --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul-borda:#1B3A4A;  --azul-fundo:#0D1B23;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  /* apelidos que o código do painel usa */
+  --card:var(--surface); --card-2:var(--bg-2);
+  --borda:var(--line); --txt:var(--text); --txt-mut:var(--text-dim);
+  --verde:var(--neon); --verde-claro:var(--neon);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:var(--body);
+  max-width:1180px;margin:0 auto;padding:34px 18px 100px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
+h1{font-size:1.35rem;margin-bottom:8px}
+.lead{color:var(--txt-mut);font-size:.87rem;margin-bottom:14px;line-height:1.65;max-width:860px}
+.lead b{color:var(--txt)}
+.meta{font-size:.72rem;color:var(--text-faint);margin-bottom:40px;font-family:var(--mono)}
+
+.secao{margin-bottom:54px}
+.secao-h{font-size:.7rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--verde);margin-bottom:6px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.secao-t{font-size:1.02rem;margin-bottom:8px}
+.secao-d{color:var(--txt-mut);font-size:.82rem;margin-bottom:18px;max-width:820px;line-height:1.6}
+.secao-d b{color:var(--txt)}
+.tag{font-size:.6rem;padding:2px 8px;border-radius:20px;letter-spacing:0;text-transform:none;font-weight:600;font-family:var(--body)}
+.tag.hoje{background:rgba(143,161,151,.13);border:1px solid #3a463f;color:var(--txt-mut)}
+.tag.novo{background:var(--neon-fraco);border:1px solid var(--neon-borda);color:var(--neon)}
+.tag.bad{background:var(--coral-fundo);border:1px solid var(--coral-borda);color:var(--coral)}
+.tag.ask{background:var(--ambar-fundo);border:1px solid var(--ambar-borda);color:var(--ambar)}
+
+/* ---------- caixa que emula o card do painel ---------- */
+.tela{background:var(--card);border:1px solid var(--borda);border-radius:12px;padding:14px 16px}
+.tela-h{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+.tela-h strong{font-size:.95rem}
+.tela-h .res{font-size:.7rem;color:var(--txt-mut)}
+.tela-h .res b{color:var(--coral)}
+.colh{display:flex;justify-content:space-between;font-size:.7rem;color:var(--txt-mut);padding:.7rem 0 .2rem;border-bottom:1px solid var(--card-2)}
+
+/* ---------- linha do funcionário (fiel a web/portal.py) ---------- */
+.folha-lin{border-top:1px solid var(--card-2)}
+.folha-head{display:flex;justify-content:space-between;align-items:center;gap:.9rem;padding:.8rem .25rem}
+.folha-sum-id{display:flex;align-items:center;gap:.5rem;min-width:0}
+.folha-chev{color:var(--txt-mut);font-size:.7rem;flex:none}
+.folha-chev.open{transform:rotate(90deg)}
+.folha-nome{font-size:.94rem;font-weight:600}
+.folha-nome .mut{font-weight:400;font-size:.8rem;color:var(--txt-mut)}
+.folha-val{text-align:right;white-space:nowrap;flex:0 0 auto}
+.folha-rot{font-size:.64rem;text-transform:uppercase;letter-spacing:.03em;color:var(--txt-mut)}
+.folha-apagar{font-size:1.05rem;font-weight:700;font-variant-numeric:tabular-nums;font-family:var(--mono)}
+.folha-body{padding:0 .25rem .9rem}
+.folha-bd{font-size:.7rem;margin-top:4px;line-height:1.7;color:var(--txt-mut)}
+.folha-bd .neg{color:var(--coral)}.folha-bd .amb{color:var(--ambar)}.folha-bd .pos{color:var(--neon)}
+.badge-dem{display:inline-block;background:var(--coral-fundo);color:#e08a8a;font-size:.62rem;
+  padding:.1rem .45rem;border-radius:6px;margin-left:.35rem;vertical-align:middle;border:1px solid var(--coral-borda)}
+
+/* ---------- área de ações (classes .fa do painel) ---------- */
+.fa{margin-top:.7rem;display:flex;flex-direction:column;gap:.5rem}
+.fa-grp{background:var(--bg-2);border:1px solid var(--card-2);border-radius:9px;padding:.6rem .75rem}
+.fa-tit{font-size:.63rem;text-transform:uppercase;letter-spacing:.05em;color:var(--txt-mut);margin-bottom:.6rem}
+.fa-row{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .5rem}
+.fa-row + .fa-row{margin-top:.5rem}
+.fa-row > .lbl{flex:0 0 150px;max-width:150px;font-size:.73rem;color:var(--txt-mut)}
+@media (max-width:560px){.fa-row > .lbl{flex-basis:100%;max-width:100%;margin-bottom:.1rem}}
+.fa input{font-size:.78rem;padding:.34rem .5rem;border-radius:7px;border:1px solid #2C3A33;
+  background:var(--bg);color:var(--txt);width:auto;font-family:var(--body)}
+.fa input.money{width:104px;font-family:var(--mono)}
+.fa input.date{width:150px}.fa input.org{width:78px}.fa input.wide{width:210px}
+.fa button,.btn{background:none;border:1px solid #2C3A33;border-radius:7px;padding:.36rem .75rem;
+  font-size:.78rem;cursor:pointer;color:var(--txt);width:auto;font-family:var(--body)}
+.btn.add{border-color:var(--neon-borda);color:var(--verde)}
+.btn.amb{border-color:var(--ambar-borda);color:var(--ambar)}
+.btn.pay{background:var(--verde);border-color:var(--verde);color:var(--sobre-verde);font-weight:600}
+.btn.dang{border-color:var(--coral-borda);color:var(--coral)}
+.btn[disabled]{opacity:.42;cursor:not-allowed}
+.fa-tool{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
+.fa-ln{border:1px solid #2C3A33;border-radius:7px;padding:.32rem .7rem;font-size:.76rem;
+  text-decoration:none;color:var(--txt);display:inline-flex;gap:.3rem}
+.vt-pill{display:inline-flex;align-items:center;gap:.5rem;border:1px solid #2C3A33;background:none;
+  border-radius:999px;padding:.28rem .55rem .28rem .7rem;color:var(--txt);font-size:.76rem}
+.vt-sw{width:34px;height:19px;border-radius:999px;position:relative;flex:none;background:#2C3A33}
+.vt-sw::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:#fff}
+.vt-sw.on{background:var(--verde)}.vt-sw.on::after{left:17px}
+.vt-st{font-size:.68rem;color:var(--txt-mut)}
+
+/* ---------- a faixa de ações NOVA ---------- */
+.acoes{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;padding:.55rem .75rem;
+  background:var(--bg-2);border:1px solid var(--card-2);border-radius:9px}
+.acoes .sep{flex:1}
+
+/* ---------- anotações do mockup ---------- */
+.nota{display:flex;gap:9px;font-size:.76rem;line-height:1.6;padding:.6rem .8rem;border-radius:9px;margin-top:10px}
+.nota .n{flex:none;font-weight:700;font-family:var(--mono);font-size:.72rem}
+.nota.gap{background:var(--coral-fundo);border:1px solid var(--coral-borda);color:#f0b3ad}
+.nota.gap .n{color:var(--coral)}
+.nota.ok{background:var(--neon-fundo);border:1px solid var(--neon-borda);color:#a8e6c2}
+.nota.ok .n{color:var(--neon)}
+.nota.warn{background:var(--ambar-fundo);border:1px solid var(--ambar-borda);color:#e8cf9a}
+.nota.warn .n{color:var(--ambar)}
+.nota.info{background:var(--azul-fundo);border:1px solid var(--azul-borda);color:#a9d6ec}
+.nota.info .n{color:var(--azul)}
+.nota code{font-family:var(--mono);font-size:.72rem;color:inherit;opacity:.92}
+
+/* ---------- comparação lado a lado ---------- */
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+@media(max-width:900px){.compare{grid-template-columns:1fr}}
+.col-h{font-size:.82rem;font-weight:700;margin-bottom:7px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.col-sub{font-size:.75rem;color:var(--txt-mut);margin-bottom:11px;line-height:1.55}
+.custo{font-size:.73rem;line-height:1.6;margin-top:10px;padding-top:9px;border-top:1px dashed #2C3A33;color:var(--txt-mut)}
+.custo b{color:var(--txt)}
+.custo .sim{color:var(--neon)}.custo .nao{color:var(--coral)}
+
+/* ---------- caixa de diálogo (confirmação) ---------- */
+.dlg{background:var(--surface);border:1px solid var(--coral-borda);border-radius:12px;
+  padding:16px 18px;max-width:440px;box-shadow:0 18px 50px rgba(0,0,0,.55)}
+.dlg h4{font-family:var(--display);font-size:.95rem;margin-bottom:8px}
+.dlg p{font-size:.79rem;color:var(--txt-mut);line-height:1.6;margin-bottom:12px}
+.dlg p b{color:var(--txt)}
+.dlg .row{display:flex;gap:.5rem;justify-content:flex-end;flex-wrap:wrap}
+
+/* ---------- histórico de salário (variação B) ---------- */
+.hist{list-style:none;font-size:.73rem;font-family:var(--mono);color:var(--txt-mut);margin-top:.55rem}
+.hist li{display:flex;justify-content:space-between;gap:10px;padding:.3rem 0;border-top:1px solid var(--card-2)}
+.hist li:first-child{border-top:0}
+.hist .at{color:var(--txt)}
+
+/* ---------- perguntas finais ---------- */
+.perg{background:var(--surface);border:1px solid var(--ambar-borda);border-radius:12px;padding:16px 18px}
+.perg li{margin:0 0 12px 18px;font-size:.83rem;line-height:1.65}
+.perg li:last-child{margin-bottom:0}
+.perg b{color:var(--ambar)}
+.rodape{margin-top:44px;padding-top:16px;border-top:1px solid var(--borda);
+  font-size:.74rem;color:var(--text-faint);line-height:1.7}
+.rodape code{font-family:var(--mono);color:var(--txt-mut)}
+</style>
+</head>
+<body>
+
+<h1>Editar, dar baixa e excluir funcionário</h1>
+<p class="lead">
+  Mockup da aba <b>Empresa › Equipe e folha</b>. Três coisas que o empregador não consegue
+  fazer hoje: <b>corrigir um dado que digitou errado</b>, <b>dar baixa de forma visível</b> e
+  <b>excluir um cadastro</b> que nunca deveria ter existido.
+  Nada aqui está implementado — é desenho pra decidir antes de escrever código.
+</p>
+<p class="meta">docs/mockups/equipe_folha_funcionario.html · tokens de web/tema.py · tela real em web/portal.py:3636+</p>
+
+<!-- ══════════════════════════════════════════════════════════════ 1. HOJE -->
+<section class="secao">
+  <div class="secao-h"><span>1 · O que existe hoje</span><span class="tag hoje">sem mudança</span></div>
+  <h2 class="secao-t">A folha do mês <i>é</i> a lista de funcionários</h2>
+  <p class="secao-d">
+    Não existe tela de "quadro de funcionários". Quem não está na folha do mês não aparece em
+    lugar nenhum. Abaixo, o card expandido exatamente como é hoje — com os buracos marcados.
+  </p>
+
+  <div class="tela">
+    <div class="tela-h">
+      <strong>Equipe e folha</strong>
+      <span class="res">folha de 08/2026: <b>R$ 7.412,90</b> · FGTS do mês R$ 704,00 · custo real ≈ R$ 12.320,00</span>
+    </div>
+    <div class="colh"><span>Funcionário</span><span>A pagar (líquido)</span></div>
+
+    <div class="folha-lin">
+      <div class="folha-head">
+        <div class="folha-sum-id">
+          <span class="folha-chev open">▶</span>
+          <span class="folha-nome">Maria Aparecida Souza <span class="mut">· Vendedora</span></span>
+        </div>
+        <div class="folha-val">
+          <div class="folha-rot">A pagar (líquido)</div>
+          <div class="folha-apagar">R$ 2.284,50</div>
+        </div>
+      </div>
+      <div class="folha-body">
+        <div class="folha-bd">salário R$ 2.500,00 <span class="neg">− INSS R$ 187,50</span>
+          <span class="neg">− VT R$ 150,00</span> <span class="mut">· FGTS R$ 200,00 (empresa deposita)</span>
+          <span class="mut">· custo real R$ 3.500,00</span>
+        </div>
+
+        <div class="fa">
+          <div class="fa-grp">
+            <div class="fa-tit">Lançar no mês</div>
+            <div class="fa-row"><span class="lbl">Adiantamento salarial</span>
+              <input class="money" placeholder="R$ 0,00"><button class="btn amb">+ adiantar</button></div>
+            <div class="fa-row"><span class="lbl">Vale-refeição / alim.</span>
+              <input class="money" placeholder="R$ 0,00"><button class="btn add">+ benefício</button></div>
+          </div>
+
+          <div class="fa-grp">
+            <div class="fa-tit">Dados &amp; configuração</div>
+            <div class="fa-row"><span class="lbl">Descontar VT (6%)</span>
+              <span class="vt-pill"><span class="vt-sw on"></span><span class="vt-st">ligado</span></span></div>
+            <div class="fa-row"><span class="lbl">Admissão</span><input class="date" type="date" value="2024-03-11"></div>
+            <div class="fa-row"><span class="lbl">Demissão</span><input class="date" type="date" value=""></div>
+            <div class="fa-row"><span class="lbl">CPF <span style="opacity:.7">(holerite)</span></span><input class="date" value="123.456.789-09"></div>
+            <div class="fa-row"><span class="lbl">Depto / setor / seção</span>
+              <input class="org" value="GERAL"><input class="org" placeholder="Setor"><input class="org" placeholder="Seção"></div>
+            <div class="fa-row"><span class="lbl"></span><button class="btn">salvar dados</button></div>
+          </div>
+
+          <div class="fa-tool">
+            <button class="btn pay">pagar ✓</button>
+            <span class="fa-ln">🖨️ holerite</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="nota gap"><span class="n">buraco 1</span><div>
+    <b>Nome, cargo, salário, dia de pagamento e CBO não aparecem em lugar nenhum depois do
+    cadastro.</b> Errou o nome ou deu aumento? Não tem saída — hoje o jeito é criar outro
+    funcionário. O backend <code>atualizar_funcionario()</code> já aceita todos esses campos;
+    a rota <code>/org</code> (<code>web/portal.py:9387</code>) simplesmente não passa eles.
+  </div></div>
+
+  <div class="nota gap"><span class="n">buraco 2</span><div>
+    <b>A demissão existe, mas está disfarçada de cadastro.</b> É só mais um campo de data no
+    meio de CPF e departamento, dentro de um bloco que o usuário precisa expandir. Não parece
+    a ação "tirar do quadro" que o empregador está procurando.
+  </div></div>
+
+  <div class="nota gap"><span class="n">buraco 3</span><div>
+    <b>Excluir não existe</b> — nem botão, nem rota, nem função. O mais perto é
+    <code>desativar_funcionario()</code> (<code>finance/empresa.py:553</code>), que está
+    escrito, funciona, e <b>nunca é chamado por nenhuma tela</b>.
+  </div></div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ 2. FAIXA DE AÇÕES -->
+<section class="secao">
+  <div class="secao-h"><span>2 · A proposta</span><span class="tag novo">novo</span></div>
+  <h2 class="secao-t">Uma faixa de ações, onde a mão procura</h2>
+  <p class="secao-d">
+    As três ações passam a viver juntas no rodapé do card, ao lado de "pagar" e "holerite" —
+    que é onde o usuário já olha quando quer <i>fazer</i> alguma coisa com aquela pessoa.
+    O bloco "Dados &amp; configuração" continua existindo pro que é ajuste fino do dia a dia
+    (VT, depto); o que é <b>identidade e contrato</b> sai de lá e vai pro "Editar".
+  </p>
+
+  <div class="tela">
+    <div class="folha-lin" style="border-top:0">
+      <div class="folha-head">
+        <div class="folha-sum-id">
+          <span class="folha-chev open">▶</span>
+          <span class="folha-nome">Maria Aparecida Souza <span class="mut">· Vendedora</span></span>
+        </div>
+        <div class="folha-val">
+          <div class="folha-rot">A pagar (líquido)</div>
+          <div class="folha-apagar">R$ 2.284,50</div>
+        </div>
+      </div>
+      <div class="folha-body">
+        <div class="folha-bd">salário R$ 2.500,00 <span class="neg">− INSS R$ 187,50</span>
+          <span class="neg">− VT R$ 150,00</span> <span class="mut">· custo real R$ 3.500,00</span></div>
+
+        <div class="fa">
+          <div class="fa-grp">
+            <div class="fa-tit">Lançar no mês</div>
+            <div class="fa-row"><span class="lbl">Adiantamento salarial</span>
+              <input class="money" placeholder="R$ 0,00"><button class="btn amb">+ adiantar</button></div>
+            <div class="fa-row"><span class="lbl">Vale-refeição / alim.</span>
+              <input class="money" placeholder="R$ 0,00"><button class="btn add">+ benefício</button></div>
+          </div>
+
+          <div class="acoes">
+            <button class="btn pay">pagar ✓</button>
+            <span class="fa-ln">🖨️ holerite</span>
+            <span class="sep"></span>
+            <button class="btn">✎ Editar</button>
+            <button class="btn amb">⊗ Dar baixa</button>
+            <button class="btn dang">🗑 Excluir</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="nota info"><span class="n">ordem</span><div>
+    As destrutivas ficam à <b>direita</b>, separadas das rotineiras por um vão. "pagar" é a
+    ação de todo mês e continua sendo a única com preenchimento sólido; as outras três são
+    contorno, pra não competir com ela.
+  </div></div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════ 3. EDITAR -->
+<section class="secao">
+  <div class="secao-h"><span>3 · Editar</span><span class="tag novo">novo</span><span class="tag hoje">backend já aceita</span></div>
+  <h2 class="secao-t">O que hoje é impossível: corrigir e reajustar</h2>
+  <p class="secao-d">
+    Os campos travados entram junto dos que já dão. <b>Nenhuma migração</b> — é a rota
+    <code>/org</code> passando os argumentos que <code>atualizar_funcionario()</code> já
+    recebe (<code>finance/empresa.py:502-550</code>).
+  </p>
+
+  <div class="tela">
+    <div class="fa">
+      <div class="fa-grp" style="border-color:var(--neon-borda)">
+        <div class="fa-tit" style="color:var(--neon)">✎ Editando · Maria Aparecida Souza</div>
+        <div class="fa-row"><span class="lbl">Nome</span><input class="wide" value="Maria Aparecida Souza"></div>
+        <div class="fa-row"><span class="lbl">Cargo</span><input class="wide" value="Vendedora"></div>
+        <div class="fa-row"><span class="lbl">CBO <span style="opacity:.7">(holerite)</span></span><input class="org" value="521110"></div>
+        <div class="fa-row"><span class="lbl">Dia de pagamento</span><input class="org" type="number" value="5"></div>
+        <div class="fa-row"><span class="lbl">CPF <span style="opacity:.7">(holerite)</span></span><input class="date" value="123.456.789-09"></div>
+        <div class="fa-row"><span class="lbl">Admissão</span><input class="date" type="date" value="2024-03-11"></div>
+        <div class="fa-row"><span class="lbl">Depto / setor / seção</span>
+          <input class="org" value="GERAL"><input class="org" placeholder="Setor"><input class="org" placeholder="Seção"></div>
+        <div class="fa-row" style="margin-top:.7rem;padding-top:.6rem;border-top:1px dashed #2C3A33">
+          <span class="lbl">Salário</span>
+          <span style="font-size:.76rem;color:var(--ambar)">↓ decidir na seção 4</span></div>
+        <div class="fa-row" style="margin-top:.7rem"><span class="lbl"></span>
+          <button class="btn add">salvar</button><button class="btn">cancelar</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="nota ok"><span class="n">grátis</span><div>
+    Tudo desta seção — menos o salário — é <b>só passar campo na rota</b>. Sem migração, sem
+    mudança de regra, sem risco pro holerite.
+  </div></div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ 4. SALÁRIO -->
+<section class="secao">
+  <div class="secao-h"><span>4 · Salário</span><span class="tag ask">você decide vendo</span></div>
+  <h2 class="secao-t">Sobrescrever ou guardar vigência?</h2>
+  <p class="secao-d">
+    Mesma funcionária, mesmo aumento — R$ 2.500,00 → R$ 2.750,00 a partir de setembro.
+    A diferença só aparece <b>depois</b>, quando alguém reimprime um holerite antigo.
+  </p>
+
+  <div class="compare">
+    <!-- A -->
+    <div>
+      <div class="col-h">A · Sobrescreve <span class="tag hoje">simples</span></div>
+      <p class="col-sub">Troca o número e pronto. É o que a tabela já suporta: <code>funcionarios.salario_centavos</code> guarda <b>um</b> valor.</p>
+      <div class="tela">
+        <div class="fa"><div class="fa-grp">
+          <div class="fa-tit">Salário</div>
+          <div class="fa-row"><span class="lbl">Salário mensal</span><input class="money" value="2.750,00"></div>
+          <div class="fa-row"><span class="lbl"></span><button class="btn add">salvar</button></div>
+        </div></div>
+        <div class="custo">
+          <div><span class="sim">✔</span> <b>Zero migração.</b> Uma linha na rota.</div>
+          <div><span class="sim">✔</span> Resolve o "digitei errado" perfeitamente.</div>
+          <div><span class="nao">✘</span> <b>Reimprimir o holerite de julho sai com R$ 2.750,00</b> — valor que ela não recebeu naquele mês.</div>
+          <div><span class="nao">✘</span> O mês corrente ainda não pago passa a calcular pelo novo valor, mesmo que o aumento seja só de setembro.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- B -->
+    <div>
+      <div class="col-h">B · Vigência <span class="tag novo">correto</span></div>
+      <p class="col-sub">O salário passa a ter data de início. O holerite de cada mês busca o valor que valia naquela competência.</p>
+      <div class="tela">
+        <div class="fa"><div class="fa-grp">
+          <div class="fa-tit">Salário</div>
+          <div class="fa-row"><span class="lbl">Novo salário</span><input class="money" value="2.750,00"></div>
+          <div class="fa-row"><span class="lbl">A partir de</span><input class="date" type="date" value="2026-09-01"></div>
+          <div class="fa-row"><span class="lbl"></span><button class="btn add">salvar</button></div>
+          <ul class="hist">
+            <li><span class="at">desde 09/2026</span><span class="at">R$ 2.750,00</span></li>
+            <li><span>03/2024 – 08/2026</span><span>R$ 2.500,00</span></li>
+          </ul>
+        </div></div>
+        <div class="custo">
+          <div><span class="sim">✔</span> Holerite antigo continua correto pra sempre.</div>
+          <div><span class="sim">✔</span> Histórico de aumentos vira dado — dá relatório depois.</div>
+          <div><span class="nao">✘</span> <b>Migração nova</b> (tabela de histórico de salário).</div>
+          <div><span class="nao">✘</span> Mexe em <code>folha_do_mes()</code> e <code>holerite_funcionario()</code>, que hoje leem o campo direto.</div>
+          <div><span class="nao">✘</span> Não resolve sozinho o "digitei errado" — corrigir um erro <b>não</b> é uma vigência nova; precisaria de um "corrigir o valor atual" ao lado.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="nota warn"><span class="n">minha leitura</span><div>
+    <b>A</b> é honesta sobre o que o sistema é hoje: um controle gerencial, com a rescisão e o
+    fechamento indo pro contador (é o que a migração <code>094</code> diz em comentário).
+    <b>B</b> é o certo se o holerite daqui é documento pro funcionário guardar. A pergunta que
+    decide não é técnica: <i>alguém reimprime holerite de mês passado?</i> Se sim, A cria um
+    problema silencioso. Se não, B é caro à toa agora.
+  </div></div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ 5. DAR BAIXA -->
+<section class="secao">
+  <div class="secao-h"><span>5 · Dar baixa</span><span class="tag novo">só muda de lugar</span></div>
+  <h2 class="secao-t">A demissão que já existe, com nome e efeito visível</h2>
+  <p class="secao-d">
+    Mesmo campo, mesmo banco (<code>funcionarios.demitido_em</code>), mesma regra. Só deixa de
+    ser um campo perdido e passa a dizer o que vai acontecer <b>antes</b> de acontecer.
+  </p>
+
+  <div class="compare">
+    <div>
+      <div class="col-h">O diálogo</div>
+      <div class="dlg" style="border-color:var(--ambar-borda)">
+        <h4>Dar baixa · Maria Aparecida Souza</h4>
+        <p>Ela sai da folha, mas continua no histórico e nos relatórios. O holerite dos meses
+           já pagos não muda.</p>
+        <div class="fa"><div class="fa-row"><span class="lbl">Data da demissão</span>
+          <input class="date" type="date" value="2026-08-22"></div></div>
+        <div class="nota info" style="margin-top:12px"><span class="n">efeito</span><div>
+          Agosto/2026 <b>ainda aparece</b> na folha, pra você acertar o último pagamento.
+          A partir de <b>setembro</b> ela some da lista.
+        </div></div>
+        <div class="row" style="margin-top:14px">
+          <button class="btn">cancelar</button><button class="btn amb">confirmar baixa</button></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="col-h">Como fica na lista</div>
+      <p class="col-sub">No mês da demissão, com o selo que o painel já desenha hoje.</p>
+      <div class="tela">
+        <div class="folha-lin" style="border-top:0">
+          <div class="folha-head">
+            <div class="folha-sum-id"><span class="folha-chev">▶</span>
+              <span class="folha-nome">Maria Aparecida Souza <span class="mut">· Vendedora</span><span class="badge-dem">demitido em 22/08/2026</span></span></div>
+            <div class="folha-val"><div class="folha-rot">A pagar (líquido)</div>
+              <div class="folha-apagar">R$ 2.284,50</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="custo">
+        <div><span class="sim">✔</span> <b>Zero migração</b> — <code>demitido_em</code> e o selo já existem.</div>
+        <div><span class="sim">✔</span> Reversível: limpar a data traz a pessoa de volta (<code>atualizar_funcionario</code> já trata <code>None</code> como "limpar").</div>
+      </div>
+      <div class="nota warn" style="margin-top:12px"><span class="n">a decidir</span><div>
+        Vale guardar <b>motivo</b> da baixa (pedido de demissão / sem justa causa / fim de
+        contrato)? Hoje o banco só tem a data, e a migração <code>094</code> diz que a
+        rescisão segue com o contador. Guardar o motivo é campo novo — só vale se você for usar.
+      </div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════════════════════ 6. EXCLUIR -->
+<section class="secao">
+  <div class="secao-h"><span>6 · Excluir</span><span class="tag bad">destrutivo</span></div>
+  <h2 class="secao-t">Só pra quem nunca movimentou a folha</h2>
+  <p class="secao-d">
+    "Excluir de verdade" apaga a linha do banco. Isso é seguro pro cadastro duplicado ou
+    digitado errado — e <b>perigoso</b> pra quem já recebeu: os <code>folha_eventos</code>
+    ficariam órfãos e o holerite e o relatório daquele período quebrariam.
+    Por isso o botão tem dois estados. <b>Esta trava é proposta minha</b> — está aqui pra você
+    aprovar ou derrubar vendo.
+  </p>
+
+  <div class="compare">
+    <div>
+      <div class="col-h">✅ Liberado <span class="tag novo">sem movimento</span></div>
+      <p class="col-sub">Cadastrado ontem por engano, nunca teve lançamento nem pagamento.</p>
+      <div class="dlg">
+        <h4>Excluir Joana Pereira?</h4>
+        <p>Ela <b>nunca teve lançamento nem pagamento</b> na folha, então dá pra apagar sem
+           deixar rastro quebrado. <b>Não dá pra desfazer.</b></p>
+        <div class="row"><button class="btn">cancelar</button><button class="btn dang">🗑 excluir</button></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="col-h">🚫 Bloqueado <span class="tag bad">tem histórico</span></div>
+      <p class="col-sub">Já apareceu em folha paga — apagar destruiria o holerite dela.</p>
+      <div class="dlg" style="border-color:var(--borda)">
+        <h4>Não dá pra excluir Maria Aparecida Souza</h4>
+        <p>Ela tem <b>17 lançamentos</b> e <b>5 meses já pagos</b>. Apagar o cadastro deixaria
+           o holerite e o relatório desses meses sem dono.</p>
+        <p>Se ela saiu da empresa, o caminho é <b>dar baixa</b>: ela sai da folha e o histórico
+           fica de pé.</p>
+        <div class="row"><button class="btn" disabled>🗑 excluir</button><button class="btn amb">⊗ dar baixa</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="nota info"><span class="n">como sabe</span><div>
+    A checagem é uma contagem em <code>folha_eventos</code> para aquele
+    <code>funcionario_id</code>. Se for zero, libera; se não, bloqueia e oferece a baixa.
+    O painel já usa <code>confirm()</code> pra ações destrutivas
+    (<code>web/portal.py:3771</code>) — o diálogo acima segue o mesmo espírito, só com o
+    motivo escrito em vez de um "tem certeza?" seco.
+  </div></div>
+</section>
+
+<!-- ═════════════════════════════════════════════════════════ 7. PERGUNTAS -->
+<section class="secao">
+  <div class="secao-h"><span>7 · O que eu não decido sozinho</span></div>
+  <div class="perg">
+    <ol>
+      <li><b>Salário: A ou B?</b> A pergunta que decide é prática — alguém aí reimprime
+        holerite de mês passado? Se sim, A cria erro silencioso. Se não, B é caro agora.</li>
+      <li><b>A trava do excluir está no lugar certo?</b> Bloquear quem tem histórico é minha
+        proposta. A alternativa é liberar sempre com um aviso mais forte — mais liberdade,
+        e a chance de alguém apagar um holerite sem perceber.</li>
+      <li><b>A baixa precisa de motivo?</b> Hoje só existe a data. Campo novo só vale se for
+        aparecer em algum lugar depois.</li>
+      <li><b>"Editar" deve poder mudar pró-labore?</b> Deixei de fora: alternar sócio ↔ CLT
+        muda INSS, FGTS e o cálculo inteiro do mês. Suspeito que seja recadastro, não edição —
+        mas é chute meu.</li>
+    </ol>
+  </div>
+</section>
+
+<div class="rodape">
+  Referências no código — tela: <code>web/portal.py:3636-3777</code> (card) e
+  <code>:9293-9403</code> (rotas) · regras: <code>finance/empresa.py:478-583</code> (CRUD),
+  <code>:633-700</code> (<code>folha_do_mes</code>, onde mora a regra do "sai no mês seguinte") ·
+  banco: <code>db/migracoes/094_funcionario_demissao.sql</code> ·
+  tokens: <code>web/tema.py:25-63</code>.
+</div>
+
+</body>
+</html>

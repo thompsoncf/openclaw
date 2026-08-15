@@ -15,7 +15,7 @@ from fastapi import APIRouter, BackgroundTasks, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from db.conexao import get_pool
-from finance import agenda as ag, servicos_catalogo as scat
+from finance import agenda as ag, icones_servico as ics, servicos_catalogo as scat
 from web.portal import _env
 
 router = APIRouter()
@@ -182,6 +182,33 @@ def registrar_assinatura(pool, token: str, nome: str, doc: str, ip: str) -> bool
     return bool(r)
 
 
+def _do_cadastro(pool, conta_id: int, cliente_id: int, congelado: tuple) -> tuple:
+    """Os dados do cliente como estão HOJE na aba Clientes.
+
+    O orçamento guarda uma cópia do que o vendedor digitou; a aba Clientes é o
+    cadastro que o lojista mantém. Enquanto o orçamento não foi assinado, vale o
+    cadastro — é lá que se corrige um nome errado. Campo vazio no cadastro NÃO
+    apaga o que o orçamento tinha (o lojista pode não ter preenchido tudo): cada
+    campo cai no valor congelado.
+
+    Cliente arquivado ou banco fora do ar caem no congelado inteiro — a folha
+    tem que abrir de qualquer jeito, é o link que está com o cliente.
+    """
+    from finance import clientes as cli
+    try:
+        c = cli.obter_cliente(pool or get_pool(), conta_id, cliente_id)
+    except Exception:  # noqa: BLE001
+        c = None
+    if not c:
+        return congelado
+    empresa, contato, doc, tel, email, end, cep, cidade, uf = congelado
+    novo_doc = c.get("cnpj") or c.get("cpf") or doc
+    return ((c.get("nome") or empresa), contato,
+            novo_doc, (c.get("telefone") or tel), (c.get("email") or email),
+            (c.get("endereco") or end), (c.get("cep") or cep),
+            (c.get("cidade") or cidade), (c.get("uf") or uf))
+
+
 def _carregar(token: str, pool=None):
     with (pool or get_pool()).connection() as c:
         r = c.execute(
@@ -195,6 +222,7 @@ def _carregar(token: str, pool=None):
                       o.evento_agenda_id,
                       c.razao_social, c.documento, c.endereco, c.cep, c.bairro,
                       c.cidade, c.uf, c.telefone, c.email_empresa,
+                      o.cliente_id,
                       -- vendedor: criado_por guarda o id do membro OU 'dono'
                       -- (quem abriu a conta). No segundo caso quem assina é a
                       -- própria conta — era isso que sumia da folha.
@@ -212,7 +240,16 @@ def _carregar(token: str, pool=None):
      modo, evento, parcelas, numero, cli_end, cli_cep, cli_cidade, cli_uf, cli_doc,
      cli_email, cli_tel, agenda_id,
      em_razao, em_doc, em_end, em_cep, em_bairro, em_cidade, em_uf, em_tel, em_email,
-     vendedor_nome) = r
+     cliente_id, vendedor_nome) = r
+    # ASSINOU, CONGELOU: enquanto o orçamento não foi aprovado, a aba Clientes é
+    # quem manda — corrigiu o nome/endereço lá, reimprimiu, saiu certo, sem
+    # precisar refazer a proposta. Depois de assinado fica exatamente o que o
+    # cliente aprovou; erro em documento assinado se conserta emitindo outro.
+    if cliente_id and (status or "") not in ("aprovada", "fechado"):
+        empresa, contato, cli_doc, cli_tel, cli_email, cli_end, cli_cep, cli_cidade, cli_uf = \
+            _do_cadastro(pool, conta_id, cliente_id,
+                         (empresa, contato, cli_doc, cli_tel, cli_email,
+                          cli_end, cli_cep, cli_cidade, cli_uf))
     itens = _lista(itens)
     evento = _dic(evento)
     criado = criado_em.date() if criado_em else date.today()
@@ -286,9 +323,15 @@ def _linhas_evento(d: dict) -> list[dict]:
         qtd = int(it.get("qtd") or 1) or 1
         total = int(it.get("setup") or 0)
         unit = int(it.get("unitario") or 0) or (total // qtd if qtd else total)
+        # ÍCONE no lugar da foto: serviço não tem embalagem pra fotografar, e a
+        # foto sumia na impressão sem fundo. O ícone sai do que o vendedor fixou
+        # no catálogo ou, quando não fixou, do nome/categoria do item — nunca
+        # falta selo na linha.
         linhas.append({"n": i, "nome": it.get("nome") or "", "desc": it.get("desc") or "",
                        "qtd": qtd, "unit": _num(unit * 100), "subtotal": _num(total * 100),
-                       "categoria": it.get("categoria") or "", "foto": it.get("foto_url") or ""})
+                       "categoria": it.get("categoria") or "",
+                       "icone": ics.svg(ics.escolher(it.get("nome"), it.get("categoria"),
+                                                     it.get("icone")), px=24)})
     return linhas
 
 
@@ -452,11 +495,11 @@ table.itens td small{font-size:10px;line-height:1.6;max-width:none}
 table.itens td.n{color:#14213D}
 .item-l{display:flex;gap:10px;align-items:flex-start}
 .item-l>div{min-width:0}
-/* <img> e não background-image: fundo NÃO imprime (a impressão sai com
-   "gráficos de plano de fundo" desligada por padrão) e a foto do item sumia
-   justo no papel, que é onde o cliente decide. */
-.foto{width:46px;height:46px;border-radius:7px;flex:0 0 46px;border:1px solid #ECE7DC;
-  background:#FBFAF7;object-fit:cover;display:block}
+/* Selo do item: ÍCONE de traço, não foto. Traço imprime (fundo não), sai igual
+   em P&B e nunca falta — metade dos serviços não tem foto pra cadastrar. */
+.selo{width:38px;height:38px;flex:0 0 38px;border:1px solid #E6DCC6;border-radius:8px;
+  display:inline-flex;align-items:center;justify-content:center;color:#B8862E;
+  background:#FDFBF6}
 .cat{font-size:8px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
   color:#B8862E;display:block;margin-bottom:2px}
 .subs{margin-top:10px;border:1px solid #ECE7DC;border-radius:9px;overflow:hidden}
@@ -509,7 +552,8 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
   td{padding:4px 9px}
   table.itens td{font-size:10.5px;padding:4px 8px}
   table.itens td small{font-size:9px;line-height:1.42;margin-top:2px}
-  .foto{width:36px;height:36px;flex:0 0 36px}
+  .selo{width:30px;height:30px;flex:0 0 30px;background:none!important}
+  .selo svg{width:20px;height:20px}
   .evb{padding:5px 9px}.evb .v{font-size:12.5px}
   .cli{padding:7px 12px;font-size:12px}
   .cond{padding:7px 12px;font-size:10px;line-height:1.5}
@@ -582,7 +626,7 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
                  <th class="r" style="width:76px">Vr. unit.</th><th class="r" style="width:84px">Subtotal</th></tr>
         {% for l in linhas %}<tr><td class="n">{{ l.n }}</td>
           <td><div class="item-l">
-            {%- if l.foto %}<img class="foto" src="{{ l.foto }}" alt="">{% endif %}
+            <span class="selo">{{ l.icone|safe }}</span>
             <div style="min-width:0">
               {%- if l.categoria %}<span class="cat">{{ l.categoria }}</span>{% endif %}
               <b>{{ l.nome }}</b>{% if l.desc %}<small>{{ l.desc }}</small>{% endif %}

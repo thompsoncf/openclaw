@@ -27,7 +27,8 @@ from pydantic import BaseModel
 from core.brain import Brain
 from db.conexao import get_pool
 from finance.cnpj_info import consultar_cnpj
-from finance import empresa as emp, vendas, servicos_catalogo as scat
+from finance import (empresa as emp, icones_servico as ics, vendas,
+                     servicos_catalogo as scat)
 from web.portal import _render, _env, conta_logada, brl
 
 router = APIRouter()
@@ -80,6 +81,7 @@ def _garantir_tabela(c):
         alter table orcamentos add column if not exists endereco      text;
         alter table orcamentos add column if not exists cep           text;
         alter table orcamentos add column if not exists evento_agenda_id bigint;
+        alter table orcamentos add column if not exists cliente_id    bigint;
         create index if not exists idx_orcamentos_status on orcamentos (status, criado_em desc);
         create index if not exists idx_orcamentos_conta on orcamentos (conta_id, status, criado_em desc);
         create unique index if not exists idx_orcamentos_token on orcamentos (token) where token is not null;
@@ -163,7 +165,9 @@ def _espelhar_cliente(pool, conta_id: int, dados) -> int | None:
     comuns = {"telefone": (dados.whatsapp or dados.telefone or "").strip() or None,
               "email": (dados.email or "").strip() or None,
               "cidade": (getattr(dados, "cidade", "") or "").strip() or None,
-              "uf": (getattr(dados, "uf", "") or "").strip() or None}
+              "uf": (getattr(dados, "uf", "") or "").strip() or None,
+              "endereco": (getattr(dados, "endereco", "") or "").strip() or None,
+              "cep": (getattr(dados, "cep", "") or "").strip() or None}
     try:
         return cli.criar_cliente(pool, conta_id, nome, **comuns,
                                  cpf=doc if len(doc) == 11 else None,
@@ -205,6 +209,7 @@ def _local_padrao(dados: dict) -> str:
     bairro = (dados.get("bairro") or "").strip()
     cidade = (dados.get("cidade") or "").strip()
     uf = (dados.get("uf") or "").strip().upper()
+    cep = "".join(ch for ch in (dados.get("cep") or "") if ch.isdigit())
     if not rua:
         return ""
     partes = [rua]
@@ -212,6 +217,8 @@ def _local_padrao(dados: dict) -> str:
         partes.append(bairro)
     if cidade:
         partes.append(f"{cidade}/{uf}" if uf else cidade)
+    if len(cep) == 8:
+        partes.append(f"CEP {cep[:5]}-{cep[5:]}")
     return " · ".join(partes)
 
 
@@ -235,7 +242,8 @@ def painel_servicos(request: Request):
     return _render("servicos", request, empresa_nome=conta[2],
                    tem_pj=True, vende_servico=True, servico_avulso=servico_avulso,
                    tipos_evento=scat.TIPOS_EVENTO, tipos_contrato=scat.TIPOS_CONTRATO,
-                   local_padrao=_local_padrao(dados_emp) if servico_avulso else "")
+                   local_padrao=_local_padrao(dados_emp) if servico_avulso else "",
+                   icones_paleta=ics.paleta())
 
 
 # ---------------------------------------------------------------- catálogo (por conta)
@@ -253,6 +261,10 @@ def painel_servicos_catalogo(request: Request):
         "mensal": round(s["mensal_centavos"] / 100),
         "custo": round(s["custo_centavos"] / 100),
         "categoria": s["categoria"], "foto_url": s["foto_url"],
+        # `icone` é o que o vendedor fixou (pode ser vazio); `icone_svg` é o que
+        # a tela desenha — já resolvido pelo nome/categoria quando não fixaram.
+        "icone": s["icone"],
+        "icone_svg": ics.svg(ics.escolher(s["nome"], s["categoria"], s["icone"]), px=20),
     } for s in scat.listar(pool, conta[0])]
     return JSONResponse({"itens": itens, "categorias": scat.CATEGORIAS_EVENTOS})
 
@@ -265,7 +277,8 @@ class ServicoIn(BaseModel):
     mensal: int = 0    # REAIS
     custo: int = 0     # REAIS
     categoria: str = ""    # agrupa no orçamento de evento (subtotal por categoria)
-    foto_url: str = ""     # o cliente vê o que está contratando
+    foto_url: str = ""     # legado: catálogo antigo que subiu foto
+    icone: str = ""        # chave do ícone; vazio = deduzido do nome/categoria
 
 
 @router.post("/painel/servicos/catalogo/salvar")
@@ -278,7 +291,8 @@ def painel_servicos_catalogo_salvar(request: Request, dados: ServicoIn):
                     setup_centavos=int(dados.setup or 0) * 100,
                     mensal_centavos=int(dados.mensal or 0) * 100,
                     custo_centavos=int(dados.custo or 0) * 100,
-                    categoria=dados.categoria, foto_url=dados.foto_url)
+                    categoria=dados.categoria, foto_url=dados.foto_url,
+                    icone=dados.icone)
     if not r.get("ok"):
         return JSONResponse({"erro": r.get("erro", "falha ao salvar")}, status_code=400)
     return JSONResponse(r)
@@ -288,36 +302,17 @@ class ServicoDelIn(BaseModel):
     id: int
 
 
-@router.get("/painel/servicos/catalogo/sugerir-fotos")
-def painel_servicos_sugerir_fotos(request: Request, nome: str = ""):
-    """Fotos sugeridas pro serviço, pelo nome (Unsplash — mesma integração da
-    foto de produto). Sem UNSPLASH_ACCESS_KEY volta lista vazia e a tela
-    continua oferecendo upload e link."""
-    conta, redir = _conta_servico(request)
-    if redir is not None:
-        return JSONResponse({"opcoes": []}, status_code=403)
-    from finance import galeria_fotos
-    return JSONResponse({"opcoes": galeria_fotos.opcoes_para_servico(nome, n=4)})
+@router.get("/painel/servicos/catalogo/icone-sugerido")
+def painel_servicos_icone_sugerido(request: Request, nome: str = "", categoria: str = ""):
+    """O ícone que o serviço teria sem ninguém escolher nada.
 
-
-@router.post("/painel/servicos/catalogo/foto")
-async def painel_servicos_catalogo_foto(request: Request, arquivo: UploadFile = File(...)):
-    """Sobe a foto do serviço e devolve a URL pública. Mesmo motor da foto de
-    produto (finance.upload_foto): redimensiona e joga no bucket. Quem grava a
-    URL no serviço é o /catalogo/salvar — aqui só sobe o arquivo."""
+    A regra (nome -> categoria -> 'outros') mora no Python e é a MESMA que a
+    folha usa; a tela pergunta em vez de reimplementar, senão painel e papel
+    divergem no dia em que alguém mexer numa das listas."""
     conta, redir = _conta_servico(request)
     if redir is not None:
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
-    from finance import upload_foto
-    try:
-        conteudo = await arquivo.read()
-        url = upload_foto.subir_foto(conteudo, arquivo.filename or "",
-                                     arquivo.content_type or "image/jpeg")
-    except ValueError as e:
-        return JSONResponse({"erro": str(e)}, status_code=400)
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"erro": f"Não consegui subir a foto: {e}"}, status_code=500)
-    return JSONResponse({"ok": True, "foto_url": url})
+    return JSONResponse({"chave": ics.escolher(nome, categoria)})
 
 
 @router.post("/painel/servicos/catalogo/excluir")
@@ -455,7 +450,7 @@ class ItemIn(BaseModel):
     qtd: int = 1              # evento: quantidade contratada
     unitario: int = 0         # evento: valor unitário em REAIS
     categoria: str = ""       # evento: agrupa e soma por categoria na folha
-    foto_url: str = ""        # evento: o cliente vê o que está contratando
+    icone: str = ""           # evento: selo do item na folha (vazio = deduzido)
 
 
 class EventoIn(BaseModel):
@@ -520,7 +515,7 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
     itens = [{"nome": (it.nome or "")[:120], "desc": (it.desc or "")[:2000],
               "setup": int(it.setup or 0), "mensal": int(it.mensal or 0),
               "qtd": max(1, int(it.qtd or 1)), "unitario": int(it.unitario or 0),
-              "categoria": (it.categoria or "")[:60], "foto_url": (it.foto_url or "")[:500]}
+              "categoria": (it.categoria or "")[:60], "icone": (it.icone or "")[:30]}
              for it in (dados.itens or [])[:50]]
     itens_json = json.dumps(itens)
     # o MODO vem do nicho da conta, não do navegador: quem vende evento emite
@@ -604,6 +599,15 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
     if modo == "evento":
         try:
             cliente_id = _espelhar_cliente(get_pool(), conta[0], dados)
+            # o VÍNCULO é o que faz a folha reler o cadastro depois: sem ele, o
+            # texto copiado aqui congelaria pra sempre e corrigir na aba
+            # Clientes não mudaria nada.
+            if cliente_id:
+                with get_pool().connection() as c:
+                    c.execute("update orcamentos set cliente_id=%s "
+                              "where id=%s and conta_id=%s",
+                              (cliente_id, oid, conta[0]))
+                    c.commit()
         except Exception:  # noqa: BLE001
             cliente_id = None
     return JSONResponse({"ok": True, "id": oid, "token": tok, "cliente_id": cliente_id})
@@ -786,15 +790,18 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .pg-row .oc-valor{text-align:right}
 @media(max-width:640px){.pg-row{grid-template-columns:1fr 1fr; gap:.4rem}.pg-row .pg-obs{grid-column:1/-1}}
 .pg-aviso{color:#e6b877}
-.svc-sug{display:flex; gap:.35rem; flex-wrap:wrap; min-height:0}
-.svc-sug .op{width:38px;height:38px;border-radius:7px;background-position:center;background-size:cover;
-  cursor:pointer;border:2px solid var(--borda)}
-.svc-sug .op.on{border-color:var(--verde)}
-.svc-sug .msg{font-size:.72rem;color:var(--txt-mut)}
+/* paleta de ícones do serviço (no lugar da foto): a biblioteca inteira à vista,
+   com o escolhido aceso. Um clique troca — sem upload, sem espera, sem rede. */
+.svc-icones{display:flex; gap:.3rem; flex-wrap:wrap; max-width:330px}
+.svc-icones .op{width:34px;height:34px;border-radius:8px;border:1.5px solid var(--borda);
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+  color:var(--txt-mut);background:var(--bg)}
+.svc-icones .op.on{border-color:var(--verde);color:var(--verde-claro);background:var(--card-2)}
 .svc-thumb{width:46px;height:46px;border-radius:8px;flex:0 0 46px;border:1px solid var(--borda);
-  background:var(--bg) center/cover no-repeat;display:flex;align-items:center;justify-content:center;color:var(--txt-mut)}
-.svc-thumb.tem span{display:none}
-.oc-mod .svc-thumb{width:34px;height:34px;flex:0 0 34px;border-radius:7px;font-size:.8rem}
+  background:var(--bg);display:flex;align-items:center;justify-content:center;color:var(--verde-claro)}
+.oc-mod .svc-thumb{width:34px;height:34px;flex:0 0 34px;border-radius:7px}
+.svc-thumb svg{width:22px;height:22px}
+.oc-mod .svc-thumb svg{width:18px;height:18px}
 .oc-nome-linha{display:flex;gap:.5rem;align-items:center;min-width:0}
 .oc-cat{font-size:.66rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
   color:var(--verde-claro);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -997,16 +1004,10 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
           <div class="oc-field" style="margin-bottom:0"><label>Categoria <span style="color:var(--txt-mut);font-size:.78rem">— agrupa e soma por categoria no orçamento</span></label>
             <select id="svc-cat" class="oc-inp"><option value="">Sem categoria</option></select>
           </div>
-          <div class="oc-field" style="margin-bottom:0"><label>Foto</label>
-            <div style="display:flex; gap:.5rem; align-items:center">
-              <div id="svc-foto-thumb" class="svc-thumb"><span>📷</span></div>
-              <div style="display:flex; flex-direction:column; gap:.35rem">
-                <label class="oc-pill" style="cursor:pointer; text-align:center">📷 Subir foto
-                  <input id="svc-foto-file" type="file" accept="image/*" style="display:none"></label>
-                <input id="svc-foto" class="oc-inp" placeholder="ou cole o link https://…" style="font-size:.8rem; padding:.35rem .5rem">
-                <div id="svc-foto-sug" class="svc-sug"></div>
-              </div>
-            </div>
+          <div class="oc-field" style="margin-bottom:0"><label>Ícone
+            <span style="color:var(--txt-mut);font-size:.78rem">— escolhido sozinho pelo nome; clique pra trocar</span></label>
+            <input type="hidden" id="svc-icone">
+            <div id="svc-icones" class="svc-icones"></div>
           </div>
         </div>
         {% endif %}
@@ -1151,6 +1152,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 </div>
 
 <script>window.SERVICO_AVULSO = {{ 'true' if servico_avulso else 'false' }};</script>
+<script>window.ZAQ_ICONES = {{ icones_paleta|tojson }};</script>
 {% raw %}<script>
 (function(){
   var SERVICO_AVULSO = window.SERVICO_AVULSO;
@@ -1434,8 +1436,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   // do link "ver todos", pra não repetir o card gigante de antes com 26 linhas
   // sempre visíveis.
   function buildRowAvulso(s){
-    var thumb='<div class="svc-thumb'+(s.foto_url?' tem':'')+'"'
-      +(s.foto_url?' style="background-image:url(\''+ec(s.foto_url)+'\')"':'')+'><span>📷</span></div>';
+    var thumb='<div class="svc-thumb">'+(s.icone_svg||'')+'</div>';
     return '<button class="oc-tog on" type="button" title="Remover da proposta"></button>'
       +'<div class="oc-nome oc-nome-linha">'+thumb+'<div style="min-width:0">'
       +(s.categoria?'<div class="oc-cat">'+ec(s.categoria)+'</div>':'')
@@ -1570,82 +1571,69 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         return;
       }
       var ed=e.target.closest('.oc-edit'), dl=e.target.closest('.oc-del');
-      if(ed){var row2=ed.closest('.oc-browse-row'); var s=CATALOGO.filter(function(x){return x.slug===row2.getAttribute('data-id');})[0]; if(s)abrirForm({id:s.id,nome:s.nome,descricao:s.descricao,setup:s.setup,mensal:s.mensal,custo:s.custo,categoria:s.categoria,foto_url:s.foto_url});}
+      if(ed){var row2=ed.closest('.oc-browse-row'); var s=CATALOGO.filter(function(x){return x.slug===row2.getAttribute('data-id');})[0]; if(s)abrirForm({id:s.id,nome:s.nome,descricao:s.descricao,setup:s.setup,mensal:s.mensal,custo:s.custo,categoria:s.categoria,icone:s.icone});}
       else if(dl){var row3=dl.closest('.oc-browse-row'); var s2=CATALOGO.filter(function(x){return x.slug===row3.getAttribute('data-id');})[0]; if(s2&&confirm('Excluir "'+s2.nome+'" do seu catálogo?')){fetch('/painel/servicos/catalogo/excluir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:s2.id})}).then(function(){carregarCatalogo(true);});}}
     });
   }
   // editar / excluir (delegação)
   document.getElementById('oc-mods').addEventListener('click',function(e){
     var ed=e.target.closest('.oc-edit'), dl=e.target.closest('.oc-del');
-    if(ed){var r=ed.closest('.oc-mod'); var sc=CATALOGO.filter(function(x){return x.slug===r.getAttribute('data-id');})[0]||{}; abrirForm({id:r.getAttribute('data-cid'),nome:r.getAttribute('data-nome'),descricao:r.getAttribute('data-desc'),setup:num(r.querySelector('.oc-setup')),mensal:num(r.querySelector('.oc-mensal')),custo:num(r.querySelector('.oc-custo')),categoria:sc.categoria,foto_url:sc.foto_url});}
+    if(ed){var r=ed.closest('.oc-mod'); var sc=CATALOGO.filter(function(x){return x.slug===r.getAttribute('data-id');})[0]||{}; abrirForm({id:r.getAttribute('data-cid'),nome:r.getAttribute('data-nome'),descricao:r.getAttribute('data-desc'),setup:num(r.querySelector('.oc-setup')),mensal:num(r.querySelector('.oc-mensal')),custo:num(r.querySelector('.oc-custo')),categoria:sc.categoria,icone:sc.icone});}
     else if(dl){var r2=dl.closest('.oc-mod'); if(confirm('Excluir "'+r2.getAttribute('data-nome')+'" do seu catálogo?')){fetch('/painel/servicos/catalogo/excluir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:parseInt(r2.getAttribute('data-cid'),10)})}).then(function(){carregarCatalogo(true);});}}
   });
-  // form de add/editar serviço do catálogo
-  function svcFotoPreview(url){
-    var t=document.getElementById('svc-foto-thumb'); if(!t)return;
-    if(url){t.style.backgroundImage="url('"+url+"')"; t.classList.add('tem');}
-    else{t.style.backgroundImage=''; t.classList.remove('tem');}
-  }
-  var svcFile=document.getElementById('svc-foto-file');
-  if(svcFile)svcFile.addEventListener('change',function(){
-    var f=this.files&&this.files[0]; if(!f)return;
-    var msg=document.getElementById('svc-msg'); msg.textContent='Subindo a foto…';
-    var fd=new FormData(); fd.append('arquivo',f);
-    fetch('/painel/servicos/catalogo/foto',{method:'POST',body:fd})
-      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
-      .then(function(res){
-        if(!res.ok){msg.textContent=(res.d&&res.d.erro)||'Não consegui subir a foto.'; return;}
-        document.getElementById('svc-foto').value=res.d.foto_url;
-        svcFotoPreview(res.d.foto_url); msg.textContent='Foto pronta.';
-      })
-      .catch(function(){msg.textContent='Erro de conexão ao subir a foto.';});
-  });
-  var svcFotoLink=document.getElementById('svc-foto');
-  if(svcFotoLink)svcFotoLink.addEventListener('input',function(){svcFotoPreview(this.value.trim());});
+  // form de add/editar serviço do catálogo — PALETA DE ÍCONES (no lugar da foto)
+  // Serviço não tem embalagem pra fotografar: metade dos itens ficava sem foto
+  // e a linha do orçamento desalinhava. O ícone vem sozinho pelo nome; o
+  // vendedor só clica quando quer outro.
+  var PALETA=(window.ZAQ_ICONES||[]);
+  var svcIconeSugerido='outros', svcSugTimer=null;
 
-  // sugestões de foto pelo NOME do serviço (Unsplash, igual ao produto)
-  var svcSugTimer=null;
-  function svcSugerirFotos(nome){
-    var box=document.getElementById('svc-foto-sug'); if(!box)return;
-    nome=(nome||'').trim();
-    if(nome.length<3){box.innerHTML=''; return;}
-    box.innerHTML='<span class="msg">buscando fotos…</span>';
-    fetch('/painel/servicos/catalogo/sugerir-fotos?nome='+encodeURIComponent(nome))
-      .then(function(r){return r.json();})
-      .then(function(d){
-        var ops=(d&&d.opcoes)||[];
-        if(!ops.length){box.innerHTML='<span class="msg">sem sugestões — suba a foto ou cole um link</span>'; return;}
-        box.innerHTML='';
-        ops.forEach(function(url){
-          var t=document.createElement('div');
-          t.className='op'; t.style.backgroundImage="url('"+url+"')"; t.title='Usar esta foto';
-          t.addEventListener('click',function(){
-            document.getElementById('svc-foto').value=url;
-            svcFotoPreview(url);
-            box.querySelectorAll('.op').forEach(function(x){x.classList.remove('on');});
-            t.classList.add('on');
-          });
-          box.appendChild(t);
+  function svcPintarIcones(){
+    var box=document.getElementById('svc-icones'); if(!box)return;
+    var fixo=(document.getElementById('svc-icone')||{}).value||'';
+    var aceso=fixo||svcIconeSugerido;
+    if(!box.childElementCount){
+      PALETA.forEach(function(ic){
+        var b=document.createElement('div');
+        b.className='op'; b.setAttribute('data-k',ic.chave); b.title=ic.rotulo;
+        b.innerHTML=ic.svg;
+        b.addEventListener('click',function(){
+          // clicou = FIXOU: daqui pra frente o nome pode mudar que o ícone não muda
+          document.getElementById('svc-icone').value=ic.chave;
+          svcPintarIcones();
         });
-      })
-      .catch(function(){box.innerHTML='<span class="msg">não consegui buscar — suba a foto ou cole um link</span>';});
+        box.appendChild(b);
+      });
+    }
+    box.querySelectorAll('.op').forEach(function(x){
+      x.classList.toggle('on', x.getAttribute('data-k')===aceso);
+    });
   }
+
+  function svcSugerirIcone(){
+    var nome=(document.getElementById('svc-nome')||{}).value||'';
+    var cat=((document.getElementById('svc-cat')||{}).value)||'';
+    fetch('/painel/servicos/catalogo/icone-sugerido?nome='+encodeURIComponent(nome)
+          +'&categoria='+encodeURIComponent(cat))
+      .then(function(r){return r.json();})
+      .then(function(d){ svcIconeSugerido=(d&&d.chave)||'outros'; svcPintarIcones(); })
+      .catch(function(){});
+  }
+
   var svcNome=document.getElementById('svc-nome');
   if(svcNome)svcNome.addEventListener('input',function(){
-    var v=this.value;
-    clearTimeout(svcSugTimer);
-    svcSugTimer=setTimeout(function(){svcSugerirFotos(v);},450);
+    clearTimeout(svcSugTimer); svcSugTimer=setTimeout(svcSugerirIcone,350);
   });
+  var svcCat=document.getElementById('svc-cat');
+  if(svcCat)svcCat.addEventListener('change',svcSugerirIcone);
 
   function abrirForm(s){
     s=s||{};
     document.getElementById('svc-id').value=s.id||'';
     var cat=document.getElementById('svc-cat');
     if(cat)cat.value=s.categoria||'';
-    var fot=document.getElementById('svc-foto');
-    if(fot){fot.value=s.foto_url||''; svcFotoPreview(s.foto_url||'');}
-    var sug=document.getElementById('svc-foto-sug');
-    if(sug){sug.innerHTML=''; if(s.nome) svcSugerirFotos(s.nome);}
+    var ico=document.getElementById('svc-icone');
+    if(ico){ico.value=s.icone||''; svcIconeSugerido='outros'; svcPintarIcones(); svcSugerirIcone();}
     document.getElementById('svc-nome').value=s.nome||'';
     document.getElementById('svc-desc').value=s.descricao||'';
     document.getElementById('svc-setup').value=s.setup||0;
@@ -1663,7 +1651,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     var nome=document.getElementById('svc-nome').value.trim();
     if(!nome){document.getElementById('svc-msg').textContent='Informe o nome do serviço.';return;}
     var idv=document.getElementById('svc-id').value;
-    var body={id:idv?parseInt(idv,10):null,nome:nome,descricao:document.getElementById('svc-desc').value||'',setup:num(document.getElementById('svc-setup')),mensal:num(document.getElementById('svc-mensal')),custo:num(document.getElementById('svc-custo')),categoria:((document.getElementById('svc-cat')||{}).value)||'',foto_url:((document.getElementById('svc-foto')||{}).value||'').trim()};
+    var body={id:idv?parseInt(idv,10):null,nome:nome,descricao:document.getElementById('svc-desc').value||'',setup:num(document.getElementById('svc-setup')),mensal:num(document.getElementById('svc-mensal')),custo:num(document.getElementById('svc-custo')),categoria:((document.getElementById('svc-cat')||{}).value)||'',icone:((document.getElementById('svc-icone')||{}).value||'').trim()};
     var b=this; b.disabled=true;
     fetch('/painel/servicos/catalogo/salvar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
       .then(function(r){return r.json().then(function(d){return{ok:r.ok,d:d};});})
@@ -1833,7 +1821,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       var cat=CATALOGO.filter(function(x){return x.slug===r.getAttribute('data-id');})[0]||{};
       return {nome:r.getAttribute('data-nome'),desc:r.getAttribute('data-desc')||'',
               setup:u*q,mensal:num(r.querySelector('.oc-mensal')),qtd:q,unitario:u,
-              categoria:cat.categoria||'',foto_url:cat.foto_url||''};
+              categoria:cat.categoria||'',icone:cat.icone||''};
     });
     var escEl=document.getElementById('oc-escopo-out');
     return {id:EDIT_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',telefone:document.getElementById('oc-tel').value||'',cidade:document.getElementById('oc-cidade').value||'',uf:document.getElementById('oc-uf').value||'',site:document.getElementById('oc-site').value||'',cargo:document.getElementById('oc-cargo').value||'',socio:document.getElementById('oc-socio').value||'',endereco:(document.getElementById('oc-endereco')||{}).value||'',cep:(document.getElementById('oc-cep')||{}).value||'',modulos:sel.map(function(r){return r.getAttribute('data-id');}),itens:itens,evento:coletarEvento(),parcelas:(SERVICO_AVULSO?coletarParcelas():[]),escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setup),mensal:Math.round(c.mensal),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods};

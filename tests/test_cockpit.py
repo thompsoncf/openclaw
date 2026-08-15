@@ -55,7 +55,7 @@ create table push_assinaturas (id bigserial primary key, conta_id bigint, membro
 create table servicos_catalogo (id bigserial primary key, conta_id bigint, slug text, nome text,
   descricao text, setup_centavos bigint default 0, mensal_centavos bigint default 0,
   custo_centavos bigint default 0, ordem int default 0, ativo boolean default true,
-  categoria text, foto_url text);
+  categoria text, foto_url text, icone text);
 create table eventos_agenda (id bigserial primary key, conta_id bigint, membro_id bigint,
   titulo text, inicio timestamptz, fim timestamptz, local text, descricao text,
   lembrete_min int, tipo text default 'pessoal', link_online text, desfecho text,

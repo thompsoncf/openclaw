@@ -24,7 +24,7 @@ create table campanhas (id bigserial primary key, conta_id bigint, nome text,
   status text default 'ativa', responsavel_id bigint);
 create table campanha_alvos (id bigserial primary key, campanha_id bigint, prospeccao_id bigint,
   status text default 'fila', wa_status text, wa_em timestamptz,
-  wa_erro_codigo text, wa_erro_msg text,
+  wa_erro_codigo text, wa_erro_msg text, wa_sid text, wa_numero text, alvo_telefone text,
   wa_tentados jsonb not null default '[]'::jsonb, wa_tentativas int not null default 0);
 """
 
@@ -102,6 +102,37 @@ def test_alvo_no_teto_nao_volta(pool, monkeypatch):
     _chamar(pool, monkeypatch, conta, camp, [aid])
     status, tentativas, _t, _c = _alvo(pool, aid)
     assert status == "erro" and tentativas == cm._WA_TENTATIVAS
+
+
+def test_destrava_o_numero_escolhido_pelo_dono(pool, monkeypatch):
+    """Se o número que ELE travou falhou e ele está apertando este botão, é isso
+    que ele está pedindo: tente os outros. Sem destravar, 16 leads em produção
+    ficavam com 87 telefones guardados e um botão que não fazia nada."""
+    conta, camp, aid = _cenario(pool, "Travado", tentativas=1)
+    with pool.connection() as c:
+        c.execute("update campanha_alvos set alvo_telefone='(86) 97777-7777' where id=%s", (aid,))
+        c.commit()
+    _chamar(pool, monkeypatch, conta, camp, [aid])
+    with pool.connection() as c:
+        status, travado, tentados = c.execute(
+            """select wa_status, alvo_telefone, wa_tentados from campanha_alvos where id=%s""",
+            (aid,)).fetchone()
+    assert status is None and travado is None
+    assert tentados == ["86999990000"], "o que já falhou continua riscado"
+
+
+def test_recolocar_limpa_o_sid_da_tentativa_encerrada(pool, monkeypatch):
+    """Senão um callback atrasado do SID antigo marcaria 'enviado' e tiraria da
+    fila quem acabou de voltar."""
+    conta, camp, aid = _cenario(pool, "Sid antigo", tentativas=1)
+    with pool.connection() as c:
+        c.execute("update campanha_alvos set wa_sid='SMvelho', wa_numero='(86) 9x' where id=%s",
+                  (aid,))
+        c.commit()
+    _chamar(pool, monkeypatch, conta, camp, [aid])
+    with pool.connection() as c:
+        assert c.execute("select wa_sid, wa_numero from campanha_alvos where id=%s",
+                         (aid,)).fetchone() == (None, None)
 
 
 def test_so_mexe_em_quem_esta_parado(pool, monkeypatch):

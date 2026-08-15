@@ -141,6 +141,21 @@ def _ator(request: Request):
     return request.session.get("membro_id"), request.session.get("papel", "dono")
 
 
+def _com_retry_numero(c, executar, tentativas: int = 3):
+    """Roda um insert/update que calcula `numero = max+1` da conta.
+
+    O índice único (conta_id, numero) é quem garante a série: se dois salvarem
+    ao mesmo tempo, o perdedor leva UniqueViolation, a transação volta e ele
+    tenta de novo — na segunda vez o max já é o do vencedor.
+    """
+    for _ in range(tentativas):
+        try:
+            return executar()
+        except UniqueViolation:
+            c.rollback()
+    return None
+
+
 def _nicho(conta_id: int) -> str:
     """Slug do nicho da conta. É ele que decide o MODO do orçamento (evento ×
     recorrente) e o vocabulário da tela — nunca o que o navegador manda."""
@@ -442,7 +457,7 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
     itens_json = json.dumps(itens)
     # o MODO vem do nicho da conta, não do navegador: quem vende evento emite
     # orçamento de evento, e só. (mesma regra do servico_avulso da tela)
-    modo = "evento" if _nicho(conta[0]) == "eventos" else "recorrente"
+    modo = vendas.modo_do_orcamento(get_pool(), conta[0])
     evento_json = json.dumps(dados.evento.model_dump()) if (modo == "evento" and dados.evento) else None
     parcelas_json = json.dumps(
         [p.model_dump() for p in (dados.parcelas or [])[:60] if int(p.valor_centavos or 0) > 0]
@@ -463,7 +478,7 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
         oid = tok = None
         if dados.id:
             # atualiza a proposta reaberta (nunca mexe em uma já 'fechado')
-            r = c.execute(
+            r = _com_retry_numero(c, lambda: c.execute(
                 """update orcamentos set cliente=%s, empresa=%s, cnpj=%s, segmento=%s,
                        whatsapp=%s, email=%s, telefone=%s, cidade=%s, uf=%s, site=%s,
                        cargo=%s, socio=%s, endereco=%s, cep=%s,
@@ -472,6 +487,11 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
                        setup_centavos=%s, mensal_centavos=%s, primeiro_ano_centavos=%s,
                        n_modulos=%s, atualizado_em=now(),
                        token=coalesce(token, %s),
+                       -- proposta criada fora do painel (cockpit, prospecção,
+                       -- agente) entra sem número: ganha o dela agora.
+                       numero=coalesce(numero,
+                           (select coalesce(max(numero),0)+1 from orcamentos o2
+                             where o2.conta_id=%s)),
                        -- editar uma proposta JÁ assinada a reabre: volta pra 'enviado'
                        -- e limpa a assinatura (os termos mudaram → precisa re-aprovar).
                        status=case when status='aprovada' then 'enviado' else status end,
@@ -481,7 +501,7 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
                        aprovada_ip=case when status='aprovada' then null else aprovada_ip end
                      where id=%s and conta_id=%s and status <> 'fechado'
                    returning id, token""",
-                vals + (secrets.token_urlsafe(16), dados.id, conta[0])).fetchone()
+                vals + (secrets.token_urlsafe(16), conta[0], dados.id, conta[0])).fetchone())
             if r:
                 oid, tok = r
         if oid is None and not dados.id:
@@ -500,14 +520,10 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
                            %s::jsonb,%s::jsonb,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,%s,%s,
                            (select coalesce(max(numero),0)+1 from orcamentos where conta_id=%s))
                    returning id, token"""
-            for _tentativa in range(3):
-                try:
-                    r = c.execute(sql_ins, (conta[0],) + vals
-                                  + (criador, secrets.token_urlsafe(16), conta[0])).fetchone()
-                    break
-                except UniqueViolation:
-                    c.rollback()   # outro salvou primeiro: o max+1 recalcula na próxima
-            else:
+            r = _com_retry_numero(c, lambda: c.execute(
+                sql_ins,
+                (conta[0],) + vals + (criador, secrets.token_urlsafe(16), conta[0])).fetchone())
+            if r is None:
                 return JSONResponse({"erro": "não consegui numerar o orçamento; tente de novo"},
                                     status_code=409)
             oid, tok = r

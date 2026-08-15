@@ -18,9 +18,13 @@ from psycopg_pool import ConnectionPool
 from finance import cockpit as ck
 
 _BASE_SQL = """
+create table nichos (id bigserial primary key, nome text, slug text unique, tipo text);
 create table contas (id bigserial primary key, nome text, documento text, razao_social text,
   nome_fantasia text, endereco text, bairro text, cep text, cidade text, uf text,
-  email_empresa text, telefone text, nicho text, cnae text);
+  email_empresa text, telefone text, nicho text, cnae text,
+  -- o nicho decide o MODO do orçamento (evento × recorrente), inclusive quando a
+  -- proposta nasce aqui no cockpit do vendedor
+  nicho_id bigint references nichos(id));
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text default 'vendedor', ativo boolean default true, whatsapp text,
   cockpit_push_ativo boolean default true, cockpit_pausado boolean default false);

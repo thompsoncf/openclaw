@@ -22,10 +22,12 @@ from pathlib import Path
 import pytest
 from psycopg_pool import ConnectionPool
 
+from psycopg.errors import UniqueViolation
+
 from db.conexao import init_schema
 from finance import agenda as ag, vendas
 from web import proposta as prop
-from web.painel_servicos import _garantir_tabela
+from web.painel_servicos import _com_retry_numero, _garantir_tabela
 
 BASE = Path(__file__).resolve().parent.parent / "db" / "migracoes"
 
@@ -57,7 +59,13 @@ def pool():
             alter table contas add column if not exists telefone      text;
             alter table contas add column if not exists email_empresa text;
             alter table contas add column if not exists logo_url      text;
+            alter table contas add column if not exists nome_fantasia text;
+            alter table contas add column if not exists cnae          text;
         """)
+        c.execute("""create table if not exists nichos (
+            id bigserial primary key, nome text, slug text unique, tipo text,
+            ativo boolean not null default true)""")
+        c.execute("alter table contas add column if not exists nicho_id bigint references nichos(id)")
         c.execute("""create table if not exists orcamentos (
             id bigserial primary key, cliente text, empresa text, segmento text,
             setup_centavos bigint default 0, mensal_centavos bigint default 0,
@@ -82,6 +90,18 @@ def conta_id(pool):
                returning id""").fetchone()[0]
         c.execute("insert into membros (conta_id, nome, papel) values (%s,%s,'dono')",
                   (cid, "Manoel Soares de Sousa Junior"))
+        c.commit()
+    return cid
+
+
+def _conta_do_nicho(pool, slug: str) -> int:
+    with pool.connection() as c:
+        c.execute("insert into nichos (nome, slug, tipo) values (%s,%s,'produto') "
+                  "on conflict (slug) do nothing", (slug, slug))
+        cid = c.execute(
+            """insert into contas (tipo, nome, nicho_id)
+               values ('pj', %s, (select id from nichos where slug=%s)) returning id""",
+            (f"Conta {slug}", slug)).fetchone()[0]
         c.commit()
     return cid
 
@@ -218,6 +238,58 @@ def test_subtotal_por_categoria(pool, conta_id):
     # nos dois casos o bloco não aparece.
     assert _subtotais([ITENS[0]]) == []
     assert _subtotais([ITENS[0], {"setup": 100}]) == []
+
+
+# ------------------------------------------------- o modo vem do nicho, sempre
+def test_modo_por_nicho():
+    assert vendas.modo_por_nicho("eventos") == "evento"
+    assert vendas.modo_por_nicho("tecnologia") == "recorrente"
+    assert vendas.modo_por_nicho(None) == "recorrente"
+
+
+def test_modo_do_orcamento_pela_conta(pool):
+    """Orçamento nasce em quatro portas (painel, cockpit, prospecção, agente) e
+    todas perguntam à conta — senão a empresa de eventos manda folha de
+    mensalidade dependendo de onde o vendedor clicou."""
+    assert vendas.modo_do_orcamento(pool, _conta_do_nicho(pool, "eventos")) == "evento"
+    assert vendas.modo_do_orcamento(pool, _conta_do_nicho(pool, "tecnologia")) == "recorrente"
+    assert vendas.modo_do_orcamento(pool, 10 ** 9) == "recorrente"   # conta inexistente
+
+
+def test_numero_repete_quando_dois_salvam_junto():
+    """A série por conta é garantida pelo índice único: quem perde a corrida
+    refaz o cálculo em vez de estourar na cara do vendedor."""
+    class FakeCursor:
+        def __init__(self): self.rollbacks = 0
+        def rollback(self): self.rollbacks += 1
+
+    c = FakeCursor()
+    tentativas = []
+
+    def uma_colisao():
+        tentativas.append(1)
+        if len(tentativas) == 1:
+            raise UniqueViolation("colidiu")
+        return ("ok",)
+
+    assert _com_retry_numero(c, uma_colisao) == ("ok",)
+    assert c.rollbacks == 1
+
+    def sempre_colide():
+        raise UniqueViolation("colidiu")
+
+    assert _com_retry_numero(c, sempre_colide) is None    # desiste e devolve vazio
+
+
+def test_folha_sem_dados_do_evento_nao_imprime_bloco_vazio(pool, conta_id, monkeypatch):
+    """Conta de eventos que gerou a proposta pelo cockpit não tem data nem
+    convidados: a folha vai direto pros itens, sem quatro travessões."""
+    _, tok = _semear(pool, conta_id, evento={})
+    carregar, pool_teste = prop._carregar, pool
+    monkeypatch.setattr(prop, "_carregar", lambda t, pool=None: carregar(t, pool=pool_teste))
+    html = prop.proposta_publica(None, tok).body.decode()
+    assert "O evento" not in html and "Convidados" not in html
+    assert "Itens do orçamento" in html and "R$ 7.450,00" in html   # o resto sai igual
 
 
 # --------------------------------------------------------------- reserva na agenda

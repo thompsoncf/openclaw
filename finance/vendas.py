@@ -30,6 +30,31 @@ from .empresa import _mes_seguinte
 
 CAT_SERVICOS = "Serviços"
 
+
+# Nichos que emitem orçamento de EVENTO (migração 147). O modo é do NICHO da
+# conta, não de quem está criando — e orçamento nasce em quatro portas: painel,
+# cockpit do vendedor, "gerar orçamento" da prospecção e o agente. Todas passam
+# por aqui; senão a empresa de eventos manda pro cliente uma folha de
+# mensalidade dependendo de onde o vendedor clicou.
+NICHOS_EVENTO = {"eventos"}
+
+
+def modo_por_nicho(slug: str | None) -> str:
+    return "evento" if (slug or "").strip() in NICHOS_EVENTO else "recorrente"
+
+
+def modo_do_orcamento(pool, conta_id: int) -> str:
+    """O modo do orçamento dessa conta: 'evento' ou 'recorrente'.
+
+    Sem try/except de propósito: se a leitura do nicho falhar, é melhor o
+    salvamento falhar do que gravar calado um orçamento no modo errado — o
+    cliente receberia uma folha de mensalidade por uma festa. Conta que não
+    existe volta sem nicho e cai em 'recorrente', que é o padrão da coluna.
+    """
+    from finance import empresa as emp
+    return modo_por_nicho((emp.obter_dados_empresa(pool, conta_id) or {}).get("nicho"))
+
+
 # SQL do título a receber (reusa a tabela titulos do módulo Empresa).
 _SQL_TITULO = """insert into titulos
     (conta_id, tipo, descricao, contraparte, valor_centavos, vencimento,

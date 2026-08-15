@@ -261,6 +261,8 @@ def proposta_publica(request: Request, token: str, erro: str = ""):
         }
         # as listas inteiras, com a escolhida em destaque — é assim que o papel
         # que ele usa hoje mostra (todas as opções, a marcada com o X).
+        d["tem_evento"] = any(str(ev.get(k) or "").strip()
+                              for k in ("data", "convidados", "inicio", "fim", "tipo", "local"))
         d["tipos_evento"] = TIPOS_EVENTO
         d["contratos_todos"] = TIPOS_CONTRATO
         d["parcelas_fmt"] = [
@@ -423,7 +425,7 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
         {%- else %}{{ prop.data_str }}{% endif %}</div>
     </div>
     <div class="bd">
-      {% if evento %}
+      {% if evento and prop.tem_evento %}
       <div class="eb">O evento</div>
       <div class="evg">
         <div class="evb"><div class="l">Data</div><div class="v">{{ prop.ev.data or '—' }}</div></div>

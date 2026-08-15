@@ -28,8 +28,13 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
   canal text default 'whatsapp', contato_ref text, contato_nome text,
   status text default 'aberta', ultima_msg_em timestamptz default now());
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
-  direcao text, autor text, texto text, provider_sid text unique,
+  direcao text, autor text, texto text, provider_sid text,
   criado_em timestamptz default now());
+
+-- unicidade por CONVERSA, não global: o id do WhatsApp é o mesmo nas duas pontas
+-- da mensagem, e global fazia a conta que recebe perder a dela (migração 159)
+create unique index if not exists idx_mensagens_sid_conversa
+  on mensagens (conversa_id, provider_sid) where provider_sid is not null;
 """
 
 

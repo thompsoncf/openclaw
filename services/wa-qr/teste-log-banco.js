@@ -59,7 +59,8 @@ async function limpar () {
 
 async function linhas (where, args) {
   const r = await s.pool.query(
-    'select conta_id, nivel, msg, dados from wa_qr_log ' + (where || '') + ' order by id', args || [])
+    'select conta_id, nivel, msg, dados, criado_em from wa_qr_log ' + (where || '') + ' order by id',
+    args || [])
   return r.rows
 }
 
@@ -83,6 +84,46 @@ async function testeGravacao () {
   conferir(doServico.length === 1 && doServico[0].msg === 'wa-qr no ar',
     'linha do serviço (sem conta) também é guardada')
   conferir(doServico[0].dados === null, 'sem objeto, dados fica nulo em vez de {}')
+}
+
+async function testeContaComoTexto () {
+  // O defeito que a própria tabela denunciou no primeiro minuto de produção: o driver
+  // do Postgres devolve bigint como STRING, então o contaId que sai de uma consulta é
+  // '35' e não 35 — e com a checagem crua de número TODA linha dessas nascia sem
+  // conta. O log gravava bonito e era inútil pro único uso que justifica a tabela.
+  console.log('\ncontaId em texto (é o que o driver do Postgres devolve) vira coluna igual')
+  await limpar()
+  s.enfileirarLog('info', { contaId: '35' }, 'iniciarSessao: começando')
+  s.enfileirarLog('info', { contaId: 35 }, 'e o número puro segue valendo')
+  await s.gravarLogsPendentes()
+  const da35 = await linhas('where conta_id=35')
+  conferir(da35.length === 2, 'as duas formas caem na mesma conta', 'linhas=' + da35.length)
+
+  console.log('\nmas o que não é conta continua nulo, sem virar zero')
+  await limpar()
+  for (const [valor, rotulo] of [['', 'string vazia'], [null, 'null'], ['abc', 'texto qualquer'],
+    [undefined, 'ausente'], [{}, 'objeto']]) {
+    s.enfileirarLog('info', { contaId: valor }, 'linha de ' + rotulo)
+  }
+  await s.gravarLogsPendentes()
+  const nulas = await linhas('where conta_id is null')
+  conferir(nulas.length === 5, 'as cinco ficaram sem conta em vez de virar 0',
+    'nulas=' + nulas.length)
+}
+
+async function testeHoraDoEvento () {
+  // O lote sai de 2 em 2s; com `default now()` a leva inteira nascia com o mesmo
+  // instante, e num incidente é justamente a ordem/o intervalo que se lê.
+  console.log('\na hora é a do evento, não a da gravação em lote')
+  await limpar()
+  s.enfileirarLog('info', { contaId: CONTA }, 'primeira')
+  await new Promise((r) => setTimeout(r, 1100))
+  s.enfileirarLog('info', { contaId: CONTA }, 'segunda, um segundo depois')
+  await s.gravarLogsPendentes()          // as duas gravam no MESMO insert
+  const [a, b] = await linhas('where conta_id=$1', [CONTA])
+  const dif = new Date(b.criado_em) - new Date(a.criado_em)
+  conferir(dif >= 1000, 'as duas linhas do mesmo lote preservam o intervalo real',
+    'diferença=' + dif + 'ms')
 }
 
 async function testeNivelEFila () {
@@ -174,6 +215,8 @@ async function testeFalhaNaoSobe () {
 ;(async () => {
   try {
     await testeGravacao()
+    await testeContaComoTexto()
+    await testeHoraDoEvento()
     await testeNivelEFila()
     await testeDadosEstranhos()
     await testeSessoes()

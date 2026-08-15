@@ -116,7 +116,17 @@ process.on('uncaughtException', (err) => log.error({ err: String(err && err.stac
 // preso numa operação síncrona longa e a rota nem chegou a ser chamada. Este
 // tique mede o atraso e denuncia o momento exato — sem ele, a única pista era o
 // aviso do Render, que não dá pra correlacionar com nada.
+//
+// O MESMO tique também publica a memória de minuto em minuto. O serviço morreu no
+// Render com "Ran out of memory (used over 512MB)" sem deixar UMA linha de log: quem
+// matou foi o kernel (cgroup), não o Node, então não há stack trace nenhum. Sem série
+// histórica de memória não dá pra distinguir "pico legítimo de sincronização" de
+// "vazamento que sobe em rampa" — que exigem consertos opostos. Vai junto o tamanho de
+// cada estrutura em memória e a fila do pool do Postgres (waitingCount): consulta
+// enfileirada é memória retida esperando uma das 4 conexões, e cresce sem teto.
+const MB = (b) => Math.round((b || 0) / 1048576)
 let _ultimoTique = Date.now()
+let _tiques = 0
 setInterval(() => {
   const agora = Date.now()
   const atraso = agora - _ultimoTique - 1000
@@ -125,6 +135,16 @@ setInterval(() => {
     log.warn({ atrasoMs: atraso },
       'event loop travou — nesse intervalo /saude não respondia (risco de health check falhar)')
   }
+  if (++_tiques % 60) return
+  const m = process.memoryUsage()
+  let lids = 0
+  for (const mapa of lidMaps.values()) lids += mapa.size
+  log.info({
+    rssMB: MB(m.rss), heapMB: MB(m.heapUsed), heapTotalMB: MB(m.heapTotal),
+    externalMB: MB(m.external), buffersMB: MB(m.arrayBuffers),
+    sessoes: sessoes.size, enviadas: enviadas.size, jids: jidsResolvidos.size, lids,
+    pgFila: pool.waitingCount, pgConexoes: pool.totalCount
+  }, 'memória')
 }, 1000).unref()
 
 const pool = new Pool({
@@ -136,6 +156,34 @@ const pool = new Pool({
 // contaId -> { sock, status, qr, iniciando }
 const sessoes = new Map()
 
+// Encerra um socket PRA VALER: marca `_descartado` (pro 'close' que o próprio end()
+// emite não reentrar nos nossos handlers) e fecha. O que importa pra memória é ser
+// chamado NA HORA — é o end() que derruba o WebSocket e mata o keep-alive do Baileys,
+// e enquanto isso não acontece o socket morto continua inteiro, com os caches dele
+// (signal store, devices, retry) e as conexões abertas.
+//
+// De propósito NÃO mexe nos listeners: o ciclo sock -> ev -> closure -> sock é coletado
+// pelo GC sozinho, então removê-los não devolveria memória nenhuma — e removeria junto
+// o `creds.update`, com risco de perder uma gravação de credencial pendente. O próprio
+// Baileys já solta os listeners de connection.update dentro do end().
+function descartarSocket (sock, contaId, motivo) {
+  if (!sock) return
+  try {
+    sock._descartado = true
+    sock.end(undefined)
+    log.info({ contaId, motivo }, 'socket descartado')
+  } catch (e) { log.warn({ contaId, motivo, e: String(e) }, 'falha ao fechar socket') }
+}
+
+// Todos os temporizadores da agenda de UMA encarnação da sessão. esperarAcalmarEResync
+// fica até 15min batendo no banco de 5 em 5s, e cada reconexão armava mais um por cima
+// sem desarmar o anterior.
+function pararTimersDaAgenda (s) {
+  if (!s) return
+  clearTimeout(s._agendaT1); clearTimeout(s._agendaT2); clearInterval(s._agendaT3)
+  s._agendaT3 = null
+}
+
 // contaId -> Map(jid @lid -> jid real @s.whatsapp.net). Usado pra traduzir o ID
 // interno de privacidade do WhatsApp pro telefone de verdade, nos três fluxos
 // (entrada, saída e histórico). Alimentado por DUAS fontes: a lista de contatos
@@ -145,19 +193,75 @@ const sessoes = new Map()
 // mandada pelo celular pra um chat @lid se perdia por falta do mapa.
 const lidMaps = new Map()
 
+// Teto por conta. O mapa era alimentado pela agenda INTEIRA (milhares de contatos) e
+// ainda por todo frame que chega no CB:message, sem nunca encolher — só sumia no
+// logout. Map preserva ordem de inserção, então despejar o primeiro é despejar o mais
+// antigo (mesmo padrão do cache `enviadas`). Despejo aqui não perde nada: a linha
+// continua no Postgres e volta no próximo religamento.
+const MAX_LIDS_POR_CONTA = 20000
+
+// Escrita dos pares @lid->telefone em LOTE, não uma query por par.
+// Antes cada par novo disparava um pool.query() sem await. Com `max: 4` no pool, uma
+// sincronização de agenda com milhares de contatos empilhava milhares de consultas na
+// fila INTERNA do pg — cada uma segurando params e promise na memória, sem teto — e
+// ainda represava atrás delas as consultas que importam (creds, chaves de app-state).
+// Agora acumula e grava de LID_FLUSH_MS em LID_FLUSH_MS num insert multi-linha só.
+// A chave do buffer é conta+lid, então o mesmo par nunca aparece duas vezes no mesmo
+// statement — o que também evita o "ON CONFLICT DO UPDATE cannot affect row a second
+// time" que um lote com repetição levaria do Postgres.
+const lidsPendentes = new Map()
+const LID_FLUSH_MS = 2000
+const MAX_LIDS_PENDENTES = 2000
+const LID_LOTE = 500
+let _lidFlushT = null
+
+async function gravarLidsPendentes () {
+  _lidFlushT = null
+  if (!lidsPendentes.size) return
+  const pares = [...lidsPendentes]
+  lidsPendentes.clear()
+  for (let i = 0; i < pares.length; i += LID_LOTE) {
+    const lote = pares.slice(i, i + LID_LOTE)
+    const valores = []
+    const params = []
+    for (const [chave, pnJid] of lote) {
+      const corte = chave.indexOf(' ')
+      params.push(parseInt(chave.slice(0, corte), 10), 'lidmap-' + chave.slice(corte + 1),
+        JSON.stringify(pnJid))
+      valores.push(`($${params.length - 2},$${params.length - 1},$${params.length}, now())`)
+    }
+    try {
+      await pool.query(
+        `insert into wa_qr_auth (conta_id, arquivo, conteudo, atualizado)
+         values ${valores.join(',')}
+         on conflict (conta_id, arquivo)
+         do update set conteudo=excluded.conteudo, atualizado=now()`, params)
+    } catch (e) {
+      log.warn({ n: lote.length, e: String(e) }, 'gravarLidsPendentes: falha ao persistir')
+    }
+  }
+}
+
 function aprenderLid (contaId, lidJid, pnJid) {
   if (!lidJid || !pnJid || !lidJid.endsWith('@lid') || !pnJid.endsWith('@s.whatsapp.net')) return
   let mapa = lidMaps.get(contaId)
   if (!mapa) { mapa = new Map(); lidMaps.set(contaId, mapa) }
   if (mapa.get(lidJid) === pnJid) return
   mapa.set(lidJid, pnJid)
-  pool.query(
-    `insert into wa_qr_auth (conta_id, arquivo, conteudo, atualizado)
-     values ($1,$2,$3, now())
-     on conflict (conta_id, arquivo)
-     do update set conteudo=excluded.conteudo, atualizado=now()`,
-    [contaId, 'lidmap-' + lidJid, JSON.stringify(pnJid)]
-  ).catch((e) => log.warn({ contaId, e: String(e) }, 'aprenderLid: falha ao persistir'))
+  while (mapa.size > MAX_LIDS_POR_CONTA) mapa.delete(mapa.keys().next().value)
+  lidsPendentes.set(contaId + ' ' + lidJid, pnJid)
+  // buffer cheio: grava JÁ, senão o teto seria só outro jeito de acumular memória
+  if (lidsPendentes.size >= MAX_LIDS_PENDENTES) {
+    clearTimeout(_lidFlushT)
+    _lidFlushT = null
+    gravarLidsPendentes().catch((e) => log.warn({ e: String(e) }, 'flush de lids falhou'))
+    return
+  }
+  if (!_lidFlushT) {
+    _lidFlushT = setTimeout(() => {
+      gravarLidsPendentes().catch((e) => log.warn({ e: String(e) }, 'flush de lids falhou'))
+    }, LID_FLUSH_MS)
+  }
 }
 
 function atualizarLidMap (contaId, contacts) {
@@ -169,9 +273,15 @@ function atualizarLidMap (contaId, contacts) {
 
 async function carregarLidMap (contaId) {
   try {
+    // com limite, pelos mais recentes: sem ele o religamento de uma conta com agenda
+    // grande carregava a tabela inteira de uma vez, e ainda por cima furava o teto de
+    // MAX_LIDS_POR_CONTA logo no arranque. O que ficar de fora volta sozinho quando o
+    // contato aparecer numa mensagem (o senderPn traz o par de graça).
     const r = await pool.query(
-      `select arquivo, conteudo from wa_qr_auth where conta_id=$1 and arquivo like 'lidmap-%'`,
-      [contaId])
+      `select arquivo, conteudo from wa_qr_auth
+        where conta_id=$1 and arquivo like 'lidmap-%'
+        order by atualizado desc limit $2`,
+      [contaId, MAX_LIDS_POR_CONTA])
     if (!r.rows.length) return
     let mapa = lidMaps.get(contaId)
     if (!mapa) { mapa = new Map(); lidMaps.set(contaId, mapa) }
@@ -211,21 +321,32 @@ async function comLimiteDeConcorrencia (itens, limite, fn) {
 // 'entregue'). Memória continua como caminho rápido; o Postgres é a rede de
 // segurança, igual ao que já se faz com o mapa de @lid.
 const MAX_ENVIADAS = 400
+// ...e o teto precisa ser de BYTES também, não só de contagem. 400 mensagens de texto
+// dão ~100 KB; 400 ECOS de imagem mandada pelo celular (todo fromMe passa por aqui, ver
+// messages.upsert) carregam o `jpegThumbnail` embutido e viram dezenas de MB presos até
+// serem despejados. Acima deste tamanho a mensagem vai só pro Postgres: buscarEnviada
+// já lê de lá quando não acha na memória, então o reenvio continua funcionando igual —
+// só paga uma consulta, num evento que é raro por natureza.
+const MAX_BYTES_ENVIADA = 8192
 const enviadas = new Map()
 
 function guardarEnviada (contaId, m) {
   if (!m || !m.key || !m.key.id || !m.message) return
-  const k = contaId + ':' + m.key.id
-  if (enviadas.has(k)) enviadas.delete(k)
-  enviadas.set(k, m.message)
-  // Map preserva ordem de inserção: o primeiro é sempre o mais antigo.
-  while (enviadas.size > MAX_ENVIADAS) enviadas.delete(enviadas.keys().next().value)
+  // serializa UMA vez: o mesmo texto decide o cache e vai pro banco
+  const corpo = JSON.stringify(m.message, BufferJSON.replacer)
+  if (corpo && corpo.length <= MAX_BYTES_ENVIADA) {
+    const k = contaId + ':' + m.key.id
+    if (enviadas.has(k)) enviadas.delete(k)
+    enviadas.set(k, m.message)
+    // Map preserva ordem de inserção: o primeiro é sempre o mais antigo.
+    while (enviadas.size > MAX_ENVIADAS) enviadas.delete(enviadas.keys().next().value)
+  }
   // não dá await: guardar é best-effort e não pode atrasar o envio
   pool.query(
     `insert into wa_qr_enviadas (conta_id, msg_id, conteudo, criado_em)
      values ($1,$2,$3, now())
      on conflict (conta_id, msg_id) do nothing`,
-    [contaId, m.key.id, JSON.stringify(m.message, BufferJSON.replacer)]
+    [contaId, m.key.id, corpo]
   ).catch((e) => log.warn({ contaId, e: String(e) }, 'guardarEnviada: falha ao persistir'))
 }
 
@@ -273,6 +394,31 @@ function jidDe (numero) {
 // e transforma "sumiu sem avisar" em erro claro na tela.
 const jidsResolvidos = new Map()
 const PRAZO_ONWHATSAPP_MS = 4000
+// Teto: uma entrada por número já contatado, por conta, e nada nunca saía daqui — nem
+// no Desconectar. Numa conta que dispara pra muita gente isso só cresce. Despejo pelo
+// mais antigo (Map preserva ordem de inserção); o pior efeito de despejar é uma
+// consulta onWhatsApp a mais no próximo envio pra aquele número.
+const MAX_JIDS_RESOLVIDOS = 2000
+
+function lembrarJid (chave, valor) {
+  jidsResolvidos.set(chave, valor)
+  while (jidsResolvidos.size > MAX_JIDS_RESOLVIDOS) {
+    jidsResolvidos.delete(jidsResolvidos.keys().next().value)
+  }
+}
+
+// Tudo que uma conta ocupa em memória, num lugar só. Antes o logout limpava `sessoes` e
+// `lidMaps` e esquecia os outros três caches — que ficavam ali segurando memória de uma
+// conta que nem existe mais no serviço. As chaves são prefixadas por conta_id, e o
+// separador (':' / ' ') impede que a conta 2 case com as chaves da conta 23.
+function esquecerConta (contaId) {
+  lidMaps.delete(contaId)
+  const prefixo = contaId + ':'
+  for (const k of jidsResolvidos.keys()) if (k.startsWith(prefixo)) jidsResolvidos.delete(k)
+  for (const k of enviadas.keys()) if (k.startsWith(prefixo)) enviadas.delete(k)
+  const prefixoLid = contaId + ' '
+  for (const k of lidsPendentes.keys()) if (k.startsWith(prefixoLid)) lidsPendentes.delete(k)
+}
 
 async function jidRealDe (sock, contaId, numero) {
   const base = jidDe(numero)
@@ -301,7 +447,7 @@ async function jidRealDe (sock, contaId, numero) {
     }
     const achado = Array.isArray(r) ? r[0] : null
     if (achado && achado.exists && achado.jid) {
-      jidsResolvidos.set(chave, achado.jid)
+      lembrarJid(chave, achado.jid)
       if (achado.jid !== base) {
         log.info({ contaId, pedido: base, real: achado.jid },
           'número corrigido pelo WhatsApp antes de enviar')
@@ -309,7 +455,7 @@ async function jidRealDe (sock, contaId, numero) {
       return { jid: achado.jid }
     }
     if (achado && !achado.exists) {
-      jidsResolvidos.set(chave, null)
+      lembrarJid(chave, null)
       log.warn({ contaId, numero: base }, 'esse número não tem WhatsApp')
       return { jid: null, erro: 'sem_whatsapp' }
     }
@@ -404,6 +550,25 @@ function ehConversaValida (jid) {
 // Só entrada ao vivo: histórico não passa por aqui de propósito — um pareamento
 // novo despejaria centenas de áudios de uma vez e viraria uma conta inesperada.
 const LIMITE_AUDIO_SEG = 120
+// ...e um teto de BYTES, não só de duração. `seconds` vem do metadado que o remetente
+// manda — não é medida nossa, e nada garante que bate com o arquivo. Um áudio de 120s
+// em taxa alta são vários MB, e aqui ele existe em QUATRO cópias ao mesmo tempo:
+// o Buffer do download, a string base64 (+33%), o corpo do JSON.stringify e a
+// serialização do fetch.
+const LIMITE_AUDIO_BYTES = 2 * 1024 * 1024
+
+// E uma FILA, concorrência 1: a chamada sai sem await (de propósito — a marca
+// "🎤 Áudio (0:18)" tem que aparecer no painel antes da transcrição ficar pronta), então
+// N áudios chegando juntos multiplicavam aquelas quatro cópias por N, sem limite nenhum.
+// Enfileirar troca latência de transcrição, que já é assíncrona pro vendedor, por pico
+// de memória, que derruba o serviço inteiro.
+let _filaAudio = Promise.resolve()
+
+function enfileirarAudio (fn) {
+  const proximo = _filaAudio.then(fn, fn)
+  _filaAudio = proximo.catch(() => {})   // um áudio que falha não pode travar a fila
+  return proximo
+}
 
 async function transcreverAudio (contaId, m, sender) {
   const msg = normalizeMessageContent(m.message) || {}
@@ -417,6 +582,11 @@ async function transcreverAudio (contaId, m, sender) {
   try {
     const bytes = await downloadMediaMessage(m, 'buffer', {})
     if (!bytes || !bytes.length) return
+    if (bytes.length > LIMITE_AUDIO_BYTES) {
+      log.info({ contaId, seg, kb: Math.round(bytes.length / 1024) },
+        'áudio pesado demais — não transcreve')
+      return
+    }
     const r = await fetch(APP_URL + '/webhooks/wa-qr/audio', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-wa-secret': SEGREDO },
@@ -458,7 +628,7 @@ async function repassarEntrada (contaId, m) {
   // depois de a mensagem já estar no painel: assim ela aparece na hora com a
   // marca "🎤 Áudio (0:18)" e o texto entra por cima quando ficar pronto, em vez
   // de o vendedor esperar a transcrição pra ver que chegou alguma coisa
-  transcreverAudio(contaId, m, sender).catch((e) =>
+  enfileirarAudio(() => transcreverAudio(contaId, m, sender)).catch((e) =>
     log.warn({ contaId, e: String(e) }, 'transcreverAudio falhou'))
 }
 
@@ -574,9 +744,12 @@ async function repassarContatos (contaId, contatos, daAgenda) {
 // 'agenda-completa' na própria wa_qr_auth): baixar a agenda toda a cada deploy
 // seria desperdício, e a marca some junto com as credenciais no Desconectar.
 const INTERVALO_AGENDA_MS = 20 * 60 * 1000
+// ...com teto: 6 × 20min ≈ 2h de insistência por conexão — ver insistirNaAgenda.
+const MAX_INSISTENCIAS_AGENDA = 6
 
 function agendarResyncAgenda (contaId, s) {
-  clearTimeout(s._agendaT1); clearTimeout(s._agendaT2); clearInterval(s._agendaT3)
+  pararTimersDaAgenda(s)
+  s._agendaTentativas = 0
   s._agendaT1 = setTimeout(() => resyncAgenda(contaId, 1, false), 30000)
   // a passada COMPLETA só depois que a sincronização inicial acalmar — ver
   // esperarAcalmarEResync
@@ -608,7 +781,21 @@ async function insistirNaAgenda (contaId) {
     s._agendaT3 = null
     return
   }
-  log.info({ contaId }, 'agenda: ainda não veio, tentando de novo')
+  // A teimosia precisa de fim. O próprio comentário acima descreve contas em que as
+  // chaves de app-state nunca chegam — nessas, a marca 'agenda-completa' nunca aparece
+  // e este intervalo repetia PRA SEMPRE, de 20 em 20 minutos, um pedido de snapshot da
+  // coleção INTEIRA (o Baileys decodifica os ~4 mil contatos de uma vez). Era um pico
+  // de memória recorrente e eterno numa instância de 512 MB, tentando de novo uma coisa
+  // que já falhou dezenas de vezes pelo mesmo motivo. Depois do teto, para e registra;
+  // o próximo religamento do serviço recomeça a contagem e tenta de novo.
+  if (++s._agendaTentativas > MAX_INSISTENCIAS_AGENDA) {
+    log.warn({ contaId, tentativas: MAX_INSISTENCIAS_AGENDA },
+      'agenda: não veio depois de todas as tentativas — desistindo até o próximo religamento')
+    clearInterval(s._agendaT3)
+    s._agendaT3 = null
+    return
+  }
+  log.info({ contaId, tentativa: s._agendaTentativas }, 'agenda: ainda não veio, tentando de novo')
   await esperarAcalmarEResync(contaId)
 }
 
@@ -788,28 +975,47 @@ const HISTORICO_JANELA_SEGUNDOS = 30 * 24 * 3600 // só os últimos 30 dias — 
 
 // Histórico importado (evento messaging-history.set, só dispara logo após conectar/parear).
 // Vira conversa ÓRFÃ do lado Python (nunca gera lead sozinho) — ver /webhooks/wa-qr/historico.
-async function repassarHistorico (contaId, m) {
-  if (!APP_URL) return
+//
+// Separado em DUAS etapas de propósito. A peneira e a montagem do corpo são síncronas e
+// baratas; o POST é que demora. Fazendo a peneira ANTES de montar a fila, o que fica
+// retido enquanto os POSTs saem é uma string de algumas centenas de bytes por mensagem
+// — não o proto do Baileys, que carrega Buffers (jpegThumbnail, mídia) junto. Numa onda
+// de milhares de mensagens é a diferença entre segurar centenas de MB e segurar poucos.
+// E o descarte (sem texto, grupo, canal, fora dos 30 dias) acontece de graça, antes de
+// entrar na fila, em vez de gastar um passo da fila pra cada mensagem que ia ser jogada
+// fora mesmo.
+function prepararHistorico (contaId, m) {
+  if (!APP_URL) return null
   const texto = textoDaMsg(m)
   const jid = (m.key && m.key.remoteJid) || ''
-  if (!texto || !ehConversaValida(jid)) return
+  if (!texto || !ehConversaValida(jid)) return null
   const ts = Number(m.messageTimestamp) || 0
   const corteSegundos = Math.floor(Date.now() / 1000) - HISTORICO_JANELA_SEGUNDOS
-  if (!ts || ts < corteSegundos) return
+  if (!ts || ts < corteSegundos) return null
   // Mensagem ENVIADA (fromMe) entra também — antes era pulada e o histórico
   // importado ficava só com o lado do cliente, conversa pela metade. Nos dois
   // casos quem identifica a conversa é o CHAT (o outro lado), nunca o autor.
   const deMim = !!(m.key && m.key.fromMe)
   const resolvido = numeroDoChat(m, contaId)
-  if (semNumeroReal(resolvido, contaId, 'historico')) return
+  if (semNumeroReal(resolvido, contaId, 'historico')) return null
   const sender = resolvido.split('@')[0]
-  const corpo = JSON.stringify({
-    conta_id: contaId, sender, texto, quando: ts, de_mim: deMim,
-    // pushName só existe nas RECEBIDAS (numa fromMe o nome seria o do próprio
-    // vendedor) — o Python só sobrescreve quando vem preenchido.
-    nome: (!deMim && m.pushName) || '',
-    id: (m.key && m.key.id) || ''
-  })
+  return {
+    // agrupa pelo CHAT já resolvido: duas mensagens do mesmo contato que chegaram
+    // com jid diferente (@lid e @s.whatsapp.net) precisam cair na MESMA fila, senão
+    // saem em paralelo e recriam a corrida de conversa duplicada que o comentário
+    // do messaging-history.set descreve.
+    chat: resolvido,
+    corpo: JSON.stringify({
+      conta_id: contaId, sender, texto, quando: ts, de_mim: deMim,
+      // pushName só existe nas RECEBIDAS (numa fromMe o nome seria o do próprio
+      // vendedor) — o Python só sobrescreve quando vem preenchido.
+      nome: (!deMim && m.pushName) || '',
+      id: (m.key && m.key.id) || ''
+    })
+  }
+}
+
+async function enviarHistorico (contaId, corpo) {
   try {
     const r = await fetch(APP_URL + '/webhooks/wa-qr/historico', {
       method: 'POST',
@@ -881,13 +1087,7 @@ async function iniciarSessao (contaId) {
     // tratava isso como "deslogou de vez": apagava a credencial inteira da conta
     // (wa_qr_auth zerada) E mandava apagar todo o histórico de conversa — matando
     // junto a sessão nova, que estava perfeitamente válida.
-    if (s.sock) {
-      try {
-        s.sock._descartado = true
-        s.sock.end(undefined)
-        log.info({ contaId }, 'socket anterior fechado antes de abrir um novo')
-      } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao fechar socket anterior') }
-    }
+    descartarSocket(s.sock, contaId, 'substituido')
 
     const sock = makeWASocket({
       version,
@@ -995,6 +1195,11 @@ async function iniciarSessao (contaId) {
       if (code === DisconnectReason.connectionReplaced) {
         s.status = 'desconectado'
         s.qr = null
+        // "sem apagar nada" vale pro que está no BANCO (credencial, histórico). O que
+        // está na memória tem que sair: este socket não volta mais, e os laços da
+        // agenda continuavam batendo no Postgres de 20 em 20min por uma sessão morta.
+        descartarSocket(sock, contaId, 'substituida_por_outra_sessao')
+        pararTimersDaAgenda(s)
         log.warn({ contaId }, 'conexão substituída por outra sessão — parando sem apagar nada')
         return
       }
@@ -1017,19 +1222,23 @@ async function iniciarSessao (contaId) {
         // nenhuma conversa entrando. Marca _descartado primeiro pro 'close' que
         // o próprio end() emite não reentrar neste handler (mesmo padrão de
         // quando trocamos de socket em iniciarSessao).
-        try {
-          sock._descartado = true
-          sock.end(undefined)
-          log.info({ contaId }, 'socket fechado no logout')
-        } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao fechar socket deslogado') }
+        descartarSocket(sock, contaId, 'logout')
+        pararTimersDaAgenda(s)
         try { await limparTudo() } catch (e) { log.warn({ contaId, e: String(e) }, 'limparTudo falhou') }
         sessoes.delete(contaId)
-        lidMaps.delete(contaId)
+        esquecerConta(contaId)
         log.warn({ contaId, foiLogoutReal }, 'deslogado — credenciais limpas')
         if (foiLogoutReal) {
           avisarDeslogado(contaId).catch((e) => log.warn({ contaId, e: String(e) }, 'avisarDeslogado falhou'))
         }
       } else {
+        // Descarta ESTE socket agora, não daqui a 2,5s no começo do iniciarSessao.
+        // Nesse intervalo ele seguia vivo com todos os listeners presos ao closure —
+        // e num flapping (o WhatsApp fechando em loop) cada ciclo deixava mais um pra
+        // trás. Os timers da agenda também são desta encarnação: o agendarResyncAgenda
+        // do próximo 'open' arma os dele.
+        descartarSocket(sock, contaId, 'reconectando')
+        pararTimersDaAgenda(s)
         setTimeout(() => {
           iniciarSessao(contaId).catch((e) => log.error({ contaId, e: String(e) }, 'reconexão automática falhou'))
         }, 2500)
@@ -1100,7 +1309,12 @@ async function iniciarSessao (contaId) {
     atualizarLidMap(contaId, contacts)
     // O histórico também traz nome de contato: `name` no bloco de conversas (agenda)
     // e `notify` na onda PUSH_NAME (perfil). repassarContatos separa os dois.
-    repassarContatos(contaId, contacts, true).catch(() => {})
+    // Com await: sem ele, cada onda soltava uma cadeia concorrente que segurava um
+    // array de milhares de contatos e ainda montava lotes de 200 em JSON — e as ondas
+    // chegam em sequência rápida, então elas se acumulavam vivas ao mesmo tempo.
+    // Esperar aqui não atrasa mensagem ao vivo (isto é um listener à parte).
+    await repassarContatos(contaId, contacts, true).catch((e) =>
+      log.warn({ contaId, e: String(e) }, 'repassarContatos (histórico) falhou'))
     // O histórico chega em ondas (ex.: recentes primeiro, depois o histórico
     // completo) e cada onda reinicia o progress do zero — sem o Math.max a barra
     // sobe até 100%, "volta" pra perto de 0% quando a próxima onda começa, e
@@ -1113,14 +1327,24 @@ async function iniciarSessao (contaId) {
     // (1) dois POSTs simultâneos do mesmo contato novo criavam DUAS conversas —
     //     o lado Python faz select-then-insert sem lock, e a corrida venceu;
     // (2) preserva a ordem das mensagens dentro da conversa.
+    // Peneira e monta o corpo AQUI (ver prepararHistorico): o que entra na fila é
+    // string pronta, e a referência ao proto do Baileys morre neste laço em vez de
+    // ficar viva até o último POST sair.
     const porChat = new Map()
+    let descartadas = 0
     for (const m of messages) {
-      const jid = (m.key && m.key.remoteJid) || ''
-      if (!porChat.has(jid)) porChat.set(jid, [])
-      porChat.get(jid).push(m)
+      const pronta = prepararHistorico(contaId, m)
+      if (!pronta) { descartadas++; continue }
+      let grupo = porChat.get(pronta.chat)
+      if (!grupo) { grupo = []; porChat.set(pronta.chat, grupo) }
+      grupo.push(pronta.corpo)
     }
+    log.info({ contaId, chats: porChat.size, descartadas }, 'histórico peneirado, repassando')
     await comLimiteDeConcorrencia([...porChat.values()], 8, async (grupo) => {
-      for (const m of grupo) { await repassarHistorico(contaId, m) }
+      for (let i = 0; i < grupo.length; i++) {
+        await enviarHistorico(contaId, grupo[i])
+        grupo[i] = null   // solta o corpo assim que ele virou POST
+      }
     })
   })
   } catch (e) {
@@ -1289,7 +1513,7 @@ const servidor = http.createServer(async (req, res) => {
         if (s && s.sock) s.sock._descartado = true
         // sem isso a teimosia da agenda continuaria batendo no banco a cada 20min
         // pra uma conta que acabou de ser desconectada
-        if (s) { clearTimeout(s._agendaT1); clearTimeout(s._agendaT2); clearInterval(s._agendaT3) }
+        pararTimersDaAgenda(s)
         // logout() com PRAZO: ele escreve um stanza no socket e espera
         // (Socket/socket.js: `await sendNode({... remove-companion-device ...})`).
         // Se o socket estiver num estado ruim isso pendura, e TODA a limpeza abaixo
@@ -1301,6 +1525,10 @@ const servidor = http.createServer(async (req, res) => {
             s.sock.logout().catch(() => {}),
             new Promise((r2) => setTimeout(r2, 5000))
           ])
+          // ...e fecha de fato. Quando o logout estoura o prazo acima, ele não chegou
+          // a fechar nada: o socket ficava aberto pra sempre, com os caches do Baileys
+          // inteiros, numa conta que o painel já mostra como desconectada.
+          descartarSocket(s.sock, contaId, 'sair')
         }
         // Se o serviço reiniciou desde a última vez que essa conta ficou conectada em
         // memória (deploy, crash, etc.), `s` não existe mais aqui — mas as credenciais
@@ -1315,7 +1543,7 @@ const servidor = http.createServer(async (req, res) => {
           }
         } catch (_) {}
         sessoes.delete(contaId)
-        lidMaps.delete(contaId)
+        esquecerConta(contaId)
         // Desconectar apaga o histórico de chat desse canal SEMPRE. Antes isso só
         // acontecia quando havia socket vivo na memória (o logout gerava um 401 que
         // disparava a limpeza por tabela); depois de um restart do serviço o MESMO
@@ -1333,6 +1561,11 @@ const servidor = http.createServer(async (req, res) => {
   }
 })
 
+// Só sobe o servidor quando o arquivo é EXECUTADO (npm start). Quando ele é apenas
+// require()-ado — o teste-lidmap.js faz isso pra exercitar o lote de gravação contra um
+// Postgres de verdade — não abre porta nem religa sessão nenhuma. Idioma padrão do Node;
+// em produção `node server.js` cai no ramo de sempre.
+if (require.main === module) {
 servidor.listen(PORT, () => {
   log.info({ PORT, esperaRestaurarMs: ESPERA_RESTAURAR_MS }, 'wa-qr no ar')
   // Abrir a porta não basta: o health check do Render bate em /saude e desiste
@@ -1349,3 +1582,7 @@ servidor.listen(PORT, () => {
     restaurarSessoes().catch((e) => log.error({ e: String(e) }, 'restaurarSessoes: erro solto'))
   }, ESPERA_RESTAURAR_MS)
 })
+}
+
+// exposto só pro teste — ver o bloco acima
+module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool }

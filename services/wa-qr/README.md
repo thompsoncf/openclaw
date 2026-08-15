@@ -46,6 +46,40 @@ No **web** (app Python), configure também:
 5. No **web**, adicione `WA_QR_SERVICE_URL` + `WA_QR_SHARED_SECRET` e redeploy.
 6. No painel: Canais → WhatsApp → **QR Code** → **Gerar QR** → escaneie no celular.
 
+## Memória (o serviço já morreu por isso)
+
+O Render matou a instância com `Ran out of memory (used over 512MB)` — quem mata é o
+kernel (cgroup), então **não sobra stack trace nenhum no log**. Duas coisas mudaram por
+causa disso:
+
+- **`npm start` roda com `--max-old-space-size=320`.** Sem o limite, o V8 dimensiona o
+  heap pela memória da MÁQUINA e não pelo limite do container: ele se acha dono de
+  vários GB, faz GC preguiçoso e o cgroup mata antes de ele sentir qualquer pressão.
+  320 e não 512 porque o RSS é heap + `external`/`arrayBuffers` (os Buffers de áudio e
+  do socket) + nativo. Com o teto, um estouro vira `JavaScript heap out of memory` COM
+  stack trace, em vez de morte silenciosa.
+- **O serviço loga a memória de minuto em minuto** (`msg: "memória"`): `rssMB`,
+  `heapMB`, `externalMB`, o tamanho de cada cache em memória e `pgFila` (consultas
+  esperando uma das 4 conexões do pool). É o que separa "pico legítimo de sincronização"
+  de "vazamento em rampa" — que pedem consertos opostos.
+
+Referência medida: **~106 MB de RSS ocioso, com zero sessões**. É o custo de Node +
+Baileys parado; o resto do orçamento é dividido entre as contas pareadas, e cada socket
+Baileys tem caches próprios. Se o log mostrar RSS estável mas alto com várias contas, o
+caminho é subir de plano (Starter 512 MB → Standard 2 GB), não caçar vazamento: o
+serviço é de **instância única** por natureza, então escalar horizontalmente não é opção.
+
+## Testes (manuais, precisam de Node + Postgres descartável)
+
+```bash
+cd services/wa-qr && npm install
+createdb wa_qr_test
+# estado de auth do Baileys (foco na chave da agenda)
+WA_AUTH_TEST_URL=postgresql://postgres@localhost:5432/wa_qr_test node teste-auth-db.js
+# caches em memória: lote de gravação do mapa @lid, teto de bytes, limpeza por conta
+WA_QR_TEST_URL=postgresql://postgres@localhost:5432/wa_qr_test node teste-lidmap.js
+```
+
 ## Local (dev)
 
 ```bash

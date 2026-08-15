@@ -3717,7 +3717,9 @@ def _reserva_numeros(c, camp_id):
                   coalesce(a.wa_tentativas,0), coalesce(a.alvo_telefone,'')
              from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
             where a.campanha_id=%s and a.wa_status='erro'
-            order by p.empresa""", (camp_id,)).fetchall()
+              and a.status = any(%s)
+            order by p.empresa""",
+        (camp_id, list(_cm._STATUS_WA_ELEGIVEL))).fetchall()
     leads, total = [], 0
     for (aid, pid, empresa, cod, tels, tentados, tentativas, travado) in rows:
         sobra = _cm.fila_numeros(tels, ja_tentados=tentados)
@@ -4312,6 +4314,9 @@ def prospeccao_campanha_recolocar_na_fila(request: Request, camp_id: int,
     isto é um botão, não automático, porque cada tentativa é uma mensagem de
     marketing cobrada — quem decide gastar é o dono.
 
+    Só recoloca quem ainda é elegível pro WhatsApp (`_STATUS_WA_ELEGIVEL`): quem
+    respondeu ou se descadastrou não volta, por mais que seja marcado aqui.
+
     DESTRAVA o `alvo_telefone`. Quando o dono escolheu um número no checkbox da
     Base, o disparo automático não adivinha em cima dessa escolha — mas se aquele
     número falhou e ele está apertando este botão, é justamente isso que ele está
@@ -4340,8 +4345,10 @@ def prospeccao_campanha_recolocar_na_fila(request: Request, camp_id: int,
                  set wa_status=null, wa_erro_codigo=null, wa_erro_msg=null,
                      wa_sid=null, wa_numero=null, alvo_telefone=null
                where campanha_id=%s and id = any(%s) and wa_status='erro'
-                 and coalesce(wa_tentativas,0) < %s""",
-            (camp_id, aids, _cm._WA_TENTATIVAS)).rowcount
+                 and coalesce(wa_tentativas,0) < %s
+                 and status = any(%s)""",
+            (camp_id, aids, _cm._WA_TENTATIVAS,
+             list(_cm._STATUS_WA_ELEGIVEL))).rowcount
         c.commit()
     return JSONResponse({"ok": True, "recolocados": n})
 

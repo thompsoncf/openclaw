@@ -404,6 +404,19 @@ def _melhor_de_lista(decisor_telefones) -> str | None:
 
 _WA_TENTATIVAS = 3   # teto de números tentados por alvo (cada um é marketing cobrado)
 
+# Quem ainda pode receber WhatsApp da campanha. `status` aqui é o da RÉGUA DE
+# E-MAIL — são canais diferentes, e por isso 'concluido' entra: a régua ter
+# terminado não diz nada sobre o WhatsApp, e o lead nunca recebeu uma mensagem que
+# chegou. Antes ele ficava de fora e o alvo sumia do disparo pra sempre, mesmo com
+# números não tentados na base e mesmo com o dono apertando "Colocar na fila" —
+# eram 11 alvos assim em produção, num botão que aceitava e não fazia nada.
+#
+# O que continua FORA, e por quê:
+#   'respondeu'    — já falou com você; insistir no frio é ruim e desnecessário
+#   'descadastrou' — LGPD: pediu pra sair, não recebe mais nada
+#   'erro'         — o alvo tem problema de cadastro; resolver antes de gastar
+_STATUS_WA_ELEGIVEL = ("fila", "enviado", "concluido")
+
 
 def _chave(numero) -> str:
     """Dígitos COMPARÁVEIS do número: sem o código do país.
@@ -659,7 +672,8 @@ def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> i
                       coalesce(a.wa_tentativas,0)
                  from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
                 where a.campanha_id=%s and a.wa_status is null
-                  and a.status in ('fila','enviado') limit %s""", (camp_id, teto)).fetchall()
+                  and a.status = any(%s) limit %s""",
+            (camp_id, list(_STATUS_WA_ELEGIVEL), teto)).fetchall()
     feitos = 0
     for (aid, pid, empresa, cnpj, whatsapp, telefone, dec_tels, alvo_tel,
          tentados, tentativas) in alvos:

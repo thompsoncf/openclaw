@@ -431,8 +431,11 @@ table.itens td small{font-size:10px;line-height:1.6;max-width:none}
 table.itens td.n{color:#14213D}
 .item-l{display:flex;gap:10px;align-items:flex-start}
 .item-l>div{min-width:0}
+/* <img> e não background-image: fundo NÃO imprime (a impressão sai com
+   "gráficos de plano de fundo" desligada por padrão) e a foto do item sumia
+   justo no papel, que é onde o cliente decide. */
 .foto{width:46px;height:46px;border-radius:7px;flex:0 0 46px;border:1px solid #ECE7DC;
-  background:#FBFAF7 center/cover no-repeat}
+  background:#FBFAF7;object-fit:cover;display:block}
 .cat{font-size:8px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
   color:#B8862E;display:block;margin-bottom:2px}
 .subs{margin-top:10px;border:1px solid #ECE7DC;border-radius:9px;overflow:hidden}
@@ -449,21 +452,51 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
   body{background:#fff;padding:0}
   .bar,.sign,.ft{display:none!important}
   .pg{box-shadow:none;border-radius:0}
-  .assp{display:block!important;margin:26px 40px 0;text-align:center;font-size:10.5px;color:#555}
+  .assp{display:block!important;margin:16px 22px 0;text-align:center;font-size:10px;color:#555}
   .assp .ln{border-top:1px solid #333;width:65%;margin:0 auto 4px}
   /* já assinado: sai o carimbo eletrônico no lugar da linha à caneta, e a
      caixa verde de "aprovado" não vira uma segunda página em branco. */
-  .assp.carimbo{border-top:1px solid #ECE7DC;padding-top:10px;color:#0b7a56;margin-top:20px}
+  .assp.carimbo{border-top:1px solid #ECE7DC;padding-top:8px;color:#0b7a56;margin-top:14px}
   .ok{display:none!important}
-  /* aperta o respiro da tela pra caber mais folha por página… */
-  .hd{padding:20px 26px}
-  .bd{padding:18px 26px 20px}
-  .eb{margin:13px 0 6px}
-  td{padding:7px 10px}
+  /* ---- papel não tem fundo ----
+     O navegador imprime com "gráficos de plano de fundo" DESLIGADO por padrão:
+     o cabeçalho azul-marinho vira papel branco com letra clara (ilegível), o
+     total some e as tarjas de cabeçalho de tabela desaparecem. Então, no papel,
+     tudo o que era FUNDO vira TRAÇO + letra escura — sai igual em jato de tinta,
+     laser e fotocópia P&B, com ou sem a opção ligada. */
+  .hd{background:#fff!important;color:#14213D;border-bottom:2px solid #14213D;
+      padding:9px 22px 8px}
+  .hd .sub,.hd .emit,.hd .mt{color:#5A6678}
+  .hd .lg{font-size:19px}
+  .hd .emit{font-size:9.5px;line-height:1.45;margin-top:5px}
+  .hd .mt b{color:#14213D}
+  .hd .mt span{color:#5A6678!important}
+  th{background:#fff!important;color:#14213D;border-bottom:1.2px solid #14213D;padding:5px 9px}
+  table.pag th{border-bottom:1.2px solid #14213D}
+  .fin{background:#fff!important;border:1.5px solid #14213D;padding:7px 14px;margin-top:8px}
+  .fin .l{color:#14213D}
+  .fin .v{color:#14213D;font-size:19px}
+  .pill.on{background:#fff!important;border-color:#14213D;color:#14213D}
+  .pill.on2{background:#fff!important;border-color:#0b7a56;color:#0b7a56}
+  .cli,.evb,.cond,.subs,.bx{background:#fff!important}
+  /* aperta o respiro da tela pra caber a folha inteira em UMA página — um
+     orçamento de festa que vira duas folhas é a assinatura sozinha na página 2. */
+  .bd{padding:10px 22px 12px}
+  .eb{margin:7px 0 3px}
+  td{padding:4px 9px}
+  table.itens td{font-size:10.5px;padding:4px 8px}
+  table.itens td small{font-size:9px;line-height:1.42;margin-top:2px}
+  .foto{width:36px;height:36px;flex:0 0 36px}
+  .evb{padding:5px 9px}.evb .v{font-size:12.5px}
+  .cli{padding:7px 12px;font-size:12px}
+  .cond{padding:7px 12px;font-size:10px;line-height:1.5}
+  .sub-cat{padding:3px 12px;font-size:10.5px}
+  .pills{margin-top:5px}.pill{font-size:9.5px;padding:2px 9px}
+  .local{margin-top:5px;font-size:10.5px}
   /* …e o que quebrar, quebra ENTRE blocos: item cortado no meio da página é o
      que faz um orçamento parecer amador. */
   tr,.evg,.evb,.subs,.cond,.cli{break-inside:avoid}
-  @page{size:A4;margin:12mm}
+  @page{size:A4;margin:11mm}
 }
 </style>{% endraw %}
 </head><body><div class="wrapc">
@@ -475,7 +508,7 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
   <div class="pg">
     {% set evento = prop.modo == 'evento' %}
     <div class="hd">
-      <div style="display:flex;align-items:flex-start;gap:12px">{% if prop.logo_url %}{{ marca_avatar({'logo_url': prop.logo_url}, px=46, raio=10, so_logo=True)|safe }}{% endif %}<div>
+      <div style="display:flex;align-items:flex-start;gap:12px">{% if prop.logo_url %}{{ marca_avatar({'logo_url': prop.logo_url}, px=72, raio=12, so_logo=True, ajuste="contain")|safe }}{% endif %}<div>
         <div class="lg">{{ prop.vendedor }} <span>·</span></div>
         <div class="sub">{{ 'Orçamento de evento' if evento else 'Proposta comercial' }}</div>
         {% if evento %}<div class="emit">
@@ -526,7 +559,7 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
                  <th class="r" style="width:76px">Vr. unit.</th><th class="r" style="width:84px">Subtotal</th></tr>
         {% for l in linhas %}<tr><td class="n">{{ l.n }}</td>
           <td><div class="item-l">
-            {%- if l.foto %}<div class="foto" style="background-image:url('{{ l.foto }}')"></div>{% endif %}
+            {%- if l.foto %}<img class="foto" src="{{ l.foto }}" alt="">{% endif %}
             <div style="min-width:0">
               {%- if l.categoria %}<span class="cat">{{ l.categoria }}</span>{% endif %}
               <b>{{ l.nome }}</b>{% if l.desc %}<small>{{ l.desc }}</small>{% endif %}

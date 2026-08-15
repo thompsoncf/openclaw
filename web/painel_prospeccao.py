@@ -2074,6 +2074,7 @@ def comunicacao_virar_lead(request: Request, conversa_id: int = Form(...),
                                      args=(pool, ctx["conta_id"], _mid, empresa_final[:250]),
                                      daemon=True).start()
             except Exception:  # noqa: BLE001
+                import logging          # local, como no resto do arquivo
                 logging.getLogger("prospeccao.rodizio").warning(
                     "não consegui distribuir o lead %s (conta %s) — fica sem dono",
                     lead_id, ctx["conta_id"], exc_info=True)

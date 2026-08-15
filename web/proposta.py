@@ -380,8 +380,29 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
 .bar .who{font-size:12.5px;color:#5A6678}
 .bar .dl{background:#14213D;color:#F4F1EA;border:0;border-radius:9px;padding:9px 16px;font-size:13px;font-weight:600;cursor:pointer}
 .pg{background:#fff;border-radius:6px;overflow:hidden;box-shadow:0 20px 50px -25px rgba(20,33,61,.4)}
-.hd{background:#14213D;color:#F4F1EA;padding:30px 40px;display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap}
+.hd{background:#14213D;color:#F4F1EA;padding:30px 40px;display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
+/* marca+dados de um lado, número do orçamento do outro, na MESMA linha: com
+   logo deitada o cabeçalho quebrava e o "Nº" caía embaixo da marca. Só no
+   celular é que empilha. */
+.hdl{display:flex;align-items:flex-start;gap:12px;flex:1;min-width:0}
+.hdl>div{min-width:0;overflow-wrap:anywhere}
+.hd .mt{flex:0 0 auto;white-space:nowrap}
+@media(max-width:560px){.hd{flex-wrap:wrap}
+  /* no celular a marca vai EM CIMA: espremida ao lado, a coluna de texto
+     ficava tão estreita que quebrava o CNPJ no meio. */
+  .hdl{flex:1 1 100%;flex-wrap:wrap}
+  .hdl>div{flex:1 1 100%}
+  .lgo img{height:40px;max-width:130px}
+  .hd .mt{flex:1 1 100%;white-space:normal}}
 .hd .lg{font-size:23px;font-weight:600}.hd .lg span{color:#E0B458}
+/* A logo é papel timbrado, não ícone de app: altura fixa e largura LIVRE, pra
+   marca deitada (que é a maioria) não ser espremida num quadrado. Na tela o
+   cabeçalho é azul-marinho, então ela ganha uma placa branca que abraça o
+   formato dela — é o que salva logo escura e PNG sem fundo. No papel o
+   cabeçalho já é branco: a placa sai e a marca fica solta, como num timbre. */
+.lgo{background:#fff;border-radius:8px;padding:6px 8px;display:inline-flex;
+  align-items:center;justify-content:center;flex:0 0 auto}
+.lgo img{height:46px;width:auto;max-width:165px;object-fit:contain;display:block}
 .hd .sub{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:#9FA8BC;margin-top:5px}
 .hd .mt{text-align:right;font-size:11px;color:#9FA8BC}.hd .mt b{display:block;color:#E0B458;font-size:10px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:4px}
 .bd{padding:28px 40px 38px}.eb{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:#B8862E;font-weight:600;margin:20px 0 8px}
@@ -468,6 +489,8 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
       padding:9px 22px 8px}
   .hd .sub,.hd .emit,.hd .mt{color:#5A6678}
   .hd .lg{font-size:19px}
+  .lgo{background:none!important;padding:0;border-radius:0}
+  .lgo img{height:50px;max-width:150px}
   .hd .emit{font-size:9.5px;line-height:1.45;margin-top:5px}
   .hd .mt b{color:#14213D}
   .hd .mt span{color:#5A6678!important}
@@ -508,7 +531,7 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
   <div class="pg">
     {% set evento = prop.modo == 'evento' %}
     <div class="hd">
-      <div style="display:flex;align-items:flex-start;gap:12px">{% if prop.logo_url %}{{ marca_avatar({'logo_url': prop.logo_url}, px=72, raio=12, so_logo=True, ajuste="contain")|safe }}{% endif %}<div>
+      <div class="hdl">{% if prop.logo_url %}<span class="lgo"><img src="{{ prop.logo_url }}" alt=""></span>{% endif %}<div>
         <div class="lg">{{ prop.vendedor }} <span>·</span></div>
         <div class="sub">{{ 'Orçamento de evento' if evento else 'Proposta comercial' }}</div>
         {% if evento %}<div class="emit">

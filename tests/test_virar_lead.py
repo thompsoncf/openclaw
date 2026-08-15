@@ -28,7 +28,12 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
 create table wa_contatos (conta_id bigint, numero8 text, nome text,
   da_agenda boolean default false, primary key (conta_id, numero8));
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
-  papel text, ativo boolean default true);
+  papel text, ativo boolean default true, cockpit_pausado boolean default false);
+create table distribuicao (conta_id bigint primary key, ativo boolean default false,
+  ponteiro int default 0, avisar boolean default true, aviso_template_sid text,
+  atualizado_em timestamptz default now());
+create table distribuicao_fila (conta_id bigint, membro_id bigint, ordem int,
+  primary key (conta_id, membro_id));
 """
 
 CONTA = 7
@@ -225,6 +230,98 @@ def test_vendedor_comum_fica_com_o_proprio_lead(pool, monkeypatch):
         tipo="pf", vendedor_id="", temperatura="morno").body)["lead_id"]
     with pool.connection() as c:
         assert _lead(c, lead_id)[7] == 42
+
+
+# ------------------------------------------------------------------ rodízio
+# O caso real: conta com a fila montada, leads entrando e NENHUM chegando ao vendedor.
+# Eram dois problemas somados — a chave do rodízio desligada (config, resolvida no
+# painel) e este caminho, que criava o lead sem nunca consultar a fila. Mesmo com a
+# chave ligada, "Levar para o lead" sem escolher responsável deixava o lead órfão.
+
+def _rodizio(c, *, ativo, membro_ids=(9,)):
+    """Liga/desliga a distribuição e monta a fila com os membros dados."""
+    c.execute("insert into distribuicao (conta_id, ativo) values (%s,%s) "
+              "on conflict (conta_id) do update set ativo=excluded.ativo", (CONTA, ativo))
+    for i, mid in enumerate(membro_ids):
+        c.execute("insert into membros (id, conta_id, nome, email, papel) "
+                  "values (%s,%s,%s,%s,'vendedor') on conflict do nothing",
+                  (mid, CONTA, f"Vendedor {mid}", f"v{mid}@x.com"))
+        c.execute("insert into distribuicao_fila (conta_id, membro_id, ordem) values (%s,%s,%s) "
+                  "on conflict do nothing", (CONTA, mid, i))
+
+
+def _sem_avisar(monkeypatch):
+    """O aviso ao vendedor sai numa thread e manda e-mail/WhatsApp de verdade —
+    fora do escopo do teste, e não é pra sair de dentro da suíte."""
+    from finance import distribuicao as dist
+    monkeypatch.setattr(dist, "avisar_vendedor", lambda *a, **k: None)
+
+
+def _virar(req, conv, **over):
+    import json
+    campos = dict(nome="Mercado Avenida", empresa="", telefone="", email="",
+                  tipo="pf", vendedor_id="", temperatura="morno")
+    campos.update(over)
+    return json.loads(pp.comunicacao_virar_lead(req, conversa_id=conv, **campos).body)["lead_id"]
+
+
+def test_sem_responsavel_escolhido_o_rodizio_decide(pool, monkeypatch):
+    """Era o buraco: só o inbound automático chamava a distribuição."""
+    _sem_avisar(monkeypatch)
+    with pool.connection() as c:
+        _rodizio(c, ativo=True, membro_ids=(9,))
+        conv = _conversa(c, nome="Mercado Avenida")
+        c.commit()
+    req = _logado(monkeypatch, pool)
+    lead_id = _virar(req, conv)
+    with pool.connection() as c:
+        assert _lead(c, lead_id)[7] == 9
+
+
+def test_o_rodizio_nao_rouba_lead_com_dono_escolhido(pool, monkeypatch):
+    """Escolher na tela vence a fila — senão o dono não conseguiria direcionar."""
+    _sem_avisar(monkeypatch)
+    with pool.connection() as c:
+        _rodizio(c, ativo=True, membro_ids=(9,))
+        c.execute("insert into membros (id, conta_id, nome, papel) values (11,%s,'Bia','vendedor') "
+                  "on conflict do nothing", (CONTA,))
+        conv = _conversa(c, nome="Mercado Avenida")
+        c.commit()
+    req = _logado(monkeypatch, pool)
+    lead_id = _virar(req, conv, vendedor_id="11")
+    with pool.connection() as c:
+        assert _lead(c, lead_id)[7] == 11
+
+
+def test_com_o_rodizio_desligado_o_lead_fica_sem_dono(pool, monkeypatch):
+    """Documenta o outro lado: a fila montada NÃO basta, a chave precisa estar ligada.
+    É exatamente o estado em que a conta do chamado estava — e por isso o painel agora
+    avisa quando a fila existe e a distribuição está desligada."""
+    _sem_avisar(monkeypatch)
+    with pool.connection() as c:
+        _rodizio(c, ativo=False, membro_ids=(9,))
+        conv = _conversa(c, nome="Mercado Avenida")
+        c.commit()
+    req = _logado(monkeypatch, pool)
+    lead_id = _virar(req, conv)
+    with pool.connection() as c:
+        assert _lead(c, lead_id)[7] is None
+
+
+def test_o_modal_avisa_quando_o_rodizio_esta_desligado(pool, monkeypatch):
+    """O rótulo do campo Responsável muda conforme o rodízio: com ele ligado, deixar em
+    branco é 'a fila escolhe'; desligado, é 'ninguém'."""
+    import json
+    with pool.connection() as c:
+        _rodizio(c, ativo=False, membro_ids=(9,))
+        conv = _conversa(c, nome="Mercado Avenida")
+        c.commit()
+    req = _logado(monkeypatch, pool)
+    assert json.loads(pp.comunicacao_virar_lead_dados(req, conversa_id=conv).body)["rodizio"] is False
+    with pool.connection() as c:
+        c.execute("update distribuicao set ativo=true where conta_id=%s", (CONTA,))
+        c.commit()
+    assert json.loads(pp.comunicacao_virar_lead_dados(req, conversa_id=conv).body)["rodizio"] is True
 
 
 # ------------------------------------------------------------------ formatação do número

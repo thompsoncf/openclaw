@@ -1976,6 +1976,15 @@ def comunicacao_virar_lead_dados(request: Request, conversa_id: int):
         nome, fonte = _contato_sugerido(c, ctx["conta_id"], canal, ref, contato_nome)
         eh_email = canal == "email" or "@" in ref
         dup = None if eh_email else _lead_por_telefone(c, ctx["conta_id"], ref)
+        # deixar o responsável em branco não quer dizer a mesma coisa nos dois casos:
+        # com o rodízio ligado, quem decide é a fila; desligado, o lead fica sem dono
+        # mesmo. O modal precisa saber pra rotular a opção sem mentir.
+        try:
+            from finance import distribuicao as _dist
+            rodizio_on = bool(_dist.config(c, ctx["conta_id"])["ativo"]) and bool(
+                _dist.fila_ids(c, ctx["conta_id"]))
+        except Exception:  # noqa: BLE001
+            rodizio_on = False
     vends = _vendedores(pool, ctx["conta_id"]) if ctx["pode_atribuir"] else []
     return JSONResponse({
         "ok": True, "ja_lead": False, "canal": canal,
@@ -1987,6 +1996,7 @@ def comunicacao_virar_lead_dados(request: Request, conversa_id: int):
         "telefone": "" if eh_email else _tel_fmt_br(ref),
         "pode_atribuir": bool(ctx["pode_atribuir"]),
         "vendedores": [{"id": v["id"], "nome": v["nome"]} for v in vends],
+        "rodizio": rodizio_on,
         "duplicado": ({"id": dup[0], "empresa": dup[1]} if dup else None),
     })
 
@@ -2043,6 +2053,22 @@ def comunicacao_virar_lead(request: Request, conversa_id: int = Form(...),
              ("+" + _so_digitos(ref)) if (ref and not eh_email) else None, tel or None,
              tipo_lead, "email_inbound" if eh_email else "whatsapp_inbound", temp)).fetchone()[0]
         c.execute("update conversas set prospeccao_id=%s where id=%s", (lead_id, conversa_id))
+        # Sem responsável escolhido, o rodízio decide — mesma regra do lead que entra
+        # sozinho pelo WhatsApp. Antes só aquele caminho chamava a distribuição, então
+        # "— livre —" aqui queria dizer "de ninguém": o lead nascia órfão mesmo com a
+        # fila montada e ligada. Best-effort, igual lá: promover a conversa a lead não
+        # pode falhar porque o aviso ao vendedor falhou.
+        if vend is None:
+            try:
+                from finance import distribuicao as _dist
+                _mid = _dist.atribuir_se_sem_dono(c, ctx["conta_id"], lead_id)
+                if _mid:
+                    import threading
+                    threading.Thread(target=_dist.avisar_vendedor,
+                                     args=(pool, ctx["conta_id"], _mid, empresa_final[:250]),
+                                     daemon=True).start()
+            except Exception:  # noqa: BLE001
+                pass
         c.commit()
     return JSONResponse({"ok": True, "lead_id": lead_id})
 
@@ -7725,6 +7751,9 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   .distrow .dnm{flex:1;font-size:.88rem}
   .distnote{font-size:.82rem;color:var(--txt-mut);background:#1a1226;border:1px solid #3a2b52;border-radius:10px;padding:.6rem .75rem;margin:.7rem 0;line-height:1.6}
   .distnote b{color:#c9a3e0}
+  .distalerta{font-size:.84rem;color:#f7d9a8;background:#2a1d0c;border:1px solid #6b4d17;
+    border-radius:10px;padding:.65rem .8rem;margin:.7rem 0;line-height:1.6}
+  .distalerta b{color:#ffc86b}
   </style>
   <div class="cx-card">
     <form method="post" action="/painel/prospeccao/comunicacao/distribuicao">
@@ -7734,6 +7763,14 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <div class="mut" style="font-size:.8rem">Reparte os leads novos entre a equipe, por ordem de fila (rodízio).</div></div>
         <label class="sw"><input type="checkbox" name="ativo" {% if dist_cfg and dist_cfg.ativo %}checked{% endif %}><span></span></label>
       </div>
+      {# fila montada + chave desligada é o estado que não avisa e não reparte: o
+         formulário grava as duas coisas juntas, então dá pra sair daqui achando que
+         ligou. Enquanto estiver assim, todo lead novo nasce sem dono. #}
+      {% if dist_cfg and not dist_cfg.ativo and dist_membros | selectattr('na_fila') | list %}
+      <div class="distalerta">⚠️ <b>A fila está montada, mas a distribuição está desligada.</b>
+        Enquanto o interruptor aí em cima estiver apagado, nenhum lead novo é repartido —
+        todos entram <b>sem dono</b>. Ligue e salve pra valer.</div>
+      {% endif %}
       <div class="distnote">🤖 O agente dá o 1º toque e qualifica. O <b>vendedor da vez</b> é avisado, observa e
         <b>assume quando quiser</b>. Vale pra toda entrada nova que cai no chip da empresa — anúncio (tráfego pago),
         resposta de campanha e contato orgânico.</div>
@@ -8345,9 +8382,12 @@ function cxVlAbrir(convId,d){
   var fonte=d.nome?(FONTES[d.nome_fonte]||''):'Não achei o nome em lugar nenhum — escreva como ele deve aparecer no funil.';
   var vend='';
   if(d.pode_atribuir){
-    var ops='<option value="">— livre —</option>';
+    // deixar em branco não é a mesma coisa nos dois casos: com o rodízio ligado a
+    // fila escolhe; desligado o lead fica sem dono e ninguém é avisado.
+    var ops='<option value="">'+(d.rodizio?'— o rodízio escolhe —':'— sem responsável —')+'</option>';
     d.vendedores.forEach(function(v){ops+='<option value="'+v.id+'">'+cxEsc(v.nome)+'</option>';});
-    vend='<div><label class="lbl" for="vl-vend">Responsável</label><select class="fld" id="vl-vend">'+ops+'</select></div>';
+    var dica=d.rodizio?'':'<small class="mut" style="font-size:.72rem">O rodízio está desligado — sem escolher aqui, o lead fica sem dono.</small>';
+    vend='<div><label class="lbl" for="vl-vend">Responsável</label><select class="fld" id="vl-vend">'+ops+'</select>'+dica+'</div>';
   }
   var dup=d.duplicado?('<div class="vl-dup">⚠️ Já existe um lead com esse telefone: <b>'+cxEsc(d.duplicado.empresa)
         +'</b>. <a href="/painel/prospeccao/'+d.duplicado.id+'">Abrir o lead existente</a> em vez de criar outro?</div>'):'';

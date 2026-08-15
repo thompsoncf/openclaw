@@ -542,6 +542,11 @@ function numeroDoChat (m, contaId) {
 // telefone — a conversa nasce com um "código" no lugar do número e nem responder
 // dá (o envio montaria um jid inválido). Melhor pular e logar; quando o contato
 // mandar mensagem ao vivo, o senderPn traz o número real e a conversa nasce certa.
+//
+// Só os caminhos AO VIVO (entrada/saída) passam por aqui: lá é uma linha por mensagem
+// de verdade, e é sinal. O histórico faz o mesmo teste dentro do prepararHistorico, sem
+// logar — uma onda de pareamento despejava centenas destas linhas iguais de uma vez, e
+// hoje ela sai resumida numa linha só por onda (motivos + lidsPerdidos).
 function semNumeroReal (resolvido, contaId, origem) {
   if (!resolvido.endsWith('@lid')) return false
   log.info({ contaId, jid: resolvido, origem }, 'ignorado: @lid sem número real no mapa')
@@ -1038,20 +1043,37 @@ const HISTORICO_JANELA_SEGUNDOS = 30 * 24 * 3600 // só os últimos 30 dias — 
 // E o descarte (sem texto, grupo, canal, fora dos 30 dias) acontece de graça, antes de
 // entrar na fila, em vez de gastar um passo da fila pra cada mensagem que ia ser jogada
 // fora mesmo.
+//
+// Devolve `{ chat, corpo }` quando aceita e `{ motivo }` quando descarta — NUNCA null.
+// O motivo existe porque a linha de log da onda dizia só `descartadas: 5000` num
+// pareamento real, e 5000 pode ser tudo certo (grupo, status, mensagem velha) ou pode ser
+// perda de conversa (@lid que o mapa não resolveu). Sem separar, qualquer decisão sobre
+// @lid seria chute. Quem soma os motivos é o handler do messaging-history.set.
 function prepararHistorico (contaId, m) {
-  if (!APP_URL) return null
+  if (!APP_URL) return { motivo: 'sem_app_url' }
   const texto = textoDaMsg(m)
   const jid = (m.key && m.key.remoteJid) || ''
-  if (!texto || !ehConversaValida(jid)) return null
+  if (!texto) return { motivo: 'sem_texto' }
+  // Mesmo teste do ehConversaValida (usado nos caminhos ao vivo), aberto por sufixo:
+  // aqui a gente CONTA, e "grupo" e "status" são coisas diferentes na hora de decidir
+  // se o descarte foi legítimo.
+  if (jid.endsWith('@g.us')) return { motivo: 'grupo' }
+  if (jid.endsWith('@newsletter')) return { motivo: 'canal' }
+  if (!jid || jid === 'status@broadcast') return { motivo: 'status' }
   const ts = Number(m.messageTimestamp) || 0
+  if (!ts) return { motivo: 'sem_data' }
   const corteSegundos = Math.floor(Date.now() / 1000) - HISTORICO_JANELA_SEGUNDOS
-  if (!ts || ts < corteSegundos) return null
+  if (ts < corteSegundos) return { motivo: 'fora_da_janela' }
   // Mensagem ENVIADA (fromMe) entra também — antes era pulada e o histórico
   // importado ficava só com o lado do cliente, conversa pela metade. Nos dois
   // casos quem identifica a conversa é o CHAT (o outro lado), nunca o autor.
   const deMim = !!(m.key && m.key.fromMe)
   const resolvido = numeroDoChat(m, contaId)
-  if (semNumeroReal(resolvido, contaId, 'historico')) return null
+  // Não passa pelo semNumeroReal de propósito: ele loga uma linha POR MENSAGEM, e numa
+  // onda de histórico isso são centenas de linhas iguais no minuto mais movimentado do
+  // serviço. Devolve o jid junto pra a onda contar CONTATOS distintos perdidos — 1400
+  // mensagens de 8 pessoas é um problema, de 300 pessoas é outro.
+  if (resolvido.endsWith('@lid')) return { motivo: 'lid_sem_mapa', jid: resolvido }
   const sender = resolvido.split('@')[0]
   return {
     // agrupa pelo CHAT já resolvido: duas mensagens do mesmo contato que chegaram
@@ -1388,14 +1410,29 @@ async function iniciarSessao (contaId) {
     // ficar viva até o último POST sair.
     const porChat = new Map()
     let descartadas = 0
+    // Descarte ABERTO por motivo. `descartadas` sozinho não responde a pergunta que
+    // importa: a maior parte de uma onda é jogada fora, e isso pode estar certo (grupo,
+    // canal, status, mídia sem legenda, mais velha que 30 dias) ou pode ser conversa
+    // perdida (@lid sem número no mapa). `lidsPerdidos` conta CONTATOS distintos, não
+    // mensagens, porque é o número de contatos que diz se vale construir a resolução
+    // atrasada de @lid; os exemplos são pra conferir no celular se é gente de verdade.
+    const motivos = Object.create(null)
+    const lidsPerdidos = new Set()
     for (const m of messages) {
       const pronta = prepararHistorico(contaId, m)
-      if (!pronta) { descartadas++; continue }
+      if (pronta.motivo) {
+        descartadas++
+        motivos[pronta.motivo] = (motivos[pronta.motivo] || 0) + 1
+        if (pronta.jid) lidsPerdidos.add(pronta.jid)
+        continue
+      }
       let grupo = porChat.get(pronta.chat)
       if (!grupo) { grupo = []; porChat.set(pronta.chat, grupo) }
       grupo.push(pronta.corpo)
     }
-    log.info({ contaId, chats: porChat.size, descartadas }, 'histórico peneirado, repassando')
+    log.info({ contaId, syncType, chats: porChat.size, descartadas, motivos,
+      lidsPerdidos: lidsPerdidos.size, exemplosLid: [...lidsPerdidos].slice(0, 5) },
+    'histórico peneirado, repassando')
     await comLimiteDeConcorrencia([...porChat.values()], 8, async (grupo) => {
       for (let i = 0; i < grupo.length; i++) {
         await enviarHistorico(contaId, grupo[i])
@@ -1651,4 +1688,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool }
+module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool }

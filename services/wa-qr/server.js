@@ -52,6 +52,15 @@ const log = pino({ level: process.env.LOG_LEVEL || 'info' })
 // sessões — ver o comentário no servidor.listen. Regulável por env caso o
 // arranque fique mais pesado (mais contas pareadas no mesmo serviço).
 const ESPERA_RESTAURAR_MS = parseInt(process.env.WA_QR_ESPERA_RESTAURAR_MS || '10000', 10)
+// Quanto esperar ENTRE uma conta e a próxima ao religar. Eram 3s, e isso era pouco: o
+// que cada conta faz depois de conectar (backlog offline que o WhatsApp guardou,
+// sincronização de agenda) dura minutos, então três contas abertas com 3s de intervalo
+// sincronizam praticamente juntas. Medido no log de um estouro: as contas 3, 34 e 35
+// pedindo a agenda dentro de 11 segundos uma da outra. Numa instância pequena isso é o
+// amplificador do laço — estoura, reinicia, as três sincronizam juntas, estoura de novo.
+// O custo de espaçar é a última conta demorar mais pra voltar a RECEBER; o envio não
+// espera, porque /enviar religa a sessão sob demanda.
+const ESPACO_CONTAS_MS = parseInt(process.env.WA_QR_ESPACO_CONTAS_MS || '30000', 10)
 
 if (!process.env.DATABASE_URL) { log.error('Falta DATABASE_URL'); process.exit(1) }
 if (!SEGREDO) { log.error('Falta WA_QR_SHARED_SECRET'); process.exit(1) }
@@ -971,6 +980,51 @@ async function avisarDeslogado (contaId) {
   } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao avisar deslogado') }
 }
 
+// QUAIS ondas de histórico processar. Esta função decide se um BLOB inteiro vai ser
+// baixado da rede e descompactado na memória — não é um filtro de "o que fazer com o
+// que já chegou". Confira na fonte do Baileys:
+//
+//   Socket/chats.js:779    shouldProcessHistoryMsg = shouldSyncHistoryMessage(...)
+//   Utils/process-message.js:158-167
+//       if (process) { await downloadAndProcessHistorySyncNotification(...) }
+//
+// Ou seja: o gate roda ANTES do download. Recusar aqui faz o blob nunca existir.
+//
+// E é por isso que o INITIAL_BOOTSTRAP saiu. Utils/history.js:10-20 mostra o custo:
+//
+//   for await (const chunk of stream) bufferArray.push(chunk)  // pedaços
+//   let buffer = Buffer.concat(bufferArray)                    // cópia inteira
+//   buffer = await inflatePromise(buffer)                      // descompactado, vários× maior
+//   const syncData = proto.HistorySync.decode(buffer)          // objetos no heap
+//
+// Os três primeiros são Buffer, ou seja MEMÓRIA EXTERNA — que o --max-old-space-size
+// NÃO limita —, e os quatro coexistem no pico. Foi exatamente isso que matou a
+// instância de 512MB no Render, reproduzido: apagar o dispositivo no celular, parear
+// de novo, e estourar na hora. A morte veio com a mensagem do Render
+// ("Ran out of memory (used over 512MB)"), não com a do Node ("JavaScript heap out of
+// memory") — a prova de que o teto de heap segurou o heap e o problema estava fora dele.
+//
+// O que fica:
+//   RECENT     — a janela recente que o WhatsApp manda sozinho com syncFullHistory:false.
+//                É a importação de conversa que sobrou.
+//   PUSH_NAME  — só os nomes (Utils/history.js: `contacts.push({ id, notify: c.pushname })`,
+//                nenhuma mensagem). É a fonte mais completa de nome que o WhatsApp manda,
+//                e é barata justamente por não ter mensagem pra processar.
+//
+// O que fica de fora:
+//   INITIAL_BOOTSTRAP — o blob do pareamento, o que estourava.
+//   FULL              — o backfill da conta inteira (meses/anos), que já represava o
+//                       tempo real antes.
+//   ON_DEMAND         — pedido sob demanda; a gente não pede.
+//
+// CUSTO ACEITO: o pareamento não importa mais o histórico do BOOTSTRAP. Se um dia a
+// conversa importada nascer vazia, o caminho é devolver o INITIAL_BOOTSTRAP e subir o
+// serviço pra um plano com mais memória — nesta ordem, porque nenhum ajuste nosso
+// encolhe o blob: quem baixa e descompacta é o Baileys por dentro.
+function deveSincronizarHistorico (syncType) {
+  return syncType === TIPO_HIST.RECENT || syncType === TIPO_HIST.PUSH_NAME
+}
+
 const HISTORICO_JANELA_SEGUNDOS = 30 * 24 * 3600 // só os últimos 30 dias — ver README (risco QR)
 
 // Histórico importado (evento messaging-history.set, só dispara logo após conectar/parear).
@@ -1101,21 +1155,15 @@ async function iniciarSessao (contaId) {
       // Deixando false, o WhatsApp manda sozinho só a janela RECENTE ao parear,
       // que é justamente o que a gente quer importar.
       syncFullHistory: false,
-      // ...e aqui a gente processa essa janela recente (por padrão o Baileys
-      // descartaria tudo junto com o FULL, já que o gate default é só o
-      // syncFullHistory). FULL fica de fora de propósito: é o backfill da conta
-      // inteira, o mesmo que travou as mensagens ao vivo antes.
-      // O corte de 30 dias continua em repassarHistorico, ANTES do POST — mensagem
-      // antiga é descartada sem custo de rede.
-      // PUSH_NAME entra junto: é a onda que traz SÓ os nomes (Utils/history.js:
-      // `contacts.push({ id, notify: c.pushname })`, nenhuma mensagem), e é de longe
-      // a fonte mais completa de nome que o WhatsApp manda. Estava sendo barrada
-      // aqui — por isso as conversas importadas ficavam com o número cru mesmo com
-      // o contato salvo na agenda. É barata: não tem mensagem pra processar.
+      // ...e aqui a gente escolhe QUAIS ondas processar — ver deveSincronizarHistorico
       shouldSyncHistoryMessage: (msg) => {
         const t = msg && msg.syncType
-        return t === TIPO_HIST.RECENT || t === TIPO_HIST.INITIAL_BOOTSTRAP ||
-               t === TIPO_HIST.PUSH_NAME
+        const aceita = deveSincronizarHistorico(t)
+        if (!aceita) {
+          log.info({ contaId, syncType: t },
+            'histórico recusado pelo gate — o blob não vai ser baixado')
+        }
+        return aceita
       },
       markOnlineOnConnect: false,
       // ver comentário do cache `enviadas`: é isto que permite reenviar quando o
@@ -1300,8 +1348,16 @@ async function iniciarSessao (contaId) {
   })
 
   sock.ev.on('messaging-history.set', async ({ messages, contacts, isLatest, progress, syncType }) => {
+    // Memória na ENTRADA e na SAÍDA desta onda. O log de minuto em minuto não serve
+    // aqui: a tempestade de um pareamento inteiro coube em 28 segundos e passou entre
+    // duas medições. `external`/`buffers` são a parte que interessa — é onde o blob de
+    // histórico vive (Buffer, fora do heap), e foi o que estourou o RSS da instância.
+    const _m0 = process.memoryUsage()
     log.info({ contaId, n: messages.length, contatos: (contacts || []).length,
-      isLatest, progress, syncType }, 'messaging-history.set recebido')
+      isLatest, progress, syncType,
+      rssMB: MB(_m0.rss), heapMB: MB(_m0.heapUsed),
+      externalMB: MB(_m0.external), buffersMB: MB(_m0.arrayBuffers) },
+    'messaging-history.set recebido')
     // Cada onda de histórico traz também os contatos daquele bloco — usa pra
     // resolver @lid -> número real (ver comentário em numeroReal). Faz isso ANTES
     // de repassar as mensagens da mesma onda, senão o mapa fica sempre um bloco
@@ -1346,6 +1402,12 @@ async function iniciarSessao (contaId) {
         grupo[i] = null   // solta o corpo assim que ele virou POST
       }
     })
+    const _m1 = process.memoryUsage()
+    log.info({ contaId, syncType,
+      rssMB: MB(_m1.rss), heapMB: MB(_m1.heapUsed),
+      externalMB: MB(_m1.external), buffersMB: MB(_m1.arrayBuffers),
+      rssDeltaMB: MB(_m1.rss) - MB(_m0.rss) },
+    'messaging-history.set concluído')
   })
   } catch (e) {
     log.error({ contaId, e: String(e && e.stack || e) }, 'iniciarSessao: falhou')
@@ -1381,19 +1443,23 @@ async function restaurarSessoes () {
       log.info('restaurarSessoes: nenhuma conta pareada pra religar')
       return
     }
-    log.info({ n: contas.length, contas }, 'restaurarSessoes: religando contas já pareadas')
+    log.info({ n: contas.length, contas, espacoMs: ESPACO_CONTAS_MS },
+      'restaurarSessoes: religando contas já pareadas')
     for (const contaId of contas) {
       try {
         await iniciarSessao(contaId)
       } catch (e) {
         log.error({ contaId, e: String(e && e.stack || e) }, 'restaurarSessoes: falhou nessa conta')
       }
-      // Espaça as reconexões por dois motivos: várias contas abrindo socket no
+      // Espaça as reconexões por TRÊS motivos: várias contas abrindo socket no
       // mesmo instante é um bom jeito de o WhatsApp achar que é abuso e
-      // derrubar/bloquear todas; e o intervalo devolve o event loop pro
-      // servidor HTTP entre uma conta e outra, pro /saude continuar respondendo
-      // durante o arranque.
-      await new Promise((r2) => setTimeout(r2, 3000))
+      // derrubar/bloquear todas; o intervalo devolve o event loop pro servidor
+      // HTTP entre uma conta e outra, pro /saude continuar respondendo durante o
+      // arranque; e — o que motivou subir de 3s pra 30s — cada conta continua
+      // trabalhando pesado por MINUTOS depois de conectar (backlog offline,
+      // agenda), então 3s fazia as sincronizações se empilharem em vez de se
+      // sucederem. Ver ESPACO_CONTAS_MS.
+      await new Promise((r2) => setTimeout(r2, ESPACO_CONTAS_MS))
     }
   } catch (e) {
     log.error({ e: String(e && e.stack || e) }, 'restaurarSessoes: falhou')
@@ -1585,4 +1651,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool }
+module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool }

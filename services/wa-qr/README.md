@@ -63,6 +63,37 @@ causa disso:
   esperando uma das 4 conexões do pool). É o que separa "pico legítimo de sincronização"
   de "vazamento em rampa" — que pedem consertos opostos.
 
+### O histórico do pareamento não é mais importado (e por quê)
+
+Depois do teto de heap, o serviço **estourou de novo** — e desta vez com reprodução: apagar
+o dispositivo no celular e parear de novo derrubava a instância na hora. A morte veio com a
+mensagem do **Render** (`used over 512MB`), não com a do Node (`heap out of memory`): o teto
+de heap segurou o heap, e o RSS estourou mesmo assim. A memória estava **fora do heap**.
+
+O culpado é o blob de histórico. Na fonte do Baileys (`Utils/history.js`), baixar uma onda
+faz `Buffer.concat` → `inflate` → `decode`, com as cópias coexistindo — e as três primeiras
+são `Buffer`, ou seja memória **externa**, que o `--max-old-space-size` não limita.
+
+O gate `shouldSyncHistoryMessage` roda **antes** do download (`Utils/process-message.js`:
+`if (process) { await downloadAndProcessHistorySyncNotification(...) }`), então recusar um
+tipo faz o blob nunca existir. Hoje aceitamos só:
+
+| Tipo | Situação |
+|---|---|
+| `RECENT` | ✅ a janela recente — é a importação de conversa que sobrou |
+| `PUSH_NAME` | ✅ só nomes, sem mensagem: barato e é a melhor fonte de nome |
+| `INITIAL_BOOTSTRAP` | ❌ o blob do pareamento — **era ele que estourava** |
+| `FULL` | ❌ backfill de meses/anos |
+| `ON_DEMAND` | ❌ não pedimos |
+
+**Custo aceito:** parear não importa mais o histórico do bootstrap. Se a conversa importada
+nascer vazia, o caminho é devolver o `INITIAL_BOOTSTRAP` **e** subir de plano, nesta ordem —
+nenhum ajuste nosso encolhe o blob, quem baixa e descompacta é o Baileys por dentro.
+
+O `restaurarSessoes` também passou a espaçar as contas em **30s** (`WA_QR_ESPACO_CONTAS_MS`),
+não 3s: cada conta trabalha pesado por minutos depois de conectar, e três delas sincronizando
+juntas era o amplificador do laço de crash.
+
 Referência medida: **~106 MB de RSS ocioso, com zero sessões**. É o custo de Node +
 Baileys parado; o resto do orçamento é dividido entre as contas pareadas, e cada socket
 Baileys tem caches próprios. Se o log mostrar RSS estável mas alto com várias contas, o
@@ -78,6 +109,8 @@ createdb wa_qr_test
 WA_AUTH_TEST_URL=postgresql://postgres@localhost:5432/wa_qr_test node teste-auth-db.js
 # caches em memória: lote de gravação do mapa @lid, teto de bytes, limpeza por conta
 WA_QR_TEST_URL=postgresql://postgres@localhost:5432/wa_qr_test node teste-lidmap.js
+# gate do histórico — quais ondas podem ser baixadas (não precisa de banco)
+node teste-historico.js
 ```
 
 ## Local (dev)

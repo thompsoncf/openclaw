@@ -21,10 +21,11 @@ def iniciais(nome: str) -> str:
 
 
 def avatar_html(marca: dict, px: int = 40, raio: int = 8,
-                so_logo: bool = False, ajuste: str = "cover") -> str:
+                so_logo: bool = False, ajuste: str = "contain") -> str:
     """Só o quadrado da marca. A logo quando existe; senão as iniciais sobre a
     cor (ou '' quando so_logo=True, pra documentos que só querem logo de verdade).
-    `ajuste`: 'cover' (preenche, pode cortar) ou 'contain' (cabe inteira, p/ docs)."""
+    `ajuste`: 'contain' (cabe inteira — o padrão, marca cortada é marca estragada)
+    ou 'cover' (preenche o quadrado, pode cortar)."""
     marca = marca or {}
     logo = marca.get("logo_url")
     if logo:
@@ -45,7 +46,7 @@ def avatar_html(marca: dict, px: int = 40, raio: int = 8,
 
 def cabecalho_html(marca: dict, px: int = 32, raio: int = 8, sub: str = "",
                    nome=None, alinhar: str = "left", cor_nome: str = "inherit",
-                   so_logo: bool = False, ajuste: str = "cover") -> str:
+                   so_logo: bool = False, ajuste: str = "contain") -> str:
     """Selo + nome (+ subtítulo opcional). `alinhar`: 'left' | 'center' | 'right'
     (right empurra pra ponta com margin-left:auto). Devolve '' se so_logo e não há
     logo — assim quem quiser silêncio sem marca fica sem faixa."""

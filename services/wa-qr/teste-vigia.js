@@ -23,7 +23,7 @@ process.env.WA_QR_SHARED_SECRET = process.env.WA_QR_SHARED_SECRET || 'teste'
 process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'silent'
 
 const s = require('./server')
-const { sessaoMuda, tetoMudo, marcarVivo, sessoes } = s
+const { sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, marcarVivo, sessoes } = s
 
 let falhas = 0
 function conferir (ok, descricao) {
@@ -102,7 +102,76 @@ sessoes.delete(35); sessoes.delete(23)
 // religaria por cima da instância que está trabalhando, que é exatamente a guerra de
 // sessões (440 em revezamento) que a trava veio acabar. Por isso: sessão que não é
 // nossa, não se toca. Sem rede e sem banco — o guard corta antes de qualquer um dos dois.
+// A CONTA ÓRFÃ DE 440 — o buraco que custou a noite da cliente.
+//
+// O caminho do 440 solta a trava e retorna, e estava certo em não reconectar na hora:
+// quem substituiu pode ser o WhatsApp Web que a própria cliente abriu, e insistir
+// contra ele derruba os dois em revezamento. O que faltava era o DEPOIS. Em 15/08 a
+// conta 35 levou 440 às 22:46:07, soltou a trava e ficou sem sessão em lugar nenhum —
+// com o serviço saudável, atendendo as vizinhas. As mensagens que o dono mandou pra
+// testar não chegaram porque não havia ninguém escutando.
+//
+// E o vigia, que podia resgatar, se recusava: `!trava.segura()` foi escrito presumindo
+// "não é minha = tem outra instância cuidando", e "não é minha" também cobre "não é de
+// NINGUÉM". Estas conferências existem pra que a distinção não se perca de novo, e pra
+// que a espera crescente (que é o que evita a guerra de sessões) não seja encurtada
+// sem querer.
+console.log('\nespera antes de retomar uma conta substituída')
+const BASE = 5 * 60 * 1000
+conferir(esperaPos440({}, BASE) === BASE, 'primeira tentativa: 5min')
+conferir(esperaPos440({ tentativasPos440: 1 }, BASE) === 2 * BASE, 'segunda: 10min')
+conferir(esperaPos440({ tentativasPos440: 3 }, BASE) === 8 * BASE, 'quarta: 40min')
+conferir(esperaPos440({ tentativasPos440: 9 }, BASE) === 16 * BASE, 'teto em 16× (80min)')
+
+console.log('\nquem É órfã (e só depois da espera)')
+conferir(sessaoOrfa({ substituidaEm: AGORA - BASE }, AGORA, BASE) === true,
+  'sem socket, substituída há 5min — retoma')
+conferir(sessaoOrfa({ substituidaEm: AGORA - BASE + 1 }, AGORA, BASE) === false,
+  'um milissegundo antes da espera — ainda não')
+conferir(sessaoOrfa({ substituidaEm: AGORA - 3 * BASE, tentativasPos440: 4 }, AGORA, BASE) === false,
+  'já tentou 4 vezes: a espera dela agora é 80min, e 15min não bastam')
+
+console.log('\nquem NÃO é órfã')
+conferir(sessaoOrfa({ sock: SOCK, substituidaEm: AGORA - 3 * BASE }, AGORA, BASE) === false,
+  'tem socket — quem cuida dela é a regra do silêncio, não esta')
+conferir(sessaoOrfa({ iniciando: true, substituidaEm: AGORA - 3 * BASE }, AGORA, BASE) === false,
+  'já está subindo — não empilha uma segunda tentativa por cima')
+conferir(sessaoOrfa({ status: 'desconectado' }, AGORA, BASE) === false,
+  'nunca levou 440 (sem carimbo) — não é caso desta regra')
+for (const [valor, rotulo] of [[undefined, 'undefined'], [null, 'null'], [{}, 'objeto vazio']]) {
+  let ok = false
+  try { ok = sessaoOrfa(valor, AGORA, BASE) === false } catch (_) { ok = false }
+  conferir(ok, rotulo + ' → não é órfã, sem exceção')
+}
+
 ;(async () => {
+  console.log('\no vigia retoma a órfã — e conta a tentativa')
+  const original = s._ganchos.iniciarSessao
+  const retomadas = []
+  s._ganchos.iniciarSessao = async (contaId) => { retomadas.push(contaId) }
+  sessoes.clear()
+  // 35: órfã há bastante tempo. 34: substituída agora, ainda dentro da espera.
+  sessoes.set(35, { status: 'desconectado', sock: null, substituidaEm: Date.now() - 30 * 60 * 1000 })
+  sessoes.set(34, { status: 'desconectado', sock: null, substituidaEm: Date.now() })
+  await s.vigiarSessoes()
+  conferir(retomadas.length === 1 && retomadas[0] === 35,
+    'só a que passou da espera foi retomada', 'retomadas=' + JSON.stringify(retomadas))
+  conferir(sessoes.get(35).tentativasPos440 === 1, 'a tentativa ficou contada')
+  conferir(Date.now() - sessoes.get(35).substituidaEm < 5000,
+    'o relógio da espera reiniciou — a próxima só daqui a 10min')
+  await s.vigiarSessoes()
+  conferir(retomadas.length === 1, 'e na volta seguinte ela NÃO é retomada de novo')
+  s._ganchos.iniciarSessao = original
+  sessoes.clear()
+
+  console.log('\nmarcarVivo tira a conta da condição de órfã')
+  sessoes.set(35, { status: 'conectado', sock: SOCK, substituidaEm: AGORA - 3 * BASE,
+    tentativasPos440: 3 })
+  marcarVivo(35)
+  conferir(sessaoOrfa(sessoes.get(35), Date.now(), BASE) === false && !sessoes.get(35).substituidaEm,
+    'entregou evento: o carimbo do 440 sai e a contagem zera')
+  sessoes.clear()
+
   console.log('\nvigia × trava: sessão de outra instância não se religa')
   const seguraDeVerdade = s.trava.segura
   s.trava.segura = () => false

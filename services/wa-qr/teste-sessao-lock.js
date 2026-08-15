@@ -125,7 +125,56 @@ const dormir = (ms) => new Promise((r) => setTimeout(r, ms))
   await tipos.soltar(CONTA)
   t('soltar com número solta o que entrou como string', tipos.segura(String(CONTA)) === false)
 
-  // ---- 11. banco fora do ar NÃO pode virar "pode abrir socket"
+  // ---- 11. a desistência tem PRAZO e reconcilia sozinha.
+  // Na estreia em produção o wa-qr subiu antes de o web criar a tabela e as três
+  // contas religaram sem trava. Se a desistência fosse permanente, a instância
+  // rodaria desprotegida até o próximo deploy — que é justamente o buraco que
+  // isto fecha. Três desfechos possíveis quando a tabela aparece:
+  const CRIA_TABELA = `create table wa_qr_sessao_lock (
+      conta_id bigint primary key, dono text not null, expira_em timestamptz not null,
+      criado_em timestamptz default now(), atualizado timestamptz default now())`
+
+  // (a) a tabela aparece e a conta estava livre -> passa a ficar protegida
+  await pool.query('drop table if exists wa_qr_sessao_lock')
+  const tardia = criarTrava(pool, mudo, { dono: 'instancia-tardia', revalidaMs: 60 })
+  t('sem tabela, abre socket assim mesmo', (await tardia.pegar(CONTA)) === true)
+  t('e sabe que está rodando sem trava', tardia.semTrava(CONTA) === true)
+  t('sem trava não é o mesmo que segurar', tardia.segura(CONTA) === false)
+  await pool.query(CRIA_TABELA)
+  await dormir(80)
+  await tardia.revalidarDegradadas()
+  t('tabela apareceu: a conta vira protegida', tardia.segura(CONTA) === true)
+  t('e sai da lista de degradadas', tardia.semTrava(CONTA) === false)
+
+  // (b) enquanto a tabela não existe, segue degradado (não desiste, não protege)
+  await pool.query('drop table wa_qr_sessao_lock')
+  const insistente = criarTrava(pool, mudo, { dono: 'instancia-insistente', revalidaMs: 60 })
+  await insistente.pegar(OUTRA)
+  await dormir(80)
+  await insistente.revalidarDegradadas()
+  t('tabela ainda ausente: continua degradada, sem estourar', insistente.semTrava(OUTRA) === true)
+
+  // (c) a tabela aparece e a conta é de OUTRA instância -> a nossa é a intrusa
+  // e tem que largar a sessão, senão viram duas com a mesma credencial
+  const largou = []
+  await pool.query(CRIA_TABELA)
+  await pool.query(`insert into wa_qr_sessao_lock (conta_id, dono, expira_em)
+                    values ($1, 'a-legitima', now() + interval '5 minutes')`, [OUTRA])
+  const intrusa = criarTrava(pool, mudo, {
+    dono: 'instancia-intrusa', revalidaMs: 60, aoPerder: (c) => largou.push(c)
+  })
+  await pool.query('drop table wa_qr_sessao_lock')          // força o caminho degradado
+  await intrusa.pegar(OUTRA)
+  await pool.query(CRIA_TABELA)
+  await pool.query(`insert into wa_qr_sessao_lock (conta_id, dono, expira_em)
+                    values ($1, 'a-legitima', now() + interval '5 minutes')`, [OUTRA])
+  await dormir(80)
+  await intrusa.revalidarDegradadas()
+  t('conta é de outra instância: larga a sessão', largou.includes(OUTRA))
+  t('e não rouba o aluguel alheio',
+    (await pool.query('select dono from wa_qr_sessao_lock where conta_id=$1', [OUTRA])).rows[0].dono === 'a-legitima')
+
+  // ---- 12. banco fora do ar NÃO pode virar "pode abrir socket"
   const poolMorto = { query: async () => { throw new Error('connection refused') } }
   const semBanco = criarTrava(poolMorto, mudo, { dono: 'instancia-sem-banco' })
   t('sem banco, recusa abrir socket', (await semBanco.pegar(CONTA)) === false)

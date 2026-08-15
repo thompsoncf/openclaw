@@ -81,10 +81,19 @@ _STATUS_SUCESSO = 2
 #
 # A gente aceita os dois e prefere o fino quando ele existe. Aceitar o grosso é
 # o que faz o alerta continuar funcionando sem RENDER_API_KEY.
-_TEXTO_SUCESSO = frozenset({"live", "deactivated", "succeeded"})
+_TEXTO_SUCESSO = frozenset({"live", "succeeded"})
 # Status textuais que significam "quebrou" (merecem alerta).
 _TEXTO_FALHA = frozenset({"build_failed", "update_failed", "pre_deploy_failed",
                           "failed"})
+# Nem sucesso nem falha: o deploy SAIU de cena, e isso não é veredito sobre ele.
+#
+#   - `canceled`: alguém cancelou. Não é falha, não acorda ninguém.
+#   - `deactivated`: foi substituído por um mais novo. Contá-lo como sucesso
+#     dobrava a conta — TODO deploy bem-sucedido acaba desativado quando o
+#     próximo sobe, então cada um entrava duas vezes no "deu certo" e a taxa
+#     de sucesso do serviço ficava inflada. O `live` do mesmo deploy já
+#     contabilizou o acerto; a aposentadoria não é um segundo acerto.
+_TEXTO_NEUTRO = frozenset({"canceled", "cancelled", "deactivated"})
 
 
 # --------------------------------------------------------------------------
@@ -314,8 +323,8 @@ def _classificar(status_txt: str, status_num, tipo: str = "deploy_ended") -> boo
         return True
     if t in _TEXTO_FALHA:
         return False
-    if t in ("canceled", "cancelled"):
-        return None            # cancelado por gente: não é falha, não alerta
+    if t in _TEXTO_NEUTRO:
+        return None            # saiu de cena: não é veredito (ver _TEXTO_NEUTRO)
     if tipo == "deploy_ended" and isinstance(status_num, int):
         return status_num == _STATUS_SUCESSO
     return None

@@ -1,10 +1,16 @@
 # =============================================================================
 # REFERENCIA DE CONFIG - NAO CONECTE ISTO COMO BLUEPRINT NO RENDER.
 # Os servicos no Render sao gerenciados MANUALMENTE e deployam por git (auto-
-# deploy na branch main). Os nomes reais la' tem sufixo -bcu3:
+# deploy na branch main). Os nomes REAIS la' (confirmados via API do Render em
+# 15/08/2026 — nem todos batem com o `name:` deste arquivo):
 #     openclaw-web-bcu3            (este web; webhook Telegram + app.zaq-ia.com)
+#     zaq-waqr                     (o WhatsApp por QR; aqui embaixo esta' como
+#                                   "openclaw-waqr", que NAO existe no Render)
 #     openclaw-monitor-saldos-bcu3 (o cron de saldos)
 #     openclaw-cron-diario         (cron a parte)
+# Fora deste repo, o mesmo workspace ainda tem zaq-landing, gestora-capital e
+# gestora-admin. Isso importa porque o webhook do Render e' do WORKSPACE: os
+# eventos deles TAMBEM caem na nossa tabela render_evento.
 # O Blueprint foi REMOVIDO de proposito: a cada sync ele RECRIAVA servicos (o
 # Render sufixa o nome em colisao -> -bcu3, depois -bcu3-bcu3...), gerando
 # duplicados vazios. Este arquivo fica so' como DOCUMENTACAO da config real.
@@ -82,7 +88,7 @@ services:
         sync: false
       # --- WhatsApp por QR Code (serviço Node à parte, services/wa-qr) ---
       # WA_QR_SERVICE_URL: URL pública do serviço wa-qr (ex.:
-      #   https://openclaw-waqr.onrender.com). Sem ela, a via QR fica inerte.
+      #   https://zaq-waqr.onrender.com). Sem ela, a via QR fica inerte.
       # WA_QR_SHARED_SECRET: MESMO segredo dos dois lados (autentica web<->wa-qr).
       - key: WA_QR_SERVICE_URL
         sync: false
@@ -114,7 +120,10 @@ services:
   #   Root Directory: services/wa-qr · Build: npm install · Start: npm start
   #   Health check path: /saude
   - type: web
-    name: openclaw-waqr
+    # No Render este servico se chama "zaq-waqr" (nao "openclaw-waqr"). O nome
+    # aqui ficou pra tras; como o arquivo nao e' Blueprint, e' so' documentacao
+    # — mas documentacao errada custa tempo de quem procura o servico no painel.
+    name: zaq-waqr
     runtime: node
     plan: standard
     numInstances: 1

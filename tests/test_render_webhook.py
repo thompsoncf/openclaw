@@ -161,6 +161,11 @@ def test_recusa_timestamp_nao_numerico():
     ("failed", None, False),
     # cancelado por gente nao e' falha: nao pode acordar o dono de madrugada
     ("canceled", 5, None),
+    # `deactivated` e' aposentadoria, nao veredito: TODO deploy que deu certo
+    # acaba desativado quando o proximo sobe. Contar como sucesso dobrava a
+    # taxa de acerto do servico — o `live` do mesmo deploy ja' contou.
+    ("deactivated", 2, None),
+    ("deactivated", None, None),
     # sem texto (API fora de alcance), cai no numero do evento
     ("", 2, True),
     ("", 4, False),
@@ -521,6 +526,53 @@ def test_migracao_155_limpa_o_veredito_falso_e_poupa_o_legitimo(limpo):
 
     # idempotente: rodar de novo nao muda mais nada
     with limpo.connection() as c:
+        c.execute(sql)
+        c.commit()
+        again = dict((w, (s, su)) for w, s, su in c.execute(
+            "select webhook_id, status, sucesso from render_evento").fetchall())
+    assert again == got
+
+
+def test_deploy_desativado_nao_conta_como_acerto(limpo, render_api_falsa):
+    """Fim de vida do deploy anterior nao pode inflar a taxa de sucesso."""
+    render_api_falsa.update(status="deactivated", status_num=2)
+    re_.processar(_corpo(), {"webhook-id": "msg_desat"}, pool=limpo)
+
+    with limpo.connection() as c:
+        status, sucesso = c.execute(
+            "select status, sucesso from render_evento").fetchone()
+    # o status FICA: "saiu do ar" e' informacao verdadeira e util
+    assert status == "deactivated"
+    # o veredito, nao
+    assert sucesso is None
+    assert render_api_falsa["alertas"] == []
+
+
+def test_migracao_156_zera_o_veredito_do_deactivated(limpo):
+    linhas = [
+        ("d1", "deploy_ended", "deactivated", True),    # corrige
+        ("d2", "deploy_ended", "live", True),           # preserva
+        ("d3", "deploy_ended", "build_failed", False),  # preserva
+    ]
+    with limpo.connection() as c:
+        for wid, tipo, status, sucesso in linhas:
+            c.execute("insert into render_evento (webhook_id, tipo, status, sucesso)"
+                      " values (%s,%s,%s,%s)", (wid, tipo, status, sucesso))
+        c.commit()
+
+    base = Path(__file__).resolve().parent.parent / "db" / "migracoes"
+    sql = (base / "156_render_evento_deactivated_neutro.sql").read_text(encoding="utf-8")
+    with limpo.connection() as c:
+        c.execute(sql)
+        c.commit()
+        got = dict((w, (s, su)) for w, s, su in c.execute(
+            "select webhook_id, status, sucesso from render_evento").fetchall())
+
+    assert got["d1"] == ("deactivated", None)   # veredito some, status fica
+    assert got["d2"] == ("live", True)
+    assert got["d3"] == ("build_failed", False)
+
+    with limpo.connection() as c:                # idempotente
         c.execute(sql)
         c.commit()
         again = dict((w, (s, su)) for w, s, su in c.execute(

@@ -1597,10 +1597,20 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
     lead = {"id": cv[2], "empresa": cv[3] or cv[13] or "—", "canal": cv[0], "canal_rot": CANAL_ROT.get(cv[0], cv[0]),
             "segmento": cv[4], "cidade": cv[5], "uf": cv[6],
             "whatsapp": destino, "email": cv[9], "vendedor": cv[11],
+            # o id vai junto do nome pra caixa poder pré-selecionar quem já é dono
+            "vendedor_id": cv[12],
             "status_rot": STATUS_ROT.get(cv[10], cv[10] or "")}
+    # Trocar o responsável direto do chat: antes só dava na ficha do lead, e o dono
+    # que atende pelo inbox tinha que sair da conversa pra descobrir de quem era.
+    # A lista só vai pra quem pode atribuir, e só quando a conversa já é lead.
+    vends = ([{"id": v["id"], "nome": v["nome"]}
+              for v in _vendedores(pool, ctx["conta_id"])]
+             if (ctx["pode_atribuir"] and cv[2]) else [])
     return JSONResponse({"ok": True, "lead": lead, "msgs": msgs,
                          "conversa_id": conversa_id, "pode_responder": pode_wa,
                          "agente_ativo": bool(cv[14]),
+                         "pode_atribuir": bool(ctx["pode_atribuir"] and cv[2]),
+                         "vendedores": vends,
                          "truncado": len(msgs) >= 100})
 
 
@@ -1976,6 +1986,15 @@ def comunicacao_virar_lead_dados(request: Request, conversa_id: int):
         nome, fonte = _contato_sugerido(c, ctx["conta_id"], canal, ref, contato_nome)
         eh_email = canal == "email" or "@" in ref
         dup = None if eh_email else _lead_por_telefone(c, ctx["conta_id"], ref)
+        # deixar o responsável em branco não quer dizer a mesma coisa nos dois casos:
+        # com o rodízio ligado, quem decide é a fila; desligado, o lead fica sem dono
+        # mesmo. O modal precisa saber pra rotular a opção sem mentir.
+        try:
+            from finance import distribuicao as _dist
+            rodizio_on = bool(_dist.config(c, ctx["conta_id"])["ativo"]) and bool(
+                _dist.fila_ids(c, ctx["conta_id"]))
+        except Exception:  # noqa: BLE001
+            rodizio_on = False
     vends = _vendedores(pool, ctx["conta_id"]) if ctx["pode_atribuir"] else []
     return JSONResponse({
         "ok": True, "ja_lead": False, "canal": canal,
@@ -1987,6 +2006,7 @@ def comunicacao_virar_lead_dados(request: Request, conversa_id: int):
         "telefone": "" if eh_email else _tel_fmt_br(ref),
         "pode_atribuir": bool(ctx["pode_atribuir"]),
         "vendedores": [{"id": v["id"], "nome": v["nome"]} for v in vends],
+        "rodizio": rodizio_on,
         "duplicado": ({"id": dup[0], "empresa": dup[1]} if dup else None),
     })
 
@@ -2043,6 +2063,31 @@ def comunicacao_virar_lead(request: Request, conversa_id: int = Form(...),
              ("+" + _so_digitos(ref)) if (ref and not eh_email) else None, tel or None,
              tipo_lead, "email_inbound" if eh_email else "whatsapp_inbound", temp)).fetchone()[0]
         c.execute("update conversas set prospeccao_id=%s where id=%s", (lead_id, conversa_id))
+        # Sem responsável escolhido, o rodízio decide — mesma regra do lead que entra
+        # sozinho pelo WhatsApp. Antes só aquele caminho chamava a distribuição, então
+        # "— livre —" aqui queria dizer "de ninguém": o lead nascia órfão mesmo com a
+        # fila montada e ligada.
+        #
+        # O `with c.transaction()` é SAVEPOINT, e não enfeite: distribuir é acessório,
+        # criar o lead é o pedido. Sem ele, um erro de SQL aqui dentro aborta a
+        # transação toda — o `except` engole a exceção, o `commit()` de baixo vira
+        # rollback e a rota responde {"ok": true, "lead_id": N} com o lead inexistente.
+        # Com o savepoint, quem cai é só a distribuição: o lead fica, sem dono.
+        if vend is None:
+            try:
+                from finance import distribuicao as _dist
+                with c.transaction():
+                    _mid = _dist.atribuir_se_sem_dono(c, ctx["conta_id"], lead_id)
+                if _mid:
+                    import threading
+                    threading.Thread(target=_dist.avisar_vendedor,
+                                     args=(pool, ctx["conta_id"], _mid, empresa_final[:250]),
+                                     daemon=True).start()
+            except Exception:  # noqa: BLE001
+                import logging          # local, como no resto do arquivo
+                logging.getLogger("prospeccao.rodizio").warning(
+                    "não consegui distribuir o lead %s (conta %s) — fica sem dono",
+                    lead_id, ctx["conta_id"], exc_info=True)
         c.commit()
     return JSONResponse({"ok": True, "lead_id": lead_id})
 
@@ -4898,16 +4943,29 @@ def prospeccao_temperatura(request: Request, alvo_id: int, temperatura: str = Fo
 
 @router.post("/painel/prospeccao/{alvo_id}/atribuir")
 def prospeccao_atribuir(request: Request, alvo_id: int, vendedor_id: str = Form("")):
+    """Atende a ficha (form + redirect) e o chat da Comunicação (fetch + JSON). Uma
+    rota só: o escopo e a regra de quem pode atribuir são os mesmos nos dois."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
+    ajax = _eh_ajax(request)
     if not ctx["pode_atribuir"]:
+        if ajax:
+            return JSONResponse({"ok": False, "erro": "Só o dono atribui."}, status_code=403)
         return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
     vend = _vendedor_destino(ctx, vendedor_id, get_pool(), ctx["conta_id"])
     with get_pool().connection() as c:
         c.execute("update prospeccao set vendedor_id=%s, atualizado_em=now() where id=%s and conta_id=%s",
                   (vend, alvo_id, ctx["conta_id"]))
+        # a conversa acompanha o lead: sem isso o inbox segue dizendo "sem
+        # responsável" (ou o nome antigo) pra quem acabou de ser trocado.
+        c.execute("""update conversas set responsavel_membro_id=%s
+                      where conta_id=%s and prospeccao_id=%s""",
+                  (vend, ctx["conta_id"], alvo_id))
         c.commit()
+    if ajax:
+        return JSONResponse({"ok": True, "vendedor_id": vend,
+                             "vendedor": _nome_vendedor(get_pool(), ctx["conta_id"], vend) or ""})
     request.session["prosp_aviso"] = "Alvo atribuído." if vend else "Alvo sem responsável."
     return RedirectResponse(f"/painel/prospeccao/{alvo_id}", status_code=303)
 
@@ -7725,6 +7783,9 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   .distrow .dnm{flex:1;font-size:.88rem}
   .distnote{font-size:.82rem;color:var(--txt-mut);background:#1a1226;border:1px solid #3a2b52;border-radius:10px;padding:.6rem .75rem;margin:.7rem 0;line-height:1.6}
   .distnote b{color:#c9a3e0}
+  .distalerta{font-size:.84rem;color:#f7d9a8;background:#2a1d0c;border:1px solid #6b4d17;
+    border-radius:10px;padding:.65rem .8rem;margin:.7rem 0;line-height:1.6}
+  .distalerta b{color:#ffc86b}
   </style>
   <div class="cx-card">
     <form method="post" action="/painel/prospeccao/comunicacao/distribuicao">
@@ -7734,6 +7795,14 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <div class="mut" style="font-size:.8rem">Reparte os leads novos entre a equipe, por ordem de fila (rodízio).</div></div>
         <label class="sw"><input type="checkbox" name="ativo" {% if dist_cfg and dist_cfg.ativo %}checked{% endif %}><span></span></label>
       </div>
+      {# fila montada + chave desligada é o estado que não avisa e não reparte: o
+         formulário grava as duas coisas juntas, então dá pra sair daqui achando que
+         ligou. Enquanto estiver assim, todo lead novo nasce sem dono. #}
+      {% if dist_cfg and not dist_cfg.ativo and dist_membros | selectattr('na_fila') | list %}
+      <div class="distalerta">⚠️ <b>A fila está montada, mas a distribuição está desligada.</b>
+        Enquanto o interruptor aí em cima estiver apagado, nenhum lead novo é repartido —
+        todos entram <b>sem dono</b>. Ligue e salve pra valer.</div>
+      {% endif %}
       <div class="distnote">🤖 O agente dá o 1º toque e qualifica. O <b>vendedor da vez</b> é avisado, observa e
         <b>assume quando quiser</b>. Vale pra toda entrada nova que cai no chip da empresa — anúncio (tráfego pago),
         resposta de campanha e contato orgânico.</div>
@@ -8254,13 +8323,30 @@ function cxOpen(el,id){
       ?'<button class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem;border-color:#4a3163;color:#c9a3e0" onclick="cxAgente('+d.conversa_id+',0)" title="Assumir você (desliga o agente)">🙋 Assumir</button>'
       :'<button class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem" onclick="cxAgente('+d.conversa_id+',1)" title="Devolver ao agente">🤖 Ativar agente</button>');
     th.innerHTML=''
-      +'<div class="cx-th"><div><b>'+cxEsc(L.empresa)+'</b><small>'+cxEsc(L.canal_rot||'')+(L.cidade?(' · '+cxEsc(L.cidade)+(L.uf?'/'+cxEsc(L.uf):'')):'')+(L.status_rot?(' · '+cxEsc(L.status_rot)):'')+(d.agente_ativo?' · <span style=\\'color:#c9a3e0\\'>🤖 no automático</span>':'')+'</small></div>'
+      // o dono do lead no cabeçalho: quem atende pelo inbox precisa saber de quem é
+      // a conversa sem abrir o painel do lado nem a ficha
+      +'<div class="cx-th"><div><b>'+cxEsc(L.empresa)+'</b><small>'+cxEsc(L.canal_rot||'')+(L.cidade?(' · '+cxEsc(L.cidade)+(L.uf?'/'+cxEsc(L.uf):'')):'')+(L.status_rot?(' · '+cxEsc(L.status_rot)):'')+(L.id?(L.vendedor?(' · 👤 '+cxEsc(L.vendedor)):' · <span style=\\'color:#e0b45f\\'>👤 sem responsável</span>'):'')+(d.agente_ativo?' · <span style=\\'color:#c9a3e0\\'>🤖 no automático</span>':'')+'</small></div>'
       +'<span style="flex:1"></span>'+agBtn+(L.id?(' <a class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem" href="/painel/prospeccao/'+L.id+'">Abrir ficha</a>'):(' <button class="pbtn" style="padding:.35rem .7rem;font-size:.78rem" onclick="cxVirarLead('+d.conversa_id+')" title="Criar um lead a partir deste contato">➕ Levar para o lead</button>'))+'</div>'
       +'<div class="cx-msgs" id="cx-msgs">'+cxMsgsHtml(d)+'</div>'+rodape;
     cxScroll(true);
     var kv=function(k,v){return v?('<div class="cx-kv"><span>'+k+'</span><b>'+cxEsc(v)+'</b></div>'):'';};
+    // Responsável: quem pode atribuir troca aqui mesmo; quem não pode continua só
+    // lendo. Sem dono, mostra "— sem responsável —" em vez de sumir a linha (era o
+    // kv() acima: valor vazio não renderizava, e o lead órfão parecia não ter campo).
+    var resp;
+    if(d.pode_atribuir){
+      var ops='<option value="">— sem responsável —</option>';
+      (d.vendedores||[]).forEach(function(v){
+        ops+='<option value="'+v.id+'"'+(v.id===L.vendedor_id?' selected':'')+'>'+cxEsc(v.nome)+'</option>';});
+      resp='<div class="cx-kv" style="align-items:center"><span>Responsável</span>'
+          +'<select class="fld" id="cx-resp" style="width:auto;padding:.25rem .4rem;font-size:.8rem"'
+          +' data-antes="'+(L.vendedor_id||'')+'"'
+          +' onchange="cxAtribuir('+L.id+',this)">'+ops+'</select></div>';
+    }else{
+      resp=kv('Responsável',L.vendedor||'— sem responsável —');
+    }
     cx.innerHTML=''
-      +'<div class="cx-sec"><h4>Lead</h4>'+kv('Empresa',L.empresa)+kv('Segmento',L.segmento)+kv('Cidade',(L.cidade||'')+(L.uf?'/'+L.uf:''))+kv('WhatsApp',L.whatsapp)+kv('E-mail',L.email)+kv('Responsável',L.vendedor)+kv('Status',L.status_rot)+'</div>'
+      +'<div class="cx-sec"><h4>Lead</h4>'+kv('Empresa',L.empresa)+kv('Segmento',L.segmento)+kv('Cidade',(L.cidade||'')+(L.uf?'/'+L.uf:''))+kv('WhatsApp',L.whatsapp)+kv('E-mail',L.email)+resp+kv('Status',L.status_rot)+'</div>'
       +(L.id?('<div class="cx-sec"><a class="pbtn" style="width:100%;text-align:center" href="/painel/prospeccao/'+L.id+'">Abrir ficha do lead</a></div>'):('<div class="cx-sec"><button class="pbtn" style="width:100%" onclick="cxVirarLead('+d.conversa_id+')">➕ Levar para o lead</button><div class="mut" style="font-size:.74rem;margin-top:.4rem">Este contato ainda não é um lead. Crie o lead quando fizer sentido.</div></div>'));
   }).catch(function(){th.innerHTML='<div class="cx-empty">Falha de rede.</div>';});
 }
@@ -8322,6 +8408,23 @@ function cxAgente(convId,on){
   fetch('/painel/prospeccao/comunicacao/agente-conversa',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
     .then(function(r){return r.json();}).then(function(d){if(!d.ok){alert(d.erro||'Não consegui.');return;}cxOpen(document.getElementById('cxc-'+convId),convId);}).catch(function(){alert('Falha de rede.');});
 }
+// Trocar o responsável sem sair da conversa. Mesma rota da ficha do lead
+// (/atribuir), que responde JSON quando vem por fetch — o guard de quem pode
+// atribuir é o mesmo nos dois lugares.
+function cxAtribuir(leadId,sel){
+  if(!leadId)return;
+  var antes=sel.getAttribute('data-antes')||'';
+  sel.disabled=true;
+  var fd=new FormData();fd.append('vendedor_id',sel.value);
+  fetch('/painel/prospeccao/'+leadId+'/atribuir',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
+    .then(function(r){return r.json();}).then(function(d){
+      sel.disabled=false;
+      if(!d.ok){sel.value=antes;alert(d.erro||'Não consegui trocar o responsável.');return;}
+      sel.setAttribute('data-antes',sel.value);
+      // recarrega a conversa pro cabeçalho e a lista mostrarem o dono novo
+      if(_cxConv)cxOpen(document.getElementById('cxc-'+_cxConv),_cxConv);
+    }).catch(function(){sel.disabled=false;sel.value=antes;alert('Falha de rede.');});
+}
 // "Levar para o lead" agora CONFIRMA antes de criar. Sem isso o clique gravava na
 // hora com o número cru no lugar do nome — e o funil enchia de lead chamado "5586…"
 // mesmo com o nome do contato guardado no banco (agenda do celular / perfil do
@@ -8345,9 +8448,12 @@ function cxVlAbrir(convId,d){
   var fonte=d.nome?(FONTES[d.nome_fonte]||''):'Não achei o nome em lugar nenhum — escreva como ele deve aparecer no funil.';
   var vend='';
   if(d.pode_atribuir){
-    var ops='<option value="">— livre —</option>';
+    // deixar em branco não é a mesma coisa nos dois casos: com o rodízio ligado a
+    // fila escolhe; desligado o lead fica sem dono e ninguém é avisado.
+    var ops='<option value="">'+(d.rodizio?'— o rodízio escolhe —':'— sem responsável —')+'</option>';
     d.vendedores.forEach(function(v){ops+='<option value="'+v.id+'">'+cxEsc(v.nome)+'</option>';});
-    vend='<div><label class="lbl" for="vl-vend">Responsável</label><select class="fld" id="vl-vend">'+ops+'</select></div>';
+    var dica=d.rodizio?'':'<small class="mut" style="font-size:.72rem">O rodízio está desligado — sem escolher aqui, o lead fica sem dono.</small>';
+    vend='<div><label class="lbl" for="vl-vend">Responsável</label><select class="fld" id="vl-vend">'+ops+'</select>'+dica+'</div>';
   }
   var dup=d.duplicado?('<div class="vl-dup">⚠️ Já existe um lead com esse telefone: <b>'+cxEsc(d.duplicado.empresa)
         +'</b>. <a href="/painel/prospeccao/'+d.duplicado.id+'">Abrir o lead existente</a> em vez de criar outro?</div>'):'';

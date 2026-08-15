@@ -2192,13 +2192,27 @@ def comunicacao_canal_numero(request: Request, canal: str = Form(...), numero: s
                 # (campo vazio mantém o que já estava salvo; nada é apagado sozinho).
                 prov = provedor if provedor in ("twilio", "cloud", "qr") else "twilio"
                 novo_num = wa.normalizar_from(numero) if (numero or "").strip() else None
-                c.execute(
-                    """insert into canais_config (conta_id, canal, provedor, ativo)
-                       values (%s,'whatsapp',%s,true)
-                       on conflict (conta_id, canal)
-                       do update set provedor=excluded.provedor, ativo=true, atualizado_em=now()""",
-                    (ctx["conta_id"], prov))
-                if novo_num:
+                # UPDATE primeiro, INSERT só se não existir. O `insert ... on
+                # conflict` daqui não passava `identificador`, que é NOT NULL — e o
+                # Postgres valida o NOT NULL ao montar a tupla, ANTES de resolver o
+                # conflito. Ou seja: estourava sempre, mesmo com a linha já existindo
+                # e só precisando trocar o provedor. O except lá embaixo engolia o
+                # erro e a tela dizia "salvo". Na prática, quem conectava o QR não
+                # conseguia mais voltar pro Twilio pela tela.
+                trocou = c.execute(
+                    """update canais_config set provedor=%s, ativo=true, atualizado_em=now()
+                        where conta_id=%s and canal='whatsapp'""",
+                    (prov, ctx["conta_id"])).rowcount
+                if not trocou:
+                    if not novo_num:
+                        request.session["prosp_aviso"] = (
+                            "Informe o número do WhatsApp desta empresa pra conectar.")
+                        return RedirectResponse(destino, status_code=303)
+                    c.execute(
+                        """insert into canais_config (conta_id, canal, identificador, provedor, ativo)
+                           values (%s,'whatsapp',%s,%s,true)""",
+                        (ctx["conta_id"], novo_num, prov))
+                elif novo_num:
                     c.execute("update canais_config set identificador=%s where conta_id=%s and canal='whatsapp'",
                               (novo_num, ctx["conta_id"]))
                 if prov == "cloud" and wa_phone_id:
@@ -2234,8 +2248,17 @@ def comunicacao_canal_numero(request: Request, canal: str = Form(...), numero: s
                 c.execute("delete from canais_config where conta_id=%s and canal=%s", (ctx["conta_id"], canal))
                 msg = "Canal removido."
             c.commit()
-    except Exception:  # noqa: BLE001 — provável colisão do índice (canal, identificador)
+    except UniqueViolation:
         msg = "Esse número já está vinculado a outra empresa."
+    except Exception as e:  # noqa: BLE001 — qualquer outra: não some, e não mente
+        # Antes TODA exceção virava "número já vinculado". Foi assim que uma
+        # NotNullViolation no identificador passou meses parecendo colisão de
+        # número — e, na tela do WhatsApp, chegou a devolver "salvo ✓" pra um
+        # salvamento que não aconteceu. Erro que não é colisão vai pro log.
+        import logging
+        logging.getLogger("prospeccao.canais").exception(
+            "canal-numero: falhou pra conta %s canal %s", ctx["conta_id"], canal)
+        msg = f"Não consegui salvar ({type(e).__name__}). O erro foi registrado."
     request.session["prosp_aviso"] = msg
     return RedirectResponse(destino, status_code=303)
 

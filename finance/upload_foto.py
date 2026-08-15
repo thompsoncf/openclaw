@@ -58,12 +58,25 @@ def _cortar_aspecto(img, aspecto: float):
     return img
 
 
+def _tem_alpha(img) -> bool:
+    """A imagem tem fundo transparente?"""
+    return (img.mode in ("RGBA", "LA", "PA")
+            or (img.mode == "P" and "transparency" in img.info))
+
+
 def _redimensionar(conteudo: bytes, content_type: str,
-                   aspecto: float | None = None) -> tuple[bytes, str]:
+                   aspecto: float | None = None,
+                   manter_alpha: bool = False) -> tuple[bytes, str]:
     """Reduz a imagem pra no máximo _LADO_MAX no maior lado, mantendo proporção.
-    Se 'aspecto' for dado (ex: 1.0 logo, 3.0 capa), corta no centro pra essa proporção
+    Se 'aspecto' for dado (ex: 3.0 capa), corta no centro pra essa proporção
     ANTES de reduzir (fica sempre alinhada, sem distorcer).
-    Converte pra JPEG (mais leve). Retorna (bytes, content_type)."""
+
+    Foto de produto vira JPEG (mais leve). LOGO com fundo transparente
+    (manter_alpha) sai em PNG: JPEG não tem canal alfa, e o transparente virava
+    PRETO — foi o que apareceu no cabeçalho do orçamento, um bloco preto atrás
+    da marca. Quando o alfa é descartado mesmo assim, o fundo é achatado em
+    BRANCO, que é o papel/tela de sempre, nunca preto.
+    """
     try:
         from PIL import Image, ImageOps
     except ImportError:
@@ -73,21 +86,34 @@ def _redimensionar(conteudo: bytes, content_type: str,
         img = ImageOps.exif_transpose(img)   # Corrige orientação de fotos de celular
     except Exception:
         pass
-    if img.mode != "RGB":
+    alpha = _tem_alpha(img)
+    if alpha and manter_alpha:
+        img = img.convert("RGBA")
+    elif alpha:
+        fundo = Image.new("RGB", img.size, (255, 255, 255))
+        fundo.paste(img.convert("RGBA"), mask=img.convert("RGBA").getchannel("A"))
+        img = fundo
+    elif img.mode != "RGB":
         img = img.convert("RGB")
     if aspecto:
         img = _cortar_aspecto(img, aspecto)
     img.thumbnail((_LADO_MAX, _LADO_MAX), Image.LANCZOS)
     out = io.BytesIO()
+    if img.mode == "RGBA":
+        img.save(out, format="PNG", optimize=True)
+        return out.getvalue(), "image/png"
     img.save(out, format="JPEG", quality=82, optimize=True)
     return out.getvalue(), "image/jpeg"
 
 
 def subir_foto(conteudo: bytes, nome_arquivo: str = "",
                content_type: str = "image/jpeg",
-               aspecto: float | None = None) -> str:
+               aspecto: float | None = None,
+               manter_alpha: bool = False) -> str:
     """Valida, redimensiona e sobe a foto pro Supabase Storage. Retorna a URL pública.
-    'aspecto' opcional corta no centro pra alinhar (1.0 = logo quadrada, 3.0 = capa larga).
+    'aspecto' opcional corta no centro pra alinhar (3.0 = capa larga); logo NÃO
+    leva aspecto — cortar quadrado comia o topo e a base da marca.
+    'manter_alpha' preserva o fundo transparente (sai PNG em vez de JPEG).
     Levanta ValueError se a foto for inválida ou o upload falhar."""
     if not conteudo:
         raise ValueError("Arquivo vazio.")
@@ -97,10 +123,11 @@ def subir_foto(conteudo: bytes, nome_arquivo: str = "",
     if ct not in _TIPOS_OK:
         raise ValueError("Só aceitamos imagem (JPEG, PNG ou WEBP).")
 
-    conteudo, ct = _redimensionar(conteudo, ct, aspecto)
+    conteudo, ct = _redimensionar(conteudo, ct, aspecto, manter_alpha)
 
     url, key, bucket = _config()
-    nome = f"{int(time.time())}_{uuid.uuid4().hex[:8]}.jpg"
+    ext = "png" if ct == "image/png" else "jpg"
+    nome = f"{int(time.time())}_{uuid.uuid4().hex[:8]}.{ext}"
     destino = f"{url}/storage/v1/object/{bucket}/{nome}"
 
     headers = {

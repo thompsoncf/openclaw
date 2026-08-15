@@ -2041,7 +2041,7 @@ _LOJA = """<!doctype html>
 
   <div style="padding:0 22px">
     <div class="sz-idrow" style="display:flex;align-items:flex-end;gap:16px;position:relative">
-      <div class="sz-logo" style="box-shadow:0 6px 18px rgba(0,0,0,.18);border:4px solid #fff;flex-shrink:0;background:{% if fornecedor.logo_url %}url('{{ fornecedor.logo_url }}') center/cover{% else %}#eef6ea{% endif %};display:flex;align-items:center;justify-content:center;font-weight:700;color:#31772f">{% if not fornecedor.logo_url %}{{ fornecedor.nome[0]|upper }}{% endif %}</div>
+      <div class="sz-logo" style="box-shadow:0 6px 18px rgba(0,0,0,.18);border:4px solid #fff;flex-shrink:0;background:{% if fornecedor.logo_url %}#fff url('{{ fornecedor.logo_url }}') center/contain no-repeat{% else %}#eef6ea{% endif %};display:flex;align-items:center;justify-content:center;font-weight:700;color:#31772f">{% if not fornecedor.logo_url %}{{ fornecedor.nome[0]|upper }}{% endif %}</div>
       <div style="padding-bottom:6px">
         <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">
           <span class="sz-nome" style="font-size:24px;font-weight:700;color:#1a2417;letter-spacing:-.3px">{{ fornecedor.nome }}</span>
@@ -2490,7 +2490,7 @@ _EMPRESA_DADOS = """{% extends "base" %}{% block conteudo %}
   <div style="display:flex;gap:1.2rem;flex-wrap:wrap;align-items:flex-end">
     <div>
       <div class="mut" style="font-size:.8rem;margin-bottom:.4rem">Logomarca</div>
-      <div id="emp-logo-prev" style="width:78px;height:78px;border-radius:16px;background:var(--card){% if identidade.logo_url %} url('{{ identidade.logo_url }}') center/cover{% endif %};border:1px solid var(--borda)"></div>
+      <div id="emp-logo-prev" style="width:78px;height:78px;border-radius:16px;background:{% if identidade.logo_url %}#fff url('{{ identidade.logo_url }}') center/contain no-repeat{% else %}var(--card){% endif %};border:1px solid var(--borda)"></div>
       <label style="display:inline-block;margin-top:.5rem;font-size:.82rem;color:var(--verde);cursor:pointer">enviar logo
         <input type="file" accept="image/*" onchange="empLogoUpload(this)" style="display:none">
       </label>
@@ -2539,7 +2539,10 @@ function _empImgUpload(inp, url, prevId){
   var fd=new FormData(); fd.append('arquivo', f);
   fetch(url,{method:'POST',body:fd}).then(function(r){return r.json();}).then(function(d){
     if(d.logo_url||d.banner_url){
-      document.getElementById(prevId).style.background="var(--card) url('"+(d.logo_url||d.banner_url)+"') center/cover";
+      // logo inteira (contain): banner segue preenchendo (cover)
+      document.getElementById(prevId).style.background=(d.logo_url
+        ? "#fff url('"+d.logo_url+"') center/contain no-repeat"
+        : "var(--card) url('"+d.banner_url+"') center/cover");
       st.textContent='✓ salvo';
     } else { st.textContent=d.erro||'falhou'; }
   }).catch(function(){st.textContent='erro de conexão';});
@@ -7993,9 +7996,12 @@ async def salvar_logo_fornecedor(request: Request, arquivo: UploadFile = File(..
         return JSONResponse({"erro": "nao autorizado"}, status_code=403)
     try:
         conteudo = await arquivo.read()
+        # logo NÃO leva aspecto: cortar quadrado comia o topo e a base da marca
+        # (marca deitada ou alta chegava mutilada na folha do orçamento). E o
+        # fundo transparente é preservado — senão vira um bloco preto atrás dela.
         url = upload_foto.subir_foto(conteudo, arquivo.filename or "",
                                      arquivo.content_type or "image/jpeg",
-                                     aspecto=1.0)
+                                     manter_alpha=True)
     except ValueError as e:
         return JSONResponse({"erro": str(e)}, status_code=400)
     except Exception as e:

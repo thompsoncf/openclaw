@@ -10,13 +10,21 @@ def test_iniciais():
 
 
 def test_avatar_com_logo():
+    """O padrão é CONTAIN: marca cortada é marca estragada — e desde que o upload
+    parou de cortar a logo em quadrado, ela chega aqui na proporção original."""
     h = marca.avatar_html({"logo_url": "https://x/l.jpg"}, px=40)
-    assert 'src="https://x/l.jpg"' in h and "width:40px" in h and "object-fit:cover" in h
+    assert 'src="https://x/l.jpg"' in h and "width:40px" in h and "object-fit:contain" in h
 
 
 def test_avatar_contain():
     h = marca.avatar_html({"logo_url": "https://x/l.jpg"}, ajuste="contain")
     assert "object-fit:contain" in h
+
+
+def test_avatar_cover_quando_pedido():
+    """Quem quiser preencher o quadrado (e aceitar o corte) ainda pede."""
+    h = marca.avatar_html({"logo_url": "https://x/l.jpg"}, ajuste="cover")
+    assert "object-fit:cover" in h
 
 
 def test_avatar_sem_logo_usa_iniciais_e_cor():

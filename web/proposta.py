@@ -138,6 +138,28 @@ def _fone(v: str) -> str:
     return (v or "").strip()
 
 
+def _contatos(*valores: str) -> list[str]:
+    """Os contatos do cliente, sem repetir.
+
+    WhatsApp e telefone quase sempre são O MESMO número — o vendedor preenche os
+    dois campos, e o espelho na aba Clientes guarda um deles. A folha juntava a
+    lista crua e o cliente lia o próprio número duas vezes.
+
+    A comparação é só por letra/dígito, então "(86) 98188-5930" e "86981885930"
+    contam como um só; vence o primeiro da lista, que é o já mascarado.
+    """
+    vistos: set[str] = set()
+    saida: list[str] = []
+    for v in valores:
+        v = (v or "").strip()
+        chave = "".join(ch for ch in v if ch.isalnum()).lower()
+        if not chave or chave in vistos:
+            continue
+        vistos.add(chave)
+        saida.append(v)
+    return saida
+
+
 def _lista(v) -> list:
     """jsonb que pode voltar como str (bancos/drivers antigos) ou já como lista."""
     if isinstance(v, str):
@@ -290,6 +312,8 @@ def _carregar(token: str, pool=None):
         "cliente": {"doc": _doc(cli_doc), "endereco": _titulo(cli_end), "cep": _cep(cli_cep),
                     "cidade": _titulo(cli_cidade), "uf": (cli_uf or "").upper(),
                     "email": cli_email or "", "telefone": _fone(cli_tel)},
+        # whatsapp e telefone costumam ser o mesmo número: a folha mostra uma vez
+        "contatos": _contatos(_fone(whats), _fone(cli_tel), cli_email or ""),
         "vendedor_nome": vendedor_nome or "",
         "emitente": {"razao": em_razao or "", "doc": _doc(em_doc), "endereco": _titulo(em_end),
                      "cep": _cep(em_cep), "bairro": _titulo(em_bairro),
@@ -643,8 +667,7 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
         {%- if prop.cliente.endereco or prop.cliente.cidade %}<br>{{ prop.cliente.endereco }}
           {%- if prop.cliente.cidade %}{% if prop.cliente.endereco %} · {% endif %}{{ prop.cliente.cidade }}{% if prop.cliente.uf %}/{{ prop.cliente.uf }}{% endif %}{% endif %}
           {%- if prop.cliente.cep %} · CEP {{ prop.cliente.cep }}{% endif %}{% endif %}
-        {%- if prop.whats or prop.cliente.telefone or prop.cliente.email %}<br>
-          {{- [prop.whats, prop.cliente.telefone, prop.cliente.email]|select|join(' · ') }}{% endif %}</div>
+        {%- if prop.contatos %}<br>{{ prop.contatos|join(' · ') }}{% endif %}</div>
       {% if linhas %}
       <div class="eb">Itens do orçamento</div>
       <table class="itens"><tr><th style="width:24px">#</th><th>Item</th><th class="r" style="width:40px">Qtd</th>

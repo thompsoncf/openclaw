@@ -107,6 +107,36 @@ def test_geral_da_empresa_fecha_a_fila():
     assert fila == ["(86) 3200-1234", "(86) 98888-7777"]
 
 
+# --- código do país: a base grava o MESMO número das duas formas ---------------
+# Achado conferindo a produção depois do deploy: `whatsapp` vem '+5586994549305' e
+# `telefone` vem '(86) 99454-9305'. Comparando dígitos crus viravam dois números.
+
+def test_mesmo_numero_com_e_sem_55_entra_uma_vez():
+    """Caso real (alvo 7): gastaria 2 das 3 tentativas com a MESMA pessoa."""
+    fila = cm.fila_numeros([], whatsapp="+5586994549305", telefone="(86) 99454-9305")
+    assert fila == ["+5586994549305"]
+
+
+def test_tentado_gravado_com_55_barra_o_mesmo_numero_sem_55():
+    """Caso real (alvo 146): o tentado ficou '5586995529151' e o telefone é
+    '(86) 99552-9151' — sem normalizar, a fila reenviava pro número que falhou."""
+    assert cm.fila_numeros([], whatsapp="+5586995529151", telefone="(86) 99552-9151",
+                           ja_tentados=["5586995529151"]) == []
+
+
+def test_fixo_com_55_nao_e_confundido_com_outro_numero():
+    """Contraprova (alvo 220): '+558632310101' e '(86) 3215-1869' são DIFERENTES —
+    normalizar não pode colapsar números distintos."""
+    fila = cm.fila_numeros([], whatsapp="+558632310101", telefone="(86) 3215-1869")
+    assert len(fila) == 2
+
+
+def test_ddd_de_casa_funciona_com_numero_prefixado():
+    """O DDD sai da chave normalizada, senão '+5586...' viraria DDD '55'."""
+    assert cm._ddd("+5586994549305") == "86"
+    assert cm._ddd("(86) 99454-9305") == "86"
+
+
 def test_lixo_e_numero_curto_sao_descartados():
     fila = cm.fila_numeros([_t("123"), _t(""), "não é dict", _t("(86) 99900-0001")])
     assert fila == ["(86) 99900-0001"]

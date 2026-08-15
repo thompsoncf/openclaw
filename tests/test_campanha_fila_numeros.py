@@ -303,6 +303,38 @@ def test_numero_travado_na_base_nao_ganha_fila(pool, motor_isolado):
     assert status == "erro" and tentativas == 1
 
 
+# --- o status da RÉGUA DE E-MAIL não pode calar o WhatsApp -------------------
+# O disparo filtrava por `status in ('fila','enviado')` — o status do E-MAIL. Quem
+# terminava a régua ('concluido') sumia do WhatsApp pra sempre, mesmo com números
+# não tentados e mesmo com o dono apertando "Colocar na fila": 11 alvos assim em
+# produção, num botão que aceitava e não fazia nada.
+
+@pytest.mark.parametrize("status_email", ["fila", "enviado", "concluido"])
+def test_regua_de_email_terminada_nao_impede_o_whatsapp(pool, motor_isolado, status_email):
+    conta, camp = _cenario(pool, f"Regua {status_email}", _TRES)
+    with pool.connection() as c:
+        c.execute("update campanha_alvos set status=%s where campanha_id=%s",
+                  (status_email, camp))
+        c.commit()
+    prov = _Provedor()
+    cm._disparar_wa_campanha(pool, camp, conta, "HXabc", 10, prov)
+    assert len(prov.numeros) == 1, f"'{status_email}' devia ser elegível pro WhatsApp"
+
+
+@pytest.mark.parametrize("status_email", ["respondeu", "descadastrou", "erro"])
+def test_quem_respondeu_ou_saiu_nao_recebe(pool, motor_isolado, status_email):
+    """`descadastrou` é LGPD — pediu pra sair, não recebe mais nada. `respondeu`
+    já falou com você. `erro` tem problema de cadastro, resolve antes de gastar."""
+    conta, camp = _cenario(pool, f"Fora {status_email}", _TRES)
+    with pool.connection() as c:
+        c.execute("update campanha_alvos set status=%s where campanha_id=%s",
+                  (status_email, camp))
+        c.commit()
+    prov = _Provedor()
+    cm._disparar_wa_campanha(pool, camp, conta, "HXabc", 10, prov)
+    assert prov.numeros == [], f"'{status_email}' NÃO pode receber disparo frio"
+
+
 def test_alvo_sem_numero_nenhum_continua_sem_numero(pool, motor_isolado):
     conta, camp = _cenario(pool, "Sem numero", [])
     cm._disparar_wa_campanha(pool, camp, conta, "HXabc", 10, _Provedor())

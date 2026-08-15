@@ -135,6 +135,29 @@ def test_recolocar_limpa_o_sid_da_tentativa_encerrada(pool, monkeypatch):
                          (aid,)).fetchone() == (None, None)
 
 
+@pytest.mark.parametrize("status_email", ["respondeu", "descadastrou", "erro"])
+def test_nao_recoloca_quem_nao_pode_receber(pool, monkeypatch, status_email):
+    """O botão não pode ser um atalho pra mandar frio pra quem já respondeu ou
+    pediu pra sair — `descadastrou` é LGPD."""
+    conta, camp, aid = _cenario(pool, f"Fora {status_email}", tentativas=1)
+    with pool.connection() as c:
+        c.execute("update campanha_alvos set status=%s where id=%s", (status_email, aid))
+        c.commit()
+    _chamar(pool, monkeypatch, conta, camp, [aid])
+    assert _alvo(pool, aid)[0] == "erro", "não pode voltar pra fila"
+
+
+def test_recoloca_quem_terminou_a_regua_de_email(pool, monkeypatch):
+    """'concluido' é elegível: a régua de e-mail ter acabado não diz nada sobre o
+    WhatsApp, e o lead nunca recebeu uma mensagem que chegou."""
+    conta, camp, aid = _cenario(pool, "Regua concluida", tentativas=1)
+    with pool.connection() as c:
+        c.execute("update campanha_alvos set status='concluido' where id=%s", (aid,))
+        c.commit()
+    _chamar(pool, monkeypatch, conta, camp, [aid])
+    assert _alvo(pool, aid)[0] is None
+
+
 def test_so_mexe_em_quem_esta_parado(pool, monkeypatch):
     conta, camp, aid = _cenario(pool, "Enviado", tentativas=1)
     with pool.connection() as c:

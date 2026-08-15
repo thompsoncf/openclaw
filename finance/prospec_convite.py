@@ -38,6 +38,61 @@ def template_configurado(camp_sid: str | None = None) -> bool:
     return bool(sid_efetivo(camp_sid) and wa.configurado())
 
 
+# Por que uma campanha não consegue disparar o WhatsApp frio. O motor grava o
+# código em campanhas.wa_bloqueio; a tela mostra a frase.
+BLOQUEIO_ROT = {
+    "sem_canal": "Conecte o WhatsApp da empresa em Comunicação › Canais.",
+    "provedor_qr": "Seu WhatsApp está conectado por QR Code, que não envia template — "
+                   "e prospecção fria saindo do número pessoal derruba a linha. "
+                   "Use Twilio ou Cloud API pra campanha.",
+    "sem_template": "Falta o SID do template aprovado — cole ele aqui embaixo.",
+    "sem_credenciais": "Faltam as credenciais do Twilio no servidor.",
+    "sem_numero_empresa": "O canal de WhatsApp da empresa está sem número.",
+    "nao_configurado": "O canal de WhatsApp da empresa está incompleto.",
+    # códigos 2xxxx do Twilio valem pra CONTA inteira (ver campanhas_motor._erro_da_conta)
+    "twilio_20003": "O Twilio recusou a autenticação da conta — confira as "
+                    "credenciais no servidor.",
+}
+
+
+def rotulo_bloqueio(codigo: str | None) -> str:
+    """Frase pro dono. Um código do provedor que ainda não tem texto próprio vira
+    uma frase genérica — melhor que um aviso vazio na tela."""
+    codigo = (codigo or "").strip()
+    if not codigo:
+        return ""
+    rot = BLOQUEIO_ROT.get(codigo)
+    if rot:
+        return rot
+    if codigo.startswith("twilio_"):
+        return (f"O Twilio recusou o envio (código {codigo[7:]}) — é um erro da conta, "
+                "não dos leads. Nenhum alvo foi gasto.")
+    return "O provedor de WhatsApp recusou o envio."
+
+
+def motivo_bloqueio(c, conta_id: int, camp_sid: str | None = None) -> str:
+    """'' quando a campanha PODE disparar o convite frio; senão o código do motivo
+    (chave de BLOQUEIO_ROT). Recebe cursor aberto, como o resto do dispatcher.
+
+    Prospecção fria é falar com quem nunca respondeu — a API oficial do WhatsApp
+    exige TEMPLATE aprovado pra isso. Quem está no QR (sessão tipo WhatsApp Web)
+    não tem template nenhum: o disparo sairia como texto livre do número pessoal,
+    que é o caminho curto pro banimento da linha. Melhor não sair, e dizer por quê."""
+    from . import whatsapp_out as wout
+    prov = wout.provedor_da_conta(c, conta_id)
+    if not prov:
+        return "sem_canal"
+    if prov == "qr":
+        return "provedor_qr"
+    if not sid_efetivo(camp_sid):
+        return "sem_template"
+    if prov == "twilio":
+        from . import whatsapp_twilio as wa
+        if not wa.configurado():
+            return "sem_credenciais"
+    return ""
+
+
 def enviar_convite(pool, conta_id: int, alvo_id: int, numero: str | None = None) -> dict:
     """Dispara o template de 1º contato pro número do lead, PELO NÚMERO DA EMPRESA
     (Twilio). Funciona fora da janela de 24h. Retorno tolerante: {'ok': bool, ...}.

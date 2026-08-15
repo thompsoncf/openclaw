@@ -162,8 +162,15 @@ def _avisar_whatsapp(pool, conta_id: int, numero: str, template_sid: str, empres
         from finance import whatsapp_out as wo
         with pool.connection() as c2:
             if template_sid:
-                wo.enviar_template(c2, conta_id, numero, template_sid, {"1": empresa})
+                r = wo.enviar_template(c2, conta_id, numero, template_sid, {"1": empresa})
             else:
-                wo.enviar(c2, conta_id, numero, texto)
-    except Exception:  # noqa: BLE001
-        pass  # fora da janela 24h e sem template → a Meta bloqueia; segue só o e-mail
+                r = wo.enviar(c2, conta_id, numero, texto)
+        # fora da janela 24h e sem template → a Meta bloqueia; segue só o e-mail.
+        # Mas isso PRECISA aparecer no log: um `pass` aqui escondia o vendedor não
+        # estar recebendo aviso nenhum de lead novo.
+        if not (r or {}).get("ok"):
+            _log.warning("distribuicao: aviso por WhatsApp não saiu (conta=%s, template=%s): %s",
+                         conta_id, bool(template_sid),
+                         (r or {}).get("erro") or (r or {}).get("msg") or "?")
+    except Exception as e:  # noqa: BLE001
+        _log.warning("distribuicao: aviso por WhatsApp falhou (conta=%s): %s", conta_id, e)

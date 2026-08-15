@@ -462,9 +462,15 @@ def _disparar_wa(pool) -> int:
                          from campanhas where status='ativa' and coalesce(wa_ativo,false)""").fetchall()
             hoje = date.today()
             for (cid, conta_id, limite, env_hoje, dia, camp_sid) in camps:
+                # decide UMA vez por campanha, não alvo a alvo: se o canal da conta
+                # não manda template (QR) ou falta o SID, nenhum alvo ia sair mesmo —
+                # e marcar erro em cada um os tirava da fila pra sempre.
+                with pool.connection() as c:
+                    motivo = prospec_convite.motivo_bloqueio(c, conta_id, camp_sid)
+                _wa_bloqueio(pool, cid, motivo)
+                if motivo:
+                    continue
                 sid = (camp_sid or "").strip() or env_sid   # template da campanha > env
-                if not sid:
-                    continue                                # campanha sem template → pula
                 if dia != hoje:
                     env_hoje = 0
                     with pool.connection() as c:
@@ -480,6 +486,58 @@ def _disparar_wa(pool) -> int:
             lockc.execute("select pg_advisory_unlock(%s)", (_LOCK_WA,))
             lockc.commit()
     return enviados
+
+
+# Falhas que são da CONFIGURAÇÃO DA CONTA, não daquele alvo: iam se repetir
+# igualzinho em todos os outros. Travam a campanha inteira em vez de queimar alvo
+# por alvo (a fila é `wa_status is null` — alvo marcado nunca mais volta).
+_ERRO_CONFIG = {"provedor_sem_template", "sem_numero_empresa", "nao_configurado",
+                "sem_template"}
+
+
+def _erro_da_conta(res: dict) -> str:
+    """'' se a falha é daquele número; senão o código do bloqueio da campanha.
+
+    A divisão que importa é POR QUEM a falha é:
+
+    * **63xxx** são do WhatsApp e valem por DESTINATÁRIO — 63024 "o número não tem
+      WhatsApp", 63016 "fora da janela". O alvo é marcado e a fila anda: é ele que
+      tem problema, não a conta.
+    * **2xxxx** são da API do Twilio e valem pra CONTA inteira — 20003 é a
+      credencial não autenticando. Em produção esse código queimou 22 alvos de uma
+      campanha em agosto/2026, um a um, por uma credencial errada no servidor.
+    * e os erros que o próprio dispatcher devolve antes de chegar no provedor.
+    """
+    if (res.get("erro") or "") in _ERRO_CONFIG:
+        return res["erro"]
+    try:
+        cod = int(res.get("codigo") or 0)
+    except (TypeError, ValueError):
+        return ""
+    return f"twilio_{cod}" if 20000 <= cod < 30000 else ""
+
+
+def _wa_bloqueio(pool, camp_id, motivo: str) -> None:
+    """Grava (ou limpa) o porquê de a campanha não estar disparando WhatsApp.
+    Só escreve quando MUDA — o agendador passa aqui de minuto em minuto e senão
+    encheria o log e o histórico de linha repetida."""
+    try:
+        with pool.connection() as c:
+            r = c.execute("select coalesce(wa_bloqueio,'') from campanhas where id=%s",
+                          (camp_id,)).fetchone()
+            if not r or r[0] == (motivo or ""):
+                return
+            c.execute("""update campanhas set wa_bloqueio=%s,
+                           wa_bloqueio_em=case when %s::text is null then null else now() end
+                         where id=%s""", (motivo or None, motivo or None, camp_id))
+            c.commit()
+    except Exception as e:  # noqa: BLE001 — anotar o bloqueio nunca derruba o disparo
+        _log.warning("campanhas: não deu pra anotar o bloqueio da campanha %s: %s", camp_id, e)
+        return
+    if motivo:
+        _log.warning("campanhas: campanha %s não dispara WhatsApp (%s)", camp_id, motivo)
+    else:
+        _log.info("campanhas: campanha %s liberada pro WhatsApp", camp_id)
 
 
 def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> int:
@@ -518,6 +576,12 @@ def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> i
             res = whatsapp_out.enviar_template(c, conta_id, numero, sid, variaveis, mmlite=mmlite)
         if not res.get("ok"):
             detalhe = res.get("msg") or res.get("erro") or ""
+            bloqueio = _erro_da_conta(res)
+            if bloqueio:
+                # problema da CONTA, não deste alvo: não queima ninguém (o alvo
+                # ficaria fora da fila pra sempre) e para a campanha com o motivo.
+                _wa_bloqueio(pool, camp_id, bloqueio)
+                break
             _wa_marca(pool, aid, "erro", erro_codigo=res.get("codigo"), erro_msg=detalhe)
             with pool.connection() as c:
                 evento(c, camp_id, pid, "whatsapp", "erro", detalhe)

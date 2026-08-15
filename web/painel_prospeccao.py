@@ -3031,6 +3031,25 @@ async def webhook_meta(request: Request, background_tasks: BackgroundTasks):
     return Response("ok", media_type="text/plain")
 
 
+def _qr_segredo_ok(request: Request) -> bool:
+    """O serviço Node se identifica pelo segredo compartilhado. `compare_digest`
+    em vez de `==` pra não vazar o segredo pelo tempo de resposta."""
+    import hmac
+    segredo = os.environ.get("WA_QR_SHARED_SECRET") or ""
+    return bool(segredo) and hmac.compare_digest(
+        str(request.headers.get("x-wa-secret") or ""), segredo)
+
+
+def _conta_em_qr(c, conta_id: int) -> bool:
+    """A empresa está mesmo com o WhatsApp no modo QR? O segredo é UM só pro
+    serviço inteiro — sem esta segunda trava, um conta_id forjado (ou trocado por
+    engano) tocaria os dados de qualquer outra empresa, inclusive as do Twilio."""
+    return bool(c.execute(
+        """select 1 from canais_config
+             where conta_id=%s and canal='whatsapp' and ativo
+               and coalesce(provedor,'twilio')='qr'""", (conta_id,)).fetchone())
+
+
 @router.post("/webhooks/wa-qr")
 async def webhook_wa_qr(request: Request, background_tasks: BackgroundTasks):
     """Entrada do WhatsApp por QR (serviço Node services/wa-qr). Autentica pelo
@@ -3043,10 +3062,9 @@ async def webhook_wa_qr(request: Request, background_tasks: BackgroundTasks):
     configurado como 'qr', etc.)."""
     import logging
     log = logging.getLogger("prospeccao.wa_qr")
-    segredo = os.environ.get("WA_QR_SHARED_SECRET") or ""
-    if not segredo or request.headers.get("x-wa-secret") != segredo:
+    if not _qr_segredo_ok(request):
         log.warning("webhook_wa_qr: segredo ausente ou não confere (WA_QR_SHARED_SECRET "
-                    "configurado=%s)", bool(segredo))
+                    "configurado=%s)", bool(os.environ.get("WA_QR_SHARED_SECRET")))
         return Response(status_code=403)
     try:
         payload = json.loads((await request.body()).decode("utf-8") or "{}")
@@ -3068,10 +3086,7 @@ async def webhook_wa_qr(request: Request, background_tasks: BackgroundTasks):
     pool = get_pool()
     with pool.connection() as c:
         # confere que a empresa está mesmo no modo QR (evita conta_id forjado tocar outra via)
-        dono = c.execute("""select 1 from canais_config
-                              where conta_id=%s and canal='whatsapp' and ativo and coalesce(provedor,'twilio')='qr'""",
-                         (conta_id,)).fetchone()
-        if not dono:
+        if not _conta_em_qr(c, conta_id):
             log.warning("webhook_wa_qr: conta_id=%s sem canal whatsapp/qr ativo em canais_config — descartado",
                         conta_id)
             return Response("ok", media_type="text/plain")
@@ -3139,8 +3154,7 @@ async def webhook_wa_qr_historico(request: Request):
     se vale virar lead pra um número antigo."""
     import logging
     log = logging.getLogger("prospeccao.wa_qr")
-    segredo = os.environ.get("WA_QR_SHARED_SECRET") or ""
-    if not segredo or request.headers.get("x-wa-secret") != segredo:
+    if not _qr_segredo_ok(request):
         log.warning("webhook_wa_qr_historico: segredo ausente ou não confere")
         return Response(status_code=403)
     try:
@@ -3216,8 +3230,7 @@ async def webhook_wa_qr_saida(request: Request):
     do que já foi respondido. Nunca cria lead ou conversa nova."""
     import logging
     log = logging.getLogger("prospeccao.wa_qr")
-    segredo = os.environ.get("WA_QR_SHARED_SECRET") or ""
-    if not segredo or request.headers.get("x-wa-secret") != segredo:
+    if not _qr_segredo_ok(request):
         return Response(status_code=403)
     try:
         payload = json.loads((await request.body()).decode("utf-8") or "{}")
@@ -3267,8 +3280,7 @@ async def webhook_wa_qr_contatos(request: Request):
     agenda inteira do vendedor viraria conversa)."""
     import logging
     log = logging.getLogger("prospeccao.wa_qr")
-    segredo = os.environ.get("WA_QR_SHARED_SECRET") or ""
-    if not segredo or request.headers.get("x-wa-secret") != segredo:
+    if not _qr_segredo_ok(request):
         return Response(status_code=403)
     try:
         payload = json.loads((await request.body()).decode("utf-8") or "{}")
@@ -3333,8 +3345,7 @@ async def webhook_wa_qr_audio(request: Request):
     fica só com a marca de áudio. Nunca quebra a conversa por causa disso."""
     import logging
     log = logging.getLogger("prospeccao.wa_qr")
-    segredo = os.environ.get("WA_QR_SHARED_SECRET") or ""
-    if not segredo or request.headers.get("x-wa-secret") != segredo:
+    if not _qr_segredo_ok(request):
         return Response(status_code=403)
     try:
         payload = json.loads((await request.body()).decode("utf-8") or "{}")
@@ -3348,6 +3359,10 @@ async def webhook_wa_qr_audio(request: Request):
     b64 = payload.get("audio_b64") or ""
     if not conta_id or not sid or not b64:
         return Response("ok", media_type="text/plain")
+    with get_pool().connection() as c:
+        if not _conta_em_qr(c, conta_id):
+            log.warning("webhook_wa_qr_audio: conta_id=%s não está em QR — descartado", conta_id)
+            return Response("ok", media_type="text/plain")
     from core.transcribe import transcritor_se_configurado
     tr = transcritor_se_configurado()
     if tr is None:
@@ -3398,8 +3413,7 @@ async def webhook_wa_qr_status(request: Request):
     cima de qualquer um — se falhou, é isso que o vendedor precisa ver."""
     import logging
     log = logging.getLogger("prospeccao.wa_qr")
-    segredo = os.environ.get("WA_QR_SHARED_SECRET") or ""
-    if not segredo or request.headers.get("x-wa-secret") != segredo:
+    if not _qr_segredo_ok(request):
         return Response(status_code=403)
     try:
         payload = json.loads((await request.body()).decode("utf-8") or "{}")
@@ -3415,6 +3429,9 @@ async def webhook_wa_qr_status(request: Request):
     validos = {"enviado", "entregue", "lido", "erro"}
     n = 0
     with get_pool().connection() as c:
+        if not _conta_em_qr(c, conta_id):
+            log.warning("webhook_wa_qr_status: conta_id=%s não está em QR — descartado", conta_id)
+            return Response("ok", media_type="text/plain")
         for it in itens[:500]:
             sid = str((it or {}).get("id") or "").strip()
             novo = str((it or {}).get("status") or "").strip()
@@ -3440,15 +3457,18 @@ async def webhook_wa_qr_status(request: Request):
 
 @router.post("/webhooks/wa-qr/deslogado")
 async def webhook_wa_qr_deslogado(request: Request):
-    """WhatsApp por QR deslogou DE VEZ (não é queda temporária — só dispara
-    quando o Baileys recebe DisconnectReason.loggedOut). Apaga o HISTÓRICO de
-    conversa (mensagens + conversas) daquele canal WhatsApp, pra não acumular
-    lixo de uma sessão que não existe mais. NÃO apaga o lead/prospecção em si
-    — só o chat; o registro comercial (funil, orçamento vinculado) continua."""
+    """WhatsApp por QR deslogou DE VEZ (não é queda temporária — só dispara quando
+    o Baileys recebe DisconnectReason.loggedOut). Desliga o canal e avisa o dono.
+
+    NÃO apaga nada. Antes esta rota apagava mensagens, conversas e a agenda de
+    contatos da conta inteira — e deslogar acontece sem querer (trocou de celular,
+    o pareamento caiu, alguém apertou "sair" no aparelho). O histórico de conversa
+    com os leads é o ativo comercial da empresa; ele não pode depender de um
+    pareamento de WhatsApp. Reconectar o QR volta a funcionar em cima do que já
+    está aqui."""
     import logging
     log = logging.getLogger("prospeccao.wa_qr")
-    segredo = os.environ.get("WA_QR_SHARED_SECRET") or ""
-    if not segredo or request.headers.get("x-wa-secret") != segredo:
+    if not _qr_segredo_ok(request):
         return Response(status_code=403)
     try:
         payload = json.loads((await request.body()).decode("utf-8") or "{}")
@@ -3462,19 +3482,25 @@ async def webhook_wa_qr_deslogado(request: Request):
         return Response("ok", media_type="text/plain")
     pool = get_pool()
     with pool.connection() as c:
-        n_msg = c.execute(
-            """delete from mensagens where conversa_id in
-                 (select id from conversas where conta_id=%s and canal='whatsapp')""",
-            (conta_id,)).rowcount
-        n_conv = c.execute(
-            "delete from conversas where conta_id=%s and canal='whatsapp'",
-            (conta_id,)).rowcount
-        # a agenda é do celular que acabou de sair — vai junto (o próximo pareamento
-        # traz a agenda do aparelho novo, que pode nem ser o mesmo)
-        c.execute("delete from wa_contatos where conta_id=%s", (conta_id,))
+        if not _conta_em_qr(c, conta_id):
+            log.warning("webhook_wa_qr_deslogado: conta_id=%s não está em QR — ignorado", conta_id)
+            return Response("ok", media_type="text/plain")
+        c.execute("""update canais_config set ativo=false
+                      where conta_id=%s and canal='whatsapp'
+                        and coalesce(provedor,'twilio')='qr'""", (conta_id,))
         c.commit()
-    log.warning("webhook_wa_qr_deslogado: conta_id=%s deslogou — apagadas %s mensagens e %s conversas "
-                "(lead/prospecção preservados)", conta_id, n_msg, n_conv)
+    log.warning("webhook_wa_qr_deslogado: conta_id=%s deslogou — canal desligado "
+                "(histórico preservado)", conta_id)
+    try:
+        from finance import notificar
+        notificar.enviar_para_dono(
+            pool, conta_id,
+            "⚠️ Seu WhatsApp desconectou do Zaq. Nada foi perdido — as conversas "
+            "estão todas aqui. Pra voltar a enviar e receber, leia o QR Code de novo "
+            "em Comunicação › Canais.")
+    except Exception as e:  # noqa: BLE001 — o aviso nunca segura a resposta do webhook
+        log.warning("webhook_wa_qr_deslogado: não deu pra avisar o dono da conta %s: %s",
+                    conta_id, e)
     return Response("ok", media_type="text/plain")
 
 
@@ -3652,7 +3678,7 @@ def _campanhas_dados(c, conta_id, membro_id=None):
     rows = c.execute(
         """select cp.id, cp.nome, cp.status, cp.limite_dia, coalesce(cp.wa_ativo,false),
                   cp.teto_wa, coalesce(cp.enviados_hoje,0), cp.dia_contagem,
-                  coalesce(cp.wa_template_sid,''),
+                  coalesce(cp.wa_template_sid,''), coalesce(cp.wa_bloqueio,''),
                   ag.n, ag.email_env, ag.email_resp, ag.email_abriu, ag.email_err, ag.virou,
                   ag.wa_env, ag.wa_resp, ag.wa_err, ag.wa_gasto, coalesce(ev.bounces,0),
                   to_char((select min(a.proximo_envio_em) from campanha_alvos a
@@ -3705,7 +3731,7 @@ def _campanhas_dados(c, conta_id, membro_id=None):
     camps = []
     tot_gasto = tot_msgs = tot_email = tot_teto = perto = 0
     for r in rows:
-        (cid, nome, status, limite, wa_ativo, teto, env_hoje, dia_cont, wa_sid,
+        (cid, nome, status, limite, wa_ativo, teto, env_hoje, dia_cont, wa_sid, wa_bloq,
          n, e_env, e_resp, e_abriu, e_err, virou, w_env, w_resp, w_err, w_gasto, e_volta,
          proximo, resp_nome) = r
         limite = limite or 0
@@ -3730,7 +3756,7 @@ def _campanhas_dados(c, conta_id, membro_id=None):
             "status_rot": _STATUS_ROT_CP.get(status, status),
             "status_curto": _STATUS_CURTO_CP.get(status, status),
             "limite": limite, "n": n, "virou": virou or 0, "wa": wa_ativo,
-            "wa_pronto": _prospec_convite.template_configurado(wa_sid),
+            "wa_pronto": not (_prospec_convite.motivo_bloqueio(c, conta_id, wa_sid) or wa_bloq),
             "hoje": hoje_n, "hoje_offset": round(_CIRC * (1 - pct_dia / 100), 1),
             "erros": (e_err or 0) + (w_err or 0), "proximo": proximo or "",
             "email": {"env": e_env or 0, "resp": e_resp or 0, "abriu": e_abriu or 0,
@@ -3812,7 +3838,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                                  coalesce(modelo_codigo,''), coalesce(wa_template_sid,''),
                                  coalesce(reengajar_ativo,false), coalesce(reengajar_dias,3),
                                  coalesce(remetente_slot,'principal'), coalesce(wa_mmlite,false),
-                                 teto_wa, responsavel_id
+                                 teto_wa, responsavel_id, coalesce(wa_bloqueio,'')
                             from campanhas where id=%s and conta_id=%s""",
                        (camp_id, ctx["conta_id"])).fetchone()
         if not cp:
@@ -3872,6 +3898,10 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                       count(*) filter (where wa_cobravel is not null)
                  from campanha_alvos where campanha_id=%s""", (camp_id,)).fetchone()
         modelos = _modelos_lista(c, ctx["conta_id"])
+        # a config de HOJE manda (é o que o dono resolve agora); se estiver tudo
+        # certo por aqui, sobra o que o PROVEDOR recusou no último disparo, que só
+        # o motor viu (ex.: twilio_20003, credencial não autentica).
+        wa_bloqueio = _prospec_convite.motivo_bloqueio(c, ctx["conta_id"], cp[13]) or cp[20]
     # "pulado" (já respondeu) e "sem_numero" não são disparos reais — fora da conta
     wa_enviados = sum(v for k, v in wa_counts.items() if k not in ("pulado", "sem_numero"))
     # "respondeu" implica que já foi entregue e lido — soma nos dois (não é status
@@ -3893,7 +3923,8 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
             "status_rot": _STATUS_ROT_CP.get(cp[2], cp[2]), "material": cp[6],
             "wa_ativo": cp[7], "limite_wa": cp[8], "wa_hoje": wa_hoje, "wa_enviados": wa_enviados,
             "wa_template_sid": cp[13],
-            "wa_pronto": _prospec_convite.template_configurado(cp[13]), "material_tipo": cp[11],
+            "wa_pronto": not wa_bloqueio, "material_tipo": cp[11],
+            "wa_bloqueio": _prospec_convite.rotulo_bloqueio(wa_bloqueio),
             "modelo_codigo": cp[12], "reengajar_ativo": cp[14], "reengajar_dias": cp[15],
             "remetente_slot": cp[16], "wa_mmlite": cp[17],
             "teto_wa": (f"{float(cp[18]):.2f}" if cp[18] is not None else ""),
@@ -8768,7 +8799,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         <span class="chips">
           <span class="chip">Envios/dia <b>{{ camp.limite }}</b></span>
           <span class="chip {% if not camp.material %}warn{% endif %}">{{ micon[mt] }} Material: <b>{% if camp.material %}{{ mt }}{% else %}não configurado{% endif %}</b></span>
-          <span class="chip {% if camp.wa_ativo and camp.wa_pronto %}on{% elif camp.wa_ativo %}warn{% endif %}">💬 WhatsApp {% if camp.wa_ativo and camp.wa_pronto %}ativo{% elif camp.wa_ativo %}SID pendente{% else %}desligado{% endif %}</span>
+          <span class="chip {% if camp.wa_ativo and camp.wa_pronto %}on{% elif camp.wa_ativo %}warn{% endif %}">💬 WhatsApp {% if camp.wa_ativo and camp.wa_pronto %}ativo{% elif camp.wa_ativo %}não dispara{% else %}desligado{% endif %}</span>
           <span class="chip {% if camp.reengajar_ativo %}on{% endif %}">🔁 Reengajar {% if camp.reengajar_ativo %}em <b>{{ camp.reengajar_dias }}d</b>{% else %}desligado{% endif %}</span>
         </span>
         <span class="caret">▾</span>
@@ -8821,10 +8852,11 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         <div class="divi"></div>
         <label class="lbl" style="font-size:.82rem">💬 Template de WhatsApp — 1º contato frio (aprovado no Twilio)</label>
         <div class="mut" style="font-size:.74rem;margin-top:.15rem">A mensagem aprovada que fura a janela de 24h (o convite com os botões). <b>É diferente do modelo de e‑mail</b> da etapa 2 — aqui você cola o código do template do WhatsApp.</div>
+        {% if camp.wa_bloqueio %}<div style="margin-top:.5rem;padding:.55rem .7rem;border:1px solid var(--ambar);border-radius:8px;background:rgba(224,163,46,.09);font-size:.78rem;line-height:1.45">⚠️ <b>O WhatsApp desta campanha não vai disparar.</b> {{ camp.wa_bloqueio }}</div>{% endif %}
         <div style="margin-top:.4rem">
           <label class="lbl">Content SID do template de WhatsApp (Twilio)</label>
           <input class="fld" name="wa_template_sid" value="{{ camp.wa_template_sid }}" placeholder="HX..." spellcheck="false" style="font-family:var(--mono)">
-          <div class="mut" style="font-size:.74rem;margin-top:.2rem">Cole o SID do template aprovado <b>desta campanha</b> (começa com <code>HX</code>). Cada campanha pode ter o seu — não precisa mexer no Render. {% if camp.wa_pronto %}<span style="color:var(--verde-claro)">● pronto pra disparo frio</span>{% else %}<span style="color:var(--ambar)">● defina o SID pra liberar o disparo</span>{% endif %}</div>
+          <div class="mut" style="font-size:.74rem;margin-top:.2rem">Cole o SID do template aprovado <b>desta campanha</b> (começa com <code>HX</code>). Cada campanha pode ter o seu — não precisa mexer no Render. {% if camp.wa_pronto %}<span style="color:var(--verde-claro)">● pronto pra disparo frio</span>{% endif %}</div>
         </div>
         <div style="display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-top:.5rem">
           <label class="chk"><input type="checkbox" name="wa_ativo" value="1" {% if camp.wa_ativo %}checked{% endif %}> <span>Disparar o convite por WhatsApp junto com o e-mail</span></label>

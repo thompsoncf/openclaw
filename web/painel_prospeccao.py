@@ -2741,20 +2741,26 @@ async def webhook_twilio_status(request: Request):
                     erro_codigo = params.get("ErrorCode") or ""
                     erro_msg = (params.get("ErrorMessage") or "")[:300]
                     # erro só marca se ainda não chegou a entregue/lido
-                    cur = c.execute("""update campanha_alvos set wa_status='erro', wa_em=now(),
-                                   wa_erro_codigo=%s, wa_erro_msg=%s
-                                   where wa_sid=%s and coalesce(wa_status,'') not in ('entregue','lido')
-                                   returning prospeccao_id, campanha_id""",
-                              (erro_codigo or None, erro_msg or None, msid))
-                    _transicao_erro = cur.fetchone()
+                    cur = c.execute(
+                        """select id, prospeccao_id, campanha_id from campanha_alvos
+                            where wa_sid=%s and coalesce(wa_status,'') not in ('entregue','lido')""",
+                        (msid,))
+                    _alvo_erro = cur.fetchone()
+                    if _alvo_erro:
+                        # a mensagem saiu e não chegou: risca o número, conta a tentativa
+                        # e devolve o alvo pra fila enquanto sobrar número — este é o
+                        # caminho da MAIORIA das falhas (63024 e afins), não o da API.
+                        from finance.campanhas_motor import falha_na_entrega
+                        parou = falha_na_entrega(c, _alvo_erro[0], erro_codigo, erro_msg)
                     c.execute("""update mensagens set status='erro'
                                    where provider_sid=%s and coalesce(status,'') not in ('entregue','lido')""",
                               (msid,))
-                    if _transicao_erro:
+                    if _alvo_erro:
                         from finance.campanhas_motor import evento
                         detalhe = (f"{erro_codigo}: {erro_msg}" if erro_codigo and erro_msg
                                    else (erro_msg or erro_codigo))
-                        evento(c, _transicao_erro[1], _transicao_erro[0], "whatsapp", "erro", detalhe)
+                        evento(c, _alvo_erro[2], _alvo_erro[1], "whatsapp",
+                               "erro" if parou else "numero_falhou", detalhe)
                     c.commit()
                 else:
                     # guarda de rank: nunca rebaixa (erro=enviado < entregue < lido)

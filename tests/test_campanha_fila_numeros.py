@@ -34,6 +34,7 @@ create table campanhas (id bigserial primary key, conta_id bigint, nome text,
   wa_bloqueio text, wa_bloqueio_em timestamptz);
 create table campanha_alvos (id bigserial primary key, campanha_id bigint, prospeccao_id bigint,
   status text default 'fila', wa_status text, wa_em timestamptz, wa_sid text,
+  wa_numero text,
   wa_erro_codigo text, wa_erro_msg text, wa_categoria text, wa_custo numeric(10,4),
   alvo_telefone text, wa_tentados jsonb not null default '[]'::jsonb,
   wa_tentativas int not null default 0);

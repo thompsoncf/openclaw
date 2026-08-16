@@ -59,7 +59,8 @@ create table servicos_catalogo (id bigserial primary key, conta_id bigint, slug 
 create table eventos_agenda (id bigserial primary key, conta_id bigint, membro_id bigint,
   titulo text, inicio timestamptz, fim timestamptz, local text, descricao text,
   lembrete_min int, tipo text default 'pessoal', link_online text, desfecho text,
-  status text default 'ativo', criado_em timestamptz default now(), prospeccao_id bigint, ics_token text);
+  status text default 'ativo', criado_em timestamptz default now(), prospeccao_id bigint, ics_token text,
+  pre_reserva_ate timestamptz);   -- 160: pré-reserva de data (agenda._COLS lê essa coluna)
 """
 
 

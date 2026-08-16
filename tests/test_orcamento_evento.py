@@ -79,6 +79,10 @@ def pool():
         # DEPOIS de orcamentos existir: a 152 altera as DUAS tabelas (o vínculo
         # em orcamentos, endereço/CEP em clientes).
         c.execute(_sql("152_orcamento_cliente_vinculo.sql"))
+        # pré-reserva por sinal: 160 é a agenda (status novo + prazo por conta),
+        # 161 é o orçamento (valor do sinal + carimbo de pago).
+        c.execute(_sql("160_agenda_pre_reserva.sql"))
+        c.execute(_sql("161_orcamento_sinal.sql"))
         c.commit()
     yield p
     p.close()
@@ -560,6 +564,121 @@ def test_assinar_reserva_a_data_na_agenda(pool, conta_id):
     assert (fim.astimezone(ag.BRT).day, fim.astimezone(ag.BRT).hour) == (19, 0)
     assert local == "Espaço 01" and "50 convidados" in desc
     assert gravado == ev_id
+
+
+# ------------------------------------------------------- pré-reserva pelo sinal
+def test_sinal_do_orcamento_sai_da_primeira_parcela():
+    """O valor do sinal já existia — na `obs` que o gerador escreve. Só ali: parcela
+    sem essa marca é parcela normal, e orçamento montado na mão não tem sinal."""
+    assert prop.sinal_do_orcamento({"parcelas": PARCELAS}) == 181000
+    assert prop.sinal_do_orcamento({"parcelas": [{"valor_centavos": 5000, "obs": "1ª de 3"}]}) == 0
+    assert prop.sinal_do_orcamento({"parcelas": []}) == 0
+    assert prop.sinal_do_orcamento({}) == 0
+
+
+def test_com_sinal_a_data_nasce_segurada_e_nao_firme(pool, conta_id):
+    """O buraco que essa mudança fecha: a folha dizia "Sinal — confirma a reserva da
+    data" e a assinatura marcava compromisso firme mesmo assim, sem pagamento nenhum."""
+    _, tok = _semear(pool, conta_id)
+    prop.registrar_assinatura(pool, tok, "Maria Teste", "", "1.2.3.4")
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    with pool.connection() as c:
+        st, ate, desc = c.execute(
+            "select status, pre_reserva_ate, descricao from eventos_agenda where id=%s",
+            (ev_id,)).fetchone()
+        sinal = c.execute("select sinal_centavos from orcamentos where token=%s",
+                          (tok,)).fetchone()[0]
+    assert st == ag.PRE_RESERVADO and "aguardando sinal" in desc
+    assert sinal == 181000                     # congelado no momento da reserva
+    dias = (ate - ag.agora_brt()).days
+    assert dias == ag.PRE_RESERVA_DIAS - 1     # 3 dias cheios, arredondando pra baixo
+
+
+def test_prazo_da_pre_reserva_respeita_a_config_da_empresa(pool, conta_id):
+    ag.salvar_pre_reserva_dias(pool, conta_id, 7)
+    _, tok = _semear(pool, conta_id)
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    with pool.connection() as c:
+        ate = c.execute("select pre_reserva_ate from eventos_agenda where id=%s",
+                        (ev_id,)).fetchone()[0]
+    assert (ate - ag.agora_brt()).days == 6
+    ag.salvar_pre_reserva_dias(pool, conta_id, ag.PRE_RESERVA_DIAS)   # devolve o padrão
+
+
+def test_sem_sinal_a_data_e_reservada_na_hora(pool, conta_id):
+    """Regressão do fluxo antigo: orçamento montado na mão, sem linha de sinal, não
+    tem o que esperar — a data é do cliente na assinatura, como sempre foi."""
+    _, tok = _semear(pool, conta_id, parcelas=[{"venc": "2025-12-13",
+                                                "valor_centavos": 745000,
+                                                "forma": "Pix", "obs": "À vista"}])
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    with pool.connection() as c:
+        st, ate, desc = c.execute(
+            "select status, pre_reserva_ate, descricao from eventos_agenda where id=%s",
+            (ev_id,)).fetchone()
+    assert st == "ativo" and ate is None and "aprovado pelo cliente" in desc
+
+
+def test_sinal_confirmado_firma_a_data_e_e_idempotente(pool, conta_id):
+    """O caminho do botão "Sinal recebido" (web/painel_servicos), pelo modelo."""
+    _, tok = _semear(pool, conta_id)
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    with pool.connection() as c:
+        c.execute("update orcamentos set sinal_pago_em=now() where token=%s", (tok,))
+        c.commit()
+    assert ag.confirmar_pre_reserva(pool, conta_id, ev_id) is True
+    with pool.connection() as c:
+        assert c.execute("select status, pre_reserva_ate from eventos_agenda where id=%s",
+                         (ev_id,)).fetchone() == ("ativo", None)
+    assert ag.confirmar_pre_reserva(pool, conta_id, ev_id) is False
+    # e o orçamento com sinal JÁ PAGO não volta a segurar a data se for reprocessado
+    d = prop._carregar(tok, pool=pool)
+    assert d["sinal_pago_em"] is not None
+    assert prop.sinal_do_orcamento(d) == 181000     # o valor continua lá, na parcela
+
+
+def test_folha_do_cliente_avisa_que_a_data_esta_segurada(pool, conta_id, monkeypatch):
+    """A proposta prometia "a data está reservada" na hora da aprovação. Com sinal
+    pendente ela precisa dizer a verdade: segurada, até quando, e por quê."""
+    carregar, pool_teste = prop._carregar, pool
+    monkeypatch.setattr(prop, "_carregar", lambda t, pool=None: carregar(t, pool=pool_teste))
+    _, tok = _semear(pool, conta_id)
+    html = prop.proposta_publica(None, tok).body.decode()
+    assert "fica <b>segurada</b>" in html and "R$ 1.810,00" in html
+    prop.registrar_assinatura(pool, tok, "Maria Teste", "", "1.2.3.4")
+    prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    html2 = prop.proposta_publica(None, tok).body.decode()
+    assert "está segurada pra você até" in html2
+    assert "está reservada" not in html2          # a promessa velha não sobra na folha
+
+
+def test_folha_para_de_avisar_quando_o_sinal_cai(pool, conta_id, monkeypatch):
+    carregar, pool_teste = prop._carregar, pool
+    monkeypatch.setattr(prop, "_carregar", lambda t, pool=None: carregar(t, pool=pool_teste))
+    _, tok = _semear(pool, conta_id)
+    prop.registrar_assinatura(pool, tok, "Maria Teste", "", "1.2.3.4")
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    ag.confirmar_pre_reserva(pool, conta_id, ev_id)
+    html = prop.proposta_publica(None, tok).body.decode()
+    assert "está segurada pra você até" not in html and "está reservada" in html
+
+
+def test_choque_de_data_avisa_o_dono_sem_bloquear(pool, conta_id, monkeypatch):
+    """Dois orçamentos aprovados pro mesmo horário viravam dois compromissos calados.
+    Quem decide se cabe é a empresa (buffet com dois salões cabe) — mas ela tem que
+    saber na hora."""
+    from finance import notificar
+    saidas = []
+    monkeypatch.setattr(notificar, "enviar_para_dono",
+                        lambda pool, cid, texto: (saidas.append(texto) or True))
+    _, tok1 = _semear(pool, conta_id)
+    prop._reservar_na_agenda(prop._carregar(tok1, pool=pool), pool=pool)
+    assert saidas == []                       # o primeiro não choca com nada
+    _, tok2 = _semear(pool, conta_id, numero=61)   # mesma data/horário do EVENTO fixo
+    ev2 = prop._reservar_na_agenda(prop._carregar(tok2, pool=pool), pool=pool)
+    assert ev2                                # NÃO bloqueia: marca e avisa
+    assert len(saidas) == 1 and "Choque de data" in saidas[0]
+    assert "data segurada" in saidas[0]        # o que já estava lá era pré-reserva
 
 
 def test_reserva_nao_duplica(pool, conta_id):

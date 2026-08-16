@@ -46,12 +46,38 @@ def rodar(pool, agora=None) -> dict:
         return {"resumo": 0, "aviso": 0}
 
 
+def _expirar_pre_reservas(pool, agora) -> int:
+    """Libera as datas cujo prazo do sinal venceu e avisa o dono.
+
+    Roda pra TODA conta, não só as que ligaram lembrete: a data segurada trava o
+    calendário de quem vende data, e soltar não é um lembrete — é a regra do
+    negócio acontecendo. Best-effort: o aviso que falha não impede a liberação.
+    """
+    try:
+        expiradas = ag.expirar_pre_reservas(pool, agora)
+    except Exception as e:  # noqa: BLE001
+        _log.info("lembretes: expirar pré-reservas falhou: %s: %s", type(e).__name__, e)
+        return 0
+    for ev in expiradas:
+        try:
+            quando = ag.fmt_hora(ev)
+            notificar.enviar_para_dono(
+                pool, ev["conta_id"],
+                f"📅 A pré-reserva de *{ev['titulo']}* — {quando} venceu: o sinal não foi "
+                "confirmado no prazo e a data está livre de novo. "
+                "Se o cliente aparecer, dá pra reabrir pelo orçamento.")
+        except Exception:  # noqa: BLE001 — aviso nunca segura a liberação da data
+            _log.info("lembretes: não deu pra avisar da pré-reserva %s", ev.get("id"))
+    return len(expiradas)
+
+
 def _rodar(pool, agora) -> dict:
     n_res = n_avi = 0
     with pool.connection() as lockc:
         if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
             return {"resumo": 0, "aviso": 0}
         try:
+            _expirar_pre_reservas(pool, agora)
             with pool.connection() as c:
                 cfgs = c.execute(
                     "select conta_id, resumo_ativo, hora_resumo, aviso_antes_min, avisar_convidados "

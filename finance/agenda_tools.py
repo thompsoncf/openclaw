@@ -20,6 +20,11 @@ def construir_ferramentas_agenda(pool, conta_id: int,
         base = f"• {ag.fmt_hora(ev)} — {ev['titulo']}"
         if ev.get("local"):
             base += f" ({ev['local']})"
+        # data SEGURADA esperando o sinal: entra na lista de propósito (dizer que o
+        # dia está livre quando alguém já segurou é o erro caro), mas dita como o
+        # que é — não é compromisso fechado.
+        if ev.get("status") == ag.PRE_RESERVADO:
+            base += " ⏳ data segurada, sinal pendente"
         return base
 
     def _convidar_e_enviar(ev: dict, convidados: list) -> list[str]:
@@ -98,14 +103,17 @@ def construir_ferramentas_agenda(pool, conta_id: int,
         agora = ag.agora_brt()
         inicio_dia = agora.replace(hour=0, minute=0, second=0, microsecond=0)
         if periodo in ("hoje", "hj"):
-            eventos = ag.listar_eventos(pool, conta_id, inicio_dia, inicio_dia + timedelta(days=1))
+            eventos = ag.listar_eventos(pool, conta_id, inicio_dia, inicio_dia + timedelta(days=1),
+                                        incluir_pre_reserva=True)
             titulo = "hoje"
         elif periodo in ("amanha", "amanhã"):
             d = inicio_dia + timedelta(days=1)
-            eventos = ag.listar_eventos(pool, conta_id, d, d + timedelta(days=1))
+            eventos = ag.listar_eventos(pool, conta_id, d, d + timedelta(days=1),
+                                        incluir_pre_reserva=True)
             titulo = "amanhã"
         elif periodo in ("semana", "essa semana"):
-            eventos = ag.listar_eventos(pool, conta_id, agora, inicio_dia + timedelta(days=7))
+            eventos = ag.listar_eventos(pool, conta_id, agora, inicio_dia + timedelta(days=7),
+                                        incluir_pre_reserva=True)
             titulo = "os próximos 7 dias"
         else:
             eventos = ag.proximos(pool, conta_id, limite=15)

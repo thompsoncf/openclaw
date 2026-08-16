@@ -27,7 +27,7 @@ from pydantic import BaseModel
 from core.brain import Brain
 from db.conexao import get_pool
 from finance.cnpj_info import consultar_cnpj
-from finance import (empresa as emp, icones_servico as ics, vendas,
+from finance import (agenda as ag, empresa as emp, icones_servico as ics, vendas,
                      servicos_catalogo as scat)
 from web.portal import _render, _env, conta_logada, brl
 
@@ -629,10 +629,16 @@ def painel_servicos_lista(request: Request):
                where conta_id=%s and token is null""", (conta[0],))
         c.commit()
         # vendedor vê só as propostas dele; dono/gestor veem o funil inteiro.
+        # o prazo da pré-reserva vem da agenda, não do orçamento: quem manda na
+        # data é o compromisso. Se ele já virou firme (ou foi cancelado), a
+        # subconsulta devolve null e o botão "Sinal recebido" some sozinho.
         _cols = """select id, cliente, empresa, setup_centavos, mensal_centavos,
                           primeiro_ano_centavos, n_modulos, criado_em, status,
                           token, aprovada_por, aprovada_em, numero,
-                          coalesce(modo,'recorrente')"""
+                          coalesce(modo,'recorrente'), sinal_centavos, sinal_pago_em,
+                          (select e.pre_reserva_ate from eventos_agenda e
+                            where e.id = orcamentos.evento_agenda_id
+                              and e.status = 'pre_reservado')"""
         if papel == "vendedor" and membro_id:
             rows = c.execute(
                 _cols + """ from orcamentos where conta_id=%s and criado_por=%s
@@ -657,6 +663,10 @@ def painel_servicos_lista(request: Request):
         "aprovada_em": r[11].strftime("%d/%m/%Y") if r[11] else "",
         "numero": r[12], "modo": r[13] or "recorrente",
         "inicial": (r[1] or r[2] or "?").strip()[:1].upper(),
+        "sinal": brl(r[14]) if r[14] else "",
+        "sinal_pago": bool(r[15]),
+        # só vem preenchido enquanto a data está SEGURADA esperando o sinal
+        "pre_reserva_ate": r[16].astimezone(ag.BRT).strftime("%d/%m %H:%M") if r[16] else "",
     } for r in rows]
     return JSONResponse({"itens": itens})
 
@@ -723,6 +733,50 @@ def painel_servicos_fechar(request: Request, dados: FecharIn):
     if not r.get("ok"):
         return JSONResponse({"erro": r.get("erro", "falha ao fechar")}, status_code=400)
     return JSONResponse(r)
+
+
+class SinalIn(BaseModel):
+    id: int
+
+
+@router.post("/painel/servicos/sinal-recebido")
+def painel_servicos_sinal_recebido(request: Request, dados: SinalIn):
+    """O sinal caiu: a data segurada vira compromisso firme na agenda.
+
+    Confirmação MANUAL de propósito. O dono recebe o Pix como já recebe hoje e
+    aperta aqui — o sistema não cobra nada nem fica esperando integração. Se um dia
+    a cobrança automática existir, ela só passa a apertar este mesmo botão.
+
+    Idempotente: orçamento com sinal já confirmado responde ok sem refazer nada.
+    """
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    pool = get_pool()
+    with pool.connection() as c:
+        _garantir_tabela(c)
+        r = c.execute("""select sinal_pago_em, evento_agenda_id from orcamentos
+                          where id=%s and conta_id=%s""",
+                      (int(dados.id), conta[0])).fetchone()
+        if not r:
+            return JSONResponse({"erro": "orçamento não encontrado"}, status_code=404)
+        ja_pago, agenda_id = r
+        if not ja_pago:
+            c.execute("update orcamentos set sinal_pago_em=now() where id=%s and conta_id=%s",
+                      (int(dados.id), conta[0]))
+            c.commit()
+    # a data vira firme. Fora da transação de propósito: confirmar o sinal é o que
+    # importa: se a agenda falhar, o pagamento continua registrado e o compromisso
+    # pode ser confirmado de novo pelo mesmo botão.
+    firmou = False
+    if agenda_id:
+        try:
+            firmou = ag.confirmar_pre_reserva(pool, conta[0], int(agenda_id))
+        except Exception:  # noqa: BLE001
+            import logging
+            logging.getLogger("servicos.sinal").exception(
+                "sinal-recebido: não deu pra firmar o compromisso %s", agenda_id)
+    return JSONResponse({"ok": True, "ja_estava": bool(ja_pago), "reserva_firmada": firmou})
 
 
 class OrcDelIn(BaseModel):
@@ -920,7 +974,13 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-badge{font-size:.66rem; font-weight:700; padding:.12rem .5rem; border-radius:6px; letter-spacing:.03em; text-transform:uppercase}
 .oc-badge.fechado{background:#10241d; color:var(--verde-claro)}
 .oc-badge.aberto{background:#2a2212; color:#e0b25a}
+/* pré-reserva: âmbar e TRACEJADO, o mesmo par que a agenda usa pra data provisória.
+   O tracejado é o sinal — cor sozinha some pra quem não distingue. */
+.oc-badge.pre{background:#2a2212; color:#e0b25a; border:1px dashed #6b5620; text-transform:none; letter-spacing:0}
 .oc-fechar{background:var(--verde); color:var(--sobre-verde); border:0; border-radius:8px; padding:.4rem .8rem; font-weight:600; cursor:pointer; font-size:.8rem}
+/* "Sinal recebido" não é "Fechar contrato": mesma forma, peso menor — fechar o
+   contrato gera título a receber, confirmar o sinal só firma a data. */
+.oc-fechar.sinal{background:transparent; color:#e0b25a; border:1px solid #6b5620}
 /* mobile: cada serviço vira 2 linhas (toggle+nome+ações em cima, valores embaixo).
    Fica no FIM do bloco pra vencer a cascata das regras base acima. */
 @media(max-width:600px){
@@ -1964,6 +2024,25 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       })
       .catch(function(){alert('Erro de conexão.'); btn.disabled=false; btn.textContent='Fechar contrato';});
   }
+  // Confirma que o sinal caiu: a data segurada vira compromisso firme na agenda.
+  // Confirma antes porque é dinheiro — e nomeia o cliente pelo mesmo motivo do
+  // 🗑 logo abaixo: a lista é densa e "tem certeza?" não diz qual linha é.
+  function sinalRecebido(id,nome,btn){
+    if(!confirm('Confirmar que o sinal de '+nome+' foi recebido? A data deixa de ser provisória e vira compromisso firme na agenda.')){return;}
+    btn.disabled=true; btn.textContent='Confirmando...';
+    fetch('/painel/servicos/sinal-recebido',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})
+      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+      .then(function(res){
+        if(!res.ok){alert((res.d&&res.d.erro)||'Não consegui confirmar.'); btn.disabled=false; btn.textContent='Sinal recebido'; return;}
+        // o pagamento gravou; se a agenda não firmou, dizemos — o botão volta e
+        // apertar de novo só tenta a agenda (o sinal já está registrado).
+        if(res.d&&res.d.reserva_firmada===false&&!res.d.ja_estava){
+          alert('Sinal registrado, mas não consegui firmar o compromisso na agenda. Confira a data por lá.');
+        }
+        carregarHist();
+      })
+      .catch(function(){alert('Erro de conexão.'); btn.disabled=false; btn.textContent='Sinal recebido';});
+  }
   // Apagar proposta do funil. Confirma sempre e nomeia o cliente na pergunta: a
   // lista é densa e o 🗑 fica ao lado do 📄, então "tem certeza?" sozinho não diz
   // qual das cinco linhas vai embora.
@@ -2004,6 +2083,21 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         badge.className='oc-badge '+(fechado?'fechado':(aprovada?'fechado':'aberto'));
         badge.textContent=fechado?'Fechado':(aprovada?('Aprovada'+(it.aprovada_por?' · '+esc(it.aprovada_por):'')):esc(it.status));
         right.appendChild(badge);
+        // Data SEGURADA esperando o sinal. Só aparece enquanto o compromisso está
+        // pré-reservado — quando o sinal cai (ou o prazo vence), o servidor para de
+        // mandar pre_reserva_ate e a linha volta ao normal sozinha.
+        if(it.pre_reserva_ate){
+          var pr=document.createElement('span'); pr.className='oc-badge pre';
+          pr.textContent='Data segurada até '+esc(it.pre_reserva_ate);
+          pr.title='O cliente aprovou, mas o sinal'+(it.sinal?' de '+esc(it.sinal):'')
+                   +' ainda não foi confirmado. Passando o prazo, a data libera sozinha.';
+          right.appendChild(pr);
+          var bs=document.createElement('button'); bs.className='oc-fechar sinal';
+          bs.textContent='Sinal recebido';
+          bs.title='Confirma que o sinal caiu — a data vira compromisso firme na agenda.';
+          bs.addEventListener('click',function(){sinalRecebido(it.id,it.cliente,bs);});
+          right.appendChild(bs);
+        }
         if(!fechado){
           var be=document.createElement('button'); be.className='oc-ic'; be.title='Editar proposta'; be.textContent='✏️';
           be.addEventListener('click',function(){abrir(it.id);});

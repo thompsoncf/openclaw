@@ -176,6 +176,13 @@ def _so_digitos(s: str) -> str:
     return "".join(ch for ch in (s or "") if ch.isdigit())
 
 
+def _vendas():
+    """Import tardio: web/painel_agenda não depende do módulo de vendas pra abrir —
+    só pra saber se esta conta vende data (nicho de eventos)."""
+    from finance import vendas
+    return vendas
+
+
 def _centavos(txt: str) -> int | None:
     """"1.810,00", "1810", "R$ 1.810" -> centavos. O dono digita como fala."""
     d = "".join(ch for ch in (txt or "") if ch.isdigit() or ch in ",.")
@@ -342,6 +349,11 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
         ev["tipo_rot"] = TIPO_ROT.get(ev["tipo"], "Pessoal")
         ev["convidados"] = convidados.get(ev["id"], [])
         ev["conv_resumo"] = cv.resumo(ev["convidados"]) if ev["convidados"] else None
+    # NICHO: só quem vende data (eventos) vê o vocabulário de data segurada. Pra
+    # clínica, loja e escritório a Agenda continua exatamente como estava — a
+    # pré-reserva nasce só de orçamento de evento, então a marca não teria o que
+    # marcar e a legenda falaria de um sinal que nunca existe.
+    vende_data = _vendas().vende_data(pool, conta_id)
     cfg = ag.get_config(pool, conta_id)
     feed_url = _feed_url(request, cfg["feed_token"]) if cfg.get("feed_token") else ""
     # Card de compartilhar os convites de um evento (?convite_ev=<id>; aceita também
@@ -361,6 +373,7 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
                    mes_hoje=f"{hoje.year:04d}-{hoje.month:02d}",
                    hoje_iso=hoje.isoformat(), abrir_novo=(novo == "1"),
                    cfg=cfg, feed_url=feed_url, share=share, seguradas=seguradas,
+                   vende_data=vende_data,
                    aviso=request.session.pop("agenda_aviso", None))
 
 
@@ -419,7 +432,9 @@ def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
     # vezes). O prazo padrão vem do card ⏳ Data segurada da conta.
     ate = None
     sinal_cent = None
-    if segurar == "1":
+    # o gate também no SERVIDOR: o form vem do navegador, e navegador não é fonte
+    # confiável. Conta que não vende data não segura data nem por requisição forjada.
+    if segurar == "1" and _vendas().vende_data(pool, ctx["conta_id"]):
         ate = ag.parse_datahora(segurar_ate) if segurar_ate else None
         if ate is None:
             dias = ag.get_config(pool, ctx["conta_id"]).get("pre_reserva_dias") or ag.PRE_RESERVA_DIAS
@@ -949,10 +964,10 @@ _CSS = """<style>
    pergunta que vem antes de "que tipo de compromisso é" (a bolinha, que fica).
    Forma, não cor: cheia = fixado, pontilhada = segurado. Quem não distingue verde
    de âmbar enxerga a diferença do mesmo jeito. */
-.ev-line{padding-left:6px;position:relative}
-.ev-line::before{content:"";position:absolute;left:0;top:1px;bottom:1px;width:3px;border-radius:2px;
-                 background:var(--verde)}
-.ev-line.pre::before{background:repeating-linear-gradient(180deg,var(--ambar) 0 3px,transparent 3px 6px)}
+.cal.marca-estado .ev-line{padding-left:6px;position:relative}
+.cal.marca-estado .ev-line::before{content:"";position:absolute;left:0;top:1px;bottom:1px;width:3px;
+                 border-radius:2px;background:var(--verde)}
+.cal.marca-estado .ev-line.pre::before{background:repeating-linear-gradient(180deg,var(--ambar) 0 3px,transparent 3px 6px)}
 .ev-line.pre .n,.ev-line.pre .h{color:var(--ambar)}
 .ev-line.pre .dot{background:transparent!important;box-shadow:inset 0 0 0 1.5px var(--ambar)}
 .ev-prazo{font-size:.55rem;font-weight:700;flex:0 0 auto;color:var(--ambar);
@@ -1276,7 +1291,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 
   <div class="ag-grid">
     <div>
-      <div class="cal">
+      <div class="cal{% if vende_data %} marca-estado{% endif %}">
         <div class="cal-hd">{% for d in dias_sem %}<span>{{ d }}</span>{% endfor %}</div>
         {% for semana in semanas %}
         <div class="cal-wk">
@@ -1300,11 +1315,15 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         </div>
         {% endfor %}
       </div>
+      {% if vende_data %}
       <p class="hint">A barra da esquerda diz se a data é sua: <b><span class="leg-mk leg-fixo"></span>fixado</b> ·
       <b style="color:var(--ambar)"><span class="leg-mk leg-seg"></span>segurado</b> (esperando o sinal — ocupa a data,
       mas não vira lembrete nem entra no calendário sincronizado; o número ao lado é quanto falta pro prazo).
       A bolinha diz o tipo: <b style="color:#bfeeda">pessoal</b>, <b style="color:#bcd8f6">empresa</b>,
       <b style="color:#f0d9a6">fornecedor</b>. Marque também pelo WhatsApp/Telegram — cai tudo aqui.</p>
+      {% else %}
+      <p class="hint">As cores separam <b style="color:#bfeeda">pessoal</b>, <b style="color:#bcd8f6">empresa</b> e <b style="color:#f0d9a6">fornecedor</b>. Marque também pelo WhatsApp/Telegram — cai tudo aqui.</p>
+      {% endif %}
     </div>
 
     <div class="side-cards">
@@ -1417,7 +1436,9 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
                quem decide se cabe é a empresa (buffet com dois salões cabe). -->
           <div class="choque" id="choqueBox"><span>⚠️</span><div id="choqueTxt"></div></div>
           <!-- só segurar a data: a pré-reserva que nasce de um telefonema, sem
-               orçamento nenhum. Antes só existia via aprovação de proposta. -->
+               orçamento nenhum. Antes só existia via aprovação de proposta.
+               Só pra quem vende data — clínica não segura horário esperando sinal. -->
+          {% if vende_data %}
           <div class="tg" style="margin-top:2px">
             <div><div class="tg-t">Só segurar a data</div><div class="tg-s">Ocupa o dia sem virar compromisso — não vira lembrete</div></div>
             <label class="sw"><input type="checkbox" name="segurar" value="1" id="fSegurar"><span class="track"></span><span class="knob"></span></label>
@@ -1430,6 +1451,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <div class="sh">Vale até o fim do dia escolhido. Passando o prazo sem o sinal, a data
             libera sozinha e você é avisado — e dá pra firmar ou soltar antes disso, abrindo o dia no calendário.</div>
           </div>
+          {% endif %}
           <label>Descrição <span style="font-weight:400">(opcional)</span></label>
           <textarea name="descricao" placeholder="Detalhes do compromisso…"></textarea>
           <label>Local <span style="font-weight:400">(opcional)</span></label>
@@ -1521,7 +1543,9 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         </form>
       </div>
 
-      <!-- prazo da data segurada (pré-reserva por sinal) -->
+      <!-- prazo da data segurada (pré-reserva por sinal). Regra de venda de DATA:
+           quem não vende data não tem o que configurar aqui. -->
+      {% if vende_data %}
       <div class="ag-card">
         <h2>⏳ Data segurada</h2>
         <p class="hint" style="margin-top:0">Quando o cliente aprova um orçamento de evento <b>com sinal</b>, a data entra aqui como segurada — ocupa o dia, mas não vira compromisso nem lembrete. Ela só firma quando você confirma o sinal, na tela do orçamento.</p>
@@ -1537,6 +1561,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <button class="ok" type="submit" data-busy="⏳ Salvando…">Salvar prazo</button>
         </form>
       </div>
+      {% endif %}
 
       <!-- sincronizar -->
       <div class="ag-card">

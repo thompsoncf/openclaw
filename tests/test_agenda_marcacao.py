@@ -13,6 +13,7 @@ Aqui prende-se o que passou a existir:
 Banco dedicado e descartável, no padrão de tests/test_painel_servicos_sinal.py.
 """
 import os
+import re
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -83,6 +84,53 @@ def test_celula_do_mes_se_pinta_quando_tem_data_segurada():
     assert celulas[19]["tem_seg"] is False and celulas[19]["urg"] is False
 
 
+# ====================================================== o nicho manda na tela
+# A marca de estado, a legenda que fala de sinal e o "Só segurar a data" são
+# vocabulário de quem VENDE DATA. Clínica, loja e escritório não seguram horário
+# esperando sinal: pra eles a Agenda continua exatamente como estava.
+
+def _render_agenda(vende_data: bool) -> str:
+    from web.portal import _env
+    agora = ag.agora_brt()
+    cfg = {"lembrete_ativo": False, "resumo_ativo": False, "hora_resumo": 7,
+           "aviso_antes_min": None, "feed_token": None, "avisar_convidados": True,
+           "enviar_confirmacao": True, "pre_reserva_dias": 3}
+    semanas = [[{"dia": d, "fora": False, "hoje": False, "iso": f"2026-08-{d:02d}",
+                 "eventos": [], "tem_seg": False, "urg": False} for d in range(15, 22)]]
+    return _env.get_template("agenda").render(
+        titulo="Agenda", secao_ativa="agenda", historico=[], historico_total=0, fila=[],
+        ano=2026, mes=8, mes_nome="Agosto", dias_sem=pa.DIAS_SEM, semanas=semanas,
+        proximos=[], tipo_rot=pa.TIPO_ROT, eventos_dia={}, status_rot={}, reaproveitar=[],
+        meses_js=pa.MESES, dias_sem_ext_js=pa.DIAS_SEM_EXT, agora_iso=agora.isoformat(),
+        mes_prev="2026-07", mes_next="2026-09", mes_hoje="2026-08", hoje_iso="2026-08-01",
+        abrir_novo=True, cfg=cfg, feed_url="", share=None, seguradas=[],
+        vende_data=vende_data, aviso="", ctx={}, conta={}, request=None)
+
+
+def test_so_o_nicho_de_eventos_ve_o_vocabulario_de_data_segurada():
+    ev, outros = _render_agenda(True), _render_agenda(False)
+    for frag in ('class="cal marca-estado"',        # a barra fixado/segurado
+                 'name="segurar"',                   # o toggle "Só segurar a data"
+                 "A barra da esquerda diz se a data é sua"):   # a legenda nova
+        assert frag in ev
+        assert frag not in outros
+
+
+def test_agenda_dos_outros_nichos_segue_como_estava():
+    outros = _render_agenda(False)
+    assert "As cores separam" in outros          # a legenda de sempre, intacta
+    assert "＋ Novo compromisso" in outros
+    # nada de "sinal"/"segurada" no que a pessoa LÊ. Comentário de HTML e CSS são
+    # fonte, não tela — o que se mede aqui é o texto renderizado.
+    corpo = outros.split("<script")[0]
+    corpo = re.sub(r"<style.*?</style>", "", corpo, flags=re.S)
+    corpo = re.sub(r"<!--.*?-->", "", corpo, flags=re.S).lower()
+    assert "sinal" not in corpo and "segurada" not in corpo
+    # o aviso de choque de horário NÃO é de nicho nenhum: some sozinho quando não há
+    # conflito, e marcar duas coisas no mesmo horário é problema de qualquer agenda.
+    assert "choqueBox" in outros
+
+
 # =========================================================== banco / rotas
 
 @pytest.fixture()
@@ -118,12 +166,24 @@ def cliente(monkeypatch):
     monkeypatch.setattr(pa, "_acesso",
                         lambda request: ({"conta_id": CONTA, "membro_id": None,
                                           "papel": "dono"}, None))
+    # a conta do teste VENDE DATA (nicho de eventos). O schema mínimo daqui não tem
+    # as tabelas da empresa, então o nicho vem por este atalho — e um teste abaixo
+    # o desliga, pra provar que conta de outro nicho não segura data nem por POST.
+    estado = {"vende": True}
+
+    class _VendasFake:
+        @staticmethod
+        def vende_data(pool_, conta_id_):
+            return estado["vende"]
+
+    monkeypatch.setattr(pa, "_vendas", lambda: _VendasFake)
 
     app = FastAPI()
     app.add_middleware(SessionMiddleware, secret_key="teste-de-sessao")
     app.include_router(pa.router)
     c = TestClient(app, follow_redirects=False)
     c.pool = pool
+    c.estado_nicho = estado
     yield c
     pool.close()
 
@@ -282,6 +342,28 @@ def test_segurar_sem_valor_de_sinal_e_permitido(cliente):
     _marcar(cliente, segurar="1", sinal_esperado="")
     _id, status, _ate, sinal = _ultimo(cliente)
     assert status == ag.PRE_RESERVADO and sinal is None
+
+
+def test_a_pagina_decide_o_nicho_pelo_nicho_da_conta(cliente):
+    """O gate tem que estar LIGADO na página, não só existir. Sem esta ida pelo
+    GET, apagar a linha que calcula `vende_data` passaria batido — a tela voltaria
+    a mostrar barra e toggle pra todo mundo."""
+    r = cliente.get("/painel/agenda")
+    assert r.status_code == 200
+    assert 'class="cal marca-estado"' in r.text and 'name="segurar"' in r.text
+    cliente.estado_nicho["vende"] = False
+    r2 = cliente.get("/painel/agenda")
+    assert r2.status_code == 200
+    assert 'class="cal marca-estado"' not in r2.text and 'name="segurar"' not in r2.text
+
+
+def test_conta_de_outro_nicho_nao_segura_data_nem_por_post(cliente):
+    """A tela não oferece o toggle fora do nicho de eventos — mas a tela não é fonte
+    confiável. O servidor recusa igual: o compromisso nasce firme, como sempre."""
+    cliente.estado_nicho["vende"] = False
+    assert _marcar(cliente, segurar="1", sinal_esperado="1.810,00").status_code == 303
+    _id, status, ate, sinal = _ultimo(cliente)
+    assert status == "ativo" and ate is None and sinal is None
 
 
 def test_centavos_le_o_que_o_dono_digita():

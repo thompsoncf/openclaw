@@ -40,6 +40,21 @@ def _horario_ok(cfg) -> bool:
     return agora.weekday() <= 5 and 8 <= agora.hour < 18       # seg–sáb, 8–18h
 
 
+def _pode_falar_agora(cfg) -> bool:
+    """O relógio deixa o agente responder agora?
+
+    MODO TESTE tem passe livre: com o agente-mestre DESLIGADO, quem chegou até aqui
+    veio de uma conversa que um humano ligou à mão, uma por vez, no botão do chat. É
+    o caminho que o painel oferece pra experimentar o agente antes de soltá-lo na
+    caixa inteira — e esse teste quase sempre acontece fora do expediente (à noite,
+    no fim de semana). Um agente mudo justamente na hora do teste se parece com um
+    agente quebrado, e foi assim que ele pareceu.
+
+    Com o mestre LIGADO, o horário da empresa vale pra todo mundo: aí não é teste, é
+    atendimento, e a conta decidiu quando quer atender."""
+    return (not cfg["ativo"]) or _horario_ok(cfg)
+
+
 def _reais(centavos: int) -> str:
     """R$ 8.800 — sem centavos, com ponto de milhar. É texto que vai pro cliente."""
     return "R$ " + f"{(centavos or 0) // 100:,}".replace(",", ".")
@@ -124,16 +139,16 @@ def atender(pool, conta_id: int, conversa_id: int) -> None:
 def _atender(pool, conta_id, conversa_id):
     with pool.connection() as c:
         cfg = _cfg(c, conta_id)
-        if not cfg or not cfg["ativo"]:
+        if not cfg:
             return
         conv = c.execute(
             """select cv.agente_ativo, cv.prospeccao_id, cv.contato_ref, p.empresa,
                       p.whatsapp, p.telefone, p.segmento, p.cidade, p.uf, cv.canal
                  from conversas cv left join prospeccao p on p.id = cv.prospeccao_id
                 where cv.id=%s and cv.conta_id=%s""", (conversa_id, conta_id)).fetchone()
-        if not conv or not conv[0]:      # conversa não existe ou humano assumiu
+        if not conv or not conv[0]:      # conversa não existe, humano assumiu, ou desligada
             return
-        if not _horario_ok(cfg):
+        if not _pode_falar_agora(cfg):
             return
         # histórico das últimas mensagens (contexto pro Brain)
         msgs = c.execute(

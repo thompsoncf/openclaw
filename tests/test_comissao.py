@@ -36,14 +36,16 @@ create table titulos (id bigserial primary key, conta_id bigint, tipo text not n
   valor_centavos int not null, vencimento date not null, status text default 'aberto',
   recorrente boolean default false, categoria text default '', lancamento_id bigint,
   cliente_id bigint, cobranca_link_url text, pago_em date, criado_por bigint,
-  criado_em timestamptz default now());
+  criado_em timestamptz default now(),
+  orcamento_id bigint, parcela_idx int);   -- 162: liga o título à parcela do orçamento
 create table orcamentos (id bigserial primary key, conta_id bigint, cliente text,
   empresa text, itens jsonb, token text, setup_centavos bigint default 0,
   mensal_centavos bigint default 0, primeiro_ano_centavos bigint default 0,
   status text default 'rascunho', canal text,
   modo text default 'recorrente', evento jsonb, parcelas jsonb,
   criado_por text, atualizado_em timestamptz default now(),
-  criado_em timestamptz default now());
+  criado_em timestamptz default now(),
+  sinal_centavos int, sinal_pago_em timestamptz);   -- 161: o sinal do evento
 """
 
 HOJE = date.today()

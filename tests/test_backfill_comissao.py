@@ -26,7 +26,8 @@ create table titulos (id bigserial primary key, conta_id bigint, tipo text not n
   descricao text not null, contraparte text not null default '',
   valor_centavos int not null, vencimento date not null, status text default 'aberto',
   recorrente boolean default false, categoria text default '', lancamento_id bigint,
-  pago_em date, criado_por bigint, criado_em timestamptz default now());
+  pago_em date, criado_por bigint, criado_em timestamptz default now(),
+  orcamento_id bigint, parcela_idx int);   -- 162: liga o título à parcela do orçamento
 """
 
 HOJE = date.today()

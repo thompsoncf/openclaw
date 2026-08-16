@@ -16,6 +16,7 @@ monta o que vende. Empresa nova começa vazia; a Aladdin usa o modelo de
 tecnologia. A IA de escopo e a validação de módulos usam o catálogo da conta.
 """
 import json
+import logging
 import re
 import secrets
 
@@ -32,6 +33,7 @@ from finance import (agenda as ag, empresa as emp, icones_servico as ics, vendas
 from web.portal import _render, _env, conta_logada, brl
 
 router = APIRouter()
+_log_sinal = logging.getLogger("servicos.sinal")
 
 
 def _garantir_tabela(c):
@@ -747,6 +749,12 @@ def painel_servicos_sinal_recebido(request: Request, dados: SinalIn):
     aperta aqui — o sistema não cobra nada nem fica esperando integração. Se um dia
     a cobrança automática existir, ela só passa a apertar este mesmo botão.
 
+    Confirmar o sinal mexe em DUAS coisas, e nessa ordem: a DATA (a pré-reserva
+    vira compromisso firme) e o DINHEIRO (o título a receber daquela parcela recebe
+    baixa, na data em que o sinal caiu). O pagamento é gravado primeiro; as duas
+    consequências vêm depois, cada uma podendo falhar sozinha sem desfazer o
+    registro — apertar o botão de novo retoma o que faltou.
+
     Idempotente: orçamento com sinal já confirmado responde ok sem refazer nada.
     """
     conta, redir = _conta_servico(request)
@@ -755,16 +763,20 @@ def painel_servicos_sinal_recebido(request: Request, dados: SinalIn):
     pool = get_pool()
     with pool.connection() as c:
         _garantir_tabela(c)
-        r = c.execute("""select sinal_pago_em, evento_agenda_id from orcamentos
-                          where id=%s and conta_id=%s""",
+        r = c.execute("""select sinal_pago_em, evento_agenda_id, parcelas
+                           from orcamentos where id=%s and conta_id=%s""",
                       (int(dados.id), conta[0])).fetchone()
         if not r:
             return JSONResponse({"erro": "orçamento não encontrado"}, status_code=404)
-        ja_pago, agenda_id = r
+        ja_pago, agenda_id, parcelas = r
         if not ja_pago:
-            c.execute("update orcamentos set sinal_pago_em=now() where id=%s and conta_id=%s",
-                      (int(dados.id), conta[0]))
+            ja_pago = c.execute(
+                "update orcamentos set sinal_pago_em=now() where id=%s and conta_id=%s "
+                "returning sinal_pago_em", (int(dados.id), conta[0])).fetchone()[0]
             c.commit()
+            era_novo = True
+        else:
+            era_novo = False
     # a data vira firme. Fora da transação de propósito: confirmar o sinal é o que
     # importa: se a agenda falhar, o pagamento continua registrado e o compromisso
     # pode ser confirmado de novo pelo mesmo botão.
@@ -773,10 +785,22 @@ def painel_servicos_sinal_recebido(request: Request, dados: SinalIn):
         try:
             firmou = ag.confirmar_pre_reserva(pool, conta[0], int(agenda_id))
         except Exception:  # noqa: BLE001
-            import logging
-            logging.getLogger("servicos.sinal").exception(
+            _log_sinal.exception(
                 "sinal-recebido: não deu pra firmar o compromisso %s", agenda_id)
-    return JSONResponse({"ok": True, "ja_estava": bool(ja_pago), "reserva_firmada": firmou})
+    # e o título daquela parcela recebe baixa NA DATA DO SINAL. Só encontra alguma
+    # coisa se o contrato já tiver sido fechado (é o fechamento que cria os
+    # títulos); no caminho normal — confirma o sinal, fecha o contrato depois — quem
+    # dá a baixa é o próprio fechar_orcamento, com a mesma data.
+    baixado = None
+    try:
+        baixado = vendas.baixar_titulo_do_sinal(pool, conta[0], int(dados.id),
+                                                parcelas, ja_pago)
+    except Exception:  # noqa: BLE001
+        _log_sinal.exception("sinal-recebido: baixa do título do orçamento %s falhou",
+                             dados.id)
+    return JSONResponse({"ok": True, "ja_estava": not era_novo,
+                         "reserva_firmada": firmou,
+                         "titulo_baixado": baixado})
 
 
 class OrcDelIn(BaseModel):
@@ -977,6 +1001,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 /* pré-reserva: âmbar e TRACEJADO, o mesmo par que a agenda usa pra data provisória.
    O tracejado é o sinal — cor sozinha some pra quem não distingue. */
 .oc-badge.pre{background:#2a2212; color:#e0b25a; border:1px dashed #6b5620; text-transform:none; letter-spacing:0}
+/* sinal já recebido: verde e SÓLIDO — o oposto do tracejado de "ainda esperando" */
+.oc-badge.sinalok{background:#10241d; color:var(--verde-claro); text-transform:none; letter-spacing:0}
 .oc-fechar{background:var(--verde); color:var(--sobre-verde); border:0; border-radius:8px; padding:.4rem .8rem; font-weight:600; cursor:pointer; font-size:.8rem}
 /* "Sinal recebido" não é "Fechar contrato": mesma forma, peso menor — fechar o
    contrato gera título a receber, confirmar o sinal só firma a data. */
@@ -2028,7 +2054,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   // Confirma antes porque é dinheiro — e nomeia o cliente pelo mesmo motivo do
   // 🗑 logo abaixo: a lista é densa e "tem certeza?" não diz qual linha é.
   function sinalRecebido(id,nome,btn){
-    if(!confirm('Confirmar que o sinal de '+nome+' foi recebido? A data deixa de ser provisória e vira compromisso firme na agenda.')){return;}
+    if(!confirm('Confirmar que o sinal de '+nome+' foi recebido?\\n\\nA data deixa de ser provisória e vira compromisso firme na agenda. Se o contrato já estiver fechado, o título dessa parcela entra como recebido no livro-caixa, com a data de hoje.')){return;}
     btn.disabled=true; btn.textContent='Confirmando...';
     fetch('/painel/servicos/sinal-recebido',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})
       .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
@@ -2094,9 +2120,22 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
           right.appendChild(pr);
           var bs=document.createElement('button'); bs.className='oc-fechar sinal';
           bs.textContent='Sinal recebido';
-          bs.title='Confirma que o sinal caiu — a data vira compromisso firme na agenda.';
+          bs.title='Confirma que o sinal caiu: a data vira compromisso firme na agenda '
+                  +'e o título dessa parcela entra como recebido, na data de hoje.';
           bs.addEventListener('click',function(){sinalRecebido(it.id,it.cliente,bs);});
           right.appendChild(bs);
+        }
+        // Sinal JÁ confirmado: fica dito na linha. Sem isso, depois que o botão some
+        // não sobra nada na tela dizendo que aquele dinheiro entrou — e é ele que
+        // explica por que o título dessa parcela não aparece em aberto.
+        else if(it.sinal_pago && it.sinal){
+          var sp=document.createElement('span'); sp.className='oc-badge sinalok';
+          sp.textContent='Sinal recebido · '+esc(it.sinal);
+          sp.title=fechado?'O título dessa parcela entrou como recebido no livro-caixa, '
+                          +'na data em que o sinal caiu.'
+                         :'Ao fechar o contrato, essa parcela já entra como recebida — '
+                          +'com a data em que o sinal caiu.';
+          right.appendChild(sp);
         }
         if(!fechado){
           var be=document.createElement('button'); be.className='oc-ic'; be.title='Editar proposta'; be.textContent='✏️';

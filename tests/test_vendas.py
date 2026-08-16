@@ -24,6 +24,7 @@ def pool():
     base = Path(__file__).resolve().parent.parent / "db" / "migracoes"
     with p.connection() as c:
         c.execute((base / "053_modulo_pj.sql").read_text(encoding="utf-8"))  # titulos
+        c.execute((base / "162_titulo_parcela_do_orcamento.sql").read_text(encoding="utf-8"))
         # tabela orcamentos (base do admin_orcamento) + colunas do pipeline
         c.execute("""create table if not exists orcamentos (
             id bigserial primary key, cliente text, empresa text, segmento text,

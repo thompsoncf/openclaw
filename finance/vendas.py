@@ -58,6 +58,25 @@ def modo_do_orcamento(pool, conta_id: int) -> str:
     return modo_por_nicho((emp.obter_dados_empresa(pool, conta_id) or {}).get("nicho"))
 
 
+def vende_data(pool, conta_id: int) -> bool:
+    """Esta conta VENDE DATA? (nicho de eventos)
+
+    É o que decide se a tela mostra o vocabulário de data segurada — barra de
+    fixado/segurado no calendário, "Só segurar a data" no formulário, a legenda que
+    fala de sinal. Clínica, loja e escritório não seguram data esperando sinal:
+    pra eles isso é ruído numa tela que já estava certa.
+
+    TOLERANTE, ao contrário de modo_do_orcamento: lá, falhar a leitura do nicho tem
+    que derrubar o salvamento (gravar no modo errado manda uma folha de mensalidade
+    por uma festa). Aqui o pior caso é a Agenda deixar de mostrar um enfeite — e ela
+    precisa abrir de qualquer jeito.
+    """
+    try:
+        return modo_do_orcamento(pool, conta_id) == "evento"
+    except Exception:  # noqa: BLE001
+        return False
+
+
 # SQL do título a receber (reusa a tabela titulos do módulo Empresa).
 # orcamento_id/parcela_idx (migração 162) só vêm preenchidos no modo evento: são
 # eles que deixam voltar do título pra parcela sem casar por texto de descrição.

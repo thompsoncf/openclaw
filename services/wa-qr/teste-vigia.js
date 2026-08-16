@@ -23,7 +23,8 @@ process.env.WA_QR_SHARED_SECRET = process.env.WA_QR_SHARED_SECRET || 'teste'
 process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'silent'
 
 const s = require('./server')
-const { sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, marcarVivo, sessoes } = s
+const { sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual,
+  marcarVivo, sessoes } = s
 
 let falhas = 0
 function conferir (ok, descricao) {
@@ -211,6 +212,32 @@ for (const [valor, rotulo] of [[undefined, 'undefined'], [null, 'null'], [{}, 'o
            esperaPos440({ tentativasPos440: 3 }, BASE) === 40 * 60 * 1000,
     'sem zerar à toa, a espera vai de 5min a 40min em vez de repetir 5min pra sempre')
   sessoes.clear()
+
+  // ------------------------------------------------------------------------
+  // O 'open' ATRASADO — a sessão que se dizia conectada sem ter socket.
+  //
+  // Medido na conta 34 em 15/08, nesta ordem:
+  //
+  //     22:16:15.890  conexão substituída  → s.sock = null
+  //     22:16:16.402  WhatsApp conectado   ← meio segundo DEPOIS, do socket morto
+  //
+  // O handler de 'open' punha status='conectado' e recarimbava a sessão. Daí em
+  // diante ela mentia pra todo mundo: chip verde no painel, o vigia do silêncio
+  // pulando a conta (sessaoMuda exige s.sock) e só o /enviar descobrindo, na hora de
+  // mandar a mensagem do cliente, que não havia socket nenhum — que é exatamente o
+  // "conectado e mudo" que abriu esta investigação.
+  console.log('\nevento só vale se vier do socket de agora')
+  const atual = { fake: 'atual' }
+  const velho = { fake: 'velho' }
+  conferir(socketAtual({ sock: atual }, atual) === true, 'o socket da sessão: passa')
+  conferir(socketAtual({ sock: null }, velho) === false,
+    'levou 440 e a sessão soltou o socket — o open atrasado dele não entra')
+  conferir(socketAtual({ sock: atual }, velho) === false,
+    'já trocamos de encarnação — o socket anterior não fala pela sessão')
+  conferir(socketAtual({ sock: velho }, Object.assign({ _descartado: true }, velho)) === false,
+    'socket descartado não fala nem sendo o da sessão')
+  conferir(socketAtual(null, atual) === false, 'sessão inexistente não estoura')
+  conferir(socketAtual({ sock: atual }, null) === false, 'sem socket no evento não estoura')
 
   console.log('\nvigia × trava: sessão de outra instância não se religa')
   const seguraDeVerdade = s.trava.segura

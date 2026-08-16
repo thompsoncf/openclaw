@@ -181,6 +181,58 @@ def _itens_escolhidos(d, slugs_ok) -> list[dict]:
     return fora
 
 
+# O convite que o agente faz ANTES de montar qualquer orçamento. É frase fixa de
+# propósito: é ela que o código procura no histórico pra saber se já ofereceu (ver
+# _ja_ofereceu_orcamento). Se a IA reescrevesse o convite a cada vez, a trava
+# dependeria de a IA se comportar — e o ponto da trava é justamente não depender.
+_CONVITE_ORCAMENTO = "Quer que eu monte um orçamento com isso?"
+
+# O que o agente PRECISA saber antes de pôr preço num documento. Sem isto ele cotava
+# no escuro: numa conversa real respondeu "quanto custa pra 150 pessoas?" montando um
+# orçamento sem data nenhuma — e, sem data, juntou o pacote de segunda-a-quinta COM o
+# de sexta-a-domingo e somou os dois, R$ 13.360 por um salão que custa 5.760 ou 7.200.
+# São alternativas; a data é que decide qual. Ordem = ordem em que se pergunta.
+_PRECISA_SABER = (("data", "a data do evento"),
+                  ("inicio", "o horário de início"),
+                  ("convidados", "quantos convidados"))
+
+
+def _falta_pro_orcamento(evento) -> list[str]:
+    """O que ainda falta perguntar antes de poder orçar."""
+    return [rotulo for chave, rotulo in _PRECISA_SABER if not (evento or {}).get(chave)]
+
+
+def _ja_ofereceu_orcamento(msgs) -> bool:
+    """O agente já perguntou se o cliente QUER um orçamento?
+
+    `msgs` são as linhas (direcao, autor, texto) do histórico recente."""
+    return any(autor == "bot" and _CONVITE_ORCAMENTO in (texto or "")
+               for (_d, autor, texto) in (msgs or []))
+
+
+def _lista_br(itens) -> str:
+    """"a data do evento, o horário de início e quantos convidados"."""
+    itens = list(itens)
+    if len(itens) <= 1:
+        return itens[0] if itens else ""
+    return ", ".join(itens[:-1]) + " e " + itens[-1]
+
+
+def _texto_perguntando(resposta: str, falta) -> str:
+    """Responde o que dá pra responder e pede o que falta — em vez de orçar no escuro."""
+    return ((resposta + "\n\n" if resposta else "")
+            + f"Pra montar um orçamento certinho eu preciso saber {_lista_br(falta)}. "
+              "Me conta? 😊")
+
+
+def _texto_oferecendo(resposta: str) -> str:
+    """O passo que faltava: perguntar antes de mandar o documento.
+
+    O agente montava orçamento em qualquer pergunta de preço. Quem só queria uma ideia
+    de valor recebia proposta formal com link — e cada uma dessas vira lixo no funil."""
+    return (resposta + "\n\n" if resposta else "") + _CONVITE_ORCAMENTO
+
+
 def _evento_do_json(d) -> dict:
     """Data, convidados, horário e tipo — o que o CLIENTE disse, guardado no orçamento.
 
@@ -295,7 +347,15 @@ def _atender(pool, conta_id, conversa_id):
             "Escolha o item cujo nome bate com o que o cliente pediu — se a festa é "
             "em 2026, o item tem que ser o de 2026. Se não existir item pro que ele "
             "pediu (uma data especial, um ano que não está no catálogo), NÃO use o "
-            "parecido: diga que vai confirmar o valor dessa data com a equipe.\n\n"
+            "parecido: diga que vai confirmar o valor dessa data com a equipe. "
+            # ela juntou "SEGUNDA A QUINTA" com "SEXTA A DOMINGO" no mesmo orçamento e
+            # somou os dois — R$ 13.360 por um salão que custa 5.760 OU 7.200
+            "Itens que são ALTERNATIVAS entre si (dias diferentes, anos diferentes do "
+            "mesmo pacote) nunca entram juntos: escolha um. "
+            # "dá pra atender bem os seus 150 convidados" — capacidade não está em
+            # lugar nenhum da base; foi invenção
+            "E capacidade (quantas pessoas cabem) só se estiver escrita na base: se "
+            "não estiver, diga que confirma com a equipe.\n\n"
             f"INSTRUÇÕES DA EMPRESA:\n{instr or '(nenhuma)'}\n\n"
             f"PERGUNTAS FREQUENTES:\n{faqs or '(nenhuma)'}\n\n"
             f"CATÁLOGO DE SERVIÇOS:\n{cat_txt}")
@@ -305,9 +365,10 @@ def _atender(pool, conta_id, conversa_id):
             '{"acao":"responder|orcamento","resposta":"texto pra mandar ao cliente",'
             '"servicos":[{"slug":"...","qtd":1}],"temperatura":"frio|morno|quente",'
             '"evento":{"data":"AAAA-MM-DD","convidados":0,"inicio":"","fim":"","tipo":""}}\n'
-            "- acao=orcamento só se o cliente PEDIU preço/orçamento; liste em servicos "
-            "os slugs do catálogo que fazem sentido. Senão, acao=responder e responda a "
-            "dúvida direto, com base na base.\n"
+            "- acao=orcamento só quando o cliente ACEITOU receber um orçamento (você "
+            "ofereceu antes e ele disse que sim) E você já sabe a data, o horário de "
+            "início e quantos convidados. Pergunta de preço não é pedido de orçamento: "
+            "responda o valor e ofereça montar. Liste em servicos os slugs do catálogo.\n"
             "- qtd é a QUANTIDADE que o cliente pediu, não 1 por padrão: 6 horas de "
             "festa num pacote de 4 são 2 horas extras, qtd=2. O preço que ele vai ler "
             "é qtd × valor do item.\n"
@@ -337,7 +398,25 @@ def _atender(pool, conta_id, conversa_id):
             return
 
         if acao == "orcamento" and cfg["pode_orcamento"]:
-            return _orcamento(c, conta_id, conversa_id, conv, catalogo, d, canal, destino, resposta)
+            # Duas travas ANTES do documento, as duas de negócio e as duas em código —
+            # não em instrução, porque instrução a IA às vezes ignora e aqui o que sai
+            # é preço com o nome da empresa em cima.
+            #
+            # 1) SEM DATA, HORÁRIO E CONVIDADOS não se orça. Foi assim que ela cotou
+            #    "150 pessoas" sem data e somou dois pacotes que são alternativas.
+            # 2) PERGUNTA ANTES. Quem faz uma pergunta de preço quer um preço, não um
+            #    documento formal com link de proposta — e cada um desses vira lixo
+            #    no funil.
+            evento = _evento_do_json(d)
+            falta = _falta_pro_orcamento(evento)
+            if falta:
+                return _enviar(c, conta_id, conversa_id, canal, destino,
+                               _texto_perguntando(resposta, falta))
+            if not _ja_ofereceu_orcamento(msgs):
+                return _enviar(c, conta_id, conversa_id, canal, destino,
+                               _texto_oferecendo(resposta))
+            return _orcamento(c, conta_id, conversa_id, conv, catalogo, d, canal,
+                              destino, resposta, evento)
 
         # responde tudo (nunca escala/desliga automático)
         _enviar(c, conta_id, conversa_id, canal, destino, resposta or
@@ -352,7 +431,7 @@ def _enviar(c, conta_id, conversa_id, canal, destino, texto):
     c.commit()
 
 
-def _orcamento(c, conta_id, conversa_id, conv, catalogo, d, canal, destino, resposta):
+def _orcamento(c, conta_id, conversa_id, conv, catalogo, d, canal, destino, resposta, evento):
     slugs_ok = {s["slug"]: s for s in catalogo}
     escolhidos = _itens_escolhidos(d, slugs_ok)
     if not escolhidos:
@@ -372,7 +451,6 @@ def _orcamento(c, conta_id, conversa_id, conv, catalogo, d, canal, destino, resp
               "unitario": round(s["setup_centavos"] / 100),
               "setup": round(s["setup_centavos"] * s["qtd"] / 100),
               "mensal": round(s["mensal_centavos"] * s["qtd"] / 100)} for s in escolhidos]
-    evento = _evento_do_json(d)
     empresa = conv[3] or conv[2] or "Cliente"
     token = secrets.token_urlsafe(16)
     from finance import vendas as _vendas

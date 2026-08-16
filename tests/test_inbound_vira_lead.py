@@ -84,8 +84,9 @@ def _estado(c, lead_id):
 
 
 def _recebe(c, texto, *, sid, continuidade):
+    # devolve (conversa, nova); estes testes só olham a conversa
     return pp._wa_inbound_conversa(c, CONTA, NUM, texto, sid, "Perfil", False,
-                                   exigir_continuidade=continuidade)
+                                   exigir_continuidade=continuidade)[0]
 
 
 # ------------------------------------------------------ 1. resposta de campanha

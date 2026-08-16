@@ -454,7 +454,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
 .hdl{display:flex;align-items:flex-start;gap:12px;flex:1;min-width:0}
 .hdl>div{min-width:0;overflow-wrap:anywhere}
 .hd .mt{flex:0 0 auto;white-space:nowrap}
-@media(max-width:560px){.hd{flex-wrap:wrap}
+@media screen and (max-width:560px){.hd{flex-wrap:wrap}
   /* no celular a marca vai EM CIMA: espremida ao lado, a coluna de texto
      ficava tão estreita que quebrava o CNPJ no meio. */
   .hdl{flex:1 1 100%;flex-wrap:wrap}
@@ -499,7 +499,7 @@ td small{display:block;color:#8A8475;font-size:11.5px;margin-top:4px;line-height
 /* ---- modo evento ---- */
 .hd .emit{font-size:10px;color:#9FA8BC;line-height:1.6;margin-top:7px}
 .evg{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-@media(max-width:560px){.evg{grid-template-columns:repeat(2,1fr)}}
+@media screen and (max-width:560px){.evg{grid-template-columns:repeat(2,1fr)}}
 .evb{background:#FBFAF7;border:1px solid #ECE7DC;border-radius:9px;padding:9px 11px}
 .evb .l{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:#8A8475;font-weight:600}
 .evb .v{font-size:15px;font-weight:700;margin-top:3px}
@@ -541,7 +541,7 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
    bloco — nome e descrição na largura toda, e os números embaixo com o rótulo
    junto (o cabeçalho da tabela some, então o número tem que se apresentar).
    Só na TELA: no papel a folha é A4 e a tabela continua tabela. */
-@media(max-width:560px){
+@media screen and (max-width:560px){
   table.itens,table.itens tbody,table.itens tr,table.itens td{display:block;width:auto}
   table.itens tr:first-child{display:none}          /* cabeçalho da tabela */
   table.itens tr{padding:11px 0;border-bottom:1px solid #F0EBE0}

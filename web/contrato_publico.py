@@ -164,7 +164,7 @@ def contrato_publico(request: Request, token: str, erro: str = ""):
     except Exception:  # noqa: BLE001
         _log.warning("não deu pra montar o contrato do token %s", token, exc_info=True)
         d = None
-    html = _env.get_template("contrato_doc").render(d=d, token=token, erro=erro)
+    html = _env.get_template(_TPL_NOME).render(d=d, token=token, erro=erro)
     return HTMLResponse(html, status_code=200 if d else 404)
 
 
@@ -357,4 +357,20 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
 </div></body></html>
 {% endif %}"""
 
-_env.loader.mapping["contrato_doc"] = _TPL
+# O NOME TERMINA EM .html DE PROPÓSITO, e é a única coisa que liga o autoescape.
+#
+# O `_env` do portal usa `select_autoescape()`, que decide pela EXTENSÃO do nome
+# do template. Os templates deste sistema são registrados no DictLoader com nomes
+# sem extensão ('proposta', 'servicos', 'base'), então caem no `default=False` e
+# saem CRUS. Conferido: `from_string` escapa, `get_template('nome')` não.
+#
+# Esta página é pública e sem login, e joga na tela dois valores que vêm da URL:
+# `{{ erro }}` (a faixa vermelha) e `{{ token }}` (dentro do action do form).
+# Sem escape, `?erro="><script>…` executa no navegador de quem abrir o link — e o
+# link é justamente o que o dono manda por WhatsApp, então basta o atacante
+# reenviar o mesmo link com a query trocada.
+#
+# Escapar campo a campo resolveria os dois que eu lembrei hoje; o autoescape
+# resolve também os que forem acrescentados amanhã.
+_TPL_NOME = "contrato_doc.html"
+_env.loader.mapping[_TPL_NOME] = _TPL

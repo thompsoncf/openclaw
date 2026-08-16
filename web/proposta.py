@@ -476,7 +476,7 @@ def emp_dados(pool, conta_id):
 def proposta_publica(request: Request, token: str, erro: str = ""):
     d = _carregar(token)
     if not d:
-        return HTMLResponse(_env.get_template("proposta").render(prop=None), status_code=404)
+        return HTMLResponse(_env.get_template(_TPL_NOME).render(prop=None), status_code=404)
     if d["modo"] == "evento":
         linhas = _linhas_evento(d)
         d["subtotais"] = _subtotais(d["itens"])
@@ -536,7 +536,7 @@ def proposta_publica(request: Request, token: str, erro: str = ""):
     d["sinal_pendente"] = bool(d["pre_ate_str"])
     d["data_reservada"] = d.get("evento_status") == "ativo"
     d["data_liberada"] = d.get("evento_status") == "cancelado"
-    return HTMLResponse(_env.get_template("proposta").render(
+    return HTMLResponse(_env.get_template(_TPL_NOME).render(
         prop=d, linhas=linhas, token=token, erro=erro,
         ))
 
@@ -956,4 +956,10 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
 </div></body></html>
 {% endif %}"""
 
-_env.loader.mapping["proposta"] = _PROPOSTA_TPL
+# .html no nome é o que LIGA o autoescape neste env (select_autoescape decide
+# pela extensão, e nome sem extensão cai no default=False — ou seja, cru).
+# A folha é pública e sem login, e joga na tela dois valores vindos da URL:
+# {{ erro }} e {{ token }} (dentro do action do form). Sem isto,
+# ?erro="><script>… executa no navegador de quem abrir o link.
+_TPL_NOME = "proposta.html"
+_env.loader.mapping[_TPL_NOME] = _PROPOSTA_TPL

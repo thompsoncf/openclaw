@@ -459,6 +459,43 @@ def test_aprovar_a_proposta_faz_nascer_o_contrato_com_link(pool):
                          (CONTA,)).fetchone()[0] == 1
 
 
+def test_a_mensagem_de_erro_da_url_nao_vira_html(pool):
+    """XSS refletido. A página é PÚBLICA e sem login, e devolve `?erro=` na tela —
+    é o link que o dono manda por WhatsApp, então basta o atacante mandar o mesmo
+    link com a query trocada.
+
+    E o autoescape NÃO cobre isto sozinho: o `_env` do portal usa
+    `select_autoescape()`, que liga o escape por EXTENSÃO do nome do template.
+    Os templates daqui são registrados no DictLoader como 'contrato_doc',
+    'proposta' — sem extensão nenhuma —, então caem no `default=False` e saem
+    crus. (Conferido: `from_string` escapa, `get_template('nome')` não.)"""
+    # com o sinal pago: é quando o formulário (e a faixa de erro) aparecem
+    _orcamento(pool, status="aprovada", sinal_pago=True)
+    payload = '"><script>alert(1)</script>'
+    html = cp.contrato_publico(_Req(), CT_TOKEN, erro=payload).body.decode()
+    assert payload not in html, "a mensagem de erro da URL entrou como HTML"
+    assert "&lt;script&gt;" in html, "a mensagem devia aparecer, só que escapada"
+
+
+def test_o_token_so_e_ecoado_depois_de_casar_com_o_banco(pool):
+    """O outro valor da URL que entra no HTML é `{{ token }}`, dentro do action do
+    formulário. Ele NÃO é vetor, e a razão é esta — vale prender porque é ela que
+    sustenta a conclusão: token que não casa com nenhuma linha nunca chega no
+    formulário, então o que a página ecoa é sempre um token gerado por
+    `secrets.token_urlsafe`, não texto do atacante.
+
+    (Medido: com o autoescape desligado este teste continuava passando. Ele passa
+    por causa do 404, não por causa do escape — dizer que ele prende a injeção
+    seria mentira com cara de teste.)"""
+    _orcamento(pool, status="aprovada", sinal_pago=True)
+    veneno = 'CTTOKEN" onload="alert(1)'
+    r = cp.contrato_publico(_Req(), veneno)
+    assert r.status_code == 404
+    html = r.body.decode()
+    assert veneno not in html
+    assert 'action="/contrato/' not in html      # a página de 404 não tem formulário
+
+
 def test_a_pagina_avisa_quando_um_campo_ficou_sem_valor(pool):
     """Falta silenciosa num contrato é o pior tipo: o cliente assina um documento
     com buraco. A página diz quais campos não resolveram."""

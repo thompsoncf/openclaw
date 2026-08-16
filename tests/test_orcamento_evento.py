@@ -665,6 +665,37 @@ def test_folha_do_cliente_avisa_que_a_data_esta_segurada(pool, conta_id, monkeyp
     assert "está reservada" not in html2          # a promessa velha não sobra na folha
 
 
+def test_a_mensagem_de_erro_da_url_nao_vira_html_na_folha(pool, conta_id, monkeypatch):
+    """XSS refletido na folha PÚBLICA. Ela devolve `?erro=` na tela, e o link é
+    justamente o que o dono manda por WhatsApp — basta o atacante reenviar o
+    mesmo link com a query trocada.
+
+    O autoescape não cobria isto: o `_env` do portal usa `select_autoescape()`,
+    que liga o escape pela EXTENSÃO do nome do template, e os templates daqui
+    eram registrados no DictLoader sem extensão ('proposta') — caindo no
+    `default=False`. Por isso o nome passou a terminar em .html."""
+    carregar, pool_teste = prop._carregar, pool
+    monkeypatch.setattr(prop, "_carregar", lambda t, pool=None: carregar(t, pool=pool_teste))
+    _, tok = _semear(pool, conta_id)
+    payload = '"><script>alert(1)</script>'
+    html = prop.proposta_publica(None, tok, erro=payload).body.decode()
+    assert payload not in html, "a mensagem de erro da URL entrou como HTML"
+    assert "&lt;script&gt;" in html, "a mensagem devia aparecer, só que escapada"
+
+
+def test_o_token_so_e_ecoado_depois_de_casar_com_o_banco(pool, conta_id, monkeypatch):
+    """O outro valor da URL que entra no HTML é {{ token }}, no action do form.
+    Ele NÃO é vetor, e é esta a razão: token que não casa com nenhuma linha cai no
+    404, que não tem formulário — o que a folha ecoa é sempre um token gerado pelo
+    sistema. Prendo a razão, não a conclusão."""
+    carregar, pool_teste = prop._carregar, pool
+    monkeypatch.setattr(prop, "_carregar", lambda t, pool=None: carregar(t, pool=pool_teste))
+    _, tok = _semear(pool, conta_id)
+    r = prop.proposta_publica(None, tok + '" onload="alert(1)')
+    assert r.status_code == 404
+    assert 'action="/proposta/' not in r.body.decode()
+
+
 def test_folha_para_de_avisar_quando_o_sinal_cai(pool, conta_id, monkeypatch):
     carregar, pool_teste = prop._carregar, pool
     monkeypatch.setattr(prop, "_carregar", lambda t, pool=None: carregar(t, pool=pool_teste))

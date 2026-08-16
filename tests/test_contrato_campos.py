@@ -212,6 +212,75 @@ def test_campos_usados_nao_repete_e_mantem_a_ordem():
     ]) == ["valor.total", "cliente.nome"]
 
 
+# --------------------------------------------- a empresa como ela chega de verdade
+
+# É ASSIM que `empresa.obter_dados_empresa` devolve: a chave é `documento`. O
+# EMPRESA lá de cima usa `cnpj` porque é dicionário escrito à mão — e foi essa
+# diferença que fez `{empresa.cnpj}` sair vazio SEMPRE em produção, sem erro
+# nenhum, num campo que a paleta de campos oferecia ao dono.
+EMPRESA_REAL = {"razao_social": "M S DE SOUSA JUNIOR FESTAS E EVENTOS LTDA",
+                "documento": "52.752.898/0001-58", "nome_fantasia": "Prime Eventos",
+                "endereco": "Av. Principal, 1000", "bairro": "Centro",
+                "cidade": "Teresina", "uf": "pi", "telefone": "(86) 99999-0000",
+                "email_empresa": "contato@prime.com.br"}
+
+
+def test_o_cnpj_da_empresa_sai_da_chave_que_o_sistema_usa():
+    txt, faltas = ct.preencher("{empresa.razao}, CNPJ {empresa.cnpj}.",
+                               _ctx(empresa=EMPRESA_REAL))
+    assert txt == ("M S DE SOUSA JUNIOR FESTAS E EVENTOS LTDA, "
+                   "CNPJ 52.752.898/0001-58.")
+    assert faltas == []
+
+
+def test_o_dicionario_escrito_a_mao_com_cnpj_continua_valendo():
+    """O fallback existe pra não quebrar quem monta o contexto na mão (os testes
+    puros acima, e a pré-visualização do modelo)."""
+    assert ct.contexto(catalogo=CATALOGO, orcamento=ORCAMENTO, modelo=None,
+                       empresa={"cnpj": "11.111.111/0001-11"})["empresa"]["cnpj"] \
+        == "11.111.111/0001-11"
+
+
+def test_os_campos_da_empresa_que_o_contrato_de_locacao_precisa():
+    """Contrato que qualifica as partes precisa de endereço completo e contato —
+    sem eles a empresa completa na mão depois de imprimir."""
+    e = _ctx(empresa=EMPRESA_REAL)["empresa"]
+    assert e["endereco"] == "Av. Principal, 1000" and e["bairro"] == "Centro"
+    assert e["cidade"] == "Teresina"
+    assert e["uf"] == "PI"                       # UF sai maiúscula, veio "pi"
+    assert e["telefone"] == "(86) 99999-0000"
+    assert e["email"] == "contato@prime.com.br"  # a coluna é `email_empresa`
+
+
+def test_os_campos_do_cliente_saem_do_orcamento():
+    c = _ctx(orcamento={**ORCAMENTO, "endereco": "Rua A, 10", "cidade": "Teresina",
+                        "uf": "pi", "cep": "64000-000", "email": "t@x.com",
+                        "whatsapp": "86988887777"})["cliente"]
+    assert c["endereco"] == "Rua A, 10" and c["cidade"] == "Teresina"
+    assert c["uf"] == "PI" and c["cep"] == "64000-000" and c["email"] == "t@x.com"
+    # sem telefone próprio, o WhatsApp serve — é o contato que o orçamento sempre tem
+    assert c["telefone"] == "86988887777"
+
+
+def test_campo_novo_da_empresa_esta_na_paleta_que_o_dono_ve():
+    """Campo que existe no contexto e não na paleta é campo que ninguém usa."""
+    campos = {c["campo"] for c in ct.campos_disponiveis(CATALOGO)}
+    for novo in ("empresa.cidade", "empresa.uf", "empresa.telefone", "empresa.email",
+                 "empresa.bairro", "cliente.endereco", "cliente.cidade", "cliente.uf",
+                 "cliente.cep", "cliente.telefone", "cliente.email", "evento.local"):
+        assert novo in campos
+
+
+def test_a_paleta_nao_oferece_campo_que_o_contexto_nao_resolve():
+    """A regra inversa, que é a que pega a falta silenciosa: se a paleta oferece
+    {empresa.cnpj} e o contexto não sabe preencher, o dono escreve a cláusula e
+    ela sai capenga sem ninguém avisar. Era exatamente o caso do CNPJ."""
+    ctx = _ctx(empresa=EMPRESA_REAL)
+    for c in ct.campos_disponiveis(CATALOGO):
+        grupo, _, nome = c["campo"].partition(".")
+        assert nome in ctx.get(grupo, {}), f"a paleta oferece {c['campo']}, o contexto não tem"
+
+
 # ------------------------------------------------------------ só nicho evento
 
 def test_contrato_de_locacao_e_do_nicho_de_eventos():

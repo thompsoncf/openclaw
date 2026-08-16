@@ -80,7 +80,8 @@ def cliente(monkeypatch):
             numero int not null, orcamento_id bigint, status text not null default 'enviado',
             texto jsonb, valor_centavos bigint, assinado_em timestamptz, assinado_por text,
             assinado_doc text, assinado_ip text, rescindido_em timestamptz,
-            rescisao_motivo text, substitui_id bigint, criado_em timestamptz default now(),
+            rescisao_motivo text, substitui_id bigint, token text,
+            criado_em timestamptz default now(),
             criado_por text default '')""")
         c.execute("create unique index ux_ct_cn on contratos (conta_id, numero)")
         c.commit()
@@ -171,6 +172,39 @@ def test_confirmar_firma_a_data_e_o_botao_some(cliente):
     # e a tela para de oferecer o botão sozinha (a subconsulta zera)
     it = _item(cliente, oid)
     assert it["pre_reserva_ate"] == "" and it["sinal_pago"] is True
+
+
+def test_a_linha_do_funil_carrega_o_link_do_contrato(cliente):
+    """O contrato é documento PRÓPRIO, com URL própria — e o dono precisa mandar
+    esse link do mesmo lugar de onde já manda o da proposta. Sem `contrato_token`
+    na resposta da lista, os botões 📜/↗ simplesmente não são desenhados e o
+    contrato existe sem ninguém ter como abrir."""
+    oid, _ = _orcamento_com_data_segurada(cliente)
+    # antes de existir contrato, a linha não pode fingir que existe
+    assert _item(cliente, oid)["contrato_token"] == ""
+    cliente.post("/painel/servicos/sinal-recebido", json={"id": oid})
+    it = _item(cliente, oid)
+    assert it["contrato_token"] and it["contrato_numero"] == 1
+    assert it["contrato_assinado"] is False
+    # e o token da linha é o token DO contrato daquele orçamento, não outro
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select token from contratos where orcamento_id=%s",
+                          (oid,)).fetchone()[0] == it["contrato_token"]
+        cx.execute("update contratos set assinado_em=now(), status='assinado' "
+                   "where orcamento_id=%s", (oid,))
+        cx.commit()
+    assert _item(cliente, oid)["contrato_assinado"] is True
+
+
+def test_contrato_de_outro_orcamento_nao_vaza_pra_linha(cliente):
+    """A subconsulta casa por `orcamento_id`. Se casasse só por conta, toda linha
+    do funil mostraria o contrato do vizinho — e o dono mandaria pro cliente
+    errado um documento com o nome e o CPF de outra pessoa."""
+    oid_a, _ = _orcamento_com_data_segurada(cliente)
+    oid_b, _ = _orcamento_com_data_segurada(cliente)
+    cliente.post("/painel/servicos/sinal-recebido", json={"id": oid_a})
+    assert _item(cliente, oid_a)["contrato_token"] != ""
+    assert _item(cliente, oid_b)["contrato_token"] == ""
 
 
 def test_confirmar_duas_vezes_nao_quebra(cliente):

@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 
 # Um campo é {grupo.nome}. O ponto separa DE ONDE vem o valor, e isso é
 # proposital: quem lê a cláusula sabe se aquele número veio do catálogo, do
@@ -128,10 +129,19 @@ def contexto(*, catalogo=None, orcamento=None, modelo=None, empresa=None) -> dic
             "convidados": str(ev.get("convidados") or ""),
             "local": ev.get("local") or "",
         },
+        # o CLIENTE inteiro, não só o nome. O orçamento já guarda endereço, cidade,
+        # e-mail e telefone — um contrato que qualifica as partes precisa disso, e
+        # deixar de fora obrigava a empresa a completar na mão depois de imprimir.
         "cliente": {
             "nome": o.get("cliente") or o.get("empresa") or "",
             "doc": o.get("cnpj") or "",
             "whatsapp": o.get("whatsapp") or "",
+            "email": o.get("email") or "",
+            "telefone": o.get("telefone") or o.get("whatsapp") or "",
+            "endereco": o.get("endereco") or "",
+            "cep": o.get("cep") or "",
+            "cidade": o.get("cidade") or "",
+            "uf": (o.get("uf") or "").upper(),
         },
         "valor": {
             "total": reais(total),
@@ -153,10 +163,17 @@ def contexto(*, catalogo=None, orcamento=None, modelo=None, empresa=None) -> dic
         },
         "empresa": {
             "razao": emp.get("razao_social") or emp.get("nome_fantasia") or "",
-            "cnpj": emp.get("cnpj") or "",
+            # `obter_dados_empresa` devolve a chave `documento`; ler "cnpj" fazia
+            # {empresa.cnpj} sair vazio SEMPRE — falta silenciosa num campo que a
+            # paleta oferece. O fallback mantém quem passar o dicionário na mão.
+            "cnpj": emp.get("documento") or emp.get("cnpj") or "",
             "endereco": emp.get("endereco") or "",
+            "bairro": emp.get("bairro") or "",
+            "cep": emp.get("cep") or "",
             "cidade": emp.get("cidade") or "",
-            "uf": emp.get("uf") or "",
+            "uf": (emp.get("uf") or "").upper(),
+            "telefone": emp.get("telefone") or "",
+            "email": emp.get("email_empresa") or "",
         },
     }
 
@@ -220,6 +237,9 @@ def campos_disponiveis(catalogo=None) -> list[dict]:
     cabeça é a forma mais fácil de criar uma falta silenciosa."""
     fixos = [
         ("cliente.nome", "nome de quem assina"), ("cliente.doc", "CPF/CNPJ"),
+        ("cliente.endereco", "endereço do cliente"), ("cliente.cidade", "cidade do cliente"),
+        ("cliente.uf", "UF do cliente"), ("cliente.cep", "CEP do cliente"),
+        ("cliente.telefone", "telefone do cliente"), ("cliente.email", "e-mail do cliente"),
         ("evento.data", "data do evento"), ("evento.inicio", "horário de início"),
         ("evento.fim", "horário de término"), ("evento.tipo", "tipo de evento"),
         ("evento.convidados", "nº de convidados"),
@@ -231,8 +251,11 @@ def campos_disponiveis(catalogo=None) -> list[dict]:
         ("regra.quitacao_dias", "dias p/ quitar"), ("regra.reagenda_dias", "antecedência p/ remarcar"),
         ("regra.reagenda_prazo", "prazo da nova data"), ("regra.retirada_horas", "horas p/ retirar"),
         ("regra.acesso_montagem", "horário de montagem"),
+        ("evento.local", "local do evento"),
         ("empresa.razao", "razão social"), ("empresa.cnpj", "CNPJ"),
-        ("empresa.endereco", "endereço"),
+        ("empresa.endereco", "endereço"), ("empresa.bairro", "bairro"),
+        ("empresa.cidade", "cidade"), ("empresa.uf", "UF"),
+        ("empresa.telefone", "telefone"), ("empresa.email", "e-mail"),
     ]
     saida = [{"campo": c, "rotulo": r, "grupo": c.split(".")[0]} for c, r in fixos]
     for s in (catalogo or []):
@@ -370,7 +393,7 @@ STATUS = ("rascunho", "enviado", "assinado", "rescindido", "cumprido")
 
 _COLS_CT = ("id, conta_id, numero, orcamento_id, status, texto, valor_centavos, "
             "assinado_em, assinado_por, assinado_doc, assinado_ip, "
-            "rescindido_em, rescisao_motivo, substitui_id, criado_em")
+            "rescindido_em, rescisao_motivo, substitui_id, criado_em, token")
 
 
 def _fmt_contrato(r) -> dict:
@@ -378,7 +401,8 @@ def _fmt_contrato(r) -> dict:
             "status": r[4], "texto": r[5], "valor_centavos": r[6],
             "assinado_em": r[7], "assinado_por": r[8] or "", "assinado_doc": r[9] or "",
             "assinado_ip": r[10] or "", "rescindido_em": r[11],
-            "rescisao_motivo": r[12] or "", "substitui_id": r[13], "criado_em": r[14]}
+            "rescisao_motivo": r[12] or "", "substitui_id": r[13], "criado_em": r[14],
+            "token": r[15] if len(r) > 15 else None}
 
 
 def por_orcamento(pool, conta_id: int, orcamento_id: int) -> dict | None:
@@ -426,14 +450,26 @@ def criar_para_orcamento(pool, conta_id: int, orcamento_id: int,
     with pool.connection() as c:
         r = c.execute(
             """insert into contratos (conta_id, numero, orcamento_id, status,
-                                      valor_centavos, criado_por)
+                                      valor_centavos, criado_por, token)
                values (%s, (select coalesce(max(numero),0)+1 from contratos
-                             where conta_id=%s), %s, 'enviado', %s, %s)
+                             where conta_id=%s), %s, 'enviado', %s, %s, %s)
                returning """ + _COLS_CT,
-            (conta_id, conta_id, int(orcamento_id), valor_centavos, (criado_por or "")[:120])
+            (conta_id, conta_id, int(orcamento_id), valor_centavos,
+             (criado_por or "")[:120], secrets.token_urlsafe(16))
         ).fetchone()
         c.commit()
     return _fmt_contrato(r)
+
+
+def por_token(pool, token: str) -> dict | None:
+    """O contrato pelo link público. Sem conta_id de propósito: quem tem o token vê
+    aquele contrato e só ele — mesmo desenho da proposta."""
+    if not (token or "").strip():
+        return None
+    with pool.connection() as c:
+        r = c.execute("select " + _COLS_CT + " from contratos where token=%s",
+                      (token.strip(),)).fetchone()
+    return _fmt_contrato(r) if r else None
 
 
 def assinar(pool, conta_id: int, contrato_id: int, clausulas,

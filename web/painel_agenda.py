@@ -8,6 +8,7 @@ token (rota /agenda/<token>.ics, fora do gate do painel) — o segredo é o toke
 Reusa o motor do portal: _render/_env (base, nav) + conta_logada.
 """
 import calendar as _cal
+import logging
 from datetime import date, datetime, timedelta
 from urllib.parse import quote
 
@@ -21,6 +22,7 @@ from finance import convites as cv
 from web.portal import _env, _render, conta_logada
 
 router = APIRouter()
+_log_ag = logging.getLogger("painel.agenda")
 
 MESES = ["", "janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho",
          "agosto", "setembro", "outubro", "novembro", "dezembro"]
@@ -77,10 +79,69 @@ def _prazo(ev: dict, agora) -> dict:
     return {"rot": rot, "horas": horas, "urgente": horas < 24}
 
 
+def _ficha_rot(f: dict | None) -> dict | None:
+    """A ficha do evento já formatada pro JS — valores em texto, nada de centavos
+    crus na tela. None quando o compromisso não veio de orçamento nenhum (marcado
+    na mão, ou data segurada por telefonema): aí não há ficha pra mostrar."""
+    if not f:
+        return None
+    prox = f.get("proxima") or None
+    conv = f.get("convidados")
+    try:
+        conv = int(conv) if conv not in (None, "") else None
+    except (TypeError, ValueError):
+        conv = None
+    return {
+        "orcamento_id": f["orcamento_id"], "numero": f.get("numero"),
+        "status": f.get("status") or "",
+        "fechado": (f.get("status") or "") == "fechado",
+        "cliente": f.get("cliente") or "", "contato": f.get("contato") or "",
+        "tipo": f.get("tipo") or "", "convidados": conv,
+        "itens": f.get("itens") or [],
+        "total": _brl(f.get("total_centavos")),
+        "tem_titulos": bool(f.get("tem_titulos")),
+        "pct": f.get("pct"),
+        "pago": _brl(f.get("pago_centavos")),
+        "cobrado": _brl(f.get("titulos_centavos")),
+        "plano": _brl(f.get("plano_centavos")),
+        "vencidas": int(f.get("vencidas") or 0),
+        "vencidas_valor": _brl(f.get("vencidas_centavos")),
+        "prox_valor": _brl(prox["valor_centavos"]) if prox else "",
+        "prox_venc": prox["vencimento"].strftime("%d/%m") if prox and prox.get("vencimento") else "",
+        "prox_vencida": bool(prox and prox.get("vencida")),
+        "prox_dias": ((prox["vencimento"] - date.today()).days
+                      if prox and prox.get("vencimento") else None),
+    }
+
+
+def _pg_estado(ficha: dict | None) -> dict:
+    """Como o pagamento daquela festa aparece NA LINHA do calendário.
+
+    Num buffet, "quanto já entrou" é tão parte da data quanto o horário — duas
+    festas no mesmo mês, uma quitada e outra sem um centavo, hoje parecem idênticas.
+    Rótulo curto e uma cor:
+      • verde  — quitado;
+      • coral  — tem parcela vencida (é o que exige ação);
+      • âmbar  — recebido em parte, nada vencido.
+    Sem título nenhum (contrato não fechado) não mostra número: não há o que medir.
+    """
+    if not ficha or ficha.get("pct") is None:
+        return {"rot": "", "classe": ""}
+    pct = int(ficha["pct"])
+    if ficha.get("vencidas"):
+        classe = "bad"
+    elif pct >= 100:
+        classe = "ok"
+    else:
+        classe = "mid"
+    return {"rot": f"{pct}%", "classe": classe}
+
+
 def _monta_semanas(ano: int, mes: int, eventos: list[dict], hoje: date,
-                   agora=None) -> list[list[dict]]:
+                   agora=None, fichas: dict | None = None) -> list[list[dict]]:
     """Grade do mês (semanas de Dom a Sáb). Cada célula traz seus eventos."""
     agora = agora or ag.agora_brt()
+    fichas = fichas or {}
     por_dia: dict[date, list[dict]] = {}
     for ev in eventos:
         d = ev["inicio"].astimezone(ag.BRT).date()
@@ -97,11 +158,13 @@ def _monta_semanas(ano: int, mes: int, eventos: list[dict], hoje: date,
             linhas_ev = []
             for e in evs:
                 pz = _prazo(e, agora)
+                pg = _pg_estado(fichas.get(e["id"]))
                 linhas_ev.append({
                     "id": e["id"], "titulo": e["titulo"], "tipo": e["tipo"],
                     "hora": e["inicio"].astimezone(ag.BRT).strftime("%H:%M"),
                     "pre": e.get("status") == ag.PRE_RESERVADO,
                     "prazo": pz["rot"], "urgente": pz["urgente"],
+                    "pg": pg["rot"], "pg_classe": pg["classe"],
                 })
             # a célula inteira se pinta: é o que se enxerga do mês sem ler linha
             # nenhuma — âmbar quando tem data segurada, coral quando alguma aperta.
@@ -122,12 +185,14 @@ def _titulo_dia(d: date) -> str:
 
 
 def _eventos_por_dia(eventos: list[dict], convidados: dict[int, list[dict]] | None = None,
-                     agora=None, orcamentos: dict[int, dict] | None = None) -> dict[str, dict]:
+                     agora=None, orcamentos: dict[int, dict] | None = None,
+                     fichas: dict[int, dict] | None = None) -> dict[str, dict]:
     """{iso_do_dia: {titulo, eventos:[...]}} com os detalhes completos (local,
     descrição, convidados) — alimenta a caixa do dia no JS sem precisar de outra
     requisição (os eventos do mês já vieram pro calendário)."""
     convidados = convidados or {}
     orcamentos = orcamentos or {}
+    fichas = fichas or {}
     agora = agora or ag.agora_brt()
     out: dict[str, dict] = {}
     for e in sorted(eventos, key=lambda ev: ev["inicio"]):
@@ -158,6 +223,8 @@ def _eventos_por_dia(eventos: list[dict], convidados: dict[int, list[dict]] | No
                           or e.get("sinal_centavos")),
             "orcamento_id": orcamentos.get(e["id"], {}).get("orcamento_id"),
             "orcamento_numero": orcamentos.get(e["id"], {}).get("orcamento_numero"),
+            # a FICHA: o que o orçamento vinculado já sabe sobre essa festa
+            "ficha": _ficha_rot(fichas.get(e["id"])),
         })
     return out
 
@@ -314,11 +381,24 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
     ano, mes = _mes_ref(m)
     agora = ag.agora_brt()
     hoje = agora.date()
+    # NICHO: só quem vende data (eventos) vê o vocabulário de data segurada e a
+    # ficha do evento. Pra clínica, loja e escritório a Agenda continua exatamente
+    # como estava — a pré-reserva nasce só de orçamento de evento, então a marca não
+    # teria o que marcar e a legenda falaria de um sinal que nunca existe.
+    vende_data = _vendas().vende_data(pool, conta_id)
     eventos = ag.eventos_mes(pool, conta_id, ano, mes)
-    semanas = _monta_semanas(ano, mes, eventos, hoje, agora)
     proximos = ag.proximos(pool, conta_id, limite=8)
     ids_com_convidados = {e["id"] for e in eventos} | {e["id"] for e in proximos}
     convidados = cv.por_evento(pool, conta_id, list(ids_com_convidados))
+    # FICHA DO EVENTO: o orçamento vinculado e o pagamento de cada festa do mês.
+    # Só pra quem vende data — e só quando há eventos, pra não gastar consulta à toa.
+    fichas = {}
+    if vende_data and eventos:
+        try:
+            fichas = _vendas().fichas_de_eventos(pool, conta_id, [e["id"] for e in eventos])
+        except Exception:  # noqa: BLE001 — a ficha é leitura extra; a agenda abre sem ela
+            _log_ag.warning("agenda: não deu pra montar as fichas dos eventos", exc_info=True)
+    semanas = _monta_semanas(ano, mes, eventos, hoje, agora, fichas)
     # DATAS SEGURADAS: lista própria, da que vence primeiro pra última. `proximos`
     # não pode mostrá-las (é a fonte do lembrete e do resumo do dia), então sem
     # este card uma data que vence amanhã só aparecia pra quem abrisse o mês certo.
@@ -336,7 +416,7 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
             "mes": f"{ev['inicio'].astimezone(ag.BRT):%Y-%m}",
         })
     orcs = {s["id"]: s for s in seguradas}
-    eventos_dia = _eventos_por_dia(eventos, convidados, agora, orcs)
+    eventos_dia = _eventos_por_dia(eventos, convidados, agora, orcs, fichas)
     reaproveitar = [{
         "id": e["id"], "titulo": e["titulo"], "hora_rot": ag.fmt_hora(e),
         "hora": e["inicio"].astimezone(ag.BRT).strftime("%H:%M"),
@@ -349,11 +429,6 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
         ev["tipo_rot"] = TIPO_ROT.get(ev["tipo"], "Pessoal")
         ev["convidados"] = convidados.get(ev["id"], [])
         ev["conv_resumo"] = cv.resumo(ev["convidados"]) if ev["convidados"] else None
-    # NICHO: só quem vende data (eventos) vê o vocabulário de data segurada. Pra
-    # clínica, loja e escritório a Agenda continua exatamente como estava — a
-    # pré-reserva nasce só de orçamento de evento, então a marca não teria o que
-    # marcar e a legenda falaria de um sinal que nunca existe.
-    vende_data = _vendas().vende_data(pool, conta_id)
     cfg = ag.get_config(pool, conta_id)
     feed_url = _feed_url(request, cfg["feed_token"]) if cfg.get("feed_token") else ""
     # Card de compartilhar os convites de um evento (?convite_ev=<id>; aceita também
@@ -980,6 +1055,43 @@ _CSS = """<style>
 .leg-mk{display:inline-block;width:3px;height:11px;border-radius:2px;vertical-align:-1px;margin-right:3px}
 .leg-fixo{background:var(--verde)}
 .leg-seg{background:repeating-linear-gradient(180deg,var(--ambar) 0 3px,transparent 3px 6px)}
+/* % RECEBIDO na linha do calendário. Num buffet "quanto já entrou" é tão parte da
+   data quanto o horário — duas festas, uma quitada e outra zerada, hoje pareciam
+   idênticas. Coral quando tem parcela vencida: é o que exige ação. */
+.ev-pg{font-size:.55rem;font-weight:700;flex:0 0 auto;font-variant-numeric:tabular-nums}
+.ev-pg.ok{color:var(--verde)} .ev-pg.mid{color:var(--ambar)} .ev-pg.bad{color:var(--coral)}
+/* FICHA DO EVENTO na caixa do dia: o que o orçamento vinculado já sabe da festa */
+.fic{margin-top:8px;border:1px solid var(--borda);border-radius:10px;overflow:hidden}
+.fic-h{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px;
+       background:var(--card-2);border-bottom:1px solid var(--borda)}
+.fic-h .t{font-size:.62rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--txt-mut)}
+.fic-h a{font-size:.66rem;color:var(--verde);text-decoration:none;white-space:nowrap}
+.fic-g{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--borda)}
+@media(max-width:560px){.fic-g{grid-template-columns:repeat(2,1fr)}}
+.fic-c{background:var(--bg);padding:7px 10px;min-width:0}
+.fic-c .k{font-size:.55rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-mut)}
+.fic-c .v{font-size:.8rem;font-weight:650;margin-top:1px;font-variant-numeric:tabular-nums;
+          overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fic-c .v.sm{font-size:.72rem;font-weight:500}
+.fic-c a.v{color:var(--verde);text-decoration:none;display:block}
+.fic-b{background:var(--bg);padding:7px 10px;border-top:1px solid var(--borda)}
+.fic-b .k{font-size:.55rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+          color:var(--txt-mut);margin-bottom:5px}
+.fchip{display:inline-block;font-size:.66rem;padding:.14rem .5rem;border-radius:6px;
+       background:var(--card-2);border:1px solid var(--borda);margin:0 4px 4px 0}
+.fchip .q{color:var(--txt-mut);font-variant-numeric:tabular-nums}
+.fbar{height:6px;border-radius:99px;background:#1c2a23;overflow:hidden;margin:5px 0 4px}
+.fbar i{display:block;height:100%;background:var(--verde)}
+.flin{display:flex;justify-content:space-between;gap:8px;font-size:.68rem;color:var(--txt-mut);
+      font-variant-numeric:tabular-nums}
+.flin b{color:var(--txt)}
+.falerta{display:flex;gap:8px;align-items:flex-start;font-size:.72rem;line-height:1.45;
+         border-radius:8px;padding:7px 9px;margin-top:7px;
+         background:var(--coral-fundo);border:1px solid var(--coral-borda);color:#f0c2be}
+.falerta b{color:var(--coral)}
+.falerta a{color:var(--coral);font-weight:650}
+.falerta.amb{background:var(--ambar-fundo);border-color:var(--ambar-borda);color:#e6c98d}
+.falerta.amb b,.falerta.amb a{color:var(--ambar)}
 /* próximos */
 .px{display:flex;flex-direction:column;gap:2px}
 .px-row{display:flex;align-items:flex-start;gap:11px;padding:9px 4px;border-bottom:1px solid var(--borda)}
@@ -1305,7 +1417,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             {% if c.eventos %}
             <div class="evs">
               {% for e in c.eventos[:2] %}
-              <div class="ev-line{% if e.pre %} pre{% endif %}" data-ev="{{ e.id }}"{% if e.pre %} title="Data segurada — esperando o sinal ({{ e.prazo }})"{% endif %}><span class="dot d-{{ e.tipo }}"></span><span class="h">{{ e.hora }}</span><span class="n">{{ e.titulo }}</span>{% if e.prazo %}<span class="ev-prazo{% if e.urgente %} urg{% endif %}">{{ e.prazo }}</span>{% endif %}</div>
+              <div class="ev-line{% if e.pre %} pre{% endif %}" data-ev="{{ e.id }}"{% if e.pre %} title="Data segurada — esperando o sinal ({{ e.prazo }})"{% endif %}><span class="dot d-{{ e.tipo }}"></span><span class="h">{{ e.hora }}</span><span class="n">{{ e.titulo }}</span>{% if e.prazo %}<span class="ev-prazo{% if e.urgente %} urg{% endif %}">{{ e.prazo }}</span>{% endif %}{% if e.pg %}<span class="ev-pg {{ e.pg_classe }}">{{ e.pg }}</span>{% endif %}</div>
               {% endfor %}
             </div>
             {% if c.eventos|length > 2 %}<div class="ev-more">+{{ c.eventos|length - 2 }} mais</div>{% endif %}
@@ -1764,6 +1876,72 @@ function _reaproveitarHtml(iso){
 // confirm() nomeando o evento SEM aninhar aspas dentro de string JS: o título vem
 // do data-attribute do próprio form. A versão inline precisava de três níveis de
 // escape (string Python -> template -> atributo HTML -> JS) e quebrava calada.
+// FICHA DO EVENTO. Tudo aqui já estava gravado no orçamento; a agenda só não lia.
+// No lugar da frase colada ("Orçamento Nº 1 · 100 convidados · aprovado pelo
+// cliente"), os campos de verdade — e o pagamento, que num buffet é parte da data.
+function _fichaHtml(f){
+  if(!f) return '';
+  var cel = function(k, v, sm){
+    return '<div class="fic-c"><div class="k">'+k+'</div>'
+         + '<div class="v'+(sm?' sm':'')+'">'+v+'</div></div>';
+  };
+  var linhas = '';
+  if(f.cliente) linhas += cel('cliente', _esc(f.cliente), true);
+  if(f.contato){
+    var so = String(f.contato).replace(/\D/g,'');
+    var num = so.length>=10 && so.slice(0,2)!=='55' ? '55'+so : so;
+    linhas += '<div class="fic-c"><div class="k">whatsapp</div>'
+            + '<a class="v sm" href="https://wa.me/'+num+'" target="_blank" rel="noopener">'
+            + _esc(f.contato)+'</a></div>';
+  }
+  if(f.total) linhas += cel('total', _esc(f.total));
+
+  var itens = '';
+  if(f.itens && f.itens.length){
+    itens = '<div class="fic-b"><div class="k">o que foi contratado</div>'
+      + f.itens.map(function(i){
+          return '<span class="fchip">'+_esc(i.nome)
+               + (i.qtd>1?' <span class="q">×'+i.qtd+'</span>':'')+'</span>';
+        }).join('')
+      + '</div>';
+  }
+
+  // PAGAMENTO. Com contrato fechado existem títulos e o número é recebido de
+  // verdade. Só aprovado, o que existe é o PLANO aceito — e dizer "0% recebido" de
+  // algo que ninguém cobrou seria mentira com cara de número.
+  var pg = '';
+  if(f.tem_titulos){
+    var pct = f.pct || 0;
+    var al = '';
+    if(f.prox_valor){
+      var urg = f.prox_vencida || (f.prox_dias !== null && f.prox_dias <= 3);
+      var quando = f.prox_vencida ? 'venceu em '+_esc(f.prox_venc)
+                 : (f.prox_dias === 0 ? 'vence hoje'
+                 : (f.prox_dias === 1 ? 'vence amanhã' : 'vence '+_esc(f.prox_venc)));
+      al = '<div class="falerta'+(urg?'':' amb')+'"><span>'+(f.prox_vencida?'⚠️':'🗓️')+'</span>'
+         + '<div><b>Próxima parcela '+quando+'</b> — '+_esc(f.prox_valor)+'.'
+         + (f.vencidas>1?' '+f.vencidas+' parcelas vencidas, '+_esc(f.vencidas_valor)+' no total.':'')
+         + ' <a href="/painel/empresa#receber">Ver em contas a receber</a></div></div>';
+    }
+    pg = '<div class="fic-b"><div class="k">recebido</div>'
+       + '<div class="fbar"><i style="width:'+Math.max(0,Math.min(100,pct))+'%"></i></div>'
+       + '<div class="flin"><span><b>'+_esc(f.pago)+'</b> de '+_esc(f.cobrado)+'</span>'
+       + '<span>'+pct+'%</span></div>' + al + '</div>';
+  } else if(f.plano){
+    pg = '<div class="fic-b"><div class="k">plano de pagamento</div>'
+       + '<div class="flin"><span><b>'+_esc(f.plano)+'</b> combinados</span>'
+       + '<span>contrato não fechado</span></div>'
+       + '<div class="flin" style="margin-top:4px;font-size:.64rem">Feche o contrato no funil '
+       + 'pra virar título a receber.</div></div>';
+  }
+
+  var cab = 'orçamento' + (f.numero ? ' nº '+_esc(String(f.numero)) : '')
+          + (f.status ? ' · '+_esc(f.status) : '');
+  return '<div class="fic"><div class="fic-h"><span class="t">'+cab+'</span>'
+       + '<a href="/painel/servicos?abrir='+f.orcamento_id+'">abrir orçamento →</a></div>'
+       + (linhas?'<div class="fic-g">'+linhas+'</div>':'')
+       + itens + pg + '</div>';
+}
 function confirmarLiberar(f){
   var t = f.getAttribute('data-titulo') || 'essa data';
   return confirm('Liberar a data de “' + t + '”? Ela volta a ficar disponível.');
@@ -1817,8 +1995,10 @@ function abrirDia(iso){
       + '<div class="dev-top"><div>'
       + '<div class="dev-hora">'+e.hora+'</div>'
       + '<div class="dev-tt"'+(e.pre?' style="color:var(--ambar)"':'')+'>'+e.titulo+'</div>'
-      + '<div class="dev-meta"><span class="tpill tp-'+e.tipo+'">'+(TPILL[e.tipo]||e.tipo_rot)+'</span>'
+      + '<div class="dev-meta">'
+      + '<span class="tpill tp-'+e.tipo+'">'+((e.ficha&&e.ficha.tipo)?_esc(e.ficha.tipo):(TPILL[e.tipo]||e.tipo_rot))+'</span>'
       + (e.local?'<span>📍 '+e.local+'</span>':'')
+      + ((e.ficha&&e.ficha.convidados)?'<span>👥 '+e.ficha.convidados+' convidados</span>':'')
       + (e.pre?'<span style="color:var(--ambar);font-weight:700">segurada</span>':'')+'</div>'
       + (e.link_online?'<a class="meet-btn" href="'+_esc(e.link_online)+'" target="_blank" rel="noopener">🎥 Entrar na reunião</a>':'')
       + '</div>'+acaoTopo+'</div>'
@@ -1826,7 +2006,8 @@ function abrirDia(iso){
       // ninguém, até quando, e — o que faltava — decidir aqui mesmo. Antes, firmar
       // exigia sair da agenda, abrir Serviços e achar a proposta no funil.
       + (e.pre?_seguradaHtml(e):'')
-      + (e.descricao?'<div class="dev-desc">'+e.descricao+'</div>':'')
+      + _fichaHtml(e.ficha)
+      + (e.descricao&&!e.ficha?'<div class="dev-desc">'+e.descricao+'</div>':'')
       + conv
       + (passado ? '<div class="dev-desf">'+_desfechoHtml(e)+'</div>' : _remarcarBoxHtml(e))
       + '</div></div>';
@@ -1856,7 +2037,10 @@ function renderizarCelula(iso){
   var linhas = evs.slice(0, 2).map(function(e){
     return '<div class="ev-line'+(e.pre?' pre':'')+'" data-ev="'+e.id+'"'
       + (e.pre?' title="Data segurada — esperando o sinal"':'')
-      + '><span class="dot d-'+e.tipo+'"></span><span class="h">'+e.hora+'</span><span class="n">'+e.titulo+'</span></div>';
+      + '><span class="dot d-'+e.tipo+'"></span><span class="h">'+e.hora+'</span><span class="n">'+e.titulo+'</span>'
+      + (e.prazo?'<span class="ev-prazo'+(e.urgente?' urg':'')+'">'+_esc(e.prazo)+'</span>':'')
+      + (e.pg?'<span class="ev-pg '+_esc(e.pg_classe||'')+'">'+_esc(e.pg)+'</span>':'')
+      + '</div>';
   }).join('');
   var mais = evs.length > 2 ? '<div class="ev-more">+'+(evs.length - 2)+' mais</div>' : '';
   cel.innerHTML = '<div class="cal-head">'+numHtml+count+'</div><div class="evs">'+linhas+'</div>'+mais;

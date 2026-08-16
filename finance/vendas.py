@@ -118,6 +118,131 @@ def valor_do_sinal(parcelas) -> int:
     return int(_parcelas(parcelas)[i]["valor_centavos"]) if i is not None else 0
 
 
+def _itens_curtos(bruto, limite: int = 8) -> list[dict]:
+    """Só o que a ficha da agenda mostra de cada item: nome e quantidade."""
+    if isinstance(bruto, str):
+        try:
+            bruto = json.loads(bruto)
+        except ValueError:
+            return []
+    out = []
+    for it in (bruto or [])[:limite]:
+        if not isinstance(it, dict):
+            continue
+        nome = str(it.get("nome") or "").strip()
+        if nome:
+            try:
+                qtd = int(it.get("qtd") or 1)
+            except (TypeError, ValueError):
+                qtd = 1
+            out.append({"nome": nome, "qtd": max(1, qtd)})
+    return out
+
+
+def fichas_de_eventos(pool, conta_id: int, evento_ids) -> dict[int, dict]:
+    """{id_do_compromisso: ficha} — o orçamento e o PAGAMENTO de cada festa.
+
+    Mora aqui, e não em finance/agenda, porque é a mesma ponte que este módulo já
+    é: orçamento -> título a receber. A agenda só pede a leitura.
+
+    O QUE ISSO RESOLVE. A agenda guardava o evento e uma FRASE colada na aprovação
+    ("Orçamento Nº 1 · 100 convidados · aprovado pelo cliente"). Não é dado: não dá
+    pra somar nem filtrar, e envelhece — segue dizendo "aprovado" num orçamento que
+    já foi fechado, com o sinal vencendo. Tudo que a ficha mostra já estava gravado;
+    faltava alguém ler.
+
+    O PAGAMENTO tem dois estados, e a diferença importa:
+      • contrato FECHADO -> existem títulos a receber, e eles são a verdade do
+        dinheiro (é neles que a baixa acontece, é deles que sai o livro-caixa);
+      • orçamento só APROVADO -> não há título nenhum ainda. Aí a ficha mostra o
+        PLANO que o cliente aceitou, dizendo que é plano — inventar "0% recebido"
+        de algo que nem virou cobrança seria mentira com cara de número.
+
+    Duas consultas no total, independentemente de quantos eventos — a tela do mês
+    pede a lista inteira de uma vez.
+    """
+    ids = [int(i) for i in (evento_ids or [])]
+    if not ids:
+        return {}
+    with pool.connection() as c:
+        try:
+            orcs = c.execute(
+                """select o.evento_agenda_id, o.id, o.numero, coalesce(o.status,''),
+                          coalesce(o.empresa, o.cliente, ''), coalesce(o.whatsapp, o.telefone, ''),
+                          o.evento, o.itens, o.parcelas,
+                          coalesce(o.primeiro_ano_centavos, o.setup_centavos, 0)
+                     from orcamentos o
+                    where o.conta_id=%s and o.evento_agenda_id = any(%s)""",
+                (conta_id, ids)).fetchall()
+        except Exception as e:  # noqa: BLE001 — conta sem o módulo de orçamentos
+            _log.info("fichas_de_eventos: sem orçamentos legíveis: %s", type(e).__name__)
+            return {}
+        por_orc = {r[1]: r for r in orcs}
+        titulos = []
+        if por_orc:
+            titulos = c.execute(
+                """select orcamento_id, status, valor_centavos, vencimento, pago_em
+                     from titulos
+                    where conta_id=%s and orcamento_id = any(%s) and status <> 'cancelado'
+                    order by vencimento, id""",
+                (conta_id, list(por_orc))).fetchall()
+
+    pagto: dict[int, dict] = {}
+    hoje = date.today()
+    for oid, status, valor, venc, _pago_em in titulos:
+        p = pagto.setdefault(oid, {"total": 0, "pago": 0, "aberto": 0,
+                                   "vencidas": 0, "vencidas_centavos": 0, "proxima": None})
+        v = int(valor or 0)
+        p["total"] += v
+        if status == "pago":
+            p["pago"] += v
+        else:
+            p["aberto"] += v
+            if venc and venc < hoje:
+                p["vencidas"] += 1
+                p["vencidas_centavos"] += v
+            # a PRÓXIMA a vencer: a primeira em aberto na ordem de vencimento (a
+            # consulta já vem ordenada), inclusive se já está vencida — é ela que o
+            # dono precisa resolver primeiro.
+            if p["proxima"] is None:
+                p["proxima"] = {"vencimento": venc, "valor_centavos": v,
+                                "vencida": bool(venc and venc < hoje)}
+
+    fichas: dict[int, dict] = {}
+    for r in orcs:
+        (ev_id, oid, numero, status, cliente, contato, evento, itens, parcelas, total) = r
+        evento = evento if isinstance(evento, dict) else {}
+        pg = pagto.get(oid)
+        plano = sum(int(p.get("valor_centavos") or 0)
+                    for p in (_parcelas(parcelas) or []))
+        ficha = {
+            "orcamento_id": oid, "numero": numero, "status": status,
+            "cliente": cliente.strip(), "contato": contato.strip(),
+            "tipo": str(evento.get("tipo") or "").strip(),
+            "convidados": evento.get("convidados"),
+            "local": str(evento.get("local") or "").strip(),
+            "itens": _itens_curtos(itens),
+            "total_centavos": int(total or 0),
+            "tem_titulos": bool(pg),
+        }
+        if pg:
+            ficha.update({
+                "titulos_centavos": pg["total"], "pago_centavos": pg["pago"],
+                "aberto_centavos": pg["aberto"],
+                "pct": int(round(100 * pg["pago"] / pg["total"])) if pg["total"] else 0,
+                "vencidas": pg["vencidas"], "vencidas_centavos": pg["vencidas_centavos"],
+                "proxima": pg["proxima"],
+            })
+        else:
+            # sem título: o que existe é o PLANO aceito, não cobrança. Sem `pct`
+            # justamente pra tela não mostrar "0% recebido" de algo que ninguém
+            # cobrou ainda.
+            ficha.update({"plano_centavos": plano, "pct": None, "vencidas": 0,
+                          "proxima": None})
+        fichas[ev_id] = ficha
+    return fichas
+
+
 def confirmar_sinal(pool, conta_id: int, orcamento_id: int) -> dict:
     """O sinal caiu. Ponto único da regra, pros dois botões que a apertam: o do
     funil (Serviços) e o da caixa do dia (Agenda).

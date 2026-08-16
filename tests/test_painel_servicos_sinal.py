@@ -568,3 +568,29 @@ def test_plano_de_parcela_unica_nao_ganha_titulo_do_total_por_cima(cliente):
     with cliente.pool.connection() as cx:
         assert cx.execute("select coalesce(sum(valor_centavos),0) from titulos "
                           "where orcamento_id=%s", (oid,)).fetchone()[0] == 400000
+
+
+def test_assinar_orcamento_que_ja_estava_fechado_nao_quebra_nem_duplica(cliente):
+    """O ESTADO LEGADO, que existe de verdade: o orçamento nº 3 da conta 34 ficou
+    `fechado` com o contrato `enviado`, porque o botão antigo não olhava assinatura.
+    Registro assim não vai ser normalizado — o passado fica quieto —, então o
+    caminho tem que aguentar receber a assinatura depois.
+
+    `fechar_orcamento` devolve "já está 'fechado'" e a assinatura segue de pé: o
+    que não pode é estourar nem gerar os títulos de novo por cima dos que existem."""
+    oid, ct_id = _com_plano(cliente)
+    with cliente.pool.connection() as cx:                 # o estado de antes da trava
+        cx.execute("update orcamentos set status='fechado' where id=%s", (oid,))
+        cx.execute("""insert into titulos (conta_id, tipo, descricao, valor_centavos,
+                        vencimento, orcamento_id, parcela_idx)
+                      values (%s,'receber','Evento — Marina · Sinal',294000,
+                              '2026-08-22',%s,0),
+                             (%s,'receber','Evento — Marina · Restante',686000,
+                              '2026-10-14',%s,1)""", (CONTA, oid, CONTA, oid))
+        cx.commit()
+    assert ctr.assinar(cliente.pool, CONTA, ct_id, [{"titulo": "C1", "corpo": "x"}],
+                       "Marina", "1", "1.2.3.4") is True
+    assert len(_titulos(cliente, oid)) == 2, "não pode ter gerado o plano de novo"
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select assinado_em is not null, status from contratos "
+                          "where id=%s", (ct_id,)).fetchone() == (True, "assinado")

@@ -29,9 +29,13 @@ CONTA = 34
 TOKEN = "tok-contrato-teste"
 
 _SQL = """
+create table nichos (id bigserial primary key, nome text, slug text unique, tipo text);
 create table contas (id bigserial primary key, nome text, nome_fantasia text,
   razao_social text, documento text, endereco text, cep text, bairro text,
-  cidade text, uf text, telefone text, email_empresa text, logo_url text);
+  cidade text, uf text, telefone text, email_empresa text, logo_url text, cnae text,
+  -- o contrato de locação é do nicho de eventos, e agora a CRIAÇÃO dele também
+  -- passa por essa porta (contrato.criar_para_orcamento -> tem_contrato)
+  nicho_id bigint references nichos(id));
 create table membros (id bigserial primary key, conta_id bigint, nome text);
 create table eventos_agenda (id bigserial primary key, conta_id bigint, status text,
   pre_reserva_ate timestamptz);
@@ -50,6 +54,15 @@ create table orcamentos (id bigserial primary key, conta_id bigint, cliente text
 create table contrato_modelo (conta_id bigint primary key, clausulas jsonb not null
   default '[]'::jsonb, regras jsonb not null default '{}'::jsonb,
   atualizado_em timestamptz default now(), atualizado_por text default '');
+-- 164: o contrato virou documento próprio. As colunas velhas em `orcamentos`
+-- continuam acima só pra provar que ninguém as lê mais.
+create table contratos (id bigserial primary key, conta_id bigint not null,
+  numero int not null, orcamento_id bigint,
+  status text not null default 'enviado', texto jsonb, valor_centavos bigint,
+  assinado_em timestamptz, assinado_por text, assinado_doc text, assinado_ip text,
+  rescindido_em timestamptz, rescisao_motivo text, substitui_id bigint,
+  criado_em timestamptz default now(), criado_por text default '');
+create unique index ux_ct_conta_numero on contratos (conta_id, numero);
 create table servicos_catalogo (id bigserial primary key, conta_id bigint, slug text,
   nome text, descricao text, setup_centavos bigint default 0,
   mensal_centavos bigint default 0, custo_centavos bigint default 0, ordem int default 0,
@@ -70,8 +83,10 @@ def pool(monkeypatch):
     p = ConnectionPool(url, min_size=1, max_size=3, open=True, kwargs={"prepare_threshold": None})
     with p.connection() as c:
         c.execute(_SQL)
-        c.execute("insert into contas (id, nome, razao_social, documento) "
-                  "values (%s,'Prime','PRIME LTDA','52.752.898/0001-58')", (CONTA,))
+        c.execute("insert into nichos (nome, slug, tipo) values ('Eventos','eventos','servico')")
+        c.execute("insert into contas (id, nome, razao_social, documento, nicho_id) "
+                  "values (%s,'Prime','PRIME LTDA','52.752.898/0001-58',"
+                  "(select id from nichos where slug='eventos'))", (CONTA,))
         c.execute("""insert into servicos_catalogo (conta_id, slug, nome, setup_centavos)
                      values (%s,'hora-extra','HORA EXTRA',62000)""", (CONTA,))
         c.execute("""insert into contrato_modelo (conta_id, clausulas, regras)
@@ -89,19 +104,26 @@ def pool(monkeypatch):
 
 def _orcamento(pool, *, status="aprovada", sinal_pago=False, assinado=False):
     with pool.connection() as c:
+        c.execute("delete from contratos")
         c.execute("delete from orcamentos")
-        c.execute(
+        oid = c.execute(
             """insert into orcamentos (conta_id, cliente, empresa, token, status,
-                 setup_centavos, numero, evento, modo, sinal_pago_em,
-                 contrato_texto, contrato_assinado_em, contrato_assinado_por)
+                 setup_centavos, numero, evento, modo, sinal_pago_em)
                values (%s,'Thompson','Thompson',%s,%s,890000,27,
                  '{"data":"31/12/2026","inicio":"21:00","convidados":50}'::jsonb,'evento',
-                 %s,%s::jsonb,%s,%s)""",
+                 %s) returning id""",
             (CONTA, TOKEN, status,
-             "2026-08-16 12:00:00+00" if sinal_pago else None,
-             json.dumps([{"titulo": "CONGELADA", "corpo": "texto de ontem"}]) if assinado else None,
-             "2026-08-16 13:00:00+00" if assinado else None,
-             "Thompson Ferreira" if assinado else None))
+             "2026-08-16 12:00:00+00" if sinal_pago else None)).fetchone()[0]
+        # o CONTRATO agora é linha própria (164), criada quando o sinal cai.
+        if sinal_pago or assinado:
+            c.execute(
+                """insert into contratos (conta_id, numero, orcamento_id, status,
+                     texto, assinado_em, assinado_por)
+                   values (%s,1,%s,%s,%s::jsonb,%s,%s)""",
+                (CONTA, oid, "assinado" if assinado else "enviado",
+                 json.dumps([{"titulo": "CONGELADA", "corpo": "texto de ontem"}]) if assinado else None,
+                 "2026-08-16 13:00:00+00" if assinado else None,
+                 "Thompson Ferreira" if assinado else None))
         c.commit()
 
 
@@ -181,8 +203,9 @@ def test_o_texto_assinado_e_o_que_o_cliente_leu(pool):
     lido = _ct(pool)["clausulas"]
     pp.proposta_assinar_contrato(_Req(), TOKEN, nome="Thompson", doc="000", aceite="on")
     with pool.connection() as c:
-        gravado = c.execute("select contrato_texto from orcamentos where token=%s",
-                            (TOKEN,)).fetchone()[0]
+        gravado = c.execute(
+            """select ct.texto from contratos ct join orcamentos o on o.id = ct.orcamento_id
+                where o.token=%s""", (TOKEN,)).fetchone()[0]
     assert gravado == lido
 
 
@@ -235,3 +258,70 @@ class _Req:
 
     class client:
         host = "203.0.113.7"
+
+
+# ------------------------------------------------- o contrato como DOCUMENTO (164)
+
+def test_contrato_nasce_com_numero_proprio_e_e_idempotente(pool):
+    """Série própria, por conta: "Contrato nº 1" e "Orçamento nº 27" sendo o mesmo
+    número seria confusão garantida na hora de citar o documento."""
+    from finance import contrato as ctr
+    _orcamento(pool, status="aprovada")          # sem sinal: nenhum contrato ainda
+    with pool.connection() as c:
+        oid = c.execute("select id from orcamentos where token=%s", (TOKEN,)).fetchone()[0]
+    ct = ctr.criar_para_orcamento(pool, CONTA, oid, valor_centavos=890000)
+    assert ct and ct["numero"] == 1 and ct["status"] == "enviado"
+    assert ct["orcamento_id"] == oid and ct["valor_centavos"] == 890000
+    # de novo: devolve o MESMO, não cria outro
+    de_novo = ctr.criar_para_orcamento(pool, CONTA, oid)
+    assert de_novo["id"] == ct["id"]
+    with pool.connection() as c:
+        assert c.execute("select count(*) from contratos").fetchone()[0] == 1
+
+
+def test_contrato_nao_nasce_fora_do_nicho_de_eventos(pool):
+    """Mesma porta do modo do orçamento. Conta de nicho recorrente não tem contrato
+    de locação de espaço — teria um de serviço, que é outro documento."""
+    from finance import contrato as ctr
+    _orcamento(pool, status="aprovada")
+    with pool.connection() as c:
+        oid = c.execute("select id from orcamentos where token=%s", (TOKEN,)).fetchone()[0]
+        c.execute("update contas set nicho_id=null where id=%s", (CONTA,))
+        c.commit()
+    assert ctr.criar_para_orcamento(pool, CONTA, oid) is None
+    with pool.connection() as c:
+        c.execute("update contas set nicho_id=(select id from nichos where slug='eventos') "
+                  "where id=%s", (CONTA,))
+        c.commit()
+
+
+def test_assinado_do_orcamento_e_a_pergunta_que_trava_a_edicao(pool):
+    from finance import contrato as ctr
+    _orcamento(pool, status="aprovada", sinal_pago=True)      # cria contrato 'enviado'
+    with pool.connection() as c:
+        oid = c.execute("select id from orcamentos where token=%s", (TOKEN,)).fetchone()[0]
+    assert ctr.assinado_do_orcamento(pool, CONTA, oid) is False
+    ct = ctr.por_orcamento(pool, CONTA, oid)
+    assert ctr.assinar(pool, CONTA, ct["id"], [{"titulo": "X", "corpo": "y"}],
+                       "Thompson", "000", "1.2.3.4") is True
+    assert ctr.assinado_do_orcamento(pool, CONTA, oid) is True
+    # a segunda assinatura não sobrescreve o texto nem a data
+    assert ctr.assinar(pool, CONTA, ct["id"], [{"titulo": "OUTRO", "corpo": "z"}],
+                       "Outro", "111", "9.9.9.9") is False
+    with pool.connection() as c:
+        texto, quem, st = c.execute(
+            "select texto, assinado_por, status from contratos where id=%s",
+            (ct["id"],)).fetchone()
+    assert texto == [{"titulo": "X", "corpo": "y"}] and quem == "Thompson"
+    assert st == "assinado"
+
+
+def test_contrato_de_outra_conta_nao_aparece(pool):
+    """Escopo multi-tenant: a busca é por (conta, orçamento)."""
+    from finance import contrato as ctr
+    _orcamento(pool, status="aprovada", sinal_pago=True)
+    with pool.connection() as c:
+        oid = c.execute("select id from orcamentos where token=%s", (TOKEN,)).fetchone()[0]
+    assert ctr.por_orcamento(pool, CONTA, oid) is not None
+    assert ctr.por_orcamento(pool, CONTA + 999, oid) is None
+    assert ctr.assinado_do_orcamento(pool, CONTA + 999, oid) is False

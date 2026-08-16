@@ -315,8 +315,9 @@ def _carregar(token: str, pool=None):
                       coalesce((select m.nome from membros m
                                  where m.id = case when o.criado_por ~ '^[0-9]+$'
                                                    then o.criado_por::bigint end),
-                               case when o.criado_por = 'dono' then c.nome end),
-                      o.contrato_texto, o.contrato_assinado_em, o.contrato_assinado_por
+                               case when o.criado_por = 'dono' then c.nome end)
+                      -- o contrato saiu daqui pra tabela própria (164): as colunas
+                      -- velhas ficam na base pra rollback e não são mais lidas.
                  from orcamentos o join contas c on c.id = o.conta_id
                 where o.token=%s""", (token,)).fetchone()
     if not r:
@@ -328,7 +329,7 @@ def _carregar(token: str, pool=None):
      cli_email, cli_tel, agenda_id,
      em_razao, em_doc, em_end, em_cep, em_bairro, em_cidade, em_uf, em_tel, em_email,
      cliente_id, sinal_centavos, sinal_pago_em, pre_reserva_ate, evento_status,
-     vendedor_nome, contrato_texto, contrato_assinado_em, contrato_assinado_por) = r
+     vendedor_nome) = r
     # ASSINOU, CONGELOU: enquanto o orçamento não foi aprovado, a aba Clientes é
     # quem manda — corrigiu o nome/endereço lá, reimprimiu, saiu certo, sem
     # precisar refazer a proposta. Depois de assinado fica exatamente o que o
@@ -375,11 +376,6 @@ def _carregar(token: str, pool=None):
                      else conta_nome) or "Proposta",
         "conta_id": conta_id, "criado_por": criado_por, "logo_url": logo_url,
         "modo": modo or "recorrente",
-        # CONTRATO: `contrato_texto` só existe depois de assinado — é o documento
-        # congelado. Antes disso a aba monta ao vivo, pra o cliente ler sempre a
-        # versão atual do modelo da empresa.
-        "contrato_texto": contrato_texto, "contrato_assinado_em": contrato_assinado_em,
-        "contrato_assinado_por": contrato_assinado_por or "",
         "evento": evento, "dia_evento": dia_evento,
         "parcelas": _lista(parcelas), "numero": numero,
         "evento_agenda_id": agenda_id,
@@ -472,13 +468,18 @@ def _contrato_da_proposta(d: dict, pool=None) -> dict | None:
       garantida com a entrada; assinar antes seria assinar um contrato cuja
       primeira obrigação ainda não foi cumprida.
 
-    E o texto: assinado → sai do `contrato_texto` CONGELADO; não assinado → é
+    E o texto: assinado → sai do texto CONGELADO no contrato; não assinado → é
     montado agora, com o modelo atual da empresa. Sem o congelamento, o dono
-    editar o modelo amanhã reescreveria o que o cliente aceitou ontem."""
+    editar o modelo amanhã reescreveria o que o cliente aceitou ontem.
+
+    Desde a 164 o contrato é uma LINHA em `contratos`, criada quando o sinal cai —
+    não mais cinco colunas do orçamento. Enquanto ela não existe, este bloco ainda
+    monta a prévia: o cliente lê o que vai assinar antes de pagar, que é o ponto."""
     from finance import contrato as ctr
     try:
         pool = pool or get_pool()
         nicho = (emp_dados(pool, d["conta_id"]) or {}).get("nicho")
+        ct = ctr.por_orcamento(pool, d["conta_id"], d["id"])
     except Exception:  # noqa: BLE001
         # A folha do cliente abre de qualquer jeito: o orçamento é o documento
         # principal, e derrubar a página inteira porque o bloco do contrato não
@@ -490,9 +491,9 @@ def _contrato_da_proposta(d: dict, pool=None) -> dict | None:
         return None
     if not ctr.tem_contrato(nicho):
         return None
-    assinado = bool(d.get("contrato_assinado_em"))
-    if assinado and d.get("contrato_texto"):
-        clausulas, faltas = _lista(d["contrato_texto"]), []
+    assinado = bool(ct and ct["assinado_em"])
+    if assinado and ct.get("texto"):
+        clausulas, faltas = _lista(ct["texto"]), []
     else:
         modelo = ctr.carregar_modelo(pool, d["conta_id"])
         ctx = ctr.contexto(catalogo=scat.listar(pool, d["conta_id"]),
@@ -509,9 +510,12 @@ def _contrato_da_proposta(d: dict, pool=None) -> dict | None:
         "aprovada": d["status"] in ("aprovada", "fechado"),
         "sinal_pago": bool(d.get("sinal_pago_em")),
         "assinado": assinado,
-        "assinado_por": d.get("contrato_assinado_por") or "",
-        "assinado_em": (d["contrato_assinado_em"].strftime("%d/%m/%Y às %H:%M")
-                        if d.get("contrato_assinado_em") else ""),
+        "assinado_por": (ct or {}).get("assinado_por") or "",
+        "assinado_em": (ct["assinado_em"].strftime("%d/%m/%Y às %H:%M")
+                        if (ct and ct.get("assinado_em")) else ""),
+        # o número do contrato é OUTRA série: só existe depois que ele nasce
+        "numero": (ct or {}).get("numero"),
+        "contrato_id": (ct or {}).get("id"),
     }
 
 
@@ -634,18 +638,17 @@ def proposta_assinar_contrato(request: Request, token: str,
     ct = _contrato_da_proposta(d, pool)
     if not ct or not ct["aprovada"] or not ct["sinal_pago"] or ct["assinado"]:
         return RedirectResponse(f"/proposta/{token}#contrato", status_code=303)
-    with pool.connection() as c:
-        # `contrato_assinado_em is null` na condição: duplo clique ou reenvio do
-        # formulário não sobrescreve a assinatura nem o texto já congelado.
-        c.execute(
-            """update orcamentos
-                  set contrato_texto=%s::jsonb, contrato_assinado_em=now(),
-                      contrato_assinado_por=%s, contrato_assinado_doc=%s,
-                      contrato_assinado_ip=%s
-                where token=%s and contrato_assinado_em is null""",
-            (json.dumps(ct["clausulas"]), (nome or "").strip()[:200],
-             (doc or "").strip()[:40], _ip(request), token))
-        c.commit()
+    from finance import contrato as ctr
+    # a linha do contrato nasce quando o sinal é confirmado (vendas.confirmar_sinal).
+    # Se por algum motivo ela não existir — sinal marcado direto no banco, conta que
+    # virou de nicho — cria aqui: o cliente está assinando, e recusar por causa de um
+    # registro que o sistema deveria ter criado seria punir quem não errou.
+    alvo = ctr.por_orcamento(pool, d["conta_id"], d["id"]) \
+        or ctr.criar_para_orcamento(pool, d["conta_id"], d["id"],
+                                    valor_centavos=d.get("total_centavos"))
+    if alvo:
+        ctr.assinar(pool, d["conta_id"], alvo["id"], ct["clausulas"],
+                    nome, doc, _ip(request))
     return RedirectResponse(f"/proposta/{token}#contrato", status_code=303)
 
 

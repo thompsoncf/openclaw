@@ -888,6 +888,64 @@ def test_reabrir_libera_tambem_a_data_so_segurada(pool, conta_id):
                          (ev_id,)).fetchone()[0] == "cancelado"
 
 
+# ---------------------------- o documento tem que somar
+def test_folha_mostra_o_total_do_plano_de_pagamento(pool, conta_id, monkeypatch):
+    """A tabela de parcelas nunca teve linha de total, então "Total do evento" podia
+    conviver com parcelas somando outra coisa sem nada apontar — e quem não somasse
+    na mão não via. Aconteceu no primeiro orçamento de evento real."""
+    carregar, pool_teste = prop._carregar, pool
+    monkeypatch.setattr(prop, "_carregar", lambda t, pool=None: carregar(t, pool=pool_teste))
+    _, tok = _semear(pool, conta_id)                 # parcelas: 181000 + 600000
+    html = prop.proposta_publica(None, tok).body.decode()
+    assert "Total do plano de pagamento" in html and "R$ 7.810,00" in html
+
+
+def test_folha_diz_a_diferenca_quando_o_plano_nao_fecha(pool, conta_id, monkeypatch):
+    """Divergir tem caso legítimo (juros de cartão), então não se bloqueia nada — mas
+    o cliente tem que ver o número antes de assinar."""
+    carregar, pool_teste = prop._carregar, pool
+    monkeypatch.setattr(prop, "_carregar", lambda t, pool=None: carregar(t, pool=pool_teste))
+    # total 745000, parcelas somando 1210500 — o caso real da produção
+    _, tok = _semear(pool, conta_id, parcelas=[
+        {"venc": "2025-11-13", "valor_centavos": 540500, "forma": "Pix",
+         "obs": "Sinal — confirma a reserva da data"},
+        {"venc": "2025-12-13", "valor_centavos": 670000, "forma": "Pix", "obs": ""}])
+    html = prop.proposta_publica(None, tok).body.decode()
+    assert "R$ 12.105,00" in html
+    assert "+ R$ 4.655,00 em relação ao total do evento" in html
+
+
+def test_folha_nao_fala_de_diferenca_quando_o_plano_fecha(pool, conta_id, monkeypatch):
+    carregar, pool_teste = prop._carregar, pool
+    monkeypatch.setattr(prop, "_carregar", lambda t, pool=None: carregar(t, pool=pool_teste))
+    _, tok = _semear(pool, conta_id, parcelas=[
+        {"venc": "2025-11-13", "valor_centavos": 245000, "forma": "Pix",
+         "obs": "Sinal — confirma a reserva da data"},
+        {"venc": "2025-12-13", "valor_centavos": 500000, "forma": "Pix", "obs": ""}])
+    html = prop.proposta_publica(None, tok).body.decode()
+    assert "Total do plano de pagamento" in html and "R$ 7.450,00" in html
+    assert "em relação ao total do evento" not in html
+
+
+def test_dif_plano_mede_a_divergencia():
+    """O número que o botão "Fechar contrato" usa pra perguntar. Vem do servidor
+    porque o botão age numa linha do funil, não no orçamento aberto no editor."""
+    from web.painel_servicos import _dif_plano
+    parc = [{"valor_centavos": 540500}, {"valor_centavos": 670000}]
+    assert _dif_plano(parc, 940500, 0) == 270000        # passa do total
+    assert _dif_plano(parc, 1210500, 0) == 0            # fecha
+    assert _dif_plano(parc, 1500000, 0) == -289500      # falta
+    # sem plano, sem total, ou lixo: não inventa divergência
+    assert _dif_plano([], 940500, 0) == 0
+    assert _dif_plano(None, 940500, 0) == 0
+    assert _dif_plano(parc, 0, 0) == 0
+    assert _dif_plano("nao é json", 940500, 0) == 0
+    # aceita o jsonb vindo como string (driver/banco antigo)
+    assert _dif_plano('[{"valor_centavos": 540500}]', 440500, 0) == 100000
+    # parcela zerada não conta (é linha em branco no gerador)
+    assert _dif_plano([{"valor_centavos": 0}, {"valor_centavos": 100}], 100, 0) == 0
+
+
 def test_choque_de_data_avisa_o_dono_sem_bloquear(pool, conta_id, monkeypatch):
     """Dois orçamentos aprovados pro mesmo horário viravam dois compromissos calados.
     Quem decide se cabe é a empresa (buffet com dois salões cabe) — mas ela tem que

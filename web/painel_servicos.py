@@ -152,6 +152,34 @@ def _ator(request: Request):
     return request.session.get("membro_id"), request.session.get("papel", "dono")
 
 
+def _dif_plano(parcelas, total_centavos, setup_centavos) -> int:
+    """Soma das parcelas menos o total do orçamento, em centavos. 0 = fecha.
+
+    Positivo quer dizer que o plano cobra MAIS do que o documento declara — foi
+    exatamente o que aconteceu no primeiro orçamento de evento real: R$ 9.405,00 na
+    folha e R$ 12.105,00 em títulos a receber, porque as parcelas tinham sido
+    geradas antes de os itens mudarem e ninguém regerou."""
+    itens = parcelas
+    if isinstance(itens, str):
+        try:
+            itens = json.loads(itens)
+        except ValueError:
+            return 0
+    if not isinstance(itens, list) or not itens:
+        return 0
+    soma = 0
+    for p in itens:
+        if isinstance(p, dict):
+            try:
+                v = int(p.get("valor_centavos") or 0)
+            except (TypeError, ValueError):
+                v = 0
+            if v > 0:
+                soma += v
+    total = int(total_centavos or 0) or int(setup_centavos or 0)
+    return soma - total if (soma and total) else 0
+
+
 def _espelhar_cliente(pool, conta_id: int, dados) -> int | None:
     """Salva o cliente do orçamento na base de Clientes da empresa.
 
@@ -670,6 +698,7 @@ def painel_servicos_lista(request: Request):
                           primeiro_ano_centavos, n_modulos, criado_em, status,
                           token, aprovada_por, aprovada_em, numero,
                           coalesce(modo,'recorrente'), sinal_centavos, sinal_pago_em,
+                          parcelas,
                           (select e.pre_reserva_ate from eventos_agenda e
                             where e.id = orcamentos.evento_agenda_id
                               and e.status = 'pre_reservado')"""
@@ -699,8 +728,12 @@ def painel_servicos_lista(request: Request):
         "inicial": (r[1] or r[2] or "?").strip()[:1].upper(),
         "sinal": brl(r[14]) if r[14] else "",
         "sinal_pago": bool(r[15]),
+        # o quanto o plano de pagamento DIVERGE do total, em centavos (0 = fecha).
+        # Vem do servidor porque o botão "Fechar contrato" age numa linha do funil,
+        # não no orçamento aberto no editor — e é ele que vira título a receber.
+        "plano_difere": _dif_plano(r[16], r[5], r[3]),
         # só vem preenchido enquanto a data está SEGURADA esperando o sinal
-        "pre_reserva_ate": r[16].astimezone(ag.BRT).strftime("%d/%m %H:%M") if r[16] else "",
+        "pre_reserva_ate": r[17].astimezone(ag.BRT).strftime("%d/%m %H:%M") if r[17] else "",
     } for r in rows]
     return JSONResponse({"itens": itens})
 
@@ -1636,6 +1669,29 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
               obs:r.querySelector('.pg-obs').value||''};
     }).filter(function(p){return p.valor_centavos>0;});
   }
+  // Quanto o plano de pagamento DIVERGE do total do orçamento, em centavos.
+  // Positivo = as parcelas passam do total. Zero = fecha (ou nem tem plano).
+  function difParcelas(){
+    var linhas=coletarParcelas();
+    if(!linhas.length) return 0;
+    var soma=linhas.reduce(function(a,p){return a+p.valor_centavos;},0);
+    return soma - Math.round(calc().ano1*100);
+  }
+  // O aviso de "não fecha" existe desde sempre, mas é passivo: texto âmbar no canto.
+  // Nos dois momentos em que o número vira compromisso — mandar pro cliente e virar
+  // título a receber — ele passa a PERGUNTAR. Não bloqueia: divergir tem caso
+  // legítimo (juros de cartão, acréscimo por forma de pagamento); o que não pode é
+  // sair calado, que foi como um orçamento de R$ 9.405,00 virou R$ 12.105,00 cobrados.
+  function confirmaDivergencia(acao){
+    var dif=difParcelas();
+    if(!dif) return true;
+    var total=Math.round(calc().ano1*100), soma=total+dif;
+    return confirm('O plano de pagamento não fecha com o total.\n\n'
+      + 'Total do orçamento: R$ '+fmtc(total)+'\n'
+      + 'Soma das parcelas: R$ '+fmtc(soma)+'\n'
+      + (dif>0?'Passa R$ ':'Faltam R$ ')+fmtc(Math.abs(dif))+'.\n\n'
+      + acao);
+  }
   function pintaParcelas(){
     var el=document.getElementById('pg-resumo'); if(!el)return;
     var linhas=pgRows();
@@ -2175,8 +2231,14 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     }).catch(function(){alert('Erro de conexão.');});
   }
   document.getElementById('oc-novo').addEventListener('click',novo);
-  function fechar(id,btn){
+  function fechar(id,btn,dif){
     if(!confirm(SERVICO_AVULSO?'Fechar este contrato? Cada parcela do plano de pagamento vira um título a receber no módulo Empresa (sem plano, gera um título com o total).':'Fechar este contrato? Vai gerar título a receber (setup + mensalidade) no módulo Empresa.')){return;}
+    // É AQUI que o plano vira dinheiro a receber. Se ele não fecha com o total, o
+    // financeiro vai cobrar um valor diferente do que o cliente assinou — então a
+    // segunda pergunta é sobre o número, não sobre a ação.
+    if(dif && !confirm('Atenção: o plano de pagamento não fecha com o total do orçamento — '
+        +(dif>0?'as parcelas passam R$ ':'faltam R$ ')+fmtc(Math.abs(dif))+'.\n\n'
+        +'Os títulos a receber vão sair pelo valor das PARCELAS. Fechar assim mesmo?')){return;}
     btn.disabled=true; btn.textContent='Fechando...';
     fetch('/painel/servicos/fechar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})
       .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
@@ -2288,7 +2350,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         }
         if(!fechado){
           var b=document.createElement('button'); b.className='oc-fechar'; b.textContent='Fechar contrato';
-          b.addEventListener('click',function(){fechar(it.id,b);});
+          b.addEventListener('click',function(){fechar(it.id,b,it.plano_difere||0);});
           right.appendChild(b);
         }
         // assinada/fechada não some: é documento com aceite do cliente (e, no
@@ -2312,6 +2374,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     var emp=(document.getElementById('oc-empresa').value||'').trim();
     var sel=rows().filter(function(r){return r.getAttribute('data-on')==='1';});
     if(!emp && !sel.length){alert('Preencha a empresa ou marque ao menos um serviço.');return;}
+    if(!confirmaDivergencia('O cliente vai receber a proposta assim. Gerar mesmo assim?')){return;}
     var w=window.open('about:blank','_blank');
     if(w){try{w.document.write('<p style="font-family:system-ui;color:#8A8475;padding:24px">Gerando proposta…</p>');}catch(e){}}
     var btn=this, t0=btn.textContent; btn.textContent='Gerando...';

@@ -305,6 +305,10 @@ def _carregar(token: str, pool=None):
                       -- cliente ler na proposta a MESMA data que corre na agenda
                       (select e.pre_reserva_ate from eventos_agenda e
                         where e.id = o.evento_agenda_id and e.status='pre_reservado'),
+                      -- e o ESTADO do compromisso: a folha não pode dizer "a data
+                      -- está reservada" depois que ela foi liberada (o prazo venceu
+                      -- ou o dono soltou). Sem isto, cancelado lia igual a firme.
+                      (select e.status from eventos_agenda e where e.id = o.evento_agenda_id),
                       -- vendedor: criado_por guarda o id do membro OU 'dono'
                       -- (quem abriu a conta). No segundo caso quem assina é a
                       -- própria conta — era isso que sumia da folha.
@@ -322,7 +326,8 @@ def _carregar(token: str, pool=None):
      modo, evento, parcelas, numero, cli_end, cli_cep, cli_cidade, cli_uf, cli_doc,
      cli_email, cli_tel, agenda_id,
      em_razao, em_doc, em_end, em_cep, em_bairro, em_cidade, em_uf, em_tel, em_email,
-     cliente_id, sinal_centavos, sinal_pago_em, pre_reserva_ate, vendedor_nome) = r
+     cliente_id, sinal_centavos, sinal_pago_em, pre_reserva_ate, evento_status,
+     vendedor_nome) = r
     # ASSINOU, CONGELOU: enquanto o orçamento não foi aprovado, a aba Clientes é
     # quem manda — corrigiu o nome/endereço lá, reimprimiu, saiu certo, sem
     # precisar refazer a proposta. Depois de assinado fica exatamente o que o
@@ -374,6 +379,7 @@ def _carregar(token: str, pool=None):
         "sinal_centavos": sinal_centavos or 0,
         "sinal_pago_em": sinal_pago_em,
         "pre_reserva_ate": pre_reserva_ate,
+        "evento_status": evento_status,
         # documento, CEP e telefone saem com máscara e o endereço em CAIXA ALTA
         # é capitalizado: o banco guarda o que a empresa digitou, o cliente lê
         # formatado.
@@ -486,9 +492,14 @@ def proposta_publica(request: Request, token: str, erro: str = ""):
     d["sinal_str"] = _brl(sinal_c) if sinal_c else ""
     d["pre_ate_str"] = (d["pre_reserva_ate"].astimezone(ag.BRT).strftime("%d/%m/%Y às %H:%M")
                         if d["pre_reserva_ate"] else "")
-    # pendente = a data está SEGURADA agora. Some sozinho quando o dono confirma o
-    # sinal (o compromisso deixa de ser pre_reservado e a subconsulta zera).
+    # Três estados possíveis da data, e a folha diz um por vez:
+    #   segurada  -> pré-reserva correndo, esperando o sinal;
+    #   reservada -> compromisso firme (sinal confirmado, ou orçamento sem sinal);
+    #   liberada  -> o prazo venceu ou o dono soltou. Aqui a folha NÃO pode dizer
+    #                que a data é do cliente — era o que ela dizia antes, calada.
     d["sinal_pendente"] = bool(d["pre_ate_str"])
+    d["data_reservada"] = d.get("evento_status") == "ativo"
+    d["data_liberada"] = d.get("evento_status") == "cancelado"
     return HTMLResponse(_env.get_template("proposta").render(prop=d, linhas=linhas,
                                                              token=token, erro=erro))
 
@@ -816,11 +827,18 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
   <div class="ok">
     {% if prop.aprovada_por %}
     <h3>✓ {{ 'Orçamento aprovado' if evento else 'Proposta aprovada' }}</h3>
-    <p>Aprovada por <b>{{ prop.aprovada_por }}</b>{% if prop.aprovada_str %} em {{ prop.aprovada_str }}{% endif %}. A empresa foi notificada{% if evento and prop.ev.data and not prop.sinal_pendente %} e a data de <b>{{ prop.ev.data.split(' ·')[0] }}</b> está reservada{% endif %} — ela dará os próximos passos.</p>
+    <p>Aprovada por <b>{{ prop.aprovada_por }}</b>{% if prop.aprovada_str %} em {{ prop.aprovada_str }}{% endif %}. A empresa foi notificada{% if evento and prop.ev.data and prop.data_reservada %} e a data de <b>{{ prop.ev.data.split(' ·')[0] }}</b> está reservada{% endif %} — ela dará os próximos passos.</p>
     {% if prop.sinal_pendente %}
     <div class="segura">
       <b>⏳ A data de {{ prop.ev.data.split(' ·')[0] }} está segurada pra você até {{ prop.pre_ate_str }}.</b>
       <p>A reserva se confirma com o pagamento do sinal{% if prop.sinal_str %} de <b>{{ prop.sinal_str }}</b>{% endif %} — é o que está na primeira parcela acima. Fale com a {{ prop.vendedor }} pra combinar o pagamento. Passando esse prazo sem o sinal, a data volta a ficar disponível.</p>
+    </div>
+    {% elif prop.data_liberada and not prop.sinal_pago_em %}
+    {# A data foi liberada (prazo vencido ou a empresa soltou). A folha dizia
+       "está reservada" nesse caso — calada e errada. #}
+    <div class="segura">
+      <b>A data de {{ prop.ev.data.split(' ·')[0] }} não está mais segurada.</b>
+      <p>O prazo do sinal passou e ela voltou a ficar disponível. Se ainda quiser essa data, fale com a {{ prop.vendedor }} — a proposta continua valendo.</p>
     </div>
     {% endif %}
     {% else %}

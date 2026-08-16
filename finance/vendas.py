@@ -99,6 +99,60 @@ def valor_do_sinal(parcelas) -> int:
     return int(_parcelas(parcelas)[i]["valor_centavos"]) if i is not None else 0
 
 
+def confirmar_sinal(pool, conta_id: int, orcamento_id: int) -> dict:
+    """O sinal caiu. Ponto único da regra, pros dois botões que a apertam: o do
+    funil (Serviços) e o da caixa do dia (Agenda).
+
+    Confirmação MANUAL de propósito. O dono recebe o Pix como já recebe hoje e
+    aperta — o sistema não cobra nada nem fica esperando integração. Se um dia a
+    cobrança automática existir, ela só passa a chamar esta função.
+
+    Mexe em DUAS coisas, nesta ordem: a DATA (a pré-reserva vira compromisso firme)
+    e o DINHEIRO (o título daquela parcela recebe baixa, na data em que o sinal
+    caiu). O pagamento é gravado PRIMEIRO; as duas consequências vêm depois, cada
+    uma podendo falhar sozinha sem desfazer o registro — apertar de novo retoma o
+    que faltou.
+
+    Devolve {ok, ja_estava, reserva_firmada, titulo_baixado} ou {ok: False, erro}.
+    """
+    from finance import agenda as ag
+    with pool.connection() as c:
+        r = c.execute("""select sinal_pago_em, evento_agenda_id, parcelas
+                           from orcamentos where id=%s and conta_id=%s""",
+                      (int(orcamento_id), conta_id)).fetchone()
+        if not r:
+            return {"ok": False, "erro": "orçamento não encontrado"}
+        ja_pago, agenda_id, parcelas = r
+        era_novo = not ja_pago
+        if era_novo:
+            ja_pago = c.execute(
+                "update orcamentos set sinal_pago_em=now() where id=%s and conta_id=%s "
+                "returning sinal_pago_em", (int(orcamento_id), conta_id)).fetchone()[0]
+            c.commit()
+    # a data vira firme. Fora da transação: confirmar o pagamento é o que não pode
+    # se perder — se a agenda falhar, o registro fica e o botão retoma depois.
+    firmou = False
+    if agenda_id:
+        try:
+            firmou = ag.confirmar_pre_reserva(pool, conta_id, int(agenda_id))
+        except Exception as e:  # noqa: BLE001
+            _log.warning("confirmar_sinal %s: não firmou o compromisso %s: %s: %s",
+                         orcamento_id, agenda_id, type(e).__name__, e)
+    # e o título daquela parcela recebe baixa NA DATA DO SINAL. Só acha alguma coisa
+    # se o contrato já tiver sido fechado (é o fechamento que cria os títulos); no
+    # caminho normal — confirma o sinal, fecha o contrato depois — quem dá a baixa é
+    # o próprio fechar_orcamento, com a mesma data.
+    baixado = None
+    try:
+        baixado = baixar_titulo_do_sinal(pool, conta_id, int(orcamento_id),
+                                         parcelas, ja_pago)
+    except Exception as e:  # noqa: BLE001
+        _log.warning("confirmar_sinal %s: baixa do título falhou: %s: %s",
+                     orcamento_id, type(e).__name__, e)
+    return {"ok": True, "ja_estava": not era_novo, "reserva_firmada": firmou,
+            "titulo_baixado": baixado}
+
+
 def baixar_titulo_do_sinal(pool, conta_id: int, orcamento_id: int, parcelas,
                            pago_em) -> int | None:
     """Dá baixa no título da parcela do sinal, NA DATA EM QUE O SINAL CAIU.

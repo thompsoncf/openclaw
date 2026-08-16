@@ -132,11 +132,12 @@ def _fmt_evento(row) -> dict:
             "desfecho": row[9] if len(row) > 9 else None,
             "link_online": row[10] if len(row) > 10 else None,
             "status": (row[11] if len(row) > 11 else None) or "ativo",
-            "pre_reserva_ate": row[12] if len(row) > 12 else None}
+            "pre_reserva_ate": row[12] if len(row) > 12 else None,
+            "sinal_centavos": row[13] if len(row) > 13 else None}
 
 
 _COLS = ("id, titulo, inicio, fim, local, descricao, lembrete_min, criado_em, tipo, "
-        "desfecho, link_online, status, pre_reserva_ate")
+        "desfecho, link_online, status, pre_reserva_ate, sinal_centavos")
 
 # Data SEGURADA, ainda não vendida: o cliente aprovou o orçamento mas o sinal não
 # entrou. Fica de fora de tudo que trata compromisso como certo — lembrete, resumo
@@ -155,13 +156,18 @@ def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
                  lembrete_min: int | None = None, tipo: str = "pessoal",
                  link_online: str | None = None,
                  prospeccao_id: int | None = None,
-                 pre_reserva_ate: datetime | None = None) -> dict:
+                 pre_reserva_ate: datetime | None = None,
+                 sinal_centavos: int | None = None) -> dict:
     """prospeccao_id liga o evento a um lead (ex.: retorno de contato) — some da
     Agenda pro cliente, mas fica clicável a partir da ficha do lead (migração 136).
 
     `pre_reserva_ate` nasce o compromisso PROVISÓRIO: a data aparece na agenda mas
     não vale como compromisso até o sinal ser confirmado, e some sozinha se o prazo
-    vencer (ver `expirar_pre_reservas`)."""
+    vencer (ver `expirar_pre_reservas`).
+
+    `sinal_centavos` é o valor que se está esperando pra firmar — só pra MOSTRAR na
+    agenda. O dinheiro (título a receber, baixa) sai de `orcamentos.sinal_centavos`;
+    ver migração 163."""
     tipo = tipo if tipo in TIPOS else "pessoal"
     # prospeccao_id só entra no INSERT quando informado — mantém compatível com
     # bancos/testes que ainda não rodaram a migração 136 (que criou a coluna).
@@ -174,6 +180,9 @@ def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
     if pre_reserva_ate is not None:
         colunas += ", status, pre_reserva_ate"
         valores += [PRE_RESERVADO, pre_reserva_ate]
+    if sinal_centavos:
+        colunas += ", sinal_centavos"
+        valores.append(int(sinal_centavos))
     with pool.connection() as c:
         row = c.execute(
             f"""insert into eventos_agenda ({colunas})
@@ -389,6 +398,72 @@ def expirar_pre_reservas(pool, agora: datetime) -> list[dict]:
         c.commit()
     return [{"id": r[0], "conta_id": r[1], "titulo": r[2], "inicio": r[3],
              "pre_reserva_ate": r[4]} for r in rows]
+
+
+def liberar_pre_reserva(pool, conta_id: int, evento_id: int) -> bool:
+    """Solta a data ANTES do prazo, porque o dono decidiu — o cliente desistiu, ou
+    apareceu quem paga hoje.
+
+    Só casa `pre_reservado`: um botão mal ligado não pode cancelar compromisso
+    firme. Idempotente pelo mesmo motivo (apertar duas vezes não faz nada na 2ª)."""
+    with pool.connection() as c:
+        cur = c.execute(
+            "update eventos_agenda set status='cancelado' "
+            "where id=%s and conta_id=%s and status=%s",
+            (evento_id, conta_id, PRE_RESERVADO))
+        c.commit()
+        return cur.rowcount > 0
+
+
+def pre_reservas(pool, conta_id: int, limite: int = 12) -> list[dict]:
+    """As datas SEGURADAS da conta, da que vence primeiro pra que vence por último.
+
+    Existe porque `proximos()` não pode mostrá-las (ele é a fonte do lembrete e do
+    resumo do dia, e data segurada não é compromisso) — e sem uma lista própria,
+    uma data que vence amanhã só aparecia pra quem abrisse o mês certo e reparasse
+    na linha.
+
+    Traz junto o orçamento de origem, quando há: é o que liga o botão "Ver
+    orçamento" e o valor do sinal que está sendo esperado. Pré-reserva criada na
+    própria agenda (telefonema "segura o dia 20") não tem orçamento.
+
+    A busca do orçamento é uma consulta SEPARADA, e tolerante: a agenda funciona
+    em conta que nem tem o módulo de orçamentos, e um join obrigatório faria a
+    tela inteira quebrar por causa de um enfeite."""
+    with pool.connection() as c:
+        rows = c.execute(
+            "select " + _COLS + " from eventos_agenda "
+            " where conta_id=%s and status=%s "
+            " order by pre_reserva_ate nulls last, inicio limit %s",
+            (conta_id, PRE_RESERVADO, limite)).fetchall()
+    eventos = [_fmt_evento(r) for r in rows]
+    if eventos:
+        for ev in eventos:
+            ev.update(_orcamento_da_reserva(pool, conta_id, ev["id"]))
+    return eventos
+
+
+def _orcamento_da_reserva(pool, conta_id: int, evento_id: int) -> dict:
+    """{orcamento_id, orcamento_numero, sinal_centavos} da reserva, ou vazio."""
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                "select id, numero, sinal_centavos from orcamentos "
+                " where evento_agenda_id=%s and conta_id=%s limit 1",
+                (evento_id, conta_id)).fetchone()
+    except Exception:  # noqa: BLE001 — conta/instalação sem o módulo de orçamentos
+        return {}
+    if not r:
+        return {}
+    out = {"orcamento_id": r[0], "orcamento_numero": r[1]}
+    if r[2]:
+        out["sinal_centavos"] = r[2]
+    return out
+
+
+def orcamento_do_evento(pool, conta_id: int, evento_id: int) -> int | None:
+    """O orçamento que originou este compromisso, se houver. Escopado por conta."""
+    return _orcamento_da_reserva(pool, conta_id, evento_id).get("orcamento_id")
 
 
 def conflitos(pool, conta_id: int, inicio: datetime, fim: datetime | None,

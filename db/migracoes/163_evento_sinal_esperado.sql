@@ -1,0 +1,21 @@
+-- 163_evento_sinal_esperado.sql
+-- Quanto se está esperando pra firmar ESTA data.
+--
+-- Até aqui, pré-reserva só nascia pela aprovação de um orçamento com sinal, e o
+-- valor vivia em `orcamentos.sinal_centavos` (161). Com o "Só segurar a data" no
+-- painel da Agenda, ela também nasce SEM orçamento nenhum — do telefonema "segura
+-- o dia 20 pra mim até sexta" — e não havia onde anotar o valor combinado.
+--
+-- DIVISÃO DE PAPÉIS, pra não virarem dois números:
+--   • `orcamentos.sinal_centavos` manda no DINHEIRO. É dele que sai o título a
+--     receber e a baixa na data do pagamento (ver finance/vendas.py).
+--   • `eventos_agenda.sinal_centavos` é o que a AGENDA mostra: o valor que segura
+--     aquela data. Quando a pré-reserva vem de orçamento, os dois são gravados
+--     juntos, na mesma operação (web/proposta._reservar_na_agenda).
+-- Nenhum cálculo financeiro lê esta coluna.
+--
+-- Aditivo e idempotente.
+alter table public.eventos_agenda add column if not exists sinal_centavos int;
+
+-- rollback:
+--   alter table public.eventos_agenda drop column if exists sinal_centavos;

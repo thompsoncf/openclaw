@@ -16,7 +16,6 @@ monta o que vende. Empresa nova começa vazia; a Aladdin usa o modelo de
 tecnologia. A IA de escopo e a validação de módulos usam o catálogo da conta.
 """
 import json
-import logging
 import re
 import secrets
 
@@ -33,7 +32,6 @@ from finance import (agenda as ag, empresa as emp, icones_servico as ics, vendas
 from web.portal import _render, _env, conta_logada, brl
 
 router = APIRouter()
-_log_sinal = logging.getLogger("servicos.sinal")
 
 
 def _garantir_tabela(c):
@@ -743,19 +741,12 @@ class SinalIn(BaseModel):
 
 @router.post("/painel/servicos/sinal-recebido")
 def painel_servicos_sinal_recebido(request: Request, dados: SinalIn):
-    """O sinal caiu: a data segurada vira compromisso firme na agenda.
+    """O sinal caiu: a data segurada vira compromisso firme e o título daquela
+    parcela recebe baixa, na data em que o sinal caiu.
 
-    Confirmação MANUAL de propósito. O dono recebe o Pix como já recebe hoje e
-    aperta aqui — o sistema não cobra nada nem fica esperando integração. Se um dia
-    a cobrança automática existir, ela só passa a apertar este mesmo botão.
-
-    Confirmar o sinal mexe em DUAS coisas, e nessa ordem: a DATA (a pré-reserva
-    vira compromisso firme) e o DINHEIRO (o título a receber daquela parcela recebe
-    baixa, na data em que o sinal caiu). O pagamento é gravado primeiro; as duas
-    consequências vêm depois, cada uma podendo falhar sozinha sem desfazer o
-    registro — apertar o botão de novo retoma o que faltou.
-
-    Idempotente: orçamento com sinal já confirmado responde ok sem refazer nada.
+    A regra inteira mora em finance.vendas.confirmar_sinal — a Agenda tem um botão
+    igual a este na caixa do dia, e duas cópias da regra viraria dois
+    comportamentos. Aqui fica só o gate da conta e a resposta pro navegador.
     """
     conta, redir = _conta_servico(request)
     if redir is not None:
@@ -763,44 +754,10 @@ def painel_servicos_sinal_recebido(request: Request, dados: SinalIn):
     pool = get_pool()
     with pool.connection() as c:
         _garantir_tabela(c)
-        r = c.execute("""select sinal_pago_em, evento_agenda_id, parcelas
-                           from orcamentos where id=%s and conta_id=%s""",
-                      (int(dados.id), conta[0])).fetchone()
-        if not r:
-            return JSONResponse({"erro": "orçamento não encontrado"}, status_code=404)
-        ja_pago, agenda_id, parcelas = r
-        if not ja_pago:
-            ja_pago = c.execute(
-                "update orcamentos set sinal_pago_em=now() where id=%s and conta_id=%s "
-                "returning sinal_pago_em", (int(dados.id), conta[0])).fetchone()[0]
-            c.commit()
-            era_novo = True
-        else:
-            era_novo = False
-    # a data vira firme. Fora da transação de propósito: confirmar o sinal é o que
-    # importa: se a agenda falhar, o pagamento continua registrado e o compromisso
-    # pode ser confirmado de novo pelo mesmo botão.
-    firmou = False
-    if agenda_id:
-        try:
-            firmou = ag.confirmar_pre_reserva(pool, conta[0], int(agenda_id))
-        except Exception:  # noqa: BLE001
-            _log_sinal.exception(
-                "sinal-recebido: não deu pra firmar o compromisso %s", agenda_id)
-    # e o título daquela parcela recebe baixa NA DATA DO SINAL. Só encontra alguma
-    # coisa se o contrato já tiver sido fechado (é o fechamento que cria os
-    # títulos); no caminho normal — confirma o sinal, fecha o contrato depois — quem
-    # dá a baixa é o próprio fechar_orcamento, com a mesma data.
-    baixado = None
-    try:
-        baixado = vendas.baixar_titulo_do_sinal(pool, conta[0], int(dados.id),
-                                                parcelas, ja_pago)
-    except Exception:  # noqa: BLE001
-        _log_sinal.exception("sinal-recebido: baixa do título do orçamento %s falhou",
-                             dados.id)
-    return JSONResponse({"ok": True, "ja_estava": not era_novo,
-                         "reserva_firmada": firmou,
-                         "titulo_baixado": baixado})
+    r = vendas.confirmar_sinal(pool, conta[0], int(dados.id))
+    if not r.get("ok"):
+        return JSONResponse({"erro": r.get("erro", "falha ao confirmar")}, status_code=404)
+    return JSONResponse(r)
 
 
 class OrcDelIn(BaseModel):

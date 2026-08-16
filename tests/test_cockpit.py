@@ -40,7 +40,8 @@ create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id 
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   canal text, status text default 'aberta', agente_ativo boolean default true,
-  responsavel_membro_id bigint, ultima_msg_em timestamptz default now(), criado_em timestamptz default now());
+  responsavel_membro_id bigint, ultima_msg_em timestamptz default now(),
+  push_avisado_em timestamptz, criado_em timestamptz default now());
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text, direcao text,
   autor text default 'humano', membro_id bigint, texto text default '', provider_sid text,
   criado_em timestamptz default now());
@@ -349,6 +350,107 @@ def test_enviar_push_respeita_toggle_e_limpa_morto(pool, monkeypatch):
     # com push desligado no membro, não envia
     ck.set_push(pool, conta, vend, False)
     assert ck.enviar_push(pool, conta, vend, "t", "c") == 0
+
+
+def _conversa(c, conta, lead):
+    return c.execute("insert into conversas (conta_id, prospeccao_id, canal) "
+                     "values (%s,%s,'whatsapp') returning id", (conta, lead)).fetchone()[0]
+
+
+def _assina(c, conta, membro, ep):
+    c.execute("insert into push_assinaturas (conta_id, membro_id, endpoint, p256dh, auth) "
+              "values (%s,%s,%s,'p','a')", (conta, membro, ep))
+
+
+def test_avisar_mensagem_vai_pro_dono_com_link_da_conversa(pool, monkeypatch):
+    """Antes deste push, a resposta do cliente era silêncio: o único gatilho no código
+    era o rodízio atribuindo um lead novo."""
+    from finance import webpush
+    monkeypatch.setattr(webpush, "configurado", lambda: True)
+    with pool.connection() as c:
+        conta = _conta(c)
+        dono = _membro(c, conta, nome="Dono", email="am1@x.com")
+        outro = _membro(c, conta, nome="Outro", email="am2@x.com")
+        lead = _lead(c, conta, dono, "Bruna")
+        conv = _conversa(c, conta, lead)
+        _assina(c, conta, dono, "https://push/dono")
+        _assina(c, conta, outro, "https://push/outro")
+        c.commit()
+    saiu = []
+    monkeypatch.setattr(webpush, "enviar",
+                        lambda sub, dados, ttl=3600: (saiu.append((sub["endpoint"], dados)), True)[1])
+
+    assert ck.avisar_mensagem(pool, conta, lead, conv, "Quais os valores") == 1
+    assert [e for e, _ in saiu] == ["https://push/dono"]         # só o dono, não a conta toda
+    d = saiu[0][1]
+    assert d["title"] == "Bruna" and d["body"] == "Quais os valores"
+    assert d["url"] == f"/cockpit/lead/{lead}"                    # abre a CONVERSA, não a fila
+
+
+def test_avisar_mensagem_sem_dono_vai_pra_quem_assinou(pool, monkeypatch):
+    """O caso da Prime Eventos: rodízio desligado, lead sem dono. Antes, ninguém era
+    avisado — agora avisa quem instalou o app e aceitou notificação."""
+    from finance import webpush
+    monkeypatch.setattr(webpush, "configurado", lambda: True)
+    with pool.connection() as c:
+        conta = _conta(c)
+        a = _membro(c, conta, nome="A", email="sd1@x.com")
+        b = _membro(c, conta, nome="B", email="sd2@x.com")
+        pausado = _membro(c, conta, nome="P", email="sd3@x.com")
+        _membro(c, conta, nome="SemApp", email="sd4@x.com")       # sem assinatura: fica fora
+        lead = _lead(c, conta, None, "Valeria")
+        conv = _conversa(c, conta, lead)
+        for m, ep in ((a, "https://push/a"), (b, "https://push/b"), (pausado, "https://push/p")):
+            _assina(c, conta, m, ep)
+        c.commit()
+    ck.set_pausado(pool, conta, pausado, True)
+    saiu = []
+    monkeypatch.setattr(webpush, "enviar",
+                        lambda sub, dados, ttl=3600: (saiu.append(sub["endpoint"]), True)[1])
+
+    assert ck.avisar_mensagem(pool, conta, lead, conv, "Olá, quero informações") == 2
+    assert sorted(saiu) == ["https://push/a", "https://push/b"]   # o pausado fica de fora
+
+
+def test_avisar_mensagem_rajada_gera_um_aviso_so(pool, monkeypatch):
+    """'Boa tarde' / '08/05/27' / 'Debutante' / '19 h' em 40 segundos é o padrão real.
+    Quatro notificações por isso e o vendedor desliga o push."""
+    from finance import webpush
+    monkeypatch.setattr(webpush, "configurado", lambda: True)
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="raj@x.com")
+        lead = _lead(c, conta, vend, "Sonja")
+        conv = _conversa(c, conta, lead)
+        _assina(c, conta, vend, "https://push/raj")
+        c.commit()
+    n = []
+    monkeypatch.setattr(webpush, "enviar", lambda sub, dados, ttl=3600: (n.append(1), True)[1])
+
+    saidas = [ck.avisar_mensagem(pool, conta, lead, conv, t)
+              for t in ("Boa tarde", "08/05/27", "Debutante", "19 h")]
+    assert saidas == [1, 0, 0, 0] and len(n) == 1
+
+    # passado o cooldown, volta a avisar — não é um silêncio permanente
+    with pool.connection() as c:
+        c.execute("update conversas set push_avisado_em = now() - interval '%s minutes' "
+                  "where id=%s" % (ck.PUSH_COOLDOWN_MIN + 1, conv))
+        c.commit()
+    assert ck.avisar_mensagem(pool, conta, lead, conv, "Ainda tem vaga?") == 1
+
+
+def test_avisar_mensagem_texto_vazio_e_sem_vapid(pool, monkeypatch):
+    from finance import webpush
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="vz@x.com")
+        lead = _lead(c, conta, vend); conv = _conversa(c, conta, lead)
+        _assina(c, conta, vend, "https://push/vz")
+        c.commit()
+    monkeypatch.setattr(webpush, "configurado", lambda: True)
+    assert ck.avisar_mensagem(pool, conta, lead, conv, "   ") == 0    # áudio/mídia sem texto
+    monkeypatch.setattr(webpush, "configurado", lambda: False)
+    assert ck.avisar_mensagem(pool, conta, lead, conv, "oi") == 0     # ambiente sem VAPID
+    with pool.connection() as c:   # e não queimou o cooldown à toa
+        assert c.execute("select push_avisado_em from conversas where id=%s", (conv,)).fetchone()[0] is None
 
 
 def test_catalogo_servicos_em_reais(pool):

@@ -113,6 +113,26 @@ def _base_leads_sql() -> str:
          limit 100"""
 
 
+def sinal_fila(pool, conta_id: int, membro_id: int) -> str:
+    """Assinatura barata da fila do vendedor: quantos leads e qual a mensagem mais
+    recente entre eles. A tela compara com o que tem na mão e só recarrega quando
+    mudou — em vez de re-renderizar a lista no cliente, que seria muito mais código
+    pra um app que é todo form + redirect."""
+    with pool.connection() as c:
+        r = c.execute(
+            """select count(*), coalesce(max(ult.mid), 0) from prospeccao p
+                 left join lateral (
+                   select max(m.id) mid from conversas cv
+                     join mensagens m on m.conversa_id = cv.id
+                    where cv.conta_id = p.conta_id and cv.prospeccao_id = p.id
+                 ) ult on true
+                where p.conta_id=%s and p.vendedor_id=%s
+                  and coalesce(p.estagio,'lead')='lead'
+                  and p.status not in ('ganho','perdido')""",
+            (conta_id, membro_id)).fetchone()
+    return f"{r[0]}:{r[1]}" if r else "0:0"
+
+
 def leads_do_vendedor(pool, conta_id: int, membro_id: int) -> list[dict]:
     from web.painel_prospeccao import _zap_link, TEMP_COR
     out = []
@@ -163,13 +183,15 @@ def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int) -> dict 
             # mensagens o vendedor abria a tela e nunca via o que acabou de chegar.
             # Corta pelas últimas e devolve em ordem de leitura.
             rows = c.execute(
-                """select direcao, autor, texto, criado_em from (
-                     select direcao, autor, texto, criado_em from mensagens
+                """select id, direcao, autor, texto, criado_em from (
+                     select id, direcao, autor, texto, criado_em from mensagens
                       where conversa_id=%s order by criado_em desc limit 200
                    ) t order by criado_em asc""", (cv[0],)).fetchall()
-            for d, autor, texto, quando in rows:
+            for mid, d, autor, texto, quando in rows:
                 who = "ia" if autor == "bot" else ("out" if d == "out" else "in")
-                msgs.append({"who": who, "texto": texto or "", "quando": quando})
+                # o id vai junto porque a tela do lead se atualiza sozinha e precisa
+                # saber a partir de onde pedir o que é novo
+                msgs.append({"id": mid, "who": who, "texto": texto or "", "quando": quando})
     alvo["etapas"] = etapas
     alvo["conversa_id"] = cv[0] if cv else None
     alvo["ia"] = bool(cv[1]) if cv else True
@@ -412,6 +434,73 @@ def enviar_push(pool, conta_id: int, membro_id: int, titulo: str, corpo: str, ur
             remover_assinatura(pool, endpoint)
         except Exception as e:  # noqa: BLE001
             _log.info("push: envio falhou (ok): %s", e)
+    return enviados
+
+
+#: minutos de silêncio por conversa depois de um aviso. O cliente responde em
+#: rajada ("Boa tarde" / "08/05/27" / "Debutante" / "19 h" em 40 segundos, que é o
+#: padrão real nas conversas), e uma notificação por bolha faria o vendedor
+#: desligar o push — matando o recurso inteiro.
+PUSH_COOLDOWN_MIN = 10
+
+
+def avisar_mensagem(pool, conta_id: int, lead_id: int, conversa_id: int, texto: str) -> int:
+    """Toca o celular de quem atende quando o CLIENTE responde.
+
+    Até aqui o push só existia num evento: o rodízio atribuindo um lead novo
+    (`distribuicao.avisar_vendedor` era o único chamador de `enviar_push` em todo o
+    código). Ou seja, da segunda mensagem do cliente em diante era silêncio — e numa
+    conta sem rodízio ligado, silêncio desde sempre.
+
+    Quem recebe: o dono do lead. Se o lead não tem dono, todo mundo da conta que
+    ASSINOU push no app — assinar é o opt-in explícito, e lead sem dono é de quem
+    pegar primeiro. Devolve quantas notificações saíram."""
+    texto = (texto or "").strip()
+    if not texto:
+        return 0
+    try:
+        from finance import webpush
+        if not webpush.configurado():
+            return 0
+        with pool.connection() as c:
+            # O cooldown é decidido no próprio UPDATE, com RETURNING: dois workers
+            # processando duas bolhas da mesma rajada disputam a linha e só um sai
+            # vencedor. Ler-e-depois-gravar deixaria os dois passarem.
+            venceu = c.execute(
+                """update conversas set push_avisado_em=now()
+                    where id=%s and conta_id=%s
+                      and (push_avisado_em is null
+                           or push_avisado_em < now() - make_interval(mins => %s))
+                 returning id""",
+                (conversa_id, conta_id, PUSH_COOLDOWN_MIN)).fetchone()
+            if not venceu:
+                return 0
+            lead = c.execute("select coalesce(empresa,''), vendedor_id from prospeccao "
+                             "where id=%s and conta_id=%s", (lead_id, conta_id)).fetchone()
+            if not lead:
+                c.commit()
+                return 0
+            empresa, dono = lead[0], lead[1]
+            if dono:
+                alvos = [dono]
+            else:
+                alvos = [r[0] for r in c.execute(
+                    """select distinct m.id from membros m
+                         join push_assinaturas p on p.membro_id=m.id and p.conta_id=m.conta_id
+                        where m.conta_id=%s and m.ativo
+                          and not coalesce(m.cockpit_pausado, false)""", (conta_id,)).fetchall()]
+            c.commit()
+    except Exception as e:  # noqa: BLE001
+        _log.info("push mensagem: leitura falhou (ok): %s", e)
+        return 0
+
+    titulo = (empresa or "Cliente").strip()[:60]
+    corpo = texto[:80] + ("…" if len(texto) > 80 else "")
+    enviados = 0
+    for mid in alvos:
+        # deep link: abre a CONVERSA, não a fila. O push do rodízio manda pra
+        # /cockpit e obriga o vendedor a procurar de quem era o aviso.
+        enviados += enviar_push(pool, conta_id, mid, titulo, corpo, f"/cockpit/lead/{lead_id}")
     return enviados
 
 

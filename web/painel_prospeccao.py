@@ -3894,7 +3894,13 @@ def _gravar_contatos_wa(conta_id: int, numeros8: list[str], nomes: list[str],
 
 @router.post("/webhooks/wa-qr/audio")
 async def webhook_wa_qr_audio(request: Request):
-    """Áudio recebido no WhatsApp vira TEXTO, pro vendedor responder digitando.
+    """Áudio do WhatsApp vira TEXTO, pro vendedor responder digitando.
+
+    Vale pros DOIS lados da conversa: o que o cliente manda e o que o vendedor
+    grava pelo celular. Casa por `provider_sid` e não olha direção de propósito —
+    foi o que permitiu passar a transcrever a saída sem rota nova. Antes só a
+    entrada era transcrita, e a conversa ficava pela metade: a pergunta do cliente
+    em texto e a resposta do vendedor como um "🎤 Áudio (0:09)" mudo.
 
     A mensagem já entrou antes com a marca "🎤 Áudio (0:18)" (ver textoDaMsg no
     serviço Node); aqui a transcrição é acrescentada por cima. Reusa o mesmo

@@ -40,6 +40,58 @@ def _horario_ok(cfg) -> bool:
     return agora.weekday() <= 5 and 8 <= agora.hour < 18       # seg–sáb, 8–18h
 
 
+def _pode_falar_agora(cfg) -> bool:
+    """O relógio deixa o agente responder agora?
+
+    MODO TESTE tem passe livre: com o agente-mestre DESLIGADO, quem chegou até aqui
+    veio de uma conversa que um humano ligou à mão, uma por vez, no botão do chat. É
+    o caminho que o painel oferece pra experimentar o agente antes de soltá-lo na
+    caixa inteira — e esse teste quase sempre acontece fora do expediente (à noite,
+    no fim de semana). Um agente mudo justamente na hora do teste se parece com um
+    agente quebrado, e foi assim que ele pareceu.
+
+    Com o mestre LIGADO, o horário da empresa vale pra todo mundo: aí não é teste, é
+    atendimento, e a conta decidiu quando quer atender."""
+    return (not cfg["ativo"]) or _horario_ok(cfg)
+
+
+def _reais(centavos: int) -> str:
+    """R$ 8.800 — sem centavos, com ponto de milhar. É texto que vai pro cliente."""
+    return "R$ " + f"{(centavos or 0) // 100:,}".replace(",", ".")
+
+
+def _linha_catalogo(s) -> str:
+    """Uma linha do catálogo do jeito que a IA deve LER — e, por tabela, falar.
+
+    O catálogo nasceu pra serviço recorrente (setup + mensalidade), e a linha era
+    sempre "setup R$X, mensal R$Y". Isso quebra em dois casos reais:
+
+    1. LOCAÇÃO. A Prime Eventos tem 26 itens com mensal ZERO — pacote de espaço,
+       DJ, hora extra, taxa de limpeza. A linha antiga mandava "mensal R$0" pra IA,
+       e "mensal R$ 0" numa conversa de aluguel de salão não quer dizer nada; na
+       melhor das hipóteses confunde, na pior o cliente entende que tem uma
+       mensalidade zerada que vai virar cobrança depois.
+
+    2. PREÇO A COMBINAR. Serviço cadastrado com os dois valores em zero (é o caso
+       de uma assessoria de consórcio na base) virava "setup R$0, mensal R$0" — a
+       IA lendo isso pode dizer ao cliente que é DE GRAÇA. Zero aqui nunca
+       significa gratuito, significa que ninguém preencheu.
+
+    Então: mostra só o que tem valor, e o que não tem vira "valor sob consulta",
+    que é a verdade e ainda deixa a IA saber que precisa perguntar."""
+    setup = s.get("setup_centavos") or 0
+    mensal = s.get("mensal_centavos") or 0
+    if setup and mensal:
+        preco = f"{_reais(setup)} de entrada + {_reais(mensal)} por mês"
+    elif setup:
+        preco = _reais(setup)
+    elif mensal:
+        preco = f"{_reais(mensal)} por mês"
+    else:
+        preco = "valor sob consulta (não cadastrado — pergunte, não invente)"
+    return f"- {s['nome']} (slug {s['slug']}): {preco}"
+
+
 def _conhecimento(c, conta_id):
     rows = c.execute(
         "select tipo, pergunta, resposta from agente_conhecimento where conta_id=%s order by ordem, id",
@@ -87,16 +139,16 @@ def atender(pool, conta_id: int, conversa_id: int) -> None:
 def _atender(pool, conta_id, conversa_id):
     with pool.connection() as c:
         cfg = _cfg(c, conta_id)
-        if not cfg or not cfg["ativo"]:
+        if not cfg:
             return
         conv = c.execute(
             """select cv.agente_ativo, cv.prospeccao_id, cv.contato_ref, p.empresa,
                       p.whatsapp, p.telefone, p.segmento, p.cidade, p.uf, cv.canal
                  from conversas cv left join prospeccao p on p.id = cv.prospeccao_id
                 where cv.id=%s and cv.conta_id=%s""", (conversa_id, conta_id)).fetchone()
-        if not conv or not conv[0]:      # conversa não existe ou humano assumiu
+        if not conv or not conv[0]:      # conversa não existe, humano assumiu, ou desligada
             return
-        if not _horario_ok(cfg):
+        if not _pode_falar_agora(cfg):
             return
         # histórico das últimas mensagens (contexto pro Brain)
         msgs = c.execute(
@@ -113,9 +165,7 @@ def _atender(pool, conta_id, conversa_id):
             ("Cliente: " if a == "lead" else ("Agente: " if a == "bot" else "Vendedor: ")) + (t or "")
             for (_d, a, t) in reversed(msgs))
 
-        cat_txt = "\n".join(
-            f"- {s['nome']} (slug {s['slug']}): setup R${s['setup_centavos']//100}, "
-            f"mensal R${s['mensal_centavos']//100}" for s in catalogo) or "(sem catálogo)"
+        cat_txt = "\n".join(_linha_catalogo(s) for s in catalogo) or "(sem catálogo)"
         tom = "informal e próximo" if cfg["tom"] == "informal" else "formal e profissional"
         system = (
             "Você é o atendente virtual da empresa, no WhatsApp. Fala em português do "

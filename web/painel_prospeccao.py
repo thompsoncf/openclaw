@@ -2885,13 +2885,21 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
               (conv_id, (corpo or "")[:8000], sid))
     # reabre a janela de 24h e REATIVA o agente — a menos que um humano tenha assumido
     # (status='pendente'). O CASE lê o status ANTIGO da linha, então 'pendente' fica preservado.
+    #
+    # O agente-mestre LIGA a conversa, mas nunca mais a DESLIGA. Antes esta linha era
+    # `agente_ativo = <mestre>`, e com o mestre desligado toda mensagem que chegava
+    # zerava a conversa: quem ligasse o agente numa conversa só — que é como o painel
+    # manda testar — via a chave voltar sozinha no primeiro "oi" do cliente. Ligar numa
+    # conversa é ato explícito de gente; mensagem que chega não desfaz ato de gente.
     c.execute(
         """update conversas set ultima_msg_em=now(),
              janela_expira_em=now()+interval '24 hours',
              -- pushName é só reserva: não derruba o nome da AGENDA que já estiver lá
              contato_nome=coalesce(nullif(contato_nome,''), nullif(%s,'')),
              status = case when status='pendente' then 'pendente' else 'aberta' end,
-             agente_ativo = case when status='pendente' then agente_ativo else %s end
+             agente_ativo = case when status='pendente' then agente_ativo
+                                 when %s then true
+                                 else agente_ativo end
            where id=%s""", ((nome_perfil or "").strip()[:120], agente_on, conv_id))
     # rodízio: se o lead ainda não tem dono, distribui pro próximo vendedor da fila.
     # Cobre contato NOVO e resposta de campanha (ambos passam por aqui). Best-effort —
@@ -2935,6 +2943,23 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
         except Exception:  # noqa: BLE001
             pass
     return conv_id
+
+
+def _agente_atende(c, conv_id, agente_on) -> bool:
+    """Vale acordar o agente pra esta conversa?
+
+    Duas portas, e a segunda é a que faltava: o agente-mestre ligado atende tudo, e
+    uma CONVERSA ligada à mão atende mesmo com o mestre desligado. É assim que se
+    testa o agente antes de soltá-lo na caixa inteira — ligar numa conversa só,
+    acompanhar as respostas, e só então ligar pra todo mundo.
+
+    Antes só existia a primeira porta: o webhook nem chamava o agente quando o mestre
+    estava desligado, então o botão da conversa não fazia nada e parecia defeito."""
+    if agente_on:
+        return True
+    r = c.execute("select coalesce(agente_ativo,false) from conversas where id=%s",
+                  (conv_id,)).fetchone()
+    return bool(r and r[0])
 
 
 def _wa_conversa_simples(c, conta_id, lead_id, remetente, corpo, sid) -> int:
@@ -3441,7 +3466,7 @@ async def webhook_meta(request: Request, background_tasks: BackgroundTasks):
                 conv_id = _wa_inbound_conversa(c, conta_id, ev["sender"], ev["texto"],
                                                ev.get("sid"), ev.get("nome"), agente_on,
                                                exigir_continuidade=True)
-                if agente_on:
+                if _agente_atende(c, conv_id, agente_on):
                     disparar.append((conta_id, conv_id))
                 continue
             conta_id = _conta_por_meta(c, ev["plataforma"], ev["conta_ident"])
@@ -3542,10 +3567,13 @@ async def webhook_wa_qr(request: Request, background_tasks: BackgroundTasks):
         agente_on = bool(m and m[0])
         conv_id = _wa_inbound_conversa(c, conta_id, sender, texto,
                                        payload.get("id") or None, payload.get("nome"), agente_on)
+        # lê DENTRO da transação: o update acima já valeu, então a conversa ligada à
+        # mão aparece aqui mesmo com o agente-mestre desligado (ver _agente_atende)
+        atender = _agente_atende(c, conv_id, agente_on)
         c.commit()
-    log.info("webhook_wa_qr: conta_id=%s conv_id=%s gravado ✓ (agente_ativo=%s)",
-             conta_id, conv_id, agente_on)
-    if agente_on:
+    log.info("webhook_wa_qr: conta_id=%s conv_id=%s gravado ✓ (mestre=%s atende=%s)",
+             conta_id, conv_id, agente_on, atender)
+    if atender:
         from finance import agente as _ag
         background_tasks.add_task(_ag.atender, get_pool(), conta_id, conv_id)
     return Response("ok", media_type="text/plain")

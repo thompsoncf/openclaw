@@ -798,6 +798,96 @@ def test_ficha_de_varios_eventos_numa_consulta_so(pool, conta_id):
     assert {f["numero"] for f in fichas.values()} == {71, 72, 73}
 
 
+# ------------------------------- reabrir a proposta e a data na agenda
+def test_reabrir_sem_sinal_pago_libera_a_data(pool, conta_id):
+    """Editar uma proposta aprovada desfaz a assinatura. Se ninguém pagou nada, não
+    há o que sustente a reserva — a data volta pro calendário e o vínculo se desfaz,
+    pra a próxima aprovação criar do zero (com a data nova, se mudou)."""
+    oid, tok = _semear(pool, conta_id)
+    prop.registrar_assinatura(pool, tok, "Maria Teste", "", "1.2.3.4")
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    r = vendas.reabrir_proposta(pool, conta_id, oid, ev_id, None, EVENTO)
+    assert r == {"liberou": True, "remarcou": False}
+    with pool.connection() as c:
+        assert c.execute("select status from eventos_agenda where id=%s",
+                         (ev_id,)).fetchone()[0] == "cancelado"
+        assert c.execute("select evento_agenda_id, sinal_centavos from orcamentos "
+                         "where id=%s", (oid,)).fetchone() == (None, None)
+    # e a próxima aprovação marca de novo, na data que estiver valendo agora
+    d = prop._carregar(tok, pool=pool)
+    novo = prop._reservar_na_agenda(d, pool=pool)
+    assert novo and novo != ev_id
+
+
+def test_reabrir_com_sinal_pago_nao_solta_a_data(pool, conta_id):
+    """O cliente pagou. Perder a data de quem pagou seria o pior erro possível
+    aqui — então ela fica, mesmo com a assinatura desfeita."""
+    oid, tok = _semear(pool, conta_id)
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    vendas.confirmar_sinal(pool, conta_id, oid)
+    with pool.connection() as c:
+        pago = c.execute("select sinal_pago_em from orcamentos where id=%s",
+                         (oid,)).fetchone()[0]
+    r = vendas.reabrir_proposta(pool, conta_id, oid, ev_id, pago, EVENTO)
+    assert r == {"liberou": False, "remarcou": False}     # mesma data: nada a fazer
+    with pool.connection() as c:
+        assert c.execute("select status from eventos_agenda where id=%s",
+                         (ev_id,)).fetchone()[0] == "ativo"
+        assert c.execute("select evento_agenda_id from orcamentos where id=%s",
+                         (oid,)).fetchone()[0] == ev_id
+
+
+def test_reabrir_com_sinal_pago_e_data_nova_remarca(pool, conta_id):
+    """Se a edição mudou o dia da festa, o compromisso acompanha — o vínculo
+    continua, então uma re-aprovação não criaria outro."""
+    oid, tok = _semear(pool, conta_id)
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    vendas.confirmar_sinal(pool, conta_id, oid)
+    with pool.connection() as c:
+        pago = c.execute("select sinal_pago_em from orcamentos where id=%s",
+                         (oid,)).fetchone()[0]
+    novo_evento = dict(EVENTO, data="2025-12-06", inicio="20:00", fim="02:00")
+    r = vendas.reabrir_proposta(pool, conta_id, oid, ev_id, pago, novo_evento)
+    assert r == {"liberou": False, "remarcou": True}
+    with pool.connection() as c:
+        ini, fim, st = c.execute(
+            "select inicio, fim, status from eventos_agenda where id=%s", (ev_id,)).fetchone()
+    assert st == "ativo"
+    assert ini.astimezone(ag.BRT).strftime("%d/%m %H:%M") == "06/12 20:00"
+    assert fim.astimezone(ag.BRT).day == 7          # 02:00 vira a noite
+
+
+def test_reabrir_sem_data_nova_nao_remarca_no_escuro(pool, conta_id):
+    """Orçamento que perdeu a data na edição não pode arrastar o compromisso pra
+    lugar nenhum — melhor deixar onde está e o dono resolver."""
+    oid, tok = _semear(pool, conta_id)
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    vendas.confirmar_sinal(pool, conta_id, oid)
+    with pool.connection() as c:
+        pago = c.execute("select sinal_pago_em from orcamentos where id=%s",
+                         (oid,)).fetchone()[0]
+        antes = c.execute("select inicio from eventos_agenda where id=%s", (ev_id,)).fetchone()[0]
+    assert vendas.reabrir_proposta(pool, conta_id, oid, ev_id, pago,
+                                   {"convidados": 50}) == {"liberou": False, "remarcou": False}
+    with pool.connection() as c:
+        assert c.execute("select inicio from eventos_agenda where id=%s",
+                         (ev_id,)).fetchone()[0] == antes
+
+
+def test_reabrir_libera_tambem_a_data_so_segurada(pool, conta_id):
+    """A pré-reserva é o caso mais comum de reabertura: o cliente aprovou, o sinal
+    não caiu, e a empresa mexe na proposta enquanto negocia."""
+    oid, tok = _semear(pool, conta_id)
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    with pool.connection() as c:
+        assert c.execute("select status from eventos_agenda where id=%s",
+                         (ev_id,)).fetchone()[0] == ag.PRE_RESERVADO
+    assert vendas.reabrir_proposta(pool, conta_id, oid, ev_id, None, EVENTO)["liberou"] is True
+    with pool.connection() as c:
+        assert c.execute("select status from eventos_agenda where id=%s",
+                         (ev_id,)).fetchone()[0] == "cancelado"
+
+
 def test_choque_de_data_avisa_o_dono_sem_bloquear(pool, conta_id, monkeypatch):
     """Dois orçamentos aprovados pro mesmo horário viravam dois compromissos calados.
     Quem decide se cabe é a empresa (buffet com dois salões cabe) — mas ela tem que

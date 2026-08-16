@@ -57,6 +57,22 @@ def cliente(monkeypatch):
             categoria text default '', lancamento_id bigint, pago_em date,
             criado_por bigint, orcamento_id bigint, parcela_idx int,
             criado_em timestamptz default now())""")
+        # salvar/1 valida os módulos contra o catálogo da conta e espelha o cliente;
+        # as duas leituras precisam das tabelas existirem, mesmo vazias.
+        c.execute("""create table servicos_catalogo (id bigserial primary key,
+            conta_id bigint, slug text, nome text, descricao text,
+            setup_centavos bigint default 0, mensal_centavos bigint default 0,
+            custo_centavos bigint default 0, ordem int default 0,
+            ativo boolean default true, categoria text, foto_url text, icone text)""")
+        # o MODO do orçamento sai do nicho da conta (vendas.modo_do_orcamento), e a
+        # conta de teste é de eventos — é o que faz salvar/1 gravar modo='evento'.
+        c.execute("create table nichos (id bigserial primary key, nome text, "
+                  "slug text unique, tipo text, ativo boolean default true)")
+        c.execute("alter table contas add column if not exists nicho_id bigint")
+        for col in ("documento", "razao_social", "nome_fantasia", "endereco", "bairro",
+                    "cep", "cidade", "uf", "email_empresa", "telefone", "cnae"):
+            c.execute(f"alter table contas add column if not exists {col} text")
+        c.execute("insert into nichos (nome, slug, tipo) values ('Eventos','eventos','servico')")
         c.commit()
     with pool.connection() as c:
         ps._garantir_tabela(c)          # cria orcamentos como em produção
@@ -65,7 +81,8 @@ def cliente(monkeypatch):
                      "131_evento_link_online.sql", "160_agenda_pre_reserva.sql",
                      "161_orcamento_sinal.sql", "163_evento_sinal_esperado.sql"):
             c.execute((BASE / nome).read_text(encoding="utf-8"))
-        c.execute("insert into contas (id, nome) values (%s,'Buffet Teste')", (CONTA,))
+        c.execute("insert into contas (id, nome, nicho_id) values "
+                  "(%s,'Buffet Teste',(select id from nichos where slug='eventos'))", (CONTA,))
         c.execute("insert into contas (id, nome) values (%s,'Vizinha')", (OUTRA,))
         c.commit()
 
@@ -173,6 +190,97 @@ def test_orcamento_sem_data_segurada_nao_aparece_como_pendente(cliente):
         cx.commit()
     it = _item(cliente, oid)
     assert it["pre_reserva_ate"] == "" and it["sinal"] == ""
+
+
+# ---------------------------------- reabrir a proposta, pela rota de verdade
+
+def _aprovado_com_data(c, *, sinal_pago=False, dias=20):
+    """Um orçamento APROVADO com a data já na agenda — o estado de onde a reabertura
+    parte. `pre_reservado` quando o sinal não caiu, `ativo` quando caiu."""
+    dia = (ag.agora_brt() + timedelta(days=dias)).date()
+    # a MESMA janela que o payload vai mandar — senão o teste do "nada mudou"
+    # mediria uma remarcação de verdade (e a de baixo, o contrário).
+    quando, fim = ag.janela_evento(dia.isoformat(), "19:00", "23:00")
+    ev = ag.criar_evento(c.pool, CONTA, "Casamento — Ana", quando, fim=fim,
+                         pre_reserva_ate=None if sinal_pago else quando)
+    with c.pool.connection() as cx:
+        oid = cx.execute(
+            """insert into orcamentos (conta_id, cliente, empresa, status, criado_por,
+                 setup_centavos, primeiro_ano_centavos, modo, evento, parcelas,
+                 evento_agenda_id, sinal_centavos, sinal_pago_em)
+               values (%s,'Ana','Ana','aprovada','',745000,745000,'evento',
+                       %s::jsonb, %s::jsonb, %s, 181000, %s) returning id""",
+            (CONTA,
+             '{"data":"' + quando.date().isoformat() + '","inicio":"19:00","fim":"23:00",'
+             '"tipo":"Casamento","convidados":100}',
+             '[{"venc":"2026-01-10","valor_centavos":181000,"forma":"Pix",'
+             '"obs":"Sinal — confirma a reserva da data"}]',
+             ev["id"], "now()" if False else (ag.agora_brt() if sinal_pago else None))
+        ).fetchone()[0]
+        cx.commit()
+    return oid, ev["id"], quando
+
+
+def _payload(oid, *, data, inicio="19:00", fim="23:00"):
+    return {"id": oid, "cliente": "Ana", "empresa": "Ana", "setup": 7450,
+            "primeiro_ano": 7450, "n_modulos": 1,
+            "itens": [{"nome": "Pacote", "setup": 7450, "mensal": 0}],
+            "evento": {"data": data, "inicio": inicio, "fim": fim,
+                       "tipo": "Casamento", "convidados": 100},
+            "parcelas": [{"venc": "2026-01-10", "valor_centavos": 181000,
+                          "forma": "Pix", "obs": "Sinal — confirma a reserva da data"}]}
+
+
+def test_editar_proposta_aprovada_libera_a_data_pela_rota(cliente):
+    """O buraco que isso fecha: editar reabria a proposta mas deixava a data
+    ocupada por um orçamento que voltou a ser rascunho — e a re-aprovação nem
+    remarcava, porque o vínculo continuava lá."""
+    oid, ev_id, quando = _aprovado_com_data(cliente)
+    r = cliente.post("/painel/servicos/salvar",
+                     json=_payload(oid, data=quando.date().isoformat()))
+    assert r.status_code == 200
+    assert r.json()["reaberta"] == {"liberou": True, "remarcou": False}
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select status from eventos_agenda where id=%s",
+                          (ev_id,)).fetchone()[0] == "cancelado"
+        assert cx.execute("select status, evento_agenda_id from orcamentos where id=%s",
+                          (oid,)).fetchone() == ("enviado", None)
+
+
+def test_editar_proposta_com_sinal_pago_mantem_a_data(cliente):
+    oid, ev_id, quando = _aprovado_com_data(cliente, sinal_pago=True)
+    r = cliente.post("/painel/servicos/salvar",
+                     json=_payload(oid, data=quando.date().isoformat()))
+    assert r.json()["reaberta"] == {"liberou": False, "remarcou": False}
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select status from eventos_agenda where id=%s",
+                          (ev_id,)).fetchone()[0] == "ativo"
+
+
+def test_editar_a_data_com_sinal_pago_remarca_o_compromisso(cliente):
+    """Quem pagou não perde a data — mas se a festa mudou de dia, o compromisso
+    acompanha. O vínculo continua, então uma re-aprovação não criaria outro."""
+    oid, ev_id, quando = _aprovado_com_data(cliente, sinal_pago=True)
+    nova = (quando + timedelta(days=7)).date().isoformat()
+    r = cliente.post("/painel/servicos/salvar", json=_payload(oid, data=nova))
+    assert r.json()["reaberta"] == {"liberou": False, "remarcou": True}
+    with cliente.pool.connection() as cx:
+        ini, st = cx.execute("select inicio, status from eventos_agenda where id=%s",
+                             (ev_id,)).fetchone()
+    assert st == "ativo" and ini.astimezone(ag.BRT).date().isoformat() == nova
+
+
+def test_editar_proposta_nao_aprovada_nao_mexe_em_data_nenhuma(cliente):
+    """Regressão: editar um rascunho é o caminho de sempre e não tem caminho de
+    volta pra percorrer."""
+    with cliente.pool.connection() as cx:
+        oid = cx.execute(
+            """insert into orcamentos (conta_id, cliente, empresa, status, criado_por,
+                 setup_centavos, modo) values (%s,'Bia','Bia','enviado','',300000,'evento')
+               returning id""", (CONTA,)).fetchone()[0]
+        cx.commit()
+    r = cliente.post("/painel/servicos/salvar", json=_payload(oid, data="2026-12-20"))
+    assert r.status_code == 200 and "reaberta" not in r.json()
 
 
 def test_sinal_confirmado_mesmo_sem_agenda_nao_perde_o_pagamento(cliente):

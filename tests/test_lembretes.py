@@ -30,7 +30,8 @@ def pool():
                     "128_lembretes_aviso_convidado.sql", "130_evento_desfecho.sql",
                     "131_evento_link_online.sql",
                     "132_convidado_canal_resposta.sql",
-                    "139_agenda_mensagens_log.sql", "146_agenda_enviar_confirmacao.sql"):
+                    "139_agenda_mensagens_log.sql", "146_agenda_enviar_confirmacao.sql",
+                    "160_agenda_pre_reserva.sql"):
             c.execute((migr / nome).read_text(encoding="utf-8"))
         c.commit()
     yield p

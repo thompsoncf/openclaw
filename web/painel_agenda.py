@@ -73,8 +73,12 @@ def _monta_semanas(ano: int, mes: int, eventos: list[dict], hoje: date) -> list[
             linha.append({
                 "dia": d.day, "fora": d.month != mes, "hoje": d == hoje,
                 "iso": d.isoformat(),
+                # `pre` = data SEGURADA esperando o sinal, não compromisso. Aparece
+                # no calendário (é ela que impede vender a data duas vezes) mas
+                # tracejada, e fora dos "Próximos" — ag.proximos só traz 'ativo'.
                 "eventos": [{"id": e["id"], "titulo": e["titulo"], "tipo": e["tipo"],
-                             "hora": e["inicio"].astimezone(ag.BRT).strftime("%H:%M")}
+                             "hora": e["inicio"].astimezone(ag.BRT).strftime("%H:%M"),
+                             "pre": e.get("status") == ag.PRE_RESERVADO}
                             for e in evs],
             })
         semanas.append(linha)
@@ -110,6 +114,9 @@ def _eventos_por_dia(eventos: list[dict], convidados: dict[int, list[dict]] | No
             "convidados": conv_lista, "inicio_iso": e["inicio"].isoformat(),
             "data_iso": iso, "desfecho": e.get("desfecho"),
             "link_online": e.get("link_online") or "",
+            "pre": e.get("status") == ag.PRE_RESERVADO,
+            "pre_ate": (e["pre_reserva_ate"].astimezone(ag.BRT).strftime("%d/%m %H:%M")
+                        if e.get("pre_reserva_ate") else ""),
         })
     return out
 
@@ -550,6 +557,26 @@ def agenda_lembrete(request: Request, resumo_dia: str = Form(""),
     return RedirectResponse(voltar, status_code=303)
 
 
+# ================================================ PRAZO DA DATA SEGURADA (pré-reserva)
+@router.post("/painel/agenda/pre-reserva")
+def agenda_pre_reserva(request: Request, pre_reserva_dias: str = Form("3"), m: str = Form("")):
+    """Quanto tempo a data fica segurada esperando o sinal. Rota própria (não é o
+    form do lembrete) porque é regra de venda, não preferência de aviso."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    try:
+        dias = int(pre_reserva_dias)
+    except (TypeError, ValueError):
+        dias = ag.PRE_RESERVA_DIAS
+    d = ag.salvar_pre_reserva_dias(get_pool(), ctx["conta_id"], dias)
+    request.session["agenda_aviso"] = (
+        f"A partir de agora a data fica segurada por {d} dia{'s' if d != 1 else ''} "
+        "esperando o sinal. As pré-reservas que já estão correndo mantêm o prazo delas.")
+    voltar = f"/painel/agenda?m={m}" if m else "/painel/agenda"
+    return RedirectResponse(voltar, status_code=303)
+
+
 # ================================================================ SINCRONIZAR (.ics)
 @router.post("/painel/agenda/sincronizar")
 def agenda_sincronizar(request: Request, m: str = Form("")):
@@ -745,6 +772,11 @@ _CSS = """<style>
 .ev-line .h{font-size:.6rem;font-weight:700;color:var(--txt-mut);flex:0 0 auto;font-variant-numeric:tabular-nums}
 .ev-line .n{font-size:.62rem;color:var(--txt);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ev-more{font-size:.58rem;color:var(--txt-mut);padding-left:10px}
+/* pré-reserva: a data está SEGURADA, não marcada. Tracejado (não só cor: quem não
+   distingue cor precisa enxergar isso) e o ponto do tipo fica vazado. */
+.ev-line.pre .n,.ev-line.pre .h{opacity:.75}
+.ev-line.pre{border-left:2px dashed #b98d2e;padding-left:3px;margin-left:-5px}
+.ev-line.pre .dot{background:transparent!important;box-shadow:inset 0 0 0 1.5px #b98d2e}
 /* próximos */
 .px{display:flex;flex-direction:column;gap:2px}
 .px-row{display:flex;align-items:flex-start;gap:11px;padding:9px 4px;border-bottom:1px solid var(--borda)}
@@ -931,6 +963,7 @@ _CSS = """<style>
 .dev-tt{font-size:.92rem;font-weight:600;margin-top:1px}
 .dev-meta{display:flex;flex-wrap:wrap;gap:8px;font-size:.76rem;color:var(--txt-mut);margin-top:4px}
 .dev-desc{font-size:.8rem;color:var(--txt-mut);margin-top:6px;line-height:1.45;background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:7px 9px}
+.dev-pre{font-size:.78rem;color:#e0b25a;margin-top:6px;line-height:1.45;background:#2a221255;border:1px dashed #6b5620;border-radius:8px;padding:7px 9px}
 .dev-conv{margin-top:9px;padding-top:9px;border-top:1px dashed var(--borda)}
 .dev-conv-lbl{font-size:.66rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--txt-mut);margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;gap:8px}
 .dev-conv-add{font-size:.66rem;font-weight:700;letter-spacing:0;text-transform:none;color:var(--verde-claro);background:none;border:0;cursor:pointer;padding:0}
@@ -1029,7 +1062,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             {% if c.eventos %}
             <div class="evs">
               {% for e in c.eventos[:2] %}
-              <div class="ev-line" data-ev="{{ e.id }}"><span class="dot d-{{ e.tipo }}"></span><span class="h">{{ e.hora }}</span><span class="n">{{ e.titulo }}</span></div>
+              <div class="ev-line{% if e.pre %} pre{% endif %}" data-ev="{{ e.id }}"{% if e.pre %} title="Data segurada — esperando o sinal"{% endif %}><span class="dot d-{{ e.tipo }}"></span><span class="h">{{ e.hora }}</span><span class="n">{{ e.titulo }}</span></div>
               {% endfor %}
             </div>
             {% if c.eventos|length > 2 %}<div class="ev-more">+{{ c.eventos|length - 2 }} mais</div>{% endif %}
@@ -1039,7 +1072,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         </div>
         {% endfor %}
       </div>
-      <p class="hint">As cores separam <b style="color:#bfeeda">pessoal</b>, <b style="color:#bcd8f6">empresa</b> e <b style="color:#f0d9a6">fornecedor</b>. Marque também pelo WhatsApp/Telegram — cai tudo aqui.</p>
+      <p class="hint">As cores separam <b style="color:#bfeeda">pessoal</b>, <b style="color:#bcd8f6">empresa</b> e <b style="color:#f0d9a6">fornecedor</b>. O <b style="color:#e0b25a">tracejado</b> é data segurada esperando o sinal — ela ocupa a data, mas não vira lembrete nem entra no calendário sincronizado. Marque também pelo WhatsApp/Telegram — cai tudo aqui.</p>
     </div>
 
     <div class="side-cards">
@@ -1213,6 +1246,23 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           </div>
           <div class="canal-tag">📲 Vai chegar no seu WhatsApp/Telegram, onde você fala com o Zaq.</div>
           <button class="ok" type="submit" data-busy="⏳ Salvando…">Salvar lembrete</button>
+        </form>
+      </div>
+
+      <!-- prazo da data segurada (pré-reserva por sinal) -->
+      <div class="ag-card">
+        <h2>⏳ Data segurada</h2>
+        <p class="hint" style="margin-top:0">Quando o cliente aprova um orçamento de evento <b>com sinal</b>, a data entra aqui como segurada — ocupa o dia, mas não vira compromisso nem lembrete. Ela só firma quando você confirma o sinal, na tela do orçamento.</p>
+        <form method="post" action="/painel/agenda/pre-reserva">
+          <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+          <div class="sub-opt">
+            <span>Segurar por</span>
+            <select name="pre_reserva_dias">
+              {% for d in [1,2,3,5,7,10,15,30] %}<option value="{{ d }}" {% if cfg.pre_reserva_dias==d %}selected{% endif %}>{{ d }} dia{{ 's' if d != 1 }}</option>{% endfor %}
+            </select>
+          </div>
+          <p class="hint">Passando o prazo sem o sinal, a data libera sozinha e você é avisado. As pré-reservas que já estão correndo mantêm o prazo com que nasceram.</p>
+          <button class="ok" type="submit" data-busy="⏳ Salvando…">Salvar prazo</button>
         </form>
       </div>
 
@@ -1440,6 +1490,11 @@ function abrirDia(iso){
       + (e.local?'<span>📍 '+e.local+'</span>':'')+'</div>'
       + (e.link_online?'<a class="meet-btn" href="'+_esc(e.link_online)+'" target="_blank" rel="noopener">🎥 Entrar na reunião</a>':'')
       + '</div>'+acaoTopo+'</div>'
+      // Data segurada: quem abre o dia precisa saber que essa data AINDA não é de
+      // ninguém — e até quando. Sem isso, a linha no calendário parece compromisso.
+      + (e.pre?'<div class="dev-pre">⏳ Data segurada esperando o sinal'
+          +(e.pre_ate?' — até <b>'+_esc(e.pre_ate)+'</b>':'')
+          +'. Confirme o sinal na tela do orçamento pra firmar; passando o prazo, a data libera sozinha.</div>':'')
       + (e.descricao?'<div class="dev-desc">'+e.descricao+'</div>':'')
       + conv
       + (passado ? '<div class="dev-desf">'+_desfechoHtml(e)+'</div>' : _remarcarBoxHtml(e))
@@ -1468,7 +1523,9 @@ function renderizarCelula(iso){
   }
   var count = evs.length > 2 ? '<span class="cal-count">'+evs.length+'</span>' : '';
   var linhas = evs.slice(0, 2).map(function(e){
-    return '<div class="ev-line" data-ev="'+e.id+'"><span class="dot d-'+e.tipo+'"></span><span class="h">'+e.hora+'</span><span class="n">'+e.titulo+'</span></div>';
+    return '<div class="ev-line'+(e.pre?' pre':'')+'" data-ev="'+e.id+'"'
+      + (e.pre?' title="Data segurada — esperando o sinal"':'')
+      + '><span class="dot d-'+e.tipo+'"></span><span class="h">'+e.hora+'</span><span class="n">'+e.titulo+'</span></div>';
   }).join('');
   var mais = evs.length > 2 ? '<div class="ev-more">+'+(evs.length - 2)+' mais</div>' : '';
   cel.innerHTML = '<div class="cal-head">'+numHtml+count+'</div><div class="evs">'+linhas+'</div>'+mais;

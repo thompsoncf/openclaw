@@ -44,14 +44,60 @@ def _pos_assinatura(d: dict, assinante: str) -> None:
     _notificar_assinatura(d, assinante)
 
 
+def sinal_do_orcamento(d: dict) -> int:
+    """Quanto é o sinal, em centavos, ou 0 se o orçamento não pede sinal.
+
+    Sai da PRIMEIRA parcela quando ela é o sinal — é o que o gerador de parcelas
+    monta (`obs` = "Sinal — confirma a reserva da data"). Orçamento montado na mão,
+    sem essa linha, simplesmente não tem sinal: a data é reservada direto."""
+    parcelas = d.get("parcelas") or []
+    if not parcelas or not isinstance(parcelas[0], dict):
+        return 0
+    if "sinal" not in str(parcelas[0].get("obs") or "").lower():
+        return 0
+    try:
+        return int(parcelas[0].get("valor_centavos") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _avisar_conflito(pool, conta_id: int, titulo: str, inicio, choques: list[dict]) -> None:
+    """Avisa o dono que a data recém-aprovada bate com o que já estava marcado.
+
+    Best-effort de ponta a ponta: a data já entrou na agenda antes daqui, e um
+    Telegram fora do ar não pode desfazer isso."""
+    try:
+        from finance import notificar
+        quando = inicio.astimezone(ag.BRT).strftime("%d/%m às %H:%M")
+        linhas = [f"• {ag.fmt_hora(o)} {o['titulo']}"
+                  + (" (data segurada)" if o.get("status") == ag.PRE_RESERVADO else "")
+                  for o in choques[:5]]
+        resto = f"\n…e mais {len(choques) - 5}." if len(choques) > 5 else ""
+        notificar.enviar_para_dono(
+            pool, conta_id,
+            f"⚠️ *Choque de data*: acabaram de aprovar *{titulo}* pra {quando}, "
+            f"e esse horário já tinha compromisso:\n" + "\n".join(linhas) + resto
+            + "\n\nMarquei do mesmo jeito — confira na Agenda se cabe.")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _reservar_na_agenda(d: dict, pool=None) -> int | None:
     """Cliente aprovou o orçamento de EVENTO -> a data entra na agenda da empresa.
 
-    É o que a folha promete ("a data é reservada"): o compromisso nasce com
-    início e fim reais (festa que encerra às 24 termina 00:00 do dia seguinte —
-    ver agenda.janela_evento), o local e o número de convidados. Idempotente:
-    orçamento que já tem compromisso não cria outro. Sem data ou sem hora de
-    início, não marca nada — a aprovação vale do mesmo jeito.
+    COM SINAL a data entra como PRÉ-RESERVA, com prazo: é o que a própria proposta
+    promete na primeira parcela ("Sinal — confirma a reserva da data"). Antes o
+    compromisso nascia firme na aprovação, sem olhar pagamento nenhum — a folha
+    prometia uma coisa e o sistema fazia outra. Quem confirma o sinal é o dono, na
+    tela do orçamento; se o prazo vencer antes, a data libera sozinha.
+
+    SEM SINAL segue como sempre: compromisso firme na hora, porque não há o que
+    esperar.
+
+    O compromisso nasce com início e fim reais (festa que encerra às 24 termina
+    00:00 do dia seguinte — ver agenda.janela_evento), o local e o número de
+    convidados. Idempotente: orçamento que já tem compromisso não cria outro. Sem
+    data ou sem hora de início, não marca nada — a aprovação vale do mesmo jeito.
     """
     if d.get("modo") != "evento" or d.get("evento_agenda_id"):
         return None
@@ -63,17 +109,34 @@ def _reservar_na_agenda(d: dict, pool=None) -> int | None:
     cliente = (d.get("empresa") or d.get("contato") or "").strip()
     titulo = " — ".join(x for x in [(ev.get("tipo") or "Evento"), cliente] if x)
     conv = ev.get("convidados")
+    sinal = 0 if d.get("sinal_pago_em") else sinal_do_orcamento(d)
+    ate = None
+    if sinal:
+        dias = (ag.get_config(pool, d["conta_id"]).get("pre_reserva_dias")
+                or ag.PRE_RESERVA_DIAS)
+        ate = ag.agora_brt() + timedelta(days=int(dias))
     descricao = " · ".join(x for x in [
         f"Orçamento {d.get('doc_num') or ''}".strip(),
         (f"{conv} convidados" if conv else ""),
-        "aprovado pelo cliente",
+        ("aguardando sinal" if sinal else "aprovado pelo cliente"),
     ] if x)
+    # CHOQUE DE DATA. Medido ANTES de criar, senão o próprio compromisso novo
+    # entraria na conta. Não bloqueia: quem decide se cabe é a empresa (buffet com
+    # dois salões cabe, fotógrafo não) — mas ela precisa saber na hora, e até hoje
+    # dois orçamentos aprovados pro mesmo horário viravam dois compromissos calados.
+    try:
+        choques = ag.conflitos(pool, d["conta_id"], inicio, fim)
+    except Exception:  # noqa: BLE001
+        choques = []
     novo = ag.criar_evento(pool, d["conta_id"], titulo, inicio, fim=fim,
                            local=(ev.get("local") or None), descricao=descricao,
-                           tipo="empresa")
+                           tipo="empresa", pre_reserva_ate=ate)
+    if choques:
+        _avisar_conflito(pool, d["conta_id"], titulo, inicio, choques)
     with pool.connection() as c:
-        c.execute("""update orcamentos set evento_agenda_id=%s
-                      where id=%s and evento_agenda_id is null""", (novo["id"], d["id"]))
+        c.execute("""update orcamentos set evento_agenda_id=%s, sinal_centavos=%s
+                      where id=%s and evento_agenda_id is null""",
+                  (novo["id"], sinal or None, d["id"]))
         c.commit()
     return novo["id"]
 
@@ -244,7 +307,11 @@ def _carregar(token: str, pool=None):
                       o.evento_agenda_id,
                       c.razao_social, c.documento, c.endereco, c.cep, c.bairro,
                       c.cidade, c.uf, c.telefone, c.email_empresa,
-                      o.cliente_id,
+                      o.cliente_id, o.sinal_centavos, o.sinal_pago_em,
+                      -- prazo da pré-reserva: sai do próprio compromisso, pra o
+                      -- cliente ler na proposta a MESMA data que corre na agenda
+                      (select e.pre_reserva_ate from eventos_agenda e
+                        where e.id = o.evento_agenda_id and e.status='pre_reservado'),
                       -- vendedor: criado_por guarda o id do membro OU 'dono'
                       -- (quem abriu a conta). No segundo caso quem assina é a
                       -- própria conta — era isso que sumia da folha.
@@ -262,7 +329,7 @@ def _carregar(token: str, pool=None):
      modo, evento, parcelas, numero, cli_end, cli_cep, cli_cidade, cli_uf, cli_doc,
      cli_email, cli_tel, agenda_id,
      em_razao, em_doc, em_end, em_cep, em_bairro, em_cidade, em_uf, em_tel, em_email,
-     cliente_id, vendedor_nome) = r
+     cliente_id, sinal_centavos, sinal_pago_em, pre_reserva_ate, vendedor_nome) = r
     # ASSINOU, CONGELOU: enquanto o orçamento não foi aprovado, a aba Clientes é
     # quem manda — corrigiu o nome/endereço lá, reimprimiu, saiu certo, sem
     # precisar refazer a proposta. Depois de assinado fica exatamente o que o
@@ -306,6 +373,14 @@ def _carregar(token: str, pool=None):
         "evento": evento, "dia_evento": dia_evento,
         "parcelas": _lista(parcelas), "numero": numero,
         "evento_agenda_id": agenda_id,
+        # SINAL: `sinal_centavos` é gravado quando a data é pré-reservada;
+        # `pre_reserva_ate` vem do próprio compromisso e só existe enquanto ele
+        # ainda está segurado — quando o dono confirma, some, e o bloco de aviso
+        # sai da página do cliente sozinho.
+        "sinal": _brl(sinal_centavos) if sinal_centavos else "",
+        "sinal_centavos": sinal_centavos or 0,
+        "sinal_pago_em": sinal_pago_em,
+        "pre_reserva_ate": pre_reserva_ate,
         # documento, CEP e telefone saem com máscara e o endereço em CAIXA ALTA
         # é capitalizado: o banco guarda o que a empresa digitou, o cliente lê
         # formatado.
@@ -411,6 +486,16 @@ def proposta_publica(request: Request, token: str, erro: str = ""):
     d["validade_str"] = d["validade"].strftime("%d/%m/%Y")
     d["aprovada_str"] = d["aprovada_em"].strftime("%d/%m/%Y às %H:%M") if d["aprovada_em"] else ""
     d["assinada"] = d["status"] in ("aprovada", "fechado")
+    # SINAL na folha do cliente. ANTES de assinar ainda não há nada gravado no
+    # orçamento — o valor sai da 1ª parcela, que é justamente onde a folha escreve
+    # "Sinal — confirma a reserva da data". DEPOIS vale o que foi gravado.
+    sinal_c = d["sinal_centavos"] or sinal_do_orcamento(d)
+    d["sinal_str"] = _brl(sinal_c) if sinal_c else ""
+    d["pre_ate_str"] = (d["pre_reserva_ate"].astimezone(ag.BRT).strftime("%d/%m/%Y às %H:%M")
+                        if d["pre_reserva_ate"] else "")
+    # pendente = a data está SEGURADA agora. Some sozinho quando o dono confirma o
+    # sinal (o compromisso deixa de ser pre_reservado e a subconsulta zera).
+    d["sinal_pendente"] = bool(d["pre_ate_str"])
     return HTMLResponse(_env.get_template("proposta").render(prop=d, linhas=linhas,
                                                              token=token, erro=erro))
 
@@ -495,6 +580,10 @@ td small{display:block;color:#8A8475;font-size:11.5px;margin-top:4px;line-height
 .sign .err{background:#3a1a1a;border:1px solid #7a3a3a;color:#ffd7d7;border-radius:8px;padding:8px 12px;font-size:12.5px;margin-bottom:12px}
 .ok{margin-top:16px;background:#0e2a1f;border:1px solid #1c5c40;border-radius:12px;padding:20px 22px;color:#eafff5}
 .ok h3{color:#7EE7B8;font-size:16px}.ok p{font-size:13px;color:#a9d9c4;margin-top:4px}
+/* data segurada esperando o sinal: âmbar e tracejado, dentro do bloco verde de
+   "aprovado" — aprovar é um passo, a data ser sua é o próximo. */
+.segura{margin-top:14px;background:#2a221233;border:1px dashed #6b5620;border-radius:10px;padding:12px 14px;color:#f0d9a6}
+.segura b{color:#e0b25a}.segura p{font-size:13px;color:#d8c39a;margin-top:5px}
 .ft{margin-top:20px;font-size:11px;color:#8A8475;line-height:1.6}
 /* ---- modo evento ---- */
 .hd .emit{font-size:10px;color:#9FA8BC;line-height:1.6;margin-top:7px}
@@ -734,7 +823,13 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
   <div class="ok">
     {% if prop.aprovada_por %}
     <h3>✓ {{ 'Orçamento aprovado' if evento else 'Proposta aprovada' }}</h3>
-    <p>Aprovada por <b>{{ prop.aprovada_por }}</b>{% if prop.aprovada_str %} em {{ prop.aprovada_str }}{% endif %}. A empresa foi notificada{% if evento and prop.ev.data %} e a data de <b>{{ prop.ev.data.split(' ·')[0] }}</b> está reservada{% endif %} — ela dará os próximos passos.</p>
+    <p>Aprovada por <b>{{ prop.aprovada_por }}</b>{% if prop.aprovada_str %} em {{ prop.aprovada_str }}{% endif %}. A empresa foi notificada{% if evento and prop.ev.data and not prop.sinal_pendente %} e a data de <b>{{ prop.ev.data.split(' ·')[0] }}</b> está reservada{% endif %} — ela dará os próximos passos.</p>
+    {% if prop.sinal_pendente %}
+    <div class="segura">
+      <b>⏳ A data de {{ prop.ev.data.split(' ·')[0] }} está segurada pra você até {{ prop.pre_ate_str }}.</b>
+      <p>A reserva se confirma com o pagamento do sinal{% if prop.sinal_str %} de <b>{{ prop.sinal_str }}</b>{% endif %} — é o que está na primeira parcela acima. Fale com a {{ prop.vendedor }} pra combinar o pagamento. Passando esse prazo sem o sinal, a data volta a ficar disponível.</p>
+    </div>
+    {% endif %}
     {% else %}
     <h3>✓ Proposta fechada</h3>
     <p>Esta proposta já foi contratada. Fale com a empresa para os próximos passos.</p>
@@ -744,7 +839,11 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
   <form class="sign" method="post" action="/proposta/{{ token }}/assinar">
     <h3>✍️ Aprovar e assinar</h3>
     {% if evento %}
-    <p>Ao aprovar, você aceita os valores e as condições acima. Fica registrado com nome, CPF, data/hora e IP{% if prop.ev.data %} — e a data de <b>{{ prop.ev.data.split(' ·')[0] }}</b> é reservada na agenda da {{ prop.vendedor }}{% endif %}.</p>
+    {# COM sinal a folha não pode prometer reserva na assinatura: o que a aprovação
+       faz é SEGURAR a data até o sinal cair. Era esse o descompasso — a primeira
+       parcela dizia "confirma a reserva da data" e o texto acima dizia que a
+       assinatura já reservava. #}
+    <p>Ao aprovar, você aceita os valores e as condições acima. Fica registrado com nome, CPF, data/hora e IP{% if prop.ev.data %} — e a data de <b>{{ prop.ev.data.split(' ·')[0] }}</b> {% if prop.sinal_str %}fica <b>segurada</b> pra você na agenda da {{ prop.vendedor }}, e a reserva se confirma com o pagamento do sinal de <b>{{ prop.sinal_str }}</b>{% else %}é reservada na agenda da {{ prop.vendedor }}{% endif %}{% endif %}.</p>
     {% if erro %}<div class="err">{{ erro }}</div>{% endif %}
     <div class="row">
       <input type="text" name="nome" placeholder="Seu nome completo" required>

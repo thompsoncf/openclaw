@@ -130,11 +130,23 @@ def _fmt_evento(row) -> dict:
             "criado_em": row[7] if len(row) > 7 else None,
             "tipo": (row[8] if len(row) > 8 else None) or "pessoal",
             "desfecho": row[9] if len(row) > 9 else None,
-            "link_online": row[10] if len(row) > 10 else None}
+            "link_online": row[10] if len(row) > 10 else None,
+            "status": (row[11] if len(row) > 11 else None) or "ativo",
+            "pre_reserva_ate": row[12] if len(row) > 12 else None}
 
 
 _COLS = ("id, titulo, inicio, fim, local, descricao, lembrete_min, criado_em, tipo, "
-        "desfecho, link_online")
+        "desfecho, link_online, status, pre_reserva_ate")
+
+# Data SEGURADA, ainda não vendida: o cliente aprovou o orçamento mas o sinal não
+# entrou. Fica de fora de tudo que trata compromisso como certo — lembrete, resumo
+# do dia, feed .ics, cockpit — porque essas consultas filtram `status='ativo'` e
+# este status não é ativo. Só a tela da Agenda e as ações sobre ela abrem exceção.
+PRE_RESERVADO = "pre_reservado"
+# Quantos dias a data fica segurada quando a empresa não escolheu. Curto de
+# propósito: prazo longo trava o calendário de quem vende data.
+PRE_RESERVA_DIAS = 3
+_ATIVO_OU_PRE = ("ativo", PRE_RESERVADO)
 
 
 def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
@@ -142,9 +154,14 @@ def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
                  local: str | None = None, descricao: str | None = None,
                  lembrete_min: int | None = None, tipo: str = "pessoal",
                  link_online: str | None = None,
-                 prospeccao_id: int | None = None) -> dict:
+                 prospeccao_id: int | None = None,
+                 pre_reserva_ate: datetime | None = None) -> dict:
     """prospeccao_id liga o evento a um lead (ex.: retorno de contato) — some da
-    Agenda pro cliente, mas fica clicável a partir da ficha do lead (migração 136)."""
+    Agenda pro cliente, mas fica clicável a partir da ficha do lead (migração 136).
+
+    `pre_reserva_ate` nasce o compromisso PROVISÓRIO: a data aparece na agenda mas
+    não vale como compromisso até o sinal ser confirmado, e some sozinha se o prazo
+    vencer (ver `expirar_pre_reservas`)."""
     tipo = tipo if tipo in TIPOS else "pessoal"
     # prospeccao_id só entra no INSERT quando informado — mantém compatível com
     # bancos/testes que ainda não rodaram a migração 136 (que criou a coluna).
@@ -154,6 +171,9 @@ def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
     if prospeccao_id is not None:
         colunas += ", prospeccao_id"
         valores.append(prospeccao_id)
+    if pre_reserva_ate is not None:
+        colunas += ", status, pre_reserva_ate"
+        valores += [PRE_RESERVADO, pre_reserva_ate]
     with pool.connection() as c:
         row = c.execute(
             f"""insert into eventos_agenda ({colunas})
@@ -166,12 +186,13 @@ def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
 
 
 def evento_por_id(pool, conta_id: int, evento_id: int) -> dict | None:
-    """Um evento ativo da conta (pra montar o card de compartilhar convites)."""
+    """Um evento vivo da conta — ativo OU pré-reservado (pra montar o card de
+    compartilhar convites e pra agir sobre a data segurada)."""
     with pool.connection() as c:
         r = c.execute(
             "select " + _COLS + " from eventos_agenda "
-            "where id=%s and conta_id=%s and status='ativo'",
-            (evento_id, conta_id)).fetchone()
+            "where id=%s and conta_id=%s and status = any(%s)",
+            (evento_id, conta_id, list(_ATIVO_OU_PRE))).fetchone()
     return _fmt_evento(r) if r else None
 
 
@@ -185,13 +206,23 @@ def evento_por_id_qualquer_status(pool, conta_id: int, evento_id: int) -> dict |
     return _fmt_evento(r) if r else None
 
 
-def listar_eventos(pool, conta_id: int, de: datetime, ate: datetime) -> list[dict]:
+def listar_eventos(pool, conta_id: int, de: datetime, ate: datetime,
+                   incluir_pre_reserva: bool = False) -> list[dict]:
+    """Os COMPROMISSOS da janela. Pré-reserva fica de fora por padrão, e o padrão é
+    o que importa: os lembretes, o resumo do dia e o aviso ao convidado saem daqui,
+    e data segurada não pode tocar o telefone de ninguém — ela ainda não é
+    compromisso de nada.
+
+    `incluir_pre_reserva=True` é pra quem precisa enxergar a data OCUPADA e não o
+    compromisso: o calendário do painel (senão o dono vende a mesma data duas
+    vezes) e o "o que eu tenho essa semana" do assistente."""
+    status = list(_ATIVO_OU_PRE) if incluir_pre_reserva else ["ativo"]
     with pool.connection() as c:
         rows = c.execute(
             "select " + _COLS + " from eventos_agenda "
-            "where conta_id=%s and status='ativo' and inicio >= %s and inicio < %s "
+            "where conta_id=%s and status = any(%s) and inicio >= %s and inicio < %s "
             "order by inicio",
-            (conta_id, de, ate),
+            (conta_id, status, de, ate),
         ).fetchall()
     return [_fmt_evento(r) for r in rows]
 
@@ -316,14 +347,72 @@ def remarcar_evento(pool, conta_id: int, evento_id: int, inicio: datetime,
 
 
 def cancelar_evento(pool, conta_id: int, evento_id: int) -> bool:
+    """Cancela um compromisso — inclusive uma data só PRÉ-RESERVADA, que é o
+    caminho de desistir da reserva antes do sinal."""
     with pool.connection() as c:
         cur = c.execute(
             "update eventos_agenda set status='cancelado' "
-            "where id=%s and conta_id=%s and status='ativo'",
-            (evento_id, conta_id),
+            "where id=%s and conta_id=%s and status = any(%s)",
+            (evento_id, conta_id, list(_ATIVO_OU_PRE)),
         )
         c.commit()
         return cur.rowcount > 0
+
+
+def confirmar_pre_reserva(pool, conta_id: int, evento_id: int) -> bool:
+    """O sinal caiu: a data segurada vira compromisso de verdade.
+
+    Idempotente por natureza — só casa quem ainda está `pre_reservado`, então
+    apertar duas vezes não faz nada na segunda."""
+    with pool.connection() as c:
+        cur = c.execute(
+            "update eventos_agenda set status='ativo', pre_reserva_ate=null "
+            "where id=%s and conta_id=%s and status=%s",
+            (evento_id, conta_id, PRE_RESERVADO))
+        c.commit()
+        return cur.rowcount > 0
+
+
+def expirar_pre_reservas(pool, agora: datetime) -> list[dict]:
+    """Libera as datas cujo prazo venceu sem o sinal. Devolve o que expirou, pra
+    quem chamou avisar o dono.
+
+    Não apaga: vira `cancelado`, com o motivo na descrição. A data fica livre mas o
+    histórico continua, e dá pra reabrir a pré-reserva num clique se o cliente
+    aparecer depois."""
+    with pool.connection() as c:
+        rows = c.execute(
+            "update eventos_agenda set status='cancelado' "
+            " where status=%s and pre_reserva_ate is not null and pre_reserva_ate <= %s "
+            "returning id, conta_id, titulo, inicio, pre_reserva_ate",
+            (PRE_RESERVADO, agora)).fetchall()
+        c.commit()
+    return [{"id": r[0], "conta_id": r[1], "titulo": r[2], "inicio": r[3],
+             "pre_reserva_ate": r[4]} for r in rows]
+
+
+def conflitos(pool, conta_id: int, inicio: datetime, fim: datetime | None,
+              ignorar_id: int | None = None) -> list[dict]:
+    """Compromissos da conta que se sobrepõem à janela — ativos E pré-reservados.
+
+    Não existia checagem nenhuma: dois orçamentos aprovados pra mesma data criavam
+    dois compromissos e ninguém era avisado. Pra buffet/espaço isso é vender a
+    mesma data duas vezes. Quem chama decide o que fazer — aqui só se informa.
+
+    Compromisso sem `fim` conta como 1h — a mesma convenção que o .ics já usa
+    (`_fim_ou_1h`). Fosse duração zero, um evento começando na hora exata do outro
+    não apareceria como conflito, que é justamente o choque mais provável."""
+    fim = fim or (inicio + timedelta(hours=1))
+    with pool.connection() as c:
+        rows = c.execute(
+            "select " + _COLS + " from eventos_agenda "
+            " where conta_id=%s and status = any(%s) and (%s::bigint is null or id <> %s) "
+            # sobreposição clássica: começa antes do outro acabar e acaba depois de
+            # o outro começar.
+            "   and inicio < %s and coalesce(fim, inicio + interval '1 hour') > %s "
+            " order by inicio",
+            (conta_id, list(_ATIVO_OU_PRE), ignorar_id, ignorar_id, fim, inicio)).fetchall()
+    return [_fmt_evento(r) for r in rows]
 
 
 _DESFECHOS = ("realizado", "nao_realizado")
@@ -450,7 +539,8 @@ def eventos_mes(pool, conta_id: int, ano: int, mes: int) -> list[dict]:
     """Todos os eventos ativos que caem no mês (Brasília). Pra pintar o calendário."""
     de = datetime(ano, mes, 1, tzinfo=BRT)
     ate = datetime(ano + 1, 1, 1, tzinfo=BRT) if mes == 12 else datetime(ano, mes + 1, 1, tzinfo=BRT)
-    return listar_eventos(pool, conta_id, de, ate)
+    # com pré-reserva: é o calendário que mostra o que está OCUPADO
+    return listar_eventos(pool, conta_id, de, ate, incluir_pre_reserva=True)
 
 
 # ---------- config do lembrete (opt-in) + feed .ics assinável ----------
@@ -460,35 +550,46 @@ def get_config(pool, conta_id: int) -> dict:
     with pool.connection() as c:
         r = c.execute(
             "select lembrete_ativo, hora_resumo, aviso_antes_min, feed_token, resumo_ativo, "
-            "avisar_convidados, enviar_confirmacao from agenda_config where conta_id=%s",
+            "avisar_convidados, enviar_confirmacao, pre_reserva_dias "
+            "from agenda_config where conta_id=%s",
             (conta_id,)).fetchone()
     if not r:
         return {"lembrete_ativo": False, "resumo_ativo": False, "hora_resumo": 7,
                 "aviso_antes_min": None, "feed_token": None, "avisar_convidados": True,
-                "enviar_confirmacao": True}
+                "enviar_confirmacao": True, "pre_reserva_dias": PRE_RESERVA_DIAS}
     return {"lembrete_ativo": bool(r[0]), "hora_resumo": r[1],
             "aviso_antes_min": r[2], "feed_token": r[3], "resumo_ativo": bool(r[4]),
-            "avisar_convidados": bool(r[5]), "enviar_confirmacao": bool(r[6])}
+            "avisar_convidados": bool(r[5]), "enviar_confirmacao": bool(r[6]),
+            "pre_reserva_dias": r[7] or PRE_RESERVA_DIAS}
 
 
 def salvar_config(pool, conta_id: int, *, resumo_ativo: bool, hora_resumo: int,
                   aviso_antes_min: int | None, avisar_convidados: bool = True,
-                  enviar_confirmacao: bool = True) -> None:
+                  enviar_confirmacao: bool = True,
+                  pre_reserva_dias: int | None = None) -> None:
     """Grava (upsert) a config do lembrete. resumo_ativo liga o "resumo do dia";
     aviso_antes_min (None = desligado) liga o "aviso antes"; avisar_convidados
     estende o "aviso antes" pra quem confirmou presença (só importa quando
     aviso_antes_min também está ligado); enviar_confirmacao liga a resposta
     automática pro convidado quando ele responde ao convite (independe dos
     outros dois). lembrete_ativo é o opt-in geral, derivado (ligado se qualquer
-    um dos dois primeiros estiver)."""
+    um dos dois primeiros estiver).
+
+    pre_reserva_dias (quanto tempo a data fica segurada esperando o sinal) é o
+    único que aceita None como "não mexe": ele não vive no mesmo card que os
+    lembretes, e um salvar de lembrete não pode zerar a regra de reserva de quem
+    já ajustou pra 7 dias."""
     hora = hora_resumo if 0 <= (hora_resumo or 0) <= 23 else 7
     lembrete_ativo = bool(resumo_ativo) or (aviso_antes_min is not None)
+    dias = None
+    if pre_reserva_dias is not None:
+        dias = min(90, max(1, int(pre_reserva_dias)))
     with pool.connection() as c:
         c.execute(
             """insert into agenda_config
                  (conta_id, lembrete_ativo, resumo_ativo, hora_resumo, aviso_antes_min,
-                  avisar_convidados, enviar_confirmacao, atualizado_em)
-               values (%s,%s,%s,%s,%s,%s,%s, now())
+                  avisar_convidados, enviar_confirmacao, pre_reserva_dias, atualizado_em)
+               values (%s,%s,%s,%s,%s,%s,%s, coalesce(%s::int, %s), now())
                on conflict (conta_id) do update set
                  lembrete_ativo     = excluded.lembrete_ativo,
                  resumo_ativo       = excluded.resumo_ativo,
@@ -496,10 +597,29 @@ def salvar_config(pool, conta_id: int, *, resumo_ativo: bool, hora_resumo: int,
                  aviso_antes_min    = excluded.aviso_antes_min,
                  avisar_convidados  = excluded.avisar_convidados,
                  enviar_confirmacao = excluded.enviar_confirmacao,
+                 pre_reserva_dias   = coalesce(%s::int, agenda_config.pre_reserva_dias),
                  atualizado_em      = now()""",
             (conta_id, lembrete_ativo, bool(resumo_ativo), hora, aviso_antes_min,
-             bool(avisar_convidados), bool(enviar_confirmacao)))
+             bool(avisar_convidados), bool(enviar_confirmacao), dias, PRE_RESERVA_DIAS, dias))
         c.commit()
+
+
+def salvar_pre_reserva_dias(pool, conta_id: int, dias: int) -> int:
+    """Quantos dias a data fica segurada esperando o sinal. Devolve o que gravou.
+
+    Separado de salvar_config porque é outra decisão e outro card: lembrete é
+    preferência de aviso, prazo de reserva é regra de venda. Juntos, salvar um
+    mexeria no outro."""
+    d = min(90, max(1, int(dias)))
+    with pool.connection() as c:
+        c.execute(
+            """insert into agenda_config (conta_id, pre_reserva_dias, atualizado_em)
+               values (%s,%s, now())
+               on conflict (conta_id) do update set
+                 pre_reserva_dias = excluded.pre_reserva_dias, atualizado_em = now()""",
+            (conta_id, d))
+        c.commit()
+    return d
 
 
 def garantir_feed_token(pool, conta_id: int) -> str:

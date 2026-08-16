@@ -147,7 +147,9 @@ def _render_agenda(vende_data: bool) -> str:
         meses_js=pa.MESES, dias_sem_ext_js=pa.DIAS_SEM_EXT, agora_iso=agora.isoformat(),
         mes_prev="2026-07", mes_next="2026-09", mes_hoje="2026-08", hoje_iso="2026-08-01",
         abrir_novo=True, cfg=cfg, feed_url="", share=None, seguradas=[],
-        vende_data=vende_data, aviso="", ctx={}, conta={}, request=None)
+        vende_data=vende_data,
+        rot=(pa._ROT_EVENTO if vende_data else pa._ROT_PADRAO),
+        aviso="", ctx={}, conta={}, request=None)
 
 
 def test_ficha_do_evento_so_e_buscada_pra_quem_vende_data(cliente):
@@ -172,6 +174,44 @@ def test_ficha_do_evento_so_e_buscada_pra_quem_vende_data(cliente):
         assert len(chamou) == 1                        # não perguntou de novo
     finally:
         _pa._vendas = orig
+
+
+def test_o_formulario_fala_a_lingua_do_nicho():
+    """Um buffet não marca "compromisso": marca EVENTO. E "O que é / Ex: reunião com
+    o contador" não é a pergunta que ele faz. Mesmo formulário, mesma rota, mesmo
+    dado — muda o que a pessoa lê."""
+    ev, outros = _render_agenda(True), _render_agenda(False)
+    for frag in ("＋ Novo evento", "<h2>Novo evento</h2>", "Ex: Casamento — Ana e Pedro",
+                 "Data da festa", "Onde vai ser", "Marcar evento", "Próximos eventos",
+                 "Quem participa"):
+        assert frag in ev and frag not in outros
+    for frag in ("＋ Novo compromisso", "<h2>Novo compromisso</h2>",
+                 "Ex: reunião com o contador", "Próximos compromissos"):
+        assert frag in outros and frag not in ev
+
+
+def test_os_valores_do_tipo_nao_mudam_com_a_palavra():
+    """"Festa" é o rótulo; `empresa` continua sendo o valor gravado. A coluna tem
+    check e o resto do sistema (cor do ponto, cockpit, .ics) lê por ele."""
+    ev = _render_agenda(True)
+    assert 'name="tipo" value="empresa"' in ev and ">Festa<" in ev
+    assert 'name="tipo" value="pessoal"' in ev and ">Interno<" in ev
+    assert ">Empresa<" not in ev
+    # e o padrão marcado muda: num buffet o que se marca é festa, não compromisso interno
+    assert 'value="empresa" checked' in ev
+    assert 'value="pessoal" checked' in _render_agenda(False)
+
+
+def test_evento_pergunta_a_hora_de_encerrar():
+    """O orçamento de evento sempre perguntou; a agenda nunca. Sem o fim, a festa
+    entra como compromisso de 1h e a checagem de choque compara a janela errada —
+    duas festas na mesma noite não acusavam nada."""
+    ev, outros = _render_agenda(True), _render_agenda(False)
+    assert 'name="hora_fim"' in ev and "Encerra" in ev
+    assert 'name="hora_fim"' not in outros
+    # e o horário padrão acompanha o ramo
+    assert 'id="fHora" type="time" value="19:00"' in ev
+    assert 'id="fHora" type="time" value="09:00"' in outros
 
 
 def test_so_o_nicho_de_eventos_ve_o_vocabulario_de_data_segurada():
@@ -418,10 +458,38 @@ def test_a_pagina_decide_o_nicho_pelo_nicho_da_conta(cliente):
     r = cliente.get("/painel/agenda")
     assert r.status_code == 200
     assert 'class="cal marca-estado"' in r.text and 'name="segurar"' in r.text
+    # e o VOCABULÁRIO vem do mesmo gate — sem isto, trocar a linha que escolhe os
+    # rótulos passaria batido e o buffet voltaria a "Novo compromisso".
+    assert "＋ Novo evento" in r.text and 'name="hora_fim"' in r.text
     cliente.estado_nicho["vende"] = False
     r2 = cliente.get("/painel/agenda")
     assert r2.status_code == 200
     assert 'class="cal marca-estado"' not in r2.text and 'name="segurar"' not in r2.text
+    assert "＋ Novo compromisso" in r2.text and 'name="hora_fim"' not in r2.text
+
+
+def test_hora_de_encerrar_vira_o_fim_do_compromisso(cliente):
+    """E herda a regra do ramo por janela_evento: 'encerra às 24' acaba 00:00 do dia
+    seguinte, e virar a noite (19h→02h) rola o dia."""
+    dia = (ag.agora_brt() + timedelta(days=25)).date()
+    _marcar(cliente, data=dia.isoformat(), hora="19:00", hora_fim="23:00")
+    with cliente.pool.connection() as cx:
+        ini, fim = cx.execute("select inicio, fim from eventos_agenda "
+                              "order by id desc limit 1").fetchone()
+    assert fim is not None
+    assert fim.astimezone(ag.BRT).strftime("%d/%m %H:%M") == dia.strftime("%d/%m") + " 23:00"
+    # vira a noite: 19h -> 02h termina no dia seguinte
+    _marcar(cliente, data=dia.isoformat(), hora="19:00", hora_fim="02:00")
+    with cliente.pool.connection() as cx:
+        fim2 = cx.execute("select fim from eventos_agenda order by id desc limit 1").fetchone()[0]
+    assert fim2.astimezone(ag.BRT).day == (dia + timedelta(days=1)).day
+
+
+def test_sem_hora_de_encerrar_o_compromisso_segue_pontual(cliente):
+    """Regressão: quem não preenche (ou não vê o campo) marca como sempre marcou."""
+    _marcar(cliente)
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select fim from eventos_agenda order by id desc limit 1").fetchone()[0] is None
 
 
 def test_conta_de_outro_nicho_nao_segura_data_nem_por_post(cliente):

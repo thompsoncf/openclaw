@@ -243,6 +243,45 @@ def _so_digitos(s: str) -> str:
     return "".join(ch for ch in (s or "") if ch.isdigit())
 
 
+# VOCABULÁRIO DA TELA, por nicho. Quem vende data não marca "compromisso" — marca
+# EVENTO, e as palavras dos campos são outras: "O que é / Ex: reunião com o
+# contador" não é a pergunta que um buffet faz. Mesmo formulário, mesma rota, mesmo
+# dado no banco; muda só o que a pessoa lê. Fora do nicho, nada disso aparece.
+_ROT_PADRAO = {
+    "novo": "Novo compromisso", "novo_btn": "＋ Novo compromisso",
+    "titulo": "O que é", "titulo_ph": "Ex: reunião com o contador",
+    "data": "Data", "hora": "Hora", "fim": "",
+    "desc": "Descrição", "desc_ph": "Detalhes do compromisso…",
+    "local": "Local", "tipo": "Tipo",
+    "t_pessoal": "Pessoal", "t_empresa": "Empresa", "t_fornecedor": "Fornecedor",
+    "conv_t": "👥 Envolvidos (opcional)",
+    "conv_d": "Um ou vários. Cada um recebe o próprio link — e a mensagem já cita quem mais vem.",
+    "conv_add": "+ adicionar envolvido",
+    "salvar": "Marcar", "salvando": "⏳ Marcando…",
+    "proximos": "Próximos compromissos",
+    "cta_dia": "＋ Marcar novo compromisso nesse dia",
+}
+_ROT_EVENTO = dict(_ROT_PADRAO, **{
+    "novo": "Novo evento", "novo_btn": "＋ Novo evento",
+    # "O que é" vira o nome que o buffet dá pra festa — é assim que ela é chamada
+    # no grupo, na cozinha e no dia.
+    "titulo": "Evento", "titulo_ph": "Ex: Casamento — Ana e Pedro",
+    "data": "Data da festa", "hora": "Começa", "fim": "Encerra",
+    "desc": "Observações", "desc_ph": "O que a equipe precisa saber…",
+    "local": "Onde vai ser", "tipo": "O que é",
+    # os VALORES no banco seguem pessoal/empresa/fornecedor (a coluna tem check e o
+    # resto do sistema lê assim). Só as palavras mudam: num buffet toda festa cairia
+    # em "Empresa", que não diz nada.
+    "t_pessoal": "Interno", "t_empresa": "Festa", "t_fornecedor": "Fornecedor",
+    "conv_t": "👥 Quem participa (opcional)",
+    "conv_d": "Cliente, equipe, fornecedor — cada um recebe o próprio link de confirmação.",
+    "conv_add": "+ adicionar pessoa",
+    "salvar": "Marcar evento", "salvando": "⏳ Marcando…",
+    "proximos": "Próximos eventos",
+    "cta_dia": "＋ Marcar evento nesse dia",
+})
+
+
 def _vendas():
     """Import tardio: web/painel_agenda não depende do módulo de vendas pra abrir —
     só pra saber se esta conta vende data (nicho de eventos)."""
@@ -449,6 +488,7 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
                    hoje_iso=hoje.isoformat(), abrir_novo=(novo == "1"),
                    cfg=cfg, feed_url=feed_url, share=share, seguradas=seguradas,
                    vende_data=vende_data,
+                   rot=(_ROT_EVENTO if vende_data else _ROT_PADRAO),
                    aviso=request.session.pop("agenda_aviso", None))
 
 
@@ -479,7 +519,8 @@ def agenda_historico_reenviar(request: Request, log_id: int = Form(...)):
 # ================================================================ NOVO
 @router.post("/painel/agenda/novo")
 def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
-                hora: str = Form(""), local: str = Form(""), descricao: str = Form(""),
+                hora: str = Form(""), hora_fim: str = Form(""),
+                local: str = Form(""), descricao: str = Form(""),
                 tipo: str = Form("pessoal"), link_online: str = Form(""),
                 convidado_nome: list[str] = Form(default=[]),
                 convidado_contato: list[str] = Form(default=[]),
@@ -501,6 +542,15 @@ def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
         return RedirectResponse(voltar + ("&" if "?" in voltar else "?") + "novo=1", status_code=303)
     pool = get_pool()
     local = (local or "").strip() or None
+    # HORA DE ENCERRAMENTO (só o formulário de evento pergunta). Passa por
+    # janela_evento pra herdar a regra do ramo: festa que "encerra às 24" acaba
+    # 00:00 do dia seguinte, e virar a noite (19h→02h) rola o dia. Sem fim, o
+    # compromisso segue pontual, como sempre foi.
+    fim = None
+    if (hora_fim or "").strip():
+        _ini, fim = ag.janela_evento(data, hora or "09:00", hora_fim)
+        if fim is not None and fim <= inicio:
+            fim = None
     # SÓ SEGURAR A DATA: pré-reserva nascida na própria agenda, sem orçamento
     # nenhum — é o telefonema "segura o dia 20 pra mim até sexta". Sem isso, a
     # única saída do dono era marcar firme (mentira) ou não marcar (e vender duas
@@ -518,7 +568,7 @@ def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
             ate = ate.replace(hour=23, minute=59)   # a data digitada vale até o fim do dia
         sinal_cent = _centavos(sinal_esperado)
     ev = ag.criar_evento(pool=pool, conta_id=ctx["conta_id"], titulo=titulo,
-                         inicio=inicio, membro_id=ctx["membro_id"],
+                         inicio=inicio, fim=fim, membro_id=ctx["membro_id"],
                          local=local,
                          descricao=(descricao or "").strip() or None,
                          tipo=tipo if tipo in ag.TIPOS else "pessoal",
@@ -1398,7 +1448,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       <h1>{{ mes_nome }} de {{ ano }}</h1>
       <a href="/painel/agenda?m={{ mes_hoje }}" class="ag-hoje">Hoje</a>
     </div>
-    <a href="#novo" class="ag-btn" onclick="agNovo(true)">＋ Novo compromisso</a>
+    <a href="#novo" class="ag-btn" onclick="agNovo(true)">{{ rot.novo_btn }}</a>
   </div>
 
   <div class="ag-grid">
@@ -1464,7 +1514,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 
       <!-- próximos -->
       <div class="ag-card">
-        <h2>Próximos compromissos</h2>
+        <h2>{{ rot.proximos }}</h2>
         <div class="px">
           {% for e in proximos %}
           <div class="px-row" data-ev="{{ e.id }}">
@@ -1535,15 +1585,25 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 
       <!-- novo compromisso -->
       <div class="ag-card" id="novo"{% if not abrir_novo %} style="display:none"{% endif %}>
-        <h2>Novo compromisso</h2>
+        <h2>{{ rot.novo }}</h2>
         <form class="frm" method="post" action="/painel/agenda/novo">
           <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
-          <label>O que é</label>
-          <input name="titulo" id="fTitulo" placeholder="Ex: reunião com o contador" required autocomplete="off">
+          <label>{{ rot.titulo }}</label>
+          <input name="titulo" id="fTitulo" placeholder="{{ rot.titulo_ph }}" required autocomplete="off">
           <div class="row2">
-            <div><label>Data</label><input name="data" id="fData" type="date" value="{{ hoje_iso }}" required></div>
-            <div><label>Hora</label><input name="hora" id="fHora" type="time" value="09:00"></div>
+            <div><label>{{ rot.data }}</label><input name="data" id="fData" type="date" value="{{ hoje_iso }}" required></div>
+            <div><label>{{ rot.hora }}</label><input name="hora" id="fHora" type="time" value="{% if vende_data %}19:00{% else %}09:00{% endif %}"></div>
           </div>
+          {% if rot.fim %}
+          {# HORA DE ENCERRAMENTO: o orçamento de evento sempre pergunta, a agenda
+             nunca perguntou. Sem ela a festa entra como compromisso de 1h e a
+             checagem de choque compara a janela errada — duas festas na mesma noite
+             não acusavam nada. Aceita 24:00 e vira a noite (ver agenda.janela_evento). #}
+          <div class="row2">
+            <div><label>{{ rot.fim }}</label><input name="hora_fim" id="fFim" type="time" value="23:00"></div>
+            <div></div>
+          </div>
+          {% endif %}
           <!-- choque de horário: aparece na TELA, na hora de marcar. Não bloqueia —
                quem decide se cabe é a empresa (buffet com dois salões cabe). -->
           <div class="choque" id="choqueBox"><span>⚠️</span><div id="choqueTxt"></div></div>
@@ -1564,9 +1624,9 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             libera sozinha e você é avisado — e dá pra firmar ou soltar antes disso, abrindo o dia no calendário.</div>
           </div>
           {% endif %}
-          <label>Descrição <span style="font-weight:400">(opcional)</span></label>
-          <textarea name="descricao" placeholder="Detalhes do compromisso…"></textarea>
-          <label>Local <span style="font-weight:400">(opcional)</span></label>
+          <label>{{ rot.desc }} <span style="font-weight:400">(opcional)</span></label>
+          <textarea name="descricao" placeholder="{{ rot.desc_ph }}"></textarea>
+          <label>{{ rot.local }} <span style="font-weight:400">(opcional)</span></label>
           <input type="hidden" name="local" id="localHidden">
           <div class="addr-wrap" id="addrWrap">
             <div class="addr-input-row">
@@ -1593,15 +1653,15 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <div class="link-hint">Se preencher, vai junto nas mensagens de convite/confirmação e aparece na caixa do dia com um botão de entrar direto.</div>
             <button type="button" class="manual-cancel" id="onlineCancel">← voltar a informar um local</button>
           </div>
-          <label>Tipo</label>
+          <label>{{ rot.tipo }}</label>
           <div class="segs">
-            <label class="s-pessoal"><input type="radio" name="tipo" value="pessoal" checked><span>Pessoal</span></label>
-            <label class="s-empresa"><input type="radio" name="tipo" value="empresa"><span>Empresa</span></label>
-            <label class="s-fornecedor"><input type="radio" name="tipo" value="fornecedor"><span>Fornecedor</span></label>
+            <label class="s-pessoal"><input type="radio" name="tipo" value="pessoal"{% if not vende_data %} checked{% endif %}><span>{{ rot.t_pessoal }}</span></label>
+            <label class="s-empresa"><input type="radio" name="tipo" value="empresa"{% if vende_data %} checked{% endif %}><span>{{ rot.t_empresa }}</span></label>
+            <label class="s-fornecedor"><input type="radio" name="tipo" value="fornecedor"><span>{{ rot.t_fornecedor }}</span></label>
           </div>
           <div class="gconv">
-            <div class="gt">👥 Envolvidos (opcional)</div>
-            <div class="gd">Um ou vários. Cada um recebe o próprio link — e a mensagem já cita quem mais vem.</div>
+            <div class="gt">{{ rot.conv_t }}</div>
+            <div class="gd">{{ rot.conv_d }}</div>
             <div id="guests">
               <div class="guest-row">
                 <div><input class="gnome" name="convidado_nome" placeholder="Nome" autocomplete="off"></div>
@@ -1609,9 +1669,9 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
                 <button type="button" class="g-rm" onclick="rmGuest(this)" title="Remover" aria-label="Remover">✕</button>
               </div>
             </div>
-            <button type="button" class="g-add" onclick="addGuest()">+ adicionar envolvido</button>
+            <button type="button" class="g-add" onclick="addGuest()">{{ rot.conv_add }}</button>
           </div>
-          <button class="ok" type="submit" data-busy="⏳ Marcando…">Marcar</button>
+          <button class="ok" type="submit" data-busy="{{ rot.salvando }}">{{ rot.salvar }}</button>
         </form>
       </div>
 
@@ -1792,6 +1852,7 @@ var REAPROVEITAR = {{ reaproveitar|tojson }};
 var MESES_JS = {{ meses_js|tojson }};
 var DIAS_EXT_JS = {{ dias_sem_ext_js|tojson }};
 var AGORA_ISO = {{ agora_iso|tojson }};
+var CTA_DIA = {{ rot.cta_dia|tojson }};
 var MES_ATUAL = {{ ('%04d-%02d'|format(ano, mes))|tojson }};   // pra voltar pro mesmo mês depois de agir
 var CUR_MES = {{ ('%04d-%02d'|format(ano, mes))|tojson }};
 var TPILL = {pessoal:'Pessoal', empresa:'Empresa', fornecedor:'Fornecedor'};
@@ -2013,7 +2074,7 @@ function abrirDia(iso){
       + '</div></div>';
   });
   html += _reaproveitarHtml(iso);
-  html += '<button class="daybox-cta" type="button" onclick="agNovoNoDia(\\''+iso+'\\')">＋ Marcar novo compromisso nesse dia</button>';
+  html += '<button class="daybox-cta" type="button" onclick="agNovoNoDia(\\''+iso+'\\')">'+CTA_DIA+'</button>';
   box.innerHTML = html;
   document.getElementById('dayOverlay').classList.add('show');
 }
@@ -2109,13 +2170,17 @@ function remToggle(id){var box=document.getElementById('remBox-'+id);if(box)box.
     });
   }
   var fd = document.getElementById('fData'), fh = document.getElementById('fHora');
+  var ff = document.getElementById('fFim');   // só existe no formulário de evento
   var cx = document.getElementById('choqueBox'), ct = document.getElementById('choqueTxt');
   if(!fd || !cx) return;
   var timer = null;
   function checar(){
     if(!fd.value){ cx.classList.remove('on'); return; }
+    // manda o FIM junto: sem ele a janela vira 1h e duas festas na mesma noite
+    // nunca acusam choque — que é justamente o caso de quem vende data.
     fetch('/painel/agenda/conflitos?data='+encodeURIComponent(fd.value)
-          +'&hora='+encodeURIComponent(fh ? fh.value : ''))
+          +'&hora='+encodeURIComponent(fh ? fh.value : '')
+          +'&fim='+encodeURIComponent(ff ? ff.value : ''))
       .then(function(r){ return r.json(); })
       .then(function(d){
         var itens = (d && d.itens) || [];
@@ -2133,6 +2198,7 @@ function remToggle(id){var box=document.getElementById('remBox-'+id);if(box)box.
   function agendar(){ clearTimeout(timer); timer = setTimeout(checar, 350); }
   fd.addEventListener('change', agendar);
   if(fh) fh.addEventListener('change', agendar);
+  if(ff) ff.addEventListener('change', agendar);
 })();
 function addConvToggle(id){var box=document.getElementById('addConvBox-'+id);if(box)box.classList.toggle('show');}
 

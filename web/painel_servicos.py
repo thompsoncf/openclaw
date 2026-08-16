@@ -713,6 +713,15 @@ def painel_servicos_lista(request: Request):
                           token, aprovada_por, aprovada_em, numero,
                           coalesce(modo,'recorrente'), sinal_centavos, sinal_pago_em,
                           parcelas,
+                          (select ct.token from contratos ct
+                            where ct.orcamento_id = orcamentos.id and ct.substitui_id is null
+                            order by ct.id desc limit 1),
+                          (select ct.numero from contratos ct
+                            where ct.orcamento_id = orcamentos.id and ct.substitui_id is null
+                            order by ct.id desc limit 1),
+                          (select ct.assinado_em is not null from contratos ct
+                            where ct.orcamento_id = orcamentos.id and ct.substitui_id is null
+                            order by ct.id desc limit 1),
                           (select e.pre_reserva_ate from eventos_agenda e
                             where e.id = orcamentos.evento_agenda_id
                               and e.status = 'pre_reservado')"""
@@ -746,8 +755,14 @@ def painel_servicos_lista(request: Request):
         # Vem do servidor porque o botão "Fechar contrato" age numa linha do funil,
         # não no orçamento aberto no editor — e é ele que vira título a receber.
         "plano_difere": _dif_plano(r[16], r[5], r[3]),
+        # o CONTRATO é documento próprio, com link próprio. Aparece na linha do
+        # funil assim que nasce (sinal confirmado) — é daqui que o dono manda o
+        # link pro cliente, do mesmo jeito que já manda o da proposta.
+        "contrato_token": r[17] or "",
+        "contrato_numero": r[18],
+        "contrato_assinado": bool(r[19]),
         # só vem preenchido enquanto a data está SEGURADA esperando o sinal
-        "pre_reserva_ate": r[17].astimezone(ag.BRT).strftime("%d/%m %H:%M") if r[17] else "",
+        "pre_reserva_ate": r[20].astimezone(ag.BRT).strftime("%d/%m %H:%M") if r[20] else "",
     } for r in rows]
     return JSONResponse({"itens": itens})
 
@@ -1161,6 +1176,9 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-badge.pre{background:#2a2212; color:#e0b25a; border:1px dashed #6b5620; text-transform:none; letter-spacing:0}
 /* sinal já recebido: verde e SÓLIDO — o oposto do tracejado de "ainda esperando" */
 .oc-badge.sinalok{background:#10241d; color:var(--verde-claro); text-transform:none; letter-spacing:0}
+/* o contrato na linha do funil: âmbar enquanto espera assinatura, verde depois */
+.oc-badge.ctwait{background:#241C0F; color:#e0b25a; border:1px solid #5A4520; text-transform:none; letter-spacing:0}
+.oc-badge.ctok{background:#10241d; color:var(--verde-claro); text-transform:none; letter-spacing:0}
 .oc-fechar{background:var(--verde); color:var(--sobre-verde); border:0; border-radius:8px; padding:.4rem .8rem; font-weight:600; cursor:pointer; font-size:.8rem}
 /* "Sinal recebido" não é "Fechar contrato": mesma forma, peso menor — fechar o
    contrato gera título a receber, confirmar o sinal só firma a data. */
@@ -2356,11 +2374,33 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         }
         if(it.token){
           var lk=window.location.origin+'/proposta/'+it.token;
-          var bl=document.createElement('button'); bl.className='oc-ic'; bl.title='Copiar link do cliente'; bl.textContent='🔗';
+          var bl=document.createElement('button'); bl.className='oc-ic'; bl.title='Copiar link da proposta'; bl.textContent='🔗';
           bl.addEventListener('click',function(){navigator.clipboard.writeText(lk); bl.textContent='✓'; setTimeout(function(){bl.textContent='🔗';},1200);});
-          var bp=document.createElement('button'); bp.className='oc-ic'; bp.title='Abrir / baixar PDF'; bp.textContent='📄';
+          var bp=document.createElement('button'); bp.className='oc-ic'; bp.title='Abrir / baixar PDF da proposta'; bp.textContent='📄';
           bp.addEventListener('click',function(){window.open('/proposta/'+it.token,'_blank');});
           right.appendChild(bl); right.appendChild(bp);
+        }
+        // O CONTRATO é outro documento, com link próprio — e por isso tem botão
+        // próprio aqui. Só aparece depois que ele nasce (na APROVAÇÃO da proposta,
+        // pra o cliente ler as cláusulas antes de pagar a entrada): antes disso
+        // não existe contrato pra mandar.
+        if(it.contrato_token){
+          var ctl=window.location.origin+'/contrato/'+it.contrato_token;
+          var cs=document.createElement('span');
+          cs.className='oc-badge '+(it.contrato_assinado?'ctok':'ctwait');
+          cs.textContent=(it.contrato_assinado?'Contrato nº '+it.contrato_numero+' assinado'
+                                              :'Contrato nº '+it.contrato_numero+' · aguardando');
+          cs.title=it.contrato_assinado?'O cliente já aceitou as cláusulas.'
+                                       :'Mande o link pro cliente ler e assinar.';
+          right.appendChild(cs);
+          var cb=document.createElement('button'); cb.className='oc-ic';
+          cb.title='Copiar link do contrato'; cb.textContent='📜';
+          cb.addEventListener('click',function(){navigator.clipboard.writeText(ctl);
+            cb.textContent='✓'; setTimeout(function(){cb.textContent='📜';},1200);});
+          var co=document.createElement('button'); co.className='oc-ic';
+          co.title='Abrir o contrato'; co.textContent='↗';
+          co.addEventListener('click',function(){window.open('/contrato/'+it.contrato_token,'_blank');});
+          right.appendChild(cb); right.appendChild(co);
         }
         if(!fechado){
           var b=document.createElement('button'); b.className='oc-fechar'; b.textContent='Fechar contrato';

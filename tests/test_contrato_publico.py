@@ -23,6 +23,8 @@ import os
 import pytest
 from psycopg_pool import ConnectionPool
 
+from finance import contrato as ctr
+from web import contrato_publico as cp
 from web import proposta as pp
 
 CONTA = 34
@@ -60,7 +62,7 @@ create table contratos (id bigserial primary key, conta_id bigint not null,
   numero int not null, orcamento_id bigint,
   status text not null default 'enviado', texto jsonb, valor_centavos bigint,
   assinado_em timestamptz, assinado_por text, assinado_doc text, assinado_ip text,
-  rescindido_em timestamptz, rescisao_motivo text, substitui_id bigint,
+  rescindido_em timestamptz, rescisao_motivo text, substitui_id bigint, token text,
   criado_em timestamptz default now(), criado_por text default '');
 create unique index ux_ct_conta_numero on contratos (conta_id, numero);
 create table servicos_catalogo (id bigserial primary key, conta_id bigint, slug text,
@@ -96,8 +98,8 @@ def pool(monkeypatch):
                       {"titulo": "Cláusula 2", "corpo": "Hora extra: {preco.hora-extra}."}])))
         c.commit()
     monkeypatch.setattr(pp, "get_pool", lambda: p)
-    monkeypatch.setattr(pp, "emp_dados", lambda pool, cid: {"nicho": "eventos",
-                                                            "razao_social": "PRIME LTDA"})
+    # o documento agora tem módulo próprio, e é ele que a rota pública usa
+    monkeypatch.setattr(cp, "get_pool", lambda: p)
     yield p
     p.close()
 
@@ -110,16 +112,18 @@ def _orcamento(pool, *, status="aprovada", sinal_pago=False, assinado=False):
             """insert into orcamentos (conta_id, cliente, empresa, token, status,
                  setup_centavos, numero, evento, modo, sinal_pago_em)
                values (%s,'Thompson','Thompson',%s,%s,890000,27,
-                 '{"data":"31/12/2026","inicio":"21:00","convidados":50}'::jsonb,'evento',
+                 '{"data":"2026-12-31","inicio":"21:00","convidados":50}'::jsonb,'evento',
                  %s) returning id""",
             (CONTA, TOKEN, status,
              "2026-08-16 12:00:00+00" if sinal_pago else None)).fetchone()[0]
-        # o CONTRATO agora é linha própria (164), criada quando o sinal cai.
-        if sinal_pago or assinado:
+        # o CONTRATO agora é linha própria (164), que nasce na APROVAÇÃO (165) —
+        # aqui ele é inserido à mão pra isolar a leitura do documento; quem prova
+        # que a aprovação de verdade o cria é `test_aprovar_a_proposta_faz_nascer...`.
+        if status in ("aprovada", "fechado"):
             c.execute(
                 """insert into contratos (conta_id, numero, orcamento_id, status,
-                     texto, assinado_em, assinado_por)
-                   values (%s,1,%s,%s,%s::jsonb,%s,%s)""",
+                     texto, assinado_em, assinado_por, token)
+                   values (%s,1,%s,%s,%s::jsonb,%s,%s,'CTTOKEN')""",
                 (CONTA, oid, "assinado" if assinado else "enviado",
                  json.dumps([{"titulo": "CONGELADA", "corpo": "texto de ontem"}]) if assinado else None,
                  "2026-08-16 13:00:00+00" if assinado else None,
@@ -127,15 +131,25 @@ def _orcamento(pool, *, status="aprovada", sinal_pago=False, assinado=False):
         c.commit()
 
 
+CT_TOKEN = "CTTOKEN"
+
+
 def _ct(pool):
-    return pp._contrato_da_proposta(pp._carregar(TOKEN, pool), pool)
+    """O contrato pelo LINK PRÓPRIO — é assim que o cliente o vê agora."""
+    return cp.carregar(CT_TOKEN, pool)
+
+
+def _assinar(pool, nome="Thompson", doc="000", aceite="on"):
+    return cp.contrato_assinar(_Req(), CT_TOKEN, nome=nome, doc=doc, aceite=aceite)
 
 
 # ------------------------------------------------------ visível desde a aprovação
 
-def test_proposta_nao_aprovada_ainda_nao_mostra_contrato(pool):
+def test_proposta_nao_aprovada_nao_tem_contrato_nenhum(pool):
+    """O contrato nasce na APROVAÇÃO. Antes dela não há documento nem link — e
+    `carregar` devolve None, que a rota vira 404 com texto de gente."""
     _orcamento(pool, status="enviado")
-    assert _ct(pool)["aprovada"] is False
+    assert _ct(pool) is None
 
 
 def test_aprovada_sem_sinal_ja_mostra_o_texto_inteiro(pool):
@@ -153,10 +167,20 @@ def test_o_preco_da_clausula_vem_do_catalogo(pool):
     assert _ct(pool)["clausulas"][1]["corpo"] == "Hora extra: R$ 620,00."
 
 
-def test_conta_sem_nicho_de_eventos_nao_tem_contrato(pool, monkeypatch):
-    monkeypatch.setattr(pp, "emp_dados", lambda pool, cid: {"nicho": "tecnologia"})
-    _orcamento(pool)
-    assert _ct(pool) is None
+def test_conta_sem_nicho_de_eventos_nao_tem_contrato(pool):
+    """O gate agora é na CRIAÇÃO: sem nicho de eventos, o contrato não nasce — e
+    sem linha não há link. Contrato de locação de espaço é do ramo."""
+    from finance import contrato as ctr
+    _orcamento(pool, status="enviado")          # sem contrato ainda
+    with pool.connection() as c:
+        oid = c.execute("select id from orcamentos where token=%s", (TOKEN,)).fetchone()[0]
+        c.execute("update contas set nicho_id=null where id=%s", (CONTA,))
+        c.commit()
+    assert ctr.criar_para_orcamento(pool, CONTA, oid) is None
+    with pool.connection() as c:
+        c.execute("update contas set nicho_id=(select id from nichos where slug='eventos') "
+                  "where id=%s", (CONTA,))
+        c.commit()
 
 
 # ------------------------------------------------- assinável só depois do sinal
@@ -164,19 +188,20 @@ def test_conta_sem_nicho_de_eventos_nao_tem_contrato(pool, monkeypatch):
 def test_sem_sinal_a_assinatura_e_recusada(pool):
     """A trava é revalidada no POST: esconder o formulário não impede a chamada."""
     _orcamento(pool, status="aprovada", sinal_pago=False)
-    pp.proposta_assinar_contrato(_Req(), TOKEN, nome="Thompson", doc="000", aceite="on")
+    _assinar(pool)
     assert _ct(pool)["assinado"] is False
 
 
-def test_proposta_nao_aprovada_nao_assina_nem_com_sinal(pool):
+def test_proposta_nao_aprovada_nao_tem_o_que_assinar_nem_com_sinal(pool):
+    """Antes a trava era no POST. Agora é mais forte: sem aprovação o contrato nem
+    nasce, então não há documento nem link pra tentar assinar."""
     _orcamento(pool, status="enviado", sinal_pago=True)
-    pp.proposta_assinar_contrato(_Req(), TOKEN, nome="Thompson", doc="000", aceite="on")
-    assert _ct(pool)["assinado"] is False
+    assert _ct(pool) is None
 
 
 def test_com_sinal_pago_assina(pool):
     _orcamento(pool, status="aprovada", sinal_pago=True)
-    pp.proposta_assinar_contrato(_Req(), TOKEN, nome="Thompson Ferreira", doc="000", aceite="on")
+    _assinar(pool, nome="Thompson Ferreira")
     ct = _ct(pool)
     assert ct["assinado"] is True
     assert ct["assinado_por"] == "Thompson Ferreira"
@@ -186,13 +211,13 @@ def test_sem_marcar_o_aceite_nao_assina(pool):
     """A caixinha é a prova de que leu — vale mais que o clique se um dia a
     assinatura for questionada."""
     _orcamento(pool, status="aprovada", sinal_pago=True)
-    pp.proposta_assinar_contrato(_Req(), TOKEN, nome="Thompson", doc="000", aceite="")
+    _assinar(pool, aceite="")
     assert _ct(pool)["assinado"] is False
 
 
 def test_sem_nome_nao_assina(pool):
     _orcamento(pool, status="aprovada", sinal_pago=True)
-    pp.proposta_assinar_contrato(_Req(), TOKEN, nome="  ", doc="000", aceite="on")
+    _assinar(pool, nome="  ")
     assert _ct(pool)["assinado"] is False
 
 
@@ -201,7 +226,7 @@ def test_sem_nome_nao_assina(pool):
 def test_o_texto_assinado_e_o_que_o_cliente_leu(pool):
     _orcamento(pool, status="aprovada", sinal_pago=True)
     lido = _ct(pool)["clausulas"]
-    pp.proposta_assinar_contrato(_Req(), TOKEN, nome="Thompson", doc="000", aceite="on")
+    _assinar(pool)
     with pool.connection() as c:
         gravado = c.execute(
             """select ct.texto from contratos ct join orcamentos o on o.id = ct.orcamento_id
@@ -212,7 +237,7 @@ def test_o_texto_assinado_e_o_que_o_cliente_leu(pool):
 def test_editar_o_modelo_depois_nao_mexe_no_assinado(pool):
     """O teste que sustenta juridicamente tudo isto."""
     _orcamento(pool, status="aprovada", sinal_pago=True)
-    pp.proposta_assinar_contrato(_Req(), TOKEN, nome="Thompson", doc="000", aceite="on")
+    _assinar(pool)
     antes = _ct(pool)["clausulas"]
     with pool.connection() as c:      # o dono reescreve o contrato da empresa
         c.execute("update contrato_modelo set clausulas=%s::jsonb where conta_id=%s",
@@ -225,7 +250,7 @@ def test_mudar_o_preco_do_catalogo_nao_mexe_no_assinado(pool):
     """Congelar o TEXTO, e não os campos, é o que faz isto valer: depois de
     assinado o número não acompanha mais o catálogo."""
     _orcamento(pool, status="aprovada", sinal_pago=True)
-    pp.proposta_assinar_contrato(_Req(), TOKEN, nome="Thompson", doc="000", aceite="on")
+    _assinar(pool)
     with pool.connection() as c:
         c.execute("update servicos_catalogo set setup_centavos=99900 where conta_id=%s", (CONTA,))
         c.commit()
@@ -235,8 +260,8 @@ def test_mudar_o_preco_do_catalogo_nao_mexe_no_assinado(pool):
 def test_assinar_duas_vezes_nao_sobrescreve(pool):
     """Duplo clique ou reenvio do formulário não pode trocar quem assinou."""
     _orcamento(pool, status="aprovada", sinal_pago=True)
-    pp.proposta_assinar_contrato(_Req(), TOKEN, nome="Primeiro", doc="1", aceite="on")
-    pp.proposta_assinar_contrato(_Req(), TOKEN, nome="Segundo", doc="2", aceite="on")
+    _assinar(pool, nome="Primeiro", doc="1")
+    _assinar(pool, nome="Segundo", doc="2")
     assert _ct(pool)["assinado_por"] == "Primeiro"
 
 
@@ -266,11 +291,12 @@ def test_contrato_nasce_com_numero_proprio_e_e_idempotente(pool):
     """Série própria, por conta: "Contrato nº 1" e "Orçamento nº 27" sendo o mesmo
     número seria confusão garantida na hora de citar o documento."""
     from finance import contrato as ctr
-    _orcamento(pool, status="aprovada")          # sem sinal: nenhum contrato ainda
+    _orcamento(pool, status="enviado")           # não aprovada: nenhum contrato ainda
     with pool.connection() as c:
         oid = c.execute("select id from orcamentos where token=%s", (TOKEN,)).fetchone()[0]
     ct = ctr.criar_para_orcamento(pool, CONTA, oid, valor_centavos=890000)
     assert ct and ct["numero"] == 1 and ct["status"] == "enviado"
+    assert ct["token"]                            # e nasce com o LINK dele
     assert ct["orcamento_id"] == oid and ct["valor_centavos"] == 890000
     # de novo: devolve o MESMO, não cria outro
     de_novo = ctr.criar_para_orcamento(pool, CONTA, oid)
@@ -279,25 +305,9 @@ def test_contrato_nasce_com_numero_proprio_e_e_idempotente(pool):
         assert c.execute("select count(*) from contratos").fetchone()[0] == 1
 
 
-def test_contrato_nao_nasce_fora_do_nicho_de_eventos(pool):
-    """Mesma porta do modo do orçamento. Conta de nicho recorrente não tem contrato
-    de locação de espaço — teria um de serviço, que é outro documento."""
-    from finance import contrato as ctr
-    _orcamento(pool, status="aprovada")
-    with pool.connection() as c:
-        oid = c.execute("select id from orcamentos where token=%s", (TOKEN,)).fetchone()[0]
-        c.execute("update contas set nicho_id=null where id=%s", (CONTA,))
-        c.commit()
-    assert ctr.criar_para_orcamento(pool, CONTA, oid) is None
-    with pool.connection() as c:
-        c.execute("update contas set nicho_id=(select id from nichos where slug='eventos') "
-                  "where id=%s", (CONTA,))
-        c.commit()
-
-
 def test_assinado_do_orcamento_e_a_pergunta_que_trava_a_edicao(pool):
     from finance import contrato as ctr
-    _orcamento(pool, status="aprovada", sinal_pago=True)      # cria contrato 'enviado'
+    _orcamento(pool, status="aprovada", sinal_pago=True)      # o seeder já cria o contrato
     with pool.connection() as c:
         oid = c.execute("select id from orcamentos where token=%s", (TOKEN,)).fetchone()[0]
     assert ctr.assinado_do_orcamento(pool, CONTA, oid) is False
@@ -325,3 +335,175 @@ def test_contrato_de_outra_conta_nao_aparece(pool):
     assert ctr.por_orcamento(pool, CONTA, oid) is not None
     assert ctr.por_orcamento(pool, CONTA + 999, oid) is None
     assert ctr.assinado_do_orcamento(pool, CONTA + 999, oid) is False
+
+
+# ------------------------------------------- o DOCUMENTO próprio (165)
+
+def test_a_pagina_do_contrato_se_qualifica_sozinha(pool):
+    """O documento não depende de a empresa ter citado cada campo numa cláusula:
+    partes, objeto e valores saem do que o sistema já tem. Foi o que o modelo da
+    Prime mostrou — 9 cláusulas e nenhuma qualificando o contratante."""
+    _orcamento(pool, status="aprovada")
+    html = cp.contrato_publico(_Req(), CT_TOKEN).body.decode()
+    assert "Contrato de locação de espaço" in html
+    assert "Contratada (locadora)" in html and "Contratante (locatário)" in html
+    assert "PRIME LTDA" in html and "52.752.898/0001-58" in html   # a empresa
+    assert "Thompson" in html                                       # o cliente
+    assert "31/12/2026" in html                                     # o objeto
+    assert "Cláusula 1" in html and "Cláusula 2" in html            # as cláusulas
+    # e o botão de imprimir, que é como isso vira PDF
+    assert "Baixar / imprimir" in html
+
+
+@pytest.mark.parametrize("errado", ["nao-existe", "", "   ", "CTTOKE", "CTTOKENX",
+                                    "cttoken"])
+def test_token_errado_nao_abre_o_contrato_de_ninguem(pool, errado):
+    """Com um contrato REAL no banco. Testar 404 num banco vazio não prova nada:
+    a consulta poderia estar ignorando o token e devolvendo `limit 1` que ainda
+    passaria. É o link público inteiro — quem chuta o token não pode cair no
+    documento de outro cliente, com nome, CPF e valores dele."""
+    _orcamento(pool, status="aprovada")
+    assert ctr.por_token(pool, CT_TOKEN) is not None      # o certo abre
+    assert ctr.por_token(pool, errado) is None            # e só ele
+    r = cp.contrato_publico(_Req(), errado)
+    assert r.status_code == 404
+    corpo = r.body.decode()
+    assert "Contrato não encontrado" in corpo
+    assert "Thompson" not in corpo and "PRIME LTDA" not in corpo
+
+
+def test_a_rota_do_contrato_existe_no_app_que_sobe(pool, monkeypatch):
+    """A FIAÇÃO no `web.app`. Todo o resto deste arquivo chama `cp.contrato_publico`
+    direto, e os outros testes de rota montam um FastAPI só com o router que
+    interessa — nenhum dos dois nota se `app.include_router(contrato_pub_router)`
+    não estiver lá. E aí o link que o dono manda pro cliente dá 404 em produção
+    com a suíte inteira verde.
+
+    (Conferido: `app.routes` NÃO serve pra isso — esta versão do FastAPI guarda
+    os routers incluídos como `_IncludedRouter` preguiçoso, sem `path`. Só a
+    requisição de verdade responde.)"""
+    from fastapi.testclient import TestClient
+
+    from web.app import app
+    _orcamento(pool, status="aprovada")
+    c = TestClient(app, raise_server_exceptions=False)
+    r = c.get(f"/contrato/{CT_TOKEN}")
+    assert r.status_code == 200, f"a rota não está registrada no app ({r.status_code})"
+    assert "Contrato nº" in r.text and "PRIME LTDA" in r.text
+    # e o POST da assinatura também — de nada adianta a página abrir e o botão 404
+    r2 = c.post(f"/contrato/{CT_TOKEN}/assinar",
+                data={"nome": "Thompson", "doc": "000", "aceite": "on"},
+                follow_redirects=False)
+    assert r2.status_code != 404, "a rota de assinar não está registrada"
+
+
+def test_link_colado_com_espaco_sobrando_ainda_abre(pool):
+    """O contrário do de cima, e de propósito: o link vai por WhatsApp e volta
+    colado com espaço. Aparar branco não afrouxa nada — o token continua tendo
+    que bater inteiro —, e sem isso o cliente vê 404 num link que está certo."""
+    _orcamento(pool, status="aprovada")
+    assert ctr.por_token(pool, " CTTOKEN\n")["token"] == CT_TOKEN
+
+
+def test_le_antes_de_pagar_mas_so_assina_depois(pool):
+    """A propriedade que a folha tinha e não podia se perder na separação: ninguém
+    deve pagar pra descobrir o que aceitou."""
+    _orcamento(pool, status="aprovada")                 # aprovada, sem sinal
+    html = cp.contrato_publico(_Req(), CT_TOKEN).body.decode()
+    assert "Hora extra: R$ 620,00." in html             # leu o contrato inteiro
+    assert "assinatura é liberada" in html
+    assert 'action="/contrato/' not in html             # e não tem como assinar
+    # com o sinal, o formulário aparece
+    _orcamento(pool, status="aprovada", sinal_pago=True)
+    html2 = cp.contrato_publico(_Req(), CT_TOKEN).body.decode()
+    assert "Assinar o contrato" in html2 and 'action="/contrato/' in html2
+
+
+def test_o_contrato_saiu_da_folha_da_proposta(pool):
+    """São dois documentos. Empilhado no rodapé do orçamento, o segundo lia como
+    anexo do primeiro — e é o segundo que restringe direito do cliente."""
+    _orcamento(pool, status="aprovada", sinal_pago=True)
+    folha = pp.proposta_publica(_Req(), TOKEN).body.decode()
+    assert "Cláusula 1" not in folha and "Assinar o contrato" not in folha
+
+
+def test_aprovar_a_proposta_faz_nascer_o_contrato_com_link(pool):
+    """A FIAÇÃO, não o modelo. Todos os testes acima inserem o contrato à mão; se
+    a aprovação não chamar `criar_para_orcamento`, todos continuam passando e em
+    produção o contrato simplesmente nunca existe. E o link tem que nascer junto:
+    contrato sem token é documento sem como ser mandado."""
+    with pool.connection() as c:
+        c.execute("delete from contratos")
+        c.execute("delete from orcamentos")
+        c.execute("""insert into orcamentos (conta_id, cliente, empresa, token, status,
+                       setup_centavos, numero, evento, modo)
+                     values (%s,'Thompson','Thompson',%s,'aprovada',890000,27,
+                       '{"data":"2026-12-31","inicio":"21:00"}'::jsonb,'evento')""",
+                  (CONTA, TOKEN))
+        c.commit()
+    d = pp._carregar(TOKEN, pool=pool)
+    pp._pos_assinatura(d, "Thompson Ferreira")
+    with pool.connection() as c:
+        row = c.execute("select orcamento_id, numero, status, token, assinado_em "
+                        "from contratos where conta_id=%s", (CONTA,)).fetchall()
+    assert len(row) == 1
+    orc_id, numero, status, token, assinado = row[0]
+    assert orc_id == d["id"] and numero == 1 and status == "enviado"
+    assert token and assinado is None
+    # e o link nascido aqui abre o documento de verdade
+    assert cp.contrato_publico(_Req(), token).status_code == 200
+    # segunda aprovação (reenvio, re-assinatura) não cria um segundo contrato
+    pp._pos_assinatura(d, "Thompson Ferreira")
+    with pool.connection() as c:
+        assert c.execute("select count(*) from contratos where conta_id=%s",
+                         (CONTA,)).fetchone()[0] == 1
+
+
+def test_a_mensagem_de_erro_da_url_nao_vira_html(pool):
+    """XSS refletido. A página é PÚBLICA e sem login, e devolve `?erro=` na tela —
+    é o link que o dono manda por WhatsApp, então basta o atacante mandar o mesmo
+    link com a query trocada.
+
+    E o autoescape NÃO cobre isto sozinho: o `_env` do portal usa
+    `select_autoescape()`, que liga o escape por EXTENSÃO do nome do template.
+    Os templates daqui são registrados no DictLoader como 'contrato_doc',
+    'proposta' — sem extensão nenhuma —, então caem no `default=False` e saem
+    crus. (Conferido: `from_string` escapa, `get_template('nome')` não.)"""
+    # com o sinal pago: é quando o formulário (e a faixa de erro) aparecem
+    _orcamento(pool, status="aprovada", sinal_pago=True)
+    payload = '"><script>alert(1)</script>'
+    html = cp.contrato_publico(_Req(), CT_TOKEN, erro=payload).body.decode()
+    assert payload not in html, "a mensagem de erro da URL entrou como HTML"
+    assert "&lt;script&gt;" in html, "a mensagem devia aparecer, só que escapada"
+
+
+def test_o_token_so_e_ecoado_depois_de_casar_com_o_banco(pool):
+    """O outro valor da URL que entra no HTML é `{{ token }}`, dentro do action do
+    formulário. Ele NÃO é vetor, e a razão é esta — vale prender porque é ela que
+    sustenta a conclusão: token que não casa com nenhuma linha nunca chega no
+    formulário, então o que a página ecoa é sempre um token gerado por
+    `secrets.token_urlsafe`, não texto do atacante.
+
+    (Medido: com o autoescape desligado este teste continuava passando. Ele passa
+    por causa do 404, não por causa do escape — dizer que ele prende a injeção
+    seria mentira com cara de teste.)"""
+    _orcamento(pool, status="aprovada", sinal_pago=True)
+    veneno = 'CTTOKEN" onload="alert(1)'
+    r = cp.contrato_publico(_Req(), veneno)
+    assert r.status_code == 404
+    html = r.body.decode()
+    assert veneno not in html
+    assert 'action="/contrato/' not in html      # a página de 404 não tem formulário
+
+
+def test_a_pagina_avisa_quando_um_campo_ficou_sem_valor(pool):
+    """Falta silenciosa num contrato é o pior tipo: o cliente assina um documento
+    com buraco. A página diz quais campos não resolveram."""
+    with pool.connection() as c:
+        c.execute("""update contrato_modelo set clausulas=%s::jsonb where conta_id=%s""",
+                  (json.dumps([{"titulo": "C1", "corpo": "Multa de {preco.nao-existe}."}]),
+                   CONTA))
+        c.commit()
+    _orcamento(pool, status="aprovada")
+    html = cp.contrato_publico(_Req(), CT_TOKEN).body.decode()
+    assert "Campos sem valor neste contrato" in html and "preco.nao-existe" in html

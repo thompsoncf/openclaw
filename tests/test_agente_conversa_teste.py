@@ -75,6 +75,11 @@ def pool():
 
 def _recebe(c, texto, *, sid, mestre):
     """Uma mensagem chegando, com o agente-mestre ligado ou desligado."""
+    return pp._wa_inbound_conversa(c, CONTA, NUM, texto, sid, "Cliente", mestre)[0]
+
+
+def _recebe_par(c, texto, *, sid, mestre=False):
+    """(conversa, nova) — pra quem está testando a reentrega."""
     return pp._wa_inbound_conversa(c, CONTA, NUM, texto, sid, "Cliente", mestre)
 
 
@@ -148,6 +153,76 @@ def test_mestre_ligado_acorda_sempre(pool):
     with pool.connection() as c:
         conv = _recebe(c, "oi", sid="m1", mestre=True)
         assert pp._agente_atende(c, conv, True) is True
+
+
+# -------------------------------------- a reentrega: uma resposta por mensagem
+#
+# O wa-qr reentrega a MESMA mensagem quando a conexão oscila (`messages.upsert` type
+# 'append'). Em 15/08 um único "?" do cliente foi entregue TRÊS vezes ao webhook: a
+# mensagem não duplicou no banco — o índice (conversa_id, provider_sid) barrou —, mas
+# o `on conflict do nothing` era SILENCIOSO e quem chamava seguia como se fosse
+# mensagem nova. O agente rodou três vezes e o cliente recebeu três respostas
+# diferentes, uma pedindo desculpa pela confusão da outra:
+#
+#     22:10:37  cliente: "?"
+#     22:10:39  agente: "Me perdi um pouco aqui..."
+#     22:10:44  agente: "Me perdi aqui..."
+#     22:10:45  agente: "Desculpa a confusão!..."
+
+def test_mensagem_nova_diz_que_e_nova(pool):
+    with pool.connection() as c:
+        _conv, nova = _recebe_par(c, "oi", sid="m1")
+        c.commit()
+        assert nova is True
+
+
+def test_a_mesma_mensagem_de_novo_nao_e_nova(pool):
+    """O sid é o mesmo — é a reentrega, não uma segunda mensagem do cliente."""
+    with pool.connection() as c:
+        conv1, _ = _recebe_par(c, "?", sid="m1")
+        conv2, nova = _recebe_par(c, "?", sid="m1")
+        c.commit()
+        assert nova is False
+        assert conv1 == conv2                       # e continua a mesma conversa
+        n = c.execute("select count(*) from mensagens where conversa_id=%s", (conv1,)).fetchone()[0]
+        assert n == 1                               # nada duplicou
+
+
+def test_tres_entregas_uma_resposta(pool):
+    """O caso do chamado: três entregas do mesmo "?" e só a primeira acorda o agente."""
+    with pool.connection() as c:
+        acordou = [nova for _ in range(3)
+                   if (nova := _recebe_par(c, "?", sid="mesmo-id")[1]) or True]
+        c.commit()
+        assert acordou == [True, False, False]
+
+
+def test_texto_diferente_com_o_mesmo_sid_continua_sendo_repeticao(pool):
+    """Quem manda o texto é o WhatsApp junto com o id; se o id repete, é a mesma
+    mensagem. Confiar no texto abriria a porta pra reentrega com acento diferente."""
+    with pool.connection() as c:
+        _recebe_par(c, "oi", sid="m1")
+        _conv, nova = _recebe_par(c, "oi ", sid="m1")
+        c.commit()
+        assert nova is False
+
+
+def test_sem_sid_toda_entrega_e_nova(pool):
+    """Sem id do provedor não há como saber que é repetição — e perder mensagem de
+    cliente é pior que responder duas vezes. O índice só cobre provider_sid não nulo."""
+    with pool.connection() as c:
+        _recebe_par(c, "oi", sid=None)
+        _conv, nova = _recebe_par(c, "oi", sid=None)
+        c.commit()
+        assert nova is True
+
+
+def test_duas_mensagens_de_verdade_acordam_as_duas(pool):
+    """A trava não pode calar o cliente que escreve duas vezes seguidas."""
+    with pool.connection() as c:
+        assert _recebe_par(c, "oi", sid="m1")[1] is True
+        assert _recebe_par(c, "tudo bem?", sid="m2")[1] is True
+        c.commit()
 
 
 # ------------------------------------------------- o horário no modo teste

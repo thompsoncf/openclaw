@@ -2779,13 +2779,21 @@ def _ja_conversou(c, conta_id, lead_id) -> bool:
 def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente_on,
                          *, exigir_continuidade=False):
     """WhatsApp de ENTRADA (Twilio OU Cloud API): resolve lead+conversa pelo telefone,
-    grava a mensagem e reabre a janela/reativa o agente. Devolve conv_id. Um humano
-    que 'assumiu' (status='pendente') não é reativado.
+    grava a mensagem e reabre a janela/reativa o agente. Devolve (conv_id, nova) — se
+    a mensagem entrou agora ou já estava lá. Um humano que 'assumiu'
+    (status='pendente') não é reativado.
 
     O dedup é por (conversa_id, provider_sid), e o par importa: o id do WhatsApp é o
     MESMO nas duas pontas da mensagem, então dedup global fazia a conta que RECEBE
     perder a mensagem quando a conta que ENVIOU era outra conta do mesmo Zaq — ver
     migração 159.
+
+    `nova` existe porque o dedup era SILENCIOSO: o `on conflict do nothing` engolia a
+    repetição e quem chamava seguia como se fosse mensagem nova. O wa-qr reentrega a
+    mesma mensagem quando a conexão oscila (`messages.upsert` type 'append'), e em
+    15/08 uma única mensagem do cliente ("?") foi entregue TRÊS vezes ao webhook: a
+    mensagem não duplicou no banco, mas o agente foi acionado três vezes e o cliente
+    recebeu três respostas diferentes, uma pedindo desculpa pela confusão da outra.
 
     `exigir_continuidade` liga a trava contra resposta automática: um contato da BASE
     que responde algo não reconhecível como aceite não vira lead quente na primeira
@@ -2879,10 +2887,13 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
                        (select nome from wa_contatos where conta_id=%s and numero8=%s))
                returning id""",
             (conta_id, lead_id, remetente, agente_on, conta_id, alvo8)).fetchone()[0]
-    c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
+    cur = c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
                  values (%s,'whatsapp','in','lead',%s,%s)
                  on conflict (conversa_id, provider_sid) where provider_sid is not null do nothing""",
-              (conv_id, (corpo or "")[:8000], sid))
+                    (conv_id, (corpo or "")[:8000], sid))
+    # entrou agora, ou é a mesma mensagem chegando de novo? Ver o `nova` no docstring:
+    # sem esta resposta o dedup era silencioso e o agente respondia uma vez por entrega.
+    nova = cur.rowcount > 0
     # reabre a janela de 24h e REATIVA o agente — a menos que um humano tenha assumido
     # (status='pendente'). O CASE lê o status ANTIGO da linha, então 'pendente' fica preservado.
     #
@@ -2942,7 +2953,7 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
             )
         except Exception:  # noqa: BLE001
             pass
-    return conv_id
+    return conv_id, nova
 
 
 def _agente_atende(c, conv_id, agente_on) -> bool:
@@ -3014,7 +3025,7 @@ def _tratar_botao_prospec(c, conta_id, remetente, tipo, texto, sid, nome) -> boo
         master = c.execute("select coalesce(ativo,false) from agente_config where conta_id=%s",
                            (conta_id,)).fetchone()
         agente_on = bool(master and master[0])
-        conv_id = _wa_inbound_conversa(c, conta_id, rem, texto, sid, nome, agente_on)
+        conv_id, _nova = _wa_inbound_conversa(c, conta_id, rem, texto, sid, nome, agente_on)
         c.execute("""update campanha_alvos set status='respondeu', wa_status='respondeu', proximo_envio_em=null
                        where prospeccao_id=%s and status in ('fila','enviado')""", (lead_id,))
     idn = _conta_identidade(c, conta_id)
@@ -3122,13 +3133,15 @@ async def webhook_twilio(request: Request, background_tasks: BackgroundTasks):
         # Twilio: aqui existe campanha com template, então a trava da resposta
         # automática vale. O clique no botão não passa por aqui — `_tratar_botao_prospec`
         # já resolveu acima.
-        conv_id = _wa_inbound_conversa(c, conta_id, remetente, corpo, sid,
-                                       params.get("ProfileName"), agente_on,
-                                       exigir_continuidade=True)
+        conv_id, nova = _wa_inbound_conversa(c, conta_id, remetente, corpo, sid,
+                                            params.get("ProfileName"), agente_on,
+                                            exigir_continuidade=True)
         c.commit()
-    # deixa o agente atender em background (não segura a resposta pro Twilio)
-    from finance import agente as _ag
-    background_tasks.add_task(_ag.atender, get_pool(), conta_id, conv_id)
+    # deixa o agente atender em background (não segura a resposta pro Twilio) — mas só
+    # se a mensagem entrou agora: reentrega da mesma mensagem não merece outra resposta
+    if nova:
+        from finance import agente as _ag
+        background_tasks.add_task(_ag.atender, get_pool(), conta_id, conv_id)
     return Response("<Response></Response>", media_type="application/xml")
 
 
@@ -3463,10 +3476,10 @@ async def webhook_meta(request: Request, background_tasks: BackgroundTasks):
                               (conta_id,)).fetchone()
                 agente_on = bool(m and m[0])
                 # Cloud API: mesma trava do Twilio — é o outro provedor com template.
-                conv_id = _wa_inbound_conversa(c, conta_id, ev["sender"], ev["texto"],
-                                               ev.get("sid"), ev.get("nome"), agente_on,
-                                               exigir_continuidade=True)
-                if _agente_atende(c, conv_id, agente_on):
+                conv_id, nova = _wa_inbound_conversa(c, conta_id, ev["sender"], ev["texto"],
+                                                     ev.get("sid"), ev.get("nome"), agente_on,
+                                                     exigir_continuidade=True)
+                if nova and _agente_atende(c, conv_id, agente_on):
                     disparar.append((conta_id, conv_id))
                 continue
             conta_id = _conta_por_meta(c, ev["plataforma"], ev["conta_ident"])
@@ -3565,14 +3578,17 @@ async def webhook_wa_qr(request: Request, background_tasks: BackgroundTasks):
         m = c.execute("select coalesce(ativo,false) from agente_config where conta_id=%s",
                       (conta_id,)).fetchone()
         agente_on = bool(m and m[0])
-        conv_id = _wa_inbound_conversa(c, conta_id, sender, texto,
-                                       payload.get("id") or None, payload.get("nome"), agente_on)
+        conv_id, nova = _wa_inbound_conversa(c, conta_id, sender, texto,
+                                            payload.get("id") or None, payload.get("nome"),
+                                            agente_on)
         # lê DENTRO da transação: o update acima já valeu, então a conversa ligada à
-        # mão aparece aqui mesmo com o agente-mestre desligado (ver _agente_atende)
-        atender = _agente_atende(c, conv_id, agente_on)
+        # mão aparece aqui mesmo com o agente-mestre desligado (ver _agente_atende).
+        # `nova` corta a reentrega: o wa-qr manda a mesma mensagem de novo quando a
+        # conexão oscila, e sem isto o cliente recebia uma resposta por entrega.
+        atender = nova and _agente_atende(c, conv_id, agente_on)
         c.commit()
-    log.info("webhook_wa_qr: conta_id=%s conv_id=%s gravado ✓ (mestre=%s atende=%s)",
-             conta_id, conv_id, agente_on, atender)
+    log.info("webhook_wa_qr: conta_id=%s conv_id=%s gravado ✓ (mestre=%s nova=%s atende=%s)",
+             conta_id, conv_id, agente_on, nova, atender)
     if atender:
         from finance import agente as _ag
         background_tasks.add_task(_ag.atender, get_pool(), conta_id, conv_id)

@@ -458,6 +458,22 @@ function sessaoFirme (s, agora, firme) {
   return (agora - s.abertoEm) >= firme
 }
 
+// Este evento vem do socket que a sessão está usando AGORA?
+//
+// Duas formas de um evento chegar velho, e as duas já custaram caro:
+//
+// * o socket foi descartado (trocamos de encarnação) e o end() dele ainda emite um
+//   último 'close' — ver descartarSocket;
+// * o socket levou 440, a gente soltou (s.sock = null) e o Baileys emite um 'open'
+//   ATRASADO desse mesmo socket. Medido na conta 34: 440 às 22:16:15.890 e 'open' às
+//   22:16:16.402. Esse 'open' punha status='conectado' numa sessão sem socket, e daí
+//   pra frente ela mentia — chip verde no painel, vigia do silêncio pulando a conta
+//   (sessaoMuda exige s.sock) e só o /enviar descobrindo, na hora de mandar a
+//   mensagem do cliente, que não havia socket nenhum.
+function socketAtual (s, sock) {
+  return !!sock && !sock._descartado && !!s && s.sock === sock
+}
+
 // Quanto esperar antes de tentar retomar uma conta que levou 440, dobrando a cada
 // tentativa até 16× (5min, 10, 20, 40, 80). A espera existe porque quem substituiu
 // pode ser uma sessão LEGÍTIMA de fora — o WhatsApp Web que a cliente abriu no
@@ -1700,7 +1716,21 @@ async function iniciarSessao (contaId) {
     // último 'close'. Sem ignorar isso, esse evento tardio mexia no estado da
     // sessão NOVA — marcava desconectado, agendava reconexão e, no pior caso,
     // disparava a limpeza de credencial/histórico da sessão que estava ok.
-    if (sock._descartado) return
+    //
+    // `s.sock !== sock` fecha o outro lado da mesma porta, e é o que faltava: o 440
+    // solta o socket (s.sock = null) e o Baileys ainda emite um 'open' ATRASADO
+    // desse mesmo socket. Medido na conta 34 em 15/08:
+    //
+    //     22:16:15.890  conexão substituída  → s.sock = null
+    //     22:16:16.402  WhatsApp conectado   ← meio segundo DEPOIS
+    //
+    // Esse 'open' tardio ressuscitava o estado: status voltava a 'conectado' com
+    // socket nenhum. Daí em diante a sessão mentia pra todo mundo — o painel
+    // mostrava o chip verde, o vigia do silêncio pulava a conta (sessaoMuda exige
+    // s.sock), o carimbo de sessão firme era refeito por uma encarnação que já tinha
+    // morrido, e só o /enviar descobria a verdade, com "temSock: false" na hora de
+    // mandar a mensagem do cliente. É o mesmo "conectado e mudo" que abriu tudo isto.
+    if (!socketAtual(s, sock)) return
     const { connection, lastDisconnect, qr } = u
     if (qr) {
       try { s.qr = await QRCode.toDataURL(qr) } catch (_) { s.qr = null }
@@ -2268,4 +2298,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, marcarVivo, vigiarSessoes, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, marcarVivo, vigiarSessoes, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

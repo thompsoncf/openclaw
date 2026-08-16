@@ -90,7 +90,8 @@ def _historico(c, numero, texto, *, sid, de_mim=False):
 
 
 def _entrada(c, numero, texto, *, sid, nome="Perfil"):
-    return pp._wa_inbound_conversa(c, CONTA, numero, texto, sid, nome, False)
+    # devolve (conversa, nova); aqui só a conversa interessa
+    return pp._wa_inbound_conversa(c, CONTA, numero, texto, sid, nome, False)[0]
 
 
 # --------------------------------------------------------------- histórico

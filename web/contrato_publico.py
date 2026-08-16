@@ -76,7 +76,7 @@ def carregar(token: str, pool=None) -> dict | None:
             """select o.cliente, o.empresa, o.cnpj, o.whatsapp, o.email, o.telefone,
                       o.endereco, o.cep, o.cidade, o.uf, o.numero, o.evento,
                       coalesce(o.primeiro_ano_centavos, o.setup_centavos, 0),
-                      o.parcelas, o.status, o.sinal_pago_em,
+                      o.status, o.sinal_pago_em,
                       ct.nome, ct.razao_social, ct.nome_fantasia, ct.documento,
                       ct.endereco, ct.bairro, ct.cep, ct.cidade, ct.uf,
                       ct.telefone, ct.email_empresa, ct.logo_url
@@ -86,7 +86,7 @@ def carregar(token: str, pool=None) -> dict | None:
     if not r:
         return None
     (cli, emp_nome, cli_doc, whats, cli_email, cli_tel, cli_end, cli_cep, cli_cid,
-     cli_uf, numero, evento, total, parcelas, orc_status, sinal_pago_em,
+     cli_uf, numero, evento, total, orc_status, sinal_pago_em,
      c_nome, c_razao, c_fantasia, c_doc, c_end, c_bairro, c_cep, c_cid, c_uf,
      c_tel, c_email, c_logo) = r
     evento = evento if isinstance(evento, dict) else {}

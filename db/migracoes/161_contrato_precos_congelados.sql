@@ -1,0 +1,40 @@
+-- 161_contrato_precos_congelados.sql
+-- Os preços do contrato congelam quando o cliente APROVA a proposta.
+--
+-- O FURO
+-- O contrato monta {preco.hora-extra} lendo o catálogo. Isso é o que faz ele
+-- nunca discordar do orçamento — mas ele lia o catálogo ATUAL até a hora de ser
+-- assinado, e a assinatura do contrato acontece DEPOIS da aprovação da proposta
+-- (a regra do sinal: lê antes de pagar, assina depois). Abre esta janela:
+--
+--   1. orçamento com hora extra R$ 620  → o cliente APROVA (assina a proposta)
+--   2. o dono corrige o catálogo: R$ 600
+--   3. o cliente paga o sinal
+--   4. o cliente ASSINA O CONTRATO      → monta agora, com R$ 600
+--
+-- Dois documentos assinados pelo MESMO cliente, com números diferentes. É
+-- exatamente o problema que o contrato-com-campos veio matar, voltando por
+-- outra porta.
+--
+-- A CORREÇÃO
+-- O momento em que o cliente aceitou os valores é a APROVAÇÃO, não a assinatura
+-- do contrato. Então a aprovação tira uma foto do catálogo, e o contrato lê
+-- dela. Entre aprovar e assinar, nenhum número muda.
+--
+-- Orçamento aprovado ANTES desta migração fica com o campo nulo e segue lendo o
+-- catálogo — é o comportamento que ele já tinha, e inventar uma foto retroativa
+-- seria pior: registraria como "aceito pelo cliente" um preço que talvez não
+-- fosse o da época.
+--
+-- POR QUE NÃO CONGELAR JUNTO COM O TEXTO
+-- `contrato_texto` (migração 160) congela na assinatura DO CONTRATO, e está
+-- certo: até lá, correção de cláusula tem que chegar ao cliente. São dois
+-- congelamentos em dois momentos porque são duas coisas diferentes — o TEXTO é
+-- da empresa e pode melhorar até o fim; os NÚMEROS são o que foi acordado, e
+-- foram acordados na aprovação.
+--
+-- Aditivo e idempotente.
+
+-- {"hora-extra": 62000, "taxa-de-limpeza": 40000, …} — slug -> centavos, como o
+-- catálogo estava no instante em que o cliente aprovou.
+alter table public.orcamentos add column if not exists contrato_precos jsonb;

@@ -57,6 +57,12 @@ def cliente(monkeypatch):
     with pool.connection() as c:
         ps._garantir_tabela(c)
     with pool.connection() as c:
+        # o que a listagem do funil lê e o _garantir_tabela não cria (vem das
+        # migrações do sinal e da agenda)
+        c.execute("""alter table orcamentos add column if not exists sinal_centavos bigint;
+                     alter table orcamentos add column if not exists sinal_pago_em timestamptz;
+                     create table if not exists eventos_agenda (id bigserial primary key,
+                       conta_id bigint, status text, pre_reserva_ate timestamptz);""")
         c.execute("""create table contrato_modelo (
                        conta_id bigint primary key references contas(id) on delete cascade,
                        clausulas jsonb not null default '[]'::jsonb,
@@ -331,6 +337,81 @@ def test_restaurar_padrao_nao_inventa_historico(cliente):
                  json={"clausulas": [{"titulo": "Meu", "corpo": "x"}], "regras": {}})
     r = cliente.get("/painel/servicos/contrato?padrao=1").json()["resumo"]
     assert r["em"] == "" and r["por"] == ""
+
+
+# --------------------------------------- editar o orçamento refaz o acordo
+#
+# Editar uma proposta já aceita não é um ajuste: é refazer o acordo. O orçamento
+# manda no contrato inteiro (valor, data, convidados, parcelas), então mudar os
+# termos torna falso o que o cliente assinou.
+#
+# O sistema já derrubava a aprovação da PROPOSTA. Faltava o contrato: deixá-lo
+# assinado apontando pro orçamento nº X que agora diz outra coisa seria manter
+# dois documentos do mesmo cliente em desacordo — o que este fluxo inteiro
+# existe pra impedir.
+
+def _proposta_aceita(cliente):
+    """Orçamento aprovado, contrato assinado e foto de preços tirada — o estado
+    completo que a edição precisa desmontar."""
+    with cliente.pool.connection() as c:
+        oid = c.execute(
+            """insert into orcamentos (conta_id, cliente, empresa, status, modo,
+                 setup_centavos, numero, evento, aprovada_por, aprovada_em,
+                 contrato_texto, contrato_assinado_em, contrato_assinado_por,
+                 contrato_precos)
+               values (%s,'Thompson','Thompson','aprovada','evento',890000,27,
+                 '{"data":"31/12/2026","inicio":"21:00","convidados":50}'::jsonb,
+                 'Thompson Ferreira', now(),
+                 '[{"titulo":"C1","corpo":"texto"}]'::jsonb, now(), 'Thompson Ferreira',
+                 '{"hora-extra": 62000}'::jsonb)
+               returning id""", (CONTA_EV,)).fetchone()[0]
+        c.commit()
+        return oid
+
+
+def _estado(cliente, oid):
+    with cliente.pool.connection() as c:
+        return c.execute(
+            """select status, aprovada_por, contrato_assinado_por, contrato_texto,
+                      contrato_precos
+                 from orcamentos where id=%s""", (oid,)).fetchone()
+
+
+def test_editar_derruba_a_aprovacao_e_a_assinatura_do_contrato(cliente):
+    oid = _proposta_aceita(cliente)
+    r = cliente.post("/painel/servicos/salvar", json={
+        "id": oid, "empresa": "Thompson", "cliente": "Thompson",
+        "modulos": [], "itens": [], "evento": {"data": "31/12/2026", "convidados": 80}})
+    assert r.status_code == 200
+    status, aprov, contrato_por, texto, precos = _estado(cliente, oid)
+    assert status == "enviado"          # volta pra fila do cliente
+    assert aprov is None                # a aprovação some…
+    assert contrato_por is None         # …e a assinatura do contrato também
+    assert texto is None                # inclusive o documento congelado
+    assert precos is None               # e a foto de preços daquele aceite
+
+
+def test_orcamento_fechado_continua_intocavel(cliente):
+    """Fechado virou contrato e título a receber: editar não passa nem antes."""
+    oid = _proposta_aceita(cliente)
+    with cliente.pool.connection() as c:
+        c.execute("update orcamentos set status='fechado' where id=%s", (oid,))
+        c.commit()
+    cliente.post("/painel/servicos/salvar", json={
+        "id": oid, "empresa": "Outro", "cliente": "Outro",
+        "modulos": [], "itens": [], "evento": {}})
+    assert _estado(cliente, oid)[0] == "fechado"
+    assert _estado(cliente, oid)[2] == "Thompson Ferreira"
+
+
+def test_a_lista_diz_o_que_a_edicao_vai_derrubar(cliente):
+    """O aviso do botão Editar precisa nomear quem aprovou e quem assinou — um
+    "tem certeza?" genérico não deixa ninguém decidir."""
+    _proposta_aceita(cliente)
+    it = cliente.get("/painel/servicos/lista").json()["itens"][0]
+    assert it["aprovada_por"] == "Thompson Ferreira"
+    assert it["contrato_por"] == "Thompson Ferreira"
+    assert it["contrato_em"]
 
 
 def test_o_modelo_padrao_da_tela_monta_sem_falta(cliente):

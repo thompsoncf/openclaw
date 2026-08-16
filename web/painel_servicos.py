@@ -90,6 +90,8 @@ def _garantir_tabela(c):
         alter table orcamentos add column if not exists contrato_assinado_por text;
         alter table orcamentos add column if not exists contrato_assinado_doc text;
         alter table orcamentos add column if not exists contrato_assinado_ip  text;
+        -- foto do catálogo no instante do aceite (migração 161)
+        alter table orcamentos add column if not exists contrato_precos       jsonb;
         create index if not exists idx_orcamentos_status on orcamentos (status, criado_em desc);
         create index if not exists idx_orcamentos_conta on orcamentos (conta_id, status, criado_em desc);
         create unique index if not exists idx_orcamentos_token on orcamentos (token) where token is not null;
@@ -569,7 +571,20 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
                        aprovada_por=case when status='aprovada' then null else aprovada_por end,
                        aprovada_em=case when status='aprovada' then null else aprovada_em end,
                        aprovada_doc=case when status='aprovada' then null else aprovada_doc end,
-                       aprovada_ip=case when status='aprovada' then null else aprovada_ip end
+                       aprovada_ip=case when status='aprovada' then null else aprovada_ip end,
+                       -- ...e o CONTRATO cai junto, sempre. Ele é montado em cima
+                       -- deste orçamento (valor, data, convidados, parcelas): se
+                       -- os termos mudaram, o contrato assinado descreve um
+                       -- acordo que não existe mais. Derrubar só a proposta
+                       -- deixaria o contrato assinado apontando pro orçamento
+                       -- nº X que agora diz outra coisa — dois documentos do
+                       -- mesmo cliente em desacordo, que é o que este fluxo
+                       -- inteiro existe pra impedir.
+                       -- A FOTO DOS PREÇOS também: ela é o que o cliente aceitou
+                       -- na aprovação, e não há mais aprovação.
+                       contrato_texto=null, contrato_assinado_em=null,
+                       contrato_assinado_por=null, contrato_assinado_doc=null,
+                       contrato_assinado_ip=null, contrato_precos=null
                      where id=%s and conta_id=%s and status <> 'fechado'
                    returning id, token""",
                 vals + (secrets.token_urlsafe(16), conta[0], dados.id, conta[0])).fetchone())
@@ -646,7 +661,11 @@ def painel_servicos_lista(request: Request):
                           coalesce(modo,'recorrente'), sinal_centavos, sinal_pago_em,
                           (select e.pre_reserva_ate from eventos_agenda e
                             where e.id = orcamentos.evento_agenda_id
-                              and e.status = 'pre_reservado')"""
+                              and e.status = 'pre_reservado'),
+                          -- o aviso do botão Editar precisa saber o que vai
+                          -- derrubar: a proposta aprovada, o contrato assinado,
+                          -- ou os dois
+                          contrato_assinado_por, contrato_assinado_em"""
         if papel == "vendedor" and membro_id:
             rows = c.execute(
                 _cols + """ from orcamentos where conta_id=%s and criado_por=%s
@@ -675,6 +694,8 @@ def painel_servicos_lista(request: Request):
         "sinal_pago": bool(r[15]),
         # só vem preenchido enquanto a data está SEGURADA esperando o sinal
         "pre_reserva_ate": r[16].astimezone(ag.BRT).strftime("%d/%m %H:%M") if r[16] else "",
+        "contrato_por": r[17] or "",
+        "contrato_em": r[18].strftime("%d/%m/%Y") if r[18] else "",
     } for r in rows]
     return JSONResponse({"itens": itens})
 
@@ -2179,6 +2200,32 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       })
       .catch(function(){alert('Erro de conexão.'); btn.disabled=false; btn.textContent='Sinal recebido';});
   }
+  // EDITAR uma proposta já aceita não é um ajuste: é refazer o acordo. O
+  // orçamento manda no contrato inteiro (valor, data, convidados, parcelas), e
+  // mudar os termos torna falso o que o cliente assinou. Então as duas
+  // assinaturas caem e ele percorre o caminho de novo.
+  //
+  // O aviso lista o que EXISTE naquela linha — quem aprovou, quem assinou, e
+  // quando. Um "tem certeza?" genérico não deixa ninguém decidir; saber que o
+  // Thompson assinou o contrato ontem, sim.
+  function abrirComAviso(it){
+    var perdas=[];
+    if(it.status==='aprovada'||it.aprovada_por)
+      perdas.push('• a aprovação da proposta'+(it.aprovada_por?' (por '+it.aprovada_por+
+        (it.aprovada_em?' em '+it.aprovada_em:'')+')':''));
+    if(it.contrato_por)
+      perdas.push('• a assinatura do contrato (por '+it.contrato_por+
+        (it.contrato_em?' em '+it.contrato_em:'')+')');
+    if(!perdas.length){ abrir(it.id); return; }   // nada assinado: edita direto
+    var txt='Esta proposta já foi aceita pelo cliente.\n\nEditar vai apagar:\n'
+      +perdas.join('\n')
+      +'\n\nA proposta volta para "enviado" e o cliente precisa aprovar'
+      +(it.contrato_por?' e assinar o contrato':'')+' de novo, com os novos termos.'
+      +'\n\nOs valores já cobrados e a data na agenda não mudam sozinhos —'
+      +' confira depois se ainda batem.\n\nQuer editar mesmo assim?';
+    if(confirm(txt)) abrir(it.id);
+  }
+
   // Apagar proposta do funil. Confirma sempre e nomeia o cliente na pergunta: a
   // lista é densa e o 🗑 fica ao lado do 📄, então "tem certeza?" sozinho não diz
   // qual das cinco linhas vai embora.
@@ -2211,7 +2258,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         left.innerHTML='<div class="oc-av">'+esc(it.inicial)+'</div>'
           +'<div><b>'+esc(it.cliente)+(it.empresa?' <span class="mut">· '+esc(it.empresa)+'</span>':'')+'</b>'
           +'<div class="mut" style="font-size:.78rem">'+sub+'</div></div>';
-        left.addEventListener('click',function(){abrir(it.id);});
+        left.addEventListener('click',function(){abrirComAviso(it);});
         el.appendChild(left);
         var right=document.createElement('div'); right.style.display='flex'; right.style.alignItems='center'; right.style.gap='.5rem'; right.style.flexWrap='wrap';
         var aprovada=it.status==='aprovada';
@@ -2249,7 +2296,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         }
         if(!fechado){
           var be=document.createElement('button'); be.className='oc-ic'; be.title='Editar proposta'; be.textContent='✏️';
-          be.addEventListener('click',function(){abrir(it.id);});
+          be.addEventListener('click',function(){abrirComAviso(it);});
           right.appendChild(be);
         }
         if(it.token){

@@ -250,11 +250,21 @@ def registrar_assinatura(pool, token: str, nome: str, doc: str, ip: str) -> bool
         return False
     with pool.connection() as c:
         r = c.execute(
-            """update orcamentos
+            """update orcamentos o
                   set aprovada_por=%s, aprovada_doc=%s, aprovada_ip=%s,
-                      aprovada_em=now(), status='aprovada', atualizado_em=now()
-                where token=%s and status not in ('aprovada','fechado')
-              returning id""",
+                      aprovada_em=now(), status='aprovada', atualizado_em=now(),
+                      -- FOTO DO CATÁLOGO no instante do aceite (migração 161). O
+                      -- contrato lê daqui em vez do catálogo vivo, senão uma
+                      -- correção de preço feita entre a aprovação e a assinatura
+                      -- do contrato deixaria os DOIS documentos assinados pelo
+                      -- mesmo cliente dizendo números diferentes.
+                      contrato_precos = (
+                          select jsonb_object_agg(s.slug, s.setup_centavos)
+                            from servicos_catalogo s
+                           where s.conta_id = o.conta_id and s.ativo
+                             and coalesce(s.slug,'') <> '')
+                where o.token=%s and o.status not in ('aprovada','fechado')
+              returning o.id""",
             (nome[:120], (doc or "").strip()[:40] or None, (ip or "")[:60], token)).fetchone()
         c.commit()
     return bool(r)
@@ -316,7 +326,8 @@ def _carregar(token: str, pool=None):
                                  where m.id = case when o.criado_por ~ '^[0-9]+$'
                                                    then o.criado_por::bigint end),
                                case when o.criado_por = 'dono' then c.nome end),
-                      o.contrato_texto, o.contrato_assinado_em, o.contrato_assinado_por
+                      o.contrato_texto, o.contrato_assinado_em, o.contrato_assinado_por,
+                      o.contrato_precos
                  from orcamentos o join contas c on c.id = o.conta_id
                 where o.token=%s""", (token,)).fetchone()
     if not r:
@@ -328,7 +339,8 @@ def _carregar(token: str, pool=None):
      cli_email, cli_tel, agenda_id,
      em_razao, em_doc, em_end, em_cep, em_bairro, em_cidade, em_uf, em_tel, em_email,
      cliente_id, sinal_centavos, sinal_pago_em, pre_reserva_ate, evento_status,
-     vendedor_nome, contrato_texto, contrato_assinado_em, contrato_assinado_por) = r
+     vendedor_nome, contrato_texto, contrato_assinado_em, contrato_assinado_por,
+     contrato_precos) = r
     # ASSINOU, CONGELOU: enquanto o orçamento não foi aprovado, a aba Clientes é
     # quem manda — corrigiu o nome/endereço lá, reimprimiu, saiu certo, sem
     # precisar refazer a proposta. Depois de assinado fica exatamente o que o
@@ -377,6 +389,7 @@ def _carregar(token: str, pool=None):
         # versão atual do modelo da empresa.
         "contrato_texto": contrato_texto, "contrato_assinado_em": contrato_assinado_em,
         "contrato_assinado_por": contrato_assinado_por or "",
+        "contrato_precos": contrato_precos,
         "evento": evento, "dia_evento": dia_evento,
         "parcelas": _lista(parcelas), "numero": numero,
         "evento_agenda_id": agenda_id,
@@ -492,7 +505,15 @@ def _contrato_da_proposta(d: dict, pool=None) -> dict | None:
         clausulas, faltas = _lista(d["contrato_texto"]), []
     else:
         modelo = ctr.carregar_modelo(pool, d["conta_id"])
-        ctx = ctr.contexto(catalogo=scat.listar(pool, d["conta_id"]),
+        # A FOTO vence o catálogo vivo. Ela é gravada na aprovação (migração
+        # 161) e é o que o cliente aceitou; o catálogo de hoje pode já ter sido
+        # corrigido. Orçamento aprovado antes da migração não tem foto e segue
+        # lendo o catálogo — inventar uma retroativa registraria como "aceito"
+        # um preço que talvez não fosse o da época.
+        foto = d.get("contrato_precos") or None
+        catalogo = ([{"slug": s, "setup_centavos": v} for s, v in foto.items()]
+                    if foto else scat.listar(pool, d["conta_id"]))
+        ctx = ctr.contexto(catalogo=catalogo,
                            orcamento={"cliente": d["contato"] or d["empresa"],
                                       # já mascarado pela folha (000.000.000-00)
                                       "cnpj": (d.get("cliente") or {}).get("doc") or "",

@@ -40,13 +40,15 @@ create table orcamentos (id bigserial primary key, conta_id bigint, cliente text
   telefone text, cnpj text, endereco text, cep text, cidade text, uf text,
   setup_centavos bigint default 0, mensal_centavos bigint default 0,
   primeiro_ano_centavos bigint default 0, status text default 'rascunho',
-  criado_em timestamptz default now(), criado_por text, token text,
+  criado_em timestamptz default now(), atualizado_em timestamptz default now(),
+  criado_por text, token text,
   aprovada_em timestamptz, aprovada_por text, aprovada_doc text, aprovada_ip text,
   modo text default 'evento', evento jsonb, parcelas jsonb, numero int,
   evento_agenda_id bigint, cliente_id bigint,
   sinal_centavos bigint, sinal_pago_em timestamptz,
   contrato_texto jsonb, contrato_assinado_em timestamptz,
-  contrato_assinado_por text, contrato_assinado_doc text, contrato_assinado_ip text);
+  contrato_assinado_por text, contrato_assinado_doc text, contrato_assinado_ip text,
+  contrato_precos jsonb);
 create table contrato_modelo (conta_id bigint primary key, clausulas jsonb not null
   default '[]'::jsonb, regras jsonb not null default '{}'::jsonb,
   atualizado_em timestamptz default now(), atualizado_por text default '');
@@ -227,6 +229,72 @@ def test_antes_de_assinar_o_texto_acompanha_o_modelo(pool):
         c.commit()
     ct = _ct(pool)
     assert ct["clausulas"] == [{"titulo": "Atualizada", "corpo": "texto novo"}]
+
+
+# ------------------------------------- a foto dos preços, tirada na aprovação
+#
+# O contrato monta {preco.hora-extra} lendo o catálogo — é o que faz ele nunca
+# discordar do orçamento. Mas ele lia o catálogo ATUAL até a hora de ser
+# assinado, e a assinatura do contrato vem DEPOIS da aprovação da proposta (a
+# regra do sinal). Abria esta janela:
+#
+#   1. orçamento com hora extra R$ 620  → o cliente APROVA (assina a proposta)
+#   2. o dono corrige o catálogo: R$ 600
+#   3. o cliente paga o sinal
+#   4. o cliente ASSINA O CONTRATO      → montava agora, com R$ 600
+#
+# Dois documentos assinados pelo MESMO cliente, com números diferentes — o
+# problema que o contrato-com-campos veio matar, voltando por outra porta.
+#
+# O momento em que ele aceitou os valores é a APROVAÇÃO. Então a aprovação tira
+# uma foto do catálogo, e o contrato lê dela.
+
+def test_aprovar_tira_a_foto_do_catalogo(pool):
+    _orcamento(pool, status="enviado")
+    pp.registrar_assinatura(pool, TOKEN, "Thompson", "000", "203.0.113.7")
+    with pool.connection() as c:
+        foto = c.execute("select contrato_precos from orcamentos where token=%s",
+                         (TOKEN,)).fetchone()[0]
+    assert foto == {"hora-extra": 62000}
+
+
+def test_mudar_o_preco_depois_de_aprovado_nao_mexe_no_contrato(pool):
+    """O furo, fechado. O cliente aprovou vendo R$ 620; é isso que ele assina."""
+    _orcamento(pool, status="enviado")
+    pp.registrar_assinatura(pool, TOKEN, "Thompson", "000", "203.0.113.7")
+    with pool.connection() as c:     # o dono corrige o catálogo depois do aceite
+        c.execute("update servicos_catalogo set setup_centavos=60000 where conta_id=%s", (CONTA,))
+        c.execute("update orcamentos set sinal_pago_em=now() where token=%s", (TOKEN,))
+        c.commit()
+    assert "R$ 620,00" in _ct(pool)["clausulas"][1]["corpo"]
+
+
+def test_orcamento_sem_foto_segue_lendo_o_catalogo(pool):
+    """Aprovado antes da migração: inventar uma foto retroativa registraria como
+    "aceito pelo cliente" um preço que talvez não fosse o da época."""
+    _orcamento(pool, status="aprovada")          # aprovado direto, sem passar pela rota
+    with pool.connection() as c:
+        assert c.execute("select contrato_precos from orcamentos where token=%s",
+                         (TOKEN,)).fetchone()[0] is None
+        c.execute("update servicos_catalogo set setup_centavos=99900 where conta_id=%s", (CONTA,))
+        c.commit()
+    assert "R$ 999,00" in _ct(pool)["clausulas"][1]["corpo"]
+
+
+def test_a_foto_nao_congela_o_texto_das_clausulas(pool):
+    """Dois congelamentos em dois momentos, porque são coisas diferentes: os
+    NÚMEROS são o acordo (congelam na aprovação); o TEXTO é da empresa e pode
+    melhorar até a assinatura."""
+    _orcamento(pool, status="enviado")
+    pp.registrar_assinatura(pool, TOKEN, "Thompson", "000", "203.0.113.7")
+    with pool.connection() as c:
+        c.execute("update contrato_modelo set clausulas=%s::jsonb where conta_id=%s",
+                  (json.dumps([{"titulo": "Corrigida", "corpo": "Hora extra: {preco.hora-extra}."}]),
+                   CONTA))
+        c.commit()
+    ct = _ct(pool)
+    assert ct["clausulas"][0]["titulo"] == "Corrigida"     # texto novo…
+    assert "R$ 620,00" in ct["clausulas"][0]["corpo"]      # …com o preço aceito
 
 
 class _Req:

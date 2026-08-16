@@ -159,9 +159,14 @@ def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int) -> dict 
                        (lead_id, conta_id)).fetchone()
         msgs = []
         if cv:
+            # 'asc limit 200' pegava as 200 mais ANTIGAS: numa conversa de 395
+            # mensagens o vendedor abria a tela e nunca via o que acabou de chegar.
+            # Corta pelas últimas e devolve em ordem de leitura.
             rows = c.execute(
-                """select direcao, autor, texto, criado_em from mensagens
-                    where conversa_id=%s order by criado_em asc limit 200""", (cv[0],)).fetchall()
+                """select direcao, autor, texto, criado_em from (
+                     select direcao, autor, texto, criado_em from mensagens
+                      where conversa_id=%s order by criado_em desc limit 200
+                   ) t order by criado_em asc""", (cv[0],)).fetchall()
             for d, autor, texto, quando in rows:
                 who = "ia" if autor == "bot" else ("out" if d == "out" else "in")
                 msgs.append({"who": who, "texto": texto or "", "quando": quando})
@@ -259,6 +264,51 @@ def mudar_etapa(pool, conta_id: int, membro_id: int, lead_id: int, chave: str) -
             return {"ok": False, "erro": "etapa_invalida"}
         c.execute("update prospeccao set status=%s, atualizado_em=now() "
                   "where id=%s and conta_id=%s", (chave, lead_id, conta_id))
+        c.commit()
+    return {"ok": True}
+
+
+def salvar_ficha(pool, conta_id: int, membro_id: int, lead_id: int, dados: dict) -> dict:
+    """Preenche os dados do cliente pela tela do vendedor. Antes isso só existia no
+    painel desktop do gestor: o lead entrava por WhatsApp com um número e mais nada, e
+    quem estava conversando — que é quem descobre o nome, o CPF e o e-mail — não tinha
+    onde anotar. Revalida posse, como toda ação daqui.
+
+    Campo vazio NÃO apaga o que já está gravado: o vendedor abre a ficha no meio da
+    conversa pra somar uma informação, não pra recadastrar o lead. Só o documento tem
+    caminho de correção (mandar outro por cima), e ele é validado antes de entrar."""
+    from web.painel_prospeccao import _doc_lead
+
+    def limpo(chave):
+        return (dados.get(chave) or "").strip()
+
+    with pool.connection() as c:
+        if not _posse(c, conta_id, membro_id, lead_id):
+            return {"ok": False, "erro": "escopo"}
+        atual = c.execute("select tipo from prospeccao where id=%s and conta_id=%s",
+                          (lead_id, conta_id)).fetchone()
+        tipo_atual = (atual[0] if atual else "") or "pj"
+
+        doc = limpo("documento")
+        tipo, cnpj, cpf, erro = _doc_lead(tipo_atual, "", "", doc)
+        if erro:
+            return {"ok": False, "erro": erro}
+
+        uf = limpo("uf")[:2].upper()
+        email = limpo("email").lower()
+        # coalesce: o que veio em branco fica como estava. O documento só é reescrito
+        # quando o vendedor digitou algo — senão um "salvar" limparia CPF já cadastrado.
+        campos = [("empresa", limpo("empresa")), ("contato", limpo("contato")),
+                  ("cargo", limpo("cargo")), ("telefone", limpo("telefone")),
+                  ("email", email), ("segmento", limpo("segmento")),
+                  ("cidade", limpo("cidade")), ("uf", uf), ("obs", limpo("obs"))]
+        sets = [f"{k}=coalesce(%s,{k})" for k, _ in campos]
+        vals = [v or None for _, v in campos]
+        if doc:
+            sets += ["tipo=%s", "cnpj=%s", "cpf=%s"]
+            vals += [tipo, cnpj, cpf]
+        c.execute(f"update prospeccao set {', '.join(sets)}, atualizado_em=now() "
+                  "where id=%s and conta_id=%s", (*vals, lead_id, conta_id))
         c.commit()
     return {"ok": True}
 

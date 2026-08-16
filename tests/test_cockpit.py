@@ -166,6 +166,74 @@ def test_lead_do_vendedor_posse(pool):
     assert ck.lead_do_vendedor(pool, conta, v1, alheio) is None               # não é dele
 
 
+def test_conversa_longa_traz_as_ultimas_mensagens(pool):
+    """O corte de 200 tem que pegar as ÚLTIMAS, não as primeiras. Com 'asc limit 200'
+    o vendedor abria uma conversa de 250 mensagens e via só o começo dela — nunca o
+    pedido que acabou de chegar, que é justamente pra isso que ele abre a tela."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="longa@x.com")
+        lead = _lead(c, conta, vend, "Conversa longa")
+        conv = c.execute("insert into conversas (conta_id, prospeccao_id, canal, agente_ativo) "
+                         "values (%s,%s,'whatsapp',false) returning id", (conta, lead)).fetchone()[0]
+        base = datetime.now(timezone.utc) - timedelta(days=1)
+        for i in range(250):
+            c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto, criado_em) "
+                      "values (%s,'whatsapp','in','lead',%s,%s)",
+                      (conv, f"msg {i}", base + timedelta(minutes=i)))
+        c.commit()
+
+    d = ck.lead_do_vendedor(pool, conta, vend, lead)
+    msgs = d["mensagens"]
+    assert len(msgs) == 200
+    assert msgs[-1]["texto"] == "msg 249"          # a última é a mais recente
+    assert msgs[0]["texto"] == "msg 50"            # cortou pelo começo, não pelo fim
+    assert [m["texto"] for m in msgs] == [f"msg {i}" for i in range(50, 250)]   # ordem de leitura
+
+
+# ------------------------------------------------------------------ ficha do cliente
+def test_salvar_ficha_preenche_e_nao_apaga(pool):
+    """O lead entra pelo WhatsApp só com número; quem conversa é quem descobre nome,
+    CPF e e-mail. Salvar duas vezes não pode zerar o que foi digitado antes."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="fic@x.com")
+        lead = _lead(c, conta, vend, "5586999990001")
+        c.commit()
+
+    r = ck.salvar_ficha(pool, conta, vend, lead, {
+        "empresa": "Bruna", "contato": "Bruna Silva", "cargo": "Mãe da debutante",
+        "email": "BRUNA@Exemplo.com ", "cidade": "Teresina", "uf": "pi",
+        "documento": "529.982.247-25", "obs": "Festa 08/05/27"})
+    assert r["ok"] is True
+
+    with pool.connection() as c:
+        got = c.execute("""select empresa, contato, cargo, email, cidade, uf, tipo, cpf, cnpj, obs
+                             from prospeccao where id=%s""", (lead,)).fetchone()
+    assert got == ("Bruna", "Bruna Silva", "Mãe da debutante", "bruna@exemplo.com",
+                   "Teresina", "PI", "pf", "52998224725", None, "Festa 08/05/27")
+
+    # segunda passada só com o telefone: o resto continua lá (inclusive o CPF)
+    assert ck.salvar_ficha(pool, conta, vend, lead, {"telefone": "86 99999-0001"})["ok"] is True
+    with pool.connection() as c:
+        got = c.execute("select contato, telefone, cpf, obs from prospeccao where id=%s",
+                        (lead,)).fetchone()
+    assert got == ("Bruna Silva", "86 99999-0001", "52998224725", "Festa 08/05/27")
+
+
+def test_salvar_ficha_posse_e_documento_invalido(pool):
+    with pool.connection() as c:
+        conta = _conta(c)
+        v1 = _membro(c, conta, nome="F1", email="f1@x.com")
+        v2 = _membro(c, conta, nome="F2", email="f2@x.com")
+        meu = _lead(c, conta, v1, "Meu")
+        alheio = _lead(c, conta, v2, "Alheio")
+        c.commit()
+    assert ck.salvar_ficha(pool, conta, v1, alheio, {"contato": "X"})["erro"] == "escopo"
+    ruim = ck.salvar_ficha(pool, conta, v1, meu, {"documento": "111.111.111-11"})
+    assert ruim["ok"] is False and "CPF" in ruim["erro"]
+    with pool.connection() as c:      # nada gravado quando o documento é recusado
+        assert c.execute("select cpf from prospeccao where id=%s", (meu,)).fetchone()[0] is None
+
+
 # ------------------------------------------------------------------ ações
 def test_mudar_etapa(pool):
     with pool.connection() as c:

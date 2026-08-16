@@ -372,6 +372,17 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
   border-bottom:1px solid var(--line);font-size:.84rem}
 .ficha-l span{color:var(--text-dim);flex-shrink:0}
 .ficha-l b{text-align:right;font-weight:500;word-break:break-word}
+/* ficha do cliente: o vendedor preenche no meio da conversa, com uma mão. Duas
+   colunas nos campos curtos pra caber sem virar rolagem infinita dentro da folha. */
+.fic{display:flex;flex-wrap:wrap;gap:.55rem}
+.fic-c{flex:1 1 100%;display:flex;flex-direction:column;gap:.2rem}
+.fic-c.meia{flex:1 1 calc(50% - .3rem);min-width:0}
+.fic-c span{color:var(--text-dim);font-size:.76rem}
+.fic-c input,.fic-c textarea{width:100%;min-width:0;background:var(--bg-2);
+  border:1px solid var(--line);border-radius:10px;color:var(--text);
+  padding:.55rem .7rem;font-family:inherit;font-size:.88rem;resize:none}
+.fic-c input:focus,.fic-c textarea:focus{outline:none;border-color:var(--neon)}
+.fic .btn{margin-top:.25rem}
 
 /* ---------- abas de baixo ---------- */
 .tabs{display:flex;flex-shrink:0;border-top:1px solid var(--line);background:rgba(10,15,12,.92);
@@ -483,6 +494,16 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 
 .fonte{margin:.2rem 1.1rem 1rem;font-size:.7rem;color:var(--text-faint);line-height:1.45}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* O Safari do iPhone dá zoom na página quando o dedo entra num campo com menos
+   de 16px — e não desfaz ao sair. Era isso que entortava o app inteiro: bastava
+   tocar em "Responder…" e a conversa passava a sair cortada pela direita o resto
+   da sessão. Os campos daqui são todos menores (.72rem a .95rem), então a regra
+   fica num lugar só, valendo pra composer, login, orçamento e visita. Só em tela
+   de toque: no desktop o tamanho desenhado continua igual. O !important é
+   necessário: media query não muda especificidade, e as regras de campo daqui são
+   todas de classe (.composer input, .login input), que ganhariam de um seletor de
+   elemento. Mesma licença que a linha do prefers-reduced-motion acima. */
+@media (pointer:coarse){input,select,textarea{font-size:16px!important}}
 </style>"""
 
 # Ícones no traço do set que o painel já usa (web/portal.py) — stroke 1.7, viewBox 24.
@@ -542,7 +563,8 @@ def _page(title: str, corpo: str) -> HTMLResponse:
     na tela inicial do celular do vendedor — é o caminho normal de uso dele."""
     return HTMLResponse(
         "<!doctype html><html lang=pt-br><head><meta charset=utf-8>"
-        "<meta name=viewport content='width=device-width,initial-scale=1,viewport-fit=cover'>"
+        "<meta name=viewport content='width=device-width,initial-scale=1,viewport-fit=cover"
+        ",interactive-widget=resizes-content'>"
         "<meta name=theme-color content='#0A0F0C'><meta name=robots content=noindex>"
         "<link rel=manifest href='/cockpit/manifest.webmanifest'>"
         "<link rel='apple-touch-icon' href='/cockpit/icon.svg'>"
@@ -1684,27 +1706,62 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict) -> HTMLResponse:
 
     motivos = "".join(f"<option>{esc(m)}</option>" for m in
                       ("Preço", "Sem retorno", "Comprou concorrente", "Fora do perfil", "Sem interesse"))
-    ficha = [("Contato", d.get("contato")), ("Cargo", d.get("cargo")),
-             (d.get("doc_rot") or "Doc", d.get("doc_fmt")), ("Segmento", d.get("segmento")),
-             ("Telefone", d.get("telefone")), ("E-mail", d.get("email"))]
-    ficha_html = "".join(f"<div class=ficha-l><span>{esc(k)}</span><b>{esc(v)}</b></div>"
-                         for k, v in ficha if v)
+    # A ficha era só leitura, e só imprimia campo que já tinha valor — num lead que
+    # entrou pelo WhatsApp (número e mais nada) ela simplesmente não aparecia, então
+    # o vendedor não tinha onde anotar o que descobre na conversa. Agora é formulário,
+    # sempre visível. Campo em branco não apaga o que está gravado (ver salvar_ficha).
+    def campo(nome, rot, valor, *, tipo="text", modo="", meia=False):
+        extra = f" inputmode={modo}" if modo else ""
+        return (f"<label class='fic-c{' meia' if meia else ''}'><span>{esc(rot)}</span>"
+                f"<input name={nome} type={tipo}{extra} value='{esc(valor or '')}'"
+                f" autocomplete=off></label>")
+
+    # rótulo único: quem digita não escolhe a coluna, o tamanho do documento decide
+    # (11 = CPF, 14 = CNPJ) lá no _doc_lead. Pedir "CNPJ" pra uma cliente pessoa
+    # física seria empurrar o vendedor pro campo errado.
+    doc_rot = "CPF ou CNPJ"
+    ficha_html = (
+        f"<form method=post action='{_BASE}/lead/{lead_id}/ficha' class=fic>"
+        + campo("empresa", "Nome / empresa", d.get("empresa"))
+        + campo("contato", "Quem fala com você", d.get("contato"))
+        + campo("cargo", "Cargo", d.get("cargo"), meia=True)
+        + campo("segmento", "Segmento", d.get("segmento"), meia=True)
+        + campo("telefone", "Telefone", d.get("telefone"), tipo="tel", modo="tel", meia=True)
+        + campo("documento", doc_rot, d.get("doc_fmt"), modo="numeric", meia=True)
+        + campo("email", "E-mail", d.get("email"), tipo="email", modo="email")
+        + campo("cidade", "Cidade", d.get("cidade"), meia=True)
+        + campo("uf", "UF", d.get("uf"), meia=True)
+        + "<label class=fic-c><span>Observação</span>"
+        + f"<textarea name=obs rows=2>{esc(d.get('obs') or '')}</textarea></label>"
+        + "<button class=btn type=submit>Salvar ficha</button></form>")
 
     # A folha só sobe com :target — sem JS, então funciona igual ao resto do app,
     # que é todo form + redirect.
     folha = (
         "<div class=folha id=acoes><div class=puxa></div>"
         f"<div class=grade>{atalhos}</div>"
-        f"<h3>Etapa no funil</h3><div class=etapas>{etapas}</div>"
-        f"<h3>Fechar</h3>"
+        # a ficha vem antes do funil e do fechamento porque é o que se preenche NO
+        # meio da conversa; fechar é o último ato, não o primeiro que se vê
+        + f"<h3>Ficha do cliente</h3>{ficha_html}"
+        + f"<h3>Etapa no funil</h3><div class=etapas>{etapas}</div>"
+        + f"<h3>Fechar</h3>"
         f"<form method=post action='{_BASE}/lead/{lead_id}/fechar' style='margin-bottom:.5rem'>"
         "<input type=hidden name=tipo value=ganho><button class=btn type=submit>Marcar como ganho</button></form>"
         f"<form method=post action='{_BASE}/lead/{lead_id}/fechar' class=linhaform>"
         "<input type=hidden name=tipo value=perdido>"
         f"<select name=motivo><option value=''>Motivo (opcional)</option>{motivos}</select>"
         "<button class='btn perigo' style='width:auto;padding:.55rem .9rem' type=submit>Perdido</button></form>"
-        + (f"<h3>Ficha</h3>{ficha_html}" if ficha_html else "")
         + "</div><a class=fbg href='#fechar' aria-label='Fechar'></a>")
+
+    # Conversa abre no fim, na mensagem mais recente — é onde o trabalho está.
+    # Sem 'smooth' de propósito: tem que JÁ NASCER embaixo, e não descer na frente
+    # do vendedor. Duas tentativas porque a primeira roda no meio do parse, quando
+    # o .chat (flex:1) ainda não sabe a altura dele; a segunda garante. Como a tela
+    # é form + redirect, isso também cobre o depois de enviar. Mesma ideia do
+    # cxScroll do inbox do gestor (web/painel_prospeccao.py).
+    fim = ("<script>(function(){function f(){var c=document.querySelector('.chat');"
+           "if(c)c.scrollTop=c.scrollHeight;}f();"
+           "document.addEventListener('DOMContentLoaded',f);})();</script>")
 
     chip = ("<span class='chip ia'>IA</span>" if d["ia"] else "<span class='chip voce'>você</span>")
     corpo = (
@@ -1713,7 +1770,7 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict) -> HTMLResponse:
              + f"<div class=chat>{chat}</div>"
              + f"<div class=rodape>{acao}"
              + "<a class='btn ghost' style='margin-top:.5rem' href='#acoes'>Ficha, funil e fechamento</a>"
-             + "</div>" + folha)
+             + "</div>" + folha + fim)
     return _page(d["empresa"], corpo)
 
 
@@ -2018,6 +2075,20 @@ def _agir(request: Request, lead_id: int, fn, destino: str):
 def cockpit_mensagem(request: Request, lead_id: int, texto: str = Form(...)):
     return _agir(request, lead_id,
                  lambda p, c, m, l: {**ck.enviar_mensagem(p, c, m, l, texto), "msg": "Mensagem enviada ✓"},
+                 f"{_BASE}/lead/{lead_id}")
+
+
+@router.post("/cockpit/lead/{lead_id}/ficha")
+def cockpit_ficha(request: Request, lead_id: int, empresa: str = Form(""), contato: str = Form(""),
+                  cargo: str = Form(""), segmento: str = Form(""), telefone: str = Form(""),
+                  documento: str = Form(""), email: str = Form(""), cidade: str = Form(""),
+                  uf: str = Form(""), obs: str = Form("")):
+    """Ficha do cliente preenchida pelo vendedor, de dentro da conversa."""
+    dados = {"empresa": empresa, "contato": contato, "cargo": cargo, "segmento": segmento,
+             "telefone": telefone, "documento": documento, "email": email,
+             "cidade": cidade, "uf": uf, "obs": obs}
+    return _agir(request, lead_id,
+                 lambda p, c, m, l: {**ck.salvar_ficha(p, c, m, l, dados), "msg": "Ficha salva ✓"},
                  f"{_BASE}/lead/{lead_id}")
 
 

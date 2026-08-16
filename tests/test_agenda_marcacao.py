@@ -84,6 +84,49 @@ def test_celula_do_mes_se_pinta_quando_tem_data_segurada():
     assert celulas[19]["tem_seg"] is False and celulas[19]["urg"] is False
 
 
+# ====================================================== o pagamento na linha
+
+def _fic(**kw):
+    base = {"pct": 0, "vencidas": 0}
+    base.update(kw)
+    return base
+
+
+def test_pagamento_na_linha_tem_uma_cor_por_situacao():
+    """Duas festas no mesmo mês, uma quitada e outra sem um centavo, apareciam
+    idênticas. Verde = quitado, âmbar = em parte, coral = tem parcela vencida (é o
+    que exige ação, e por isso vence a regra do percentual)."""
+    assert pa._pg_estado(_fic(pct=100)) == {"rot": "100%", "classe": "ok"}
+    assert pa._pg_estado(_fic(pct=40)) == {"rot": "40%", "classe": "mid"}
+    assert pa._pg_estado(_fic(pct=0)) == {"rot": "0%", "classe": "mid"}
+    # vencida manda, mesmo com quase tudo pago
+    assert pa._pg_estado(_fic(pct=90, vencidas=1)) == {"rot": "90%", "classe": "bad"}
+    assert pa._pg_estado(_fic(pct=100, vencidas=1))["classe"] == "bad"
+
+
+def test_sem_titulo_a_linha_nao_mostra_percentual_nenhum():
+    """Contrato não fechado não tem cobrança: "0%" leria como calote quando ninguém
+    cobrou ainda. E compromisso sem orçamento não tem o que medir."""
+    assert pa._pg_estado(_fic(pct=None)) == {"rot": "", "classe": ""}
+    assert pa._pg_estado(None) == {"rot": "", "classe": ""}
+
+
+def test_ficha_formatada_vira_texto_e_some_quando_nao_existe():
+    assert pa._ficha_rot(None) is None
+    f = pa._ficha_rot({"orcamento_id": 9, "numero": 60, "status": "fechado",
+                       "cliente": "Maria", "contato": "(86) 99999-0000",
+                       "tipo": "Aniversário", "convidados": "50",
+                       "itens": [{"nome": "DJ", "qtd": 1}], "total_centavos": 745000,
+                       "tem_titulos": True, "pct": 23, "pago_centavos": 181000,
+                       "titulos_centavos": 781000, "vencidas": 0,
+                       "proxima": {"vencimento": date(2026, 9, 13),
+                                   "valor_centavos": 600000, "vencida": False}})
+    assert f["total"] == "R$ 7.450,00" and f["pago"] == "R$ 1.810,00"
+    assert f["convidados"] == 50          # veio como string do jsonb, sai como número
+    assert f["prox_valor"] == "R$ 6.000,00" and f["prox_venc"] == "13/09"
+    assert f["fechado"] is True
+
+
 # ====================================================== o nicho manda na tela
 # A marca de estado, a legenda que fala de sinal e o "Só segurar a data" são
 # vocabulário de quem VENDE DATA. Clínica, loja e escritório não seguram horário
@@ -105,6 +148,30 @@ def _render_agenda(vende_data: bool) -> str:
         mes_prev="2026-07", mes_next="2026-09", mes_hoje="2026-08", hoje_iso="2026-08-01",
         abrir_novo=True, cfg=cfg, feed_url="", share=None, seguradas=[],
         vende_data=vende_data, aviso="", ctx={}, conta={}, request=None)
+
+
+def test_ficha_do_evento_so_e_buscada_pra_quem_vende_data(cliente):
+    """Duas consultas a mais por abertura da Agenda. Fora do nicho de eventos não
+    existe orçamento de festa pra ler — então nem se pergunta."""
+    chamou = []
+    fake = type("V", (), {
+        "vende_data": staticmethod(lambda p, c: cliente.estado_nicho["vende"]),
+        "fichas_de_eventos": staticmethod(
+            lambda p, c, ids: (chamou.append(list(ids)) or {})),
+    })
+    import web.painel_agenda as _pa
+    orig = _pa._vendas
+    _pa._vendas = lambda: fake
+    try:
+        ag.criar_evento(cliente.pool, CONTA, "Festa", ag.agora_brt() + timedelta(days=3))
+        cliente.estado_nicho["vende"] = True
+        cliente.get("/painel/agenda")
+        assert len(chamou) == 1 and chamou[0]          # perguntou, com os ids do mês
+        cliente.estado_nicho["vende"] = False
+        cliente.get("/painel/agenda")
+        assert len(chamou) == 1                        # não perguntou de novo
+    finally:
+        _pa._vendas = orig
 
 
 def test_so_o_nicho_de_eventos_ve_o_vocabulario_de_data_segurada():

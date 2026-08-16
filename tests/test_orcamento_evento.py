@@ -727,6 +727,77 @@ def test_pre_reserva_da_agenda_mostra_o_orcamento_de_origem(pool, conta_id):
     assert linha["sinal_centavos"] == 181000
 
 
+# ------------------------------------------- a ficha do evento na agenda
+def test_ficha_traz_o_que_a_agenda_nao_sabia(pool, conta_id):
+    """A agenda guardava uma FRASE colada na aprovação ("Orçamento Nº 1 · 100
+    convidados · aprovado pelo cliente") — não é dado, não dá pra somar nem filtrar,
+    e envelhece. Tudo que a ficha mostra já estava gravado; faltava alguém ler."""
+    oid, tok = _semear(pool, conta_id)
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    f = vendas.fichas_de_eventos(pool, conta_id, [ev_id])[ev_id]
+    assert f["orcamento_id"] == oid and f["numero"] == 60
+    assert f["tipo"] == "Aniversário" and f["convidados"] == 50
+    assert f["cliente"] == "Maria Teste" and f["contato"] == "(86) 99999-0000"
+    assert f["total_centavos"] == 745000
+    assert [i["nome"] for i in f["itens"]] == ["Espaço 01 — completo", "Cadeira Modway Entreat"]
+    assert [i["qtd"] for i in f["itens"]] == [1, 10]
+
+
+def test_ficha_sem_contrato_fechado_mostra_plano_e_nao_inventa_percentual(pool, conta_id):
+    """Orçamento só aprovado não tem título nenhum: ninguém cobrou. Dizer "0%
+    recebido" seria mentira com cara de número — então `pct` vem None e o que
+    aparece é o PLANO que o cliente aceitou."""
+    _oid, tok = _semear(pool, conta_id)
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    f = vendas.fichas_de_eventos(pool, conta_id, [ev_id])[ev_id]
+    assert f["tem_titulos"] is False and f["pct"] is None
+    assert f["plano_centavos"] == 781000            # 181000 + 600000
+    assert f["proxima"] is None and f["vencidas"] == 0
+
+
+def test_ficha_conta_o_recebido_a_partir_dos_titulos(pool, conta_id):
+    """Fechado o contrato, quem manda no dinheiro são os títulos — é neles que a
+    baixa acontece e é deles que sai o livro-caixa."""
+    oid, tok = _semear(pool, conta_id)
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    r = vendas.fechar_orcamento(pool, conta_id, oid)
+    f = vendas.fichas_de_eventos(pool, conta_id, [ev_id])[ev_id]
+    assert f["tem_titulos"] is True and f["pct"] == 0
+    assert f["titulos_centavos"] == 781000 and f["aberto_centavos"] == 781000
+    # a PRÓXIMA é a primeira em aberto por vencimento — o sinal, de 13/11
+    assert f["proxima"]["valor_centavos"] == 181000
+    assert f["proxima"]["vencimento"] == date(2025, 11, 13)
+    assert f["proxima"]["vencida"] is True          # data no passado, no fixture
+    assert f["vencidas"] == 2 and f["vencidas_centavos"] == 781000
+    # dá baixa no sinal: o percentual anda e a próxima passa a ser a 2ª parcela
+    from finance import empresa as emp
+    emp.dar_baixa_titulo(pool, conta_id, r["titulos"][0], data_pagto=date(2025, 11, 13))
+    f2 = vendas.fichas_de_eventos(pool, conta_id, [ev_id])[ev_id]
+    assert f2["pago_centavos"] == 181000 and f2["pct"] == 23
+    assert f2["proxima"]["valor_centavos"] == 600000
+
+
+def test_ficha_nao_atravessa_conta_nem_inventa_evento(pool, conta_id):
+    _oid, tok = _semear(pool, conta_id)
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    assert vendas.fichas_de_eventos(pool, conta_id + 999, [ev_id]) == {}
+    assert vendas.fichas_de_eventos(pool, conta_id, []) == {}
+    # compromisso marcado na mão não tem orçamento — e não tem ficha
+    solto = ag.criar_evento(pool, conta_id, "Reunião", ag.agora_brt() + timedelta(days=3))
+    assert solto["id"] not in vendas.fichas_de_eventos(pool, conta_id, [solto["id"]])
+
+
+def test_ficha_de_varios_eventos_numa_consulta_so(pool, conta_id):
+    """A tela do mês pede a lista inteira: uma consulta por festa não escala."""
+    ids = []
+    for n in (71, 72, 73):
+        _o, tok = _semear(pool, conta_id, numero=n)
+        ids.append(prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool))
+    fichas = vendas.fichas_de_eventos(pool, conta_id, ids)
+    assert sorted(fichas) == sorted(ids)
+    assert {f["numero"] for f in fichas.values()} == {71, 72, 73}
+
+
 def test_choque_de_data_avisa_o_dono_sem_bloquear(pool, conta_id, monkeypatch):
     """Dois orçamentos aprovados pro mesmo horário viravam dois compromissos calados.
     Quem decide se cabe é a empresa (buffet com dois salões cabe) — mas ela tem que

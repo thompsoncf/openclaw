@@ -372,6 +372,31 @@ def test_token_errado_nao_abre_o_contrato_de_ninguem(pool, errado):
     assert "Thompson" not in corpo and "PRIME LTDA" not in corpo
 
 
+def test_a_rota_do_contrato_existe_no_app_que_sobe(pool, monkeypatch):
+    """A FIAÇÃO no `web.app`. Todo o resto deste arquivo chama `cp.contrato_publico`
+    direto, e os outros testes de rota montam um FastAPI só com o router que
+    interessa — nenhum dos dois nota se `app.include_router(contrato_pub_router)`
+    não estiver lá. E aí o link que o dono manda pro cliente dá 404 em produção
+    com a suíte inteira verde.
+
+    (Conferido: `app.routes` NÃO serve pra isso — esta versão do FastAPI guarda
+    os routers incluídos como `_IncludedRouter` preguiçoso, sem `path`. Só a
+    requisição de verdade responde.)"""
+    from fastapi.testclient import TestClient
+
+    from web.app import app
+    _orcamento(pool, status="aprovada")
+    c = TestClient(app, raise_server_exceptions=False)
+    r = c.get(f"/contrato/{CT_TOKEN}")
+    assert r.status_code == 200, f"a rota não está registrada no app ({r.status_code})"
+    assert "Contrato nº" in r.text and "PRIME LTDA" in r.text
+    # e o POST da assinatura também — de nada adianta a página abrir e o botão 404
+    r2 = c.post(f"/contrato/{CT_TOKEN}/assinar",
+                data={"nome": "Thompson", "doc": "000", "aceite": "on"},
+                follow_redirects=False)
+    assert r2.status_code != 404, "a rota de assinar não está registrada"
+
+
 def test_link_colado_com_espaco_sobrando_ainda_abre(pool):
     """O contrário do de cima, e de propósito: o link vai por WhatsApp e volta
     colado com espaço. Aparar branco não afrouxa nada — o token continua tendo

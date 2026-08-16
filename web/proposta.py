@@ -359,6 +359,9 @@ def _carregar(token: str, pool=None):
         # não dá pra fazer conta em cima de "R$ 8.900,00"
         "setup_centavos_cru": int(setup_c or 0),
         "total": _brl(ano1_c if (ano1_c or 0) > 0 else (setup_c or 0)),
+        # o mesmo total, CRU: a folha precisa somar o plano de pagamento e comparar,
+        # e comparar string formatada seria pedir bug.
+        "total_centavos": int(ano1_c or 0) if (ano1_c or 0) > 0 else int(setup_c or 0),
         "desconto_pct": int((evento or {}).get("desconto") or 0),
         "desconto_valor": _brl(max(0, (setup_c or 0) - (ano1_c or 0))),
         "status": status or "rascunho",
@@ -544,6 +547,18 @@ def proposta_publica(request: Request, token: str, erro: str = ""):
             {"venc": _data_br(p.get("venc")), "valor": _brl(p.get("valor_centavos")),
              "forma": p.get("forma") or "", "obs": p.get("obs") or ""}
             for p in d["parcelas"] if int(p.get("valor_centavos") or 0) > 0]
+        # O DOCUMENTO TEM QUE SOMAR. A tabela de parcelas nunca teve linha de total,
+        # então "Total do evento: R$ 9.405,00" podia conviver com parcelas somando
+        # R$ 12.105,00 sem nada apontar — e quem não somasse na mão não via. Aconteceu
+        # em produção, no primeiro orçamento de evento real. Divergir tem caso
+        # legítimo (juros de cartão, acréscimo por forma de pagamento), então não se
+        # bloqueia nada: mostra-se a soma e, quando ela não bate, diz-se a diferença.
+        plano = sum(int(p.get("valor_centavos") or 0) for p in d["parcelas"]
+                    if int(p.get("valor_centavos") or 0) > 0)
+        total_ev = int(d.get("total_centavos") or 0)
+        d["plano_total"] = _brl(plano) if plano else ""
+        d["plano_difere"] = _brl(abs(plano - total_ev)) if (plano and plano != total_ev) else ""
+        d["plano_a_mais"] = plano > total_ev
     else:
         linhas = [{"nome": (it.get("nome") or ""), "desc": (it.get("desc") or ""),
                    "setup": _reais(it.get("setup")), "mensal": _reais(it.get("mensal"))}
@@ -743,6 +758,11 @@ table.itens td.n{color:#14213D}
 .sub-cat b{font-family:var(--mono);color:#14213D;white-space:nowrap}
 .sub-cat.desconto,.sub-cat.desconto b{color:#0b7a56}
 table.pag th{background:#FBFAF7;color:#8A8475;border-bottom:1px solid #ECE7DC}
+/* A soma do plano. Fecha a tabela: documento que não soma não pode sair calado.
+   Quando diverge do total do evento, a diferença sai ao lado — em coral, porque
+   é a linha que o cliente precisa enxergar antes de assinar. */
+table.pag tr.pag-tot td{border-top:1.5px solid #ECE7DC;font-weight:700;background:#FBFAF7}
+table.pag tr.pag-tot td:last-child{font-weight:600;color:#B4453C;font-size:12px}
 td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:top}
 .cond{background:#FBFAF7;border:1px solid #ECE7DC;border-radius:9px;padding:12px 14px;font-size:12px;color:#5A6678;line-height:1.7;white-space:pre-line}
 /* CONTRATO — mesma folha, depois do orçamento. Texto corrido de documento, sem
@@ -775,6 +795,7 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
     letter-spacing:.06em;text-transform:uppercase;color:#8A8475}
   table.pag,table.pag tbody,table.pag tr,table.pag td{display:block;width:auto}
   table.pag tr:first-child{display:none}
+  table.pag tr.pag-tot{border-top:1.5px solid #ECE7DC;margin-top:2px}
   table.pag tr{padding:9px 0;border-bottom:1px solid #F0EBE0}
   table.pag td{border:0;padding:1px 0;font-size:12.5px;text-align:left}
   table.pag td:empty{display:none}
@@ -930,6 +951,11 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
         {% for p in prop.parcelas_fmt %}<tr><td data-r="Vencimento">{{ p.venc or '—' }}</td>
           <td class="q" data-r="Valor">{{ p.valor }}</td>
           <td data-r="Forma">{{ p.forma }}</td><td data-r="Obs">{{ p.obs }}</td></tr>{% endfor %}
+        {% if prop.plano_total %}
+        <tr class="pag-tot"><td data-r="">Total do plano de pagamento</td>
+          <td class="q" data-r="Total">{{ prop.plano_total }}</td><td colspan="2">
+          {%- if prop.plano_difere %}{{ prop.plano_a_mais and '+' or '−' }} {{ prop.plano_difere }} em relação ao total do evento{% endif %}</td></tr>
+        {% endif %}
       </table>
       {% endif %}
       {% if prop.escopo %}<div class="eb">Condições</div><div class="cond">{{ prop.escopo }}</div>{% endif %}

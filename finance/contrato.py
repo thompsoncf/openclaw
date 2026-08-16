@@ -42,8 +42,11 @@ pudesse divergir dela.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import secrets
+
+_log = logging.getLogger("finance.contrato")
 
 # Um campo é {grupo.nome}. O ponto separa DE ONDE vem o valor, e isso é
 # proposital: quem lê a cláusula sabe se aquele número veio do catálogo, do
@@ -445,6 +448,23 @@ def assinado_do_orcamento(pool, conta_id: int, orcamento_id: int) -> bool:
     return bool(ct and ct["assinado_em"])
 
 
+def exige_assinatura(pool, conta_id: int) -> bool:
+    """Nesta conta, o financeiro só abre com o contrato assinado?
+
+    É a mesma porta de sempre (`tem_contrato` -> `modo_por_nicho`): onde existe
+    contrato de locação, é ele que fecha o negócio. Onde não existe — consultoria,
+    tecnologia, os recorrentes —, nada muda: quem fecha continua sendo o botão.
+
+    NÃO É TOLERANTE, de propósito, e é o oposto do `vende_data`. Lá o pior caso
+    era um enfeite faltando na tela; aqui é gerar contas a receber e lançar receita
+    de um negócio que ninguém assinou. Se não dá pra ler o nicho, não dá pra saber
+    se este negócio precisa de assinatura — e falhar abrindo a porta recriaria
+    exatamente o buraco que esta função existe pra fechar.
+    """
+    from finance import empresa as emp
+    return tem_contrato((emp.obter_dados_empresa(pool, conta_id) or {}).get("nicho"))
+
+
 def criar_para_orcamento(pool, conta_id: int, orcamento_id: int,
                          valor_centavos: int | None = None,
                          criado_por: str = "") -> dict | None:
@@ -507,4 +527,26 @@ def assinar(pool, conta_id: int, contrato_id: int, clausulas,
              (doc or "").strip()[:40] or None, (ip or "")[:60],
              int(contrato_id), conta_id))
         c.commit()
-        return cur.rowcount > 0
+        if not cur.rowcount:
+            return False
+        orcamento_id = c.execute("select orcamento_id from contratos where id=%s",
+                                 (int(contrato_id),)).fetchone()[0]
+
+    # É AQUI QUE O FINANCEIRO ABRE. A assinatura é que fecha o negócio no nicho de
+    # eventos — o botão "Fechar contrato" some do funil justamente porque quem
+    # fechava era ele, sem olhar se havia assinatura.
+    #
+    # Depois do commit e tolerante, como as consequências do `confirmar_sinal`: a
+    # ASSINATURA é o que não pode se perder. Se a geração falhar, o contrato fica
+    # assinado e o financeiro é retomável — a rota de fechar continua viva e a
+    # trava agora deixa passar (o contrato está assinado). Botão escondido não é
+    # rota removida, e foi por isso que eu não removi a rota.
+    if orcamento_id:
+        try:
+            from finance import vendas
+            vendas.fechar_orcamento(pool, conta_id, int(orcamento_id),
+                                    por_assinatura=True)
+        except Exception as e:  # noqa: BLE001
+            _log.warning("assinar %s: financeiro não abriu no orçamento %s: %s: %s",
+                         contrato_id, orcamento_id, type(e).__name__, e)
+    return True

@@ -20,6 +20,8 @@ from psycopg_pool import ConnectionPool
 from starlette.middleware.sessions import SessionMiddleware
 
 from finance import agenda as ag
+from finance import contrato as ctr
+from finance import vendas
 from web import painel_servicos as ps
 
 CONTA = 7
@@ -57,6 +59,17 @@ def cliente(monkeypatch):
             categoria text default '', lancamento_id bigint, pago_em date,
             criado_por bigint, orcamento_id bigint, parcela_idx int,
             criado_em timestamptz default now())""")
+        # lancamentos existe pelo MESMO motivo que titulos: o sinal agora entra no
+        # livro-caixa na hora em que cai, e `dar_baixa_titulo` escreve aqui. Sem a
+        # tabela, a baixa estouraria dentro do try/except de `confirmar_sinal` e o
+        # teste veria "não lançou" sem saber que foi por falta de schema.
+        c.execute("""create table lancamentos (id bigserial primary key, conta_id bigint,
+            membro_id bigint, tipo text not null, valor_centavos bigint not null,
+            categoria text not null default '', descricao text not null default '',
+            data date not null, pagamento text default '', forma_pagamento text default '',
+            origem text default 'manual', comprovante text default '', chave text,
+            natureza text default 'empresa', plano_conta_id bigint,
+            centro_custo_id bigint, criado_em timestamptz default now())""")
         # salvar/1 valida os módulos contra o catálogo da conta e espelha o cliente;
         # as duas leituras precisam das tabelas existirem, mesmo vazias.
         c.execute("""create table servicos_catalogo (id bigserial primary key,
@@ -389,3 +402,169 @@ def test_sinal_confirmado_mesmo_sem_agenda_nao_perde_o_pagamento(cliente):
     with cliente.pool.connection() as cx:
         assert cx.execute("select sinal_pago_em from orcamentos where id=%s",
                           (oid,)).fetchone()[0] is not None
+
+
+# ------------------------------------- quem abre o financeiro é a ASSINATURA
+#
+# O buraco, medido em produção em 16/08/2026: `fechar_orcamento` só olhava
+# `status <> 'fechado'`. Deu pra gerar contas a receber e lançar receita (R$
+# 2.940,00, lançamento 622) de um negócio cujo contrato estava `enviado`, sem
+# assinatura nenhuma. E o botão se chamava "Fechar contrato".
+
+def _com_plano(c, *, sinal=294000, resto=686000, conta_id=CONTA):
+    """Orçamento de evento aprovado, com plano de pagamento e contrato ainda sem
+    assinar — o estado exato em que o fechamento tem que ser recusado."""
+    with c.pool.connection() as cx:
+        oid = cx.execute(
+            """insert into orcamentos (conta_id, cliente, empresa, status, criado_por,
+                 setup_centavos, primeiro_ano_centavos, modo, parcelas, sinal_centavos)
+               values (%s,'Marina','Marina','aprovada','',%s,%s,'evento',%s::jsonb,%s)
+               returning id""",
+            (conta_id, sinal + resto, sinal + resto,
+             '[{"obs":"Sinal — confirma a reserva da data","venc":"2026-08-22",'
+             f'"forma":"Pix","valor_centavos":{sinal}}},'
+             '{"obs":"Restante","venc":"2026-10-14","forma":"Pix",'
+             f'"valor_centavos":{resto}}}]', sinal)).fetchone()[0]
+        ct = cx.execute(
+            """insert into contratos (conta_id, numero, orcamento_id, status, token)
+               values (%s,(select coalesce(max(numero),0)+1 from contratos where conta_id=%s),
+                       %s,'enviado',%s) returning id""",
+            (conta_id, conta_id, oid, f"tok{oid}")).fetchone()[0]
+        cx.commit()
+    return oid, ct
+
+
+def _titulos(c, oid):
+    with c.pool.connection() as cx:
+        return cx.execute(
+            """select parcela_idx, valor_centavos, status, lancamento_id
+                 from titulos where orcamento_id=%s order by parcela_idx""",
+            (oid,)).fetchall()
+
+
+def test_fechar_e_recusado_enquanto_o_cliente_nao_assinar(cliente):
+    """O pedido do dono, virado regra do sistema: sem assinatura, nada de contas a
+    receber. A trava fica no servidor porque o pedido vem do navegador."""
+    oid, _ = _com_plano(cliente)
+    r = cliente.post("/painel/servicos/fechar", json={"id": oid})
+    assert r.status_code == 400
+    assert "assinou" in r.json()["erro"]
+    assert _titulos(cliente, oid) == []
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select status from orcamentos where id=%s",
+                          (oid,)).fetchone()[0] == "aprovada"
+
+
+def test_a_assinatura_e_que_gera_as_contas_a_receber(cliente):
+    """E é o único caminho: assinar fecha o negócio e abre o financeiro de uma vez."""
+    oid, ct_id = _com_plano(cliente)
+    assert ctr.assinar(cliente.pool, CONTA, ct_id, [{"titulo": "C1", "corpo": "x"}],
+                       "Marina Souza", "123", "1.2.3.4") is True
+    assert [(i, v, s) for i, v, s, _ in _titulos(cliente, oid)] == [
+        (0, 294000, "aberto"), (1, 686000, "aberto")]
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select status from orcamentos where id=%s",
+                          (oid,)).fetchone()[0] == "fechado"
+
+
+def test_o_sinal_entra_no_caixa_quando_cai_e_nao_no_fechamento(cliente):
+    """O nó que o desenho novo desata. O sinal é dinheiro que JÁ entrou; segurar o
+    lançamento até a assinatura seria recusar-se a registrar dinheiro recebido.
+    Só o título DELE nasce — o resto do plano continua esperando a assinatura."""
+    oid, _ = _com_plano(cliente)
+    r = cliente.post("/painel/servicos/sinal-recebido", json={"id": oid})
+    assert r.status_code == 200 and r.json()["titulo_baixado"]
+    linhas = _titulos(cliente, oid)
+    assert len(linhas) == 1, "só o título do sinal, e nada do resto do plano"
+    idx, valor, status, lanc = linhas[0]
+    assert (idx, valor, status) == (0, 294000, "pago")
+    assert lanc, "o dinheiro tem que ter chegado ao livro-caixa"
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select valor_centavos, tipo from lancamentos where id=%s",
+                          (lanc,)).fetchone() == (294000, "receita")
+        # e o negócio NÃO fechou por causa disso
+        assert cx.execute("select status from orcamentos where id=%s",
+                          (oid,)).fetchone()[0] == "aprovada"
+
+
+def test_o_sinal_nao_vira_titulo_duas_vezes(cliente):
+    """Com o sinal nascendo antes e a assinatura gerando o resto, a segunda etapa
+    tem que PULAR o que já existe. Sem isso a receita do sinal dobrava."""
+    oid, ct_id = _com_plano(cliente)
+    cliente.post("/painel/servicos/sinal-recebido", json={"id": oid})
+    ctr.assinar(cliente.pool, CONTA, ct_id, [{"titulo": "C1", "corpo": "x"}],
+                "Marina", "123", "1.2.3.4")
+    linhas = _titulos(cliente, oid)
+    assert [(i, v, s) for i, v, s, _ in linhas] == [
+        (0, 294000, "pago"), (1, 686000, "aberto")]
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select count(*), coalesce(sum(valor_centavos),0) "
+                          "from lancamentos where conta_id=%s", (CONTA,)).fetchone() \
+            == (1, 294000), "o sinal não pode ter sido lançado duas vezes"
+
+
+def test_orcamento_sem_plano_de_pagamento_ainda_gera_o_titulo_do_total(cliente):
+    """A regressão que o pulo poderia causar: o fallback do título único olhava
+    `if not ids`, e agora `ids` pode voltar vazio porque tudo já existia. Se
+    continuasse olhando `ids`, um evento COM parcelas ganharia um título extra do
+    total por cima — dobrando a receita."""
+    with cliente.pool.connection() as cx:
+        oid = cx.execute(
+            """insert into orcamentos (conta_id, cliente, empresa, status, criado_por,
+                 setup_centavos, primeiro_ano_centavos, modo)
+               values (%s,'Sem plano','Sem plano','aprovada','',500000,500000,'evento')
+               returning id""", (CONTA,)).fetchone()[0]
+        ct = cx.execute(
+            """insert into contratos (conta_id, numero, orcamento_id, status, token)
+               values (%s,90,%s,'enviado','toksemplano') returning id""",
+            (CONTA, oid)).fetchone()[0]
+        cx.commit()
+    ctr.assinar(cliente.pool, CONTA, ct, [{"titulo": "C1", "corpo": "x"}],
+                "Alguém", "1", "1.2.3.4")
+    assert [(i, v, s) for i, v, s, _ in _titulos(cliente, oid)] == [(None, 500000, "aberto")]
+
+
+def test_conta_sem_contrato_fecha_pelo_botao_como_sempre(cliente):
+    """O escopo, de novo: os nichos recorrentes não têm documento pra assinar, então
+    a trava não pode alcançá-los. A conta OUTRA não é de eventos."""
+    with cliente.pool.connection() as cx:
+        oid = cx.execute(
+            """insert into orcamentos (conta_id, cliente, empresa, status, criado_por,
+                 setup_centavos, mensal_centavos, modo)
+               values (%s,'Clínica','Clínica','aprovada','',920000,45000,'recorrente')
+               returning id""", (OUTRA,)).fetchone()[0]
+        cx.commit()
+    r = vendas.fechar_orcamento(cliente.pool, OUTRA, oid)
+    assert r["ok"] is True and r["modo"] == "recorrente"
+    assert r["setup_titulo_id"] and r["mensal_titulo_id"]
+
+
+def test_plano_de_parcela_unica_nao_ganha_titulo_do_total_por_cima(cliente):
+    """O caso que expõe o fallback: pagamento à vista na reserva — o plano TEM uma
+    parcela, e ela é o sinal. Quando ele cai, o título nasce; na assinatura o laço
+    pula essa parcela e `ids` volta VAZIO.
+
+    Se o fallback do título único ainda olhasse `if not ids`, ele concluiria "esse
+    evento não tem plano de pagamento" e criaria um título do TOTAL por cima do que
+    já estava pago — dobrando a receita do evento. Por isso a condição olha
+    `parcelas`, que é a pergunta que ele queria fazer desde sempre."""
+    with cliente.pool.connection() as cx:
+        oid = cx.execute(
+            """insert into orcamentos (conta_id, cliente, empresa, status, criado_por,
+                 setup_centavos, primeiro_ano_centavos, modo, parcelas, sinal_centavos)
+               values (%s,'À vista','À vista','aprovada','',400000,400000,'evento',
+                 '[{"obs":"Sinal — confirma a reserva da data","venc":"2026-08-22",
+                    "forma":"Pix","valor_centavos":400000}]'::jsonb,400000)
+               returning id""", (CONTA,)).fetchone()[0]
+        ct = cx.execute(
+            """insert into contratos (conta_id, numero, orcamento_id, status, token)
+               values (%s,91,%s,'enviado','tokavista') returning id""",
+            (CONTA, oid)).fetchone()[0]
+        cx.commit()
+    cliente.post("/painel/servicos/sinal-recebido", json={"id": oid})
+    ctr.assinar(cliente.pool, CONTA, ct, [{"titulo": "C1", "corpo": "x"}],
+                "À vista", "1", "1.2.3.4")
+    assert [(i, v, s) for i, v, s, _ in _titulos(cliente, oid)] == [(0, 400000, "pago")]
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select coalesce(sum(valor_centavos),0) from titulos "
+                          "where orcamento_id=%s", (oid,)).fetchone()[0] == 400000

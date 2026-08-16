@@ -725,6 +725,57 @@ def painel_servicos_fechar(request: Request, dados: FecharIn):
     return JSONResponse(r)
 
 
+class OrcDelIn(BaseModel):
+    id: int
+
+
+@router.post("/painel/servicos/excluir")
+def painel_servicos_excluir(request: Request, dados: OrcDelIn):
+    """Apaga um orçamento do funil.
+
+    Não existia jeito nenhum de apagar: proposta gerada errada (e o agente gera
+    sozinho agora) ficava no funil pra sempre, contando nos números e aparecendo pro
+    vendedor. O catálogo já tinha excluir; o funil não.
+
+    Duas travas, e as duas são de negócio, não de código:
+
+    * PROPOSTA ASSINADA NÃO SE APAGA. `aprovada`/`fechado` é documento com aceite do
+      cliente e, no fechado, título a receber no módulo Empresa — sumir com ele
+      deixaria o financeiro apontando pra um orçamento que não existe. Erro em
+      documento assinado se conserta emitindo outro, que é a mesma regra que a
+      página da proposta já segue ao parar de reler o cadastro depois do aceite.
+    * VENDEDOR SÓ APAGA O QUE É DELE. Mesmo recorte da listagem: quem vê só as
+      próprias propostas não pode apagar as dos outros por id.
+
+    O lead aponta pro orçamento (prospeccao.orcamento_id, FK sem on delete), então o
+    vínculo é solto antes — senão o delete estoura no banco e o botão não funcionaria
+    justamente no caso mais comum, o orçamento que nasceu de um lead."""
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    membro_id, papel = _ator(request)
+    with get_pool().connection() as c:
+        _garantir_tabela(c)
+        r = c.execute("select coalesce(status,'rascunho'), coalesce(criado_por,'') "
+                      "from orcamentos where id=%s and conta_id=%s",
+                      (int(dados.id), conta[0])).fetchone()
+        if not r:
+            return JSONResponse({"erro": "proposta não encontrada"}, status_code=404)
+        status, criado_por = r
+        if papel == "vendedor" and membro_id and criado_por != str(membro_id):
+            return JSONResponse({"erro": "essa proposta não é sua"}, status_code=403)
+        if status in ("aprovada", "fechado"):
+            return JSONResponse(
+                {"erro": "proposta assinada não pode ser apagada — emita outra"},
+                status_code=409)
+        c.execute("update prospeccao set orcamento_id=null "
+                  "where orcamento_id=%s and conta_id=%s", (int(dados.id), conta[0]))
+        c.execute("delete from orcamentos where id=%s and conta_id=%s",
+                  (int(dados.id), conta[0]))
+        c.commit()
+    return JSONResponse({"ok": True})
+
+
 # ---------------------------------------------------------------- template
 _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 <div class="sv-wrap{% if servico_avulso %} evento{% endif %}">
@@ -1913,6 +1964,20 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       })
       .catch(function(){alert('Erro de conexão.'); btn.disabled=false; btn.textContent='Fechar contrato';});
   }
+  // Apagar proposta do funil. Confirma sempre e nomeia o cliente na pergunta: a
+  // lista é densa e o 🗑 fica ao lado do 📄, então "tem certeza?" sozinho não diz
+  // qual das cinco linhas vai embora.
+  function excluir(id,nome,btn){
+    if(!confirm('Apagar a proposta de '+nome+'? Isso não tem volta.')){return;}
+    btn.disabled=true;
+    fetch('/painel/servicos/excluir',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})
+      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+      .then(function(res){
+        if(!res.ok){alert((res.d&&res.d.erro)||'Não consegui apagar.'); btn.disabled=false; return;}
+        carregarHist();
+      })
+      .catch(function(){alert('Erro de conexão.'); btn.disabled=false;});
+  }
   function carregarHist(){
     fetch('/painel/servicos/lista').then(function(r){return r.json();}).then(function(d){
       var box=document.getElementById('oc-hist-box');
@@ -1956,6 +2021,14 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
           var b=document.createElement('button'); b.className='oc-fechar'; b.textContent='Fechar contrato';
           b.addEventListener('click',function(){fechar(it.id,b);});
           right.appendChild(b);
+        }
+        // assinada/fechada não some: é documento com aceite do cliente (e, no
+        // fechado, título a receber). O servidor recusa de qualquer jeito — aqui o
+        // botão nem aparece, pra não oferecer o que vai dar erro.
+        if(!fechado && !aprovada){
+          var bx=document.createElement('button'); bx.className='oc-ic'; bx.title='Apagar proposta'; bx.textContent='🗑';
+          bx.addEventListener('click',function(){excluir(it.id,it.cliente,bx);});
+          right.appendChild(bx);
         }
         el.appendChild(right);
         box.appendChild(el);

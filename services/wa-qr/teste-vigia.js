@@ -23,7 +23,7 @@ process.env.WA_QR_SHARED_SECRET = process.env.WA_QR_SHARED_SECRET || 'teste'
 process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'silent'
 
 const s = require('./server')
-const { sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, marcarVivo, sessoes } = s
+const { sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, marcarVivo, sessoes } = s
 
 let falhas = 0
 function conferir (ok, descricao) {
@@ -169,7 +169,47 @@ for (const [valor, rotulo] of [[undefined, 'undefined'], [null, 'null'], [{}, 'o
     tentativasPos440: 3 })
   marcarVivo(35)
   conferir(sessaoOrfa(sessoes.get(35), Date.now(), BASE) === false && !sessoes.get(35).substituidaEm,
-    'entregou evento: o carimbo do 440 sai e a contagem zera')
+    'entregou evento: o carimbo do 440 sai')
+
+  // ------------------------------------------------------------------------
+  // sessaoFirme — a dobra do esperaPos440 não estava dobrando.
+  //
+  // Quem zerava `tentativasPos440` era o marcarVivo, e numa conta movimentada
+  // sempre chega um recibo entre o socket subir e levar 440 de novo. Resultado
+  // medido em produção na noite de 15/08: a conta 23 foi substituída às 20:42,
+  // 20:48, 20:54, 21:00, 21:06, 21:12, 21:18, 21:24 e 21:30 — de 6 em 6 minutos,
+  // no relógio, a noite inteira. A espera ficava presa nos 5 minutos iniciais e
+  // a "guerra de sessões" que a dobra existia pra evitar rodava sozinha.
+  //
+  // Cada religamento desses refaz a sessão criptográfica com quem está do outro
+  // lado: as mensagens enviadas em volta da troca chegam ilegíveis e o aparelho
+  // do cliente mostra "Aguardando mensagem" até pedir reenvio. Foi o atraso de
+  // 2min30 que apareceu no teste do agente.
+  const FIRME = 15 * 60 * 1000
+  console.log('\nsessaoFirme: só o tempo DE PÉ zera a contagem de retomadas')
+  conferir(sessaoFirme({ abertoEm: AGORA - FIRME }, AGORA, FIRME) === true,
+    'aberta há 15min: firme')
+  conferir(sessaoFirme({ abertoEm: AGORA - FIRME + 1 }, AGORA, FIRME) === false,
+    'um milissegundo antes: ainda não')
+  conferir(sessaoFirme({}, AGORA, FIRME) === false,
+    'sem abertoEm (nunca abriu, ou veio de deploy antigo): na dúvida, não é firme')
+  conferir(sessaoFirme(null, AGORA, FIRME) === false, 'sessão inexistente não estoura')
+
+  sessoes.set(35, { status: 'conectado', sock: SOCK, abertoEm: Date.now(), tentativasPos440: 3 })
+  marcarVivo(35)
+  conferir(sessoes.get(35).tentativasPos440 === 3,
+    'subiu agora e já entregou um recibo: a contagem NÃO zera — era este o furo')
+
+  sessoes.set(35, { status: 'conectado', sock: SOCK, abertoEm: Date.now() - FIRME - 1,
+    tentativasPos440: 3 })
+  marcarVivo(35)
+  conferir(sessoes.get(35).tentativasPos440 === 0,
+    'de pé há mais de 15min: aí sim a retomada pegou e a espera volta ao começo')
+
+  // e o efeito prático da correção: a espera cresce a cada retomada que não segura
+  conferir(esperaPos440({ tentativasPos440: 0 }, BASE) === 5 * 60 * 1000 &&
+           esperaPos440({ tentativasPos440: 3 }, BASE) === 40 * 60 * 1000,
+    'sem zerar à toa, a espera vai de 5min a 40min em vez de repetir 5min pra sempre')
   sessoes.clear()
 
   console.log('\nvigia × trava: sessão de outra instância não se religa')

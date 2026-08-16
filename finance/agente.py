@@ -92,6 +92,117 @@ def _linha_catalogo(s) -> str:
     return f"- {s['nome']} (slug {s['slug']}): {preco}"
 
 
+# O campo `escopo` do orçamento é impresso na folha da proposta sob o título
+# "Condições" — texto de documento, que o cliente lê depois de assinar. O agente
+# gravava ali a RESPOSTA DE CHAT que tinha acabado de mandar, então a proposta saía
+# com "Que festa incrível vai ser essa! 🎉🥂", emoji de bolo e "quer que eu chame um
+# consultor?" no lugar das condições comerciais. Condição de documento é isto:
+_CONDICOES = ("Valores de referência para a data, o horário e o número de convidados "
+              "informados pelo cliente. Sujeito à confirmação de disponibilidade da data.")
+
+
+def _linha_orcamento(it) -> str:
+    """Uma linha do orçamento que vai pro WhatsApp do cliente.
+
+    Mesma regra do _linha_catalogo (zero é campo em branco, nunca desconto), mais a
+    QUANTIDADE — que faltava e mudava o preço. O cliente pediu 6 horas de festa e a
+    linha da hora extra saía "R$ 620", como se fosse uma só; o número que ele leu não
+    era o que ele pediu."""
+    q = max(1, int(it.get("qtd") or 1))
+    us = int(it.get("setup_centavos") or 0)
+    um = int(it.get("mensal_centavos") or 0)
+    nome = it.get("nome") or ""
+    rot = f"{nome} ({q}×)" if q > 1 else nome
+    if not us and not um:
+        return f"• {rot}: valor sob consulta"
+    if us and um:
+        txt = f"{_reais(us * q)} de entrada + {_reais(um * q)} por mês"
+    elif us:
+        txt = _reais(us * q)
+    else:
+        txt = f"{_reais(um * q)} por mês"
+    if q > 1:
+        txt += f" ({_reais(us or um)} cada)"
+    return f"• {rot}: {txt}"
+
+
+def _bloco_orcamento(itens, link: str) -> str:
+    """O orçamento prévio inteiro, do jeito que chega no WhatsApp.
+
+    Nasceu de um orçamento real que saiu assim pra um cliente:
+
+        • PACOTE ESSENCIAL - SEGUNDA A QUINTA - 2027: R$ 0/mês
+        • DJ: R$ 0/mês
+        Setup: R$ 11920
+        Total mensal: R$ 0
+
+    Três erros numa tela só. O "R$ 0/mês" é o mesmo zero que o _linha_catalogo já
+    tinha aprendido a não falar — só que este texto era montado à parte e ficou pra
+    trás. O "R$ 11920" é dinheiro sem ponto de milhar. E "Total mensal: R$ 0" num
+    aluguel de salão não quer dizer nada: não existe mensalidade aqui.
+
+    Função pura, e de propósito: é o texto que chega no cliente."""
+    linhas = [_linha_orcamento(i) for i in itens]
+    setup = sum(int(i.get("setup_centavos") or 0) * max(1, int(i.get("qtd") or 1)) for i in itens)
+    mensal = sum(int(i.get("mensal_centavos") or 0) * max(1, int(i.get("qtd") or 1)) for i in itens)
+    if setup and mensal:
+        total = f"Entrada: {_reais(setup)}\nMensal: {_reais(mensal)}"
+    elif setup:
+        total = f"Total: {_reais(setup)}"
+    elif mensal:
+        total = f"Total: {_reais(mensal)} por mês"
+    else:
+        # nenhum item tem preço cadastrado: melhor não fingir um total do que somar zeros
+        total = "Os valores desses itens ainda não estão cadastrados — já confirmo com a equipe."
+    return ("📄 Montei um orçamento prévio pra você:\n" + "\n".join(linhas) + "\n" + total
+            + f"\n\nVer a proposta: {link}\n\nÉ um valor de referência, sem compromisso.")
+
+
+def _itens_escolhidos(d, slugs_ok) -> list[dict]:
+    """Os itens que a IA escolheu, validados contra o catálogo e com quantidade.
+
+    Aceita as duas formas em `servicos`: o slug solto (como sempre foi) ou
+    {"slug": ..., "qtd": N}. Slug que não existe no catálogo é descartado sem dó — é
+    o que impede a IA de inventar item, e por tabela inventar preço. Slug repetido
+    entra uma vez só: a IA às vezes lista o mesmo pacote duas vezes e o orçamento
+    saía com o valor dobrado."""
+    fora, vistos = [], set()
+    for x in (d.get("servicos") or []):
+        slug = (x.get("slug") if isinstance(x, dict) else x) or ""
+        s = slugs_ok.get(slug)
+        if not s or slug in vistos:
+            continue
+        vistos.add(slug)
+        try:
+            q = int(x.get("qtd") or 1) if isinstance(x, dict) else 1
+        except (TypeError, ValueError):
+            q = 1
+        fora.append({**s, "qtd": max(1, min(q, 999))})
+    return fora
+
+
+def _evento_do_json(d) -> dict:
+    """Data, convidados, horário e tipo — o que o CLIENTE disse, guardado no orçamento.
+
+    A folha da proposta tem um bloco "O evento" (data, convidados, início,
+    encerramento) e ele saía todo vazio nos orçamentos do agente, porque o agente
+    nunca gravava nada ali. O cliente dizia "31/12, casamento, 21h, 50 convidados" e
+    recebia um papel que não repetia nenhuma dessas quatro coisas."""
+    ev = d.get("evento") if isinstance(d.get("evento"), dict) else {}
+    out = {}
+    for k in ("data", "inicio", "fim", "tipo", "local"):
+        v = str(ev.get(k) or "").strip()[:60]
+        if v:
+            out[k] = v
+    try:
+        n = int(str(ev.get("convidados") or "").strip() or 0)
+        if n > 0:
+            out["convidados"] = n
+    except (TypeError, ValueError):
+        pass
+    return out
+
+
 def _conhecimento(c, conta_id):
     rows = c.execute(
         "select tipo, pergunta, resposta from agente_conhecimento where conta_id=%s order by ordem, id",
@@ -175,17 +286,34 @@ def _atender(pool, conta_id, conversa_id):
             "e qualificar sozinho — NÃO ofereça 'chamar um consultor' a não ser que o "
             "CLIENTE peça explicitamente falar com uma pessoa. "
             "Responda SEMPRE só com JSON válido, sem markdown.\n\n"
+            # O nome do item do catálogo costuma CARREGAR a condição (o ano, o dia da
+            # semana, a faixa). Um agente que ignora isso cotou o pacote de 2027 pra
+            # uma festa de 31/12/2026 e ainda escreveu "2026" ao lado do preço de
+            # 2027 — R$ 7.800 no lugar de R$ 5.760, com o nome do ano certo.
+            f"Hoje é {datetime.now(timezone.utc).date().isoformat()}. O nome de cada "
+            "item do catálogo diz a que ele se aplica (ano, dia da semana, faixa). "
+            "Escolha o item cujo nome bate com o que o cliente pediu — se a festa é "
+            "em 2026, o item tem que ser o de 2026. Se não existir item pro que ele "
+            "pediu (uma data especial, um ano que não está no catálogo), NÃO use o "
+            "parecido: diga que vai confirmar o valor dessa data com a equipe.\n\n"
             f"INSTRUÇÕES DA EMPRESA:\n{instr or '(nenhuma)'}\n\n"
             f"PERGUNTAS FREQUENTES:\n{faqs or '(nenhuma)'}\n\n"
             f"CATÁLOGO DE SERVIÇOS:\n{cat_txt}")
         pedir = (
             f"Conversa com {lead_empresa}:\n{historico}\n\n"
             "Responda a última mensagem do cliente. Retorne APENAS JSON:\n"
-            '{"acao":"responder|orcamento","resposta":"texto pra mandar ao '
-            'cliente","servicos":["slug"],"temperatura":"frio|morno|quente"}\n'
+            '{"acao":"responder|orcamento","resposta":"texto pra mandar ao cliente",'
+            '"servicos":[{"slug":"...","qtd":1}],"temperatura":"frio|morno|quente",'
+            '"evento":{"data":"AAAA-MM-DD","convidados":0,"inicio":"","fim":"","tipo":""}}\n'
             "- acao=orcamento só se o cliente PEDIU preço/orçamento; liste em servicos "
             "os slugs do catálogo que fazem sentido. Senão, acao=responder e responda a "
             "dúvida direto, com base na base.\n"
+            "- qtd é a QUANTIDADE que o cliente pediu, não 1 por padrão: 6 horas de "
+            "festa num pacote de 4 são 2 horas extras, qtd=2. O preço que ele vai ler "
+            "é qtd × valor do item.\n"
+            "- evento: repita o que o CLIENTE disse (data, quantos convidados, que "
+            "horas começa e termina, que tipo de festa). Deixe em branco o que ele não "
+            "disse — não complete com número redondo nem com o padrão da casa.\n"
             "- Sempre preencha resposta com um texto útil pra mandar ao cliente.")
 
         from core.brain import Brain
@@ -226,14 +354,25 @@ def _enviar(c, conta_id, conversa_id, canal, destino, texto):
 
 def _orcamento(c, conta_id, conversa_id, conv, catalogo, d, canal, destino, resposta):
     slugs_ok = {s["slug"]: s for s in catalogo}
-    escolhidos = [slugs_ok[s] for s in (d.get("servicos") or []) if s in slugs_ok]
+    escolhidos = _itens_escolhidos(d, slugs_ok)
     if not escolhidos:
         # sem serviços válidos → responde o texto e para
         return _enviar(c, conta_id, conversa_id, canal, destino, resposta or
                        "Me conta rapidinho o que você precisa que eu monto um orçamento 😊")
-    setup = sum(s["setup_centavos"] for s in escolhidos)
-    mensal = sum(s["mensal_centavos"] for s in escolhidos)
-    itens = [{"nome": s["nome"], "setup": s["setup_centavos"], "mensal": s["mensal_centavos"]} for s in escolhidos]
+    setup = sum(s["setup_centavos"] * s["qtd"] for s in escolhidos)
+    mensal = sum(s["mensal_centavos"] * s["qtd"] for s in escolhidos)
+    # `itens` vai pra folha da proposta, e lá os valores são lidos em REAIS: o
+    # painel grava round(setup_centavos/100) e o fechamento multiplica por 100 de
+    # volta (finance/cockpit.py). Só o agente gravava CENTAVOS neste mesmo campo, e a
+    # folha então multiplicava tudo por 100 outra vez — o pacote de R$ 7.800 aparecia
+    # como R$ 780.000,00 na linha, enquanto o total, que vem de outro campo, dizia
+    # R$ 11.920,00. O papel se contradizia sozinho na frente do cliente.
+    itens = [{"nome": s["nome"], "desc": s.get("descricao") or "",
+              "categoria": s.get("categoria") or "", "qtd": s["qtd"],
+              "unitario": round(s["setup_centavos"] / 100),
+              "setup": round(s["setup_centavos"] * s["qtd"] / 100),
+              "mensal": round(s["mensal_centavos"] * s["qtd"] / 100)} for s in escolhidos]
+    evento = _evento_do_json(d)
     empresa = conv[3] or conv[2] or "Cliente"
     token = secrets.token_urlsafe(16)
     from finance import vendas as _vendas
@@ -242,18 +381,13 @@ def _orcamento(c, conta_id, conversa_id, conv, catalogo, d, canal, destino, resp
                        where ct.id=%s""", (conta_id,)).fetchone()
     c.execute(
         """insert into orcamentos (conta_id, cliente, empresa, modulos, itens, escopo,
-             setup_centavos, mensal_centavos, n_modulos, criado_por, token, status, modo)
-           values (%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,'agente',%s,'rascunho',%s)""",
+             evento, setup_centavos, mensal_centavos, n_modulos, criado_por, token,
+             status, modo)
+           values (%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s::jsonb,%s,%s,%s,'agente',%s,'rascunho',%s)""",
         (conta_id, empresa, empresa, json.dumps([s["slug"] for s in escolhidos]),
-         json.dumps(itens), (resposta or "")[:2000], setup, mensal, len(escolhidos), token,
-         _vendas.modo_por_nicho(_n[0] if _n else "")))
+         json.dumps(itens), _CONDICOES, json.dumps(evento), setup, mensal,
+         len(escolhidos), token, _vendas.modo_por_nicho(_n[0] if _n else "")))
     from finance.email_sender import _app_url
     link = _app_url() + "/proposta/" + token
-    linhas = "\n".join(f"• {s['nome']}: R$ {s['mensal_centavos']//100}/mês" for s in escolhidos)
-    corpo = (resposta + "\n\n" if resposta else "") + (
-        f"📄 Montei um orçamento prévio pra você:\n{linhas}\n"
-        + (f"Setup: R$ {setup//100}\n" if setup else "")
-        + f"Total mensal: R$ {mensal//100}\n\n"
-        f"Ver a proposta: {link}\n\n"
-        "É um valor de referência — quer que eu chame um consultor pra fechar os detalhes?")
+    corpo = (resposta + "\n\n" if resposta else "") + _bloco_orcamento(escolhidos, link)
     _enviar(c, conta_id, conversa_id, canal, destino, corpo)

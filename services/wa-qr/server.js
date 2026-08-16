@@ -93,6 +93,14 @@ const MUDO_TETO_MS = parseInt(process.env.WA_QR_MUDO_TETO_MS || '2700000', 10)  
 // Espera antes de tentar retomar uma conta que levou 440 e ficou sem dono. Dobra a
 // cada tentativa (5min, 10, 20, 40, 80) — ver esperaPos440.
 const ESPERA_POS_440_MS = parseInt(process.env.WA_QR_ESPERA_POS_440_MS || '300000', 10)
+// Quanto tempo DE PÉ uma sessão precisa ficar pra a retomada valer como resolvida —
+// ver sessaoFirme. Existe porque a dobra do esperaPos440 não estava dobrando: quem
+// zerava o contador era o marcarVivo, e uma sessão que sobe, entrega dois recibos e
+// leva 440 de novo já tinha zerado. Resultado medido em produção na noite de 15/08:
+// a conta 23 foi substituída às 20:42, 20:48, 20:54, 21:00, 21:06, 21:12, 21:18,
+// 21:24 e 21:30 — de 6 em 6 minutos, no relógio, a noite inteira. 15min é mais que o
+// dobro da volta desse laço: quem passa disso está de pé de verdade.
+const SESSAO_FIRME_MS = parseInt(process.env.WA_QR_SESSAO_FIRME_MS || '900000', 10)
 
 if (!process.env.DATABASE_URL) { logBase.error('Falta DATABASE_URL'); process.exit(1) }
 if (!SEGREDO) { logBase.error('Falta WA_QR_SHARED_SECRET'); process.exit(1) }
@@ -430,7 +438,24 @@ function marcarVivo (contaId) {
   s.reconexoesMudas = 0
   // ...e a conta deixa de ser órfã de 440: quem entrega está vivo e é nosso
   s.substituidaEm = null
-  s.tentativasPos440 = 0
+  // Mas o contador de retomadas NÃO se apaga aqui. Entregar um evento prova que o
+  // socket subiu, não que ele vai FICAR — e era essa confusão que desarmava a dobra
+  // do esperaPos440: numa conta movimentada sempre chega um recibo entre subir e
+  // levar 440 de novo, então o contador voltava a zero toda volta e a espera ficava
+  // presa nos 5 minutos iniciais pra sempre. Quem zera é o tempo de pé (sessaoFirme).
+  if (sessaoFirme(s, Date.now(), SESSAO_FIRME_MS)) s.tentativasPos440 = 0
+}
+
+// A sessão está de pé há tempo suficiente pra a retomada ter dado certo?
+//
+// `abertoEm` é carimbado no 'open' e limpo quando o socket é descartado, então isto
+// mede a ENCARNAÇÃO atual — não a conta. Sem `abertoEm` (sessão que nunca abriu, ou
+// restaurada por um deploy antes deste campo existir) a resposta é não: na dúvida a
+// espera continua crescendo, que é o lado seguro. Religar de menos atrasa uma conta;
+// religar de mais é o que faz o WhatsApp achar que é abuso.
+function sessaoFirme (s, agora, firme) {
+  if (!s || !s.abertoEm) return false
+  return (agora - s.abertoEm) >= firme
 }
 
 // Quanto esperar antes de tentar retomar uma conta que levou 440, dobrando a cada
@@ -1685,6 +1710,9 @@ async function iniciarSessao (contaId) {
     if (connection === 'open') {
       s.status = 'conectado'; s.qr = null
       s.ultimoEvento = Date.now()   // ponto de partida do vigia — ver vigiarSessoes
+      // quando ESTA encarnação subiu — é o relógio do sessaoFirme, que decide se uma
+      // retomada pós-440 pegou ou se a conta está no meio de uma guerra de sessões
+      s.abertoEm = Date.now()
       // marca que ESTA sessão chegou a abrir de verdade — é isso (e não o
       // creds.registered, que nunca vira true no fluxo QR) que separa um logout
       // real de uma credencial podre rejeitada logo na primeira tentativa.
@@ -1717,6 +1745,9 @@ async function iniciarSessao (contaId) {
         descartarSocket(sock, contaId, 'substituida_por_outra_sessao')
         pararTimersDaAgenda(s)
         s.sock = null
+        // esta encarnação acabou: quanto ela durou já foi contabilizado (sessaoFirme),
+        // e deixar o carimbo velho faria a PRÓXIMA parecer firme antes de subir
+        s.abertoEm = null
         // Levar 440 SEGURANDO a trava significa que quem assumiu não é outra
         // instância nossa — é o celular do vendedor abrindo o WhatsApp Web em
         // outro lugar, ou uma instância rodando sem a tabela da trava. A
@@ -1736,6 +1767,7 @@ async function iniciarSessao (contaId) {
       const deslogado = code === DisconnectReason.loggedOut
       s.status = deslogado ? 'desconectado' : 'reconectando'
       s.qr = null
+      s.abertoEm = null              // ver sessaoFirme: o relógio é por encarnação
       log.warn({ contaId, code, deslogado }, 'conexão fechou')
       if (deslogado) {
         // Só conta como logout DE VERDADE (o que autoriza apagar o histórico de
@@ -2236,4 +2268,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, marcarVivo, vigiarSessoes, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, marcarVivo, vigiarSessoes, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

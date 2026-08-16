@@ -250,24 +250,46 @@ def registrar_assinatura(pool, token: str, nome: str, doc: str, ip: str) -> bool
         return False
     with pool.connection() as c:
         r = c.execute(
-            """update orcamentos o
+            """update orcamentos
                   set aprovada_por=%s, aprovada_doc=%s, aprovada_ip=%s,
-                      aprovada_em=now(), status='aprovada', atualizado_em=now(),
-                      -- FOTO DO CATÁLOGO no instante do aceite (migração 161). O
-                      -- contrato lê daqui em vez do catálogo vivo, senão uma
-                      -- correção de preço feita entre a aprovação e a assinatura
-                      -- do contrato deixaria os DOIS documentos assinados pelo
-                      -- mesmo cliente dizendo números diferentes.
-                      contrato_precos = (
+                      aprovada_em=now(), status='aprovada', atualizado_em=now()
+                where token=%s and status not in ('aprovada','fechado')
+              returning id""",
+            (nome[:120], (doc or "").strip()[:40] or None, (ip or "")[:60], token)).fetchone()
+        c.commit()
+        if r:
+            _foto_dos_precos(c, token)
+    return bool(r)
+
+
+def _foto_dos_precos(c, token: str) -> None:
+    """Congela o catálogo no instante do aceite (migração 161).
+
+    O contrato lê daqui em vez do catálogo vivo, senão uma correção de preço
+    feita entre a aprovação e a assinatura do contrato deixaria os DOIS
+    documentos assinados pelo mesmo cliente dizendo números diferentes.
+
+    EM STATEMENT PRÓPRIO, e depois do commit da aprovação, de propósito: a foto
+    é um acessório e a assinatura do cliente não é. Junto no mesmo UPDATE, uma
+    falha aqui derrubaria o aceite inteiro — foi o que aconteceu no CI, onde a
+    tabela do catálogo nem sempre existe. Sem a foto o contrato cai no catálogo
+    vivo, que é o comportamento que ele tinha antes desta migração; perder a
+    aprovação seria bem pior."""
+    try:
+        with c.transaction():
+            c.execute(
+                """update orcamentos o
+                      set contrato_precos = (
                           select jsonb_object_agg(s.slug, s.setup_centavos)
                             from servicos_catalogo s
                            where s.conta_id = o.conta_id and s.ativo
                              and coalesce(s.slug,'') <> '')
-                where o.token=%s and o.status not in ('aprovada','fechado')
-              returning o.id""",
-            (nome[:120], (doc or "").strip()[:40] or None, (ip or "")[:60], token)).fetchone()
+                    where o.token=%s""", (token,))
         c.commit()
-    return bool(r)
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger("proposta.contrato").warning(
+            "não deu pra congelar os preços do token %s", token, exc_info=True)
 
 
 def _do_cadastro(pool, conta_id: int, cliente_id: int, congelado: tuple) -> tuple:

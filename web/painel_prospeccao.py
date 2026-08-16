@@ -2953,6 +2953,26 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
             )
         except Exception:  # noqa: BLE001
             pass
+    # PUSH no celular de quem atende. Fica DEPOIS do rodízio de propósito: se o lead
+    # acabou de ser atribuído (`_mid`), `avisar_vendedor` já mandou o "🔥 Novo lead" e
+    # duas notificações pela mesma mensagem seria barulho. Da segunda mensagem em
+    # diante — que antes era silêncio total — quem avisa é este.
+    #
+    # Thread solta e FORA da transação, pela mesma regra que já governa o rodízio
+    # aqui em cima: falhar o aviso custa um aviso; abortar a transação custa a
+    # MENSAGEM RECEBIDA, e o WhatsApp leva 200 como se estivesse tudo bem.
+    # `nova` pela mesma razão que o agente olha pra ela: a mesma mensagem chega mais
+    # de uma vez (reentrega do provedor), e notificar de novo por uma entrega repetida
+    # é avisar de algo que não aconteceu.
+    if nova and not _mid:
+        try:
+            from finance import cockpit as _ck
+            import threading
+            threading.Thread(target=_ck.avisar_mensagem,
+                             args=(get_pool(), conta_id, lead_id, conv_id, corpo),
+                             daemon=True).start()
+        except Exception:  # noqa: BLE001
+            pass
     return conv_id, nova
 
 

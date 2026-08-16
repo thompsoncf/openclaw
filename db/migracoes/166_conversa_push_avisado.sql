@@ -1,0 +1,22 @@
+-- 166_conversa_push_avisado.sql
+-- Quando o push avisou dessa conversa pela última vez.
+--
+-- Até aqui o único push que existia era o do rodízio ("caiu um lead pra você"), e
+-- ele acontece UMA vez na vida do lead. Agora a resposta do cliente também toca o
+-- celular do vendedor — e aí a conta muda: nas conversas reais o cliente manda em
+-- rajada. Nas threads da Doce Mell é o padrão, não a exceção: "Boa tarde" /
+-- "08/05/27" / "Debutante" / "19 h" em quarenta segundos. Quatro notificações pra
+-- uma pessoa que só está respondendo o formulário do atendimento é o caminho mais
+-- curto pro vendedor desligar o push — e aí o recurso todo morre.
+--
+-- Guardar o instante do último aviso POR CONVERSA resolve com uma coluna. Tem que
+-- ser no banco, não em memória de processo: o app roda com mais de um worker no
+-- Render, e cada um teria a sua contagem — o cooldown vazaria na proporção do
+-- número de workers.
+--
+-- Aditivo e idempotente. Nulo = nunca avisou, que é o estado certo pra toda
+-- conversa que já existe.
+alter table public.conversas add column if not exists push_avisado_em timestamptz;
+
+-- rollback:
+--   alter table public.conversas drop column if exists push_avisado_em;

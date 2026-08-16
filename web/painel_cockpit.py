@@ -373,7 +373,10 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .ficha-l span{color:var(--text-dim);flex-shrink:0}
 .ficha-l b{text-align:right;font-weight:500;word-break:break-word}
 /* ficha do cliente: o vendedor preenche no meio da conversa, com uma mão. Duas
-   colunas nos campos curtos pra caber sem virar rolagem infinita dentro da folha. */
+   colunas nos campos curtos pra não virar uma coluna interminável de campos. */
+/* o <form> assume o lugar de item flex do shell: o miolo (.scroll) rola e o botão
+   (.rodape-b) fica preso embaixo, sem depender do atributo form= no botão */
+.telaform{flex:1;min-height:0;display:flex;flex-direction:column}
 .fic{display:flex;flex-wrap:wrap;gap:.55rem}
 .fic-c{flex:1 1 100%;display:flex;flex-direction:column;gap:.2rem}
 .fic-c.meia{flex:1 1 calc(50% - .3rem);min-width:0}
@@ -881,8 +884,33 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
              + f"<div class=scroll>{pushcard}{lista}{dica}{volta}</div>"
              + "<div class=toast id=toast></div>"
              + _abas_vend("fila")
-             + f'<script>window.CKBASE="{_BASE}";</script>' + vapid_js + _FILA_JS)
+             + f'<script>window.CKBASE="{_BASE}";</script>' + vapid_js + _FILA_JS
+             + _sinal_js(ck.sinal_fila(pool, conta_id, membro_id)))
     return _page("Meus leads", corpo)
+
+
+def _sinal_js(sig: str) -> str:
+    """A fila se atualiza sozinha: lead novo caindo no rodízio, ou mensagem chegando
+    numa conversa da lista, aparecem sem o vendedor recarregar.
+
+    Recarrega em vez de re-renderizar a lista no cliente — é muito menos código, e o
+    app inteiro é form + redirect. Mas nunca por cima de trabalho em curso: card
+    aberto no deslize, ou campo em foco, adiam pro próximo tique."""
+    import json as _json          # local, como no resto do arquivo
+    return ("<script>(function(){var sig=" + _json.dumps(sig) + ",ocupado=false;"
+            "function tique(){"
+            "if(ocupado||document.visibilityState!=='visible')return;"
+            "if(document.querySelector('.front.open'))return;"          # deslize aberto
+            "var a=document.activeElement;"
+            "if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))return;"
+            "ocupado=true;"
+            "fetch(window.CKBASE+'/fila/sinal').then(function(r){return r.json();})"
+            ".then(function(j){ocupado=false;if(j&&j.ok&&j.sig!==sig)location.reload();})"
+            ".catch(function(){ocupado=false;});}"
+            "setInterval(tique,8000);"
+            "document.addEventListener('visibilitychange',function(){"
+            "if(document.visibilityState==='visible')tique();});"
+            "})();</script>")
 
 
 @router.get("/cockpit/agenda", response_class=HTMLResponse)
@@ -1319,6 +1347,58 @@ async def cockpit_visita_criar(request: Request, lead_id: int, payload: dict = B
     return JSONResponse(r)
 
 
+# ------------------------------------------------------------------ ficha do cliente
+@router.get("/cockpit/lead/{lead_id}/ficha", response_class=HTMLResponse)
+def cockpit_ficha_tela(request: Request, lead_id: int):
+    """Os dados do cliente, preenchidos por quem está conversando com ele. O lead entra
+    pelo WhatsApp com um número e mais nada; nome, CPF e e-mail aparecem no meio da
+    conversa, e quem descobre é o vendedor — não o gestor no painel de desktop.
+
+    Tela inteira, no mesmo molde de orçamento e visita: formulário não cabe na folha
+    de ações (ver o comentário em `_lead_vendedor`)."""
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess
+    d = ck.lead_do_vendedor(get_pool(), conta_id, membro_id, lead_id)
+    if not d:
+        return RedirectResponse(_BASE, status_code=303)
+
+    def campo(nome, rot, valor, *, tipo="text", modo="", meia=False):
+        extra = f" inputmode={modo}" if modo else ""
+        return (f"<label class='fic-c{' meia' if meia else ''}'><span>{esc(rot)}</span>"
+                f"<input name={nome} type={tipo}{extra} value='{esc(valor or '')}'"
+                f" autocomplete=off></label>")
+
+    # Rótulo único: quem digita não escolhe a coluna — o tamanho do documento decide
+    # (11 = CPF, 14 = CNPJ) lá no _doc_lead. Pedir "CNPJ" pra uma cliente pessoa
+    # física seria empurrar o vendedor pro campo errado.
+    campos = (
+        campo("empresa", "Nome / empresa", d.get("empresa"))
+        + campo("contato", "Quem fala com você", d.get("contato"))
+        + campo("cargo", "Cargo", d.get("cargo"), meia=True)
+        + campo("segmento", "Segmento", d.get("segmento"), meia=True)
+        + campo("telefone", "Telefone", d.get("telefone"), tipo="tel", modo="tel", meia=True)
+        + campo("documento", "CPF ou CNPJ", d.get("doc_fmt"), modo="numeric", meia=True)
+        + campo("email", "E-mail", d.get("email"), tipo="email", modo="email")
+        + campo("cidade", "Cidade", d.get("cidade"), meia=True)
+        + campo("uf", "UF", d.get("uf"), meia=True)
+        + "<label class=fic-c><span>Observação</span>"
+        + f"<textarea name=obs rows=3>{esc(d.get('obs') or '')}</textarea></label>")
+
+    # O <form> é o próprio item flex do shell: assim o miolo (.scroll) rola e o botão
+    # (.rodape-b) fica preso embaixo, sem precisar do atributo form= no botão.
+    corpo = (_hdr("Ficha do cliente", d["empresa"], voltar=f"{_BASE}/lead/{lead_id}")
+             + _flash(request)
+             + f"<form class=telaform method=post action='{_BASE}/lead/{lead_id}/ficha'>"
+             + f"<div class=scroll><div class=secao><div class='fic'>{campos}</div>"
+             + "<div class=fonte>Campo em branco não apaga o que já está salvo — dá pra "
+               "voltar aqui e ir completando conforme a conversa anda.</div></div></div>"
+             + "<div class=rodape-b><button class=btn type=submit>Salvar ficha</button></div>"
+             + "</form>")
+    return _page(f"Ficha — {d['empresa']}", corpo)
+
+
 # ------------------------------------------------------------------ propostas
 _STATUS_SEG = [("", "Todas"), ("enviado", "Enviadas"), ("negociando", "Negociando"),
                ("aprovada", "Aprovadas"), ("fechado", "Fechadas"), ("perdido", "Perdidas")]
@@ -1675,7 +1755,8 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict) -> HTMLResponse:
         who = m["who"]
         rot = ("<div class=who>Agente</div>" if who == "ia"
                else "<div class=who>Você</div>" if who == "out" else "")
-        bolhas.append(f"<div class='bub {esc(who)}'>{rot}{esc(m['texto'])}</div>")
+        bolhas.append(f"<div class='bub {esc(who)}' data-id='{m.get('id') or 0}'>"
+                      f"{rot}{esc(m['texto'])}</div>")
     if d["ia"]:
         bolhas.insert(0, "<div class=aviso>O agente está atendendo. Toque em "
                          "<b>Assumir</b> pra responder você.</div>")
@@ -1696,7 +1777,8 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict) -> HTMLResponse:
         + (f"<a href='{esc(zap)}' target=_blank rel=noopener>{_ic('zap', 'ic p')} WhatsApp</a>" if zap
            else f"<span class=off>{_ic('zap', 'ic p')} WhatsApp</span>")
         + f"<a class=orc href='{_BASE}/lead/{lead_id}/orcamento'>{_ic('orc', 'ic p')} Orçamento</a>"
-        + f"<a class=vis2 href='{_BASE}/lead/{lead_id}/visita'>{_ic('agenda', 'ic p')} Visita</a>")
+        + f"<a class=vis2 href='{_BASE}/lead/{lead_id}/visita'>{_ic('agenda', 'ic p')} Visita</a>"
+        + f"<a href='{_BASE}/lead/{lead_id}/ficha'>{_ic('ficha', 'ic p')} Ficha</a>")
 
     etapas = "".join(
         f"<form method=post action='{_BASE}/lead/{lead_id}/etapa'>"
@@ -1706,43 +1788,18 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict) -> HTMLResponse:
 
     motivos = "".join(f"<option>{esc(m)}</option>" for m in
                       ("Preço", "Sem retorno", "Comprou concorrente", "Fora do perfil", "Sem interesse"))
-    # A ficha era só leitura, e só imprimia campo que já tinha valor — num lead que
-    # entrou pelo WhatsApp (número e mais nada) ela simplesmente não aparecia, então
-    # o vendedor não tinha onde anotar o que descobre na conversa. Agora é formulário,
-    # sempre visível. Campo em branco não apaga o que está gravado (ver salvar_ficha).
-    def campo(nome, rot, valor, *, tipo="text", modo="", meia=False):
-        extra = f" inputmode={modo}" if modo else ""
-        return (f"<label class='fic-c{' meia' if meia else ''}'><span>{esc(rot)}</span>"
-                f"<input name={nome} type={tipo}{extra} value='{esc(valor or '')}'"
-                f" autocomplete=off></label>")
-
-    # rótulo único: quem digita não escolhe a coluna, o tamanho do documento decide
-    # (11 = CPF, 14 = CNPJ) lá no _doc_lead. Pedir "CNPJ" pra uma cliente pessoa
-    # física seria empurrar o vendedor pro campo errado.
-    doc_rot = "CPF ou CNPJ"
-    ficha_html = (
-        f"<form method=post action='{_BASE}/lead/{lead_id}/ficha' class=fic>"
-        + campo("empresa", "Nome / empresa", d.get("empresa"))
-        + campo("contato", "Quem fala com você", d.get("contato"))
-        + campo("cargo", "Cargo", d.get("cargo"), meia=True)
-        + campo("segmento", "Segmento", d.get("segmento"), meia=True)
-        + campo("telefone", "Telefone", d.get("telefone"), tipo="tel", modo="tel", meia=True)
-        + campo("documento", doc_rot, d.get("doc_fmt"), modo="numeric", meia=True)
-        + campo("email", "E-mail", d.get("email"), tipo="email", modo="email")
-        + campo("cidade", "Cidade", d.get("cidade"), meia=True)
-        + campo("uf", "UF", d.get("uf"), meia=True)
-        + "<label class=fic-c><span>Observação</span>"
-        + f"<textarea name=obs rows=2>{esc(d.get('obs') or '')}</textarea></label>"
-        + "<button class=btn type=submit>Salvar ficha</button></form>")
 
     # A folha só sobe com :target — sem JS, então funciona igual ao resto do app,
-    # que é todo form + redirect.
+    # que é todo form + redirect. Ela só se sustenta CURTA: é `position:absolute` com
+    # `max-height:84%`, e enquanto o conteúdo cabe na caixa ela não rola por dentro.
+    # A ficha morou aqui por um PR e custou caro — 548px de formulário num conteúdo
+    # de 410px fizeram a rolagem interna nascer, e no Safari o salto de âncora sobre
+    # um container absoluto que passou a rolar abria a folha no FIM do conteúdo, com
+    # um vazio embaixo. Formulário tem tela própria (como orçamento e visita); aqui
+    # só entra o que é curto.
     folha = (
         "<div class=folha id=acoes><div class=puxa></div>"
         f"<div class=grade>{atalhos}</div>"
-        # a ficha vem antes do funil e do fechamento porque é o que se preenche NO
-        # meio da conversa; fechar é o último ato, não o primeiro que se vê
-        + f"<h3>Ficha do cliente</h3>{ficha_html}"
         + f"<h3>Etapa no funil</h3><div class=etapas>{etapas}</div>"
         + f"<h3>Fechar</h3>"
         f"<form method=post action='{_BASE}/lead/{lead_id}/fechar' style='margin-bottom:.5rem'>"
@@ -1759,9 +1816,40 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict) -> HTMLResponse:
     # o .chat (flex:1) ainda não sabe a altura dele; a segunda garante. Como a tela
     # é form + redirect, isso também cobre o depois de enviar. Mesma ideia do
     # cxScroll do inbox do gestor (web/painel_prospeccao.py).
-    fim = ("<script>(function(){function f(){var c=document.querySelector('.chat');"
-           "if(c)c.scrollTop=c.scrollHeight;}f();"
-           "document.addEventListener('DOMContentLoaded',f);})();</script>")
+    #
+    # E daí em diante ela se atualiza sozinha: o vendedor deixava a conversa aberta e
+    # não via a resposta do cliente chegar — tinha que recarregar pra descobrir.
+    fim = ("<script>(function(){"
+           "var chat=document.querySelector('.chat');if(!chat)return;"
+           "function fim(){chat.scrollTop=chat.scrollHeight;}"
+           "fim();document.addEventListener('DOMContentLoaded',fim);"
+           f"var ultimo={d['mensagens'][-1].get('id') or 0 if d['mensagens'] else 0},"
+           f"ia={'true' if d['ia'] else 'false'},ocupado=false;"
+           "function rot(w){return w==='ia'?'<div class=who>Agente</div>':"
+           "w==='out'?'<div class=who>Você</div>':'';}"
+           "function txt(s){var e=document.createElement('div');e.textContent=s;return e.innerHTML;}"
+           "function puxa(){"
+           "if(ocupado||document.visibilityState!=='visible')return;ocupado=true;"
+           f"fetch('{_BASE}/lead/{lead_id}/mensagens?desde='+ultimo)"
+           ".then(function(r){return r.json();}).then(function(j){"
+           "ocupado=false;if(!j||!j.ok)return;"
+           # quem responde mudou (o agente assumiu, ou um colega assumiu por você):
+           # o composer inteiro é outro, então recarregar é mais honesto que remendar
+           "if(j.ia!==ia){location.reload();return;}"
+           "if(!j.msgs||!j.msgs.length)return;"
+           # a regra que o inbox do gestor já acertou: no rodapé, segue a conversa;
+           # se o vendedor subiu pra ler o histórico, a posição dele é preservada
+           "var perto=(chat.scrollHeight-chat.scrollTop-chat.clientHeight)<80;"
+           "j.msgs.forEach(function(m){"
+           "var d=document.createElement('div');d.className='bub '+m.who;"
+           "d.setAttribute('data-id',m.id);d.innerHTML=rot(m.who)+txt(m.texto);"
+           "chat.appendChild(d);ultimo=m.id;});"
+           "if(perto)fim();"
+           "}).catch(function(){ocupado=false;});}"
+           "setInterval(puxa,8000);"
+           "document.addEventListener('visibilitychange',function(){"
+           "if(document.visibilityState==='visible')puxa();});"
+           "})();</script>")
 
     chip = ("<span class='chip ia'>IA</span>" if d["ia"] else "<span class='chip voce'>você</span>")
     corpo = (
@@ -2076,6 +2164,31 @@ def cockpit_mensagem(request: Request, lead_id: int, texto: str = Form(...)):
     return _agir(request, lead_id,
                  lambda p, c, m, l: {**ck.enviar_mensagem(p, c, m, l, texto), "msg": "Mensagem enviada ✓"},
                  f"{_BASE}/lead/{lead_id}")
+
+
+@router.get("/cockpit/lead/{lead_id}/mensagens")
+def cockpit_lead_mensagens(request: Request, lead_id: int, desde: int = 0):
+    """O que chegou depois da mensagem `desde`. Alimenta a conversa que se atualiza
+    sozinha. Passa por `lead_do_vendedor` de propósito: é ele quem revalida a posse,
+    e nenhuma rota daqui pode devolver conversa de outro vendedor."""
+    sess = _sessao(request)
+    if not sess:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    d = ck.lead_do_vendedor(get_pool(), sess[0], sess[1], lead_id)
+    if not d:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=404)
+    novas = [{"id": m["id"], "who": m["who"], "texto": m["texto"]}
+             for m in d["mensagens"] if (m.get("id") or 0) > desde]
+    return JSONResponse({"ok": True, "ia": bool(d["ia"]), "msgs": novas})
+
+
+@router.get("/cockpit/fila/sinal")
+def cockpit_fila_sinal(request: Request):
+    """Assinatura da fila, pra tela saber se vale recarregar."""
+    sess = _sessao(request)
+    if not sess:
+        return JSONResponse({"ok": False}, status_code=401)
+    return JSONResponse({"ok": True, "sig": ck.sinal_fila(get_pool(), sess[0], sess[1])})
 
 
 @router.post("/cockpit/lead/{lead_id}/ficha")

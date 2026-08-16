@@ -16,6 +16,7 @@ monta o que vende. Empresa nova começa vazia; a Aladdin usa o modelo de
 tecnologia. A IA de escopo e a validação de módulos usam o catálogo da conta.
 """
 import json
+import logging
 import re
 import secrets
 
@@ -529,7 +530,8 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
     # o MODO vem do nicho da conta, não do navegador: quem vende evento emite
     # orçamento de evento, e só. (mesma regra do servico_avulso da tela)
     modo = vendas.modo_do_orcamento(get_pool(), conta[0])
-    evento_json = json.dumps(dados.evento.model_dump()) if (modo == "evento" and dados.evento) else None
+    evento_dic = dados.evento.model_dump() if (modo == "evento" and dados.evento) else None
+    evento_json = json.dumps(evento_dic) if evento_dic is not None else None
     parcelas_json = json.dumps(
         [p.model_dump() for p in (dados.parcelas or [])[:60] if int(p.valor_centavos or 0) > 0]
     ) if modo == "evento" else None
@@ -544,10 +546,21 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
             (dados.canal or "").strip() or None, modo, evento_json, parcelas_json,
             int(dados.setup) * 100, int(dados.mensal) * 100,
             int(dados.primeiro_ano) * 100, int(dados.n_modulos))
-    with get_pool().connection() as c:
+    pool = get_pool()
+    reabriu = None
+    with pool.connection() as c:
         _garantir_tabela(c)
         oid = tok = None
         if dados.id:
+            # ESTADO ANTES da edição: o UPDATE abaixo reverte 'aprovada' -> 'enviado',
+            # e depois já não dá pra saber que houve reabertura. É esse fato que
+            # decide o que fazer com a data que o cliente tinha reservado.
+            antes = c.execute(
+                """select coalesce(status,''), evento_agenda_id, sinal_pago_em
+                     from orcamentos where id=%s and conta_id=%s""",
+                (int(dados.id), conta[0])).fetchone()
+            if antes and antes[0] == "aprovada" and antes[1]:
+                reabriu = {"evento_agenda_id": antes[1], "sinal_pago_em": antes[2]}
             # atualiza a proposta reaberta (nunca mexe em uma já 'fechado')
             r = _com_retry_numero(c, lambda: c.execute(
                 """update orcamentos set cliente=%s, empresa=%s, cnpj=%s, segmento=%s,
@@ -618,7 +631,20 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
                     c.commit()
         except Exception:  # noqa: BLE001
             cliente_id = None
-    return JSONResponse({"ok": True, "id": oid, "token": tok, "cliente_id": cliente_id})
+    # CAMINHO DE VOLTA da reabertura: a assinatura foi desfeita, então a data na
+    # agenda precisa acompanhar. Fora da transação de propósito — o que não pode se
+    # perder é a edição; se a agenda falhar, a proposta editada continua salva e o
+    # dono resolve a data pela própria Agenda.
+    resp = {"ok": True, "id": oid, "token": tok, "cliente_id": cliente_id}
+    if reabriu and oid:
+        try:
+            resp["reaberta"] = vendas.reabrir_proposta(
+                pool, conta[0], oid, reabriu["evento_agenda_id"],
+                reabriu["sinal_pago_em"], evento_dic)
+        except Exception:  # noqa: BLE001
+            logging.getLogger("servicos.salvar").exception(
+                "reabrir_proposta falhou pro orçamento %s", oid)
+    return JSONResponse(resp)
 
 
 @router.get("/painel/servicos/lista")

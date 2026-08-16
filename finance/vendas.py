@@ -243,6 +243,49 @@ def fichas_de_eventos(pool, conta_id: int, evento_ids) -> dict[int, dict]:
     return fichas
 
 
+def reabrir_proposta(pool, conta_id: int, orcamento_id: int, evento_agenda_id: int,
+                     sinal_pago_em, evento_novo: dict | None = None) -> dict:
+    """Editar uma proposta JÁ APROVADA desfaz a assinatura — e a data na agenda tem
+    que acompanhar. Este é o caminho de volta que não existia.
+
+    Até aqui, editar uma proposta aprovada revertia o status pra 'enviado' e limpava
+    a assinatura, mas NÃO tocava em `evento_agenda_id` nem no sinal: a data seguia
+    ocupada por um orçamento que voltou a ser rascunho, e uma re-aprovação nem
+    remarcava (o `_reservar_na_agenda` sai fora quando já existe compromisso), nem
+    movia a data se o cliente tivesse escolhido outro dia.
+
+    A REGRA é o dinheiro:
+
+      • SINAL PAGO -> a data é do cliente e não se mexe nela. Se a edição mudou
+        data/hora, o compromisso é REMARCADO pra janela nova — perder a data de quem
+        pagou seria o pior erro possível aqui.
+      • SINAL NÃO PAGO -> nada sustenta a reserva. A data é liberada e o vínculo se
+        desfaz, pra a próxima aprovação criar do zero (com a data nova, se mudou).
+
+    Devolve {liberou, remarcou} pra quem chamou contar na tela.
+    """
+    from finance import agenda as ag
+    liberou = remarcou = False
+    if sinal_pago_em:
+        ini, fim = ag.janela_evento((evento_novo or {}).get("data"),
+                                    (evento_novo or {}).get("inicio"),
+                                    (evento_novo or {}).get("fim"))
+        atual = ag.evento_por_id(pool, conta_id, evento_agenda_id)
+        if ini and atual and (atual["inicio"] != ini or atual.get("fim") != fim):
+            remarcou = ag.remarcar_evento(pool, conta_id, evento_agenda_id, ini, fim)
+        return {"liberou": False, "remarcou": remarcou}
+
+    liberou = ag.cancelar_evento(pool, conta_id, evento_agenda_id)
+    with pool.connection() as c:
+        # o vínculo E o valor congelado do sinal saem juntos: a próxima aprovação
+        # relê as parcelas do orçamento editado e grava de novo. Deixar o
+        # `sinal_centavos` velho faria a ficha da agenda mostrar o preço de antes.
+        c.execute("update orcamentos set evento_agenda_id=null, sinal_centavos=null "
+                  " where id=%s and conta_id=%s", (int(orcamento_id), conta_id))
+        c.commit()
+    return {"liberou": liberou, "remarcou": False}
+
+
 def confirmar_sinal(pool, conta_id: int, orcamento_id: int) -> dict:
     """O sinal caiu. Ponto único da regra, pros dois botões que a apertam: o do
     funil (Serviços) e o da caixa do dia (Agenda).

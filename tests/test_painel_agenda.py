@@ -112,7 +112,8 @@ def test_rota_novo_salva_link_online_quando_marcado_online(pool, conta_id, monke
         {"conta_id": conta_id, "gerencia": True, "membro_id": None}, None))
     amanha = ag.agora_brt() + timedelta(days=1)
     resp = pa.agenda_novo(_FakeSessionRequest(conta_id), titulo="Daily",
-                          data=amanha.strftime("%Y-%m-%d"), hora="09:00", descricao="",
+                          data=amanha.strftime("%Y-%m-%d"), hora="09:00", hora_fim="",
+                          descricao="",
                           tipo="pessoal", local="Online",
                           link_online="https://meet.google.com/abc-defg-hij",
                           convidado_nome=[], convidado_contato=[], m="")
@@ -216,7 +217,8 @@ def test_rota_novo_ignora_link_online_se_nao_marcou_online(pool, conta_id, monke
         {"conta_id": conta_id, "gerencia": True, "membro_id": None}, None))
     amanha = ag.agora_brt() + timedelta(days=1)
     resp = pa.agenda_novo(_FakeSessionRequest(conta_id), titulo="Presencial",
-                          data=amanha.strftime("%Y-%m-%d"), hora="09:00", descricao="",
+                          data=amanha.strftime("%Y-%m-%d"), hora="09:00", hora_fim="",
+                          descricao="",
                           tipo="pessoal", local="Escritório",
                           link_online="https://meet.google.com/deveria-sumir",
                           convidado_nome=[], convidado_contato=[], m="")

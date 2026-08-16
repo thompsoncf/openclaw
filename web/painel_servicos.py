@@ -27,8 +27,8 @@ from pydantic import BaseModel
 from core.brain import Brain
 from db.conexao import get_pool
 from finance.cnpj_info import consultar_cnpj
-from finance import (agenda as ag, empresa as emp, icones_servico as ics, vendas,
-                     servicos_catalogo as scat)
+from finance import (agenda as ag, contrato as ctr, empresa as emp,
+                     icones_servico as ics, vendas, servicos_catalogo as scat)
 from web.portal import _render, _env, conta_logada, brl
 
 router = APIRouter()
@@ -82,6 +82,14 @@ def _garantir_tabela(c):
         alter table orcamentos add column if not exists cep           text;
         alter table orcamentos add column if not exists evento_agenda_id bigint;
         alter table orcamentos add column if not exists cliente_id    bigint;
+        -- contrato de locação (migração 160): o documento congelado no momento
+        -- da assinatura, e quem assinou. Fica no orçamento, e não numa tabela
+        -- própria, porque é 1-para-1 com ele e nasce e morre junto.
+        alter table orcamentos add column if not exists contrato_texto        jsonb;
+        alter table orcamentos add column if not exists contrato_assinado_em  timestamptz;
+        alter table orcamentos add column if not exists contrato_assinado_por text;
+        alter table orcamentos add column if not exists contrato_assinado_doc text;
+        alter table orcamentos add column if not exists contrato_assinado_ip  text;
         create index if not exists idx_orcamentos_status on orcamentos (status, criado_em desc);
         create index if not exists idx_orcamentos_conta on orcamentos (conta_id, status, criado_em desc);
         create unique index if not exists idx_orcamentos_token on orcamentos (token) where token is not null;
@@ -760,6 +768,93 @@ def painel_servicos_sinal_recebido(request: Request, dados: SinalIn):
     return JSONResponse(r)
 
 
+def _conta_evento(request: Request):
+    """Gate do CONTRATO: além do gate da aba, a conta precisa ser de eventos.
+
+    A trava vive aqui e não só no template porque a rota é POST e o navegador não
+    é fonte confiável: esconder o card não impede ninguém de chamar a URL. E quem
+    decide é `contrato.tem_contrato`, que delega pra mesma porta do modo do
+    orçamento — uma regra nova aqui poderia divergir dela, e aí a conta emitiria
+    orçamento de evento com contrato de serviço, ou o contrário."""
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return None, JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    nicho = (emp.obter_dados_empresa(get_pool(), conta[0]) or {}).get("nicho")
+    if not ctr.tem_contrato(nicho):
+        return None, JSONResponse({"erro": "contrato de locação é do nicho de eventos"},
+                                  status_code=404)
+    return conta, None
+
+
+@router.get("/painel/servicos/contrato")
+def painel_servicos_contrato(request: Request, padrao: int = 0):
+    """O modelo da conta + a paleta de campos que a tela oferece.
+
+    `padrao=1` devolve o modelo genérico SEM tocar no que está salvo: é o botão
+    "restaurar" da tela, e ele só troca o texto na tela. O que estava gravado só
+    morre quando o dono clicar em salvar — senão um clique curioso apagaria o
+    contrato da empresa sem chance de desistir."""
+    conta, erro = _conta_evento(request)
+    if erro is not None:
+        return erro
+    pool = get_pool()
+    modelo = ({"clausulas": ctr.modelo_padrao(), "regras": dict(ctr.REGRAS_PADRAO), "novo": True}
+              if padrao else ctr.carregar_modelo(pool, conta[0]))
+    catalogo = scat.listar(pool, conta[0])
+    return JSONResponse({
+        "clausulas": modelo["clausulas"], "regras": modelo["regras"],
+        "novo": modelo["novo"], "campos": ctr.campos_disponiveis(catalogo),
+    })
+
+
+class ContratoIn(BaseModel):
+    clausulas: list[dict] = []
+    regras: dict = {}
+
+
+@router.post("/painel/servicos/contrato/salvar")
+def painel_servicos_contrato_salvar(request: Request, dados: ContratoIn):
+    conta, erro = _conta_evento(request)
+    if erro is not None:
+        return erro
+    membro_id, _papel = _ator(request)
+    r = ctr.salvar_modelo(get_pool(), conta[0], dados.clausulas, dados.regras,
+                          por=str(membro_id or "dono"))
+    return JSONResponse(r)
+
+
+@router.post("/painel/servicos/contrato/previa")
+def painel_servicos_contrato_previa(request: Request, dados: ContratoIn):
+    """Monta o contrato com um orçamento REAL da conta — o mais recente que tenha
+    data de evento — e devolve o texto pronto mais o que ficou faltando.
+
+    Prévia com dados inventados esconderia justamente o erro que interessa: o
+    campo que não resolve porque o item saiu do catálogo. Sem nenhum orçamento
+    com evento, avisa em vez de fingir."""
+    conta, erro = _conta_evento(request)
+    if erro is not None:
+        return erro
+    pool = get_pool()
+    with pool.connection() as c:
+        _garantir_tabela(c)
+        r = c.execute(
+            """select cliente, cnpj, whatsapp, setup_centavos, numero, evento
+                 from orcamentos
+                where conta_id=%s and coalesce(evento->>'data','') <> ''
+                order by id desc limit 1""", (conta[0],)).fetchone()
+    if not r:
+        return JSONResponse({"erro": "nenhum orçamento com data de evento para usar de exemplo"},
+                            status_code=404)
+    orcamento = {"cliente": r[0], "cnpj": r[1], "whatsapp": r[2],
+                 "setup_centavos": r[3], "numero": r[4], "evento": r[5] or {}}
+    ctx = ctr.contexto(catalogo=scat.listar(pool, conta[0]), orcamento=orcamento,
+                       modelo={"regras": dados.regras},
+                       empresa=emp.obter_dados_empresa(pool, conta[0]))
+    doc, faltas = ctr.montar(dados.clausulas, ctx)
+    return JSONResponse({"clausulas": doc, "faltas": faltas,
+                         "exemplo": f"orçamento nº {r[4] or '—'} · {orcamento['cliente'] or ''}"})
+
+
 class OrcDelIn(BaseModel):
     id: int
 
@@ -1243,6 +1338,20 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   <h2 style="margin-top:0">Funil</h2>
   <div id="oc-hist-box"><p class="mut">Carregando...</p></div>
 </div>
+
+{% if servico_avulso %}
+{# Contrato de locação: só existe no nicho de eventos. O gate de verdade está nas
+   rotas (ver _conta_evento) — esconder o card não impede um POST direto. #}
+<div class="card" id="ct-card">
+  <h2 style="margin-top:0">Contrato de locação</h2>
+  <p class="mut" style="margin-top:0;font-size:.86rem">
+    As cláusulas são suas — escreva como quiser. Onde entra um valor, use um
+    <b style="color:var(--verde-claro)">campo</b>: ele é preenchido na hora com o preço do
+    catálogo e os dados do orçamento, então o contrato nunca diz um número diferente da proposta.
+  </p>
+  <div id="ct-box"><p class="mut">Carregando...</p></div>
+</div>
+{% endif %}
 </div>
 
 <script>window.SERVICO_AVULSO = {{ 'true' if servico_avulso else 'false' }};</script>
@@ -2142,6 +2251,165 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       if(w){ w.location='/proposta/'+d.token; } else { window.location='/proposta/'+d.token; }
     });
   });
+
+  // ------------------------------------------------------------ contrato
+  // Só existe no nicho de eventos; o card nem é renderizado nos outros, então a
+  // ausência do #ct-box é a checagem.
+  var ctBox=document.getElementById('ct-box');
+  if(ctBox){ (function(){
+    var CAMPOS=[], REGRAS={}, ultimo=null;   // ultimo = textarea que teve foco
+
+    function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
+    function clausulas(){
+      return [].slice.call(ctBox.querySelectorAll('.ct-cl')).map(function(el){
+        return {titulo:el.querySelector('.ct-t').value, corpo:el.querySelector('.ct-c').value};
+      });
+    }
+    function regras(){
+      var r={};
+      [].slice.call(ctBox.querySelectorAll('.ct-rg')).forEach(function(i){
+        r[i.getAttribute('data-k')]=i.value;
+      });
+      return r;
+    }
+
+    // Inserir campo no ponto do cursor — e não no fim do texto: o dono está
+    // escrevendo a frase, e "de {preco.hora-extra} por hora" precisa cair no meio.
+    function inserir(campo){
+      var ta=ultimo||ctBox.querySelector('.ct-c');
+      if(!ta){return;}
+      var a=ta.selectionStart||0, b=ta.selectionEnd||0, txt='{'+campo+'}';
+      ta.value=ta.value.slice(0,a)+txt+ta.value.slice(b);
+      ta.focus(); ta.selectionStart=ta.selectionEnd=a+txt.length;
+    }
+
+    function linhaClausula(c){
+      var d=document.createElement('div');
+      d.className='ct-cl';
+      d.style.cssText='border:1px solid var(--borda);border-radius:10px;padding:.6rem .7rem;margin-bottom:.5rem;background:var(--card-2)';
+      d.innerHTML=
+        '<div style="display:flex;gap:.4rem;align-items:center;margin-bottom:.35rem">'
+        +'<input class="ct-t oc-inp" style="flex:1;font-weight:600" value="'+esc(c.titulo)+'" placeholder="Título da cláusula">'
+        +'<button type="button" class="ct-up oc-pill" title="Subir">↑</button>'
+        +'<button type="button" class="ct-dn oc-pill" title="Descer">↓</button>'
+        +'<button type="button" class="ct-rm oc-pill" title="Remover">✕</button></div>'
+        +'<textarea class="ct-c oc-inp" rows="4" style="width:100%;font-family:var(--mono);font-size:.8rem;line-height:1.6" placeholder="Texto da cláusula. Use os campos abaixo para os valores.">'+esc(c.corpo)+'</textarea>';
+      d.querySelector('.ct-c').addEventListener('focus',function(){ultimo=this;});
+      d.querySelector('.ct-rm').addEventListener('click',function(){
+        if(confirm('Remover esta cláusula?')) d.remove();});
+      d.querySelector('.ct-up').addEventListener('click',function(){
+        var p=d.previousElementSibling; if(p&&p.classList.contains('ct-cl')) d.parentNode.insertBefore(d,p);});
+      d.querySelector('.ct-dn').addEventListener('click',function(){
+        var n=d.nextElementSibling; if(n&&n.classList.contains('ct-cl')) d.parentNode.insertBefore(n,d);});
+      return d;
+    }
+
+    var ROTULO_REGRA={sinal_pct:'Entrada (%)',multa_cancelamento:'Multa de cancelamento (%)',
+      taxa_reagendamento:'Taxa de reagendamento (%)',duracao_horas:'Horas de evento',
+      tolerancia_min:'Tolerância (min)',quitacao_dias:'Quitar até (dias antes)',
+      reagenda_dias:'Remarcar com (dias)',reagenda_prazo:'Nova data em até (dias)',
+      retirada_horas:'Retirar materiais (h)',acesso_montagem:'Montagem a partir de'};
+
+    function desenhar(d){
+      CAMPOS=d.campos||[]; REGRAS=d.regras||{};
+      ctBox.innerHTML=
+        (d.novo?'<p class="mut" style="font-size:.84rem;background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:.5rem .7rem">Este é um modelo inicial de contrato de locação. Ajuste ao que a sua empresa pratica e salve.</p>':'')
+        +'<div id="ct-lista"></div>'
+        +'<button type="button" id="ct-add" class="oc-pill" style="margin-bottom:.9rem">+ Cláusula</button>'
+        +'<div id="ct-campos" style="background:var(--card-2);border:1px solid var(--borda);border-radius:10px;padding:.6rem .7rem;margin-bottom:.8rem">'
+        +'<div class="mut" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.4rem">Campos — clique para inserir no texto</div>'
+        +'<div id="ct-chips" style="display:flex;flex-wrap:wrap;gap:.3rem"></div></div>'
+        +'<div style="background:var(--card-2);border:1px solid var(--borda);border-radius:10px;padding:.6rem .7rem;margin-bottom:.8rem">'
+        +'<div class="mut" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.5rem">Números da casa — é daqui que os campos {regra.*} saem</div>'
+        +'<div id="ct-regras" class="mini-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.5rem"></div></div>'
+        +'<div style="display:flex;gap:.45rem;flex-wrap:wrap"><button type="button" id="ct-salvar" class="oc-btn oc-btn-g" style="width:auto">Salvar contrato</button>'
+        +'<button type="button" id="ct-previa" class="oc-pill">Pré-visualizar</button>'
+        +'<button type="button" id="ct-padrao" class="oc-pill">Restaurar modelo padrão</button></div>'
+        +'<div id="ct-msg" style="margin-top:.7rem"></div>';
+
+      var lista=document.getElementById('ct-lista');
+      (d.clausulas||[]).forEach(function(c){lista.appendChild(linhaClausula(c));});
+
+      var chips=document.getElementById('ct-chips');
+      CAMPOS.forEach(function(f){
+        var b=document.createElement('button');
+        b.type='button'; b.className='oc-pill';
+        b.style.cssText='font-family:var(--mono);font-size:.7rem;padding:.15rem .4rem';
+        b.textContent='{'+f.campo+'}';
+        b.title=f.rotulo;
+        b.addEventListener('click',function(){inserir(f.campo);});
+        chips.appendChild(b);
+      });
+
+      var gr=document.getElementById('ct-regras');
+      Object.keys(ROTULO_REGRA).forEach(function(k){
+        var w=document.createElement('div');
+        w.innerHTML='<label class="mut" style="font-size:.68rem">'+esc(ROTULO_REGRA[k])+'</label>'
+          +'<input class="ct-rg oc-inp" data-k="'+k+'" style="width:100%" value="'+esc(REGRAS[k])+'">';
+        gr.appendChild(w);
+      });
+
+      document.getElementById('ct-add').addEventListener('click',function(){
+        lista.appendChild(linhaClausula({titulo:'',corpo:''}));});
+      document.getElementById('ct-salvar').addEventListener('click',salvar);
+      document.getElementById('ct-previa').addEventListener('click',previa);
+      document.getElementById('ct-padrao').addEventListener('click',function(){
+        if(!confirm('Trocar o texto atual pelo modelo padrão? O que você escreveu será perdido.')) return;
+        fetch('/painel/servicos/contrato?padrao=1').then(function(r){return r.json();})
+          .then(function(d){d.novo=true;desenhar(d);});
+      });
+    }
+
+    function msg(html){document.getElementById('ct-msg').innerHTML=html;}
+
+    function salvar(){
+      var b=document.getElementById('ct-salvar'), t=b.textContent; b.textContent='Salvando...';
+      fetch('/painel/servicos/contrato/salvar',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({clausulas:clausulas(),regras:regras()})})
+        .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+        .then(function(res){
+          b.textContent=t;
+          if(!res.ok){msg('<p style="color:var(--verm);font-size:.85rem">'+esc((res.d&&res.d.erro)||'Não consegui salvar.')+'</p>');return;}
+          msg('<p style="color:var(--verde-claro);font-size:.85rem">✓ Contrato salvo — '+res.d.clausulas+' cláusulas. Vale para os próximos contratos; os já assinados não mudam.</p>');
+        }).catch(function(){b.textContent=t;msg('<p style="color:var(--verm);font-size:.85rem">Erro de conexão.</p>');});
+    }
+
+    // A prévia usa um orçamento REAL da conta. É o que revela a falta que
+    // importa: o campo que não resolve porque o item saiu do catálogo.
+    function previa(){
+      var b=document.getElementById('ct-previa'), t=b.textContent; b.textContent='Montando...';
+      fetch('/painel/servicos/contrato/previa',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({clausulas:clausulas(),regras:regras()})})
+        .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+        .then(function(res){
+          b.textContent=t;
+          if(!res.ok){msg('<p class="mut" style="font-size:.85rem">'+esc((res.d&&res.d.erro)||'Não consegui montar.')+'</p>');return;}
+          var h='';
+          if((res.d.faltas||[]).length){
+            h+='<div style="background:#241C0F;border:1px solid var(--ambar-borda);border-radius:8px;padding:.55rem .7rem;margin-bottom:.6rem;font-size:.84rem">'
+              +'<b style="color:var(--amar)">Estes campos não têm valor</b> e vão sair assim mesmo no documento:<br>'
+              +res.d.faltas.map(function(f){return '<code>{'+esc(f)+'}</code>';}).join(' ')
+              +'<div class="mut" style="margin-top:.3rem">Geralmente é um item que saiu do catálogo ou um dado que o orçamento não tem.</div></div>';
+          }
+          h+='<div class="mut" style="font-size:.78rem;margin-bottom:.4rem">Prévia com '+esc(res.d.exemplo||'')+'</div>';
+          h+='<div style="background:#fff;color:#1a1a1a;border-radius:8px;padding:.9rem 1rem;font-family:Georgia,serif;max-height:420px;overflow:auto">';
+          (res.d.clausulas||[]).forEach(function(c){
+            h+='<div style="margin-bottom:.7rem"><div style="font-weight:700;font-size:.8rem;text-transform:uppercase;letter-spacing:.04em">'+esc(c.titulo)+'</div>'
+              +'<div style="font-size:.85rem;line-height:1.6;white-space:pre-wrap">'+esc(c.corpo)+'</div></div>';
+          });
+          h+='</div>';
+          msg(h);
+        }).catch(function(){b.textContent=t;msg('<p style="color:var(--verm);font-size:.85rem">Erro de conexão.</p>');});
+    }
+
+    fetch('/painel/servicos/contrato').then(function(r){return r.json();})
+      .then(desenhar)
+      .catch(function(){ctBox.innerHTML='<p class="mut">Erro ao carregar o contrato.</p>';});
+  })(); }
 
   carregarCatalogo(false).then(function(){
     var ab=new URLSearchParams(location.search).get('abrir');

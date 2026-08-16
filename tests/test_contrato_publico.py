@@ -6,9 +6,13 @@ TRÊS REGRAS, e elas são diferentes de propósito:
 * **Visível desde a aprovação.** O cliente precisa ler o que vai assinar ANTES de
   pagar. Liberar o texto só depois do sinal criaria o intervalo em que ele já
   pagou e ainda não sabe o que aceitou.
-* **Assinável só depois do sinal.** A cláusula da reserva diz que a data só fica
-  garantida com a entrada; assinar antes é aceitar um contrato cuja primeira
-  obrigação ainda não foi cumprida.
+* **Assinável só depois do sinal — quando há sinal.** A cláusula da reserva diz
+  que a data só fica garantida com a entrada; assinar antes é aceitar um contrato
+  cuja primeira obrigação ainda não foi cumprida. Onde o plano NÃO pede entrada, a
+  cláusula não se aplica e a aprovação basta: exigir o sinal sempre travava pra
+  sempre o contrato desses orçamentos, porque sem sinal não nasce pré-reserva, sem
+  pré-reserva o botão "Sinal recebido" não aparece, e `sinal_pago_em` ficava nulo
+  até o fim dos tempos.
 * **Congelado no ato.** O que fica gravado é o texto que o cliente LEU, não uma
   referência ao modelo. Sem isso, o dono editar as cláusulas amanhã reescreveria
   retroativamente o que foi aceito ontem — e nenhum contrato assinado no Zaq se
@@ -104,18 +108,28 @@ def pool(monkeypatch):
     p.close()
 
 
-def _orcamento(pool, *, status="aprovada", sinal_pago=False, assinado=False):
+# O plano de pagamento COM entrada, que é a forma que produção grava. Importa
+# porque a trava da assinatura passou a perguntar se este orçamento pede entrada:
+# onde não há entrada, a cláusula da reserva não se aplica e a aprovação basta.
+_PLANO_COM_SINAL = ('[{"obs":"Sinal — confirma a reserva da data","venc":"2026-09-01",'
+                    '"forma":"Pix","valor_centavos":267000},'
+                    '{"obs":"Restante","venc":"2026-12-01","forma":"Pix",'
+                    '"valor_centavos":623000}]')
+
+
+def _orcamento(pool, *, status="aprovada", sinal_pago=False, assinado=False,
+               parcelas=_PLANO_COM_SINAL):
     with pool.connection() as c:
         c.execute("delete from contratos")
         c.execute("delete from orcamentos")
         oid = c.execute(
             """insert into orcamentos (conta_id, cliente, empresa, token, status,
-                 setup_centavos, numero, evento, modo, sinal_pago_em)
+                 setup_centavos, numero, evento, modo, sinal_pago_em, parcelas)
                values (%s,'Thompson','Thompson',%s,%s,890000,27,
                  '{"data":"2026-12-31","inicio":"21:00","convidados":50}'::jsonb,'evento',
-                 %s) returning id""",
+                 %s,%s::jsonb) returning id""",
             (CONTA, TOKEN, status,
-             "2026-08-16 12:00:00+00" if sinal_pago else None)).fetchone()[0]
+             "2026-08-16 12:00:00+00" if sinal_pago else None, parcelas)).fetchone()[0]
         # o CONTRATO agora é linha própria (164), que nasce na APROVAÇÃO (165) —
         # aqui ele é inserido à mão pra isolar a leitura do documento; quem prova
         # que a aprovação de verdade o cria é `test_aprovar_a_proposta_faz_nascer...`.
@@ -190,6 +204,34 @@ def test_sem_sinal_a_assinatura_e_recusada(pool):
     _orcamento(pool, status="aprovada", sinal_pago=False)
     _assinar(pool)
     assert _ct(pool)["assinado"] is False
+
+
+def test_orcamento_sem_entrada_no_plano_assina_depois_de_aprovar(pool):
+    """O buraco que isto fecha: exigir `sinal_pago_em` sempre travava PRA SEMPRE o
+    contrato de todo orçamento sem parcela de sinal. Sem sinal a data é reservada
+    firme na hora, não nasce pré-reserva, o botão "Sinal recebido" nunca aparece no
+    funil — e o campo ficava nulo até o fim dos tempos.
+
+    Onde não há entrada, a cláusula da reserva não tem o que exigir."""
+    _orcamento(pool, status="aprovada", sinal_pago=False, parcelas="[]")
+    d = _ct(pool)
+    assert d["tem_sinal"] is False and d["pode_assinar"] is True
+    _assinar(pool, nome="Thompson Ferreira")
+    assert _ct(pool)["assinado"] is True
+
+
+def test_sem_entrada_a_pagina_nao_manda_esperar_pagamento(pool):
+    """E o texto acompanha: mandar o cliente aguardar a confirmação de uma entrada
+    que ninguém pediu é promessa de um pagamento que não existe."""
+    _orcamento(pool, status="enviado", parcelas="[]")
+    with pool.connection() as c:
+        c.execute("""insert into contratos (conta_id, numero, orcamento_id, status, token)
+                     select %s,1,id,'enviado','CTTOKEN' from orcamentos where token=%s""",
+                  (CONTA, TOKEN))
+        c.commit()
+    html = cp.contrato_publico(_Req(), CT_TOKEN).body.decode()
+    assert "pagamento da entrada" not in html
+    assert "quando o orçamento for aprovado" in html
 
 
 def test_proposta_nao_aprovada_nao_tem_o_que_assinar_nem_com_sinal(pool):

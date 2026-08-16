@@ -4,8 +4,8 @@ Motor GENÉRICO de venda consultiva de serviço (o nicho 'tecnologia'/Aladdin é
 primeiro caso; o mesmo fluxo serve advocacia, agência, etc., trocando só o
 catálogo). Aqui mora a ação que fecha o negócio:
 
-    fechar_orcamento() — o orçamento vira contrato e cai no financeiro que já
-    existe (módulo Empresa), como TÍTULOS A RECEBER:
+    fechar_orcamento() — o orçamento cai no financeiro que já existe (módulo
+    Empresa), como TÍTULOS A RECEBER:
       • setup  (valor único)      -> título a receber não-recorrente
       • mensal (recorrente)       -> título a receber RECORRENTE, que na baixa
                                      se auto-renova (dar_baixa_titulo do Empresa).
@@ -13,6 +13,13 @@ catálogo). Aqui mora a ação que fecha o negócio:
     No modo EVENTO (nicho eventos, migração 147) não existe mensalidade: cada
     parcela do plano de pagamento vira um título no vencimento combinado —
     sinal no Pix hoje, 12x no cartão a partir do mês que vem.
+
+    E no modo EVENTO quem CHAMA fechar_orcamento não é botão nenhum: é a
+    assinatura do contrato pelo cliente. O dinheiro se divide em dois momentos —
+    o sinal entra no caixa quando cai (lancar_sinal_recebido), porque é dinheiro
+    que já entrou; o resto do plano vira conta a receber só quando o cliente
+    assina. Nos nichos recorrentes não existe contrato e nada mudou: quem fecha
+    continua sendo o botão do funil.
 
     Assim a receita entra pelo caminho de sempre (livro-caixa, fonte única) e o
     relatório de vendas continua unificado — sem PDV novo pra serviço.
@@ -325,16 +332,19 @@ def confirmar_sinal(pool, conta_id: int, orcamento_id: int) -> dict:
         except Exception as e:  # noqa: BLE001
             _log.warning("confirmar_sinal %s: não firmou o compromisso %s: %s: %s",
                          orcamento_id, agenda_id, type(e).__name__, e)
-    # e o título daquela parcela recebe baixa NA DATA DO SINAL. Só acha alguma coisa
-    # se o contrato já tiver sido fechado (é o fechamento que cria os títulos); no
-    # caminho normal — confirma o sinal, fecha o contrato depois — quem dá a baixa é
-    # o próprio fechar_orcamento, com a mesma data.
+    # e o DINHEIRO entra AGORA, na data em que caiu. O título do sinal nasce aqui
+    # e já entra baixado — não espera o fechamento.
+    #
+    # Antes ele só nascia no "Fechar contrato", e por isso quem confirmasse o sinal
+    # primeiro via a data firmar e o dinheiro não aparecer em canto nenhum. O resto
+    # do plano continua esperando a assinatura: dinheiro que entrou se registra,
+    # negócio que ninguém assinou não vira conta a receber.
     baixado = None
     try:
-        baixado = baixar_titulo_do_sinal(pool, conta_id, int(orcamento_id),
-                                         parcelas, ja_pago)
+        baixado = lancar_sinal_recebido(pool, conta_id, int(orcamento_id),
+                                        parcelas, ja_pago)
     except Exception as e:  # noqa: BLE001
-        _log.warning("confirmar_sinal %s: baixa do título falhou: %s: %s",
+        _log.warning("confirmar_sinal %s: lançamento do sinal falhou: %s: %s",
                      orcamento_id, type(e).__name__, e)
     # e o CONTRATO nasce aqui. Até a 164 ele era uma condição reavaliada a cada
     # carregamento da folha (tem nicho de evento? aprovada? sinal pago?); virou um
@@ -390,6 +400,67 @@ def baixar_titulo_do_sinal(pool, conta_id: int, orcamento_id: int, parcelas,
     return r[0] if res.get("ok") else None
 
 
+def _idx_com_titulo(c, conta_id: int, orcamento_id: int) -> set[int]:
+    """Quais parcelas deste orçamento JÁ viraram título.
+
+    Existe porque os títulos deixaram de nascer todos de uma vez: o do sinal nasce
+    quando o dinheiro cai, o resto nasce na assinatura. Sem esta consulta, a
+    segunda etapa duplicaria a primeira.
+
+    Casa por `parcela_idx`, não pelo texto da descrição — foi pra isso que a
+    migração 162 existiu."""
+    rs = c.execute(
+        """select parcela_idx from titulos
+            where conta_id=%s and orcamento_id=%s and parcela_idx is not null""",
+        (conta_id, int(orcamento_id))).fetchall()
+    return {int(r[0]) for r in rs}
+
+
+def lancar_sinal_recebido(pool, conta_id: int, orcamento_id: int, parcelas,
+                          pago_em, criado_por: int | None = None) -> int | None:
+    """O sinal caiu: o título DELE nasce e já entra baixado, na data em que caiu.
+
+    Só ele. O resto do plano espera a assinatura do contrato — é a regra nova:
+    dinheiro que entrou é registrado quando entra, mas negócio que ninguém assinou
+    não vira conta a receber.
+
+    Antes, o único caminho do sinal até o livro-caixa passava pelo "Fechar
+    contrato" (é o fechamento que criava os títulos). Quem confirmasse o sinal
+    antes de fechar via a data firmar e o dinheiro não aparecer em lugar nenhum —
+    foi o que aconteceu no teste de 16/08/2026, com 2min47 de buraco entre uma
+    coisa e outra.
+
+    Idempotente pelos dois lados: se o título já existe (contrato fechado antes),
+    só recebe baixa; se já está pago, `dar_baixa_titulo` não age duas vezes.
+    Devolve o id do título, ou None se este orçamento não tem sinal.
+    """
+    i = indice_do_sinal(parcelas)
+    if i is None or not pago_em:
+        return None
+    itens = _parcelas(parcelas)
+    with pool.connection() as c:
+        if i not in _idx_com_titulo(c, conta_id, orcamento_id):
+            r = c.execute(
+                """select empresa, cliente from orcamentos
+                    where id=%s and conta_id=%s""",
+                (int(orcamento_id), conta_id)).fetchone()
+            if not r:
+                return None
+            contraparte = (r[0] or r[1] or "").strip()
+            p = itens[i]
+            base = f"Evento — {contraparte}".strip(" —")
+            rotulo = p["obs"] or f"parcela {i + 1}/{len(itens)}"
+            c.execute(
+                _SQL_TITULO,
+                (conta_id, f"{base} · {rotulo}"[:200], contraparte,
+                 p["valor_centavos"], _venc(p["venc"], date.today()),
+                 CAT_SERVICOS, False, criado_por, int(orcamento_id), i))
+            c.commit()
+    # a baixa abre a própria conexão, então fica fora do `with` — mesmo cuidado
+    # que o fechar_orcamento já tomava.
+    return baixar_titulo_do_sinal(pool, conta_id, int(orcamento_id), parcelas, pago_em)
+
+
 def _venc(v, padrao: date) -> date:
     """Vencimento da parcela: aceita date, ISO ('2025-11-13') e 'dd/mm/aaaa'.
     O que não der pra ler cai no padrão — parcela sem data válida vira título
@@ -428,7 +499,8 @@ def _parcelas(bruto) -> list[dict]:
 
 def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
                      criado_por: int | None = None,
-                     dias_setup: int = 7) -> dict:
+                     dias_setup: int = 7,
+                     por_assinatura: bool = False) -> dict:
     """Fecha o orçamento e gera os títulos a receber.
 
     • modo 'recorrente' (o de sempre): setup (único) + mensalidade (recorrente).
@@ -437,9 +509,26 @@ def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
       evento sem plano de pagamento cai no título único do valor total.
 
     conta_id é a conta que EMITE (a empresa de serviço, ex.: Aladdin) — os títulos
-    são dela. Idempotente: orçamento já fechado não gera de novo.
+    são dela. Idempotente: orçamento já fechado não gera de novo, e parcela que já
+    virou título (o sinal, tipicamente) não vira de novo.
+
+    QUEM PODE FECHAR, no nicho de eventos: só a assinatura do cliente. É o que
+    `por_assinatura=True` diz — e ele vem de `contrato.assinar`, nunca da tela. Sem
+    isso, dava pra gerar contas a receber e lançar receita de um negócio que ninguém
+    assinou; aconteceu em 16/08/2026 e é o buraco que esta trava fecha. Nos nichos
+    recorrentes não existe contrato pra assinar e nada muda: quem fecha é o botão.
+
+    A trava mora AQUI, e não só na tela, pelo motivo de sempre: o pedido vem do
+    navegador, e navegador não é fonte confiável.
     """
     hoje = date.today()
+    # a porta do nicho primeiro: conta recorrente nem chega a perguntar por contrato
+    if not por_assinatura:
+        from finance import contrato as ctr
+        if ctr.exige_assinatura(pool, conta_id) and not ctr.assinado_do_orcamento(
+                pool, conta_id, int(orcamento_id)):
+            return {"ok": False, "erro": "O cliente ainda não assinou o contrato. "
+                                         "O financeiro abre quando ele assinar."}
     with pool.connection() as c:
         # trava atômica + escopo por conta: só o dono fecha, e só o primeiro a
         # fechar segue; os demais (duplo-clique) voltam vazios.
@@ -470,7 +559,12 @@ def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
             parcelas = _parcelas(parcelas_raw)
             base = f"Evento — {contraparte}".strip(" —")
             ids = []
+            # o SINAL já nasceu lá atrás, quando o dinheiro caiu — e já entrou
+            # baixado. Recriar aqui duplicaria o título e a receita.
+            ja_tem = _idx_com_titulo(c, conta_id, orcamento_id)
             for i, p in enumerate(parcelas, 1):
+                if (i - 1) in ja_tem:
+                    continue
                 # a observação da parcela ("Sinal", "12x no cartão") é o que a
                 # empresa escreveu pro cliente — vale mais na conciliação do que
                 # um "parcela 2/13" genérico, então ela manda quando existe.
@@ -483,8 +577,13 @@ def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
                 ).fetchone()[0])
             # sem plano de pagamento: um título só, com o total do evento — o
             # COM desconto (primeiro_ano_centavos), não a soma bruta dos itens.
+            #
+            # A condição olha `parcelas`, NÃO `ids`: desde que o sinal passou a
+            # nascer antes, `ids` pode voltar vazio porque tudo já existia — e aí
+            # testar `not ids` criaria um título do TOTAL por cima das parcelas
+            # que já estavam lá, dobrando a receita do evento.
             total_evento = int(total_cent or 0) or setup_cent
-            if not ids and total_evento > 0:
+            if not parcelas and not ja_tem and total_evento > 0:
                 ids.append(c.execute(
                     _SQL_TITULO,
                     (conta_id, base, contraparte, total_evento,

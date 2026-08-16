@@ -22,7 +22,14 @@ from psycopg_pool import ConnectionPool
 from finance import comissao as com
 
 _BASE_SQL = """
-create table contas (id bigserial primary key, nome text);
+-- `fechar_orcamento` agora pergunta se ESTA CONTA exige contrato assinado
+-- antes de abrir o financeiro, e a pergunta passa pelo nicho. Sem estas duas
+-- linhas o teste media um caminho que produção não tem.
+create table nichos (id bigserial primary key, nome text, slug text unique, tipo text);
+create table contas (id bigserial primary key, nome text, nome_fantasia text,
+  razao_social text, documento text, endereco text, bairro text, cep text,
+  cidade text, uf text, telefone text, email_empresa text, logo_url text,
+  cnae text, nicho_id bigint references nichos(id));
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text default 'vendedor', ativo boolean default true, comissao_pct numeric(5,2));
 create table lancamentos (id bigserial primary key, conta_id bigint, membro_id bigint,

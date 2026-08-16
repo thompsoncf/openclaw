@@ -11,6 +11,11 @@ finance.vendas.fechar_orcamento, que vira TÍTULOS A RECEBER no módulo Empresa
 (setup único + mensalidade recorrente). Sem PDV novo pra serviço: a receita entra
 pelo livro-caixa de sempre.
 
+NO NICHO DE EVENTOS o último passo é outro: o botão "Fechar contrato" não aparece,
+porque quem abre o financeiro é a ASSINATURA do contrato pelo cliente. O botão
+gerava contas a receber sem olhar contrato nenhum — e o nome convidava a apertar
+justamente quando o contrato ainda estava sem assinatura.
+
 O catálogo de serviços é POR CONTA (finance.servicos_catalogo) — cada empresa
 monta o que vende. Empresa nova começa vazia; a Aladdin usa o modelo de
 tecnologia. A IA de escopo e a validação de módulos usam o catálogo da conta.
@@ -2402,7 +2407,16 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
           co.addEventListener('click',function(){window.open('/contrato/'+it.contrato_token,'_blank');});
           right.appendChild(cb); right.appendChild(co);
         }
-        if(!fechado){
+        // NO NICHO DE EVENTOS QUEM FECHA É A ASSINATURA DO CLIENTE, não este botão.
+        // Ele gerava contas a receber e lançava receita sem olhar contrato nenhum —
+        // e o nome "Fechar contrato" convidava a apertar justamente quando o
+        // contrato ainda estava sem assinatura. Nos nichos recorrentes não existe
+        // contrato pra assinar e nada muda.
+        //
+        // A ROTA continua viva e barrada pela mesma trava do servidor: se a geração
+        // do financeiro falhar na hora da assinatura, o contrato fica assinado e o
+        // fechamento é retomável. Esconder o botão não é remover o caminho.
+        if(!fechado && !evento){
           var b=document.createElement('button'); b.className='oc-fechar'; b.textContent='Fechar contrato';
           b.addEventListener('click',function(){fechar(it.id,b,it.plano_difere||0);});
           right.appendChild(b);

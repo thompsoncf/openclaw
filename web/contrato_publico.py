@@ -76,7 +76,7 @@ def carregar(token: str, pool=None) -> dict | None:
             """select o.cliente, o.empresa, o.cnpj, o.whatsapp, o.email, o.telefone,
                       o.endereco, o.cep, o.cidade, o.uf, o.numero, o.evento,
                       coalesce(o.primeiro_ano_centavos, o.setup_centavos, 0),
-                      o.status, o.sinal_pago_em,
+                      o.parcelas, o.status, o.sinal_pago_em,
                       ct.nome, ct.razao_social, ct.nome_fantasia, ct.documento,
                       ct.endereco, ct.bairro, ct.cep, ct.cidade, ct.uf,
                       ct.telefone, ct.email_empresa, ct.logo_url
@@ -86,7 +86,7 @@ def carregar(token: str, pool=None) -> dict | None:
     if not r:
         return None
     (cli, emp_nome, cli_doc, whats, cli_email, cli_tel, cli_end, cli_cep, cli_cid,
-     cli_uf, numero, evento, total, orc_status, sinal_pago_em,
+     cli_uf, numero, evento, total, parcelas, orc_status, sinal_pago_em,
      c_nome, c_razao, c_fantasia, c_doc, c_end, c_bairro, c_cep, c_cid, c_uf,
      c_tel, c_email, c_logo) = r
     evento = evento if isinstance(evento, dict) else {}
@@ -100,6 +100,11 @@ def carregar(token: str, pool=None) -> dict | None:
                  "telefone": cli_tel or "", "endereco": cli_end or "", "cep": cli_cep or "",
                  "cidade": cli_cid or "", "uf": cli_uf or "", "numero": numero,
                  "setup_centavos": int(total or 0), "evento": evento}
+
+    # "este orçamento pede entrada?" sai do mesmo lugar que a folha do cliente usa
+    # pra prometer o valor do sinal — duas leituras diferentes seriam dois números.
+    from finance import vendas
+    tem_sinal = vendas.valor_do_sinal(parcelas) > 0
 
     assinado = bool(ct["assinado_em"])
     if assinado and ct.get("texto"):
@@ -146,14 +151,21 @@ def carregar(token: str, pool=None) -> dict | None:
         "valor": ctr.reais(int(total or 0)),
         "orcamento_numero": numero,
         "orcamento_status": orc_status or "",
-        # LÊ SEMPRE, ASSINA DEPOIS DO SINAL. A cláusula da reserva diz que a data só
-        # fica garantida com a entrada — assinar antes seria aceitar um contrato
-        # cuja primeira obrigação ainda não foi cumprida. Mas ler antes é o ponto:
-        # ninguém deve pagar pra descobrir o que aceitou.
+        # LÊ SEMPRE, ASSINA DEPOIS DO SINAL — QUANDO HÁ SINAL. A cláusula da reserva
+        # diz que a data só fica garantida com a entrada; assinar antes seria aceitar
+        # um contrato cuja primeira obrigação ainda não foi cumprida. Mas ler antes é
+        # o ponto: ninguém deve pagar pra descobrir o que aceitou.
+        #
+        # ONDE NÃO HÁ ENTRADA, A CLÁUSULA NÃO SE APLICA. Exigir o sinal sempre travava
+        # pra sempre o contrato de todo orçamento sem parcela de sinal: sem sinal não
+        # nasce pré-reserva, sem pré-reserva o botão "Sinal recebido" não aparece no
+        # funil, e `sinal_pago_em` ficava nulo até o fim dos tempos.
         "aprovada": (orc_status or "") in ("aprovada", "fechado"),
         "sinal_pago": bool(sinal_pago_em),
+        "tem_sinal": tem_sinal,
         "pode_assinar": ((orc_status or "") in ("aprovada", "fechado")
-                         and bool(sinal_pago_em) and not assinado),
+                         and (bool(sinal_pago_em) or not tem_sinal)
+                         and not assinado),
     }
 
 
@@ -328,10 +340,16 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#142
         <p>Guarde este link: ele é o seu contrato. Dá pra baixar em PDF pelo botão
         "Baixar / imprimir" no topo da página.</p>
       </div>
-      {% elif not d.pode_assinar %}
+      {% elif not d.pode_assinar and d.tem_sinal %}
       <div class="carimbo">Você já pode ler o contrato inteiro.
         <b>A assinatura é liberada</b> assim que o pagamento da entrada for
         confirmado pela {{ d.contratada.nome }}.</div>
+      {% elif not d.pode_assinar %}
+      {# sem entrada no plano, o que falta é a aprovação do orçamento — prometer
+         "assim que a entrada for confirmada" seria mandar o cliente esperar por
+         um pagamento que ninguém pediu. #}
+      <div class="carimbo">Você já pode ler o contrato inteiro.
+        <b>A assinatura é liberada</b> quando o orçamento for aprovado.</div>
       {% else %}
       <form class="sign" method="post" action="/contrato/{{ token }}/assinar">
         <h3>✍️ Assinar o contrato</h3>

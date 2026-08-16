@@ -43,10 +43,20 @@ def pool():
     init_schema(p)
     with p.connection() as c:
         c.execute(_sql("053_modulo_pj.sql"))        # titulos
+        # a baixa do título lança no livro-caixa; `lancamentos` precisa das
+        # colunas que o LivroCaixa escreve. Sem elas o arquivo só passava
+        # quando outro teste tinha criado a coluna antes, no banco compartilhado.
+        c.execute(_sql("018_chave_nfce_lancamentos.sql"))   # lancamentos.chave
+        c.execute(_sql("057_natureza_lancamento.sql"))      # lancamentos.natureza
         c.execute(_sql("098_agenda.sql"))           # eventos_agenda
         c.execute(_sql("099_agenda_tipo.sql"))      # eventos_agenda.tipo
         c.execute(_sql("130_evento_desfecho.sql"))      # .desfecho
         c.execute(_sql("131_evento_link_online.sql"))   # .link_online
+        # agenda_config completa: _reservar_na_agenda lê `pre_reserva_dias` por
+        # get_config, que seleciona todas as colunas do card de lembrete.
+        c.execute(_sql("101_agenda_lembretes.sql"))
+        c.execute(_sql("126_agenda_avisar_convidados.sql"))
+        c.execute(_sql("146_agenda_enviar_confirmacao.sql"))
         # dados da empresa que o cabeçalho do orçamento usa. Vêm das migrações
         # 038/045/049/058/059, que arrastam junto loja/catálogo — aqui só as
         # colunas, que é o que o teste precisa.
@@ -85,6 +95,7 @@ def pool():
         c.execute(_sql("161_orcamento_sinal.sql"))
         # 162: o vínculo título↔parcela, que a baixa do sinal usa pra achar o título
         c.execute(_sql("162_titulo_parcela_do_orcamento.sql"))
+        c.execute(_sql("163_evento_sinal_esperado.sql"))
         c.commit()
     yield p
     p.close()
@@ -663,6 +674,57 @@ def test_folha_para_de_avisar_quando_o_sinal_cai(pool, conta_id, monkeypatch):
     ag.confirmar_pre_reserva(pool, conta_id, ev_id)
     html = prop.proposta_publica(None, tok).body.decode()
     assert "está segurada pra você até" not in html and "está reservada" in html
+
+
+def test_folha_nao_diz_reservada_depois_que_a_data_foi_liberada(pool, conta_id, monkeypatch):
+    """O prazo venceu (ou a empresa soltou) e a folha continuava dizendo "a data
+    está reservada" — calada e errada. Agora ela diz o que aconteceu."""
+    carregar, pool_teste = prop._carregar, pool
+    monkeypatch.setattr(prop, "_carregar", lambda t, pool=None: carregar(t, pool=pool_teste))
+    _, tok = _semear(pool, conta_id)
+    prop.registrar_assinatura(pool, tok, "Maria Teste", "", "1.2.3.4")
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    assert ag.liberar_pre_reserva(pool, conta_id, ev_id) is True
+    html = prop.proposta_publica(None, tok).body.decode()
+    assert "não está mais segurada" in html
+    assert "está reservada" not in html and "está segurada pra você" not in html
+
+
+def test_orcamento_do_evento_liga_a_agenda_de_volta_na_proposta(pool, conta_id):
+    """É esse vínculo que faz o botão "Sinal recebido" da caixa do dia usar a mesma
+    regra do funil — e o "Ver orçamento" saber pra onde ir."""
+    oid, tok = _semear(pool, conta_id)
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    assert ag.orcamento_do_evento(pool, conta_id, ev_id) == oid
+    assert ag.orcamento_do_evento(pool, conta_id + 999, ev_id) is None   # escopo
+
+
+def test_sinal_pela_agenda_faz_o_mesmo_que_pelo_funil(pool, conta_id):
+    """Dois botões, uma regra só: firma a data E dá baixa no título, na data do
+    sinal. Duas cópias da regra seria o começo de dois comportamentos."""
+    oid, tok = _semear(pool, conta_id)
+    ev_id = prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    r = vendas.fechar_orcamento(pool, conta_id, oid)         # contrato fechado antes
+    assert r["sinal_titulo_id"] is None
+    # o que a rota da Agenda faz: acha o orçamento pelo evento e confirma
+    achado = ag.orcamento_do_evento(pool, conta_id, ev_id)
+    res = vendas.confirmar_sinal(pool, conta_id, achado)
+    assert res["ok"] and res["reserva_firmada"] and res["titulo_baixado"]
+    with pool.connection() as c:
+        assert c.execute("select status from eventos_agenda where id=%s",
+                         (ev_id,)).fetchone()[0] == "ativo"
+        assert c.execute("select status from titulos where orcamento_id=%s and parcela_idx=0",
+                         (oid,)).fetchone()[0] == "pago"
+
+
+def test_pre_reserva_da_agenda_mostra_o_orcamento_de_origem(pool, conta_id):
+    """A lista ⏳ Datas seguradas traz o número do orçamento e o valor do sinal —
+    é o que deixa decidir sem sair da agenda."""
+    oid, tok = _semear(pool, conta_id)
+    prop._reservar_na_agenda(prop._carregar(tok, pool=pool), pool=pool)
+    linha = ag.pre_reservas(pool, conta_id)[0]
+    assert linha["orcamento_id"] == oid and linha["orcamento_numero"] == 60
+    assert linha["sinal_centavos"] == 181000
 
 
 def test_choque_de_data_avisa_o_dono_sem_bloquear(pool, conta_id, monkeypatch):

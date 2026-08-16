@@ -58,8 +58,29 @@ def _vizinho(ano: int, mes: int, delta: int) -> str:
     return f"{idx // 12:04d}-{idx % 12 + 1:02d}"
 
 
-def _monta_semanas(ano: int, mes: int, eventos: list[dict], hoje: date) -> list[list[dict]]:
+def _prazo(ev: dict, agora) -> dict:
+    """Quanto falta pro prazo da data segurada vencer, em texto curto e em horas.
+
+    O texto vai na LINHA do calendário (é o que faz o prazo aparecer sem abrir
+    nada) e as horas decidem a cor: abaixo de 24h a data vira urgência, não aviso.
+    Compromisso firme devolve vazio — não tem prazo correndo."""
+    ate = ev.get("pre_reserva_ate")
+    if ev.get("status") != ag.PRE_RESERVADO or not ate:
+        return {"rot": "", "horas": None, "urgente": False}
+    horas = (ate - agora).total_seconds() / 3600
+    if horas <= 0:
+        rot = "vencido"
+    elif horas < 24:
+        rot = f"{max(1, int(horas))}h"
+    else:
+        rot = f"{int(horas // 24)}d"
+    return {"rot": rot, "horas": horas, "urgente": horas < 24}
+
+
+def _monta_semanas(ano: int, mes: int, eventos: list[dict], hoje: date,
+                   agora=None) -> list[list[dict]]:
     """Grade do mês (semanas de Dom a Sáb). Cada célula traz seus eventos."""
+    agora = agora or ag.agora_brt()
     por_dia: dict[date, list[dict]] = {}
     for ev in eventos:
         d = ev["inicio"].astimezone(ag.BRT).date()
@@ -70,16 +91,25 @@ def _monta_semanas(ano: int, mes: int, eventos: list[dict], hoje: date) -> list[
         linha = []
         for d in semana:
             evs = por_dia.get(d, [])
+            # `pre` = data SEGURADA esperando o sinal, não compromisso. Aparece no
+            # calendário (é ela que impede vender a data duas vezes) com a marca de
+            # estado própria, e fica fora dos "Próximos" — ag.proximos só traz 'ativo'.
+            linhas_ev = []
+            for e in evs:
+                pz = _prazo(e, agora)
+                linhas_ev.append({
+                    "id": e["id"], "titulo": e["titulo"], "tipo": e["tipo"],
+                    "hora": e["inicio"].astimezone(ag.BRT).strftime("%H:%M"),
+                    "pre": e.get("status") == ag.PRE_RESERVADO,
+                    "prazo": pz["rot"], "urgente": pz["urgente"],
+                })
+            # a célula inteira se pinta: é o que se enxerga do mês sem ler linha
+            # nenhuma — âmbar quando tem data segurada, coral quando alguma aperta.
             linha.append({
                 "dia": d.day, "fora": d.month != mes, "hoje": d == hoje,
-                "iso": d.isoformat(),
-                # `pre` = data SEGURADA esperando o sinal, não compromisso. Aparece
-                # no calendário (é ela que impede vender a data duas vezes) mas
-                # tracejada, e fora dos "Próximos" — ag.proximos só traz 'ativo'.
-                "eventos": [{"id": e["id"], "titulo": e["titulo"], "tipo": e["tipo"],
-                             "hora": e["inicio"].astimezone(ag.BRT).strftime("%H:%M"),
-                             "pre": e.get("status") == ag.PRE_RESERVADO}
-                            for e in evs],
+                "iso": d.isoformat(), "eventos": linhas_ev,
+                "tem_seg": any(x["pre"] for x in linhas_ev),
+                "urg": any(x["pre"] and x["urgente"] for x in linhas_ev),
             })
         semanas.append(linha)
     return semanas
@@ -91,11 +121,14 @@ def _titulo_dia(d: date) -> str:
     return f"{DIAS_SEM_EXT[idx]}, {d.day} de {MESES[d.month]}"
 
 
-def _eventos_por_dia(eventos: list[dict], convidados: dict[int, list[dict]] | None = None) -> dict[str, dict]:
+def _eventos_por_dia(eventos: list[dict], convidados: dict[int, list[dict]] | None = None,
+                     agora=None, orcamentos: dict[int, dict] | None = None) -> dict[str, dict]:
     """{iso_do_dia: {titulo, eventos:[...]}} com os detalhes completos (local,
     descrição, convidados) — alimenta a caixa do dia no JS sem precisar de outra
     requisição (os eventos do mês já vieram pro calendário)."""
     convidados = convidados or {}
+    orcamentos = orcamentos or {}
+    agora = agora or ag.agora_brt()
     out: dict[str, dict] = {}
     for e in sorted(eventos, key=lambda ev: ev["inicio"]):
         d = e["inicio"].astimezone(ag.BRT).date()
@@ -117,6 +150,14 @@ def _eventos_por_dia(eventos: list[dict], convidados: dict[int, list[dict]] | No
             "pre": e.get("status") == ag.PRE_RESERVADO,
             "pre_ate": (e["pre_reserva_ate"].astimezone(ag.BRT).strftime("%d/%m %H:%M")
                         if e.get("pre_reserva_ate") else ""),
+            "prazo": _prazo(e, agora)["rot"],
+            "urgente": _prazo(e, agora)["urgente"],
+            # sinal e orçamento só existem na data segurada — são eles que ligam os
+            # botões "Sinal recebido" e "Ver orçamento" da caixa do dia.
+            "sinal": _brl(orcamentos.get(e["id"], {}).get("sinal_centavos")
+                          or e.get("sinal_centavos")),
+            "orcamento_id": orcamentos.get(e["id"], {}).get("orcamento_id"),
+            "orcamento_numero": orcamentos.get(e["id"], {}).get("orcamento_numero"),
         })
     return out
 
@@ -133,6 +174,29 @@ def _convite_url(request: Request, token: str) -> str:
 
 def _so_digitos(s: str) -> str:
     return "".join(ch for ch in (s or "") if ch.isdigit())
+
+
+def _centavos(txt: str) -> int | None:
+    """"1.810,00", "1810", "R$ 1.810" -> centavos. O dono digita como fala."""
+    d = "".join(ch for ch in (txt or "") if ch.isdigit() or ch in ",.")
+    if not d:
+        return None
+    d = d.replace(".", "").replace(",", ".")
+    try:
+        v = float(d)
+    except ValueError:
+        return None
+    return int(round(v * 100)) or None
+
+
+def _brl(centavos) -> str:
+    """R$ 1.810,00 — vazio quando não há valor. O sinal esperado aparece na caixa
+    do dia e no card das datas seguradas; sem valor, a linha simplesmente não fala
+    de dinheiro."""
+    if not centavos:
+        return ""
+    v = int(centavos) / 100
+    return "R$ " + f"{v:,.2f}".replace(",", "\x00").replace(".", ",").replace("\x00", ".")
 
 
 def _wa_share(contato: str, texto: str) -> str:
@@ -244,11 +308,28 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
     agora = ag.agora_brt()
     hoje = agora.date()
     eventos = ag.eventos_mes(pool, conta_id, ano, mes)
-    semanas = _monta_semanas(ano, mes, eventos, hoje)
+    semanas = _monta_semanas(ano, mes, eventos, hoje, agora)
     proximos = ag.proximos(pool, conta_id, limite=8)
     ids_com_convidados = {e["id"] for e in eventos} | {e["id"] for e in proximos}
     convidados = cv.por_evento(pool, conta_id, list(ids_com_convidados))
-    eventos_dia = _eventos_por_dia(eventos, convidados)
+    # DATAS SEGURADAS: lista própria, da que vence primeiro pra última. `proximos`
+    # não pode mostrá-las (é a fonte do lembrete e do resumo do dia), então sem
+    # este card uma data que vence amanhã só aparecia pra quem abrisse o mês certo.
+    seguradas = []
+    for ev in ag.pre_reservas(pool, conta_id):
+        pz = _prazo(ev, agora)
+        seguradas.append({
+            "id": ev["id"], "titulo": ev["titulo"],
+            "quando": ag.fmt_hora(ev), "prazo": pz["rot"], "urgente": pz["urgente"],
+            "ate": (ev["pre_reserva_ate"].astimezone(ag.BRT).strftime("%d/%m %H:%M")
+                    if ev.get("pre_reserva_ate") else ""),
+            "sinal": _brl(ev.get("sinal_centavos")),
+            "orcamento_id": ev.get("orcamento_id"),
+            "orcamento_numero": ev.get("orcamento_numero"),
+            "mes": f"{ev['inicio'].astimezone(ag.BRT):%Y-%m}",
+        })
+    orcs = {s["id"]: s for s in seguradas}
+    eventos_dia = _eventos_por_dia(eventos, convidados, agora, orcs)
     reaproveitar = [{
         "id": e["id"], "titulo": e["titulo"], "hora_rot": ag.fmt_hora(e),
         "hora": e["inicio"].astimezone(ag.BRT).strftime("%H:%M"),
@@ -279,7 +360,7 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
                    mes_prev=_vizinho(ano, mes, -1), mes_next=_vizinho(ano, mes, +1),
                    mes_hoje=f"{hoje.year:04d}-{hoje.month:02d}",
                    hoje_iso=hoje.isoformat(), abrir_novo=(novo == "1"),
-                   cfg=cfg, feed_url=feed_url, share=share,
+                   cfg=cfg, feed_url=feed_url, share=share, seguradas=seguradas,
                    aviso=request.session.pop("agenda_aviso", None))
 
 
@@ -314,6 +395,8 @@ def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
                 tipo: str = Form("pessoal"), link_online: str = Form(""),
                 convidado_nome: list[str] = Form(default=[]),
                 convidado_contato: list[str] = Form(default=[]),
+                segurar: str = Form(""), segurar_ate: str = Form(""),
+                sinal_esperado: str = Form(""),
                 m: str = Form("")):
     ctx, redir = _acesso(request)
     if redir is not None:
@@ -330,13 +413,33 @@ def agenda_novo(request: Request, titulo: str = Form(...), data: str = Form(""),
         return RedirectResponse(voltar + ("&" if "?" in voltar else "?") + "novo=1", status_code=303)
     pool = get_pool()
     local = (local or "").strip() or None
+    # SÓ SEGURAR A DATA: pré-reserva nascida na própria agenda, sem orçamento
+    # nenhum — é o telefonema "segura o dia 20 pra mim até sexta". Sem isso, a
+    # única saída do dono era marcar firme (mentira) ou não marcar (e vender duas
+    # vezes). O prazo padrão vem do card ⏳ Data segurada da conta.
+    ate = None
+    sinal_cent = None
+    if segurar == "1":
+        ate = ag.parse_datahora(segurar_ate) if segurar_ate else None
+        if ate is None:
+            dias = ag.get_config(pool, ctx["conta_id"]).get("pre_reserva_dias") or ag.PRE_RESERVA_DIAS
+            ate = ag.agora_brt() + timedelta(days=int(dias))
+        else:
+            ate = ate.replace(hour=23, minute=59)   # a data digitada vale até o fim do dia
+        sinal_cent = _centavos(sinal_esperado)
     ev = ag.criar_evento(pool=pool, conta_id=ctx["conta_id"], titulo=titulo,
                          inicio=inicio, membro_id=ctx["membro_id"],
                          local=local,
                          descricao=(descricao or "").strip() or None,
                          tipo=tipo if tipo in ag.TIPOS else "pessoal",
-                         link_online=(link_online or "").strip() or None if ag.eh_online(local) else None)
+                         link_online=(link_online or "").strip() or None if ag.eh_online(local) else None,
+                         pre_reserva_ate=ate, sinal_centavos=sinal_cent)
     destino = f"/painel/agenda?m={inicio.year:04d}-{inicio.month:02d}"
+    if ate is not None:
+        request.session["agenda_aviso"] = (
+            f"Data segurada: “{titulo}” em {inicio.strftime('%d/%m às %H:%M')}, "
+            f"até {ate.strftime('%d/%m %H:%M')}. Ela ocupa o dia, mas não vira lembrete.")
+        return RedirectResponse(destino, status_code=303)
     # Convidados (um ou vários): cria um convite por linha preenchida.
     pares = []
     for i in range(max(len(convidado_nome), len(convidado_contato))):
@@ -557,6 +660,76 @@ def agenda_lembrete(request: Request, resumo_dia: str = Form(""),
     return RedirectResponse(voltar, status_code=303)
 
 
+# ============================================ AÇÕES SOBRE A DATA SEGURADA
+@router.post("/painel/agenda/sinal-recebido")
+def agenda_sinal_recebido(request: Request, evento_id: int = Form(...), m: str = Form("")):
+    """O sinal caiu — apertado de dentro da Agenda, onde a data está.
+
+    Antes só existia no funil (Serviços): pra firmar uma data era preciso sair da
+    agenda, abrir a proposta e apertar lá. A REGRA é a mesma —
+    finance.vendas.confirmar_sinal, o mesmo ponto único que o botão do funil usa,
+    com a mesma baixa do título na data do pagamento.
+
+    Pré-reserva nascida na própria agenda não tem orçamento: aí só firma a data,
+    que é tudo que existe pra firmar."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    pool, conta_id = get_pool(), ctx["conta_id"]
+    orc = ag.orcamento_do_evento(pool, conta_id, evento_id)
+    if orc:
+        from finance import vendas
+        r = vendas.confirmar_sinal(pool, conta_id, orc)
+        ok = bool(r.get("ok"))
+        extra = " O título dessa parcela entrou como recebido." if r.get("titulo_baixado") else ""
+    else:
+        ok = ag.confirmar_pre_reserva(pool, conta_id, evento_id)
+        extra = ""
+    request.session["agenda_aviso"] = (
+        f"Sinal confirmado — a data é do cliente agora. ✅{extra}" if ok
+        else "Essa data já não estava segurada.")
+    voltar = f"/painel/agenda?m={m}" if m else "/painel/agenda"
+    return RedirectResponse(voltar, status_code=303)
+
+
+@router.post("/painel/agenda/liberar")
+def agenda_liberar(request: Request, evento_id: int = Form(...), m: str = Form("")):
+    """Solta a data antes do prazo, porque o dono decidiu.
+
+    Até aqui só o prazo soltava: quem recebia um "desisti" por telefone ficava
+    esperando o relógio, com a data travada. Só age em data SEGURADA — compromisso
+    firme se cancela pelo botão de cancelar, que pede confirmação e avisa convidado."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    ok = ag.liberar_pre_reserva(get_pool(), ctx["conta_id"], evento_id)
+    request.session["agenda_aviso"] = (
+        "Data liberada — voltou a ficar disponível." if ok
+        else "Essa data já não estava segurada.")
+    voltar = f"/painel/agenda?m={m}" if m else "/painel/agenda"
+    return RedirectResponse(voltar, status_code=303)
+
+
+@router.get("/painel/agenda/conflitos")
+def agenda_conflitos(request: Request, data: str = "", hora: str = "", fim: str = ""):
+    """O que já está marcado nessa janela — pro aviso de choque APARECER NA TELA,
+    na hora de marcar.
+
+    Hoje o choque só existe por Telegram, e só quando vem de aprovação de orçamento.
+    Quem marca pelo painel não é avisado de nada. Não bloqueia: quem decide se cabe
+    é a empresa (buffet com dois salões cabe, fotógrafo não)."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "itens": []}, status_code=401)
+    inicio, ffim = ag.janela_evento(data, hora or "09:00", fim or None)
+    if not inicio:
+        return JSONResponse({"ok": True, "itens": []})
+    itens = [{"titulo": e["titulo"], "quando": ag.fmt_hora(e),
+              "pre": e.get("status") == ag.PRE_RESERVADO}
+             for e in ag.conflitos(get_pool(), ctx["conta_id"], inicio, ffim)]
+    return JSONResponse({"ok": True, "itens": itens})
+
+
 # ================================================ PRAZO DA DATA SEGURADA (pré-reserva)
 @router.post("/painel/agenda/pre-reserva")
 def agenda_pre_reserva(request: Request, pre_reserva_dias: str = Form("3"), m: str = Form("")):
@@ -772,11 +945,26 @@ _CSS = """<style>
 .ev-line .h{font-size:.6rem;font-weight:700;color:var(--txt-mut);flex:0 0 auto;font-variant-numeric:tabular-nums}
 .ev-line .n{font-size:.62rem;color:var(--txt);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ev-more{font-size:.58rem;color:var(--txt-mut);padding-left:10px}
-/* pré-reserva: a data está SEGURADA, não marcada. Tracejado (não só cor: quem não
-   distingue cor precisa enxergar isso) e o ponto do tipo fica vazado. */
-.ev-line.pre .n,.ev-line.pre .h{opacity:.75}
-.ev-line.pre{border-left:2px dashed #b98d2e;padding-left:3px;margin-left:-5px}
-.ev-line.pre .dot{background:transparent!important;box-shadow:inset 0 0 0 1.5px #b98d2e}
+/* MARCA DE ESTADO — a barra da esquerda responde "essa data já é minha?", que é a
+   pergunta que vem antes de "que tipo de compromisso é" (a bolinha, que fica).
+   Forma, não cor: cheia = fixado, pontilhada = segurado. Quem não distingue verde
+   de âmbar enxerga a diferença do mesmo jeito. */
+.ev-line{padding-left:6px;position:relative}
+.ev-line::before{content:"";position:absolute;left:0;top:1px;bottom:1px;width:3px;border-radius:2px;
+                 background:var(--verde)}
+.ev-line.pre::before{background:repeating-linear-gradient(180deg,var(--ambar) 0 3px,transparent 3px 6px)}
+.ev-line.pre .n,.ev-line.pre .h{color:var(--ambar)}
+.ev-line.pre .dot{background:transparent!important;box-shadow:inset 0 0 0 1.5px var(--ambar)}
+.ev-prazo{font-size:.55rem;font-weight:700;flex:0 0 auto;color:var(--ambar);
+          font-variant-numeric:tabular-nums}
+.ev-prazo.urg{color:var(--coral)}
+/* a célula inteira se pinta: é o que se vê do mês sem ler linha nenhuma */
+.cal-cell.temseg{border-color:var(--ambar-borda)}
+.cal-cell.temseg.urg{border-color:var(--coral-borda)}
+/* legenda das marcas */
+.leg-mk{display:inline-block;width:3px;height:11px;border-radius:2px;vertical-align:-1px;margin-right:3px}
+.leg-fixo{background:var(--verde)}
+.leg-seg{background:repeating-linear-gradient(180deg,var(--ambar) 0 3px,transparent 3px 6px)}
 /* próximos */
 .px{display:flex;flex-direction:column;gap:2px}
 .px-row{display:flex;align-items:flex-start;gap:11px;padding:9px 4px;border-bottom:1px solid var(--borda)}
@@ -963,7 +1151,47 @@ _CSS = """<style>
 .dev-tt{font-size:.92rem;font-weight:600;margin-top:1px}
 .dev-meta{display:flex;flex-wrap:wrap;gap:8px;font-size:.76rem;color:var(--txt-mut);margin-top:4px}
 .dev-desc{font-size:.8rem;color:var(--txt-mut);margin-top:6px;line-height:1.45;background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:7px 9px}
-.dev-pre{font-size:.78rem;color:#e0b25a;margin-top:6px;line-height:1.45;background:#2a221255;border:1px dashed #6b5620;border-radius:8px;padding:7px 9px}
+.dev-pre{font-size:.78rem;color:#e6c98d;margin-top:6px;line-height:1.45;background:var(--ambar-fundo);border:1px dashed var(--ambar-borda);border-radius:8px;padding:7px 9px}
+.dev-pre b{color:var(--ambar)}
+/* na caixa do dia o ponto do tipo também fica vazado quando a data é segurada */
+.dev-dot.pre-dot{background:transparent!important;box-shadow:inset 0 0 0 2px var(--ambar)}
+.dev-pre.urg{background:var(--coral-fundo);border-color:var(--coral-borda);color:#f0c2be}
+.dev-pre.urg b{color:var(--coral)}
+/* ações da data segurada: firmar, soltar, ver de onde veio */
+.segacts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.segacts form{display:inline}
+.sbtn{font-size:.7rem;font-weight:650;border-radius:7px;padding:.34rem .62rem;cursor:pointer;
+      border:1px solid var(--borda);background:transparent;color:var(--txt);width:auto;margin:0}
+.sbtn.ok{background:var(--verde);border-color:var(--verde);color:var(--sobre-verde)}
+.sbtn.amb{border-color:var(--ambar-borda);color:var(--ambar)}
+.sbtn.gh{color:var(--txt-mut);text-decoration:none;display:inline-block}
+/* card das datas seguradas */
+.segrow{display:grid;grid-template-columns:3px 1fr auto;gap:9px;align-items:center;
+        padding:8px 0;border-top:1px dashed var(--borda)}
+.segrow:first-of-type{border-top:0;padding-top:2px}
+.segbar{align-self:stretch;border-radius:2px;
+        background:repeating-linear-gradient(180deg,var(--ambar) 0 3px,transparent 3px 6px)}
+.segrow.urg .segbar{background:repeating-linear-gradient(180deg,var(--coral) 0 3px,transparent 3px 6px)}
+.segrow .stt{font-size:.82rem;font-weight:600}
+.segrow .smt{font-size:.68rem;color:var(--txt-mut)}
+.segrow .srt{text-align:right}
+.segrow .srt .v{font-size:.74rem;font-weight:700;color:var(--ambar);font-variant-numeric:tabular-nums}
+.segrow.urg .srt .v{color:var(--coral)}
+.segrow .srt .s{font-size:.62rem;color:var(--txt-mut);font-variant-numeric:tabular-nums}
+.segcnt{font-size:.62rem;font-weight:700;color:var(--ambar);background:var(--ambar-fundo);
+        border:1px solid var(--ambar-borda);border-radius:999px;padding:.1rem .45rem}
+/* choque de horário no formulário */
+.choque{display:none;gap:8px;align-items:flex-start;font-size:.74rem;color:#f0c2be;
+        background:var(--coral-fundo);border:1px solid var(--coral-borda);border-radius:9px;
+        padding:8px 10px;line-height:1.45;margin-top:2px}
+.choque.on{display:flex}
+.choque b{color:var(--coral)}
+/* "só segurar a data" */
+.segbox{display:none;flex-direction:column;gap:8px;border:1px dashed var(--ambar-borda);
+        background:var(--ambar-fundo);border-radius:9px;padding:9px 10px;margin-top:2px}
+.segbox.on{display:flex}
+.segbox .sl{font-size:.66rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ambar)}
+.segbox .sh{font-size:.68rem;color:var(--txt-mut);line-height:1.45}
 .dev-conv{margin-top:9px;padding-top:9px;border-top:1px dashed var(--borda)}
 .dev-conv-lbl{font-size:.66rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--txt-mut);margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;gap:8px}
 .dev-conv-add{font-size:.66rem;font-weight:700;letter-spacing:0;text-transform:none;color:var(--verde-claro);background:none;border:0;cursor:pointer;padding:0}
@@ -1053,7 +1281,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         {% for semana in semanas %}
         <div class="cal-wk">
           {% for c in semana %}
-          <div class="cal-cell{% if c.fora %} fora{% endif %}{% if c.hoje %} hoje{% endif %}{% if c.eventos %} tem-evento{% endif %}{% if not c.eventos and reaproveitar %} clicavel{% endif %}"
+          <div class="cal-cell{% if c.fora %} fora{% endif %}{% if c.hoje %} hoje{% endif %}{% if c.eventos %} tem-evento{% endif %}{% if c.tem_seg %} temseg{% endif %}{% if c.urg %} urg{% endif %}{% if not c.eventos and reaproveitar %} clicavel{% endif %}"
                {% if c.eventos or reaproveitar %}data-iso="{{ c.iso }}" tabindex="0" role="button" aria-label="{% if c.eventos %}Ver os {{ c.eventos|length }} compromisso{{ 's' if c.eventos|length != 1 }} do dia {{ c.dia }}{% else %}Ver sugestões pro dia {{ c.dia }}{% endif %}"{% endif %}>
             <div class="cal-head">
               <span class="cal-num">{{ c.dia }}</span>
@@ -1062,7 +1290,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             {% if c.eventos %}
             <div class="evs">
               {% for e in c.eventos[:2] %}
-              <div class="ev-line{% if e.pre %} pre{% endif %}" data-ev="{{ e.id }}"{% if e.pre %} title="Data segurada — esperando o sinal"{% endif %}><span class="dot d-{{ e.tipo }}"></span><span class="h">{{ e.hora }}</span><span class="n">{{ e.titulo }}</span></div>
+              <div class="ev-line{% if e.pre %} pre{% endif %}" data-ev="{{ e.id }}"{% if e.pre %} title="Data segurada — esperando o sinal ({{ e.prazo }})"{% endif %}><span class="dot d-{{ e.tipo }}"></span><span class="h">{{ e.hora }}</span><span class="n">{{ e.titulo }}</span>{% if e.prazo %}<span class="ev-prazo{% if e.urgente %} urg{% endif %}">{{ e.prazo }}</span>{% endif %}</div>
               {% endfor %}
             </div>
             {% if c.eventos|length > 2 %}<div class="ev-more">+{{ c.eventos|length - 2 }} mais</div>{% endif %}
@@ -1072,10 +1300,37 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         </div>
         {% endfor %}
       </div>
-      <p class="hint">As cores separam <b style="color:#bfeeda">pessoal</b>, <b style="color:#bcd8f6">empresa</b> e <b style="color:#f0d9a6">fornecedor</b>. O <b style="color:#e0b25a">tracejado</b> é data segurada esperando o sinal — ela ocupa a data, mas não vira lembrete nem entra no calendário sincronizado. Marque também pelo WhatsApp/Telegram — cai tudo aqui.</p>
+      <p class="hint">A barra da esquerda diz se a data é sua: <b><span class="leg-mk leg-fixo"></span>fixado</b> ·
+      <b style="color:var(--ambar)"><span class="leg-mk leg-seg"></span>segurado</b> (esperando o sinal — ocupa a data,
+      mas não vira lembrete nem entra no calendário sincronizado; o número ao lado é quanto falta pro prazo).
+      A bolinha diz o tipo: <b style="color:#bfeeda">pessoal</b>, <b style="color:#bcd8f6">empresa</b>,
+      <b style="color:#f0d9a6">fornecedor</b>. Marque também pelo WhatsApp/Telegram — cai tudo aqui.</p>
     </div>
 
     <div class="side-cards">
+      <!-- datas seguradas: só existe quando existe alguma. Quem não vende data
+           nunca vê este card. -->
+      {% if seguradas %}
+      <div class="ag-card">
+        <h2>⏳ Datas seguradas <span class="segcnt">{{ seguradas|length }}</span></h2>
+        {% for s in seguradas %}
+        <div class="segrow{% if s.urgente %} urg{% endif %}">
+          <div class="segbar"></div>
+          <div>
+            <div class="stt">{{ s.titulo }}</div>
+            <div class="smt">{{ s.quando }}{% if s.sinal %} · sinal {{ s.sinal }}{% endif %}{% if s.orcamento_numero %} · orçamento nº {{ s.orcamento_numero }}{% endif %}</div>
+          </div>
+          <div class="srt">
+            <div class="v">{{ s.prazo }}</div>
+            <div class="s">vence {{ s.ate }}</div>
+          </div>
+        </div>
+        {% endfor %}
+        <p class="hint" style="margin:2px 0 0">Da que vence primeiro. Passando o prazo sem o sinal, a data
+        libera sozinha e você é avisado — abra o dia no calendário pra firmar ou soltar antes disso.</p>
+      </div>
+      {% endif %}
+
       <!-- próximos -->
       <div class="ag-card">
         <h2>Próximos compromissos</h2>
@@ -1157,6 +1412,23 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <div class="row2">
             <div><label>Data</label><input name="data" id="fData" type="date" value="{{ hoje_iso }}" required></div>
             <div><label>Hora</label><input name="hora" id="fHora" type="time" value="09:00"></div>
+          </div>
+          <!-- choque de horário: aparece na TELA, na hora de marcar. Não bloqueia —
+               quem decide se cabe é a empresa (buffet com dois salões cabe). -->
+          <div class="choque" id="choqueBox"><span>⚠️</span><div id="choqueTxt"></div></div>
+          <!-- só segurar a data: a pré-reserva que nasce de um telefonema, sem
+               orçamento nenhum. Antes só existia via aprovação de proposta. -->
+          <div class="tg" style="margin-top:2px">
+            <div><div class="tg-t">Só segurar a data</div><div class="tg-s">Ocupa o dia sem virar compromisso — não vira lembrete</div></div>
+            <label class="sw"><input type="checkbox" name="segurar" value="1" id="fSegurar"><span class="track"></span><span class="knob"></span></label>
+          </div>
+          <div class="segbox" id="segBox">
+            <div class="row2">
+              <div><div class="sl">Segurar até</div><input name="segurar_ate" id="fSegAte" type="date"></div>
+              <div><div class="sl">Sinal esperado</div><input name="sinal_esperado" id="fSinal" type="text" placeholder="opcional" autocomplete="off" inputmode="decimal"></div>
+            </div>
+            <div class="sh">Vale até o fim do dia escolhido. Passando o prazo sem o sinal, a data
+            libera sozinha e você é avisado — e dá pra firmar ou soltar antes disso, abrindo o dia no calendário.</div>
           </div>
           <label>Descrição <span style="font-weight:400">(opcional)</span></label>
           <textarea name="descricao" placeholder="Detalhes do compromisso…"></textarea>
@@ -1383,6 +1655,7 @@ var REAPROVEITAR = {{ reaproveitar|tojson }};
 var MESES_JS = {{ meses_js|tojson }};
 var DIAS_EXT_JS = {{ dias_sem_ext_js|tojson }};
 var AGORA_ISO = {{ agora_iso|tojson }};
+var MES_ATUAL = {{ ('%04d-%02d'|format(ano, mes))|tojson }};   // pra voltar pro mesmo mês depois de agir
 var CUR_MES = {{ ('%04d-%02d'|format(ano, mes))|tojson }};
 var TPILL = {pessoal:'Pessoal', empresa:'Empresa', fornecedor:'Fornecedor'};
 var HIST_STATE = {dias: 7, falhas: false, q: '', itens: {{ historico|tojson }},
@@ -1460,6 +1733,39 @@ function _reaproveitarHtml(iso){
   }).join('');
   return '<div class="reuse-sec"><div class="reuse-lbl">♻️ Reaproveitar um compromisso que não aconteceu</div>'+cards+'</div>';
 }
+// Bloco da data segurada dentro da caixa do dia: o prazo, o que se espera, e as
+// três decisões possíveis. "Sinal recebido" é o MESMO botão do funil (mesma rota
+// no servidor, mesma baixa do título na data do pagamento).
+// confirm() nomeando o evento SEM aninhar aspas dentro de string JS: o título vem
+// do data-attribute do próprio form. A versão inline precisava de três níveis de
+// escape (string Python -> template -> atributo HTML -> JS) e quebrava calada.
+function confirmarLiberar(f){
+  var t = f.getAttribute('data-titulo') || 'essa data';
+  return confirm('Liberar a data de “' + t + '”? Ela volta a ficar disponível.');
+}
+function _seguradaHtml(e){
+  var urg = e.urgente ? ' urg' : '';
+  var quanto = e.prazo ? 'Vence em <b>'+_esc(e.prazo)+'</b>' : 'Data segurada';
+  var ate = e.pre_ate ? ' ('+_esc(e.pre_ate)+')' : '';
+  var sinal = e.sinal ? ' Sinal esperado: <b>'+_esc(e.sinal)+'</b>.' : '';
+  var orc = e.orcamento_numero ? ' Orçamento nº '+_esc(String(e.orcamento_numero))+'.' : '';
+  var verOrc = e.orcamento_id
+    ? '<a class="sbtn gh" href="/painel/servicos?abrir='+e.orcamento_id+'">Ver orçamento</a>' : '';
+  return '<div class="dev-pre'+urg+'">⏳ '+quanto+ate+'.'+sinal+orc
+    + ' Passando o prazo sem o sinal, a data libera sozinha.'
+    + '<div class="segacts">'
+    +   '<form method="post" action="/painel/agenda/sinal-recebido">'
+    +     '<input type="hidden" name="evento_id" value="'+e.id+'">'
+    +     '<input type="hidden" name="m" value="'+MES_ATUAL+'">'
+    +     '<button class="sbtn ok" type="submit">Sinal recebido</button></form>'
+    +   '<form method="post" action="/painel/agenda/liberar" '
+    +      'data-titulo="'+_esc(e.titulo)+'" onsubmit="return confirmarLiberar(this)">'
+    +     '<input type="hidden" name="evento_id" value="'+e.id+'">'
+    +     '<input type="hidden" name="m" value="'+MES_ATUAL+'">'
+    +     '<button class="sbtn amb" type="submit">Liberar a data</button></form>'
+    +   verOrc
+    + '</div></div>';
+}
 function abrirDia(iso){
   var d = EVENTOS_DIA[iso];
   var evs = d ? d.eventos : [];
@@ -1482,19 +1788,19 @@ function abrirDia(iso){
       + conv + _addConvBoxHtml(e) + '</div>';
     var passado = new Date(e.inicio_iso) <= agora;
     var acaoTopo = passado ? '' : '<button class="px-rm" type="button" title="Remarcar" onclick="remToggleDia('+e.id+')">🔁</button>';
-    html += '<div class="dev" data-ev="'+e.id+'"><div class="dev-dot d-'+e.tipo+'"></div><div class="dev-body">'
+    html += '<div class="dev" data-ev="'+e.id+'"><div class="dev-dot d-'+e.tipo+(e.pre?' pre-dot':'')+'"></div><div class="dev-body">'
       + '<div class="dev-top"><div>'
       + '<div class="dev-hora">'+e.hora+'</div>'
-      + '<div class="dev-tt">'+e.titulo+'</div>'
+      + '<div class="dev-tt"'+(e.pre?' style="color:var(--ambar)"':'')+'>'+e.titulo+'</div>'
       + '<div class="dev-meta"><span class="tpill tp-'+e.tipo+'">'+(TPILL[e.tipo]||e.tipo_rot)+'</span>'
-      + (e.local?'<span>📍 '+e.local+'</span>':'')+'</div>'
+      + (e.local?'<span>📍 '+e.local+'</span>':'')
+      + (e.pre?'<span style="color:var(--ambar);font-weight:700">segurada</span>':'')+'</div>'
       + (e.link_online?'<a class="meet-btn" href="'+_esc(e.link_online)+'" target="_blank" rel="noopener">🎥 Entrar na reunião</a>':'')
       + '</div>'+acaoTopo+'</div>'
       // Data segurada: quem abre o dia precisa saber que essa data AINDA não é de
-      // ninguém — e até quando. Sem isso, a linha no calendário parece compromisso.
-      + (e.pre?'<div class="dev-pre">⏳ Data segurada esperando o sinal'
-          +(e.pre_ate?' — até <b>'+_esc(e.pre_ate)+'</b>':'')
-          +'. Confirme o sinal na tela do orçamento pra firmar; passando o prazo, a data libera sozinha.</div>':'')
+      // ninguém, até quando, e — o que faltava — decidir aqui mesmo. Antes, firmar
+      // exigia sair da agenda, abrir Serviços e achar a proposta no funil.
+      + (e.pre?_seguradaHtml(e):'')
       + (e.descricao?'<div class="dev-desc">'+e.descricao+'</div>':'')
       + conv
       + (passado ? '<div class="dev-desf">'+_desfechoHtml(e)+'</div>' : _remarcarBoxHtml(e))
@@ -1574,6 +1880,51 @@ function cpRow(b){var row=b.closest('.share-row');if(!row)return;var txt=row.get
 function addGuest(){var box=document.getElementById('guests');var d=document.createElement('div');d.className='guest-row';d.innerHTML='<div><input class="gnome" name="convidado_nome" placeholder="Nome" autocomplete="off"></div><div><input name="convidado_contato" placeholder="(86) 90000-0000" autocomplete="off"></div><button type="button" class="g-rm" onclick="rmGuest(this)" title="Remover" aria-label="Remover">✕</button>';box.appendChild(d);var i=d.querySelector('input');if(i)i.focus();}
 function rmGuest(b){var box=document.getElementById('guests');var row=b.closest('.guest-row');if(box&&box.children.length>1){row.remove();}else{row.querySelectorAll('input').forEach(function(x){x.value='';});}}
 function remToggle(id){var box=document.getElementById('remBox-'+id);if(box)box.classList.toggle('show');}
+
+// ---------------- Só segurar a data + choque de horário ----------------
+// Duas coisas que faltavam no momento de marcar: poder segurar (em vez de mentir
+// marcando firme) e saber que aquele horário já tem coisa. O choque NÃO bloqueia —
+// só informa, porque quem sabe se cabe é a empresa.
+(function(){
+  var chk = document.getElementById('fSegurar');
+  var box = document.getElementById('segBox');
+  var ate = document.getElementById('fSegAte');
+  var dias = {{ (cfg.pre_reserva_dias or 3)|tojson }};
+  if(chk && box){
+    chk.addEventListener('change', function(){
+      box.classList.toggle('on', chk.checked);
+      if(chk.checked && ate && !ate.value){
+        var d = new Date(); d.setDate(d.getDate() + dias);
+        ate.value = d.toISOString().slice(0,10);   // prazo padrão da conta, já preenchido
+      }
+    });
+  }
+  var fd = document.getElementById('fData'), fh = document.getElementById('fHora');
+  var cx = document.getElementById('choqueBox'), ct = document.getElementById('choqueTxt');
+  if(!fd || !cx) return;
+  var timer = null;
+  function checar(){
+    if(!fd.value){ cx.classList.remove('on'); return; }
+    fetch('/painel/agenda/conflitos?data='+encodeURIComponent(fd.value)
+          +'&hora='+encodeURIComponent(fh ? fh.value : ''))
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var itens = (d && d.itens) || [];
+        if(!itens.length){ cx.classList.remove('on'); return; }
+        var linhas = itens.slice(0,3).map(function(i){
+          return _esc(i.titulo)+' ('+_esc(i.quando)+(i.pre?', segurada':'')+')';
+        }).join(', ');
+        var resto = itens.length > 3 ? ' e mais '+(itens.length-3)+'.' : '.';
+        ct.innerHTML = '<b>Esse horário já tem coisa marcada:</b> '+linhas+resto
+          +' Dá pra marcar assim mesmo — só confira se cabe.';
+        cx.classList.add('on');
+      })
+      .catch(function(){ cx.classList.remove('on'); });
+  }
+  function agendar(){ clearTimeout(timer); timer = setTimeout(checar, 350); }
+  fd.addEventListener('change', agendar);
+  if(fh) fh.addEventListener('change', agendar);
+})();
 function addConvToggle(id){var box=document.getElementById('addConvBox-'+id);if(box)box.classList.toggle('show');}
 
 // ---------------- Histórico de envios ----------------

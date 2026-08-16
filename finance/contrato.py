@@ -82,6 +82,23 @@ def reais(centavos) -> str:
     return "R$ " + f"{v:,.2f}".replace(",", "\x00").replace(".", ",").replace("\x00", ".")
 
 
+def data_br(v) -> str:
+    """31/12/2026 — a data como brasileiro lê.
+
+    O orçamento grava a data do evento em ISO ('2026-10-10'; conferido nos dois
+    orçamentos de evento em produção em 16/08/2026). Sem passar por aqui, um
+    contrato de locação daqui imprime '2026-10-10' na qualificação do objeto e em
+    toda cláusula que cite {evento.data} — data ao contrário em documento que se
+    assina e se arquiva.
+
+    Tolerante de propósito: o que não for data reconhecível volta como veio. O
+    campo é texto livre e o dono pode ter escrito 'a combinar' — trocar isso por
+    vazio apagaria informação que ele quis dar."""
+    from finance.agenda import parse_data      # só datetime lá dentro, sem banco
+    d = parse_data(v)
+    return d.strftime("%d/%m/%Y") if d else str(v or "")
+
+
 def pct(n) -> str:
     """30% — inteiro quando é inteiro, que é como um contrato escreve."""
     try:
@@ -122,7 +139,7 @@ def contexto(*, catalogo=None, orcamento=None, modelo=None, empresa=None) -> dic
         "preco": {s["slug"]: reais(s.get("setup_centavos"))
                   for s in (catalogo or []) if s.get("slug")},
         "evento": {
-            "data": ev.get("data") or "",
+            "data": data_br(ev.get("data")),
             "inicio": ev.get("inicio") or "",
             "fim": ev.get("fim") or "",
             "tipo": ev.get("tipo") or "",

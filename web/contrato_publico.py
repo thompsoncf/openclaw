@@ -136,7 +136,9 @@ def carregar(token: str, pool=None) -> dict | None:
         },
         "evento": {
             "tipo": evento.get("tipo") or "Evento",
-            "data": evento.get("data") or "",
+            # mesma função que preenche {evento.data} nas cláusulas: a data no
+            # quadro do objeto e a data no texto não podem sair diferentes
+            "data": ctr.data_br(evento.get("data")),
             "horario": _linha_end(evento.get("inicio"), evento.get("fim")).replace(" · ", " às "),
             "local": evento.get("local") or "",
             "convidados": evento.get("convidados") or "",

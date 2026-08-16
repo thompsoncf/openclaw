@@ -212,6 +212,36 @@ def test_campos_usados_nao_repete_e_mantem_a_ordem():
     ]) == ["valor.total", "cliente.nome"]
 
 
+# ------------------------------------------------------- a data como o Brasil lê
+
+def test_a_data_do_evento_sai_em_dd_mm_aaaa():
+    """O orçamento GRAVA em ISO — conferido nos dois orçamentos de evento em
+    produção (16/08/2026): `{"data": "2026-10-10"}`. Sem formatar, a cláusula sai
+    'Evento em 2026-10-10' e o quadro do objeto também: data ao contrário num
+    documento que se assina e se arquiva."""
+    txt, faltas = ct.preencher(
+        "Evento em {evento.data}.",
+        _ctx(orcamento={**ORCAMENTO, "evento": {"data": "2026-10-10"}}))
+    assert txt == "Evento em 10/10/2026."
+    assert faltas == []
+
+
+def test_data_que_ja_veio_brasileira_nao_e_mexida():
+    assert ct.data_br("31/12/2026") == "31/12/2026"
+
+
+@pytest.mark.parametrize("texto", ["a combinar", "sábado que vem", ""])
+def test_data_que_nao_e_data_volta_como_veio(texto):
+    """Campo de texto livre: o dono pode ter escrito 'a combinar'. Trocar por
+    vazio apagaria informação que ele quis dar — e um contrato com o objeto em
+    branco é pior que um com o objeto impreciso."""
+    assert ct.data_br(texto) == texto
+
+
+def test_data_ausente_nao_vira_a_palavra_none():
+    assert ct.data_br(None) == ""
+
+
 # --------------------------------------------- a empresa como ela chega de verdade
 
 # É ASSIM que `empresa.obter_dados_empresa` devolve: a chave é `documento`. O

@@ -112,7 +112,7 @@ def _orcamento(pool, *, status="aprovada", sinal_pago=False, assinado=False):
             """insert into orcamentos (conta_id, cliente, empresa, token, status,
                  setup_centavos, numero, evento, modo, sinal_pago_em)
                values (%s,'Thompson','Thompson',%s,%s,890000,27,
-                 '{"data":"31/12/2026","inicio":"21:00","convidados":50}'::jsonb,'evento',
+                 '{"data":"2026-12-31","inicio":"21:00","convidados":50}'::jsonb,'evento',
                  %s) returning id""",
             (CONTA, TOKEN, status,
              "2026-08-16 12:00:00+00" if sinal_pago else None)).fetchone()[0]
@@ -438,7 +438,7 @@ def test_aprovar_a_proposta_faz_nascer_o_contrato_com_link(pool):
         c.execute("""insert into orcamentos (conta_id, cliente, empresa, token, status,
                        setup_centavos, numero, evento, modo)
                      values (%s,'Thompson','Thompson',%s,'aprovada',890000,27,
-                       '{"data":"31/12/2026","inicio":"21:00"}'::jsonb,'evento')""",
+                       '{"data":"2026-12-31","inicio":"21:00"}'::jsonb,'evento')""",
                   (CONTA, TOKEN))
         c.commit()
     d = pp._carregar(TOKEN, pool=pool)

@@ -359,3 +359,99 @@ def modelo_padrao() -> list[dict]:
                   "9.3. Aplica-se a legislação brasileira, especialmente o Código Civil, o Código "
                   "de Defesa do Consumidor e a Lei Geral de Proteção de Dados."},
     ]
+
+
+# ---------------------------------------------------- o CONTRATO de cada venda
+# Até a 164 o contrato era cinco colunas em `orcamentos`. Virou documento: nasce
+# de um FATO (o sinal caiu), tem número próprio, estado próprio, e pode ser
+# rescindido ou substituído por aditivo. Ver db/migracoes/164_contratos.sql.
+
+STATUS = ("rascunho", "enviado", "assinado", "rescindido", "cumprido")
+
+_COLS_CT = ("id, conta_id, numero, orcamento_id, status, texto, valor_centavos, "
+            "assinado_em, assinado_por, assinado_doc, assinado_ip, "
+            "rescindido_em, rescisao_motivo, substitui_id, criado_em")
+
+
+def _fmt_contrato(r) -> dict:
+    return {"id": r[0], "conta_id": r[1], "numero": r[2], "orcamento_id": r[3],
+            "status": r[4], "texto": r[5], "valor_centavos": r[6],
+            "assinado_em": r[7], "assinado_por": r[8] or "", "assinado_doc": r[9] or "",
+            "assinado_ip": r[10] or "", "rescindido_em": r[11],
+            "rescisao_motivo": r[12] or "", "substitui_id": r[13], "criado_em": r[14]}
+
+
+def por_orcamento(pool, conta_id: int, orcamento_id: int) -> dict | None:
+    """O contrato VIVO daquele orçamento (o que não foi substituído por aditivo)."""
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                "select " + _COLS_CT + " from contratos "
+                " where conta_id=%s and orcamento_id=%s and substitui_id is null "
+                " order by id desc limit 1", (conta_id, int(orcamento_id))).fetchone()
+    except Exception:  # noqa: BLE001 — base sem a 164 ainda: a folha abre sem contrato
+        return None
+    return _fmt_contrato(r) if r else None
+
+
+def assinado_do_orcamento(pool, conta_id: int, orcamento_id: int) -> bool:
+    """Este orçamento tem contrato ASSINADO?
+
+    É a pergunta que trava a edição. Documento congelado, com aceite e IP do
+    cliente, não pode ter os números de origem mudando embaixo — precisou mudar,
+    é aditivo. Mesma regra do `status='fechado'`, e pelo mesmo motivo."""
+    ct = por_orcamento(pool, conta_id, orcamento_id)
+    return bool(ct and ct["assinado_em"])
+
+
+def criar_para_orcamento(pool, conta_id: int, orcamento_id: int,
+                         valor_centavos: int | None = None,
+                         criado_por: str = "") -> dict | None:
+    """Cria o contrato daquele orçamento. IDEMPOTENTE: se já existe um vivo,
+    devolve o que existe sem tocar em nada.
+
+    Chamado quando o SINAL É CONFIRMADO — é o momento em que as três condições
+    que a tela avaliava a cada carregamento (nicho de evento, proposta aprovada,
+    sinal pago) deixam de ser uma pergunta e viram um fato. A partir daqui o
+    contrato existe e tem estado próprio.
+
+    Devolve None quando a conta não tem contrato de locação (nicho != eventos) —
+    mesma porta de `tem_contrato`, pra não nascer contrato onde não existe."""
+    ja = por_orcamento(pool, conta_id, orcamento_id)
+    if ja:
+        return ja
+    from finance import empresa as emp
+    if not tem_contrato((emp.obter_dados_empresa(pool, conta_id) or {}).get("nicho")):
+        return None
+    with pool.connection() as c:
+        r = c.execute(
+            """insert into contratos (conta_id, numero, orcamento_id, status,
+                                      valor_centavos, criado_por)
+               values (%s, (select coalesce(max(numero),0)+1 from contratos
+                             where conta_id=%s), %s, 'enviado', %s, %s)
+               returning """ + _COLS_CT,
+            (conta_id, conta_id, int(orcamento_id), valor_centavos, (criado_por or "")[:120])
+        ).fetchone()
+        c.commit()
+    return _fmt_contrato(r)
+
+
+def assinar(pool, conta_id: int, contrato_id: int, clausulas,
+            nome: str, doc: str, ip: str) -> bool:
+    """O cliente aceitou as cláusulas. Congela o texto no ato — grava o que ele
+    LEU, não uma referência ao modelo, senão editar o modelo amanhã reescreveria
+    o que foi aceito ontem.
+
+    `assinado_em is null` na condição: duplo clique ou reenvio do formulário não
+    sobrescreve a assinatura nem o texto já congelado."""
+    with pool.connection() as c:
+        cur = c.execute(
+            """update contratos
+                  set texto=%s::jsonb, status='assinado', assinado_em=now(),
+                      assinado_por=%s, assinado_doc=%s, assinado_ip=%s
+                where id=%s and conta_id=%s and assinado_em is null""",
+            (json.dumps(clausulas or []), (nome or "").strip()[:120],
+             (doc or "").strip()[:40] or None, (ip or "")[:60],
+             int(contrato_id), conta_id))
+        c.commit()
+        return cur.rowcount > 0

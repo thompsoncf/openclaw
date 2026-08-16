@@ -576,6 +576,20 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
             int(dados.primeiro_ano) * 100, int(dados.n_modulos))
     pool = get_pool()
     reabriu = None
+    # CONTRATO ASSINADO NÃO SE EDITA POR BAIXO. Documento congelado, com aceite e
+    # IP do cliente — mudar os itens e valores do orçamento de origem faria o
+    # assinado dizer uma coisa e o sistema outra, que é o mesmo tipo de divergência
+    # que o contrato no sistema nasceu pra matar. Mesma regra do `fechado`, e pelo
+    # mesmo motivo. Precisou mudar? É aditivo (contrato novo).
+    if dados.id:
+        try:
+            if ctr.assinado_do_orcamento(pool, conta[0], int(dados.id)):
+                return JSONResponse(
+                    {"erro": "esta proposta tem contrato assinado e não pode ser editada — "
+                             "faça um aditivo"}, status_code=409)
+        except Exception:  # noqa: BLE001 — base sem a 164: segue o fluxo de antes
+            logging.getLogger("servicos.salvar").info(
+                "não deu pra checar contrato assinado do orçamento %s", dados.id)
     with pool.connection() as c:
         _garantir_tabela(c)
         oid = tok = None

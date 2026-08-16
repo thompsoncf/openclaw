@@ -73,6 +73,16 @@ def cliente(monkeypatch):
                     "cep", "cidade", "uf", "email_empresa", "telefone", "cnae"):
             c.execute(f"alter table contas add column if not exists {col} text")
         c.execute("insert into nichos (nome, slug, tipo) values ('Eventos','eventos','servico')")
+        # 164: confirmar o sinal também CRIA o contrato. A tabela existe aqui pra o
+        # teste medir isso de verdade — sem ela o `contrato_id` viria None por erro
+        # engolido, não porque a regra decidiu assim.
+        c.execute("""create table contratos (id bigserial primary key, conta_id bigint not null,
+            numero int not null, orcamento_id bigint, status text not null default 'enviado',
+            texto jsonb, valor_centavos bigint, assinado_em timestamptz, assinado_por text,
+            assinado_doc text, assinado_ip text, rescindido_em timestamptz,
+            rescisao_motivo text, substitui_id bigint, criado_em timestamptz default now(),
+            criado_por text default '')""")
+        c.execute("create unique index ux_ct_cn on contratos (conta_id, numero)")
         c.commit()
     with pool.connection() as c:
         ps._garantir_tabela(c)          # cria orcamentos como em produção
@@ -144,8 +154,15 @@ def test_confirmar_firma_a_data_e_o_botao_some(cliente):
     assert r.status_code == 200
     # titulo_baixado None porque o contrato não foi fechado: não existe título ainda.
     # Quem dá a baixa nesse caminho é o próprio fechar_orcamento, depois.
-    assert r.json() == {"ok": True, "ja_estava": False, "reserva_firmada": True,
-                        "titulo_baixado": None}
+    d = r.json()
+    assert {k: d[k] for k in ("ok", "ja_estava", "reserva_firmada", "titulo_baixado")} == {
+        "ok": True, "ja_estava": False, "reserva_firmada": True, "titulo_baixado": None}
+    # e o CONTRATO nasceu junto — é o fato que substitui as três condições que a
+    # folha reavaliava a cada carregamento
+    assert d["contrato_id"]
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select status, numero, orcamento_id from contratos where id=%s",
+                          (d["contrato_id"],)).fetchone() == ("enviado", 1, oid)
     with cliente.pool.connection() as cx:
         assert cx.execute("select status, pre_reserva_ate from eventos_agenda where id=%s",
                           (ev_id,)).fetchone() == ("ativo", None)
@@ -163,8 +180,13 @@ def test_confirmar_duas_vezes_nao_quebra(cliente):
     cliente.post("/painel/servicos/sinal-recebido", json={"id": oid})
     r = cliente.post("/painel/servicos/sinal-recebido", json={"id": oid})
     assert r.status_code == 200
-    assert r.json() == {"ok": True, "ja_estava": True, "reserva_firmada": False,
-                        "titulo_baixado": None}
+    d = r.json()
+    assert {k: d[k] for k in ("ok", "ja_estava", "reserva_firmada", "titulo_baixado")} == {
+        "ok": True, "ja_estava": True, "reserva_firmada": False, "titulo_baixado": None}
+    # idempotente também no contrato: a segunda vez devolve o MESMO, não cria outro
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select count(*) from contratos where orcamento_id=%s",
+                          (oid,)).fetchone()[0] == 1
     with cliente.pool.connection() as cx:
         assert cx.execute("select status from eventos_agenda where id=%s",
                           (ev_id,)).fetchone()[0] == "ativo"
@@ -268,6 +290,40 @@ def test_editar_a_data_com_sinal_pago_remarca_o_compromisso(cliente):
         ini, st = cx.execute("select inicio, status from eventos_agenda where id=%s",
                              (ev_id,)).fetchone()
     assert st == "ativo" and ini.astimezone(ag.BRT).date().isoformat() == nova
+
+
+def test_orcamento_com_contrato_assinado_nao_pode_ser_editado(cliente):
+    """O buraco que a 164 fecha: a trava de edição só barrava `status='fechado'`, e
+    um contrato ASSINADO — texto congelado, aceite e IP do cliente — não impedia
+    ninguém de mudar os itens e valores do orçamento por baixo. O documento
+    assinado passava a dizer uma coisa e o sistema outra."""
+    oid, _ev, quando = _aprovado_com_data(cliente, sinal_pago=True)
+    with cliente.pool.connection() as cx:
+        cx.execute("""insert into contratos (conta_id, numero, orcamento_id, status,
+                        texto, assinado_em, assinado_por)
+                      values (%s, 90, %s, 'assinado', '[]'::jsonb, now(), 'Ana')""",
+                   (CONTA, oid))
+        cx.commit()
+    r = cliente.post("/painel/servicos/salvar",
+                     json=_payload(oid, data=quando.date().isoformat()))
+    assert r.status_code == 409 and "aditivo" in r.json()["erro"]
+    with cliente.pool.connection() as cx:
+        # e nada foi tocado: o status segue 'aprovada', não virou 'enviado'
+        assert cx.execute("select status from orcamentos where id=%s",
+                          (oid,)).fetchone()[0] == "aprovada"
+
+
+def test_contrato_so_enviado_nao_trava_a_edicao(cliente):
+    """A trava é sobre ASSINADO. Contrato criado e ainda não assinado não congelou
+    nada — editar continua sendo o caminho normal da negociação."""
+    oid, _ev, quando = _aprovado_com_data(cliente, sinal_pago=True)
+    with cliente.pool.connection() as cx:
+        cx.execute("""insert into contratos (conta_id, numero, orcamento_id, status)
+                      values (%s, 91, %s, 'enviado')""", (CONTA, oid))
+        cx.commit()
+    r = cliente.post("/painel/servicos/salvar",
+                     json=_payload(oid, data=quando.date().isoformat()))
+    assert r.status_code == 200
 
 
 def test_editar_proposta_nao_aprovada_nao_mexe_em_data_nenhuma(cliente):

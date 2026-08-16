@@ -336,8 +336,25 @@ def confirmar_sinal(pool, conta_id: int, orcamento_id: int) -> dict:
     except Exception as e:  # noqa: BLE001
         _log.warning("confirmar_sinal %s: baixa do título falhou: %s: %s",
                      orcamento_id, type(e).__name__, e)
+    # e o CONTRATO nasce aqui. Até a 164 ele era uma condição reavaliada a cada
+    # carregamento da folha (tem nicho de evento? aprovada? sinal pago?); virou um
+    # fato: existe uma linha de contrato, com número e estado próprios. Só no nicho
+    # de eventos — `criar_para_orcamento` devolve None no resto.
+    contrato_id = None
+    try:
+        from finance import contrato as ctr
+        with pool.connection() as c:
+            tot = c.execute("select coalesce(primeiro_ano_centavos, setup_centavos, 0) "
+                            "from orcamentos where id=%s and conta_id=%s",
+                            (int(orcamento_id), conta_id)).fetchone()
+        ct = ctr.criar_para_orcamento(pool, conta_id, int(orcamento_id),
+                                      valor_centavos=int(tot[0]) if tot else None)
+        contrato_id = ct["id"] if ct else None
+    except Exception as e:  # noqa: BLE001 — o contrato é consequência, não o registro
+        _log.warning("confirmar_sinal %s: não deu pra criar o contrato: %s: %s",
+                     orcamento_id, type(e).__name__, e)
     return {"ok": True, "ja_estava": not era_novo, "reserva_firmada": firmou,
-            "titulo_baixado": baixado}
+            "titulo_baixado": baixado, "contrato_id": contrato_id}
 
 
 def baixar_titulo_do_sinal(pool, conta_id: int, orcamento_id: int, parcelas,

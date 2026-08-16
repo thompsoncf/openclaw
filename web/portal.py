@@ -798,12 +798,12 @@ _DASH = """{% extends "base" %}{% block conteudo %}
   </div>
 
   <div id="ofx-step-upload">
-    <div style="font-size:.75rem;color:#888780;margin:.2rem 0 .8rem">Exporte o extrato do seu banco em OFX (a maioria oferece isso em "Extrato → Exportar") e a gente lança tudo — já sugerindo categoria{% if eh_pj %}, conta contábil e centro de custo{% endif %}, e comparando com o que você já lançou pra não duplicar.</div>
+    <div style="font-size:.75rem;color:#888780;margin:.2rem 0 .8rem">Exporte o extrato do seu banco em OFX (a maioria oferece isso em "Extrato → Exportar"). Se o seu banco só dá PDF, mande o PDF — hoje lemos o do Santander, e conferimos a soma contra o saldo do próprio extrato antes de importar qualquer coisa. A gente lança tudo — já sugerindo categoria{% if eh_pj %}, conta contábil e centro de custo{% endif %}, e comparando com o que você já lançou pra não duplicar.</div>
     <div style="border:1.5px dashed var(--borda);border-radius:10px;padding:1.6rem 1rem;text-align:center;background:#131316">
-      <input type="file" id="ofx-arquivo" accept=".ofx" onchange="ofxArquivoEscolhido(this)" style="display:none">
+      <input type="file" id="ofx-arquivo" accept=".ofx,.pdf" onchange="ofxArquivoEscolhido(this)" style="display:none">
       <div id="ofx-dropzone-texto">
         <div style="font-size:1.4rem;margin-bottom:.4rem">📤</div>
-        <button type="button" onclick="document.getElementById('ofx-arquivo').click()" style="width:auto;margin:0;background:var(--verde);color:var(--sobre-verde);border:0;border-radius:7px;padding:.5rem 1rem;font-size:.85rem;font-weight:600;cursor:pointer">Escolher arquivo .ofx</button>
+        <button type="button" onclick="document.getElementById('ofx-arquivo').click()" style="width:auto;margin:0;background:var(--verde);color:var(--sobre-verde);border:0;border-radius:7px;padding:.5rem 1rem;font-size:.85rem;font-weight:600;cursor:pointer">Escolher arquivo (.ofx ou .pdf)</button>
       </div>
       <div id="ofx-arquivo-nome" style="display:none;font-size:.85rem;color:var(--txt)"></div>
     </div>
@@ -900,7 +900,7 @@ _DASH = """{% extends "base" %}{% block conteudo %}
 {% endif %}
 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem;margin-top:1.6rem">
 <h1 style="font-size:1.05rem;margin:0">Lançamentos</h1>
-<button type="button" onclick="abrirImportOfx()" style="width:auto;margin:0;font-size:.78rem;color:var(--verde-claro);background:#1d3a2e;border:0;padding:.4rem .8rem;border-radius:7px;cursor:pointer;white-space:nowrap">📄 Importar extrato (OFX)</button>
+<button type="button" onclick="abrirImportOfx()" style="width:auto;margin:0;font-size:.78rem;color:var(--verde-claro);background:#1d3a2e;border:0;padding:.4rem .8rem;border-radius:7px;cursor:pointer;white-space:nowrap">📄 Importar extrato</button>
 </div>
 <form method="get" action="/painel/financeiro" style="margin:.5rem 0 1rem">
 <input type="search" name="q" value="{{ q_search or '' }}" placeholder="🔎 Buscar lançamento..."
@@ -10207,11 +10207,19 @@ async def painel_lancamentos_ler_ofx(request: Request, arquivo: UploadFile = Fil
     if not conta:
         return JSONResponse({"ok": False, "erro": "não autenticado"}, status_code=401)
     from finance import ofx_import as ofx
+    from finance import extrato_pdf as pdf
     from finance.livro_caixa import LivroCaixa
     try:
         bruto = await arquivo.read()
-        extrato = ofx.parsear_ofx(ofx.decodificar(bruto))
-    except ofx.OfxInvalido as e:
+        # PDF pelos MÁGICOS do arquivo, não pela extensão: o cliente renomeia,
+        # o navegador erra o content-type, e o que decide o que fazer com os
+        # bytes tem que ser os bytes. Daí pra frente é tudo igual — os dois
+        # parsers devolvem OfxExtrato e o pipeline não sabe da diferença.
+        if bruto[:5] == b"%PDF-":
+            extrato = pdf.parsear_pdf(bruto)
+        else:
+            extrato = ofx.parsear_ofx(ofx.decodificar(bruto))
+    except (ofx.OfxInvalido, pdf.ExtratoPdfInvalido) as e:
         return JSONResponse({"ok": False, "erro": str(e)}, status_code=400)
     except Exception as e:
         return JSONResponse({"ok": False, "erro": f"não consegui ler o arquivo: {e}"}, status_code=400)

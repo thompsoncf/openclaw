@@ -47,6 +47,16 @@ def cliente(monkeypatch):
         # 098_agenda referencia membros (dono do compromisso); só a coluna importa aqui
         c.execute("create table membros (id bigserial primary key, conta_id bigint, "
                   "nome text, papel text)")
+        # titulos existe aqui pra a busca do título do sinal RODAR de verdade: sem a
+        # tabela, o erro seria engolido pelo try/except da rota e `titulo_baixado`
+        # viria None por motivo errado. Nestes casos o contrato nunca é fechado, então
+        # o certo é não achar título nenhum — e é isso que se quer provar.
+        c.execute("""create table titulos (id bigserial primary key, conta_id bigint,
+            tipo text, descricao text, contraparte text default '', valor_centavos int,
+            vencimento date, status text default 'aberto', recorrente boolean default false,
+            categoria text default '', lancamento_id bigint, pago_em date,
+            criado_por bigint, orcamento_id bigint, parcela_idx int,
+            criado_em timestamptz default now())""")
         c.commit()
     with pool.connection() as c:
         ps._garantir_tabela(c)          # cria orcamentos como em produção
@@ -115,7 +125,10 @@ def test_confirmar_firma_a_data_e_o_botao_some(cliente):
     oid, ev_id = _orcamento_com_data_segurada(cliente)
     r = cliente.post("/painel/servicos/sinal-recebido", json={"id": oid})
     assert r.status_code == 200
-    assert r.json() == {"ok": True, "ja_estava": False, "reserva_firmada": True}
+    # titulo_baixado None porque o contrato não foi fechado: não existe título ainda.
+    # Quem dá a baixa nesse caminho é o próprio fechar_orcamento, depois.
+    assert r.json() == {"ok": True, "ja_estava": False, "reserva_firmada": True,
+                        "titulo_baixado": None}
     with cliente.pool.connection() as cx:
         assert cx.execute("select status, pre_reserva_ate from eventos_agenda where id=%s",
                           (ev_id,)).fetchone() == ("ativo", None)
@@ -133,7 +146,8 @@ def test_confirmar_duas_vezes_nao_quebra(cliente):
     cliente.post("/painel/servicos/sinal-recebido", json={"id": oid})
     r = cliente.post("/painel/servicos/sinal-recebido", json={"id": oid})
     assert r.status_code == 200
-    assert r.json() == {"ok": True, "ja_estava": True, "reserva_firmada": False}
+    assert r.json() == {"ok": True, "ja_estava": True, "reserva_firmada": False,
+                        "titulo_baixado": None}
     with cliente.pool.connection() as cx:
         assert cx.execute("select status from eventos_agenda where id=%s",
                           (ev_id,)).fetchone()[0] == "ativo"

@@ -47,18 +47,11 @@ def _pos_assinatura(d: dict, assinante: str) -> None:
 def sinal_do_orcamento(d: dict) -> int:
     """Quanto é o sinal, em centavos, ou 0 se o orçamento não pede sinal.
 
-    Sai da PRIMEIRA parcela quando ela é o sinal — é o que o gerador de parcelas
-    monta (`obs` = "Sinal — confirma a reserva da data"). Orçamento montado na mão,
-    sem essa linha, simplesmente não tem sinal: a data é reservada direto."""
-    parcelas = d.get("parcelas") or []
-    if not parcelas or not isinstance(parcelas[0], dict):
-        return 0
-    if "sinal" not in str(parcelas[0].get("obs") or "").lower():
-        return 0
-    try:
-        return int(parcelas[0].get("valor_centavos") or 0)
-    except (TypeError, ValueError):
-        return 0
+    Delega pra finance.vendas: a mesma regra decide o que a folha promete ao
+    cliente, qual data segurar e QUAL TÍTULO recebe baixa quando o sinal cai. Duas
+    leituras diferentes de "o que é o sinal" seria o começo de dois números."""
+    from finance import vendas
+    return vendas.valor_do_sinal(d.get("parcelas") or [])
 
 
 def _avisar_conflito(pool, conta_id: int, titulo: str, inicio, choques: list[dict]) -> None:

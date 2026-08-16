@@ -23,6 +23,15 @@ create table lancamentos (id bigserial primary key, conta_id bigint references c
 -- funcionarios vem da 053 (marcada como aplicada no baseline). admitido_em é dessa
 -- mesma migração e precisa existir aqui: o backfill da 150 lê essa coluna pra datar
 -- a vigência inicial de salário de quem já estava cadastrado.
+-- titulos também vem da 053: a 162 (vínculo título↔parcela do orçamento) altera
+-- essa tabela, e migração que roda depois de um baseline não pode inventar o que o
+-- baseline diz que já existe.
+create table titulos (id bigserial primary key, conta_id bigint references contas(id),
+  tipo text not null, descricao text not null, contraparte text not null default '',
+  valor_centavos int not null, vencimento date not null, status text default 'aberto',
+  recorrente boolean default false, categoria text default '', lancamento_id bigint,
+  cobranca_link_url text, pago_em date, criado_por bigint,
+  criado_em timestamptz default now());
 create table funcionarios (id bigserial primary key, conta_id bigint references contas(id),
   nome text, salario_centavos int default 0, pro_labore boolean default false,
   ativo boolean default true, admitido_em date);

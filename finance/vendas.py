@@ -24,9 +24,12 @@ gera títulos em dobro) e, se algo falhar no meio, faz rollback total.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date, datetime, timedelta
 
 from .empresa import _mes_seguinte
+
+_log = logging.getLogger("openclaw.vendas")
 
 CAT_SERVICOS = "Serviços"
 
@@ -56,10 +59,77 @@ def modo_do_orcamento(pool, conta_id: int) -> str:
 
 
 # SQL do título a receber (reusa a tabela titulos do módulo Empresa).
+# orcamento_id/parcela_idx (migração 162) só vêm preenchidos no modo evento: são
+# eles que deixam voltar do título pra parcela sem casar por texto de descrição.
 _SQL_TITULO = """insert into titulos
     (conta_id, tipo, descricao, contraparte, valor_centavos, vencimento,
-     categoria, recorrente, criado_por)
-  values (%s, 'receber', %s, %s, %s, %s, %s, %s, %s) returning id"""
+     categoria, recorrente, criado_por, orcamento_id, parcela_idx)
+  values (%s, 'receber', %s, %s, %s, %s, %s, %s, %s, %s, %s) returning id"""
+
+
+# ---------------------------------------------------------------- o SINAL
+# Ponto único da regra "qual parcela é o sinal". O gerador de parcelas do
+# orçamento de evento escreve, na PRIMEIRA linha, "Sinal — confirma a reserva da
+# data"; é dali que sai o valor e é essa parcela que recebe baixa quando o dono
+# confirma o recebimento. web/proposta.sinal_do_orcamento delega pra cá — duas
+# leituras diferentes de "o que é o sinal" seria o começo de dois números.
+
+def indice_do_sinal(parcelas) -> int | None:
+    """A posição da parcela do sinal em `orcamentos.parcelas`, ou None.
+
+    Só a primeira conta: parcela de sinal no meio do plano não é sinal, é parcela
+    com observação parecida. Orçamento montado na mão, sem essa linha, não tem
+    sinal — e a data é reservada direto (ver web/proposta._reservar_na_agenda).
+
+    SEMPRE sobre a lista normalizada por `_parcelas` — nunca sobre o jsonb cru,
+    mesmo quando ele já vem como list. É `_parcelas` que fechar_orcamento percorre
+    pra numerar `parcela_idx`, e ela DESCARTA linha de valor zero. Contando no cru,
+    um plano com uma primeira linha vazia daria índices diferentes nos dois lados —
+    e o índice aqui é o que escolhe qual título recebe baixa. Errar isso é dar por
+    recebida uma parcela que ninguém pagou."""
+    itens = _parcelas(parcelas)
+    if not itens:
+        return None
+    return 0 if "sinal" in str(itens[0].get("obs") or "").lower() else None
+
+
+def valor_do_sinal(parcelas) -> int:
+    """Quanto é o sinal, em centavos, ou 0 se o orçamento não pede sinal."""
+    i = indice_do_sinal(parcelas)
+    return int(_parcelas(parcelas)[i]["valor_centavos"]) if i is not None else 0
+
+
+def baixar_titulo_do_sinal(pool, conta_id: int, orcamento_id: int, parcelas,
+                           pago_em) -> int | None:
+    """Dá baixa no título da parcela do sinal, NA DATA EM QUE O SINAL CAIU.
+
+    O dinheiro entrou quando o Pix caiu, não quando o dono apertou o botão nem
+    quando fechou o contrato — e a data do lançamento decide o MÊS da receita.
+    Por isso `pago_em` vem de `orcamentos.sinal_pago_em` e não de `date.today()`.
+
+    Idempotente por baixo (dar_baixa_titulo só age em título 'aberto'), então
+    pode ser chamado pelos dois caminhos sem coordenação:
+      • "Sinal recebido" com o contrato JÁ fechado -> o título existe, recebe baixa;
+      • "Fechar contrato" com o sinal JÁ confirmado -> o título nasce e recebe
+        baixa logo em seguida.
+    Devolve o id do título baixado, ou None se não havia o que baixar.
+    """
+    i = indice_do_sinal(parcelas)
+    if i is None or not pago_em:
+        return None
+    with pool.connection() as c:
+        r = c.execute(
+            """select id from titulos
+                where conta_id=%s and orcamento_id=%s and parcela_idx=%s
+                  and status='aberto'
+                order by id limit 1""",
+            (conta_id, orcamento_id, i)).fetchone()
+    if not r:
+        return None
+    from finance import empresa as emp
+    quando = pago_em.date() if isinstance(pago_em, datetime) else pago_em
+    res = emp.dar_baixa_titulo(pool, conta_id, r[0], data_pagto=quando)
+    return r[0] if res.get("ok") else None
 
 
 def _venc(v, padrao: date) -> date:
@@ -119,7 +189,8 @@ def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
             """update orcamentos set status='fechado', atualizado_em=now()
                 where id=%s and conta_id=%s and status <> 'fechado'
              returning empresa, cliente, setup_centavos, mensal_centavos,
-                       coalesce(modo,'recorrente'), parcelas, primeiro_ano_centavos""",
+                       coalesce(modo,'recorrente'), parcelas, primeiro_ano_centavos,
+                       sinal_pago_em""",
             (orcamento_id, conta_id),
         ).fetchone()
         if not orc:
@@ -131,7 +202,8 @@ def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
                 return {"ok": False, "erro": "Orçamento não encontrado."}
             return {"ok": False, "erro": f"Orçamento já está '{estado[0]}'."}
 
-        empresa, cliente, setup_cent, mensal_cent, modo, parcelas_raw, total_cent = orc
+        (empresa, cliente, setup_cent, mensal_cent, modo, parcelas_raw, total_cent,
+         sinal_pago_em) = orc
         contraparte = (empresa or cliente or "").strip()
         setup_cent = int(setup_cent or 0)
         mensal_cent = int(mensal_cent or 0)
@@ -149,7 +221,7 @@ def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
                     _SQL_TITULO,
                     (conta_id, f"{base} · {rotulo}"[:200], contraparte,
                      p["valor_centavos"], _venc(p["venc"], hoje + timedelta(days=dias_setup)),
-                     CAT_SERVICOS, False, criado_por),
+                     CAT_SERVICOS, False, criado_por, orcamento_id, i - 1),
                 ).fetchone()[0])
             # sem plano de pagamento: um título só, com o total do evento — o
             # COM desconto (primeiro_ano_centavos), não a soma bruta dos itens.
@@ -158,27 +230,51 @@ def fechar_orcamento(pool, conta_id: int, orcamento_id: int,
                 ids.append(c.execute(
                     _SQL_TITULO,
                     (conta_id, base, contraparte, total_evento,
-                     hoje + timedelta(days=dias_setup), CAT_SERVICOS, False, criado_por),
+                     hoje + timedelta(days=dias_setup), CAT_SERVICOS, False, criado_por,
+                     orcamento_id, None),
                 ).fetchone()[0])
             c.commit()
-            return {"ok": True, "modo": "evento", "titulos": ids,
-                    "setup_titulo_id": None, "mensal_titulo_id": None}
+            evento_ids = ids
 
-        setup_id = mensal_id = None
-        if setup_cent > 0:
-            setup_id = c.execute(
-                _SQL_TITULO,
-                (conta_id, f"Setup — {contraparte}".strip(" —"), contraparte,
-                 setup_cent, hoje + timedelta(days=dias_setup), CAT_SERVICOS,
-                 False, criado_por),
-            ).fetchone()[0]
-        if mensal_cent > 0:
-            mensal_id = c.execute(
-                _SQL_TITULO,
-                (conta_id, f"Mensalidade — {contraparte}".strip(" —"), contraparte,
-                 mensal_cent, _mes_seguinte(hoje), CAT_SERVICOS, True, criado_por),
-            ).fetchone()[0]
-        c.commit()
+        else:
+            evento_ids = None
+            setup_id = mensal_id = None
+            if setup_cent > 0:
+                setup_id = c.execute(
+                    _SQL_TITULO,
+                    (conta_id, f"Setup — {contraparte}".strip(" —"), contraparte,
+                     setup_cent, hoje + timedelta(days=dias_setup), CAT_SERVICOS,
+                     False, criado_por, None, None),
+                ).fetchone()[0]
+            if mensal_cent > 0:
+                mensal_id = c.execute(
+                    _SQL_TITULO,
+                    (conta_id, f"Mensalidade — {contraparte}".strip(" —"), contraparte,
+                     mensal_cent, _mes_seguinte(hoje), CAT_SERVICOS, True, criado_por,
+                     None, None),
+                ).fetchone()[0]
+            c.commit()
 
-    return {"ok": True, "modo": "recorrente", "setup_titulo_id": setup_id,
-            "mensal_titulo_id": mensal_id}
+    if evento_ids is None:
+        return {"ok": True, "modo": "recorrente", "setup_titulo_id": setup_id,
+                "mensal_titulo_id": mensal_id}
+
+    # O SINAL JÁ RECEBIDO não pode nascer como título em aberto: o dinheiro está no
+    # bolso desde que o Pix caiu, e o lançamento sai na DATA DO SINAL — é ela que
+    # decide o mês da receita, não o dia em que se apertou "Fechar contrato".
+    #
+    # Fora da transação de propósito, e depois do `with`: o contrato fechado é o
+    # que não pode se perder, e dar_baixa_titulo abre a própria conexão. Se a baixa
+    # falhar, o título fica aberto e o botão "Sinal recebido" (ou a baixa na mão)
+    # resolve depois — nada fica duplicado, porque a baixa só age em 'aberto'.
+    sinal_baixado = None
+    if sinal_pago_em:
+        try:
+            sinal_baixado = baixar_titulo_do_sinal(pool, conta_id, orcamento_id,
+                                                   parcelas_raw, sinal_pago_em)
+        except Exception as e:  # noqa: BLE001
+            _log.warning("fechar_orcamento %s: título do sinal não recebeu baixa: %s: %s",
+                         orcamento_id, type(e).__name__, e)
+    return {"ok": True, "modo": "evento", "titulos": evento_ids,
+            "setup_titulo_id": None, "mensal_titulo_id": None,
+            "sinal_titulo_id": sinal_baixado}

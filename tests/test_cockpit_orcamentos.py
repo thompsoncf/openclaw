@@ -37,13 +37,15 @@ create table orcamentos (id bigserial primary key, conta_id bigint, cliente text
   status text default 'rascunho', canal text, criado_por text,
   aprovada_em timestamptz, aprovada_por text, aprovada_doc text,
   modo text default 'recorrente', evento jsonb, parcelas jsonb, numero int,
-  criado_em timestamptz default now(), atualizado_em timestamptz default now());
+  criado_em timestamptz default now(), atualizado_em timestamptz default now(),
+  sinal_centavos int, sinal_pago_em timestamptz);   -- 161: o sinal do evento
 create table titulos (id bigserial primary key, conta_id bigint not null,
   tipo text not null check (tipo in ('pagar','receber')), descricao text not null,
   contraparte text not null default '', valor_centavos int not null check (valor_centavos > 0),
   vencimento date not null, status text not null default 'aberto',
   recorrente boolean not null default false, categoria text not null default '',
-  criado_por bigint, criado_em timestamptz not null default now());
+  criado_por bigint, criado_em timestamptz not null default now(),
+  orcamento_id bigint, parcela_idx int);   -- 162: liga o título à parcela do orçamento
 """
 
 

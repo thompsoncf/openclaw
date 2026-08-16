@@ -83,6 +83,8 @@ def pool():
         # 161 é o orçamento (valor do sinal + carimbo de pago).
         c.execute(_sql("160_agenda_pre_reserva.sql"))
         c.execute(_sql("161_orcamento_sinal.sql"))
+        # 162: o vínculo título↔parcela, que a baixa do sinal usa pra achar o título
+        c.execute(_sql("162_titulo_parcela_do_orcamento.sql"))
         c.commit()
     yield p
     p.close()
@@ -723,6 +725,130 @@ def test_fechar_evento_gera_um_titulo_por_parcela(pool, conta_id):
     assert [l[2] for l in linhas] == [date(2025, 11, 13), date(2025, 12, 13)]
     assert all(l[3] is False and l[4] == "receber" for l in linhas)   # evento não é recorrente
     assert "Sinal" in linhas[0][0] and "Maria Teste" in linhas[0][0]
+
+
+def test_titulo_guarda_de_qual_parcela_veio(pool, conta_id):
+    """Sem esse vínculo, voltar do título pra parcela só dava casando TEXTO de
+    descrição — e a descrição do título é editável na tela."""
+    oid, _tok = _semear(pool, conta_id)
+    r = vendas.fechar_orcamento(pool, conta_id, oid)
+    with pool.connection() as c:
+        linhas = c.execute(
+            "select orcamento_id, parcela_idx from titulos where id = any(%s) "
+            "order by parcela_idx", (r["titulos"],)).fetchall()
+    assert linhas == [(oid, 0), (oid, 1)]
+
+
+# --------------------------------------------- o sinal recebido e o dinheiro
+def _sinal_pago_em(pool, oid, quando):
+    with pool.connection() as c:
+        c.execute("update orcamentos set sinal_pago_em=%s where id=%s", (quando, oid))
+        c.commit()
+
+
+def _titulo_do_sinal(pool, oid):
+    with pool.connection() as c:
+        return c.execute(
+            """select t.status, t.pago_em, l.data, l.valor_centavos, l.tipo
+                 from titulos t left join lancamentos l on l.id = t.lancamento_id
+                where t.orcamento_id=%s and t.parcela_idx=0""", (oid,)).fetchone()
+
+
+def test_sinal_ja_confirmado_nao_vira_titulo_em_aberto(pool, conta_id):
+    """O caminho normal: confirma o sinal, fecha o contrato depois. O título dessa
+    parcela não pode nascer em aberto — o dinheiro está no bolso desde que o Pix
+    caiu, e é NA DATA DO PIX que a receita entra no livro-caixa (é ela que decide
+    o mês). Antes, o título nascia aberto e o dono dava baixa na mão, lembrando."""
+    oid, _tok = _semear(pool, conta_id)
+    caiu = datetime(2025, 10, 3, 14, 30, tzinfo=ag.BRT)
+    _sinal_pago_em(pool, oid, caiu)
+    r = vendas.fechar_orcamento(pool, conta_id, oid)
+    assert r["ok"] and r["sinal_titulo_id"]
+    status, pago_em, data_lanc, valor, tipo = _titulo_do_sinal(pool, oid)
+    assert status == "pago" and pago_em == date(2025, 10, 3)
+    assert data_lanc == date(2025, 10, 3)        # o mês da receita é o do sinal
+    assert valor == 181000 and tipo == "receita"
+
+
+def test_as_outras_parcelas_seguem_em_aberto(pool, conta_id):
+    """Só o sinal foi pago. O resto do plano continua a receber — senão fechar o
+    contrato de um evento daria por recebido o que ainda vai ser cobrado."""
+    oid, _tok = _semear(pool, conta_id)
+    _sinal_pago_em(pool, oid, datetime(2025, 10, 3, 14, 30, tzinfo=ag.BRT))
+    r = vendas.fechar_orcamento(pool, conta_id, oid)
+    with pool.connection() as c:
+        linhas = c.execute(
+            "select parcela_idx, status from titulos where id = any(%s) "
+            "order by parcela_idx", (r["titulos"],)).fetchall()
+    assert linhas == [(0, "pago"), (1, "aberto")]
+
+
+def test_sinal_confirmado_depois_do_contrato_fechado_da_baixa(pool, conta_id):
+    """O caminho invertido: fechou o contrato antes de o sinal cair. Quando o dono
+    confirma, o título que JÁ EXISTE recebe a baixa — e com a mesma data."""
+    oid, _tok = _semear(pool, conta_id)
+    r = vendas.fechar_orcamento(pool, conta_id, oid)
+    assert r["sinal_titulo_id"] is None                 # nada a baixar ainda
+    assert _titulo_do_sinal(pool, oid)[0] == "aberto"
+    caiu = datetime(2025, 10, 9, 9, 0, tzinfo=ag.BRT)
+    _sinal_pago_em(pool, oid, caiu)
+    with pool.connection() as c:
+        parcelas = c.execute("select parcelas from orcamentos where id=%s",
+                             (oid,)).fetchone()[0]
+    assert vendas.baixar_titulo_do_sinal(pool, conta_id, oid, parcelas, caiu)
+    status, pago_em, data_lanc, _v, _t = _titulo_do_sinal(pool, oid)
+    assert status == "pago" and pago_em == date(2025, 10, 9) and data_lanc == date(2025, 10, 9)
+
+
+def test_baixa_do_sinal_nao_lanca_duas_vezes(pool, conta_id):
+    """Os dois caminhos podem se cruzar (fechou, confirmou, e o botão foi clicado de
+    novo). A segunda passada não pode gerar outro lançamento no caixa."""
+    oid, _tok = _semear(pool, conta_id)
+    caiu = datetime(2025, 10, 3, 14, 30, tzinfo=ag.BRT)
+    _sinal_pago_em(pool, oid, caiu)
+    vendas.fechar_orcamento(pool, conta_id, oid)
+    with pool.connection() as c:
+        parcelas = c.execute("select parcelas from orcamentos where id=%s",
+                             (oid,)).fetchone()[0]
+        antes = c.execute("select count(*) from lancamentos where conta_id=%s",
+                          (conta_id,)).fetchone()[0]
+    assert vendas.baixar_titulo_do_sinal(pool, conta_id, oid, parcelas, caiu) is None
+    with pool.connection() as c:
+        depois = c.execute("select count(*) from lancamentos where conta_id=%s",
+                           (conta_id,)).fetchone()[0]
+    assert depois == antes
+
+
+def test_linha_vazia_no_plano_nao_desalinha_o_indice_do_sinal(pool, conta_id):
+    """`_parcelas` descarta linha de valor zero — é ela que fechar_orcamento percorre
+    pra numerar `parcela_idx`. Se o índice do sinal fosse contado no jsonb CRU, uma
+    primeira linha vazia (o dono apagou o valor e deixou a linha) deslocaria tudo e a
+    baixa cairia na parcela errada: dar por recebido o que ninguém pagou."""
+    oid, _tok = _semear(pool, conta_id, parcelas=[
+        {"venc": "", "valor_centavos": 0, "forma": "", "obs": ""},
+        {"venc": "2025-11-13", "valor_centavos": 181000, "forma": "Pix",
+         "obs": "Sinal — confirma a reserva da data"},
+        {"venc": "2025-12-13", "valor_centavos": 564000, "forma": "Pix", "obs": "Restante"}])
+    _sinal_pago_em(pool, oid, datetime(2025, 10, 3, 14, 30, tzinfo=ag.BRT))
+    r = vendas.fechar_orcamento(pool, conta_id, oid)
+    assert len(r["titulos"]) == 2 and r["sinal_titulo_id"]
+    with pool.connection() as c:
+        linhas = c.execute(
+            "select parcela_idx, valor_centavos, status from titulos where id = any(%s) "
+            "order by parcela_idx", (r["titulos"],)).fetchall()
+    assert linhas == [(0, 181000, "pago"), (1, 564000, "aberto")]
+
+
+def test_orcamento_sem_sinal_nao_baixa_parcela_nenhuma(pool, conta_id):
+    """Parcela normal na primeira linha não é sinal. Baixar por engano a primeira
+    parcela de um plano seria dar por recebido o que não entrou."""
+    oid, _tok = _semear(pool, conta_id, parcelas=[
+        {"venc": "2025-11-13", "valor_centavos": 300000, "forma": "Pix", "obs": "1ª de 2"},
+        {"venc": "2025-12-13", "valor_centavos": 445000, "forma": "Pix", "obs": "2ª de 2"}])
+    _sinal_pago_em(pool, oid, datetime(2025, 10, 3, 14, 30, tzinfo=ag.BRT))
+    r = vendas.fechar_orcamento(pool, conta_id, oid)
+    assert r["sinal_titulo_id"] is None
+    assert _titulo_do_sinal(pool, oid)[0] == "aberto"
 
 
 def test_fechar_evento_sem_parcelas_gera_titulo_do_total(pool, conta_id):

@@ -1150,6 +1150,16 @@ async function repassarSaida (contaId, m) {
     if (!r.ok) log.warn({ contaId, status: r.status }, 'webhook wa-qr/saida respondeu não-ok')
     else log.info({ contaId, destinatario: destinatario.slice(0, 6) + '…' }, 'saída repassada ao webhook ✓')
   } catch (e) { log.warn({ contaId, e: String(e) }, 'falha ao repassar saída') }
+  // O áudio que o VENDEDOR grava pelo celular também vira texto. Faltava: a
+  // transcrição só era disparada aqui na entrada (repassarEntrada), então metade
+  // da conversa ficava legível e a outra metade era um "🎤 Áudio (0:09)" mudo —
+  // quem abrisse a conversa depois via a pergunta do cliente e não via a resposta.
+  // Mesma fila de concorrência 1 da entrada, e pelo mesmo motivo: a marca precisa
+  // aparecer no painel antes, e N áudios juntos não podem multiplicar o pico de
+  // memória. O webhook do outro lado casa por provider_sid e não olha direção, então
+  // não precisou de rota nova.
+  enfileirarAudio(() => transcreverAudio(contaId, m, destinatario)).catch((e) =>
+    log.warn({ contaId, e: String(e) }, 'transcreverAudio (saída) falhou'))
 }
 
 // Deslogou de vez (não é queda temporária) — avisa o Python pra limpar o

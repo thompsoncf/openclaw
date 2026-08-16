@@ -315,7 +315,8 @@ def _carregar(token: str, pool=None):
                       coalesce((select m.nome from membros m
                                  where m.id = case when o.criado_por ~ '^[0-9]+$'
                                                    then o.criado_por::bigint end),
-                               case when o.criado_por = 'dono' then c.nome end)
+                               case when o.criado_por = 'dono' then c.nome end),
+                      o.contrato_texto, o.contrato_assinado_em, o.contrato_assinado_por
                  from orcamentos o join contas c on c.id = o.conta_id
                 where o.token=%s""", (token,)).fetchone()
     if not r:
@@ -327,7 +328,7 @@ def _carregar(token: str, pool=None):
      cli_email, cli_tel, agenda_id,
      em_razao, em_doc, em_end, em_cep, em_bairro, em_cidade, em_uf, em_tel, em_email,
      cliente_id, sinal_centavos, sinal_pago_em, pre_reserva_ate, evento_status,
-     vendedor_nome) = r
+     vendedor_nome, contrato_texto, contrato_assinado_em, contrato_assinado_por) = r
     # ASSINOU, CONGELOU: enquanto o orçamento não foi aprovado, a aba Clientes é
     # quem manda — corrigiu o nome/endereço lá, reimprimiu, saiu certo, sem
     # precisar refazer a proposta. Depois de assinado fica exatamente o que o
@@ -354,6 +355,9 @@ def _carregar(token: str, pool=None):
         # é o total COM desconto (é o que a tela calcula e o que as parcelas
         # somam). A folha mostrava o bruto e o desconto sumia.
         "subtotal_itens": _brl(setup_c or 0),
+        # cru, em centavos: o contrato calcula entrada e saldo a partir daqui, e
+        # não dá pra fazer conta em cima de "R$ 8.900,00"
+        "setup_centavos_cru": int(setup_c or 0),
         "total": _brl(ano1_c if (ano1_c or 0) > 0 else (setup_c or 0)),
         "desconto_pct": int((evento or {}).get("desconto") or 0),
         "desconto_valor": _brl(max(0, (setup_c or 0) - (ano1_c or 0))),
@@ -368,6 +372,11 @@ def _carregar(token: str, pool=None):
                      else conta_nome) or "Proposta",
         "conta_id": conta_id, "criado_por": criado_por, "logo_url": logo_url,
         "modo": modo or "recorrente",
+        # CONTRATO: `contrato_texto` só existe depois de assinado — é o documento
+        # congelado. Antes disso a aba monta ao vivo, pra o cliente ler sempre a
+        # versão atual do modelo da empresa.
+        "contrato_texto": contrato_texto, "contrato_assinado_em": contrato_assinado_em,
+        "contrato_assinado_por": contrato_assinado_por or "",
         "evento": evento, "dia_evento": dia_evento,
         "parcelas": _lista(parcelas), "numero": numero,
         "evento_agenda_id": agenda_id,
@@ -448,6 +457,66 @@ def _subtotais(itens: list[dict]) -> list[dict]:
     return [{"nome": k, "valor": _brl(v * 100)} for k, v in soma.items()]
 
 
+def _contrato_da_proposta(d: dict, pool=None) -> dict | None:
+    """O contrato desta proposta, ou None se esta conta não tem contrato.
+
+    DUAS REGRAS, e elas são diferentes de propósito:
+
+    * VISÍVEL desde a aprovação. O cliente precisa ler o que vai assinar ANTES de
+      pagar — liberar o texto só depois do sinal criaria o intervalo em que ele
+      já pagou e ainda não sabe o que aceitou.
+    * ASSINÁVEL só depois do sinal. A cláusula da reserva diz que a data só fica
+      garantida com a entrada; assinar antes seria assinar um contrato cuja
+      primeira obrigação ainda não foi cumprida.
+
+    E o texto: assinado → sai do `contrato_texto` CONGELADO; não assinado → é
+    montado agora, com o modelo atual da empresa. Sem o congelamento, o dono
+    editar o modelo amanhã reescreveria o que o cliente aceitou ontem."""
+    from finance import contrato as ctr
+    try:
+        pool = pool or get_pool()
+        nicho = (emp_dados(pool, d["conta_id"]) or {}).get("nicho")
+    except Exception:  # noqa: BLE001
+        # A folha do cliente abre de qualquer jeito: o orçamento é o documento
+        # principal, e derrubar a página inteira porque o bloco do contrato não
+        # carregou seria trocar um problema por um pior. Vai no log em warning —
+        # some do rodapé, não do registro.
+        import logging
+        logging.getLogger("proposta.contrato").warning(
+            "não deu pra montar o contrato do orçamento %s", d.get("id"), exc_info=True)
+        return None
+    if not ctr.tem_contrato(nicho):
+        return None
+    assinado = bool(d.get("contrato_assinado_em"))
+    if assinado and d.get("contrato_texto"):
+        clausulas, faltas = _lista(d["contrato_texto"]), []
+    else:
+        modelo = ctr.carregar_modelo(pool, d["conta_id"])
+        ctx = ctr.contexto(catalogo=scat.listar(pool, d["conta_id"]),
+                           orcamento={"cliente": d["contato"] or d["empresa"],
+                                      # já mascarado pela folha (000.000.000-00)
+                                      "cnpj": (d.get("cliente") or {}).get("doc") or "",
+                                      "whatsapp": d["whats"],
+                                      "setup_centavos": d["setup_centavos_cru"],
+                                      "numero": d["numero"], "evento": d["evento"]},
+                           modelo=modelo, empresa=emp_dados(pool, d["conta_id"]))
+        clausulas, faltas = ctr.montar(modelo["clausulas"], ctx)
+    return {
+        "clausulas": clausulas, "faltas": faltas,
+        "aprovada": d["status"] in ("aprovada", "fechado"),
+        "sinal_pago": bool(d.get("sinal_pago_em")),
+        "assinado": assinado,
+        "assinado_por": d.get("contrato_assinado_por") or "",
+        "assinado_em": (d["contrato_assinado_em"].strftime("%d/%m/%Y às %H:%M")
+                        if d.get("contrato_assinado_em") else ""),
+    }
+
+
+def emp_dados(pool, conta_id):
+    from finance import empresa as _emp
+    return _emp.obter_dados_empresa(pool, conta_id) or {}
+
+
 @router.get("/proposta/{token}", response_class=HTMLResponse)
 def proposta_publica(request: Request, token: str, erro: str = ""):
     d = _carregar(token)
@@ -500,8 +569,9 @@ def proposta_publica(request: Request, token: str, erro: str = ""):
     d["sinal_pendente"] = bool(d["pre_ate_str"])
     d["data_reservada"] = d.get("evento_status") == "ativo"
     d["data_liberada"] = d.get("evento_status") == "cancelado"
-    return HTMLResponse(_env.get_template("proposta").render(prop=d, linhas=linhas,
-                                                             token=token, erro=erro))
+    return HTMLResponse(_env.get_template("proposta").render(
+        prop=d, linhas=linhas, token=token, erro=erro,
+        contrato=_contrato_da_proposta(d)))
 
 
 @router.post("/proposta/{token}/assinar")
@@ -515,6 +585,53 @@ def proposta_assinar(request: Request, background: BackgroundTasks, token: str,
         if d:
             background.add_task(_pos_assinatura, d, nome.strip())
     return RedirectResponse(f"/proposta/{token}", status_code=303)
+
+
+@router.post("/proposta/{token}/assinar-contrato")
+def proposta_assinar_contrato(request: Request, token: str,
+                              nome: str = Form(""), doc: str = Form(""),
+                              aceite: str = Form("")):
+    """Assinatura do CONTRATO — separada da assinatura da proposta.
+
+    São dois aceites porque são dois documentos: um aprova valores, o outro
+    aceita cláusulas de cancelamento, multa e reagendamento. Um aceite só,
+    cobrindo ambos, deixaria o segundo implícito — e é o segundo que restringe
+    direito do cliente.
+
+    Três travas, todas revalidadas AQUI e não na tela:
+
+    1. a conta tem contrato (nicho de eventos);
+    2. a proposta foi aprovada;
+    3. o sinal foi pago — a cláusula da reserva diz que a data só fica garantida
+       com a entrada, então assinar antes seria aceitar um contrato cuja
+       primeira obrigação ainda não foi cumprida.
+
+    E o texto é CONGELADO no ato: grava o que o cliente leu, não uma referência
+    ao modelo. Editar o modelo depois não reescreve o que ele aceitou."""
+    if not (nome or "").strip() or aceite != "on":
+        return RedirectResponse(
+            f"/proposta/{token}?erro=Preencha+seu+nome+e+marque+o+aceite.#contrato",
+            status_code=303)
+    pool = get_pool()
+    d = _carregar(token, pool)
+    if not d:
+        return RedirectResponse(f"/proposta/{token}", status_code=303)
+    ct = _contrato_da_proposta(d, pool)
+    if not ct or not ct["aprovada"] or not ct["sinal_pago"] or ct["assinado"]:
+        return RedirectResponse(f"/proposta/{token}#contrato", status_code=303)
+    with pool.connection() as c:
+        # `contrato_assinado_em is null` na condição: duplo clique ou reenvio do
+        # formulário não sobrescreve a assinatura nem o texto já congelado.
+        c.execute(
+            """update orcamentos
+                  set contrato_texto=%s::jsonb, contrato_assinado_em=now(),
+                      contrato_assinado_por=%s, contrato_assinado_doc=%s,
+                      contrato_assinado_ip=%s
+                where token=%s and contrato_assinado_em is null""",
+            (json.dumps(ct["clausulas"]), (nome or "").strip()[:200],
+             (doc or "").strip()[:40], _ip(request), token))
+        c.commit()
+    return RedirectResponse(f"/proposta/{token}#contrato", status_code=303)
 
 
 # ---------------------------------------------------------------- template
@@ -628,6 +745,17 @@ table.itens td.n{color:#14213D}
 table.pag th{background:#FBFAF7;color:#8A8475;border-bottom:1px solid #ECE7DC}
 td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:top}
 .cond{background:#FBFAF7;border:1px solid #ECE7DC;border-radius:9px;padding:12px 14px;font-size:12px;color:#5A6678;line-height:1.7;white-space:pre-line}
+/* CONTRATO — mesma folha, depois do orçamento. Texto corrido de documento, sem
+   as caixas do orçamento: aqui o que importa é ler, não comparar valores. */
+.ctr{margin-top:22px;border-top:2px solid #14213D;padding-top:14px}
+.ctrc{margin-bottom:11px;break-inside:avoid}
+.ctrt{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:#14213D;margin-bottom:3px}
+/* pre-line porque a cláusula é escrita com quebras (2.1., 2.2., …) e elas são
+   parte do documento — juntar tudo num parágrafo só é o que faz contrato virar
+   parede de texto */
+.ctrb{font-size:12.5px;line-height:1.72;color:#333F52;white-space:pre-line}
+.ctresp{background:#FBF7EC;border:1px solid #EADFC4;border-radius:9px;padding:11px 13px;font-size:12.5px;color:#6B5A34;margin-top:12px}
+.ctrok{background:#F0F8F3;border:1px solid #C6E4D2;border-radius:9px;padding:11px 13px;font-size:12.5px;color:#1B5E38;margin-top:12px}
 /* ---- celular: a tabela vira LISTA ----
    Cinco colunas em 390px sobrava uns 90px pro item: cada palavra caía numa
    linha e a descrição virava uma coluna de letras. No celular cada item vira um
@@ -704,7 +832,14 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
   .local{margin-top:5px;font-size:10.5px}
   /* …e o que quebrar, quebra ENTRE blocos: item cortado no meio da página é o
      que faz um orçamento parecer amador. */
-  tr,.evg,.evb,.subs,.cond,.cli{break-inside:avoid}
+  tr,.evg,.evb,.subs,.cond,.cli,.ctrc{break-inside:avoid}
+  /* o contrato é a segunda parte do documento impresso: começa em página nova,
+     como o papel que a empresa usa hoje, e o formulário de assinar (que é botão
+     de tela) não vai pro PDF */
+  .ctr{break-before:page;border-top:none}
+  .ctr .sign,.ctresp{display:none}
+  .ctrb{font-size:10.5px;line-height:1.55}
+  .ctrt{font-size:10px}
   @page{size:A4;margin:11mm}
 }
 </style>{% endraw %}
@@ -876,6 +1011,39 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
     <button class="go" type="submit">✓ Aprovar e assinar proposta</button>
     {% endif %}
   </form>
+  {% endif %}
+
+  {# ------------------------------------------------------------ CONTRATO
+     Aparece depois do orçamento, na mesma folha — e só existe no nicho de
+     eventos (contrato é None nos outros). Fica VISÍVEL desde a aprovação, pra
+     o cliente ler antes de pagar; só o botão de assinar espera o sinal. #}
+  {% if contrato and contrato.aprovada %}
+  <div id="contrato" class="ctr">
+    <div class="eb">Contrato de locação</div>
+    {% for c in contrato.clausulas %}
+    <div class="ctrc"><div class="ctrt">{{ c.titulo }}</div><div class="ctrb">{{ c.corpo }}</div></div>
+    {% endfor %}
+
+    {% if contrato.assinado %}
+    <div class="ctrok">✓ Contrato assinado por <b>{{ contrato.assinado_por }}</b> em {{ contrato.assinado_em }}.</div>
+    {% elif not contrato.sinal_pago %}
+    {# Lê agora, assina depois do sinal — a cláusula da reserva diz que a data só
+       fica garantida com a entrada. #}
+    <div class="ctresp">Você já pode ler o contrato inteiro. A assinatura é liberada assim que o pagamento da entrada for confirmado pela {{ prop.vendedor }}.</div>
+    {% else %}
+    <form class="sign" method="post" action="/proposta/{{ token }}/assinar-contrato">
+      <h3>✍️ Assinar o contrato</h3>
+      <p>Entrada confirmada. Ao assinar, você aceita as cláusulas acima — inclusive as de cancelamento, reagendamento e utilização excedente. Fica registrado com nome, CPF, data/hora e IP.</p>
+      {% if erro %}<div class="err">{{ erro }}</div>{% endif %}
+      <div class="row">
+        <input type="text" name="nome" placeholder="Seu nome completo" required>
+        <input type="text" name="doc" placeholder="CPF">
+      </div>
+      <label class="ck"><input type="checkbox" name="aceite"> Li e concordo com todas as cláusulas deste contrato.</label>
+      <button class="go" type="submit">✓ Assinar contrato</button>
+    </form>
+    {% endif %}
+  </div>
   {% endif %}
 
   <div class="ft">Valores em reais (BRL). Assinatura eletrônica registrada com nome, data/hora e IP — validade jurídica conforme MP 2.200-2/2001. {{ 'Orçamento válido' if evento else 'Proposta válida' }} até {{ prop.validade_str }}.</div>

@@ -82,6 +82,14 @@ def _garantir_tabela(c):
         alter table orcamentos add column if not exists cep           text;
         alter table orcamentos add column if not exists evento_agenda_id bigint;
         alter table orcamentos add column if not exists cliente_id    bigint;
+        -- contrato de locação (migração 160): o documento congelado no momento
+        -- da assinatura, e quem assinou. Fica no orçamento, e não numa tabela
+        -- própria, porque é 1-para-1 com ele e nasce e morre junto.
+        alter table orcamentos add column if not exists contrato_texto        jsonb;
+        alter table orcamentos add column if not exists contrato_assinado_em  timestamptz;
+        alter table orcamentos add column if not exists contrato_assinado_por text;
+        alter table orcamentos add column if not exists contrato_assinado_doc text;
+        alter table orcamentos add column if not exists contrato_assinado_ip  text;
         create index if not exists idx_orcamentos_status on orcamentos (status, criado_em desc);
         create index if not exists idx_orcamentos_conta on orcamentos (conta_id, status, criado_em desc);
         create unique index if not exists idx_orcamentos_token on orcamentos (token) where token is not null;

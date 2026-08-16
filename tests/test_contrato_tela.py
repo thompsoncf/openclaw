@@ -48,6 +48,9 @@ def cliente(monkeypatch):
                           kwargs={"prepare_threshold": None})
     with pool.connection() as c:
         c.execute("create table contas (id bigserial primary key, nome text)")
+        # `membros` existe porque o resumo do card resolve o NOME de quem alterou
+        # o contrato; 'dono' não tem linha aqui e cai no nome da conta
+        c.execute("create table membros (id bigserial primary key, conta_id bigint, nome text)")
         c.execute("insert into contas (id, nome) values (%s,'Prime'),(%s,'SaaS')",
                   (CONTA_EV, CONTA_REC))
         c.commit()
@@ -253,6 +256,81 @@ def test_sem_orcamento_com_data_a_previa_avisa_em_vez_de_fingir(cliente):
                      json={"clausulas": _clausulas(), "regras": {}})
     assert r.status_code == 404
     assert "orçamento" in r.json()["erro"]
+
+
+# ------------------------------------------------- o resumo do card recolhido
+#
+# O contrato se escreve uma vez e fica. O card vive RECOLHIDO na tela do dia a
+# dia (montar orçamento, ver o funil), e o resumo é o que responde "está no ar e
+# é o meu?" sem obrigar a abrir.
+#
+# O selo de falta custa uma consulta a mais por carregamento, e vale: um campo
+# sem valor não aparece em lugar nenhum até sair no contrato DO CLIENTE. É o
+# único erro deste fluxo que estreia na frente dele.
+
+def test_conta_nova_nao_finge_que_esta_configurada(cliente):
+    """`novo` é o que faz o card abrir sozinho — quem nunca configurou não pode
+    ter que descobrir a seta."""
+    d = cliente.get("/painel/servicos/contrato").json()
+    assert d["novo"] is True
+    assert d["resumo"]["em"] == "" and d["resumo"]["por"] == ""
+
+
+def test_resumo_conta_as_clausulas_e_diz_quem_mexeu(cliente):
+    cliente.post("/painel/servicos/contrato/salvar",
+                 json={"clausulas": [{"titulo": "A", "corpo": "x"},
+                                     {"titulo": "B", "corpo": "y"}], "regras": {}})
+    r = cliente.get("/painel/servicos/contrato").json()["resumo"]
+    assert r["n"] == 2
+    assert r["em"]                      # dd/mm de hoje
+    assert r["por"] == "Prime"          # 'dono' cai no nome da conta
+
+
+def test_o_selo_denuncia_o_item_que_saiu_do_catalogo(cliente):
+    """O card fechado avisa antes de o campo vazio sair no contrato do cliente."""
+    _orcamento(cliente)
+    cliente.post("/painel/servicos/contrato/salvar", json={
+        "clausulas": [{"titulo": "X", "corpo": "Segurança: {preco.seguranca}"}], "regras": {}})
+    assert cliente.get("/painel/servicos/contrato").json()["resumo"]["faltas"] == \
+        ["preco.seguranca"]
+
+
+def test_contrato_saudavel_nao_tem_falta(cliente):
+    _orcamento(cliente)
+    cliente.post("/painel/servicos/contrato/salvar", json={
+        "clausulas": [{"titulo": "X", "corpo": "Hora extra: {preco.hora-extra}"}], "regras": {}})
+    assert cliente.get("/painel/servicos/contrato").json()["resumo"]["faltas"] == []
+
+
+def test_o_item_sumir_do_catalogo_acende_o_selo(cliente):
+    """A sequência real: o contrato estava certo, alguém apagou o item, e o card
+    passa a avisar sem ninguém ter tocado no contrato."""
+    _orcamento(cliente)
+    cliente.post("/painel/servicos/contrato/salvar", json={
+        "clausulas": [{"titulo": "X", "corpo": "Limpeza: {preco.taxa-de-limpeza}"}], "regras": {}})
+    assert cliente.get("/painel/servicos/contrato").json()["resumo"]["faltas"] == []
+    with cliente.pool.connection() as c:
+        c.execute("delete from servicos_catalogo where slug='taxa-de-limpeza'")
+        c.commit()
+    assert cliente.get("/painel/servicos/contrato").json()["resumo"]["faltas"] == \
+        ["preco.taxa-de-limpeza"]
+
+
+def test_sem_orcamento_de_exemplo_o_selo_fica_quieto(cliente):
+    """Sem base pra montar, dizer "tudo certo" seria mentira e dizer "faltando"
+    seria alarme falso. O resumo só não fala de faltas."""
+    cliente.post("/painel/servicos/contrato/salvar", json={
+        "clausulas": [{"titulo": "X", "corpo": "{preco.inexistente}"}], "regras": {}})
+    r = cliente.get("/painel/servicos/contrato").json()["resumo"]
+    assert r["faltas"] == [] and r["n"] == 1
+
+
+def test_restaurar_padrao_nao_inventa_historico(cliente):
+    """A prévia do padrão não pode dizer "alterado por Manoel" — ninguém alterou."""
+    cliente.post("/painel/servicos/contrato/salvar",
+                 json={"clausulas": [{"titulo": "Meu", "corpo": "x"}], "regras": {}})
+    r = cliente.get("/painel/servicos/contrato?padrao=1").json()["resumo"]
+    assert r["em"] == "" and r["por"] == ""
 
 
 def test_o_modelo_padrao_da_tela_monta_sem_falta(cliente):

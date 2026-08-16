@@ -257,13 +257,25 @@ def tem_contrato(nicho: str | None) -> bool:
 def carregar_modelo(pool, conta_id: int) -> dict:
     """O modelo da conta. Quem nunca editou recebe o modelo padrão — assim a
     tela abre com um contrato inteiro pra editar em vez de uma página em branco,
-    que é o que faz o dono desistir na primeira visita."""
+    que é o que faz o dono desistir na primeira visita.
+
+    `atualizado_em`/`atualizado_por` alimentam o resumo do card recolhido: o
+    contrato se escreve uma vez e some da frente, e é esse resumo que responde
+    "está no ar e é o meu?" sem obrigar a abrir. O nome sai do membro; 'dono'
+    (quem abriu a conta) não tem linha em `membros` e vira o nome da conta."""
     with pool.connection() as c:
-        r = c.execute("select clausulas, regras from contrato_modelo where conta_id=%s",
-                      (conta_id,)).fetchone()
+        r = c.execute(
+            """select m.clausulas, m.regras, m.atualizado_em,
+                      coalesce((select mb.nome from membros mb
+                                 where mb.id = case when m.atualizado_por ~ '^[0-9]+$'
+                                                    then m.atualizado_por::bigint end),
+                               (select ct.nome from contas ct where ct.id = m.conta_id), '')
+                 from contrato_modelo m where m.conta_id=%s""", (conta_id,)).fetchone()
     if not r or not r[0]:
-        return {"clausulas": modelo_padrao(), "regras": dict(REGRAS_PADRAO), "novo": True}
-    return {"clausulas": r[0], "regras": _regras({"regras": r[1]}), "novo": False}
+        return {"clausulas": modelo_padrao(), "regras": dict(REGRAS_PADRAO), "novo": True,
+                "atualizado_em": None, "atualizado_por": ""}
+    return {"clausulas": r[0], "regras": _regras({"regras": r[1]}), "novo": False,
+            "atualizado_em": r[2], "atualizado_por": r[3] or ""}
 
 
 def salvar_modelo(pool, conta_id: int, clausulas, regras, por: str = "") -> dict:

@@ -212,6 +212,36 @@ def campos_usados(clausulas) -> list[str]:
     return vistos
 
 
+def campos_disponiveis(catalogo=None) -> list[dict]:
+    """A paleta de campos que a tela do dono mostra, na ordem em que ele pensa.
+
+    Os {preco.*} são gerados a partir do catálogo REAL da conta — é assim que ele
+    descobre que pode citar qualquer item, e com o slug certo. Escrever o slug de
+    cabeça é a forma mais fácil de criar uma falta silenciosa."""
+    fixos = [
+        ("cliente.nome", "nome de quem assina"), ("cliente.doc", "CPF/CNPJ"),
+        ("evento.data", "data do evento"), ("evento.inicio", "horário de início"),
+        ("evento.fim", "horário de término"), ("evento.tipo", "tipo de evento"),
+        ("evento.convidados", "nº de convidados"),
+        ("valor.total", "valor total"), ("valor.entrada", "valor da entrada"),
+        ("valor.saldo", "saldo a pagar"), ("valor.numero", "nº do orçamento"),
+        ("regra.sinal_pct", "% da entrada"), ("regra.multa_cancelamento", "% da multa"),
+        ("regra.taxa_reagendamento", "% do reagendamento"),
+        ("regra.duracao_horas", "horas de evento"), ("regra.tolerancia_min", "min. de tolerância"),
+        ("regra.quitacao_dias", "dias p/ quitar"), ("regra.reagenda_dias", "antecedência p/ remarcar"),
+        ("regra.reagenda_prazo", "prazo da nova data"), ("regra.retirada_horas", "horas p/ retirar"),
+        ("regra.acesso_montagem", "horário de montagem"),
+        ("empresa.razao", "razão social"), ("empresa.cnpj", "CNPJ"),
+        ("empresa.endereco", "endereço"),
+    ]
+    saida = [{"campo": c, "rotulo": r, "grupo": c.split(".")[0]} for c, r in fixos]
+    for s in (catalogo or []):
+        if s.get("slug"):
+            saida.append({"campo": f"preco.{s['slug']}",
+                          "rotulo": (s.get("nome") or s["slug"]).lower(), "grupo": "preco"})
+    return saida
+
+
 def tem_contrato(nicho: str | None) -> bool:
     """Esta conta tem contrato de locação?
 

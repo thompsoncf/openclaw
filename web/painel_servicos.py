@@ -786,6 +786,31 @@ def _conta_evento(request: Request):
     return conta, None
 
 
+def _contexto_de_exemplo(pool, conta_id: int):
+    """(contexto, rótulo) montado com um orçamento REAL da conta, ou (None, "").
+
+    O mais recente que tenha data de evento. Serve a duas coisas — a prévia da
+    tela e o aviso de campo sem valor no card recolhido — e é o mesmo de
+    propósito: se as duas usassem bases diferentes, uma diria que está tudo certo
+    enquanto a outra apontava falta.
+
+    `regras` vem de fora porque a prévia precisa refletir o que está NO
+    FORMULÁRIO, não o que está gravado — é assim que o dono experimenta uma multa
+    diferente antes de salvar."""
+    with pool.connection() as c:
+        _garantir_tabela(c)
+        r = c.execute(
+            """select cliente, cnpj, whatsapp, setup_centavos, numero, evento
+                 from orcamentos
+                where conta_id=%s and coalesce(evento->>'data','') <> ''
+                order by id desc limit 1""", (conta_id,)).fetchone()
+    if not r:
+        return None, ""
+    orcamento = {"cliente": r[0], "cnpj": r[1], "whatsapp": r[2],
+                 "setup_centavos": r[3], "numero": r[4], "evento": r[5] or {}}
+    return orcamento, f"orçamento nº {r[4] or '—'} · {r[0] or ''}"
+
+
 @router.get("/painel/servicos/contrato")
 def painel_servicos_contrato(request: Request, padrao: int = 0):
     """O modelo da conta + a paleta de campos que a tela oferece.
@@ -798,12 +823,29 @@ def painel_servicos_contrato(request: Request, padrao: int = 0):
     if erro is not None:
         return erro
     pool = get_pool()
-    modelo = ({"clausulas": ctr.modelo_padrao(), "regras": dict(ctr.REGRAS_PADRAO), "novo": True}
+    modelo = ({"clausulas": ctr.modelo_padrao(), "regras": dict(ctr.REGRAS_PADRAO), "novo": True,
+               "atualizado_em": None, "atualizado_por": ""}
               if padrao else ctr.carregar_modelo(pool, conta[0]))
     catalogo = scat.listar(pool, conta[0])
+    # FALTAS no resumo do card fechado. Custa uma consulta a mais por
+    # carregamento e vale: um campo sem valor não aparece em lugar nenhum até
+    # sair no contrato DO CLIENTE — é o único erro deste fluxo que estreia na
+    # frente dele. Melhor o dono ver com o card recolhido.
+    orcamento, exemplo = _contexto_de_exemplo(pool, conta[0])
+    faltas = []
+    if orcamento and not modelo["novo"]:
+        ctx = ctr.contexto(catalogo=catalogo, orcamento=orcamento, modelo=modelo,
+                           empresa=emp.obter_dados_empresa(pool, conta[0]))
+        _doc, faltas = ctr.montar(modelo["clausulas"], ctx)
     return JSONResponse({
         "clausulas": modelo["clausulas"], "regras": modelo["regras"],
         "novo": modelo["novo"], "campos": ctr.campos_disponiveis(catalogo),
+        "resumo": {
+            "n": len(modelo["clausulas"]),
+            "em": modelo["atualizado_em"].strftime("%d/%m") if modelo.get("atualizado_em") else "",
+            "por": modelo.get("atualizado_por") or "",
+            "faltas": faltas, "exemplo": exemplo,
+        },
     })
 
 
@@ -835,24 +877,15 @@ def painel_servicos_contrato_previa(request: Request, dados: ContratoIn):
     if erro is not None:
         return erro
     pool = get_pool()
-    with pool.connection() as c:
-        _garantir_tabela(c)
-        r = c.execute(
-            """select cliente, cnpj, whatsapp, setup_centavos, numero, evento
-                 from orcamentos
-                where conta_id=%s and coalesce(evento->>'data','') <> ''
-                order by id desc limit 1""", (conta[0],)).fetchone()
-    if not r:
+    orcamento, exemplo = _contexto_de_exemplo(pool, conta[0])
+    if not orcamento:
         return JSONResponse({"erro": "nenhum orçamento com data de evento para usar de exemplo"},
                             status_code=404)
-    orcamento = {"cliente": r[0], "cnpj": r[1], "whatsapp": r[2],
-                 "setup_centavos": r[3], "numero": r[4], "evento": r[5] or {}}
     ctx = ctr.contexto(catalogo=scat.listar(pool, conta[0]), orcamento=orcamento,
                        modelo={"regras": dados.regras},
                        empresa=emp.obter_dados_empresa(pool, conta[0]))
     doc, faltas = ctr.montar(dados.clausulas, ctx)
-    return JSONResponse({"clausulas": doc, "faltas": faltas,
-                         "exemplo": f"orçamento nº {r[4] or '—'} · {orcamento['cliente'] or ''}"})
+    return JSONResponse({"clausulas": doc, "faltas": faltas, "exemplo": exemplo})
 
 
 class OrcDelIn(BaseModel):
@@ -1343,13 +1376,24 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 {# Contrato de locação: só existe no nicho de eventos. O gate de verdade está nas
    rotas (ver _conta_evento) — esconder o card não impede um POST direto. #}
 <div class="card" id="ct-card">
-  <h2 style="margin-top:0">Contrato de locação</h2>
-  <p class="mut" style="margin-top:0;font-size:.86rem">
-    As cláusulas são suas — escreva como quiser. Onde entra um valor, use um
-    <b style="color:var(--verde-claro)">campo</b>: ele é preenchido na hora com o preço do
-    catálogo e os dados do orçamento, então o contrato nunca diz um número diferente da proposta.
-  </p>
-  <div id="ct-box"><p class="mut">Carregando...</p></div>
+  {# Cabeçalho clicável INTEIRO, não só a seta: alvo de 12px no celular é o que
+     faz o dono achar que a tela travou. #}
+  <div id="ct-cab" style="display:flex;align-items:center;gap:.6rem;cursor:pointer;user-select:none">
+    <span id="ct-seta" style="color:var(--mut);font-size:.85rem;transition:transform .18s">▸</span>
+    <div style="min-width:0">
+      <div style="font-weight:700;font-size:1rem">Contrato de locação</div>
+      <div id="ct-resumo" class="mut" style="font-size:.78rem;margin-top:.1rem">Carregando...</div>
+    </div>
+    <div id="ct-selo" style="margin-left:auto;flex-shrink:0"></div>
+  </div>
+  <div id="ct-corpo" style="display:none;margin-top:.85rem;padding-top:.85rem;border-top:1px solid var(--borda)">
+    <p class="mut" style="margin-top:0;font-size:.86rem">
+      As cláusulas são suas — escreva como quiser. Onde entra um valor, use um
+      <b style="color:var(--verde-claro)">campo</b>: ele é preenchido na hora com o preço do
+      catálogo e os dados do orçamento, então o contrato nunca diz um número diferente da proposta.
+    </p>
+    <div id="ct-box"><p class="mut">Carregando...</p></div>
+  </div>
 </div>
 {% endif %}
 </div>
@@ -2258,6 +2302,22 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   var ctBox=document.getElementById('ct-box');
   if(ctBox){ (function(){
     var CAMPOS=[], REGRAS={}, ultimo=null;   // ultimo = textarea que teve foco
+    var corpo=document.getElementById('ct-corpo'), seta=document.getElementById('ct-seta');
+    var LEMBRA='zaq_ct_aberto';
+
+    // Recolhido é o estado normal: o contrato se escreve uma vez, e esta é a
+    // tela do DIA A DIA (montar orçamento, ver o funil). Duas exceções, e as
+    // duas são sobre não esconder trabalho de quem tem trabalho a fazer:
+    // quem NUNCA configurou precisa achar isto sem procurar a seta, e quem
+    // abriu nesta sessão está mexendo agora — recolher a cada F5 seria briga.
+    function abrir(v){
+      corpo.style.display = v ? 'block' : 'none';
+      seta.style.transform = v ? 'rotate(90deg)' : '';
+      try{ v ? localStorage.setItem(LEMBRA,'1') : localStorage.removeItem(LEMBRA); }catch(e){}
+    }
+    document.getElementById('ct-cab').addEventListener('click',function(){
+      abrir(corpo.style.display==='none');
+    });
 
     function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){
       return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
@@ -2312,8 +2372,26 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       reagenda_dias:'Remarcar com (dias)',reagenda_prazo:'Nova data em até (dias)',
       retirada_horas:'Retirar materiais (h)',acesso_montagem:'Montagem a partir de'};
 
+    // O resumo do card fechado. Responde "está no ar e é o meu?" sem abrir —
+    // e o selo âmbar denuncia o campo sem valor, que é o único erro deste fluxo
+    // que estrearia na frente do cliente, dentro do contrato dele.
+    function resumir(d){
+      var r=d.resumo||{}, res=document.getElementById('ct-resumo'), selo=document.getElementById('ct-selo');
+      if(d.novo){
+        res.textContent='Ainda não configurado — comece pelo modelo abaixo.';
+        selo.innerHTML=''; return;
+      }
+      res.textContent=(r.n||0)+' cláusula'+((r.n||0)===1?'':'s')
+        +(r.em?' · alterado em '+r.em:'')+(r.por?' por '+r.por:'');
+      var f=(r.faltas||[]).length;
+      selo.innerHTML = f
+        ? '<span style="font-size:.68rem;font-weight:700;background:var(--ambar-fundo);color:var(--amar);border:1px solid var(--ambar-borda);border-radius:5px;padding:.1rem .38rem;white-space:nowrap">⚠ '+f+' campo'+(f===1?'':'s')+' sem valor</span>'
+        : '<span style="font-size:.68rem;font-weight:700;background:var(--neon-fundo);color:var(--verde-claro);border:1px solid var(--neon-borda);border-radius:5px;padding:.1rem .38rem;white-space:nowrap">✓ pronto</span>';
+    }
+
     function desenhar(d){
       CAMPOS=d.campos||[]; REGRAS=d.regras||{};
+      resumir(d);
       ctBox.innerHTML=
         (d.novo?'<p class="mut" style="font-size:.84rem;background:var(--card-2);border:1px solid var(--borda);border-radius:8px;padding:.5rem .7rem">Este é um modelo inicial de contrato de locação. Ajuste ao que a sua empresa pratica e salve.</p>':'')
         +'<div id="ct-lista"></div>'
@@ -2374,6 +2452,13 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
           b.textContent=t;
           if(!res.ok){msg('<p style="color:var(--verm);font-size:.85rem">'+esc((res.d&&res.d.erro)||'Não consegui salvar.')+'</p>');return;}
           msg('<p style="color:var(--verde-claro);font-size:.85rem">✓ Contrato salvo — '+res.d.clausulas+' cláusulas. Vale para os próximos contratos; os já assinados não mudam.</p>');
+          // Recolhe depois de mostrar a confirmação: o trabalho acabou, e deixar
+          // aberto obriga a fechar à mão. Relê pra o resumo (e o selo de falta)
+          // refletirem o que ACABOU de ser salvo.
+          setTimeout(function(){
+            fetch('/painel/servicos/contrato').then(function(r){return r.json();})
+              .then(function(d){resumir(d);abrir(false);}).catch(function(){abrir(false);});
+          }, 1600);
         }).catch(function(){b.textContent=t;msg('<p style="color:var(--verm);font-size:.85rem">Erro de conexão.</p>');});
     }
 
@@ -2407,8 +2492,16 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     }
 
     fetch('/painel/servicos/contrato').then(function(r){return r.json();})
-      .then(desenhar)
-      .catch(function(){ctBox.innerHTML='<p class="mut">Erro ao carregar o contrato.</p>';});
+      .then(function(d){
+        desenhar(d);
+        var lembrado=false;
+        try{ lembrado = localStorage.getItem(LEMBRA)==='1'; }catch(e){}
+        abrir(!!d.novo || lembrado);
+      })
+      .catch(function(){
+        document.getElementById('ct-resumo').textContent='Erro ao carregar.';
+        ctBox.innerHTML='<p class="mut">Erro ao carregar o contrato.</p>';
+      });
   })(); }
 
   carregarCatalogo(false).then(function(){

@@ -3342,12 +3342,6 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   </div>
 
   <style>
-    .emp-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:.55rem;margin-top:1rem}
-    /* card pequeno: mata o padding:2rem do .card base (era o que apertava e vazava o valor) */
-    .emp-kpis>.card{margin:0;min-width:0;padding:12px 13px;border-radius:12px}
-    .emp-kpis .rot{font-size:.72rem;color:var(--txt-mut);font-weight:600}
-    .emp-kpis .val{font-size:clamp(.92rem,3.4vw,1.2rem);font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em;line-height:1.15;overflow-wrap:anywhere;margin:2px 0}
-    @media (max-width:430px){.emp-kpis{grid-template-columns:1fr 1fr}}
     /* forms de adicionar (título/funcionário): colapsam no mobile pra não vazar */
     @media (max-width:560px){
       .emp-form{grid-template-columns:1fr 1fr !important}
@@ -3356,7 +3350,10 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   </style>
 </div>
 
-{% include "dash_bloco" %}
+{# O bloco "Visão do negócio" (dash_bloco) NÃO entra aqui: ele já é a tela do /painel,
+   e ter os mesmos KPIs/funil/fluxo nos dois lugares era pura duplicação. O financeiro
+   próprio da Empresa é o card "DRE do mês" mais abaixo, que é mais detalhado (estrutura
+   do plano de contas + quebra por centro de custo). #}
 
 <style>
   .sec-pc>summary{list-style:none;cursor:pointer;display:flex;justify-content:space-between;align-items:center;font-weight:620;font-size:1rem;gap:.5rem}
@@ -5574,8 +5571,10 @@ _HOLERITE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 
 
 # Bloco "Visão do negócio" (KPIs + entradas×saídas + funil + fluxo projetado).
-# Partial compartilhado entre /painel e /painel/empresa — a fonte única do dash.
-# Só renderiza se `dash` vier no contexto (senão fica vazio).
+# Partial de UMA tela só: o /painel. Já foi incluído também no /painel/empresa, e o
+# resultado era a mesma tela com os mesmos números aparecendo duas vezes no app — não
+# devolva o include sem ter um motivo novo. Só renderiza se `dash` vier no contexto
+# (senão fica vazio).
 _DASH_BLOCO = """<style>
 .dash-eyebrow{font-size:.72rem;text-transform:uppercase;letter-spacing:.09em;color:var(--txt-mut);font-weight:650;margin:0 0 12px}
 .dash-div{height:1px;background:var(--borda);margin:18px 0}
@@ -8792,10 +8791,12 @@ def painel_empresa(request: Request):
                        nichos_lista=_nichos.lista_nichos(), eh_fornecedor=bool(conta[8]),
                        identidade=emp.obter_identidade(pool, conta[0]), margem_alvo=60.0)
     hoje = _date.today()
-    # Dashboard "Visão do negócio" (o mesmo do /painel) agora no topo da Empresa.
-    # Reaproveita res/fluxo/dre já calculados dentro dele (uma computação só).
-    dash = _painel_dashboard(pool, conta, vende_servico=bool(conta[14]))
-    res, fluxo, dre = dash["res"], dash["fluxo"], dash["dre"]
+    # Só o DRE, não o dashboard inteiro. Esta tela já mostrou o bloco "Visão do negócio"
+    # do /painel no topo — duplicata da mesma tela — e junto vinha o custo do
+    # _painel_dashboard completo (resumo de títulos, fluxo de 4 semanas, MRR e a query do
+    # funil de orçamentos) só pra aproveitar o `dre` de dentro dele. Sem o bloco, o resto
+    # não tem consumidor: o único que a Empresa usa é este.
+    dre = emp.dre_mes(pool, conta[0], hoje.year, hoje.month)
     # Plano de contas (árvore + liga/desliga), centros de custo e DRE por centro.
     # Tolerante: se a migração 132 ainda não rodou, as seções ficam vazias.
     from finance import plano_contas as _pc
@@ -8831,7 +8832,7 @@ def painel_empresa(request: Request):
                        "on n.id=ct.nicho_id where ct.id=%s", (conta[0],)).fetchone()
     rotulo_receber = _nichos.rotulo_receber(_r[0] if _r else "")
     return _render("empresa", request, empresa_nome=conta[2], empresa_doc=doc,
-                   dash=dash, res=res, fluxo=fluxo, dre=dre, titulos=titulos,
+                   dre=dre, titulos=titulos,
                    folha=folha, clientes_lista=clientes_lista, carteira=carteira,
                    rotulo_receber=rotulo_receber, tem_pj=True,
                    plano_arvore=plano_arvore, centros=centros, dre_centro=dre_centro,

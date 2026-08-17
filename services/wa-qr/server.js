@@ -474,6 +474,22 @@ function socketAtual (s, sock) {
   return !!sock && !sock._descartado && !!s && s.sock === sock
 }
 
+// Sessão de pé com o aluguel de outro (ou de ninguém).
+//
+// Trava e socket podem sair de sincronia, e quando saem ninguém conserta: a trava só
+// é pega no iniciarSessao, e nesse ponto a sessão já está de pé. Foi o que prendeu a
+// conta 35 em 17/08 — 440 no socket, o handler solta o aluguel, 1,5s depois a sessão
+// reconecta e fica trabalhando SEM trava. Ficou 45 minutos assim, e o pior nem foi
+// ficar desprotegida: o ramo do silêncio do vigia começa com "a trava não é minha,
+// não mexo", então a conta ficou MUDA e o resgate se recusou a agir. Conectada,
+// sem entregar nada, e sem ninguém para socorrer.
+//
+// Reconciliar é do vigia mesmo: ele já cuida de sessão fora do lugar, roda de minuto
+// em minuto e nunca fala por conta que não seja dele.
+function sessaoSemTrava (s, seguraATrava) {
+  return !!(s && s.sock && s.status === 'conectado' && !seguraATrava)
+}
+
 // Levou 440: pode SOLTAR o aluguel da conta?
 //
 // Só se não houver uma encarnação nossa subindo agora. Com iniciarSessao em curso, o
@@ -681,6 +697,30 @@ async function vigiarSessoes () {
         log.error({ contaId, e: String(e) }, 'vigia: retomar a órfã falhou — tenta na próxima')
       }
       continue
+    }
+    // Conectada e sem o aluguel: retoma ANTES de qualquer outra checagem, porque é
+    // a trava que destranca o resto (o ramo do silêncio abaixo desiste de toda conta
+    // que não é nossa). `semTrava` exclui o modo degradado — sem a tabela o `segura`
+    // devolve false pra todo mundo, e aí não há nada a reconciliar.
+    if (!trava.semTrava(contaId) && sessaoSemTrava(s, trava.segura(contaId))) {
+      let voltou = null
+      try {
+        voltou = await trava.pegar(contaId)
+      } catch (e) {
+        // banco fora do ar: não dá pra afirmar nada sobre o aluguel, então não mexe
+        log.warn({ contaId, e: String(e) }, 'vigia: não consegui conferir o aluguel — deixo como está')
+      }
+      if (voltou === true) {
+        log.warn({ contaId }, 'vigia: sessão estava conectada SEM trava — aluguel retomado')
+      } else if (voltou === false) {
+        // A conta é de outra instância AGORA e nós temos socket vivo nela. Não largo
+        // o socket aqui de propósito: derrubar sessão de cliente por conta de uma
+        // leitura de tabela é grave demais pra este ponto, e quem cuida de perder o
+        // aluguel de verdade é o batimento da trava (aoPerder). Aqui o dever é
+        // GRITAR, porque duas pontas na mesma credencial é a guerra de 440.
+        log.error({ contaId },
+          'vigia: conectada e a conta é de OUTRA instância — dois na mesma credencial')
+      }
     }
     if (!sessaoMuda(s, agora, MUDO_LIMITE_MS)) continue
     // Sessão que não é NOSSA não se religa. Com a trava por conta (sessao-lock.js),
@@ -2428,4 +2468,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

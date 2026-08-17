@@ -40,9 +40,15 @@ def pool():
     init_schema(p)
     with p.connection() as c:
         # conversas referencia prospeccao(id) — entra só o alvo da FK, mesma manha
-        # do test_wa_qr_contatos.
+        # do test_wa_qr_contatos. `prospeccao_atividades` vem junto porque a 080
+        # a referencia: sem ela o schema não sobe num banco VAZIO (local passava
+        # só porque outro módulo de teste já havia criado a tabela ali).
         c.execute("""create table if not exists prospeccao (
                        id bigserial primary key, conta_id bigint)""")
+        c.execute("""create table if not exists prospeccao_atividades (
+                       id bigserial primary key, prospeccao_id bigint, tipo text,
+                       membro_id bigint, descricao text,
+                       criado_em timestamptz default now())""")
         for mig in ("080_comunicacao_omnichannel.sql", "081_canais_config.sql",
                     "096_whatsapp_cloud.sql", "140_conversa_contato_nome.sql",
                     "141_wa_contatos.sql", "165_canal_desconectado_em.sql"):

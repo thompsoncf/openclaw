@@ -406,6 +406,19 @@ def test_pendentes_conversa_nunca_respondida_conta_tudo(pool):
     assert por_id[sem_conversa] == 0      # lead sem conversa não inventa pendência
 
 
+def test_shell_leva_o_retorno_visual_de_espera():
+    """O app é form + redirect: todo toque é uma navegação inteira. O que faltava era
+    ele CONTAR isso. Estas peças precisam existir no shell de toda tela."""
+    from web import painel_cockpit as pc
+    html = pc._page("x", "<div>y</div>").body.decode()
+    assert "class=prog id=prog" in html          # o fio de progresso
+    assert "form.composer" in html               # o enviar otimista
+    # o valor tem que migrar pro hidden ANTES de esvaziar o visível, senão o POST
+    # vai com texto vazio — foi o erro que quase passou
+    assert "hid.value=txt" in html and "campo.removeAttribute('name')" in html
+    assert ".tabs a:active" in pc._CSS           # resposta ao toque, sem rede e sem JS
+
+
 def test_aba_fila_mostra_o_numero_em_todas_as_telas():
     """O selo na aba é o que dá a contagem no ANDROID, onde setAppBadge não existe.
     Ele tem que estar em toda tela do vendedor — o vendedor está na Agenda e vê que

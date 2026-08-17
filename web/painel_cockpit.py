@@ -338,6 +338,25 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .bub.out{align-self:flex-end;background:#0A5C49;border-bottom-right-radius:4px}
 .bub.ia{align-self:flex-end;background:#1a1226;border:1px solid #3a2b52;border-bottom-right-radius:4px}
 .bub .who{font-size:.64rem;color:var(--text-faint);margin-bottom:.15rem}
+/* a mensagem que já está na tela mas ainda não voltou do servidor */
+.bub.voando{opacity:.55}
+.bub.voando .tick{display:block;font-family:var(--mono);font-size:.6rem;
+  color:var(--text-faint);margin-top:.2rem}
+.girando{display:block;width:15px;height:15px;margin:0 auto;border:2px solid rgba(0,0,0,.2);
+  border-top-color:var(--ink);border-radius:50%;animation:gira .6s linear infinite}
+@keyframes gira{to{transform:rotate(360deg)}}
+/* fio de progresso: a única coisa na tela que diz "estou indo buscar". Fica no
+   topo do .wrap, acima do cabeçalho, e some junto com o documento. */
+/* o containing block do absoluto é a caixa de PADDING do .wrap, então top:0 cairia
+   atrás da ilha dinâmica — o inset põe o fio logo abaixo da barra de status */
+.prog{position:absolute;top:env(safe-area-inset-top,0px);left:0;height:2.5px;width:0;
+  background:var(--neon);box-shadow:0 0 8px var(--neon);opacity:0;z-index:9;pointer-events:none}
+.prog.on{opacity:1}
+@media (prefers-reduced-motion:reduce){
+  .prog{transition:none!important}
+  .tabs .ic{transition:none}
+  .girando{animation-duration:1.6s}
+}
 .aviso{margin:.2rem 0;padding:.55rem .7rem;border-radius:11px;font-size:.78rem;text-align:center;
   background:var(--surface);border:1px solid var(--line);color:var(--text-dim)}
 .rodape{flex-shrink:0;border-top:1px solid var(--line);background:var(--bg);padding:.7rem 1.1rem;
@@ -399,6 +418,12 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .tabs a{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:.5rem 0 .45rem;
   color:var(--text-faint);font-size:.62rem;position:relative}
 .tabs a.on{color:var(--neon)}
+/* O toque tinha eco em card (.lead:active) e em nada mais: tocar numa aba não
+   mudava um pixel até a página nova chegar, e em 4G isso é meio segundo de app
+   que parece morto. Isto responde em 0 ms, sem rede e sem JS. */
+.tabs a:active{background:var(--neon-fraco)}
+.tabs a:active .ic{transform:scale(.88)}
+.tabs .ic{transition:transform .09s ease-out}
 /* o número em cima do ícone da aba. É o que dá a contagem no Android, onde a API
    de badge do ícone do app não existe — e serve de reforço no iOS. Fica absoluto
    pra não empurrar o ícone nem mudar a altura da barra. */
@@ -587,11 +612,83 @@ def _page(title: str, corpo: str) -> HTMLResponse:
         "<meta name='apple-mobile-web-app-capable' content=yes>"
         "<meta name='apple-mobile-web-app-status-bar-style' content='black-translucent'>"
         f"<title>{esc(title)} · Zaq</title>{_CSS}</head><body>{_ICONES}"
-        f"<div class=wrap><div class=glow></div>{corpo}</div>"
+        f"<div class=wrap><div class=glow></div><i class=prog id=prog></i>{corpo}</div>"
         "<script>if('serviceWorker' in navigator)"
         "navigator.serviceWorker.register('/cockpit/sw.js',{scope:'/cockpit'})"
         ".catch(function(){});</script>"
+        + _ESPERA_JS +
         "</body></html>")
+
+
+# O app é form + redirect: todo toque numa aba, num card ou no enviar é uma
+# navegação inteira, com ida ao servidor. Isso não vai mudar — é o que mantém o
+# app simples e funcionando sem JS. O que estava errado é que ele não CONTAVA
+# nada nesse meio tempo, e silêncio de sistema o usuário lê como falha.
+#
+# Nada aqui altera o que é enviado nem para onde: sem JS, tudo funciona como
+# antes. É só o app parando de esconder que está trabalhando.
+_ESPERA_JS = """<script>(function(){
+  var prog=document.getElementById('prog'),t=null;
+  function corre(){
+    if(!prog)return;
+    clearTimeout(t);
+    prog.className='prog on';prog.style.transition='none';prog.style.width='0';
+    requestAnimationFrame(function(){
+      // 90% em 2,4s e para: chegar a 100% antes da página prometeria uma
+      // conclusão que ainda não aconteceu. O resto some junto com o documento.
+      prog.style.transition='width 2.4s cubic-bezier(.15,.75,.3,1)';
+      prog.style.width='90%';
+    });
+  }
+  function para(){ if(prog){clearTimeout(t);prog.className='prog';prog.style.width='0';} }
+
+  document.addEventListener('click',function(e){
+    var a=e.target.closest&&e.target.closest('a');
+    if(!a||e.defaultPrevented||e.metaKey||e.ctrlKey||a.target==='_blank')return;
+    var h=a.getAttribute('href')||'';
+    // só navegação DENTRO do app: âncora (#acoes, #fechar), tel: e wa.me ficam de fora
+    if(h.charAt(0)!=='/'||h.indexOf('/cockpit')!==0)return;
+    var abas=a.parentNode&&a.parentNode.classList&&a.parentNode.classList.contains('tabs');
+    if(abas){
+      // a aba destino acende AGORA, antes de qualquer rede
+      var irmaos=a.parentNode.querySelectorAll('a');
+      for(var i=0;i<irmaos.length;i++){irmaos[i].classList.remove('on');}
+      a.classList.add('on');
+    }
+    corre();
+  },true);
+
+  // voltar pelo histórico devolve a página do cache com a barra congelada no meio
+  window.addEventListener('pageshow',para);
+
+  // ---- o enviar ----
+  // A bolha entra na hora e o campo esvazia. O campo CHEIO depois de tocar em
+  // enviar é o sinal universal de "não foi" — e aqui a dúvida não é sobre uma
+  // tela, é sobre o cliente ter recebido.
+  var f=document.querySelector('form.composer');
+  if(f) f.addEventListener('submit',function(){
+    var campo=f.querySelector('input[name=texto]');
+    if(!campo)return;
+    var txt=(campo.value||'').trim();
+    if(!txt)return;
+    // o valor migra pra um hidden ANTES de esvaziar o visível: limpar o campo
+    // que carrega o name mandaria texto vazio pro servidor.
+    var hid=document.createElement('input');
+    hid.type='hidden';hid.name='texto';hid.value=txt;
+    f.appendChild(hid);campo.removeAttribute('name');campo.value='';campo.blur();
+    var b=f.querySelector('button');
+    if(b){b.disabled=true;b.innerHTML='<i class=girando></i>';}
+    var chat=document.querySelector('.chat');
+    if(chat){
+      var d=document.createElement('div');
+      d.className='bub out voando';
+      d.textContent=txt;
+      var s=document.createElement('span');s.className='tick';s.textContent='enviando…';
+      d.appendChild(s);chat.appendChild(d);chat.scrollTop=chat.scrollHeight;
+    }
+    corre();
+  });
+})();</script>"""
 
 
 def _brl(centavos, *, centavos_visiveis: bool = False) -> str:

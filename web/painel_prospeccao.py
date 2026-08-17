@@ -4620,7 +4620,7 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                       to_char(a.aberto_em - interval '3 hours','DD/MM HH24:MI'),
                       coalesce(a.wa_status,''),
                       coalesce(nullif(trim(p.whatsapp),''), nullif(trim(p.telefone),'')),
-                      coalesce(a.wa_erro_msg,'')
+                      coalesce(a.wa_erro_msg,''), coalesce(a.wa_erro_codigo,'')
                  from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
                 where a.campanha_id=%s order by a.ultima_msg_em desc nulls last, a.id desc limit 200""",
             (camp_id,)).fetchall()
@@ -4715,7 +4715,11 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
     leads_l = [{"empresa": r[0], "email": r[1], "status": r[2], "passo": r[3],
                 "prox": r[4], "ult": r[5], "pid": r[6], "rot": _ALVO_ROT.get(r[2], r[2]),
                 "abriu": r[7], "aberto": r[8], "wa": r[9], "wa_rot": _WA_ROT.get(r[9], ""),
-                "fone": r[10] or "", "wa_erro": r[11] if r[9] == "erro" else ""}
+                # a falha quase sempre chega por webhook com CÓDIGO e sem texto, e a
+                # ficha só lia a mensagem — o motivo estava gravado e a tela não usava
+                "fone": r[10] or "",
+                "wa_erro": (_prospec_convite.rotulo_erro_alvo(r[12], r[11])
+                            if r[9] == "erro" else "")}
                for r in leads]
     from finance import email_inbound as _ein_mod
     email_principal = _ein_mod.remetente_conta(get_pool(), ctx["conta_id"], "email") or ""

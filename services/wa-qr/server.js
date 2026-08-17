@@ -2319,6 +2319,38 @@ const servidor = http.createServer(async (req, res) => {
 // exatamente a disputa que a trava veio impedir — e só depois solta os aluguéis,
 // pra instância nova assumir em segundos em vez de esperar o prazo vencer.
 let saindo = false
+
+// Descarrega a fila do espelho de log no banco, com teto de tempo.
+//
+// Existe por causa de um ponto cego: o log vai pra uma fila em memória gravada de
+// 2 em 2s, e o encerrar() terminava em process.exit SEM descarregar. Resultado —
+// conferido na tabela em 17/08/2026 — ZERO linha 'encerrando%' ou 'trava: soltei
+// tudo%' em toda a história do serviço. Não dava pra saber se o SIGTERM sequer
+// chegava, e era exatamente essa a pergunta num deploy que deixou as três contas
+// esperando o prazo da trava vencer.
+//
+// gravarLogsPendentes leva LOG_DB_LOTE por vez, então repete até esvaziar. O teto
+// é obrigatório: estamos saindo, e banco lento aqui não pode segurar o processo.
+async function descarregarLogs (tetoMs) {
+  if (!LOG_DB) return
+  const limite = Date.now() + (tetoMs || 2000)
+  while (_logFila.length && Date.now() < limite) {
+    try {
+      await Promise.race([
+        gravarLogsPendentes(),
+        new Promise((r) => setTimeout(r, Math.max(200, limite - Date.now())))
+      ])
+    } catch (_) { return }
+  }
+}
+
+// Quanto o encerramento pode demorar antes de sair à força. O Render dá ~30s entre
+// o SIGTERM e o SIGKILL; os 5s de antes eram um limite NOSSO, mais apertado que o
+// dele, e cobriam o teardown dos sockets MAIS o soltarTudo — numa lentidão do
+// pooler era o release que ficava pra trás, e aí a conta só voltava quando o prazo
+// da trava vencesse. 15s é folgado e ainda sai bem antes do SIGKILL.
+const ENCERRA_TETO_MS = parseInt(process.env.WA_QR_ENCERRA_TETO_MS || '15000', 10)
+
 async function encerrar (sinal) {
   if (saindo) return
   saindo = true
@@ -2328,9 +2360,14 @@ async function encerrar (sinal) {
   // recuperável (o aluguel vence sozinho) — ficar preso não é.
   const forca = setTimeout(() => {
     log.warn({ sinal }, 'encerrando: demorou demais — saindo à força')
-    process.exit(0)
-  }, 5000)
+    // best-effort: sem isto o aviso de "saí à força" também se perderia, e ele é
+    // justamente o que explica um encerramento pela metade
+    descarregarLogs(1500).catch(() => {}).then(() => process.exit(0))
+  }, ENCERRA_TETO_MS)
   if (forca.unref) forca.unref()
+  // Grava JÁ que o encerramento começou. Se daqui pra baixo travar tudo, esta linha
+  // sozinha responde a pergunta que a gente não conseguia responder: o sinal chegou.
+  await descarregarLogs(2000)
   for (const [contaId, s] of sessoes) {
     try { descartarSocket(s.sock, contaId, 'encerrando'); pararTimersDaAgenda(s) } catch (_) {}
   }
@@ -2338,9 +2375,13 @@ async function encerrar (sinal) {
   tentativasDeTrava.clear()
   try { await trava.soltarTudo() } catch (e) { log.warn({ e: String(e) }, 'encerrando: soltarTudo falhou') }
   try { servidor.close() } catch (_) {}
+  // 'pronto' e o descarregar vêm ANTES do pool.end(): o espelho do log usa o mesmo
+  // pool, e do jeito antigo a última linha era escrita num pool já fechado — ou
+  // seja, nunca chegava ao banco nem que a fila fosse descarregada.
+  log.info({ sinal }, 'encerrando: pronto')
+  await descarregarLogs(3000)
   try { await pool.end() } catch (_) {}
   clearTimeout(forca)
-  log.info({ sinal }, 'encerrando: pronto')
   process.exit(0)
 }
 

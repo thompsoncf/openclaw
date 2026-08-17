@@ -124,8 +124,20 @@ services:
   # sessões a cada deploy. Quem garante uma só agora é a trava de sessão por
   # conta (tabela wa_qr_sessao_lock, migração 157, ver services/wa-qr/README.md):
   # a instância nova espera a velha soltar no SIGTERM em vez de roubar a sessão.
-  #   Root Directory: services/wa-qr · Build: npm install · Start: npm start
+  #
+  # E O SIGTERM PRECISA CHEGAR NO NODE. Com `npm start`, quem fica de PID 1 é o
+  # npm e o node é filho dele — o sinal morre no meio do caminho e o encerrar()
+  # do server.js (que solta os aluguéis) nunca roda. O sintoma medido em
+  # 17/08/2026: ZERO linha 'encerrando%' na wa_qr_log em toda a história do
+  # serviço, e a trava da instância que saía ficando pra trás até vencer por
+  # prazo — ~70s de conta parada a cada deploy, esperando o TTL. Por isso o
+  # start chama o node DIRETO (mesma linha do "start" do package.json).
+  #   Root Directory: services/wa-qr · Build: npm install
+  #   Start: node --max-old-space-size=320 server.js
   #   Health check path: /saude
+  # ATENÇÃO: este arquivo é documentação (o serviço é gerenciado manual no
+  # Render). Mudar o startCommand AQUI não muda nada lá — tem que editar o campo
+  # "Start Command" no painel do serviço zaq-waqr.
   - type: web
     # No Render este servico se chama "zaq-waqr" (nao "openclaw-waqr"). O nome
     # aqui ficou pra tras; como o arquivo nao e' Blueprint, e' so' documentacao
@@ -136,7 +148,9 @@ services:
     numInstances: 1
     rootDir: services/wa-qr
     buildCommand: npm install
-    startCommand: npm start
+    # node direto, sem o npm no meio: é o que faz o SIGTERM chegar no processo
+    # que sabe soltar as travas (ver o bloco de comentário acima)
+    startCommand: node --max-old-space-size=320 server.js
     healthCheckPath: /saude
     envVars:
       - key: DATABASE_URL

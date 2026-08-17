@@ -37,6 +37,7 @@ process.env.WA_QR_SHARED_SECRET = process.env.WA_QR_SHARED_SECRET || 'teste'
 const CONTA = 35
 const preparo = new Pool({ connectionString: URL })
 const MIGRACAO = path.join(__dirname, '..', '..', 'db', 'migracoes', '157_wa_qr_sessao_lock.sql')
+const MIGRACAO_LOG = path.join(__dirname, '..', '..', 'db', 'migracoes', '158_wa_qr_log.sql')
 
 const ok = []; const bad = []
 const t = (nome, cond) => (cond ? ok : bad).push(nome)
@@ -48,6 +49,10 @@ const t = (nome, cond) => (cond ? ok : bad).push(nome)
   await preparo.query('create table contas (id bigserial primary key, nome text)')
   await preparo.query('insert into contas (id, nome) values ($1,$2)', [CONTA, 'Conta 35'])
   await preparo.query(fs.readFileSync(MIGRACAO, 'utf8'))
+  // o espelho do log entra aqui porque o encerramento tem que ESCREVER nele — ver
+  // a conferência do 'encerrando%' lá embaixo
+  await preparo.query('drop table if exists wa_qr_log cascade')
+  await preparo.query(fs.readFileSync(MIGRACAO_LOG, 'utf8'))
   // credencial pareada de mentira: se o portão falhar, o iniciarSessao passa
   // daqui e tenta abrir socket de verdade — e o teste denuncia
   await preparo.query(`create table wa_qr_auth (
@@ -103,6 +108,22 @@ const t = (nome, cond) => (cond ? ok : bad).push(nome)
   const restou = (await preparo.query(
     'select count(*)::int n from wa_qr_sessao_lock where conta_id=$1', [CONTA])).rows[0].n
   t('SIGTERM solta o aluguel ao sair', restou === 0)
+
+  // O log do encerramento tem que CHEGAR no banco.
+  //
+  // O espelho do log é uma fila em memória gravada de 2 em 2s, e o encerrar()
+  // terminava em process.exit sem descarregar. Conferido na tabela de produção em
+  // 17/08/2026: ZERO linha 'encerrando%' em toda a história do serviço — então,
+  // quando um deploy deixou as três contas esperando o prazo da trava vencer, não
+  // havia como saber se o SIGTERM tinha sequer chegado. Diagnóstico não pode
+  // depender de sorte de timing.
+  const logs = (await preparo.query(
+    "select msg from wa_qr_log where msg like 'encerrando%' order by criado_em")).rows.map((r) => r.msg)
+  t('o log do encerramento chega no banco (não morre na fila)', logs.length > 0)
+  t('e registra que o sinal chegou',
+    logs.some((m) => m.startsWith('encerrando: fechando sockets')))
+  t('e registra que terminou — a última linha não é escrita em pool fechado',
+    logs.some((m) => m === 'encerrando: pronto'))
 
   ok.forEach((n) => console.log('  ok   ' + n))
   bad.forEach((n) => console.log('  FALHOU  ' + n))

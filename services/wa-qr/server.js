@@ -2212,13 +2212,22 @@ const servidor = http.createServer(async (req, res) => {
         // mandar desligar.
         clearTimeout(tentativasDeTrava.get(contaId)); tentativasDeTrava.delete(contaId)
         await trava.soltar(contaId)
-        // Desconectar apaga o histórico de chat desse canal SEMPRE. Antes isso só
-        // acontecia quando havia socket vivo na memória (o logout gerava um 401 que
-        // disparava a limpeza por tabela); depois de um restart do serviço o MESMO
-        // botão não apagava nada — o resultado dependia de o serviço ter reiniciado
-        // ou não. O LEAD em si continua existindo: só some a aba de conversa.
+        // Avisa o app que esta conta deslogou, pra ele desligar o canal e carimbar
+        // o marco da retenção (`canais_config.desconectado_em`, migração 165).
+        //
+        // NÃO APAGA HISTÓRICO — e este comentário já disse o contrário por um bom
+        // tempo. Desconectar apagava tudo até o PR #404, que removeu a limpeza:
+        // desconectar acontece sem querer (trocou de celular, o pareamento caiu),
+        // e o histórico com os leads é o ativo comercial da empresa. O comentário
+        // e o log daqui ficaram para trás afirmando que a limpeza acontecia, o que
+        // manda quem depura pro lado errado — em 17/08 a conta 23 tinha 11.275
+        // mensagens anteriores ao "sair" ainda no banco, com este log dizendo
+        // "histórico limpo".
+        //
+        // Apagar agora tem duas portas explícitas, as duas no app: o botão
+        // "Apagar histórico" na aba Canais, e a faxina dos 30 dias.
         await avisarDeslogado(contaId)
-        log.info({ contaId }, 'sair: sessão encerrada e histórico de conversa limpo')
+        log.info({ contaId }, 'sair: sessão encerrada (histórico preservado)')
         return json(res, 200, { ok: true })
       }
     }

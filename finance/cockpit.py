@@ -178,9 +178,21 @@ def _conta_membro(c, conta_id, membro_id):
                      (membro_id, conta_id)).fetchone()
 
 
-def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int) -> dict | None:
+def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int,
+                     *, pos_visto: bool = False) -> dict | None:
     """Detalhe de UM lead do vendedor (revalida a posse). Traz a ficha, as etapas do
-    funil da conta e o histórico da conversa. None se não é dele."""
+    funil da conta e o histórico da conversa. None se não é dele.
+
+    `pos_visto` zera o cooldown do push desta conversa — quem ABRIU está em dia, e a
+    próxima mensagem do cliente deve tocar na hora em vez de esperar a janela de 10
+    min fechar. O cooldown existe pra abafar rajada que ninguém viu, não pra calar
+    novidade depois que o vendedor se pôs em dia; sem isso, quanto mais rápido ele
+    atendia, mais chance tinha de perder a mensagem seguinte.
+
+    Só a tela passa `pos_visto` — o polling de 8s NÃO passa, senão a conversa aberta
+    ficaria zerando o cooldown a cada tique. Resposta da IA também não zera: ela
+    responde ao cliente, não põe o vendedor em dia (é de propósito que difere da
+    bolinha vermelha, que pergunta 'precisa de gente?' em vez de 'a gente viu?')."""
     from web.painel_prospeccao import _carrega_alvo, _etapas
     alvo = _carrega_alvo(pool, conta_id, lead_id)
     if not alvo or alvo.get("vendedor_id") != membro_id:
@@ -190,6 +202,9 @@ def lead_do_vendedor(pool, conta_id: int, membro_id: int, lead_id: int) -> dict 
         cv = c.execute("select id, coalesce(agente_ativo,true) from conversas "
                        "where prospeccao_id=%s and conta_id=%s order by ultima_msg_em desc limit 1",
                        (lead_id, conta_id)).fetchone()
+        if cv and pos_visto:
+            c.execute("update conversas set push_avisado_em=null where id=%s", (cv[0],))
+            c.commit()
         msgs = []
         if cv:
             # 'asc limit 200' pegava as 200 mais ANTIGAS: numa conversa de 395
@@ -266,7 +281,10 @@ def enviar_mensagem(pool, conta_id: int, membro_id: int, lead_id: int, texto: st
                     "Não consegui enviar (a janela de 24h pode ter fechado).")}
         conv = _conversa_id(c, conta_id, lead_id, "whatsapp")
         _add_msg(c, conv, "whatsapp", "out", "humano", texto, membro_id, res.get("sid"))
-        c.execute("update conversas set status='pendente', agente_ativo=false where id=%s", (conv,))
+        # `push_avisado_em=null` zera o cooldown: quem acabou de responder está EM DIA,
+        # e a próxima mensagem do cliente tem que tocar na hora. Ver `pos_visto`.
+        c.execute("update conversas set status='pendente', agente_ativo=false, "
+                  "push_avisado_em=null where id=%s", (conv,))
         c.commit()
     return {"ok": True}
 

@@ -492,6 +492,78 @@ def test_avisar_mensagem_rajada_gera_um_aviso_so(pool, monkeypatch):
     assert ck.avisar_mensagem(pool, conta, lead, conv, "Ainda tem vaga?") == 1
 
 
+def test_cooldown_zera_quando_o_vendedor_abre_a_conversa(pool, monkeypatch):
+    """O caso real: cliente manda, push toca, vendedor ABRE e lê. Cliente escreve de
+    novo 2 min depois — tem que tocar. Antes ficava mudo até fechar os 10 min, ou
+    seja, quem atendia rápido tinha MAIS chance de perder a mensagem seguinte."""
+    from finance import webpush
+    monkeypatch.setattr(webpush, "configurado", lambda: True)
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="visto@x.com")
+        lead = _lead(c, conta, vend, "Bruna")
+        conv = _conversa(c, conta, lead)
+        _assina(c, conta, vend, "https://push/visto")
+        c.commit()
+    n = []
+    monkeypatch.setattr(webpush, "enviar", lambda sub, dados, ttl=3600: (n.append(1), True)[1])
+
+    assert ck.avisar_mensagem(pool, conta, lead, conv, "Boa tarde") == 1
+    assert ck.avisar_mensagem(pool, conta, lead, conv, "e aí?") == 0      # cooldown
+
+    ck.lead_do_vendedor(pool, conta, vend, lead, pos_visto=True)          # abriu e leu
+    with pool.connection() as c:
+        assert c.execute("select push_avisado_em from conversas where id=%s",
+                         (conv,)).fetchone()[0] is None
+    assert ck.avisar_mensagem(pool, conta, lead, conv, "manda por favor") == 1
+    assert len(n) == 2
+
+
+def test_polling_nao_zera_o_cooldown(pool, monkeypatch):
+    """O polling de 8s da conversa aberta chama o mesmo lead_do_vendedor. Se ele
+    zerasse o cooldown, a janela nunca fecharia e a rajada voltaria a virar rajada
+    de notificação — que é justamente o que o cooldown existe pra impedir."""
+    from finance import webpush
+    monkeypatch.setattr(webpush, "configurado", lambda: True)
+    monkeypatch.setattr(webpush, "enviar", lambda sub, dados, ttl=3600: True)
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="poll@x.com")
+        lead = _lead(c, conta, vend, "Sonja")
+        conv = _conversa(c, conta, lead)
+        _assina(c, conta, vend, "https://push/poll")
+        c.commit()
+
+    assert ck.avisar_mensagem(pool, conta, lead, conv, "oi") == 1
+    ck.lead_do_vendedor(pool, conta, vend, lead)          # sem pos_visto = é o polling
+    with pool.connection() as c:
+        assert c.execute("select push_avisado_em from conversas where id=%s",
+                         (conv,)).fetchone()[0] is not None
+    assert ck.avisar_mensagem(pool, conta, lead, conv, "?") == 0          # segue calado
+
+
+def test_cooldown_zera_quando_o_vendedor_responde(pool, monkeypatch):
+    """Responder é a forma mais forte de estar em dia."""
+    from finance import webpush, whatsapp_out
+    from web import painel_prospeccao as pp
+    monkeypatch.setattr(webpush, "configurado", lambda: True)
+    monkeypatch.setattr(webpush, "enviar", lambda sub, dados, ttl=3600: True)
+    monkeypatch.setattr(whatsapp_out, "enviar", lambda c, ci, num, txt: {"ok": True, "sid": "SM1"})
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="resp@x.com")
+        lead = _lead(c, conta, vend, "Valeria")
+        c.execute("update prospeccao set whatsapp='558611112222' where id=%s", (lead,))
+        conv = _conversa(c, conta, lead)
+        _assina(c, conta, vend, "https://push/resp")
+        c.commit()
+    monkeypatch.setattr(pp, "_conversa_id", lambda c, ci, li, canal: conv)
+
+    assert ck.avisar_mensagem(pool, conta, lead, conv, "Quero orçamento") == 1
+    assert ck.enviar_mensagem(pool, conta, vend, lead, "Já te mando")["ok"] is True
+    with pool.connection() as c:
+        assert c.execute("select push_avisado_em from conversas where id=%s",
+                         (conv,)).fetchone()[0] is None
+    assert ck.avisar_mensagem(pool, conta, lead, conv, "manda por favor") == 1
+
+
 def test_avisar_mensagem_texto_vazio_e_sem_vapid(pool, monkeypatch):
     from finance import webpush
     with pool.connection() as c:

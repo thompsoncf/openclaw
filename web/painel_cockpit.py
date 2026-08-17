@@ -1751,7 +1751,9 @@ def cockpit_lead(request: Request, lead_id: int):
     gestão — em vez de chutar pro /painel/prospeccao, como a versão anterior fazia."""
     sess = _sessao(request)
     if sess:
-        d = ck.lead_do_vendedor(get_pool(), sess[0], sess[1], lead_id)
+        # pos_visto: abrir a conversa põe o vendedor em dia, então o cooldown do push
+        # zera e a próxima mensagem do cliente toca na hora (ver lead_do_vendedor).
+        d = ck.lead_do_vendedor(get_pool(), sess[0], sess[1], lead_id, pos_visto=True)
         if d:
             return _lead_vendedor(request, lead_id, d)
     g = _gerencia(request)

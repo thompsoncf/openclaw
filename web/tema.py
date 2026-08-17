@@ -64,12 +64,31 @@ _TOKENS = """
 
 # As fontes da marca. Sem elas o navegador cai no stack de sistema e a página
 # fica correta mas sem a voz do site — então a tag entra junto dos tokens.
-FONTES = ('<link rel="preconnect" href="https://fonts.googleapis.com">'
-          '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
-          '<link href="https://fonts.googleapis.com/css2?'
-          'family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800'
-          '&family=Inter:wght@400;500;600'
-          '&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">')
+#
+# Servidas por NÓS, não pelo Google. A folha do fonts.googleapis.com era um
+# <link rel=stylesheet> em outro domínio: bloqueia a renderização e cobra DNS +
+# TLS + download de um host que não controlamos antes de a tela pintar. No app
+# do vendedor, aberto em 4G no meio da rua, isso é a maior fatia da abertura —
+# e um service worker não resolve, porque resposta cross-origin vem opaca.
+#
+# São três arquivos, não oito: o Google serve a MESMA fonte variável repetida
+# uma vez por peso (conferido por md5 — 8 URLs, 3 arquivos distintos). Aqui cada
+# família entra uma vez, com a faixa de pesos declarada. 160 KB no total, contra
+# 428 KB do jeito que vinha.
+#
+# `swap` mantém o texto legível desde o primeiro quadro, com a fonte de sistema,
+# e troca quando a nossa chega — a página nunca fica em branco esperando fonte.
+FONTES = ("<style>"
+          "@font-face{font-family:'Bricolage Grotesque';font-style:normal;"
+          "font-weight:200 800;font-stretch:100%;font-display:swap;"
+          "src:url(/estatico/fontes/bricolage.woff2) format('woff2')}"
+          "@font-face{font-family:'Inter';font-style:normal;"
+          "font-weight:100 900;font-display:swap;"
+          "src:url(/estatico/fontes/inter.woff2) format('woff2')}"
+          "@font-face{font-family:'JetBrains Mono';font-style:normal;"
+          "font-weight:100 800;font-display:swap;"
+          "src:url(/estatico/fontes/jetbrains.woff2) format('woff2')}"
+          "</style>")
 
 # Base que todas as telas herdam: título em Bricolage, corpo em Inter, número em
 # mono. Antes cada arquivo repetia — e divergia — na própria regra de body.

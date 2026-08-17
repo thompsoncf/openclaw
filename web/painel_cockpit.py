@@ -39,7 +39,9 @@ comum se o JS não carregar.
 """
 from __future__ import annotations
 
+import hashlib as _hashlib
 import html as _html
+import os as _os
 
 from fastapi import APIRouter, Body, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -598,6 +600,66 @@ def _ic(nome: str, cls: str = "ic") -> str:
     return f'<svg class="{cls}"><use href="#i-{nome}"/></svg>'
 
 
+# A folha saiu de dentro do HTML. Eram 33 KB — 85% do documento — reenviados a
+# cada navegação, e o app é form + redirect: o vendedor troca de tela o tempo
+# todo. Agora o HTML vai com ~6 KB e a folha vem do disco depois da 1ª vez (ver
+# o cache-primeiro no sw.js).
+#
+# A versão sai do CONTEÚDO: mudou o CSS, muda a URL, e o navegador busca a nova
+# sem ninguém precisar lembrar de virar um número à mão.
+_CSS_TEXTO = _CSS[len(_tema.FONTES):].replace("<style>", "", 1).rsplit("</style>", 1)[0]
+_CSS_VER = _hashlib.sha1(_CSS_TEXTO.encode()).hexdigest()[:10]
+
+
+#: (largura, altura, densidade) dos iPhones em uso. O iOS casa o splash por media
+#: query de tamanho CSS + densidade — não por modelo — então é isso que importa.
+#: Aparelho fora da lista simplesmente não recebe splash e volta ao fundo liso,
+#: que é o comportamento de hoje: nada piora.
+_SPLASH = [(375, 812, 3), (390, 844, 3), (393, 852, 3), (402, 874, 3),
+           (414, 896, 2), (428, 926, 3), (430, 932, 3), (440, 956, 3)]
+_SPLASH_DIR = _os.path.join(_os.path.dirname(__file__), "estatico", "splash")
+_splash_cache: dict[str, bytes] = {}
+
+
+def _splash_tags() -> str:
+    """As tags que o iPhone lê pra saber o que mostrar enquanto o app abre.
+
+    O manifest já tem `background_color`, e o Android usa isso com ícone e nome —
+    mas o iOS ignora o manifest e quer `apple-touch-startup-image`, uma imagem em
+    tamanho EXATO por aparelho. Sem elas, o que aparecia era o fundo da marca
+    vazio: a "tela preta" que o vendedor via já era `#0A0F0C`, só que sem nada."""
+    out = []
+    for w, h, d in _SPLASH:
+        media = (f"(device-width:{w}px) and (device-height:{h}px) and "
+                 f"(-webkit-device-pixel-ratio:{d}) and (orientation:portrait)")
+        out.append(f"<link rel='apple-touch-startup-image' media='{media}' "
+                   f"href='{_BASE}/splash/{w}x{h}@{d}.png'>")
+    return "".join(out)
+
+
+@router.get("/cockpit/splash/{nome}.png", include_in_schema=False)
+def cockpit_splash(nome: str):
+    """Nome validado contra a lista, não montado por concatenação: `{nome}.png`
+    com join direto deixaria `../../` sair da pasta."""
+    if nome not in {f"{w}x{h}@{d}" for w, h, d in _SPLASH}:
+        return Response(status_code=404)
+    if nome not in _splash_cache:
+        try:
+            with open(_os.path.join(_SPLASH_DIR, f"{nome}.png"), "rb") as fh:
+                _splash_cache[nome] = fh.read()
+        except OSError:
+            return Response(status_code=404)
+    return Response(_splash_cache[nome], media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=2592000"})
+
+
+@router.get("/cockpit/app.css", include_in_schema=False)
+def cockpit_css():
+    return Response(_CSS_TEXTO, media_type="text/css",
+                    # a URL carrega o hash do conteúdo, então o arquivo é imutável
+                    headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
 # ================================================================== helpers
 def _page(title: str, corpo: str) -> HTMLResponse:
     """O documento. Leva manifest + service worker porque este app é pra instalar
@@ -611,7 +673,14 @@ def _page(title: str, corpo: str) -> HTMLResponse:
         "<link rel='apple-touch-icon' href='/cockpit/icon.svg'>"
         "<meta name='apple-mobile-web-app-capable' content=yes>"
         "<meta name='apple-mobile-web-app-status-bar-style' content='black-translucent'>"
-        f"<title>{esc(title)} · Zaq</title>{_CSS}</head><body>{_ICONES}"
+        + _splash_tags() +
+        # O @font-face fica INLINE de propósito, enquanto a folha grande sai pra
+        # arquivo: se ele morasse no .css externo, o navegador só descobriria as
+        # fontes depois de baixar a folha — uma requisição esperando a outra.
+        # Assim a fonte começa a vir no primeiro quadro.
+        f"<title>{esc(title)} · Zaq</title>{_tema.FONTES}"
+        f"<link rel=stylesheet href='{_BASE}/app.css?v={_CSS_VER}'>"
+        "</head><body>" + _ICONES +
         f"<div class=wrap><div class=glow></div><i class=prog id=prog></i>{corpo}</div>"
         "<script>if('serviceWorker' in navigator)"
         "navigator.serviceWorker.register('/cockpit/sw.js',{scope:'/cockpit'})"
@@ -2619,17 +2688,42 @@ def cockpit_manifest():
 # chave ele voltaria do cache na primeira vez que a rede falhasse — o visual velho
 # reaparecendo sozinho. Chave nova, cache velho descartado no activate.
 _SW = """
-const CACHE='cockpit-v2';
+const CACHE='cockpit-v3';
 self.addEventListener('install',e=>{self.skipWaiting();});
 self.addEventListener('activate',e=>{e.waitUntil(
   caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k))))
     .then(()=>self.clients.claim()));});
+
+// O que é ESTÁTICO e igual em toda tela: a folha, as fontes, o ícone, o splash e
+// o manifest. Antes tudo era rede-primeiro, então o app pagava a viagem completa
+// até pra desenhar o que já tinha em disco.
+// A folha e as fontes têm URL imutável (hash no ?v= / nome fixo), então guardar
+// pra sempre é seguro: conteúdo novo chega com endereço novo.
+const ESTATICO=/^\\/(cockpit\\/(app\\.css|icon\\.svg|splash\\/|manifest\\.webmanifest)|estatico\\/fontes\\/)/;
+
 self.addEventListener('fetch',e=>{
   const r=e.request; if(r.method!=='GET'){return;}
-  e.respondWith(fetch(r).then(res=>{
-    try{const cp=res.clone();caches.open(CACHE).then(c=>c.put(r,cp));}catch(_){}
-    return res;
-  }).catch(()=>caches.match(r)));
+
+  // HTML segue REDE-PRIMEIRO, de propósito: a fila, a conversa e os contadores
+  // mudam a cada minuto, e servir uma tela velha do disco seria pior que esperar.
+  // O cache continua sendo a reserva pra quando a rede falha.
+  if(!ESTATICO.test(new URL(r.url).pathname)){
+    e.respondWith(fetch(r).then(res=>{
+      try{const cp=res.clone();caches.open(CACHE).then(c=>c.put(r,cp));}catch(_){}
+      return res;
+    }).catch(()=>caches.match(r)));
+    return;
+  }
+
+  // Estático: responde do disco NA HORA e revalida por trás (stale-while-
+  // revalidate). A tela nunca espera por isso, e a versão nova entra na próxima.
+  e.respondWith(caches.match(r).then(cacheado=>{
+    const rede=fetch(r).then(res=>{
+      try{const cp=res.clone();caches.open(CACHE).then(c=>c.put(r,cp));}catch(_){}
+      return res;
+    }).catch(()=>cacheado);
+    return cacheado||rede;
+  }));
 });
 self.addEventListener('push',e=>{
   let d={title:'Novo lead',body:'Toque pra atender'};

@@ -406,6 +406,19 @@ def test_pendentes_conversa_nunca_respondida_conta_tudo(pool):
     assert por_id[sem_conversa] == 0      # lead sem conversa não inventa pendência
 
 
+def test_aba_fila_mostra_o_numero_em_todas_as_telas():
+    """O selo na aba é o que dá a contagem no ANDROID, onde setAppBadge não existe.
+    Ele tem que estar em toda tela do vendedor — o vendedor está na Agenda e vê que
+    a fila tem gente esperando, sem entrar."""
+    from web import painel_cockpit as pc
+    for tela in ("fila", "agenda", "orcamentos", "resultado", "perfil"):
+        assert "class=tsel" in pc._abas_vend(tela, 3), tela
+        assert ">3<" in pc._abas_vend(tela, 3)
+    assert "class=tsel" not in pc._abas_vend("fila", 0)    # zerado: sem selo
+    assert ">9+<" in pc._abas_vend("fila", 40)             # não estica a barra
+    assert "class=tsel" not in pc._abas_dono("orcamentos")  # gestor não tem fila
+
+
 def test_total_pendentes_soma_a_carteira_e_ignora_fechados(pool):
     """O número da bolinha do ícone: soma de todas as conversas do vendedor."""
     with pool.connection() as c:

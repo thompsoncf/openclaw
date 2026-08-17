@@ -99,9 +99,21 @@ def _base_leads_sql() -> str:
                p.whatsapp, p.telefone,
                cv.id, coalesce(cv.agente_ativo, true), cv.ultima_msg_em,
                lm.texto, lm.autor,
+               -- quantas mensagens do cliente ficaram SEM RESPOSTA: as que
+               -- chegaram depois da última saída da conversa. É o que vira a
+               -- bolinha vermelha no card. Resposta da IA conta como resposta —
+               -- se o agente já atendeu, não há nada pendente de gente, e o
+               -- vermelho continua raro o bastante pra ser levado a sério.
+               -- (Antes havia aqui um `n_in` de 30 dias que ninguém lia.)
+               -- o corte é por ID, não por criado_em: `now()` no Postgres é o
+               -- início da TRANSAÇÃO, então duas mensagens gravadas na mesma
+               -- transação nascem com o mesmo instante e um `>` por tempo
+               -- descarta as duas. id é serial, sempre crescente e sem empate.
                (select count(*) from mensagens mm
                  where mm.conversa_id=cv.id and mm.direcao='in'
-                   and mm.criado_em > coalesce(cv.criado_em, now()) - interval '30 days') as n_in
+                   and mm.id > coalesce(
+                         (select max(m2.id) from mensagens m2
+                           where m2.conversa_id=cv.id and m2.direcao='out'), 0)) as n_pend
           from prospeccao p
           left join conversas cv on cv.prospeccao_id=p.id and cv.conta_id=p.conta_id
           left join lateral (select texto, autor from mensagens
@@ -154,6 +166,7 @@ def leads_do_vendedor(pool, conta_id: int, membro_id: int) -> list[dict]:
             "status": r[6] or "novo",
             "zap": _zap_link(r[7] or r[8] or ""),
             "conversa_id": r[9], "ia": ia, "snip": snip,
+            "pend": int(r[14] or 0),
         })
     return out
 

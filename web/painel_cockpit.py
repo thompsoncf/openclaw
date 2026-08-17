@@ -169,6 +169,12 @@ b,strong{font-weight:600}
 .lead .emp{font-weight:600;font-size:.94rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lead .snip{display:block;color:var(--text-dim);font-size:.78rem;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap;margin-top:.05rem}
+/* mensagens do cliente sem resposta. Vermelho e à direita, longe do chip de
+   estado: um diz DE QUEM é a vez, o outro diz QUANTO está esperando. Números
+   redondos (min-width = height) e 9+ acima de nove, pra não esticar o card. */
+.lead .pend{flex-shrink:0;min-width:20px;height:20px;padding:0 .32rem;border-radius:999px;
+  background:var(--coral);color:#fff;font-family:var(--mono);font-size:.7rem;font-weight:700;
+  display:inline-flex;align-items:center;justify-content:center;line-height:1}
 .chip{font-size:.66rem;padding:.14rem .5rem;border-radius:999px;border:1px solid var(--line);
   color:var(--text-dim);flex-shrink:0;white-space:nowrap}
 .chip.ia{color:var(--roxo);border-color:#3a2b52;background:#1a1226}
@@ -851,13 +857,20 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
     for l in leads:
         chip = ("<span class='chip ia'>IA</span>" if l["ia"]
                 else "<span class='chip voce'>sua vez</span>")
+        # Quantas o cliente mandou e ninguém respondeu. O push é aviso que passa —
+        # chega uma vez, e se o vendedor estiver dirigindo ou com o foco ligado,
+        # passou. A bolinha fica até a conversa ser respondida, que é o que faz o
+        # lead esquecido continuar visível no dia seguinte.
+        pend = int(l.get("pend") or 0)
+        selo = (f"<span class=pend aria-label='{pend} sem resposta'>"
+                f"{pend if pend < 10 else '9+'}</span>") if pend else ""
         # sem JS o card ainda é um link normal pro lead — o deslizar só acrescenta
         cartoes.append(
             f"<div class=swipe data-id='{l['id']}'>{_acoes_card(bool(l['ia']))}"
             f"<a class='lead front' draggable=false href='{_BASE}/lead/{l['id']}'>"
             f"<span class=dot style='background:{_TEMP.get(l['temperatura'], 'var(--azul)')}'></span>"
             f"<span class=mid><span class=top><span class=emp>{esc(l['empresa'])}</span>{chip}</span>"
-            f"<span class=snip>{esc(l['snip'])}</span></span></a></div>")
+            f"<span class=snip>{esc(l['snip'])}</span></span>{selo}</a></div>")
     lista = "".join(cartoes) or (
         "<div class=vazio><div class=big>◎</div><b>Fila zerada</b>"
         "Nenhum lead aberto agora. Quando cair um novo no rodízio, você é avisado.</div>")

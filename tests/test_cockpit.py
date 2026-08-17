@@ -352,6 +352,60 @@ def test_enviar_push_respeita_toggle_e_limpa_morto(pool, monkeypatch):
     assert ck.enviar_push(pool, conta, vend, "t", "c") == 0
 
 
+def test_pendentes_conta_so_o_que_ficou_sem_resposta(pool):
+    """A bolinha vermelha do card: mensagens do cliente depois da última resposta.
+    O push é aviso que passa; isto é o que fica pro vendedor que não viu."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="pend@x.com")
+        lead = _lead(c, conta, vend, "Bruna")
+        conv = c.execute("insert into conversas (conta_id, prospeccao_id, canal) "
+                         "values (%s,%s,'whatsapp') returning id", (conta, lead)).fetchone()[0]
+
+        def msg(direcao, autor, texto):
+            c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto) "
+                      "values (%s,'whatsapp',%s,%s,%s)", (conv, direcao, autor, texto))
+        msg("in", "lead", "Boa tarde")
+        msg("out", "vendedor", "Oi! Como posso ajudar?")   # respondeu: zera aqui
+        msg("in", "lead", "Quero orçamento")
+        msg("in", "lead", "pra 80 pessoas")
+        c.commit()
+
+    def pend():
+        return {l["id"]: l["pend"] for l in ck.leads_do_vendedor(pool, conta, vend)}[lead]
+
+    assert pend() == 2                    # as duas depois da resposta
+
+    with pool.connection() as c:          # a IA responde → também zera
+        c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto) "
+                  "values (%s,'whatsapp','out','bot','Claro, vou verificar')", (conv,))
+        c.commit()
+    assert pend() == 0
+
+    with pool.connection() as c:          # cliente volta a falar
+        c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto) "
+                  "values (%s,'whatsapp','in','lead','e tem data em maio?')", (conv,))
+        c.commit()
+    assert pend() == 1
+
+
+def test_pendentes_conversa_nunca_respondida_conta_tudo(pool):
+    """Lead que chegou e ninguém respondeu nunca: sem `out` na conversa, o corte
+    não pode zerar por falta de referência — tem que contar todas."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="pend2@x.com")
+        mudo = _lead(c, conta, vend, "Ninguém respondeu")
+        conv = c.execute("insert into conversas (conta_id, prospeccao_id, canal) "
+                         "values (%s,%s,'whatsapp') returning id", (conta, mudo)).fetchone()[0]
+        for t in ("oi", "tem espaço dia 12?", "?"):
+            c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto) "
+                      "values (%s,'whatsapp','in','lead',%s)", (conv, t))
+        sem_conversa = _lead(c, conta, vend, "Sem conversa")
+        c.commit()
+    por_id = {l["id"]: l["pend"] for l in ck.leads_do_vendedor(pool, conta, vend)}
+    assert por_id[mudo] == 3
+    assert por_id[sem_conversa] == 0      # lead sem conversa não inventa pendência
+
+
 def _conversa(c, conta, lead):
     return c.execute("insert into conversas (conta_id, prospeccao_id, canal) "
                      "values (%s,%s,'whatsapp') returning id", (conta, lead)).fetchone()[0]

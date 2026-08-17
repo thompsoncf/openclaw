@@ -8812,7 +8812,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           Usa o número <b>como está</b>, sem migrar nada. Mas: <b>viola os termos</b> do WhatsApp (risco de banimento) e depende de um serviço à parte sempre-ligado.
         </div>
         <div style="display:flex;gap:.4rem;margin-top:.6rem;flex-wrap:wrap">
-          <button type="button" class="pbtn" id="qr-btn" onclick="qrIniciar()">📱 Gerar QR</button>
+          <!-- nasce "Verificando…" de propósito. Nascer "📱 Gerar QR" era afirmar
+               "não há sessão" antes de ter perguntado — e numa empresa conectada a
+               tela ficava assim até alguém trocar de aba. Quem responde é o qrShow;
+               se a consulta falhar, o qrPoll devolve o botão ao estado usável. -->
+          <button type="button" class="pbtn" id="qr-btn" onclick="qrIniciar()" disabled>Verificando…</button>
           <button type="button" class="pbtn ghost" id="qr-sair" onclick="qrSair()" style="display:none">Desconectar</button>
           <!-- só aparece DESCONECTADO: com a sessão de pé o celular continua
                sincronizando e reescreveria parte do que foi apagado. -->
@@ -8839,6 +8843,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         function qrShow(d){var box=document.getElementById('qr-box'),img=document.getElementById('qr-img'),
             msg=document.getElementById('qr-msg'),sair=document.getElementById('qr-sair'),btn=document.getElementById('qr-btn'),
             sync=document.getElementById('qr-sync'),syncBar=document.getElementById('qr-sync-bar'),syncPct=document.getElementById('qr-sync-pct');
+          // SEM STATUS NÃO SE CONCLUI NADA. O /iniciar devolve `status` nulo quando o
+          // serviço de QR não responde, e seguir daqui trataria isso como
+          // desconectado: escondia "Desconectar", mostrava "Gerar QR" e — pior —
+          // liberava o "Apagar histórico" numa empresa que talvez esteja conectada.
+          if(!d||!d.status){qrIndefinido();return;}
           var conectado=d.status==='conectado';
           // conectado tira o QR da tela na hora — nada de deixar a imagem velha
           // parada aí sem dizer nada (era exatamente essa a queixa).
@@ -8854,12 +8863,19 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           var apg=document.getElementById('qr-apagar'),ret=document.getElementById('qr-retencao');
           if(apg)apg.style.display=(d.status==='desconectado')?'inline-flex':'none';
           if(ret)ret.style.display=(d.status==='desconectado')?'block':'none';
-          if(btn)btn.textContent=conectado?'Reconectar':'📱 Gerar QR';
+          // chegou resposta: o botão sai do "Verificando…" e volta a ser clicável
+          if(btn){btn.textContent=conectado?'Reconectar':'📱 Gerar QR';btn.disabled=false;}
           if(msg)msg.style.color=conectado?'var(--verde-claro)':'';
           // só para de perguntar quando realmente não tem mais nada mudando:
           // desconectado, ou conectado E já terminou de sincronizar o histórico.
           if(d.status==='desconectado'||(conectado&&!d.sincronizando)){if(_qrTimer){clearInterval(_qrTimer);_qrTimer=null;}}}
-        function qrPoll(){fetch('/painel/prospeccao/comunicacao/whatsapp-qr-status').then(function(r){return r.json();}).then(qrShow).catch(function(){});}
+        // A consulta falhou (rede, serviço fora): NÃO dá pra dizer "desconectado" —
+        // isso é justamente a mentira que o "Verificando…" existe pra evitar. Libera
+        // o botão pro usuário poder agir e diz que não deu pra checar.
+        function qrIndefinido(){var btn=document.getElementById('qr-btn'),m=document.getElementById('qr-msg');
+          if(btn&&btn.disabled){btn.textContent='📱 Gerar QR';btn.disabled=false;}
+          if(m&&!m.textContent){m.textContent='Não deu pra checar a sessão agora.';m.style.color='var(--ambar)';}}
+        function qrPoll(){fetch('/painel/prospeccao/comunicacao/whatsapp-qr-status').then(function(r){return r.json();}).then(qrShow).catch(qrIndefinido);}
         function qrIniciar(){var btn=document.getElementById('qr-btn'),msg=document.getElementById('qr-msg');
           btn.disabled=true;var t=btn.textContent;btn.textContent='Gerando…';if(msg)msg.textContent='';
           fetch('/painel/prospeccao/comunicacao/whatsapp-qr-iniciar',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
@@ -8941,7 +8957,18 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       function waProv(v){['twilio','cloud','qr'].forEach(function(k){var e=document.getElementById('wa-'+k);if(e)e.style.display=(k===v)?'block':'none';});
         document.querySelectorAll('.waseg label').forEach(function(l){var r=l.querySelector('input');l.classList.toggle('on',!!r&&r.value===v);});
         // no QR não existe template aprovado — esconde pra não prometer o que não funciona
-        var t=document.getElementById('wa-tmpl-agenda');if(t)t.style.display=(v==='qr')?'none':'block';}
+        var t=document.getElementById('wa-tmpl-agenda');if(t)t.style.display=(v==='qr')?'none':'block';
+        // MOSTROU O BLOCO, PERGUNTA O ESTADO. Sem isto o bloco aparecia com o HTML
+        // estático — "Gerar QR" visível e "Desconectar" escondido —, que é a cara de
+        // sessão desconectada, mesmo com a sessão de pé. O polling só era disparado
+        // quando o provedor SALVO era 'qr', então bastava clicar no rádio "QR Code"
+        // (ou o auto-reconectar do load falhar) pra tela mentir sobre a conexão.
+        //
+        // `qrPoll` e não `qrAutoReconectar`: o /whatsapp-qr-iniciar faz
+        // `on conflict do update set provedor='qr', ativo=true` — clicar num rádio
+        // pra CONFERIR não pode migrar a empresa pro QR por efeito colateral. Ver o
+        // estado é leitura; mudar de provedor é o botão Salvar.
+        if(v==='qr'&&typeof qrPoll==='function')qrPoll();}
       waProv('{{ canais.wa_provedor if canais.wa_provedor in ['twilio','cloud','qr'] else 'twilio' }}');
       </script>
       {% else %}

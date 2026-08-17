@@ -125,6 +125,28 @@ def _base_leads_sql() -> str:
          limit 100"""
 
 
+def total_pendentes(pool, conta_id: int, membro_id: int) -> int:
+    """Quantas mensagens de cliente estão sem resposta na carteira INTEIRA do
+    vendedor. É o número da bolinha no ícone do app — a mesma conta do selo do card
+    (ver `_base_leads_sql`), somada. Vale pro push conseguir marcar o ícone com o app
+    fechado, que é quando o vendedor mais precisa ser lembrado."""
+    with pool.connection() as c:
+        r = c.execute(
+            """select coalesce(sum(x.n), 0) from prospeccao p
+                 join conversas cv on cv.prospeccao_id=p.id and cv.conta_id=p.conta_id
+                 join lateral (
+                   select count(*) n from mensagens mm
+                    where mm.conversa_id=cv.id and mm.direcao='in'
+                      and mm.id > coalesce((select max(m2.id) from mensagens m2
+                                             where m2.conversa_id=cv.id and m2.direcao='out'), 0)
+                 ) x on true
+                where p.conta_id=%s and p.vendedor_id=%s
+                  and coalesce(p.estagio,'lead')='lead'
+                  and p.status not in ('ganho','perdido')""",
+            (conta_id, membro_id)).fetchone()
+    return int(r[0] or 0) if r else 0
+
+
 def sinal_fila(pool, conta_id: int, membro_id: int) -> str:
     """Assinatura barata da fila do vendedor: quantos leads e qual a mensagem mais
     recente entre eles. A tela compara com o que tem na mão e só recarrega quando
@@ -435,7 +457,8 @@ def remover_assinatura(pool, endpoint: str) -> None:
         c.commit()
 
 
-def enviar_push(pool, conta_id: int, membro_id: int, titulo: str, corpo: str, url: str = "/cockpit") -> int:
+def enviar_push(pool, conta_id: int, membro_id: int, titulo: str, corpo: str,
+                url: str = "/cockpit", badge: int | None = None) -> int:
     """Dispara push pra TODAS as assinaturas ativas do vendedor (se ele deixou o push
     ligado). Best-effort: nunca levanta; apaga assinatura morta (404/410). Devolve
     quantas foram entregues. Sem chaves VAPID no ambiente, não faz nada."""
@@ -455,6 +478,11 @@ def enviar_push(pool, conta_id: int, membro_id: int, titulo: str, corpo: str, ur
         return 0
     enviados = 0
     dados = {"title": titulo, "body": corpo, "url": url}
+    # o número da bolinha do ícone viaja junto: o service worker acorda com o push
+    # mesmo com o app fechado, e é a única chance de marcar o ícone sem o vendedor
+    # abrir nada. Só vai quando o chamador soube calcular — `None` é "não mexe".
+    if badge is not None:
+        dados["badge_n"] = int(badge)
     for endpoint, p256dh, auth in subs:
         sub = {"endpoint": endpoint, "keys": {"p256dh": p256dh, "auth": auth}}
         try:
@@ -531,7 +559,15 @@ def avisar_mensagem(pool, conta_id: int, lead_id: int, conversa_id: int, texto: 
     for mid in alvos:
         # deep link: abre a CONVERSA, não a fila. O push do rodízio manda pra
         # /cockpit e obriga o vendedor a procurar de quem era o aviso.
-        enviados += enviar_push(pool, conta_id, mid, titulo, corpo, f"/cockpit/lead/{lead_id}")
+        #
+        # O badge é POR VENDEDOR — cada um tem a sua carteira, e num lead sem dono o
+        # push vai pra vários. Uma consulta por destinatário, não uma pra todos.
+        try:
+            n = total_pendentes(pool, conta_id, mid)
+        except Exception:  # noqa: BLE001
+            n = None       # falhou a conta? manda o push mesmo assim, sem mexer no ícone
+        enviados += enviar_push(pool, conta_id, mid, titulo, corpo,
+                                f"/cockpit/lead/{lead_id}", badge=n)
     return enviados
 
 

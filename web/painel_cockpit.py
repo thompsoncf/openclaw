@@ -898,8 +898,22 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
              + "<div class=toast id=toast></div>"
              + _abas_vend("fila")
              + f'<script>window.CKBASE="{_BASE}";</script>' + vapid_js + _FILA_JS
-             + _sinal_js(ck.sinal_fila(pool, conta_id, membro_id)))
+             + _sinal_js(ck.sinal_fila(pool, conta_id, membro_id))
+             + _badge_js(sum(int(l.get("pend") or 0) for l in leads)))
     return _page("Meus leads", corpo)
+
+
+def _badge_js(total: int) -> str:
+    """Acerta a bolinha do ícone toda vez que a fila abre.
+
+    O push já marca o ícone com o app fechado (ver o sw.js), mas ele só roda quando
+    chega mensagem. Isto é o outro lado: fechou tudo respondendo, a bolinha some;
+    respondeu pelo WhatsApp direto e voltou ao app, o número se corrige sozinho.
+    Sem isto a bolinha grudaria num valor velho até o próximo push."""
+    return ("<script>(function(){var n=" + str(int(total)) + ";"
+            "if(!navigator.setAppBadge)return;"        # navegador sem a API: nem tenta
+            "try{(n>0?navigator.setAppBadge(n):navigator.clearAppBadge())"
+            ".catch(function(){});}catch(_){}})();</script>")
 
 
 def _sinal_js(sig: str) -> str:
@@ -2489,8 +2503,18 @@ self.addEventListener('fetch',e=>{
 self.addEventListener('push',e=>{
   let d={title:'Novo lead',body:'Toque pra atender'};
   try{d=Object.assign(d,e.data.json());}catch(_){}
-  e.waitUntil(self.registration.showNotification(d.title,{body:d.body,icon:'/cockpit/icon.svg',
-    badge:'/cockpit/icon.svg',data:{url:d.url||'/cockpit'}}));
+  const tarefas=[self.registration.showNotification(d.title,{body:d.body,icon:'/cockpit/icon.svg',
+    badge:'/cockpit/icon.svg',data:{url:d.url||'/cockpit'}})];
+  // A bolinha no ÍCONE do app. O service worker acorda com o push mesmo com o app
+  // fechado, então é aqui — e só aqui — que dá pra marcar o ícone sem o vendedor
+  // abrir nada. A notificação passa; a bolinha fica até ele responder.
+  // `setAppBadge` não existe em todo navegador (e no iOS só em app instalado na
+  // tela de início): onde não existir, isto não faz nada e o push segue igual.
+  if(typeof d.badge_n==='number'&&self.navigator&&self.navigator.setAppBadge){
+    tarefas.push(d.badge_n>0?self.navigator.setAppBadge(d.badge_n)
+                            :self.navigator.clearAppBadge());
+  }
+  e.waitUntil(Promise.all(tarefas.map(p=>Promise.resolve(p).catch(()=>{}))));
 });
 self.addEventListener('notificationclick',e=>{
   e.notification.close();

@@ -311,9 +311,50 @@ for (const [valor, rotulo] of [[undefined, 'undefined'], [null, 'null'], [{}, 'o
   conferir(deveSoltarTravaNo440(null) === true,
     'sessão inexistente não estoura e não segura aluguel de ninguém')
 
-  console.log('\nvigia × trava: sessão de outra instância não se religa')
+  // ---------------------------------------------------------------------------
+  // Conta 35, 17/08: o 440 fez o handler soltar o aluguel e 1,5s depois a sessão
+  // reconectou — conectada, trabalhando e SEM trava, por 45 minutos. Trava e socket
+  // saíram de sincronia e ninguém reconciliava, porque a trava só é pega no
+  // iniciarSessao e a sessão já estava de pé.
+  //
+  // O estrago maior foi indireto: o ramo do silêncio começa com "a trava não é
+  // minha, não mexo", então a conta ficou MUDA e o resgate se recusou a agir.
+  console.log('\nconectada sem o aluguel: o vigia reconcilia')
+  conferir(s.sessaoSemTrava({ status: 'conectado', sock: SOCK }, false) === true,
+    'de pé e o aluguel não é nosso — tem o que reconciliar')
+  conferir(s.sessaoSemTrava({ status: 'conectado', sock: SOCK }, true) === false,
+    'de pé e o aluguel é nosso — o caso normal, nada a fazer')
+  conferir(s.sessaoSemTrava({ status: 'desconectado', sock: null }, false) === false,
+    'sem socket não é este caso (é o da órfã, logo acima)')
+  conferir(s.sessaoSemTrava(null, false) === false, 'sessão inexistente não estoura')
+
   const seguraDeVerdade = s.trava.segura
+  const pegarDeVerdade = s.trava.pegar
+  const semTravaDeVerdade = s.trava.semTrava
   s.trava.segura = () => false
+  s.trava.semTrava = () => false
+  let pedidos = 0
+  s.trava.pegar = async () => { pedidos++; return true }
+  sessoes.clear()
+  const sockVivo2 = { fake: 'vivo2' }
+  sessoes.set(35, { status: 'conectado', sock: sockVivo2, ultimoEvento: Date.now() })
+  await s.vigiarSessoes()
+  conferir(pedidos === 1, 'o vigia foi buscar o aluguel de volta')
+  conferir(sessoes.get(35).sock === sockVivo2 && sessoes.get(35).status === 'conectado',
+    'e a sessão do cliente NÃO foi tocada pra isso')
+
+  // modo degradado (tabela ausente): `segura` devolve false pra todo mundo e não há
+  // nada a reconciliar — reconciliar aqui seria pedir trava a cada volta, à toa
+  pedidos = 0
+  s.trava.semTrava = () => true
+  sessoes.set(35, { status: 'conectado', sock: sockVivo2, ultimoEvento: Date.now() })
+  await s.vigiarSessoes()
+  conferir(pedidos === 0, 'sem a tabela da trava, não fica pedindo aluguel à toa')
+  s.trava.semTrava = () => false
+
+  console.log('\nvigia × trava: sessão de outra instância não se religa')
+  // a conta é de OUTRA instância: o pegar recusa
+  s.trava.pegar = async () => { pedidos++; return false }
   sessoes.clear()
   const sock = { fake: true }
   sessoes.set(35, { status: 'conectado', sock, ultimoEvento: AGORA - 5 * 60 * 60 * 1000 })
@@ -323,6 +364,8 @@ for (const [valor, rotulo] of [[undefined, 'undefined'], [null, 'null'], [{}, 'o
     'muda há 5h, mas a trava é da outra instância — socket e status intactos')
   conferir(!depois.reconexoesMudas, 'e nem contou tentativa de religamento')
   s.trava.segura = seguraDeVerdade
+  s.trava.pegar = pegarDeVerdade
+  s.trava.semTrava = semTravaDeVerdade
   sessoes.clear()
 
   console.log(falhas ? '\n' + falhas + ' FALHA(S)\n' : '\ntudo certo\n')

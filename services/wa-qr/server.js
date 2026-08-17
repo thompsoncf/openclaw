@@ -474,6 +474,22 @@ function socketAtual (s, sock) {
   return !!sock && !sock._descartado && !!s && s.sock === sock
 }
 
+// Sessão de pé com o aluguel de outro (ou de ninguém).
+//
+// Trava e socket podem sair de sincronia, e quando saem ninguém conserta: a trava só
+// é pega no iniciarSessao, e nesse ponto a sessão já está de pé. Foi o que prendeu a
+// conta 35 em 17/08 — 440 no socket, o handler solta o aluguel, 1,5s depois a sessão
+// reconecta e fica trabalhando SEM trava. Ficou 45 minutos assim, e o pior nem foi
+// ficar desprotegida: o ramo do silêncio do vigia começa com "a trava não é minha,
+// não mexo", então a conta ficou MUDA e o resgate se recusou a agir. Conectada,
+// sem entregar nada, e sem ninguém para socorrer.
+//
+// Reconciliar é do vigia mesmo: ele já cuida de sessão fora do lugar, roda de minuto
+// em minuto e nunca fala por conta que não seja dele.
+function sessaoSemTrava (s, seguraATrava) {
+  return !!(s && s.sock && s.status === 'conectado' && !seguraATrava)
+}
+
 // Levou 440: pode SOLTAR o aluguel da conta?
 //
 // Só se não houver uma encarnação nossa subindo agora. Com iniciarSessao em curso, o
@@ -681,6 +697,30 @@ async function vigiarSessoes () {
         log.error({ contaId, e: String(e) }, 'vigia: retomar a órfã falhou — tenta na próxima')
       }
       continue
+    }
+    // Conectada e sem o aluguel: retoma ANTES de qualquer outra checagem, porque é
+    // a trava que destranca o resto (o ramo do silêncio abaixo desiste de toda conta
+    // que não é nossa). `semTrava` exclui o modo degradado — sem a tabela o `segura`
+    // devolve false pra todo mundo, e aí não há nada a reconciliar.
+    if (!trava.semTrava(contaId) && sessaoSemTrava(s, trava.segura(contaId))) {
+      let voltou = null
+      try {
+        voltou = await trava.pegar(contaId)
+      } catch (e) {
+        // banco fora do ar: não dá pra afirmar nada sobre o aluguel, então não mexe
+        log.warn({ contaId, e: String(e) }, 'vigia: não consegui conferir o aluguel — deixo como está')
+      }
+      if (voltou === true) {
+        log.warn({ contaId }, 'vigia: sessão estava conectada SEM trava — aluguel retomado')
+      } else if (voltou === false) {
+        // A conta é de outra instância AGORA e nós temos socket vivo nela. Não largo
+        // o socket aqui de propósito: derrubar sessão de cliente por conta de uma
+        // leitura de tabela é grave demais pra este ponto, e quem cuida de perder o
+        // aluguel de verdade é o batimento da trava (aoPerder). Aqui o dever é
+        // GRITAR, porque duas pontas na mesma credencial é a guerra de 440.
+        log.error({ contaId },
+          'vigia: conectada e a conta é de OUTRA instância — dois na mesma credencial')
+      }
     }
     if (!sessaoMuda(s, agora, MUDO_LIMITE_MS)) continue
     // Sessão que não é NOSSA não se religa. Com a trava por conta (sessao-lock.js),
@@ -2328,6 +2368,38 @@ const servidor = http.createServer(async (req, res) => {
 // exatamente a disputa que a trava veio impedir — e só depois solta os aluguéis,
 // pra instância nova assumir em segundos em vez de esperar o prazo vencer.
 let saindo = false
+
+// Descarrega a fila do espelho de log no banco, com teto de tempo.
+//
+// Existe por causa de um ponto cego: o log vai pra uma fila em memória gravada de
+// 2 em 2s, e o encerrar() terminava em process.exit SEM descarregar. Resultado —
+// conferido na tabela em 17/08/2026 — ZERO linha 'encerrando%' ou 'trava: soltei
+// tudo%' em toda a história do serviço. Não dava pra saber se o SIGTERM sequer
+// chegava, e era exatamente essa a pergunta num deploy que deixou as três contas
+// esperando o prazo da trava vencer.
+//
+// gravarLogsPendentes leva LOG_DB_LOTE por vez, então repete até esvaziar. O teto
+// é obrigatório: estamos saindo, e banco lento aqui não pode segurar o processo.
+async function descarregarLogs (tetoMs) {
+  if (!LOG_DB) return
+  const limite = Date.now() + (tetoMs || 2000)
+  while (_logFila.length && Date.now() < limite) {
+    try {
+      await Promise.race([
+        gravarLogsPendentes(),
+        new Promise((r) => setTimeout(r, Math.max(200, limite - Date.now())))
+      ])
+    } catch (_) { return }
+  }
+}
+
+// Quanto o encerramento pode demorar antes de sair à força. O Render dá ~30s entre
+// o SIGTERM e o SIGKILL; os 5s de antes eram um limite NOSSO, mais apertado que o
+// dele, e cobriam o teardown dos sockets MAIS o soltarTudo — numa lentidão do
+// pooler era o release que ficava pra trás, e aí a conta só voltava quando o prazo
+// da trava vencesse. 15s é folgado e ainda sai bem antes do SIGKILL.
+const ENCERRA_TETO_MS = parseInt(process.env.WA_QR_ENCERRA_TETO_MS || '15000', 10)
+
 async function encerrar (sinal) {
   if (saindo) return
   saindo = true
@@ -2337,9 +2409,14 @@ async function encerrar (sinal) {
   // recuperável (o aluguel vence sozinho) — ficar preso não é.
   const forca = setTimeout(() => {
     log.warn({ sinal }, 'encerrando: demorou demais — saindo à força')
-    process.exit(0)
-  }, 5000)
+    // best-effort: sem isto o aviso de "saí à força" também se perderia, e ele é
+    // justamente o que explica um encerramento pela metade
+    descarregarLogs(1500).catch(() => {}).then(() => process.exit(0))
+  }, ENCERRA_TETO_MS)
   if (forca.unref) forca.unref()
+  // Grava JÁ que o encerramento começou. Se daqui pra baixo travar tudo, esta linha
+  // sozinha responde a pergunta que a gente não conseguia responder: o sinal chegou.
+  await descarregarLogs(2000)
   for (const [contaId, s] of sessoes) {
     try { descartarSocket(s.sock, contaId, 'encerrando'); pararTimersDaAgenda(s) } catch (_) {}
   }
@@ -2347,9 +2424,13 @@ async function encerrar (sinal) {
   tentativasDeTrava.clear()
   try { await trava.soltarTudo() } catch (e) { log.warn({ e: String(e) }, 'encerrando: soltarTudo falhou') }
   try { servidor.close() } catch (_) {}
+  // 'pronto' e o descarregar vêm ANTES do pool.end(): o espelho do log usa o mesmo
+  // pool, e do jeito antigo a última linha era escrita num pool já fechado — ou
+  // seja, nunca chegava ao banco nem que a fila fosse descarregada.
+  log.info({ sinal }, 'encerrando: pronto')
+  await descarregarLogs(3000)
   try { await pool.end() } catch (_) {}
   clearTimeout(forca)
-  log.info({ sinal }, 'encerrando: pronto')
   process.exit(0)
 }
 
@@ -2396,4 +2477,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, sessaoSemTrava, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

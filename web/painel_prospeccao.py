@@ -8390,8 +8390,18 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           {# "conectado" é o que o serviço acha da SESSÃO; isto aqui é o que a caixa
              viu de verdade. Os dois discordando é exatamente o sintoma da sessão que
              emudece sem cair — e era o que ninguém tinha como perceber. #}
-          {% if chip.sem_receber %}· <span style="color:var(--ambar)">sem receber {{ chip.sem_receber }}</span>
-          · <a href="/painel/prospeccao/comunicacao?aba=canais">conferir o chip</a>{% endif %}
+          {% if chip.sem_receber %}· <span style="color:var(--ambar)"><b>sem receber {{ chip.sem_receber }}</b></span>
+          · <a href="/painel/prospeccao/comunicacao?aba=canais">conferir o chip</a>
+          {# "conectado + sem receber" é o estado que engana: ninguém desconfia de um
+             chip verde. Dizer o TESTE aqui vale mais que o alerta — mandar mensagem
+             de outro celular resolve a dúvida em 10 segundos, e sem isso a reação
+             comum era clicar em Desconectar, que só piora (apaga o cofre de chaves e
+             deixa a conta horas sem receber). O dono também leva este aviso no
+             Telegram/e-mail — ver finance/wa_silencio.py. #}
+          <div style="font-size:.72rem;color:var(--txt-mut);margin-top:.2rem">
+            Teste: mande uma mensagem de <b>outro celular</b> pro número. Se ela não
+            aparecer aqui, reconecte o chip em Canais — <b>não</b> use o Desconectar.
+          </div>{% endif %}
         {% elif chip.estado == 'sincronizando' %}
           <span class="pt" style="background:var(--ambar)"></span>Chip
           {% if chip.nome %}<b>{{ chip.nome }}</b> · {% endif %}<code>{{ chip.numero }}</code>
@@ -8897,6 +8907,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           funcionar quando você reconectar. Depois de <b>30 dias</b> desconectado,
           o sistema apaga o histórico deste WhatsApp automaticamente.
         </div>
+        <div style="font-size:.73rem;color:var(--txt-mut);margin-top:.4rem">
+          Caiu ou está reconectando? <b>Espere</b> — o sistema religa sozinho. O
+          <b>Desconectar</b> apaga a sessão e exige QR novo; depois dele a conta fica
+          um tempo conectada <b>sem receber</b>. Use só pra trocar de número.
+        </div>
         <div id="qr-box" style="margin-top:.6rem;text-align:center;display:none">
           <img id="qr-img" alt="QR do WhatsApp" style="width:220px;max-width:100%;border-radius:10px;background:#fff;padding:.4rem">
         </div>
@@ -8964,7 +8979,22 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             if(!d.ok&&msg){msg.textContent=d.msg||d.erro||'Falha.';msg.style.color='var(--ambar)';return;}
             if(_qrTimer)clearInterval(_qrTimer);_qrTimer=setInterval(qrPoll,3000);
           }).catch(function(){btn.disabled=false;btn.textContent=t;if(msg){msg.textContent='Falha de rede.';msg.style.color='var(--ambar)';}});}
-        function qrSair(){if(!confirm('Desconectar o WhatsApp por QR desta empresa?'))return;
+        // O texto é longo de propósito. "Desconectar o WhatsApp por QR desta empresa?"
+        // fazia parecer um liga/desliga, e não é: o botão APAGA a credencial e o cofre
+        // de chaves (wa_qr_auth inteira). Medido na conta 35 em 17/08 — um clique às
+        // 15:07, QR novo às 15:13, e a conta passou as 3 horas seguintes CONECTADA e
+        // sem receber uma mensagem, porque as chaves do Signal se refazem conversa por
+        // conversa (8 sessões reconstruídas em 3h, contra 85 e 467 das contas sadias).
+        // Quem clicou queria só reconectar — e reconectar o sistema já faz sozinho.
+        function qrSair(){if(!confirm('⚠️ Isto NÃO é só desconectar.\\n\\n'
+          + 'Este botão APAGA a credencial e as chaves de criptografia desta empresa. '
+          + 'Para voltar, alguém vai precisar escanear um QR novo — e depois disso o '
+          + 'WhatsApp fica CONECTADO MAS SEM RECEBER por um bom tempo, enquanto as '
+          + 'chaves se refazem conversa por conversa. Já aconteceu de uma conta passar '
+          + '3 horas assim depois de um clique aqui.\\n\\n'
+          + 'Se você só quer RECONECTAR, não use este botão: o sistema reconecta sozinho.\\n\\n'
+          + 'Use só para trocar o número desta empresa, ou se o suporte pediu.\\n\\n'
+          + 'Apagar a sessão mesmo assim?'))return;
           fetch('/painel/prospeccao/comunicacao/whatsapp-qr-sair',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
             // só declara desconectado se REALMENTE desconectou — senão o usuário ia
             // escanear um QR novo achando que a sessão antiga tinha caído
@@ -10124,7 +10154,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 
         <div class="foot">
           <button type="button" class="pbtn ghost sm" onclick="secToggle('s1')">Fechar</button>
-          <button class="pbtn ghost sm" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/reiniciar" formmethod="post" formnovalidate style="color:#d98a2b;border-color:#5c4a27" onclick="return confirm('Reiniciar a campanha do zero?\n\nTodos os leads voltam pra fila no passo 0 e o acompanhamento (aberturas, status, histórico de Desempenho) é zerado. As conversas do inbox são preservadas.\n\nA campanha fica pausada até você clicar em Ativar — aí o motor recomeça do 1º e-mail.')">🔄 Reiniciar</button>
+          <button class="pbtn ghost sm" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/reiniciar" formmethod="post" formnovalidate style="color:#d98a2b;border-color:#5c4a27" onclick="return confirm('Reiniciar a campanha do zero?\\n\\nTodos os leads voltam pra fila no passo 0 e o acompanhamento (aberturas, status, histórico de Desempenho) é zerado. As conversas do inbox são preservadas.\\n\\nA campanha fica pausada até você clicar em Ativar — aí o motor recomeça do 1º e-mail.')">🔄 Reiniciar</button>
           <button class="pbtn ghost sm" formaction="/painel/prospeccao/campanhas/{{ camp.id }}/excluir" formmethod="post" formnovalidate style="color:var(--coral);border-color:#5c2a27" onclick="return confirm('Excluir a campanha? Os leads voltam pro funil.')">🗑 Excluir</button>
           <button class="pbtn sm">Salvar configuração</button>
         </div>

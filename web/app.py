@@ -192,6 +192,14 @@ def _iniciar_poller_email() -> None:
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — IA Insta falhou: %s: %s", ciclo, type(e).__name__, e)
             try:
+                from finance import wa_silencio as _ws
+                # "conectado" e sem receber é o pior estado que existe: ninguém
+                # desconfia. A faixa do painel já mostrava — pra quem estivesse
+                # olhando. Isto avisa o dono.
+                _ws.rodar(pool)
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — wa_silencio falhou: %s: %s", ciclo, type(e).__name__, e)
+            try:
                 from finance import lembretes as _lb
                 _lb.rodar(pool)                  # resumo do dia + aviso antes (agenda)
             except Exception as e:  # noqa: BLE001

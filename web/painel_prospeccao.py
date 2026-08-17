@@ -9895,6 +9895,14 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
 .cpstat .l{font-size:.7rem;color:var(--mut);margin-top:.1rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cpstat.g .n{color:var(--verde)}.cpstat.r .n{color:var(--coral)}
 .cpstat.novo{border-color:var(--neon-borda)}.cpstat.novo .l{color:var(--verde-claro)}
+/* Por que a mensagem não chegou NAQUELE lead. Fica visível na linha, não só no
+   hover: é por este motivo que o dono decide recolocar o lead na fila, e cada
+   tentativa é uma mensagem de marketing cobrada — decisão que custa dinheiro não
+   pode depender de passar o mouse (e no celular não existe hover).
+   `white-space:normal` porque a célula é nowrap; sem isso a frase esticaria a
+   coluna e jogaria a tabela inteira no scroll horizontal. */
+.wa-why{font-size:.72rem;line-height:1.25;color:var(--coral);opacity:.85;
+        white-space:normal;max-width:22ch;margin-top:.1rem}
 .tbl-wrap{overflow-x:auto;border-radius:12px;border:1px solid var(--borda);margin-top:.8rem}
 .tbl-wrap table{width:100%;border-collapse:collapse;font-size:.84rem;min-width:460px}
 .tbl-wrap thead th{text-align:left;color:var(--mut);font-weight:500;padding:.55rem .9rem;background:var(--card-2)}
@@ -10232,7 +10240,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
                 <td><b>{{ l.empresa }}</b><div class="mut" style="font-size:.76rem">{% if l.email %}✉️ {{ l.email }}{% endif %}{% if l.email and l.fone %} · {% endif %}{% if l.fone %}💬 {{ l.fone }}{% endif %}{% if not l.email and not l.fone %}—{% endif %}</div></td>
                 <td><span class="apill {{ l.status }}">{{ l.rot }}</span></td>
                 <td class="mut" style="white-space:nowrap">D{{ l.passo }}{% if l.abriu %} · <span style="color:var(--verde-claro)" title="Abriu {{ l.abriu }}x · 1ª em {{ l.aberto }}">👁 {{ l.aberto }}{% if l.abriu > 1 %} ({{ l.abriu }}x){% endif %}</span>{% endif %}</td>
-                <td class="mut" style="white-space:nowrap">{% if l.fone %}{{ l.fone }}{% if l.wa_rot %}<div style="font-size:.76rem"{% if l.wa_erro %} title="{{ l.wa_erro|e }}"{% endif %}>{{ l.wa_rot }}</div>{% endif %}{% else %}<span{% if l.wa_erro %} title="{{ l.wa_erro|e }}"{% endif %}>{{ l.wa_rot or '—' }}</span>{% endif %}</td>
+                <td class="mut" style="white-space:nowrap">{% if l.fone %}{{ l.fone }}{% if l.wa_rot %}<div style="font-size:.76rem">{{ l.wa_rot }}</div>{% endif %}{% else %}<span>{{ l.wa_rot or '—' }}</span>{% endif %}{% if l.wa_erro %}<div class="wa-why" title="{{ l.wa_erro|e }}">{{ l.wa_erro|e }}</div>{% endif %}</td>
                 <td class="mut" style="white-space:nowrap">{% if l.status in ('fila','enviado') and l.prox %}⏳ {{ l.prox }}{% elif l.ult %}✓ {{ l.ult }}{% else %}—{% endif %}</td>
                 <td style="text-align:right;white-space:nowrap"><button type="button" class="cpx" onclick="campHist({{ camp.id }},{{ l.pid }},this)" title="Ver histórico (data/hora por canal)">🕘</button> <button type="button" class="cpx" onclick="campRemLead(this,{{ camp.id }},{{ l.pid }})" title="Remover da campanha (o lead volta pra Base)">✕</button></td></tr>
               {% else %}<tr><td colspan="7" class="mut" style="text-align:center;padding:1.6rem">Nenhum lead ainda — mande da <b>Base</b> (marque os leads → “Jogar na campanha”).</td></tr>{% endfor %}

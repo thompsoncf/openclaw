@@ -4603,6 +4603,158 @@ def prospeccao_campanhas(request: Request):
                    aviso=request.session.pop("prosp_aviso", None))
 
 
+# --------------------------------------------------------------- Radar: quem atacar
+# A tela de campanha responde "como foi a campanha". Esta responde "pra quem eu ligo
+# agora", que é a pergunta que move dinheiro. Por isso vive FORA de uma campanha: os
+# leads que levantaram a mão estão espalhados por várias, e uma aba por campanha
+# mostraria um lead em cada e esconderia o conjunto.
+#
+# Os baldes saem dos botões do template de WhatsApp e dos cliques do e-mail. A
+# tradução exata está em prospec_inbound/_rot_btn: "Agora não" grava evento='clicou'
+# e os outros dois gravam 'respondeu'. Confundir os dois inverte a lista — quem
+# recusou viraria quem levantou a mão.
+_RADAR_BALDES = ("mao", "leu", "nao", "frio")
+
+# Abertura de e-mail NÃO entra em balde nenhum, de propósito: o proxy de imagem do
+# Gmail/Apple busca o pixel sozinho. Medido nesta base: 62 das 69 "aberturas"
+# aconteceram em menos de 1 minuto após o envio, com 2,9 aberturas em média. Usar
+# isso como sinal mandaria o vendedor ligar pra quem nunca leu nada.
+
+
+def _radar_dados(c, conta_id: int, escopo_membro, balde: str = "", camp_id: int = 0):
+    """Leads da conta com o sinal mais forte que cada um deu, prontos pra contato.
+
+    Um lead pode estar em várias campanhas; o `distinct on` fica com a passagem mais
+    recente, que é a que o vendedor vai citar quando ligar."""
+    sql = """
+    with sinais as (
+      select e.prospeccao_id,
+             bool_or(e.evento='respondeu' and e.detalhe in ('Quero te conhecer','Tenho interesse')) as quer_falar,
+             bool_or(e.evento='respondeu' and e.detalhe='Quero o material') as quer_material,
+             bool_or(e.evento='baixou') as baixou,
+             bool_or(e.evento='clicou' and e.detalhe='Agora não') as agora_nao,
+             max(e.quando) filter (where e.evento in ('respondeu','baixou','clicou')) as sinal_em
+        from campanha_eventos e join campanhas cp on cp.id=e.campanha_id
+       where cp.conta_id=%(conta)s
+       group by 1
+    ), base as (
+      select distinct on (p.id)
+             p.id as pid, p.empresa, p.segmento, p.cidade, p.uf, p.temperatura,
+             coalesce(nullif(trim(p.whatsapp),''), nullif(trim(p.telefone),'')) as fone,
+             nullif(trim(p.email),'') as email,
+             p.ultimo_contato_em, p.vendedor_id,
+             coalesce(nullif(m.nome,''), m.email, '—') as vendedor,
+             cp.id as camp_id, cp.nome as campanha,
+             coalesce(a.wa_status,'') as wa_status,
+             coalesce(s.quer_falar,false) as quer_falar,
+             coalesce(s.quer_material,false) as quer_material,
+             coalesce(s.baixou,false) as baixou,
+             coalesce(s.agora_nao,false) as agora_nao,
+             greatest(s.sinal_em, a.wa_em, a.ultima_msg_em) as quando
+        from campanha_alvos a
+        join campanhas cp on cp.id=a.campanha_id
+        join prospeccao p on p.id=a.prospeccao_id
+        left join sinais s on s.prospeccao_id=p.id
+        left join membros m on m.id=p.vendedor_id
+       where cp.conta_id=%(conta)s
+         and (%(membro)s::bigint is null or p.vendedor_id=%(membro)s)
+         and (%(camp)s::bigint is null or cp.id=%(camp)s)
+       order by p.id, greatest(s.sinal_em, a.wa_em, a.ultima_msg_em) desc nulls last
+    )
+    select *, case when quer_falar or quer_material or baixou then 'mao'
+                   when agora_nao then 'nao'
+                   when wa_status in ('lido','respondeu') then 'leu'
+                   else 'frio' end as balde
+      from base
+    """
+    p = {"conta": conta_id, "membro": escopo_membro, "camp": camp_id or None}
+    cur = c.execute(sql, p)
+    cols = [d.name for d in cur.description]
+    itens = [dict(zip(cols, r)) for r in cur.fetchall()]
+    for it in itens:
+        sinal = []
+        if it["quer_falar"]:
+            sinal.append("quer falar")
+        if it["quer_material"]:
+            sinal.append("pediu o material")
+        if it["baixou"]:
+            sinal.append("abriu o material")
+        if it["agora_nao"]:
+            sinal.append("disse “agora não”")
+        if not sinal and it["wa_status"] in ("lido", "respondeu"):
+            sinal.append("leu no WhatsApp")
+        it["sinal"] = " · ".join(sinal) or "sem sinal"
+        it["quando_br"] = ((it["quando"] - timedelta(hours=3)).strftime("%d/%m %H:%M")
+                           if it["quando"] else "")
+        it["falado_br"] = ((it["ultimo_contato_em"] - timedelta(hours=3)).strftime("%d/%m")
+                           if it["ultimo_contato_em"] else "")
+        it["wa_link"] = ("https://wa.me/" + _so_digitos_wa(it["fone"])) if it["fone"] else ""
+    contagem = {b: sum(1 for i in itens if i["balde"] == b) for b in _RADAR_BALDES}
+    if balde in _RADAR_BALDES:
+        itens = [i for i in itens if i["balde"] == balde]
+    ordem = {b: n for n, b in enumerate(_RADAR_BALDES)}
+    itens.sort(key=lambda i: (ordem[i["balde"]], i["ultimo_contato_em"] is not None,
+                              -(i["quando"].timestamp() if i["quando"] else 0)))
+    return itens, contagem
+
+
+def _so_digitos_wa(fone: str) -> str:
+    """Telefone em dígitos com DDI pro link wa.me (assume BR quando vem sem)."""
+    d = "".join(ch for ch in (fone or "") if ch.isdigit())
+    if d and not d.startswith("55") and len(d) <= 11:
+        d = "55" + d
+    return d
+
+
+@router.get("/painel/prospeccao/radar", response_class=HTMLResponse)
+def prospeccao_radar(request: Request, balde: str = "", camp: int = 0):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    # dono/gestor vê a carteira toda; vendedor vê só os leads dele.
+    escopo_membro = None if ctx["gerencia"] else ctx["membro_id"]
+    with get_pool().connection() as c:
+        itens, contagem = _radar_dados(c, ctx["conta_id"], escopo_membro, balde, camp)
+        camps = c.execute("""select id, nome from campanhas where conta_id=%s
+                              order by criado_em desc""", (ctx["conta_id"],)).fetchall()
+    return _render("prospeccao_radar", request, titulo="Quem atacar",
+                   secao_ativa="prospeccao", nav_ativo="radar",
+                   itens=itens, contagem=contagem, balde=balde,
+                   camps=[{"id": r[0], "nome": r[1]} for r in camps], camp_sel=camp,
+                   gerencia=ctx["gerencia"])
+
+
+@router.post("/painel/prospeccao/radar/contatado")
+def prospeccao_radar_contatado(request: Request, pid: int = Form(0), desfazer: str = Form("")):
+    """Marca (ou desmarca) que o vendedor já falou com o lead.
+
+    Grava atividade além de carimbar `ultimo_contato_em`: sem a trilha, ninguém
+    sabe QUEM disse que falou — e numa carteira dividida entre 3 vendedores isso
+    vira discussão."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    with get_pool().connection() as c:
+        dono = c.execute("select vendedor_id from prospeccao where id=%s and conta_id=%s",
+                         (pid, ctx["conta_id"])).fetchone()
+        if not dono:
+            return JSONResponse({"ok": False, "erro": "lead"}, status_code=404)
+        # vendedor só mexe no que é dele; dono/gestor mexe em qualquer um
+        if not ctx["gerencia"] and dono[0] != ctx["membro_id"]:
+            return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+        if desfazer:
+            c.execute("update prospeccao set ultimo_contato_em=null, atualizado_em=now() "
+                      "where id=%s and conta_id=%s", (pid, ctx["conta_id"]))
+        else:
+            c.execute("update prospeccao set ultimo_contato_em=now(), atualizado_em=now() "
+                      "where id=%s and conta_id=%s", (pid, ctx["conta_id"]))
+            c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id, tipo, descricao)
+                         values (%s,%s,'nota','Marcado como contatado pelo Radar')""",
+                      (pid, ctx["membro_id"]))
+        c.commit()
+    return JSONResponse({"ok": True, "desfeito": bool(desfazer)})
+
+
 @router.get("/painel/prospeccao/campanhas/metricas")
 def prospeccao_campanhas_metricas(request: Request):
     """JSON leve pro polling da lista de campanhas — mesmos números, sem HTML."""
@@ -6727,6 +6879,7 @@ def _navbar(active):
     tabs = [("captar", "🎯 Captar Lead", "/painel/prospeccao?captar=1", False),
             ("base", "📇 Base", "/painel/prospeccao/base", False),
             ("campanhas", "📣 Campanhas", "/painel/prospeccao/campanhas", True),
+            ("radar", "🎯 Quem atacar", "/painel/prospeccao/radar", True),
             ("ia-insta", "✨ IA Insta", "/painel/prospeccao/ia-insta", False),
             ("comunicacao", "💬 Comunicação", "/painel/prospeccao/comunicacao", False),
             ("funil", "🔥 Funil", "/painel/prospeccao", False),
@@ -10524,4 +10677,131 @@ _env.loader.mapping["prospeccao_captar"] = _CAPTAR_TPL
 _env.loader.mapping["prospeccao_ficha"] = _FICHA_TPL
 _env.loader.mapping["prospeccao_comunicacao"] = _COMUNICACAO_TPL
 _env.loader.mapping["prospeccao_campanhas"] = _CAMPANHAS_TPL
+
+# ATENÇÃO ao escape: este template roda com autoescape DESLIGADO (o DictLoader usa
+# nomes sem extensão, e `select_autoescape()` resolve pra False nesse caso). Todo
+# dado que veio do banco sai com `|e` na mão. Nome de empresa e segmento chegam de
+# fonte externa (Google Maps, CNPJ, CSV importado) — sem o `|e` isso é injeção.
+_RADAR_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
+<style>
+.rwrap{max-width:1000px;margin:0 auto}
+.rbaldes{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem;margin:.9rem 0}
+@media(max-width:640px){.rbaldes{grid-template-columns:repeat(2,1fr)}}
+.rb{display:block;text-decoration:none;color:inherit;background:var(--card);
+    border:1px solid var(--borda);border-radius:12px;padding:.6rem .7rem}
+.rb.on{border-color:var(--verde);background:var(--neon-fundo)}
+.rb .n{font-size:1.5rem;font-weight:750;font-variant-numeric:tabular-nums;line-height:1.1}
+.rb .l{font-size:.72rem;color:var(--mut);margin-top:.15rem}
+.rb.mao .n{color:var(--verde-claro)} .rb.nao .n{color:var(--coral)}
+.rlead{background:var(--card);border:1px solid var(--borda);border-radius:12px;
+       padding:.7rem .8rem;margin-bottom:.5rem;display:flex;gap:.7rem;align-items:flex-start}
+.rlead.feito{opacity:.5}
+.rlead .corpo{flex:1;min-width:0}
+.rlead .emp{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rlead .meta{font-size:.76rem;color:var(--mut);margin-top:.1rem}
+.rsinal{display:inline-block;font-size:.74rem;border-radius:999px;padding:.05rem .5rem;margin-top:.35rem}
+.rsinal.mao{color:var(--verde-claro);border:1px solid var(--neon-borda);background:var(--neon-fundo)}
+.rsinal.nao{color:var(--coral);border:1px solid var(--coral-borda);background:var(--coral-fundo)}
+.rsinal.leu{color:var(--mut);border:1px solid var(--borda)}
+.rsinal.frio{color:var(--text-faint);border:1px solid var(--borda)}
+.racoes{display:flex;flex-direction:column;gap:.3rem;flex-shrink:0;align-items:stretch;width:170px}
+.racoes .linha{display:flex;gap:.3rem}
+.racoes .linha>*{flex:1;text-align:center}
+/* No celular a coluna fixa de ações espremia o nome da empresa em "Mimo cani…" e
+   empilhava o segmento/cidade numa tira estreita. Aqui as ações descem pra baixo
+   do lead e viram uma faixa — o nome volta a caber, que é o que o vendedor lê. */
+@media(max-width:640px){
+  .rlead{flex-direction:column;gap:.5rem;align-items:stretch}
+  /* `min-width:0` sozinho não segura filho de coluna: sem o `width:100%` o nome
+     longo (nowrap+ellipsis) estica o cartão e joga a PÁGINA no scroll lateral. */
+  .rlead .corpo{width:100%;max-width:100%}
+  .racoes{width:auto;flex-direction:row;flex-wrap:wrap}
+  .racoes>*{flex:1 1 auto}
+  .racoes .linha{flex:1 1 100%}
+}
+.rbtn{font-size:.76rem;text-decoration:none;border-radius:8px;padding:.3rem .55rem;
+      border:1px solid var(--borda);color:var(--txt);background:var(--bg);white-space:nowrap}
+.rbtn.zap{border-color:#1e5c39;color:var(--verde)}
+.rbtn.ok{cursor:pointer}
+.rvazio{text-align:center;color:var(--mut);padding:2rem 1rem;font-size:.88rem}
+</style>
+<div class="pw rwrap">
+""" + _navbar("radar") + """
+  <h2 style="margin:.2rem 0 .1rem">🎯 Quem atacar</h2>
+  <div class="mut" style="font-size:.82rem">
+    Quem deu sinal nas campanhas, do mais quente pro mais frio. Atualizado a cada minuto.
+    <span id="r-quando"></span>
+  </div>
+
+  <div class="rbaldes">
+    <a class="rb mao{% if balde=='mao' %} on{% endif %}" href="/painel/prospeccao/radar?balde=mao{% if camp_sel %}&camp={{ camp_sel }}{% endif %}">
+      <div class="n">{{ contagem.mao }}</div><div class="l">🔥 Levantou a mão</div></a>
+    <a class="rb{% if balde=='leu' %} on{% endif %}" href="/painel/prospeccao/radar?balde=leu{% if camp_sel %}&camp={{ camp_sel }}{% endif %}">
+      <div class="n">{{ contagem.leu }}</div><div class="l">👀 Leu, não respondeu</div></a>
+    <a class="rb nao{% if balde=='nao' %} on{% endif %}" href="/painel/prospeccao/radar?balde=nao{% if camp_sel %}&camp={{ camp_sel }}{% endif %}">
+      <div class="n">{{ contagem.nao }}</div><div class="l">🚫 Disse “agora não”</div></a>
+    <a class="rb{% if balde=='frio' %} on{% endif %}" href="/painel/prospeccao/radar?balde=frio{% if camp_sel %}&camp={{ camp_sel }}{% endif %}">
+      <div class="n">{{ contagem.frio }}</div><div class="l">💤 Sem sinal</div></a>
+  </div>
+
+  <form method="get" action="/painel/prospeccao/radar" style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin-bottom:.8rem">
+    <input type="hidden" name="balde" value="{{ balde|e }}">
+    <select class="fld" name="camp" onchange="this.form.submit()" style="max-width:280px">
+      <option value="0">Todas as campanhas</option>
+      {% for c in camps %}<option value="{{ c.id }}"{% if camp_sel == c.id %} selected{% endif %}>{{ c.nome|e }}</option>{% endfor %}
+    </select>
+    {% if balde %}<a class="rbtn" href="/painel/prospeccao/radar{% if camp_sel %}?camp={{ camp_sel }}{% endif %}">limpar filtro</a>{% endif %}
+  </form>
+
+  {% if balde == 'nao' %}
+  <div class="mut" style="font-size:.8rem;border:1px solid var(--coral-borda);background:var(--coral-fundo);border-radius:10px;padding:.55rem .7rem;margin-bottom:.7rem">
+    Estes clicaram em <b>“Agora não”</b> — recusaram. Ligar agora queima a marca. O lugar deles é uma reabordagem daqui a 60–90 dias, com outra oferta.
+  </div>
+  {% endif %}
+
+  {% for l in itens %}
+  <div class="rlead{% if l.falado_br %} feito{% endif %}" id="rl-{{ l.pid }}">
+    <div class="corpo">
+      <div class="emp">{{ l.empresa|e or '(sem nome)' }}</div>
+      <div class="meta">
+        {% if l.segmento %}{{ l.segmento|e }} · {% endif %}{% if l.cidade %}{{ l.cidade|e }}{% if l.uf %}/{{ l.uf|e }}{% endif %} · {% endif %}{{ l.campanha|e }}
+        · 👤 {{ l.vendedor|e }}
+      </div>
+      <span class="rsinal {{ l.balde }}">{{ l.sinal }}{% if l.quando_br %} · {{ l.quando_br }}{% endif %}</span>
+      {% if l.falado_br %}<span class="rsinal leu">✓ falado em {{ l.falado_br }}</span>{% endif %}
+    </div>
+    <div class="racoes">
+      {% if l.wa_link %}<a class="rbtn zap" href="{{ l.wa_link|e }}" target="_blank" rel="noopener">💬 chamar no zap</a>{% endif %}
+      {% if l.fone %}<a class="rbtn" href="tel:{{ l.fone|e }}">📞 {{ l.fone|e }}</a>{% endif %}
+      <div class="linha">
+        {% if l.email %}<a class="rbtn" href="mailto:{{ l.email|e }}" title="{{ l.email|e }}">✉️ e-mail</a>{% endif %}
+        <a class="rbtn" href="/painel/prospeccao/{{ l.pid }}">ficha</a>
+      </div>
+      <button type="button" class="rbtn ok" onclick="radarFalei({{ l.pid }}, {{ 'true' if l.falado_br else 'false' }})">
+        {% if l.falado_br %}↩ desfazer{% else %}✓ já falei{% endif %}</button>
+    </div>
+  </div>
+  {% else %}
+  <div class="rvazio">Nada aqui. {% if balde %}Tente outro balde ou limpe o filtro.{% else %}Quando um lead reagir a uma campanha, ele aparece nesta lista.{% endif %}</div>
+  {% endfor %}
+</div>
+<script>
+function radarFalei(pid, desfazer){
+  var b = new URLSearchParams(); b.set('pid', pid);
+  if(desfazer) b.set('desfazer','1');
+  fetch('/painel/prospeccao/radar/contatado',{method:'POST',headers:{'X-Requested-With':'fetch'},body:b})
+    .then(function(r){return r.json()})
+    .then(function(d){ if(d.ok){ location.reload(); } else { alert('Não consegui marcar ('+(d.erro||'?')+').'); } })
+    .catch(function(){ alert('Não consegui marcar.'); });
+}
+// "tempo real" aqui é recarregar sozinho: os webhooks escrevem na hora e o poller
+// roda a cada 2min, então 60s de atraso é menos que a granularidade do dado.
+// Não recarrega com a aba escondida, pra não competir com quem está atendendo.
+setInterval(function(){ if(!document.hidden) location.reload(); }, 60000);
+(function(){ var e=document.getElementById('r-quando');
+  var h=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  if(e) e.textContent='· '+h; })();
+</script>
+{% endblock %}"""
+_env.loader.mapping["prospeccao_radar"] = _RADAR_TPL
 _env.loader.mapping["prospeccao_campanha"] = _CAMPANHA_TPL

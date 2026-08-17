@@ -24,7 +24,7 @@ process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'silent'
 
 const s = require('./server')
 const { sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual,
-  marcarVivo, sessoes } = s
+  marcarVivo, deveSoltarTravaNo440, sessoes } = s
 
 let falhas = 0
 function conferir (ok, descricao) {
@@ -293,6 +293,23 @@ for (const [valor, rotulo] of [[undefined, 'undefined'], [null, 'null'], [{}, 'o
     'socket descartado não fala nem sendo o da sessão')
   conferir(socketAtual(null, atual) === false, 'sessão inexistente não estoura')
   conferir(socketAtual({ sock: atual }, null) === false, 'sem socket no evento não estoura')
+
+  // ---------------------------------------------------------------------------
+  // Conta 35, 17/08 12:25 (horário de Brasília): a rota de envio chamou
+  // iniciarSessao; 1,3s depois o socket VELHO levou 440 e o handler dele soltou o
+  // aluguel da conta; 0,4s depois a sessão NOVA conectou — sem trava. Cinco
+  // minutos depois a tabela seguia sem a linha dela, enquanto as contas 23 e 34,
+  // no mesmo processo, renovavam de 7 em 7s. Sessão conectada e desprotegida é o
+  // convite pro segundo socket na mesma credencial: a guerra de 440 de novo.
+  console.log('\n440 no socket velho não pode tirar o aluguel de quem está subindo')
+  conferir(deveSoltarTravaNo440({ iniciando: true }) === false,
+    'tem iniciarSessao em curso — o aluguel fica com quem entra')
+  conferir(deveSoltarTravaNo440({ iniciando: false }) === true,
+    'ninguém subindo — solta, pra outra instância poder assumir')
+  conferir(deveSoltarTravaNo440({}) === true,
+    'sessão sem a marca de "iniciando" — comportamento de sempre')
+  conferir(deveSoltarTravaNo440(null) === true,
+    'sessão inexistente não estoura e não segura aluguel de ninguém')
 
   console.log('\nvigia × trava: sessão de outra instância não se religa')
   const seguraDeVerdade = s.trava.segura

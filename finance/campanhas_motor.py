@@ -1064,15 +1064,22 @@ def _wa_marca(pool, aid, status, wa_sid=None, erro_codigo=None, erro_msg=None,
                            wa_erro_codigo=%s, wa_erro_msg=%s where id=%s""",
                       (status, str(erro_codigo) if erro_codigo else None, erro_msg, aid))
         elif wa_sid:
-            # estimativa de custo no envio (categoria/custo). coalesce: se o webhook de
-            # status da Meta já tiver corrigido com o valor real, não sobrescreve.
+            # `wa_custo` é o ACUMULADO do alvo: a fila manda até 3 mensagens pra ele,
+            # uma por telefone, e cada uma é cobrada. Antes isto era
+            # `coalesce(wa_custo, estimativa)` — da 2ª mensagem em diante achava um
+            # valor gravado e não somava nada, então o teto da campanha
+            # (`sum(wa_custo)`) não via o reenvio. Em produção: 17 mensagens numa
+            # tarde, R$ 0,00 somados.
+            # `wa_custo_msg` guarda a parcela DESTA mensagem — é o que o webhook de
+            # status da Meta troca pelo preço real, sem derrubar o acumulado.
             # `wa_numero` guarda PRA QUEM este SID foi: sem isso, quando a entrega
             # falha depois (webhook), não há como saber qual número riscar da fila.
             c.execute("""update campanha_alvos set wa_status=%s, wa_em=now(), wa_sid=%s,
                            wa_numero=%s,
                            wa_categoria=coalesce(wa_categoria,%s),
-                           wa_custo=coalesce(wa_custo,%s) where id=%s""",
-                      (status, wa_sid, numero, categoria, custo, aid))
+                           wa_custo=coalesce(wa_custo,0)+%s,
+                           wa_custo_msg=%s where id=%s""",
+                      (status, wa_sid, numero, categoria, custo, custo, aid))
         else:
             c.execute("update campanha_alvos set wa_status=%s, wa_em=now() where id=%s", (status, aid))
         c.commit()

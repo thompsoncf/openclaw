@@ -3519,10 +3519,19 @@ async def webhook_meta(request: Request, background_tasks: BackgroundTasks):
         for stt in meta_msg.parse_status_whatsapp(payload):
             cobr = stt["cobravel"]
             custo = _wp.custo_brl(stt["categoria"], cobr if cobr is not None else True)
+            # `wa_custo` é o acumulado do alvo (a fila manda até 3 mensagens pra ele).
+            # Corrigir é TROCAR a parcela desta mensagem, não substituir o total —
+            # senão o preço real da última apagaria o que as anteriores custaram, e o
+            # teto da campanha voltava a não ver o reenvio.
+            # Reentrante: se o mesmo status chegar duas vezes, tira e põe o mesmo
+            # valor. Ver db/migracoes/168_campanha_alvo_custo_por_mensagem.sql.
             c.execute("""update campanha_alvos
-                           set wa_categoria=%s, wa_cobravel=%s, wa_custo=%s
+                           set wa_categoria=%s, wa_cobravel=%s,
+                               wa_custo=greatest(coalesce(wa_custo,0)
+                                                 - coalesce(wa_custo_msg,0) + %s, 0),
+                               wa_custo_msg=%s
                          where wa_sid=%s""",
-                      (stt["categoria"] or None, cobr, custo, stt["sid"]))
+                      (stt["categoria"] or None, cobr, custo, custo, stt["sid"]))
         # ENTREGA: mesma regra do Twilio, num ponto só (aplicar_status_wa). Isto
         # faltava — o Cloud API lia só o `pricing` e nunca marcava entregue/lido/erro
         # no alvo, então os KPIs ficavam zerados e a fila de números não andava.

@@ -312,6 +312,33 @@ def favicon():
                     headers={"Cache-Control": "public, max-age=604800"})
 
 
+#: as três famílias da marca, servidas por nós em vez do Google (ver tema.FONTES).
+#: Nome fixo em vez de caminho livre: `{nome}.woff2` com join direto deixaria
+#: `../../` chegar em qualquer arquivo do disco.
+_FONTES_OK = {"bricolage", "inter", "jetbrains"}
+_FONTES_DIR = os.path.join(os.path.dirname(__file__), "estatico", "fontes")
+_fontes_cache: dict[str, bytes] = {}
+
+
+@app.get("/estatico/fontes/{nome}.woff2", include_in_schema=False)
+def fonte(nome: str):
+    """Fonte da marca. Lê do disco uma vez e guarda em memória — são 160 KB no
+    total, e o processo já vive mais que qualquer sessão."""
+    from fastapi.responses import Response
+    if nome not in _FONTES_OK:
+        return Response(status_code=404)
+    if nome not in _fontes_cache:
+        try:
+            with open(os.path.join(_FONTES_DIR, f"{nome}.woff2"), "rb") as fh:
+                _fontes_cache[nome] = fh.read()
+        except OSError:
+            return Response(status_code=404)
+    return Response(
+        content=_fontes_cache[nome], media_type="font/woff2",
+        # o arquivo é imutável: muda de nome se mudar de conteúdo
+        headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
 _pool = None
 _brain = None
 _transcritor = None

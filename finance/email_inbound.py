@@ -200,6 +200,10 @@ def buscar_novos(cfg: dict, desde_uid: int | None = None, limite: int = 40):
                     "assunto": _dec(msg.get("Subject", "")).strip(),
                     "corpo": _corpo(msg),
                     "quando": quando,
+                    # cabeçalhos que denunciam e-mail de máquina (ver _eh_automatico)
+                    "list_unsub": (msg.get("List-Unsubscribe") or "").strip(),
+                    "precedence": (msg.get("Precedence") or "").strip(),
+                    "auto_sub": (msg.get("Auto-Submitted") or "").strip(),
                 })
                 maior = max(maior, uid)
             except Exception as e:  # noqa: BLE001
@@ -264,6 +268,52 @@ def _tratar_bounce(c, conta_id: int, m: dict) -> int:
     return n
 
 
+# ------------------------------------------------------- e-mail de máquina
+# A caixa de uma empresa recebe muito mais robô que gente: newsletter de banco,
+# alerta de rede social, boleto, cobrança — e a própria notificação do Zaq ("Proposta
+# aprovada"), que sai pelo SMTP de sistema pro e-mail da conta e o IMAP puxa DE VOLTA
+# pra dentro. Tudo isso virava conversa no inbox de Comunicação, que nasceu pra
+# atender CLIENTE: na Prime Eventos foram 61 e-mails puxados e nenhum lead de verdade.
+#
+# Regra de ouro (aplicada em sincronizar): quem JÁ é lead da conta NUNCA é filtrado.
+# Resposta de lead entra mesmo com cabeçalho estranho — senão a campanha perde o
+# "respondeu" e a sequência continua atrás de quem já respondeu.
+
+_AUTOMATICO_LOCAL = _re.compile(
+    r"^(no.?reply|nao.?responda|nao.?responder|do.?not.?reply|donotreply|mailer|"
+    r"postmaster|bounce|notification|notifications|notificacao|newsletter)([._+-]|$)")
+
+# subdomínio de disparo em massa (ESP): cliente nenhum escreve de "email.loja.com.br"
+_AUTOMATICO_SUB = ("email.", "e-mail.", "mail.", "mailing.", "envio.", "news.",
+                   "newsletter.", "notification.", "notifications.", "notifica.",
+                   "comunicacao.", "comunicado.", "novidades.", "marketing.", "mkt.",
+                   "alerta.", "alertas.")
+
+_PRECEDENCIA_MASSA = ("bulk", "list", "junk", "auto_reply")
+
+
+def _eh_automatico(m: dict) -> bool:
+    """E-mail de máquina — no-reply, disparo em massa, auto-resposta — ou a própria
+    notificação do Zaq voltando pra caixa da empresa. Não vira conversa no inbox."""
+    de = (m.get("from_email") or "").strip().lower()
+    if "@" not in de:
+        return False
+    local, dominio = de.split("@", 1)
+    if _AUTOMATICO_LOCAL.match(local) or "noreply" in local or "no-reply" in local:
+        return True
+    if any(dominio.startswith(p) for p in _AUTOMATICO_SUB):
+        return True
+    if (m.get("list_unsub") or "").strip():                  # RFC 8058: disparo em massa
+        return True
+    if (m.get("precedence") or "").strip().lower() in _PRECEDENCIA_MASSA:
+        return True
+    auto = (m.get("auto_sub") or "").strip().lower()
+    if auto and auto != "no":                                # RFC 3834: auto-gerado
+        return True
+    sistema = (os.environ.get("SMTP_USER") or "").strip().lower()   # o próprio Zaq
+    return bool(sistema) and de == sistema
+
+
 def sincronizar(pool, conta_id: int, canal: str = "email") -> int:
     """Puxa os e-mails novos de uma CAIXA da conta ('email' ou 'email2') e grava no
     inbox. Best-effort."""
@@ -271,7 +321,7 @@ def sincronizar(pool, conta_id: int, canal: str = "email") -> int:
     if not cfg:
         return 0
     novos, maior = buscar_novos(cfg, desde_uid=cfg["ultimo_uid"])
-    n = 0
+    n = ignorados = 0
     for m in novos:
         addr = m["from_email"]
         # bounce (retorno de e-mail inválido) → marca e para a sequência; não vira conversa
@@ -296,6 +346,11 @@ def sincronizar(pool, conta_id: int, canal: str = "email") -> int:
                 lead = c.execute(
                     """select id from prospeccao where conta_id=%s and lower(email)=%s
                         order by atualizado_em desc limit 1""", (conta_id, addr)).fetchone()
+                # robô que não é lead: não abre conversa. O UID já avançou, então
+                # ele não volta no próximo ciclo. Lead conhecido passa SEMPRE.
+                if not lead and _eh_automatico(m):
+                    ignorados += 1
+                    continue
                 if lead:
                     # remetente JÁ é um lead → anexa na conversa dele
                     lead_id = lead[0]
@@ -350,6 +405,9 @@ def sincronizar(pool, conta_id: int, canal: str = "email") -> int:
             _log.info("email_in: pulei um e-mail (%s): %s", addr, e)
             continue
 
+    if ignorados:
+        _log.info("email_in: conta %s caixa %s — %d e-mail(s) de máquina ignorado(s)",
+                  conta_id, canal, ignorados)
     if maior and maior != cfg["ultimo_uid"]:
         try:
             with pool.connection() as c:

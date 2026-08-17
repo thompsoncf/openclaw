@@ -24,7 +24,7 @@ process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'silent'
 
 const s = require('./server')
 const { sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual,
-  marcarVivo, sessoes } = s
+  marcarVivo, deveSoltarTravaNo440, sessoes } = s
 
 let falhas = 0
 function conferir (ok, descricao) {
@@ -148,6 +148,9 @@ for (const [valor, rotulo] of [[undefined, 'undefined'], [null, 'null'], [{}, 'o
 ;(async () => {
   console.log('\no vigia retoma a órfã — e conta a tentativa')
   const original = s._ganchos.iniciarSessao
+  const originalPareada = s._ganchos.contaPareada
+  // a órfã com credencial no banco é o caso normal deste bloco
+  s._ganchos.contaPareada = async () => true
   const retomadas = []
   s._ganchos.iniciarSessao = async (contaId) => { retomadas.push(contaId) }
   sessoes.clear()
@@ -162,7 +165,59 @@ for (const [valor, rotulo] of [[undefined, 'undefined'], [null, 'null'], [{}, 'o
     'o relógio da espera reiniciou — a próxima só daqui a 10min')
   await s.vigiarSessoes()
   conferir(retomadas.length === 1, 'e na volta seguinte ela NÃO é retomada de novo')
+  sessoes.clear()
+
+  // ---------------------------------------------------------------------------
+  // O caso da Doce Mell (17/08): 440 às 12:04 marcou a conta como órfã; às 12:07
+  // alguém clicou "Desconectar" no painel, que APAGA a credencial do banco; às
+  // 12:10 o vigia "retomou" a órfã e, sem credencial pra retomar, o socket só
+  // soube pedir QR — cliente levando QR na tela de uma conta que ele mesmo tinha
+  // acabado de desligar. A marca de órfã é de memória; a credencial é do banco, e
+  // é o banco que manda.
+  console.log('\nórfã que foi DESCONECTADA de propósito não volta sozinha')
+  const semCred = []
+  s._ganchos.contaPareada = async (contaId) => { semCred.push(contaId); return false }
+  sessoes.set(35, { status: 'desconectado', sock: null,
+    substituidaEm: Date.now() - 30 * 60 * 1000, tentativasPos440: 2 })
+  await s.vigiarSessoes()
+  conferir(retomadas.length === 1, 'sem credencial no banco — o vigia NÃO retoma')
+  conferir(semCred.length === 1 && semCred[0] === 35, 'e foi ao banco conferir antes de decidir')
+  conferir(sessoes.get(35).substituidaEm === null,
+    'a marca de órfã sai — não reavalia isso a cada volta')
+  conferir(sessoes.get(35).tentativasPos440 === 0, 'e o contador de retomadas zera junto')
+  await s.vigiarSessoes()
+  conferir(retomadas.length === 1 && semCred.length === 1,
+    'na volta seguinte ela nem chega a ser avaliada de novo')
+  sessoes.clear()
+
+  // Banco fora do ar não pode virar conta parada: deixar uma sessão VIVA órfã é
+  // pior que um QR à toa. Na dúvida, o vigia faz o que sempre fez.
+  console.log('\nbanco fora do ar: na dúvida o vigia retoma (não perde a conta)')
+  s._ganchos.contaPareada = async () => { throw new Error('banco fora do ar') }
+  sessoes.set(35, { status: 'desconectado', sock: null,
+    substituidaEm: Date.now() - 30 * 60 * 1000 })
+  await s.vigiarSessoes()
+  conferir(retomadas.length === 2 && retomadas[1] === 35,
+    'credencial não pôde ser conferida — retoma assim mesmo')
+  conferir(sessoes.get(35).tentativasPos440 === 1, 'e conta a tentativa normalmente')
+  sessoes.clear()
+
+  // A checagem nova mora DENTRO do ramo da órfã (que exige sock null). Quem está
+  // conectado não pode nem ser consultado — muito menos tocado.
+  console.log('\nconta conectada não passa nem perto da checagem de credencial')
+  let consultou = false
+  s._ganchos.contaPareada = async () => { consultou = true; return false }
+  const sockVivo = { fake: 'vivo' }
+  sessoes.set(35, { status: 'conectado', sock: sockVivo, ultimoEvento: Date.now(),
+    substituidaEm: Date.now() - 30 * 60 * 1000 })
+  await s.vigiarSessoes()
+  conferir(consultou === false, 'tem socket vivo — o ramo da órfã nem roda')
+  conferir(sessoes.get(35).sock === sockVivo && sessoes.get(35).status === 'conectado',
+    'socket e status intactos')
+  conferir(retomadas.length === 2, 'e ninguém foi religado')
+
   s._ganchos.iniciarSessao = original
+  s._ganchos.contaPareada = originalPareada
   sessoes.clear()
 
   console.log('\nmarcarVivo tira a conta da condição de órfã')
@@ -238,6 +293,23 @@ for (const [valor, rotulo] of [[undefined, 'undefined'], [null, 'null'], [{}, 'o
     'socket descartado não fala nem sendo o da sessão')
   conferir(socketAtual(null, atual) === false, 'sessão inexistente não estoura')
   conferir(socketAtual({ sock: atual }, null) === false, 'sem socket no evento não estoura')
+
+  // ---------------------------------------------------------------------------
+  // Conta 35, 17/08 12:25 (horário de Brasília): a rota de envio chamou
+  // iniciarSessao; 1,3s depois o socket VELHO levou 440 e o handler dele soltou o
+  // aluguel da conta; 0,4s depois a sessão NOVA conectou — sem trava. Cinco
+  // minutos depois a tabela seguia sem a linha dela, enquanto as contas 23 e 34,
+  // no mesmo processo, renovavam de 7 em 7s. Sessão conectada e desprotegida é o
+  // convite pro segundo socket na mesma credencial: a guerra de 440 de novo.
+  console.log('\n440 no socket velho não pode tirar o aluguel de quem está subindo')
+  conferir(deveSoltarTravaNo440({ iniciando: true }) === false,
+    'tem iniciarSessao em curso — o aluguel fica com quem entra')
+  conferir(deveSoltarTravaNo440({ iniciando: false }) === true,
+    'ninguém subindo — solta, pra outra instância poder assumir')
+  conferir(deveSoltarTravaNo440({}) === true,
+    'sessão sem a marca de "iniciando" — comportamento de sempre')
+  conferir(deveSoltarTravaNo440(null) === true,
+    'sessão inexistente não estoura e não segura aluguel de ninguém')
 
   console.log('\nvigia × trava: sessão de outra instância não se religa')
   const seguraDeVerdade = s.trava.segura

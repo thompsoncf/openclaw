@@ -474,6 +474,29 @@ function socketAtual (s, sock) {
   return !!sock && !sock._descartado && !!s && s.sock === sock
 }
 
+// Levou 440: pode SOLTAR o aluguel da conta?
+//
+// Só se não houver uma encarnação nossa subindo agora. Com iniciarSessao em curso, o
+// 440 é do socket que está SAINDO — quem entra já pegou a trava, e soltar aqui tira o
+// aluguel de quem está entrando, não de quem saiu.
+//
+// Foi assim que a conta 35 ficou CONECTADA e SEM TRAVA em 17/08 (horário de Brasília):
+//   12:25:08.763  iniciarSessao: começando        ← a rota de envio religando a conta
+//   12:25:10.064  440 no socket velho             ← seguravaATrava: true
+//   12:25:10.132  trava: soltei a conta           ← o socket que morre solta o aluguel
+//   12:25:10.503  WhatsApp conectado              ← a sessão nova sobe sem trava
+// Cinco minutos depois a tabela seguia sem a linha dela, com a sessão trabalhando
+// exposta a qualquer outro processo abrir um segundo socket na mesma credencial — que
+// é exatamente a guerra de 440 que a trava existe pra impedir. As contas 23 e 34, no
+// mesmo processo, estavam com aluguel renovado de 7 em 7s.
+//
+// A marca de órfã (substituidaEm) continua sendo posta NOS DOIS casos, de propósito: se
+// quem estava subindo não conseguir, o vigia ainda tem por onde resgatar a conta — e
+// hoje ele confere a credencial antes (ver vigiarSessoes), então não vira QR à toa.
+function deveSoltarTravaNo440 (s) {
+  return !(s && s.iniciando)
+}
+
 // Quanto esperar antes de tentar retomar uma conta que levou 440, dobrando a cada
 // tentativa até 16× (5min, 10, 20, 40, 80). A espera existe porque quem substituiu
 // pode ser uma sessão LEGÍTIMA de fora — o WhatsApp Web que a cliente abriu no
@@ -590,11 +613,26 @@ async function registrarSessoes () {
   }
 }
 
+// A conta ainda TEM credencial pareada no banco?
+//
+// Mesmo critério do restaurarSessoes (creds.me preenchido): é o que o Baileys usa
+// pra decidir entre RETOMAR a sessão e pedir QR novo. Fica no banco de propósito —
+// é a única fonte de verdade que sobrevive a deploy, a troca de instância e à
+// memória de um processo que não foi quem atendeu o "Desconectar".
+async function contaPareada (contaId) {
+  const r = await pool.query(
+    `select 1 from wa_qr_auth
+      where conta_id=$1 and arquivo='creds' and conteudo::json->'me'->>'id' is not null`,
+    [contaId])
+  return r.rowCount > 0
+}
+
 // Costura só pro teste: o resgate da órfã chama iniciarSessao, que abre socket de
 // verdade e fala com o WhatsApp — coisa que teste nenhum pode fazer. Passando por
 // aqui, o teste troca a função e confere QUANDO o vigia decide retomar, que é a
-// regra que interessa. Em produção é o iniciarSessao de sempre.
-const _ganchos = { iniciarSessao }
+// regra que interessa. Em produção é o iniciarSessao de sempre. O contaPareada
+// entra pelo mesmo motivo: é uma ida ao banco no meio da decisão.
+const _ganchos = { iniciarSessao, contaPareada }
 
 async function vigiarSessoes () {
   const agora = Date.now()
@@ -603,6 +641,33 @@ async function vigiarSessoes () {
     // silêncio abaixo (que exige um). É a conta que soltou a trava depois de ser
     // substituída e ficou sem ninguém — ver sessaoOrfa.
     if (sessaoOrfa(s, agora, ESPERA_POS_440_MS)) {
+      // Retomar só faz sentido se AINDA existe credencial pra retomar. Sem ela o
+      // iniciarSessao abre um socket que só sabe pedir QR — e foi exatamente isso
+      // na Doce Mell: 440 às 12:04, "Desconectar" no painel às 12:07 (que apaga a
+      // credencial), e o vigia às 12:10 "retomando" a conta que o cliente tinha
+      // acabado de desligar — devolvendo um QR que ninguém pediu.
+      //
+      // A marca de órfã é de MEMÓRIA, e memória não fecha esse buraco: o
+      // "Desconectar" pode ter sido atendido por outro processo, ou por este mesmo
+      // antes de um deploy. Credencial no banco fecha.
+      let pareada = true
+      try {
+        pareada = await _ganchos.contaPareada(contaId)
+      } catch (e) {
+        // Banco fora do ar não pode virar conta parada: na dúvida RETOMA, que é o
+        // comportamento de sempre. Deixar uma sessão viva órfã é pior que um QR à toa.
+        log.warn({ contaId, e: String(e) },
+          'vigia: não consegui conferir a credencial — retomando assim mesmo')
+      }
+      if (!pareada) {
+        // Sai da condição de órfã pra não reavaliar isso a cada volta do vigia.
+        // Não mexo no resto da sessão: quem reconecta é a pessoa, pela tela.
+        s.substituidaEm = null
+        s.tentativasPos440 = 0
+        log.info({ contaId },
+          'vigia: órfã sem credencial no banco — foi desconectada de propósito, não retomo')
+        continue
+      }
       s.tentativasPos440 = (s.tentativasPos440 || 0) + 1
       s.substituidaEm = agora        // reinicia a espera, tenha dado certo ou não
       log.warn({ contaId, tentativa: s.tentativasPos440,
@@ -1801,7 +1866,16 @@ async function iniciarSessao (contaId) {
         s.substituidaEm = Date.now()
         // Solta: esta sessão não volta AGORA (reconectar aqui vira guerra de sessões),
         // e segurar o aluguel sem usar só impediria outra instância de assumir.
-        await trava.soltar(contaId)
+        //
+        // MENOS quando já tem encarnação nossa subindo: aí o aluguel é de quem está
+        // entrando, e soltar deixa a sessão nova conectada e desprotegida — ver
+        // deveSoltarTravaNo440.
+        if (deveSoltarTravaNo440(s)) {
+          await trava.soltar(contaId)
+        } else {
+          log.info({ contaId },
+            '440 no socket velho com sessão nova subindo — o aluguel fica com quem entra')
+        }
         return
       }
       const deslogado = code === DisconnectReason.loggedOut
@@ -2205,6 +2279,11 @@ const servidor = http.createServer(async (req, res) => {
             await limparTudo()
           }
         } catch (_) {}
+        // Apaga a marca de órfã de 440 ANTES de soltar a sessão. O delete abaixo
+        // resolve o caso normal, mas quem já tiver este objeto na mão (um timer, o
+        // laço do vigia rodando agora) segue com a referência antiga — e órfã com
+        // credencial apagada é justamente o que faz o vigia devolver QR sozinho.
+        if (s) { s.substituidaEm = null; s.tentativasPos440 = 0 }
         sessoes.delete(contaId)
         esquecerConta(contaId)
         // Desconectou de propósito: solta o aluguel e cancela a tentativa de
@@ -2317,4 +2396,4 @@ servidor.listen(PORT, () => {
 }
 
 // exposto só pro teste — ver o bloco acima
-module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, marcarVivo, vigiarSessoes, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }
+module.exports = { aprenderLid, gravarLidsPendentes, esquecerConta, guardarEnviada, buscarEnviada, deveSincronizarHistorico, prepararHistorico, sessaoMuda, tetoMudo, sessaoOrfa, esperaPos440, sessaoFirme, socketAtual, marcarVivo, vigiarSessoes, contaPareada, deveSoltarTravaNo440, _ganchos, enfileirarLog, gravarLogsPendentes, registrarSessoes, TIPO_HIST, lidMaps, lidsPendentes, enviadas, jidsResolvidos, pool, iniciarSessao, trava, sessoes, tentativasDeTrava, encerrar, _logFila }

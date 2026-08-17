@@ -52,6 +52,19 @@ BLOQUEIO_ROT = {
     # códigos 2xxxx do Twilio valem pra CONTA inteira (ver campanhas_motor._erro_da_conta)
     "twilio_20003": "O Twilio recusou a autenticação da conta — confira as "
                     "credenciais no servidor.",
+    # códigos da Meta (Cloud API); a lista do que é do destinatário está em
+    # campanhas_motor._META_ALVO — o resto pára a campanha e cai aqui
+    "meta_190": "O token do WhatsApp da empresa venceu — reconecte o número em "
+                "Comunicação › Canais.",
+    "meta_131031": "A Meta travou a conta de WhatsApp da empresa. Nenhum alvo foi "
+                   "gasto — resolva no Gerenciador da Meta e volte aqui.",
+    "meta_131042": "A Meta bloqueou os envios por pendência de pagamento na conta "
+                   "de WhatsApp. Nenhum alvo foi gasto.",
+    "meta_131048": "A Meta limitou os envios deste número por qualidade/spam. "
+                   "Nenhum alvo foi gasto — espere e volte mais devagar.",
+    "meta_sem_codigo": "Não deu pra falar com a Meta agora (rede ou instabilidade). "
+                       "Nenhum alvo foi gasto; a campanha volta sozinha na próxima "
+                       "passada.",
 }
 
 
@@ -66,6 +79,9 @@ def rotulo_bloqueio(codigo: str | None) -> str:
         return rot
     if codigo.startswith("twilio_"):
         return (f"O Twilio recusou o envio (código {codigo[7:]}) — é um erro da conta, "
+                "não dos leads. Nenhum alvo foi gasto.")
+    if codigo.startswith("meta_"):
+        return (f"A Meta recusou o envio (código {codigo[5:]}) — é um erro da conta, "
                 "não dos leads. Nenhum alvo foi gasto.")
     return "O provedor de WhatsApp recusou o envio."
 

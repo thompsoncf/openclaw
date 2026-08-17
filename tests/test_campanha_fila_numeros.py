@@ -36,6 +36,7 @@ create table campanha_alvos (id bigserial primary key, campanha_id bigint, prosp
   status text default 'fila', wa_status text, wa_em timestamptz, wa_sid text,
   wa_numero text,
   wa_erro_codigo text, wa_erro_msg text, wa_categoria text, wa_custo numeric(10,4),
+  wa_custo_msg numeric(10,4),
   alvo_telefone text, wa_tentados jsonb not null default '[]'::jsonb,
   wa_tentativas int not null default 0);
 create table campanha_eventos (id bigserial primary key, campanha_id bigint, prospeccao_id bigint,

@@ -39,6 +39,35 @@ def configurado(wa_phone_id: str, token: str) -> bool:
     return bool(wa_phone_id and token)
 
 
+def _erro_meta(corpo: str) -> dict:
+    """Tira o código de erro da Meta do corpo da recusa: {'codigo': int, 'msg': str}.
+
+    A Graph API responde a falha com `{"error": {"code": 190, "error_subcode": ...,
+    "message": "...", "error_data": {"details": "..."}}}`. Sem ler isso, o retorno
+    do envio saía só com o texto cru — e quem chama não tinha COMO separar "o token
+    da conta venceu" de "este número não tem WhatsApp". É a mesma leitura que o
+    adaptador do Twilio já faz com `TwilioRestException.code` (whatsapp_twilio.
+    _erro_provedor); sem ela a campanha ficava cega justamente no provedor que
+    carrega o número próprio do cliente.
+
+    Devolve `{}` quando não dá pra ler o código — melhor nada que um número chutado.
+    """
+    try:
+        err = (json.loads(corpo or "{}") or {}).get("error") or {}
+    except (ValueError, TypeError):
+        return {}
+    if not isinstance(err, dict):
+        return {}
+    try:
+        cod = int(err.get("code"))
+    except (TypeError, ValueError):
+        return {}
+    det = ((err.get("error_data") or {}).get("details")
+           if isinstance(err.get("error_data"), dict) else "")
+    msg = (err.get("message") or "") + ((" — " + det) if det else "")
+    return {"codigo": cod, "msg": msg[:300] or f"erro {cod} da Meta"}
+
+
 def _post(wa_phone_id: str, token: str, payload: dict, endpoint: str = "messages") -> dict:
     url = f"{_GRAPH}/{urllib.parse.quote(str(wa_phone_id))}/{endpoint}"
     try:
@@ -65,11 +94,15 @@ def _post(wa_phone_id: str, token: str, payload: dict, endpoint: str = "messages
         from core.falhas import avaliar_falha_provedor
         avaliar_falha_provedor(f"http_{e.code}: {det}", servico="WhatsApp Cloud API",
                                canal="whatsapp")
-        return {"ok": False, "erro": det}
+        return {"ok": False, "erro": det, "provedor": "cloud", **_erro_meta(det)}
     except Exception as e:  # noqa: BLE001
         from core.falhas import avaliar_falha_provedor
         avaliar_falha_provedor(e, servico="WhatsApp Cloud API", canal="whatsapp")
-        return {"ok": False, "erro": str(e)[:200]}
+        # rede/timeout: não é recusa da Meta, é o servidor sem alcançar a Graph.
+        # Vai como falha da CONTA (sem código) — quem chama decide, mas o alvo não
+        # tem culpa nenhuma e não pode ser queimado por isso.
+        return {"ok": False, "erro": str(e)[:200], "provedor": "cloud",
+                "msg": str(e)[:300] or "sem resposta da Graph API"}
 
 
 def enviar_texto(wa_phone_id: str, token: str, numero: str, corpo: str) -> dict:

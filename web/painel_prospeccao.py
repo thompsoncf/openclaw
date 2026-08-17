@@ -3616,10 +3616,19 @@ async def webhook_meta(request: Request, background_tasks: BackgroundTasks):
         for stt in meta_msg.parse_status_whatsapp(payload):
             cobr = stt["cobravel"]
             custo = _wp.custo_brl(stt["categoria"], cobr if cobr is not None else True)
+            # `wa_custo` é o acumulado do alvo (a fila manda até 3 mensagens pra ele).
+            # Corrigir é TROCAR a parcela desta mensagem, não substituir o total —
+            # senão o preço real da última apagaria o que as anteriores custaram, e o
+            # teto da campanha voltava a não ver o reenvio.
+            # Reentrante: se o mesmo status chegar duas vezes, tira e põe o mesmo
+            # valor. Ver db/migracoes/168_campanha_alvo_custo_por_mensagem.sql.
             c.execute("""update campanha_alvos
-                           set wa_categoria=%s, wa_cobravel=%s, wa_custo=%s
+                           set wa_categoria=%s, wa_cobravel=%s,
+                               wa_custo=greatest(coalesce(wa_custo,0)
+                                                 - coalesce(wa_custo_msg,0) + %s, 0),
+                               wa_custo_msg=%s
                          where wa_sid=%s""",
-                      (stt["categoria"] or None, cobr, custo, stt["sid"]))
+                      (stt["categoria"] or None, cobr, custo, custo, stt["sid"]))
         # ENTREGA: mesma regra do Twilio, num ponto só (aplicar_status_wa). Isto
         # faltava — o Cloud API lia só o `pricing` e nunca marcava entregue/lido/erro
         # no alvo, então os KPIs ficavam zerados e a fila de números não andava.
@@ -4590,6 +4599,19 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
                                                        nullif(trim(p.telefone),'')) is not null)
                  from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
                 where a.campanha_id=%s""", (camp_id,)).fetchone()
+        # "Na fila" só vale pra quem AINDA TEM por onde sair. Um alvo sem e-mail e
+        # com o WhatsApp já resolvido está parado em `fila` pra sempre: o motor de
+        # e-mail exige '@' e a fila do WhatsApp é `wa_status is null`. Contando os
+        # dois juntos, a tela prometia trabalho que não ia acontecer — 122 alvos em
+        # 5 campanhas desta conta apareciam "na fila" com os dois canais esgotados.
+        fila_viva, fila_sem_canal = c.execute(
+            """select count(*) filter (where position('@' in coalesce(p.email,'')) > 1
+                                          or (a.wa_status is null and %s)),
+                      count(*) filter (where position('@' in coalesce(p.email,'')) <= 1
+                                         and not (a.wa_status is null and %s))
+                 from campanha_alvos a join prospeccao p on p.id=a.prospeccao_id
+                where a.campanha_id=%s and a.status='fila'""",
+            (cp[7], cp[7], camp_id)).fetchone()
         leads = c.execute(
             """select p.empresa, p.email, a.status, a.passo_atual,
                       to_char(a.proximo_envio_em - interval '3 hours','DD/MM HH24:MI'),
@@ -4661,7 +4683,8 @@ def prospeccao_campanha_det(request: Request, camp_id: int, seg: str = "", cidad
             "remetente_slot": cp[16], "wa_mmlite": cp[17],
             "teto_wa": (f"{float(cp[18]):.2f}" if cp[18] is not None else ""),
             "responsavel_id": cp[19]}
-    metr = {"total": na_camp, "fila": st.get("fila", 0), "enviados": enviados, "responderam": resp,
+    metr = {"total": na_camp, "fila": fila_viva, "sem_canal": fila_sem_canal,
+            "enviados": enviados, "responderam": resp,
             "descadastros": st.get("descadastrou", 0), "erros": st.get("erro", 0),
             "concluidos": st.get("concluido", 0), "hoje": hoje, "abriram": abriram,
             "taxa": (round(100 * resp / enviados) if enviados else 0),
@@ -10073,6 +10096,7 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
           <span class="chip {% if metr.responderam %}on{% endif %}">{{ metr.responderam }} responderam</span>
           <span class="chip">{{ metr.taxa }}% taxa</span>
           <span class="chip">{{ metr.fila }} na fila</span>
+          {% if metr.sem_canal %}<span class="chip">{{ metr.sem_canal }} sem canal</span>{% endif %}
           {% if metr.wa_custo.tem %}<span class="chip">💰 {{ metr.wa_custo.total }}</span>{% endif %}
         </span>
         <span class="caret">▾</span>
@@ -10125,9 +10149,10 @@ _CAMPANHA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + ""
         </div>
         {% endif %}
         <div class="kpigrp"><div class="kpihead">📊 Geral</div>
-          <div class="cpstats5">
+          <div class="cpstats6">
             <div class="cpstat g"><div class="n">{{ metr.taxa }}%</div><div class="l">Taxa resposta</div></div>
             <div class="cpstat"><div class="n">{{ metr.fila }}</div><div class="l">Na fila</div></div>
+            <div class="cpstat"><div class="n">{{ metr.sem_canal }}</div><div class="l">Sem canal</div></div>
             <div class="cpstat r"><div class="n">{{ metr.descadastros }}</div><div class="l">Descadastros</div></div>
             <div class="cpstat{% if metr.erros_total %} r{% endif %}"><div class="n">{{ metr.erros_total }}</div><div class="l">Erros totais</div></div>
             <div class="cpstat"><div class="n">{{ metr.hoje }}<span style="font-size:.9rem;color:var(--mut)">/{{ camp.limite }}</span></div><div class="l">Hoje</div></div>

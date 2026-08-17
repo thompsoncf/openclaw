@@ -127,9 +127,27 @@ def _contas_com_whatsapp(c) -> list[tuple]:
             group by ct.id, ct.nome_fantasia, ct.nome, ct.email""").fetchall()
 
 
+def envia_de_verdade(conta_id: int, modo: str, contas_ligadas: str) -> bool:
+    """Este aviso SAI, ou só é registrado?
+
+    Alarme novo estreia em ENSAIO: ele avalia tudo e só escreve no log o que teria
+    mandado. Assim dá pra ver os disparos reais antes de qualquer cliente receber
+    mensagem — se a calibragem estiver errada, o erro fica no log e não no bolso de
+    alguém. Ligar é decisão de quem viu os disparos:
+
+        app_config['wa_silencio_modo']   = 'ligado'   → manda pra todo mundo
+        app_config['wa_silencio_contas'] = '35,34'    → manda só pra essas
+                                                        (vale mesmo em ensaio)
+    """
+    if (modo or "").strip().lower() == "ligado":
+        return True
+    escolhidas = {p.strip() for p in (contas_ligadas or "").split(",") if p.strip()}
+    return str(conta_id) in escolhidas
+
+
 def rodar(pool, hora_brt: int | None = None) -> int:
-    """Uma passada: avisa quem precisa. Devolve quantos avisos saíram.
-    Best-effort — nunca levanta (roda no mesmo ticker dos lembretes)."""
+    """Uma passada: avisa quem precisa. Devolve quantos avisos saíram DE VERDADE
+    (ensaio não conta). Best-effort — nunca levanta (roda no ticker dos lembretes)."""
     if hora_brt is None:
         from .agenda import agora_brt
         hora_brt = agora_brt().hour
@@ -140,11 +158,19 @@ def rodar(pool, hora_brt: int | None = None) -> int:
     except Exception as e:  # noqa: BLE001
         _log.info("wa_silencio: não deu pra listar as contas: %s", e)
         return 0
+    modo = config_app.get_config(pool, "wa_silencio_modo", "ensaio") or "ensaio"
+    contas_ligadas = config_app.get_config(pool, "wa_silencio_contas", "") or ""
 
     for conta_id, nome, email, minutos, recebidas_7d, ultima_in in linhas:
         try:
             episodio = ultima_in.isoformat() if ultima_in else None
-            chave = f"wa_silencio_aviso_{conta_id}"
+            real = envia_de_verdade(conta_id, modo, contas_ligadas)
+            # O ensaio tem dedup PRÓPRIO: sem isso ele gastaria a marca do episódio e,
+            # no dia em que o alarme fosse ligado, o aviso de verdade não sairia —
+            # o episódio já constaria como avisado. Com chave separada, o ensaio
+            # também não repete a mesma linha de log a cada 2 minutos.
+            chave = (f"wa_silencio_aviso_{conta_id}" if real
+                     else f"wa_silencio_ensaio_{conta_id}")
             ja = config_app.get_config(pool, chave)
             if not deve_avisar(minutos, int(recebidas_7d or 0), hora_brt, ja, episodio):
                 continue
@@ -152,6 +178,14 @@ def rodar(pool, hora_brt: int | None = None) -> int:
             # grava o dedup ANTES de mandar: se o envio falhar, é melhor perder um
             # aviso do que arriscar repetir o mesmo alarme a cada 2 minutos
             config_app.set_config(pool, chave, episodio)
+            if not real:
+                _log.warning(
+                    "wa_silencio[ENSAIO]: TERIA avisado a conta %s (%s) — %d min sem "
+                    "receber, ritmo normal ~%d min. Pra ligar de verdade: "
+                    "app_config wa_silencio_contas='%s'",
+                    conta_id, nome, int(minutos),
+                    int(_MIN_UTEIS_7D / max(int(recebidas_7d or 0), 1)), conta_id)
+                continue
             ok = notificar.enviar_para_dono(pool, conta_id, tg)
             if not ok and email:
                 try:

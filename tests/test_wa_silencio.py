@@ -95,6 +95,28 @@ def test_nunca_recebeu_nao_e_silencio():
     assert ws.deve_avisar(None, 468, HORA_OK, None, EP) is False
 
 
+def test_estreia_em_ensaio_ninguem_recebe():
+    """Alarme novo não estreia mandando mensagem pra cliente. O padrão é ensaio: ele
+    avalia e escreve no log o que TERIA mandado, e quem viu os disparos decide."""
+    assert ws.envia_de_verdade(35, "ensaio", "") is False
+    assert ws.envia_de_verdade(35, "", "") is False
+    assert ws.envia_de_verdade(35, None, None) is False
+
+
+def test_ligar_uma_conta_de_cada_vez():
+    """O jeito pretendido de ligar: conta por conta, depois de ver o disparo dela."""
+    assert ws.envia_de_verdade(35, "ensaio", "35") is True
+    assert ws.envia_de_verdade(34, "ensaio", "35") is False
+    assert ws.envia_de_verdade(34, "ensaio", "35,34") is True
+    # tolerante ao jeito que a pessoa digita na mão
+    assert ws.envia_de_verdade(34, "ensaio", " 35 , 34 ") is True
+
+
+def test_ligar_geral():
+    assert ws.envia_de_verdade(99, "ligado", "") is True
+    assert ws.envia_de_verdade(99, "LIGADO", "") is True
+
+
 def test_texto_diz_o_que_fazer():
     """Aviso que só assusta não ajuda: tem que ter o teste (mandar mensagem de outro
     celular) e o que NÃO fazer (Desconectar apaga o cofre e custa horas)."""

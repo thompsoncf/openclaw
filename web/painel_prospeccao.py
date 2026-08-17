@@ -8191,8 +8191,18 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           {# "conectado" é o que o serviço acha da SESSÃO; isto aqui é o que a caixa
              viu de verdade. Os dois discordando é exatamente o sintoma da sessão que
              emudece sem cair — e era o que ninguém tinha como perceber. #}
-          {% if chip.sem_receber %}· <span style="color:var(--ambar)">sem receber {{ chip.sem_receber }}</span>
-          · <a href="/painel/prospeccao/comunicacao?aba=canais">conferir o chip</a>{% endif %}
+          {% if chip.sem_receber %}· <span style="color:var(--ambar)"><b>sem receber {{ chip.sem_receber }}</b></span>
+          · <a href="/painel/prospeccao/comunicacao?aba=canais">conferir o chip</a>
+          {# "conectado + sem receber" é o estado que engana: ninguém desconfia de um
+             chip verde. Dizer o TESTE aqui vale mais que o alerta — mandar mensagem
+             de outro celular resolve a dúvida em 10 segundos, e sem isso a reação
+             comum era clicar em Desconectar, que só piora (apaga o cofre de chaves e
+             deixa a conta horas sem receber). O dono também leva este aviso no
+             Telegram/e-mail — ver finance/wa_silencio.py. #}
+          <div style="font-size:.72rem;color:var(--txt-mut);margin-top:.2rem">
+            Teste: mande uma mensagem de <b>outro celular</b> pro número. Se ela não
+            aparecer aqui, reconecte o chip em Canais — <b>não</b> use o Desconectar.
+          </div>{% endif %}
         {% elif chip.estado == 'sincronizando' %}
           <span class="pt" style="background:var(--ambar)"></span>Chip
           {% if chip.nome %}<b>{{ chip.nome }}</b> · {% endif %}<code>{{ chip.numero }}</code>

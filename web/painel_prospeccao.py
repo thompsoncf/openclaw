@@ -8932,7 +8932,9 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           var apg=document.getElementById('qr-apagar'),ret=document.getElementById('qr-retencao');
           if(apg)apg.style.display=(d.status==='desconectado')?'inline-flex':'none';
           if(ret)ret.style.display=(d.status==='desconectado')?'block':'none';
-          // chegou resposta: o botão sai do "Verificando…" e volta a ser clicável
+          // chegou resposta: desarma o cão de guarda, o botão sai do "Verificando…"
+          // e volta a ser clicável
+          if(_qrEspera){clearTimeout(_qrEspera);_qrEspera=null;}
           if(btn){btn.textContent=conectado?'Reconectar':'📱 Gerar QR';btn.disabled=false;}
           if(msg)msg.style.color=conectado?'var(--verde-claro)':'';
           // só para de perguntar quando realmente não tem mais nada mudando:
@@ -8942,9 +8944,19 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         // isso é justamente a mentira que o "Verificando…" existe pra evitar. Libera
         // o botão pro usuário poder agir e diz que não deu pra checar.
         function qrIndefinido(){var btn=document.getElementById('qr-btn'),m=document.getElementById('qr-msg');
+          if(_qrEspera){clearTimeout(_qrEspera);_qrEspera=null;}
           if(btn&&btn.disabled){btn.textContent='📱 Gerar QR';btn.disabled=false;}
-          if(m&&!m.textContent){m.textContent='Não deu pra checar a sessão agora.';m.style.color='var(--ambar)';}}
-        function qrPoll(){fetch('/painel/prospeccao/comunicacao/whatsapp-qr-status').then(function(r){return r.json();}).then(qrShow).catch(qrIndefinido);}
+          if(m&&!m.textContent){m.textContent='Não deu pra checar a sessão agora — pode gerar o QR.';m.style.color='var(--ambar)';}}
+        // CÃO DE GUARDA do "Verificando…". A consulta pode não FALHAR nem RESPONDER:
+        // o /iniciar de uma conta caída tenta religar antes de devolver, e o timeout
+        // do servidor pro serviço de QR é 20s (finance/whatsapp_qr.py). Sem prazo aqui,
+        // um botão desabilitado esperando essa resposta deixava a tela sem saída —
+        // pior que o estado anterior, em que ele era sempre clicável.
+        var _qrEspera=null;
+        function qrEsperando(){if(_qrEspera)clearTimeout(_qrEspera);
+          _qrEspera=setTimeout(qrIndefinido,7000);}
+        function qrPoll(){qrEsperando();
+          fetch('/painel/prospeccao/comunicacao/whatsapp-qr-status').then(function(r){return r.json();}).then(qrShow).catch(qrIndefinido);}
         function qrIniciar(){var btn=document.getElementById('qr-btn'),msg=document.getElementById('qr-msg');
           btn.disabled=true;var t=btn.textContent;btn.textContent='Gerando…';if(msg)msg.textContent='';
           fetch('/painel/prospeccao/comunicacao/whatsapp-qr-iniciar',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
@@ -8999,6 +9011,9 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         // com o que já tinha salvo. iniciarSessao só gera QR de verdade quando não
         // existe credencial válida — reconectar não tem custo/risco de rodar à toa.
         function qrAutoReconectar(){
+          // com prazo: este POST é o que mais demora (religa antes de responder), e
+          // era ele que deixava o "Verificando…" preso na abertura da tela.
+          qrEsperando();
           fetch('/painel/prospeccao/comunicacao/whatsapp-qr-iniciar',{method:'POST',headers:{'X-Requested-With':'fetch'}})
             .then(function(r){return r.json();}).then(function(d){qrShow(d);})
             .catch(function(){qrPoll();})

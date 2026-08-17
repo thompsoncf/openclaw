@@ -32,8 +32,12 @@ def pool():
         # conversas referencia prospeccao(id); o módulo inteiro de prospecção
         # não interessa aqui, então entra só o alvo da FK (mesma manha do
         # test_vendas com orcamentos).
+        # empresa/contato/atualizado_em entram porque o sincronismo, ao aprender um
+        # nome, desce ele pro lead que ainda está com o provisório (_batiza_lead_pendente)
         c.execute("""create table if not exists prospeccao (
-                       id bigserial primary key, conta_id bigint)""")
+                       id bigserial primary key, conta_id bigint,
+                       empresa text, contato text,
+                       atualizado_em timestamptz default now())""")
         c.execute("""create table if not exists prospeccao_atividades (
                        id bigserial primary key, prospeccao_id bigint, tipo text,
                        membro_id bigint, descricao text,

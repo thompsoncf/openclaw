@@ -249,3 +249,58 @@ def test_rodizio_quebrado_nao_engole_a_mensagem(pool, monkeypatch):
             """select texto from mensagens m join conversas cv on cv.id=m.conversa_id
                 where cv.prospeccao_id=%s""", (lead[0],)).fetchone()[0] \
             == "quero fazer um pedido"
+
+
+# --------------------------------------------- 3. o nome que chega depois do lead
+
+def _recebe_sem_nome(c, texto, *, sid):
+    """Como na vida real quando nem a agenda nem o pushName chegaram ainda."""
+    return pp._wa_inbound_conversa(c, CONTA, NUM, texto, sid, "", False,
+                                   exigir_continuidade=False)[0]
+
+
+def test_o_nome_desce_pro_lead_quando_aparece_depois(pool):
+    """O lead é batizado no instante em que a mensagem chega — e nesse instante o
+    nome pode não existir em lugar nenhum. Na Doce Mell isso deu 8 leads chamados
+    'Contato WhatsApp' cujo nome estava, sete minutos depois, na própria conversa."""
+    with pool.connection() as c:
+        conv = _recebe_sem_nome(c, "oi", sid="n1")
+        lead = c.execute("select id, empresa from prospeccao where conta_id=%s",
+                         (CONTA,)).fetchone()
+        assert lead[1] == pp.NOME_PROVISORIO, "sem nome nenhum, nasce provisório"
+
+        # o pushName chega na mensagem seguinte — é o caso real
+        pp._wa_inbound_conversa(c, CONTA, NUM, "quero um bolo", "n2", "gilmaria cruz",
+                                False, exigir_continuidade=False)
+        c.commit()
+        assert c.execute("select empresa, contato from prospeccao where id=%s",
+                         (lead[0],)).fetchone() == ("gilmaria cruz", "gilmaria cruz")
+
+
+def test_nome_digitado_por_gente_nao_e_sobrescrito(pool):
+    """Quem escreveu sabe mais que o WhatsApp: o pushName não derruba nome de gente."""
+    with pool.connection() as c:
+        _recebe_sem_nome(c, "oi", sid="d1")
+        lead = c.execute("select id from prospeccao where conta_id=%s", (CONTA,)).fetchone()[0]
+        c.execute("update prospeccao set empresa=%s, contato=%s where id=%s",
+                  ("Confeitaria da Ana", "Ana", lead))
+        # o WhatsApp insiste com outro nome
+        pp._wa_inbound_conversa(c, CONTA, NUM, "oi de novo", "d2", "aninha 🌸",
+                                False, exigir_continuidade=False)
+        c.commit()
+        assert c.execute("select empresa, contato from prospeccao where id=%s",
+                         (lead,)).fetchone() == ("Confeitaria da Ana", "Ana")
+
+
+def test_numero_cru_no_lugar_do_nome_tambem_e_corrigido(pool):
+    """Irmão do provisório: o lead que nasceu com o número no lugar do nome."""
+    with pool.connection() as c:
+        _recebe_sem_nome(c, "oi", sid="c1")
+        lead = c.execute("select id from prospeccao where conta_id=%s", (CONTA,)).fetchone()[0]
+        c.execute("update prospeccao set empresa=%s, contato=%s where id=%s",
+                  ("+" + NUM, "+" + NUM, lead))
+        pp._wa_inbound_conversa(c, CONTA, NUM, "oi", "c2", "Joaquim", False,
+                                exigir_continuidade=False)
+        c.commit()
+        assert c.execute("select empresa from prospeccao where id=%s",
+                         (lead,)).fetchone()[0] == "Joaquim"

@@ -432,6 +432,26 @@ def test_aba_fila_mostra_o_numero_em_todas_as_telas():
     assert "class=tsel" not in pc._abas_dono("orcamentos")  # gestor não tem fila
 
 
+def test_gestor_tem_como_sair_pela_barra():
+    """O Sair do gestor existe em /cockpit/perfil desde sempre — mas só se chegava
+    nele tocando nas INICIAIS DA EMPRESA num círculo sem rótulo. Na prática, quem
+    entrava no app de gestão não achava como sair."""
+    from web import painel_cockpit as pc
+    barra = pc._abas_dono("visao")
+    assert ">Perfil<" in barra
+    assert f"href='{pc._BASE}/perfil'" in barra
+
+    # e a aba certa acende: antes `_abas_dono("perfil")` não casava com nada da
+    # lista, então a barra inteira ficava apagada
+    assert pc._abas_dono("perfil").count("<a class=on") == 1
+    for tela in ("visao", "placar", "leads", "orcamentos", "ativ", "perfil"):
+        assert pc._abas_dono(tela).count("<a class=on") == 1, tela
+
+    # o vendedor não herda a aba do gestor: são barras diferentes
+    assert pc._abas_vend("fila").count("<a") == 5
+    assert pc._abas_dono("visao").count("<a") == 6
+
+
 def test_total_pendentes_soma_a_carteira_e_ignora_fechados(pool):
     """O número da bolinha do ícone: soma de todas as conversas do vendedor."""
     with pool.connection() as c:

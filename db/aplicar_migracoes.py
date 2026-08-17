@@ -28,17 +28,37 @@ def criar_tabela_rastreamento(pool):
 
 def migracao_ja_rodou(pool, nome: str) -> bool:
     """Verifica se uma migração já foi executada."""
-    try:
-        with pool.connection() as conn:
-            # Use cursor explicitamente para evitar prepared statement reutilizado
-            with conn.cursor() as cur:
-                cur.execute(
-                    "select 1 from schema_migrations where nome = %s", (nome,)
-                )
-                r = cur.fetchone()
-        return r is not None
-    except Exception:
-        return False
+    # NUNCA responder False por causa de um erro. "Não sei" não é "não rodou": o
+    # chamador reexecuta a migração, e reexecutar migração é destrutivo por
+    # natureza (drop/recreate de constraint, backfill que soma de novo).
+    #
+    # Aconteceu em 17/ago: três migrações registradas desde julho (090, 109, 127)
+    # foram reexecutadas num deploy porque este SELECT falhou e o except respondeu
+    # "não rodou". A 127 derruba e recria o check de prospeccao_atividades sem
+    # 'engajamento', valor que a 169 passou a usar — e o pre-deploy morreu com
+    # "violated by some row", deixando o serviço no código anterior.
+    #
+    # A falha do SELECT em si é esperada de vez em quando: o pooler do Supabase é
+    # transaction-mode, e o prepared statement que o psycopg cria depois de
+    # algumas execuções pode não existir no backend que atende a próxima. Por isso
+    # a tentativa é repetida com `prepare=False` antes de desistir — e, se ainda
+    # assim falhar, o erro SOBE e o deploy pára. Deploy que pára é problema; deploy
+    # que reaplica migração antiga em silêncio é incidente.
+    ultimo = None
+    for tentativa in range(3):
+        try:
+            with pool.connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("select 1 from schema_migrations where nome = %s",
+                                (nome,), prepare=False)
+                    return cur.fetchone() is not None
+        except Exception as e:  # noqa: BLE001 — relançado abaixo se insistir
+            ultimo = e
+            time.sleep(0.4 * (tentativa + 1))
+    raise RuntimeError(
+        f"não deu pra saber se a migração {nome} já rodou ({ultimo}). "
+        "Abortando: reexecutar migração já aplicada pode destruir dado."
+    ) from ultimo
 
 def registrar_migracao(pool, nome: str):
     """Registra que uma migração foi executada."""

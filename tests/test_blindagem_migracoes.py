@@ -195,3 +195,49 @@ def test_segue_e_aplica_mesmo_sem_o_lock(pool, monkeypatch):
     n = am.aplicar_migracoes(pool)
     assert n == len(_pendentes_a_partir_de("088"))
     assert _col_existe(pool, "funcionarios", "demitido_em")   # 094 aplicou
+
+
+# ------------------------------------- "não sei" não pode virar "não rodou"
+
+def test_erro_na_verificacao_aborta_em_vez_de_reaplicar(pool):
+    """O incidente de 17/ago: este SELECT falhou, o `except` respondeu "não rodou"
+    e o runner REEXECUTOU três migrações registradas desde julho. Uma delas (127)
+    derruba e recria um check constraint — e o pre-deploy morreu, deixando o
+    serviço no código anterior.
+
+    Reexecutar migração é destrutivo por natureza (drop/recreate, backfill que
+    soma de novo). Diante de erro, a resposta certa é PARAR, não chutar."""
+    from db.aplicar_migracoes import migracao_ja_rodou
+    with pool.connection() as c:
+        c.execute("alter table schema_migrations rename to schema_migrations_escondida")
+        c.commit()
+    try:
+        with pytest.raises(Exception) as exc:
+            migracao_ja_rodou(pool, "127_prospeccao_atividade_bounce.sql")
+        assert "já rodou" in str(exc.value)      # a mensagem diz o que não se sabe
+    finally:
+        with pool.connection() as c:
+            c.execute("alter table schema_migrations_escondida rename to schema_migrations")
+            c.commit()
+
+
+def test_responde_certo_quando_sabe(pool):
+    """Contraprova: sem erro, segue respondendo o que o registro diz."""
+    from db.aplicar_migracoes import migracao_ja_rodou
+    with pool.connection() as c:
+        c.execute("insert into schema_migrations (nome) values ('999_so_pro_teste.sql') "
+                  "on conflict do nothing")
+        c.commit()
+    assert migracao_ja_rodou(pool, "999_so_pro_teste.sql") is True
+    assert migracao_ja_rodou(pool, "998_nunca_existiu.sql") is False
+
+
+def test_127_permite_engajamento():
+    """A 127 derruba e recria o check, então precisa listar tudo que é válido hoje
+    — inclusive o valor que a 169 introduziu depois dela. Esquecer isso é o que
+    derrubou o deploy."""
+    from pathlib import Path
+    sql = (Path(__file__).resolve().parent.parent / "db" / "migracoes"
+           / "127_prospeccao_atividade_bounce.sql").read_text("utf-8")
+    assert "'engajamento'" in sql, "reexecutar a 127 vai quebrar em banco com engajamento"
+    assert "'bounce'" in sql

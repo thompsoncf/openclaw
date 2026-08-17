@@ -610,6 +610,19 @@ def _disparar_wa(pool) -> int:
 _ERRO_CONFIG = {"provedor_sem_template", "sem_numero_empresa", "nao_configurado",
                 "sem_template"}
 
+# Códigos da Meta (Cloud API) que valem por DESTINATÁRIO. Tudo que não está aqui é
+# tratado como problema da CONTA — ver _erro_da_conta.
+_META_ALVO = frozenset({
+    131021,  # o destinatário é o próprio remetente
+    131026,  # mensagem não entregável (número não tem WhatsApp / não recebe)
+    131047,  # fora da janela de 24h (precisa de template)
+    131049,  # a Meta escolheu não entregar (health do ecossistema)
+    131050,  # o usuário optou por não receber marketing
+    131051,  # tipo de mensagem não suportado
+    131052,  # falha ao baixar a mídia
+    131053,  # falha ao subir a mídia
+})
+
 
 def _erro_da_conta(res: dict) -> str:
     """'' se a falha é daquele número; senão o código do bloqueio da campanha.
@@ -623,13 +636,24 @@ def _erro_da_conta(res: dict) -> str:
       credencial não autenticando. Em produção esse código queimou 22 alvos de uma
       campanha em agosto/2026, um a um, por uma credencial errada no servidor.
     * e os erros que o próprio dispatcher devolve antes de chegar no provedor.
+
+    Na **Cloud API** a régua se inverte, de propósito. Lá os códigos da conta são a
+    maioria e os mais graves (190 = token vencido, 131031 = conta travada, 133xxx =
+    registro do número, 132xxx = template) — e a lista dos que são do destinatário é
+    curta e conhecida (`_META_ALVO`). Então o padrão é BLOQUEAR: um código novo da
+    Meta pára a campanha em vez de queimar a base inteira alvo por alvo. Errar pro
+    lado do bloqueio custa um aviso na tela; errar pro outro custa lead, que não
+    volta. Falha de rede vem sem código nenhum e entra aqui pelo mesmo caminho — o
+    servidor não alcançou a Graph, o lead não tem culpa disso.
     """
     if (res.get("erro") or "") in _ERRO_CONFIG:
         return res["erro"]
     try:
         cod = int(res.get("codigo") or 0)
     except (TypeError, ValueError):
-        return ""
+        cod = 0
+    if (res.get("provedor") or "") == "cloud":
+        return "" if cod in _META_ALVO else f"meta_{cod or 'sem_codigo'}"
     return f"twilio_{cod}" if 20000 <= cod < 30000 else ""
 
 
@@ -688,7 +712,10 @@ def _disparar_wa_campanha(pool, camp_id, conta_id, sid, teto, whatsapp_out) -> i
         if not fila:
             # sem número nenhum, ou a fila acabou depois de tentar todos os que
             # tinham WhatsApp — nos dois casos não há o que fazer com este alvo
-            _wa_marca(pool, aid, "sem_numero" if not tentativas else "erro")
+            if tentativas:
+                _wa_esgotou_a_fila(pool, aid)
+            else:
+                _wa_marca(pool, aid, "sem_numero")
             continue
         numero = fila[0]
         variaveis = {"1": (idn.get("responsavel") or idn.get("empresa") or "nós"),
@@ -958,6 +985,23 @@ def _wa_tentativa_falhou(pool, aid, numero, res, detalhe, tentados,
         c.commit()
 
 
+def _wa_esgotou_a_fila(pool, aid) -> None:
+    """Fim da linha do alvo: acabaram os números. Marca 'erro' SEM apagar o motivo.
+
+    A fila de disparo é `wa_status is null`, então marcar aqui tira o lead dela pra
+    sempre — esta é a última coisa que a tela vai dizer sobre ele. Marcando sem
+    motivo nenhum, o dono vê um 'erro' pelado e não tem como decidir se recoloca na
+    fila. Quando não sobrou nem o motivo da tentativa anterior, escreve o próprio:
+    a fila acabou, e isso já é a explicação."""
+    with pool.connection() as c:
+        c.execute("""update campanha_alvos
+                       set wa_status='erro', wa_em=now(),
+                           wa_erro_msg=coalesce(wa_erro_msg,
+                                                'todos os números do lead já foram tentados')
+                     where id=%s""", (aid,))
+        c.commit()
+
+
 def falha_na_entrega(c, aid, erro_codigo="", erro_msg="") -> bool:
     """A mensagem SAIU mas não chegou — a falha veio pelo webhook de status, não
     pela chamada da API. Fecha o ciclo da fila de números aqui também.
@@ -994,9 +1038,15 @@ def falha_na_entrega(c, aid, erro_codigo="", erro_msg="") -> bool:
     # voltando pra fila, o SID e o número da tentativa ENCERRADA saem junto. Sem
     # isso, um callback atrasado daquele mesmo SID casaria com o alvo de novo e o
     # marcaria 'enviado' — tirando da fila quem estava esperando a próxima rodada.
+    # `coalesce(%s, wa_erro_codigo)`: um callback SEM ErrorCode não apaga o motivo
+    # que já estava gravado. O Twilio manda 'failed'/'undelivered' sem código com
+    # alguma frequência, e quando isso chegava depois de um 63024 o alvo virava um
+    # 'erro' mudo — 10 alvos assim em produção nesta conta, sem código nem mensagem,
+    # sem como o dono saber se valia recolocar na fila.
     c.execute("""update campanha_alvos
                    set wa_status=%s, wa_em=now(), wa_tentados=%s::jsonb, wa_tentativas=%s,
-                       wa_erro_codigo=%s, wa_erro_msg=%s,
+                       wa_erro_codigo=coalesce(%s, wa_erro_codigo),
+                       wa_erro_msg=coalesce(%s, wa_erro_msg),
                        wa_sid=case when %s then wa_sid else null end,
                        wa_numero=case when %s then wa_numero else null end
                  where id=%s""",

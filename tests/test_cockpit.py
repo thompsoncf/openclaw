@@ -411,7 +411,7 @@ def test_shell_leva_o_retorno_visual_de_espera():
     ele CONTAR isso. Estas peças precisam existir no shell de toda tela."""
     from web import painel_cockpit as pc
     html = pc._page("x", "<div>y</div>").body.decode()
-    assert "class=prog id=prog" in html          # o fio de progresso
+    assert "id=zprog" in html                    # o Z que se desenha enquanto carrega
     assert "form.composer" in html               # o enviar otimista
     # o valor tem que migrar pro hidden ANTES de esvaziar o visível, senão o POST
     # vai com texto vazio — foi o erro que quase passou

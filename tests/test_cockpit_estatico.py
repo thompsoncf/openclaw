@@ -79,6 +79,38 @@ def test_splash_serve_png_e_recusa_o_resto():
     assert cliente.get("/cockpit/splash/..%2f..%2fapp.png").status_code == 404
 
 
+def test_o_z_se_desenha_na_abertura_e_uma_vez_por_sessao():
+    """O logo é um caminho contínuo, então ele se escreve na tela — dasharray, sem
+    imagem e sem biblioteca. A cortina vive no HTML e não no splash do iOS: o
+    `apple-touch-startup-image` é PNG (não anima) e o iPhone guarda com teimosia as
+    imagens de um app já instalado, então trocá-las não chega em quem já instalou."""
+    html = pc._page("x", "<i>y</i>").body.decode()
+
+    assert "id=abertura" in html and "class=abertura id=abertura hidden" in html
+    # nasce ESCONDIDA: sem JS ninguém vê cortina e o app abre direto
+    assert "hidden>" in html.split("id=abertura")[1][:20]
+
+    # trocar de aba é navegação inteira neste app — sem a trava de sessão o Z
+    # tomaria a tela a cada toque na barra de abas
+    assert "sessionStorage.getItem('zaqAberto')" in html
+    assert "sessionStorage.setItem('zaqAberto'" in html
+
+    # o mesmo traço serve à cortina e ao indicador
+    assert html.count("M170 150 h150 L190 362 h150") == 2
+    assert "class=zdraw" in html
+
+
+def test_o_indicador_das_abas_nao_segura_nada():
+    """O Z pequeno substitui o fio: mesma função, cara da marca. Ele roda em laço
+    enquanto a tela nova não chega e some junto com o documento."""
+    assert ".zprog.on .zdraw" in pc._CSS_TEXTO
+    assert "infinite" in pc._CSS_TEXTO.split(".zprog.on .zdraw")[1][:120]
+    # e continua respeitando quem pediu menos movimento
+    assert "prefers-reduced-motion" in pc._CSS_TEXTO
+    reduzido = pc._CSS_TEXTO.split("prefers-reduced-motion")[1][:400]
+    assert ".zprog.on .zdraw" in reduzido and "animation:none" in reduzido
+
+
 def test_service_worker_so_cacheia_o_que_e_imutavel():
     """HTML segue rede-primeiro de propósito: fila, conversa e contadores mudam a
     cada minuto, e servir tela velha do disco seria pior que esperar."""

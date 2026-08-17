@@ -347,6 +347,42 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .girando{display:block;width:15px;height:15px;margin:0 auto;border:2px solid rgba(0,0,0,.2);
   border-top-color:var(--ink);border-radius:50%;animation:gira .6s linear infinite}
 @keyframes gira{to{transform:rotate(360deg)}}
+/* ---------- o Z que se desenha ----------
+   O logo é UM caminho contínuo, então ele pode se escrever na tela: dasharray +
+   dashoffset é o próprio traço se revelando, sem biblioteca e sem imagem.
+   Serve nos dois lugares — a cortina de abertura e o indicador das abas. */
+.zdraw{fill:none;stroke:var(--neon);stroke-width:34;stroke-linecap:round;stroke-linejoin:round;
+  stroke-dasharray:760;stroke-dashoffset:760}
+@keyframes zescreve{to{stroke-dashoffset:0}}
+
+/* a cortina da abertura: cobre a tela enquanto o Z se escreve, e sai */
+.abertura{position:fixed;inset:0;z-index:60;background:var(--bg);display:flex;
+  flex-direction:column;align-items:center;justify-content:center;gap:16px}
+.abertura[hidden]{display:none}
+.abertura svg{width:76px;height:76px;overflow:visible}
+.abertura .zdraw{animation:zescreve .62s cubic-bezier(.65,.02,.3,1) forwards;
+  filter:drop-shadow(0 0 8px var(--neon))}
+.abertura .marca{font-family:var(--mono);font-size:.68rem;letter-spacing:.34em;
+  text-transform:uppercase;color:var(--text-dim);padding-left:.34em;opacity:0;
+  animation:zsurge .3s ease-out .36s forwards}
+@keyframes zsurge{to{opacity:1}}
+.abertura.saindo{animation:zsai .26s ease-in forwards}
+@keyframes zsai{to{opacity:0}}
+
+/* o mesmo traço, pequeno, no lugar do fio: some sozinho quando a tela chega e
+   não segura nada — quem espera é a rede, não uma animação. */
+.zprog{position:absolute;top:calc(env(safe-area-inset-top,0px) + 6px);left:50%;
+  transform:translateX(-50%);width:26px;height:26px;z-index:9;opacity:0;
+  pointer-events:none;transition:opacity .14s;overflow:visible}
+.zprog.on{opacity:1}
+.zprog.on .zdraw{animation:zescreve .75s cubic-bezier(.65,.02,.3,1) infinite}
+
+@media (prefers-reduced-motion:reduce){
+  .abertura .zdraw,.abertura .marca,.zprog.on .zdraw{animation:none}
+  .abertura .zdraw{stroke-dashoffset:0}
+  .abertura .marca{opacity:1}
+}
+
 /* fio de progresso: a única coisa na tela que diz "estou indo buscar". Fica no
    topo do .wrap, acima do cabeçalho, e some junto com o documento. */
 /* o containing block do absoluto é a caixa de PADDING do .wrap, então top:0 cairia
@@ -680,13 +716,44 @@ def _page(title: str, corpo: str) -> HTMLResponse:
         # Assim a fonte começa a vir no primeiro quadro.
         f"<title>{esc(title)} · Zaq</title>{_tema.FONTES}"
         f"<link rel=stylesheet href='{_BASE}/app.css?v={_CSS_VER}'>"
-        "</head><body>" + _ICONES +
-        f"<div class=wrap><div class=glow></div><i class=prog id=prog></i>{corpo}</div>"
+        "</head><body>" + _ICONES + _ABERTURA_HTML +
+        f"<div class=wrap><div class=glow></div>{_ZPROG}{corpo}</div>"
         "<script>if('serviceWorker' in navigator)"
         "navigator.serviceWorker.register('/cockpit/sw.js',{scope:'/cockpit'})"
         ".catch(function(){});</script>"
         + _ESPERA_JS +
         "</body></html>")
+
+
+#: O traço do logo, sozinho — o mesmo `d` do _ICON_SVG. Some a moldura: na cortina
+#: o fundo já é o da marca, e no indicador ela viraria um quadrado no meio da tela.
+_Z_PATH = "<path class=zdraw d='M170 150 h150 L190 362 h150'/>"
+
+#: o Z pequeno que substitui o fio de progresso ao trocar de aba
+_ZPROG = f"<svg class=zprog id=zprog viewBox='0 0 512 512' aria-hidden=true>{_Z_PATH}</svg>"
+
+# A cortina de abertura. Fica no HTML, não no splash do iOS, por dois motivos:
+# o `apple-touch-startup-image` é PNG e não anima, e o iPhone guarda as imagens
+# de um app já instalado com teimosia — trocá-las não chega em quem já instalou.
+# Aqui é HTML nosso: aparece para todo mundo, na hora.
+#
+# Nasce ESCONDIDA e o script decide. Sem JS, ninguém vê cortina nenhuma e o app
+# abre direto, que é o comportamento de sempre.
+_ABERTURA_HTML = (
+    "<div class=abertura id=abertura hidden>"
+    f"<svg viewBox='0 0 512 512' aria-hidden=true>{_Z_PATH}</svg>"
+    "<span class=marca>Zaq</span></div>"
+    # roda DURANTE o parse, antes do primeiro quadro: decidir depois faria a fila
+    # piscar antes da cortina cobrir.
+    "<script>(function(){try{"
+    # uma vez por SESSÃO, não por navegação. Trocar de aba é navegação inteira
+    # neste app — sem esta trava, o Z tomaria a tela a cada toque na barra.
+    "if(sessionStorage.getItem('zaqAberto'))return;"
+    "sessionStorage.setItem('zaqAberto','1');"
+    "var a=document.getElementById('abertura');if(!a)return;a.hidden=false;"
+    "setTimeout(function(){a.className='abertura saindo';"
+    "setTimeout(function(){a.hidden=true;a.className='abertura';},260);},700);"
+    "}catch(e){}})();</script>")
 
 
 # O app é form + redirect: todo toque numa aba, num card ou no enviar é uma
@@ -697,19 +764,12 @@ def _page(title: str, corpo: str) -> HTMLResponse:
 # Nada aqui altera o que é enviado nem para onde: sem JS, tudo funciona como
 # antes. É só o app parando de esconder que está trabalhando.
 _ESPERA_JS = """<script>(function(){
-  var prog=document.getElementById('prog'),t=null;
-  function corre(){
-    if(!prog)return;
-    clearTimeout(t);
-    prog.className='prog on';prog.style.transition='none';prog.style.width='0';
-    requestAnimationFrame(function(){
-      // 90% em 2,4s e para: chegar a 100% antes da página prometeria uma
-      // conclusão que ainda não aconteceu. O resto some junto com o documento.
-      prog.style.transition='width 2.4s cubic-bezier(.15,.75,.3,1)';
-      prog.style.width='90%';
-    });
-  }
-  function para(){ if(prog){clearTimeout(t);prog.className='prog';prog.style.width='0';} }
+  // O Z se desenhando no lugar do fio: mesma função, cara da marca. Ele fica em
+  // laço enquanto a tela nova não chega e some junto com o documento — nunca
+  // segura nada, porque quem faz esperar é a rede, não a animação.
+  var prog=document.getElementById('zprog');
+  function corre(){ if(prog)prog.classList.add('on'); }
+  function para(){ if(prog)prog.classList.remove('on'); }
 
   document.addEventListener('click',function(e){
     var a=e.target.closest&&e.target.closest('a');

@@ -397,8 +397,15 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .tabs{display:flex;flex-shrink:0;border-top:1px solid var(--line);background:rgba(10,15,12,.92);
   backdrop-filter:blur(12px);padding-bottom:env(safe-area-inset-bottom,0px);position:relative;z-index:2}
 .tabs a{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:.5rem 0 .45rem;
-  color:var(--text-faint);font-size:.62rem}
+  color:var(--text-faint);font-size:.62rem;position:relative}
 .tabs a.on{color:var(--neon)}
+/* o número em cima do ícone da aba. É o que dá a contagem no Android, onde a API
+   de badge do ícone do app não existe — e serve de reforço no iOS. Fica absoluto
+   pra não empurrar o ícone nem mudar a altura da barra. */
+.tabs .tsel{position:absolute;top:.16rem;left:50%;margin-left:.28rem;min-width:15px;height:15px;
+  padding:0 .22rem;border-radius:999px;background:var(--coral);color:#fff;font-family:var(--mono);
+  font-size:.58rem;font-weight:700;line-height:15px;text-align:center;
+  box-shadow:0 0 0 2px rgba(10,15,12,.92)}
 .tabs a.on .ic{filter:drop-shadow(0 0 6px rgba(37,211,102,.5))}
 .ic{width:21px;height:21px;stroke:currentColor;fill:none;stroke-width:1.7;
   stroke-linecap:round;stroke-linejoin:round}
@@ -637,21 +644,43 @@ def _hdr(titulo: str, sub: str = "", *, voltar: str = "", direita: str = "",
             + (f"<small>{esc(sub)}</small>" if sub else "") + f"</div>{direita}</div>")
 
 
-def _abas(itens, ativo: str) -> str:
+def _abas(itens, ativo: str, selos: dict | None = None) -> str:
     """Barra de abas. É o que faltava no app do vendedor — ele tinha uma tela só."""
+    selos = selos or {}
     out = []
     for chave, icone, rotulo, href in itens:
         on = " class=on" if chave == ativo else ""
-        out.append(f"<a{on} href='{esc(href)}'>{_ic(icone)}<span>{esc(rotulo)}</span></a>")
+        n = int(selos.get(chave) or 0)
+        selo = (f"<span class=tsel aria-label='{n} sem resposta'>"
+                f"{n if n < 10 else '9+'}</span>") if n else ""
+        out.append(f"<a{on} href='{esc(href)}'>{_ic(icone)}{selo}"
+                   f"<span>{esc(rotulo)}</span></a>")
     return "<div class=tabs>" + "".join(out) + "</div>"
 
 
-def _abas_vend(ativo: str) -> str:
+def _abas_vend(ativo: str, pend: int = 0) -> str:
     return _abas([("fila", "fila", "Fila", _BASE),
                   ("agenda", "agenda", "Agenda", f"{_BASE}/agenda"),
                   ("orcamentos", "orc", "Propostas", f"{_BASE}/orcamentos"),
                   ("resultado", "resultado", "Resultado", f"{_BASE}/resultado"),
-                  ("perfil", "perfil", "Perfil", f"{_BASE}/perfil")], ativo)
+                  ("perfil", "perfil", "Perfil", f"{_BASE}/perfil")],
+                 ativo, {"fila": pend})
+
+
+def _pend_vend(conta_id: int, membro_id: int) -> int:
+    """Total sem resposta pro selo da aba Fila.
+
+    A aba aparece em TODAS as telas do vendedor, então o número vai junto: ele está
+    na Agenda e vê que a fila tem 3 esperando, sem precisar entrar. É também o que
+    dá o número no ANDROID, onde `setAppBadge` não existe — lá o ícone ganha, no
+    máximo, um pontinho sem contagem.
+
+    Best-effort de propósito: barra de abas não pode derrubar a tela se a consulta
+    falhar. Sem o número, a aba ainda é uma aba."""
+    try:
+        return ck.total_pendentes(get_pool(), conta_id, membro_id)
+    except Exception:  # noqa: BLE001
+        return 0
 
 
 def _abas_dono(ativo: str) -> str:
@@ -853,6 +882,9 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
     p = ck.perfil(pool, conta_id, membro_id)
     vez = sum(1 for l in leads if not l["ia"])
 
+    # a fila já tem os leads em mão: soma daqui, sem uma consulta a mais só pra aba
+    total_pend = sum(int(l.get("pend") or 0) for l in leads)
+
     cartoes = []
     for l in leads:
         chip = ("<span class='chip ia'>IA</span>" if l["ia"]
@@ -896,10 +928,10 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
              + _flash(request)
              + f"<div class=scroll>{pushcard}{lista}{dica}{volta}</div>"
              + "<div class=toast id=toast></div>"
-             + _abas_vend("fila")
+             + _abas_vend("fila", total_pend)
              + f'<script>window.CKBASE="{_BASE}";</script>' + vapid_js + _FILA_JS
              + _sinal_js(ck.sinal_fila(pool, conta_id, membro_id))
-             + _badge_js(sum(int(l.get("pend") or 0) for l in leads)))
+             + _badge_js(total_pend))
     return _page("Meus leads", corpo)
 
 
@@ -980,7 +1012,7 @@ def cockpit_agenda(request: Request):
                  "Abra um lead e toque em <b>Agendar visita</b> — ela aparece aqui.</div>")
 
     corpo = (_hdr("Minha agenda", f"{len(hoje)} hoje · {len(visitas)} nos próximos 14 dias")
-             + f"<div class=scroll>{miolo}</div>" + _abas_vend("agenda"))
+             + f"<div class=scroll>{miolo}</div>" + _abas_vend("agenda", _pend_vend(conta_id, membro_id)))
     return _page("Minha agenda", corpo)
 
 
@@ -1043,7 +1075,7 @@ def cockpit_resultado(request: Request):
              + f"<div class=kpi><div class=v>{esc(r['resp'])}</div><div class=l>Resposta</div>"
                "<div class=d>média de 30 dias</div></div>"
              + pos + "</div>"
-             + "</div>" + _abas_vend("resultado"))
+             + "</div>" + _abas_vend("resultado", _pend_vend(conta_id, membro_id)))
     return _page("Meu resultado", corpo)
 
 
@@ -1507,7 +1539,8 @@ def cockpit_orcamentos(request: Request, s: str = "", v: str = ""):
                    _hdr("Minhas propostas", "manda pro cliente por aqui",
                         inicial=_ini(p["nome"]))
                  + _flash(request) + filtros
-                 + f"<div class=scroll>{miolo}</div>" + _abas_vend("orcamentos"))
+                 + f"<div class=scroll>{miolo}</div>"
+                 + _abas_vend("orcamentos", 0 if gestao else _pend_vend(conta_id, sess[1])))
     return _page("Propostas", corpo)
 
 
@@ -1629,7 +1662,8 @@ def cockpit_orcamento(request: Request, orc_id: int):
              + (f"<div class=eyebrow>Cliente</div><div class=bloco><div class=card>{ficha_html}</div></div>"
                 if ficha_html else "")
              + "</div>"
-             + (_abas_dono("orcamentos") if gestao else _abas_vend("orcamentos")))
+             + (_abas_dono("orcamentos") if gestao
+                else _abas_vend("orcamentos", _pend_vend(conta_id, sess[1]))))
     return _page(o["titulo"], corpo)
 
 
@@ -1731,7 +1765,7 @@ def _perfil_vendedor(request: Request, conta_id: int, membro_id: int) -> HTMLRes
              + "<div class=bloco><a class='btn ghost' style='margin-bottom:.5rem' "
                "href='/painel'>Abrir o painel completo</a>"
              + f"<a class='btn ghost' href='/cockpit/sair'>{_ic('sair', 'ic p')} Sair</a></div>"
-             + "</div>" + _abas_vend("perfil"))
+             + "</div>" + _abas_vend("perfil", _pend_vend(conta_id, membro_id)))
     return _page("Meu perfil", corpo)
 
 

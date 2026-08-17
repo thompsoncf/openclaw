@@ -17,7 +17,8 @@ from web import painel_prospeccao as pp
 _BASE_SQL = """
 create table contas (id bigserial primary key, tipo text, nome text);
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text);
-create table prospeccao (id bigserial primary key, conta_id bigint, estagio text);
+create table prospeccao (id bigserial primary key, conta_id bigint, estagio text,
+  vendedor_id bigint);   -- dono do lead: escopo do KPI de conversa no chat
 create table campanhas (id bigserial primary key, conta_id bigint, nome text, status text,
   limite_dia int default 40, wa_ativo boolean default false, wa_template_sid text,
   enviados_hoje int default 0, dia_contagem date, teto_wa numeric(10,2),
@@ -27,6 +28,12 @@ create table campanha_alvos (id bigserial primary key, campanha_id bigint, prosp
   status text, aberturas int, wa_status text, wa_custo numeric(10,4), proximo_envio_em timestamptz);
 create table campanha_eventos (id bigserial primary key, campanha_id bigint, prospeccao_id bigint,
   canal text, evento text, detalhe text, quando timestamptz default now());
+-- conversas/mensagens: os KPIs de "Gastos das campanhas" passaram a contar quem
+-- ESCREVEU no chat (e quantos desses nunca receberam resposta humana), sinal que
+-- os contadores de botão não pegam. Sem as tabelas aqui, _campanhas_dados quebra.
+create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint);
+create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
+  autor text, texto text, criado_em timestamptz default now());
 create table canais_config (
   id bigserial primary key, conta_id bigint, canal text, identificador text,
   ativo boolean not null default true, token text, provedor text not null default 'twilio',

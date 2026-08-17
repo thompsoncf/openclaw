@@ -4609,6 +4609,38 @@ def _campanhas_dados(c, conta_id, membro_id=None):
              join campanhas cp on cp.id=e.campanha_id
             where cp.conta_id=%s and e.canal='whatsapp' and e.evento='respondeu'
               and e.detalhe='Quero o material'""" + _esc, (conta_id, membro_id, membro_id)).fetchone()[0]
+    # Os três de cima só olham o WhatsApp, de propósito — mudá-los mudaria o
+    # significado de um número que o dono já acompanha. Os quatro abaixo são
+    # informação NOVA, que hoje não aparece em lugar nenhum e some sem ninguém ver:
+    #   · quem clicou "Tenho interesse" pelo E-MAIL (o CTA da régua de e-mail);
+    #   · quem ABRIU o material (evento 'baixou', que nunca teve contador);
+    #   · quem ESCREVEU no chat sem apertar botão nenhum — o maior buraco: nesta
+    #     base, 52 leads, e a maioria invisível pros três de cima;
+    #   · e, desses, quantos nunca receberam resposta de GENTE (só do bot). Este
+    #     último é o que vira dinheiro: um lead que perguntou e ficou no vácuo.
+    interesse_email = c.execute(
+        """select count(distinct e.prospeccao_id) from campanha_eventos e
+             join campanhas cp on cp.id=e.campanha_id
+            where cp.conta_id=%s and e.canal='email' and e.evento='respondeu'
+              and e.detalhe='Tenho interesse'""" + _esc, (conta_id, membro_id, membro_id)).fetchone()[0]
+    baixou_material = c.execute(
+        """select count(distinct e.prospeccao_id) from campanha_eventos e
+             join campanhas cp on cp.id=e.campanha_id
+            where cp.conta_id=%s and e.evento='baixou'""" + _esc,
+        (conta_id, membro_id, membro_id)).fetchone()[0]
+    _chat = c.execute(
+        """select count(*), count(*) filter (where sem_humano)
+             from (select cv.prospeccao_id,
+                          count(*) filter (where m.direcao='out' and m.autor<>'bot') = 0 as sem_humano
+                     from conversas cv
+                     join mensagens m on m.conversa_id=cv.id
+                     join prospeccao p on p.id=cv.prospeccao_id
+                    where cv.conta_id=%s and cv.prospeccao_id is not null
+                      and (%s::bigint is null or p.vendedor_id=%s)
+                    group by 1
+                   having count(*) filter (where m.direcao='in' and m.autor='lead') > 0) t""",
+        (conta_id, membro_id, membro_id)).fetchone()
+    conversou, sem_humano = (_chat or (0, 0))
     camps = []
     tot_gasto = tot_msgs = tot_email = tot_teto = perto = 0
     for r in rows:
@@ -4653,6 +4685,8 @@ def _campanhas_dados(c, conta_id, membro_id=None):
     totais = {"gasto_fmt": _reais(tot_gasto), "msgs": tot_msgs, "emails": tot_email,
               "teto_fmt": _reais(tot_teto), "perto": perto, "sem_interesse": sem_interesse,
               "quer_conhecer": quer_conhecer, "quer_material": quer_material,
+              "interesse_email": interesse_email, "baixou_material": baixou_material,
+              "conversou": conversou, "sem_humano": sem_humano,
               "custo_lead_fmt": _reais(tot_gasto / tot_msgs if tot_msgs else 0),
               "motor": _motor_status(c)}
     return camps, totais
@@ -4673,6 +4707,152 @@ def prospeccao_campanhas(request: Request):
     return _render("prospeccao_campanhas", request, titulo="Campanhas", secao_ativa="prospeccao",
                    camps=camps, totais=totais, elegiveis=eleg, gerencia=ctx["gerencia"],
                    aviso=request.session.pop("prosp_aviso", None))
+
+
+# ------------------------------------------------- quem está por trás de cada KPI
+# Os contadores de "Gastos das campanhas" respondem QUANTOS. Estas rotas respondem
+# QUEM — com nome, campanha e telefone, que é o que permite ligar. Sem isso o número
+# é uma métrica de vaidade: nesta base havia lead perguntando "qual exatamente é o
+# produto que você oferece?" e ninguém sabia que ele existia.
+
+_KPI_SINAIS = {
+    # chave       (canal,       evento,      detalhe)          — None = qualquer
+    "sem_interesse":   ("whatsapp", "clicou",    "Agora não"),
+    "quer_conhecer":   ("whatsapp", "respondeu", "Quero te conhecer"),
+    "quer_material":   ("whatsapp", "respondeu", "Quero o material"),
+    "interesse_email": ("email",    "respondeu", "Tenho interesse"),
+    "baixou_material": (None,       "baixou",    None),
+}
+
+# Frases com que o WhatsApp Business do PRÓPRIO lead responde sozinho. Não é gente:
+# é o autoatendimento dele. Marcado, NUNCA escondido — a regra é heurística e vai
+# errar em algum caso; esconder um lead de verdade por causa de um palpite custa
+# mais caro que mostrar um ruído rotulado.
+_AUTORESPOSTA = ("agradece seu contato", "agradecemos sua mensagem", "agradecemos seu contato",
+                 "não estamos disponíve", "nao estamos disponive", "horário de funcionamento",
+                 "horario de funcionamento", "seja bem-vind", "seja muito bem-vind",
+                 "como podemos ajud", "retornaremos assim que", "nosso atendimento está")
+
+
+def _parece_autoresposta(txt: str) -> bool:
+    t = (txt or "").lower()
+    return any(p in t for p in _AUTORESPOSTA)
+
+
+def _kpi_leads(c, conta_id: int, escopo_membro, sinal: str):
+    """Leads por trás de um KPI. Devolve (itens, rotulo)."""
+    idn = c.execute("""select regexp_replace(coalesce(telefone,''),'\\D','','g'), lower(coalesce(email,''))
+                         from contas where id=%s""", (conta_id,)).fetchone() or ("", "")
+    fone_dono, email_dono = (idn[0] or "@@"), (idn[1] or "@@")
+    if sinal in _KPI_SINAIS:
+        canal, evento, detalhe = _KPI_SINAIS[sinal]
+        cur = c.execute(
+            """select p.id, p.empresa, p.segmento, p.cidade, p.uf, p.temperatura,
+                      coalesce(nullif(trim(p.whatsapp),''), nullif(trim(p.telefone),'')) as fone,
+                      nullif(trim(p.email),'') as email,
+                      coalesce(nullif(m.nome,''), m.email, '—') as vendedor,
+                      cp.nome as campanha, max(e.quando) as quando, count(*) as vezes,
+                      '' as detalhe_extra, 0 as msgs_lead, 0 as resp_humana
+                 from campanha_eventos e
+                 join campanhas cp on cp.id=e.campanha_id
+                 join prospeccao p on p.id=e.prospeccao_id
+                 left join membros m on m.id=p.vendedor_id
+                where cp.conta_id=%(conta)s and e.evento=%(ev)s
+                  and (%(canal)s::text is null or e.canal=%(canal)s)
+                  and (%(det)s::text is null or e.detalhe=%(det)s)
+                  and (%(membro)s::bigint is null or p.vendedor_id=%(membro)s)
+                group by p.id, p.empresa, p.segmento, p.cidade, p.uf, p.temperatura,
+                         coalesce(nullif(trim(p.whatsapp),''), nullif(trim(p.telefone),'')),
+                         nullif(trim(p.email),''),
+                         coalesce(nullif(m.nome,''), m.email, '—'), cp.nome
+                order by max(e.quando) desc""",
+            {"conta": conta_id, "ev": evento, "canal": canal, "det": detalhe,
+             "membro": escopo_membro})
+    else:  # 'conversou' e 'sem_humano': quem ESCREVEU, não quem clicou
+        cur = c.execute(
+            """select p.id, p.empresa, p.segmento, p.cidade, p.uf, p.temperatura,
+                      coalesce(nullif(trim(p.whatsapp),''), nullif(trim(p.telefone),'')) as fone,
+                      nullif(trim(p.email),'') as email,
+                      coalesce(nullif(m.nome,''), m.email, '—') as vendedor,
+                      coalesce((select cp.nome from campanha_alvos a
+                                 join campanhas cp on cp.id=a.campanha_id
+                                where a.prospeccao_id=p.id order by a.id desc limit 1), '—') as campanha,
+                      max(msg.criado_em) as quando, 1 as vezes,
+                      (array_agg(msg.texto order by msg.criado_em)
+                         filter (where msg.direcao='in' and msg.autor='lead'))[1] as detalhe_extra,
+                      count(*) filter (where msg.direcao='in' and msg.autor='lead') as msgs_lead,
+                      count(*) filter (where msg.direcao='out' and msg.autor<>'bot') as resp_humana
+                 from conversas cv
+                 join mensagens msg on msg.conversa_id=cv.id
+                 join prospeccao p on p.id=cv.prospeccao_id
+                 left join membros m on m.id=p.vendedor_id
+                where cv.conta_id=%(conta)s
+                  and (%(membro)s::bigint is null or p.vendedor_id=%(membro)s)
+                group by p.id, p.empresa, p.segmento, p.cidade, p.uf, p.temperatura,
+                         coalesce(nullif(trim(p.whatsapp),''), nullif(trim(p.telefone),'')),
+                         nullif(trim(p.email),''),
+                         coalesce(nullif(m.nome,''), m.email, '—')
+               having count(*) filter (where msg.direcao='in' and msg.autor='lead') > 0
+                  and (%(so_mudo)s = false
+                       or count(*) filter (where msg.direcao='out' and msg.autor<>'bot') = 0)
+                order by count(*) filter (where msg.direcao='in' and msg.autor='lead') desc,
+                         max(msg.criado_em) desc""",
+            {"conta": conta_id, "membro": escopo_membro, "so_mudo": sinal == "sem_humano"})
+    cols = [d.name for d in cur.description]
+    itens = []
+    for r in cur.fetchall():
+        it = dict(zip(cols, r))
+        dig = "".join(ch for ch in (it["fone"] or "") if ch.isdigit())
+        # Lead com o telefone/e-mail da PRÓPRIA conta é teste do dono. Some nos KPIs
+        # como se fosse cliente — marcar é o mínimo pra ele não confundir o próprio
+        # número com demanda de mercado.
+        it["eh_teste"] = bool((dig and fone_dono in dig) or
+                              (it["email"] and it["email"].lower() == email_dono))
+        it["eh_ruido"] = _parece_autoresposta(it.get("detalhe_extra") or "")
+        it["quando_br"] = ((it["quando"] - timedelta(hours=3)).strftime("%d/%m %H:%M")
+                           if it["quando"] else "")
+        it["wa_link"] = ("https://wa.me/" + _so_digitos_wa(it["fone"])) if it["fone"] else ""
+        it["trecho"] = " ".join((it.get("detalhe_extra") or "").split())[:120]
+        itens.append(it)
+    return itens
+
+
+@router.get("/painel/prospeccao/campanhas/kpi/{sinal}", response_class=HTMLResponse)
+def prospeccao_kpi_leads(request: Request, sinal: str):
+    """Lista (HTML parcial) de quem está por trás de um KPI. Carregada sob demanda."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return HTMLResponse("", status_code=401)
+    if sinal not in _KPI_SINAIS and sinal not in ("conversou", "sem_humano"):
+        return HTMLResponse("", status_code=404)
+    escopo_membro = None if ctx["gerencia"] else ctx["membro_id"]
+    with get_pool().connection() as c:
+        itens = _kpi_leads(c, ctx["conta_id"], escopo_membro, sinal)
+    return _env.from_string(_KPI_LISTA_TPL).render(itens=itens, sinal=sinal)
+
+
+@router.get("/painel/prospeccao/campanhas/kpi/{sinal}/csv")
+def prospeccao_kpi_csv(request: Request, sinal: str):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if sinal not in _KPI_SINAIS and sinal not in ("conversou", "sem_humano"):
+        return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
+    escopo_membro = None if ctx["gerencia"] else ctx["membro_id"]
+    with get_pool().connection() as c:
+        itens = _kpi_leads(c, ctx["conta_id"], escopo_membro, sinal)
+    buf = io.StringIO()
+    w = _csv.writer(buf, delimiter=";")
+    w.writerow(["Empresa", "Campanha", "Segmento", "Cidade", "WhatsApp", "E-mail",
+                "Vendedor", "Temperatura", "Quando", "Msgs do lead", "Resposta humana",
+                "Teste da casa", "Provável autoresposta", "Trecho"])
+    for i in itens:
+        w.writerow([i["empresa"] or "", i["campanha"] or "", i["segmento"] or "",
+                    i["cidade"] or "", i["fone"] or "", i["email"] or "", i["vendedor"],
+                    i["temperatura"] or "", i["quando_br"], i["msgs_lead"], i["resp_humana"],
+                    "sim" if i["eh_teste"] else "", "sim" if i["eh_ruido"] else "", i["trecho"]])
+    return Response(content="﻿" + buf.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{sinal}.csv"'})
 
 
 # --------------------------------------------------------------- Radar: quem atacar
@@ -9928,6 +10108,31 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
 .gastos .gi .v{font-size:1.2rem;font-weight:800;letter-spacing:-.02em;margin-top:.1rem;font-variant-numeric:tabular-nums}
 .gastos .gi .v.free{color:var(--verde-claro)} .gastos .gi .v.warn{color:var(--ambar)}
 .gastos .gi .f{font-size:.64rem;color:var(--mut);margin-top:.05rem}
+/* KPI que abre a lista de quem está por trás dele */
+.gastos .gi.abre{cursor:pointer} .gastos .gi.abre:hover{border-color:var(--verde)}
+.gastos .gi.abre.on{border-color:var(--verde);background:var(--neon-fundo)}
+.gastos .gi .lup{opacity:.5;font-size:.62rem}
+.kpi-painel{display:none;margin-top:.7rem;border:1px solid var(--borda);border-radius:11px;background:var(--bg-2)}
+.kpi-painel.on{display:block}
+.kv-top{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;padding:.55rem .7rem;border-bottom:1px solid var(--borda);font-size:.78rem}
+.kv-vazio{padding:1.3rem;text-align:center;color:var(--mut);font-size:.85rem}
+.kv-wrap{overflow-x:auto}
+.kv-tab{width:100%;border-collapse:collapse;font-size:.79rem;min-width:820px}
+.kv-tab th{text-align:left;color:var(--mut);font-weight:600;font-size:.69rem;padding:.4rem .55rem;border-bottom:1px solid var(--borda);white-space:nowrap}
+.kv-tab td{padding:.45rem .55rem;border-bottom:1px solid var(--borda);vertical-align:top}
+.kv-tab tr:last-child td{border-bottom:0}
+.kv-teste{background:rgba(224,163,46,.06)} .kv-ruido{opacity:.5}
+.kv-sub{font-size:.7rem;color:var(--mut);margin-top:.1rem}
+.kv-det{min-width:210px;font-size:.75rem;color:var(--mut)}
+.kv-alerta{color:var(--coral)}
+.kv-nw{white-space:nowrap}
+.kv-tag,.kv-tmp,.kv-flag{font-size:.68rem;border-radius:999px;padding:.05rem .42rem;border:1px solid var(--borda);white-space:nowrap;color:var(--mut)}
+.kv-tmp.quente{color:var(--coral);border-color:var(--coral-borda);background:var(--coral-fundo)}
+.kv-tmp.morno{color:var(--ambar);border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.kv-flag.t{color:var(--ambar);border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.kv-flag.a{color:var(--coral);border-color:var(--coral-borda);background:var(--coral-fundo)}
+.kv-bt{font-size:.72rem;text-decoration:none;border:1px solid var(--borda);border-radius:7px;padding:.12rem .4rem;color:var(--txt)}
+.kv-bt.zap{border-color:#1e5c39;color:var(--verde)}
 .subline{margin-top:.4rem;font-size:.78rem;color:var(--mut)}
 .subline b{color:var(--txt);font-variant-numeric:tabular-nums} .subline .g{color:var(--verde-claro)}
 .chan{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .5rem;margin-top:.42rem;font-size:.79rem;color:var(--mut)}
@@ -10000,10 +10205,18 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
       <div class="gi"><div class="k">Teto total</div><div class="v" data-t="tot_teto">{{ totais.teto_fmt }}</div></div>
       <div class="gi"><div class="k">Perto do limite</div><div class="v warn" data-t="tot_perto">{{ totais.perto }}</div></div>
       <div class="gi"><div class="k">Custo médio/lead</div><div class="v" data-t="tot_cpl">{{ totais.custo_lead_fmt }}</div></div>
-      <div class="gi"><div class="k">🙅 Sem interesse agora</div><div class="v warn" data-t="tot_sem_interesse">{{ totais.sem_interesse }}</div><div class="f">clicaram "Agora não" no WhatsApp</div></div>
-      <div class="gi"><div class="k">👋 Quero te conhecer</div><div class="v free" data-t="tot_quer_conhecer">{{ totais.quer_conhecer }}</div><div class="f">clicaram no WhatsApp</div></div>
-      <div class="gi"><div class="k">📎 Quero o material</div><div class="v free" data-t="tot_quer_material">{{ totais.quer_material }}</div><div class="f">clicaram no WhatsApp</div></div>
+      <div class="gi abre" onclick="kpiAbre('sem_interesse',this)"><div class="k">🙅 Sem interesse agora <span class="lup">🔍</span></div><div class="v warn" data-t="tot_sem_interesse">{{ totais.sem_interesse }}</div><div class="f">clicaram "Agora não" no WhatsApp</div></div>
+      <div class="gi abre" onclick="kpiAbre('quer_conhecer',this)"><div class="k">👋 Quero te conhecer <span class="lup">🔍</span></div><div class="v free" data-t="tot_quer_conhecer">{{ totais.quer_conhecer }}</div><div class="f">clicaram no WhatsApp</div></div>
+      <div class="gi abre" onclick="kpiAbre('quer_material',this)"><div class="k">📎 Quero o material <span class="lup">🔍</span></div><div class="v free" data-t="tot_quer_material">{{ totais.quer_material }}</div><div class="f">clicaram no WhatsApp</div></div>
     </div>
+    <div class="gh" style="margin-top:.9rem">📡 Sinais que os três de cima não pegam</div>
+    <div class="gg">
+      <div class="gi abre" onclick="kpiAbre('interesse_email',this)"><div class="k">📧 Tenho interesse <span class="lup">🔍</span></div><div class="v free" data-t="tot_int_email">{{ totais.interesse_email }}</div><div class="f">clicaram no <b>e-mail</b></div></div>
+      <div class="gi abre" onclick="kpiAbre('baixou_material',this)"><div class="k">📥 Baixou o material <span class="lup">🔍</span></div><div class="v free" data-t="tot_baixou">{{ totais.baixou_material }}</div><div class="f">abriu o PDF/link</div></div>
+      <div class="gi abre" onclick="kpiAbre('conversou',this)"><div class="k">💬 Conversou no chat <span class="lup">🔍</span></div><div class="v" data-t="tot_conversou">{{ totais.conversou }}</div><div class="f">escreveram alguma coisa</div></div>
+      <div class="gi abre" onclick="kpiAbre('sem_humano',this)"><div class="k">⚠️ Sem resposta humana <span class="lup">🔍</span></div><div class="v warn" data-t="tot_sem_humano">{{ totais.sem_humano }}</div><div class="f">desses, só o bot falou</div></div>
+    </div>
+    <div id="kpi-painel" class="kpi-painel"><div id="kpi-corpo"></div></div>
   </div>
   {% endif %}
   {% if elegiveis == 0 %}<div class="mut" style="margin-top:.5rem;font-size:.85rem;border:1px solid var(--borda);border-radius:10px;padding:.7rem .9rem">Nenhum lead com e-mail ou WhatsApp ainda. Capte leads (Google Maps traz o telefone) pra começar.</div>{% endif %}
@@ -10100,12 +10313,29 @@ document.addEventListener('keydown', function(e){
       else{al.style.display='none';}
     }
   }
+  // Abre/fecha a lista de quem está por trás de um KPI. Carrega sob demanda: a
+  // consulta varre mensagens da conta inteira e não pode pesar no load da página
+  // de quem só quer ver os números.
+  var kpiAtual=null;
+  function kpiAbre(sinal, el){
+    var painel=document.getElementById('kpi-painel'), corpo=document.getElementById('kpi-corpo');
+    document.querySelectorAll('.gastos .gi.abre').forEach(function(n){n.classList.remove('on');});
+    if(kpiAtual===sinal){ kpiAtual=null; painel.classList.remove('on'); return; }
+    kpiAtual=sinal; el.classList.add('on'); painel.classList.add('on');
+    corpo.innerHTML='<div class="kv-vazio">Carregando…</div>';
+    fetch('/painel/prospeccao/campanhas/kpi/'+encodeURIComponent(sinal))
+      .then(function(r){ return r.ok ? r.text() : Promise.reject(r.status); })
+      .then(function(h){ if(kpiAtual===sinal) corpo.innerHTML=h; })
+      .catch(function(){ corpo.innerHTML='<div class="kv-vazio">Não consegui carregar a lista.</div>'; });
+  }
   function paintTot(t){
     var s=function(f,v){var n=document.querySelector('.gastos [data-t="'+f+'"]'); if(n&&v!=null)n.textContent=v;};
     s('tot_gasto',t.gasto_fmt); s('tot_msgs',t.msgs); s('tot_emails',t.emails);
     s('tot_teto',t.teto_fmt); s('tot_perto',t.perto); s('tot_cpl',t.custo_lead_fmt);
     s('tot_sem_interesse',t.sem_interesse);
     s('tot_quer_conhecer',t.quer_conhecer); s('tot_quer_material',t.quer_material);
+    s('tot_int_email',t.interesse_email); s('tot_baixou',t.baixou_material);
+    s('tot_conversou',t.conversou); s('tot_sem_humano',t.sem_humano);
     if(t.motor){
       document.querySelectorAll('.motorstat').forEach(function(el){
         el.className='motorstat '+t.motor.estado;
@@ -10753,6 +10983,46 @@ _env.loader.mapping["prospeccao_base"] = _BASE_TPL
 _env.loader.mapping["prospeccao_captar"] = _CAPTAR_TPL
 _env.loader.mapping["prospeccao_ficha"] = _FICHA_TPL
 _env.loader.mapping["prospeccao_comunicacao"] = _COMUNICACAO_TPL
+# Lista de quem está por trás de um KPI. Parcial, servida sob demanda.
+# ESCAPE: autoescape está DESLIGADO (DictLoader com nome sem extensão), e aqui sai
+# nome de empresa e TRECHO DE MENSAGEM DO LEAD — texto externo puro. Todo dado leva
+# `|e` na mão.
+_KPI_LISTA_TPL = """
+{% if not itens %}<div class="kv-vazio">Ninguém ainda neste sinal.</div>{% else %}
+<div class="kv-top">
+  <span class="mut">{{ itens|length }} lead{{ 's' if itens|length != 1 }}</span>
+  {% set testes = itens|selectattr('eh_teste')|list|length %}
+  {% if testes %}<span class="kv-flag t">🧪 {{ testes }} teste{{ 's' if testes != 1 }} da casa</span>{% endif %}
+  {% set mudos = itens|rejectattr('resp_humana')|list|length %}
+  {% if mudos %}<span class="kv-flag a">⚠️ {{ mudos }} sem resposta humana</span>{% endif %}
+  <span style="flex:1"></span>
+  <a class="kv-bt" href="/painel/prospeccao/campanhas/kpi/{{ sinal|e }}/csv">📥 CSV</a>
+</div>
+<div class="kv-wrap"><table class="kv-tab">
+<thead><tr><th>Empresa</th><th>Campanha</th><th>Quando</th><th>Temp.</th><th>Vendedor</th><th>O que aconteceu</th><th></th></tr></thead>
+<tbody>
+{% for l in itens %}
+<tr class="{% if l.eh_teste %}kv-teste{% elif l.eh_ruido %}kv-ruido{% endif %}">
+  <td><b>{{ l.empresa|e or '(sem nome)' }}</b>
+    {% if l.eh_teste %}<span class="kv-flag t">🧪 teste seu</span>
+    {% elif l.eh_ruido %}<span class="kv-flag r">🤖 resposta automática</span>{% endif %}
+    <div class="kv-sub">{% if l.segmento %}{{ l.segmento|e }}{% endif %}{% if l.cidade %} · {{ l.cidade|e }}{% endif %}</div></td>
+  <td><span class="kv-tag">{{ l.campanha|e }}</span></td>
+  <td class="kv-nw">{{ l.quando_br }}{% if l.vezes > 1 %}<div class="kv-sub">{{ l.vezes }}x</div>{% endif %}</td>
+  <td class="kv-nw"><span class="kv-tmp {{ l.temperatura|e }}">{{ l.temperatura|e or '—' }}</span></td>
+  <td class="kv-nw">👤 {{ l.vendedor|e }}</td>
+  <td class="kv-det">
+    {% if l.msgs_lead %}{{ l.msgs_lead }} msg{{ 's' if l.msgs_lead != 1 }} do lead ·
+      {% if l.resp_humana %}{{ l.resp_humana }} resposta{{ 's' if l.resp_humana != 1 }} humana{% else %}<b class="kv-alerta">nenhuma resposta humana</b>{% endif %}{% endif %}
+    {% if l.trecho %}<div class="kv-sub">“{{ l.trecho|e }}”</div>{% endif %}</td>
+  <td class="kv-nw">
+    {% if l.wa_link %}<a class="kv-bt zap" href="{{ l.wa_link|e }}" target="_blank" rel="noopener">💬</a>{% endif %}
+    <a class="kv-bt" href="/painel/prospeccao/{{ l.id }}">ficha</a></td>
+</tr>
+{% endfor %}
+</tbody></table></div>
+{% endif %}"""
+
 _env.loader.mapping["prospeccao_campanhas"] = _CAMPANHAS_TPL
 
 # ATENÇÃO ao escape: este template roda com autoescape DESLIGADO (o DictLoader usa

@@ -3468,12 +3468,11 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
   .ac-sel.done{border-color:var(--verde-claro)}
   .ac-ok{color:var(--verde-claro);font-weight:600;font-size:.75rem;white-space:nowrap}
 </style>
-<div class="card larga ac-card" id="a-classificar">
-  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.4rem">
-    <strong style="color:#f0c05a">⚠️ Lançamentos a classificar <span id="ac-count">({{ a_classificar|length }})</span></strong>
-    <span class="mut" style="font-size:.72rem">de empresa, sem conta contábil — ficam de fora da DRE por conta</span>
-  </div>
-  <p class="mut" style="font-size:.75rem;margin:.3rem 0 .6rem">Escolha a conta contábil (e o centro, se quiser) — some daqui e entra na DRE na hora.</p>
+<details class="card larga sec-pc ac-card" id="a-classificar">
+  <summary><span id="ac-titulo" style="color:#f0c05a"><span id="ac-rotulo">⚠️ Lançamentos a classificar</span> <span id="ac-count">({{ a_classificar|length }})</span>
+    <span id="ac-sub" class="mut" style="font-weight:400;font-size:.76rem">· sem conta contábil — fora da DRE</span></span><span class="chev">▾</span></summary>
+  <div class="sec-body">
+  <p class="mut" style="font-size:.75rem;margin:0 0 .6rem">Escolha a conta contábil (e o centro, se quiser) — some daqui e entra na DRE na hora.</p>
   <div id="ac-list">
     {% for l in a_classificar %}
     <div class="ac-item" id="ac-row-{{ l.id }}">
@@ -3503,7 +3502,17 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
             var cnt=document.getElementById('ac-count');
             var n=Math.max(0,(parseInt(cnt.textContent.replace(/\\D/g,''))||1)-1);
             cnt.textContent='('+n+')';
-            if(n===0){ document.getElementById('ac-list').style.display='none'; document.getElementById('ac-done').style.display='block'; }
+            if(n===0){ document.getElementById('ac-list').style.display='none'; document.getElementById('ac-done').style.display='block';
+              // a seção é recolhível: o "✓" do corpo some de vista se o dono fechar. O
+              // aviso mora no RESUMO, então é ele que precisa deixar de gritar aqui.
+              // Troca só o RÓTULO e esconde a contagem — apagar o título inteiro levaria
+              // junto o #ac-count que este mesmo bloco lê a cada classificação.
+              document.getElementById('ac-rotulo').textContent='✓ Tudo classificado';
+              cnt.style.display='none';
+              document.getElementById('ac-sub').style.display='none';
+              document.getElementById('ac-titulo').style.color='var(--verde-claro)';
+              document.getElementById('a-classificar').classList.remove('ac-card');
+            }
           }
         }
       });
@@ -3513,7 +3522,8 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
       .then(r=>r.json()).then(function(d){ if(d.ok){ sel.classList.remove('miss'); sel.classList.add('done'); } });
   }
   </script>
-</div>
+  </div>
+</details>
 {% endif %}
 
 <div class="card larga" id="dre">

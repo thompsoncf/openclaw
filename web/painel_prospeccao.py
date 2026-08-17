@@ -8987,11 +8987,17 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             if(d.conversas)per.push(d.conversas+(d.conversas===1?' conversa':' conversas'));
             if(d.mensagens)per.push(d.mensagens.toLocaleString('pt-BR')+(d.mensagens===1?' mensagem':' mensagens'));
             if(d.contatos)per.push(d.contatos+' contatos da agenda do celular');
-            var txt='APAGAR O HISTÓRICO DE WHATSAPP\n\nVai apagar '+per.join(', ')
-              +(d.de?('\n\nConversas de '+d.de+' a '+d.ate):'')
-              +'\n\nIsso NÃO tem como desfazer.\n\nOs leads e os orçamentos continuam —'
+            // BARRA-N DUPLA nas quebras de linha abaixo. Este template é uma string
+            // Python comum (não raw), então uma barra-n simples viraria newline
+            // LITERAL dentro da string JS de aspas simples — SyntaxError que mata o
+            // bloco <script> INTEIRO, levando qrShow/qrPoll/qrIniciar/qrSair com
+            // ele. Vale pros comentários também: um destes aqui já se partiu no
+            // meio e o resto da frase virou código. Ver tests/test_painel_js_sintaxe.
+            var txt='APAGAR O HISTÓRICO DE WHATSAPP\\n\\nVai apagar '+per.join(', ')
+              +(d.de?('\\n\\nConversas de '+d.de+' a '+d.ate):'')
+              +'\\n\\nIsso NÃO tem como desfazer.\\n\\nOs leads e os orçamentos continuam —'
               +' só somem as conversas. Os contatos da agenda voltam sozinhos no próximo'
-              +' pareamento.\n\nApagar mesmo assim?';
+              +' pareamento.\\n\\nApagar mesmo assim?';
             if(!confirm(txt))return;
             var b=document.getElementById('qr-apagar');if(b){b.disabled=true;b.textContent='Apagando…';}
             fetch('/painel/prospeccao/comunicacao/historico-apagar',{method:'POST',headers:{'X-Requested-With':'fetch'}})

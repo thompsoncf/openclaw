@@ -55,8 +55,13 @@ create table prospeccao (id bigserial primary key, conta_id bigint,
 -- o check de tipo pra incluir 'bounce'.
 create table prospeccao_atividades (id bigserial primary key, prospeccao_id bigint,
   tipo text not null check (tipo in ('ligacao','whatsapp','email','reuniao','visita','nota')));
--- campanhas vem da 086 (marcada como aplicada); a 104/105 adicionam colunas.
-create table campanhas (id bigserial primary key, conta_id bigint);
+-- campanhas vem da 086 (marcada como aplicada); a 104/105 adicionam colunas e a
+-- 170 lê modelo_codigo pra recuperar a atribuição de quem nasceu sem ela.
+create table campanhas (id bigserial primary key, conta_id bigint, modelo_codigo text);
+-- campanha_passos também vem da 086: a 170 compara os passos da campanha com os do
+-- modelo padrão pra decidir se pode marcá-la como 'generico' sem inventar a origem.
+create table campanha_passos (id bigserial primary key, campanha_id bigint, ordem int,
+  assunto text, corpo text, usar_ia boolean default false);
 -- campanha_alvos vem da 086 (com status); a 105 adiciona wa_status/wa_em e a 107 indexa.
 create table campanha_alvos (id bigserial primary key, campanha_id bigint, prospeccao_id bigint,
   status text);

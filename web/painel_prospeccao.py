@@ -656,7 +656,10 @@ async def prospeccao_base_add_campanha(request: Request):
     with get_pool().connection() as c:
         if nova:
             nome = (novo_nome or "").strip()[:120] or "Nova campanha"
-            cid = c.execute("insert into campanhas (conta_id, nome, criado_por) values (%s,%s,%s) returning id",
+            # mesma marcação da rota /campanhas/nova: quem nasce com _PASSOS_PADRAO
+            # nasce com o modelo 'generico' registrado, senão o resultado não tem causa
+            cid = c.execute("""insert into campanhas (conta_id, nome, criado_por, modelo_codigo)
+                               values (%s,%s,%s,'generico') returning id""",
                             (ctx["conta_id"], nome, ctx["membro_id"])).fetchone()[0]
             for (ordem, dias, assunto, corpo, ia) in _PASSOS_PADRAO:
                 c.execute("""insert into campanha_passos (campanha_id, ordem, dias_apos, assunto, corpo, usar_ia)
@@ -4333,6 +4336,75 @@ _MODELOS_BASE = [
                   "WhatsApp quando puder.", "ia": False},
     ]},
 ]
+
+# ---- v2: "pergunta única" ------------------------------------------------------
+# Por que existe uma v2, e o que ela muda.
+#
+# O diagnóstico da conta 3 (ago/2026): das 166 mensagens entregues, 80 foram LIDAS
+# (48%) e 26 pessoas apertaram um botão — 21 delas em "Agora não", contra 5
+# positivas. Não é problema de atenção: a mensagem é lida, entendida e RECUSADA,
+# 4 pra 1. E a taxa de leitura é parecida em todos os segmentos (Pet 58%, Salão
+# 61%, Estética 42%), o que descarta "a lista está errada" — se fosse a audiência,
+# algum nicho destoaria.
+#
+# Então a v2 muda o PEDIDO, não a redação. A v1 pede uma reunião ("Posso te mostrar
+# em 2 minutinhos?"), que é caro pra um desconhecido: a resposta barata é "não". A
+# v2 pede uma palavra, dá permissão explícita pra recusar, e só oferece exemplo
+# depois. A hipótese é que parte dos 21 "Agora não" está recusando o COMPROMISSO,
+# não o produto.
+#
+# D0 com texto FIXO de propósito (a v1 usa IA e escreve diferente pra cada lead):
+# mensagem que muda a cada envio não pode ser testada — não se mede o que não se
+# repete.
+_V2_FECHO = ("Oi, {empresa}! Última mensagem, prometido. 😊\n\n"
+             "Se um dia o controle do caixa virar dor de cabeça aí, é só me chamar no "
+             "WhatsApp — respondo na hora, sem compromisso.\n\nBoas vendas!")
+
+
+def _v2(codigo, nome, emoji, dor, pergunta, exemplo):
+    """Monta a sequência v2 — mesma estrutura pros nichos, só a dor muda."""
+    return {"codigo": codigo, "nome": nome, "wa_texto": "", "passos": [
+        {"dias": 0, "assunto": "Pergunta rápida, {empresa}",
+         "corpo": f"Oi, {{empresa}}! {emoji}\n\nVou direto, pra não tomar seu tempo.\n\n{dor}\n\n"
+                  f"Uma pergunta só: {pergunta}\n\n"
+                  "Se já estiver, me responde “já resolvi” que eu paro por aqui — sem insistir. 😊",
+         "ia": False},
+        {"dias": 3, "assunto": "Sem compromisso — só um exemplo",
+         "corpo": f"Oi, {{empresa}}!\n\nNão vou pedir reunião. Só deixo o exemplo:\n\n{exemplo}\n\n"
+                  "Se quiser ver com os números do seu negócio, responde “quero ver”. "
+                  "Se não for o momento, pode ignorar que eu não volto. 👍",
+         "ia": False},
+        {"dias": 7, "assunto": "Encerro por aqui, {empresa}", "corpo": _V2_FECHO, "ia": False},
+    ]}
+
+
+_MODELOS_BASE += [
+    _v2("generico_v2", "Genérico · pergunta única (v2)", "👋",
+        "A parte chata de controlar dinheiro — quanto entrou, quanto saiu, o que sobrou — "
+        "dá pra resolver conversando no WhatsApp. Sem sistema novo, sem planilha, sem treinar ninguém.",
+        "fechar o caixa te dá trabalho hoje, ou já está resolvido?",
+        "Você manda “paguei 240 no fornecedor” e o resto se organiza sozinho: categoria, "
+        "relatório do mês e o que vence essa semana."),
+    _v2("beleza_v2", "Salão & estética · pergunta única (v2)", "💅",
+        "Em salão o dinheiro se perde no detalhe: comissão da profissional, produto que acabou "
+        "sem ninguém ver, cliente que sumiu e não voltou.",
+        "fechar a comissão do mês te dá trabalho hoje, ou já está redondo?",
+        "Você manda “Ana fez 3 escovas hoje” e a comissão dela sai calculada no fim do mês, "
+        "junto com o que entrou no caixa."),
+    _v2("clinica_v2", "Clínica · pergunta única (v2)", "🦷",
+        "Em clínica o furo costuma ser o mesmo: paciente que falta sem avisar, retorno que "
+        "ninguém lembra de chamar, e o caixa que só fecha lá no fim do mês.",
+        "falta de paciente é problema aí hoje, ou já está sob controle?",
+        "A confirmação sai sozinha um dia antes, e quem não voltou há meses entra numa "
+        "lista pra você chamar — sem ninguém ficar catando na agenda."),
+    _v2("petshop_v2", "Pet shop · pergunta única (v2)", "🐾",
+        "Em pet shop o tutor some sem avisar: fez o banho, gostou, e só volta quando lembra. "
+        "Enquanto isso a agenda tem buraco no meio da semana.",
+        "encher a agenda de banho & tosa te dá trabalho hoje, ou já está resolvido?",
+        "Quando chega a hora do próximo banho, o tutor recebe o lembrete sozinho — "
+        "e a agenda enche sem você caçar cliente."),
+]
+
 _MODELOS_BASE_COD = {m["codigo"] for m in _MODELOS_BASE}
 
 
@@ -4776,7 +4848,12 @@ def prospeccao_campanha_nova(request: Request, nome: str = Form("")):
         return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
     nome = (nome or "").strip() or "Nova campanha"
     with get_pool().connection() as c:
-        cid = c.execute("insert into campanhas (conta_id, nome, criado_por) values (%s,%s,%s) returning id",
+        # `modelo_codigo` marcado na criação: _PASSOS_PADRAO É o modelo 'generico'.
+        # Sem isso a campanha nasce sem dizer que mensagem está usando, e depois não
+        # há como comparar um texto com outro — 7 das 8 campanhas desta base ficaram
+        # órfãs assim, e o resultado delas virou um número sem causa.
+        cid = c.execute("""insert into campanhas (conta_id, nome, criado_por, modelo_codigo)
+                           values (%s,%s,%s,'generico') returning id""",
                         (ctx["conta_id"], nome[:120], ctx["membro_id"])).fetchone()[0]
         for (ordem, dias, assunto, corpo, ia) in _PASSOS_PADRAO:
             c.execute("""insert into campanha_passos (campanha_id, ordem, dias_apos, assunto, corpo, usar_ia)

@@ -86,6 +86,37 @@ def rotulo_bloqueio(codigo: str | None) -> str:
     return "O provedor de WhatsApp recusou o envio."
 
 
+# Por que a mensagem não chegou NAQUELE lead (não é da conta — a campanha segue).
+# O código vem do provedor e fica em campanha_alvos.wa_erro_codigo; a frase é o que
+# a ficha do lead mostra. Só entram aqui os significados que o projeto já conhece:
+# um código sem tradução certa vira a frase genérica, COM o número junto — chutar o
+# motivo é pior que dizer "o WhatsApp recusou, o código é este".
+ERRO_ALVO_ROT = {
+    "63024": "Este número não tem WhatsApp.",
+    "63016": "Fora da janela de 24h — só template aprovado chega neste número.",
+}
+
+
+def rotulo_erro_alvo(codigo: str | None, msg: str | None = None) -> str:
+    """Frase pro dono sobre a falha DESTE lead. Vazio só quando não há nem código
+    nem mensagem — aí não há o que dizer mesmo.
+
+    Existe porque a ficha do lead mostrava só `wa_erro_msg`, e a maior parte das
+    falhas chega por webhook com CÓDIGO e sem texto (o `ErrorCode` do Twilio não
+    vem acompanhado de frase). O motivo estava gravado o tempo todo, e a tela não
+    usava: 40 leads em erro numa conta, todos com o tooltip vazio.
+
+    A mensagem do provedor ganha do rótulo quando existe — ela é mais específica
+    que qualquer texto nosso."""
+    msg = (msg or "").strip()
+    if msg:
+        return msg
+    codigo = (codigo or "").strip()
+    if not codigo:
+        return ""
+    return ERRO_ALVO_ROT.get(codigo) or f"O WhatsApp recusou a entrega (código {codigo})."
+
+
 def motivo_bloqueio(c, conta_id: int, camp_sid: str | None = None) -> str:
     """'' quando a campanha PODE disparar o convite frio; senão o código do motivo
     (chave de BLOQUEIO_ROT). Recebe cursor aberto, como o resto do dispatcher.

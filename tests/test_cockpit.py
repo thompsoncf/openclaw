@@ -406,6 +406,73 @@ def test_pendentes_conversa_nunca_respondida_conta_tudo(pool):
     assert por_id[sem_conversa] == 0      # lead sem conversa não inventa pendência
 
 
+def test_total_pendentes_soma_a_carteira_e_ignora_fechados(pool):
+    """O número da bolinha do ícone: soma de todas as conversas do vendedor."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="tot@x.com")
+        outro = _membro(c, conta, nome="Outro", email="tot2@x.com")
+
+        def conversa_com(dono, entradas, respondida=False, status="novo"):
+            lead = _lead(c, conta, dono)
+            if status != "novo":
+                c.execute("update prospeccao set status=%s where id=%s", (status, lead))
+            cv = c.execute("insert into conversas (conta_id, prospeccao_id, canal) "
+                           "values (%s,%s,'whatsapp') returning id", (conta, lead)).fetchone()[0]
+            for i in range(entradas):
+                c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto) "
+                          "values (%s,'whatsapp','in','lead',%s)", (cv, f"m{i}"))
+            if respondida:
+                c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto) "
+                          "values (%s,'whatsapp','out','humano','ja respondi')", (cv,))
+            return lead
+
+        conversa_com(vend, 2)                       # +2
+        conversa_com(vend, 3)                       # +3
+        conversa_com(vend, 4, respondida=True)      # respondida: não soma
+        conversa_com(vend, 9, status="ganho")       # fechado: sai da carteira
+        conversa_com(outro, 7)                      # de outro vendedor
+        c.commit()
+
+    assert ck.total_pendentes(pool, conta, vend) == 5
+    assert ck.total_pendentes(pool, conta, outro) == 7
+
+
+def test_push_leva_o_numero_da_bolinha_por_vendedor(pool, monkeypatch):
+    """Lead sem dono vai pra vários, e cada um tem a SUA carteira — o badge não pode
+    ser um número só repetido pra todo mundo."""
+    from finance import webpush
+    monkeypatch.setattr(webpush, "configurado", lambda: True)
+    with pool.connection() as c:
+        conta = _conta(c)
+        a = _membro(c, conta, nome="A", email="bdg1@x.com")
+        b = _membro(c, conta, nome="B", email="bdg2@x.com")
+        # endpoint é UNIQUE na tabela: cada teste precisa dos seus, senão um rouba a
+        # assinatura do outro e a falha aparece longe daqui, na suíte inteira.
+        _assina(c, conta, a, "https://push/bdg-a")
+        _assina(c, conta, b, "https://push/bdg-b")
+        # A já tem 3 sem resposta numa outra conversa; B não tem nada
+        outro_lead = _lead(c, conta, a)
+        cv2 = c.execute("insert into conversas (conta_id, prospeccao_id, canal) "
+                        "values (%s,%s,'whatsapp') returning id", (conta, outro_lead)).fetchone()[0]
+        for i in range(3):
+            c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto) "
+                      "values (%s,'whatsapp','in','lead',%s)", (cv2, f"x{i}"))
+        # e o lead SEM DONO que acabou de falar
+        orfao = _lead(c, conta, None, "Órfão")
+        conv = _conversa(c, conta, orfao)
+        c.execute("insert into mensagens (conversa_id, canal, direcao, autor, texto) "
+                  "values (%s,'whatsapp','in','lead','oi')", (conv,))
+        c.commit()
+    por_endpoint = {}
+    monkeypatch.setattr(webpush, "enviar",
+                        lambda sub, dados, ttl=3600: (por_endpoint.__setitem__(
+                            sub["endpoint"], dados.get("badge_n")), True)[1])
+
+    assert ck.avisar_mensagem(pool, conta, orfao, conv, "oi") == 2
+    assert por_endpoint["https://push/bdg-a"] == 3   # a carteira dele
+    assert por_endpoint["https://push/bdg-b"] == 0   # a dele está limpa
+
+
 def _conversa(c, conta, lead):
     return c.execute("insert into conversas (conta_id, prospeccao_id, canal) "
                      "values (%s,%s,'whatsapp') returning id", (conta, lead)).fetchone()[0]

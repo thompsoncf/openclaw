@@ -2038,6 +2038,31 @@ def comunicacao_whatsapp_testar(request: Request, numero: str = Form("")):
                          + " · (token válido? número do destino verificado no painel da Meta?)"})
 
 
+def _qr_relogio_retencao(conta_id: int, status: str | None) -> None:
+    """Zera o marco da retenção quando o QR é OBSERVADO conectado.
+
+    Só aqui, e só com status 'conectado'. A tentação é zerar no
+    /whatsapp-qr-iniciar, que é a rota que liga o canal — e seria um furo: o
+    painel chama essa rota SOZINHO a cada abertura da tela de Canais
+    (qrAutoReconectar), então o dono reiniciaria os 30 dias só por olhar a
+    página, com o WhatsApp ainda desconectado. Conectou de verdade é o único
+    fato que para o relógio.
+
+    Best-effort: é contabilidade de prazo, não pode derrubar a tela do QR."""
+    if (status or "") != "conectado":
+        return
+    try:
+        with get_pool().connection() as c:
+            c.execute("""update canais_config set desconectado_em=null
+                          where conta_id=%s and canal='whatsapp'
+                            and desconectado_em is not null""", (int(conta_id),))
+            c.commit()
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger("prospeccao.wa_qr").warning(
+            "não deu pra zerar o relógio de retenção da conta %s: %s", conta_id, e)
+
+
 @router.post("/painel/prospeccao/comunicacao/whatsapp-qr-iniciar")
 def comunicacao_whatsapp_qr_iniciar(request: Request):
     """Coloca a empresa no modo QR e pede o QR ao serviço Node pra exibir/escanear."""
@@ -2060,6 +2085,7 @@ def comunicacao_whatsapp_qr_iniciar(request: Request):
             (ctx["conta_id"], "qr:" + str(ctx["conta_id"])))
         c.commit()
     r = wq.iniciar(ctx["conta_id"])
+    _qr_relogio_retencao(ctx["conta_id"], r.get("status"))
     return JSONResponse({"ok": bool(r.get("ok", True) and not r.get("erro")),
                          "status": r.get("status"), "qr": r.get("qr"),
                          "sincronizando": bool(r.get("sincronizando")), "sync_progress": r.get("syncProgress") or 0,
@@ -2075,6 +2101,7 @@ def comunicacao_whatsapp_qr_status(request: Request):
     from finance import whatsapp_qr as wq
     r = wq.status(ctx["conta_id"])
     st = r.get("status") or "desconectado"
+    _qr_relogio_retencao(ctx["conta_id"], st)
     return JSONResponse({"ok": True, "status": st, "qr": r.get("qr"),
                          "sincronizando": bool(r.get("sincronizando")), "sync_progress": r.get("syncProgress") or 0,
                          "msg": _QR_ROT.get(st, "")})
@@ -2102,6 +2129,76 @@ def comunicacao_whatsapp_qr_sair(request: Request):
             "whatsapp_qr_sair: conta_id=%s falhou — %s", ctx["conta_id"], r.get("erro"))
         return JSONResponse({"ok": False, "erro": r.get("erro") or "falha"}, status_code=502)
     return JSONResponse({"ok": True})
+
+
+@router.get("/painel/prospeccao/comunicacao/historico-resumo")
+def comunicacao_historico_resumo(request: Request):
+    """Quanto histórico de WhatsApp existe, pra o botão de apagar dizer o que vai
+    levar ANTES de levar. Confirmação sem número não informa nada."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    from finance import retencao
+    try:
+        d = retencao.resumo_historico(get_pool(), ctx["conta_id"])
+    except Exception as e:  # noqa: BLE001 — a tela de Canais abre de qualquer jeito
+        import logging
+        logging.getLogger("prospeccao.retencao").warning(
+            "historico_resumo: conta_id=%s falhou: %s", ctx["conta_id"], e)
+        return JSONResponse({"ok": False, "erro": "indisponivel"}, status_code=502)
+    d["ok"] = True
+    d["dias_retencao"] = retencao.DIAS_RETENCAO
+    return JSONResponse(d)
+
+
+@router.post("/painel/prospeccao/comunicacao/historico-apagar")
+def comunicacao_historico_apagar(request: Request):
+    """Apaga o histórico de conversa do WhatsApp desta empresa, a pedido do dono.
+
+    EXIGE O CANAL DESCONECTADO. Não é burocracia: com a sessão de pé o celular
+    continua sincronizando e o serviço de QR reescreveria parte do que acabou de
+    ser apagado, deixando um resultado pela metade que ninguém entende. Além
+    disso, apagar por engano o histórico de um canal EM USO é o pior estrago
+    possível nesta tela — e desconectar primeiro é uma barreira deliberada.
+
+    Só dono/gestor (`gerencia`): vendedor não apaga o histórico da empresa."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    import logging
+    log = logging.getLogger("prospeccao.retencao")
+    from finance import whatsapp_qr as wq
+    # pergunta ao SERVIÇO, não ao banco: `canais_config.ativo` é intenção de
+    # configuração, e o que importa aqui é se existe sessão viva agora. Quando o
+    # serviço não responde, o certo é recusar — apagar às cegas não tem volta.
+    try:
+        st = (wq.status(ctx["conta_id"]) or {}).get("status") or ""
+    except Exception as e:  # noqa: BLE001
+        log.warning("historico_apagar: conta_id=%s sem status do serviço: %s",
+                    ctx["conta_id"], e)
+        return JSONResponse(
+            {"ok": False, "erro": "O serviço de QR não respondeu. Tente de novo em "
+                                  "instantes — nada foi apagado."}, status_code=502)
+    if st and st != "desconectado":
+        return JSONResponse(
+            {"ok": False, "erro": "Desconecte o WhatsApp antes de apagar o histórico."},
+            status_code=409)
+    from finance import retencao
+    try:
+        r = retencao.apagar_historico_whatsapp(get_pool(), ctx["conta_id"])
+    except Exception as e:  # noqa: BLE001
+        log.warning("historico_apagar: conta_id=%s falhou: %s: %s",
+                    ctx["conta_id"], type(e).__name__, e)
+        return JSONResponse(
+            {"ok": False, "erro": "Não deu pra apagar. Nada foi removido."},
+            status_code=500)
+    log.warning("historico_apagar: conta_id=%s apagado a pedido do dono — %s", ctx["conta_id"], r)
+    r["ok"] = True
+    return JSONResponse(r)
 
 
 def _tel_fmt_br(numero: str) -> str:
@@ -4072,7 +4169,13 @@ async def webhook_wa_qr_deslogado(request: Request):
         if not _conta_em_qr(c, conta_id):
             log.warning("webhook_wa_qr_deslogado: conta_id=%s não está em QR — ignorado", conta_id)
             return Response("ok", media_type="text/plain")
-        c.execute("""update canais_config set ativo=false
+        # `desconectado_em` é o MARCO ZERO da retenção de 30 dias (migração 165).
+        # `coalesce` de propósito: só carimba a PRIMEIRA desconexão. Deslogar de
+        # novo sem ter reconectado no meio não pode empurrar o prazo pra frente,
+        # senão um pareamento que cai em looping segura o histórico pra sempre.
+        c.execute("""update canais_config
+                        set ativo=false,
+                            desconectado_em=coalesce(desconectado_em, now())
                       where conta_id=%s and canal='whatsapp'
                         and coalesce(provedor,'twilio')='qr'""", (conta_id,))
         c.commit()
@@ -8684,6 +8787,15 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <div style="display:flex;gap:.4rem;margin-top:.6rem;flex-wrap:wrap">
           <button type="button" class="pbtn" id="qr-btn" onclick="qrIniciar()">📱 Gerar QR</button>
           <button type="button" class="pbtn ghost" id="qr-sair" onclick="qrSair()" style="display:none">Desconectar</button>
+          <!-- só aparece DESCONECTADO: com a sessão de pé o celular continua
+               sincronizando e reescreveria parte do que foi apagado. -->
+          <button type="button" class="pbtn ghost" id="qr-apagar" onclick="qrApagar()"
+                  style="display:none;border-color:var(--ambar-borda);color:var(--ambar)">🗑️ Apagar histórico</button>
+        </div>
+        <div class="mut" id="qr-retencao" style="font-size:.75rem;margin-top:.45rem;display:none">
+          Desconectar <b>não apaga</b> as conversas — elas ficam aqui e voltam a
+          funcionar quando você reconectar. Depois de <b>30 dias</b> desconectado,
+          o sistema apaga o histórico deste WhatsApp automaticamente.
         </div>
         <div id="qr-box" style="margin-top:.6rem;text-align:center;display:none">
           <img id="qr-img" alt="QR do WhatsApp" style="width:220px;max-width:100%;border-radius:10px;background:#fff;padding:.4rem">
@@ -8709,6 +8821,12 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           if(syncPct)syncPct.textContent=(d.sync_progress||0)+'%';
           if(msg)msg.textContent=(conectado&&d.sincronizando)?'':(d.msg||'');
           if(sair)sair.style.display=(d.status&&d.status!=='desconectado')?'inline-flex':'none';
+          // apagar e desconectar são exclusivos: um só faz sentido quando o outro
+          // não cabe. `=== 'desconectado'` e não `!conectado` de propósito — em
+          // 'reconectando'/'sincronizando' a sessão está viva e apagar faria estrago.
+          var apg=document.getElementById('qr-apagar'),ret=document.getElementById('qr-retencao');
+          if(apg)apg.style.display=(d.status==='desconectado')?'inline-flex':'none';
+          if(ret)ret.style.display=(d.status==='desconectado')?'block':'none';
           if(btn)btn.textContent=conectado?'Reconectar':'📱 Gerar QR';
           if(msg)msg.style.color=conectado?'var(--verde-claro)':'';
           // só para de perguntar quando realmente não tem mais nada mudando:
@@ -8732,6 +8850,36 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             if(_qrTimer){clearInterval(_qrTimer);_qrTimer=null;}qrShow({status:'desconectado',msg:'Desconectado.'});})
             .catch(function(){var m=document.getElementById('qr-msg');
               if(m){m.textContent='Falha de rede ao desconectar. Tente de novo.';m.style.color='var(--ambar)';}});}
+        // Apagar é irreversível, então a confirmação diz NÚMEROS REAIS (buscados
+        // agora) em vez de um "tem certeza?" genérico. Quem lê "2.394 mensagens de
+        // 14/07 a 17/08" decide de verdade; quem lê "tem certeza?" só clica em OK.
+        function qrApagar(){
+          var m=document.getElementById('qr-msg');
+          fetch('/painel/prospeccao/comunicacao/historico-resumo').then(function(r){return r.json();}).then(function(d){
+            if(!d||!d.ok){if(m){m.textContent='Não deu pra ler o histórico. Tente de novo.';m.style.color='var(--ambar)';}return;}
+            if(!d.mensagens&&!d.conversas&&!d.contatos){
+              if(m){m.textContent='Não há histórico de WhatsApp pra apagar.';m.style.color='';}return;}
+            var per=[];
+            if(d.conversas)per.push(d.conversas+(d.conversas===1?' conversa':' conversas'));
+            if(d.mensagens)per.push(d.mensagens.toLocaleString('pt-BR')+(d.mensagens===1?' mensagem':' mensagens'));
+            if(d.contatos)per.push(d.contatos+' contatos da agenda do celular');
+            var txt='APAGAR O HISTÓRICO DE WHATSAPP\n\nVai apagar '+per.join(', ')
+              +(d.de?('\n\nConversas de '+d.de+' a '+d.ate):'')
+              +'\n\nIsso NÃO tem como desfazer.\n\nOs leads e os orçamentos continuam —'
+              +' só somem as conversas. Os contatos da agenda voltam sozinhos no próximo'
+              +' pareamento.\n\nApagar mesmo assim?';
+            if(!confirm(txt))return;
+            var b=document.getElementById('qr-apagar');if(b){b.disabled=true;b.textContent='Apagando…';}
+            fetch('/painel/prospeccao/comunicacao/historico-apagar',{method:'POST',headers:{'X-Requested-With':'fetch'}})
+              .then(function(r){return r.json();}).then(function(res){
+                if(b){b.disabled=false;b.textContent='🗑️ Apagar histórico';}
+                if(!res||!res.ok){if(m){m.textContent=res&&res.erro?res.erro:'Não deu pra apagar.';m.style.color='var(--ambar)';}return;}
+                if(m){m.textContent='Histórico apagado: '+res.mensagens+' mensagens e '+res.conversas+' conversas.';
+                      m.style.color='var(--verde-claro)';}
+                if(b)b.style.display='none';
+              }).catch(function(){if(b){b.disabled=false;b.textContent='🗑️ Apagar histórico';}
+                if(m){m.textContent='Falha de rede ao apagar.';m.style.color='var(--ambar)';}});
+          }).catch(function(){if(m){m.textContent='Falha de rede.';m.style.color='var(--ambar)';}});}
         // Ao abrir a página, tenta reconectar sozinho em vez de só checar o status —
         // o serviço Node reinicia a cada deploy (perde a sessão da memória, mas as
         // credenciais continuam salvas), e sem isso o usuário via "Desconectado" e

@@ -188,6 +188,21 @@ def rodar() -> None:
                 f"R$ {min_as:.2f}.",
             )
 
+    # 4) FAXINA DE RETENCAO — pega carona neste cron de proposito.
+    # Nao e' assunto de "saldo", e o lar certo dela e' scripts/faxina_retencao.py.
+    # Mas o `render.yaml` deste repo e' DOCUMENTACAO, nao Blueprint: declarar um
+    # `type: cron` la' nao cria cron no Render (criar o servico e' passo manual).
+    # Este e' o unico cron deste repo que comprovadamente roda todo dia, então e'
+    # o unico jeito da regra dos 30 dias acontecer de verdade sem passo manual.
+    # O precedente: finance.observabilidade.expurgar_antigos documenta "rodar por
+    # cron 1x/dia" e nunca foi chamada por ninguem — retencao que so' existe no
+    # papel. Quando houver cron dedicado apontando pra faxina_retencao, remova isto.
+    try:
+        from scripts import faxina_retencao
+        faxina_retencao.rodar()
+    except Exception as e:  # noqa: BLE001 — a faxina nunca derruba o monitor
+        _log.warning("faxina de retencao falhou (ignorado): %s: %s", type(e).__name__, e)
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

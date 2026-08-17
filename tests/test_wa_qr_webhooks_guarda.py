@@ -38,7 +38,9 @@ create table wa_contatos (id bigserial primary key, conta_id bigint, numero text
 create table canais_config (
   id bigserial primary key, conta_id bigint, canal text, identificador text,
   ativo boolean not null default true, token text, provedor text not null default 'twilio',
-  wa_phone_id text);
+  wa_phone_id text,
+  -- marco zero da retenção de histórico (migração 165): o /deslogado carimba aqui
+  desconectado_em timestamptz);
 """
 
 
@@ -130,6 +132,33 @@ def test_logout_desliga_o_canal_e_preserva_o_historico(pool):
     assert (e["conversas"], e["mensagens"], e["contatos"]) == (1, 1, 1), (
         "deslogar não pode custar o histórico de conversa com os leads"
     )
+
+
+def _marco(pool, conta):
+    with pool.connection() as c:
+        return c.execute("""select desconectado_em from canais_config
+                             where conta_id=%s and canal='whatsapp'""",
+                         (conta,)).fetchone()[0]
+
+
+def test_logout_carimba_o_marco_da_retencao(pool):
+    """`desconectado_em` é o marco zero dos 30 dias (migração 165). Sem ele o
+    relógio não tem de onde partir, e a faxina nunca saberia o que venceu."""
+    conta = _conta_com_historico(pool, "QR pra carimbar", "qr")
+    assert _marco(pool, conta) is None
+    _deslogar(conta)
+    assert _marco(pool, conta) is not None
+
+
+def test_deslogar_de_novo_nao_empurra_o_prazo(pool):
+    """`coalesce` no UPDATE: só a PRIMEIRA desconexão carimba. Um pareamento que
+    cai em looping renovaria o marco a cada queda e o histórico ficaria retido
+    pra sempre — a regra dos 30 dias nunca venceria."""
+    conta = _conta_com_historico(pool, "QR em looping", "qr")
+    _deslogar(conta)
+    primeiro = _marco(pool, conta)
+    _deslogar(conta)
+    assert _marco(pool, conta) == primeiro
 
 
 def test_logout_de_conta_twilio_nao_encosta_em_nada(pool):

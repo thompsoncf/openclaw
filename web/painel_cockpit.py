@@ -910,13 +910,21 @@ def _pend_vend(conta_id: int, membro_id: int) -> int:
 
 
 def _abas_dono(ativo: str) -> str:
-    # Perfil sai da barra e vira o avatar do topo (igual no app do vendedor): com
-    # seis abas os rótulos não cabem numa tela de 390px.
+    # O Perfil já saiu daqui uma vez, virando só o avatar do topo, porque "com seis
+    # abas os rótulos não cabem numa tela de 390px". A preocupação com o espaço era
+    # justa; a consequência não foi vista: o avatar é as INICIAIS DA EMPRESA num
+    # círculo sem rótulo, e ele é a única porta pro Sair. Quem entrava no app de
+    # gestão não achava como sair — foi o que aconteceu na prática.
+    #
+    # Medido antes de trazer de volta, em 390px: o maior rótulo ("Propostas") ocupa
+    # 48px numa faixa de 65, todos em uma linha, e a barra fica com os mesmos 54px
+    # de altura de quando tinha cinco. Cabe — não precisou encurtar nada.
     return _abas([("visao", "visao", "Visão", _BASE),
                   ("placar", "placar", "Placar", f"{_BASE}/equipe/placar"),
                   ("leads", "leads", "Leads", f"{_BASE}/equipe/leads"),
                   ("orcamentos", "orc", "Propostas", f"{_BASE}/orcamentos"),
-                  ("ativ", "ativ", "Atividade", f"{_BASE}/equipe/atividade")], ativo)
+                  ("ativ", "ativ", "Atividade", f"{_BASE}/equipe/atividade"),
+                  ("perfil", "perfil", "Perfil", f"{_BASE}/perfil")], ativo)
 
 
 def _hdr_dono(conta_id: int, titulo: str, sub: str = "", voltar: str = "") -> str:
@@ -2002,7 +2010,10 @@ def _perfil_dono(conta_id: int, membro_id: int | None) -> HTMLResponse:
     minha_caixa = (f"<a class='btn ghost' href='{_BASE}?meus=1'>Ver a minha caixa de leads</a>"
                    if membro_id else "")
     corpo = (
-               _hdr("Perfil", "dono · gestão da equipe")
+               # o mesmo topo das outras telas de gestão (ver _hdr_dono): sem o
+               # avatar, esta era a única tela do gestor sem nada no canto esquerdo
+               _hdr("Perfil", "dono · gestão da equipe",
+                    inicial=marca["iniciais"], href_inicial=f"{_BASE}/perfil")
              + "<div class=scroll>"
              + "<div class=bloco><div class=card style='display:flex;align-items:center;gap:.9rem'>"
              + f"<span class=av style='width:46px;height:46px;font-size:1.1rem'>{esc(marca['iniciais'])}</span>"

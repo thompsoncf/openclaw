@@ -10294,6 +10294,26 @@ _CAMPANHAS_TPL = """{% extends "base" %}{% block conteudo %}""" + _CPILL_CSS + "
 document.addEventListener('keydown', function(e){
   if(e.key === 'Escape'){ var o=document.getElementById('ovlCriar'); if(o) o.classList.remove('on'); }
 });
+/* Abre/fecha a lista de quem está por trás de um KPI. Carrega sob demanda: a
+   consulta varre as mensagens da conta inteira e não pode pesar no load de quem
+   só quer ver os números.
+   FICA NO TOPO, fora do IIFE abaixo, porque é chamada por `onclick=` inline no
+   HTML — e onclick só enxerga o escopo global. Dentro do IIFE ela existe, mas o
+   clique morre num ReferenceError e a tela não faz nada. Mesma convenção de
+   capToggle/secToggle/clUpd. */
+var kpiAtual=null;
+function kpiAbre(sinal, el){
+  var painel=document.getElementById('kpi-painel'), corpo=document.getElementById('kpi-corpo');
+  if(!painel||!corpo) return;
+  document.querySelectorAll('.gastos .gi.abre').forEach(function(n){n.classList.remove('on');});
+  if(kpiAtual===sinal){ kpiAtual=null; painel.classList.remove('on'); return; }
+  kpiAtual=sinal; el.classList.add('on'); painel.classList.add('on');
+  corpo.innerHTML='<div class="kv-vazio">Carregando…</div>';
+  fetch('/painel/prospeccao/campanhas/kpi/'+encodeURIComponent(sinal))
+    .then(function(r){ return r.ok ? r.text() : Promise.reject(r.status); })
+    .then(function(h){ if(kpiAtual===sinal) corpo.innerHTML=h; })
+    .catch(function(){ corpo.innerHTML='<div class="kv-vazio">Não consegui carregar a lista.</div>'; });
+}
 /* tempo real: pergunta as métricas a cada 10s e repinta números/barras sem refresh.
    pausa sozinho quando a aba está oculta (Page Visibility) e retoma ao voltar. */
 (function(){
@@ -10312,21 +10332,6 @@ document.addEventListener('keydown', function(e){
       else if(c.alerta==='amar'){al.style.display='';al.className='calert amar';al.textContent='⚠ '+c.pct+'% do teto';}
       else{al.style.display='none';}
     }
-  }
-  // Abre/fecha a lista de quem está por trás de um KPI. Carrega sob demanda: a
-  // consulta varre mensagens da conta inteira e não pode pesar no load da página
-  // de quem só quer ver os números.
-  var kpiAtual=null;
-  function kpiAbre(sinal, el){
-    var painel=document.getElementById('kpi-painel'), corpo=document.getElementById('kpi-corpo');
-    document.querySelectorAll('.gastos .gi.abre').forEach(function(n){n.classList.remove('on');});
-    if(kpiAtual===sinal){ kpiAtual=null; painel.classList.remove('on'); return; }
-    kpiAtual=sinal; el.classList.add('on'); painel.classList.add('on');
-    corpo.innerHTML='<div class="kv-vazio">Carregando…</div>';
-    fetch('/painel/prospeccao/campanhas/kpi/'+encodeURIComponent(sinal))
-      .then(function(r){ return r.ok ? r.text() : Promise.reject(r.status); })
-      .then(function(h){ if(kpiAtual===sinal) corpo.innerHTML=h; })
-      .catch(function(){ corpo.innerHTML='<div class="kv-vazio">Não consegui carregar a lista.</div>'; });
   }
   function paintTot(t){
     var s=function(f,v){var n=document.querySelector('.gastos [data-t="'+f+'"]'); if(n&&v!=null)n.textContent=v;};

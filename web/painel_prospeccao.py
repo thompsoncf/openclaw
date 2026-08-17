@@ -2809,6 +2809,64 @@ def _nome_da_agenda(c, conta_id, numero: str) -> str:
     return ((r[0] if r else "") or "").strip()[:120]
 
 
+#: o nome que o funil usa quando ainda não sabe de quem é o número (ver a escada
+#: em `_wa_inbound_conversa`). É texto fixo, então dá pra reconhecer depois.
+NOME_PROVISORIO = "Contato WhatsApp"
+
+#: lead que nunca foi batizado de verdade: sem nome, com o número cru no lugar do
+#: nome, ou com o texto provisório. Mesma família que o `scripts/backfill_nome_lead`
+#: já conhece — aqui ela ganha o texto provisório, que faltava lá.
+_SQL_LEAD_SEM_NOME = (r"(p.empresa = %(prov)s or coalesce(btrim(p.empresa),'') = ''"
+                      r" or p.empresa ~ '^\+?[0-9 ()\-]+$')")
+
+
+def _batiza_lead_pendente(c, conta_id: int, conv_id: int | None = None) -> int:
+    """Desce pro lead o nome que a CONVERSA já sabe.
+
+    O lead é batizado no instante em que a mensagem chega, e nesse instante o nome
+    pode não existir em lugar nenhum: a agenda do celular ainda não sincronizou e o
+    pushName não veio. A escada cai no texto provisório — e nunca mais era
+    revisitada. Na Doce Mell isso deu 8 leads chamados "Contato WhatsApp" cujo nome
+    estava, sete minutos depois, na conversa ligada a eles.
+
+    Então o nome desce onde ele CHEGA, não onde o lead nasce. Chamado dos três
+    pontos que aprendem nome: a mensagem que entra, a importação de histórico e a
+    sincronização de contatos.
+
+    Só toca em lead que nunca foi batizado (ver `_SQL_LEAD_SEM_NOME`). Nome que
+    alguém digitou fica onde está, mesmo que o pushName discorde — quem escreveu
+    sabe mais que o WhatsApp.
+
+    Dentro de SAVEPOINT pela mesma razão do rodízio, algumas linhas abaixo: isto é
+    acessório, e um erro aqui sem a trava abortaria a transação inteira — a MENSAGEM
+    RECEBIDA se perderia, ou a sincronização de contatos inteira cairia. Batismo que
+    falha custa um nome feio; transação abortada custa o cliente."""
+    sql = (r"""update prospeccao p
+                  set empresa = btrim(cv.contato_nome),
+                      contato = case when coalesce(btrim(p.contato),'') in ('', %(prov)s)
+                                       or p.contato ~ '^\+?[0-9 ()\-]+$'
+                                     then btrim(cv.contato_nome) else p.contato end,
+                      atualizado_em = now()
+                 from conversas cv
+                where cv.prospeccao_id = p.id and cv.conta_id = p.conta_id
+                  and p.conta_id = %(conta)s
+                  and coalesce(btrim(cv.contato_nome),'') <> ''
+                  and """ + _SQL_LEAD_SEM_NOME)
+    par = {"conta": conta_id, "prov": NOME_PROVISORIO}
+    if conv_id is not None:
+        sql += " and cv.id = %(conv)s"
+        par["conv"] = conv_id
+    try:
+        with c.transaction():
+            return c.execute(sql, par).rowcount or 0
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger("prospeccao.nome").warning(
+            "batismo do lead falhou conta=%s conv=%s — mensagem preservada",
+            conta_id, conv_id, exc_info=True)
+        return 0
+
+
 def _conversa_wa_do_contato(c, conta_id, lead_id, numero):
     """A conversa de WhatsApp deste contato: a do LEAD, se ele já tiver uma; senão a
     do NÚMERO, nas duas grafias (ver _wa_equivalentes). Devolve (id, prospeccao_id)
@@ -2936,7 +2994,7 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
         # `nome_orfa` entra logo depois da agenda: numa conversa importada ele é o nome
         # com que o contato já aparecia no celular, melhor que o pushName do momento.
         nome = _nome_da_agenda(c, conta_id, remetente) or nome_orfa \
-            or (nome_perfil or "").strip() or "Contato WhatsApp"
+            or (nome_perfil or "").strip() or NOME_PROVISORIO
         # tipo 'pf': quem manda mensagem é uma pessoa. Mesmo palpite do botão "Levar
         # para o lead" — os dois caminhos nascendo diferentes era o que confundia. Um
         # clique na ficha troca pra empresa quando o número for de um comércio.
@@ -3009,6 +3067,10 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
                                  when %s then true
                                  else agente_ativo end
            where id=%s""", ((nome_perfil or "").strip()[:120], agente_on, conv_id))
+    # o nome que acabou de chegar desce pro lead, se ele ainda não tiver um de
+    # verdade. Sem isto o lead fica com o texto provisório pra sempre, mesmo com o
+    # nome ali do lado na conversa.
+    _batiza_lead_pendente(c, conta_id, conv_id)
     # rodízio: se o lead ainda não tem dono, distribui pro próximo vendedor da fila.
     # Cobre contato NOVO e resposta de campanha (ambos passam por aqui). Best-effort —
     # nunca deixa a entrada da mensagem quebrar; o aviso vai numa thread solta.
@@ -3758,6 +3820,9 @@ def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando, de_mim=Fa
     c.execute("""update conversas set ultima_msg_em=greatest(ultima_msg_em, coalesce(%s,now())),
                    contato_nome=coalesce(nullif(contato_nome,''), nullif(%s,'')) where id=%s""",
               (quando, (nome_perfil or "").strip()[:120], conv_id))
+    # a importação de histórico é a que mais chega ATRASADA — é justamente ela que
+    # trouxe o nome sete minutos depois do lead nascer sem ele.
+    _batiza_lead_pendente(c, conta_id, conv_id)
     return conv_id
 
 
@@ -4014,6 +4079,10 @@ def _gravar_contatos_wa(conta_id: int, numeros8: list[str], nomes: list[str],
                    and right(regexp_replace(conversas.contato_ref, '\D', '', 'g'), 8) = t.n8"""
             + cond, (numeros8, nomes, conta_id))
         n = r.rowcount or 0
+        # a agenda chegando tarde é o outro jeito de o nome aparecer depois do lead
+        # nascer. Sem conv_id: vale pra toda conversa da conta que acabou de ganhar
+        # nome nesta mesma passada.
+        _batiza_lead_pendente(c, conta_id)
         c.commit()
     return n
 

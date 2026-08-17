@@ -26,6 +26,13 @@ from db.conexao import get_pool
 # lead que nunca foi batizado: o nome é o próprio número (com ou sem +/espaços)
 _SO_NUMERO = r"^\+?[0-9 ()\-]+$"
 
+# O outro jeito de um lead nascer sem nome: quando nem a agenda nem o pushName
+# tinham chegado, a escada do inbound grava este texto fixo. Ele fica pra sempre,
+# mesmo com o nome aparecendo na conversa minutos depois — foi o que aconteceu na
+# Doce Mell. A correção contínua está em `_batiza_lead_pendente`; aqui é o
+# retroativo, pras contas que já acumularam.
+_PROVISORIO = "Contato WhatsApp"
+
 
 def _candidatos(c):
     """(id, conta_id, empresa, nome_novo, fonte) dos leads que dá pra renomear."""
@@ -41,10 +48,11 @@ def _candidatos(c):
                      on wa.conta_id = p.conta_id
                     and wa.numero8 = right(regexp_replace(coalesce(p.whatsapp, p.telefone, ''),
                                                           '\D', '', 'g'), 8)
-             where p.empresa ~ %s
-               and length(regexp_replace(p.empresa, '\D', '', 'g')) >= 8
+             where ((p.empresa ~ %s
+                     and length(regexp_replace(p.empresa, '\D', '', 'g')) >= 8)
+                    or p.empresa = %s)
                and coalesce(nullif(wa.nome, ''), nullif(cv.contato_nome, '')) is not null
-             order by p.conta_id, p.id""", (_SO_NUMERO,)).fetchall()
+             order by p.conta_id, p.id""", (_SO_NUMERO, _PROVISORIO)).fetchall()
 
 
 def main():

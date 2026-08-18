@@ -475,6 +475,13 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .ic.p{width:17px;height:17px}
 
 /* ---------- construtores (orçamento e visita) ---------- */
+/* seletor Meus × Todos da agenda: dois links, um marcado. Links e não botões
+   de propósito — o app inteiro é navegação por URL, e ?t= sobrevive a refresh. */
+.seg-ag{display:flex;background:var(--surface);border:1px solid var(--line);
+  border-radius:10px;padding:3px;gap:3px}
+.seg-ag a{flex:1;text-align:center;padding:.45rem .3rem;border-radius:8px;
+  font-size:.82rem;color:var(--text-dim);text-decoration:none}
+.seg-ag a.on{background:var(--bg);color:var(--text);font-weight:600}
 /* botão de novo lead: flutua acima das abas. Fixo e não no cabeçalho porque lá o
    `direita` já é o selo da conta — e o polegar alcança melhor embaixo à direita. */
 .fab{position:fixed;right:16px;bottom:84px;z-index:40;width:52px;height:52px;
@@ -926,7 +933,10 @@ def _abas_dono(ativo: str) -> str:
     # Medido antes de trazer de volta, em 390px: o maior rótulo ("Propostas") ocupa
     # 48px numa faixa de 65, todos em uma linha, e a barra fica com os mesmos 54px
     # de altura de quando tinha cinco. Cabe — não precisou encurtar nada.
+    # Sete abas, medido de novo em 390px: ~55px por aba, e o maior rótulo
+    # ("Propostas", .58rem) ocupa ~46px. Continua numa linha só.
     return _abas([("visao", "visao", "Visão", _BASE),
+                  ("agenda", "agenda", "Agenda", f"{_BASE}/agenda"),
                   ("placar", "placar", "Placar", f"{_BASE}/equipe/placar"),
                   ("leads", "leads", "Leads", f"{_BASE}/equipe/leads"),
                   ("orcamentos", "orc", "Propostas", f"{_BASE}/orcamentos"),
@@ -1216,15 +1226,30 @@ def _sinal_js(sig: str) -> str:
 
 
 @router.get("/cockpit/agenda", response_class=HTMLResponse)
-def cockpit_agenda(request: Request):
-    """A agenda do vendedor. Na versão anterior ele marcava a visita e ela sumia — não existia
-    tela nenhuma que devolva 'o que eu tenho pra hoje'."""
+def cockpit_agenda(request: Request, t: str = ""):
+    """A agenda da CONTA, pros três papéis. Era só a do vendedor (as visitas que ELE
+    marcou), dono e gestor não tinham aba nenhuma, e a data SEGURADA não aparecia
+    pra ninguém no app — a informação que evita prometer a mesma data duas vezes.
+
+    `t` é o seletor Meus × Todos. O padrão diz quem é: o vendedor abre em MEUS —
+    a agenda dele é a rota do dia, e abrir com o time inteiro empurraria a próxima
+    visita pra baixo da dobra; dono e gestor abrem em TODOS, que é o trabalho deles.
+    O dono titular não tem membro_id, então pra ele o seletor nem aparece."""
     sess = _sessao(request)
-    if not sess:
+    g = _gerencia(request)
+    if not sess and not g:
         return RedirectResponse("/cockpit/login", status_code=303)
-    conta_id, membro_id = sess
-    visitas = ck.visitas_do_vendedor(get_pool(), conta_id, membro_id)
-    hoje = [v for v in visitas if v["hoje"]]
+    conta_id, membro_id = sess if sess else g
+    gestao = bool(g)
+    so_meus = (t == "meus") if t in ("meus", "todos") else (not gestao)
+    if not membro_id:
+        so_meus = False       # dono titular: "meus" não aponta pra ninguém
+    eventos = ck.agenda_da_conta(get_pool(), conta_id, membro_id, so_meus=so_meus)
+    hoje = [v for v in eventos if v["hoje"]]
+
+    _TAG = {"visita": ("visita", "var(--azul)", "var(--azul-borda)", "#0d1b23"),
+            "segurada": ("segurada", "var(--ambar)", "#5a4520", "#241c0f"),
+            "compromisso": ("compromisso", "var(--neon)", "#1e4a3a", "#10241a")}
 
     def bloco(v):
         acoes = []
@@ -1236,27 +1261,98 @@ def cockpit_agenda(request: Request):
             acoes.append(f"<a href='{esc(v['zap'])}' target=_blank rel=noopener>{_ic('zap', 'ic p')} Avisar</a>")
         if v["ics_url"]:
             acoes.append(f"<a href='{esc(v['ics_url'])}'>{_ic('agenda', 'ic p')} Calendário</a>")
+        rot, cor, borda, fundo = _TAG[v["tipo_ev"]]
+        tag = (f"<span style='font-size:.62rem;font-weight:700;padding:.08rem .42rem;"
+               f"border-radius:10px;border:1px solid {borda};background:{fundo};color:{cor}'>{rot}</span>")
+        # quem marcou: 'você' quando é o próprio; vazio quando foi o dono titular
+        # (que não tem membro) — aí a linha simplesmente não aparece.
+        quem = "você" if v["minha"] else v["autor"]
+        prazo = (f" <span style='color:var(--ambar)'>· sinal vence em {esc(v['prazo'])}</span>"
+                 if v["prazo"] and v["prazo"] != "vencido"
+                 else " <span style='color:var(--coral)'>· prazo vencido</span>" if v["prazo"] else "")
         return (f"<div class='vis{' hoje' if v['hoje'] else ''}'>"
                 f"<div class=quando><div class=h>{esc(v['hora'])}</div><div class=d>{esc(v['dia'])}</div></div>"
                 f"<div class=mid><b>{esc(v['titulo'])}</b>"
                 + (f"<div class=loc>{esc(v['local'])}</div>" if v["local"] else "")
+                + f"<div class=loc>{tag}{prazo}" + (f" · {esc(quem)}" if quem else "") + "</div>"
                 + (f"<div class=acoes>{''.join(acoes)}</div>" if acoes else "")
                 + "</div></div>")
 
-    if visitas:
+    if eventos:
         miolo = ("<div class=eyebrow>Hoje</div>"
                  + ("".join(bloco(v) for v in hoje) if hoje
                     else "<div class=fonte>Nada marcado pra hoje.</div>"))
-        depois = [v for v in visitas if not v["hoje"]]
+        depois = [v for v in eventos if not v["hoje"]]
         if depois:
             miolo += "<div class=eyebrow>Próximos dias</div>" + "".join(bloco(v) for v in depois)
     else:
-        miolo = ("<div class=vazio><div class=big>◷</div><b>Nenhuma visita marcada</b>"
-                 "Abra um lead e toque em <b>Agendar visita</b> — ela aparece aqui.</div>")
+        miolo = ("<div class=vazio><div class=big>◷</div><b>Nada na agenda</b>"
+                 "Marque uma visita pelo lead, ou toque no + pra criar um compromisso.</div>")
 
-    corpo = (_hdr("Minha agenda", f"{len(hoje)} hoje · {len(visitas)} nos próximos 14 dias")
-             + f"<div class=scroll>{miolo}</div>" + _abas_vend("agenda", _pend_vend(conta_id, membro_id)))
-    return _page("Minha agenda", corpo)
+    # o seletor só existe pra quem TEM agenda própria (membro_id) — pro dono
+    # titular "meus" seria um filtro que devolve sempre vazio.
+    seletor = ""
+    if membro_id:
+        seletor = (
+            "<div class=bloco style='margin-top:.9rem'><div class=seg-ag>"
+            + (f"<a href='{_BASE}/agenda?t=meus'" + (" class=on" if so_meus else "") + ">Meus</a>")
+            + (f"<a href='{_BASE}/agenda?t=todos'" + ("" if so_meus else " class=on") + ">Todos</a>")
+            + "</div></div>")
+
+    abas = _abas_dono("agenda") if gestao else _abas_vend("agenda", _pend_vend(conta_id, membro_id))
+    corpo = (_hdr("Agenda", f"{len(hoje)} hoje · {len(eventos)} nos próximos 14 dias")
+             + _flash(request)
+             + f"<div class=scroll>{seletor}{miolo}</div>"
+             + f"<a class=fab href='{_BASE}/agenda/novo' aria-label='Novo compromisso'>+</a>"
+             + abas)
+    return _page("Agenda", corpo)
+
+
+@router.get("/cockpit/agenda/novo", response_class=HTMLResponse)
+def cockpit_agenda_novo_tela(request: Request):
+    """Compromisso avulso direto do celular. Antes o app só criava evento por DENTRO
+    de um lead (a visita) — reunião, entrega ou qualquer coisa fora de lead não tinha
+    onde entrar sem abrir o desktop."""
+    if not (_sessao(request) or _gerencia(request)):
+        return RedirectResponse("/cockpit/login", status_code=303)
+    corpo = (_hdr("Novo compromisso", "entra na agenda de todos", voltar=f"{_BASE}/agenda")
+             + _flash(request)
+             + f"<form class=telaform method=post action='{_BASE}/agenda/novo'>"
+             + "<div class=scroll><div class=secao><div class='fic'>"
+             + "<label class=fic-c><span>O que é</span>"
+               "<input name=titulo required autocomplete=off autofocus"
+               " placeholder='Ex: Reunião — Salão Prime'></label>"
+             + "<label class='fic-c meia'><span>Data</span>"
+               "<input name=data type=date required></label>"
+             + "<label class='fic-c meia'><span>Hora</span>"
+               "<input name=hora type=time required></label>"
+             + "<label class=fic-c><span>Local (opcional)</span>"
+               "<input name=local autocomplete=off placeholder='Endereço ou link'></label>"
+             + "</div><div class=fonte>Aparece pra equipe inteira, com o seu nome. Visita "
+               "de lead continua sendo marcada pelo próprio lead — ali ela já sai ligada "
+               "na ficha.</div></div></div>"
+             + "<div class=rodape-b><button class=btn type=submit>Marcar</button></div>"
+             + "</form>")
+    return _page("Novo compromisso", corpo)
+
+
+@router.post("/cockpit/agenda/novo")
+def cockpit_agenda_novo(request: Request, titulo: str = Form(""), data: str = Form(""),
+                        hora: str = Form(""), local: str = Form("")):
+    sess = _sessao(request)
+    g = _gerencia(request)
+    if not sess and not g:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess if sess else g
+    from finance import agenda as ag
+    inicio = ag.parse_datahora(f"{(data or '').strip()} {(hora or '').strip()}".strip())
+    if not (titulo or "").strip() or not inicio:
+        request.session["ck_err"] = "Preencha o que é, a data e a hora."
+        return RedirectResponse(f"{_BASE}/agenda/novo", status_code=303)
+    ag.criar_evento(get_pool(), conta_id, (titulo or "").strip()[:200], inicio,
+                    membro_id=membro_id, local=(local or "").strip() or None)
+    request.session["ck_ok"] = "Compromisso marcado ✓"
+    return RedirectResponse(f"{_BASE}/agenda", status_code=303)
 
 
 @router.get("/cockpit/resultado", response_class=HTMLResponse)

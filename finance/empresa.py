@@ -426,14 +426,25 @@ def editar_titulo(pool, conta_id: int, titulo_id: int,
 
 
 def apagar_titulo(pool, conta_id: int, titulo_id: int) -> bool:
-    """Apaga de vez um titulo em ABERTO (lancado por engano). So' mexe em titulo
-    'aberto' DESTA conta - um titulo ja' PAGO gerou lancamento no caixa e NAO pode
-    sumir por aqui (o dinheiro e' real; apagar so' o titulo deixaria o caixa
-    orfao). Pra titulo pago, o caminho e' apagar o lancamento no financeiro.
-    Retorna True se apagou."""
+    """Apaga de vez um titulo lancado por engano. Retorna True se apagou.
+
+    A TRAVA e' `lancamento_id is null`, e nao o status. A regra que importa nao e'
+    "so' aberto" — e' *nada no livro-caixa depende deste titulo*. Um titulo pago pelo
+    `dar_baixa_titulo` carrega o id do lancamento que a baixa criou; apagar so' o
+    titulo deixaria aquele dinheiro no caixa sem origem, e o DRE e o relatorio do
+    contador passariam a mostrar receita que nao se explica. Esse caso continua
+    recusado — pra ele o caminho e' apagar o LANCAMENTO no financeiro, que e' onde o
+    dinheiro esta'.
+
+    O que isso libera, e por que: titulo `pago` com `lancamento_id` NULO. Ele existe
+    de verdade — a FK e' `on delete set null`, entao quem apaga o lancamento do caixa
+    deixa o titulo pago apontando pra nada. Sem esta regra o registro ficava preso pra
+    sempre: nao aparecia na lista de abertos (a tela so' mostra 'aberto') e nenhum
+    caminho o removia. Visto em producao numa conta de teste.
+    """
     with pool.connection() as c:
         cur = c.execute(
-            "delete from titulos where id=%s and conta_id=%s and status='aberto'",
+            "delete from titulos where id=%s and conta_id=%s and lancamento_id is null",
             (titulo_id, conta_id),
         )
         c.commit()

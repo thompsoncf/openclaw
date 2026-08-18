@@ -594,3 +594,113 @@ def test_assinar_orcamento_que_ja_estava_fechado_nao_quebra_nem_duplica(cliente)
     with cliente.pool.connection() as cx:
         assert cx.execute("select assinado_em is not null, status from contratos "
                           "where id=%s", (ct_id,)).fetchone() == (True, "assinado")
+
+
+# ─────────────────────────────── DESCONTO, pelas rotas de verdade
+#
+# O que importa aqui não é a conta (essa está em test_desconto.py, pura) — é a
+# FIAÇÃO: o servidor recalcula em vez de acreditar no total que a tela mandou, o
+# desconto sobrevive a reabrir a proposta, e nada disso vaza pro que não pediu.
+
+def _corpo(**extra):
+    d = {"cliente": "Marina", "empresa": "Marina", "n_modulos": 3,
+         "setup": 17060,           # BRUTO: 12.400 + 1.860 + 2.800
+         "mensal": 0, "primeiro_ano": 17060,
+         "itens": [
+             {"nome": "Pacote", "setup": 12400, "mensal": 0, "qtd": 1,
+              "unitario": 12400, "desc_tipo": "pct", "desc_val": 5},
+             {"nome": "Hora extra", "setup": 1860, "mensal": 0, "qtd": 3,
+              "unitario": 620, "desc_tipo": "valor", "desc_val": 360},
+             {"nome": "Cerimonial", "setup": 2800, "mensal": 0, "qtd": 1,
+              "unitario": 2800},
+         ],
+         "evento": {"data": "2026-12-05", "inicio": "19:00", "fim": "23:00",
+                    "tipo": "Formatura", "convidados": 150}}
+    d.update(extra)
+    return d
+
+
+def _orc(c, oid):
+    with c.pool.connection() as cx:
+        return cx.execute(
+            """select setup_centavos, primeiro_ano_centavos, desconto_tipo,
+                      desconto_pct, desconto_centavos
+                 from orcamentos where id=%s""", (oid,)).fetchone()
+
+
+def test_a_conta_do_mockup_chega_inteira_pela_rota(cliente):
+    """Os mesmos números do mockup aprovado, atravessando o HTTP: bruto 17.060,
+    descontos de item 980, final 10% sobre 16.080, total 14.472."""
+    r = cliente.post("/painel/servicos/salvar",
+                     json=_corpo(desconto_tipo="pct", desconto_pct=10))
+    assert r.status_code == 200
+    bruto, total, tipo, pct, cent = _orc(cliente, r.json()["id"])
+    assert bruto == 1706000, "setup_centavos continua sendo o BRUTO"
+    assert total == 1447200, "primeiro_ano_centavos é o líquido"
+    assert (tipo, float(pct), cent) == ("pct", 10.0, 0)
+
+
+def test_o_total_nao_vem_mais_do_navegador(cliente):
+    """A trava que a mudança abriu espaço pra colocar: `primeiro_ano` era gravado
+    como veio. Bastava editar o JSON na aba pra fechar um orçamento por qualquer
+    valor — e o título a receber sairia com ele."""
+    r = cliente.post("/painel/servicos/salvar",
+                     json=_corpo(desconto_tipo="pct", desconto_pct=10,
+                                 primeiro_ano=1))       # a mentira
+    assert _orc(cliente, r.json()["id"])[1] == 1447200
+
+
+def test_desconto_em_reais_no_total(cliente):
+    r = cliente.post("/painel/servicos/salvar",
+                     json=_corpo(desconto_tipo="valor", desconto_valor=1000))
+    bruto, total, tipo, pct, cent = _orc(cliente, r.json()["id"])
+    assert (tipo, cent) == ("valor", 100000)
+    assert total == 1608000 - 100000        # subtotal com descontos − R$ 1.000
+
+
+def test_desconto_maior_que_o_orcamento_nao_vira_acrescimo(cliente):
+    """Sem teto, um R$ digitado com um zero a mais faria total negativo — e daí
+    saem título, parcela e margem negativos."""
+    r = cliente.post("/painel/servicos/salvar",
+                     json=_corpo(desconto_tipo="valor", desconto_valor=999999))
+    assert _orc(cliente, r.json()["id"])[1] == 0
+
+
+def test_sem_desconto_o_total_continua_o_de_sempre(cliente):
+    """A regressão que mais importa: quem nunca usou desconto não pode ver número
+    diferente depois desta mudança. Itens LIMPOS, sem desconto em lugar nenhum."""
+    limpos = [{k: v for k, v in it.items() if not k.startswith("desc_")}
+              for it in _corpo()["itens"]]
+    r = cliente.post("/painel/servicos/salvar", json=_corpo(itens=limpos))
+    bruto, total, tipo, pct, cent = _orc(cliente, r.json()["id"])
+    assert bruto == 1706000 and total == 1706000
+    assert (tipo, float(pct), cent) == ("pct", 0.0, 0)
+
+
+def test_o_desconto_volta_quando_a_proposta_e_reaberta(cliente):
+    """Sem isto, reabrir pra trocar uma vírgula zeraria o desconto negociado — e o
+    cliente receberia um link mais caro que o que ele aprovou."""
+    oid = cliente.post("/painel/servicos/salvar",
+                       json=_corpo(desconto_tipo="valor",
+                                   desconto_valor=1000)).json()["id"]
+    r = cliente.get(f"/painel/servicos/item/{oid}")
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["desconto_tipo"] == "valor" and d["desconto_valor"] == 1000
+    # e o desconto de CADA linha volta junto
+    por_nome = {i["nome"]: i for i in d["itens"]}
+    assert por_nome["Pacote"]["desc_tipo"] == "pct" and por_nome["Pacote"]["desc_val"] == 5
+    assert por_nome["Hora extra"]["desc_tipo"] == "valor"
+    assert por_nome["Hora extra"]["desc_val"] == 360
+    assert por_nome["Cerimonial"]["desc_val"] == 0
+
+
+def test_reabrir_e_salvar_de_novo_nao_desconta_duas_vezes(cliente):
+    """O erro clássico deste desenho: a tela devolve o total já descontado, o
+    servidor desconta de novo, e cada edição encolhe a proposta."""
+    oid = cliente.post("/painel/servicos/salvar",
+                       json=_corpo(desconto_tipo="pct", desconto_pct=10)).json()["id"]
+    primeiro = _orc(cliente, oid)[1]
+    cliente.post("/painel/servicos/salvar",
+                 json=_corpo(id=oid, desconto_tipo="pct", desconto_pct=10))
+    assert _orc(cliente, oid)[1] == primeiro == 1447200

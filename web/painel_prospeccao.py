@@ -1729,9 +1729,9 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
         # passa fácil de 500 msgs — carregar tudo (e re-carregar a cada poll de 4s)
         # deixava o painel segundos no "Carregando…" e pesava a renderização.
         rows = c.execute(
-            """select canal, direcao, autor, criado_em, texto, membro_id, nome, status
+            """select canal, direcao, autor, criado_em, texto, membro_id, nome, status, meta
                  from (select msg.canal, msg.direcao, msg.autor, msg.criado_em, msg.texto,
-                              msg.membro_id, mm.nome as nome, msg.status, msg.id as mid
+                              msg.membro_id, mm.nome as nome, msg.status, msg.meta, msg.id as mid
                          from mensagens msg left join membros mm on mm.id = msg.membro_id
                         where msg.conversa_id=%s
                         order by msg.criado_em desc, msg.id desc limit 100) ult
@@ -1742,7 +1742,7 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
     # apertou enviar, então é ele que entra nesse lugar.
     nome_celular = _wa_nome_conectado(ctx["conta_id"]) if cv[0] == "whatsapp" else ""
     msgs = []
-    for (cn, direcao, autor, quando, texto, mid, nome, mstatus) in rows:
+    for (cn, direcao, autor, quando, texto, mid, nome, mstatus, mmeta) in rows:
         # só e-mail separa assunto (cabeçalho) do corpo; os outros canais são texto puro
         if cn == "email" and "\n\n" in (texto or ""):
             cab, _, corpo = (texto or "").partition("\n\n")
@@ -1758,10 +1758,17 @@ def prospeccao_comunicacao_thread(request: Request, conversa_id: int):
             # saiu pelo celular (ou veio do histórico): sem membro, mas dá pra
             # dizer quem foi — é o dono do WhatsApp conectado
             quem = ("📱 " + nome_celular) if nome_celular else "📱 Pelo celular"
+        # por que não chegou — a mesma frase que a ficha do lead já usa
+        # (prospec_convite.rotulo_erro_alvo), pra não existirem dois vocabulários
+        # pro mesmo erro do mesmo provedor
+        erro_rot = ""
+        if mstatus == "erro" and isinstance(mmeta, dict):
+            from finance.prospec_convite import rotulo_erro_alvo
+            erro_rot = rotulo_erro_alvo(mmeta.get("erro_codigo"), mmeta.get("erro_msg"))
         msgs.append({"canal": cn, "direcao": direcao, "autor": autor,
                      "quando": _hora_br(quando),
                      "quem": quem, "cabecalho": cab.strip(), "corpo": corpo.strip(),
-                     "status": mstatus or ""})
+                     "status": mstatus or "", "erro": erro_rot})
     destino = cv[7] or cv[8] or cv[13]     # telefone do lead OU contato_ref (conversa sem lead)
     pode_wa = False
     if cv[0] == "whatsapp" and bool(destino):
@@ -3371,9 +3378,30 @@ def aplicar_status_wa(c, sid: str, novo: str, erro_codigo: str = "", erro_msg: s
             # MAIORIA das falhas (63024 e afins) — o da API é a minoria.
             from finance.campanhas_motor import falha_na_entrega
             parou = falha_na_entrega(c, alvo[0], erro_codigo, erro_msg)
-        c.execute("""update mensagens set status='erro'
-                       where provider_sid=%s and coalesce(status,'') not in ('entregue','lido')""",
-                  (sid,))
+        # O MOTIVO junto, não só o status. O provedor manda ErrorCode/ErrorMessage
+        # no callback e isto aqui descartava os dois: quem mandou via "⚠ falhou" e
+        # mais nada. Aconteceu na conta 3 em 18/08 — uma mensagem 51h depois da
+        # última resposta do contato, ou seja, fora da janela de 24h, e descobrir
+        # isso exigiu cruzar o histórico da conversa na mão.
+        #
+        # Em alvo de campanha o motivo já era gravado (campanha_alvos.wa_erro_codigo);
+        # o buraco era só a conversa comum do inbox. Vai pro `meta` da mensagem, que
+        # é jsonb e já existe — sem tabela nova e sem coluna nova.
+        erro_meta = {}
+        if erro_codigo:
+            erro_meta["erro_codigo"] = str(erro_codigo)
+        if erro_msg:
+            erro_meta["erro_msg"] = erro_msg[:300]
+        if erro_meta:
+            import json as _json
+            c.execute("""update mensagens
+                            set status='erro', meta = coalesce(meta,'{}'::jsonb) || %s::jsonb
+                          where provider_sid=%s and coalesce(status,'') not in ('entregue','lido')""",
+                      (_json.dumps(erro_meta), sid))
+        else:
+            c.execute("""update mensagens set status='erro'
+                           where provider_sid=%s and coalesce(status,'') not in ('entregue','lido')""",
+                      (sid,))
         if alvo:
             from finance.campanhas_motor import evento
             detalhe = (f"{erro_codigo}: {erro_msg}" if erro_codigo and erro_msg
@@ -9612,7 +9640,12 @@ function cxMsgsHtml(d){
 function cxTick(m){
   if(m.direcao!=='out'||m.canal!=='whatsapp')return '';
   var s={enviado:' · ✓',entregue:' · ✓✓',lido:' · <span style="color:#4aa3ff">👀 lido</span>',erro:' · <span style="color:var(--coral)">⚠ falhou</span>'}[m.status];
-  return s||'';
+  if(!s)return '';
+  // "falhou" sozinho não diz o que fazer. O motivo vem do provedor e agora é
+  // guardado junto da mensagem — quase sempre é a janela de 24h, e saber disso
+  // é a diferença entre reenviar em vão e pedir pro cliente responder.
+  if(m.status==='erro'&&m.erro)s+=' <span style="color:var(--txt-mut)">— '+cxEsc(m.erro)+'</span>';
+  return s;
 }
 // JSON.stringify em vez de join('|'): o corpo da última mensagem entra na
 // assinatura, e um '|' digitado pelo cliente quebrava o split lá no poll —

@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup — Barra de navegação da Prospecção</title>
+<style>
+/* ============================================================================
+   TOKENS — cópia fiel de web/tema.py (_TOKENS). NÃO copiar de
+   orcamento_eventos.html: aquele ainda usa a paleta anterior ao PR #400.
+   Fontes: as do próprio repo (web/estatico/fontes) — o Google Fonts não carrega
+   no ambiente do agente, e sem isto o mockup nasce com fonte de sistema.
+   ============================================================================ */
+@font-face{font-family:"Bricolage Grotesque";
+  src:url("../../web/estatico/fontes/bricolage.woff2") format("woff2");
+  font-weight:600 700;font-display:swap}
+@font-face{font-family:"Inter";
+  src:url("../../web/estatico/fontes/inter.woff2") format("woff2");
+  font-weight:400 700;font-display:swap}
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-fundo:#10241A; --neon-borda:#1E4A3A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,sans-serif;
+  --body:"Inter",system-ui,-apple-system,sans-serif;
+  --card:var(--surface); --card-2:var(--bg-2); --borda:var(--line);
+  --txt:var(--text); --txt-mut:var(--text-dim); --verde:var(--neon);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:var(--body);
+  max-width:1180px;margin:0 auto;padding:34px 18px 100px;line-height:1.5;
+  -webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
+h1{font-size:1.7rem;font-weight:700}
+h2{font-size:1.18rem;font-weight:700;margin:0 0 .2rem}
+h3{font-size:.92rem;font-weight:600;margin-bottom:.4rem}
+code{font-family:ui-monospace,Menlo,monospace;font-size:.85em;background:var(--bg-2);
+  padding:.1rem .35rem;border-radius:4px;color:var(--txt-mut)}
+.sec{margin-top:44px}
+.sec>.num{font-family:ui-monospace,monospace;font-size:.72rem;color:var(--verde);
+  letter-spacing:.1em;text-transform:uppercase;margin-bottom:.35rem}
+.lede{color:var(--txt-mut);font-size:.92rem;max-width:80ch;margin-top:.5rem}
+.nota{border-left:2px solid var(--neon-borda);background:rgba(37,211,102,.08);
+  padding:.7rem .9rem;border-radius:0 8px 8px 0;font-size:.87rem;margin-top:1rem;
+  color:var(--txt-mut);max-width:84ch}
+.nota b{color:var(--txt)}
+.nota.mau{border-left-color:var(--coral-borda);background:var(--coral-fundo)}
+.nota.mau b{color:var(--coral)}
+
+/* moldura de "janela" com largura fixa, pra mostrar o comportamento real */
+.janela{border:1px solid var(--borda);border-radius:12px;overflow:hidden;
+  background:var(--card);margin-top:.9rem}
+.janela>.cap{background:var(--bg-2);padding:.4rem .8rem;font-size:.72rem;
+  color:var(--txt-mut);border-bottom:1px solid var(--borda);
+  font-family:ui-monospace,monospace;display:flex;justify-content:space-between;gap:.6rem}
+.janela>.miolo{padding:14px;overflow:hidden}
+.w880>.miolo{width:880px;max-width:100%}
+.w1000>.miolo{width:1000px;max-width:100%}
+.w620>.miolo{width:620px;max-width:100%}
+
+/* ---------- a barra ---------- */
+.pnavbar{display:flex;gap:.4rem;align-items:center;margin:.2rem 0 1.1rem}
+.pnav{display:inline-flex;align-items:center;gap:.35rem;font:inherit;font-size:.84rem;
+  font-weight:600;padding:.45rem .8rem;border-radius:9px;border:1px solid var(--borda);
+  color:var(--txt);background:transparent;text-decoration:none;white-space:nowrap;
+  cursor:pointer;line-height:1}
+.pnav:hover{border-color:var(--verde)}
+.pnav.on{color:var(--sobre-verde);background:var(--verde);border-color:var(--verde)}
+/* ANTES: quebra */
+.antes{flex-wrap:wrap}
+/* DEPOIS: rola, nunca quebra */
+.depois{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;
+  -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 34px),transparent);
+          mask-image:linear-gradient(90deg,#000 calc(100% - 34px),transparent)}
+.depois::-webkit-scrollbar{display:none}
+.depois.sem-mascara{-webkit-mask-image:none;mask-image:none}
+.pnav.cfg{margin-left:auto;padding:.45rem .6rem;flex:none}
+.pnav.cfg span{font-size:.95rem;line-height:1}
+
+.marca{position:relative}
+.marca::after{content:attr(data-nota);position:absolute;left:0;top:calc(100% + 6px);
+  font-size:.7rem;color:var(--coral);white-space:nowrap;font-weight:600}
+
+/* ---------- conteúdo falso da tela do funil ---------- */
+.fh{display:flex;justify-content:space-between;align-items:center;gap:1rem;
+  flex-wrap:wrap;margin-bottom:.9rem}
+.fh h2{margin:0}
+.fh .sub{font-size:.78rem;color:var(--txt-mut)}
+.cta{display:inline-flex;align-items:center;gap:.4rem;background:var(--verde);
+  color:var(--sobre-verde);border:0;border-radius:9px;padding:.55rem 1rem;
+  font-weight:700;font-size:.86rem;cursor:pointer;font-family:inherit}
+.cta:hover{background:var(--neon-bright)}
+.cols{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:.2rem}
+.col{background:var(--bg-2);border:1px solid var(--borda);border-radius:10px;padding:10px}
+.col .ct{font-size:.72rem;color:var(--txt-mut);text-transform:uppercase;
+  letter-spacing:.05em;font-weight:700;margin-bottom:.45rem;display:flex;
+  justify-content:space-between}
+.card-l{background:var(--card);border:1px solid var(--borda);border-radius:8px;
+  padding:.45rem .55rem;margin-bottom:.4rem;font-size:.78rem}
+.card-l small{display:block;color:var(--txt-mut);font-size:.68rem;margin-top:2px}
+
+table.diag{width:100%;border-collapse:collapse;margin-top:1rem;font-size:.86rem}
+table.diag th,table.diag td{padding:.5rem .7rem;border-bottom:1px solid var(--borda);
+  text-align:left;vertical-align:top}
+table.diag th{color:var(--txt-mut);font-weight:600;font-size:.74rem;
+  text-transform:uppercase;letter-spacing:.05em}
+ul.lista{margin:.6rem 0 0 1.1rem;font-size:.88rem;color:var(--txt-mut)}
+ul.lista li{margin-bottom:.35rem}
+ul.lista b{color:var(--txt)}
+.rodape{margin-top:56px;padding-top:18px;border-top:1px solid var(--borda);
+  font-size:.8rem;color:var(--text-faint)}
+</style>
+</head>
+<body>
+
+<h1>Barra da Prospecção</h1>
+<p class="lede">São <b>8 abas</b>. A barra precisa de ~920px e o CSS é
+<code>flex-wrap:wrap</code> — em notebook, com zoom, ou em tablet, a última cai pra
+segunda linha. Foi o que você viu.</p>
+
+<!-- ================================================= 1 -->
+<section class="sec">
+  <div class="num">1 · o problema</div>
+  <h2>Hoje, num notebook</h2>
+
+  <div class="janela w880">
+    <div class="cap"><span>/painel/prospeccao</span><span>notebook · largura útil ~850px</span></div>
+    <div class="miolo">
+      <nav class="pnavbar antes">
+        <a class="pnav">🎯 Captar Lead</a>
+        <a class="pnav">📇 Base</a>
+        <a class="pnav">📣 Campanhas</a>
+        <a class="pnav">🎯 Quem atacar</a>
+        <a class="pnav">✨ IA Insta</a>
+        <a class="pnav">💬 Comunicação</a>
+        <a class="pnav on">🔥 Funil</a>
+        <a class="pnav marca" data-nota="↑ caiu pra segunda linha">⚙️ Canais</a>
+      </nav>
+      <div style="height:8px"></div>
+    </div>
+  </div>
+
+  <div class="nota mau">
+    <b>Duas das oito nem são lugares — são atalhos duplicados.</b>
+    <br>· <b>⚙️ Canais</b> leva pra <code>comunicacao?aba=canais</code> — uma sub-aba de
+    outra aba que já está na barra.
+    <br>· <b>🎯 Captar Lead</b> leva pro <code>/painel/prospeccao?captar=1</code>, que é o
+    <b>próprio Funil</b> com o painel de captação aberto. E a tela do Funil <b>já tem</b> um
+    botão "🎯 Captar Lead" dentro dela, chamando a mesma função.
+    <br>Ou seja: a barra carrega duas entradas que não levam a nenhum lugar novo — e é
+    justamente o peso delas que empurra a última pra baixo.
+  </div>
+</section>
+
+<!-- ================================================= 2 -->
+<section class="sec">
+  <div class="num">2 · a proposta</div>
+  <h2>Seis lugares + a engrenagem</h2>
+  <p class="lede">Sai o "Captar Lead" (vira o botão verde do Funil, seção 4) e o "Canais"
+  vira <b>só o ícone</b>, encostado à direita — separando <i>configuração</i> de
+  <i>lugar de trabalho</i>. A barra cai pra ~700px e sobra folga.</p>
+
+  <div class="janela w1000">
+    <div class="cap"><span>/painel/prospeccao</span><span>mesma largura, agora com folga</span></div>
+    <div class="miolo">
+      <nav class="pnavbar depois sem-mascara">
+        <a class="pnav">📇 Base</a>
+        <a class="pnav">📣 Campanhas</a>
+        <a class="pnav">🎯 Quem atacar</a>
+        <a class="pnav">✨ IA Insta</a>
+        <a class="pnav">💬 Comunicação</a>
+        <a class="pnav on">🔥 Funil</a>
+        <a class="pnav cfg" title="Canais" aria-label="Canais"><span>⚙️</span></a>
+      </nav>
+      <div style="height:8px"></div>
+    </div>
+  </div>
+
+  <table class="diag">
+    <tr><th>Aba</th><th>O que muda</th></tr>
+    <tr><td>🎯 <b>Captar Lead</b></td>
+        <td><b>Sai da barra.</b> Vira o botão verde no topo do Funil — a tela onde a ação
+        acontece. De qualquer outra aba, é 1 clique (🔥 Funil).</td></tr>
+    <tr><td>⚙️ <b>Canais</b></td>
+        <td><b>Vira só o ícone</b>, colado à direita (<code>margin-left:auto</code>), com
+        <code>title="Canais"</code> pra quem passar o mouse. O destino não muda.</td></tr>
+    <tr><td>as outras 6</td>
+        <td>Iguais, na mesma ordem.</td></tr>
+  </table>
+
+  <div class="nota">
+    De quebra: o 🎯 deixa de aparecer <b>duas vezes</b> na mesma barra — hoje o "Captar
+    Lead" e o "Quem atacar" usam o mesmo emoji, e a repetição embaralha a leitura rápida.
+  </div>
+</section>
+
+<!-- ================================================= 3 -->
+<section class="sec">
+  <div class="num">3 · tela estreita</div>
+  <h2>Rola de lado. Nunca quebra.</h2>
+  <p class="lede">Mesmo com 6 abas, sempre vai existir uma tela pequena o bastante — ou
+  uma aba nova amanhã. Então a regra muda de <code>wrap</code> pra <b>rolar</b>: a barra
+  vira uma faixa horizontal, com o esfumado na direita avisando que tem mais.
+  É o padrão de app mobile, e é à prova do futuro.</p>
+
+  <div class="janela w620">
+    <div class="cap"><span>tablet em pé · ~590px</span><span>← arraste a barra</span></div>
+    <div class="miolo">
+      <nav class="pnavbar depois">
+        <a class="pnav">📇 Base</a>
+        <a class="pnav">📣 Campanhas</a>
+        <a class="pnav">🎯 Quem atacar</a>
+        <a class="pnav">✨ IA Insta</a>
+        <a class="pnav">💬 Comunicação</a>
+        <a class="pnav on">🔥 Funil</a>
+        <a class="pnav cfg" title="Canais" aria-label="Canais"><span>⚙️</span></a>
+      </nav>
+      <div style="height:8px"></div>
+    </div>
+  </div>
+
+  <div class="nota">
+    <b>A barra acima rola de verdade</b> — arraste com o dedo ou com shift+scroll. A barra
+    de rolagem fica escondida (<code>scrollbar-width:none</code>): quem indica que tem mais
+    é o esfumado da borda, não um traço cinza atravessado no meio da navegação.
+  </div>
+</section>
+
+<!-- ================================================= 4 -->
+<section class="sec">
+  <div class="num">4 · o "Captar Lead" não some</div>
+  <h2>Ele muda de lugar — pra um mais visível</h2>
+  <p class="lede">Como aba, ele era um link discreto no meio de outros sete. Como botão
+  verde no topo do Funil, ele é a única coisa colorida da tela.</p>
+
+  <div class="janela w1000">
+    <div class="cap"><span>/painel/prospeccao — o Funil</span><span>o CTA no lugar da ação</span></div>
+    <div class="miolo">
+      <nav class="pnavbar depois sem-mascara">
+        <a class="pnav">📇 Base</a>
+        <a class="pnav">📣 Campanhas</a>
+        <a class="pnav">🎯 Quem atacar</a>
+        <a class="pnav">✨ IA Insta</a>
+        <a class="pnav">💬 Comunicação</a>
+        <a class="pnav on">🔥 Funil</a>
+        <a class="pnav cfg" title="Canais" aria-label="Canais"><span>⚙️</span></a>
+      </nav>
+
+      <div class="fh">
+        <div><h2>🔥 Funil</h2><div class="sub">18 leads em andamento · 4 sem contato há 3 dias</div></div>
+        <button class="cta">🎯 Captar Lead</button>
+      </div>
+
+      <div class="cols">
+        <div class="col"><div class="ct"><span>Novo</span><span>6</span></div>
+          <div class="card-l">Padaria Central<small>Teresina · WhatsApp</small></div>
+          <div class="card-l">Ana e Pedro<small>indicação</small></div></div>
+        <div class="col"><div class="ct"><span>Contatado</span><span>5</span></div>
+          <div class="card-l">Studio Bella<small>proposta enviada</small></div></div>
+        <div class="col"><div class="ct"><span>Proposta</span><span>4</span></div>
+          <div class="card-l">Marina e Rafael<small>R$ 9.800</small></div></div>
+        <div class="col"><div class="ct"><span>Fechamento</span><span>3</span></div>
+          <div class="card-l">Júlia e Caio<small>aguardando sinal</small></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="nota">
+    <b>Nada de link quebrado:</b> <code>?captar=1</code> continua funcionando. Quem tem o
+    endereço salvo ou clicou num link antigo cai no Funil com o painel de captação já
+    aberto, exatamente como hoje.
+  </div>
+</section>
+
+<!-- ================================================= 5 -->
+<section class="sec">
+  <div class="num">5 · resumo</div>
+  <h2>O que muda no código</h2>
+  <ul class="lista">
+    <li><b>Uma função</b> — <code>_navbar()</code> em <code>web/painel_prospeccao.py</code>:
+      sai a entrada do "Captar Lead", a do "Canais" vira ícone.</li>
+    <li><b>Uma regra de CSS</b> — <code>.pnavbar</code> troca <code>flex-wrap:wrap</code>
+      por <code>nowrap</code> + <code>overflow-x:auto</code> + o esfumado.</li>
+    <li><b>Um botão</b> — o <code>capToggle()</code> que já existe no Funil ganha a cor
+      verde de CTA.</li>
+    <li>A <code>_navbar</code> é compartilhada: a <b>IA Insta</b>
+      (<code>painel_conteudo.py</code>) importa a mesma e herda tudo de graça.</li>
+  </ul>
+  <div class="nota">
+    <b>Sem migração, sem rota nova, sem mudança de dado.</b> É layout e navegação.
+  </div>
+</section>
+
+<p class="rodape">Mockup estático — cores e tipografia copiadas de <code>web/tema.py</code>.
+As barras das seções 2, 3 e 4 são funcionais: dá pra arrastar.</p>
+
+</body>
+</html>

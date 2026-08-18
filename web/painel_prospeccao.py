@@ -928,29 +928,36 @@ def prospeccao_novo(request: Request, empresa: str = Form(...), segmento: str = 
                     vendedor_id: str = Form(""), obs: str = Form(""),
                     socio: str = Form(""), regime_tributario: str = Form(""),
                     porte: str = Form(""), cargo: str = Form(""), instagram: str = Form(""),
-                    site_url: str = Form(""), receita: str = Form(""), voltar: str = Form("")):
+                    site_url: str = Form(""), receita: str = Form(""), voltar: str = Form(""),
+                    destino: str = Form("")):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
     ajax = _eh_ajax(request)
     empresa = (empresa or "").strip()
-    destino = voltar if voltar in ("/painel/prospeccao", "/painel/prospeccao/captar") else "/painel/prospeccao"
+    volta = voltar if voltar in ("/painel/prospeccao", "/painel/prospeccao/captar") else "/painel/prospeccao"
     tipo_lead, cnpj_limpo, cpf_limpo, erro_doc = _doc_lead(tipo, cnpj, cpf, documento)
     if not empresa:
         falta = "o nome da pessoa" if tipo_lead == "pf" else "o nome da empresa"
         if ajax:
             return JSONResponse({"ok": False, "erro": f"Informe ao menos {falta}."}, status_code=400)
         request.session["prosp_aviso"] = f"Informe ao menos {falta}."
-        return RedirectResponse(destino, status_code=303)
+        return RedirectResponse(volta, status_code=303)
     if erro_doc:
         if ajax:
             return JSONResponse({"ok": False, "erro": erro_doc}, status_code=400)
         request.session["prosp_aviso"] = erro_doc
-        return RedirectResponse(destino, status_code=303)
+        return RedirectResponse(volta, status_code=303)
     if tipo_lead == "pf":
         # sócio/regime/porte são do quadro societário — pessoa física não tem
         socio = regime_tributario = porte = ""
     temperatura = temperatura if temperatura in TEMP_OK else "frio"
+    # ONDE o lead nasce. O padrão histórico é a BASE: a captação em massa (Google
+    # Maps, CSV, Explorium) traz quem NÓS fomos atrás, e isso ainda não é lead. Mas o
+    # formulário manual que abre DENTRO do funil manda `destino=funil` — ali o cadastro
+    # é de quem já chegou, e nascer na base fazia o card aparecer na tela e sumir no
+    # primeiro refresh: o funil só lista `estagio='lead'` (ver prospeccao_kanban).
+    estagio = "lead" if (destino or "").strip() == "funil" else "base"
     site_link = (site_url or "").strip()
     if site_link and "://" not in site_link:
         site_link = "https://" + site_link
@@ -964,14 +971,20 @@ def prospeccao_novo(request: Request, empresa: str = Form(...), segmento: str = 
             receita_json = None
     pool = get_pool()
     vend = _vendedor_destino(ctx, vendedor_id, pool, ctx["conta_id"])
+    etapa1 = ""
     try:
         with pool.connection() as c:
+            # o rótulo da 1ª etapa é da CONTA (dá pra renomear "Novo"), então o aviso
+            # tem que perguntar pro banco em vez de chutar o nome padrão
+            if estagio == "lead":
+                etapas = _etapas(c, ctx["conta_id"])
+                etapa1 = etapas[0]["rotulo"] if etapas else "Novo"
             row = c.execute(
                 """insert into prospeccao (conta_id, vendedor_id, empresa, segmento, cidade,
                      uf, contato, cargo, telefone, whatsapp, email, cnpj, temperatura,
                      valor_estimado_centavos, origem, obs, socio, regime_tributario, porte,
-                     instagram, site_url, tem_site, receita, criado_por, tipo, cpf)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s) returning id""",
+                     instagram, site_url, tem_site, receita, criado_por, tipo, cpf, estagio)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s) returning id""",
                 (ctx["conta_id"], vend, empresa, segmento.strip() or None, cidade.strip() or None,
                  (uf or "").strip()[:2].upper() or None, contato.strip() or None, cargo.strip() or None,
                  telefone.strip() or None, whatsapp.strip() or None, email.strip().lower() or None,
@@ -979,7 +992,7 @@ def prospeccao_novo(request: Request, empresa: str = Form(...), segmento: str = 
                  (origem or "manual").strip() or None, obs.strip() or None,
                  socio.strip() or None, regime_tributario.strip() or None, porte.strip() or None,
                  instagram.strip() or None, site_link or None, tem_site, receita_json,
-                 ctx["membro_id"], tipo_lead, cpf_limpo)).fetchone()
+                 ctx["membro_id"], tipo_lead, cpf_limpo, estagio)).fetchone()
             c.commit()
     except UniqueViolation:
         doc, campo = (cpf_limpo, "cpf") if cpf_limpo else (cnpj_limpo, "cnpj")
@@ -991,14 +1004,20 @@ def prospeccao_novo(request: Request, empresa: str = Form(...), segmento: str = 
                                   "link_url": info["link_url"], "link_label": info["link_label"]},
                                  status_code=409)
         request.session["prosp_aviso"] = info["msg"]
-        return RedirectResponse(destino, status_code=303)
+        return RedirectResponse(volta, status_code=303)
+    # "entrou na prospecção" não dizia NADA: quem cadastrava pelo funil ia procurar
+    # o lead ali e não achava (tinha caído na Base). O aviso agora nomeia o lugar — e,
+    # quando é Base, ensina o caminho de volta pro funil.
+    msg = (f"“{empresa}” entrou no funil, em {etapa1}." if estagio == "lead" else
+           f"“{empresa}” entrou na Base — ainda NÃO aparece no funil. "
+           f"Pra jogar no funil: 📇 Base → marque o lead → Promover.")
     if ajax:
         lead = _lead_card(row[0], empresa, segmento.strip(), cidade.strip(),
                           (uf or "").strip()[:2].upper(), temperatura, _reais_para_centavos(valor),
                           _nome_vendedor(pool, ctx["conta_id"], vend) if ctx["gerencia"] else None)
-        return JSONResponse({"ok": True, "lead": lead})
-    request.session["prosp_aviso"] = f"“{empresa}” entrou na prospecção."
-    return RedirectResponse(destino, status_code=303)
+        return JSONResponse({"ok": True, "lead": lead, "estagio": estagio, "msg": msg})
+    request.session["prosp_aviso"] = msg
+    return RedirectResponse(volta, status_code=303)
 
 
 # ================================================================ CAPTAÇÃO
@@ -7307,7 +7326,7 @@ _CAPTURA_JS = """<script>
 function capTab(t){document.querySelectorAll('.caba').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===t);});document.querySelectorAll('.captab').forEach(function(d){d.style.display=(d.getAttribute('data-tab')===t)?'block':'none';});}
 function capFetch(url,fd){return fetch(url,{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();});}
 function _capReload(msg){capToast(msg||'Adicionado à base ✓');setTimeout(function(){location.reload();},700);}
-function capManual(ev){ev.preventDefault();var f=ev.target;capFetch('/painel/prospeccao/novo',new FormData(f)).then(function(d){if(!d.ok){capToast(d.erro||'Erro',d.link_url?{url:d.link_url,label:d.link_label}:null);return;}f.reset();_capReload('Lead adicionado à base ✓');}).catch(function(){capToast('Falha de rede');});return false;}
+function capManual(ev){ev.preventDefault();var f=ev.target;capFetch('/painel/prospeccao/novo',new FormData(f)).then(function(d){if(!d.ok){capToast(d.erro||'Erro',d.link_url?{url:d.link_url,label:d.link_label}:null);return;}f.reset();_capReload(d.msg||'Lead adicionado à base ✓');}).catch(function(){capToast('Falha de rede');});return false;}
 function capCnpj(){var f=document.getElementById('cap-manual');var cnpj=f.querySelector('[name=documento]').value.replace(/\\D/g,'');if(cnpj.length!==14){capToast('Pra puxar da Receita, o CNPJ precisa ter 14 dígitos');return;}
   capToast('Consultando Receita…');
   fetch('/painel/prospeccao/cnpj?cnpj='+cnpj,{headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
@@ -7782,6 +7801,9 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <div class="captab" data-tab="manual">
       <form id="cap-manual" data-tipo-form action="/painel/prospeccao/novo" method="post" onsubmit="return capManual(event)">
         <input type="hidden" name="voltar" value="/painel/prospeccao">
+        <!-- cadastrou aqui dentro do funil = o lead ENTRA no funil (estagio=lead).
+             Sem isto ele nascia na Base e o card sumia no primeiro refresh. -->
+        <input type="hidden" name="destino" value="funil">
         <input type="hidden" name="receita">
         <input type="hidden" name="tipo" value="pj">
         <div class="rcpills">
@@ -7811,7 +7833,8 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <div><label class="lbl">Temperatura</label><select class="fld" name="temperatura">{% for v,l in temperaturas_all %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
           {% if pode_atribuir %}<div><label class="lbl">Vendedor</label><select class="fld" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
           <div class="full"><label class="lbl">Observações</label><input class="fld" name="obs"></div>
-          <div class="full"><button class="pbtn" style="margin:.3rem 0 0">Adicionar</button></div>
+          <div class="full"><button class="pbtn" style="margin:.3rem 0 0">Adicionar ao funil</button>
+            <div class="mut" style="font-size:.78rem;margin-top:.4rem">Entra direto no funil, na primeira etapa. Pra alimentar a Base (campanhas em massa), use 📇 Base.</div></div>
         </div>
       </form>
     </div>
@@ -8059,7 +8082,7 @@ function addCard(l){var col=document.querySelector('.kbcol[data-status="novo"]')
 function capToggle(){var e=document.getElementById('captar');var vis=e.style.display!=='none';e.style.display=vis?'none':'block';if(!vis){var i=e.querySelector('.captab[data-tab=manual] input[name=empresa]');if(i)i.focus();e.scrollIntoView({behavior:'smooth',block:'nearest'});}}
 function capTab(t){document.querySelectorAll('#captar .caba').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===t);});document.querySelectorAll('#captar .captab').forEach(function(d){d.style.display=(d.getAttribute('data-tab')===t)?'block':'none';});}
 function capFetch(url,fd){return fetch(url,{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();});}
-function capManual(ev){ev.preventDefault();var f=ev.target;capFetch('/painel/prospeccao/novo',new FormData(f)).then(function(d){if(!d.ok){capToast(d.erro||'Erro',d.link_url?{url:d.link_url,label:d.link_label}:null);return;}addCard(d.lead);f.reset();capToast('Lead adicionado');}).catch(function(){capToast('Falha de rede');});return false;}
+function capManual(ev){ev.preventDefault();var f=ev.target;capFetch('/painel/prospeccao/novo',new FormData(f)).then(function(d){if(!d.ok){capToast(d.erro||'Erro',d.link_url?{url:d.link_url,label:d.link_label}:null);return;}if(d.estagio==='lead')addCard(d.lead);f.reset();capToast(d.msg||'Lead adicionado ao funil');}).catch(function(){capToast('Falha de rede');});return false;}
 function capCnpj(){var f=document.getElementById('cap-manual');var cnpj=f.querySelector('[name=documento]').value.replace(/\\D/g,'');if(cnpj.length!==14){capToast('Pra puxar da Receita, o CNPJ precisa ter 14 dígitos');return;}
   capToast('Consultando Receita…');
   fetch('/painel/prospeccao/cnpj?cnpj='+cnpj,{headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){

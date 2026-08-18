@@ -116,7 +116,11 @@ def test_pre_reserva_nao_vira_lembrete_nem_resumo(pool, conta_id, enviados):
                     pre_reserva_ate=agora + timedelta(days=2))
     ag.salvar_config(pool, conta_id, resumo_ativo=True, hora_resumo=7, aviso_antes_min=30)
     r = lb.rodar(pool, agora=agora)
-    assert r == {"resumo": 0, "aviso": 0} and enviados == []
+    # por chave, não por igualdade do dict inteiro: o retorno do rodar cresce quando
+    # entra um lembrete novo (o de aniversário entrou assim), e o que este teste
+    # afirma é que a data SEGURADA não gerou resumo nem aviso — não quantos tipos de
+    # lembrete o motor conhece.
+    assert r["resumo"] == 0 and r["aviso"] == 0 and enviados == []
 
 
 def test_pre_reserva_fica_fora_do_feed_ics(pool, conta_id):

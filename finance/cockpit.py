@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import date as _date, datetime, timedelta, timezone
 
 _log = logging.getLogger(__name__)
 
@@ -343,6 +343,82 @@ def mudar_etapa(pool, conta_id: int, membro_id: int, lead_id: int, chave: str) -
     return {"ok": True}
 
 
+def criar_lead(pool, conta_id: int, membro_id: int, nome: str, whatsapp: str) -> dict:
+    """O vendedor cadastra um lead na mão, do celular. Devolve {ok, lead_id, existia}.
+
+    Por que existe: o cockpit tinha vinte e tantas rotas e NENHUMA criava lead — o
+    vendedor só trabalhava o que o rodízio entregava. Quem pegava um contato na rua não
+    tinha onde botar, e o app perdia justamente o lead que ninguém mais ia registrar.
+
+    Nasce dele: `vendedor_id` = quem criou, então cai na fila da própria pessoa já
+    aberto. `tipo='pf'` é o mesmo palpite do lead que entra pelo WhatsApp (quem manda
+    mensagem é uma pessoa); um toque na ficha troca pra empresa.
+
+    NÃO DUPLICA. Número repetido é o modo normal de errar aqui — o vendedor não sabe de
+    cor quem já está na base, e um segundo cadastro do mesmo número parte a conversa em
+    duas fichas. Se já existe lead com aquele número na conta, devolve o que existe com
+    `existia=True` e a tela abre ele em vez de criar outro. A busca usa os 8 finais mais
+    a igualdade exata nas duas grafias do celular brasileiro (com e sem o nono dígito) —
+    o mesmo casamento de `_conversa_wa_do_contato`, porque '98392961' pode ser o final
+    de um celular do 86 e de um do 11.
+    """
+    from web.painel_prospeccao import _so_digitos, _so_digitos_wa, _wa_equivalentes
+
+    nome = (nome or "").strip()
+    if not nome:
+        return {"ok": False, "erro": "Diga o nome do contato."}
+    # O vendedor digita "(86) 99999-1234", sem DDI. Guardar assim quebraria duas coisas
+    # de uma vez: o lead nasceria com número diferente do formato que o WhatsApp entrega
+    # (`+55...`, ver o insert de whatsapp_inbound), e o _wa_equivalentes — que é quem
+    # acha o repetido — só reconhece as duas grafias do celular brasileiro a partir da
+    # forma COM o 55. `_so_digitos_wa` é o normalizador que já existe pra isso.
+    if len(_so_digitos(whatsapp)) < 10:
+        return {"ok": False, "erro": "WhatsApp incompleto (DDD + número)."}
+    digs = _so_digitos_wa(whatsapp)
+
+    alvo8 = digs[-8:]
+    with pool.connection() as c:
+        achado = c.execute(
+            r"""select id from prospeccao
+                 where conta_id=%s
+                   and right(regexp_replace(coalesce(whatsapp,''), '\D', '', 'g'), 8) = %s
+                   and regexp_replace(coalesce(whatsapp,''), '\D', '', 'g') = any(%s)
+                 order by id limit 1""",
+            (conta_id, alvo8, _wa_equivalentes(digs) or [digs])).fetchone()
+        if achado:
+            return {"ok": True, "lead_id": achado[0], "existia": True}
+        lead_id = c.execute(
+            """insert into prospeccao (conta_id, vendedor_id, empresa, contato, whatsapp,
+                 tipo, origem, temperatura, status, estagio, criado_por)
+               values (%s,%s,%s,%s,%s,'pf','manual_vendedor','morno','novo','lead',%s)
+            returning id""",
+            (conta_id, membro_id, nome[:250], nome[:250],
+             "+" + digs, membro_id)).fetchone()[0]
+        c.commit()
+    return {"ok": True, "lead_id": lead_id, "existia": False}
+
+
+def _data_nascimento(texto: str):
+    """'AAAA-MM-DD' do <input type=date> -> date. Devolve (date|None, erro|None).
+
+    Vazio é ausência, não erro: campo em branco mantém o que está gravado, como todo
+    o resto da ficha. Lixo é ERRO com mensagem, e não um silencioso None — o vendedor
+    que digitou uma data no celular precisa saber que ela não entrou; engolir o valor
+    e responder "Ficha salva ✓" seria mentir pra ele.
+    """
+    if not texto:
+        return None, None
+    try:
+        d = _date.fromisoformat(texto[:10])
+    except ValueError:
+        return None, "Data de nascimento inválida (use dia/mês/ano)."
+    # 1900 corta o dedo escorregado no ano (0002, 0202) sem inventar idade mínima;
+    # o futuro é sempre engano — ninguém nasce depois de hoje.
+    if d.year < 1900 or d > _date.today():
+        return None, "Data de nascimento fora do intervalo."
+    return d, None
+
+
 def salvar_ficha(pool, conta_id: int, membro_id: int, lead_id: int, dados: dict) -> dict:
     """Preenche os dados do cliente pela tela do vendedor. Antes isso só existia no
     painel desktop do gestor: o lead entrava por WhatsApp com um número e mais nada, e
@@ -376,6 +452,10 @@ def salvar_ficha(pool, conta_id: int, membro_id: int, lead_id: int, dados: dict)
 
         uf = limpo("uf")[:2].upper()
         email = limpo("email").lower()
+        cep = "".join(ch for ch in limpo("cep") if ch.isdigit())[:8]
+        nasc, erro_nasc = _data_nascimento(limpo("nascimento"))
+        if erro_nasc:
+            return {"ok": False, "erro": erro_nasc}
         # coalesce: o que veio em branco fica como estava. O documento só é reescrito
         # quando o vendedor digitou algo — senão um "salvar" limparia CPF já cadastrado.
         # `whatsapp` entra junto e é editável: ele é o número por onde a conversa corre,
@@ -387,9 +467,19 @@ def salvar_ficha(pool, conta_id: int, membro_id: int, lead_id: int, dados: dict)
                   ("cargo", limpo("cargo")), ("telefone", limpo("telefone")),
                   ("whatsapp", limpo("whatsapp")),
                   ("email", email), ("segmento", limpo("segmento")),
-                  ("cidade", limpo("cidade")), ("uf", uf), ("obs", limpo("obs"))]
+                  ("cidade", limpo("cidade")), ("uf", uf), ("obs", limpo("obs")),
+                  # endereço: o CEP puxa rua/bairro/cidade/UF na tela (/api/cep), mas o
+                  # que chega aqui é sempre o que ESTÁ no formulário — o servidor não
+                  # reconsulta. Guardar o CEP é o que permite conferir depois de onde
+                  # veio o endereço preenchido sozinho.
+                  ("cep", cep), ("endereco", limpo("endereco")),
+                  ("numero", limpo("numero")), ("bairro", limpo("bairro"))]
         sets = [f"{k}=coalesce(%s,{k})" for k, _ in campos]
         vals = [v or None for _, v in campos]
+        # data não passa pelo mesmo laço: os outros campos são texto e o `or None`
+        # resolve; aqui o valor já vem date-ou-None do _data_nascimento.
+        sets.append("nascimento=coalesce(%s,nascimento)")
+        vals.append(nasc)
         if doc:
             sets += ["tipo=%s", "cnpj=%s", "cpf=%s"]
             vals += [tipo, cnpj, cpf]

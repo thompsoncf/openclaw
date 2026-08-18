@@ -235,7 +235,8 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
                       m.nome, p.orcamento_id, p.tem_site, p.maps_url, p.receita,
                       p.site_url, p.decisor_nome, p.decisor_cargo, p.decisor_telefone,
                       p.decisor_whatsapp, p.decisor_em, p.decisor_telefones,
-                      p.tipo, p.cpf
+                      p.tipo, p.cpf,
+                      p.cep, p.endereco, p.numero, p.bairro, p.nascimento
                  from prospeccao p
                  left join membros m on m.id = p.vendedor_id
                 where p.id=%s and p.conta_id=%s""", (alvo_id, conta_id)).fetchone()
@@ -247,7 +248,8 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
             "ultimo_contato_em", "proximo_contato_em", "vendedor_id", "vendedor_nome",
             "orcamento_id", "tem_site", "maps_url", "receita", "site_url",
             "decisor_nome", "decisor_cargo", "decisor_telefone", "decisor_whatsapp", "decisor_em",
-            "decisor_telefones", "tipo", "cpf"]
+            "decisor_telefones", "tipo", "cpf",
+            "cep", "endereco", "numero", "bairro", "nascimento"]
     d = dict(zip(cols, r))
     # PF x PJ: o que a ficha precisa saber pra trocar rótulo, documento e esconder o
     # que só existe em empresa (sócio, regime, porte, Receita, decisor).

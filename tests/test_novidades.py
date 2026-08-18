@@ -280,3 +280,17 @@ def test_reaplicar_a_175_nao_duplica_nem_desmarca_quem_leu(pool):
     with pool.connection() as c:
         assert dict(c.execute("select chave, id from novidades").fetchall()) == ids
     assert antes == depois and len(ids) == 3
+
+
+def test_o_aviso_do_desconto_no_cockpit_segue_o_portao_do_montador(pool):
+    """O montador do Cockpit é gateado por `vende_servico` — o MESMO portão do
+    painel. Mirar em 'eventos' calaria pra advocacia e construção, que também têm
+    vendedor montando orçamento no celular."""
+    with pool.connection() as c:
+        c.execute((BASE / "176_novidade_desconto_no_cockpit.sql").read_text(encoding="utf-8"))
+        c.commit()
+        a = c.execute("""select tipo, publico from novidades
+                          where chave='desconto-no-app-do-vendedor'""").fetchone()
+    assert a == ("novidade", "servico")
+    assert nv.nichos_alcancados(a[1]) == {s for s in nic.NICHOS if nic.vende_servico(s)}
+    assert nv.alcanca(a[1], None) is False

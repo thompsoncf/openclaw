@@ -825,17 +825,44 @@ def catalogo_servicos(pool, conta_id: int) -> list[dict]:
     return out
 
 
-def _sanear_itens(itens) -> list[dict]:
-    """Snapshot seguro das linhas: nome + setup/mensal em REAIS (inteiros, ≥0)."""
+def _sanear_itens(itens, *, com_desconto: bool = False) -> list[dict]:
+    """Snapshot seguro das linhas: nome + setup/mensal em REAIS (inteiros, ≥0).
+
+    `com_desconto` traz o desconto da linha junto — mesmo formato do painel
+    (`desc_val` e não `desc`, porque `desc` já é a DESCRIÇÃO do item logo acima).
+    Quando False os campos são DESCARTADOS, não zerados: é o portão do nicho, e
+    quem não vende serviço não grava desconto nem se mandar no payload.
+    """
     out = []
     for it in (itens or [])[:50]:
         nome = (str(it.get("nome") or "")).strip()[:120]
         if not nome:
             continue
-        out.append({"nome": nome, "desc": (str(it.get("desc") or "")).strip()[:200],
-                    "setup": max(0, int(it.get("setup") or 0)),
-                    "mensal": max(0, int(it.get("mensal") or 0))})
+        linha = {"nome": nome, "desc": (str(it.get("desc") or "")).strip()[:200],
+                 "setup": max(0, int(it.get("setup") or 0)),
+                 "mensal": max(0, int(it.get("mensal") or 0))}
+        if com_desconto:
+            linha["desc_tipo"] = "valor" if (it.get("desc_tipo") or "") == "valor" else "pct"
+            linha["desc_val"] = max(0, int(it.get("desc_val") or 0))
+        out.append(linha)
     return out
+
+
+def _sanear_desconto(d) -> dict:
+    """O desconto do TOTAL, como a tela manda: {tipo, pct, valor} — `valor` em
+    REAIS, igual aos itens. `dsc.quanto_desconta` já limita a base, então aqui só
+    se garante que número solto e texto viram zero em vez de explodir."""
+    d = d if isinstance(d, dict) else {}
+    try:
+        pct = max(0.0, min(100.0, float(d.get("pct") or 0)))
+    except (TypeError, ValueError):
+        pct = 0.0
+    try:
+        valor = max(0, int(d.get("valor") or 0))
+    except (TypeError, ValueError):
+        valor = 0
+    return {"tipo": "valor" if (d.get("tipo") or "") == "valor" else "pct",
+            "pct": pct, "valor": valor}
 
 
 # ------------------------------------------------------------------ carteira de propostas
@@ -1025,20 +1052,55 @@ def fechar_contrato(pool, conta_id: int, orc_id: int, *, membro_id: int | None =
                     if quantos else "Contrato fechado ✓")}
 
 
-def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens) -> dict:
+def vende_servico(pool, conta_id: int) -> bool:
+    """Esta conta vende SERVIÇO? É o portão do desconto no orçamento — o mesmo que
+    guarda o painel (web/painel_servicos:150, o `conta[14]`).
+
+    TOLERANTE: se a leitura falhar, responde False. Errar pra menos aqui custa um
+    controle que não aparece; errar pra mais gravaria desconto num orçamento de
+    quem não deveria tê-lo, e desconto gravado vira título a receber.
+    """
+    try:
+        from finance import empresa as _emp
+        return bool(_emp.o_que_vende(pool, conta_id)["servico"])
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra saber se a conta %s vende serviço (%s: %s) — "
+                     "desconto fica de fora", conta_id, type(e).__name__, e)
+        return False
+
+
+def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens,
+                    desconto=None) -> dict:
     """Cria a proposta do lead (mesma tabela/token do painel) e devolve o link público
     /proposta/<token> pro vendedor mandar. Revalida a posse do lead. Reusa a página de
-    proposta que já existe (o cliente vê com a marca da empresa e aprova online)."""
+    proposta que já existe (o cliente vê com a marca da empresa e aprova online).
+
+    O DESCONTO passa pela MESMA função do painel (`finance.desconto.totais`). Não é
+    economia de código: é o motivo de o módulo existir. Duas contas de "quanto é o
+    desconto" seriam o começo de dois números, e já custou um orçamento com parcelas
+    somando R$ 12.105 contra um total de R$ 9.405.
+
+    E quem faz a conta é o SERVIDOR. O que chega da tela é o que a pessoa digitou
+    (o tipo, o percentual, os reais); o total líquido é derivado aqui — senão
+    bastaria editar o JSON no navegador pra fechar proposta por qualquer valor.
+    """
     import secrets as _secrets
     from web.painel_prospeccao import _zap_link_texto
     from finance.email_sender import _app_url
-    linhas = _sanear_itens(itens)
+    from finance import desconto as _dsc
+    pode_desconto = vende_servico(pool, conta_id)
+    linhas = _sanear_itens(itens, com_desconto=pode_desconto)
     if not linhas:
         return {"ok": False, "erro": "Adicione ao menos um item ao orçamento."}
+    dsc_final = _sanear_desconto(desconto) if pode_desconto else _sanear_desconto(None)
     import json as _json
     from finance import vendas as _vendas
+    # setup/mensal continuam sendo o BRUTO, como no painel: eles são o preço de
+    # tabela do que foi escolhido. O que o desconto muda é `primeiro_ano_centavos`.
     setup_c = sum(x["setup"] for x in linhas) * 100
     mensal_c = sum(x["mensal"] for x in linhas) * 100
+    tot = _dsc.totais(linhas, tipo=dsc_final["tipo"], pct=dsc_final["pct"],
+                      valor=dsc_final["valor"] * 100)
     with pool.connection() as c:
         if not _posse(c, conta_id, membro_id, lead_id):
             return {"ok": False, "erro": "escopo"}
@@ -1052,16 +1114,25 @@ def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens) ->
         except Exception:  # noqa: BLE001 — colunas já existem em produção
             pass
         token = _secrets.token_urlsafe(16)
+        # `primeiro_ano_centavos` NÃO é enfeite e não estava aqui antes: quem gera
+        # os títulos lê `coalesce(primeiro_ano_centavos, setup_centavos, 0)`
+        # (finance/vendas.py), então sem ele o financeiro cai na soma BRUTA dos
+        # itens. Somar desconto sem gravar o líquido faria o cliente assinar por um
+        # valor e o sistema cobrar outro — as duas coisas sobem juntas.
         oid = c.execute(
             """insert into orcamentos
                  (conta_id, cliente, empresa, cnpj, segmento, whatsapp, telefone, email,
-                  cidade, uf, itens, setup_centavos, mensal_centavos, status, criado_por,
-                  canal, token, modo)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,'enviado',%s,'cockpit',%s,%s)
+                  cidade, uf, itens, setup_centavos, mensal_centavos,
+                  primeiro_ano_centavos, desconto_tipo, desconto_pct, desconto_centavos,
+                  status, criado_por, canal, token, modo)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,
+                       %s,%s,%s,%s,'enviado',%s,'cockpit',%s,%s)
                returning id""",
             (conta_id, (lead[1] or None), (lead[0] or None), lead[2], lead[3], lead[4],
              lead[5], lead[6], lead[7], (lead[8] or "")[:2] or None,
-             _json.dumps(linhas), setup_c, mensal_c, str(membro_id), token,
+             _json.dumps(linhas), setup_c, mensal_c,
+             tot["total"], dsc_final["tipo"], dsc_final["pct"], dsc_final["valor"] * 100,
+             str(membro_id), token,
              _vendas.modo_do_orcamento(pool, conta_id))).fetchone()[0]
         c.execute("update prospeccao set orcamento_id=%s, atualizado_em=now() where id=%s and conta_id=%s",
                   (oid, lead_id, conta_id))
@@ -1071,7 +1142,10 @@ def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens) ->
     msg = f"Olá! Segue sua proposta 👋\n{link}"
     return {"ok": True, "id": oid, "token": token, "link": link,
             "zap": _zap_link_texto(numero, msg) if numero else "",
-            "setup_centavos": setup_c, "mensal_centavos": mensal_c}
+            "setup_centavos": setup_c, "mensal_centavos": mensal_c,
+            # o líquido volta pra tela poder confirmar o número que o vendedor viu:
+            # se divergir do que ela calculou, quem vale é este.
+            "total_centavos": tot["total"], "desconto_centavos": tot["desconto_total"]}
 
 
 def enviar_proposta_conversa(pool, conta_id: int, membro_id: int, lead_id: int, link: str) -> dict:

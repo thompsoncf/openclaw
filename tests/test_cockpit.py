@@ -220,6 +220,55 @@ def test_salvar_ficha_preenche_e_nao_apaga(pool):
     assert got == ("Bruna Silva", "86 99999-0001", "52998224725", "Festa 08/05/27")
 
 
+def test_ficha_traz_o_whatsapp_do_lead_que_entrou_conversando(pool):
+    """O buraco que motivou o campo: quem chega por `whatsapp_inbound` nasce com o
+    número em `whatsapp` e `telefone` NULL. A ficha do vendedor mostrava só `telefone`,
+    então o campo aparecia EM BRANCO justamente no lead que veio conversando."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="wa@x.com")
+        lead = _lead(c, conta, vend, "Cliente do zap", wa="+5586999990001")
+        c.commit()
+    d = ck.lead_do_vendedor(pool, conta, vend, lead)
+    assert d["whatsapp"] == "+5586999990001"
+    assert not d["telefone"], "o lead de WhatsApp não tem telefone — é esse o ponto"
+
+
+def test_salvar_ficha_grava_whatsapp_sem_encostar_no_telefone(pool):
+    """São COLUNAS diferentes e continuam separadas: o zap é por onde a conversa corre,
+    o telefone é o fixo/comercial que o vendedor descobre depois. Salvar um não pode
+    escrever no outro."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="wa2@x.com")
+        lead = _lead(c, conta, vend, "Zap", wa="+5586999990002")
+        c.commit()
+
+    assert ck.salvar_ficha(pool, conta, vend, lead, {"telefone": "86 3221-0000"})["ok"] is True
+    with pool.connection() as c:
+        assert c.execute("select whatsapp, telefone from prospeccao where id=%s",
+                         (lead,)).fetchone() == ("+5586999990002", "86 3221-0000")
+
+    # trocar o zap (cliente passou outro número) não encosta no telefone
+    assert ck.salvar_ficha(pool, conta, vend, lead, {"whatsapp": "+5511988887777"})["ok"] is True
+    with pool.connection() as c:
+        assert c.execute("select whatsapp, telefone from prospeccao where id=%s",
+                         (lead,)).fetchone() == ("+5511988887777", "86 3221-0000")
+
+
+def test_ficha_em_branco_nao_apaga_o_whatsapp(pool):
+    """O número é a IDENTIDADE da conversa. Salvar a ficha inteira só pra corrigir um
+    cargo não pode esvaziá-lo — o `coalesce` do salvar_ficha é o que garante isso, e
+    aqui é onde ele mais importa."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="wa3@x.com")
+        lead = _lead(c, conta, vend, "Zap", wa="+5586999990003")
+        c.commit()
+    assert ck.salvar_ficha(pool, conta, vend, lead,
+                           {"cargo": "Comprador", "whatsapp": ""})["ok"] is True
+    with pool.connection() as c:
+        assert c.execute("select whatsapp, cargo from prospeccao where id=%s",
+                         (lead,)).fetchone() == ("+5586999990003", "Comprador")
+
+
 def test_salvar_ficha_posse_e_documento_invalido(pool):
     with pool.connection() as c:
         conta = _conta(c)

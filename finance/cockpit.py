@@ -351,7 +351,12 @@ def salvar_ficha(pool, conta_id: int, membro_id: int, lead_id: int, dados: dict)
 
     Campo vazio NÃO apaga o que já está gravado: o vendedor abre a ficha no meio da
     conversa pra somar uma informação, não pra recadastrar o lead. Só o documento tem
-    caminho de correção (mandar outro por cima), e ele é validado antes de entrar."""
+    caminho de correção (mandar outro por cima), e ele é validado antes de entrar.
+
+    Consequência disso pro WhatsApp: dá pra TROCAR o número por outro, nunca pra apagar
+    — deixar em branco mantém o que está lá. É o que se quer, porque o número é a
+    identidade da conversa; esvaziá-lo por engano ao salvar a ficha inteira só pra
+    corrigir um cargo seria caro."""
     from web.painel_prospeccao import _doc_lead
 
     def limpo(chave):
@@ -373,8 +378,14 @@ def salvar_ficha(pool, conta_id: int, membro_id: int, lead_id: int, dados: dict)
         email = limpo("email").lower()
         # coalesce: o que veio em branco fica como estava. O documento só é reescrito
         # quando o vendedor digitou algo — senão um "salvar" limparia CPF já cadastrado.
+        # `whatsapp` entra junto e é editável: ele é o número por onde a conversa corre,
+        # e o vendedor precisa poder corrigir quando o cliente passa outro. Isso NÃO
+        # descasa a conversa que já existe — a busca liga por `conversas.prospeccao_id`
+        # e, no segundo caminho, por `conversas.contato_ref` (o número de quem mandou
+        # de verdade); nenhum dos dois lê esta coluna. Ver _conversa_wa_do_contato.
         campos = [("empresa", limpo("empresa")), ("contato", limpo("contato")),
                   ("cargo", limpo("cargo")), ("telefone", limpo("telefone")),
+                  ("whatsapp", limpo("whatsapp")),
                   ("email", email), ("segmento", limpo("segmento")),
                   ("cidade", limpo("cidade")), ("uf", uf), ("obs", limpo("obs"))]
         sets = [f"{k}=coalesce(%s,{k})" for k, _ in campos]

@@ -3631,6 +3631,33 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     if(!aberto){ var d = f.querySelector('input[name=descricao]'); if(d) d.focus(); }
   }
   </script>
+  {# Os PAGOS, recolhidos: histórico não é operação — quem abre a tela quer o que
+     ainda está em aberto. O "apagar" aqui só aparece pro título cujo lançamento
+     não existe (ver apagar_titulo): se o dinheiro está no livro-caixa, o caminho
+     é apagar o LANÇAMENTO no financeiro, senão o caixa fica com receita órfã. #}
+  {% if titulos_pagos %}
+  <details class="tit-pagos" style="margin-top:1rem">
+    <summary style="cursor:pointer;font-size:.8rem;color:var(--txt-mut)">
+      Já baixados ({{ titulos_pagos|length }}) ▾</summary>
+    <div style="margin-top:.5rem">
+    {% for t in titulos_pagos %}<div class="tit-lin">
+      <div class="tit-id">
+        <div class="tit-desc" style="opacity:.75">{{ t.descricao }}{% if t.contraparte %} <span class="mut">· {{ t.contraparte }}</span>{% endif %}</div>
+        <div class="tit-meta">baixado {% if t.pago_em %}{{ t.pago_em.strftime('%d/%m/%Y') }}{% else %}—{% endif %} · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">pago</span>{% else %}<span style="color:var(--verde-claro)">recebido</span>{% endif %}</div>
+      </div>
+      <div class="tit-val" style="opacity:.75">{{ t.valor_centavos|brl }}</div>
+      <div class="tit-acoes">
+        {% if t.lancamento_id %}
+        <a href="/painel/financeiro" class="mut" style="font-size:.72rem;text-decoration:none"
+           title="a baixa lançou no livro-caixa: pra desfazer, apague o lançamento no financeiro">no caixa ↗</a>
+        {% else %}
+        <form method="post" action="/painel/empresa/titulo/{{ t.id }}/apagar" onsubmit="return confirm('Apagar este título baixado? Ele não tem lançamento no caixa, então nada de dinheiro é afetado.')"><button title="apagar título" style="color:#c98080">apagar ✕</button></form>
+        {% endif %}
+      </div>
+    </div>{% endfor %}
+    </div>
+  </details>
+  {% endif %}
 </div>
 
 {% if carteira and carteira.n_titulos %}
@@ -8829,6 +8856,10 @@ def painel_empresa(request: Request):
                       (conta[0],)).fetchone()
         doc = _mascara_cnpj(r[0]) if r else ""
     titulos = emp.listar_titulos(pool, conta[0], status="aberto")
+    # Os PAGOS numa seção à parte, recolhida. A tela mostrava só 'aberto', então título
+    # baixado sumia do app inteiro — e o que tinha sido baixado por engano (ou cujo
+    # lançamento foi apagado no financeiro) ficava preso pra sempre, sem caminho nenhum.
+    titulos_pagos = emp.listar_titulos(pool, conta[0], status="pago", limite=60)
     folha = emp.folha_do_mes(pool, conta[0], hoje.year, hoje.month)
     # anexa os lançamentos do mês a cada funcionário (pro histórico "corrigir")
     _evs = emp.eventos_folha_do_mes(pool, conta[0], hoje.year, hoje.month)
@@ -8842,7 +8873,7 @@ def painel_empresa(request: Request):
                        "on n.id=ct.nicho_id where ct.id=%s", (conta[0],)).fetchone()
     rotulo_receber = _nichos.rotulo_receber(_r[0] if _r else "")
     return _render("empresa", request, empresa_nome=conta[2], empresa_doc=doc,
-                   dre=dre, titulos=titulos,
+                   dre=dre, titulos=titulos, titulos_pagos=titulos_pagos,
                    folha=folha, clientes_lista=clientes_lista, carteira=carteira,
                    rotulo_receber=rotulo_receber, tem_pj=True,
                    plano_arvore=plano_arvore, centros=centros, dre_centro=dre_centro,

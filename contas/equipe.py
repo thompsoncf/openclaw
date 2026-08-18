@@ -42,6 +42,19 @@ def caps_do_papel(papel: str | None) -> dict:
     return dict(CAPS.get(papel or "", _SEM_ACESSO))
 
 
+def recebe_novidades(papel: str | None) -> bool:
+    """Quem vê o aviso de atualização: DONO e GESTOR.
+
+    Não dá pra usar `caps["gerir"]` aqui, e o motivo é fácil de errar: `gerir` é
+    só do dono (o gestor tem vendas+financeiro e gerir=False), então gatear por
+    ele deixaria justamente o gestor de fora — e é ele quem costuma operar a tela
+    todo dia. Também não é pro vendedor nem pro financeiro: o aviso muda o JEITO
+    de trabalhar do negócio, e essa decisão não é deles.
+
+    Papel ausente = dono (o login do portal é por conta; ver _papel_logado)."""
+    return (papel or "dono") in ("dono", "gestor")
+
+
 def home_do_papel(papel: str | None, membro_id=None) -> str:
     """Pra onde a pessoa cai depois de entrar (login, troca de empresa, /login já logado).
 
@@ -70,7 +83,10 @@ def rotas_do_papel(papel: str | None) -> list[str]:
     membro fica preso num laço de redirect sem conseguir entrar.
     """
     caps = caps_do_papel(papel)
-    permitido = ["/trocar", "/sair"]
+    # /painel/versao é de TODO papel: é a pergunta que a aba aberta durante o
+    # deploy faz pra saber se precisa recarregar. Barrada, o gate devolveria um
+    # 303 e a faixa nunca apareceria justamente pra quem passa o dia na mesma aba.
+    permitido = ["/trocar", "/sair", "/painel/versao"]
     if caps["vendas"]:
         permitido += ["/painel/servicos", "/painel/prospeccao"]
     if caps["financeiro"]:
@@ -83,6 +99,8 @@ def rotas_do_papel(papel: str | None) -> list[str]:
         permitido += ["/painel/agenda"]
     if caps["gerir"]:
         permitido += ["/painel/equipe", "/membros"]
+    if recebe_novidades(papel):
+        permitido += ["/painel/novidades"]
     return permitido
 
 

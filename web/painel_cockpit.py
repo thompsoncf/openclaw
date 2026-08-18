@@ -566,7 +566,30 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .rodape-b .tot{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;margin-bottom:.6rem;
   font-size:.85rem;color:var(--text-dim)}
 .rodape-b .tot b{font-family:var(--mono);font-size:1rem;color:var(--neon)}
+.rodape-b .tot b s{display:block;text-align:right;font-size:.74rem;color:var(--text-faint);
+  text-decoration:line-through}
 .btn[disabled]{opacity:.4;cursor:not-allowed;box-shadow:none}
+/* ---------- desconto (só nicho de serviço; ver ORC.desc) ----------
+   O controle mora DENTRO da linha já marcada, na mesma altura do .qtd que já está
+   ali — a linha não cresce duas vezes. A pílula %/R$ existe porque o vendedor
+   negocia dos dois jeitos ("dou 5%" / "tiro 240"), e obrigar a converter de cabeça
+   no meio da conversa com o cliente é onde o erro entra. */
+.dsc{display:inline-flex;align-items:center;gap:.4rem;margin-top:.42rem}
+.pil{display:inline-flex;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;
+  overflow:hidden;flex-shrink:0}
+.pil button{border:0;background:none;font-family:var(--mono);font-size:.74rem;
+  padding:.22rem .48rem;color:var(--text-faint);cursor:pointer;line-height:1.2}
+.pil button.on{background:var(--neon);color:var(--ink);font-weight:700}
+.cmp{font-family:var(--mono);font-size:.8rem;background:var(--bg-2);border:1px solid var(--line);
+  border-radius:8px;padding:.2rem .42rem;width:60px;min-width:0;color:var(--text)}
+.cmp:focus{outline:none;border-color:var(--neon)}
+.dsc .tag{font-family:var(--mono);font-size:.7rem;color:var(--neon);white-space:nowrap}
+.srv .pr s{display:block;color:var(--text-faint);font-size:.72rem;text-decoration:line-through}
+.rodape-b .dlin{display:flex;justify-content:space-between;align-items:center;gap:.7rem;
+  font-size:.82rem;color:var(--text-dim);padding:.1rem 0}
+.rodape-b .dlin b{font-family:var(--mono);font-weight:400;color:var(--text)}
+.rodape-b .dlin.desc span,.rodape-b .dlin.desc b{color:var(--neon)}
+.rodape-b .dlin .dsc{margin-top:0}
 /* tela de "pronto" que substitui o construtor depois de gerar */
 .pronto{padding:2rem 1.1rem;text-align:center}
 .pronto .big{font-size:2.4rem;margin-bottom:.6rem}
@@ -1472,8 +1495,10 @@ def cockpit_resultado(request: Request):
 _ORC_JS = r"""
 <script>
 (function(){
-  var O=window.ORC||{cat:[],leadId:0,base:""};
-  var sel={}, avulsos=[];
+  var O=window.ORC||{cat:[],leadId:0,base:"",desc:false};
+  // sel[i] = {q, dt, dv} — quantidade E desconto da linha no MESMO lugar. Mapa
+  // paralelo casado por índice seria a armadilha que a 162 tirou dos títulos.
+  var sel={}, avulsos=[], dFim={t:"pct",v:0};
   function $(id){return document.getElementById(id);}
   function brl(v){return "R$ "+Number(v||0).toLocaleString("pt-BR");}
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(m){
@@ -1483,42 +1508,161 @@ _ORC_JS = r"""
   function preco(s){var a=[];if(s.setup)a.push(brl(s.setup));if(s.mensal)a.push(brl(s.mensal)+"/mês");
     return a.join(" + ")||"grátis";}
 
+  // ---- a conta, espelhando finance/desconto.py LINHA A LINHA ----
+  // Em CENTAVOS, como o Python — arredondar em reais e em centavos dá números
+  // diferentes, e a divergência é invisível na tela. O servidor refaz tudo e é
+  // ele quem vale; isto aqui é pra o vendedor ver o mesmo número que vai gravar.
+  var MESES=12;
+  // Python arredonda metade pro PAR (round-half-even) e o JS arredonda pra cima.
+  // Sem isto, um desconto que caia exatamente no meio separa as duas contas.
+  function arr(x){
+    var f=Math.floor(x), d=x-f;
+    if(d>0.5)return f+1;
+    if(d<0.5)return f;
+    return (f%2===0)?f:f+1;
+  }
+  function contribuicao(it){return (it.setup||0)*100+(it.mensal||0)*100*MESES;}
+  function pctLinha(it){
+    var base=contribuicao(it);
+    if(base<=0)return 0;
+    var v=Math.max(0,it.desc_val||0);
+    if(v<=0)return 0;
+    if((it.desc_tipo||"pct")==="pct")return Math.min(100,v);
+    return Math.min(100,100*(v*100)/base);        // reais viram o % da linha
+  }
+  function quantoDesconta(base,tipo,pct,valor){
+    base=Math.max(0,base);
+    if(base<=0)return 0;
+    var d=(tipo==="valor")?Math.max(0,valor):arr(base*Math.min(100,Math.max(0,pct))/100);
+    return Math.max(0,Math.min(base,d));
+  }
+  function conta(){
+    var its=itens(), bs=0,bm=0,ls=0,lm=0;
+    its.forEach(function(it){
+      var s=Math.max(0,it.setup||0)*100, m=Math.max(0,it.mensal||0)*100, p=pctLinha(it);
+      bs+=s; bm+=m;
+      ls+=arr(s*(100-p)/100); lm+=arr(m*(100-p)/100);
+    });
+    var subtotal=ls+lm*MESES;
+    var bruto=bs+bm*MESES;
+    var df=O.desc?quantoDesconta(subtotal,dFim.t,dFim.v,dFim.v*100):0;
+    return {n:its.length, bruto:bruto, subtotal:subtotal,
+            descItens:bruto-subtotal, descFim:df, total:subtotal-df,
+            setup:ls, mensal:lm};
+  }
+
+  function ctrl(k,it){
+    if(!O.desc)return "";
+    var p=(it.desc_tipo||"pct")==="pct";
+    var tag="";
+    var pc=pctLinha(it);
+    if(pc>0){var d=arr(contribuicao(it)*pc/100);tag='<span class=tag>− '+brl(Math.round(d/100))+'</span>';}
+    return '<div class=dsc data-k="'+k+'"><span class=pil>'
+      +'<button type=button data-dt="pct" class="'+(p?"on":"")+'">%</button>'
+      +'<button type=button data-dt="valor" class="'+(p?"":"on")+'">R$</button></span>'
+      +'<input class=cmp data-di="'+k+'" inputmode=numeric autocomplete=off'
+      +' aria-label="Desconto do item" value="'+(it.desc_val||"")+'"></div>';
+  }
+  function precoCel(it){
+    var p=pctLinha(it);
+    if(p<=0)return preco(it);
+    var liq={setup:Math.round(arr((it.setup||0)*100*(100-p)/100)/100),
+             mensal:Math.round(arr((it.mensal||0)*100*(100-p)/100)/100)};
+    return preco(liq)+'<s>'+preco(it)+'</s>';
+  }
+
   function pintaCatalogo(){
     var box=$("cat");if(!box)return;box.innerHTML="";
     if(!O.cat.length){box.innerHTML='<div class=vazio-cat>Nenhum serviço no catálogo ainda. '
       +'Dá pra montar com itens avulsos aqui embaixo, ou pedir pro gestor cadastrar o catálogo no painel.</div>';return;}
     O.cat.forEach(function(s,i){
-      var on=sel[i]!==undefined;
+      var e=sel[i], on=e!==undefined;
       var q=on?'<div class=qtd><button data-q="-" data-i="'+i+'" aria-label="menos">−</button>'
-        +'<span>'+sel[i]+'</span><button data-q="+" data-i="'+i+'" aria-label="mais">+</button></div>':'';
+        +'<span>'+e.q+'</span><button data-q="+" data-i="'+i+'" aria-label="mais">+</button></div>':'';
+      var it=on?linhaDe(i):s;
       var d=document.createElement("div");d.className="srv"+(on?" on":"");d.setAttribute("data-i",i);
       d.innerHTML='<div class=ck>'+(on?'✓':'')+'</div><div class=m><b>'+esc(s.nome)+'</b>'
-        +(s.desc?'<small>'+esc(s.desc)+'</small>':'')+q+'</div><div class=pr>'+preco(s)+'</div>';
+        +(s.desc?'<small>'+esc(s.desc)+'</small>':'')+q+(on?ctrl("c"+i,it):"")
+        +'</div><div class=pr>'+(on?precoCel(it):preco(s))+'</div>';
       box.appendChild(d);
     });
   }
+  function linhaDe(i){
+    var s=O.cat[i], e=sel[i];
+    return {nome:s.nome+(e.q>1?" (× "+e.q+")":""), setup:(s.setup||0)*e.q,
+            mensal:(s.mensal||0)*e.q, desc_tipo:e.dt, desc_val:e.dv};
+  }
   function itens(){
     var out=[];
-    Object.keys(sel).forEach(function(i){var s=O.cat[i],q=sel[i];
-      out.push({nome:s.nome+(q>1?" (× "+q+")":""),setup:(s.setup||0)*q,mensal:(s.mensal||0)*q});});
+    Object.keys(sel).forEach(function(i){out.push(linhaDe(i));});
     avulsos.forEach(function(c){out.push(c);});
     return out;
   }
   function soma(){
-    var its=itens(),setup=0,mensal=0;
-    its.forEach(function(x){setup+=x.setup;mensal+=x.mensal;});
-    var t=[];if(setup)t.push(brl(setup));if(mensal)t.push(brl(mensal)+"/mês");
-    $("total").innerHTML=its.length?(t.join(" + ")||"grátis"):"—";
-    $("gerar").disabled=its.length===0;
+    var t=conta();
+    $("gerar").disabled=t.n===0;
+    if(!t.n){$("total").innerHTML="—";
+      ["dfim","lsub","ldesc"].forEach(function(x){$(x).style.display="none";});return;}
+    var temD=(t.descItens+t.descFim)>0;
+    $("dfim").style.display=O.desc?"flex":"none";
+    $("lsub").style.display=temD?"flex":"none";
+    $("ldesc").style.display=t.descFim>0?"flex":"none";
+    $("sub").textContent=brl(Math.round(t.subtotal/100));
+    $("ldescr").textContent="Desconto no total"+(dFim.t==="pct"&&dFim.v>0?" ("+dFim.v+"%)":"");
+    $("descv").textContent="− "+brl(Math.round(t.descFim/100));
+    $("total").innerHTML=brl(Math.round(t.total/100))
+      +(temD?'<s>'+brl(Math.round(t.bruto/100))+'</s>':"");
   }
+
   document.addEventListener("click",function(e){
+    // a pílula %/R$ e o campo vivem DENTRO da linha: sem parar o clique aqui,
+    // mexer no desconto desmarcaria o serviço.
+    var dt=e.target.closest("[data-dt]");
+    if(dt){e.stopPropagation();
+      var k=dt.closest(".dsc").getAttribute("data-k");
+      if(k){sel[k.slice(1)].dt=dt.getAttribute("data-dt");pintaCatalogo();soma();}
+      return;}
+    if(e.target.closest(".cmp")){e.stopPropagation();return;}
     var qb=e.target.closest("[data-q]");
     if(qb){e.stopPropagation();var i=qb.getAttribute("data-i");
-      sel[i]=Math.max(1,(sel[i]||1)+(qb.getAttribute("data-q")==="+"?1:-1));pintaCatalogo();soma();return;}
+      sel[i].q=Math.max(1,sel[i].q+(qb.getAttribute("data-q")==="+"?1:-1));pintaCatalogo();soma();return;}
     var row=e.target.closest(".srv");
     if(row){var j=row.getAttribute("data-i");
-      if(sel[j]!==undefined)delete sel[j];else sel[j]=1;pintaCatalogo();soma();}
+      if(sel[j]!==undefined)delete sel[j];else sel[j]={q:1,dt:"pct",dv:0};
+      pintaCatalogo();soma();}
   });
+  // o rodapé é só o desconto do total — pílula própria, mesmo desenho
+  document.addEventListener("click",function(e){
+    var b=e.target.closest("[data-dfim]");if(!b)return;
+    dFim.t=b.getAttribute("data-dfim");
+    Array.prototype.forEach.call(b.parentNode.children,function(x){
+      x.classList.toggle("on",x===b);});
+    soma();
+  });
+  // NÃO repinta o catálogo no input: repintar tira o foco do campo a cada tecla.
+  // Só o preço da linha e o rodapé mudam.
+  document.addEventListener("input",function(e){
+    var f=e.target.closest("[data-di]");
+    if(f){
+      var k=f.getAttribute("data-di"), v=parseInt((f.value||"").replace(/\D/g,''),10);
+      sel[k.slice(1)].dv=Math.max(0,isNaN(v)?0:v);
+      var row=$("cat").querySelector('.srv[data-i="'+k.slice(1)+'"]');
+      var it=linhaDe(k.slice(1));
+      if(row)row.querySelector(".pr").innerHTML=precoCel(it);
+      var tg=f.closest(".dsc").querySelector(".tag");
+      var pc=pctLinha(it);
+      var txt=pc>0?("− "+brl(Math.round(arr(contribuicao(it)*pc/100)/100))):"";
+      if(!tg&&txt){tg=document.createElement("span");tg.className="tag";
+        f.closest(".dsc").appendChild(tg);}
+      if(tg)tg.textContent=txt;
+      soma();return;
+    }
+    if(e.target.id==="dfimv"){
+      var w=parseInt((e.target.value||"").replace(/\D/g,''),10);
+      dFim.v=Math.max(0,isNaN(w)?0:w);soma();
+    }
+  });
+
   // O item avulso precisa APARECER. No app anterior ele entrava só na conta do
   // total: quem digitava errado não via o erro e não tinha como desfazer.
   function pintaAvulsos(){
@@ -1538,14 +1682,19 @@ _ORC_JS = r"""
     var n=$("addnome").value.trim();
     var v=parseInt(($("addval").value||"").replace(/\D/g,''),10);
     if(!n||!v){toast("Preencha o nome e o valor");return;}
+    // avulso não leva desconto de linha: não existe preço de tabela pra descontar,
+    // o vendedor digita o valor que quer. O desconto do total pega ele igual.
     avulsos.push({nome:n,setup:v,mensal:0});
     $("addnome").value="";$("addval").value="";pintaAvulsos();soma();toast("Item adicionado");
   };
   var g=$("gerar");
   if(g)g.onclick=function(){
     g.disabled=true;g.textContent="Gerando…";
+    // manda o BRUTO e o que foi digitado: o servidor refaz a conta do desconto.
+    // Mandar o já descontado faria ele descontar de novo.
     fetch(O.base+"/lead/"+O.leadId+"/orcamento",{method:"POST",
-      headers:{"Content-Type":"application/json"},body:JSON.stringify({itens:itens()})})
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({itens:itens(),desconto:{tipo:dFim.t,pct:dFim.v,valor:dFim.v}})})
       .then(function(r){return r.json();}).then(function(j){
         if(!j||!j.ok){toast((j&&j.erro)||"Não deu certo");g.disabled=false;
           g.textContent="Gerar proposta e link";return;}
@@ -1576,6 +1725,9 @@ _ORC_JS = r"""
         .catch(function(){toast("Falha de conexão");b.disabled=false;
           b.textContent="Enviar na conversa do lead";});};
   }
+  // exposto pro teste de paridade rodar a MESMA conta que a tela roda
+  window.__orc={conta:conta,itens:itens,sel:sel,avulsos:avulsos,dFim:dFim,
+                set:function(s,a,d){sel=s;avulsos=a;dFim=d;}};
   pintaCatalogo();soma();
 })();
 </script>"""
@@ -1597,8 +1749,12 @@ def cockpit_orcamento_montar(request: Request, lead_id: int):
         return RedirectResponse(_BASE, status_code=303)
     import json as _json
     cat = ck.catalogo_servicos(pool, conta_id)
+    # O DESCONTO É DO NICHO DE SERVIÇOS. Esconder da tela é metade do portão — a
+    # outra metade está no `criar_orcamento`, que descarta os campos de quem não
+    # vende serviço. O form vem do navegador, e navegador não é fonte confiável.
     # `</` escapado: o catálogo é texto do usuário e fecharia o <script> antes da hora
-    dados = _json.dumps({"cat": cat, "leadId": lead_id, "base": _BASE},
+    dados = _json.dumps({"cat": cat, "leadId": lead_id, "base": _BASE,
+                         "desc": ck.vende_servico(pool, conta_id)},
                         ensure_ascii=False).replace("</", "<\\/")
     corpo = (_hdr("Orçamento", d["empresa"], voltar=f"{_BASE}/lead/{lead_id}")
              + "<div class=toast id=toast></div>"
@@ -1610,7 +1766,17 @@ def cockpit_orcamento_montar(request: Request, lead_id: int):
                "<button type=button id=addbtn aria-label='Adicionar item'>+</button></div>"
              + "<div id=avulsos></div>"
              + "</div>"
-             + "<div class=rodape-b id=rodape><div class=tot><span>Total</span><b id=total>—</b></div>"
+             + "<div class=rodape-b id=rodape>"
+               "<div class=dlin id=dfim style='display:none'><span>Desconto no total</span>"
+               "<span class=dsc><span class=pil>"
+               "<button type=button data-dfim=pct class=on>%</button>"
+               "<button type=button data-dfim=valor>R$</button></span>"
+               "<input class=cmp id=dfimv inputmode=numeric autocomplete=off aria-label='Desconto no total'>"
+               "</span></div>"
+               "<div class=dlin id=lsub style='display:none'><span>Itens</span><b id=sub></b></div>"
+               "<div class='dlin desc' id=ldesc style='display:none'><span id=ldescr>Desconto</span>"
+               "<b id=descv></b></div>"
+               "<div class=tot><span>Total</span><b id=total>—</b></div>"
                "<button class=btn id=gerar type=button disabled>Gerar proposta e link</button></div>"
              + "<div id=pronto style='display:none'></div>"
              + f"<script>window.ORC={dados};</script>" + _ORC_JS)
@@ -1622,7 +1788,9 @@ async def cockpit_orcamento_criar(request: Request, lead_id: int, payload: dict 
     sess = _sessao(request)
     if not sess:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    r = ck.criar_orcamento(get_pool(), sess[0], sess[1], lead_id, (payload or {}).get("itens"))
+    p = payload or {}
+    r = ck.criar_orcamento(get_pool(), sess[0], sess[1], lead_id,
+                           p.get("itens"), p.get("desconto"))
     return JSONResponse(r)
 
 

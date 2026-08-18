@@ -125,6 +125,28 @@ const t = (nome, cond) => (cond ? ok : bad).push(nome)
   t('e registra que terminou — a última linha não é escrita em pool fechado',
     logs.some((m) => m === 'encerrando: pronto'))
 
+  // O 440 de um socket JÁ SUPERADO não pode tocar no aluguel de quem entrou.
+  //
+  // Foi o que aconteceu com a conta 34 em 18/08: quatro voltas em vinte minutos de
+  // "soltei a conta" logo depois de "socket criado", e o vigia tendo que retomar o
+  // aluguel toda vez. O `deveSoltarTravaNo440` não pegava porque olha `s.iniciando`,
+  // que já voltou a false quando os listeners terminam de ser registrados — antes de
+  // a conexão abrir, que é exatamente o vão onde o 440 do velho cai.
+  //
+  // socketAtual é quem responde a pergunta certa: este evento é da encarnação de
+  // agora, ou de uma que já foi substituída?
+  const sockVelho = { _descartado: false }
+  const sockNovo = { _descartado: false }
+  const sessao = { sock: sockNovo, iniciando: false }
+  t('440 do socket superado é reconhecido como não-atual',
+    srv.socketAtual(sessao, sockVelho) === false)
+  t('e o socket vigente continua sendo o atual',
+    srv.socketAtual(sessao, sockNovo) === true)
+  t('socket já descartado nunca é o atual',
+    srv.socketAtual({ sock: sockVelho }, Object.assign(sockVelho, { _descartado: true })) === false)
+  t('sessão sem socket nenhum não confunde com atual',
+    srv.socketAtual({ sock: null }, sockNovo) === false)
+
   ok.forEach((n) => console.log('  ok   ' + n))
   bad.forEach((n) => console.log('  FALHOU  ' + n))
   console.log(`\n${ok.length} ok, ${bad.length} falhou`)

@@ -1671,6 +1671,13 @@ def cockpit_ficha_tela(request: Request, lead_id: int):
         + campo("contato", "Quem fala com você", d.get("contato"))
         + campo("cargo", "Cargo", d.get("cargo"), meia=True)
         + campo("segmento", "Segmento", d.get("segmento"), meia=True)
+        # WhatsApp e Telefone são COLUNAS DIFERENTES do lead, e a ficha mostrava só a
+        # segunda. Quem entra por `whatsapp_inbound` nasce com o número em `whatsapp` e
+        # `telefone` NULL (painel_prospeccao, insert do lead novo) — ou seja, justamente
+        # no lead que veio conversando o campo aparecia EM BRANCO, com o número logo ali.
+        # Os dois juntos porque são coisas diferentes na prática: o zap é por onde a
+        # conversa corre, o fixo/comercial é o que o vendedor descobre depois.
+        + campo("whatsapp", "WhatsApp", d.get("whatsapp"), tipo="tel", modo="tel", meia=True)
         + campo("telefone", "Telefone", d.get("telefone"), tipo="tel", modo="tel", meia=True)
         + campo("documento", "CPF ou CNPJ", d.get("doc_fmt"), modo="numeric", meia=True)
         + campo("email", "E-mail", d.get("email"), tipo="email", modo="email")
@@ -2070,15 +2077,20 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict) -> HTMLResponse:
                 "<input name=texto placeholder='Responder…' required autocomplete=off>"
                 "<button type=submit aria-label=Enviar>&#10148;</button></form>")
 
-    tel, zap = d.get("tel_link") or "", d.get("zap_link") or ""
+    # Quatro atalhos, e não cinco: o `.grade` é de DUAS colunas, então o quinto nascia
+    # sozinho na terceira linha, meia largura, com um buraco do lado. Saiu o "Ligar" —
+    # quem chega por `whatsapp_inbound` tem o número em `whatsapp` e `telefone` NULL, e
+    # o botão vinha CINZA (tel_link só olha `telefone`) na maioria dos leads deste app;
+    # um atalho apagado ocupando o melhor lugar da tela não vale a linha extra. A Ficha
+    # sobe pro lugar dele, e as linhas ficam com sentido próprio: em cima o contato e os
+    # dados, embaixo as duas ações coloridas.
+    zap = d.get("zap_link") or ""
     atalhos = (
-        (f"<a href='{esc(tel)}'>{_ic('ligar', 'ic p')} Ligar</a>" if tel
-         else f"<span class=off>{_ic('ligar', 'ic p')} Ligar</span>")
-        + (f"<a href='{esc(zap)}' target=_blank rel=noopener>{_ic('zap', 'ic p')} WhatsApp</a>" if zap
-           else f"<span class=off>{_ic('zap', 'ic p')} WhatsApp</span>")
+        (f"<a href='{esc(zap)}' target=_blank rel=noopener>{_ic('zap', 'ic p')} WhatsApp</a>" if zap
+         else f"<span class=off>{_ic('zap', 'ic p')} WhatsApp</span>")
+        + f"<a href='{_BASE}/lead/{lead_id}/ficha'>{_ic('ficha', 'ic p')} Ficha</a>"
         + f"<a class=orc href='{_BASE}/lead/{lead_id}/orcamento'>{_ic('orc', 'ic p')} Orçamento</a>"
-        + f"<a class=vis2 href='{_BASE}/lead/{lead_id}/visita'>{_ic('agenda', 'ic p')} Visita</a>"
-        + f"<a href='{_BASE}/lead/{lead_id}/ficha'>{_ic('ficha', 'ic p')} Ficha</a>")
+        + f"<a class=vis2 href='{_BASE}/lead/{lead_id}/visita'>{_ic('agenda', 'ic p')} Visita</a>")
 
     etapas = "".join(
         f"<form method=post action='{_BASE}/lead/{lead_id}/etapa'>"
@@ -2494,11 +2506,11 @@ def cockpit_fila_sinal(request: Request):
 @router.post("/cockpit/lead/{lead_id}/ficha")
 def cockpit_ficha(request: Request, lead_id: int, empresa: str = Form(""), contato: str = Form(""),
                   cargo: str = Form(""), segmento: str = Form(""), telefone: str = Form(""),
-                  documento: str = Form(""), email: str = Form(""), cidade: str = Form(""),
-                  uf: str = Form(""), obs: str = Form("")):
+                  whatsapp: str = Form(""), documento: str = Form(""), email: str = Form(""),
+                  cidade: str = Form(""), uf: str = Form(""), obs: str = Form("")):
     """Ficha do cliente preenchida pelo vendedor, de dentro da conversa."""
     dados = {"empresa": empresa, "contato": contato, "cargo": cargo, "segmento": segmento,
-             "telefone": telefone, "documento": documento, "email": email,
+             "telefone": telefone, "whatsapp": whatsapp, "documento": documento, "email": email,
              "cidade": cidade, "uf": uf, "obs": obs}
     return _agir(request, lead_id,
                  lambda p, c, m, l: {**ck.salvar_ficha(p, c, m, l, dados), "msg": "Ficha salva ✓"},

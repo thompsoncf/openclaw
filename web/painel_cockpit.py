@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import hashlib as _hashlib
 import html as _html
+import logging as _logging
 import os as _os
 
 from fastapi import APIRouter, Body, Form, Request
@@ -3042,8 +3043,30 @@ def cockpit_senha_salva(request: Request, senha: str = Form(...),
     return RedirectResponse(_BASE, status_code=303)
 
 
+# um envio de acesso que falha em SILÊNCIO é o pior caso: o membro fica de fora e
+# ninguém fica sabendo. Este log é o rastro que faltava em 18/08.
+_log_link = _logging.getLogger("cockpit.acesso")
+
+
 def _enviar_link_email(pool, conta_id: int, email: str, link: str) -> bool:
-    """Manda o link mágico. Pela caixa da empresa (Canais) se houver; senão SMTP do Zaq."""
+    """Manda o link mágico PELO REMETENTE DO ZAQ, com a caixa da empresa como reserva.
+
+    A ordem já foi a inversa — empresa primeiro — e foi assim que o link sumiu. Em
+    18/08 um membro pediu acesso na Prime Eventos: o token nasceu e ficou válido, e o
+    e-mail nunca chegou. Pelo painel, o mesmo pedido chegou na hora — porque o portal
+    manda por este mesmo remetente, sem passar pela caixa do cliente.
+
+    E o plano B não salvava, porque só entra quando o envio RECUSA. Quando o Gmail da
+    empresa ACEITA e a mensagem morre depois (filtro do destino, spam, caixa com
+    problema), a função devolve True, a reserva nunca roda, e a tela diz "confira seu
+    e-mail" com toda a tranquilidade. Falha silenciosa com cara de sucesso.
+
+    A REGRA, agora explícita: mensagem pra LEAD sai pela caixa da empresa — a resposta
+    dele tem que cair no inbox dela. Link de acesso é E-MAIL DE SISTEMA: ninguém
+    responde, só precisa chegar, e a entrega manda mais que o remetente. Sai pelo Zaq.
+
+    A caixa da empresa continua como reserva pra quando o SMTP do Zaq não estiver
+    configurado — aí é melhor sair por ela do que não sair."""
     titulo = "Seu acesso ao Zaq"
     corpo = ("Toque no botão pra entrar e atender seus leads. "
              "O link vale por 15 minutos e abre no seu aparelho.")
@@ -3057,17 +3080,27 @@ def _enviar_link_email(pool, conta_id: int, email: str, link: str) -> bool:
                  f'<p style="color:#888;font-size:13px">Ou copie: {esc(link)}</p>')
         html = es._layout(titulo, f"<p>{esc(corpo)}</p>{botao}")
         texto = f"{corpo}\n\n{link}"
+        with pool.connection() as c:
+            nome_emp = (c.execute("select nome from contas where id=%s",
+                                  (conta_id,)).fetchone() or [""])[0]
+        # 1) remetente do Zaq — o mesmo caminho da recuperação de senha do portal,
+        #    que é o que comprovadamente entrega. `from_nome` mantém o nome da
+        #    empresa visível pra quem recebe: muda quem carrega, não quem assina.
+        # `enviar_email` já devolve False quando falta config — não precisa de um
+        # gate a mais, que só criaria um segundo jeito de decidir a mesma coisa.
+        if es.enviar_email(email, titulo, html, texto, from_nome=nome_emp or None):
+            return True
+        _log_link.warning("conta %s: o Zaq não mandou o link de acesso — "
+                          "tentando pela caixa da empresa", conta_id)
+        # 2) reserva: a caixa da empresa. Só quando o Zaq não pôde mandar.
         try:
             from finance import email_inbound as ein
-            with pool.connection() as c:
-                nome_emp = (c.execute("select nome from contas where id=%s",
-                                      (conta_id,)).fetchone() or [""])[0]
-            if ein.enviar_conta(pool, conta_id, email, titulo, html, texto,
-                                from_nome=nome_emp or None):
-                return True
-        except Exception:  # noqa: BLE001
-            pass
-        return bool(es.enviar_email(email, titulo, html, texto))
+            return bool(ein.enviar_conta(pool, conta_id, email, titulo, html, texto,
+                                         from_nome=nome_emp or None))
+        except Exception as e:  # noqa: BLE001
+            _log_link.warning("conta %s: nem o Zaq nem a caixa da empresa mandaram o "
+                              "link de acesso: %s: %s", conta_id, type(e).__name__, e)
+            return False
     except Exception:  # noqa: BLE001
         return False
 

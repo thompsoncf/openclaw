@@ -69,10 +69,25 @@
 -- id=$1`, que é busca por chave primária. Filtrar conversa POR chip (a etiqueta no
 -- inbox) só vai existir no passo 04, e com 1.058 linhas um índice hoje seria enfeite.
 --
+-- AS DUAS REGRAS DE APAGAMENTO, E POR QUE SÃO DIFERENTES
+--
+-- chip_de é ON DELETE CASCADE porque as três FKs do wa-qr já são (conferido em
+-- produção: wa_qr_auth, _sessao_lock e _enviadas apagam junto com a empresa). Sem o
+-- cascade aqui, apagar uma empresa que tem chip passaria a dar erro de FK — um
+-- comportamento que hoje funciona e que esta migração quebraria de lado. Com ele,
+-- apagar a empresa leva o chip, que leva a credencial: a mesma cadeia de hoje.
+--
+-- chip_id é ON DELETE SET NULL, não cascade — de propósito e pelo motivo oposto. A
+-- conversa NÃO pode morrer junto com o chip: "o histórico de conversa com os leads é
+-- o ativo comercial da empresa" (a mesma razão pela qual /webhooks/wa-qr/deslogado
+-- parou de apagar mensagens). Sumindo o chip, a conversa fica com chip_id nulo — que
+-- é exatamente "responder pelo chip da empresa", o comportamento de sempre.
+--
 -- Aditivo e idempotente.
 
 alter table public.contas
-  add column if not exists chip_de bigint references public.contas(id);
+  add column if not exists chip_de bigint
+    references public.contas(id) on delete cascade;
 
 comment on column public.contas.chip_de is
   'Nulo = empresa de verdade. Preenchido = esta linha não é cliente, é um chip de '
@@ -92,14 +107,16 @@ begin
 end $$;
 
 alter table public.conversas
-  add column if not exists chip_id bigint references public.contas(id);
+  add column if not exists chip_id bigint
+    references public.contas(id) on delete set null;
 
 comment on column public.conversas.chip_id is
   'Por qual chip esta conversa ENTROU. Nulo = o chip da própria empresa (todo o '
   'histórico até aqui). É o que faz a resposta sair pelo mesmo número que recebeu — '
   'sem isso o lead escreve para um número e é respondido por outro.';
 
--- rollback:
+-- rollback (com o cascade, apagar a linha do chip já limpa wa_qr_*):
+--   delete from public.contas where chip_de is not null;
 --   alter table public.conversas drop column if exists chip_id;
 --   alter table public.contas drop constraint if exists contas_chip_de_nao_si_mesmo;
 --   alter table public.contas drop column if exists chip_de;

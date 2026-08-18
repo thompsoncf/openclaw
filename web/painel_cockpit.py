@@ -475,6 +475,13 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .ic.p{width:17px;height:17px}
 
 /* ---------- construtores (orçamento e visita) ---------- */
+/* botão de novo lead: flutua acima das abas. Fixo e não no cabeçalho porque lá o
+   `direita` já é o selo da conta — e o polegar alcança melhor embaixo à direita. */
+.fab{position:fixed;right:16px;bottom:84px;z-index:40;width:52px;height:52px;
+  border-radius:50%;background:var(--neon);color:#04150c;display:flex;align-items:center;
+  justify-content:center;font-size:1.7rem;font-weight:400;line-height:1;text-decoration:none;
+  box-shadow:0 6px 20px rgba(0,0,0,.45)}
+.fab:active{transform:scale(.94)}
 .toast{position:fixed;left:50%;bottom:88px;transform:translateX(-50%) translateY(12px);z-index:60;
   background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:.5rem .95rem;
   font-size:.84rem;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;max-width:86%}
@@ -1161,6 +1168,8 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
                   inicial=_ini(p["nome"]), direita=_selo(conta_id))
              + _flash(request)
              + f"<div class=scroll>{pushcard}{lista}{dica}{volta}</div>"
+             + (f"<a class=fab href='{_BASE}/lead/novo' aria-label='Novo lead'>+</a>"
+                if not gestor else "")
              + "<div class=toast id=toast></div>"
              + _abas_vend("fila", total_pend)
              + f'<script>window.CKBASE="{_BASE}";</script>' + vapid_js + _FILA_JS
@@ -1640,6 +1649,37 @@ async def cockpit_visita_criar(request: Request, lead_id: int, payload: dict = B
     return JSONResponse(r)
 
 
+def _iso(d) -> str:
+    """date -> 'AAAA-MM-DD' pro <input type=date>, que só aceita esse formato."""
+    return d.isoformat() if hasattr(d, "isoformat") else (d or "")
+
+
+# Autopreenchimento pelo CEP. A rota /api/cep/{cep} JÁ EXISTE (web/portal.py) e usa a
+# BrasilAPI por dentro (finance/cep.py) — não há rota nova aqui. Ela passa livre pelo
+# gate de web/app.py, que só guarda /painel* e /membros*.
+#
+# Duas decisões copiadas do admCep (web/admin.py), porque o erro oposto é caro:
+#   * só preenche campo VAZIO — quem já digitou o endereço não pode vê-lo sumir
+#     porque o CEP amplo do bairro devolveu outra rua;
+#   * .catch silencioso — a BrasilAPI fora do ar não pode travar o preenchimento da
+#     ficha. O consultar() já devolve None em qualquer falha e a rota responde
+#     {"ok": false}; aqui o que resta é não estourar no console e seguir na mão.
+_CEP_JS = """<script>(function(){
+  var cep=document.getElementById('fic-cep'); if(!cep) return;
+  function po(id,v){var e=document.getElementById(id); if(e&&!e.value.trim()&&v) e.value=v;}
+  cep.addEventListener('input',function(){
+    var d=(cep.value||'').replace(/[^0-9]/g,'');
+    if(d.length!==8) return;
+    fetch('/api/cep/'+d).then(function(r){return r.json();}).then(function(j){
+      if(!j||!j.ok) return;
+      po('fic-endereco',j.rua); po('fic-bairro',j.bairro);
+      po('fic-cidade',j.cidade); po('fic-uf',j.uf);
+      var n=document.getElementById('fic-numero'); if(n&&!n.value.trim()) n.focus();
+    }).catch(function(){});
+  });
+})();</script>"""
+
+
 # ------------------------------------------------------------------ ficha do cliente
 @router.get("/cockpit/lead/{lead_id}/ficha", response_class=HTMLResponse)
 def cockpit_ficha_tela(request: Request, lead_id: int):
@@ -1658,9 +1698,11 @@ def cockpit_ficha_tela(request: Request, lead_id: int):
         return RedirectResponse(_BASE, status_code=303)
 
     def campo(nome, rot, valor, *, tipo="text", modo="", meia=False):
+        # id=fic-<nome> porque o autopreenchimento do CEP precisa achar rua, bairro,
+        # cidade e UF pra completar; sem id o JS teria que caçar por name= no form.
         extra = f" inputmode={modo}" if modo else ""
         return (f"<label class='fic-c{' meia' if meia else ''}'><span>{esc(rot)}</span>"
-                f"<input name={nome} type={tipo}{extra} value='{esc(valor or '')}'"
+                f"<input id=fic-{nome} name={nome} type={tipo}{extra} value='{esc(valor or '')}'"
                 f" autocomplete=off></label>")
 
     # Rótulo único: quem digita não escolhe a coluna — o tamanho do documento decide
@@ -1681,6 +1723,15 @@ def cockpit_ficha_tela(request: Request, lead_id: int):
         + campo("telefone", "Telefone", d.get("telefone"), tipo="tel", modo="tel", meia=True)
         + campo("documento", "CPF ou CNPJ", d.get("doc_fmt"), modo="numeric", meia=True)
         + campo("email", "E-mail", d.get("email"), tipo="email", modo="email")
+        # O CEP vem ANTES do endereço de propósito: digitou os 8 dígitos, rua/bairro/
+        # cidade/UF se preenchem sozinhos (ver _CEP_JS) e sobra o número pra digitar.
+        + campo("cep", "CEP", d.get("cep"), modo="numeric", meia=True)
+        + campo("numero", "Número", d.get("numero"), meia=True)
+        + campo("endereco", "Endereço", d.get("endereco"))
+        + campo("bairro", "Bairro", d.get("bairro"), meia=True)
+        # <input type=date> abre o seletor nativo do celular — datilografar
+        # dd/mm/aaaa numa mão, na rua, ninguém faz.
+        + campo("nascimento", "Aniversário", _iso(d.get("nascimento")), tipo="date", meia=True)
         + campo("cidade", "Cidade", d.get("cidade"), meia=True)
         + campo("uf", "UF", d.get("uf"), meia=True)
         + "<label class=fic-c><span>Observação</span>"
@@ -1695,8 +1746,58 @@ def cockpit_ficha_tela(request: Request, lead_id: int):
              + "<div class=fonte>Campo em branco não apaga o que já está salvo — dá pra "
                "voltar aqui e ir completando conforme a conversa anda.</div></div></div>"
              + "<div class=rodape-b><button class=btn type=submit>Salvar ficha</button></div>"
-             + "</form>")
+             + "</form>" + _CEP_JS)
     return _page(f"Ficha — {d['empresa']}", corpo)
+
+
+# ------------------------------------------------------------------ lead novo (manual)
+@router.get("/cockpit/lead/novo", response_class=HTMLResponse)
+def cockpit_lead_novo_tela(request: Request):
+    """Cadastrar um lead na mão, do celular.
+
+    Faltava: o app tinha vinte e tantas rotas e nenhuma criava lead — o vendedor só
+    trabalhava o que o rodízio entregava, e o contato pego na rua não tinha onde entrar.
+
+    Dois campos e pronto. O resto (documento, CEP, endereço, aniversário) ele completa
+    depois na ficha, que já tem tudo: formulário longo no celular, em pé na calçada, é
+    o jeito mais certo de o lead não ser cadastrado."""
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    corpo = (_hdr("Novo lead", "entra na sua fila", voltar=_BASE)
+             + _flash(request)
+             + f"<form class=telaform method=post action='{_BASE}/lead/novo'>"
+             + "<div class=scroll><div class=secao><div class='fic'>"
+             + "<label class=fic-c><span>Nome do contato</span>"
+               "<input name=nome required autocomplete=off autofocus"
+               " placeholder='Como você vai reconhecer'></label>"
+             + "<label class=fic-c><span>WhatsApp</span>"
+               "<input name=whatsapp required type=tel inputmode=tel autocomplete=off"
+               " placeholder='DDD + número'></label>"
+             + "</div><div class=fonte>Já tem esse número na base? A gente abre o lead "
+               "que existe em vez de criar outro — conversa partida em duas fichas é pior "
+               "que lead repetido.</div></div></div>"
+             + "<div class=rodape-b><button class=btn type=submit>Criar e abrir</button></div>"
+             + "</form>")
+    return _page("Novo lead", corpo)
+
+
+@router.post("/cockpit/lead/novo")
+def cockpit_lead_novo(request: Request, nome: str = Form(""), whatsapp: str = Form("")):
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess
+    r = ck.criar_lead(get_pool(), conta_id, membro_id, nome, whatsapp)
+    if not r.get("ok"):
+        request.session["ck_err"] = _erro(r)
+        return RedirectResponse(f"{_BASE}/lead/novo", status_code=303)
+    # `existia` não é erro — é o caso normal de quem não sabe de cor quem já está na
+    # base. Diz o que aconteceu e abre o lead certo, em vez de deixar a pessoa achando
+    # que criou um novo.
+    request.session["ck_ok"] = ("Esse número já era um lead — abrindo ele."
+                                if r.get("existia") else "Lead criado ✓")
+    return RedirectResponse(f"{_BASE}/lead/{r['lead_id']}", status_code=303)
 
 
 # ------------------------------------------------------------------ propostas
@@ -2507,10 +2608,14 @@ def cockpit_fila_sinal(request: Request):
 def cockpit_ficha(request: Request, lead_id: int, empresa: str = Form(""), contato: str = Form(""),
                   cargo: str = Form(""), segmento: str = Form(""), telefone: str = Form(""),
                   whatsapp: str = Form(""), documento: str = Form(""), email: str = Form(""),
+                  cep: str = Form(""), endereco: str = Form(""), numero: str = Form(""),
+                  bairro: str = Form(""), nascimento: str = Form(""),
                   cidade: str = Form(""), uf: str = Form(""), obs: str = Form("")):
     """Ficha do cliente preenchida pelo vendedor, de dentro da conversa."""
     dados = {"empresa": empresa, "contato": contato, "cargo": cargo, "segmento": segmento,
              "telefone": telefone, "whatsapp": whatsapp, "documento": documento, "email": email,
+             "cep": cep, "endereco": endereco, "numero": numero, "bairro": bairro,
+             "nascimento": nascimento,
              "cidade": cidade, "uf": uf, "obs": obs}
     return _agir(request, lead_id,
                  lambda p, c, m, l: {**ck.salvar_ficha(p, c, m, l, dados), "msg": "Ficha salva ✓"},

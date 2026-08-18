@@ -75,6 +75,12 @@ def rotas_do_papel(papel: str | None) -> list[str]:
         permitido += ["/painel/servicos", "/painel/prospeccao"]
     if caps["financeiro"]:
         permitido += ["/painel/empresa", "/painel/relatorios"]
+    # A agenda é da CONTA (finance/agenda.py não filtra por membro) e é compartilhada
+    # de propósito: a data segurada precisa aparecer pra quem está com o cliente,
+    # senão a mesma data é prometida duas vezes. Vendas e financeiro entram; o
+    # papel 'restrito' continua de fora.
+    if caps["vendas"] or caps["financeiro"]:
+        permitido += ["/painel/agenda"]
     if caps["gerir"]:
         permitido += ["/painel/equipe", "/membros"]
     return permitido

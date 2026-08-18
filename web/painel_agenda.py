@@ -186,13 +186,15 @@ def _titulo_dia(d: date) -> str:
 
 def _eventos_por_dia(eventos: list[dict], convidados: dict[int, list[dict]] | None = None,
                      agora=None, orcamentos: dict[int, dict] | None = None,
-                     fichas: dict[int, dict] | None = None) -> dict[str, dict]:
+                     fichas: dict[int, dict] | None = None,
+                     nomes: dict[int, str] | None = None) -> dict[str, dict]:
     """{iso_do_dia: {titulo, eventos:[...]}} com os detalhes completos (local,
     descrição, convidados) — alimenta a caixa do dia no JS sem precisar de outra
     requisição (os eventos do mês já vieram pro calendário)."""
     convidados = convidados or {}
     orcamentos = orcamentos or {}
     fichas = fichas or {}
+    nomes = nomes or {}
     agora = agora or ag.agora_brt()
     out: dict[str, dict] = {}
     for e in sorted(eventos, key=lambda ev: ev["inicio"]):
@@ -225,6 +227,9 @@ def _eventos_por_dia(eventos: list[dict], convidados: dict[int, list[dict]] | No
             "orcamento_numero": orcamentos.get(e["id"], {}).get("orcamento_numero"),
             # a FICHA: o que o orçamento vinculado já sabe sobre essa festa
             "ficha": _ficha_rot(fichas.get(e["id"])),
+            # quem marcou — a agenda agora é de todos, e esta é a primeira pergunta
+            # de quem olha um compromisso que não marcou. Vazio = o dono titular.
+            "autor": nomes.get(e.get("membro_id")) or "",
         })
     return out
 
@@ -411,7 +416,7 @@ def _montar_share(request: Request, pool, conta_id: int, convite_ev: str, convit
 # ================================================================ CALENDÁRIO
 @router.get("/painel/agenda", response_class=HTMLResponse)
 def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = "",
-                convite_ev: str = ""):
+                convite_ev: str = "", p: str = ""):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -420,6 +425,9 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
     ano, mes = _mes_ref(m)
     agora = ag.agora_brt()
     hoje = agora.date()
+    # FILTRO POR PESSOA (?p=<membro_id>). Não é permissão — a agenda é da conta e
+    # todos veem tudo; é foco: "me mostra só o do Rafael". O padrão é o time.
+    p_id = int(p) if (p or "").isdigit() else None
     # NICHO: só quem vende data (eventos) vê o vocabulário de data segurada e a
     # ficha do evento. Pra clínica, loja e escritório a Agenda continua exatamente
     # como estava — a pré-reserva nasce só de orçamento de evento, então a marca não
@@ -427,6 +435,21 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
     vende_data = _vendas().vende_data(pool, conta_id)
     eventos = ag.eventos_mes(pool, conta_id, ano, mes)
     proximos = ag.proximos(pool, conta_id, limite=8)
+    # nomes de quem marcou + as pessoas do filtro. As pessoas vêm dos AUTORES do
+    # mês (não da equipe inteira): chip de quem não tem evento é botão que filtra
+    # pro vazio. O mapa de nomes cobre eventos e próximos.
+    with pool.connection() as c:
+        # só `nome`: a coluna `email` de membros nasce em runtime (garantir_tabela)
+        # e nem todo banco passou por ela — a agenda não pode quebrar por isso.
+        nomes = dict(c.execute(
+            "select id, coalesce(nullif(nome,''), '') from membros where conta_id=%s",
+            (conta_id,)).fetchall())
+    autores_mes = sorted({e["membro_id"] for e in eventos if e.get("membro_id")})
+    pessoas = [{"id": mid, "nome": nomes.get(mid) or f"#{mid}", "on": (mid == p_id)}
+               for mid in autores_mes]
+    if p_id is not None:
+        eventos = [e for e in eventos if e.get("membro_id") == p_id]
+        proximos = [e for e in proximos if e.get("membro_id") == p_id]
     ids_com_convidados = {e["id"] for e in eventos} | {e["id"] for e in proximos}
     convidados = cv.por_evento(pool, conta_id, list(ids_com_convidados))
     # FICHA DO EVENTO: o orçamento vinculado e o pagamento de cada festa do mês.
@@ -455,7 +478,7 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
             "mes": f"{ev['inicio'].astimezone(ag.BRT):%Y-%m}",
         })
     orcs = {s["id"]: s for s in seguradas}
-    eventos_dia = _eventos_por_dia(eventos, convidados, agora, orcs, fichas)
+    eventos_dia = _eventos_por_dia(eventos, convidados, agora, orcs, fichas, nomes)
     reaproveitar = [{
         "id": e["id"], "titulo": e["titulo"], "hora_rot": ag.fmt_hora(e),
         "hora": e["inicio"].astimezone(ag.BRT).strftime("%H:%M"),
@@ -468,6 +491,7 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
         ev["tipo_rot"] = TIPO_ROT.get(ev["tipo"], "Pessoal")
         ev["convidados"] = convidados.get(ev["id"], [])
         ev["conv_resumo"] = cv.resumo(ev["convidados"]) if ev["convidados"] else None
+        ev["autor"] = nomes.get(ev.get("membro_id")) or ""
     cfg = ag.get_config(pool, conta_id)
     feed_url = _feed_url(request, cfg["feed_token"]) if cfg.get("feed_token") else ""
     # Card de compartilhar os convites de um evento (?convite_ev=<id>; aceita também
@@ -487,7 +511,7 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
                    mes_hoje=f"{hoje.year:04d}-{hoje.month:02d}",
                    hoje_iso=hoje.isoformat(), abrir_novo=(novo == "1"),
                    cfg=cfg, feed_url=feed_url, share=share, seguradas=seguradas,
-                   vende_data=vende_data,
+                   vende_data=vende_data, pessoas=pessoas, p_id=p_id,
                    rot=(_ROT_EVENTO if vende_data else _ROT_PADRAO),
                    aviso=request.session.pop("agenda_aviso", None))
 
@@ -985,6 +1009,13 @@ _CSS = """<style>
 .zaq-toast.err{border-color:var(--coral)}
 .px-row.saindo{opacity:0;transform:translateX(8px);transition:.22s}
 .ag-btn:hover{background:var(--verde-hover)}
+/* filtro por pessoa: chips abaixo do topo. Não é permissão — todos veem tudo —,
+   é foco. Só aparece quando o mês tem autor identificado (senão é um "Todos" só). */
+.ag-pessoas{display:flex;gap:.4rem;flex-wrap:wrap;margin:-.4rem 0 1rem}
+.agp{font-size:.76rem;color:var(--txt-mut);text-decoration:none;
+  border:1px solid var(--borda);background:var(--card-2);border-radius:999px;
+  padding:.22rem .7rem}
+.agp.on{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--txt);font-weight:600}
 .ag-grid{display:grid;grid-template-columns:1.7fr .95fr;gap:18px;align-items:start}
 @media(max-width:860px){.ag-grid{grid-template-columns:1fr}}
 /* histórico de envios */
@@ -1451,6 +1482,13 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <a href="#novo" class="ag-btn" onclick="agNovo(true)">{{ rot.novo_btn }}</a>
   </div>
 
+  {% if pessoas %}
+  <div class="ag-pessoas">
+    <a href="/painel/agenda?m={{ '%04d-%02d'|format(ano, mes) }}" class="agp{% if p_id is none %} on{% endif %}">Todos</a>
+    {% for pp in pessoas %}<a href="/painel/agenda?m={{ '%04d-%02d'|format(ano, mes) }}&p={{ pp.id }}" class="agp{% if pp.on %} on{% endif %}">{{ pp.nome }}</a>{% endfor %}
+  </div>
+  {% endif %}
+
   <div class="ag-grid">
     <div>
       <div class="cal{% if vende_data %} marca-estado{% endif %}">
@@ -1522,7 +1560,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             <div class="px-when"><div class="d">{{ e.dia_rot }}</div><div class="h">{{ e.hora_rot }}</div></div>
             <div class="px-body">
               <div class="tt">{{ e.titulo }}</div>
-              <div class="mt">{{ e.tipo_rot }}{% if e.local %} · {{ e.local }}{% endif %}</div>
+              <div class="mt">{{ e.tipo_rot }}{% if e.local %} · {{ e.local }}{% endif %}{% if e.autor %} · <span title="quem marcou">👤 {{ e.autor }}</span>{% endif %}</div>
               {% if e.convidados %}
               <div class="px-conv">
                 {% if e.conv_resumo.total > 1 %}
@@ -2060,7 +2098,8 @@ function abrirDia(iso){
       + '<span class="tpill tp-'+e.tipo+'">'+((e.ficha&&e.ficha.tipo)?_esc(e.ficha.tipo):(TPILL[e.tipo]||e.tipo_rot))+'</span>'
       + (e.local?'<span>📍 '+e.local+'</span>':'')
       + ((e.ficha&&e.ficha.convidados)?'<span>👥 '+e.ficha.convidados+' convidados</span>':'')
-      + (e.pre?'<span style="color:var(--ambar);font-weight:700">segurada</span>':'')+'</div>'
+      + (e.pre?'<span style="color:var(--ambar);font-weight:700">segurada</span>':'')
+      + (e.autor?'<span title="quem marcou">👤 '+_esc(e.autor)+'</span>':'')+'</div>'
       + (e.link_online?'<a class="meet-btn" href="'+_esc(e.link_online)+'" target="_blank" rel="noopener">🎥 Entrar na reunião</a>':'')
       + '</div>'+acaoTopo+'</div>'
       // Data segurada: quem abre o dia precisa saber que essa data AINDA não é de

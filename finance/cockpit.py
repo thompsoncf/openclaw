@@ -1062,30 +1062,57 @@ def visita_ics(pool, token: str) -> str | None:
 
 
 # ------------------------------------------------------------------ agenda do vendedor
-def visitas_do_vendedor(pool, conta_id: int, membro_id: int, dias: int = 14) -> list[dict]:
-    """As visitas QUE ELE marcou, de hoje pra frente (a agenda do dia dele).
+def agenda_da_conta(pool, conta_id: int, membro_id: int | None = None,
+                    so_meus: bool = False, dias: int = 14) -> list[dict]:
+    """A agenda dos próximos `dias` — visitas, compromissos e datas SEGURADAS — da
+    conta inteira, com quem marcou. Substitui a antiga `visitas_do_vendedor`, que
+    filtrava por `membro_id` e `status='ativo'`: o vendedor via só as visitas dele,
+    e a data segurada (pré-reserva aguardando sinal) não aparecia pra ninguém no
+    app. É exatamente a informação que evita prometer a mesma data duas vezes, e
+    quem corre esse risco é o vendedor, na rua.
 
-    `agendar_visita` grava o evento com `membro_id` (via `agenda.criar_evento`) e
-    liga no lead pelo `prospeccao_id`; aqui a gente lê o mesmo dado pelo dono do
-    evento. `agenda.listar_eventos` não serve porque é por CONTA — o vendedor
-    veria a agenda do time inteiro.
+    `so_meus=True` devolve só os eventos de `membro_id` — o filtro "Meus × Todos"
+    da tela. Fica no SQL (e não na tela) porque a tela corta em `dias`; filtrar
+    depois faria "Meus" perder eventos quando o time lota a janela.
+
+    Cada item traz `tipo_ev` ('visita' | 'segurada' | 'compromisso'), `autor` (nome
+    de quem marcou; '' quando foi o dono titular, que não tem membro) e `minha`
+    (o evento é de quem está olhando). O prazo do sinal vai em `prazo` ('2d', '5h',
+    'vencido') — no card ele é a diferença entre "data ocupada" e "urgência".
     """
     from finance import agenda as ag
     from web.painel_prospeccao import _zap_link
     hoje = datetime.now(ag.BRT).replace(hour=0, minute=0, second=0, microsecond=0)
+    cond = "and e.membro_id=%s " if (so_meus and membro_id) else ""
+    args = [conta_id] + ([membro_id] if (so_meus and membro_id) else []) \
+        + [hoje, hoje + timedelta(days=max(1, int(dias or 14)))]
     with pool.connection() as c:
         rows = c.execute(
-            """select e.id, e.titulo, e.inicio, e.local, e.ics_token,
-                      e.prospeccao_id, p.empresa, coalesce(p.whatsapp, p.telefone, '')
+            f"""select e.id, e.titulo, e.inicio, e.local, e.ics_token,
+                      e.prospeccao_id, p.empresa, coalesce(p.whatsapp, p.telefone, ''),
+                      e.status, e.pre_reserva_ate, e.membro_id,
+                      coalesce(nullif(m.nome,''), '')
                  from eventos_agenda e
                  left join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
-                where e.conta_id=%s and e.membro_id=%s and e.status='ativo'
+                 left join membros m on m.id = e.membro_id
+                where e.conta_id=%s {cond}and e.status in ('ativo','pre_reservado')
                   and e.inicio >= %s and e.inicio < %s
                 order by e.inicio""",
-            (conta_id, membro_id, hoje, hoje + timedelta(days=max(1, int(dias or 14))))).fetchall()
+            args).fetchall()
+    agora = datetime.now(ag.BRT)
     out = []
     for r in rows:
         ini = r[2].astimezone(ag.BRT) if r[2] else None
+        segurada = (r[8] == "pre_reservado")
+        # o rótulo do card: visita é o que tem lead pendurado; segurada é a data
+        # esperando sinal; o resto (festa confirmada, reunião) é compromisso firme.
+        tipo_ev = "segurada" if segurada else ("visita" if r[5] else "compromisso")
+        prazo = ""
+        if segurada and r[9]:
+            horas = (r[9] - agora).total_seconds() / 3600
+            prazo = ("vencido" if horas <= 0
+                     else f"{max(1, int(horas))}h" if horas < 24
+                     else f"{int(horas // 24)}d")
         out.append({
             "id": r[0], "titulo": r[1] or "Visita", "inicio": ini,
             "dia": ini.strftime("%d/%m") if ini else "", "hora": ini.strftime("%H:%M") if ini else "",
@@ -1093,6 +1120,8 @@ def visitas_do_vendedor(pool, conta_id: int, membro_id: int, dias: int = 14) -> 
             "local": r[3] or "", "maps": _maps_link(r[3] or ""),
             "ics_url": f"/visita/{r[4]}.ics" if r[4] else "",
             "lead_id": r[5], "empresa": r[6] or "", "zap": _zap_link(r[7]) if r[7] else "",
+            "tipo_ev": tipo_ev, "prazo": prazo,
+            "autor": r[11] or "", "minha": bool(membro_id and r[10] == membro_id),
         })
     return out
 

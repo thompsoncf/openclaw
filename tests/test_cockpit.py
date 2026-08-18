@@ -601,7 +601,9 @@ def test_gestor_tem_como_sair_pela_barra():
 
     # o vendedor não herda a aba do gestor: são barras diferentes
     assert pc._abas_vend("fila").count("<a") == 5
-    assert pc._abas_dono("visao").count("<a") == 6
+    # 7 desde a agenda compartilhada: a aba Agenda entrou pro dono/gestor (medido
+    # em 390px: ~55px por aba e o maior rótulo ocupa ~46px — cabe numa linha).
+    assert pc._abas_dono("visao").count("<a") == 7
 
 
 def test_total_pendentes_soma_a_carteira_e_ignora_fechados(pool):

@@ -68,13 +68,39 @@ def _ini(s: str) -> str:
 
 # ------------------------------------------------------------------ sessão
 def _sessao(request: Request):
-    """(conta_id, membro_id) do vendedor logado, ou None. Reusa a sessão do portal."""
+    """(conta_id, membro_id) do vendedor logado, ou None. Reusa a sessão do portal.
+
+    Se a sessão caiu mas o aparelho tem o cookie "manter conectado", RECONSTRÓI a
+    sessão aqui e segue — é o que faz o acesso ser indeterminado sem mexer no
+    max_age global do SessionMiddleware (que vale pro painel do dono também).
+
+    A reconstrução só escreve em `request.session`; o Starlette reassina o cookie na
+    resposta sozinho. Não precisa de Response nenhum, e por isso cabe dentro de um
+    guard que é chamado em toda rota."""
     mid = request.session.get("membro_id")
     cid = request.session.get("conta_id")
     papel = request.session.get("papel", "dono")
-    if not mid or not cid or papel not in _PAPEIS_OK:
+    if mid and cid and papel in _PAPEIS_OK:
+        return cid, mid
+    return _sessao_do_lembrete(request)
+
+
+def _sessao_do_lembrete(request: Request):
+    """Sessão vazia + cookie de "manter conectado" válido = entra de novo, calado.
+
+    `lembrar_validar` relê o membro no banco, então desativar alguém na Equipe corta
+    o acesso no request seguinte — a trava que uma sessão sem prazo exige."""
+    token = request.cookies.get(ck.LEMBRETE_COOKIE)
+    if not token:
         return None
-    return cid, mid
+    d = ck.lembrar_validar(get_pool(), token)
+    if not d:
+        return None
+    request.session["conta_id"] = d["conta_id"]
+    request.session["membro_id"] = d["membro_id"]
+    request.session["papel"] = d["papel"]
+    request.session["cockpit"] = True
+    return d["conta_id"], d["membro_id"]
 
 
 def _gerencia(request: Request):
@@ -85,7 +111,15 @@ def _gerencia(request: Request):
     cid = request.session.get("conta_id")
     papel = request.session.get("papel", "dono")
     if not cid or papel not in ("dono", "gestor"):
-        return None
+        # o gestor também tem "manter conectado": sem isto ele voltaria a cair na
+        # tela de entrada mesmo com o aparelho lembrado, já que várias rotas de
+        # equipe checam `_gerencia` ANTES de `_sessao`.
+        if _sessao_do_lembrete(request) is None:
+            return None
+        cid = request.session.get("conta_id")
+        papel = request.session.get("papel", "dono")
+        if not cid or papel not in ("dono", "gestor"):
+            return None
     return cid, request.session.get("membro_id")
 
 
@@ -571,7 +605,7 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .flash.ok{background:rgba(37,211,102,.12);border:1px solid #1e4a3a;color:var(--neon)}
 .flash.err{background:#241313;border:1px solid #5a2b2b;color:var(--coral)}
 
-/* ---------- entrar (link mágico) ---------- */
+/* ---------- entrar (senha + link) ---------- */
 .login{flex:1;display:flex;flex-direction:column;justify-content:center;padding:2.4rem 1.6rem;
   gap:.4rem;text-align:center}
 .login .marca{font-family:var(--display);font-size:2rem;font-weight:800;letter-spacing:-.03em;
@@ -584,6 +618,21 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
   border-radius:12px;padding:.85rem;font-family:inherit;font-weight:700;font-size:.95rem;
   margin-top:.7rem;cursor:pointer;text-decoration:none}
 .login small{color:var(--text-faint);font-size:.76rem;margin-top:.9rem;line-height:1.5}
+/* segunda ação da tela: mesma forma do botão principal, sem o peso do verde cheio —
+   entrar por link é a saída, não o caminho de todo dia. */
+.login .go2{display:block;width:100%;background:transparent;color:var(--neon);
+  border:1px solid var(--neon-borda);border-radius:12px;padding:.8rem;font-family:inherit;
+  font-weight:600;font-size:.9rem;margin-top:.55rem;cursor:pointer;text-decoration:none}
+/* dois <form> empilhados não podem virar dois blocos separados por margem: a tela é
+   uma coluna só, e o gap do .login já dá o respiro. */
+.login form{margin:0;width:100%}
+.login .chk{display:flex;align-items:center;gap:.5rem;justify-content:center;
+  color:var(--text-dim);font-size:.85rem;margin-top:.7rem;cursor:pointer}
+.login .chk input{width:auto;accent-color:var(--neon);margin:0}
+.login .erro{background:#2A1613;border:1px solid #5A2A22;color:#E8705C;border-radius:10px;
+  padding:.6rem .75rem;font-size:.82rem;margin-bottom:.4rem}
+.login .nota{background:var(--neon-fundo);border:1px solid var(--neon-borda);color:var(--neon);
+  border-radius:10px;padding:.6rem .75rem;font-size:.82rem;margin-bottom:.4rem}
 
 .fonte{margin:.2rem 1.1rem 1rem;font-size:.7rem;color:var(--text-faint);line-height:1.45}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
@@ -2805,8 +2854,41 @@ def cockpit_pausar(request: Request, membro_id: int = Form(...), on: str = Form(
 # não visual, e reescrever ia trocar risco por nada.
 
 # ------------------------------------------------------------------ login mágico
+def _tela_login(titulo: str, sub: str, email: str = "", erro: str = "",
+                nota: str = "") -> HTMLResponse:
+    """A tela de entrada. Senha é o caminho PRINCIPAL; o link por e-mail fica como
+    saída pra quem esqueceu ou nunca criou senha.
+
+    Era o contrário: só link mágico, com a frase "Sem senha". Como é aqui que o
+    vendedor aterrissa quando a sessão cai, ele ficava dependendo de e-mail chegar e
+    de abrir em 15 min — no meio do expediente. E-mail e senha já existiam
+    (contas/equipe.py), só não eram oferecidos neste lugar."""
+    aviso = (f"<div class=erro>{esc(erro)}</div>" if erro else
+             (f"<div class=nota>{esc(nota)}</div>" if nota else ""))
+    corpo = ("<div class=login><div class=marca>Zaq</div>"
+             f"<h2>{esc(titulo)}</h2><p>{esc(sub)}</p>"
+             f"{aviso}"
+             f"<form method=post action='{_BASE}/login'>"
+             f"<input name=email type=email required placeholder='seu e-mail' "
+             f"autocomplete=username value='{esc(email)}'>"
+             "<input name=senha type=password placeholder='sua senha' "
+             "autocomplete=current-password>"
+             # marcado por padrão: é o aparelho de trabalho do vendedor, e o pedido
+             # que originou isto foi justamente não ter que entrar de novo.
+             "<label class=chk><input type=checkbox name=lembrar value=1 checked>"
+             "Manter conectado neste aparelho</label>"
+             "<button class=go type=submit>Entrar</button></form>"
+             f"<form method=post action='{_BASE}/login'>"
+             f"<input type=hidden name=email value='{esc(email)}'>"
+             "<input type=hidden name=so_link value=1>"
+             "<button class=go2 type=submit>Entrar por link no e-mail</button></form>"
+             "<small>Esqueceu a senha? Use o link por e-mail e crie outra ao entrar.</small>"
+             "</div>")
+    return _page("Zaq — entrar", corpo)
+
+
 @router.get("/cockpit/login", response_class=HTMLResponse)
-def cockpit_login_form(request: Request, enviado: str = ""):
+def cockpit_login_form(request: Request, enviado: str = "", expirou: str = ""):
     if _sessao(request):
         return RedirectResponse(_BASE, status_code=303)
     if enviado:
@@ -2815,28 +2897,65 @@ def cockpit_login_form(request: Request, enviado: str = ""):
         corpo = ("<div class=login><div class=marca>Zaq</div><h2>Confira seu e-mail</h2>"
                  "<p>Se esse e-mail estiver cadastrado, você recebeu um link pra entrar. "
                  "Ele vale por 15 minutos.</p>"
+                 f"<a class=go2 href='{_BASE}/login'>Voltar</a>"
                  "<small>Não chegou? Veja o spam ou peça o link ao seu gestor.</small></div>")
         return _page("Zaq — confira o e-mail", corpo)
-    corpo = ("<div class=login><div class=marca>Zaq</div><h2>Seus leads, no bolso</h2>"
-             "<p>Sem senha — a gente manda um link pro seu e-mail.</p>"
-             f"<form method=post action='{_BASE}/login'>"
-             "<input name=email type=email required placeholder='seu e-mail' autocomplete=email>"
-             "<button class=go type=submit>Enviar meu link de acesso</button></form>"
-             "<small>O link vale por 15 min e abre no seu aparelho.</small></div>")
-    return _page("Zaq — entrar", corpo)
+    if expirou:
+        return _tela_login("Entre de novo", "Sua sessão expirou neste aparelho.",
+                           nota="Seus leads continuam aí — nada se perdeu.")
+    return _tela_login("Seus leads, no bolso", "Entre com seu e-mail e senha.")
 
 
 @router.post("/cockpit/login")
-def cockpit_login(request: Request, email: str = Form(...)):
+def cockpit_login(request: Request, email: str = Form(...), senha: str = Form(""),
+                  lembrar: str = Form(""), so_link: str = Form("")):
+    """Duas portas no mesmo endereço: com senha entra na hora; sem senha (ou pelo
+    botão "entrar por link") cai no e-mail de sempre."""
     pool = get_pool()
+    email = (email or "").strip()
+    if senha and not so_link:
+        from contas import equipe as _equipe
+        ctx = _equipe.autenticar(pool, email, senha)
+        if not ctx or (ctx.get("papel") or "") not in _PAPEIS_OK:
+            # mensagem única pra senha errada e pra e-mail que não é do time: dizer
+            # qual dos dois falhou entrega quem tem cadastro.
+            return _tela_login("Seus leads, no bolso", "Entre com seu e-mail e senha.",
+                               email=email, erro="E-mail ou senha incorretos.")
+        request.session["conta_id"] = ctx["conta_id"]
+        request.session["membro_id"] = ctx["membro_id"]
+        request.session["papel"] = ctx["papel"]
+        request.session["cockpit"] = True
+        resp = RedirectResponse(_BASE, status_code=303)
+        if lembrar:
+            _pôr_lembrete(request, resp, ctx["conta_id"], ctx["membro_id"])
+        return resp
     achado = ck.membro_por_email(pool, email)
     if achado:                       # nunca revela se existe: sempre redireciona igual
         try:
             token = ck.gerar_token(pool, achado["conta_id"], achado["membro_id"])
-            _enviar_link_email(pool, achado["conta_id"], (email or "").strip(), ck.link_acesso(token))
+            _enviar_link_email(pool, achado["conta_id"], email, ck.link_acesso(token))
         except Exception:  # noqa: BLE001
             pass
     return RedirectResponse(f"{_BASE}/login?enviado=1", status_code=303)
+
+
+def _pôr_lembrete(request: Request, resp, conta_id: int, membro_id: int) -> None:
+    """Grava o aparelho e põe o cookie SEM prazo de expiração.
+
+    `max_age` de 10 anos é o "indeterminado" na prática — cookie sem max_age morre ao
+    fechar o navegador, que é o oposto do pedido. Quem encerra de verdade é a
+    revogação no banco (Sair, membro desativado), não o relógio.
+
+    httponly: JS da página não lê — se algum script de terceiro entrar, não leva a
+    sessão junto. secure: só por HTTPS, igual ao cookie do portal."""
+    token = ck.lembrar_criar(get_pool(), conta_id, membro_id,
+                             (request.headers.get("user-agent") or "")[:120])
+    if not token:
+        return
+    resp.set_cookie(
+        ck.LEMBRETE_COOKIE, token, max_age=60 * 60 * 24 * 3650, path="/cockpit",
+        httponly=True, samesite="lax",
+        secure=_os.environ.get("PORTAL_COOKIE_SECURE", "1") == "1")
 
 
 @router.get("/cockpit/entrar/{token}", response_class=HTMLResponse)
@@ -2851,7 +2970,13 @@ def cockpit_entrar(request: Request, token: str):
     request.session["membro_id"] = dados["membro_id"]
     request.session["papel"] = dados["papel"]
     request.session["cockpit"] = True
-    return RedirectResponse(_BASE, status_code=303)
+    # quem entrou por link JÁ provou o e-mail: o aparelho fica lembrado igual a quem
+    # entrou por senha. Sem isto, o vendedor que só usa link seguiria caindo fora.
+    destino = _BASE if ck.tem_senha(get_pool(), dados["conta_id"], dados["membro_id"]) \
+        else f"{_BASE}/senha"
+    resp = RedirectResponse(destino, status_code=303)
+    _pôr_lembrete(request, resp, dados["conta_id"], dados["membro_id"])
+    return resp
 
 
 @router.get("/cockpit/sair")
@@ -2864,8 +2989,57 @@ def cockpit_sair(request: Request):
     volta em /cockpit e via a visão de equipe inteira, com a carteira de propostas
     do time e o botão de fechar contrato. Sair tem que sair.
     """
+    # revoga ESTE aparelho antes de limpar a sessão: sem isto o cookie de "manter
+    # conectado" reconstruiria a sessão no request seguinte e o Sair não sairia.
+    # Os outros aparelhos do vendedor continuam conectados, que é o esperado.
+    token = request.cookies.get(ck.LEMBRETE_COOKIE)
+    if token:
+        ck.lembrar_revogar(get_pool(), token)
     request.session.clear()
-    return RedirectResponse(f"{_BASE}/login", status_code=303)
+    resp = RedirectResponse(f"{_BASE}/login", status_code=303)
+    resp.delete_cookie(ck.LEMBRETE_COOKIE, path="/cockpit")
+    return resp
+
+
+@router.get("/cockpit/senha", response_class=HTMLResponse)
+def cockpit_senha_form(request: Request, erro: str = "", trocar: str = ""):
+    """Criar (ou trocar) a senha, sem sair do app.
+
+    Aparece uma vez, logo depois do link mágico, pra quem ainda não tem senha — e é o
+    que tira o vendedor da dependência de e-mail. Grava na MESMA coluna do login web
+    (migração 072): uma credencial só, Cockpit e painel."""
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse(f"{_BASE}/login", status_code=303)
+    novo_login = not trocar
+    corpo = ("<div class=login><div class=marca>Zaq</div>"
+             f"<h2>{'Crie sua senha' if novo_login else 'Trocar senha'}</h2>"
+             "<p>Assim você entra direto da próxima vez, sem depender do e-mail.</p>"
+             + (f"<div class=erro>{esc(erro)}</div>" if erro else "")
+             + f"<form method=post action='{_BASE}/senha'>"
+             "<input name=senha type=password required minlength=8 maxlength=72 "
+             "placeholder='nova senha' autocomplete=new-password>"
+             "<input name=confirma type=password required minlength=8 maxlength=72 "
+             "placeholder='repetir a senha' autocomplete=new-password>"
+             "<button class=go type=submit>Salvar e continuar</button></form>"
+             "<small>Mínimo de 8 caracteres. Dá pra trocar depois no Perfil.</small>"
+             + (f"<a class=go2 href='{_BASE}'>Agora não</a>" if novo_login else "")
+             + "</div>")
+    return _page("Zaq — senha", corpo)
+
+
+@router.post("/cockpit/senha")
+def cockpit_senha_salva(request: Request, senha: str = Form(...),
+                        confirma: str = Form("")):
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse(f"{_BASE}/login", status_code=303)
+    if senha != confirma:
+        return cockpit_senha_form(request, erro="As senhas não conferem.")
+    r = ck.definir_senha(get_pool(), sess[0], sess[1], senha)
+    if not r.get("ok"):
+        return cockpit_senha_form(request, erro=r.get("erro") or "Não deu pra salvar.")
+    return RedirectResponse(_BASE, status_code=303)
 
 
 def _enviar_link_email(pool, conta_id: int, email: str, link: str) -> bool:

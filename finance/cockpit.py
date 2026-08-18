@@ -74,6 +74,138 @@ def validar_token(pool, token: str) -> dict | None:
     return {"conta_id": conta_id, "membro_id": membro_id, "nome": m[0], "papel": m[1]}
 
 
+# ------------------------------------------------- "manter conectado" (indeterminado)
+# O vendedor marca a caixa e o aparelho dele para de pedir login. Não tem prazo: vale
+# até alguém revogar, o membro ser desativado, ou ele apertar Sair. Ver a migração 173
+# pra o porquê de ser tabela em vez de um max_age maior no cookie.
+#
+# O COOKIE guarda o token cru; a TABELA guarda só o sha256 dele. Quem lê o banco não
+# consegue se passar por ninguém — mesma razão de `membros.senha_hash`.
+
+LEMBRETE_COOKIE = "zaq_lembrar"
+
+
+def _hash_lembrete(token: str) -> str:
+    import hashlib
+    return hashlib.sha256((token or "").encode("utf-8")).hexdigest()
+
+
+def lembrar_criar(pool, conta_id: int, membro_id: int, aparelho: str = "") -> str | None:
+    """Registra este aparelho e devolve o token CRU (só ele serve pro cookie).
+
+    Best-effort: se falhar, o vendedor segue logado pela sessão normal — perder o
+    "manter conectado" é chato, derrubar o login por causa disso seria pior."""
+    token = secrets.token_urlsafe(32)
+    try:
+        with pool.connection() as c:
+            c.execute(
+                """insert into cockpit_lembrete (conta_id, membro_id, token_hash, aparelho)
+                   values (%s,%s,%s,%s)""",
+                (int(conta_id), int(membro_id), _hash_lembrete(token),
+                 (aparelho or "")[:120]))
+            c.commit()
+    except Exception as e:  # noqa: BLE001
+        _log.warning("lembrar_criar falhou (membro %s): %s: %s", membro_id, type(e).__name__, e)
+        return None
+    return token
+
+
+def lembrar_validar(pool, token: str) -> dict | None:
+    """O cookie ainda vale? Devolve {conta_id, membro_id, papel} ou None.
+
+    RELÊ O MEMBRO a cada uso, de propósito: desativar alguém na Equipe, ou mudar o
+    papel dele, tem que cortar o acesso no request seguinte. Se isto confiasse só na
+    linha do lembrete, um vendedor demitido continuaria entrando pra sempre — que é
+    exatamente o risco de uma sessão sem prazo."""
+    token = (token or "").strip()
+    if not token:
+        return None
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                """update cockpit_lembrete set ultimo_uso=now()
+                    where token_hash=%s and revogado_em is null
+                returning conta_id, membro_id""", (_hash_lembrete(token),)).fetchone()
+            if not r:
+                return None
+            m = c.execute("select papel, ativo from membros where id=%s and conta_id=%s",
+                          (r[1], r[0])).fetchone()
+            c.commit()
+    except Exception as e:  # noqa: BLE001
+        _log.warning("lembrar_validar falhou: %s: %s", type(e).__name__, e)
+        return None
+    if not m or not m[1] or (m[0] or "") not in _PAPEIS_OK:
+        return None
+    return {"conta_id": r[0], "membro_id": r[1], "papel": m[0]}
+
+
+def lembrar_revogar(pool, token: str) -> bool:
+    """Encerra ESTE aparelho (o botão Sair). Os outros continuam."""
+    token = (token or "").strip()
+    if not token:
+        return False
+    try:
+        with pool.connection() as c:
+            n = c.execute(
+                """update cockpit_lembrete set revogado_em=now()
+                    where token_hash=%s and revogado_em is null""",
+                (_hash_lembrete(token),)).rowcount
+            c.commit()
+        return bool(n)
+    except Exception as e:  # noqa: BLE001
+        _log.warning("lembrar_revogar falhou: %s: %s", type(e).__name__, e)
+        return False
+
+
+def lembrar_revogar_membro(pool, conta_id: int, membro_id: int) -> int:
+    """Derruba TODOS os aparelhos do membro — celular perdido, ou desligamento.
+    Escopado por conta: ninguém encerra sessão de membro de outra empresa."""
+    try:
+        with pool.connection() as c:
+            n = c.execute(
+                """update cockpit_lembrete set revogado_em=now()
+                    where conta_id=%s and membro_id=%s and revogado_em is null""",
+                (int(conta_id), int(membro_id))).rowcount
+            c.commit()
+        return n or 0
+    except Exception as e:  # noqa: BLE001
+        _log.warning("lembrar_revogar_membro falhou: %s: %s", type(e).__name__, e)
+        return 0
+
+
+def tem_senha(pool, conta_id: int, membro_id: int) -> bool:
+    """Este membro já criou senha? Decide se a tela de "crie sua senha" aparece
+    depois do link mágico."""
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                "select coalesce(senha_hash,'') <> '' from membros where id=%s and conta_id=%s",
+                (int(membro_id), int(conta_id))).fetchone()
+    except Exception:  # noqa: BLE001
+        return True          # na dúvida NÃO insiste em pedir senha
+    return bool(r and r[0])
+
+
+def definir_senha(pool, conta_id: int, membro_id: int, senha_txt: str) -> dict:
+    """Grava a senha do membro na MESMA coluna do login web (migração 072), pra o
+    vendedor ter uma credencial só — Cockpit e painel."""
+    senha_txt = (senha_txt or "").strip()
+    if len(senha_txt) < 8:
+        return {"ok": False, "erro": "A senha precisa de pelo menos 8 caracteres."}
+    if len(senha_txt) > 72:
+        return {"ok": False, "erro": "Senha longa demais (máximo 72 caracteres)."}
+    from contas import senha as _senha
+    try:
+        with pool.connection() as c:
+            n = c.execute("update membros set senha_hash=%s where id=%s and conta_id=%s",
+                          (_senha.hash_senha(senha_txt), int(membro_id), int(conta_id))).rowcount
+            c.commit()
+    except Exception as e:  # noqa: BLE001
+        _log.warning("definir_senha falhou (membro %s): %s", membro_id, e)
+        return {"ok": False, "erro": "Não deu pra salvar a senha. Tente de novo."}
+    return {"ok": True} if n else {"ok": False, "erro": "Membro não encontrado."}
+
+
 def membro_por_email(pool, email: str) -> dict | None:
     """Acha o membro ATIVO (vendedor/gestor/dono) por e-mail, pro login self-service.
     Devolve {conta_id, membro_id} do 1º match ou None. Não revela nada pra fora — o

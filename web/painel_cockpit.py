@@ -2869,6 +2869,11 @@ def _tela_login(titulo: str, sub: str, email: str = "", erro: str = "",
     corpo = ("<div class=login><div class=marca>Zaq</div>"
              f"<h2>{esc(titulo)}</h2><p>{esc(sub)}</p>"
              f"{aviso}"
+             # UM FORMULÁRIO SÓ, dois botões. Eram dois <form>: o de baixo levava um
+             # e-mail ESCONDIDO, preenchido pelo servidor — ou seja, nunca via o que
+             # a pessoa tinha acabado de digitar no de cima. Pedir link mandava pra
+             # endereço vazio, e o campo vazio ainda estourava um 422 em JSON cru na
+             # cara do vendedor. Com um form só, os dois botões leem o mesmo campo.
              f"<form method=post action='{_BASE}/login'>"
              f"<input name=email type=email required placeholder='seu e-mail' "
              f"autocomplete=username value='{esc(email)}'>"
@@ -2878,11 +2883,11 @@ def _tela_login(titulo: str, sub: str, email: str = "", erro: str = "",
              # que originou isto foi justamente não ter que entrar de novo.
              "<label class=chk><input type=checkbox name=lembrar value=1 checked>"
              "Manter conectado neste aparelho</label>"
-             "<button class=go type=submit>Entrar</button></form>"
-             f"<form method=post action='{_BASE}/login'>"
-             f"<input type=hidden name=email value='{esc(email)}'>"
-             "<input type=hidden name=so_link value=1>"
-             "<button class=go2 type=submit>Entrar por link no e-mail</button></form>"
+             "<button class=go type=submit>Entrar</button>"
+             # `name` no BOTÃO: só é enviado quando ELE é o clicado. É assim que o
+             # servidor sabe qual das duas portas a pessoa escolheu, sem JS.
+             "<button class=go2 type=submit name=so_link value=1>"
+             "Entrar por link no e-mail</button></form>"
              "<small>Esqueceu a senha? Use o link por e-mail e crie outra ao entrar.</small>"
              "</div>")
     return _page("Zaq — entrar", corpo)
@@ -2908,12 +2913,20 @@ def cockpit_login_form(request: Request, enviado: str = "", expirou: str = ""):
 
 
 @router.post("/cockpit/login")
-def cockpit_login(request: Request, email: str = Form(...), senha: str = Form(""),
+def cockpit_login(request: Request, email: str = Form(""), senha: str = Form(""),
                   lembrar: str = Form(""), so_link: str = Form("")):
     """Duas portas no mesmo endereço: com senha entra na hora; sem senha (ou pelo
-    botão "entrar por link") cai no e-mail de sempre."""
-    pool = get_pool()
+    botão "entrar por link") cai no e-mail de sempre.
+
+    NENHUM campo é obrigatório aqui, de propósito. Com `Form(...)` o FastAPI devolve
+    422 em JSON cru — e foi o que o vendedor viu na tela do celular: um arquivo
+    `login.json` pra baixar. Validação de formulário é resposta de tela, não de API."""
+    # valida ANTES de pegar o pool: formulário vazio não precisa de banco.
     email = (email or "").strip()
+    if not email:
+        return _tela_login("Seus leads, no bolso", "Entre com seu e-mail e senha.",
+                           erro="Digite seu e-mail.")
+    pool = get_pool()
     if senha and not so_link:
         from contas import equipe as _equipe
         ctx = _equipe.autenticar(pool, email, senha)

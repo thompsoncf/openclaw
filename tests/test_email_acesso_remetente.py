@@ -143,3 +143,60 @@ def test_convite_cai_na_empresa_quando_o_zaq_nao_manda(espiao):
 def test_convite_sem_ninguem_pra_mandar_devolve_false(espiao):
     espiao["zaq_ok"] = espiao["empresa_ok"] = False
     assert _convite() is False
+
+
+# ------------------------------------------- a tela de entrada (form e validação)
+#
+# Em 18/08 o vendedor tocou em "Entrar por link no e-mail" e o celular BAIXOU UM
+# ARQUIVO: `login.json`, com {"detail":[{"type":"missing","loc":["body","email"]}]}.
+# Dois defeitos no mesmo lugar:
+#
+#   1. eram DOIS <form>. O de baixo levava um e-mail ESCONDIDO, preenchido pelo
+#      servidor — nunca via o que a pessoa acabara de digitar no de cima. Mesmo se
+#      tivesse respondido, o link iria pra endereço vazio;
+#   2. `email: str = Form(...)` fazia o FastAPI devolver 422 em JSON cru. Validação
+#      de formulário é resposta de TELA; JSON de API na mão do vendedor é um beco.
+
+def _app():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from starlette.middleware.sessions import SessionMiddleware
+    from web.painel_cockpit import router
+    app = FastAPI()
+    app.add_middleware(SessionMiddleware, secret_key="teste")
+    app.include_router(router)
+    return TestClient(app)
+
+
+def test_a_tela_tem_um_form_so():
+    """Os dois botões precisam ler o MESMO campo de e-mail."""
+    html = _app().get("/cockpit/login").text
+    assert html.count("<form") == 1
+
+
+def test_o_botao_de_link_se_identifica_sozinho():
+    """`name` no botão: só vai junto quando ELE é o clicado. É como o servidor sabe
+    qual porta a pessoa escolheu, sem uma linha de JS."""
+    html = _app().get("/cockpit/login").text
+    assert "name=so_link value=1" in html
+
+
+def test_nao_existe_mais_email_escondido():
+    """Era ele que mandava vazio para o link."""
+    assert "type=hidden name=email" not in _app().get("/cockpit/login").text
+
+
+def test_pedir_link_sem_email_devolve_TELA_e_nao_json(monkeypatch):
+    """O defeito exato do print: nunca mais um `login.json` pra baixar."""
+    r = _app().post("/cockpit/login", data={"so_link": "1"}, follow_redirects=False)
+    assert r.status_code == 200
+    assert "text/html" in r.headers.get("content-type", "")
+    assert "Digite seu e-mail" in r.text
+    assert "detail" not in r.text[:200]
+
+
+def test_senha_vazia_tambem_nao_estoura():
+    """Quem toca em Entrar sem preencher nada vê a tela, não um erro de API."""
+    r = _app().post("/cockpit/login", data={"email": "", "senha": ""},
+                    follow_redirects=False)
+    assert r.status_code == 200 and "Digite seu e-mail" in r.text

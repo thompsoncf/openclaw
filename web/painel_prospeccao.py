@@ -7061,10 +7061,31 @@ _CSS = """<style>
 # de progresso). O <script> entra no _CSS, então TODA tela de prospecção ganha a
 # navegação instantânea sem recarregar sensação de lentidão; o back segue rendrizando.
 _NAV_ASSETS = """<style>
-.pnavbar{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin:.2rem 0 1.1rem}
+/* NUNCA quebra linha. Era `flex-wrap:wrap`, e com 8 abas (996px medidos) a última
+   descia pra segunda linha assim que o viewport caía abaixo de ~1030px — zoom de 125%
+   numa tela de 1280, janela não maximizada, tablet. Rolagem lateral em vez de quebra:
+   funciona em qualquer largura e a próxima aba que entrar não quebra nada de novo.
+
+   DUAS CAIXAS, e não uma: as abas rolam dentro de `.pnav-rol`, e o ⚙️ fica FORA dela.
+   Numa caixa só, duas coisas quebravam — o esfumado da borda direita apagaria o próprio
+   ⚙️ (que mora encostado ali), e a engrenagem sairia de vista junto com as abas quando a
+   pessoa rolasse. Configuração tem que estar sempre alcançável. */
+.pnavbar{display:flex;gap:.4rem;flex-wrap:nowrap;align-items:center;margin:.2rem 0 1.1rem}
+.pnav-rol{display:flex;gap:.4rem;flex-wrap:nowrap;align-items:center;min-width:0;
+  overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.pnav-rol::-webkit-scrollbar{display:none}
+.pnav{flex:none}
 .pnav{display:inline-flex;align-items:center;gap:.35rem;font:inherit;font-size:.84rem;font-weight:600;padding:.45rem .8rem;border-radius:9px;border:1px solid var(--borda);color:var(--txt);background:transparent;text-decoration:none;white-space:nowrap;cursor:pointer;line-height:1;box-sizing:border-box;width:auto;margin:0;-webkit-appearance:none;appearance:none;vertical-align:middle;height:auto}
 .pnav:hover{border-color:var(--verde);color:#fff}
 .pnav.on{color:var(--sobre-verde);background:var(--verde);border-color:var(--verde)}
+/* Captar Lead: botão de AÇÃO no cabeçalho do Funil, não aba de navegação. Verde
+   cheio porque é o call-to-action da tela — abrir o painel de captação. */
+.cap-btn{display:inline-flex;align-items:center;gap:.4rem;font:inherit;font-size:.84rem;
+  font-weight:700;padding:.5rem .9rem;border-radius:9px;border:0;cursor:pointer;
+  background:var(--verde);color:var(--sobre-verde);white-space:nowrap;flex:none}
+.cap-btn:hover{background:var(--verde2,var(--verde))}
+/* o ⚙️ encostado à direita, separado das abas de trabalho e fora da rolagem */
+.pnav.cfg{margin-left:auto;padding:.45rem .55rem;flex:none}
 #pnavprog{position:fixed;top:0;left:0;height:3px;width:0;background:var(--verde);box-shadow:0 0 8px var(--verde);z-index:99999;transition:width .3s ease;opacity:0}
 #pnavprog.go{opacity:1}
 /* cercar área no mapa (Captar leads → Google Maps) — acordeão retraído por padrão */
@@ -7133,25 +7154,40 @@ _CSS = _CSS + _NAV_ASSETS + _TIPO_JS
 
 
 def _navbar(active):
-    """Barra de navegação do módulo, na ordem da história. `active` marca a aba atual."""
-    # "Captar Lead" abre o painel de captação embutido no funil (âncora ?captar=1).
-    tabs = [("captar", "🎯 Captar Lead", "/painel/prospeccao?captar=1", False),
-            ("base", "📇 Base", "/painel/prospeccao/base", False),
+    """Barra de navegação do módulo, na ordem da história. `active` marca a aba atual.
+
+    FONTE ÚNICA. A tela do Funil (_KANBAN_TPL) já teve uma cópia desta barra escrita à
+    mão, e as duas divergiram: quando a aba "Quem atacar" nasceu, entrou aqui e ninguém
+    lembrou da cópia — quem estava no Funil não tinha como chegar nela. Se precisar de
+    uma aba nova, é aqui e só aqui.
+
+    "Captar Lead" NÃO é aba: ele apontava pro próprio Funil com o painel de captação
+    aberto (?captar=1), então virou botão no cabeçalho do Funil, onde ele age. O link
+    ?captar=1 continua funcionando pra quem vem de fora ou tem o atalho salvo.
+    """
+    tabs = [("base", "📇 Base", "/painel/prospeccao/base", False),
             ("campanhas", "📣 Campanhas", "/painel/prospeccao/campanhas", True),
             ("radar", "🎯 Quem atacar", "/painel/prospeccao/radar", True),
             ("ia-insta", "✨ IA Insta", "/painel/prospeccao/ia-insta", False),
             ("comunicacao", "💬 Comunicação", "/painel/prospeccao/comunicacao", False),
             ("funil", "🔥 Funil", "/painel/prospeccao", False),
-            ("canais", "⚙️ Canais", "/painel/prospeccao/comunicacao?aba=canais", False)]
-    out = ['<nav class="pnavbar" aria-label="Prospecção">']
+            ("canais", "⚙️", "/painel/prospeccao/comunicacao?aba=canais", False)]
+    # as abas dentro da caixa que rola; o ⚙️ sai dela (ver o CSS do .pnav-rol)
+    out = ['<nav class="pnavbar" aria-label="Prospecção">', '<div class="pnav-rol">']
     for key, label, href, gated in tabs:
+        # .cfg empurra o ⚙️ pra direita (margin-left:auto) e some com o rótulo: quem
+        # configura canal vai lá uma vez; quem trabalha usa as outras seis todo dia.
         extra = " cfg" if key == "canais" else ""
         # ativo dinâmico: a var de render `nav_ativo` sobrepõe o default estático
         # `active` (ex.: na Comunicação, Canais fica ativo quando aba=canais).
         cond = "{% if (nav_ativo|default('" + active + "')) == '" + key + "' %} on{% endif %}"
-        a = '<a class="pnav' + cond + extra + '" href="' + href + '">' + label + '</a>'
+        titulo = ' title="Canais" aria-label="Canais"' if key == "canais" else ""
+        a = ('<a class="pnav' + cond + extra + '"' + titulo + ' href="' + href + '">'
+             + label + '</a>')
         if gated:  # Campanhas: gestão vê tudo; vendedor vê as em que é responsável
             a = "{% if gerencia or caps.vendas %}" + a + "{% endif %}"
+        if key == "canais":       # fecha a caixa que rola ANTES da engrenagem
+            out.append("</div>")
         out.append(a)
     out.append("</nav>")
     return "\n".join(out)
@@ -7755,20 +7791,17 @@ function baseTirarCheck(){
 
 _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 <div class="pw">
-  <nav class="pnavbar" aria-label="Prospecção">
-    <button type="button" class="pnav" onclick="capToggle()">🎯 Captar Lead</button>
-    <a class="pnav" href="/painel/prospeccao/base">📇 Base</a>
-    {% if gerencia or caps.vendas %}<a class="pnav" href="/painel/prospeccao/campanhas">📣 Campanhas</a>{% endif %}
-    <a class="pnav" href="/painel/prospeccao/ia-insta">✨ IA Insta</a>
-    <a class="pnav" href="/painel/prospeccao/comunicacao">💬 Comunicação</a>
-    <a class="pnav on" href="/painel/prospeccao">🔥 Funil</a>
-    <a class="pnav cfg" href="/painel/prospeccao/comunicacao?aba=canais">⚙️ Canais</a>
-  </nav>
+""" + _navbar('funil') + """
   <div style="display:flex;align-items:flex-start;gap:.6rem;flex-wrap:wrap">
     <div style="flex:1;min-width:170px">
       <h2 class="tt">Prospecção</h2>
       <div class="mut" style="font-size:.82rem;margin-top:.15rem">{% if conta %}<b style="color:var(--verde-claro)">🏢 {{ conta[2] }}</b> · {% endif %}<span id="kb-total-n">{{ total_alvos }}</span> alvo(s){% if total_valor %} · pipeline {{ brl(total_valor) }}{% endif %}{% if n_contextos and n_contextos > 1 %} · <a href="/trocar" style="color:var(--verde-claro)">trocar empresa ⇄</a>{% endif %}</div>
     </div>
+    {# Captar Lead saiu da barra de abas e virou botão AQUI: ele nunca navegou pra lugar
+       nenhum — abre o painel de captação logo abaixo, nesta mesma tela. Como aba ele
+       ocupava 129px da barra apontando pro próprio Funil; como botão fica em evidência,
+       ao lado do título, e a barra ganhou o espaço de volta. #}
+    <button type="button" class="cap-btn" onclick="capToggle()">🎯 Captar Lead</button>
   </div>
 
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}

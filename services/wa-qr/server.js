@@ -1882,12 +1882,38 @@ async function iniciarSessao (contaId) {
       // pode apagar nada — e reconectar aqui vira uma guerra de sessões, cada uma
       // derrubando a outra em loop até o WhatsApp bloquear a conta.
       if (code === DisconnectReason.connectionReplaced) {
+        // ESTE 440 é da sessão de agora ou de uma encarnação já superada?
+        //
+        // A pergunta não é acadêmica. O `_descartado` do topo deste handler só
+        // barra o socket que passou pelo descartarSocket — e o velho ESCAPA dele
+        // quando `s.sock` já estava null na hora em que a sessão nova subiu (o
+        // próprio caminho do 440 zera `s.sock`). Aí o socket velho descobre o 440
+        // tarde, com uma sessão nova de pé, e sai mexendo no que não é mais dele:
+        // zera o `s.sock` de quem entrou e solta o aluguel recém-pego.
+        //
+        // Medido em produção em 18/08, conta 34, quatro voltas em vinte minutos:
+        //     iniciarSessao: socket criado, registrando listeners
+        //     trava: soltei a conta          <- este handler, do socket velho
+        //     WhatsApp conectado
+        //     vigia: sessão estava conectada SEM trava — aluguel retomado
+        //
+        // O `deveSoltarTravaNo440` sozinho não cobria: ele olha `s.iniciando`, que
+        // volta a false no `finally` do iniciarSessao — ou seja, assim que os
+        // listeners são registrados, ANTES de a conexão abrir. O 440 do velho cai
+        // exatamente nesse vão, e por isso o guard nunca apareceu no log.
+        const eraOAtual = socketAtual(s, sock)
+        descartarSocket(sock, contaId, 'substituida_por_outra_sessao')
+        if (!eraOAtual) {
+          log.info({ contaId },
+            '440 de socket já superado — o estado e o aluguel ficam com quem entrou')
+          return
+        }
         s.status = 'desconectado'
         s.qr = null
         // "sem apagar nada" vale pro que está no BANCO (credencial, histórico). O que
         // está na memória tem que sair: este socket não volta mais, e os laços da
         // agenda continuavam batendo no Postgres de 20 em 20min por uma sessão morta.
-        descartarSocket(sock, contaId, 'substituida_por_outra_sessao')
+        // (o socket em si já foi descartado acima, antes do teste de encarnação)
         pararTimersDaAgenda(s)
         s.sock = null
         // esta encarnação acabou: quanto ela durou já foi contabilizado (sessaoFirme),

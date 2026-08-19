@@ -80,6 +80,53 @@ def _prazo(ev: dict, agora) -> dict:
     return {"rot": rot, "horas": horas, "urgente": horas < 24}
 
 
+def _pendencias_rot(p: dict, nomes: dict[int, str]) -> dict | None:
+    """As pendências da agenda já em texto, prontas pro card de aviso.
+
+    Devolve None quando não há nada — é isso que faz o card SUMIR sozinho em vez de
+    ficar dizendo "0 pendências", que é ruído que se aprende a ignorar.
+
+    Cada linha carrega o mês (`mes`) porque o botão da linha abre o calendário no
+    mês certo: mandar alguém "conferir 10/07/2027" e abrir agosto de 2026 é a mesma
+    coisa que não avisar."""
+    if not p or not p.get("total"):
+        return None
+
+    def _mes(ev):
+        return f"{ev['inicio'].astimezone(ag.BRT):%Y-%m}"
+
+    def _quem(ev):
+        return nomes.get(ev.get("membro_id")) or ""
+
+    choques = [{
+        "dia_iso": c["dia"].isoformat(),
+        "dia_rot": c["dia"].strftime("%d/%m/%Y"),
+        "mes": f"{c['dia']:%Y-%m}",
+        "quantos": len(c["eventos"]),
+        "eventos": [{
+            "id": e["id"], "titulo": e["titulo"],
+            "hora": e["inicio"].astimezone(ag.BRT).strftime("%H:%M"),
+            "pre": e.get("status") == ag.PRE_RESERVADO,
+            "quem": _quem(e),
+        } for e in c["eventos"]],
+    } for c in p["choques"]]
+
+    horas = [{
+        "id": e["id"], "titulo": e["titulo"], "mes": _mes(e),
+        "quando": ag.fmt_hora(e), "quem": _quem(e),
+        "data_iso": e["inicio"].astimezone(ag.BRT).date().isoformat(),
+    } for e in p["horas"]]
+
+    orfas = [{
+        "id": e["id"], "titulo": e["titulo"], "mes": _mes(e),
+        "quando": ag.fmt_hora(e),
+        "pre": e.get("status") == ag.PRE_RESERVADO,
+        "data_iso": e["inicio"].astimezone(ag.BRT).date().isoformat(),
+    } for e in p["sem_vendedor"]]
+
+    return {"total": p["total"], "choques": choques, "horas": horas, "sem_vendedor": orfas}
+
+
 def _ficha_rot(f: dict | None) -> dict | None:
     """A ficha do evento já formatada pro JS — valores em texto, nada de centavos
     crus na tela. None quando o compromisso não veio de orçamento nenhum (marcado
@@ -530,6 +577,10 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
     # Card de compartilhar os convites de um evento (?convite_ev=<id>; aceita também
     # ?convite=<token> por retrocompat, resolvendo pro evento dele).
     share = _montar_share(request, pool, conta_id, convite_ev, convite)
+    # PENDÊNCIAS: só pra quem vende data. Nos outros nichos as três coisas que ela
+    # mede ou não existem (tipo de festa, hora chutada) ou não são problema (dois
+    # compromissos no mesmo dia é o normal de quem marca reunião).
+    pend = _pendencias_rot(ag.pendencias(pool, conta_id, agora), nomes) if vende_data else None
     hist = cv.listar_historico(pool, conta_id, dias=7)
     historico = _preparar_historico(hist["itens"], hoje)
     fila = _preparar_fila(cv.listar_fila(pool, conta_id, agora), agora)
@@ -544,7 +595,7 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
                    mes_hoje=f"{hoje.year:04d}-{hoje.month:02d}",
                    hoje_iso=hoje.isoformat(), abrir_novo=(novo == "1"),
                    cfg=cfg, feed_url=feed_url, share=share, seguradas=seguradas,
-                   confirmadas=confirmadas,
+                   confirmadas=confirmadas, pend=pend,
                    vende_data=vende_data, pessoas=pessoas, p_id=p_id,
                    rot=(_ROT_EVENTO if vende_data else _ROT_PADRAO),
                    aviso=request.session.pop("agenda_aviso", None))
@@ -1394,6 +1445,23 @@ _CSS_CRU = """
 .ag-aviso{background:rgba(29,158,117,.14);border:1px solid var(--verde);color:#bfeeda;border-radius:10px;padding:.6rem .8rem;font-size:.88rem;margin-bottom:14px}
 .hint{font-size:.78rem;color:var(--txt-mut);margin-top:8px;line-height:1.45}
 /* card de compartilhar convite */
+/* PENDÊNCIAS — o que precisa de conferência humana, no topo. Coral porque é a cor
+   que a agenda já usa pro que exige ação (parcela vencida, prazo apertando), e não
+   uma cor nova só pra este card. Some sozinho quando zera: card que fica dizendo
+   "0 pendências" vira paisagem, e paisagem não avisa ninguém. */
+.pend{background:linear-gradient(180deg,var(--coral-fundo),var(--card));border:1px solid var(--coral-borda);border-radius:14px;padding:14px 16px 6px;margin-bottom:18px}
+.pend-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:4px}
+.pend-h h2{font-size:1rem;margin:0;color:var(--coral)}
+.pend-sub{font-size:.74rem;color:var(--mut)}
+.pend-l{display:flex;align-items:center;gap:10px;padding:11px 0;border-top:1px solid var(--borda)}
+.pend-ic{flex:0 0 auto;font-size:.95rem}
+.pend-t{min-width:0;flex:1}
+.pend-t b{display:block;font-size:.88rem;line-height:1.35}
+.pend-t small{display:block;font-size:.75rem;color:var(--mut);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pend-b{flex:0 0 auto;border:1px solid var(--borda);background:var(--card2);color:var(--txt);border-radius:8px;padding:5px 12px;font-size:.78rem;font-weight:600;text-decoration:none;white-space:nowrap}
+.pend-b.forte{background:var(--verde);color:var(--ink);border-color:var(--verde)}
+.pend-b:hover{border-color:var(--verde)}
+@media(max-width:560px){.pend-t small{white-space:normal}}
 .share{background:linear-gradient(180deg,rgba(29,158,117,.10),var(--card));border:1px solid var(--verde);border-radius:14px;padding:16px 18px;margin-bottom:18px}
 .share h2{font-size:.95rem;margin:0 0 4px;color:var(--txt)}
 .share p{font-size:.86rem;color:var(--txt-mut);margin:0 0 12px}
@@ -2421,6 +2489,44 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       </div>
       {% endfor %}
     </div>
+  </div>
+  {% endif %}
+  {% if pend %}
+  <div class="pend">
+    <div class="pend-h">
+      <h2>⚠️ {{ pend.total }} coisa{{ 's' if pend.total != 1 }} pra conferir</h2>
+      <span class="pend-sub">some daqui sozinho quando você resolver</span>
+    </div>
+    {% for c in pend.choques %}
+    <div class="pend-l alta">
+      <span class="pend-ic" aria-hidden="true">🔴</span>
+      <div class="pend-t">
+        <b>{{ c.dia_rot }} — {{ c.quantos }} eventos no mesmo dia</b>
+        <small>{% for e in c.eventos %}{{ e.hora }} {{ e.titulo }}{% if e.pre %} (segurado){% endif %}{% if e.quem %} · {{ e.quem }}{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</small>
+      </div>
+      <a class="pend-b forte" href="/painel/agenda?m={{ c.mes }}#d{{ c.dia_iso }}">Abrir o dia</a>
+    </div>
+    {% endfor %}
+    {% if pend.horas %}
+    <div class="pend-l">
+      <span class="pend-ic" aria-hidden="true">🕐</span>
+      <div class="pend-t">
+        <b>{{ pend.horas|length }} horário{{ 's' if pend.horas|length != 1 }} a conferir</b>
+        <small>o sistema chutou a hora e ninguém confirmou: {% for h in pend.horas[:4] %}{{ h.quando }} {{ h.titulo }}{% if not loop.last %} · {% endif %}{% endfor %}{% if pend.horas|length > 4 %} · +{{ pend.horas|length - 4 }}{% endif %}</small>
+      </div>
+      <a class="pend-b" href="/painel/agenda?m={{ pend.horas[0].mes }}#d{{ pend.horas[0].data_iso }}">Ver o primeiro</a>
+    </div>
+    {% endif %}
+    {% if pend.sem_vendedor %}
+    <div class="pend-l">
+      <span class="pend-ic" aria-hidden="true">👤</span>
+      <div class="pend-t">
+        <b>{{ pend.sem_vendedor|length }} sem vendedor</b>
+        <small>ninguém está tocando: {% for o in pend.sem_vendedor[:4] %}{{ o.quando }} {{ o.titulo }}{% if o.pre %} (segurado){% endif %}{% if not loop.last %} · {% endif %}{% endfor %}{% if pend.sem_vendedor|length > 4 %} · +{{ pend.sem_vendedor|length - 4 }}{% endif %}</small>
+      </div>
+      <a class="pend-b" href="/painel/agenda?m={{ pend.sem_vendedor[0].mes }}#d{{ pend.sem_vendedor[0].data_iso }}">Ver o primeiro</a>
+    </div>
+    {% endif %}
   </div>
   {% endif %}
   <div class="ag-top">

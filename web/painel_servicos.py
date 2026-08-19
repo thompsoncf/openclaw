@@ -34,7 +34,8 @@ from core.brain import Brain
 from db.conexao import get_pool
 from finance.cnpj_info import consultar_cnpj
 from finance import (agenda as ag, contrato as ctr, desconto as dsc, empresa as emp,
-                     icones_servico as ics, vendas, servicos_catalogo as scat)
+                     icones_servico as ics, proposta_email as pmail, vendas,
+                     servicos_catalogo as scat)
 from web.portal import _render, _env, conta_logada, brl
 
 router = APIRouter()
@@ -114,6 +115,24 @@ def _garantir_tabela(c):
     c.execute("alter table orcamentos drop constraint if exists orcamentos_status_check")
     c.execute("""alter table orcamentos add constraint orcamentos_status_check
         check (status in ('rascunho','enviado','negociando','aprovada','fechado','perdido'))""")
+    # registro dos envios da proposta por e-mail (migração 178). Mesmo motivo das
+    # linhas acima: o deploy não roda migração sozinho, e sem a tabela o histórico
+    # some em silêncio — o botão manda e a tela diz "nunca enviado".
+    c.execute("""
+        create table if not exists orcamento_envios (
+            id            bigserial primary key,
+            conta_id      bigint      not null,
+            orcamento_id  bigint      not null,
+            canal         text        not null default 'email',
+            destino       text        not null default '',
+            remetente     text        not null default '',
+            ok            boolean     not null default true,
+            erro          text        not null default '',
+            por           text        not null default '',
+            criado_em     timestamptz not null default now());
+        create index if not exists idx_orc_envios_orcamento
+            on orcamento_envios (orcamento_id, criado_em desc);
+    """)
     c.commit()
 
 
@@ -786,7 +805,17 @@ def painel_servicos_lista(request: Request):
                               and e.status = 'pre_reservado'),
                           evento,
                           (select e.status from eventos_agenda e
-                            where e.id = orcamentos.evento_agenda_id)"""
+                            where e.id = orcamentos.evento_agenda_id),
+                          -- o último ENVIO da proposta por e-mail. Sem isto, "será
+                          -- que já mandei pra Carla?" só se responde abrindo o
+                          -- Gmail — e na dúvida se manda duas vezes.
+                          -- o APELIDO não é enfeite: sem ele a saída fica com duas
+                          -- colunas chamadas `criado_em` (esta e a do orçamento) e o
+                          -- `order by criado_em` de baixo vira ambíguo — a lista
+                          -- inteira do funil devolvia 500.
+                          (select ev.criado_em from orcamento_envios ev
+                            where ev.orcamento_id = orcamentos.id and ev.ok
+                            order by ev.criado_em desc limit 1) as enviado_em"""
         if papel == "vendedor" and membro_id:
             rows = c.execute(
                 _cols + """ from orcamentos where conta_id=%s and criado_por=%s
@@ -831,6 +860,7 @@ def painel_servicos_lista(request: Request):
         "data": vendas.estado_da_data(
             status=r[8], modo=r[13] or "recorrente", evento=r[21],
             evento_status=r[22], pre_reserva_ate=r[20]),
+        "enviado_em": r[23].astimezone(ag.BRT).strftime("%d/%m %H:%M") if r[23] else "",
     } for r in rows]
     return JSONResponse({"itens": itens})
 
@@ -928,6 +958,161 @@ def painel_servicos_sinal_recebido(request: Request, dados: SinalIn):
     if not r.get("ok"):
         return JSONResponse({"erro": r.get("erro", "falha ao confirmar")}, status_code=404)
     return JSONResponse(r)
+
+
+# ============================================== MANDAR A PROPOSTA POR E-MAIL
+#
+# O funil sabia gerar o link e abrir o PDF; mandar era por fora, na mão. E o
+# vendedor não tinha como saber se já tinha mandado — na dúvida, mandava de novo.
+#
+# Por qual caixa o e-mail sai é decisão de fundo e mora em finance/proposta_email:
+# a proposta é mensagem PRA CLIENTE, e ele vai apertar Responder.
+
+
+def _dados_do_envio(pool, conta_id: int, orc_id: int) -> dict | None:
+    """O orçamento, do jeito que a tela de envio precisa. None se não é da conta."""
+    with pool.connection() as c:
+        _garantir_tabela(c)
+        r = c.execute(
+            """select coalesce(cliente,''), coalesce(empresa,''), coalesce(email,''),
+                      numero, coalesce(modo,'recorrente'), token, evento,
+                      coalesce(primeiro_ano_centavos, setup_centavos, 0), criado_em
+                 from orcamentos where id=%s and conta_id=%s""",
+            (orc_id, conta_id)).fetchone()
+        if not r:
+            return None
+        token = r[5]
+        if not token:
+            # proposta antiga, de antes de o token existir. A listagem do funil já
+            # preenche na passagem; gerar aqui também é o mesmo UPDATE, e evita que
+            # o botão dependa de a pessoa ter carregado a lista antes.
+            token = c.execute(
+                """update orcamentos set token = substr(md5(random()::text || id::text
+                     || clock_timestamp()::text), 1, 22)
+                   where id=%s and conta_id=%s returning token""",
+                (orc_id, conta_id)).fetchone()[0]
+            c.commit()
+    return {"cliente": r[0], "empresa_cli": r[1], "email": r[2], "numero": r[3],
+            "modo": r[4], "token": token, "evento": r[6] or {}, "total": r[7],
+            "criado_em": r[8]}
+
+
+def _resumo_do_envio(d: dict) -> str:
+    """A linha discreta embaixo do botão do e-mail: do que se trata, sem abrir.
+
+    A DATA EM QUE FOI GERADO entra aqui de propósito. Proposta tem validade na
+    cabeça de quem recebe, e um cliente que acha o e-mail duas semanas depois
+    precisa saber se aquilo ainda é de hoje — sem ter que perguntar."""
+    ev = d.get("evento") or {}
+    partes = []
+    if ev.get("tipo"):
+        partes.append(str(ev["tipo"]))
+    if ev.get("data"):
+        partes.append(ctr.data_br(ev["data"]))
+    if d.get("total"):
+        partes.append(brl(d["total"]))
+    if d.get("criado_em"):
+        partes.append(f"gerado em {d['criado_em'].strftime('%d/%m/%Y')}")
+    return " · ".join(partes)
+
+
+@router.get("/painel/servicos/email/{orc_id}")
+def painel_servicos_email(request: Request, orc_id: int):
+    """O que a tela de envio abre preenchido — e por qual caixa vai sair.
+
+    O remetente é resolvido AQUI, antes de mandar, porque o mesmo botão se
+    comporta diferente em duas empresas: a que tem caixa configurada e a que não
+    tem. Sem dizer, o vendedor descobriria pelo cliente reclamando que respondeu e
+    ninguém viu."""
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    pool = get_pool()
+    d = _dados_do_envio(pool, conta[0], int(orc_id))
+    if not d:
+        return JSONResponse({"erro": "orçamento não encontrado"}, status_code=404)
+    dados_emp = emp.obter_dados_empresa(pool, conta[0]) or {}
+    nome_emp = (dados_emp.get("nome_fantasia") or dados_emp.get("razao_social")
+                or conta[2] or "")
+    rem = pmail.remetente(pool, conta[0], dados_emp.get("email_empresa") or "")
+    envios = pmail.historico(pool, conta[0], int(orc_id))
+    return JSONResponse({
+        "para": d["email"],
+        "cliente": d["cliente"] or d["empresa_cli"],
+        "assunto": pmail.assunto_padrao(d["numero"], nome_emp, d["modo"]),
+        "mensagem": pmail.texto_padrao(d["cliente"] or d["empresa_cli"], d["modo"]),
+        "link": f"{request.base_url.scheme}://{request.base_url.netloc}/proposta/{d['token']}",
+        "resumo": _resumo_do_envio(d),
+        "empresa": nome_emp,
+        "remetente": rem,
+        "envios": [{"quando": e["quando"].strftime("%d/%m %H:%M"), "ok": e["ok"],
+                    "destino": e["destino"]} for e in envios],
+    })
+
+
+class EnviarEmailIn(BaseModel):
+    id: int
+    para: str = ""
+    assunto: str = ""
+    mensagem: str = ""
+
+
+@router.post("/painel/servicos/enviar-email")
+def painel_servicos_enviar_email(request: Request, dados: EnviarEmailIn):
+    """Manda, registra o que aconteceu e devolve o link como plano B.
+
+    QUEM PODE: o mesmo gate da aba (dono, gestor e vendedor). É o vendedor que
+    fala com o cliente e a proposta é dele — travar isso mandaria ele pedir pro
+    dono apertar um botão.
+
+    O E-MAIL DIGITADO FICA SALVO no orçamento quando ele não tinha nenhum. Sem
+    isso, a mesma pessoa redigitaria o endereço a cada envio, e o orçamento
+    seguiria sem o dado que o contrato depois vai precisar.
+    """
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    pool = get_pool()
+    d = _dados_do_envio(pool, conta[0], int(dados.id))
+    if not d:
+        # o 404 vem ANTES da checagem do e-mail: orçamento de outra conta não pode
+        # se denunciar respondendo "confira o e-mail" em vez de "não existe".
+        return JSONResponse({"erro": "orçamento não encontrado"}, status_code=404)
+    # sem `para` no corpo vale o que está gravado no orçamento — é o caso de quem
+    # abriu a tela e apertou Enviar sem tocar em nada.
+    para = (dados.para or "").strip() or d["email"]
+    if "@" not in para or "." not in para.split("@")[-1]:
+        return JSONResponse({"erro": "Confira o e-mail do cliente."}, status_code=400)
+    dados_emp = emp.obter_dados_empresa(pool, conta[0]) or {}
+    nome_emp = (dados_emp.get("nome_fantasia") or dados_emp.get("razao_social")
+                or conta[2] or "")
+    link = f"{request.base_url.scheme}://{request.base_url.netloc}/proposta/{d['token']}"
+    assunto = (dados.assunto or "").strip() or pmail.assunto_padrao(
+        d["numero"], nome_emp, d["modo"])
+    mensagem = (dados.mensagem or "").strip() or pmail.texto_padrao(
+        d["cliente"] or d["empresa_cli"], d["modo"])
+    html, texto = pmail.montar(
+        mensagem=mensagem, link=link, numero=d["numero"], empresa=nome_emp,
+        telefone=dados_emp.get("telefone") or "",
+        email_empresa=dados_emp.get("email_empresa") or "",
+        resumo=_resumo_do_envio(d), modo=d["modo"])
+    r = pmail.enviar(pool, conta[0], destino=para, assunto=assunto, html=html,
+                     texto=texto, empresa=nome_emp,
+                     reply_to=dados_emp.get("email_empresa") or "")
+    membro_id, _papel = _ator(request)
+    pmail.registrar(pool, conta[0], int(dados.id), destino=para,
+                    remetente_usado=r["remetente"], ok=r["ok"], erro=r["erro"],
+                    por=str(membro_id or "dono"))
+    if not d["email"]:
+        with pool.connection() as c:
+            c.execute("update orcamentos set email=%s where id=%s and conta_id=%s "
+                      "and coalesce(email,'')=''", (para, int(dados.id), conta[0]))
+            c.commit()
+    if not r["ok"]:
+        # o link vai junto do erro: o vendedor tem um cliente esperando, e mandar
+        # pelo WhatsApp resolve o dia dele enquanto a caixa se conserta.
+        return JSONResponse({"erro": r["erro"], "link": link}, status_code=502)
+    return JSONResponse({"ok": True, "remetente": r["remetente"], "para": para})
 
 
 class MarcarDataIn(BaseModel):
@@ -1285,6 +1470,38 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-ic{background:var(--bg); border:1px solid var(--borda); color:var(--txt-mut); cursor:pointer; font-size:.85rem; width:30px; height:30px; padding:0; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; transition:border-color .15s,color .15s,background .15s}
 .oc-ic:hover{color:var(--txt); border-color:var(--verde); background:var(--card)}
 .oc-del:hover{color:#e0857a; border-color:#5c2a27}
+/* mandar por e-mail: destacado do 🔗 e do 📄 porque é o único dos três que AGE —
+   os outros dois preparam, este manda. */
+.oc-ic.mail{color:var(--verde-claro); border-color:var(--neon-borda); background:var(--neon-fundo)}
+.oc-badge.enviado{background:var(--azul-fundo); color:var(--azul); border:1px solid var(--azul-borda);
+  text-transform:none; letter-spacing:0}
+
+/* A TELA DE ENVIO. Modal por cima do funil: o caminho de quem só quer mandar é
+   abrir e apertar Enviar — tudo já vem preenchido. */
+.env-fundo{position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:60;
+  display:none; align-items:flex-start; justify-content:center; padding:6vh 1rem 2rem; overflow:auto}
+.env-fundo.on{display:flex}
+.env-cx{background:var(--card); border:1px solid var(--borda); border-radius:14px;
+  padding:1rem 1.1rem; width:100%; max-width:520px; display:flex; flex-direction:column; gap:.7rem}
+.env-hd{display:flex; align-items:flex-start; justify-content:space-between; gap:1rem}
+.env-hd h3{margin:0; font-size:1.05rem}
+.env-x{background:none; border:0; color:var(--txt-mut); font-size:1rem; cursor:pointer; padding:.1rem .3rem}
+.env-campo{display:flex; flex-direction:column; gap:.25rem}
+.env-campo label{font-size:.72rem; font-weight:600; color:var(--txt-mut)}
+.env-campo input,.env-campo textarea{background:var(--card-2); border:1px solid var(--borda);
+  border-radius:9px; padding:.5rem .6rem; font-size:.9rem; color:var(--txt); font-family:inherit; width:100%}
+.env-campo textarea{min-height:6rem; line-height:1.5; resize:vertical}
+.env-campo input:focus,.env-campo textarea:focus{outline:0; border-color:var(--verde)}
+.env-de{display:flex; gap:.5rem; align-items:flex-start; font-size:.78rem; color:var(--txt-mut);
+  background:var(--card-2); border:1px solid var(--borda); border-radius:9px; padding:.5rem .6rem}
+.env-de b{color:var(--txt)}
+.env-acoes{display:flex; align-items:center; gap:.5rem; flex-wrap:wrap}
+.env-hist{margin-left:auto; font-size:.72rem; color:var(--txt-mut); text-align:right}
+.env-msg{font-size:.84rem; line-height:1.5; border-radius:9px; padding:.55rem .7rem; display:none}
+.env-msg.on{display:block}
+.env-msg.amb{background:var(--ambar-fundo); border:1px solid var(--ambar-borda); color:var(--amar)}
+.env-msg.cor{background:var(--coral-fundo); border:1px solid var(--coral-borda); color:var(--verm)}
+.env-msg.ok{background:var(--neon-fundo); border:1px solid var(--neon-borda); color:var(--verde-claro)}
 .oc-svcform{background:var(--bg); border:1px solid var(--borda); border-radius:10px; padding:.8rem; margin-top:.7rem}
 .oc-empty{border:1px dashed var(--borda); border-radius:12px; padding:1.4rem; text-align:center; margin-top:.6rem}
 .oc-tog{width:42px; height:24px; border-radius:99px; border:none; cursor:pointer; position:relative; background:#2a3550; flex:none}
@@ -1723,6 +1940,31 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   <div id="oc-hist-box"><p class="mut">Carregando...</p></div>
 </div>
 
+</div>
+
+{# A TELA DE ENVIO. Nasce vazia e é preenchida pelo servidor ao abrir — o assunto,
+   a mensagem e o e-mail do cliente já vêm prontos, e por qual caixa vai sair é
+   dito ANTES de apertar. Fora do .oc-wrap pra o fundo escuro cobrir a página. #}
+<div class="env-fundo" id="env-fundo" role="dialog" aria-modal="true" aria-labelledby="env-tt">
+  <div class="env-cx">
+    <div class="env-hd">
+      <h3 id="env-tt">Mandar por e-mail</h3>
+      <button type="button" class="env-x" id="env-x" aria-label="Fechar">✕</button>
+    </div>
+    <div class="env-msg" id="env-msg"></div>
+    <div class="env-campo"><label for="env-para">Para</label>
+      <input id="env-para" type="email" inputmode="email" autocomplete="off" placeholder="email@do-cliente.com"></div>
+    <div class="env-campo"><label for="env-assunto">Assunto</label>
+      <input id="env-assunto" type="text"></div>
+    <div class="env-campo"><label for="env-texto">Mensagem</label>
+      <textarea id="env-texto"></textarea></div>
+    <div class="env-de" id="env-de"></div>
+    <div class="env-acoes">
+      <button type="button" class="oc-btn oc-btn-g" style="width:auto;margin:0" id="env-enviar">Enviar</button>
+      <button type="button" class="oc-pill" id="env-cancelar">Cancelar</button>
+      <span class="env-hist" id="env-hist"></span>
+    </div>
+  </div>
 </div>
 
 <script>window.SERVICO_AVULSO = {{ 'true' if servico_avulso else 'false' }};</script>
@@ -2700,6 +2942,104 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       })
       .catch(function(){alert('Erro de conexão.'); btn.disabled=false; btn.textContent=t;});
   }
+  // ---------------------------------------------- mandar a proposta por e-mail
+  //
+  // O funil sabia gerar o link e abrir o PDF; mandar era por fora, na mão. A tela
+  // abre PREENCHIDA — quem só quer mandar abre e aperta Enviar. Por qual caixa vai
+  // sair é dito antes, porque o mesmo botão se comporta diferente na empresa que
+  // tem caixa configurada e na que não tem (ver finance/proposta_email).
+  var ENV_ID = null, ENV_LINK = '';
+  function envMsg(txt, cls){
+    var el=document.getElementById('env-msg');
+    el.className='env-msg'+(txt?(' on '+(cls||'amb')):'');
+    el.innerHTML=txt||'';
+  }
+  function envFechar(){
+    document.getElementById('env-fundo').classList.remove('on');
+    ENV_ID=null; ENV_LINK='';
+  }
+  function abrirEnvio(id){
+    ENV_ID=id;
+    var fundo=document.getElementById('env-fundo');
+    envMsg('');
+    document.getElementById('env-hist').textContent='';
+    document.getElementById('env-de').textContent='Carregando...';
+    ['env-para','env-assunto','env-texto'].forEach(function(k){
+      document.getElementById(k).value='';});
+    fundo.classList.add('on');
+    fetch('/painel/servicos/email/'+id)
+      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+      .then(function(res){
+        if(!res.ok){envMsg(esc((res.d&&res.d.erro)||'Não consegui abrir.'),'cor'); return;}
+        var d=res.d;
+        ENV_LINK=d.link||'';
+        document.getElementById('env-tt').textContent='Mandar '+esc(d.assunto||'a proposta');
+        document.getElementById('env-para').value=d.para||'';
+        document.getElementById('env-assunto').value=d.assunto||'';
+        document.getElementById('env-texto').value=d.mensagem||'';
+        var rem=d.remetente||{};
+        var de=document.getElementById('env-de');
+        if(rem.caixa==='própria'){
+          de.innerHTML='<span>📮</span><span>Sai de <b>'+esc(d.empresa)+' &lt;'+esc(rem.endereco)+'&gt;</b>'
+            +'<span style="display:block;opacity:.85;margin-top:.15rem">A resposta do cliente cai nessa mesma caixa.</span></span>';
+        } else {
+          de.innerHTML='<span>📮</span><span>Sai pelo Zaq, assinado como <b>'+esc(d.empresa)+'</b>'
+            +'<span style="display:block;opacity:.85;margin-top:.15rem">'
+            +(rem.reply_to?('A resposta volta pra <b>'+esc(rem.reply_to)+'</b>. '):'')
+            +'Pra sair da sua própria caixa, configure em Canais → E-mail.</span></span>';
+        }
+        var n=(d.envios||[]).filter(function(e){return e.ok;});
+        document.getElementById('env-hist').textContent = n.length
+          ? ('enviado '+n.length+'× · último '+n[0].quando) : '';
+        // sem e-mail do cliente o campo abre focado: é o único que falta preencher
+        if(!d.para){
+          envMsg('Este orçamento não tem o e-mail do cliente. <span style="opacity:.85">'
+                +'Escreva aqui e ele fica salvo no orçamento — da próxima vez já vem preenchido.</span>','amb');
+          document.getElementById('env-para').focus();
+        }
+      })
+      .catch(function(){envMsg('Erro de conexão.','cor');});
+  }
+  function enviarEmail(){
+    if(!ENV_ID) return;
+    var b=document.getElementById('env-enviar'), t=b.textContent;
+    b.disabled=true; b.textContent='Enviando...';
+    fetch('/painel/servicos/enviar-email',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id:ENV_ID,
+        para:document.getElementById('env-para').value,
+        assunto:document.getElementById('env-assunto').value,
+        mensagem:document.getElementById('env-texto').value})})
+      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+      .then(function(res){
+        b.disabled=false; b.textContent=t;
+        if(!res.ok){
+          // O LINK VAI JUNTO DO ERRO. O vendedor tem um cliente esperando: mandar
+          // pelo WhatsApp resolve o dia dele enquanto a caixa se conserta.
+          var extra=(res.d&&res.d.link)
+            ? '<span style="display:block;opacity:.9;margin-top:.3rem">O link continua valendo — '
+              +'<a href="#" id="env-copiar" style="color:inherit;text-decoration:underline">copiar</a>'
+              +' e mandar pelo WhatsApp.</span>' : '';
+          envMsg(esc((res.d&&res.d.erro)||'Não consegui enviar.')+extra,'cor');
+          var cp=document.getElementById('env-copiar');
+          if(cp) cp.addEventListener('click',function(ev){
+            ev.preventDefault(); navigator.clipboard.writeText(ENV_LINK); cp.textContent='copiado ✓';});
+          return;
+        }
+        envMsg('✓ Enviado para '+esc(res.d.para||'')+'.','ok');
+        carregarHist();
+        setTimeout(envFechar, 1400);
+      })
+      .catch(function(){b.disabled=false; b.textContent=t; envMsg('Erro de conexão.','cor');});
+  }
+  document.getElementById('env-enviar').addEventListener('click',enviarEmail);
+  document.getElementById('env-cancelar').addEventListener('click',envFechar);
+  document.getElementById('env-x').addEventListener('click',envFechar);
+  document.getElementById('env-fundo').addEventListener('click',function(ev){
+    if(ev.target===this) envFechar();});
+  document.addEventListener('keydown',function(ev){
+    if(ev.key==='Escape' && ENV_ID) envFechar();});
+
   // Apagar proposta do funil. Confirma sempre e nomeia o cliente na pergunta: a
   // lista é densa e o 🗑 fica ao lado do 📄, então "tem certeza?" sozinho não diz
   // qual das cinco linhas vai embora.
@@ -2784,13 +3124,23 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
           be.addEventListener('click',function(){abrir(it.id);});
           right.appendChild(be);
         }
+        // JÁ FOI MANDADA? A pergunta que só se respondia abrindo o Gmail — e na
+        // dúvida se mandava de novo, pro mesmo cliente.
+        if(it.enviado_em){
+          var en=document.createElement('span'); en.className='oc-badge enviado';
+          en.textContent='✉️ enviado '+esc(it.enviado_em);
+          en.title='Último envio por e-mail que deu certo.';
+          right.appendChild(en);
+        }
         if(it.token){
           var lk=window.location.origin+'/proposta/'+it.token;
           var bl=document.createElement('button'); bl.className='oc-ic'; bl.title='Copiar link da proposta'; bl.textContent='🔗';
           bl.addEventListener('click',function(){navigator.clipboard.writeText(lk); bl.textContent='✓'; setTimeout(function(){bl.textContent='🔗';},1200);});
           var bp=document.createElement('button'); bp.className='oc-ic'; bp.title='Abrir / baixar PDF da proposta'; bp.textContent='📄';
           bp.addEventListener('click',function(){window.open('/proposta/'+it.token,'_blank');});
-          right.appendChild(bl); right.appendChild(bp);
+          var bm=document.createElement('button'); bm.className='oc-ic mail'; bm.title='Mandar por e-mail'; bm.textContent='✉️';
+          bm.addEventListener('click',function(){abrirEnvio(it.id);});
+          right.appendChild(bl); right.appendChild(bp); right.appendChild(bm);
         }
         // O CONTRATO é outro documento, com link próprio — e por isso tem botão
         // próprio aqui. Só aparece depois que ele nasce (na APROVAÇÃO da proposta,

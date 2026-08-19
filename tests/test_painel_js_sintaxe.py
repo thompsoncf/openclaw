@@ -132,6 +132,17 @@ def test_o_bloco_do_contrato_esta_mesmo_na_pagina():
         assert fn in js, f"{fn} não está no JS servido"
 
 
+def test_o_funil_sabe_desenhar_o_estado_da_data():
+    """A linha do funil ganhou os quatro estados da data e o botão que conserta os
+    dois ruins. Sem estas funções no JS servido, a resposta da rota chega e ninguém
+    desenha — que é exatamente como uma data fora da agenda passou despercebida."""
+    html = _render("servicos")
+    js = "\n".join(_scripts(html))
+    for fn in ("marcarData", "pintarSemHora"):
+        assert fn in js, f"{fn} não está no JS servido"
+    assert "ev-sem-hora" in html, "o aviso da hora de início sumiu do formulário"
+
+
 def test_o_bloco_do_qr_esta_mesmo_na_pagina():
     """Guarda do teste acima: se o bloco do QR sumir do render, o teste de sintaxe
     fica verde sem ter olhado o código que já quebrou uma vez."""

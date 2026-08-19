@@ -211,8 +211,10 @@ def _iniciar_poller_email() -> None:
                 from finance import funil_regua as _fregua
                 _r = _fregua.rodar(pool)
                 if _r["contas"]:
-                    log.info("poller: ciclo #%d — régua: %d conta(s), %d movido(s), %d simulado(s)",
-                             ciclo, _r["contas"], _r["movidos"], _r["simulados"])
+                    log.info("poller: ciclo #%d — régua: %d conta(s), %d movido(s), "
+                             "%d simulado(s), %d aviso(s), %d escalado(s)",
+                             ciclo, _r["contas"], _r["movidos"], _r["simulados"],
+                             _r["avisos"], _r["escalados"])
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — régua falhou: %s: %s", ciclo, type(e).__name__, e)
 

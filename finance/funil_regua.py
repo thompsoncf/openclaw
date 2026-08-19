@@ -336,7 +336,7 @@ def rodar(pool) -> dict:
     Devolve {contas, movidos, simulados} pro log do ciclo — 0 repetido com conta
     ligada é pista de bug, e sem esse número não haveria como perceber.
     """
-    total = {"contas": 0, "movidos": 0, "simulados": 0}
+    total = {"contas": 0, "movidos": 0, "simulados": 0, "avisos": 0, "escalados": 0}
     with pool.connection() as lockc:
         # Dois workers no Render: sem o lock, os dois aplicam o mesmo gatilho no
         # mesmo lead no mesmo segundo e o histórico ganha a linha em duplicidade.
@@ -345,15 +345,21 @@ def rodar(pool) -> dict:
         try:
             with pool.connection() as c:
                 contas = [r[0] for r in c.execute(
-                    "select conta_id from funil_regua where gatilhos_modo <> 'off'").fetchall()]
+                    "select conta_id from funil_regua "
+                    "where gatilhos_modo <> 'off' or cobranca_modo <> 'off'").fetchall()]
             for conta_id in contas:
                 try:
                     with pool.connection() as c:
                         r = aplicar_gatilhos(c, conta_id)
+                        cob = avaliar_cobranca(c, conta_id)
                         c.commit()
                     total["contas"] += 1
                     total["movidos"] += r["movidos"]
-                    total["simulados"] += r["simulados"]
+                    total["simulados"] += r["simulados"] + cob["simulados"]
+                    total["avisos"] += cob["avisos"]
+                    total["escalados"] += cob["escalados"]
+                    # só depois do commit: ver o comentário em avaliar_cobranca
+                    notificar(pool, conta_id, cob["pendentes"])
                 except Exception:  # noqa: BLE001
                     _log.warning("régua falhou na conta %s", conta_id, exc_info=True)
         finally:
@@ -395,3 +401,224 @@ def sql_encerradas_nao(alias: str = "p") -> str:
     """Açúcar pra `<alias>.status not in <encerradas>` — o filtro de "ainda em jogo",
     que é o mais repetido do produto."""
     return f"{alias}.status not in " + sql_encerradas(alias)
+
+
+# ------------------------------------------------------------------ a cobrança
+def _bolas(c, conta_id: int) -> dict:
+    """O estado da bola de TODOS os leads da conta numa consulta só.
+
+    A versão de um lead por vez (`estado_da_bola`) serve pra ficha e pra teste; aqui
+    seriam 87 consultas a cada 2 minutos, por conta — e o poller ainda tem campanha,
+    lembrete e IA Insta pra rodar na mesma passada.
+    """
+    linhas = c.execute(
+        """select p.id,
+                  max(m.criado_em) filter (where m.direcao='in')  as ult_in,
+                  max(m.criado_em) filter (where m.direcao='out') as ult_out,
+                  min(m.criado_em) as primeira, p.criado_em
+             from prospeccao p
+             left join conversas cv on cv.prospeccao_id = p.id
+             left join mensagens m on m.conversa_id = cv.id
+            where p.conta_id=%s and p.estagio='lead'
+            group by p.id, p.criado_em""", (conta_id,)).fetchall()
+    out = {}
+    for lead_id, ult_in, ult_out, primeira, criado in linhas:
+        if ult_out is None:
+            out[lead_id] = ("sem_resposta", ult_in or primeira or criado)
+        elif ult_in is not None and ult_in > ult_out:
+            out[lead_id] = ("bola_nossa", ult_in)
+        else:
+            out[lead_id] = ("bola_cliente", ult_out)
+    return out
+
+
+def _na_etapa_desde(c, conta_id: int) -> dict:
+    """Desde quando cada lead está na etapa atual. Vem do histórico — que só existe
+    a partir da migração 177; antes disso ninguém tinha como responder isso. Lead
+    sem movimento nenhum conta desde que nasceu."""
+    linhas = c.execute(
+        """select p.id, coalesce(max(fm.criado_em), p.criado_em)
+             from prospeccao p
+             left join funil_movimentos fm on fm.prospeccao_id = p.id and fm.para = p.status
+            where p.conta_id=%s and p.estagio='lead'
+            group by p.id, p.criado_em""", (conta_id,)).fetchall()
+    return dict(linhas)
+
+
+def _avisos_hoje(c, conta_id: int) -> dict:
+    linhas = c.execute(
+        """select membro_id, count(*) from funil_avisos
+            where conta_id=%s and not simulado and criado_em >= date_trunc('day', now())
+            group by membro_id""", (conta_id,)).fetchall()
+    return {m: n for m, n in linhas}
+
+
+def _registrar_aviso(c, conta_id, lead_id, estado, nivel, etapa, ref_em, simulado, membro_id) -> bool:
+    """Grava o aviso e devolve se ele é NOVO. O índice único é por
+    (lead, estado, nível, etapa, referência, simulado): mesmo fato nunca cobra duas
+    vezes, fato novo cobra de novo."""
+    cur = c.execute(
+        """insert into funil_avisos (conta_id, prospeccao_id, estado, nivel, etapa,
+                                     ref_em, simulado, membro_id)
+           values (%s,%s,%s,%s,%s,%s,%s,%s)
+           on conflict do nothing""",
+        (conta_id, lead_id, estado, nivel, etapa or "", ref_em, simulado, membro_id))
+    return cur.rowcount > 0
+
+
+def avaliar_cobranca(c, conta_id: int, agora: datetime | None = None) -> dict:
+    """Uma passada de cobrança. Devolve {avisos, escalados, simulados, represados}.
+
+    `represados` são os que estouraram o prazo mas não viraram aviso porque o
+    vendedor já bateu o teto do dia. Eles não somem: no dia seguinte o teto zera e
+    o aviso sai, porque o dedup é pelo FATO (ref_em), não pela data do aviso.
+    """
+    cfg = config(c, conta_id)
+    modo = cfg["cobranca_modo"]
+    fora = {"avisos": 0, "escalados": 0, "simulados": 0, "represados": 0, "pendentes": []}
+    if modo == "off":
+        return fora
+    agora = agora or datetime.now(timezone.utc)
+    # A empresa fechada não recebe cobrança — e o modo observação obedece a mesma
+    # regra, senão a simulação mentiria sobre o que teria acontecido.
+    if not dentro_da_janela(agora, cfg):
+        return fora
+
+    simulado = modo == "observando"
+    todas = etapas(c, conta_id)
+    encerradas = {e["chave"] for e in todas if e["fase"] in ("fechamento", "pos")} | {"ganho", "perdido"}
+    prazo_etapa = {e["chave"]: e["prazo_min"] for e in todas}
+    bolas, desde, teto_usado = _bolas(c, conta_id), _na_etapa_desde(c, conta_id), _avisos_hoje(c, conta_id)
+    teto = cfg["teto_avisos_dia"]
+
+    leads = c.execute(
+        """select id, status, vendedor_id, coalesce(nullif(empresa,''), 'Um lead')
+             from prospeccao where conta_id=%s and estagio='lead'""", (conta_id,)).fetchall()
+    out = dict(fora, pendentes=[])
+    for lead_id, status, vendedor_id, empresa in leads:
+        if status in encerradas:
+            continue
+        estado, ref = bolas.get(lead_id, (None, None))
+        prazo = prazo_do_estado(estado, cfg) if estado else None
+        etapa_chave = ""
+        # A conversa vem primeiro: "o cliente está esperando" é mais urgente e mais
+        # acionável que "este card não anda". Só quando a conversa está em dia é que
+        # a etapa cobra decisão.
+        if not (ref and prazo and minutos_uteis(ref, agora, cfg) > prazo):
+            estado, prazo = "etapa", prazo_etapa.get(status)
+            ref, etapa_chave = desde.get(lead_id), status
+            if not (ref and prazo and minutos_uteis(ref, agora, cfg) > prazo):
+                continue
+
+        atrasado = minutos_uteis(ref, agora, cfg) - prazo
+        # ESCALA É SEQUENCIAL. O vendedor é cobrado primeiro, sempre — mesmo num lead
+        # que já está atrasado há dias. A versão anterior mandava direto pro gestor
+        # quando o atraso passava de escala_min, e o dono do lead nunca ficava
+        # sabendo: virava fofoca sobre ele em vez de aviso pra ele.
+        nivel = "vendedor"
+        if vendedor_id and not simulado and teto_usado.get(vendedor_id, 0) >= teto:
+            out["represados"] += 1
+            continue
+        if not _registrar_aviso(c, conta_id, lead_id, estado, "vendedor", etapa_chave,
+                                ref, simulado, vendedor_id):
+            # já cobrado: o gestor entra só depois de escala_min SEM NINGUÉM AGIR —
+            # contado desde a cobrança do vendedor, que é o que "mais 4h" quer dizer
+            r = c.execute(
+                """select criado_em from funil_avisos
+                    where prospeccao_id=%s and estado=%s and nivel='vendedor'
+                      and etapa=%s and ref_em=%s and simulado=%s""",
+                (lead_id, estado, etapa_chave or "", ref, simulado)).fetchone()
+            if not r or minutos_uteis(r[0], agora, cfg) <= cfg["escala_min"]:
+                continue
+            nivel = "gestor"
+            if not _registrar_aviso(c, conta_id, lead_id, estado, "gestor", etapa_chave,
+                                    ref, simulado, vendedor_id):
+                continue
+        if simulado:
+            out["simulados"] += 1
+            continue
+        teto_usado[vendedor_id] = teto_usado.get(vendedor_id, 0) + 1
+        out["escalados" if nivel == "gestor" else "avisos"] += 1
+        # A mensagem sai DEPOIS do commit, nunca aqui: avisar dentro da transação
+        # significa mandar push de um aviso que um erro adiante pode desfazer — e
+        # push não tem como ser desfeito.
+        out["pendentes"].append({"lead_id": lead_id, "membro_id": vendedor_id,
+                                 "estado": estado, "nivel": nivel, "empresa": empresa,
+                                 "atraso_min": atrasado})
+    return out
+
+
+_FRASE = {
+    "sem_resposta": "entrou e ainda não recebeu resposta",
+    "bola_nossa": "está esperando sua resposta",
+    "bola_cliente": "sumiu — hora do follow-up",
+    "etapa": "está parado nesta etapa",
+}
+
+
+def _horas(minutos: int) -> str:
+    h = max(1, int(minutos) // 60)
+    return f"{h}h" if h < 24 else f"{h // 24}d"
+
+
+def notificar(pool, conta_id: int, pendentes: list[dict]) -> None:
+    """Push no Cockpit + e-mail, no mesmo caminho que a distribuição já usa pra
+    avisar de lead novo. Best-effort inteiro: a régua não pode derrubar o poller —
+    e um aviso perdido custa menos que um ciclo que não roda.
+
+    Agrupa por vendedor de propósito. Três avisos separados viram três notificações
+    ignoradas; um "3 clientes esperando você" é lido.
+    """
+    if not pendentes:
+        return
+    # ESCALAR É TROCAR DE DESTINATÁRIO. `membro_id` no aviso é o DONO DO LEAD (é o
+    # que o relatório precisa saber depois); mandar o nível 'gestor' pra ele seria
+    # cobrar de novo quem já foi cobrado e nunca contar pra quem devia agir.
+    gestores = []
+    if any(p["nivel"] == "gestor" for p in pendentes):
+        try:
+            with pool.connection() as c:
+                gestores = [r[0] for r in c.execute(
+                    "select id from membros where conta_id=%s and ativo "
+                    "and papel in ('dono','gestor')", (conta_id,)).fetchall()]
+        except Exception:  # noqa: BLE001
+            gestores = []
+    por_membro: dict = {}
+    for p in pendentes:
+        destinos = gestores if p["nivel"] == "gestor" else [p["membro_id"]]
+        for d in destinos:
+            por_membro.setdefault(d, []).append(p)
+    for membro_id, itens in por_membro.items():
+        if not membro_id:
+            continue                      # lead sem dono: o rodízio resolve, não a régua
+        try:
+            with pool.connection() as c:
+                m = c.execute("select coalesce(nullif(nome,''), email), email from membros "
+                              "where id=%s and conta_id=%s", (membro_id, conta_id)).fetchone()
+            if not m:
+                continue
+            nome, email = m
+            escalado = all(i["nivel"] == "gestor" for i in itens)
+            if len(itens) == 1:
+                it = itens[0]
+                quem = "Ninguém respondeu: " if escalado else ""
+                titulo = f"⏱️ {quem}{it['empresa']} {_FRASE.get(it['estado'], 'precisa de alguém')}"
+                corpo = f"há {_horas(it['atraso_min'])} além do combinado · toque pra abrir"
+            else:
+                titulo = (f"⏱️ {len(itens)} leads sem ninguém agir" if escalado
+                          else f"⏱️ {len(itens)} leads esperando você")
+                corpo = " · ".join(i["empresa"] for i in itens[:3])
+            try:
+                from finance import cockpit as _ck
+                _ck.enviar_push(pool, conta_id, membro_id, titulo, corpo, "/cockpit")
+            except Exception:  # noqa: BLE001
+                pass
+            if email and "@" in email:
+                try:
+                    from finance import email_sender as es
+                    es.enviar_aviso(email, titulo,
+                                    corpo + ". Abra o Zaq pra responder.", nome=nome)
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception:  # noqa: BLE001
+            _log.warning("aviso da régua falhou (membro %s)", membro_id, exc_info=True)

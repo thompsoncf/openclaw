@@ -22,7 +22,15 @@ AGORA = datetime(2026, 8, 19, 12, 0, tzinfo=timezone.utc)   # 09:00 em Brasília
 _SQL = """
 create table prospeccao (id bigserial primary key, conta_id bigint, empresa text,
   status text default 'novo', estagio text default 'lead', orcamento_id bigint,
-  atualizado_em timestamptz default now());
+  vendedor_id bigint, atualizado_em timestamptz default now(),
+  criado_em timestamptz default now());
+create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
+  papel text default 'vendedor', ativo boolean default true);
+create table funil_avisos (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
+  estado text, nivel text, etapa text default '', ref_em timestamptz, simulado boolean default false,
+  membro_id bigint, criado_em timestamptz default now());
+create unique index uq_funil_aviso on funil_avisos
+  (prospeccao_id, estado, nivel, etapa, ref_em, simulado);
 create table funil_etapas (id bigserial primary key, conta_id bigint, chave text,
   rotulo text, ordem int default 0, fixa boolean default false, fase text default 'venda',
   prazo_min integer, gatilho text, gatilho_ativo boolean default false);
@@ -83,9 +91,11 @@ def _cfg(**kw):
     return base
 
 
-def _lead(c, empresa="ACME", status="novo"):
-    return c.execute("insert into prospeccao (conta_id, empresa, status) values (%s,%s,%s) returning id",
-                     (CONTA, empresa, status)).fetchone()[0]
+def _lead(c, empresa="ACME", status="novo", vend=None, criado=None):
+    return c.execute(
+        """insert into prospeccao (conta_id, empresa, status, vendedor_id, criado_em)
+           values (%s,%s,%s,%s,coalesce(%s, now())) returning id""",
+        (CONTA, empresa, status, vend, criado)).fetchone()[0]
 
 
 def _conversa(c, lead_id):
@@ -314,7 +324,8 @@ def test_motor_e_inerte_com_tudo_desligado(pool):
         _msg(c, conv, "out", AGORA)
         c.execute("update funil_etapas set gatilho_ativo=true where conta_id=%s", (CONTA,))
         c.commit()
-    assert fr.rodar(pool) == {"contas": 0, "movidos": 0, "simulados": 0}
+    assert fr.rodar(pool) == {"contas": 0, "movidos": 0, "simulados": 0,
+                              "avisos": 0, "escalados": 0}
     with pool.connection() as c:
         assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "novo"
 
@@ -325,7 +336,8 @@ def test_motor_roda_so_nas_contas_que_ligaram(pool):
         _msg(c, conv, "out", AGORA)
         _ligar(c, "contatado")
         c.commit()
-    assert fr.rodar(pool) == {"contas": 1, "movidos": 1, "simulados": 0}
+    assert fr.rodar(pool) == {"contas": 1, "movidos": 1, "simulados": 0,
+                              "avisos": 0, "escalados": 0}
     with pool.connection() as c:
         assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "contatado"
 
@@ -374,3 +386,198 @@ def test_conta_sem_etapas_semeadas_ainda_reconhece_ganho(pool):
         c.commit()
         assert _conta_fechados(c, outra) == 1
         assert _conta_abertos(c, outra) == 0
+
+
+# ----------------------------------------------------------------- cobrança
+def _cobrar(c, quando=None):
+    return fr.avaliar_cobranca(c, CONTA, quando or AGORA)
+
+
+def _ligar_cobranca(c, modo="ligado", **kw):
+    campos = {"cobranca_modo": modo}
+    campos.update(kw)
+    fr.config(c, CONTA)
+    sets = ", ".join(f"{k}=%s" for k in campos)
+    c.execute(f"update funil_regua set {sets} where conta_id=%s", (*campos.values(), CONTA))
+
+
+def _vendedor(c, nome="Jacqueline"):
+    return c.execute("insert into membros (conta_id, nome, email) values (%s,%s,%s) returning id",
+                     (CONTA, nome, f"{nome.lower()}@x.com")).fetchone()[0]
+
+
+def _esperando(c, horas, vend=None):
+    """Lead com o cliente falando por último há N horas — a 'bola com você'."""
+    lead = _lead(c, "ESPERANDO", vend=vend)
+    conv = _conversa(c, lead)
+    _msg(c, conv, "out", AGORA - timedelta(hours=horas + 1))
+    _msg(c, conv, "in", AGORA - timedelta(hours=horas))
+    return lead
+
+
+def test_cobranca_desligada_nao_avisa_ninguem(pool):
+    with pool.connection() as c:
+        _esperando(c, 30, _vendedor(c))
+        c.commit()
+        assert _cobrar(c)["avisos"] == 0
+
+
+def test_bola_com_a_gente_alem_do_prazo_vira_aviso(pool):
+    with pool.connection() as c:
+        v = _vendedor(c)
+        _esperando(c, 30, v)                       # 30h de relógio, bem além de 4h úteis
+        _ligar_cobranca(c)
+        c.commit()
+        r = _cobrar(c)
+        assert r["avisos"] == 1
+        assert r["pendentes"][0]["membro_id"] == v
+        assert r["pendentes"][0]["estado"] == "bola_nossa"
+
+
+def test_o_mesmo_fato_nunca_cobra_duas_vezes(pool):
+    """O poller roda a cada 2 minutos: sem o dedup, o vendedor levaria 30 pushes por
+    hora do mesmo lead."""
+    with pool.connection() as c:
+        _esperando(c, 30, _vendedor(c))
+        _ligar_cobranca(c)
+        c.commit()
+        assert _cobrar(c)["avisos"] == 1
+        c.commit()
+        assert _cobrar(c)["avisos"] == 0
+
+
+def test_fato_novo_volta_a_cobrar(pool):
+    """O cliente escreve de novo daqui a um mês: é outro fato, e tem que cobrar.
+    Por isso o dedup é por `ref_em` e não por lead."""
+    with pool.connection() as c:
+        v = _vendedor(c)
+        lead = _esperando(c, 30, v)
+        _ligar_cobranca(c)
+        c.commit()
+        assert _cobrar(c)["avisos"] == 1
+        c.commit()
+        _msg(c, _conversa(c, lead), "in", AGORA - timedelta(hours=20))
+        c.commit()
+        assert _cobrar(c)["avisos"] == 1
+
+
+def test_fora_do_expediente_guarda_e_nao_acorda_ninguem(pool):
+    with pool.connection() as c:
+        _esperando(c, 30, _vendedor(c))
+        _ligar_cobranca(c)
+        c.commit()
+        madrugada = datetime(2026, 8, 19, 6, 0, tzinfo=timezone.utc)     # 03:00 BR
+        assert _cobrar(c, madrugada)["avisos"] == 0
+        c.commit()
+        assert _cobrar(c)["avisos"] == 1, "e sai quando o expediente abre"
+
+
+def test_teto_do_dia_represa_em_vez_de_perder(pool):
+    with pool.connection() as c:
+        v = _vendedor(c)
+        for i in range(4):
+            lead = _lead(c, f"LEAD {i}", vend=v)
+            conv = _conversa(c, lead)
+            _msg(c, conv, "out", AGORA - timedelta(hours=31))
+            _msg(c, conv, "in", AGORA - timedelta(hours=30))
+        _ligar_cobranca(c, teto_avisos_dia=2)
+        c.commit()
+        r = _cobrar(c)
+        assert (r["avisos"], r["represados"]) == (2, 2)
+
+
+def test_o_vendedor_e_sempre_cobrado_antes_do_gestor(pool):
+    """Mesmo num lead atrasado há dias. Escalar de cara nunca avisaria o dono do
+    lead — viraria fofoca sobre ele em vez de aviso pra ele."""
+    with pool.connection() as c:
+        _esperando(c, 300, _vendedor(c))      # muito além do prazo + escala
+        _ligar_cobranca(c)
+        c.commit()
+        r = _cobrar(c)
+        assert (r["avisos"], r["escalados"]) == (1, 0)
+        assert r["pendentes"][0]["nivel"] == "vendedor"
+
+
+def test_gestor_entra_depois_de_escala_min_sem_ninguem_agir(pool):
+    with pool.connection() as c:
+        _esperando(c, 300, _vendedor(c))
+        _ligar_cobranca(c)
+        c.commit()
+        _cobrar(c)                                   # 1ª passada: cobra o vendedor
+        c.commit()
+        # e nada muda enquanto a escala não vence
+        assert _cobrar(c, AGORA + timedelta(hours=1))["escalados"] == 0
+        c.commit()
+        r = _cobrar(c, AGORA + timedelta(hours=6))   # escala_min padrão = 4h
+        assert r["escalados"] == 1
+        assert r["pendentes"][0]["nivel"] == "gestor"
+
+
+def test_observando_conta_sem_mandar_nada(pool):
+    """É o que o dono pediu: medir o barulho que a régua faria, sem fazer barulho."""
+    with pool.connection() as c:
+        _esperando(c, 30, _vendedor(c))
+        _ligar_cobranca(c, modo="observando")
+        c.commit()
+        r = _cobrar(c)
+        assert (r["simulados"], r["avisos"], r["pendentes"]) == (1, 0, [])
+
+
+def test_lead_fechado_nao_e_cobrado(pool):
+    with pool.connection() as c:
+        v = _vendedor(c)
+        lead = _lead(c, "JA VENDIDO", status="ganho", vend=v)
+        conv = _conversa(c, lead)
+        _msg(c, conv, "out", AGORA - timedelta(hours=31))
+        _msg(c, conv, "in", AGORA - timedelta(hours=30))
+        # e o de pós-venda também não: o evento foi entregue, não há o que cobrar
+        lead2 = _lead(c, "EVENTO FEITO", status="eventos", vend=v)
+        conv2 = _conversa(c, lead2)
+        _msg(c, conv2, "out", AGORA - timedelta(hours=31))
+        _msg(c, conv2, "in", AGORA - timedelta(hours=30))
+        _ligar_cobranca(c)
+        c.commit()
+        assert _cobrar(c)["avisos"] == 0
+
+
+def test_etapa_travada_so_cobra_com_a_conversa_em_dia(pool):
+    """'O cliente está esperando' é mais urgente e mais acionável que 'este card não
+    anda' — então a conversa cobra primeiro, e a etapa só quando ela está em dia."""
+    with pool.connection() as c:
+        v = _vendedor(c)
+        lead = _lead(c, "PROPOSTA PARADA", status="proposta", vend=v,
+                     criado=AGORA - timedelta(days=40))
+        conv = _conversa(c, lead)
+        _msg(c, conv, "in", AGORA - timedelta(days=39))
+        _msg(c, conv, "out", AGORA - timedelta(minutes=30))     # respondemos agorinha
+        c.execute("update funil_etapas set prazo_min=%s where conta_id=%s and chave='proposta'",
+                  (10 * 1440, CONTA))
+        _ligar_cobranca(c, bola_cliente_min=999999)             # follow-up longe de vencer
+        c.commit()
+        r = _cobrar(c)
+        assert r["avisos"] == 1
+        assert r["pendentes"][0]["estado"] == "etapa"
+
+
+def test_escalar_troca_de_destinatario(pool):
+    """Se o aviso de gestor fosse pro mesmo vendedor, escalar não seria escalar:
+    cobraria de novo quem já foi cobrado e ninguém acima ficaria sabendo."""
+    enviados = []
+    with pool.connection() as c:
+        v = _vendedor(c, "Vendedor")
+        dono = c.execute("insert into membros (conta_id, nome, email, papel) "
+                         "values (%s,'Dono','dono@x.com','dono') returning id", (CONTA,)).fetchone()[0]
+        _esperando(c, 300, v)
+        _ligar_cobranca(c)
+        c.commit()
+        _cobrar(c); c.commit()
+        r = _cobrar(c, AGORA + timedelta(hours=6)); c.commit()
+
+    import finance.cockpit as ck
+    orig = ck.enviar_push
+    ck.enviar_push = lambda pool, conta, membro, t, cp, url: enviados.append(membro)
+    try:
+        fr.notificar(pool, CONTA, r["pendentes"])
+    finally:
+        ck.enviar_push = orig
+    assert enviados == [dono], f"o escalado tem que ir pro dono, foi pra {enviados}"

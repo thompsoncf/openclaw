@@ -588,17 +588,40 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .gravando.on{display:flex}
 .composer.gravando-on input,.composer.gravando-on button[type=submit],
 .composer.gravando-on .mic{display:none}
+/* O microfone responde ao TOQUE, não ao getUserMedia: ele afunda na hora e a
+   barra já aparece em "preparando". Sem isso a tela fica parada de 0,3 a 2s (a
+   permissão e o hardware do celular demoram) e a pessoa acha que travou. */
+.composer .mic:active{transform:scale(.92)}
 .gravando .bolha{width:11px;height:11px;border-radius:50%;background:#E0654F;flex-shrink:0;
-  animation:pisca 1.1s infinite}
+  opacity:.3;transition:opacity .15s}
+.gravando.st-grav .bolha{animation:pisca 1.1s infinite;opacity:1}
 @keyframes pisca{0%,100%{opacity:1}50%{opacity:.25}}
-.gravando .rel{font-family:var(--mono);font-size:1rem;color:var(--text);min-width:44px}
-.gravando .dica{flex:1;font-size:.78rem;color:var(--text-faint)}
+.gravando .rel{font-family:var(--mono);font-size:1rem;color:var(--text);min-width:44px;
+  display:none}
+.gravando.st-grav .rel,.gravando.st-env .rel{display:block}
+.gravando.st-env .rel{color:var(--text-dim)}
+/* medidor ao vivo: é ele que prova que o microfone está ouvindo. Um relógio
+   correndo sozinho não distingue "gravando" de "gravando mudo". */
+.gravando .nivel{display:none;flex:1;height:4px;border-radius:2px;background:var(--bg-2);
+  overflow:hidden}
+.gravando.st-grav .nivel{display:block}
+.gravando .nivel i{display:block;height:100%;width:2%;background:var(--neon);
+  border-radius:2px;transition:width .09s linear}
+.gravando .dica{flex:1;font-size:.82rem;color:var(--text-dim)}
+.gravando.st-grav .dica{display:none}
 .gravando .cancela{background:none;border:0;color:var(--text-dim);font-size:.85rem;
-  padding:.4rem .6rem;cursor:pointer;width:auto}
+  padding:.4rem .6rem;cursor:pointer;width:auto;flex-shrink:0}
+.gravando.st-env .cancela,.gravando.st-env .manda{display:none}
 .gravando .manda{flex:0 0 auto;width:40px;height:40px;border-radius:50%;border:0;
   background:var(--neon);color:var(--ink);display:grid;place-items:center;
   font-size:1.1rem;cursor:pointer;padding:0}
-@media (prefers-reduced-motion:reduce){.gravando .bolha{animation:none}}
+.gravando .manda:active{transform:scale(.92)}
+.gravando.st-prep .manda{display:none}
+@media (prefers-reduced-motion:reduce){
+  .gravando.st-grav .bolha{animation:none}
+  .gravando .nivel i{transition:none}
+  .composer .mic:active,.gravando .manda:active{transform:none}
+}
 /* ---------- desconto (só nicho de serviço; ver ORC.desc) ----------
    O controle mora DENTRO da linha já marcada, na mesma altura do .qtd que já está
    ali — a linha não cresce duas vezes. A pílula %/R$ existe porque o vendedor
@@ -2498,13 +2521,31 @@ _VOZ_JS = r"""
 (function(){
   var BASE="__BASE__", LEAD=__LEAD__, TETO=90;
   function $(id){return document.getElementById(id);}
-  var comp=$("comp"), grav=$("grav"), rel=$("rel"), dica=$("dica");
-  var mr=null, pedacos=[], t0=0, tick=null, cancelado=false, enviando=false, fluxo=null;
+  var comp=$("comp"), grav=$("grav"), rel=$("rel"), dica=$("dica"), nivel=$("nivel");
+  var mr=null, pedacos=[], t0=0, tick=null, cancelado=false, enviando=false;
+  var fluxo=null, ctx=null, an=null, medir=null, niveis=[], tipoAtual="";
 
-  // O que o navegador ACEITA gravar decide o resto do caminho. Medido: o Chromium
-  // dá webm/opus (o servidor troca a embalagem pra ogg, sem recodificar) e o
-  // Safari do iPhone dá mp4 — que vai como veio, porque a duração e a onda saem
-  // daqui prontas e aí o WhatsApp não precisa que ninguém decodifique nada.
+  // ---- estado da barra. TUDO que o dedo toca muda a tela ANTES do trabalho ----
+  // O que fazia parecer travado: a barra só aparecia depois do getUserMedia (0,3
+  // a 2s no celular) e o "enviando" só depois do mr.stop() resolver. Agora o
+  // estado troca no próprio toque, e o assíncrono corre por baixo.
+  function estado(e, texto){
+    grav.classList.remove("st-prep","st-grav","st-env");
+    grav.classList.add("st-" + e);
+    if(texto) dica.textContent = texto;
+  }
+  function abrir(){ comp.classList.add("gravando-on"); grav.classList.add("on"); }
+  function sair(){
+    clearInterval(tick); tick=null;
+    cancelAnimationFrame(medir); medir=null;
+    comp.classList.remove("gravando-on"); grav.classList.remove("on");
+    if(fluxo){ fluxo.getTracks().forEach(function(t){t.stop();}); fluxo=null; }
+    if(ctx){ try{ ctx.close(); }catch(e){} ctx=null; an=null; }
+    mr=null; pedacos=[]; niveis=[]; enviando=false;
+    $("manda").disabled=false; $("cancela").disabled=false;
+  }
+  function mmss(s){return Math.floor(s/60)+":"+("0"+Math.floor(s%60)).slice(-2);}
+
   function tipoBom(){
     var opcoes=["audio/webm;codecs=opus","audio/webm","audio/mp4"];
     for(var i=0;i<opcoes.length;i++){
@@ -2512,86 +2553,126 @@ _VOZ_JS = r"""
     }
     return "";
   }
-  function mmss(s){return Math.floor(s/60)+":"+("0"+Math.floor(s%60)).slice(-2);}
-  function fecharFluxo(){ if(fluxo){fluxo.getTracks().forEach(function(t){t.stop();}); fluxo=null;} }
-  function sair(){
-    clearInterval(tick); tick=null;
-    comp.classList.remove("gravando-on"); grav.classList.remove("on");
-    fecharFluxo(); mr=null; pedacos=[];
-  }
 
-  // A onda de 64 pontos que o WhatsApp desenha na bolha. Sai daqui porque o
-  // servidor não decodifica áudio — e porque no iPhone ninguém consegue decodificar.
-  function ondaDe(buf){
-    return new Promise(function(ok){
-      var Ctx=window.AudioContext||window.webkitAudioContext;
-      if(!Ctx) return ok(null);
-      var ctx=new Ctx();
-      ctx.decodeAudioData(buf.slice(0), function(a){
-        try{
-          var raw=a.getChannelData(0), n=64, bloco=Math.floor(raw.length/n), f=[];
-          if(bloco<1) return ok(null);
-          for(var i=0;i<n;i++){var soma=0;
-            for(var j=0;j<bloco;j++) soma+=Math.abs(raw[bloco*i+j]);
-            f.push(soma/bloco);}
-          var pico=Math.max.apply(null,f);
-          var w=new Uint8Array(n);
-          for(var k=0;k<n;k++) w[k]=pico>0?Math.floor(100*f[k]/pico):0;
-          ok(w);
-        }catch(e){ ok(null); } finally { try{ctx.close();}catch(e2){} }
-      }, function(){ ok(null); });
-    });
+  // A ONDA SAI DA GRAVAÇÃO, não de decodificar depois. Decodificar o áudio
+  // inteiro acontecia DEPOIS de a pessoa apertar enviar — quanto mais longo o
+  // áudio, mais tempo de tela parada. Aqui a amplitude é lida ao vivo, o que de
+  // quebra alimenta o medidor: o vendedor VÊ que o microfone está ouvindo.
+  function ouvir(st){
+    var Ctx=window.AudioContext||window.webkitAudioContext;
+    if(!Ctx) return;
+    try{
+      ctx=new Ctx();
+      if(ctx.state==="suspended") ctx.resume();   // iOS sobe suspenso
+      an=ctx.createAnalyser(); an.fftSize=512;
+      ctx.createMediaStreamSource(st).connect(an);
+      var buf=new Uint8Array(an.fftSize);
+      (function passo(){
+        if(!an) return;
+        an.getByteTimeDomainData(buf);
+        var soma=0;
+        for(var i=0;i<buf.length;i++){ var v=(buf[i]-128)/128; soma+=Math.abs(v); }
+        var m=soma/buf.length;
+        niveis.push(m);
+        // 2% de piso: barra zerada parece desligada, e microfone mudo não é isso
+        nivel.style.width=Math.max(2,Math.min(100,Math.round(m*380)))+"%";
+        medir=requestAnimationFrame(passo);
+      })();
+    }catch(e){ ctx=null; an=null; }
+  }
+  // 64 baldes, média por balde, normalizado pelo pico — a mesma forma que o
+  // Baileys calcula decodificando. Não é byte a byte igual (dois decodificadores
+  // já divergem entre si), e numa barrinha decorativa isso não se vê.
+  function ondaPronta(){
+    // menos de 4 leituras é áudio de um piscar de olhos: não há forma pra desenhar
+    if(niveis.length < 4) return null;
+    var n=64, bloco=niveis.length/n, f=[];
+    for(var i=0;i<n;i++){
+      var ini=Math.floor(i*bloco), fim=Math.floor((i+1)*bloco), soma=0, c=0;
+      for(var j=ini;j<fim;j++){ soma+=niveis[j]; c++; }
+      // gravação curta tem menos leituras que baldes: cada balde pega a leitura
+      // mais próxima em vez de sair vazio — senão um áudio de meio segundo ia
+      // sem onda nenhuma e a bolha saía chapada.
+      f.push(c ? soma/c : niveis[Math.min(niveis.length-1, ini)]);
+    }
+    var pico=Math.max.apply(null,f);
+    var w=new Uint8Array(n);
+    for(var k=0;k<n;k++) w[k]=pico>0?Math.floor(100*f[k]/pico):0;
+    return w;
   }
   function b64(u8){ var s2=""; for(var i=0;i<u8.length;i++) s2+=String.fromCharCode(u8[i]); return btoa(s2); }
 
   $("mic").onclick=function(){
     var tipo=tipoBom();
     if(!tipo){ alert("Este navegador não grava áudio. Responda por texto."); return; }
+    tipoAtual=tipo;
+    cancelado=false; enviando=false; pedacos=[]; niveis=[];
+    abrir(); estado("prep","preparando…");      // ← a tela responde AQUI
     navigator.mediaDevices.getUserMedia({audio:true}).then(function(st){
-      fluxo=st; cancelado=false; enviando=false; pedacos=[];
+      if(cancelado){ st.getTracks().forEach(function(t){t.stop();}); sair(); return; }
+      fluxo=st;
       // 24 kbps é taxa de voz: 27s (a média do vendedor) dão ~66 KB. O padrão do
       // navegador é ~118 kbps, cinco vezes mais, sem ganho nenhum pra fala.
       try{ mr=new MediaRecorder(st,{mimeType:tipo,audioBitsPerSecond:24000}); }
       catch(e){ mr=new MediaRecorder(st,{mimeType:tipo}); }
       mr.ondataavailable=function(e){ if(e.data && e.data.size) pedacos.push(e.data); };
-      mr.onstop=function(){ if(cancelado){ sair(); return; } mandar(tipo); };
+      mr.onstop=function(){ if(cancelado){ sair(); return; } mandar(); };
       mr.start();
+      ouvir(st);
       t0=Date.now();
-      comp.classList.add("gravando-on"); grav.classList.add("on");
-      rel.textContent="0:00"; dica.textContent="gravando…";
+      rel.textContent="0:00"; estado("grav");
       tick=setInterval(function(){
         var s3=(Date.now()-t0)/1000;
         rel.textContent=mmss(s3);
-        if(s3>=TETO){ dica.textContent="limite de "+TETO+"s"; parar(); }
+        if(s3>=TETO) pedirEnvio();
       },200);
     }).catch(function(){
+      sair();
       alert("Não consegui acessar o microfone. Confira a permissão do navegador.");
     });
   };
-  function parar(){ try{ if(mr && mr.state!=="inactive") mr.stop(); }catch(e){ sair(); } }
-  $("cancela").onclick=function(){ cancelado=true; parar(); };
-  $("manda").onclick=function(){ if(!enviando) parar(); };
 
-  function mandar(tipo){
+  // ---- os dois botões respondem no toque, e só depois param o gravador ----
+  function pedirEnvio(){
     if(enviando) return;
     enviando=true;
+    estado("env","enviando…");                  // ← a tela responde AQUI
+    cancelAnimationFrame(medir); medir=null;
+    clearInterval(tick); tick=null;
+    try{ if(mr && mr.state!=="inactive") mr.stop(); else mandar(); }
+    catch(e){ sair(); }
+  }
+  $("manda").onclick=pedirEnvio;
+  $("cancela").onclick=function(){
+    cancelado=true;
+    estado("env","cancelando…");                // ← e AQUI
+    try{ if(mr && mr.state!=="inactive") mr.stop(); else sair(); }
+    catch(e){ sair(); }
+  };
+
+  function mandar(){
     var seg=Math.max(1,Math.round((Date.now()-t0)/1000));
-    var blob=new Blob(pedacos,{type:tipo});
-    fecharFluxo();
-    dica.textContent="enviando…"; $("manda").disabled=true; $("cancela").disabled=true;
+    var blob=new Blob(pedacos,{type:tipoAtual});
+    var onda=ondaPronta();                      // já está pronta: zero espera
+    if(fluxo){ fluxo.getTracks().forEach(function(t){t.stop();}); fluxo=null; }
+    if(ctx){ try{ ctx.close(); }catch(e){} ctx=null; an=null; }
     blob.arrayBuffer().then(function(buf){
-      return ondaDe(buf).then(function(w){
-        var h={"Content-Type": blob.type || tipo};
-        if(w) h["X-Onda"]=b64(w);
-        return fetch(BASE+"/lead/"+LEAD+"/audio?seg="+seg,{method:"POST",headers:h,body:buf});
-      });
+      var h={"Content-Type": blob.type || tipoAtual};
+      if(onda) h["X-Onda"]=b64(onda);
+      return fetch(BASE+"/lead/"+LEAD+"/audio?seg="+seg,{method:"POST",headers:h,body:buf});
     }).then(function(r){ return r.json(); }).then(function(j){
-      if(j && j.ok){ location.reload(); return; }
+      if(j && j.ok){
+        sair();
+        // a conversa já se atualiza sozinha (puxa): recarregar a página inteira
+        // custava ~1s de tela branca logo depois de enviar
+        if(window.__puxa) window.__puxa(); else location.reload();
+        return;
+      }
       alert((j && j.erro) || "Não consegui enviar o áudio.");
-      $("manda").disabled=false; $("cancela").disabled=false; sair();
+      sair();
     }).catch(function(){
       alert("Falha de conexão ao enviar o áudio.");
-      $("manda").disabled=false; $("cancela").disabled=false; sair();
+      sair();
     });
   }
 })();
@@ -2643,16 +2724,20 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
                "<svg width=20 height=20 viewBox='0 0 24 24' fill=none stroke=currentColor "
                "stroke-width=1.8 stroke-linecap=round><rect x=9 y=3 width=6 height=11 rx=3/>"
                "<path d='M5 11a7 7 0 0014 0M12 18v3'/></svg></button>") if pode_voz else ""
+        # a barra de gravação também é gateada: sem microfone ela seria marcação
+        # morta em toda tela de conversa de todo vendedor
+        barra = ("<div class=gravando id=grav>"
+                 "<span class=bolha></span><span class=rel id=rel>0:00</span>"
+                 "<span class=nivel><i id=nivel></i></span>"
+                 "<span class=dica id=dica>preparando…</span>"
+                 "<button type=button class=cancela id=cancela>Cancelar</button>"
+                 "<button type=button class=manda id=manda aria-label='Enviar áudio'>&#10148;</button>"
+                 "</div>") if pode_voz else ""
         acao = (f"<form class=composer id=comp method=post action='{_BASE}/lead/{lead_id}/mensagem'>"
                 "<input name=texto placeholder='Responder…' required autocomplete=off>"
                 + mic +
                 "<button type=submit aria-label=Enviar>&#10148;</button>"
-                "<div class=gravando id=grav>"
-                "<span class=bolha></span><span class=rel id=rel>0:00</span>"
-                "<span class=dica id=dica>gravando…</span>"
-                "<button type=button class=cancela id=cancela>Cancelar</button>"
-                "<button type=button class=manda id=manda aria-label='Enviar áudio'>&#10148;</button>"
-                "</div></form>")
+                + barra + "</form>")
         if pode_voz:
             acao += _VOZ_JS.replace("__BASE__", _BASE).replace("__LEAD__", str(lead_id))
 
@@ -2737,7 +2822,9 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
            "chat.appendChild(d);ultimo=m.id;});"
            "if(perto)fim();"
            "}).catch(function(){ocupado=false;});}"
-           "setInterval(puxa,8000);"
+           # exposto pra quem manda áudio puxar na hora: recarregar a página inteira
+           # depois de enviar dá ~1s de tela branca num aparelho de vendedor
+           "window.__puxa=puxa;setInterval(puxa,8000);"
            "document.addEventListener('visibilitychange',function(){"
            "if(document.visibilityState==='visible')puxa();});"
            "})();</script>")

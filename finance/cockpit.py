@@ -17,6 +17,16 @@ from __future__ import annotations
 
 import logging
 import secrets
+from finance import funil_regua as _fr
+
+# "Em aberto" e "ganho do mês" passam a perguntar pela FASE da etapa em vez do
+# literal 'ganho' — ver finance/funil_regua.sql_fechadas. Sem isto, o lead que
+# anda pra uma etapa de pós-venda sumiria do placar do vendedor no dia em que
+# alguém arrastasse o card, como se a venda tivesse sido desfeita.
+_ABERTO_P = "p.status not in " + _fr.sql_encerradas("p")
+_ABERTO_T = "status not in " + _fr.sql_encerradas("prospeccao")
+_FECHADO_T = "status in " + _fr.sql_fechadas("prospeccao")
+
 from datetime import date as _date, datetime, timedelta, timezone
 
 _log = logging.getLogger(__name__)
@@ -280,7 +290,7 @@ def _base_leads_sql() -> str:
                               where conversa_id=cv.id order by criado_em desc limit 1) lm on true
          where p.conta_id=%s and p.vendedor_id=%s
            and coalesce(p.estagio,'lead')='lead'
-           and p.status not in ('ganho','perdido')
+           and """ + _ABERTO_P + """
          order by coalesce(cv.ultima_msg_em, p.atualizado_em) desc
          limit 100"""
 
@@ -302,7 +312,7 @@ def total_pendentes(pool, conta_id: int, membro_id: int) -> int:
                  ) x on true
                 where p.conta_id=%s and p.vendedor_id=%s
                   and coalesce(p.estagio,'lead')='lead'
-                  and p.status not in ('ganho','perdido')""",
+                  and """ + _ABERTO_P + """""",
             (conta_id, membro_id)).fetchone()
     return int(r[0] or 0) if r else 0
 
@@ -322,7 +332,7 @@ def sinal_fila(pool, conta_id: int, membro_id: int) -> str:
                  ) ult on true
                 where p.conta_id=%s and p.vendedor_id=%s
                   and coalesce(p.estagio,'lead')='lead'
-                  and p.status not in ('ganho','perdido')""",
+                  and """ + _ABERTO_P + """""",
             (conta_id, membro_id)).fetchone()
     return f"{r[0]}:{r[1]}" if r else "0:0"
 
@@ -415,11 +425,11 @@ def perfil(pool, conta_id: int, membro_id: int) -> dict:
         m = _conta_membro(c, conta_id, membro_id)
         na_fila = c.execute(
             "select count(*) from prospeccao where conta_id=%s and vendedor_id=%s "
-            "and coalesce(estagio,'lead')='lead' and status not in ('ganho','perdido')",
+            "and coalesce(estagio,'lead')='lead' and " + _ABERTO_T,
             (conta_id, membro_id)).fetchone()[0]
         ganhos = c.execute(
             "select count(*) from prospeccao where conta_id=%s and vendedor_id=%s "
-            "and status='ganho' and atualizado_em >= date_trunc('month', now())",
+            "and " + _FECHADO_T + " and atualizado_em >= date_trunc('month', now())",
             (conta_id, membro_id)).fetchone()[0]
         atend = c.execute(
             "select count(distinct cv.prospeccao_id) from conversas cv "
@@ -1367,7 +1377,7 @@ def agendar_visita(pool, conta_id: int, membro_id: int, lead_id: int, *, data: s
             pass
         # ao agendar a visita, o lead avança pra 'qualificado' (nunca mexe em ganho/perdido)
         c.execute("update prospeccao set status='qualificado', ultimo_contato_em=now(), atualizado_em=now() "
-                  "where id=%s and conta_id=%s and status not in ('ganho','perdido')", (lead_id, conta_id))
+                  "where id=%s and conta_id=%s and " + _ABERTO_T, (lead_id, conta_id))
         c.commit()
     ics_url = f"{_app_url()}/visita/{token}.ics"
     msg = (f"Olá! 👋 Sua visita ao {esp['nome']} está marcada:\n📅 {quando}\n📍 {local}"

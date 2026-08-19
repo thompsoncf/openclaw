@@ -16,6 +16,7 @@ import logging
 from datetime import timedelta
 
 from . import agenda as ag
+from . import funil_regua as _fr
 from . import convites as cv
 from . import notificar
 
@@ -132,7 +133,7 @@ def _aniversarios(pool, agora) -> int:
                   and extract(month from p.nascimento) = %s
                   and extract(day   from p.nascimento) = %s
                   and p.vendedor_id is not null
-                  and p.status not in ('ganho','perdido')""",
+                  and """ + _fr.sql_encerradas_nao("p") + """""",
             (hoje.month, hoje.day)).fetchall()
     if not leads:
         return 0

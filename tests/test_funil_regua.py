@@ -328,3 +328,49 @@ def test_motor_roda_so_nas_contas_que_ligaram(pool):
     assert fr.rodar(pool) == {"contas": 1, "movidos": 1, "simulados": 0}
     with pool.connection() as c:
         assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "contatado"
+
+
+# ----------------------------------------------------------------- "fechado?"
+
+def _conta_fechados(c, conta_id=CONTA):
+    return c.execute("select count(*) from prospeccao p where p.conta_id=%s and p.status in "
+                     + fr.sql_fechadas("p"), (conta_id,)).fetchone()[0]
+
+
+def _conta_abertos(c, conta_id=CONTA):
+    return c.execute("select count(*) from prospeccao p where p.conta_id=%s and "
+                     + fr.sql_encerradas_nao("p"), (conta_id,)).fetchone()[0]
+
+
+def test_lead_na_pos_venda_continua_contando_como_vendido(pool):
+    """O motivo desta parte existir. Antes, o placar do vendedor contava
+    `status='ganho'` cru: no dia em que alguém arrastasse o card de "Sinal Pago"
+    pra "Eventos Realizados", a venda sumia do mês como se tivesse sido desfeita."""
+    with pool.connection() as c:
+        _lead(c, "PAGOU", status="ganho")
+        _lead(c, "EVENTO FEITO", status="eventos")     # etapa de fase 'pos'
+        _lead(c, "AINDA NEGOCIANDO", status="proposta")
+        _lead(c, "FOI EMBORA", status="perdido")
+        c.commit()
+        assert _conta_fechados(c) == 2, "a etapa de pós-venda tem que contar como ganha"
+        assert _conta_abertos(c) == 1, "só o que ainda está em venda fica 'em aberto'"
+
+
+def test_perdido_nunca_entra_no_fechado(pool):
+    with pool.connection() as c:
+        _lead(c, "PERDIDA", status="perdido")
+        c.commit()
+        assert _conta_fechados(c) == 0
+
+
+def test_conta_sem_etapas_semeadas_ainda_reconhece_ganho(pool):
+    """A subconsulta correlaciona por conta_id: numa conta que nunca abriu o funil,
+    funil_etapas está vazia e `status in ()` responderia que ninguém nunca vendeu.
+    O `union all select 'ganho'` existe pra isso."""
+    outra = CONTA + 500
+    with pool.connection() as c:
+        c.execute("insert into prospeccao (conta_id, empresa, status) values (%s,'SEM ETAPAS','ganho')",
+                  (outra,))
+        c.commit()
+        assert _conta_fechados(c, outra) == 1
+        assert _conta_abertos(c, outra) == 0

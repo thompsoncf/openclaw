@@ -359,3 +359,39 @@ def rodar(pool) -> dict:
         finally:
             lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
     return total
+
+
+# ------------------------------------------------------------------ "fechado?"
+# Era `status='ganho'` cru espalhado por seis arquivos. Com a fase, a pergunta
+# passa a ser feita num lugar só — e o lead que anda pra uma etapa de PÓS-VENDA
+# continua contando como vendido, em vez de sumir do "ganhos do mês" no dia em que
+# o vendedor arrasta o card.
+#
+# São subconsultas CORRELACIONADAS (fe.conta_id = <alias>.conta_id) de propósito:
+# assim não entra parâmetro novo em nenhuma query existente. Trocar um literal por
+# um `%s` no meio de uma tupla de dez argumentos é o tipo de mudança que passa nos
+# testes e sai errada em produção, com o parâmetro certo na posição errada.
+#
+# O `union all select 'ganho'` não é redundância: conta que ainda não semeou as
+# etapas tem funil_etapas vazio, e `status in ()` faria o relatório responder que
+# ninguém nunca vendeu nada. 'ganho' é fechamento por definição, sempre.
+
+def sql_fechadas(alias: str = "p") -> str:
+    """As etapas que contam como VENDA GANHA (fechamento e pós-venda, menos perdido)."""
+    return (f"(select fe.chave from funil_etapas fe where fe.conta_id = {alias}.conta_id "
+            "and fe.fase in ('fechamento','pos') and fe.chave <> 'perdido' "
+            "union all select 'ganho')")
+
+
+def sql_encerradas(alias: str = "p") -> str:
+    """Tudo que saiu do jogo: fechado OU perdido. É o que os painéis usam pra dizer
+    "lead em aberto" — `status not in <isto>`."""
+    return (f"(select fe.chave from funil_etapas fe where fe.conta_id = {alias}.conta_id "
+            "and fe.fase in ('fechamento','pos') "
+            "union all select 'ganho' union all select 'perdido')")
+
+
+def sql_encerradas_nao(alias: str = "p") -> str:
+    """Açúcar pra `<alias>.status not in <encerradas>` — o filtro de "ainda em jogo",
+    que é o mais repetido do produto."""
+    return f"{alias}.status not in " + sql_encerradas(alias)

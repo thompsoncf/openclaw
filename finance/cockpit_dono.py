@@ -11,6 +11,16 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+from finance import funil_regua as _fr
+
+# O painel do dono conta venda pela FASE da etapa, não pelo literal 'ganho' — senão
+# o lead que anda pra uma etapa de pós-venda sai do "ganhos do mês" como se a venda
+# tivesse sido desfeita (ver finance/funil_regua.sql_fechadas).
+_ABERTO_P = "p.status not in " + _fr.sql_encerradas("p")
+_ABERTO_T = "status not in " + _fr.sql_encerradas("prospeccao")
+_FECHADO_T = "status in " + _fr.sql_fechadas("prospeccao")
+_ENCERRADO_P = "p.status in " + _fr.sql_encerradas("p")
+
 
 def _brt():
     from finance import agenda as ag
@@ -60,11 +70,11 @@ def visao(pool, conta_id: int, periodo: str = "semana") -> dict:
                       count(*) filter (where not coalesce(cv.agente_ativo,true))
                  from prospeccao p
                  left join conversas cv on cv.prospeccao_id=p.id and cv.conta_id=p.conta_id
-                where p.conta_id=%s and coalesce(p.estagio,'lead')='lead' and p.status not in ('ganho','perdido')
+                where p.conta_id=%s and coalesce(p.estagio,'lead')='lead' and """ + _ABERTO_P + """
                   and p.vendedor_id is not null""", (conta_id,)).fetchone()
         com_ia, com_vend = int(atend[0] or 0), int(atend[1] or 0)
         g = c.execute("select count(*), coalesce(sum(valor_estimado_centavos),0) from prospeccao "
-                      "where conta_id=%s and status='ganho' and atualizado_em>=%s and atualizado_em<%s",
+                      "where conta_id=%s and " + _FECHADO_T + " and atualizado_em>=%s and atualizado_em<%s",
                       (conta_id, ini, fim)).fetchone()
         perd = c.execute("select count(*) from prospeccao where conta_id=%s and status='perdido' "
                          "and atualizado_em>=%s and atualizado_em<%s", (conta_id, ini, fim)).fetchone()[0]
@@ -84,11 +94,11 @@ def visao(pool, conta_id: int, periodo: str = "semana") -> dict:
         agora = datetime.now(_brt())
         parados = c.execute(
             "select count(*) from prospeccao where conta_id=%s and coalesce(estagio,'lead')='lead' "
-            "and status not in ('ganho','perdido') and coalesce(ultimo_contato_em, criado_em) < %s",
+            "and " + _ABERTO_T + " and coalesce(ultimo_contato_em, criado_em) < %s",
             (conta_id, agora - timedelta(days=3))).fetchone()[0]
         quentes = c.execute(
             "select count(*) from prospeccao where conta_id=%s and coalesce(estagio,'lead')='lead' "
-            "and status not in ('ganho','perdido') and temperatura='quente' "
+            "and " + _ABERTO_T + " and temperatura='quente' "
             "and (ultimo_contato_em is null or ultimo_contato_em < %s)",
             (conta_id, agora.replace(hour=0, minute=0, second=0, microsecond=0))).fetchone()[0]
         propostas = c.execute("select count(*) from orcamentos where conta_id=%s and status='enviado'",
@@ -130,14 +140,14 @@ def placar(pool, conta_id: int, periodo: str = "mes") -> list[dict]:
             (conta_id,)).fetchall()
         for mid, nome, pausado in membros:
             fila = c.execute("select count(*) from prospeccao where conta_id=%s and vendedor_id=%s "
-                             "and coalesce(estagio,'lead')='lead' and status not in ('ganho','perdido')",
+                             "and coalesce(estagio,'lead')='lead' and " + _ABERTO_T,
                              (conta_id, mid)).fetchone()[0]
             atend = c.execute(
                 "select count(*) from conversas cv join prospeccao p on p.id=cv.prospeccao_id "
                 "where cv.conta_id=%s and cv.responsavel_membro_id=%s and not coalesce(cv.agente_ativo,true) "
-                "and p.status not in ('ganho','perdido')", (conta_id, mid)).fetchone()[0]
+                "and " + _ABERTO_P, (conta_id, mid)).fetchone()[0]
             g = c.execute("select count(*), coalesce(sum(valor_estimado_centavos),0) from prospeccao "
-                          "where conta_id=%s and vendedor_id=%s and status='ganho' and atualizado_em>=%s and atualizado_em<%s",
+                          "where conta_id=%s and vendedor_id=%s and " + _FECHADO_T + " and atualizado_em>=%s and atualizado_em<%s",
                           (conta_id, mid, ini, fim)).fetchone()
             perd = c.execute("select count(*) from prospeccao where conta_id=%s and vendedor_id=%s and status='perdido' "
                              "and atualizado_em>=%s and atualizado_em<%s", (conta_id, mid, ini, fim)).fetchone()[0]
@@ -173,7 +183,7 @@ def vendedor(pool, conta_id: int, membro_id: int) -> dict | None:
                  from prospeccao p
                  left join conversas cv on cv.prospeccao_id=p.id and cv.conta_id=p.conta_id
                 where p.conta_id=%s and p.vendedor_id=%s and coalesce(p.estagio,'lead')='lead'
-                  and p.status not in ('ganho','perdido')
+                  and """ + _ABERTO_P + """
                 order by p.atualizado_em desc limit 50""", (conta_id, membro_id)).fetchall()
     from web.painel_prospeccao import TEMP_COR
     leads = [{"id": r[0], "empresa": r[1] or "Lead", "temp_cor": TEMP_COR.get(r[2] or "frio", "#5b9bd5"),
@@ -192,9 +202,11 @@ def atividade(pool, conta_id: int, limite: int = 25) -> list[dict]:
                 """select p.empresa, p.status, p.valor_estimado_centavos, p.atualizado_em,
                           coalesce(nullif(m.nome,''), m.email, '—')
                      from prospeccao p left join membros m on m.id=p.vendedor_id
-                    where p.conta_id=%s and p.status in ('ganho','perdido')
+                    where p.conta_id=%s and """ + _ENCERRADO_P + """
                     order by p.atualizado_em desc limit 15""", (conta_id,)).fetchall():
-            g = status == "ganho"
+            # com fase, "ganhou" é tudo que encerrou e não foi perdido — inclusive
+            # uma etapa de pós-venda, que é fechamento com o evento já entregue
+            g = status != "perdido"
             txt = f"{_primeiro(nome)} {'ganhou' if g else 'perdeu'} — {emp or 'lead'}"
             if g and val:
                 txt += f" · {_reais(val)}"
@@ -253,7 +265,7 @@ def leads(pool, conta_id: int, vend: int | None = None, etapa: str = "", temp: s
     """TODOS os leads abertos da equipe (fora de ganho/perdido), com o vendedor dono e
     se está com IA ou com o vendedor. Filtra por vendedor / etapa / temperatura."""
     from web.painel_prospeccao import TEMP_COR
-    where = ["p.conta_id=%s", "coalesce(p.estagio,'lead')='lead'", "p.status not in ('ganho','perdido')"]
+    where = ["p.conta_id=%s", "coalesce(p.estagio,'lead')='lead'", _ABERTO_P]
     args = [conta_id]
     if vend:
         where.append("p.vendedor_id=%s")
@@ -281,7 +293,7 @@ def filtros_leads(pool, conta_id: int) -> dict:
         vends = c.execute(
             "select distinct m.id, coalesce(nullif(m.nome,''), m.email) from prospeccao p "
             "join membros m on m.id=p.vendedor_id where p.conta_id=%s and coalesce(p.estagio,'lead')='lead' "
-            "and p.status not in ('ganho','perdido') order by 2", (conta_id,)).fetchall()
+            "and " + _ABERTO_P + " order by 2", (conta_id,)).fetchall()
         etapas = [e for e in _etapas_conta(c, conta_id) if e not in ("ganho", "perdido")]
     return {"vendedores": [{"id": r[0], "nome": r[1]} for r in vends], "etapas": etapas}
 

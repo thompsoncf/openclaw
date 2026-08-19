@@ -833,7 +833,11 @@ def painel_servicos_lista(request: Request):
         "mensal": brl(r[4]),
         "total": brl(r[5]),
         "mods": r[6],
-        "data": r[7].strftime("%d/%m") if r[7] else "",
+        # COM ANO E COM RÓTULO. Era um "12/08" solto no meio de nº, itens e valor:
+        # ninguém lia aquilo como "quando isto foi gerado", e proposta tem validade
+        # na cabeça de quem vende. Sem o ano, um orçamento do ano passado passava
+        # por deste mês.
+        "data": r[7].strftime("%d/%m/%Y") if r[7] else "",
         "status": r[8] or "rascunho",
         "token": r[9] or "",
         "aprovada_por": r[10] or "",
@@ -857,7 +861,13 @@ def painel_servicos_lista(request: Request):
         # O ESTADO DA DATA, resolvido no servidor. A linha do funil mostrava só a
         # pré-reserva correndo — "data firme", "nunca entrou" e "liberada" tinham a
         # mesma cara, e duas delas são problema. Ver vendas.estado_da_data.
-        "data": vendas.estado_da_data(
+        #
+        # CHAMA-SE `data_estado`, NÃO `data`. Nasceu como "data" e colidiu com a
+        # chave logo acima — dicionário Python fica com a ÚLTIMA, então a data de
+        # geração sumiu da linha do funil no mesmo commit em que o selo apareceu,
+        # sem quebrar teste nenhum. São duas coisas diferentes e agora têm dois
+        # nomes diferentes.
+        "data_estado": vendas.estado_da_data(
             status=r[8], modo=r[13] or "recorrente", evento=r[21],
             evento_status=r[22], pre_reserva_ate=r[20]),
         "enviado_em": r[23].astimezone(ag.BRT).strftime("%d/%m %H:%M") if r[23] else "",
@@ -883,7 +893,7 @@ def painel_servicos_item(request: Request, orc_id: int):
                       telefone, cidade, uf, site, cargo, socio,
                       endereco, cep, evento, parcelas, numero,
                       coalesce(modo,'recorrente'),
-                      desconto_tipo, desconto_pct, desconto_centavos
+                      desconto_tipo, desconto_pct, desconto_centavos, criado_em
                  from orcamentos where id=%s and conta_id=%s""" + dono_filtro,
             args).fetchone()
     if not r:
@@ -914,6 +924,10 @@ def painel_servicos_item(request: Request, orc_id: int):
         "desconto_tipo": r[27] or "pct",
         "desconto_pct": float(r[28] or 0),
         "desconto_valor": round(int(r[29] or 0) / 100),
+        # QUANDO ESTA PROPOSTA FOI GERADA. A folha do cliente sempre disse
+        # ("Emitido em"); quem vende, não — nem no funil nem aqui no editor. E é
+        # quem vende que precisa saber se aquilo ainda está de pé.
+        "gerado_em": r[30].strftime("%d/%m/%Y") if r[30] else "",
     })
 
 
@@ -2886,7 +2900,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       var bn=document.getElementById('oc-editando');
       bn.style.display='flex';
       var aviso=(d.status==='aprovada')?' · ⚠ editar vai pedir nova aprovação do cliente':'';
-      bn.querySelector('.t').textContent='Editando proposta #'+d.id+' · '+d.status+aviso+' — salve pra atualizar o link do cliente.';
+      var quando=d.gerado_em?(' · gerada em '+d.gerado_em):'';
+      bn.querySelector('.t').textContent='Editando proposta #'+d.id+' · '+d.status+quando+aviso+' — salve pra atualizar o link do cliente.';
       if(SERVICO_AVULSO)atualizarChip();
       pinta();
       window.scrollTo({top:0,behavior:'smooth'});
@@ -3066,7 +3081,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         left.style.cssText='display:flex;align-items:center;min-width:0;flex:1;cursor:pointer';
         left.title='Abrir proposta';
         var evento=it.modo==='evento';
-        var sub=[(it.numero?('nº '+it.numero):''),esc(it.data),
+        var sub=[(it.numero?('nº '+it.numero):''),(it.data?('gerada '+esc(it.data)):''),
                  it.mods+(evento?' itens':' módulos'),esc(evento?it.setup:it.total)]
                 .filter(Boolean).join(' · ');
         left.innerHTML='<div class="oc-av">'+esc(it.inicial)+'</div>'
@@ -3084,14 +3099,14 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         // (a pré-reserva correndo). "Firme", "nunca entrou" e "liberada" ficavam
         // com a mesma cara, e duas delas são problema. A redação inteira mora no
         // servidor (vendas.estado_da_data); aqui só se escolhe a cor e o botão.
-        if(it.data){
+        if(it.data_estado){
           var CLS={reservada:'firme',segurada:'pre',fora:'fora',liberada:'solta'};
           var dd=document.createElement('span');
-          dd.className='oc-badge '+(CLS[it.data.estado]||'pre');
-          dd.textContent=it.data.texto;
-          dd.title=it.data.dica||'';
+          dd.className='oc-badge '+(CLS[it.data_estado.estado]||'pre');
+          dd.textContent=it.data_estado.texto;
+          dd.title=it.data_estado.dica||'';
           right.appendChild(dd);
-          if(it.data.acao==='sinal'){
+          if(it.data_estado.acao==='sinal'){
             var bs=document.createElement('button'); bs.className='oc-fechar sinal';
             bs.textContent='Sinal recebido';
             bs.title='Confirma que o sinal caiu: a data vira compromisso firme na agenda '
@@ -3099,10 +3114,10 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
             bs.addEventListener('click',function(){sinalRecebido(it.id,it.cliente,bs);});
             right.appendChild(bs);
           }
-          else if(it.data.acao==='marcar'||it.data.acao==='resegurar'){
+          else if(it.data_estado.acao==='marcar'||it.data_estado.acao==='resegurar'){
             var bm=document.createElement('button'); bm.className='oc-fechar marcar';
-            bm.textContent=(it.data.acao==='marcar')?'Marcar agora':'Segurar de novo';
-            bm.title=it.data.dica||'';
+            bm.textContent=(it.data_estado.acao==='marcar')?'Marcar agora':'Segurar de novo';
+            bm.title=it.data_estado.dica||'';
             bm.addEventListener('click',function(){marcarData(it.id,bm);});
             right.appendChild(bm);
           }
@@ -3110,7 +3125,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         // Sinal JÁ confirmado: fica dito na linha. Sem isso, depois que o botão some
         // não sobra nada na tela dizendo que aquele dinheiro entrou — e é ele que
         // explica por que o título dessa parcela não aparece em aberto.
-        if(!(it.data&&it.data.estado==='segurada') && it.sinal_pago && it.sinal){
+        if(!(it.data_estado&&it.data_estado.estado==='segurada') && it.sinal_pago && it.sinal){
           var sp=document.createElement('span'); sp.className='oc-badge sinalok';
           sp.textContent='Sinal recebido · '+esc(it.sinal);
           sp.title=fechado?'O título dessa parcela entrou como recebido no livro-caixa, '

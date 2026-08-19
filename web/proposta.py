@@ -842,7 +842,10 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
       </div></div>
       <div class="mt"><b>{{ 'Orçamento' if evento else 'Proposta comercial' }}</b>{{ prop.doc_num }}<br>
         {%- if evento %}Emitido em {{ prop.criado.strftime('%d/%m/%Y') }}<br><span style="color:#E0B458">Válido até {{ prop.validade_str }}</span>
-        {%- else %}{{ prop.data_str }}{% endif %}</div>
+        {#- a data sem rótulo lia como enfeite. A folha do evento já dizia "Emitido em";
+            aqui dizia só "12 de agosto de 2026", e quem recebe não sabia se aquilo era
+            a data de emissão, de validade ou do serviço. #}
+        {%- else %}Emitida em {{ prop.data_str }}{% endif %}</div>
     </div>
     <div class="bd">
       {% if evento and prop.tem_evento %}

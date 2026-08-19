@@ -100,6 +100,12 @@ app.add_middleware(
     allow_methods=["POST", "GET"],
     allow_headers=["Content-Type"],
 )
+# ESTÁTICOS PRIMEIRO: rota curta e sem sessão, e nenhum outro router tem
+# /estatico/*. Serve o CSS e o JS que saíram de dentro das páginas (ver
+# web/estaticos.py) — é o que faz o navegador parar de rebaixar 76 KB a cada
+# clique na Agenda.
+from web.estaticos import router as estaticos_router   # noqa: E402
+app.include_router(estaticos_router)
 app.include_router(portal_router)
 app.include_router(admin_router)
 app.include_router(precos_router)

@@ -143,6 +143,19 @@ def test_o_funil_sabe_desenhar_o_estado_da_data():
     assert "ev-sem-hora" in html, "o aviso da hora de início sumiu do formulário"
 
 
+def test_o_js_da_agenda_compila(tmp_path):
+    """A Agenda serve o JS como ARQUIVO (web/estaticos.py), então dá pra checar a
+    fonte direto — sem render, sem contexto. Vale o mesmo que os outros: erro de
+    sintaxe mata o bloco inteiro, e a tela fica com cara de travada."""
+    if not shutil.which("node"):
+        pytest.skip("sem node no ambiente")
+    from web import painel_agenda as pa
+    alvo = tmp_path / "agenda.js"
+    alvo.write_text(pa._JS_CRU, encoding="utf-8")
+    r = subprocess.run(["node", "--check", str(alvo)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr.strip()[:600]
+
+
 def test_o_bloco_do_qr_esta_mesmo_na_pagina():
     """Guarda do teste acima: se o bloco do QR sumir do render, o teste de sintaxe
     fica verde sem ter olhado o código que já quebrou uma vez."""

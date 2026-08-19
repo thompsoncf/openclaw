@@ -315,3 +315,110 @@ def test_a_tela_pede_o_prazo_em_campo_livre_e_nao_em_lista():
     assert 'type="number"' in tpl and 'max="90"' in tpl, (
         "o prazo voltou a ser lista fechada — a faixa aceita é 1 a 90")
     assert "<select name=\"pre_reserva_dias\"" not in tpl
+
+
+# ================================================= datas CONFIRMADAS + a consulta única
+#
+# `confirmadas` é a irmã de `pre_reservas`, e não existia: quem quisesse saber
+# quantas datas a empresa tinha vendidas contava no calendário, mês a mês. As duas
+# alimentam o mesmo card na lateral da Agenda, em duas abas.
+#
+# E as duas passaram a colar o orçamento de origem numa CONSULTA SÓ. Era uma por
+# evento, cada uma pegando conexão nova do pool: numa agenda com 12 datas
+# seguradas, 12 idas ao banco a cada carregamento — e a tela recarregava a cada
+# clique. Quanto melhor o mês da empresa, mais lenta ficava a Agenda.
+
+def _com_orcamento(pool, conta_id, evento_id, *, numero, sinal=None, total=None):
+    """Vincula um orçamento ao compromisso, como a aprovação da proposta faz."""
+    with pool.connection() as c:
+        c.execute("""create table if not exists orcamentos (
+                       id bigserial primary key, conta_id bigint, numero int,
+                       evento_agenda_id bigint, sinal_centavos bigint,
+                       setup_centavos bigint, primeiro_ano_centavos bigint)""")
+        c.execute("""insert into orcamentos (conta_id, numero, evento_agenda_id,
+                       sinal_centavos, primeiro_ano_centavos) values (%s,%s,%s,%s,%s)""",
+                  (conta_id, numero, evento_id, sinal, total))
+        c.commit()
+
+
+def test_confirmadas_traz_so_data_firme_de_empresa_daqui_pra_frente(pool, conta_id):
+    base = ag.agora_brt()
+    firme = ag.criar_evento(pool, conta_id, "Casamento", base + timedelta(days=10),
+                            tipo="empresa")
+    ag.criar_evento(pool, conta_id, "Formatura", base + timedelta(days=20),
+                    tipo="empresa", pre_reserva_ate=base + timedelta(days=2))
+    ag.criar_evento(pool, conta_id, "Festa de ontem", base - timedelta(days=1),
+                    tipo="empresa")
+    ag.criar_evento(pool, conta_id, "Dentista", base + timedelta(days=5), tipo="pessoal")
+    ids = [e["id"] for e in ag.confirmadas(pool, conta_id)]
+    assert ids == [firme["id"]]
+
+
+def test_confirmadas_vem_da_mais_proxima_pra_mais_distante(pool, conta_id):
+    base = ag.agora_brt()
+    longe = ag.criar_evento(pool, conta_id, "Dezembro", base + timedelta(days=90), tipo="empresa")
+    perto = ag.criar_evento(pool, conta_id, "Semana que vem", base + timedelta(days=7), tipo="empresa")
+    assert [e["id"] for e in ag.confirmadas(pool, conta_id)] == [perto["id"], longe["id"]]
+
+
+def test_a_festa_que_ja_aconteceu_sai_da_lista_sozinha(pool, conta_id):
+    """O corte é no AGORA, não no início do dia: a festa de ontem à noite não é
+    data confirmada, é festa que já aconteceu. Ninguém precisa arquivar nada."""
+    base = ag.agora_brt()
+    ag.criar_evento(pool, conta_id, "Ontem", base - timedelta(hours=2), tipo="empresa")
+    assert ag.confirmadas(pool, conta_id) == []
+
+
+def test_confirmada_traz_o_orcamento_e_o_valor(pool, conta_id):
+    ev = ag.criar_evento(pool, conta_id, "Casamento", ag.agora_brt() + timedelta(days=10),
+                         tipo="empresa")
+    _com_orcamento(pool, conta_id, ev["id"], numero=14, sinal=267000, total=890000)
+    c, = ag.confirmadas(pool, conta_id)
+    assert c["orcamento_numero"] == 14
+    assert c["total_centavos"] == 890000
+    assert c["sinal_centavos"] == 267000
+
+
+def test_data_marcada_na_agenda_nao_finge_ter_orcamento(pool, conta_id):
+    """"Segura o dia 20", por telefone, não tem orçamento — e a linha simplesmente
+    não fala de dinheiro em vez de mostrar zero."""
+    ag.criar_evento(pool, conta_id, "Aniversário da Dona Cleide",
+                    ag.agora_brt() + timedelta(days=10), tipo="empresa")
+    c, = ag.confirmadas(pool, conta_id)
+    assert "orcamento_numero" not in c and "total_centavos" not in c
+
+
+def test_o_orcamento_de_todas_as_datas_sai_numa_consulta_so(pool, conta_id, monkeypatch):
+    """O N+1 que fazia a Agenda ficar mais lenta quanto melhor era o mês. Conta
+    conexões porque era uma por evento — e cada uma pegava conexão do pool."""
+    base = ag.agora_brt()
+    for n in range(6):
+        ev = ag.criar_evento(pool, conta_id, f"Festa {n}", base + timedelta(days=10 + n),
+                             tipo="empresa", pre_reserva_ate=base + timedelta(days=3))
+        _com_orcamento(pool, conta_id, ev["id"], numero=n, sinal=1000)
+
+    conexoes = {"n": 0}
+    original = pool.connection
+
+    def contando(*a, **kw):
+        conexoes["n"] += 1
+        return original(*a, **kw)
+
+    monkeypatch.setattr(pool, "connection", contando)
+    reservas = ag.pre_reservas(pool, conta_id)
+    assert len(reservas) == 6
+    assert all(r.get("orcamento_numero") is not None for r in reservas)
+    # uma pra listar os eventos + uma pra colar os orçamentos. Eram 1 + 6.
+    assert conexoes["n"] == 2, f"voltou o N+1: {conexoes['n']} conexões pra 6 datas"
+
+
+def test_sem_o_modulo_de_orcamentos_a_agenda_continua_abrindo(pool, conta_id):
+    """A agenda roda em conta que nem tem orçamento. O vínculo é enfeite: falhar
+    a leitura não pode derrubar a tela."""
+    with pool.connection() as c:
+        c.execute("drop table if exists orcamentos")
+        c.commit()
+    ev = ag.criar_evento(pool, conta_id, "Casamento", ag.agora_brt() + timedelta(days=10),
+                         tipo="empresa")
+    c, = ag.confirmadas(pool, conta_id)
+    assert c["id"] == ev["id"] and "orcamento_numero" not in c

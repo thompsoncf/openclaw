@@ -622,3 +622,75 @@ def notificar(pool, conta_id: int, pendentes: list[dict]) -> None:
                     pass
         except Exception:  # noqa: BLE001
             _log.warning("aviso da régua falhou (membro %s)", membro_id, exc_info=True)
+
+
+# ------------------------------------------------------------------ o ritmo
+def medir(c, conta_id: int, dias: int = 21) -> dict:
+    """Os números que devem escolher os prazos — os da equipe, não o palpite de quem
+    escreveu o código.
+
+    Foi medindo isto na conta 34 que o desenho da régua mudou: a mediana de primeira
+    resposta é de 12 a 18 MINUTOS (a equipe é rápida), e o que existe é uma cauda
+    dura — 610 mensagens de clientes em 21 dias, 35 nunca respondidas, e o corte em
+    2h, 4h ou 8h pega quase o mesmo grupo. A escolha do prazo importa muito menos do
+    que ter alguém pegando a cauda.
+    """
+    jan = f"now() - ({dias} || ' days')::interval"
+    pares = f"""
+        select p.vendedor_id, mi.criado_em as entrada,
+               (select min(mo.criado_em) from mensagens mo
+                 where mo.conversa_id = mi.conversa_id and mo.direcao='out'
+                   and mo.criado_em > mi.criado_em) as saida
+          from prospeccao p
+          join conversas cv on cv.prospeccao_id = p.id
+          join mensagens mi on mi.conversa_id = cv.id and mi.direcao='in'
+         where p.conta_id=%s and mi.criado_em > {jan}"""
+
+    geral = c.execute(f"""
+        with pares as ({pares})
+        select count(*), count(*) filter (where saida is null),
+               count(*) filter (where saida is not null and saida-entrada > interval '2 hours'),
+               count(*) filter (where saida is not null and saida-entrada > interval '4 hours'),
+               count(*) filter (where saida is not null and saida-entrada > interval '8 hours')
+          from pares""", (conta_id,)).fetchone() or (0, 0, 0, 0, 0)
+
+    vends = c.execute(f"""
+        with pares as ({pares}), resp as (
+          select vendedor_id, extract(epoch from (saida-entrada))/60.0 as min
+            from pares where saida is not null)
+        select coalesce(nullif(m.nome,''), m.email, '— sem dono —'), count(*),
+               percentile_cont(0.5) within group (order by r.min),
+               percentile_cont(0.9) within group (order by r.min)
+          from resp r left join membros m on m.id = r.vendedor_id
+         group by 1 order by 2 desc""", (conta_id,)).fetchall()
+
+    # Tempo em cada etapa. Só existe a partir do histórico (migração 177): antes
+    # disso o banco nunca guardou mudança de coluna, e a pergunta não tinha resposta
+    # nem olhando pra trás. Enquanto não houver movimento, esta lista vem vazia — e
+    # a tela diz "aguardando" em vez de inventar um número.
+    etapas_ = c.execute("""
+        with mov as (
+          select prospeccao_id, de, criado_em,
+                 lag(criado_em) over (partition by prospeccao_id order by criado_em) as anterior
+            from funil_movimentos where conta_id=%s)
+        select de, count(*),
+               percentile_cont(0.5) within group (order by extract(epoch from (criado_em-anterior))/3600)
+          from mov where de is not null and anterior is not null
+         group by de order by 2 desc""", (conta_id,)).fetchall()
+
+    simul = c.execute("""
+        select (select count(*) from funil_avisos where conta_id=%s and simulado),
+               (select count(*) from funil_movimentos where conta_id=%s and motivo like 'simulado:%%'),
+               (select min(criado_em) from funil_movimentos where conta_id=%s)""",
+        (conta_id, conta_id, conta_id)).fetchone() or (0, 0, None)
+
+    n, mudas, p2, p4, p8 = (int(x or 0) for x in geral)
+    return {
+        "dias": dias, "mensagens": n, "mudas": mudas,
+        "cortes": [("2 horas", p2), ("4 horas", p4), ("8 horas", p8)],
+        "vendedores": [{"nome": r[0], "n": int(r[1] or 0),
+                        "p50": float(r[2] or 0), "p90": float(r[3] or 0)} for r in vends],
+        "etapas": [{"chave": r[0], "n": int(r[1] or 0), "horas": float(r[2] or 0)} for r in etapas_],
+        "avisos_simulados": int(simul[0] or 0), "saltos_simulados": int(simul[1] or 0),
+        "desde": simul[2],
+    }

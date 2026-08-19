@@ -11457,9 +11457,12 @@ _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       </span>
     </div>
     {% endfor %}
-    <div class="mut" style="font-size:.79rem;line-height:1.55;padding-top:.75rem;border-top:1px solid var(--borda)">
-      <b style="color:var(--azul)">Observando</b> roda o motor inteiro e anota o que <i>teria</i> feito — sem mover card nem avisar ninguém.
-      O histórico de movimento já roda de qualquer jeito: <b class="num" style="color:var(--txt)">{{ n_mov }}</b> movimento(s) gravado(s) até agora.
+    <div style="display:flex;align-items:center;gap:.6rem;padding-top:.75rem;border-top:1px solid var(--borda);flex-wrap:wrap">
+      <span class="mut" style="font-size:.79rem;line-height:1.55;flex:1;min-width:280px">
+        <b style="color:var(--azul)">Observando</b> roda o motor inteiro e anota o que <i>teria</i> feito — sem mover card nem avisar ninguém.
+        O histórico já roda de qualquer jeito: <b class="num" style="color:var(--txt)">{{ n_mov }}</b> movimento(s) gravado(s).
+      </span>
+      <a class="pbtn ghost" href="/painel/prospeccao/regua/ritmo" style="white-space:nowrap">📈 Ver o ritmo real</a>
     </div>
   </div>
 
@@ -11587,3 +11590,161 @@ function rgSalvar(ev){ev.preventDefault();var f=ev.target;
 {% endblock %}"""
 
 _env.loader.mapping["prospeccao_regua"] = _REGUA_TPL
+
+
+def _dur(minutos: float) -> str:
+    """Duração pra humano. 12 minutos é '12 min', não '0,2 h' — e a mediana desta
+    equipe É 12 minutos, então arredondar pra hora apagaria justamente o número que
+    mostra que os vendedores são rápidos."""
+    m = int(round(minutos or 0))
+    if m < 60:
+        return f"{m} min"
+    if m < 1440:
+        return f"{m // 60}h{m % 60:02d}"
+    return f"{m // 1440}d {(m % 1440) // 60}h"
+
+
+@router.get("/painel/prospeccao/regua/ritmo", response_class=HTMLResponse)
+def regua_ritmo(request: Request, dias: int = 21):
+    """O ritmo real da equipe, medido. É esta tela que escolhe os prazos da régua —
+    ela existe pra que ninguém precise chutar, inclusive eu."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "O ritmo da equipe é visão de dono/gestor."
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    dias = max(7, min(int(dias or 21), 90))
+    with get_pool().connection() as c:
+        d = _fr.medir(c, ctx["conta_id"], dias)
+        cfg = _fr.config(c, ctx["conta_id"])
+        rot = {e["chave"]: e["rotulo"] for e in _fr.etapas(c, ctx["conta_id"])}
+        c.commit()
+    # a barra vai até o P90 do mais lento — comparar vendedor com vendedor só faz
+    # sentido na mesma régua
+    teto = max([v["p90"] for v in d["vendedores"]] or [1]) or 1
+    for v in d["vendedores"]:
+        v["p50_rot"], v["p90_rot"] = _dur(v["p50"]), _dur(v["p90"])
+        v["larg50"] = f"{min(100, v['p50'] / teto * 100):.1f}%"
+        v["larg90"] = f"{min(100, v['p90'] / teto * 100):.1f}%"
+    for e in d["etapas"]:
+        e["rotulo"] = rot.get(e["chave"], e["chave"])
+        e["dur"] = _dur(e["horas"] * 60)
+    maior = max([n for _r, n in d["cortes"]] or [1]) or 1
+    cortes = [{"rotulo": r, "n": n, "dia": f"{n / max(dias, 1):.1f}".replace(".", ","),
+               "larg": f"{(n / maior * 100):.0f}%"} for r, n in d["cortes"]]
+    return _render("prospeccao_ritmo", request, titulo="O ritmo real",
+                   secao_ativa="prospeccao", nav_ativo="regua", gerencia=True,
+                   d=d, cfg=cfg, cortes=cortes, dias=dias, dur=_dur,
+                   aviso=request.session.pop("prosp_aviso", None))
+
+
+_RITMO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
+<style>
+.rt-tile{background:var(--card);border:1px solid var(--borda);border-radius:14px;padding:.95rem 1.05rem}
+.rt-tile .v{font-family:var(--mono);font-weight:700;font-size:1.9rem;letter-spacing:-.03em;line-height:1.05}
+.rt-tile .l{font-size:.83rem;color:var(--txt-mut);margin-top:.25rem}
+.rt-tile .d{font-size:.74rem;color:var(--text-faint);margin-top:.15rem;line-height:1.45}
+.rt-bar{position:relative;height:10px;border-radius:5px;background:var(--neon-fraco);overflow:hidden}
+.rt-bar i{position:absolute;top:0;left:0;height:10px;border-radius:5px;background:var(--verde);display:block}
+.rt-usar{padding:.28rem .6rem;border-radius:7px;font-size:.74rem;font-weight:600;border:1px solid var(--neon-borda);
+  color:var(--verde-claro);background:var(--neon-fraco);cursor:pointer;white-space:nowrap}
+</style>
+<div class="pw">
+""" + _navbar("regua") + """
+  <div style="display:flex;align-items:flex-start;gap:.8rem;flex-wrap:wrap">
+    <div style="flex:1;min-width:260px">
+      <h2 class="tt">O ritmo real</h2>
+      <div class="mut" style="font-size:.84rem;margin-top:.25rem;line-height:1.55;max-width:74ch">
+        Medido nos últimos <b style="color:var(--txt)">{{ dias }}</b> dias. São estes números que
+        devem escolher os prazos da régua — não o palpite de quem escreveu o código.
+      </div>
+    </div>
+    <a class="pbtn ghost" href="/painel/prospeccao/regua">⏱️ Ajustar a régua</a>
+  </div>
+  {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
+
+  <div class="egrid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-top:1.1rem">
+    <div class="rt-tile"><div class="v">{{ d.mensagens }}</div>
+      <div class="l">mensagens de clientes</div>
+      <div class="d">~{{ (d.mensagens / dias)|round(0, 'floor')|int }} por dia</div></div>
+    <div class="rt-tile" style="border-color:var(--coral-borda)">
+      <div class="v" style="color:var(--coral)">{{ d.mudas }}</div>
+      <div class="l">nunca receberam resposta</div>
+      <div class="d">some sem ninguém saber</div></div>
+    <div class="rt-tile"><div class="v" style="color:var(--azul)">{{ d.saltos_simulados }}</div>
+      <div class="l">cards que teriam saltado</div>
+      <div class="d">gatilhos em observação</div></div>
+    <div class="rt-tile"><div class="v" style="color:var(--ambar)">{{ d.avisos_simulados }}</div>
+      <div class="l">cobranças que teriam saído</div>
+      <div class="d">com os prazos de agora</div></div>
+  </div>
+
+  <div class="fsec" style="margin-top:.9rem">
+    <div class="sh"><b>Quanto vocês demoram pra responder</b>
+      <span class="mut" style="font-size:.76rem">a barra clara vai até 9 em cada 10 · a cheia é a metade</span></div>
+    {% if not d.vendedores %}
+      <div class="mut" style="font-size:.85rem;padding:.6rem 0">Sem mensagens no período.</div>
+    {% endif %}
+    {% for v in d.vendedores %}
+    <div style="display:grid;grid-template-columns:190px 1fr 150px;gap:.9rem;align-items:center;padding:.7rem 0;border-top:1px solid var(--borda)">
+      <div><div style="font-size:.88rem;font-weight:600">{{ v.nome }}</div>
+        <div class="mut num" style="font-size:.72rem">{{ v.n }} respostas</div></div>
+      <div class="rt-bar" style="width:{{ v.larg90 }}"><i style="width:{{ v.larg50 }}"></i></div>
+      <div style="text-align:right;font-size:.8rem">
+        <b class="num" style="color:var(--verde-claro)">{{ v.p50_rot }}</b>
+        <span class="mut"> · 9/10 em {{ v.p90_rot }}</span></div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="fsec" style="margin-top:.9rem">
+    <div class="sh"><b>Que prazo escolher pra “bola com você”</b>
+      <span class="mut" style="font-size:.76rem">quantas viraram cobrança em {{ dias }} dias</span></div>
+    <form method="post" action="/painel/prospeccao/regua/config">
+      <input type="hidden" name="gatilhos_modo" value="{{ cfg.gatilhos_modo }}">
+      <input type="hidden" name="cobranca_modo" value="{{ cfg.cobranca_modo }}">
+      {% for c in cortes %}
+      <div style="display:grid;grid-template-columns:90px 1fr 170px 96px;gap:.9rem;align-items:center;padding:.6rem 0;border-top:1px solid var(--borda)">
+        <span class="num" style="font-size:.95rem">{{ c.rotulo }}</span>
+        <span class="rt-bar" style="width:{{ c.larg }}"><i style="width:100%"></i></span>
+        <span class="mut" style="font-size:.82rem"><b class="num" style="color:var(--txt)">{{ c.n }}</b> cobranças · {{ c.dia }}/dia</span>
+        <span style="text-align:right">
+          <button class="rt-usar" name="bola_nossa_n" value="{{ c.rotulo.split(' ')[0] }}">usar este</button>
+        </span>
+      </div>
+      {% endfor %}
+      <input type="hidden" name="bola_nossa_u" value="h">
+    </form>
+    <p class="mut" style="font-size:.79rem;line-height:1.55;margin:.85rem 0 0;max-width:84ch">
+      Repare se o número muda pouco de uma linha pra outra: quando muda, a cauda é gente atrasada e o
+      prazo importa; quando não muda, é gente esquecida — qualquer prazo da faixa pega o mesmo grupo, então
+      vale escolher o que menos incomoda quem está trabalhando bem.
+    </p>
+  </div>
+
+  <div class="fsec" style="margin-top:.9rem">
+    <div class="sh"><b>Quanto tempo um lead fica em cada etapa</b>
+      {% if not d.etapas %}<span style="font-size:.76rem;color:var(--ambar)">ainda não dá pra saber</span>{% endif %}</div>
+    {% if not d.etapas %}
+    <div style="background:var(--ambar-fundo);border:1px solid var(--ambar-borda);border-radius:11px;padding:.85rem .95rem;margin-top:.5rem">
+      <p style="margin:0;color:var(--txt-mut);font-size:.85rem;line-height:1.6">
+        O sistema nunca guardou quando um card muda de coluna — a pergunta não tinha resposta nem
+        olhando pra trás. O histórico começou a ser gravado agora{% if d.desde %}, em
+        {{ d.desde.strftime('%d/%m') }}{% endif %}; em duas semanas de uso estes números existem e
+        escolhem os prazos das etapas sozinhos.
+      </p>
+    </div>
+    {% endif %}
+    {% for e in d.etapas %}
+    <div style="display:grid;grid-template-columns:200px 1fr 130px;gap:.9rem;align-items:center;padding:.6rem 0;border-top:1px solid var(--borda)">
+      <span style="font-size:.87rem;font-weight:600">{{ e.rotulo }}</span>
+      <span class="mut num" style="font-size:.78rem">{{ e.n }} passagem(ns)</span>
+      <span style="text-align:right;font-size:.82rem">metade em <b class="num" style="color:var(--txt)">{{ e.dur }}</b></span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}"""
+
+_env.loader.mapping["prospeccao_ritmo"] = _RITMO_TPL

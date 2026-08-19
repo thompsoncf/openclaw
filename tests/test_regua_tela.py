@@ -22,7 +22,7 @@ CONTA = 11
 
 _SQL = """
 create table prospeccao (id bigserial primary key, conta_id bigint, status text default 'novo',
-  estagio text default 'lead');
+  estagio text default 'lead', vendedor_id bigint, criado_em timestamptz default now());
 create table funil_etapas (id bigserial primary key, conta_id bigint, chave text, rotulo text,
   ordem int default 0, fixa boolean default false, fase text default 'venda',
   prazo_min integer, gatilho text, gatilho_ativo boolean default false,
@@ -36,6 +36,13 @@ create table funil_regua (conta_id bigint primary key,
   atualizado_em timestamptz default now());
 create table funil_movimentos (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   de text, para text, motivo text, membro_id bigint, criado_em timestamptz default now());
+create table funil_avisos (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
+  estado text, nivel text, etapa text default '', ref_em timestamptz,
+  simulado boolean default false, membro_id bigint, criado_em timestamptz default now());
+create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint);
+create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
+  criado_em timestamptz);
+create table membros (id bigserial primary key, conta_id bigint, nome text, email text);
 """
 
 
@@ -197,3 +204,48 @@ def test_vendedor_nao_configura_a_regua_da_empresa(monkeypatch, pool):
                                    _eid(pool, "ganho")))
     assert r.status_code == 403
     assert _etapa(pool, "ganho")[2] is False
+
+
+# ----------------------------------------------------------------- ritmo
+
+def test_duracao_em_minutos_nao_vira_zero_hora():
+    """A mediana desta equipe é 12 minutos. Arredondar pra hora apagaria justamente
+    o número que mostra que os vendedores são rápidos."""
+    assert pp._dur(12) == "12 min"
+    assert pp._dur(59) == "59 min"
+    assert pp._dur(90) == "1h30"
+    assert pp._dur(60 * 30) == "1d 6h"
+
+
+def test_medir_conta_as_mudas_e_os_cortes(monkeypatch, pool):
+    """Os três cortes (2h/4h/8h) são o que deixa escolher o prazo com evidência:
+    quando o número mal muda entre eles, a cauda é gente esquecida, não atrasada."""
+    from finance import funil_regua as fr
+    from datetime import datetime, timedelta, timezone
+    agora = datetime.now(timezone.utc)
+    with pool.connection() as c:
+        for nome, atraso_h in [("RAPIDO", 0.2), ("LENTO", 6.0), ("MUDO", None)]:
+            lead = c.execute("insert into prospeccao (conta_id, status) values (%s,'novo') returning id",
+                             (CONTA,)).fetchone()[0]
+            conv = c.execute("insert into conversas (conta_id, prospeccao_id) values (%s,%s) returning id",
+                             (CONTA, lead)).fetchone()[0]
+            entrada = agora - timedelta(days=1)
+            c.execute("insert into mensagens (conversa_id, direcao, criado_em) values (%s,'in',%s)",
+                      (conv, entrada))
+            if atraso_h is not None:
+                c.execute("insert into mensagens (conversa_id, direcao, criado_em) values (%s,'out',%s)",
+                          (conv, entrada + timedelta(hours=atraso_h)))
+        c.commit()
+        d = fr.medir(c, CONTA, 21)
+    assert d["mensagens"] == 3
+    assert d["mudas"] == 1
+    cortes = dict(d["cortes"])
+    assert cortes["2 horas"] == 1 and cortes["8 horas"] == 0
+    assert any(v["n"] for v in d["vendedores"])
+
+
+def test_tempo_por_etapa_fica_vazio_sem_historico(monkeypatch, pool):
+    """Honestidade: sem movimento gravado a tela diz "aguardando" em vez de inventar."""
+    from finance import funil_regua as fr
+    with pool.connection() as c:
+        assert fr.medir(c, CONTA, 21)["etapas"] == []

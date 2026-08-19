@@ -108,3 +108,39 @@ def test_dia_vazio_pelo_filtro_nao_perde_o_data_iso():
     filtro tem que trazê-la de volta. Perder o `data-iso` a mataria pra sempre."""
     js = pa._JS_CRU
     assert "if(REAPROVEITAR.length || todos.length){ cel.classList.add('clicavel'); }" in js
+
+
+# ------------------------------------------- a seta do mês, também sem recarregar
+
+def test_a_seta_do_mes_troca_por_fetch_e_nao_por_link():
+    """O filtro por pessoa ficou instantâneo e a seta não — era o que faltava. Ela
+    continua sendo <a href> de verdade (sem JS, ou se o fetch falhar, o link vale),
+    mas ganhou `data-m`, que é o que o JS lê pra trocar sem recarregar."""
+    tpl = pa._AGENDA_TPL
+    assert 'data-m="{{ mes_prev }}"' in tpl and 'data-m="{{ mes_next }}"' in tpl
+    assert 'data-m="{{ mes_hoje }}" class="ag-hoje"' in tpl
+    # o href continua completo: é o plano B, não enfeite
+    assert 'href="/painel/agenda?m={{ mes_prev }}"' in tpl
+
+
+def test_a_troca_de_mes_usa_o_mesmo_desenhador_de_celula():
+    """Dois lugares desenhando célula é o começo de dois calendários. `irParaMes`
+    monta a grade vazia e chama `renderizarCelula` — o mesmo que o cancelar, o
+    remarcar e o filtro por pessoa já usavam."""
+    js = pa._JS_CRU
+    assert "function irParaMes(" in js and "function montarGrade(" in js
+    assert "Object.keys(EVENTOS_DIA).forEach(renderizarCelula)" in js
+
+
+def test_falhar_o_fetch_volta_pro_link_de_sempre():
+    """Rede caindo não pode deixar a agenda travada num mês. O catch devolve o
+    comportamento antigo em vez de engolir o clique."""
+    assert "window.location.href = '/painel/agenda?m='" in pa._JS_CRU
+
+
+def test_o_botao_voltar_volta_de_mes():
+    """A contrapartida de trocar link por fetch: sem tratar `popstate`, o voltar do
+    navegador sairia da agenda em vez de voltar um mês."""
+    js = pa._JS_CRU
+    assert "history.pushState" in js and "popstate" in js
+

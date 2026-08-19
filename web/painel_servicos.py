@@ -1323,6 +1323,12 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     </div>
     <div id="ct-selo" style="margin-left:auto;flex-shrink:0"></div>
   </div>
+  {# QUAIS campos faltam, não só quantos. O selo diz que há problema; esta linha diz
+     ONDE — e é o que separa um aviso de uma tarefa. Fora do cabeçalho porque nome de
+     campo é largo e espremer ao lado do selo cortaria justamente a informação. #}
+  <div id="ct-faltas" style="display:none;cursor:pointer;margin-top:.5rem;font-size:.74rem;
+       line-height:1.5;background:var(--ambar-fundo);border:1px solid var(--ambar-borda);
+       border-radius:8px;padding:.4rem .55rem;color:var(--amar)"></div>
   <div id="ct-corpo" style="display:none;margin-top:.85rem;padding-top:.85rem;border-top:1px solid var(--borda)">
     <p class="mut" style="margin-top:0;font-size:.86rem">
       As cláusulas são suas — escreva como quiser. Onde entra um valor, use um
@@ -2727,6 +2733,9 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     document.getElementById('ct-cab').addEventListener('click',function(){
       abrir(corpo.style.display==='none');
     });
+    // o aviso leva ao conserto: apontar o erro e deixar a pessoa procurar a porta
+    // seria metade do trabalho.
+    document.getElementById('ct-faltas').addEventListener('click',function(){abrir(true);});
 
     function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){
       return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
@@ -2792,10 +2801,30 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       }
       res.textContent=(r.n||0)+' cláusula'+((r.n||0)===1?'':'s')
         +(r.em?' · alterado em '+r.em:'')+(r.por?' por '+r.por:'');
-      var f=(r.faltas||[]).length;
+      var lista=(r.faltas||[]), f=lista.length;
       selo.innerHTML = f
         ? '<span style="font-size:.68rem;font-weight:700;background:var(--ambar-fundo);color:var(--amar);border:1px solid var(--ambar-borda);border-radius:5px;padding:.1rem .38rem;white-space:nowrap">⚠ '+f+' campo'+(f===1?'':'s')+' sem valor</span>'
         : '<span style="font-size:.68rem;font-weight:700;background:var(--neon-fundo);color:var(--verde-claro);border:1px solid var(--neon-borda);border-radius:5px;padding:.1rem .38rem;white-space:nowrap">✓ pronto</span>';
+      pintarFaltas(lista);
+    }
+
+    // NOMEIA o que falta. "1 campo sem valor" não diz o que fazer — o dono teria que
+    // abrir o contrato e caçar. Mostra os campos como eles aparecem NO TEXTO da
+    // cláusula ({preco.hora-extra}), que é a forma que ele procura pra corrigir.
+    function pintarFaltas(lista){
+      var el=document.getElementById('ct-faltas');
+      if(!el) return;
+      if(!lista.length){ el.style.display='none'; el.innerHTML=''; return; }
+      // teto de 6: uma lista de trinta campos vira parede de texto e ninguém lê.
+      var mostra=lista.slice(0,6).map(function(c){
+        return '<code style="background:rgba(0,0,0,.25);border-radius:4px;padding:.05rem .3rem;'
+             + 'font-size:.72rem;color:inherit">{'+esc(c)+'}</code>';}).join(' ');
+      var resto=lista.length-6;
+      el.innerHTML='<b>Falta preencher:</b> '+mostra
+        +(resto>0?' <span style="opacity:.8">e mais '+resto+'</span>':'')
+        +'<div style="opacity:.85;margin-top:.25rem">Sai assim mesmo no contrato do '
+        +'cliente. Toque para abrir e corrigir.</div>';
+      el.style.display='block';
     }
 
     function desenhar(d){

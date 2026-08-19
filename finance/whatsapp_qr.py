@@ -80,6 +80,46 @@ def enviar_texto(conta_id: int, numero: str, texto: str) -> dict:
     return {"ok": False, "erro": r.get("erro") or "falha"}
 
 
+def enviar_audio(conta_id: int, numero: str, dados: bytes, mimetype: str,
+                 segundos: int, onda: bytes | None = None) -> dict:
+    """Manda um áudio de voz gravado no Zaq pelo número conectado por QR.
+
+    O corpo é BINÁRIO puro, não JSON com base64: base64 custa +33% de memória e de
+    rede dos dois lados, e o serviço Node roda com --max-old-space-size=320. Os
+    metadados vão na query; a onda (64 bytes) num cabeçalho.
+
+    `segundos` e `onda` vêm da TELA porque o Baileys só decodifica o áudio quando
+    falta um deles — e o decodificador de m4a dele falha, o que quebraria o
+    iPhone. Mandando prontos, nenhum aparelho precisa de conversão no servidor.
+    """
+    import base64
+    from urllib.parse import urlencode
+    if not configurado():
+        return {"ok": False, "erro": "qr_indisponivel"}
+    q = urlencode({"numero": numero, "mime": mimetype, "seg": max(1, int(segundos))})
+    url = f"{_base()}/session/{conta_id}/enviar-audio?{q}"
+    headers = {"x-wa-secret": _segredo(), "content-type": "application/octet-stream"}
+    if onda and len(onda) == 64:
+        headers["x-wa-onda"] = base64.b64encode(onda).decode("ascii")
+    try:
+        req = urllib.request.Request(url, data=dados, headers=headers, method="POST")
+        # prazo maior que o padrão: o Baileys ainda cifra e SOBE a mídia pro
+        # servidor do WhatsApp antes de responder — não é só um texto saindo.
+        with urllib.request.urlopen(req, timeout=45) as r:
+            resp = json.loads(r.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as e:  # noqa: BLE001
+        from core.falhas import avaliar_falha_provedor
+        avaliar_falha_provedor(f"http_{e.code}", servico="WhatsApp (QR)", canal="whatsapp")
+        return {"ok": False, "erro": f"http_{e.code}"}
+    except Exception as e:  # noqa: BLE001
+        from core.falhas import avaliar_falha_provedor
+        avaliar_falha_provedor(e, servico="WhatsApp (QR)", canal="whatsapp")
+        return {"ok": False, "erro": str(e)[:180]}
+    if resp.get("ok"):
+        return {"ok": True, "sid": resp.get("id") or ""}
+    return {"ok": False, "erro": resp.get("erro") or "falha"}
+
+
 def sair(conta_id: int) -> dict:
     """Desconecta e apaga a sessão daquela empresa.
 

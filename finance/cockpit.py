@@ -471,6 +471,103 @@ def enviar_mensagem(pool, conta_id: int, membro_id: int, lead_id: int, texto: st
     return {"ok": True}
 
 
+def pode_gravar_audio(pool, conta_id: int) -> bool:
+    """Esta conta consegue MANDAR áudio pelo Zaq?
+
+    Só o canal QR. Twilio e Cloud API mandam mídia por outro caminho (URL pública
+    e media-id), e nenhum dos dois está construído — mostrar o microfone numa
+    conta dessas faria o vendedor gravar e o envio falhar depois, que é pior que
+    não ter o botão. As três distinções seguem separadas de propósito.
+
+    TOLERANTE: falha de leitura responde não. O pior caso é um microfone que não
+    aparece; o outro lado é um áudio que o cliente nunca recebe.
+    """
+    try:
+        from finance import whatsapp_out as _wo
+        with pool.connection() as c:
+            if _wo.provedor_da_conta(c, conta_id) != "qr":
+                return False
+        from finance import whatsapp_qr as _qr
+        return _qr.configurado()
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra saber se a conta %s pode gravar áudio (%s: %s)",
+                     conta_id, type(e).__name__, e)
+        return False
+
+
+def enviar_audio(pool, conta_id: int, membro_id: int, lead_id: int, dados: bytes,
+                 mimetype: str, segundos: int, onda: bytes | None = None) -> dict:
+    """Manda o áudio que o vendedor gravou DENTRO do Zaq, e o transcreve.
+
+    A ordem importa: transcreve ANTES de enviar. Os bytes já estão aqui, então não
+    há download nenhum — enquanto hoje o áudio gravado no celular só vira texto
+    depois de o WhatsApp entregar e o serviço Node baixar de volta. Dá menos
+    trabalho ao serviço que o fluxo de hoje, não mais.
+
+    E a mensagem nasce com `membro_id`. É o ganho que sobrevive a tudo: hoje 98%
+    do que a Prime manda ao cliente chega sem nome, porque sai do celular.
+    """
+    from finance import audio_voz as av
+    from web.painel_prospeccao import _add_msg, _conversa_id
+    if not dados:
+        return {"ok": False, "erro": "Áudio vazio."}
+    if len(dados) > av.LIMITE_BYTES:
+        return {"ok": False, "erro": "Áudio grande demais."}
+    segundos = max(1, int(segundos or 1))
+    if segundos > av.LIMITE_SEGUNDOS:
+        return {"ok": False, "erro": f"Áudio passa de {av.LIMITE_SEGUNDOS}s."}
+    if not pode_gravar_audio(pool, conta_id):
+        return {"ok": False, "erro": "Esta conta não manda áudio pelo Zaq."}
+
+    with pool.connection() as c:
+        if not _posse(c, conta_id, membro_id, lead_id):
+            return {"ok": False, "erro": "escopo"}
+        p = c.execute("select whatsapp, telefone from prospeccao where id=%s and conta_id=%s",
+                      (lead_id, conta_id)).fetchone()
+    numero = (p[0] or p[1] or "") if p else ""
+    if not numero:
+        return {"ok": False, "erro": "Lead sem número de WhatsApp."}
+
+    pronto = av.preparar(dados, mimetype)
+    if pronto.get("erro"):
+        _log.warning("áudio da conta %s não converteu (%s) — vai como veio",
+                     conta_id, pronto["erro"])
+
+    # A transcrição é um EXTRA: se o STT falhar, o áudio sai do mesmo jeito. O que
+    # não pode é o vendedor ficar sem mandar porque a transcrição caiu.
+    texto = ""
+    try:
+        from core.transcribe import transcritor_se_configurado
+        tr = transcritor_se_configurado()
+        if tr is not None:
+            nome = "audio.ogg" if pronto["mimetype"].startswith("audio/ogg") else "audio.mp4"
+            texto = (tr.transcrever(pronto["bytes"], nome) or "").strip()[:4000]
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra transcrever o áudio da conta %s: %s", conta_id, e)
+
+    from finance import whatsapp_qr as _qr
+    res = _qr.enviar_audio(conta_id, numero, pronto["bytes"], pronto["mimetype"],
+                           segundos, onda)
+    if not res.get("ok"):
+        erros = {"desconectado": "WhatsApp desconectado. Reconecte na aba Canais.",
+                 "numero_invalido": "Número do lead inválido.",
+                 "qr_indisponivel": "O serviço de WhatsApp está fora do ar.",
+                 "audio_vazio_ou_grande": "Áudio grande demais."}
+        return {"ok": False, "erro": erros.get(res.get("erro"), "Não consegui enviar o áudio.")}
+
+    # a marca é a MESMA que o serviço Node escreve pro áudio que chega do celular
+    # (ver textoDaMsg), então as duas origens ficam iguais na conversa.
+    marca = "🎤 Áudio (%d:%02d)" % (segundos // 60, segundos % 60)
+    with pool.connection() as c:
+        conv = _conversa_id(c, conta_id, lead_id, "whatsapp")
+        _add_msg(c, conv, "whatsapp", "out", "humano",
+                 (marca + "\n" + texto) if texto else marca, membro_id, res.get("sid"))
+        c.execute("update conversas set status='pendente', agente_ativo=false, "
+                  "push_avisado_em=null where id=%s", (conv,))
+        c.commit()
+    return {"ok": True, "texto": texto, "convertido": pronto["convertido"]}
+
+
 def assumir(pool, conta_id: int, membro_id: int, lead_id: int) -> dict:
     """Tira a conversa do automático (o vendedor passa a responder). Revalida posse."""
     from web.painel_prospeccao import _conversa_id

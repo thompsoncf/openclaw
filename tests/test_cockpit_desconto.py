@@ -272,13 +272,31 @@ __SCRIPT__
 
 var casos = __CASOS__, saida = [];
 casos.forEach(function(c){
+  // METADE pelo CATÁLOGO e metade pelo AVULSO, de propósito: são dois caminhos de
+  // código (`linhaDe` lê de sel[i], o avulso é o próprio objeto) e alimentar só um
+  // deixaria o outro sem teste — foi o que aconteceu quando os dois guardavam o
+  // desconto com nomes de campo diferentes.
   var sel = {}, avulsos = [];
+  window.ORC.cat = [];
   c.itens.forEach(function(it, i){
-    // entra como avulso: o teste mede a CONTA, e a origem da linha não muda a conta
-    avulsos.push({nome:"i"+i, setup:it.setup, mensal:it.mensal,
-                  desc_tipo:it.desc_tipo, desc_val:it.desc_val});
+    // "pct"/0 quando o caso não diz: é como o app inicializa a linha (marcar um
+    // serviço cria {q:1,desc_tipo:"pct",desc_val:0}), e montar estado que o app
+    // nunca produz testaria outra coisa.
+    var t = it.desc_tipo || "pct", v = it.desc_val || 0;
+    if(i % 2 === 0){
+      window.ORC.cat.push({nome:"c"+i, setup:it.setup, mensal:it.mensal});
+      sel[window.ORC.cat.length-1] = {q:1, desc_tipo:t, desc_val:v};
+    } else {
+      avulsos.push({nome:"a"+i, setup:it.setup, mensal:it.mensal,
+                    desc_tipo:t, desc_val:v});
+    }
   });
   window.__orc.set(sel, avulsos, {t:c.d.t, v:c.d.v});
+  // e as LINHAS que vão no payload têm que sair com o desconto nos dois caminhos
+  var linhas = window.__orc.itens();
+  linhas.forEach(function(l, j){
+    if(l.desc_val === undefined) throw new Error("linha sem desc_val: " + JSON.stringify(l));
+  });
   var r = window.__orc.conta();
   saida.push({total:r.total, subtotal:r.subtotal, descItens:r.descItens,
               descFim:r.descFim, setup:r.setup, mensal:r.mensal});
@@ -422,3 +440,118 @@ def test_a_folha_do_cliente_mostra_o_desconto_que_o_vendedor_deu(tela, pool):
     assert all(l["cheio"] for l in linhas), "faltou o valor cheio riscado"
     # o riscado é o BRUTO e o que ele paga é o LÍQUIDO — nessa ordem
     assert linhas[0]["cheio"] != linhas[0]["subtotal"]
+
+
+_HARNESS_DOM = r"""
+globalThis.window = globalThis;
+window.ORC = {cat:[{nome:"Salão", setup:9000, mensal:0}], leadId:1, base:"", desc:true};
+
+// ---- DOM de mentira, só o bastante pros handlers rodarem ----
+// Não é fidelidade ao navegador: é provar que a pílula e o campo acham a LINHA
+// certa. Com catálogo e avulso guardando o desconto no mesmo lugar, apontar pro
+// objeto errado é o jeito de errar aqui.
+function No(tag, attrs){
+  this.tag=tag; this.attrs=attrs||{}; this.filhos=[]; this._html="";
+  this.style={}; this.textContent=""; this.value=""; this.disabled=false;
+  this.parentNode={children:[]};
+  this.classList={_c:{}, add:function(){}, remove:function(){}, toggle:function(){}};
+}
+No.prototype.getAttribute=function(k){return this.attrs[k]!==undefined?this.attrs[k]:null;};
+No.prototype.setAttribute=function(k,v){this.attrs[k]=v;};
+No.prototype.appendChild=function(n){this.filhos.push(n);return n;};
+No.prototype.querySelector=function(){return new No("div",{});};
+Object.defineProperty(No.prototype,"innerHTML",{
+  get:function(){return this._html;}, set:function(v){this._html=v;}});
+
+var caixas={};
+globalThis.document={
+  getElementById:function(id){return caixas[id]||(caixas[id]=new No("div",{id:id}));},
+  querySelector:function(){return null;},
+  createElement:function(t){return new No(t,{});},
+  addEventListener:function(ev,fn){(this._ls=this._ls||{})[ev]=(this._ls[ev]||[]).concat([fn]);},
+};
+
+__SCRIPT__
+
+// dispara um evento como o navegador dispararia, com o alvo que interessa
+function manda(ev, alvo){
+  (document._ls[ev]||[]).forEach(function(fn){
+    fn({target:alvo, stopPropagation:function(){}});
+  });
+}
+function comClosest(no, mapa){
+  no.closest=function(sel){return mapa[sel]||null;};
+  return no;
+}
+
+var erros=[], ok=function(c,m){if(!c)erros.push(m);};
+var A=window.__orc;
+
+// 1) marca o serviço do catálogo
+var linha=comClosest(new No("div",{}), {".srv": new No("div",{"data-i":"0"})});
+manda("click", linha);
+ok(A.itens().length===1, "não marcou o serviço do catálogo");
+
+// 2) põe 5% NELE — pela pílula e pelo campo, como o dedo faria
+var dsc=new No("div",{"data-k":"c0"});
+var botao=comClosest(new No("button",{"data-dt":"pct"}), {"[data-dt]":null, ".dsc":dsc});
+botao.closest=function(s){return s==="[data-dt]"?botao:(s===".dsc"?dsc:null);};
+manda("click", botao);
+var campo=new No("input",{"data-di":"c0"}); campo.value="5";
+campo.closest=function(s){return s==="[data-di]"?campo:(s===".dsc"?dsc:null);};
+manda("input", campo);
+ok(A.itens()[0].desc_val===5, "o desconto não entrou na linha do catálogo: "
+   + JSON.stringify(A.itens()[0]));
+
+// 3) agora um AVULSO, adicionado pelo botão como o vendedor faria
+document.getElementById("addnome").value="Visita";
+document.getElementById("addval").value="1000";
+document.getElementById("addbtn").onclick();
+var desenho=document.getElementById("avulsos").innerHTML;
+ok(/data-di="a0"/.test(desenho), "a linha do avulso saiu SEM o campo de desconto");
+ok(/data-dt="pct"/.test(desenho) && /data-dt="valor"/.test(desenho),
+   "a linha do avulso saiu SEM a pílula %/R$");
+ok(A.itens().length===2, "o avulso não entrou: "+A.itens().length);
+var dsc2=new No("div",{"data-k":"a0"});
+var b2=new No("button",{"data-dt":"valor"});
+b2.closest=function(s){return s==="[data-dt]"?b2:(s===".dsc"?dsc2:null);};
+manda("click", b2);
+var c2=new No("input",{"data-di":"a0"}); c2.value="240";
+c2.closest=function(s){return s==="[data-di]"?c2:(s===".dsc"?dsc2:null);};
+manda("input", c2);
+var av=A.itens()[1];
+ok(av && av.setup===1000, "o avulso perdeu o valor: "+JSON.stringify(av));
+ok(av && av.desc_tipo==="valor" && av.desc_val===240,
+   "o desconto não entrou no avulso: " + JSON.stringify(av));
+
+// 4) e o do catálogo NÃO foi mexido junto — é o erro que alvo() existe pra evitar
+ok(A.itens()[0].desc_val===5 && A.itens()[0].desc_tipo==="pct",
+   "mexer no avulso mudou a linha do catálogo: " + JSON.stringify(A.itens()[0]));
+
+// 5) e o PORTÃO na tela: conta que não vende serviço não ganha o controle em
+// linha nenhuma. O servidor já recusa o campo, mas sem isto o vendedor digitaria
+// um desconto que some calado — pior que não ter o campo.
+window.ORC.desc = false;
+document.getElementById("addnome").value="Outra";
+document.getElementById("addval").value="500";
+document.getElementById("addbtn").onclick();
+var semPortao=document.getElementById("avulsos").innerHTML;
+ok(!/data-di=/.test(semPortao), "conta sem serviço ganhou campo de desconto");
+ok(!/data-dt=/.test(semPortao), "conta sem serviço ganhou a pílula %/R$");
+
+if(erros.length){console.log("FALHOU: "+erros.join(" | "));process.exit(1);}
+console.log("OK");
+"""
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node não instalado")
+def test_a_pilula_e_o_campo_acertam_a_linha_certa(tmp_path):
+    """Catálogo e avulso guardam o desconto no MESMO formato e passam pela mesma
+    porta (`alvo`). O jeito de errar aqui é apontar pro objeto errado — mexer no
+    avulso e o desconto cair no serviço do catálogo, calado. Então os handlers
+    rodam de verdade, com evento e alvo, em vez de serem lidos."""
+    f = tmp_path / "dom.mjs"
+    f.write_text(_HARNESS_DOM.replace("__SCRIPT__", _script_do_cockpit()), encoding="utf-8")
+    p = subprocess.run(["node", str(f)], capture_output=True, text=True, timeout=60)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert "OK" in p.stdout

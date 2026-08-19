@@ -553,11 +553,18 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .avulso button{flex-shrink:0;width:42px;border:1px solid var(--line);border-radius:10px;
   background:var(--surface);color:var(--neon);font-size:1.1rem;font-weight:700;cursor:pointer}
 .vazio-cat{padding:1rem 1.1rem;color:var(--text-dim);font-size:.86rem;line-height:1.5}
-.avl{display:flex;align-items:center;gap:.7rem;margin:.45rem 1.1rem 0;padding:.5rem .7rem;
-  border:1px solid var(--neon-borda);background:var(--neon-fraco);border-radius:10px}
+/* o avulso agora leva o desconto também: a linha QUEBRA em duas em vez de
+   espremer quatro controles numa faixa de 10 caracteres. */
+.avl{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;margin:.45rem 1.1rem 0;
+  padding:.5rem .7rem;border:1px solid var(--neon-borda);background:var(--neon-fraco);
+  border-radius:10px}
 .avl b{flex:1;min-width:0;font-size:.86rem;font-weight:500;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
-.avl span{font-family:var(--mono);font-size:.8rem;color:var(--neon);flex-shrink:0}
+.avl>span.vl{font-family:var(--mono);font-size:.8rem;color:var(--neon);flex-shrink:0;
+  text-align:right}
+.avl>span.vl s{display:block;color:var(--text-faint);font-size:.72rem;
+  text-decoration:line-through}
+.avl .dsc{flex:1 1 100%;margin-top:.1rem}
 .avl button{flex-shrink:0;width:26px;height:26px;border-radius:8px;border:1px solid var(--line);
   background:var(--surface);color:var(--text-dim);font:inherit;font-size:1rem;line-height:1;cursor:pointer}
 /* rodapé fixo do construtor: total à esquerda, ação à direita */
@@ -1496,8 +1503,10 @@ _ORC_JS = r"""
 <script>
 (function(){
   var O=window.ORC||{cat:[],leadId:0,base:"",desc:false};
-  // sel[i] = {q, dt, dv} — quantidade E desconto da linha no MESMO lugar. Mapa
+  // sel[i] = {q, desc_tipo, desc_val} — quantidade E desconto no MESMO lugar. Mapa
   // paralelo casado por índice seria a armadilha que a 162 tirou dos títulos.
+  // Os NOMES são os mesmos que o avulso usa e os mesmos que vão no payload: um
+  // campo com dois nomes pelo caminho é onde o desconto se perde na tradução.
   var sel={}, avulsos=[], dFim={t:"pct",v:0};
   function $(id){return document.getElementById(id);}
   function brl(v){return "R$ "+Number(v||0).toLocaleString("pt-BR");}
@@ -1587,10 +1596,14 @@ _ORC_JS = r"""
       box.appendChild(d);
     });
   }
+  // "c3" = 3ª linha do catálogo, "a1" = 2º avulso. Uma porta só: o controle é o
+  // mesmo nos dois, e dois caminhos separados divergiriam no primeiro ajuste.
+  function alvo(k){return k.charAt(0)==="c"?sel[k.slice(1)]:avulsos[k.slice(1)];}
+  function itemDe(k){return k.charAt(0)==="c"?linhaDe(k.slice(1)):avulsos[k.slice(1)];}
   function linhaDe(i){
     var s=O.cat[i], e=sel[i];
     return {nome:s.nome+(e.q>1?" (× "+e.q+")":""), setup:(s.setup||0)*e.q,
-            mensal:(s.mensal||0)*e.q, desc_tipo:e.dt, desc_val:e.dv};
+            mensal:(s.mensal||0)*e.q, desc_tipo:e.desc_tipo, desc_val:e.desc_val};
   }
   function itens(){
     var out=[];
@@ -1620,7 +1633,8 @@ _ORC_JS = r"""
     var dt=e.target.closest("[data-dt]");
     if(dt){e.stopPropagation();
       var k=dt.closest(".dsc").getAttribute("data-k");
-      if(k){sel[k.slice(1)].dt=dt.getAttribute("data-dt");pintaCatalogo();soma();}
+      if(k){alvo(k).desc_tipo=dt.getAttribute("data-dt");
+        pintaCatalogo();pintaAvulsos();soma();}
       return;}
     if(e.target.closest(".cmp")){e.stopPropagation();return;}
     var qb=e.target.closest("[data-q]");
@@ -1628,7 +1642,7 @@ _ORC_JS = r"""
       sel[i].q=Math.max(1,sel[i].q+(qb.getAttribute("data-q")==="+"?1:-1));pintaCatalogo();soma();return;}
     var row=e.target.closest(".srv");
     if(row){var j=row.getAttribute("data-i");
-      if(sel[j]!==undefined)delete sel[j];else sel[j]={q:1,dt:"pct",dv:0};
+      if(sel[j]!==undefined)delete sel[j];else sel[j]={q:1,desc_tipo:"pct",desc_val:0};
       pintaCatalogo();soma();}
   });
   // o rodapé é só o desconto do total — pílula própria, mesmo desenho
@@ -1645,10 +1659,12 @@ _ORC_JS = r"""
     var f=e.target.closest("[data-di]");
     if(f){
       var k=f.getAttribute("data-di"), v=parseInt((f.value||"").replace(/\D/g,''),10);
-      sel[k.slice(1)].dv=Math.max(0,isNaN(v)?0:v);
-      var row=$("cat").querySelector('.srv[data-i="'+k.slice(1)+'"]');
-      var it=linhaDe(k.slice(1));
-      if(row)row.querySelector(".pr").innerHTML=precoCel(it);
+      alvo(k).desc_val=Math.max(0,isNaN(v)?0:v);
+      var it=itemDe(k), i=k.slice(1);
+      var row=(k.charAt(0)==="c")
+        ? $("cat").querySelector('.srv[data-i="'+i+'"]')
+        : $("avulsos").querySelector('.avl[data-a="'+i+'"]');
+      if(row)row.querySelector(k.charAt(0)==="c"?".pr":".vl").innerHTML=precoCel(it);
       var tg=f.closest(".dsc").querySelector(".tag");
       var pc=pctLinha(it);
       var txt=pc>0?("− "+brl(Math.round(arr(contribuicao(it)*pc/100)/100))):"";
@@ -1668,8 +1684,10 @@ _ORC_JS = r"""
   function pintaAvulsos(){
     var box=$("avulsos");if(!box)return;
     box.innerHTML=avulsos.map(function(a,i){
-      return '<div class=avl><b>'+esc(a.nome)+'</b><span>'+brl(a.setup)+'</span>'
-        +'<button type=button data-x="'+i+'" aria-label="Remover '+esc(a.nome)+'">×</button></div>';
+      return '<div class=avl data-a="'+i+'"><b>'+esc(a.nome)+'</b>'
+        +'<span class=vl>'+precoCel(a)+'</span>'
+        +'<button type=button data-x="'+i+'" aria-label="Remover '+esc(a.nome)+'">×</button>'
+        +ctrl("a"+i,a)+'</div>';
     }).join("");
   }
   document.addEventListener("click",function(e){
@@ -1682,9 +1700,10 @@ _ORC_JS = r"""
     var n=$("addnome").value.trim();
     var v=parseInt(($("addval").value||"").replace(/\D/g,''),10);
     if(!n||!v){toast("Preencha o nome e o valor");return;}
-    // avulso não leva desconto de linha: não existe preço de tabela pra descontar,
-    // o vendedor digita o valor que quer. O desconto do total pega ele igual.
-    avulsos.push({nome:n,setup:v,mensal:0});
+    // o avulso leva desconto igual ao item de catálogo: o vendedor põe o preço
+    // cheio ("Visita técnica R$ 400") e negocia por cima, e aí o cliente vê o
+    // riscado na folha em vez de um valor que apareceu já abatido do nada.
+    avulsos.push({nome:n,setup:v,mensal:0,desc_tipo:"pct",desc_val:0});
     $("addnome").value="";$("addval").value="";pintaAvulsos();soma();toast("Item adicionado");
   };
   var g=$("gerar");

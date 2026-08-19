@@ -284,8 +284,17 @@ def painel_servicos(request: Request):
     # gravado em setup_centavos por baixo, pra "Fechar contrato" não virar
     # cobrança recorrente errada de um evento pontual).
     servico_avulso = nicho == "eventos"
+    # O CONTRATO É DO DONO. Ele define o que a empresa se compromete a cumprir
+    # com o cliente — prazo, multa, sinal — e isso não é decisão de quem vende.
+    # `gerir` é a capacidade que já separa o titular do resto (contas/equipe.py:26:
+    # só o dono tem); usar ela evita criar uma segunda régua de permissão que
+    # amanhã diverge da primeira.
+    from contas import equipe as _equipe
+    pode_contrato = servico_avulso and _equipe.caps_do_papel(
+        request.session.get("papel", "dono"))["gerir"]
     return _render("servicos", request, empresa_nome=conta[2],
                    tem_pj=True, vende_servico=True, servico_avulso=servico_avulso,
+                   pode_contrato=pode_contrato,
                    tipos_evento=scat.TIPOS_EVENTO, tipos_contrato=scat.TIPOS_CONTRATO,
                    local_padrao=_local_padrao(dados_emp) if servico_avulso else "",
                    icones_paleta=ics.paleta())
@@ -923,6 +932,13 @@ def _conta_evento(request: Request):
     conta, redir = _conta_servico(request)
     if redir is not None:
         return None, JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    # SÓ O DONO. Esconder o card no template não tranca nada: estas rotas são
+    # POST e a URL é chamável direto. O vendedor abre a mesma aba (tem `vendas`),
+    # então sem esta linha ele editaria as cláusulas que a empresa assina.
+    from contas import equipe as _equipe
+    if not _equipe.caps_do_papel(request.session.get("papel", "dono"))["gerir"]:
+        return None, JSONResponse(
+            {"erro": "só o dono da empresa configura o contrato"}, status_code=403)
     nicho = (emp.obter_dados_empresa(get_pool(), conta[0]) or {}).get("nicho")
     if not ctr.tem_contrato(nicho):
         return None, JSONResponse({"erro": "contrato de locação é do nicho de eventos"},
@@ -1286,6 +1302,38 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 }
 </style>{% endraw %}
 
+{% if pode_contrato %}
+{# Contrato de locação: nicho de eventos E só pro DONO — ele define o que a
+   empresa se compromete a cumprir, e isso não é decisão de quem vende. O gate
+   de verdade está nas rotas (ver _conta_evento): esconder o card não impede
+   um POST direto.
+
+   PRIMEIRO CARD DA PÁGINA. Era o último, depois do Funil — quem ia gerar a
+   proposta não passava por ele, e campo sem valor só aparecia no documento do
+   cliente. Fechado ocupa uma linha: o selo responde "está tudo certo?" sem
+   tirar espaço de quem só quer montar o orçamento, que é o trabalho diário. #}
+<div class="card" id="ct-card">
+  {# Cabeçalho clicável INTEIRO, não só a seta: alvo de 12px no celular é o que
+     faz o dono achar que a tela travou. #}
+  <div id="ct-cab" style="display:flex;align-items:center;gap:.6rem;cursor:pointer;user-select:none">
+    <span id="ct-seta" style="color:var(--mut);font-size:.85rem;transition:transform .18s">▸</span>
+    <div style="min-width:0">
+      <div style="font-weight:700;font-size:1rem">Contrato de locação</div>
+      <div id="ct-resumo" class="mut" style="font-size:.78rem;margin-top:.1rem">Carregando...</div>
+    </div>
+    <div id="ct-selo" style="margin-left:auto;flex-shrink:0"></div>
+  </div>
+  <div id="ct-corpo" style="display:none;margin-top:.85rem;padding-top:.85rem;border-top:1px solid var(--borda)">
+    <p class="mut" style="margin-top:0;font-size:.86rem">
+      As cláusulas são suas — escreva como quiser. Onde entra um valor, use um
+      <b style="color:var(--verde-claro)">campo</b>: ele é preenchido na hora com o preço do
+      catálogo e os dados do orçamento, então o contrato nunca diz um número diferente da proposta.
+    </p>
+    <div id="ct-box"><p class="mut">Carregando...</p></div>
+  </div>
+</div>
+{% endif %}
+
 <div class="card"{% if servico_avulso %} style="display:none"{% endif %}>
   <h2 style="margin-top:0">Escopo automático · IA</h2>
   <p class="mut" style="margin-top:0">Cole o site ou a descrição do cliente. A IA escolhe os módulos e escreve o escopo da proposta.</p>
@@ -1561,30 +1609,6 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   <div id="oc-hist-box"><p class="mut">Carregando...</p></div>
 </div>
 
-{% if servico_avulso %}
-{# Contrato de locação: só existe no nicho de eventos. O gate de verdade está nas
-   rotas (ver _conta_evento) — esconder o card não impede um POST direto. #}
-<div class="card" id="ct-card">
-  {# Cabeçalho clicável INTEIRO, não só a seta: alvo de 12px no celular é o que
-     faz o dono achar que a tela travou. #}
-  <div id="ct-cab" style="display:flex;align-items:center;gap:.6rem;cursor:pointer;user-select:none">
-    <span id="ct-seta" style="color:var(--mut);font-size:.85rem;transition:transform .18s">▸</span>
-    <div style="min-width:0">
-      <div style="font-weight:700;font-size:1rem">Contrato de locação</div>
-      <div id="ct-resumo" class="mut" style="font-size:.78rem;margin-top:.1rem">Carregando...</div>
-    </div>
-    <div id="ct-selo" style="margin-left:auto;flex-shrink:0"></div>
-  </div>
-  <div id="ct-corpo" style="display:none;margin-top:.85rem;padding-top:.85rem;border-top:1px solid var(--borda)">
-    <p class="mut" style="margin-top:0;font-size:.86rem">
-      As cláusulas são suas — escreva como quiser. Onde entra um valor, use um
-      <b style="color:var(--verde-claro)">campo</b>: ele é preenchido na hora com o preço do
-      catálogo e os dados do orçamento, então o contrato nunca diz um número diferente da proposta.
-    </p>
-    <div id="ct-box"><p class="mut">Carregando...</p></div>
-  </div>
-</div>
-{% endif %}
 </div>
 
 <script>window.SERVICO_AVULSO = {{ 'true' if servico_avulso else 'false' }};</script>

@@ -362,13 +362,20 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if _dono and vende_produto %}{{ navi('abastecimento','/painel/produtos/abastecimento','abastecimento','Abastecimento') }}{% endif %}
   {% if vende_servico and caps.vendas %}{{ navi('servicos','/painel/servicos','financeiro','Serviços') }}{% endif %}
   {% if tem_pj and caps.vendas %}{{ navi('prospeccao','/painel/prospeccao','prospeccao','Prospecção') }}{% endif %}
+  {# A Agenda é COMPARTILHADA (dono, gestor e vendedor veem a mesma) desde o #490, e
+     saiu do grupo "Pessoal" por isso: virou ferramenta de trabalho do time, não a
+     agenda particular do dono. A regra aqui espelha a do gate (rotas_do_papel): quem
+     tem vendas ou financeiro entra. Sem esta linha a rota abria mas NENHUM link
+     aparecia pro time — o buraco que o #490 deixou. `_tem_app` fica pra conta só de
+     cesta não ganhar um menu que ela nunca teve. #}
+  {% if _tem_app and (caps.vendas or caps.financeiro) %}{{ navi('agenda','/painel/agenda','agenda','Agenda') }}{% endif %}
   {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{{ navi('relatorios','/painel/relatorios','relatorios','Relatórios') }}{% endif %}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
   {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes') }}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
   {% if _dono and _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
   {% if _dono and (_tem_app or _tem_cesta) %}<div class="side-grp">Pessoal</div>{% endif %}
-  {% if _dono and _tem_app %}{{ navi('agenda','/painel/agenda','agenda','Agenda') }}{{ navi('painel','/painel','painel','Painel') }}{{ navi('compras','/painel/compras','compras','Lista de compras') }}{% endif %}
+  {% if _dono and _tem_app %}{{ navi('painel','/painel','painel','Painel') }}{{ navi('compras','/painel/compras','compras','Lista de compras') }}{% endif %}
   {% if _dono and _tem_cesta %}{{ navi('assinaturas','/painel/assinaturas','cesta','Assinaturas') }}{{ navi('pedidos','/painel/meus-pedidos','compras','Meus pedidos') }}{% endif %}
   {% if n_contextos > 1 %}{{ navi('trocar','/trocar','fornecedor','Trocar empresa') }}{% endif %}
   {# Novidades é de quem MANDA na conta — dono ou gestor (contas.equipe.recebe_novidades).
@@ -394,13 +401,20 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if _dono and vende_produto %}{{ navi('abastecimento','/painel/produtos/abastecimento','abastecimento','Abastecimento') }}{% endif %}
   {% if vende_servico and caps.vendas %}{{ navi('servicos','/painel/servicos','financeiro','Serviços') }}{% endif %}
   {% if tem_pj and caps.vendas %}{{ navi('prospeccao','/painel/prospeccao','prospeccao','Prospecção') }}{% endif %}
+  {# A Agenda é COMPARTILHADA (dono, gestor e vendedor veem a mesma) desde o #490, e
+     saiu do grupo "Pessoal" por isso: virou ferramenta de trabalho do time, não a
+     agenda particular do dono. A regra aqui espelha a do gate (rotas_do_papel): quem
+     tem vendas ou financeiro entra. Sem esta linha a rota abria mas NENHUM link
+     aparecia pro time — o buraco que o #490 deixou. `_tem_app` fica pra conta só de
+     cesta não ganhar um menu que ela nunca teve. #}
+  {% if _tem_app and (caps.vendas or caps.financeiro) %}{{ navi('agenda','/painel/agenda','agenda','Agenda') }}{% endif %}
   {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{{ navi('relatorios','/painel/relatorios','relatorios','Relatórios') }}{% endif %}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
   {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes') }}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
   {% if _dono and _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
   {% if _dono and (_tem_app or _tem_cesta) %}<div class="side-grp">Pessoal</div>{% endif %}
-  {% if _dono and _tem_app %}{{ navi('agenda','/painel/agenda','agenda','Agenda') }}{{ navi('painel','/painel','painel','Painel') }}{{ navi('compras','/painel/compras','compras','Lista de compras') }}{% endif %}
+  {% if _dono and _tem_app %}{{ navi('painel','/painel','painel','Painel') }}{{ navi('compras','/painel/compras','compras','Lista de compras') }}{% endif %}
   {% if _dono and _tem_cesta %}{{ navi('assinaturas','/painel/assinaturas','cesta','Assinaturas') }}{{ navi('pedidos','/painel/meus-pedidos','compras','Meus pedidos') }}{% endif %}
   {% if n_contextos > 1 %}{{ navi('trocar','/trocar','fornecedor','Trocar empresa') }}{% endif %}
   {% if ve_novidades %}<div class="side-grp">Sistema</div>{{ navi_n() }}{% endif %}

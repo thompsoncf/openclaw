@@ -61,7 +61,7 @@ def _novo(req, **kw):
                   email="", cnpj="", cpf="", documento="", tipo="", temperatura="frio",
                   valor="", origem="manual", vendedor_id="", obs="", socio="",
                   regime_tributario="", porte="", cargo="", instagram="", site_url="",
-                  receita="", voltar="")
+                  receita="", voltar="", destino="")
     campos.update(kw)
     return pp.prospeccao_novo(req, **campos)
 

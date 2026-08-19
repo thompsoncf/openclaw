@@ -50,7 +50,11 @@ create table mensagens (id bigserial primary key, conversa_id bigint, canal text
   autor text default 'humano', membro_id bigint, texto text default '', provider_sid text,
   criado_em timestamptz default now());
 create table funil_etapas (id bigserial primary key, conta_id bigint, chave text, rotulo text,
-  ordem int default 0, fixa boolean default false, unique (conta_id, chave));
+  -- `fase` (migração 177) é o que os painéis leem pra saber o que conta como venda
+  -- ganha; sem a coluna aqui, toda consulta do cockpit estoura com UndefinedColumn
+  ordem int default 0, fixa boolean default false, fase text not null default 'venda',
+  prazo_min integer, gatilho text, gatilho_ativo boolean not null default false,
+  unique (conta_id, chave));
 create table prospeccao_atividades (id bigserial primary key, prospeccao_id bigint, membro_id bigint,
   tipo text, resultado text, descricao text, criado_em timestamptz default now());
 create table cockpit_acesso (token text primary key, conta_id bigint, membro_id bigint,

@@ -105,9 +105,30 @@ def test_o_atalho_antigo_continua_abrindo_o_painel():
 
 
 # ── o tamanho ──────────────────────────────────────────────────────────────
-def test_sao_seis_abas_mais_a_engrenagem():
-    """6 abas + ⚙️ = 786px medidos, contra 996px das 8 de antes. Se este número subir,
-    a barra vai rolar (não quebra), mas vale saber que subiu."""
+def test_sao_sete_abas_mais_a_engrenagem():
+    """Eram 6 + ⚙️ (786px). A Régua entrou e são 7 + ⚙️.
+
+    O aviso do teste anterior valia como aviso, não como proibição: a barra ROLA em
+    vez de quebrar (test_a_barra_rola_em_vez_de_quebrar), então uma aba a mais custa
+    rolagem, não uma segunda linha. A Régua ganhou lugar porque é onde se liga e
+    desliga o automático do funil — quem procura isso procura na barra do módulo, e
+    esconder configuração de comportamento dentro de outra tela é como se perde uma
+    função inteira. Se este número subir de novo, pense duas vezes: a próxima
+    provavelmente é submenu, não aba."""
     abas = _abas(pp._navbar("funil"))
-    assert len(abas) == 7, f"esperado 6 abas + ⚙️, veio {len(abas)}: {abas}"
+    assert len(abas) == 8, f"esperado 7 abas + ⚙️, veio {len(abas)}: {abas}"
     assert abas[-1] == "⚙️"
+    assert "⏱️ Régua" in abas
+
+
+# ── o quadro do funil ──────────────────────────────────────────────────────
+def test_o_funil_nao_quebra_linha_com_etapa_a_mais():
+    """`repeat(6, ...)` fixo era uma aposta em quantas etapas a conta tem — e as
+    etapas são configuráveis. Quem criou uma 7ª (pós-venda, por exemplo) já via a
+    última coluna cair pra segunda linha no desktop. Agora o quadro rola, como a
+    barra de abas faz desde a reforma dela."""
+    css = pp._CSS.split(".kbrow{display:grid")[1].split("}")[0]
+    # o assert é na REGRA, não no arquivo: o comentário do CSS cita o número antigo
+    # pra explicar o que mudou, e procurá-lo solto acusaria a própria explicação
+    assert "repeat(" not in css, "voltou o número fixo de colunas"
+    assert "grid-auto-columns" in css and "overflow-x:auto" in css

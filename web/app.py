@@ -204,6 +204,19 @@ def _iniciar_poller_email() -> None:
                 _lb.rodar(pool)                  # resumo do dia + aviso antes (agenda)
             except Exception as e:  # noqa: BLE001
                 log.info("poller: ciclo #%d — lembretes falhou: %s: %s", ciclo, type(e).__name__, e)
+            try:
+                # A régua do funil: move o card quando o fato acontece (gatilho) ou
+                # anota o que TERIA movido (modo observação). Inerte por padrão —
+                # só entra em contas que ligaram, e nasce desligada.
+                from finance import funil_regua as _fregua
+                _r = _fregua.rodar(pool)
+                if _r["contas"]:
+                    log.info("poller: ciclo #%d — régua: %d conta(s), %d movido(s), "
+                             "%d simulado(s), %d aviso(s), %d escalado(s)",
+                             ciclo, _r["contas"], _r["movidos"], _r["simulados"],
+                             _r["avisos"], _r["escalados"])
+            except Exception as e:  # noqa: BLE001
+                log.info("poller: ciclo #%d — régua falhou: %s: %s", ciclo, type(e).__name__, e)
 
     try:
         threading.Thread(target=_loop, daemon=True, name="email-poller").start()

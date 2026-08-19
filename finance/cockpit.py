@@ -17,6 +17,16 @@ from __future__ import annotations
 
 import logging
 import secrets
+from finance import funil_regua as _fr
+
+# "Em aberto" e "ganho do mês" passam a perguntar pela FASE da etapa em vez do
+# literal 'ganho' — ver finance/funil_regua.sql_fechadas. Sem isto, o lead que
+# anda pra uma etapa de pós-venda sumiria do placar do vendedor no dia em que
+# alguém arrastasse o card, como se a venda tivesse sido desfeita.
+_ABERTO_P = "p.status not in " + _fr.sql_encerradas("p")
+_ABERTO_T = "status not in " + _fr.sql_encerradas("prospeccao")
+_FECHADO_T = "status in " + _fr.sql_fechadas("prospeccao")
+
 from datetime import date as _date, datetime, timedelta, timezone
 
 _log = logging.getLogger(__name__)
@@ -280,7 +290,7 @@ def _base_leads_sql() -> str:
                               where conversa_id=cv.id order by criado_em desc limit 1) lm on true
          where p.conta_id=%s and p.vendedor_id=%s
            and coalesce(p.estagio,'lead')='lead'
-           and p.status not in ('ganho','perdido')
+           and """ + _ABERTO_P + """
          order by coalesce(cv.ultima_msg_em, p.atualizado_em) desc
          limit 100"""
 
@@ -302,7 +312,7 @@ def total_pendentes(pool, conta_id: int, membro_id: int) -> int:
                  ) x on true
                 where p.conta_id=%s and p.vendedor_id=%s
                   and coalesce(p.estagio,'lead')='lead'
-                  and p.status not in ('ganho','perdido')""",
+                  and """ + _ABERTO_P + """""",
             (conta_id, membro_id)).fetchone()
     return int(r[0] or 0) if r else 0
 
@@ -322,7 +332,7 @@ def sinal_fila(pool, conta_id: int, membro_id: int) -> str:
                  ) ult on true
                 where p.conta_id=%s and p.vendedor_id=%s
                   and coalesce(p.estagio,'lead')='lead'
-                  and p.status not in ('ganho','perdido')""",
+                  and """ + _ABERTO_P + """""",
             (conta_id, membro_id)).fetchone()
     return f"{r[0]}:{r[1]}" if r else "0:0"
 
@@ -415,11 +425,11 @@ def perfil(pool, conta_id: int, membro_id: int) -> dict:
         m = _conta_membro(c, conta_id, membro_id)
         na_fila = c.execute(
             "select count(*) from prospeccao where conta_id=%s and vendedor_id=%s "
-            "and coalesce(estagio,'lead')='lead' and status not in ('ganho','perdido')",
+            "and coalesce(estagio,'lead')='lead' and " + _ABERTO_T,
             (conta_id, membro_id)).fetchone()[0]
         ganhos = c.execute(
             "select count(*) from prospeccao where conta_id=%s and vendedor_id=%s "
-            "and status='ganho' and atualizado_em >= date_trunc('month', now())",
+            "and " + _FECHADO_T + " and atualizado_em >= date_trunc('month', now())",
             (conta_id, membro_id)).fetchone()[0]
         atend = c.execute(
             "select count(distinct cv.prospeccao_id) from conversas cv "
@@ -634,6 +644,22 @@ def assumir(pool, conta_id: int, membro_id: int, lead_id: int) -> dict:
     return {"ok": True}
 
 
+def _historico(c, conta_id, lead_id, de, para, membro_id) -> None:
+    """Linha no histórico do funil. Best-effort de propósito: registrar é
+    acessório, mover o card do vendedor é o pedido — e o Cockpit roda no celular
+    dele, no meio da rua."""
+    # O `with c.transaction()` é SAVEPOINT, e não enfeite: sem ele um erro aqui
+    # aborta a transação inteira, o except engole a exceção e o commit lá embaixo
+    # vira ROLLBACK calado — o vendedor arrasta o card, a tela diz "ok" e nada
+    # muda. Com o savepoint, quem cai é só o registro.
+    try:
+        from finance import funil_regua as _fr
+        with c.transaction():
+            _fr.registrar_movimento(c, conta_id, lead_id, de, para, "manual", membro_id)
+    except Exception:  # noqa: BLE001
+        _log.warning("movimento do funil não registrado (lead %s)", lead_id, exc_info=True)
+
+
 def mudar_etapa(pool, conta_id: int, membro_id: int, lead_id: int, chave: str) -> dict:
     """Move o lead pra uma etapa do funil (não deixa cair em ganho/perdido por aqui —
     isso é o botão de fechar). Revalida posse e que a etapa é da conta."""
@@ -647,8 +673,11 @@ def mudar_etapa(pool, conta_id: int, membro_id: int, lead_id: int, chave: str) -
                        (conta_id, chave)).fetchone()
         if not ok:
             return {"ok": False, "erro": "etapa_invalida"}
+        antes = c.execute("select status from prospeccao where id=%s and conta_id=%s",
+                          (lead_id, conta_id)).fetchone()
         c.execute("update prospeccao set status=%s, atualizado_em=now() "
                   "where id=%s and conta_id=%s", (chave, lead_id, conta_id))
+        _historico(c, conta_id, lead_id, antes[0] if antes else None, chave, membro_id)
         c.commit()
     return {"ok": True}
 
@@ -807,8 +836,11 @@ def fechar(pool, conta_id: int, membro_id: int, lead_id: int, tipo: str, motivo:
     with pool.connection() as c:
         if not _posse(c, conta_id, membro_id, lead_id):
             return {"ok": False, "erro": "escopo"}
+        antes = c.execute("select status from prospeccao where id=%s and conta_id=%s",
+                          (lead_id, conta_id)).fetchone()
         c.execute("update prospeccao set status=%s, atualizado_em=now() "
                   "where id=%s and conta_id=%s", (tipo, lead_id, conta_id))
+        _historico(c, conta_id, lead_id, antes[0] if antes else None, tipo, membro_id)
         try:
             c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id, tipo, resultado, descricao)
                          values (%s,%s,'nota',%s,%s)""",
@@ -1402,7 +1434,7 @@ def agendar_visita(pool, conta_id: int, membro_id: int, lead_id: int, *, data: s
             pass
         # ao agendar a visita, o lead avança pra 'qualificado' (nunca mexe em ganho/perdido)
         c.execute("update prospeccao set status='qualificado', ultimo_contato_em=now(), atualizado_em=now() "
-                  "where id=%s and conta_id=%s and status not in ('ganho','perdido')", (lead_id, conta_id))
+                  "where id=%s and conta_id=%s and " + _ABERTO_T, (lead_id, conta_id))
         c.commit()
     ics_url = f"{_app_url()}/visita/{token}.ics"
     msg = (f"Olá! 👋 Sua visita ao {esp['nome']} está marcada:\n📅 {quando}\n📍 {local}"

@@ -6142,6 +6142,13 @@ def prospeccao_orcamento(request: Request, alvo_id: int):
             novo_status = alvo["status"] if alvo["status"] in ("ganho", "perdido") else "proposta"
             c.execute("update prospeccao set orcamento_id=%s, status=%s, atualizado_em=now() "
                       "where id=%s and conta_id=%s", (oid, novo_status, alvo_id, ctx["conta_id"]))
+            try:
+                from finance import funil_regua as _fr
+                with c.transaction():    # savepoint: registrar não pode derrubar o orçamento
+                    _fr.registrar_movimento(c, ctx["conta_id"], alvo_id, alvo["status"], novo_status,
+                                            "orcamento", ctx["membro_id"])
+            except Exception:  # noqa: BLE001
+                pass
             c.commit()
     return RedirectResponse(f"/painel/servicos?abrir={oid}", status_code=303)
 
@@ -6168,6 +6175,22 @@ async def prospeccao_status(request: Request, alvo_id: int):
         c.execute("""update prospeccao set status=%s, estagio='lead', atualizado_em=now()
                        where id=%s and conta_id=%s""",
                   (status, alvo_id, ctx["conta_id"]))
+        # O histórico é o que o banco nunca teve: sem ele ninguém consegue dizer
+        # quanto um lead ficou em cada coluna. Grava desde já, com a régua toda
+        # desligada — anotar o que a pessoa acabou de fazer não é automação. E é
+        # esta linha 'manual' que a trava 3 da régua respeita depois.
+        # SAVEPOINT, não enfeite: sem ele um erro no registro aborta a transação e
+        # o commit abaixo vira ROLLBACK calado — o card volta pra coluna antiga e a
+        # tela diz que deu certo. Mesmo motivo do savepoint da distribuição.
+        try:
+            from finance import funil_regua as _fr
+            with c.transaction():
+                _fr.registrar_movimento(c, ctx["conta_id"], alvo_id, alvo["status"], status,
+                                        "manual", ctx["membro_id"])
+        except Exception:  # noqa: BLE001 — histórico é acessório; mover o card é o pedido
+            import logging
+            logging.getLogger("funil.historico").warning(
+                "movimento do lead %s não registrado", alvo_id, exc_info=True)
         c.commit()
     return JSONResponse({"ok": True, "status": status, "estagio": "lead"})
 
@@ -6363,6 +6386,13 @@ def _reg_atividade(c, alvo_id, conta_id, membro_id, tipo, descricao, status_atua
     c.execute("""update prospeccao set ultimo_contato_em=now(), status=%s,
                    atualizado_em=now() where id=%s and conta_id=%s""",
               (novo, alvo_id, conta_id))
+    if novo != status_atual:
+        try:
+            from finance import funil_regua as _fr
+            with c.transaction():        # savepoint: registrar não pode derrubar a atividade
+                _fr.registrar_movimento(c, conta_id, alvo_id, status_atual, novo, "atividade", membro_id)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 @router.post("/painel/prospeccao/{alvo_id}/mensagem-ia")

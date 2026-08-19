@@ -324,6 +324,22 @@ def assumir(pool, conta_id: int, membro_id: int, lead_id: int) -> dict:
     return {"ok": True}
 
 
+def _historico(c, conta_id, lead_id, de, para, membro_id) -> None:
+    """Linha no histórico do funil. Best-effort de propósito: registrar é
+    acessório, mover o card do vendedor é o pedido — e o Cockpit roda no celular
+    dele, no meio da rua."""
+    # O `with c.transaction()` é SAVEPOINT, e não enfeite: sem ele um erro aqui
+    # aborta a transação inteira, o except engole a exceção e o commit lá embaixo
+    # vira ROLLBACK calado — o vendedor arrasta o card, a tela diz "ok" e nada
+    # muda. Com o savepoint, quem cai é só o registro.
+    try:
+        from finance import funil_regua as _fr
+        with c.transaction():
+            _fr.registrar_movimento(c, conta_id, lead_id, de, para, "manual", membro_id)
+    except Exception:  # noqa: BLE001
+        _log.warning("movimento do funil não registrado (lead %s)", lead_id, exc_info=True)
+
+
 def mudar_etapa(pool, conta_id: int, membro_id: int, lead_id: int, chave: str) -> dict:
     """Move o lead pra uma etapa do funil (não deixa cair em ganho/perdido por aqui —
     isso é o botão de fechar). Revalida posse e que a etapa é da conta."""
@@ -337,8 +353,11 @@ def mudar_etapa(pool, conta_id: int, membro_id: int, lead_id: int, chave: str) -
                        (conta_id, chave)).fetchone()
         if not ok:
             return {"ok": False, "erro": "etapa_invalida"}
+        antes = c.execute("select status from prospeccao where id=%s and conta_id=%s",
+                          (lead_id, conta_id)).fetchone()
         c.execute("update prospeccao set status=%s, atualizado_em=now() "
                   "where id=%s and conta_id=%s", (chave, lead_id, conta_id))
+        _historico(c, conta_id, lead_id, antes[0] if antes else None, chave, membro_id)
         c.commit()
     return {"ok": True}
 
@@ -396,8 +415,11 @@ def fechar(pool, conta_id: int, membro_id: int, lead_id: int, tipo: str, motivo:
     with pool.connection() as c:
         if not _posse(c, conta_id, membro_id, lead_id):
             return {"ok": False, "erro": "escopo"}
+        antes = c.execute("select status from prospeccao where id=%s and conta_id=%s",
+                          (lead_id, conta_id)).fetchone()
         c.execute("update prospeccao set status=%s, atualizado_em=now() "
                   "where id=%s and conta_id=%s", (tipo, lead_id, conta_id))
+        _historico(c, conta_id, lead_id, antes[0] if antes else None, tipo, membro_id)
         try:
             c.execute("""insert into prospeccao_atividades (prospeccao_id, membro_id, tipo, resultado, descricao)
                          values (%s,%s,'nota',%s,%s)""",

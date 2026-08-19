@@ -1,0 +1,305 @@
+"""A régua do funil — as quatro travas, o relógio de atendimento e a bola.
+
+O que estes testes protegem, em uma frase cada:
+  * o relógio só anda em horário de atendimento (senão a régua acorda vendedor de
+    madrugada e a equipe desliga tudo no primeiro dia);
+  * gatilho nunca puxa card pra trás, nunca deixa o lead no meio do caminho e
+    nunca desfaz o que o vendedor decidiu na mão;
+  * o modo observação mede sem mexer em nada — e não reescreve a mesma linha a
+    cada ciclo do poller.
+"""
+import os
+from datetime import datetime, time, timedelta, timezone
+
+import pytest
+from psycopg_pool import ConnectionPool
+
+from finance import funil_regua as fr
+
+CONTA = 9
+AGORA = datetime(2026, 8, 19, 12, 0, tzinfo=timezone.utc)   # 09:00 em Brasília
+
+_SQL = """
+create table prospeccao (id bigserial primary key, conta_id bigint, empresa text,
+  status text default 'novo', estagio text default 'lead', orcamento_id bigint,
+  atualizado_em timestamptz default now());
+create table funil_etapas (id bigserial primary key, conta_id bigint, chave text,
+  rotulo text, ordem int default 0, fixa boolean default false, fase text default 'venda',
+  prazo_min integer, gatilho text, gatilho_ativo boolean default false);
+create table funil_regua (conta_id bigint primary key,
+  gatilhos_modo text default 'off', cobranca_modo text default 'off',
+  janela_dias text default '1,2,3,4,5,6', janela_abre time default '08:00',
+  janela_fecha time default '19:00', sem_resposta_min int default 120,
+  bola_nossa_min int default 240, bola_cliente_min int default 4320,
+  escala_min int default 240, teto_avisos_dia int default 5);
+create table funil_movimentos (id bigserial primary key, conta_id bigint,
+  prospeccao_id bigint, de text, para text, motivo text, membro_id bigint,
+  criado_em timestamptz default now());
+create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint);
+create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
+  criado_em timestamptz default now());
+create table eventos_agenda (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
+  inicio timestamptz, fim timestamptz, status text default 'ativo', desfecho text,
+  criado_em timestamptz default now());
+create table orcamentos (id bigserial primary key, conta_id bigint, status text,
+  atualizado_em timestamptz, aprovada_em timestamptz, sinal_pago_em timestamptz,
+  contrato_assinado_em timestamptz);
+"""
+
+_ETAPAS = [("novo", "Novo", 0, True, "venda", None, None, False),
+           ("contatado", "Contatado", 10, False, "venda", None, "resposta_nossa", False),
+           ("qualificado", "Agendado Visita", 20, False, "venda", None, "compromisso", False),
+           ("proposta", "Proposta", 30, False, "venda", None, "orcamento_enviado", False),
+           ("ganho", "Sinal Pago", 900, True, "fechamento", None, "sinal_pago", False),
+           ("perdido", "Perdido", 910, True, "fechamento", None, None, False),
+           ("eventos", "Eventos Realizados", 920, False, "pos", None, "compromisso_feito", False)]
+
+
+@pytest.fixture()
+def pool():
+    admin = ConnectionPool(os.environ["TEST_DATABASE_URL"], min_size=1, max_size=1, open=True)
+    dbname = "zaq_funil_regua_test"
+    with admin.connection() as c:
+        c.autocommit = True
+        c.execute(f"drop database if exists {dbname}")
+        c.execute(f"create database {dbname}")
+    admin.close()
+    url = os.environ["TEST_DATABASE_URL"].rsplit("/", 1)[0] + "/" + dbname
+    p = ConnectionPool(url, min_size=1, max_size=3, open=True, kwargs={"prepare_threshold": None})
+    with p.connection() as c:
+        c.execute(_SQL)
+        for e in _ETAPAS:
+            c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fixa, fase,
+                           prazo_min, gatilho, gatilho_ativo) values (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                      (CONTA,) + e)
+        c.commit()
+    yield p
+    p.close()
+
+
+def _cfg(**kw):
+    base = {"janela_dias": "1,2,3,4,5,6", "janela_abre": time(8, 0), "janela_fecha": time(19, 0)}
+    base.update(kw)
+    return base
+
+
+def _lead(c, empresa="ACME", status="novo"):
+    return c.execute("insert into prospeccao (conta_id, empresa, status) values (%s,%s,%s) returning id",
+                     (CONTA, empresa, status)).fetchone()[0]
+
+
+def _conversa(c, lead_id):
+    return c.execute("insert into conversas (conta_id, prospeccao_id) values (%s,%s) returning id",
+                     (CONTA, lead_id)).fetchone()[0]
+
+
+def _msg(c, conv, direcao, quando):
+    c.execute("insert into mensagens (conversa_id, direcao, criado_em) values (%s,%s,%s)",
+              (conv, direcao, quando))
+
+
+def _ligar(c, chave, modo="ligado"):
+    c.execute("update funil_etapas set gatilho_ativo=true where conta_id=%s and chave=%s", (CONTA, chave))
+    c.execute("insert into funil_regua (conta_id, gatilhos_modo) values (%s,%s) "
+              "on conflict (conta_id) do update set gatilhos_modo=excluded.gatilhos_modo", (CONTA, modo))
+
+
+# ----------------------------------------------------------------- o relógio
+
+def test_fora_do_expediente_o_cronometro_nao_anda():
+    # 22h de um sábado até 23h do mesmo sábado: uma hora de relógio, zero de atendimento
+    ini = datetime(2026, 8, 22, 1, 0, tzinfo=timezone.utc)    # sáb 22:00 BR (sexta 22h BR? não: 01:00Z = sex 22:00)
+    assert fr.minutos_uteis(ini, ini + timedelta(hours=1), _cfg()) == 0
+
+
+def test_conta_so_o_pedaco_dentro_da_janela():
+    # 10:00 BR -> 12:00 BR numa quarta = 120 minutos cheios
+    ini = datetime(2026, 8, 19, 13, 0, tzinfo=timezone.utc)
+    assert fr.minutos_uteis(ini, ini + timedelta(hours=2), _cfg()) == 120
+
+
+def test_atravessar_a_noite_nao_soma_a_madrugada():
+    # quarta 18:00 BR -> quinta 09:00 BR: 1h de quarta + 1h de quinta = 120 min
+    ini = datetime(2026, 8, 19, 21, 0, tzinfo=timezone.utc)   # qua 18:00 BR
+    fim = datetime(2026, 8, 20, 12, 0, tzinfo=timezone.utc)   # qui 09:00 BR
+    assert fr.minutos_uteis(ini, fim, _cfg()) == 120
+
+
+def test_domingo_fora_da_janela_nao_conta():
+    # sábado 18:00 BR -> segunda 09:00 BR: 1h de sábado + 1h de segunda
+    ini = datetime(2026, 8, 22, 21, 0, tzinfo=timezone.utc)
+    fim = datetime(2026, 8, 24, 12, 0, tzinfo=timezone.utc)
+    assert fr.minutos_uteis(ini, fim, _cfg()) == 120
+
+
+def test_semana_sem_dia_nenhum_nunca_vence():
+    """Desligar a semana toda tem que significar 'não cobra', nunca 'cobra sempre'."""
+    ini = datetime(2026, 8, 19, 13, 0, tzinfo=timezone.utc)
+    assert fr.minutos_uteis(ini, ini + timedelta(days=5), _cfg(janela_dias="")) == 0
+
+
+def test_dentro_da_janela_so_no_expediente():
+    assert fr.dentro_da_janela(datetime(2026, 8, 19, 13, 0, tzinfo=timezone.utc), _cfg())   # qua 10h BR
+    assert not fr.dentro_da_janela(datetime(2026, 8, 19, 3, 0, tzinfo=timezone.utc), _cfg())  # qua 00h BR
+    assert not fr.dentro_da_janela(datetime(2026, 8, 23, 15, 0, tzinfo=timezone.utc), _cfg())  # domingo
+
+
+# ----------------------------------------------------------------- travas 1 e 2
+
+def test_gatilho_nunca_puxa_card_pra_tras():
+    cands = [{"chave": "contatado", "ordem": 10}]
+    assert fr.escolher_etapa(30, cands) is None      # o lead já está em Proposta
+
+
+def test_empate_leva_o_lead_pra_etapa_mais_avancada():
+    cands = [{"chave": "proposta", "ordem": 30}, {"chave": "ganho", "ordem": 900}]
+    assert fr.escolher_etapa(0, cands)["chave"] == "ganho"
+
+
+# ----------------------------------------------------------------- a bola
+
+def test_bola_nossa_quando_o_cliente_falou_por_ultimo(pool):
+    with pool.connection() as c:
+        lead = _lead(c); conv = _conversa(c, lead)
+        _msg(c, conv, "out", AGORA - timedelta(hours=5))
+        _msg(c, conv, "in", AGORA - timedelta(hours=2))
+        c.commit()
+        estado, ref = fr.estado_da_bola(c, lead)
+        assert estado == "bola_nossa"
+        assert ref == AGORA - timedelta(hours=2)
+
+
+def test_bola_do_cliente_quando_respondemos_por_ultimo(pool):
+    with pool.connection() as c:
+        lead = _lead(c); conv = _conversa(c, lead)
+        _msg(c, conv, "in", AGORA - timedelta(hours=5))
+        _msg(c, conv, "out", AGORA - timedelta(hours=1))
+        c.commit()
+        assert fr.estado_da_bola(c, lead)[0] == "bola_cliente"
+
+
+def test_sem_resposta_quando_nunca_falamos_nada(pool):
+    """O pior estado que existe — e o que a conta 34 tem 35 vezes em 21 dias."""
+    with pool.connection() as c:
+        lead = _lead(c); conv = _conversa(c, lead)
+        _msg(c, conv, "in", AGORA - timedelta(hours=30))
+        c.commit()
+        estado, ref = fr.estado_da_bola(c, lead)
+        assert estado == "sem_resposta"
+        assert ref == AGORA - timedelta(hours=30)
+
+
+def test_lead_sem_conversa_nenhuma_e_sem_resposta(pool):
+    with pool.connection() as c:
+        lead = _lead(c)
+        c.commit()
+        assert fr.estado_da_bola(c, lead)[0] == "sem_resposta"
+
+
+# ----------------------------------------------------------------- gatilhos
+
+def test_desligado_nao_mexe_em_nada(pool):
+    with pool.connection() as c:
+        lead = _lead(c); conv = _conversa(c, lead)
+        _msg(c, conv, "out", AGORA)
+        c.execute("update funil_etapas set gatilho_ativo=true where conta_id=%s", (CONTA,))
+        c.commit()
+        assert fr.aplicar_gatilhos(c, CONTA) == {"movidos": 0, "simulados": 0}
+        assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "novo"
+
+
+def test_observando_anota_o_salto_sem_mover_o_card(pool):
+    with pool.connection() as c:
+        lead = _lead(c); conv = _conversa(c, lead)
+        _msg(c, conv, "out", AGORA)
+        _ligar(c, "contatado", "observando")
+        c.commit()
+        assert fr.aplicar_gatilhos(c, CONTA)["simulados"] == 1
+        c.commit()
+        assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "novo"
+        mov = c.execute("select de, para, motivo from funil_movimentos where prospeccao_id=%s",
+                        (lead,)).fetchone()
+        assert mov == ("novo", "contatado", "simulado:resposta_nossa")
+
+
+def test_observando_nao_reescreve_a_cada_ciclo(pool):
+    """O poller roda a cada 2 minutos; sem guarda, 'o que teria acontecido' viraria
+    um contador de ciclos."""
+    with pool.connection() as c:
+        lead = _lead(c); conv = _conversa(c, lead)
+        _msg(c, conv, "out", AGORA)
+        _ligar(c, "contatado", "observando")
+        c.commit()
+        fr.aplicar_gatilhos(c, CONTA); c.commit()
+        assert fr.aplicar_gatilhos(c, CONTA)["simulados"] == 0
+        c.commit()
+        n = c.execute("select count(*) from funil_movimentos where prospeccao_id=%s", (lead,)).fetchone()[0]
+        assert n == 1
+
+
+def test_ligado_move_o_card_e_deixa_a_linha_no_historico(pool):
+    with pool.connection() as c:
+        lead = _lead(c); conv = _conversa(c, lead)
+        _msg(c, conv, "out", AGORA)
+        _ligar(c, "contatado")
+        c.commit()
+        assert fr.aplicar_gatilhos(c, CONTA)["movidos"] == 1
+        c.commit()
+        assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "contatado"
+        assert c.execute("select motivo from funil_movimentos where prospeccao_id=%s",
+                         (lead,)).fetchone()[0] == "gatilho:resposta_nossa"
+
+
+def test_sinal_pago_leva_direto_pro_fechamento(pool):
+    with pool.connection() as c:
+        lead = _lead(c)
+        oid = c.execute("""insert into orcamentos (conta_id, status, sinal_pago_em)
+                           values (%s,'aprovada',%s) returning id""", (CONTA, AGORA)).fetchone()[0]
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (oid, lead))
+        _ligar(c, "ganho")
+        c.commit()
+        fr.aplicar_gatilhos(c, CONTA); c.commit()
+        assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "ganho"
+
+
+def test_a_mao_do_vendedor_manda(pool):
+    """TRAVA 3: o vendedor puxou o card de volta pra Novo depois do orçamento. O
+    gatilho do orçamento (que é ANTERIOR) não pode desfazer isso no ciclo seguinte."""
+    with pool.connection() as c:
+        lead = _lead(c, status="novo")
+        oid = c.execute("""insert into orcamentos (conta_id, status, atualizado_em)
+                           values (%s,'enviado',%s) returning id""",
+                        (CONTA, AGORA - timedelta(days=2))).fetchone()[0]
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (oid, lead))
+        fr.registrar_movimento(c, CONTA, lead, "proposta", "novo", "manual", membro_id=1)
+        _ligar(c, "proposta")
+        c.commit()
+        assert fr.aplicar_gatilhos(c, CONTA)["movidos"] == 0
+        c.commit()
+        assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "novo"
+
+
+def test_evento_novo_depois_do_movimento_manual_volta_a_valer(pool):
+    """A trava 3 respeita a decisão do vendedor, mas não congela o lead pra sempre:
+    fato NOVO depois da mão dele volta a mover."""
+    with pool.connection() as c:
+        lead = _lead(c, status="novo")
+        oid = c.execute("""insert into orcamentos (conta_id, status, atualizado_em)
+                           values (%s,'enviado',%s) returning id""",
+                        (CONTA, AGORA + timedelta(days=1))).fetchone()[0]
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (oid, lead))
+        fr.registrar_movimento(c, CONTA, lead, "proposta", "novo", "manual", membro_id=1)
+        _ligar(c, "proposta")
+        c.commit()
+        assert fr.aplicar_gatilhos(c, CONTA)["movidos"] == 1
+
+
+# ----------------------------------------------------------------- fase
+
+def test_fechado_passa_a_incluir_a_pos_venda(pool):
+    """O motivo de existir a fase: o lead que anda pra "Eventos Realizados" não pode
+    sumir do "ganhos do mês" — ele foi vendido, o evento é depois."""
+    with pool.connection() as c:
+        fechadas = fr.chaves_fechadas(fr.etapas(c, CONTA))
+        assert set(fechadas) == {"ganho", "eventos"}
+        assert "perdido" not in fechadas

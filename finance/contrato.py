@@ -235,6 +235,81 @@ def montar(clausulas, ctx: dict) -> tuple[list[dict], list[str]]:
     return saida, faltas
 
 
+# ------------------------------------------------------------------ diagnóstico
+
+# Os grupos que vêm de CADA orçamento. O valor não mora na configuração: chega
+# junto com a proposta, e é diferente em cada uma.
+GRUPOS_DA_PROPOSTA = ("cliente", "evento", "valor")
+
+# Onde o dono conserta o que é dele. Endereço, não nome de campo: "{empresa.cnpj}"
+# não diz a ninguém o que fazer; "preencha na aba Empresa" diz.
+_ONDE = {
+    "preco": "adicione o item ao catálogo, logo abaixo, ou corrija o nome na cláusula",
+    "empresa": "preencha nos dados da empresa, na aba Empresa",
+    "regra": "preencha em “Números da casa”, dentro deste card",
+}
+
+
+def diagnostico(faltas, ctx, catalogo=None) -> dict:
+    """Separa as faltas em CONSERTÁVEIS e as que só dependem da proposta.
+
+    POR QUE ISSO EXISTE. A tela de configuração passou a avisar quais campos
+    ficaram sem valor, e o primeiro aviso que a Prime viu foi `{cliente.nome}` —
+    porque o orçamento usado de exemplo (o nº 2) não tinha o nome do cliente
+    preenchido. Não havia nada errado no contrato dela. Alarme que dispara sem
+    ter o que consertar treina o dono a ignorar o próximo, que vai ser de
+    verdade.
+
+    A régua é uma só: SÓ é alarme o que não vai se resolver sozinho.
+
+        preco.X     slug fora do catálogo  → nunca preenche, em proposta nenhuma
+        empresa.X   cadastro em branco     → nunca preenche até o dono preencher
+        regra.X     número da casa vazio   → idem
+        cliente/evento/valor com campo INEXISTENTE (erro de digitação na
+                    cláusula) → nunca preenche, em proposta nenhuma
+        cliente/evento/valor com campo VÁLIDO e vazio → é dado daquela proposta;
+                    a próxima que tiver o dado preenche. Informação, não defeito.
+
+    Devolve {"ajustes": [...], "da_proposta": [campo, ...]}. Cada ajuste traz
+    `titulo` (o campo em português) e `detalhe` (o que fazer, e onde) — a tela só
+    imprime, e o texto que o dono lê fica testável aqui em vez de dentro do JS.
+
+    Não substitui `montar`: o contrato do cliente de verdade (contrato_publico)
+    continua olhando TODAS as faltas, porque lá o {cliente.nome} vazio é o nome
+    de quem vai assinar."""
+    ajustes, da_proposta = [], []
+
+    for f in (faltas or []):
+        grupo, _, nome = f.partition(".")
+        existe = nome in (ctx.get(grupo) or {})
+        rotulo = _ROTULO.get(f) or nome
+
+        if grupo not in GRUPOS:
+            ajustes.append({
+                "campo": f, "titulo": f"{{{f}}}",
+                "detalhe": "esse campo não existe — veja a lista de campos ao abrir o contrato"})
+        elif grupo == "preco":
+            # o slug não está no catálogo (se estivesse, teria valor e não seria
+            # falta), então não há nome bonito pra mostrar: vale mais o campo do
+            # jeito que ele aparece na cláusula, que é o que o dono procura.
+            ajustes.append({
+                "campo": f, "titulo": f"{{{f}}}",
+                "detalhe": f"esse item não existe no seu catálogo — {_ONDE['preco']}"})
+        elif not existe:
+            # digitou errado o nome do campo: {cliente.nomee} não preenche nunca
+            ajustes.append({
+                "campo": f, "titulo": f"{{{f}}}",
+                "detalhe": "esse campo não existe — o contrato vai imprimir isso como está"})
+        elif grupo in GRUPOS_DA_PROPOSTA:
+            da_proposta.append(f)
+        else:
+            ajustes.append({
+                "campo": f, "titulo": rotulo,
+                "detalhe": f"está em branco — {_ONDE[grupo]}"})
+
+    return {"ajustes": ajustes, "da_proposta": da_proposta}
+
+
 def campos_usados(clausulas) -> list[str]:
     """Todos os campos citados no modelo, sem repetição.
 
@@ -249,35 +324,42 @@ def campos_usados(clausulas) -> list[str]:
     return vistos
 
 
+# A paleta fixa: campo e como se chama pra quem não escreveu o sistema. Vive aqui
+# fora e não dentro de `campos_disponiveis` porque o diagnóstico usa os mesmos
+# rótulos — duas listas iguais viravam duas listas diferentes na primeira edição.
+_CAMPOS_FIXOS = [
+    ("cliente.nome", "nome de quem assina"), ("cliente.doc", "CPF/CNPJ"),
+    ("cliente.endereco", "endereço do cliente"), ("cliente.cidade", "cidade do cliente"),
+    ("cliente.uf", "UF do cliente"), ("cliente.cep", "CEP do cliente"),
+    ("cliente.telefone", "telefone do cliente"), ("cliente.email", "e-mail do cliente"),
+    ("evento.data", "data do evento"), ("evento.inicio", "horário de início"),
+    ("evento.fim", "horário de término"), ("evento.tipo", "tipo de evento"),
+    ("evento.convidados", "nº de convidados"),
+    ("valor.total", "valor total"), ("valor.entrada", "valor da entrada"),
+    ("valor.saldo", "saldo a pagar"), ("valor.numero", "nº do orçamento"),
+    ("regra.sinal_pct", "% da entrada"), ("regra.multa_cancelamento", "% da multa"),
+    ("regra.taxa_reagendamento", "% do reagendamento"),
+    ("regra.duracao_horas", "horas de evento"), ("regra.tolerancia_min", "min. de tolerância"),
+    ("regra.quitacao_dias", "dias p/ quitar"), ("regra.reagenda_dias", "antecedência p/ remarcar"),
+    ("regra.reagenda_prazo", "prazo da nova data"), ("regra.retirada_horas", "horas p/ retirar"),
+    ("regra.acesso_montagem", "horário de montagem"),
+    ("evento.local", "local do evento"),
+    ("empresa.razao", "razão social"), ("empresa.cnpj", "CNPJ"),
+    ("empresa.endereco", "endereço"), ("empresa.bairro", "bairro"),
+    ("empresa.cidade", "cidade"), ("empresa.uf", "UF"),
+    ("empresa.telefone", "telefone"), ("empresa.email", "e-mail"),
+]
+
+_ROTULO = dict(_CAMPOS_FIXOS)
+
+
 def campos_disponiveis(catalogo=None) -> list[dict]:
     """A paleta de campos que a tela do dono mostra, na ordem em que ele pensa.
 
     Os {preco.*} são gerados a partir do catálogo REAL da conta — é assim que ele
     descobre que pode citar qualquer item, e com o slug certo. Escrever o slug de
     cabeça é a forma mais fácil de criar uma falta silenciosa."""
-    fixos = [
-        ("cliente.nome", "nome de quem assina"), ("cliente.doc", "CPF/CNPJ"),
-        ("cliente.endereco", "endereço do cliente"), ("cliente.cidade", "cidade do cliente"),
-        ("cliente.uf", "UF do cliente"), ("cliente.cep", "CEP do cliente"),
-        ("cliente.telefone", "telefone do cliente"), ("cliente.email", "e-mail do cliente"),
-        ("evento.data", "data do evento"), ("evento.inicio", "horário de início"),
-        ("evento.fim", "horário de término"), ("evento.tipo", "tipo de evento"),
-        ("evento.convidados", "nº de convidados"),
-        ("valor.total", "valor total"), ("valor.entrada", "valor da entrada"),
-        ("valor.saldo", "saldo a pagar"), ("valor.numero", "nº do orçamento"),
-        ("regra.sinal_pct", "% da entrada"), ("regra.multa_cancelamento", "% da multa"),
-        ("regra.taxa_reagendamento", "% do reagendamento"),
-        ("regra.duracao_horas", "horas de evento"), ("regra.tolerancia_min", "min. de tolerância"),
-        ("regra.quitacao_dias", "dias p/ quitar"), ("regra.reagenda_dias", "antecedência p/ remarcar"),
-        ("regra.reagenda_prazo", "prazo da nova data"), ("regra.retirada_horas", "horas p/ retirar"),
-        ("regra.acesso_montagem", "horário de montagem"),
-        ("evento.local", "local do evento"),
-        ("empresa.razao", "razão social"), ("empresa.cnpj", "CNPJ"),
-        ("empresa.endereco", "endereço"), ("empresa.bairro", "bairro"),
-        ("empresa.cidade", "cidade"), ("empresa.uf", "UF"),
-        ("empresa.telefone", "telefone"), ("empresa.email", "e-mail"),
-    ]
-    saida = [{"campo": c, "rotulo": r, "grupo": c.split(".")[0]} for c, r in fixos]
+    saida = [{"campo": c, "rotulo": r, "grupo": c.split(".")[0]} for c, r in _CAMPOS_FIXOS]
     for s in (catalogo or []):
         if s.get("slug"):
             saida.append({"campo": f"preco.{s['slug']}",

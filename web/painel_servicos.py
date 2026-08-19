@@ -987,16 +987,17 @@ def painel_servicos_contrato(request: Request, padrao: int = 0):
                "atualizado_em": None, "atualizado_por": ""}
               if padrao else ctr.carregar_modelo(pool, conta[0]))
     catalogo = scat.listar(pool, conta[0])
-    # FALTAS no resumo do card fechado. Custa uma consulta a mais por
+    # O QUE AJUSTAR no resumo do card fechado. Custa uma consulta a mais por
     # carregamento e vale: um campo sem valor não aparece em lugar nenhum até
     # sair no contrato DO CLIENTE — é o único erro deste fluxo que estreia na
     # frente dele. Melhor o dono ver com o card recolhido.
     orcamento, exemplo = _contexto_de_exemplo(pool, conta[0])
-    faltas = []
+    diag = {"ajustes": [], "da_proposta": []}
     if orcamento and not modelo["novo"]:
         ctx = ctr.contexto(catalogo=catalogo, orcamento=orcamento, modelo=modelo,
                            empresa=emp.obter_dados_empresa(pool, conta[0]))
         _doc, faltas = ctr.montar(modelo["clausulas"], ctx)
+        diag = ctr.diagnostico(faltas, ctx, catalogo)
     return JSONResponse({
         "clausulas": modelo["clausulas"], "regras": modelo["regras"],
         "novo": modelo["novo"], "campos": ctr.campos_disponiveis(catalogo),
@@ -1004,7 +1005,10 @@ def painel_servicos_contrato(request: Request, padrao: int = 0):
             "n": len(modelo["clausulas"]),
             "em": modelo["atualizado_em"].strftime("%d/%m") if modelo.get("atualizado_em") else "",
             "por": modelo.get("atualizado_por") or "",
-            "faltas": faltas, "exemplo": exemplo,
+            # só o que o DONO tem como consertar vira alarme. Campo de proposta
+            # vazio no exemplo não é defeito — ver ctr.diagnostico.
+            "ajustes": diag["ajustes"], "da_proposta": diag["da_proposta"],
+            "exemplo": exemplo,
         },
     })
 
@@ -1041,11 +1045,14 @@ def painel_servicos_contrato_previa(request: Request, dados: ContratoIn):
     if not orcamento:
         return JSONResponse({"erro": "nenhum orçamento com data de evento para usar de exemplo"},
                             status_code=404)
-    ctx = ctr.contexto(catalogo=scat.listar(pool, conta[0]), orcamento=orcamento,
+    catalogo = scat.listar(pool, conta[0])
+    ctx = ctr.contexto(catalogo=catalogo, orcamento=orcamento,
                        modelo={"regras": dados.regras},
                        empresa=emp.obter_dados_empresa(pool, conta[0]))
     doc, faltas = ctr.montar(dados.clausulas, ctx)
-    return JSONResponse({"clausulas": doc, "faltas": faltas, "exemplo": exemplo})
+    diag = ctr.diagnostico(faltas, ctx, catalogo)
+    return JSONResponse({"clausulas": doc, "exemplo": exemplo,
+                         "ajustes": diag["ajustes"], "da_proposta": diag["da_proposta"]})
 
 
 class OrcDelIn(BaseModel):
@@ -1323,9 +1330,9 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     </div>
     <div id="ct-selo" style="margin-left:auto;flex-shrink:0"></div>
   </div>
-  {# QUAIS campos faltam, não só quantos. O selo diz que há problema; esta linha diz
-     ONDE — e é o que separa um aviso de uma tarefa. Fora do cabeçalho porque nome de
-     campo é largo e espremer ao lado do selo cortaria justamente a informação. #}
+  {# O QUE FAZER, não quais campos. O selo diz que há problema; esta linha diz o
+     conserto e onde fica — é o que separa um aviso de uma tarefa. Fora do cabeçalho
+     porque a frase é larga e espremer ao lado do selo cortaria a informação. #}
   <div id="ct-faltas" style="display:none;cursor:pointer;margin-top:.5rem;font-size:.74rem;
        line-height:1.5;background:var(--ambar-fundo);border:1px solid var(--ambar-borda);
        border-radius:8px;padding:.4rem .55rem;color:var(--amar)"></div>
@@ -2791,7 +2798,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       retirada_horas:'Retirar materiais (h)',acesso_montagem:'Montagem a partir de'};
 
     // O resumo do card fechado. Responde "está no ar e é o meu?" sem abrir —
-    // e o selo âmbar denuncia o campo sem valor, que é o único erro deste fluxo
+    // e o selo âmbar conta os ajustes pendentes, que é o único erro deste fluxo
     // que estrearia na frente do cliente, dentro do contrato dele.
     function resumir(d){
       var r=d.resumo||{}, res=document.getElementById('ct-resumo'), selo=document.getElementById('ct-selo');
@@ -2801,29 +2808,32 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       }
       res.textContent=(r.n||0)+' cláusula'+((r.n||0)===1?'':'s')
         +(r.em?' · alterado em '+r.em:'')+(r.por?' por '+r.por:'');
-      var lista=(r.faltas||[]), f=lista.length;
+      var lista=(r.ajustes||[]), f=lista.length;
       selo.innerHTML = f
-        ? '<span style="font-size:.68rem;font-weight:700;background:var(--ambar-fundo);color:var(--amar);border:1px solid var(--ambar-borda);border-radius:5px;padding:.1rem .38rem;white-space:nowrap">⚠ '+f+' campo'+(f===1?'':'s')+' sem valor</span>'
+        ? '<span style="font-size:.68rem;font-weight:700;background:var(--ambar-fundo);color:var(--amar);border:1px solid var(--ambar-borda);border-radius:5px;padding:.1rem .38rem;white-space:nowrap">⚠ '+f+(f===1?' ajuste':' ajustes')+'</span>'
         : '<span style="font-size:.68rem;font-weight:700;background:var(--neon-fundo);color:var(--verde-claro);border:1px solid var(--neon-borda);border-radius:5px;padding:.1rem .38rem;white-space:nowrap">✓ pronto</span>';
-      pintarFaltas(lista);
+      pintarAjustes(lista);
     }
 
-    // NOMEIA o que falta. "1 campo sem valor" não diz o que fazer — o dono teria que
-    // abrir o contrato e caçar. Mostra os campos como eles aparecem NO TEXTO da
-    // cláusula ({preco.hora-extra}), que é a forma que ele procura pra corrigir.
-    function pintarFaltas(lista){
+    // DIZ O QUE FAZER, não o nome do campo. "1 campo sem valor" mandava o dono
+    // caçar; "{cliente.nome}" pior ainda — ele não escreveu aquilo e não sabe o
+    // que é. Cada linha aqui é uma tarefa com endereço.
+    //
+    // E entra pouca coisa: só o que ELE resolve e que vale pra todo contrato.
+    // Campo que vem de cada proposta ({cliente.nome} vazio num orçamento antigo)
+    // não é defeito e não aparece aqui — ver finance/contrato.diagnostico.
+    function pintarAjustes(lista){
       var el=document.getElementById('ct-faltas');
       if(!el) return;
       if(!lista.length){ el.style.display='none'; el.innerHTML=''; return; }
-      // teto de 6: uma lista de trinta campos vira parede de texto e ninguém lê.
-      var mostra=lista.slice(0,6).map(function(c){
-        return '<code style="background:rgba(0,0,0,.25);border-radius:4px;padding:.05rem .3rem;'
-             + 'font-size:.72rem;color:inherit">{'+esc(c)+'}</code>';}).join(' ');
-      var resto=lista.length-6;
-      el.innerHTML='<b>Falta preencher:</b> '+mostra
-        +(resto>0?' <span style="opacity:.8">e mais '+resto+'</span>':'')
-        +'<div style="opacity:.85;margin-top:.25rem">Sai assim mesmo no contrato do '
-        +'cliente. Toque para abrir e corrigir.</div>';
+      // teto de 4: lista longa no card fechado vira parede de texto e ninguém lê.
+      var itens=lista.slice(0,4).map(function(a){
+        return '<div style="margin-top:.22rem">• <b>'+esc(a.titulo)+'</b> '+esc(a.detalhe)+'</div>';
+      }).join('');
+      var resto=lista.length-4;
+      el.innerHTML='<b>Precisa de ajuste antes de mandar pro cliente</b>'+itens
+        +(resto>0?'<div style="opacity:.8;margin-top:.22rem">e mais '+resto+'</div>':'')
+        +'<div style="opacity:.85;margin-top:.35rem">Toque para abrir e corrigir.</div>';
       el.style.display='block';
     }
 
@@ -2912,11 +2922,24 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
           b.textContent=t;
           if(!res.ok){msg('<p class="mut" style="font-size:.85rem">'+esc((res.d&&res.d.erro)||'Não consegui montar.')+'</p>');return;}
           var h='';
-          if((res.d.faltas||[]).length){
+          var aj=res.d.ajustes||[];
+          if(aj.length){
             h+='<div style="background:#241C0F;border:1px solid var(--ambar-borda);border-radius:8px;padding:.55rem .7rem;margin-bottom:.6rem;font-size:.84rem">'
-              +'<b style="color:var(--amar)">Estes campos não têm valor</b> e vão sair assim mesmo no documento:<br>'
-              +res.d.faltas.map(function(f){return '<code>{'+esc(f)+'}</code>';}).join(' ')
-              +'<div class="mut" style="margin-top:.3rem">Geralmente é um item que saiu do catálogo ou um dado que o orçamento não tem.</div></div>';
+              +'<b style="color:var(--amar)">Precisa de ajuste</b> — isto não vai preencher em contrato nenhum:'
+              +aj.map(function(a){
+                  return '<div style="margin-top:.25rem">• <b>'+esc(a.titulo)+'</b> '+esc(a.detalhe)+'</div>';
+                }).join('')
+              +'</div>';
+          }
+          // Nota NEUTRA, não alarme: estes campos ficam à vista no texto porque o
+          // orçamento de exemplo não tem o dado. Sem esta linha o dono lê o
+          // {cliente.nome} do preview como defeito e vem perguntar o que quebrou.
+          var dp=res.d.da_proposta||[];
+          if(dp.length){
+            h+='<div class="mut" style="border:1px solid var(--borda);border-radius:8px;padding:.5rem .7rem;margin-bottom:.6rem;font-size:.8rem">'
+              +'Aparecem escritos assim — '
+              +dp.map(function(c){return '<code>{'+esc(c)+'}</code>';}).join(' ')
+              +' — porque este orçamento de exemplo não tem esses dados. Em cada proposta eles entram sozinhos, com os dados do cliente. Nada a fazer aqui.</div>';
           }
           h+='<div class="mut" style="font-size:.78rem;margin-bottom:.4rem">Prévia com '+esc(res.d.exemplo||'')+'</div>';
           h+='<div style="background:#fff;color:#1a1a1a;border-radius:8px;padding:.9rem 1rem;font-family:Georgia,serif;max-height:420px;overflow:auto">';

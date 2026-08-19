@@ -331,3 +331,95 @@ def test_a_porta_e_a_mesma_do_modo_do_orcamento():
     from finance.vendas import modo_por_nicho
     for nicho in ("eventos", "tecnologia", "", None):
         assert ct.tem_contrato(nicho) is (modo_por_nicho(nicho) == "evento")
+
+
+# ------------------------------------------------ alarme só do que dá pra consertar
+#
+# A tela de configuração do dono passou a listar os campos sem valor, e o
+# PRIMEIRO aviso que a Prime Eventos viu foi "{cliente.nome}" — porque o
+# orçamento usado de exemplo (o nº 2) não tinha o nome do cliente preenchido.
+# Não havia nada errado no contrato dela: o campo funciona, aquela proposta é que
+# estava incompleta.
+#
+# Alarme que dispara sem ter o que consertar não é inofensivo — ele treina o dono
+# a ignorar o próximo, que vai ser de verdade. Daí `diagnostico`: só é alarme o
+# que não vai se resolver sozinho em nenhuma proposta.
+#
+# O contrato do cliente de verdade (contrato_publico) continua olhando TODAS as
+# faltas — lá o {cliente.nome} vazio é o nome de quem vai assinar.
+
+def _diag(*campos, **kw):
+    ctx = _ctx(**kw)
+    _txt, faltas = ct.preencher(" ".join("{%s}" % c for c in campos), ctx)
+    return ct.diagnostico(faltas, ctx, kw.get("catalogo", CATALOGO))
+
+
+def test_campo_de_proposta_vazio_nao_e_alarme():
+    """O caso da Prime, exatamente: orçamento sem nome de cliente."""
+    d = _diag("cliente.nome", orcamento={"setup_centavos": 100, "evento": {}})
+    assert d["ajustes"] == []
+    assert d["da_proposta"] == ["cliente.nome"]
+
+
+@pytest.mark.parametrize("campo", ["cliente.nome", "cliente.endereco", "evento.data",
+                                   "evento.local", "valor.numero"])
+def test_nenhum_campo_que_vem_do_orcamento_vira_ajuste(campo):
+    """Todos eles preenchem sozinhos na proposta seguinte que tiver o dado."""
+    d = _diag(campo, orcamento={"setup_centavos": 0, "evento": {}})
+    assert d["ajustes"] == [] and d["da_proposta"] == [campo]
+
+
+def test_item_fora_do_catalogo_e_alarme_e_diz_onde_consertar():
+    """Este nunca preenche — em proposta nenhuma, hoje ou daqui a um ano."""
+    d = _diag("preco.seguranca")
+    assert d["da_proposta"] == []
+    a, = d["ajustes"]
+    assert a["campo"] == "preco.seguranca"
+    assert a["titulo"] == "{preco.seguranca}"
+    assert "catálogo" in a["detalhe"]
+
+
+def test_dado_da_empresa_em_branco_e_alarme_e_aponta_a_aba():
+    d = _diag("empresa.cnpj", empresa={"razao_social": "X"})
+    a, = d["ajustes"]
+    assert a["titulo"] == "CNPJ"            # e não "{empresa.cnpj}"
+    assert "aba Empresa" in a["detalhe"]
+
+
+def test_campo_digitado_errado_e_alarme_mesmo_sendo_grupo_de_proposta():
+    """{cliente.nomee} não é dado faltando: é cláusula escrita errada, e não vai
+    preencher em contrato nenhum. É a exceção que justifica olhar a CHAVE e não
+    só o grupo."""
+    d = _diag("cliente.nomee")
+    assert d["da_proposta"] == []
+    a, = d["ajustes"]
+    assert a["titulo"] == "{cliente.nomee}"
+    assert "não existe" in a["detalhe"]
+
+
+def test_grupo_inventado_tambem_e_alarme():
+    d = _diag("xpto.foo")
+    assert [a["titulo"] for a in d["ajustes"]] == ["{xpto.foo}"]
+
+
+def test_o_alarme_diz_o_que_fazer_e_nao_o_nome_do_campo():
+    """A regra de redação, presa aqui: o dono não escreveu '{empresa.cnpj}' e não
+    tem por que saber o que é. Cada ajuste é uma tarefa com endereço."""
+    d = _diag("empresa.cnpj", "empresa.endereco", empresa={})
+    for a in d["ajustes"]:
+        assert a["detalhe"].strip()
+        assert "preencha" in a["detalhe"]
+
+
+def test_contrato_saudavel_nao_gera_nada():
+    d = _diag("preco.hora-extra", "cliente.nome", "empresa.razao")
+    assert d == {"ajustes": [], "da_proposta": []}
+
+
+def test_diagnostico_nao_mexe_no_que_montar_devolve():
+    """`montar` continua entregando a lista crua: o contrato assinável usa ela
+    inteira, e é o diagnóstico que decide o que virar alarme NA TELA."""
+    ctx = _ctx(orcamento={"setup_centavos": 0, "evento": {}})
+    _doc, faltas = ct.montar(
+        [{"titulo": "X", "corpo": "{cliente.nome} {preco.seguranca}"}], ctx)
+    assert faltas == ["cliente.nome", "preco.seguranca"]

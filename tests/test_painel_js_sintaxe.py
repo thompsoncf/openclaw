@@ -31,10 +31,27 @@ import jinja2
 import pytest
 
 from web import painel_prospeccao as pp
+from web import painel_servicos as _ps  # registra "servicos" no mesmo loader
 
-# páginas do módulo que carregam JS próprio, pelo nome com que são registradas no
-# loader. Crescer esta lista é de graça; deixar uma de fora é o que custou caro.
-PAGINAS = ["prospeccao_comunicacao"]
+# páginas que carregam JS próprio, pelo nome com que são registradas no loader, e
+# o contexto MÍNIMO que abre os ramos de {% if %} onde o JS mora. Crescer esta
+# lista é de graça; deixar uma de fora é o que custou caro.
+#
+# Os contextos não são decoração: com `_Mudo` (falso pra tudo) o {% if %} esconde
+# justamente o bloco que interessa, e o teste passaria sem ter olhado nada.
+PAGINAS = {
+    # 'gerencia' e provedor 'qr': é o ramo que traz o bloco do QR, que foi o que
+    # quebrou em 17/08.
+    "prospeccao_comunicacao": dict(
+        gerencia=True,
+        canais={"whatsapp": True, "wa_provedor": "qr",
+                "numeros": {"whatsapp": "+5586999999999"}, "tokens_set": {}}),
+    # 'pode_contrato': o card do contrato, que só existe pro dono de conta de
+    # eventos — e é onde vive o JS do modelo, da prévia e do aviso de ajustes.
+    # `icones_paleta` entra porque a página o serializa com |tojson, e `_Mudo`
+    # não é serializável — é o preço de renderizar de verdade em vez de fingir.
+    "servicos": dict(servico_avulso=True, pode_contrato=True, icones_paleta=[]),
+}
 
 
 class _Mudo(jinja2.Undefined):
@@ -79,20 +96,14 @@ def _render(nome: str) -> str:
         env.filters.setdefault(k, v)
     for k, v in pp._env.globals.items():
         env.globals.setdefault(k, v)
-    # `gerencia` e o provedor 'qr' ligados: é o ramo que traz o bloco do QR, que é
-    # justamente o que quebrou. Sem eles o {% if %} esconde o script e o teste
-    # passaria sem olhar nada.
-    return env.get_template(nome).render(
-        gerencia=True,
-        canais={"whatsapp": True, "wa_provedor": "qr",
-                "numeros": {"whatsapp": "+5586999999999"}, "tokens_set": {}})
+    return env.get_template(nome).render(**PAGINAS[nome])
 
 
 def _scripts(html: str) -> list[str]:
     return [b for b in re.findall(r"<script[^>]*>(.*?)</script>", html, re.S) if b.strip()]
 
 
-@pytest.mark.parametrize("pagina", PAGINAS)
+@pytest.mark.parametrize("pagina", sorted(PAGINAS))
 def test_todo_script_da_pagina_compila(pagina, tmp_path):
     if not shutil.which("node"):
         pytest.skip("sem node no ambiente")
@@ -112,6 +123,15 @@ def test_todo_script_da_pagina_compila(pagina, tmp_path):
         + "\n\n".join(erros))
 
 
+def test_o_bloco_do_contrato_esta_mesmo_na_pagina():
+    """Mesma guarda do QR, pro card do contrato: o JS dele só existe no ramo
+    `pode_contrato`, e um {% if %} mudado deixaria o teste de sintaxe verde sem
+    ter olhado nada."""
+    js = "\n".join(_scripts(_render("servicos")))
+    for fn in ("pintarAjustes", "resumir", "previa", "desenhar"):
+        assert fn in js, f"{fn} não está no JS servido"
+
+
 def test_o_bloco_do_qr_esta_mesmo_na_pagina():
     """Guarda do teste acima: se o bloco do QR sumir do render, o teste de sintaxe
     fica verde sem ter olhado o código que já quebrou uma vez."""
@@ -120,11 +140,12 @@ def test_o_bloco_do_qr_esta_mesmo_na_pagina():
         assert fn in js, f"{fn} não está no JS servido"
 
 
-def test_nenhuma_string_js_quebrada_por_newline_literal():
+@pytest.mark.parametrize("pagina", sorted(PAGINAS))
+def test_nenhuma_string_js_quebrada_por_newline_literal(pagina):
     """A armadilha específica, dita por extenso: string JS de aspas simples com
     newline literal dentro. `node --check` já pega, mas este teste NOMEIA a causa —
     quem quebrar de novo lê o motivo em vez de decifrar um SyntaxError."""
-    for bloco in _scripts(_render("prospeccao_comunicacao")):
+    for bloco in _scripts(_render(pagina)):
         for n, linha in enumerate(bloco.split("\n"), 1):
             # aspas simples ímpares na linha = string aberta que atravessa o \n
             if linha.count("'") % 2:

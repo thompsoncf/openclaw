@@ -3097,20 +3097,31 @@ def cockpit_login(request: Request, email: str = Form(""), senha: str = Form("")
     pool = get_pool()
     if senha and not so_link:
         from contas import equipe as _equipe
-        ctx = _equipe.autenticar(pool, email, senha)
-        if not ctx or (ctx.get("papel") or "") not in _PAPEIS_OK:
+        # `contextos_de_login`, NÃO `autenticar`. A identidade aqui é por E-MAIL, e a
+        # mesma pessoa pode ser dona de uma conta e vendedora de outras — uma senha,
+        # vários lugares. `autenticar` só olha `membros.senha_hash`; quem tem conta
+        # própria e entrou como membro numa empresa ficava de fora, porque a senha
+        # dele mora em `contas`, e o membro nasce SEM senha nenhuma.
+        #
+        # Foi o que aconteceu em 18/08: o mesmo e-mail existia como conta (com senha)
+        # e como membro "vendedor" da Prime (sem senha). A pessoa trocou a senha duas
+        # vezes — da CONTA — e o Cockpit continuou recusando, porque lia a do MEMBRO.
+        # Pelo painel entrava, porque o portal já usa esta função.
+        ctxs = [x for x in _equipe.contextos_de_login(pool, email, senha)
+                if (x.get("papel") or "") in _PAPEIS_OK]
+        if not ctxs:
             # mensagem única pra senha errada e pra e-mail que não é do time: dizer
             # qual dos dois falhou entrega quem tem cadastro.
             return _tela_login("Seus leads, no bolso", "Entre com seu e-mail e senha.",
                                email=email, erro="E-mail ou senha incorretos.")
-        request.session["conta_id"] = ctx["conta_id"]
-        request.session["membro_id"] = ctx["membro_id"]
-        request.session["papel"] = ctx["papel"]
-        request.session["cockpit"] = True
-        resp = RedirectResponse(_BASE, status_code=303)
-        if lembrar:
-            _pôr_lembrete(request, resp, ctx["conta_id"], ctx["membro_id"])
-        return resp
+        if len(ctxs) > 1:
+            # Trabalha em mais de um lugar: quem escolhe é ela. Entrar na empresa
+            # errada é pior que um toque a mais — o vendedor mexeria no funil de
+            # outra empresa achando que é o dele.
+            request.session["ck_ctxs"] = ctxs
+            request.session["ck_lembrar"] = bool(lembrar)
+            return _tela_empresas(ctxs)
+        return _entrar_no_contexto(request, ctxs[0], bool(lembrar))
     achado = ck.membro_por_email(pool, email)
     if achado:                       # nunca revela se existe: sempre redireciona igual
         try:
@@ -3138,6 +3149,59 @@ def _pôr_lembrete(request: Request, resp, conta_id: int, membro_id: int) -> Non
         ck.LEMBRETE_COOKIE, token, max_age=60 * 60 * 24 * 3650, path="/cockpit",
         httponly=True, samesite="lax",
         secure=_os.environ.get("PORTAL_COOKIE_SECURE", "1") == "1")
+
+
+def _entrar_no_contexto(request: Request, ctx: dict, lembrar: bool):
+    """Aplica o contexto escolhido na sessão e entra. `aplicar_contexto` é a mesma
+    função do portal — a sessão do Cockpit e a do painel são a mesma sessão, e
+    escrever os campos na mão aqui abriria espaço pra elas divergirem."""
+    from contas import equipe as _equipe
+    _equipe.aplicar_contexto(request.session, ctx)
+    request.session["cockpit"] = True
+    resp = RedirectResponse(_BASE, status_code=303)
+    if lembrar and ctx.get("membro_id"):
+        # sem membro_id não há quem lembrar: o dono da conta não é linha de `membros`,
+        # e `cockpit_lembrete` referencia membro. Ele segue pela sessão normal.
+        _pôr_lembrete(request, resp, ctx["conta_id"], ctx["membro_id"])
+    return resp
+
+
+def _tela_empresas(ctxs: list[dict]) -> HTMLResponse:
+    """Escolha da empresa, pra quem trabalha em mais de uma."""
+    botoes = "".join(
+        f"<form method=post action='{_BASE}/empresa' style='margin:0'>"
+        f"<input type=hidden name=i value='{n}'>"
+        f"<button class=go2 type=submit>{esc(x.get('nome') or 'Empresa')}"
+        f"<br><small style='opacity:.7'>{esc(_equipe_rotulo(x))}</small></button></form>"
+        for n, x in enumerate(ctxs))
+    corpo = ("<div class=login><div class=marca>Zaq</div>"
+             "<h2>Onde você vai trabalhar?</h2>"
+             "<p>Seu acesso vale em mais de um lugar. Escolha um — dá pra trocar "
+             "depois saindo e entrando de novo.</p>"
+             f"{botoes}</div>")
+    return _page("Zaq — escolher empresa", corpo)
+
+
+def _equipe_rotulo(ctx: dict) -> str:
+    from contas import equipe as _equipe
+    return "Sua conta" if not ctx.get("membro_id") else _equipe.rotulo(ctx.get("papel"))
+
+
+@router.post("/cockpit/empresa")
+def cockpit_empresa(request: Request, i: str = Form("")):
+    """Confirma a empresa escolhida na tela acima.
+
+    Relê os contextos da SESSÃO, gravados no login que já validou a senha — o índice
+    que vem do formulário só escolhe entre eles. Assim ninguém entra numa empresa
+    mandando um número diferente: o que limita é a lista que a própria senha abriu."""
+    ctxs = request.session.get("ck_ctxs") or []
+    try:
+        ctx = ctxs[int(i)]
+    except (ValueError, IndexError, TypeError):
+        return RedirectResponse(f"{_BASE}/login", status_code=303)
+    lembrar = bool(request.session.pop("ck_lembrar", False))
+    request.session.pop("ck_ctxs", None)
+    return _entrar_no_contexto(request, ctx, lembrar)
 
 
 @router.get("/cockpit/entrar/{token}", response_class=HTMLResponse)

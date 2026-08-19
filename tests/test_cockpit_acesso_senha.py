@@ -43,8 +43,11 @@ def pool():
                        open=True, kwargs={"prepare_threshold": None})
     init_schema(p)
     with p.connection() as c:
-        for mig in ("072_membro_login_web.sql", "134_cockpit_vendedor.sql",
-                    "173_cockpit_lembrete.sql"):
+        # 073 traz `contas.senha_hash`: desde que a senha passou a ser UMA POR
+        # PESSOA (a conta manda, o vínculo só tem senha própria pra quem não tem
+        # conta), `tem_senha` e `definir_senha` consultam essa coluna.
+        for mig in ("072_membro_login_web.sql", "073_membro_multi_empresa.sql",
+                    "134_cockpit_vendedor.sql", "173_cockpit_lembrete.sql"):
             c.execute((BASE / mig).read_text(encoding="utf-8"))
         c.commit()
     yield p

@@ -174,12 +174,25 @@ def lembrar_revogar_membro(pool, conta_id: int, membro_id: int) -> int:
 
 
 def tem_senha(pool, conta_id: int, membro_id: int) -> bool:
-    """Este membro já criou senha? Decide se a tela de "crie sua senha" aparece
-    depois do link mágico."""
+    """Esta pessoa JÁ TEM COMO ENTRAR com senha? Decide se a tela de "crie sua
+    senha" aparece depois do link mágico.
+
+    A pergunta é sobre a PESSOA, não sobre a linha de membro — e é o que faltava.
+    A autoridade da identidade é a conta própria: quem tem conta no Zaq com este
+    e-mail entra com A SENHA DELA em qualquer empresa onde seja membro
+    (`contas.equipe.contextos_de_login`). Perguntar a essa pessoa se ela quer
+    "criar uma senha" criaria uma SEGUNDA senha, na linha de membro — as duas
+    passariam a funcionar, e trocar uma não mexeria na outra.
+
+    Só quem NÃO tem conta precisa de senha própria no vínculo de membro."""
     try:
         with pool.connection() as c:
             r = c.execute(
-                "select coalesce(senha_hash,'') <> '' from membros where id=%s and conta_id=%s",
+                """select coalesce(m.senha_hash,'') <> ''
+                        or exists (select 1 from contas ct
+                                    where lower(ct.email) = lower(m.email)
+                                      and coalesce(ct.senha_hash,'') <> '')
+                     from membros m where m.id=%s and m.conta_id=%s""",
                 (int(membro_id), int(conta_id))).fetchone()
     except Exception:  # noqa: BLE001
         return True          # na dúvida NÃO insiste em pedir senha
@@ -197,6 +210,21 @@ def definir_senha(pool, conta_id: int, membro_id: int, senha_txt: str) -> dict:
     from contas import senha as _senha
     try:
         with pool.connection() as c:
+            # QUEM TEM CONTA NÃO GANHA UMA SEGUNDA SENHA. A senha da conta é a
+            # autoridade e já abre todas as empresas; gravar outra aqui faria as
+            # duas valerem, e trocar a da conta não mexeria nesta — foi assim que
+            # alguém trocou a senha duas vezes e o app continuou recusando.
+            dona = c.execute(
+                """select 1 from membros m join contas ct
+                          on lower(ct.email) = lower(m.email)
+                    where m.id=%s and m.conta_id=%s
+                      and coalesce(ct.senha_hash,'') <> ''""",
+                (int(membro_id), int(conta_id))).fetchone()
+            if dona:
+                return {"ok": False, "ja_tem_conta": True,
+                        "erro": "Você já tem conta no Zaq com este e-mail — entre com "
+                                "a senha dela. Pra trocar, use 'Esqueci minha senha' "
+                                "na tela de login do painel."}
             n = c.execute("update membros set senha_hash=%s where id=%s and conta_id=%s",
                           (_senha.hash_senha(senha_txt), int(membro_id), int(conta_id))).rowcount
             c.commit()

@@ -117,6 +117,10 @@ def cliente(monkeypatch):
     monkeypatch.setattr(ps, "get_pool", lambda: pool)
     conta = [None] * 15
     conta[0], conta[11], conta[12], conta[14] = CONTA, True, True, True
+    # [2] = nome da conta. É ele que assina o e-mail da proposta quando a empresa
+    # ainda não preencheu razão social / nome fantasia — o cliente tem que ver o
+    # nome do fornecedor, não um remetente vazio.
+    conta[2] = "Buffet Teste"
     monkeypatch.setattr(ps, "conta_logada", lambda request: tuple(conta))
 
     app = FastAPI()
@@ -849,3 +853,185 @@ def test_proposta_nao_aprovada_nao_marca_data(cliente):
         cx.execute("update orcamentos set status='enviado' where id=%s", (oid,))
         cx.commit()
     assert cliente.post("/painel/servicos/marcar-data", json={"id": oid}).status_code == 400
+
+
+# ================================== mandar a proposta por e-mail, pelas ROTAS
+#
+# O módulo puro está em tests/test_proposta_email.py. Aqui prova-se o que só a
+# rota responde: que a tela abre preenchida, que o envio registra o que
+# aconteceu (inclusive a falha), e que falhar devolve o link — o vendedor tem um
+# cliente esperando, e o link resolve o dia dele enquanto a caixa se conserta.
+
+@pytest.fixture()
+def correio(monkeypatch):
+    """Substitui as duas pontas de envio (caixa da empresa e SMTP do Zaq).
+
+    Troca as FUNÇÕES dos módulos reais, não o módulo em sys.modules: quem chama
+    faz `from finance import email_inbound`, que lê o atributo do pacote — já
+    resolvido na primeira importação. Trocar o sys.modules funcionava rodando o
+    arquivo sozinho e falhava na suíte inteira, que é o pior tipo de teste.
+
+    Devolve a lista do que SAIU, com `.estado` pendurado pra o caso ligar e
+    desligar cada caminho — é assim que se testa "a caixa da empresa falhou, caiu
+    pro Zaq" sem servidor de e-mail nenhum."""
+    from finance import email_inbound as ein
+    from finance import email_sender as es
+
+    class _Correio(list):
+        estado = {"caixa": "prime@gmail.com", "ok_empresa": True, "ok_zaq": True}
+
+    saidas = _Correio()
+    st = saidas.estado
+
+    def _remetente_conta(pool, conta_id, canal="email"):
+        return st["caixa"]
+
+    def _enviar_conta(pool, conta_id, destino, assunto, html, texto_alt=None,
+                      from_nome=None, **kw):
+        if not st["ok_empresa"]:
+            return False
+        saidas.append({"por": "empresa", "destino": destino, "assunto": assunto,
+                       "html": html, "from_nome": from_nome})
+        return True
+
+    def _enviar_email(destino, assunto, html, texto_alt=None, reply_to=None,
+                      from_nome=None, **kw):
+        if not st["ok_zaq"]:
+            return False
+        saidas.append({"por": "zaq", "destino": destino, "assunto": assunto,
+                       "html": html, "reply_to": reply_to, "from_nome": from_nome})
+        return True
+
+    monkeypatch.setattr(ein, "remetente_conta", _remetente_conta)
+    monkeypatch.setattr(ein, "enviar_conta", _enviar_conta)
+    monkeypatch.setattr(es, "enviar_email", _enviar_email)
+    monkeypatch.setattr(es, "remetente_configurado", lambda: "contato@zaq-ia.com")
+    return saidas
+
+
+def _orcamento_pra_mandar(c, *, email="", conta_id=CONTA, numero=14):
+    with c.pool.connection() as cx:
+        return cx.execute(
+            """insert into orcamentos (conta_id, cliente, empresa, status, criado_por,
+                 setup_centavos, primeiro_ano_centavos, modo, evento, numero, email, token)
+               values (%s,'Maria Helena','','enviado','',890000,890000,'evento',
+                       %s::jsonb,%s,%s,%s) returning id""",
+            (conta_id, json.dumps({"data": "2026-09-12", "tipo": "Casamento"}),
+             numero, email or None, f"tk{numero}{conta_id}")).fetchone()[0]
+
+
+def test_a_tela_de_envio_abre_preenchida(cliente, correio):
+    oid = _orcamento_pra_mandar(cliente, email="maria@x.com")
+    d = cliente.get(f"/painel/servicos/email/{oid}").json()
+    assert d["para"] == "maria@x.com"
+    assert d["assunto"].startswith("Orçamento nº 14")
+    assert d["mensagem"].startswith("Oi, Maria!")
+    assert d["link"].endswith("/proposta/tk147")
+    assert d["remetente"]["caixa"] == "própria"
+    assert d["envios"] == []
+
+
+def test_o_resumo_diz_quando_o_orcamento_foi_gerado(cliente, correio):
+    """Proposta tem validade na cabeça de quem recebe. O cliente que acha o e-mail
+    duas semanas depois precisa saber se aquilo ainda é de hoje."""
+    oid = _orcamento_pra_mandar(cliente, email="maria@x.com")
+    d = cliente.get(f"/painel/servicos/email/{oid}").json()
+    assert "gerado em" in d["resumo"]
+    assert "Casamento" in d["resumo"] and "12/09/2026" in d["resumo"]
+
+
+def test_manda_pela_caixa_da_empresa_e_registra(cliente, correio):
+    oid = _orcamento_pra_mandar(cliente, email="maria@x.com")
+    r = cliente.post("/painel/servicos/enviar-email", json={"id": oid})
+    assert r.status_code == 200, r.text
+    assert correio[0]["por"] == "empresa" and correio[0]["destino"] == "maria@x.com"
+    assert "gerado em" in correio[0]["html"]
+    # e a linha do funil passa a dizer que já foi
+    assert _item(cliente, oid)["enviado_em"]
+
+
+def test_o_email_digitado_fica_salvo_no_orcamento(cliente, correio):
+    """Sem isso a mesma pessoa redigitaria o endereço a cada envio, e o orçamento
+    seguiria sem o dado que o contrato depois vai precisar."""
+    oid = _orcamento_pra_mandar(cliente, email="")
+    assert cliente.get(f"/painel/servicos/email/{oid}").json()["para"] == ""
+    cliente.post("/painel/servicos/enviar-email",
+                 json={"id": oid, "para": "nova@x.com"})
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select email from orcamentos where id=%s",
+                          (oid,)).fetchone()[0] == "nova@x.com"
+    assert cliente.get(f"/painel/servicos/email/{oid}").json()["para"] == "nova@x.com"
+
+
+def test_e_mail_invalido_nao_chega_a_tentar_enviar(cliente, correio):
+    oid = _orcamento_pra_mandar(cliente)
+    r = cliente.post("/painel/servicos/enviar-email", json={"id": oid, "para": "maria"})
+    assert r.status_code == 400 and not correio
+
+
+def test_apertar_enviar_sem_tocar_em_nada_usa_o_email_do_orcamento(cliente, correio):
+    """O caminho de quem só quer mandar: abrir e apertar Enviar."""
+    oid = _orcamento_pra_mandar(cliente, email="maria@x.com")
+    assert cliente.post("/painel/servicos/enviar-email",
+                        json={"id": oid}).status_code == 200
+    assert correio[0]["destino"] == "maria@x.com"
+
+
+def test_o_email_sai_assinado_com_o_nome_da_empresa(cliente, correio):
+    """Quem recebe tem que ver a Prime, não o Zaq — mesmo quando quem manda é o
+    servidor do Zaq."""
+    oid = _orcamento_pra_mandar(cliente, email="maria@x.com")
+    cliente.post("/painel/servicos/enviar-email", json={"id": oid})
+    assert correio[0]["from_nome"] == "Buffet Teste"
+
+
+def test_falhar_devolve_o_LINK_junto_do_erro(cliente, correio):
+    """O vendedor tem um cliente esperando. Mandar pelo WhatsApp resolve o dia
+    dele enquanto a caixa se conserta."""
+    correio.estado.update(ok_empresa=False, ok_zaq=False)
+    oid = _orcamento_pra_mandar(cliente, email="maria@x.com")
+    r = cliente.post("/painel/servicos/enviar-email", json={"id": oid})
+    assert r.status_code == 502
+    d = r.json()
+    assert d["link"].endswith("/proposta/tk147") and d["erro"]
+
+
+def test_a_falha_tambem_fica_registrada(cliente, correio):
+    """"Nunca enviado" seria verdade e inútil. O que resolve é "tentou e falhou"."""
+    correio.estado.update(ok_empresa=False, ok_zaq=False)
+    oid = _orcamento_pra_mandar(cliente, email="maria@x.com")
+    cliente.post("/painel/servicos/enviar-email", json={"id": oid})
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select ok, destino from orcamento_envios where orcamento_id=%s",
+                          (oid,)).fetchone() == (False, "maria@x.com")
+    # e o selo do funil NÃO acende com uma tentativa que falhou
+    assert _item(cliente, oid)["enviado_em"] == ""
+
+
+def test_o_historico_conta_quantas_vezes_foi(cliente, correio):
+    oid = _orcamento_pra_mandar(cliente, email="maria@x.com")
+    cliente.post("/painel/servicos/enviar-email", json={"id": oid})
+    cliente.post("/painel/servicos/enviar-email", json={"id": oid})
+    envios = cliente.get(f"/painel/servicos/email/{oid}").json()["envios"]
+    assert len(envios) == 2 and all(e["ok"] for e in envios)
+
+
+def test_orcamento_de_outra_conta_nao_se_manda_daqui(cliente, correio):
+    oid = _orcamento_pra_mandar(cliente, email="x@x.com", conta_id=OUTRA, numero=99)
+    assert cliente.get(f"/painel/servicos/email/{oid}").status_code == 404
+    assert cliente.post("/painel/servicos/enviar-email",
+                        json={"id": oid}).status_code == 404
+    assert not correio
+
+
+def test_proposta_antiga_sem_token_ganha_um_na_hora(cliente, correio):
+    """O botão não pode depender de a pessoa ter carregado a lista antes — é ela
+    que preenchia o token das propostas de antes de ele existir."""
+    with cliente.pool.connection() as cx:
+        oid = cx.execute(
+            """insert into orcamentos (conta_id, cliente, status, criado_por, modo,
+                 setup_centavos, numero) values (%s,'Antiga','enviado','','evento',1000,77)
+               returning id""", (CONTA,)).fetchone()[0]
+        cx.commit()
+    d = cliente.get(f"/painel/servicos/email/{oid}").json()
+    assert "/proposta/" in d["link"] and not d["link"].endswith("/proposta/")

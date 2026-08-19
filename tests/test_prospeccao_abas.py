@@ -132,3 +132,36 @@ def test_o_funil_nao_quebra_linha_com_etapa_a_mais():
     # pra explicar o que mudou, e procurá-lo solto acusaria a própria explicação
     assert "repeat(" not in css, "voltou o número fixo de colunas"
     assert "grid-auto-columns" in css and "overflow-x:auto" in css
+
+
+# ── as rotas: quem casa primeiro ───────────────────────────────────────────
+def _resolve(caminho: str, metodo: str = "GET"):
+    """Qual função o router escolhe pra este caminho — a mesma decisão que o
+    FastAPI toma em produção, não uma leitura da ordem no arquivo."""
+    from starlette.routing import Match
+    escopo = {"type": "http", "method": metodo, "path": caminho,
+              "path_params": {}, "root_path": "", "headers": []}
+    for rota in pp.router.routes:
+        if rota.matches(escopo)[0] == Match.FULL:
+            return rota.endpoint.__name__
+    return None
+
+
+def test_regua_vem_antes_da_ficha_do_lead():
+    """SUBIU QUEBRADO ASSIM. `/painel/prospeccao/{alvo_id}` é a ficha do lead, e o
+    FastAPI casa por ORDEM DE REGISTRO, não por especificidade: com a ficha
+    declarada primeiro, ela engolia /painel/prospeccao/regua tratando "regua" como
+    id de lead, e a tela respondia 422 "unable to parse string as an integer".
+
+    Testar a ordem das linhas no arquivo não bastaria — o que decide é o router.
+    Aqui a pergunta é feita a ele."""
+    assert _resolve("/painel/prospeccao/regua") == "regua_pagina"
+    assert _resolve("/painel/prospeccao/regua/ritmo") == "regua_ritmo"
+    assert _resolve("/painel/prospeccao/regua/config", "POST") == "regua_config"
+    assert _resolve("/painel/prospeccao/regua/etapa/7", "POST") == "regua_etapa"
+
+
+def test_a_ficha_do_lead_continua_atendendo_id():
+    """E o conserto não pode ter roubado o caminho de quem é dono dele."""
+    assert _resolve("/painel/prospeccao/629") == "prospeccao_ficha"
+    assert _resolve("/painel/prospeccao/629/status", "POST") == "prospeccao_status"

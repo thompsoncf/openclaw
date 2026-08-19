@@ -5810,6 +5810,210 @@ def _numeros_candidatos(alvo: dict) -> list[dict]:
 
 
 # ================================================================ FICHA DO ALVO
+# ================================================================ RÉGUA DO FUNIL
+# ATENÇÃO À POSIÇÃO: estas rotas TÊM que ser declaradas antes de
+# `/painel/prospeccao/{alvo_id}` (logo abaixo). O FastAPI casa por ORDEM DE
+# REGISTRO, não por especificidade: com a ficha do lead declarada primeiro, ela
+# engole /painel/prospeccao/regua tratando "regua" como id de lead, e a tela
+# responde 422 "unable to parse string as an integer". Foi assim que a Régua
+# subiu quebrada em produção — ver test_regua_vem_antes_da_ficha_do_lead.
+# A configuração da empresa num lugar só: as etapas (nome, fase, ordem), o gatilho
+# que traz o lead pra cada uma, o prazo que ela aguenta, e os dois interruptores.
+# Nasce tudo desligado — quem liga é o dono, um gatilho de cada vez.
+_UNIDADES = [("min", "minutos", 1), ("h", "horas", 60), ("d", "dias", 1440)]
+_UNI_MIN = {u: m for u, _r, m in _UNIDADES}
+
+
+def _min_par(m):
+    """240 -> (4, 'h'). Escolhe a maior unidade que divide certo, pra tela mostrar
+    '4 horas' e não '240 minutos'."""
+    if not m:
+        return ("", "h")
+    for uni, _rot, mult in reversed(_UNIDADES):
+        if m % mult == 0:
+            return (m // mult, uni)
+    return (m, "min")
+
+
+def _par_min(n, uni):
+    """('4','h') -> 240. Vazio/zero/negativo = sem prazo (None), que é como a etapa
+    diz 'não cobro ninguém' sem precisar de uma segunda coluna pra isso."""
+    try:
+        v = int(str(n).strip())
+    except (TypeError, ValueError):
+        return None
+    if v <= 0:
+        return None
+    return v * _UNI_MIN.get(uni, 60)
+
+
+@router.get("/painel/prospeccao/regua", response_class=HTMLResponse)
+def regua_pagina(request: Request):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "A régua é configuração da empresa — só dono/gestor."
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    pool = get_pool()
+    with pool.connection() as c:
+        _etapas(c, ctx["conta_id"])                 # semeia o padrão na 1ª visita
+        cfg = _fr.config(c, ctx["conta_id"])
+        c.commit()
+        linhas = _fr.etapas(c, ctx["conta_id"])
+        # quantos leads em cada coluna, pro dono ver o que ele está mexendo (e pra
+        # tela saber quando o botão de remover pode ficar habilitado)
+        n_por = dict(c.execute(
+            """select status, count(*) from prospeccao
+                where conta_id=%s and estagio='lead' group by status""",
+            (ctx["conta_id"],)).fetchall())
+        # o histórico já roda com tudo desligado — mostrar o tamanho dele é o que
+        # justifica esperar antes de ligar
+        n_mov = c.execute("select count(*) from funil_movimentos where conta_id=%s",
+                          (ctx["conta_id"],)).fetchone()[0]
+    for e in linhas:
+        e["n"] = n_por.get(e["chave"], 0)
+        e["prazo_n"], e["prazo_u"] = _min_par(e["prazo_min"])
+        e["gatilho_rot"] = _fr.EVENTOS.get(e["gatilho"] or "", "")
+    conv = [{"chave": k, "rotulo": v, "prazo_n": _min_par(cfg[c_])[0], "prazo_u": _min_par(cfg[c_])[1]}
+            for k, v, c_ in (("sem_resposta", "Sem resposta", "sem_resposta_min"),
+                             ("bola_nossa", "Bola com você", "bola_nossa_min"),
+                             ("bola_cliente", "Bola com o cliente", "bola_cliente_min"))]
+    return _render("prospeccao_regua", request, titulo="Régua do funil",
+                   secao_ativa="prospeccao", nav_ativo="regua", gerencia=True,
+                   etapas=linhas, cfg=cfg, conv=conv, eventos=sorted(_fr.EVENTOS.items()),
+                   unidades=[(u, r) for u, r, _m in _UNIDADES],
+                   dias_on=_fr._dias(cfg), n_mov=n_mov,
+                   aviso=request.session.pop("prosp_aviso", None))
+
+
+@router.post("/painel/prospeccao/regua/config")
+async def regua_config(request: Request):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    f = await request.form()
+
+    def modo(nome):
+        v = (f.get(nome) or "off").strip()
+        return v if v in _fr.MODOS else "off"
+
+    dias = ",".join(d for d in (f.getlist("dias") or []) if d in "1234567")
+    abre = (f.get("abre") or "08:00").strip()[:5]
+    fecha = (f.get("fecha") or "19:00").strip()[:5]
+    with get_pool().connection() as c:
+        _fr.config(c, ctx["conta_id"])          # garante a linha
+        c.execute("""update funil_regua set gatilhos_modo=%s, cobranca_modo=%s,
+                       janela_dias=%s, janela_abre=%s, janela_fecha=%s,
+                       sem_resposta_min=coalesce(%s, sem_resposta_min),
+                       bola_nossa_min=coalesce(%s, bola_nossa_min),
+                       bola_cliente_min=coalesce(%s, bola_cliente_min),
+                       escala_min=coalesce(%s, escala_min),
+                       teto_avisos_dia=greatest(1, coalesce(%s, teto_avisos_dia)),
+                       atualizado_em=now()
+                     where conta_id=%s""",
+                  (modo("gatilhos_modo"), modo("cobranca_modo"), dias, abre, fecha,
+                   _par_min(f.get("sem_resposta_n"), f.get("sem_resposta_u")),
+                   _par_min(f.get("bola_nossa_n"), f.get("bola_nossa_u")),
+                   _par_min(f.get("bola_cliente_n"), f.get("bola_cliente_u")),
+                   _par_min(f.get("escala_n"), f.get("escala_u")),
+                   _par_min(f.get("teto"), "min"), ctx["conta_id"]))
+        c.commit()
+    request.session["prosp_aviso"] = "Régua salva ✓"
+    return RedirectResponse("/painel/prospeccao/regua", status_code=303)
+
+
+@router.post("/painel/prospeccao/regua/etapa/{eid}")
+async def regua_etapa(request: Request, eid: int):
+    """Salva UMA etapa: rótulo, prazo, gatilho e a chave que liga esse gatilho.
+    Uma linha por vez de propósito — o dono pediu pra ligar um de cada vez, e um
+    formulário só pra sete etapas transformaria isso em tudo-ou-nada."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    f = await request.form()
+    rot = (f.get("rotulo") or "").strip()[:40]
+    gat = (f.get("gatilho") or "").strip()
+    gat = gat if gat in _fr.EVENTOS else None
+    ativo = str(f.get("gatilho_ativo") or "").lower() in ("1", "on", "true", "sim")
+    prazo = _par_min(f.get("prazo_n"), f.get("prazo_u"))
+    with get_pool().connection() as c:
+        r = c.execute("select chave, fixa from funil_etapas where id=%s and conta_id=%s",
+                      (eid, ctx["conta_id"])).fetchone()
+        if not r:
+            return JSONResponse({"ok": False, "erro": "etapa"}, status_code=404)
+        # Etapa de resultado não tem prazo: "está em Perdido há 30 dias" não é uma
+        # cobrança, é o fim da história. Deixar o campo aberto só convidaria alguém
+        # a criar um alarme que nunca deveria tocar.
+        if r[0] in ("ganho", "perdido"):
+            prazo = None
+        c.execute("""update funil_etapas
+                        set rotulo = coalesce(nullif(%s,''), rotulo),
+                            prazo_min = %s, gatilho = %s,
+                            -- ligar sem escolher evento não liga nada: a etapa ficaria
+                            -- "ativa" apontando pro vazio e o motor rodaria em falso.
+                            -- O ::text é pro Postgres saber o tipo do parâmetro solto.
+                            gatilho_ativo = (%s and %s::text is not null)
+                      where id=%s and conta_id=%s""",
+                  (rot, prazo, gat, ativo, gat, eid, ctx["conta_id"]))
+        c.commit()
+    return JSONResponse({"ok": True, "gatilho_ativo": bool(ativo and gat)})
+
+
+
+def _dur(minutos: float) -> str:
+    """Duração pra humano. 12 minutos é '12 min', não '0,2 h' — e a mediana desta
+    equipe É 12 minutos, então arredondar pra hora apagaria justamente o número que
+    mostra que os vendedores são rápidos."""
+    m = int(round(minutos or 0))
+    if m < 60:
+        return f"{m} min"
+    if m < 1440:
+        return f"{m // 60}h{m % 60:02d}"
+    return f"{m // 1440}d {(m % 1440) // 60}h"
+
+
+@router.get("/painel/prospeccao/regua/ritmo", response_class=HTMLResponse)
+def regua_ritmo(request: Request, dias: int = 21):
+    """O ritmo real da equipe, medido. É esta tela que escolhe os prazos da régua —
+    ela existe pra que ninguém precise chutar, inclusive eu."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "O ritmo da equipe é visão de dono/gestor."
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    dias = max(7, min(int(dias or 21), 90))
+    with get_pool().connection() as c:
+        d = _fr.medir(c, ctx["conta_id"], dias)
+        cfg = _fr.config(c, ctx["conta_id"])
+        rot = {e["chave"]: e["rotulo"] for e in _fr.etapas(c, ctx["conta_id"])}
+        c.commit()
+    # a barra vai até o P90 do mais lento — comparar vendedor com vendedor só faz
+    # sentido na mesma régua
+    teto = max([v["p90"] for v in d["vendedores"]] or [1]) or 1
+    for v in d["vendedores"]:
+        v["p50_rot"], v["p90_rot"] = _dur(v["p50"]), _dur(v["p90"])
+        v["larg50"] = f"{min(100, v['p50'] / teto * 100):.1f}%"
+        v["larg90"] = f"{min(100, v['p90'] / teto * 100):.1f}%"
+    for e in d["etapas"]:
+        e["rotulo"] = rot.get(e["chave"], e["chave"])
+        e["dur"] = _dur(e["horas"] * 60)
+    maior = max([n for _r, n in d["cortes"]] or [1]) or 1
+    cortes = [{"rotulo": r, "n": n, "dia": f"{n / max(dias, 1):.1f}".replace(".", ","),
+               "larg": f"{(n / maior * 100):.0f}%"} for r, n in d["cortes"]]
+    return _render("prospeccao_ritmo", request, titulo="O ritmo real",
+                   secao_ativa="prospeccao", nav_ativo="regua", gerencia=True,
+                   d=d, cfg=cfg, cortes=cortes, dias=dias, dur=_dur,
+                   aviso=request.session.pop("prosp_aviso", None))
+
+
+
+
 @router.get("/painel/prospeccao/{alvo_id}", response_class=HTMLResponse)
 def prospeccao_ficha(request: Request, alvo_id: int):
     ctx, redir = _acesso(request)
@@ -11356,154 +11560,6 @@ _env.loader.mapping["prospeccao_radar"] = _RADAR_TPL
 _env.loader.mapping["prospeccao_campanha"] = _CAMPANHA_TPL
 
 
-# ================================================================ RÉGUA DO FUNIL
-# A configuração da empresa num lugar só: as etapas (nome, fase, ordem), o gatilho
-# que traz o lead pra cada uma, o prazo que ela aguenta, e os dois interruptores.
-# Nasce tudo desligado — quem liga é o dono, um gatilho de cada vez.
-_UNIDADES = [("min", "minutos", 1), ("h", "horas", 60), ("d", "dias", 1440)]
-_UNI_MIN = {u: m for u, _r, m in _UNIDADES}
-
-
-def _min_par(m):
-    """240 -> (4, 'h'). Escolhe a maior unidade que divide certo, pra tela mostrar
-    '4 horas' e não '240 minutos'."""
-    if not m:
-        return ("", "h")
-    for uni, _rot, mult in reversed(_UNIDADES):
-        if m % mult == 0:
-            return (m // mult, uni)
-    return (m, "min")
-
-
-def _par_min(n, uni):
-    """('4','h') -> 240. Vazio/zero/negativo = sem prazo (None), que é como a etapa
-    diz 'não cobro ninguém' sem precisar de uma segunda coluna pra isso."""
-    try:
-        v = int(str(n).strip())
-    except (TypeError, ValueError):
-        return None
-    if v <= 0:
-        return None
-    return v * _UNI_MIN.get(uni, 60)
-
-
-@router.get("/painel/prospeccao/regua", response_class=HTMLResponse)
-def regua_pagina(request: Request):
-    ctx, redir = _acesso(request)
-    if redir is not None:
-        return redir
-    if not ctx["gerencia"]:
-        request.session["prosp_aviso"] = "A régua é configuração da empresa — só dono/gestor."
-        return RedirectResponse("/painel/prospeccao", status_code=303)
-    pool = get_pool()
-    with pool.connection() as c:
-        _etapas(c, ctx["conta_id"])                 # semeia o padrão na 1ª visita
-        cfg = _fr.config(c, ctx["conta_id"])
-        c.commit()
-        linhas = _fr.etapas(c, ctx["conta_id"])
-        # quantos leads em cada coluna, pro dono ver o que ele está mexendo (e pra
-        # tela saber quando o botão de remover pode ficar habilitado)
-        n_por = dict(c.execute(
-            """select status, count(*) from prospeccao
-                where conta_id=%s and estagio='lead' group by status""",
-            (ctx["conta_id"],)).fetchall())
-        # o histórico já roda com tudo desligado — mostrar o tamanho dele é o que
-        # justifica esperar antes de ligar
-        n_mov = c.execute("select count(*) from funil_movimentos where conta_id=%s",
-                          (ctx["conta_id"],)).fetchone()[0]
-    for e in linhas:
-        e["n"] = n_por.get(e["chave"], 0)
-        e["prazo_n"], e["prazo_u"] = _min_par(e["prazo_min"])
-        e["gatilho_rot"] = _fr.EVENTOS.get(e["gatilho"] or "", "")
-    conv = [{"chave": k, "rotulo": v, "prazo_n": _min_par(cfg[c_])[0], "prazo_u": _min_par(cfg[c_])[1]}
-            for k, v, c_ in (("sem_resposta", "Sem resposta", "sem_resposta_min"),
-                             ("bola_nossa", "Bola com você", "bola_nossa_min"),
-                             ("bola_cliente", "Bola com o cliente", "bola_cliente_min"))]
-    return _render("prospeccao_regua", request, titulo="Régua do funil",
-                   secao_ativa="prospeccao", nav_ativo="regua", gerencia=True,
-                   etapas=linhas, cfg=cfg, conv=conv, eventos=sorted(_fr.EVENTOS.items()),
-                   unidades=[(u, r) for u, r, _m in _UNIDADES],
-                   dias_on=_fr._dias(cfg), n_mov=n_mov,
-                   aviso=request.session.pop("prosp_aviso", None))
-
-
-@router.post("/painel/prospeccao/regua/config")
-async def regua_config(request: Request):
-    ctx, redir = _acesso(request)
-    if redir is not None:
-        return redir
-    if not ctx["gerencia"]:
-        return RedirectResponse("/painel/prospeccao", status_code=303)
-    f = await request.form()
-
-    def modo(nome):
-        v = (f.get(nome) or "off").strip()
-        return v if v in _fr.MODOS else "off"
-
-    dias = ",".join(d for d in (f.getlist("dias") or []) if d in "1234567")
-    abre = (f.get("abre") or "08:00").strip()[:5]
-    fecha = (f.get("fecha") or "19:00").strip()[:5]
-    with get_pool().connection() as c:
-        _fr.config(c, ctx["conta_id"])          # garante a linha
-        c.execute("""update funil_regua set gatilhos_modo=%s, cobranca_modo=%s,
-                       janela_dias=%s, janela_abre=%s, janela_fecha=%s,
-                       sem_resposta_min=coalesce(%s, sem_resposta_min),
-                       bola_nossa_min=coalesce(%s, bola_nossa_min),
-                       bola_cliente_min=coalesce(%s, bola_cliente_min),
-                       escala_min=coalesce(%s, escala_min),
-                       teto_avisos_dia=greatest(1, coalesce(%s, teto_avisos_dia)),
-                       atualizado_em=now()
-                     where conta_id=%s""",
-                  (modo("gatilhos_modo"), modo("cobranca_modo"), dias, abre, fecha,
-                   _par_min(f.get("sem_resposta_n"), f.get("sem_resposta_u")),
-                   _par_min(f.get("bola_nossa_n"), f.get("bola_nossa_u")),
-                   _par_min(f.get("bola_cliente_n"), f.get("bola_cliente_u")),
-                   _par_min(f.get("escala_n"), f.get("escala_u")),
-                   _par_min(f.get("teto"), "min"), ctx["conta_id"]))
-        c.commit()
-    request.session["prosp_aviso"] = "Régua salva ✓"
-    return RedirectResponse("/painel/prospeccao/regua", status_code=303)
-
-
-@router.post("/painel/prospeccao/regua/etapa/{eid}")
-async def regua_etapa(request: Request, eid: int):
-    """Salva UMA etapa: rótulo, prazo, gatilho e a chave que liga esse gatilho.
-    Uma linha por vez de propósito — o dono pediu pra ligar um de cada vez, e um
-    formulário só pra sete etapas transformaria isso em tudo-ou-nada."""
-    ctx, redir = _acesso(request)
-    if redir is not None:
-        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    if not ctx["gerencia"]:
-        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
-    f = await request.form()
-    rot = (f.get("rotulo") or "").strip()[:40]
-    gat = (f.get("gatilho") or "").strip()
-    gat = gat if gat in _fr.EVENTOS else None
-    ativo = str(f.get("gatilho_ativo") or "").lower() in ("1", "on", "true", "sim")
-    prazo = _par_min(f.get("prazo_n"), f.get("prazo_u"))
-    with get_pool().connection() as c:
-        r = c.execute("select chave, fixa from funil_etapas where id=%s and conta_id=%s",
-                      (eid, ctx["conta_id"])).fetchone()
-        if not r:
-            return JSONResponse({"ok": False, "erro": "etapa"}, status_code=404)
-        # Etapa de resultado não tem prazo: "está em Perdido há 30 dias" não é uma
-        # cobrança, é o fim da história. Deixar o campo aberto só convidaria alguém
-        # a criar um alarme que nunca deveria tocar.
-        if r[0] in ("ganho", "perdido"):
-            prazo = None
-        c.execute("""update funil_etapas
-                        set rotulo = coalesce(nullif(%s,''), rotulo),
-                            prazo_min = %s, gatilho = %s,
-                            -- ligar sem escolher evento não liga nada: a etapa ficaria
-                            -- "ativa" apontando pro vazio e o motor rodaria em falso.
-                            -- O ::text é pro Postgres saber o tipo do parâmetro solto.
-                            gatilho_ativo = (%s and %s::text is not null)
-                      where id=%s and conta_id=%s""",
-                  (rot, prazo, gat, ativo, gat, eid, ctx["conta_id"]))
-        c.commit()
-    return JSONResponse({"ok": True, "gatilho_ativo": bool(ativo and gat)})
-
-
 _REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 <style>
 .rg-grp{display:flex;align-items:center;gap:.6rem;margin:1.1rem 0 .35rem}
@@ -11687,53 +11743,6 @@ function rgSalvar(ev){ev.preventDefault();var f=ev.target;
 {% endblock %}"""
 
 _env.loader.mapping["prospeccao_regua"] = _REGUA_TPL
-
-
-def _dur(minutos: float) -> str:
-    """Duração pra humano. 12 minutos é '12 min', não '0,2 h' — e a mediana desta
-    equipe É 12 minutos, então arredondar pra hora apagaria justamente o número que
-    mostra que os vendedores são rápidos."""
-    m = int(round(minutos or 0))
-    if m < 60:
-        return f"{m} min"
-    if m < 1440:
-        return f"{m // 60}h{m % 60:02d}"
-    return f"{m // 1440}d {(m % 1440) // 60}h"
-
-
-@router.get("/painel/prospeccao/regua/ritmo", response_class=HTMLResponse)
-def regua_ritmo(request: Request, dias: int = 21):
-    """O ritmo real da equipe, medido. É esta tela que escolhe os prazos da régua —
-    ela existe pra que ninguém precise chutar, inclusive eu."""
-    ctx, redir = _acesso(request)
-    if redir is not None:
-        return redir
-    if not ctx["gerencia"]:
-        request.session["prosp_aviso"] = "O ritmo da equipe é visão de dono/gestor."
-        return RedirectResponse("/painel/prospeccao", status_code=303)
-    dias = max(7, min(int(dias or 21), 90))
-    with get_pool().connection() as c:
-        d = _fr.medir(c, ctx["conta_id"], dias)
-        cfg = _fr.config(c, ctx["conta_id"])
-        rot = {e["chave"]: e["rotulo"] for e in _fr.etapas(c, ctx["conta_id"])}
-        c.commit()
-    # a barra vai até o P90 do mais lento — comparar vendedor com vendedor só faz
-    # sentido na mesma régua
-    teto = max([v["p90"] for v in d["vendedores"]] or [1]) or 1
-    for v in d["vendedores"]:
-        v["p50_rot"], v["p90_rot"] = _dur(v["p50"]), _dur(v["p90"])
-        v["larg50"] = f"{min(100, v['p50'] / teto * 100):.1f}%"
-        v["larg90"] = f"{min(100, v['p90'] / teto * 100):.1f}%"
-    for e in d["etapas"]:
-        e["rotulo"] = rot.get(e["chave"], e["chave"])
-        e["dur"] = _dur(e["horas"] * 60)
-    maior = max([n for _r, n in d["cortes"]] or [1]) or 1
-    cortes = [{"rotulo": r, "n": n, "dia": f"{n / max(dias, 1):.1f}".replace(".", ","),
-               "larg": f"{(n / maior * 100):.0f}%"} for r, n in d["cortes"]]
-    return _render("prospeccao_ritmo", request, titulo="O ritmo real",
-                   secao_ativa="prospeccao", nav_ativo="regua", gerencia=True,
-                   d=d, cfg=cfg, cortes=cortes, dias=dias, dur=_dur,
-                   aviso=request.session.pop("prosp_aviso", None))
 
 
 _RITMO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """

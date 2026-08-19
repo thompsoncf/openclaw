@@ -119,3 +119,16 @@ def test_sao_sete_abas_mais_a_engrenagem():
     assert len(abas) == 8, f"esperado 7 abas + ⚙️, veio {len(abas)}: {abas}"
     assert abas[-1] == "⚙️"
     assert "⏱️ Régua" in abas
+
+
+# ── o quadro do funil ──────────────────────────────────────────────────────
+def test_o_funil_nao_quebra_linha_com_etapa_a_mais():
+    """`repeat(6, ...)` fixo era uma aposta em quantas etapas a conta tem — e as
+    etapas são configuráveis. Quem criou uma 7ª (pós-venda, por exemplo) já via a
+    última coluna cair pra segunda linha no desktop. Agora o quadro rola, como a
+    barra de abas faz desde a reforma dela."""
+    css = pp._CSS.split(".kbrow{display:grid")[1].split("}")[0]
+    # o assert é na REGRA, não no arquivo: o comentário do CSS cita o número antigo
+    # pra explicar o que mudou, e procurá-lo solto acusaria a própria explicação
+    assert "repeat(" not in css, "voltou o número fixo de colunas"
+    assert "grid-auto-columns" in css and "overflow-x:auto" in css

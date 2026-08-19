@@ -7076,7 +7076,12 @@ _CSS = """<style>
 .kbcard .ft{display:flex;align-items:center;justify-content:space-between;gap:.3rem;margin-top:.42rem;flex-wrap:wrap}
 @media(min-width:900px){
   .kbtabs{display:none}
-  .kbrow{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.55rem}
+  /* Uma coluna por ETAPA, e as etapas são configuráveis desde a régua: o
+     repeat(6,...) fixo jogava a 7ª pra uma segunda linha no desktop — que é o que
+     já acontece hoje em quem criou uma etapa a mais. auto-fit + minmax mantém a
+     linha única e faz o quadro rolar quando não couber, como a barra de abas. */
+  .kbrow{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(150px,1fr);
+    gap:.55rem;overflow-x:auto;scrollbar-width:thin}
   .kbcol{display:flex !important;min-height:180px}
 }
 /* ---- ficha ---- */

@@ -1,4 +1,4 @@
--- 171_funil_regua.sql
+-- 177_funil_regua.sql
 -- A régua do funil: fase na etapa, prazo, gatilho — e o histórico que nunca existiu.
 --
 -- O QUE MOTIVOU

@@ -21,6 +21,7 @@ log = logging.getLogger("zaq.portal")
 
 from db.conexao import get_pool
 from web import tema as _tema
+from web import versao as _versao
 from contas import contas as ct
 from contas.permissoes import pode_financas
 from finance.livro_caixa import LivroCaixa
@@ -206,6 +207,17 @@ button:hover{background:var(--verde-hover)}
 .pb-vencido{background:#3a1d1d;border:1px solid #6e2b2b;color:#f0c2c2}
 .pb-avencer{background:#332a12;border:1px solid #6e5a22;color:#f0dca6}
 .pb-avencer .pb-btn{background:#c99a2e}.pb-avencer .pb-btn:hover{background:#d9a832}
+/* faixa "tem versão nova" — só aparece via JS, nunca no HTML servido */
+#ver-nova{display:none;width:100%;max-width:720px;box-sizing:border-box;margin:1rem 1rem 0;
+ align-items:center;gap:.9rem;flex-wrap:wrap;background:#12302a;border:1px solid #1d6e57;
+ color:#bfe9d8;border-radius:12px;padding:.8rem 1rem;font-size:.9rem;line-height:1.4}
+#ver-nova.on{display:flex}
+#ver-nova .vn-txt{flex:1 1 260px;min-width:0}
+#ver-nova .vn-txt small{display:block;color:#8fbfae;font-size:.8rem;margin-top:.15rem}
+#ver-nova button{flex:0 0 auto;width:auto;margin:0;padding:.55rem 1.1rem;border-radius:8px;
+ font-size:.9rem;font-weight:600;white-space:nowrap}
+#ver-nova .vn-depois{background:transparent;border:1px solid #2f6b59;color:#9fd3c0;font-weight:500}
+#ver-nova .vn-depois:hover{background:#173a33}
 table{width:100%;border-collapse:collapse;margin-top:.8rem}
 td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;font-size:.92rem}
 .tag{display:inline-block;padding:.1rem .55rem;border-radius:999px;font-size:.78rem;
@@ -296,6 +308,9 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
 .nav-i{display:flex;align-items:center;gap:.65rem;padding:.55rem .6rem;border-radius:8px;color:var(--txt-mut);text-decoration:none;font-size:.9rem;margin:0}
 .nav-i:hover{background:var(--card-2);color:var(--txt)}
 .nav-i.on{background:rgba(29,158,117,.16);color:var(--verde-claro)}
+.nav-i .nvb{margin-left:auto;background:var(--verde);color:var(--sobre-verde);border-radius:999px;
+ min-width:18px;height:18px;padding:0 5px;box-sizing:border-box;font-size:.7rem;font-weight:600;
+ display:inline-flex;align-items:center;justify-content:center;line-height:1}
 .topo-mob{display:none}
 @media(min-width:768px){
   body{padding-left:216px}
@@ -320,11 +335,14 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   .mais-sheet.open{transform:translateY(0)}
   .mais-grab{width:34px;height:4px;background:var(--borda);border-radius:2px;margin:.4rem auto .5rem}
 }
-</style>{% if embed %}<style>body{padding-left:0 !important;padding-bottom:0 !important}.side,.topo-mob,.wa-suporte,.btmnav,.mais-sheet,.mais-bg{display:none !important}</style>{% endif %}</head><body>
-<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="ic-caixa" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></symbol><symbol id="ic-produtos" viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></symbol><symbol id="ic-clientes" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><path d="M16 6a3 3 0 010 6"/></symbol><symbol id="ic-financeiro" viewBox="0 0 24 24"><path d="M4 4v16h16"/><path d="M8 15l3-4 3 2 4-6"/></symbol><symbol id="ic-mais" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol><symbol id="ic-abastecimento" viewBox="0 0 24 24"><path d="M3 6h11v9H3zM14 9h4l3 3v3h-7z"/><circle cx="7" cy="18" r="1.6"/><circle cx="17" cy="18" r="1.6"/></symbol><symbol id="ic-empresa" viewBox="0 0 24 24"><path d="M4 9l1.2-4h13.6L20 9M5 9v10h14V9M4 9h16M10 19v-5h4v5"/></symbol><symbol id="ic-fornecedor" viewBox="0 0 24 24"><path d="M12 21v-8M12 13c0-3 2-5.5 5.5-5.5C17.5 11 15.5 13 12 13zM12 15c0-2.5-1.6-4.5-4.5-4.5C7.5 13 9 15 12 15z"/></symbol><symbol id="ic-compras" viewBox="0 0 24 24"><circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/><path d="M2 4h2.2l2.3 11h11l1.8-8H6"/></symbol><symbol id="ic-cesta" viewBox="0 0 24 24"><path d="M5 9h14l-1.4 10H6.4zM9 9l1.2-5M15 9l-1.2-5"/></symbol><symbol id="ic-painel" viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v4h-7zM13 11h7v9h-7zM4 14h7v6H4z"/></symbol><symbol id="ic-sair" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></symbol><symbol id="ic-prospeccao" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol><symbol id="ic-agenda" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/><path d="M7.5 13h2M11 13h2M14.5 13h2M7.5 16.5h2M11 16.5h2"/></symbol><symbol id="ic-relatorios" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M8 17v-5M12.5 17V7M17 17v-8"/></symbol></defs></svg>
+</style>{% if embed %}<style>body{padding-left:0 !important;padding-bottom:0 !important}.side,.topo-mob,.wa-suporte,.btmnav,.mais-sheet,.mais-bg,#ver-nova{display:none !important}</style>{% endif %}</head><body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><symbol id="ic-caixa" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></symbol><symbol id="ic-produtos" viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v8l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></symbol><symbol id="ic-clientes" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3.3 2.5-5.5 5.5-5.5s5.5 2.2 5.5 5.5"/><path d="M16 6a3 3 0 010 6"/></symbol><symbol id="ic-financeiro" viewBox="0 0 24 24"><path d="M4 4v16h16"/><path d="M8 15l3-4 3 2 4-6"/></symbol><symbol id="ic-mais" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol><symbol id="ic-abastecimento" viewBox="0 0 24 24"><path d="M3 6h11v9H3zM14 9h4l3 3v3h-7z"/><circle cx="7" cy="18" r="1.6"/><circle cx="17" cy="18" r="1.6"/></symbol><symbol id="ic-empresa" viewBox="0 0 24 24"><path d="M4 9l1.2-4h13.6L20 9M5 9v10h14V9M4 9h16M10 19v-5h4v5"/></symbol><symbol id="ic-fornecedor" viewBox="0 0 24 24"><path d="M12 21v-8M12 13c0-3 2-5.5 5.5-5.5C17.5 11 15.5 13 12 13zM12 15c0-2.5-1.6-4.5-4.5-4.5C7.5 13 9 15 12 15z"/></symbol><symbol id="ic-compras" viewBox="0 0 24 24"><circle cx="9" cy="20" r="1.5"/><circle cx="17" cy="20" r="1.5"/><path d="M2 4h2.2l2.3 11h11l1.8-8H6"/></symbol><symbol id="ic-cesta" viewBox="0 0 24 24"><path d="M5 9h14l-1.4 10H6.4zM9 9l1.2-5M15 9l-1.2-5"/></symbol><symbol id="ic-painel" viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v4h-7zM13 11h7v9h-7zM4 14h7v6H4z"/></symbol><symbol id="ic-sair" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></symbol><symbol id="ic-prospeccao" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol><symbol id="ic-agenda" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/><path d="M7.5 13h2M11 13h2M14.5 13h2M7.5 16.5h2M11 16.5h2"/></symbol><symbol id="ic-relatorios" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M8 17v-5M12.5 17V7M17 17v-8"/></symbol><symbol id="ic-novidades" viewBox="0 0 24 24"><path d="M18 8.5a6 6 0 10-12 0c0 6.5-2.5 6.5-2.5 8.5h17c0-2-2.5-2-2.5-8.5"/><path d="M10.2 20.5a2.2 2.2 0 003.6 0"/></symbol></defs></svg>
 <div id="navprog"></div>
 {% macro navi(sec, href, ic, label) -%}
 <a href="{{ href }}" class="nav-i{% if secao_ativa==sec and sec %} on{% endif %}" onclick="navTap(this)"><svg class="nav-ic"><use href="#ic-{{ ic }}"/></svg><span>{{ label }}</span></a>
+{%- endmacro %}
+{% macro navi_n() -%}
+<a href="/painel/novidades" class="nav-i{% if secao_ativa=='novidades' %} on{% endif %}" onclick="navTap(this)"><svg class="nav-ic"><use href="#ic-novidades"/></svg><span>Novidades</span>{% if novidades_n %}<span class="nvb">{{ novidades_n }}</span>{% endif %}</a>
 {%- endmacro %}
 {% macro tabi(sec, href, ic, label) -%}
 <a href="{{ href }}" class="{% if secao_ativa==sec and sec %}on{% endif %}" onclick="navTap(this)"><svg class="nav-ic"><use href="#ic-{{ ic }}"/></svg><span>{{ label }}</span></a>
@@ -344,15 +362,26 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if _dono and vende_produto %}{{ navi('abastecimento','/painel/produtos/abastecimento','abastecimento','Abastecimento') }}{% endif %}
   {% if vende_servico and caps.vendas %}{{ navi('servicos','/painel/servicos','financeiro','Serviços') }}{% endif %}
   {% if tem_pj and caps.vendas %}{{ navi('prospeccao','/painel/prospeccao','prospeccao','Prospecção') }}{% endif %}
+  {# A Agenda é COMPARTILHADA (dono, gestor e vendedor veem a mesma) desde o #490, e
+     saiu do grupo "Pessoal" por isso: virou ferramenta de trabalho do time, não a
+     agenda particular do dono. A regra aqui espelha a do gate (rotas_do_papel): quem
+     tem vendas ou financeiro entra. Sem esta linha a rota abria mas NENHUM link
+     aparecia pro time — o buraco que o #490 deixou. `_tem_app` fica pra conta só de
+     cesta não ganhar um menu que ela nunca teve. #}
+  {% if _tem_app and (caps.vendas or caps.financeiro) %}{{ navi('agenda','/painel/agenda','agenda','Agenda') }}{% endif %}
   {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{{ navi('relatorios','/painel/relatorios','relatorios','Relatórios') }}{% endif %}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
   {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes') }}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
   {% if _dono and _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
   {% if _dono and (_tem_app or _tem_cesta) %}<div class="side-grp">Pessoal</div>{% endif %}
-  {% if _dono and _tem_app %}{{ navi('agenda','/painel/agenda','agenda','Agenda') }}{{ navi('painel','/painel','painel','Painel') }}{{ navi('compras','/painel/compras','compras','Lista de compras') }}{% endif %}
+  {% if _dono and _tem_app %}{{ navi('painel','/painel','painel','Painel') }}{{ navi('compras','/painel/compras','compras','Lista de compras') }}{% endif %}
   {% if _dono and _tem_cesta %}{{ navi('assinaturas','/painel/assinaturas','cesta','Assinaturas') }}{{ navi('pedidos','/painel/meus-pedidos','compras','Meus pedidos') }}{% endif %}
   {% if n_contextos > 1 %}{{ navi('trocar','/trocar','fornecedor','Trocar empresa') }}{% endif %}
+  {# Novidades é de quem MANDA na conta — dono ou gestor (contas.equipe.recebe_novidades).
+     De propósito não é `caps.gerir`: gerir é só do dono, e deixaria de fora o gestor,
+     que é justamente quem opera a tela todo dia. #}
+  {% if ve_novidades %}<div class="side-grp">Sistema</div>{{ navi_n() }}{% endif %}
   <div style="flex:1"></div>
   {{ navi('','/sair','sair','Sair') }}
 </nav>
@@ -372,15 +401,23 @@ td,th{padding:.5rem .4rem;border-bottom:1px solid var(--borda);text-align:left;f
   {% if _dono and vende_produto %}{{ navi('abastecimento','/painel/produtos/abastecimento','abastecimento','Abastecimento') }}{% endif %}
   {% if vende_servico and caps.vendas %}{{ navi('servicos','/painel/servicos','financeiro','Serviços') }}{% endif %}
   {% if tem_pj and caps.vendas %}{{ navi('prospeccao','/painel/prospeccao','prospeccao','Prospecção') }}{% endif %}
+  {# A Agenda é COMPARTILHADA (dono, gestor e vendedor veem a mesma) desde o #490, e
+     saiu do grupo "Pessoal" por isso: virou ferramenta de trabalho do time, não a
+     agenda particular do dono. A regra aqui espelha a do gate (rotas_do_papel): quem
+     tem vendas ou financeiro entra. Sem esta linha a rota abria mas NENHUM link
+     aparecia pro time — o buraco que o #490 deixou. `_tem_app` fica pra conta só de
+     cesta não ganhar um menu que ela nunca teve. #}
+  {% if _tem_app and (caps.vendas or caps.financeiro) %}{{ navi('agenda','/painel/agenda','agenda','Agenda') }}{% endif %}
   {% if tem_pj and caps.financeiro %}{{ navi('empresa','/painel/empresa','empresa','Empresa') }}{{ navi('relatorios','/painel/relatorios','relatorios','Relatórios') }}{% endif %}
   {# Clientes é de TODO negócio (não só varejo). Varejo já mostra na Principal; aqui entra pro serviço. #}
   {% if _dono and tem_pj and not vende_produto %}{{ navi('clientes','/painel/clientes','clientes','Clientes') }}{% endif %}
   {% if caps.gerir %}{{ navi('equipe','/painel/equipe','clientes','Equipe') }}{% endif %}
   {% if _dono and _forn %}{{ navi('fornecedor','/painel/fornecedor','fornecedor','Fornecedor') }}{% endif %}
   {% if _dono and (_tem_app or _tem_cesta) %}<div class="side-grp">Pessoal</div>{% endif %}
-  {% if _dono and _tem_app %}{{ navi('agenda','/painel/agenda','agenda','Agenda') }}{{ navi('painel','/painel','painel','Painel') }}{{ navi('compras','/painel/compras','compras','Lista de compras') }}{% endif %}
+  {% if _dono and _tem_app %}{{ navi('painel','/painel','painel','Painel') }}{{ navi('compras','/painel/compras','compras','Lista de compras') }}{% endif %}
   {% if _dono and _tem_cesta %}{{ navi('assinaturas','/painel/assinaturas','cesta','Assinaturas') }}{{ navi('pedidos','/painel/meus-pedidos','compras','Meus pedidos') }}{% endif %}
   {% if n_contextos > 1 %}{{ navi('trocar','/trocar','fornecedor','Trocar empresa') }}{% endif %}
+  {% if ve_novidades %}<div class="side-grp">Sistema</div>{{ navi_n() }}{% endif %}
   {{ navi('','/sair','sair','Sair') }}
 </div>
 <script>
@@ -407,6 +444,46 @@ function maisToggle(v){var sh=document.getElementById('mais-sheet'),bg=document.
   </div>
   <a href="/painel/pagar" class="pb-btn">Pagar agora</a>
 </div>
+{% endif %}
+{% if logado and not embed %}
+{# A aba que ficou aberta durante o deploy roda o JavaScript ANTIGO contra o
+   servidor novo. Nasce escondida e só o JS liga — HTML servido nunca a mostra. #}
+<div id="ver-nova" aria-live="polite">
+  <div class="vn-txt"><b>Tem uma versão nova do Zaq.</b>
+    <small>Recarregue pra usar a tela atualizada — nada do que você já salvou se perde.</small></div>
+  <button type="button" id="vn-recarregar">Recarregar</button>
+  <button type="button" id="vn-depois" class="vn-depois">Depois</button>
+</div>
+<script>
+(function(){
+  var atual = "{{ versao_app }}", box = document.getElementById('ver-nova');
+  if(!box || !atual) return;
+  var vista = '', dispensada = '', ultimo = 0;
+  function olhar(){
+    // Nunca recarrega sozinho: a pessoa pode estar no meio de um formulário.
+    // A faixa pergunta; quem decide é ela.
+    var agora = Date.now();
+    if(agora - ultimo < 60000) return;
+    ultimo = agora;
+    fetch('/painel/versao', {headers:{'Accept':'application/json'}, cache:'no-store'})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){
+        if(!d || !d.v || d.v === atual || d.v === dispensada) return;
+        vista = d.v; box.classList.add('on');
+      })
+      .catch(function(){});   // rede caiu: silêncio, a faixa é enfeite
+  }
+  document.getElementById('vn-recarregar').onclick = function(){ location.reload(); };
+  document.getElementById('vn-depois').onclick = function(){
+    dispensada = vista; box.classList.remove('on');   // não insiste NESTA versão
+  };
+  setInterval(olhar, 300000);
+  // O caso real é a aba esquecida: a pessoa volta pra ela horas depois.
+  document.addEventListener('visibilitychange', function(){
+    if(!document.hidden) olhar();
+  });
+})();
+</script>
 {% endif %}
 {% block conteudo %}{% endblock %}
 <a href="https://wa.me/5586981885930?text={% if conta %}Oi%20Thompson%21%20Estou%20no%20Zaq%20%28conta%20%23{{ conta[0] }}%29%20e%20preciso%20de%20ajuda%20com%3A%20{% else %}Oi%20Thompson%21%20Estou%20no%20Zaq%20e%20preciso%20de%20ajuda%20com%3A%20{% endif %}"
@@ -3631,6 +3708,33 @@ _EMPRESA = """{% extends "base" %}{% block conteudo %}
     if(!aberto){ var d = f.querySelector('input[name=descricao]'); if(d) d.focus(); }
   }
   </script>
+  {# Os PAGOS, recolhidos: histórico não é operação — quem abre a tela quer o que
+     ainda está em aberto. O "apagar" aqui só aparece pro título cujo lançamento
+     não existe (ver apagar_titulo): se o dinheiro está no livro-caixa, o caminho
+     é apagar o LANÇAMENTO no financeiro, senão o caixa fica com receita órfã. #}
+  {% if titulos_pagos %}
+  <details class="tit-pagos" style="margin-top:1rem">
+    <summary style="cursor:pointer;font-size:.8rem;color:var(--txt-mut)">
+      Já baixados ({{ titulos_pagos|length }}) ▾</summary>
+    <div style="margin-top:.5rem">
+    {% for t in titulos_pagos %}<div class="tit-lin">
+      <div class="tit-id">
+        <div class="tit-desc" style="opacity:.75">{{ t.descricao }}{% if t.contraparte %} <span class="mut">· {{ t.contraparte }}</span>{% endif %}</div>
+        <div class="tit-meta">baixado {% if t.pago_em %}{{ t.pago_em.strftime('%d/%m/%Y') }}{% else %}—{% endif %} · {% if t.tipo=='pagar' %}<span style="color:#e07a5f">pago</span>{% else %}<span style="color:var(--verde-claro)">recebido</span>{% endif %}</div>
+      </div>
+      <div class="tit-val" style="opacity:.75">{{ t.valor_centavos|brl }}</div>
+      <div class="tit-acoes">
+        {% if t.lancamento_id %}
+        <a href="/painel/financeiro" class="mut" style="font-size:.72rem;text-decoration:none"
+           title="a baixa lançou no livro-caixa: pra desfazer, apague o lançamento no financeiro">no caixa ↗</a>
+        {% else %}
+        <form method="post" action="/painel/empresa/titulo/{{ t.id }}/apagar" onsubmit="return confirm('Apagar este título baixado? Ele não tem lançamento no caixa, então nada de dinheiro é afetado.')"><button title="apagar título" style="color:#c98080">apagar ✕</button></form>
+        {% endif %}
+      </div>
+    </div>{% endfor %}
+    </div>
+  </details>
+  {% endif %}
 </div>
 
 {% if carteira and carteira.n_titulos %}
@@ -3980,6 +4084,70 @@ Suas compras avulsas nas lojas ficam em <a href="/painel/meus-pedidos" style="co
 <p class="mut">Você ainda não tem assinaturas. <a href="/" style="color:var(--verde-claro)">Explore os fornecedores</a></p>
 {% endif %}
 </div>
+{% endblock %}"""
+
+_NOVIDADES = """{% extends "base" %}{% block conteudo %}
+<style>
+.nv{background:var(--bg);border:1px solid var(--borda);border-left:3px solid var(--borda);
+ border-radius:10px;padding:.9rem 1rem;margin-top:.7rem}
+.nv.mud{border-left-color:#c99a2e}
+.nv.nova{border-left-color:var(--verde)}
+.nv.lida{opacity:.62}
+.nv-tp{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap;margin-bottom:.45rem}
+.nv-tag{display:inline-block;padding:.1rem .55rem;border-radius:999px;font-size:.72rem;
+ border:1px solid var(--borda);color:var(--txt-mut)}
+.nv-tag.m{border-color:#6e5a22;color:#f0dca6;background:#332a12}
+.nv-tag.n{border-color:var(--verde);color:var(--verde-claro);background:rgba(29,158,117,.14)}
+.nv-ti{font-size:1rem;font-weight:600;margin-bottom:.3rem}
+.nv-co{font-size:.9rem;color:#c5c5c0;line-height:1.5;white-space:pre-line}
+.nv-pe{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;margin-top:.8rem}
+.nv-pe button{width:auto;margin:0;padding:.4rem .95rem;font-size:.85rem}
+.nv-vazio{color:var(--txt-mut);font-size:.9rem;padding:1.4rem 0}
+</style>
+<div class="card larga">
+<h2>Novidades</h2>
+<p class="mut" style="margin:.2rem 0 0">O que mudou no Zaq pro seu tipo de negócio.
+Só aparece aqui o que afeta você — cada nicho recebe atualização diferente.</p>
+{% if not itens %}
+<div class="nv-vazio">Nada novo por aqui.<br>Quando uma mudança que afeta o seu negócio
+subir, ela aparece nesta tela — e o menu avisa com uma bolinha.</div>
+{% endif %}
+{% for n in itens %}
+<div class="nv {% if n.tipo == 'mudanca' %}mud{% else %}nova{% endif %}{% if n.lida %} lida{% endif %}" id="nv-{{ n.id }}">
+  <div class="nv-tp">
+    <span class="nv-tag {% if n.tipo == 'mudanca' %}m{% else %}n{% endif %}">{% if n.tipo == 'mudanca' %}Mudança{% else %}Novidade{% endif %}</span>
+    <span class="nv-tag">{{ n.dia }}</span>
+    {% if n.lida %}<span class="nv-tag">&#10003; lida</span>{% endif %}
+  </div>
+  <div class="nv-ti">{{ n.titulo }}</div>
+  <div class="nv-co">{{ n.corpo }}</div>
+  {% if n.tipo == 'mudanca' and not n.lida %}
+  <div class="nv-pe">
+    <button type="button" class="nv-ok" data-id="{{ n.id }}">Entendi</button>
+    <span class="mut">precisa confirmar &mdash; muda como você trabalha</span>
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+</div>
+<script>
+// 'Mudança' exige o "Entendi" explícito — é o que permite saber QUEM já viu.
+// 'Novidade' o servidor já marcou ao abrir a tela (ver painel_novidades).
+document.querySelectorAll('.nv-ok').forEach(function(b){
+  b.onclick = function(){
+    b.disabled = true;
+    fetch('/painel/novidades/' + b.dataset.id + '/lida', {method:'POST'})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(!d || !d.ok){ b.disabled = false; return; }
+        var c = document.getElementById('nv-' + b.dataset.id);
+        if(c){ c.classList.add('lida'); }
+        b.closest('.nv-pe').remove();
+      })
+      .catch(function(){ b.disabled = false; });
+  };
+});
+</script>
 {% endblock %}"""
 
 _MEU_PLANO = """{% extends "base" %}{% block conteudo %}
@@ -5867,7 +6035,7 @@ _RELATORIO_PDF = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8
 
 _env = Environment(loader=DictLoader({
     "holerite": _HOLERITE,
-    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "dash_bloco": _DASH_BLOCO, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "pagar_aviso": _PAGAR_AVISO, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS, "produtos": _PRODUTOS, "abastecimento": _ABASTECIMENTO, "clientes": _CLIENTES, "cliente_detalhe": _CLIENTE_DETALHE, "pdv": _PDV, "venda_detalhe": _VENDA_DETALHE, "relatorios": _RELATORIOS, "relatorio_pdf": _RELATORIO_PDF,
+    "base": _BASE, "cadastro": _CADASTRO, "login": _LOGIN, "bemvindo": _BEMVINDO, "painel": _PAINEL, "dash_bloco": _DASH_BLOCO, "bloco_conta": _BLOCO_CONTA, "senha": _SENHA, "dash": _DASH, "compras": _COMPRAS, "fornecedor": _FORNECEDOR, "compra_revisar": _COMPRA_REVISAR, "loja": _LOJA, "loja_confirmar_novo": _LOJA_CONFIRMAR_NOVO, "revisar": _REVISAR, "painel_assinaturas": _PAINEL_ASSINATURAS, "meu_plano": _MEU_PLANO, "ativar_app": _ATIVAR_APP, "pagar_aviso": _PAGAR_AVISO, "cesta_ajuste": _CESTA_AJUSTE, "pedidos_forn": _PEDIDOS_FORN, "pedidos_uni": _PEDIDOS_UNI, "financeiro_forn": _FINANCEIRO_FORN, "avulsos_forn": _AVULSOS_FORN, "pedido_detalhe_forn": _PEDIDO_DETALHE_FORN, "separacao_forn": _SEPARACAO_FORN, "embalagem_forn": _EMBALAGEM_FORN, "etiqueta_forn": _ETIQUETA_FORN, "rotas_forn": _ROTAS_FORN, "esqueci_senha": _ESQUECI_SENHA, "redefinir_senha": _REDEFINIR_SENHA, "pedido_enviado": _PEDIDO_ENVIADO, "meus_pedidos": _MEUS_PEDIDOS, "promocoes_em_breve": _PROMOCOES_EM_BREVE, "empresa": _EMPRESA, "empresa_dados": _EMPRESA_DADOS, "produtos": _PRODUTOS, "abastecimento": _ABASTECIMENTO, "clientes": _CLIENTES, "cliente_detalhe": _CLIENTE_DETALHE, "pdv": _PDV, "venda_detalhe": _VENDA_DETALHE, "relatorios": _RELATORIOS, "relatorio_pdf": _RELATORIO_PDF, "novidades.html": _NOVIDADES,
 }), autoescape=select_autoescape())
 _env.globals["brl"] = brl
 _env.filters["brl"] = brl
@@ -5988,7 +6156,7 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
                  ("servicos", "/painel/servicos"), ("prospeccao", "/painel/prospeccao"),
                  ("agenda", "/painel/agenda"), ("equipe", "/painel/equipe"),
                  ("financeiro", "/painel/financeiro"), ("empresa", "/painel/empresa"),
-                 ("relatorios", "/painel/relatorios"),
+                 ("relatorios", "/painel/relatorios"), ("novidades", "/painel/novidades"),
                  ("fornecedor", "/painel/fornecedor"), ("assinaturas", "/painel/assinaturas"),
                  ("pedidos", "/painel/meus-pedidos"), ("compras", "/painel/compras"),
                  ("painel", "/painel")]
@@ -6001,6 +6169,16 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
         ctx.setdefault("papel", _papel)
         ctx["caps"] = _equipe.caps_do_papel(_papel)
     ctx.setdefault("n_contextos", len(request.session.get("contextos") or []))
+    ctx.setdefault("versao_app", _versao.VERSAO)
+    # A bolinha do menu. Só pra quem tem o item (dono ou gestor) — pro vendedor
+    # seria uma consulta por página pra um menu que ele não vê. `nao_lidas` já é
+    # tolerante: se falhar devolve 0 e o painel abre igual.
+    from contas import equipe as _eq
+    ctx.setdefault("ve_novidades", _eq.recebe_novidades(request.session.get("papel", "dono")))
+    if "novidades_n" not in ctx and request.session.get("conta_id") and ctx["ve_novidades"]:
+        from finance import novidades as _nv
+        ctx["novidades_n"] = _nv.nao_lidas(get_pool(), request.session["conta_id"],
+                                           request.session.get("membro_id"))
     # Injeta conta + gating (o conta_logada ja traz tudo numa query so: conta[11..15])
     if request.session.get("conta_id"):
         if "conta" not in ctx:
@@ -6028,6 +6206,82 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
 
 
 # ---------- rotas ----------
+
+@router.get("/painel/versao")
+def painel_versao(request: Request):
+    """Qual versão o SERVIDOR está servindo agora.
+
+    A aba aberta durante o deploy pergunta isto de tempos em tempos e compara com
+    a versão que ela carregou. Só responde pra sessão logada: a faixa só faz
+    sentido pra quem está usando o painel, e sem sessão a resposta vazia faz o JS
+    ficar quieto em vez de piscar faixa em tela de login."""
+    if not request.session.get("conta_id"):
+        return JSONResponse({}, status_code=401)
+    return JSONResponse({"v": _versao.VERSAO})
+
+
+@router.get("/painel/novidades")
+def painel_novidades(request: Request):
+    """O que mudou no Zaq pro negócio DESTA conta.
+
+    Quem abre a tela já marca as 'novidade' como lidas — ganhar uma tela nova não
+    precisa de confirmação. As 'mudanca' ficam pendentes até o "Entendi": elas
+    mudam o jeito de trabalhar (o botão que saiu do funil, o fechamento que agora
+    é por assinatura) e a pergunta que interessa é QUEM já viu.
+
+    A marcação acontece ANTES de renderizar, mas o que a tela mostra é o estado de
+    ANTES — assim a bolinha do menu já zera nesta mesma resposta e os avisos ainda
+    aparecem destacados nesta visita, com o ✓ só a partir da próxima.
+    """
+    conta = conta_logada(request)
+    if not conta:
+        return RedirectResponse("/login", status_code=303)
+    from contas import equipe as _eq
+    from finance import novidades as nv
+    papel = request.session.get("papel", "dono")
+    if not _eq.recebe_novidades(papel):
+        return RedirectResponse(_eq.home_do_papel(papel, request.session.get("membro_id")),
+                                status_code=303)
+    membro_id = request.session.get("membro_id")
+    pool = get_pool()
+    try:
+        itens = nv.listar(pool, conta[0], membro_id)
+    except Exception as e:  # noqa: BLE001
+        log.warning("novidades: não deu pra listar da conta %s: %s: %s",
+                    conta[0], type(e).__name__, e)
+        itens = []
+    for n in itens:
+        if n["tipo"] == "novidade" and not n["lida"]:
+            nv.marcar_lida(pool, n["id"], conta[0], membro_id)
+    vis = [dict(n, dia=n["publicado_em"].strftime("%d/%m")) for n in itens]
+    return _render("novidades.html", request, titulo="Novidades", itens=vis,
+                   novidades_n=sum(1 for n in itens
+                                   if n["tipo"] == "mudanca" and not n["lida"]))
+
+
+@router.post("/painel/novidades/{nid}/lida")
+def painel_novidade_lida(request: Request, nid: int):
+    """O "Entendi" de uma mudança. Marca por PESSOA, não por conta (ver
+    finance.novidades.marcar_lida) — numa conta com dono e gestor cada um confirma
+    a sua, senão o segundo nunca vê o aviso que o primeiro fechou."""
+    conta = conta_logada(request)
+    if not conta:
+        return JSONResponse({"ok": False, "erro": "sessao"}, status_code=401)
+    from contas import equipe as _eq
+    if not _eq.recebe_novidades(request.session.get("papel", "dono")):
+        return JSONResponse({"ok": False, "erro": "papel"}, status_code=403)
+    from finance import novidades as nv
+    # Só marca o que ESTA conta enxerga: id de aviso de outro público não vira
+    # linha em novidade_lida só porque alguém digitou o número na URL.
+    pool = get_pool()
+    membro_id = request.session.get("membro_id")
+    if not any(n["id"] == nid for n in nv.listar(pool, conta[0], membro_id)):
+        return JSONResponse({"ok": False, "erro": "nao encontrada"}, status_code=404)
+    nv.marcar_lida(pool, nid, conta[0], membro_id)
+    # true mesmo quando já estava marcada: o botão é clicável de novo enquanto a
+    # resposta não volta, e a segunda resposta não pode desfazer a primeira na tela.
+    return JSONResponse({"ok": True})
+
 
 @router.get("/painel/pagar")
 def painel_pagar(request: Request):
@@ -8829,6 +9083,10 @@ def painel_empresa(request: Request):
                       (conta[0],)).fetchone()
         doc = _mascara_cnpj(r[0]) if r else ""
     titulos = emp.listar_titulos(pool, conta[0], status="aberto")
+    # Os PAGOS numa seção à parte, recolhida. A tela mostrava só 'aberto', então título
+    # baixado sumia do app inteiro — e o que tinha sido baixado por engano (ou cujo
+    # lançamento foi apagado no financeiro) ficava preso pra sempre, sem caminho nenhum.
+    titulos_pagos = emp.listar_titulos(pool, conta[0], status="pago", limite=60)
     folha = emp.folha_do_mes(pool, conta[0], hoje.year, hoje.month)
     # anexa os lançamentos do mês a cada funcionário (pro histórico "corrigir")
     _evs = emp.eventos_folha_do_mes(pool, conta[0], hoje.year, hoje.month)
@@ -8842,7 +9100,7 @@ def painel_empresa(request: Request):
                        "on n.id=ct.nicho_id where ct.id=%s", (conta[0],)).fetchone()
     rotulo_receber = _nichos.rotulo_receber(_r[0] if _r else "")
     return _render("empresa", request, empresa_nome=conta[2], empresa_doc=doc,
-                   dre=dre, titulos=titulos,
+                   dre=dre, titulos=titulos, titulos_pagos=titulos_pagos,
                    folha=folha, clientes_lista=clientes_lista, carteira=carteira,
                    rotulo_receber=rotulo_receber, tem_pj=True,
                    plano_arvore=plano_arvore, centros=centros, dre_centro=dre_centro,

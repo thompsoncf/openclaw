@@ -55,6 +55,10 @@ create table orcamentos (id bigserial primary key, conta_id bigint, cliente text
   modo text default 'evento', evento jsonb, parcelas jsonb, numero int,
   evento_agenda_id bigint, cliente_id bigint,
   sinal_centavos bigint, sinal_pago_em timestamptz,
+  -- 172: o desconto saiu do jsonb do evento e virou coluna do orçamento
+  desconto_tipo text not null default 'pct',
+  desconto_pct numeric(5,2) not null default 0,
+  desconto_centavos bigint not null default 0,
   contrato_texto jsonb, contrato_assinado_em timestamptz,
   contrato_assinado_por text, contrato_assinado_doc text, contrato_assinado_ip text);
 create table contrato_modelo (conta_id bigint primary key, clausulas jsonb not null

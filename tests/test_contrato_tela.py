@@ -95,8 +95,10 @@ def cliente(monkeypatch):
     app.include_router(ps.router)
 
     @app.post("/_entrar")
-    async def _entrar(request: Request):
-        request.session["papel"] = "dono"
+    async def _entrar(request: Request, papel: str = "dono"):
+        # papel virou parâmetro quando o contrato passou a ser SÓ DO DONO: o
+        # vendedor abre a mesma aba (tem `vendas`), e precisa dar 403 aqui.
+        request.session["papel"] = papel
         request.session["membro_id"] = 1
         return {"ok": True}
 
@@ -340,3 +342,45 @@ def test_o_modelo_padrao_da_tela_monta_sem_falta(cliente):
     d = cliente.post("/painel/servicos/contrato/previa",
                      json={"clausulas": d0["clausulas"], "regras": d0["regras"]}).json()
     assert d["faltas"] == []
+
+
+# --------------------------------------------- o segundo gate: só o DONO
+#
+# O contrato define o que a empresa se compromete a cumprir com o cliente —
+# prazo, multa, sinal, tolerância. Não é decisão de quem vende: o vendedor
+# negocia dentro dessas regras, não as escreve.
+#
+# `gerir` é a capacidade que já separa o titular do resto (contas/equipe.py:26 —
+# só o dono tem). Gatear por ela evita uma segunda régua de permissão que amanhã
+# diverge da primeira.
+
+
+@pytest.mark.parametrize("papel", ["vendedor", "gestor"])
+@pytest.mark.parametrize("metodo, url", [
+    ("get", "/painel/servicos/contrato"),
+    ("post", "/painel/servicos/contrato/salvar"),
+    ("post", "/painel/servicos/contrato/previa"),
+])
+def test_quem_nao_e_dono_nao_alcanca_o_contrato(cliente, papel, metodo, url):
+    """O gestor também não: ele tem vendas e financeiro, mas `gerir` é do dono."""
+    cliente.post("/_entrar", params={"papel": papel})
+    r = (cliente.get(url) if metodo == "get"
+         else cliente.post(url, json={"clausulas": _clausulas(), "regras": {}}))
+    assert r.status_code == 403
+    assert "dono" in r.json()["erro"]
+
+
+def test_vendedor_nao_grava_clausula_nenhuma(cliente):
+    """Esconder o card não tranca a URL — o que tranca é isto."""
+    cliente.post("/_entrar", params={"papel": "vendedor"})
+    cliente.post("/painel/servicos/contrato/salvar",
+                 json={"clausulas": _clausulas(), "regras": {}})
+    with cliente.pool.connection() as c:
+        n = c.execute("select count(*) from contrato_modelo").fetchone()[0]
+    assert n == 0
+
+
+def test_o_dono_continua_entrando(cliente):
+    """A trava nova não pode ter fechado a porta pra quem tem que passar."""
+    cliente.post("/_entrar", params={"papel": "dono"})
+    assert cliente.get("/painel/servicos/contrato").status_code == 200

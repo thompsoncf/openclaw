@@ -10,7 +10,7 @@
 Banco dedicado e descartável com o schema mínimo (mesmo padrão do teste de blindagem).
 """
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from psycopg_pool import ConnectionPool
@@ -37,6 +37,10 @@ create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id 
   decisor_nome text, decisor_cargo text, decisor_telefone text, decisor_whatsapp boolean,
   decisor_em timestamptz, decisor_telefones jsonb, estagio text default 'lead',
   tipo text default 'pj', cpf text,
+  -- endereço + aniversário (migração 171): a ficha do vendedor preenche, e o
+  -- cep é o que puxa rua/bairro/cidade/uf pela BrasilAPI na tela
+  cep text, endereco text, numero text, bairro text, nascimento date,
+  criado_por bigint,
   atualizado_em timestamptz default now(), criado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   canal text, status text default 'aberta', agente_ativo boolean default true,
@@ -218,6 +222,154 @@ def test_salvar_ficha_preenche_e_nao_apaga(pool):
         got = c.execute("select contato, telefone, cpf, obs from prospeccao where id=%s",
                         (lead,)).fetchone()
     assert got == ("Bruna Silva", "86 99999-0001", "52998224725", "Festa 08/05/27")
+
+
+def test_ficha_traz_o_whatsapp_do_lead_que_entrou_conversando(pool):
+    """O buraco que motivou o campo: quem chega por `whatsapp_inbound` nasce com o
+    número em `whatsapp` e `telefone` NULL. A ficha do vendedor mostrava só `telefone`,
+    então o campo aparecia EM BRANCO justamente no lead que veio conversando."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="wa@x.com")
+        lead = _lead(c, conta, vend, "Cliente do zap", wa="+5586999990001")
+        c.commit()
+    d = ck.lead_do_vendedor(pool, conta, vend, lead)
+    assert d["whatsapp"] == "+5586999990001"
+    assert not d["telefone"], "o lead de WhatsApp não tem telefone — é esse o ponto"
+
+
+def test_salvar_ficha_grava_whatsapp_sem_encostar_no_telefone(pool):
+    """São COLUNAS diferentes e continuam separadas: o zap é por onde a conversa corre,
+    o telefone é o fixo/comercial que o vendedor descobre depois. Salvar um não pode
+    escrever no outro."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="wa2@x.com")
+        lead = _lead(c, conta, vend, "Zap", wa="+5586999990002")
+        c.commit()
+
+    assert ck.salvar_ficha(pool, conta, vend, lead, {"telefone": "86 3221-0000"})["ok"] is True
+    with pool.connection() as c:
+        assert c.execute("select whatsapp, telefone from prospeccao where id=%s",
+                         (lead,)).fetchone() == ("+5586999990002", "86 3221-0000")
+
+    # trocar o zap (cliente passou outro número) não encosta no telefone
+    assert ck.salvar_ficha(pool, conta, vend, lead, {"whatsapp": "+5511988887777"})["ok"] is True
+    with pool.connection() as c:
+        assert c.execute("select whatsapp, telefone from prospeccao where id=%s",
+                         (lead,)).fetchone() == ("+5511988887777", "86 3221-0000")
+
+
+def test_ficha_em_branco_nao_apaga_o_whatsapp(pool):
+    """O número é a IDENTIDADE da conversa. Salvar a ficha inteira só pra corrigir um
+    cargo não pode esvaziá-lo — o `coalesce` do salvar_ficha é o que garante isso, e
+    aqui é onde ele mais importa."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="wa3@x.com")
+        lead = _lead(c, conta, vend, "Zap", wa="+5586999990003")
+        c.commit()
+    assert ck.salvar_ficha(pool, conta, vend, lead,
+                           {"cargo": "Comprador", "whatsapp": ""})["ok"] is True
+    with pool.connection() as c:
+        assert c.execute("select whatsapp, cargo from prospeccao where id=%s",
+                         (lead,)).fetchone() == ("+5586999990003", "Comprador")
+
+
+def test_ficha_guarda_endereco_e_aniversario(pool):
+    """Campos da migração 171: o vendedor que vai VISITAR precisa de rua e número, e
+    o aniversário é o que alimenta o aviso do dia (finance/lembretes._aniversarios)."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="end@x.com")
+        lead = _lead(c, conta, vend, "Visitar"); c.commit()
+
+    assert ck.salvar_ficha(pool, conta, vend, lead, {
+        "cep": "64.000-000", "endereco": "Rua São Pedro", "numero": "120",
+        "bairro": "Centro", "cidade": "Teresina", "uf": "pi",
+        "nascimento": "1990-05-08"})["ok"] is True
+    with pool.connection() as c:
+        got = c.execute("""select cep, endereco, numero, bairro, cidade, uf, nascimento
+                             from prospeccao where id=%s""", (lead,)).fetchone()
+    # o CEP entra só com dígitos: veio mascarado da tela, e é assim que ele é comparável
+    assert got == ("64000000", "Rua São Pedro", "120", "Centro", "Teresina", "PI",
+                   date(1990, 5, 8))
+
+    # branco não apaga, igual ao resto da ficha
+    assert ck.salvar_ficha(pool, conta, vend, lead, {"numero": "121"})["ok"] is True
+    with pool.connection() as c:
+        got = c.execute("select numero, endereco, nascimento from prospeccao where id=%s",
+                        (lead,)).fetchone()
+    assert got == ("121", "Rua São Pedro", date(1990, 5, 8))
+
+
+def test_data_de_nascimento_ruim_e_erro_e_nao_salva_nada(pool):
+    """Engolir a data inválida e responder "Ficha salva ✓" seria mentir pro vendedor
+    que acabou de digitá-la. E a recusa não pode gravar os outros campos pela metade."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="dt@x.com")
+        lead = _lead(c, conta, vend, "Data"); c.commit()
+
+    r = ck.salvar_ficha(pool, conta, vend, lead, {"cargo": "Chefe", "nascimento": "31/02/1990"})
+    assert r["ok"] is False and "nascimento" in r["erro"].lower()
+    with pool.connection() as c:
+        assert c.execute("select cargo from prospeccao where id=%s", (lead,)).fetchone()[0] is None
+
+    assert ck.salvar_ficha(pool, conta, vend, lead, {"nascimento": "2099-01-01"})["ok"] is False
+    assert ck.salvar_ficha(pool, conta, vend, lead, {"nascimento": ""})["ok"] is True
+
+
+# ------------------------------------------------------------------ lead manual
+def test_criar_lead_cai_na_fila_do_proprio_vendedor(pool):
+    """O app não tinha NENHUMA rota que criasse lead — o vendedor só trabalhava o que
+    o rodízio entregava. Criado por ele, o lead nasce dele e já aberto."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="novo@x.com"); c.commit()
+
+    r = ck.criar_lead(pool, conta, vend, "Dona Bruna", "(86) 99999-1234")
+    assert r["ok"] is True and r["existia"] is False
+
+    with pool.connection() as c:
+        got = c.execute("""select vendedor_id, empresa, contato, whatsapp, tipo, origem,
+                                  status, estagio, criado_por
+                             from prospeccao where id=%s""", (r["lead_id"],)).fetchone()
+    assert got == (vend, "Dona Bruna", "Dona Bruna", "+5586999991234", "pf",
+                   "manual_vendedor", "novo", "lead", vend)
+    assert r["lead_id"] in [l["id"] for l in ck.leads_do_vendedor(pool, conta, vend)]
+
+
+def test_criar_lead_com_numero_repetido_abre_o_que_existe(pool):
+    """Número repetido é o modo normal de errar aqui — ninguém sabe de cor quem já
+    está na base. Dois cadastros partiriam a conversa em duas fichas."""
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="dup@x.com")
+        antigo = _lead(c, conta, vend, "Já existe", wa="+5586999995555"); c.commit()
+
+    r = ck.criar_lead(pool, conta, vend, "Outro nome", "86 99999-5555")
+    assert r["ok"] is True and r["existia"] is True and r["lead_id"] == antigo
+
+    # a grafia sem o nono dígito é o MESMO celular (ver _wa_equivalentes)
+    r2 = ck.criar_lead(pool, conta, vend, "Terceiro", "8699995555")
+    assert r2["existia"] is True and r2["lead_id"] == antigo
+    with pool.connection() as c:
+        assert c.execute("select count(*) from prospeccao where conta_id=%s",
+                         (conta,)).fetchone()[0] == 1
+
+
+def test_criar_lead_recusa_entrada_vazia_ou_curta(pool):
+    with pool.connection() as c:
+        conta = _conta(c); vend = _membro(c, conta, email="vaz@x.com"); c.commit()
+    assert ck.criar_lead(pool, conta, vend, "", "86999991111")["ok"] is False
+    assert ck.criar_lead(pool, conta, vend, "Sem número", "999")["ok"] is False
+    with pool.connection() as c:
+        assert c.execute("select count(*) from prospeccao where conta_id=%s",
+                         (conta,)).fetchone()[0] == 0
+
+
+def test_lead_de_outra_conta_com_o_mesmo_numero_nao_atrapalha(pool):
+    """O dedup é por CONTA: o mesmo celular pode ser lead de duas empresas clientes."""
+    with pool.connection() as c:
+        a = _conta(c, "A"); b = _conta(c, "B")
+        va = _membro(c, a, email="a@x.com"); vb = _membro(c, b, email="b@x.com")
+        _lead(c, a, va, "Da A", wa="+5586999997777"); c.commit()
+    r = ck.criar_lead(pool, b, vb, "Da B", "86999997777")
+    assert r["existia"] is False
 
 
 def test_salvar_ficha_posse_e_documento_invalido(pool):
@@ -449,7 +601,9 @@ def test_gestor_tem_como_sair_pela_barra():
 
     # o vendedor não herda a aba do gestor: são barras diferentes
     assert pc._abas_vend("fila").count("<a") == 5
-    assert pc._abas_dono("visao").count("<a") == 6
+    # 7 desde a agenda compartilhada: a aba Agenda entrou pro dono/gestor (medido
+    # em 390px: ~55px por aba e o maior rótulo ocupa ~46px — cabe numa linha).
+    assert pc._abas_dono("visao").count("<a") == 7
 
 
 def test_total_pendentes_soma_a_carteira_e_ignora_fechados(pool):

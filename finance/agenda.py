@@ -133,11 +133,16 @@ def _fmt_evento(row) -> dict:
             "link_online": row[10] if len(row) > 10 else None,
             "status": (row[11] if len(row) > 11 else None) or "ativo",
             "pre_reserva_ate": row[12] if len(row) > 12 else None,
-            "sinal_centavos": row[13] if len(row) > 13 else None}
+            "sinal_centavos": row[13] if len(row) > 13 else None,
+            # quem marcou. Numa agenda de um dono só isso era ruído; agora que ela é
+            # compartilhada (gestor e vendedor também veem), é a primeira pergunta de
+            # quem olha um compromisso que não marcou. A coluna sempre existiu (098);
+            # só não era lida.
+            "membro_id": row[14] if len(row) > 14 else None}
 
 
 _COLS = ("id, titulo, inicio, fim, local, descricao, lembrete_min, criado_em, tipo, "
-        "desfecho, link_online, status, pre_reserva_ate, sinal_centavos")
+        "desfecho, link_online, status, pre_reserva_ate, sinal_centavos, membro_id")
 
 # Data SEGURADA, ainda não vendida: o cliente aprovou o orçamento mas o sinal não
 # entrou. Fica de fora de tudo que trata compromisso como certo — lembrete, resumo

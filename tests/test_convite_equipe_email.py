@@ -77,8 +77,18 @@ def test_convidar_sem_smtp_mostra_link(monkeypatch):
     assert "smtp" in req.session["equipe_aviso"].lower()
 
 
-def test_convite_usa_caixa_da_empresa_primeiro(monkeypatch):
-    """Manda pela caixa que a empresa configurou em Canais; não cai no SMTP global."""
+def test_convite_usa_o_remetente_do_zaq_primeiro(monkeypatch):
+    """A ORDEM VIROU, e este teste virou junto.
+
+    Ele exigia o contrário — caixa da empresa primeiro, SMTP do Zaq só de reserva. Em
+    18/08 essa ordem custou um acesso: na Prime Eventos o token de entrada nasceu e
+    ficou válido, e o e-mail nunca chegou, porque a caixa daquela empresa estava com
+    problema (o IMAP dela deu TimeoutError no mesmo dia). Pelo painel, que manda pelo
+    Zaq, o mesmo pedido chegou na hora.
+
+    Convite é e-mail de SISTEMA: ninguém responde, só precisa chegar. Quem sai pela
+    caixa da empresa é mensagem pra LEAD, pra resposta cair no inbox dela — e isso
+    não muda."""
     monkeypatch.setattr(pe, "get_pool", lambda: object())
     cont = {"conta": 0, "geral": 0}
     monkeypatch.setattr(ein, "enviar_conta",
@@ -89,11 +99,16 @@ def test_convite_usa_caixa_da_empresa_primeiro(monkeypatch):
     ok = pe._enviar_email_convite((7, "pj", "Zaq Prospecção"), "Pedro", "pedro@x.com",
                                   "gestor", "https://z/equipe/convite/T")
     assert ok is True
-    assert cont["conta"] == 1 and cont["geral"] == 0    # usou a caixa da empresa, não o global
+    assert cont["geral"] == 1 and cont["conta"] == 0    # Zaq mandou; nem tocou na empresa
 
 
 def test_convite_cai_no_smtp_zaq_sem_canais(monkeypatch):
-    """Empresa sem caixa própria (Canais) → cai no SMTP de sistema do Zaq."""
+    """Convite sai pelo SMTP de sistema do Zaq.
+
+    Desde 18/08 o Zaq é a PRIMEIRA porta (era reserva): convite e link de acesso são
+    e-mail de sistema — ninguém responde, só precisam chegar —, e sair pela caixa do
+    cliente fazia o convite sumir quando aquela caixa tinha problema. A caixa da
+    empresa virou a reserva. Ver tests/test_email_acesso_remetente.py."""
     monkeypatch.setattr(pe, "get_pool", lambda: object())
     monkeypatch.setattr(ein, "enviar_conta", lambda *a, **k: False)   # sem caixa configurada
     cont = {"geral": 0}

@@ -22,7 +22,7 @@ create table contas (id bigserial primary key, tipo text, nome text);
 create table prospeccao (id bigserial primary key, conta_id bigint, status text, estagio text);
 create table funil_etapas (id bigserial primary key, conta_id bigint, chave text, rotulo text,
   ordem int not null default 0, fixa boolean not null default false,
-  -- colunas da migração 171 (fase/prazo/gatilho): a etapa nova nasce com fase
+  -- colunas da migração 177 (fase/prazo/gatilho): a etapa nova nasce com fase
   fase text not null default 'venda', prazo_min integer, gatilho text,
   gatilho_ativo boolean not null default false,
   criado_em timestamptz not null default now(), unique (conta_id, chave));
@@ -162,7 +162,7 @@ def test_nao_gerencia_nao_edita(pool, monkeypatch):
 
 
 def test_etapa_de_pos_venda_entra_depois_do_fechamento(pool, monkeypatch):
-    """O motivo de existir a fase (migração 171): numa empresa de eventos o evento
+    """O motivo de existir a fase (migração 177): numa empresa de eventos o evento
     acontece DEPOIS de o sinal ser pago. Antes disso, `ordem = min(max+10, 899)`
     prendia toda etapa nova antes de "Ganho" — e "Eventos Realizados" ficava
     encalhada no meio da venda."""

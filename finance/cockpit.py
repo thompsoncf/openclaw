@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import date as _date, datetime, timedelta, timezone
 
 _log = logging.getLogger(__name__)
 
@@ -72,6 +72,166 @@ def validar_token(pool, token: str) -> dict | None:
     if not m or not m[2] or (m[1] or "") not in _PAPEIS_OK:
         return None
     return {"conta_id": conta_id, "membro_id": membro_id, "nome": m[0], "papel": m[1]}
+
+
+# ------------------------------------------------- "manter conectado" (indeterminado)
+# O vendedor marca a caixa e o aparelho dele para de pedir login. Não tem prazo: vale
+# até alguém revogar, o membro ser desativado, ou ele apertar Sair. Ver a migração 173
+# pra o porquê de ser tabela em vez de um max_age maior no cookie.
+#
+# O COOKIE guarda o token cru; a TABELA guarda só o sha256 dele. Quem lê o banco não
+# consegue se passar por ninguém — mesma razão de `membros.senha_hash`.
+
+LEMBRETE_COOKIE = "zaq_lembrar"
+
+
+def _hash_lembrete(token: str) -> str:
+    import hashlib
+    return hashlib.sha256((token or "").encode("utf-8")).hexdigest()
+
+
+def lembrar_criar(pool, conta_id: int, membro_id: int, aparelho: str = "") -> str | None:
+    """Registra este aparelho e devolve o token CRU (só ele serve pro cookie).
+
+    Best-effort: se falhar, o vendedor segue logado pela sessão normal — perder o
+    "manter conectado" é chato, derrubar o login por causa disso seria pior."""
+    token = secrets.token_urlsafe(32)
+    try:
+        with pool.connection() as c:
+            c.execute(
+                """insert into cockpit_lembrete (conta_id, membro_id, token_hash, aparelho)
+                   values (%s,%s,%s,%s)""",
+                (int(conta_id), int(membro_id), _hash_lembrete(token),
+                 (aparelho or "")[:120]))
+            c.commit()
+    except Exception as e:  # noqa: BLE001
+        _log.warning("lembrar_criar falhou (membro %s): %s: %s", membro_id, type(e).__name__, e)
+        return None
+    return token
+
+
+def lembrar_validar(pool, token: str) -> dict | None:
+    """O cookie ainda vale? Devolve {conta_id, membro_id, papel} ou None.
+
+    RELÊ O MEMBRO a cada uso, de propósito: desativar alguém na Equipe, ou mudar o
+    papel dele, tem que cortar o acesso no request seguinte. Se isto confiasse só na
+    linha do lembrete, um vendedor demitido continuaria entrando pra sempre — que é
+    exatamente o risco de uma sessão sem prazo."""
+    token = (token or "").strip()
+    if not token:
+        return None
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                """update cockpit_lembrete set ultimo_uso=now()
+                    where token_hash=%s and revogado_em is null
+                returning conta_id, membro_id""", (_hash_lembrete(token),)).fetchone()
+            if not r:
+                return None
+            m = c.execute("select papel, ativo from membros where id=%s and conta_id=%s",
+                          (r[1], r[0])).fetchone()
+            c.commit()
+    except Exception as e:  # noqa: BLE001
+        _log.warning("lembrar_validar falhou: %s: %s", type(e).__name__, e)
+        return None
+    if not m or not m[1] or (m[0] or "") not in _PAPEIS_OK:
+        return None
+    return {"conta_id": r[0], "membro_id": r[1], "papel": m[0]}
+
+
+def lembrar_revogar(pool, token: str) -> bool:
+    """Encerra ESTE aparelho (o botão Sair). Os outros continuam."""
+    token = (token or "").strip()
+    if not token:
+        return False
+    try:
+        with pool.connection() as c:
+            n = c.execute(
+                """update cockpit_lembrete set revogado_em=now()
+                    where token_hash=%s and revogado_em is null""",
+                (_hash_lembrete(token),)).rowcount
+            c.commit()
+        return bool(n)
+    except Exception as e:  # noqa: BLE001
+        _log.warning("lembrar_revogar falhou: %s: %s", type(e).__name__, e)
+        return False
+
+
+def lembrar_revogar_membro(pool, conta_id: int, membro_id: int) -> int:
+    """Derruba TODOS os aparelhos do membro — celular perdido, ou desligamento.
+    Escopado por conta: ninguém encerra sessão de membro de outra empresa."""
+    try:
+        with pool.connection() as c:
+            n = c.execute(
+                """update cockpit_lembrete set revogado_em=now()
+                    where conta_id=%s and membro_id=%s and revogado_em is null""",
+                (int(conta_id), int(membro_id))).rowcount
+            c.commit()
+        return n or 0
+    except Exception as e:  # noqa: BLE001
+        _log.warning("lembrar_revogar_membro falhou: %s: %s", type(e).__name__, e)
+        return 0
+
+
+def tem_senha(pool, conta_id: int, membro_id: int) -> bool:
+    """Esta pessoa JÁ TEM COMO ENTRAR com senha? Decide se a tela de "crie sua
+    senha" aparece depois do link mágico.
+
+    A pergunta é sobre a PESSOA, não sobre a linha de membro — e é o que faltava.
+    A autoridade da identidade é a conta própria: quem tem conta no Zaq com este
+    e-mail entra com A SENHA DELA em qualquer empresa onde seja membro
+    (`contas.equipe.contextos_de_login`). Perguntar a essa pessoa se ela quer
+    "criar uma senha" criaria uma SEGUNDA senha, na linha de membro — as duas
+    passariam a funcionar, e trocar uma não mexeria na outra.
+
+    Só quem NÃO tem conta precisa de senha própria no vínculo de membro."""
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                """select coalesce(m.senha_hash,'') <> ''
+                        or exists (select 1 from contas ct
+                                    where lower(ct.email) = lower(m.email)
+                                      and coalesce(ct.senha_hash,'') <> '')
+                     from membros m where m.id=%s and m.conta_id=%s""",
+                (int(membro_id), int(conta_id))).fetchone()
+    except Exception:  # noqa: BLE001
+        return True          # na dúvida NÃO insiste em pedir senha
+    return bool(r and r[0])
+
+
+def definir_senha(pool, conta_id: int, membro_id: int, senha_txt: str) -> dict:
+    """Grava a senha do membro na MESMA coluna do login web (migração 072), pra o
+    vendedor ter uma credencial só — Cockpit e painel."""
+    senha_txt = (senha_txt or "").strip()
+    if len(senha_txt) < 8:
+        return {"ok": False, "erro": "A senha precisa de pelo menos 8 caracteres."}
+    if len(senha_txt) > 72:
+        return {"ok": False, "erro": "Senha longa demais (máximo 72 caracteres)."}
+    from contas import senha as _senha
+    try:
+        with pool.connection() as c:
+            # QUEM TEM CONTA NÃO GANHA UMA SEGUNDA SENHA. A senha da conta é a
+            # autoridade e já abre todas as empresas; gravar outra aqui faria as
+            # duas valerem, e trocar a da conta não mexeria nesta — foi assim que
+            # alguém trocou a senha duas vezes e o app continuou recusando.
+            dona = c.execute(
+                """select 1 from membros m join contas ct
+                          on lower(ct.email) = lower(m.email)
+                    where m.id=%s and m.conta_id=%s
+                      and coalesce(ct.senha_hash,'') <> ''""",
+                (int(membro_id), int(conta_id))).fetchone()
+            if dona:
+                return {"ok": False, "ja_tem_conta": True,
+                        "erro": "Você já tem conta no Zaq com este e-mail — entre com "
+                                "a senha dela. Pra trocar, use 'Esqueci minha senha' "
+                                "na tela de login do painel."}
+            n = c.execute("update membros set senha_hash=%s where id=%s and conta_id=%s",
+                          (_senha.hash_senha(senha_txt), int(membro_id), int(conta_id))).rowcount
+            c.commit()
+    except Exception as e:  # noqa: BLE001
+        _log.warning("definir_senha falhou (membro %s): %s", membro_id, e)
+        return {"ok": False, "erro": "Não deu pra salvar a senha. Tente de novo."}
+    return {"ok": True} if n else {"ok": False, "erro": "Membro não encontrado."}
 
 
 def membro_por_email(pool, email: str) -> dict | None:
@@ -311,6 +471,103 @@ def enviar_mensagem(pool, conta_id: int, membro_id: int, lead_id: int, texto: st
     return {"ok": True}
 
 
+def pode_gravar_audio(pool, conta_id: int) -> bool:
+    """Esta conta consegue MANDAR áudio pelo Zaq?
+
+    Só o canal QR. Twilio e Cloud API mandam mídia por outro caminho (URL pública
+    e media-id), e nenhum dos dois está construído — mostrar o microfone numa
+    conta dessas faria o vendedor gravar e o envio falhar depois, que é pior que
+    não ter o botão. As três distinções seguem separadas de propósito.
+
+    TOLERANTE: falha de leitura responde não. O pior caso é um microfone que não
+    aparece; o outro lado é um áudio que o cliente nunca recebe.
+    """
+    try:
+        from finance import whatsapp_out as _wo
+        with pool.connection() as c:
+            if _wo.provedor_da_conta(c, conta_id) != "qr":
+                return False
+        from finance import whatsapp_qr as _qr
+        return _qr.configurado()
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra saber se a conta %s pode gravar áudio (%s: %s)",
+                     conta_id, type(e).__name__, e)
+        return False
+
+
+def enviar_audio(pool, conta_id: int, membro_id: int, lead_id: int, dados: bytes,
+                 mimetype: str, segundos: int, onda: bytes | None = None) -> dict:
+    """Manda o áudio que o vendedor gravou DENTRO do Zaq, e o transcreve.
+
+    A ordem importa: transcreve ANTES de enviar. Os bytes já estão aqui, então não
+    há download nenhum — enquanto hoje o áudio gravado no celular só vira texto
+    depois de o WhatsApp entregar e o serviço Node baixar de volta. Dá menos
+    trabalho ao serviço que o fluxo de hoje, não mais.
+
+    E a mensagem nasce com `membro_id`. É o ganho que sobrevive a tudo: hoje 98%
+    do que a Prime manda ao cliente chega sem nome, porque sai do celular.
+    """
+    from finance import audio_voz as av
+    from web.painel_prospeccao import _add_msg, _conversa_id
+    if not dados:
+        return {"ok": False, "erro": "Áudio vazio."}
+    if len(dados) > av.LIMITE_BYTES:
+        return {"ok": False, "erro": "Áudio grande demais."}
+    segundos = max(1, int(segundos or 1))
+    if segundos > av.LIMITE_SEGUNDOS:
+        return {"ok": False, "erro": f"Áudio passa de {av.LIMITE_SEGUNDOS}s."}
+    if not pode_gravar_audio(pool, conta_id):
+        return {"ok": False, "erro": "Esta conta não manda áudio pelo Zaq."}
+
+    with pool.connection() as c:
+        if not _posse(c, conta_id, membro_id, lead_id):
+            return {"ok": False, "erro": "escopo"}
+        p = c.execute("select whatsapp, telefone from prospeccao where id=%s and conta_id=%s",
+                      (lead_id, conta_id)).fetchone()
+    numero = (p[0] or p[1] or "") if p else ""
+    if not numero:
+        return {"ok": False, "erro": "Lead sem número de WhatsApp."}
+
+    pronto = av.preparar(dados, mimetype)
+    if pronto.get("erro"):
+        _log.warning("áudio da conta %s não converteu (%s) — vai como veio",
+                     conta_id, pronto["erro"])
+
+    # A transcrição é um EXTRA: se o STT falhar, o áudio sai do mesmo jeito. O que
+    # não pode é o vendedor ficar sem mandar porque a transcrição caiu.
+    texto = ""
+    try:
+        from core.transcribe import transcritor_se_configurado
+        tr = transcritor_se_configurado()
+        if tr is not None:
+            nome = "audio.ogg" if pronto["mimetype"].startswith("audio/ogg") else "audio.mp4"
+            texto = (tr.transcrever(pronto["bytes"], nome) or "").strip()[:4000]
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra transcrever o áudio da conta %s: %s", conta_id, e)
+
+    from finance import whatsapp_qr as _qr
+    res = _qr.enviar_audio(conta_id, numero, pronto["bytes"], pronto["mimetype"],
+                           segundos, onda)
+    if not res.get("ok"):
+        erros = {"desconectado": "WhatsApp desconectado. Reconecte na aba Canais.",
+                 "numero_invalido": "Número do lead inválido.",
+                 "qr_indisponivel": "O serviço de WhatsApp está fora do ar.",
+                 "audio_vazio_ou_grande": "Áudio grande demais."}
+        return {"ok": False, "erro": erros.get(res.get("erro"), "Não consegui enviar o áudio.")}
+
+    # a marca é a MESMA que o serviço Node escreve pro áudio que chega do celular
+    # (ver textoDaMsg), então as duas origens ficam iguais na conversa.
+    marca = "🎤 Áudio (%d:%02d)" % (segundos // 60, segundos % 60)
+    with pool.connection() as c:
+        conv = _conversa_id(c, conta_id, lead_id, "whatsapp")
+        _add_msg(c, conv, "whatsapp", "out", "humano",
+                 (marca + "\n" + texto) if texto else marca, membro_id, res.get("sid"))
+        c.execute("update conversas set status='pendente', agente_ativo=false, "
+                  "push_avisado_em=null where id=%s", (conv,))
+        c.commit()
+    return {"ok": True, "texto": texto, "convertido": pronto["convertido"]}
+
+
 def assumir(pool, conta_id: int, membro_id: int, lead_id: int) -> dict:
     """Tira a conversa do automático (o vendedor passa a responder). Revalida posse."""
     from web.painel_prospeccao import _conversa_id
@@ -362,6 +619,82 @@ def mudar_etapa(pool, conta_id: int, membro_id: int, lead_id: int, chave: str) -
     return {"ok": True}
 
 
+def criar_lead(pool, conta_id: int, membro_id: int, nome: str, whatsapp: str) -> dict:
+    """O vendedor cadastra um lead na mão, do celular. Devolve {ok, lead_id, existia}.
+
+    Por que existe: o cockpit tinha vinte e tantas rotas e NENHUMA criava lead — o
+    vendedor só trabalhava o que o rodízio entregava. Quem pegava um contato na rua não
+    tinha onde botar, e o app perdia justamente o lead que ninguém mais ia registrar.
+
+    Nasce dele: `vendedor_id` = quem criou, então cai na fila da própria pessoa já
+    aberto. `tipo='pf'` é o mesmo palpite do lead que entra pelo WhatsApp (quem manda
+    mensagem é uma pessoa); um toque na ficha troca pra empresa.
+
+    NÃO DUPLICA. Número repetido é o modo normal de errar aqui — o vendedor não sabe de
+    cor quem já está na base, e um segundo cadastro do mesmo número parte a conversa em
+    duas fichas. Se já existe lead com aquele número na conta, devolve o que existe com
+    `existia=True` e a tela abre ele em vez de criar outro. A busca usa os 8 finais mais
+    a igualdade exata nas duas grafias do celular brasileiro (com e sem o nono dígito) —
+    o mesmo casamento de `_conversa_wa_do_contato`, porque '98392961' pode ser o final
+    de um celular do 86 e de um do 11.
+    """
+    from web.painel_prospeccao import _so_digitos, _so_digitos_wa, _wa_equivalentes
+
+    nome = (nome or "").strip()
+    if not nome:
+        return {"ok": False, "erro": "Diga o nome do contato."}
+    # O vendedor digita "(86) 99999-1234", sem DDI. Guardar assim quebraria duas coisas
+    # de uma vez: o lead nasceria com número diferente do formato que o WhatsApp entrega
+    # (`+55...`, ver o insert de whatsapp_inbound), e o _wa_equivalentes — que é quem
+    # acha o repetido — só reconhece as duas grafias do celular brasileiro a partir da
+    # forma COM o 55. `_so_digitos_wa` é o normalizador que já existe pra isso.
+    if len(_so_digitos(whatsapp)) < 10:
+        return {"ok": False, "erro": "WhatsApp incompleto (DDD + número)."}
+    digs = _so_digitos_wa(whatsapp)
+
+    alvo8 = digs[-8:]
+    with pool.connection() as c:
+        achado = c.execute(
+            r"""select id from prospeccao
+                 where conta_id=%s
+                   and right(regexp_replace(coalesce(whatsapp,''), '\D', '', 'g'), 8) = %s
+                   and regexp_replace(coalesce(whatsapp,''), '\D', '', 'g') = any(%s)
+                 order by id limit 1""",
+            (conta_id, alvo8, _wa_equivalentes(digs) or [digs])).fetchone()
+        if achado:
+            return {"ok": True, "lead_id": achado[0], "existia": True}
+        lead_id = c.execute(
+            """insert into prospeccao (conta_id, vendedor_id, empresa, contato, whatsapp,
+                 tipo, origem, temperatura, status, estagio, criado_por)
+               values (%s,%s,%s,%s,%s,'pf','manual_vendedor','morno','novo','lead',%s)
+            returning id""",
+            (conta_id, membro_id, nome[:250], nome[:250],
+             "+" + digs, membro_id)).fetchone()[0]
+        c.commit()
+    return {"ok": True, "lead_id": lead_id, "existia": False}
+
+
+def _data_nascimento(texto: str):
+    """'AAAA-MM-DD' do <input type=date> -> date. Devolve (date|None, erro|None).
+
+    Vazio é ausência, não erro: campo em branco mantém o que está gravado, como todo
+    o resto da ficha. Lixo é ERRO com mensagem, e não um silencioso None — o vendedor
+    que digitou uma data no celular precisa saber que ela não entrou; engolir o valor
+    e responder "Ficha salva ✓" seria mentir pra ele.
+    """
+    if not texto:
+        return None, None
+    try:
+        d = _date.fromisoformat(texto[:10])
+    except ValueError:
+        return None, "Data de nascimento inválida (use dia/mês/ano)."
+    # 1900 corta o dedo escorregado no ano (0002, 0202) sem inventar idade mínima;
+    # o futuro é sempre engano — ninguém nasce depois de hoje.
+    if d.year < 1900 or d > _date.today():
+        return None, "Data de nascimento fora do intervalo."
+    return d, None
+
+
 def salvar_ficha(pool, conta_id: int, membro_id: int, lead_id: int, dados: dict) -> dict:
     """Preenche os dados do cliente pela tela do vendedor. Antes isso só existia no
     painel desktop do gestor: o lead entrava por WhatsApp com um número e mais nada, e
@@ -370,7 +703,12 @@ def salvar_ficha(pool, conta_id: int, membro_id: int, lead_id: int, dados: dict)
 
     Campo vazio NÃO apaga o que já está gravado: o vendedor abre a ficha no meio da
     conversa pra somar uma informação, não pra recadastrar o lead. Só o documento tem
-    caminho de correção (mandar outro por cima), e ele é validado antes de entrar."""
+    caminho de correção (mandar outro por cima), e ele é validado antes de entrar.
+
+    Consequência disso pro WhatsApp: dá pra TROCAR o número por outro, nunca pra apagar
+    — deixar em branco mantém o que está lá. É o que se quer, porque o número é a
+    identidade da conversa; esvaziá-lo por engano ao salvar a ficha inteira só pra
+    corrigir um cargo seria caro."""
     from web.painel_prospeccao import _doc_lead
 
     def limpo(chave):
@@ -390,14 +728,34 @@ def salvar_ficha(pool, conta_id: int, membro_id: int, lead_id: int, dados: dict)
 
         uf = limpo("uf")[:2].upper()
         email = limpo("email").lower()
+        cep = "".join(ch for ch in limpo("cep") if ch.isdigit())[:8]
+        nasc, erro_nasc = _data_nascimento(limpo("nascimento"))
+        if erro_nasc:
+            return {"ok": False, "erro": erro_nasc}
         # coalesce: o que veio em branco fica como estava. O documento só é reescrito
         # quando o vendedor digitou algo — senão um "salvar" limparia CPF já cadastrado.
+        # `whatsapp` entra junto e é editável: ele é o número por onde a conversa corre,
+        # e o vendedor precisa poder corrigir quando o cliente passa outro. Isso NÃO
+        # descasa a conversa que já existe — a busca liga por `conversas.prospeccao_id`
+        # e, no segundo caminho, por `conversas.contato_ref` (o número de quem mandou
+        # de verdade); nenhum dos dois lê esta coluna. Ver _conversa_wa_do_contato.
         campos = [("empresa", limpo("empresa")), ("contato", limpo("contato")),
                   ("cargo", limpo("cargo")), ("telefone", limpo("telefone")),
+                  ("whatsapp", limpo("whatsapp")),
                   ("email", email), ("segmento", limpo("segmento")),
-                  ("cidade", limpo("cidade")), ("uf", uf), ("obs", limpo("obs"))]
+                  ("cidade", limpo("cidade")), ("uf", uf), ("obs", limpo("obs")),
+                  # endereço: o CEP puxa rua/bairro/cidade/UF na tela (/api/cep), mas o
+                  # que chega aqui é sempre o que ESTÁ no formulário — o servidor não
+                  # reconsulta. Guardar o CEP é o que permite conferir depois de onde
+                  # veio o endereço preenchido sozinho.
+                  ("cep", cep), ("endereco", limpo("endereco")),
+                  ("numero", limpo("numero")), ("bairro", limpo("bairro"))]
         sets = [f"{k}=coalesce(%s,{k})" for k, _ in campos]
         vals = [v or None for _, v in campos]
+        # data não passa pelo mesmo laço: os outros campos são texto e o `or None`
+        # resolve; aqui o valor já vem date-ou-None do _data_nascimento.
+        sets.append("nascimento=coalesce(%s,nascimento)")
+        vals.append(nasc)
         if doc:
             sets += ["tipo=%s", "cnpj=%s", "cpf=%s"]
             vals += [tipo, cnpj, cpf]
@@ -614,17 +972,44 @@ def catalogo_servicos(pool, conta_id: int) -> list[dict]:
     return out
 
 
-def _sanear_itens(itens) -> list[dict]:
-    """Snapshot seguro das linhas: nome + setup/mensal em REAIS (inteiros, ≥0)."""
+def _sanear_itens(itens, *, com_desconto: bool = False) -> list[dict]:
+    """Snapshot seguro das linhas: nome + setup/mensal em REAIS (inteiros, ≥0).
+
+    `com_desconto` traz o desconto da linha junto — mesmo formato do painel
+    (`desc_val` e não `desc`, porque `desc` já é a DESCRIÇÃO do item logo acima).
+    Quando False os campos são DESCARTADOS, não zerados: é o portão do nicho, e
+    quem não vende serviço não grava desconto nem se mandar no payload.
+    """
     out = []
     for it in (itens or [])[:50]:
         nome = (str(it.get("nome") or "")).strip()[:120]
         if not nome:
             continue
-        out.append({"nome": nome, "desc": (str(it.get("desc") or "")).strip()[:200],
-                    "setup": max(0, int(it.get("setup") or 0)),
-                    "mensal": max(0, int(it.get("mensal") or 0))})
+        linha = {"nome": nome, "desc": (str(it.get("desc") or "")).strip()[:200],
+                 "setup": max(0, int(it.get("setup") or 0)),
+                 "mensal": max(0, int(it.get("mensal") or 0))}
+        if com_desconto:
+            linha["desc_tipo"] = "valor" if (it.get("desc_tipo") or "") == "valor" else "pct"
+            linha["desc_val"] = max(0, int(it.get("desc_val") or 0))
+        out.append(linha)
     return out
+
+
+def _sanear_desconto(d) -> dict:
+    """O desconto do TOTAL, como a tela manda: {tipo, pct, valor} — `valor` em
+    REAIS, igual aos itens. `dsc.quanto_desconta` já limita a base, então aqui só
+    se garante que número solto e texto viram zero em vez de explodir."""
+    d = d if isinstance(d, dict) else {}
+    try:
+        pct = max(0.0, min(100.0, float(d.get("pct") or 0)))
+    except (TypeError, ValueError):
+        pct = 0.0
+    try:
+        valor = max(0, int(d.get("valor") or 0))
+    except (TypeError, ValueError):
+        valor = 0
+    return {"tipo": "valor" if (d.get("tipo") or "") == "valor" else "pct",
+            "pct": pct, "valor": valor}
 
 
 # ------------------------------------------------------------------ carteira de propostas
@@ -814,20 +1199,55 @@ def fechar_contrato(pool, conta_id: int, orc_id: int, *, membro_id: int | None =
                     if quantos else "Contrato fechado ✓")}
 
 
-def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens) -> dict:
+def vende_servico(pool, conta_id: int) -> bool:
+    """Esta conta vende SERVIÇO? É o portão do desconto no orçamento — o mesmo que
+    guarda o painel (web/painel_servicos:150, o `conta[14]`).
+
+    TOLERANTE: se a leitura falhar, responde False. Errar pra menos aqui custa um
+    controle que não aparece; errar pra mais gravaria desconto num orçamento de
+    quem não deveria tê-lo, e desconto gravado vira título a receber.
+    """
+    try:
+        from finance import empresa as _emp
+        return bool(_emp.o_que_vende(pool, conta_id)["servico"])
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra saber se a conta %s vende serviço (%s: %s) — "
+                     "desconto fica de fora", conta_id, type(e).__name__, e)
+        return False
+
+
+def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens,
+                    desconto=None) -> dict:
     """Cria a proposta do lead (mesma tabela/token do painel) e devolve o link público
     /proposta/<token> pro vendedor mandar. Revalida a posse do lead. Reusa a página de
-    proposta que já existe (o cliente vê com a marca da empresa e aprova online)."""
+    proposta que já existe (o cliente vê com a marca da empresa e aprova online).
+
+    O DESCONTO passa pela MESMA função do painel (`finance.desconto.totais`). Não é
+    economia de código: é o motivo de o módulo existir. Duas contas de "quanto é o
+    desconto" seriam o começo de dois números, e já custou um orçamento com parcelas
+    somando R$ 12.105 contra um total de R$ 9.405.
+
+    E quem faz a conta é o SERVIDOR. O que chega da tela é o que a pessoa digitou
+    (o tipo, o percentual, os reais); o total líquido é derivado aqui — senão
+    bastaria editar o JSON no navegador pra fechar proposta por qualquer valor.
+    """
     import secrets as _secrets
     from web.painel_prospeccao import _zap_link_texto
     from finance.email_sender import _app_url
-    linhas = _sanear_itens(itens)
+    from finance import desconto as _dsc
+    pode_desconto = vende_servico(pool, conta_id)
+    linhas = _sanear_itens(itens, com_desconto=pode_desconto)
     if not linhas:
         return {"ok": False, "erro": "Adicione ao menos um item ao orçamento."}
+    dsc_final = _sanear_desconto(desconto) if pode_desconto else _sanear_desconto(None)
     import json as _json
     from finance import vendas as _vendas
+    # setup/mensal continuam sendo o BRUTO, como no painel: eles são o preço de
+    # tabela do que foi escolhido. O que o desconto muda é `primeiro_ano_centavos`.
     setup_c = sum(x["setup"] for x in linhas) * 100
     mensal_c = sum(x["mensal"] for x in linhas) * 100
+    tot = _dsc.totais(linhas, tipo=dsc_final["tipo"], pct=dsc_final["pct"],
+                      valor=dsc_final["valor"] * 100)
     with pool.connection() as c:
         if not _posse(c, conta_id, membro_id, lead_id):
             return {"ok": False, "erro": "escopo"}
@@ -841,16 +1261,25 @@ def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens) ->
         except Exception:  # noqa: BLE001 — colunas já existem em produção
             pass
         token = _secrets.token_urlsafe(16)
+        # `primeiro_ano_centavos` NÃO é enfeite e não estava aqui antes: quem gera
+        # os títulos lê `coalesce(primeiro_ano_centavos, setup_centavos, 0)`
+        # (finance/vendas.py), então sem ele o financeiro cai na soma BRUTA dos
+        # itens. Somar desconto sem gravar o líquido faria o cliente assinar por um
+        # valor e o sistema cobrar outro — as duas coisas sobem juntas.
         oid = c.execute(
             """insert into orcamentos
                  (conta_id, cliente, empresa, cnpj, segmento, whatsapp, telefone, email,
-                  cidade, uf, itens, setup_centavos, mensal_centavos, status, criado_por,
-                  canal, token, modo)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,'enviado',%s,'cockpit',%s,%s)
+                  cidade, uf, itens, setup_centavos, mensal_centavos,
+                  primeiro_ano_centavos, desconto_tipo, desconto_pct, desconto_centavos,
+                  status, criado_por, canal, token, modo)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,
+                       %s,%s,%s,%s,'enviado',%s,'cockpit',%s,%s)
                returning id""",
             (conta_id, (lead[1] or None), (lead[0] or None), lead[2], lead[3], lead[4],
              lead[5], lead[6], lead[7], (lead[8] or "")[:2] or None,
-             _json.dumps(linhas), setup_c, mensal_c, str(membro_id), token,
+             _json.dumps(linhas), setup_c, mensal_c,
+             tot["total"], dsc_final["tipo"], dsc_final["pct"], dsc_final["valor"] * 100,
+             str(membro_id), token,
              _vendas.modo_do_orcamento(pool, conta_id))).fetchone()[0]
         c.execute("update prospeccao set orcamento_id=%s, atualizado_em=now() where id=%s and conta_id=%s",
                   (oid, lead_id, conta_id))
@@ -860,7 +1289,10 @@ def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens) ->
     msg = f"Olá! Segue sua proposta 👋\n{link}"
     return {"ok": True, "id": oid, "token": token, "link": link,
             "zap": _zap_link_texto(numero, msg) if numero else "",
-            "setup_centavos": setup_c, "mensal_centavos": mensal_c}
+            "setup_centavos": setup_c, "mensal_centavos": mensal_c,
+            # o líquido volta pra tela poder confirmar o número que o vendedor viu:
+            # se divergir do que ela calculou, quem vale é este.
+            "total_centavos": tot["total"], "desconto_centavos": tot["desconto_total"]}
 
 
 def enviar_proposta_conversa(pool, conta_id: int, membro_id: int, lead_id: int, link: str) -> dict:
@@ -983,30 +1415,57 @@ def visita_ics(pool, token: str) -> str | None:
 
 
 # ------------------------------------------------------------------ agenda do vendedor
-def visitas_do_vendedor(pool, conta_id: int, membro_id: int, dias: int = 14) -> list[dict]:
-    """As visitas QUE ELE marcou, de hoje pra frente (a agenda do dia dele).
+def agenda_da_conta(pool, conta_id: int, membro_id: int | None = None,
+                    so_meus: bool = False, dias: int = 14) -> list[dict]:
+    """A agenda dos próximos `dias` — visitas, compromissos e datas SEGURADAS — da
+    conta inteira, com quem marcou. Substitui a antiga `visitas_do_vendedor`, que
+    filtrava por `membro_id` e `status='ativo'`: o vendedor via só as visitas dele,
+    e a data segurada (pré-reserva aguardando sinal) não aparecia pra ninguém no
+    app. É exatamente a informação que evita prometer a mesma data duas vezes, e
+    quem corre esse risco é o vendedor, na rua.
 
-    `agendar_visita` grava o evento com `membro_id` (via `agenda.criar_evento`) e
-    liga no lead pelo `prospeccao_id`; aqui a gente lê o mesmo dado pelo dono do
-    evento. `agenda.listar_eventos` não serve porque é por CONTA — o vendedor
-    veria a agenda do time inteiro.
+    `so_meus=True` devolve só os eventos de `membro_id` — o filtro "Meus × Todos"
+    da tela. Fica no SQL (e não na tela) porque a tela corta em `dias`; filtrar
+    depois faria "Meus" perder eventos quando o time lota a janela.
+
+    Cada item traz `tipo_ev` ('visita' | 'segurada' | 'compromisso'), `autor` (nome
+    de quem marcou; '' quando foi o dono titular, que não tem membro) e `minha`
+    (o evento é de quem está olhando). O prazo do sinal vai em `prazo` ('2d', '5h',
+    'vencido') — no card ele é a diferença entre "data ocupada" e "urgência".
     """
     from finance import agenda as ag
     from web.painel_prospeccao import _zap_link
     hoje = datetime.now(ag.BRT).replace(hour=0, minute=0, second=0, microsecond=0)
+    cond = "and e.membro_id=%s " if (so_meus and membro_id) else ""
+    args = [conta_id] + ([membro_id] if (so_meus and membro_id) else []) \
+        + [hoje, hoje + timedelta(days=max(1, int(dias or 14)))]
     with pool.connection() as c:
         rows = c.execute(
-            """select e.id, e.titulo, e.inicio, e.local, e.ics_token,
-                      e.prospeccao_id, p.empresa, coalesce(p.whatsapp, p.telefone, '')
+            f"""select e.id, e.titulo, e.inicio, e.local, e.ics_token,
+                      e.prospeccao_id, p.empresa, coalesce(p.whatsapp, p.telefone, ''),
+                      e.status, e.pre_reserva_ate, e.membro_id,
+                      coalesce(nullif(m.nome,''), '')
                  from eventos_agenda e
                  left join prospeccao p on p.id = e.prospeccao_id and p.conta_id = e.conta_id
-                where e.conta_id=%s and e.membro_id=%s and e.status='ativo'
+                 left join membros m on m.id = e.membro_id
+                where e.conta_id=%s {cond}and e.status in ('ativo','pre_reservado')
                   and e.inicio >= %s and e.inicio < %s
                 order by e.inicio""",
-            (conta_id, membro_id, hoje, hoje + timedelta(days=max(1, int(dias or 14))))).fetchall()
+            args).fetchall()
+    agora = datetime.now(ag.BRT)
     out = []
     for r in rows:
         ini = r[2].astimezone(ag.BRT) if r[2] else None
+        segurada = (r[8] == "pre_reservado")
+        # o rótulo do card: visita é o que tem lead pendurado; segurada é a data
+        # esperando sinal; o resto (festa confirmada, reunião) é compromisso firme.
+        tipo_ev = "segurada" if segurada else ("visita" if r[5] else "compromisso")
+        prazo = ""
+        if segurada and r[9]:
+            horas = (r[9] - agora).total_seconds() / 3600
+            prazo = ("vencido" if horas <= 0
+                     else f"{max(1, int(horas))}h" if horas < 24
+                     else f"{int(horas // 24)}d")
         out.append({
             "id": r[0], "titulo": r[1] or "Visita", "inicio": ini,
             "dia": ini.strftime("%d/%m") if ini else "", "hora": ini.strftime("%H:%M") if ini else "",
@@ -1014,6 +1473,8 @@ def visitas_do_vendedor(pool, conta_id: int, membro_id: int, dias: int = 14) -> 
             "local": r[3] or "", "maps": _maps_link(r[3] or ""),
             "ics_url": f"/visita/{r[4]}.ics" if r[4] else "",
             "lead_id": r[5], "empresa": r[6] or "", "zap": _zap_link(r[7]) if r[7] else "",
+            "tipo_ev": tipo_ev, "prazo": prazo,
+            "autor": r[11] or "", "minha": bool(membro_id and r[10] == membro_id),
         })
     return out
 

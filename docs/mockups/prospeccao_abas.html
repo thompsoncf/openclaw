@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup — Barra de abas da Prospecção</title>
+<style>
+/* ============================================================================
+   TOKENS — cópia fiel de web/tema.py (_TOKENS). NÃO copiar de
+   orcamento_eventos.html, que está na paleta anterior ao PR #400.
+   ============================================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-fundo:#10241A; --neon-borda:#1E4A3A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --card:var(--surface); --card-2:var(--bg-2);
+  --borda:var(--line); --txt:var(--text); --txt-mut:var(--text-dim);
+  --verde:var(--neon); --verde-claro:var(--neon);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:var(--body);
+  max-width:1180px;margin:0 auto;padding:34px 18px 100px;line-height:1.5;
+  -webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
+h1{font-size:1.7rem;font-weight:700}
+h2{font-size:1.18rem;font-weight:700;margin:0 0 .2rem}
+h3{font-size:.92rem;font-weight:600;margin-bottom:.4rem}
+code{font-family:var(--mono);font-size:.85em;background:var(--bg-2);
+  padding:.1rem .35rem;border-radius:4px;color:var(--txt-mut)}
+.sec{margin-top:44px}
+.sec>.num{font-family:var(--mono);font-size:.72rem;color:var(--verde);
+  letter-spacing:.1em;text-transform:uppercase;margin-bottom:.35rem}
+.lede{color:var(--txt-mut);font-size:.92rem;max-width:78ch;margin-top:.5rem}
+.nota{border-left:2px solid var(--neon-borda);background:rgba(37,211,102,.08);
+  padding:.7rem .9rem;border-radius:0 8px 8px 0;font-size:.86rem;margin-top:1rem;
+  color:var(--txt-mut);max-width:84ch}
+.nota b{color:var(--txt)}
+.alerta{border-left-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.alerta b{color:var(--ambar)}
+.ruim{border-left-color:var(--coral-borda);background:var(--coral-fundo)}
+.ruim b{color:var(--coral)}
+
+/* ---------- moldura de "tela" ---------- */
+.quadro{border:1px solid var(--borda);border-radius:12px;overflow:hidden;
+  background:var(--card);margin-top:.8rem}
+.quadro>.cap{background:var(--bg-2);padding:.42rem .8rem;font-size:.72rem;
+  color:var(--txt-mut);border-bottom:1px solid var(--borda);font-family:var(--mono);
+  display:flex;justify-content:space-between;gap:.6rem;flex-wrap:wrap}
+.quadro>.cap .larg{color:var(--verde)}
+.quadro>.miolo{padding:14px}
+.viewport{overflow:hidden;border:1px dashed #2b3a32;border-radius:9px;
+  padding:10px;background:var(--bg)}
+
+/* ---------- a barra: réplica do .pnavbar/.pnav reais ---------- */
+.pnavbar{display:flex;gap:.4rem;align-items:center;margin:0}
+.pnavbar.hoje{flex-wrap:wrap}          /* como é hoje: quebra */
+.pnavbar.novo{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;
+  -webkit-overflow-scrolling:touch}
+.pnavbar.novo::-webkit-scrollbar{display:none}
+/* o esfumado da borda direita: diz "tem mais" sem ocupar espaço */
+.pnavbar.novo.transborda{
+  mask-image:linear-gradient(to right,#000 calc(100% - 38px),transparent 100%);
+  -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 38px),transparent 100%)}
+.pnav{display:inline-flex;align-items:center;gap:.35rem;font:inherit;font-size:.84rem;
+  font-weight:600;padding:.45rem .8rem;border-radius:9px;border:1px solid var(--borda);
+  color:var(--txt);background:transparent;text-decoration:none;white-space:nowrap;
+  line-height:1;flex:none}
+.pnav.on{color:var(--sobre-verde);background:var(--verde);border-color:var(--verde)}
+.pnav.cfg{margin-left:auto}
+.pnav.cfg.icone{padding:.45rem .55rem}
+
+/* botão verde do Captar, dentro do Funil */
+.cap-btn{display:inline-flex;align-items:center;gap:.4rem;font-size:.84rem;
+  font-weight:700;padding:.5rem .9rem;border-radius:9px;border:0;cursor:pointer;
+  background:var(--verde);color:var(--sobre-verde);font-family:inherit}
+
+/* cabeçalho do funil, pro contexto do botão */
+.fh{display:flex;align-items:flex-start;gap:.6rem;flex-wrap:wrap;margin-top:.9rem}
+.fh .tt{font-family:var(--display);font-size:1.15rem;font-weight:700}
+.fh .mut{font-size:.8rem;color:var(--txt-mut);margin-top:.15rem}
+
+.col2{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:1rem}
+/* o antes/depois NÃO vai em duas colunas: o assunto é largura, e coluna estreita
+   empilharia as abas, exagerando o problema e mostrando o que não acontece. */
+@media(max-width:860px){.col2{grid-template-columns:1fr}}
+.rot{font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;font-weight:700;
+  margin-bottom:.4rem}
+.rot.r{color:var(--coral)} .rot.b{color:var(--verde)}
+
+table.diag{width:100%;border-collapse:collapse;margin-top:1rem;font-size:.86rem}
+table.diag th,table.diag td{padding:.5rem .7rem;border-bottom:1px solid var(--borda);
+  text-align:left;vertical-align:top}
+table.diag th{color:var(--txt-mut);font-weight:600;font-size:.74rem;
+  text-transform:uppercase;letter-spacing:.05em}
+ul.lista{margin:.6rem 0 0 1.1rem;font-size:.88rem;color:var(--txt-mut)}
+ul.lista li{margin-bottom:.35rem}
+ul.lista b{color:var(--txt)}
+.rodape{margin-top:56px;padding-top:18px;border-top:1px solid var(--borda);
+  font-size:.8rem;color:var(--text-faint)}
+</style>
+</head>
+<body>
+
+<h1>Barra de abas da Prospecção</h1>
+<p class="lede">A barra cresceu até quebrar em duas linhas — a última aba cai fora do
+layout. Este mockup mostra o conserto aprovado: <b>enxugar os dois atalhos duplicados</b> e
+<b>nunca quebrar linha</b>. E resolve um bug que apareceu no levantamento.</p>
+
+<!-- ================================================== 1 -->
+<section class="sec">
+  <div class="num">1 · o bug que apareceu no caminho</div>
+  <h2>A barra existe duas vezes — e as duas já divergiram</h2>
+  <p class="lede">Há a função <code>_navbar()</code>, usada por Base, Campanhas,
+  Comunicação, Quem atacar e IA Insta — e uma <b>cópia escrita à mão</b> dentro do template
+  do Funil.</p>
+
+  <table class="diag">
+    <tr><th>Onde</th><th>Abas</th><th>Situação</th></tr>
+    <tr><td><code>_navbar()</code><br><span style="color:var(--txt-mut);font-size:.8rem">Base, Campanhas, Comunicação, Quem atacar, IA Insta</span></td>
+        <td><b>8</b></td><td>completa</td></tr>
+    <tr><td><code>_KANBAN_TPL</code> (cópia)<br><span style="color:var(--txt-mut);font-size:.8rem">a tela do Funil</span></td>
+        <td><b>7</b></td><td style="color:var(--coral)">falta <b>🎯 Quem atacar</b></td></tr>
+  </table>
+
+  <div class="nota ruim">
+    <b>Consequência:</b> quem está no Funil <b>não tem como chegar em "Quem atacar"</b>.
+    Quando essa aba foi criada, ela entrou na função e ninguém lembrou da cópia. Isso é bug,
+    não estética — e some junto com o conserto, porque o Funil passa a usar a mesma função
+    que as outras telas.
+  </div>
+</section>
+
+<!-- ================================================== 2 -->
+<section class="sec">
+  <div class="num">2 · antes e depois</div>
+  <h2>De 996px de abas para 786px — e nunca mais em duas linhas</h2>
+
+  <div>
+    <div>
+      <div class="rot r">Como é hoje — quebra em duas linhas</div>
+      <div class="quadro">
+        <div class="cap"><span>/painel/prospeccao</span><span class="larg">viewport 1000px — abaixo de ~1030px ela quebra</span></div>
+        <div class="miolo">
+          <div class="viewport" style="max-width:968px">
+            <nav class="pnavbar hoje">
+              <a class="pnav">🎯 Captar Lead</a>
+              <a class="pnav">📇 Base</a>
+              <a class="pnav">📣 Campanhas</a>
+              <a class="pnav">🎯 Quem atacar</a>
+              <a class="pnav">✨ IA Insta</a>
+              <a class="pnav">💬 Comunicação</a>
+              <a class="pnav on">🔥 Funil</a>
+              <a class="pnav cfg" style="margin-left:0">⚙️ Canais</a>
+            </nav>
+          </div>
+          <p style="font-size:.78rem;color:var(--coral);margin-top:.5rem">↑ a última aba
+          desce pra segunda linha e empurra o conteúdo</p>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:1.4rem">
+      <div class="rot b">Como fica — uma linha, sempre</div>
+      <div class="quadro">
+        <div class="cap"><span>/painel/prospeccao</span><span class="larg">viewport 1000px — a mesma largura</span></div>
+        <div class="miolo">
+          <div class="viewport" style="max-width:968px">
+            <nav class="pnavbar novo">
+              <a class="pnav">📇 Base</a>
+              <a class="pnav">📣 Campanhas</a>
+              <a class="pnav">🎯 Quem atacar</a>
+              <a class="pnav">✨ IA Insta</a>
+              <a class="pnav">💬 Comunicação</a>
+              <a class="pnav on">🔥 Funil</a>
+              <a class="pnav cfg icone" title="Canais">⚙️</a>
+            </nav>
+          </div>
+          <p style="font-size:.78rem;color:var(--verde);margin-top:.5rem">↑ sobra espaço —
+          e o ⚙️ fica encostado à direita, separado do que é trabalho</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="nota">
+    <b>O que saiu, e por quê.</b> As duas eram atalho pra lugar que já se alcança:
+    <b>⚙️ Canais</b> é configuração (vira só o ícone, longe das abas de trabalho) e
+    <b>🎯 Captar Lead</b> apontava pro <i>próprio Funil</i> com o painel de captação aberto —
+    então virou botão dentro do Funil, que é onde ele age.
+  </div>
+</section>
+
+<!-- ================================================== 3 -->
+<section class="sec">
+  <div class="num">3 · em três larguras</div>
+  <h2>Onde a rolagem entra</h2>
+  <p class="lede">A barra nova nunca quebra: quando não cabe, ela <b>rola de lado</b>, com um
+  esfumado na borda indicando que há mais. Confira qual destas bate com a sua tela.</p>
+
+  <div class="quadro">
+    <div class="cap"><span>notebook grande</span><span class="larg">1440px — 786px de 1400: folga de 614px</span></div>
+    <div class="miolo"><div class="viewport" style="max-width:1400px">
+      <nav class="pnavbar novo">
+        <a class="pnav">📇 Base</a><a class="pnav">📣 Campanhas</a>
+        <a class="pnav">🎯 Quem atacar</a><a class="pnav">✨ IA Insta</a>
+        <a class="pnav">💬 Comunicação</a><a class="pnav on">🔥 Funil</a>
+        <a class="pnav cfg icone" title="Canais">⚙️</a>
+      </nav></div></div>
+  </div>
+
+  <div class="quadro">
+    <div class="cap"><span>notebook comum</span><span class="larg">1280px — onde a barra ANTIGA já quebrava com zoom</span></div>
+    <div class="miolo"><div class="viewport" style="max-width:1240px">
+      <nav class="pnavbar novo">
+        <a class="pnav">📇 Base</a><a class="pnav">📣 Campanhas</a>
+        <a class="pnav">🎯 Quem atacar</a><a class="pnav">✨ IA Insta</a>
+        <a class="pnav">💬 Comunicação</a><a class="pnav on">🔥 Funil</a>
+        <a class="pnav cfg icone" title="Canais">⚙️</a>
+      </nav></div></div>
+  </div>
+
+  <div class="quadro">
+    <div class="cap"><span>janela estreita / tablet</span><span class="larg">760px — aqui nem a nova cabe: rola de lado</span></div>
+    <div class="miolo"><div class="viewport" style="max-width:720px">
+      <nav class="pnavbar novo transborda">
+        <a class="pnav">📇 Base</a><a class="pnav">📣 Campanhas</a>
+        <a class="pnav">🎯 Quem atacar</a><a class="pnav">✨ IA Insta</a>
+        <a class="pnav">💬 Comunicação</a><a class="pnav on">🔥 Funil</a>
+        <a class="pnav cfg icone" title="Canais">⚙️</a>
+      </nav></div>
+      <p style="font-size:.78rem;color:var(--txt-mut);margin-top:.5rem">↑ arraste a barra
+      pra o lado — o esfumado na direita é o aviso de que continua</p>
+    </div>
+  </div>
+
+  <div class="nota alerta">
+    <b>Os números, medidos no navegador</b> (não estimados): a barra de <b>8 abas ocupa
+    996px</b>; a nova, com <b>6 + ⚙️, ocupa 786px</b>. O container útil da tela é 1208px.
+    Ou seja: <b>hoje ela quebra quando o viewport cai abaixo de ~1030px</b> — o que
+    acontece com zoom de 125% numa tela de 1280, com a janela não maximizada, ou num
+    tablet. Com 786px, sobram 422px de folga: cabem mais três abas antes de chegar perto
+    de novo, e mesmo aí a barra rola em vez de quebrar.
+  </div>
+</section>
+
+<!-- ================================================== 4 -->
+<section class="sec">
+  <div class="num">4 · o Captar Lead</div>
+  <h2>Vira botão, no lugar onde ele age</h2>
+  <p class="lede">Ele nunca foi uma aba de verdade: o destino era o próprio Funil com o
+  painel de captação aberto. Como botão, fica em evidência — verde, no cabeçalho — em vez
+  de disputar espaço com a navegação.</p>
+
+  <div class="quadro">
+    <div class="cap"><span>/painel/prospeccao — topo da tela do Funil</span><span>depois</span></div>
+    <div class="miolo">
+      <nav class="pnavbar novo">
+        <a class="pnav">📇 Base</a><a class="pnav">📣 Campanhas</a>
+        <a class="pnav">🎯 Quem atacar</a><a class="pnav">✨ IA Insta</a>
+        <a class="pnav">💬 Comunicação</a><a class="pnav on">🔥 Funil</a>
+        <a class="pnav cfg icone" title="Canais">⚙️</a>
+      </nav>
+      <div class="fh">
+        <div style="flex:1;min-width:170px">
+          <div class="tt">Prospecção</div>
+          <div class="mut"><b style="color:var(--verde-claro)">🏢 PRIME EVENTOS</b> · 34 alvo(s) · pipeline R$ 128.400,00</div>
+        </div>
+        <button class="cap-btn">🎯 Captar Lead</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="nota">
+    <b>Quem vinha de fora continua chegando.</b> O link <code>?captar=1</code> segue
+    funcionando — quem tinha o atalho salvo, ou vier de outra tela, cai no Funil com o
+    painel já aberto, como hoje.
+  </div>
+</section>
+
+<!-- ================================================== 5 -->
+<section class="sec">
+  <div class="num">5 · resumo</div>
+  <h2>O que muda no código</h2>
+  <ul class="lista">
+    <li><b>A cópia à mão do Funil morre</b> — ele passa a chamar a mesma
+      <code>_navbar()</code> das outras telas. É isso que impede a divergência de voltar,
+      e é o que traz o "Quem atacar" pro Funil.</li>
+    <li><b>A barra não quebra mais</b>: <code>nowrap</code> + rolagem lateral com esfumado.
+      A próxima aba que entrar não quebra nada de novo.</li>
+    <li><b>⚙️ Canais</b> vira ícone encostado à direita; <b>🎯 Captar Lead</b> vira botão no
+      cabeçalho do Funil.</li>
+    <li><b>Um teste novo</b> trava as mesmas abas em TODAS as telas do módulo — é a trava
+      que teria pegado a divergência de hoje.</li>
+  </ul>
+  <div class="nota">
+    <b>Sem migração, sem mudança de rota.</b> Tudo em um arquivo
+    (<code>web/painel_prospeccao.py</code>), só apresentação e navegação.
+  </div>
+</section>
+
+<p class="rodape">Mockup estático — cores e medidas copiadas de <code>web/tema.py</code> e
+do CSS real do módulo. As barras acima são o componente real, não desenho.</p>
+
+</body>
+</html>

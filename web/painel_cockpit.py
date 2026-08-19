@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import hashlib as _hashlib
 import html as _html
+import logging as _logging
 import os as _os
 
 from fastapi import APIRouter, Body, Form, Request
@@ -68,13 +69,39 @@ def _ini(s: str) -> str:
 
 # ------------------------------------------------------------------ sessão
 def _sessao(request: Request):
-    """(conta_id, membro_id) do vendedor logado, ou None. Reusa a sessão do portal."""
+    """(conta_id, membro_id) do vendedor logado, ou None. Reusa a sessão do portal.
+
+    Se a sessão caiu mas o aparelho tem o cookie "manter conectado", RECONSTRÓI a
+    sessão aqui e segue — é o que faz o acesso ser indeterminado sem mexer no
+    max_age global do SessionMiddleware (que vale pro painel do dono também).
+
+    A reconstrução só escreve em `request.session`; o Starlette reassina o cookie na
+    resposta sozinho. Não precisa de Response nenhum, e por isso cabe dentro de um
+    guard que é chamado em toda rota."""
     mid = request.session.get("membro_id")
     cid = request.session.get("conta_id")
     papel = request.session.get("papel", "dono")
-    if not mid or not cid or papel not in _PAPEIS_OK:
+    if mid and cid and papel in _PAPEIS_OK:
+        return cid, mid
+    return _sessao_do_lembrete(request)
+
+
+def _sessao_do_lembrete(request: Request):
+    """Sessão vazia + cookie de "manter conectado" válido = entra de novo, calado.
+
+    `lembrar_validar` relê o membro no banco, então desativar alguém na Equipe corta
+    o acesso no request seguinte — a trava que uma sessão sem prazo exige."""
+    token = request.cookies.get(ck.LEMBRETE_COOKIE)
+    if not token:
         return None
-    return cid, mid
+    d = ck.lembrar_validar(get_pool(), token)
+    if not d:
+        return None
+    request.session["conta_id"] = d["conta_id"]
+    request.session["membro_id"] = d["membro_id"]
+    request.session["papel"] = d["papel"]
+    request.session["cockpit"] = True
+    return d["conta_id"], d["membro_id"]
 
 
 def _gerencia(request: Request):
@@ -85,7 +112,15 @@ def _gerencia(request: Request):
     cid = request.session.get("conta_id")
     papel = request.session.get("papel", "dono")
     if not cid or papel not in ("dono", "gestor"):
-        return None
+        # o gestor também tem "manter conectado": sem isto ele voltaria a cair na
+        # tela de entrada mesmo com o aparelho lembrado, já que várias rotas de
+        # equipe checam `_gerencia` ANTES de `_sessao`.
+        if _sessao_do_lembrete(request) is None:
+            return None
+        cid = request.session.get("conta_id")
+        papel = request.session.get("papel", "dono")
+        if not cid or papel not in ("dono", "gestor"):
+            return None
     return cid, request.session.get("membro_id")
 
 
@@ -475,6 +510,20 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .ic.p{width:17px;height:17px}
 
 /* ---------- construtores (orçamento e visita) ---------- */
+/* seletor Meus × Todos da agenda: dois links, um marcado. Links e não botões
+   de propósito — o app inteiro é navegação por URL, e ?t= sobrevive a refresh. */
+.seg-ag{display:flex;background:var(--surface);border:1px solid var(--line);
+  border-radius:10px;padding:3px;gap:3px}
+.seg-ag a{flex:1;text-align:center;padding:.45rem .3rem;border-radius:8px;
+  font-size:.82rem;color:var(--text-dim);text-decoration:none}
+.seg-ag a.on{background:var(--bg);color:var(--text);font-weight:600}
+/* botão de novo lead: flutua acima das abas. Fixo e não no cabeçalho porque lá o
+   `direita` já é o selo da conta — e o polegar alcança melhor embaixo à direita. */
+.fab{position:fixed;right:16px;bottom:84px;z-index:40;width:52px;height:52px;
+  border-radius:50%;background:var(--neon);color:#04150c;display:flex;align-items:center;
+  justify-content:center;font-size:1.7rem;font-weight:400;line-height:1;text-decoration:none;
+  box-shadow:0 6px 20px rgba(0,0,0,.45)}
+.fab:active{transform:scale(.94)}
 .toast{position:fixed;left:50%;bottom:88px;transform:translateX(-50%) translateY(12px);z-index:60;
   background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:.5rem .95rem;
   font-size:.84rem;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;max-width:86%}
@@ -504,11 +553,18 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .avulso button{flex-shrink:0;width:42px;border:1px solid var(--line);border-radius:10px;
   background:var(--surface);color:var(--neon);font-size:1.1rem;font-weight:700;cursor:pointer}
 .vazio-cat{padding:1rem 1.1rem;color:var(--text-dim);font-size:.86rem;line-height:1.5}
-.avl{display:flex;align-items:center;gap:.7rem;margin:.45rem 1.1rem 0;padding:.5rem .7rem;
-  border:1px solid var(--neon-borda);background:var(--neon-fraco);border-radius:10px}
+/* o avulso agora leva o desconto também: a linha QUEBRA em duas em vez de
+   espremer quatro controles numa faixa de 10 caracteres. */
+.avl{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;margin:.45rem 1.1rem 0;
+  padding:.5rem .7rem;border:1px solid var(--neon-borda);background:var(--neon-fraco);
+  border-radius:10px}
 .avl b{flex:1;min-width:0;font-size:.86rem;font-weight:500;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
-.avl span{font-family:var(--mono);font-size:.8rem;color:var(--neon);flex-shrink:0}
+.avl>span.vl{font-family:var(--mono);font-size:.8rem;color:var(--neon);flex-shrink:0;
+  text-align:right}
+.avl>span.vl s{display:block;color:var(--text-faint);font-size:.72rem;
+  text-decoration:line-through}
+.avl .dsc{flex:1 1 100%;margin-top:.1rem}
 .avl button{flex-shrink:0;width:26px;height:26px;border-radius:8px;border:1px solid var(--line);
   background:var(--surface);color:var(--text-dim);font:inherit;font-size:1rem;line-height:1;cursor:pointer}
 /* rodapé fixo do construtor: total à esquerda, ação à direita */
@@ -517,7 +573,76 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .rodape-b .tot{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;margin-bottom:.6rem;
   font-size:.85rem;color:var(--text-dim)}
 .rodape-b .tot b{font-family:var(--mono);font-size:1rem;color:var(--neon)}
+.rodape-b .tot b s{display:block;text-align:right;font-size:.74rem;color:var(--text-faint);
+  text-decoration:line-through}
 .btn[disabled]{opacity:.4;cursor:not-allowed;box-shadow:none}
+/* ---------- gravador de voz (só canal QR; ver ck.pode_gravar_audio) ----------
+   O vendedor da Prime manda 1 em cada 3 mensagens por áudio, com 32s de média.
+   O botão fica ao lado do enviar, e enquanto grava ele TOMA a barra inteira —
+   é o único jeito de o cancelar ser alcançável com uma mão. */
+.composer .mic{flex:0 0 auto;width:40px;height:40px;border-radius:50%;border:0;
+  background:var(--surface);color:var(--neon);display:grid;place-items:center;
+  cursor:pointer;padding:0}
+.composer .mic:active{background:var(--bg-2)}
+.gravando{display:none;align-items:center;gap:.7rem;padding:.5rem .3rem}
+.gravando.on{display:flex}
+.composer.gravando-on input,.composer.gravando-on button[type=submit],
+.composer.gravando-on .mic{display:none}
+/* O microfone responde ao TOQUE, não ao getUserMedia: ele afunda na hora e a
+   barra já aparece em "preparando". Sem isso a tela fica parada de 0,3 a 2s (a
+   permissão e o hardware do celular demoram) e a pessoa acha que travou. */
+.composer .mic:active{transform:scale(.92)}
+.gravando .bolha{width:11px;height:11px;border-radius:50%;background:#E0654F;flex-shrink:0;
+  opacity:.3;transition:opacity .15s}
+.gravando.st-grav .bolha{animation:pisca 1.1s infinite;opacity:1}
+@keyframes pisca{0%,100%{opacity:1}50%{opacity:.25}}
+.gravando .rel{font-family:var(--mono);font-size:1rem;color:var(--text);min-width:44px;
+  display:none}
+.gravando.st-grav .rel,.gravando.st-env .rel{display:block}
+.gravando.st-env .rel{color:var(--text-dim)}
+/* medidor ao vivo: é ele que prova que o microfone está ouvindo. Um relógio
+   correndo sozinho não distingue "gravando" de "gravando mudo". */
+.gravando .nivel{display:none;flex:1;height:4px;border-radius:2px;background:var(--bg-2);
+  overflow:hidden}
+.gravando.st-grav .nivel{display:block}
+.gravando .nivel i{display:block;height:100%;width:2%;background:var(--neon);
+  border-radius:2px;transition:width .09s linear}
+.gravando .dica{flex:1;font-size:.82rem;color:var(--text-dim)}
+.gravando.st-grav .dica{display:none}
+.gravando .cancela{background:none;border:0;color:var(--text-dim);font-size:.85rem;
+  padding:.4rem .6rem;cursor:pointer;width:auto;flex-shrink:0}
+.gravando.st-env .cancela,.gravando.st-env .manda{display:none}
+.gravando .manda{flex:0 0 auto;width:40px;height:40px;border-radius:50%;border:0;
+  background:var(--neon);color:var(--ink);display:grid;place-items:center;
+  font-size:1.1rem;cursor:pointer;padding:0}
+.gravando .manda:active{transform:scale(.92)}
+.gravando.st-prep .manda{display:none}
+@media (prefers-reduced-motion:reduce){
+  .gravando.st-grav .bolha{animation:none}
+  .gravando .nivel i{transition:none}
+  .composer .mic:active,.gravando .manda:active{transform:none}
+}
+/* ---------- desconto (só nicho de serviço; ver ORC.desc) ----------
+   O controle mora DENTRO da linha já marcada, na mesma altura do .qtd que já está
+   ali — a linha não cresce duas vezes. A pílula %/R$ existe porque o vendedor
+   negocia dos dois jeitos ("dou 5%" / "tiro 240"), e obrigar a converter de cabeça
+   no meio da conversa com o cliente é onde o erro entra. */
+.dsc{display:inline-flex;align-items:center;gap:.4rem;margin-top:.42rem}
+.pil{display:inline-flex;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;
+  overflow:hidden;flex-shrink:0}
+.pil button{border:0;background:none;font-family:var(--mono);font-size:.74rem;
+  padding:.22rem .48rem;color:var(--text-faint);cursor:pointer;line-height:1.2}
+.pil button.on{background:var(--neon);color:var(--ink);font-weight:700}
+.cmp{font-family:var(--mono);font-size:.8rem;background:var(--bg-2);border:1px solid var(--line);
+  border-radius:8px;padding:.2rem .42rem;width:60px;min-width:0;color:var(--text)}
+.cmp:focus{outline:none;border-color:var(--neon)}
+.dsc .tag{font-family:var(--mono);font-size:.7rem;color:var(--neon);white-space:nowrap}
+.srv .pr s{display:block;color:var(--text-faint);font-size:.72rem;text-decoration:line-through}
+.rodape-b .dlin{display:flex;justify-content:space-between;align-items:center;gap:.7rem;
+  font-size:.82rem;color:var(--text-dim);padding:.1rem 0}
+.rodape-b .dlin b{font-family:var(--mono);font-weight:400;color:var(--text)}
+.rodape-b .dlin.desc span,.rodape-b .dlin.desc b{color:var(--neon)}
+.rodape-b .dlin .dsc{margin-top:0}
 /* tela de "pronto" que substitui o construtor depois de gerar */
 .pronto{padding:2rem 1.1rem;text-align:center}
 .pronto .big{font-size:2.4rem;margin-bottom:.6rem}
@@ -557,7 +682,7 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .flash.ok{background:rgba(37,211,102,.12);border:1px solid #1e4a3a;color:var(--neon)}
 .flash.err{background:#241313;border:1px solid #5a2b2b;color:var(--coral)}
 
-/* ---------- entrar (link mágico) ---------- */
+/* ---------- entrar (senha + link) ---------- */
 .login{flex:1;display:flex;flex-direction:column;justify-content:center;padding:2.4rem 1.6rem;
   gap:.4rem;text-align:center}
 .login .marca{font-family:var(--display);font-size:2rem;font-weight:800;letter-spacing:-.03em;
@@ -570,6 +695,21 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
   border-radius:12px;padding:.85rem;font-family:inherit;font-weight:700;font-size:.95rem;
   margin-top:.7rem;cursor:pointer;text-decoration:none}
 .login small{color:var(--text-faint);font-size:.76rem;margin-top:.9rem;line-height:1.5}
+/* segunda ação da tela: mesma forma do botão principal, sem o peso do verde cheio —
+   entrar por link é a saída, não o caminho de todo dia. */
+.login .go2{display:block;width:100%;background:transparent;color:var(--neon);
+  border:1px solid var(--neon-borda);border-radius:12px;padding:.8rem;font-family:inherit;
+  font-weight:600;font-size:.9rem;margin-top:.55rem;cursor:pointer;text-decoration:none}
+/* dois <form> empilhados não podem virar dois blocos separados por margem: a tela é
+   uma coluna só, e o gap do .login já dá o respiro. */
+.login form{margin:0;width:100%}
+.login .chk{display:flex;align-items:center;gap:.5rem;justify-content:center;
+  color:var(--text-dim);font-size:.85rem;margin-top:.7rem;cursor:pointer}
+.login .chk input{width:auto;accent-color:var(--neon);margin:0}
+.login .erro{background:#2A1613;border:1px solid #5A2A22;color:#E8705C;border-radius:10px;
+  padding:.6rem .75rem;font-size:.82rem;margin-bottom:.4rem}
+.login .nota{background:var(--neon-fundo);border:1px solid var(--neon-borda);color:var(--neon);
+  border-radius:10px;padding:.6rem .75rem;font-size:.82rem;margin-bottom:.4rem}
 
 .fonte{margin:.2rem 1.1rem 1rem;font-size:.7rem;color:var(--text-faint);line-height:1.45}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
@@ -919,7 +1059,10 @@ def _abas_dono(ativo: str) -> str:
     # Medido antes de trazer de volta, em 390px: o maior rótulo ("Propostas") ocupa
     # 48px numa faixa de 65, todos em uma linha, e a barra fica com os mesmos 54px
     # de altura de quando tinha cinco. Cabe — não precisou encurtar nada.
+    # Sete abas, medido de novo em 390px: ~55px por aba, e o maior rótulo
+    # ("Propostas", .58rem) ocupa ~46px. Continua numa linha só.
     return _abas([("visao", "visao", "Visão", _BASE),
+                  ("agenda", "agenda", "Agenda", f"{_BASE}/agenda"),
                   ("placar", "placar", "Placar", f"{_BASE}/equipe/placar"),
                   ("leads", "leads", "Leads", f"{_BASE}/equipe/leads"),
                   ("orcamentos", "orc", "Propostas", f"{_BASE}/orcamentos"),
@@ -1161,6 +1304,8 @@ def _fila(request: Request, conta_id: int, membro_id: int, *, gestor: bool = Fal
                   inicial=_ini(p["nome"]), direita=_selo(conta_id))
              + _flash(request)
              + f"<div class=scroll>{pushcard}{lista}{dica}{volta}</div>"
+             + (f"<a class=fab href='{_BASE}/lead/novo' aria-label='Novo lead'>+</a>"
+                if not gestor else "")
              + "<div class=toast id=toast></div>"
              + _abas_vend("fila", total_pend)
              + f'<script>window.CKBASE="{_BASE}";</script>' + vapid_js + _FILA_JS
@@ -1207,15 +1352,30 @@ def _sinal_js(sig: str) -> str:
 
 
 @router.get("/cockpit/agenda", response_class=HTMLResponse)
-def cockpit_agenda(request: Request):
-    """A agenda do vendedor. Na versão anterior ele marcava a visita e ela sumia — não existia
-    tela nenhuma que devolva 'o que eu tenho pra hoje'."""
+def cockpit_agenda(request: Request, t: str = ""):
+    """A agenda da CONTA, pros três papéis. Era só a do vendedor (as visitas que ELE
+    marcou), dono e gestor não tinham aba nenhuma, e a data SEGURADA não aparecia
+    pra ninguém no app — a informação que evita prometer a mesma data duas vezes.
+
+    `t` é o seletor Meus × Todos. O padrão diz quem é: o vendedor abre em MEUS —
+    a agenda dele é a rota do dia, e abrir com o time inteiro empurraria a próxima
+    visita pra baixo da dobra; dono e gestor abrem em TODOS, que é o trabalho deles.
+    O dono titular não tem membro_id, então pra ele o seletor nem aparece."""
     sess = _sessao(request)
-    if not sess:
+    g = _gerencia(request)
+    if not sess and not g:
         return RedirectResponse("/cockpit/login", status_code=303)
-    conta_id, membro_id = sess
-    visitas = ck.visitas_do_vendedor(get_pool(), conta_id, membro_id)
-    hoje = [v for v in visitas if v["hoje"]]
+    conta_id, membro_id = sess if sess else g
+    gestao = bool(g)
+    so_meus = (t == "meus") if t in ("meus", "todos") else (not gestao)
+    if not membro_id:
+        so_meus = False       # dono titular: "meus" não aponta pra ninguém
+    eventos = ck.agenda_da_conta(get_pool(), conta_id, membro_id, so_meus=so_meus)
+    hoje = [v for v in eventos if v["hoje"]]
+
+    _TAG = {"visita": ("visita", "var(--azul)", "var(--azul-borda)", "#0d1b23"),
+            "segurada": ("segurada", "var(--ambar)", "#5a4520", "#241c0f"),
+            "compromisso": ("compromisso", "var(--neon)", "#1e4a3a", "#10241a")}
 
     def bloco(v):
         acoes = []
@@ -1227,27 +1387,98 @@ def cockpit_agenda(request: Request):
             acoes.append(f"<a href='{esc(v['zap'])}' target=_blank rel=noopener>{_ic('zap', 'ic p')} Avisar</a>")
         if v["ics_url"]:
             acoes.append(f"<a href='{esc(v['ics_url'])}'>{_ic('agenda', 'ic p')} Calendário</a>")
+        rot, cor, borda, fundo = _TAG[v["tipo_ev"]]
+        tag = (f"<span style='font-size:.62rem;font-weight:700;padding:.08rem .42rem;"
+               f"border-radius:10px;border:1px solid {borda};background:{fundo};color:{cor}'>{rot}</span>")
+        # quem marcou: 'você' quando é o próprio; vazio quando foi o dono titular
+        # (que não tem membro) — aí a linha simplesmente não aparece.
+        quem = "você" if v["minha"] else v["autor"]
+        prazo = (f" <span style='color:var(--ambar)'>· sinal vence em {esc(v['prazo'])}</span>"
+                 if v["prazo"] and v["prazo"] != "vencido"
+                 else " <span style='color:var(--coral)'>· prazo vencido</span>" if v["prazo"] else "")
         return (f"<div class='vis{' hoje' if v['hoje'] else ''}'>"
                 f"<div class=quando><div class=h>{esc(v['hora'])}</div><div class=d>{esc(v['dia'])}</div></div>"
                 f"<div class=mid><b>{esc(v['titulo'])}</b>"
                 + (f"<div class=loc>{esc(v['local'])}</div>" if v["local"] else "")
+                + f"<div class=loc>{tag}{prazo}" + (f" · {esc(quem)}" if quem else "") + "</div>"
                 + (f"<div class=acoes>{''.join(acoes)}</div>" if acoes else "")
                 + "</div></div>")
 
-    if visitas:
+    if eventos:
         miolo = ("<div class=eyebrow>Hoje</div>"
                  + ("".join(bloco(v) for v in hoje) if hoje
                     else "<div class=fonte>Nada marcado pra hoje.</div>"))
-        depois = [v for v in visitas if not v["hoje"]]
+        depois = [v for v in eventos if not v["hoje"]]
         if depois:
             miolo += "<div class=eyebrow>Próximos dias</div>" + "".join(bloco(v) for v in depois)
     else:
-        miolo = ("<div class=vazio><div class=big>◷</div><b>Nenhuma visita marcada</b>"
-                 "Abra um lead e toque em <b>Agendar visita</b> — ela aparece aqui.</div>")
+        miolo = ("<div class=vazio><div class=big>◷</div><b>Nada na agenda</b>"
+                 "Marque uma visita pelo lead, ou toque no + pra criar um compromisso.</div>")
 
-    corpo = (_hdr("Minha agenda", f"{len(hoje)} hoje · {len(visitas)} nos próximos 14 dias")
-             + f"<div class=scroll>{miolo}</div>" + _abas_vend("agenda", _pend_vend(conta_id, membro_id)))
-    return _page("Minha agenda", corpo)
+    # o seletor só existe pra quem TEM agenda própria (membro_id) — pro dono
+    # titular "meus" seria um filtro que devolve sempre vazio.
+    seletor = ""
+    if membro_id:
+        seletor = (
+            "<div class=bloco style='margin-top:.9rem'><div class=seg-ag>"
+            + (f"<a href='{_BASE}/agenda?t=meus'" + (" class=on" if so_meus else "") + ">Meus</a>")
+            + (f"<a href='{_BASE}/agenda?t=todos'" + ("" if so_meus else " class=on") + ">Todos</a>")
+            + "</div></div>")
+
+    abas = _abas_dono("agenda") if gestao else _abas_vend("agenda", _pend_vend(conta_id, membro_id))
+    corpo = (_hdr("Agenda", f"{len(hoje)} hoje · {len(eventos)} nos próximos 14 dias")
+             + _flash(request)
+             + f"<div class=scroll>{seletor}{miolo}</div>"
+             + f"<a class=fab href='{_BASE}/agenda/novo' aria-label='Novo compromisso'>+</a>"
+             + abas)
+    return _page("Agenda", corpo)
+
+
+@router.get("/cockpit/agenda/novo", response_class=HTMLResponse)
+def cockpit_agenda_novo_tela(request: Request):
+    """Compromisso avulso direto do celular. Antes o app só criava evento por DENTRO
+    de um lead (a visita) — reunião, entrega ou qualquer coisa fora de lead não tinha
+    onde entrar sem abrir o desktop."""
+    if not (_sessao(request) or _gerencia(request)):
+        return RedirectResponse("/cockpit/login", status_code=303)
+    corpo = (_hdr("Novo compromisso", "entra na agenda de todos", voltar=f"{_BASE}/agenda")
+             + _flash(request)
+             + f"<form class=telaform method=post action='{_BASE}/agenda/novo'>"
+             + "<div class=scroll><div class=secao><div class='fic'>"
+             + "<label class=fic-c><span>O que é</span>"
+               "<input name=titulo required autocomplete=off autofocus"
+               " placeholder='Ex: Reunião — Salão Prime'></label>"
+             + "<label class='fic-c meia'><span>Data</span>"
+               "<input name=data type=date required></label>"
+             + "<label class='fic-c meia'><span>Hora</span>"
+               "<input name=hora type=time required></label>"
+             + "<label class=fic-c><span>Local (opcional)</span>"
+               "<input name=local autocomplete=off placeholder='Endereço ou link'></label>"
+             + "</div><div class=fonte>Aparece pra equipe inteira, com o seu nome. Visita "
+               "de lead continua sendo marcada pelo próprio lead — ali ela já sai ligada "
+               "na ficha.</div></div></div>"
+             + "<div class=rodape-b><button class=btn type=submit>Marcar</button></div>"
+             + "</form>")
+    return _page("Novo compromisso", corpo)
+
+
+@router.post("/cockpit/agenda/novo")
+def cockpit_agenda_novo(request: Request, titulo: str = Form(""), data: str = Form(""),
+                        hora: str = Form(""), local: str = Form("")):
+    sess = _sessao(request)
+    g = _gerencia(request)
+    if not sess and not g:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess if sess else g
+    from finance import agenda as ag
+    inicio = ag.parse_datahora(f"{(data or '').strip()} {(hora or '').strip()}".strip())
+    if not (titulo or "").strip() or not inicio:
+        request.session["ck_err"] = "Preencha o que é, a data e a hora."
+        return RedirectResponse(f"{_BASE}/agenda/novo", status_code=303)
+    ag.criar_evento(get_pool(), conta_id, (titulo or "").strip()[:200], inicio,
+                    membro_id=membro_id, local=(local or "").strip() or None)
+    request.session["ck_ok"] = "Compromisso marcado ✓"
+    return RedirectResponse(f"{_BASE}/agenda", status_code=303)
 
 
 @router.get("/cockpit/resultado", response_class=HTMLResponse)
@@ -1317,8 +1548,12 @@ def cockpit_resultado(request: Request):
 _ORC_JS = r"""
 <script>
 (function(){
-  var O=window.ORC||{cat:[],leadId:0,base:""};
-  var sel={}, avulsos=[];
+  var O=window.ORC||{cat:[],leadId:0,base:"",desc:false};
+  // sel[i] = {q, desc_tipo, desc_val} — quantidade E desconto no MESMO lugar. Mapa
+  // paralelo casado por índice seria a armadilha que a 162 tirou dos títulos.
+  // Os NOMES são os mesmos que o avulso usa e os mesmos que vão no payload: um
+  // campo com dois nomes pelo caminho é onde o desconto se perde na tradução.
+  var sel={}, avulsos=[], dFim={t:"pct",v:0};
   function $(id){return document.getElementById(id);}
   function brl(v){return "R$ "+Number(v||0).toLocaleString("pt-BR");}
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(m){
@@ -1328,49 +1563,177 @@ _ORC_JS = r"""
   function preco(s){var a=[];if(s.setup)a.push(brl(s.setup));if(s.mensal)a.push(brl(s.mensal)+"/mês");
     return a.join(" + ")||"grátis";}
 
+  // ---- a conta, espelhando finance/desconto.py LINHA A LINHA ----
+  // Em CENTAVOS, como o Python — arredondar em reais e em centavos dá números
+  // diferentes, e a divergência é invisível na tela. O servidor refaz tudo e é
+  // ele quem vale; isto aqui é pra o vendedor ver o mesmo número que vai gravar.
+  var MESES=12;
+  // Python arredonda metade pro PAR (round-half-even) e o JS arredonda pra cima.
+  // Sem isto, um desconto que caia exatamente no meio separa as duas contas.
+  function arr(x){
+    var f=Math.floor(x), d=x-f;
+    if(d>0.5)return f+1;
+    if(d<0.5)return f;
+    return (f%2===0)?f:f+1;
+  }
+  function contribuicao(it){return (it.setup||0)*100+(it.mensal||0)*100*MESES;}
+  function pctLinha(it){
+    var base=contribuicao(it);
+    if(base<=0)return 0;
+    var v=Math.max(0,it.desc_val||0);
+    if(v<=0)return 0;
+    if((it.desc_tipo||"pct")==="pct")return Math.min(100,v);
+    return Math.min(100,100*(v*100)/base);        // reais viram o % da linha
+  }
+  function quantoDesconta(base,tipo,pct,valor){
+    base=Math.max(0,base);
+    if(base<=0)return 0;
+    var d=(tipo==="valor")?Math.max(0,valor):arr(base*Math.min(100,Math.max(0,pct))/100);
+    return Math.max(0,Math.min(base,d));
+  }
+  function conta(){
+    var its=itens(), bs=0,bm=0,ls=0,lm=0;
+    its.forEach(function(it){
+      var s=Math.max(0,it.setup||0)*100, m=Math.max(0,it.mensal||0)*100, p=pctLinha(it);
+      bs+=s; bm+=m;
+      ls+=arr(s*(100-p)/100); lm+=arr(m*(100-p)/100);
+    });
+    var subtotal=ls+lm*MESES;
+    var bruto=bs+bm*MESES;
+    var df=O.desc?quantoDesconta(subtotal,dFim.t,dFim.v,dFim.v*100):0;
+    return {n:its.length, bruto:bruto, subtotal:subtotal,
+            descItens:bruto-subtotal, descFim:df, total:subtotal-df,
+            setup:ls, mensal:lm};
+  }
+
+  function ctrl(k,it){
+    if(!O.desc)return "";
+    var p=(it.desc_tipo||"pct")==="pct";
+    var tag="";
+    var pc=pctLinha(it);
+    if(pc>0){var d=arr(contribuicao(it)*pc/100);tag='<span class=tag>− '+brl(Math.round(d/100))+'</span>';}
+    return '<div class=dsc data-k="'+k+'"><span class=pil>'
+      +'<button type=button data-dt="pct" class="'+(p?"on":"")+'">%</button>'
+      +'<button type=button data-dt="valor" class="'+(p?"":"on")+'">R$</button></span>'
+      +'<input class=cmp data-di="'+k+'" inputmode=numeric autocomplete=off'
+      +' aria-label="Desconto do item" value="'+(it.desc_val||"")+'"></div>';
+  }
+  function precoCel(it){
+    var p=pctLinha(it);
+    if(p<=0)return preco(it);
+    var liq={setup:Math.round(arr((it.setup||0)*100*(100-p)/100)/100),
+             mensal:Math.round(arr((it.mensal||0)*100*(100-p)/100)/100)};
+    return preco(liq)+'<s>'+preco(it)+'</s>';
+  }
+
   function pintaCatalogo(){
     var box=$("cat");if(!box)return;box.innerHTML="";
     if(!O.cat.length){box.innerHTML='<div class=vazio-cat>Nenhum serviço no catálogo ainda. '
       +'Dá pra montar com itens avulsos aqui embaixo, ou pedir pro gestor cadastrar o catálogo no painel.</div>';return;}
     O.cat.forEach(function(s,i){
-      var on=sel[i]!==undefined;
+      var e=sel[i], on=e!==undefined;
       var q=on?'<div class=qtd><button data-q="-" data-i="'+i+'" aria-label="menos">−</button>'
-        +'<span>'+sel[i]+'</span><button data-q="+" data-i="'+i+'" aria-label="mais">+</button></div>':'';
+        +'<span>'+e.q+'</span><button data-q="+" data-i="'+i+'" aria-label="mais">+</button></div>':'';
+      var it=on?linhaDe(i):s;
       var d=document.createElement("div");d.className="srv"+(on?" on":"");d.setAttribute("data-i",i);
       d.innerHTML='<div class=ck>'+(on?'✓':'')+'</div><div class=m><b>'+esc(s.nome)+'</b>'
-        +(s.desc?'<small>'+esc(s.desc)+'</small>':'')+q+'</div><div class=pr>'+preco(s)+'</div>';
+        +(s.desc?'<small>'+esc(s.desc)+'</small>':'')+q+(on?ctrl("c"+i,it):"")
+        +'</div><div class=pr>'+(on?precoCel(it):preco(s))+'</div>';
       box.appendChild(d);
     });
   }
+  // "c3" = 3ª linha do catálogo, "a1" = 2º avulso. Uma porta só: o controle é o
+  // mesmo nos dois, e dois caminhos separados divergiriam no primeiro ajuste.
+  function alvo(k){return k.charAt(0)==="c"?sel[k.slice(1)]:avulsos[k.slice(1)];}
+  function itemDe(k){return k.charAt(0)==="c"?linhaDe(k.slice(1)):avulsos[k.slice(1)];}
+  function linhaDe(i){
+    var s=O.cat[i], e=sel[i];
+    return {nome:s.nome+(e.q>1?" (× "+e.q+")":""), setup:(s.setup||0)*e.q,
+            mensal:(s.mensal||0)*e.q, desc_tipo:e.desc_tipo, desc_val:e.desc_val};
+  }
   function itens(){
     var out=[];
-    Object.keys(sel).forEach(function(i){var s=O.cat[i],q=sel[i];
-      out.push({nome:s.nome+(q>1?" (× "+q+")":""),setup:(s.setup||0)*q,mensal:(s.mensal||0)*q});});
+    Object.keys(sel).forEach(function(i){out.push(linhaDe(i));});
     avulsos.forEach(function(c){out.push(c);});
     return out;
   }
   function soma(){
-    var its=itens(),setup=0,mensal=0;
-    its.forEach(function(x){setup+=x.setup;mensal+=x.mensal;});
-    var t=[];if(setup)t.push(brl(setup));if(mensal)t.push(brl(mensal)+"/mês");
-    $("total").innerHTML=its.length?(t.join(" + ")||"grátis"):"—";
-    $("gerar").disabled=its.length===0;
+    var t=conta();
+    $("gerar").disabled=t.n===0;
+    if(!t.n){$("total").innerHTML="—";
+      ["dfim","lsub","ldesc"].forEach(function(x){$(x).style.display="none";});return;}
+    var temD=(t.descItens+t.descFim)>0;
+    $("dfim").style.display=O.desc?"flex":"none";
+    $("lsub").style.display=temD?"flex":"none";
+    $("ldesc").style.display=t.descFim>0?"flex":"none";
+    $("sub").textContent=brl(Math.round(t.subtotal/100));
+    $("ldescr").textContent="Desconto no total"+(dFim.t==="pct"&&dFim.v>0?" ("+dFim.v+"%)":"");
+    $("descv").textContent="− "+brl(Math.round(t.descFim/100));
+    $("total").innerHTML=brl(Math.round(t.total/100))
+      +(temD?'<s>'+brl(Math.round(t.bruto/100))+'</s>':"");
   }
+
   document.addEventListener("click",function(e){
+    // a pílula %/R$ e o campo vivem DENTRO da linha: sem parar o clique aqui,
+    // mexer no desconto desmarcaria o serviço.
+    var dt=e.target.closest("[data-dt]");
+    if(dt){e.stopPropagation();
+      var k=dt.closest(".dsc").getAttribute("data-k");
+      if(k){alvo(k).desc_tipo=dt.getAttribute("data-dt");
+        pintaCatalogo();pintaAvulsos();soma();}
+      return;}
+    if(e.target.closest(".cmp")){e.stopPropagation();return;}
     var qb=e.target.closest("[data-q]");
     if(qb){e.stopPropagation();var i=qb.getAttribute("data-i");
-      sel[i]=Math.max(1,(sel[i]||1)+(qb.getAttribute("data-q")==="+"?1:-1));pintaCatalogo();soma();return;}
+      sel[i].q=Math.max(1,sel[i].q+(qb.getAttribute("data-q")==="+"?1:-1));pintaCatalogo();soma();return;}
     var row=e.target.closest(".srv");
     if(row){var j=row.getAttribute("data-i");
-      if(sel[j]!==undefined)delete sel[j];else sel[j]=1;pintaCatalogo();soma();}
+      if(sel[j]!==undefined)delete sel[j];else sel[j]={q:1,desc_tipo:"pct",desc_val:0};
+      pintaCatalogo();soma();}
   });
+  // o rodapé é só o desconto do total — pílula própria, mesmo desenho
+  document.addEventListener("click",function(e){
+    var b=e.target.closest("[data-dfim]");if(!b)return;
+    dFim.t=b.getAttribute("data-dfim");
+    Array.prototype.forEach.call(b.parentNode.children,function(x){
+      x.classList.toggle("on",x===b);});
+    soma();
+  });
+  // NÃO repinta o catálogo no input: repintar tira o foco do campo a cada tecla.
+  // Só o preço da linha e o rodapé mudam.
+  document.addEventListener("input",function(e){
+    var f=e.target.closest("[data-di]");
+    if(f){
+      var k=f.getAttribute("data-di"), v=parseInt((f.value||"").replace(/\D/g,''),10);
+      alvo(k).desc_val=Math.max(0,isNaN(v)?0:v);
+      var it=itemDe(k), i=k.slice(1);
+      var row=(k.charAt(0)==="c")
+        ? $("cat").querySelector('.srv[data-i="'+i+'"]')
+        : $("avulsos").querySelector('.avl[data-a="'+i+'"]');
+      if(row)row.querySelector(k.charAt(0)==="c"?".pr":".vl").innerHTML=precoCel(it);
+      var tg=f.closest(".dsc").querySelector(".tag");
+      var pc=pctLinha(it);
+      var txt=pc>0?("− "+brl(Math.round(arr(contribuicao(it)*pc/100)/100))):"";
+      if(!tg&&txt){tg=document.createElement("span");tg.className="tag";
+        f.closest(".dsc").appendChild(tg);}
+      if(tg)tg.textContent=txt;
+      soma();return;
+    }
+    if(e.target.id==="dfimv"){
+      var w=parseInt((e.target.value||"").replace(/\D/g,''),10);
+      dFim.v=Math.max(0,isNaN(w)?0:w);soma();
+    }
+  });
+
   // O item avulso precisa APARECER. No app anterior ele entrava só na conta do
   // total: quem digitava errado não via o erro e não tinha como desfazer.
   function pintaAvulsos(){
     var box=$("avulsos");if(!box)return;
     box.innerHTML=avulsos.map(function(a,i){
-      return '<div class=avl><b>'+esc(a.nome)+'</b><span>'+brl(a.setup)+'</span>'
-        +'<button type=button data-x="'+i+'" aria-label="Remover '+esc(a.nome)+'">×</button></div>';
+      return '<div class=avl data-a="'+i+'"><b>'+esc(a.nome)+'</b>'
+        +'<span class=vl>'+precoCel(a)+'</span>'
+        +'<button type=button data-x="'+i+'" aria-label="Remover '+esc(a.nome)+'">×</button>'
+        +ctrl("a"+i,a)+'</div>';
     }).join("");
   }
   document.addEventListener("click",function(e){
@@ -1383,14 +1746,20 @@ _ORC_JS = r"""
     var n=$("addnome").value.trim();
     var v=parseInt(($("addval").value||"").replace(/\D/g,''),10);
     if(!n||!v){toast("Preencha o nome e o valor");return;}
-    avulsos.push({nome:n,setup:v,mensal:0});
+    // o avulso leva desconto igual ao item de catálogo: o vendedor põe o preço
+    // cheio ("Visita técnica R$ 400") e negocia por cima, e aí o cliente vê o
+    // riscado na folha em vez de um valor que apareceu já abatido do nada.
+    avulsos.push({nome:n,setup:v,mensal:0,desc_tipo:"pct",desc_val:0});
     $("addnome").value="";$("addval").value="";pintaAvulsos();soma();toast("Item adicionado");
   };
   var g=$("gerar");
   if(g)g.onclick=function(){
     g.disabled=true;g.textContent="Gerando…";
+    // manda o BRUTO e o que foi digitado: o servidor refaz a conta do desconto.
+    // Mandar o já descontado faria ele descontar de novo.
     fetch(O.base+"/lead/"+O.leadId+"/orcamento",{method:"POST",
-      headers:{"Content-Type":"application/json"},body:JSON.stringify({itens:itens()})})
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({itens:itens(),desconto:{tipo:dFim.t,pct:dFim.v,valor:dFim.v}})})
       .then(function(r){return r.json();}).then(function(j){
         if(!j||!j.ok){toast((j&&j.erro)||"Não deu certo");g.disabled=false;
           g.textContent="Gerar proposta e link";return;}
@@ -1421,6 +1790,9 @@ _ORC_JS = r"""
         .catch(function(){toast("Falha de conexão");b.disabled=false;
           b.textContent="Enviar na conversa do lead";});};
   }
+  // exposto pro teste de paridade rodar a MESMA conta que a tela roda
+  window.__orc={conta:conta,itens:itens,sel:sel,avulsos:avulsos,dFim:dFim,
+                set:function(s,a,d){sel=s;avulsos=a;dFim=d;}};
   pintaCatalogo();soma();
 })();
 </script>"""
@@ -1442,8 +1814,12 @@ def cockpit_orcamento_montar(request: Request, lead_id: int):
         return RedirectResponse(_BASE, status_code=303)
     import json as _json
     cat = ck.catalogo_servicos(pool, conta_id)
+    # O DESCONTO É DO NICHO DE SERVIÇOS. Esconder da tela é metade do portão — a
+    # outra metade está no `criar_orcamento`, que descarta os campos de quem não
+    # vende serviço. O form vem do navegador, e navegador não é fonte confiável.
     # `</` escapado: o catálogo é texto do usuário e fecharia o <script> antes da hora
-    dados = _json.dumps({"cat": cat, "leadId": lead_id, "base": _BASE},
+    dados = _json.dumps({"cat": cat, "leadId": lead_id, "base": _BASE,
+                         "desc": ck.vende_servico(pool, conta_id)},
                         ensure_ascii=False).replace("</", "<\\/")
     corpo = (_hdr("Orçamento", d["empresa"], voltar=f"{_BASE}/lead/{lead_id}")
              + "<div class=toast id=toast></div>"
@@ -1455,7 +1831,17 @@ def cockpit_orcamento_montar(request: Request, lead_id: int):
                "<button type=button id=addbtn aria-label='Adicionar item'>+</button></div>"
              + "<div id=avulsos></div>"
              + "</div>"
-             + "<div class=rodape-b id=rodape><div class=tot><span>Total</span><b id=total>—</b></div>"
+             + "<div class=rodape-b id=rodape>"
+               "<div class=dlin id=dfim style='display:none'><span>Desconto no total</span>"
+               "<span class=dsc><span class=pil>"
+               "<button type=button data-dfim=pct class=on>%</button>"
+               "<button type=button data-dfim=valor>R$</button></span>"
+               "<input class=cmp id=dfimv inputmode=numeric autocomplete=off aria-label='Desconto no total'>"
+               "</span></div>"
+               "<div class=dlin id=lsub style='display:none'><span>Itens</span><b id=sub></b></div>"
+               "<div class='dlin desc' id=ldesc style='display:none'><span id=ldescr>Desconto</span>"
+               "<b id=descv></b></div>"
+               "<div class=tot><span>Total</span><b id=total>—</b></div>"
                "<button class=btn id=gerar type=button disabled>Gerar proposta e link</button></div>"
              + "<div id=pronto style='display:none'></div>"
              + f"<script>window.ORC={dados};</script>" + _ORC_JS)
@@ -1467,7 +1853,9 @@ async def cockpit_orcamento_criar(request: Request, lead_id: int, payload: dict 
     sess = _sessao(request)
     if not sess:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
-    r = ck.criar_orcamento(get_pool(), sess[0], sess[1], lead_id, (payload or {}).get("itens"))
+    p = payload or {}
+    r = ck.criar_orcamento(get_pool(), sess[0], sess[1], lead_id,
+                           p.get("itens"), p.get("desconto"))
     return JSONResponse(r)
 
 
@@ -1640,6 +2028,37 @@ async def cockpit_visita_criar(request: Request, lead_id: int, payload: dict = B
     return JSONResponse(r)
 
 
+def _iso(d) -> str:
+    """date -> 'AAAA-MM-DD' pro <input type=date>, que só aceita esse formato."""
+    return d.isoformat() if hasattr(d, "isoformat") else (d or "")
+
+
+# Autopreenchimento pelo CEP. A rota /api/cep/{cep} JÁ EXISTE (web/portal.py) e usa a
+# BrasilAPI por dentro (finance/cep.py) — não há rota nova aqui. Ela passa livre pelo
+# gate de web/app.py, que só guarda /painel* e /membros*.
+#
+# Duas decisões copiadas do admCep (web/admin.py), porque o erro oposto é caro:
+#   * só preenche campo VAZIO — quem já digitou o endereço não pode vê-lo sumir
+#     porque o CEP amplo do bairro devolveu outra rua;
+#   * .catch silencioso — a BrasilAPI fora do ar não pode travar o preenchimento da
+#     ficha. O consultar() já devolve None em qualquer falha e a rota responde
+#     {"ok": false}; aqui o que resta é não estourar no console e seguir na mão.
+_CEP_JS = """<script>(function(){
+  var cep=document.getElementById('fic-cep'); if(!cep) return;
+  function po(id,v){var e=document.getElementById(id); if(e&&!e.value.trim()&&v) e.value=v;}
+  cep.addEventListener('input',function(){
+    var d=(cep.value||'').replace(/[^0-9]/g,'');
+    if(d.length!==8) return;
+    fetch('/api/cep/'+d).then(function(r){return r.json();}).then(function(j){
+      if(!j||!j.ok) return;
+      po('fic-endereco',j.rua); po('fic-bairro',j.bairro);
+      po('fic-cidade',j.cidade); po('fic-uf',j.uf);
+      var n=document.getElementById('fic-numero'); if(n&&!n.value.trim()) n.focus();
+    }).catch(function(){});
+  });
+})();</script>"""
+
+
 # ------------------------------------------------------------------ ficha do cliente
 @router.get("/cockpit/lead/{lead_id}/ficha", response_class=HTMLResponse)
 def cockpit_ficha_tela(request: Request, lead_id: int):
@@ -1658,9 +2077,11 @@ def cockpit_ficha_tela(request: Request, lead_id: int):
         return RedirectResponse(_BASE, status_code=303)
 
     def campo(nome, rot, valor, *, tipo="text", modo="", meia=False):
+        # id=fic-<nome> porque o autopreenchimento do CEP precisa achar rua, bairro,
+        # cidade e UF pra completar; sem id o JS teria que caçar por name= no form.
         extra = f" inputmode={modo}" if modo else ""
         return (f"<label class='fic-c{' meia' if meia else ''}'><span>{esc(rot)}</span>"
-                f"<input name={nome} type={tipo}{extra} value='{esc(valor or '')}'"
+                f"<input id=fic-{nome} name={nome} type={tipo}{extra} value='{esc(valor or '')}'"
                 f" autocomplete=off></label>")
 
     # Rótulo único: quem digita não escolhe a coluna — o tamanho do documento decide
@@ -1671,9 +2092,25 @@ def cockpit_ficha_tela(request: Request, lead_id: int):
         + campo("contato", "Quem fala com você", d.get("contato"))
         + campo("cargo", "Cargo", d.get("cargo"), meia=True)
         + campo("segmento", "Segmento", d.get("segmento"), meia=True)
+        # WhatsApp e Telefone são COLUNAS DIFERENTES do lead, e a ficha mostrava só a
+        # segunda. Quem entra por `whatsapp_inbound` nasce com o número em `whatsapp` e
+        # `telefone` NULL (painel_prospeccao, insert do lead novo) — ou seja, justamente
+        # no lead que veio conversando o campo aparecia EM BRANCO, com o número logo ali.
+        # Os dois juntos porque são coisas diferentes na prática: o zap é por onde a
+        # conversa corre, o fixo/comercial é o que o vendedor descobre depois.
+        + campo("whatsapp", "WhatsApp", d.get("whatsapp"), tipo="tel", modo="tel", meia=True)
         + campo("telefone", "Telefone", d.get("telefone"), tipo="tel", modo="tel", meia=True)
         + campo("documento", "CPF ou CNPJ", d.get("doc_fmt"), modo="numeric", meia=True)
         + campo("email", "E-mail", d.get("email"), tipo="email", modo="email")
+        # O CEP vem ANTES do endereço de propósito: digitou os 8 dígitos, rua/bairro/
+        # cidade/UF se preenchem sozinhos (ver _CEP_JS) e sobra o número pra digitar.
+        + campo("cep", "CEP", d.get("cep"), modo="numeric", meia=True)
+        + campo("numero", "Número", d.get("numero"), meia=True)
+        + campo("endereco", "Endereço", d.get("endereco"))
+        + campo("bairro", "Bairro", d.get("bairro"), meia=True)
+        # <input type=date> abre o seletor nativo do celular — datilografar
+        # dd/mm/aaaa numa mão, na rua, ninguém faz.
+        + campo("nascimento", "Aniversário", _iso(d.get("nascimento")), tipo="date", meia=True)
         + campo("cidade", "Cidade", d.get("cidade"), meia=True)
         + campo("uf", "UF", d.get("uf"), meia=True)
         + "<label class=fic-c><span>Observação</span>"
@@ -1688,8 +2125,58 @@ def cockpit_ficha_tela(request: Request, lead_id: int):
              + "<div class=fonte>Campo em branco não apaga o que já está salvo — dá pra "
                "voltar aqui e ir completando conforme a conversa anda.</div></div></div>"
              + "<div class=rodape-b><button class=btn type=submit>Salvar ficha</button></div>"
-             + "</form>")
+             + "</form>" + _CEP_JS)
     return _page(f"Ficha — {d['empresa']}", corpo)
+
+
+# ------------------------------------------------------------------ lead novo (manual)
+@router.get("/cockpit/lead/novo", response_class=HTMLResponse)
+def cockpit_lead_novo_tela(request: Request):
+    """Cadastrar um lead na mão, do celular.
+
+    Faltava: o app tinha vinte e tantas rotas e nenhuma criava lead — o vendedor só
+    trabalhava o que o rodízio entregava, e o contato pego na rua não tinha onde entrar.
+
+    Dois campos e pronto. O resto (documento, CEP, endereço, aniversário) ele completa
+    depois na ficha, que já tem tudo: formulário longo no celular, em pé na calçada, é
+    o jeito mais certo de o lead não ser cadastrado."""
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    corpo = (_hdr("Novo lead", "entra na sua fila", voltar=_BASE)
+             + _flash(request)
+             + f"<form class=telaform method=post action='{_BASE}/lead/novo'>"
+             + "<div class=scroll><div class=secao><div class='fic'>"
+             + "<label class=fic-c><span>Nome do contato</span>"
+               "<input name=nome required autocomplete=off autofocus"
+               " placeholder='Como você vai reconhecer'></label>"
+             + "<label class=fic-c><span>WhatsApp</span>"
+               "<input name=whatsapp required type=tel inputmode=tel autocomplete=off"
+               " placeholder='DDD + número'></label>"
+             + "</div><div class=fonte>Já tem esse número na base? A gente abre o lead "
+               "que existe em vez de criar outro — conversa partida em duas fichas é pior "
+               "que lead repetido.</div></div></div>"
+             + "<div class=rodape-b><button class=btn type=submit>Criar e abrir</button></div>"
+             + "</form>")
+    return _page("Novo lead", corpo)
+
+
+@router.post("/cockpit/lead/novo")
+def cockpit_lead_novo(request: Request, nome: str = Form(""), whatsapp: str = Form("")):
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse("/cockpit/login", status_code=303)
+    conta_id, membro_id = sess
+    r = ck.criar_lead(get_pool(), conta_id, membro_id, nome, whatsapp)
+    if not r.get("ok"):
+        request.session["ck_err"] = _erro(r)
+        return RedirectResponse(f"{_BASE}/lead/novo", status_code=303)
+    # `existia` não é erro — é o caso normal de quem não sabe de cor quem já está na
+    # base. Diz o que aconteceu e abre o lead certo, em vez de deixar a pessoa achando
+    # que criou um novo.
+    request.session["ck_ok"] = ("Esse número já era um lead — abrindo ele."
+                                if r.get("existia") else "Lead criado ✓")
+    return RedirectResponse(f"{_BASE}/lead/{r['lead_id']}", status_code=303)
 
 
 # ------------------------------------------------------------------ propostas
@@ -2029,6 +2516,169 @@ def _perfil_dono(conta_id: int, membro_id: int | None) -> HTMLResponse:
 
 
 # ------------------------------------------------------------------ lead
+_VOZ_JS = r"""
+<script>
+(function(){
+  var BASE="__BASE__", LEAD=__LEAD__, TETO=90;
+  function $(id){return document.getElementById(id);}
+  var comp=$("comp"), grav=$("grav"), rel=$("rel"), dica=$("dica"), nivel=$("nivel");
+  var mr=null, pedacos=[], t0=0, tick=null, cancelado=false, enviando=false;
+  var fluxo=null, ctx=null, an=null, medir=null, niveis=[], tipoAtual="";
+
+  // ---- estado da barra. TUDO que o dedo toca muda a tela ANTES do trabalho ----
+  // O que fazia parecer travado: a barra só aparecia depois do getUserMedia (0,3
+  // a 2s no celular) e o "enviando" só depois do mr.stop() resolver. Agora o
+  // estado troca no próprio toque, e o assíncrono corre por baixo.
+  function estado(e, texto){
+    grav.classList.remove("st-prep","st-grav","st-env");
+    grav.classList.add("st-" + e);
+    if(texto) dica.textContent = texto;
+  }
+  function abrir(){ comp.classList.add("gravando-on"); grav.classList.add("on"); }
+  function sair(){
+    clearInterval(tick); tick=null;
+    cancelAnimationFrame(medir); medir=null;
+    comp.classList.remove("gravando-on"); grav.classList.remove("on");
+    if(fluxo){ fluxo.getTracks().forEach(function(t){t.stop();}); fluxo=null; }
+    if(ctx){ try{ ctx.close(); }catch(e){} ctx=null; an=null; }
+    mr=null; pedacos=[]; niveis=[]; enviando=false;
+    $("manda").disabled=false; $("cancela").disabled=false;
+  }
+  function mmss(s){return Math.floor(s/60)+":"+("0"+Math.floor(s%60)).slice(-2);}
+
+  function tipoBom(){
+    var opcoes=["audio/webm;codecs=opus","audio/webm","audio/mp4"];
+    for(var i=0;i<opcoes.length;i++){
+      if(window.MediaRecorder && MediaRecorder.isTypeSupported(opcoes[i])) return opcoes[i];
+    }
+    return "";
+  }
+
+  // A ONDA SAI DA GRAVAÇÃO, não de decodificar depois. Decodificar o áudio
+  // inteiro acontecia DEPOIS de a pessoa apertar enviar — quanto mais longo o
+  // áudio, mais tempo de tela parada. Aqui a amplitude é lida ao vivo, o que de
+  // quebra alimenta o medidor: o vendedor VÊ que o microfone está ouvindo.
+  function ouvir(st){
+    var Ctx=window.AudioContext||window.webkitAudioContext;
+    if(!Ctx) return;
+    try{
+      ctx=new Ctx();
+      if(ctx.state==="suspended") ctx.resume();   // iOS sobe suspenso
+      an=ctx.createAnalyser(); an.fftSize=512;
+      ctx.createMediaStreamSource(st).connect(an);
+      var buf=new Uint8Array(an.fftSize);
+      (function passo(){
+        if(!an) return;
+        an.getByteTimeDomainData(buf);
+        var soma=0;
+        for(var i=0;i<buf.length;i++){ var v=(buf[i]-128)/128; soma+=Math.abs(v); }
+        var m=soma/buf.length;
+        niveis.push(m);
+        // 2% de piso: barra zerada parece desligada, e microfone mudo não é isso
+        nivel.style.width=Math.max(2,Math.min(100,Math.round(m*380)))+"%";
+        medir=requestAnimationFrame(passo);
+      })();
+    }catch(e){ ctx=null; an=null; }
+  }
+  // 64 baldes, média por balde, normalizado pelo pico — a mesma forma que o
+  // Baileys calcula decodificando. Não é byte a byte igual (dois decodificadores
+  // já divergem entre si), e numa barrinha decorativa isso não se vê.
+  function ondaPronta(){
+    // menos de 4 leituras é áudio de um piscar de olhos: não há forma pra desenhar
+    if(niveis.length < 4) return null;
+    var n=64, bloco=niveis.length/n, f=[];
+    for(var i=0;i<n;i++){
+      var ini=Math.floor(i*bloco), fim=Math.floor((i+1)*bloco), soma=0, c=0;
+      for(var j=ini;j<fim;j++){ soma+=niveis[j]; c++; }
+      // gravação curta tem menos leituras que baldes: cada balde pega a leitura
+      // mais próxima em vez de sair vazio — senão um áudio de meio segundo ia
+      // sem onda nenhuma e a bolha saía chapada.
+      f.push(c ? soma/c : niveis[Math.min(niveis.length-1, ini)]);
+    }
+    var pico=Math.max.apply(null,f);
+    var w=new Uint8Array(n);
+    for(var k=0;k<n;k++) w[k]=pico>0?Math.floor(100*f[k]/pico):0;
+    return w;
+  }
+  function b64(u8){ var s2=""; for(var i=0;i<u8.length;i++) s2+=String.fromCharCode(u8[i]); return btoa(s2); }
+
+  $("mic").onclick=function(){
+    var tipo=tipoBom();
+    if(!tipo){ alert("Este navegador não grava áudio. Responda por texto."); return; }
+    tipoAtual=tipo;
+    cancelado=false; enviando=false; pedacos=[]; niveis=[];
+    abrir(); estado("prep","preparando…");      // ← a tela responde AQUI
+    navigator.mediaDevices.getUserMedia({audio:true}).then(function(st){
+      if(cancelado){ st.getTracks().forEach(function(t){t.stop();}); sair(); return; }
+      fluxo=st;
+      // 24 kbps é taxa de voz: 27s (a média do vendedor) dão ~66 KB. O padrão do
+      // navegador é ~118 kbps, cinco vezes mais, sem ganho nenhum pra fala.
+      try{ mr=new MediaRecorder(st,{mimeType:tipo,audioBitsPerSecond:24000}); }
+      catch(e){ mr=new MediaRecorder(st,{mimeType:tipo}); }
+      mr.ondataavailable=function(e){ if(e.data && e.data.size) pedacos.push(e.data); };
+      mr.onstop=function(){ if(cancelado){ sair(); return; } mandar(); };
+      mr.start();
+      ouvir(st);
+      t0=Date.now();
+      rel.textContent="0:00"; estado("grav");
+      tick=setInterval(function(){
+        var s3=(Date.now()-t0)/1000;
+        rel.textContent=mmss(s3);
+        if(s3>=TETO) pedirEnvio();
+      },200);
+    }).catch(function(){
+      sair();
+      alert("Não consegui acessar o microfone. Confira a permissão do navegador.");
+    });
+  };
+
+  // ---- os dois botões respondem no toque, e só depois param o gravador ----
+  function pedirEnvio(){
+    if(enviando) return;
+    enviando=true;
+    estado("env","enviando…");                  // ← a tela responde AQUI
+    cancelAnimationFrame(medir); medir=null;
+    clearInterval(tick); tick=null;
+    try{ if(mr && mr.state!=="inactive") mr.stop(); else mandar(); }
+    catch(e){ sair(); }
+  }
+  $("manda").onclick=pedirEnvio;
+  $("cancela").onclick=function(){
+    cancelado=true;
+    estado("env","cancelando…");                // ← e AQUI
+    try{ if(mr && mr.state!=="inactive") mr.stop(); else sair(); }
+    catch(e){ sair(); }
+  };
+
+  function mandar(){
+    var seg=Math.max(1,Math.round((Date.now()-t0)/1000));
+    var blob=new Blob(pedacos,{type:tipoAtual});
+    var onda=ondaPronta();                      // já está pronta: zero espera
+    if(fluxo){ fluxo.getTracks().forEach(function(t){t.stop();}); fluxo=null; }
+    if(ctx){ try{ ctx.close(); }catch(e){} ctx=null; an=null; }
+    blob.arrayBuffer().then(function(buf){
+      var h={"Content-Type": blob.type || tipoAtual};
+      if(onda) h["X-Onda"]=b64(onda);
+      return fetch(BASE+"/lead/"+LEAD+"/audio?seg="+seg,{method:"POST",headers:h,body:buf});
+    }).then(function(r){ return r.json(); }).then(function(j){
+      if(j && j.ok){
+        sair();
+        // a conversa já se atualiza sozinha (puxa): recarregar a página inteira
+        // custava ~1s de tela branca logo depois de enviar
+        if(window.__puxa) window.__puxa(); else location.reload();
+        return;
+      }
+      alert((j && j.erro) || "Não consegui enviar o áudio.");
+      sair();
+    }).catch(function(){
+      alert("Falha de conexão ao enviar o áudio.");
+      sair();
+    });
+  }
+})();
+</script>"""
+
+
 @router.get("/cockpit/lead/{lead_id}", response_class=HTMLResponse)
 def cockpit_lead(request: Request, lead_id: int):
     """Uma rota, dois papéis. Se o lead é do vendedor logado, abre a tela de trabalho
@@ -2040,14 +2690,16 @@ def cockpit_lead(request: Request, lead_id: int):
         # zera e a próxima mensagem do cliente toca na hora (ver lead_do_vendedor).
         d = ck.lead_do_vendedor(get_pool(), sess[0], sess[1], lead_id, pos_visto=True)
         if d:
-            return _lead_vendedor(request, lead_id, d)
+            return _lead_vendedor(request, lead_id, d,
+                                  pode_voz=ck.pode_gravar_audio(get_pool(), sess[0]))
     g = _gerencia(request)
     if g:
         return _lead_gestor(request, g[0], lead_id)
     return RedirectResponse("/cockpit/login", status_code=303)
 
 
-def _lead_vendedor(request: Request, lead_id: int, d: dict) -> HTMLResponse:
+def _lead_vendedor(request: Request, lead_id: int, d: dict,
+                   pode_voz: bool = False) -> HTMLResponse:
     sub = " · ".join(x for x in [d.get("cidade") or "", d.get("uf") or ""] if x) or (d.get("doc_fmt") or "")
 
     bolhas = []
@@ -2066,19 +2718,43 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict) -> HTMLResponse:
         acao = (f"<form method=post action='{_BASE}/lead/{lead_id}/assumir'>"
                 "<button class=btn type=submit>Assumir a conversa</button></form>")
     else:
-        acao = (f"<form class=composer method=post action='{_BASE}/lead/{lead_id}/mensagem'>"
+        # `pode_voz` chega de fora (o microfone só existe no canal QR): quem
+        # monta a tela não vai buscar sessão nem banco pra decidir isso.
+        mic = ("<button type=button class=mic id=mic aria-label='Gravar áudio'>"
+               "<svg width=20 height=20 viewBox='0 0 24 24' fill=none stroke=currentColor "
+               "stroke-width=1.8 stroke-linecap=round><rect x=9 y=3 width=6 height=11 rx=3/>"
+               "<path d='M5 11a7 7 0 0014 0M12 18v3'/></svg></button>") if pode_voz else ""
+        # a barra de gravação também é gateada: sem microfone ela seria marcação
+        # morta em toda tela de conversa de todo vendedor
+        barra = ("<div class=gravando id=grav>"
+                 "<span class=bolha></span><span class=rel id=rel>0:00</span>"
+                 "<span class=nivel><i id=nivel></i></span>"
+                 "<span class=dica id=dica>preparando…</span>"
+                 "<button type=button class=cancela id=cancela>Cancelar</button>"
+                 "<button type=button class=manda id=manda aria-label='Enviar áudio'>&#10148;</button>"
+                 "</div>") if pode_voz else ""
+        acao = (f"<form class=composer id=comp method=post action='{_BASE}/lead/{lead_id}/mensagem'>"
                 "<input name=texto placeholder='Responder…' required autocomplete=off>"
-                "<button type=submit aria-label=Enviar>&#10148;</button></form>")
+                + mic +
+                "<button type=submit aria-label=Enviar>&#10148;</button>"
+                + barra + "</form>")
+        if pode_voz:
+            acao += _VOZ_JS.replace("__BASE__", _BASE).replace("__LEAD__", str(lead_id))
 
-    tel, zap = d.get("tel_link") or "", d.get("zap_link") or ""
+    # Quatro atalhos, e não cinco: o `.grade` é de DUAS colunas, então o quinto nascia
+    # sozinho na terceira linha, meia largura, com um buraco do lado. Saiu o "Ligar" —
+    # quem chega por `whatsapp_inbound` tem o número em `whatsapp` e `telefone` NULL, e
+    # o botão vinha CINZA (tel_link só olha `telefone`) na maioria dos leads deste app;
+    # um atalho apagado ocupando o melhor lugar da tela não vale a linha extra. A Ficha
+    # sobe pro lugar dele, e as linhas ficam com sentido próprio: em cima o contato e os
+    # dados, embaixo as duas ações coloridas.
+    zap = d.get("zap_link") or ""
     atalhos = (
-        (f"<a href='{esc(tel)}'>{_ic('ligar', 'ic p')} Ligar</a>" if tel
-         else f"<span class=off>{_ic('ligar', 'ic p')} Ligar</span>")
-        + (f"<a href='{esc(zap)}' target=_blank rel=noopener>{_ic('zap', 'ic p')} WhatsApp</a>" if zap
-           else f"<span class=off>{_ic('zap', 'ic p')} WhatsApp</span>")
+        (f"<a href='{esc(zap)}' target=_blank rel=noopener>{_ic('zap', 'ic p')} WhatsApp</a>" if zap
+         else f"<span class=off>{_ic('zap', 'ic p')} WhatsApp</span>")
+        + f"<a href='{_BASE}/lead/{lead_id}/ficha'>{_ic('ficha', 'ic p')} Ficha</a>"
         + f"<a class=orc href='{_BASE}/lead/{lead_id}/orcamento'>{_ic('orc', 'ic p')} Orçamento</a>"
-        + f"<a class=vis2 href='{_BASE}/lead/{lead_id}/visita'>{_ic('agenda', 'ic p')} Visita</a>"
-        + f"<a href='{_BASE}/lead/{lead_id}/ficha'>{_ic('ficha', 'ic p')} Ficha</a>")
+        + f"<a class=vis2 href='{_BASE}/lead/{lead_id}/visita'>{_ic('agenda', 'ic p')} Visita</a>")
 
     etapas = "".join(
         f"<form method=post action='{_BASE}/lead/{lead_id}/etapa'>"
@@ -2146,7 +2822,9 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict) -> HTMLResponse:
            "chat.appendChild(d);ultimo=m.id;});"
            "if(perto)fim();"
            "}).catch(function(){ocupado=false;});}"
-           "setInterval(puxa,8000);"
+           # exposto pra quem manda áudio puxar na hora: recarregar a página inteira
+           # depois de enviar dá ~1s de tela branca num aparelho de vendedor
+           "window.__puxa=puxa;setInterval(puxa,8000);"
            "document.addEventListener('visibilitychange',function(){"
            "if(document.visibilityState==='visible')puxa();});"
            "})();</script>")
@@ -2459,6 +3137,37 @@ def _agir(request: Request, lead_id: int, fn, destino: str):
     return RedirectResponse(destino, status_code=303)
 
 
+@router.post("/cockpit/lead/{lead_id}/audio")
+async def cockpit_lead_audio(request: Request, lead_id: int, seg: int = 0):
+    """Recebe o áudio que o vendedor gravou. Corpo = os BYTES, não JSON.
+
+    Base64 num JSON custaria +33% de banda no 4G do vendedor e de memória aqui —
+    e é a memória que já quase derrubou o serviço de WhatsApp uma vez.
+
+    `seg` e a onda (cabeçalho X-Onda) vêm da tela: é o que faz o áudio do iPhone
+    passar sem conversão nenhuma, porque assim o Baileys não precisa decodificar.
+    """
+    sess = _sessao(request)
+    if not sess:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    from finance import audio_voz as av
+    dados = await request.body()
+    if not dados or len(dados) > av.LIMITE_BYTES:
+        return JSONResponse({"ok": False, "erro": "Áudio vazio ou grande demais."})
+    onda = None
+    cab = request.headers.get("x-onda") or ""
+    if cab:
+        try:
+            import base64
+            w = base64.b64decode(cab)
+            onda = w if len(w) == 64 else None
+        except Exception:  # noqa: BLE001 — onda é enfeite; sem ela o áudio vai igual
+            onda = None
+    tipo = (request.headers.get("content-type") or "audio/webm").split(",")[0].strip()
+    r = ck.enviar_audio(get_pool(), sess[0], sess[1], lead_id, dados, tipo, seg, onda)
+    return JSONResponse(r)
+
+
 @router.post("/cockpit/lead/{lead_id}/mensagem")
 def cockpit_mensagem(request: Request, lead_id: int, texto: str = Form(...)):
     return _agir(request, lead_id,
@@ -2494,11 +3203,15 @@ def cockpit_fila_sinal(request: Request):
 @router.post("/cockpit/lead/{lead_id}/ficha")
 def cockpit_ficha(request: Request, lead_id: int, empresa: str = Form(""), contato: str = Form(""),
                   cargo: str = Form(""), segmento: str = Form(""), telefone: str = Form(""),
-                  documento: str = Form(""), email: str = Form(""), cidade: str = Form(""),
-                  uf: str = Form(""), obs: str = Form("")):
+                  whatsapp: str = Form(""), documento: str = Form(""), email: str = Form(""),
+                  cep: str = Form(""), endereco: str = Form(""), numero: str = Form(""),
+                  bairro: str = Form(""), nascimento: str = Form(""),
+                  cidade: str = Form(""), uf: str = Form(""), obs: str = Form("")):
     """Ficha do cliente preenchida pelo vendedor, de dentro da conversa."""
     dados = {"empresa": empresa, "contato": contato, "cargo": cargo, "segmento": segmento,
-             "telefone": telefone, "documento": documento, "email": email,
+             "telefone": telefone, "whatsapp": whatsapp, "documento": documento, "email": email,
+             "cep": cep, "endereco": endereco, "numero": numero, "bairro": bairro,
+             "nascimento": nascimento,
              "cidade": cidade, "uf": uf, "obs": obs}
     return _agir(request, lead_id,
                  lambda p, c, m, l: {**ck.salvar_ficha(p, c, m, l, dados), "msg": "Ficha salva ✓"},
@@ -2592,8 +3305,46 @@ def cockpit_pausar(request: Request, membro_id: int = Form(...), on: str = Form(
 # não visual, e reescrever ia trocar risco por nada.
 
 # ------------------------------------------------------------------ login mágico
+def _tela_login(titulo: str, sub: str, email: str = "", erro: str = "",
+                nota: str = "") -> HTMLResponse:
+    """A tela de entrada. Senha é o caminho PRINCIPAL; o link por e-mail fica como
+    saída pra quem esqueceu ou nunca criou senha.
+
+    Era o contrário: só link mágico, com a frase "Sem senha". Como é aqui que o
+    vendedor aterrissa quando a sessão cai, ele ficava dependendo de e-mail chegar e
+    de abrir em 15 min — no meio do expediente. E-mail e senha já existiam
+    (contas/equipe.py), só não eram oferecidos neste lugar."""
+    aviso = (f"<div class=erro>{esc(erro)}</div>" if erro else
+             (f"<div class=nota>{esc(nota)}</div>" if nota else ""))
+    corpo = ("<div class=login><div class=marca>Zaq</div>"
+             f"<h2>{esc(titulo)}</h2><p>{esc(sub)}</p>"
+             f"{aviso}"
+             # UM FORMULÁRIO SÓ, dois botões. Eram dois <form>: o de baixo levava um
+             # e-mail ESCONDIDO, preenchido pelo servidor — ou seja, nunca via o que
+             # a pessoa tinha acabado de digitar no de cima. Pedir link mandava pra
+             # endereço vazio, e o campo vazio ainda estourava um 422 em JSON cru na
+             # cara do vendedor. Com um form só, os dois botões leem o mesmo campo.
+             f"<form method=post action='{_BASE}/login'>"
+             f"<input name=email type=email required placeholder='seu e-mail' "
+             f"autocomplete=username value='{esc(email)}'>"
+             "<input name=senha type=password placeholder='sua senha' "
+             "autocomplete=current-password>"
+             # marcado por padrão: é o aparelho de trabalho do vendedor, e o pedido
+             # que originou isto foi justamente não ter que entrar de novo.
+             "<label class=chk><input type=checkbox name=lembrar value=1 checked>"
+             "Manter conectado neste aparelho</label>"
+             "<button class=go type=submit>Entrar</button>"
+             # `name` no BOTÃO: só é enviado quando ELE é o clicado. É assim que o
+             # servidor sabe qual das duas portas a pessoa escolheu, sem JS.
+             "<button class=go2 type=submit name=so_link value=1>"
+             "Entrar por link no e-mail</button></form>"
+             "<small>Esqueceu a senha? Use o link por e-mail e crie outra ao entrar.</small>"
+             "</div>")
+    return _page("Zaq — entrar", corpo)
+
+
 @router.get("/cockpit/login", response_class=HTMLResponse)
-def cockpit_login_form(request: Request, enviado: str = ""):
+def cockpit_login_form(request: Request, enviado: str = "", expirou: str = ""):
     if _sessao(request):
         return RedirectResponse(_BASE, status_code=303)
     if enviado:
@@ -2602,28 +3353,137 @@ def cockpit_login_form(request: Request, enviado: str = ""):
         corpo = ("<div class=login><div class=marca>Zaq</div><h2>Confira seu e-mail</h2>"
                  "<p>Se esse e-mail estiver cadastrado, você recebeu um link pra entrar. "
                  "Ele vale por 15 minutos.</p>"
+                 f"<a class=go2 href='{_BASE}/login'>Voltar</a>"
                  "<small>Não chegou? Veja o spam ou peça o link ao seu gestor.</small></div>")
         return _page("Zaq — confira o e-mail", corpo)
-    corpo = ("<div class=login><div class=marca>Zaq</div><h2>Seus leads, no bolso</h2>"
-             "<p>Sem senha — a gente manda um link pro seu e-mail.</p>"
-             f"<form method=post action='{_BASE}/login'>"
-             "<input name=email type=email required placeholder='seu e-mail' autocomplete=email>"
-             "<button class=go type=submit>Enviar meu link de acesso</button></form>"
-             "<small>O link vale por 15 min e abre no seu aparelho.</small></div>")
-    return _page("Zaq — entrar", corpo)
+    if expirou:
+        return _tela_login("Entre de novo", "Sua sessão expirou neste aparelho.",
+                           nota="Seus leads continuam aí — nada se perdeu.")
+    return _tela_login("Seus leads, no bolso", "Entre com seu e-mail e senha.")
 
 
 @router.post("/cockpit/login")
-def cockpit_login(request: Request, email: str = Form(...)):
+def cockpit_login(request: Request, email: str = Form(""), senha: str = Form(""),
+                  lembrar: str = Form(""), so_link: str = Form("")):
+    """Duas portas no mesmo endereço: com senha entra na hora; sem senha (ou pelo
+    botão "entrar por link") cai no e-mail de sempre.
+
+    NENHUM campo é obrigatório aqui, de propósito. Com `Form(...)` o FastAPI devolve
+    422 em JSON cru — e foi o que o vendedor viu na tela do celular: um arquivo
+    `login.json` pra baixar. Validação de formulário é resposta de tela, não de API."""
+    # valida ANTES de pegar o pool: formulário vazio não precisa de banco.
+    email = (email or "").strip()
+    if not email:
+        return _tela_login("Seus leads, no bolso", "Entre com seu e-mail e senha.",
+                           erro="Digite seu e-mail.")
     pool = get_pool()
+    if senha and not so_link:
+        from contas import equipe as _equipe
+        # `contextos_de_login`, NÃO `autenticar`. A identidade aqui é por E-MAIL, e a
+        # mesma pessoa pode ser dona de uma conta e vendedora de outras — uma senha,
+        # vários lugares. `autenticar` só olha `membros.senha_hash`; quem tem conta
+        # própria e entrou como membro numa empresa ficava de fora, porque a senha
+        # dele mora em `contas`, e o membro nasce SEM senha nenhuma.
+        #
+        # Foi o que aconteceu em 18/08: o mesmo e-mail existia como conta (com senha)
+        # e como membro "vendedor" da Prime (sem senha). A pessoa trocou a senha duas
+        # vezes — da CONTA — e o Cockpit continuou recusando, porque lia a do MEMBRO.
+        # Pelo painel entrava, porque o portal já usa esta função.
+        ctxs = [x for x in _equipe.contextos_de_login(pool, email, senha)
+                if (x.get("papel") or "") in _PAPEIS_OK]
+        if not ctxs:
+            # mensagem única pra senha errada e pra e-mail que não é do time: dizer
+            # qual dos dois falhou entrega quem tem cadastro.
+            return _tela_login("Seus leads, no bolso", "Entre com seu e-mail e senha.",
+                               email=email, erro="E-mail ou senha incorretos.")
+        if len(ctxs) > 1:
+            # Trabalha em mais de um lugar: quem escolhe é ela. Entrar na empresa
+            # errada é pior que um toque a mais — o vendedor mexeria no funil de
+            # outra empresa achando que é o dele.
+            request.session["ck_ctxs"] = ctxs
+            request.session["ck_lembrar"] = bool(lembrar)
+            return _tela_empresas(ctxs)
+        return _entrar_no_contexto(request, ctxs[0], bool(lembrar))
     achado = ck.membro_por_email(pool, email)
     if achado:                       # nunca revela se existe: sempre redireciona igual
         try:
             token = ck.gerar_token(pool, achado["conta_id"], achado["membro_id"])
-            _enviar_link_email(pool, achado["conta_id"], (email or "").strip(), ck.link_acesso(token))
+            _enviar_link_email(pool, achado["conta_id"], email, ck.link_acesso(token))
         except Exception:  # noqa: BLE001
             pass
     return RedirectResponse(f"{_BASE}/login?enviado=1", status_code=303)
+
+
+def _pôr_lembrete(request: Request, resp, conta_id: int, membro_id: int) -> None:
+    """Grava o aparelho e põe o cookie SEM prazo de expiração.
+
+    `max_age` de 10 anos é o "indeterminado" na prática — cookie sem max_age morre ao
+    fechar o navegador, que é o oposto do pedido. Quem encerra de verdade é a
+    revogação no banco (Sair, membro desativado), não o relógio.
+
+    httponly: JS da página não lê — se algum script de terceiro entrar, não leva a
+    sessão junto. secure: só por HTTPS, igual ao cookie do portal."""
+    token = ck.lembrar_criar(get_pool(), conta_id, membro_id,
+                             (request.headers.get("user-agent") or "")[:120])
+    if not token:
+        return
+    resp.set_cookie(
+        ck.LEMBRETE_COOKIE, token, max_age=60 * 60 * 24 * 3650, path="/cockpit",
+        httponly=True, samesite="lax",
+        secure=_os.environ.get("PORTAL_COOKIE_SECURE", "1") == "1")
+
+
+def _entrar_no_contexto(request: Request, ctx: dict, lembrar: bool):
+    """Aplica o contexto escolhido na sessão e entra. `aplicar_contexto` é a mesma
+    função do portal — a sessão do Cockpit e a do painel são a mesma sessão, e
+    escrever os campos na mão aqui abriria espaço pra elas divergirem."""
+    from contas import equipe as _equipe
+    _equipe.aplicar_contexto(request.session, ctx)
+    request.session["cockpit"] = True
+    resp = RedirectResponse(_BASE, status_code=303)
+    if lembrar and ctx.get("membro_id"):
+        # sem membro_id não há quem lembrar: o dono da conta não é linha de `membros`,
+        # e `cockpit_lembrete` referencia membro. Ele segue pela sessão normal.
+        _pôr_lembrete(request, resp, ctx["conta_id"], ctx["membro_id"])
+    return resp
+
+
+def _tela_empresas(ctxs: list[dict]) -> HTMLResponse:
+    """Escolha da empresa, pra quem trabalha em mais de uma."""
+    botoes = "".join(
+        f"<form method=post action='{_BASE}/empresa' style='margin:0'>"
+        f"<input type=hidden name=i value='{n}'>"
+        f"<button class=go2 type=submit>{esc(x.get('nome') or 'Empresa')}"
+        f"<br><small style='opacity:.7'>{esc(_equipe_rotulo(x))}</small></button></form>"
+        for n, x in enumerate(ctxs))
+    corpo = ("<div class=login><div class=marca>Zaq</div>"
+             "<h2>Onde você vai trabalhar?</h2>"
+             "<p>Seu acesso vale em mais de um lugar. Escolha um — dá pra trocar "
+             "depois saindo e entrando de novo.</p>"
+             f"{botoes}</div>")
+    return _page("Zaq — escolher empresa", corpo)
+
+
+def _equipe_rotulo(ctx: dict) -> str:
+    from contas import equipe as _equipe
+    return "Sua conta" if not ctx.get("membro_id") else _equipe.rotulo(ctx.get("papel"))
+
+
+@router.post("/cockpit/empresa")
+def cockpit_empresa(request: Request, i: str = Form("")):
+    """Confirma a empresa escolhida na tela acima.
+
+    Relê os contextos da SESSÃO, gravados no login que já validou a senha — o índice
+    que vem do formulário só escolhe entre eles. Assim ninguém entra numa empresa
+    mandando um número diferente: o que limita é a lista que a própria senha abriu."""
+    ctxs = request.session.get("ck_ctxs") or []
+    try:
+        ctx = ctxs[int(i)]
+    except (ValueError, IndexError, TypeError):
+        return RedirectResponse(f"{_BASE}/login", status_code=303)
+    lembrar = bool(request.session.pop("ck_lembrar", False))
+    request.session.pop("ck_ctxs", None)
+    return _entrar_no_contexto(request, ctx, lembrar)
 
 
 @router.get("/cockpit/entrar/{token}", response_class=HTMLResponse)
@@ -2638,7 +3498,13 @@ def cockpit_entrar(request: Request, token: str):
     request.session["membro_id"] = dados["membro_id"]
     request.session["papel"] = dados["papel"]
     request.session["cockpit"] = True
-    return RedirectResponse(_BASE, status_code=303)
+    # quem entrou por link JÁ provou o e-mail: o aparelho fica lembrado igual a quem
+    # entrou por senha. Sem isto, o vendedor que só usa link seguiria caindo fora.
+    destino = _BASE if ck.tem_senha(get_pool(), dados["conta_id"], dados["membro_id"]) \
+        else f"{_BASE}/senha"
+    resp = RedirectResponse(destino, status_code=303)
+    _pôr_lembrete(request, resp, dados["conta_id"], dados["membro_id"])
+    return resp
 
 
 @router.get("/cockpit/sair")
@@ -2651,12 +3517,83 @@ def cockpit_sair(request: Request):
     volta em /cockpit e via a visão de equipe inteira, com a carteira de propostas
     do time e o botão de fechar contrato. Sair tem que sair.
     """
+    # revoga ESTE aparelho antes de limpar a sessão: sem isto o cookie de "manter
+    # conectado" reconstruiria a sessão no request seguinte e o Sair não sairia.
+    # Os outros aparelhos do vendedor continuam conectados, que é o esperado.
+    token = request.cookies.get(ck.LEMBRETE_COOKIE)
+    if token:
+        ck.lembrar_revogar(get_pool(), token)
     request.session.clear()
-    return RedirectResponse(f"{_BASE}/login", status_code=303)
+    resp = RedirectResponse(f"{_BASE}/login", status_code=303)
+    resp.delete_cookie(ck.LEMBRETE_COOKIE, path="/cockpit")
+    return resp
+
+
+@router.get("/cockpit/senha", response_class=HTMLResponse)
+def cockpit_senha_form(request: Request, erro: str = "", trocar: str = ""):
+    """Criar (ou trocar) a senha, sem sair do app.
+
+    Aparece uma vez, logo depois do link mágico, pra quem ainda não tem senha — e é o
+    que tira o vendedor da dependência de e-mail. Grava na MESMA coluna do login web
+    (migração 072): uma credencial só, Cockpit e painel."""
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse(f"{_BASE}/login", status_code=303)
+    novo_login = not trocar
+    corpo = ("<div class=login><div class=marca>Zaq</div>"
+             f"<h2>{'Crie sua senha' if novo_login else 'Trocar senha'}</h2>"
+             "<p>Assim você entra direto da próxima vez, sem depender do e-mail.</p>"
+             + (f"<div class=erro>{esc(erro)}</div>" if erro else "")
+             + f"<form method=post action='{_BASE}/senha'>"
+             "<input name=senha type=password required minlength=8 maxlength=72 "
+             "placeholder='nova senha' autocomplete=new-password>"
+             "<input name=confirma type=password required minlength=8 maxlength=72 "
+             "placeholder='repetir a senha' autocomplete=new-password>"
+             "<button class=go type=submit>Salvar e continuar</button></form>"
+             "<small>Mínimo de 8 caracteres. Dá pra trocar depois no Perfil.</small>"
+             + (f"<a class=go2 href='{_BASE}'>Agora não</a>" if novo_login else "")
+             + "</div>")
+    return _page("Zaq — senha", corpo)
+
+
+@router.post("/cockpit/senha")
+def cockpit_senha_salva(request: Request, senha: str = Form(...),
+                        confirma: str = Form("")):
+    sess = _sessao(request)
+    if not sess:
+        return RedirectResponse(f"{_BASE}/login", status_code=303)
+    if senha != confirma:
+        return cockpit_senha_form(request, erro="As senhas não conferem.")
+    r = ck.definir_senha(get_pool(), sess[0], sess[1], senha)
+    if not r.get("ok"):
+        return cockpit_senha_form(request, erro=r.get("erro") or "Não deu pra salvar.")
+    return RedirectResponse(_BASE, status_code=303)
+
+
+# um envio de acesso que falha em SILÊNCIO é o pior caso: o membro fica de fora e
+# ninguém fica sabendo. Este log é o rastro que faltava em 18/08.
+_log_link = _logging.getLogger("cockpit.acesso")
 
 
 def _enviar_link_email(pool, conta_id: int, email: str, link: str) -> bool:
-    """Manda o link mágico. Pela caixa da empresa (Canais) se houver; senão SMTP do Zaq."""
+    """Manda o link mágico PELO REMETENTE DO ZAQ, com a caixa da empresa como reserva.
+
+    A ordem já foi a inversa — empresa primeiro — e foi assim que o link sumiu. Em
+    18/08 um membro pediu acesso na Prime Eventos: o token nasceu e ficou válido, e o
+    e-mail nunca chegou. Pelo painel, o mesmo pedido chegou na hora — porque o portal
+    manda por este mesmo remetente, sem passar pela caixa do cliente.
+
+    E o plano B não salvava, porque só entra quando o envio RECUSA. Quando o Gmail da
+    empresa ACEITA e a mensagem morre depois (filtro do destino, spam, caixa com
+    problema), a função devolve True, a reserva nunca roda, e a tela diz "confira seu
+    e-mail" com toda a tranquilidade. Falha silenciosa com cara de sucesso.
+
+    A REGRA, agora explícita: mensagem pra LEAD sai pela caixa da empresa — a resposta
+    dele tem que cair no inbox dela. Link de acesso é E-MAIL DE SISTEMA: ninguém
+    responde, só precisa chegar, e a entrega manda mais que o remetente. Sai pelo Zaq.
+
+    A caixa da empresa continua como reserva pra quando o SMTP do Zaq não estiver
+    configurado — aí é melhor sair por ela do que não sair."""
     titulo = "Seu acesso ao Zaq"
     corpo = ("Toque no botão pra entrar e atender seus leads. "
              "O link vale por 15 minutos e abre no seu aparelho.")
@@ -2670,17 +3607,27 @@ def _enviar_link_email(pool, conta_id: int, email: str, link: str) -> bool:
                  f'<p style="color:#888;font-size:13px">Ou copie: {esc(link)}</p>')
         html = es._layout(titulo, f"<p>{esc(corpo)}</p>{botao}")
         texto = f"{corpo}\n\n{link}"
+        with pool.connection() as c:
+            nome_emp = (c.execute("select nome from contas where id=%s",
+                                  (conta_id,)).fetchone() or [""])[0]
+        # 1) remetente do Zaq — o mesmo caminho da recuperação de senha do portal,
+        #    que é o que comprovadamente entrega. `from_nome` mantém o nome da
+        #    empresa visível pra quem recebe: muda quem carrega, não quem assina.
+        # `enviar_email` já devolve False quando falta config — não precisa de um
+        # gate a mais, que só criaria um segundo jeito de decidir a mesma coisa.
+        if es.enviar_email(email, titulo, html, texto, from_nome=nome_emp or None):
+            return True
+        _log_link.warning("conta %s: o Zaq não mandou o link de acesso — "
+                          "tentando pela caixa da empresa", conta_id)
+        # 2) reserva: a caixa da empresa. Só quando o Zaq não pôde mandar.
         try:
             from finance import email_inbound as ein
-            with pool.connection() as c:
-                nome_emp = (c.execute("select nome from contas where id=%s",
-                                      (conta_id,)).fetchone() or [""])[0]
-            if ein.enviar_conta(pool, conta_id, email, titulo, html, texto,
-                                from_nome=nome_emp or None):
-                return True
-        except Exception:  # noqa: BLE001
-            pass
-        return bool(es.enviar_email(email, titulo, html, texto))
+            return bool(ein.enviar_conta(pool, conta_id, email, titulo, html, texto,
+                                         from_nome=nome_emp or None))
+        except Exception as e:  # noqa: BLE001
+            _log_link.warning("conta %s: nem o Zaq nem a caixa da empresa mandaram o "
+                              "link de acesso: %s: %s", conta_id, type(e).__name__, e)
+            return False
     except Exception:  # noqa: BLE001
         return False
 

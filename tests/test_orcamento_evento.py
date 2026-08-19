@@ -146,7 +146,8 @@ PARCELAS = [{"venc": "2025-11-13", "valor_centavos": 181000, "forma": "Pix",
 
 
 def _semear(pool, conta_id, *, status="enviado", evento=EVENTO, parcelas=PARCELAS,
-            numero=60, total_centavos=745000, com_desconto=None, criado_por=None):
+            numero=60, total_centavos=745000, com_desconto=None, criado_por=None,
+            desconto_tipo="pct", desconto_pct=0, desconto_centavos=0, itens=None):
     """Cria um orçamento de evento e devolve (id, token). O token é sorteado: o
     banco de teste é compartilhado entre módulos e não é truncado entre runs."""
     token = "EV" + secrets.token_hex(6)
@@ -155,17 +156,20 @@ def _semear(pool, conta_id, *, status="enviado", evento=EVENTO, parcelas=PARCELA
             """insert into orcamentos (conta_id, empresa, cliente, escopo, itens,
                    setup_centavos, primeiro_ano_centavos, status, token, modo,
                    evento, parcelas, numero, endereco, cep, cidade, uf, cnpj,
-                   email, telefone, criado_por)
+                   email, telefone, criado_por,
+                   desconto_tipo, desconto_pct, desconto_centavos)
                values (%s,'Maria Teste','Maria Teste','Reserva com o sinal.',%s::jsonb,
                        %s,%s,%s,%s,'evento',%s::jsonb,%s::jsonb,%s,
                        'Rua das Flores, 120','64049-000','Teresina','PI',
                        '000.000.000-00','maria@teste.com','(86) 99999-0000',
-                       coalesce(%s, (select min(id)::text from membros where conta_id=%s)))
+                       coalesce(%s, (select min(id)::text from membros where conta_id=%s)),
+                       %s,%s,%s)
                returning id""",
-            (conta_id, json.dumps(ITENS), total_centavos,
+            (conta_id, json.dumps(ITENS if itens is None else itens), total_centavos,
              (com_desconto if com_desconto is not None else total_centavos), status, token,
              json.dumps(evento) if evento is not None else None,
-             json.dumps(parcelas), numero, criado_por, conta_id)).fetchone()[0]
+             json.dumps(parcelas), numero, criado_por, conta_id,
+             desconto_tipo, desconto_pct, desconto_centavos)).fetchone()[0]
         c.commit()
     return oid, token
 
@@ -300,19 +304,60 @@ def test_vendedor_sai_na_folha_mesmo_quando_quem_vendeu_e_o_dono(pool, conta_id)
 
 def test_desconto_aparece_e_manda_no_total(pool, conta_id, monkeypatch):
     """O desconto era aplicado na tela, gravado em primeiro_ano_centavos e
-    ignorado pela folha, que mostrava a soma bruta dos itens."""
-    ev = dict(EVENTO, desconto=10)
-    _, tok = _semear(pool, conta_id, evento=ev, total_centavos=745000,
-                     com_desconto=670500, parcelas=[])
+    ignorado pela folha, que mostrava a soma bruta dos itens.
+
+    Com a 172 ele saiu do jsonb do evento e virou coluna — a folha lê de lá, e o
+    rótulo só anuncia a porcentagem quando foi percentual que se digitou."""
+    _, tok = _semear(pool, conta_id, total_centavos=745000, com_desconto=670500,
+                     parcelas=[], desconto_tipo="pct", desconto_pct=10)
     d = prop._carregar(tok, pool=pool)
     assert d["subtotal_itens"] == "R$ 7.450,00"
-    assert d["desconto_pct"] == 10 and d["desconto_valor"] == "R$ 745,00"
+    assert d["desconto_pct"] == "10" and d["desconto_final"] == "R$ 745,00"
     assert d["total"] == "R$ 6.705,00"                    # é o total COM desconto
 
     carregar, pool_teste = prop._carregar, pool
     monkeypatch.setattr(prop, "_carregar", lambda t, pool=None: carregar(t, pool=pool_teste))
     html = prop.proposta_publica(None, tok).body.decode()
     assert "Desconto (10%)" in html and "− R$ 745,00" in html
+
+
+def test_a_folha_mostra_o_desconto_de_cada_item_riscado(pool, conta_id, monkeypatch):
+    """O desconto por linha na folha do CLIENTE. Ele vê o cheio riscado e o que
+    paga — desconto que o cliente não vê some da conta dele sem explicação.
+
+    E o "Subtotal dos itens" tem que somar o LÍQUIDO: somando o bruto, a conta
+    não fecharia com a tabela que o cliente acabou de ler logo acima."""
+    itens = [dict(ITENS[0], desc_tipo="pct", desc_val=10),      # 7.200 −10% = 6.480
+             dict(ITENS[1], desc_tipo="valor", desc_val=50)]    #   250 −50  =   200
+    _, tok = _semear(pool, conta_id, itens=itens, total_centavos=745000,
+                     com_desconto=634800, parcelas=[],
+                     desconto_tipo="pct", desconto_pct=5)
+    d = prop._carregar(tok, pool=pool)
+    l1, l2 = prop._linhas_evento(d)
+    assert l1["subtotal"] == "6.480,00" and l1["cheio"] == "7.200,00"
+    assert l2["subtotal"] == "200,00" and l2["cheio"] == "250,00"
+    # 6.480 + 200 = 6.680, e é ISSO que o subtotal soma — não os 7.450 brutos
+    assert d["subtotal_itens"] == "R$ 6.680,00"
+
+    carregar, pool_teste = prop._carregar, pool
+    monkeypatch.setattr(prop, "_carregar", lambda t, pool=None: carregar(t, pool=pool_teste))
+    html = prop.proposta_publica(None, tok).body.decode()
+    assert 'class="risc">7.200,00' in html and "6.480,00" in html
+    assert "R$ 6.680,00" in html
+
+
+def test_desconto_em_reais_nao_anuncia_porcentagem_que_ninguem_digitou(pool, conta_id,
+                                                                      monkeypatch):
+    """O rótulo diz só "Desconto" quando o valor foi em reais. Inventar uma
+    porcentagem que o dono não digitou seria informação que ninguém deu."""
+    _, tok = _semear(pool, conta_id, total_centavos=745000, com_desconto=670500,
+                     parcelas=[], desconto_tipo="valor", desconto_centavos=74500)
+    d = prop._carregar(tok, pool=pool)
+    assert d["desconto_pct"] == "" and d["desconto_final"] == "R$ 745,00"
+    carregar, pool_teste = prop._carregar, pool
+    monkeypatch.setattr(prop, "_carregar", lambda t, pool=None: carregar(t, pool=pool_teste))
+    html = prop.proposta_publica(None, tok).body.decode()
+    assert "− R$ 745,00" in html and "Desconto (" not in html
     assert "R$ 6.705,00" in html
 
 

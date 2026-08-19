@@ -2201,6 +2201,37 @@ function lerBody (req) {
   })
 }
 
+// Teto do áudio de voz que o vendedor grava. 90s a 24 kbps dão ~270 KB; 1 MB é
+// folga larga. O motivo do teto é o mesmo do LIMITE_AUDIO_BYTES da entrada: este
+// processo roda com --max-old-space-size=320 e áudio vira várias cópias.
+const LIMITE_VOZ_BYTES = 1024 * 1024
+
+// O áudio chega como BINÁRIO puro, não em JSON com base64 — base64 custa +33% de
+// memória e de rede, e aqui os dois são o recurso escasso. Os metadados (número,
+// duração, onda) viajam na query e nos cabeçalhos.
+function lerBinario (req, limite) {
+  return new Promise((resolve) => {
+    const partes = []
+    let total = 0
+    req.on('data', (c) => {
+      total += c.length
+      if (total > limite) { partes.length = 0; req.destroy(); return resolve(null) }
+      partes.push(c)
+    })
+    req.on('end', () => resolve(total ? Buffer.concat(partes) : null))
+    req.on('error', () => resolve(null))
+  })
+}
+
+// Uma fila de concorrência 1 pro ENVIO de voz, pelo mesmo motivo da fila da
+// transcrição: N vendedores mandando junto multiplicariam o buffer por N.
+let _filaVoz = Promise.resolve()
+function enfileirarVoz (fn) {
+  const proximo = _filaVoz.then(fn, fn)
+  _filaVoz = proximo.catch(() => {})
+  return proximo
+}
+
 const servidor = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://x')
@@ -2307,6 +2338,62 @@ const servidor = http.createServer(async (req, res) => {
           return json(res, 200, { ok: false, erro: String(e).slice(0, 180) })
         }
       }
+      // ÁUDIO DE VOZ gravado dentro do Zaq (Cockpit). Corpo = os bytes do áudio.
+      //
+      // `seconds` e `waveform` vêm PRONTOS da tela, e isso não é economia: o
+      // Baileys só chama os decodificadores quando falta informação
+      //   requiresDurationComputation = audio && seconds === undefined
+      //   requiresWaveformProcessing  = audio && ptt === true && sem waveform
+      // Medido: com eles preenchidos o Baileys não decodifica nada — e é o que
+      // faz o mp4 do iPhone passar sem conversão, já que o decodificador de m4a
+      // dele falha ("Missing decoder for m4a format").
+      if (req.method === 'POST' && acao === 'enviar-audio') {
+        const bytes = await lerBinario(req, LIMITE_VOZ_BYTES)
+        if (!bytes) return json(res, 200, { ok: false, erro: 'audio_vazio_ou_grande' })
+        const numero = url.searchParams.get('numero') || ''
+        const mime = url.searchParams.get('mime') || 'audio/ogg; codecs=opus'
+        const seg = Math.max(1, Math.round(Number(url.searchParams.get('seg')) || 1))
+        let onda
+        try {
+          const b64 = req.headers['x-wa-onda']
+          if (b64) { const w = Buffer.from(String(b64), 'base64'); if (w.length === 64) onda = new Uint8Array(w) }
+        } catch (_) { onda = undefined }
+
+        let s = sessoes.get(contaId)
+        log.info({ contaId, status: s && s.status, kb: Math.round(bytes.length / 1024), seg },
+          'enviar-audio: tentativa')
+        if (!s || s.status !== 'conectado' || !s.sock) {
+          try { await iniciarSessao(contaId) } catch (e) {
+            log.warn({ contaId, e: String(e) }, 'enviar-audio: religar falhou')
+          }
+          const limite = Date.now() + 12000
+          while (Date.now() < limite) {
+            s = sessoes.get(contaId)
+            if (s && s.status === 'conectado' && s.sock) break
+            if (s && s.status === 'aguardando_qr') break
+            await new Promise((r2) => setTimeout(r2, 400))
+          }
+          s = sessoes.get(contaId)
+        }
+        if (!s || s.status !== 'conectado' || !s.sock) return json(res, 200, { ok: false, erro: 'desconectado' })
+        if (!jidDe(numero)) return json(res, 200, { ok: false, erro: 'numero_invalido' })
+        const alvo2 = await jidRealDe(s.sock, contaId, numero)
+        if (!alvo2.jid) return json(res, 200, { ok: false, erro: alvo2.erro || 'numero_invalido' })
+        return enfileirarVoz(async () => {
+          try {
+            const conteudo = { audio: bytes, mimetype: mime, ptt: true, seconds: seg }
+            if (onda) conteudo.waveform = onda
+            const r = await s.sock.sendMessage(alvo2.jid, conteudo)
+            guardarEnviada(contaId, r)
+            log.info({ contaId, id: r && r.key && r.key.id, seg }, 'enviar-audio: sucesso ✓')
+            return json(res, 200, { ok: true, id: (r && r.key && r.key.id) || '' })
+          } catch (e) {
+            log.warn({ contaId, e: String(e) }, 'enviar-audio: sendMessage falhou')
+            return json(res, 200, { ok: false, erro: String(e).slice(0, 180) })
+          }
+        })
+      }
+
       if (req.method === 'POST' && acao === 'sair') {
         const s = sessoes.get(contaId)
         // marca como descartado ANTES do logout: o 'close' que o logout provoca

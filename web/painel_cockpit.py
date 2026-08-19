@@ -459,6 +459,11 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
   padding:.6rem .4rem;border-radius:11px;border:1px solid var(--line);background:var(--surface);
   font-size:.82rem;color:var(--text)}
 .grade .off{opacity:.35}
+/* Número ÍMPAR de atalhos deixaria o último meia-largura com um buraco do lado —
+   e ele passou a ser possível quando o atalho do WhatsApp saiu da conta que
+   entrega tudo pelo Zaq. Em vez de inventar um quarto botão só pra emparelhar, o
+   último ocupa a linha inteira. */
+.grade a:last-child:nth-child(odd),.grade .off:last-child:nth-child(odd){grid-column:1/-1}
 .grade a.orc{border-color:#1e4a3a;color:var(--neon);background:rgba(37,211,102,.08);font-weight:600}
 .grade a.vis2{border-color:#1b3a4a;color:var(--azul);background:#0d1b23;font-weight:600}
 .etapas{display:flex;gap:.35rem;flex-wrap:wrap}
@@ -1769,11 +1774,14 @@ _ORC_JS = r"""
   };
   function pronto(j){
     $("build").style.display="none";$("rodape").style.display="none";
+    // sem o atalho pro WhatsApp (conta que entrega tudo pelo Zaq) o "Enviar na
+    // conversa" vira a ação principal — botão fantasma sozinho parece opcional
     var wa=j.zap?'<a class=btn href="'+esc(j.zap)+'" target=_blank rel=noopener>Mandar no WhatsApp</a>':'';
+    var classeEnviar=j.zap?'btn ghost':'btn';
     $("pronto").innerHTML='<div class=pronto><div class=big>✓</div><h3>Proposta pronta</h3>'
       +'<p>Mande o link pro cliente — ele abre, vê com a marca da empresa e aprova online.</p>'
       +wa
-      +'<button class="btn ghost" style="margin-top:.5rem" id=naconversa>Enviar na conversa do lead</button>'
+      +'<button class="'+classeEnviar+'" style="margin-top:.5rem" id=naconversa>Enviar na conversa do lead</button>'
       +'<div class=copiar><input value="'+esc(j.link)+'" readonly onclick="this.select()">'
       +'<button type=button id=copiar>Copiar</button></div>'
       +'<a class="btn ghost" style="margin-top:.9rem" href="'+O.base+'/lead/'+O.leadId+'">Voltar pro lead</a></div>';
@@ -2690,16 +2698,19 @@ def cockpit_lead(request: Request, lead_id: int):
         # zera e a próxima mensagem do cliente toca na hora (ver lead_do_vendedor).
         d = ck.lead_do_vendedor(get_pool(), sess[0], sess[1], lead_id, pos_visto=True)
         if d:
+            _entrega = ck.entrega_sempre(get_pool(), sess[0])
             return _lead_vendedor(request, lead_id, d,
-                                  pode_voz=ck.pode_gravar_audio(get_pool(), sess[0]))
+                                  pode_voz=ck.pode_gravar_audio(get_pool(), sess[0]),
+                                  saida_wa=not _entrega)
     g = _gerencia(request)
     if g:
-        return _lead_gestor(request, g[0], lead_id)
+        return _lead_gestor(request, g[0], lead_id,
+                            saida_wa=not ck.entrega_sempre(get_pool(), g[0]))
     return RedirectResponse("/cockpit/login", status_code=303)
 
 
 def _lead_vendedor(request: Request, lead_id: int, d: dict,
-                   pode_voz: bool = False) -> HTMLResponse:
+                   pode_voz: bool = False, saida_wa: bool = True) -> HTMLResponse:
     sub = " · ".join(x for x in [d.get("cidade") or "", d.get("uf") or ""] if x) or (d.get("doc_fmt") or "")
 
     bolhas = []
@@ -2748,10 +2759,15 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
     # um atalho apagado ocupando o melhor lugar da tela não vale a linha extra. A Ficha
     # sobe pro lugar dele, e as linhas ficam com sentido próprio: em cima o contato e os
     # dados, embaixo as duas ações coloridas.
-    zap = d.get("zap_link") or ""
+    # A PORTA PRO CELULAR. Onde o Zaq entrega sempre (canal QR) ela não existe: o
+    # atalho abria o wa.me e era o próprio app convidando o vendedor a sair dele —
+    # e o que sai por fora chega sem nome (98% do que a Prime mandava). Onde o Zaq
+    # NÃO entrega sempre (janela de 24h da API oficial) o atalho fica, senão o
+    # vendedor ficaria sem resposta num horário morto.
+    zap = (d.get("zap_link") or "") if saida_wa else ""
     atalhos = (
-        (f"<a href='{esc(zap)}' target=_blank rel=noopener>{_ic('zap', 'ic p')} WhatsApp</a>" if zap
-         else f"<span class=off>{_ic('zap', 'ic p')} WhatsApp</span>")
+        ((f"<a href='{esc(zap)}' target=_blank rel=noopener>{_ic('zap', 'ic p')} WhatsApp</a>" if zap
+          else f"<span class=off>{_ic('zap', 'ic p')} WhatsApp</span>") if saida_wa else "")
         + f"<a href='{_BASE}/lead/{lead_id}/ficha'>{_ic('ficha', 'ic p')} Ficha</a>"
         + f"<a class=orc href='{_BASE}/lead/{lead_id}/orcamento'>{_ic('orc', 'ic p')} Orçamento</a>"
         + f"<a class=vis2 href='{_BASE}/lead/{lead_id}/visita'>{_ic('agenda', 'ic p')} Visita</a>")
@@ -2840,7 +2856,7 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict,
     return _page(d["empresa"], corpo)
 
 
-def _lead_gestor(request: Request, conta_id: int, lead_id: int) -> HTMLResponse:
+def _lead_gestor(request: Request, conta_id: int, lead_id: int, saida_wa: bool = True) -> HTMLResponse:
     """A tela que não existia. Na versão anterior o gestor tocava num lead da equipe e caía em
     /painel/prospeccao/{id} — o painel desktop, no meio do celular."""
     from web.painel_prospeccao import _carrega_alvo
@@ -2851,12 +2867,16 @@ def _lead_gestor(request: Request, conta_id: int, lead_id: int) -> HTMLResponse:
     outros = cd.vendedores_para_reatribuir(pool, conta_id, d.get("vendedor_id") or 0)
 
     sub = " · ".join(x for x in [d.get("cidade") or "", d.get("uf") or ""] if x) or (d.get("doc_fmt") or "")
-    tel, zap = d.get("tel_link") or "", d.get("zap_link") or ""
+    # mesma porta da tela do vendedor, mesmo portão: onde o Zaq entrega sempre, a
+    # conversa fica por dentro — inclusive pra quem gerencia (o que o gestor manda
+    # do celular chega tão sem nome quanto o do vendedor)
+    tel = d.get("tel_link") or ""
+    zap = (d.get("zap_link") or "") if saida_wa else ""
     atalhos = (
         (f"<a href='{esc(tel)}'>{_ic('ligar', 'ic p')} Ligar</a>" if tel
          else f"<span class=off>{_ic('ligar', 'ic p')} Ligar</span>")
-        + (f"<a href='{esc(zap)}' target=_blank rel=noopener>{_ic('zap', 'ic p')} WhatsApp</a>" if zap
-           else f"<span class=off>{_ic('zap', 'ic p')} WhatsApp</span>")
+        + ((f"<a href='{esc(zap)}' target=_blank rel=noopener>{_ic('zap', 'ic p')} WhatsApp</a>" if zap
+            else f"<span class=off>{_ic('zap', 'ic p')} WhatsApp</span>") if saida_wa else "")
         + f"<a href='/painel/prospeccao/{lead_id}'>{_ic('ficha', 'ic p')} Ficha completa</a>"
         + (f"<a href='{esc(d['maps_url'])}' target=_blank rel=noopener>{_ic('mapa', 'ic p')} Mapa</a>"
            if d.get("maps_url") else f"<span class=off>{_ic('mapa', 'ic p')} Mapa</span>"))

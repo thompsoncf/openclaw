@@ -2112,6 +2112,35 @@ def comunicacao_whatsapp_qr_status(request: Request):
                          "msg": _QR_ROT.get(st, "")})
 
 
+@router.get("/painel/prospeccao/comunicacao/whatsapp-aparelhos")
+def comunicacao_whatsapp_aparelhos(request: Request):
+    """Quantos aparelhos estão ligados neste WhatsApp — e quanto ainda sai por fora.
+
+    Depois que o Cockpit parou de oferecer a saída pro celular, sobrou a pergunta
+    que só o dono responde: quem ainda tem o número ligado no aparelho. O sistema
+    MOSTRA; desligar é no celular dono da conta, e nenhum sistema faz por ninguém.
+
+    Vêm dois números de fontes diferentes de propósito. Os APARELHOS dizem que a
+    porta existe e dependem do WhatsApp responder; a SAÍDA POR FORA sai do banco e
+    diz se alguém passa por ela. Um cobre o outro quando a sessão está fora do ar.
+    """
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    from finance import cockpit as ck
+    fora = ck.saida_por_fora(get_pool(), ctx["conta_id"])
+    # A CONSULTA AO WHATSAPP SÓ SAI COM `perguntar=1`. Sem isso a rota devolve só o
+    # número do banco — que é o que a tela carrega sozinha. Perguntar ao WhatsApp
+    # é caro e repetição é o que queima número em cliente não oficial.
+    if request.query_params.get("perguntar") != "1":
+        return JSONResponse({"ok": True, "aparelhos": None, "fora": fora})
+    from finance import whatsapp_qr as wq
+    ap = wq.aparelhos(ctx["conta_id"]) or {}
+    return JSONResponse({"ok": True,
+                         "aparelhos": ap if ap.get("ok") else None,
+                         "fora": fora})
+
+
 @router.post("/painel/prospeccao/comunicacao/whatsapp-qr-sair")
 def comunicacao_whatsapp_qr_sair(request: Request):
     """Encerra a sessão QR no serviço Node. NÃO apaga a config do WhatsApp da empresa —
@@ -9367,7 +9396,69 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           </div>
         </div>
         <div class="mut" id="qr-msg" style="font-size:.78rem;margin-top:.45rem"></div>
+        <!-- APARELHOS LIGADOS. Nasce escondido e só o JS mostra: afirmar "nenhum
+             aparelho" antes de ter perguntado seria pior que não dizer nada. -->
+<div id="wa-aps" style="margin-top:.7rem;border-top:1px solid var(--borda);padding-top:.7rem">
+          <div style="font-weight:600;font-size:.82rem;margin-bottom:.35rem">Quem ainda responde por fora</div>
+          <div id="wa-aps-n" style="display:flex;gap:.4rem;flex-wrap:wrap;font-size:.78rem"></div>
+          <!-- SOB DEMANDA, NUNCA EM INTERVALO. Perguntar os aparelhos é uma consulta
+               ao WhatsApp; repetir isso sozinho a cada poucos segundos é tráfego de
+               robô num cliente não oficial — o caminho curto pro número ser banido,
+               que é a pior forma de derrubar a conexão. Quem pede é o dedo. -->
+          <button type="button" class="pbtn ghost sm" id="wa-aps-btn" onclick="apsPuxa()"
+                  style="margin-top:.5rem;font-size:.76rem">Conferir aparelhos ligados</button>
+          <div class="mut" id="wa-aps-dica" style="font-size:.74rem;margin-top:.45rem"></div>
+        </div>
         <script>
+        // Dois números de fontes DIFERENTES: os aparelhos dizem que a porta
+        // existe (e dependem do WhatsApp responder); a saída por fora sai do
+        // banco e diz se alguém passa por ela. Um cobre o outro.
+        function apsPinta(j){
+          var cx=document.getElementById('wa-aps'),n=document.getElementById('wa-aps-n'),
+              d=document.getElementById('wa-aps-dica');
+          if(!j||!j.ok){cx.style.display='none';return;}
+          var a=j.aparelhos,f=j.fora||{},chips=[];
+          if(a){
+            chips.push('<span class="chip">📱 celular do dono</span>');
+            chips.push('<span class="chip" style="border-color:var(--verde);color:var(--verde)">⚡ Zaq</span>');
+            if(a.outros>0)
+              chips.push('<span class="chip" style="border-color:var(--ambar-borda);color:var(--ambar)">⚠️ '
+                +a.outros+' outro'+(a.outros>1?'s':'')+'</span>');
+          }
+          if(f.total>0){
+            var cor=f.pct>=50?'var(--ambar)':'var(--txt-mut)';
+            chips.push('<span class="chip" style="color:'+cor+'">'+f.pct+'% saiu por fora em '+f.dias+' dias</span>');
+          }
+          n.innerHTML=chips.join('');
+          if(a && a.outros>0){
+            d.innerHTML='Cada "outro" é um WhatsApp Web ou aparelho ligado neste número — '
+              +'o que sai por ali chega aqui <b>sem o nome de quem falou</b>. '
+              +'Desligar é no celular dono da conta: <b>Aparelhos conectados</b>.';
+          } else if(a){
+            d.textContent='Só o celular do dono e o Zaq. É o estado que você quer.';
+          } else {
+            d.textContent='Não consegui perguntar ao WhatsApp agora (sessão fora do ar).';
+          }
+          cx.style.display='block';
+        }
+        var _apsOcupado=false;
+        function apsPuxa(){
+          if(_apsOcupado)return;                       // clique nervoso não vira rajada
+          _apsOcupado=true;
+          var b=document.getElementById('wa-aps-btn');
+          if(b){b.disabled=true;b.textContent='Perguntando…';}
+          fetch('/painel/prospeccao/comunicacao/whatsapp-aparelhos?perguntar=1')
+            .then(function(r){return r.json();}).then(apsPinta)
+            .catch(function(){})
+            .then(function(){_apsOcupado=false;
+              if(b){b.disabled=false;b.textContent='Conferir aparelhos ligados';}});
+        }
+        // a saída por fora vem do BANCO: não toca no WhatsApp, então pode carregar
+        // junto com a página e ficar sempre à vista
+        document.addEventListener('DOMContentLoaded',function(){
+          fetch('/painel/prospeccao/comunicacao/whatsapp-aparelhos')
+            .then(function(r){return r.json();}).then(apsPinta).catch(function(){});
+        });
         var _qrTimer=null;
         function qrShow(d){var box=document.getElementById('qr-box'),img=document.getElementById('qr-img'),
             msg=document.getElementById('qr-msg'),sair=document.getElementById('qr-sair'),btn=document.getElementById('qr-btn'),
@@ -9416,7 +9507,8 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         function qrEsperando(){if(_qrEspera)clearTimeout(_qrEspera);
           _qrEspera=setTimeout(qrIndefinido,7000);}
         function qrPoll(){qrEsperando();
-          fetch('/painel/prospeccao/comunicacao/whatsapp-qr-status').then(function(r){return r.json();}).then(qrShow).catch(qrIndefinido);}
+          fetch('/painel/prospeccao/comunicacao/whatsapp-qr-status').then(function(r){return r.json();})
+            .then(qrShow).catch(qrIndefinido);}
         function qrIniciar(){var btn=document.getElementById('qr-btn'),msg=document.getElementById('qr-msg');
           btn.disabled=true;var t=btn.textContent;btn.textContent='Gerando…';if(msg)msg.textContent='';
           fetch('/painel/prospeccao/comunicacao/whatsapp-qr-iniciar',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){

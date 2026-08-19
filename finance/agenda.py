@@ -241,14 +241,20 @@ def listar_eventos(pool, conta_id: int, de: datetime, ate: datetime,
     return [_fmt_evento(r) for r in rows]
 
 
-def proximos(pool, conta_id: int, limite: int = 20) -> list[dict]:
+def proximos(pool, conta_id: int, limite: int = 20, tipos=None) -> list[dict]:
+    """O que vem por aí. `tipos` limita as categorias — é como a tela de quem vende
+    data separa VISITA de FESTA: a festa tem card próprio (`confirmadas`) e, sem o
+    filtro, ela ocuparia as oito linhas e a visita da semana não apareceria."""
+    where = "conta_id=%s and status='ativo' and inicio >= %s"
+    args = [conta_id, agora_brt() - timedelta(hours=2)]
+    if tipos:
+        where += " and tipo = any(%s)"
+        args.append(list(tipos))
+    args.append(limite)
     with pool.connection() as c:
         rows = c.execute(
             "select " + _COLS + " from eventos_agenda "
-            "where conta_id=%s and status='ativo' and inicio >= %s "
-            "order by inicio limit %s",
-            (conta_id, agora_brt() - timedelta(hours=2), limite),
-        ).fetchall()
+            f"where {where} order by inicio limit %s", args).fetchall()
     return [_fmt_evento(r) for r in rows]
 
 

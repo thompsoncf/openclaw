@@ -147,7 +147,7 @@ def _render_agenda(vende_data: bool) -> str:
         meses_js=pa.MESES, dias_sem_ext_js=pa.DIAS_SEM_EXT, agora_iso=agora.isoformat(),
         mes_prev="2026-07", mes_next="2026-09", mes_hoje="2026-08", hoje_iso="2026-08-01",
         abrir_novo=True, cfg=cfg, feed_url="", share=None, seguradas=[],
-        vende_data=vende_data,
+        confirmadas=[], vende_data=vende_data,
         rot=(pa._ROT_EVENTO if vende_data else pa._ROT_PADRAO),
         aviso="", ctx={}, conta={}, request=None)
 
@@ -182,7 +182,10 @@ def test_o_formulario_fala_a_lingua_do_nicho():
     dado — muda o que a pessoa lê."""
     ev, outros = _render_agenda(True), _render_agenda(False)
     for frag in ("＋ Novo evento", "<h2>Novo evento</h2>", "Ex: Casamento — Ana e Pedro",
-                 "Data da festa", "Onde vai ser", "Marcar evento", "Próximos eventos",
+                 # "Próximos eventos" virou "🚶 Visitas": quem vende data ganhou card
+                 # próprio pra festa (Reservado) e pra data segurada (Pré-reserva), e
+                 # o que sobra neste é a visita ao espaço, a degustação, o fornecedor.
+                 "Data da festa", "Onde vai ser", "Marcar evento", "🚶 Visitas",
                  "Quem participa"):
         assert frag in ev and frag not in outros
     for frag in ("＋ Novo compromisso", "<h2>Novo compromisso</h2>",
@@ -282,6 +285,12 @@ def cliente(monkeypatch):
         @staticmethod
         def vende_data(pool_, conta_id_):
             return estado["vende"]
+
+        @staticmethod
+        def fichas_de_eventos(pool_, conta_id_, ids):
+            # o schema mínimo daqui não tem `orcamentos`; a ficha é leitura extra e
+            # a tela abre sem ela — o que interessa aqui é a grade e os eventos.
+            return {}
 
     monkeypatch.setattr(pa, "_vendas", lambda: _VendasFake)
 
@@ -507,3 +516,98 @@ def test_centavos_le_o_que_o_dono_digita():
     assert pa._centavos("1810") == 181000
     assert pa._centavos("") is None and pa._centavos("abc") is None
     assert pa._centavos("0") is None          # zero não é sinal
+
+
+# ================================================ trocar de mês sem recarregar
+#
+# A seta era um <a href> comum: dezesseis consultas ao banco e a página inteira
+# remontada, quando a maior parte daquilo devolvia o mesmo resultado — próximas
+# visitas, configuração de lembrete, prazo da reserva, histórico, fila. Nada
+# disso muda de mês.
+#
+# /painel/agenda/mes devolve só o mês. Quem desenha as células continua sendo o
+# `renderizarCelula` do navegador, com os dados daqui.
+
+def test_o_mes_vem_em_json_com_a_grade_e_os_eventos(cliente):
+    ev = ag.criar_evento(cliente.pool, CONTA, "Casamento",
+                         ag.agora_brt().replace(day=15) + timedelta(days=0))
+    m = ag.agora_brt().strftime("%Y-%m")
+    d = cliente.get(f"/painel/agenda/mes?m={m}").json()
+    assert d["m"] == m and d["mes_nome"]
+    # a grade vem SEM os eventos: as células se preenchem no navegador, pela mesma
+    # função que já redesenhava célula depois de cancelar e remarcar
+    celula = d["dias"][0][0]
+    assert set(celula) == {"dia", "fora", "hoje", "iso"}
+    iso = ev["inicio"].astimezone(ag.BRT).date().isoformat()
+    assert [e["id"] for e in d["eventos_dia"][iso]["eventos"]] == [ev["id"]]
+
+
+def test_a_seta_sabe_pra_onde_ir_depois(cliente):
+    """Sem `mes_prev`/`mes_next` na resposta, a segunda seta apontaria pro mesmo
+    lugar da primeira — e o mês travaria depois de um clique."""
+    d = cliente.get("/painel/agenda/mes?m=2026-09").json()
+    assert d["mes_prev"] == "2026-08" and d["mes_next"] == "2026-10"
+
+
+def test_o_mes_nao_traz_o_que_nao_muda_de_mes(cliente):
+    """Os três cards de baixo falam do que vem por aí, não do mês na tela. Mandar
+    de volta seria refazer consulta pra sobrescrever a tela com o mesmo dado — que
+    é exatamente o custo que esta rota existe pra cortar."""
+    d = cliente.get("/painel/agenda/mes?m=2026-09").json()
+    for chave in ("seguradas", "confirmadas", "proximos", "cfg", "historico", "fila"):
+        assert chave not in d
+
+
+def test_a_data_segurada_chega_com_o_vinculo_do_orcamento(cliente):
+    """A caixa do dia usa isso pra oferecer "Sinal recebido" e "Ver orçamento".
+    Sem o vínculo, abrir uma data segurada depois de trocar de mês daria uma caixa
+    sem os botões — e pareceria que a data perdeu o orçamento."""
+    ev = _segurar(cliente, horas=48, sinal=150000)
+    m = ev["inicio"].astimezone(ag.BRT).strftime("%Y-%m")
+    iso = ev["inicio"].astimezone(ag.BRT).date().isoformat()
+    d = cliente.get(f"/painel/agenda/mes?m={m}").json()
+    linha, = d["eventos_dia"][iso]["eventos"]
+    assert linha["pre"] is True and linha["sinal"] == "R$ 1.500,00"
+
+
+def test_o_mes_e_da_conta_logada(cliente):
+    ag.criar_evento(cliente.pool, OUTRA, "Festa da vizinha", ag.agora_brt() + timedelta(days=1))
+    m = (ag.agora_brt() + timedelta(days=1)).strftime("%Y-%m")
+    d = cliente.get(f"/painel/agenda/mes?m={m}").json()
+    titulos = [e["titulo"] for dia in d["eventos_dia"].values() for e in dia["eventos"]]
+    assert "Festa da vizinha" not in titulos
+
+
+# ============================================ os três cards embaixo do calendário
+
+def test_quem_vende_data_ve_os_tres_cards_fora_da_coluna_lateral():
+    """Antes eram um card de abas (uma escondia a outra) e um card de próximos, os
+    dois espremidos na coluna estreita. Lado a lado e na largura inteira, as três
+    respostas se leem juntas — que é como a empresa pensa a semana."""
+    ev = _render_agenda(True)
+    for titulo in ("🚶 Visitas", "⏳ Pré-reserva", "✓ Reservado"):
+        assert titulo in ev
+    # e ficam FORA do .ag-grid — quem for mover de volta pra lateral quebra aqui
+    assert ev.index('class="ag-tres"') > ev.index('class="ag-grid"')
+    assert ev.index('class="ag-tres"') > ev.index('class="side-cards"')
+
+
+def test_fora_do_nicho_de_eventos_a_lateral_continua_como_sempre():
+    """Numa clínica não existe pré-reserva nem festa: três cards ali seriam dois
+    vazios pra sempre e um renomeado sem motivo."""
+    outros = _render_agenda(False)
+    assert "ag-tres" not in outros
+    assert "Próximos compromissos" in outros
+    assert "Pré-reserva" not in outros and "Reservado" not in outros
+
+
+def test_visitas_nao_repete_a_festa_que_ja_esta_em_reservado(cliente):
+    """Sem o filtro, num mês cheio as festas ocupavam as oito linhas e a visita de
+    amanhã não aparecia — além de a mesma data sair em dois cards."""
+    base = ag.agora_brt()
+    ag.criar_evento(cliente.pool, CONTA, "Casamento", base + timedelta(days=5), tipo="empresa")
+    ag.criar_evento(cliente.pool, CONTA, "Visita — Bia", base + timedelta(days=1), tipo="pessoal")
+    ag.criar_evento(cliente.pool, CONTA, "Buffet Sabor", base + timedelta(days=2), tipo="fornecedor")
+    visitas = ag.proximos(cliente.pool, CONTA, limite=8, tipos=("pessoal", "fornecedor"))
+    assert [e["titulo"] for e in visitas] == ["Visita — Bia", "Buffet Sabor"]
+    assert [e["titulo"] for e in ag.confirmadas(cliente.pool, CONTA)] == ["Casamento"]

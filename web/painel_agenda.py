@@ -287,7 +287,10 @@ _ROT_EVENTO = dict(_ROT_PADRAO, **{
     "conv_d": "Cliente, equipe, fornecedor — cada um recebe o próprio link de confirmação.",
     "conv_add": "+ adicionar pessoa",
     "salvar": "Marcar evento", "salvando": "⏳ Marcando…",
-    "proximos": "Próximos eventos",
+    # "Próximos eventos" virou VISITAS: quem vende data ganhou card próprio pra
+    # festa (Reservado) e pra data segurada (Pré-reserva), e o que sobra neste é a
+    # visita ao espaço, a degustação, o fornecedor — o que não é venda de data.
+    "proximos": "🚶 Visitas",
     "cta_dia": "＋ Marcar evento nesse dia",
 })
 
@@ -439,7 +442,14 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
     # teria o que marcar e a legenda falaria de um sinal que nunca existe.
     vende_data = _vendas().vende_data(pool, conta_id)
     eventos = ag.eventos_mes(pool, conta_id, ano, mes)
-    proximos = ag.proximos(pool, conta_id, limite=8)
+    # QUEM VENDE DATA divide "o que vem por aí" em três cards: Visitas, Pré-reserva
+    # e Reservado. A festa tem card próprio (as confirmadas), então aqui entra o
+    # resto — a visita ao espaço, a degustação, o fornecedor. Sem o filtro, num mês
+    # cheio as festas ocupavam as oito linhas e a visita de amanhã não aparecia.
+    #
+    # Pra quem NÃO vende data nada muda: um card só, com tudo, como sempre foi.
+    proximos = ag.proximos(pool, conta_id, limite=8,
+                           tipos=("pessoal", "fornecedor") if vende_data else None)
     # nomes de quem marcou + as pessoas do filtro. As pessoas vêm dos AUTORES do
     # mês (não da equipe inteira): chip de quem não tem evento é botão que filtra
     # pro vazio. O mapa de nomes cobre eventos e próximos.
@@ -538,6 +548,64 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
                    vende_data=vende_data, pessoas=pessoas, p_id=p_id,
                    rot=(_ROT_EVENTO if vende_data else _ROT_PADRAO),
                    aviso=request.session.pop("agenda_aviso", None))
+
+
+@router.get("/painel/agenda/mes")
+def agenda_mes(request: Request, m: str = ""):
+    """Só o MÊS, em JSON — a seta do calendário deixa de recarregar a página.
+
+    POR QUE ISSO EXISTE. A seta era um <a href> comum e refazia a tela inteira:
+    dezesseis consultas ao banco e 31 KB de HTML remontado. A maior parte delas
+    devolvia exatamente o mesmo resultado — próximas visitas, configuração de
+    lembrete, prazo da reserva, link do calendário, histórico de envios, fila —
+    pra remontar uma tela que já estava desenhada. Aqui são SEIS, e cada uma tem
+    motivo.
+
+    E os três cards de baixo nem entram aqui: eles falam do que vem por aí, não do
+    mês que está na tela. Trocar de mês não mexe neles — e é por isso que esta
+    rota é tão curta.
+
+    Devolve a GRADE VAZIA (que dias, quais são de fora, qual é hoje) e os eventos
+    por dia. Quem preenche as células é o mesmo `renderizarCelula` que a tela já
+    usava depois de cancelar e remarcar: uma função só desenhando célula, senão
+    seriam dois calendários que um dia discordam.
+
+    As pré-reservas entram mesmo não mudando de mês, e é de propósito: a caixa do
+    dia precisa delas pra oferecer "Sinal recebido" e "Ver orçamento". Sem isso,
+    abrir uma data segurada depois de trocar de mês daria uma caixa sem os botões
+    — e o dono acharia que a data perdeu o vínculo com o orçamento.
+    """
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    pool = get_pool()
+    conta_id = ctx["conta_id"]
+    ano, mes = _mes_ref(m)
+    agora = ag.agora_brt()
+    hoje = agora.date()
+    eventos = ag.eventos_mes(pool, conta_id, ano, mes)
+    convidados = cv.por_evento(pool, conta_id, [e["id"] for e in eventos])
+    fichas = {}
+    if eventos and _vendas().vende_data(pool, conta_id):
+        try:
+            fichas = _vendas().fichas_de_eventos(pool, conta_id, [e["id"] for e in eventos])
+        except Exception:  # noqa: BLE001 — a ficha é leitura extra; o mês abre sem ela
+            _log_ag.warning("agenda/mes: não deu pra montar as fichas", exc_info=True)
+    with pool.connection() as c:
+        nomes = dict(c.execute(
+            "select id, coalesce(nullif(nome,''), '') from membros where conta_id=%s",
+            (conta_id,)).fetchall())
+    orcs = {ev["id"]: ev for ev in ag.pre_reservas(pool, conta_id)}
+    # a grade sem os eventos: as células se preenchem sozinhas no navegador
+    dias = [[{k: cel[k] for k in ("dia", "fora", "hoje", "iso")} for cel in semana]
+            for semana in _monta_semanas(ano, mes, eventos, hoje, agora, fichas)]
+    return JSONResponse({
+        "ano": ano, "mes": mes, "mes_nome": MESES[mes],
+        "m": f"{ano:04d}-{mes:02d}",
+        "mes_prev": _vizinho(ano, mes, -1), "mes_next": _vizinho(ano, mes, +1),
+        "dias": dias,
+        "eventos_dia": _eventos_por_dia(eventos, convidados, agora, orcs, fichas, nomes),
+    })
 
 
 # ================================================================ HISTÓRICO DE ENVIOS
@@ -1417,18 +1485,20 @@ _CSS_CRU = """
    distingue cor lê pela forma. */
 .segrow.ok .segbar{background:var(--verde)}
 .segrow.ok .srt .v{color:var(--verde-claro)}
-/* as duas abas do card de datas */
-.dt-abas{display:flex;gap:4px;background:var(--card-2);border:1px solid var(--borda);
-         border-radius:10px;padding:3px;margin-bottom:10px}
-.dt-aba{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;
-        border:0;background:transparent;border-radius:8px;padding:.4rem .5rem;cursor:pointer;
-        font-family:inherit;font-size:.78rem;font-weight:600;color:var(--txt-mut);width:auto;margin:0}
-.dt-aba.on{background:var(--card);color:var(--txt);box-shadow:0 1px 0 rgba(0,0,0,.35)}
-.dt-aba:focus-visible{outline:2px solid var(--verde);outline-offset:1px}
-.dt-aba .c{font-size:.66rem;font-weight:700;border-radius:5px;padding:.02rem .32rem;
-           background:var(--borda);color:var(--txt-mut);font-variant-numeric:tabular-nums}
-.dt-aba.on .c.seg{background:var(--ambar-fundo);color:var(--ambar);border:1px solid var(--ambar-borda)}
-.dt-aba.on .c.con{background:var(--neon-fundo);color:var(--verde-claro);border:1px solid var(--neon-borda)}
+/* A FAIXA DOS TRÊS, embaixo do calendário e na largura inteira. Antes eram um
+   card de abas (uma escondia a outra) e um card de próximos, os dois espremidos
+   na coluna estreita da direita. Lado a lado, as três respostas se leem juntas —
+   que é como a empresa pensa a semana. */
+.ag-tres{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:18px;align-items:start}
+.ag-tres>.ag-card{min-width:0}
+@media(max-width:900px){.ag-tres{grid-template-columns:1fr}}
+/* o contador no título de cada card */
+.ag-tres h2{display:flex;align-items:center;gap:8px}
+.cnt{font-size:.62rem;font-weight:700;border-radius:999px;padding:.1rem .45rem;margin-left:auto;
+     font-variant-numeric:tabular-nums}
+.cnt.vis{background:var(--azul-fundo);color:var(--azul);border:1px solid var(--azul-borda)}
+.cnt.pre{background:var(--ambar-fundo);color:var(--ambar);border:1px solid var(--ambar-borda)}
+.cnt.res{background:var(--neon-fundo);color:var(--verde-claro);border:1px solid var(--neon-borda)}
 /* choque de horário no formulário */
 .choque{display:none;gap:8px;align-items:flex-start;font-size:.74rem;color:#f0c2be;
         background:var(--coral-fundo);border:1px solid var(--coral-borda);border-radius:9px;
@@ -2156,22 +2226,87 @@ function zaqVazioProximos(){
     d.textContent='Nada por vir. Marque um compromisso ali em cima. 🎉'; px.appendChild(d);
   }
 }
-// ---------------- As abas do card de datas ----------------
-// Puro DOM: as duas listas já vieram no HTML. Trocar de aba não pede nada ao
-// servidor — o card inteiro custa duas consultas, e elas já foram feitas.
-(function(){
-  var card=document.getElementById('datas-card'); if(!card) return;
-  var abas=[].slice.call(card.querySelectorAll('.dt-aba'));
-  abas.forEach(function(b){
-    b.addEventListener('click', function(){
-      abas.forEach(function(o){
-        var on=(o===b);
-        o.classList.toggle('on', on);
-        o.setAttribute('aria-selected', on?'true':'false');
-        var pane=document.getElementById(o.dataset.alvo);
-        if(pane) pane.hidden=!on;
-      });
+// ---------------- Trocar de mês sem recarregar ----------------
+// A SETA ERA UM LINK. Refazia a tela inteira — dezesseis consultas ao banco e
+// 31 KB de HTML — quando só QUATRO dessas consultas têm a ver com o mês. E os
+// três cards de baixo nem mudam de mês: falam do que vem por aí, não do mês na
+// tela.
+//
+// Agora a seta busca só o mês (/painel/agenda/mes) e o calendário se redesenha.
+// Quem preenche cada célula é o MESMO `renderizarCelula` de sempre: uma função
+// só desenhando célula, senão seriam dois calendários que um dia discordam.
+var AG_INDO = false;
+function montarGrade(dias){
+  var cal = document.querySelector('.cal');
+  if(!cal) return;
+  var hd = cal.querySelector('.cal-hd');
+  var html = hd ? hd.outerHTML : '';
+  dias.forEach(function(semana){
+    html += '<div class="cal-wk">';
+    semana.forEach(function(c){
+      html += '<div class="cal-cell'+(c.fora?' fora':'')+(c.hoje?' hoje':'')+'"'
+            + ' data-iso="'+c.iso+'" tabindex="0" role="button">'
+            + '<div class="cal-head"><span class="cal-num">'+c.dia+'</span></div></div>';
     });
+    html += '</div>';
+  });
+  cal.innerHTML = html;
+}
+function irParaMes(m, push){
+  if(AG_INDO) return;
+  AG_INDO = true;
+  var cal = document.querySelector('.cal');
+  if(cal) cal.style.opacity = '.55';
+  fetch('/painel/agenda/mes?m='+encodeURIComponent(m), {headers:{'Accept':'application/json'}})
+    .then(function(r){ if(!r.ok) throw new Error('http'); return r.json(); })
+    .then(function(d){
+      EVENTOS_DIA = d.eventos_dia || {};
+      MES_ATUAL = CUR_MES = d.m;
+      montarGrade(d.dias || []);
+      Object.keys(EVENTOS_DIA).forEach(renderizarCelula);
+      var h1 = document.querySelector('.ag-mes h1');
+      if(h1) h1.textContent = d.mes_nome + ' de ' + d.ano;
+      var setas = document.querySelectorAll('.ag-nav a');
+      if(setas.length === 2){
+        setas[0].setAttribute('data-m', d.mes_prev);
+        setas[0].href = '/painel/agenda?m=' + d.mes_prev;
+        setas[1].setAttribute('data-m', d.mes_next);
+        setas[1].href = '/painel/agenda?m=' + d.mes_next;
+      }
+      fecharDia();
+      if(push !== false){
+        try{
+          var u = new URL(window.location.href);
+          u.searchParams.set('m', d.m);
+          history.pushState({m: d.m}, '', u.toString());
+        }catch(e){}
+      }
+    })
+    .catch(function(){
+      // deu ruim: cai no comportamento antigo em vez de deixar a tela travada
+      window.location.href = '/painel/agenda?m=' + encodeURIComponent(m);
+    })
+    .finally(function(){ AG_INDO = false; if(cal) cal.style.opacity = ''; });
+}
+(function(){
+  var nav = document.querySelector('.ag-top');
+  if(!nav) return;
+  nav.addEventListener('click', function(ev){
+    var a = ev.target.closest && ev.target.closest('.ag-nav a, .ag-hoje');
+    if(!a) return;
+    var m = a.getAttribute('data-m');
+    if(!m) return;
+    ev.preventDefault();
+    irParaMes(m);
+  });
+  // o botão VOLTAR do navegador tem que voltar de mês, não sair da agenda —
+  // é a contrapartida de ter trocado o link por fetch.
+  window.addEventListener('popstate', function(ev){
+    var m = (ev.state && ev.state.m);
+    if(!m){
+      try{ m = new URL(window.location.href).searchParams.get('m'); }catch(e){}
+    }
+    if(m) irParaMes(m, false);
   });
 })();
 
@@ -2291,11 +2426,14 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
   <div class="ag-top">
     <div class="ag-mes">
       <div class="ag-nav">
-        <a href="/painel/agenda?m={{ mes_prev }}" aria-label="Mês anterior">‹</a>
-        <a href="/painel/agenda?m={{ mes_next }}" aria-label="Próximo mês">›</a>
+        {# `data-m` é o que o JS lê pra trocar de mês sem recarregar. O href
+           continua certo e completo: sem JS, ou se o fetch falhar, a seta volta a
+           ser o link de sempre. #}
+        <a href="/painel/agenda?m={{ mes_prev }}" data-m="{{ mes_prev }}" aria-label="Mês anterior">‹</a>
+        <a href="/painel/agenda?m={{ mes_next }}" data-m="{{ mes_next }}" aria-label="Próximo mês">›</a>
       </div>
       <h1>{{ mes_nome }} de {{ ano }}</h1>
-      <a href="/painel/agenda?m={{ mes_hoje }}" class="ag-hoje">Hoje</a>
+      <a href="/painel/agenda?m={{ mes_hoje }}" data-m="{{ mes_hoje }}" class="ag-hoje">Hoje</a>
     </div>
     <a href="#novo" class="ag-btn" onclick="agNovo(true)">{{ rot.novo_btn }}</a>
   </div>
@@ -2347,66 +2485,8 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </div>
 
     <div class="side-cards">
-      <!-- AS DATAS, as duas faces do mesmo número: o que está por um fio e o que
-           já é da casa. Antes existia só o lado "seguradas", e ele sumia quando
-           não havia nenhuma — a empresa não tinha onde ver quantas datas tinha
-           vendido sem contar no calendário, mês a mês.
-           Só quem vende data vê o card; clínica e loja não seguram data. -->
-      {% if seguradas or confirmadas %}
-      <div class="ag-card" id="datas-card">
-        <div class="dt-abas" role="tablist">
-          <button type="button" class="dt-aba on" data-alvo="dt-seg" role="tab" aria-selected="true">
-            ⏳ Seguradas <span class="c seg">{{ seguradas|length }}</span></button>
-          <button type="button" class="dt-aba" data-alvo="dt-con" role="tab" aria-selected="false">
-            ✓ Confirmadas <span class="c con">{{ confirmadas|length }}</span></button>
-        </div>
-
-        <div id="dt-seg" class="dt-pane">
-          {% for s in seguradas %}
-          <div class="segrow{% if s.urgente %} urg{% endif %}">
-            <div class="segbar"></div>
-            <div>
-              <div class="stt">{{ s.titulo }}</div>
-              <div class="smt">{{ s.quando }}{% if s.sinal %} · sinal {{ s.sinal }}{% endif %}{% if s.orcamento_numero %} · orçamento nº {{ s.orcamento_numero }}{% endif %}</div>
-            </div>
-            <div class="srt">
-              <div class="v">{{ s.prazo }}</div>
-              <div class="s">vence {{ s.ate }}</div>
-            </div>
-          </div>
-          {% else %}
-          <p class="hint" style="margin:2px 0">Nenhuma data segurada agora.</p>
-          {% endfor %}
-          {% if seguradas %}
-          <p class="hint" style="margin:2px 0 0">Da que vence primeiro. Passando o prazo sem o sinal, a data
-          libera sozinha e você é avisado — abra o dia no calendário pra firmar ou soltar antes disso.</p>
-          {% endif %}
-        </div>
-
-        <div id="dt-con" class="dt-pane" hidden>
-          {% for s in confirmadas %}
-          <div class="segrow ok">
-            <div class="segbar"></div>
-            <div>
-              <div class="stt">{{ s.titulo }}</div>
-              <div class="smt">{{ s.quando }}{% if s.orcamento_numero %} · orçamento nº {{ s.orcamento_numero }}{% else %} · marcado na agenda{% endif %}</div>
-            </div>
-            <div class="srt">
-              <div class="v">{{ s.total or '—' }}</div>
-              <div class="s">{{ 'sinal recebido' if s.sinal_pago else 'data firme' }}</div>
-            </div>
-          </div>
-          {% else %}
-          <p class="hint" style="margin:2px 0">Nenhuma data firme daqui pra frente.</p>
-          {% endfor %}
-          {% if confirmadas %}
-          <p class="hint" style="margin:2px 0 0">Da mais próxima. A festa que já aconteceu sai daqui sozinha.</p>
-          {% endif %}
-        </div>
-      </div>
-      {% endif %}
-
-      <!-- próximos -->
+      {# clínica, loja, escritório: um card só, com tudo, como sempre foi. #}
+      {% if not vende_data %}
       <div class="ag-card">
         <h2>{{ rot.proximos }}</h2>
         <div class="px">
@@ -2477,6 +2557,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         </div>
       </div>
 
+      {% endif %}
       <!-- novo compromisso -->
       <div class="ag-card" id="novo"{% if not abrir_novo %} style="display:none"{% endif %}>
         <h2>{{ rot.novo }}</h2>
@@ -2658,6 +2739,137 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       </div>
     </div>
   </div>
+
+
+  {# OS TRÊS CARDS DAS DATAS, embaixo do calendário e na largura inteira.
+     Antes viviam na coluna estreita da direita: o de datas com duas abas (uma
+     escondia a outra) e o de próximos misturando festa com visita. Aqui cada um
+     responde uma pergunta e as três respostas se leem juntas, que é como a
+     empresa pensa a semana.
+
+     Só pra quem vende data. Numa clínica não existe pré-reserva nem festa — lá o
+     card de próximos continua onde sempre esteve, na lateral. #}
+  {% if vende_data %}
+  <div class="ag-tres">
+
+    <div class="ag-card">
+      <h2>{{ rot.proximos }} <span class="cnt vis">{{ proximos|length }}</span></h2>
+      <div class="px">
+          {% for e in proximos %}
+          <div class="px-row" data-ev="{{ e.id }}" data-membro="{{ e.membro_id or '' }}">
+            <div class="px-dot d-{{ e.tipo }}"></div>
+            <div class="px-when"><div class="d">{{ e.dia_rot }}</div><div class="h">{{ e.hora_rot }}</div></div>
+            <div class="px-body">
+              <div class="tt">{{ e.titulo }}</div>
+              <div class="mt">{{ e.tipo_rot }}{% if e.local %} · {{ e.local }}{% endif %}{% if e.autor %} · <span title="quem marcou">👤 {{ e.autor }}</span>{% endif %}</div>
+              {% if e.convidados %}
+              <div class="px-conv">
+                {% if e.conv_resumo.total > 1 %}
+                <a href="/painel/agenda?m={{ '%04d-%02d'|format(ano, mes) }}&convite_ev={{ e.id }}" class="cgrp{% if e.conv_resumo.fechado %} cgrp-ok{% endif %}" style="text-decoration:none" title="Ver e reenviar os convites">👥 {{ e.conv_resumo.confirmados }} de {{ e.conv_resumo.total }} confirmaram{% if e.conv_resumo.fechado %} 🎉{% endif %}</a>
+                {% else %}
+                {% for g in e.convidados %}<a href="/painel/agenda?m={{ '%04d-%02d'|format(ano, mes) }}&convite_ev={{ e.id }}" class="cpill cp-{{ g.status }}" style="text-decoration:none" title="Reenviar o link do convite de {{ g.nome or 'convidado' }}">👤 {{ g.nome or 'Convidado' }}: {{ g.status_rot }}</a>{% endfor %}
+                {% endif %}
+              </div>
+              {% endif %}
+              <div class="remarcar-box" id="remBox-{{ e.id }}">
+                <form method="post" action="/painel/agenda/remarcar">
+                  <div class="rlbl">🔁 Nova data</div>
+                  <input type="hidden" name="evento_id" value="{{ e.id }}">
+                  <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+                  <div class="remarcar-row2">
+                    <input type="date" name="data" value="{{ e.data_iso }}" required>
+                    <input type="time" name="hora" value="{{ e.hora_rot }}" required>
+                  </div>
+                  <div class="tg">
+                    <div><div class="tg-t">Avisar os convidados</div><div class="tg-s">Manda a nova data pro mesmo link que já têm</div></div>
+                    <label class="sw"><input type="checkbox" name="avisar" value="1" checked><span class="track"></span><span class="knob"></span></label>
+                  </div>
+                  <div class="remarcar-actions">
+                    <button class="rbtn ok" type="submit" data-busy="⏳ Salvando…">Salvar nova data</button>
+                    <button class="rbtn cc" type="button" onclick="remToggle({{ e.id }})">Cancelar</button>
+                  </div>
+                </form>
+              </div>
+              <div class="add-conv-box" id="addConvBox-{{ e.id }}">
+                <form method="post" action="/painel/agenda/convidado/adicionar">
+                  <div class="rlbl">＋ Adicionar convidado</div>
+                  <input type="hidden" name="evento_id" value="{{ e.id }}">
+                  <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+                  <div class="add-conv-row">
+                    <input name="nome" placeholder="Nome" autocomplete="off">
+                    <input name="contato" placeholder="(86) 90000-0000" autocomplete="off">
+                  </div>
+                  <div class="add-conv-actions">
+                    <button class="rbtn ok" type="submit" data-busy="⏳ Adicionando…">Adicionar</button>
+                    <button class="rbtn cc" type="button" onclick="addConvToggle({{ e.id }})">Cancelar</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+            <div class="px-actions">
+              <button class="px-add" type="button" title="Adicionar convidado" onclick="addConvToggle({{ e.id }})">＋👤</button>
+              <button class="px-rm" type="button" title="Remarcar" onclick="remToggle({{ e.id }})">🔁</button>
+              <form method="post" action="/painel/agenda/cancelar" data-ajax="cancelar" onsubmit="return confirm('Cancelar “{{ e.titulo }}”?')">
+                <input type="hidden" name="evento_id" value="{{ e.id }}">
+                <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+                <button class="px-x" type="submit" title="Cancelar">✕</button>
+              </form>
+            </div>
+          </div>
+          {% else %}
+          <div class="px-vazio">Nada por vir. Marque um compromisso ali em cima. 🎉</div>
+          {% endfor %}
+        </div>
+      <p class="hint" style="margin:6px 0 0">O que não é festa nem data segurada.</p>
+    </div>
+
+    <div class="ag-card">
+      <h2>⏳ Pré-reserva <span class="cnt pre">{{ seguradas|length }}</span></h2>
+            {% for s in seguradas %}
+      <div class="segrow{% if s.urgente %} urg{% endif %}">
+        <div class="segbar"></div>
+        <div>
+          <div class="stt">{{ s.titulo }}</div>
+          <div class="smt">{{ s.quando }}{% if s.sinal %} · sinal {{ s.sinal }}{% endif %}{% if s.orcamento_numero %} · orçamento nº {{ s.orcamento_numero }}{% endif %}</div>
+        </div>
+        <div class="srt">
+          <div class="v">{{ s.prazo }}</div>
+          <div class="s">vence {{ s.ate }}</div>
+        </div>
+      </div>
+      {% else %}
+      <p class="hint" style="margin:2px 0">Nenhuma data segurada agora.</p>
+      {% endfor %}
+      {% if seguradas %}
+      <p class="hint" style="margin:6px 0 0">Da que vence primeiro. Sem o sinal no prazo, a data
+      libera sozinha e você é avisado — abra o dia no calendário pra firmar ou soltar antes disso.</p>
+      {% endif %}
+    </div>
+
+    <div class="ag-card">
+      <h2>✓ Reservado <span class="cnt res">{{ confirmadas|length }}</span></h2>
+            {% for s in confirmadas %}
+      <div class="segrow ok">
+        <div class="segbar"></div>
+        <div>
+          <div class="stt">{{ s.titulo }}</div>
+          <div class="smt">{{ s.quando }}{% if s.orcamento_numero %} · orçamento nº {{ s.orcamento_numero }}{% else %} · marcado na agenda{% endif %}</div>
+        </div>
+        <div class="srt">
+          <div class="v">{{ s.total or '—' }}</div>
+          <div class="s">{{ 'sinal recebido' if s.sinal_pago else 'data firme' }}</div>
+        </div>
+      </div>
+      {% else %}
+      <p class="hint" style="margin:2px 0">Nenhuma data firme daqui pra frente.</p>
+      {% endfor %}
+      {% if confirmadas %}
+      <p class="hint" style="margin:6px 0 0">Da mais próxima. A festa que já aconteceu sai sozinha.</p>
+      {% endif %}
+    </div>
+
+  </div>
+  {% endif %}
 
   <!-- histórico de envios: convites/lembretes/remarcados mandados, com status -->
   <div class="hist-card">

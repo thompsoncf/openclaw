@@ -51,11 +51,20 @@ def pool(monkeypatch):
     p = ConnectionPool(url, min_size=1, max_size=3, open=True,
                        kwargs={"prepare_threshold": None})
     with p.connection() as c:
-        c.execute("create table contas (id bigserial primary key, nome text)")
+        c.execute("create table nichos (id bigserial primary key, nome text, slug text unique)")
+        c.execute("""create table contas (id bigserial primary key, nome text,
+                     documento text, razao_social text, nome_fantasia text, endereco text,
+                     bairro text, cep text, cidade text, uf text, email_empresa text,
+                     telefone text, cnae text, nicho_id bigint,
+                     vende_produto boolean, vende_servico boolean)""")
         c.execute("""create table canais_config (conta_id bigint, canal text, provedor text,
                      identificador text, wa_phone_id text, token text, ativo boolean default true)""")
+        # as colunas de contato existem porque `criar_orcamento` monta a proposta
+        # a partir da ficha do lead — os testes da PORTA passam por ele
         c.execute("""create table prospeccao (id bigserial primary key, conta_id bigint,
-                     membro_id bigint, empresa text, whatsapp text, telefone text,
+                     membro_id bigint, empresa text, contato text, decisor_nome text,
+                     socio text, cnpj text, segmento text, whatsapp text, telefone text,
+                     email text, cidade text, uf text,
                      orcamento_id bigint, atualizado_em timestamptz default now())""")
         c.execute("""create table conversas (id bigserial primary key, conta_id bigint,
                      prospeccao_id bigint, canal text, status text, agente_ativo boolean,
@@ -74,6 +83,10 @@ def pool(monkeypatch):
                   (CONTA_QR, CONTA_TW, CONTA_CLOUD))
         c.execute("""insert into prospeccao (id, conta_id, membro_id, empresa, whatsapp)
                      values (%s,%s,7,'Buffet Estrela','5586999998888')""", (LEAD, CONTA_QR))
+        c.commit()
+    with p.connection() as c:
+        from web.painel_servicos import _garantir_tabela
+        _garantir_tabela(c)
         c.commit()
     monkeypatch.setattr(ck, "_posse", lambda c, cid, mid, lid: True)
     monkeypatch.setenv("WA_QR_SERVICE_URL", "https://qr.test")
@@ -263,3 +276,103 @@ def test_o_envio_falhando_nao_grava_mensagem(pool, monkeypatch, sem_stt):
     r = ck.enviar_audio(pool, CONTA_QR, 7, LEAD, WEBM, "audio/webm", 8)
     assert r["ok"] is False and "desconectado" in r["erro"].lower()
     assert _msgs(pool) == []
+
+
+# ══════════════════════════════════════════════ a porta pro celular
+
+def test_onde_o_zaq_entrega_sempre_a_porta_fecha(pool):
+    """`entrega_sempre` é o portão da porta pro WhatsApp. No QR o Zaq fala com o
+    cliente a qualquer hora; na API oficial (Twilio/Cloud) existe a janela de 24h,
+    e fora dela o vendedor simplesmente não consegue responder pelo Zaq — fechar a
+    porta lá o deixaria mudo num horário morto."""
+    assert ck.entrega_sempre(pool, CONTA_QR) is True
+    assert ck.entrega_sempre(pool, CONTA_TW) is False
+    assert ck.entrega_sempre(pool, CONTA_CLOUD) is False
+
+
+def test_falha_de_leitura_deixa_a_porta_ABERTA(pool, monkeypatch):
+    """A tolerância aqui aponta pro outro lado da do áudio, de propósito: não saber
+    o canal vira "não entrega sempre", que MANTÉM a saída. Trancar o vendedor por
+    causa de uma consulta que falhou é pior que uma porta a mais."""
+    from finance import whatsapp_out as wo
+    monkeypatch.setattr(wo, "provedor_da_conta",
+                        lambda *a: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert ck.entrega_sempre(pool, CONTA_QR) is False
+
+
+def test_a_tela_do_vendedor_perde_o_atalho_do_whatsapp(pool):
+    from web import painel_cockpit as pc
+
+    class _Req:
+        def __init__(self):
+            self.session = {}
+
+    d = {"empresa": "Buffet", "cidade": "", "uf": "", "doc_fmt": "", "mensagens": [],
+         "ia": False, "status": "novo", "etapas": [], "zap_link": "https://wa.me/5586999990000",
+         "tel_link": ""}
+    import re as _re
+
+    def _atalhos(h):
+        return _re.search(r"<div class=grade>(.*?)</div>", h, _re.S).group(1)
+
+    fechada = _atalhos(pc._lead_vendedor(_Req(), 7, d, saida_wa=False).body.decode())
+    aberta = _atalhos(pc._lead_vendedor(_Req(), 7, d, saida_wa=True).body.decode())
+    # olha os ATALHOS, não a página: "wa.me" também aparece num comentário do JS
+    assert "wa.me" not in fechada, "o app não pode mais convidar o vendedor a sair dele"
+    assert "WhatsApp" not in fechada, "nem o atalho apagado deve sobrar"
+    assert "wa.me" in aberta, "na conta com janela de 24h a saída continua"
+
+
+def test_a_proposta_nao_devolve_link_de_whatsapp_onde_o_zaq_entrega(pool, envios, sem_stt):
+    """Depois de gerar a proposta havia dois botões: "Mandar no WhatsApp" (que sai
+    do Zaq) e "Enviar na conversa" (que fica). Manter os dois é ensinar a sair."""
+    r = ck.criar_orcamento(pool, CONTA_QR, 7, LEAD, [{"nome": "X", "setup": 100, "mensal": 0}])
+    assert r["ok"] and r["zap"] == ""
+
+
+def test_a_proposta_MANTEM_o_link_onde_existe_janela_de_24h(pool, envios, sem_stt):
+    with pool.connection() as c:
+        c.execute("""insert into prospeccao (id, conta_id, membro_id, empresa, whatsapp)
+                     values (777,%s,7,'Mercadinho','5586999997777')""", (CONTA_TW,))
+        c.commit()
+    r = ck.criar_orcamento(pool, CONTA_TW, 7, 777, [{"nome": "X", "setup": 100, "mensal": 0}])
+    assert r["ok"] and "wa.me" in r["zap"]
+
+
+# ══════════════════════════════════════════════ quanto ainda sai por fora
+
+def test_a_saida_por_fora_conta_o_que_nao_tem_autor(pool, envios, sem_stt):
+    """Mensagem enviada pelo Zaq nasce com `membro_id`; a que sai do celular chega
+    pelo espelho da sessão e vem sem autor. Contar `membro_id is null` mede o USO
+    da porta — a lista de aparelhos diz que ela existe, este número diz se alguém
+    passa por ela. E sai do BANCO: não encosta no WhatsApp."""
+    ck.enviar_audio(pool, CONTA_QR, 7, LEAD, WEBM, "audio/webm", 8)     # pelo Zaq
+    with pool.connection() as c:
+        conv = c.execute("select id from conversas limit 1").fetchone()[0]
+        # três saídas pelo celular (sem autor) e uma do agente, que não conta
+        c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, membro_id, texto)
+                     values (%s,'whatsapp','out','humano',null,'a'),
+                            (%s,'whatsapp','out','humano',null,'b'),
+                            (%s,'whatsapp','out','humano',null,'c'),
+                            (%s,'whatsapp','out','agente',null,'resposta automática')""",
+                  (conv, conv, conv, conv))
+        c.commit()
+    r = ck.saida_por_fora(pool, CONTA_QR)
+    assert r["total"] == 4 and r["por_fora"] == 3, r
+    assert r["pct"] == 75
+
+
+def test_o_agente_nao_conta_como_saida_por_fora(pool):
+    """O agente também manda sem `membro_id`, e ele não é vendedor nenhum — contar
+    a IA como "saiu por fora" inflaria o número que o dono usa pra decidir."""
+    with pool.connection() as c:
+        c.execute("""insert into conversas (id, conta_id, prospeccao_id, canal)
+                     values (900,%s,%s,'whatsapp')""", (CONTA_QR, LEAD))
+        c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, membro_id, texto)
+                     values (900,'whatsapp','out','agente',null,'oi')""")
+        c.commit()
+    assert ck.saida_por_fora(pool, CONTA_QR)["total"] == 0
+
+
+def test_conta_sem_mensagem_nao_vira_divisao_por_zero(pool):
+    assert ck.saida_por_fora(pool, CONTA_TW) == {"dias": 7, "total": 0, "por_fora": 0, "pct": 0}

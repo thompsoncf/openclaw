@@ -41,6 +41,11 @@ def test_a_tela_do_vendedor_nao_tem_mais_o_botao_ligar():
     assert "Ligar" not in _html(_lead_falso())
 
 
+def _grade(html):
+    # não-guloso até o primeiro </div>: os atalhos são <a>/<span>, não têm div dentro
+    return re.search(r"<div class=grade>(.*?)</div>", html, re.S).group(1)
+
+
 def test_a_grade_fica_com_quatro_atalhos_pares():
     """`.grade` é `grid-template-columns:1fr 1fr`. Número ímpar de atalhos deixa o
     último meia-largura, com um buraco do lado — foi o que motivou o ajuste."""
@@ -48,9 +53,17 @@ def test_a_grade_fica_com_quatro_atalhos_pares():
     html = _html(_lead_falso())
     for rot in ("WhatsApp", "Ficha", "Orçamento", "Visita"):
         assert rot in html, f"sumiu o atalho {rot}"
-    # não-guloso até o primeiro </div>: os atalhos são <a>/<span>, não têm div dentro
-    grade = re.search(r"<div class=grade>(.*?)</div>", html, re.S).group(1)
-    assert grade.count("</a>") + grade.count("</span>") == 4
+    assert _grade(html).count("</a>") + _grade(html).count("</span>") == 4
+
+
+def test_sem_o_atalho_do_whatsapp_o_ultimo_ocupa_a_linha_inteira():
+    """Quando a conta entrega tudo pelo Zaq o atalho do WhatsApp some, e aí sobram
+    TRÊS. Sem a regra do ímpar o último ficaria meia-largura com um buraco ao lado
+    — o mesmo defeito que tirou o 'Ligar' daqui."""
+    html = pc._lead_vendedor(_Req(), 7, _lead_falso(), saida_wa=False).body.decode()
+    assert "WhatsApp" not in _grade(html)
+    assert _grade(html).count("</a>") + _grade(html).count("</span>") == 3
+    assert ".grade a:last-child:nth-child(odd)" in pc._CSS
 
 
 def test_o_whatsapp_desligado_vira_atalho_apagado_e_nao_some():

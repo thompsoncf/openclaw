@@ -471,22 +471,75 @@ def enviar_mensagem(pool, conta_id: int, membro_id: int, lead_id: int, texto: st
     return {"ok": True}
 
 
-def pode_gravar_audio(pool, conta_id: int) -> bool:
-    """Esta conta consegue MANDAR áudio pelo Zaq?
+def entrega_sempre(pool, conta_id: int) -> bool:
+    """O Zaq consegue falar com o cliente A QUALQUER HORA nesta conta?
 
-    Só o canal QR. Twilio e Cloud API mandam mídia por outro caminho (URL pública
-    e media-id), e nenhum dos dois está construído — mostrar o microfone numa
-    conta dessas faria o vendedor gravar e o envio falhar depois, que é pior que
-    não ter o botão. As três distinções seguem separadas de propósito.
+    Só no canal QR. Twilio e Cloud API são a API oficial: fora da janela de 24h
+    só sai template aprovado, então existe hora em que o vendedor simplesmente
+    não consegue responder pelo Zaq. As três distinções seguem separadas.
 
-    TOLERANTE: falha de leitura responde não. O pior caso é um microfone que não
-    aparece; o outro lado é um áudio que o cliente nunca recebe.
+    É este portão que decide se o atalho pro WhatsApp aparece: fechar a porta numa
+    conta que não entrega sempre deixaria o vendedor sem saída num horário morto.
+
+    TOLERANTE pro lado seguro: falha de leitura responde NÃO — e "não" aqui é
+    manter a porta aberta, que é o pior dos dois males só quando tudo funciona.
     """
     try:
         from finance import whatsapp_out as _wo
         with pool.connection() as c:
-            if _wo.provedor_da_conta(c, conta_id) != "qr":
-                return False
+            return _wo.provedor_da_conta(c, conta_id) == "qr"
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra saber o canal da conta %s (%s: %s)",
+                     conta_id, type(e).__name__, e)
+        return False
+
+
+def saida_por_fora(pool, conta_id: int, dias: int = 7) -> dict:
+    """Quanto do que a empresa mandou ao cliente saiu POR FORA do Zaq.
+
+    Mensagem enviada pelo Zaq nasce com `membro_id`; a que sai do celular chega
+    pelo espelho da sessão e vem sem autor nenhum. Então contar `membro_id is
+    null` mede exatamente o que a porta fechada quer resolver — e mede o USO,
+    não a possibilidade: a lista de aparelhos diz que a porta existe, este número
+    diz se alguém passa por ela.
+
+    Vale por si quando a consulta de aparelhos falha (sessão fora do ar), porque
+    sai do banco e não depende do WhatsApp responder.
+
+    {dias, total, por_fora, pct} — pct arredondado, 0 quando não houve mensagem.
+    """
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                """select count(*),
+                          count(*) filter (where m.membro_id is null)
+                     from mensagens m join conversas cv on cv.id = m.conversa_id
+                    where cv.conta_id=%s and m.canal='whatsapp' and m.direcao='out'
+                      and m.autor <> 'agente'
+                      and m.criado_em > now() - (%s || ' days')::interval""",
+                (conta_id, int(dias))).fetchone()
+        total, fora = int(r[0] or 0), int(r[1] or 0)
+    except Exception as e:  # noqa: BLE001
+        _log.warning("não deu pra medir a saída por fora da conta %s: %s", conta_id, e)
+        return {"dias": dias, "total": 0, "por_fora": 0, "pct": 0}
+    return {"dias": dias, "total": total, "por_fora": fora,
+            "pct": round(100 * fora / total) if total else 0}
+
+
+def pode_gravar_audio(pool, conta_id: int) -> bool:
+    """Esta conta consegue MANDAR áudio pelo Zaq?
+
+    Mesmo portão de canal do `entrega_sempre`, mais o serviço de QR estar de pé.
+    Twilio e Cloud API mandam mídia por outro caminho (URL pública e media-id) e
+    nenhum dos dois está construído — mostrar o microfone numa conta dessas faria
+    o vendedor gravar e o envio falhar depois, que é pior que não ter o botão.
+
+    TOLERANTE: falha de leitura responde não. O pior caso é um microfone que não
+    aparece; o outro lado é um áudio que o cliente nunca recebe.
+    """
+    if not entrega_sempre(pool, conta_id):
+        return False
+    try:
         from finance import whatsapp_qr as _qr
         return _qr.configurado()
     except Exception as e:  # noqa: BLE001
@@ -1265,8 +1318,12 @@ def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens,
     link = f"{_app_url()}/proposta/{token}"
     numero = (lead[4] or lead[5] or "")
     msg = f"Olá! Segue sua proposta 👋\n{link}"
+    # O ATALHO PRO WHATSAPP SÓ SOBRA ONDE O ZAQ NÃO DÁ CONTA. Na conta que entrega
+    # sempre existe o "Enviar na conversa do lead" logo ali, e manter os dois é
+    # convidar o vendedor a sair do Zaq — que é justamente o hábito a desfazer.
     return {"ok": True, "id": oid, "token": token, "link": link,
-            "zap": _zap_link_texto(numero, msg) if numero else "",
+            "zap": ("" if entrega_sempre(pool, conta_id)
+                    else (_zap_link_texto(numero, msg) if numero else "")),
             "setup_centavos": setup_c, "mensal_centavos": mensal_c,
             # o líquido volta pra tela poder confirmar o número que o vendedor viu:
             # se divergir do que ela calculou, quem vale é este.
@@ -1365,9 +1422,13 @@ def agendar_visita(pool, conta_id: int, membro_id: int, lead_id: int, *, data: s
         except Exception:  # noqa: BLE001
             avisado = False
     from web.painel_prospeccao import _zap_link_texto
+    # o reenvio pelo WhatsApp só sobra quando o aviso NÃO saiu. Numa conta que
+    # entrega sempre e com a confirmação já enviada, o botão seria só uma porta
+    # pra fora do Zaq — e mandaria a mesma coisa duas vezes pro cliente.
+    sobra_saida = not (avisado and entrega_sempre(pool, conta_id))
     return {"ok": True, "evento_id": ev["id"], "ics_url": ics_url, "quando": quando,
             "local": local, "empresa": esp["nome"], "avisado": avisado,
-            "zap": _zap_link_texto(numero, msg) if numero else ""}
+            "zap": (_zap_link_texto(numero, msg) if (numero and sobra_saida) else "")}
 
 
 def visita_ics(pool, token: str) -> str | None:

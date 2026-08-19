@@ -51,7 +51,7 @@ const pino = require('pino')
 const QRCode = require('qrcode')
 const makeWASocket = require('@whiskeysockets/baileys').default
 const { DisconnectReason, makeCacheableSignalKeyStore, fetchLatestBaileysVersion, proto, BufferJSON,
-  normalizeMessageContent, downloadMediaMessage } = require('@whiskeysockets/baileys')
+  normalizeMessageContent, downloadMediaMessage, jidNormalizedUser } = require('@whiskeysockets/baileys')
 const TIPO_HIST = proto.Message.HistorySyncNotification.HistorySyncType
 const { useDbAuthState } = require('./auth-db')
 const { criarTrava } = require('./sessao-lock')
@@ -2392,6 +2392,53 @@ const servidor = http.createServer(async (req, res) => {
             return json(res, 200, { ok: false, erro: String(e).slice(0, 180) })
           }
         })
+      }
+
+      // QUANTOS APARELHOS ESTÃO LIGADOS neste WhatsApp. É a pergunta que sobra
+      // depois de o Cockpit parar de oferecer a saída pro celular: o app deixou de
+      // convidar, mas quem já tem o número ligado no aparelho continua respondendo
+      // por fora — e o que sai por fora chega sem nome.
+      //
+      // O protocolo numera os aparelhos: 0 é o celular dono da conta, e cada
+      // ligação (WhatsApp Web, Desktop, e a NOSSA sessão) ganha um número. Então
+      // "outros" = total − o celular − o Zaq.
+      if (req.method === 'GET' && acao === 'aparelhos') {
+        // TRAVA DO LADO DE CÁ, e não só na tela: no máximo uma pergunta por minuto
+        // por conta. A tela vem do navegador, e navegador não é fonte confiável —
+        // uma aba com laço ou um F5 insistente viraria rajada de consulta ao
+        // WhatsApp, que é como se queima um número não oficial.
+        const agora = Date.now()
+        if (!globalThis.__apsQuando) globalThis.__apsQuando = {}
+        const ultimo = globalThis.__apsQuando[contaId] || 0
+        if (agora - ultimo < 60000) {
+          return json(res, 200, { ok: false, erro: 'espere', faltam: Math.ceil((60000 - (agora - ultimo)) / 1000) })
+        }
+        globalThis.__apsQuando[contaId] = agora
+        const s = sessoes.get(contaId)
+        if (!s || s.status !== 'conectado' || !s.sock) {
+          return json(res, 200, { ok: false, erro: 'desconectado' })
+        }
+        try {
+          const meu = jidNormalizedUser(s.sock.user && s.sock.user.id)
+          if (!meu) return json(res, 200, { ok: false, erro: 'sem_sessao' })
+          // ignoreZeroDevices=false: o celular dono conta, e é ele que dá sentido
+          // ao número (2 aparelhos = celular + Zaq, que é o esperado)
+          // useCache=true: o Baileys já mantém essa lista pra encriptar mensagem.
+          // Forçar ida à rede a cada clique seria tráfego que não precisa existir.
+          const lista = await s.sock.getUSyncDevices([meu], true, false)
+          const nosso = (s.sock.user.id.split(':')[1] || '0').split('@')[0]
+          const devs = (lista || []).map((d) => Number(d.device) || 0)
+          return json(res, 200, {
+            ok: true,
+            total: devs.length,
+            celular: devs.filter((d) => d === 0).length,
+            zaq: devs.filter((d) => String(d) === String(nosso)).length,
+            outros: devs.filter((d) => d !== 0 && String(d) !== String(nosso)).length
+          })
+        } catch (e) {
+          log.warn({ contaId, e: String(e) }, 'aparelhos: consulta falhou')
+          return json(res, 200, { ok: false, erro: String(e).slice(0, 120) })
+        }
       }
 
       if (req.method === 'POST' && acao === 'sair') {

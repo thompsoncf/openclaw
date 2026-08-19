@@ -80,6 +80,23 @@ def enviar_texto(conta_id: int, numero: str, texto: str) -> dict:
     return {"ok": False, "erro": r.get("erro") or "falha"}
 
 
+def aparelhos(conta_id: int) -> dict:
+    """Quantos aparelhos estão ligados neste WhatsApp.
+
+    É a pergunta que sobra depois de o Cockpit parar de oferecer a saída pro
+    celular: o app deixou de convidar, mas quem já tem o número ligado no aparelho
+    continua respondendo por fora — e o que sai por fora chega sem nome.
+
+    {ok, total, celular, zaq, outros} — `outros` é o número que interessa, e
+    desligar cada um é decisão de quem é dono da conta, no celular dele. Nenhum
+    sistema faz isso por ninguém: aqui só se MOSTRA.
+
+    Tolerante: sessão fora do ar devolve {ok: False}, e a tela some com o bloco em
+    vez de afirmar zero — dizer "nenhum aparelho ligado" sem ter perguntado seria
+    pior que não dizer nada."""
+    return _req("GET", f"/session/{conta_id}/aparelhos")
+
+
 def enviar_audio(conta_id: int, numero: str, dados: bytes, mimetype: str,
                  segundos: int, onda: bytes | None = None) -> dict:
     """Manda um áudio de voz gravado no Zaq pelo número conectado por QR.

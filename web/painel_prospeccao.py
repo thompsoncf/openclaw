@@ -27,6 +27,7 @@ from psycopg.errors import UniqueViolation
 from db.conexao import get_pool
 from contas import equipe as eq
 from finance import campanhas_motor as _cm
+from finance import funil_regua as _fr
 from finance import prospec_convite as _prospec_convite
 from finance import prospec_inbound as _prospec_inbound
 from finance import prospeccao_fontes as fontes
@@ -52,7 +53,8 @@ _ETAPAS_PADRAO = [
     ("qualificado", "Qualificado", 20, False), ("proposta", "Proposta", 30, False),
     ("ganho", "Ganho", 900, True), ("perdido", "Perdido", 910, True),
 ]
-_ORDEM_GANHO = 900  # etapas novas entram antes disso (miolo fica < 900)
+_ORDEM_GANHO = 900     # etapas de VENDA entram antes disso (o miolo fica < 900)
+_ORDEM_PERDIDO = 910   # e as de PÓS-VENDA depois daqui (migração 171)
 
 
 def _etapas(c, conta_id: int) -> list[dict]:
@@ -6199,7 +6201,7 @@ async def prospeccao_status(request: Request, alvo_id: int):
 # Só o dono/gestor edita a estrutura do funil (é uma configuração da empresa). O vendedor
 # usa o funil normalmente. 'novo'/'ganho'/'perdido' (fixa=true) só renomeiam.
 @router.post("/painel/prospeccao/etapas/nova")
-def prospeccao_etapa_nova(request: Request, rotulo: str = Form("")):
+def prospeccao_etapa_nova(request: Request, rotulo: str = Form(""), fase: str = Form("venda")):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -6207,6 +6209,7 @@ def prospeccao_etapa_nova(request: Request, rotulo: str = Form("")):
         request.session["prosp_aviso"] = "Só o dono/gestor edita as etapas do funil."
         return RedirectResponse("/painel/prospeccao", status_code=303)
     rot = (rotulo or "").strip()[:40] or "Nova etapa"
+    fase = fase if fase in ("venda", "pos") else "venda"   # 'fechamento' é só das fixas
     with get_pool().connection() as c:
         _etapas(c, ctx["conta_id"])  # garante o seed antes de mexer
         existentes = {r[0] for r in c.execute(
@@ -6218,8 +6221,16 @@ def prospeccao_etapa_nova(request: Request, rotulo: str = Form("")):
         mx = c.execute("select coalesce(max(ordem),0) from funil_etapas where conta_id=%s and ordem<%s",
                        (ctx["conta_id"], _ORDEM_GANHO)).fetchone()[0]
         ordem = min(mx + 10, _ORDEM_GANHO - 1)
-        c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fixa)
-                     values (%s,%s,%s,%s,false)""", (ctx["conta_id"], chave, rot, ordem))
+        # Etapa de PÓS-VENDA entra depois do fechamento — o que era impossível até a
+        # migração 171. Numa empresa de eventos o evento acontece DEPOIS de o sinal
+        # ser pago, e prender essa coluna no meio da venda é errado na origem. Quem
+        # continua contando como venda ganha é a `fase`, não a ordem (chaves_fechadas).
+        if fase == "pos":
+            mxp = c.execute("select coalesce(max(ordem),%s) from funil_etapas where conta_id=%s",
+                            (_ORDEM_PERDIDO, ctx["conta_id"])).fetchone()[0]
+            ordem = max(mxp + 10, _ORDEM_PERDIDO + 10)
+        c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fixa, fase)
+                     values (%s,%s,%s,%s,false,%s)""", (ctx["conta_id"], chave, rot, ordem, fase))
         c.commit()
     request.session["prosp_aviso"] = f"Etapa “{rot}” adicionada ✓"
     return RedirectResponse("/painel/prospeccao", status_code=303)
@@ -7189,6 +7200,7 @@ def _navbar(active):
             ("ia-insta", "✨ IA Insta", "/painel/prospeccao/ia-insta", False),
             ("comunicacao", "💬 Comunicação", "/painel/prospeccao/comunicacao", False),
             ("funil", "🔥 Funil", "/painel/prospeccao", False),
+            ("regua", "⏱️ Régua", "/painel/prospeccao/regua", False),
             ("canais", "⚙️ Canais", "/painel/prospeccao/comunicacao?aba=canais", False)]
     out = ['<nav class="pnavbar" aria-label="Prospecção">']
     for key, label, href, gated in tabs:
@@ -7809,6 +7821,7 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <a class="pnav" href="/painel/prospeccao/ia-insta">✨ IA Insta</a>
     <a class="pnav" href="/painel/prospeccao/comunicacao">💬 Comunicação</a>
     <a class="pnav on" href="/painel/prospeccao">🔥 Funil</a>
+    <a class="pnav" href="/painel/prospeccao/regua">⏱️ Régua</a>
     <a class="pnav cfg" href="/painel/prospeccao/comunicacao?aba=canais">⚙️ Canais</a>
   </nav>
   <div style="display:flex;align-items:flex-start;gap:.6rem;flex-wrap:wrap">
@@ -11210,3 +11223,333 @@ setInterval(function(){ if(!document.hidden) location.reload(); }, 60000);
 {% endblock %}"""
 _env.loader.mapping["prospeccao_radar"] = _RADAR_TPL
 _env.loader.mapping["prospeccao_campanha"] = _CAMPANHA_TPL
+
+
+# ================================================================ RÉGUA DO FUNIL
+# A configuração da empresa num lugar só: as etapas (nome, fase, ordem), o gatilho
+# que traz o lead pra cada uma, o prazo que ela aguenta, e os dois interruptores.
+# Nasce tudo desligado — quem liga é o dono, um gatilho de cada vez.
+_UNIDADES = [("min", "minutos", 1), ("h", "horas", 60), ("d", "dias", 1440)]
+_UNI_MIN = {u: m for u, _r, m in _UNIDADES}
+
+
+def _min_par(m):
+    """240 -> (4, 'h'). Escolhe a maior unidade que divide certo, pra tela mostrar
+    '4 horas' e não '240 minutos'."""
+    if not m:
+        return ("", "h")
+    for uni, _rot, mult in reversed(_UNIDADES):
+        if m % mult == 0:
+            return (m // mult, uni)
+    return (m, "min")
+
+
+def _par_min(n, uni):
+    """('4','h') -> 240. Vazio/zero/negativo = sem prazo (None), que é como a etapa
+    diz 'não cobro ninguém' sem precisar de uma segunda coluna pra isso."""
+    try:
+        v = int(str(n).strip())
+    except (TypeError, ValueError):
+        return None
+    if v <= 0:
+        return None
+    return v * _UNI_MIN.get(uni, 60)
+
+
+@router.get("/painel/prospeccao/regua", response_class=HTMLResponse)
+def regua_pagina(request: Request):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "A régua é configuração da empresa — só dono/gestor."
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    pool = get_pool()
+    with pool.connection() as c:
+        _etapas(c, ctx["conta_id"])                 # semeia o padrão na 1ª visita
+        cfg = _fr.config(c, ctx["conta_id"])
+        c.commit()
+        linhas = _fr.etapas(c, ctx["conta_id"])
+        # quantos leads em cada coluna, pro dono ver o que ele está mexendo (e pra
+        # tela saber quando o botão de remover pode ficar habilitado)
+        n_por = dict(c.execute(
+            """select status, count(*) from prospeccao
+                where conta_id=%s and estagio='lead' group by status""",
+            (ctx["conta_id"],)).fetchall())
+        # o histórico já roda com tudo desligado — mostrar o tamanho dele é o que
+        # justifica esperar antes de ligar
+        n_mov = c.execute("select count(*) from funil_movimentos where conta_id=%s",
+                          (ctx["conta_id"],)).fetchone()[0]
+    for e in linhas:
+        e["n"] = n_por.get(e["chave"], 0)
+        e["prazo_n"], e["prazo_u"] = _min_par(e["prazo_min"])
+        e["gatilho_rot"] = _fr.EVENTOS.get(e["gatilho"] or "", "")
+    conv = [{"chave": k, "rotulo": v, "prazo_n": _min_par(cfg[c_])[0], "prazo_u": _min_par(cfg[c_])[1]}
+            for k, v, c_ in (("sem_resposta", "Sem resposta", "sem_resposta_min"),
+                             ("bola_nossa", "Bola com você", "bola_nossa_min"),
+                             ("bola_cliente", "Bola com o cliente", "bola_cliente_min"))]
+    return _render("prospeccao_regua", request, titulo="Régua do funil",
+                   secao_ativa="prospeccao", nav_ativo="regua", gerencia=True,
+                   etapas=linhas, cfg=cfg, conv=conv, eventos=sorted(_fr.EVENTOS.items()),
+                   unidades=[(u, r) for u, r, _m in _UNIDADES],
+                   dias_on=_fr._dias(cfg), n_mov=n_mov,
+                   aviso=request.session.pop("prosp_aviso", None))
+
+
+@router.post("/painel/prospeccao/regua/config")
+async def regua_config(request: Request):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    f = await request.form()
+
+    def modo(nome):
+        v = (f.get(nome) or "off").strip()
+        return v if v in _fr.MODOS else "off"
+
+    dias = ",".join(d for d in (f.getlist("dias") or []) if d in "1234567")
+    abre = (f.get("abre") or "08:00").strip()[:5]
+    fecha = (f.get("fecha") or "19:00").strip()[:5]
+    with get_pool().connection() as c:
+        _fr.config(c, ctx["conta_id"])          # garante a linha
+        c.execute("""update funil_regua set gatilhos_modo=%s, cobranca_modo=%s,
+                       janela_dias=%s, janela_abre=%s, janela_fecha=%s,
+                       sem_resposta_min=coalesce(%s, sem_resposta_min),
+                       bola_nossa_min=coalesce(%s, bola_nossa_min),
+                       bola_cliente_min=coalesce(%s, bola_cliente_min),
+                       escala_min=coalesce(%s, escala_min),
+                       teto_avisos_dia=greatest(1, coalesce(%s, teto_avisos_dia)),
+                       atualizado_em=now()
+                     where conta_id=%s""",
+                  (modo("gatilhos_modo"), modo("cobranca_modo"), dias, abre, fecha,
+                   _par_min(f.get("sem_resposta_n"), f.get("sem_resposta_u")),
+                   _par_min(f.get("bola_nossa_n"), f.get("bola_nossa_u")),
+                   _par_min(f.get("bola_cliente_n"), f.get("bola_cliente_u")),
+                   _par_min(f.get("escala_n"), f.get("escala_u")),
+                   _par_min(f.get("teto"), "min"), ctx["conta_id"]))
+        c.commit()
+    request.session["prosp_aviso"] = "Régua salva ✓"
+    return RedirectResponse("/painel/prospeccao/regua", status_code=303)
+
+
+@router.post("/painel/prospeccao/regua/etapa/{eid}")
+async def regua_etapa(request: Request, eid: int):
+    """Salva UMA etapa: rótulo, prazo, gatilho e a chave que liga esse gatilho.
+    Uma linha por vez de propósito — o dono pediu pra ligar um de cada vez, e um
+    formulário só pra sete etapas transformaria isso em tudo-ou-nada."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    f = await request.form()
+    rot = (f.get("rotulo") or "").strip()[:40]
+    gat = (f.get("gatilho") or "").strip()
+    gat = gat if gat in _fr.EVENTOS else None
+    ativo = str(f.get("gatilho_ativo") or "").lower() in ("1", "on", "true", "sim")
+    prazo = _par_min(f.get("prazo_n"), f.get("prazo_u"))
+    with get_pool().connection() as c:
+        r = c.execute("select chave, fixa from funil_etapas where id=%s and conta_id=%s",
+                      (eid, ctx["conta_id"])).fetchone()
+        if not r:
+            return JSONResponse({"ok": False, "erro": "etapa"}, status_code=404)
+        # Etapa de resultado não tem prazo: "está em Perdido há 30 dias" não é uma
+        # cobrança, é o fim da história. Deixar o campo aberto só convidaria alguém
+        # a criar um alarme que nunca deveria tocar.
+        if r[0] in ("ganho", "perdido"):
+            prazo = None
+        c.execute("""update funil_etapas
+                        set rotulo = coalesce(nullif(%s,''), rotulo),
+                            prazo_min = %s, gatilho = %s,
+                            -- ligar sem escolher evento não liga nada: a etapa ficaria
+                            -- "ativa" apontando pro vazio e o motor rodaria em falso.
+                            -- O ::text é pro Postgres saber o tipo do parâmetro solto.
+                            gatilho_ativo = (%s and %s::text is not null)
+                      where id=%s and conta_id=%s""",
+                  (rot, prazo, gat, ativo, gat, eid, ctx["conta_id"]))
+        c.commit()
+    return JSONResponse({"ok": True, "gatilho_ativo": bool(ativo and gat)})
+
+
+_REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
+<style>
+.rg-grp{display:flex;align-items:center;gap:.6rem;margin:1.1rem 0 .35rem}
+.rg-grp b{font-family:var(--mono);font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap}
+.rg-grp span{flex:1;height:1px;background:var(--borda)}
+.rg-r1{display:grid;grid-template-columns:12px 1fr 150px 62px;gap:.6rem;align-items:center}
+.rg-uni{padding:.48rem .5rem;border-radius:8px;border:1px solid #333;background:var(--bg);color:var(--txt);font-size:.8rem;font-family:inherit}
+.rg-sel{width:100%;box-sizing:border-box;padding:.42rem .6rem;border-radius:8px;border:1px solid var(--azul-borda);
+  background:var(--azul-fundo);color:var(--azul);font-size:.8rem;font-family:inherit}
+.rg-sel:disabled{border-color:var(--borda);background:transparent;color:var(--txt-mut)}
+.rg-seg{display:inline-flex;padding:3px;background:var(--bg);border:1px solid var(--borda);border-radius:999px;gap:2px}
+.rg-seg label{padding:.34rem .8rem;border-radius:999px;font-size:.78rem;color:var(--txt-mut);cursor:pointer;white-space:nowrap}
+.rg-seg input{display:none}
+.rg-seg input:checked+label{background:var(--azul-fundo);color:var(--azul);font-weight:600;box-shadow:inset 0 0 0 1px var(--azul-borda)}
+.rg-seg input[value=off]:checked+label{background:var(--verde);color:var(--sobre-verde);box-shadow:none}
+.rg-dia{padding:.35rem .7rem;border-radius:999px;font-size:.8rem;border:1px solid var(--borda);color:var(--txt-mut);cursor:pointer}
+.rg-dia input{display:none}
+.rg-dia.on{border-color:var(--neon-borda);background:var(--neon-fraco);color:var(--verde-claro)}
+.rg-tag{display:inline-flex;align-items:center;padding:.06rem .45rem;border-radius:999px;font-size:.68rem;font-weight:600}
+</style>
+<div class="pw">
+""" + _navbar("regua") + """
+  <div style="display:flex;align-items:flex-start;gap:.6rem;flex-wrap:wrap">
+    <div style="flex:1;min-width:200px">
+      <h2 class="tt">Régua do funil</h2>
+      <div class="mut" style="font-size:.82rem;margin-top:.15rem">{% if conta %}<b style="color:var(--verde-claro)">🏢 {{ conta[2] }}</b> · {% endif %}as etapas, o que traz o lead pra cada uma, e quanto tempo ela aguenta</div>
+    </div>
+  </div>
+  {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
+
+  <form method="post" action="/painel/prospeccao/regua/config">
+  <!-- ---------------- estado ---------------- -->
+  <div class="fsec" style="margin-top:1rem;border-color:var(--azul-borda)">
+    <div class="sh"><b>Estado</b><span class="mut" style="font-size:.76rem">tudo construído · você decide quando cada parte age</span></div>
+    {% for campo, nome, desc in [
+        ('gatilhos_modo','Gatilhos das etapas','movem o card sozinhos quando o fato acontece'),
+        ('cobranca_modo','Cobrança por prazo','avisa o vendedor e escala pro gestor')] %}
+    <div style="display:flex;align-items:center;gap:1rem;padding:.8rem 0;border-top:1px solid var(--borda);flex-wrap:wrap">
+      <div style="flex:1;min-width:240px">
+        <div style="font-size:.9rem;font-weight:600">{{ nome }}</div>
+        <div class="mut" style="font-size:.79rem;margin-top:.15rem">{{ desc }}</div>
+      </div>
+      <span class="rg-seg">
+        {% for v, r in [('off','Desligado'),('observando','Observando'),('ligado','Ligado')] %}
+        <input type="radio" id="{{ campo }}_{{ v }}" name="{{ campo }}" value="{{ v }}" {% if cfg[campo]==v %}checked{% endif %}>
+        <label for="{{ campo }}_{{ v }}">{{ r }}</label>
+        {% endfor %}
+      </span>
+    </div>
+    {% endfor %}
+    <div class="mut" style="font-size:.79rem;line-height:1.55;padding-top:.75rem;border-top:1px solid var(--borda)">
+      <b style="color:var(--azul)">Observando</b> roda o motor inteiro e anota o que <i>teria</i> feito — sem mover card nem avisar ninguém.
+      O histórico de movimento já roda de qualquer jeito: <b class="num" style="color:var(--txt)">{{ n_mov }}</b> movimento(s) gravado(s) até agora.
+    </div>
+  </div>
+
+  <!-- ---------------- conversa ---------------- -->
+  <div class="fsec" style="margin-top:.9rem">
+    <div class="sh"><b>Quando a bola está com a gente</b><span class="mut" style="font-size:.76rem">lido da conversa, inclusive do celular do vendedor</span></div>
+    {% for b in conv %}
+    <div style="display:grid;grid-template-columns:1fr 150px;gap:.6rem;align-items:center;padding:.62rem 0;border-top:1px solid var(--borda)">
+      <div style="font-size:.89rem;font-weight:600">{{ b.rotulo }}</div>
+      <div style="display:flex;gap:.3rem">
+        <input class="fld" style="text-align:right" name="{{ b.chave }}_n" value="{{ b.prazo_n }}">
+        <select class="rg-uni" name="{{ b.chave }}_u">
+          {% for u, r in unidades %}<option value="{{ u }}" {% if b.prazo_u==u %}selected{% endif %}>{{ r }}</option>{% endfor %}
+        </select>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- ---------------- janela + escalonamento ---------------- -->
+  <div class="fgrid" style="grid-template-columns:1.1fr 1fr">
+    <div class="fsec">
+      <div class="sh"><b>Janela de atendimento</b></div>
+      <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin:.3rem 0 .8rem">
+        {% for d, r in [(1,'Seg'),(2,'Ter'),(3,'Qua'),(4,'Qui'),(5,'Sex'),(6,'Sáb'),(7,'Dom')] %}
+        <label class="rg-dia {% if d in dias_on %}on{% endif %}" onclick="rgDia(this)">
+          <input type="checkbox" name="dias" value="{{ d }}" {% if d in dias_on %}checked{% endif %}>{{ r }}
+        </label>
+        {% endfor %}
+      </div>
+      <div class="egrid">
+        <div><label class="lbl">Abre</label><input class="fld" name="abre" value="{{ cfg.janela_abre.strftime('%H:%M') }}"></div>
+        <div><label class="lbl">Fecha</label><input class="fld" name="fecha" value="{{ cfg.janela_fecha.strftime('%H:%M') }}"></div>
+      </div>
+      <p class="mut" style="font-size:.76rem;line-height:1.55;margin:.7rem 0 0">
+        Todo prazo desta tela só corre aqui dentro. Gatilho, não: fato é fato a qualquer hora — sinal pago às 23h move o card às 23h.
+      </p>
+    </div>
+    <div class="fsec">
+      <div class="sh"><b>Escalonamento</b></div>
+      <label class="lbl" style="margin-top:.3rem">Depois de quanto tempo sem toque escala pro gestor</label>
+      <div style="display:flex;gap:.3rem">
+        <input class="fld" style="text-align:right" name="escala_n" value="{{ (cfg.escala_min // 60) or 4 }}">
+        <select class="rg-uni" name="escala_u"><option value="h" selected>horas</option><option value="d">dias</option></select>
+      </div>
+      <label class="lbl" style="margin-top:.7rem">Teto de avisos por vendedor / dia</label>
+      <input class="fld" name="teto" value="{{ cfg.teto_avisos_dia }}">
+      <p class="mut" style="font-size:.76rem;line-height:1.5;margin:.55rem 0 0">Passou do teto, vira um resumo só no fim do expediente.</p>
+    </div>
+  </div>
+
+  <div style="margin-top:1rem"><button class="pbtn">Salvar régua</button></div>
+  </form>
+
+  <!-- ---------------- etapas ---------------- -->
+  <div class="fsec" style="margin-top:1.1rem">
+    <div class="sh"><b>As etapas do funil</b><span class="mut" style="font-size:.76rem">cada linha salva sozinha · ligue um gatilho de cada vez</span></div>
+    {% set fases = [('venda','Fase · Venda','o lead ainda está sendo conquistado'),
+                    ('fechamento','Fase · Fechamento','relatório e comissão contam a partir daqui'),
+                    ('pos','Fase · Pós-venda','já é cliente — continua contando como fechado')] %}
+    {% for fchave, ftit, fnota in fases %}
+      {% set doFase = etapas | selectattr('fase','equalto',fchave) | list %}
+      {% if doFase %}
+      <div class="rg-grp"><b style="color:var(--txt-mut)">{{ ftit }}</b><span></span><span class="mut" style="font-size:.72rem;flex:0 0 auto">{{ fnota }}</span></div>
+      {% for e in doFase %}
+      <form class="rg-etapa" onsubmit="return rgSalvar(event)"
+            action="/painel/prospeccao/regua/etapa/{{ e.id }}" method="post"
+            style="padding:.65rem 0;border-top:1px solid var(--borda)">
+        <div class="rg-r1">
+          <span class="tdot" style="background:{{ '#25D366' if e.fase!='venda' else '#229ED9' }}"></span>
+          <span style="display:flex;align-items:center;gap:.5rem;min-width:0">
+            <input class="fld" name="rotulo" value="{{ e.rotulo }}" style="max-width:240px">
+            <code class="mut" style="font-size:.68rem">{{ e.chave }}</code>
+            {% if e.fixa %}<span class="rg-tag" style="background:var(--card-2);border:1px solid var(--borda);color:var(--txt-mut)">fixa</span>{% endif %}
+          </span>
+          <span style="display:flex;gap:.3rem">
+            <input class="fld" name="prazo_n" value="{{ e.prazo_n }}" style="text-align:right;width:56px"
+                   {% if e.chave in ('ganho','perdido') %}disabled placeholder="—"{% endif %}>
+            <select class="rg-uni" name="prazo_u" {% if e.chave in ('ganho','perdido') %}disabled{% endif %}>
+              {% for u, r in unidades %}<option value="{{ u }}" {% if e.prazo_u==u %}selected{% endif %}>{{ r }}</option>{% endfor %}
+            </select>
+          </span>
+          <span class="num" style="text-align:right;font-size:.95rem;color:{{ 'var(--txt-mut)' if not e.n else 'var(--txt)' }}">{{ e.n }}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:.5rem;margin:.45rem 0 0 1.35rem;flex-wrap:wrap">
+          <label class="chk" style="display:inline-flex;align-items:center;gap:.35rem;font-size:.74rem;color:var(--txt-mut);cursor:pointer">
+            <input type="checkbox" name="gatilho_ativo" value="1" {% if e.gatilho_ativo %}checked{% endif %}
+                   style="width:auto;margin:0;accent-color:var(--azul)">
+            entra sozinho quando
+          </label>
+          <select class="rg-sel" name="gatilho" style="flex:1;min-width:260px">
+            <option value="">— só na mão —</option>
+            {% for ev, rot in eventos %}<option value="{{ ev }}" {% if e.gatilho==ev %}selected{% endif %}>{{ rot }}</option>{% endfor %}
+          </select>
+          <button class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem">Salvar</button>
+        </div>
+      </form>
+      {% endfor %}
+      {% endif %}
+    {% endfor %}
+
+    <form method="post" action="/painel/prospeccao/etapas/nova" style="display:flex;gap:.5rem;align-items:center;margin-top:1rem;padding-top:.85rem;border-top:1px solid var(--borda);flex-wrap:wrap">
+      <input class="fld" name="rotulo" placeholder="Nome da etapa nova" style="max-width:230px">
+      <select class="rg-uni" name="fase"><option value="venda">na fase de venda</option><option value="pos">na pós-venda</option></select>
+      <button class="pbtn novo">+ Nova etapa</button>
+      <span class="mut" style="font-size:.78rem">só remove etapa vazia · as fixas só renomeiam</span>
+    </form>
+  </div>
+</div>
+<script>
+function rgToast(msg,erro){var t=document.getElementById('rg-toast');
+  if(!t){t=document.createElement('div');t.id='rg-toast';
+    t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--card);border:1px solid var(--verde);color:var(--verde-claro);padding:.6rem 1rem;border-radius:10px;z-index:200;font-size:.85rem;box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .4s';
+    document.body.appendChild(t);}
+  t.style.borderColor=erro?'var(--coral)':'var(--verde)';t.style.color=erro?'var(--coral)':'var(--verde-claro)';
+  t.textContent=msg;t.style.opacity='1';clearTimeout(t._t);t._t=setTimeout(function(){t.style.opacity='0';},2600);}
+function rgDia(el){setTimeout(function(){el.classList.toggle('on',el.querySelector('input').checked);},0);}
+function rgSalvar(ev){ev.preventDefault();var f=ev.target;
+  fetch(f.action,{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData(f)})
+    .then(function(r){return r.json();}).then(function(d){
+      rgToast(d.ok?'Etapa salva ✓':(d.erro||'Não consegui salvar'),!d.ok);})
+    .catch(function(){rgToast('Falha de rede',true);});
+  return false;}
+</script>
+{% endblock %}"""
+
+_env.loader.mapping["prospeccao_regua"] = _REGUA_TPL

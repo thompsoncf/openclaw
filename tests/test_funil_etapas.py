@@ -22,6 +22,9 @@ create table contas (id bigserial primary key, tipo text, nome text);
 create table prospeccao (id bigserial primary key, conta_id bigint, status text, estagio text);
 create table funil_etapas (id bigserial primary key, conta_id bigint, chave text, rotulo text,
   ordem int not null default 0, fixa boolean not null default false,
+  -- colunas da migração 171 (fase/prazo/gatilho): a etapa nova nasce com fase
+  fase text not null default 'venda', prazo_min integer, gatilho text,
+  gatilho_ativo boolean not null default false,
   criado_em timestamptz not null default now(), unique (conta_id, chave));
 """
 
@@ -156,3 +159,35 @@ def test_nao_gerencia_nao_edita(pool, monkeypatch):
     with pool.connection() as c:
         n = c.execute("select count(*) from funil_etapas where conta_id=%s", (conta,)).fetchone()[0]
     assert n == len(et)     # nada foi adicionado
+
+
+def test_etapa_de_pos_venda_entra_depois_do_fechamento(pool, monkeypatch):
+    """O motivo de existir a fase (migração 171): numa empresa de eventos o evento
+    acontece DEPOIS de o sinal ser pago. Antes disso, `ordem = min(max+10, 899)`
+    prendia toda etapa nova antes de "Ganho" — e "Eventos Realizados" ficava
+    encalhada no meio da venda."""
+    with pool.connection() as c:
+        conta = _conta(c, "Pós")
+    req = _mp(monkeypatch, pool, conta)
+    pp.prospeccao_etapa_nova(req, rotulo="Eventos Realizados", fase="pos")
+    with pool.connection() as c:
+        et = pp._etapas(c, conta)
+        fase = c.execute("select fase from funil_etapas where conta_id=%s and rotulo=%s",
+                         (conta, "Eventos Realizados")).fetchone()[0]
+    nova = next(e for e in et if e["rotulo"] == "Eventos Realizados")
+    perdido = next(e for e in et if e["chave"] == "perdido")
+    assert fase == "pos"
+    assert nova["ordem"] > perdido["ordem"], "pós-venda tem que vir depois do fechamento"
+    assert et[-1]["rotulo"] == "Eventos Realizados"
+
+
+def test_fase_esquisita_cai_pra_venda(pool, monkeypatch):
+    """Fase vem de um <select>, mas POST é POST: ninguém inventa uma quarta fase."""
+    with pool.connection() as c:
+        conta = _conta(c, "Fase torta")
+    req = _mp(monkeypatch, pool, conta)
+    pp.prospeccao_etapa_nova(req, rotulo="Qualquer", fase="fechamento")
+    with pool.connection() as c:
+        fase = c.execute("select fase from funil_etapas where conta_id=%s and rotulo='Qualquer'",
+                         (conta,)).fetchone()[0]
+    assert fase == "venda"

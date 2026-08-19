@@ -303,3 +303,28 @@ def test_fechado_passa_a_incluir_a_pos_venda(pool):
         fechadas = fr.chaves_fechadas(fr.etapas(c, CONTA))
         assert set(fechadas) == {"ganho", "eventos"}
         assert "perdido" not in fechadas
+
+
+# ----------------------------------------------------------------- o motor
+
+def test_motor_e_inerte_com_tudo_desligado(pool):
+    """O deploy não pode mexer em nada. Conta sem régua ligada nem aparece."""
+    with pool.connection() as c:
+        lead = _lead(c); conv = _conversa(c, lead)
+        _msg(c, conv, "out", AGORA)
+        c.execute("update funil_etapas set gatilho_ativo=true where conta_id=%s", (CONTA,))
+        c.commit()
+    assert fr.rodar(pool) == {"contas": 0, "movidos": 0, "simulados": 0}
+    with pool.connection() as c:
+        assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "novo"
+
+
+def test_motor_roda_so_nas_contas_que_ligaram(pool):
+    with pool.connection() as c:
+        lead = _lead(c); conv = _conversa(c, lead)
+        _msg(c, conv, "out", AGORA)
+        _ligar(c, "contatado")
+        c.commit()
+    assert fr.rodar(pool) == {"contas": 1, "movidos": 1, "simulados": 0}
+    with pool.connection() as c:
+        assert c.execute("select status from prospeccao where id=%s", (lead,)).fetchone()[0] == "contatado"

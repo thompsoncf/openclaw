@@ -238,10 +238,10 @@ _SQL_EVENTO = {
 
 def etapas(c, conta_id: int) -> list[dict]:
     rows = c.execute(
-        """select chave, rotulo, ordem, fixa, fase, prazo_min, gatilho, gatilho_ativo
+        """select chave, rotulo, ordem, fixa, fase, prazo_min, gatilho, gatilho_ativo, id
              from funil_etapas where conta_id=%s order by ordem, id""", (conta_id,)).fetchall()
     return [{"chave": r[0], "rotulo": r[1], "ordem": r[2], "fixa": r[3], "fase": r[4],
-             "prazo_min": r[5], "gatilho": r[6], "gatilho_ativo": r[7]} for r in rows]
+             "prazo_min": r[5], "gatilho": r[6], "gatilho_ativo": r[7], "id": r[8]} for r in rows]
 
 
 def chaves_fechadas(etapas_: list[dict]) -> list[str]:
@@ -321,3 +321,41 @@ def aplicar_gatilhos(c, conta_id: int) -> dict:
             simulados += 1
         registrar_movimento(c, conta_id, lead_id, atual, alvo["chave"], motivo)
     return {"movidos": movidos, "simulados": simulados}
+
+
+# ------------------------------------------------------------------ o motor
+_LOCK = 771147   # vizinho dos locks das campanhas (771144-771146)
+
+
+def rodar(pool) -> dict:
+    """Uma passada da régua em todas as contas que a ligaram. Chamada pelo poller
+    (web/app.py), junto de campanhas e lembretes — sem cron novo no Render.
+
+    Best-effort por conta: uma conta com dado torto não pode parar a passada das
+    outras, do mesmo jeito que uma campanha quebrada não derruba o motor inteiro.
+    Devolve {contas, movidos, simulados} pro log do ciclo — 0 repetido com conta
+    ligada é pista de bug, e sem esse número não haveria como perceber.
+    """
+    total = {"contas": 0, "movidos": 0, "simulados": 0}
+    with pool.connection() as lockc:
+        # Dois workers no Render: sem o lock, os dois aplicam o mesmo gatilho no
+        # mesmo lead no mesmo segundo e o histórico ganha a linha em duplicidade.
+        if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
+            return total
+        try:
+            with pool.connection() as c:
+                contas = [r[0] for r in c.execute(
+                    "select conta_id from funil_regua where gatilhos_modo <> 'off'").fetchall()]
+            for conta_id in contas:
+                try:
+                    with pool.connection() as c:
+                        r = aplicar_gatilhos(c, conta_id)
+                        c.commit()
+                    total["contas"] += 1
+                    total["movidos"] += r["movidos"]
+                    total["simulados"] += r["simulados"]
+                except Exception:  # noqa: BLE001
+                    _log.warning("régua falhou na conta %s", conta_id, exc_info=True)
+        finally:
+            lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
+    return total

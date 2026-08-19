@@ -576,6 +576,29 @@ select{flex:1;min-width:0;background:var(--bg-2);border:1px solid var(--line);bo
 .rodape-b .tot b s{display:block;text-align:right;font-size:.74rem;color:var(--text-faint);
   text-decoration:line-through}
 .btn[disabled]{opacity:.4;cursor:not-allowed;box-shadow:none}
+/* ---------- gravador de voz (só canal QR; ver ck.pode_gravar_audio) ----------
+   O vendedor da Prime manda 1 em cada 3 mensagens por áudio, com 32s de média.
+   O botão fica ao lado do enviar, e enquanto grava ele TOMA a barra inteira —
+   é o único jeito de o cancelar ser alcançável com uma mão. */
+.composer .mic{flex:0 0 auto;width:40px;height:40px;border-radius:50%;border:0;
+  background:var(--surface);color:var(--neon);display:grid;place-items:center;
+  cursor:pointer;padding:0}
+.composer .mic:active{background:var(--bg-2)}
+.gravando{display:none;align-items:center;gap:.7rem;padding:.5rem .3rem}
+.gravando.on{display:flex}
+.composer.gravando-on input,.composer.gravando-on button[type=submit],
+.composer.gravando-on .mic{display:none}
+.gravando .bolha{width:11px;height:11px;border-radius:50%;background:#E0654F;flex-shrink:0;
+  animation:pisca 1.1s infinite}
+@keyframes pisca{0%,100%{opacity:1}50%{opacity:.25}}
+.gravando .rel{font-family:var(--mono);font-size:1rem;color:var(--text);min-width:44px}
+.gravando .dica{flex:1;font-size:.78rem;color:var(--text-faint)}
+.gravando .cancela{background:none;border:0;color:var(--text-dim);font-size:.85rem;
+  padding:.4rem .6rem;cursor:pointer;width:auto}
+.gravando .manda{flex:0 0 auto;width:40px;height:40px;border-radius:50%;border:0;
+  background:var(--neon);color:var(--ink);display:grid;place-items:center;
+  font-size:1.1rem;cursor:pointer;padding:0}
+@media (prefers-reduced-motion:reduce){.gravando .bolha{animation:none}}
 /* ---------- desconto (só nicho de serviço; ver ORC.desc) ----------
    O controle mora DENTRO da linha já marcada, na mesma altura do .qtd que já está
    ali — a linha não cresce duas vezes. A pílula %/R$ existe porque o vendedor
@@ -2470,6 +2493,111 @@ def _perfil_dono(conta_id: int, membro_id: int | None) -> HTMLResponse:
 
 
 # ------------------------------------------------------------------ lead
+_VOZ_JS = r"""
+<script>
+(function(){
+  var BASE="__BASE__", LEAD=__LEAD__, TETO=90;
+  function $(id){return document.getElementById(id);}
+  var comp=$("comp"), grav=$("grav"), rel=$("rel"), dica=$("dica");
+  var mr=null, pedacos=[], t0=0, tick=null, cancelado=false, enviando=false, fluxo=null;
+
+  // O que o navegador ACEITA gravar decide o resto do caminho. Medido: o Chromium
+  // dá webm/opus (o servidor troca a embalagem pra ogg, sem recodificar) e o
+  // Safari do iPhone dá mp4 — que vai como veio, porque a duração e a onda saem
+  // daqui prontas e aí o WhatsApp não precisa que ninguém decodifique nada.
+  function tipoBom(){
+    var opcoes=["audio/webm;codecs=opus","audio/webm","audio/mp4"];
+    for(var i=0;i<opcoes.length;i++){
+      if(window.MediaRecorder && MediaRecorder.isTypeSupported(opcoes[i])) return opcoes[i];
+    }
+    return "";
+  }
+  function mmss(s){return Math.floor(s/60)+":"+("0"+Math.floor(s%60)).slice(-2);}
+  function fecharFluxo(){ if(fluxo){fluxo.getTracks().forEach(function(t){t.stop();}); fluxo=null;} }
+  function sair(){
+    clearInterval(tick); tick=null;
+    comp.classList.remove("gravando-on"); grav.classList.remove("on");
+    fecharFluxo(); mr=null; pedacos=[];
+  }
+
+  // A onda de 64 pontos que o WhatsApp desenha na bolha. Sai daqui porque o
+  // servidor não decodifica áudio — e porque no iPhone ninguém consegue decodificar.
+  function ondaDe(buf){
+    return new Promise(function(ok){
+      var Ctx=window.AudioContext||window.webkitAudioContext;
+      if(!Ctx) return ok(null);
+      var ctx=new Ctx();
+      ctx.decodeAudioData(buf.slice(0), function(a){
+        try{
+          var raw=a.getChannelData(0), n=64, bloco=Math.floor(raw.length/n), f=[];
+          if(bloco<1) return ok(null);
+          for(var i=0;i<n;i++){var soma=0;
+            for(var j=0;j<bloco;j++) soma+=Math.abs(raw[bloco*i+j]);
+            f.push(soma/bloco);}
+          var pico=Math.max.apply(null,f);
+          var w=new Uint8Array(n);
+          for(var k=0;k<n;k++) w[k]=pico>0?Math.floor(100*f[k]/pico):0;
+          ok(w);
+        }catch(e){ ok(null); } finally { try{ctx.close();}catch(e2){} }
+      }, function(){ ok(null); });
+    });
+  }
+  function b64(u8){ var s2=""; for(var i=0;i<u8.length;i++) s2+=String.fromCharCode(u8[i]); return btoa(s2); }
+
+  $("mic").onclick=function(){
+    var tipo=tipoBom();
+    if(!tipo){ alert("Este navegador não grava áudio. Responda por texto."); return; }
+    navigator.mediaDevices.getUserMedia({audio:true}).then(function(st){
+      fluxo=st; cancelado=false; enviando=false; pedacos=[];
+      // 24 kbps é taxa de voz: 27s (a média do vendedor) dão ~66 KB. O padrão do
+      // navegador é ~118 kbps, cinco vezes mais, sem ganho nenhum pra fala.
+      try{ mr=new MediaRecorder(st,{mimeType:tipo,audioBitsPerSecond:24000}); }
+      catch(e){ mr=new MediaRecorder(st,{mimeType:tipo}); }
+      mr.ondataavailable=function(e){ if(e.data && e.data.size) pedacos.push(e.data); };
+      mr.onstop=function(){ if(cancelado){ sair(); return; } mandar(tipo); };
+      mr.start();
+      t0=Date.now();
+      comp.classList.add("gravando-on"); grav.classList.add("on");
+      rel.textContent="0:00"; dica.textContent="gravando…";
+      tick=setInterval(function(){
+        var s3=(Date.now()-t0)/1000;
+        rel.textContent=mmss(s3);
+        if(s3>=TETO){ dica.textContent="limite de "+TETO+"s"; parar(); }
+      },200);
+    }).catch(function(){
+      alert("Não consegui acessar o microfone. Confira a permissão do navegador.");
+    });
+  };
+  function parar(){ try{ if(mr && mr.state!=="inactive") mr.stop(); }catch(e){ sair(); } }
+  $("cancela").onclick=function(){ cancelado=true; parar(); };
+  $("manda").onclick=function(){ if(!enviando) parar(); };
+
+  function mandar(tipo){
+    if(enviando) return;
+    enviando=true;
+    var seg=Math.max(1,Math.round((Date.now()-t0)/1000));
+    var blob=new Blob(pedacos,{type:tipo});
+    fecharFluxo();
+    dica.textContent="enviando…"; $("manda").disabled=true; $("cancela").disabled=true;
+    blob.arrayBuffer().then(function(buf){
+      return ondaDe(buf).then(function(w){
+        var h={"Content-Type": blob.type || tipo};
+        if(w) h["X-Onda"]=b64(w);
+        return fetch(BASE+"/lead/"+LEAD+"/audio?seg="+seg,{method:"POST",headers:h,body:buf});
+      });
+    }).then(function(r){ return r.json(); }).then(function(j){
+      if(j && j.ok){ location.reload(); return; }
+      alert((j && j.erro) || "Não consegui enviar o áudio.");
+      $("manda").disabled=false; $("cancela").disabled=false; sair();
+    }).catch(function(){
+      alert("Falha de conexão ao enviar o áudio.");
+      $("manda").disabled=false; $("cancela").disabled=false; sair();
+    });
+  }
+})();
+</script>"""
+
+
 @router.get("/cockpit/lead/{lead_id}", response_class=HTMLResponse)
 def cockpit_lead(request: Request, lead_id: int):
     """Uma rota, dois papéis. Se o lead é do vendedor logado, abre a tela de trabalho
@@ -2481,14 +2609,16 @@ def cockpit_lead(request: Request, lead_id: int):
         # zera e a próxima mensagem do cliente toca na hora (ver lead_do_vendedor).
         d = ck.lead_do_vendedor(get_pool(), sess[0], sess[1], lead_id, pos_visto=True)
         if d:
-            return _lead_vendedor(request, lead_id, d)
+            return _lead_vendedor(request, lead_id, d,
+                                  pode_voz=ck.pode_gravar_audio(get_pool(), sess[0]))
     g = _gerencia(request)
     if g:
         return _lead_gestor(request, g[0], lead_id)
     return RedirectResponse("/cockpit/login", status_code=303)
 
 
-def _lead_vendedor(request: Request, lead_id: int, d: dict) -> HTMLResponse:
+def _lead_vendedor(request: Request, lead_id: int, d: dict,
+                   pode_voz: bool = False) -> HTMLResponse:
     sub = " · ".join(x for x in [d.get("cidade") or "", d.get("uf") or ""] if x) or (d.get("doc_fmt") or "")
 
     bolhas = []
@@ -2507,9 +2637,24 @@ def _lead_vendedor(request: Request, lead_id: int, d: dict) -> HTMLResponse:
         acao = (f"<form method=post action='{_BASE}/lead/{lead_id}/assumir'>"
                 "<button class=btn type=submit>Assumir a conversa</button></form>")
     else:
-        acao = (f"<form class=composer method=post action='{_BASE}/lead/{lead_id}/mensagem'>"
+        # `pode_voz` chega de fora (o microfone só existe no canal QR): quem
+        # monta a tela não vai buscar sessão nem banco pra decidir isso.
+        mic = ("<button type=button class=mic id=mic aria-label='Gravar áudio'>"
+               "<svg width=20 height=20 viewBox='0 0 24 24' fill=none stroke=currentColor "
+               "stroke-width=1.8 stroke-linecap=round><rect x=9 y=3 width=6 height=11 rx=3/>"
+               "<path d='M5 11a7 7 0 0014 0M12 18v3'/></svg></button>") if pode_voz else ""
+        acao = (f"<form class=composer id=comp method=post action='{_BASE}/lead/{lead_id}/mensagem'>"
                 "<input name=texto placeholder='Responder…' required autocomplete=off>"
-                "<button type=submit aria-label=Enviar>&#10148;</button></form>")
+                + mic +
+                "<button type=submit aria-label=Enviar>&#10148;</button>"
+                "<div class=gravando id=grav>"
+                "<span class=bolha></span><span class=rel id=rel>0:00</span>"
+                "<span class=dica id=dica>gravando…</span>"
+                "<button type=button class=cancela id=cancela>Cancelar</button>"
+                "<button type=button class=manda id=manda aria-label='Enviar áudio'>&#10148;</button>"
+                "</div></form>")
+        if pode_voz:
+            acao += _VOZ_JS.replace("__BASE__", _BASE).replace("__LEAD__", str(lead_id))
 
     # Quatro atalhos, e não cinco: o `.grade` é de DUAS colunas, então o quinto nascia
     # sozinho na terceira linha, meia largura, com um buraco do lado. Saiu o "Ligar" —
@@ -2903,6 +3048,37 @@ def _agir(request: Request, lead_id: int, fn, destino: str):
     request.session["ck_ok" if r.get("ok") else "ck_err"] = (
         r.get("msg", "Feito ✓") if r.get("ok") else _erro(r))
     return RedirectResponse(destino, status_code=303)
+
+
+@router.post("/cockpit/lead/{lead_id}/audio")
+async def cockpit_lead_audio(request: Request, lead_id: int, seg: int = 0):
+    """Recebe o áudio que o vendedor gravou. Corpo = os BYTES, não JSON.
+
+    Base64 num JSON custaria +33% de banda no 4G do vendedor e de memória aqui —
+    e é a memória que já quase derrubou o serviço de WhatsApp uma vez.
+
+    `seg` e a onda (cabeçalho X-Onda) vêm da tela: é o que faz o áudio do iPhone
+    passar sem conversão nenhuma, porque assim o Baileys não precisa decodificar.
+    """
+    sess = _sessao(request)
+    if not sess:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    from finance import audio_voz as av
+    dados = await request.body()
+    if not dados or len(dados) > av.LIMITE_BYTES:
+        return JSONResponse({"ok": False, "erro": "Áudio vazio ou grande demais."})
+    onda = None
+    cab = request.headers.get("x-onda") or ""
+    if cab:
+        try:
+            import base64
+            w = base64.b64decode(cab)
+            onda = w if len(w) == 64 else None
+        except Exception:  # noqa: BLE001 — onda é enfeite; sem ela o áudio vai igual
+            onda = None
+    tipo = (request.headers.get("content-type") or "audio/webm").split(",")[0].strip()
+    r = ck.enviar_audio(get_pool(), sess[0], sess[1], lead_id, dados, tipo, seg, onda)
+    return JSONResponse(r)
 
 
 @router.post("/cockpit/lead/{lead_id}/mensagem")

@@ -284,9 +284,34 @@ def test_prazo_padrao_e_ajustavel_por_empresa(pool, conta_id):
     assert ag.salvar_pre_reserva_dias(pool, conta_id, 9999) == 90
 
 
+def test_qualquer_prazo_da_faixa_serve(pool, conta_id):
+    """A tela oferecia uma lista fechada — 1, 2, 3, 5, 7, 10, 15 e 30 dias — e quem
+    pratica 4 ou 20 não tinha como dizer. O campo virou livre; o servidor sempre
+    aceitou a faixa inteira, e este teste prende isso pra ninguém reintroduzir a
+    lista achando que 4 nunca foi possível."""
+    for dias in (4, 6, 9, 20, 45, 90, 1):
+        assert ag.salvar_pre_reserva_dias(pool, conta_id, dias) == dias
+        assert ag.get_config(pool, conta_id)["pre_reserva_dias"] == dias
+
+
 def test_salvar_lembrete_nao_apaga_o_prazo_da_reserva(pool, conta_id):
     """São dois cards e duas decisões: mexer no lembrete não pode devolver o prazo
     pro padrão de quem já ajustou pra 7 dias."""
     ag.salvar_pre_reserva_dias(pool, conta_id, 7)
     ag.salvar_config(pool, conta_id, resumo_ativo=True, hora_resumo=8, aviso_antes_min=30)
     assert ag.get_config(pool, conta_id)["pre_reserva_dias"] == 7
+
+
+def test_a_tela_pede_o_prazo_em_campo_livre_e_nao_em_lista():
+    """A regra é da CASA, não do sistema: cada empresa segura a data pelo prazo que
+    pratica. A lista fechada (1, 2, 3, 5, 7, 10, 15, 30) decidia por ela — quem
+    trabalha com 4 ou 20 dias ficava sem opção, num campo onde o servidor sempre
+    aceitou de 1 a 90.
+
+    Olha a fonte do template porque é ela que a empresa vê: `salvar_pre_reserva_dias`
+    aceitar 4 não adianta nada se a tela não deixa escrever 4."""
+    from web.painel_agenda import _AGENDA_TPL as tpl
+    assert 'name="pre_reserva_dias"' in tpl, "o campo do prazo sumiu da tela"
+    assert 'type="number"' in tpl and 'max="90"' in tpl, (
+        "o prazo voltou a ser lista fechada — a faixa aceita é 1 a 90")
+    assert "<select name=\"pre_reserva_dias\"" not in tpl

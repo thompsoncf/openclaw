@@ -1761,11 +1761,16 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <p class="hint" style="margin-top:0">Quando o cliente aprova um orçamento de evento <b>com sinal</b>, a data entra aqui como segurada — ocupa o dia, mas não vira compromisso nem lembrete. Ela só firma quando você confirma o sinal, na tela do orçamento.</p>
         <form method="post" action="/painel/agenda/pre-reserva">
           <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+          {# CAMPO LIVRE, não lista fechada. A lista oferecia 1, 2, 3, 5, 7, 10, 15 e
+             30 — quem pratica 4 ou 20 dias não tinha como dizer, e o prazo do sinal
+             é regra de venda de cada casa. O limite de 1 a 90 é o que o servidor já
+             aplicava; agora ele está à vista. #}
           <div class="sub-opt">
             <span>Segurar por</span>
-            <select name="pre_reserva_dias">
-              {% for d in [1,2,3,5,7,10,15,30] %}<option value="{{ d }}" {% if cfg.pre_reserva_dias==d %}selected{% endif %}>{{ d }} dia{{ 's' if d != 1 }}</option>{% endfor %}
-            </select>
+            <input type="number" name="pre_reserva_dias" min="1" max="90" step="1"
+                   inputmode="numeric" style="width:5rem;text-align:right"
+                   value="{{ cfg.pre_reserva_dias or 3 }}">
+            <span>dias</span>
           </div>
           <p class="hint">Passando o prazo sem o sinal, a data libera sozinha e você é avisado. As pré-reservas que já estão correndo mantêm o prazo com que nasceram.</p>
           <button class="ok" type="submit" data-busy="⏳ Salvando…">Salvar prazo</button>

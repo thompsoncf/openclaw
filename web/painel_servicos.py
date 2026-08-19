@@ -783,7 +783,10 @@ def painel_servicos_lista(request: Request):
                             order by ct.id desc limit 1),
                           (select e.pre_reserva_ate from eventos_agenda e
                             where e.id = orcamentos.evento_agenda_id
-                              and e.status = 'pre_reservado')"""
+                              and e.status = 'pre_reservado'),
+                          evento,
+                          (select e.status from eventos_agenda e
+                            where e.id = orcamentos.evento_agenda_id)"""
         if papel == "vendedor" and membro_id:
             rows = c.execute(
                 _cols + """ from orcamentos where conta_id=%s and criado_por=%s
@@ -822,6 +825,12 @@ def painel_servicos_lista(request: Request):
         "contrato_assinado": bool(r[19]),
         # só vem preenchido enquanto a data está SEGURADA esperando o sinal
         "pre_reserva_ate": r[20].astimezone(ag.BRT).strftime("%d/%m %H:%M") if r[20] else "",
+        # O ESTADO DA DATA, resolvido no servidor. A linha do funil mostrava só a
+        # pré-reserva correndo — "data firme", "nunca entrou" e "liberada" tinham a
+        # mesma cara, e duas delas são problema. Ver vendas.estado_da_data.
+        "data": vendas.estado_da_data(
+            status=r[8], modo=r[13] or "recorrente", evento=r[21],
+            evento_status=r[22], pre_reserva_ate=r[20]),
     } for r in rows]
     return JSONResponse({"itens": itens})
 
@@ -919,6 +928,78 @@ def painel_servicos_sinal_recebido(request: Request, dados: SinalIn):
     if not r.get("ok"):
         return JSONResponse({"erro": r.get("erro", "falha ao confirmar")}, status_code=404)
     return JSONResponse(r)
+
+
+class MarcarDataIn(BaseModel):
+    id: int
+
+
+@router.post("/painel/servicos/marcar-data")
+def painel_servicos_marcar_data(request: Request, dados: MarcarDataIn):
+    """Põe na agenda a data de um orçamento aprovado que ficou de fora.
+
+    É o conserto dos dois estados ruins da linha do funil:
+      • FORA DA AGENDA — a aprovação nunca virou compromisso (orçamento sem hora
+        de início, erro engolido, processo reiniciado antes da tarefa rodar);
+      • DATA LIBERADA — o prazo do sinal venceu e o compromisso foi cancelado; o
+        cliente reapareceu e a empresa quer segurar de novo.
+
+    Usa a MESMA função da aprovação (proposta._reservar_na_agenda) de propósito.
+    Uma segunda rotina de "criar o compromisso" seria uma segunda regra: prazo
+    diferente, título diferente, conflito não avisado. Ela já é idempotente —
+    clicar duas vezes não cria dois compromissos.
+
+    O compromisso CANCELADO não é ressuscitado: fica como histórico e o orçamento
+    solta o vínculo pra ganhar um novo. Reviver o antigo apagaria o registro de
+    que a data chegou a vencer.
+    """
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    pool = get_pool()
+    with pool.connection() as c:
+        # o token é a chave de leitura do orçamento (a mesma que o cliente usa).
+        # Propostas antigas nasceram sem ele; a listagem do funil preenche na
+        # passagem, mas depender disso deixaria esta rota quebrada pra quem chegar
+        # por outro caminho. Gerar aqui é o mesmo UPDATE, e é idempotente.
+        c.execute(
+            """update orcamentos set token = substr(md5(random()::text || id::text
+                 || clock_timestamp()::text), 1, 22)
+               where id=%s and conta_id=%s and token is null""", (int(dados.id), conta[0]))
+        c.commit()
+        r = c.execute(
+            """select o.token, coalesce(o.status,''), coalesce(o.modo,'recorrente'),
+                      (select e.status from eventos_agenda e where e.id=o.evento_agenda_id)
+                 from orcamentos o where o.id=%s and o.conta_id=%s""",
+            (int(dados.id), conta[0])).fetchone()
+        if not r:
+            return JSONResponse({"erro": "orçamento não encontrado"}, status_code=404)
+        token, status, modo, ev_status = r
+        if modo != "evento" or status not in ("aprovada", "fechado"):
+            return JSONResponse(
+                {"erro": "só orçamento de evento já aprovado reserva data"}, status_code=400)
+        if ev_status in ("ativo", "pre_reservado"):
+            return JSONResponse({"erro": "essa data já está na agenda"}, status_code=409)
+        if ev_status == "cancelado":
+            c.execute("update orcamentos set evento_agenda_id=null, sinal_centavos=null "
+                      "where id=%s and conta_id=%s", (int(dados.id), conta[0]))
+            c.commit()
+
+    from web import proposta as prop
+    d = prop._carregar(token, pool=pool)
+    if not d:
+        return JSONResponse({"erro": "não consegui ler o orçamento"}, status_code=404)
+    novo_id = prop._reservar_na_agenda(d, pool=pool)
+    if not novo_id:
+        # o motivo mais comum tem conserto, e dizer "falhou" mandaria o dono
+        # procurar no escuro justamente o campo que a linha do funil já apontou.
+        falta_hora = not ((d.get("evento") or {}).get("inicio") or "").strip()
+        return JSONResponse(
+            {"erro": ("Falta a hora de início do evento — preencha em “O evento” e "
+                      "marque de novo." if falta_hora else
+                      "Não consegui marcar. Confira a data e a hora do evento.")},
+            status_code=400)
+    return JSONResponse({"ok": True, "evento_id": novo_id})
 
 
 def _conta_evento(request: Request):
@@ -1266,6 +1347,14 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-badge.pre{background:#2a2212; color:#e0b25a; border:1px dashed #6b5620; text-transform:none; letter-spacing:0}
 /* sinal já recebido: verde e SÓLIDO — o oposto do tracejado de "ainda esperando" */
 .oc-badge.sinalok{background:#10241d; color:var(--verde-claro); text-transform:none; letter-spacing:0}
+/* os outros dois estados da data. Verde sólido = firme, e os dois problemas em
+   coral: SÓLIDO pra "nunca entrou" (erro), TRACEJADO pra "liberada" (a data
+   existiu e caiu) — o mesmo par sólido/tracejado que separa firme de provisório
+   no resto da tela, pra quem não distingue cor ler pela forma. */
+.oc-badge.firme{background:var(--neon-fundo); color:var(--verde-claro); border:1px solid var(--neon-borda); text-transform:none; letter-spacing:0}
+.oc-badge.fora{background:var(--coral-fundo); color:var(--verm); border:1px solid var(--coral-borda); text-transform:none; letter-spacing:0}
+.oc-badge.solta{background:var(--coral-fundo); color:var(--verm); border:1px dashed var(--coral-borda); text-transform:none; letter-spacing:0}
+.oc-fechar.marcar{background:transparent; color:var(--verm); border:1px solid var(--coral-borda)}
 /* DESCONTO: campo + alternador %/R$. O mesmo par se repete na linha do item e no
    total, de propósito — dois controles diferentes pra mesma ideia viram duas ideias. */
 .oc-dpar{display:flex; align-items:stretch; width:100%}
@@ -1366,6 +1455,18 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     <div class="oc-field"><label>Convidados</label><input id="ev-conv" class="oc-inp" inputmode="numeric" placeholder="50"></div>
     <div class="oc-field"><label>Início</label><input id="ev-ini" class="oc-inp" placeholder="19:00"></div>
     <div class="oc-field"><label>Encerramento</label><input id="ev-fim" class="oc-inp" placeholder="24:00"></div>
+  </div>
+  {# A HORA DE INÍCIO É O QUE SEGURA A DATA. Sem ela a aprovação do cliente não
+     vira compromisso na agenda — e saía calada: o vendedor prometia a data, o
+     cliente assinava, e ninguém ficava sabendo que ela nunca foi reservada.
+     AVISA, não bloqueia: às vezes se fecha a proposta com a hora ainda a
+     combinar, e travar o botão travaria a venda. #}
+  <div id="ev-sem-hora" style="display:none;margin-top:.6rem;font-size:.8rem;line-height:1.5;
+       background:var(--ambar-fundo);border:1px solid var(--ambar-borda);
+       border-radius:8px;padding:.45rem .6rem;color:var(--amar)">
+    <b>Sem a hora de início, esta data não entra na agenda.</b>
+    <div style="opacity:.85;margin-top:.15rem">Pode salvar assim — mas a data só fica
+      segurada quando você preencher o Início.</div>
   </div>
   <div class="oc-field"><label>Tipo de evento</label>
     <div style="display:flex; gap:.4rem; flex-wrap:wrap" id="ev-tipos">
@@ -1852,11 +1953,28 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
             local:document.getElementById('ev-local').value||'',
             desconto:Math.max(0,Math.min(100,num(document.getElementById('oc-desconto'))))};
   }
+  // O aviso da hora que falta. Aparece só quando há DATA e não há hora: orçamento
+  // sem data nenhuma não prometeu nada e não tem o que avisar.
+  function pintarSemHora(){
+    var el=document.getElementById('ev-sem-hora');
+    if(!el)return;
+    var temData=!!(document.getElementById('ev-data')||{}).value;
+    var temHora=!!((document.getElementById('ev-ini')||{}).value||'').trim();
+    el.style.display=(temData&&!temHora)?'block':'none';
+  }
+  if(SERVICO_AVULSO){
+    ['ev-data','ev-ini'].forEach(function(id){
+      var el=document.getElementById(id);
+      if(el){el.addEventListener('input',pintarSemHora); el.addEventListener('change',pintarSemHora);}
+    });
+    pintarSemHora();
+  }
   function aplicarEvento(ev){
     if(!SERVICO_AVULSO)return;
     ev=ev||{};
     setv('ev-data',ev.data); setv('ev-conv',ev.convidados?String(ev.convidados):'');
     setv('ev-ini',ev.inicio); setv('ev-fim',ev.fim);
+    pintarSemHora();
     // Local: quase toda festa é no salão da própria empresa, então o endereço
     // dela já vem escrito. Evento fora ("na casa do cliente") o vendedor troca.
     var loc=document.getElementById('ev-local');
@@ -2569,6 +2687,19 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       })
       .catch(function(){alert('Erro de conexão.'); btn.disabled=false; btn.textContent='Sinal recebido';});
   }
+  // Põe na agenda a data que ficou de fora, ou segura de novo a que foi liberada.
+  // Sem confirmação de propósito: marcar uma data que deveria estar marcada não
+  // destrói nada, e o botão só aparece quando há de fato o que consertar.
+  function marcarData(id,btn){
+    var t=btn.textContent; btn.disabled=true; btn.textContent='Marcando...';
+    fetch('/painel/servicos/marcar-data',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})
+      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+      .then(function(res){
+        if(!res.ok){alert((res.d&&res.d.erro)||'Não consegui marcar.'); btn.disabled=false; btn.textContent=t; return;}
+        carregarHist();
+      })
+      .catch(function(){alert('Erro de conexão.'); btn.disabled=false; btn.textContent=t;});
+  }
   // Apagar proposta do funil. Confirma sempre e nomeia o cliente na pergunta: a
   // lista é densa e o 🗑 fica ao lado do 📄, então "tem certeza?" sozinho não diz
   // qual das cinco linhas vai embora.
@@ -2609,26 +2740,37 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         badge.className='oc-badge '+(fechado?'fechado':(aprovada?'fechado':'aberto'));
         badge.textContent=fechado?'Fechado':(aprovada?('Aprovada'+(it.aprovada_por?' · '+esc(it.aprovada_por):'')):esc(it.status));
         right.appendChild(badge);
-        // Data SEGURADA esperando o sinal. Só aparece enquanto o compromisso está
-        // pré-reservado — quando o sinal cai (ou o prazo vence), o servidor para de
-        // mandar pre_reserva_ate e a linha volta ao normal sozinha.
-        if(it.pre_reserva_ate){
-          var pr=document.createElement('span'); pr.className='oc-badge pre';
-          pr.textContent='Data segurada até '+esc(it.pre_reserva_ate);
-          pr.title='O cliente aprovou, mas o sinal'+(it.sinal?' de '+esc(it.sinal):'')
-                   +' ainda não foi confirmado. Passando o prazo, a data libera sozinha.';
-          right.appendChild(pr);
-          var bs=document.createElement('button'); bs.className='oc-fechar sinal';
-          bs.textContent='Sinal recebido';
-          bs.title='Confirma que o sinal caiu: a data vira compromisso firme na agenda '
-                  +'e o título dessa parcela entra como recebido, na data de hoje.';
-          bs.addEventListener('click',function(){sinalRecebido(it.id,it.cliente,bs);});
-          right.appendChild(bs);
+        // O ESTADO DA DATA — quatro possíveis, e até 19/08 a linha desenhava um só
+        // (a pré-reserva correndo). "Firme", "nunca entrou" e "liberada" ficavam
+        // com a mesma cara, e duas delas são problema. A redação inteira mora no
+        // servidor (vendas.estado_da_data); aqui só se escolhe a cor e o botão.
+        if(it.data){
+          var CLS={reservada:'firme',segurada:'pre',fora:'fora',liberada:'solta'};
+          var dd=document.createElement('span');
+          dd.className='oc-badge '+(CLS[it.data.estado]||'pre');
+          dd.textContent=it.data.texto;
+          dd.title=it.data.dica||'';
+          right.appendChild(dd);
+          if(it.data.acao==='sinal'){
+            var bs=document.createElement('button'); bs.className='oc-fechar sinal';
+            bs.textContent='Sinal recebido';
+            bs.title='Confirma que o sinal caiu: a data vira compromisso firme na agenda '
+                    +'e o título dessa parcela entra como recebido, na data de hoje.';
+            bs.addEventListener('click',function(){sinalRecebido(it.id,it.cliente,bs);});
+            right.appendChild(bs);
+          }
+          else if(it.data.acao==='marcar'||it.data.acao==='resegurar'){
+            var bm=document.createElement('button'); bm.className='oc-fechar marcar';
+            bm.textContent=(it.data.acao==='marcar')?'Marcar agora':'Segurar de novo';
+            bm.title=it.data.dica||'';
+            bm.addEventListener('click',function(){marcarData(it.id,bm);});
+            right.appendChild(bm);
+          }
         }
         // Sinal JÁ confirmado: fica dito na linha. Sem isso, depois que o botão some
         // não sobra nada na tela dizendo que aquele dinheiro entrou — e é ele que
         // explica por que o título dessa parcela não aparece em aberto.
-        else if(it.sinal_pago && it.sinal){
+        if(!(it.data&&it.data.estado==='segurada') && it.sinal_pago && it.sinal){
           var sp=document.createElement('span'); sp.className='oc-badge sinalok';
           sp.textContent='Sinal recebido · '+esc(it.sinal);
           sp.title=fechado?'O título dessa parcela entrou como recebido no livro-caixa, '

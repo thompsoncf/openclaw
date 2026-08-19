@@ -9,6 +9,7 @@ no funil, gerando os títulos a receber). Escopo de leitura por TOKEN, não por
 conta — quem tem o link vê aquela proposta e só ela.
 """
 import json
+import logging
 from datetime import date, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Request, Form
@@ -18,6 +19,8 @@ from db.conexao import get_pool
 from finance import (agenda as ag, desconto as dsc, icones_servico as ics,
                      servicos_catalogo as scat)
 from web.portal import _env
+
+_log = logging.getLogger("openclaw.proposta")
 
 router = APIRouter()
 
@@ -38,10 +41,17 @@ def _pos_assinatura(d: dict, assinante: str) -> None:
     """Depois que o cliente assina: reserva a data na agenda (evento) e avisa a
     empresa. Roda em background; cada parte falha sozinha, sem derrubar a outra
     nem a resposta que o cliente já recebeu."""
+    # O QUE MUDOU AQUI. Este bloco era `except: pass` — mudo. Quando ele
+    # engolia, o cliente via "aprovado", a data não entrava na agenda e não
+    # sobrava rastro em lugar nenhum: nem log, nem tela. Foi assim que um
+    # orçamento aprovado apareceu sem pré-reserva e ninguém soube dizer por quê.
+    # Continua sem derrubar a assinatura — só para de ser invisível.
     try:
-        _reservar_na_agenda(d)
-    except Exception:  # noqa: BLE001
-        pass
+        if _reservar_na_agenda(d) is None:
+            _log.info("proposta %s: aprovada sem reservar data (ver motivo acima)", d.get("id"))
+    except Exception as e:  # noqa: BLE001
+        _log.warning("proposta %s: falhou ao reservar a data: %s: %s",
+                     d.get("id"), type(e).__name__, e)
     # O CONTRATO nasce aqui, na aprovação — não no sinal. Assim o cliente recebe o
     # link e LÊ as cláusulas antes de pagar a entrada, que é a propriedade que a
     # folha tinha quando o contrato era um bloco dela. Assinar segue liberado só
@@ -104,11 +114,20 @@ def _reservar_na_agenda(d: dict, pool=None) -> int | None:
     convidados. Idempotente: orçamento que já tem compromisso não cria outro. Sem
     data ou sem hora de início, não marca nada — a aprovação vale do mesmo jeito.
     """
-    if d.get("modo") != "evento" or d.get("evento_agenda_id"):
-        return None
+    if d.get("modo") != "evento":
+        return None                       # nicho recorrente não vende data
+    if d.get("evento_agenda_id"):
+        return None                       # já tem compromisso: idempotência, não falha
     ev = d.get("evento") or {}
     inicio, fim = ag.janela_evento(ev.get("data"), ev.get("inicio"), ev.get("fim"))
     if not inicio:
+        # A PORTA MAIS LARGA. O campo "Início" do orçamento é livre e não é
+        # obrigatório, então data preenchida + hora vazia sai por aqui — e saía
+        # calada. A linha do funil hoje denuncia (vendas.estado_da_data), e o log
+        # diz qual dos dois campos faltou pra quem for investigar depois.
+        _log.info("proposta %s: sem data ou sem hora de início (data=%r inicio=%r) — "
+                  "a aprovação não vira compromisso", d.get("id"),
+                  ev.get("data"), ev.get("inicio"))
         return None
     pool = pool or get_pool()
     cliente = (d.get("empresa") or d.get("contato") or "").strip()

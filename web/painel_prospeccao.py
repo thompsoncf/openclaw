@@ -27,6 +27,7 @@ from psycopg.errors import UniqueViolation
 from db.conexao import get_pool
 from contas import equipe as eq
 from finance import campanhas_motor as _cm
+from finance import funil_regua as _fr
 from finance import prospec_convite as _prospec_convite
 from finance import prospec_inbound as _prospec_inbound
 from finance import prospeccao_fontes as fontes
@@ -52,7 +53,8 @@ _ETAPAS_PADRAO = [
     ("qualificado", "Qualificado", 20, False), ("proposta", "Proposta", 30, False),
     ("ganho", "Ganho", 900, True), ("perdido", "Perdido", 910, True),
 ]
-_ORDEM_GANHO = 900  # etapas novas entram antes disso (miolo fica < 900)
+_ORDEM_GANHO = 900     # etapas de VENDA entram antes disso (o miolo fica < 900)
+_ORDEM_PERDIDO = 910   # e as de PÓS-VENDA depois daqui (migração 177)
 
 
 def _etapas(c, conta_id: int) -> list[dict]:
@@ -235,7 +237,8 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
                       m.nome, p.orcamento_id, p.tem_site, p.maps_url, p.receita,
                       p.site_url, p.decisor_nome, p.decisor_cargo, p.decisor_telefone,
                       p.decisor_whatsapp, p.decisor_em, p.decisor_telefones,
-                      p.tipo, p.cpf
+                      p.tipo, p.cpf,
+                      p.cep, p.endereco, p.numero, p.bairro, p.nascimento
                  from prospeccao p
                  left join membros m on m.id = p.vendedor_id
                 where p.id=%s and p.conta_id=%s""", (alvo_id, conta_id)).fetchone()
@@ -247,7 +250,8 @@ def _carrega_alvo(pool, conta_id: int, alvo_id: int):
             "ultimo_contato_em", "proximo_contato_em", "vendedor_id", "vendedor_nome",
             "orcamento_id", "tem_site", "maps_url", "receita", "site_url",
             "decisor_nome", "decisor_cargo", "decisor_telefone", "decisor_whatsapp", "decisor_em",
-            "decisor_telefones", "tipo", "cpf"]
+            "decisor_telefones", "tipo", "cpf",
+            "cep", "endereco", "numero", "bairro", "nascimento"]
     d = dict(zip(cols, r))
     # PF x PJ: o que a ficha precisa saber pra trocar rótulo, documento e esconder o
     # que só existe em empresa (sócio, regime, porte, Receita, decisor).
@@ -928,29 +932,36 @@ def prospeccao_novo(request: Request, empresa: str = Form(...), segmento: str = 
                     vendedor_id: str = Form(""), obs: str = Form(""),
                     socio: str = Form(""), regime_tributario: str = Form(""),
                     porte: str = Form(""), cargo: str = Form(""), instagram: str = Form(""),
-                    site_url: str = Form(""), receita: str = Form(""), voltar: str = Form("")):
+                    site_url: str = Form(""), receita: str = Form(""), voltar: str = Form(""),
+                    destino: str = Form("")):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
     ajax = _eh_ajax(request)
     empresa = (empresa or "").strip()
-    destino = voltar if voltar in ("/painel/prospeccao", "/painel/prospeccao/captar") else "/painel/prospeccao"
+    volta = voltar if voltar in ("/painel/prospeccao", "/painel/prospeccao/captar") else "/painel/prospeccao"
     tipo_lead, cnpj_limpo, cpf_limpo, erro_doc = _doc_lead(tipo, cnpj, cpf, documento)
     if not empresa:
         falta = "o nome da pessoa" if tipo_lead == "pf" else "o nome da empresa"
         if ajax:
             return JSONResponse({"ok": False, "erro": f"Informe ao menos {falta}."}, status_code=400)
         request.session["prosp_aviso"] = f"Informe ao menos {falta}."
-        return RedirectResponse(destino, status_code=303)
+        return RedirectResponse(volta, status_code=303)
     if erro_doc:
         if ajax:
             return JSONResponse({"ok": False, "erro": erro_doc}, status_code=400)
         request.session["prosp_aviso"] = erro_doc
-        return RedirectResponse(destino, status_code=303)
+        return RedirectResponse(volta, status_code=303)
     if tipo_lead == "pf":
         # sócio/regime/porte são do quadro societário — pessoa física não tem
         socio = regime_tributario = porte = ""
     temperatura = temperatura if temperatura in TEMP_OK else "frio"
+    # ONDE o lead nasce. O padrão histórico é a BASE: a captação em massa (Google
+    # Maps, CSV, Explorium) traz quem NÓS fomos atrás, e isso ainda não é lead. Mas o
+    # formulário manual que abre DENTRO do funil manda `destino=funil` — ali o cadastro
+    # é de quem já chegou, e nascer na base fazia o card aparecer na tela e sumir no
+    # primeiro refresh: o funil só lista `estagio='lead'` (ver prospeccao_kanban).
+    estagio = "lead" if (destino or "").strip() == "funil" else "base"
     site_link = (site_url or "").strip()
     if site_link and "://" not in site_link:
         site_link = "https://" + site_link
@@ -964,14 +975,20 @@ def prospeccao_novo(request: Request, empresa: str = Form(...), segmento: str = 
             receita_json = None
     pool = get_pool()
     vend = _vendedor_destino(ctx, vendedor_id, pool, ctx["conta_id"])
+    etapa1 = ""
     try:
         with pool.connection() as c:
+            # o rótulo da 1ª etapa é da CONTA (dá pra renomear "Novo"), então o aviso
+            # tem que perguntar pro banco em vez de chutar o nome padrão
+            if estagio == "lead":
+                etapas = _etapas(c, ctx["conta_id"])
+                etapa1 = etapas[0]["rotulo"] if etapas else "Novo"
             row = c.execute(
                 """insert into prospeccao (conta_id, vendedor_id, empresa, segmento, cidade,
                      uf, contato, cargo, telefone, whatsapp, email, cnpj, temperatura,
                      valor_estimado_centavos, origem, obs, socio, regime_tributario, porte,
-                     instagram, site_url, tem_site, receita, criado_por, tipo, cpf)
-                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s) returning id""",
+                     instagram, site_url, tem_site, receita, criado_por, tipo, cpf, estagio)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s) returning id""",
                 (ctx["conta_id"], vend, empresa, segmento.strip() or None, cidade.strip() or None,
                  (uf or "").strip()[:2].upper() or None, contato.strip() or None, cargo.strip() or None,
                  telefone.strip() or None, whatsapp.strip() or None, email.strip().lower() or None,
@@ -979,7 +996,7 @@ def prospeccao_novo(request: Request, empresa: str = Form(...), segmento: str = 
                  (origem or "manual").strip() or None, obs.strip() or None,
                  socio.strip() or None, regime_tributario.strip() or None, porte.strip() or None,
                  instagram.strip() or None, site_link or None, tem_site, receita_json,
-                 ctx["membro_id"], tipo_lead, cpf_limpo)).fetchone()
+                 ctx["membro_id"], tipo_lead, cpf_limpo, estagio)).fetchone()
             c.commit()
     except UniqueViolation:
         doc, campo = (cpf_limpo, "cpf") if cpf_limpo else (cnpj_limpo, "cnpj")
@@ -991,14 +1008,20 @@ def prospeccao_novo(request: Request, empresa: str = Form(...), segmento: str = 
                                   "link_url": info["link_url"], "link_label": info["link_label"]},
                                  status_code=409)
         request.session["prosp_aviso"] = info["msg"]
-        return RedirectResponse(destino, status_code=303)
+        return RedirectResponse(volta, status_code=303)
+    # "entrou na prospecção" não dizia NADA: quem cadastrava pelo funil ia procurar
+    # o lead ali e não achava (tinha caído na Base). O aviso agora nomeia o lugar — e,
+    # quando é Base, ensina o caminho de volta pro funil.
+    msg = (f"“{empresa}” entrou no funil, em {etapa1}." if estagio == "lead" else
+           f"“{empresa}” entrou na Base — ainda NÃO aparece no funil. "
+           f"Pra jogar no funil: 📇 Base → marque o lead → Promover.")
     if ajax:
         lead = _lead_card(row[0], empresa, segmento.strip(), cidade.strip(),
                           (uf or "").strip()[:2].upper(), temperatura, _reais_para_centavos(valor),
                           _nome_vendedor(pool, ctx["conta_id"], vend) if ctx["gerencia"] else None)
-        return JSONResponse({"ok": True, "lead": lead})
-    request.session["prosp_aviso"] = f"“{empresa}” entrou na prospecção."
-    return RedirectResponse(destino, status_code=303)
+        return JSONResponse({"ok": True, "lead": lead, "estagio": estagio, "msg": msg})
+    request.session["prosp_aviso"] = msg
+    return RedirectResponse(volta, status_code=303)
 
 
 # ================================================================ CAPTAÇÃO
@@ -2115,6 +2138,35 @@ def comunicacao_whatsapp_qr_status(request: Request):
     return JSONResponse({"ok": True, "status": st, "qr": r.get("qr"),
                          "sincronizando": bool(r.get("sincronizando")), "sync_progress": r.get("syncProgress") or 0,
                          "msg": _QR_ROT.get(st, "")})
+
+
+@router.get("/painel/prospeccao/comunicacao/whatsapp-aparelhos")
+def comunicacao_whatsapp_aparelhos(request: Request):
+    """Quantos aparelhos estão ligados neste WhatsApp — e quanto ainda sai por fora.
+
+    Depois que o Cockpit parou de oferecer a saída pro celular, sobrou a pergunta
+    que só o dono responde: quem ainda tem o número ligado no aparelho. O sistema
+    MOSTRA; desligar é no celular dono da conta, e nenhum sistema faz por ninguém.
+
+    Vêm dois números de fontes diferentes de propósito. Os APARELHOS dizem que a
+    porta existe e dependem do WhatsApp responder; a SAÍDA POR FORA sai do banco e
+    diz se alguém passa por ela. Um cobre o outro quando a sessão está fora do ar.
+    """
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    from finance import cockpit as ck
+    fora = ck.saida_por_fora(get_pool(), ctx["conta_id"])
+    # A CONSULTA AO WHATSAPP SÓ SAI COM `perguntar=1`. Sem isso a rota devolve só o
+    # número do banco — que é o que a tela carrega sozinha. Perguntar ao WhatsApp
+    # é caro e repetição é o que queima número em cliente não oficial.
+    if request.query_params.get("perguntar") != "1":
+        return JSONResponse({"ok": True, "aparelhos": None, "fora": fora})
+    from finance import whatsapp_qr as wq
+    ap = wq.aparelhos(ctx["conta_id"]) or {}
+    return JSONResponse({"ok": True,
+                         "aparelhos": ap if ap.get("ok") else None,
+                         "fora": fora})
 
 
 @router.post("/painel/prospeccao/comunicacao/whatsapp-qr-sair")
@@ -5786,6 +5838,210 @@ def _numeros_candidatos(alvo: dict) -> list[dict]:
 
 
 # ================================================================ FICHA DO ALVO
+# ================================================================ RÉGUA DO FUNIL
+# ATENÇÃO À POSIÇÃO: estas rotas TÊM que ser declaradas antes de
+# `/painel/prospeccao/{alvo_id}` (logo abaixo). O FastAPI casa por ORDEM DE
+# REGISTRO, não por especificidade: com a ficha do lead declarada primeiro, ela
+# engole /painel/prospeccao/regua tratando "regua" como id de lead, e a tela
+# responde 422 "unable to parse string as an integer". Foi assim que a Régua
+# subiu quebrada em produção — ver test_regua_vem_antes_da_ficha_do_lead.
+# A configuração da empresa num lugar só: as etapas (nome, fase, ordem), o gatilho
+# que traz o lead pra cada uma, o prazo que ela aguenta, e os dois interruptores.
+# Nasce tudo desligado — quem liga é o dono, um gatilho de cada vez.
+_UNIDADES = [("min", "minutos", 1), ("h", "horas", 60), ("d", "dias", 1440)]
+_UNI_MIN = {u: m for u, _r, m in _UNIDADES}
+
+
+def _min_par(m):
+    """240 -> (4, 'h'). Escolhe a maior unidade que divide certo, pra tela mostrar
+    '4 horas' e não '240 minutos'."""
+    if not m:
+        return ("", "h")
+    for uni, _rot, mult in reversed(_UNIDADES):
+        if m % mult == 0:
+            return (m // mult, uni)
+    return (m, "min")
+
+
+def _par_min(n, uni):
+    """('4','h') -> 240. Vazio/zero/negativo = sem prazo (None), que é como a etapa
+    diz 'não cobro ninguém' sem precisar de uma segunda coluna pra isso."""
+    try:
+        v = int(str(n).strip())
+    except (TypeError, ValueError):
+        return None
+    if v <= 0:
+        return None
+    return v * _UNI_MIN.get(uni, 60)
+
+
+@router.get("/painel/prospeccao/regua", response_class=HTMLResponse)
+def regua_pagina(request: Request):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "A régua é configuração da empresa — só dono/gestor."
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    pool = get_pool()
+    with pool.connection() as c:
+        _etapas(c, ctx["conta_id"])                 # semeia o padrão na 1ª visita
+        cfg = _fr.config(c, ctx["conta_id"])
+        c.commit()
+        linhas = _fr.etapas(c, ctx["conta_id"])
+        # quantos leads em cada coluna, pro dono ver o que ele está mexendo (e pra
+        # tela saber quando o botão de remover pode ficar habilitado)
+        n_por = dict(c.execute(
+            """select status, count(*) from prospeccao
+                where conta_id=%s and estagio='lead' group by status""",
+            (ctx["conta_id"],)).fetchall())
+        # o histórico já roda com tudo desligado — mostrar o tamanho dele é o que
+        # justifica esperar antes de ligar
+        n_mov = c.execute("select count(*) from funil_movimentos where conta_id=%s",
+                          (ctx["conta_id"],)).fetchone()[0]
+    for e in linhas:
+        e["n"] = n_por.get(e["chave"], 0)
+        e["prazo_n"], e["prazo_u"] = _min_par(e["prazo_min"])
+        e["gatilho_rot"] = _fr.EVENTOS.get(e["gatilho"] or "", "")
+    conv = [{"chave": k, "rotulo": v, "prazo_n": _min_par(cfg[c_])[0], "prazo_u": _min_par(cfg[c_])[1]}
+            for k, v, c_ in (("sem_resposta", "Sem resposta", "sem_resposta_min"),
+                             ("bola_nossa", "Bola com você", "bola_nossa_min"),
+                             ("bola_cliente", "Bola com o cliente", "bola_cliente_min"))]
+    return _render("prospeccao_regua", request, titulo="Régua do funil",
+                   secao_ativa="prospeccao", nav_ativo="regua", gerencia=True,
+                   etapas=linhas, cfg=cfg, conv=conv, eventos=sorted(_fr.EVENTOS.items()),
+                   unidades=[(u, r) for u, r, _m in _UNIDADES],
+                   dias_on=_fr._dias(cfg), n_mov=n_mov,
+                   aviso=request.session.pop("prosp_aviso", None))
+
+
+@router.post("/painel/prospeccao/regua/config")
+async def regua_config(request: Request):
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    f = await request.form()
+
+    def modo(nome):
+        v = (f.get(nome) or "off").strip()
+        return v if v in _fr.MODOS else "off"
+
+    dias = ",".join(d for d in (f.getlist("dias") or []) if d in "1234567")
+    abre = (f.get("abre") or "08:00").strip()[:5]
+    fecha = (f.get("fecha") or "19:00").strip()[:5]
+    with get_pool().connection() as c:
+        _fr.config(c, ctx["conta_id"])          # garante a linha
+        c.execute("""update funil_regua set gatilhos_modo=%s, cobranca_modo=%s,
+                       janela_dias=%s, janela_abre=%s, janela_fecha=%s,
+                       sem_resposta_min=coalesce(%s, sem_resposta_min),
+                       bola_nossa_min=coalesce(%s, bola_nossa_min),
+                       bola_cliente_min=coalesce(%s, bola_cliente_min),
+                       escala_min=coalesce(%s, escala_min),
+                       teto_avisos_dia=greatest(1, coalesce(%s, teto_avisos_dia)),
+                       atualizado_em=now()
+                     where conta_id=%s""",
+                  (modo("gatilhos_modo"), modo("cobranca_modo"), dias, abre, fecha,
+                   _par_min(f.get("sem_resposta_n"), f.get("sem_resposta_u")),
+                   _par_min(f.get("bola_nossa_n"), f.get("bola_nossa_u")),
+                   _par_min(f.get("bola_cliente_n"), f.get("bola_cliente_u")),
+                   _par_min(f.get("escala_n"), f.get("escala_u")),
+                   _par_min(f.get("teto"), "min"), ctx["conta_id"]))
+        c.commit()
+    request.session["prosp_aviso"] = "Régua salva ✓"
+    return RedirectResponse("/painel/prospeccao/regua", status_code=303)
+
+
+@router.post("/painel/prospeccao/regua/etapa/{eid}")
+async def regua_etapa(request: Request, eid: int):
+    """Salva UMA etapa: rótulo, prazo, gatilho e a chave que liga esse gatilho.
+    Uma linha por vez de propósito — o dono pediu pra ligar um de cada vez, e um
+    formulário só pra sete etapas transformaria isso em tudo-ou-nada."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    f = await request.form()
+    rot = (f.get("rotulo") or "").strip()[:40]
+    gat = (f.get("gatilho") or "").strip()
+    gat = gat if gat in _fr.EVENTOS else None
+    ativo = str(f.get("gatilho_ativo") or "").lower() in ("1", "on", "true", "sim")
+    prazo = _par_min(f.get("prazo_n"), f.get("prazo_u"))
+    with get_pool().connection() as c:
+        r = c.execute("select chave, fixa from funil_etapas where id=%s and conta_id=%s",
+                      (eid, ctx["conta_id"])).fetchone()
+        if not r:
+            return JSONResponse({"ok": False, "erro": "etapa"}, status_code=404)
+        # Etapa de resultado não tem prazo: "está em Perdido há 30 dias" não é uma
+        # cobrança, é o fim da história. Deixar o campo aberto só convidaria alguém
+        # a criar um alarme que nunca deveria tocar.
+        if r[0] in ("ganho", "perdido"):
+            prazo = None
+        c.execute("""update funil_etapas
+                        set rotulo = coalesce(nullif(%s,''), rotulo),
+                            prazo_min = %s, gatilho = %s,
+                            -- ligar sem escolher evento não liga nada: a etapa ficaria
+                            -- "ativa" apontando pro vazio e o motor rodaria em falso.
+                            -- O ::text é pro Postgres saber o tipo do parâmetro solto.
+                            gatilho_ativo = (%s and %s::text is not null)
+                      where id=%s and conta_id=%s""",
+                  (rot, prazo, gat, ativo, gat, eid, ctx["conta_id"]))
+        c.commit()
+    return JSONResponse({"ok": True, "gatilho_ativo": bool(ativo and gat)})
+
+
+
+def _dur(minutos: float) -> str:
+    """Duração pra humano. 12 minutos é '12 min', não '0,2 h' — e a mediana desta
+    equipe É 12 minutos, então arredondar pra hora apagaria justamente o número que
+    mostra que os vendedores são rápidos."""
+    m = int(round(minutos or 0))
+    if m < 60:
+        return f"{m} min"
+    if m < 1440:
+        return f"{m // 60}h{m % 60:02d}"
+    return f"{m // 1440}d {(m % 1440) // 60}h"
+
+
+@router.get("/painel/prospeccao/regua/ritmo", response_class=HTMLResponse)
+def regua_ritmo(request: Request, dias: int = 21):
+    """O ritmo real da equipe, medido. É esta tela que escolhe os prazos da régua —
+    ela existe pra que ninguém precise chutar, inclusive eu."""
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return redir
+    if not ctx["gerencia"]:
+        request.session["prosp_aviso"] = "O ritmo da equipe é visão de dono/gestor."
+        return RedirectResponse("/painel/prospeccao", status_code=303)
+    dias = max(7, min(int(dias or 21), 90))
+    with get_pool().connection() as c:
+        d = _fr.medir(c, ctx["conta_id"], dias)
+        cfg = _fr.config(c, ctx["conta_id"])
+        rot = {e["chave"]: e["rotulo"] for e in _fr.etapas(c, ctx["conta_id"])}
+        c.commit()
+    # a barra vai até o P90 do mais lento — comparar vendedor com vendedor só faz
+    # sentido na mesma régua
+    teto = max([v["p90"] for v in d["vendedores"]] or [1]) or 1
+    for v in d["vendedores"]:
+        v["p50_rot"], v["p90_rot"] = _dur(v["p50"]), _dur(v["p90"])
+        v["larg50"] = f"{min(100, v['p50'] / teto * 100):.1f}%"
+        v["larg90"] = f"{min(100, v['p90'] / teto * 100):.1f}%"
+    for e in d["etapas"]:
+        e["rotulo"] = rot.get(e["chave"], e["chave"])
+        e["dur"] = _dur(e["horas"] * 60)
+    maior = max([n for _r, n in d["cortes"]] or [1]) or 1
+    cortes = [{"rotulo": r, "n": n, "dia": f"{n / max(dias, 1):.1f}".replace(".", ","),
+               "larg": f"{(n / maior * 100):.0f}%"} for r, n in d["cortes"]]
+    return _render("prospeccao_ritmo", request, titulo="O ritmo real",
+                   secao_ativa="prospeccao", nav_ativo="regua", gerencia=True,
+                   d=d, cfg=cfg, cortes=cortes, dias=dias, dur=_dur,
+                   aviso=request.session.pop("prosp_aviso", None))
+
+
+
+
 @router.get("/painel/prospeccao/{alvo_id}", response_class=HTMLResponse)
 def prospeccao_ficha(request: Request, alvo_id: int):
     ctx, redir = _acesso(request)
@@ -6151,6 +6407,13 @@ def prospeccao_orcamento(request: Request, alvo_id: int):
             novo_status = alvo["status"] if alvo["status"] in ("ganho", "perdido") else "proposta"
             c.execute("update prospeccao set orcamento_id=%s, status=%s, atualizado_em=now() "
                       "where id=%s and conta_id=%s", (oid, novo_status, alvo_id, ctx["conta_id"]))
+            try:
+                from finance import funil_regua as _fr
+                with c.transaction():    # savepoint: registrar não pode derrubar o orçamento
+                    _fr.registrar_movimento(c, ctx["conta_id"], alvo_id, alvo["status"], novo_status,
+                                            "orcamento", ctx["membro_id"])
+            except Exception:  # noqa: BLE001
+                pass
             c.commit()
     return RedirectResponse(f"/painel/servicos?abrir={oid}", status_code=303)
 
@@ -6177,6 +6440,22 @@ async def prospeccao_status(request: Request, alvo_id: int):
         c.execute("""update prospeccao set status=%s, estagio='lead', atualizado_em=now()
                        where id=%s and conta_id=%s""",
                   (status, alvo_id, ctx["conta_id"]))
+        # O histórico é o que o banco nunca teve: sem ele ninguém consegue dizer
+        # quanto um lead ficou em cada coluna. Grava desde já, com a régua toda
+        # desligada — anotar o que a pessoa acabou de fazer não é automação. E é
+        # esta linha 'manual' que a trava 3 da régua respeita depois.
+        # SAVEPOINT, não enfeite: sem ele um erro no registro aborta a transação e
+        # o commit abaixo vira ROLLBACK calado — o card volta pra coluna antiga e a
+        # tela diz que deu certo. Mesmo motivo do savepoint da distribuição.
+        try:
+            from finance import funil_regua as _fr
+            with c.transaction():
+                _fr.registrar_movimento(c, ctx["conta_id"], alvo_id, alvo["status"], status,
+                                        "manual", ctx["membro_id"])
+        except Exception:  # noqa: BLE001 — histórico é acessório; mover o card é o pedido
+            import logging
+            logging.getLogger("funil.historico").warning(
+                "movimento do lead %s não registrado", alvo_id, exc_info=True)
         c.commit()
     return JSONResponse({"ok": True, "status": status, "estagio": "lead"})
 
@@ -6185,7 +6464,7 @@ async def prospeccao_status(request: Request, alvo_id: int):
 # Só o dono/gestor edita a estrutura do funil (é uma configuração da empresa). O vendedor
 # usa o funil normalmente. 'novo'/'ganho'/'perdido' (fixa=true) só renomeiam.
 @router.post("/painel/prospeccao/etapas/nova")
-def prospeccao_etapa_nova(request: Request, rotulo: str = Form("")):
+def prospeccao_etapa_nova(request: Request, rotulo: str = Form(""), fase: str = Form("venda")):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -6193,6 +6472,7 @@ def prospeccao_etapa_nova(request: Request, rotulo: str = Form("")):
         request.session["prosp_aviso"] = "Só o dono/gestor edita as etapas do funil."
         return RedirectResponse("/painel/prospeccao", status_code=303)
     rot = (rotulo or "").strip()[:40] or "Nova etapa"
+    fase = fase if fase in ("venda", "pos") else "venda"   # 'fechamento' é só das fixas
     with get_pool().connection() as c:
         _etapas(c, ctx["conta_id"])  # garante o seed antes de mexer
         existentes = {r[0] for r in c.execute(
@@ -6204,8 +6484,16 @@ def prospeccao_etapa_nova(request: Request, rotulo: str = Form("")):
         mx = c.execute("select coalesce(max(ordem),0) from funil_etapas where conta_id=%s and ordem<%s",
                        (ctx["conta_id"], _ORDEM_GANHO)).fetchone()[0]
         ordem = min(mx + 10, _ORDEM_GANHO - 1)
-        c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fixa)
-                     values (%s,%s,%s,%s,false)""", (ctx["conta_id"], chave, rot, ordem))
+        # Etapa de PÓS-VENDA entra depois do fechamento — o que era impossível até a
+        # migração 177. Numa empresa de eventos o evento acontece DEPOIS de o sinal
+        # ser pago, e prender essa coluna no meio da venda é errado na origem. Quem
+        # continua contando como venda ganha é a `fase`, não a ordem (chaves_fechadas).
+        if fase == "pos":
+            mxp = c.execute("select coalesce(max(ordem),%s) from funil_etapas where conta_id=%s",
+                            (_ORDEM_PERDIDO, ctx["conta_id"])).fetchone()[0]
+            ordem = max(mxp + 10, _ORDEM_PERDIDO + 10)
+        c.execute("""insert into funil_etapas (conta_id, chave, rotulo, ordem, fixa, fase)
+                     values (%s,%s,%s,%s,false,%s)""", (ctx["conta_id"], chave, rot, ordem, fase))
         c.commit()
     request.session["prosp_aviso"] = f"Etapa “{rot}” adicionada ✓"
     return RedirectResponse("/painel/prospeccao", status_code=303)
@@ -6372,6 +6660,13 @@ def _reg_atividade(c, alvo_id, conta_id, membro_id, tipo, descricao, status_atua
     c.execute("""update prospeccao set ultimo_contato_em=now(), status=%s,
                    atualizado_em=now() where id=%s and conta_id=%s""",
               (novo, alvo_id, conta_id))
+    if novo != status_atual:
+        try:
+            from finance import funil_regua as _fr
+            with c.transaction():        # savepoint: registrar não pode derrubar a atividade
+                _fr.registrar_movimento(c, conta_id, alvo_id, status_atual, novo, "atividade", membro_id)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 @router.post("/painel/prospeccao/{alvo_id}/mensagem-ia")
@@ -7042,7 +7337,12 @@ _CSS = """<style>
 .kbcard .ft{display:flex;align-items:center;justify-content:space-between;gap:.3rem;margin-top:.42rem;flex-wrap:wrap}
 @media(min-width:900px){
   .kbtabs{display:none}
-  .kbrow{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.55rem}
+  /* Uma coluna por ETAPA, e as etapas são configuráveis desde a régua: o
+     repeat(6,...) fixo jogava a 7ª pra uma segunda linha no desktop — que é o que
+     já acontece hoje em quem criou uma etapa a mais. auto-fit + minmax mantém a
+     linha única e faz o quadro rolar quando não couber, como a barra de abas. */
+  .kbrow{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(150px,1fr);
+    gap:.55rem;overflow-x:auto;scrollbar-width:thin}
   .kbcol{display:flex !important;min-height:180px}
 }
 /* ---- ficha ---- */
@@ -7087,10 +7387,31 @@ _CSS = """<style>
 # de progresso). O <script> entra no _CSS, então TODA tela de prospecção ganha a
 # navegação instantânea sem recarregar sensação de lentidão; o back segue rendrizando.
 _NAV_ASSETS = """<style>
-.pnavbar{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin:.2rem 0 1.1rem}
+/* NUNCA quebra linha. Era `flex-wrap:wrap`, e com 8 abas (996px medidos) a última
+   descia pra segunda linha assim que o viewport caía abaixo de ~1030px — zoom de 125%
+   numa tela de 1280, janela não maximizada, tablet. Rolagem lateral em vez de quebra:
+   funciona em qualquer largura e a próxima aba que entrar não quebra nada de novo.
+
+   DUAS CAIXAS, e não uma: as abas rolam dentro de `.pnav-rol`, e o ⚙️ fica FORA dela.
+   Numa caixa só, duas coisas quebravam — o esfumado da borda direita apagaria o próprio
+   ⚙️ (que mora encostado ali), e a engrenagem sairia de vista junto com as abas quando a
+   pessoa rolasse. Configuração tem que estar sempre alcançável. */
+.pnavbar{display:flex;gap:.4rem;flex-wrap:nowrap;align-items:center;margin:.2rem 0 1.1rem}
+.pnav-rol{display:flex;gap:.4rem;flex-wrap:nowrap;align-items:center;min-width:0;
+  overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.pnav-rol::-webkit-scrollbar{display:none}
+.pnav{flex:none}
 .pnav{display:inline-flex;align-items:center;gap:.35rem;font:inherit;font-size:.84rem;font-weight:600;padding:.45rem .8rem;border-radius:9px;border:1px solid var(--borda);color:var(--txt);background:transparent;text-decoration:none;white-space:nowrap;cursor:pointer;line-height:1;box-sizing:border-box;width:auto;margin:0;-webkit-appearance:none;appearance:none;vertical-align:middle;height:auto}
 .pnav:hover{border-color:var(--verde);color:#fff}
 .pnav.on{color:var(--sobre-verde);background:var(--verde);border-color:var(--verde)}
+/* Captar Lead: botão de AÇÃO no cabeçalho do Funil, não aba de navegação. Verde
+   cheio porque é o call-to-action da tela — abrir o painel de captação. */
+.cap-btn{display:inline-flex;align-items:center;gap:.4rem;font:inherit;font-size:.84rem;
+  font-weight:700;padding:.5rem .9rem;border-radius:9px;border:0;cursor:pointer;
+  background:var(--verde);color:var(--sobre-verde);white-space:nowrap;flex:none}
+.cap-btn:hover{background:var(--verde2,var(--verde))}
+/* o ⚙️ encostado à direita, separado das abas de trabalho e fora da rolagem */
+.pnav.cfg{margin-left:auto;padding:.45rem .55rem;flex:none}
 #pnavprog{position:fixed;top:0;left:0;height:3px;width:0;background:var(--verde);box-shadow:0 0 8px var(--verde);z-index:99999;transition:width .3s ease;opacity:0}
 #pnavprog.go{opacity:1}
 /* cercar área no mapa (Captar leads → Google Maps) — acordeão retraído por padrão */
@@ -7159,25 +7480,41 @@ _CSS = _CSS + _NAV_ASSETS + _TIPO_JS
 
 
 def _navbar(active):
-    """Barra de navegação do módulo, na ordem da história. `active` marca a aba atual."""
-    # "Captar Lead" abre o painel de captação embutido no funil (âncora ?captar=1).
-    tabs = [("captar", "🎯 Captar Lead", "/painel/prospeccao?captar=1", False),
-            ("base", "📇 Base", "/painel/prospeccao/base", False),
+    """Barra de navegação do módulo, na ordem da história. `active` marca a aba atual.
+
+    FONTE ÚNICA. A tela do Funil (_KANBAN_TPL) já teve uma cópia desta barra escrita à
+    mão, e as duas divergiram: quando a aba "Quem atacar" nasceu, entrou aqui e ninguém
+    lembrou da cópia — quem estava no Funil não tinha como chegar nela. Se precisar de
+    uma aba nova, é aqui e só aqui.
+
+    "Captar Lead" NÃO é aba: ele apontava pro próprio Funil com o painel de captação
+    aberto (?captar=1), então virou botão no cabeçalho do Funil, onde ele age. O link
+    ?captar=1 continua funcionando pra quem vem de fora ou tem o atalho salvo.
+    """
+    tabs = [("base", "📇 Base", "/painel/prospeccao/base", False),
             ("campanhas", "📣 Campanhas", "/painel/prospeccao/campanhas", True),
             ("radar", "🎯 Quem atacar", "/painel/prospeccao/radar", True),
             ("ia-insta", "✨ IA Insta", "/painel/prospeccao/ia-insta", False),
             ("comunicacao", "💬 Comunicação", "/painel/prospeccao/comunicacao", False),
             ("funil", "🔥 Funil", "/painel/prospeccao", False),
-            ("canais", "⚙️ Canais", "/painel/prospeccao/comunicacao?aba=canais", False)]
-    out = ['<nav class="pnavbar" aria-label="Prospecção">']
+            ("regua", "⏱️ Régua", "/painel/prospeccao/regua", False),
+            ("canais", "⚙️", "/painel/prospeccao/comunicacao?aba=canais", False)]
+    # as abas dentro da caixa que rola; o ⚙️ sai dela (ver o CSS do .pnav-rol)
+    out = ['<nav class="pnavbar" aria-label="Prospecção">', '<div class="pnav-rol">']
     for key, label, href, gated in tabs:
+        # .cfg empurra o ⚙️ pra direita (margin-left:auto) e some com o rótulo: quem
+        # configura canal vai lá uma vez; quem trabalha usa as outras seis todo dia.
         extra = " cfg" if key == "canais" else ""
         # ativo dinâmico: a var de render `nav_ativo` sobrepõe o default estático
         # `active` (ex.: na Comunicação, Canais fica ativo quando aba=canais).
         cond = "{% if (nav_ativo|default('" + active + "')) == '" + key + "' %} on{% endif %}"
-        a = '<a class="pnav' + cond + extra + '" href="' + href + '">' + label + '</a>'
+        titulo = ' title="Canais" aria-label="Canais"' if key == "canais" else ""
+        a = ('<a class="pnav' + cond + extra + '"' + titulo + ' href="' + href + '">'
+             + label + '</a>')
         if gated:  # Campanhas: gestão vê tudo; vendedor vê as em que é responsável
             a = "{% if gerencia or caps.vendas %}" + a + "{% endif %}"
+        if key == "canais":       # fecha a caixa que rola ANTES da engrenagem
+            out.append("</div>")
         out.append(a)
     out.append("</nav>")
     return "\n".join(out)
@@ -7335,7 +7672,7 @@ _CAPTURA_JS = """<script>
 function capTab(t){document.querySelectorAll('.caba').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===t);});document.querySelectorAll('.captab').forEach(function(d){d.style.display=(d.getAttribute('data-tab')===t)?'block':'none';});}
 function capFetch(url,fd){return fetch(url,{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();});}
 function _capReload(msg){capToast(msg||'Adicionado à base ✓');setTimeout(function(){location.reload();},700);}
-function capManual(ev){ev.preventDefault();var f=ev.target;capFetch('/painel/prospeccao/novo',new FormData(f)).then(function(d){if(!d.ok){capToast(d.erro||'Erro',d.link_url?{url:d.link_url,label:d.link_label}:null);return;}f.reset();_capReload('Lead adicionado à base ✓');}).catch(function(){capToast('Falha de rede');});return false;}
+function capManual(ev){ev.preventDefault();var f=ev.target;capFetch('/painel/prospeccao/novo',new FormData(f)).then(function(d){if(!d.ok){capToast(d.erro||'Erro',d.link_url?{url:d.link_url,label:d.link_label}:null);return;}f.reset();_capReload(d.msg||'Lead adicionado à base ✓');}).catch(function(){capToast('Falha de rede');});return false;}
 function capCnpj(){var f=document.getElementById('cap-manual');var cnpj=f.querySelector('[name=documento]').value.replace(/\\D/g,'');if(cnpj.length!==14){capToast('Pra puxar da Receita, o CNPJ precisa ter 14 dígitos');return;}
   capToast('Consultando Receita…');
   fetch('/painel/prospeccao/cnpj?cnpj='+cnpj,{headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
@@ -7781,20 +8118,17 @@ function baseTirarCheck(){
 
 _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 <div class="pw">
-  <nav class="pnavbar" aria-label="Prospecção">
-    <button type="button" class="pnav" onclick="capToggle()">🎯 Captar Lead</button>
-    <a class="pnav" href="/painel/prospeccao/base">📇 Base</a>
-    {% if gerencia or caps.vendas %}<a class="pnav" href="/painel/prospeccao/campanhas">📣 Campanhas</a>{% endif %}
-    <a class="pnav" href="/painel/prospeccao/ia-insta">✨ IA Insta</a>
-    <a class="pnav" href="/painel/prospeccao/comunicacao">💬 Comunicação</a>
-    <a class="pnav on" href="/painel/prospeccao">🔥 Funil</a>
-    <a class="pnav cfg" href="/painel/prospeccao/comunicacao?aba=canais">⚙️ Canais</a>
-  </nav>
+""" + _navbar('funil') + """
   <div style="display:flex;align-items:flex-start;gap:.6rem;flex-wrap:wrap">
     <div style="flex:1;min-width:170px">
       <h2 class="tt">Prospecção</h2>
       <div class="mut" style="font-size:.82rem;margin-top:.15rem">{% if conta %}<b style="color:var(--verde-claro)">🏢 {{ conta[2] }}</b> · {% endif %}<span id="kb-total-n">{{ total_alvos }}</span> alvo(s){% if total_valor %} · pipeline {{ brl(total_valor) }}{% endif %}{% if n_contextos and n_contextos > 1 %} · <a href="/trocar" style="color:var(--verde-claro)">trocar empresa ⇄</a>{% endif %}</div>
     </div>
+    {# Captar Lead saiu da barra de abas e virou botão AQUI: ele nunca navegou pra lugar
+       nenhum — abre o painel de captação logo abaixo, nesta mesma tela. Como aba ele
+       ocupava 129px da barra apontando pro próprio Funil; como botão fica em evidência,
+       ao lado do título, e a barra ganhou o espaço de volta. #}
+    <button type="button" class="cap-btn" onclick="capToggle()">🎯 Captar Lead</button>
   </div>
 
   {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
@@ -7810,6 +8144,9 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     <div class="captab" data-tab="manual">
       <form id="cap-manual" data-tipo-form action="/painel/prospeccao/novo" method="post" onsubmit="return capManual(event)">
         <input type="hidden" name="voltar" value="/painel/prospeccao">
+        <!-- cadastrou aqui dentro do funil = o lead ENTRA no funil (estagio=lead).
+             Sem isto ele nascia na Base e o card sumia no primeiro refresh. -->
+        <input type="hidden" name="destino" value="funil">
         <input type="hidden" name="receita">
         <input type="hidden" name="tipo" value="pj">
         <div class="rcpills">
@@ -7839,7 +8176,8 @@ _KANBAN_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <div><label class="lbl">Temperatura</label><select class="fld" name="temperatura">{% for v,l in temperaturas_all %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select></div>
           {% if pode_atribuir %}<div><label class="lbl">Vendedor</label><select class="fld" name="vendedor_id"><option value="">— livre —</option>{% for v in vendedores %}<option value="{{ v.id }}">{{ v.nome }}</option>{% endfor %}</select></div>{% endif %}
           <div class="full"><label class="lbl">Observações</label><input class="fld" name="obs"></div>
-          <div class="full"><button class="pbtn" style="margin:.3rem 0 0">Adicionar</button></div>
+          <div class="full"><button class="pbtn" style="margin:.3rem 0 0">Adicionar ao funil</button>
+            <div class="mut" style="font-size:.78rem;margin-top:.4rem">Entra direto no funil, na primeira etapa. Pra alimentar a Base (campanhas em massa), use 📇 Base.</div></div>
         </div>
       </form>
     </div>
@@ -8087,7 +8425,7 @@ function addCard(l){var col=document.querySelector('.kbcol[data-status="novo"]')
 function capToggle(){var e=document.getElementById('captar');var vis=e.style.display!=='none';e.style.display=vis?'none':'block';if(!vis){var i=e.querySelector('.captab[data-tab=manual] input[name=empresa]');if(i)i.focus();e.scrollIntoView({behavior:'smooth',block:'nearest'});}}
 function capTab(t){document.querySelectorAll('#captar .caba').forEach(function(b){b.classList.toggle('on',b.getAttribute('data-tab')===t);});document.querySelectorAll('#captar .captab').forEach(function(d){d.style.display=(d.getAttribute('data-tab')===t)?'block':'none';});}
 function capFetch(url,fd){return fetch(url,{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd}).then(function(r){return r.json();});}
-function capManual(ev){ev.preventDefault();var f=ev.target;capFetch('/painel/prospeccao/novo',new FormData(f)).then(function(d){if(!d.ok){capToast(d.erro||'Erro',d.link_url?{url:d.link_url,label:d.link_label}:null);return;}addCard(d.lead);f.reset();capToast('Lead adicionado');}).catch(function(){capToast('Falha de rede');});return false;}
+function capManual(ev){ev.preventDefault();var f=ev.target;capFetch('/painel/prospeccao/novo',new FormData(f)).then(function(d){if(!d.ok){capToast(d.erro||'Erro',d.link_url?{url:d.link_url,label:d.link_label}:null);return;}if(d.estagio==='lead')addCard(d.lead);f.reset();capToast(d.msg||'Lead adicionado ao funil');}).catch(function(){capToast('Falha de rede');});return false;}
 function capCnpj(){var f=document.getElementById('cap-manual');var cnpj=f.querySelector('[name=documento]').value.replace(/\\D/g,'');if(cnpj.length!==14){capToast('Pra puxar da Receita, o CNPJ precisa ter 14 dígitos');return;}
   capToast('Consultando Receita…');
   fetch('/painel/prospeccao/cnpj?cnpj='+cnpj,{headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
@@ -9360,7 +9698,69 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           </div>
         </div>
         <div class="mut" id="qr-msg" style="font-size:.78rem;margin-top:.45rem"></div>
+        <!-- APARELHOS LIGADOS. Nasce escondido e só o JS mostra: afirmar "nenhum
+             aparelho" antes de ter perguntado seria pior que não dizer nada. -->
+<div id="wa-aps" style="margin-top:.7rem;border-top:1px solid var(--borda);padding-top:.7rem">
+          <div style="font-weight:600;font-size:.82rem;margin-bottom:.35rem">Quem ainda responde por fora</div>
+          <div id="wa-aps-n" style="display:flex;gap:.4rem;flex-wrap:wrap;font-size:.78rem"></div>
+          <!-- SOB DEMANDA, NUNCA EM INTERVALO. Perguntar os aparelhos é uma consulta
+               ao WhatsApp; repetir isso sozinho a cada poucos segundos é tráfego de
+               robô num cliente não oficial — o caminho curto pro número ser banido,
+               que é a pior forma de derrubar a conexão. Quem pede é o dedo. -->
+          <button type="button" class="pbtn ghost sm" id="wa-aps-btn" onclick="apsPuxa()"
+                  style="margin-top:.5rem;font-size:.76rem">Conferir aparelhos ligados</button>
+          <div class="mut" id="wa-aps-dica" style="font-size:.74rem;margin-top:.45rem"></div>
+        </div>
         <script>
+        // Dois números de fontes DIFERENTES: os aparelhos dizem que a porta
+        // existe (e dependem do WhatsApp responder); a saída por fora sai do
+        // banco e diz se alguém passa por ela. Um cobre o outro.
+        function apsPinta(j){
+          var cx=document.getElementById('wa-aps'),n=document.getElementById('wa-aps-n'),
+              d=document.getElementById('wa-aps-dica');
+          if(!j||!j.ok){cx.style.display='none';return;}
+          var a=j.aparelhos,f=j.fora||{},chips=[];
+          if(a){
+            chips.push('<span class="chip">📱 celular do dono</span>');
+            chips.push('<span class="chip" style="border-color:var(--verde);color:var(--verde)">⚡ Zaq</span>');
+            if(a.outros>0)
+              chips.push('<span class="chip" style="border-color:var(--ambar-borda);color:var(--ambar)">⚠️ '
+                +a.outros+' outro'+(a.outros>1?'s':'')+'</span>');
+          }
+          if(f.total>0){
+            var cor=f.pct>=50?'var(--ambar)':'var(--txt-mut)';
+            chips.push('<span class="chip" style="color:'+cor+'">'+f.pct+'% saiu por fora em '+f.dias+' dias</span>');
+          }
+          n.innerHTML=chips.join('');
+          if(a && a.outros>0){
+            d.innerHTML='Cada "outro" é um WhatsApp Web ou aparelho ligado neste número — '
+              +'o que sai por ali chega aqui <b>sem o nome de quem falou</b>. '
+              +'Desligar é no celular dono da conta: <b>Aparelhos conectados</b>.';
+          } else if(a){
+            d.textContent='Só o celular do dono e o Zaq. É o estado que você quer.';
+          } else {
+            d.textContent='Não consegui perguntar ao WhatsApp agora (sessão fora do ar).';
+          }
+          cx.style.display='block';
+        }
+        var _apsOcupado=false;
+        function apsPuxa(){
+          if(_apsOcupado)return;                       // clique nervoso não vira rajada
+          _apsOcupado=true;
+          var b=document.getElementById('wa-aps-btn');
+          if(b){b.disabled=true;b.textContent='Perguntando…';}
+          fetch('/painel/prospeccao/comunicacao/whatsapp-aparelhos?perguntar=1')
+            .then(function(r){return r.json();}).then(apsPinta)
+            .catch(function(){})
+            .then(function(){_apsOcupado=false;
+              if(b){b.disabled=false;b.textContent='Conferir aparelhos ligados';}});
+        }
+        // a saída por fora vem do BANCO: não toca no WhatsApp, então pode carregar
+        // junto com a página e ficar sempre à vista
+        document.addEventListener('DOMContentLoaded',function(){
+          fetch('/painel/prospeccao/comunicacao/whatsapp-aparelhos')
+            .then(function(r){return r.json();}).then(apsPinta).catch(function(){});
+        });
         var _qrTimer=null;
         function qrShow(d){var box=document.getElementById('qr-box'),img=document.getElementById('qr-img'),
             msg=document.getElementById('qr-msg'),sair=document.getElementById('qr-sair'),btn=document.getElementById('qr-btn'),
@@ -9409,7 +9809,8 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         function qrEsperando(){if(_qrEspera)clearTimeout(_qrEspera);
           _qrEspera=setTimeout(qrIndefinido,7000);}
         function qrPoll(){qrEsperando();
-          fetch('/painel/prospeccao/comunicacao/whatsapp-qr-status').then(function(r){return r.json();}).then(qrShow).catch(qrIndefinido);}
+          fetch('/painel/prospeccao/comunicacao/whatsapp-qr-status').then(function(r){return r.json();})
+            .then(qrShow).catch(qrIndefinido);}
         function qrIniciar(){var btn=document.getElementById('qr-btn'),msg=document.getElementById('qr-msg');
           btn.disabled=true;var t=btn.textContent;btn.textContent='Gerando…';if(msg)msg.textContent='';
           fetch('/painel/prospeccao/comunicacao/whatsapp-qr-iniciar',{method:'POST',headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json();}).then(function(d){
@@ -11190,3 +11591,299 @@ setInterval(function(){ if(!document.hidden) location.reload(); }, 60000);
 {% endblock %}"""
 _env.loader.mapping["prospeccao_radar"] = _RADAR_TPL
 _env.loader.mapping["prospeccao_campanha"] = _CAMPANHA_TPL
+
+
+_REGUA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
+<style>
+.rg-grp{display:flex;align-items:center;gap:.6rem;margin:1.1rem 0 .35rem}
+.rg-grp b{font-family:var(--mono);font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap}
+.rg-grp span{flex:1;height:1px;background:var(--borda)}
+.rg-r1{display:grid;grid-template-columns:12px 1fr 150px 62px;gap:.6rem;align-items:center}
+.rg-uni{padding:.48rem .5rem;border-radius:8px;border:1px solid #333;background:var(--bg);color:var(--txt);font-size:.8rem;font-family:inherit}
+.rg-sel{width:100%;box-sizing:border-box;padding:.42rem .6rem;border-radius:8px;border:1px solid var(--azul-borda);
+  background:var(--azul-fundo);color:var(--azul);font-size:.8rem;font-family:inherit}
+.rg-sel:disabled{border-color:var(--borda);background:transparent;color:var(--txt-mut)}
+.rg-seg{display:inline-flex;padding:3px;background:var(--bg);border:1px solid var(--borda);border-radius:999px;gap:2px}
+.rg-seg label{padding:.34rem .8rem;border-radius:999px;font-size:.78rem;color:var(--txt-mut);cursor:pointer;white-space:nowrap}
+.rg-seg input{display:none}
+.rg-seg input:checked+label{background:var(--azul-fundo);color:var(--azul);font-weight:600;box-shadow:inset 0 0 0 1px var(--azul-borda)}
+.rg-seg input[value=off]:checked+label{background:var(--verde);color:var(--sobre-verde);box-shadow:none}
+.rg-dia{padding:.35rem .7rem;border-radius:999px;font-size:.8rem;border:1px solid var(--borda);color:var(--txt-mut);cursor:pointer}
+.rg-dia input{display:none}
+.rg-dia.on{border-color:var(--neon-borda);background:var(--neon-fraco);color:var(--verde-claro)}
+.rg-tag{display:inline-flex;align-items:center;padding:.06rem .45rem;border-radius:999px;font-size:.68rem;font-weight:600}
+</style>
+<div class="pw">
+""" + _navbar("regua") + """
+  <div style="display:flex;align-items:flex-start;gap:.6rem;flex-wrap:wrap">
+    <div style="flex:1;min-width:200px">
+      <h2 class="tt">Régua do funil</h2>
+      <div class="mut" style="font-size:.82rem;margin-top:.15rem">{% if conta %}<b style="color:var(--verde-claro)">🏢 {{ conta[2] }}</b> · {% endif %}as etapas, o que traz o lead pra cada uma, e quanto tempo ela aguenta</div>
+    </div>
+  </div>
+  {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
+
+  <form method="post" action="/painel/prospeccao/regua/config">
+  <!-- ---------------- estado ---------------- -->
+  <div class="fsec" style="margin-top:1rem;border-color:var(--azul-borda)">
+    <div class="sh"><b>Estado</b><span class="mut" style="font-size:.76rem">tudo construído · você decide quando cada parte age</span></div>
+    {% for campo, nome, desc in [
+        ('gatilhos_modo','Gatilhos das etapas','movem o card sozinhos quando o fato acontece'),
+        ('cobranca_modo','Cobrança por prazo','avisa o vendedor e escala pro gestor')] %}
+    <div style="display:flex;align-items:center;gap:1rem;padding:.8rem 0;border-top:1px solid var(--borda);flex-wrap:wrap">
+      <div style="flex:1;min-width:240px">
+        <div style="font-size:.9rem;font-weight:600">{{ nome }}</div>
+        <div class="mut" style="font-size:.79rem;margin-top:.15rem">{{ desc }}</div>
+      </div>
+      <span class="rg-seg">
+        {% for v, r in [('off','Desligado'),('observando','Observando'),('ligado','Ligado')] %}
+        <input type="radio" id="{{ campo }}_{{ v }}" name="{{ campo }}" value="{{ v }}" {% if cfg[campo]==v %}checked{% endif %}>
+        <label for="{{ campo }}_{{ v }}">{{ r }}</label>
+        {% endfor %}
+      </span>
+    </div>
+    {% endfor %}
+    <div style="display:flex;align-items:center;gap:.6rem;padding-top:.75rem;border-top:1px solid var(--borda);flex-wrap:wrap">
+      <span class="mut" style="font-size:.79rem;line-height:1.55;flex:1;min-width:280px">
+        <b style="color:var(--azul)">Observando</b> roda o motor inteiro e anota o que <i>teria</i> feito — sem mover card nem avisar ninguém.
+        O histórico já roda de qualquer jeito: <b class="num" style="color:var(--txt)">{{ n_mov }}</b> movimento(s) gravado(s).
+      </span>
+      <a class="pbtn ghost" href="/painel/prospeccao/regua/ritmo" style="white-space:nowrap">📈 Ver o ritmo real</a>
+    </div>
+  </div>
+
+  <!-- ---------------- conversa ---------------- -->
+  <div class="fsec" style="margin-top:.9rem">
+    <div class="sh"><b>Quando a bola está com a gente</b><span class="mut" style="font-size:.76rem">lido da conversa, inclusive do celular do vendedor</span></div>
+    {% for b in conv %}
+    <div style="display:grid;grid-template-columns:1fr 150px;gap:.6rem;align-items:center;padding:.62rem 0;border-top:1px solid var(--borda)">
+      <div style="font-size:.89rem;font-weight:600">{{ b.rotulo }}</div>
+      <div style="display:flex;gap:.3rem">
+        <input class="fld" style="text-align:right" name="{{ b.chave }}_n" value="{{ b.prazo_n }}">
+        <select class="rg-uni" name="{{ b.chave }}_u">
+          {% for u, r in unidades %}<option value="{{ u }}" {% if b.prazo_u==u %}selected{% endif %}>{{ r }}</option>{% endfor %}
+        </select>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- ---------------- janela + escalonamento ---------------- -->
+  <div class="fgrid" style="grid-template-columns:1.1fr 1fr">
+    <div class="fsec">
+      <div class="sh"><b>Janela de atendimento</b></div>
+      <div style="display:flex;gap:.35rem;flex-wrap:wrap;margin:.3rem 0 .8rem">
+        {% for d, r in [(1,'Seg'),(2,'Ter'),(3,'Qua'),(4,'Qui'),(5,'Sex'),(6,'Sáb'),(7,'Dom')] %}
+        <label class="rg-dia {% if d in dias_on %}on{% endif %}" onclick="rgDia(this)">
+          <input type="checkbox" name="dias" value="{{ d }}" {% if d in dias_on %}checked{% endif %}>{{ r }}
+        </label>
+        {% endfor %}
+      </div>
+      <div class="egrid">
+        <div><label class="lbl">Abre</label><input class="fld" name="abre" value="{{ cfg.janela_abre.strftime('%H:%M') }}"></div>
+        <div><label class="lbl">Fecha</label><input class="fld" name="fecha" value="{{ cfg.janela_fecha.strftime('%H:%M') }}"></div>
+      </div>
+      <p class="mut" style="font-size:.76rem;line-height:1.55;margin:.7rem 0 0">
+        Todo prazo desta tela só corre aqui dentro. Gatilho, não: fato é fato a qualquer hora — sinal pago às 23h move o card às 23h.
+      </p>
+    </div>
+    <div class="fsec">
+      <div class="sh"><b>Escalonamento</b></div>
+      <label class="lbl" style="margin-top:.3rem">Depois de quanto tempo sem toque escala pro gestor</label>
+      <div style="display:flex;gap:.3rem">
+        <input class="fld" style="text-align:right" name="escala_n" value="{{ (cfg.escala_min // 60) or 4 }}">
+        <select class="rg-uni" name="escala_u"><option value="h" selected>horas</option><option value="d">dias</option></select>
+      </div>
+      <label class="lbl" style="margin-top:.7rem">Teto de avisos por vendedor / dia</label>
+      <input class="fld" name="teto" value="{{ cfg.teto_avisos_dia }}">
+      <p class="mut" style="font-size:.76rem;line-height:1.5;margin:.55rem 0 0">Passou do teto, vira um resumo só no fim do expediente.</p>
+    </div>
+  </div>
+
+  <div style="margin-top:1rem"><button class="pbtn">Salvar régua</button></div>
+  </form>
+
+  <!-- ---------------- etapas ---------------- -->
+  <div class="fsec" style="margin-top:1.1rem">
+    <div class="sh"><b>As etapas do funil</b><span class="mut" style="font-size:.76rem">cada linha salva sozinha · ligue um gatilho de cada vez</span></div>
+    {% set fases = [('venda','Fase · Venda','o lead ainda está sendo conquistado'),
+                    ('fechamento','Fase · Fechamento','relatório e comissão contam a partir daqui'),
+                    ('pos','Fase · Pós-venda','já é cliente — continua contando como fechado')] %}
+    {% for fchave, ftit, fnota in fases %}
+      {% set doFase = etapas | selectattr('fase','equalto',fchave) | list %}
+      {% if doFase %}
+      <div class="rg-grp"><b style="color:var(--txt-mut)">{{ ftit }}</b><span></span><span class="mut" style="font-size:.72rem;flex:0 0 auto">{{ fnota }}</span></div>
+      {% for e in doFase %}
+      <form class="rg-etapa" onsubmit="return rgSalvar(event)"
+            action="/painel/prospeccao/regua/etapa/{{ e.id }}" method="post"
+            style="padding:.65rem 0;border-top:1px solid var(--borda)">
+        <div class="rg-r1">
+          <span class="tdot" style="background:{{ '#25D366' if e.fase!='venda' else '#229ED9' }}"></span>
+          <span style="display:flex;align-items:center;gap:.5rem;min-width:0">
+            <input class="fld" name="rotulo" value="{{ e.rotulo }}" style="max-width:240px">
+            <code class="mut" style="font-size:.68rem">{{ e.chave }}</code>
+            {% if e.fixa %}<span class="rg-tag" style="background:var(--card-2);border:1px solid var(--borda);color:var(--txt-mut)">fixa</span>{% endif %}
+          </span>
+          <span style="display:flex;gap:.3rem">
+            <input class="fld" name="prazo_n" value="{{ e.prazo_n }}" style="text-align:right;width:56px"
+                   {% if e.chave in ('ganho','perdido') %}disabled placeholder="—"{% endif %}>
+            <select class="rg-uni" name="prazo_u" {% if e.chave in ('ganho','perdido') %}disabled{% endif %}>
+              {% for u, r in unidades %}<option value="{{ u }}" {% if e.prazo_u==u %}selected{% endif %}>{{ r }}</option>{% endfor %}
+            </select>
+          </span>
+          <span class="num" style="text-align:right;font-size:.95rem;color:{{ 'var(--txt-mut)' if not e.n else 'var(--txt)' }}">{{ e.n }}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:.5rem;margin:.45rem 0 0 1.35rem;flex-wrap:wrap">
+          <label class="chk" style="display:inline-flex;align-items:center;gap:.35rem;font-size:.74rem;color:var(--txt-mut);cursor:pointer">
+            <input type="checkbox" name="gatilho_ativo" value="1" {% if e.gatilho_ativo %}checked{% endif %}
+                   style="width:auto;margin:0;accent-color:var(--azul)">
+            entra sozinho quando
+          </label>
+          <select class="rg-sel" name="gatilho" style="flex:1;min-width:260px">
+            <option value="">— só na mão —</option>
+            {% for ev, rot in eventos %}<option value="{{ ev }}" {% if e.gatilho==ev %}selected{% endif %}>{{ rot }}</option>{% endfor %}
+          </select>
+          <button class="pbtn ghost" style="padding:.35rem .7rem;font-size:.78rem">Salvar</button>
+        </div>
+      </form>
+      {% endfor %}
+      {% endif %}
+    {% endfor %}
+
+    <form method="post" action="/painel/prospeccao/etapas/nova" style="display:flex;gap:.5rem;align-items:center;margin-top:1rem;padding-top:.85rem;border-top:1px solid var(--borda);flex-wrap:wrap">
+      <input class="fld" name="rotulo" placeholder="Nome da etapa nova" style="max-width:230px">
+      <select class="rg-uni" name="fase"><option value="venda">na fase de venda</option><option value="pos">na pós-venda</option></select>
+      <button class="pbtn novo">+ Nova etapa</button>
+      <span class="mut" style="font-size:.78rem">só remove etapa vazia · as fixas só renomeiam</span>
+    </form>
+  </div>
+</div>
+<script>
+function rgToast(msg,erro){var t=document.getElementById('rg-toast');
+  if(!t){t=document.createElement('div');t.id='rg-toast';
+    t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--card);border:1px solid var(--verde);color:var(--verde-claro);padding:.6rem 1rem;border-radius:10px;z-index:200;font-size:.85rem;box-shadow:0 6px 20px rgba(0,0,0,.4);transition:opacity .4s';
+    document.body.appendChild(t);}
+  t.style.borderColor=erro?'var(--coral)':'var(--verde)';t.style.color=erro?'var(--coral)':'var(--verde-claro)';
+  t.textContent=msg;t.style.opacity='1';clearTimeout(t._t);t._t=setTimeout(function(){t.style.opacity='0';},2600);}
+function rgDia(el){setTimeout(function(){el.classList.toggle('on',el.querySelector('input').checked);},0);}
+function rgSalvar(ev){ev.preventDefault();var f=ev.target;
+  fetch(f.action,{method:'POST',headers:{'X-Requested-With':'fetch'},body:new FormData(f)})
+    .then(function(r){return r.json();}).then(function(d){
+      rgToast(d.ok?'Etapa salva ✓':(d.erro||'Não consegui salvar'),!d.ok);})
+    .catch(function(){rgToast('Falha de rede',true);});
+  return false;}
+</script>
+{% endblock %}"""
+
+_env.loader.mapping["prospeccao_regua"] = _REGUA_TPL
+
+
+_RITMO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
+<style>
+.rt-tile{background:var(--card);border:1px solid var(--borda);border-radius:14px;padding:.95rem 1.05rem}
+.rt-tile .v{font-family:var(--mono);font-weight:700;font-size:1.9rem;letter-spacing:-.03em;line-height:1.05}
+.rt-tile .l{font-size:.83rem;color:var(--txt-mut);margin-top:.25rem}
+.rt-tile .d{font-size:.74rem;color:var(--text-faint);margin-top:.15rem;line-height:1.45}
+.rt-bar{position:relative;height:10px;border-radius:5px;background:var(--neon-fraco);overflow:hidden}
+.rt-bar i{position:absolute;top:0;left:0;height:10px;border-radius:5px;background:var(--verde);display:block}
+.rt-usar{padding:.28rem .6rem;border-radius:7px;font-size:.74rem;font-weight:600;border:1px solid var(--neon-borda);
+  color:var(--verde-claro);background:var(--neon-fraco);cursor:pointer;white-space:nowrap}
+</style>
+<div class="pw">
+""" + _navbar("regua") + """
+  <div style="display:flex;align-items:flex-start;gap:.8rem;flex-wrap:wrap">
+    <div style="flex:1;min-width:260px">
+      <h2 class="tt">O ritmo real</h2>
+      <div class="mut" style="font-size:.84rem;margin-top:.25rem;line-height:1.55;max-width:74ch">
+        Medido nos últimos <b style="color:var(--txt)">{{ dias }}</b> dias. São estes números que
+        devem escolher os prazos da régua — não o palpite de quem escreveu o código.
+      </div>
+    </div>
+    <a class="pbtn ghost" href="/painel/prospeccao/regua">⏱️ Ajustar a régua</a>
+  </div>
+  {% if aviso %}<div class="ok" style="margin-top:.8rem">{{ aviso }}</div>{% endif %}
+
+  <div class="egrid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-top:1.1rem">
+    <div class="rt-tile"><div class="v">{{ d.mensagens }}</div>
+      <div class="l">mensagens de clientes</div>
+      <div class="d">~{{ (d.mensagens / dias)|round(0, 'floor')|int }} por dia</div></div>
+    <div class="rt-tile" style="border-color:var(--coral-borda)">
+      <div class="v" style="color:var(--coral)">{{ d.mudas }}</div>
+      <div class="l">nunca receberam resposta</div>
+      <div class="d">some sem ninguém saber</div></div>
+    <div class="rt-tile"><div class="v" style="color:var(--azul)">{{ d.saltos_simulados }}</div>
+      <div class="l">cards que teriam saltado</div>
+      <div class="d">gatilhos em observação</div></div>
+    <div class="rt-tile"><div class="v" style="color:var(--ambar)">{{ d.avisos_simulados }}</div>
+      <div class="l">cobranças que teriam saído</div>
+      <div class="d">com os prazos de agora</div></div>
+  </div>
+
+  <div class="fsec" style="margin-top:.9rem">
+    <div class="sh"><b>Quanto vocês demoram pra responder</b>
+      <span class="mut" style="font-size:.76rem">a barra clara vai até 9 em cada 10 · a cheia é a metade</span></div>
+    {% if not d.vendedores %}
+      <div class="mut" style="font-size:.85rem;padding:.6rem 0">Sem mensagens no período.</div>
+    {% endif %}
+    {% for v in d.vendedores %}
+    <div style="display:grid;grid-template-columns:190px 1fr 150px;gap:.9rem;align-items:center;padding:.7rem 0;border-top:1px solid var(--borda)">
+      <div><div style="font-size:.88rem;font-weight:600">{{ v.nome }}</div>
+        <div class="mut num" style="font-size:.72rem">{{ v.n }} respostas</div></div>
+      <div class="rt-bar" style="width:{{ v.larg90 }}"><i style="width:{{ v.larg50 }}"></i></div>
+      <div style="text-align:right;font-size:.8rem">
+        <b class="num" style="color:var(--verde-claro)">{{ v.p50_rot }}</b>
+        <span class="mut"> · 9/10 em {{ v.p90_rot }}</span></div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="fsec" style="margin-top:.9rem">
+    <div class="sh"><b>Que prazo escolher pra “bola com você”</b>
+      <span class="mut" style="font-size:.76rem">quantas viraram cobrança em {{ dias }} dias</span></div>
+    <form method="post" action="/painel/prospeccao/regua/config">
+      <input type="hidden" name="gatilhos_modo" value="{{ cfg.gatilhos_modo }}">
+      <input type="hidden" name="cobranca_modo" value="{{ cfg.cobranca_modo }}">
+      {% for c in cortes %}
+      <div style="display:grid;grid-template-columns:90px 1fr 170px 96px;gap:.9rem;align-items:center;padding:.6rem 0;border-top:1px solid var(--borda)">
+        <span class="num" style="font-size:.95rem">{{ c.rotulo }}</span>
+        <span class="rt-bar" style="width:{{ c.larg }}"><i style="width:100%"></i></span>
+        <span class="mut" style="font-size:.82rem"><b class="num" style="color:var(--txt)">{{ c.n }}</b> cobranças · {{ c.dia }}/dia</span>
+        <span style="text-align:right">
+          <button class="rt-usar" name="bola_nossa_n" value="{{ c.rotulo.split(' ')[0] }}">usar este</button>
+        </span>
+      </div>
+      {% endfor %}
+      <input type="hidden" name="bola_nossa_u" value="h">
+    </form>
+    <p class="mut" style="font-size:.79rem;line-height:1.55;margin:.85rem 0 0;max-width:84ch">
+      Repare se o número muda pouco de uma linha pra outra: quando muda, a cauda é gente atrasada e o
+      prazo importa; quando não muda, é gente esquecida — qualquer prazo da faixa pega o mesmo grupo, então
+      vale escolher o que menos incomoda quem está trabalhando bem.
+    </p>
+  </div>
+
+  <div class="fsec" style="margin-top:.9rem">
+    <div class="sh"><b>Quanto tempo um lead fica em cada etapa</b>
+      {% if not d.etapas %}<span style="font-size:.76rem;color:var(--ambar)">ainda não dá pra saber</span>{% endif %}</div>
+    {% if not d.etapas %}
+    <div style="background:var(--ambar-fundo);border:1px solid var(--ambar-borda);border-radius:11px;padding:.85rem .95rem;margin-top:.5rem">
+      <p style="margin:0;color:var(--txt-mut);font-size:.85rem;line-height:1.6">
+        O sistema nunca guardou quando um card muda de coluna — a pergunta não tinha resposta nem
+        olhando pra trás. O histórico começou a ser gravado agora{% if d.desde %}, em
+        {{ d.desde.strftime('%d/%m') }}{% endif %}; em duas semanas de uso estes números existem e
+        escolhem os prazos das etapas sozinhos.
+      </p>
+    </div>
+    {% endif %}
+    {% for e in d.etapas %}
+    <div style="display:grid;grid-template-columns:200px 1fr 130px;gap:.9rem;align-items:center;padding:.6rem 0;border-top:1px solid var(--borda)">
+      <span style="font-size:.87rem;font-weight:600">{{ e.rotulo }}</span>
+      <span class="mut num" style="font-size:.78rem">{{ e.n }} passagem(ns)</span>
+      <span style="text-align:right;font-size:.82rem">metade em <b class="num" style="color:var(--txt)">{{ e.dur }}</b></span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}"""
+
+_env.loader.mapping["prospeccao_ritmo"] = _RITMO_TPL

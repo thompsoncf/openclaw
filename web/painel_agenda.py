@@ -16,6 +16,7 @@ from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from db.conexao import get_pool
+from web import estaticos as _estaticos
 from web import tema as _tema
 from finance import agenda as ag
 from finance import convites as cv
@@ -165,6 +166,9 @@ def _monta_semanas(ano: int, mes: int, eventos: list[dict], hoje: date,
                     "pre": e.get("status") == ag.PRE_RESERVADO,
                     "prazo": pz["rot"], "urgente": pz["urgente"],
                     "pg": pg["rot"], "pg_classe": pg["classe"],
+                    # quem marcou: é por ele que o filtro por pessoa esconde e mostra
+                    # sem voltar ao servidor (ver o JS do .ag-pessoas).
+                    "membro_id": e.get("membro_id") or "",
                 })
             # a célula inteira se pinta: é o que se enxerga do mês sem ler linha
             # nenhuma — âmbar quando tem data segurada, coral quando alguma aperta.
@@ -186,13 +190,15 @@ def _titulo_dia(d: date) -> str:
 
 def _eventos_por_dia(eventos: list[dict], convidados: dict[int, list[dict]] | None = None,
                      agora=None, orcamentos: dict[int, dict] | None = None,
-                     fichas: dict[int, dict] | None = None) -> dict[str, dict]:
+                     fichas: dict[int, dict] | None = None,
+                     nomes: dict[int, str] | None = None) -> dict[str, dict]:
     """{iso_do_dia: {titulo, eventos:[...]}} com os detalhes completos (local,
     descrição, convidados) — alimenta a caixa do dia no JS sem precisar de outra
     requisição (os eventos do mês já vieram pro calendário)."""
     convidados = convidados or {}
     orcamentos = orcamentos or {}
     fichas = fichas or {}
+    nomes = nomes or {}
     agora = agora or ag.agora_brt()
     out: dict[str, dict] = {}
     for e in sorted(eventos, key=lambda ev: ev["inicio"]):
@@ -225,6 +231,10 @@ def _eventos_por_dia(eventos: list[dict], convidados: dict[int, list[dict]] | No
             "orcamento_numero": orcamentos.get(e["id"], {}).get("orcamento_numero"),
             # a FICHA: o que o orçamento vinculado já sabe sobre essa festa
             "ficha": _ficha_rot(fichas.get(e["id"])),
+            # quem marcou — a agenda agora é de todos, e esta é a primeira pergunta
+            # de quem olha um compromisso que não marcou. Vazio = o dono titular.
+            "autor": nomes.get(e.get("membro_id")) or "",
+            "membro_id": e.get("membro_id") or "",
         })
     return out
 
@@ -411,7 +421,7 @@ def _montar_share(request: Request, pool, conta_id: int, convite_ev: str, convit
 # ================================================================ CALENDÁRIO
 @router.get("/painel/agenda", response_class=HTMLResponse)
 def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = "",
-                convite_ev: str = ""):
+                convite_ev: str = "", p: str = ""):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
@@ -420,6 +430,9 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
     ano, mes = _mes_ref(m)
     agora = ag.agora_brt()
     hoje = agora.date()
+    # FILTRO POR PESSOA (?p=<membro_id>). Não é permissão — a agenda é da conta e
+    # todos veem tudo; é foco: "me mostra só o do Rafael". O padrão é o time.
+    p_id = int(p) if (p or "").isdigit() else None
     # NICHO: só quem vende data (eventos) vê o vocabulário de data segurada e a
     # ficha do evento. Pra clínica, loja e escritório a Agenda continua exatamente
     # como estava — a pré-reserva nasce só de orçamento de evento, então a marca não
@@ -427,6 +440,26 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
     vende_data = _vendas().vende_data(pool, conta_id)
     eventos = ag.eventos_mes(pool, conta_id, ano, mes)
     proximos = ag.proximos(pool, conta_id, limite=8)
+    # nomes de quem marcou + as pessoas do filtro. As pessoas vêm dos AUTORES do
+    # mês (não da equipe inteira): chip de quem não tem evento é botão que filtra
+    # pro vazio. O mapa de nomes cobre eventos e próximos.
+    with pool.connection() as c:
+        # só `nome`: a coluna `email` de membros nasce em runtime (garantir_tabela)
+        # e nem todo banco passou por ela — a agenda não pode quebrar por isso.
+        nomes = dict(c.execute(
+            "select id, coalesce(nullif(nome,''), '') from membros where conta_id=%s",
+            (conta_id,)).fetchall())
+    autores_mes = sorted({e["membro_id"] for e in eventos if e.get("membro_id")})
+    pessoas = [{"id": mid, "nome": nomes.get(mid) or f"#{mid}", "on": (mid == p_id)}
+               for mid in autores_mes]
+    # O SERVIDOR NÃO FILTRA MAIS. Filtrava aqui — depois de fazer as treze
+    # consultas e montar a página inteira — e por isso cada clique num nome era um
+    # recarregamento completo pra rodar duas linhas sobre dados que já estavam na
+    # mão. O filtro virou coisa da tela (ver o JS do .ag-pessoas): `p_id` só diz
+    # qual chip nasce ligado, e o JS aplica antes do primeiro toque.
+    #
+    # Mandar tudo é o que torna "Todos" possível sem voltar ao servidor: filtrado
+    # na origem, o navegador não teria de onde trazer os outros de volta.
     ids_com_convidados = {e["id"] for e in eventos} | {e["id"] for e in proximos}
     convidados = cv.por_evento(pool, conta_id, list(ids_com_convidados))
     # FICHA DO EVENTO: o orçamento vinculado e o pagamento de cada festa do mês.
@@ -454,8 +487,21 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
             "orcamento_numero": ev.get("orcamento_numero"),
             "mes": f"{ev['inicio'].astimezone(ag.BRT):%Y-%m}",
         })
+    # DATAS CONFIRMADAS: a irmã do card acima, e a que não existia em lugar
+    # nenhum. Quem quisesse saber quantas datas tinha vendidas contava no
+    # calendário, mês a mês. Mesma consulta única do lado das seguradas.
+    confirmadas = [{
+        "id": ev["id"], "titulo": ev["titulo"],
+        "quando": ag.fmt_hora(ev),
+        "dia_rot": ev["inicio"].astimezone(ag.BRT).strftime("%d/%m"),
+        "total": _brl(ev.get("total_centavos")),
+        "sinal_pago": bool(ev.get("sinal_centavos")),
+        "orcamento_id": ev.get("orcamento_id"),
+        "orcamento_numero": ev.get("orcamento_numero"),
+        "mes": f"{ev['inicio'].astimezone(ag.BRT):%Y-%m}",
+    } for ev in ag.confirmadas(pool, conta_id, agora)] if vende_data else []
     orcs = {s["id"]: s for s in seguradas}
-    eventos_dia = _eventos_por_dia(eventos, convidados, agora, orcs, fichas)
+    eventos_dia = _eventos_por_dia(eventos, convidados, agora, orcs, fichas, nomes)
     reaproveitar = [{
         "id": e["id"], "titulo": e["titulo"], "hora_rot": ag.fmt_hora(e),
         "hora": e["inicio"].astimezone(ag.BRT).strftime("%H:%M"),
@@ -468,6 +514,7 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
         ev["tipo_rot"] = TIPO_ROT.get(ev["tipo"], "Pessoal")
         ev["convidados"] = convidados.get(ev["id"], [])
         ev["conv_resumo"] = cv.resumo(ev["convidados"]) if ev["convidados"] else None
+        ev["autor"] = nomes.get(ev.get("membro_id")) or ""
     cfg = ag.get_config(pool, conta_id)
     feed_url = _feed_url(request, cfg["feed_token"]) if cfg.get("feed_token") else ""
     # Card de compartilhar os convites de um evento (?convite_ev=<id>; aceita também
@@ -487,7 +534,8 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
                    mes_hoje=f"{hoje.year:04d}-{hoje.month:02d}",
                    hoje_iso=hoje.isoformat(), abrir_novo=(novo == "1"),
                    cfg=cfg, feed_url=feed_url, share=share, seguradas=seguradas,
-                   vende_data=vende_data,
+                   confirmadas=confirmadas,
+                   vende_data=vende_data, pessoas=pessoas, p_id=p_id,
                    rot=(_ROT_EVENTO if vende_data else _ROT_PADRAO),
                    aviso=request.session.pop("agenda_aviso", None))
 
@@ -960,7 +1008,7 @@ def convite_responder(request: Request, token: str, acao: str = Form(...),
 
 
 # ================================================================ TEMPLATE
-_CSS = """<style>
+_CSS_CRU = """
 /* width:100% porque .ag-wrap é item flex do body (junto do menu lateral): sem
    largura definida ele adota a do conteúdo, e uma tabela larga empurrava a
    página inteira pra fora da tela em vez de rolar dentro do próprio card. */
@@ -985,6 +1033,13 @@ _CSS = """<style>
 .zaq-toast.err{border-color:var(--coral)}
 .px-row.saindo{opacity:0;transform:translateX(8px);transition:.22s}
 .ag-btn:hover{background:var(--verde-hover)}
+/* filtro por pessoa: chips abaixo do topo. Não é permissão — todos veem tudo —,
+   é foco. Só aparece quando o mês tem autor identificado (senão é um "Todos" só). */
+.ag-pessoas{display:flex;gap:.4rem;flex-wrap:wrap;margin:-.4rem 0 1rem}
+.agp{font-size:.76rem;color:var(--txt-mut);text-decoration:none;
+  border:1px solid var(--borda);background:var(--card-2);border-radius:999px;
+  padding:.22rem .7rem}
+.agp.on{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--txt);font-weight:600}
 .ag-grid{display:grid;grid-template-columns:1.7fr .95fr;gap:18px;align-items:start}
 @media(max-width:860px){.ag-grid{grid-template-columns:1fr}}
 /* histórico de envios */
@@ -1357,6 +1412,23 @@ _CSS = """<style>
 .segrow .srt .s{font-size:.62rem;color:var(--txt-mut);font-variant-numeric:tabular-nums}
 .segcnt{font-size:.62rem;font-weight:700;color:var(--ambar);background:var(--ambar-fundo);
         border:1px solid var(--ambar-borda);border-radius:999px;padding:.1rem .45rem}
+/* CONFIRMADAS: sólido onde a segurada é tracejada. O par sólido/tracejado é o
+   mesmo que separa firme de provisório no calendário e no funil — quem não
+   distingue cor lê pela forma. */
+.segrow.ok .segbar{background:var(--verde)}
+.segrow.ok .srt .v{color:var(--verde-claro)}
+/* as duas abas do card de datas */
+.dt-abas{display:flex;gap:4px;background:var(--card-2);border:1px solid var(--borda);
+         border-radius:10px;padding:3px;margin-bottom:10px}
+.dt-aba{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;
+        border:0;background:transparent;border-radius:8px;padding:.4rem .5rem;cursor:pointer;
+        font-family:inherit;font-size:.78rem;font-weight:600;color:var(--txt-mut);width:auto;margin:0}
+.dt-aba.on{background:var(--card);color:var(--txt);box-shadow:0 1px 0 rgba(0,0,0,.35)}
+.dt-aba:focus-visible{outline:2px solid var(--verde);outline-offset:1px}
+.dt-aba .c{font-size:.66rem;font-weight:700;border-radius:5px;padding:.02rem .32rem;
+           background:var(--borda);color:var(--txt-mut);font-variant-numeric:tabular-nums}
+.dt-aba.on .c.seg{background:var(--ambar-fundo);color:var(--ambar);border:1px solid var(--ambar-borda)}
+.dt-aba.on .c.con{background:var(--neon-fundo);color:var(--verde-claro);border:1px solid var(--neon-borda)}
 /* choque de horário no formulário */
 .choque{display:none;gap:8px;align-items:flex-start;font-size:.74rem;color:#f0c2be;
         background:var(--coral-fundo);border:1px solid var(--coral-borda);border-radius:9px;
@@ -1406,459 +1478,22 @@ _CSS = """<style>
 .meet-btn:hover{background:rgba(29,158,117,.24)}
 .daybox-cta{display:block;width:100%;text-align:center;margin-top:14px;background:transparent;border:1px dashed var(--borda);color:var(--verde-claro);border-radius:9px;padding:.6rem;font-size:.82rem;font-weight:600;cursor:pointer}
 .daybox-cta:hover{border-color:var(--verde)}
-</style>"""
+"""
 
-_AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
-<div class="ag-wrap">
-  {% if aviso %}<div class="ag-aviso">{{ aviso }}</div>{% endif %}
-  {% if share %}
-  <div class="share">
-    <h2>✅ {{ share.total }} convite{{ 's' if share.total != 1 }} pronto{{ 's' if share.total != 1 }} pra enviar</h2>
-    <p><b>{{ share.titulo }}</b> — {{ share.quando }}. {% if share.auto_on %}Toque em <b>📲 Zaq</b> pra ele mandar o convite sozinho pelo WhatsApp (a pessoa confirma num toque), ou use o link.{% else %}Mande o link de cada um; cada pessoa confirma o seu e você é avisado aqui.{% endif %}</p>
-    <div class="share-list">
-      {% for g in share.guests %}
-      <div class="share-row" data-link="{{ g.url }}">
-        <div class="sr-av">{{ (g.nome or '?')[0]|upper }}</div>
-        <div class="sr-who"><b>{{ g.nome or 'Convidado' }}</b><small>{{ g.contato or 'sem número' }} · {{ g.status_rot }}</small></div>
-        {% if share.auto_on and g.contato %}
-          {% if g.status == 'confirmado' %}
-          <button type="button" class="sr-za" disabled title="Já confirmou — não precisa reenviar">📲 Zaq</button>
-          {% else %}
-          <form method="post" action="/painel/agenda/convite/enviar" data-ajax="enviar" style="margin:0">
-            <input type="hidden" name="token" value="{{ g.token }}">
-            <input type="hidden" name="ev_id" value="{{ share.ev_id }}">
-            <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
-            <button type="submit" class="sr-za" data-busy="⏳ Enviando…" title="O Zaq envia o convite pelo WhatsApp">📲 Zaq</button>
-          </form>
-          {% endif %}
-        {% endif %}
-        <a class="sr-wa" href="{{ g.wa }}" target="_blank" rel="noopener">💬 Enviar</a>
-        <button type="button" class="sr-cp" onclick="cpRow(this)" title="Copiar link">📋</button>
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
-  <div class="ag-top">
-    <div class="ag-mes">
-      <div class="ag-nav">
-        <a href="/painel/agenda?m={{ mes_prev }}" aria-label="Mês anterior">‹</a>
-        <a href="/painel/agenda?m={{ mes_next }}" aria-label="Próximo mês">›</a>
-      </div>
-      <h1>{{ mes_nome }} de {{ ano }}</h1>
-      <a href="/painel/agenda?m={{ mes_hoje }}" class="ag-hoje">Hoje</a>
-    </div>
-    <a href="#novo" class="ag-btn" onclick="agNovo(true)">{{ rot.novo_btn }}</a>
-  </div>
+# A folha sai de dentro da página e vira arquivo com cache de um ano. Eram 38 KB
+# rebaixados e reinterpretados a cada clique nos nomes e nas setas do mês — ver
+# web/estaticos.py.
+_CSS_URL = _estaticos.registrar("agenda.css", _CSS_CRU)
+_CSS = f'<link rel="stylesheet" href="{_CSS_URL}">'
 
-  <div class="ag-grid">
-    <div>
-      <div class="cal{% if vende_data %} marca-estado{% endif %}">
-        <div class="cal-hd">{% for d in dias_sem %}<span>{{ d }}</span>{% endfor %}</div>
-        {% for semana in semanas %}
-        <div class="cal-wk">
-          {% for c in semana %}
-          <div class="cal-cell{% if c.fora %} fora{% endif %}{% if c.hoje %} hoje{% endif %}{% if c.eventos %} tem-evento{% endif %}{% if c.tem_seg %} temseg{% endif %}{% if c.urg %} urg{% endif %}{% if not c.eventos and reaproveitar %} clicavel{% endif %}"
-               {% if c.eventos or reaproveitar %}data-iso="{{ c.iso }}" tabindex="0" role="button" aria-label="{% if c.eventos %}Ver os {{ c.eventos|length }} compromisso{{ 's' if c.eventos|length != 1 }} do dia {{ c.dia }}{% else %}Ver sugestões pro dia {{ c.dia }}{% endif %}"{% endif %}>
-            <div class="cal-head">
-              <span class="cal-num">{{ c.dia }}</span>
-              {% if c.eventos|length > 2 %}<span class="cal-count">{{ c.eventos|length }}</span>{% endif %}
-            </div>
-            {% if c.eventos %}
-            <div class="evs">
-              {% for e in c.eventos[:2] %}
-              <div class="ev-line{% if e.pre %} pre{% endif %}" data-ev="{{ e.id }}"{% if e.pre %} title="Data segurada — esperando o sinal ({{ e.prazo }})"{% endif %}><span class="dot d-{{ e.tipo }}"></span><span class="h">{{ e.hora }}</span><span class="n">{{ e.titulo }}</span>{% if e.prazo %}<span class="ev-prazo{% if e.urgente %} urg{% endif %}">{{ e.prazo }}</span>{% endif %}{% if e.pg %}<span class="ev-pg {{ e.pg_classe }}">{{ e.pg }}</span>{% endif %}</div>
-              {% endfor %}
-            </div>
-            {% if c.eventos|length > 2 %}<div class="ev-more">+{{ c.eventos|length - 2 }} mais</div>{% endif %}
-            {% endif %}
-          </div>
-          {% endfor %}
-        </div>
-        {% endfor %}
-      </div>
-      {% if vende_data %}
-      <p class="hint">A barra da esquerda diz se a data é sua: <b><span class="leg-mk leg-fixo"></span>fixado</b> ·
-      <b style="color:var(--ambar)"><span class="leg-mk leg-seg"></span>segurado</b> (esperando o sinal — ocupa a data,
-      mas não vira lembrete nem entra no calendário sincronizado; o número ao lado é quanto falta pro prazo).
-      A bolinha diz o tipo: <b style="color:#bfeeda">pessoal</b>, <b style="color:#bcd8f6">empresa</b>,
-      <b style="color:#f0d9a6">fornecedor</b>. Marque também pelo WhatsApp/Telegram — cai tudo aqui.</p>
-      {% else %}
-      <p class="hint">As cores separam <b style="color:#bfeeda">pessoal</b>, <b style="color:#bcd8f6">empresa</b> e <b style="color:#f0d9a6">fornecedor</b>. Marque também pelo WhatsApp/Telegram — cai tudo aqui.</p>
-      {% endif %}
-    </div>
 
-    <div class="side-cards">
-      <!-- datas seguradas: só existe quando existe alguma. Quem não vende data
-           nunca vê este card. -->
-      {% if seguradas %}
-      <div class="ag-card">
-        <h2>⏳ Datas seguradas <span class="segcnt">{{ seguradas|length }}</span></h2>
-        {% for s in seguradas %}
-        <div class="segrow{% if s.urgente %} urg{% endif %}">
-          <div class="segbar"></div>
-          <div>
-            <div class="stt">{{ s.titulo }}</div>
-            <div class="smt">{{ s.quando }}{% if s.sinal %} · sinal {{ s.sinal }}{% endif %}{% if s.orcamento_numero %} · orçamento nº {{ s.orcamento_numero }}{% endif %}</div>
-          </div>
-          <div class="srt">
-            <div class="v">{{ s.prazo }}</div>
-            <div class="s">vence {{ s.ate }}</div>
-          </div>
-        </div>
-        {% endfor %}
-        <p class="hint" style="margin:2px 0 0">Da que vence primeiro. Passando o prazo sem o sinal, a data
-        libera sozinha e você é avisado — abra o dia no calendário pra firmar ou soltar antes disso.</p>
-      </div>
-      {% endif %}
-
-      <!-- próximos -->
-      <div class="ag-card">
-        <h2>{{ rot.proximos }}</h2>
-        <div class="px">
-          {% for e in proximos %}
-          <div class="px-row" data-ev="{{ e.id }}">
-            <div class="px-dot d-{{ e.tipo }}"></div>
-            <div class="px-when"><div class="d">{{ e.dia_rot }}</div><div class="h">{{ e.hora_rot }}</div></div>
-            <div class="px-body">
-              <div class="tt">{{ e.titulo }}</div>
-              <div class="mt">{{ e.tipo_rot }}{% if e.local %} · {{ e.local }}{% endif %}</div>
-              {% if e.convidados %}
-              <div class="px-conv">
-                {% if e.conv_resumo.total > 1 %}
-                <a href="/painel/agenda?m={{ '%04d-%02d'|format(ano, mes) }}&convite_ev={{ e.id }}" class="cgrp{% if e.conv_resumo.fechado %} cgrp-ok{% endif %}" style="text-decoration:none" title="Ver e reenviar os convites">👥 {{ e.conv_resumo.confirmados }} de {{ e.conv_resumo.total }} confirmaram{% if e.conv_resumo.fechado %} 🎉{% endif %}</a>
-                {% else %}
-                {% for g in e.convidados %}<a href="/painel/agenda?m={{ '%04d-%02d'|format(ano, mes) }}&convite_ev={{ e.id }}" class="cpill cp-{{ g.status }}" style="text-decoration:none" title="Reenviar o link do convite de {{ g.nome or 'convidado' }}">👤 {{ g.nome or 'Convidado' }}: {{ g.status_rot }}</a>{% endfor %}
-                {% endif %}
-              </div>
-              {% endif %}
-              <div class="remarcar-box" id="remBox-{{ e.id }}">
-                <form method="post" action="/painel/agenda/remarcar">
-                  <div class="rlbl">🔁 Nova data</div>
-                  <input type="hidden" name="evento_id" value="{{ e.id }}">
-                  <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
-                  <div class="remarcar-row2">
-                    <input type="date" name="data" value="{{ e.data_iso }}" required>
-                    <input type="time" name="hora" value="{{ e.hora_rot }}" required>
-                  </div>
-                  <div class="tg">
-                    <div><div class="tg-t">Avisar os convidados</div><div class="tg-s">Manda a nova data pro mesmo link que já têm</div></div>
-                    <label class="sw"><input type="checkbox" name="avisar" value="1" checked><span class="track"></span><span class="knob"></span></label>
-                  </div>
-                  <div class="remarcar-actions">
-                    <button class="rbtn ok" type="submit" data-busy="⏳ Salvando…">Salvar nova data</button>
-                    <button class="rbtn cc" type="button" onclick="remToggle({{ e.id }})">Cancelar</button>
-                  </div>
-                </form>
-              </div>
-              <div class="add-conv-box" id="addConvBox-{{ e.id }}">
-                <form method="post" action="/painel/agenda/convidado/adicionar">
-                  <div class="rlbl">＋ Adicionar convidado</div>
-                  <input type="hidden" name="evento_id" value="{{ e.id }}">
-                  <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
-                  <div class="add-conv-row">
-                    <input name="nome" placeholder="Nome" autocomplete="off">
-                    <input name="contato" placeholder="(86) 90000-0000" autocomplete="off">
-                  </div>
-                  <div class="add-conv-actions">
-                    <button class="rbtn ok" type="submit" data-busy="⏳ Adicionando…">Adicionar</button>
-                    <button class="rbtn cc" type="button" onclick="addConvToggle({{ e.id }})">Cancelar</button>
-                  </div>
-                </form>
-              </div>
-            </div>
-            <div class="px-actions">
-              <button class="px-add" type="button" title="Adicionar convidado" onclick="addConvToggle({{ e.id }})">＋👤</button>
-              <button class="px-rm" type="button" title="Remarcar" onclick="remToggle({{ e.id }})">🔁</button>
-              <form method="post" action="/painel/agenda/cancelar" data-ajax="cancelar" onsubmit="return confirm('Cancelar “{{ e.titulo }}”?')">
-                <input type="hidden" name="evento_id" value="{{ e.id }}">
-                <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
-                <button class="px-x" type="submit" title="Cancelar">✕</button>
-              </form>
-            </div>
-          </div>
-          {% else %}
-          <div class="px-vazio">Nada por vir. Marque um compromisso ali em cima. 🎉</div>
-          {% endfor %}
-        </div>
-      </div>
-
-      <!-- novo compromisso -->
-      <div class="ag-card" id="novo"{% if not abrir_novo %} style="display:none"{% endif %}>
-        <h2>{{ rot.novo }}</h2>
-        <form class="frm" method="post" action="/painel/agenda/novo">
-          <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
-          <label>{{ rot.titulo }}</label>
-          <input name="titulo" id="fTitulo" placeholder="{{ rot.titulo_ph }}" required autocomplete="off">
-          <div class="row2">
-            <div><label>{{ rot.data }}</label><input name="data" id="fData" type="date" value="{{ hoje_iso }}" required></div>
-            <div><label>{{ rot.hora }}</label><input name="hora" id="fHora" type="time" value="{% if vende_data %}19:00{% else %}09:00{% endif %}"></div>
-          </div>
-          {% if rot.fim %}
-          {# HORA DE ENCERRAMENTO: o orçamento de evento sempre pergunta, a agenda
-             nunca perguntou. Sem ela a festa entra como compromisso de 1h e a
-             checagem de choque compara a janela errada — duas festas na mesma noite
-             não acusavam nada. Aceita 24:00 e vira a noite (ver agenda.janela_evento). #}
-          <div class="row2">
-            <div><label>{{ rot.fim }}</label><input name="hora_fim" id="fFim" type="time" value="23:00"></div>
-            <div></div>
-          </div>
-          {% endif %}
-          <!-- choque de horário: aparece na TELA, na hora de marcar. Não bloqueia —
-               quem decide se cabe é a empresa (buffet com dois salões cabe). -->
-          <div class="choque" id="choqueBox"><span>⚠️</span><div id="choqueTxt"></div></div>
-          <!-- só segurar a data: a pré-reserva que nasce de um telefonema, sem
-               orçamento nenhum. Antes só existia via aprovação de proposta.
-               Só pra quem vende data — clínica não segura horário esperando sinal. -->
-          {% if vende_data %}
-          <div class="tg" style="margin-top:2px">
-            <div><div class="tg-t">Só segurar a data</div><div class="tg-s">Ocupa o dia sem virar compromisso — não vira lembrete</div></div>
-            <label class="sw"><input type="checkbox" name="segurar" value="1" id="fSegurar"><span class="track"></span><span class="knob"></span></label>
-          </div>
-          <div class="segbox" id="segBox">
-            <div class="row2">
-              <div><div class="sl">Segurar até</div><input name="segurar_ate" id="fSegAte" type="date"></div>
-              <div><div class="sl">Sinal esperado</div><input name="sinal_esperado" id="fSinal" type="text" placeholder="opcional" autocomplete="off" inputmode="decimal"></div>
-            </div>
-            <div class="sh">Vale até o fim do dia escolhido. Passando o prazo sem o sinal, a data
-            libera sozinha e você é avisado — e dá pra firmar ou soltar antes disso, abrindo o dia no calendário.</div>
-          </div>
-          {% endif %}
-          <label>{{ rot.desc }} <span style="font-weight:400">(opcional)</span></label>
-          <textarea name="descricao" placeholder="{{ rot.desc_ph }}"></textarea>
-          <label>{{ rot.local }} <span style="font-weight:400">(opcional)</span></label>
-          <input type="hidden" name="local" id="localHidden">
-          <div class="addr-wrap" id="addrWrap">
-            <div class="addr-input-row">
-              <input type="text" id="addrInput" placeholder="Buscar endereço ou nome do lugar…" autocomplete="off">
-              <span class="addr-ic">🔍</span>
-            </div>
-            <div class="addr-drop" id="addrDrop"></div>
-            <div id="addrPicked"></div>
-          </div>
-          <div class="hint-line" id="hintLine">Digite pra buscar — ex: nome do lugar ou endereço.</div>
-          <div class="local-alt-row">
-            <button type="button" class="manual-toggle" id="manualToggle">✍️ Não achei o lugar — digitar manualmente</button>
-            <button type="button" class="online-toggle" id="onlineToggle">🌐 É uma reunião online</button>
-          </div>
-          <div class="manual-box" id="manualBox">
-            <div class="mlabel">Local (texto livre, sem link de mapa)</div>
-            <input type="text" id="manualInput" placeholder="Ex: na casa da Ana, no clube…" autocomplete="off">
-            <button type="button" class="manual-cancel" id="manualCancel">← voltar pra busca de endereço</button>
-          </div>
-          <div class="online-box" id="onlineBox">
-            <div class="omsg">🌐 Reunião online — nenhum endereço vai ser enviado aos convidados.</div>
-            <div class="link-lbl">🎥 Link da chamada <span style="font-weight:400">(opcional)</span></div>
-            <input type="url" name="link_online" id="linkOnline" class="link-input" placeholder="Cole aqui o link do Meet, Zoom, Teams…" autocomplete="off">
-            <div class="link-hint">Se preencher, vai junto nas mensagens de convite/confirmação e aparece na caixa do dia com um botão de entrar direto.</div>
-            <button type="button" class="manual-cancel" id="onlineCancel">← voltar a informar um local</button>
-          </div>
-          <label>{{ rot.tipo }}</label>
-          <div class="segs">
-            <label class="s-pessoal"><input type="radio" name="tipo" value="pessoal"{% if not vende_data %} checked{% endif %}><span>{{ rot.t_pessoal }}</span></label>
-            <label class="s-empresa"><input type="radio" name="tipo" value="empresa"{% if vende_data %} checked{% endif %}><span>{{ rot.t_empresa }}</span></label>
-            <label class="s-fornecedor"><input type="radio" name="tipo" value="fornecedor"><span>{{ rot.t_fornecedor }}</span></label>
-          </div>
-          <div class="gconv">
-            <div class="gt">{{ rot.conv_t }}</div>
-            <div class="gd">{{ rot.conv_d }}</div>
-            <div id="guests">
-              <div class="guest-row">
-                <div><input class="gnome" name="convidado_nome" placeholder="Nome" autocomplete="off"></div>
-                <div><input name="convidado_contato" placeholder="(86) 90000-0000" autocomplete="off"></div>
-                <button type="button" class="g-rm" onclick="rmGuest(this)" title="Remover" aria-label="Remover">✕</button>
-              </div>
-            </div>
-            <button type="button" class="g-add" onclick="addGuest()">{{ rot.conv_add }}</button>
-          </div>
-          <button class="ok" type="submit" data-busy="{{ rot.salvando }}">{{ rot.salvar }}</button>
-        </form>
-      </div>
-
-      <!-- lembrete -->
-      <div class="ag-card">
-        <h2>🔔 Lembrete</h2>
-        <form method="post" action="/painel/agenda/lembrete">
-          <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
-          <div class="tg">
-            <div><div class="tg-t">Resumo do dia</div><div class="tg-s">De manhã, o que você tem no dia</div></div>
-            <label class="sw"><input type="checkbox" name="resumo_dia" value="1" {% if cfg.resumo_ativo %}checked{% endif %} onchange="document.getElementById('subResumo').style.display=this.checked?'flex':'none'"><span class="track"></span><span class="knob"></span></label>
-          </div>
-          <div class="sub-opt" id="subResumo"{% if not cfg.resumo_ativo %} style="display:none"{% endif %}>
-            <span>às</span>
-            <select name="hora_resumo">
-              {% for h in range(5,12) %}<option value="{{ h }}" {% if cfg.hora_resumo==h %}selected{% endif %}>{{ '%02d:00'|format(h) }}</option>{% endfor %}
-            </select>
-          </div>
-          <div class="tg">
-            <div><div class="tg-t">Aviso antes do compromisso</div><div class="tg-s">Um toque minutos antes de cada um</div></div>
-            <label class="sw"><input type="checkbox" name="aviso" value="1" {% if cfg.aviso_antes_min %}checked{% endif %} onchange="document.getElementById('subAviso').style.display=this.checked?'block':'none'"><span class="track"></span><span class="knob"></span></label>
-          </div>
-          <div id="subAviso"{% if not cfg.aviso_antes_min %} style="display:none"{% endif %}>
-            <div class="sub-opt">
-              <select name="aviso_antes_min">
-                {% for mn in [10,15,30,60,120] %}<option value="{{ mn }}" {% if cfg.aviso_antes_min==mn %}selected{% endif %}>{{ mn }} min antes</option>{% endfor %}
-              </select>
-            </div>
-            <div class="tg">
-              <div><div class="tg-t">Avisar os convidados</div><div class="tg-s">Quem confirmou presença recebe o mesmo aviso, pelo WhatsApp</div></div>
-              <label class="sw"><input type="checkbox" name="avisar_convidados" value="1" {% if cfg.avisar_convidados %}checked{% endif %}><span class="track"></span><span class="knob"></span></label>
-            </div>
-          </div>
-          <!-- fora do subAviso: independe do "aviso antes" estar ligado -->
-          <div class="tg">
-            <div><div class="tg-t">Confirmar de volta pro convidado</div><div class="tg-s">Quando ele responde, o Zaq manda o comprovante com calendário e mapa</div></div>
-            <label class="sw"><input type="checkbox" name="enviar_confirmacao" value="1" {% if cfg.enviar_confirmacao %}checked{% endif %}><span class="track"></span><span class="knob"></span></label>
-          </div>
-          <div class="canal-tag">📲 Vai chegar no seu WhatsApp/Telegram, onde você fala com o Zaq.</div>
-          <button class="ok" type="submit" data-busy="⏳ Salvando…">Salvar lembrete</button>
-        </form>
-      </div>
-
-      <!-- prazo da data segurada (pré-reserva por sinal). Regra de venda de DATA:
-           quem não vende data não tem o que configurar aqui. -->
-      {% if vende_data %}
-      <div class="ag-card">
-        <h2>⏳ Data segurada</h2>
-        <p class="hint" style="margin-top:0">Quando o cliente aprova um orçamento de evento <b>com sinal</b>, a data entra aqui como segurada — ocupa o dia, mas não vira compromisso nem lembrete. Ela só firma quando você confirma o sinal, na tela do orçamento.</p>
-        <form method="post" action="/painel/agenda/pre-reserva">
-          <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
-          <div class="sub-opt">
-            <span>Segurar por</span>
-            <select name="pre_reserva_dias">
-              {% for d in [1,2,3,5,7,10,15,30] %}<option value="{{ d }}" {% if cfg.pre_reserva_dias==d %}selected{% endif %}>{{ d }} dia{{ 's' if d != 1 }}</option>{% endfor %}
-            </select>
-          </div>
-          <p class="hint">Passando o prazo sem o sinal, a data libera sozinha e você é avisado. As pré-reservas que já estão correndo mantêm o prazo com que nasceram.</p>
-          <button class="ok" type="submit" data-busy="⏳ Salvando…">Salvar prazo</button>
-        </form>
-      </div>
-      {% endif %}
-
-      <!-- sincronizar -->
-      <div class="ag-card">
-        <h2>🔗 Sincronizar com sua agenda</h2>
-        {% if feed_url %}
-        <p class="hint" style="margin-top:0">Cole este link uma vez no seu calendário — ele puxa seus compromissos sozinho.</p>
-        <div class="feed">
-          <input id="feedUrl" value="{{ feed_url }}" readonly onclick="this.select()">
-          <button type="button" onclick="agCopiar()">Copiar</button>
-        </div>
-        <ul class="sync-steps">
-          <li><b>Google Agenda:</b> Outras agendas › + › <b>De um URL</b> › cole o link.</li>
-          <li><b>iPhone (Apple):</b> Ajustes › Calendário › Contas › Adicionar › <b>Outro</b> › Assinar calendário.</li>
-          <li><b>Outlook:</b> Adicionar calendário › <b>Assinar da Web</b> › cole o link.</li>
-        </ul>
-        {% else %}
-        <p class="hint" style="margin-top:0">Gere um link seguro pra abrir seus compromissos no Google Agenda, Apple ou Outlook — sem senha, sem login.</p>
-        <form method="post" action="/painel/agenda/sincronizar">
-          <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
-          <button class="ag-btn" type="submit" style="margin-top:6px" data-busy="⏳ Ativando…">Ativar sincronização</button>
-        </form>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-
-  <!-- histórico de envios: convites/lembretes/remarcados mandados, com status -->
-  <div class="hist-card">
-    <div class="hist-hd">
-      <div>
-        <h2>📨 Histórico de envios</h2>
-        <div class="sub">Convites, avisos e lembretes mandados pros seus convidados — e pra você</div>
-      </div>
-      <div class="hist-filtros">
-        <input class="hf-search" id="histQ" placeholder="Buscar convidado ou compromisso…">
-        <button class="hf-btn on" type="button" data-dias="7" onclick="histFiltro(this)">7 dias</button>
-        <button class="hf-btn" type="button" data-dias="30" onclick="histFiltro(this)">30 dias</button>
-        <button class="hf-btn" id="histFalhasBtn" type="button" onclick="histToggleFalhas()">Só falhas</button>
-      </div>
-    </div>
-    <div class="hist-tabs">
-      <button class="hist-tab on" id="histTabFeito" type="button" onclick="histTab('feito')">✅ Feito <span class="cnt">{{ historico_total }}</span></button>
-      <button class="hist-tab" id="histTabFila" type="button" onclick="histTab('fila')">🕓 Por fazer <span class="cnt{% if fila %} warn{% endif %}">{{ fila|length }}</span></button>
-    </div>
-    <div id="histBody">
-      {% if historico %}
-      <div class="hist-resumo" id="histResumo">
-        <span class="hr-ok">✅ <b>{{ historico|selectattr("ok")|list|length }}</b> enviados</span>
-        <span class="hr-fail">❌ <b>{{ historico|rejectattr("ok")|list|length }}</b> falharam</span>
-        <span>📨 <b>{{ historico_total }}</b> no total · últimos 7 dias</span>
-      </div>
-      <div class="hist-tbl-wrap">
-        <table class="hist-tbl">
-          <thead><tr><th>Quando</th><th>Compromisso</th><th>Convidado</th><th>Tipo</th><th>Canal</th><th>Status</th><th></th></tr></thead>
-          <tbody id="histTbody">
-            {% for it in historico %}
-            <tr>
-              <td class="hist-qd" data-rot="Quando">{{ it.quando_rot }}</td>
-              <td class="hist-compr" data-rot="Compromisso">{{ it.evento_titulo or "—" }}{% if it.evento_local %}<div class="loc">{{ it.evento_local }}</div>{% endif %}</td>
-              <td data-rot="Convidado">{{ it.convidado_rot }}</td>
-              <td data-rot="Tipo"><span class="hist-tipo ht-{{ it.tipo }}">{{ it.tipo_rot }}</span></td>
-              <td class="hist-canal" data-rot="Canal">{{ it.canal_rot }}</td>
-              <td data-rot="Status">
-                {% if it.ok %}<span class="hist-status hs-ok">✅ Enviado</span>
-                {% else %}<span class="hist-status hs-fail">❌ Falhou{% if it.motivo_rot %}<span class="hs-motivo">{{ it.motivo_rot }}</span>{% endif %}</span>{% endif %}
-              </td>
-              <td>{% if it.pode_reenviar %}<button class="hist-retry" type="button" onclick="histReenviar({{ it.id }}, this)">🔁 Reenviar</button>{% endif %}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      {% if historico_total > historico|length %}
-      <div class="hist-foot"><button class="hist-mais" type="button" onclick="histMais()">Ver mais</button></div>
-      {% endif %}
-      {% else %}
-      <div class="hist-vazio" id="histVazio">Nada enviado nos últimos 7 dias. 🤷</div>
-      {% endif %}
-    </div>
-    <div id="filaBody" style="display:none">
-      {% if fila %}
-      <div class="hist-resumo">
-        <span class="hr-wait">🕓 <b>{{ fila|length }}</b> na fila</span>
-        <span>Próximo em <b>{{ fila[0].eta_rel }}</b> · {{ fila[0].evento_titulo }}</span>
-      </div>
-      <div class="hist-tbl-wrap">
-        <table class="hist-tbl">
-          <thead><tr><th>Sai em</th><th>Compromisso</th><th>Convidado</th><th>Tipo</th><th></th></tr></thead>
-          <tbody>
-            {% for it in fila %}
-            <tr>
-              <td class="hist-qd" data-rot="Sai em"><span class="eta">{{ it.eta_rel }} · <b>{{ it.eta_hora }}</b></span></td>
-              <td class="hist-compr" data-rot="Compromisso">{{ it.evento_titulo }}{% if it.evento_local %}<div class="loc">{{ it.evento_local }}</div>{% endif %}</td>
-              <td data-rot="Convidado">{{ it.convidado_rot }}</td>
-              <td data-rot="Tipo"><span class="hist-tipo ht-{{ it.tipo }}">{{ it.tipo_rot }}</span></td>
-              <td data-rot="Status"><span class="hist-status hs-wait">{{ it.status_rot }}</span></td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      {% else %}
-      <div class="hist-vazio">Nada na fila — sem compromisso esperando aviso nos próximos 7 dias. 🎉</div>
-      {% endif %}
-    </div>
-  </div>
-
-  <!-- caixa do dia (abre ao clicar numa célula com compromisso) -->
-  <div class="day-overlay" id="dayOverlay">
-    <div class="daybox" id="daybox"></div>
-  </div>
-</div>
-<script>
-var EVENTOS_DIA = {{ eventos_dia|tojson }};
-var REAPROVEITAR = {{ reaproveitar|tojson }};
-var MESES_JS = {{ meses_js|tojson }};
-var DIAS_EXT_JS = {{ dias_sem_ext_js|tojson }};
-var AGORA_ISO = {{ agora_iso|tojson }};
-var CTA_DIA = {{ rot.cta_dia|tojson }};
-var MES_ATUAL = {{ ('%04d-%02d'|format(ano, mes))|tojson }};   // pra voltar pro mesmo mês depois de agir
-var CUR_MES = {{ ('%04d-%02d'|format(ano, mes))|tojson }};
-var TPILL = {pessoal:'Pessoal', empresa:'Empresa', fornecedor:'Fornecedor'};
-var HIST_STATE = {dias: 7, falhas: false, q: '', itens: {{ historico|tojson }},
-                  total: {{ historico_total }}};
-
+# O JS da tela sai de dentro da página do mesmo jeito que a folha de estilo.
+# Ficam inline só as ~13 linhas de DADOS do mês (os eventos, o mês aberto, a
+# hora do servidor) — 692 bytes que mudam a cada carregamento. As outras 761
+# linhas são código, não mudam entre um clique e outro, e agora o navegador
+# guarda por um ano. A ordem importa: os dados primeiro, porque o código lê
+# EVENTOS_DIA assim que carrega.
+_JS_CRU = """
 function _esc(s){ return (s||'').replace(/[&<>"']/g, function(ch){
   return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]; }); }
 function isoTitulo(iso){
@@ -2030,9 +1665,13 @@ function _seguradaHtml(e){
     +   verOrc
     + '</div></div>';
 }
+var AG_DIA_ABERTO = '';
 function abrirDia(iso){
+  AG_DIA_ABERTO = iso;
   var d = EVENTOS_DIA[iso];
-  var evs = d ? d.eventos : [];
+  // mesmo filtro do calendário: abrir o dia embaixo do nome do Rafael e ver o
+  // compromisso da Ana seria a tela se contradizendo.
+  var evs = (d ? d.eventos : []).filter(agDoFiltro);
   var box = document.getElementById('daybox');
   var html = '<div class="daybox-hd"><h3>'+(d?d.titulo:isoTitulo(iso))+'</h3>'
     + '<button class="x" type="button" onclick="fecharDia()" aria-label="Fechar">✕</button></div>'
@@ -2060,7 +1699,8 @@ function abrirDia(iso){
       + '<span class="tpill tp-'+e.tipo+'">'+((e.ficha&&e.ficha.tipo)?_esc(e.ficha.tipo):(TPILL[e.tipo]||e.tipo_rot))+'</span>'
       + (e.local?'<span>📍 '+e.local+'</span>':'')
       + ((e.ficha&&e.ficha.convidados)?'<span>👥 '+e.ficha.convidados+' convidados</span>':'')
-      + (e.pre?'<span style="color:var(--ambar);font-weight:700">segurada</span>':'')+'</div>'
+      + (e.pre?'<span style="color:var(--ambar);font-weight:700">segurada</span>':'')
+      + (e.autor?'<span title="quem marcou">👤 '+_esc(e.autor)+'</span>':'')+'</div>'
       + (e.link_online?'<a class="meet-btn" href="'+_esc(e.link_online)+'" target="_blank" rel="noopener">🎥 Entrar na reunião</a>':'')
       + '</div>'+acaoTopo+'</div>'
       // Data segurada: quem abre o dia precisa saber que essa data AINDA não é de
@@ -2078,18 +1718,29 @@ function abrirDia(iso){
   box.innerHTML = html;
   document.getElementById('dayOverlay').classList.add('show');
 }
-function fecharDia(){ document.getElementById('dayOverlay').classList.remove('show'); }
+function fecharDia(){ AG_DIA_ABERTO=''; document.getElementById('dayOverlay').classList.remove('show'); }
+// O filtro por pessoa. Vazio = time inteiro. Mora aqui em cima porque tanto a
+// célula do calendário quanto a caixa do dia leem por ele — duas listas
+// filtradas por critérios diferentes seriam dois calendários.
+var AG_FILTRO = '';
+function agDoFiltro(e){
+  return AG_FILTRO === '' || String(e.membro_id || '') === AG_FILTRO;
+}
 // Reconstrói o conteúdo de UMA célula (linhas de compromisso + "+N mais") a partir
 // de EVENTOS_DIA — mesma fonte de dados da caixa do dia, pra nunca desalinhar.
 function renderizarCelula(iso){
   var cel = document.querySelector('.cal-cell[data-iso="'+iso+'"]');
   if(!cel) return;
-  var evs = (EVENTOS_DIA[iso] || {}).eventos || [];
+  var todos = (EVENTOS_DIA[iso] || {}).eventos || [];
+  var evs = todos.filter(agDoFiltro);
   var num = cel.querySelector('.cal-num');
   var numHtml = num ? num.outerHTML : '';
   if(!evs.length){
-    cel.classList.remove('tem-evento');
-    if(REAPROVEITAR.length){ cel.classList.add('clicavel'); }
+    cel.classList.remove('tem-evento','temseg','urg');
+    // DIA VAZIO PELO FILTRO ≠ DIA VAZIO. Só o segundo perde o `data-iso` (é o
+    // caminho de "cancelei o último compromisso do dia"); tirar do primeiro
+    // deixaria a célula morta pra sempre — limpar o filtro não a traria de volta.
+    if(REAPROVEITAR.length || todos.length){ cel.classList.add('clicavel'); }
     else { cel.removeAttribute('tabindex'); cel.removeAttribute('role'); cel.removeAttribute('data-iso'); }
     cel.innerHTML = '<div class="cal-head">'+numHtml+'</div>';
     return;
@@ -2104,6 +1755,9 @@ function renderizarCelula(iso){
       + '</div>';
   }).join('');
   var mais = evs.length > 2 ? '<div class="ev-more">+'+(evs.length - 2)+' mais</div>' : '';
+  cel.classList.add('tem-evento');
+  cel.classList.toggle('temseg', evs.some(function(e){return e.pre;}));
+  cel.classList.toggle('urg', evs.some(function(e){return e.pre && e.urgente;}));
   cel.innerHTML = '<div class="cal-head">'+numHtml+count+'</div><div class="evs">'+linhas+'</div>'+mais;
 }
 // Tira o evento cancelado do calendário (linha na célula + caixa do dia se estiver
@@ -2159,7 +1813,7 @@ function remToggle(id){var box=document.getElementById('remBox-'+id);if(box)box.
   var chk = document.getElementById('fSegurar');
   var box = document.getElementById('segBox');
   var ate = document.getElementById('fSegAte');
-  var dias = {{ (cfg.pre_reserva_dias or 3)|tojson }};
+  var dias = PRE_RESERVA_DIAS;
   if(chk && box){
     chk.addEventListener('change', function(){
       box.classList.toggle('on', chk.checked);
@@ -2502,6 +2156,76 @@ function zaqVazioProximos(){
     d.textContent='Nada por vir. Marque um compromisso ali em cima. 🎉'; px.appendChild(d);
   }
 }
+// ---------------- As abas do card de datas ----------------
+// Puro DOM: as duas listas já vieram no HTML. Trocar de aba não pede nada ao
+// servidor — o card inteiro custa duas consultas, e elas já foram feitas.
+(function(){
+  var card=document.getElementById('datas-card'); if(!card) return;
+  var abas=[].slice.call(card.querySelectorAll('.dt-aba'));
+  abas.forEach(function(b){
+    b.addEventListener('click', function(){
+      abas.forEach(function(o){
+        var on=(o===b);
+        o.classList.toggle('on', on);
+        o.setAttribute('aria-selected', on?'true':'false');
+        var pane=document.getElementById(o.dataset.alvo);
+        if(pane) pane.hidden=!on;
+      });
+    });
+  });
+})();
+
+// ---------------- Filtro por pessoa, sem recarregar ----------------
+// ERA UM LINK. Cada clique num nome refazia a página inteira — treze consultas ao
+// banco, 139 KB de HTML — pra só então filtrar, em Python, uma lista que o
+// servidor já tinha na mão. O mês aberto, a rolagem e o dia expandido se perdiam
+// junto: era isso que fazia a tela piscar a cada toque.
+//
+// O filtro é VISUAL, e todos os dados do mês já estão na página (EVENTOS_DIA).
+// Trocar de pessoa não pede nada ao servidor — só redesenha as células pela mesma
+// função que a agenda já usava depois de cancelar ou remarcar.
+//
+// O SERVIDOR PAROU DE FILTRAR. Tinha que parar: se ele mandasse só os eventos do
+// Rafael, clicar em "Todos" não teria como trazer os outros de volta sem
+// recarregar — que é justamente o que se está tirando. Ele segue lendo o ?p= pra
+// marcar qual chip nasce ligado, e o JS aplica antes de a pessoa tocar em nada.
+(function(){
+  var barra=document.querySelector('.ag-pessoas'); if(!barra) return;
+  var chips=[].slice.call(barra.querySelectorAll('.agp'));
+  if(!chips.length) return;
+
+  function aplicar(id){
+    AG_FILTRO=id;
+    Object.keys(EVENTOS_DIA).forEach(renderizarCelula);
+    [].slice.call(document.querySelectorAll('.px-row')).forEach(function(el){
+      var meu=el.getAttribute('data-membro')||'';
+      el.hidden=!(id==='' || meu===id);
+    });
+    if(typeof zaqVazioProximos==='function') zaqVazioProximos();
+    if(AG_DIA_ABERTO) abrirDia(AG_DIA_ABERTO);   // a caixa aberta acompanha
+  }
+
+  chips.forEach(function(a){
+    a.addEventListener('click', function(ev){
+      ev.preventDefault();
+      var id=a.dataset.membro||'';
+      chips.forEach(function(o){ o.classList.toggle('on', o===a); });
+      aplicar(id);
+      // a URL acompanha sem recarregar: F5 mantém o filtro e o link colado no
+      // WhatsApp continua abrindo a agenda do jeito que a pessoa estava vendo.
+      try{
+        var u=new URL(window.location.href);
+        if(id) u.searchParams.set('p', id); else u.searchParams.delete('p');
+        history.replaceState(null, '', u.toString());
+      }catch(e){}
+    });
+  });
+
+  var ligado=barra.querySelector('.agp.on');
+  var inicial=(ligado && ligado.dataset.membro) || '';
+  if(inicial) aplicar(inicial);
+})();
+
 // Ações SEM reload (fetch): Cancelar remove a linha/chip na hora; 📲 Zaq envia e
 // dá um toast. Fallback: sem JS, os <form> continuam funcionando por POST normal.
 document.addEventListener('submit', function(ev){
@@ -2529,7 +2253,513 @@ document.addEventListener('submit', function(ev){
     })
     .catch(function(){ restore(); zaqToast('Erro de conexão — tenta de novo.', false); });
 }, false);
-</script>
+"""
+_JS_TAG = f'<script src="{_estaticos.registrar("agenda.js", _JS_CRU)}" defer></script>'
+
+
+_AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
+<div class="ag-wrap">
+  {% if aviso %}<div class="ag-aviso">{{ aviso }}</div>{% endif %}
+  {% if share %}
+  <div class="share">
+    <h2>✅ {{ share.total }} convite{{ 's' if share.total != 1 }} pronto{{ 's' if share.total != 1 }} pra enviar</h2>
+    <p><b>{{ share.titulo }}</b> — {{ share.quando }}. {% if share.auto_on %}Toque em <b>📲 Zaq</b> pra ele mandar o convite sozinho pelo WhatsApp (a pessoa confirma num toque), ou use o link.{% else %}Mande o link de cada um; cada pessoa confirma o seu e você é avisado aqui.{% endif %}</p>
+    <div class="share-list">
+      {% for g in share.guests %}
+      <div class="share-row" data-link="{{ g.url }}">
+        <div class="sr-av">{{ (g.nome or '?')[0]|upper }}</div>
+        <div class="sr-who"><b>{{ g.nome or 'Convidado' }}</b><small>{{ g.contato or 'sem número' }} · {{ g.status_rot }}</small></div>
+        {% if share.auto_on and g.contato %}
+          {% if g.status == 'confirmado' %}
+          <button type="button" class="sr-za" disabled title="Já confirmou — não precisa reenviar">📲 Zaq</button>
+          {% else %}
+          <form method="post" action="/painel/agenda/convite/enviar" data-ajax="enviar" style="margin:0">
+            <input type="hidden" name="token" value="{{ g.token }}">
+            <input type="hidden" name="ev_id" value="{{ share.ev_id }}">
+            <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+            <button type="submit" class="sr-za" data-busy="⏳ Enviando…" title="O Zaq envia o convite pelo WhatsApp">📲 Zaq</button>
+          </form>
+          {% endif %}
+        {% endif %}
+        <a class="sr-wa" href="{{ g.wa }}" target="_blank" rel="noopener">💬 Enviar</a>
+        <button type="button" class="sr-cp" onclick="cpRow(this)" title="Copiar link">📋</button>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  <div class="ag-top">
+    <div class="ag-mes">
+      <div class="ag-nav">
+        <a href="/painel/agenda?m={{ mes_prev }}" aria-label="Mês anterior">‹</a>
+        <a href="/painel/agenda?m={{ mes_next }}" aria-label="Próximo mês">›</a>
+      </div>
+      <h1>{{ mes_nome }} de {{ ano }}</h1>
+      <a href="/painel/agenda?m={{ mes_hoje }}" class="ag-hoje">Hoje</a>
+    </div>
+    <a href="#novo" class="ag-btn" onclick="agNovo(true)">{{ rot.novo_btn }}</a>
+  </div>
+
+  {% if pessoas %}
+  <div class="ag-pessoas">
+    {# Continuam <a> de verdade: sem JS o servidor filtra igual a antes, e o link
+       é copiável. Com JS o clique é interceptado e nada vai ao servidor. #}
+    <a href="/painel/agenda?m={{ '%04d-%02d'|format(ano, mes) }}" class="agp{% if p_id is none %} on{% endif %}" data-membro="">Todos</a>
+    {% for pp in pessoas %}<a href="/painel/agenda?m={{ '%04d-%02d'|format(ano, mes) }}&p={{ pp.id }}" class="agp{% if pp.on %} on{% endif %}" data-membro="{{ pp.id }}">{{ pp.nome }}</a>{% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="ag-grid">
+    <div>
+      <div class="cal{% if vende_data %} marca-estado{% endif %}">
+        <div class="cal-hd">{% for d in dias_sem %}<span>{{ d }}</span>{% endfor %}</div>
+        {% for semana in semanas %}
+        <div class="cal-wk">
+          {% for c in semana %}
+          <div class="cal-cell{% if c.fora %} fora{% endif %}{% if c.hoje %} hoje{% endif %}{% if c.eventos %} tem-evento{% endif %}{% if c.tem_seg %} temseg{% endif %}{% if c.urg %} urg{% endif %}{% if not c.eventos and reaproveitar %} clicavel{% endif %}"
+               {% if c.eventos or reaproveitar %}data-iso="{{ c.iso }}" tabindex="0" role="button" aria-label="{% if c.eventos %}Ver os {{ c.eventos|length }} compromisso{{ 's' if c.eventos|length != 1 }} do dia {{ c.dia }}{% else %}Ver sugestões pro dia {{ c.dia }}{% endif %}"{% endif %}>
+            <div class="cal-head">
+              <span class="cal-num">{{ c.dia }}</span>
+              {% if c.eventos|length > 2 %}<span class="cal-count">{{ c.eventos|length }}</span>{% endif %}
+            </div>
+            {% if c.eventos %}
+            <div class="evs">
+              {% for e in c.eventos[:2] %}
+              <div class="ev-line{% if e.pre %} pre{% endif %}" data-ev="{{ e.id }}" data-membro="{{ e.membro_id }}"{% if e.pre %} title="Data segurada — esperando o sinal ({{ e.prazo }})"{% endif %}><span class="dot d-{{ e.tipo }}"></span><span class="h">{{ e.hora }}</span><span class="n">{{ e.titulo }}</span>{% if e.prazo %}<span class="ev-prazo{% if e.urgente %} urg{% endif %}">{{ e.prazo }}</span>{% endif %}{% if e.pg %}<span class="ev-pg {{ e.pg_classe }}">{{ e.pg }}</span>{% endif %}</div>
+              {% endfor %}
+            </div>
+            {% if c.eventos|length > 2 %}<div class="ev-more">+{{ c.eventos|length - 2 }} mais</div>{% endif %}
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% endfor %}
+      </div>
+      {% if vende_data %}
+      <p class="hint">A barra da esquerda diz se a data é sua: <b><span class="leg-mk leg-fixo"></span>fixado</b> ·
+      <b style="color:var(--ambar)"><span class="leg-mk leg-seg"></span>segurado</b> (esperando o sinal — ocupa a data,
+      mas não vira lembrete nem entra no calendário sincronizado; o número ao lado é quanto falta pro prazo).
+      A bolinha diz o tipo: <b style="color:#bfeeda">pessoal</b>, <b style="color:#bcd8f6">empresa</b>,
+      <b style="color:#f0d9a6">fornecedor</b>. Marque também pelo WhatsApp/Telegram — cai tudo aqui.</p>
+      {% else %}
+      <p class="hint">As cores separam <b style="color:#bfeeda">pessoal</b>, <b style="color:#bcd8f6">empresa</b> e <b style="color:#f0d9a6">fornecedor</b>. Marque também pelo WhatsApp/Telegram — cai tudo aqui.</p>
+      {% endif %}
+    </div>
+
+    <div class="side-cards">
+      <!-- AS DATAS, as duas faces do mesmo número: o que está por um fio e o que
+           já é da casa. Antes existia só o lado "seguradas", e ele sumia quando
+           não havia nenhuma — a empresa não tinha onde ver quantas datas tinha
+           vendido sem contar no calendário, mês a mês.
+           Só quem vende data vê o card; clínica e loja não seguram data. -->
+      {% if seguradas or confirmadas %}
+      <div class="ag-card" id="datas-card">
+        <div class="dt-abas" role="tablist">
+          <button type="button" class="dt-aba on" data-alvo="dt-seg" role="tab" aria-selected="true">
+            ⏳ Seguradas <span class="c seg">{{ seguradas|length }}</span></button>
+          <button type="button" class="dt-aba" data-alvo="dt-con" role="tab" aria-selected="false">
+            ✓ Confirmadas <span class="c con">{{ confirmadas|length }}</span></button>
+        </div>
+
+        <div id="dt-seg" class="dt-pane">
+          {% for s in seguradas %}
+          <div class="segrow{% if s.urgente %} urg{% endif %}">
+            <div class="segbar"></div>
+            <div>
+              <div class="stt">{{ s.titulo }}</div>
+              <div class="smt">{{ s.quando }}{% if s.sinal %} · sinal {{ s.sinal }}{% endif %}{% if s.orcamento_numero %} · orçamento nº {{ s.orcamento_numero }}{% endif %}</div>
+            </div>
+            <div class="srt">
+              <div class="v">{{ s.prazo }}</div>
+              <div class="s">vence {{ s.ate }}</div>
+            </div>
+          </div>
+          {% else %}
+          <p class="hint" style="margin:2px 0">Nenhuma data segurada agora.</p>
+          {% endfor %}
+          {% if seguradas %}
+          <p class="hint" style="margin:2px 0 0">Da que vence primeiro. Passando o prazo sem o sinal, a data
+          libera sozinha e você é avisado — abra o dia no calendário pra firmar ou soltar antes disso.</p>
+          {% endif %}
+        </div>
+
+        <div id="dt-con" class="dt-pane" hidden>
+          {% for s in confirmadas %}
+          <div class="segrow ok">
+            <div class="segbar"></div>
+            <div>
+              <div class="stt">{{ s.titulo }}</div>
+              <div class="smt">{{ s.quando }}{% if s.orcamento_numero %} · orçamento nº {{ s.orcamento_numero }}{% else %} · marcado na agenda{% endif %}</div>
+            </div>
+            <div class="srt">
+              <div class="v">{{ s.total or '—' }}</div>
+              <div class="s">{{ 'sinal recebido' if s.sinal_pago else 'data firme' }}</div>
+            </div>
+          </div>
+          {% else %}
+          <p class="hint" style="margin:2px 0">Nenhuma data firme daqui pra frente.</p>
+          {% endfor %}
+          {% if confirmadas %}
+          <p class="hint" style="margin:2px 0 0">Da mais próxima. A festa que já aconteceu sai daqui sozinha.</p>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- próximos -->
+      <div class="ag-card">
+        <h2>{{ rot.proximos }}</h2>
+        <div class="px">
+          {% for e in proximos %}
+          <div class="px-row" data-ev="{{ e.id }}" data-membro="{{ e.membro_id or '' }}">
+            <div class="px-dot d-{{ e.tipo }}"></div>
+            <div class="px-when"><div class="d">{{ e.dia_rot }}</div><div class="h">{{ e.hora_rot }}</div></div>
+            <div class="px-body">
+              <div class="tt">{{ e.titulo }}</div>
+              <div class="mt">{{ e.tipo_rot }}{% if e.local %} · {{ e.local }}{% endif %}{% if e.autor %} · <span title="quem marcou">👤 {{ e.autor }}</span>{% endif %}</div>
+              {% if e.convidados %}
+              <div class="px-conv">
+                {% if e.conv_resumo.total > 1 %}
+                <a href="/painel/agenda?m={{ '%04d-%02d'|format(ano, mes) }}&convite_ev={{ e.id }}" class="cgrp{% if e.conv_resumo.fechado %} cgrp-ok{% endif %}" style="text-decoration:none" title="Ver e reenviar os convites">👥 {{ e.conv_resumo.confirmados }} de {{ e.conv_resumo.total }} confirmaram{% if e.conv_resumo.fechado %} 🎉{% endif %}</a>
+                {% else %}
+                {% for g in e.convidados %}<a href="/painel/agenda?m={{ '%04d-%02d'|format(ano, mes) }}&convite_ev={{ e.id }}" class="cpill cp-{{ g.status }}" style="text-decoration:none" title="Reenviar o link do convite de {{ g.nome or 'convidado' }}">👤 {{ g.nome or 'Convidado' }}: {{ g.status_rot }}</a>{% endfor %}
+                {% endif %}
+              </div>
+              {% endif %}
+              <div class="remarcar-box" id="remBox-{{ e.id }}">
+                <form method="post" action="/painel/agenda/remarcar">
+                  <div class="rlbl">🔁 Nova data</div>
+                  <input type="hidden" name="evento_id" value="{{ e.id }}">
+                  <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+                  <div class="remarcar-row2">
+                    <input type="date" name="data" value="{{ e.data_iso }}" required>
+                    <input type="time" name="hora" value="{{ e.hora_rot }}" required>
+                  </div>
+                  <div class="tg">
+                    <div><div class="tg-t">Avisar os convidados</div><div class="tg-s">Manda a nova data pro mesmo link que já têm</div></div>
+                    <label class="sw"><input type="checkbox" name="avisar" value="1" checked><span class="track"></span><span class="knob"></span></label>
+                  </div>
+                  <div class="remarcar-actions">
+                    <button class="rbtn ok" type="submit" data-busy="⏳ Salvando…">Salvar nova data</button>
+                    <button class="rbtn cc" type="button" onclick="remToggle({{ e.id }})">Cancelar</button>
+                  </div>
+                </form>
+              </div>
+              <div class="add-conv-box" id="addConvBox-{{ e.id }}">
+                <form method="post" action="/painel/agenda/convidado/adicionar">
+                  <div class="rlbl">＋ Adicionar convidado</div>
+                  <input type="hidden" name="evento_id" value="{{ e.id }}">
+                  <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+                  <div class="add-conv-row">
+                    <input name="nome" placeholder="Nome" autocomplete="off">
+                    <input name="contato" placeholder="(86) 90000-0000" autocomplete="off">
+                  </div>
+                  <div class="add-conv-actions">
+                    <button class="rbtn ok" type="submit" data-busy="⏳ Adicionando…">Adicionar</button>
+                    <button class="rbtn cc" type="button" onclick="addConvToggle({{ e.id }})">Cancelar</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+            <div class="px-actions">
+              <button class="px-add" type="button" title="Adicionar convidado" onclick="addConvToggle({{ e.id }})">＋👤</button>
+              <button class="px-rm" type="button" title="Remarcar" onclick="remToggle({{ e.id }})">🔁</button>
+              <form method="post" action="/painel/agenda/cancelar" data-ajax="cancelar" onsubmit="return confirm('Cancelar “{{ e.titulo }}”?')">
+                <input type="hidden" name="evento_id" value="{{ e.id }}">
+                <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+                <button class="px-x" type="submit" title="Cancelar">✕</button>
+              </form>
+            </div>
+          </div>
+          {% else %}
+          <div class="px-vazio">Nada por vir. Marque um compromisso ali em cima. 🎉</div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- novo compromisso -->
+      <div class="ag-card" id="novo"{% if not abrir_novo %} style="display:none"{% endif %}>
+        <h2>{{ rot.novo }}</h2>
+        <form class="frm" method="post" action="/painel/agenda/novo">
+          <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+          <label>{{ rot.titulo }}</label>
+          <input name="titulo" id="fTitulo" placeholder="{{ rot.titulo_ph }}" required autocomplete="off">
+          <div class="row2">
+            <div><label>{{ rot.data }}</label><input name="data" id="fData" type="date" value="{{ hoje_iso }}" required></div>
+            <div><label>{{ rot.hora }}</label><input name="hora" id="fHora" type="time" value="{% if vende_data %}19:00{% else %}09:00{% endif %}"></div>
+          </div>
+          {% if rot.fim %}
+          {# HORA DE ENCERRAMENTO: o orçamento de evento sempre pergunta, a agenda
+             nunca perguntou. Sem ela a festa entra como compromisso de 1h e a
+             checagem de choque compara a janela errada — duas festas na mesma noite
+             não acusavam nada. Aceita 24:00 e vira a noite (ver agenda.janela_evento). #}
+          <div class="row2">
+            <div><label>{{ rot.fim }}</label><input name="hora_fim" id="fFim" type="time" value="23:00"></div>
+            <div></div>
+          </div>
+          {% endif %}
+          <!-- choque de horário: aparece na TELA, na hora de marcar. Não bloqueia —
+               quem decide se cabe é a empresa (buffet com dois salões cabe). -->
+          <div class="choque" id="choqueBox"><span>⚠️</span><div id="choqueTxt"></div></div>
+          <!-- só segurar a data: a pré-reserva que nasce de um telefonema, sem
+               orçamento nenhum. Antes só existia via aprovação de proposta.
+               Só pra quem vende data — clínica não segura horário esperando sinal. -->
+          {% if vende_data %}
+          <div class="tg" style="margin-top:2px">
+            <div><div class="tg-t">Só segurar a data</div><div class="tg-s">Ocupa o dia sem virar compromisso — não vira lembrete</div></div>
+            <label class="sw"><input type="checkbox" name="segurar" value="1" id="fSegurar"><span class="track"></span><span class="knob"></span></label>
+          </div>
+          <div class="segbox" id="segBox">
+            <div class="row2">
+              <div><div class="sl">Segurar até</div><input name="segurar_ate" id="fSegAte" type="date"></div>
+              <div><div class="sl">Sinal esperado</div><input name="sinal_esperado" id="fSinal" type="text" placeholder="opcional" autocomplete="off" inputmode="decimal"></div>
+            </div>
+            <div class="sh">Vale até o fim do dia escolhido. Passando o prazo sem o sinal, a data
+            libera sozinha e você é avisado — e dá pra firmar ou soltar antes disso, abrindo o dia no calendário.</div>
+          </div>
+          {% endif %}
+          <label>{{ rot.desc }} <span style="font-weight:400">(opcional)</span></label>
+          <textarea name="descricao" placeholder="{{ rot.desc_ph }}"></textarea>
+          <label>{{ rot.local }} <span style="font-weight:400">(opcional)</span></label>
+          <input type="hidden" name="local" id="localHidden">
+          <div class="addr-wrap" id="addrWrap">
+            <div class="addr-input-row">
+              <input type="text" id="addrInput" placeholder="Buscar endereço ou nome do lugar…" autocomplete="off">
+              <span class="addr-ic">🔍</span>
+            </div>
+            <div class="addr-drop" id="addrDrop"></div>
+            <div id="addrPicked"></div>
+          </div>
+          <div class="hint-line" id="hintLine">Digite pra buscar — ex: nome do lugar ou endereço.</div>
+          <div class="local-alt-row">
+            <button type="button" class="manual-toggle" id="manualToggle">✍️ Não achei o lugar — digitar manualmente</button>
+            <button type="button" class="online-toggle" id="onlineToggle">🌐 É uma reunião online</button>
+          </div>
+          <div class="manual-box" id="manualBox">
+            <div class="mlabel">Local (texto livre, sem link de mapa)</div>
+            <input type="text" id="manualInput" placeholder="Ex: na casa da Ana, no clube…" autocomplete="off">
+            <button type="button" class="manual-cancel" id="manualCancel">← voltar pra busca de endereço</button>
+          </div>
+          <div class="online-box" id="onlineBox">
+            <div class="omsg">🌐 Reunião online — nenhum endereço vai ser enviado aos convidados.</div>
+            <div class="link-lbl">🎥 Link da chamada <span style="font-weight:400">(opcional)</span></div>
+            <input type="url" name="link_online" id="linkOnline" class="link-input" placeholder="Cole aqui o link do Meet, Zoom, Teams…" autocomplete="off">
+            <div class="link-hint">Se preencher, vai junto nas mensagens de convite/confirmação e aparece na caixa do dia com um botão de entrar direto.</div>
+            <button type="button" class="manual-cancel" id="onlineCancel">← voltar a informar um local</button>
+          </div>
+          <label>{{ rot.tipo }}</label>
+          <div class="segs">
+            <label class="s-pessoal"><input type="radio" name="tipo" value="pessoal"{% if not vende_data %} checked{% endif %}><span>{{ rot.t_pessoal }}</span></label>
+            <label class="s-empresa"><input type="radio" name="tipo" value="empresa"{% if vende_data %} checked{% endif %}><span>{{ rot.t_empresa }}</span></label>
+            <label class="s-fornecedor"><input type="radio" name="tipo" value="fornecedor"><span>{{ rot.t_fornecedor }}</span></label>
+          </div>
+          <div class="gconv">
+            <div class="gt">{{ rot.conv_t }}</div>
+            <div class="gd">{{ rot.conv_d }}</div>
+            <div id="guests">
+              <div class="guest-row">
+                <div><input class="gnome" name="convidado_nome" placeholder="Nome" autocomplete="off"></div>
+                <div><input name="convidado_contato" placeholder="(86) 90000-0000" autocomplete="off"></div>
+                <button type="button" class="g-rm" onclick="rmGuest(this)" title="Remover" aria-label="Remover">✕</button>
+              </div>
+            </div>
+            <button type="button" class="g-add" onclick="addGuest()">{{ rot.conv_add }}</button>
+          </div>
+          <button class="ok" type="submit" data-busy="{{ rot.salvando }}">{{ rot.salvar }}</button>
+        </form>
+      </div>
+
+      <!-- lembrete -->
+      <div class="ag-card">
+        <h2>🔔 Lembrete</h2>
+        <form method="post" action="/painel/agenda/lembrete">
+          <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+          <div class="tg">
+            <div><div class="tg-t">Resumo do dia</div><div class="tg-s">De manhã, o que você tem no dia</div></div>
+            <label class="sw"><input type="checkbox" name="resumo_dia" value="1" {% if cfg.resumo_ativo %}checked{% endif %} onchange="document.getElementById('subResumo').style.display=this.checked?'flex':'none'"><span class="track"></span><span class="knob"></span></label>
+          </div>
+          <div class="sub-opt" id="subResumo"{% if not cfg.resumo_ativo %} style="display:none"{% endif %}>
+            <span>às</span>
+            <select name="hora_resumo">
+              {% for h in range(5,12) %}<option value="{{ h }}" {% if cfg.hora_resumo==h %}selected{% endif %}>{{ '%02d:00'|format(h) }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="tg">
+            <div><div class="tg-t">Aviso antes do compromisso</div><div class="tg-s">Um toque minutos antes de cada um</div></div>
+            <label class="sw"><input type="checkbox" name="aviso" value="1" {% if cfg.aviso_antes_min %}checked{% endif %} onchange="document.getElementById('subAviso').style.display=this.checked?'block':'none'"><span class="track"></span><span class="knob"></span></label>
+          </div>
+          <div id="subAviso"{% if not cfg.aviso_antes_min %} style="display:none"{% endif %}>
+            <div class="sub-opt">
+              <select name="aviso_antes_min">
+                {% for mn in [10,15,30,60,120] %}<option value="{{ mn }}" {% if cfg.aviso_antes_min==mn %}selected{% endif %}>{{ mn }} min antes</option>{% endfor %}
+              </select>
+            </div>
+            <div class="tg">
+              <div><div class="tg-t">Avisar os convidados</div><div class="tg-s">Quem confirmou presença recebe o mesmo aviso, pelo WhatsApp</div></div>
+              <label class="sw"><input type="checkbox" name="avisar_convidados" value="1" {% if cfg.avisar_convidados %}checked{% endif %}><span class="track"></span><span class="knob"></span></label>
+            </div>
+          </div>
+          <!-- fora do subAviso: independe do "aviso antes" estar ligado -->
+          <div class="tg">
+            <div><div class="tg-t">Confirmar de volta pro convidado</div><div class="tg-s">Quando ele responde, o Zaq manda o comprovante com calendário e mapa</div></div>
+            <label class="sw"><input type="checkbox" name="enviar_confirmacao" value="1" {% if cfg.enviar_confirmacao %}checked{% endif %}><span class="track"></span><span class="knob"></span></label>
+          </div>
+          <div class="canal-tag">📲 Vai chegar no seu WhatsApp/Telegram, onde você fala com o Zaq.</div>
+          <button class="ok" type="submit" data-busy="⏳ Salvando…">Salvar lembrete</button>
+        </form>
+      </div>
+
+      <!-- prazo da data segurada (pré-reserva por sinal). Regra de venda de DATA:
+           quem não vende data não tem o que configurar aqui. -->
+      {% if vende_data %}
+      <div class="ag-card">
+        <h2>⏳ Data segurada</h2>
+        <p class="hint" style="margin-top:0">Quando o cliente aprova um orçamento de evento <b>com sinal</b>, a data entra aqui como segurada — ocupa o dia, mas não vira compromisso nem lembrete. Ela só firma quando você confirma o sinal, na tela do orçamento.</p>
+        <form method="post" action="/painel/agenda/pre-reserva">
+          <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+          {# CAMPO LIVRE, não lista fechada. A lista oferecia 1, 2, 3, 5, 7, 10, 15 e
+             30 — quem pratica 4 ou 20 dias não tinha como dizer, e o prazo do sinal
+             é regra de venda de cada casa. O limite de 1 a 90 é o que o servidor já
+             aplicava; agora ele está à vista. #}
+          <div class="sub-opt">
+            <span>Segurar por</span>
+            <input type="number" name="pre_reserva_dias" min="1" max="90" step="1"
+                   inputmode="numeric" style="width:5rem;text-align:right"
+                   value="{{ cfg.pre_reserva_dias or 3 }}">
+            <span>dias</span>
+          </div>
+          <p class="hint">Passando o prazo sem o sinal, a data libera sozinha e você é avisado. As pré-reservas que já estão correndo mantêm o prazo com que nasceram.</p>
+          <button class="ok" type="submit" data-busy="⏳ Salvando…">Salvar prazo</button>
+        </form>
+      </div>
+      {% endif %}
+
+      <!-- sincronizar -->
+      <div class="ag-card">
+        <h2>🔗 Sincronizar com sua agenda</h2>
+        {% if feed_url %}
+        <p class="hint" style="margin-top:0">Cole este link uma vez no seu calendário — ele puxa seus compromissos sozinho.</p>
+        <div class="feed">
+          <input id="feedUrl" value="{{ feed_url }}" readonly onclick="this.select()">
+          <button type="button" onclick="agCopiar()">Copiar</button>
+        </div>
+        <ul class="sync-steps">
+          <li><b>Google Agenda:</b> Outras agendas › + › <b>De um URL</b> › cole o link.</li>
+          <li><b>iPhone (Apple):</b> Ajustes › Calendário › Contas › Adicionar › <b>Outro</b> › Assinar calendário.</li>
+          <li><b>Outlook:</b> Adicionar calendário › <b>Assinar da Web</b> › cole o link.</li>
+        </ul>
+        {% else %}
+        <p class="hint" style="margin-top:0">Gere um link seguro pra abrir seus compromissos no Google Agenda, Apple ou Outlook — sem senha, sem login.</p>
+        <form method="post" action="/painel/agenda/sincronizar">
+          <input type="hidden" name="m" value="{{ '%04d-%02d'|format(ano, mes) }}">
+          <button class="ag-btn" type="submit" style="margin-top:6px" data-busy="⏳ Ativando…">Ativar sincronização</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- histórico de envios: convites/lembretes/remarcados mandados, com status -->
+  <div class="hist-card">
+    <div class="hist-hd">
+      <div>
+        <h2>📨 Histórico de envios</h2>
+        <div class="sub">Convites, avisos e lembretes mandados pros seus convidados — e pra você</div>
+      </div>
+      <div class="hist-filtros">
+        <input class="hf-search" id="histQ" placeholder="Buscar convidado ou compromisso…">
+        <button class="hf-btn on" type="button" data-dias="7" onclick="histFiltro(this)">7 dias</button>
+        <button class="hf-btn" type="button" data-dias="30" onclick="histFiltro(this)">30 dias</button>
+        <button class="hf-btn" id="histFalhasBtn" type="button" onclick="histToggleFalhas()">Só falhas</button>
+      </div>
+    </div>
+    <div class="hist-tabs">
+      <button class="hist-tab on" id="histTabFeito" type="button" onclick="histTab('feito')">✅ Feito <span class="cnt">{{ historico_total }}</span></button>
+      <button class="hist-tab" id="histTabFila" type="button" onclick="histTab('fila')">🕓 Por fazer <span class="cnt{% if fila %} warn{% endif %}">{{ fila|length }}</span></button>
+    </div>
+    <div id="histBody">
+      {% if historico %}
+      <div class="hist-resumo" id="histResumo">
+        <span class="hr-ok">✅ <b>{{ historico|selectattr("ok")|list|length }}</b> enviados</span>
+        <span class="hr-fail">❌ <b>{{ historico|rejectattr("ok")|list|length }}</b> falharam</span>
+        <span>📨 <b>{{ historico_total }}</b> no total · últimos 7 dias</span>
+      </div>
+      <div class="hist-tbl-wrap">
+        <table class="hist-tbl">
+          <thead><tr><th>Quando</th><th>Compromisso</th><th>Convidado</th><th>Tipo</th><th>Canal</th><th>Status</th><th></th></tr></thead>
+          <tbody id="histTbody">
+            {% for it in historico %}
+            <tr>
+              <td class="hist-qd" data-rot="Quando">{{ it.quando_rot }}</td>
+              <td class="hist-compr" data-rot="Compromisso">{{ it.evento_titulo or "—" }}{% if it.evento_local %}<div class="loc">{{ it.evento_local }}</div>{% endif %}</td>
+              <td data-rot="Convidado">{{ it.convidado_rot }}</td>
+              <td data-rot="Tipo"><span class="hist-tipo ht-{{ it.tipo }}">{{ it.tipo_rot }}</span></td>
+              <td class="hist-canal" data-rot="Canal">{{ it.canal_rot }}</td>
+              <td data-rot="Status">
+                {% if it.ok %}<span class="hist-status hs-ok">✅ Enviado</span>
+                {% else %}<span class="hist-status hs-fail">❌ Falhou{% if it.motivo_rot %}<span class="hs-motivo">{{ it.motivo_rot }}</span>{% endif %}</span>{% endif %}
+              </td>
+              <td>{% if it.pode_reenviar %}<button class="hist-retry" type="button" onclick="histReenviar({{ it.id }}, this)">🔁 Reenviar</button>{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if historico_total > historico|length %}
+      <div class="hist-foot"><button class="hist-mais" type="button" onclick="histMais()">Ver mais</button></div>
+      {% endif %}
+      {% else %}
+      <div class="hist-vazio" id="histVazio">Nada enviado nos últimos 7 dias. 🤷</div>
+      {% endif %}
+    </div>
+    <div id="filaBody" style="display:none">
+      {% if fila %}
+      <div class="hist-resumo">
+        <span class="hr-wait">🕓 <b>{{ fila|length }}</b> na fila</span>
+        <span>Próximo em <b>{{ fila[0].eta_rel }}</b> · {{ fila[0].evento_titulo }}</span>
+      </div>
+      <div class="hist-tbl-wrap">
+        <table class="hist-tbl">
+          <thead><tr><th>Sai em</th><th>Compromisso</th><th>Convidado</th><th>Tipo</th><th></th></tr></thead>
+          <tbody>
+            {% for it in fila %}
+            <tr>
+              <td class="hist-qd" data-rot="Sai em"><span class="eta">{{ it.eta_rel }} · <b>{{ it.eta_hora }}</b></span></td>
+              <td class="hist-compr" data-rot="Compromisso">{{ it.evento_titulo }}{% if it.evento_local %}<div class="loc">{{ it.evento_local }}</div>{% endif %}</td>
+              <td data-rot="Convidado">{{ it.convidado_rot }}</td>
+              <td data-rot="Tipo"><span class="hist-tipo ht-{{ it.tipo }}">{{ it.tipo_rot }}</span></td>
+              <td data-rot="Status"><span class="hist-status hs-wait">{{ it.status_rot }}</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="hist-vazio">Nada na fila — sem compromisso esperando aviso nos próximos 7 dias. 🎉</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- caixa do dia (abre ao clicar numa célula com compromisso) -->
+  <div class="day-overlay" id="dayOverlay">
+    <div class="daybox" id="daybox"></div>
+  </div>
+</div>
+<script>
+var EVENTOS_DIA = {{ eventos_dia|tojson }};
+var REAPROVEITAR = {{ reaproveitar|tojson }};
+var MESES_JS = {{ meses_js|tojson }};
+var DIAS_EXT_JS = {{ dias_sem_ext_js|tojson }};
+var AGORA_ISO = {{ agora_iso|tojson }};
+var CTA_DIA = {{ rot.cta_dia|tojson }};
+var MES_ATUAL = {{ ('%04d-%02d'|format(ano, mes))|tojson }};   // pra voltar pro mesmo mês depois de agir
+var CUR_MES = {{ ('%04d-%02d'|format(ano, mes))|tojson }};
+var TPILL = {pessoal:'Pessoal', empresa:'Empresa', fornecedor:'Fornecedor'};
+var HIST_STATE = {dias: 7, falhas: false, q: '', itens: {{ historico|tojson }},
+                  total: {{ historico_total }}};
+var PRE_RESERVA_DIAS = {{ (cfg.pre_reserva_dias or 3)|tojson }};
+</script>""" + _JS_TAG + """
+
 {% endblock %}"""
 
 _env.loader.mapping["agenda"] = _AGENDA_TPL

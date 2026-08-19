@@ -33,7 +33,7 @@ from pydantic import BaseModel
 from core.brain import Brain
 from db.conexao import get_pool
 from finance.cnpj_info import consultar_cnpj
-from finance import (agenda as ag, contrato as ctr, empresa as emp,
+from finance import (agenda as ag, contrato as ctr, desconto as dsc, empresa as emp,
                      icones_servico as ics, vendas, servicos_catalogo as scat)
 from web.portal import _render, _env, conta_logada, brl
 
@@ -65,6 +65,9 @@ def _garantir_tabela(c):
         alter table orcamentos add column if not exists status        text not null default 'rascunho';
         alter table orcamentos add column if not exists criado_por    text;
         alter table orcamentos add column if not exists canal         text;
+        alter table orcamentos add column if not exists desconto_tipo text not null default 'pct';
+        alter table orcamentos add column if not exists desconto_pct  numeric(5,2) not null default 0;
+        alter table orcamentos add column if not exists desconto_centavos bigint not null default 0;
         alter table orcamentos add column if not exists follow_up_em  date;
         alter table orcamentos add column if not exists atualizado_em timestamptz not null default now();
         alter table orcamentos add column if not exists conta_id      bigint references contas(id) on delete restrict;
@@ -281,8 +284,17 @@ def painel_servicos(request: Request):
     # gravado em setup_centavos por baixo, pra "Fechar contrato" não virar
     # cobrança recorrente errada de um evento pontual).
     servico_avulso = nicho == "eventos"
+    # O CONTRATO É DO DONO. Ele define o que a empresa se compromete a cumprir
+    # com o cliente — prazo, multa, sinal — e isso não é decisão de quem vende.
+    # `gerir` é a capacidade que já separa o titular do resto (contas/equipe.py:26:
+    # só o dono tem); usar ela evita criar uma segunda régua de permissão que
+    # amanhã diverge da primeira.
+    from contas import equipe as _equipe
+    pode_contrato = servico_avulso and _equipe.caps_do_papel(
+        request.session.get("papel", "dono"))["gerir"]
     return _render("servicos", request, empresa_nome=conta[2],
                    tem_pj=True, vende_servico=True, servico_avulso=servico_avulso,
+                   pode_contrato=pode_contrato,
                    tipos_evento=scat.TIPOS_EVENTO, tipos_contrato=scat.TIPOS_CONTRATO,
                    local_padrao=_local_padrao(dados_emp) if servico_avulso else "",
                    icones_paleta=ics.paleta())
@@ -493,6 +505,13 @@ class ItemIn(BaseModel):
     unitario: int = 0         # evento: valor unitário em REAIS
     categoria: str = ""       # evento: agrupa e soma por categoria na folha
     icone: str = ""           # evento: selo do item na folha (vazio = deduzido)
+    # DESCONTO DA LINHA. Fica aqui, no snapshot do item, e não em coluna: `itens`
+    # já é o retrato da linha no momento da proposta, e o desconto dela é parte do
+    # mesmo retrato. Lista separada obrigaria a casar duas por índice — a armadilha
+    # que a 162 tirou dos títulos.
+    # `desc_val` e não `desc`: `desc` já é a DESCRIÇÃO do item, logo acima.
+    desc_tipo: str = "pct"    # 'pct' | 'valor'
+    desc_val: int = 0         # % ou REAIS, conforme desc_tipo
 
 
 class EventoIn(BaseModel):
@@ -539,10 +558,16 @@ class SalvarIn(BaseModel):
     parcelas: list[ParcelaIn] = []      # modo evento: plano de pagamento
     escopo: str = ""
     canal: str = ""
-    setup: int = 0            # em REAIS
-    mensal: int = 0           # em REAIS
-    primeiro_ano: int = 0     # em REAIS
+    setup: int = 0            # em REAIS, BRUTO (antes de qualquer desconto)
+    mensal: int = 0           # em REAIS, bruto
+    # o líquido NÃO vem mais da tela: o servidor recalcula com finance.desconto.
+    # Continua no modelo porque a tela ainda o manda, e ignorá-lo em silêncio é
+    # melhor que quebrar o payload de uma aba aberta durante o deploy.
+    primeiro_ano: int = 0     # IGNORADO — derivado no servidor
     n_modulos: int = 0
+    desconto_tipo: str = "pct"    # 'pct' | 'valor' — desconto do TOTAL
+    desconto_pct: float = 0       # 0–100
+    desconto_valor: int = 0       # em REAIS
 
 
 @router.post("/painel/servicos/salvar")
@@ -557,7 +582,9 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
     itens = [{"nome": (it.nome or "")[:120], "desc": (it.desc or "")[:2000],
               "setup": int(it.setup or 0), "mensal": int(it.mensal or 0),
               "qtd": max(1, int(it.qtd or 1)), "unitario": int(it.unitario or 0),
-              "categoria": (it.categoria or "")[:60], "icone": (it.icone or "")[:30]}
+              "categoria": (it.categoria or "")[:60], "icone": (it.icone or "")[:30],
+              "desc_tipo": "valor" if (it.desc_tipo or "") == "valor" else "pct",
+              "desc_val": max(0, int(it.desc_val or 0))}
              for it in (dados.itens or [])[:50]]
     itens_json = json.dumps(itens)
     # o MODO vem do nicho da conta, não do navegador: quem vende evento emite
@@ -568,6 +595,25 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
     parcelas_json = json.dumps(
         [p.model_dump() for p in (dados.parcelas or [])[:60] if int(p.valor_centavos or 0) > 0]
     ) if modo == "evento" else None
+    # O TOTAL LÍQUIDO É DERIVADO AQUI, não recebido. O bruto continua vindo da
+    # tela (ela conhece infraestrutura, canais e integrações, que não são linha),
+    # mas quanto o desconto tira passa a ser conta do servidor — senão bastaria
+    # editar o JSON no navegador pra fechar um orçamento por qualquer valor.
+    #
+    # `extra_*` é o que o modo recorrente soma FORA das linhas: recebe o desconto
+    # do total (está no subtotal) e não recebe desconto por item (não é item).
+    bruto_setup = max(0, int(dados.setup or 0)) * 100
+    bruto_mensal = max(0, int(dados.mensal or 0)) * 100
+    itens_setup = sum(max(0, int(i["setup"] or 0)) for i in itens) * 100
+    itens_mensal = sum(max(0, int(i["mensal"] or 0)) for i in itens) * 100
+    tot = dsc.totais(
+        itens,
+        tipo="valor" if (dados.desconto_tipo or "") == "valor" else "pct",
+        pct=max(0.0, float(dados.desconto_pct or 0)),
+        valor=max(0, int(dados.desconto_valor or 0)) * 100,
+        extra_setup=max(0, bruto_setup - itens_setup),
+        extra_mensal=max(0, bruto_mensal - itens_mensal),
+    )
     vals = (dados.cliente or None, dados.empresa or None,
             (dados.cnpj or "").strip() or None, dados.segmento or None,
             (dados.whatsapp or "").strip() or None, (dados.email or "").strip() or None,
@@ -577,8 +623,11 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
             (dados.endereco or "").strip() or None, (dados.cep or "").strip() or None,
             json.dumps(modulos), itens_json, (dados.escopo or "").strip() or None,
             (dados.canal or "").strip() or None, modo, evento_json, parcelas_json,
-            int(dados.setup) * 100, int(dados.mensal) * 100,
-            int(dados.primeiro_ano) * 100, int(dados.n_modulos))
+            bruto_setup, bruto_mensal,
+            tot["total"], int(dados.n_modulos),
+            "valor" if (dados.desconto_tipo or "") == "valor" else "pct",
+            max(0.0, min(100.0, float(dados.desconto_pct or 0))),
+            max(0, int(dados.desconto_valor or 0)) * 100)
     pool = get_pool()
     reabriu = None
     # CONTRATO ASSINADO NÃO SE EDITA POR BAIXO. Documento congelado, com aceite e
@@ -616,7 +665,9 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
                        modulos=%s::jsonb, itens=%s::jsonb, escopo=%s, canal=%s,
                        modo=%s, evento=%s::jsonb, parcelas=%s::jsonb,
                        setup_centavos=%s, mensal_centavos=%s, primeiro_ano_centavos=%s,
-                       n_modulos=%s, atualizado_em=now(),
+                       n_modulos=%s,
+                       desconto_tipo=%s, desconto_pct=%s, desconto_centavos=%s,
+                       atualizado_em=now(),
                        token=coalesce(token, %s),
                        -- proposta criada fora do painel (cockpit, prospecção,
                        -- agente) entra sem número: ganha o dela agora.
@@ -646,9 +697,12 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
                     telefone, cidade, uf, site, cargo, socio, endereco, cep,
                     modulos, itens, escopo, canal, modo, evento, parcelas,
                     setup_centavos, mensal_centavos,
-                    primeiro_ano_centavos, n_modulos, criado_por, token, numero)
+                    primeiro_ano_centavos, n_modulos,
+                    desconto_tipo, desconto_pct, desconto_centavos,
+                    criado_por, token, numero)
                    values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                           %s::jsonb,%s::jsonb,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,%s,%s,
+                           %s::jsonb,%s::jsonb,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s,%s,
+                           %s,%s,%s,%s,%s,
                            (select coalesce(max(numero),0)+1 from orcamentos where conta_id=%s))
                    returning id, token"""
             r = _com_retry_numero(c, lambda: c.execute(
@@ -729,7 +783,10 @@ def painel_servicos_lista(request: Request):
                             order by ct.id desc limit 1),
                           (select e.pre_reserva_ate from eventos_agenda e
                             where e.id = orcamentos.evento_agenda_id
-                              and e.status = 'pre_reservado')"""
+                              and e.status = 'pre_reservado'),
+                          evento,
+                          (select e.status from eventos_agenda e
+                            where e.id = orcamentos.evento_agenda_id)"""
         if papel == "vendedor" and membro_id:
             rows = c.execute(
                 _cols + """ from orcamentos where conta_id=%s and criado_por=%s
@@ -768,6 +825,12 @@ def painel_servicos_lista(request: Request):
         "contrato_assinado": bool(r[19]),
         # só vem preenchido enquanto a data está SEGURADA esperando o sinal
         "pre_reserva_ate": r[20].astimezone(ag.BRT).strftime("%d/%m %H:%M") if r[20] else "",
+        # O ESTADO DA DATA, resolvido no servidor. A linha do funil mostrava só a
+        # pré-reserva correndo — "data firme", "nunca entrou" e "liberada" tinham a
+        # mesma cara, e duas delas são problema. Ver vendas.estado_da_data.
+        "data": vendas.estado_da_data(
+            status=r[8], modo=r[13] or "recorrente", evento=r[21],
+            evento_status=r[22], pre_reserva_ate=r[20]),
     } for r in rows]
     return JSONResponse({"itens": itens})
 
@@ -789,7 +852,8 @@ def painel_servicos_item(request: Request, orc_id: int):
                       primeiro_ano_centavos, n_modulos, itens,
                       telefone, cidade, uf, site, cargo, socio,
                       endereco, cep, evento, parcelas, numero,
-                      coalesce(modo,'recorrente')
+                      coalesce(modo,'recorrente'),
+                      desconto_tipo, desconto_pct, desconto_centavos
                  from orcamentos where id=%s and conta_id=%s""" + dono_filtro,
             args).fetchone()
     if not r:
@@ -815,6 +879,11 @@ def painel_servicos_item(request: Request, orc_id: int):
         "endereco": r[21] or "", "cep": r[22] or "",
         "evento": _jsonb(r[23], {}), "parcelas": _jsonb(r[24]),
         "numero": r[25], "modo": r[26] or "recorrente",
+        # o desconto volta pro editor: reabrir a proposta pra trocar uma vírgula
+        # não pode zerar em silêncio o que foi negociado.
+        "desconto_tipo": r[27] or "pct",
+        "desconto_pct": float(r[28] or 0),
+        "desconto_valor": round(int(r[29] or 0) / 100),
     })
 
 
@@ -861,6 +930,78 @@ def painel_servicos_sinal_recebido(request: Request, dados: SinalIn):
     return JSONResponse(r)
 
 
+class MarcarDataIn(BaseModel):
+    id: int
+
+
+@router.post("/painel/servicos/marcar-data")
+def painel_servicos_marcar_data(request: Request, dados: MarcarDataIn):
+    """Põe na agenda a data de um orçamento aprovado que ficou de fora.
+
+    É o conserto dos dois estados ruins da linha do funil:
+      • FORA DA AGENDA — a aprovação nunca virou compromisso (orçamento sem hora
+        de início, erro engolido, processo reiniciado antes da tarefa rodar);
+      • DATA LIBERADA — o prazo do sinal venceu e o compromisso foi cancelado; o
+        cliente reapareceu e a empresa quer segurar de novo.
+
+    Usa a MESMA função da aprovação (proposta._reservar_na_agenda) de propósito.
+    Uma segunda rotina de "criar o compromisso" seria uma segunda regra: prazo
+    diferente, título diferente, conflito não avisado. Ela já é idempotente —
+    clicar duas vezes não cria dois compromissos.
+
+    O compromisso CANCELADO não é ressuscitado: fica como histórico e o orçamento
+    solta o vínculo pra ganhar um novo. Reviver o antigo apagaria o registro de
+    que a data chegou a vencer.
+    """
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    pool = get_pool()
+    with pool.connection() as c:
+        # o token é a chave de leitura do orçamento (a mesma que o cliente usa).
+        # Propostas antigas nasceram sem ele; a listagem do funil preenche na
+        # passagem, mas depender disso deixaria esta rota quebrada pra quem chegar
+        # por outro caminho. Gerar aqui é o mesmo UPDATE, e é idempotente.
+        c.execute(
+            """update orcamentos set token = substr(md5(random()::text || id::text
+                 || clock_timestamp()::text), 1, 22)
+               where id=%s and conta_id=%s and token is null""", (int(dados.id), conta[0]))
+        c.commit()
+        r = c.execute(
+            """select o.token, coalesce(o.status,''), coalesce(o.modo,'recorrente'),
+                      (select e.status from eventos_agenda e where e.id=o.evento_agenda_id)
+                 from orcamentos o where o.id=%s and o.conta_id=%s""",
+            (int(dados.id), conta[0])).fetchone()
+        if not r:
+            return JSONResponse({"erro": "orçamento não encontrado"}, status_code=404)
+        token, status, modo, ev_status = r
+        if modo != "evento" or status not in ("aprovada", "fechado"):
+            return JSONResponse(
+                {"erro": "só orçamento de evento já aprovado reserva data"}, status_code=400)
+        if ev_status in ("ativo", "pre_reservado"):
+            return JSONResponse({"erro": "essa data já está na agenda"}, status_code=409)
+        if ev_status == "cancelado":
+            c.execute("update orcamentos set evento_agenda_id=null, sinal_centavos=null "
+                      "where id=%s and conta_id=%s", (int(dados.id), conta[0]))
+            c.commit()
+
+    from web import proposta as prop
+    d = prop._carregar(token, pool=pool)
+    if not d:
+        return JSONResponse({"erro": "não consegui ler o orçamento"}, status_code=404)
+    novo_id = prop._reservar_na_agenda(d, pool=pool)
+    if not novo_id:
+        # o motivo mais comum tem conserto, e dizer "falhou" mandaria o dono
+        # procurar no escuro justamente o campo que a linha do funil já apontou.
+        falta_hora = not ((d.get("evento") or {}).get("inicio") or "").strip()
+        return JSONResponse(
+            {"erro": ("Falta a hora de início do evento — preencha em “O evento” e "
+                      "marque de novo." if falta_hora else
+                      "Não consegui marcar. Confira a data e a hora do evento.")},
+            status_code=400)
+    return JSONResponse({"ok": True, "evento_id": novo_id})
+
+
 def _conta_evento(request: Request):
     """Gate do CONTRATO: além do gate da aba, a conta precisa ser de eventos.
 
@@ -872,6 +1013,13 @@ def _conta_evento(request: Request):
     conta, redir = _conta_servico(request)
     if redir is not None:
         return None, JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    # SÓ O DONO. Esconder o card no template não tranca nada: estas rotas são
+    # POST e a URL é chamável direto. O vendedor abre a mesma aba (tem `vendas`),
+    # então sem esta linha ele editaria as cláusulas que a empresa assina.
+    from contas import equipe as _equipe
+    if not _equipe.caps_do_papel(request.session.get("papel", "dono"))["gerir"]:
+        return None, JSONResponse(
+            {"erro": "só o dono da empresa configura o contrato"}, status_code=403)
     nicho = (emp.obter_dados_empresa(get_pool(), conta[0]) or {}).get("nicho")
     if not ctr.tem_contrato(nicho):
         return None, JSONResponse({"erro": "contrato de locação é do nicho de eventos"},
@@ -920,16 +1068,17 @@ def painel_servicos_contrato(request: Request, padrao: int = 0):
                "atualizado_em": None, "atualizado_por": ""}
               if padrao else ctr.carregar_modelo(pool, conta[0]))
     catalogo = scat.listar(pool, conta[0])
-    # FALTAS no resumo do card fechado. Custa uma consulta a mais por
+    # O QUE AJUSTAR no resumo do card fechado. Custa uma consulta a mais por
     # carregamento e vale: um campo sem valor não aparece em lugar nenhum até
     # sair no contrato DO CLIENTE — é o único erro deste fluxo que estreia na
     # frente dele. Melhor o dono ver com o card recolhido.
     orcamento, exemplo = _contexto_de_exemplo(pool, conta[0])
-    faltas = []
+    diag = {"ajustes": [], "da_proposta": []}
     if orcamento and not modelo["novo"]:
         ctx = ctr.contexto(catalogo=catalogo, orcamento=orcamento, modelo=modelo,
                            empresa=emp.obter_dados_empresa(pool, conta[0]))
         _doc, faltas = ctr.montar(modelo["clausulas"], ctx)
+        diag = ctr.diagnostico(faltas, ctx, catalogo)
     return JSONResponse({
         "clausulas": modelo["clausulas"], "regras": modelo["regras"],
         "novo": modelo["novo"], "campos": ctr.campos_disponiveis(catalogo),
@@ -937,7 +1086,10 @@ def painel_servicos_contrato(request: Request, padrao: int = 0):
             "n": len(modelo["clausulas"]),
             "em": modelo["atualizado_em"].strftime("%d/%m") if modelo.get("atualizado_em") else "",
             "por": modelo.get("atualizado_por") or "",
-            "faltas": faltas, "exemplo": exemplo,
+            # só o que o DONO tem como consertar vira alarme. Campo de proposta
+            # vazio no exemplo não é defeito — ver ctr.diagnostico.
+            "ajustes": diag["ajustes"], "da_proposta": diag["da_proposta"],
+            "exemplo": exemplo,
         },
     })
 
@@ -974,11 +1126,14 @@ def painel_servicos_contrato_previa(request: Request, dados: ContratoIn):
     if not orcamento:
         return JSONResponse({"erro": "nenhum orçamento com data de evento para usar de exemplo"},
                             status_code=404)
-    ctx = ctr.contexto(catalogo=scat.listar(pool, conta[0]), orcamento=orcamento,
+    catalogo = scat.listar(pool, conta[0])
+    ctx = ctr.contexto(catalogo=catalogo, orcamento=orcamento,
                        modelo={"regras": dados.regras},
                        empresa=emp.obter_dados_empresa(pool, conta[0]))
     doc, faltas = ctr.montar(dados.clausulas, ctx)
-    return JSONResponse({"clausulas": doc, "faltas": faltas, "exemplo": exemplo})
+    diag = ctr.diagnostico(faltas, ctx, catalogo)
+    return JSONResponse({"clausulas": doc, "exemplo": exemplo,
+                         "ajustes": diag["ajustes"], "da_proposta": diag["da_proposta"]})
 
 
 class OrcDelIn(BaseModel):
@@ -1069,9 +1224,9 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-field label{font-size:.82rem; color:var(--txt-mut)}
 .oc-inp{padding:.55rem .7rem; border-radius:8px; background:var(--bg); color:var(--txt); border:1px solid var(--borda); font-size:.95rem; width:100%; box-sizing:border-box}
 .oc-inp:focus{border-color:var(--verde); outline:none}
-.oc-mod{display:grid; grid-template-columns:auto 1fr 84px 84px 84px auto; gap:.55rem; align-items:center; padding:.6rem 0; border-bottom:1px solid var(--borda)}
-.oc-mod.avulso,.oc-head.avulso{grid-template-columns:auto minmax(0,1fr) 56px 96px 92px auto}
-.sv-wrap.oc-margin .oc-mod.avulso,.sv-wrap.oc-margin .oc-head.avulso{grid-template-columns:auto minmax(0,1fr) 56px 96px 88px 92px auto}
+.oc-mod{display:grid; grid-template-columns:auto 1fr 84px 84px 84px 104px auto; gap:.55rem; align-items:center; padding:.6rem 0; border-bottom:1px solid var(--borda)}
+.oc-mod.avulso,.oc-head.avulso{grid-template-columns:auto minmax(0,1fr) 56px 96px 104px 92px auto}
+.sv-wrap.oc-margin .oc-mod.avulso,.sv-wrap.oc-margin .oc-head.avulso{grid-template-columns:auto minmax(0,1fr) 56px 96px 88px 104px 92px auto}
 /* no orçamento de evento o rótulo vai EM CIMA do campo: "7200" e "10" precisam
    da largura inteira da caixinha, senão o número sai cortado. */
 .oc-mod.avulso .oc-num{flex-direction:column; align-items:stretch; gap:1px; padding:.25rem .45rem}
@@ -1085,7 +1240,18 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   .oc-mod.avulso .oc-nome{order:2; flex:1 1 140px; min-width:0}
   .oc-mod.avulso .oc-rowacts{order:3; flex:0 0 auto}
   .oc-mod.avulso .oc-num{order:4; flex:1 1 86px}
-  .oc-mod.avulso .oc-sub{order:5; flex:1 1 86px; justify-content:flex-end}
+  /* DESCONTO E SUBTOTAL COLADOS: são os dois números que a pessoa compara ao
+     negociar; separados obrigam a rolar de um pro outro. O par precisa de mais
+     largura que um campo simples por causa do alternador %/R$. */
+  .oc-mod.avulso .oc-desc-col{order:5; flex:1 1 118px}
+  .oc-mod.avulso .oc-sub{order:6; flex:1 1 86px; justify-content:flex-end}
+}
+@media(max-width:700px){
+  /* recorrente no estreito: a grade de 7 colunas não cabe, então vira lista */
+  .oc-mod:not(.avulso){display:flex; flex-wrap:wrap; align-items:flex-start; gap:.5rem .55rem}
+  .oc-mod:not(.avulso) .oc-nome{flex:1 1 140px; min-width:0}
+  .oc-mod:not(.avulso) .oc-num{flex:1 1 86px}
+  .oc-mod:not(.avulso) .oc-desc-col{flex:1 1 118px}
 }
 /* subtotal da linha: valor calculado, não campo — o vendedor lê enquanto monta */
 .oc-sub{display:flex;flex-direction:column;gap:.15rem;text-align:right}
@@ -1131,7 +1297,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-num input:focus{outline:none}
 .oc-custo-col{display:none}
 .sv-wrap.oc-margin .oc-custo-col{display:flex}
-.oc-head{display:grid; grid-template-columns:auto 1fr 84px 84px 84px auto; gap:.55rem; font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:var(--txt-mut); padding-bottom:.4rem; border-bottom:1px solid var(--borda)}
+.oc-head{display:grid; grid-template-columns:auto 1fr 84px 84px 84px 104px auto; gap:.55rem; font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; color:var(--txt-mut); padding-bottom:.4rem; border-bottom:1px solid var(--borda)}
 .oc-pill{padding:.4rem .8rem; border-radius:99px; border:1px solid var(--borda); background:var(--bg); color:var(--txt); cursor:pointer; font-size:.85rem}
 .oc-pill.on{border-color:var(--verde-claro); background:#10241d; color:var(--verde-claro)}
 .tipo-badge{font-size:.62rem; font-weight:700; letter-spacing:.02em; border-radius:5px; padding:.05rem .35rem; flex-shrink:0}
@@ -1181,6 +1347,30 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-badge.pre{background:#2a2212; color:#e0b25a; border:1px dashed #6b5620; text-transform:none; letter-spacing:0}
 /* sinal já recebido: verde e SÓLIDO — o oposto do tracejado de "ainda esperando" */
 .oc-badge.sinalok{background:#10241d; color:var(--verde-claro); text-transform:none; letter-spacing:0}
+/* os outros dois estados da data. Verde sólido = firme, e os dois problemas em
+   coral: SÓLIDO pra "nunca entrou" (erro), TRACEJADO pra "liberada" (a data
+   existiu e caiu) — o mesmo par sólido/tracejado que separa firme de provisório
+   no resto da tela, pra quem não distingue cor ler pela forma. */
+.oc-badge.firme{background:var(--neon-fundo); color:var(--verde-claro); border:1px solid var(--neon-borda); text-transform:none; letter-spacing:0}
+.oc-badge.fora{background:var(--coral-fundo); color:var(--verm); border:1px solid var(--coral-borda); text-transform:none; letter-spacing:0}
+.oc-badge.solta{background:var(--coral-fundo); color:var(--verm); border:1px dashed var(--coral-borda); text-transform:none; letter-spacing:0}
+.oc-fechar.marcar{background:transparent; color:var(--verm); border:1px solid var(--coral-borda)}
+/* DESCONTO: campo + alternador %/R$. O mesmo par se repete na linha do item e no
+   total, de propósito — dois controles diferentes pra mesma ideia viram duas ideias. */
+.oc-dpar{display:flex; align-items:stretch; width:100%}
+.oc-dpar > input{flex:1; min-width:0; text-align:right; border-radius:8px 0 0 8px; border-right:0}
+.oc-dtog{display:flex; border:1px solid var(--linha); border-left:0; border-radius:0 8px 8px 0; overflow:hidden}
+.oc-dtog button{border:0; background:var(--fundo-2); color:var(--txt-mut); font-size:.72rem;
+  padding:0 .5rem; cursor:pointer; font-weight:600; min-width:2rem}
+.oc-dtog button.on{background:var(--verde); color:var(--sobre-verde)}
+.oc-dzero{margin-top:.45rem; width:100%; background:none; border:1px solid var(--linha);
+  color:var(--txt-mut); border-radius:8px; padding:.32rem; font-size:.72rem; cursor:pointer;
+  letter-spacing:.06em; text-transform:uppercase}
+.oc-dzero:hover{color:var(--txt)}
+/* as linhas de desconto do resumo: verdes, porque é dinheiro que o cliente ganha */
+.oc-dline b{color:var(--verde-claro)}
+/* subtotal da linha: o cheio riscado por cima do líquido, quando há desconto */
+.oc-sub-risc{display:block; font-size:.72rem; color:var(--txt-mut); text-decoration:line-through}
 /* o contrato na linha do funil: âmbar enquanto espera assinatura, verde depois */
 .oc-badge.ctwait{background:#241C0F; color:#e0b25a; border:1px solid #5A4520; text-transform:none; letter-spacing:0}
 .oc-badge.ctok{background:#10241d; color:var(--verde-claro); text-transform:none; letter-spacing:0}
@@ -1208,6 +1398,44 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 }
 </style>{% endraw %}
 
+{% if pode_contrato %}
+{# Contrato de locação: nicho de eventos E só pro DONO — ele define o que a
+   empresa se compromete a cumprir, e isso não é decisão de quem vende. O gate
+   de verdade está nas rotas (ver _conta_evento): esconder o card não impede
+   um POST direto.
+
+   PRIMEIRO CARD DA PÁGINA. Era o último, depois do Funil — quem ia gerar a
+   proposta não passava por ele, e campo sem valor só aparecia no documento do
+   cliente. Fechado ocupa uma linha: o selo responde "está tudo certo?" sem
+   tirar espaço de quem só quer montar o orçamento, que é o trabalho diário. #}
+<div class="card" id="ct-card">
+  {# Cabeçalho clicável INTEIRO, não só a seta: alvo de 12px no celular é o que
+     faz o dono achar que a tela travou. #}
+  <div id="ct-cab" style="display:flex;align-items:center;gap:.6rem;cursor:pointer;user-select:none">
+    <span id="ct-seta" style="color:var(--mut);font-size:.85rem;transition:transform .18s">▸</span>
+    <div style="min-width:0">
+      <div style="font-weight:700;font-size:1rem">Contrato de locação</div>
+      <div id="ct-resumo" class="mut" style="font-size:.78rem;margin-top:.1rem">Carregando...</div>
+    </div>
+    <div id="ct-selo" style="margin-left:auto;flex-shrink:0"></div>
+  </div>
+  {# O QUE FAZER, não quais campos. O selo diz que há problema; esta linha diz o
+     conserto e onde fica — é o que separa um aviso de uma tarefa. Fora do cabeçalho
+     porque a frase é larga e espremer ao lado do selo cortaria a informação. #}
+  <div id="ct-faltas" style="display:none;cursor:pointer;margin-top:.5rem;font-size:.74rem;
+       line-height:1.5;background:var(--ambar-fundo);border:1px solid var(--ambar-borda);
+       border-radius:8px;padding:.4rem .55rem;color:var(--amar)"></div>
+  <div id="ct-corpo" style="display:none;margin-top:.85rem;padding-top:.85rem;border-top:1px solid var(--borda)">
+    <p class="mut" style="margin-top:0;font-size:.86rem">
+      As cláusulas são suas — escreva como quiser. Onde entra um valor, use um
+      <b style="color:var(--verde-claro)">campo</b>: ele é preenchido na hora com o preço do
+      catálogo e os dados do orçamento, então o contrato nunca diz um número diferente da proposta.
+    </p>
+    <div id="ct-box"><p class="mut">Carregando...</p></div>
+  </div>
+</div>
+{% endif %}
+
 <div class="card"{% if servico_avulso %} style="display:none"{% endif %}>
   <h2 style="margin-top:0">Escopo automático · IA</h2>
   <p class="mut" style="margin-top:0">Cole o site ou a descrição do cliente. A IA escolhe os módulos e escreve o escopo da proposta.</p>
@@ -1227,6 +1455,18 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     <div class="oc-field"><label>Convidados</label><input id="ev-conv" class="oc-inp" inputmode="numeric" placeholder="50"></div>
     <div class="oc-field"><label>Início</label><input id="ev-ini" class="oc-inp" placeholder="19:00"></div>
     <div class="oc-field"><label>Encerramento</label><input id="ev-fim" class="oc-inp" placeholder="24:00"></div>
+  </div>
+  {# A HORA DE INÍCIO É O QUE SEGURA A DATA. Sem ela a aprovação do cliente não
+     vira compromisso na agenda — e saía calada: o vendedor prometia a data, o
+     cliente assinava, e ninguém ficava sabendo que ela nunca foi reservada.
+     AVISA, não bloqueia: às vezes se fecha a proposta com a hora ainda a
+     combinar, e travar o botão travaria a venda. #}
+  <div id="ev-sem-hora" style="display:none;margin-top:.6rem;font-size:.8rem;line-height:1.5;
+       background:var(--ambar-fundo);border:1px solid var(--ambar-borda);
+       border-radius:8px;padding:.45rem .6rem;color:var(--amar)">
+    <b>Sem a hora de início, esta data não entra na agenda.</b>
+    <div style="opacity:.85;margin-top:.15rem">Pode salvar assim — mas a data só fica
+      segurada quando você preencher o Início.</div>
   </div>
   <div class="oc-field"><label>Tipo de evento</label>
     <div style="display:flex; gap:.4rem; flex-wrap:wrap" id="ev-tipos">
@@ -1353,7 +1593,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       </div>
       {% endif %}
       <div class="oc-head{% if servico_avulso %} avulso{% endif %}" id="oc-head" style="margin-top:.8rem; display:none">
-        <span></span><span>Serviço</span><span style="text-align:right">{{ 'Valor' if servico_avulso else 'Setup' }}</span>{% if not servico_avulso %}<span style="text-align:right">Mensal</span>{% endif %}<span style="text-align:right">{{ 'Custo' if servico_avulso else 'Custo/Margem' }}</span><span></span>
+        <span></span><span>Serviço</span><span style="text-align:right">{{ 'Valor' if servico_avulso else 'Setup' }}</span>{% if not servico_avulso %}<span style="text-align:right">Mensal</span>{% endif %}<span style="text-align:right">{{ 'Custo' if servico_avulso else 'Custo/Margem' }}</span><span style="text-align:right">Desconto</span><span></span>
       </div>
       <div id="oc-mods"{% if servico_avulso %} style="display:none"{% endif %}></div>
       {% if servico_avulso %}
@@ -1452,9 +1692,24 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       {% if not servico_avulso %}<div class="oc-ll"><span class="mut">Mensalidade</span><b id="oc-r-mensal" style="color:var(--verde-claro)">R$ 0</b></div>{% endif %}
       <div class="oc-ll" id="oc-r-margem-l" style="display:none"><span class="mut">{{ 'Margem' if servico_avulso else 'Margem/mês' }}</span><b id="oc-r-margem" style="color:var(--verde-claro); font-size:.95rem">-</b></div>
       <div class="oc-total"><div class="mut" style="font-size:.78rem; text-transform:uppercase; letter-spacing:.08em; color:var(--verde-claro)">{{ 'Total' if servico_avulso else 'Total 1º ano' }}</div><div class="v" id="oc-r-ano">R$ 0</div><div class="mut" id="oc-r-eco" style="display:none; font-size:.8rem; color:var(--verde-claro); margin-top:.3rem"></div></div>
-      {% if servico_avulso %}
-      <div class="oc-field" style="margin-top:.7rem; margin-bottom:0"><label class="mut" style="font-size:.76rem">Desconto (%)</label><input id="oc-desconto" class="oc-inp" inputmode="numeric" value="0" style="text-align:right"></div>
-      {% else %}
+      <div class="oc-ll oc-dline" id="oc-r-descitens-l" style="display:none"><span class="mut">Descontos por item</span><b id="oc-r-descitens">R$ 0</b></div>
+      <div class="oc-ll" id="oc-r-sub-l" style="display:none"><span class="mut">Subtotal com descontos</span><b id="oc-r-sub">R$ 0</b></div>
+      <div class="oc-ll oc-dline" id="oc-r-descfim-l" style="display:none"><span class="mut">Desconto no total</span><b id="oc-r-descfim">R$ 0</b></div>
+      <!-- o desconto do TOTAL vale nos dois modos: consultoria e advocacia vendem
+           por orçamento igual, e só não tinham desconto porque ele morava dentro
+           do jsonb do evento. -->
+      <div class="oc-field" style="margin-top:.7rem; margin-bottom:0">
+        <label class="mut" style="font-size:.76rem">Desconto no total</label>
+        <div class="oc-dpar oc-dpar-tot" data-tipo="pct">
+          <input id="oc-desconto" class="oc-inp oc-desc-inp" inputmode="numeric" value="0">
+          <span class="oc-dtog">
+            <button type="button" data-t="pct" class="on">%</button>
+            <button type="button" data-t="valor">R$</button>
+          </span>
+        </div>
+        <button id="oc-desc-zerar" class="oc-dzero" type="button">zerar desconto</button>
+      </div>
+      {% if not servico_avulso %}
       <button id="oc-anual" class="oc-pill" data-on="0" type="button" style="width:100%; margin-top:.7rem; text-align:left; display:flex; justify-content:space-between; align-items:center">Pagamento anual (-15%) <span id="oc-anual-mk">↻</span></button>
       {% endif %}
       <button id="oc-gerar" class="oc-btn oc-btn-g">Gerar proposta</button>
@@ -1468,30 +1723,6 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   <div id="oc-hist-box"><p class="mut">Carregando...</p></div>
 </div>
 
-{% if servico_avulso %}
-{# Contrato de locação: só existe no nicho de eventos. O gate de verdade está nas
-   rotas (ver _conta_evento) — esconder o card não impede um POST direto. #}
-<div class="card" id="ct-card">
-  {# Cabeçalho clicável INTEIRO, não só a seta: alvo de 12px no celular é o que
-     faz o dono achar que a tela travou. #}
-  <div id="ct-cab" style="display:flex;align-items:center;gap:.6rem;cursor:pointer;user-select:none">
-    <span id="ct-seta" style="color:var(--mut);font-size:.85rem;transition:transform .18s">▸</span>
-    <div style="min-width:0">
-      <div style="font-weight:700;font-size:1rem">Contrato de locação</div>
-      <div id="ct-resumo" class="mut" style="font-size:.78rem;margin-top:.1rem">Carregando...</div>
-    </div>
-    <div id="ct-selo" style="margin-left:auto;flex-shrink:0"></div>
-  </div>
-  <div id="ct-corpo" style="display:none;margin-top:.85rem;padding-top:.85rem;border-top:1px solid var(--borda)">
-    <p class="mut" style="margin-top:0;font-size:.86rem">
-      As cláusulas são suas — escreva como quiser. Onde entra um valor, use um
-      <b style="color:var(--verde-claro)">campo</b>: ele é preenchido na hora com o preço do
-      catálogo e os dados do orçamento, então o contrato nunca diz um número diferente da proposta.
-    </p>
-    <div id="ct-box"><p class="mut">Carregando...</p></div>
-  </div>
-</div>
-{% endif %}
 </div>
 
 <script>window.SERVICO_AVULSO = {{ 'true' if servico_avulso else 'false' }};</script>
@@ -1509,38 +1740,82 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   // quantidade da linha (só existe no modo evento; sem o campo, é sempre 1)
   function qtd(r){return Math.max(1,num(r.querySelector('.oc-qtd')));}
 
+  // ─────────────────────────── DESCONTO ───────────────────────────
+  // ESTA CONTA É A MESMA de finance/desconto.py, linha por linha. Se as duas
+  // divergirem, a tela mostra um número e o cliente lê outro — foi assim que um
+  // orçamento ficou com parcelas somando 12.105 e total de 9.405.
+  //
+  // No ITEM o desconto é SEMPRE percentual, mesmo digitado em reais: a linha do
+  // recorrente tem setup E mensalidade, e `fechar_orcamento` gera um título de
+  // cada. Valor único não teria como voltar a se dividir entre as duas pontas
+  // sem chute, então reais viram o percentual equivalente da contribuição da
+  // linha ao primeiro ano, e esse percentual cai igual nos dois.
+  function pctLinha(r){
+    var par=r.querySelector('.oc-dpar'); if(!par) return 0;
+    var v=num(r.querySelector('.oc-desc'));
+    if(v<=0) return 0;
+    if((par.getAttribute('data-tipo')||'pct')==='pct') return Math.min(100,v);
+    var base=num(r.querySelector('.oc-setup'))*qtd(r)+num(r.querySelector('.oc-mensal'))*12;
+    return base>0?Math.min(100,100*v/base):0;
+  }
+  // o desconto do TOTAL, já resolvido em reais sobre a base que recebe
+  function descFinal(base){
+    var par=document.querySelector('.oc-dpar-tot'); if(!par||base<=0) return 0;
+    var v=num(document.getElementById('oc-desconto'));
+    if(v<=0) return 0;
+    var d=((par.getAttribute('data-tipo')||'pct')==='valor')?v:Math.round(base*Math.min(100,v)/100);
+    // NUNCA maior que a base: desconto que ultrapassa viraria acréscimo.
+    return Math.max(0,Math.min(base,d));
+  }
+
   function calc(){
-    var setup=0,mensal=0,modMensal=0,custo=0,mods=0;
+    // BRUTO e LÍQUIDO andam juntos: o resumo mostra o líquido, mas é o BRUTO que
+    // vai no payload — o servidor refaz a conta do desconto, e receber o já
+    // descontado faria ele descontar de novo.
+    var setup=0,mensal=0,modMensal=0,custo=0,mods=0,descItens=0;
+    var setupBruto=0,mensalBruto=0;
     rows().forEach(function(r){
       if(r.getAttribute('data-on')==='1'){
         mods++;
         var q=qtd(r);
-        setup+=num(r.querySelector('.oc-setup'))*q;
-        var mm=num(r.querySelector('.oc-mensal'));
-        mensal+=mm; modMensal+=mm;
+        var p=pctLinha(r);
+        var sb=num(r.querySelector('.oc-setup'))*q, mb=num(r.querySelector('.oc-mensal'));
+        var sl=Math.round(sb*(100-p)/100), ml=Math.round(mb*(100-p)/100);
+        descItens+=(sb-sl)+(mb-ml)*12;
+        setupBruto+=sb; mensalBruto+=mb;
+        setup+=sl;
+        mensal+=ml; modMensal+=ml;
         custo+=num(r.querySelector('.oc-custo'))*q;
       }
     });
     var inf=INFRA[seg('infra')]||INFRA.compartilhada;
-    setup+=inf.s; mensal+=inf.m;
-    if(seg('volume')==='alto') mensal+=600;
+    setup+=inf.s; mensal+=inf.m; setupBruto+=inf.s; mensalBruto+=inf.m;
+    if(seg('volume')==='alto'){mensal+=600; mensalBruto+=600;}
     var integ=num(document.getElementById('oc-integ'));
-    setup+=integ*250; mensal+=integ*120;
+    setup+=integ*250; mensal+=integ*120; setupBruto+=integ*250; mensalBruto+=integ*120;
     var canais=document.querySelectorAll('.oc-canal[data-on="1"]').length;
-    setup+=canais*400;
+    setup+=canais*400; setupBruto+=canais*400;
     var ocSup=document.getElementById('oc-sup');
-    if(ocSup&&ocSup.getAttribute('data-on')==='1') mensal+=1500;
+    if(ocSup&&ocSup.getAttribute('data-on')==='1'){mensal+=1500; mensalBruto+=1500;}
     if(SERVICO_AVULSO){
-      var desconto=Math.max(0,Math.min(100,num(document.getElementById('oc-desconto'))));
-      var total=setup*(1-desconto/100);
-      var margemAv=setup-custo, margemAvPct=setup>0?Math.round(margemAv/setup*100):0;
-      return {setup:setup,mensal:0,mensalCheio:0,ano1:total,margem:margemAv,margemPct:margemAvPct,mods:mods,desconto:desconto,economia:setup-total};
+      var dFim=descFinal(setup), total=setup-dFim;
+      // A MARGEM USA O VALOR JÁ DESCONTADO. Com o desconto fora dela, ela mentiria
+      // exatamente quando mais importa: na hora de decidir quanto dá pra descontar.
+      var margemAv=total-custo, margemAvPct=total>0?Math.round(margemAv/total*100):0;
+      return {setup:setup,mensal:0,mensalCheio:0,ano1:total,margem:margemAv,
+              margemPct:margemAvPct,mods:mods,subtotal:setup,descItens:descItens,
+              descFim:dFim,economia:descItens+dFim,
+              setupBruto:setupBruto,mensalBruto:0};
     }
     var anual=document.getElementById('oc-anual').getAttribute('data-on')==='1';
     var mensalEf=anual?mensal*0.85:mensal;
-    var ano1=setup+mensalEf*12;
+    var sub=setup+mensalEf*12;
+    var dFim=descFinal(sub), ano1=sub-dFim;
     var margem=modMensal-custo, margemPct=modMensal>0?Math.round(margem/modMensal*100):0;
-    return {setup:setup,mensal:mensalEf,mensalCheio:mensal,ano1:ano1,margem:margem,margemPct:margemPct,mods:mods,anual:anual};
+    return {setup:setup,mensal:mensalEf,mensalCheio:mensal,ano1:ano1,margem:margem,
+            margemPct:margemPct,mods:mods,anual:anual,subtotal:sub,
+            descItens:descItens,descFim:dFim,economia:descItens+dFim,
+            setupBruto:setupBruto,mensalBruto:(anual?mensalBruto*0.85:mensalBruto)};
   }
 
   function pinta(){
@@ -1548,24 +1823,70 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     // subtotal de cada linha (qtd × valor unitário), ao vivo
     rows().forEach(function(r){
       var el=r.querySelector('.oc-sub-v');
-      if(el) el.textContent=fmt(num(r.querySelector('.oc-setup'))*qtd(r));
+      if(!el) return;
+      var sb=num(r.querySelector('.oc-setup'))*qtd(r), p=pctLinha(r);
+      var sl=Math.round(sb*(100-p)/100);
+      // o cheio riscado só aparece QUANDO há desconto — riscar um valor igual ao
+      // de baixo seria ruído.
+      el.innerHTML=(sl<sb?'<span class="oc-sub-risc">'+fmt(sb)+'</span>':'')+fmt(sl);
     });
     document.getElementById('oc-r-setup').textContent=fmt(c.setup);
     var elMensal=document.getElementById('oc-r-mensal');
     if(elMensal)elMensal.textContent=fmt(c.mensal);
     document.getElementById('oc-r-ano').textContent=fmt(c.ano1);
     document.getElementById('oc-r-margem').textContent=fmt(c.margem)+' · '+c.margemPct+'%';
+    // as três linhas do desconto: só aparecem quando existem, pra o resumo de quem
+    // não usa desconto continuar do tamanho que sempre teve.
+    function mostra(idL,id,val){
+      var l=document.getElementById(idL); if(!l) return;
+      l.style.display=val>0?'flex':'none';
+      if(val>0) document.getElementById(id).textContent='− '+fmt(val);
+    }
+    mostra('oc-r-descitens-l','oc-r-descitens',c.descItens||0);
+    mostra('oc-r-descfim-l','oc-r-descfim',c.descFim||0);
+    var subL=document.getElementById('oc-r-sub-l');
+    if(subL){
+      var temDesc=(c.descItens||0)>0&&(c.descFim||0)>0;
+      subL.style.display=temDesc?'flex':'none';
+      if(temDesc) document.getElementById('oc-r-sub').textContent=fmt(c.subtotal||0);
+    }
     var eco=document.getElementById('oc-r-eco');
-    if(SERVICO_AVULSO){
-      if(c.desconto>0){eco.style.display='block'; eco.textContent='Economia de '+fmt(c.economia);}
-      else eco.style.display='none';
-      pintaParcelas();   // mudou item/desconto -> o plano de pagamento pode ter deixado de fechar
-    }else if(c.anual){eco.style.display='block'; eco.textContent='Economia de '+fmt(c.mensalCheio*12*0.15)+' no ano';}
+    if((c.economia||0)>0){eco.style.display='block'; eco.textContent='Economia de '+fmt(c.economia);}
+    else if(!SERVICO_AVULSO&&c.anual){eco.style.display='block'; eco.textContent='Economia de '+fmt(c.mensalCheio*12*0.15)+' no ano';}
     else eco.style.display='none';
+    // mudou item/desconto -> o plano de pagamento pode ter deixado de fechar
+    if(SERVICO_AVULSO) pintaParcelas();
   }
 
   // linhas de serviço são dinâmicas (catálogo por conta) — delegação:
   var MODS=document.getElementById('oc-mods');
+  // ALTERNADOR %/R$ — um só ouvinte pro par da linha e o par do total, porque é o
+  // mesmo controle. Delegado no documento: as linhas são recriadas a cada
+  // renderização do catálogo e ouvinte preso à linha morreria junto.
+  document.addEventListener('click',function(e){
+    var b=e.target.closest('.oc-dtog button'); if(!b) return;
+    var par=b.closest('.oc-dpar'); if(!par) return;
+    par.setAttribute('data-tipo',b.getAttribute('data-t'));
+    par.querySelectorAll('.oc-dtog button').forEach(function(x){
+      x.classList.toggle('on',x===b);
+    });
+    pinta();
+  });
+  var zerar=document.getElementById('oc-desc-zerar');
+  if(zerar) zerar.addEventListener('click',function(){
+    // zera o do TOTAL e o de cada linha: "zerar desconto" que deixa desconto pra
+    // trás é pior que não ter botão.
+    var dt=document.getElementById('oc-desconto'); if(dt) dt.value='0';
+    document.querySelectorAll('.oc-desc').forEach(function(i){i.value='0';});
+    document.querySelectorAll('.oc-dpar').forEach(function(par){
+      par.setAttribute('data-tipo','pct');
+      par.querySelectorAll('.oc-dtog button').forEach(function(x){
+        x.classList.toggle('on',x.getAttribute('data-t')==='pct');
+      });
+    });
+    pinta();
+  });
+
   MODS.addEventListener('click',function(e){
     if(SERVICO_AVULSO){
       var rm=e.target.closest('.oc-tog')||e.target.closest('.oc-rm');
@@ -1581,7 +1902,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   });
   MODS.addEventListener('input',function(e){
     if(e.target.classList.contains('oc-setup')||e.target.classList.contains('oc-mensal')
-       ||e.target.classList.contains('oc-custo')||e.target.classList.contains('oc-qtd')) pinta();
+       ||e.target.classList.contains('oc-custo')||e.target.classList.contains('oc-qtd')
+       ||e.target.classList.contains('oc-desc')) pinta();
   });
 
   document.getElementById('oc-margin').addEventListener('click',function(){
@@ -1631,11 +1953,28 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
             local:document.getElementById('ev-local').value||'',
             desconto:Math.max(0,Math.min(100,num(document.getElementById('oc-desconto'))))};
   }
+  // O aviso da hora que falta. Aparece só quando há DATA e não há hora: orçamento
+  // sem data nenhuma não prometeu nada e não tem o que avisar.
+  function pintarSemHora(){
+    var el=document.getElementById('ev-sem-hora');
+    if(!el)return;
+    var temData=!!(document.getElementById('ev-data')||{}).value;
+    var temHora=!!((document.getElementById('ev-ini')||{}).value||'').trim();
+    el.style.display=(temData&&!temHora)?'block':'none';
+  }
+  if(SERVICO_AVULSO){
+    ['ev-data','ev-ini'].forEach(function(id){
+      var el=document.getElementById(id);
+      if(el){el.addEventListener('input',pintarSemHora); el.addEventListener('change',pintarSemHora);}
+    });
+    pintarSemHora();
+  }
   function aplicarEvento(ev){
     if(!SERVICO_AVULSO)return;
     ev=ev||{};
     setv('ev-data',ev.data); setv('ev-conv',ev.convidados?String(ev.convidados):'');
     setv('ev-ini',ev.inicio); setv('ev-fim',ev.fim);
+    pintarSemHora();
     // Local: quase toda festa é no salão da própria empresa, então o endereço
     // dela já vem escrito. Evento fora ("na casa do cliente") o vendedor troca.
     var loc=document.getElementById('ev-local');
@@ -1797,6 +2136,23 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   var VERTODOS_OPEN=false;
   function ec(s){var d=document.createElement('div');d.textContent=s==null?'':s;return d.innerHTML;}
 
+  // A célula de desconto da LINHA. Mesmo par do desconto do total — a forma se
+  // repete porque a ideia é a mesma.
+  function descTipoTot(){
+    var par=document.querySelector('.oc-dpar-tot');
+    return (par&&par.getAttribute('data-tipo')==='valor')?'valor':'pct';
+  }
+  function celDesc(tipo,val){
+    var t=(tipo==='valor')?'valor':'pct';
+    return '<div class="oc-num oc-desc-col"><span>Desconto</span>'
+      +'<div class="oc-dpar" data-tipo="'+t+'">'
+      +'<input class="oc-desc" inputmode="numeric" value="'+(parseInt(val,10)||0)+'">'
+      +'<span class="oc-dtog">'
+      +'<button type="button" data-t="pct" class="'+(t==='pct'?'on':'')+'">%</button>'
+      +'<button type="button" data-t="valor" class="'+(t==='valor'?'on':'')+'">R$</button>'
+      +'</span></div></div>';
+  }
+
   // eventos: catálogo ordenado A-Z + "busca pra adicionar" — a lista só mostra
   // o que já foi escolhido pra esta proposta; o resto fica atrás da busca ou
   // do link "ver todos", pra não repetir o card gigante de antes com 26 linhas
@@ -1810,6 +2166,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       +'<div class="oc-num"><span>Qtd</span><input class="oc-qtd" inputmode="numeric" value="1"></div>'
       +'<div class="oc-num"><span>Vr. unit.</span><input class="oc-setup" inputmode="numeric" value="'+s.setup+'"></div>'
       +'<div class="oc-num oc-custo-col"><span>Custo</span><input class="oc-custo" inputmode="numeric" value="'+s.custo+'"></div>'
+      +celDesc(s.desc_tipo,s.desc_val)
       +'<div class="oc-sub"><span>Subtotal</span><b class="oc-sub-v">'+fmt(s.setup)+'</b></div>'
       +'<div class="oc-rowacts"><button class="oc-ic oc-rm" type="button" title="Remover da proposta">🗑</button></div>';
   }
@@ -1874,6 +2231,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         +'<div class="oc-num"><span>'+lblValor+'</span><input class="oc-setup" inputmode="numeric" value="'+s.setup+'"></div>'
         +(SERVICO_AVULSO?'':'<div class="oc-num"><span>Mensal</span><input class="oc-mensal" inputmode="numeric" value="'+s.mensal+'"></div>')
         +'<div class="oc-num'+(SERVICO_AVULSO?'':' oc-custo-col')+'"><span>Custo</span><input class="oc-custo" inputmode="numeric" value="'+s.custo+'"></div>'
+        +celDesc('pct',0)
         +'<div class="oc-rowacts"><button class="oc-ic oc-edit" type="button" title="Editar serviço">✎</button><button class="oc-ic oc-del" type="button" title="Excluir serviço">🗑</button></div>';
       box.appendChild(r);
     });
@@ -2185,12 +2543,15 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     var itens=sel.map(function(r){
       var q=qtd(r), u=num(r.querySelector('.oc-setup'));
       var cat=CATALOGO.filter(function(x){return x.slug===r.getAttribute('data-id');})[0]||{};
+      var par=r.querySelector('.oc-dpar');
       return {nome:r.getAttribute('data-nome'),desc:r.getAttribute('data-desc')||'',
               setup:u*q,mensal:num(r.querySelector('.oc-mensal')),qtd:q,unitario:u,
-              categoria:cat.categoria||'',icone:cat.icone||''};
+              categoria:cat.categoria||'',icone:cat.icone||'',
+              desc_tipo:(par?(par.getAttribute('data-tipo')||'pct'):'pct'),
+              desc_val:num(r.querySelector('.oc-desc'))};
     });
     var escEl=document.getElementById('oc-escopo-out');
-    return {id:EDIT_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',telefone:document.getElementById('oc-tel').value||'',cidade:document.getElementById('oc-cidade').value||'',uf:document.getElementById('oc-uf').value||'',site:document.getElementById('oc-site').value||'',cargo:document.getElementById('oc-cargo').value||'',socio:document.getElementById('oc-socio').value||'',endereco:(document.getElementById('oc-endereco')||{}).value||'',cep:(document.getElementById('oc-cep')||{}).value||'',modulos:sel.map(function(r){return r.getAttribute('data-id');}),itens:itens,evento:coletarEvento(),parcelas:(SERVICO_AVULSO?coletarParcelas():[]),escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setup),mensal:Math.round(c.mensal),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods};
+    return {id:EDIT_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',telefone:document.getElementById('oc-tel').value||'',cidade:document.getElementById('oc-cidade').value||'',uf:document.getElementById('oc-uf').value||'',site:document.getElementById('oc-site').value||'',cargo:document.getElementById('oc-cargo').value||'',socio:document.getElementById('oc-socio').value||'',endereco:(document.getElementById('oc-endereco')||{}).value||'',cep:(document.getElementById('oc-cep')||{}).value||'',modulos:sel.map(function(r){return r.getAttribute('data-id');}),itens:itens,evento:coletarEvento(),parcelas:(SERVICO_AVULSO?coletarParcelas():[]),escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setupBruto),mensal:Math.round(c.mensalBruto),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods,desconto_tipo:descTipoTot(),desconto_pct:(descTipoTot()==='pct'?num(document.getElementById('oc-desconto')):0),desconto_valor:(descTipoTot()==='valor'?num(document.getElementById('oc-desconto')):0)};
   }
   function salvarProposta(cb){
     fetch('/painel/servicos/salvar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(coletarBody())})
@@ -2253,8 +2614,30 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
           var unit=(it.unitario!=null&&it.unitario>0)?it.unitario:it.setup;
           if(s&&unit!=null) s.value=unit;
           if(q&&it.qtd) q.value=it.qtd;
-          if(m&&it.mensal!=null) m.value=it.mensal; }
+          if(m&&it.mensal!=null) m.value=it.mensal;
+          // O DESCONTO DA LINHA VOLTA JUNTO. Sem isto, reabrir a proposta pra
+          // trocar uma vírgula zeraria silenciosamente o desconto negociado — e o
+          // cliente receberia um link mais caro que o que ele aprovou.
+          var di=r.querySelector('.oc-desc'), par=r.querySelector('.oc-dpar');
+          if(di) di.value=(it.desc_val!=null?it.desc_val:0);
+          if(par){
+            var t=(it.desc_tipo==='valor')?'valor':'pct';
+            par.setAttribute('data-tipo',t);
+            par.querySelectorAll('.oc-dtog button').forEach(function(x){
+              x.classList.toggle('on',x.getAttribute('data-t')===t);
+            });
+          } }
       });
+      // e o desconto do TOTAL, pelo mesmo motivo
+      var dtPar=document.querySelector('.oc-dpar-tot');
+      if(dtPar){
+        var dt=(d.desconto_tipo==='valor')?'valor':'pct';
+        dtPar.setAttribute('data-tipo',dt);
+        dtPar.querySelectorAll('.oc-dtog button').forEach(function(x){
+          x.classList.toggle('on',x.getAttribute('data-t')===dt);
+        });
+        setv('oc-desconto', String(dt==='valor'?(d.desconto_valor||0):(d.desconto_pct||0)));
+      }
       var out=document.getElementById('oc-escopo-out');
       if(d.escopo){out.style.display='block'; out.textContent=d.escopo; out.setAttribute('data-escopo',d.escopo);}
       else{out.style.display='none'; out.removeAttribute('data-escopo');}
@@ -2304,6 +2687,19 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       })
       .catch(function(){alert('Erro de conexão.'); btn.disabled=false; btn.textContent='Sinal recebido';});
   }
+  // Põe na agenda a data que ficou de fora, ou segura de novo a que foi liberada.
+  // Sem confirmação de propósito: marcar uma data que deveria estar marcada não
+  // destrói nada, e o botão só aparece quando há de fato o que consertar.
+  function marcarData(id,btn){
+    var t=btn.textContent; btn.disabled=true; btn.textContent='Marcando...';
+    fetch('/painel/servicos/marcar-data',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})})
+      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+      .then(function(res){
+        if(!res.ok){alert((res.d&&res.d.erro)||'Não consegui marcar.'); btn.disabled=false; btn.textContent=t; return;}
+        carregarHist();
+      })
+      .catch(function(){alert('Erro de conexão.'); btn.disabled=false; btn.textContent=t;});
+  }
   // Apagar proposta do funil. Confirma sempre e nomeia o cliente na pergunta: a
   // lista é densa e o 🗑 fica ao lado do 📄, então "tem certeza?" sozinho não diz
   // qual das cinco linhas vai embora.
@@ -2344,26 +2740,37 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         badge.className='oc-badge '+(fechado?'fechado':(aprovada?'fechado':'aberto'));
         badge.textContent=fechado?'Fechado':(aprovada?('Aprovada'+(it.aprovada_por?' · '+esc(it.aprovada_por):'')):esc(it.status));
         right.appendChild(badge);
-        // Data SEGURADA esperando o sinal. Só aparece enquanto o compromisso está
-        // pré-reservado — quando o sinal cai (ou o prazo vence), o servidor para de
-        // mandar pre_reserva_ate e a linha volta ao normal sozinha.
-        if(it.pre_reserva_ate){
-          var pr=document.createElement('span'); pr.className='oc-badge pre';
-          pr.textContent='Data segurada até '+esc(it.pre_reserva_ate);
-          pr.title='O cliente aprovou, mas o sinal'+(it.sinal?' de '+esc(it.sinal):'')
-                   +' ainda não foi confirmado. Passando o prazo, a data libera sozinha.';
-          right.appendChild(pr);
-          var bs=document.createElement('button'); bs.className='oc-fechar sinal';
-          bs.textContent='Sinal recebido';
-          bs.title='Confirma que o sinal caiu: a data vira compromisso firme na agenda '
-                  +'e o título dessa parcela entra como recebido, na data de hoje.';
-          bs.addEventListener('click',function(){sinalRecebido(it.id,it.cliente,bs);});
-          right.appendChild(bs);
+        // O ESTADO DA DATA — quatro possíveis, e até 19/08 a linha desenhava um só
+        // (a pré-reserva correndo). "Firme", "nunca entrou" e "liberada" ficavam
+        // com a mesma cara, e duas delas são problema. A redação inteira mora no
+        // servidor (vendas.estado_da_data); aqui só se escolhe a cor e o botão.
+        if(it.data){
+          var CLS={reservada:'firme',segurada:'pre',fora:'fora',liberada:'solta'};
+          var dd=document.createElement('span');
+          dd.className='oc-badge '+(CLS[it.data.estado]||'pre');
+          dd.textContent=it.data.texto;
+          dd.title=it.data.dica||'';
+          right.appendChild(dd);
+          if(it.data.acao==='sinal'){
+            var bs=document.createElement('button'); bs.className='oc-fechar sinal';
+            bs.textContent='Sinal recebido';
+            bs.title='Confirma que o sinal caiu: a data vira compromisso firme na agenda '
+                    +'e o título dessa parcela entra como recebido, na data de hoje.';
+            bs.addEventListener('click',function(){sinalRecebido(it.id,it.cliente,bs);});
+            right.appendChild(bs);
+          }
+          else if(it.data.acao==='marcar'||it.data.acao==='resegurar'){
+            var bm=document.createElement('button'); bm.className='oc-fechar marcar';
+            bm.textContent=(it.data.acao==='marcar')?'Marcar agora':'Segurar de novo';
+            bm.title=it.data.dica||'';
+            bm.addEventListener('click',function(){marcarData(it.id,bm);});
+            right.appendChild(bm);
+          }
         }
         // Sinal JÁ confirmado: fica dito na linha. Sem isso, depois que o botão some
         // não sobra nada na tela dizendo que aquele dinheiro entrou — e é ele que
         // explica por que o título dessa parcela não aparece em aberto.
-        else if(it.sinal_pago && it.sinal){
+        if(!(it.data&&it.data.estado==='segurada') && it.sinal_pago && it.sinal){
           var sp=document.createElement('span'); sp.className='oc-badge sinalok';
           sp.textContent='Sinal recebido · '+esc(it.sinal);
           sp.title=fechado?'O título dessa parcela entrou como recebido no livro-caixa, '
@@ -2475,6 +2882,9 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     document.getElementById('ct-cab').addEventListener('click',function(){
       abrir(corpo.style.display==='none');
     });
+    // o aviso leva ao conserto: apontar o erro e deixar a pessoa procurar a porta
+    // seria metade do trabalho.
+    document.getElementById('ct-faltas').addEventListener('click',function(){abrir(true);});
 
     function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){
       return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
@@ -2530,7 +2940,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       retirada_horas:'Retirar materiais (h)',acesso_montagem:'Montagem a partir de'};
 
     // O resumo do card fechado. Responde "está no ar e é o meu?" sem abrir —
-    // e o selo âmbar denuncia o campo sem valor, que é o único erro deste fluxo
+    // e o selo âmbar conta os ajustes pendentes, que é o único erro deste fluxo
     // que estrearia na frente do cliente, dentro do contrato dele.
     function resumir(d){
       var r=d.resumo||{}, res=document.getElementById('ct-resumo'), selo=document.getElementById('ct-selo');
@@ -2540,10 +2950,33 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       }
       res.textContent=(r.n||0)+' cláusula'+((r.n||0)===1?'':'s')
         +(r.em?' · alterado em '+r.em:'')+(r.por?' por '+r.por:'');
-      var f=(r.faltas||[]).length;
+      var lista=(r.ajustes||[]), f=lista.length;
       selo.innerHTML = f
-        ? '<span style="font-size:.68rem;font-weight:700;background:var(--ambar-fundo);color:var(--amar);border:1px solid var(--ambar-borda);border-radius:5px;padding:.1rem .38rem;white-space:nowrap">⚠ '+f+' campo'+(f===1?'':'s')+' sem valor</span>'
+        ? '<span style="font-size:.68rem;font-weight:700;background:var(--ambar-fundo);color:var(--amar);border:1px solid var(--ambar-borda);border-radius:5px;padding:.1rem .38rem;white-space:nowrap">⚠ '+f+(f===1?' ajuste':' ajustes')+'</span>'
         : '<span style="font-size:.68rem;font-weight:700;background:var(--neon-fundo);color:var(--verde-claro);border:1px solid var(--neon-borda);border-radius:5px;padding:.1rem .38rem;white-space:nowrap">✓ pronto</span>';
+      pintarAjustes(lista);
+    }
+
+    // DIZ O QUE FAZER, não o nome do campo. "1 campo sem valor" mandava o dono
+    // caçar; "{cliente.nome}" pior ainda — ele não escreveu aquilo e não sabe o
+    // que é. Cada linha aqui é uma tarefa com endereço.
+    //
+    // E entra pouca coisa: só o que ELE resolve e que vale pra todo contrato.
+    // Campo que vem de cada proposta ({cliente.nome} vazio num orçamento antigo)
+    // não é defeito e não aparece aqui — ver finance/contrato.diagnostico.
+    function pintarAjustes(lista){
+      var el=document.getElementById('ct-faltas');
+      if(!el) return;
+      if(!lista.length){ el.style.display='none'; el.innerHTML=''; return; }
+      // teto de 4: lista longa no card fechado vira parede de texto e ninguém lê.
+      var itens=lista.slice(0,4).map(function(a){
+        return '<div style="margin-top:.22rem">• <b>'+esc(a.titulo)+'</b> '+esc(a.detalhe)+'</div>';
+      }).join('');
+      var resto=lista.length-4;
+      el.innerHTML='<b>Precisa de ajuste antes de mandar pro cliente</b>'+itens
+        +(resto>0?'<div style="opacity:.8;margin-top:.22rem">e mais '+resto+'</div>':'')
+        +'<div style="opacity:.85;margin-top:.35rem">Toque para abrir e corrigir.</div>';
+      el.style.display='block';
     }
 
     function desenhar(d){
@@ -2631,11 +3064,24 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
           b.textContent=t;
           if(!res.ok){msg('<p class="mut" style="font-size:.85rem">'+esc((res.d&&res.d.erro)||'Não consegui montar.')+'</p>');return;}
           var h='';
-          if((res.d.faltas||[]).length){
+          var aj=res.d.ajustes||[];
+          if(aj.length){
             h+='<div style="background:#241C0F;border:1px solid var(--ambar-borda);border-radius:8px;padding:.55rem .7rem;margin-bottom:.6rem;font-size:.84rem">'
-              +'<b style="color:var(--amar)">Estes campos não têm valor</b> e vão sair assim mesmo no documento:<br>'
-              +res.d.faltas.map(function(f){return '<code>{'+esc(f)+'}</code>';}).join(' ')
-              +'<div class="mut" style="margin-top:.3rem">Geralmente é um item que saiu do catálogo ou um dado que o orçamento não tem.</div></div>';
+              +'<b style="color:var(--amar)">Precisa de ajuste</b> — isto não vai preencher em contrato nenhum:'
+              +aj.map(function(a){
+                  return '<div style="margin-top:.25rem">• <b>'+esc(a.titulo)+'</b> '+esc(a.detalhe)+'</div>';
+                }).join('')
+              +'</div>';
+          }
+          // Nota NEUTRA, não alarme: estes campos ficam à vista no texto porque o
+          // orçamento de exemplo não tem o dado. Sem esta linha o dono lê o
+          // {cliente.nome} do preview como defeito e vem perguntar o que quebrou.
+          var dp=res.d.da_proposta||[];
+          if(dp.length){
+            h+='<div class="mut" style="border:1px solid var(--borda);border-radius:8px;padding:.5rem .7rem;margin-bottom:.6rem;font-size:.8rem">'
+              +'Aparecem escritos assim — '
+              +dp.map(function(c){return '<code>{'+esc(c)+'}</code>';}).join(' ')
+              +' — porque este orçamento de exemplo não tem esses dados. Em cada proposta eles entram sozinhos, com os dados do cliente. Nada a fazer aqui.</div>';
           }
           h+='<div class="mut" style="font-size:.78rem;margin-bottom:.4rem">Prévia com '+esc(res.d.exemplo||'')+'</div>';
           h+='<div style="background:#fff;color:#1a1a1a;border-radius:8px;padding:.9rem 1rem;font-family:Georgia,serif;max-height:420px;overflow:auto">';

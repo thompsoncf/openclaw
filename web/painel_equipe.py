@@ -34,20 +34,29 @@ def _link(token: str) -> str:
 
 
 def _enviar_email_convite(conta, nome: str, email: str, papel: str, link: str) -> bool:
-    """Dispara o e-mail de convite pro convidado (com o link). Manda PELA caixa que a
-    empresa configurou em Canais (o cliente bota o e-mail lá); se ela não tiver caixa
-    própria, cai no SMTP de sistema do Zaq. Tolerante: se nada enviar, devolve False e
-    o link segue na tela como plano B."""
+    """Dispara o e-mail de convite pro convidado (com o link).
+
+    Sai pelo REMETENTE DO ZAQ, com a caixa da empresa como reserva — mesma ordem, e
+    pelo mesmo motivo, do link de acesso do Cockpit (ver web/painel_cockpit.py). O
+    convite é a OUTRA porta de entrada da mesma pessoa: deixar um caminho pela caixa
+    do cliente e outro pelo Zaq faria o acesso funcionar ou não conforme a porta.
+
+    Convite é e-mail de SISTEMA — ninguém responde, só precisa chegar. Mensagem pra
+    lead é que sai pela caixa da empresa, pra resposta cair no inbox dela.
+
+    Tolerante: se nada enviar, devolve False e o link segue na tela como plano B."""
     try:
         from finance import email_sender as es
         from finance import email_inbound as ein
         empresa = conta[2] or "sua empresa"
         assunto, html, texto = es.conteudo_convite_equipe(nome or None, empresa,
                                                           eq.rotulo(papel), link)
-        # 1) caixa da própria empresa (Canais); 2) fallback no SMTP do Zaq
-        if ein.enviar_conta(get_pool(), conta[0], email, assunto, html, texto, from_nome=empresa):
+        # 1) remetente do Zaq, com o nome da empresa visível pra quem recebe
+        if es.enviar_email(email, assunto, html, texto, from_nome=empresa):
             return True
-        return bool(es.enviar_email(email, assunto, html, texto))
+        # 2) reserva: a caixa da empresa, quando o Zaq não pôde mandar
+        return bool(ein.enviar_conta(get_pool(), conta[0], email, assunto, html, texto,
+                                     from_nome=empresa))
     except Exception:  # noqa: BLE001
         return False
 

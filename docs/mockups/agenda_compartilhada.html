@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup — Agenda compartilhada (dono, gestor e vendedor)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================================
+   TOKENS — cópia fiel de web/tema.py (_TOKENS). A fonte da verdade é o tema.py.
+   NÃO copiar de orcamento_eventos.html: aquele ainda usa a paleta anterior ao #400.
+   ============================================================================ */
+:root{
+  color-scheme: dark;
+  --bg:#0A0F0C; --bg-2:#0E1512; --surface:#121A16; --line:#1E2A23;
+  --text:#EAF2ED; --text-dim:#8FA197; --text-faint:#5E6F66;
+  --neon:#25D366; --neon-bright:#46F58A; --neon-deep:#0FA85A;
+  --neon-fraco:rgba(37,211,102,.10); --neon-borda:#1E4A3A; --neon-fundo:#10241A;
+  --sobre-verde:#04150C;
+  --ambar:#E0A32E; --coral:#E0574F; --azul:#229ED9; --roxo:#C9A3E0;
+  --ambar-borda:#5A4520; --ambar-fundo:#241C0F;
+  --coral-borda:#5A2B2B; --coral-fundo:#241313;
+  --azul-borda:#1B3A4A;  --azul-fundo:#0D1B23;
+  --display:"Bricolage Grotesque",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --card:var(--surface); --card-2:var(--bg-2);
+  --borda:var(--line); --txt:var(--text); --txt-mut:var(--text-dim);
+  --verde:var(--neon); --verde-claro:var(--neon);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font-family:var(--body);
+  max-width:1180px;margin:0 auto;padding:34px 18px 100px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.02em}
+h1{font-size:1.7rem;font-weight:700}
+h2{font-size:1.18rem;font-weight:700;margin:0 0 .2rem}
+h3{font-size:.95rem;font-weight:600}
+a{color:var(--verde)}
+code{font-family:var(--mono);font-size:.85em;background:var(--bg-2);
+  padding:.1rem .35rem;border-radius:4px;color:var(--text-dim)}
+
+.sec{margin-top:44px}
+.sec>.num{font-family:var(--mono);font-size:.72rem;color:var(--verde);
+  letter-spacing:.1em;text-transform:uppercase;margin-bottom:.35rem}
+.lede{color:var(--txt-mut);font-size:.92rem;max-width:78ch;margin-top:.5rem}
+.nota{border-left:2px solid var(--neon-borda);background:var(--neon-fraco);
+  padding:.7rem .9rem;border-radius:0 8px 8px 0;font-size:.86rem;margin-top:1rem;
+  color:var(--txt-mut);max-width:82ch}
+.nota b{color:var(--txt)}
+.alerta{border-left-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.alerta b{color:var(--ambar)}
+
+table.diag{width:100%;border-collapse:collapse;margin-top:1rem;font-size:.86rem}
+table.diag th,table.diag td{padding:.55rem .7rem;border-bottom:1px solid var(--borda);
+  text-align:left;vertical-align:top}
+table.diag th{color:var(--txt-mut);font-weight:600;font-size:.76rem;
+  text-transform:uppercase;letter-spacing:.05em}
+.sim{color:var(--verde)} .nao{color:var(--coral)} .meio{color:var(--ambar)}
+
+/* ---------- moldura de tela ---------- */
+.telas{display:grid;grid-template-columns:1fr 340px;gap:26px;margin-top:1.2rem;align-items:start}
+@media (max-width:900px){.telas{grid-template-columns:1fr}}
+.quadro{background:var(--card);border:1px solid var(--borda);border-radius:14px;
+  overflow:hidden}
+.quadro>.cap{background:var(--bg-2);padding:.5rem .85rem;font-size:.72rem;
+  color:var(--txt-mut);border-bottom:1px solid var(--borda);
+  font-family:var(--mono);display:flex;justify-content:space-between;gap:.5rem}
+.quadro>.miolo{padding:16px}
+
+/* ---------- desktop: barra e calendário ---------- */
+.ag-top{display:flex;justify-content:space-between;align-items:center;
+  flex-wrap:wrap;gap:.6rem;margin-bottom:.9rem}
+.seg{display:inline-flex;background:var(--bg-2);border:1px solid var(--borda);
+  border-radius:9px;padding:2px;gap:2px}
+.seg button{background:none;border:0;color:var(--txt-mut);font:inherit;
+  font-size:.78rem;padding:.32rem .7rem;border-radius:7px;cursor:pointer}
+.seg button.on{background:var(--surface);color:var(--txt);font-weight:600;
+  box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.pes{display:flex;gap:.35rem;align-items:center;flex-wrap:wrap}
+.chip-p{display:inline-flex;align-items:center;gap:.35rem;border:1px solid var(--borda);
+  background:var(--bg-2);border-radius:999px;padding:.2rem .6rem .2rem .25rem;
+  font-size:.76rem;color:var(--txt-mut);cursor:pointer}
+.chip-p.on{border-color:var(--neon-borda);background:var(--neon-fundo);color:var(--txt)}
+.av{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;
+  font-size:.6rem;font-weight:700;color:var(--sobre-verde);font-family:var(--mono)}
+
+.legenda{display:flex;gap:1rem;flex-wrap:wrap;font-size:.75rem;color:var(--txt-mut);
+  margin:.2rem 0 1rem}
+.legenda span{display:inline-flex;align-items:center;gap:.4rem}
+.pt{width:9px;height:9px;border-radius:3px;flex:none}
+
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--borda);
+  border:1px solid var(--borda);border-radius:10px;overflow:hidden}
+.cal .dow{background:var(--bg-2);padding:.35rem;text-align:center;font-size:.66rem;
+  color:var(--txt-mut);text-transform:uppercase;letter-spacing:.05em}
+.cal .dia{background:var(--card);min-height:78px;padding:.35rem;display:flex;
+  flex-direction:column;gap:3px}
+.cal .dia.fora{background:var(--bg-2);opacity:.45}
+.cal .dia .n{font-size:.7rem;color:var(--txt-mut);font-variant-numeric:tabular-nums}
+.cal .dia.hoje .n{color:var(--verde);font-weight:700}
+.ev{font-size:.66rem;border-radius:4px;padding:.12rem .3rem;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;border-left:2px solid}
+.ev.visita{background:var(--azul-fundo);border-color:var(--azul);color:#9fd4ee}
+.ev.reserva{background:var(--neon-fundo);border-color:var(--neon);color:#8ee7b0}
+.ev.pre{background:var(--ambar-fundo);border-color:var(--ambar);color:#e6c684;
+  border-left-style:dashed}
+
+/* ---------- lista de compromissos ---------- */
+.lin{display:flex;gap:.75rem;padding:.7rem 0;border-top:1px solid var(--card-2)}
+.lin:first-child{border-top:0}
+.quando{flex:none;width:52px;text-align:center}
+.quando .h{font-size:.92rem;font-weight:700;font-variant-numeric:tabular-nums}
+.quando .d{font-size:.66rem;color:var(--txt-mut)}
+.corpo{flex:1;min-width:0}
+.corpo .tt{font-size:.9rem;font-weight:600}
+.corpo .meta{font-size:.72rem;color:var(--txt-mut);margin-top:2px;
+  display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
+.tag{font-size:.62rem;font-weight:700;padding:.08rem .42rem;border-radius:10px;
+  border:1px solid;white-space:nowrap}
+.tag.visita{color:var(--azul);border-color:var(--azul-borda);background:var(--azul-fundo)}
+.tag.reserva{color:var(--verde);border-color:var(--neon-borda);background:var(--neon-fundo)}
+.tag.pre{color:var(--ambar);border-color:var(--ambar-borda);background:var(--ambar-fundo)}
+.dono-ev{display:inline-flex;align-items:center;gap:.3rem}
+.acoes{display:flex;gap:.55rem;flex-wrap:wrap;margin-top:.4rem}
+.acoes a{font-size:.74rem;text-decoration:none;color:var(--txt-mut);
+  border:1px solid var(--borda);border-radius:7px;padding:.2rem .5rem;background:var(--bg-2)}
+.acoes a.forte{color:var(--verde);border-color:var(--neon-borda)}
+.acoes a.perigo{color:var(--coral);border-color:var(--coral-borda)}
+
+/* ---------- celular ---------- */
+.fone{width:300px;margin:0 auto;border:8px solid #1b241f;border-radius:30px;
+  overflow:hidden;background:var(--bg);box-shadow:0 14px 40px rgba(0,0,0,.5)}
+.fone .barra{background:var(--bg-2);padding:.5rem .8rem;display:flex;
+  justify-content:space-between;align-items:center;border-bottom:1px solid var(--borda)}
+.fone .barra b{font-family:var(--display);font-size:.9rem}
+.fone .barra small{color:var(--txt-mut);font-size:.66rem;display:block;font-weight:400}
+.fone .corpo-f{padding:12px;min-height:330px}
+.eyebrow{font-size:.64rem;text-transform:uppercase;letter-spacing:.09em;
+  color:var(--txt-mut);font-weight:700;margin:.7rem 0 .4rem}
+.eyebrow:first-child{margin-top:0}
+.card-ev{background:var(--card);border:1px solid var(--borda);border-radius:11px;
+  padding:.6rem .7rem;margin-bottom:.5rem;display:flex;gap:.6rem}
+.card-ev.hoje{border-color:var(--neon-borda)}
+.card-ev .qq{flex:none;text-align:center;width:44px}
+.card-ev .qq .h{font-size:.88rem;font-weight:700}
+.card-ev .qq .d{font-size:.62rem;color:var(--txt-mut)}
+.card-ev .cc{flex:1;min-width:0}
+.card-ev .cc b{font-size:.8rem;display:block}
+.card-ev .cc .lo{font-size:.68rem;color:var(--txt-mut)}
+.mini{display:flex;gap:.35rem;margin-top:.35rem;flex-wrap:wrap}
+.mini a{font-size:.66rem;color:var(--txt-mut);text-decoration:none;
+  border:1px solid var(--borda);border-radius:6px;padding:.12rem .4rem}
+.tabs{display:flex;background:var(--bg-2);border-top:1px solid var(--borda)}
+.tabs a{flex:1;text-align:center;padding:.5rem .2rem;font-size:.58rem;
+  color:var(--txt-faint);text-decoration:none}
+.tabs a.on{color:var(--verde)}
+.tabs a i{display:block;font-size:.95rem;font-style:normal;margin-bottom:1px}
+
+.legenda-lat{font-size:.78rem;color:var(--txt-mut);margin-top:.8rem}
+ul.lista{margin:.6rem 0 0 1.1rem;font-size:.87rem;color:var(--txt-mut)}
+ul.lista li{margin-bottom:.35rem}
+ul.lista b{color:var(--txt)}
+.rodape{margin-top:56px;padding-top:18px;border-top:1px solid var(--borda);
+  font-size:.8rem;color:var(--text-faint)}
+</style>
+</head>
+<body>
+
+<h1>Agenda compartilhada</h1>
+<p class="lede">Hoje a agenda existe, o dado já é da conta inteira — mas a tela esconde.
+Este mockup mostra o que passa a aparecer pra <b>dono, gestor e vendedor</b>, no desktop e
+no app, com <b>visita, pré-reserva e reserva</b> no mesmo lugar.</p>
+
+<!-- ====================================================== 1 -->
+<section class="sec">
+  <div class="num">1 · o que está errado hoje</div>
+  <h2>O dado já é comum. O que separa é permissão de rota e uma consulta.</h2>
+  <p class="lede"><code>agenda.listar_eventos</code> já busca por <code>conta_id</code>, sem
+  filtro de membro. Ou seja: não é preciso "construir" uma agenda compartilhada — é preciso
+  parar de escondê-la.</p>
+
+  <table class="diag">
+    <tr><th>Papel</th><th>Desktop <code>/painel/agenda</code></th><th>App <code>/cockpit/agenda</code></th></tr>
+    <tr>
+      <td><b>Dono</b></td>
+      <td class="sim">✓ conta inteira — visita, reserva e pré-reserva</td>
+      <td class="nao">✕ não existe aba de agenda</td>
+    </tr>
+    <tr>
+      <td><b>Gestor</b></td>
+      <td class="nao">✕ o gate devolve — <code>/painel/agenda</code> não está em <code>rotas_do_papel</code></td>
+      <td class="nao">✕ não existe aba de agenda</td>
+    </tr>
+    <tr>
+      <td><b>Vendedor</b></td>
+      <td class="nao">✕ o gate devolve</td>
+      <td class="meio">~ só as visitas que <b>ele</b> marcou, e <b>sem pré-reserva</b>
+        (<code>visitas_do_vendedor</code> filtra <code>membro_id</code> e <code>status='ativo'</code>)</td>
+    </tr>
+  </table>
+
+  <div class="nota alerta">
+    <b>O buraco que mais dói:</b> a <b>pré-reserva</b> — a data segurada até o sinal — não
+    aparece pra ninguém além do dono. É exatamente a informação que evita vender a mesma
+    data duas vezes, e é o vendedor, na rua, quem corre esse risco.
+  </div>
+</section>
+
+<!-- ====================================================== 2 -->
+<section class="sec">
+  <div class="num">2 · desktop</div>
+  <h2>Mesma tela pra todo mundo, com filtro por pessoa</h2>
+  <p class="lede">Como agora todos veem tudo, o filtro por pessoa deixa de ser permissão e
+  vira <b>conveniência</b>: "me mostra só o meu" continua a um clique, mas o padrão é o time.</p>
+
+  <div class="telas">
+    <div class="quadro">
+      <div class="cap"><span>/painel/agenda</span><span>desktop · dono, gestor e vendedor</span></div>
+      <div class="miolo">
+        <div class="ag-top">
+          <div class="seg">
+            <button class="on">Mês</button><button>Semana</button><button>Lista</button>
+          </div>
+          <div class="pes">
+            <span class="chip-p on"><span class="av" style="background:var(--neon)">TD</span>Todos</span>
+            <span class="chip-p"><span class="av" style="background:#7fb2d9">MS</span>Manoel</span>
+            <span class="chip-p"><span class="av" style="background:#d9a87f">RF</span>Rafael</span>
+            <span class="chip-p"><span class="av" style="background:#c2a3d9">BI</span>Bia</span>
+          </div>
+        </div>
+
+        <div class="legenda">
+          <span><i class="pt" style="background:var(--azul)"></i> Visita</span>
+          <span><i class="pt" style="background:var(--neon)"></i> Reserva confirmada</span>
+          <span><i class="pt" style="background:var(--ambar)"></i> Pré-reserva (data segurada)</span>
+        </div>
+
+        <div class="cal">
+          <div class="dow">dom</div><div class="dow">seg</div><div class="dow">ter</div>
+          <div class="dow">qua</div><div class="dow">qui</div><div class="dow">sex</div><div class="dow">sáb</div>
+
+          <div class="dia fora"><span class="n">28</span></div>
+          <div class="dia fora"><span class="n">29</span></div>
+          <div class="dia fora"><span class="n">30</span></div>
+          <div class="dia"><span class="n">1</span></div>
+          <div class="dia"><span class="n">2</span></div>
+          <div class="dia"><span class="n">3</span><div class="ev visita">14h Visita — Padaria</div></div>
+          <div class="dia"><span class="n">4</span></div>
+
+          <div class="dia"><span class="n">5</span></div>
+          <div class="dia hoje"><span class="n">6</span>
+            <div class="ev visita">09h Visita — Ana</div>
+            <div class="ev pre">Pré — Marina</div></div>
+          <div class="dia"><span class="n">7</span></div>
+          <div class="dia"><span class="n">8</span><div class="ev reserva">Casamento — Júlia</div></div>
+          <div class="dia"><span class="n">9</span></div>
+          <div class="dia"><span class="n">10</span><div class="ev visita">16h Visita — Caio</div></div>
+          <div class="dia"><span class="n">11</span></div>
+
+          <div class="dia"><span class="n">12</span></div>
+          <div class="dia"><span class="n">13</span><div class="ev pre">Pré — Formatura</div></div>
+          <div class="dia"><span class="n">14</span></div>
+          <div class="dia"><span class="n">15</span><div class="ev reserva">15 anos — Bia</div></div>
+          <div class="dia"><span class="n">16</span></div>
+          <div class="dia"><span class="n">17</span></div>
+          <div class="dia"><span class="n">18</span></div>
+        </div>
+
+        <div style="margin-top:1.1rem">
+          <h3 style="margin-bottom:.5rem">Hoje · quinta, 6</h3>
+
+          <div class="lin">
+            <div class="quando"><div class="h">09:00</div><div class="d">06/09</div></div>
+            <div class="corpo">
+              <div class="tt">Visita — Ana e Pedro</div>
+              <div class="meta">
+                <span class="tag visita">visita</span>
+                <span>📍 Av. Frei Serafim, 1200</span>
+                <span class="dono-ev"><i class="av" style="background:#d9a87f;width:16px;height:16px;font-size:.52rem">RF</i> Rafael</span>
+              </div>
+              <div class="acoes">
+                <a href="#" class="forte">Abrir lead</a><a href="#">Remarcar</a>
+                <a href="#">Desfecho</a><a href="#" class="perigo">Cancelar</a>
+              </div>
+            </div>
+          </div>
+
+          <div class="lin">
+            <div class="quando"><div class="h">—</div><div class="d">06/09</div></div>
+            <div class="corpo">
+              <div class="tt">Pré-reserva — Marina e Rafael</div>
+              <div class="meta">
+                <span class="tag pre">pré-reserva</span>
+                <span style="color:var(--ambar)">⏳ sinal vence em 2 dias</span>
+                <span class="dono-ev"><i class="av" style="background:#7fb2d9;width:16px;height:16px;font-size:.52rem">MS</i> Manoel</span>
+              </div>
+              <div class="acoes">
+                <a href="#" class="forte">Confirmar sinal</a><a href="#">Ver proposta</a>
+                <a href="#" class="perigo">Liberar data</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="quadro">
+        <div class="cap"><span>o que muda aqui</span></div>
+        <div class="miolo">
+          <ul class="lista">
+            <li><b>Libera a rota.</b> <code>/painel/agenda</code> entra no
+              <code>rotas_do_papel</code> pra quem tem <code>vendas</code> ou
+              <code>financeiro</code>. Hoje só o dono passa.</li>
+            <li><b>Pré-reserva no calendário</b>, com traço tracejado e âmbar — data ocupada
+              não é compromisso, e a tela precisa dizer isso sem exigir clique.</li>
+            <li><b>Quem marcou aparece</b> em cada linha. Numa agenda de um dono só isso era
+              ruído; numa de time é a primeira pergunta.</li>
+            <li><b>Filtro por pessoa</b> — padrão "Todos". Não é permissão, é foco.</li>
+            <li><b>Todos mexem</b> (sua decisão): remarcar, dar desfecho e cancelar ficam
+              disponíveis pra qualquer papel.</li>
+          </ul>
+          <div class="nota alerta" style="margin-top:1rem">
+            <b>O risco aceito:</b> com todos mexendo, um toque errado cancela a data de um
+            evento vendido. Por isso o <b>Cancelar</b> e o <b>Liberar data</b> nascem em
+            coral e com confirmação — e o desfecho fica registrado com o nome de quem fez.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================== 3 -->
+<section class="sec">
+  <div class="num">3 · app</div>
+  <h2>Aba de agenda pros três papéis</h2>
+  <p class="lede">O vendedor já tem a aba, mas ela mostra só as visitas dele. Dono e gestor
+  não têm aba nenhuma. Nos dois casos a mesma tela resolve — muda só o que vem marcado por
+  padrão no seletor do topo.</p>
+
+  <div class="telas">
+    <div>
+      <div class="fone">
+        <div class="barra">
+          <div><b>Agenda</b><small>2 hoje · 9 nos próximos 14 dias</small></div>
+          <span style="font-size:1.1rem;color:var(--verde)">+</span>
+        </div>
+        <div class="corpo-f">
+          <div class="seg" style="width:100%;margin-bottom:.7rem">
+            <button style="flex:1">Meus</button>
+            <button class="on" style="flex:1">Todos</button>
+          </div>
+
+          <div class="eyebrow">Hoje</div>
+
+          <div class="card-ev hoje">
+            <div class="qq"><div class="h">09:00</div><div class="d">hoje</div></div>
+            <div class="cc">
+              <b>Visita — Ana e Pedro</b>
+              <div class="lo">📍 Av. Frei Serafim, 1200</div>
+              <div class="meta" style="font-size:.66rem;color:var(--txt-mut);margin-top:3px">
+                <span class="tag visita">visita</span> · Rafael
+              </div>
+              <div class="mini"><a href="#">Lead</a><a href="#">Mapa</a><a href="#">Avisar</a></div>
+            </div>
+          </div>
+
+          <div class="card-ev">
+            <div class="qq"><div class="h">—</div><div class="d">hoje</div></div>
+            <div class="cc">
+              <b>Pré-reserva — Marina</b>
+              <div class="lo" style="color:var(--ambar)">⏳ sinal vence em 2 dias</div>
+              <div class="meta" style="font-size:.66rem;color:var(--txt-mut);margin-top:3px">
+                <span class="tag pre">pré-reserva</span> · Manoel
+              </div>
+              <div class="mini"><a href="#">Proposta</a><a href="#">Confirmar sinal</a></div>
+            </div>
+          </div>
+
+          <div class="eyebrow">Próximos dias</div>
+
+          <div class="card-ev">
+            <div class="qq"><div class="h">—</div><div class="d">08/09</div></div>
+            <div class="cc">
+              <b>Casamento — Júlia e Caio</b>
+              <div class="lo">📍 Salão Prime</div>
+              <div class="meta" style="font-size:.66rem;color:var(--txt-mut);margin-top:3px">
+                <span class="tag reserva">reserva</span> · Bia
+              </div>
+              <div class="mini"><a href="#">Proposta</a><a href="#">Calendário</a></div>
+            </div>
+          </div>
+
+          <div class="card-ev">
+            <div class="qq"><div class="h">16:00</div><div class="d">10/09</div></div>
+            <div class="cc">
+              <b>Visita — Caio</b>
+              <div class="lo">📍 Rua Areolino, 45</div>
+              <div class="meta" style="font-size:.66rem;color:var(--txt-mut);margin-top:3px">
+                <span class="tag visita">visita</span> · você
+              </div>
+              <div class="mini"><a href="#">Lead</a><a href="#">Mapa</a></div>
+            </div>
+          </div>
+        </div>
+        <div class="tabs">
+          <a href="#"><i>▤</i>Fila</a>
+          <a href="#" class="on"><i>◷</i>Agenda</a>
+          <a href="#"><i>◈</i>Propostas</a>
+          <a href="#"><i>▲</i>Resultado</a>
+          <a href="#"><i>◉</i>Perfil</a>
+        </div>
+      </div>
+      <p class="legenda-lat" style="text-align:center">Vendedor — a aba que já existe,<br>
+        agora com o time e com pré-reserva</p>
+    </div>
+
+    <div>
+      <div class="quadro">
+        <div class="cap"><span>o que muda aqui</span></div>
+        <div class="miolo">
+          <ul class="lista">
+            <li><b>Uma consulta só</b> substitui <code>visitas_do_vendedor</code>: por conta,
+              incluindo pré-reserva, com o filtro "meus × todos" na tela em vez de no SQL.</li>
+            <li><b>Aba nova pro dono e pro gestor</b> em <code>_abas_dono</code> — hoje ela
+              não existe, e são seis abas: cabe (o próprio código já mediu isso).</li>
+            <li><b>"Meus × Todos"</b> — o vendedor abre em "Todos" por padrão? <b>Não</b>:
+              abre em <b>Meus</b>, que é o dia dele. O dono/gestor abre em <b>Todos</b>.</li>
+            <li><b>Quem marcou</b> em cada card, com "você" quando for o próprio.</li>
+            <li><b>O "+"</b> no topo cria compromisso direto do celular — hoje só dá pra
+              marcar visita de dentro de um lead.</li>
+          </ul>
+          <div class="nota">
+            <b>Por que o vendedor abre em "Meus":</b> a agenda dele é ferramenta de rota do
+            dia — abrir com o time inteiro empurraria a próxima visita dele pra baixo da
+            dobra. Ver o time é uma consulta, não o uso principal.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================== 4 -->
+<section class="sec">
+  <div class="num">4 · resumo do que muda no código</div>
+  <h2>Quatro pontos, nenhum deles no modelo</h2>
+  <table class="diag">
+    <tr><th>Onde</th><th>O quê</th></tr>
+    <tr><td><code>contas/equipe.py</code></td>
+        <td><code>rotas_do_papel</code> ganha <code>/painel/agenda</code> pra quem tem
+        <code>vendas</code> ou <code>financeiro</code>. É o que destrava o desktop.</td></tr>
+    <tr><td><code>finance/cockpit.py</code></td>
+        <td><code>visitas_do_vendedor</code> vira <code>agenda_da_conta(..., so_meus=False)</code>:
+        por conta, com pré-reserva, devolvendo o dono de cada evento.</td></tr>
+    <tr><td><code>web/painel_cockpit.py</code></td>
+        <td>Aba Agenda em <code>_abas_dono</code>; seletor "Meus × Todos"; tipo e autor em
+        cada card; botão "+" de novo compromisso.</td></tr>
+    <tr><td><code>web/painel_agenda.py</code></td>
+        <td>Pré-reserva no calendário por padrão, filtro por pessoa, e o autor na linha.</td></tr>
+  </table>
+  <div class="nota">
+    <b>O que NÃO muda:</b> <code>finance/agenda.py</code>. O modelo já é por conta, já
+    conhece <code>pre_reservado</code> e já tem <code>incluir_pre_reserva</code>. Nada de
+    migração, nada de coluna nova.
+  </div>
+</section>
+
+<p class="rodape">Mockup estático — cores e tipografia copiadas de <code>web/tema.py</code>.
+Números e nomes são ilustrativos.</p>
+
+</body>
+</html>

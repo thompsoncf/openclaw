@@ -146,6 +146,97 @@ def _itens_curtos(bruto, limite: int = 8) -> list[dict]:
     return out
 
 
+# ------------------------------------------------- o ESTADO DA DATA no funil
+#
+# POR QUE ISSO EXISTE. A data de um evento aprovado tem quatro estados, e até
+# 19/08/2026 a linha do funil só sabia desenhar UM deles — a pré-reserva
+# correndo. Os outros três ficavam com a mesma cara:
+#
+#     reservada  compromisso firme na agenda           tudo certo
+#     segurada   pré-reserva correndo, esperando sinal  já aparecia
+#     fora       nunca entrou na agenda                 PARECIA tudo certo
+#     liberada   entrou e o prazo do sinal venceu       PARECIA tudo certo
+#
+# E "fora" não é hipótese: a reserva nasce num lugar só (o cliente assinando o
+# link público) e sai calada por quatro portas — orçamento sem hora de início,
+# exceção engolida, processo reiniciado antes da tarefa de segundo plano rodar,
+# ou modo diferente de evento. Nenhuma delas deixava rastro na tela.
+#
+# NADA DISSO PEDE CONFIGURAÇÃO NOVA. Os quatro estados são lidos do que já
+# existe; o único ajuste da empresa continua sendo "Segurar por N dias", na aba
+# Agenda.
+
+DATA_RESERVADA = "reservada"
+DATA_SEGURADA = "segurada"
+DATA_FORA = "fora"
+DATA_LIBERADA = "liberada"
+
+# Depois do aceite a data virou promessa ao cliente. Antes disso não há o que
+# cobrar: rascunho e proposta enviada não reservam nada, por definição.
+_APROVADOS = ("aprovada", "fechado")
+
+
+def estado_da_data(*, status, modo, evento, evento_status, pre_reserva_ate,
+                   hoje=None) -> dict | None:
+    """O que a linha do funil diz sobre a data — ou None quando não diz nada.
+
+    Devolve `estado`, o `texto` do selo, a `dica` que explica sem jargão e a
+    `acao` que conserta (None quando não há o que fazer).
+
+    DEVOLVE None QUANDO A DATA JÁ PASSOU. Um alarme vermelho eterno num evento de
+    julho não é informação: é a mesma armadilha do aviso do contrato, que
+    disparava sem ter o que consertar e ensinava o dono a ignorar o próximo. Data
+    vencida não tem conserto — some do funil em silêncio.
+
+    Pura de propósito: recebe as colunas que a consulta do funil já traz e não
+    volta ao banco, então a REDAÇÃO — que é o que o dono lê — dá pra testar sem
+    subir tela nenhuma."""
+    from finance import agenda as ag
+
+    if (modo or "") != "evento" or (status or "") not in _APROVADOS:
+        return None
+
+    ev = evento or {}
+    dia = ag.parse_data(ev.get("data"))
+    hoje = hoje or ag.agora_brt().date()
+    # sem data e sem compromisso, nada foi prometido
+    if dia is None and not evento_status:
+        return None
+    if dia is not None and dia < hoje:
+        return None
+
+    if evento_status == ag.PRE_RESERVADO:
+        ate = (pre_reserva_ate.astimezone(ag.BRT).strftime("%d/%m %H:%M")
+               if pre_reserva_ate else "")
+        return {"estado": DATA_SEGURADA,
+                "texto": f"Data segurada até {ate}" if ate else "Data segurada",
+                "dica": "O cliente aprovou, mas o sinal ainda não foi confirmado. "
+                        "Passando o prazo, a data libera sozinha.",
+                "acao": "sinal"}
+
+    if evento_status == "ativo":
+        return {"estado": DATA_RESERVADA, "texto": "Data reservada",
+                "dica": "A data está firme na agenda da empresa.", "acao": None}
+
+    if evento_status == "cancelado":
+        return {"estado": DATA_LIBERADA, "texto": "Data liberada",
+                "dica": "O prazo do sinal venceu (ou alguém soltou a data) e ela "
+                        "voltou a ficar livre na agenda. Se o cliente ainda quer, "
+                        "dá pra segurar de novo.",
+                "acao": "resegurar"}
+
+    # nenhum compromisso: a aprovação não virou data. O motivo mais comum tem
+    # conserto próprio, então ele é dito em vez de um "deu erro" genérico.
+    sem_hora = not (ev.get("inicio") or "").strip()
+    return {"estado": DATA_FORA, "texto": "Fora da agenda",
+            "dica": ("Falta a hora de início do evento — sem ela a data não entra "
+                     "na agenda. Preencha em “O evento” e marque."
+                     if sem_hora else
+                     "O cliente aprovou, mas a data não entrou na agenda. "
+                     "Toque em Marcar agora."),
+            "acao": "marcar"}
+
+
 def fichas_de_eventos(pool, conta_id: int, evento_ids) -> dict[int, dict]:
     """{id_do_compromisso: ficha} — o orçamento e o PAGAMENTO de cada festa.
 

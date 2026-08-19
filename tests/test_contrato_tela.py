@@ -95,8 +95,10 @@ def cliente(monkeypatch):
     app.include_router(ps.router)
 
     @app.post("/_entrar")
-    async def _entrar(request: Request):
-        request.session["papel"] = "dono"
+    async def _entrar(request: Request, papel: str = "dono"):
+        # papel virou parâmetro quando o contrato passou a ser SÓ DO DONO: o
+        # vendedor abre a mesma aba (tem `vendas`), e precisa dar 403 aqui.
+        request.session["papel"] = papel
         request.session["membro_id"] = 1
         return {"ok": True}
 
@@ -205,12 +207,13 @@ def test_a_paleta_traz_os_precos_do_catalogo_da_conta(cliente):
 
 # --------------------------------------------------------------------- prévia
 
-def _orcamento(cliente, *, com_evento=True):
+def _orcamento(cliente, *, com_evento=True, cliente_nome="Thompson"):
     with cliente.pool.connection() as c:
         c.execute("""insert into orcamentos (conta_id, cliente, cnpj, setup_centavos, numero,
                        evento, modo, status)
-                     values (%s,'Thompson','000.000.000-00',890000,27,%s::jsonb,'evento','aprovada')""",
-                  (CONTA_EV, '{"data":"31/12/2026","inicio":"21:00","convidados":50,"tipo":"Casamento"}'
+                     values (%s,%s,'000.000.000-00',890000,27,%s::jsonb,'evento','aprovada')""",
+                  (CONTA_EV, cliente_nome,
+                   '{"data":"31/12/2026","inicio":"21:00","convidados":50,"tipo":"Casamento"}'
                    if com_evento else '{}'))
         c.commit()
 
@@ -224,7 +227,7 @@ def test_previa_usa_um_orcamento_de_verdade(cliente):
         "regras": {}})
     assert r.status_code == 200
     d = r.json()
-    assert d["faltas"] == []
+    assert d["ajustes"] == [] and d["da_proposta"] == []
     assert d["clausulas"][0]["corpo"] == (
         "Thompson, dia 31/12/2026, total R$ 8.900,00, hora extra R$ 620,00")
 
@@ -235,7 +238,8 @@ def test_previa_denuncia_o_item_que_saiu_do_catalogo(cliente):
     d = cliente.post("/painel/servicos/contrato/previa", json={
         "clausulas": [{"titulo": "X", "corpo": "Segurança: {preco.seguranca}"}],
         "regras": {}}).json()
-    assert d["faltas"] == ["preco.seguranca"]
+    assert [a["campo"] for a in d["ajustes"]] == ["preco.seguranca"]
+    assert "catálogo" in d["ajustes"][0]["detalhe"]
     assert "{preco.seguranca}" in d["clausulas"][0]["corpo"]
 
 
@@ -291,15 +295,15 @@ def test_o_selo_denuncia_o_item_que_saiu_do_catalogo(cliente):
     _orcamento(cliente)
     cliente.post("/painel/servicos/contrato/salvar", json={
         "clausulas": [{"titulo": "X", "corpo": "Segurança: {preco.seguranca}"}], "regras": {}})
-    assert cliente.get("/painel/servicos/contrato").json()["resumo"]["faltas"] == \
-        ["preco.seguranca"]
+    r = cliente.get("/painel/servicos/contrato").json()["resumo"]
+    assert [a["campo"] for a in r["ajustes"]] == ["preco.seguranca"]
 
 
 def test_contrato_saudavel_nao_tem_falta(cliente):
     _orcamento(cliente)
     cliente.post("/painel/servicos/contrato/salvar", json={
         "clausulas": [{"titulo": "X", "corpo": "Hora extra: {preco.hora-extra}"}], "regras": {}})
-    assert cliente.get("/painel/servicos/contrato").json()["resumo"]["faltas"] == []
+    assert cliente.get("/painel/servicos/contrato").json()["resumo"]["ajustes"] == []
 
 
 def test_o_item_sumir_do_catalogo_acende_o_selo(cliente):
@@ -308,21 +312,21 @@ def test_o_item_sumir_do_catalogo_acende_o_selo(cliente):
     _orcamento(cliente)
     cliente.post("/painel/servicos/contrato/salvar", json={
         "clausulas": [{"titulo": "X", "corpo": "Limpeza: {preco.taxa-de-limpeza}"}], "regras": {}})
-    assert cliente.get("/painel/servicos/contrato").json()["resumo"]["faltas"] == []
+    assert cliente.get("/painel/servicos/contrato").json()["resumo"]["ajustes"] == []
     with cliente.pool.connection() as c:
         c.execute("delete from servicos_catalogo where slug='taxa-de-limpeza'")
         c.commit()
-    assert cliente.get("/painel/servicos/contrato").json()["resumo"]["faltas"] == \
-        ["preco.taxa-de-limpeza"]
+    r = cliente.get("/painel/servicos/contrato").json()["resumo"]
+    assert [a["campo"] for a in r["ajustes"]] == ["preco.taxa-de-limpeza"]
 
 
 def test_sem_orcamento_de_exemplo_o_selo_fica_quieto(cliente):
     """Sem base pra montar, dizer "tudo certo" seria mentira e dizer "faltando"
-    seria alarme falso. O resumo só não fala de faltas."""
+    seria alarme falso. O resumo só não fala de ajustes."""
     cliente.post("/painel/servicos/contrato/salvar", json={
         "clausulas": [{"titulo": "X", "corpo": "{preco.inexistente}"}], "regras": {}})
     r = cliente.get("/painel/servicos/contrato").json()["resumo"]
-    assert r["faltas"] == [] and r["n"] == 1
+    assert r["ajustes"] == [] and r["n"] == 1
 
 
 def test_restaurar_padrao_nao_inventa_historico(cliente):
@@ -339,4 +343,89 @@ def test_o_modelo_padrao_da_tela_monta_sem_falta(cliente):
     d0 = cliente.get("/painel/servicos/contrato").json()
     d = cliente.post("/painel/servicos/contrato/previa",
                      json={"clausulas": d0["clausulas"], "regras": d0["regras"]}).json()
-    assert d["faltas"] == []
+    assert d["ajustes"] == []
+
+
+# --------------------------------------------- o segundo gate: só o DONO
+#
+# O contrato define o que a empresa se compromete a cumprir com o cliente —
+# prazo, multa, sinal, tolerância. Não é decisão de quem vende: o vendedor
+# negocia dentro dessas regras, não as escreve.
+#
+# `gerir` é a capacidade que já separa o titular do resto (contas/equipe.py:26 —
+# só o dono tem). Gatear por ela evita uma segunda régua de permissão que amanhã
+# diverge da primeira.
+
+
+@pytest.mark.parametrize("papel", ["vendedor", "gestor"])
+@pytest.mark.parametrize("metodo, url", [
+    ("get", "/painel/servicos/contrato"),
+    ("post", "/painel/servicos/contrato/salvar"),
+    ("post", "/painel/servicos/contrato/previa"),
+])
+def test_quem_nao_e_dono_nao_alcanca_o_contrato(cliente, papel, metodo, url):
+    """O gestor também não: ele tem vendas e financeiro, mas `gerir` é do dono."""
+    cliente.post("/_entrar", params={"papel": papel})
+    r = (cliente.get(url) if metodo == "get"
+         else cliente.post(url, json={"clausulas": _clausulas(), "regras": {}}))
+    assert r.status_code == 403
+    assert "dono" in r.json()["erro"]
+
+
+def test_vendedor_nao_grava_clausula_nenhuma(cliente):
+    """Esconder o card não tranca a URL — o que tranca é isto."""
+    cliente.post("/_entrar", params={"papel": "vendedor"})
+    cliente.post("/painel/servicos/contrato/salvar",
+                 json={"clausulas": _clausulas(), "regras": {}})
+    with cliente.pool.connection() as c:
+        n = c.execute("select count(*) from contrato_modelo").fetchone()[0]
+    assert n == 0
+
+
+def test_o_dono_continua_entrando(cliente):
+    """A trava nova não pode ter fechado a porta pra quem tem que passar."""
+    cliente.post("/_entrar", params={"papel": "dono"})
+    assert cliente.get("/painel/servicos/contrato").status_code == 200
+
+
+# ------------------------------------- o alarme só fala do que o dono conserta
+#
+# O caso real que trouxe estes testes: o card passou a listar os campos sem valor
+# e o primeiro aviso que a Prime Eventos viu foi "{cliente.nome}" — porque o
+# orçamento mais recente com data de evento (o nº 2) não tinha o nome do cliente.
+# Nada estava errado no contrato dela. Aviso sem conserto possível ensina o dono
+# a ignorar o próximo, que vai ser de verdade.
+
+def test_orcamento_de_exemplo_sem_nome_do_cliente_nao_acende_o_selo(cliente):
+    """A reprodução do caso da Prime, ponta a ponta."""
+    _orcamento(cliente, cliente_nome="")
+    cliente.post("/painel/servicos/contrato/salvar", json={
+        "clausulas": [{"titulo": "Objeto", "corpo": "{cliente.nome} loca o espaço."}],
+        "regras": {}})
+    r = cliente.get("/painel/servicos/contrato").json()["resumo"]
+    assert r["ajustes"] == []
+    assert r["da_proposta"] == ["cliente.nome"]
+
+
+def test_o_selo_continua_acendendo_pro_erro_de_verdade(cliente):
+    """A garantia do teste acima: separar não pode virar silenciar."""
+    _orcamento(cliente, cliente_nome="")
+    cliente.post("/painel/servicos/contrato/salvar", json={
+        "clausulas": [{"titulo": "X", "corpo": "{cliente.nome} · {preco.seguranca}"}],
+        "regras": {}})
+    r = cliente.get("/painel/servicos/contrato").json()["resumo"]
+    assert [a["campo"] for a in r["ajustes"]] == ["preco.seguranca"]
+    assert r["da_proposta"] == ["cliente.nome"]
+
+
+def test_a_previa_explica_o_campo_de_proposta_em_vez_de_esconder(cliente):
+    """No preview o {cliente.nome} FICA à vista no texto — é o comportamento do
+    contrato. A prévia devolve a lista pra tela poder dizer por que ele está ali,
+    senão o dono lê aquilo como defeito."""
+    _orcamento(cliente, cliente_nome="")
+    d = cliente.post("/painel/servicos/contrato/previa", json={
+        "clausulas": [{"titulo": "Objeto", "corpo": "{cliente.nome} loca o espaço."}],
+        "regras": {}}).json()
+    assert d["ajustes"] == []
+    assert d["da_proposta"] == ["cliente.nome"]
+    assert "{cliente.nome}" in d["clausulas"][0]["corpo"]

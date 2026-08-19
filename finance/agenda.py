@@ -133,11 +133,16 @@ def _fmt_evento(row) -> dict:
             "link_online": row[10] if len(row) > 10 else None,
             "status": (row[11] if len(row) > 11 else None) or "ativo",
             "pre_reserva_ate": row[12] if len(row) > 12 else None,
-            "sinal_centavos": row[13] if len(row) > 13 else None}
+            "sinal_centavos": row[13] if len(row) > 13 else None,
+            # quem marcou. Numa agenda de um dono só isso era ruído; agora que ela é
+            # compartilhada (gestor e vendedor também veem), é a primeira pergunta de
+            # quem olha um compromisso que não marcou. A coluna sempre existiu (098);
+            # só não era lida.
+            "membro_id": row[14] if len(row) > 14 else None}
 
 
 _COLS = ("id, titulo, inicio, fim, local, descricao, lembrete_min, criado_em, tipo, "
-        "desfecho, link_online, status, pre_reserva_ate, sinal_centavos")
+        "desfecho, link_online, status, pre_reserva_ate, sinal_centavos, membro_id")
 
 # Data SEGURADA, ainda não vendida: o cliente aprovou o orçamento mas o sinal não
 # entrou. Fica de fora de tudo que trata compromisso como certo — lembrete, resumo
@@ -437,33 +442,79 @@ def pre_reservas(pool, conta_id: int, limite: int = 12) -> list[dict]:
             " order by pre_reserva_ate nulls last, inicio limit %s",
             (conta_id, PRE_RESERVADO, limite)).fetchall()
     eventos = [_fmt_evento(r) for r in rows]
-    if eventos:
-        for ev in eventos:
-            ev.update(_orcamento_da_reserva(pool, conta_id, ev["id"]))
+    return _com_orcamento(pool, conta_id, eventos)
+
+
+def confirmadas(pool, conta_id: int, agora=None, limite: int = 12) -> list[dict]:
+    """As datas FIRMES daqui pra frente, da mais próxima pra mais distante.
+
+    A irmã de `pre_reservas`. Uma diz o que está por um fio; esta diz o que já é
+    da casa — e até 19/08/2026 não existia em lugar nenhum da tela: quem quisesse
+    saber quantas datas tinha vendidas contava no calendário, mês a mês.
+
+    Só compromisso de EMPRESA: aniversário do sócio e reunião com fornecedor são
+    agenda, não venda de data, e misturados no mesmo contador o número deixa de
+    querer dizer alguma coisa.
+
+    Corta no AGORA, não no início do dia: a festa de ontem não é data confirmada,
+    é festa que já aconteceu — e sai da lista sozinha, sem ninguém arquivar nada."""
+    agora = agora or agora_brt()
+    with pool.connection() as c:
+        rows = c.execute(
+            "select " + _COLS + " from eventos_agenda "
+            " where conta_id=%s and status='ativo' and tipo='empresa' and inicio >= %s "
+            " order by inicio limit %s",
+            (conta_id, agora, limite)).fetchall()
+    return _com_orcamento(pool, conta_id, [_fmt_evento(r) for r in rows])
+
+
+def _com_orcamento(pool, conta_id: int, eventos: list[dict]) -> list[dict]:
+    """Cola o orçamento de origem em cada evento, numa CONSULTA SÓ.
+
+    Era uma por evento — e cada uma pegava conexão nova do pool. Numa agenda com
+    12 datas seguradas isso somava 12 idas ao banco a cada carregamento da tela,
+    e a tela recarrega a cada clique nos nomes e nas setas do mês. Quanto melhor
+    o mês da empresa, mais lenta ficava a Agenda: o pior jeito possível de uma
+    lentidão crescer.
+
+    Tolerante de propósito: a agenda funciona em conta que nem tem o módulo de
+    orçamentos, e um erro aqui não pode derrubar a tela por causa de um enfeite.
+    Compromisso marcado na própria agenda ("segura o dia 20", por telefone) não
+    tem orçamento e simplesmente não ganha as chaves."""
+    ids = [e["id"] for e in eventos]
+    if not ids:
+        return eventos
+    try:
+        with pool.connection() as c:
+            rows = c.execute(
+                "select evento_agenda_id, id, numero, sinal_centavos, "
+                "       coalesce(primeiro_ano_centavos, setup_centavos, 0) "
+                "  from orcamentos "
+                " where conta_id=%s and evento_agenda_id = any(%s)",
+                (conta_id, ids)).fetchall()
+    except Exception:  # noqa: BLE001 — conta/instalação sem o módulo de orçamentos
+        return eventos
+    por_evento = {r[0]: r for r in rows}
+    for ev in eventos:
+        r = por_evento.get(ev["id"])
+        if not r:
+            continue
+        ev["orcamento_id"] = r[1]
+        ev["orcamento_numero"] = r[2]
+        if r[3]:
+            ev["sinal_centavos"] = r[3]
+        if r[4]:
+            ev["total_centavos"] = r[4]
     return eventos
 
 
-def _orcamento_da_reserva(pool, conta_id: int, evento_id: int) -> dict:
-    """{orcamento_id, orcamento_numero, sinal_centavos} da reserva, ou vazio."""
-    try:
-        with pool.connection() as c:
-            r = c.execute(
-                "select id, numero, sinal_centavos from orcamentos "
-                " where evento_agenda_id=%s and conta_id=%s limit 1",
-                (evento_id, conta_id)).fetchone()
-    except Exception:  # noqa: BLE001 — conta/instalação sem o módulo de orçamentos
-        return {}
-    if not r:
-        return {}
-    out = {"orcamento_id": r[0], "orcamento_numero": r[1]}
-    if r[2]:
-        out["sinal_centavos"] = r[2]
-    return out
-
-
 def orcamento_do_evento(pool, conta_id: int, evento_id: int) -> int | None:
-    """O orçamento que originou este compromisso, se houver. Escopado por conta."""
-    return _orcamento_da_reserva(pool, conta_id, evento_id).get("orcamento_id")
+    """O orçamento que originou este compromisso, se houver. Escopado por conta.
+
+    Um evento só — passa pelo mesmo `_com_orcamento` das listas de propósito: duas
+    leituras do vínculo evento↔orçamento seriam duas chances de discordarem."""
+    achados = _com_orcamento(pool, conta_id, [{"id": evento_id}])
+    return achados[0].get("orcamento_id")
 
 
 def conflitos(pool, conta_id: int, inicio: datetime, fim: datetime | None,

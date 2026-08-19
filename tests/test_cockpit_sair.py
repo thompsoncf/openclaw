@@ -14,9 +14,15 @@ from web.painel_cockpit import _gerencia, _sessao, cockpit_sair
 
 
 class _Req:
-    """Request com o mínimo que os guards e o handler leem."""
-    def __init__(self, **sessao):
+    """Request com o mínimo que os guards e o handler leem.
+
+    `cookies` entrou junto com o "manter conectado" (migração 173): o Sair revoga o
+    aparelho lembrado antes de limpar a sessão, senão o cookie reconstruiria a sessão
+    no request seguinte e o botão viraria enfeite. Todo Request real do Starlette tem
+    este atributo — o dublê é que estava incompleto."""
+    def __init__(self, cookies=None, **sessao):
         self.session = dict(sessao)
+        self.cookies = dict(cookies or {})
 
 
 def _sair(**sessao):

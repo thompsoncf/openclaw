@@ -9,6 +9,7 @@ rota não chamava ninguém. Aqui passa-se pelo HTTP:
 
 Banco dedicado e descartável, no padrão de tests/test_orcamento_excluir.py.
 """
+import json
 import os
 from datetime import timedelta
 from pathlib import Path
@@ -83,7 +84,10 @@ def cliente(monkeypatch):
                   "slug text unique, tipo text, ativo boolean default true)")
         c.execute("alter table contas add column if not exists nicho_id bigint")
         for col in ("documento", "razao_social", "nome_fantasia", "endereco", "bairro",
-                    "cep", "cidade", "uf", "email_empresa", "telefone", "cnae"):
+                    "cep", "cidade", "uf", "email_empresa", "telefone", "cnae",
+                    # logo_url: `proposta._carregar` lê — e é ele que a rota
+                    # "Marcar agora" usa pra remontar o orçamento
+                    "logo_url"):
             c.execute(f"alter table contas add column if not exists {col} text")
         c.execute("insert into nichos (nome, slug, tipo) values ('Eventos','eventos','servico')")
         # 164: confirmar o sinal também CRIA o contrato. A tabela existe aqui pra o
@@ -594,3 +598,254 @@ def test_assinar_orcamento_que_ja_estava_fechado_nao_quebra_nem_duplica(cliente)
     with cliente.pool.connection() as cx:
         assert cx.execute("select assinado_em is not null, status from contratos "
                           "where id=%s", (ct_id,)).fetchone() == (True, "assinado")
+
+
+# ─────────────────────────────── DESCONTO, pelas rotas de verdade
+#
+# O que importa aqui não é a conta (essa está em test_desconto.py, pura) — é a
+# FIAÇÃO: o servidor recalcula em vez de acreditar no total que a tela mandou, o
+# desconto sobrevive a reabrir a proposta, e nada disso vaza pro que não pediu.
+
+def _corpo(**extra):
+    d = {"cliente": "Marina", "empresa": "Marina", "n_modulos": 3,
+         "setup": 17060,           # BRUTO: 12.400 + 1.860 + 2.800
+         "mensal": 0, "primeiro_ano": 17060,
+         "itens": [
+             {"nome": "Pacote", "setup": 12400, "mensal": 0, "qtd": 1,
+              "unitario": 12400, "desc_tipo": "pct", "desc_val": 5},
+             {"nome": "Hora extra", "setup": 1860, "mensal": 0, "qtd": 3,
+              "unitario": 620, "desc_tipo": "valor", "desc_val": 360},
+             {"nome": "Cerimonial", "setup": 2800, "mensal": 0, "qtd": 1,
+              "unitario": 2800},
+         ],
+         "evento": {"data": "2026-12-05", "inicio": "19:00", "fim": "23:00",
+                    "tipo": "Formatura", "convidados": 150}}
+    d.update(extra)
+    return d
+
+
+def _orc(c, oid):
+    with c.pool.connection() as cx:
+        return cx.execute(
+            """select setup_centavos, primeiro_ano_centavos, desconto_tipo,
+                      desconto_pct, desconto_centavos
+                 from orcamentos where id=%s""", (oid,)).fetchone()
+
+
+def test_a_conta_do_mockup_chega_inteira_pela_rota(cliente):
+    """Os mesmos números do mockup aprovado, atravessando o HTTP: bruto 17.060,
+    descontos de item 980, final 10% sobre 16.080, total 14.472."""
+    r = cliente.post("/painel/servicos/salvar",
+                     json=_corpo(desconto_tipo="pct", desconto_pct=10))
+    assert r.status_code == 200
+    bruto, total, tipo, pct, cent = _orc(cliente, r.json()["id"])
+    assert bruto == 1706000, "setup_centavos continua sendo o BRUTO"
+    assert total == 1447200, "primeiro_ano_centavos é o líquido"
+    assert (tipo, float(pct), cent) == ("pct", 10.0, 0)
+
+
+def test_o_total_nao_vem_mais_do_navegador(cliente):
+    """A trava que a mudança abriu espaço pra colocar: `primeiro_ano` era gravado
+    como veio. Bastava editar o JSON na aba pra fechar um orçamento por qualquer
+    valor — e o título a receber sairia com ele."""
+    r = cliente.post("/painel/servicos/salvar",
+                     json=_corpo(desconto_tipo="pct", desconto_pct=10,
+                                 primeiro_ano=1))       # a mentira
+    assert _orc(cliente, r.json()["id"])[1] == 1447200
+
+
+def test_desconto_em_reais_no_total(cliente):
+    r = cliente.post("/painel/servicos/salvar",
+                     json=_corpo(desconto_tipo="valor", desconto_valor=1000))
+    bruto, total, tipo, pct, cent = _orc(cliente, r.json()["id"])
+    assert (tipo, cent) == ("valor", 100000)
+    assert total == 1608000 - 100000        # subtotal com descontos − R$ 1.000
+
+
+def test_desconto_maior_que_o_orcamento_nao_vira_acrescimo(cliente):
+    """Sem teto, um R$ digitado com um zero a mais faria total negativo — e daí
+    saem título, parcela e margem negativos."""
+    r = cliente.post("/painel/servicos/salvar",
+                     json=_corpo(desconto_tipo="valor", desconto_valor=999999))
+    assert _orc(cliente, r.json()["id"])[1] == 0
+
+
+def test_sem_desconto_o_total_continua_o_de_sempre(cliente):
+    """A regressão que mais importa: quem nunca usou desconto não pode ver número
+    diferente depois desta mudança. Itens LIMPOS, sem desconto em lugar nenhum."""
+    limpos = [{k: v for k, v in it.items() if not k.startswith("desc_")}
+              for it in _corpo()["itens"]]
+    r = cliente.post("/painel/servicos/salvar", json=_corpo(itens=limpos))
+    bruto, total, tipo, pct, cent = _orc(cliente, r.json()["id"])
+    assert bruto == 1706000 and total == 1706000
+    assert (tipo, float(pct), cent) == ("pct", 0.0, 0)
+
+
+def test_o_desconto_volta_quando_a_proposta_e_reaberta(cliente):
+    """Sem isto, reabrir pra trocar uma vírgula zeraria o desconto negociado — e o
+    cliente receberia um link mais caro que o que ele aprovou."""
+    oid = cliente.post("/painel/servicos/salvar",
+                       json=_corpo(desconto_tipo="valor",
+                                   desconto_valor=1000)).json()["id"]
+    r = cliente.get(f"/painel/servicos/item/{oid}")
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["desconto_tipo"] == "valor" and d["desconto_valor"] == 1000
+    # e o desconto de CADA linha volta junto
+    por_nome = {i["nome"]: i for i in d["itens"]}
+    assert por_nome["Pacote"]["desc_tipo"] == "pct" and por_nome["Pacote"]["desc_val"] == 5
+    assert por_nome["Hora extra"]["desc_tipo"] == "valor"
+    assert por_nome["Hora extra"]["desc_val"] == 360
+    assert por_nome["Cerimonial"]["desc_val"] == 0
+
+
+def test_reabrir_e_salvar_de_novo_nao_desconta_duas_vezes(cliente):
+    """O erro clássico deste desenho: a tela devolve o total já descontado, o
+    servidor desconta de novo, e cada edição encolhe a proposta."""
+    oid = cliente.post("/painel/servicos/salvar",
+                       json=_corpo(desconto_tipo="pct", desconto_pct=10)).json()["id"]
+    primeiro = _orc(cliente, oid)[1]
+    cliente.post("/painel/servicos/salvar",
+                 json=_corpo(id=oid, desconto_tipo="pct", desconto_pct=10))
+    assert _orc(cliente, oid)[1] == primeiro == 1447200
+
+
+# ============================================ o ESTADO DA DATA na linha do funil
+#
+# O botão "Sinal recebido" acima cobre UM dos quatro estados da data. Em
+# 19/08/2026 apareceu um orçamento aprovado que nunca virou pré-reserva, e o
+# problema não era só a porta por onde ele escapou: a linha do funil desenhava
+# só a pré-reserva correndo. "Firme", "nunca entrou" e "liberada" ficavam com a
+# mesma cara — e duas delas são data perdida.
+#
+# A regra mora em vendas.estado_da_data (testada pura em test_estado_da_data.py).
+# Aqui prova-se o que só a ROTA responde: que o campo chega na tela e que o botão
+# de conserto conserta.
+
+def _orcamento_aprovado_sem_data_na_agenda(c, *, conta_id=CONTA, inicio="19:00"):
+    """Aprovado, com data de evento no futuro, e SEM compromisso — exatamente o
+    estado que passava despercebido."""
+    quando = (ag.agora_brt() + timedelta(days=45)).date().isoformat()
+    with c.pool.connection() as cx:
+        oid = cx.execute(
+            """insert into orcamentos (conta_id, cliente, empresa, status, criado_por,
+                 setup_centavos, modo, evento, token, numero)
+               values (%s,'Bruno','Bruno','aprovada','',500000,'evento',
+                       %s::jsonb, %s, 77) returning id""",
+            (conta_id, json.dumps({"data": quando, "inicio": inicio, "tipo": "Casamento"}),
+             f"tok{conta_id}{inicio or 'x'}")).fetchone()[0]
+        cx.commit()
+    return oid
+
+
+def test_a_linha_diz_que_a_data_esta_segurada(cliente):
+    oid, _ = _orcamento_com_data_segurada(cliente)
+    d = _item(cliente, oid)["data"]
+    assert d["estado"] == vendas.DATA_SEGURADA and d["acao"] == "sinal"
+
+
+def test_a_linha_denuncia_a_data_que_ficou_fora_da_agenda(cliente):
+    """Sem este campo a tela não tem como desenhar o selo — e foi assim que um
+    orçamento aprovado ficou sem data sem ninguém perceber."""
+    oid = _orcamento_aprovado_sem_data_na_agenda(cliente)
+    d = _item(cliente, oid)["data"]
+    assert d["estado"] == vendas.DATA_FORA and d["acao"] == "marcar"
+
+
+def test_confirmar_o_sinal_deixa_a_linha_dizendo_data_reservada(cliente):
+    """O estado que antes não tinha selo nenhum: firme. Depois do sinal a linha
+    ficava muda, indistinguível de quem nunca entrou na agenda."""
+    oid, _ = _orcamento_com_data_segurada(cliente)
+    cliente.post("/painel/servicos/sinal-recebido", json={"id": oid})
+    assert _item(cliente, oid)["data"]["estado"] == vendas.DATA_RESERVADA
+
+
+def test_prazo_vencido_acende_o_selo_de_data_liberada(cliente):
+    """A sequência de verdade: ninguém pagou, o robô expirou a pré-reserva. Antes
+    a linha voltava a parecer normal."""
+    oid, ev_id = _orcamento_com_data_segurada(cliente, dias=1)
+    with cliente.pool.connection() as cx:
+        cx.execute("update eventos_agenda set pre_reserva_ate=now() - interval '1 hour' "
+                   "where id=%s", (ev_id,))
+        cx.commit()
+    ag.expirar_pre_reservas(cliente.pool, ag.agora_brt())
+    d = _item(cliente, oid)["data"]
+    assert d["estado"] == vendas.DATA_LIBERADA and d["acao"] == "resegurar"
+
+
+def test_proposta_ainda_nao_aprovada_nao_fala_de_data(cliente):
+    oid = _orcamento_aprovado_sem_data_na_agenda(cliente)
+    with cliente.pool.connection() as cx:
+        cx.execute("update orcamentos set status='enviado' where id=%s", (oid,))
+        cx.commit()
+    assert _item(cliente, oid)["data"] is None
+
+
+# ------------------------------------------------------- o botão que conserta
+
+def test_marcar_agora_poe_a_data_na_agenda(cliente):
+    oid = _orcamento_aprovado_sem_data_na_agenda(cliente)
+    r = cliente.post("/painel/servicos/marcar-data", json={"id": oid})
+    assert r.status_code == 200, r.text
+    with cliente.pool.connection() as cx:
+        ev_id = cx.execute("select evento_agenda_id from orcamentos where id=%s",
+                           (oid,)).fetchone()[0]
+        assert ev_id == r.json()["evento_id"]
+    assert _item(cliente, oid)["data"]["estado"] in (vendas.DATA_RESERVADA,
+                                                     vendas.DATA_SEGURADA)
+
+
+def test_marcar_duas_vezes_nao_cria_dois_compromissos(cliente):
+    """A rota usa a mesma função da aprovação, que já é idempotente. Duplo clique
+    numa empresa que vende data criaria dois compromissos no mesmo horário — e o
+    aviso de choque dispararia contra o próprio orçamento."""
+    oid = _orcamento_aprovado_sem_data_na_agenda(cliente)
+    cliente.post("/painel/servicos/marcar-data", json={"id": oid})
+    r2 = cliente.post("/painel/servicos/marcar-data", json={"id": oid})
+    assert r2.status_code == 409
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select count(*) from eventos_agenda where conta_id=%s",
+                          (CONTA,)).fetchone()[0] == 1
+
+
+def test_sem_a_hora_de_inicio_o_botao_diz_qual_campo_falta(cliente):
+    """A porta mais larga. "Não consegui marcar" mandaria o vendedor procurar no
+    escuro justamente o campo que a linha do funil já apontou."""
+    oid = _orcamento_aprovado_sem_data_na_agenda(cliente, inicio="")
+    r = cliente.post("/painel/servicos/marcar-data", json={"id": oid})
+    assert r.status_code == 400
+    assert "hora de início" in r.json()["erro"]
+
+
+def test_segurar_de_novo_solta_o_compromisso_vencido_e_cria_outro(cliente):
+    """O compromisso cancelado NÃO é ressuscitado: fica como histórico de que a
+    data chegou a vencer, e o orçamento ganha um novo."""
+    oid, ev_id = _orcamento_com_data_segurada(cliente, dias=1)
+    with cliente.pool.connection() as cx:
+        cx.execute("update orcamentos set evento=%s::jsonb where id=%s",
+                   (json.dumps({"data": (ag.agora_brt() + timedelta(days=30)).date().isoformat(),
+                                "inicio": "19:00"}), oid))
+        cx.execute("update eventos_agenda set pre_reserva_ate=now() - interval '1 hour' "
+                   "where id=%s", (ev_id,))
+        cx.commit()
+    ag.expirar_pre_reservas(cliente.pool, ag.agora_brt())
+    r = cliente.post("/painel/servicos/marcar-data", json={"id": oid})
+    assert r.status_code == 200, r.text
+    novo = r.json()["evento_id"]
+    assert novo != ev_id
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select status from eventos_agenda where id=%s",
+                          (ev_id,)).fetchone()[0] == "cancelado"
+
+
+def test_orcamento_de_outra_conta_nao_se_marca_daqui(cliente):
+    oid = _orcamento_aprovado_sem_data_na_agenda(cliente, conta_id=OUTRA)
+    assert cliente.post("/painel/servicos/marcar-data", json={"id": oid}).status_code == 404
+
+
+def test_proposta_nao_aprovada_nao_marca_data(cliente):
+    oid = _orcamento_aprovado_sem_data_na_agenda(cliente)
+    with cliente.pool.connection() as cx:
+        cx.execute("update orcamentos set status='enviado' where id=%s", (oid,))
+        cx.commit()
+    assert cliente.post("/painel/servicos/marcar-data", json={"id": oid}).status_code == 400

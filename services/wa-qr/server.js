@@ -51,7 +51,7 @@ const pino = require('pino')
 const QRCode = require('qrcode')
 const makeWASocket = require('@whiskeysockets/baileys').default
 const { DisconnectReason, makeCacheableSignalKeyStore, fetchLatestBaileysVersion, proto, BufferJSON,
-  normalizeMessageContent, downloadMediaMessage } = require('@whiskeysockets/baileys')
+  normalizeMessageContent, downloadMediaMessage, jidNormalizedUser } = require('@whiskeysockets/baileys')
 const TIPO_HIST = proto.Message.HistorySyncNotification.HistorySyncType
 const { useDbAuthState } = require('./auth-db')
 const { criarTrava } = require('./sessao-lock')
@@ -1882,12 +1882,38 @@ async function iniciarSessao (contaId) {
       // pode apagar nada — e reconectar aqui vira uma guerra de sessões, cada uma
       // derrubando a outra em loop até o WhatsApp bloquear a conta.
       if (code === DisconnectReason.connectionReplaced) {
+        // ESTE 440 é da sessão de agora ou de uma encarnação já superada?
+        //
+        // A pergunta não é acadêmica. O `_descartado` do topo deste handler só
+        // barra o socket que passou pelo descartarSocket — e o velho ESCAPA dele
+        // quando `s.sock` já estava null na hora em que a sessão nova subiu (o
+        // próprio caminho do 440 zera `s.sock`). Aí o socket velho descobre o 440
+        // tarde, com uma sessão nova de pé, e sai mexendo no que não é mais dele:
+        // zera o `s.sock` de quem entrou e solta o aluguel recém-pego.
+        //
+        // Medido em produção em 18/08, conta 34, quatro voltas em vinte minutos:
+        //     iniciarSessao: socket criado, registrando listeners
+        //     trava: soltei a conta          <- este handler, do socket velho
+        //     WhatsApp conectado
+        //     vigia: sessão estava conectada SEM trava — aluguel retomado
+        //
+        // O `deveSoltarTravaNo440` sozinho não cobria: ele olha `s.iniciando`, que
+        // volta a false no `finally` do iniciarSessao — ou seja, assim que os
+        // listeners são registrados, ANTES de a conexão abrir. O 440 do velho cai
+        // exatamente nesse vão, e por isso o guard nunca apareceu no log.
+        const eraOAtual = socketAtual(s, sock)
+        descartarSocket(sock, contaId, 'substituida_por_outra_sessao')
+        if (!eraOAtual) {
+          log.info({ contaId },
+            '440 de socket já superado — o estado e o aluguel ficam com quem entrou')
+          return
+        }
         s.status = 'desconectado'
         s.qr = null
         // "sem apagar nada" vale pro que está no BANCO (credencial, histórico). O que
         // está na memória tem que sair: este socket não volta mais, e os laços da
         // agenda continuavam batendo no Postgres de 20 em 20min por uma sessão morta.
-        descartarSocket(sock, contaId, 'substituida_por_outra_sessao')
+        // (o socket em si já foi descartado acima, antes do teste de encarnação)
         pararTimersDaAgenda(s)
         s.sock = null
         // esta encarnação acabou: quanto ela durou já foi contabilizado (sessaoFirme),
@@ -2175,6 +2201,37 @@ function lerBody (req) {
   })
 }
 
+// Teto do áudio de voz que o vendedor grava. 90s a 24 kbps dão ~270 KB; 1 MB é
+// folga larga. O motivo do teto é o mesmo do LIMITE_AUDIO_BYTES da entrada: este
+// processo roda com --max-old-space-size=320 e áudio vira várias cópias.
+const LIMITE_VOZ_BYTES = 1024 * 1024
+
+// O áudio chega como BINÁRIO puro, não em JSON com base64 — base64 custa +33% de
+// memória e de rede, e aqui os dois são o recurso escasso. Os metadados (número,
+// duração, onda) viajam na query e nos cabeçalhos.
+function lerBinario (req, limite) {
+  return new Promise((resolve) => {
+    const partes = []
+    let total = 0
+    req.on('data', (c) => {
+      total += c.length
+      if (total > limite) { partes.length = 0; req.destroy(); return resolve(null) }
+      partes.push(c)
+    })
+    req.on('end', () => resolve(total ? Buffer.concat(partes) : null))
+    req.on('error', () => resolve(null))
+  })
+}
+
+// Uma fila de concorrência 1 pro ENVIO de voz, pelo mesmo motivo da fila da
+// transcrição: N vendedores mandando junto multiplicariam o buffer por N.
+let _filaVoz = Promise.resolve()
+function enfileirarVoz (fn) {
+  const proximo = _filaVoz.then(fn, fn)
+  _filaVoz = proximo.catch(() => {})
+  return proximo
+}
+
 const servidor = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://x')
@@ -2281,6 +2338,109 @@ const servidor = http.createServer(async (req, res) => {
           return json(res, 200, { ok: false, erro: String(e).slice(0, 180) })
         }
       }
+      // ÁUDIO DE VOZ gravado dentro do Zaq (Cockpit). Corpo = os bytes do áudio.
+      //
+      // `seconds` e `waveform` vêm PRONTOS da tela, e isso não é economia: o
+      // Baileys só chama os decodificadores quando falta informação
+      //   requiresDurationComputation = audio && seconds === undefined
+      //   requiresWaveformProcessing  = audio && ptt === true && sem waveform
+      // Medido: com eles preenchidos o Baileys não decodifica nada — e é o que
+      // faz o mp4 do iPhone passar sem conversão, já que o decodificador de m4a
+      // dele falha ("Missing decoder for m4a format").
+      if (req.method === 'POST' && acao === 'enviar-audio') {
+        const bytes = await lerBinario(req, LIMITE_VOZ_BYTES)
+        if (!bytes) return json(res, 200, { ok: false, erro: 'audio_vazio_ou_grande' })
+        const numero = url.searchParams.get('numero') || ''
+        const mime = url.searchParams.get('mime') || 'audio/ogg; codecs=opus'
+        const seg = Math.max(1, Math.round(Number(url.searchParams.get('seg')) || 1))
+        let onda
+        try {
+          const b64 = req.headers['x-wa-onda']
+          if (b64) { const w = Buffer.from(String(b64), 'base64'); if (w.length === 64) onda = new Uint8Array(w) }
+        } catch (_) { onda = undefined }
+
+        let s = sessoes.get(contaId)
+        log.info({ contaId, status: s && s.status, kb: Math.round(bytes.length / 1024), seg },
+          'enviar-audio: tentativa')
+        if (!s || s.status !== 'conectado' || !s.sock) {
+          try { await iniciarSessao(contaId) } catch (e) {
+            log.warn({ contaId, e: String(e) }, 'enviar-audio: religar falhou')
+          }
+          const limite = Date.now() + 12000
+          while (Date.now() < limite) {
+            s = sessoes.get(contaId)
+            if (s && s.status === 'conectado' && s.sock) break
+            if (s && s.status === 'aguardando_qr') break
+            await new Promise((r2) => setTimeout(r2, 400))
+          }
+          s = sessoes.get(contaId)
+        }
+        if (!s || s.status !== 'conectado' || !s.sock) return json(res, 200, { ok: false, erro: 'desconectado' })
+        if (!jidDe(numero)) return json(res, 200, { ok: false, erro: 'numero_invalido' })
+        const alvo2 = await jidRealDe(s.sock, contaId, numero)
+        if (!alvo2.jid) return json(res, 200, { ok: false, erro: alvo2.erro || 'numero_invalido' })
+        return enfileirarVoz(async () => {
+          try {
+            const conteudo = { audio: bytes, mimetype: mime, ptt: true, seconds: seg }
+            if (onda) conteudo.waveform = onda
+            const r = await s.sock.sendMessage(alvo2.jid, conteudo)
+            guardarEnviada(contaId, r)
+            log.info({ contaId, id: r && r.key && r.key.id, seg }, 'enviar-audio: sucesso ✓')
+            return json(res, 200, { ok: true, id: (r && r.key && r.key.id) || '' })
+          } catch (e) {
+            log.warn({ contaId, e: String(e) }, 'enviar-audio: sendMessage falhou')
+            return json(res, 200, { ok: false, erro: String(e).slice(0, 180) })
+          }
+        })
+      }
+
+      // QUANTOS APARELHOS ESTÃO LIGADOS neste WhatsApp. É a pergunta que sobra
+      // depois de o Cockpit parar de oferecer a saída pro celular: o app deixou de
+      // convidar, mas quem já tem o número ligado no aparelho continua respondendo
+      // por fora — e o que sai por fora chega sem nome.
+      //
+      // O protocolo numera os aparelhos: 0 é o celular dono da conta, e cada
+      // ligação (WhatsApp Web, Desktop, e a NOSSA sessão) ganha um número. Então
+      // "outros" = total − o celular − o Zaq.
+      if (req.method === 'GET' && acao === 'aparelhos') {
+        // TRAVA DO LADO DE CÁ, e não só na tela: no máximo uma pergunta por minuto
+        // por conta. A tela vem do navegador, e navegador não é fonte confiável —
+        // uma aba com laço ou um F5 insistente viraria rajada de consulta ao
+        // WhatsApp, que é como se queima um número não oficial.
+        const agora = Date.now()
+        if (!globalThis.__apsQuando) globalThis.__apsQuando = {}
+        const ultimo = globalThis.__apsQuando[contaId] || 0
+        if (agora - ultimo < 60000) {
+          return json(res, 200, { ok: false, erro: 'espere', faltam: Math.ceil((60000 - (agora - ultimo)) / 1000) })
+        }
+        globalThis.__apsQuando[contaId] = agora
+        const s = sessoes.get(contaId)
+        if (!s || s.status !== 'conectado' || !s.sock) {
+          return json(res, 200, { ok: false, erro: 'desconectado' })
+        }
+        try {
+          const meu = jidNormalizedUser(s.sock.user && s.sock.user.id)
+          if (!meu) return json(res, 200, { ok: false, erro: 'sem_sessao' })
+          // ignoreZeroDevices=false: o celular dono conta, e é ele que dá sentido
+          // ao número (2 aparelhos = celular + Zaq, que é o esperado)
+          // useCache=true: o Baileys já mantém essa lista pra encriptar mensagem.
+          // Forçar ida à rede a cada clique seria tráfego que não precisa existir.
+          const lista = await s.sock.getUSyncDevices([meu], true, false)
+          const nosso = (s.sock.user.id.split(':')[1] || '0').split('@')[0]
+          const devs = (lista || []).map((d) => Number(d.device) || 0)
+          return json(res, 200, {
+            ok: true,
+            total: devs.length,
+            celular: devs.filter((d) => d === 0).length,
+            zaq: devs.filter((d) => String(d) === String(nosso)).length,
+            outros: devs.filter((d) => d !== 0 && String(d) !== String(nosso)).length
+          })
+        } catch (e) {
+          log.warn({ contaId, e: String(e) }, 'aparelhos: consulta falhou')
+          return json(res, 200, { ok: false, erro: String(e).slice(0, 120) })
+        }
+      }
+
       if (req.method === 'POST' && acao === 'sair') {
         const s = sessoes.get(contaId)
         // marca como descartado ANTES do logout: o 'close' que o logout provoca

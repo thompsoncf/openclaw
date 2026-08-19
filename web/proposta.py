@@ -9,14 +9,18 @@ no funil, gerando os títulos a receber). Escopo de leitura por TOKEN, não por
 conta — quem tem o link vê aquela proposta e só ela.
 """
 import json
+import logging
 from datetime import date, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from db.conexao import get_pool
-from finance import agenda as ag, icones_servico as ics, servicos_catalogo as scat
+from finance import (agenda as ag, desconto as dsc, icones_servico as ics,
+                     servicos_catalogo as scat)
 from web.portal import _env
+
+_log = logging.getLogger("openclaw.proposta")
 
 router = APIRouter()
 
@@ -37,10 +41,17 @@ def _pos_assinatura(d: dict, assinante: str) -> None:
     """Depois que o cliente assina: reserva a data na agenda (evento) e avisa a
     empresa. Roda em background; cada parte falha sozinha, sem derrubar a outra
     nem a resposta que o cliente já recebeu."""
+    # O QUE MUDOU AQUI. Este bloco era `except: pass` — mudo. Quando ele
+    # engolia, o cliente via "aprovado", a data não entrava na agenda e não
+    # sobrava rastro em lugar nenhum: nem log, nem tela. Foi assim que um
+    # orçamento aprovado apareceu sem pré-reserva e ninguém soube dizer por quê.
+    # Continua sem derrubar a assinatura — só para de ser invisível.
     try:
-        _reservar_na_agenda(d)
-    except Exception:  # noqa: BLE001
-        pass
+        if _reservar_na_agenda(d) is None:
+            _log.info("proposta %s: aprovada sem reservar data (ver motivo acima)", d.get("id"))
+    except Exception as e:  # noqa: BLE001
+        _log.warning("proposta %s: falhou ao reservar a data: %s: %s",
+                     d.get("id"), type(e).__name__, e)
     # O CONTRATO nasce aqui, na aprovação — não no sinal. Assim o cliente recebe o
     # link e LÊ as cláusulas antes de pagar a entrada, que é a propriedade que a
     # folha tinha quando o contrato era um bloco dela. Assinar segue liberado só
@@ -103,11 +114,20 @@ def _reservar_na_agenda(d: dict, pool=None) -> int | None:
     convidados. Idempotente: orçamento que já tem compromisso não cria outro. Sem
     data ou sem hora de início, não marca nada — a aprovação vale do mesmo jeito.
     """
-    if d.get("modo") != "evento" or d.get("evento_agenda_id"):
-        return None
+    if d.get("modo") != "evento":
+        return None                       # nicho recorrente não vende data
+    if d.get("evento_agenda_id"):
+        return None                       # já tem compromisso: idempotência, não falha
     ev = d.get("evento") or {}
     inicio, fim = ag.janela_evento(ev.get("data"), ev.get("inicio"), ev.get("fim"))
     if not inicio:
+        # A PORTA MAIS LARGA. O campo "Início" do orçamento é livre e não é
+        # obrigatório, então data preenchida + hora vazia sai por aqui — e saía
+        # calada. A linha do funil hoje denuncia (vendas.estado_da_data), e o log
+        # diz qual dos dois campos faltou pra quem for investigar depois.
+        _log.info("proposta %s: sem data ou sem hora de início (data=%r inicio=%r) — "
+                  "a aprovação não vira compromisso", d.get("id"),
+                  ev.get("data"), ev.get("inicio"))
         return None
     pool = pool or get_pool()
     cliente = (d.get("empresa") or d.get("contato") or "").strip()
@@ -329,6 +349,7 @@ def _carregar(token: str, pool=None):
                                case when o.criado_por = 'dono' then c.nome end)
                       -- o contrato saiu daqui pra tabela própria (164): as colunas
                       -- velhas ficam na base pra rollback e não são mais lidas.
+                      , o.desconto_tipo, o.desconto_pct
                  from orcamentos o join contas c on c.id = o.conta_id
                 where o.token=%s""", (token,)).fetchone()
     if not r:
@@ -340,7 +361,7 @@ def _carregar(token: str, pool=None):
      cli_email, cli_tel, agenda_id,
      em_razao, em_doc, em_end, em_cep, em_bairro, em_cidade, em_uf, em_tel, em_email,
      cliente_id, sinal_centavos, sinal_pago_em, pre_reserva_ate, evento_status,
-     vendedor_nome) = r
+     vendedor_nome, desc_tipo, desc_pct) = r
     # ASSINOU, CONGELOU: enquanto o orçamento não foi aprovado, a aba Clientes é
     # quem manda — corrigiu o nome/endereço lá, reimprimiu, saiu certo, sem
     # precisar refazer a proposta. Depois de assinado fica exatamente o que o
@@ -366,7 +387,10 @@ def _carregar(token: str, pool=None):
         # evento: `setup_centavos` é a soma dos itens e `primeiro_ano_centavos`
         # é o total COM desconto (é o que a tela calcula e o que as parcelas
         # somam). A folha mostrava o bruto e o desconto sumia.
-        "subtotal_itens": _brl(setup_c or 0),
+        # O SUBTOTAL que a folha mostra é a soma dos itens JÁ com o desconto de cada
+        # um — é o que a tabela acima somou, linha a linha. Mostrar o bruto aqui
+        # faria a conta não fechar com o que o cliente acabou de ler.
+        "subtotal_itens": _brl(dsc.somar_itens(itens)["setup"]),
         # cru, em centavos: o contrato calcula entrada e saldo a partir daqui, e
         # não dá pra fazer conta em cima de "R$ 8.900,00"
         "setup_centavos_cru": int(setup_c or 0),
@@ -374,7 +398,17 @@ def _carregar(token: str, pool=None):
         # o mesmo total, CRU: a folha precisa somar o plano de pagamento e comparar,
         # e comparar string formatada seria pedir bug.
         "total_centavos": int(ano1_c or 0) if (ano1_c or 0) > 0 else int(setup_c or 0),
-        "desconto_pct": int((evento or {}).get("desconto") or 0),
+        # O RÓTULO do desconto do total: "Desconto (10%)" quando foi percentual,
+        # só "Desconto" quando foi em reais — anunciar uma porcentagem que ninguém
+        # digitou seria inventar informação.
+        # o desconto do TOTAL, sozinho: os de item já apareceram riscados linha a
+        # linha, e repeti-los aqui contaria o mesmo desconto duas vezes.
+        # `:g` e NÃO rstrip("0"): com rstrip, um desconto de 10% virava "1%" na
+        # folha do cliente — o zero final some junto com as casas decimais.
+        "desconto_pct": (f"{float(desc_pct):g}".replace(".", ",")
+                         if (desc_tipo or "pct") == "pct" and float(desc_pct or 0) > 0 else ""),
+        "desconto_final": _brl(max(0, dsc.somar_itens(itens)["setup"] - int(ano1_c or 0))),
+        "tem_desconto_final": dsc.somar_itens(itens)["setup"] > int(ano1_c or 0),
         "desconto_valor": _brl(max(0, (setup_c or 0) - (ano1_c or 0))),
         "status": status or "rascunho",
         "criado": criado, "validade": validade,
@@ -444,8 +478,17 @@ def _linhas_evento(d: dict) -> list[dict]:
         # foto sumia na impressão sem fundo. O ícone sai do que o vendedor fixou
         # no catálogo ou, quando não fixou, do nome/categoria do item — nunca
         # falta selo na linha.
+        # DESCONTO DA LINHA: o cliente vê o cheio riscado e o que ele paga. Desconto
+        # que o cliente não vê não vende — e some da conta dele sem explicação.
+        liq = dsc.liquido_do_item(it)
+        d_cent = (total * 100) - liq["setup"]
         linhas.append({"n": i, "nome": it.get("nome") or "", "desc": it.get("desc") or "",
-                       "qtd": qtd, "unit": _num(unit * 100), "subtotal": _num(total * 100),
+                       "qtd": qtd, "unit": _num(unit * 100),
+                       "subtotal": _num(liq["setup"]),
+                       "cheio": _num(total * 100) if d_cent > 0 else "",
+                       "desconto": _brl(d_cent) if d_cent > 0 else "",
+                       "desconto_pct": (f"{liq['pct']:.0f}%".replace(".0", "")
+                                        if d_cent > 0 else ""),
                        "categoria": it.get("categoria") or "",
                        "icone": ics.svg(ics.escolher(it.get("nome"), it.get("categoria"),
                                                      it.get("icone")), px=24)})
@@ -461,10 +504,12 @@ def _subtotais(itens: list[dict]) -> list[dict]:
         cat = (it.get("categoria") or "").strip()
         if not cat:
             return []          # item sem categoria: o agrupamento mentiria no total
-        soma[cat] = soma.get(cat, 0) + int(it.get("setup") or 0)
+        # soma o LÍQUIDO da linha: com desconto por item, somar o cheio faria os
+        # subtotais por categoria não fecharem com o total logo abaixo deles.
+        soma[cat] = soma.get(cat, 0) + dsc.liquido_do_item(it)["setup"]
     if len(soma) < 2:
         return []
-    return [{"nome": k, "valor": _brl(v * 100)} for k, v in soma.items()]
+    return [{"nome": k, "valor": _brl(v)} for k, v in soma.items()]
 
 
 def emp_dados(pool, conta_id):
@@ -661,6 +706,9 @@ table.itens td.n{color:#14213D}
 .sub-cat:last-child{border-bottom:0}
 .sub-cat b{font-family:var(--mono);color:#14213D;white-space:nowrap}
 .sub-cat.desconto,.sub-cat.desconto b{color:#0b7a56}
+/* o cheio riscado por cima do que o cliente paga: desconto que ele não vê
+   some da conta dele sem explicação */
+.risc{display:block;font-size:.78em;color:#8A8475;text-decoration:line-through}
 table.pag th{background:#FBFAF7;color:#8A8475;border-bottom:1px solid #ECE7DC}
 /* A soma do plano. Fecha a tabela: documento que não soma não pode sair calado.
    Quando diverge do total do evento, a diferença sai ao lado — em coral, porque
@@ -837,15 +885,15 @@ td.q{text-align:right;font-family:var(--mono);white-space:nowrap;vertical-align:
              linha de cabeçalho some, então cada número precisa se apresentar. #}
           <td class="q" data-r="Qtd">{{ l.qtd }}</td>
           <td class="q" data-r="Vr. unit.">{{ l.unit }}</td>
-          <td class="q" data-r="Subtotal">{{ l.subtotal }}</td></tr>{% endfor %}
+          <td class="q" data-r="Subtotal">{% if l.cheio %}<span class="risc">{{ l.cheio }}</span>{% endif %}{{ l.subtotal }}</td></tr>{% endfor %}
       </table>
       {% endif %}
-      {% if prop.subtotais or prop.desconto_pct %}
+      {% if prop.subtotais or prop.tem_desconto_final %}
       <div class="subs">
         {% for st in prop.subtotais %}<div class="sub-cat"><span>{{ st.nome }}</span><b>{{ st.valor }}</b></div>{% endfor %}
-        {% if prop.desconto_pct %}
+        {% if prop.tem_desconto_final %}
         <div class="sub-cat"><span>Subtotal dos itens</span><b>{{ prop.subtotal_itens }}</b></div>
-        <div class="sub-cat desconto"><span>Desconto ({{ prop.desconto_pct }}%)</span><b>− {{ prop.desconto_valor }}</b></div>
+        <div class="sub-cat desconto"><span>Desconto{% if prop.desconto_pct %} ({{ prop.desconto_pct }}%){% endif %}</span><b>− {{ prop.desconto_final }}</b></div>
         {% endif %}
       </div>{% endif %}
       <div class="fin"><div class="l">Total do evento</div><div class="v">{{ prop.total }}</div></div>

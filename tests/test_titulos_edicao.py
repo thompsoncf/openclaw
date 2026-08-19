@@ -1,8 +1,11 @@
 """Títulos a pagar/receber: corrigir a descrição e apagar (o que faltava no portal).
 
 - editar_descricao_titulo: troca só a descrição, não mexe em valor/vencimento.
-- apagar_titulo: some com o título em ABERTO; um título já PAGO (que virou
-  lançamento no caixa) NÃO pode ser apagado por aqui.
+- apagar_titulo: a trava é `lancamento_id is null` — "nada no livro-caixa depende
+  deste título" —, e não o status. Some com o aberto; recusa o pago que virou
+  lançamento; e LIBERA o pago cujo lançamento não existe (a FK é `on delete set
+  null`, então apagar o lançamento no financeiro deixa o título pago apontando pra
+  nada — e ele ficava preso pra sempre, porque a tela só lista os abertos).
 """
 import os
 from datetime import date
@@ -154,6 +157,41 @@ def test_apagar_titulo_aberto(pool, conta_id):
     assert all(x["id"] != t["id"] for x in emp.listar_titulos(pool, conta_id, status="aberto"))
     # apagar de novo: já não existe
     assert emp.apagar_titulo(pool, conta_id, t["id"]) is False
+
+
+def test_apagar_titulo_pago_sem_lancamento_no_caixa(pool, conta_id):
+    """O caso que ficava preso: baixado, mas sem nada no caixa apontando pra ele.
+
+    Acontece de verdade — `titulos.lancamento_id` é `on delete set null`, então quem
+    apaga o lançamento no financeiro deixa o título 'pago' órfão. Ele sumia da tela
+    (que só lista 'aberto') e nenhum caminho o removia. Visto em produção.
+    """
+    t = emp.criar_titulo(pool, conta_id, "receber", "Sinal de teste", 30000,
+                         date(2026, 8, 5))
+    emp.dar_baixa_titulo(pool, conta_id, t["id"])
+    # o financeiro apaga o lançamento: a FK zera o vínculo e o título fica pago e órfão
+    with pool.connection() as c:
+        lanc_id = c.execute("select lancamento_id from titulos where id=%s",
+                            (t["id"],)).fetchone()[0]
+        assert lanc_id is not None, "a baixa tem que ter lançado no caixa"
+        c.execute("delete from lancamentos where id=%s", (lanc_id,))
+        c.commit()
+        assert c.execute("select status, lancamento_id from titulos where id=%s",
+                         (t["id"],)).fetchone() == ("pago", None)
+
+    assert emp.apagar_titulo(pool, conta_id, t["id"]) is True
+    assert all(x["id"] != t["id"] for x in emp.listar_titulos(pool, conta_id, status="pago"))
+
+
+def test_apagar_nao_atravessa_conta(pool, conta_id):
+    """A trava do caixa não pode ofuscar a de escopo: conta vizinha não apaga nada."""
+    with pool.connection() as c:
+        outra = c.execute("insert into contas (tipo, nome) values ('pj','Vizinha') "
+                          "returning id").fetchone()[0]
+        c.commit()
+    t = emp.criar_titulo(pool, conta_id, "pagar", "Meu", 10000, date(2026, 8, 9))
+    assert emp.apagar_titulo(pool, outra, t["id"]) is False
+    assert any(x["id"] == t["id"] for x in emp.listar_titulos(pool, conta_id, status="aberto"))
 
 
 def test_apagar_nao_atinge_titulo_pago(pool, conta_id):

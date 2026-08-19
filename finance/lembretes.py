@@ -16,6 +16,7 @@ import logging
 from datetime import timedelta
 
 from . import agenda as ag
+from . import funil_regua as _fr
 from . import convites as cv
 from . import notificar
 
@@ -43,7 +44,7 @@ def rodar(pool, agora=None) -> dict:
         return _rodar(pool, agora or ag.agora_brt())
     except Exception as e:  # noqa: BLE001
         _log.info("lembretes.rodar falhou: %s: %s", type(e).__name__, e)
-        return {"resumo": 0, "aviso": 0}
+        return {"resumo": 0, "aviso": 0, "aniversario": 0}
 
 
 def _expirar_pre_reservas(pool, agora) -> int:
@@ -72,10 +73,10 @@ def _expirar_pre_reservas(pool, agora) -> int:
 
 
 def _rodar(pool, agora) -> dict:
-    n_res = n_avi = 0
+    n_res = n_avi = n_ani = 0
     with pool.connection() as lockc:
         if not lockc.execute("select pg_try_advisory_lock(%s)", (_LOCK,)).fetchone()[0]:
-            return {"resumo": 0, "aviso": 0}
+            return {"resumo": 0, "aviso": 0, "aniversario": 0}
         try:
             _expirar_pre_reservas(pool, agora)
             with pool.connection() as c:
@@ -89,10 +90,68 @@ def _rodar(pool, agora) -> dict:
                 if aviso_antes_min:
                     n_avi += _avisos_proximos(pool, conta_id, int(aviso_antes_min), agora,
                                               bool(avisar_convidados))
+            # FORA do laço acima: o aniversário do lead é do VENDEDOR e não depende de
+            # a conta ter ligado lembrete de agenda — `cfgs` só traz quem configurou.
+            # Envolvido em try próprio pelo mesmo motivo da migração 128: uma exceção
+            # aqui abortaria o tick inteiro, inclusive o resumo das contas seguintes.
+            try:
+                n_ani = _aniversarios(pool, agora)
+            except Exception as e:  # noqa: BLE001
+                _log.info("lembretes: aniversários falhou: %s: %s", type(e).__name__, e)
+                n_ani = 0
         finally:
             lockc.execute("select pg_advisory_unlock(%s)", (_LOCK,))
             lockc.commit()
-    return {"resumo": n_res, "aviso": n_avi}
+    return {"resumo": n_res, "aviso": n_avi, "aniversario": n_ani}
+
+
+# Hora do aviso de aniversário, em Brasília. Não é meia-noite de propósito: o push
+# chegaria com o vendedor dormindo, viraria notificação velha na bandeja e ele veria
+# o aniversário quando já tivesse passado o dia inteiro sem falar com o cliente.
+_HORA_ANIVERSARIO = 8
+
+
+def _aniversarios(pool, agora) -> int:
+    """Avisa o vendedor dos leads que fazem aniversário HOJE.
+
+    Sai uma vez por lead por ano (dedup em lembretes_enviados, tipo='aniversario' —
+    o CHECK que permite esse valor entrou na migração 171; sem ele o insert levanta
+    CheckViolation, que foi o incidente da 128).
+
+    Só lead ABERTO e COM DONO: sem vendedor não há pra quem mandar, e parabenizar
+    quem já foi dado como perdido não é lembrete, é constrangimento.
+    """
+    if agora.hour != _HORA_ANIVERSARIO:
+        return 0
+    hoje = agora.date()
+    with pool.connection() as c:
+        leads = c.execute(
+            """select p.id, p.conta_id, p.vendedor_id,
+                      coalesce(nullif(p.contato,''), p.empresa)
+                 from prospeccao p
+                where p.nascimento is not null
+                  and extract(month from p.nascimento) = %s
+                  and extract(day   from p.nascimento) = %s
+                  and p.vendedor_id is not null
+                  and """ + _fr.sql_encerradas_nao("p") + """""",
+            (hoje.month, hoje.day)).fetchall()
+    if not leads:
+        return 0
+
+    from . import cockpit as ck
+    n = 0
+    for lead_id, conta_id, vendedor_id, quem in leads:
+        if not _primeira_vez(pool, conta_id, "aniversario", f"{lead_id}:{hoje.isoformat()}"):
+            continue
+        # best-effort, como todo push daqui: sem chave VAPID ou sem assinatura viva o
+        # enviar_push devolve 0 sem levantar. O dedup já foi gravado — reenviar no
+        # próximo tick (2 min) só repetiria a mesma falha de configuração.
+        ck.enviar_push(pool, conta_id, vendedor_id,
+                       "🎂 Aniversário hoje",
+                       f"{quem} faz aniversário hoje. Uma mensagem cai bem.",
+                       url=f"/cockpit/lead/{lead_id}")
+        n += 1
+    return n
 
 
 def _primeira_vez(pool, conta_id: int, tipo: str, chave: str) -> bool:

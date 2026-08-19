@@ -24,8 +24,19 @@ import re
 # Vocabulário do orçamento de EVENTO: o que a tela oferece e o que a folha
 # imprime (a lista inteira, com a escolhida em destaque, como no formulário de
 # papel). Um lugar só, pra tela e folha nunca divergirem.
-TIPOS_EVENTO = ["Aniversário", "Casamento", "Confraternização", "Corporativo",
-                "Infantil", "Suítes"]
+# Ordem alfabética, e não por frequência: a lista é a MESMA pra toda conta do nicho
+# eventos, então ordenar pelo que uma empresa vende mais desorganiza a tela das
+# outras. Alfabética ninguém precisa decorar.
+#
+# Locação, Formatura e Buffet entraram em 19/ago, vindos da agenda real da Prime
+# Eventos: das 31 datas dela, 20 usavam uma dessas três palavras e nenhuma existia
+# aqui — "Locação" era só tipo de CONTRATO (TIPOS_CONTRATO) e "Buffet" só nome de
+# CATEGORIA de item (CATEGORIAS_EVENTOS). A mesma palavra passa a fazer dois
+# trabalhos em campos diferentes, e isso é aceito de propósito: é a palavra que o
+# dono usa, e trocá-la por um sinônimo só pra evitar a repetição faria a tela falar
+# uma língua que ele não fala.
+TIPOS_EVENTO = ["Aniversário", "Buffet", "Casamento", "Confraternização",
+                "Corporativo", "Formatura", "Infantil", "Locação", "Suítes"]
 TIPOS_CONTRATO = ["Locação de espaço", "Locação de móveis e utensílios",
                   "Serviços terceirizados"]
 

@@ -107,7 +107,8 @@ def cliente(monkeypatch):
     with pool.connection() as c:
         for nome in ("098_agenda.sql", "099_agenda_tipo.sql", "130_evento_desfecho.sql",
                      "131_evento_link_online.sql", "160_agenda_pre_reserva.sql",
-                     "161_orcamento_sinal.sql", "163_evento_sinal_esperado.sql"):
+                     "161_orcamento_sinal.sql", "163_evento_sinal_esperado.sql",
+                     "179_agenda_tipo_e_hora_sugerida.sql"):
             c.execute((BASE / nome).read_text(encoding="utf-8"))
         c.execute("insert into contas (id, nome, nicho_id) values "
                   "(%s,'Buffet Teste',(select id from nichos where slug='eventos'))", (CONTA,))

@@ -16,6 +16,7 @@ from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from db.conexao import get_pool
+from web import estaticos as _estaticos
 from web import tema as _tema
 from finance import agenda as ag
 from finance import convites as cv
@@ -165,6 +166,9 @@ def _monta_semanas(ano: int, mes: int, eventos: list[dict], hoje: date,
                     "pre": e.get("status") == ag.PRE_RESERVADO,
                     "prazo": pz["rot"], "urgente": pz["urgente"],
                     "pg": pg["rot"], "pg_classe": pg["classe"],
+                    # quem marcou: é por ele que o filtro por pessoa esconde e mostra
+                    # sem voltar ao servidor (ver o JS do .ag-pessoas).
+                    "membro_id": e.get("membro_id") or "",
                 })
             # a célula inteira se pinta: é o que se enxerga do mês sem ler linha
             # nenhuma — âmbar quando tem data segurada, coral quando alguma aperta.
@@ -230,6 +234,7 @@ def _eventos_por_dia(eventos: list[dict], convidados: dict[int, list[dict]] | No
             # quem marcou — a agenda agora é de todos, e esta é a primeira pergunta
             # de quem olha um compromisso que não marcou. Vazio = o dono titular.
             "autor": nomes.get(e.get("membro_id")) or "",
+            "membro_id": e.get("membro_id") or "",
         })
     return out
 
@@ -447,9 +452,14 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
     autores_mes = sorted({e["membro_id"] for e in eventos if e.get("membro_id")})
     pessoas = [{"id": mid, "nome": nomes.get(mid) or f"#{mid}", "on": (mid == p_id)}
                for mid in autores_mes]
-    if p_id is not None:
-        eventos = [e for e in eventos if e.get("membro_id") == p_id]
-        proximos = [e for e in proximos if e.get("membro_id") == p_id]
+    # O SERVIDOR NÃO FILTRA MAIS. Filtrava aqui — depois de fazer as treze
+    # consultas e montar a página inteira — e por isso cada clique num nome era um
+    # recarregamento completo pra rodar duas linhas sobre dados que já estavam na
+    # mão. O filtro virou coisa da tela (ver o JS do .ag-pessoas): `p_id` só diz
+    # qual chip nasce ligado, e o JS aplica antes do primeiro toque.
+    #
+    # Mandar tudo é o que torna "Todos" possível sem voltar ao servidor: filtrado
+    # na origem, o navegador não teria de onde trazer os outros de volta.
     ids_com_convidados = {e["id"] for e in eventos} | {e["id"] for e in proximos}
     convidados = cv.por_evento(pool, conta_id, list(ids_com_convidados))
     # FICHA DO EVENTO: o orçamento vinculado e o pagamento de cada festa do mês.
@@ -477,6 +487,19 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
             "orcamento_numero": ev.get("orcamento_numero"),
             "mes": f"{ev['inicio'].astimezone(ag.BRT):%Y-%m}",
         })
+    # DATAS CONFIRMADAS: a irmã do card acima, e a que não existia em lugar
+    # nenhum. Quem quisesse saber quantas datas tinha vendidas contava no
+    # calendário, mês a mês. Mesma consulta única do lado das seguradas.
+    confirmadas = [{
+        "id": ev["id"], "titulo": ev["titulo"],
+        "quando": ag.fmt_hora(ev),
+        "dia_rot": ev["inicio"].astimezone(ag.BRT).strftime("%d/%m"),
+        "total": _brl(ev.get("total_centavos")),
+        "sinal_pago": bool(ev.get("sinal_centavos")),
+        "orcamento_id": ev.get("orcamento_id"),
+        "orcamento_numero": ev.get("orcamento_numero"),
+        "mes": f"{ev['inicio'].astimezone(ag.BRT):%Y-%m}",
+    } for ev in ag.confirmadas(pool, conta_id, agora)] if vende_data else []
     orcs = {s["id"]: s for s in seguradas}
     eventos_dia = _eventos_por_dia(eventos, convidados, agora, orcs, fichas, nomes)
     reaproveitar = [{
@@ -511,6 +534,7 @@ def agenda_home(request: Request, m: str = "", novo: str = "", convite: str = ""
                    mes_hoje=f"{hoje.year:04d}-{hoje.month:02d}",
                    hoje_iso=hoje.isoformat(), abrir_novo=(novo == "1"),
                    cfg=cfg, feed_url=feed_url, share=share, seguradas=seguradas,
+                   confirmadas=confirmadas,
                    vende_data=vende_data, pessoas=pessoas, p_id=p_id,
                    rot=(_ROT_EVENTO if vende_data else _ROT_PADRAO),
                    aviso=request.session.pop("agenda_aviso", None))
@@ -984,7 +1008,7 @@ def convite_responder(request: Request, token: str, acao: str = Form(...),
 
 
 # ================================================================ TEMPLATE
-_CSS = """<style>
+_CSS_CRU = """
 /* width:100% porque .ag-wrap é item flex do body (junto do menu lateral): sem
    largura definida ele adota a do conteúdo, e uma tabela larga empurrava a
    página inteira pra fora da tela em vez de rolar dentro do próprio card. */
@@ -1388,6 +1412,23 @@ _CSS = """<style>
 .segrow .srt .s{font-size:.62rem;color:var(--txt-mut);font-variant-numeric:tabular-nums}
 .segcnt{font-size:.62rem;font-weight:700;color:var(--ambar);background:var(--ambar-fundo);
         border:1px solid var(--ambar-borda);border-radius:999px;padding:.1rem .45rem}
+/* CONFIRMADAS: sólido onde a segurada é tracejada. O par sólido/tracejado é o
+   mesmo que separa firme de provisório no calendário e no funil — quem não
+   distingue cor lê pela forma. */
+.segrow.ok .segbar{background:var(--verde)}
+.segrow.ok .srt .v{color:var(--verde-claro)}
+/* as duas abas do card de datas */
+.dt-abas{display:flex;gap:4px;background:var(--card-2);border:1px solid var(--borda);
+         border-radius:10px;padding:3px;margin-bottom:10px}
+.dt-aba{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;
+        border:0;background:transparent;border-radius:8px;padding:.4rem .5rem;cursor:pointer;
+        font-family:inherit;font-size:.78rem;font-weight:600;color:var(--txt-mut);width:auto;margin:0}
+.dt-aba.on{background:var(--card);color:var(--txt);box-shadow:0 1px 0 rgba(0,0,0,.35)}
+.dt-aba:focus-visible{outline:2px solid var(--verde);outline-offset:1px}
+.dt-aba .c{font-size:.66rem;font-weight:700;border-radius:5px;padding:.02rem .32rem;
+           background:var(--borda);color:var(--txt-mut);font-variant-numeric:tabular-nums}
+.dt-aba.on .c.seg{background:var(--ambar-fundo);color:var(--ambar);border:1px solid var(--ambar-borda)}
+.dt-aba.on .c.con{background:var(--neon-fundo);color:var(--verde-claro);border:1px solid var(--neon-borda)}
 /* choque de horário no formulário */
 .choque{display:none;gap:8px;align-items:flex-start;font-size:.74rem;color:#f0c2be;
         background:var(--coral-fundo);border:1px solid var(--coral-borda);border-radius:9px;
@@ -1437,7 +1478,784 @@ _CSS = """<style>
 .meet-btn:hover{background:rgba(29,158,117,.24)}
 .daybox-cta{display:block;width:100%;text-align:center;margin-top:14px;background:transparent;border:1px dashed var(--borda);color:var(--verde-claro);border-radius:9px;padding:.6rem;font-size:.82rem;font-weight:600;cursor:pointer}
 .daybox-cta:hover{border-color:var(--verde)}
-</style>"""
+"""
+
+# A folha sai de dentro da página e vira arquivo com cache de um ano. Eram 38 KB
+# rebaixados e reinterpretados a cada clique nos nomes e nas setas do mês — ver
+# web/estaticos.py.
+_CSS_URL = _estaticos.registrar("agenda.css", _CSS_CRU)
+_CSS = f'<link rel="stylesheet" href="{_CSS_URL}">'
+
+
+# O JS da tela sai de dentro da página do mesmo jeito que a folha de estilo.
+# Ficam inline só as ~13 linhas de DADOS do mês (os eventos, o mês aberto, a
+# hora do servidor) — 692 bytes que mudam a cada carregamento. As outras 761
+# linhas são código, não mudam entre um clique e outro, e agora o navegador
+# guarda por um ano. A ordem importa: os dados primeiro, porque o código lê
+# EVENTOS_DIA assim que carrega.
+_JS_CRU = """
+function _esc(s){ return (s||'').replace(/[&<>"']/g, function(ch){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]; }); }
+function isoTitulo(iso){
+  var p = iso.split('-');
+  var d = new Date(Number(p[0]), Number(p[1])-1, Number(p[2]));
+  return DIAS_EXT_JS[d.getDay()] + ', ' + d.getDate() + ' de ' + MESES_JS[d.getMonth()+1];
+}
+function remToggleDia(id){ var box=document.getElementById('remBoxDia-'+id); if(box) box.classList.toggle('show'); }
+function addConvToggleDia(id){ var box=document.getElementById('addConvBoxDia-'+id); if(box) box.classList.toggle('show'); }
+function _addConvBoxHtml(e){
+  return '<div class="add-conv-box" id="addConvBoxDia-'+e.id+'">'
+    + '<form method="post" action="/painel/agenda/convidado/adicionar">'
+    + '<input type="hidden" name="evento_id" value="'+e.id+'">'
+    + '<input type="hidden" name="m" value="'+CUR_MES+'">'
+    + '<div class="rlbl">＋ Adicionar convidado</div>'
+    + '<div class="add-conv-row"><input name="nome" placeholder="Nome" autocomplete="off"><input name="contato" placeholder="(86) 90000-0000" autocomplete="off"></div>'
+    + '<div class="add-conv-actions"><button class="rbtn ok" type="submit">Adicionar</button>'
+    + '<button class="rbtn cc" type="button" onclick="addConvToggleDia('+e.id+')">Cancelar</button></div>'
+    + '</form></div>';
+}
+function _remarcarBoxHtml(e){
+  return '<div class="remarcar-box" id="remBoxDia-'+e.id+'">'
+    + '<form method="post" action="/painel/agenda/remarcar">'
+    + '<input type="hidden" name="evento_id" value="'+e.id+'">'
+    + '<input type="hidden" name="m" value="'+CUR_MES+'">'
+    + '<div class="rlbl">🔁 Nova data</div>'
+    + '<div class="remarcar-row2"><input type="date" name="data" value="'+e.data_iso+'" required><input type="time" name="hora" value="'+e.hora+'" required></div>'
+    + '<div class="tg"><div><div class="tg-t">Avisar os convidados</div><div class="tg-s">Manda a nova data pro mesmo link que já têm</div></div>'
+    + '<label class="sw"><input type="checkbox" name="avisar" value="1" checked><span class="track"></span><span class="knob"></span></label></div>'
+    + '<div class="remarcar-actions"><button class="rbtn ok" type="submit">Salvar nova data</button>'
+    + '<button class="rbtn cc" type="button" onclick="remToggleDia('+e.id+')">Cancelar</button></div>'
+    + '</form></div>';
+}
+function _desfechoHtml(e){
+  if(e.desfecho === 'realizado') return '<span class="desf-badge desf-ok">✅ Aconteceu</span>';
+  if(e.desfecho === 'nao_realizado') return '<span class="desf-badge desf-nao">❌ Não rolou</span>';
+  return '<div class="desf-ask" id="desfAsk-'+e.id+'"><span>Como foi?</span>'
+    + '<button type="button" class="desf-btn ok" onclick="marcarDesfecho('+e.id+',\\'realizado\\')">✅ Aconteceu</button>'
+    + '<button type="button" class="desf-btn nao" onclick="marcarDesfecho('+e.id+',\\'nao_realizado\\')">❌ Não rolou</button></div>';
+}
+function marcarDesfecho(id, valor){
+  fetch('/painel/agenda/desfecho', {
+    method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'},
+    body: 'evento_id='+id+'&desfecho='+valor
+  }).then(function(r){ return r.json(); }).then(function(d){
+    if(!d.ok) return;
+    var ask = document.getElementById('desfAsk-'+id);
+    if(ask) ask.outerHTML = valor==='realizado'
+      ? '<span class="desf-badge desf-ok">✅ Aconteceu</span>'
+      : '<span class="desf-badge desf-nao">❌ Não rolou</span>';
+    for(var iso in EVENTOS_DIA){
+      EVENTOS_DIA[iso].eventos.forEach(function(e){ if(String(e.id)===String(id)) e.desfecho = valor; });
+    }
+  });
+}
+function _reaproveitarHtml(iso){
+  if(!REAPROVEITAR.length) return '';
+  var cards = REAPROVEITAR.map(function(r){
+    return '<div class="reuse-card"><div class="reuse-info">'
+      + '<div class="reuse-tt">'+_esc(r.titulo)+'</div>'
+      + '<div class="reuse-mt"><span class="reuse-nr-tag">Não rolou</span>'
+      + ' era '+r.hora_rot+(r.n_convidados?' · 👤 '+r.n_convidados+(r.n_convidados===1?' convidado':' convidados'):'')+'</div></div>'
+      + '<form method="post" action="/painel/agenda/remarcar">'
+      + '<input type="hidden" name="evento_id" value="'+r.id+'">'
+      + '<input type="hidden" name="data" value="'+iso+'">'
+      + '<input type="hidden" name="hora" value="'+r.hora+'">'
+      + '<input type="hidden" name="avisar" value="1">'
+      + '<input type="hidden" name="m" value="'+CUR_MES+'">'
+      + '<button class="reuse-btn" type="submit">Usar nesse dia</button></form></div>';
+  }).join('');
+  return '<div class="reuse-sec"><div class="reuse-lbl">♻️ Reaproveitar um compromisso que não aconteceu</div>'+cards+'</div>';
+}
+// Bloco da data segurada dentro da caixa do dia: o prazo, o que se espera, e as
+// três decisões possíveis. "Sinal recebido" é o MESMO botão do funil (mesma rota
+// no servidor, mesma baixa do título na data do pagamento).
+// confirm() nomeando o evento SEM aninhar aspas dentro de string JS: o título vem
+// do data-attribute do próprio form. A versão inline precisava de três níveis de
+// escape (string Python -> template -> atributo HTML -> JS) e quebrava calada.
+// FICHA DO EVENTO. Tudo aqui já estava gravado no orçamento; a agenda só não lia.
+// No lugar da frase colada ("Orçamento Nº 1 · 100 convidados · aprovado pelo
+// cliente"), os campos de verdade — e o pagamento, que num buffet é parte da data.
+function _fichaHtml(f){
+  if(!f) return '';
+  var cel = function(k, v, sm){
+    return '<div class="fic-c"><div class="k">'+k+'</div>'
+         + '<div class="v'+(sm?' sm':'')+'">'+v+'</div></div>';
+  };
+  var linhas = '';
+  if(f.cliente) linhas += cel('cliente', _esc(f.cliente), true);
+  if(f.contato){
+    var so = String(f.contato).replace(/\D/g,'');
+    var num = so.length>=10 && so.slice(0,2)!=='55' ? '55'+so : so;
+    linhas += '<div class="fic-c"><div class="k">whatsapp</div>'
+            + '<a class="v sm" href="https://wa.me/'+num+'" target="_blank" rel="noopener">'
+            + _esc(f.contato)+'</a></div>';
+  }
+  if(f.total) linhas += cel('total', _esc(f.total));
+
+  var itens = '';
+  if(f.itens && f.itens.length){
+    itens = '<div class="fic-b"><div class="k">o que foi contratado</div>'
+      + f.itens.map(function(i){
+          return '<span class="fchip">'+_esc(i.nome)
+               + (i.qtd>1?' <span class="q">×'+i.qtd+'</span>':'')+'</span>';
+        }).join('')
+      + '</div>';
+  }
+
+  // PAGAMENTO. Com contrato fechado existem títulos e o número é recebido de
+  // verdade. Só aprovado, o que existe é o PLANO aceito — e dizer "0% recebido" de
+  // algo que ninguém cobrou seria mentira com cara de número.
+  var pg = '';
+  if(f.tem_titulos){
+    var pct = f.pct || 0;
+    var al = '';
+    if(f.prox_valor){
+      var urg = f.prox_vencida || (f.prox_dias !== null && f.prox_dias <= 3);
+      var quando = f.prox_vencida ? 'venceu em '+_esc(f.prox_venc)
+                 : (f.prox_dias === 0 ? 'vence hoje'
+                 : (f.prox_dias === 1 ? 'vence amanhã' : 'vence '+_esc(f.prox_venc)));
+      al = '<div class="falerta'+(urg?'':' amb')+'"><span>'+(f.prox_vencida?'⚠️':'🗓️')+'</span>'
+         + '<div><b>Próxima parcela '+quando+'</b> — '+_esc(f.prox_valor)+'.'
+         + (f.vencidas>1?' '+f.vencidas+' parcelas vencidas, '+_esc(f.vencidas_valor)+' no total.':'')
+         + ' <a href="/painel/empresa#receber">Ver em contas a receber</a></div></div>';
+    }
+    pg = '<div class="fic-b"><div class="k">recebido</div>'
+       + '<div class="fbar"><i style="width:'+Math.max(0,Math.min(100,pct))+'%"></i></div>'
+       + '<div class="flin"><span><b>'+_esc(f.pago)+'</b> de '+_esc(f.cobrado)+'</span>'
+       + '<span>'+pct+'%</span></div>' + al + '</div>';
+  } else if(f.plano){
+    pg = '<div class="fic-b"><div class="k">plano de pagamento</div>'
+       + '<div class="flin"><span><b>'+_esc(f.plano)+'</b> combinados</span>'
+       + '<span>contrato não fechado</span></div>'
+       + '<div class="flin" style="margin-top:4px;font-size:.64rem">Feche o contrato no funil '
+       + 'pra virar título a receber.</div></div>';
+  }
+
+  var cab = 'orçamento' + (f.numero ? ' nº '+_esc(String(f.numero)) : '')
+          + (f.status ? ' · '+_esc(f.status) : '');
+  return '<div class="fic"><div class="fic-h"><span class="t">'+cab+'</span>'
+       + '<a href="/painel/servicos?abrir='+f.orcamento_id+'">abrir orçamento →</a></div>'
+       + (linhas?'<div class="fic-g">'+linhas+'</div>':'')
+       + itens + pg + '</div>';
+}
+function confirmarLiberar(f){
+  var t = f.getAttribute('data-titulo') || 'essa data';
+  return confirm('Liberar a data de “' + t + '”? Ela volta a ficar disponível.');
+}
+function _seguradaHtml(e){
+  var urg = e.urgente ? ' urg' : '';
+  var quanto = e.prazo ? 'Vence em <b>'+_esc(e.prazo)+'</b>' : 'Data segurada';
+  var ate = e.pre_ate ? ' ('+_esc(e.pre_ate)+')' : '';
+  var sinal = e.sinal ? ' Sinal esperado: <b>'+_esc(e.sinal)+'</b>.' : '';
+  var orc = e.orcamento_numero ? ' Orçamento nº '+_esc(String(e.orcamento_numero))+'.' : '';
+  var verOrc = e.orcamento_id
+    ? '<a class="sbtn gh" href="/painel/servicos?abrir='+e.orcamento_id+'">Ver orçamento</a>' : '';
+  return '<div class="dev-pre'+urg+'">⏳ '+quanto+ate+'.'+sinal+orc
+    + ' Passando o prazo sem o sinal, a data libera sozinha.'
+    + '<div class="segacts">'
+    +   '<form method="post" action="/painel/agenda/sinal-recebido">'
+    +     '<input type="hidden" name="evento_id" value="'+e.id+'">'
+    +     '<input type="hidden" name="m" value="'+MES_ATUAL+'">'
+    +     '<button class="sbtn ok" type="submit">Sinal recebido</button></form>'
+    +   '<form method="post" action="/painel/agenda/liberar" '
+    +      'data-titulo="'+_esc(e.titulo)+'" onsubmit="return confirmarLiberar(this)">'
+    +     '<input type="hidden" name="evento_id" value="'+e.id+'">'
+    +     '<input type="hidden" name="m" value="'+MES_ATUAL+'">'
+    +     '<button class="sbtn amb" type="submit">Liberar a data</button></form>'
+    +   verOrc
+    + '</div></div>';
+}
+var AG_DIA_ABERTO = '';
+function abrirDia(iso){
+  AG_DIA_ABERTO = iso;
+  var d = EVENTOS_DIA[iso];
+  // mesmo filtro do calendário: abrir o dia embaixo do nome do Rafael e ver o
+  // compromisso da Ana seria a tela se contradizendo.
+  var evs = (d ? d.eventos : []).filter(agDoFiltro);
+  var box = document.getElementById('daybox');
+  var html = '<div class="daybox-hd"><h3>'+(d?d.titulo:isoTitulo(iso))+'</h3>'
+    + '<button class="x" type="button" onclick="fecharDia()" aria-label="Fechar">✕</button></div>'
+    + '<p class="daybox-sub">'+(evs.length?evs.length+(evs.length===1?' compromisso':' compromissos'):'Nada marcado ainda')+'</p>';
+  var agora = new Date(AGORA_ISO);
+  evs.forEach(function(e){
+    var conv = '';
+    (e.convidados||[]).forEach(function(g){
+      conv += '<div class="guest"><div class="guest-info">'
+        + '<div class="guest-nome">'+_esc(g.nome||'Convidado')+' <span class="cpill cp-'+g.status+'">'+_esc(g.status_rot)+'</span></div>'
+        + '<div class="guest-fone">'+(g.contato?_esc(g.contato):'<i>sem número</i>')+'</div></div>'
+        + (g.wa?'<a class="guest-wa" href="'+g.wa+'" target="_blank" rel="noopener" title="Chamar '+_esc(g.nome||'convidado')+' no WhatsApp">💬</a>':'')
+        + '</div>';
+    });
+    conv = '<div class="dev-conv"><div class="dev-conv-lbl"><span>👤 Convidados</span>'
+      + '<button class="dev-conv-add" type="button" onclick="addConvToggleDia('+e.id+')">＋ adicionar</button></div>'
+      + conv + _addConvBoxHtml(e) + '</div>';
+    var passado = new Date(e.inicio_iso) <= agora;
+    var acaoTopo = passado ? '' : '<button class="px-rm" type="button" title="Remarcar" onclick="remToggleDia('+e.id+')">🔁</button>';
+    html += '<div class="dev" data-ev="'+e.id+'"><div class="dev-dot d-'+e.tipo+(e.pre?' pre-dot':'')+'"></div><div class="dev-body">'
+      + '<div class="dev-top"><div>'
+      + '<div class="dev-hora">'+e.hora+'</div>'
+      + '<div class="dev-tt"'+(e.pre?' style="color:var(--ambar)"':'')+'>'+e.titulo+'</div>'
+      + '<div class="dev-meta">'
+      + '<span class="tpill tp-'+e.tipo+'">'+((e.ficha&&e.ficha.tipo)?_esc(e.ficha.tipo):(TPILL[e.tipo]||e.tipo_rot))+'</span>'
+      + (e.local?'<span>📍 '+e.local+'</span>':'')
+      + ((e.ficha&&e.ficha.convidados)?'<span>👥 '+e.ficha.convidados+' convidados</span>':'')
+      + (e.pre?'<span style="color:var(--ambar);font-weight:700">segurada</span>':'')
+      + (e.autor?'<span title="quem marcou">👤 '+_esc(e.autor)+'</span>':'')+'</div>'
+      + (e.link_online?'<a class="meet-btn" href="'+_esc(e.link_online)+'" target="_blank" rel="noopener">🎥 Entrar na reunião</a>':'')
+      + '</div>'+acaoTopo+'</div>'
+      // Data segurada: quem abre o dia precisa saber que essa data AINDA não é de
+      // ninguém, até quando, e — o que faltava — decidir aqui mesmo. Antes, firmar
+      // exigia sair da agenda, abrir Serviços e achar a proposta no funil.
+      + (e.pre?_seguradaHtml(e):'')
+      + _fichaHtml(e.ficha)
+      + (e.descricao&&!e.ficha?'<div class="dev-desc">'+e.descricao+'</div>':'')
+      + conv
+      + (passado ? '<div class="dev-desf">'+_desfechoHtml(e)+'</div>' : _remarcarBoxHtml(e))
+      + '</div></div>';
+  });
+  html += _reaproveitarHtml(iso);
+  html += '<button class="daybox-cta" type="button" onclick="agNovoNoDia(\\''+iso+'\\')">'+CTA_DIA+'</button>';
+  box.innerHTML = html;
+  document.getElementById('dayOverlay').classList.add('show');
+}
+function fecharDia(){ AG_DIA_ABERTO=''; document.getElementById('dayOverlay').classList.remove('show'); }
+// O filtro por pessoa. Vazio = time inteiro. Mora aqui em cima porque tanto a
+// célula do calendário quanto a caixa do dia leem por ele — duas listas
+// filtradas por critérios diferentes seriam dois calendários.
+var AG_FILTRO = '';
+function agDoFiltro(e){
+  return AG_FILTRO === '' || String(e.membro_id || '') === AG_FILTRO;
+}
+// Reconstrói o conteúdo de UMA célula (linhas de compromisso + "+N mais") a partir
+// de EVENTOS_DIA — mesma fonte de dados da caixa do dia, pra nunca desalinhar.
+function renderizarCelula(iso){
+  var cel = document.querySelector('.cal-cell[data-iso="'+iso+'"]');
+  if(!cel) return;
+  var todos = (EVENTOS_DIA[iso] || {}).eventos || [];
+  var evs = todos.filter(agDoFiltro);
+  var num = cel.querySelector('.cal-num');
+  var numHtml = num ? num.outerHTML : '';
+  if(!evs.length){
+    cel.classList.remove('tem-evento','temseg','urg');
+    // DIA VAZIO PELO FILTRO ≠ DIA VAZIO. Só o segundo perde o `data-iso` (é o
+    // caminho de "cancelei o último compromisso do dia"); tirar do primeiro
+    // deixaria a célula morta pra sempre — limpar o filtro não a traria de volta.
+    if(REAPROVEITAR.length || todos.length){ cel.classList.add('clicavel'); }
+    else { cel.removeAttribute('tabindex'); cel.removeAttribute('role'); cel.removeAttribute('data-iso'); }
+    cel.innerHTML = '<div class="cal-head">'+numHtml+'</div>';
+    return;
+  }
+  var count = evs.length > 2 ? '<span class="cal-count">'+evs.length+'</span>' : '';
+  var linhas = evs.slice(0, 2).map(function(e){
+    return '<div class="ev-line'+(e.pre?' pre':'')+'" data-ev="'+e.id+'"'
+      + (e.pre?' title="Data segurada — esperando o sinal"':'')
+      + '><span class="dot d-'+e.tipo+'"></span><span class="h">'+e.hora+'</span><span class="n">'+e.titulo+'</span>'
+      + (e.prazo?'<span class="ev-prazo'+(e.urgente?' urg':'')+'">'+_esc(e.prazo)+'</span>':'')
+      + (e.pg?'<span class="ev-pg '+_esc(e.pg_classe||'')+'">'+_esc(e.pg)+'</span>':'')
+      + '</div>';
+  }).join('');
+  var mais = evs.length > 2 ? '<div class="ev-more">+'+(evs.length - 2)+' mais</div>' : '';
+  cel.classList.add('tem-evento');
+  cel.classList.toggle('temseg', evs.some(function(e){return e.pre;}));
+  cel.classList.toggle('urg', evs.some(function(e){return e.pre && e.urgente;}));
+  cel.innerHTML = '<div class="cal-head">'+numHtml+count+'</div><div class="evs">'+linhas+'</div>'+mais;
+}
+// Tira o evento cancelado do calendário (linha na célula + caixa do dia se estiver
+// aberta) e do EVENTOS_DIA em memória, sem precisar recarregar a página.
+function removerEventoDoCalendario(id){
+  var isoAlvo = null;
+  for(var iso in EVENTOS_DIA){
+    if(EVENTOS_DIA[iso].eventos.some(function(e){ return String(e.id) === String(id); })){ isoAlvo = iso; break; }
+  }
+  if(isoAlvo){
+    EVENTOS_DIA[isoAlvo].eventos = EVENTOS_DIA[isoAlvo].eventos.filter(function(e){ return String(e.id) !== String(id); });
+    if(!EVENTOS_DIA[isoAlvo].eventos.length) delete EVENTOS_DIA[isoAlvo];
+    renderizarCelula(isoAlvo);
+  }
+  var overlayAberto = document.getElementById('dayOverlay').classList.contains('show');
+  var devRow = document.querySelector('#daybox .dev[data-ev="'+id+'"]');
+  if(overlayAberto && devRow && isoAlvo){
+    abrirDia(isoAlvo);   // reconstrói (mostra "nada marcado" + reaproveitar se for o caso)
+  }
+}
+function agNovoNoDia(iso){
+  fecharDia();
+  agNovo(true);
+  var i = document.querySelector('#novo input[name=data]');
+  if(i) i.value = iso;
+}
+// Delegado no calendário (não em cada célula): células podem ser recriadas por
+// renderizarCelula() depois de um cancelamento, então o listener direto se perderia.
+document.querySelector('.cal').addEventListener('click', function(ev){
+  var cel = ev.target.closest('.cal-cell[data-iso]');
+  if(cel) abrirDia(cel.getAttribute('data-iso'));
+});
+document.querySelector('.cal').addEventListener('keydown', function(ev){
+  if(ev.key!=='Enter' && ev.key!==' ') return;
+  var cel = ev.target.closest('.cal-cell[data-iso]');
+  if(cel){ ev.preventDefault(); abrirDia(cel.getAttribute('data-iso')); }
+});
+document.getElementById('dayOverlay').addEventListener('click', function(ev){ if(ev.target.id==='dayOverlay') fecharDia(); });
+document.addEventListener('keydown', function(ev){ if(ev.key==='Escape') fecharDia(); });
+
+function agNovo(v){var n=document.getElementById('novo');if(n){n.style.display='';n.scrollIntoView({behavior:'smooth',block:'center'});var i=n.querySelector('input[name=titulo]');if(i)setTimeout(function(){i.focus()},300);}return false;}
+function agCopiar(){var i=document.getElementById('feedUrl');if(!i)return;i.select();try{document.execCommand('copy');}catch(e){}if(navigator.clipboard)navigator.clipboard.writeText(i.value);var b=event.target;var t=b.textContent;b.textContent='Copiado ✓';setTimeout(function(){b.textContent=t},1600);}
+function cpRow(b){var row=b.closest('.share-row');if(!row)return;var txt=row.getAttribute('data-link')||'';if(navigator.clipboard)navigator.clipboard.writeText(txt);var t=b.textContent;b.textContent='✓';setTimeout(function(){b.textContent=t},1400);}
+function addGuest(){var box=document.getElementById('guests');var d=document.createElement('div');d.className='guest-row';d.innerHTML='<div><input class="gnome" name="convidado_nome" placeholder="Nome" autocomplete="off"></div><div><input name="convidado_contato" placeholder="(86) 90000-0000" autocomplete="off"></div><button type="button" class="g-rm" onclick="rmGuest(this)" title="Remover" aria-label="Remover">✕</button>';box.appendChild(d);var i=d.querySelector('input');if(i)i.focus();}
+function rmGuest(b){var box=document.getElementById('guests');var row=b.closest('.guest-row');if(box&&box.children.length>1){row.remove();}else{row.querySelectorAll('input').forEach(function(x){x.value='';});}}
+function remToggle(id){var box=document.getElementById('remBox-'+id);if(box)box.classList.toggle('show');}
+
+// ---------------- Só segurar a data + choque de horário ----------------
+// Duas coisas que faltavam no momento de marcar: poder segurar (em vez de mentir
+// marcando firme) e saber que aquele horário já tem coisa. O choque NÃO bloqueia —
+// só informa, porque quem sabe se cabe é a empresa.
+(function(){
+  var chk = document.getElementById('fSegurar');
+  var box = document.getElementById('segBox');
+  var ate = document.getElementById('fSegAte');
+  var dias = PRE_RESERVA_DIAS;
+  if(chk && box){
+    chk.addEventListener('change', function(){
+      box.classList.toggle('on', chk.checked);
+      if(chk.checked && ate && !ate.value){
+        var d = new Date(); d.setDate(d.getDate() + dias);
+        ate.value = d.toISOString().slice(0,10);   // prazo padrão da conta, já preenchido
+      }
+    });
+  }
+  var fd = document.getElementById('fData'), fh = document.getElementById('fHora');
+  var ff = document.getElementById('fFim');   // só existe no formulário de evento
+  var cx = document.getElementById('choqueBox'), ct = document.getElementById('choqueTxt');
+  if(!fd || !cx) return;
+  var timer = null;
+  function checar(){
+    if(!fd.value){ cx.classList.remove('on'); return; }
+    // manda o FIM junto: sem ele a janela vira 1h e duas festas na mesma noite
+    // nunca acusam choque — que é justamente o caso de quem vende data.
+    fetch('/painel/agenda/conflitos?data='+encodeURIComponent(fd.value)
+          +'&hora='+encodeURIComponent(fh ? fh.value : '')
+          +'&fim='+encodeURIComponent(ff ? ff.value : ''))
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        var itens = (d && d.itens) || [];
+        if(!itens.length){ cx.classList.remove('on'); return; }
+        var linhas = itens.slice(0,3).map(function(i){
+          return _esc(i.titulo)+' ('+_esc(i.quando)+(i.pre?', segurada':'')+')';
+        }).join(', ');
+        var resto = itens.length > 3 ? ' e mais '+(itens.length-3)+'.' : '.';
+        ct.innerHTML = '<b>Esse horário já tem coisa marcada:</b> '+linhas+resto
+          +' Dá pra marcar assim mesmo — só confira se cabe.';
+        cx.classList.add('on');
+      })
+      .catch(function(){ cx.classList.remove('on'); });
+  }
+  function agendar(){ clearTimeout(timer); timer = setTimeout(checar, 350); }
+  fd.addEventListener('change', agendar);
+  if(fh) fh.addEventListener('change', agendar);
+  if(ff) ff.addEventListener('change', agendar);
+})();
+function addConvToggle(id){var box=document.getElementById('addConvBox-'+id);if(box)box.classList.toggle('show');}
+
+// ---------------- Histórico de envios ----------------
+function _histRowHtml(it){
+  var motivo = it.motivo_rot ? '<span class="hs-motivo">'+_esc(it.motivo_rot)+'</span>' : '';
+  var status = it.ok ? '<span class="hist-status hs-ok">✅ Enviado</span>'
+    : '<span class="hist-status hs-fail">❌ Falhou'+motivo+'</span>';
+  var retry = it.pode_reenviar ? '<button class="hist-retry" type="button" onclick="histReenviar('+it.id+',this)">🔁 Reenviar</button>' : '';
+  var loc = it.evento_local ? '<div class="loc">'+_esc(it.evento_local)+'</div>' : '';
+  return '<tr><td class="hist-qd" data-rot="Quando">'+_esc(it.quando_rot)+'</td>'
+    + '<td class="hist-compr" data-rot="Compromisso">'+_esc(it.evento_titulo||'—')+loc+'</td>'
+    + '<td data-rot="Convidado">'+_esc(it.convidado_rot)+'</td>'
+    + '<td data-rot="Tipo"><span class="hist-tipo ht-'+it.tipo+'">'+_esc(it.tipo_rot)+'</span></td>'
+    + '<td class="hist-canal" data-rot="Canal">'+_esc(it.canal_rot)+'</td>'
+    + '<td data-rot="Status">'+status+'</td><td>'+retry+'</td></tr>';
+}
+function _histRenderBody(){
+  var box = document.getElementById('histBody');
+  if(!box) return;
+  if(!HIST_STATE.itens.length){
+    box.innerHTML = '<div class="hist-vazio" id="histVazio">Nada enviado nos últimos '+HIST_STATE.dias+' dias. 🤷</div>';
+    return;
+  }
+  var ok = HIST_STATE.itens.filter(function(i){return i.ok;}).length;
+  var fail = HIST_STATE.itens.length - ok;
+  var rows = HIST_STATE.itens.map(_histRowHtml).join('');
+  var mais = HIST_STATE.total > HIST_STATE.itens.length
+    ? '<div class="hist-foot"><button class="hist-mais" type="button" onclick="histMais()">Ver mais</button></div>' : '';
+  box.innerHTML = '<div class="hist-resumo" id="histResumo">'
+    + '<span class="hr-ok">✅ <b>'+ok+'</b> enviados</span>'
+    + '<span class="hr-fail">❌ <b>'+fail+'</b> falharam</span>'
+    + '<span>📨 <b>'+HIST_STATE.total+'</b> no total · últimos '+HIST_STATE.dias+' dias</span></div>'
+    + '<div class="hist-tbl-wrap"><table class="hist-tbl"><thead><tr><th>Quando</th><th>Compromisso</th>'
+    + '<th>Convidado</th><th>Tipo</th><th>Canal</th><th>Status</th><th></th></tr></thead>'
+    + '<tbody id="histTbody">'+rows+'</tbody></table></div>' + mais;
+}
+function _histQS(offset){
+  return 'dias='+HIST_STATE.dias+'&falhas='+(HIST_STATE.falhas?'1':'0')
+    +'&q='+encodeURIComponent(HIST_STATE.q)+'&offset='+offset;
+}
+function _histFetch(reset){
+  var offset = reset ? 0 : HIST_STATE.itens.length;
+  fetch('/painel/agenda/historico?'+_histQS(offset)).then(function(r){return r.json();}).then(function(d){
+    if(!d.ok) return;
+    HIST_STATE.itens = reset ? d.itens : HIST_STATE.itens.concat(d.itens);
+    HIST_STATE.total = d.total;
+    _histRenderBody();
+  });
+}
+function histFiltro(btn){
+  document.querySelectorAll('.hist-filtros .hf-btn[data-dias]').forEach(function(b){b.classList.remove('on');});
+  btn.classList.add('on');
+  HIST_STATE.dias = Number(btn.getAttribute('data-dias'));
+  _histFetch(true);
+}
+function histTab(nome){
+  var feito = nome === 'feito';
+  document.getElementById('histTabFeito').classList.toggle('on', feito);
+  document.getElementById('histTabFila').classList.toggle('on', !feito);
+  document.getElementById('histBody').style.display = feito ? '' : 'none';
+  document.getElementById('filaBody').style.display = feito ? 'none' : '';
+  var filtros = document.querySelector('.hist-filtros');
+  if(filtros) filtros.style.display = feito ? '' : 'none';
+}
+function histToggleFalhas(){
+  HIST_STATE.falhas = !HIST_STATE.falhas;
+  var b = document.getElementById('histFalhasBtn'); if(b) b.classList.toggle('on', HIST_STATE.falhas);
+  _histFetch(true);
+}
+function histMais(){ _histFetch(false); }
+function histReenviar(id, btn){
+  btn.disabled = true; var orig = btn.textContent; btn.textContent = '⏳';
+  fetch('/painel/agenda/historico/reenviar', {method:'POST',
+    headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'log_id='+id})
+    .then(function(r){return r.json();}).then(function(d){
+      if(d.ok){ _histFetch(true); }
+      else { btn.disabled = false; btn.textContent = orig; zaqToast('Não consegui reenviar agora.', false); }
+    }).catch(function(){ btn.disabled = false; btn.textContent = orig; });
+}
+(function(){
+  var q = document.getElementById('histQ');
+  if(!q) return;
+  var t;
+  q.addEventListener('input', function(){
+    clearTimeout(t);
+    t = setTimeout(function(){ HIST_STATE.q = q.value; _histFetch(true); }, 350);
+  });
+})();
+
+// ---------------- Local: busca de endereço (Google Places) + manual + enviar ----------------
+(function(){
+  var addrInput = document.getElementById('addrInput');
+  var addrDrop = document.getElementById('addrDrop');
+  var addrPicked = document.getElementById('addrPicked');
+  var localHidden = document.getElementById('localHidden');
+  var hintLine = document.getElementById('hintLine');
+  var addrWrap = document.getElementById('addrWrap');
+  var searchRow = document.querySelector('.addr-input-row');
+  var altRow = document.querySelector('.local-alt-row');
+  var manualToggle = document.getElementById('manualToggle');
+  var manualBox = document.getElementById('manualBox');
+  var manualInput = document.getElementById('manualInput');
+  var manualCancel = document.getElementById('manualCancel');
+  var onlineToggle = document.getElementById('onlineToggle');
+  var onlineBox = document.getElementById('onlineBox');
+  var onlineCancel = document.getElementById('onlineCancel');
+  var linkOnline = document.getElementById('linkOnline');
+  if(!addrInput) return;
+
+  function nomesEnvolvidos(){
+    var nomes = [];
+    document.querySelectorAll('.gnome').forEach(function(i){ if(i.value.trim()) nomes.push(i.value.trim()); });
+    return nomes;
+  }
+  function fraseEnvolvidos(){
+    var n = nomesEnvolvidos();
+    if(n.length < 2) return '';
+    return n.slice(0, -1).join(', ') + ' e ' + n[n.length - 1];
+  }
+  function linkMapa(endereco){
+    return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(endereco);
+  }
+
+  // Geolocalização: só pede no primeiro foco no campo (não no load da página,
+  // pra não estourar o popup de permissão sem contexto). Se negar/não suportar,
+  // segue sem — a busca continua igual a antes, só sem o bias de proximidade.
+  var geoCoords = null, geoPedido = false;
+  addrInput.addEventListener('focus', function(){
+    if(geoPedido || !navigator.geolocation) return;
+    geoPedido = true;
+    navigator.geolocation.getCurrentPosition(function(pos){
+      geoCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    }, function(){ /* negado ou indisponível: segue sem bias */ }, { timeout: 6000 });
+  });
+
+  var timer = null;
+  addrInput.addEventListener('input', function(){
+    localHidden.value = addrInput.value;    // digitou solto -> já vale como local, igual antes
+    addrPicked.innerHTML = '';
+    var termo = addrInput.value.trim();
+    clearTimeout(timer);
+    if(termo.length < 2){ addrDrop.classList.remove('show'); return; }
+    timer = setTimeout(function(){ buscar(termo); }, 320);
+  });
+
+  function buscar(termo){
+    var url = '/painel/agenda/buscar-local?q=' + encodeURIComponent(termo);
+    if(geoCoords) url += '&lat=' + geoCoords.lat + '&lng=' + geoCoords.lng;
+    fetch(url)
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(addrInput.value.trim() !== termo) return;   // resposta atrasada de uma busca antiga
+        if(!d.ok && d.erro === 'sem_chave'){
+          addrDrop.classList.remove('show');
+          hintLine.textContent = 'Busca de endereço desligada nesta conta — digite manualmente.';
+          return;
+        }
+        var itens = (d.itens || []);
+        if(!itens.length){
+          addrDrop.innerHTML = '<div class="addr-empty">Nenhum lugar encontrado pra "'+termo+'". Usa o link "digitar manualmente" abaixo.</div>';
+        } else {
+          addrDrop.innerHTML = itens.map(function(p, idx){
+            return '<div class="addr-opt" data-idx="'+idx+'"><span class="pin">📍</span>'
+              + '<div><div class="tt"></div><div class="ad"></div></div></div>';
+          }).join('');
+          // texto via textContent (não via template) pra não abrir brecha de HTML no nome/endereço do lugar
+          Array.prototype.forEach.call(addrDrop.querySelectorAll('.addr-opt'), function(row, idx){
+            row.querySelector('.tt').textContent = itens[idx].nome;
+            row.querySelector('.ad').textContent = itens[idx].endereco;
+            row.addEventListener('click', function(){ escolherLocal(itens[idx]); });
+          });
+        }
+        addrDrop.classList.add('show');
+      })
+      .catch(function(){ addrDrop.classList.remove('show'); });
+  }
+
+  function escolherLocal(p){
+    addrInput.value = p.nome;
+    localHidden.value = p.nome;
+    addrDrop.classList.remove('show');
+    hintLine.textContent = 'Endereço confirmado pelo Google — o link do mapa vai junto nas mensagens.';
+    var mapa = linkMapa(p.endereco);
+    var card = document.createElement('div');
+    card.className = 'addr-picked';
+    var chk = document.createElement('span'); chk.className = 'chk'; chk.textContent = '✅';
+    var body = document.createElement('div'); body.className = 'body';
+    var nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = p.nome;
+    var ed = document.createElement('div'); ed.className = 'ed'; ed.textContent = p.endereco;
+    var lnk = document.createElement('a'); lnk.className = 'lnk'; lnk.href = mapa; lnk.target = '_blank';
+    lnk.rel = 'noopener'; lnk.textContent = '🔗 Ver no Google Maps';
+    body.appendChild(nm); body.appendChild(ed); body.appendChild(lnk);
+    var x = document.createElement('button'); x.type = 'button'; x.className = 'x';
+    x.setAttribute('aria-label', 'Trocar endereço'); x.textContent = '✕';
+    x.addEventListener('click', function(){
+      addrInput.value = ''; localHidden.value = ''; addrPicked.innerHTML = '';
+      hintLine.textContent = 'Digite pra buscar — ex: nome do lugar ou endereço.';
+      addrInput.focus();
+    });
+    var actions = document.createElement('div'); actions.className = 'addr-actions';
+    var send = document.createElement('button'); send.type = 'button'; send.className = 'send-btn';
+    send.textContent = '💬 Enviar pro cliente';
+    var pop = document.createElement('div'); pop.className = 'pop';
+    send.addEventListener('click', function(){
+      var titulo = (document.getElementById('fTitulo').value || 'Compromisso').trim();
+      var data = document.getElementById('fData').value, hora = document.getElementById('fHora').value;
+      var quando = (data ? data.split('-').reverse().join('/') : '') + (hora ? ' ' + hora : '');
+      var frase = fraseEnvolvidos();
+      var msgTxt = titulo + '\\n' + quando + ' — ' + p.nome + '\\n📍 ' + mapa + (frase ? '\\n👥 Com: ' + frase : '');
+      pop.innerHTML = '';
+      var h4 = document.createElement('h4'); h4.textContent = '📍 Enviar pro cliente';
+      var box = document.createElement('div'); box.className = 'pop-msg'; box.textContent = msgTxt;
+      var go = document.createElement('a'); go.className = 'pop-go'; go.target = '_blank'; go.rel = 'noopener';
+      go.href = 'https://wa.me/?text=' + encodeURIComponent(msgTxt); go.textContent = '💬 Abrir WhatsApp';
+      pop.appendChild(h4); pop.appendChild(box); pop.appendChild(go);
+      pop.classList.toggle('show');
+    });
+    actions.appendChild(send); actions.appendChild(pop);
+    card.appendChild(chk); card.appendChild(body); card.appendChild(x); card.appendChild(actions);
+    addrPicked.innerHTML = '';
+    addrPicked.appendChild(card);
+  }
+
+  function voltarBusca(){
+    searchRow.style.display = ''; hintLine.style.display = ''; altRow.style.display = '';
+    addrInput.value = ''; localHidden.value = ''; linkOnline.value = '';
+  }
+
+  manualToggle.addEventListener('click', function(){
+    searchRow.style.display = 'none';
+    addrDrop.classList.remove('show');
+    addrPicked.innerHTML = '';
+    hintLine.style.display = 'none';
+    altRow.style.display = 'none';
+    manualBox.classList.add('show');
+    addrInput.value = ''; localHidden.value = ''; linkOnline.value = '';
+    manualInput.focus();
+  });
+  manualInput.addEventListener('input', function(){ localHidden.value = manualInput.value; });
+  manualCancel.addEventListener('click', function(){
+    manualBox.classList.remove('show');
+    manualInput.value = '';
+    voltarBusca();
+    addrInput.focus();
+  });
+
+  // Reunião online: sem endereço nenhum — fecha a busca e nunca manda link de
+  // mapa (nem no convite, nem quando o convidado confirma presença).
+  onlineToggle.addEventListener('click', function(){
+    searchRow.style.display = 'none';
+    addrDrop.classList.remove('show');
+    addrPicked.innerHTML = '';
+    hintLine.style.display = 'none';
+    altRow.style.display = 'none';
+    onlineBox.classList.add('show');
+    addrInput.value = ''; localHidden.value = 'Online';
+  });
+  onlineCancel.addEventListener('click', function(){
+    onlineBox.classList.remove('show');
+    voltarBusca();
+    addrInput.focus();
+  });
+
+  document.addEventListener('click', function(ev){
+    if(!addrWrap.contains(ev.target)) addrDrop.classList.remove('show');
+    if(!ev.target.closest('.addr-actions')){
+      document.querySelectorAll('.pop.show').forEach(function(p){ p.classList.remove('show'); });
+    }
+  });
+})();
+// Feedback instantâneo: ao enviar QUALQUER form, o botão reage na hora (apaga +
+// "⏳ …"), enquanto o back processa — pro clique nunca parecer travado. Como a
+// maioria recarrega, isso só precisa durar até a navegação; o timeout destrava
+// caso algo impeça o envio (ex.: erro de rede). Respeita confirm() cancelado.
+document.addEventListener('submit', function(ev){
+  if(ev.defaultPrevented) return;                         // ex.: Cancelar -> confirm() = não
+  var f=ev.target; if(!f||f.tagName!=='FORM') return;
+  if(f.dataset && f.dataset.ajax) return;                 // forms AJAX se gerenciam sozinhos
+  var b=f.querySelector('button[type=submit],button:not([type])');
+  if(!b||b.disabled) return;
+  var busy=b.getAttribute('data-busy');
+  b.dataset.orig=b.innerHTML;
+  if(busy) b.innerHTML=busy;
+  b.classList.add('is-busy'); b.disabled=true;
+  setTimeout(function(){ if(b.dataset.orig!=null){ b.innerHTML=b.dataset.orig; b.disabled=false; b.classList.remove('is-busy'); delete b.dataset.orig; } }, 8000);
+}, false);
+
+// Toast flutuante
+function zaqToast(msg, ok){
+  var t=document.createElement('div');
+  t.className='zaq-toast'+(ok===false?' err':'');
+  t.textContent=msg; document.body.appendChild(t);
+  requestAnimationFrame(function(){ t.classList.add('show'); });
+  setTimeout(function(){ t.classList.remove('show'); setTimeout(function(){ t.remove(); },300); }, 3400);
+}
+function zaqVazioProximos(){
+  var px=document.querySelector('.px'); if(!px) return;
+  if(!px.querySelector('.px-row') && !px.querySelector('.px-vazio')){
+    var d=document.createElement('div'); d.className='px-vazio';
+    d.textContent='Nada por vir. Marque um compromisso ali em cima. 🎉'; px.appendChild(d);
+  }
+}
+// ---------------- As abas do card de datas ----------------
+// Puro DOM: as duas listas já vieram no HTML. Trocar de aba não pede nada ao
+// servidor — o card inteiro custa duas consultas, e elas já foram feitas.
+(function(){
+  var card=document.getElementById('datas-card'); if(!card) return;
+  var abas=[].slice.call(card.querySelectorAll('.dt-aba'));
+  abas.forEach(function(b){
+    b.addEventListener('click', function(){
+      abas.forEach(function(o){
+        var on=(o===b);
+        o.classList.toggle('on', on);
+        o.setAttribute('aria-selected', on?'true':'false');
+        var pane=document.getElementById(o.dataset.alvo);
+        if(pane) pane.hidden=!on;
+      });
+    });
+  });
+})();
+
+// ---------------- Filtro por pessoa, sem recarregar ----------------
+// ERA UM LINK. Cada clique num nome refazia a página inteira — treze consultas ao
+// banco, 139 KB de HTML — pra só então filtrar, em Python, uma lista que o
+// servidor já tinha na mão. O mês aberto, a rolagem e o dia expandido se perdiam
+// junto: era isso que fazia a tela piscar a cada toque.
+//
+// O filtro é VISUAL, e todos os dados do mês já estão na página (EVENTOS_DIA).
+// Trocar de pessoa não pede nada ao servidor — só redesenha as células pela mesma
+// função que a agenda já usava depois de cancelar ou remarcar.
+//
+// O SERVIDOR PAROU DE FILTRAR. Tinha que parar: se ele mandasse só os eventos do
+// Rafael, clicar em "Todos" não teria como trazer os outros de volta sem
+// recarregar — que é justamente o que se está tirando. Ele segue lendo o ?p= pra
+// marcar qual chip nasce ligado, e o JS aplica antes de a pessoa tocar em nada.
+(function(){
+  var barra=document.querySelector('.ag-pessoas'); if(!barra) return;
+  var chips=[].slice.call(barra.querySelectorAll('.agp'));
+  if(!chips.length) return;
+
+  function aplicar(id){
+    AG_FILTRO=id;
+    Object.keys(EVENTOS_DIA).forEach(renderizarCelula);
+    [].slice.call(document.querySelectorAll('.px-row')).forEach(function(el){
+      var meu=el.getAttribute('data-membro')||'';
+      el.hidden=!(id==='' || meu===id);
+    });
+    if(typeof zaqVazioProximos==='function') zaqVazioProximos();
+    if(AG_DIA_ABERTO) abrirDia(AG_DIA_ABERTO);   // a caixa aberta acompanha
+  }
+
+  chips.forEach(function(a){
+    a.addEventListener('click', function(ev){
+      ev.preventDefault();
+      var id=a.dataset.membro||'';
+      chips.forEach(function(o){ o.classList.toggle('on', o===a); });
+      aplicar(id);
+      // a URL acompanha sem recarregar: F5 mantém o filtro e o link colado no
+      // WhatsApp continua abrindo a agenda do jeito que a pessoa estava vendo.
+      try{
+        var u=new URL(window.location.href);
+        if(id) u.searchParams.set('p', id); else u.searchParams.delete('p');
+        history.replaceState(null, '', u.toString());
+      }catch(e){}
+    });
+  });
+
+  var ligado=barra.querySelector('.agp.on');
+  var inicial=(ligado && ligado.dataset.membro) || '';
+  if(inicial) aplicar(inicial);
+})();
+
+// Ações SEM reload (fetch): Cancelar remove a linha/chip na hora; 📲 Zaq envia e
+// dá um toast. Fallback: sem JS, os <form> continuam funcionando por POST normal.
+document.addEventListener('submit', function(ev){
+  var f=ev.target; if(!f||!f.dataset||!f.dataset.ajax) return;
+  if(ev.defaultPrevented) return;                         // confirm() cancelado
+  ev.preventDefault();
+  var tipo=f.dataset.ajax, btn=f.querySelector('button[type=submit]');
+  var orig=btn?btn.innerHTML:'';
+  if(btn){ btn.disabled=true; btn.classList.add('is-busy'); if(btn.getAttribute('data-busy')) btn.innerHTML=btn.getAttribute('data-busy'); }
+  function restore(){ if(btn){ btn.disabled=false; btn.classList.remove('is-busy'); btn.innerHTML=orig; } }
+  fetch(f.action, {method:'POST', headers:{'X-Zaq-Ajax':'1'}, body:new FormData(f)})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(tipo==='cancelar'){
+        if(d && d.ok){
+          var id=(f.querySelector('[name=evento_id]')||{}).value;
+          var row=f.closest('.px-row'); if(row){ row.classList.add('saindo'); setTimeout(function(){ row.remove(); zaqVazioProximos(); },200); }
+          if(id) removerEventoDoCalendario(id);
+          zaqToast('Compromisso cancelado.');
+        } else { restore(); zaqToast('Não consegui cancelar.', false); }
+      } else {   // enviar convite
+        if(d && d.ok){ zaqToast(d.msg||'Convite enviado! ✅'); if(btn){ btn.innerHTML='✓ Enviado'; btn.classList.remove('is-busy'); } }
+        else { restore(); zaqToast((d && d.msg)||'Não consegui enviar.', false); }
+      }
+    })
+    .catch(function(){ restore(); zaqToast('Erro de conexão — tenta de novo.', false); });
+}, false);
+"""
+_JS_TAG = f'<script src="{_estaticos.registrar("agenda.js", _JS_CRU)}" defer></script>'
+
 
 _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 <div class="ag-wrap">
@@ -1484,8 +2302,10 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 
   {% if pessoas %}
   <div class="ag-pessoas">
-    <a href="/painel/agenda?m={{ '%04d-%02d'|format(ano, mes) }}" class="agp{% if p_id is none %} on{% endif %}">Todos</a>
-    {% for pp in pessoas %}<a href="/painel/agenda?m={{ '%04d-%02d'|format(ano, mes) }}&p={{ pp.id }}" class="agp{% if pp.on %} on{% endif %}">{{ pp.nome }}</a>{% endfor %}
+    {# Continuam <a> de verdade: sem JS o servidor filtra igual a antes, e o link
+       é copiável. Com JS o clique é interceptado e nada vai ao servidor. #}
+    <a href="/painel/agenda?m={{ '%04d-%02d'|format(ano, mes) }}" class="agp{% if p_id is none %} on{% endif %}" data-membro="">Todos</a>
+    {% for pp in pessoas %}<a href="/painel/agenda?m={{ '%04d-%02d'|format(ano, mes) }}&p={{ pp.id }}" class="agp{% if pp.on %} on{% endif %}" data-membro="{{ pp.id }}">{{ pp.nome }}</a>{% endfor %}
   </div>
   {% endif %}
 
@@ -1505,7 +2325,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
             {% if c.eventos %}
             <div class="evs">
               {% for e in c.eventos[:2] %}
-              <div class="ev-line{% if e.pre %} pre{% endif %}" data-ev="{{ e.id }}"{% if e.pre %} title="Data segurada — esperando o sinal ({{ e.prazo }})"{% endif %}><span class="dot d-{{ e.tipo }}"></span><span class="h">{{ e.hora }}</span><span class="n">{{ e.titulo }}</span>{% if e.prazo %}<span class="ev-prazo{% if e.urgente %} urg{% endif %}">{{ e.prazo }}</span>{% endif %}{% if e.pg %}<span class="ev-pg {{ e.pg_classe }}">{{ e.pg }}</span>{% endif %}</div>
+              <div class="ev-line{% if e.pre %} pre{% endif %}" data-ev="{{ e.id }}" data-membro="{{ e.membro_id }}"{% if e.pre %} title="Data segurada — esperando o sinal ({{ e.prazo }})"{% endif %}><span class="dot d-{{ e.tipo }}"></span><span class="h">{{ e.hora }}</span><span class="n">{{ e.titulo }}</span>{% if e.prazo %}<span class="ev-prazo{% if e.urgente %} urg{% endif %}">{{ e.prazo }}</span>{% endif %}{% if e.pg %}<span class="ev-pg {{ e.pg_classe }}">{{ e.pg }}</span>{% endif %}</div>
               {% endfor %}
             </div>
             {% if c.eventos|length > 2 %}<div class="ev-more">+{{ c.eventos|length - 2 }} mais</div>{% endif %}
@@ -1527,26 +2347,62 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </div>
 
     <div class="side-cards">
-      <!-- datas seguradas: só existe quando existe alguma. Quem não vende data
-           nunca vê este card. -->
-      {% if seguradas %}
-      <div class="ag-card">
-        <h2>⏳ Datas seguradas <span class="segcnt">{{ seguradas|length }}</span></h2>
-        {% for s in seguradas %}
-        <div class="segrow{% if s.urgente %} urg{% endif %}">
-          <div class="segbar"></div>
-          <div>
-            <div class="stt">{{ s.titulo }}</div>
-            <div class="smt">{{ s.quando }}{% if s.sinal %} · sinal {{ s.sinal }}{% endif %}{% if s.orcamento_numero %} · orçamento nº {{ s.orcamento_numero }}{% endif %}</div>
-          </div>
-          <div class="srt">
-            <div class="v">{{ s.prazo }}</div>
-            <div class="s">vence {{ s.ate }}</div>
-          </div>
+      <!-- AS DATAS, as duas faces do mesmo número: o que está por um fio e o que
+           já é da casa. Antes existia só o lado "seguradas", e ele sumia quando
+           não havia nenhuma — a empresa não tinha onde ver quantas datas tinha
+           vendido sem contar no calendário, mês a mês.
+           Só quem vende data vê o card; clínica e loja não seguram data. -->
+      {% if seguradas or confirmadas %}
+      <div class="ag-card" id="datas-card">
+        <div class="dt-abas" role="tablist">
+          <button type="button" class="dt-aba on" data-alvo="dt-seg" role="tab" aria-selected="true">
+            ⏳ Seguradas <span class="c seg">{{ seguradas|length }}</span></button>
+          <button type="button" class="dt-aba" data-alvo="dt-con" role="tab" aria-selected="false">
+            ✓ Confirmadas <span class="c con">{{ confirmadas|length }}</span></button>
         </div>
-        {% endfor %}
-        <p class="hint" style="margin:2px 0 0">Da que vence primeiro. Passando o prazo sem o sinal, a data
-        libera sozinha e você é avisado — abra o dia no calendário pra firmar ou soltar antes disso.</p>
+
+        <div id="dt-seg" class="dt-pane">
+          {% for s in seguradas %}
+          <div class="segrow{% if s.urgente %} urg{% endif %}">
+            <div class="segbar"></div>
+            <div>
+              <div class="stt">{{ s.titulo }}</div>
+              <div class="smt">{{ s.quando }}{% if s.sinal %} · sinal {{ s.sinal }}{% endif %}{% if s.orcamento_numero %} · orçamento nº {{ s.orcamento_numero }}{% endif %}</div>
+            </div>
+            <div class="srt">
+              <div class="v">{{ s.prazo }}</div>
+              <div class="s">vence {{ s.ate }}</div>
+            </div>
+          </div>
+          {% else %}
+          <p class="hint" style="margin:2px 0">Nenhuma data segurada agora.</p>
+          {% endfor %}
+          {% if seguradas %}
+          <p class="hint" style="margin:2px 0 0">Da que vence primeiro. Passando o prazo sem o sinal, a data
+          libera sozinha e você é avisado — abra o dia no calendário pra firmar ou soltar antes disso.</p>
+          {% endif %}
+        </div>
+
+        <div id="dt-con" class="dt-pane" hidden>
+          {% for s in confirmadas %}
+          <div class="segrow ok">
+            <div class="segbar"></div>
+            <div>
+              <div class="stt">{{ s.titulo }}</div>
+              <div class="smt">{{ s.quando }}{% if s.orcamento_numero %} · orçamento nº {{ s.orcamento_numero }}{% else %} · marcado na agenda{% endif %}</div>
+            </div>
+            <div class="srt">
+              <div class="v">{{ s.total or '—' }}</div>
+              <div class="s">{{ 'sinal recebido' if s.sinal_pago else 'data firme' }}</div>
+            </div>
+          </div>
+          {% else %}
+          <p class="hint" style="margin:2px 0">Nenhuma data firme daqui pra frente.</p>
+          {% endfor %}
+          {% if confirmadas %}
+          <p class="hint" style="margin:2px 0 0">Da mais próxima. A festa que já aconteceu sai daqui sozinha.</p>
+          {% endif %}
+        </div>
       </div>
       {% endif %}
 
@@ -1555,7 +2411,7 @@ _AGENDA_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         <h2>{{ rot.proximos }}</h2>
         <div class="px">
           {% for e in proximos %}
-          <div class="px-row" data-ev="{{ e.id }}">
+          <div class="px-row" data-ev="{{ e.id }}" data-membro="{{ e.membro_id or '' }}">
             <div class="px-dot d-{{ e.tipo }}"></div>
             <div class="px-when"><div class="d">{{ e.dia_rot }}</div><div class="h">{{ e.hora_rot }}</div></div>
             <div class="px-body">
@@ -1901,679 +2757,9 @@ var CUR_MES = {{ ('%04d-%02d'|format(ano, mes))|tojson }};
 var TPILL = {pessoal:'Pessoal', empresa:'Empresa', fornecedor:'Fornecedor'};
 var HIST_STATE = {dias: 7, falhas: false, q: '', itens: {{ historico|tojson }},
                   total: {{ historico_total }}};
+var PRE_RESERVA_DIAS = {{ (cfg.pre_reserva_dias or 3)|tojson }};
+</script>""" + _JS_TAG + """
 
-function _esc(s){ return (s||'').replace(/[&<>"']/g, function(ch){
-  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]; }); }
-function isoTitulo(iso){
-  var p = iso.split('-');
-  var d = new Date(Number(p[0]), Number(p[1])-1, Number(p[2]));
-  return DIAS_EXT_JS[d.getDay()] + ', ' + d.getDate() + ' de ' + MESES_JS[d.getMonth()+1];
-}
-function remToggleDia(id){ var box=document.getElementById('remBoxDia-'+id); if(box) box.classList.toggle('show'); }
-function addConvToggleDia(id){ var box=document.getElementById('addConvBoxDia-'+id); if(box) box.classList.toggle('show'); }
-function _addConvBoxHtml(e){
-  return '<div class="add-conv-box" id="addConvBoxDia-'+e.id+'">'
-    + '<form method="post" action="/painel/agenda/convidado/adicionar">'
-    + '<input type="hidden" name="evento_id" value="'+e.id+'">'
-    + '<input type="hidden" name="m" value="'+CUR_MES+'">'
-    + '<div class="rlbl">＋ Adicionar convidado</div>'
-    + '<div class="add-conv-row"><input name="nome" placeholder="Nome" autocomplete="off"><input name="contato" placeholder="(86) 90000-0000" autocomplete="off"></div>'
-    + '<div class="add-conv-actions"><button class="rbtn ok" type="submit">Adicionar</button>'
-    + '<button class="rbtn cc" type="button" onclick="addConvToggleDia('+e.id+')">Cancelar</button></div>'
-    + '</form></div>';
-}
-function _remarcarBoxHtml(e){
-  return '<div class="remarcar-box" id="remBoxDia-'+e.id+'">'
-    + '<form method="post" action="/painel/agenda/remarcar">'
-    + '<input type="hidden" name="evento_id" value="'+e.id+'">'
-    + '<input type="hidden" name="m" value="'+CUR_MES+'">'
-    + '<div class="rlbl">🔁 Nova data</div>'
-    + '<div class="remarcar-row2"><input type="date" name="data" value="'+e.data_iso+'" required><input type="time" name="hora" value="'+e.hora+'" required></div>'
-    + '<div class="tg"><div><div class="tg-t">Avisar os convidados</div><div class="tg-s">Manda a nova data pro mesmo link que já têm</div></div>'
-    + '<label class="sw"><input type="checkbox" name="avisar" value="1" checked><span class="track"></span><span class="knob"></span></label></div>'
-    + '<div class="remarcar-actions"><button class="rbtn ok" type="submit">Salvar nova data</button>'
-    + '<button class="rbtn cc" type="button" onclick="remToggleDia('+e.id+')">Cancelar</button></div>'
-    + '</form></div>';
-}
-function _desfechoHtml(e){
-  if(e.desfecho === 'realizado') return '<span class="desf-badge desf-ok">✅ Aconteceu</span>';
-  if(e.desfecho === 'nao_realizado') return '<span class="desf-badge desf-nao">❌ Não rolou</span>';
-  return '<div class="desf-ask" id="desfAsk-'+e.id+'"><span>Como foi?</span>'
-    + '<button type="button" class="desf-btn ok" onclick="marcarDesfecho('+e.id+',\\'realizado\\')">✅ Aconteceu</button>'
-    + '<button type="button" class="desf-btn nao" onclick="marcarDesfecho('+e.id+',\\'nao_realizado\\')">❌ Não rolou</button></div>';
-}
-function marcarDesfecho(id, valor){
-  fetch('/painel/agenda/desfecho', {
-    method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'},
-    body: 'evento_id='+id+'&desfecho='+valor
-  }).then(function(r){ return r.json(); }).then(function(d){
-    if(!d.ok) return;
-    var ask = document.getElementById('desfAsk-'+id);
-    if(ask) ask.outerHTML = valor==='realizado'
-      ? '<span class="desf-badge desf-ok">✅ Aconteceu</span>'
-      : '<span class="desf-badge desf-nao">❌ Não rolou</span>';
-    for(var iso in EVENTOS_DIA){
-      EVENTOS_DIA[iso].eventos.forEach(function(e){ if(String(e.id)===String(id)) e.desfecho = valor; });
-    }
-  });
-}
-function _reaproveitarHtml(iso){
-  if(!REAPROVEITAR.length) return '';
-  var cards = REAPROVEITAR.map(function(r){
-    return '<div class="reuse-card"><div class="reuse-info">'
-      + '<div class="reuse-tt">'+_esc(r.titulo)+'</div>'
-      + '<div class="reuse-mt"><span class="reuse-nr-tag">Não rolou</span>'
-      + ' era '+r.hora_rot+(r.n_convidados?' · 👤 '+r.n_convidados+(r.n_convidados===1?' convidado':' convidados'):'')+'</div></div>'
-      + '<form method="post" action="/painel/agenda/remarcar">'
-      + '<input type="hidden" name="evento_id" value="'+r.id+'">'
-      + '<input type="hidden" name="data" value="'+iso+'">'
-      + '<input type="hidden" name="hora" value="'+r.hora+'">'
-      + '<input type="hidden" name="avisar" value="1">'
-      + '<input type="hidden" name="m" value="'+CUR_MES+'">'
-      + '<button class="reuse-btn" type="submit">Usar nesse dia</button></form></div>';
-  }).join('');
-  return '<div class="reuse-sec"><div class="reuse-lbl">♻️ Reaproveitar um compromisso que não aconteceu</div>'+cards+'</div>';
-}
-// Bloco da data segurada dentro da caixa do dia: o prazo, o que se espera, e as
-// três decisões possíveis. "Sinal recebido" é o MESMO botão do funil (mesma rota
-// no servidor, mesma baixa do título na data do pagamento).
-// confirm() nomeando o evento SEM aninhar aspas dentro de string JS: o título vem
-// do data-attribute do próprio form. A versão inline precisava de três níveis de
-// escape (string Python -> template -> atributo HTML -> JS) e quebrava calada.
-// FICHA DO EVENTO. Tudo aqui já estava gravado no orçamento; a agenda só não lia.
-// No lugar da frase colada ("Orçamento Nº 1 · 100 convidados · aprovado pelo
-// cliente"), os campos de verdade — e o pagamento, que num buffet é parte da data.
-function _fichaHtml(f){
-  if(!f) return '';
-  var cel = function(k, v, sm){
-    return '<div class="fic-c"><div class="k">'+k+'</div>'
-         + '<div class="v'+(sm?' sm':'')+'">'+v+'</div></div>';
-  };
-  var linhas = '';
-  if(f.cliente) linhas += cel('cliente', _esc(f.cliente), true);
-  if(f.contato){
-    var so = String(f.contato).replace(/\D/g,'');
-    var num = so.length>=10 && so.slice(0,2)!=='55' ? '55'+so : so;
-    linhas += '<div class="fic-c"><div class="k">whatsapp</div>'
-            + '<a class="v sm" href="https://wa.me/'+num+'" target="_blank" rel="noopener">'
-            + _esc(f.contato)+'</a></div>';
-  }
-  if(f.total) linhas += cel('total', _esc(f.total));
-
-  var itens = '';
-  if(f.itens && f.itens.length){
-    itens = '<div class="fic-b"><div class="k">o que foi contratado</div>'
-      + f.itens.map(function(i){
-          return '<span class="fchip">'+_esc(i.nome)
-               + (i.qtd>1?' <span class="q">×'+i.qtd+'</span>':'')+'</span>';
-        }).join('')
-      + '</div>';
-  }
-
-  // PAGAMENTO. Com contrato fechado existem títulos e o número é recebido de
-  // verdade. Só aprovado, o que existe é o PLANO aceito — e dizer "0% recebido" de
-  // algo que ninguém cobrou seria mentira com cara de número.
-  var pg = '';
-  if(f.tem_titulos){
-    var pct = f.pct || 0;
-    var al = '';
-    if(f.prox_valor){
-      var urg = f.prox_vencida || (f.prox_dias !== null && f.prox_dias <= 3);
-      var quando = f.prox_vencida ? 'venceu em '+_esc(f.prox_venc)
-                 : (f.prox_dias === 0 ? 'vence hoje'
-                 : (f.prox_dias === 1 ? 'vence amanhã' : 'vence '+_esc(f.prox_venc)));
-      al = '<div class="falerta'+(urg?'':' amb')+'"><span>'+(f.prox_vencida?'⚠️':'🗓️')+'</span>'
-         + '<div><b>Próxima parcela '+quando+'</b> — '+_esc(f.prox_valor)+'.'
-         + (f.vencidas>1?' '+f.vencidas+' parcelas vencidas, '+_esc(f.vencidas_valor)+' no total.':'')
-         + ' <a href="/painel/empresa#receber">Ver em contas a receber</a></div></div>';
-    }
-    pg = '<div class="fic-b"><div class="k">recebido</div>'
-       + '<div class="fbar"><i style="width:'+Math.max(0,Math.min(100,pct))+'%"></i></div>'
-       + '<div class="flin"><span><b>'+_esc(f.pago)+'</b> de '+_esc(f.cobrado)+'</span>'
-       + '<span>'+pct+'%</span></div>' + al + '</div>';
-  } else if(f.plano){
-    pg = '<div class="fic-b"><div class="k">plano de pagamento</div>'
-       + '<div class="flin"><span><b>'+_esc(f.plano)+'</b> combinados</span>'
-       + '<span>contrato não fechado</span></div>'
-       + '<div class="flin" style="margin-top:4px;font-size:.64rem">Feche o contrato no funil '
-       + 'pra virar título a receber.</div></div>';
-  }
-
-  var cab = 'orçamento' + (f.numero ? ' nº '+_esc(String(f.numero)) : '')
-          + (f.status ? ' · '+_esc(f.status) : '');
-  return '<div class="fic"><div class="fic-h"><span class="t">'+cab+'</span>'
-       + '<a href="/painel/servicos?abrir='+f.orcamento_id+'">abrir orçamento →</a></div>'
-       + (linhas?'<div class="fic-g">'+linhas+'</div>':'')
-       + itens + pg + '</div>';
-}
-function confirmarLiberar(f){
-  var t = f.getAttribute('data-titulo') || 'essa data';
-  return confirm('Liberar a data de “' + t + '”? Ela volta a ficar disponível.');
-}
-function _seguradaHtml(e){
-  var urg = e.urgente ? ' urg' : '';
-  var quanto = e.prazo ? 'Vence em <b>'+_esc(e.prazo)+'</b>' : 'Data segurada';
-  var ate = e.pre_ate ? ' ('+_esc(e.pre_ate)+')' : '';
-  var sinal = e.sinal ? ' Sinal esperado: <b>'+_esc(e.sinal)+'</b>.' : '';
-  var orc = e.orcamento_numero ? ' Orçamento nº '+_esc(String(e.orcamento_numero))+'.' : '';
-  var verOrc = e.orcamento_id
-    ? '<a class="sbtn gh" href="/painel/servicos?abrir='+e.orcamento_id+'">Ver orçamento</a>' : '';
-  return '<div class="dev-pre'+urg+'">⏳ '+quanto+ate+'.'+sinal+orc
-    + ' Passando o prazo sem o sinal, a data libera sozinha.'
-    + '<div class="segacts">'
-    +   '<form method="post" action="/painel/agenda/sinal-recebido">'
-    +     '<input type="hidden" name="evento_id" value="'+e.id+'">'
-    +     '<input type="hidden" name="m" value="'+MES_ATUAL+'">'
-    +     '<button class="sbtn ok" type="submit">Sinal recebido</button></form>'
-    +   '<form method="post" action="/painel/agenda/liberar" '
-    +      'data-titulo="'+_esc(e.titulo)+'" onsubmit="return confirmarLiberar(this)">'
-    +     '<input type="hidden" name="evento_id" value="'+e.id+'">'
-    +     '<input type="hidden" name="m" value="'+MES_ATUAL+'">'
-    +     '<button class="sbtn amb" type="submit">Liberar a data</button></form>'
-    +   verOrc
-    + '</div></div>';
-}
-function abrirDia(iso){
-  var d = EVENTOS_DIA[iso];
-  var evs = d ? d.eventos : [];
-  var box = document.getElementById('daybox');
-  var html = '<div class="daybox-hd"><h3>'+(d?d.titulo:isoTitulo(iso))+'</h3>'
-    + '<button class="x" type="button" onclick="fecharDia()" aria-label="Fechar">✕</button></div>'
-    + '<p class="daybox-sub">'+(evs.length?evs.length+(evs.length===1?' compromisso':' compromissos'):'Nada marcado ainda')+'</p>';
-  var agora = new Date(AGORA_ISO);
-  evs.forEach(function(e){
-    var conv = '';
-    (e.convidados||[]).forEach(function(g){
-      conv += '<div class="guest"><div class="guest-info">'
-        + '<div class="guest-nome">'+_esc(g.nome||'Convidado')+' <span class="cpill cp-'+g.status+'">'+_esc(g.status_rot)+'</span></div>'
-        + '<div class="guest-fone">'+(g.contato?_esc(g.contato):'<i>sem número</i>')+'</div></div>'
-        + (g.wa?'<a class="guest-wa" href="'+g.wa+'" target="_blank" rel="noopener" title="Chamar '+_esc(g.nome||'convidado')+' no WhatsApp">💬</a>':'')
-        + '</div>';
-    });
-    conv = '<div class="dev-conv"><div class="dev-conv-lbl"><span>👤 Convidados</span>'
-      + '<button class="dev-conv-add" type="button" onclick="addConvToggleDia('+e.id+')">＋ adicionar</button></div>'
-      + conv + _addConvBoxHtml(e) + '</div>';
-    var passado = new Date(e.inicio_iso) <= agora;
-    var acaoTopo = passado ? '' : '<button class="px-rm" type="button" title="Remarcar" onclick="remToggleDia('+e.id+')">🔁</button>';
-    html += '<div class="dev" data-ev="'+e.id+'"><div class="dev-dot d-'+e.tipo+(e.pre?' pre-dot':'')+'"></div><div class="dev-body">'
-      + '<div class="dev-top"><div>'
-      + '<div class="dev-hora">'+e.hora+'</div>'
-      + '<div class="dev-tt"'+(e.pre?' style="color:var(--ambar)"':'')+'>'+e.titulo+'</div>'
-      + '<div class="dev-meta">'
-      + '<span class="tpill tp-'+e.tipo+'">'+((e.ficha&&e.ficha.tipo)?_esc(e.ficha.tipo):(TPILL[e.tipo]||e.tipo_rot))+'</span>'
-      + (e.local?'<span>📍 '+e.local+'</span>':'')
-      + ((e.ficha&&e.ficha.convidados)?'<span>👥 '+e.ficha.convidados+' convidados</span>':'')
-      + (e.pre?'<span style="color:var(--ambar);font-weight:700">segurada</span>':'')
-      + (e.autor?'<span title="quem marcou">👤 '+_esc(e.autor)+'</span>':'')+'</div>'
-      + (e.link_online?'<a class="meet-btn" href="'+_esc(e.link_online)+'" target="_blank" rel="noopener">🎥 Entrar na reunião</a>':'')
-      + '</div>'+acaoTopo+'</div>'
-      // Data segurada: quem abre o dia precisa saber que essa data AINDA não é de
-      // ninguém, até quando, e — o que faltava — decidir aqui mesmo. Antes, firmar
-      // exigia sair da agenda, abrir Serviços e achar a proposta no funil.
-      + (e.pre?_seguradaHtml(e):'')
-      + _fichaHtml(e.ficha)
-      + (e.descricao&&!e.ficha?'<div class="dev-desc">'+e.descricao+'</div>':'')
-      + conv
-      + (passado ? '<div class="dev-desf">'+_desfechoHtml(e)+'</div>' : _remarcarBoxHtml(e))
-      + '</div></div>';
-  });
-  html += _reaproveitarHtml(iso);
-  html += '<button class="daybox-cta" type="button" onclick="agNovoNoDia(\\''+iso+'\\')">'+CTA_DIA+'</button>';
-  box.innerHTML = html;
-  document.getElementById('dayOverlay').classList.add('show');
-}
-function fecharDia(){ document.getElementById('dayOverlay').classList.remove('show'); }
-// Reconstrói o conteúdo de UMA célula (linhas de compromisso + "+N mais") a partir
-// de EVENTOS_DIA — mesma fonte de dados da caixa do dia, pra nunca desalinhar.
-function renderizarCelula(iso){
-  var cel = document.querySelector('.cal-cell[data-iso="'+iso+'"]');
-  if(!cel) return;
-  var evs = (EVENTOS_DIA[iso] || {}).eventos || [];
-  var num = cel.querySelector('.cal-num');
-  var numHtml = num ? num.outerHTML : '';
-  if(!evs.length){
-    cel.classList.remove('tem-evento');
-    if(REAPROVEITAR.length){ cel.classList.add('clicavel'); }
-    else { cel.removeAttribute('tabindex'); cel.removeAttribute('role'); cel.removeAttribute('data-iso'); }
-    cel.innerHTML = '<div class="cal-head">'+numHtml+'</div>';
-    return;
-  }
-  var count = evs.length > 2 ? '<span class="cal-count">'+evs.length+'</span>' : '';
-  var linhas = evs.slice(0, 2).map(function(e){
-    return '<div class="ev-line'+(e.pre?' pre':'')+'" data-ev="'+e.id+'"'
-      + (e.pre?' title="Data segurada — esperando o sinal"':'')
-      + '><span class="dot d-'+e.tipo+'"></span><span class="h">'+e.hora+'</span><span class="n">'+e.titulo+'</span>'
-      + (e.prazo?'<span class="ev-prazo'+(e.urgente?' urg':'')+'">'+_esc(e.prazo)+'</span>':'')
-      + (e.pg?'<span class="ev-pg '+_esc(e.pg_classe||'')+'">'+_esc(e.pg)+'</span>':'')
-      + '</div>';
-  }).join('');
-  var mais = evs.length > 2 ? '<div class="ev-more">+'+(evs.length - 2)+' mais</div>' : '';
-  cel.innerHTML = '<div class="cal-head">'+numHtml+count+'</div><div class="evs">'+linhas+'</div>'+mais;
-}
-// Tira o evento cancelado do calendário (linha na célula + caixa do dia se estiver
-// aberta) e do EVENTOS_DIA em memória, sem precisar recarregar a página.
-function removerEventoDoCalendario(id){
-  var isoAlvo = null;
-  for(var iso in EVENTOS_DIA){
-    if(EVENTOS_DIA[iso].eventos.some(function(e){ return String(e.id) === String(id); })){ isoAlvo = iso; break; }
-  }
-  if(isoAlvo){
-    EVENTOS_DIA[isoAlvo].eventos = EVENTOS_DIA[isoAlvo].eventos.filter(function(e){ return String(e.id) !== String(id); });
-    if(!EVENTOS_DIA[isoAlvo].eventos.length) delete EVENTOS_DIA[isoAlvo];
-    renderizarCelula(isoAlvo);
-  }
-  var overlayAberto = document.getElementById('dayOverlay').classList.contains('show');
-  var devRow = document.querySelector('#daybox .dev[data-ev="'+id+'"]');
-  if(overlayAberto && devRow && isoAlvo){
-    abrirDia(isoAlvo);   // reconstrói (mostra "nada marcado" + reaproveitar se for o caso)
-  }
-}
-function agNovoNoDia(iso){
-  fecharDia();
-  agNovo(true);
-  var i = document.querySelector('#novo input[name=data]');
-  if(i) i.value = iso;
-}
-// Delegado no calendário (não em cada célula): células podem ser recriadas por
-// renderizarCelula() depois de um cancelamento, então o listener direto se perderia.
-document.querySelector('.cal').addEventListener('click', function(ev){
-  var cel = ev.target.closest('.cal-cell[data-iso]');
-  if(cel) abrirDia(cel.getAttribute('data-iso'));
-});
-document.querySelector('.cal').addEventListener('keydown', function(ev){
-  if(ev.key!=='Enter' && ev.key!==' ') return;
-  var cel = ev.target.closest('.cal-cell[data-iso]');
-  if(cel){ ev.preventDefault(); abrirDia(cel.getAttribute('data-iso')); }
-});
-document.getElementById('dayOverlay').addEventListener('click', function(ev){ if(ev.target.id==='dayOverlay') fecharDia(); });
-document.addEventListener('keydown', function(ev){ if(ev.key==='Escape') fecharDia(); });
-
-function agNovo(v){var n=document.getElementById('novo');if(n){n.style.display='';n.scrollIntoView({behavior:'smooth',block:'center'});var i=n.querySelector('input[name=titulo]');if(i)setTimeout(function(){i.focus()},300);}return false;}
-function agCopiar(){var i=document.getElementById('feedUrl');if(!i)return;i.select();try{document.execCommand('copy');}catch(e){}if(navigator.clipboard)navigator.clipboard.writeText(i.value);var b=event.target;var t=b.textContent;b.textContent='Copiado ✓';setTimeout(function(){b.textContent=t},1600);}
-function cpRow(b){var row=b.closest('.share-row');if(!row)return;var txt=row.getAttribute('data-link')||'';if(navigator.clipboard)navigator.clipboard.writeText(txt);var t=b.textContent;b.textContent='✓';setTimeout(function(){b.textContent=t},1400);}
-function addGuest(){var box=document.getElementById('guests');var d=document.createElement('div');d.className='guest-row';d.innerHTML='<div><input class="gnome" name="convidado_nome" placeholder="Nome" autocomplete="off"></div><div><input name="convidado_contato" placeholder="(86) 90000-0000" autocomplete="off"></div><button type="button" class="g-rm" onclick="rmGuest(this)" title="Remover" aria-label="Remover">✕</button>';box.appendChild(d);var i=d.querySelector('input');if(i)i.focus();}
-function rmGuest(b){var box=document.getElementById('guests');var row=b.closest('.guest-row');if(box&&box.children.length>1){row.remove();}else{row.querySelectorAll('input').forEach(function(x){x.value='';});}}
-function remToggle(id){var box=document.getElementById('remBox-'+id);if(box)box.classList.toggle('show');}
-
-// ---------------- Só segurar a data + choque de horário ----------------
-// Duas coisas que faltavam no momento de marcar: poder segurar (em vez de mentir
-// marcando firme) e saber que aquele horário já tem coisa. O choque NÃO bloqueia —
-// só informa, porque quem sabe se cabe é a empresa.
-(function(){
-  var chk = document.getElementById('fSegurar');
-  var box = document.getElementById('segBox');
-  var ate = document.getElementById('fSegAte');
-  var dias = {{ (cfg.pre_reserva_dias or 3)|tojson }};
-  if(chk && box){
-    chk.addEventListener('change', function(){
-      box.classList.toggle('on', chk.checked);
-      if(chk.checked && ate && !ate.value){
-        var d = new Date(); d.setDate(d.getDate() + dias);
-        ate.value = d.toISOString().slice(0,10);   // prazo padrão da conta, já preenchido
-      }
-    });
-  }
-  var fd = document.getElementById('fData'), fh = document.getElementById('fHora');
-  var ff = document.getElementById('fFim');   // só existe no formulário de evento
-  var cx = document.getElementById('choqueBox'), ct = document.getElementById('choqueTxt');
-  if(!fd || !cx) return;
-  var timer = null;
-  function checar(){
-    if(!fd.value){ cx.classList.remove('on'); return; }
-    // manda o FIM junto: sem ele a janela vira 1h e duas festas na mesma noite
-    // nunca acusam choque — que é justamente o caso de quem vende data.
-    fetch('/painel/agenda/conflitos?data='+encodeURIComponent(fd.value)
-          +'&hora='+encodeURIComponent(fh ? fh.value : '')
-          +'&fim='+encodeURIComponent(ff ? ff.value : ''))
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        var itens = (d && d.itens) || [];
-        if(!itens.length){ cx.classList.remove('on'); return; }
-        var linhas = itens.slice(0,3).map(function(i){
-          return _esc(i.titulo)+' ('+_esc(i.quando)+(i.pre?', segurada':'')+')';
-        }).join(', ');
-        var resto = itens.length > 3 ? ' e mais '+(itens.length-3)+'.' : '.';
-        ct.innerHTML = '<b>Esse horário já tem coisa marcada:</b> '+linhas+resto
-          +' Dá pra marcar assim mesmo — só confira se cabe.';
-        cx.classList.add('on');
-      })
-      .catch(function(){ cx.classList.remove('on'); });
-  }
-  function agendar(){ clearTimeout(timer); timer = setTimeout(checar, 350); }
-  fd.addEventListener('change', agendar);
-  if(fh) fh.addEventListener('change', agendar);
-  if(ff) ff.addEventListener('change', agendar);
-})();
-function addConvToggle(id){var box=document.getElementById('addConvBox-'+id);if(box)box.classList.toggle('show');}
-
-// ---------------- Histórico de envios ----------------
-function _histRowHtml(it){
-  var motivo = it.motivo_rot ? '<span class="hs-motivo">'+_esc(it.motivo_rot)+'</span>' : '';
-  var status = it.ok ? '<span class="hist-status hs-ok">✅ Enviado</span>'
-    : '<span class="hist-status hs-fail">❌ Falhou'+motivo+'</span>';
-  var retry = it.pode_reenviar ? '<button class="hist-retry" type="button" onclick="histReenviar('+it.id+',this)">🔁 Reenviar</button>' : '';
-  var loc = it.evento_local ? '<div class="loc">'+_esc(it.evento_local)+'</div>' : '';
-  return '<tr><td class="hist-qd" data-rot="Quando">'+_esc(it.quando_rot)+'</td>'
-    + '<td class="hist-compr" data-rot="Compromisso">'+_esc(it.evento_titulo||'—')+loc+'</td>'
-    + '<td data-rot="Convidado">'+_esc(it.convidado_rot)+'</td>'
-    + '<td data-rot="Tipo"><span class="hist-tipo ht-'+it.tipo+'">'+_esc(it.tipo_rot)+'</span></td>'
-    + '<td class="hist-canal" data-rot="Canal">'+_esc(it.canal_rot)+'</td>'
-    + '<td data-rot="Status">'+status+'</td><td>'+retry+'</td></tr>';
-}
-function _histRenderBody(){
-  var box = document.getElementById('histBody');
-  if(!box) return;
-  if(!HIST_STATE.itens.length){
-    box.innerHTML = '<div class="hist-vazio" id="histVazio">Nada enviado nos últimos '+HIST_STATE.dias+' dias. 🤷</div>';
-    return;
-  }
-  var ok = HIST_STATE.itens.filter(function(i){return i.ok;}).length;
-  var fail = HIST_STATE.itens.length - ok;
-  var rows = HIST_STATE.itens.map(_histRowHtml).join('');
-  var mais = HIST_STATE.total > HIST_STATE.itens.length
-    ? '<div class="hist-foot"><button class="hist-mais" type="button" onclick="histMais()">Ver mais</button></div>' : '';
-  box.innerHTML = '<div class="hist-resumo" id="histResumo">'
-    + '<span class="hr-ok">✅ <b>'+ok+'</b> enviados</span>'
-    + '<span class="hr-fail">❌ <b>'+fail+'</b> falharam</span>'
-    + '<span>📨 <b>'+HIST_STATE.total+'</b> no total · últimos '+HIST_STATE.dias+' dias</span></div>'
-    + '<div class="hist-tbl-wrap"><table class="hist-tbl"><thead><tr><th>Quando</th><th>Compromisso</th>'
-    + '<th>Convidado</th><th>Tipo</th><th>Canal</th><th>Status</th><th></th></tr></thead>'
-    + '<tbody id="histTbody">'+rows+'</tbody></table></div>' + mais;
-}
-function _histQS(offset){
-  return 'dias='+HIST_STATE.dias+'&falhas='+(HIST_STATE.falhas?'1':'0')
-    +'&q='+encodeURIComponent(HIST_STATE.q)+'&offset='+offset;
-}
-function _histFetch(reset){
-  var offset = reset ? 0 : HIST_STATE.itens.length;
-  fetch('/painel/agenda/historico?'+_histQS(offset)).then(function(r){return r.json();}).then(function(d){
-    if(!d.ok) return;
-    HIST_STATE.itens = reset ? d.itens : HIST_STATE.itens.concat(d.itens);
-    HIST_STATE.total = d.total;
-    _histRenderBody();
-  });
-}
-function histFiltro(btn){
-  document.querySelectorAll('.hist-filtros .hf-btn[data-dias]').forEach(function(b){b.classList.remove('on');});
-  btn.classList.add('on');
-  HIST_STATE.dias = Number(btn.getAttribute('data-dias'));
-  _histFetch(true);
-}
-function histTab(nome){
-  var feito = nome === 'feito';
-  document.getElementById('histTabFeito').classList.toggle('on', feito);
-  document.getElementById('histTabFila').classList.toggle('on', !feito);
-  document.getElementById('histBody').style.display = feito ? '' : 'none';
-  document.getElementById('filaBody').style.display = feito ? 'none' : '';
-  var filtros = document.querySelector('.hist-filtros');
-  if(filtros) filtros.style.display = feito ? '' : 'none';
-}
-function histToggleFalhas(){
-  HIST_STATE.falhas = !HIST_STATE.falhas;
-  var b = document.getElementById('histFalhasBtn'); if(b) b.classList.toggle('on', HIST_STATE.falhas);
-  _histFetch(true);
-}
-function histMais(){ _histFetch(false); }
-function histReenviar(id, btn){
-  btn.disabled = true; var orig = btn.textContent; btn.textContent = '⏳';
-  fetch('/painel/agenda/historico/reenviar', {method:'POST',
-    headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'log_id='+id})
-    .then(function(r){return r.json();}).then(function(d){
-      if(d.ok){ _histFetch(true); }
-      else { btn.disabled = false; btn.textContent = orig; zaqToast('Não consegui reenviar agora.', false); }
-    }).catch(function(){ btn.disabled = false; btn.textContent = orig; });
-}
-(function(){
-  var q = document.getElementById('histQ');
-  if(!q) return;
-  var t;
-  q.addEventListener('input', function(){
-    clearTimeout(t);
-    t = setTimeout(function(){ HIST_STATE.q = q.value; _histFetch(true); }, 350);
-  });
-})();
-
-// ---------------- Local: busca de endereço (Google Places) + manual + enviar ----------------
-(function(){
-  var addrInput = document.getElementById('addrInput');
-  var addrDrop = document.getElementById('addrDrop');
-  var addrPicked = document.getElementById('addrPicked');
-  var localHidden = document.getElementById('localHidden');
-  var hintLine = document.getElementById('hintLine');
-  var addrWrap = document.getElementById('addrWrap');
-  var searchRow = document.querySelector('.addr-input-row');
-  var altRow = document.querySelector('.local-alt-row');
-  var manualToggle = document.getElementById('manualToggle');
-  var manualBox = document.getElementById('manualBox');
-  var manualInput = document.getElementById('manualInput');
-  var manualCancel = document.getElementById('manualCancel');
-  var onlineToggle = document.getElementById('onlineToggle');
-  var onlineBox = document.getElementById('onlineBox');
-  var onlineCancel = document.getElementById('onlineCancel');
-  var linkOnline = document.getElementById('linkOnline');
-  if(!addrInput) return;
-
-  function nomesEnvolvidos(){
-    var nomes = [];
-    document.querySelectorAll('.gnome').forEach(function(i){ if(i.value.trim()) nomes.push(i.value.trim()); });
-    return nomes;
-  }
-  function fraseEnvolvidos(){
-    var n = nomesEnvolvidos();
-    if(n.length < 2) return '';
-    return n.slice(0, -1).join(', ') + ' e ' + n[n.length - 1];
-  }
-  function linkMapa(endereco){
-    return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(endereco);
-  }
-
-  // Geolocalização: só pede no primeiro foco no campo (não no load da página,
-  // pra não estourar o popup de permissão sem contexto). Se negar/não suportar,
-  // segue sem — a busca continua igual a antes, só sem o bias de proximidade.
-  var geoCoords = null, geoPedido = false;
-  addrInput.addEventListener('focus', function(){
-    if(geoPedido || !navigator.geolocation) return;
-    geoPedido = true;
-    navigator.geolocation.getCurrentPosition(function(pos){
-      geoCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-    }, function(){ /* negado ou indisponível: segue sem bias */ }, { timeout: 6000 });
-  });
-
-  var timer = null;
-  addrInput.addEventListener('input', function(){
-    localHidden.value = addrInput.value;    // digitou solto -> já vale como local, igual antes
-    addrPicked.innerHTML = '';
-    var termo = addrInput.value.trim();
-    clearTimeout(timer);
-    if(termo.length < 2){ addrDrop.classList.remove('show'); return; }
-    timer = setTimeout(function(){ buscar(termo); }, 320);
-  });
-
-  function buscar(termo){
-    var url = '/painel/agenda/buscar-local?q=' + encodeURIComponent(termo);
-    if(geoCoords) url += '&lat=' + geoCoords.lat + '&lng=' + geoCoords.lng;
-    fetch(url)
-      .then(function(r){ return r.json(); })
-      .then(function(d){
-        if(addrInput.value.trim() !== termo) return;   // resposta atrasada de uma busca antiga
-        if(!d.ok && d.erro === 'sem_chave'){
-          addrDrop.classList.remove('show');
-          hintLine.textContent = 'Busca de endereço desligada nesta conta — digite manualmente.';
-          return;
-        }
-        var itens = (d.itens || []);
-        if(!itens.length){
-          addrDrop.innerHTML = '<div class="addr-empty">Nenhum lugar encontrado pra "'+termo+'". Usa o link "digitar manualmente" abaixo.</div>';
-        } else {
-          addrDrop.innerHTML = itens.map(function(p, idx){
-            return '<div class="addr-opt" data-idx="'+idx+'"><span class="pin">📍</span>'
-              + '<div><div class="tt"></div><div class="ad"></div></div></div>';
-          }).join('');
-          // texto via textContent (não via template) pra não abrir brecha de HTML no nome/endereço do lugar
-          Array.prototype.forEach.call(addrDrop.querySelectorAll('.addr-opt'), function(row, idx){
-            row.querySelector('.tt').textContent = itens[idx].nome;
-            row.querySelector('.ad').textContent = itens[idx].endereco;
-            row.addEventListener('click', function(){ escolherLocal(itens[idx]); });
-          });
-        }
-        addrDrop.classList.add('show');
-      })
-      .catch(function(){ addrDrop.classList.remove('show'); });
-  }
-
-  function escolherLocal(p){
-    addrInput.value = p.nome;
-    localHidden.value = p.nome;
-    addrDrop.classList.remove('show');
-    hintLine.textContent = 'Endereço confirmado pelo Google — o link do mapa vai junto nas mensagens.';
-    var mapa = linkMapa(p.endereco);
-    var card = document.createElement('div');
-    card.className = 'addr-picked';
-    var chk = document.createElement('span'); chk.className = 'chk'; chk.textContent = '✅';
-    var body = document.createElement('div'); body.className = 'body';
-    var nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = p.nome;
-    var ed = document.createElement('div'); ed.className = 'ed'; ed.textContent = p.endereco;
-    var lnk = document.createElement('a'); lnk.className = 'lnk'; lnk.href = mapa; lnk.target = '_blank';
-    lnk.rel = 'noopener'; lnk.textContent = '🔗 Ver no Google Maps';
-    body.appendChild(nm); body.appendChild(ed); body.appendChild(lnk);
-    var x = document.createElement('button'); x.type = 'button'; x.className = 'x';
-    x.setAttribute('aria-label', 'Trocar endereço'); x.textContent = '✕';
-    x.addEventListener('click', function(){
-      addrInput.value = ''; localHidden.value = ''; addrPicked.innerHTML = '';
-      hintLine.textContent = 'Digite pra buscar — ex: nome do lugar ou endereço.';
-      addrInput.focus();
-    });
-    var actions = document.createElement('div'); actions.className = 'addr-actions';
-    var send = document.createElement('button'); send.type = 'button'; send.className = 'send-btn';
-    send.textContent = '💬 Enviar pro cliente';
-    var pop = document.createElement('div'); pop.className = 'pop';
-    send.addEventListener('click', function(){
-      var titulo = (document.getElementById('fTitulo').value || 'Compromisso').trim();
-      var data = document.getElementById('fData').value, hora = document.getElementById('fHora').value;
-      var quando = (data ? data.split('-').reverse().join('/') : '') + (hora ? ' ' + hora : '');
-      var frase = fraseEnvolvidos();
-      var msgTxt = titulo + '\\n' + quando + ' — ' + p.nome + '\\n📍 ' + mapa + (frase ? '\\n👥 Com: ' + frase : '');
-      pop.innerHTML = '';
-      var h4 = document.createElement('h4'); h4.textContent = '📍 Enviar pro cliente';
-      var box = document.createElement('div'); box.className = 'pop-msg'; box.textContent = msgTxt;
-      var go = document.createElement('a'); go.className = 'pop-go'; go.target = '_blank'; go.rel = 'noopener';
-      go.href = 'https://wa.me/?text=' + encodeURIComponent(msgTxt); go.textContent = '💬 Abrir WhatsApp';
-      pop.appendChild(h4); pop.appendChild(box); pop.appendChild(go);
-      pop.classList.toggle('show');
-    });
-    actions.appendChild(send); actions.appendChild(pop);
-    card.appendChild(chk); card.appendChild(body); card.appendChild(x); card.appendChild(actions);
-    addrPicked.innerHTML = '';
-    addrPicked.appendChild(card);
-  }
-
-  function voltarBusca(){
-    searchRow.style.display = ''; hintLine.style.display = ''; altRow.style.display = '';
-    addrInput.value = ''; localHidden.value = ''; linkOnline.value = '';
-  }
-
-  manualToggle.addEventListener('click', function(){
-    searchRow.style.display = 'none';
-    addrDrop.classList.remove('show');
-    addrPicked.innerHTML = '';
-    hintLine.style.display = 'none';
-    altRow.style.display = 'none';
-    manualBox.classList.add('show');
-    addrInput.value = ''; localHidden.value = ''; linkOnline.value = '';
-    manualInput.focus();
-  });
-  manualInput.addEventListener('input', function(){ localHidden.value = manualInput.value; });
-  manualCancel.addEventListener('click', function(){
-    manualBox.classList.remove('show');
-    manualInput.value = '';
-    voltarBusca();
-    addrInput.focus();
-  });
-
-  // Reunião online: sem endereço nenhum — fecha a busca e nunca manda link de
-  // mapa (nem no convite, nem quando o convidado confirma presença).
-  onlineToggle.addEventListener('click', function(){
-    searchRow.style.display = 'none';
-    addrDrop.classList.remove('show');
-    addrPicked.innerHTML = '';
-    hintLine.style.display = 'none';
-    altRow.style.display = 'none';
-    onlineBox.classList.add('show');
-    addrInput.value = ''; localHidden.value = 'Online';
-  });
-  onlineCancel.addEventListener('click', function(){
-    onlineBox.classList.remove('show');
-    voltarBusca();
-    addrInput.focus();
-  });
-
-  document.addEventListener('click', function(ev){
-    if(!addrWrap.contains(ev.target)) addrDrop.classList.remove('show');
-    if(!ev.target.closest('.addr-actions')){
-      document.querySelectorAll('.pop.show').forEach(function(p){ p.classList.remove('show'); });
-    }
-  });
-})();
-// Feedback instantâneo: ao enviar QUALQUER form, o botão reage na hora (apaga +
-// "⏳ …"), enquanto o back processa — pro clique nunca parecer travado. Como a
-// maioria recarrega, isso só precisa durar até a navegação; o timeout destrava
-// caso algo impeça o envio (ex.: erro de rede). Respeita confirm() cancelado.
-document.addEventListener('submit', function(ev){
-  if(ev.defaultPrevented) return;                         // ex.: Cancelar -> confirm() = não
-  var f=ev.target; if(!f||f.tagName!=='FORM') return;
-  if(f.dataset && f.dataset.ajax) return;                 // forms AJAX se gerenciam sozinhos
-  var b=f.querySelector('button[type=submit],button:not([type])');
-  if(!b||b.disabled) return;
-  var busy=b.getAttribute('data-busy');
-  b.dataset.orig=b.innerHTML;
-  if(busy) b.innerHTML=busy;
-  b.classList.add('is-busy'); b.disabled=true;
-  setTimeout(function(){ if(b.dataset.orig!=null){ b.innerHTML=b.dataset.orig; b.disabled=false; b.classList.remove('is-busy'); delete b.dataset.orig; } }, 8000);
-}, false);
-
-// Toast flutuante
-function zaqToast(msg, ok){
-  var t=document.createElement('div');
-  t.className='zaq-toast'+(ok===false?' err':'');
-  t.textContent=msg; document.body.appendChild(t);
-  requestAnimationFrame(function(){ t.classList.add('show'); });
-  setTimeout(function(){ t.classList.remove('show'); setTimeout(function(){ t.remove(); },300); }, 3400);
-}
-function zaqVazioProximos(){
-  var px=document.querySelector('.px'); if(!px) return;
-  if(!px.querySelector('.px-row') && !px.querySelector('.px-vazio')){
-    var d=document.createElement('div'); d.className='px-vazio';
-    d.textContent='Nada por vir. Marque um compromisso ali em cima. 🎉'; px.appendChild(d);
-  }
-}
-// Ações SEM reload (fetch): Cancelar remove a linha/chip na hora; 📲 Zaq envia e
-// dá um toast. Fallback: sem JS, os <form> continuam funcionando por POST normal.
-document.addEventListener('submit', function(ev){
-  var f=ev.target; if(!f||!f.dataset||!f.dataset.ajax) return;
-  if(ev.defaultPrevented) return;                         // confirm() cancelado
-  ev.preventDefault();
-  var tipo=f.dataset.ajax, btn=f.querySelector('button[type=submit]');
-  var orig=btn?btn.innerHTML:'';
-  if(btn){ btn.disabled=true; btn.classList.add('is-busy'); if(btn.getAttribute('data-busy')) btn.innerHTML=btn.getAttribute('data-busy'); }
-  function restore(){ if(btn){ btn.disabled=false; btn.classList.remove('is-busy'); btn.innerHTML=orig; } }
-  fetch(f.action, {method:'POST', headers:{'X-Zaq-Ajax':'1'}, body:new FormData(f)})
-    .then(function(r){ return r.json(); })
-    .then(function(d){
-      if(tipo==='cancelar'){
-        if(d && d.ok){
-          var id=(f.querySelector('[name=evento_id]')||{}).value;
-          var row=f.closest('.px-row'); if(row){ row.classList.add('saindo'); setTimeout(function(){ row.remove(); zaqVazioProximos(); },200); }
-          if(id) removerEventoDoCalendario(id);
-          zaqToast('Compromisso cancelado.');
-        } else { restore(); zaqToast('Não consegui cancelar.', false); }
-      } else {   // enviar convite
-        if(d && d.ok){ zaqToast(d.msg||'Convite enviado! ✅'); if(btn){ btn.innerHTML='✓ Enviado'; btn.classList.remove('is-busy'); } }
-        else { restore(); zaqToast((d && d.msg)||'Não consegui enviar.', false); }
-      }
-    })
-    .catch(function(){ restore(); zaqToast('Erro de conexão — tenta de novo.', false); });
-}, false);
-</script>
 {% endblock %}"""
 
 _env.loader.mapping["agenda"] = _AGENDA_TPL

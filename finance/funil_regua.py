@@ -453,16 +453,26 @@ def _avisos_hoje(c, conta_id: int) -> dict:
     return {m: n for m, n in linhas}
 
 
-def _registrar_aviso(c, conta_id, lead_id, estado, nivel, etapa, ref_em, simulado, membro_id) -> bool:
+def _registrar_aviso(c, conta_id, lead_id, estado, nivel, etapa, ref_em, simulado,
+                     membro_id, agora=None) -> bool:
     """Grava o aviso e devolve se ele é NOVO. O índice único é por
     (lead, estado, nível, etapa, referência, simulado): mesmo fato nunca cobra duas
-    vezes, fato novo cobra de novo."""
+    vezes, fato novo cobra de novo.
+
+    `criado_em` recebe o INSTANTE DA PASSADA, não o relógio do banco. Não é
+    detalhe: a escala lê essa coluna de volta e compara com `agora` pra decidir se
+    já passou tempo suficiente sem ninguém agir. Deixando o `default now()`
+    responder, a comparação juntava dois relógios — o do Postgres, na hora do
+    insert, e o que a passada recebeu. Em produção os dois coincidem e ninguém
+    notava; num teste que injeta o instante, a escala simplesmente não acontecia,
+    e o teste passava ou falhava conforme a HORA REAL do dia em que rodasse."""
     cur = c.execute(
         """insert into funil_avisos (conta_id, prospeccao_id, estado, nivel, etapa,
-                                     ref_em, simulado, membro_id)
-           values (%s,%s,%s,%s,%s,%s,%s,%s)
+                                     ref_em, simulado, membro_id, criado_em)
+           values (%s,%s,%s,%s,%s,%s,%s,%s, coalesce(%s, now()))
            on conflict do nothing""",
-        (conta_id, lead_id, estado, nivel, etapa or "", ref_em, simulado, membro_id))
+        (conta_id, lead_id, estado, nivel, etapa or "", ref_em, simulado, membro_id,
+         agora))
     return cur.rowcount > 0
 
 
@@ -520,7 +530,7 @@ def avaliar_cobranca(c, conta_id: int, agora: datetime | None = None) -> dict:
             out["represados"] += 1
             continue
         if not _registrar_aviso(c, conta_id, lead_id, estado, "vendedor", etapa_chave,
-                                ref, simulado, vendedor_id):
+                                ref, simulado, vendedor_id, agora):
             # já cobrado: o gestor entra só depois de escala_min SEM NINGUÉM AGIR —
             # contado desde a cobrança do vendedor, que é o que "mais 4h" quer dizer
             r = c.execute(
@@ -532,7 +542,7 @@ def avaliar_cobranca(c, conta_id: int, agora: datetime | None = None) -> dict:
                 continue
             nivel = "gestor"
             if not _registrar_aviso(c, conta_id, lead_id, estado, "gestor", etapa_chave,
-                                    ref, simulado, vendedor_id):
+                                    ref, simulado, vendedor_id, agora):
                 continue
         if simulado:
             out["simulados"] += 1

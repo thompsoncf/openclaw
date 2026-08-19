@@ -581,3 +581,33 @@ def test_escalar_troca_de_destinatario(pool):
     finally:
         ck.enviar_push = orig
     assert enviados == [dono], f"o escalado tem que ir pro dono, foi pra {enviados}"
+
+
+def test_a_escala_nao_depende_da_hora_REAL_em_que_o_teste_roda(pool):
+    """A armadilha que derrubou estes testes em 19/08/2026, às 14h UTC.
+
+    A escala lê `funil_avisos.criado_em` de volta e compara com `agora` pra saber
+    se passou tempo suficiente sem ninguém agir. A coluna nascia do `default
+    now()` — o relógio do BANCO —, então a comparação juntava dois relógios. Em
+    produção eles coincidem e ninguém via; aqui, com o instante injetado, a
+    escala só acontecia enquanto a hora real do dia deixasse a conta fechar. Os
+    dois testes acima passavam de manhã e falhavam à tarde, no mesmo commit.
+
+    Este caso prende a propriedade: dado o mesmo instante injetado, o resultado é
+    o mesmo — em qualquer hora do dia em que alguém rode a suíte."""
+    from datetime import timedelta
+    with pool.connection() as c:
+        v = _vendedor(c, "Vendedor")
+        _esperando(c, 300, v)
+        _ligar_cobranca(c)
+        c.commit()
+        _cobrar(c); c.commit()
+        # a passada seguinte é 6h DEPOIS da primeira no relógio injetado, e
+        # escala_min é 240 — tem que escalar, sem consultar o relógio de ninguém.
+        r = _cobrar(c, AGORA + timedelta(hours=6)); c.commit()
+        assert r["escalados"] == 1, r
+        assert [p["nivel"] for p in r["pendentes"]] == ["gestor"]
+        # e o aviso ficou carimbado com o instante da passada, não com o do banco
+        carimbos = c.execute("select nivel, criado_em from funil_avisos order by id").fetchall()
+        assert dict(carimbos) == {"vendedor": AGORA, "gestor": AGORA + timedelta(hours=6)}
+

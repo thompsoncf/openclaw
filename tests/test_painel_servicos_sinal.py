@@ -745,7 +745,7 @@ def _orcamento_aprovado_sem_data_na_agenda(c, *, conta_id=CONTA, inicio="19:00")
 
 def test_a_linha_diz_que_a_data_esta_segurada(cliente):
     oid, _ = _orcamento_com_data_segurada(cliente)
-    d = _item(cliente, oid)["data"]
+    d = _item(cliente, oid)["data_estado"]
     assert d["estado"] == vendas.DATA_SEGURADA and d["acao"] == "sinal"
 
 
@@ -753,7 +753,7 @@ def test_a_linha_denuncia_a_data_que_ficou_fora_da_agenda(cliente):
     """Sem este campo a tela não tem como desenhar o selo — e foi assim que um
     orçamento aprovado ficou sem data sem ninguém perceber."""
     oid = _orcamento_aprovado_sem_data_na_agenda(cliente)
-    d = _item(cliente, oid)["data"]
+    d = _item(cliente, oid)["data_estado"]
     assert d["estado"] == vendas.DATA_FORA and d["acao"] == "marcar"
 
 
@@ -762,7 +762,7 @@ def test_confirmar_o_sinal_deixa_a_linha_dizendo_data_reservada(cliente):
     ficava muda, indistinguível de quem nunca entrou na agenda."""
     oid, _ = _orcamento_com_data_segurada(cliente)
     cliente.post("/painel/servicos/sinal-recebido", json={"id": oid})
-    assert _item(cliente, oid)["data"]["estado"] == vendas.DATA_RESERVADA
+    assert _item(cliente, oid)["data_estado"]["estado"] == vendas.DATA_RESERVADA
 
 
 def test_prazo_vencido_acende_o_selo_de_data_liberada(cliente):
@@ -774,7 +774,7 @@ def test_prazo_vencido_acende_o_selo_de_data_liberada(cliente):
                    "where id=%s", (ev_id,))
         cx.commit()
     ag.expirar_pre_reservas(cliente.pool, ag.agora_brt())
-    d = _item(cliente, oid)["data"]
+    d = _item(cliente, oid)["data_estado"]
     assert d["estado"] == vendas.DATA_LIBERADA and d["acao"] == "resegurar"
 
 
@@ -783,7 +783,7 @@ def test_proposta_ainda_nao_aprovada_nao_fala_de_data(cliente):
     with cliente.pool.connection() as cx:
         cx.execute("update orcamentos set status='enviado' where id=%s", (oid,))
         cx.commit()
-    assert _item(cliente, oid)["data"] is None
+    assert _item(cliente, oid)["data_estado"] is None
 
 
 # ------------------------------------------------------- o botão que conserta
@@ -796,7 +796,7 @@ def test_marcar_agora_poe_a_data_na_agenda(cliente):
         ev_id = cx.execute("select evento_agenda_id from orcamentos where id=%s",
                            (oid,)).fetchone()[0]
         assert ev_id == r.json()["evento_id"]
-    assert _item(cliente, oid)["data"]["estado"] in (vendas.DATA_RESERVADA,
+    assert _item(cliente, oid)["data_estado"]["estado"] in (vendas.DATA_RESERVADA,
                                                      vendas.DATA_SEGURADA)
 
 
@@ -1036,3 +1036,59 @@ def test_proposta_antiga_sem_token_ganha_um_na_hora(cliente, correio):
         cx.commit()
     d = cliente.get(f"/painel/servicos/email/{oid}").json()
     assert "/proposta/" in d["link"] and not d["link"].endswith("/proposta/")
+
+
+# ================================ QUANDO a proposta foi gerada, onde quem vende vê
+#
+# A folha do CLIENTE sempre disse ("Emitido em"). Quem vende, não: no funil a data
+# era um "12/08" solto no meio de nº, itens e valor — sem ano e sem rótulo, ninguém
+# lia aquilo como "quando isto foi gerado" —, e no editor não aparecia em lugar
+# nenhum. E é quem vende que precisa saber se a proposta ainda está de pé.
+
+def test_a_linha_do_funil_diz_a_data_com_ANO(cliente):
+    """Sem o ano, um orçamento do ano passado passa por deste mês."""
+    oid = _orcamento_pra_mandar(cliente, numero=21)
+    with cliente.pool.connection() as cx:
+        cx.execute("update orcamentos set criado_em = '2025-11-18 10:00-03' where id=%s", (oid,))
+        cx.commit()
+    assert _item(cliente, oid)["data"] == "18/11/2025"
+
+
+def test_o_editor_tambem_diz_quando_foi_gerada(cliente):
+    oid = _orcamento_pra_mandar(cliente, numero=22)
+    with cliente.pool.connection() as cx:
+        cx.execute("update orcamentos set criado_em = '2026-08-12 09:00-03' where id=%s", (oid,))
+        cx.commit()
+    assert cliente.get(f"/painel/servicos/item/{oid}").json()["gerado_em"] == "12/08/2026"
+
+
+def test_a_data_de_geracao_tambem_vai_no_email(cliente, correio):
+    """O terceiro lugar: o cliente que acha o e-mail duas semanas depois precisa
+    saber se aquilo ainda é de hoje sem ter que perguntar."""
+    oid = _orcamento_pra_mandar(cliente, email="maria@x.com", numero=23)
+    with cliente.pool.connection() as cx:
+        cx.execute("update orcamentos set criado_em = '2026-08-12 09:00-03' where id=%s", (oid,))
+        cx.commit()
+    assert "gerado em 12/08/2026" in \
+        cliente.get(f"/painel/servicos/email/{oid}").json()["resumo"]
+
+
+def test_a_data_e_o_ESTADO_da_data_sao_duas_chaves_diferentes(cliente):
+    """A regressão que trouxe estes testes.
+
+    O selo do estado da data nasceu com a chave `data` — o mesmo nome da data de
+    geração, três linhas acima no mesmo dicionário. Python fica com a ÚLTIMA: a
+    data de geração sumiu da linha do funil no mesmo commit em que o selo apareceu,
+    e nenhum teste caiu, porque cada um olhava só a sua chave.
+
+    Este caso olha as DUAS de uma vez — é o que faltava."""
+    oid = _orcamento_pra_mandar(cliente, numero=24)
+    with cliente.pool.connection() as cx:
+        cx.execute("update orcamentos set criado_em = '2026-08-12 09:00-03', "
+                   "status='aprovada' where id=%s", (oid,))
+        cx.commit()
+    it = _item(cliente, oid)
+    assert it["data"] == "12/08/2026", "a data de geração sumiu da linha"
+    assert isinstance(it["data_estado"], dict), "o estado da data sumiu da linha"
+    assert it["data_estado"]["estado"] == vendas.DATA_FORA
+

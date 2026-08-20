@@ -22,6 +22,8 @@ from web import painel_prospeccao as pp
 CONTA = 7
 
 _SQL = """
+-- a lista junta `contas` pra saber o apelido do chip por onde a conversa entrou
+create table contas (id bigserial primary key, tipo text, nome text, chip_de bigint);
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
   empresa text, cidade text, uf text, estagio text default 'lead',
   atualizado_em timestamptz default now());
@@ -39,7 +41,7 @@ create table mensagens (id bigserial primary key, conversa_id bigint, canal text
   criado_em timestamptz default now());
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text, ativo boolean default true, cockpit_pausado boolean default false);
-create table canais_config (conta_id bigint, canal text, provedor text,
+create table canais_config (conta_id bigint, canal text, provedor text, rotulo text,
   identificador text, ativo boolean default true);
 create table wa_qr_auth (conta_id bigint, arquivo text, conteudo text);
 """

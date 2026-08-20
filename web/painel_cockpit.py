@@ -2311,9 +2311,15 @@ def cockpit_orcamento(request: Request, orc_id: int):
     if o["link"]:
         envio.append(f"<a class='btn ghost' style='margin-top:.5rem' href='{esc(o['link'])}' "
                      f"target=_blank rel=noopener>Abrir a proposta como o cliente vê</a>")
+        # o fetch anota que a proposta saiu por aqui — é o que faz o card do funil
+        # andar sozinho. `keepalive` porque quem copia troca de app em seguida, e o
+        # `catch` é mudo de propósito: o link JÁ está na área de transferência, e um
+        # erro de rede não pode virar aviso dizendo o contrário.
         envio.append("<div class=copiar><input value='" + esc(o["link"]) + "' readonly "
                      "onclick='this.select()'><button type=button onclick=\"navigator.clipboard"
-                     ".writeText(this.previousElementSibling.value);this.textContent='Copiado'\">"
+                     ".writeText(this.previousElementSibling.value);this.textContent='Copiado';"
+                     "fetch('" + _BASE + "/orcamentos/" + str(orc_id) + "/link-copiado',"
+                     "{method:'POST',keepalive:true}).catch(function(){})\">"
                      "Copiar</button></div>")
 
     fechada = o["status"] == "fechado"
@@ -2425,6 +2431,35 @@ def cockpit_orcamento_fechar(request: Request, orc_id: int):
     request.session["ck_ok" if r.get("ok") else "ck_err"] = (
         r.get("msg", "Contrato fechado ✓") if r.get("ok") else r.get("erro", "Não deu certo."))
     return RedirectResponse(f"{_BASE}/orcamentos/{orc_id}", status_code=303)
+
+
+@router.post("/cockpit/orcamentos/{orc_id}/link-copiado")
+def cockpit_orcamento_link_copiado(request: Request, orc_id: int):
+    """Anota que o vendedor pegou o link desta proposta pra mandar pro cliente.
+
+    Mesmo motivo da rota irmã no painel: no app o vendedor copia o link e cola no
+    WhatsApp dele. Sem esta anotação o Zaq não sabe que a proposta saiu, e o card
+    fica parado enquanto o cliente já está com ela na mão.
+
+    Chama-se "link copiado", e não "enviado": aqui o Zaq não entregou nada — só sabe
+    que o link saiu da tela.
+
+    `ck.orcamento` antes de anotar não é enfeite: ele é quem confere que a proposta
+    é DESTA conta (e deste vendedor). Sem essa volta, um id chutado na barra de
+    endereço anotaria envio na proposta de outra empresa."""
+    sess = _sessao(request)
+    if not sess:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    conta_id, membro_id = sess
+    try:
+        from finance import proposta_email as _pe
+        if ck.orcamento(get_pool(), conta_id, orc_id, membro_id=membro_id):
+            _pe.registrar(get_pool(), conta_id, orc_id, destino="", remetente_usado="",
+                          ok=True, canal="link", por=str(membro_id or ""))
+    except Exception:  # noqa: BLE001 — anotação não derruba a tela
+        _logging.getLogger("cockpit.envio").warning(
+            "proposta %s: não registrei o link copiado", orc_id, exc_info=True)
+    return JSONResponse({"ok": True})
 
 
 @router.post("/cockpit/orcamentos/{orc_id}/enviar")

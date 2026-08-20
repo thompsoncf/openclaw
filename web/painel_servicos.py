@@ -577,6 +577,11 @@ class ParcelaIn(BaseModel):
 
 class SalvarIn(BaseModel):
     id: int | None = None   # se vier, ATUALIZA a proposta (reaberta do funil)
+    # DE QUAL LEAD É ESTA PROPOSTA. Vem preenchido quando o cliente foi escolhido na
+    # busca da Base; null quando é cliente novo, sem vínculo. É este vínculo que faz
+    # o card andar sozinho: o gatilho `orcamento_enviado` procura o orçamento por
+    # `prospeccao.orcamento_id`, e proposta solta não tem card pra mover.
+    lead_id: int | None = None
     cliente: str = ""
     empresa: str = ""
     cnpj: str = ""
@@ -775,6 +780,28 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
     # agenda precisa acompanhar. Fora da transação de propósito — o que não pode se
     # perder é a edição; se a agenda falhar, a proposta editada continua salva e o
     # dono resolve a data pela própria Agenda.
+    # O VÍNCULO COM O LEAD. Sem ele a proposta é um documento solto: o gatilho
+    # `orcamento_enviado` procura o orçamento por `prospeccao.orcamento_id`, e o que
+    # não está ligado a lead nenhum não tem card pra mover — por mais que o envio
+    # esteja registrado. Medido na conta 34 em 19/08: 4 propostas, ZERO ligadas, e o
+    # único card que chegou em Proposta foi arrastado na mão.
+    #
+    # `orcamento_id is null` no WHERE é a trava: amarrar aqui não pode roubar um
+    # lead que já tem outra proposta. Quem já está servido continua como está, e o
+    # caso vira conversa, não sobrescrita silenciosa.
+    #
+    # Fora da transação e tolerante pelo mesmo motivo do espelho de cliente acima: o
+    # que não pode se perder é a proposta, que é o que a pessoa está tentando salvar.
+    if oid and dados.lead_id:
+        try:
+            from finance import proposta_lead as _pl
+            with pool.connection() as c:
+                _pl.ligar(c, conta[0], int(dados.lead_id), oid, _ator(request)[0])
+                c.commit()
+        except Exception:  # noqa: BLE001 — o vínculo é organização, não o orçamento
+            logging.getLogger("servicos.salvar").warning(
+                "não deu pra ligar o lead %s ao orçamento %s", dados.lead_id, oid,
+                exc_info=True)
     resp = {"ok": True, "id": oid, "token": tok, "cliente_id": cliente_id}
     if reabriu and oid:
         try:
@@ -1116,6 +1143,36 @@ class EnviarEmailIn(BaseModel):
     para: str = ""
     assunto: str = ""
     mensagem: str = ""
+
+
+@router.post("/painel/servicos/proposta/{orc_id}/link-copiado")
+def painel_servicos_link_copiado(request: Request, orc_id: int):
+    """Anota que alguém pegou o link desta proposta pra mandar pro cliente.
+
+    POR QUE ISSO É UM ENVIO. O funil precisa saber que a proposta saiu, e no
+    desktop o caminho mais usado não é o e-mail: é copiar o link e colar onde o
+    cliente estiver. Sem esta anotação, quem manda assim fica com o card parado em
+    "Novo" pra sempre — e o dono arrasta na mão, que é justamente o que a régua
+    existe pra evitar.
+
+    E POR QUE ELE SE CHAMA "LINK COPIADO", E NÃO "ENVIADO". No e-mail e na conversa
+    do WhatsApp o Zaq entregou; aqui ele só sabe que o link saiu da tela. A tela
+    escreve a diferença, em vez de prometer uma certeza que não tem.
+
+    Best-effort: devolve ok mesmo quando não deu pra anotar. Um erro aqui não pode
+    fazer a tela dizer que o link não foi copiado — ele foi, o navegador já copiou.
+    """
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "nao autorizado"}, status_code=403)
+    try:
+        from finance import proposta_email as _pe
+        _pe.registrar(get_pool(), conta[0], int(orc_id), destino="", remetente_usado="",
+                      ok=True, canal="link", por=str(_ator(request)[0] or ""))
+    except Exception:  # noqa: BLE001 — anotação não é o trabalho da tela
+        logging.getLogger("servicos.envio").warning(
+            "proposta %s: não registrei o link copiado", orc_id, exc_info=True)
+    return JSONResponse({"ok": True})
 
 
 @router.post("/painel/servicos/enviar-email")
@@ -2939,6 +2996,10 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     if(busca)busca.style.display='none';
     var linkN2=document.getElementById('cli-novo-link'); if(linkN2)linkN2.style.display='none';
   }
+  /* De qual lead é esta proposta. Vazio = proposta sem vínculo, que continua
+     permitida — é o que o link "cadastrar um cliente novo, sem vínculo com lead"
+     oferece de propósito. */
+  var LEAD_ID=(typeof EDIT_LEAD_ID!=='undefined'?EDIT_LEAD_ID:null);
   var cliBusca=document.getElementById('cli-busca'), cliDrop=document.getElementById('cli-drop');
   if(cliBusca){
     var cliTimer=null;
@@ -2973,6 +3034,10 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       setv('oc-cargo',l.cargo); setv('oc-socio',l.socio); setv('oc-whats',l.whatsapp);
       setv('oc-tel',l.telefone); setv('oc-email',l.email); setv('oc-site',l.site);
       setv('oc-cidade',l.cidade); setv('oc-uf',l.uf); setv('oc-segmento',l.segmento);
+      /* O ID DO LEAD ERA JOGADO FORA AQUI. A tela copiava nome, telefone e e-mail e
+         esquecia de QUEM era — e sem isso a proposta nasce solta, o gatilho
+         "orçamento enviado" não acha card nenhum pra mover, e alguém arrasta na mão. */
+      LEAD_ID=l.id||null;
       cliBusca.value=''; cliDrop.style.display='none'; cliDrop.innerHTML='';
       atualizarChip();
     });
@@ -2993,6 +3058,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   if(cliNovoLink)cliNovoLink.addEventListener('click',function(e){
     e.preventDefault();
     ['oc-empresa','oc-contato','oc-cnpj','oc-segmento','oc-whats','oc-email','oc-tel','oc-cidade','oc-uf','oc-site','oc-cargo','oc-socio'].forEach(function(id){setv(id,'');});
+    LEAD_ID=null;   /* cliente novo: não herda o vínculo de quem estava selecionado */
     aplicaTipoCliente('pj');
     document.getElementById('cli-form-full').style.display='block';
     document.getElementById('cli-chip').style.display='none';
@@ -3016,7 +3082,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
               desc_val:num(r.querySelector('.oc-desc'))};
     });
     var escEl=document.getElementById('oc-escopo-out');
-    return {id:EDIT_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',telefone:document.getElementById('oc-tel').value||'',cidade:document.getElementById('oc-cidade').value||'',uf:document.getElementById('oc-uf').value||'',site:document.getElementById('oc-site').value||'',cargo:document.getElementById('oc-cargo').value||'',socio:document.getElementById('oc-socio').value||'',endereco:(document.getElementById('oc-endereco')||{}).value||'',cep:(document.getElementById('oc-cep')||{}).value||'',modulos:sel.map(function(r){return r.getAttribute('data-id');}),itens:itens,evento:coletarEvento(),parcelas:(SERVICO_AVULSO?coletarParcelas():[]),escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setupBruto),mensal:Math.round(c.mensalBruto),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods,desconto_tipo:descTipoTot(),desconto_pct:(descTipoTot()==='pct'?num(document.getElementById('oc-desconto')):0),desconto_valor:(descTipoTot()==='valor'?num(document.getElementById('oc-desconto')):0)};
+    return {id:EDIT_ID,lead_id:LEAD_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',telefone:document.getElementById('oc-tel').value||'',cidade:document.getElementById('oc-cidade').value||'',uf:document.getElementById('oc-uf').value||'',site:document.getElementById('oc-site').value||'',cargo:document.getElementById('oc-cargo').value||'',socio:document.getElementById('oc-socio').value||'',endereco:(document.getElementById('oc-endereco')||{}).value||'',cep:(document.getElementById('oc-cep')||{}).value||'',modulos:sel.map(function(r){return r.getAttribute('data-id');}),itens:itens,evento:coletarEvento(),parcelas:(SERVICO_AVULSO?coletarParcelas():[]),escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setupBruto),mensal:Math.round(c.mensalBruto),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods,desconto_tipo:descTipoTot(),desconto_pct:(descTipoTot()==='pct'?num(document.getElementById('oc-desconto')):0),desconto_valor:(descTipoTot()==='valor'?num(document.getElementById('oc-desconto')):0)};
   }
   function salvarProposta(cb){
     fetch('/painel/servicos/salvar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(coletarBody())})
@@ -3484,7 +3550,12 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         if(it.token){
           var lk=window.location.origin+'/proposta/'+it.token;
           var bl=document.createElement('button'); bl.className='oc-ic'; bl.title='Copiar link da proposta'; bl.textContent='🔗';
-          bl.addEventListener('click',function(){navigator.clipboard.writeText(lk); bl.textContent='✓'; setTimeout(function(){bl.textContent='🔗';},1200);});
+          bl.addEventListener('click',function(){navigator.clipboard.writeText(lk); bl.textContent='✓'; setTimeout(function(){bl.textContent='🔗';},1200);
+            /* anota que a proposta saiu por aqui — é o que faz o card do funil andar.
+               keepalive porque a pessoa costuma trocar de aba logo depois de copiar;
+               e o catch é mudo de propósito: o link JÁ foi copiado, e um erro de rede
+               não pode virar um alerta que sugere o contrário. */
+            fetch('/painel/servicos/proposta/'+it.id+'/link-copiado',{method:'POST',keepalive:true}).catch(function(){});});
           var bp=document.createElement('button'); bp.className='oc-ic'; bp.title='Abrir / baixar PDF da proposta'; bp.textContent='📄';
           bp.addEventListener('click',function(){window.open('/proposta/'+it.token,'_blank');});
           var bm=document.createElement('button'); bm.className='oc-ic mail'; bm.title='Mandar por e-mail'; bm.textContent='✉️';

@@ -187,20 +187,40 @@ def enviar(pool, conta_id: int, *, destino: str, assunto: str, html: str,
 # ------------------------------------------------------------------ o registro
 
 def registrar(pool, conta_id: int, orcamento_id: int, *, destino: str,
-              remetente_usado: str, ok: bool, erro: str = "", por: str = "") -> None:
+              remetente_usado: str, ok: bool, erro: str = "", por: str = "",
+              canal: str = "email") -> None:
     """Guarda a tentativa — inclusive a que falhou.
 
     Sem gravar a falha, uma caixa com senha errada deixaria a tela dizendo "nunca
-    enviado": verdade e inútil. O que resolve é "tentou 3 vezes e falhou"."""
+    enviado": verdade e inútil. O que resolve é "tentou 3 vezes e falhou".
+
+    `canal` já existia na tabela (migração 178) e só o e-mail escrevia. Agora a
+    conversa do WhatsApp e o link copiado também passam por aqui — é esta tabela que
+    o gatilho `orcamento_enviado` lê pra saber que a proposta saiu, e ela só serve
+    se todos os canais escreverem nela. O default continua 'email' pra não mexer em
+    quem já chamava."""
     try:
         with pool.connection() as c:
             c.execute(
                 """insert into orcamento_envios (conta_id, orcamento_id, destino,
-                       remetente, ok, erro, por)
-                   values (%s,%s,%s,%s,%s,%s,%s)""",
-                (conta_id, orcamento_id, destino[:200], (remetente_usado or "")[:200],
-                 bool(ok), (erro or "")[:400], (por or "")[:60]))
+                       remetente, ok, erro, por, canal)
+                   values (%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (conta_id, orcamento_id, (destino or "")[:200], (remetente_usado or "")[:200],
+                 bool(ok), (erro or "")[:400], (por or "")[:60], (canal or "email")[:20]))
             c.commit()
+        # O CARD DO FUNIL, garantido AQUI e não em cada rota de envio.
+        #
+        # Depois que todo canal passou a registrar por esta função, ela virou o ponto
+        # único por onde "a proposta saiu" passa — e é exatamente onde a garantia do
+        # card pertence. Espalhá-la pelas quatro rotas de envio significaria que a
+        # quinta, escrita daqui a três meses, esqueceria.
+        #
+        # Só no sucesso: tentativa que estourou não é proposta entregue, e não
+        # justifica criar card nenhum.
+        if ok:
+            from finance import proposta_lead as _pl
+            _pl.garantir(pool, conta_id, orcamento_id,
+                         int(por) if str(por).isdigit() else None)
     except Exception as ex:  # noqa: BLE001 — o histórico é registro, não o envio
         _log.warning("proposta: não deu pra registrar o envio %s: %s: %s",
                      orcamento_id, type(ex).__name__, ex)
@@ -210,7 +230,7 @@ def historico(pool, conta_id: int, orcamento_id: int, limite: int = 5) -> list[d
     try:
         with pool.connection() as c:
             rows = c.execute(
-                """select destino, remetente, ok, erro, criado_em
+                """select destino, remetente, ok, erro, criado_em, coalesce(canal,'email')
                      from orcamento_envios
                     where conta_id=%s and orcamento_id=%s
                     order by criado_em desc limit %s""",
@@ -218,4 +238,16 @@ def historico(pool, conta_id: int, orcamento_id: int, limite: int = 5) -> list[d
     except Exception:  # noqa: BLE001
         return []
     return [{"destino": r[0], "remetente": r[1], "ok": r[2], "erro": r[3],
-             "quando": r[4]} for r in rows]
+             "quando": r[4], "canal": r[5], "canal_rot": CANAL_ROT.get(r[5], r[5])}
+            for r in rows]
+
+
+# Como cada canal se chama na tela. "Link copiado" é deliberadamente diferente de
+# "E-mail" e "WhatsApp": nos dois primeiros o Zaq entregou, no terceiro ele só sabe
+# que alguém pegou o link pra mandar. Chamar os três de "enviado" seria prometer uma
+# certeza que só dois têm.
+CANAL_ROT = {
+    "email": "E-mail",
+    "whatsapp": "WhatsApp",
+    "link": "Link copiado",
+}

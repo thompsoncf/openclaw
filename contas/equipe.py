@@ -123,6 +123,7 @@ def garantir_tabela(pool):
         c.execute("alter table membros add column if not exists convite_expira timestamptz")
         c.execute("alter table membros add column if not exists whatsapp       text")
         c.execute("alter table membros add column if not exists comissao_pct   numeric(5,2)")
+        c.execute("alter table membros add column if not exists pode_campanha  boolean not null default false")
         c.execute("alter table membros drop constraint if exists membros_papel_check")
         # e-mail é único POR CONTA (não global): a mesma pessoa pode ser membro de
         # várias empresas com o mesmo e-mail. Troca o índice global antigo, se houver.
@@ -289,14 +290,15 @@ def listar_equipe(pool, conta_id: int) -> list[dict]:
     with pool.connection() as c:
         rows = c.execute(
             """select id, nome, email, papel, ativo, (convite_token is not null),
-                      coalesce(whatsapp,''), comissao_pct
+                      coalesce(whatsapp,''), comissao_pct, coalesce(pode_campanha,false)
                  from membros where conta_id=%s and email is not null
                 order by id""", (conta_id,)).fetchall()
     # 'pendente' = convite por LINK ainda não aceito (inativo + com token). Quem já
     # tinha login Zaq entra ativo sem senha/token — NÃO é pendente.
     return [{"id": r[0], "nome": r[1], "email": r[2], "papel": r[3], "ativo": r[4],
              "pendente": (not r[4]) and r[5], "rotulo": rotulo(r[3]), "whatsapp": r[6],
-             "comissao_pct": float(r[7]) if r[7] is not None else None} for r in rows]
+             "comissao_pct": float(r[7]) if r[7] is not None else None,
+             "pode_campanha": bool(r[8])} for r in rows]
 
 
 def definir_comissao(pool, conta_id: int, membro_id: int, comissao_pct: float | None) -> dict:
@@ -310,6 +312,42 @@ def definir_comissao(pool, conta_id: int, membro_id: int, comissao_pct: float | 
             (comissao_pct, membro_id, conta_id)).fetchone()
         c.commit()
     return {"ok": bool(r)}
+
+
+def definir_pode_campanha(pool, conta_id: int, membro_id: int, pode: bool) -> dict:
+    """Liga/desliga a criação de campanhas pra UM membro (migração 183).
+
+    Só faz sentido pra quem tem `vendas` e não tem `gerencia` — dono e gestor já
+    passam pelo gate antigo. Guardar num papel novo obrigaria a escolher entre
+    "todo vendedor pode" e "nenhum pode"; campanha dispara mensagem em massa pelo
+    número da empresa, e essa é uma decisão de pessoa, não de cargo.
+
+    Nunca mexe no dono (o `papel<>'dono'`, igual aos outros setters daqui)."""
+    with pool.connection() as c:
+        r = c.execute(
+            "update membros set pode_campanha=%s where id=%s and conta_id=%s "
+            "and papel<>'dono' returning id",
+            (bool(pode), membro_id, conta_id)).fetchone()
+        c.commit()
+    return {"ok": bool(r)}
+
+
+def pode_campanha(pool, conta_id: int, membro_id) -> bool:
+    """A flag deste membro. Best-effort: qualquer tropeço devolve False.
+
+    Falhar FECHADO é de propósito — um erro de banco não pode virar permissão de
+    disparar mensagem em massa. E `membro_id` None (login por conta, o dono) cai
+    no False aqui porque o dono nem passa por esta função: ele já é `gerencia`."""
+    if not membro_id:
+        return False
+    try:
+        with pool.connection() as c:
+            r = c.execute(
+                "select coalesce(pode_campanha,false) from membros "
+                "where id=%s and conta_id=%s", (membro_id, conta_id)).fetchone()
+        return bool(r and r[0])
+    except Exception:  # noqa: BLE001 — coluna ausente/banco fora: sem permissão nova
+        return False
 
 
 def atualizar_papel(pool, conta_id: int, membro_id: int, papel: str) -> dict:

@@ -6105,7 +6105,7 @@ def _tem_assinatura_cesta(conta_id: int) -> bool:
         return False
 
 
-def _plano_aviso(conta_row, beta_ativo) -> dict | None:
+def _plano_aviso(conta_row, beta_ativo, avisar=True) -> dict | None:
     """Estado do plano pro banner do painel. None = nada a mostrar (em dia).
 
     NAO corta acesso — so' informa. Roda em cima da mesma verdade do
@@ -6117,8 +6117,22 @@ def _plano_aviso(conta_row, beta_ativo) -> dict | None:
       'vencido'  -> venceu (ou suspensa/cancelada) — banner vermelho.
       'avencer'  -> vence em ate 5 dias — banner amarelo.
     conta_row: a tupla do conta_logada ([5]=status, [6]=vencimento).
+
+    `avisar=False` (config_app.aviso_vencimento) CALA a faixa durante o beta.
+    Durante a validacao o vencimento continua correndo no banco e ninguem esta
+    sendo cobrado — a faixa vermelha em toda tela era ruido, e ruido constante
+    ensina o cliente a ignorar faixa vermelha justo antes de existir uma que
+    importa.
+
+    A TRAVA: calar so' vale com o BETA LIGADO. Desligou o beta pra comecar a
+    cobrar, os avisos voltam sozinhos, mesmo que esta chave tenha ficado calada.
+    Isso e' de proposito, e nao e' zelo excessivo: sao duas chaves que precisam
+    ser mexidas na ordem certa, e a segunda e' exatamente a que se esquece —
+    o preco do esquecimento seria cortar o acesso de quem nunca foi avisado.
     """
     if not conta_row:
+        return None
+    if not avisar and beta_ativo:
         return None
     status = conta_row[5]
     venc = conta_row[6]
@@ -6199,7 +6213,10 @@ def _render(nome: str, request: Request, **ctx) -> HTMLResponse:
             ctx["beta_gratis"] = True
     if "plano_aviso" not in ctx:
         try:
-            ctx["plano_aviso"] = _plano_aviso(ctx.get("conta"), ctx.get("beta_gratis"))
+            from finance import config_app as _cfg
+            ctx["plano_aviso"] = _plano_aviso(
+                ctx.get("conta"), ctx.get("beta_gratis"),
+                _cfg.aviso_vencimento_ativo(get_pool()))
         except Exception:
             ctx["plano_aviso"] = None
     return HTMLResponse(_env.get_template(nome).render(**ctx))

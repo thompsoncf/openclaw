@@ -32,6 +32,12 @@ create table titulos (id bigserial primary key, conta_id bigint references conta
   recorrente boolean default false, categoria text default '', lancamento_id bigint,
   cobranca_link_url text, pago_em date, criado_por bigint,
   criado_em timestamptz default now());
+-- app_config vem da 054 (dentro do baseline). A 181 grava a chave do aviso de
+-- vencimento aqui: sem a tabela no baseline ela quebraria neste teste — e só
+-- neste teste, porque em produção a 054 já rodou. O conserto certo é declarar a
+-- tabela aqui, não fazer a 181 recriar o que o baseline garante que existe.
+create table app_config (chave text primary key, valor text not null,
+  atualizado_em timestamptz not null default now());
 create table funcionarios (id bigserial primary key, conta_id bigint references contas(id),
   nome text, salario_centavos int default 0, pro_labore boolean default false,
   ativo boolean default true, admitido_em date);

@@ -25,16 +25,18 @@ import logging
 import re
 import secrets
 
-from fastapi import APIRouter, File, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi.responses import (HTMLResponse, JSONResponse, RedirectResponse,
+                               Response)
 from psycopg.errors import UniqueViolation
 from pydantic import BaseModel
 
 from core.brain import Brain
 from db.conexao import get_pool
 from finance.cnpj_info import consultar_cnpj
-from finance import (agenda as ag, contrato as ctr, desconto as dsc, empresa as emp,
-                     icones_servico as ics, vendas, servicos_catalogo as scat)
+from finance import (agenda as ag, comprovantes as comprov, contrato as ctr,
+                     desconto as dsc, empresa as emp, icones_servico as ics,
+                     proposta_email as pmail, vendas, servicos_catalogo as scat)
 from web.portal import _render, _env, conta_logada, brl
 
 router = APIRouter()
@@ -114,6 +116,43 @@ def _garantir_tabela(c):
     c.execute("alter table orcamentos drop constraint if exists orcamentos_status_check")
     c.execute("""alter table orcamentos add constraint orcamentos_status_check
         check (status in ('rascunho','enviado','negociando','aprovada','fechado','perdido'))""")
+    # registro dos envios da proposta por e-mail (migração 178). Mesmo motivo das
+    # linhas acima: o deploy não roda migração sozinho, e sem a tabela o histórico
+    # some em silêncio — o botão manda e a tela diz "nunca enviado".
+    c.execute("""
+        create table if not exists orcamento_envios (
+            id            bigserial primary key,
+            conta_id      bigint      not null,
+            orcamento_id  bigint      not null,
+            canal         text        not null default 'email',
+            destino       text        not null default '',
+            remetente     text        not null default '',
+            ok            boolean     not null default true,
+            erro          text        not null default '',
+            por           text        not null default '',
+            criado_em     timestamptz not null default now());
+        create index if not exists idx_orc_envios_orcamento
+            on orcamento_envios (orcamento_id, criado_em desc);
+    """)
+    # comprovante de pagamento por PARCELA (migração 179). Guarda o CAMINHO no
+    # bucket privado, nunca uma URL — ver finance/comprovantes.
+    c.execute("""
+        create table if not exists orcamento_comprovantes (
+            id            bigserial primary key,
+            conta_id      bigint      not null,
+            orcamento_id  bigint      not null,
+            parcela_idx   int         not null,
+            caminho       text        not null,
+            nome          text        not null default '',
+            tipo          text        not null default '',
+            bytes         bigint      not null default 0,
+            por           text        not null default '',
+            criado_em     timestamptz not null default now());
+        create unique index if not exists uq_orc_comprovante
+            on orcamento_comprovantes (orcamento_id, parcela_idx);
+        create index if not exists idx_orc_comprovante_conta
+            on orcamento_comprovantes (conta_id, orcamento_id);
+    """)
     c.commit()
 
 
@@ -538,6 +577,11 @@ class ParcelaIn(BaseModel):
 
 class SalvarIn(BaseModel):
     id: int | None = None   # se vier, ATUALIZA a proposta (reaberta do funil)
+    # DE QUAL LEAD É ESTA PROPOSTA. Vem preenchido quando o cliente foi escolhido na
+    # busca da Base; null quando é cliente novo, sem vínculo. É este vínculo que faz
+    # o card andar sozinho: o gatilho `orcamento_enviado` procura o orçamento por
+    # `prospeccao.orcamento_id`, e proposta solta não tem card pra mover.
+    lead_id: int | None = None
     cliente: str = ""
     empresa: str = ""
     cnpj: str = ""
@@ -736,6 +780,28 @@ def painel_servicos_salvar(request: Request, dados: SalvarIn):
     # agenda precisa acompanhar. Fora da transação de propósito — o que não pode se
     # perder é a edição; se a agenda falhar, a proposta editada continua salva e o
     # dono resolve a data pela própria Agenda.
+    # O VÍNCULO COM O LEAD. Sem ele a proposta é um documento solto: o gatilho
+    # `orcamento_enviado` procura o orçamento por `prospeccao.orcamento_id`, e o que
+    # não está ligado a lead nenhum não tem card pra mover — por mais que o envio
+    # esteja registrado. Medido na conta 34 em 19/08: 4 propostas, ZERO ligadas, e o
+    # único card que chegou em Proposta foi arrastado na mão.
+    #
+    # `orcamento_id is null` no WHERE é a trava: amarrar aqui não pode roubar um
+    # lead que já tem outra proposta. Quem já está servido continua como está, e o
+    # caso vira conversa, não sobrescrita silenciosa.
+    #
+    # Fora da transação e tolerante pelo mesmo motivo do espelho de cliente acima: o
+    # que não pode se perder é a proposta, que é o que a pessoa está tentando salvar.
+    if oid and dados.lead_id:
+        try:
+            from finance import proposta_lead as _pl
+            with pool.connection() as c:
+                _pl.ligar(c, conta[0], int(dados.lead_id), oid, _ator(request)[0])
+                c.commit()
+        except Exception:  # noqa: BLE001 — o vínculo é organização, não o orçamento
+            logging.getLogger("servicos.salvar").warning(
+                "não deu pra ligar o lead %s ao orçamento %s", dados.lead_id, oid,
+                exc_info=True)
     resp = {"ok": True, "id": oid, "token": tok, "cliente_id": cliente_id}
     if reabriu and oid:
         try:
@@ -786,7 +852,17 @@ def painel_servicos_lista(request: Request):
                               and e.status = 'pre_reservado'),
                           evento,
                           (select e.status from eventos_agenda e
-                            where e.id = orcamentos.evento_agenda_id)"""
+                            where e.id = orcamentos.evento_agenda_id),
+                          -- o último ENVIO da proposta por e-mail. Sem isto, "será
+                          -- que já mandei pra Carla?" só se responde abrindo o
+                          -- Gmail — e na dúvida se manda duas vezes.
+                          -- o APELIDO não é enfeite: sem ele a saída fica com duas
+                          -- colunas chamadas `criado_em` (esta e a do orçamento) e o
+                          -- `order by criado_em` de baixo vira ambíguo — a lista
+                          -- inteira do funil devolvia 500.
+                          (select ev.criado_em from orcamento_envios ev
+                            where ev.orcamento_id = orcamentos.id and ev.ok
+                            order by ev.criado_em desc limit 1) as enviado_em"""
         if papel == "vendedor" and membro_id:
             rows = c.execute(
                 _cols + """ from orcamentos where conta_id=%s and criado_por=%s
@@ -796,6 +872,30 @@ def painel_servicos_lista(request: Request):
             rows = c.execute(
                 _cols + """ from orcamentos where conta_id=%s
                    order by criado_em desc limit 50""", (conta[0],)).fetchall()
+    # OS PAGAMENTOS DE TODAS AS LINHAS, em dois SELECTs. Por linha seriam cem
+    # consultas numa lista de cinquenta — o mesmo N+1 que já custou caro na Agenda.
+    ids = [r[0] for r in rows]
+    pagos_por_orc, comp_por_orc = {}, {}
+    if ids:
+        with get_pool().connection() as c:
+            try:
+                for oid, idx in c.execute(
+                        """select orcamento_id, parcela_idx from titulos
+                            where conta_id=%s and orcamento_id = any(%s)
+                              and parcela_idx is not null and status='pago'""",
+                        (conta[0], ids)).fetchall():
+                    pagos_por_orc.setdefault(oid, []).append(idx)
+            except Exception:  # noqa: BLE001 — conta sem o módulo financeiro
+                pagos_por_orc = {}
+            try:
+                for oid, idx in c.execute(
+                        """select orcamento_id, parcela_idx from orcamento_comprovantes
+                            where conta_id=%s and orcamento_id = any(%s)""",
+                        (conta[0], ids)).fetchall():
+                    comp_por_orc.setdefault(oid, []).append(idx)
+            except Exception:  # noqa: BLE001
+                comp_por_orc = {}
+
     itens = [{
         "id": r[0],
         "cliente": r[1] or "-",
@@ -804,7 +904,11 @@ def painel_servicos_lista(request: Request):
         "mensal": brl(r[4]),
         "total": brl(r[5]),
         "mods": r[6],
-        "data": r[7].strftime("%d/%m") if r[7] else "",
+        # COM ANO E COM RÓTULO. Era um "12/08" solto no meio de nº, itens e valor:
+        # ninguém lia aquilo como "quando isto foi gerado", e proposta tem validade
+        # na cabeça de quem vende. Sem o ano, um orçamento do ano passado passava
+        # por deste mês.
+        "data": r[7].strftime("%d/%m/%Y") if r[7] else "",
         "status": r[8] or "rascunho",
         "token": r[9] or "",
         "aprovada_por": r[10] or "",
@@ -828,9 +932,19 @@ def painel_servicos_lista(request: Request):
         # O ESTADO DA DATA, resolvido no servidor. A linha do funil mostrava só a
         # pré-reserva correndo — "data firme", "nunca entrou" e "liberada" tinham a
         # mesma cara, e duas delas são problema. Ver vendas.estado_da_data.
-        "data": vendas.estado_da_data(
+        #
+        # CHAMA-SE `data_estado`, NÃO `data`. Nasceu como "data" e colidiu com a
+        # chave logo acima — dicionário Python fica com a ÚLTIMA, então a data de
+        # geração sumiu da linha do funil no mesmo commit em que o selo apareceu,
+        # sem quebrar teste nenhum. São duas coisas diferentes e agora têm dois
+        # nomes diferentes.
+        "data_estado": vendas.estado_da_data(
             status=r[8], modo=r[13] or "recorrente", evento=r[21],
             evento_status=r[22], pre_reserva_ate=r[20]),
+        "enviado_em": r[23].astimezone(ag.BRT).strftime("%d/%m %H:%M") if r[23] else "",
+        # quanto já entrou, e quanto disso está sem comprovante
+        "pgto": vendas.resumo_pagamentos(
+            r[16], r[15], pagos_por_orc.get(r[0], ()), comp_por_orc.get(r[0], ())),
     } for r in rows]
     return JSONResponse({"itens": itens})
 
@@ -853,7 +967,7 @@ def painel_servicos_item(request: Request, orc_id: int):
                       telefone, cidade, uf, site, cargo, socio,
                       endereco, cep, evento, parcelas, numero,
                       coalesce(modo,'recorrente'),
-                      desconto_tipo, desconto_pct, desconto_centavos
+                      desconto_tipo, desconto_pct, desconto_centavos, criado_em
                  from orcamentos where id=%s and conta_id=%s""" + dono_filtro,
             args).fetchone()
     if not r:
@@ -884,6 +998,10 @@ def painel_servicos_item(request: Request, orc_id: int):
         "desconto_tipo": r[27] or "pct",
         "desconto_pct": float(r[28] or 0),
         "desconto_valor": round(int(r[29] or 0) / 100),
+        # QUANDO ESTA PROPOSTA FOI GERADA. A folha do cliente sempre disse
+        # ("Emitido em"); quem vende, não — nem no funil nem aqui no editor. E é
+        # quem vende que precisa saber se aquilo ainda está de pé.
+        "gerado_em": r[30].strftime("%d/%m/%Y") if r[30] else "",
     })
 
 
@@ -928,6 +1046,310 @@ def painel_servicos_sinal_recebido(request: Request, dados: SinalIn):
     if not r.get("ok"):
         return JSONResponse({"erro": r.get("erro", "falha ao confirmar")}, status_code=404)
     return JSONResponse(r)
+
+
+# ============================================== MANDAR A PROPOSTA POR E-MAIL
+#
+# O funil sabia gerar o link e abrir o PDF; mandar era por fora, na mão. E o
+# vendedor não tinha como saber se já tinha mandado — na dúvida, mandava de novo.
+#
+# Por qual caixa o e-mail sai é decisão de fundo e mora em finance/proposta_email:
+# a proposta é mensagem PRA CLIENTE, e ele vai apertar Responder.
+
+
+def _dados_do_envio(pool, conta_id: int, orc_id: int) -> dict | None:
+    """O orçamento, do jeito que a tela de envio precisa. None se não é da conta."""
+    with pool.connection() as c:
+        _garantir_tabela(c)
+        r = c.execute(
+            """select coalesce(cliente,''), coalesce(empresa,''), coalesce(email,''),
+                      numero, coalesce(modo,'recorrente'), token, evento,
+                      coalesce(primeiro_ano_centavos, setup_centavos, 0), criado_em
+                 from orcamentos where id=%s and conta_id=%s""",
+            (orc_id, conta_id)).fetchone()
+        if not r:
+            return None
+        token = r[5]
+        if not token:
+            # proposta antiga, de antes de o token existir. A listagem do funil já
+            # preenche na passagem; gerar aqui também é o mesmo UPDATE, e evita que
+            # o botão dependa de a pessoa ter carregado a lista antes.
+            token = c.execute(
+                """update orcamentos set token = substr(md5(random()::text || id::text
+                     || clock_timestamp()::text), 1, 22)
+                   where id=%s and conta_id=%s returning token""",
+                (orc_id, conta_id)).fetchone()[0]
+            c.commit()
+    return {"cliente": r[0], "empresa_cli": r[1], "email": r[2], "numero": r[3],
+            "modo": r[4], "token": token, "evento": r[6] or {}, "total": r[7],
+            "criado_em": r[8]}
+
+
+def _resumo_do_envio(d: dict) -> str:
+    """A linha discreta embaixo do botão do e-mail: do que se trata, sem abrir.
+
+    A DATA EM QUE FOI GERADO entra aqui de propósito. Proposta tem validade na
+    cabeça de quem recebe, e um cliente que acha o e-mail duas semanas depois
+    precisa saber se aquilo ainda é de hoje — sem ter que perguntar."""
+    ev = d.get("evento") or {}
+    partes = []
+    if ev.get("tipo"):
+        partes.append(str(ev["tipo"]))
+    if ev.get("data"):
+        partes.append(ctr.data_br(ev["data"]))
+    if d.get("total"):
+        partes.append(brl(d["total"]))
+    if d.get("criado_em"):
+        partes.append(f"gerado em {d['criado_em'].strftime('%d/%m/%Y')}")
+    return " · ".join(partes)
+
+
+@router.get("/painel/servicos/email/{orc_id}")
+def painel_servicos_email(request: Request, orc_id: int):
+    """O que a tela de envio abre preenchido — e por qual caixa vai sair.
+
+    O remetente é resolvido AQUI, antes de mandar, porque o mesmo botão se
+    comporta diferente em duas empresas: a que tem caixa configurada e a que não
+    tem. Sem dizer, o vendedor descobriria pelo cliente reclamando que respondeu e
+    ninguém viu."""
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    pool = get_pool()
+    d = _dados_do_envio(pool, conta[0], int(orc_id))
+    if not d:
+        return JSONResponse({"erro": "orçamento não encontrado"}, status_code=404)
+    dados_emp = emp.obter_dados_empresa(pool, conta[0]) or {}
+    nome_emp = (dados_emp.get("nome_fantasia") or dados_emp.get("razao_social")
+                or conta[2] or "")
+    rem = pmail.remetente(pool, conta[0], dados_emp.get("email_empresa") or "")
+    envios = pmail.historico(pool, conta[0], int(orc_id))
+    return JSONResponse({
+        "para": d["email"],
+        "cliente": d["cliente"] or d["empresa_cli"],
+        "assunto": pmail.assunto_padrao(d["numero"], nome_emp, d["modo"]),
+        "mensagem": pmail.texto_padrao(d["cliente"] or d["empresa_cli"], d["modo"]),
+        "link": f"{request.base_url.scheme}://{request.base_url.netloc}/proposta/{d['token']}",
+        "resumo": _resumo_do_envio(d),
+        "empresa": nome_emp,
+        "remetente": rem,
+        "envios": [{"quando": e["quando"].strftime("%d/%m %H:%M"), "ok": e["ok"],
+                    "destino": e["destino"]} for e in envios],
+    })
+
+
+class EnviarEmailIn(BaseModel):
+    id: int
+    para: str = ""
+    assunto: str = ""
+    mensagem: str = ""
+
+
+@router.post("/painel/servicos/proposta/{orc_id}/link-copiado")
+def painel_servicos_link_copiado(request: Request, orc_id: int):
+    """Anota que alguém pegou o link desta proposta pra mandar pro cliente.
+
+    POR QUE ISSO É UM ENVIO. O funil precisa saber que a proposta saiu, e no
+    desktop o caminho mais usado não é o e-mail: é copiar o link e colar onde o
+    cliente estiver. Sem esta anotação, quem manda assim fica com o card parado em
+    "Novo" pra sempre — e o dono arrasta na mão, que é justamente o que a régua
+    existe pra evitar.
+
+    E POR QUE ELE SE CHAMA "LINK COPIADO", E NÃO "ENVIADO". No e-mail e na conversa
+    do WhatsApp o Zaq entregou; aqui ele só sabe que o link saiu da tela. A tela
+    escreve a diferença, em vez de prometer uma certeza que não tem.
+
+    Best-effort: devolve ok mesmo quando não deu pra anotar. Um erro aqui não pode
+    fazer a tela dizer que o link não foi copiado — ele foi, o navegador já copiou.
+    """
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "nao autorizado"}, status_code=403)
+    try:
+        from finance import proposta_email as _pe
+        _pe.registrar(get_pool(), conta[0], int(orc_id), destino="", remetente_usado="",
+                      ok=True, canal="link", por=str(_ator(request)[0] or ""))
+    except Exception:  # noqa: BLE001 — anotação não é o trabalho da tela
+        logging.getLogger("servicos.envio").warning(
+            "proposta %s: não registrei o link copiado", orc_id, exc_info=True)
+    return JSONResponse({"ok": True})
+
+
+@router.post("/painel/servicos/enviar-email")
+def painel_servicos_enviar_email(request: Request, dados: EnviarEmailIn):
+    """Manda, registra o que aconteceu e devolve o link como plano B.
+
+    QUEM PODE: o mesmo gate da aba (dono, gestor e vendedor). É o vendedor que
+    fala com o cliente e a proposta é dele — travar isso mandaria ele pedir pro
+    dono apertar um botão.
+
+    O E-MAIL DIGITADO FICA SALVO no orçamento quando ele não tinha nenhum. Sem
+    isso, a mesma pessoa redigitaria o endereço a cada envio, e o orçamento
+    seguiria sem o dado que o contrato depois vai precisar.
+    """
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    pool = get_pool()
+    d = _dados_do_envio(pool, conta[0], int(dados.id))
+    if not d:
+        # o 404 vem ANTES da checagem do e-mail: orçamento de outra conta não pode
+        # se denunciar respondendo "confira o e-mail" em vez de "não existe".
+        return JSONResponse({"erro": "orçamento não encontrado"}, status_code=404)
+    # sem `para` no corpo vale o que está gravado no orçamento — é o caso de quem
+    # abriu a tela e apertou Enviar sem tocar em nada.
+    para = (dados.para or "").strip() or d["email"]
+    if "@" not in para or "." not in para.split("@")[-1]:
+        return JSONResponse({"erro": "Confira o e-mail do cliente."}, status_code=400)
+    dados_emp = emp.obter_dados_empresa(pool, conta[0]) or {}
+    nome_emp = (dados_emp.get("nome_fantasia") or dados_emp.get("razao_social")
+                or conta[2] or "")
+    link = f"{request.base_url.scheme}://{request.base_url.netloc}/proposta/{d['token']}"
+    assunto = (dados.assunto or "").strip() or pmail.assunto_padrao(
+        d["numero"], nome_emp, d["modo"])
+    mensagem = (dados.mensagem or "").strip() or pmail.texto_padrao(
+        d["cliente"] or d["empresa_cli"], d["modo"])
+    html, texto = pmail.montar(
+        mensagem=mensagem, link=link, numero=d["numero"], empresa=nome_emp,
+        telefone=dados_emp.get("telefone") or "",
+        email_empresa=dados_emp.get("email_empresa") or "",
+        resumo=_resumo_do_envio(d), modo=d["modo"])
+    r = pmail.enviar(pool, conta[0], destino=para, assunto=assunto, html=html,
+                     texto=texto, empresa=nome_emp,
+                     reply_to=dados_emp.get("email_empresa") or "")
+    membro_id, _papel = _ator(request)
+    pmail.registrar(pool, conta[0], int(dados.id), destino=para,
+                    remetente_usado=r["remetente"], ok=r["ok"], erro=r["erro"],
+                    por=str(membro_id or "dono"))
+    if not d["email"]:
+        with pool.connection() as c:
+            c.execute("update orcamentos set email=%s where id=%s and conta_id=%s "
+                      "and coalesce(email,'')=''", (para, int(dados.id), conta[0]))
+            c.commit()
+    if not r["ok"]:
+        # o link vai junto do erro: o vendedor tem um cliente esperando, e mandar
+        # pelo WhatsApp resolve o dia dele enquanto a caixa se conserta.
+        return JSONResponse({"erro": r["erro"], "link": link}, status_code=502)
+    return JSONResponse({"ok": True, "remetente": r["remetente"], "para": para})
+
+
+# ==================================== COMPROVANTE DE PAGAMENTO (sinal e parcelas)
+#
+# O comprovante é da PARCELA, não do orçamento — um orçamento tem o sinal e mais N.
+# A chave é `parcela_idx`, a mesma que os títulos usam.
+#
+# QUEM FAZ O QUÊ, e é de propósito que sejam gates diferentes:
+#   ver a lista e o arquivo   dono, gestor e VENDEDOR — é ele que cobra o cliente,
+#                             e cobrar sem saber o que já entrou é ligar no escuro
+#   anexar                    só dono e gestor. Papel de dinheiro é do financeiro.
+#
+# `vendas` + `financeiro` dá exatamente dono e gestor: o papel `financeiro` puro
+# não passa no gate da aba, e o vendedor não tem `financeiro`.
+
+
+def _conta_financeiro(request: Request):
+    """Gate de quem MEXE em dinheiro dentro da aba: dono e gestor."""
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return None, JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    from contas import equipe as _equipe
+    if not _equipe.caps_do_papel(request.session.get("papel", "dono"))["financeiro"]:
+        return None, JSONResponse(
+            {"erro": "só o dono e o gestor anexam comprovante"}, status_code=403)
+    return conta, None
+
+
+@router.get("/painel/servicos/pagamentos/{orc_id}")
+def painel_servicos_pagamentos(request: Request, orc_id: int):
+    """O sinal e as parcelas do orçamento, com o que já foi pago e o que tem
+    comprovante. Aberto pra quem vende — inclusive o vendedor."""
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    pool = get_pool()
+    with pool.connection() as c:
+        _garantir_tabela(c)
+    d = vendas.pagamentos_do_orcamento(pool, conta[0], int(orc_id))
+    if not d:
+        return JSONResponse({"erro": "orçamento não encontrado"}, status_code=404)
+    from contas import equipe as _equipe
+    pode = _equipe.caps_do_papel(request.session.get("papel", "dono"))["financeiro"]
+    anexos = comprov.por_orcamento(pool, conta[0], int(orc_id))
+    linhas = []
+    for p in d["parcelas"]:
+        a = anexos.get(p["idx"])
+        linhas.append({
+            "idx": p["idx"], "rotulo": p["rotulo"], "valor": brl(p["valor_centavos"]),
+            "venc": ctr.data_br(p["venc"]) if p["venc"] else "",
+            "forma": p["forma"], "pago": p["pago"],
+            "pago_em": p["pago_em"].strftime("%d/%m/%Y") if p["pago_em"] else "",
+            "vence_hoje": p["vence_hoje"],
+            "comprovante_id": (a or {}).get("id"),
+            "comprovante_nome": (a or {}).get("nome") or "",
+        })
+    return JSONResponse({
+        "parcelas": linhas, "total": brl(d["total"]), "recebido": brl(d["recebido"]),
+        "falta": brl(d["falta"]),
+        # a tela só oferece o botão quando ele tem pra onde mandar o arquivo —
+        # botão que engole comprovante é pior que botão nenhum
+        "pode_anexar": bool(pode and comprov.configurado()),
+        "sem_storage": not comprov.configurado(),
+    })
+
+
+@router.post("/painel/servicos/comprovante")
+async def painel_servicos_comprovante_subir(
+        request: Request, orcamento_id: int = Form(...), parcela_idx: int = Form(...),
+        arquivo: UploadFile = File(...)):
+    """Anexa (ou substitui) o comprovante de uma parcela."""
+    conta, redir = _conta_financeiro(request)
+    if redir is not None:
+        return redir
+    pool = get_pool()
+    d = vendas.pagamentos_do_orcamento(pool, conta[0], int(orcamento_id))
+    if not d:
+        return JSONResponse({"erro": "orçamento não encontrado"}, status_code=404)
+    if not any(p["idx"] == int(parcela_idx) for p in d["parcelas"]):
+        # parcela inventada na URL não pode criar linha órfã: o comprovante ficaria
+        # invisível na tela e ninguém saberia que subiu.
+        return JSONResponse({"erro": "essa parcela não existe no plano"}, status_code=400)
+    conteudo = await arquivo.read()
+    try:
+        caminho = comprov.subir(conteudo, arquivo.content_type or "",
+                                conta_id=conta[0], orcamento_id=int(orcamento_id),
+                                parcela_idx=int(parcela_idx))
+    except ValueError as e:
+        return JSONResponse({"erro": str(e)}, status_code=400)
+    membro_id, _papel = _ator(request)
+    r = comprov.registrar(pool, conta[0], int(orcamento_id), int(parcela_idx),
+                          caminho=caminho, nome=arquivo.filename or "",
+                          tipo=arquivo.content_type or "", bytes_=len(conteudo),
+                          por=str(membro_id or "dono"))
+    return JSONResponse({"ok": True, "id": r["id"], "trocou": r["trocou"]})
+
+
+@router.get("/painel/servicos/comprovante/{comprovante_id}")
+def painel_servicos_comprovante_ver(request: Request, comprovante_id: int):
+    """Entrega o arquivo. É ESTA ROTA que faz o bucket poder ser privado.
+
+    O `conta_id` no WHERE é o que impede uma empresa de ler o comprovante de outra
+    trocando o número na URL. E vai sem cache: documento de dinheiro não fica
+    guardado no navegador de quem usou o painel num computador emprestado."""
+    conta, redir = _conta_servico(request)
+    if redir is not None:
+        return JSONResponse({"erro": "nao autorizado"}, status_code=403)
+    d = comprov.obter(get_pool(), conta[0], int(comprovante_id))
+    if not d:
+        return JSONResponse({"erro": "não encontrado"}, status_code=404)
+    try:
+        conteudo, tipo = comprov.ler(d["caminho"])
+    except ValueError as e:
+        return JSONResponse({"erro": str(e)}, status_code=502)
+    nome = (d["nome"] or "comprovante").replace('"', "")
+    return Response(conteudo, media_type=d["tipo"] or tipo, headers={
+        "Content-Disposition": f'inline; filename="{nome}"',
+        "Cache-Control": "no-store",
+    })
 
 
 class MarcarDataIn(BaseModel):
@@ -1285,6 +1707,65 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
 .oc-ic{background:var(--bg); border:1px solid var(--borda); color:var(--txt-mut); cursor:pointer; font-size:.85rem; width:30px; height:30px; padding:0; border-radius:8px; display:inline-flex; align-items:center; justify-content:center; transition:border-color .15s,color .15s,background .15s}
 .oc-ic:hover{color:var(--txt); border-color:var(--verde); background:var(--card)}
 .oc-del:hover{color:#e0857a; border-color:#5c2a27}
+/* mandar por e-mail: destacado do 🔗 e do 📄 porque é o único dos três que AGE —
+   os outros dois preparam, este manda. */
+.oc-ic.mail{color:var(--verde-claro); border-color:var(--neon-borda); background:var(--neon-fundo)}
+.oc-badge.enviado{background:var(--azul-fundo); color:var(--azul); border:1px solid var(--azul-borda);
+  text-transform:none; letter-spacing:0}
+
+/* A TELA DE ENVIO. Modal por cima do funil: o caminho de quem só quer mandar é
+   abrir e apertar Enviar — tudo já vem preenchido. */
+.env-fundo{position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:60;
+  display:none; align-items:flex-start; justify-content:center; padding:6vh 1rem 2rem; overflow:auto}
+.env-fundo.on{display:flex}
+.env-cx{background:var(--card); border:1px solid var(--borda); border-radius:14px;
+  padding:1rem 1.1rem; width:100%; max-width:520px; display:flex; flex-direction:column; gap:.7rem}
+.env-hd{display:flex; align-items:flex-start; justify-content:space-between; gap:1rem}
+.env-hd h3{margin:0; font-size:1.05rem}
+.env-x{background:none; border:0; color:var(--txt-mut); font-size:1rem; cursor:pointer; padding:.1rem .3rem}
+.env-campo{display:flex; flex-direction:column; gap:.25rem}
+.env-campo label{font-size:.72rem; font-weight:600; color:var(--txt-mut)}
+.env-campo input,.env-campo textarea{background:var(--card-2); border:1px solid var(--borda);
+  border-radius:9px; padding:.5rem .6rem; font-size:.9rem; color:var(--txt); font-family:inherit; width:100%}
+.env-campo textarea{min-height:6rem; line-height:1.5; resize:vertical}
+.env-campo input:focus,.env-campo textarea:focus{outline:0; border-color:var(--verde)}
+.env-de{display:flex; gap:.5rem; align-items:flex-start; font-size:.78rem; color:var(--txt-mut);
+  background:var(--card-2); border:1px solid var(--borda); border-radius:9px; padding:.5rem .6rem}
+.env-de b{color:var(--txt)}
+.env-acoes{display:flex; align-items:center; gap:.5rem; flex-wrap:wrap}
+.env-hist{margin-left:auto; font-size:.72rem; color:var(--txt-mut); text-align:right}
+.env-msg{font-size:.84rem; line-height:1.5; border-radius:9px; padding:.55rem .7rem; display:none}
+.env-msg.on{display:block}
+.env-msg.amb{background:var(--ambar-fundo); border:1px solid var(--ambar-borda); color:var(--amar)}
+.env-msg.cor{background:var(--coral-fundo); border:1px solid var(--coral-borda); color:var(--verm)}
+.env-msg.ok{background:var(--neon-fundo); border:1px solid var(--neon-borda); color:var(--verde-claro)}
+
+/* PAGAMENTOS. Mesma caixa do envio — o dono já sabe como ela abre e fecha. */
+.oc-ic.pgto{color:var(--azul); border-color:var(--azul-borda); background:var(--azul-fundo)}
+.oc-badge.pgto{background:var(--azul-fundo); color:var(--azul); border:1px solid var(--azul-borda);
+  text-transform:none; letter-spacing:0}
+.oc-badge.pgto.falta{background:var(--ambar-fundo); color:var(--amar); border-color:var(--ambar-borda)}
+.pg-tot{display:flex; gap:1.1rem; flex-wrap:wrap; font-size:.8rem; color:var(--txt-mut);
+  border-bottom:1px solid var(--borda); padding-bottom:.55rem}
+.pg-tot b{color:var(--txt); font-variant-numeric:tabular-nums}
+.pg-tot .ok b{color:var(--verde-claro)}
+.pg-tot .fl b{color:var(--amar)}
+.pl{display:grid; grid-template-columns:3px 1fr auto auto; gap:.7rem; align-items:center;
+  padding:.5rem 0; border-top:1px dashed var(--borda)}
+.pl:first-of-type{border-top:0}
+.pl .bar{align-self:stretch; min-height:2rem; border-radius:3px; background:var(--borda)}
+.pl.paga .bar{background:var(--verde)}
+.pl.hoje .bar{background:var(--ambar)}
+.pl .tt{font-size:.85rem; font-weight:600}
+.pl .mt{font-size:.71rem; color:var(--txt-mut)}
+.pl .vl{font-size:.83rem; font-weight:700; font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap}
+.pl .ac{white-space:nowrap}
+.pmini{font-size:.7rem; font-weight:600; border-radius:7px; padding:.24rem .5rem; cursor:pointer;
+  border:1px solid var(--borda); color:var(--txt-mut); background:transparent; font-family:inherit;
+  width:auto; margin:0; text-decoration:none; display:inline-block}
+.pmini.up{border-color:var(--azul-borda); color:var(--azul); background:var(--azul-fundo)}
+.pmini.ver{border-color:var(--neon-borda); color:var(--verde-claro); background:var(--neon-fundo)}
+.pmini:disabled{opacity:.5; cursor:default}
 .oc-svcform{background:var(--bg); border:1px solid var(--borda); border-radius:10px; padding:.8rem; margin-top:.7rem}
 .oc-empty{border:1px dashed var(--borda); border-radius:12px; padding:1.4rem; text-align:center; margin-top:.6rem}
 .oc-tog{width:42px; height:24px; border-radius:99px; border:none; cursor:pointer; position:relative; background:#2a3550; flex:none}
@@ -1723,6 +2204,47 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   <div id="oc-hist-box"><p class="mut">Carregando...</p></div>
 </div>
 
+</div>
+
+{# A TELA DE ENVIO. Nasce vazia e é preenchida pelo servidor ao abrir — o assunto,
+   a mensagem e o e-mail do cliente já vêm prontos, e por qual caixa vai sair é
+   dito ANTES de apertar. Fora do .oc-wrap pra o fundo escuro cobrir a página. #}
+<div class="env-fundo" id="env-fundo" role="dialog" aria-modal="true" aria-labelledby="env-tt">
+  <div class="env-cx">
+    <div class="env-hd">
+      <h3 id="env-tt">Mandar por e-mail</h3>
+      <button type="button" class="env-x" id="env-x" aria-label="Fechar">✕</button>
+    </div>
+    <div class="env-msg" id="env-msg"></div>
+    <div class="env-campo"><label for="env-para">Para</label>
+      <input id="env-para" type="email" inputmode="email" autocomplete="off" placeholder="email@do-cliente.com"></div>
+    <div class="env-campo"><label for="env-assunto">Assunto</label>
+      <input id="env-assunto" type="text"></div>
+    <div class="env-campo"><label for="env-texto">Mensagem</label>
+      <textarea id="env-texto"></textarea></div>
+    <div class="env-de" id="env-de"></div>
+    <div class="env-acoes">
+      <button type="button" class="oc-btn oc-btn-g" style="width:auto;margin:0" id="env-enviar">Enviar</button>
+      <button type="button" class="oc-pill" id="env-cancelar">Cancelar</button>
+      <span class="env-hist" id="env-hist"></span>
+    </div>
+  </div>
+</div>
+
+{# PAGAMENTOS. Reusa a caixa do envio (.env-fundo/.env-cx): a mesma forma de abrir
+   e fechar, o mesmo Esc, o mesmo clique no fundo. Duas caixas com comportamentos
+   diferentes seriam duas coisas pra aprender. #}
+<div class="env-fundo" id="pg-fundo" role="dialog" aria-modal="true" aria-labelledby="pg-tt">
+  <div class="env-cx">
+    <div class="env-hd">
+      <h3 id="pg-tt">Pagamentos</h3>
+      <button type="button" class="env-x" id="pg-x" aria-label="Fechar">✕</button>
+    </div>
+    <div class="env-msg" id="pg-msg"></div>
+    <div class="pg-tot" id="pg-tot"></div>
+    <div id="pg-lista"><p class="mut" style="font-size:.85rem">Carregando...</p></div>
+    <input type="file" id="pg-arquivo" accept="application/pdf,image/*" style="display:none">
+  </div>
 </div>
 
 <script>window.SERVICO_AVULSO = {{ 'true' if servico_avulso else 'false' }};</script>
@@ -2474,6 +2996,10 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
     if(busca)busca.style.display='none';
     var linkN2=document.getElementById('cli-novo-link'); if(linkN2)linkN2.style.display='none';
   }
+  /* De qual lead é esta proposta. Vazio = proposta sem vínculo, que continua
+     permitida — é o que o link "cadastrar um cliente novo, sem vínculo com lead"
+     oferece de propósito. */
+  var LEAD_ID=(typeof EDIT_LEAD_ID!=='undefined'?EDIT_LEAD_ID:null);
   var cliBusca=document.getElementById('cli-busca'), cliDrop=document.getElementById('cli-drop');
   if(cliBusca){
     var cliTimer=null;
@@ -2508,6 +3034,10 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       setv('oc-cargo',l.cargo); setv('oc-socio',l.socio); setv('oc-whats',l.whatsapp);
       setv('oc-tel',l.telefone); setv('oc-email',l.email); setv('oc-site',l.site);
       setv('oc-cidade',l.cidade); setv('oc-uf',l.uf); setv('oc-segmento',l.segmento);
+      /* O ID DO LEAD ERA JOGADO FORA AQUI. A tela copiava nome, telefone e e-mail e
+         esquecia de QUEM era — e sem isso a proposta nasce solta, o gatilho
+         "orçamento enviado" não acha card nenhum pra mover, e alguém arrasta na mão. */
+      LEAD_ID=l.id||null;
       cliBusca.value=''; cliDrop.style.display='none'; cliDrop.innerHTML='';
       atualizarChip();
     });
@@ -2528,6 +3058,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
   if(cliNovoLink)cliNovoLink.addEventListener('click',function(e){
     e.preventDefault();
     ['oc-empresa','oc-contato','oc-cnpj','oc-segmento','oc-whats','oc-email','oc-tel','oc-cidade','oc-uf','oc-site','oc-cargo','oc-socio'].forEach(function(id){setv(id,'');});
+    LEAD_ID=null;   /* cliente novo: não herda o vínculo de quem estava selecionado */
     aplicaTipoCliente('pj');
     document.getElementById('cli-form-full').style.display='block';
     document.getElementById('cli-chip').style.display='none';
@@ -2551,7 +3082,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
               desc_val:num(r.querySelector('.oc-desc'))};
     });
     var escEl=document.getElementById('oc-escopo-out');
-    return {id:EDIT_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',telefone:document.getElementById('oc-tel').value||'',cidade:document.getElementById('oc-cidade').value||'',uf:document.getElementById('oc-uf').value||'',site:document.getElementById('oc-site').value||'',cargo:document.getElementById('oc-cargo').value||'',socio:document.getElementById('oc-socio').value||'',endereco:(document.getElementById('oc-endereco')||{}).value||'',cep:(document.getElementById('oc-cep')||{}).value||'',modulos:sel.map(function(r){return r.getAttribute('data-id');}),itens:itens,evento:coletarEvento(),parcelas:(SERVICO_AVULSO?coletarParcelas():[]),escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setupBruto),mensal:Math.round(c.mensalBruto),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods,desconto_tipo:descTipoTot(),desconto_pct:(descTipoTot()==='pct'?num(document.getElementById('oc-desconto')):0),desconto_valor:(descTipoTot()==='valor'?num(document.getElementById('oc-desconto')):0)};
+    return {id:EDIT_ID,lead_id:LEAD_ID,cliente:document.getElementById('oc-contato').value||'',empresa:document.getElementById('oc-empresa').value||'',cnpj:document.getElementById('oc-cnpj').value||'',segmento:document.getElementById('oc-segmento').value||'',whatsapp:document.getElementById('oc-whats').value||'',email:document.getElementById('oc-email').value||'',telefone:document.getElementById('oc-tel').value||'',cidade:document.getElementById('oc-cidade').value||'',uf:document.getElementById('oc-uf').value||'',site:document.getElementById('oc-site').value||'',cargo:document.getElementById('oc-cargo').value||'',socio:document.getElementById('oc-socio').value||'',endereco:(document.getElementById('oc-endereco')||{}).value||'',cep:(document.getElementById('oc-cep')||{}).value||'',modulos:sel.map(function(r){return r.getAttribute('data-id');}),itens:itens,evento:coletarEvento(),parcelas:(SERVICO_AVULSO?coletarParcelas():[]),escopo:(escEl.getAttribute('data-escopo')||''),setup:Math.round(c.setupBruto),mensal:Math.round(c.mensalBruto),primeiro_ano:Math.round(c.ano1),n_modulos:c.mods,desconto_tipo:descTipoTot(),desconto_pct:(descTipoTot()==='pct'?num(document.getElementById('oc-desconto')):0),desconto_valor:(descTipoTot()==='valor'?num(document.getElementById('oc-desconto')):0)};
   }
   function salvarProposta(cb){
     fetch('/painel/servicos/salvar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(coletarBody())})
@@ -2644,7 +3175,8 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       var bn=document.getElementById('oc-editando');
       bn.style.display='flex';
       var aviso=(d.status==='aprovada')?' · ⚠ editar vai pedir nova aprovação do cliente':'';
-      bn.querySelector('.t').textContent='Editando proposta #'+d.id+' · '+d.status+aviso+' — salve pra atualizar o link do cliente.';
+      var quando=d.gerado_em?(' · gerada em '+d.gerado_em):'';
+      bn.querySelector('.t').textContent='Editando proposta #'+d.id+' · '+d.status+quando+aviso+' — salve pra atualizar o link do cliente.';
       if(SERVICO_AVULSO)atualizarChip();
       pinta();
       window.scrollTo({top:0,behavior:'smooth'});
@@ -2684,6 +3216,12 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
           alert('Sinal registrado, mas não consegui firmar o compromisso na agenda. Confira a data por lá.');
         }
         carregarHist();
+        // O MOMENTO EM QUE O COMPROVANTE ESTÁ NA MÃO. O Pix acabou de cair e o
+        // print está no celular — abrir a tela agora é o que evita o comprovante
+        // que ninguém anexa e vira pendência âmbar semana que vem.
+        abrirPagamentos(id,nome);
+        pgMsg('Sinal confirmado. Se tiver o comprovante aí, anexa agora — '
+             +'depois vira caça ao print.','ok');
       })
       .catch(function(){alert('Erro de conexão.'); btn.disabled=false; btn.textContent='Sinal recebido';});
   }
@@ -2700,6 +3238,210 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
       })
       .catch(function(){alert('Erro de conexão.'); btn.disabled=false; btn.textContent=t;});
   }
+  // ---------------------------------------------- mandar a proposta por e-mail
+  //
+  // O funil sabia gerar o link e abrir o PDF; mandar era por fora, na mão. A tela
+  // abre PREENCHIDA — quem só quer mandar abre e aperta Enviar. Por qual caixa vai
+  // sair é dito antes, porque o mesmo botão se comporta diferente na empresa que
+  // tem caixa configurada e na que não tem (ver finance/proposta_email).
+  var ENV_ID = null, ENV_LINK = '';
+  function envMsg(txt, cls){
+    var el=document.getElementById('env-msg');
+    el.className='env-msg'+(txt?(' on '+(cls||'amb')):'');
+    el.innerHTML=txt||'';
+  }
+  function envFechar(){
+    document.getElementById('env-fundo').classList.remove('on');
+    ENV_ID=null; ENV_LINK='';
+  }
+  function abrirEnvio(id){
+    ENV_ID=id;
+    var fundo=document.getElementById('env-fundo');
+    envMsg('');
+    document.getElementById('env-hist').textContent='';
+    document.getElementById('env-de').textContent='Carregando...';
+    ['env-para','env-assunto','env-texto'].forEach(function(k){
+      document.getElementById(k).value='';});
+    fundo.classList.add('on');
+    fetch('/painel/servicos/email/'+id)
+      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+      .then(function(res){
+        if(!res.ok){envMsg(esc((res.d&&res.d.erro)||'Não consegui abrir.'),'cor'); return;}
+        var d=res.d;
+        ENV_LINK=d.link||'';
+        document.getElementById('env-tt').textContent='Mandar '+esc(d.assunto||'a proposta');
+        document.getElementById('env-para').value=d.para||'';
+        document.getElementById('env-assunto').value=d.assunto||'';
+        document.getElementById('env-texto').value=d.mensagem||'';
+        var rem=d.remetente||{};
+        var de=document.getElementById('env-de');
+        if(rem.caixa==='própria'){
+          de.innerHTML='<span>📮</span><span>Sai de <b>'+esc(d.empresa)+' &lt;'+esc(rem.endereco)+'&gt;</b>'
+            +'<span style="display:block;opacity:.85;margin-top:.15rem">A resposta do cliente cai nessa mesma caixa.</span></span>';
+        } else {
+          de.innerHTML='<span>📮</span><span>Sai pelo Zaq, assinado como <b>'+esc(d.empresa)+'</b>'
+            +'<span style="display:block;opacity:.85;margin-top:.15rem">'
+            +(rem.reply_to?('A resposta volta pra <b>'+esc(rem.reply_to)+'</b>. '):'')
+            +'Pra sair da sua própria caixa, configure em Canais → E-mail.</span></span>';
+        }
+        var n=(d.envios||[]).filter(function(e){return e.ok;});
+        document.getElementById('env-hist').textContent = n.length
+          ? ('enviado '+n.length+'× · último '+n[0].quando) : '';
+        // sem e-mail do cliente o campo abre focado: é o único que falta preencher
+        if(!d.para){
+          envMsg('Este orçamento não tem o e-mail do cliente. <span style="opacity:.85">'
+                +'Escreva aqui e ele fica salvo no orçamento — da próxima vez já vem preenchido.</span>','amb');
+          document.getElementById('env-para').focus();
+        }
+      })
+      .catch(function(){envMsg('Erro de conexão.','cor');});
+  }
+  function enviarEmail(){
+    if(!ENV_ID) return;
+    var b=document.getElementById('env-enviar'), t=b.textContent;
+    b.disabled=true; b.textContent='Enviando...';
+    fetch('/painel/servicos/enviar-email',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id:ENV_ID,
+        para:document.getElementById('env-para').value,
+        assunto:document.getElementById('env-assunto').value,
+        mensagem:document.getElementById('env-texto').value})})
+      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+      .then(function(res){
+        b.disabled=false; b.textContent=t;
+        if(!res.ok){
+          // O LINK VAI JUNTO DO ERRO. O vendedor tem um cliente esperando: mandar
+          // pelo WhatsApp resolve o dia dele enquanto a caixa se conserta.
+          var extra=(res.d&&res.d.link)
+            ? '<span style="display:block;opacity:.9;margin-top:.3rem">O link continua valendo — '
+              +'<a href="#" id="env-copiar" style="color:inherit;text-decoration:underline">copiar</a>'
+              +' e mandar pelo WhatsApp.</span>' : '';
+          envMsg(esc((res.d&&res.d.erro)||'Não consegui enviar.')+extra,'cor');
+          var cp=document.getElementById('env-copiar');
+          if(cp) cp.addEventListener('click',function(ev){
+            ev.preventDefault(); navigator.clipboard.writeText(ENV_LINK); cp.textContent='copiado ✓';});
+          return;
+        }
+        envMsg('✓ Enviado para '+esc(res.d.para||'')+'.','ok');
+        carregarHist();
+        setTimeout(envFechar, 1400);
+      })
+      .catch(function(){b.disabled=false; b.textContent=t; envMsg('Erro de conexão.','cor');});
+  }
+  document.getElementById('env-enviar').addEventListener('click',enviarEmail);
+  document.getElementById('env-cancelar').addEventListener('click',envFechar);
+  document.getElementById('env-x').addEventListener('click',envFechar);
+  document.getElementById('env-fundo').addEventListener('click',function(ev){
+    if(ev.target===this) envFechar();});
+  document.addEventListener('keydown',function(ev){
+    if(ev.key==='Escape' && ENV_ID) envFechar();});
+
+  // ------------------------------------------------ pagamentos e comprovantes
+  //
+  // O comprovante é da PARCELA. Um botão só na linha não saberia de qual —
+  // então o 📎 abre a lista, e o upload é por linha.
+  //
+  // O vendedor ABRE e VÊ (é ele que cobra o cliente); anexar é do dono e do
+  // gestor. Quem decide é o servidor — `pode_anexar` aqui só evita oferecer um
+  // botão que vai voltar 403.
+  var PG_ID=null, PG_IDX=null;
+  function pgMsg(txt, cls){
+    var el=document.getElementById('pg-msg');
+    el.className='env-msg'+(txt?(' on '+(cls||'amb')):'');
+    el.innerHTML=txt||'';
+  }
+  function pgFechar(){
+    document.getElementById('pg-fundo').classList.remove('on');
+    PG_ID=null; PG_IDX=null;
+  }
+  function abrirPagamentos(id,nome){
+    PG_ID=id;
+    pgMsg('');
+    document.getElementById('pg-tt').textContent='Pagamentos'+(nome?(' · '+nome):'');
+    document.getElementById('pg-tot').innerHTML='';
+    document.getElementById('pg-lista').innerHTML='<p class="mut" style="font-size:.85rem">Carregando...</p>';
+    document.getElementById('pg-fundo').classList.add('on');
+    pgCarregar();
+  }
+  function pgCarregar(){
+    fetch('/painel/servicos/pagamentos/'+PG_ID)
+      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+      .then(function(res){
+        if(!res.ok){pgMsg(esc((res.d&&res.d.erro)||'Não consegui abrir.'),'cor'); return;}
+        var d=res.d;
+        document.getElementById('pg-tot').innerHTML=
+          '<span class="ok">Recebido <b>'+esc(d.recebido)+'</b></span>'
+         +'<span class="fl">Falta <b>'+esc(d.falta)+'</b></span>'
+         +'<span>Total <b>'+esc(d.total)+'</b></span>';
+        var box=document.getElementById('pg-lista');
+        box.innerHTML='';
+        (d.parcelas||[]).forEach(function(p){
+          var el=document.createElement('div');
+          el.className='pl'+(p.pago?' paga':(p.vence_hoje?' hoje':''));
+          var quando = p.pago ? ('pago em '+esc(p.pago_em||'—')) :
+                       (p.venc?('vence '+esc(p.venc)):'sem vencimento');
+          var falta = p.pago && !p.comprovante_id;
+          var meta = quando + (p.forma?(' · '+esc(p.forma)):'')
+                   + (falta?' · <b style="color:var(--amar)">sem comprovante</b>':'');
+          el.innerHTML='<div class="bar"></div>'
+            +'<div><div class="tt">'+esc(p.rotulo)+'</div><div class="mt">'+meta+'</div></div>'
+            +'<div class="vl">'+esc(p.valor)+'</div>';
+          var ac=document.createElement('div'); ac.className='ac';
+          if(p.comprovante_id){
+            var a=document.createElement('a'); a.className='pmini ver';
+            a.href='/painel/servicos/comprovante/'+p.comprovante_id;
+            a.target='_blank'; a.rel='noopener'; a.textContent='📎 ver';
+            a.title=p.comprovante_nome||'Abrir o comprovante';
+            ac.appendChild(a);
+          }
+          if(d.pode_anexar){
+            var b=document.createElement('button');
+            b.className='pmini'+(p.comprovante_id?'':' up');
+            b.textContent=p.comprovante_id?'trocar':'📎 anexar';
+            b.addEventListener('click',function(){pgEscolher(p.idx);});
+            ac.appendChild(b);
+          }
+          el.appendChild(ac);
+          box.appendChild(el);
+        });
+        if(!(d.parcelas||[]).length){
+          box.innerHTML='<p class="mut" style="font-size:.85rem">Este orçamento não tem plano de pagamento.</p>';
+        }
+        if(d.sem_storage){
+          pgMsg('O guardador de arquivos não está configurado nesta instalação, '
+               +'então não dá pra anexar comprovante ainda.','amb');
+        }
+      })
+      .catch(function(){pgMsg('Erro de conexão.','cor');});
+  }
+  function pgEscolher(idx){
+    PG_IDX=idx;
+    var inp=document.getElementById('pg-arquivo');
+    inp.value='';            // escolher o MESMO arquivo de novo tem que disparar
+    inp.click();
+  }
+  document.getElementById('pg-arquivo').addEventListener('change',function(){
+    var f=this.files&&this.files[0];
+    if(!f||PG_ID===null||PG_IDX===null) return;
+    pgMsg('Enviando '+esc(f.name)+'...','amb');
+    var fd=new FormData();
+    fd.append('orcamento_id',PG_ID); fd.append('parcela_idx',PG_IDX); fd.append('arquivo',f);
+    fetch('/painel/servicos/comprovante',{method:'POST',body:fd})
+      .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+      .then(function(res){
+        if(!res.ok){pgMsg(esc((res.d&&res.d.erro)||'Não consegui anexar.'),'cor'); return;}
+        pgMsg('✓ Comprovante anexado.','ok');
+        pgCarregar();       // a linha vira "ver" sozinha
+        carregarHist();     // e o selo do funil acompanha
+      })
+      .catch(function(){pgMsg('Erro de conexão.','cor');});
+  });
+  document.getElementById('pg-x').addEventListener('click',pgFechar);
+  document.getElementById('pg-fundo').addEventListener('click',function(ev){
+    if(ev.target===this) pgFechar();});
+  document.addEventListener('keydown',function(ev){
+    if(ev.key==='Escape' && PG_ID!==null) pgFechar();});
+
   // Apagar proposta do funil. Confirma sempre e nomeia o cliente na pergunta: a
   // lista é densa e o 🗑 fica ao lado do 📄, então "tem certeza?" sozinho não diz
   // qual das cinco linhas vai embora.
@@ -2726,7 +3468,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         left.style.cssText='display:flex;align-items:center;min-width:0;flex:1;cursor:pointer';
         left.title='Abrir proposta';
         var evento=it.modo==='evento';
-        var sub=[(it.numero?('nº '+it.numero):''),esc(it.data),
+        var sub=[(it.numero?('nº '+it.numero):''),(it.data?('gerada '+esc(it.data)):''),
                  it.mods+(evento?' itens':' módulos'),esc(evento?it.setup:it.total)]
                 .filter(Boolean).join(' · ');
         left.innerHTML='<div class="oc-av">'+esc(it.inicial)+'</div>'
@@ -2744,14 +3486,14 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         // (a pré-reserva correndo). "Firme", "nunca entrou" e "liberada" ficavam
         // com a mesma cara, e duas delas são problema. A redação inteira mora no
         // servidor (vendas.estado_da_data); aqui só se escolhe a cor e o botão.
-        if(it.data){
+        if(it.data_estado){
           var CLS={reservada:'firme',segurada:'pre',fora:'fora',liberada:'solta'};
           var dd=document.createElement('span');
-          dd.className='oc-badge '+(CLS[it.data.estado]||'pre');
-          dd.textContent=it.data.texto;
-          dd.title=it.data.dica||'';
+          dd.className='oc-badge '+(CLS[it.data_estado.estado]||'pre');
+          dd.textContent=it.data_estado.texto;
+          dd.title=it.data_estado.dica||'';
           right.appendChild(dd);
-          if(it.data.acao==='sinal'){
+          if(it.data_estado.acao==='sinal'){
             var bs=document.createElement('button'); bs.className='oc-fechar sinal';
             bs.textContent='Sinal recebido';
             bs.title='Confirma que o sinal caiu: a data vira compromisso firme na agenda '
@@ -2759,10 +3501,10 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
             bs.addEventListener('click',function(){sinalRecebido(it.id,it.cliente,bs);});
             right.appendChild(bs);
           }
-          else if(it.data.acao==='marcar'||it.data.acao==='resegurar'){
+          else if(it.data_estado.acao==='marcar'||it.data_estado.acao==='resegurar'){
             var bm=document.createElement('button'); bm.className='oc-fechar marcar';
-            bm.textContent=(it.data.acao==='marcar')?'Marcar agora':'Segurar de novo';
-            bm.title=it.data.dica||'';
+            bm.textContent=(it.data_estado.acao==='marcar')?'Marcar agora':'Segurar de novo';
+            bm.title=it.data_estado.dica||'';
             bm.addEventListener('click',function(){marcarData(it.id,bm);});
             right.appendChild(bm);
           }
@@ -2770,7 +3512,7 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
         // Sinal JÁ confirmado: fica dito na linha. Sem isso, depois que o botão some
         // não sobra nada na tela dizendo que aquele dinheiro entrou — e é ele que
         // explica por que o título dessa parcela não aparece em aberto.
-        if(!(it.data&&it.data.estado==='segurada') && it.sinal_pago && it.sinal){
+        if(!(it.data_estado&&it.data_estado.estado==='segurada') && it.sinal_pago && it.sinal){
           var sp=document.createElement('span'); sp.className='oc-badge sinalok';
           sp.textContent='Sinal recebido · '+esc(it.sinal);
           sp.title=fechado?'O título dessa parcela entrou como recebido no livro-caixa, '
@@ -2784,13 +3526,50 @@ _SERVICOS_TPL = r"""{% extends "base" %}{% block conteudo %}
           be.addEventListener('click',function(){abrir(it.id);});
           right.appendChild(be);
         }
+        // QUANTO JÁ ENTROU. O vendedor vê igual ao dono: cobrar o cliente sem saber
+        // o que já foi pago é ligar no escuro. O que ele não pode é dar baixa nem
+        // anexar — isso o servidor decide, não este selo.
+        if(it.pgto && it.pgto.pagas){
+          var pg=document.createElement('span');
+          var falta=it.pgto.sem_comprovante;
+          pg.className='oc-badge pgto'+(falta?' falta':'');
+          pg.textContent=it.pgto.pagas+' de '+it.pgto.total+' pagas'
+                       +(falta?(' · '+falta+' sem comprovante'):'');
+          pg.title=falta?'Parcela paga sem comprovante anexado.'
+                        :'Todas as parcelas pagas têm comprovante.';
+          right.appendChild(pg);
+        }
+        // JÁ FOI MANDADA? A pergunta que só se respondia abrindo o Gmail — e na
+        // dúvida se mandava de novo, pro mesmo cliente.
+        if(it.enviado_em){
+          var en=document.createElement('span'); en.className='oc-badge enviado';
+          en.textContent='✉️ enviado '+esc(it.enviado_em);
+          en.title='Último envio por e-mail que deu certo.';
+          right.appendChild(en);
+        }
         if(it.token){
           var lk=window.location.origin+'/proposta/'+it.token;
           var bl=document.createElement('button'); bl.className='oc-ic'; bl.title='Copiar link da proposta'; bl.textContent='🔗';
-          bl.addEventListener('click',function(){navigator.clipboard.writeText(lk); bl.textContent='✓'; setTimeout(function(){bl.textContent='🔗';},1200);});
+          bl.addEventListener('click',function(){navigator.clipboard.writeText(lk); bl.textContent='✓'; setTimeout(function(){bl.textContent='🔗';},1200);
+            /* anota que a proposta saiu por aqui — é o que faz o card do funil andar.
+               keepalive porque a pessoa costuma trocar de aba logo depois de copiar;
+               e o catch é mudo de propósito: o link JÁ foi copiado, e um erro de rede
+               não pode virar um alerta que sugere o contrário. */
+            fetch('/painel/servicos/proposta/'+it.id+'/link-copiado',{method:'POST',keepalive:true}).catch(function(){});});
           var bp=document.createElement('button'); bp.className='oc-ic'; bp.title='Abrir / baixar PDF da proposta'; bp.textContent='📄';
           bp.addEventListener('click',function(){window.open('/proposta/'+it.token,'_blank');});
-          right.appendChild(bl); right.appendChild(bp);
+          var bm=document.createElement('button'); bm.className='oc-ic mail'; bm.title='Mandar por e-mail'; bm.textContent='✉️';
+          bm.addEventListener('click',function(){abrirEnvio(it.id);});
+          right.appendChild(bl); right.appendChild(bp); right.appendChild(bm);
+        }
+        // PAGAMENTOS: o sinal e as parcelas, com o comprovante de cada uma. Só
+        // aparece quando há plano de pagamento — orçamento sem parcela não tem o
+        // que mostrar.
+        if(it.pgto && it.pgto.total){
+          var pb=document.createElement('button'); pb.className='oc-ic pgto';
+          pb.title='Pagamentos e comprovantes'; pb.textContent='📎';
+          pb.addEventListener('click',function(){abrirPagamentos(it.id,it.cliente);});
+          right.appendChild(pb);
         }
         // O CONTRATO é outro documento, com link próprio — e por isso tem botão
         // próprio aqui. Só aparece depois que ele nasce (na APROVAÇÃO da proposta,

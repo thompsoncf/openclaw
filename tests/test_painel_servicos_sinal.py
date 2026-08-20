@@ -107,7 +107,8 @@ def cliente(monkeypatch):
     with pool.connection() as c:
         for nome in ("098_agenda.sql", "099_agenda_tipo.sql", "130_evento_desfecho.sql",
                      "131_evento_link_online.sql", "160_agenda_pre_reserva.sql",
-                     "161_orcamento_sinal.sql", "163_evento_sinal_esperado.sql"):
+                     "161_orcamento_sinal.sql", "163_evento_sinal_esperado.sql",
+                     "179_agenda_tipo_e_hora_sugerida.sql"):
             c.execute((BASE / nome).read_text(encoding="utf-8"))
         c.execute("insert into contas (id, nome, nicho_id) values "
                   "(%s,'Buffet Teste',(select id from nichos where slug='eventos'))", (CONTA,))
@@ -117,6 +118,10 @@ def cliente(monkeypatch):
     monkeypatch.setattr(ps, "get_pool", lambda: pool)
     conta = [None] * 15
     conta[0], conta[11], conta[12], conta[14] = CONTA, True, True, True
+    # [2] = nome da conta. É ele que assina o e-mail da proposta quando a empresa
+    # ainda não preencheu razão social / nome fantasia — o cliente tem que ver o
+    # nome do fornecedor, não um remetente vazio.
+    conta[2] = "Buffet Teste"
     monkeypatch.setattr(ps, "conta_logada", lambda request: tuple(conta))
 
     app = FastAPI()
@@ -124,8 +129,8 @@ def cliente(monkeypatch):
     app.include_router(ps.router)
 
     @app.post("/_entrar")
-    async def _entrar(request: Request):
-        request.session["papel"] = "dono"
+    async def _entrar(request: Request, papel: str = "dono"):
+        request.session["papel"] = papel
         request.session["membro_id"] = None
         return {"ok": True}
 
@@ -740,7 +745,7 @@ def _orcamento_aprovado_sem_data_na_agenda(c, *, conta_id=CONTA, inicio="19:00")
 
 def test_a_linha_diz_que_a_data_esta_segurada(cliente):
     oid, _ = _orcamento_com_data_segurada(cliente)
-    d = _item(cliente, oid)["data"]
+    d = _item(cliente, oid)["data_estado"]
     assert d["estado"] == vendas.DATA_SEGURADA and d["acao"] == "sinal"
 
 
@@ -748,7 +753,7 @@ def test_a_linha_denuncia_a_data_que_ficou_fora_da_agenda(cliente):
     """Sem este campo a tela não tem como desenhar o selo — e foi assim que um
     orçamento aprovado ficou sem data sem ninguém perceber."""
     oid = _orcamento_aprovado_sem_data_na_agenda(cliente)
-    d = _item(cliente, oid)["data"]
+    d = _item(cliente, oid)["data_estado"]
     assert d["estado"] == vendas.DATA_FORA and d["acao"] == "marcar"
 
 
@@ -757,7 +762,7 @@ def test_confirmar_o_sinal_deixa_a_linha_dizendo_data_reservada(cliente):
     ficava muda, indistinguível de quem nunca entrou na agenda."""
     oid, _ = _orcamento_com_data_segurada(cliente)
     cliente.post("/painel/servicos/sinal-recebido", json={"id": oid})
-    assert _item(cliente, oid)["data"]["estado"] == vendas.DATA_RESERVADA
+    assert _item(cliente, oid)["data_estado"]["estado"] == vendas.DATA_RESERVADA
 
 
 def test_prazo_vencido_acende_o_selo_de_data_liberada(cliente):
@@ -769,7 +774,7 @@ def test_prazo_vencido_acende_o_selo_de_data_liberada(cliente):
                    "where id=%s", (ev_id,))
         cx.commit()
     ag.expirar_pre_reservas(cliente.pool, ag.agora_brt())
-    d = _item(cliente, oid)["data"]
+    d = _item(cliente, oid)["data_estado"]
     assert d["estado"] == vendas.DATA_LIBERADA and d["acao"] == "resegurar"
 
 
@@ -778,7 +783,7 @@ def test_proposta_ainda_nao_aprovada_nao_fala_de_data(cliente):
     with cliente.pool.connection() as cx:
         cx.execute("update orcamentos set status='enviado' where id=%s", (oid,))
         cx.commit()
-    assert _item(cliente, oid)["data"] is None
+    assert _item(cliente, oid)["data_estado"] is None
 
 
 # ------------------------------------------------------- o botão que conserta
@@ -791,7 +796,7 @@ def test_marcar_agora_poe_a_data_na_agenda(cliente):
         ev_id = cx.execute("select evento_agenda_id from orcamentos where id=%s",
                            (oid,)).fetchone()[0]
         assert ev_id == r.json()["evento_id"]
-    assert _item(cliente, oid)["data"]["estado"] in (vendas.DATA_RESERVADA,
+    assert _item(cliente, oid)["data_estado"]["estado"] in (vendas.DATA_RESERVADA,
                                                      vendas.DATA_SEGURADA)
 
 
@@ -849,3 +854,416 @@ def test_proposta_nao_aprovada_nao_marca_data(cliente):
         cx.execute("update orcamentos set status='enviado' where id=%s", (oid,))
         cx.commit()
     assert cliente.post("/painel/servicos/marcar-data", json={"id": oid}).status_code == 400
+
+
+# ================================== mandar a proposta por e-mail, pelas ROTAS
+#
+# O módulo puro está em tests/test_proposta_email.py. Aqui prova-se o que só a
+# rota responde: que a tela abre preenchida, que o envio registra o que
+# aconteceu (inclusive a falha), e que falhar devolve o link — o vendedor tem um
+# cliente esperando, e o link resolve o dia dele enquanto a caixa se conserta.
+
+@pytest.fixture()
+def correio(monkeypatch):
+    """Substitui as duas pontas de envio (caixa da empresa e SMTP do Zaq).
+
+    Troca as FUNÇÕES dos módulos reais, não o módulo em sys.modules: quem chama
+    faz `from finance import email_inbound`, que lê o atributo do pacote — já
+    resolvido na primeira importação. Trocar o sys.modules funcionava rodando o
+    arquivo sozinho e falhava na suíte inteira, que é o pior tipo de teste.
+
+    Devolve a lista do que SAIU, com `.estado` pendurado pra o caso ligar e
+    desligar cada caminho — é assim que se testa "a caixa da empresa falhou, caiu
+    pro Zaq" sem servidor de e-mail nenhum."""
+    from finance import email_inbound as ein
+    from finance import email_sender as es
+
+    class _Correio(list):
+        estado = {"caixa": "prime@gmail.com", "ok_empresa": True, "ok_zaq": True}
+
+    saidas = _Correio()
+    st = saidas.estado
+
+    def _remetente_conta(pool, conta_id, canal="email"):
+        return st["caixa"]
+
+    def _enviar_conta(pool, conta_id, destino, assunto, html, texto_alt=None,
+                      from_nome=None, **kw):
+        if not st["ok_empresa"]:
+            return False
+        saidas.append({"por": "empresa", "destino": destino, "assunto": assunto,
+                       "html": html, "from_nome": from_nome})
+        return True
+
+    def _enviar_email(destino, assunto, html, texto_alt=None, reply_to=None,
+                      from_nome=None, **kw):
+        if not st["ok_zaq"]:
+            return False
+        saidas.append({"por": "zaq", "destino": destino, "assunto": assunto,
+                       "html": html, "reply_to": reply_to, "from_nome": from_nome})
+        return True
+
+    monkeypatch.setattr(ein, "remetente_conta", _remetente_conta)
+    monkeypatch.setattr(ein, "enviar_conta", _enviar_conta)
+    monkeypatch.setattr(es, "enviar_email", _enviar_email)
+    monkeypatch.setattr(es, "remetente_configurado", lambda: "contato@zaq-ia.com")
+    return saidas
+
+
+def _orcamento_pra_mandar(c, *, email="", conta_id=CONTA, numero=14):
+    with c.pool.connection() as cx:
+        return cx.execute(
+            """insert into orcamentos (conta_id, cliente, empresa, status, criado_por,
+                 setup_centavos, primeiro_ano_centavos, modo, evento, numero, email, token)
+               values (%s,'Maria Helena','','enviado','',890000,890000,'evento',
+                       %s::jsonb,%s,%s,%s) returning id""",
+            (conta_id, json.dumps({"data": "2026-09-12", "tipo": "Casamento"}),
+             numero, email or None, f"tk{numero}{conta_id}")).fetchone()[0]
+
+
+def test_a_tela_de_envio_abre_preenchida(cliente, correio):
+    oid = _orcamento_pra_mandar(cliente, email="maria@x.com")
+    d = cliente.get(f"/painel/servicos/email/{oid}").json()
+    assert d["para"] == "maria@x.com"
+    assert d["assunto"].startswith("Orçamento nº 14")
+    assert d["mensagem"].startswith("Oi, Maria!")
+    assert d["link"].endswith("/proposta/tk147")
+    assert d["remetente"]["caixa"] == "própria"
+    assert d["envios"] == []
+
+
+def test_o_resumo_diz_quando_o_orcamento_foi_gerado(cliente, correio):
+    """Proposta tem validade na cabeça de quem recebe. O cliente que acha o e-mail
+    duas semanas depois precisa saber se aquilo ainda é de hoje."""
+    oid = _orcamento_pra_mandar(cliente, email="maria@x.com")
+    d = cliente.get(f"/painel/servicos/email/{oid}").json()
+    assert "gerado em" in d["resumo"]
+    assert "Casamento" in d["resumo"] and "12/09/2026" in d["resumo"]
+
+
+def test_manda_pela_caixa_da_empresa_e_registra(cliente, correio):
+    oid = _orcamento_pra_mandar(cliente, email="maria@x.com")
+    r = cliente.post("/painel/servicos/enviar-email", json={"id": oid})
+    assert r.status_code == 200, r.text
+    assert correio[0]["por"] == "empresa" and correio[0]["destino"] == "maria@x.com"
+    assert "gerado em" in correio[0]["html"]
+    # e a linha do funil passa a dizer que já foi
+    assert _item(cliente, oid)["enviado_em"]
+
+
+def test_o_email_digitado_fica_salvo_no_orcamento(cliente, correio):
+    """Sem isso a mesma pessoa redigitaria o endereço a cada envio, e o orçamento
+    seguiria sem o dado que o contrato depois vai precisar."""
+    oid = _orcamento_pra_mandar(cliente, email="")
+    assert cliente.get(f"/painel/servicos/email/{oid}").json()["para"] == ""
+    cliente.post("/painel/servicos/enviar-email",
+                 json={"id": oid, "para": "nova@x.com"})
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select email from orcamentos where id=%s",
+                          (oid,)).fetchone()[0] == "nova@x.com"
+    assert cliente.get(f"/painel/servicos/email/{oid}").json()["para"] == "nova@x.com"
+
+
+def test_e_mail_invalido_nao_chega_a_tentar_enviar(cliente, correio):
+    oid = _orcamento_pra_mandar(cliente)
+    r = cliente.post("/painel/servicos/enviar-email", json={"id": oid, "para": "maria"})
+    assert r.status_code == 400 and not correio
+
+
+def test_apertar_enviar_sem_tocar_em_nada_usa_o_email_do_orcamento(cliente, correio):
+    """O caminho de quem só quer mandar: abrir e apertar Enviar."""
+    oid = _orcamento_pra_mandar(cliente, email="maria@x.com")
+    assert cliente.post("/painel/servicos/enviar-email",
+                        json={"id": oid}).status_code == 200
+    assert correio[0]["destino"] == "maria@x.com"
+
+
+def test_o_email_sai_assinado_com_o_nome_da_empresa(cliente, correio):
+    """Quem recebe tem que ver a Prime, não o Zaq — mesmo quando quem manda é o
+    servidor do Zaq."""
+    oid = _orcamento_pra_mandar(cliente, email="maria@x.com")
+    cliente.post("/painel/servicos/enviar-email", json={"id": oid})
+    assert correio[0]["from_nome"] == "Buffet Teste"
+
+
+def test_falhar_devolve_o_LINK_junto_do_erro(cliente, correio):
+    """O vendedor tem um cliente esperando. Mandar pelo WhatsApp resolve o dia
+    dele enquanto a caixa se conserta."""
+    correio.estado.update(ok_empresa=False, ok_zaq=False)
+    oid = _orcamento_pra_mandar(cliente, email="maria@x.com")
+    r = cliente.post("/painel/servicos/enviar-email", json={"id": oid})
+    assert r.status_code == 502
+    d = r.json()
+    assert d["link"].endswith("/proposta/tk147") and d["erro"]
+
+
+def test_a_falha_tambem_fica_registrada(cliente, correio):
+    """"Nunca enviado" seria verdade e inútil. O que resolve é "tentou e falhou"."""
+    correio.estado.update(ok_empresa=False, ok_zaq=False)
+    oid = _orcamento_pra_mandar(cliente, email="maria@x.com")
+    cliente.post("/painel/servicos/enviar-email", json={"id": oid})
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select ok, destino from orcamento_envios where orcamento_id=%s",
+                          (oid,)).fetchone() == (False, "maria@x.com")
+    # e o selo do funil NÃO acende com uma tentativa que falhou
+    assert _item(cliente, oid)["enviado_em"] == ""
+
+
+def test_o_historico_conta_quantas_vezes_foi(cliente, correio):
+    oid = _orcamento_pra_mandar(cliente, email="maria@x.com")
+    cliente.post("/painel/servicos/enviar-email", json={"id": oid})
+    cliente.post("/painel/servicos/enviar-email", json={"id": oid})
+    envios = cliente.get(f"/painel/servicos/email/{oid}").json()["envios"]
+    assert len(envios) == 2 and all(e["ok"] for e in envios)
+
+
+def test_orcamento_de_outra_conta_nao_se_manda_daqui(cliente, correio):
+    oid = _orcamento_pra_mandar(cliente, email="x@x.com", conta_id=OUTRA, numero=99)
+    assert cliente.get(f"/painel/servicos/email/{oid}").status_code == 404
+    assert cliente.post("/painel/servicos/enviar-email",
+                        json={"id": oid}).status_code == 404
+    assert not correio
+
+
+def test_proposta_antiga_sem_token_ganha_um_na_hora(cliente, correio):
+    """O botão não pode depender de a pessoa ter carregado a lista antes — é ela
+    que preenchia o token das propostas de antes de ele existir."""
+    with cliente.pool.connection() as cx:
+        oid = cx.execute(
+            """insert into orcamentos (conta_id, cliente, status, criado_por, modo,
+                 setup_centavos, numero) values (%s,'Antiga','enviado','','evento',1000,77)
+               returning id""", (CONTA,)).fetchone()[0]
+        cx.commit()
+    d = cliente.get(f"/painel/servicos/email/{oid}").json()
+    assert "/proposta/" in d["link"] and not d["link"].endswith("/proposta/")
+
+
+# ================================ QUANDO a proposta foi gerada, onde quem vende vê
+#
+# A folha do CLIENTE sempre disse ("Emitido em"). Quem vende, não: no funil a data
+# era um "12/08" solto no meio de nº, itens e valor — sem ano e sem rótulo, ninguém
+# lia aquilo como "quando isto foi gerado" —, e no editor não aparecia em lugar
+# nenhum. E é quem vende que precisa saber se a proposta ainda está de pé.
+
+def test_a_linha_do_funil_diz_a_data_com_ANO(cliente):
+    """Sem o ano, um orçamento do ano passado passa por deste mês."""
+    oid = _orcamento_pra_mandar(cliente, numero=21)
+    with cliente.pool.connection() as cx:
+        cx.execute("update orcamentos set criado_em = '2025-11-18 10:00-03' where id=%s", (oid,))
+        cx.commit()
+    assert _item(cliente, oid)["data"] == "18/11/2025"
+
+
+def test_o_editor_tambem_diz_quando_foi_gerada(cliente):
+    oid = _orcamento_pra_mandar(cliente, numero=22)
+    with cliente.pool.connection() as cx:
+        cx.execute("update orcamentos set criado_em = '2026-08-12 09:00-03' where id=%s", (oid,))
+        cx.commit()
+    assert cliente.get(f"/painel/servicos/item/{oid}").json()["gerado_em"] == "12/08/2026"
+
+
+def test_a_data_de_geracao_tambem_vai_no_email(cliente, correio):
+    """O terceiro lugar: o cliente que acha o e-mail duas semanas depois precisa
+    saber se aquilo ainda é de hoje sem ter que perguntar."""
+    oid = _orcamento_pra_mandar(cliente, email="maria@x.com", numero=23)
+    with cliente.pool.connection() as cx:
+        cx.execute("update orcamentos set criado_em = '2026-08-12 09:00-03' where id=%s", (oid,))
+        cx.commit()
+    assert "gerado em 12/08/2026" in \
+        cliente.get(f"/painel/servicos/email/{oid}").json()["resumo"]
+
+
+def test_a_data_e_o_ESTADO_da_data_sao_duas_chaves_diferentes(cliente):
+    """A regressão que trouxe estes testes.
+
+    O selo do estado da data nasceu com a chave `data` — o mesmo nome da data de
+    geração, três linhas acima no mesmo dicionário. Python fica com a ÚLTIMA: a
+    data de geração sumiu da linha do funil no mesmo commit em que o selo apareceu,
+    e nenhum teste caiu, porque cada um olhava só a sua chave.
+
+    Este caso olha as DUAS de uma vez — é o que faltava."""
+    oid = _orcamento_pra_mandar(cliente, numero=24)
+    with cliente.pool.connection() as cx:
+        cx.execute("update orcamentos set criado_em = '2026-08-12 09:00-03', "
+                   "status='aprovada' where id=%s", (oid,))
+        cx.commit()
+    it = _item(cliente, oid)
+    assert it["data"] == "12/08/2026", "a data de geração sumiu da linha"
+    assert isinstance(it["data_estado"], dict), "o estado da data sumiu da linha"
+    assert it["data_estado"]["estado"] == vendas.DATA_FORA
+
+
+
+# ============================ comprovante de pagamento (sinal e parcelas), pelas ROTAS
+#
+# O módulo puro está em tests/test_comprovantes.py. Aqui prova-se o que só a rota
+# responde: a lista, os dois gates diferentes, e a porta única de leitura.
+#
+# OS GATES SÃO DIFERENTES DE PROPÓSITO:
+#   ver a lista e o arquivo   dono, gestor E VENDEDOR — é ele que cobra o cliente,
+#                             e cobrar sem saber o que já entrou é ligar no escuro
+#   anexar                    só dono e gestor. Papel de dinheiro é do financeiro.
+
+@pytest.fixture()
+def storage(monkeypatch):
+    """Supabase de mentira. Guarda o que subiu, em memória."""
+    from finance import comprovantes as cp
+    guardado = {}
+
+    def _subir(conteudo, content_type, *, conta_id, orcamento_id, parcela_idx):
+        cp.validar(conteudo, content_type)
+        caminho = f"comprovantes/{conta_id}/{orcamento_id}-{parcela_idx}"
+        guardado[caminho] = (conteudo, content_type)
+        return caminho
+
+    monkeypatch.setattr(cp, "configurado", lambda: True)
+    monkeypatch.setattr(cp, "subir", _subir)
+    monkeypatch.setattr(cp, "ler", lambda caminho: guardado[caminho])
+    monkeypatch.setattr(cp, "apagar", lambda caminho: guardado.pop(caminho, None))
+    return guardado
+
+
+def _com_parcelas(c, *, conta_id=CONTA, numero=31, sinal_pago=False):
+    """Orçamento de evento com sinal + 2 parcelas — o plano de verdade."""
+    parcelas = [{"valor_centavos": 267000, "venc": "2026-08-20", "forma": "Pix",
+                 "obs": "Sinal — confirma a reserva da data"},
+                {"valor_centavos": 311500, "venc": "2026-09-20", "forma": "Pix"},
+                {"valor_centavos": 311500, "venc": "2026-10-20", "forma": "Pix"}]
+    with c.pool.connection() as cx:
+        oid = cx.execute(
+            """insert into orcamentos (conta_id, cliente, status, criado_por,
+                 setup_centavos, primeiro_ano_centavos, modo, parcelas, numero,
+                 sinal_centavos, sinal_pago_em, token)
+               values (%s,'Maria','aprovada','',890000,890000,'evento',%s::jsonb,%s,
+                       267000, %s, %s) returning id""",
+            (conta_id, json.dumps(parcelas), numero,
+             "now()" and (None if not sinal_pago else "2026-08-14"),
+             f"tkp{numero}")).fetchone()[0]
+        cx.commit()
+    return oid
+
+
+def _pagamentos(c, oid):
+    return c.get(f"/painel/servicos/pagamentos/{oid}").json()
+
+
+def test_a_lista_traz_o_sinal_e_as_parcelas_com_o_que_falta(cliente, storage):
+    oid = _com_parcelas(cliente, sinal_pago=True)
+    d = _pagamentos(cliente, oid)
+    assert [p["rotulo"] for p in d["parcelas"]] == ["Sinal", "Parcela 1 de 2", "Parcela 2 de 2"]
+    assert d["recebido"] == "R$ 2.670,00" and d["falta"] == "R$ 6.230,00"
+    assert d["parcelas"][0]["pago"] is True and d["parcelas"][1]["pago"] is False
+
+
+def test_o_sinal_conta_como_pago_antes_de_existir_titulo(cliente, storage):
+    """Ele é confirmado ANTES de o contrato fechar, quando título nenhum existe.
+    Lendo só `titulos`, o sinal pago apareceria como em aberto."""
+    oid = _com_parcelas(cliente, numero=32, sinal_pago=True)
+    assert _pagamentos(cliente, oid)["parcelas"][0]["pago"] is True
+
+
+def test_anexar_e_depois_ver(cliente, storage):
+    oid = _com_parcelas(cliente, numero=33, sinal_pago=True)
+    r = cliente.post("/painel/servicos/comprovante",
+                     data={"orcamento_id": oid, "parcela_idx": 0},
+                     files={"arquivo": ("pix.pdf", b"%PDF-1.4", "application/pdf")})
+    assert r.status_code == 200, r.text
+    d = _pagamentos(cliente, oid)
+    cid = d["parcelas"][0]["comprovante_id"]
+    assert cid and d["parcelas"][0]["comprovante_nome"] == "pix.pdf"
+    ver = cliente.get(f"/painel/servicos/comprovante/{cid}")
+    assert ver.status_code == 200 and ver.content == b"%PDF-1.4"
+    # documento de dinheiro não fica guardado no navegador de um computador emprestado
+    assert ver.headers["cache-control"] == "no-store"
+
+
+def test_anexar_de_novo_SUBSTITUI(cliente, storage):
+    """Anexou o errado, anexa de novo. Histórico de comprovante trocado é arquivo
+    morto — ninguém audita a versão que estava errada."""
+    oid = _com_parcelas(cliente, numero=34, sinal_pago=True)
+    for corpo in (b"errado", b"certo"):
+        cliente.post("/painel/servicos/comprovante",
+                     data={"orcamento_id": oid, "parcela_idx": 0},
+                     files={"arquivo": ("p.pdf", corpo, "application/pdf")})
+    with cliente.pool.connection() as cx:
+        assert cx.execute("select count(*) from orcamento_comprovantes where orcamento_id=%s",
+                          (oid,)).fetchone()[0] == 1
+    cid = _pagamentos(cliente, oid)["parcelas"][0]["comprovante_id"]
+    assert cliente.get(f"/painel/servicos/comprovante/{cid}").content == b"certo"
+
+
+def test_parcela_inventada_na_url_nao_cria_linha_orfa(cliente, storage):
+    """O comprovante ficaria invisível na tela e ninguém saberia que subiu."""
+    oid = _com_parcelas(cliente, numero=35)
+    r = cliente.post("/painel/servicos/comprovante",
+                     data={"orcamento_id": oid, "parcela_idx": 99},
+                     files={"arquivo": ("p.pdf", b"x", "application/pdf")})
+    assert r.status_code == 400 and "não existe" in r.json()["erro"]
+
+
+def test_arquivo_que_nao_e_documento_e_recusado(cliente, storage):
+    oid = _com_parcelas(cliente, numero=36)
+    r = cliente.post("/painel/servicos/comprovante",
+                     data={"orcamento_id": oid, "parcela_idx": 0},
+                     files={"arquivo": ("planilha.xls", b"x", "application/vnd.ms-excel")})
+    assert r.status_code == 400 and "PDF ou imagem" in r.json()["erro"]
+
+
+# ------------------------------------------------------------------- os gates
+
+def test_o_VENDEDOR_ve_a_lista_porque_e_ele_que_cobra(cliente, storage):
+    oid = _com_parcelas(cliente, numero=37, sinal_pago=True)
+    cliente.post("/_entrar?papel=vendedor")
+    d = _pagamentos(cliente, oid)
+    assert d["parcelas"][0]["pago"] is True
+    assert d["pode_anexar"] is False, "o vendedor não anexa"
+
+
+def test_o_VENDEDOR_ve_o_arquivo_mas_nao_anexa(cliente, storage):
+    oid = _com_parcelas(cliente, numero=38, sinal_pago=True)
+    cliente.post("/painel/servicos/comprovante",
+                 data={"orcamento_id": oid, "parcela_idx": 0},
+                 files={"arquivo": ("p.pdf", b"%PDF", "application/pdf")})
+    cid = _pagamentos(cliente, oid)["parcelas"][0]["comprovante_id"]
+
+    cliente.post("/_entrar?papel=vendedor")
+    assert cliente.get(f"/painel/servicos/comprovante/{cid}").status_code == 200
+    r = cliente.post("/painel/servicos/comprovante",
+                     data={"orcamento_id": oid, "parcela_idx": 1},
+                     files={"arquivo": ("p.pdf", b"x", "application/pdf")})
+    assert r.status_code == 403, "o gate de anexar é do SERVIDOR, não da tela"
+
+
+def test_o_GESTOR_anexa(cliente, storage):
+    oid = _com_parcelas(cliente, numero=39, sinal_pago=True)
+    cliente.post("/_entrar?papel=gestor")
+    assert _pagamentos(cliente, oid)["pode_anexar"] is True
+    assert cliente.post("/painel/servicos/comprovante",
+                        data={"orcamento_id": oid, "parcela_idx": 0},
+                        files={"arquivo": ("p.pdf", b"%PDF", "application/pdf")}
+                        ).status_code == 200
+
+
+def test_comprovante_de_outra_conta_nao_se_le_trocando_o_numero(cliente, storage):
+    """O `conta_id` no WHERE é o que impede isso — e é a única coisa entre uma
+    empresa e o comprovante bancário da outra."""
+    oid = _com_parcelas(cliente, numero=40, sinal_pago=True)
+    cliente.post("/painel/servicos/comprovante",
+                 data={"orcamento_id": oid, "parcela_idx": 0},
+                 files={"arquivo": ("p.pdf", b"%PDF", "application/pdf")})
+    cid = _pagamentos(cliente, oid)["parcelas"][0]["comprovante_id"]
+    with cliente.pool.connection() as cx:
+        cx.execute("update orcamento_comprovantes set conta_id=%s where id=%s", (OUTRA, cid))
+        cx.commit()
+    assert cliente.get(f"/painel/servicos/comprovante/{cid}").status_code == 404
+
+
+def test_o_selo_do_funil_conta_o_que_falta(cliente, storage):
+    """"2 de 3 pagas · 1 sem comprovante". Sem parcela paga sem comprovante ele nem
+    aparece — a lição do aviso do contrato."""
+    oid = _com_parcelas(cliente, numero=41, sinal_pago=True)
+    assert _item(cliente, oid)["pgto"] == {"pagas": 1, "total": 3, "sem_comprovante": 1}
+    cliente.post("/painel/servicos/comprovante",
+                 data={"orcamento_id": oid, "parcela_idx": 0},
+                 files={"arquivo": ("p.pdf", b"%PDF", "application/pdf")})
+    assert _item(cliente, oid)["pgto"] == {"pagas": 1, "total": 3, "sem_comprovante": 0}

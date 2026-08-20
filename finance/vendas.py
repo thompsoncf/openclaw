@@ -146,6 +146,112 @@ def _itens_curtos(bruto, limite: int = 8) -> list[dict]:
     return out
 
 
+# ------------------------------------------------------- os PAGAMENTOS do orçamento
+#
+# Um orçamento não tem UM pagamento: tem o sinal e mais N parcelas. Até 19/08/2026
+# isso só se enxergava em dois lugares separados — o botão "Sinal recebido" no
+# funil e a lista de títulos no módulo Empresa —, e nenhum dos dois respondia a
+# pergunta que a empresa faz: "quanto desta festa já entrou?".
+#
+# ANTES DO CONTRATO FECHAR NÃO EXISTE TÍTULO. O plano é um jsonb, e o único
+# pagamento que pode ter acontecido é o sinal (`orcamentos.sinal_pago_em`). Depois
+# do fechamento cada parcela vira título, e é o título que manda — é nele que a
+# baixa acontece e é dele que sai o livro-caixa. Esta função lê os dois mundos e
+# devolve UMA lista, porque a tela não tem por que saber em qual deles está.
+
+
+def pagamentos_do_orcamento(pool, conta_id: int, orcamento_id: int) -> dict:
+    """{parcelas: [...], total, recebido, falta} do orçamento.
+
+    Cada parcela traz `idx` (o mesmo `parcela_idx` dos títulos e do comprovante),
+    rótulo, valor, vencimento, se está paga e quando."""
+    from datetime import date as _date
+    with pool.connection() as c:
+        r = c.execute("select parcelas, sinal_pago_em, coalesce(status,'') "
+                      "  from orcamentos where id=%s and conta_id=%s",
+                      (orcamento_id, conta_id)).fetchone()
+        if not r:
+            return {}
+        parcelas_cru, sinal_pago_em, _status = r
+        try:
+            titulos = {t[0]: {"pago": t[1] == "pago", "pago_em": t[2], "id": t[3]}
+                       for t in c.execute(
+                           """select parcela_idx, status, pago_em, id
+                                from titulos
+                               where conta_id=%s and orcamento_id=%s
+                                 and parcela_idx is not null
+                                 and status <> 'cancelado'""",
+                           (conta_id, orcamento_id)).fetchall()}
+        except Exception:  # noqa: BLE001 — conta sem o módulo financeiro
+            titulos = {}
+
+    itens = _parcelas(parcelas_cru)
+    i_sinal = indice_do_sinal(parcelas_cru)
+    n = len(itens)
+    n_normais = n - (1 if i_sinal is not None else 0)
+    saida, recebido, total = [], 0, 0
+    ordem = 0
+    hoje = _date.today()
+    for idx, p in enumerate(itens):
+        valor = int(p["valor_centavos"])
+        total += valor
+        eh_sinal = (idx == i_sinal)
+        if eh_sinal:
+            rotulo = "Sinal"
+        else:
+            ordem += 1
+            rotulo = f"Parcela {ordem} de {n_normais}" if n_normais > 1 else "Pagamento"
+        t = titulos.get(idx)
+        # o sinal tem caminho próprio: ele é confirmado ANTES de o contrato fechar,
+        # quando título nenhum existe ainda. Depois de fechar, o título manda — é
+        # nele que a baixa acontece e é dele que sai o livro-caixa.
+        pago = t["pago"] if t else (eh_sinal and bool(sinal_pago_em))
+        if not pago and eh_sinal and sinal_pago_em:
+            pago = True          # sinal confirmado antes de o título existir
+        quando = None
+        if t and t["pago"]:
+            quando = t["pago_em"]
+        elif pago and eh_sinal and sinal_pago_em:
+            quando = sinal_pago_em.date()
+        if pago:
+            recebido += valor
+        venc = p.get("venc")
+        saida.append({
+            "idx": idx, "rotulo": rotulo, "valor_centavos": valor,
+            "venc": venc, "forma": p.get("forma") or "", "obs": p.get("obs") or "",
+            "pago": pago, "pago_em": quando, "titulo_id": (t["id"] if t else None),
+            "vence_hoje": bool(not pago and venc and str(venc)[:10] == hoje.isoformat()),
+        })
+    return {"parcelas": saida, "total": total, "recebido": recebido,
+            "falta": max(0, total - recebido)}
+
+
+def resumo_pagamentos(parcelas, sinal_pago_em, titulos_pagos=(), com_comprovante=()) -> dict:
+    """{pagas, total, sem_comprovante} de UMA linha do funil.
+
+    Pura, e separada de `pagamentos_do_orcamento`, por causa do N+1: a lista do
+    funil traz até 50 orçamentos, e chamar a função completa por linha seriam 100
+    consultas. Quem chama busca os títulos e os comprovantes de TODAS as linhas de
+    uma vez e passa por aqui — dois SELECTs no total.
+
+    `sem_comprovante` conta só parcela PAGA. Cobrar comprovante do que ainda nem
+    venceu encheria a tela de âmbar que ninguém pode resolver — a mesma armadilha
+    do aviso do contrato."""
+    itens = _parcelas(parcelas)
+    if not itens:
+        return {"pagas": 0, "total": 0, "sem_comprovante": 0}
+    i_sinal = indice_do_sinal(parcelas)
+    pagos, faltando = 0, 0
+    for idx in range(len(itens)):
+        pago = idx in set(titulos_pagos) or (idx == i_sinal and bool(sinal_pago_em))
+        if not pago:
+            continue
+        pagos += 1
+        if idx not in set(com_comprovante):
+            faltando += 1
+    return {"pagas": pagos, "total": len(itens), "sem_comprovante": faltando}
+
+
 # ------------------------------------------------- o ESTADO DA DATA no funil
 #
 # POR QUE ISSO EXISTE. A data de um evento aprovado tem quatro estados, e até

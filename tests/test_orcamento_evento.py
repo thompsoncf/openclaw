@@ -96,6 +96,7 @@ def pool():
         # 162: o vínculo título↔parcela, que a baixa do sinal usa pra achar o título
         c.execute(_sql("162_titulo_parcela_do_orcamento.sql"))
         c.execute(_sql("163_evento_sinal_esperado.sql"))
+        c.execute(_sql("179_agenda_tipo_e_hora_sugerida.sql"))
         c.commit()
     yield p
     p.close()

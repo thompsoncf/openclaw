@@ -25,7 +25,8 @@ def pool():
                     "098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql",
                     "130_evento_desfecho.sql", "131_evento_link_online.sql", "132_convidado_canal_resposta.sql",
                     "139_agenda_mensagens_log.sql", "146_agenda_enviar_confirmacao.sql",
-                    "160_agenda_pre_reserva.sql", "163_evento_sinal_esperado.sql"):
+                    "160_agenda_pre_reserva.sql", "163_evento_sinal_esperado.sql",
+                    "179_agenda_tipo_e_hora_sugerida.sql"):
             c.execute((migr / nome).read_text(encoding="utf-8"))
         c.commit()
     yield p

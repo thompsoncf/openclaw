@@ -12,7 +12,10 @@ Tudo escopado por conta_id (multi-tenant sagrado).
 """
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timedelta, timezone
+
+_log = logging.getLogger(__name__)
 
 # Brasília: UTC-3 fixo (o Brasil não usa mais horário de verão).
 BRT = timezone(timedelta(hours=-3))
@@ -138,11 +141,17 @@ def _fmt_evento(row) -> dict:
             # compartilhada (gestor e vendedor também veem), é a primeira pergunta de
             # quem olha um compromisso que não marcou. A coluna sempre existiu (098);
             # só não era lida.
-            "membro_id": row[14] if len(row) > 14 else None}
+            "membro_id": row[14] if len(row) > 14 else None,
+            # nicho eventos (migração 179): que festa é, quanta gente, e se o
+            # horário é palpite do sistema esperando confirmação.
+            "tipo_evento": row[15] if len(row) > 15 else None,
+            "convidados": row[16] if len(row) > 16 else None,
+            "hora_sugerida": bool(row[17]) if len(row) > 17 else False}
 
 
 _COLS = ("id, titulo, inicio, fim, local, descricao, lembrete_min, criado_em, tipo, "
-        "desfecho, link_online, status, pre_reserva_ate, sinal_centavos, membro_id")
+        "desfecho, link_online, status, pre_reserva_ate, sinal_centavos, membro_id, "
+        "tipo_evento, convidados, hora_sugerida")
 
 # Data SEGURADA, ainda não vendida: o cliente aprovou o orçamento mas o sinal não
 # entrou. Fica de fora de tudo que trata compromisso como certo — lembrete, resumo
@@ -162,7 +171,11 @@ def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
                  link_online: str | None = None,
                  prospeccao_id: int | None = None,
                  pre_reserva_ate: datetime | None = None,
-                 sinal_centavos: int | None = None) -> dict:
+                 sinal_centavos: int | None = None,
+                 segurar: bool = False,
+                 tipo_evento: str | None = None,
+                 convidados: int | None = None,
+                 hora_sugerida: bool = False) -> dict:
     """prospeccao_id liga o evento a um lead (ex.: retorno de contato) — some da
     Agenda pro cliente, mas fica clicável a partir da ficha do lead (migração 136).
 
@@ -170,9 +183,19 @@ def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
     não vale como compromisso até o sinal ser confirmado, e some sozinha se o prazo
     vencer (ver `expirar_pre_reservas`).
 
+    `segurar` também nasce pré-reservado, mas SEM PRAZO CORRENDO. Existe porque
+    prazo e pré-reserva não são a mesma coisa: uma negociação de casamento pra daqui
+    a nove meses é data segurada e não tem prazo nenhum. Sem esta porta, a única
+    forma de segurar uma data era dar um prazo — e `expirar_pre_reservas` cancelaria
+    a negociação sozinha quando ele vencesse. Pôr prazo continua possível depois,
+    numa data específica, quando o dono quiser apertar o cliente.
+
     `sinal_centavos` é o valor que se está esperando pra firmar — só pra MOSTRAR na
     agenda. O dinheiro (título a receber, baixa) sai de `orcamentos.sinal_centavos`;
-    ver migração 163."""
+    ver migração 163.
+
+    `tipo_evento`, `convidados` e `hora_sugerida` são do nicho eventos (migração
+    179) — que festa é, quanta gente, e se a hora foi chutada pelo sistema."""
     tipo = tipo if tipo in TIPOS else "pessoal"
     # prospeccao_id só entra no INSERT quando informado — mantém compatível com
     # bancos/testes que ainda não rodaram a migração 136 (que criou a coluna).
@@ -185,9 +208,21 @@ def criar_evento(pool, conta_id: int, titulo: str, inicio: datetime, *,
     if pre_reserva_ate is not None:
         colunas += ", status, pre_reserva_ate"
         valores += [PRE_RESERVADO, pre_reserva_ate]
+    elif segurar:
+        colunas += ", status"
+        valores.append(PRE_RESERVADO)
     if sinal_centavos:
         colunas += ", sinal_centavos"
         valores.append(int(sinal_centavos))
+    if tipo_evento:
+        colunas += ", tipo_evento"
+        valores.append(tipo_evento.strip())
+    if convidados:
+        colunas += ", convidados"
+        valores.append(int(convidados))
+    if hora_sugerida:
+        colunas += ", hora_sugerida"
+        valores.append(True)
     with pool.connection() as c:
         row = c.execute(
             f"""insert into eventos_agenda ({colunas})
@@ -241,14 +276,20 @@ def listar_eventos(pool, conta_id: int, de: datetime, ate: datetime,
     return [_fmt_evento(r) for r in rows]
 
 
-def proximos(pool, conta_id: int, limite: int = 20) -> list[dict]:
+def proximos(pool, conta_id: int, limite: int = 20, tipos=None) -> list[dict]:
+    """O que vem por aí. `tipos` limita as categorias — é como a tela de quem vende
+    data separa VISITA de FESTA: a festa tem card próprio (`confirmadas`) e, sem o
+    filtro, ela ocuparia as oito linhas e a visita da semana não apareceria."""
+    where = "conta_id=%s and status='ativo' and inicio >= %s"
+    args = [conta_id, agora_brt() - timedelta(hours=2)]
+    if tipos:
+        where += " and tipo = any(%s)"
+        args.append(list(tipos))
+    args.append(limite)
     with pool.connection() as c:
         rows = c.execute(
             "select " + _COLS + " from eventos_agenda "
-            "where conta_id=%s and status='ativo' and inicio >= %s "
-            "order by inicio limit %s",
-            (conta_id, agora_brt() - timedelta(hours=2), limite),
-        ).fetchall()
+            f"where {where} order by inicio limit %s", args).fetchall()
     return [_fmt_evento(r) for r in rows]
 
 
@@ -539,6 +580,106 @@ def conflitos(pool, conta_id: int, inicio: datetime, fim: datetime | None,
             " order by inicio",
             (conta_id, list(_ATIVO_OU_PRE), ignorar_id, ignorar_id, fim, inicio)).fetchall()
     return [_fmt_evento(r) for r in rows]
+
+
+def choques_de_data(pool, conta_id: int, de: datetime | None = None) -> list[dict]:
+    """Dias que têm MAIS DE UM compromisso — no nicho eventos, isso já é o alerta.
+
+    Não é o mesmo que `conflitos()`, e a diferença não é detalhe. `conflitos()`
+    compara HORÁRIOS: dois compromissos só se chocam se um começa antes de o outro
+    acabar. Pra reunião isso está certo; pra quem aluga espaço, não. Uma locação às
+    17:00 e outra às 20:00 no mesmo sábado não se sobrepõem por hora nenhuma — e são
+    duas festas no mesmo salão.
+
+    Foi exatamente o caso que expôs isto: 10/07/2027 na Prime Eventos tem o Allef
+    fixado às 17:00 e a Márcia em negociação às 20:00. Pelo cálculo de horário
+    (17–18h contra 20–21h) não há choque nenhum, e o dia passaria limpo.
+
+    Conta pré-reserva junto de propósito: é justamente a data segurada que ninguém
+    lembra que está ocupada. Só o futuro — dia que já passou não tem o que resolver.
+
+    O fuso é `interval '-03:00'`, e não a string 'UTC-03': em nome POSIX o sinal é
+    INVERTIDO, então 'UTC-03' significa UTC+3 e uma festa das 22:30 cairia no dia
+    seguinte — que é exatamente o erro que faria duas festas do mesmo sábado
+    parecerem dias diferentes.
+
+    Devolve um item por DIA, com os compromissos daquele dia:
+        [{"dia": date, "eventos": [ev, ev, ...]}]
+    """
+    de = de or agora_brt()
+    with pool.connection() as c:
+        rows = c.execute(
+            "select " + _COLS + " from eventos_agenda "
+            " where conta_id=%s and status = any(%s) and inicio >= %s "
+            "   and (inicio at time zone interval '-03:00')::date in ("
+            "        select (inicio at time zone interval '-03:00')::date"
+            "          from eventos_agenda"
+            "         where conta_id=%s and status = any(%s) and inicio >= %s"
+            "         group by 1 having count(*) > 1)"
+            " order by inicio",
+            (conta_id, list(_ATIVO_OU_PRE), de,
+             conta_id, list(_ATIVO_OU_PRE), de)).fetchall()
+    por_dia: dict = {}
+    for r in rows:
+        ev = _fmt_evento(r)
+        por_dia.setdefault(ev["inicio"].astimezone(BRT).date(), []).append(ev)
+    return [{"dia": d, "eventos": evs} for d, evs in sorted(por_dia.items())]
+
+
+def horas_a_conferir(pool, conta_id: int, de: datetime | None = None) -> list[dict]:
+    """Compromissos futuros cujo horário o SISTEMA chutou e ninguém confirmou.
+
+    Existe pra que um palpite nunca fique com a mesma cara de um dado escolhido.
+    Enquanto a linha estiver aqui, a tela mostra o horário marcado; quando alguém
+    corrige o horário, `hora_sugerida` vira false e a linha some sozinha."""
+    de = de or agora_brt()
+    with pool.connection() as c:
+        rows = c.execute(
+            "select " + _COLS + " from eventos_agenda "
+            " where conta_id=%s and status = any(%s) and inicio >= %s and hora_sugerida "
+            " order by inicio",
+            (conta_id, list(_ATIVO_OU_PRE), de)).fetchall()
+    return [_fmt_evento(r) for r in rows]
+
+
+def sem_vendedor(pool, conta_id: int, de: datetime | None = None) -> list[dict]:
+    """Compromissos futuros que não têm ninguém responsável.
+
+    Numa agenda de dono só isso não importava. Numa agenda de equipe, uma festa
+    marcada sem dono é uma festa que ninguém está tocando — e o caso que trouxe
+    isto à tona foi uma vendedora que saiu da empresa deixando seis datas para
+    trás, uma delas uma negociação ainda aberta."""
+    de = de or agora_brt()
+    with pool.connection() as c:
+        rows = c.execute(
+            "select " + _COLS + " from eventos_agenda "
+            " where conta_id=%s and status = any(%s) and inicio >= %s and membro_id is null "
+            " order by inicio",
+            (conta_id, list(_ATIVO_OU_PRE), de)).fetchall()
+    return [_fmt_evento(r) for r in rows]
+
+
+def pendencias(pool, conta_id: int, de: datetime | None = None) -> dict:
+    """Tudo que a agenda tem pra alguém conferir, num lugar só.
+
+    É a fonte do card de alerta no topo da tela. Some sozinho quando zera — por
+    isso `total` existe: quem desenha não precisa somar três listas pra saber se
+    mostra o card.
+
+    Tolerante de propósito: se qualquer uma das três consultas falhar (banco sem a
+    migração 179, por exemplo), ela devolve vazio e as outras continuam. Um card de
+    aviso não pode derrubar a agenda inteira — a agenda é o que a pessoa veio ver;
+    o aviso é enfeite útil."""
+    de = de or agora_brt()
+    out: dict = {"choques": [], "horas": [], "sem_vendedor": []}
+    for chave, fn in (("choques", choques_de_data), ("horas", horas_a_conferir),
+                      ("sem_vendedor", sem_vendedor)):
+        try:
+            out[chave] = fn(pool, conta_id, de)
+        except Exception as e:  # noqa: BLE001 — aviso não derruba a tela
+            _log.warning("pendencias.%s conta=%s: %s", chave, conta_id, e)
+    out["total"] = len(out["choques"]) + len(out["horas"]) + len(out["sem_vendedor"])
+    return out
 
 
 _DESFECHOS = ("realizado", "nao_realizado")

@@ -262,6 +262,29 @@ for (const [valor, rotulo] of [[undefined, 'undefined'], [null, 'null'], [{}, 'o
   conferir(sessoes.get(35).tentativasPos440 === 0,
     'de pé há mais de 15min: aí sim a retomada pegou e a espera volta ao começo')
 
+  // ------------------------------------------------------------------------
+  // ...e "de pé" também não pode ser só o socket aberto.
+  //
+  // Conta 35, 20/08: sessão do Signal quebrada. O socket conectava perfeito,
+  // respondia ping e entregava recibo — e não decifrava mensagem nenhuma. Como
+  // ficava de pé mais de 15 minutos entre uma tempestade e outra, o
+  // `tentativasPos440` voltava a zero, a dobra recomeçava dos 5 minutos e o chip
+  // voltava pra queimar mais 60 decifragens. O disjuntor abriu ONZE vezes entre
+  // 17:30 e 19:03, sempre no teto exato de 60, e a instância inteira morreu junto
+  // no health check — enquanto a caixa da cliente estava muda desde 17/08.
+  console.log('\nsessaoFirme: quem não decifra não conta como de pé')
+  conferir(sessaoFirme({ abertoEm: AGORA - FIRME,
+    ultimaFalhaDecifrar: AGORA - FIRME + 1 }, AGORA, FIRME) === false,
+  'aberta há 15min mas falhou ao decifrar dentro da janela: não é firme')
+  conferir(sessaoFirme({ abertoEm: AGORA - FIRME,
+    ultimaFalhaDecifrar: AGORA - FIRME }, AGORA, FIRME) === true,
+  'a última falha completou a janela junto com a abertura: firme')
+  conferir(sessaoFirme({ abertoEm: AGORA - 10 * FIRME,
+    ultimaFalhaDecifrar: AGORA - 1000 }, AGORA, FIRME) === false,
+  'de pé há horas e falhando agora: continua não sendo firme — era este o furo de 20/08')
+  conferir(sessaoFirme({ abertoEm: AGORA - FIRME }, AGORA, FIRME) === true,
+    'sem falha nenhuma registrada: nada muda pro caminho normal')
+
   // e o efeito prático da correção: a espera cresce a cada retomada que não segura
   conferir(esperaPos440({ tentativasPos440: 0 }, BASE) === 5 * 60 * 1000 &&
            esperaPos440({ tentativasPos440: 3 }, BASE) === 40 * 60 * 1000,

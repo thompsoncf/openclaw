@@ -78,12 +78,20 @@ O Render matou a instância com `Ran out of memory (used over 512MB)` — quem m
 kernel (cgroup), então **não sobra stack trace nenhum no log**. Duas coisas mudaram por
 causa disso:
 
-- **`npm start` roda com `--max-old-space-size=320`.** Sem o limite, o V8 dimensiona o
+- **`npm start` roda com `--max-old-space-size=1024`.** Sem o limite, o V8 dimensiona o
   heap pela memória da MÁQUINA e não pelo limite do container: ele se acha dono de
   vários GB, faz GC preguiçoso e o cgroup mata antes de ele sentir qualquer pressão.
-  320 e não 512 porque o RSS é heap + `external`/`arrayBuffers` (os Buffers de áudio e
-  do socket) + nativo. Com o teto, um estouro vira `JavaScript heap out of memory` COM
-  stack trace, em vez de morte silenciosa.
+  O teto é menor que a RAM do plano porque o RSS é heap + `external`/`arrayBuffers`
+  (os Buffers de áudio e do socket) + nativo. Com o teto, um estouro vira
+  `JavaScript heap out of memory` COM stack trace, em vez de morte silenciosa.
+
+  **O número acompanha o plano — e uma vez não acompanhou.** 320 foi escolhido no
+  plano de 512MB e ficou pra trás quando o serviço subiu pro standard, de 2GB. Em
+  20/08 uma onda de histórico levou o heap a 314MB e o Node abortou com
+  `FATAL ERROR: Ineffective mark-compacts near heap limit` — com 1,7GB de RAM parada
+  ao lado, e levando junto os quatro chips que a instância segurava. Quem mudar de
+  plano muda este número no mesmo passo: **no painel do Render**, campo *Start
+  Command*, porque o `render.yaml` aqui é só documentação.
 - **O serviço loga a memória de minuto em minuto** (`msg: "memória"`): `rssMB`,
   `heapMB`, `externalMB`, o tamanho de cada cache em memória e `pgFila` (consultas
   esperando uma das 4 conexões do pool). É o que separa "pico legítimo de sincronização"

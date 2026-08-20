@@ -1392,7 +1392,26 @@ def _canais_status(pool, conta_id: int) -> dict:
         "msg_tok_ruim": msg_tok_ruim, "ig_tok_ruim": ig_tok_ruim,
         "twilio": twilio, "meta": meta_app, "numeros": nums,
         "tokens_set": {k: bool(v) for k, v in tokens.items()},
+        # os chips de WhatsApp desta empresa (migração 171). Numa empresa de um chip
+        # só — todas hoje — a lista tem um item, e a tela desenha o bloco de sempre.
+        "chips": _chips_para_tela(pool, conta_id),
     }
+
+
+def _chips_para_tela(pool, conta_id: int) -> list[dict]:
+    """`chips_da_conta` com o pool já aberto, tolerante a falha.
+
+    Best-effort de propósito: um erro aqui não pode derrubar a aba de Canais
+    inteira. Sem a lista, a tela cai no bloco de um chip só — que é o de hoje.
+    """
+    try:
+        with pool.connection() as c:
+            return chips_da_conta(c, conta_id)
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger("prospeccao.chips").warning(
+            "não deu pra listar os chips da conta %s", conta_id, exc_info=True)
+        return []
 
 
 _AGENTE_PADRAO = {"ativo": False, "limiar_confianca": 80, "horario": "comercial",
@@ -2100,9 +2119,136 @@ def _qr_relogio_retencao(conta_id: int, status: str | None) -> None:
             "não deu pra zerar o relógio de retenção da conta %s: %s", conta_id, e)
 
 
+def chips_da_conta(c, conta_id: int) -> list[dict]:
+    """Os chips de WhatsApp desta empresa, o principal primeiro.
+
+    O principal é a própria linha da empresa (`chip_de` nulo); os demais são as
+    linhas que apontam pra ela. `apelido` é `contas.nome` — na empresa esse campo é
+    o nome do titular, que não serve de rótulo de chip, então ali ele vem vazio e a
+    tela mostra "Chip 1" até alguém batizar.
+    """
+    linhas = c.execute(
+        """select ct.id, coalesce(ct.nome,''), ct.chip_de,
+                  coalesce(cc.identificador,''), coalesce(cc.ativo,false),
+                  coalesce(cc.rotulo,'')
+             from contas ct
+             left join canais_config cc
+                    on cc.conta_id = ct.id and cc.canal='whatsapp'
+                   and coalesce(cc.provedor,'twilio')='qr'
+            where ct.id = %s or ct.chip_de = %s
+            order by (ct.chip_de is not null), ct.id""",
+        (conta_id, conta_id)).fetchall()
+    saida = []
+    for i, (cid, nome, chip_de, ident, ativo, rotulo) in enumerate(linhas):
+        principal = chip_de is None
+        # o apelido do principal mora no canal (migração 172); o do secundário, em
+        # contas.nome da linha dele — ver o cabeçalho da 172 pro porquê
+        apelido = (rotulo or "").strip() if principal else (nome or "").strip()
+        numero = "" if ident.startswith("qr:") else ident
+        saida.append({"id": cid, "principal": principal, "apelido": apelido,
+                      "rotulo": apelido or f"Chip {i + 1}",
+                      "numero": numero, "ativo": bool(ativo),
+                      "pareado": bool(numero)})
+    return saida
+
+
+def _chip_da_conta(c, conta_id: int, chip_id) -> int | None:
+    """Valida que `chip_id` é desta empresa e devolve o id — ou None.
+
+    Sem esta volta, um id na querystring mandaria o painel de uma empresa gerar QR,
+    desconectar ou renomear o chip de outra. É o mesmo cuidado do `_posse` do cockpit.
+    """
+    if not chip_id:
+        return conta_id
+    try:
+        chip_id = int(chip_id)
+    except (TypeError, ValueError):
+        return None
+    if chip_id == conta_id:
+        return conta_id
+    r = c.execute("select 1 from contas where id=%s and chip_de=%s", (chip_id, conta_id)).fetchone()
+    return chip_id if r else None
+
+
+@router.post("/painel/prospeccao/comunicacao/chip-novo")
+def comunicacao_chip_novo(request: Request, apelido: str = Form("")):
+    """Cria um SEGUNDO chip de WhatsApp nesta empresa.
+
+    A linha nasce em `contas` porque é lá que `wa_qr_auth`, `wa_qr_sessao_lock` e
+    `wa_qr_enviadas` apontam — o chip precisa de um id próprio pra ter cofre e trava
+    próprios, e é justamente isso que o mantém isolado do chip 1. `chip_de` é o que
+    impede essa linha de virar uma empresa de verdade.
+
+    NÃO pareia nada aqui: cria a linha e o canal desligado. O QR é o passo seguinte,
+    no botão do cartão — separar os dois é o que deixa criar o chip sem risco nenhum
+    pra sessão que está no ar.
+    """
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    apelido = " ".join((apelido or "").split())[:60]
+    if not apelido:
+        return JSONResponse({"ok": False, "msg": "Dê um apelido pro chip (ex.: Agência Beta)."})
+    with get_pool().connection() as c:
+        # um chip extra por vez: dois cartões vazios na tela é convite pra parear
+        # o mesmo número duas vezes
+        pend = c.execute("""select 1 from contas ct
+                             left join canais_config cc on cc.conta_id=ct.id and cc.canal='whatsapp'
+                            where ct.chip_de=%s and coalesce(cc.identificador,'') like 'qr:%%'""",
+                         (ctx["conta_id"],)).fetchone()
+        if pend:
+            return JSONResponse({"ok": False, "msg": "Já existe um chip esperando pareamento. "
+                                                    "Leia o QR dele antes de criar outro."})
+        tipo = (c.execute("select coalesce(tipo,'pj') from contas where id=%s",
+                          (ctx["conta_id"],)).fetchone() or ["pj"])[0]
+        chip = c.execute("""insert into contas (tipo, nome, chip_de) values (%s,%s,%s)
+                            returning id""", (tipo, apelido, ctx["conta_id"])).fetchone()[0]
+        c.execute("""insert into canais_config (conta_id, canal, identificador, provedor, ativo)
+                     values (%s,'whatsapp',%s,'qr',false)""", (chip, "qr:" + str(chip)))
+        c.commit()
+    return JSONResponse({"ok": True, "chip": chip, "apelido": apelido})
+
+
+@router.post("/painel/prospeccao/comunicacao/chip-apelido")
+def comunicacao_chip_apelido(request: Request, chip: str = Form(""), apelido: str = Form("")):
+    """Renomeia um chip. Vale pro principal também — é o rótulo do relatório.
+
+    No chip principal o apelido é gravado em `canais_config.rotulo`, não em
+    `contas.nome`: aquele campo é o nome do titular da conta e aparece em contrato,
+    cobrança e e-mail. Trocá-lo por "Agência Alfa" arrumaria a etiqueta do inbox e
+    estragaria cinco outros lugares.
+    """
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    apelido = " ".join((apelido or "").split())[:60]
+    with get_pool().connection() as c:
+        alvo = _chip_da_conta(c, ctx["conta_id"], chip)
+        if alvo is None:
+            return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+        if alvo == ctx["conta_id"]:
+            c.execute("""update canais_config set rotulo=%s
+                          where conta_id=%s and canal='whatsapp'""", (apelido, alvo))
+        else:
+            c.execute("update contas set nome=%s where id=%s and chip_de=%s",
+                      (apelido or "Chip 2", alvo, ctx["conta_id"]))
+        c.commit()
+    return JSONResponse({"ok": True, "apelido": apelido})
+
+
 @router.post("/painel/prospeccao/comunicacao/whatsapp-qr-iniciar")
-def comunicacao_whatsapp_qr_iniciar(request: Request):
-    """Coloca a empresa no modo QR e pede o QR ao serviço Node pra exibir/escanear."""
+def comunicacao_whatsapp_qr_iniciar(request: Request, chip: str = Form("")):
+    """Coloca o chip no modo QR e pede o QR ao serviço Node pra exibir/escanear.
+
+    `chip` vazio = o chip principal, que é a própria empresa e o caminho de sempre.
+    Com um id de chip secundário, tudo daqui pra baixo age NAQUELE id — canal,
+    sessão e relógio de retenção. É o que faz gerar o QR do chip 2 não encostar em
+    nada do chip 1: o serviço abre outro socket, com outro cofre e outra trava.
+    """
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
@@ -2112,6 +2258,9 @@ def comunicacao_whatsapp_qr_iniciar(request: Request):
     if not wq.configurado():
         return JSONResponse({"ok": False, "msg": "O serviço de QR ainda não está ligado (falta WA_QR_SERVICE_URL no ambiente)."})
     with get_pool().connection() as c:
+        alvo = _chip_da_conta(c, ctx["conta_id"], chip)
+        if alvo is None:
+            return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
         # vira o provedor pra 'qr', mas PRESERVA o identificador de um provedor anterior
         # (ex.: número do Twilio) — só usa o placeholder 'qr:<id>' quando é a 1ª config.
         c.execute(
@@ -2119,10 +2268,10 @@ def comunicacao_whatsapp_qr_iniciar(request: Request):
                values (%s,'whatsapp',%s,'qr',true)
                on conflict (conta_id, canal)
                do update set provedor='qr', ativo=true, atualizado_em=now()""",
-            (ctx["conta_id"], "qr:" + str(ctx["conta_id"])))
+            (alvo, "qr:" + str(alvo)))
         c.commit()
-    r = wq.iniciar(ctx["conta_id"])
-    _qr_relogio_retencao(ctx["conta_id"], r.get("status"))
+    r = wq.iniciar(alvo)
+    _qr_relogio_retencao(alvo, r.get("status"))
     return JSONResponse({"ok": bool(r.get("ok", True) and not r.get("erro")),
                          "status": r.get("status"), "qr": r.get("qr"),
                          "sincronizando": bool(r.get("sincronizando")), "sync_progress": r.get("syncProgress") or 0,
@@ -2130,15 +2279,22 @@ def comunicacao_whatsapp_qr_iniciar(request: Request):
 
 
 @router.get("/painel/prospeccao/comunicacao/whatsapp-qr-status")
-def comunicacao_whatsapp_qr_status(request: Request):
-    """Consulta o status da sessão QR (pro polling do painel enquanto escaneia)."""
+def comunicacao_whatsapp_qr_status(request: Request, chip: str = ""):
+    """Consulta o status da sessão QR (pro polling do painel enquanto escaneia).
+
+    Cada cartão da tela faz o próprio polling, no próprio chip — dois status
+    independentes, como as duas sessões."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
     from finance import whatsapp_qr as wq
-    r = wq.status(ctx["conta_id"])
+    with get_pool().connection() as c:
+        alvo = _chip_da_conta(c, ctx["conta_id"], chip)
+    if alvo is None:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    r = wq.status(alvo)
     st = r.get("status") or "desconectado"
-    _qr_relogio_retencao(ctx["conta_id"], st)
+    _qr_relogio_retencao(alvo, st)
     return JSONResponse({"ok": True, "status": st, "qr": r.get("qr"),
                          "sincronizando": bool(r.get("sincronizando")), "sync_progress": r.get("syncProgress") or 0,
                          "msg": _QR_ROT.get(st, "")})
@@ -2174,25 +2330,34 @@ def comunicacao_whatsapp_aparelhos(request: Request):
 
 
 @router.post("/painel/prospeccao/comunicacao/whatsapp-qr-sair")
-def comunicacao_whatsapp_qr_sair(request: Request):
+def comunicacao_whatsapp_qr_sair(request: Request, chip: str = Form("")):
     """Encerra a sessão QR no serviço Node. NÃO apaga a config do WhatsApp da empresa —
     pra não derrubar o canal sem querer (ela continua no provedor 'qr', desconectada;
-    pra trocar de provedor é só usar o seletor de Canais)."""
+    pra trocar de provedor é só usar o seletor de Canais).
+
+    Age no chip informado, e SÓ nele. `wq.sair` chama /session/<chip>/sair, que apaga
+    a credencial daquele id — outra linha do cofre, outra trava, outro socket. É por
+    isso que o Desconectar de um cartão não alcança o outro nem por engano.
+    """
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
     if not ctx["gerencia"]:
         return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
     from finance import whatsapp_qr as wq
+    with get_pool().connection() as c:
+        alvo = _chip_da_conta(c, ctx["conta_id"], chip)
+    if alvo is None:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
     # devolve o resultado DE VERDADE. Antes respondia {"ok": True} sempre, mesmo
     # quando o serviço não respondia — e o painel dizia "Desconectado." com a
     # sessão inteira ainda de pé, credencial e histórico intactos. O usuário ia
     # escanear um QR novo achando que tinha desconectado.
-    r = wq.sair(ctx["conta_id"])
+    r = wq.sair(alvo)
     if not r.get("ok"):
         import logging
         logging.getLogger("prospeccao.wa_qr").warning(
-            "whatsapp_qr_sair: conta_id=%s falhou — %s", ctx["conta_id"], r.get("erro"))
+            "whatsapp_qr_sair: chip=%s falhou — %s", alvo, r.get("erro"))
         return JSONResponse({"ok": False, "erro": r.get("erro") or "falha"}, status_code=502)
     return JSONResponse({"ok": True})
 
@@ -9793,6 +9958,72 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           </div>
         </div>
         <div class="mut" id="qr-msg" style="font-size:.78rem;margin-top:.45rem"></div>
+
+        <!-- ═══ APELIDO DO CHIP 1 e o CHIP 2 ═══════════════════════════════════
+             Tudo daqui até o fim do bloco é ADITIVO: nenhuma linha acima foi
+             tocada. O chip 1 continua com os mesmos ids, as mesmas funções e o
+             mesmo polling de sempre — o cartão do chip 2 tem os seus (`c2-*`) e
+             fala com as mesmas rotas passando `chip=<id>`. Duas sessões, dois
+             cartões, dois pollings; um não alcança o outro nem por engano.       -->
+        <div style="margin-top:.7rem;border-top:1px solid var(--borda);padding-top:.7rem">
+          <label class="lbl" style="font-size:.72rem">Apelido deste chip</label>
+          <div style="display:flex;gap:.4rem">
+            <input class="fld" id="c1-apelido" maxlength="60" placeholder="ex.: Agência Alfa"
+                   value="{{ (canais.chips[0].apelido if canais.chips else '') }}">
+            <button type="button" class="pbtn ghost" style="white-space:nowrap"
+                    onclick="chipApelido('', 'c1-apelido')">Salvar</button>
+          </div>
+          <div class="mut" style="font-size:.72rem;margin-top:.3rem">
+            É este nome que aparece no inbox e que o relatório agrupa. Não muda o
+            nome da empresa em contrato, cobrança ou e-mail.
+          </div>
+        </div>
+
+        {% set chip2 = (canais.chips[1] if canais.chips|length > 1 else None) %}
+        {% if chip2 %}
+        <div id="c2-card" data-chip="{{ chip2.id }}" style="margin-top:.7rem;border:1px dashed var(--ambar-borda);border-radius:10px;padding:.7rem .8rem;background:#1a1710">
+          <div style="display:flex;align-items:center;gap:.45rem;flex-wrap:wrap">
+            <b style="font-size:.85rem">Chip 2</b>
+            <span id="c2-num" style="font-family:ui-monospace,monospace;font-size:.8rem;color:var(--txt-mut)">{{ chip2.numero or 'nenhum número pareado' }}</span>
+            <span id="c2-st" style="font-size:.76rem;margin-left:auto;color:var(--ambar)">Verificando…</span>
+          </div>
+          <div style="margin-top:.5rem">
+            <label class="lbl" style="font-size:.72rem">Apelido deste chip</label>
+            <div style="display:flex;gap:.4rem">
+              <input class="fld" id="c2-apelido" maxlength="60" placeholder="ex.: Agência Beta" value="{{ chip2.apelido }}">
+              <button type="button" class="pbtn ghost" style="white-space:nowrap"
+                      onclick="chipApelido(document.getElementById('c2-card').dataset.chip,'c2-apelido')">Salvar</button>
+            </div>
+          </div>
+          <div style="display:flex;gap:.4rem;margin-top:.55rem;flex-wrap:wrap">
+            <button type="button" class="pbtn" id="c2-btn" onclick="c2Iniciar()" disabled>Verificando…</button>
+            <button type="button" class="pbtn ghost" id="c2-sair" onclick="c2Sair()" style="display:none">Desconectar</button>
+          </div>
+          <div id="c2-box" style="margin-top:.6rem;text-align:center;display:none">
+            <img id="c2-img" alt="QR do chip 2" style="width:220px;max-width:100%;border-radius:10px;background:#fff;padding:.4rem">
+          </div>
+          <div class="mut" id="c2-msg" style="font-size:.78rem;margin-top:.45rem"></div>
+          <div class="mut" style="font-size:.72rem;margin-top:.35rem">
+            Chip próprio: <b>credencial, sessão e histórico separados</b>. Parear,
+            reconectar ou desconectar aqui <b>não encosta no chip 1</b>. Os dois caem
+            no mesmo funil, com etiqueta no inbox.
+          </div>
+        </div>
+        {% else %}
+        <div style="margin-top:.7rem;border-top:1px solid var(--borda);padding-top:.7rem">
+          <div style="font-weight:600;font-size:.82rem;margin-bottom:.2rem">Segundo chip</div>
+          <div class="mut" style="font-size:.76rem;margin-bottom:.4rem">
+            Conecta outro aparelho nesta mesma empresa. Conexão independente — não
+            mexe na do chip 1 — e os leads caem no mesmo funil.
+          </div>
+          <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+            <input class="fld" id="c2-novo-nome" maxlength="60" placeholder="Apelido (ex.: Agência Beta)">
+            <button type="button" class="pbtn ghost" style="white-space:nowrap" onclick="chipNovo()">Criar chip 2</button>
+          </div>
+          <div class="mut" id="c2-novo-msg" style="font-size:.76rem;margin-top:.35rem"></div>
+        </div>
+        {% endif %}
+
         <!-- APARELHOS LIGADOS. Nasce escondido e só o JS mostra: afirmar "nenhum
              aparelho" antes de ter perguntado seria pior que não dizer nada. -->
 <div id="wa-aps" style="margin-top:.7rem;border-top:1px solid var(--borda);padding-top:.7rem">
@@ -9903,6 +10134,82 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         var _qrEspera=null;
         function qrEsperando(){if(_qrEspera)clearTimeout(_qrEspera);
           _qrEspera=setTimeout(qrIndefinido,7000);}
+
+        // ═══ CHIP 2 ═══════════════════════════════════════════════════════════
+        // Funções PRÓPRIAS, ids próprios, timer próprio. Reaproveitar as do chip 1
+        // com um parâmetro pareceria mais limpo e seria pior: o chip 1 está no ar em
+        // três contas, e qualquer engano no parâmetro faria o cartão de um mexer na
+        // sessão do outro. Duplicar cem linhas custa menos que essa chance.
+        var _c2Timer=null;
+        function c2Chip(){var el=document.getElementById('c2-card');return el?el.dataset.chip:'';}
+        function c2Show(d){
+          var box=document.getElementById('c2-box'),img=document.getElementById('c2-img'),
+              msg=document.getElementById('c2-msg'),sair=document.getElementById('c2-sair'),
+              btn=document.getElementById('c2-btn'),st=document.getElementById('c2-st');
+          if(!d||!d.status){if(btn){btn.textContent='📱 Gerar QR';btn.disabled=false;}
+            if(st){st.textContent='não deu pra checar';st.style.color='var(--ambar)';}return;}
+          var conectado=d.status==='conectado';
+          if(d.qr&&!conectado){img.src=d.qr;box.style.display='block';}else{box.style.display='none';}
+          if(msg)msg.textContent=d.msg||'';
+          if(st){st.textContent=conectado?'✅ Conectado':(d.status==='aguardando_qr'?'Aguardando QR':d.status);
+                 st.style.color=conectado?'var(--verde-claro)':'var(--ambar)';}
+          if(sair)sair.style.display=(d.status!=='desconectado')?'inline-flex':'none';
+          if(btn){btn.textContent=conectado?'Reconectar':'📱 Gerar QR';btn.disabled=false;}
+          if(d.status==='desconectado'||conectado){if(_c2Timer){clearInterval(_c2Timer);_c2Timer=null;}}}
+        function c2Poll(){fetch('/painel/prospeccao/comunicacao/whatsapp-qr-status?chip='+encodeURIComponent(c2Chip()))
+          .then(function(r){return r.json();}).then(c2Show).catch(function(){c2Show(null);});}
+        function c2Iniciar(){var btn=document.getElementById('c2-btn'),msg=document.getElementById('c2-msg');
+          btn.disabled=true;btn.textContent='Gerando…';if(msg)msg.textContent='';
+          var fd=new FormData();fd.append('chip',c2Chip());
+          fetch('/painel/prospeccao/comunicacao/whatsapp-qr-iniciar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
+            .then(function(r){return r.json();}).then(function(d){
+              c2Show(d);
+              if(!d.ok&&msg){msg.textContent=d.msg||d.erro||'Falha.';msg.style.color='var(--ambar)';return;}
+              if(_c2Timer)clearInterval(_c2Timer);_c2Timer=setInterval(c2Poll,3000);})
+            .catch(function(){btn.disabled=false;btn.textContent='📱 Gerar QR';
+              if(msg){msg.textContent='Falha de rede.';msg.style.color='var(--ambar)';}});}
+        // Mesmo aviso do chip 1, e pelo mesmo motivo: este botão APAGA a credencial.
+        // A diferença é que aqui ele apaga a DESTE chip — o chip 1 não sente nada.
+        function c2Sair(){if(!confirm('⚠️ Isto NÃO é só desconectar.\\n\\n'
+          + 'Apaga a credencial e as chaves deste chip 2. Pra voltar, alguém vai '
+          + 'precisar escanear um QR novo — e depois disso ele fica CONECTADO MAS SEM '
+          + 'RECEBER por um bom tempo, enquanto as chaves se refazem.\\n\\n'
+          + 'O chip 1 não é afetado.\\n\\n'
+          + 'Se você só quer RECONECTAR, não use: o sistema reconecta sozinho.\\n\\n'
+          + 'Apagar a sessão do chip 2 mesmo assim?'))return;
+          var fd=new FormData();fd.append('chip',c2Chip());
+          fetch('/painel/prospeccao/comunicacao/whatsapp-qr-sair',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
+            .then(function(r){return r.json();}).then(function(d){
+              var m=document.getElementById('c2-msg');
+              if(d&&d.ok===false){if(m){m.textContent='Não deu pra desconectar ('+(d.erro||'falha')+').';m.style.color='var(--ambar)';}return;}
+              if(_c2Timer){clearInterval(_c2Timer);_c2Timer=null;}
+              c2Show({status:'desconectado',msg:'Desconectado.'});})
+            .catch(function(){var m=document.getElementById('c2-msg');
+              if(m){m.textContent='Falha de rede ao desconectar.';m.style.color='var(--ambar)';}});}
+        function chipNovo(){
+          var i=document.getElementById('c2-novo-nome'),m=document.getElementById('c2-novo-msg');
+          var nome=(i&&i.value||'').trim();
+          if(!nome){if(m){m.textContent='Dê um apelido pro chip.';m.style.color='var(--ambar)';}return;}
+          var fd=new FormData();fd.append('apelido',nome);
+          fetch('/painel/prospeccao/comunicacao/chip-novo',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
+            .then(function(r){return r.json();}).then(function(d){
+              if(!d||!d.ok){if(m){m.textContent=(d&&(d.msg||d.erro))||'Falha.';m.style.color='var(--ambar)';}return;}
+              // recarrega pra tela nascer com o cartão do chip 2 — é uma vez só, e
+              // evita duplicar em JS o bloco que o template já sabe desenhar
+              location.reload();})
+            .catch(function(){if(m){m.textContent='Falha de rede.';m.style.color='var(--ambar)';}});}
+        function chipApelido(chip,campo){
+          var i=document.getElementById(campo);if(!i)return;
+          var fd=new FormData();fd.append('chip',chip||'');fd.append('apelido',i.value||'');
+          var antes=i.style.borderColor;
+          fetch('/painel/prospeccao/comunicacao/chip-apelido',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
+            .then(function(r){return r.json();}).then(function(d){
+              i.style.borderColor=(d&&d.ok)?'var(--verde)':'var(--ambar)';
+              setTimeout(function(){i.style.borderColor=antes;},1400);})
+            .catch(function(){i.style.borderColor='var(--ambar)';
+              setTimeout(function(){i.style.borderColor=antes;},1400);});}
+        document.addEventListener('DOMContentLoaded',function(){
+          if(document.getElementById('c2-card'))c2Poll();});
         function qrPoll(){qrEsperando();
           fetch('/painel/prospeccao/comunicacao/whatsapp-qr-status').then(function(r){return r.json();})
             .then(qrShow).catch(qrIndefinido);}

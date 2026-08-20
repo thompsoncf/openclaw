@@ -35,7 +35,9 @@ create table contas (id bigserial primary key, tipo text, nome text,
 create table canais_config (
   id bigserial primary key, conta_id bigint, canal text, identificador text,
   ativo boolean not null default true, token text, provedor text not null default 'twilio',
-  wa_phone_id text, desconectado_em timestamptz);
+  wa_phone_id text, desconectado_em timestamptz,
+  -- migração 172: apelido do chip principal, que não tem linha própria em contas
+  rotulo text);
 create table prospeccao (id bigserial primary key, conta_id bigint, membro_id bigint,
   vendedor_id bigint, empresa text, contato text, decisor_nome text, socio text, cnpj text,
   segmento text, telefone text, whatsapp text, email text, cidade text, uf text,
@@ -268,3 +270,118 @@ def test_conversa_de_outra_empresa_nao_escolhe_o_chip(pool):
         conv = c.execute("""select id from conversas where contato_ref like %s
                              order by id desc limit 1""", ("%91110009",)).fetchone()[0]
         assert wout.chip_da_conversa(c, outra, conv) is None
+
+
+# ═══════════════════════════════════════════ 5. as rotas da tela
+
+class _Ctx:
+    """Sessão de painel de mentira: só o que `_acesso` devolve."""
+
+
+@pytest.fixture()
+def painel(pool, monkeypatch):
+    """Liga o painel neste banco e loga como gerência da empresa dada."""
+    def _logar(conta_id, gerencia=True):
+        monkeypatch.setattr(
+            pp, "_acesso",
+            lambda req: ({"conta_id": conta_id, "membro_id": 1, "gerencia": gerencia}, None))
+    return _logar
+
+
+def _json(resp):
+    import json as _j
+    return _j.loads(bytes(resp.body).decode("utf-8"))
+
+
+def test_criar_chip_2_nao_encosta_no_chip_1(pool, painel):
+    emp = _empresa(pool)
+    painel(emp)
+    r = _json(pp.comunicacao_chip_novo(None, apelido="Agência Beta"))
+    assert r["ok"]
+    chip = r["chip"]
+    with pool.connection() as c:
+        # a linha nova é um CHIP, não uma empresa
+        dono = c.execute("select chip_de from contas where id=%s", (chip,)).fetchone()[0]
+        assert dono == emp
+        # e nasce com canal PRÓPRIO e DESLIGADO — parear é o passo seguinte
+        ativo = c.execute("""select ativo from canais_config where conta_id=%s and canal='whatsapp'""",
+                          (chip,)).fetchone()[0]
+        assert ativo is False
+        # o canal do chip 1 não foi tocado
+        assert c.execute("""select ativo from canais_config where conta_id=%s and canal='whatsapp'""",
+                         (emp,)).fetchone()[0] is True
+
+
+def test_nao_deixa_criar_dois_chips_pendentes(pool, painel):
+    """Dois cartões vazios na tela é convite pra parear o mesmo número duas vezes."""
+    emp = _empresa(pool)
+    painel(emp)
+    assert _json(pp.comunicacao_chip_novo(None, apelido="Beta"))["ok"]
+    segundo = _json(pp.comunicacao_chip_novo(None, apelido="Gama"))
+    assert segundo["ok"] is False and "esperando pareamento" in segundo["msg"]
+
+
+def test_chip_sem_apelido_e_recusado(pool, painel):
+    emp = _empresa(pool)
+    painel(emp)
+    r = _json(pp.comunicacao_chip_novo(None, apelido="   "))
+    assert r["ok"] is False
+
+
+def test_vendedor_nao_cria_chip(pool, painel):
+    emp = _empresa(pool)
+    painel(emp, gerencia=False)
+    resp = pp.comunicacao_chip_novo(None, apelido="Beta")
+    assert resp.status_code == 403
+
+
+def test_nao_da_pra_mexer_no_chip_de_outra_empresa(pool, painel):
+    """Sem esta trava, um id na querystring geraria QR, desconectaria ou renomearia
+    o chip de outra empresa."""
+    emp = _empresa(pool)
+    outra = _empresa(pool, "Outra")
+    chip = _chip2(pool, emp)
+    with pool.connection() as c:
+        assert pp._chip_da_conta(c, emp, chip) == chip
+        assert pp._chip_da_conta(c, outra, chip) is None
+        assert pp._chip_da_conta(c, emp, 999999) is None
+        assert pp._chip_da_conta(c, emp, "") == emp, "vazio = o chip principal"
+
+
+def test_apelido_do_chip_2_vai_pro_nome_da_linha(pool, painel):
+    emp = _empresa(pool)
+    chip = _chip2(pool, emp, nome="Beta")
+    painel(emp)
+    assert _json(pp.comunicacao_chip_apelido(None, chip=str(chip), apelido="Agência Beta"))["ok"]
+    with pool.connection() as c:
+        assert c.execute("select nome from contas where id=%s", (chip,)).fetchone()[0] == "Agência Beta"
+
+
+def test_apelido_do_chip_1_NAO_mexe_no_nome_da_empresa(pool, painel):
+    """`contas.nome` da empresa aparece em contrato, cobrança, assinatura de e-mail e
+    convite. O apelido do chip principal vai pro canal (migração 172)."""
+    emp = _empresa(pool, "MANOEL SOARES")
+    painel(emp)
+    assert _json(pp.comunicacao_chip_apelido(None, chip="", apelido="Agência Alfa"))["ok"]
+    with pool.connection() as c:
+        assert c.execute("select nome from contas where id=%s", (emp,)).fetchone()[0] == "MANOEL SOARES"
+        assert c.execute("""select rotulo from canais_config
+                             where conta_id=%s and canal='whatsapp'""", (emp,)).fetchone()[0] == "Agência Alfa"
+
+
+def test_a_tela_lista_o_principal_primeiro(pool):
+    emp = _empresa(pool)
+    chip = _chip2(pool, emp, nome="Agência Beta")
+    with pool.connection() as c:
+        chips = pp.chips_da_conta(c, emp)
+    assert [x["id"] for x in chips] == [emp, chip]
+    assert chips[0]["principal"] is True and chips[1]["principal"] is False
+    assert chips[1]["rotulo"] == "Agência Beta"
+    assert chips[0]["rotulo"] == "Chip 1", "sem apelido, a tela mostra Chip 1"
+
+
+def test_empresa_de_um_chip_so_lista_um(pool):
+    """O estado de produção: a tela desenha o bloco de sempre."""
+    emp = _empresa(pool)
+    with pool.connection() as c:
+        assert len(pp.chips_da_conta(c, emp)) == 1

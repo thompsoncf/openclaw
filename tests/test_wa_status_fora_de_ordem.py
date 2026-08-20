@@ -40,7 +40,11 @@ create table campanha_eventos (id bigserial primary key, campanha_id bigint, pro
   canal text, evento text, detalhe text, quando timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, canal text);
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
-  provider_sid text, status text, texto text);
+  -- `meta` existe em produção desde a migração 080 e é onde o MOTIVO da falha
+  -- é gravado (o código do provedor, a mensagem dele). Faltava aqui, e o
+  -- update caía com UndefinedColumn — schema mínimo que esqueceu uma coluna
+  -- que a produção tem.
+  provider_sid text, status text, texto text, meta jsonb);
 """
 
 

@@ -385,3 +385,75 @@ def test_empresa_de_um_chip_so_lista_um(pool):
     emp = _empresa(pool)
     with pool.connection() as c:
         assert len(pp.chips_da_conta(c, emp)) == 1
+
+
+# ═══════════════════════════════════════════ 6. as 3 informações POR CHIP
+
+def _msg(pool, conv_id, direcao="in", membro_id=None, quando="now()"):
+    with pool.connection() as c:
+        c.execute(f"""insert into mensagens (conversa_id, canal, direcao, autor, texto,
+                        membro_id, criado_em)
+                      values (%s,'whatsapp',%s,'lead','oi',%s,{quando})""",
+                  (conv_id, direcao, membro_id))
+        c.commit()
+
+
+def _conv_id(pool, contato):
+    with pool.connection() as c:
+        return c.execute("""select id from conversas where contato_ref like %s
+                             order by id desc limit 1""", ("%" + contato[-8:],)).fetchone()[0]
+
+
+def test_ultima_recebida_e_de_cada_chip_separadamente(pool):
+    """No nível da empresa, "última recebida 21:40" não diz em QUAL número entrou —
+    e essa é justamente a pergunta de quem desconfia que um dos dois parou."""
+    emp = _empresa(pool)
+    chip = _chip2(pool, emp)
+    _entrada(emp, "5586991120001")     # chega no chip 1
+    with pool.connection() as c:
+        chips = pp.chips_da_conta(c, emp)
+    assert chips[0]["ultima"], "o chip 1 recebeu"
+    assert not chips[1]["ultima"], "o chip 2 não recebeu nada ainda"
+
+    _entrada(chip, "5586991120002")    # agora chega no chip 2
+    with pool.connection() as c:
+        chips = pp.chips_da_conta(c, emp)
+    assert chips[1]["ultima"], "agora o chip 2 tem a dele"
+
+
+def test_historico_antigo_conta_pro_chip_principal(pool):
+    """`chip_id` nulo é todo o histórico de antes de existir chip 2. Ele não pode
+    sumir da tela nem migrar pro chip novo."""
+    emp = _empresa(pool)
+    _entrada(emp, "5586991120003")
+    chip = _chip2(pool, emp)           # o chip 2 nasce DEPOIS da conversa
+    with pool.connection() as c:
+        chips = pp.chips_da_conta(c, emp)
+    assert chips[0]["ultima"], "o histórico ficou com o chip principal"
+    assert not chips[1]["ultima"]
+
+
+def test_saida_por_fora_separa_por_chip(pool):
+    """Com dois números, um "95% saiu por fora" somado não diz em qual aparelho bater."""
+    from finance import cockpit as ck
+    emp = _empresa(pool)
+    chip = _chip2(pool, emp)
+    _entrada(emp, "5586991120004")
+    _entrada(chip, "5586991120005")
+    c1, c2 = _conv_id(pool, "5586991120004"), _conv_id(pool, "5586991120005")
+    # chip 1: uma saída pelo Zaq (tem membro). chip 2: uma por fora (sem membro).
+    _msg(pool, c1, "out", membro_id=7)
+    _msg(pool, c2, "out", membro_id=None)
+
+    assert ck.saida_por_fora(pool, emp, chip_id=emp)["pct"] == 0, "o chip 1 respondeu pelo Zaq"
+    assert ck.saida_por_fora(pool, emp, chip_id=chip)["pct"] == 100, "o chip 2, por fora"
+    assert ck.saida_por_fora(pool, emp)["pct"] == 50, "sem chip, a empresa inteira"
+
+
+def test_a_tela_nao_pergunta_aparelhos_de_chip_alheio(pool, painel):
+    emp = _empresa(pool)
+    outra = _empresa(pool, "Outra")
+    chip = _chip2(pool, emp)
+    painel(outra)
+    resp = pp.comunicacao_whatsapp_aparelhos(None, chip=str(chip))
+    assert resp.status_code == 403

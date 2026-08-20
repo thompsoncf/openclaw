@@ -15,7 +15,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 _BASE_SQL = """
-create table contas (id bigserial primary key, nome text);
+create table contas (id bigserial primary key, nome text, chip_de bigint);
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text default 'vendedor', ativo boolean default true, comissao_pct numeric(5,2));
 create table lancamentos (id bigserial primary key, conta_id bigint, membro_id bigint,

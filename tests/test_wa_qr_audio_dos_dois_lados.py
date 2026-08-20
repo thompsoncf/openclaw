@@ -33,9 +33,9 @@ from web import painel_prospeccao as pp
 _SEGREDO = "segredo-de-teste"
 
 _SQL = """
-create table contas (id bigserial primary key, tipo text, nome text);
+create table contas (id bigserial primary key, tipo text, nome text, chip_de bigint);
 create table conversas (id bigserial primary key, conta_id bigint, canal text,
-  contato_ref text, status text);
+  contato_ref text, status text, chip_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
   direcao text, autor text, texto text, provider_sid text, status text);
 create table canais_config (id bigserial primary key, conta_id bigint, canal text,

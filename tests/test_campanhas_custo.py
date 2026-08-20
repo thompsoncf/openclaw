@@ -12,7 +12,7 @@ from psycopg_pool import ConnectionPool
 from web import painel_prospeccao as pp
 
 _BASE_SQL = """
-create table contas (id bigserial primary key, tipo text, nome text);
+create table contas (id bigserial primary key, tipo text, nome text, chip_de bigint);
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text);
 create table prospeccao (id bigserial primary key, conta_id bigint, estagio text,
   vendedor_id bigint);   -- dono do lead: escopo do KPI de conversa no chat
@@ -28,7 +28,7 @@ create table campanha_eventos (id bigserial primary key, campanha_id bigint, pro
 -- conversas/mensagens: os KPIs de "Gastos das campanhas" passaram a contar quem
 -- ESCREVEU no chat (e quantos desses nunca receberam resposta humana), sinal que
 -- os contadores de botão não pegam. Sem as tabelas aqui, _campanhas_dados quebra.
-create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint);
+create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint, chip_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
   autor text, texto text, criado_em timestamptz default now());
 create table canais_config (

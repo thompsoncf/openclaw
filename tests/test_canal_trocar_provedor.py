@@ -26,7 +26,7 @@ from psycopg_pool import ConnectionPool
 from web import painel_prospeccao as pp
 
 _BASE_SQL = """
-create table contas (id bigserial primary key, tipo text, nome text);
+create table contas (id bigserial primary key, tipo text, nome text, chip_de bigint);
 create table canais_config (
   id bigserial primary key, conta_id bigint, canal text,
   identificador text not null,                    -- o NOT NULL que quebrava o upsert

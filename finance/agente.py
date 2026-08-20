@@ -274,15 +274,22 @@ def _add_bot_msg(c, conversa_id, canal, texto, sid=None):
     c.execute("update conversas set ultima_msg_em=now() where id=%s", (conversa_id,))
 
 
-def _mandar(c, conta_id, canal, destino, texto) -> dict:
-    """Envia pelo canal certo: WhatsApp (Twilio/Cloud API) ou Messenger/Instagram (Meta)."""
+def _mandar(c, conta_id, canal, destino, texto, conversa_id=None) -> dict:
+    """Envia pelo canal certo: WhatsApp (Twilio/Cloud API) ou Messenger/Instagram (Meta).
+
+    `conversa_id` serve pra sair pelo MESMO chip que recebeu, quando a empresa tem
+    mais de um. Sem ele o agente responderia pelo chip principal — e o lead que
+    escreveu pro segundo número receberia resposta de um número que ele não conhece.
+    """
     if canal in ("messenger", "instagram"):
         from finance import meta_msg
         r = c.execute("select token from canais_config where conta_id=%s and canal=%s and ativo",
                       (conta_id, canal)).fetchone()
         return meta_msg.enviar(r[0] if r else None, destino, texto, canal)
     from finance import whatsapp_out
-    return whatsapp_out.enviar(c, conta_id, destino, texto)
+    return whatsapp_out.enviar(
+        c, conta_id, destino, texto,
+        chip_id=whatsapp_out.chip_da_conversa(c, conta_id, conversa_id))
 
 
 def _extrair_json(txt: str) -> dict:
@@ -426,7 +433,7 @@ def _atender(pool, conta_id, conversa_id):
 def _enviar(c, conta_id, conversa_id, canal, destino, texto):
     if not texto:
         return
-    res = _mandar(c, conta_id, canal, destino, texto)
+    res = _mandar(c, conta_id, canal, destino, texto, conversa_id)
     _add_bot_msg(c, conversa_id, canal, texto, res.get("sid") if res.get("ok") else None)
     c.commit()
 

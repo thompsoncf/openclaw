@@ -46,7 +46,7 @@ def cliente(monkeypatch):
     pool = ConnectionPool(url, min_size=1, max_size=3, open=True,
                           kwargs={"prepare_threshold": None})
     with pool.connection() as c:
-        c.execute("create table contas (id bigserial primary key, nome text)")
+        c.execute("create table contas (id bigserial primary key, nome text, chip_de bigint)")
         # 098_agenda referencia membros (dono do compromisso); só a coluna importa aqui
         c.execute("create table membros (id bigserial primary key, conta_id bigint, "
                   "nome text, papel text)")

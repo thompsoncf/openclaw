@@ -47,7 +47,7 @@ def cli(monkeypatch):
     pool = ConnectionPool(url, min_size=1, max_size=3, open=True,
                           kwargs={"prepare_threshold": None})
     with pool.connection() as c:
-        c.execute("create table contas (id bigserial primary key, tipo text, nome text)")
+        c.execute("create table contas (id bigserial primary key, tipo text, nome text, chip_de bigint)")
         c.execute("create table membros (id bigserial primary key, conta_id bigint, "
                   "nome text, papel text)")
         for nome in ("098_agenda.sql", "099_agenda_tipo.sql", "100_evento_convidados.sql",

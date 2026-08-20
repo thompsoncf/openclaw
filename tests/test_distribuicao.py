@@ -14,13 +14,13 @@ from psycopg_pool import ConnectionPool
 from finance import distribuicao as dist
 
 _BASE_SQL = """
-create table contas (id bigserial primary key, nome text);
+create table contas (id bigserial primary key, nome text, chip_de bigint);
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   ativo boolean default true, whatsapp text, cockpit_pausado boolean default false);
 create table prospeccao (id bigserial primary key, conta_id bigint, empresa text,
   vendedor_id bigint, atualizado_em timestamptz default now());
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
-  responsavel_membro_id bigint);
+  responsavel_membro_id bigint, chip_id bigint);
 create table distribuicao (conta_id bigint primary key, ativo boolean not null default false,
   ponteiro int not null default 0, avisar boolean not null default true,
   aviso_template_sid text, atualizado_em timestamptz not null default now());

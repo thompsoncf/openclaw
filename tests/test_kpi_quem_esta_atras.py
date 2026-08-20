@@ -18,7 +18,7 @@ from psycopg_pool import ConnectionPool
 from web import painel_prospeccao as pp
 
 _SQL = """
-create table contas (id bigint primary key, telefone text, email text);
+create table contas (id bigint primary key, telefone text, email text, chip_de bigint);
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text);
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,
   empresa text, segmento text, cidade text, uf text, telefone text, whatsapp text,
@@ -27,7 +27,7 @@ create table campanhas (id bigserial primary key, conta_id bigint, nome text);
 create table campanha_alvos (id bigserial primary key, campanha_id bigint, prospeccao_id bigint);
 create table campanha_eventos (id bigserial primary key, campanha_id bigint, prospeccao_id bigint,
   canal text, evento text, detalhe text, quando timestamptz default now());
-create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint);
+create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint, chip_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text, autor text,
   texto text, criado_em timestamptz default now());
 """

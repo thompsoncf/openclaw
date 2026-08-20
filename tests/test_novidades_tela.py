@@ -59,7 +59,7 @@ def cliente(monkeypatch):
         c.execute("create table nichos (id bigserial primary key, nome text, slug text unique)")
         c.execute("""create table contas (id bigserial primary key, nome text,
                      nicho_id bigint references nichos(id),
-                     criado_em timestamptz not null default now())""")
+                     criado_em timestamptz not null default now(), chip_de bigint)""")
         c.execute((BASE / "174_novidades.sql").read_text(encoding="utf-8"))
         c.execute("insert into nichos (nome, slug) values ('Eventos','eventos'),"
                   "('Consultoria','consultoria')")

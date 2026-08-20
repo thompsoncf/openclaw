@@ -18,7 +18,7 @@ from psycopg_pool import ConnectionPool
 from web import painel_prospeccao as pp
 
 _BASE_SQL = """
-create table contas (id bigserial primary key, tipo text, nome text);
+create table contas (id bigserial primary key, tipo text, nome text, chip_de bigint);
 create table campanhas (id bigserial primary key, conta_id bigint, nome text, status text default 'ativa',
   limite_dia int default 40, limite_wa_dia int default 30, wa_ativo boolean default false,
   wa_mmlite boolean default false, wa_template_sid text, reengajar_ativo boolean default false,

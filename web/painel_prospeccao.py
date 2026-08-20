@@ -1392,7 +1392,26 @@ def _canais_status(pool, conta_id: int) -> dict:
         "msg_tok_ruim": msg_tok_ruim, "ig_tok_ruim": ig_tok_ruim,
         "twilio": twilio, "meta": meta_app, "numeros": nums,
         "tokens_set": {k: bool(v) for k, v in tokens.items()},
+        # os chips de WhatsApp desta empresa (migração 171). Numa empresa de um chip
+        # só — todas hoje — a lista tem um item, e a tela desenha o bloco de sempre.
+        "chips": _chips_para_tela(pool, conta_id),
     }
+
+
+def _chips_para_tela(pool, conta_id: int) -> list[dict]:
+    """`chips_da_conta` com o pool já aberto, tolerante a falha.
+
+    Best-effort de propósito: um erro aqui não pode derrubar a aba de Canais
+    inteira. Sem a lista, a tela cai no bloco de um chip só — que é o de hoje.
+    """
+    try:
+        with pool.connection() as c:
+            return chips_da_conta(c, conta_id)
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger("prospeccao.chips").warning(
+            "não deu pra listar os chips da conta %s", conta_id, exc_info=True)
+        return []
 
 
 _AGENTE_PADRAO = {"ativo": False, "limiar_confianca": 80, "horario": "comercial",
@@ -1885,7 +1904,11 @@ def comunicacao_responder(request: Request, conversa_id: int = Form(...), texto:
             return JSONResponse({"ok": False, "erro": "canal_sem_resposta"})
         from finance import whatsapp_out
         numero = cv[3] or cv[4] or cv[2]
-        res = whatsapp_out.enviar(c, ctx["conta_id"], numero, texto)
+        # sai pelo MESMO chip que recebeu — senão o lead escreve pra um número e é
+        # respondido por outro, que do lado dele parece outra empresa
+        res = whatsapp_out.enviar(
+            c, ctx["conta_id"], numero, texto,
+            chip_id=whatsapp_out.chip_da_conversa(c, ctx["conta_id"], conversa_id))
         if not res.get("ok"):
             erros = {"nao_configurado": "WhatsApp não conectado (falta credencial Twilio no Render).",
                      "sem_numero_empresa": "Configure o WhatsApp desta empresa na aba Canais.",
@@ -2096,9 +2119,136 @@ def _qr_relogio_retencao(conta_id: int, status: str | None) -> None:
             "não deu pra zerar o relógio de retenção da conta %s: %s", conta_id, e)
 
 
+def chips_da_conta(c, conta_id: int) -> list[dict]:
+    """Os chips de WhatsApp desta empresa, o principal primeiro.
+
+    O principal é a própria linha da empresa (`chip_de` nulo); os demais são as
+    linhas que apontam pra ela. `apelido` é `contas.nome` — na empresa esse campo é
+    o nome do titular, que não serve de rótulo de chip, então ali ele vem vazio e a
+    tela mostra "Chip 1" até alguém batizar.
+    """
+    linhas = c.execute(
+        """select ct.id, coalesce(ct.nome,''), ct.chip_de,
+                  coalesce(cc.identificador,''), coalesce(cc.ativo,false),
+                  coalesce(cc.rotulo,'')
+             from contas ct
+             left join canais_config cc
+                    on cc.conta_id = ct.id and cc.canal='whatsapp'
+                   and coalesce(cc.provedor,'twilio')='qr'
+            where ct.id = %s or ct.chip_de = %s
+            order by (ct.chip_de is not null), ct.id""",
+        (conta_id, conta_id)).fetchall()
+    saida = []
+    for i, (cid, nome, chip_de, ident, ativo, rotulo) in enumerate(linhas):
+        principal = chip_de is None
+        # o apelido do principal mora no canal (migração 172); o do secundário, em
+        # contas.nome da linha dele — ver o cabeçalho da 172 pro porquê
+        apelido = (rotulo or "").strip() if principal else (nome or "").strip()
+        numero = "" if ident.startswith("qr:") else ident
+        saida.append({"id": cid, "principal": principal, "apelido": apelido,
+                      "rotulo": apelido or f"Chip {i + 1}",
+                      "numero": numero, "ativo": bool(ativo),
+                      "pareado": bool(numero)})
+    return saida
+
+
+def _chip_da_conta(c, conta_id: int, chip_id) -> int | None:
+    """Valida que `chip_id` é desta empresa e devolve o id — ou None.
+
+    Sem esta volta, um id na querystring mandaria o painel de uma empresa gerar QR,
+    desconectar ou renomear o chip de outra. É o mesmo cuidado do `_posse` do cockpit.
+    """
+    if not chip_id:
+        return conta_id
+    try:
+        chip_id = int(chip_id)
+    except (TypeError, ValueError):
+        return None
+    if chip_id == conta_id:
+        return conta_id
+    r = c.execute("select 1 from contas where id=%s and chip_de=%s", (chip_id, conta_id)).fetchone()
+    return chip_id if r else None
+
+
+@router.post("/painel/prospeccao/comunicacao/chip-novo")
+def comunicacao_chip_novo(request: Request, apelido: str = Form("")):
+    """Cria um SEGUNDO chip de WhatsApp nesta empresa.
+
+    A linha nasce em `contas` porque é lá que `wa_qr_auth`, `wa_qr_sessao_lock` e
+    `wa_qr_enviadas` apontam — o chip precisa de um id próprio pra ter cofre e trava
+    próprios, e é justamente isso que o mantém isolado do chip 1. `chip_de` é o que
+    impede essa linha de virar uma empresa de verdade.
+
+    NÃO pareia nada aqui: cria a linha e o canal desligado. O QR é o passo seguinte,
+    no botão do cartão — separar os dois é o que deixa criar o chip sem risco nenhum
+    pra sessão que está no ar.
+    """
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    apelido = " ".join((apelido or "").split())[:60]
+    if not apelido:
+        return JSONResponse({"ok": False, "msg": "Dê um apelido pro chip (ex.: Agência Beta)."})
+    with get_pool().connection() as c:
+        # um chip extra por vez: dois cartões vazios na tela é convite pra parear
+        # o mesmo número duas vezes
+        pend = c.execute("""select 1 from contas ct
+                             left join canais_config cc on cc.conta_id=ct.id and cc.canal='whatsapp'
+                            where ct.chip_de=%s and coalesce(cc.identificador,'') like 'qr:%%'""",
+                         (ctx["conta_id"],)).fetchone()
+        if pend:
+            return JSONResponse({"ok": False, "msg": "Já existe um chip esperando pareamento. "
+                                                    "Leia o QR dele antes de criar outro."})
+        tipo = (c.execute("select coalesce(tipo,'pj') from contas where id=%s",
+                          (ctx["conta_id"],)).fetchone() or ["pj"])[0]
+        chip = c.execute("""insert into contas (tipo, nome, chip_de) values (%s,%s,%s)
+                            returning id""", (tipo, apelido, ctx["conta_id"])).fetchone()[0]
+        c.execute("""insert into canais_config (conta_id, canal, identificador, provedor, ativo)
+                     values (%s,'whatsapp',%s,'qr',false)""", (chip, "qr:" + str(chip)))
+        c.commit()
+    return JSONResponse({"ok": True, "chip": chip, "apelido": apelido})
+
+
+@router.post("/painel/prospeccao/comunicacao/chip-apelido")
+def comunicacao_chip_apelido(request: Request, chip: str = Form(""), apelido: str = Form("")):
+    """Renomeia um chip. Vale pro principal também — é o rótulo do relatório.
+
+    No chip principal o apelido é gravado em `canais_config.rotulo`, não em
+    `contas.nome`: aquele campo é o nome do titular da conta e aparece em contrato,
+    cobrança e e-mail. Trocá-lo por "Agência Alfa" arrumaria a etiqueta do inbox e
+    estragaria cinco outros lugares.
+    """
+    ctx, redir = _acesso(request)
+    if redir is not None:
+        return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
+    if not ctx["gerencia"]:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    apelido = " ".join((apelido or "").split())[:60]
+    with get_pool().connection() as c:
+        alvo = _chip_da_conta(c, ctx["conta_id"], chip)
+        if alvo is None:
+            return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+        if alvo == ctx["conta_id"]:
+            c.execute("""update canais_config set rotulo=%s
+                          where conta_id=%s and canal='whatsapp'""", (apelido, alvo))
+        else:
+            c.execute("update contas set nome=%s where id=%s and chip_de=%s",
+                      (apelido or "Chip 2", alvo, ctx["conta_id"]))
+        c.commit()
+    return JSONResponse({"ok": True, "apelido": apelido})
+
+
 @router.post("/painel/prospeccao/comunicacao/whatsapp-qr-iniciar")
-def comunicacao_whatsapp_qr_iniciar(request: Request):
-    """Coloca a empresa no modo QR e pede o QR ao serviço Node pra exibir/escanear."""
+def comunicacao_whatsapp_qr_iniciar(request: Request, chip: str = Form("")):
+    """Coloca o chip no modo QR e pede o QR ao serviço Node pra exibir/escanear.
+
+    `chip` vazio = o chip principal, que é a própria empresa e o caminho de sempre.
+    Com um id de chip secundário, tudo daqui pra baixo age NAQUELE id — canal,
+    sessão e relógio de retenção. É o que faz gerar o QR do chip 2 não encostar em
+    nada do chip 1: o serviço abre outro socket, com outro cofre e outra trava.
+    """
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
@@ -2108,6 +2258,9 @@ def comunicacao_whatsapp_qr_iniciar(request: Request):
     if not wq.configurado():
         return JSONResponse({"ok": False, "msg": "O serviço de QR ainda não está ligado (falta WA_QR_SERVICE_URL no ambiente)."})
     with get_pool().connection() as c:
+        alvo = _chip_da_conta(c, ctx["conta_id"], chip)
+        if alvo is None:
+            return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
         # vira o provedor pra 'qr', mas PRESERVA o identificador de um provedor anterior
         # (ex.: número do Twilio) — só usa o placeholder 'qr:<id>' quando é a 1ª config.
         c.execute(
@@ -2115,10 +2268,10 @@ def comunicacao_whatsapp_qr_iniciar(request: Request):
                values (%s,'whatsapp',%s,'qr',true)
                on conflict (conta_id, canal)
                do update set provedor='qr', ativo=true, atualizado_em=now()""",
-            (ctx["conta_id"], "qr:" + str(ctx["conta_id"])))
+            (alvo, "qr:" + str(alvo)))
         c.commit()
-    r = wq.iniciar(ctx["conta_id"])
-    _qr_relogio_retencao(ctx["conta_id"], r.get("status"))
+    r = wq.iniciar(alvo)
+    _qr_relogio_retencao(alvo, r.get("status"))
     return JSONResponse({"ok": bool(r.get("ok", True) and not r.get("erro")),
                          "status": r.get("status"), "qr": r.get("qr"),
                          "sincronizando": bool(r.get("sincronizando")), "sync_progress": r.get("syncProgress") or 0,
@@ -2126,15 +2279,22 @@ def comunicacao_whatsapp_qr_iniciar(request: Request):
 
 
 @router.get("/painel/prospeccao/comunicacao/whatsapp-qr-status")
-def comunicacao_whatsapp_qr_status(request: Request):
-    """Consulta o status da sessão QR (pro polling do painel enquanto escaneia)."""
+def comunicacao_whatsapp_qr_status(request: Request, chip: str = ""):
+    """Consulta o status da sessão QR (pro polling do painel enquanto escaneia).
+
+    Cada cartão da tela faz o próprio polling, no próprio chip — dois status
+    independentes, como as duas sessões."""
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
     from finance import whatsapp_qr as wq
-    r = wq.status(ctx["conta_id"])
+    with get_pool().connection() as c:
+        alvo = _chip_da_conta(c, ctx["conta_id"], chip)
+    if alvo is None:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    r = wq.status(alvo)
     st = r.get("status") or "desconectado"
-    _qr_relogio_retencao(ctx["conta_id"], st)
+    _qr_relogio_retencao(alvo, st)
     return JSONResponse({"ok": True, "status": st, "qr": r.get("qr"),
                          "sincronizando": bool(r.get("sincronizando")), "sync_progress": r.get("syncProgress") or 0,
                          "msg": _QR_ROT.get(st, "")})
@@ -2170,25 +2330,34 @@ def comunicacao_whatsapp_aparelhos(request: Request):
 
 
 @router.post("/painel/prospeccao/comunicacao/whatsapp-qr-sair")
-def comunicacao_whatsapp_qr_sair(request: Request):
+def comunicacao_whatsapp_qr_sair(request: Request, chip: str = Form("")):
     """Encerra a sessão QR no serviço Node. NÃO apaga a config do WhatsApp da empresa —
     pra não derrubar o canal sem querer (ela continua no provedor 'qr', desconectada;
-    pra trocar de provedor é só usar o seletor de Canais)."""
+    pra trocar de provedor é só usar o seletor de Canais).
+
+    Age no chip informado, e SÓ nele. `wq.sair` chama /session/<chip>/sair, que apaga
+    a credencial daquele id — outra linha do cofre, outra trava, outro socket. É por
+    isso que o Desconectar de um cartão não alcança o outro nem por engano.
+    """
     ctx, redir = _acesso(request)
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
     if not ctx["gerencia"]:
         return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
     from finance import whatsapp_qr as wq
+    with get_pool().connection() as c:
+        alvo = _chip_da_conta(c, ctx["conta_id"], chip)
+    if alvo is None:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
     # devolve o resultado DE VERDADE. Antes respondia {"ok": True} sempre, mesmo
     # quando o serviço não respondia — e o painel dizia "Desconectado." com a
     # sessão inteira ainda de pé, credencial e histórico intactos. O usuário ia
     # escanear um QR novo achando que tinha desconectado.
-    r = wq.sair(ctx["conta_id"])
+    r = wq.sair(alvo)
     if not r.get("ok"):
         import logging
         logging.getLogger("prospeccao.wa_qr").warning(
-            "whatsapp_qr_sair: conta_id=%s falhou — %s", ctx["conta_id"], r.get("erro"))
+            "whatsapp_qr_sair: chip=%s falhou — %s", alvo, r.get("erro"))
         return JSONResponse({"ok": False, "erro": r.get("erro") or "falha"}, status_code=502)
     return JSONResponse({"ok": True})
 
@@ -2994,7 +3163,7 @@ def _ja_conversou(c, conta_id, lead_id) -> bool:
 
 
 def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente_on,
-                         *, exigir_continuidade=False):
+                         *, exigir_continuidade=False, chip_id=None):
     """WhatsApp de ENTRADA (Twilio OU Cloud API): resolve lead+conversa pelo telefone,
     grava a mensagem e reabre a janela/reativa o agente. Devolve (conv_id, nova) — se
     a mensagem entrou agora ou já estava lá. Um humano que 'assumiu'
@@ -3098,12 +3267,16 @@ def _wa_inbound_conversa(c, conta_id, remetente, corpo, sid, nome_perfil, agente
             c.execute("update conversas set prospeccao_id=%s where id=%s", (lead_id, conv_id))
     else:
         conv_id = c.execute(
+            # `chip_id` guarda POR QUAL CHIP a conversa entrou — é o que faz a
+            # resposta sair pelo mesmo número. Nulo = o chip da própria empresa, que
+            # é o estado de todo o histórico e da empresa de um chip só.
             """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status,
-                 agente_ativo, contato_nome)
+                 agente_ativo, contato_nome, chip_id)
                values (%s,%s,'whatsapp',%s,'aberta',%s,
-                       (select nome from wa_contatos where conta_id=%s and numero8=%s))
+                       (select nome from wa_contatos where conta_id=%s and numero8=%s),%s)
                returning id""",
-            (conta_id, lead_id, remetente, agente_on, conta_id, alvo8)).fetchone()[0]
+            (conta_id, lead_id, remetente, agente_on, conta_id, alvo8,
+             _chip_gravavel(chip_id, conta_id))).fetchone()[0]
     cur = c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
                  values (%s,'whatsapp','in','lead',%s,%s)
                  on conflict (conversa_id, provider_sid) where provider_sid is not null do nothing""",
@@ -3288,7 +3461,8 @@ def _tratar_botao_prospec(c, conta_id, remetente, tipo, texto, sid, nome) -> boo
     txt = _pi.resposta(tipo, idn, material)
     _res = {}
     try:
-        _res = _wout.enviar(c, conta_id, rem, txt) or {}
+        _res = _wout.enviar(c, conta_id, rem, txt,
+                            chip_id=_wout.chip_da_conversa(c, conta_id, conv_id)) or {}
     except Exception:  # noqa: BLE001
         pass
     c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid, status)
@@ -3351,7 +3525,8 @@ async def webhook_twilio(request: Request, background_tasks: BackgroundTasks):
                     # a resposta ao CONVIDADO é opt-out por conta (Agenda › Lembrete)
                     from finance import agenda as _ag
                     if _ag.get_config(pool, _conv["conta_id"]).get("enviar_confirmacao", True):
-                        _wout.enviar(c, conta_id, remetente, _cv.confirmacao_texto(_conv))
+                        _wout.enviar(c, conta_id, remetente, _cv.confirmacao_texto(_conv),
+                                     chip_id=_wout.chip_da_conversa(c, conta_id, conv_id))
                     c.commit()
                     return Response("<Response></Response>", media_type="application/xml")
         # --- Botões do template de 1º contato da prospecção (quick reply) ---
@@ -3806,6 +3981,46 @@ def _conta_em_qr(c, conta_id: int) -> bool:
                and coalesce(provedor,'twilio')='qr'""", (conta_id,)).fetchone())
 
 
+def _resolver_chip(c, chip_id: int) -> tuple[int, int] | None:
+    """`(empresa_id, chip_id)` do id que o wa-qr mandou — ou None se ele não é um
+    canal QR válido.
+
+    O serviço manda o id do CHIP que recebeu a mensagem; para ele "conta_id" sempre
+    foi só o número de uma conexão (ele nem conhece a tabela `contas`). Enquanto cada
+    empresa tem um chip só, os dois números coincidem. Com um segundo chip, a linha
+    dele em `contas` traz `chip_de` apontando pro dono — e é ISSO que faz o lead do
+    chip 2 nascer no funil da mesma empresa, em vez de virar uma conta à parte.
+
+    Duas coisas que parecem detalhe e não são:
+
+    * o portão olha o `canais_config` DO CHIP, não o da empresa. É o que permite
+      desligar o chip 2 sem desligar o chip 1 — e é o mesmo motivo pelo qual o
+      /deslogado não pode traduzir (ver lá).
+    * `coalesce(chip_de, id)` devolve o próprio id quando `chip_de` é nulo, que é o
+      estado de todas as 22 contas hoje. Com uma empresa de um chip só, esta função
+      responde exatamente o que `_conta_em_qr` respondia.
+    """
+    r = c.execute(
+        """select coalesce(ct.chip_de, ct.id)
+             from contas ct
+             join canais_config cc on cc.conta_id = ct.id
+            where ct.id = %s and cc.canal='whatsapp' and cc.ativo
+              and coalesce(cc.provedor,'twilio')='qr'""", (chip_id,)).fetchone()
+    return (int(r[0]), int(chip_id)) if r else None
+
+
+def _chip_gravavel(chip_id, empresa_id):
+    """O que vai em `conversas.chip_id`: o chip, ou NULO quando ele É a empresa.
+
+    Nulo já significa "responde pelo chip da própria empresa" — é o que valem as 1.101
+    conversas que existem hoje. Gravar o id da empresa ali diria a mesma coisa com
+    outro valor, e aí passariam a existir duas formas de dizer "chip principal": a
+    consulta que filtrasse por uma delas erraria metade das conversas, dependendo de
+    terem entrado antes ou depois desta mudança.
+    """
+    return None if (chip_id is None or int(chip_id) == int(empresa_id)) else int(chip_id)
+
+
 @router.post("/webhooks/wa-qr")
 async def webhook_wa_qr(request: Request, background_tasks: BackgroundTasks):
     """Entrada do WhatsApp por QR (serviço Node services/wa-qr). Autentica pelo
@@ -3841,33 +4056,36 @@ async def webhook_wa_qr(request: Request, background_tasks: BackgroundTasks):
         return Response("ok", media_type="text/plain")
     pool = get_pool()
     with pool.connection() as c:
-        # confere que a empresa está mesmo no modo QR (evita conta_id forjado tocar outra via)
-        if not _conta_em_qr(c, conta_id):
-            log.warning("webhook_wa_qr: conta_id=%s sem canal whatsapp/qr ativo em canais_config — descartado",
+        # confere que o chip está mesmo no modo QR (evita id forjado tocar outra via)
+        # e traduz chip -> empresa. Com um chip só, empresa == chip, como sempre foi.
+        alvo = _resolver_chip(c, conta_id)
+        if not alvo:
+            log.warning("webhook_wa_qr: chip=%s sem canal whatsapp/qr ativo em canais_config — descartado",
                         conta_id)
             return Response("ok", media_type="text/plain")
+        empresa_id, chip_id = alvo
         m = c.execute("select coalesce(ativo,false) from agente_config where conta_id=%s",
-                      (conta_id,)).fetchone()
+                      (empresa_id,)).fetchone()
         agente_on = bool(m and m[0])
-        conv_id, nova = _wa_inbound_conversa(c, conta_id, sender, texto,
+        conv_id, nova = _wa_inbound_conversa(c, empresa_id, sender, texto,
                                             payload.get("id") or None, payload.get("nome"),
-                                            agente_on)
+                                            agente_on, chip_id=chip_id)
         # lê DENTRO da transação: o update acima já valeu, então a conversa ligada à
         # mão aparece aqui mesmo com o agente-mestre desligado (ver _agente_atende).
         # `nova` corta a reentrega: o wa-qr manda a mesma mensagem de novo quando a
         # conexão oscila, e sem isto o cliente recebia uma resposta por entrega.
         atender = nova and _agente_atende(c, conv_id, agente_on)
         c.commit()
-    log.info("webhook_wa_qr: conta_id=%s conv_id=%s gravado ✓ (mestre=%s nova=%s atende=%s)",
-             conta_id, conv_id, agente_on, nova, atender)
+    log.info("webhook_wa_qr: chip=%s empresa=%s conv_id=%s gravado ✓ (mestre=%s nova=%s atende=%s)",
+             chip_id, empresa_id, conv_id, agente_on, nova, atender)
     if atender:
         from finance import agente as _ag
-        background_tasks.add_task(_ag.atender, get_pool(), conta_id, conv_id)
+        background_tasks.add_task(_ag.atender, get_pool(), empresa_id, conv_id)
     return Response("ok", media_type="text/plain")
 
 
 def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando, de_mim=False,
-                           nome_perfil="") -> int:
+                           nome_perfil="", *, chip_id=None) -> int:
     """WhatsApp IMPORTADO do histórico (mensagem de ANTES de conectar por QR, ver
     /webhooks/wa-qr/historico): grava a conversa preservando a data original da
     mensagem. `de_mim=True` = mensagem que o VENDEDOR enviou (o histórico traz os
@@ -3889,11 +4107,12 @@ def _wa_historico_conversa(c, conta_id, remetente, corpo, sid, quando, de_mim=Fa
         # das mensagens, então renomear depois não alcançaria estas conversas
         conv_id = c.execute(
             """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status,
-                 agente_ativo, ultima_msg_em, contato_nome)
+                 agente_ativo, ultima_msg_em, contato_nome, chip_id)
                values (%s,null,'whatsapp',%s,'aberta',false,coalesce(%s,now()),
-                       (select nome from wa_contatos where conta_id=%s and numero8=%s))
+                       (select nome from wa_contatos where conta_id=%s and numero8=%s),%s)
                returning id""",
-            (conta_id, remetente, quando, conta_id, alvo8)).fetchone()[0]
+            (conta_id, remetente, quando, conta_id, alvo8,
+             _chip_gravavel(chip_id, conta_id))).fetchone()[0]
     c.execute(
         """insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid, criado_em)
              values (%s,'whatsapp',%s,%s,%s,%s,coalesce(%s,now()))
@@ -3943,22 +4162,23 @@ async def webhook_wa_qr_historico(request: Request):
         return Response("ok", media_type="text/plain")
     pool = get_pool()
     with pool.connection() as c:
-        dono = c.execute("""select 1 from canais_config
-                              where conta_id=%s and canal='whatsapp' and ativo and coalesce(provedor,'twilio')='qr'""",
-                         (conta_id,)).fetchone()
-        if not dono:
-            log.warning("webhook_wa_qr_historico: conta_id=%s sem canal whatsapp/qr ativo — descartado",
+        alvo = _resolver_chip(c, conta_id)
+        if not alvo:
+            log.warning("webhook_wa_qr_historico: chip=%s sem canal whatsapp/qr ativo — descartado",
                         conta_id)
             return Response("ok", media_type="text/plain")
-        conv_id = _wa_historico_conversa(c, conta_id, sender, texto, payload.get("id") or None,
+        empresa_id, chip_id = alvo
+        conv_id = _wa_historico_conversa(c, empresa_id, sender, texto, payload.get("id") or None,
                                          quando, de_mim=bool(payload.get("de_mim")),
-                                         nome_perfil=str(payload.get("nome") or ""))
+                                         nome_perfil=str(payload.get("nome") or ""),
+                                         chip_id=chip_id)
         c.commit()
-    log.info("webhook_wa_qr_historico: conta_id=%s conv_id=%s importado ✓", conta_id, conv_id)
+    log.info("webhook_wa_qr_historico: chip=%s empresa=%s conv_id=%s importado ✓",
+             chip_id, empresa_id, conv_id)
     return Response("ok", media_type="text/plain")
 
 
-def _wa_saida_conversa(c, conta_id, destinatario, corpo, sid):
+def _wa_saida_conversa(c, conta_id, destinatario, corpo, sid, *, chip_id=None):
     """Mensagem que o VENDEDOR mandou DIRETO pelo WhatsApp do celular (fora do
     Zaq) — o Baileys ecoa de volta como fromMe. Dedup por (conversa_id,
     provider_sid): se a mensagem já saiu PELO Zaq (que grava na hora do envio em
@@ -3995,11 +4215,12 @@ def _wa_saida_conversa(c, conta_id, destinatario, corpo, sid):
         # isso a conversa que o vendedor abriu aparece na caixa como número cru
         conv_id = c.execute(
             """insert into conversas (conta_id, prospeccao_id, canal, contato_ref, status,
-                 agente_ativo, ultima_msg_em, contato_nome)
+                 agente_ativo, ultima_msg_em, contato_nome, chip_id)
                values (%s,%s,'whatsapp',%s,'aberta',false,now(),
-                       (select nome from wa_contatos where conta_id=%s and numero8=%s))
+                       (select nome from wa_contatos where conta_id=%s and numero8=%s),%s)
                returning id""",
-            (conta_id, lead_id, destinatario, conta_id, alvo8)).fetchone()[0]
+            (conta_id, lead_id, destinatario, conta_id, alvo8,
+             _chip_gravavel(chip_id, conta_id))).fetchone()[0]
     c.execute("""insert into mensagens (conversa_id, canal, direcao, autor, texto, provider_sid)
                  values (%s,'whatsapp','out','humano',%s,%s)
                  on conflict (conversa_id, provider_sid) where provider_sid is not null do nothing""",
@@ -4032,21 +4253,22 @@ async def webhook_wa_qr_saida(request: Request):
         return Response("ok", media_type="text/plain")
     pool = get_pool()
     with pool.connection() as c:
-        dono = c.execute("""select 1 from canais_config
-                              where conta_id=%s and canal='whatsapp' and ativo and coalesce(provedor,'twilio')='qr'""",
-                         (conta_id,)).fetchone()
-        if not dono:
+        alvo = _resolver_chip(c, conta_id)
+        if not alvo:
             return Response("ok", media_type="text/plain")
-        conv_id = _wa_saida_conversa(c, conta_id, destinatario, texto, payload.get("id") or None)
+        empresa_id, chip_id = alvo
+        conv_id = _wa_saida_conversa(c, empresa_id, destinatario, texto,
+                                     payload.get("id") or None, chip_id=chip_id)
         c.commit()
     if conv_id:
-        log.info("webhook_wa_qr_saida: conta_id=%s conv_id=%s registrado ✓", conta_id, conv_id)
+        log.info("webhook_wa_qr_saida: chip=%s empresa=%s conv_id=%s registrado ✓",
+                 chip_id, empresa_id, conv_id)
     else:
         # não deve mais acontecer (a conversa é criada quando falta), então isto aqui
         # é sinal de defeito de verdade — número impossível de normalizar, insert que
         # não voltou id. Fica gravado pra não sumir em silêncio como sumia antes.
-        log.warning("webhook_wa_qr_saida: conta_id=%s não consegui registrar o eco do número %s…",
-                    conta_id, destinatario[:6])
+        log.warning("webhook_wa_qr_saida: empresa=%s não consegui registrar o eco do número %s…",
+                    empresa_id, destinatario[:6])
     return Response("ok", media_type="text/plain")
 
 
@@ -4141,8 +4363,14 @@ def _gravar_contatos_wa(conta_id: int, numeros8: list[str], nomes: list[str],
 
     Devolve quantas conversas foram renomeadas."""
     with (pool or get_pool()).connection() as c:
-        if not _conta_em_qr(c, conta_id):
+        # traduz: a agenda é o caderno de contatos DA EMPRESA. Os dois chips podem
+        # ter listas diferentes no celular, e aqui elas se juntam — mesmo número
+        # salvo com nomes diferentes fica com o do sync mais recente. É o
+        # comportamento certo pra uma empresa só, mas é escolha, não consequência.
+        alvo = _resolver_chip(c, conta_id)
+        if not alvo:
             return 0
+        conta_id = alvo[0]
         # guarda na agenda (vale pra conversa que ainda NEM EXISTE). Nome da
         # agenda sobrescreve; pushName não derruba um nome que veio da agenda.
         c.execute("""insert into wa_contatos (conta_id, numero8, nome, da_agenda, atualizado)
@@ -4204,9 +4432,12 @@ async def webhook_wa_qr_audio(request: Request):
     if not conta_id or not sid or not b64:
         return Response("ok", media_type="text/plain")
     with get_pool().connection() as c:
-        if not _conta_em_qr(c, conta_id):
-            log.warning("webhook_wa_qr_audio: conta_id=%s não está em QR — descartado", conta_id)
+        # traduz: o áudio cola numa mensagem que já é da empresa
+        alvo = _resolver_chip(c, conta_id)
+        if not alvo:
+            log.warning("webhook_wa_qr_audio: chip=%s não está em QR — descartado", conta_id)
             return Response("ok", media_type="text/plain")
+        conta_id = alvo[0]
     from core.transcribe import transcritor_se_configurado
     tr = transcritor_se_configurado()
     if tr is None:
@@ -4273,9 +4504,14 @@ async def webhook_wa_qr_status(request: Request):
     validos = {"enviado", "entregue", "lido", "erro"}
     n = 0
     with get_pool().connection() as c:
-        if not _conta_em_qr(c, conta_id):
-            log.warning("webhook_wa_qr_status: conta_id=%s não está em QR — descartado", conta_id)
+        # traduz, e aqui é obrigatório: o recibo casa por `cv.conta_id`, e a conversa
+        # foi gravada com o id da EMPRESA. Sem traduzir, recibo de mensagem do chip 2
+        # não acharia nada e o status ficaria congelado em "enviado" pra sempre.
+        alvo = _resolver_chip(c, conta_id)
+        if not alvo:
+            log.warning("webhook_wa_qr_status: chip=%s não está em QR — descartado", conta_id)
             return Response("ok", media_type="text/plain")
+        conta_id = alvo[0]
         for it in itens[:500]:
             sid = str((it or {}).get("id") or "").strip()
             novo = str((it or {}).get("status") or "").strip()
@@ -4327,9 +4563,24 @@ async def webhook_wa_qr_deslogado(request: Request):
         return Response("ok", media_type="text/plain")
     pool = get_pool()
     with pool.connection() as c:
-        if not _conta_em_qr(c, conta_id):
-            log.warning("webhook_wa_qr_deslogado: conta_id=%s não está em QR — ignorado", conta_id)
+        # ────────────────────────────────────────────────────────────────────────
+        # ESTE É O ÚNICO WEBHOOK QUE **NÃO** TRADUZ CHIP -> EMPRESA.
+        #
+        # Deslogar é fato sobre a CONEXÃO, não sobre o lead. O `update` abaixo apaga
+        # o canal do id que veio: se aqui a gente trocasse o chip pela empresa, o
+        # chip 2 caindo desligaria o `canais_config` da empresa — e a empresa é onde
+        # mora o canal do CHIP 1, que está conectado e recebendo. Uma queda no
+        # aparelho secundário derrubaria o principal, calada.
+        #
+        # A regra vale pra todo o caminho: fato sobre o LEAD sobe pra empresa; fato
+        # sobre a CONEXÃO fica no chip. Só `_resolver_chip` para validar (é o mesmo
+        # portão), e o id usado daqui pra baixo continua sendo o do chip.
+        # ────────────────────────────────────────────────────────────────────────
+        alvo = _resolver_chip(c, conta_id)
+        if not alvo:
+            log.warning("webhook_wa_qr_deslogado: chip=%s não está em QR — ignorado", conta_id)
             return Response("ok", media_type="text/plain")
+        empresa_id, chip_id = alvo
         # `desconectado_em` é o MARCO ZERO da retenção de 30 dias (migração 165).
         # `coalesce` de propósito: só carimba a PRIMEIRA desconexão. Deslogar de
         # novo sem ter reconectado no meio não pode empurrar o prazo pra frente,
@@ -4338,20 +4589,29 @@ async def webhook_wa_qr_deslogado(request: Request):
                         set ativo=false,
                             desconectado_em=coalesce(desconectado_em, now())
                       where conta_id=%s and canal='whatsapp'
-                        and coalesce(provedor,'twilio')='qr'""", (conta_id,))
+                        and coalesce(provedor,'twilio')='qr'""", (chip_id,))
         c.commit()
-    log.warning("webhook_wa_qr_deslogado: conta_id=%s deslogou — canal desligado "
-                "(histórico preservado)", conta_id)
+    log.warning("webhook_wa_qr_deslogado: chip=%s (empresa %s) deslogou — canal do chip "
+                "desligado (histórico preservado)", chip_id, empresa_id)
     try:
         from finance import notificar
+        # o aviso vai pro dono da EMPRESA — é ele quem reconecta. Quando o chip que
+        # caiu não é o principal, o texto diz QUAL: "seu WhatsApp desconectou" numa
+        # empresa de dois números manda a pessoa conferir o aparelho errado.
+        qual = ""
+        if chip_id != empresa_id:
+            with pool.connection() as c2:
+                nm = c2.execute("select coalesce(nullif(btrim(nome),''),'') from contas where id=%s",
+                                (chip_id,)).fetchone()
+            qual = f" ({nm[0]})" if nm and nm[0] else " (o segundo número)"
         notificar.enviar_para_dono(
-            pool, conta_id,
-            "⚠️ Seu WhatsApp desconectou do Zaq. Nada foi perdido — as conversas "
+            pool, empresa_id,
+            f"⚠️ Seu WhatsApp{qual} desconectou do Zaq. Nada foi perdido — as conversas "
             "estão todas aqui. Pra voltar a enviar e receber, leia o QR Code de novo "
             "em Comunicação › Canais.")
     except Exception as e:  # noqa: BLE001 — o aviso nunca segura a resposta do webhook
-        log.warning("webhook_wa_qr_deslogado: não deu pra avisar o dono da conta %s: %s",
-                    conta_id, e)
+        log.warning("webhook_wa_qr_deslogado: não deu pra avisar o dono da empresa %s: %s",
+                    empresa_id, e)
     return Response("ok", media_type="text/plain")
 
 
@@ -9698,6 +9958,72 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           </div>
         </div>
         <div class="mut" id="qr-msg" style="font-size:.78rem;margin-top:.45rem"></div>
+
+        <!-- ═══ APELIDO DO CHIP 1 e o CHIP 2 ═══════════════════════════════════
+             Tudo daqui até o fim do bloco é ADITIVO: nenhuma linha acima foi
+             tocada. O chip 1 continua com os mesmos ids, as mesmas funções e o
+             mesmo polling de sempre — o cartão do chip 2 tem os seus (`c2-*`) e
+             fala com as mesmas rotas passando `chip=<id>`. Duas sessões, dois
+             cartões, dois pollings; um não alcança o outro nem por engano.       -->
+        <div style="margin-top:.7rem;border-top:1px solid var(--borda);padding-top:.7rem">
+          <label class="lbl" style="font-size:.72rem">Apelido deste chip</label>
+          <div style="display:flex;gap:.4rem">
+            <input class="fld" id="c1-apelido" maxlength="60" placeholder="ex.: Agência Alfa"
+                   value="{{ (canais.chips[0].apelido if canais.chips else '') }}">
+            <button type="button" class="pbtn ghost" style="white-space:nowrap"
+                    onclick="chipApelido('', 'c1-apelido')">Salvar</button>
+          </div>
+          <div class="mut" style="font-size:.72rem;margin-top:.3rem">
+            É este nome que aparece no inbox e que o relatório agrupa. Não muda o
+            nome da empresa em contrato, cobrança ou e-mail.
+          </div>
+        </div>
+
+        {% set chip2 = (canais.chips[1] if canais.chips|length > 1 else None) %}
+        {% if chip2 %}
+        <div id="c2-card" data-chip="{{ chip2.id }}" style="margin-top:.7rem;border:1px dashed var(--ambar-borda);border-radius:10px;padding:.7rem .8rem;background:#1a1710">
+          <div style="display:flex;align-items:center;gap:.45rem;flex-wrap:wrap">
+            <b style="font-size:.85rem">Chip 2</b>
+            <span id="c2-num" style="font-family:ui-monospace,monospace;font-size:.8rem;color:var(--txt-mut)">{{ chip2.numero or 'nenhum número pareado' }}</span>
+            <span id="c2-st" style="font-size:.76rem;margin-left:auto;color:var(--ambar)">Verificando…</span>
+          </div>
+          <div style="margin-top:.5rem">
+            <label class="lbl" style="font-size:.72rem">Apelido deste chip</label>
+            <div style="display:flex;gap:.4rem">
+              <input class="fld" id="c2-apelido" maxlength="60" placeholder="ex.: Agência Beta" value="{{ chip2.apelido }}">
+              <button type="button" class="pbtn ghost" style="white-space:nowrap"
+                      onclick="chipApelido(document.getElementById('c2-card').dataset.chip,'c2-apelido')">Salvar</button>
+            </div>
+          </div>
+          <div style="display:flex;gap:.4rem;margin-top:.55rem;flex-wrap:wrap">
+            <button type="button" class="pbtn" id="c2-btn" onclick="c2Iniciar()" disabled>Verificando…</button>
+            <button type="button" class="pbtn ghost" id="c2-sair" onclick="c2Sair()" style="display:none">Desconectar</button>
+          </div>
+          <div id="c2-box" style="margin-top:.6rem;text-align:center;display:none">
+            <img id="c2-img" alt="QR do chip 2" style="width:220px;max-width:100%;border-radius:10px;background:#fff;padding:.4rem">
+          </div>
+          <div class="mut" id="c2-msg" style="font-size:.78rem;margin-top:.45rem"></div>
+          <div class="mut" style="font-size:.72rem;margin-top:.35rem">
+            Chip próprio: <b>credencial, sessão e histórico separados</b>. Parear,
+            reconectar ou desconectar aqui <b>não encosta no chip 1</b>. Os dois caem
+            no mesmo funil, com etiqueta no inbox.
+          </div>
+        </div>
+        {% else %}
+        <div style="margin-top:.7rem;border-top:1px solid var(--borda);padding-top:.7rem">
+          <div style="font-weight:600;font-size:.82rem;margin-bottom:.2rem">Segundo chip</div>
+          <div class="mut" style="font-size:.76rem;margin-bottom:.4rem">
+            Conecta outro aparelho nesta mesma empresa. Conexão independente — não
+            mexe na do chip 1 — e os leads caem no mesmo funil.
+          </div>
+          <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+            <input class="fld" id="c2-novo-nome" maxlength="60" placeholder="Apelido (ex.: Agência Beta)">
+            <button type="button" class="pbtn ghost" style="white-space:nowrap" onclick="chipNovo()">Criar chip 2</button>
+          </div>
+          <div class="mut" id="c2-novo-msg" style="font-size:.76rem;margin-top:.35rem"></div>
+        </div>
+        {% endif %}
+
         <!-- APARELHOS LIGADOS. Nasce escondido e só o JS mostra: afirmar "nenhum
              aparelho" antes de ter perguntado seria pior que não dizer nada. -->
 <div id="wa-aps" style="margin-top:.7rem;border-top:1px solid var(--borda);padding-top:.7rem">
@@ -9821,6 +10147,89 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         var _qrEspera=null;
         function qrEsperando(){if(_qrEspera)clearTimeout(_qrEspera);
           _qrEspera=setTimeout(qrIndefinido,7000);}
+
+        // ═══ CHIP 2 ═══════════════════════════════════════════════════════════
+        // Funções PRÓPRIAS, ids próprios, timer próprio. Reaproveitar as do chip 1
+        // com um parâmetro pareceria mais limpo e seria pior: o chip 1 está no ar em
+        // três contas, e qualquer engano no parâmetro faria o cartão de um mexer na
+        // sessão do outro. Duplicar cem linhas custa menos que essa chance.
+        var _c2Timer=null;
+        function c2Chip(){var el=document.getElementById('c2-card');return el?el.dataset.chip:'';}
+        function c2Show(d){
+          var box=document.getElementById('c2-box'),img=document.getElementById('c2-img'),
+              msg=document.getElementById('c2-msg'),sair=document.getElementById('c2-sair'),
+              btn=document.getElementById('c2-btn'),st=document.getElementById('c2-st');
+          if(!d||!d.status){if(btn){btn.textContent='📱 Gerar QR';btn.disabled=false;}
+            if(st){st.textContent='não deu pra checar';st.style.color='var(--ambar)';}return;}
+          var conectado=d.status==='conectado';
+          if(d.qr&&!conectado){img.src=d.qr;box.style.display='block';}else{box.style.display='none';}
+          if(msg)msg.textContent=d.msg||'';
+          if(st){st.textContent=conectado?'✅ Conectado':(d.status==='aguardando_qr'?'Aguardando QR':d.status);
+                 st.style.color=conectado?'var(--verde-claro)':'var(--ambar)';}
+          if(sair)sair.style.display=(d.status!=='desconectado')?'inline-flex':'none';
+          // mesma correção que o chip 1 recebeu: conectado não é "Reconectar". O
+          // /iniciar devolve a sessão viva sem tocar nela, então o botão prometia uma
+          // ação que não acontece. Continua clicável — é a saída de quem está
+          // "conectado" e mudo.
+          if(btn){btn.textContent=conectado?'✓ Conectado':'📱 Gerar QR';
+            btn.classList.toggle('ghost',conectado);
+            btn.title=conectado?'A sessão está de pé. Clique só se desconfiar do status — verifica sem derrubar nada.':'';
+            btn.disabled=false;}
+          if(d.status==='desconectado'||conectado){if(_c2Timer){clearInterval(_c2Timer);_c2Timer=null;}}}
+        function c2Poll(){fetch('/painel/prospeccao/comunicacao/whatsapp-qr-status?chip='+encodeURIComponent(c2Chip()))
+          .then(function(r){return r.json();}).then(c2Show).catch(function(){c2Show(null);});}
+        function c2Iniciar(){var btn=document.getElementById('c2-btn'),msg=document.getElementById('c2-msg');
+          btn.disabled=true;btn.textContent='Gerando…';if(msg)msg.textContent='';
+          var fd=new FormData();fd.append('chip',c2Chip());
+          fetch('/painel/prospeccao/comunicacao/whatsapp-qr-iniciar',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
+            .then(function(r){return r.json();}).then(function(d){
+              c2Show(d);
+              if(!d.ok&&msg){msg.textContent=d.msg||d.erro||'Falha.';msg.style.color='var(--ambar)';return;}
+              if(_c2Timer)clearInterval(_c2Timer);_c2Timer=setInterval(c2Poll,3000);})
+            .catch(function(){btn.disabled=false;btn.textContent='📱 Gerar QR';
+              if(msg){msg.textContent='Falha de rede.';msg.style.color='var(--ambar)';}});}
+        // Mesmo aviso do chip 1, e pelo mesmo motivo: este botão APAGA a credencial.
+        // A diferença é que aqui ele apaga a DESTE chip — o chip 1 não sente nada.
+        function c2Sair(){if(!confirm('⚠️ Isto NÃO é só desconectar.\\n\\n'
+          + 'Apaga a credencial e as chaves deste chip 2. Pra voltar, alguém vai '
+          + 'precisar escanear um QR novo — e depois disso ele fica CONECTADO MAS SEM '
+          + 'RECEBER por um bom tempo, enquanto as chaves se refazem.\\n\\n'
+          + 'O chip 1 não é afetado.\\n\\n'
+          + 'Se você só quer RECONECTAR, não use: o sistema reconecta sozinho.\\n\\n'
+          + 'Apagar a sessão do chip 2 mesmo assim?'))return;
+          var fd=new FormData();fd.append('chip',c2Chip());
+          fetch('/painel/prospeccao/comunicacao/whatsapp-qr-sair',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
+            .then(function(r){return r.json();}).then(function(d){
+              var m=document.getElementById('c2-msg');
+              if(d&&d.ok===false){if(m){m.textContent='Não deu pra desconectar ('+(d.erro||'falha')+').';m.style.color='var(--ambar)';}return;}
+              if(_c2Timer){clearInterval(_c2Timer);_c2Timer=null;}
+              c2Show({status:'desconectado',msg:'Desconectado.'});})
+            .catch(function(){var m=document.getElementById('c2-msg');
+              if(m){m.textContent='Falha de rede ao desconectar.';m.style.color='var(--ambar)';}});}
+        function chipNovo(){
+          var i=document.getElementById('c2-novo-nome'),m=document.getElementById('c2-novo-msg');
+          var nome=(i&&i.value||'').trim();
+          if(!nome){if(m){m.textContent='Dê um apelido pro chip.';m.style.color='var(--ambar)';}return;}
+          var fd=new FormData();fd.append('apelido',nome);
+          fetch('/painel/prospeccao/comunicacao/chip-novo',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
+            .then(function(r){return r.json();}).then(function(d){
+              if(!d||!d.ok){if(m){m.textContent=(d&&(d.msg||d.erro))||'Falha.';m.style.color='var(--ambar)';}return;}
+              // recarrega pra tela nascer com o cartão do chip 2 — é uma vez só, e
+              // evita duplicar em JS o bloco que o template já sabe desenhar
+              location.reload();})
+            .catch(function(){if(m){m.textContent='Falha de rede.';m.style.color='var(--ambar)';}});}
+        function chipApelido(chip,campo){
+          var i=document.getElementById(campo);if(!i)return;
+          var fd=new FormData();fd.append('chip',chip||'');fd.append('apelido',i.value||'');
+          var antes=i.style.borderColor;
+          fetch('/painel/prospeccao/comunicacao/chip-apelido',{method:'POST',headers:{'X-Requested-With':'fetch'},body:fd})
+            .then(function(r){return r.json();}).then(function(d){
+              i.style.borderColor=(d&&d.ok)?'var(--verde)':'var(--ambar)';
+              setTimeout(function(){i.style.borderColor=antes;},1400);})
+            .catch(function(){i.style.borderColor='var(--ambar)';
+              setTimeout(function(){i.style.borderColor=antes;},1400);});}
+        document.addEventListener('DOMContentLoaded',function(){
+          if(document.getElementById('c2-card'))c2Poll();});
         function qrPoll(){qrEsperando();
           fetch('/painel/prospeccao/comunicacao/whatsapp-qr-status').then(function(r){return r.json();})
             .then(qrShow).catch(qrIndefinido);}

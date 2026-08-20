@@ -39,7 +39,7 @@ create table funil_movimentos (id bigserial primary key, conta_id bigint, prospe
 create table funil_avisos (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   estado text, nivel text, etapa text default '', ref_em timestamptz,
   simulado boolean default false, membro_id bigint, criado_em timestamptz default now());
-create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint);
+create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint, chip_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
   criado_em timestamptz);
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text);

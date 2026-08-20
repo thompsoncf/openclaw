@@ -45,7 +45,10 @@ def pool():
         # 096 é quem acrescenta canais_config.provedor ('twilio'/'cloud'/'qr')
         for mig in ("080_comunicacao_omnichannel.sql", "081_canais_config.sql",
                     "096_whatsapp_cloud.sql", "140_conversa_contato_nome.sql",
-                    "141_wa_contatos.sql", "156_conversas_indice_num8.sql"):
+                    "141_wa_contatos.sql", "156_conversas_indice_num8.sql",
+                    # 171 traz contas.chip_de e conversas.chip_id — a entrada do
+                    # WhatsApp lê as duas desde que a empresa pode ter mais de um chip
+                    "171_conta_chip.sql"):
             c.execute((BASE / mig).read_text(encoding="utf-8"))
         c.commit()
     yield p

@@ -9760,7 +9760,20 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           // chegou resposta: desarma o cão de guarda, o botão sai do "Verificando…"
           // e volta a ser clicável
           if(_qrEspera){clearTimeout(_qrEspera);_qrEspera=null;}
-          if(btn){btn.textContent=conectado?'Reconectar':'📱 Gerar QR';btn.disabled=false;}
+          // CONECTADO NÃO É "RECONECTAR". O botão dizia isso e não reconectava nada:
+          // o /iniciar devolve a sessão viva sem tocar nela (services/wa-qr:1696), e
+          // o painel nunca manda {forcar:true}. Prometer uma ação que não acontece é
+          // pior que não ter botão — quem clica acha que consertou.
+          //
+          // CONTINUA CLICÁVEL de propósito. Desabilitar tiraria a única saída de quem
+          // está "conectado" e mudo — o caso que a Doce Mell já viveu —, e este
+          // arquivo já pagou por botão travado: é por isso que existe o cão de guarda
+          // do "Verificando…". Clicar aqui reconsulta e, se a sessão tiver morrido por
+          // baixo, religa. Só o texto e o peso mudam.
+          if(btn){btn.textContent=conectado?'✓ Conectado':'📱 Gerar QR';
+            btn.classList.toggle('ghost',conectado);
+            btn.title=conectado?'A sessão está de pé. Clique só se desconfiar do status — verifica sem derrubar nada.':'';
+            btn.disabled=false;}
           if(msg)msg.style.color=conectado?'var(--verde-claro)':'';
           // só para de perguntar quando realmente não tem mais nada mudando:
           // desconectado, ou conectado E já terminou de sincronizar o histórico.
@@ -9770,7 +9783,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         // o botão pro usuário poder agir e diz que não deu pra checar.
         function qrIndefinido(){var btn=document.getElementById('qr-btn'),m=document.getElementById('qr-msg');
           if(_qrEspera){clearTimeout(_qrEspera);_qrEspera=null;}
-          if(btn&&btn.disabled){btn.textContent='📱 Gerar QR';btn.disabled=false;}
+          if(btn&&btn.disabled){btn.textContent='📱 Gerar QR';btn.classList.remove('ghost');btn.disabled=false;}
           if(m&&!m.textContent){m.textContent='Não deu pra checar a sessão agora — pode gerar o QR.';m.style.color='var(--ambar)';}}
         // CÃO DE GUARDA do "Verificando…". A consulta pode não FALHAR nem RESPONDER:
         // o /iniciar de uma conta caída tenta religar antes de devolver, e o timeout

@@ -123,6 +123,19 @@ def test_todo_script_da_pagina_compila(pagina, tmp_path):
         + "\n\n".join(erros))
 
 
+def test_conectado_nao_promete_reconectar():
+    """O botão dizia "Reconectar" com a sessão de pé e não reconectava nada: o
+    /iniciar devolve a sessão viva sem tocar nela e o painel nunca manda
+    {forcar:true}. Prometer ação que não acontece é pior que não ter botão.
+
+    E ele CONTINUA clicável: desabilitar tiraria a única saída de quem está
+    "conectado" e mudo — e este arquivo já pagou caro por botão travado."""
+    js = "\n".join(_scripts(_render("prospeccao_comunicacao")))
+    assert "'✓ Conectado'" in js
+    assert "'Reconectar'" not in js, "o texto que mentia voltou"
+    assert "btn.disabled=false;}" in js, "o botão não pode nascer travado quando conectado"
+
+
 def test_o_bloco_do_contrato_esta_mesmo_na_pagina():
     """Mesma guarda do QR, pro card do contrato: o JS dele só existe no ramo
     `pode_contrato`, e um {% if %} mudado deixaria o teste de sintaxe verde sem

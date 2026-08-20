@@ -1481,8 +1481,15 @@ def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=
                -- o DONO do lead (vm), que não é quem falou por último (mm): a lista
                -- mostrava só o segundo, e os dois se confundem quando o vendedor
                -- responde por último.
-               p.vendedor_id, vm.nome
+               p.vendedor_id, vm.nome,
+               -- por qual CHIP a conversa entrou. Nulo = o chip principal, que é todo
+               -- o histórico; aí vale o apelido gravado no canal da própria empresa.
+               cv.chip_id,
+               coalesce(nullif(btrim(chp.nome),''), nullif(btrim(cc1.rotulo),''), '')
           from conversas cv
+          left join contas chp on chp.id = cv.chip_id
+          left join canais_config cc1 on cv.chip_id is null and cc1.conta_id = cv.conta_id
+                                     and cc1.canal='whatsapp' 
           left join prospeccao p on p.id = cv.prospeccao_id
           left join lateral (select id, texto, autor, membro_id from mensagens
                               where conversa_id=cv.id order by criado_em desc limit 1) lm on true
@@ -1491,6 +1498,10 @@ def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=
           join lateral (select count(*) n from mensagens where conversa_id=cv.id) cnt on true
          where {' and '.join(where)}
          order by cv.ultima_msg_em desc limit 100""", tuple(params)).fetchall()
+    # a empresa tem mais de um chip? decide se a etiqueta aparece — uma consulta só,
+    # fora do laço
+    dois_chips = bool(c.execute("select 1 from contas where chip_de=%s limit 1",
+                                (conta_id,)).fetchone())
     out = []
     for r in rows:
         if r[9] == "bot":
@@ -1510,7 +1521,10 @@ def _conversas_list(c, conta_id, gerencia, membro_id, canal="", vend="", escopo=
                     # é a MAIORIA da caixa; marcá-las de "sem responsável" seria
                     # alarme falso em quase toda linha.
                     "eh_lead": r[4] is not None, "lead_id": r[4],
-                    "dono_id": r[14], "dono": r[15] or ""})
+                    "dono_id": r[14], "dono": r[15] or "",
+                    # etiqueta do chip: só é preenchida quando a empresa TEM dois.
+                    # Numa empresa de um chip só seria a mesma palavra em 100 linhas.
+                    "chip_id": r[16], "chip_rot": (r[17] or "") if dois_chips else ""})
     return out
 
 
@@ -1637,15 +1651,20 @@ def _wa_chip(conta_id) -> dict:
     hit = _WA_CHIP_CACHE.get(conta_id)
     if hit and (agora - hit[0]) < 15:
         return hit[1]
-    chip = {"provedor": "", "nome": "", "numero": "", "estado": "sem_chip"}
+    chip = {"provedor": "", "nome": "", "numero": "", "estado": "sem_chip", "apelido": ""}
     try:
         with get_pool().connection() as c:
-            r = c.execute("""select coalesce(provedor,'twilio'), coalesce(identificador,'')
+            r = c.execute("""select coalesce(provedor,'twilio'), coalesce(identificador,''),
+                                    coalesce(rotulo,'')
                                from canais_config
                               where conta_id=%s and canal='whatsapp' and ativo""",
                           (conta_id,)).fetchone()
             if r:
                 chip["provedor"] = r[0]
+                # o APELIDO que a pessoa digitou em Canais vence o nome do perfil do
+                # WhatsApp. É ele que aparece no inbox e que o relatório agrupa —
+                # dois nomes pro mesmo chip em telas diferentes é o começo da confusão
+                chip["apelido"] = (r[2] or "").strip()[:60]
                 if r[0] == "qr":
                     cred = c.execute(
                         """select conteudo::json->'me'->>'name',
@@ -1653,7 +1672,8 @@ def _wa_chip(conta_id) -> dict:
                              from wa_qr_auth where conta_id=%s and arquivo='creds'""",
                         (conta_id,)).fetchone()
                     if cred:
-                        chip["nome"] = (cred[0] or "").strip()[:60]
+                        # o nome do perfil vira reserva: vale enquanto ninguém batizou
+                        chip["nome"] = chip.get("apelido") or (cred[0] or "").strip()[:60]
                         # "558698392961:14@s.whatsapp.net" → só os dígitos do número
                         chip["numero"] = _tel_fmt_br((cred[1] or "").split(":")[0].split("@")[0])
                 else:
@@ -1674,8 +1694,70 @@ def _wa_chip(conta_id) -> dict:
         if chip["estado"] == "conectado":
             chip["sem_receber"] = _ha_quanto(_wa_minutos_sem_receber(conta_id))
     except Exception:  # noqa: BLE001
-        chip = {"provedor": "", "nome": "", "numero": "", "estado": "sem_chip"}
+        chip = {"provedor": "", "nome": "", "numero": "", "estado": "sem_chip", "apelido": ""}
     _WA_CHIP_CACHE[conta_id] = (agora, chip)
+    return chip
+
+
+_WA_CHIP2_CACHE: dict = {}   # conta_id -> (quando, dict|None)
+
+
+def _wa_chip2(conta_id) -> dict | None:
+    """O SEGUNDO chip da empresa, no mesmo formato do `_wa_chip` — ou None.
+
+    None é a resposta das 22 contas de hoje, e a faixa desenha uma linha discreta
+    dizendo que não há segundo chip. Some seria mais limpo e pior: quem tem dois e vê
+    uma linha só não sabe se o outro caiu ou se a tela é que não mostra.
+
+    Cache próprio, de 15s como o do chip 1, porque o estado também vem de um HTTP ao
+    serviço Node e o cabeçalho é renderizado em toda navegação.
+    """
+    import time
+    agora = time.time()
+    hit = _WA_CHIP2_CACHE.get(conta_id)
+    if hit and (agora - hit[0]) < 15:
+        return hit[1]
+    chip = None
+    try:
+        with get_pool().connection() as c:
+            r = c.execute(
+                """select ct.id, coalesce(ct.nome,''),
+                          coalesce(cc.ativo,false),
+                          (select conteudo::json->'me'->>'id' from wa_qr_auth
+                            where conta_id=ct.id and arquivo='creds')
+                     from contas ct
+                     left join canais_config cc
+                            on cc.conta_id=ct.id and cc.canal='whatsapp'
+                           and coalesce(cc.provedor,'twilio')='qr'
+                    where ct.chip_de=%s
+                    order by ct.id limit 1""", (conta_id,)).fetchone()
+        if r:
+            chip = {"id": r[0], "provedor": "qr", "apelido": (r[1] or "").strip()[:60],
+                    "nome": (r[1] or "").strip()[:60],
+                    "numero": _tel_fmt_br((r[3] or "").split(":")[0].split("@")[0]) if r[3] else "",
+                    "estado": "sem_chip", "sem_receber": ""}
+            if not r[2]:
+                # canal desligado (recém-criado, ou desconectado pelo painel)
+                chip["estado"] = "caido" if chip["numero"] else "sem_chip"
+            else:
+                from finance import whatsapp_qr as _qr
+                if _qr.configurado():
+                    st = (_qr.status(r[0]) or {}).get("status") or ""
+                    chip["estado"] = "conectado" if st == "conectado" else "caido"
+                else:
+                    chip["estado"] = "caido"
+            if chip["estado"] == "conectado":
+                with get_pool().connection() as c:
+                    m = c.execute(
+                        """select extract(epoch from now() - max(m.criado_em))/60
+                             from mensagens m join conversas cv on cv.id=m.conversa_id
+                            where coalesce(cv.chip_id, cv.conta_id)=%s
+                              and cv.canal='whatsapp' and m.direcao='in'""",
+                        (r[0],)).fetchone()
+                chip["sem_receber"] = _ha_quanto(int(m[0]) if m and m[0] is not None else None)
+    except Exception:  # noqa: BLE001
+        chip = None
+    _WA_CHIP2_CACHE[conta_id] = (agora, chip)
     return chip
 
 
@@ -1735,7 +1817,7 @@ def prospeccao_comunicacao(request: Request, aba: str = "conversas", canal: str 
                    secao_ativa="prospeccao", aba=aba, convs=convs, escopo=escopo, canal=canal,
                    canais=_canais_status(pool, ctx["conta_id"]), canal_rot=CANAL_ROT,
                    gerencia=ctx["gerencia"], vendedores=vends, filtro_vend=filtro_vend,
-                   pode_atribuir=ctx["pode_atribuir"], chip=_wa_chip(ctx["conta_id"]),
+                   pode_atribuir=ctx["pode_atribuir"], chip=_wa_chip(ctx["conta_id"]), chip2=_wa_chip2(ctx["conta_id"]),
                    remetente=_ein_remetente(pool, ctx["conta_id"]), tem_ia=_tem_ia(),
                    ag_cfg=ag_cfg, ag_conhec=ag_conhec, perfil=perfil,
                    dist_cfg=dist_cfg, dist_membros=dist_membros,
@@ -9304,6 +9386,12 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .cx-conv{display:flex;gap:.6rem;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--borda);padding:.7rem .75rem;cursor:pointer;color:var(--txt)}
 .cx-conv:hover{background:#141416}
 .cx-conv.on{background:#12271f}
+/* etiqueta de chip: só nasce quando a empresa tem dois. Verde no principal,
+   âmbar no segundo — as mesmas cores das abas de Canais. */
+.cx-chip{font-size:.68rem;padding:1px 7px;border-radius:100px;border:1px solid;
+  margin-left:.3rem;white-space:nowrap}
+.cx-chip.um{color:var(--neon);border-color:#2A5A3E}
+.cx-chip.dois{color:var(--ambar);border-color:#57491D}
 .cx-conv .av{width:36px;height:36px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.78rem;background:#1d3a30;color:var(--verde-claro)}
 .cx-conv .mid{flex:1;min-width:0}
 .cx-conv .nm{display:flex;justify-content:space-between;gap:.4rem;align-items:baseline}
@@ -9478,6 +9566,31 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <a href="/painel/prospeccao/comunicacao?aba=canais">conectar</a>
         {% endif %}
       </div>
+
+      {# SEGUNDA LINHA — o chip 2, no mesmo formato e com os mesmos estados. Só
+         aparece pra empresa que está no QR: no Twilio/Cloud não existe segundo chip,
+         e a linha viraria ruído prometendo o que não dá pra fazer. #}
+      {% if chip.provedor == 'qr' %}
+      <div class="cx-chip-faixa">
+        {% if chip2 and chip2.estado == 'conectado' %}
+          <span class="pt" style="background:{{ 'var(--ambar)' if chip2.sem_receber else 'var(--neon)' }}"></span>Enviando WhatsApp pelo chip
+          {% if chip2.nome %}<b>{{ chip2.nome }}</b> · {% endif %}<code>{{ chip2.numero }}</code>
+          · <span style="color:var(--neon)">conectado</span>
+          {% if chip2.sem_receber %}· <span style="color:var(--ambar)"><b>sem receber {{ chip2.sem_receber }}</b></span>
+          · <a href="/painel/prospeccao/comunicacao?aba=canais">conferir o chip</a>{% endif %}
+        {% elif chip2 %}
+          <span class="pt" style="background:var(--coral)"></span>Chip
+          {% if chip2.nome %}<b>{{ chip2.nome }}</b>{% endif %}{% if chip2.numero %} · <code>{{ chip2.numero }}</code>{% endif %}
+          · <span style="color:var(--coral)">{{ 'desconectado' if chip2.numero else 'ainda sem parear' }}</span> —
+          <a href="/painel/prospeccao/comunicacao?aba=canais">{{ 'reconectar' if chip2.numero else 'ler o QR' }}</a>
+        {% else %}
+          {# discreto de propósito: não ter chip 2 é o normal, não é problema #}
+          <span class="pt" style="background:var(--borda)"></span>
+          <span style="color:var(--txt-mut)">Segundo chip não conectado</span> ·
+          <a href="/painel/prospeccao/comunicacao?aba=canais">conectar</a>
+        {% endif %}
+      </div>
+      {% endif %}
     </div>
   </div>
 
@@ -9535,7 +9648,7 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           <span class="nm"><b>{{ c.empresa }}</b><span class="t">{{ c.quando.strftime('%d/%m') if c.quando else '' }}</span></span>
           <span class="pre">{{ c.quem }}: {{ c.preview }}</span>
           {% set cnc = {'whatsapp':'cn-wpp','email':'cn-mail','messenger':'cn-msg','instagram':'cn-ig'} %}
-          <span class="cx-cn {{ cnc.get(c.canal,'cn-mail') }}">{{ c.canal_rot }}{% if c.n > 1 %} · {{ c.n }}{% endif %}</span>
+          <span class="cx-cn {{ cnc.get(c.canal,'cn-mail') }}">{{ c.canal_rot }}{% if c.n > 1 %} · {{ c.n }}{% endif %}</span>{% if c.chip_rot %}<span class="cx-chip {{ 'dois' if c.chip_id else 'um' }}">{{ c.chip_rot }}</span>{% endif %}
         </span>
       </button>
       {% else %}
@@ -10645,7 +10758,9 @@ function cxListItem(c){
     +'<span class="nm"><b>'+cxEsc(c.empresa)+'</b><span class="t">'+cxEsc(c.quando||'')+(unread?' <span class="cx-undot"></span>':'')+'</span></span>'
     +'<span class="pre">'+cxEsc(c.quem)+': '+cxEsc(c.preview)+'</span>'
     +cxDonoLinha(c)
-    +'<span class="cx-cn '+cnc+'">'+cxEsc(c.canal_rot)+(c.n>1?(' · '+c.n):'')+'</span></span></button>';
+    +'<span class="cx-cn '+cnc+'">'+cxEsc(c.canal_rot)+(c.n>1?(' · '+c.n):'')+'</span>'
+    +(c.chip_rot?('<span class="cx-chip '+(c.chip_id?'dois':'um')+'">'+cxEsc(c.chip_rot)+'</span>'):'')
+    +'</span></button>';
 }
 // O dono do lead, em linha própria. Só pra conversa que JÁ é lead: a maior parte da
 // caixa é contato que ainda não virou lead, e marcar todas de "sem responsável" seria

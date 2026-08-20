@@ -58,6 +58,10 @@ create table wa_contatos (conta_id bigint, numero8 text, nome text,
   da_agenda boolean default false, atualizado timestamptz default now(),
   primary key (conta_id, numero8));
 create table agente_config (conta_id bigint primary key, ativo boolean default false);
+-- a faixa do cabeçalho lê o aparelho conectado direto da credencial
+create table wa_qr_auth (conta_id bigint not null, arquivo text not null,
+  conteudo text not null, atualizado timestamptz default now(),
+  primary key (conta_id, arquivo));
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text, ativo boolean default true);
 """
@@ -457,3 +461,110 @@ def test_a_tela_nao_pergunta_aparelhos_de_chip_alheio(pool, painel):
     painel(outra)
     resp = pp.comunicacao_whatsapp_aparelhos(None, chip=str(chip))
     assert resp.status_code == 403
+
+
+# ═══════════════════════════════════════════ 7. a faixa e a etiqueta na lista
+
+def test_a_faixa_usa_o_APELIDO_e_nao_o_nome_do_perfil(pool, monkeypatch):
+    """O apelido é o que a pessoa digitou em Canais e o que o relatório agrupa. Dois
+    nomes pro mesmo chip em telas diferentes é o começo da confusão."""
+    emp = _empresa(pool)
+    with pool.connection() as c:
+        c.execute("""insert into wa_qr_auth (conta_id, arquivo, conteudo)
+                     values (%s,'creds',%s)""",
+                  (emp, '{"me":{"id":"5586994095516:14@s.whatsapp.net","name":"Perfil do Zap"}}'))
+        c.execute("update canais_config set rotulo='Agência Alfa' where conta_id=%s", (emp,))
+        c.commit()
+    monkeypatch.setattr(pp, "_WA_CHIP_CACHE", {})
+    from finance import whatsapp_qr as _qr
+    monkeypatch.setattr(_qr, "configurado", lambda: True)
+    monkeypatch.setattr(_qr, "status", lambda cid: {"status": "conectado"})
+    chip = pp._wa_chip(emp)
+    assert chip["nome"] == "Agência Alfa", "o apelido vence o nome do perfil"
+    assert chip["apelido"] == "Agência Alfa"
+
+
+def test_sem_apelido_a_faixa_cai_no_nome_do_perfil(pool, monkeypatch):
+    """Reserva: enquanto ninguém batizou, o nome do WhatsApp é melhor que nada."""
+    emp = _empresa(pool)
+    with pool.connection() as c:
+        c.execute("""insert into wa_qr_auth (conta_id, arquivo, conteudo)
+                     values (%s,'creds',%s)""",
+                  (emp, '{"me":{"id":"5586994095516:14@s.whatsapp.net","name":"Perfil do Zap"}}'))
+        c.commit()
+    monkeypatch.setattr(pp, "_WA_CHIP_CACHE", {})
+    from finance import whatsapp_qr as _qr
+    monkeypatch.setattr(_qr, "configurado", lambda: True)
+    monkeypatch.setattr(_qr, "status", lambda cid: {"status": "conectado"})
+    assert pp._wa_chip(emp)["nome"] == "Perfil do Zap"
+
+
+def test_sem_segundo_chip_a_faixa_devolve_None(pool, monkeypatch):
+    """O estado das 22 contas de hoje. A tela desenha a linha discreta."""
+    emp = _empresa(pool)
+    monkeypatch.setattr(pp, "_WA_CHIP2_CACHE", {})
+    assert pp._wa_chip2(emp) is None
+
+
+def test_a_faixa_do_chip_2_traz_apelido_e_estado(pool, monkeypatch):
+    emp = _empresa(pool)
+    chip = _chip2(pool, emp, nome="Agência Beta")
+    with pool.connection() as c:
+        c.execute("""insert into wa_qr_auth (conta_id, arquivo, conteudo)
+                     values (%s,'creds',%s)""",
+                  (chip, '{"me":{"id":"5586988124400:9@s.whatsapp.net","name":"outro"}}'))
+        c.commit()
+    monkeypatch.setattr(pp, "_WA_CHIP2_CACHE", {})
+    from finance import whatsapp_qr as _qr
+    monkeypatch.setattr(_qr, "configurado", lambda: True)
+    monkeypatch.setattr(_qr, "status", lambda cid: {"status": "conectado"})
+    c2 = pp._wa_chip2(emp)
+    assert c2 and c2["id"] == chip
+    assert c2["nome"] == "Agência Beta", "aqui o apelido é o contas.nome da linha do chip"
+    assert c2["estado"] == "conectado" and "8812" in c2["numero"]
+
+
+def test_chip_recem_criado_aparece_como_ainda_sem_parear(pool, monkeypatch):
+    """Criado mas sem QR lido: a faixa não pode dizer 'desconectado', que sugere que
+    caiu — ele nunca chegou a subir."""
+    emp = _empresa(pool)
+    chip = _chip2(pool, emp, nome="Agência Beta")
+    with pool.connection() as c:
+        c.execute("update canais_config set ativo=false where conta_id=%s", (chip,))
+        c.commit()
+    monkeypatch.setattr(pp, "_WA_CHIP2_CACHE", {})
+    c2 = pp._wa_chip2(emp)
+    assert c2["estado"] == "sem_chip" and not c2["numero"]
+
+
+def test_a_etiqueta_de_chip_so_aparece_com_dois(pool):
+    """Numa empresa de um chip só seria a mesma palavra repetida em 100 linhas."""
+    emp = _empresa(pool)
+    with pool.connection() as c:
+        c.execute("update canais_config set rotulo='Agência Alfa' where conta_id=%s", (emp,))
+        c.commit()
+    _entrada(emp, "5586991130001")
+    with pool.connection() as c:
+        linhas = pp._conversas_list(c, emp, True, None)
+    assert linhas and linhas[0]["chip_rot"] == "", "um chip só: sem etiqueta"
+
+    _chip2(pool, emp, nome="Agência Beta")
+    with pool.connection() as c:
+        linhas = pp._conversas_list(c, emp, True, None)
+    assert linhas[0]["chip_rot"] == "Agência Alfa", "com dois, a conversa antiga é do principal"
+
+
+def test_a_etiqueta_diz_o_chip_de_cada_conversa(pool):
+    emp = _empresa(pool)
+    chip = _chip2(pool, emp, nome="Agência Beta")
+    with pool.connection() as c:
+        c.execute("update canais_config set rotulo='Agência Alfa' where conta_id=%s", (emp,))
+        c.commit()
+    _entrada(emp, "5586991130002")
+    _entrada(chip, "5586991130003")
+    with pool.connection() as c:
+        linhas = pp._conversas_list(c, emp, True, None)
+    # chaveia pelo chip, não pelo nome: `empresa` é o nome do lead, não o telefone
+    por_chip = {l["chip_id"]: l["chip_rot"] for l in linhas}
+    assert por_chip[None] == "Agência Alfa", "a que entrou pelo principal"
+    assert por_chip[chip] == "Agência Beta", "a que entrou pelo chip 2"

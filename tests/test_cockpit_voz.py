@@ -74,8 +74,17 @@ def pool(monkeypatch):
                      canal text, direcao text, autor text, membro_id bigint, texto text,
                      meta jsonb, provider_sid text, status text,
                      criado_em timestamptz default now())""")
+        # `ck.orcamento` (a tela de DETALHE) junta membros pra mostrar o vendedor e
+        # pra saber pra quem o cliente responde no e-mail — os testes antigos só
+        # passavam por `criar_orcamento`, que não junta
+        c.execute("""create table membros (id bigserial primary key, conta_id bigint,
+                     nome text, email text, papel text, ativo boolean default true)""")
         c.execute("insert into contas (id, nome) values (%s,'Prime QR'),(%s,'Twilio'),(%s,'Cloud')",
                   (CONTA_QR, CONTA_TW, CONTA_CLOUD))
+        c.execute("""insert into membros (id, conta_id, nome, email)
+                     values (7,%s,'Vendedor','vendedor@empresa.com')""", (CONTA_QR,))
+        c.execute("""insert into membros (conta_id, nome, email)
+                     values (%s,'Vendedor TW','tw@empresa.com')""", (CONTA_TW,))
         c.execute("""insert into canais_config (conta_id, canal, provedor, identificador, wa_phone_id, token)
                      values (%s,'whatsapp','qr','+5586999990000',null,null),
                             (%s,'whatsapp','twilio','+5586999991111',null,null),
@@ -376,3 +385,67 @@ def test_o_agente_nao_conta_como_saida_por_fora(pool):
 
 def test_conta_sem_mensagem_nao_vira_divisao_por_zero(pool):
     assert ck.saida_por_fora(pool, CONTA_TW) == {"dias": 7, "total": 0, "por_fora": 0, "pct": 0}
+
+# ═══════════════════════════════════ a proposta sai por e-mail, não por fora
+
+def _proposta(pool, conta_id, email="cliente@exemplo.com"):
+    """Cria uma proposta e devolve o id. O e-mail vem do lead, como em produção."""
+    with pool.connection() as c:
+        lid = c.execute("""insert into prospeccao (conta_id, membro_id, empresa, whatsapp, email)
+                           values (%s,7,'Buffet Estrela','5586999998888',%s) returning id""",
+                        (conta_id, email)).fetchone()[0]
+        c.commit()
+    r = ck.criar_orcamento(pool, conta_id, 7, lid, [{"nome": "Salão", "setup": 650, "mensal": 0}])
+    assert r["ok"]
+    return r["id"]
+
+
+def test_o_detalhe_da_proposta_nao_oferece_mais_a_saida_no_qr(pool, envios, sem_stt):
+    """O portão de `entrega_sempre` já existia na CRIAÇÃO, mas a tela de detalhe
+    montava o wa.me sem consultá-lo — então o botão "Mandar no WhatsApp" continuava
+    aparecendo pra quem está no QR, que é justamente quem não precisa sair."""
+    o = ck.orcamento(pool, CONTA_QR, _proposta(pool, CONTA_QR), membro_id=7)
+    assert o["zap"] == "", "no QR o Zaq entrega sempre — o atalho pra fora não se justifica"
+
+
+def test_mas_a_saida_continua_onde_o_zaq_pode_nao_entregar(pool, envios, sem_stt):
+    """Twilio fora da janela de 24h só manda template aprovado. Fechar a porta aqui
+    deixaria o vendedor sem NENHUMA saída num horário morto — pior que o problema."""
+    o = ck.orcamento(pool, CONTA_TW, _proposta(pool, CONTA_TW), membro_id=7)
+    assert "wa.me" in o["zap"]
+
+
+def test_email_da_proposta_assina_com_o_nome_COMERCIAL(pool, envios, sem_stt, monkeypatch):
+    """Quem recebe é o cliente do salão. `contas.nome` é o nome de quem abriu a conta —
+    a proposta da Prime Eventos chegaria assinada "MANOEL SOARES"."""
+    with pool.connection() as c:
+        c.execute("update contas set nome='MANOEL SOARES', nome_fantasia='PRIME EVENTOS' "
+                  "where id=%s", (CONTA_QR,))
+        c.commit()
+    caixa = {}
+    from finance import email_sender as es
+    monkeypatch.setattr(es, "enviar_email",
+                        lambda *a, **k: caixa.update(args=a, kw=k) or True)
+    r = ck.enviar_proposta_email(pool, CONTA_QR, _proposta(pool, CONTA_QR), membro_id=7)
+    assert r["ok"] and r["destino"] == "cliente@exemplo.com"
+    assert caixa["kw"]["from_nome"] == "PRIME EVENTOS"
+    assert "MANOEL SOARES" not in caixa["args"][1]      # nem no assunto
+    assert "MANOEL SOARES" not in caixa["args"][2]      # nem no corpo
+
+
+def test_email_da_proposta_leva_o_link_publico(pool, envios, sem_stt, monkeypatch):
+    caixa = {}
+    from finance import email_sender as es
+    monkeypatch.setattr(es, "enviar_email",
+                        lambda *a, **k: caixa.update(args=a, kw=k) or True)
+    orc_id = _proposta(pool, CONTA_QR)
+    link = ck.orcamento(pool, CONTA_QR, orc_id, membro_id=7)["link"]
+    assert link, "sem link público não há o que mandar"
+    ck.enviar_proposta_email(pool, CONTA_QR, orc_id, membro_id=7)
+    assert link in caixa["args"][2] and link in caixa["args"][3]   # html e texto
+
+
+def test_sem_email_no_cadastro_o_envio_explica_em_vez_de_falhar_calado(pool, envios, sem_stt):
+    r = ck.enviar_proposta_email(pool, CONTA_QR, _proposta(pool, CONTA_QR, email=""),
+                                 membro_id=7)
+    assert r["ok"] is False and "e-mail" in r["erro"]

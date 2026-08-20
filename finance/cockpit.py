@@ -1188,7 +1188,16 @@ def orcamento(pool, conta_id: int, orc_id: int, *, membro_id: int | None = None)
         "token": r[11] or "", "link": link, "criado_em": r[12],
         "aprovada_por": r[13] or "", "aprovada_em": r[14], "aprovada_doc": r[15] or "",
         "lead_id": r[16], "vendedor": r[17], "cidade": r[18] or "", "uf": r[19] or "",
-        "zap": _zap_link_texto(r[5], f"Olá! Segue sua proposta 👋\n{link}") if (r[5] and link) else "",
+        # Mesmo portão que criar_orcamento já usa (ver `entrega_sempre`): onde o Zaq
+        # entrega a qualquer hora — o canal QR — o wa.me some, porque mandar por fora
+        # tira a conversa de dentro do sistema e o histórico do lead fica pela metade.
+        # O detalhe da proposta era o único lugar que ainda oferecia a saída, e por
+        # isso o botão continuava aparecendo pra quem está no QR. Onde a entrega NÃO é
+        # garantida (Twilio/Cloud fora da janela de 24h) o atalho fica: fechar a porta
+        # ali deixaria o vendedor sem nenhuma saída num horário morto.
+        "zap": ("" if entrega_sempre(pool, conta_id)
+                else (_zap_link_texto(r[5], f"Olá! Segue sua proposta 👋\n{link}")
+                      if (r[5] and link) else "")),
     }
 
 
@@ -1365,6 +1374,61 @@ def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens,
 def enviar_proposta_conversa(pool, conta_id: int, membro_id: int, lead_id: int, link: str) -> dict:
     """Manda o link da proposta na conversa do lead (WhatsApp da empresa)."""
     return enviar_mensagem(pool, conta_id, membro_id, lead_id, f"Olá! Segue sua proposta 👋\n{link}")
+
+
+def enviar_proposta_email(pool, conta_id: int, orc_id: int, membro_id: int | None = None) -> dict:
+    """Manda o link da proposta pro e-mail do cliente, assinado pela EMPRESA.
+
+    Sai pelo SMTP do Zaq com `from_nome` da empresa — mesmo caminho do link de acesso
+    do vendedor (ver `_mandar_link_acesso` no painel), que é o que comprovadamente
+    entrega. O que muda é só quem assina, nunca quem carrega.
+
+    O nome é o COMERCIAL (fantasia → razão social → titular): quem recebe é o cliente
+    do salão, e `contas.nome` é o nome de quem abriu a conta — a proposta da Prime
+    Eventos chegaria assinada "MANOEL SOARES". Mesma precedência de
+    `endereco_empresa` e da página pública de convite.
+
+    `reply_to` é o e-mail do vendedor quando existe: o cliente responde a proposta
+    pra pessoa que a fez, não pra caixa do Zaq.
+    """
+    o = orcamento(pool, conta_id, orc_id, membro_id=membro_id)
+    if not o:
+        return {"ok": False, "erro": "Proposta não encontrada."}
+    destino = (o.get("email") or "").strip()
+    if "@" not in destino:
+        return {"ok": False, "erro": "Esse cliente não tem e-mail cadastrado."}
+    if not o.get("link"):
+        return {"ok": False, "erro": "Essa proposta ainda não tem link público."}
+
+    with pool.connection() as c:
+        r = c.execute(
+            "select coalesce(nome_fantasia,''), coalesce(razao_social,''), coalesce(nome,'') "
+            "from contas where id=%s", (conta_id,)).fetchone() or ("", "", "")
+        empresa = (r[0].strip() or r[1].strip() or r[2].strip() or "Sua proposta")
+        responder = ""
+        if membro_id:
+            m = c.execute("select coalesce(email,'') from membros where id=%s and conta_id=%s",
+                          (membro_id, conta_id)).fetchone()
+            responder = (m[0] or "").strip() if m else ""
+
+    from finance import email_sender as es
+    quem = (o.get("cliente") or o.get("empresa") or "").strip()
+    ola = f"Olá, {quem}!" if quem else "Olá!"
+    titulo = f"Sua proposta — {empresa}"
+    botao = (f'<div style="text-align:center;margin:26px 0">'
+             f'<a href="{o["link"]}" style="background:#0f766e;color:#ffffff;padding:14px 30px;'
+             f'border-radius:10px;font-weight:600;text-decoration:none;display:inline-block">'
+             f'Ver a proposta →</a></div>'
+             f'<p style="color:#888;font-size:13px">Ou copie este endereço: {o["link"]}</p>')
+    corpo = (f"<p>{ola}</p><p>Segue a proposta da <b>{empresa}</b>. "
+             "É só abrir pelo botão abaixo — dá pra ver tudo e aprovar por ali mesmo.</p>"
+             + botao)
+    texto = f"{ola}\n\nSegue a proposta da {empresa}:\n{o['link']}"
+    enviou = es.enviar_email(destino, titulo, es._layout(titulo, corpo), texto,
+                             reply_to=responder or None, from_nome=empresa)
+    if enviou:
+        return {"ok": True, "destino": destino}
+    return {"ok": False, "erro": "O envio de e-mail não está configurado ou falhou."}
 
 
 # ----------------------------------------------------------------- agendar visita

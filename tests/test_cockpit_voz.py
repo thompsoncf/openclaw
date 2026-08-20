@@ -415,34 +415,53 @@ def test_mas_a_saida_continua_onde_o_zaq_pode_nao_entregar(pool, envios, sem_stt
     assert "wa.me" in o["zap"]
 
 
-def test_email_da_proposta_assina_com_o_nome_COMERCIAL(pool, envios, sem_stt, monkeypatch):
+@pytest.fixture()
+def caixa_email(monkeypatch):
+    """Intercepta a ÚLTIMA porta (o SMTP), não o `proposta_email`: assim o teste
+    passa pelo caminho real de main — caixa da empresa primeiro, Zaq de reserva."""
+    caixa = {}
+    from finance import email_inbound as ein
+    from finance import email_sender as es
+    monkeypatch.setattr(ein, "remetente_conta", lambda *a, **k: None)   # sem caixa própria
+    monkeypatch.setattr(es, "remetente_configurado", lambda: "zaq@zaq-ia.com")
+    monkeypatch.setattr(es, "enviar_email",
+                        lambda *a, **k: caixa.update(args=a, kw=k) or True)
+    return caixa
+
+
+def test_email_da_proposta_assina_com_o_nome_COMERCIAL(pool, envios, sem_stt, caixa_email):
     """Quem recebe é o cliente do salão. `contas.nome` é o nome de quem abriu a conta —
     a proposta da Prime Eventos chegaria assinada "MANOEL SOARES"."""
     with pool.connection() as c:
         c.execute("update contas set nome='MANOEL SOARES', nome_fantasia='PRIME EVENTOS' "
                   "where id=%s", (CONTA_QR,))
         c.commit()
-    caixa = {}
-    from finance import email_sender as es
-    monkeypatch.setattr(es, "enviar_email",
-                        lambda *a, **k: caixa.update(args=a, kw=k) or True)
     r = ck.enviar_proposta_email(pool, CONTA_QR, _proposta(pool, CONTA_QR), membro_id=7)
     assert r["ok"] and r["destino"] == "cliente@exemplo.com"
-    assert caixa["kw"]["from_nome"] == "PRIME EVENTOS"
-    assert "MANOEL SOARES" not in caixa["args"][1]      # nem no assunto
-    assert "MANOEL SOARES" not in caixa["args"][2]      # nem no corpo
+    assert caixa_email["kw"]["from_nome"] == "PRIME EVENTOS"
+    assert "MANOEL SOARES" not in caixa_email["args"][1]      # nem no assunto
+    assert "MANOEL SOARES" not in caixa_email["args"][2]      # nem no corpo
 
 
-def test_email_da_proposta_leva_o_link_publico(pool, envios, sem_stt, monkeypatch):
-    caixa = {}
-    from finance import email_sender as es
-    monkeypatch.setattr(es, "enviar_email",
-                        lambda *a, **k: caixa.update(args=a, kw=k) or True)
+def test_email_da_proposta_sai_pelo_mesmo_caminho_do_painel(pool, envios, sem_stt, monkeypatch):
+    """A caixa da EMPRESA vem primeiro — é lá que a resposta do cliente precisa cair.
+    Dois caminhos de envio dariam duas respostas pra "de quem é esse e-mail"."""
+    passou = {}
+    from finance import email_inbound as ein
+    monkeypatch.setattr(ein, "remetente_conta", lambda *a, **k: "contato@prime.com")
+    monkeypatch.setattr(ein, "enviar_conta",
+                        lambda *a, **k: passou.update(args=a, kw=k) or True)
+    r = ck.enviar_proposta_email(pool, CONTA_QR, _proposta(pool, CONTA_QR), membro_id=7)
+    assert r["ok"] and r["remetente"] == "contato@prime.com"
+    assert passou, "não passou pela caixa da empresa"
+
+
+def test_email_da_proposta_leva_o_link_publico(pool, envios, sem_stt, caixa_email):
     orc_id = _proposta(pool, CONTA_QR)
     link = ck.orcamento(pool, CONTA_QR, orc_id, membro_id=7)["link"]
     assert link, "sem link público não há o que mandar"
     ck.enviar_proposta_email(pool, CONTA_QR, orc_id, membro_id=7)
-    assert link in caixa["args"][2] and link in caixa["args"][3]   # html e texto
+    assert link in caixa_email["args"][2] and link in caixa_email["args"][3]  # html e texto
 
 
 def test_sem_email_no_cadastro_o_envio_explica_em_vez_de_falhar_calado(pool, envios, sem_stt):

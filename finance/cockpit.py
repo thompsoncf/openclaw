@@ -1425,58 +1425,60 @@ def _registrar_envio_proposta(pool, conta_id: int, link: str, *, canal: str,
 
 
 def enviar_proposta_email(pool, conta_id: int, orc_id: int, membro_id: int | None = None) -> dict:
-    """Manda o link da proposta pro e-mail do cliente, assinado pela EMPRESA.
+    """Manda a proposta pro e-mail do cliente, do app do vendedor.
 
-    Sai pelo SMTP do Zaq com `from_nome` da empresa — mesmo caminho do link de acesso
-    do vendedor (ver `_mandar_link_acesso` no painel), que é o que comprovadamente
-    entrega. O que muda é só quem assina, nunca quem carrega.
+    A regra de POR ONDE sai já foi decidida em `finance/proposta_email`: caixa da
+    empresa primeiro, remetente do Zaq como reserva com Reply-To. Aqui não se decide
+    nada disso de novo — o cockpit só junta o que a tela dele tem e chama. Ter dois
+    caminhos de envio seria ter duas respostas pra "de quem é esse e-mail", e a
+    resposta do cliente cairia numa caixa diferente dependendo de onde o vendedor
+    apertou o botão.
 
-    O nome é o COMERCIAL (fantasia → razão social → titular): quem recebe é o cliente
-    do salão, e `contas.nome` é o nome de quem abriu a conta — a proposta da Prime
-    Eventos chegaria assinada "MANOEL SOARES". Mesma precedência de
-    `endereco_empresa` e da página pública de convite.
-
-    `reply_to` é o e-mail do vendedor quando existe: o cliente responde a proposta
-    pra pessoa que a fez, não pra caixa do Zaq.
+    Registra a tentativa (inclusive a que falhou) na mesma tabela que o painel usa —
+    é dela que o gatilho `orcamento_enviado` lê pra saber que a proposta saiu.
     """
+    from finance import empresa as _emp
+    from finance import proposta_email as _pe
+
     o = orcamento(pool, conta_id, orc_id, membro_id=membro_id)
     if not o:
         return {"ok": False, "erro": "Proposta não encontrada."}
     destino = (o.get("email") or "").strip()
-    if "@" not in destino:
+    if "@" not in destino or "." not in destino.split("@")[-1]:
         return {"ok": False, "erro": "Esse cliente não tem e-mail cadastrado."}
     if not o.get("link"):
         return {"ok": False, "erro": "Essa proposta ainda não tem link público."}
 
     with pool.connection() as c:
-        r = c.execute(
-            "select coalesce(nome_fantasia,''), coalesce(razao_social,''), coalesce(nome,'') "
-            "from contas where id=%s", (conta_id,)).fetchone() or ("", "", "")
-        empresa = (r[0].strip() or r[1].strip() or r[2].strip() or "Sua proposta")
-        responder = ""
-        if membro_id:
-            m = c.execute("select coalesce(email,'') from membros where id=%s and conta_id=%s",
-                          (membro_id, conta_id)).fetchone()
-            responder = (m[0] or "").strip() if m else ""
+        r = c.execute("select numero, coalesce(modo,'recorrente') from orcamentos "
+                      "where id=%s and conta_id=%s", (orc_id, conta_id)).fetchone()
+        # `obter_dados_empresa` não traz `contas.nome`, e ele é o último degrau: a
+        # conta que ainda não preencheu razão/fantasia precisa assinar com ALGUMA
+        # coisa — um e-mail com o topo em branco é pior que um assinado pela pessoa
+        titular = (c.execute("select coalesce(nome,'') from contas where id=%s",
+                             (conta_id,)).fetchone() or [""])[0]
+    numero, modo = (r[0], r[1]) if r else (None, "recorrente")
 
-    from finance import email_sender as es
-    quem = (o.get("cliente") or o.get("empresa") or "").strip()
-    ola = f"Olá, {quem}!" if quem else "Olá!"
-    titulo = f"Sua proposta — {empresa}"
-    botao = (f'<div style="text-align:center;margin:26px 0">'
-             f'<a href="{o["link"]}" style="background:#0f766e;color:#ffffff;padding:14px 30px;'
-             f'border-radius:10px;font-weight:600;text-decoration:none;display:inline-block">'
-             f'Ver a proposta →</a></div>'
-             f'<p style="color:#888;font-size:13px">Ou copie este endereço: {o["link"]}</p>')
-    corpo = (f"<p>{ola}</p><p>Segue a proposta da <b>{empresa}</b>. "
-             "É só abrir pelo botão abaixo — dá pra ver tudo e aprovar por ali mesmo.</p>"
-             + botao)
-    texto = f"{ola}\n\nSegue a proposta da {empresa}:\n{o['link']}"
-    enviou = es.enviar_email(destino, titulo, es._layout(titulo, corpo), texto,
-                             reply_to=responder or None, from_nome=empresa)
-    if enviou:
-        return {"ok": True, "destino": destino}
-    return {"ok": False, "erro": "O envio de e-mail não está configurado ou falhou."}
+    d_emp = _emp.obter_dados_empresa(pool, conta_id) or {}
+    # nome COMERCIAL: quem recebe é o cliente do salão, e `contas.nome` é o nome de
+    # quem abriu a conta — a proposta da Prime Eventos sairia assinada "MANOEL SOARES"
+    nome_emp = ((d_emp.get("nome_fantasia") or "").strip()
+                or (d_emp.get("razao_social") or "").strip()
+                or (titular or "").strip())
+    assunto = _pe.assunto_padrao(numero, nome_emp, modo)
+    mensagem = _pe.texto_padrao(o.get("cliente") or o.get("empresa"), modo)
+    html, texto = _pe.montar(mensagem=mensagem, link=o["link"], numero=numero,
+                             empresa=nome_emp, telefone=d_emp.get("telefone") or "",
+                             email_empresa=d_emp.get("email_empresa") or "", modo=modo)
+    env = _pe.enviar(pool, conta_id, destino=destino, assunto=assunto, html=html,
+                     texto=texto, empresa=nome_emp,
+                     reply_to=d_emp.get("email_empresa") or "")
+    _pe.registrar(pool, conta_id, orc_id, destino=destino,
+                  remetente_usado=env.get("remetente", ""), ok=env.get("ok", False),
+                  erro=env.get("erro", ""), por=str(membro_id or ""))
+    if env.get("ok"):
+        return {"ok": True, "destino": destino, "remetente": env.get("remetente", "")}
+    return {"ok": False, "erro": env.get("erro") or "Não consegui enviar."}
 
 
 # ----------------------------------------------------------------- agendar visita

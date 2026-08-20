@@ -1363,8 +1363,56 @@ def criar_orcamento(pool, conta_id: int, membro_id: int, lead_id: int, itens,
 
 
 def enviar_proposta_conversa(pool, conta_id: int, membro_id: int, lead_id: int, link: str) -> dict:
-    """Manda o link da proposta na conversa do lead (WhatsApp da empresa)."""
-    return enviar_mensagem(pool, conta_id, membro_id, lead_id, f"Olá! Segue sua proposta 👋\n{link}")
+    """Manda o link da proposta na conversa do lead (WhatsApp da empresa).
+
+    REGISTRA o envio em `orcamento_envios`, como o e-mail já fazia. Sem isso o
+    sistema sabia que uma mensagem saiu, mas não que aquela mensagem ERA a proposta
+    — e o gatilho `orcamento_enviado`, que hoje lê essa tabela, ficava cego pro
+    canal mais usado da casa.
+
+    O orçamento sai do token do próprio link, e não de um parâmetro a mais: as duas
+    rotas que chamam isto passam coisas diferentes (uma tem o id, a outra só o
+    link), e resolver aqui dentro faz as duas — e qualquer chamador futuro —
+    registrarem sem precisar lembrar."""
+    r = enviar_mensagem(pool, conta_id, membro_id, lead_id, f"Olá! Segue sua proposta 👋\n{link}")
+    _registrar_envio_proposta(pool, conta_id, link, canal="whatsapp",
+                              ok=bool(r.get("ok")), erro=str(r.get("erro") or ""),
+                              por=str(membro_id or ""))
+    return r
+
+
+def _token_do_link(link: str) -> str:
+    """O token no fim de `.../proposta/<token>`. Vazio quando não reconhece —
+    registro é anotação, não pode inventar a qual proposta pertence."""
+    if not link or "/proposta/" not in link:
+        return ""
+    return link.rsplit("/proposta/", 1)[1].split("?")[0].split("#")[0].strip()
+
+
+def _registrar_envio_proposta(pool, conta_id: int, link: str, *, canal: str,
+                              ok: bool = True, erro: str = "", por: str = "",
+                              destino: str = "") -> None:
+    """Anota em `orcamento_envios` que a proposta saiu por este canal.
+
+    Best-effort de ponta a ponta: o registro é o que alimenta o gatilho e a tela de
+    histórico, mas ele NÃO pode derrubar o envio. Mensagem entregue e registro
+    perdido é um card que não anda; envio que estoura porque a anotação falhou é
+    cliente que não recebe a proposta."""
+    try:
+        token = _token_do_link(link)
+        if not token:
+            return
+        from finance import proposta_email as _pe
+        with pool.connection() as c:
+            r = c.execute("select id from orcamentos where token=%s and conta_id=%s",
+                          (token, conta_id)).fetchone()
+        if not r:
+            return
+        _pe.registrar(pool, conta_id, r[0], destino=destino, remetente_usado="",
+                      ok=ok, erro=erro, por=por, canal=canal)
+    except Exception as ex:  # noqa: BLE001 — anotação não derruba envio
+        _log.warning("proposta: não registrei o envio por %s: %s: %s",
+                     canal, type(ex).__name__, ex)
 
 
 # ----------------------------------------------------------------- agendar visita

@@ -1093,6 +1093,45 @@ def test_a_data_e_o_ESTADO_da_data_sao_duas_chaves_diferentes(cliente):
     assert it["data_estado"]["estado"] == vendas.DATA_FORA
 
 
+# ---------------------------------------------------- a linha pronta, pela ROTA
+#
+# A redação está toda testada em tests/test_linha_do_funil.py, sem banco. O que
+# só a rota responde é a FIAÇÃO: se `painel` não vier, ou vier com o estado da
+# data desligado do que está no banco, a barra de pendências fica muda — e uma
+# barra muda é exatamente o que ela substituiu.
+
+def test_a_lista_manda_a_linha_pronta(cliente):
+    """`painel` é o contrato que a tela consome: selos, ação e resumo."""
+    oid = _orcamento_pra_mandar(cliente, numero=31)
+    pn = _item(cliente, oid)["painel"]
+    assert set(pn) == {"selos", "acao", "resumo"}
+
+
+def test_o_estado_da_data_do_banco_chega_no_selo(cliente):
+    """A fiação de ponta a ponta: um orçamento aprovado que nunca entrou na agenda
+    tem que sair da rota já com o coral na mão — é o caso que motivou tudo isto."""
+    oid = _orcamento_pra_mandar(cliente, numero=32)
+    with cliente.pool.connection() as cx:
+        cx.execute("update orcamentos set status='aprovada' where id=%s", (oid,))
+        cx.commit()
+    pn = _item(cliente, oid)["painel"]
+    assert [(s["texto"], s["tom"]) for s in pn["selos"]] == [("Fora da agenda", "coral")]
+    assert pn["acao"]["chave"] == "marcar"
+
+
+def test_proposta_ja_enviada_perde_o_selo_de_nunca_enviada(cliente, correio):
+    """`nunca_enviada` sai de `enviado_em`, que sai de uma subconsulta na lista.
+    Se a subconsulta parar de vir, todo orçamento já mandado volta a pedir pra
+    ser mandado — e o dono manda duas vezes."""
+    oid = _orcamento_pra_mandar(cliente, email="maria@x.com", numero=33)
+    assert _item(cliente, oid)["painel"]["acao"]["chave"] == "enviar"
+    assert cliente.post("/painel/servicos/enviar-email", json={
+        "id": oid, "para": "maria@x.com", "assunto": "Orçamento",
+        "mensagem": "Segue."}).status_code == 200
+    pn = _item(cliente, oid)["painel"]
+    assert pn["selos"] == [] and pn["acao"] is None
+    assert pn["resumo"].startswith("enviada ")
+
 
 # ============================ comprovante de pagamento (sinal e parcelas), pelas ROTAS
 #

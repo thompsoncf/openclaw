@@ -252,6 +252,118 @@ def resumo_pagamentos(parcelas, sinal_pago_em, titulos_pagos=(), com_comprovante
     return {"pagas": pagos, "total": len(itens), "sem_comprovante": faltando}
 
 
+# -------------------------------------------------- O QUE A LINHA DO FUNIL DIZ
+#
+# A linha chegou a mostrar QUATORZE coisas: seis selos e oito ícones sem rótulo.
+# Cada uma entrou por um bom motivo — e juntas viraram uma parede onde nada se
+# destaca. Cinco dos ícones faziam "abrir ou mandar documento", pra DOIS
+# documentos diferentes (a proposta e o contrato), e nada dizia qual era qual.
+#
+# A regra que enxuga sem esconder nada: SELO É PRA PENDÊNCIA. O que já foi feito
+# desce pro subtítulo, em cinza — continua visível, para de gritar. Uma proposta
+# sem pendência nenhuma carregava cinco selos verdes dizendo que estava tudo bem,
+# e era esse ruído que fazia os selos de verdade sumirem no meio.
+#
+# E UMA AÇÃO PRINCIPAL, com o nome do que falta. A ordem é a que o dono escolheu,
+# e ela tem lógica: primeiro o que TRAVA DINHEIRO (data que se perde, sinal que
+# não entrou), depois papelada.
+
+# tom do selo: 'pre' (segurada, tracejado), 'coral' (perde dinheiro),
+# 'ambar' (espera algo), 'azul' (informação de andamento).
+_ORDEM_ACAO = ("marcar", "resegurar", "sinal", "comprovante", "fechar", "enviar")
+
+
+def linha_do_funil(*, status, data_estado=None, sinal="", sinal_pago=False,
+                   pagamentos=None, enviado_em="", contrato_numero=None,
+                   contrato_assinado=False, plano_difere=0, aprovada_por="",
+                   nunca_enviada=True) -> dict:
+    """{selos, acao, resumo} de uma linha — a redação inteira, testável sem tela.
+
+    `selos` são só PENDÊNCIAS. `resumo` é o que já aconteceu, pro subtítulo.
+    `acao` é o único botão verde, ou None quando não há o que fazer agora."""
+    pg = pagamentos or {}
+    selos, feito, acoes = [], [], []
+
+    # ---- a data. Só vira selo quando é problema ou espera; firme desce pro cinza.
+    est = (data_estado or {}).get("estado")
+    if est == DATA_FORA:
+        selos.append({"texto": "Fora da agenda", "tom": "coral",
+                      "dica": (data_estado or {}).get("dica", "")})
+        acoes.append(("marcar", "Marcar data"))
+    elif est == DATA_LIBERADA:
+        selos.append({"texto": "Data liberada", "tom": "coral",
+                      "dica": (data_estado or {}).get("dica", "")})
+        acoes.append(("resegurar", "Segurar de novo"))
+    elif est == DATA_SEGURADA:
+        selos.append({"texto": (data_estado or {}).get("texto", "Data segurada"),
+                      "tom": "pre", "dica": (data_estado or {}).get("dica", "")})
+        acoes.append(("sinal", "Sinal recebido"))
+    # (o "data reservada" entra no resumo lá embaixo, na ordem certa)
+
+    # ---- comprovante. Só do que JÁ FOI PAGO: cobrar papel de parcela que nem
+    # venceu encheria a linha de coral que ninguém pode resolver.
+    faltam = int(pg.get("sem_comprovante") or 0)
+    if faltam:
+        selos.append({
+            "texto": (f"{faltam} parcelas sem comprovante" if faltam > 1
+                      else "1 parcela sem comprovante"),
+            "tom": "coral", "dica": "Parcela paga sem o comprovante anexado."})
+        acoes.append(("comprovante", "Anexar comprovante"))
+
+
+    # ---- o plano que não fecha com o total. Era um aviso que só aparecia DENTRO
+    # do confirm de "Fechar contrato" — quem não clicava nunca sabia, e é dinheiro:
+    # os títulos saem pelo valor das parcelas, não pelo que a folha declara.
+    if plano_difere:
+        selos.append({
+            "texto": "Plano não fecha com o total", "tom": "ambar",
+            "dica": "As parcelas somam diferente do valor do orçamento. Os títulos "
+                    "a receber saem pelo valor das PARCELAS."})
+
+    # ---- o contrato
+    if contrato_numero and not contrato_assinado:
+        selos.append({"texto": "Contrato aguardando assinatura", "tom": "ambar",
+                      "dica": "Mande o link pro cliente ler e assinar."})
+    elif contrato_numero and contrato_assinado:
+        if status != "fechado":
+            acoes.append(("fechar", "Fechar contrato"))
+
+    # ---- o começo do caminho
+    if status in ("rascunho", "enviado", "negociando") and nunca_enviada:
+        selos.append({"texto": "Nunca enviada ao cliente", "tom": "azul",
+                      "dica": "O cliente ainda não recebeu esta proposta."})
+        acoes.append(("enviar", "Mandar pro cliente"))
+
+    # O RESUMO, na ordem em que a empresa conta a história: fechou o negócio,
+    # o dinheiro entrou, a data está de pé, o papel foi assinado. Montado aqui e
+    # não espalhado acima justamente pra a ordem ser uma decisão, não o acaso da
+    # sequência do código.
+    if status in ("aprovada", "fechado"):
+        feito.append("aprovada" + (f" por {aprovada_por}" if aprovada_por else ""))
+    if enviado_em:
+        feito.append(f"enviada {enviado_em}")
+    if sinal_pago and sinal:
+        feito.append(f"sinal {sinal} recebido")
+    if est == DATA_RESERVADA:
+        feito.append("data reservada")
+    if pg.get("pagas"):
+        feito.append(f"{pg['pagas']} de {pg['total']} pagas")
+    if contrato_numero and contrato_assinado:
+        feito.append(f"contrato nº {contrato_numero} assinado")
+    if status == "fechado":
+        feito.append("contrato fechado")
+
+    # a ação é UMA: a primeira da ordem que o dono escolheu. As outras pendências
+    # continuam visíveis nos selos — some o botão, não o aviso.
+    escolhida = None
+    for chave in _ORDEM_ACAO:
+        achou = next((a for a in acoes if a[0] == chave), None)
+        if achou:
+            escolhida = {"chave": achou[0], "texto": achou[1]}
+            break
+    return {"selos": selos, "acao": escolhida, "resumo": " · ".join(feito)}
+
+
 # ------------------------------------------------- o ESTADO DA DATA no funil
 #
 # POR QUE ISSO EXISTE. A data de um evento aprovado tem quatro estados, e até

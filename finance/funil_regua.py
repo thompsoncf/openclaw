@@ -221,9 +221,38 @@ _SQL_EVENTO = {
         select prospeccao_id, max(coalesce(fim, inicio)) from eventos_agenda
          where conta_id=%(conta)s and prospeccao_id is not null and desfecho='realizado'
          group by prospeccao_id""",
+    # ENVIADO POR QUALQUER CANAL DO ZAQ — e não só pelo caminho que mexe no status.
+    #
+    # A versão original perguntava só `o.status in ('enviado','aprovada','fechado')`,
+    # e isso deixava o gatilho cego pro envio de verdade: mandar por e-mail, mandar
+    # na conversa do app ou copiar o link NÃO mexem no status. O único caminho que
+    # marca 'enviado' é a proposta criada pelo app do vendedor. Medido na conta 34
+    # em 19/08, com o gatilho ligado desde as 14:02: `resposta_nossa` moveu 78 cards
+    # sozinho e este aqui moveu ZERO — o card que chegou em Proposta foi arrastado
+    # na mão, que é exatamente o que a régua existe pra evitar.
+    #
+    # `orcamento_envios` é quem sabe: uma linha por envio, com canal, destino e a
+    # tentativa que falhou. Só `ok` conta — tentativa que estourou não é proposta
+    # entregue.
+    #
+    # O `quando` é o PRIMEIRO envio registrado, e não o `atualizado_em`: o fato é o
+    # envio, e ele tem data própria. Sendo o primeiro, e não o último, o instante
+    # também para de andar — `atualizado_em` avança a cada edição da proposta, e um
+    # instante que anda sozinho atravessa a TRAVA 3, que descarta evento anterior ao
+    # último movimento manual.
+    #
+    # O `coalesce` preserva quem já funcionava: a proposta criada pelo app do
+    # vendedor nasce com status 'enviado' e sem linha em `orcamento_envios`, e
+    # continua disparando pelo `atualizado_em` como antes.
     "orcamento_enviado": """
-        select p.id, o.atualizado_em from prospeccao p join orcamentos o on o.id = p.orcamento_id
-         where p.conta_id=%(conta)s and o.status in ('enviado','aprovada','fechado')""",
+        select p.id, coalesce(e.primeiro, o.atualizado_em)
+          from prospeccao p
+          join orcamentos o on o.id = p.orcamento_id
+          left join (select orcamento_id, min(criado_em) as primeiro
+                       from orcamento_envios where conta_id=%(conta)s and ok
+                      group by orcamento_id) e on e.orcamento_id = o.id
+         where p.conta_id=%(conta)s
+           and (o.status in ('enviado','aprovada','fechado') or e.primeiro is not null)""",
     "orcamento_aprovado": """
         select p.id, o.aprovada_em from prospeccao p join orcamentos o on o.id = p.orcamento_id
          where p.conta_id=%(conta)s and o.aprovada_em is not null""",
@@ -278,9 +307,26 @@ def aplicar_gatilhos(c, conta_id: int) -> dict:
     ordem_de = {e["chave"]: e["ordem"] for e in todas}
 
     # lead -> [{chave, ordem, evento, quando}]
+    #
+    # UM GATILHO QUEBRADO NÃO DERRUBA OS OUTROS. Cada consulta roda no seu savepoint:
+    # sem ele, uma tabela que falta (banco que ainda não rodou a migração de
+    # `orcamento_envios`, por exemplo) levantaria no meio do laço, envenenaria a
+    # transação, e a conta inteira ficaria SEM gatilho nenhum — os seis que
+    # funcionavam parariam junto com o que quebrou.
+    #
+    # Silêncio por gatilho é degradação; silêncio por conta é apagão. O log diz qual
+    # caiu, porque um gatilho que nunca dispara e nunca reclama é indistinguível de
+    # um gatilho que ninguém ligou.
     candidatos: dict[int, list[dict]] = {}
     for e in ativas:
-        for lead_id, quando in c.execute(_SQL_EVENTO[e["gatilho"]], {"conta": conta_id}).fetchall():
+        try:
+            with c.transaction():
+                linhas = c.execute(_SQL_EVENTO[e["gatilho"]], {"conta": conta_id}).fetchall()
+        except Exception as ex:  # noqa: BLE001 — um evento cego não cega os demais
+            _log.warning("gatilho %s da conta %s não pôde ser lido: %s: %s",
+                         e["gatilho"], conta_id, type(ex).__name__, ex)
+            continue
+        for lead_id, quando in linhas:
             if lead_id and quando:
                 candidatos.setdefault(lead_id, []).append(
                     {"chave": e["chave"], "ordem": e["ordem"], "evento": e["gatilho"], "quando": quando})

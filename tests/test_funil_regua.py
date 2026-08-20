@@ -10,6 +10,7 @@ O que estes testes protegem, em uma frase cada:
 """
 import os
 from datetime import datetime, time, timedelta, timezone
+from unittest import mock
 
 import pytest
 from psycopg_pool import ConnectionPool
@@ -52,6 +53,13 @@ create table eventos_agenda (id bigserial primary key, conta_id bigint, prospecc
 create table orcamentos (id bigserial primary key, conta_id bigint, status text,
   atualizado_em timestamptz, aprovada_em timestamptz, sinal_pago_em timestamptz,
   contrato_assinado_em timestamptz);
+-- migração 178: é ela que sabe que a proposta SAIU, por qual canal e quando. O
+-- gatilho `orcamento_enviado` lê daqui — sem a tabela ele fica cego pro e-mail,
+-- pra conversa do app e pro link copiado, que é o estado que este trabalho corrige.
+create table orcamento_envios (id bigserial primary key, conta_id bigint,
+  orcamento_id bigint, canal text default 'email', destino text default '',
+  remetente text default '', ok boolean default true, erro text default '',
+  por text default '', criado_em timestamptz default now());
 """
 
 _ETAPAS = [("novo", "Novo", 0, True, "venda", None, None, False),
@@ -302,6 +310,128 @@ def test_evento_novo_depois_do_movimento_manual_volta_a_valer(pool):
         _ligar(c, "proposta")
         c.commit()
         assert fr.aplicar_gatilhos(c, CONTA)["movidos"] == 1
+
+
+# ------------------------------------------- orçamento enviado, por QUALQUER canal
+#
+# A versão original do gatilho perguntava só `orcamentos.status`, e só um caminho no
+# sistema inteiro escreve 'enviado' ao enviar (a proposta criada no app do vendedor).
+# Mandar por e-mail, mandar na conversa do app ou copiar o link não mexem em status
+# nenhum — então o gatilho ficava cego justamente pros canais mais usados.
+#
+# Medido na conta 34 em 19/08/2026, com o gatilho ligado desde as 14:02:
+# `resposta_nossa` moveu 78 cards sozinho e este aqui moveu ZERO.
+
+def _orc_rascunho(c, quando=None):
+    """Uma proposta que NUNCA teve o status mexido — o caso que estava quebrado."""
+    return c.execute(
+        """insert into orcamentos (conta_id, status, atualizado_em)
+           values (%s,'rascunho',%s) returning id""",
+        (CONTA, quando or AGORA)).fetchone()[0]
+
+
+def _envio(c, oid, canal="email", ok=True, quando=None):
+    c.execute("""insert into orcamento_envios (conta_id, orcamento_id, canal, ok, criado_em)
+                 values (%s,%s,%s,%s,%s)""", (CONTA, oid, canal, ok, quando or AGORA))
+
+
+@pytest.mark.parametrize("canal", ["email", "whatsapp", "link"])
+def test_envio_registrado_move_o_card_seja_qual_for_o_canal(pool, canal):
+    """O coração deste trabalho: proposta em RASCUNHO, mandada por um canal
+    qualquer, move o card. Antes, nenhum dos três movia."""
+    with pool.connection() as c:
+        lead = _lead(c, status="novo")
+        oid = _orc_rascunho(c)
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (oid, lead))
+        _envio(c, oid, canal)
+        _ligar(c, "proposta")
+        c.commit()
+        assert fr.aplicar_gatilhos(c, CONTA)["movidos"] == 1
+        c.commit()
+        assert c.execute("select status from prospeccao where id=%s",
+                         (lead,)).fetchone()[0] == "proposta"
+
+
+def test_tentativa_que_falhou_nao_move_o_card(pool):
+    """`ok=false` é a caixa que recusou. Proposta que não chegou não é proposta
+    enviada — e mover o card aqui esconderia justamente o que precisa de conserto."""
+    with pool.connection() as c:
+        lead = _lead(c, status="novo")
+        oid = _orc_rascunho(c)
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (oid, lead))
+        _envio(c, oid, "email", ok=False)
+        _ligar(c, "proposta")
+        c.commit()
+        assert fr.aplicar_gatilhos(c, CONTA)["movidos"] == 0
+
+
+def test_o_instante_do_gatilho_e_o_do_ENVIO(pool):
+    """TRAVA 3 compara o instante do fato com o último movimento manual. Se o
+    instante fosse `atualizado_em`, qualquer edição posterior da proposta faria o
+    fato "acontecer" de novo e ressuscitaria um card que alguém puxou de propósito.
+
+    Aqui: envio ANTES da mão do vendedor, proposta editada DEPOIS. O card fica."""
+    with pool.connection() as c:
+        lead = _lead(c, status="novo")
+        oid = _orc_rascunho(c, quando=AGORA + timedelta(days=1))   # editada hoje
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (oid, lead))
+        _envio(c, oid, "email", quando=AGORA - timedelta(days=3))  # enviada antes
+        fr.registrar_movimento(c, CONTA, lead, "proposta", "novo", "manual", membro_id=1)
+        _ligar(c, "proposta")
+        c.commit()
+        assert fr.aplicar_gatilhos(c, CONTA)["movidos"] == 0, \
+            "o gatilho usou a data de edição e desfez a decisão do vendedor"
+
+
+def test_o_caminho_antigo_pelo_status_continua_valendo(pool):
+    """A proposta criada no app do vendedor nasce 'enviado' e sem linha de envio —
+    ela não pode parar de funcionar por causa da porta nova."""
+    with pool.connection() as c:
+        lead = _lead(c, status="novo")
+        oid = c.execute("""insert into orcamentos (conta_id, status, atualizado_em)
+                           values (%s,'enviado',%s) returning id""",
+                        (CONTA, AGORA)).fetchone()[0]
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (oid, lead))
+        _ligar(c, "proposta")
+        c.commit()
+        assert fr.aplicar_gatilhos(c, CONTA)["movidos"] == 1
+
+
+def test_proposta_solta_nao_move_ninguem(pool):
+    """Sem `prospeccao.orcamento_id` não há card pra mover — por isso o vínculo é
+    metade do trabalho (a outra metade está em tests/test_proposta_lead.py)."""
+    with pool.connection() as c:
+        _lead(c, status="novo")
+        oid = _orc_rascunho(c)
+        _envio(c, oid, "email")
+        _ligar(c, "proposta")
+        c.commit()
+        assert fr.aplicar_gatilhos(c, CONTA)["movidos"] == 0
+
+
+def test_um_gatilho_quebrado_nao_derruba_os_outros(pool):
+    """Sem savepoint por evento, uma tabela que falta envenena a transação e a conta
+    inteira fica SEM gatilho nenhum — os que funcionavam param junto com o que
+    quebrou. Silêncio por gatilho é degradação; por conta é apagão."""
+    with pool.connection() as c:
+        lead = _lead(c, status="novo")
+        _msg(c, _conversa(c, lead), "out", AGORA)   # dispara resposta_nossa
+        oid = _orc_rascunho(c)
+        c.execute("update prospeccao set orcamento_id=%s where id=%s", (oid, lead))
+        _envio(c, oid, "email")
+        _ligar(c, "contatado")
+        _ligar(c, "proposta")
+        c.commit()
+
+    quebrado = dict(fr._SQL_EVENTO)
+    quebrado["orcamento_enviado"] = "select id, now() from tabela_que_nao_existe"
+    with mock.patch.object(fr, "_SQL_EVENTO", quebrado):
+        with pool.connection() as c:
+            assert fr.aplicar_gatilhos(c, CONTA)["movidos"] == 1, \
+                "o gatilho quebrado levou o resto junto"
+            c.commit()
+            assert c.execute("select status from prospeccao where id=%s",
+                             (lead,)).fetchone()[0] == "contatado"
 
 
 # ----------------------------------------------------------------- fase

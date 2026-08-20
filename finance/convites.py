@@ -174,7 +174,18 @@ def reenviar_historico(pool, conta_id: int, log_id: int) -> dict:
 
 def por_token(pool, token: str) -> dict | None:
     """Tudo que a página pública de confirmação precisa: convidado + evento + a
-    empresa (nome). None se o token não existe."""
+    empresa (nome COMERCIAL). None se o token não existe.
+
+    O nome é o que o CONVIDADO vê — no título da página, no "A {empresa} quer
+    marcar com você" e no assunto do convite por WhatsApp/e-mail (ver
+    _titulo_com_extras). Por isso a ordem é nome_fantasia → razão social →
+    contas.nome, e não `contas.nome` direto: esse último é o nome de quem ABRIU
+    a conta, então o convite da Prime Eventos chegava assinado "MANOEL SOARES" —
+    um nome que o cliente do salão não tem como reconhecer.
+
+    Mesma precedência que web/proposta.py já usa no cabeçalho do orçamento de
+    evento, pelo mesmo motivo. O coalesce cobre a conta PF, que não tem fantasia
+    nem razão social: aí o nome da pessoa É o nome comercial."""
     token = (token or "").strip()
     if not token:
         return None
@@ -182,7 +193,9 @@ def por_token(pool, token: str) -> dict | None:
         r = c.execute(
             """select cv.id, cv.nome, cv.contato, cv.status, cv.resposta, cv.token,
                       cv.conta_id, e.id, e.titulo, e.inicio, e.fim, e.local, e.tipo,
-                      co.nome, e.link_online
+                      coalesce(nullif(btrim(co.nome_fantasia), ''),
+                               nullif(btrim(co.razao_social), ''),
+                               co.nome), e.link_online
                  from evento_convidados cv
                  join eventos_agenda e on e.id = cv.evento_id
                  join contas co on co.id = cv.conta_id

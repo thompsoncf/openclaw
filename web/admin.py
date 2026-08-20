@@ -114,6 +114,23 @@ _ADMIN_HOME = """{% extends "abase" %}{% block conteudo %}
   <div class="mut" style="font-size:.78rem;margin-top:.2rem">{% if beta_gratis %}Quem se cadastra vê "Grátis (beta)" e não é cobrado. Os preços abaixo ficam guardados.{% else %}Os preços abaixo estão VALENDO — clientes veem o valor no cadastro.{% endif %}</div></div>
   <button name="acao" value="{% if beta_gratis %}off{% else %}on{% endif %}" style="padding:.5rem 1rem;background:{% if beta_gratis %}#333{% else %}var(--verde){% endif %};border:0;color:#fff;border-radius:6px;font-weight:600;cursor:pointer">{% if beta_gratis %}Desligar beta{% else %}Ligar beta{% endif %}</button>
 </form>
+
+{# A FAIXA DE VENCIMENTO no painel do cliente. Encostada na chave do beta porque
+   e' a mesma decisao: o que o cliente ve enquanto ainda nao esta sendo cobrado.
+
+   So' decide o que APARECE — nao libera nem corta acesso de ninguem.
+
+   Com o beta DESLIGADO a chave fica inerte, e o cartao diz isso em vez de
+   sumir: um controle que some deixa a pessoa procurando; um que se explica,
+   nao. #}
+<form method="post" action="/admin/aviso-vencimento" style="display:flex;justify-content:space-between;align-items:center;gap:1rem;background:{% if not avisa_venc and beta_gratis %}#14251c{% else %}var(--card){% endif %};border:1px {% if not beta_gratis %}dashed{% else %}solid{% endif %} {% if not avisa_venc and beta_gratis %}var(--verde)33{% else %}var(--borda){% endif %};border-radius:10px;padding:.8rem 1rem;margin-bottom:1rem{% if not beta_gratis %};opacity:.62{% endif %}">
+  <div><div style="font-weight:600;color:{% if not avisa_venc and beta_gratis %}var(--verde-claro){% else %}#b4b2a9{% endif %}">Aviso de vencimento — {% if not avisa_venc %}calado{% if not beta_gratis %} (sem efeito){% endif %}{% else %}aparecendo{% endif %}</div>
+  <div class="mut" style="font-size:.78rem;margin-top:.2rem">
+    {% if not beta_gratis %}Com o beta desligado esta chave nao vale: cobrar sem avisar quem esta vencendo nao e' opcao. Os avisos estao aparecendo.
+    {% elif avisa_venc %}Quem esta vencido ve a faixa vermelha pedindo pagamento. Durante o beta ninguem e' cortado por isso.
+    {% else %}Ninguem ve faixa de vencimento. Vale so' enquanto o beta estiver ligado — ao desligar, os avisos voltam sozinhos.{% endif %}</div></div>
+  <button name="acao" value="{% if avisa_venc %}off{% else %}on{% endif %}" {% if not beta_gratis %}disabled{% endif %} style="padding:.5rem 1rem;background:{% if not beta_gratis %}transparent{% elif avisa_venc %}var(--verde){% else %}#333{% endif %};border:{% if not beta_gratis %}1px solid var(--borda){% else %}0{% endif %};color:{% if not beta_gratis %}var(--txt-mut){% elif avisa_venc %}var(--sobre-verde){% else %}#fff{% endif %};border-radius:6px;font-weight:600;cursor:{% if not beta_gratis %}not-allowed{% else %}pointer{% endif %}">{% if not beta_gratis %}sem efeito agora{% elif avisa_venc %}Calar o aviso{% else %}Voltar a avisar{% endif %}</button>
+</form>
 <table style="width:100%;font-size:.86rem">
   <tr class="mut" style="font-size:.74rem;text-align:left"><td style="padding:.3rem 0">Plano</td><td>Tipo</td><td style="text-align:right">Preço/mês</td><td style="text-align:center">Ativo</td><td></td></tr>
   {% for p in planos_admin %}
@@ -626,6 +643,7 @@ def admin_home(request: Request, busca: str = ""):
     modulos_admin = [_SN(codigo=r[0], nome=r[1], preco_centavos=r[2], ativo=r[3])
                      for r in _md]
     beta_gratis = _cfg.beta_gratis_ativo(get_pool())
+    avisa_venc = _cfg.aviso_vencimento_ativo(get_pool())
     try:
         with get_pool().connection() as _cx:
             leads_forn = _cx.execute(
@@ -636,7 +654,7 @@ def admin_home(request: Request, busca: str = ""):
     return HTMLResponse(_env.get_template("ahome").render(
         resumo=resumo, contas=contas, eventos=eventos, nichos=nichos, busca=busca,
         planos_admin=planos_admin, modulos_admin=modulos_admin,
-        beta_gratis=beta_gratis, leads_forn=leads_forn,
+        beta_gratis=beta_gratis, avisa_venc=avisa_venc, leads_forn=leads_forn,
         aviso=request.session.pop("admin_aviso", None)))
 
 
@@ -649,6 +667,22 @@ def admin_beta(request: Request, acao: str = Form("")):
     request.session["admin_aviso"] = (
         "Modo beta LIGADO — clientes veem gratis." if acao == "on"
         else "Modo beta DESLIGADO — precos valendo no cadastro.")
+    return RedirectResponse("/admin", status_code=303)
+
+
+@router.post("/admin/aviso-vencimento")
+def admin_aviso_vencimento(request: Request, acao: str = Form("")):
+    """Liga/desliga a faixa de vencimento no painel do cliente.
+
+    So' mexe no que aparece. Nao encosta em plano, cobranca nem corte de acesso.
+    """
+    if _admin(request) is None:
+        return _NEGADO
+    from finance import config_app as _cfg
+    _cfg.set_aviso_vencimento(get_pool(), acao == "on")
+    request.session["admin_aviso"] = (
+        "Aviso de vencimento APARECENDO pros clientes." if acao == "on"
+        else "Aviso de vencimento CALADO enquanto o beta estiver ligado.")
     return RedirectResponse("/admin", status_code=303)
 
 

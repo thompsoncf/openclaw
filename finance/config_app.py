@@ -59,6 +59,40 @@ def set_beta_gratis(pool, ligado: bool) -> None:
     set_config(pool, BETA_GRATIS, "on" if ligado else "off")
 
 
+# ── Aviso de vencimento no painel do cliente ──────────────────────────────
+#
+# POR QUE EXISTE. Durante o beta ninguem e' cobrado, mas o vencimento do plano
+# continua correndo no banco — entao contas "vencidas" que estao usando o
+# sistema de graca, e com a nossa benca, ganhavam uma faixa vermelha pedindo
+# pagamento em toda tela. Ruido puro enquanto a cobranca nao comecou.
+#
+# Esta chave CALA a faixa. Ela nao libera nem corta acesso de ninguem: quem
+# decide isso e' contas.acesso_liberado, que nao olha pra ca. Aqui so' se
+# escolhe o que aparece na tela.
+#
+# TRAVA: so' vale enquanto o beta gratis estiver LIGADO (ver web/portal.py,
+# _plano_aviso). No dia em que o beta for desligado pra comecar a cobrar, os
+# avisos voltam sozinhos, mesmo que esta chave tenha ficado calada — cobrar sem
+# avisar quem esta vencendo nao e' opcao, e depender de lembrar de duas chaves
+# na ordem certa e' como se esquece uma.
+AVISO_VENCIMENTO = "aviso_vencimento"
+
+
+def aviso_vencimento_ativo(pool) -> bool:
+    """True se a faixa de vencimento deve aparecer pro cliente.
+
+    PADRAO SEGURO, e o INVERSO do beta: sem configuracao, AVISA. O beta assume
+    'gratis' porque cobrar sem querer e' pior; aqui e' ao contrario — deixar de
+    avisar sem querer e' o que cobra caro.
+    """
+    return (get_config(pool, AVISO_VENCIMENTO, "on") or "on").strip().lower() == "on"
+
+
+def set_aviso_vencimento(pool, ligado: bool) -> None:
+    """Liga/desliga a faixa de vencimento no painel do cliente."""
+    set_config(pool, AVISO_VENCIMENTO, "on" if ligado else "off")
+
+
 # ── Alertas do admin (pra ONDE vao os avisos do sistema) ──────────────────
 # Antes isso vivia SO' em variavel de ambiente (ADMIN_EMAIL / ADMIN_TELEGRAM_ID)
 # — e a env so' estava setada no cron de saldos, entao os alertas disparados

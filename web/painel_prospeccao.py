@@ -203,10 +203,19 @@ def _acesso(request: Request):
         return None, RedirectResponse("/painel", status_code=303)
     if not conta[11]:  # prospecção é ferramenta de EMPRESA (módulo PJ) — não de conta PF
         return None, RedirectResponse("/painel", status_code=303)
+    _membro_id = request.session.get("membro_id")
+    _gerencia = papel in ("dono", "gestor")
     ctx = {"conta": conta, "conta_id": conta[0], "papel": papel,
-           "membro_id": request.session.get("membro_id"),
-           "gerencia": papel in ("dono", "gestor"),  # vê a carteira toda + filtra
-           "pode_atribuir": papel == "dono"}          # só o dono atribui/reatribui
+           "membro_id": _membro_id,
+           "gerencia": _gerencia,                     # vê a carteira toda + filtra
+           "pode_atribuir": papel == "dono",          # só o dono atribui/reatribui
+           # Campanha liberada individualmente pelo dono (migração 183). Só se
+           # consulta pra quem NÃO é gerência: dono e gestor já passam pelo gate
+           # antigo, e assim a tela deles não paga uma consulta por request.
+           "pode_campanha": (not _gerencia) and eq.pode_campanha(
+               get_pool(), conta[0], _membro_id)}
+    # Atalho usado nos gates de campanha/enriquecimento: gerência OU liberado.
+    ctx["gere_campanha"] = ctx["gerencia"] or ctx["pode_campanha"]
     return ctx, None
 
 
@@ -641,7 +650,7 @@ async def prospeccao_base_add_campanha(request: Request):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
-    if not ctx["gerencia"]:
+    if not ctx["gere_campanha"]:
         request.session["prosp_aviso"] = "Só o dono/gestor gerencia campanhas."
         return RedirectResponse("/painel/prospeccao/base", status_code=303)
     form = await request.form()
@@ -705,7 +714,7 @@ def prospeccao_base_tirar_campanha(request: Request, ids: list[str] = Form([])):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
-    if not ctx["gerencia"]:
+    if not ctx["gere_campanha"]:
         request.session["prosp_aviso"] = "Só o dono/gestor gerencia campanhas."
         return RedirectResponse("/painel/prospeccao/base?ver_camp=1", status_code=303)
     pids = [int(i) for i in ids if str(i).isdigit()]
@@ -5474,7 +5483,7 @@ def prospeccao_campanha_nova(request: Request, nome: str = Form("")):
     ctx, redir = _acesso(request)
     if redir is not None:
         return redir
-    if not ctx["gerencia"]:
+    if not ctx["gere_campanha"]:
         return RedirectResponse("/painel/prospeccao/campanhas", status_code=303)
     nome = (nome or "").strip() or "Nova campanha"
     with get_pool().connection() as c:
@@ -5482,9 +5491,15 @@ def prospeccao_campanha_nova(request: Request, nome: str = Form("")):
         # Sem isso a campanha nasce sem dizer que mensagem está usando, e depois não
         # há como comparar um texto com outro — 7 das 8 campanhas desta base ficaram
         # órfãs assim, e o resultado delas virou um número sem causa.
-        cid = c.execute("""insert into campanhas (conta_id, nome, criado_por, modelo_codigo)
-                           values (%s,%s,%s,'generico') returning id""",
-                        (ctx["conta_id"], nome[:120], ctx["membro_id"])).fetchone()[0]
+        # responsavel_id: sem isto o vendedor cria a campanha e NÃO CONSEGUE ABRIR
+        # o que acabou de criar — o _pode_campanha exige gerência ou ser o
+        # responsável, e `criado_por` sozinho não conta. Pra gerência fica NULL
+        # como sempre foi (campanha da empresa, sem dono individual).
+        _resp = None if ctx["gerencia"] else ctx["membro_id"]
+        cid = c.execute("""insert into campanhas (conta_id, nome, criado_por, modelo_codigo,
+                                                  responsavel_id)
+                           values (%s,%s,%s,'generico',%s) returning id""",
+                        (ctx["conta_id"], nome[:120], ctx["membro_id"], _resp)).fetchone()[0]
         for (ordem, dias, assunto, corpo, ia) in _PASSOS_PADRAO:
             c.execute("""insert into campanha_passos (campanha_id, ordem, dias_apos, assunto, corpo, usar_ia)
                          values (%s,%s,%s,%s,%s,%s)""", (cid, ordem, dias, assunto, corpo, ia))

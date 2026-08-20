@@ -27,7 +27,7 @@ create table nichos (id bigserial primary key, nome text, slug text unique, tipo
 create table contas (id bigserial primary key, nome text, nome_fantasia text,
   razao_social text, endereco text, bairro text, cidade text, uf text, logo_url text,
   banner_cor text, documento text, cep text, telefone text, email_empresa text,
-  cnae text, nicho_id bigint references nichos(id));
+  cnae text, nicho_id bigint references nichos(id), chip_de bigint);
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text default 'vendedor', ativo boolean default true);
 create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id bigint,

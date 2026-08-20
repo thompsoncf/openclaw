@@ -464,7 +464,13 @@ def enviar_mensagem(pool, conta_id: int, membro_id: int, lead_id: int, texto: st
         numero = (p[0] or p[1] or "") if p else ""
         if not numero:
             return {"ok": False, "erro": "Lead sem número de WhatsApp."}
-        res = whatsapp_out.enviar(c, conta_id, numero, texto)
+        # responde pelo mesmo chip que recebeu. `_conversa_id` já é chamado logo
+        # abaixo pra gravar no inbox; aqui ele vem antes porque o chip precisa ser
+        # decidido ANTES do envio.
+        res = whatsapp_out.enviar(
+            c, conta_id, numero, texto,
+            chip_id=whatsapp_out.chip_da_conversa(
+                c, conta_id, _conversa_id(c, conta_id, lead_id, "whatsapp")))
         if not res.get("ok"):
             erros = {"nao_configurado": "WhatsApp não conectado (credencial no Render).",
                      "sem_numero_empresa": "Configure o WhatsApp da empresa na aba Canais.",

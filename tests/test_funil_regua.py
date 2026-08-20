@@ -44,7 +44,7 @@ create table funil_regua (conta_id bigint primary key,
 create table funil_movimentos (id bigserial primary key, conta_id bigint,
   prospeccao_id bigint, de text, para text, motivo text, membro_id bigint,
   criado_em timestamptz default now());
-create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint);
+create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint, chip_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, direcao text,
   criado_em timestamptz default now());
 create table eventos_agenda (id bigserial primary key, conta_id bigint, prospeccao_id bigint,

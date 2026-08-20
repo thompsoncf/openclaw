@@ -29,7 +29,7 @@ create table nichos (id bigserial primary key, nome text, slug text unique, tipo
 create table contas (id bigserial primary key, nome text, nome_fantasia text,
   razao_social text, documento text, endereco text, bairro text, cep text,
   cidade text, uf text, telefone text, email_empresa text, logo_url text,
-  cnae text, nicho_id bigint references nichos(id));
+  cnae text, nicho_id bigint references nichos(id), chip_de bigint);
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text default 'vendedor', ativo boolean default true, comissao_pct numeric(5,2));
 create table lancamentos (id bigserial primary key, conta_id bigint, membro_id bigint,

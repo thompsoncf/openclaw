@@ -47,7 +47,7 @@ def cliente(monkeypatch):
     pool = ConnectionPool(url, min_size=1, max_size=3, open=True,
                           kwargs={"prepare_threshold": None})
     with pool.connection() as c:
-        c.execute("create table contas (id bigserial primary key, nome text)")
+        c.execute("create table contas (id bigserial primary key, nome text, chip_de bigint)")
         # `membros` existe porque o resumo do card resolve o NOME de quem alterou
         # o contrato; 'dono' não tem linha aqui e cai no nome da conta
         c.execute("create table membros (id bigserial primary key, conta_id bigint, nome text)")

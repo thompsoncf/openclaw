@@ -32,7 +32,7 @@ from finance import lembretes as lb
 BRT = timezone(timedelta(hours=-3))
 
 _SQL = """
-create table contas (id bigserial primary key, nome text);
+create table contas (id bigserial primary key, nome text, chip_de bigint);
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text default 'vendedor', ativo boolean default true,
   cockpit_push_ativo boolean default true);

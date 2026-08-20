@@ -47,8 +47,29 @@ def configurado_conta(c, conta_id) -> bool:
     return _twilio.configurado() and bool(r[1])
 
 
-def enviar(c, conta_id, numero, texto) -> dict:
-    """Manda um texto pro `numero` do lead pelo provedor configurado da empresa."""
+def chip_da_conversa(c, conta_id, conversa_id) -> int | None:
+    """Por qual chip esta conversa entrou — ou None (= o chip da própria empresa).
+
+    Só vale no provedor 'qr': Twilio e Cloud API têm um número por conta, e ali a
+    pergunta não existe. Confere `conta_id` de propósito: sem isso um id de conversa
+    de outra empresa faria a resposta sair por um chip que não é desta.
+    """
+    if not conversa_id:
+        return None
+    r = c.execute("select chip_id from conversas where id=%s and conta_id=%s",
+                  (conversa_id, conta_id)).fetchone()
+    return int(r[0]) if (r and r[0]) else None
+
+
+def enviar(c, conta_id, numero, texto, *, chip_id=None) -> dict:
+    """Manda um texto pro `numero` do lead pelo provedor configurado da empresa.
+
+    `chip_id` só é lido no provedor 'qr' e responde "por qual número isto sai".
+    Nulo — que é o padrão e o caso de toda empresa de um chip só — sai pelo chip da
+    própria empresa, exatamente como sempre saiu. Quem responde a uma CONVERSA
+    deveria passar o chip dela (ver `chip_da_conversa`): sem isso o lead escreve pra
+    um número e é respondido por outro, que do lado dele parece outra empresa.
+    """
     r = _row(c, conta_id)
     if not r:
         return {"ok": False, "erro": "sem_numero_empresa"}
@@ -57,7 +78,7 @@ def enviar(c, conta_id, numero, texto) -> dict:
         return _cloud.enviar_texto(r[2], r[3], numero, texto)
     if prov == "qr":
         from finance import whatsapp_qr as _qr
-        return _qr.enviar_texto(conta_id, numero, texto)
+        return _qr.enviar_texto(chip_id or conta_id, numero, texto)
     return _twilio.enviar_texto(r[1], numero, texto)
 
 

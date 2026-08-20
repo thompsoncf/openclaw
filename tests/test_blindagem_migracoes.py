@@ -14,7 +14,7 @@ from db.aplicar_migracoes import aplicar_migracoes
 
 # tabelas base mínimas que as migrações 088/089 referenciam (FKs)
 _BASE_SQL = """
-create table contas (id bigserial primary key, tipo text, nome text);
+create table contas (id bigserial primary key, tipo text, nome text, chip_de bigint);
 create table membros (id bigserial primary key, conta_id bigint, nome text);
 create table lancamentos (id bigserial primary key, conta_id bigint references contas(id),
   membro_id bigint, tipo text, valor_centavos bigint, categoria text, descricao text default '',
@@ -74,7 +74,7 @@ create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id
   canal text, contato_ref text, status text default 'aberta',
   agente_ativo boolean default false, responsavel_membro_id bigint,
   janela_expira_em timestamptz, ultima_msg_em timestamptz default now(),
-  criado_em timestamptz default now());
+  criado_em timestamptz default now(), chip_id bigint);
 -- orcamentos vem da 045 (marcada como aplicada); a 147 dá a ela o modo evento
 -- (colunas do evento/parcelas, numeração por conta e o backfill do número).
 create table orcamentos (id bigserial primary key, conta_id bigint references contas(id));

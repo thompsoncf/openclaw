@@ -56,7 +56,7 @@ def pool(monkeypatch):
                      documento text, razao_social text, nome_fantasia text, endereco text,
                      bairro text, cep text, cidade text, uf text, email_empresa text,
                      telefone text, cnae text, nicho_id bigint,
-                     vende_produto boolean, vende_servico boolean)""")
+                     vende_produto boolean, vende_servico boolean, chip_de bigint)""")
         c.execute("""create table canais_config (conta_id bigint, canal text, provedor text,
                      identificador text, wa_phone_id text, token text, ativo boolean default true)""")
         # as colunas de contato existem porque `criar_orcamento` monta a proposta
@@ -69,7 +69,7 @@ def pool(monkeypatch):
         c.execute("""create table conversas (id bigserial primary key, conta_id bigint,
                      prospeccao_id bigint, canal text, status text, agente_ativo boolean,
                      responsavel_membro_id bigint, push_avisado_em timestamptz,
-                     ultima_msg_em timestamptz, criado_em timestamptz default now())""")
+                     ultima_msg_em timestamptz, criado_em timestamptz default now(), chip_id bigint)""")
         c.execute("""create table mensagens (id bigserial primary key, conversa_id bigint,
                      canal text, direcao text, autor text, membro_id bigint, texto text,
                      meta jsonb, provider_sid text, status text,

@@ -29,9 +29,13 @@ from web import painel_prospeccao as pp
 _SEGREDO = "segredo-do-servico-qr"
 
 _BASE_SQL = """
-create table contas (id bigserial primary key, tipo text, nome text);
+-- `chip_de` e `chip_id` vêm da migração 171: nulos = empresa de um chip só, que é
+-- o caso de tudo que existe hoje. As rotas leem as duas colunas desde que a empresa
+-- passou a poder ter mais de um chip.
+create table contas (id bigserial primary key, tipo text, nome text,
+  chip_de bigint references contas(id) on delete cascade);
 create table conversas (id bigserial primary key, conta_id bigint, canal text,
-  contato text, status text);
+  contato text, status text, chip_id bigint references contas(id) on delete set null);
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text,
   direcao text, autor text, texto text, provider_sid text, status text);
 create table wa_contatos (id bigserial primary key, conta_id bigint, numero text, nome text);

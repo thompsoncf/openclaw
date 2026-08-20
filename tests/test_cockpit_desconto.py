@@ -63,7 +63,7 @@ def pool(monkeypatch):
                      vende_produto boolean, vende_servico boolean,
                      documento text, razao_social text, nome_fantasia text,
                      endereco text, bairro text, cep text, cidade text, uf text,
-                     email_empresa text, telefone text, cnae text)""")
+                     email_empresa text, telefone text, cnae text, chip_de bigint)""")
         c.execute("""create table prospeccao (id bigserial primary key, conta_id bigint,
                      membro_id bigint, empresa text, contato text, decisor_nome text,
                      socio text, cnpj text, segmento text, whatsapp text, telefone text,

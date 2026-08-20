@@ -41,7 +41,7 @@ create table contas (id bigserial primary key, nome text, nome_fantasia text,
   cidade text, uf text, telefone text, email_empresa text, logo_url text, cnae text,
   -- o contrato de locação é do nicho de eventos, e agora a CRIAÇÃO dele também
   -- passa por essa porta (contrato.criar_para_orcamento -> tem_contrato)
-  nicho_id bigint references nichos(id));
+  nicho_id bigint references nichos(id), chip_de bigint);
 create table membros (id bigserial primary key, conta_id bigint, nome text);
 create table eventos_agenda (id bigserial primary key, conta_id bigint, status text,
   pre_reserva_ate timestamptz);

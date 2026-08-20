@@ -24,7 +24,7 @@ create table contas (id bigserial primary key, nome text, documento text, razao_
   email_empresa text, telefone text, nicho text, cnae text,
   -- o nicho decide o MODO do orçamento (evento × recorrente), inclusive quando a
   -- proposta nasce aqui no cockpit do vendedor
-  nicho_id bigint references nichos(id));
+  nicho_id bigint references nichos(id), chip_de bigint);
 create table membros (id bigserial primary key, conta_id bigint, nome text, email text,
   papel text default 'vendedor', ativo boolean default true, whatsapp text,
   cockpit_push_ativo boolean default true, cockpit_pausado boolean default false);
@@ -45,7 +45,7 @@ create table prospeccao (id bigserial primary key, conta_id bigint, vendedor_id 
 create table conversas (id bigserial primary key, conta_id bigint, prospeccao_id bigint,
   canal text, status text default 'aberta', agente_ativo boolean default true,
   responsavel_membro_id bigint, ultima_msg_em timestamptz default now(),
-  push_avisado_em timestamptz, criado_em timestamptz default now());
+  push_avisado_em timestamptz, criado_em timestamptz default now(), chip_id bigint);
 create table mensagens (id bigserial primary key, conversa_id bigint, canal text, direcao text,
   autor text default 'humano', membro_id bigint, texto text default '', provider_sid text,
   criado_em timestamptz default now());

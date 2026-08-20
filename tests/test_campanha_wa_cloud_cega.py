@@ -26,7 +26,7 @@ from finance import prospec_convite as pc
 from finance import whatsapp_cloud as wc
 
 _BASE_SQL = """
-create table contas (id bigserial primary key, tipo text, nome text);
+create table contas (id bigserial primary key, tipo text, nome text, chip_de bigint);
 create table prospeccao (id bigserial primary key, conta_id bigint, empresa text,
   cnpj text, whatsapp text, telefone text, decisor_telefones jsonb, estagio text);
 create table campanhas (id bigserial primary key, conta_id bigint, nome text,

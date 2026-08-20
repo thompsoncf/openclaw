@@ -13,7 +13,7 @@ from psycopg_pool import ConnectionPool
 from contas import equipe as eq
 
 _BASE_SQL = """
-create table contas (id bigserial primary key, nome text);
+create table contas (id bigserial primary key, nome text, chip_de bigint);
 create table membros (id bigserial primary key, conta_id bigint, nome text, papel text,
   email text, ativo boolean default true, convite_token text, convite_expira timestamptz,
   senha_hash text);

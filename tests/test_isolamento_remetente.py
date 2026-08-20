@@ -16,7 +16,7 @@ from psycopg_pool import ConnectionPool
 from finance import email_inbound as ei
 
 _BASE_SQL = """
-create table contas (id bigserial primary key, tipo text, nome text);
+create table contas (id bigserial primary key, tipo text, nome text, chip_de bigint);
 create table canais_config (
   id bigserial primary key, conta_id bigint, canal text, identificador text,
   ativo boolean not null default true, imap_senha text, imap_host text,

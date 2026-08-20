@@ -422,7 +422,7 @@ def _atender(pool, conta_id, conversa_id):
             if not _ja_ofereceu_orcamento(msgs):
                 return _enviar(c, conta_id, conversa_id, canal, destino,
                                _texto_oferecendo(resposta))
-            return _orcamento(c, conta_id, conversa_id, conv, catalogo, d, canal,
+            return _orcamento(pool, c, conta_id, conversa_id, conv, catalogo, d, canal,
                               destino, resposta, evento)
 
         # responde tudo (nunca escala/desliga automático)
@@ -438,7 +438,7 @@ def _enviar(c, conta_id, conversa_id, canal, destino, texto):
     c.commit()
 
 
-def _orcamento(c, conta_id, conversa_id, conv, catalogo, d, canal, destino, resposta, evento):
+def _orcamento(pool, c, conta_id, conversa_id, conv, catalogo, d, canal, destino, resposta, evento):
     slugs_ok = {s["slug"]: s for s in catalogo}
     escolhidos = _itens_escolhidos(d, slugs_ok)
     if not escolhidos:
@@ -464,15 +464,68 @@ def _orcamento(c, conta_id, conversa_id, conv, catalogo, d, canal, destino, resp
     _n = c.execute("""select coalesce(n.slug,'') from contas ct
                         left join nichos n on n.id = ct.nicho_id
                        where ct.id=%s""", (conta_id,)).fetchone()
-    c.execute(
+    # O TELEFONE DO CLIENTE VAI NA PROPOSTA.
+    #
+    # Sem ele o `proposta_lead` fica sem a segunda porta (casar lead por telefone),
+    # e a folha sai sem o contato de quem vai assinar. O agente é o único caminho
+    # que gravava a proposta com o campo vazio — o cockpit sempre copiou do lead.
+    fone = (conv[4] or conv[5] or (destino if canal == "whatsapp" else "") or "")
+    # `primeiro_ano_centavos` NÃO pode ficar no default.
+    #
+    # Quem gera os títulos lê `coalesce(primeiro_ano_centavos, setup_centavos, 0)`
+    # (finance/vendas.py, finance/agenda.py) — e o coalesce só cai pro setup quando o
+    # campo é NULO. O default da coluna é ZERO, que não é nulo: a proposta 32 da conta
+    # 34, feita pelo agente em 20/08, foi aprovada pelo cliente valendo R$ 0,00.
+    # Sem desconto (o agente não dá), o primeiro ano É o setup.
+    orc_id = c.execute(
         """insert into orcamentos (conta_id, cliente, empresa, modulos, itens, escopo,
-             evento, setup_centavos, mensal_centavos, n_modulos, criado_por, token,
-             status, modo)
-           values (%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s::jsonb,%s,%s,%s,'agente',%s,'rascunho',%s)""",
+             evento, setup_centavos, mensal_centavos, primeiro_ano_centavos, whatsapp,
+             n_modulos, criado_por, token, status, modo)
+           values (%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s::jsonb,%s,%s,%s,%s,%s,'agente',%s,'rascunho',%s)
+           returning id""",
         (conta_id, empresa, empresa, json.dumps([s["slug"] for s in escolhidos]),
-         json.dumps(itens), _CONDICOES, json.dumps(evento), setup, mensal,
-         len(escolhidos), token, _vendas.modo_por_nicho(_n[0] if _n else "")))
+         json.dumps(itens), _CONDICOES, json.dumps(evento), setup, mensal, setup,
+         fone[:60], len(escolhidos), token,
+         _vendas.modo_por_nicho(_n[0] if _n else ""))).fetchone()[0]
+
+    # O CARD DO FUNIL, amarrado AQUI, na mesma transação da proposta.
+    #
+    # `proposta_lead.garantir` procura o lead pelo telefone porque nas outras portas
+    # (cockpit, app do vendedor) não há conversa nenhuma pra perguntar. Aqui há: a
+    # conversa JÁ sabe de quem é o lead. Amarrar direto dispensa o palpite e o empate.
+    #
+    # Era isto que faltava. Medido na conta 34 em 20/08: a proposta 32 saiu pelo chip
+    # 2 às 17:18 e o cliente aprovou às 17:19 — sem linha em `orcamento_envios`, sem
+    # `prospeccao.orcamento_id` e sem movimento no funil. O gatilho `orcamento_enviado`
+    # estava ligado e cego: a consulta dele é `join orcamentos on id = p.orcamento_id`,
+    # e sem o vínculo não existe card pra mover. O lead ficou parado em "contatado"
+    # com uma proposta aprovada do lado.
+    if conv[1]:
+        try:
+            from finance import proposta_lead as _pl
+            _pl.ligar(c, conta_id, int(conv[1]), orc_id)
+        except Exception:  # noqa: BLE001 — o vínculo não pode derrubar o atendimento
+            _log.warning("agente: não amarrei a proposta %s ao lead %s",
+                         orc_id, conv[1], exc_info=True)
+
     from finance.email_sender import _app_url
     link = _app_url() + "/proposta/" + token
     corpo = (resposta + "\n\n" if resposta else "") + _bloco_orcamento(escolhidos, link)
     _enviar(c, conta_id, conversa_id, canal, destino, corpo)
+
+    # O REGISTRO DO ENVIO, depois do commit do `_enviar`.
+    #
+    # `proposta_email.registrar` é o ponto único por onde "a proposta saiu" passa: ele
+    # grava `orcamento_envios` (que é o que o gatilho lê quando o status ainda é
+    # rascunho) e chama o `garantir` como rede. O comentário lá previa a quinta rota
+    # de envio esquecendo de chamar — o agente era essa quinta rota.
+    #
+    # Depois do `_enviar` porque ele abre a PRÓPRIA conexão: antes do commit, a
+    # proposta que acabou de nascer ainda não existe pra ela.
+    try:
+        from finance import proposta_email as _pe
+        _pe.registrar(pool, conta_id, orc_id, destino=str(destino or "")[:200],
+                      remetente_usado="", ok=True, por="agente",
+                      canal=canal or "whatsapp")
+    except Exception:  # noqa: BLE001
+        _log.warning("agente: não registrei o envio da proposta %s", orc_id, exc_info=True)

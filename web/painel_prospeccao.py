@@ -2127,10 +2127,25 @@ def chips_da_conta(c, conta_id: int) -> list[dict]:
     o nome do titular, que não serve de rótulo de chip, então ali ele vem vazio e a
     tela mostra "Chip 1" até alguém batizar.
     """
+    # `ultima` e `sem_receber` são POR CHIP de propósito. Ficavam no topo da aba, no
+    # nível da empresa, e com dois chips isso passa a mentir: "última recebida 21:40"
+    # não diz em QUAL número, e é justamente essa a pergunta de quem desconfia que um
+    # deles parou. `coalesce(cv.chip_id, cv.conta_id)` casa o histórico inteiro no
+    # chip principal, que é onde ele sempre esteve.
     linhas = c.execute(
         """select ct.id, coalesce(ct.nome,''), ct.chip_de,
                   coalesce(cc.identificador,''), coalesce(cc.ativo,false),
-                  coalesce(cc.rotulo,'')
+                  coalesce(cc.rotulo,''),
+                  -- mesmo formato do `ult_in` do resto da aba (BRT via -3h, como o
+                  -- arquivo já faz), mais os minutos crus pro aviso de silêncio
+                  (select to_char(max(m.criado_em) - interval '3 hours','DD/MM HH24:MI')
+                     from mensagens m join conversas cv on cv.id = m.conversa_id
+                    where coalesce(cv.chip_id, cv.conta_id) = ct.id
+                      and cv.canal='whatsapp' and m.direcao='in') ultima,
+                  (select extract(epoch from now() - max(m.criado_em))/60
+                     from mensagens m join conversas cv on cv.id = m.conversa_id
+                    where coalesce(cv.chip_id, cv.conta_id) = ct.id
+                      and cv.canal='whatsapp' and m.direcao='in') min_sem
              from contas ct
              left join canais_config cc
                     on cc.conta_id = ct.id and cc.canal='whatsapp'
@@ -2139,7 +2154,7 @@ def chips_da_conta(c, conta_id: int) -> list[dict]:
             order by (ct.chip_de is not null), ct.id""",
         (conta_id, conta_id)).fetchall()
     saida = []
-    for i, (cid, nome, chip_de, ident, ativo, rotulo) in enumerate(linhas):
+    for i, (cid, nome, chip_de, ident, ativo, rotulo, ultima, min_sem) in enumerate(linhas):
         principal = chip_de is None
         # o apelido do principal mora no canal (migração 172); o do secundário, em
         # contas.nome da linha dele — ver o cabeçalho da 172 pro porquê
@@ -2148,7 +2163,9 @@ def chips_da_conta(c, conta_id: int) -> list[dict]:
         saida.append({"id": cid, "principal": principal, "apelido": apelido,
                       "rotulo": apelido or f"Chip {i + 1}",
                       "numero": numero, "ativo": bool(ativo),
-                      "pareado": bool(numero)})
+                      "pareado": bool(numero),
+                      "ultima": ultima or "",
+                      "sem_receber": _ha_quanto(int(min_sem) if min_sem is not None else None)})
     return saida
 
 
@@ -2301,7 +2318,7 @@ def comunicacao_whatsapp_qr_status(request: Request, chip: str = ""):
 
 
 @router.get("/painel/prospeccao/comunicacao/whatsapp-aparelhos")
-def comunicacao_whatsapp_aparelhos(request: Request):
+def comunicacao_whatsapp_aparelhos(request: Request, chip: str = ""):
     """Quantos aparelhos estão ligados neste WhatsApp — e quanto ainda sai por fora.
 
     Depois que o Cockpit parou de oferecer a saída pro celular, sobrou a pergunta
@@ -2316,14 +2333,21 @@ def comunicacao_whatsapp_aparelhos(request: Request):
     if redir is not None:
         return JSONResponse({"ok": False, "erro": "login"}, status_code=401)
     from finance import cockpit as ck
-    fora = ck.saida_por_fora(get_pool(), ctx["conta_id"])
+    # POR CHIP: numa empresa de dois números, um "95% saiu por fora" somado não diz
+    # em qual aparelho bater. `chip` vazio = a empresa inteira, o de sempre.
+    with get_pool().connection() as _c:
+        alvo = _chip_da_conta(_c, ctx["conta_id"], chip)
+    if alvo is None:
+        return JSONResponse({"ok": False, "erro": "escopo"}, status_code=403)
+    fora = ck.saida_por_fora(get_pool(), ctx["conta_id"],
+                             chip_id=alvo if chip else None)
     # A CONSULTA AO WHATSAPP SÓ SAI COM `perguntar=1`. Sem isso a rota devolve só o
     # número do banco — que é o que a tela carrega sozinha. Perguntar ao WhatsApp
     # é caro e repetição é o que queima número em cliente não oficial.
     if request.query_params.get("perguntar") != "1":
         return JSONResponse({"ok": True, "aparelhos": None, "fora": fora})
     from finance import whatsapp_qr as wq
-    ap = wq.aparelhos(ctx["conta_id"]) or {}
+    ap = wq.aparelhos(alvo) or {}
     return JSONResponse({"ok": True,
                          "aparelhos": ap if ap.get("ok") else None,
                          "fora": fora})
@@ -9385,10 +9409,11 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
 .st-off{color:var(--ambar);border-color:var(--ambar-borda);background:#241d10}
 .cx-env{font-family:var(--mono);font-size:.76rem;background:var(--bg);border:1px solid var(--borda);border-radius:8px;padding:.5rem .6rem;color:var(--txt-mut);margin-top:.5rem}
 .cx-env b{color:var(--verde-claro)}
-.waseg{display:grid;grid-template-columns:repeat(3,1fr);gap:.25rem;margin:.3rem 0 .75rem;background:var(--bg);border:1px solid var(--borda);border-radius:10px;padding:.25rem}
+.waseg{display:grid;grid-template-columns:repeat(var(--waseg-n,3),1fr);gap:.25rem;margin:.3rem 0 .75rem;background:var(--bg);border:1px solid var(--borda);border-radius:10px;padding:.25rem}
 .waseg label{font-size:.75rem;border-radius:7px;padding:.42rem .25rem;cursor:pointer;color:var(--txt-mut);text-align:center;line-height:1.15;display:flex;align-items:center;justify-content:center;transition:background .12s,color .12s}
 .waseg label:hover{color:var(--txt)}
 .waseg label.on{color:var(--sobre-verde);background:var(--verde);font-weight:600}
+.waseg label.dois.on{background:var(--ambar);color:#1B1405}
 .waseg label input{display:none}
 .waprov{display:none}
 .waprov .lbl{margin-top:.5rem}
@@ -9859,13 +9884,23 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
     </div>
     <div class="cx-card">
       <h3>💬 WhatsApp <span class="cx-stat {{ 'st-on' if canais.whatsapp else 'st-off' }}">● {{ ('Serviço de QR ligado — veja o status da sessão abaixo' if canais.wa_provedor == 'qr' else 'Conectado') if canais.whatsapp else 'A configurar' }}</span></h3>
-      <div class="mut" style="font-size:.8rem;margin-bottom:.2rem">📥 Última recebida: {% if canais.ult_in.get('whatsapp') %}<b style="color:var(--verde-claro)">{{ canais.ult_in['whatsapp'] }}</b>{% if canais.wa_sem_receber %} <span style="color:var(--ambar)">({{ canais.wa_sem_receber }} — se o cliente está mandando mensagem, reconecte o chip abaixo)</span>{% endif %}{% else %}<span style="color:var(--mut)">nenhuma ainda</span>{% endif %}</div>
+      {# A "última recebida" saiu daqui e desceu pra dentro de cada aba de chip: no
+         nível da empresa ela não diz em QUAL número a mensagem entrou, e essa é
+         justamente a pergunta de quem desconfia que um dos dois parou. #}
       {% if gerencia %}
       <div class="mut" style="font-size:.8rem;margin-bottom:.1rem">Como este cliente conecta o WhatsApp:</div>
-      <div class="waseg">
+      {# Uma aba por chip. A pílula sempre foi "escolha um jeito de conectar e veja o
+         painel dele" — dois chips são dois painéis, e cabem no mesmo mecanismo. Com
+         um chip só (todas as contas hoje) a quarta aba não existe e o rótulo é
+         "QR Code", igualzinho ao de antes. #}
+      {% set tem2 = canais.chips|length > 1 %}
+      {# a 4ª aba existe SEMPRE: é por ela que se cria o chip 2. Sem chip criado
+         ela mostra só o campo de apelido e o botão — nada de sessão, nada de QR. #}
+      <div class="waseg" style="--waseg-n:4">
         <label class="{{ 'on' if canais.wa_provedor not in ['cloud','qr'] else '' }}"><input type="radio" name="wa_prov_sel" value="twilio" {{ 'checked' if canais.wa_provedor not in ['cloud','qr'] else '' }} onchange="waProv('twilio')">Twilio</label>
         <label class="{{ 'on' if canais.wa_provedor=='cloud' else '' }}"><input type="radio" name="wa_prov_sel" value="cloud" {{ 'checked' if canais.wa_provedor=='cloud' else '' }} onchange="waProv('cloud')">Número próprio</label>
-        <label class="{{ 'on' if canais.wa_provedor=='qr' else '' }}"><input type="radio" name="wa_prov_sel" value="qr" {{ 'checked' if canais.wa_provedor=='qr' else '' }} onchange="waProv('qr')">QR Code</label>
+        <label class="{{ 'on' if canais.wa_provedor=='qr' else '' }}"><input type="radio" name="wa_prov_sel" value="qr" {{ 'checked' if canais.wa_provedor=='qr' else '' }} onchange="waProv('qr')">{{ 'QR Code 1' if tem2 else 'QR Code' }}</label>
+        <label class="dois"><input type="radio" name="wa_prov_sel" value="qr2" onchange="waProv('qr2')">{{ 'QR Code 2' if tem2 else '+ 2º chip' }}</label>
       </div>
 
       <div id="wa-twilio" class="waprov">
@@ -9922,7 +9957,15 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
       </div>
 
       <div id="wa-qr" class="waprov">
+        {% set chip1 = (canais.chips[0] if canais.chips else None) %}
         <div style="font-weight:600;font-size:.85rem;margin-bottom:.15rem">QR Code (tipo WhatsApp Web)</div>
+        {# desceu do topo da aba: agora diz de QUAL chip é a última mensagem #}
+        {% if chip1 %}
+        <div class="mut" style="font-size:.8rem;margin-bottom:.35rem">📥 Última recebida neste chip:
+          {% if chip1.ultima %}<b style="color:var(--verde-claro)">{{ chip1.ultima }}</b>{% if chip1.sem_receber %}
+          <span style="color:var(--ambar)">({{ chip1.sem_receber }} — se o cliente está mandando mensagem, reconecte abaixo)</span>{% endif %}
+          {% else %}<span style="color:var(--mut)">nenhuma ainda</span>{% endif %}</div>
+        {% endif %}
         <div style="font-size:.78rem;color:var(--ambar);background:#2a2113;border:1px solid var(--ambar-borda);border-radius:8px;padding:.55rem .7rem">
           Usa o número <b>como está</b>, sem migrar nada. Mas: <b>viola os termos</b> do WhatsApp (risco de banimento) e depende de um serviço à parte sempre-ligado.
         </div>
@@ -9979,51 +10022,6 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
           </div>
         </div>
 
-        {% set chip2 = (canais.chips[1] if canais.chips|length > 1 else None) %}
-        {% if chip2 %}
-        <div id="c2-card" data-chip="{{ chip2.id }}" style="margin-top:.7rem;border:1px dashed var(--ambar-borda);border-radius:10px;padding:.7rem .8rem;background:#1a1710">
-          <div style="display:flex;align-items:center;gap:.45rem;flex-wrap:wrap">
-            <b style="font-size:.85rem">Chip 2</b>
-            <span id="c2-num" style="font-family:ui-monospace,monospace;font-size:.8rem;color:var(--txt-mut)">{{ chip2.numero or 'nenhum número pareado' }}</span>
-            <span id="c2-st" style="font-size:.76rem;margin-left:auto;color:var(--ambar)">Verificando…</span>
-          </div>
-          <div style="margin-top:.5rem">
-            <label class="lbl" style="font-size:.72rem">Apelido deste chip</label>
-            <div style="display:flex;gap:.4rem">
-              <input class="fld" id="c2-apelido" maxlength="60" placeholder="ex.: Agência Beta" value="{{ chip2.apelido }}">
-              <button type="button" class="pbtn ghost" style="white-space:nowrap"
-                      onclick="chipApelido(document.getElementById('c2-card').dataset.chip,'c2-apelido')">Salvar</button>
-            </div>
-          </div>
-          <div style="display:flex;gap:.4rem;margin-top:.55rem;flex-wrap:wrap">
-            <button type="button" class="pbtn" id="c2-btn" onclick="c2Iniciar()" disabled>Verificando…</button>
-            <button type="button" class="pbtn ghost" id="c2-sair" onclick="c2Sair()" style="display:none">Desconectar</button>
-          </div>
-          <div id="c2-box" style="margin-top:.6rem;text-align:center;display:none">
-            <img id="c2-img" alt="QR do chip 2" style="width:220px;max-width:100%;border-radius:10px;background:#fff;padding:.4rem">
-          </div>
-          <div class="mut" id="c2-msg" style="font-size:.78rem;margin-top:.45rem"></div>
-          <div class="mut" style="font-size:.72rem;margin-top:.35rem">
-            Chip próprio: <b>credencial, sessão e histórico separados</b>. Parear,
-            reconectar ou desconectar aqui <b>não encosta no chip 1</b>. Os dois caem
-            no mesmo funil, com etiqueta no inbox.
-          </div>
-        </div>
-        {% else %}
-        <div style="margin-top:.7rem;border-top:1px solid var(--borda);padding-top:.7rem">
-          <div style="font-weight:600;font-size:.82rem;margin-bottom:.2rem">Segundo chip</div>
-          <div class="mut" style="font-size:.76rem;margin-bottom:.4rem">
-            Conecta outro aparelho nesta mesma empresa. Conexão independente — não
-            mexe na do chip 1 — e os leads caem no mesmo funil.
-          </div>
-          <div style="display:flex;gap:.4rem;flex-wrap:wrap">
-            <input class="fld" id="c2-novo-nome" maxlength="60" placeholder="Apelido (ex.: Agência Beta)">
-            <button type="button" class="pbtn ghost" style="white-space:nowrap" onclick="chipNovo()">Criar chip 2</button>
-          </div>
-          <div class="mut" id="c2-novo-msg" style="font-size:.76rem;margin-top:.35rem"></div>
-        </div>
-        {% endif %}
-
         <!-- APARELHOS LIGADOS. Nasce escondido e só o JS mostra: afirmar "nenhum
              aparelho" antes de ter perguntado seria pior que não dizer nada. -->
 <div id="wa-aps" style="margin-top:.7rem;border-top:1px solid var(--borda);padding-top:.7rem">
@@ -10041,9 +10039,13 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         // Dois números de fontes DIFERENTES: os aparelhos dizem que a porta
         // existe (e dependem do WhatsApp responder); a saída por fora sai do
         // banco e diz se alguém passa por ela. Um cobre o outro.
-        function apsPinta(j){
-          var cx=document.getElementById('wa-aps'),n=document.getElementById('wa-aps-n'),
-              d=document.getElementById('wa-aps-dica');
+        // Os ids entram por parâmetro pra mesma função servir os dois chips. O
+        // PADRÃO é o do chip 1, então as chamadas que já existiam continuam iguais.
+        function apsPinta(j,idN,idD){
+          var cx=document.getElementById(idN?idN.replace(/-n$/,''):'wa-aps'),
+              n=document.getElementById(idN||'wa-aps-n'),
+              d=document.getElementById(idD||'wa-aps-dica');
+          if(!cx||!n||!d)return;
           if(!j||!j.ok){cx.style.display='none';return;}
           var a=j.aparelhos,f=j.fora||{},chips=[];
           if(a){
@@ -10228,8 +10230,24 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
               setTimeout(function(){i.style.borderColor=antes;},1400);})
             .catch(function(){i.style.borderColor='var(--ambar)';
               setTimeout(function(){i.style.borderColor=antes;},1400);});}
-        document.addEventListener('DOMContentLoaded',function(){
-          if(document.getElementById('c2-card'))c2Poll();});
+        // NÃO consulta no load: a aba do chip 2 nasce escondida, e perguntar o
+        // estado de uma sessão que ninguém está olhando é tráfego à toa no serviço.
+        // Quem dispara é o `waProv('qr2')`, quando a aba abre.
+        // Aparelhos do chip 2 — mesma regra do chip 1: SOB DEMANDA, nunca em
+        // intervalo. Perguntar é uma consulta ao WhatsApp, e repetir sozinho é
+        // tráfego de robô num cliente não oficial.
+        var _aps2Ocupado=false;
+        function apsPuxa2(){
+          if(_aps2Ocupado)return;
+          _aps2Ocupado=true;
+          var b=document.getElementById('c2-aps-btn');
+          if(b){b.disabled=true;b.textContent='Perguntando…';}
+          fetch('/painel/prospeccao/comunicacao/whatsapp-aparelhos?perguntar=1&chip='+encodeURIComponent(c2Chip()))
+            .then(function(r){return r.json();}).then(function(j){apsPinta(j,'c2-aps-n','c2-aps-dica');})
+            .catch(function(){})
+            .then(function(){_aps2Ocupado=false;
+              if(b){b.disabled=false;b.textContent='Conferir aparelhos ligados';}});
+        }
         function qrPoll(){qrEsperando();
           fetch('/painel/prospeccao/comunicacao/whatsapp-qr-status').then(function(r){return r.json();})
             .then(qrShow).catch(qrIndefinido);}
@@ -10319,6 +10337,75 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         {% if canais.wa_provedor=='qr' %}qrAutoReconectar();{% endif %}
         </script>
       </div>
+
+      {# ═══ ABA DO CHIP 2 ═══════════════════════════════════════════════════
+         Irmã da aba do chip 1, não apêndice dela: mesmo painel, mesma ordem,
+         mesmos botões. Ids próprios (`c2-*`) e polling próprio — o cartão de um
+         não alcança a sessão do outro nem por engano. Só existe pra empresa que
+         criou o chip; nas 22 contas de hoje esta div nem é renderizada.        #}
+      <div id="wa-qr2" class="waprov">
+        {% set chip2 = (canais.chips[1] if canais.chips|length > 1 else None) %}
+        {% if chip2 %}
+        <div id="c2-card" data-chip="{{ chip2.id }}">
+          <div style="font-weight:600;font-size:.85rem;margin-bottom:.15rem">QR Code · chip 2</div>
+          <div style="display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;margin-bottom:.3rem">
+            <span id="c2-num" style="font-family:ui-monospace,monospace;font-size:.82rem;color:{{ 'var(--txt)' if chip2.numero else 'var(--txt-mut)' }}">{{ chip2.numero or 'nenhum número pareado' }}</span>
+            <span id="c2-st" style="font-size:.78rem;margin-left:auto;color:var(--ambar)">Verificando…</span>
+          </div>
+          <div class="mut" style="font-size:.8rem;margin-bottom:.35rem">📥 Última recebida neste chip:
+            {% if chip2.ultima %}<b style="color:var(--verde-claro)">{{ chip2.ultima }}</b>{% if chip2.sem_receber %}
+            <span style="color:var(--ambar)">({{ chip2.sem_receber }} — se o cliente está mandando mensagem, reconecte abaixo)</span>{% endif %}
+            {% else %}<span style="color:var(--mut)">nenhuma ainda</span>{% endif %}</div>
+
+          <div style="display:flex;gap:.4rem;margin-top:.5rem;flex-wrap:wrap">
+            <button type="button" class="pbtn" id="c2-btn" onclick="c2Iniciar()" disabled>Verificando…</button>
+            <button type="button" class="pbtn ghost" id="c2-sair" onclick="c2Sair()" style="display:none">Desconectar</button>
+          </div>
+          <div style="font-size:.73rem;color:var(--txt-mut);margin-top:.4rem">
+            Caiu ou está reconectando? <b>Espere</b> — o sistema religa sozinho. O
+            <b>Desconectar</b> apaga a sessão <b>deste chip</b> e exige QR novo; o chip 1
+            não é afetado.
+          </div>
+          <div id="c2-box" style="margin-top:.6rem;text-align:center;display:none">
+            <img id="c2-img" alt="QR do chip 2" style="width:220px;max-width:100%;border-radius:10px;background:#fff;padding:.4rem">
+          </div>
+          <div class="mut" id="c2-msg" style="font-size:.78rem;margin-top:.45rem"></div>
+
+          <div style="margin-top:.7rem;border-top:1px solid var(--borda);padding-top:.7rem">
+            <label class="lbl" style="font-size:.72rem">Apelido deste chip</label>
+            <div style="display:flex;gap:.4rem">
+              <input class="fld" id="c2-apelido" maxlength="60" placeholder="ex.: Agência Beta" value="{{ chip2.apelido }}">
+              <button type="button" class="pbtn ghost" style="white-space:nowrap"
+                      onclick="chipApelido(document.getElementById('c2-card').dataset.chip,'c2-apelido')">Salvar</button>
+            </div>
+            <div class="mut" style="font-size:.72rem;margin-top:.3rem">
+              É este nome que aparece no inbox e que o relatório agrupa.
+            </div>
+          </div>
+
+          <div id="c2-aps" style="margin-top:.7rem;border-top:1px solid var(--borda);padding-top:.7rem">
+            <div style="font-weight:600;font-size:.82rem;margin-bottom:.35rem">Quem ainda responde por fora <span class="mut" style="font-weight:400">(neste chip)</span></div>
+            <div id="c2-aps-n" style="display:flex;gap:.4rem;flex-wrap:wrap;font-size:.78rem"></div>
+            <button type="button" class="pbtn ghost sm" id="c2-aps-btn" onclick="apsPuxa2()"
+                    style="margin-top:.5rem;font-size:.76rem">Conferir aparelhos ligados</button>
+            <div class="mut" id="c2-aps-dica" style="font-size:.74rem;margin-top:.45rem"></div>
+          </div>
+        </div>
+        {% else %}
+        <div style="font-weight:600;font-size:.85rem;margin-bottom:.15rem">Segundo chip</div>
+        <div class="mut" style="font-size:.78rem;margin-bottom:.5rem">
+          Conecta outro aparelho nesta mesma empresa. Conexão independente —
+          <b>não mexe na do chip 1</b> — e os leads caem no mesmo funil, com etiqueta
+          no inbox.
+        </div>
+        <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+          <input class="fld" id="c2-novo-nome" maxlength="60" placeholder="Apelido (ex.: Agência Beta)">
+          <button type="button" class="pbtn ghost" style="white-space:nowrap" onclick="chipNovo()">Criar chip 2</button>
+        </div>
+        <div class="mut" id="c2-novo-msg" style="font-size:.76rem;margin-top:.35rem"></div>
+        {% endif %}
+      </div>
+
       <!-- templates da agenda: só valem na API oficial (no QR não existe template) -->
       <div id="wa-tmpl-agenda" style="margin-top:.9rem;padding-top:.8rem;border-top:1px dashed var(--borda)">
         <div style="font-weight:600;font-size:.85rem">📅 Templates da Agenda <span class="mut" style="font-weight:400">(opcional)</span></div>
@@ -10335,10 +10422,13 @@ _COMUNICACAO_TPL = """{% extends "base" %}{% block conteudo %}""" + _CSS + """
         </form>
       </div>
       <script>
-      function waProv(v){['twilio','cloud','qr'].forEach(function(k){var e=document.getElementById('wa-'+k);if(e)e.style.display=(k===v)?'block':'none';});
+      function waProv(v){['twilio','cloud','qr','qr2'].forEach(function(k){var e=document.getElementById('wa-'+k);if(e)e.style.display=(k===v)?'block':'none';});
         document.querySelectorAll('.waseg label').forEach(function(l){var r=l.querySelector('input');l.classList.toggle('on',!!r&&r.value===v);});
         // no QR não existe template aprovado — esconde pra não prometer o que não funciona
-        var t=document.getElementById('wa-tmpl-agenda');if(t)t.style.display=(v==='qr')?'none':'block';
+        var t=document.getElementById('wa-tmpl-agenda');if(t)t.style.display=(v==='qr'||v==='qr2')?'none':'block';
+        // a aba do chip 2 pergunta o estado DELE ao abrir, pelo mesmo motivo do chip 1:
+        // o HTML estático tem a cara de sessão desconectada
+        if(v==='qr2'&&document.getElementById('c2-card'))c2Poll();
         // MOSTROU O BLOCO, PERGUNTA O ESTADO. Sem isto o bloco aparecia com o HTML
         // estático — "Gerar QR" visível e "Desconectar" escondido —, que é a cara de
         // sessão desconectada, mesmo com a sessão de pé. O polling só era disparado

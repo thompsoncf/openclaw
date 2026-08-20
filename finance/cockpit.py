@@ -510,7 +510,7 @@ def entrega_sempre(pool, conta_id: int) -> bool:
         return False
 
 
-def saida_por_fora(pool, conta_id: int, dias: int = 7) -> dict:
+def saida_por_fora(pool, conta_id: int, dias: int = 7, chip_id: int | None = None) -> dict:
     """Quanto do que a empresa mandou ao cliente saiu POR FORA do Zaq.
 
     Mensagem enviada pelo Zaq nasce com `membro_id`; a que sai do celular chega
@@ -522,18 +522,29 @@ def saida_por_fora(pool, conta_id: int, dias: int = 7) -> dict:
     Vale por si quando a consulta de aparelhos falha (sessão fora do ar), porque
     sai do banco e não depende do WhatsApp responder.
 
+    `chip_id` restringe a UM chip. Numa empresa de dois números, o total misturado
+    não responde a pergunta que interessa: o dono precisa saber em qual APARELHO o
+    vendedor está respondendo por fora, porque é nesse que ele vai bater. Nulo = a
+    empresa inteira, que é o comportamento de sempre.
+
     {dias, total, por_fora, pct} — pct arredondado, 0 quando não houve mensagem.
     """
+    filtro, args = "cv.conta_id=%s", [conta_id]
+    if chip_id is not None:
+        # `coalesce` casa o histórico inteiro no chip principal, que é onde ele
+        # esteve enquanto a empresa tinha um chip só
+        filtro = "coalesce(cv.chip_id, cv.conta_id)=%s"
+        args = [chip_id]
     try:
         with pool.connection() as c:
             r = c.execute(
-                """select count(*),
-                          count(*) filter (where m.membro_id is null)
-                     from mensagens m join conversas cv on cv.id = m.conversa_id
-                    where cv.conta_id=%s and m.canal='whatsapp' and m.direcao='out'
-                      and m.autor <> 'agente'
-                      and m.criado_em > now() - (%s || ' days')::interval""",
-                (conta_id, int(dias))).fetchone()
+                f"""select count(*),
+                           count(*) filter (where m.membro_id is null)
+                      from mensagens m join conversas cv on cv.id = m.conversa_id
+                     where {filtro} and m.canal='whatsapp' and m.direcao='out'
+                       and m.autor <> 'agente'
+                       and m.criado_em > now() - (%s || ' days')::interval""",
+                args + [int(dias)]).fetchone()
         total, fora = int(r[0] or 0), int(r[1] or 0)
     except Exception as e:  # noqa: BLE001
         _log.warning("não deu pra medir a saída por fora da conta %s: %s", conta_id, e)

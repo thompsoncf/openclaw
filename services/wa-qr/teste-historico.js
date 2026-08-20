@@ -27,7 +27,8 @@ process.env.LOG_LEVEL = process.env.LOG_LEVEL || 'silent'
 // pelo motivo errado, verde e sem valor nenhum.
 process.env.APP_URL = process.env.APP_URL || 'http://localhost:8000'
 
-const { deveSincronizarHistorico, prepararHistorico, TIPO_HIST, lidMaps } = require('./server')
+const { deveSincronizarHistorico, deveSeguirNoHistorico, prepararHistorico, TIPO_HIST,
+  lidMaps } = require('./server')
 
 let falhas = 0
 function conferir (ok, descricao) {
@@ -152,6 +153,35 @@ for (const m of lote) {
 conferir(aceitas === 1, 'uma aceita no lote (achou ' + aceitas + ')')
 conferir(aceitas + comMotivo === lote.length,
   'aceitas + motivos === total (' + aceitas + '+' + comMotivo + ' de ' + lote.length + ')')
+
+// ---------------------------------------------------------------- teto de ondas
+//
+// Aceitar o RECENT não é aceitar RECENT sem fim. Conta 7, 20/08: 63 ondas de ~5.000
+// mensagens em 8 minutos — 315 mil mensagens — com a peneira devolvendo
+// `descartadas: 4995` em TODAS. O heap foi de 47MB a 314MB contra um teto de 320 e o
+// Node abortou com `JavaScript heap out of memory` no meio, derrubando junto os
+// outros três chips que a instância segurava.
+//
+// A regra tem que ser decidida ANTES do download, com o que já se sabe das ondas
+// anteriores — por isso ela é aritmética pura sobre o placar acumulado.
+console.log('\nteto de ondas do histórico')
+const SEM_NADA = 5
+const MAX = 40
+
+conferir(deveSeguirNoHistorico(undefined, SEM_NADA, MAX) === true,
+  'primeira onda da sessão: sempre passa')
+conferir(deveSeguirNoHistorico({ ondas: 0, aproveitadas: 0 }, SEM_NADA, MAX) === true,
+  'placar zerado: passa')
+conferir(deveSeguirNoHistorico({ ondas: 4, aproveitadas: 0 }, SEM_NADA, MAX) === true,
+  'quatro ondas sem nada: ainda dá o benefício da dúvida')
+conferir(deveSeguirNoHistorico({ ondas: 5, aproveitadas: 0 }, SEM_NADA, MAX) === false,
+  'cinco ondas e ZERO aproveitada: chega — é o caso da conta 7')
+conferir(deveSeguirNoHistorico({ ondas: 30, aproveitadas: 1 }, SEM_NADA, MAX) === true,
+  'trinta ondas mas uma serviu: segue, quem aproveita tem direito à janela')
+conferir(deveSeguirNoHistorico({ ondas: 40, aproveitadas: 900 }, SEM_NADA, MAX) === false,
+  'quarenta ondas: freio de mão, aproveitando ou não')
+conferir(deveSeguirNoHistorico({ ondas: 63, aproveitadas: 0 }, SEM_NADA, MAX) === false,
+  'as 63 ondas que mataram a instância nunca teriam passado da quinta')
 
 console.log('\n' + (falhas ? falhas + ' FALHA(S)' : 'tudo passou'))
 process.exit(falhas ? 1 : 0)

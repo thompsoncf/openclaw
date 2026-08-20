@@ -182,7 +182,7 @@ def duracao_segundos(webm: bytes) -> float:
 # (511 de 519). O teto não é palpite: é o p90 medido, com folga.
 LIMITE_SEGUNDOS = 90
 # ~24 kbps de voz dão ~270 KB em 90 s. 1 MB deixa margem larga e ainda protege o
-# serviço do WhatsApp, que roda com --max-old-space-size=320.
+# serviço do WhatsApp, que roda com --max-old-space-size=1024.
 LIMITE_BYTES = 1024 * 1024
 
 _OGG = "audio/ogg; codecs=opus"

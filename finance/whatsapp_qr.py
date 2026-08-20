@@ -102,7 +102,7 @@ def enviar_audio(conta_id: int, numero: str, dados: bytes, mimetype: str,
     """Manda um áudio de voz gravado no Zaq pelo número conectado por QR.
 
     O corpo é BINÁRIO puro, não JSON com base64: base64 custa +33% de memória e de
-    rede dos dois lados, e o serviço Node roda com --max-old-space-size=320. Os
+    rede dos dois lados, e o serviço Node roda com --max-old-space-size=1024. Os
     metadados vão na query; a onda (64 bytes) num cabeçalho.
 
     `segundos` e `onda` vêm da TELA porque o Baileys só decodifica o áudio quando
